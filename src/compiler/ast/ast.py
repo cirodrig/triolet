@@ -16,6 +16,10 @@ class Variable(object):
 class PythonVariable(Variable):
     """A variable as determined by Python's name resolution rules"""
 
+    def __init__(self, name):
+        self.name = name
+        
+
 ###############################################################################
 # Expressions
 
@@ -33,21 +37,51 @@ class ExprInit(object):
         This is called from the expression's __init__ method."""
         return ()
 
+exprDefault = ExprInit() 
+
 class Expr(object):
+    """An abstract base class of expressions."""
+
     def __init__(self, arg):
         arg.initializeExpr(self)
 
 class VariableExpr(Expr):
     """A reference to a variable"""
+    
     def __init__(self, initobj, v):
         Expr.__init__(self, initobj)
         self.variable = v
 
 class LiteralExpr(Expr):
-    """A reference to a literal, non-compound value"""
+    """A reference to a primitive, immutable literal value.
+
+    Literals can be numbers, booleans, or the None value."""
+
     def __init__(self, initobj, l):
         Expr.__init__(self, initobj)
         self.literal = l
+
+class UnaryExpr(Expr):
+    """An application of a unary operator to an operand."""
+
+    def __init__(self, initobj, op, arg):
+        Expr.__init__(self, initobj)
+        assert isinstance(op, operators.UnaryOp)
+        assert isinstance(arg, Expr)
+        self.operator = op
+        self.argument = arg
+
+class BinaryExpr(Expr):
+    """An application of a binary operator to left and right operands."""
+
+    def __init__(self, initobj, op, left, right):
+        Expr.__init__(self, initobj)
+        assert isinstance(op, operators.BinaryOp)
+        assert isinstance(left, Expr)
+        assert isinstance(right, Expr)
+        self.operator = op
+        self.left = left
+        self.right = right
 
 class LetExpr(Expr):
     """An assignment expression"""
