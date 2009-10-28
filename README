@@ -1,0 +1,17 @@
+
+Building
+--------
+
+We don't have a configure script yet.  Instead, edit the flags in 'mk/flags.mk'
+to suit your system.
+
+The code supports building in a separate build tree.  Start with a clean copy
+of the source tree.  Create a new, empty directory that will contain the build
+tree.  Change to that directory and run 'lndir' with the source tree path as
+its parameter.  This will create a directory tree with symbolic links to your
+source tree.  Then run 'make' in the build directory.
+
+Hacking
+-------
+
+See the coding guidelines in HACKING.

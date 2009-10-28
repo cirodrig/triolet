@@ -1,0 +1,58 @@
+
+Python Coding Conventions
+------------------------
+
+Python is quite permissive at the source code level, which makes it
+easy for errors to remain undetected in the code base.  To reduce the
+incidence of errors, please adhere to the following coding conventions.
+
+* Visual style
+
+  * Use documentation strings and comments to explain your code.
+
+  * Organize function bodies into paragraphs separated by a blank
+    line.  Organize large files into sections, separated by a row of
+    octothorpes.  In general, if you have more than four things,
+    consider organizing them into meaningful groups, as I did when
+    writing this file.
+
+  * Naming conventions:
+
+    + Data types:                   CamelCase
+    + Modules:                      lowercase_with_underscores
+    + Local variables and functions: lowercase_with_underscores
+
+    + Public methods and members:   camelCase
+    + Public global variables:      camelCase
+    + Public global functions:      camelCase
+    + Public constants:             UPPERCASE_WITH_UNDERSCORES
+
+    + Internal global variables:    _camelCase
+    + Internal methods and members: _camelCase
+    + Internal constants:           _UPPERCASE_WITH_UNDERSCORES
+
+* Error checking and ambiguity
+
+  * Do not nest unspecialized data types to a depth of three or more.
+    For example, do not use a list of tuples of lists of expressions.
+    Instead, create a data type with a meaningful name.
+
+  * Do not allow variables to hold multiple incompatible types.  In
+    particular, don't overload functions to work for different kinds of
+    unspecialized data types, such as lists, tuples, or dictionaries.
+    For example, do not write a function that accepts either an
+    'Expression' or a list of 'Expression'.  Special-casing 'None' is
+    acceptable.  Creating data types specifically for the purpose of
+    overloading on them is acceptable.
+
+  * Check the values stored into global variables and the fields of
+    globally used data types.
+    
+* Extensibility
+
+  * Data structures shared by many modules should not contain members
+    or methods that are only meaningful to one module.  If you want to
+    add module-specific members to a data structure, then add one member,
+    whose name matches the module's name.  It should be an instance
+    of a class defined in your module.  It should be safe to delete the
+    member when your module is finished.
