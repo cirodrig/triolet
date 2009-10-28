@@ -21,6 +21,32 @@ class PythonVariable(Variable):
         
 
 ###############################################################################
+# Function parameters
+
+class Parameter(object):
+    """A function parameter"""
+
+    def __init__(self):
+        raise NotImplementedError, "'Parameter' is an abstract base class"
+
+class VariableParam(Parameter):
+    """A variable function parameter"""
+
+    def __init__(self, v, annotation = None, default = None):
+        assert isinstance(v, Variable)
+        self.name = v
+        self.annotation = annotation
+        self.default = default
+
+class TupleParam(Parameter):
+    """A tuple parameter"""
+
+    def __init__(self, fields):
+        for p in fields:
+            assert isinstance(p, Parameter)
+        self.fields = fields
+
+###############################################################################
 # Expressions
 
 class ExprInit(object):
@@ -84,14 +110,25 @@ class BinaryExpr(Expr):
         self.left = left
         self.right = right
 
+class CallExpr(Expr):
+    """A function call."""
+
+    def __init__(self, operator, arguments, base = ExprInit.default):
+        Expr.__init__(self, base)
+        assert isinstance(operator, Expr)
+        for arg in arguments:
+            assert isinstance(arg, Expr)
+        self.operator = operator
+        self.arguments = arguments
+
 class LetExpr(Expr):
     """An assignment expression"""
-    def __init__(self, name, rhs, body, base = ExprInit.default):
+    def __init__(self, lhs, rhs, body, base = ExprInit.default):
         Expr.__init__(self, base)
-        assert isinstance(name, Variable)
+        assert lhs is None or isinstance(lhs, Parameter)
         assert isinstance(rhs, Expr)
         assert isinstance(body, Expr)
-        self.name = name
+        self.name = lhs
         self.rhs = rhs
         self.body = body
 
@@ -119,7 +156,7 @@ class Function(object):
     """A function or lambda term"""
     def __init__(self, parameters, body):
         for p in parameters:
-            assert isinstance(p, Variable)
+            assert isinstance(p, Parameter)
         assert isinstance(body, Expr)
         self.parameters = parameters
         self.body = body

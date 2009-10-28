@@ -8,11 +8,11 @@ f_var = PythonVariable("f")
 
 # def f(a, b):
 #     c = a + b
-#     c
+#     return c
 
 f = FunctionDef(f_var,
-                Function([a_var, b_var],
-                         LetExpr(c_var,
+                Function([VariableParam(a_var), VariableParam(b_var)],
+                         LetExpr(VariableParam(c_var),
                                  BinaryExpr(operators.ADD,
                                             VariableExpr(a_var),
                                             VariableExpr(b_var)),
