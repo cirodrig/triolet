@@ -135,6 +135,17 @@ class ForExpr(Expression):
         self.argument = argument
         self.body = body
 
+class GuardExpr(Expression):
+    """A guard from a generator expression.
+
+    The expression [foo for x in xs if bar if baz]
+    translates to (FOR x xs (GUARD bar (GUARD baz foo)))"""
+    def __init__(self, guard, body, base = ExprInit.default):
+        assert isinstance(guard, Expression)
+        assert isinstance(body, Expression)
+        self.guard = guard
+        self.body = body
+
 class CallExpr(Expression):
     """A function call."""
 
