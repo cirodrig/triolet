@@ -23,7 +23,7 @@ class PythonVariable(Variable):
         self.name = name
 
 ###############################################################################
-# Function parameters
+# Parameters
 
 class Parameter(object):
     """A function parameter"""
@@ -72,13 +72,13 @@ class Expression(object):
     """An abstract base class of expressions."""
 
     def __init__(self, arg):
-        arg.initializeExpr(self)
+        raise NotImplementedError, "'Expression' is an abstract base class"
 
 class VariableExpr(Expression):
     """A reference to a variable"""
     
     def __init__(self, v, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         self.variable = v
 
 class LiteralExpr(Expression):
@@ -87,14 +87,14 @@ class LiteralExpr(Expression):
     Literals can be numbers, booleans, or the None value."""
 
     def __init__(self, l, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         self.literal = l
 
 class UnaryExpr(Expression):
     """An application of a unary operator to an operand."""
 
     def __init__(self, op, arg, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         assert isinstance(op, operators.UnaryOp)
         assert isinstance(arg, Expression)
         self.operator = op
@@ -104,7 +104,7 @@ class BinaryExpr(Expression):
     """An application of a binary operator to left and right operands."""
 
     def __init__(self, op, left, right, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         assert isinstance(op, operators.BinaryOp)
         assert isinstance(left, Expression)
         assert isinstance(right, Expression)
@@ -116,7 +116,7 @@ class IfExpr(Expression):
     """An if-else expression."""
 
     def __init__(self, argument, ifTrue, ifFalse, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         assert isinstance(test, Expression)
         assert isinstance(ifTrue, Expression)
         assert isinstance(ifFalse, Expression)
@@ -128,6 +128,7 @@ class ForExpr(Expression):
     """A 'for' loop or generator expression."""
 
     def __init__(self, param, argument, body, base = ExprInit.default):
+        base.initializeExpr(self)
         assert isinstance(param, Parameter)
         assert isinstance(argument, Expression)
         assert isinstance(body, Expression)
@@ -141,6 +142,7 @@ class GuardExpr(Expression):
     The expression [foo for x in xs if bar if baz]
     translates to (FOR x xs (GUARD bar (GUARD baz foo)))"""
     def __init__(self, guard, body, base = ExprInit.default):
+        base.initializeExpr(self)
         assert isinstance(guard, Expression)
         assert isinstance(body, Expression)
         self.guard = guard
@@ -150,7 +152,7 @@ class CallExpr(Expression):
     """A function call."""
 
     def __init__(self, operator, arguments, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         assert isinstance(operator, Expression)
         for arg in arguments:
             assert isinstance(arg, Expression)
@@ -160,7 +162,7 @@ class CallExpr(Expression):
 class LetExpr(Expression):
     """An assignment expression"""
     def __init__(self, lhs, rhs, body, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         assert lhs is None or isinstance(lhs, Parameter)
         assert isinstance(rhs, Expression)
         assert isinstance(body, Expression)
@@ -171,7 +173,7 @@ class LetExpr(Expression):
 class LetrecExpr(Expression):
     """A set of function definitions"""
     def __init__(self, definitions, body, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         for d in definitions: assert isinstance(d, FunctionDef)
         assert isinstance(body, Expression)
         self.definitions = definitions
@@ -180,7 +182,7 @@ class LetrecExpr(Expression):
 class FunExpr(Expression):
     """A lambda function"""
     def __init__(self, function, base = ExprInit.default):
-        Expression.__init__(self, base)
+        base.initializeExpr(self)
         assert isinstance(function, Function)
         self.function = function
 
