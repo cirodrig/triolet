@@ -22,7 +22,7 @@ all : $(BUILD_TARGETS)
 
 clean :
 	if [ -d bin ]; then rm -f bin/*; rmdir bin; fi
-	find src \( -name "*.o" -o -name "*.$(SOEXT)" \) -exec rm {} \;
+	find src \( -name "*.o" -o -name "*.hi" -o -name "*.pyc" -o -name "*.$(SOEXT)" \) -exec rm {} \;
 
 ###############################################################################
 # Rules
