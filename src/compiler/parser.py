@@ -39,4 +39,10 @@ def run(filename):
     # Evaluate the output to build the AST
     data = eval(command, _makeDictionary())
 
+    # If the result is an exception, raise the exception
+    if isinstance(data, Exception):
+	raise data
+    if isinstance(data, list) and isinstance(data[0], Exception):
+	raise data[0]
+
     return data
