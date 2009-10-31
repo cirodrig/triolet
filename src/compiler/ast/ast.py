@@ -19,8 +19,11 @@ class Variable(object):
 class PythonVariable(Variable):
     """A variable as determined by Python's name resolution rules"""
 
-    def __init__(self, name):
+    def __init__(self, name, identifier):
+        assert isinstance(name, str)
+        assert isinstance(identifier, int)
         self.name = name
+        self.identifier = identifier
 
 ###############################################################################
 # Parameters
@@ -124,29 +127,21 @@ class IfExpr(Expression):
         self.ifTrue = ifTrue
         self.ifFalse = ifFalse
 
-class ForExpr(Expression):
-    """A 'for' loop or generator expression."""
+class ListCompExpr(Expression):
+    """A list comprehension."""
 
-    def __init__(self, param, argument, body, base = ExprInit.default):
+    def __init__(self, iterator, base = ExprInit.default):
         base.initializeExpr(self)
-        assert isinstance(param, Parameter)
-        assert isinstance(argument, Expression)
-        assert isinstance(body, Expression)
-        self.parameter = param
-        self.argument = argument
-        self.body = body
+        assert isinstance(iterator, ForIter) # Must start with 'for'
+        self.iterator = iterator
 
-class GuardExpr(Expression):
-    """A guard from a generator expression.
+class GeneratorExpr(Expression):
+    """A generator expression."""
 
-    The expression [foo for x in xs if bar if baz]
-    translates to (FOR x xs (GUARD bar (GUARD baz foo)))"""
-    def __init__(self, guard, body, base = ExprInit.default):
+    def __init__(self, iterator, base = ExprInit.default):
         base.initializeExpr(self)
-        assert isinstance(guard, Expression)
-        assert isinstance(body, Expression)
-        self.guard = guard
-        self.body = body
+        assert isinstance(iterator, ForIter) # Must start with 'for'
+        self.iterator = iterator
 
 class CallExpr(Expression):
     """A function call."""
@@ -185,6 +180,62 @@ class FunExpr(Expression):
         base.initializeExpr(self)
         assert isinstance(function, Function)
         self.function = function
+
+class ReturnExpr(Expression):
+    """A return statement"""
+    def __init__(self, arg, base = ExprInit.default):
+        base.initializeExpr(self)
+        assert isinstance(arg, Expression)
+        self.argument = arg
+
+###############################################################################
+# Generators
+
+class IterInit(object):
+    def __init__(self):
+        pass
+
+    def initializeIter(self, iter):
+        """Initialize an 'Iterator'.
+        This is called from the iterator's __init__ method."""
+        pass
+
+IterInit.default = IterInit()
+
+class Iterator(object):
+    """An iterating expression in a generator or comprehension."""
+    def __init__(self):
+        raise NotImplementedError, "'Iterator' is an abstract base class"
+
+class ForIter(Iterator):
+    """A 'for' term in an iterator."""
+    
+    def __init__(self, param, argument, body, base = IterInit.default):
+        base.initializeIter(self)
+        assert isinstance(param, Parameter)
+        assert isinstance(argument, Expression)
+        assert isinstance(body, Iterator)
+        self.parameter = param
+        self.argument = argument
+        self.body = body
+
+class IfIter(Iterator):
+    """An 'if' term in an iterator."""
+
+    def __init__(self, guard, body, base = IterInit.default):
+        base.initializeIter(self)
+        assert isinstance(guard, Expression)
+        assert isinstance(body, Iterator)
+        self.guard = guard
+        self.body = body
+
+class DoIter(Iterator):
+    """The computational component in an iterator."""
+
+    def __init__(self, body, base = IterInit.default):
+        base.initializeIter(self)
+        assert isinstance(body, Expression)
+        self.body = body
 
 ###############################################################################
 # Functions

@@ -17,6 +17,7 @@
 #	CHS	Any C file that's part of haskell code
 #	CPY	Any C file that's part of a python module
 #	HS	Any haskell file
+#	HSCPY	A .hsc file that uses the python runtime
 #
 # The program is the step of compilation where the flag is used.
 #	C	Compilation
@@ -42,7 +43,7 @@ w_C_RAW_INCLUDEDIRS=
 C_C_RAW_INCLUDEDIRS=
 CHS_C_RAW_INCLUDEDIRS=
 CPY_C_RAW_INCLUDEDIRS=/usr/include/python2.4
-HS_C_RAW_INCLUDEDIRS=
+HS_C_RAW_INCLUDEDIRS=/usr/local/lib/ghc-6.10.4/include
 
 # Library directories
 w_A_RAW_LIBDIRS=
@@ -97,6 +98,7 @@ C_FLAG_SET=w C
 CHS_FLAG_SET=w C CHS
 CPY_FLAG_SET=w C CPY
 HS_FLAG_SET=w HS
+HSCPY_FLAG_SET=w C CPY HS
 
 # ASSEMBLE_FLAGS
 #  $(1):	flag set
@@ -143,22 +145,22 @@ endef
 ###############################################################################
 # Options
 
-$(foreach ftype, C CHS CPY HS, \
+$(foreach ftype, C CHS CPY HS HSCPY, \
  $(foreach stage, C A D, \
   $(eval \
    $(call DEFINE_FLAG,$(ftype),$(stage),INCLUDEDIRS, TRANSFORM_INCLUDEDIR))))
 
-$(foreach ftype, C CHS CPY HS, \
+$(foreach ftype, C CHS CPY HS HSCPY, \
  $(foreach stage, C A D, \
   $(eval \
    $(call DEFINE_FLAG,$(ftype),$(stage),LIBDIRS, TRANSFORM_LIBDIR))))
 
-$(foreach ftype, C CHS CPY HS, \
+$(foreach ftype, C CHS CPY HS HSCPY, \
  $(foreach stage, C A D, \
   $(eval \
    $(call DEFINE_FLAG,$(ftype),$(stage),LIBS, TRANSFORM_LIB))))
 
-$(foreach ftype, C CHS CPY HS, \
+$(foreach ftype, C CHS CPY HS HSCPY, \
  $(foreach stage, C A D, \
   $(eval \
    $(call DEFINE_FLAG,$(ftype),$(stage),OPTS, TRANSFORM_ID))))
