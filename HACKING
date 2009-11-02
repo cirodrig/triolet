@@ -38,12 +38,15 @@ incidence of errors, please adhere to the following coding conventions.
     Instead, create a data type with a meaningful name.
 
   * Do not allow variables to hold multiple incompatible types.  In
-    particular, don't overload functions to work for different kinds of
-    unspecialized data types, such as lists, tuples, or dictionaries.
-    For example, do not write a function that accepts either an
-    'Expression' or a list of 'Expression'.  Special-casing 'None' is
-    acceptable.  Creating data types specifically for the purpose of
-    overloading on them is acceptable.
+    particular, don't conditionally execute code based on an object's
+    type.  For example, don't write a function that does something if
+    passed a list of 'Expression' and does something different if
+    passed a list of 'Variable'.  Don't use a workaround that produces
+    the same information that checking the type would.
+
+    Exceptions to this rule are that it is okay to check for None, to
+    check and raise an exception if an unexpected type is seen, and to
+    dynamically dispatch based on types you created for that purpose.
 
   * Check the values stored into global variables and the fields of
     globally used data types.
