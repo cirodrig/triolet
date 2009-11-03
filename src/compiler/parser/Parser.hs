@@ -11,6 +11,7 @@ import Data.Traversable
 
 import qualified Language.Python.Version3.Parser as Py
 import qualified Language.Python.Version3.Syntax.AST as Py
+import qualified Language.Python.Version3.Syntax.Pretty as Py
 import ParserSyntax
 
 data Binding = Local { bIsDef :: Bool
@@ -388,6 +389,7 @@ expression' expr =
                                   Generator locals <$>
                                   comprehension expression comp
        Py.ListComp comp    -> ListComp <$> comprehension expression comp
+       _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
 
 -- Convert an optional expression into an expression or None
 maybeExpression :: Maybe Py.Expr -> Cvt LabExpr
@@ -436,12 +438,12 @@ exprToLHS e@(Py.Var name) = Lab e . Parameter <$> definition name
 medialStatement :: Py.Statement -> Cvt LabExpr -> Cvt LabExpr
 medialStatement stmt cont =
     case stmt
-    of Py.For targets generator bodyClause _ ->
+    of {- Py.For targets generator bodyClause _ ->
            let mkFor generator targets bodyClause =
                    For targets generator bodyClause
            in addLabel $ mkFor <$> expression generator
                                <*> traverse exprToLHS targets
-                               <*> suite bodyClause
+                               <*> suite bodyClause -}
        Py.Fun name args _ body ->
            let funBody = fmap (Lab stmt) $ funDefinition name args body
            in addLabel $ Letrec <$> fmap (:[]) funBody <*> cont
@@ -455,6 +457,7 @@ medialStatement stmt cont =
        Py.Global xs -> do
          mapM_ globalDeclaration xs
          cont
+       _ -> fail $ "Cannot translate statement:\n" ++ Py.prettyText stmt
     where
       -- Assign the right-hand side to a sequence of variables by handing
       -- the value along.  The continuation comes after all assignments.
@@ -477,7 +480,6 @@ finalStatement stmt =
 
        -- Default: run the expression and return None
        _ -> medialStatement stmt $ pure noneExpr
-
     where
       addLabel f = Lab stmt <$> f
 

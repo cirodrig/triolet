@@ -1,10 +1,11 @@
 
 module Main where
 
+import Prelude hiding(catch)
 import Control.Exception
 import System.Environment
 import System.IO
-import System.IO.Error
+import System.IO.Error hiding(catch)
 import Parser
 import PythonPrint
 
@@ -22,7 +23,8 @@ showErrorString e = PyFunCall "RuntimeError" [P (PyShowString e)]
 -- to stdout.  The result is written as a Python expression. 
 main = do args <- getArgs
           inPath <- parseArgs args
-          catchJust isFileException (parseFile inPath) fileErrorHandler
+          catchJust isFileException (parseFile inPath) fileErrorHandler `catch`
+                    fallbackErrorHandler
     where
       parseFile inPath = do
         text <- readFile inPath
@@ -38,3 +40,7 @@ main = do args <- getArgs
 
       -- Error opening file: create an error object
       fileErrorHandler e = putStrLn $ pyShow (showErrorString $ show e) ""
+
+      -- Run the fallback error handler for any uncaught errors
+      fallbackErrorHandler e = putStrLn $ pyShow (showErrorString $ show (e :: SomeException)) ""
+          

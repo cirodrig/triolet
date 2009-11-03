@@ -67,7 +67,7 @@ data Expr =
     -- Python statements
   | Let LabParameter LabExpr LabExpr
   | Letrec [Lab FunDef] LabExpr
-  | For [LabParameter] LabExpr LabExpr -- parameter, generator, body
+  -- | For [LabParameter] LabExpr LabExpr -- parameter, generator, body
   | Return LabExpr
 
 data IterFor a =
