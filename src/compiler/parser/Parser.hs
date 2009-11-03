@@ -447,6 +447,8 @@ medialStatement stmt cont =
        Py.Fun name args _ body ->
            let funBody = fmap (Lab stmt) $ funDefinition name args body
            in addLabel $ Letrec <$> fmap (:[]) funBody <*> cont
+       Py.Conditional guards els ->
+           addLabel $ Let Nothing <$> foldr ifelse (suite els) guards <*> cont
        Py.Assign dsts src -> addLabel $
                              expression src <**> assignments (reverse dsts)
        Py.Return me -> -- Process, then discard statements after the return
@@ -459,13 +461,19 @@ medialStatement stmt cont =
          cont
        _ -> fail $ "Cannot translate statement:\n" ++ Py.prettyText stmt
     where
+      -- An if-else clause
+      ifelse (guard, ifTrue) ifFalse = 
+          addLabel $ Cond <$> expression guard
+                          <*> suite ifTrue
+                          <*> ifFalse
+
       -- Assign the right-hand side to a sequence of variables by handing
       -- the value along.  The continuation comes after all assignments.
       assignments :: [Py.Expr] -> Cvt (LabExpr -> Expr)
       assignments (v:vs) = do v' <- exprToLHS v
                               body <- assignments vs
                               let body' = Lab stmt $ body $ paramToValue v'
-                              return $ \src -> Let v' src body'
+                              return $ \src -> Let (Just v') src body'
       assignments []     = return $ \(Lab _ e) -> e
 
       paramToValue (Lab l (Parameter v)) = Lab l (Variable v)

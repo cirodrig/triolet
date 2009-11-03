@@ -65,7 +65,7 @@ data Expr =
   | Generator Locals (IterFor LabExpr)
   | ListComp (IterFor LabExpr)
     -- Python statements
-  | Let LabParameter LabExpr LabExpr
+  | Let (Maybe LabParameter) LabExpr LabExpr
   | Letrec [Lab FunDef] LabExpr
   -- | For [LabParameter] LabExpr LabExpr -- parameter, generator, body
   | Return LabExpr

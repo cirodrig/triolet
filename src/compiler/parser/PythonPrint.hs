@@ -46,6 +46,11 @@ instance PyShow Int where pyShow n = shows n
 
 instance PyShow a => PyShow [a] where pyShow = showPythonList
 
+-- Represent a 'Maybe a' as a possibly-None value
+instance PyShow a => PyShow (Maybe a) where
+    pyShow Nothing  = showPythonString "None"
+    pyShow (Just x) = pyShow x
+
 instance PyShow PyFunCall where pyShow (PyFunCall n xs) = showCall' n xs
 
 showCall :: ShowS -> [P] -> ShowS
@@ -76,7 +81,7 @@ instance PyShow LabExpr where
 showExpr (Variable v)    = showCall' "VariableExpr" [P v]
 showExpr (Literal l)     = showCall' "LiteralExpr" [P l]
 showExpr (Call e args)   = showCall' "CallExpr" [P args]
-showExpr (Cond c tr fa)  = showCall' "CondExpr" [P c, P tr, P fa]
+showExpr (Cond c tr fa)  = showCall' "IfExpr" [P c, P tr, P fa]
 showExpr (Binary op l r) = showCall' "BinaryExpr" [P op, P l, P r]
 showExpr (Unary op arg)  = showCall' "UnaryExpr" [P op, P arg]
 showExpr (Lambda f)      = showCall' "FunExpr" [P f]
