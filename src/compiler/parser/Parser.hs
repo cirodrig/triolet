@@ -4,18 +4,62 @@ where
 
 import Control.Applicative
 import Control.Monad
+import Data.Maybe
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Traversable
 
 import qualified Language.Python.Version3.Parser as Py
 import qualified Language.Python.Version3.Syntax.AST as Py
 import ParserSyntax
 
-data Binding = Local Var        -- A locally defined variable
-             | Param Var        -- A variable defined as a function parameter
-             | Nonlocal         -- A nonlocal variable (indicated by a keyword)
-             | Global           -- A global variable (indicated by a keyword)
+data Binding = Local { bIsDef :: Bool
+                     , bName  :: Var
+                     }   -- A locally defined variable
+             | Param { bIsDef :: Bool -- Always true
+                     , bName  :: Var
+                     }   -- A variable defined as a function parameter
+             | Nonlocal { bIsDef :: Bool
+                        }       -- A nonlocal variable (indicated by a keyword)
+             | Global { bIsDef :: Bool
+                      }         -- A global variable (indicated by a keyword)
                deriving(Show)
+
+
+
+-- Given a binding and the set of nonlocal uses and defs, produce scope
+-- information for the variable.
+toScopeVar :: NameSet -> NameSet -> Binding -> Maybe ScopeVar
+toScopeVar nonlocalUses nonlocalDefs binding =
+    case binding
+    of Local _ v  -> Just $ toVar False v
+       Param _ v  -> Just $ toVar True  v
+       Nonlocal _ -> Nothing
+       Global _   -> Nothing
+    where
+      toVar isParam v =
+          let use = varName v `Set.member` nonlocalUses
+              def = varName v `Set.member` nonlocalDefs
+          in ScopeVar
+                 { scopeVar       = v
+                 , isParameter    = isParam
+                 , hasNonlocalUse = use || def
+                 , hasNonlocalDef = def
+                 }
+
+toGlobalScopeVar :: Binding -> Maybe ScopeVar
+toGlobalScopeVar binding =
+    case binding
+    of Local _ v  -> Just $ ScopeVar { scopeVar = v
+                                     , isParameter = False
+                                     , hasNonlocalUse = True
+                                     , hasNonlocalDef = True
+                                     }
+       Param _ v  -> error "Unexpected parameter variable at global scope"
+       Nonlocal _ -> Nothing      -- Error, will be reported if there are any
+                                 -- defs or uses of the variable
+       Global _   -> error "Unexpected 'global' declaration at global scope" 
+
 type Bindings = Map.Map Py.Ident Binding
 
 data Scope =
@@ -28,6 +72,9 @@ type Scopes = [Scope]
 
 emptyScope :: Scopes
 emptyScope = [] 
+
+-- A set of variable names
+type NameSet = Set.Set String
 
 type NameSupply = [Int]
 
@@ -53,20 +100,38 @@ data CvtState = S NameSupply !Scopes Errors
 
 newtype Cvt a = Cvt {run :: CvtState -> Cvt' a}
 
-data Cvt' a = OK !CvtState a
+-- Running a Cvt returns a new state,
+-- the free variable references that were used but not def'd in the conversion,
+-- the free variable references that were def'd in the conversion,
+-- and a return value.
+data Cvt' a = OK { state       :: !CvtState
+                 , uses        :: NameSet
+                 , defs        :: NameSet
+                 , returnValue :: a
+                 }
             | Fail String
 
+-- Add some uses and defs to the output of a cvt step
+joinCvtResults :: NameSet -> NameSet -> Cvt a -> Cvt a
+joinCvtResults u d m = Cvt $ \s ->
+    case run m s
+    of OK s' u2 d2 x    -> OK s' (Set.union u u2) (Set.union d d2) x
+       failure@(Fail _) -> failure
+
+ok :: CvtState -> a -> Cvt' a
+ok s x = OK s Set.empty Set.empty x
+
 instance Monad Cvt where
-    return x = Cvt $ \s -> OK s x
+    return x = Cvt $ \s -> OK s Set.empty Set.empty x
     fail msg = Cvt $ \_ -> Fail msg
     m >>= k  = Cvt $ \s -> case run m s
-                           of OK s' x  -> run (k x) s'
-                              Fail msg -> Fail msg
+                           of OK s' u1 d1 x -> run (joinCvtResults u1 d1 (k x)) s'
+                              Fail msg      -> Fail msg
 
 instance Functor Cvt where
     fmap f m = Cvt $ \s -> case run m s
-                           of OK s' x  -> OK s' (f x)
-                              Fail msg -> Fail msg
+                           of OK s' u d x -> OK s' u d (f x)
+                              Fail msg    -> Fail msg
 
 instance Applicative Cvt where
     pure  = return
@@ -74,16 +139,50 @@ instance Applicative Cvt where
 
 -- Run a computation in a nested scope.  This adds a scope to the stack at
 -- the beginning of the computation and removes it at the end.
-enter :: Cvt a -> Cvt a
-enter m = Cvt $ \initialState ->
-    let (final, result) =
-            case run m $ addNewScope final initialState
-            of OK finalState x ->
+--
+-- The 'Locals' parameter is the set of local variables for this scope.
+-- It must not be used strictly.
+--
+-- We do things slightly differently at global scope, since there's no next
+-- scope to propagate to.
+enter_ :: Bool -> (Locals -> Cvt a) -> Cvt a
+enter_ isGlobalScope f = Cvt $ \initialState ->
+    let -- Run the local computation in a modified environment
+        (final, localUses, localDefs, result) =
+            case run (f locals) $ addNewScope final initialState
+            of OK finalState localUses localDefs x ->
                    let (final, finalState') = removeNewScope finalState
-                   in (final, OK finalState' x)
-               Fail str -> 
-                   (Map.empty, Fail str)
-    in result
+                   in (final, localUses, localDefs, Right (finalState', x))
+               Fail str ->
+                   (Map.empty, Set.empty, Set.empty, Left str)
+
+        -- The local variables are the 'Local' and 'Param' bindings from the
+        -- scope
+        convertToScopeVar =
+            if isGlobalScope
+            then toGlobalScopeVar
+            else toScopeVar localUses localDefs
+        locals = Locals $ mapMaybe convertToScopeVar $ Map.elems final
+
+        -- Nonlocal variables, plus uses that are not satisfied locally,
+        -- propagate upward
+        boundHere = Set.fromList $ mapMaybe localBindingName $ Map.elems final
+        usesNotBoundHere = Set.fromList $
+                           Map.elems $
+                           Map.mapMaybeWithKey nonlocalUseName final
+        defsNotBoundHere = Set.fromList $
+                           Map.elems $
+                           Map.mapMaybeWithKey nonlocalDefName final
+        nonlocalUses = Set.union
+                       (localUses `Set.difference` boundHere)
+                       usesNotBoundHere
+        nonlocalDefs = Set.union
+                       (localDefs `Set.difference` boundHere)
+                       defsNotBoundHere
+    in case result
+       of Right (finalState, resultValue) ->
+              OK finalState nonlocalUses nonlocalDefs resultValue
+          Left str -> Fail str
     where
       -- Put a new scope on the stack.  The new scope contains the final value
       -- of its dictionary.
@@ -96,21 +195,34 @@ enter m = Cvt $ \initialState ->
       removeNewScope (S ns (Scope _ finalScope : scopes) errs) =
           (finalScope, S ns scopes errs)
 
+      localBindingName (Local _ v) = Just $ varName v
+      localBindingName (Param _ v) = Just $ varName v
+      localBindingName _           = Nothing
+
+      nonlocalUseName (Py.Ident name) (Nonlocal False) = Just name
+      nonlocalUseName _ _ = Nothing
+
+      nonlocalDefName (Py.Ident name) (Nonlocal True) = Just name
+      nonlocalDefName _ _ = Nothing
+
+enter = enter_ False
+enterGlobal = enter_ True
+
 withScopes :: (Scopes -> (a, Errors)) -> Cvt a
 withScopes f = Cvt $ \(S ns scopes errs) ->
                          let (x, errs') = f scopes
-                         in OK (S ns scopes (errs' . errs)) x
+                         in ok (S ns scopes (errs' . errs)) x
 
 updateScopes :: (Scopes -> (Scopes, Errors)) -> Cvt ()
 updateScopes f = Cvt $ \(S ns scopes errs) ->
                            let (scopes', errs') = f scopes
-                           in OK (S ns scopes' (errs' . errs)) ()
+                           in ok (S ns scopes' (errs' . errs)) ()
 
 newID :: Cvt Int
-newID = Cvt $ \(S (n:ns) s errs) -> OK (S ns s errs) n
+newID = Cvt $ \(S (n:ns) s errs) -> ok (S ns s errs) n
 
 logErrors :: Errors -> Cvt ()
-logErrors es = Cvt $ \(S ns scopes errs) -> OK (S ns scopes (es . errs)) ()
+logErrors es = Cvt $ \(S ns scopes errs) -> ok (S ns scopes (es . errs)) ()
 
 logError :: Maybe Err -> Cvt ()
 logError e = logErrors (toErrors e)
@@ -122,7 +234,7 @@ runAndGetErrors :: Cvt a -> NameSupply -> (NameSupply, Either [String] a)
 runAndGetErrors m names =
     case run m (S names emptyScope noError)
     of Fail msg -> (names, Left [msg])
-       OK (S names _ errs) x ->
+       OK (S names _ errs) _ _ x ->
            case errs []
            of [] -> (names, Right x)
               xs -> (names, Left xs)
@@ -135,9 +247,9 @@ lookupVar :: Py.Ident -> Cvt Var
 lookupVar name = withScopes $ \s -> lookup s
     where
       lookup (s:ss) = case Map.lookup name $ finalMembers s
-                      of Just (Local v) -> (v, noError)
-                         Just (Param v) -> (v, noError)
-                         _              -> lookup ss
+                      of Just (Local _ v) -> (v, noError)
+                         Just (Param _ v) -> (v, noError)
+                         _                -> lookup ss
 
       lookup [] = (noVariable, oneError msg)
 
@@ -152,6 +264,7 @@ lookupCurrentLocalBinding name =
     where
       lookup s = Map.lookup name $ currentMembers s
 
+-- Insert or modify a binding
 addLocalBinding :: Py.Ident -> Binding -> Cvt ()
 addLocalBinding name binding =
     updateScopes $ \s -> (addBinding s, noError)
@@ -161,8 +274,20 @@ addLocalBinding name binding =
       addBindingToScope s = s {currentMembers = Map.insert name binding $
                                                 currentMembers s}
 
+signalDef :: Py.Ident -> Cvt ()
+signalDef (Py.Ident nm) = Cvt $ \s -> OK s Set.empty (Set.singleton nm) ()
+
+signalUse :: Py.Ident -> Cvt ()
+signalUse (Py.Ident nm) = Cvt $ \s -> OK s (Set.singleton nm) Set.empty ()
+
 -------------------------------------------------------------------------------
 -- High-level editing of bindings
+
+-- Record that a binding has a definition 
+markAsDefinition :: Py.Ident -> Binding -> Cvt ()
+markAsDefinition name b
+    | bIsDef b = return ()
+    | otherwise = addLocalBinding name (b {bIsDef = True})
 
 -- Create a new variable from an identifier.
 -- This is different from all other variables created by newVar.
@@ -173,14 +298,15 @@ newVar (Py.Ident name) = Var name <$> newID
 -- which must be used lazily.
 definition :: Py.Ident -> Cvt Var
 definition name = do
-  -- First, insert a new binding if appropriate
-  b <- lookupCurrentLocalBinding name
-  case b of
-    Just _  -> return ()
+  signalDef name
+  -- Insert a new binding if appropriate
+  mb <- lookupCurrentLocalBinding name
+  case mb of
+    Just b  -> markAsDefinition name b
     Nothing -> do v' <- newVar name
-                  addLocalBinding name (Local v')
+                  addLocalBinding name (Local True v')
 
-  -- Then look up the actual binding for this variable.
+  -- Look up the actual binding for this variable.
   -- The binding that was inserted may not be the actual binding.
   lookupVar name
 
@@ -189,11 +315,12 @@ definition name = do
 -- Return the corresponding variable.
 parameterDefinition :: Py.Ident -> Cvt Var
 parameterDefinition name = do
-  b <- lookupCurrentLocalBinding name
-  case b of
+  signalDef name
+  mb <- lookupCurrentLocalBinding name
+  case mb of
     Just _  -> parameterRedefined name
     Nothing -> do v <- newVar name
-                  addLocalBinding name (Param v)
+                  addLocalBinding name (Param True v)
                   return v
 
 parameterRedefined :: Py.Ident -> Cvt a
@@ -207,27 +334,31 @@ globalDeclaration, nonlocalDeclaration :: Py.Ident -> Cvt ()
 globalDeclaration name = do
   b <- lookupCurrentLocalBinding name
   case b of
-    Just (Local v) -> addLocalBinding name Global -- override local binding
-    Just (Param _) -> parameterRedefined name
-    Just Nonlocal  -> fail msg
-    Just Global    -> return () -- no change
-    Nothing        -> addLocalBinding name Global
+    Just (Local isDef v) -> -- override local binding
+                            addLocalBinding name (Global isDef)
+    Just (Param _ _)   -> parameterRedefined name
+    Just (Nonlocal _)  -> fail msg
+    Just (Global _)    -> return () -- no change
+    Nothing            -> addLocalBinding name (Global False)
     where
       msg = "Variable '" ++ identName name ++ "' cannot be declared both global and nonlocal"
 
 nonlocalDeclaration name = do
   b <- lookupCurrentLocalBinding name
   case b of
-    Just (Local v) -> addLocalBinding name Nonlocal -- override local binding
-    Just (Param _) -> parameterRedefined name
-    Just Nonlocal  -> return () -- no change
-    Just Global    -> fail message
-    Nothing        -> addLocalBinding name Nonlocal
+    Just (Local isDef v) -> -- override local binding
+                            addLocalBinding name (Nonlocal isDef)
+    Just (Param _ _)  -> parameterRedefined name
+    Just (Nonlocal _) -> return () -- no change
+    Just (Global _)   -> fail message
+    Nothing           -> addLocalBinding name (Nonlocal False)
     where
       message = "Variable '" ++ identName name ++ "' cannot be declared both global and nonlocal"
 
 -- Look up a use of a variable
-use name = lookupVar name
+use name = do
+  signalUse name
+  lookupVar name
 
 -------------------------------------------------------------------------------
 -- Conversions for Python 3 Syntax
@@ -253,8 +384,9 @@ expression' expr =
        Py.Lambda args body -> Lambda <$> lambda args body
 
        -- Generators have a separate scope
-       Py.Generator comp   -> Generator <$>
-                              enter (comprehension expression comp)
+       Py.Generator comp   -> enter $ \locals ->
+                                  Generator locals <$>
+                                  comprehension expression comp
        Py.ListComp comp    -> ListComp <$> comprehension expression comp
 
 -- Convert an optional expression into an expression or None
@@ -302,20 +434,27 @@ exprToLHS e@(Py.Var name) = Lab e . Parameter <$> definition name
 -- Convert a statement that is not at the end of a suite.
 -- The rest of the suite is passed as a parameter.
 medialStatement :: Py.Statement -> Cvt LabExpr -> Cvt LabExpr
-medialStatement stmt cont = addLabel $
+medialStatement stmt cont =
     case stmt
     of Py.For targets generator bodyClause _ ->
            let mkFor generator targets bodyClause =
                    For targets generator bodyClause
-           in mkFor <$> expression generator
-                    <*> traverse exprToLHS targets
-                    <*> suite bodyClause
+           in addLabel $ mkFor <$> expression generator
+                               <*> traverse exprToLHS targets
+                               <*> suite bodyClause
        Py.Fun name args _ body ->
            let funBody = fmap (Lab stmt) $ funDefinition name args body
-           in Letrec <$> fmap (:[]) funBody <*> cont
-       Py.Assign dsts src -> expression src <**> assignments (reverse dsts)
+           in addLabel $ Letrec <$> fmap (:[]) funBody <*> cont
+       Py.Assign dsts src -> addLabel $
+                             expression src <**> assignments (reverse dsts)
        Py.Return me -> -- Process, then discard statements after the return
-                       Return <$> maybeExpression me <* cont
+                       addLabel $ Return <$> maybeExpression me <* cont
+       Py.NonLocal xs -> do
+         mapM_ nonlocalDeclaration xs
+         cont
+       Py.Global xs -> do
+         mapM_ globalDeclaration xs
+         cont
     where
       -- Assign the right-hand side to a sequence of variables by handing
       -- the value along.  The continuation comes after all assignments.
@@ -356,12 +495,12 @@ topLevel xs = traverse topLevelFunction xs
           fail "Only function definitions permitted at global scpoe"
 
 lambda :: [Py.Parameter] -> Py.Expr -> Cvt Function
-lambda args body = enter $
-    Function <$> traverse parameter args <*> expression body
+lambda args body = enter $ \locals ->
+    Function locals <$> traverse parameter args <*> expression body
 
 function :: [Py.Parameter] -> Py.Suite -> Cvt Function
-function args body = enter $
-    Function <$> traverse parameter args <*> suite body
+function args body = enter $ \locals ->
+    Function locals <$> traverse parameter args <*> suite body
 
 funDefinition :: Py.Ident -> [Py.Parameter] -> Py.Suite -> Cvt FunDef
 funDefinition name params body =
@@ -370,23 +509,26 @@ funDefinition name params body =
 -------------------------------------------------------------------------------
 -- Exported functions
 
--- Convert a statement; check for and report errors
+-- | Convert a Python statement to a Pyon expression.
 convertStatement :: Py.Statement -> NameSupply -> Either [String] LabExpr
 convertStatement stmt names =
     let computation = finalStatement stmt
     in case runAndGetErrors computation names
        of (_, result) -> result
 
--- Convert a module; check for and report errors
+-- | Convert a Python module to a Pyon module.
 convertModule :: Py.Module -> NameSupply -> Either [String] [Lab FunDef]
 convertModule mod names =
     let computation =
             case mod
-            of Py.Module statements -> enter $ topLevel statements
+            of Py.Module statements -> enterGlobal $ \_ -> topLevel statements
     in case runAndGetErrors computation names
        of (_, result) -> result
 
-parseModule :: String -> String -> Either [String] [Lab FunDef]
+-- | Parse a Python module.
+parseModule :: String           -- ^ File contents
+            -> String           -- ^ File name
+            -> Either [String] [Lab FunDef]
 parseModule stream path =
     case Py.parseModule stream path
     of Left err  -> Left [show err]

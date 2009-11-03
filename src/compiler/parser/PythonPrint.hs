@@ -11,11 +11,16 @@ parenthesize :: ShowS -> ShowS
 parenthesize x = showChar '(' . x . showChar ')'
 brackets :: ShowS -> ShowS
 brackets x = showChar '[' . x . showChar ']'
+braces :: ShowS -> ShowS
+braces x = showChar '{' . x . showChar '}'
 concatList :: [ShowS] -> ShowS
 concatList xs z = foldr ($) z xs
 commas xs = intersperse (showChar ',') xs
 showPythonList xs = brackets $ concatList $ commas $ map pyShow xs
 showPythonTuple xs = parenthesize $ concatList $ commas $ map pyShow xs
+showPythonDict xs = braces $ concatList $ commas $ map showAssoc xs
+    where
+      showAssoc (key, val) = pyShow key . showChar ':' . pyShow val
 
 -- Data that can be marshaled in the form of Python code
 class PyShow a where
@@ -53,6 +58,11 @@ instance PyShow Var where
     pyShow v = showCall' "makeVariable"
                [P $ PyShowString (varName v), P (varID v)]
 
+instance PyShow Locals where
+    pyShow (Locals vs) = showPythonDict $ map toLocal vs
+        where
+          toLocal v = (scopeVar v, BoolLit (hasNonlocalDef v))
+
 instance PyShow Literal where
     pyShow (IntLit n)   = shows n
     pyShow (FloatLit d) = shows d
@@ -70,7 +80,7 @@ showExpr (Cond c tr fa)  = showCall' "CondExpr" [P c, P tr, P fa]
 showExpr (Binary op l r) = showCall' "BinaryExpr" [P op, P l, P r]
 showExpr (Unary op arg)  = showCall' "UnaryExpr" [P op, P arg]
 showExpr (Lambda f)      = showCall' "FunExpr" [P f]
-showExpr (Generator gen) = showCall' "GeneratorExpr" [P gen]
+showExpr (Generator locals gen) = showCall' "GeneratorExpr" [P locals, P gen]
 showExpr (ListComp gen)  = showCall' "ListCompExpr" [P gen]
 showExpr (Let lhs rhs e) = showCall' "LetExpr" [P lhs, P rhs, P e]
 showExpr (Letrec fs e)   = showCall' "LetrecExpr" [P fs, P e]
@@ -89,7 +99,8 @@ instance PyShow a => PyShow (IterIf a) where
     pyShow (IterIf e c) = showCall' "IfIter" [P e, P c]
 
 instance PyShow Function where
-    pyShow (Function params body) = showCall' "Function" [P params, P body]
+    pyShow (Function locals params body) =
+        showCall' "Function" [P params, P body, P locals]
 
 instance PyShow (Lab Parameter) where
     pyShow (Lab _ (Parameter v)) = showCall' "VariableParam" [P v]

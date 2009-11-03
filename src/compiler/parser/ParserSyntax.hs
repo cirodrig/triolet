@@ -5,12 +5,35 @@ module ParserSyntax where
 import qualified Language.Python.Version3.Syntax.AST as Python
 import Language.Python.Version3.Syntax.AST(Ident, AssignOp, Op)
 
+-- | A Python variable.
+-- Different variables have different IDs, though they can have
+-- the same name.
 data Var =
     Var
-    { varName :: String
-    , varID   :: !Int
+    { varName           :: String
+    , varID             :: !Int
     }
     deriving(Show)
+
+-- | A Python variable with scope information.
+--
+-- If a variable is a parameter, it cannot have a nonlocal definition.
+--
+-- Since we do not keep track of global uses and defs, global variables
+-- are always marked as having nonlocal uses and defs.
+data ScopeVar =
+    ScopeVar
+    { scopeVar       :: {-# UNPACK #-} !Var
+    , isParameter    :: !Bool   -- ^ True if this is a function parameter
+    , hasNonlocalUse :: !Bool   -- ^ True if the variable is used outside
+                                -- of its scope; implied by hasNonlocalDef
+    , hasNonlocalDef :: !Bool   -- ^ True if the variable is assigned outside
+                                -- of its scope
+    }
+
+-- A list of the variables local to a scope, generated after a scope is
+-- fully processed.
+newtype Locals = Locals [ScopeVar]
 
 -- Expression are labeled with their original syntax tree equivalent.
 -- To save space, we store the original showable object. 
@@ -39,7 +62,7 @@ data Expr =
   | Binary !Op LabExpr LabExpr
   | Unary !Op LabExpr
   | Lambda Function
-  | Generator (IterFor LabExpr)
+  | Generator Locals (IterFor LabExpr)
   | ListComp (IterFor LabExpr)
     -- Python statements
   | Let LabParameter LabExpr LabExpr
@@ -61,6 +84,6 @@ data Comprehension a =
 data Parameter =
     Parameter Var
 
-data Function = Function [LabParameter] LabExpr
+data Function = Function Locals [LabParameter] LabExpr
 
 data FunDef = FunDef Var !Function

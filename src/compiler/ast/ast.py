@@ -138,10 +138,11 @@ class ListCompExpr(Expression):
 class GeneratorExpr(Expression):
     """A generator expression."""
 
-    def __init__(self, iterator, base = ExprInit.default):
+    def __init__(self, iterator, local_scope = None, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(iterator, ForIter) # Must start with 'for'
         self.iterator = iterator
+        self.localScope = local_scope
 
 class CallExpr(Expression):
     """A function call."""
@@ -250,12 +251,13 @@ class FunctionDef(object):
 
 class Function(object):
     """A function or lambda term"""
-    def __init__(self, parameters, body):
+    def __init__(self, parameters, body, local_scope = None):
         for p in parameters:
             assert isinstance(p, Parameter)
         assert isinstance(body, Expression)
         self.parameters = parameters
         self.body = body
+        self.localScope = local_scope
 
 ###############################################################################
 # Modules
