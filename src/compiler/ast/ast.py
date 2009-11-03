@@ -120,7 +120,7 @@ class IfExpr(Expression):
 
     def __init__(self, argument, ifTrue, ifFalse, base = ExprInit.default):
         base.initializeExpr(self)
-        assert isinstance(test, Expression)
+        assert isinstance(argument, Expression)
         assert isinstance(ifTrue, Expression)
         assert isinstance(ifFalse, Expression)
         self.argument = argument

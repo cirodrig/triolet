@@ -26,16 +26,16 @@ x_var = PythonVariable("x")
 y_var = PythonVariable("y")
 nn_var = PythonVariable("nn")
 
-# lambda x: dist(x,y)
-nn_lambda = Function([VariableParam(x_var)],
+# lambda y: dist(x,y)
+nn_lambda = Function([VariableParam(y_var)],
                      CallExpr(VariableExpr(PythonVariable("dist")),
                               [VariableExpr(x_var), VariableExpr(y_var)]))
 
-# [minIndex(lambda x: dist(x,y), ys) for x in xs]
-nn_body = ForExpr(VariableParam(x_var),
+# [minIndex(lambda y: dist(x,y), ys) for x in xs]
+nn_body = ListCompExpr(ForIter(VariableParam(x_var),
                   VariableExpr(xs_var),
-                  CallExpr(VariableExpr(PythonVariable("minIndex")),
-                           [FunExpr(nn_lambda), VariableExpr(ys_var)]))
+                  DoIter(CallExpr(VariableExpr(PythonVariable("minIndex")),
+                           [FunExpr(nn_lambda), VariableExpr(ys_var)])) ) )
 
 # def nn(xs, ys):
 #     return [minIndex(lambda x: dist(x,y), ys) for x in xs]
