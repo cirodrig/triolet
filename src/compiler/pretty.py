@@ -254,7 +254,7 @@ class stack(_grouping):
 
 class nest(pretty):
     """
-    nest(indentation, doc) -> print 'doc' with additional indentation
+    nest(doc, indentation) -> print 'doc' with additional indentation
        relative to its context
     """
 
