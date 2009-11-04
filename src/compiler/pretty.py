@@ -111,7 +111,7 @@ def renderString(doc):
 
 def _prettyPrint(doc, file = sys.stdout, pos = posinfo(0, 0)):
     if isinstance(doc, str):            # string
-        return _prettyPrintText(str, file, pos)
+        return _prettyPrintText(doc, file, pos)
     elif isinstance(doc, pretty):       # pretty instance
         return doc.format(file, pos)
     elif isinstance(doc, (int, float)): # showable as a string
@@ -127,8 +127,8 @@ def _prettyPrintText(text, file, pos):
     "Print a string and update position information."
     pos = pos.pre(file, pos)            # Run preformatter
     start = pos.column                  # Get starting position
-    file.write(doc)                     # Write string
-    end = pos.column + len(doc)         # Compute ending position
+    file.write(text)                    # Write string
+    end = pos.column + len(text)        # Compute ending position
     return (start, end)                 # Return interval
 
 ###############################################################################
