@@ -1,0 +1,296 @@
+"""Pretty-printing routines.
+
+These functions produce documents that can be formatted and written to
+a file by 'prettyPrint'.  The documents manage indentation and spacing,
+so that users can concern themselves with the acutal structure of the
+data.
+
+The basic pretty-printable objects are 'str', 'int', and 'float'.
+If 'None' is pretty-printed, it is formatted as nothing.  Pretty-printable
+objects may be composed into more complex documents, while determining the
+indentation and positioning of sub-documents, with functions such
+as 'abut', 'space', 'stack' and 'nest'.
+
+These functions are modeled after the pretty-printer combinators in the
+Haskell library Text.PrettyPrint.HughesPJ.  
+"""
+
+# Pretty-printing classes in this file have lowercase types, since they are
+# used like functions.
+
+import sys
+import cStringIO
+
+# Number of columns in output
+_COLUMNS = 80
+
+# The following interface is followed by pretty-printing code, including
+# '_prettyPrint' and the 'format' methods of pretty instances.
+# The parameters are a posinfo object and a file.
+# The return value is None for an empty document,
+# or an interval (start, end) for a nonempty document
+
+# These functions are used in the 'pre' slot of 'posinfo'
+
+# Do nothing.
+def _printNothing(file, pos):
+    return pos
+
+# Print a space.
+def _printOneSpace(file, pos):
+    if file: file.write(' ')
+    return posinfo(pos.indent, pos.column + 1)
+
+# Move the indentation to the current starting position.
+def _ratchet(file, pos):
+    return posinfo(pos.column, pos.column)
+
+# Print a newline and some indentation.
+def _printNewlineIndent(line_start):
+    def do_it(file, pos):
+        if file: file.write('\n' + ' ' * line_start)
+        return posinfo(line_start, line_start, _printNothing)
+    return do_it
+
+# Print with extra indentation
+def _indentBy(indent):
+    def do_it(file, pos):
+        new_indent = pos.indent + indent
+
+        # If we haven't reached the right indentation level, then add extra
+        # spaces
+        if pos.column < new_indent:
+            extra_indent = new_indent - pos.column
+            if file: file.write(' ' * extra_indent)
+            
+            return posinfo(new_indent, new_indent, _printNothing)
+        else:
+            return posinfo(new_indent, pos.column, _printNothing)
+
+    return do_it
+
+class posinfo(object):
+    """Positioning information for pretty-printing.
+
+    indent: Indentation to give to the first document in subsequent lines
+    column: Position of the next character to be printed on the current line
+    pre: Action to perform before printing something
+       pre(file, pos) -> new_pos
+          Update position in preparation to write something.
+          If file is not None, then write output to the file so that
+          output will print at the right place."""
+    def __init__(self, indent, column, pre = _printNothing):
+        self.indent = indent
+        self.column = column
+        self.pre = pre
+
+    def addPre(self, new_pre):
+        """Add another preformatter.  It will run after existing
+        preformatters."""
+        old_pre = self.pre
+        def composed_pre(file, pos):
+            return new_pre(file, old_pre(file, pos))
+
+        return posinfo(self.indent, self.column, composed_pre)
+
+    __slots__ = ['indent', 'column', 'pre']
+
+# Top-level pretty-printing function.
+# This calls the internal function and returns None.
+def render(doc, file = sys.stdout):
+    "Write a pretty-printable object to a file."
+    _prettyPrint(doc, file)
+
+def renderString(doc):
+    "Render a pretty-printable object as a string."
+    buf = cStringIO.StringIO()
+    _prettyPrint(doc, buf)
+    ret = buf.getvalue()
+    buf.close()
+    return ret
+
+def _prettyPrint(doc, file = sys.stdout, pos = posinfo(0, 0)):
+    if isinstance(doc, str):            # string
+        return _prettyPrintText(str, file, pos)
+    elif isinstance(doc, pretty):       # pretty instance
+        return doc.format(file, pos)
+    elif isinstance(doc, (int, float)): # showable as a string
+        return _prettyPrintText(str(doc), file, pos)
+    elif doc is None:                   # Empty document
+        return None
+
+    else:
+        raise TypeError, doc
+
+# All pretty-printing (other than whitespace) goes through this function
+def _prettyPrintText(text, file, pos):
+    "Print a string and update position information."
+    pos = pos.pre(file, pos)            # Run preformatter
+    start = pos.column                  # Get starting position
+    file.write(doc)                     # Write string
+    end = pos.column + len(doc)         # Compute ending position
+    return (start, end)                 # Return interval
+
+###############################################################################
+# Pretty-printers
+
+class pretty(object):
+    def __new__(self, *args, **kwargs):
+        # Special-case pretty instances, strings, and None
+        # so that we can use pretty as a type-cast operator
+        if self is pretty and len(args) == 1 and len(kwargs) == 0:
+            arg = args[0]
+            if isinstance(args[0], pretty):
+                return args[0]
+            elif isinstance(args[0], str):
+                return args[0]
+            elif args[0] is None:
+                return None
+
+        return object.__new__(self, *args, **kwargs)
+
+    def __init__(self, arg):
+        raise NotImplementedError, "'pretty' is an abstract base class"
+
+    def format(self, file, pos):
+        """An internal formatting routine.  Do not call this directly;
+        call 'render' or 'renderString' instead.
+
+        file: output file
+        pos: formatting information
+
+        returns a boolean telling whether this document is empty"""
+        raise NotImplementedError
+
+    def render(self, file = sys.stdout):
+        """Render this object to a file"""
+        # Call the global function
+        render(self, file)
+
+    def renderString(self):
+        """Render this object to a string"""
+        return renderString(self)
+
+class _grouping(pretty):
+    """A grouping of pretty-printable documents"""
+
+    def __init__(self, *argl):
+        if len(argl) == 2:
+            self.documents = argl
+        elif len(argl) == 1:
+            self.documents = argl[0]
+        else:
+            raise TypeError, "expecting sequence or two printables"
+
+    @staticmethod
+    def _updatePosition(pos, cur_start, cur_end):
+        """Update the formatting information to pass to children.
+        This should return a new 'pos' object.
+        The new object's column should always be 'cur_end'."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _setup(pos):
+        """Set up formatting.  By default, this does nothing."""
+        return pos
+
+    def format(self, file, pos):
+        # Print all elements
+        any_is_nonempty = False
+        pos = self._setup(pos)
+        for doc in self.documents:
+            ret = _prettyPrint(doc, file, pos)
+
+            # If doc was not empty, then update positioning info
+            if ret is not None:
+                (cur_start, cur_end) = ret
+                
+                if not any_is_nonempty:
+                    # This is the first nonempty element.
+                    # Keep track of its starting position.
+                    start = cur_start
+                    any_is_nonempty = True
+
+                pos = self._updatePosition(pos, cur_start, cur_end)
+
+        # Return the printed interval
+        if any_is_nonempty:
+            return (start, cur_end)
+        else:
+            return None
+
+class abut(_grouping):
+    """abut(x, y) -> print x and y adjacently, with no intervening space
+    abut(sequence) -> print all elements of the sequence adjacently"""
+
+    @staticmethod
+    def _updatePosition(pos, cur_start, cur_end):
+        # Next document is printed right after current document
+        return posinfo(cur_end, cur_end, _printNothing)
+
+class space(_grouping):
+    """space(x, y) -> print x and y with an intervening space
+    space(sequence) -> print all elements of the sequence adjacently"""
+
+    @staticmethod
+    def _updatePosition(pos, cur_start, cur_end):
+        # Next document is printed after current document, with one space
+        return posinfo(cur_end, cur_end, _printOneSpace)
+
+class stack(_grouping):
+    """stack(x, y) -> print y under x with the same indentation
+    stack(sequence) -> print all elements of the sequence starting
+        on separate lines, with the same indentation as the first element"""
+
+    @staticmethod
+    def _setup(pos):
+        return pos.addPre(_ratchet)
+
+    @staticmethod
+    def _updatePosition(pos, cur_start, cur_end):
+        # Locally, set indentation to the first document's starting position
+        # Next document is printed on a new line
+        return posinfo(cur_start, cur_end, _printNewlineIndent(cur_start))
+
+class nest(pretty):
+    """
+    nest(indentation, doc) -> print 'doc' with additional indentation
+       relative to its context
+    """
+
+    def __init__(self, doc, indent):
+        self.indentation = indent
+        self.doc = doc
+
+    def format(self, file, pos):
+        # Print contents with extra indentation
+        _prettyPrint(self.doc, file, pos.addPre(_indentBy(self.indentation)))
+
+def punctuate(separator, documents):
+    """punctuate(separator, sequence) -> sequence with separator interspersed"""
+
+    return [abut(doc, separator) for doc in documents[:-1]] + documents[-1:]
+
+def parens(doc):
+    """parens(doc) -> "(" doc ")" """
+    return abut(["(", doc, ")"])
+
+def braces(doc):
+    """braces(doc) -> "{" doc "}" """
+    return abut(["{", doc, "}"])
+
+def brackets(doc):
+    """brackets(doc) -> "[" doc "]" """
+    return abut(["[", doc, "]"])
+
+def parensStack(documents, indent = 2):
+    """parens(documents) -> print stacked documents with surrounding parentheses"""
+    return stack(["(", nest(stack(documents), indent), ")"])
+
+def bracesStack(documents, indent = 2):
+    """braces(documents) -> print stacked documents with surrounding braces"""
+    return stack(["{", nest(stack(documents), indent), "}"])
+
+def bracketsStack(documents, indent = 2):
+    """brackets(documents) -> print stacked documents with surrounding brackets"""
+    return stack(["[", nest(stack(documents), indent), "]"])
