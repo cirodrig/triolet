@@ -3,32 +3,36 @@
 # Prints the AST in human-readable form
 
 from ast import *
+from pretty import *
 import operators
+import sys 
 
 #_indentation = 0
 
-def printAst(root):
+def printAst(root, file = sys.stdout):
     """A generic, recursive printing function.
     Examines the argument type and calls the appropriate print function.
 
     root: an AST node marking the subtree to be printed"""
 #    _indentation = 0
     if isinstance(root, Expression):
-        printExpression(root)
+        doc = printExpression(root)
     elif isinstance(root, Iterator):
-        printIterator(root)
+        doc = printIterator(root)
     elif isinstance(root, FunctionDef):
-        printFuncDef(root)
+        doc = printFuncDef(root)
     elif isinstance(root, Function):
-        printFunction(root)
+        doc = printFunction(root)
     elif isinstance(root, Variable):
-        printVar(root)
+        doc = printVar(root)
     elif isinstance(root, Parameter):
-        printParam(root)
+        doc = printParam(root)
     elif isinstance(root, Module):
-        printModule(root)
+        doc = printModule(root)
     else:
         raise TypeError("Called printAst on a non-AST object")
+    render(stack(doc, ''), file)
+
 
 def _printStr(s):
     """Function checks argument for None before printing
@@ -62,11 +66,11 @@ def _printFlat(irtype, children, childprint = _printStr,
     print ')',
 
 def _printNested(irtype, children, childprint = _printStr, 
-				prequel = None, separator = None, sequel = None):
+                  prequel = None, separator = None, sequel = None):
     """Prints an IR node and its children using nesting 
     (intended to somewhat replicate scopes)
 
-    irtype: printable object denoting the IR type
+    irtype: pretty-printable object denoting the IR type
     children: list of children to print
     childprint: function to invoke to print each child
     separator: optional printable separator between children
@@ -88,110 +92,130 @@ def _printNested(irtype, children, childprint = _printStr,
     print ')'
 
 def printExpression(expr):
-    """Prints an expression IR node
+    """Returns a pretty-printable object for an expression IR node
 
     expr: Expression node in the AST"""
     if isinstance(expr, VariableExpr):
-        _printFlat('VAR', [expr.variable.name , expr.variable.identifier])
+        varname = abut(expr.variable.name, expr.variable.identifier)
+        return parens(space('VAR', varname))
     elif isinstance(expr, LiteralExpr):
-        _printFlat('LIT', [expr.literal])
+        return parens(space('LIT', expr.literal))
     elif isinstance(expr, UnaryExpr):
-        _printFlat('UEXPR' + expr.operator.display, 
-        		[expr.argument], printExpression)
+        exprdoc = printExpressoin(expr.argument)
+        return parens(space(['UEXPR', expr.operator.display, exprdoc]))
     elif isinstance(expr, BinaryExpr):
-        _printFlat('BEXPR', [expr.left, expr.right], 
-                            printExpression, expr.operator.display)
+        exprdoclist = ['BEXPR',
+                       printExpression(expr.left), 
+                       expr.operator.display, 
+                       printExpression(expr.right)]
+        return parens(space(exprdoclist))
     elif isinstance(expr, IfExpr):
-        printNested('IF', [expr.ifTrue, expr.ifFalse], printExpression, 
-        		separator = 'ELSE', 
-        		prequel = lambda : printExpression(expr.argument) )
+        thendoc = nest(printExpression(expr.ifTrue), 2)
+        elsedoc = nest(printExpression(expr.ifFalse), 2)
+        stacklist = [ hang('IF', 4, printExpression(expr.argument)),
+                      thendoc,
+                      'ELSE',
+                      elsedoc,
+                      'ENDIF' ]
+        return parens(stack(stacklist))
     elif isinstance(expr, ListCompExpr):
-        printNested('LISTCOMP', [expr.iterator], printIterator)
+        return parensStack('LISTCOMP', nest(printIterator(expr.iterator), 2))
     elif isinstance(expr, GeneratorExpr):
-        printNested('GENERATOR', [expr.iterator], printIterator)
+        return paresStack('GENERATOR', nest(printIterator(expr.iterator), 2))
     elif isinstance(expr, CallExpr):
-        _printFlat('CALL', expr.arguments, printExpression, 
-                      prequel = lambda : printExpression(expr.operator))
+        arglist = punctuate(',', [printExpression(e) for e in expr.arguments])
+        hungarg = None
+        for init in arglist[:1]:
+            hungarg = init
+            for a in arglist[1:]:
+                hungarg = hang(hungarg, 0, a)
+        return parens(space(['CALL', 
+                             printExpression(expr.operator), 
+                             brackets(hungarg)]))
     elif isinstance(expr, LetExpr):
-        _printFlat('LET', [expr.rhs], printExpression, 
-               prequel = lambda : printParam(expr.name) )
+        nextLet = None
         if expr.body is not None:
-            print '...'
-            printExpression(expr.body)
+            nextLet = printExpression(expr.body)
+        assigndoc = space(['LET', printParam(expr.name), '='])
+        exprdoc = parens(hang(assigndoc, 4, printExpression(expr.rhs)))
+        if expr.body is not None:
+            exprdoc = abut(exprdoc, '...')
+        return stack(exprdoc, nextLet) 
     elif isinstance(expr, LetrecExpr):
-        printNested('LETREC', expr.definitions, printFuncDef, 
-                      sequel = lambda : printExpression(expr.body))
+        defdoclist = [nest(printFuncDef(f), 2) for f in expr.definitions]
+        return bracesStack(['LETREC'] + defdoclist + 
+                               [nest(printExpression(expr.body), 2)])
     elif isinstance(expr, FunExpr):
-        _printFlat('LAMBDA', [expr.function], printFunction)
+        return brackets(hang('LAMBDA', 2, printFunction(expr.function)))
     elif isinstance(expr, ReturnExpr):
-        _printFlat('RETURN', [expr.argument], printExpression)
+        return parens(space('RETURN', printExpression(expr.argument)))
     else:
         raise TypeError('Called printExpression on an unknown expression type')
 
 def printIterator(iter):
-    """Prints an Iterator node in the AST
+    """Returns a pretty-printable object for an Iterator node in the AST
 
     iter: Iterator to be printed"""
     if isinstance(iter, ForIter):
-        printNested('FOR', [iter.argument], printExpression, 
-                        prequel = lambda : printParam(iter.parameter),
-                        sequel = lambda : printIterator(iter.body) )
+        declclause = hang(space(['FOR', printParam(iter.parameter), 'IN']), 
+                          4, printExpression(iter.argument))
+        bodynest = nest(printIterator(iter.body), 2)
+        return parenStack(declclause, bodynest)
     elif isinstance(iter, IfIter):
-        printNested('GUARDIF', [iter.guard], printExpression,
-                        sequel = lambda : printIterator(iter.body) )
+        return parenStack(hang('GUARDIF', 2, printExpression(iter.guard)),
+                            nest(printIterator(iter.body)))
     elif isinstance(iter, DoIter):
-        printNested('DO', [iter.body], printExpression)
+        parenStack('DO', nest(printExpression(iter.body)))
     else:
         raise TypeError('Called printIterator on an unknown iterator type')
 
 
 def printFuncDef(fdef):
-    """Prints a FunctionDef node in the AST
+    """Returns a pretty-printable object for a FunctionDef node in the AST
 
     fdef: FunctionDef to be printed"""
-    _printFlat('FDEF', [fdef.function], printFunction, 
-                  prequel = lambda : printVar(fdef.name))
+    return parens(hang( space('DEF', printVar(fdef.name)), 
+                        2, printFunction(fdef.function)))
 
 def printFunction(f):
-    """Prints a Function node in the AST
+    """Returns a pretty-printable object for a Function node in the AST
 
     f: Function to be printed"""
-    _printFlat('FUNC', f.parameters, printParam, 
-                    sequel = lambda : printExpression(f.body))
+    paramsdoc = []
+    for p in f.parameters:
+        paramsdoc.append(printParam(p))
+    paramsdoc = brackets(abut(punctuate(',', paramsdoc)))
+    fdoc = space('FUNCTION', paramsdoc)
+    return parens(hang(fdoc, 2, printExpression(f.body)))
 
 def printVar(v):
-    """Prints a variable in the AST
+    """Returns a pretty-printable object for a variable in the AST
     v: Variable to be printed"""
-    print v.name, v.identifier,
+    return abut(v.name, v.identifier)
 
 def printParam(p):
-    """Prints a parameter in the AST
+    """Returns a pretty-printable object for a parameter in the AST
     TupleParams untested as of yet...
     p: Parameter to be printed"""
     if isinstance(p, VariableParam):
-        print '(',
+        printlist = []
         if p.annotation is not None:
-            print p.annotation,
-        printVar(p.name)
+            pass #Unimplemented?
+        printlist.append(printVar(p.name))
         if p.default is not None:
-            print '=', p.default,
-        print ')',
+            printlist.append(space('=', printVar(p.default)))
+        return parens(space(printlist))
     elif isinstance(p, TupleParam):
-        print '(',
-        for field in p.fields:
-            printParam(field)
-        print ')',
+        return braces( space([printParam(f) for f in p.fields]))
     else:
         raise TypeError('Called printParam with unknown param type')
 
 def printModule(m):
-    """Prints a Module in the AST
+    """Returns a pretty-printable object for a Module in the AST
     As of yet untested.
     m: Module to be printed"""
-    print '(' 'MODULE'
+    defdoclist = []
     for df in m.definitions:
-        for d in dg:
-            printFuncDef(d)
-    print 'END MODULE' ')'
-
+        defdoclist = defdoclist + [printFuncDef(d) for d in dg]
+    return bracesStack(['MODULE'] + defdoclist + 'END MODULE')
 
