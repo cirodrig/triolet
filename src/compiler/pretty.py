@@ -46,11 +46,10 @@ def _ratchet(file, pos):
     return posinfo(pos.column, pos.column)
 
 # Print a newline and some indentation.
-def _printNewlineIndent(line_start):
-    def do_it(file, pos):
-        if file: file.write('\n' + ' ' * line_start)
-        return posinfo(line_start, line_start, _printNothing)
-    return do_it
+def _printNewlineIndent(file, pos):
+    ind = pos.indent
+    if file: file.write('\n' + ' ' * ind)
+    return posinfo(ind, ind)
 
 # Print with extra indentation
 def _indentBy(indent):
@@ -63,10 +62,25 @@ def _indentBy(indent):
             extra_indent = new_indent - pos.column
             if file: file.write(' ' * extra_indent)
             
-            return posinfo(new_indent, new_indent, _printNothing)
+            return posinfo(new_indent, new_indent)
         else:
-            return posinfo(new_indent, pos.column, _printNothing)
+            return posinfo(new_indent, pos.column)
 
+    return do_it
+
+# Go to the given column; insert at least one space.
+# If past that column, start a new line.
+# The given column becomes the new indentation level.
+def _goToColumnOneSpace(indent):
+    def do_it(file, pos):
+        delta = indent - pos.column
+        if file:
+            if delta > 0:               # Fits on current line
+                file.write(' ' * delta)
+            else:                       # Go to next line
+                file.write('\n' + ' ' * indent)
+
+        return posinfo(indent, indent)
     return do_it
 
 class posinfo(object):
@@ -126,9 +140,9 @@ def _prettyPrint(doc, file = sys.stdout, pos = posinfo(0, 0)):
 def _prettyPrintText(text, file, pos):
     "Print a string and update position information."
     pos = pos.pre(file, pos)            # Run preformatter
-    start = pos.column                  # Get starting position
     file.write(text)                    # Write string
-    end = pos.column + len(text)        # Compute ending position
+    start = pos.column                  # Get starting position
+    end = start + len(text)             # Compute ending position
     return (start, end)                 # Return interval
 
 ###############################################################################
@@ -226,7 +240,7 @@ class abut(_grouping):
     @staticmethod
     def _updatePosition(pos, cur_start, cur_end):
         # Next document is printed right after current document
-        return posinfo(cur_end, cur_end, _printNothing)
+        return posinfo(pos.indent, cur_end, _printNothing)
 
 class space(_grouping):
     """space(x, y) -> print x and y with an intervening space
@@ -235,7 +249,7 @@ class space(_grouping):
     @staticmethod
     def _updatePosition(pos, cur_start, cur_end):
         # Next document is printed after current document, with one space
-        return posinfo(cur_end, cur_end, _printOneSpace)
+        return posinfo(pos.indent, cur_end, _printOneSpace)
 
 class stack(_grouping):
     """stack(x, y) -> print y under x with the same indentation
@@ -250,7 +264,7 @@ class stack(_grouping):
     def _updatePosition(pos, cur_start, cur_end):
         # Locally, set indentation to the first document's starting position
         # Next document is printed on a new line
-        return posinfo(cur_start, cur_end, _printNewlineIndent(cur_start))
+        return posinfo(cur_start, cur_end, _printNewlineIndent)
 
 class nest(pretty):
     """
@@ -265,6 +279,30 @@ class nest(pretty):
     def format(self, file, pos):
         # Print contents with extra indentation
         _prettyPrint(self.doc, file, pos.addPre(_indentBy(self.indentation)))
+
+class hang(pretty):
+    """
+    hang(doc1, indent, doc2) -> print 'doc1', followed by indented 'doc2'
+       on the same line if it fits, on the next line otherwise
+    """
+
+    def __init__(self, doc1, indent, doc2):
+        self.doc1 = doc1
+        self.indentation = indent
+        self.doc2 = doc2
+
+    def format(self, file, pos):
+        rc = _prettyPrint(self.doc1, file, pos)
+
+        if rc is None:
+            # When first document is empty, behave like 'nest'
+            return _prettyPrint(nest(self.doc2, self.indentation), file, pos)
+        else:
+            # Otherwise, indent the second part
+            (fst_start, fst_end) = rc
+            pos = posinfo(fst_start, fst_end,
+                          _goToColumnOneSpace(fst_start + self.indentation))
+            return _prettyPrint(self.doc2, file, pos)
 
 def punctuate(separator, documents):
     """punctuate(separator, sequence) -> sequence with separator interspersed"""
