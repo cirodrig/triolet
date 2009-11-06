@@ -112,7 +112,7 @@ def printExpression(expr):
     elif isinstance(expr, IfExpr):
         thendoc = nest(printExpression(expr.ifTrue), 2)
         elsedoc = nest(printExpression(expr.ifFalse), 2)
-        stacklist = [ hang('IF', 4, printExpression(expr.argument)),
+        stacklist = [ linewr('IF', 4, printExpression(expr.argument)),
                       thendoc,
                       'ELSE',
                       elsedoc,
@@ -128,7 +128,7 @@ def printExpression(expr):
         for init in arglist[:1]:
             hungarg = init
             for a in arglist[1:]:
-                hungarg = hang(hungarg, 0, a)
+                hungarg = linewr(hungarg, a, 0)
         return parens(space(['CALL', 
                              printExpression(expr.operator), 
                              brackets(hungarg)]))
@@ -137,7 +137,7 @@ def printExpression(expr):
         if expr.body is not None:
             nextLet = printExpression(expr.body)
         assigndoc = space(['LET', printParam(expr.name), '='])
-        exprdoc = parens(hang(assigndoc, 4, printExpression(expr.rhs)))
+        exprdoc = parens(linewr(assigndoc, printExpression(expr.rhs), 4))
         if expr.body is not None:
             exprdoc = abut(exprdoc, '...')
         return stack(exprdoc, nextLet) 
@@ -146,7 +146,7 @@ def printExpression(expr):
         return bracesStack(['LETREC'] + defdoclist + 
                                [nest(printExpression(expr.body), 2)])
     elif isinstance(expr, FunExpr):
-        return brackets(hang('LAMBDA', 2, printFunction(expr.function)))
+        return brackets(linewr('LAMBDA', printFunction(expr.function)))
     elif isinstance(expr, ReturnExpr):
         return parens(space('RETURN', printExpression(expr.argument)))
     else:
@@ -157,12 +157,12 @@ def printIterator(iter):
 
     iter: Iterator to be printed"""
     if isinstance(iter, ForIter):
-        declclause = hang(space(['FOR', printParam(iter.parameter), 'IN']), 
-                          4, printExpression(iter.argument))
+        declclause = linewr(space(['FOR', printParam(iter.parameter), 'IN']), 
+                          printExpression(iter.argument), 4)
         bodynest = nest(printIterator(iter.body), 2)
         return parenStack(declclause, bodynest)
     elif isinstance(iter, IfIter):
-        return parenStack(hang('GUARDIF', 2, printExpression(iter.guard)),
+        return parenStack(linewr('GUARDIF', printExpression(iter.guard), 4),
                             nest(printIterator(iter.body)))
     elif isinstance(iter, DoIter):
         parenStack('DO', nest(printExpression(iter.body)))
@@ -174,8 +174,8 @@ def printFuncDef(fdef):
     """Returns a pretty-printable object for a FunctionDef node in the AST
 
     fdef: FunctionDef to be printed"""
-    return parens(hang( space('DEF', printVar(fdef.name)), 
-                        2, printFunction(fdef.function)))
+    return parens(linewr( space('DEF', printVar(fdef.name)), 
+                        printFunction(fdef.function), 4))
 
 def printFunction(f):
     """Returns a pretty-printable object for a Function node in the AST
@@ -186,7 +186,7 @@ def printFunction(f):
         paramsdoc.append(printParam(p))
     paramsdoc = brackets(abut(punctuate(',', paramsdoc)))
     fdoc = space('FUNCTION', paramsdoc)
-    return parens(hang(fdoc, 2, printExpression(f.body)))
+    return parens(linewr(fdoc, printExpression(f.body)))
 
 def printVar(v):
     """Returns a pretty-printable object for a variable in the AST
@@ -204,7 +204,7 @@ def printParam(p):
         printlist.append(printVar(p.name))
         if p.default is not None:
             printlist.append(space('=', printVar(p.default)))
-        return parens(space(printlist))
+        return space(printlist)
     elif isinstance(p, TupleParam):
         return braces( space([printParam(f) for f in p.fields]))
     else:

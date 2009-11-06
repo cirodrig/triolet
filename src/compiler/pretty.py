@@ -304,6 +304,41 @@ class hang(pretty):
                           _goToColumnOneSpace(fst_start + self.indentation))
             return _prettyPrint(self.doc2, file, pos)
 
+class linewr(pretty):
+    """
+    linewr(doc1, doc2, indent) -> print 'doc1', then, print 'doc2' on the 
+    same line if it fits, and on the next line with a relative indentation 
+    of 'indent' if it does not.
+    """
+
+    def __init__(self, doc1, doc2, indent = 2):
+        self.doc1 = doc1
+        self.indentation = indent
+        self.doc2 = doc2
+
+    def format(self, file, pos):
+        rc = _prettyPrint(self.doc1, file, pos)
+        
+        if rc is None:
+            #if the first part didn't exist, just print
+            return _prettyPrint(self.doc2, file, pos)
+        else:
+            #Otherwise, check to see if there's room on this line
+            (fst_start, fst_end) = rc
+            doc2str =  renderString(self.doc2)
+            if doc2str.count('\n') == 0:
+                strlen = len(doc2str)
+            else:
+                strlen = doc2str.index('\n')
+
+            pos = posinfo(fst_start, fst_end)
+            if strlen < _COLUMNS - fst_end:
+                #It's fine, print on this line
+                _prettyPrint(self.doc2, file, pos)
+            else:
+                #Too big, print on next
+                _prettyPrint(self.doc2, file, pos.addPre(_printNewlineIndent))
+
 def punctuate(separator, documents):
     """punctuate(separator, sequence) -> sequence with separator interspersed"""
 
