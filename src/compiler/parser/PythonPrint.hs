@@ -80,7 +80,7 @@ instance PyShow LabExpr where
 
 showExpr (Variable v)    = showCall' "VariableExpr" [P v]
 showExpr (Literal l)     = showCall' "LiteralExpr" [P l]
-showExpr (Call e args)   = showCall' "CallExpr" [P args]
+showExpr (Call e args)   = showCall' "CallExpr" [P e, P args]
 showExpr (Cond c tr fa)  = showCall' "IfExpr" [P c, P tr, P fa]
 showExpr (Binary op l r) = showCall' "BinaryExpr" [P op, P l, P r]
 showExpr (Unary op arg)  = showCall' "UnaryExpr" [P op, P arg]
