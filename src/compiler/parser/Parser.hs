@@ -449,8 +449,8 @@ medialStatement stmt cont =
            in addLabel $ Letrec <$> fmap (:[]) funBody <*> cont
        Py.Conditional guards els ->
            addLabel $ Let Nothing <$> foldr ifelse (suite els) guards <*> cont
-       Py.Assign dsts src -> addLabel $
-                             expression src <**> assignments (reverse dsts)
+       Py.Assign dsts src -> do src' <- expression src
+                                assignments stmt cont (reverse dsts) src'
        Py.Return me -> -- Process, then discard statements after the return
                        addLabel $ Return <$> maybeExpression me <* cont
        Py.NonLocal xs -> do
@@ -467,18 +467,26 @@ medialStatement stmt cont =
                           <*> suite ifTrue
                           <*> ifFalse
 
-      -- Assign the right-hand side to a sequence of variables by handing
-      -- the value along.  The continuation comes after all assignments.
-      assignments :: [Py.Expr] -> Cvt (LabExpr -> Expr)
-      assignments (v:vs) = do v' <- exprToLHS v
-                              body <- assignments vs
-                              let body' = Lab stmt $ body $ paramToValue v'
-                              return $ \src -> Let (Just v') src body'
-      assignments []     = return $ \(Lab _ e) -> e
-
-      paramToValue (Lab l (Parameter v)) = Lab l (Variable v)
-
       addLabel f = Lab stmt <$> f
+
+-- For each assignment in a multiple-assignment statement,
+-- assign to one variable, then use that variable as the source value
+-- for the next assignment.
+assignments :: Py.Statement
+            -> Cvt LabExpr
+            -> [Py.Expr]
+            -> LabExpr
+            -> Cvt LabExpr
+assignments stmt cont (v:vs) src = do
+  lhs <- exprToLHS v            -- Bind variable
+
+  -- Create an expression to get the value of the variable that was just bound
+  let vExpr = case lhs of Lab l (Parameter v) -> Lab l (Variable v)
+  body <- assignments stmt cont vs vExpr
+  return $ Lab stmt $ Let (Just lhs) src body
+
+-- After all variables are assigned, continue
+assignments _ cont [] _ = cont
 
 finalStatement :: Py.Statement -> Cvt LabExpr
 finalStatement stmt =
