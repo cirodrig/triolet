@@ -174,8 +174,8 @@ def printFuncDef(fdef):
     """Returns a pretty-printable object for a FunctionDef node in the AST
 
     fdef: FunctionDef to be printed"""
-    return parens(linewr( space('DEF', printVar(fdef.name)), 
-                        printFunction(fdef.function), 4))
+    return parens(stack( [space('DEF', printVar(fdef.name)), 
+                        nest(printFunction(fdef.function), 2), '']))
 
 def printFunction(f):
     """Returns a pretty-printable object for a Function node in the AST
@@ -186,7 +186,7 @@ def printFunction(f):
         paramsdoc.append(printParam(p))
     paramsdoc = brackets(abut(punctuate(',', paramsdoc)))
     fdoc = space('FUNCTION', paramsdoc)
-    return parens(linewr(fdoc, printExpression(f.body)))
+    return parens(stack([fdoc, nest(printExpression(f.body), 2)]))
 
 def printVar(v):
     """Returns a pretty-printable object for a variable in the AST
