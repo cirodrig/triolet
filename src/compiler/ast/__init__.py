@@ -4,4 +4,4 @@
 
 import operators
 from ast import *
-from printast import *
+from print_ast import printAst
