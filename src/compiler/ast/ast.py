@@ -77,6 +77,8 @@ class Expression(object):
     def __init__(self, arg):
         raise NotImplementedError, "'Expression' is an abstract base class"
 
+## These expressions are generated from Python expressions (not statements)
+
 class VariableExpr(Expression):
     """A reference to a variable"""
     
@@ -115,18 +117,6 @@ class BinaryExpr(Expression):
         self.left = left
         self.right = right
 
-class IfExpr(Expression):
-    """An if-else expression."""
-
-    def __init__(self, argument, ifTrue, ifFalse, base = ExprInit.default):
-        base.initializeExpr(self)
-        assert isinstance(argument, Expression)
-        assert isinstance(ifTrue, Expression)
-        assert isinstance(ifFalse, Expression)
-        self.argument = argument
-        self.ifTrue = ifTrue
-        self.ifFalse = ifFalse
-
 class ListCompExpr(Expression):
     """A list comprehension."""
 
@@ -155,6 +145,30 @@ class CallExpr(Expression):
         self.operator = operator
         self.arguments = arguments
 
+## These expressions can be generated from either Python expressions
+## or Python statements
+
+class IfExpr(Expression):
+    """An if-else expression."""
+
+    def __init__(self, argument, ifTrue, ifFalse, base = ExprInit.default):
+        base.initializeExpr(self)
+        assert isinstance(argument, Expression)
+        assert isinstance(ifTrue, Expression)
+        assert isinstance(ifFalse, Expression)
+        self.argument = argument
+        self.ifTrue = ifTrue
+        self.ifFalse = ifFalse
+
+class FunExpr(Expression):
+    """A lambda function"""
+    def __init__(self, function, base = ExprInit.default):
+        base.initializeExpr(self)
+        assert isinstance(function, Function)
+        self.function = function
+
+## These expressions are generated from Python statements
+
 class LetExpr(Expression):
     """An assignment expression"""
     def __init__(self, lhs, rhs, body, base = ExprInit.default):
@@ -174,13 +188,6 @@ class LetrecExpr(Expression):
         assert isinstance(body, Expression)
         self.definitions = definitions
         self.body = body
-
-class FunExpr(Expression):
-    """A lambda function"""
-    def __init__(self, function, base = ExprInit.default):
-        base.initializeExpr(self)
-        assert isinstance(function, Function)
-        self.function = function
 
 class ReturnExpr(Expression):
     """A return statement"""
