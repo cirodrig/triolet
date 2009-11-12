@@ -31,6 +31,16 @@ incidence of errors, please adhere to the following coding conventions.
     + Internal methods and members: _camelCase
     + Internal constants:           _UPPERCASE_WITH_UNDERSCORES
 
+* Namespaces
+
+  * Use the "from _ import _" sparingly.  This adds the contents of
+    a module to the current module.  You should only do that if they
+    belong in the current module.
+
+    If you frequently use a member of another module and want it to
+    have a shorter name, then consider defining a local variable for
+    it.
+
 * Error checking and ambiguity
 
   * Do not nest unspecialized data types to a depth of three or more.
