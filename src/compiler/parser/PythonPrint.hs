@@ -1,36 +1,70 @@
 
-{-# LANGUAGE ExistentialQuantification, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module PythonPrint where
 
 import Data.List
+import System.IO.Unsafe(unsafePerformIO)
 import qualified Language.Python.Version3.Syntax.AST as Py
 import ParserSyntax
+import Python
 
--- Pure text formatting
-parenthesize :: ShowS -> ShowS
-parenthesize x = showChar '(' . x . showChar ')'
-brackets :: ShowS -> ShowS
-brackets x = showChar '[' . x . showChar ']'
-braces :: ShowS -> ShowS
-braces x = showChar '{' . x . showChar '}'
-concatList :: [ShowS] -> ShowS
-concatList xs z = foldr ($) z xs
-commas xs = intersperse (showChar ',') xs
-showPythonList xs = brackets $ concatList $ commas $ map pyShow xs
-showPythonTuple xs = parenthesize $ concatList $ commas $ map pyShow xs
-showPythonDict xs = braces $ concatList $ commas $ map showAssoc xs
-    where
-      showAssoc (key, val) = pyShow key . showChar ':' . pyShow val
+data Env =
+    Env
+    { py_RuntimeError       :: PyPtr
+    , py_makePythonVariable :: PyPtr
+    , py_VariableExpr       :: PyPtr
+    , py_LiteralExpr        :: PyPtr
+    , py_UnaryExpr          :: PyPtr
+    , py_BinaryExpr         :: PyPtr
+    , py_Function           :: PyPtr
+    }
 
--- Data that can be marshaled in the form of Python code
-class PyShow a where
-    pyShow :: a -> ShowS
+mkEnv :: IO Env
+mkEnv = do withPyPtr (importModule "ast.parser_ast") $ \mod -> do
+             putStrLn "Here!"
+             builtins <- getBuiltins
+             runtimeError <- getAttr builtins "RuntimeError"
+             makePythonVariable <- getAttr mod "makePythonVariable"
+             function <- getAttr mod "Function"
+             return $ Env { py_makePythonVariable = makePythonVariable
+                          }
 
--- A marshalable object
-data P = forall a. PyShow a => P a
+{-# NOINLINE theEnv #-}
+theEnv :: Env
+theEnv = unsafePerformIO mkEnv
 
-instance PyShow P where pyShow (P x) = pyShow x
+readEnv :: (Env -> PyPtr) -> PyPtr
+readEnv f = f theEnv
 
+instance Python Var where
+    toPython (Var name id) =
+        call2 (readEnv py_makePythonVariable) (AsString name) id
+
+instance Python Literal where
+    toPython (IntLit n)   = toPython n
+    toPython (FloatLit d) = toPython d
+    toPython (BoolLit b)  = toPython b
+    toPython NoneLit      = pyNone
+
+instance Python Py.Op
+
+instance Python Parameter
+
+instance Python Locals
+
+instance Python Stmt
+
+instance Python Expr where
+    toPython (Variable v)    = call1 (readEnv py_VariableExpr) v
+    toPython (Literal l)     = call1 (readEnv py_LiteralExpr) l
+    toPython (Unary op e)    = call2 (readEnv py_UnaryExpr) op e
+    toPython (Binary op e f) = call3 (readEnv py_BinaryExpr) op e f
+
+instance Python Func where
+    toPython (Func name locals params body) =
+        call4 (readEnv py_Function) name locals params body
+
+{-
 -- A string that should be marshaled to a Python string
 newtype PyShowString = PyShowString String
 
@@ -146,3 +180,4 @@ instance PyShow Py.Op where
     pyShow Py.Invert = showPythonString "operators.INVERT"
     pyShow Py.Modulo = showPythonString "operators.MOD"
     pyShow Py.Dot = showPythonString "operators.DOT"
+-}

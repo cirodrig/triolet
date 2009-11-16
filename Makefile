@@ -5,6 +5,7 @@ include mk/programs.mk
 PARSER_TARGET=bin/pyon_parser
 PARSER_HS_SRCS=src/compiler/parser/Main.hs \
 	src/compiler/parser/Parser.hs \
+	src/compiler/parser/Python.hs \
 	src/compiler/parser/PythonPrint.hs \
 	src/compiler/parser/ParserSyntax.hs
 
@@ -48,13 +49,19 @@ src/compiler/ast/operators.o : src/compiler/ast/operators.c
 
 bin/pyon_parser : bin $(PARSER_OBJECTS)
 	$(HC) $(PARSER_OBJECTS) -o $@ \
-		$(HS_X_OPTS) $(HS_X_LIBDIRS) $(HS_X_LIBS) \
+		$(HSCPY_X_OPTS) $(HSCPY_X_LIBDIRS) $(HSCPY_X_LIBS) \
 		-package language-python
 
+src/compiler/parser/Python.hs : src/compiler/parser/Python.hsc
+	hsc2hs $< -o $@ $(HSCPY_C_INCLUDEDIRS)
+
 src/compiler/parser/Main.o : src/compiler/parser/Parser.hi
+src/compiler/parser/Main.o : src/compiler/parser/Python.hi
 src/compiler/parser/Main.o : src/compiler/parser/PythonPrint.hi
-src/compiler/parser/Parser.o : src/compiler/parser/ParserSyntax.hi
+src/compiler/parser/PythonPrint.o : src/compiler/parser/Python.hi
 src/compiler/parser/PythonPrint.o : src/compiler/parser/ParserSyntax.hi
+src/compiler/parser/Parser.o : src/compiler/parser/ParserSyntax.hi
+src/compiler/parser/Python.o : src/compiler/parser/ParserSyntax.hi
 
 # After invoking the compiler,
 # touch interface files to ensure that their timestamps are updated

@@ -35,17 +35,6 @@ data ScopeVar =
 -- fully processed.
 newtype Locals = Locals [ScopeVar]
 
--- Expression are labeled with their original syntax tree equivalent.
--- To save space, we store the original showable object. 
-data Lab a = forall lab. Show lab => Lab lab a
-
-type LabExpr = Lab Expr
-type LabArgument = Lab Expr
-type LabParameter = Lab Parameter
-
-instance Show (Lab a) where
-    showsPrec n (Lab label _) = showsPrec n label
-
 data Literal =
     IntLit !Integer
   | FloatLit !Double
@@ -57,33 +46,35 @@ data Expr =
     Variable Var
   | Literal Literal
     -- Python expressions
-  | Call LabExpr [LabArgument]
-  | Cond LabExpr LabExpr LabExpr -- condition, true, false
-  | Binary !Op LabExpr LabExpr
-  | Unary !Op LabExpr
-  | Lambda Function
-  | Generator Locals (IterFor LabExpr)
-  | ListComp (IterFor LabExpr)
-    -- Python statements
-  | Let (Maybe LabParameter) LabExpr LabExpr
-  | Letrec [Lab FunDef] LabExpr
-  -- | For [LabParameter] LabExpr LabExpr -- parameter, generator, body
-  | Return LabExpr
+  | Unary !Op Expr
+  | Binary !Op Expr Expr
+  | ListComp (IterFor Expr)
+  | Generator Locals (IterFor Expr)
+  | Call Expr [Expr]
+  | Cond Expr Expr Expr -- condition, true, false
+  | Lambda [Parameter] Expr
 
 data IterFor a =
-    IterFor [LabParameter] LabExpr (Comprehension a)
+    IterFor [Parameter] Expr (Comprehension a)
 
 data IterIf a =
-    IterIf LabExpr (Comprehension a)
+    IterIf Expr (Comprehension a)
 
 data Comprehension a =
     CompFor (IterFor a)
   | CompIf (IterIf a)
   | CompBody a
 
+data Stmt =
+    ExprStmt Expr
+  | Assign Parameter Expr
+  | Return Expr
+  | If Expr Suite Suite
+  | DefGroup [Func]
+
+type Suite = [Stmt]
+
 data Parameter =
     Parameter Var
 
-data Function = Function Locals [LabParameter] LabExpr
-
-data FunDef = FunDef Var !Function
+data Func = Func Var Locals [Parameter] Suite

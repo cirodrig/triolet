@@ -4,6 +4,8 @@ where
 
 import Control.Applicative
 import Control.Monad
+import Data.Function
+import Data.List
 import Data.Maybe
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -14,19 +16,25 @@ import qualified Language.Python.Version3.Syntax.AST as Py
 import qualified Language.Python.Version3.Syntax.Pretty as Py
 import ParserSyntax
 
-data Binding = Local { bIsDef :: Bool
-                     , bName  :: Var
-                     }   -- A locally defined variable
-             | Param { bIsDef :: Bool -- Always true
-                     , bName  :: Var
-                     }   -- A variable defined as a function parameter
-             | Nonlocal { bIsDef :: Bool
-                        }       -- A nonlocal variable (indicated by a keyword)
-             | Global { bIsDef :: Bool
-                      }         -- A global variable (indicated by a keyword)
-               deriving(Show)
+data Binding =
+    Local                       -- A locally defined variable
+    { bIsDef :: Bool
+    , bName  :: Var
+    }
+  | Param                       -- A variable defined as a function parameter
+    { bIsDef :: Bool            -- Always true
+    , bName  :: Var
+    }
+  | Nonlocal                    -- A nonlocal variable (indicated by a keyword)
+    { bIsDef :: Bool
+    }
+  | Global                      -- A global variable (indicated by a keyword)
+    { bIsDef :: Bool
+    }
+    deriving(Show)
 
-
+-- A map from variable names to bindings
+type Bindings = Map.Map Py.Ident Binding
 
 -- Given a binding and the set of nonlocal uses and defs, produce scope
 -- information for the variable.
@@ -48,6 +56,8 @@ toScopeVar nonlocalUses nonlocalDefs binding =
                  , hasNonlocalDef = def
                  }
 
+-- Given a binding at global scope, produce scope information.
+-- Global variables are always assumed to be nonlocally used and modified.
 toGlobalScopeVar :: Binding -> Maybe ScopeVar
 toGlobalScopeVar binding =
     case binding
@@ -61,14 +71,16 @@ toGlobalScopeVar binding =
                                  -- defs or uses of the variable
        Global _   -> error "Unexpected 'global' declaration at global scope" 
 
-type Bindings = Map.Map Py.Ident Binding
-
+-- A name resolution scope.
+-- The value of 'finalMembers' is the value of 'currentMembers' after the
+-- scope is fully processed. 
 data Scope =
     Scope { finalMembers   :: Bindings
           , currentMembers :: !Bindings
           }
     deriving(Show)
 
+-- A stack of scopes.
 type Scopes = [Scope]
 
 emptyScope :: Scopes
@@ -95,7 +107,9 @@ identName (Py.Ident name) = name
 -- The process of converting to a Pyon AST.
 --
 -- Keeps track of the current context and thread a name supply through the
--- computation.   throw an error. 
+-- computation.
+-- Computation may fail.
+-- Computation may also lazily generate errors, which are stored in a list.
 
 data CvtState = S NameSupply !Scopes Errors
 
@@ -169,11 +183,13 @@ enter_ isGlobalScope f = Cvt $ \initialState ->
         -- propagate upward
         boundHere = Set.fromList $ mapMaybe localBindingName $ Map.elems final
         usesNotBoundHere = Set.fromList $
-                           Map.elems $
-                           Map.mapMaybeWithKey nonlocalUseName final
+                           map identName $
+                           Map.keys $
+                           Map.filter isNonlocalUse final
         defsNotBoundHere = Set.fromList $
-                           Map.elems $
-                           Map.mapMaybeWithKey nonlocalDefName final
+                           map identName $
+                           Map.keys $
+                           Map.filter isNonlocalDef final
         nonlocalUses = Set.union
                        (localUses `Set.difference` boundHere)
                        usesNotBoundHere
@@ -200,11 +216,11 @@ enter_ isGlobalScope f = Cvt $ \initialState ->
       localBindingName (Param _ v) = Just $ varName v
       localBindingName _           = Nothing
 
-      nonlocalUseName (Py.Ident name) (Nonlocal False) = Just name
-      nonlocalUseName _ _ = Nothing
+      isNonlocalUse (Nonlocal False) = True
+      isNonlocalUse _                = False
 
-      nonlocalDefName (Py.Ident name) (Nonlocal True) = Just name
-      nonlocalDefName _ _ = Nothing
+      isNonlocalDef (Nonlocal True) = True
+      isNonlocalDef _               = False
 
 enter = enter_ False
 enterGlobal = enter_ True
@@ -275,9 +291,11 @@ addLocalBinding name binding =
       addBindingToScope s = s {currentMembers = Map.insert name binding $
                                                 currentMembers s}
 
+-- Indicate that a definition was seen
 signalDef :: Py.Ident -> Cvt ()
 signalDef (Py.Ident nm) = Cvt $ \s -> OK s Set.empty (Set.singleton nm) ()
 
+-- Indicate that a use was seen
 signalUse :: Py.Ident -> Cvt ()
 signalUse (Py.Ident nm) = Cvt $ \s -> OK s (Set.singleton nm) Set.empty ()
 
@@ -364,11 +382,8 @@ use name = do
 -------------------------------------------------------------------------------
 -- Conversions for Python 3 Syntax
 
-expression :: Py.Expr -> Cvt LabExpr
-expression expr = Lab expr <$> expression' expr
-
-expression' :: Py.Expr -> Cvt Expr
-expression' expr =
+expression :: Py.Expr -> Cvt Expr
+expression expr =
     case expr
     of Py.Var ident        -> Variable <$> use ident
        Py.Int n            -> pure (Literal (IntLit n))
@@ -382,7 +397,8 @@ expression' expr =
                                         <*> expression fa
        Py.BinaryOp op l r  -> Binary op <$> expression l <*> expression r
        Py.UnaryOp op arg   -> Unary op <$> expression arg
-       Py.Lambda args body -> Lambda <$> lambda args body
+       Py.Lambda args body -> enter $ \_ -> Lambda <$> traverse parameter args
+                                                   <*> expression body
 
        -- Generators have a separate scope
        Py.Generator comp   -> enter $ \locals ->
@@ -392,7 +408,7 @@ expression' expr =
        _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
 
 -- Convert an optional expression into an expression or None
-maybeExpression :: Maybe Py.Expr -> Cvt LabExpr
+maybeExpression :: Maybe Py.Expr -> Cvt Expr
 maybeExpression (Just e) = expression e
 maybeExpression Nothing  = pure noneExpr
 
@@ -415,28 +431,26 @@ comprehension convertBody comprehension =
       compIter (Just (Py.IterFor cf)) = CompFor <$> compFor cf
       compIter (Just (Py.IterIf ci))  = CompIf <$> compIf ci
 
-noneExpr = Lab ("None") (Literal NoneLit)
+noneExpr = Literal NoneLit
 
-argument :: Py.Argument -> Cvt LabExpr
+argument :: Py.Argument -> Cvt Expr
 argument (Py.ArgExpr e) = expression e
 argument _ = error "Unsupported argument type"
 
-parameter :: Py.Parameter -> Cvt LabParameter
-parameter param = Lab param <$> parameter' param
+parameter :: Py.Parameter -> Cvt Parameter
+parameter (Py.Param name _ _) = Parameter <$> parameterDefinition name
 
-parameter' :: Py.Parameter -> Cvt Parameter
-parameter' (Py.Param name _ _) = Parameter <$> parameterDefinition name
+parameters xs = traverse parameter xs
 
-exprToParam :: Py.Expr -> Cvt LabParameter
-exprToParam e@(Py.Var name) = Lab e . Parameter <$> parameterDefinition name
+exprToParam :: Py.Expr -> Cvt Parameter
+exprToParam e@(Py.Var name) = Parameter <$> parameterDefinition name
 
-exprToLHS :: Py.Expr -> Cvt LabParameter
-exprToLHS e@(Py.Var name) = Lab e . Parameter <$> definition name
+exprToLHS :: Py.Expr -> Cvt Parameter
+exprToLHS e@(Py.Var name) = Parameter <$> definition name
 
--- Convert a statement that is not at the end of a suite.
--- The rest of the suite is passed as a parameter.
-medialStatement :: Py.Statement -> Cvt LabExpr -> Cvt LabExpr
-medialStatement stmt cont =
+-- Convert a single statement.
+singleStatement :: Py.Statement -> Cvt [Stmt]
+singleStatement stmt =
     case stmt
     of {- Py.For targets generator bodyClause _ ->
            let mkFor generator targets bodyClause =
@@ -444,98 +458,77 @@ medialStatement stmt cont =
            in addLabel $ mkFor <$> expression generator
                                <*> traverse exprToLHS targets
                                <*> suite bodyClause -}
-       Py.Fun name args _ body ->
-           let funBody = fmap (Lab stmt) $ funDefinition name args body
-           in addLabel $ Letrec <$> fmap (:[]) funBody <*> cont
        Py.Conditional guards els ->
-           addLabel $ Let Nothing <$> foldr ifelse (suite els) guards <*> cont
-       Py.Assign dsts src -> do src' <- expression src
-                                assignments stmt cont (reverse dsts) src'
+           foldr ifelse (suite els) guards
+       Py.Assign dsts src -> assignments (reverse dsts) (expression src)
        Py.Return me -> -- Process, then discard statements after the return
-                       addLabel $ Return <$> maybeExpression me <* cont
-       Py.NonLocal xs -> do
-         mapM_ nonlocalDeclaration xs
-         cont
-       Py.Global xs -> do
-         mapM_ globalDeclaration xs
-         cont
+                       singleton <$> Return <$> maybeExpression me
+       Py.Pass -> pure []
+       Py.NonLocal xs -> [] <$ mapM_ nonlocalDeclaration xs
+       Py.Global xs -> [] <$ mapM_ globalDeclaration xs
        _ -> fail $ "Cannot translate statement:\n" ++ Py.prettyText stmt
     where
       -- An if-else clause
       ifelse (guard, ifTrue) ifFalse = 
-          addLabel $ Cond <$> expression guard
-                          <*> suite ifTrue
-                          <*> ifFalse
+          singleton <$> (If <$> expression guard <*> suite ifTrue <*> ifFalse)
 
-      addLabel f = Lab stmt <$> f
+      singleton x = [x]
+
+defStatements :: [Py.Statement] -> Cvt Stmt
+defStatements stmts = DefGroup <$> traverse funDefinition stmts
 
 -- For each assignment in a multiple-assignment statement,
 -- assign to one variable, then use that variable as the source value
 -- for the next assignment.
-assignments :: Py.Statement
-            -> Cvt LabExpr
-            -> [Py.Expr]
-            -> LabExpr
-            -> Cvt LabExpr
-assignments stmt cont (v:vs) src = do
-  lhs <- exprToLHS v            -- Bind variable
-
-  -- Create an expression to get the value of the variable that was just bound
-  let vExpr = case lhs of Lab l (Parameter v) -> Lab l (Variable v)
-  body <- assignments stmt cont vs vExpr
-  return $ Lab stmt $ Let (Just lhs) src body
-
--- After all variables are assigned, continue
-assignments _ cont [] _ = cont
-
-finalStatement :: Py.Statement -> Cvt LabExpr
-finalStatement stmt =
-    case stmt
-    of Py.Return me -> addLabel $ Return <$> maybeExpression me
-       Py.Pass -> pure noneExpr
-
-       -- Default: run the expression and return None
-       _ -> medialStatement stmt $ pure noneExpr
+assignments :: [Py.Expr] -> Cvt Expr -> Cvt [Stmt]
+assignments (v:vs) src = (:) <$> assign v src
+                             <*> assignments vs (expression v)
     where
-      addLabel f = Lab stmt <$> f
+      assign v src = Assign <$> exprToLHS v <*> src
+
+assignments [] src = pure []
 
 -- Convert a suite of statements.  A suite must have at least one statement.
-suite :: [Py.Statement] -> Cvt LabExpr
-suite [s]    = finalStatement s
-suite (s:ss) = medialStatement s $ suite ss
+suite :: [Py.Statement] -> Cvt Suite
+suite ss = let groups = groupBy ((==) `on` isDefStatement) ss
+           in concat <$> traverse suiteComponent groups
+    where
+      isDefStatement (Py.Fun {}) = True
+      isDefStatement _           = False
 
-topLevel :: [Py.Statement] -> Cvt [Lab FunDef]
+      suiteComponent ss
+          | isDefStatement (head ss) = fmap (:[]) $ defStatements ss
+          | otherwise                = concat <$> traverse singleStatement ss
+
+topLevel :: [Py.Statement] -> Cvt [Func]
 topLevel xs = traverse topLevelFunction xs
     where
-      topLevelFunction stmt@(Py.Fun name args _ body) = fmap (Lab stmt) $
-          FunDef <$> definition name <*> function args body
+      topLevelFunction stmt@(Py.Fun {}) = funDefinition stmt
       topLevelFunction _ =
           fail "Only function definitions permitted at global scpoe"
 
-lambda :: [Py.Parameter] -> Py.Expr -> Cvt Function
-lambda args body = enter $ \locals ->
-    Function locals <$> traverse parameter args <*> expression body
+funDefinition :: Py.Statement -> Cvt Func
+funDefinition (Py.Fun name params _ body) =
+    mkFunction <$> definition name <*> functionBody
+    where
+      mkFunction name (locals, params, body) = Func name locals params body
 
-function :: [Py.Parameter] -> Py.Suite -> Cvt Function
-function args body = enter $ \locals ->
-    Function locals <$> traverse parameter args <*> suite body
-
-funDefinition :: Py.Ident -> [Py.Parameter] -> Py.Suite -> Cvt FunDef
-funDefinition name params body =
-    FunDef <$> definition name <*> function params body
+      functionBody = enter $ \locals -> (,,) <$> pure locals
+                                             <*> parameters params
+                                             <*> suite body
 
 -------------------------------------------------------------------------------
 -- Exported functions
 
 -- | Convert a Python statement to a Pyon expression.
-convertStatement :: Py.Statement -> NameSupply -> Either [String] LabExpr
+convertStatement :: Py.Statement -> NameSupply -> Either [String] [Stmt]
 convertStatement stmt names =
-    let computation = finalStatement stmt
+    let computation = singleStatement stmt
     in case runAndGetErrors computation names
        of (_, result) -> result
 
 -- | Convert a Python module to a Pyon module.
-convertModule :: Py.Module -> NameSupply -> Either [String] [Lab FunDef]
+convertModule :: Py.Module -> NameSupply -> Either [String] [Func]
 convertModule mod names =
     let computation =
             case mod
@@ -546,7 +539,7 @@ convertModule mod names =
 -- | Parse a Python module.
 parseModule :: String           -- ^ File contents
             -> String           -- ^ File name
-            -> Either [String] [Lab FunDef]
+            -> Either [String] [Func]
 parseModule stream path =
     case Py.parseModule stream path
     of Left err  -> Left [show err]

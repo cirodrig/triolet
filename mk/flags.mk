@@ -71,6 +71,12 @@ CHS_D_RAW_LIBS=
 CPY_D_RAW_LIBS=
 HS_D_RAW_LIBS=
 
+w_X_RAW_LIBS=
+C_X_RAW_LIBS=
+CHS_X_RAW_LIBS=
+CPY_X_RAW_LIBS=python2.4
+HS_X_RAW_LIBS=
+
 # Command-line options
 #  For Python, compile position-independent code
 w_C_RAW_OPTS=
@@ -146,21 +152,21 @@ endef
 # Options
 
 $(foreach ftype, C CHS CPY HS HSCPY, \
- $(foreach stage, C A D, \
+ $(foreach stage, C A D X, \
   $(eval \
    $(call DEFINE_FLAG,$(ftype),$(stage),INCLUDEDIRS, TRANSFORM_INCLUDEDIR))))
 
 $(foreach ftype, C CHS CPY HS HSCPY, \
- $(foreach stage, C A D, \
+ $(foreach stage, C A D X, \
   $(eval \
    $(call DEFINE_FLAG,$(ftype),$(stage),LIBDIRS, TRANSFORM_LIBDIR))))
 
 $(foreach ftype, C CHS CPY HS HSCPY, \
- $(foreach stage, C A D, \
+ $(foreach stage, C A D X, \
   $(eval \
    $(call DEFINE_FLAG,$(ftype),$(stage),LIBS, TRANSFORM_LIB))))
 
 $(foreach ftype, C CHS CPY HS HSCPY, \
- $(foreach stage, C A D, \
+ $(foreach stage, C A D X, \
   $(eval \
    $(call DEFINE_FLAG,$(ftype),$(stage),OPTS, TRANSFORM_ID))))
