@@ -41,7 +41,7 @@ SOEXT=so
 # Header directories
 w_C_RAW_INCLUDEDIRS=
 C_C_RAW_INCLUDEDIRS=
-CHS_C_RAW_INCLUDEDIRS=
+CHS_C_RAW_INCLUDEDIRS=/usr/local/lib/ghc-6.10.4/include
 CPY_C_RAW_INCLUDEDIRS=/usr/include/python2.4
 HS_C_RAW_INCLUDEDIRS=/usr/local/lib/ghc-6.10.4/include
 

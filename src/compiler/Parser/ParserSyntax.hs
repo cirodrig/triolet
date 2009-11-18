@@ -1,6 +1,6 @@
 
 {-# LANGUAGE ExistentialQuantification #-}
-module ParserSyntax where
+module Parser.ParserSyntax where
 
 import qualified Language.Python.Version3.Syntax.AST as Python
 import Language.Python.Version3.Syntax.AST(Ident, AssignOp, Op)
@@ -11,9 +11,9 @@ import Language.Python.Version3.Syntax.AST(Ident, AssignOp, Op)
 data Var =
     Var
     { varName           :: String
-    , varID             :: !Int
+    , varID             :: {-# UNPACK #-} !Int
     }
-    deriving(Show)
+    deriving(Eq, Ord, Show)
 
 -- | A Python variable with scope information.
 --

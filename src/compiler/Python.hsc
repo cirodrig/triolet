@@ -1,5 +1,8 @@
 
-{-# LANGUAGE ForeignFunctionInterface, EmptyDataDecls, DeriveDataTypeable #-}
+{-# LANGUAGE ForeignFunctionInterface,
+             EmptyDataDecls,
+             DeriveDataTypeable,
+             BangPatterns #-}
 module Python where
 
 import Prelude hiding(catch)
@@ -9,11 +12,10 @@ import Control.Exception
 import Data.Typeable
 import Foreign.C.String
 import Foreign.C.Types
+import Foreign.Marshal
 import Foreign.Ptr
-
-data PyObject
-
-type PyPtr = Ptr PyObject
+import Foreign.Storable
+import System.Environment
 
 #include <Python.h>
 
@@ -22,6 +24,18 @@ type Py_ssize_t = CInt
 #else
 type Py_ssize_t = #{type Py_ssize_t}
 #endif
+
+-- Like mapM_, but also keep track of the current array index
+mapMIndex_ :: Monad m => (Int -> a -> m b) -> [a] -> m ()
+mapMIndex_ f xs = go 0 xs
+    where
+      go (!n) (x:xs) = do f n x
+                          go (n + 1) xs
+      go _ []        = return ()
+
+-- Python objects
+data PyObject
+type PyPtr = Ptr PyObject
 
 -- Indicates that an error occurred in the Python runtime.
 -- The Python runtime has the details of the error.
@@ -32,10 +46,34 @@ instance Show PythonErr where
 
 instance Exception PythonErr
 
+foreign import ccall safe "Python.h PyErr_SetString"
+    pyErr_SetString :: PyPtr -> CString -> IO ()
+
+foreign import ccall "Python.h &PyExc_RuntimeError"
+    pyExc_RuntimeError :: Ptr PyPtr
+
+setRuntimeException msg =
+    withCString msg $ \msgPtr -> do
+      exctype <- peek pyExc_RuntimeError
+      pyErr_SetString exctype msgPtr
+
 foreign import ccall safe "Python.h Py_Initialize"
     py_Initialize :: IO ()
 
 initializePython = py_Initialize
+
+foreign import ccall "Python.h Py_Main"
+    py_Main :: CInt -> Ptr CString -> IO CInt
+
+runPythonMain :: IO CInt
+runPythonMain = do
+  -- Create an 'argv' for Python containing [program name, NULL]
+  progname <- getProgName
+  withCString progname $ \str ->
+      allocaArray 2 $ \argvPtr -> do
+          pokeElemOff argvPtr 0 str
+          pokeElemOff argvPtr 1 nullPtr
+          py_Main 1 argvPtr
 
 foreign import ccall safe "Python.h Py_IncRef"
     py_IncRef :: PyPtr -> IO ()
@@ -64,6 +102,22 @@ withPyPtrExc m f = bracketOnError m py_DecRef f
 -- Run code and catch a Python error, if one occurred.
 catchPythonErr :: IO a -> IO (Maybe a)
 catchPythonErr m = liftM Just m `catch` \PythonErr -> return Nothing
+
+convertPythonErrToNull :: IO PyPtr -> IO PyPtr
+convertPythonErrToNull m = m `catch` \PythonErr -> return nullPtr
+
+-- Run some code and, if an exception is detected, marshal it as a
+-- Python exception
+throwAsPythonException :: IO PyPtr -> IO PyPtr
+throwAsPythonException m =
+    -- If a Python exception is active, return NULL.
+    -- If a Haskell exception is active, set a Python exception and
+    -- return NULL.
+    convertPythonErrToNull m `catch` fallbackHandler
+    where
+      fallbackHandler e = do
+        setRuntimeException (show (e :: SomeException))
+        return nullPtr
 
 -- Convert an object to a Python object temporarily, and decrement its
 -- reference count when done.
@@ -143,11 +197,9 @@ setListItem list index obj = do
 instance Python a => Python [a] where
     toPython xs =
         withPyPtrExc (newList $ length xs) $ \list ->
-            let marshalItems index (x:xs) = do
+            let marshalItem index x =
                     safeToPythonExc x $ setListItem list index
-                    marshalItems (index + 1) xs
-                marshalItems _ [] = return ()
-            in do marshalItems 0 xs
+            in do mapMIndex_ marshalItem xs
                   return list
 
 foreign import ccall "Python.h PyTuple_New"
@@ -168,11 +220,9 @@ setTupleItem tup index obj = do
 toPythonTuple :: [IO PyPtr] -> IO PyPtr
 toPythonTuple xs =
     withPyPtrExc (newTuple $ length xs) $ \tuple ->
-        let marshalItems index (x:xs) = do
-              withPyPtrExc x $ setTupleItem tuple index
-              marshalItems (index + 1) xs
-            marshalItems _ [] = return ()
-        in do marshalItems 0 xs
+        let marshalItem index x =
+                withPyPtrExc x $ setTupleItem tuple index
+        in do mapMIndex_ marshalItem xs
               return tuple
 
 foreign import ccall "Python.h PyObject_CallObject"
@@ -216,6 +266,13 @@ foreign import ccall "Python.h PyObject_GetAttrString"
 getAttr :: PyPtr -> String -> IO PyPtr
 getAttr obj name = checkNull $ withCString name $ \cName ->
                    pyObject_GetAttrString obj cName
+
+foreign import ccall "Python.h PyMapping_GetItemString"
+  pyMapping_GetItemString :: PyPtr -> CString -> IO PyPtr
+
+getItemString :: PyPtr -> String -> IO PyPtr
+getItemString obj name = checkNull $ withCString name $ \cName ->
+                         pyMapping_GetItemString obj cName
 
 foreign import ccall "Python.h PyEval_GetBuiltins"
   pyEval_GetBuiltins :: IO PyPtr

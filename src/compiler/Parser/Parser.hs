@@ -1,5 +1,5 @@
 
-module Parser(convertStatement, convertModule, parseModule)
+module Parser.Parser(convertStatement, convertModule, parseModule)
 where
 
 import Control.Applicative
@@ -14,7 +14,7 @@ import Data.Traversable
 import qualified Language.Python.Version3.Parser as Py
 import qualified Language.Python.Version3.Syntax.AST as Py
 import qualified Language.Python.Version3.Syntax.Pretty as Py
-import ParserSyntax
+import Parser.ParserSyntax
 
 data Binding =
     Local                       -- A locally defined variable
