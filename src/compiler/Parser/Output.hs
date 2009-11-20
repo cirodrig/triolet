@@ -20,10 +20,13 @@ import Python
 data Env =
     Env
     { py_RuntimeError       :: PyPtr
+    , py_PythonVariable     :: PyPtr
+    , py_VariableParam      :: PyPtr
     , py_VariableExpr       :: PyPtr
     , py_LiteralExpr        :: PyPtr
     , py_UnaryExpr          :: PyPtr
     , py_BinaryExpr         :: PyPtr
+    , py_ExprStmt           :: PyPtr
     , py_Function           :: PyPtr
     }
 
@@ -32,16 +35,22 @@ mkEnv :: IO Env
 mkEnv = do withPyPtr (importModule "ast.parser_ast") $ \mod -> do
              builtins <- getBuiltins
              runtimeError <- getItemString builtins "RuntimeError"
-             variableExpr <- getAttr mod "PythonVariable"
+             pythonVariable <- getAttr mod "PythonVariable"
+             variableParam <- getAttr mod "VariableParam"
+             variableExpr <- getAttr mod "VariableExpr"
              literalExpr <- getAttr mod "LiteralExpr"
              unaryExpr <- getAttr mod "UnaryExpr"
              binaryExpr <- getAttr mod "BinaryExpr"
+             exprStmt <- getAttr mod "ExprStmt"
              function <- getAttr mod "Function"
              return $ Env { py_RuntimeError = runtimeError
+                          , py_PythonVariable = pythonVariable
+                          , py_VariableParam = variableParam
                           , py_VariableExpr = variableExpr
                           , py_LiteralExpr = literalExpr
                           , py_UnaryExpr = unaryExpr
                           , py_BinaryExpr = binaryExpr
+                          , py_ExprStmt = exprStmt
                           , py_Function = function
                           }
 
@@ -49,10 +58,13 @@ mkEnv = do withPyPtr (importModule "ast.parser_ast") $ \mod -> do
 freeEnv :: Env -> IO ()
 freeEnv env = mapM_ decrefField
               [ py_RuntimeError
+              , py_PythonVariable
+              , py_VariableParam
               , py_VariableExpr
               , py_LiteralExpr
               , py_UnaryExpr
               , py_BinaryExpr
+              , py_ExprStmt
               , py_Function
               ]
     where
@@ -81,6 +93,14 @@ instance MonadState ExportState Export where
 instance MonadIO Export where
     liftIO m = Export $ \_ s -> do x <- m
                                    return (s, x)
+
+runExport :: Export PyPtr -> IO PyPtr
+runExport m =
+    bracket mkEnv freeEnv $ \env ->
+        do (_, p) <- runEx m env initialState
+           return p
+    where
+      initialState = ExportState {stVars = Map.empty}
 
 liftEndo :: (forall a. IO a -> IO a) -> Export a -> Export a
 liftEndo t m = Export $ \r s -> t (runEx m r s)
@@ -127,31 +147,7 @@ savePtrOfVar v ptr = modify savePtr
     where
       savePtr st = st {stVars = Map.insert v ptr (stVars st)}
 
-runExport :: Export PyPtr -> IO PyPtr
-runExport m =
-    bracket mkEnv freeEnv $ \env ->
-        do (_, p) <- runEx m env initialState
-           return p
-    where
-      initialState = ExportState {stVars = Map.empty}
-
 -------------------------------------------------------------------------------
-
--- Return a Python variable corresponding to the current variable.
--- Only one Python variable is created for each variable.
-createPythonVar :: Var -> Export PyPtr
-createPythonVar v = lookupPtrOfVar v >>= check
-    where
-      -- If found, return a new reference
-      check (Just ptr) = do liftIO $ py_IncRef ptr
-                            return ptr
-      -- Otherwise, create a new object
-      check Nothing = do
-        ptr <- call2Ex (readEnv py_VariableExpr)
-                       (Inherit $ AsString $ varName v)
-                       (Inherit $ varID v)
-        savePtrOfVar v ptr
-        return ptr
 
 class Exportable a where
     toPythonEx :: a -> Export PyPtr
@@ -164,6 +160,37 @@ instance Exception a => Exportable (AsRuntimeError a) where
         let message = Inherit $ AsString (show e)
         in call1Ex (readEnv py_RuntimeError) message
 
+-- Inherit the marshaling method for ordinary Python code
+newtype Inherit a = Inherit a
+
+instance Python a => Exportable (Inherit a) where
+    toPythonEx (Inherit x) = liftIO $ toPython x
+
+instance Exportable a => Exportable [a] where
+    toPythonEx xs =
+        liftTrans (withPyPtrExc (newList $ length xs)) $ \list ->
+            let marshalItem index x =
+                    withPyPtrExcEx (toPythonEx x) $ \obj ->
+                        liftIO $ setListItem list index obj
+            in do mapMIndex_ marshalItem xs
+                  return list
+
+-- Return a Python variable corresponding to the current variable.
+-- Only one Python variable is created for each variable.
+createPythonVar :: Var -> Export PyPtr
+createPythonVar v = lookupPtrOfVar v >>= check
+    where
+      -- If found, return a new reference
+      check (Just ptr) = do liftIO $ py_IncRef ptr
+                            return ptr
+      -- Otherwise, create a new object
+      check Nothing = do
+        ptr <- call2Ex (readEnv py_PythonVariable)
+                       (Inherit $ AsString $ varName v)
+                       (Inherit $ varID v)
+        savePtrOfVar v ptr
+        return ptr
+
 -- Convert Haskell tuples to Python tuples
 toPythonTupleEx :: [Export PyPtr] -> Export PyPtr
 toPythonTupleEx xs =
@@ -173,6 +200,14 @@ toPythonTupleEx xs =
                     liftIO $ setTupleItem tuple index obj
         in do mapMIndex_ marshalItem xs
               return tuple
+
+instance (Exportable a, Exportable b) => Exportable (a, b) where
+    toPythonEx (x, y) =
+        toPythonTupleEx [toPythonEx x, toPythonEx y]
+
+instance (Exportable a, Exportable b, Exportable c) => Exportable (a, b, c) where
+    toPythonEx (x, y, z) =
+        toPythonTupleEx [toPythonEx x, toPythonEx y, toPythonEx z]
 
 call1Ex :: Exportable a => Export PyPtr -> a -> Export PyPtr
 call1Ex fun mkx =
@@ -207,20 +242,17 @@ call4Ex fun mkx mky mkz mkw =
         do ptr <- fun
            liftIO $ checkNull $ pyObject_CallObject ptr tuple
 
-newtype Inherit a = Inherit a
-
-instance Python a => Exportable (Inherit a) where
-    toPythonEx (Inherit x) = liftIO $ toPython x
-
-instance Exportable a => Exportable [a] where
-    toPythonEx xs =
-        liftTrans (withPyPtrExc (newList $ length xs)) $ \list ->
-            let marshalItem index x =
-                    withPyPtrExcEx (toPythonEx x) $ \obj ->
-                        liftIO $ setListItem list index obj
-            in do mapMIndex_ marshalItem xs
-                  return list
-
+-- Convert an association list to a Python dictionary
+toPythonDictEx :: (Exportable key, Exportable value) =>
+                  [(key, value)] -> Export PyPtr
+toPythonDictEx xs = do
+  withPyPtrExcEx (liftIO pyDict_New) $ \dict -> do
+      -- For each element, marshal key and value, and put them into the dict
+      forM_ xs $ \(k, v) ->
+          withPyPtrEx (toPythonEx k) $ \kPtr ->
+              withPyPtrEx (toPythonEx v) $ \vPtr ->
+                  liftIO (setDictItem dict kPtr vPtr)
+      return dict
 
 instance Exportable Var where
     toPythonEx v = createPythonVar v
@@ -233,11 +265,20 @@ instance Python Literal where
 
 instance Python Py.Op
 
-instance Exportable Parameter
+instance Exportable Parameter where
+    toPythonEx (Parameter v) = call1Ex (readEnv py_VariableParam) v
 
-instance Exportable Locals
+-- Convert locals to a map from variable to (bool, bool, bool)
+instance Exportable Locals where
+    toPythonEx (Locals vars) = toPythonDictEx (map asAssoc vars)
+        where
+          asAssoc v =
+              ( scopeVar v
+              , Inherit (isParameter v, hasNonlocalUse v, hasNonlocalDef v)
+              )
 
-instance Exportable Stmt
+instance Exportable Stmt where
+    toPythonEx (ExprStmt e) = call1Ex (readEnv py_ExprStmt) e
 
 instance Exportable Expr where
     toPythonEx (Variable v)    = call1Ex (readEnv py_VariableExpr) v
@@ -247,7 +288,7 @@ instance Exportable Expr where
 
 instance Exportable Func where
     toPythonEx (Func name locals params body) =
-        call4Ex (readEnv py_Function) name locals params body
+        call4Ex (readEnv py_Function) name params body locals
 
 {-
 -- A string that should be marshaled to a Python string

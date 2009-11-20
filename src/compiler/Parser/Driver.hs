@@ -17,13 +17,16 @@ import Parser.Output
 
 foreign export ccall parsePyonFile :: CString -> IO PyPtr
 
-parsePyonFile filename_ptr = throwAsPythonException $ do
+-- Read and parse a Pyon file.  On success, a pointer to a Python
+-- object is returned.
+parsePyonFile filename_ptr = rethrowExceptionsInPython $ do
   filename <- peekCString filename_ptr
   parseFile filename
 
+-- Parse a Pyon file.  On parser error, raise an exception.
 parseFile inPath = do
   text <- readFile inPath
   case parseModule text inPath of
-    Left errs  -> runExport $ toPythonEx (Inherit $ AsString $ head errs)
+    Left errs  -> raisePythonExc pyRuntimeError (head errs)
     Right defs -> runExport $ toPythonEx defs
 

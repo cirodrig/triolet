@@ -37,25 +37,78 @@ mapMIndex_ f xs = go 0 xs
 data PyObject
 type PyPtr = Ptr PyObject
 
+-- A class for data that can be marshaled to Python
+class Python a where
+    toPython :: a -> IO PyPtr
+
+-------------------------------------------------------------------------------
+-- Python exceptions
+
 -- Indicates that an error occurred in the Python runtime.
 -- The Python runtime has the details of the error.
-data PythonErr = PythonErr deriving(Typeable)
+data PythonExc = PythonExc deriving(Typeable)
 
-instance Show PythonErr where
-    show PythonErr = "Error in Python runtime"
+instance Show PythonExc where
+    show PythonExc = "Error in Python runtime"
 
-instance Exception PythonErr
+instance Exception PythonExc
 
-foreign import ccall safe "Python.h PyErr_SetString"
-    pyErr_SetString :: PyPtr -> CString -> IO ()
+-- An exception type from Python.
+newtype PythonExcType = PythonExcType {fromPythonExcType :: Ptr PyPtr}
 
 foreign import ccall "Python.h &PyExc_RuntimeError"
     pyExc_RuntimeError :: Ptr PyPtr
 
-setRuntimeException msg =
+pyRuntimeError :: PythonExcType
+pyRuntimeError = PythonExcType pyExc_RuntimeError
+
+foreign import ccall safe "Python.h PyErr_SetString"
+    pyErr_SetString :: PyPtr -> CString -> IO ()
+
+-- Raise an exception in the Python runtime.
+setPythonExc :: PythonExcType -> String -> IO ()
+setPythonExc exctypePtr msg =
     withCString msg $ \msgPtr -> do
-      exctype <- peek pyExc_RuntimeError
+      exctype <- peek (fromPythonExcType exctypePtr)
       pyErr_SetString exctype msgPtr
+
+-- Raise an exception in the Python runtime and return a null pointer.
+-- In many functions, returning a NULL value to the Python runtime
+-- signals that an exception has been raised.
+raisePythonExc :: PythonExcType -> String -> IO PyPtr
+raisePythonExc exctypePtr msg = do
+  setPythonExc exctypePtr msg
+  return nullPtr
+
+-- Run some code and, if an exception is detected, marshal it as a
+-- Python exception.
+rethrowExceptionsInPython :: IO PyPtr -> IO PyPtr
+rethrowExceptionsInPython m =
+    -- If a Python exception is active, return NULL.
+    -- If a Haskell exception is active, set a Python exception and
+    -- return NULL.
+    convertPythonExcToNull m `catch` fallbackHandler
+    where
+      fallbackHandler e =
+          raisePythonExc pyRuntimeError (show (e :: SomeException))
+
+-- Convenience function for running C/Python code that returns a PyPtr.
+--
+-- If the function returns NULL, this means a Python exception was raised, so
+-- throw a Haskell exception.
+checkNull :: IO PyPtr -> IO PyPtr
+checkNull m = do p <- m
+                 if p == nullPtr then throwIO PythonExc else return p
+
+-- Run code and catch a Python error, if one occurred.
+catchPythonExc :: IO a -> IO (Maybe a)
+catchPythonExc m = liftM Just m `catch` \PythonExc -> return Nothing
+
+-- Catch exceptions, and return NULL if an exception was caught.
+convertPythonExcToNull :: IO PyPtr -> IO PyPtr
+convertPythonExcToNull m = m `catch` \PythonExc -> return nullPtr
+
+-------------------------------------------------------------------------------
 
 foreign import ccall safe "Python.h Py_Initialize"
     py_Initialize :: IO ()
@@ -75,19 +128,14 @@ runPythonMain = do
           pokeElemOff argvPtr 1 nullPtr
           py_Main 1 argvPtr
 
+-------------------------------------------------------------------------------
+-- Reference counting
+
 foreign import ccall safe "Python.h Py_IncRef"
     py_IncRef :: PyPtr -> IO ()
 
 foreign import ccall "Python.h Py_DecRef"
     py_DecRef :: PyPtr -> IO ()
-
-checkNull :: IO PyPtr -> IO PyPtr
-checkNull m = do p <- m
-                 if p == nullPtr then throwIO PythonErr else return p
-
--- Data that can be marshaled to Python
-class Python a where
-    toPython :: a -> IO PyPtr
 
 -- Create a temporary Python object reference.
 -- Decrement its reference count when leaving the scope, whether
@@ -99,35 +147,19 @@ withPyPtr m f = bracket m py_DecRef f
 withPyPtrExc :: IO PyPtr -> (PyPtr -> IO a) -> IO a
 withPyPtrExc m f = bracketOnError m py_DecRef f
 
--- Run code and catch a Python error, if one occurred.
-catchPythonErr :: IO a -> IO (Maybe a)
-catchPythonErr m = liftM Just m `catch` \PythonErr -> return Nothing
-
-convertPythonErrToNull :: IO PyPtr -> IO PyPtr
-convertPythonErrToNull m = m `catch` \PythonErr -> return nullPtr
-
--- Run some code and, if an exception is detected, marshal it as a
--- Python exception
-throwAsPythonException :: IO PyPtr -> IO PyPtr
-throwAsPythonException m =
-    -- If a Python exception is active, return NULL.
-    -- If a Haskell exception is active, set a Python exception and
-    -- return NULL.
-    convertPythonErrToNull m `catch` fallbackHandler
-    where
-      fallbackHandler e = do
-        setRuntimeException (show (e :: SomeException))
-        return nullPtr
-
 -- Convert an object to a Python object temporarily, and decrement its
 -- reference count when done.
 safeToPython :: Python a => a -> (PyPtr -> IO b) -> IO b
 safeToPython x f = withPyPtr (toPython x) f
 
+-- Like safeToPython, but only decrement the reference counter on an exception.
 safeToPythonExc :: Python a => a -> (PyPtr -> IO b) -> IO b
 safeToPythonExc x f = withPyPtrExc (toPython x) f
 
-foreign import ccall "Python.h _Py_NoneStruct"
+-------------------------------------------------------------------------------
+-- Python objects
+
+foreign import ccall "Python.h &_Py_NoneStruct"
     py_None :: PyPtr
 
 pyNone :: IO PyPtr
@@ -160,16 +192,16 @@ instance Python Float where
 instance Python Double where
     toPython d = pyFloat_FromDouble $ fromRational $ toRational d
 
-foreign import ccall "Python.h _Py_ZeroStruct"
+foreign import ccall "Python.h &_Py_ZeroStruct"
     py_False :: PyPtr
 
-foreign import ccall "Python.h _Py_TrueStruct"
+foreign import ccall "Python.h &_Py_TrueStruct"
     py_True :: PyPtr
 
 instance Python Bool where
-    toPython b = let bool = if b then py_True else py_False
-                 in do py_IncRef bool
-                       return bool
+    toPython b = do let bool = if b then py_True else py_False
+                    py_IncRef bool
+                    return bool
 
 instance Python AsString where
     toPython (AsString s) = stringToPython s
@@ -191,7 +223,7 @@ foreign import ccall "Python.h PyList_SetItem"
 setListItem :: PyPtr -> Int -> PyPtr -> IO ()
 setListItem list index obj = do
   rc <- pyList_SetItem list (fromIntegral index) obj
-  when (rc == -1) $ throwIO PythonErr
+  when (rc == -1) $ throwIO PythonExc
 
 -- Convert Haskell lists to Python lists
 instance Python a => Python [a] where
@@ -201,6 +233,17 @@ instance Python a => Python [a] where
                     safeToPythonExc x $ setListItem list index
             in do mapMIndex_ marshalItem xs
                   return list
+
+foreign import ccall "Python.h PyDict_New"
+    pyDict_New :: IO PyPtr
+
+foreign import ccall "Python.h PyDict_SetItem"
+    pyDict_SetItem :: PyPtr -> PyPtr -> PyPtr -> IO CInt
+
+setDictItem :: PyPtr -> PyPtr -> PyPtr -> IO ()
+setDictItem dict key val = do
+  rc <- pyDict_SetItem dict key val
+  when (rc /= 0) $ throwIO PythonExc
 
 foreign import ccall "Python.h PyTuple_New"
     pyTuple_New :: Py_ssize_t -> IO PyPtr
@@ -214,7 +257,7 @@ foreign import ccall "Python.h PyTuple_SetItem"
 setTupleItem :: PyPtr -> Int -> PyPtr -> IO ()
 setTupleItem tup index obj = do
   rc <- pyTuple_SetItem tup (fromIntegral index) obj
-  when (rc /= 0) $ throwIO PythonErr
+  when (rc /= 0) $ throwIO PythonExc
 
 -- Convert Haskell tuples to Python tuples
 toPythonTuple :: [IO PyPtr] -> IO PyPtr
@@ -224,6 +267,14 @@ toPythonTuple xs =
                 withPyPtrExc x $ setTupleItem tuple index
         in do mapMIndex_ marshalItem xs
               return tuple
+
+instance (Python a, Python b) => Python (a, b) where
+    toPython (x, y) =
+        toPythonTuple [toPython x, toPython y]
+
+instance (Python a, Python b, Python c) => Python (a, b, c) where
+    toPython (x, y, z) =
+        toPythonTuple [toPython x, toPython y, toPython z]
 
 foreign import ccall "Python.h PyObject_CallObject"
   pyObject_CallObject :: PyPtr -> PyPtr -> IO PyPtr

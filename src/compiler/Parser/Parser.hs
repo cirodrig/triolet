@@ -458,6 +458,8 @@ singleStatement stmt =
            in addLabel $ mkFor <$> expression generator
                                <*> traverse exprToLHS targets
                                <*> suite bodyClause -}
+       Py.StmtExpr e ->
+           singleton . ExprStmt <$> expression e
        Py.Conditional guards els ->
            foldr ifelse (suite els) guards
        Py.Assign dsts src -> assignments (reverse dsts) (expression src)

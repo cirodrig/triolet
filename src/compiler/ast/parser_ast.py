@@ -293,7 +293,8 @@ class Function(object):
         assert isinstance(name, Variable)
         for p in parameters:
             assert isinstance(p, Parameter)
-        assert isinstance(body, Expression)
+        for s in body:
+            assert isinstance(s, Statement)
         self.name = name
         self.parameters = parameters
         self.body = body
