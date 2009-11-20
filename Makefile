@@ -62,7 +62,7 @@ bin/pyon : bin $(PYON_OBJECTS)
 		-package language-python -package mtl
 
 # Dependences
-src/compiler/Main.o : src/compiler/Parser/Driver.hi
+src/compiler/Main.o : src/compiler/Parser/Driver_stub.h
 src/compiler/Main.o : src/compiler/Python.hi
 src/compiler/Parser/Driver_stub.c \
  src/compiler/Parser/Driver_stub.h \
@@ -91,6 +91,7 @@ $(patsubst %.hs, %.o, $(1)) : $(1)
 		$(HS_C_OPTS) $(HS_C_INCLUDEDIRS) \
 		-isrc/compiler
 	touch $(patsubst %.hs, %.hi, $(1))
+
 endef
 
 $(eval $(foreach src, $(PYON_HS_SRCS), $(call PYON_COMPILE_HS_SOURCE, $(src))))

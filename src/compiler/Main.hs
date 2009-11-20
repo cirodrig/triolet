@@ -3,7 +3,6 @@
 module Main where
 
 import System.IO
-import Parser.Driver
 import Python
 
 -- Defined in Main_c.c
