@@ -1,3 +1,12 @@
+{- AST parsing and name resolution.
+--
+-- The exported parsing functions in this module first call the
+-- Language.Python parser, then apply name resolution rules to
+-- assign variables a globally unique ID.
+--
+-- Some errors related to name resolution, such as undefined variable
+-- names and redefinitions of parameter variables, are detected here. 
+-}
 
 module Parser.Parser(convertStatement, convertModule, parseModule)
 where

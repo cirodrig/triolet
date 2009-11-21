@@ -1,4 +1,10 @@
 
+{- This file defines the temporary AST used by the parser.
+-- It is nearly a copy of the Language.Python AST.  Unlike that AST,
+-- variables have globally unique IDs, there is information about
+-- variable scopes, and a few parts of the AST are simplified.
+ -}
+
 {-# LANGUAGE ExistentialQuantification #-}
 module Parser.ParserSyntax where
 

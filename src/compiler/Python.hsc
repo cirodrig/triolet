@@ -1,3 +1,6 @@
+{- Low-level routines for interaction between the Haskell and Python
+-- runtimes.
+-}
 
 {-# LANGUAGE ForeignFunctionInterface,
              EmptyDataDecls,

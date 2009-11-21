@@ -1,4 +1,4 @@
--- The parser driver.  This exports a function to C.
+-- The parser driver.  This exports a function to be called via C.
 -- The driver function takes a filename, reads the file, and returns a
 -- Python object.
 
