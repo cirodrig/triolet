@@ -14,45 +14,99 @@ import Data.List
 import qualified Data.Map as Map
 import System.IO.Unsafe(unsafePerformIO)
 import qualified Language.Python.Version3.Syntax.AST as Py
+
 import Parser.ParserSyntax
 import Python
 
 data Env =
     Env
-    { py_RuntimeError       :: PyPtr
-    , py_PythonVariable     :: PyPtr
-    , py_VariableParam      :: PyPtr
-    , py_VariableExpr       :: PyPtr
-    , py_LiteralExpr        :: PyPtr
-    , py_UnaryExpr          :: PyPtr
-    , py_BinaryExpr         :: PyPtr
-    , py_ExprStmt           :: PyPtr
-    , py_Function           :: PyPtr
+    { py_RuntimeError       :: !PyPtr
+    , py_PythonVariable     :: !PyPtr
+    , py_VariableParam      :: !PyPtr
+    , py_VariableExpr       :: !PyPtr
+    , py_LiteralExpr        :: !PyPtr
+    , py_UnaryExpr          :: !PyPtr
+    , py_BinaryExpr         :: !PyPtr
+    , py_ListCompExpr       :: !PyPtr
+    , py_GeneratorExpr      :: !PyPtr
+    , py_CallExpr           :: !PyPtr
+    , py_CondExpr           :: !PyPtr
+    , py_LambdaExpr         :: !PyPtr
+    , py_ForIter            :: !PyPtr
+    , py_IfIter             :: !PyPtr
+    , py_DoIter             :: !PyPtr
+    , py_ExprStmt           :: !PyPtr
+    , py_AssignStmt         :: !PyPtr
+    , py_ReturnStmt         :: !PyPtr
+    , py_IfStmt             :: !PyPtr
+    , py_DefGroupStmt       :: !PyPtr
+    , py_Function           :: !PyPtr
+    , py_ADD                :: !PyPtr
+    , py_SUB                :: !PyPtr
+    , py_DIV                :: !PyPtr
+    , py_MUL                :: !PyPtr
     }
 
 -- Get references to objects needed on the Python side
 mkEnv :: IO Env
-mkEnv = do withPyPtr (importModule "ast.parser_ast") $ \mod -> do
-             builtins <- getBuiltins
-             runtimeError <- getItemString builtins "RuntimeError"
-             pythonVariable <- getAttr mod "PythonVariable"
-             variableParam <- getAttr mod "VariableParam"
-             variableExpr <- getAttr mod "VariableExpr"
-             literalExpr <- getAttr mod "LiteralExpr"
-             unaryExpr <- getAttr mod "UnaryExpr"
-             binaryExpr <- getAttr mod "BinaryExpr"
-             exprStmt <- getAttr mod "ExprStmt"
-             function <- getAttr mod "Function"
-             return $ Env { py_RuntimeError = runtimeError
-                          , py_PythonVariable = pythonVariable
-                          , py_VariableParam = variableParam
-                          , py_VariableExpr = variableExpr
-                          , py_LiteralExpr = literalExpr
-                          , py_UnaryExpr = unaryExpr
-                          , py_BinaryExpr = binaryExpr
-                          , py_ExprStmt = exprStmt
-                          , py_Function = function
-                          }
+mkEnv =
+    withPyPtr (importModule "ast.parser_ast") $ \mod -> do
+      withPyPtr (importModule "ast.operators") $ \op -> do
+        builtins <- getBuiltins
+
+        runtimeError <- getItemString builtins "RuntimeError"
+        pythonVariable <- getAttr mod "PythonVariable"
+        variableParam <- getAttr mod "VariableParam"
+        variableExpr <- getAttr mod "VariableExpr"
+        literalExpr <- getAttr mod "LiteralExpr"
+        unaryExpr <- getAttr mod "UnaryExpr"
+        binaryExpr <- getAttr mod "BinaryExpr"
+        listCompExpr <- getAttr mod "ListCompExpr"
+        generatorExpr <- getAttr mod "GeneratorExpr"
+        callExpr <- getAttr mod "CallExpr"
+        condExpr <- getAttr mod "CondExpr"
+        lambdaExpr <- getAttr mod "LambdaExpr"
+        forIter <- getAttr mod "ForIter"
+        ifIter <- getAttr mod "IfIter"
+        doIter <- getAttr mod "DoIter"
+        exprStmt <- getAttr mod "ExprStmt"
+        assignStmt <- getAttr mod "AssignStmt"
+        returnStmt <- getAttr mod "ReturnStmt"
+        ifStmt <- getAttr mod "IfStmt"
+        defGroupStmt <- getAttr mod "DefGroupStmt"
+        function <- getAttr mod "Function"
+
+        addOp <- getAttr op "ADD"
+        subOp <- getAttr op "SUB"
+        divOp <- getAttr op "DIV"
+        mulOp <- getAttr op "MUL"
+
+        return $ Env { py_RuntimeError = runtimeError
+                     , py_PythonVariable = pythonVariable
+                     , py_VariableParam = variableParam
+                     , py_VariableExpr = variableExpr
+                     , py_LiteralExpr = literalExpr
+                     , py_UnaryExpr = unaryExpr
+                     , py_BinaryExpr = binaryExpr
+                     , py_ListCompExpr = listCompExpr
+                     , py_GeneratorExpr = generatorExpr
+                     , py_CallExpr = callExpr
+                     , py_CondExpr = condExpr
+                     , py_LambdaExpr = lambdaExpr
+                     , py_ForIter = forIter
+                     , py_IfIter = ifIter
+                     , py_DoIter = doIter
+                     , py_ExprStmt = exprStmt
+                     , py_AssignStmt = assignStmt
+                     , py_ReturnStmt = returnStmt
+                     , py_IfStmt = ifStmt
+                     , py_DefGroupStmt = defGroupStmt
+                     , py_Function = function
+                     , py_ADD = addOp
+                     , py_SUB = subOp
+                     , py_DIV = divOp
+                     , py_MUL = mulOp
+                     }
 
 -- Release the references in an Env
 freeEnv :: Env -> IO ()
@@ -64,8 +118,24 @@ freeEnv env = mapM_ decrefField
               , py_LiteralExpr
               , py_UnaryExpr
               , py_BinaryExpr
+              , py_ListCompExpr
+              , py_GeneratorExpr
+              , py_CallExpr
+              , py_CondExpr
+              , py_LambdaExpr
+              , py_ForIter
+              , py_IfIter
+              , py_DoIter
               , py_ExprStmt
+              , py_AssignStmt
+              , py_ReturnStmt
+              , py_IfStmt
+              , py_DefGroupStmt
               , py_Function
+              , py_ADD
+              , py_SUB
+              , py_DIV
+              , py_MUL
               ]
     where
       decrefField field = py_DecRef (field env)
@@ -149,6 +219,8 @@ savePtrOfVar v ptr = modify savePtr
 
 -------------------------------------------------------------------------------
 
+-- Data types that can be exported to Python, using objects looked up
+-- from 'Env'.
 class Exportable a where
     toPythonEx :: a -> Export PyPtr
 
@@ -205,7 +277,8 @@ instance (Exportable a, Exportable b) => Exportable (a, b) where
     toPythonEx (x, y) =
         toPythonTupleEx [toPythonEx x, toPythonEx y]
 
-instance (Exportable a, Exportable b, Exportable c) => Exportable (a, b, c) where
+instance (Exportable a, Exportable b, Exportable c) =>
+         Exportable (a, b, c) where
     toPythonEx (x, y, z) =
         toPythonTupleEx [toPythonEx x, toPythonEx y, toPythonEx z]
 
@@ -263,7 +336,11 @@ instance Python Literal where
     toPython (BoolLit b)  = toPython b
     toPython NoneLit      = pyNone
 
-instance Python Py.Op
+instance Exportable Py.Op where
+    toPythonEx Py.Plus     = readEnv py_ADD
+    toPythonEx Py.Minus    = readEnv py_SUB
+    toPythonEx Py.Divide   = readEnv py_DIV
+    toPythonEx Py.Multiply = readEnv py_MUL
 
 instance Exportable Parameter where
     toPythonEx (Parameter v) = call1Ex (readEnv py_VariableParam) v
@@ -279,131 +356,35 @@ instance Exportable Locals where
 
 instance Exportable Stmt where
     toPythonEx (ExprStmt e) = call1Ex (readEnv py_ExprStmt) e
+    toPythonEx (Assign lhs e) = call2Ex (readEnv py_AssignStmt) lhs e
+    toPythonEx (Return e) = call1Ex (readEnv py_ReturnStmt) e
+    toPythonEx (If e tr fa) = call3Ex (readEnv py_IfStmt) e tr fa
+    toPythonEx (DefGroup fs) = call1Ex (readEnv py_DefGroupStmt) fs
 
 instance Exportable Expr where
     toPythonEx (Variable v)    = call1Ex (readEnv py_VariableExpr) v
     toPythonEx (Literal l)     = call1Ex (readEnv py_LiteralExpr) (Inherit l)
-    toPythonEx (Unary op e)    = call2Ex (readEnv py_UnaryExpr) (Inherit op) e
-    toPythonEx (Binary op e f) = call3Ex (readEnv py_BinaryExpr) (Inherit op) e f
+    toPythonEx (Unary op e)    = call2Ex (readEnv py_UnaryExpr) op e
+    toPythonEx (Binary op e f) = call3Ex (readEnv py_BinaryExpr) op e f
+    toPythonEx (ListComp it)   = call1Ex (readEnv py_ListCompExpr) it
+    toPythonEx (Generator l f) = call2Ex (readEnv py_GeneratorExpr) f l
+    toPythonEx (Call f xs)     = call2Ex (readEnv py_CallExpr) f xs
+    toPythonEx (Cond c tr fa)  = call3Ex (readEnv py_CondExpr) c tr fa
+    toPythonEx (Lambda ps e)   = call2Ex (readEnv py_LambdaExpr) ps e
+
+instance Exportable (IterFor Expr) where
+    toPythonEx (IterFor [param] e comp) =
+        call3Ex (readEnv py_ForIter) param e comp
+
+instance Exportable (IterIf Expr) where
+    toPythonEx (IterIf e comp) =
+        call2Ex (readEnv py_IfIter) e comp
+
+instance Exportable (Comprehension Expr) where
+    toPythonEx (CompFor iter) = toPythonEx iter
+    toPythonEx (CompIf iter)  = toPythonEx iter
+    toPythonEx (CompBody x)   = call1Ex (readEnv py_DoIter) x
 
 instance Exportable Func where
     toPythonEx (Func name locals params body) =
         call4Ex (readEnv py_Function) name params body locals
-
-{-
--- A string that should be marshaled to a Python string
-newtype PyShowString = PyShowString String
-
-instance PyShow PyShowString where
-    pyShow (PyShowString s) = shows s
-
-showPythonString :: String -> ShowS
-showPythonString = showString
-
-data PyFunCall = PyFunCall String [P]
-
-instance PyShow Int where pyShow n = shows n
-
-instance PyShow a => PyShow [a] where pyShow = showPythonList
-
--- Represent a 'Maybe a' as a possibly-None value
-instance PyShow a => PyShow (Maybe a) where
-    pyShow Nothing  = showPythonString "None"
-    pyShow (Just x) = pyShow x
-
-instance PyShow PyFunCall where pyShow (PyFunCall n xs) = showCall' n xs
-
-showCall :: ShowS -> [P] -> ShowS
-showCall fun args = fun . showPythonTuple args
-
-showCall' :: String -> [P] -> ShowS
-showCall' fun args = showCall (showPythonString fun) args
-
-instance PyShow Var where
-    pyShow v = showCall' "makeVariable"
-               [P $ PyShowString (varName v), P (varID v)]
-
-instance PyShow Locals where
-    pyShow (Locals vs) = showPythonDict $ map toLocal vs
-        where
-          toLocal v = (scopeVar v, BoolLit (hasNonlocalDef v))
-
-instance PyShow Literal where
-    pyShow (IntLit n)   = shows n
-    pyShow (FloatLit d) = shows d
-    pyShow (BoolLit b)  = showPythonString $
-                          case b of {True -> "True"; False -> "False"}
-    pyShow NoneLit      = showPythonString "None"
-
-instance PyShow LabExpr where
-    pyShow (Lab _ e) = showExpr e
-
-showExpr (Variable v)    = showCall' "VariableExpr" [P v]
-showExpr (Literal l)     = showCall' "LiteralExpr" [P l]
-showExpr (Call e args)   = showCall' "CallExpr" [P e, P args]
-showExpr (Cond c tr fa)  = showCall' "IfExpr" [P c, P tr, P fa]
-showExpr (Binary op l r) = showCall' "BinaryExpr" [P op, P l, P r]
-showExpr (Unary op arg)  = showCall' "UnaryExpr" [P op, P arg]
-showExpr (Lambda f)      = showCall' "FunExpr" [P f]
-showExpr (Generator locals gen) = showCall' "GeneratorExpr" [P locals, P gen]
-showExpr (ListComp gen)  = showCall' "ListCompExpr" [P gen]
-showExpr (Let lhs rhs e) = showCall' "LetExpr" [P lhs, P rhs, P e]
-showExpr (Letrec fs e)   = showCall' "LetrecExpr" [P fs, P e]
-showExpr (Return e)      = showCall' "ReturnExpr" [P e]
-
-instance PyShow a => PyShow (Comprehension a) where
-    pyShow (CompFor iter) = pyShow iter
-    pyShow (CompIf iter)  = pyShow iter
-    pyShow (CompBody e)   = showCall' "DoIter" [P e]
-
-instance PyShow a => PyShow (IterFor a) where
-    pyShow (IterFor params e c) = showCall' "ForIter"
-                                  [P (ParamTuple params), P e, P c]
-
-instance PyShow a => PyShow (IterIf a) where
-    pyShow (IterIf e c) = showCall' "IfIter" [P e, P c]
-
-instance PyShow Function where
-    pyShow (Function locals params body) =
-        showCall' "Function" [P params, P body, P locals]
-
-instance PyShow (Lab Parameter) where
-    pyShow (Lab _ (Parameter v)) = showCall' "VariableParam" [P v]
-
-data ParamTuple = ParamTuple [Lab Parameter]
-
-instance PyShow ParamTuple where
-    pyShow (ParamTuple xs) = showPythonTuple xs
-
-instance PyShow (Lab FunDef) where
-    pyShow (Lab _ (FunDef v f)) = showCall' "FunctionDef" [P v, P f]
-
-instance PyShow Py.Op where
-    pyShow Py.And = showPythonString "operators.AND"
-    pyShow Py.Or = showPythonString "operators.OR"
-    pyShow Py.Not = showPythonString "operators.NOT"
-    pyShow Py.Exponent = showPythonString "operators.EXPONENT"
-    pyShow Py.LessThan = showPythonString "operators.LT"
-    pyShow Py.GreaterThan = showPythonString "operators.GT"
-    pyShow Py.Equality = showPythonString "operators.EQ"
-    pyShow Py.GreaterThanEquals = showPythonString "operators.GE"
-    pyShow Py.LessThanEquals = showPythonString "operators.LE"
-    pyShow Py.NotEquals = showPythonString "operators.NE"
-    pyShow Py.In = showPythonString "operators.IN"
-    pyShow Py.Is = showPythonString "operators.IS"
-    pyShow Py.IsNot = showPythonString "operators.ISNOT"
-    pyShow Py.NotIn = showPythonString "operators.NOTIN"
-    pyShow Py.BinaryOr = showPythonString "operators.BITWISE_OR"
-    pyShow Py.Xor = showPythonString "operators.BITWISE_XOR"
-    pyShow Py.BinaryAnd = showPythonString "operators.BITWISE_AND"
-    pyShow Py.ShiftLeft = showPythonString "operators.SHIFT_LEFT"
-    pyShow Py.ShiftRight = showPythonString "operators.SHIFT_RIGHT"
-    pyShow Py.Multiply = showPythonString "operators.MULTIPLY"
-    pyShow Py.Plus = showPythonString "operators.ADD"
-    pyShow Py.Minus = showPythonString "operators.SUB"
-    pyShow Py.Divide = showPythonString "operators.DIV"
-    pyShow Py.FloorDivide = showPythonString "operators.FLOOR_DIV"
-    pyShow Py.Invert = showPythonString "operators.INVERT"
-    pyShow Py.Modulo = showPythonString "operators.MOD"
-    pyShow Py.Dot = showPythonString "operators.DOT"
--}
