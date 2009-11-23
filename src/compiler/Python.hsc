@@ -21,6 +21,7 @@ import Foreign.Ptr
 import Foreign.Storable
 import System.Environment
 
+#undef _POSIX_C_SOURCE // Silences a warning. Defined in HsFFI.h and Python.h
 #include <Python.h>
 
 #if PY_MINOR_VERSION <= 5
