@@ -13,6 +13,7 @@ import Prelude hiding(catch)
 import Control.Monad
 import Control.Exception
 import Data.Typeable
+import Data.Int
 import Foreign.C.String
 import Foreign.C.Types
 import Foreign.Marshal
