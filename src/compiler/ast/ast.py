@@ -16,14 +16,21 @@ class Variable(object):
     def __eq__(self, other):
         raise NotImplementedError, "'Variable' is an abstract base class"
 
-class PythonVariable(Variable):
-    """A variable as determined by Python's name resolution rules"""
+class ANFVariable(Variable):
+    """A single-assignment variable used in ANF."""
 
     def __init__(self, name, identifier):
-        assert isinstance(name, str)
+        """ANFVariable(string-or-None, int) -> new variable
+        Create a new variable.  The variable should have a globally
+        unique ID."""
+        # Variables have an optional name 
+        assert isinstance(name, str) or name is None
         assert isinstance(identifier, int)
         self.name = name
         self.identifier = identifier
+
+    def __eq__(self, other):
+        return self.identifier == other.identifier
 
 ###############################################################################
 # Parameters
@@ -81,7 +88,7 @@ class Expression(object):
 
 class VariableExpr(Expression):
     """A reference to a variable"""
-    
+
     def __init__(self, v, base = ExprInit.default):
         base.initializeExpr(self)
         self.variable = v
@@ -117,22 +124,13 @@ class BinaryExpr(Expression):
         self.left = left
         self.right = right
 
-class ListCompExpr(Expression):
-    """A list comprehension."""
+class StreamExpr(Expression):
+    """A stream expression."""
 
     def __init__(self, iterator, base = ExprInit.default):
         base.initializeExpr(self)
-        assert isinstance(iterator, ForIter) # Must start with 'for'
+        assert isinstance(iterator, Iterator)
         self.iterator = iterator
-
-class GeneratorExpr(Expression):
-    """A generator expression."""
-
-    def __init__(self, iterator, local_scope = None, base = ExprInit.default):
-        base.initializeExpr(self)
-        assert isinstance(iterator, ForIter) # Must start with 'for'
-        self.iterator = iterator
-        self.localScope = local_scope
 
 class CallExpr(Expression):
     """A function call."""
@@ -189,13 +187,6 @@ class LetrecExpr(Expression):
         self.definitions = definitions
         self.body = body
 
-class ReturnExpr(Expression):
-    """A return statement"""
-    def __init__(self, arg, base = ExprInit.default):
-        base.initializeExpr(self)
-        assert isinstance(arg, Expression)
-        self.argument = arg
-
 ###############################################################################
 # Generators
 
@@ -211,12 +202,12 @@ class IterInit(object):
 IterInit.default = IterInit()
 
 class Iterator(object):
-    """An iterating expression in a generator or comprehension."""
+    """A stream expression."""
     def __init__(self):
         raise NotImplementedError, "'Iterator' is an abstract base class"
 
 class ForIter(Iterator):
-    """A 'for' term in an iterator."""
+    """A stream that traverses an object."""
     
     def __init__(self, param, argument, body, base = IterInit.default):
         base.initializeIter(self)
@@ -228,7 +219,7 @@ class ForIter(Iterator):
         self.body = body
 
 class IfIter(Iterator):
-    """An 'if' term in an iterator."""
+    """A stream that traverses a subset of an iteration space."""
 
     def __init__(self, guard, body, base = IterInit.default):
         base.initializeIter(self)
@@ -238,7 +229,7 @@ class IfIter(Iterator):
         self.body = body
 
 class DoIter(Iterator):
-    """The computational component in an iterator."""
+    """A stream that produces a single value."""
 
     def __init__(self, body, base = IterInit.default):
         base.initializeIter(self)
