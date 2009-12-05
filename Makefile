@@ -84,12 +84,6 @@ src/compiler/Parser/Output.o : src/compiler/Python.hi
 src/compiler/Parser/Output.o : src/compiler/Parser/ParserSyntax.hi
 src/compiler/Parser/Parser.o : src/compiler/Parser/ParserSyntax.hi
 
-src/compiler/Main_c.o : src/compiler/Main_c.c
-	$(CC) -c $< -o $@ $(HSCPY_C_OPTS) $(HSCPY_C_INCLUDEDIRS)
-
-src/compiler/Parser/Driver_stub.o : src/compiler/Parser/Driver_stub.c
-	$(CC) -c $< -o $@ $(CHS_C_OPTS) $(CHS_C_INCLUDEDIRS)
-
 # After invoking the compiler,
 # touch interface files to ensure that their timestamps are updated
 define PYON_COMPILE_HS_SOURCE
