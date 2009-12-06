@@ -1,7 +1,7 @@
 
 #include <Python.h>
 #include <HsFFI.h>
-#include "Parser/Driver_stub.h"
+#include "stages/Parser/Driver_stub.h"
 
 /* Python wrapper around parsePyonFile */ 
 static PyObject *

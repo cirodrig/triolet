@@ -44,12 +44,12 @@ src/compiler/ast/operators.o : src/compiler/ast/operators.c
 # Program 'pyon'
 
 PYON_C_SRCS=src/compiler/Main_c.c
-PYON_C_GENERATED_SRCS=src/compiler/Parser/Driver_stub.c
+PYON_C_GENERATED_SRCS=src/compiler/stages/Parser/Driver_stub.c
 PYON_HS_SRCS=src/compiler/Main.hs \
-	src/compiler/Parser/Driver.hs \
-	src/compiler/Parser/Parser.hs \
-	src/compiler/Parser/Output.hs \
-	src/compiler/Parser/ParserSyntax.hs
+	src/compiler/stages/Parser/Driver.hs \
+	src/compiler/stages/Parser/Parser.hs \
+	src/compiler/stages/Parser/Output.hs \
+	src/compiler/stages/Parser/ParserSyntax.hs
 PYON_HS_GENERATED_SRCS=src/compiler/Python.hs
 
 PYON_HS_OBJECTS=$(patsubst %.hs, %.o, $(PYON_HS_SRCS) $(PYON_HS_GENERATED_SRCS))
@@ -64,25 +64,25 @@ bin/pyon : bin $(PYON_OBJECTS)
 src/compiler/Main_c.o : src/compiler/Main_c.c
 	$(CC) -c $< -o $@ $(HSCPY_C_OPTS) $(HSCPY_C_INCLUDEDIRS)
 
-src/compiler/Parser/Driver_stub.o : src/compiler/Parser/Driver_stub.c
+src/compiler/stages/Parser/Driver_stub.o : src/compiler/stages/Parser/Driver_stub.c
 	$(CC) -c $< -o $@ $(CHS_C_OPTS) $(CHS_C_INCLUDEDIRS)
 
 # Dependences
-src/compiler/Main_c.o : src/compiler/Parser/Driver_stub.h
-src/compiler/Main.o : src/compiler/Parser/Driver_stub.h
+src/compiler/Main_c.o : src/compiler/stages/Parser/Driver_stub.h
+src/compiler/Main.o : src/compiler/stages/Parser/Driver_stub.h
 src/compiler/Main.o : src/compiler/Python.hi
-src/compiler/Parser/Driver_stub.c \
- src/compiler/Parser/Driver_stub.h \
- src/compiler/Parser/Driver.o : src/compiler/Python.hi
-src/compiler/Parser/Driver_stub.c \
- src/compiler/Parser/Driver_stub.h \
- src/compiler/Parser/Driver.o : src/compiler/Parser/Parser.hi
-src/compiler/Parser/Driver_stub.c \
- src/compiler/Parser/Driver_stub.h \
- src/compiler/Parser/Driver.o : src/compiler/Parser/Output.hi
-src/compiler/Parser/Output.o : src/compiler/Python.hi
-src/compiler/Parser/Output.o : src/compiler/Parser/ParserSyntax.hi
-src/compiler/Parser/Parser.o : src/compiler/Parser/ParserSyntax.hi
+src/compiler/stages/Parser/Driver_stub.c \
+ src/compiler/stages/Parser/Driver_stub.h \
+ src/compiler/stages/Parser/Driver.o : src/compiler/Python.hi
+src/compiler/stages/Parser/Driver_stub.c \
+ src/compiler/stages/Parser/Driver_stub.h \
+ src/compiler/stages/Parser/Driver.o : src/compiler/stages/Parser/Parser.hi
+src/compiler/stages/Parser/Driver_stub.c \
+ src/compiler/stages/Parser/Driver_stub.h \
+ src/compiler/stages/Parser/Driver.o : src/compiler/stages/Parser/Output.hi
+src/compiler/stages/Parser/Output.o : src/compiler/Python.hi
+src/compiler/stages/Parser/Output.o : src/compiler/stages/Parser/ParserSyntax.hi
+src/compiler/stages/Parser/Parser.o : src/compiler/stages/Parser/ParserSyntax.hi
 
 # After invoking the compiler,
 # touch interface files to ensure that their timestamps are updated
@@ -90,7 +90,7 @@ define PYON_COMPILE_HS_SOURCE
 $(patsubst %.hs, %.o, $(1)) : $(1)
 	$(HC) -c $$< -o $$@ \
 		$(HS_C_OPTS) $(HS_C_INCLUDEDIRS) \
-		-isrc/compiler \
+		-isrc/compiler -isrc/compiler/stages \
 		-package language-python-0.1.1
 	touch $(patsubst %.hs, %.hi, $(1))
 
@@ -98,17 +98,17 @@ endef
 
 $(eval $(call PYON_COMPILE_HS_SOURCE, src/compiler/Main.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE, src/compiler/Python.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE, src/compiler/Parser/Parser.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE, src/compiler/Parser/Output.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE, src/compiler/Parser/ParserSyntax.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE, src/compiler/stages/Parser/Parser.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE, src/compiler/stages/Parser/Output.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE, src/compiler/stages/Parser/ParserSyntax.hs))
 
 # 'Driver.hs' has multiple targets, so it needs a distinct rule
-src/compiler/Parser/Driver_stub.c \
- src/compiler/Parser/Driver_stub.h \
- src/compiler/Parser/Driver.o : src/compiler/Parser/Driver.hs
-	$(HC) -c $< -o src/compiler/Parser/Driver.o \
+src/compiler/stages/Parser/Driver_stub.c \
+ src/compiler/stages/Parser/Driver_stub.h \
+ src/compiler/stages/Parser/Driver.o : src/compiler/stages/Parser/Driver.hs
+	$(HC) -c $< -o src/compiler/stages/Parser/Driver.o \
 		$(HS_C_OPTS) $(HS_C_INCLUDEDIRS) \
-		-isrc/compiler
+		-isrc/compiler -isrc/compiler/stages
 	touch src/compiler/Driver.hi
 
 src/compiler/Python.hs : src/compiler/Python.hsc
