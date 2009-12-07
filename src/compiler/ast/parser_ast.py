@@ -252,7 +252,7 @@ class AssignStmt(Statement):
 
     def __init__(self, lhs, expr):
         assert isinstance(lhs, Parameter)
-        assert isinstance(rhs, Expression)
+        assert isinstance(expr, Expression)
         self.lhs = lhs
         self.expression = expr
 
