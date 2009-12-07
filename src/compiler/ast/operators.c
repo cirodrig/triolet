@@ -10,6 +10,18 @@ static PyMemberDef Pyon_Operator_members[] = {
   {NULL}
 };
 
+static PyMemberDef Pyon_BinaryOp_members[] = {
+  {"name", T_STRING, offsetof(Pyon_BinaryOp, name), READONLY,
+   "Name of operator"},
+  {"display", T_STRING, offsetof(Pyon_BinaryOp, display), READONLY,
+   "Source code appearance of operator"},
+  {"associativity", T_INT, offsetof(Pyon_BinaryOp, associativity), READONLY,
+   "Associativity of operator (ASSOC_NONE, ASSOC_LEFT, or ASSOC_RIGHT)"},
+  {"precedence", T_INT, offsetof(Pyon_BinaryOp, precedence), READONLY,
+   "Operator precedence (higher precedence binds more tightly"},
+  {NULL}
+};
+
 static PyTypeObject Operator_type = {
   PyObject_HEAD_INIT(NULL)
   0,				/* ob_size */
@@ -116,7 +128,7 @@ static PyTypeObject BinaryOp_type = {
   0,				/* tp_iter */
   0,				/* tp_iternext */
   0,				/* tp_methods */
-  Pyon_Operator_members,	/* tp_members */
+  Pyon_BinaryOp_members,	/* tp_members */
   0,				/* tp_getset */
   &Operator_type,		/* tp_base */
   0,				/* tp_dict */
@@ -175,21 +187,21 @@ static PyTypeObject AugmentOp_type = {
  * in decreasing order of priority.
  */
 
-#define BINARY_OP_DECL(name, display) \
-  { PyObject_HEAD_INIT(&BinaryOp_type) name, display }
+#define BINARY_OP_DECL(name, display, prec, assoc)			\
+  { PyObject_HEAD_INIT(&BinaryOp_type) name, display, prec, assoc }
 
 #define BINARY_OP_NAME(name, index) \
   const Pyon_BinaryOpRef pyon_Op_ ## name = &ast_binary_operators[index]
 
 static struct Pyon_BinaryOp ast_binary_operators[] = {
-  BINARY_OP_DECL("POWER", "**"),
-  BINARY_OP_DECL("MUL", "*"),
-  BINARY_OP_DECL("FLOORDIV", "//"),
-  BINARY_OP_DECL("DIV", "/"),
-  BINARY_OP_DECL("MOD", "%"),
-  BINARY_OP_DECL("ADD",  "+"),
-  BINARY_OP_DECL("SUB",  "-"),
-  BINARY_OP_DECL(NULL, NULL)	/* sentinel */
+  BINARY_OP_DECL("POWER", "**", 9, ASSOC_NONE),
+  BINARY_OP_DECL("MUL", "*", 6, ASSOC_LEFT),
+  BINARY_OP_DECL("FLOORDIV", "//", 6, ASSOC_LEFT),
+  BINARY_OP_DECL("DIV", "/", 6, ASSOC_LEFT),
+  BINARY_OP_DECL("MOD", "%", 6, ASSOC_LEFT),
+  BINARY_OP_DECL("ADD",  "+", 5, ASSOC_LEFT),
+  BINARY_OP_DECL("SUB",  "-", 5, ASSOC_LEFT),
+  BINARY_OP_DECL(NULL, NULL, 0, 0)	/* sentinel */
 };
 
 BINARY_OP_NAME(POWER,   0);
@@ -243,6 +255,11 @@ PyMODINIT_FUNC
 initoperators(void)
 {
   PyObject *mod = Py_InitModule("operators", module_methods);
+
+  /* Associativity */
+  PyModule_AddIntConstant(mod, "ASSOC_NONE", ASSOC_NONE);
+  PyModule_AddIntConstant(mod, "ASSOC_LEFT", ASSOC_LEFT);
+  PyModule_AddIntConstant(mod, "ASSOC_RIGHT", ASSOC_RIGHT);
 
   if (!add_type(mod, &Operator_type)) return;
   if (!add_type(mod, &UnaryOp_type)) return;

@@ -61,7 +61,7 @@ def _prParameter(p):
     elif isinstance(p, TupleParam):
         return _tuple(p.fields)
     else:
-        raise TypeError, p
+        raise TypeError, type(p)
 
 def _prExpression(e, precedence):
     """Print an expression in a context with the specified precedence.
@@ -69,14 +69,41 @@ def _prExpression(e, precedence):
     If the expression has precedence lower than or equal to the context,
     then the expression should be parenthesized."""
 
+    # Use this function to put parentheses around the whole expression
+    # if it might be needed
     def parenthesize(local_prec, doc):
         if local_prec <= precedence: return pretty.parens(doc)
         else: return doc
 
-    # Put parentheses around the whole expression if it might be needed
-    
     if isinstance(e, VariableExpr):
         return prettyAst(e.variable)
+    elif isinstance(e, LiteralExpr):
+        lit = e.literal
+        if lit is None:
+            return "None"
+        elif isinstance(lit, (int, float, bool)):
+            return str(lit)
+        else:
+            raise TypeError, "Unexpected literal value"
+    elif isinstance(e, BinaryExpr):
+        prec = e.operator.precedence
+        assoc = e.operator.associativity
+
+        # Choose precedence context for subexpressions
+        if assoc == operators.ASSOC_LEFT:
+            left_prec = prec - 1
+            right_prec = prec
+        elif assoc == operators.ASSOC_RIGHT:
+            left_prec = prec
+            right_prec = prec - 1
+        else:
+            right_prec = left_prec = prec
+
+        # Generate document 
+        left = _prExpression(e.left, left_prec)
+        right = _prExpression(e.right, right_prec)
+        doc = pretty.space([left, e.operator.display, right])
+        return parenthesize(prec, doc)
     elif isinstance(e, ListCompExpr):
         return pretty.brackets(prettyAst(e.iterator))
     elif isinstance(e, GeneratorExpr):
@@ -100,7 +127,7 @@ def _prExpression(e, precedence):
                             _prExpression(e.body, _PREC_LAMBDA)])
         return parenthesize(_PREC_LAMBDA, doc)
     else:
-        raise TypeError, e
+        raise TypeError, type(e)
 
 def _prIterator(i):
     # When body is found, put it here
@@ -123,7 +150,7 @@ def _prIterator(i):
             body = prettyAst(i.body)
             break
         else:
-            raise TypeError, i
+            raise TypeError, type(i)
 
     return pretty.space(body, pretty.space(iteration))
         
@@ -153,7 +180,7 @@ def _prStatement(s):
     elif isinstance(s, DefGroupStmt):
         return pretty.stack(_prFunction(f) for f in s.definitions)
     else:
-        raise TypeError, s
+        raise TypeError, type(s)
 
 def _prFunction(f):
     param_list = _tuple(f.parameters)

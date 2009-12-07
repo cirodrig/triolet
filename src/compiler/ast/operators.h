@@ -2,6 +2,11 @@
 #include <Python.h>
 #include <structmember.h>
 
+/* Associativity for binary operators */
+#define ASSOC_NONE  0
+#define ASSOC_LEFT  1
+#define ASSOC_RIGHT 2
+
 typedef struct Pyon_Operator Pyon_Operator;
 typedef struct Pyon_UnaryOp Pyon_UnaryOp;
 typedef struct Pyon_BinaryOp Pyon_BinaryOp;
@@ -30,6 +35,8 @@ struct Pyon_UnaryOp {
 /* A binary Pyon operator */
 struct Pyon_BinaryOp {
   Pyon_Operator_FIELDS
+  const int precedence;		/* The operator's precedence */
+  const int associativity;	/* The operator's associativity */
 };
 
 /* An augmenting Pyon operator */
