@@ -18,6 +18,8 @@ class Variable(object):
 
 class PythonVariable(Variable):
     """A variable as determined by Python's name resolution rules"""
+    def __eq__(self, other):
+        return (self.name == other.name) and (self.identifier == other.identifier)
 
     def __init__(self, name, identifier):
         assert isinstance(name, str)
