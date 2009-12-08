@@ -19,7 +19,6 @@ import Foreign.C.Types
 import Foreign.Marshal
 import Foreign.Ptr
 import Foreign.Storable
-import System.Environment
 
 #undef _POSIX_C_SOURCE // Silences a warning. Defined in HsFFI.h and Python.h
 #include <Python.h>
@@ -123,15 +122,25 @@ initializePython = py_Initialize
 foreign import ccall "Python.h Py_Main"
     py_Main :: CInt -> Ptr CString -> IO CInt
 
-runPythonMain :: IO CInt
-runPythonMain = do
-  -- Create an 'argv' for Python containing [program name, NULL]
-  progname <- getProgName
-  withCString progname $ \str ->
-      allocaArray 2 $ \argvPtr -> do
-          pokeElemOff argvPtr 0 str
-          pokeElemOff argvPtr 1 nullPtr
-          py_Main 1 argvPtr
+runPythonMain :: String -> [String] -> IO CInt
+runPythonMain progName args = do
+  withCArgs (progName : args) $ \argc argv -> py_Main argc argv
+  where
+    -- Create a C array that acts like argv
+    withCArgs args m =
+      bracket (makeCArgs args) freeCArgs $ \(argc, argv) -> 
+      m (fromIntegral argc) argv
+    
+    makeCArgs args = do 
+      let argc = length args
+      argv <- newArray =<< mapM newCString args
+      return (argc, argv)
+    
+    freeCArgs (argc, argv) = do
+      forM_ [0..argc - 1] $ \n -> freeElem n
+      free argv
+      where
+        freeElem n = free =<< peekElemOff argv n
 
 -------------------------------------------------------------------------------
 -- Reference counting
