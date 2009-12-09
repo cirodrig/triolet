@@ -52,6 +52,7 @@ data Expr =
     Variable Var
   | Literal Literal
     -- Python expressions
+  | Tuple [Expr]
   | Unary !Op Expr
   | Binary !Op Expr Expr
   | ListComp (IterFor Expr)
@@ -82,5 +83,6 @@ type Suite = [Stmt]
 
 data Parameter =
     Parameter Var
+  | TupleParam [Parameter]
 
 data Func = Func Var Locals [Parameter] Suite

@@ -399,6 +399,7 @@ expression expr =
        Py.Float d          -> pure (Literal (FloatLit d))
        Py.Bool b           -> pure (Literal (BoolLit b))
        Py.None             -> pure (Literal NoneLit)
+       Py.Tuple es         -> Tuple <$> traverse expression es
        Py.Call f xs        -> Call <$> expression f <*> traverse argument xs
        Py.CondExpr tr c fa -> let mkCond tr c fa = Cond c tr fa
                               in mkCond <$> expression tr
@@ -456,6 +457,8 @@ exprToParam e@(Py.Var name) = Parameter <$> parameterDefinition name
 
 exprToLHS :: Py.Expr -> Cvt Parameter
 exprToLHS e@(Py.Var name) = Parameter <$> definition name
+exprToLHS e@(Py.Tuple es) = TupleParam <$> traverse exprToLHS es
+exprToLHS _               = error "Unsupported assignment target"
 
 -- Convert a single statement.
 singleStatement :: Py.Statement -> Cvt [Stmt]

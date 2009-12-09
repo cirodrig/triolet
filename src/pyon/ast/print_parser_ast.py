@@ -84,6 +84,8 @@ def _prExpression(e, precedence):
             return str(lit)
         else:
             raise TypeError, "Unexpected literal value"
+    elif isinstance(e, TupleExpr):
+        return _tuple(e.arguments)
     elif isinstance(e, BinaryExpr):
         prec = e.operator.precedence
         assoc = e.operator.associativity

@@ -95,6 +95,14 @@ class LiteralExpr(Expression):
         base.initializeExpr(self)
         self.literal = l
 
+class TupleExpr(Expression):
+    """A tuple construction."""
+    def __init__(self, args, base = ExprInit.default):
+        base.initializeExpr(self)
+        for e in args:
+            assert isinstance(e, Expression)
+        self.arguments = args
+
 class UnaryExpr(Expression):
     """An application of a unary operator to an operand."""
 

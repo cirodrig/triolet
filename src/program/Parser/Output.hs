@@ -23,8 +23,10 @@ data Env =
     { py_RuntimeError       :: !PyPtr
     , py_PythonVariable     :: !PyPtr
     , py_VariableParam      :: !PyPtr
+    , py_TupleParam         :: !PyPtr
     , py_VariableExpr       :: !PyPtr
     , py_LiteralExpr        :: !PyPtr
+    , py_TupleExpr          :: !PyPtr
     , py_UnaryExpr          :: !PyPtr
     , py_BinaryExpr         :: !PyPtr
     , py_ListCompExpr       :: !PyPtr
@@ -57,8 +59,10 @@ mkEnv =
         runtimeError <- getItemString builtins "RuntimeError"
         pythonVariable <- getAttr mod "PythonVariable"
         variableParam <- getAttr mod "VariableParam"
+        tupleParam <- getAttr mod "TupleParam"
         variableExpr <- getAttr mod "VariableExpr"
         literalExpr <- getAttr mod "LiteralExpr"
+        tupleExpr <- getAttr mod "TupleExpr"
         unaryExpr <- getAttr mod "UnaryExpr"
         binaryExpr <- getAttr mod "BinaryExpr"
         listCompExpr <- getAttr mod "ListCompExpr"
@@ -84,8 +88,10 @@ mkEnv =
         return $ Env { py_RuntimeError = runtimeError
                      , py_PythonVariable = pythonVariable
                      , py_VariableParam = variableParam
+                     , py_TupleParam = tupleParam
                      , py_VariableExpr = variableExpr
                      , py_LiteralExpr = literalExpr
+                     , py_TupleExpr = tupleExpr
                      , py_UnaryExpr = unaryExpr
                      , py_BinaryExpr = binaryExpr
                      , py_ListCompExpr = listCompExpr
@@ -114,8 +120,10 @@ freeEnv env = mapM_ decrefField
               [ py_RuntimeError
               , py_PythonVariable
               , py_VariableParam
+              , py_TupleParam
               , py_VariableExpr
               , py_LiteralExpr
+              , py_TupleExpr
               , py_UnaryExpr
               , py_BinaryExpr
               , py_ListCompExpr
@@ -343,7 +351,8 @@ instance Exportable Py.Op where
     toPythonEx Py.Multiply = readEnv py_MUL
 
 instance Exportable Parameter where
-    toPythonEx (Parameter v) = call1Ex (readEnv py_VariableParam) v
+    toPythonEx (Parameter v)   = call1Ex (readEnv py_VariableParam) v
+    toPythonEx (TupleParam es) = call1Ex (readEnv py_TupleParam) es
 
 -- Convert locals to a map from variable to (bool, bool, bool)
 instance Exportable Locals where
@@ -364,6 +373,7 @@ instance Exportable Stmt where
 instance Exportable Expr where
     toPythonEx (Variable v)    = call1Ex (readEnv py_VariableExpr) v
     toPythonEx (Literal l)     = call1Ex (readEnv py_LiteralExpr) (Inherit l)
+    toPythonEx (Tuple es)      = call1Ex (readEnv py_TupleExpr) es
     toPythonEx (Unary op e)    = call2Ex (readEnv py_UnaryExpr) op e
     toPythonEx (Binary op e f) = call3Ex (readEnv py_BinaryExpr) op e f
     toPythonEx (ListComp it)   = call1Ex (readEnv py_ListCompExpr) it
