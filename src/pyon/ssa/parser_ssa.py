@@ -1,4 +1,4 @@
-"""SSA generation module for the Pyon AST"""
+"""SSA generation module for the Pyon Parser AST"""
 
 import pyon.ast
 from pyon.ast.parser_ast import *
@@ -10,7 +10,25 @@ _savedForks = []
 _joinNodeStack = [{}]
 _joinNodeList = []
 
+def convertSSA(obj):
+    "Convert a parser object into SSA format"
+    if isinstance(obj, Module):
+        [_doFunction(f) for f in obj.iterDefinitions]
+    elif isinstance(obj, Function):
+        _doFunction(obj)
+    elif isinstance(obj, Statement):
+        _doStmt(obj)
+    elif isinstance(obj, Expression):
+        _doExpr(obj)
+    elif isinstance(obj, Parameter):
+        pass
+    elif isinstance(obj, PythonVariable):
+        pass
+    else:
+        raise TypeError, type(obj)
+
 def _makeSSA(paramorfunc):
+    "Converts a variable definition to SSA form"
     #Taking advantage of the fact that both parameters and 
     # functions reference their corresponding variable object 
     # with the attribute 'name', even though they do not share 
@@ -30,23 +48,31 @@ def _makeSSA(paramorfunc):
         current, orig = _joinNodeStack[-1][var]
         _joinNodeStack[-1][var] = (var.ssaver, orig)
     else:
-        _joinNodeStack[-1][var] = (var.ssaver, -1)
+        _joinNodeStack[-1][var] = (var.ssaver, oldssaver)
 
     paramorfunc.ssaver = var.ssaver
 
-def _enterFork(joinNode):
+
+def _enterLoop(phiNode):
+    "Setup data structure for entering a looping structure"
+    _enterFork(phiNode)
+    _nextFork()
+
+def _enterFork(phiNode):
+    "Setup internal structures for entering a control flow fork"
     _joinNodeStack.append({})
-    _joinNodeList.append(joinNode)
+    _joinNodeList.append(phiNode)
 
 def _joinFork():
+    "Join the paths of control flow from the most recent fork"
     phiNodes = []
     for var in set(_joinNodeStack[-1].keys()) | set(_savedForks[-1].keys()):
         forkone = -1
         forktwo = -1
         if var in _joinNodeStack[-1].keys():
-            forktwo , _ = _joinNodeStack[-1][var]
+            forktwo , orig = _joinNodeStack[-1][var]
         if var in _savedForks[-1].keys():
-            forkone , _ = _savedForks[-1][var]
+            forkone , orig = _savedForks[-1][var]
         #Create a new SSA version for every assigned variable
         var.ssaver = var.topssaver+1
         var.topssaver = var.ssaver
@@ -61,14 +87,21 @@ def _joinFork():
     _savedForks.pop()
     if len(phiNodes) > 0:
         _joinNodeList[-1].phiNodes = phiNodes
+    _joinNodeList.pop()
 
 def _nextFork():
+    """Save state of the first path of a fork, and begin 
+    recording the second path's state"""
     _savedForks.append(_joinNodeStack[-1])
+    _joinNodeStack[-1] = {}
+    for var in _savedForks[-1].keys():
+        _ , var.ssaver = _savedForks[-1][var]
 
 def _doIter(iter):
+    """Perform SSA evaluation on an iterator"""
     if isinstance(iter, ForIter):
-        #Need to fork SSA at this point
         _doExpr(iter.argument)
+        _enterFork(iter)
         _doIter(iter.body)
     elif isinstance(iter, IfIter):
         _doExpr(guard)
@@ -80,6 +113,7 @@ def _doIter(iter):
         raise TypeError, type(iter)
 
 def _doExpr(expr):
+    """Perform SSA evaluation on an expression"""
     if isinstance(expr, BinaryExpr):
         _doExpr(expr.left)
         _doExpr(expr.right)
@@ -111,10 +145,12 @@ def _doExpr(expr):
 
 
 def _doStmt(stmt):
+    """Perform SSA evaluation on a statement"""
     if isinstance(stmt, ExprStmt):
         _doExpr(stmt.expression)
     elif isinstance(stmt, ReturnStmt):
         _doExpr(stmt.expression)
+        #Need to mark the rest of this path as dead
     elif isinstance(stmt, AssignStmt):
         _doExpr(stmt.expression)
         _makeSSA(stmt.lhs)
@@ -138,8 +174,7 @@ def _doStmt(stmt):
 
 def _doFunction(f):
     """Perform SSA for the parameters and body of a function
-    NOTE: this function assumes that the caller has performed 
-    SSA on the function name variable already"""
+    Does not currently handle function definitions inside conditional structures"""
     _makeSSA(f)
     for p in f.parameters:
         _makeSSA(p)
