@@ -2,24 +2,19 @@
 Building
 --------
 
-We don't have a configure script yet.  Instead, edit the flags in 'mk/flags.mk'
-to suit your system.
-
-The code supports building in a separate build tree.  Start with a clean copy
-of the source tree.  Create a new, empty directory that will contain the build
-tree.  Change to that directory and run 'lndir' with the source tree path as
-its parameter.  This will create a directory tree with symbolic links to your
-source tree.  Then run 'make' in the build directory.
+We don't have a configure script yet.  Instead, edit the flags in 'Makefile'
+to suit your system.  After building, run 'python setup.py install'.  You may
+supply a prefix to this command to change the install path.
 
 Using
 -----
 
 After building, some environment variables need to be set up.
 Add the 'bin' subdirectory to PATH.
-Add the 'src/compiler' subdirectory to PYTHONPATH.
+Ensure the installed python modules are in the python search path.  You may
+need to add the directory containing the Python 'pyon' package to PYTHONPATH.
 
-At this point, you can import and run compiler modules from the Python
-interpreter.
+At this point, you can import and run compiler modules from pyon.
 
 Hacking
 -------

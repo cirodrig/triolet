@@ -1,7 +1,10 @@
 
 #include <Python.h>
 #include <HsFFI.h>
-#include "stages/Parser/Driver_stub.h"
+
+/* Defined in Driver.hs */
+extern PyObject *
+parsePyonFile(const char *);
 
 /* Python wrapper around parsePyonFile */ 
 static PyObject *

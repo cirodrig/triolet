@@ -3,8 +3,8 @@
 
 # TODO: How to convert control flow?
 
-import ast.parser_ast as p_ast
-import ast.anf_ast as a_ast
+import pyon.ast.parser_ast as p_ast
+import pyon.ast.anf_ast as a_ast
 
 def convertModule(module, scope):
     "Convert a module to ANF"

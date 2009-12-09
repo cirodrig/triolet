@@ -5,7 +5,7 @@
 import itertools
 
 # Operator names
-import operators
+import pyon.ast.operators
 
 class Variable(object):
     """Abstract base class of variables"""
@@ -100,7 +100,7 @@ class UnaryExpr(Expression):
 
     def __init__(self, op, arg, base = ExprInit.default):
         base.initializeExpr(self)
-        assert isinstance(op, operators.UnaryOp)
+        assert isinstance(op, pyon.ast.operators.UnaryOp)
         assert isinstance(arg, Expression)
         self.operator = op
         self.argument = arg
@@ -110,7 +110,7 @@ class BinaryExpr(Expression):
 
     def __init__(self, op, left, right, base = ExprInit.default):
         base.initializeExpr(self)
-        assert isinstance(op, operators.BinaryOp)
+        assert isinstance(op, pyon.ast.operators.BinaryOp)
         assert isinstance(left, Expression)
         assert isinstance(right, Expression)
         self.operator = op

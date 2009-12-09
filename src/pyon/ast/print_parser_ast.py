@@ -4,10 +4,9 @@ Pretty-print parser AST data structures.
 
 import sys
 
-import ast
-import operators
-from parser_ast import *
-import pretty
+import pyon.ast.operators as operators
+from pyon.ast.parser_ast import *
+import pyon.pretty as pretty
 
 def prettyAst(obj):
     """Format a parser AST object as a pretty-printable object."""

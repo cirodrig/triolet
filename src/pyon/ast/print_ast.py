@@ -2,9 +2,9 @@
 #
 # Prints the AST in human-readable form
 
-from ast import *
-from pretty import *
-import operators
+from pyon.ast.ast import *
+from pyon.pretty import *
+import pyon.ast.operators
 import sys 
 
 #_indentation = 0

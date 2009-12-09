@@ -5,7 +5,7 @@
 import itertools
 
 # Operator names
-import operators
+import pyon.ast.operators
 
 class Variable(object):
     """Abstract base class of variables"""
@@ -64,10 +64,8 @@ class TupleParam(Parameter):
 class ExprInit(object):
     """An initializer for expression base types"""
 
-    def __init__(self, astHandle = None):
-        """Initialize this expression.
-
-        astHandle: A handle to the original, printable AST data structure."""
+    def __init__(self):
+        """Initialize this expression."""
         pass
 
     def initializeExpr(self, expr):

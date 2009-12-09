@@ -5,7 +5,7 @@ Types are represented by the classes TyVar, FunTy, and TyConApp.  These are
 immutable data types (except for mutation due to unification).
 """
 
-import unification
+import pyon.unification
 
 class TyVar(unification.Variable):
     """

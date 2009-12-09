@@ -1,7 +1,7 @@
 """SSA generation module for the Pyon AST"""
 
-import ast
-from ast.parser_ast import *
+import pyon.ast
+from pyon.ast.parser_ast import *
 
 #Stack of "join nodes": repositories for phi nodes
 

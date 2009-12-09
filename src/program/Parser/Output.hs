@@ -50,8 +50,8 @@ data Env =
 -- Get references to objects needed on the Python side
 mkEnv :: IO Env
 mkEnv =
-    withPyPtr (importModule "ast.parser_ast") $ \mod -> do
-      withPyPtr (importModule "ast.operators") $ \op -> do
+    withPyPtr (importModule "pyon.ast.parser_ast") $ \mod -> do
+      withPyPtr (importModule "pyon.ast.operators") $ \op -> do
         builtins <- getBuiltins
 
         runtimeError <- getItemString builtins "RuntimeError"
