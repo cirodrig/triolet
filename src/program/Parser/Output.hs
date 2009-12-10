@@ -47,6 +47,12 @@ data Env =
     , py_SUB                :: !PyPtr
     , py_DIV                :: !PyPtr
     , py_MUL                :: !PyPtr
+    , py_LT                 :: !PyPtr
+    , py_GT                 :: !PyPtr
+    , py_EQ                 :: !PyPtr
+    , py_GE                 :: !PyPtr
+    , py_LE                 :: !PyPtr
+    , py_NE                 :: !PyPtr
     }
 
 -- Get references to objects needed on the Python side
@@ -84,6 +90,12 @@ mkEnv =
         subOp <- getAttr op "SUB"
         divOp <- getAttr op "DIV"
         mulOp <- getAttr op "MUL"
+        ltOp  <- getAttr op "LT"
+        gtOp  <- getAttr op "GT"
+        eqOp  <- getAttr op "EQ"
+        leOp  <- getAttr op "LE"
+        geOp  <- getAttr op "GE"
+        neOp  <- getAttr op "NE"
 
         return $ Env { py_RuntimeError = runtimeError
                      , py_PythonVariable = pythonVariable
@@ -112,6 +124,12 @@ mkEnv =
                      , py_SUB = subOp
                      , py_DIV = divOp
                      , py_MUL = mulOp
+                     , py_LT = ltOp
+                     , py_GT = gtOp
+                     , py_EQ = eqOp
+                     , py_LE = leOp
+                     , py_GE = geOp
+                     , py_NE = neOp
                      }
 
 -- Release the references in an Env
@@ -144,6 +162,12 @@ freeEnv env = mapM_ decrefField
               , py_SUB
               , py_DIV
               , py_MUL
+              , py_LT
+              , py_GT
+              , py_EQ
+              , py_LE
+              , py_GE
+              , py_NE
               ]
     where
       decrefField field = py_DecRef (field env)
@@ -345,10 +369,16 @@ instance Python Literal where
     toPython NoneLit      = pyNone
 
 instance Exportable Py.Op where
-    toPythonEx Py.Plus     = readEnv py_ADD
-    toPythonEx Py.Minus    = readEnv py_SUB
-    toPythonEx Py.Divide   = readEnv py_DIV
-    toPythonEx Py.Multiply = readEnv py_MUL
+    toPythonEx Py.Plus        = readEnv py_ADD
+    toPythonEx Py.Minus       = readEnv py_SUB
+    toPythonEx Py.Divide      = readEnv py_DIV
+    toPythonEx Py.Multiply    = readEnv py_MUL
+    toPythonEx Py.LessThan    = readEnv py_LT
+    toPythonEx Py.GreaterThan = readEnv py_GT
+    toPythonEx Py.Equality    = readEnv py_EQ
+    toPythonEx Py.GreaterThanEquals = readEnv py_GE
+    toPythonEx Py.LessThanEquals = readEnv py_LE
+    toPythonEx Py.NotEquals   = readEnv py_NE
 
 instance Exportable Parameter where
     toPythonEx (Parameter v)   = call1Ex (readEnv py_VariableParam) v

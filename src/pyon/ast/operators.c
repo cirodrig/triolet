@@ -201,6 +201,12 @@ static struct Pyon_BinaryOp ast_binary_operators[] = {
   BINARY_OP_DECL("MOD", "%", 6, ASSOC_LEFT),
   BINARY_OP_DECL("ADD",  "+", 5, ASSOC_LEFT),
   BINARY_OP_DECL("SUB",  "-", 5, ASSOC_LEFT),
+  BINARY_OP_DECL("LT", "<", 4, ASSOC_NONE),
+  BINARY_OP_DECL("GT", ">", 4, ASSOC_NONE),
+  BINARY_OP_DECL("EQ", "==", 4, ASSOC_NONE),
+  BINARY_OP_DECL("LE", "<=", 4, ASSOC_NONE),
+  BINARY_OP_DECL("GE", ">=", 4, ASSOC_NONE),
+  BINARY_OP_DECL("NE", "!=", 4, ASSOC_NONE),
   BINARY_OP_DECL(NULL, NULL, 0, 0)	/* sentinel */
 };
 
@@ -211,6 +217,12 @@ BINARY_OP_NAME(DIV,     3);
 BINARY_OP_NAME(MOD,     4);
 BINARY_OP_NAME(ADD,     5);
 BINARY_OP_NAME(SUB,     6);
+BINARY_OP_NAME(LT,      7);
+BINARY_OP_NAME(GT,      8);
+BINARY_OP_NAME(EQ,      9);
+BINARY_OP_NAME(LE,      10);
+BINARY_OP_NAME(GE,      11);
+BINARY_OP_NAME(NE,      12);
 
 /*****************************************************************************/
 /* Module initialization */
