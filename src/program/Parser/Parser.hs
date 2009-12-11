@@ -553,10 +553,10 @@ convertModule mod names =
 -- | Parse a Python module.
 parseModule :: String           -- ^ File contents
             -> String           -- ^ File name
-            -> Either [String] [Func]
+            -> Either [String] Module
 parseModule stream path =
     case Py.parseModule stream path
     of Left err  -> Left [show err]
        Right mod -> case convertModule mod [1..]
                     of Left err   -> Left err
-                       Right defs -> Right defs
+                       Right defs -> Right (Module [defs])

@@ -43,6 +43,7 @@ data Env =
     , py_IfStmt             :: !PyPtr
     , py_DefGroupStmt       :: !PyPtr
     , py_Function           :: !PyPtr
+    , py_Module             :: !PyPtr
     , py_ADD                :: !PyPtr
     , py_SUB                :: !PyPtr
     , py_DIV                :: !PyPtr
@@ -85,6 +86,7 @@ mkEnv =
         ifStmt <- getAttr mod "IfStmt"
         defGroupStmt <- getAttr mod "DefGroupStmt"
         function <- getAttr mod "Function"
+        module_ <- getAttr mod "Module"
 
         addOp <- getAttr op "ADD"
         subOp <- getAttr op "SUB"
@@ -120,6 +122,7 @@ mkEnv =
                      , py_IfStmt = ifStmt
                      , py_DefGroupStmt = defGroupStmt
                      , py_Function = function
+                     , py_Module = module_
                      , py_ADD = addOp
                      , py_SUB = subOp
                      , py_DIV = divOp
@@ -158,6 +161,7 @@ freeEnv env = mapM_ decrefField
               , py_IfStmt
               , py_DefGroupStmt
               , py_Function
+              , py_Module
               , py_ADD
               , py_SUB
               , py_DIV
@@ -428,3 +432,6 @@ instance Exportable (Comprehension Expr) where
 instance Exportable Func where
     toPythonEx (Func name locals params body) =
         call4Ex (readEnv py_Function) name params body locals
+
+instance Exportable Module where
+    toPythonEx (Module groups) = call1Ex (readEnv py_Module) groups

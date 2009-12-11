@@ -86,3 +86,5 @@ data Parameter =
   | TupleParam [Parameter]
 
 data Func = Func Var Locals [Parameter] Suite
+
+data Module = Module [[Func]]
