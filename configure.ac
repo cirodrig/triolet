@@ -29,7 +29,6 @@ CIR_PY_INCDIR()
 ## Output
 
 # Force 32-bit build on darwin.
-echo $host
 case $host in
   i?86-*-darwin*) BUILD_32BIT=yes;;
   *)              BUILD_32BIT=no;;
