@@ -1,0 +1,39 @@
+
+# Directories
+BUILDDIR=build/program
+SRCDIR=src/program
+
+## System-dependent programs
+
+CC=@CC@
+HC=ghc
+HSC2HS=hsc2hs
+
+## System-dependent flags
+
+# Compiler and linker flags
+ifeq (@BUILD_32BIT@, yes)
+
+HSC2HS_32BIT_FLAG=--cflag=-m32 --lflag=-m32
+CC_32BIT_FLAG=-m32
+L_32BIT_FLAG=-optl-m32
+
+endif
+
+HSC2HSFLAGS=$(HSC2HS_32BIT_FLAG)
+HCFLAGS=
+CCFLAGS=$(CC_32BIT_FLAG)
+LFLAGS=$(L_32BIT_FLAG)
+
+# Include directories
+INCLUDEDIRS=@cir_hs_libdir@/include \
+	@cir_python_incdir@
+
+# Library directories
+LIBDIRS=
+
+# Haskell package names
+PACKAGES=language-python-0.1.1 mtl
+
+# Library names
+LIBS=python@cir_python_version@

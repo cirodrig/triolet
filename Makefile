@@ -1,6 +1,6 @@
 
 # Platform-specific settings
-include config.linux.mk
+include config.mk
 
 ## Convert parameters into command line option strings
 PACKAGE_FLAGS=$(foreach pkg, $(PACKAGES), -package $(pkg))
