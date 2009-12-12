@@ -1,7 +1,11 @@
 
 # Directories
 BUILDDIR=build/program
-SRCDIR=src/program
+SRCDIR=@srcdir@/src/program
+
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+bindir=@bindir@
 
 ## System-dependent programs
 

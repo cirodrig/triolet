@@ -4,10 +4,10 @@ import os.path
 
 import haskell
 import pyon.ast
+from pyon.data_dir import *
 
 # Find path to source files
-thisDir, _ = os.path.split(__file__)
-testDir = os.path.join(thisDir, 'sources')
+testDir = os.path.join(DATA_DIR, 'testcases')
 
 # Try to compile a test program
 def tryCompile(fname):
