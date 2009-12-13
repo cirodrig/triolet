@@ -11,6 +11,12 @@ AC_CHECK_PROG([HAVE_HSC2HS], [hsc2hs], [yes], [no])
 AC_PATH_PROG([cir_ghc_pkg], [ghc-pkg])
 CIR_PROG_PYTHON()
 CIR_PY_VERSION()
+CIR_HS_VERSION()
+
+case $(($cir_hs_major_version >= 6 && $cir_hs_minor_version >= 10)) in
+  1) ;;
+  *) AC_MSG_ERROR([[need ghc 6.10 or above; found $cir_hs_version]]) ;;
+esac
 
 ## Find paths to libraries
 

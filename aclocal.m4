@@ -67,6 +67,24 @@ AC_MSG_RESULT([[$cir_python_libdir]])
 ])
 
 ########################################
+# CIR_HS_VERSION()
+# Get the version of GHC
+AC_DEFUN([CIR_HS_VERSION],[
+AC_MSG_CHECKING([[version of GHC]])
+cir_hs_version=`ghc --version | sed -En 's/.*version (@<:@0-9@:>@+\.@<:@0-9@:>@@<:@0-9.@:>@*)\n?/\1/p'`
+if test -z "$cir_hs_version"; then
+  AC_MSG_ERROR([[failed to identify GHC version]])
+else
+  AC_MSG_RESULT([[$cir_hs_version]])
+fi
+cir_hs_major_version=`echo $cir_hs_version | sed -En 's/(@<:@0-9@:>@+)\.(@<:@0-9.@:>@+)*/\1/p'`
+cir_hs_minor_version=`echo $cir_hs_version | sed -En 's/@<:@0-9@:>@+\.(@<:@0-9@:>@+)(\..*)?/\1/p'`
+if test -z "$cir_hs_major_version" -o -z "$cir_hs_minor_version"; then
+  AC_MSG_FAILURE([[malformed GHC version string]])
+fi
+])
+
+########################################
 # CIR_HS_LIBDIR()
 # Find the GHC library directory
 AC_DEFUN([CIR_HS_LIBDIR],[
