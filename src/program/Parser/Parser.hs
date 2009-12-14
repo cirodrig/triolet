@@ -410,11 +410,12 @@ expression expr =
        Py.Lambda args body -> enter $ \_ -> Lambda <$> traverse parameter args
                                                    <*> expression body
 
-       -- Generators have a separate scope
+       -- Generators and list comprehensions have a separate scope
        Py.Generator comp   -> enter $ \locals ->
                                   Generator locals <$>
                                   comprehension expression comp
-       Py.ListComp comp    -> ListComp <$> comprehension expression comp
+       Py.ListComp comp    -> enter $ \locals ->
+                                  ListComp <$> comprehension expression comp
        _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
 
 -- Convert an optional expression into an expression or None
