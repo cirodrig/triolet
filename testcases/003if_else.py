@@ -10,6 +10,7 @@ def test_ifelse(a,b):
 		else:
 			c = -b / a
 			positive = False
+		x = c
 	else:
 		return (0, True)
 
