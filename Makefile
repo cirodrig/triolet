@@ -52,6 +52,11 @@ clean :
 
 veryclean : clean
 	find src -name "*~" -exec rm {} ';'
+	rm -f config.log
+	rm -f config.status
+	rm -f config.mk
+	rm -f configure
+	rm -rf autom4te.cache
 	if [ -d bin ]; then rm -f bin/*; rmdir bin; fi
 
 bin :
