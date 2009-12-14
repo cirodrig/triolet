@@ -125,12 +125,15 @@ $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/Output.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/ParserSyntax.hs))
 
 # 'Driver.hs' has multiple targets, so it needs a distinct rule
+# Touch output files to ensure their timestamps are updated
 $(BUILDDIR)/Parser/Driver_stub.c \
  $(BUILDDIR)/Parser/Driver_stub.h \
  $(BUILDDIR)/Parser/Driver.o : $(BUILDDIR)/Parser/Driver.hs
 	$(HC) -c $< -o $(BUILDDIR)/Parser/Driver.o -i$(BUILDDIR) \
 	 $(HS_C_OPTS)
 	touch $(BUILDDIR)/Parser/Driver.hi
+	touch $(BUILDDIR)/Parser/Driver_stub.c
+	touch $(BUILDDIR)/Parser/Driver_stub.h
 
 $(BUILDDIR)/Main_c.o : $(SRCDIR)/Main_c.c
 	$(CC) -c $< -o $@ $(C_C_OPTS)
