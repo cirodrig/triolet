@@ -22,6 +22,16 @@ static PyMemberDef Pyon_BinaryOp_members[] = {
   {NULL}
 };
 
+static PyMemberDef Pyon_UnaryOp_members[] = {
+  {"name", T_STRING, offsetof(Pyon_UnaryOp, name), READONLY,
+   "Name of operator"},
+  {"display", T_STRING, offsetof(Pyon_UnaryOp, display), READONLY,
+   "Source code appearance of operator"},
+  {"precedence", T_INT, offsetof(Pyon_UnaryOp, precedence), READONLY,
+   "Operator precedence (higher precedence binds more tightly"},
+  {NULL}
+};
+
 static PyTypeObject Operator_type = {
   PyObject_HEAD_INIT(NULL)
   0,				/* ob_size */
@@ -90,7 +100,7 @@ static PyTypeObject UnaryOp_type = {
   0,				/* tp_iter */
   0,				/* tp_iternext */
   0,				/* tp_methods */
-  Pyon_Operator_members,	/* tp_members */
+  Pyon_UnaryOp_members,		/* tp_members */
   0,				/* tp_getset */
   &Operator_type,		/* tp_base */
   0,				/* tp_dict */
@@ -194,13 +204,13 @@ static PyTypeObject AugmentOp_type = {
   const Pyon_BinaryOpRef pyon_Op_ ## name = &ast_binary_operators[index]
 
 static struct Pyon_BinaryOp ast_binary_operators[] = {
-  BINARY_OP_DECL("POWER", "**", 9, ASSOC_NONE),
-  BINARY_OP_DECL("MUL", "*", 6, ASSOC_LEFT),
-  BINARY_OP_DECL("FLOORDIV", "//", 6, ASSOC_LEFT),
-  BINARY_OP_DECL("DIV", "/", 6, ASSOC_LEFT),
-  BINARY_OP_DECL("MOD", "%", 6, ASSOC_LEFT),
-  BINARY_OP_DECL("ADD",  "+", 5, ASSOC_LEFT),
-  BINARY_OP_DECL("SUB",  "-", 5, ASSOC_LEFT),
+  BINARY_OP_DECL("POWER", "**", 13, ASSOC_NONE),
+  BINARY_OP_DECL("MUL", "*", 11, ASSOC_LEFT),
+  BINARY_OP_DECL("FLOORDIV", "//", 11, ASSOC_LEFT),
+  BINARY_OP_DECL("DIV", "/", 11, ASSOC_LEFT),
+  BINARY_OP_DECL("MOD", "%", 11, ASSOC_LEFT),
+  BINARY_OP_DECL("ADD",  "+", 10, ASSOC_LEFT),
+  BINARY_OP_DECL("SUB",  "-", 10, ASSOC_LEFT),
   BINARY_OP_DECL("LT", "<", 4, ASSOC_NONE),
   BINARY_OP_DECL("GT", ">", 4, ASSOC_NONE),
   BINARY_OP_DECL("EQ", "==", 4, ASSOC_NONE),
@@ -224,6 +234,19 @@ BINARY_OP_NAME(LE,      10);
 BINARY_OP_NAME(GE,      11);
 BINARY_OP_NAME(NE,      12);
 
+#define UNARY_OP_DECL(name, display, prec)			\
+  { PyObject_HEAD_INIT(&UnaryOp_type) name, display, prec }
+
+#define UNARY_OP_NAME(name, index) \
+  const Pyon_UnaryOpRef pyon_Op_ ## name = &ast_unary_operators[index]
+
+static struct Pyon_UnaryOp ast_unary_operators[] = {
+  UNARY_OP_DECL("NEGATE", "-", 12),
+  UNARY_OP_DECL("COMPLEMENT", "~", 12),
+  UNARY_OP_DECL("NOT", "not", 12),
+  UNARY_OP_DECL(NULL, NULL, 0)	/* sentinel */
+};
+
 /*****************************************************************************/
 /* Module initialization */
 
@@ -231,13 +254,25 @@ BINARY_OP_NAME(NE,      12);
 static int
 add_operators(PyObject *mod)
 {
-  Pyon_BinaryOp *def;
+  {
+    Pyon_BinaryOp *def;
 
-  for (def = &ast_binary_operators[0]; def->name; def++) {
-    /* Increment the reference count, so that the reference count will
-     * never fall to zero. */
-    Py_INCREF(def);
-    PyModule_AddObject(mod, (char *)def->name, (PyObject *)def);
+    for (def = &ast_binary_operators[0]; def->name; def++) {
+      /* Increment the reference count, so that the reference count will
+       * never fall to zero. */
+      Py_INCREF(def);
+      PyModule_AddObject(mod, (char *)def->name, (PyObject *)def);
+    }
+  }
+  {
+    Pyon_UnaryOp *def;
+
+    for (def = &ast_unary_operators[0]; def->name; def++) {
+      /* Increment the reference count, so that the reference count will
+       * never fall to zero. */
+      Py_INCREF(def);
+      PyModule_AddObject(mod, (char *)def->name, (PyObject *)def);
+    }
   }
 
   return 1;

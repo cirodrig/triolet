@@ -3,6 +3,7 @@
              TypeSynonymInstances,
              FlexibleInstances,
              Rank2Types #-}
+{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 module Parser.Output
     (Exportable(..), runExport, Inherit(Inherit))
 where
@@ -14,6 +15,7 @@ import Data.List
 import qualified Data.Map as Map
 import System.IO.Unsafe(unsafePerformIO)
 import qualified Language.Python.Version3.Syntax.AST as Py
+import qualified Language.Python.Version3.Syntax.Pretty as Py
 
 import Parser.ParserSyntax
 import Python
@@ -47,13 +49,19 @@ data Env =
     , py_ADD                :: !PyPtr
     , py_SUB                :: !PyPtr
     , py_DIV                :: !PyPtr
+    , py_FLOORDIV           :: !PyPtr
     , py_MUL                :: !PyPtr
+    , py_MOD                :: !PyPtr
+    , py_POWER              :: !PyPtr
     , py_LT                 :: !PyPtr
     , py_GT                 :: !PyPtr
     , py_EQ                 :: !PyPtr
     , py_GE                 :: !PyPtr
     , py_LE                 :: !PyPtr
     , py_NE                 :: !PyPtr
+    , py_NEGATE             :: !PyPtr
+    , py_COMPLEMENT         :: !PyPtr
+    , py_NOT                :: !PyPtr
     }
 
 -- Get references to objects needed on the Python side
@@ -91,13 +99,19 @@ mkEnv =
         addOp <- getAttr op "ADD"
         subOp <- getAttr op "SUB"
         divOp <- getAttr op "DIV"
+        floordivOp <- getAttr op "FLOORDIV"
         mulOp <- getAttr op "MUL"
+        modOp <- getAttr op "MOD"
+        powerOp <- getAttr op "POWER"
         ltOp  <- getAttr op "LT"
         gtOp  <- getAttr op "GT"
         eqOp  <- getAttr op "EQ"
         leOp  <- getAttr op "LE"
         geOp  <- getAttr op "GE"
         neOp  <- getAttr op "NE"
+        negateOp <- getAttr op "NEGATE"
+        complementOp <- getAttr op "COMPLEMENT"
+        notOp <- getAttr op "NOT"
 
         return $ Env { py_RuntimeError = runtimeError
                      , py_PythonVariable = pythonVariable
@@ -126,13 +140,19 @@ mkEnv =
                      , py_ADD = addOp
                      , py_SUB = subOp
                      , py_DIV = divOp
+                     , py_FLOORDIV = floordivOp
                      , py_MUL = mulOp
+                     , py_MOD = modOp
+                     , py_POWER = powerOp
                      , py_LT = ltOp
                      , py_GT = gtOp
                      , py_EQ = eqOp
                      , py_LE = leOp
                      , py_GE = geOp
                      , py_NE = neOp
+                     , py_NEGATE = negateOp
+                     , py_COMPLEMENT = complementOp
+                     , py_NOT = notOp
                      }
 
 -- Release the references in an Env
@@ -165,13 +185,19 @@ freeEnv env = mapM_ decrefField
               , py_ADD
               , py_SUB
               , py_DIV
+              , py_FLOORDIV
               , py_MUL
+              , py_MOD
+              , py_POWER
               , py_LT
               , py_GT
               , py_EQ
               , py_LE
               , py_GE
               , py_NE
+              , py_NEGATE
+              , py_COMPLEMENT
+              , py_NOT
               ]
     where
       decrefField field = py_DecRef (field env)
@@ -377,12 +403,26 @@ instance Exportable Py.Op where
     toPythonEx Py.Minus       = readEnv py_SUB
     toPythonEx Py.Divide      = readEnv py_DIV
     toPythonEx Py.Multiply    = readEnv py_MUL
+    toPythonEx Py.Modulo      = readEnv py_MOD
+    toPythonEx Py.FloorDivide = readEnv py_FLOORDIV
+    toPythonEx Py.Exponent    = readEnv py_POWER
     toPythonEx Py.LessThan    = readEnv py_LT
     toPythonEx Py.GreaterThan = readEnv py_GT
     toPythonEx Py.Equality    = readEnv py_EQ
     toPythonEx Py.GreaterThanEquals = readEnv py_GE
     toPythonEx Py.LessThanEquals = readEnv py_LE
     toPythonEx Py.NotEquals   = readEnv py_NE
+    toPythonEx op             = error $ "Cannot translate operator to Python: " ++ Py.prettyText op
+
+-- Language-Python uses the same names for unary and binary operators.
+-- This newtype wrapper is used to disambiguate the 'Exportable' instance.
+newtype AsUnary = AsUnary Py.Op
+
+instance Exportable AsUnary where
+    toPythonEx (AsUnary Py.Minus)  = readEnv py_NEGATE
+    toPythonEx (AsUnary Py.Invert) = readEnv py_COMPLEMENT
+    toPythonEx (AsUnary Py.Not)    = readEnv py_NOT
+    toPythonEx (AsUnary op)        = error $ "Cannot translate operator to Python: " ++ Py.prettyText op
 
 instance Exportable Parameter where
     toPythonEx (Parameter v)   = call1Ex (readEnv py_VariableParam) v
@@ -408,7 +448,7 @@ instance Exportable Expr where
     toPythonEx (Variable v)    = call1Ex (readEnv py_VariableExpr) v
     toPythonEx (Literal l)     = call1Ex (readEnv py_LiteralExpr) (Inherit l)
     toPythonEx (Tuple es)      = call1Ex (readEnv py_TupleExpr) es
-    toPythonEx (Unary op e)    = call2Ex (readEnv py_UnaryExpr) op e
+    toPythonEx (Unary op e)    = call2Ex (readEnv py_UnaryExpr) (AsUnary op) e
     toPythonEx (Binary op e f) = call3Ex (readEnv py_BinaryExpr) op e f
     toPythonEx (ListComp it)   = call1Ex (readEnv py_ListCompExpr) it
     toPythonEx (Generator l f) = call2Ex (readEnv py_GeneratorExpr) f l
@@ -419,6 +459,9 @@ instance Exportable Expr where
 instance Exportable (IterFor Expr) where
     toPythonEx (IterFor [param] e comp) =
         call3Ex (readEnv py_ForIter) param e comp
+
+    toPythonEx (IterFor _ e comp) =
+        error "Cannot translate 'for' generator to Python"
 
 instance Exportable (IterIf Expr) where
     toPythonEx (IterIf e comp) =

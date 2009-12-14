@@ -30,6 +30,7 @@ struct Pyon_Operator {
 /* A unary Pyon operator */
 struct Pyon_UnaryOp {
   Pyon_Operator_FIELDS
+  const int precedence;		/* The operator's precedence */
 };
 
 /* A binary Pyon operator */
