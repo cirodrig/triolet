@@ -46,6 +46,9 @@ data Env =
     , py_DefGroupStmt       :: !PyPtr
     , py_Function           :: !PyPtr
     , py_Module             :: !PyPtr
+    , py_BITWISEAND         :: !PyPtr
+    , py_BITWISEOR          :: !PyPtr
+    , py_BITWISEXOR         :: !PyPtr
     , py_ADD                :: !PyPtr
     , py_SUB                :: !PyPtr
     , py_DIV                :: !PyPtr
@@ -96,6 +99,9 @@ mkEnv =
         function <- getAttr mod "Function"
         module_ <- getAttr mod "Module"
 
+        bitwiseandOp <- getAttr op "BITWISEAND"
+        bitwiseorOp <- getAttr op "BITWISEOR"
+        bitwisexorOp <- getAttr op "BITWISEXOR"
         addOp <- getAttr op "ADD"
         subOp <- getAttr op "SUB"
         divOp <- getAttr op "DIV"
@@ -137,6 +143,9 @@ mkEnv =
                      , py_DefGroupStmt = defGroupStmt
                      , py_Function = function
                      , py_Module = module_
+                     , py_BITWISEAND = bitwiseandOp
+                     , py_BITWISEOR = bitwiseorOp
+                     , py_BITWISEXOR = bitwisexorOp
                      , py_ADD = addOp
                      , py_SUB = subOp
                      , py_DIV = divOp
@@ -182,6 +191,9 @@ freeEnv env = mapM_ decrefField
               , py_DefGroupStmt
               , py_Function
               , py_Module
+              , py_BITWISEAND
+              , py_BITWISEOR
+              , py_BITWISEXOR
               , py_ADD
               , py_SUB
               , py_DIV
@@ -404,6 +416,9 @@ instance Exportable Py.Op where
     toPythonEx Py.GreaterThanEquals = readEnv py_GE
     toPythonEx Py.LessThanEquals = readEnv py_LE
     toPythonEx Py.NotEquals   = readEnv py_NE
+    toPythonEx Py.BinaryAnd   = readEnv py_BITWISEAND
+    toPythonEx Py.BinaryOr    = readEnv py_BITWISEOR
+    toPythonEx Py.Xor         = readEnv py_BITWISEXOR
     toPythonEx op             = error $ "Cannot translate operator to Python: " ++ Py.prettyText op
 
 -- Language-Python uses the same names for unary and binary operators.

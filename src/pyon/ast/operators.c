@@ -211,6 +211,9 @@ static struct Pyon_BinaryOp ast_binary_operators[] = {
   BINARY_OP_DECL("MOD", "%", 11, ASSOC_LEFT),
   BINARY_OP_DECL("ADD",  "+", 10, ASSOC_LEFT),
   BINARY_OP_DECL("SUB",  "-", 10, ASSOC_LEFT),
+  BINARY_OP_DECL("BITWISEAND", "&", 8, ASSOC_LEFT),
+  BINARY_OP_DECL("BITWISEOR", "|", 6, ASSOC_LEFT),
+  BINARY_OP_DECL("BITWISEXOR", "^", 7, ASSOC_LEFT),
   BINARY_OP_DECL("LT", "<", 4, ASSOC_NONE),
   BINARY_OP_DECL("GT", ">", 4, ASSOC_NONE),
   BINARY_OP_DECL("EQ", "==", 4, ASSOC_NONE),
@@ -227,12 +230,15 @@ BINARY_OP_NAME(DIV,     3);
 BINARY_OP_NAME(MOD,     4);
 BINARY_OP_NAME(ADD,     5);
 BINARY_OP_NAME(SUB,     6);
-BINARY_OP_NAME(LT,      7);
-BINARY_OP_NAME(GT,      8);
-BINARY_OP_NAME(EQ,      9);
-BINARY_OP_NAME(LE,      10);
-BINARY_OP_NAME(GE,      11);
-BINARY_OP_NAME(NE,      12);
+BINARY_OP_NAME(BITWISEAND, 7);
+BINARY_OP_NAME(BITWISEOR, 8);
+BINARY_OP_NAME(BITWISEXOR, 9);
+BINARY_OP_NAME(LT,      10);
+BINARY_OP_NAME(GT,      11);
+BINARY_OP_NAME(EQ,      12);
+BINARY_OP_NAME(LE,      13);
+BINARY_OP_NAME(GE,      14);
+BINARY_OP_NAME(NE,      15);
 
 #define UNARY_OP_DECL(name, display, prec)			\
   { PyObject_HEAD_INIT(&UnaryOp_type) name, display, prec }
@@ -246,6 +252,10 @@ static struct Pyon_UnaryOp ast_unary_operators[] = {
   UNARY_OP_DECL("NOT", "not", 12),
   UNARY_OP_DECL(NULL, NULL, 0)	/* sentinel */
 };
+
+UNARY_OP_NAME(NEGATE, 0);
+UNARY_OP_NAME(COMPLEMENT, 1);
+UNARY_OP_NAME(NOT, 2);
 
 /*****************************************************************************/
 /* Module initialization */
