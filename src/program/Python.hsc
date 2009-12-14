@@ -1,5 +1,17 @@
 {- Low-level routines for interaction between the Haskell and Python
 -- runtimes.
+--
+-- * Conventions
+--
+-- When calling into Python, the result should be checked against NULL.
+-- A NULL value indicates that an exception occurred.  Exceptions should be
+-- re-thrown as a PythonExc.  The 'checkNull' function assists with this.
+--
+-- Most calls made from the Python interpreter expect a non-NULL PyPtr as
+-- the return value, or NULL to signify an exception.  In the case an
+-- exception is thrown, a Haskell function that may be called from Python
+-- should catch it, ensure that an exception is been set in the Python
+-- runtime, and return NULL.
 -}
 
 {-# LANGUAGE ForeignFunctionInterface,
@@ -77,8 +89,8 @@ setPythonExc exctypePtr msg =
       pyErr_SetString exctype msgPtr
 
 -- Raise an exception in the Python runtime and return a null pointer.
--- In many functions, returning a NULL value to the Python runtime
--- signals that an exception has been raised.
+-- This function behaves as the Python interpreter expects from a C
+-- function: set an exception, then return NULL.
 raisePythonExc :: PythonExcType -> String -> IO PyPtr
 raisePythonExc exctypePtr msg = do
   setPythonExc exctypePtr msg
