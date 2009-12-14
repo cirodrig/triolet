@@ -286,14 +286,6 @@ savePtrOfVar v ptr = modify savePtr
 class Exportable a where
     toPythonEx :: a -> Export PyPtr
 
-newtype AsRuntimeError a = AsRuntimeError a
-
--- Marshal all exceptions as RuntimeError
-instance Exception a => Exportable (AsRuntimeError a) where
-    toPythonEx (AsRuntimeError e) =
-        let message = Inherit $ AsString (show e)
-        in call1Ex (readEnv py_RuntimeError) message
-
 -- Inherit the marshaling method for ordinary Python code
 newtype Inherit a = Inherit a
 
