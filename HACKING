@@ -1,4 +1,10 @@
 
+Test cases
+----------
+
+Test cases should start with a three-digit number, so that they are
+processed in a predictable order.
+
 Python Coding Conventions
 ------------------------
 
