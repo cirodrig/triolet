@@ -222,7 +222,7 @@ def _doExpr(expr):
         raise TypeError, type(expr)
 
 def _separateReturns(stmtlist):
-    fdef, var = _functionStack[-1]
+    _, var = _functionStack[-1]
     global _returnVarCnt
     for i in reversed(range(len(stmtlist))):
         s = stmtlist[i]
@@ -246,7 +246,6 @@ def _doStmtList(stmts, fallthrough):
     _separateReturns(stmts)
     join = None
     for s in stmts:
-        x, y = _functionStack[-1]
         if join is not None:
             join.setJoin(s)
         if isinstance(s, ast.ReturnStmt):
