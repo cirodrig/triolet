@@ -46,7 +46,7 @@ class JoinNode(object):
             self.phiNodes[var].paths.append( (stmt, version) )
         else:
             _nextVarSSA(var)
-            self.phiNodes[var] = PhiNode(var.ssaver, [(stmt, version)])
+            self.phiNodes[var] = PhiNode(var._ssaver, [(stmt, version)])
             
 
 class IfNode(JoinNode):
@@ -93,14 +93,14 @@ _returnVarCnt = 0
 def _nextVarSSA(var):
     """returns the current SSA version number for this variable, and 
     adjusts the variable to the next SSA version available"""
-    if hasattr(var, 'ssaver'):
-        oldssaver = var.ssaver
-        var.ssaver = var.topssaver+1
-        var.topssaver = var.ssaver
+    if hasattr(var, '_ssaver'):
+        oldssaver = var._ssaver
+        var._ssaver = var._topssaver+1
+        var._topssaver = var._ssaver
     else:
         oldssaver = 0
-        var.ssaver = 0
-        var.topssaver = 0
+        var._ssaver = 0
+        var._topssaver = 0
     return oldssaver
 
 
@@ -110,17 +110,19 @@ def _makeSSA(paramorfunc):
     # functions reference their corresponding variable object 
     # with the attribute 'name', even though they do not share 
     # it from a common inheritence heirarchy
-    var = paramorfunc.name
-    oldssaver = _nextVarSSA(var)
-
-    if var in _phiNodeStack[-1]:
-        current, orig = _phiNodeStack[-1][var]
-        _phiNodeStack[-1][var] = (var.ssaver, orig)
+    if isinstance(paramorfunc, ast.TupleParam):
+        [_makeSSA(param) for param in paramorfunc.fields]
     else:
-        _phiNodeStack[-1][var] = (var.ssaver, oldssaver)
+        var = paramorfunc.name
+        oldssaver = _nextVarSSA(var)
 
-    paramorfunc.ssaver = var.ssaver
+        if var in _phiNodeStack[-1]:
+            current, orig = _phiNodeStack[-1][var]
+            _phiNodeStack[-1][var] = (var._ssaver, orig)
+        else:
+            _phiNodeStack[-1][var] = (var._ssaver, oldssaver)
 
+        paramorfunc.ssaver = var._ssaver
 
 def _enterLoop(phiNode):
     "Setup data structure for entering a looping structure"
@@ -147,22 +149,19 @@ def _joinFork(truefall, falsefall, joinNode, hasret):
         else: #both forks have already been set correctly
             pass
 
-        #Create a new SSA version for every assigned variable
-        #_nextVarSSA(var)
-        #phiList = []
+        #Add phi nodes for each path it was assigned from
         if truefall is not None:
             joinNode.addPhi(var, truefall, forkone) 
-            #phiList.append( (truefall, forkone) )
         if falsefall is not None:
             joinNode.addPhi(var, falsefall, forktwo) 
-            #phiList.append( (falsefall, forktwo) )
         
-        #phiNodes[var] = PhiNode(var.ssaver, phiList)
-
+        #A phi node generates a new SSA assignment, which should be 
+        #  recorded in the previous fork nest (if any)
         orig = -1
         if var in _phiNodeStack[-2]:
             _, orig = _phiNodeStack[-2][var]
-        _phiNodeStack[-2][var] = (var.ssaver, orig)
+        _phiNodeStack[-2][var] = (var._ssaver, orig)
+
     _phiNodeStack.pop()
     _savedForks.pop()
     joinNode.hasret = hasret
@@ -173,7 +172,7 @@ def _nextFork():
     _savedForks.append(_phiNodeStack[-1])
     _phiNodeStack[-1] = {}
     for var in _savedForks[-1].keys():
-        _ , var.ssaver = _savedForks[-1][var]
+        _ , var._ssaver = _savedForks[-1][var]
 
 def _doIter(iter):
     """Perform SSA evaluation on an iterator"""
@@ -195,7 +194,7 @@ def _doExpr(expr):
         _doExpr(expr.left)
         _doExpr(expr.right)
     elif isinstance(expr, ast.VariableExpr):
-        expr.ssaver = expr.variable.ssaver
+        expr.ssaver = expr.variable._ssaver
     elif isinstance(expr, ast.LiteralExpr):
         pass #Nothing to do
     elif isinstance(expr, ast.UnaryExpr):
@@ -232,7 +231,6 @@ def _separateReturns(stmtlist):
             newretexpr = ast.VariableExpr(var)
 
             retcopy = ast.AssignStmt(retparam, s.expression)
-            #newretstmt = ast.ReturnStmt(newretexpr)
             s.expression = newretexpr
             stmtlist.insert(i, retcopy)
 
@@ -266,19 +264,10 @@ def _doStmt(stmt, listfallthrough):
         _doExpr(stmt.expression)
         fdef, var = _functionStack[-1]
         stmt.joinNode = fdef.joinPoint
-        #if isinstance(stmt.expression, ast.TupleExpr):
-        #    for var, ex in zip(varlist, stmt.expression.arguments):
-        #        stmt.joinNode.addPhi(var, stmt, ex.ssaver)
-        #else:
         stmt.joinNode.addPhi(var, stmt, stmt.expression.ssaver)
     elif isinstance(stmt, ast.AssignStmt):
         _doExpr(stmt.expression)
-        if isinstance(stmt.lhs, ast.VariableParam):
-            _makeSSA(stmt.lhs)
-        elif isinstance(stmt.lhs, ast.TupleParam):
-            [_makeSSA(x) for x in stmt.lhs.fields]
-        else:
-            raise TypeError, type(stmt.lhs)
+        _makeSSA(stmt.lhs)
     elif isinstance(stmt, ast.IfStmt):
         #Expression evaluation happens first
         _doExpr(stmt.cond)
@@ -322,7 +311,6 @@ def _doFunction(f):
     _makeSSA(f)
     f.joinPoint = ReturnNode()
     retvar = ast.PythonVariable('fret', _returnVarCnt)
-    #_nextVarSSA(retvar)
     _functionStack.append((f, retvar))
     _returnVarCnt = _returnVarCnt + 1
     for p in f.parameters:
