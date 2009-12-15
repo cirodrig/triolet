@@ -7,6 +7,8 @@ import sys
 import pyon.ast.operators as operators
 from pyon.ast.parser_ast import *
 import pyon.pretty as pretty
+import pyon.ssa as ssa
+import pyon.ssa.print_ssa as print_ssa
 
 def prettyAst(obj):
     """Format a parser AST object as a pretty-printable object."""
@@ -56,7 +58,10 @@ def _prVariable(v):
 
 def _prParameter(p):
     if isinstance(p, VariableParam):
-        return prettyAst(p.name)
+        if hasattr(p, 'ssaver'):
+            return pretty.abut(prettyAst(p.name),p.ssaver)
+        else:
+            return prettyAst(p.name)
     elif isinstance(p, TupleParam):
         return _tuple(p.fields)
     else:
@@ -75,7 +80,10 @@ def _prExpression(e, precedence):
         else: return doc
 
     if isinstance(e, VariableExpr):
-        return prettyAst(e.variable)
+        if hasattr(e, 'ssaver'):
+            return pretty.abut(prettyAst(e.variable),e.ssaver)
+        else:
+            return prettyAst(e.variable)
     elif isinstance(e, LiteralExpr):
         lit = e.literal
         if lit is None:
@@ -104,6 +112,11 @@ def _prExpression(e, precedence):
         left = _prExpression(e.left, left_prec)
         right = _prExpression(e.right, right_prec)
         doc = pretty.space([left, e.operator.display, right])
+        return parenthesize(prec, doc)
+    elif isinstance(e, UnaryExpr):
+        prec = e.operator.precedence
+        arg = _prExpression(e.argument, prec)
+        doc = pretty.space([e.operator.display, arg])
         return parenthesize(prec, doc)
     elif isinstance(e, ListCompExpr):
         return pretty.brackets(prettyAst(e.iterator))
@@ -168,6 +181,8 @@ def _prStatement(s):
         #else:
         #    ELSE
         if_line = pretty.abut(pretty.space('if', prettyAst(s.cond)), ':')
+        if hasattr(s, 'joinPoint'):
+            if_line = pretty.stack([if_line, print_ssa.prettySSA(s.joinPoint)])
         tr_suite = pretty.nest(pretty.stack(prettyAst(e) for e in s.ifTrue), 4)
 
         fa = s.ifFalse
@@ -180,14 +195,21 @@ def _prStatement(s):
         return pretty.stack([if_line, tr_suite, fa_text])
     elif isinstance(s, DefGroupStmt):
         return pretty.stack(_prFunction(f) for f in s.definitions)
+    elif isinstance(s, ssa.FallStmt):
+        return pretty.space(['<fallthrough to JP', s.joinNode.num, '>'])
     else:
         raise TypeError, type(s)
 
 def _prFunction(f):
     param_list = _tuple(f.parameters)
-    f_name = prettyAst(f.name)
+    if hasattr(f, 'ssaver'):
+        f_name = pretty.abut(prettyAst(f.name), f.ssaver)
+    else:
+        f_name = prettyAst(f.name)
     f_decl = pretty.abut(pretty.space('def', pretty.abut(f_name, param_list)),
                          ':')
+    if hasattr(f, 'joinPoint'):
+        f_decl = pretty.stack([f_decl, print_ssa.prettySSA(f.joinPoint)])
     f_body = pretty.stack(prettyAst(s) for s in f.body)
     return pretty.stack(f_decl, pretty.nest(f_body, 4))
 

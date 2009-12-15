@@ -96,8 +96,10 @@ def printExpression(expr):
 
     expr: Expression node in the AST"""
     if isinstance(expr, VariableExpr):
-        varname = abut(expr.variable.name, expr.variable.identifier)
-        return parens(space('VAR', varname))
+        var = space('VAR', printVar(expr.variable))
+        if hasattr(expr, 'ssaver'):
+            var = space(var, abut('S', expr.ssaver))
+        return parens(var)
     elif isinstance(expr, LiteralExpr):
         return parens(space('LIT', expr.literal))
     elif isinstance(expr, UnaryExpr):
@@ -202,6 +204,8 @@ def printParam(p):
         if p.annotation is not None:
             pass #Unimplemented?
         printlist.append(printVar(p.name))
+        if hasattr(p, 'ssaver'):
+            printlist.append(abut('S', p.ssaver))
         if p.default is not None:
             printlist.append(space('=', printVar(p.default)))
         return space(printlist)

@@ -5,6 +5,7 @@ import os.path
 import haskell
 import pyon.ast
 from pyon.data_dir import *
+import pyon.ssa.parser_ssa as ssa
 
 # Find path to source files
 testDir = os.path.join(DATA_DIR, 'testcases')
@@ -13,7 +14,8 @@ testDir = os.path.join(DATA_DIR, 'testcases')
 def tryCompile(fname):
     try:
         # Currently we only run the parser
-        haskell.parse(fname)
+        test_ast = haskell.parse(fname)
+        ssa.convertSSA(test_ast)
     except Exception, e:
         print e
         print "Test failed:", fname

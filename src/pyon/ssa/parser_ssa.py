@@ -1,40 +1,98 @@
 """SSA generation module for the Pyon Parser AST"""
 
-import pyon.ast
-from pyon.ast.parser_ast import *
-
+import pyon.ast.parser_ast as ast 
 #Stack of "join nodes": repositories for phi nodes
 
 
-_savedForks = []
-_joinNodeStack = [{}]
-_joinNodeList = []
+
+class FallStmt(ast.Statement):
+    """A statement representing the transfer of control flow 
+    to another statement within the function"""
+    def __init__(self, join):
+        assert isinstance(join, JoinNode)
+        self.joinNode = join
+
+class PhiNode(object):
+    """Represents the variable-agnostic SSA information of a phiNode, 
+    i.e. the ssa version defined by the phi node, and a list of 
+    (statement, version) pairs that define the versions defined from 
+    each path leading to the join.  An SSA version number of -1 indicates 
+    that the variable is undefined when control returns from that path."""
+    def __init__(self, ssaver, paths):
+        assert isinstance(ssaver, int)
+        for stmt, ver in paths:
+            assert isinstance(stmt, FallStmt) or isinstance(stmt, ast.ReturnStmt)
+            assert isinstance(ver, int)
+        self.ssaVersion = ssaver
+        self.paths = paths
+
+class JoinNode(object):
+    """An object representing a control-flow join, and containing the 
+    phi nodes representing the dataflow through that join"""
+    def __init__(self):
+        self.num = JoinNode.enum
+        JoinNode.enum = JoinNode.enum + 1
+        self.phiNodes = {}
+        #Structure is filled in lazily
+
+    def setPhis(self, phis):
+        for var, phiNode in phis.iteritems():
+            assert isinstance(var, ast.Variable)
+            assert isinstance(phiNode, PhiNode)
+        self.phiNodes = phis
+
+    def addPhi(self, var, stmt, version):
+        if var in self.phiNodes:
+            self.phiNodes[var].paths.append( (stmt, version) )
+        else:
+            _nextVarSSA(var)
+            self.phiNodes[var] = PhiNode(var.ssaver, [(stmt, version)])
+            
+
+class IfNode(JoinNode):
+    """Represents the control-flow join of an if or if-else 
+    construct"""
+    def __init__(self):
+        JoinNode.__init__(self)
+        self.hasret = False
+
+    def setJoin(self, stmt):
+        assert isinstance(stmt, ast.Statement)
+        self.joinStmt = stmt
+
+class ReturnNode(JoinNode):
+    """Represents the control-flow join from exiting a function 
+    and returning to the calling context"""
+    pass
+
+#The static counter of join nodes
+JoinNode.enum = 0
 
 def convertSSA(obj):
     "Convert a parser object into SSA format"
-    if isinstance(obj, Module):
-        [_doFunction(f) for f in obj.iterDefinitions]
-    elif isinstance(obj, Function):
+    if isinstance(obj, ast.Module):
+        [[_doFunction(f) for f in f_list] for f_list in obj.definitions]
+    elif isinstance(obj, ast.Function):
         _doFunction(obj)
-    elif isinstance(obj, Statement):
-        _doStmt(obj)
-    elif isinstance(obj, Expression):
+    elif isinstance(obj, ast.Statement):
+        _doStmt(obj, FallStmt(JoinNode()))
+    elif isinstance(obj, ast.Expression):
         _doExpr(obj)
-    elif isinstance(obj, Parameter):
+    elif isinstance(obj, ast.Parameter):
         pass
-    elif isinstance(obj, PythonVariable):
+    elif isinstance(obj, ast.PythonVariable):
         pass
     else:
         raise TypeError, type(obj)
 
-def _makeSSA(paramorfunc):
-    "Converts a variable definition to SSA form"
-    #Taking advantage of the fact that both parameters and 
-    # functions reference their corresponding variable object 
-    # with the attribute 'name', even though they do not share 
-    # it from a common inheritence heirarchy
-    var = paramorfunc.name
+_savedForks = []
+_phiNodeStack = [{}]
+_functionStack = []
+_returnVarCnt = 0
 
+def _nextVarSSA(var):
+    """returns the current SSA version number for this variable, and 
+    adjusts the variable to the next SSA version available"""
     if hasattr(var, 'ssaver'):
         oldssaver = var.ssaver
         var.ssaver = var.topssaver+1
@@ -43,143 +101,233 @@ def _makeSSA(paramorfunc):
         oldssaver = 0
         var.ssaver = 0
         var.topssaver = 0
+    return oldssaver
 
-    if var in _joinNodeStack[-1]:
-        current, orig = _joinNodeStack[-1][var]
-        _joinNodeStack[-1][var] = (var.ssaver, orig)
+
+def _makeSSA(paramorfunc):
+    "Converts a variable definition to SSA form"
+    #Taking advantage of the fact that both parameters and 
+    # functions reference their corresponding variable object 
+    # with the attribute 'name', even though they do not share 
+    # it from a common inheritence heirarchy
+    var = paramorfunc.name
+    oldssaver = _nextVarSSA(var)
+
+    if var in _phiNodeStack[-1]:
+        current, orig = _phiNodeStack[-1][var]
+        _phiNodeStack[-1][var] = (var.ssaver, orig)
     else:
-        _joinNodeStack[-1][var] = (var.ssaver, oldssaver)
+        _phiNodeStack[-1][var] = (var.ssaver, oldssaver)
 
     paramorfunc.ssaver = var.ssaver
 
 
 def _enterLoop(phiNode):
     "Setup data structure for entering a looping structure"
-    _enterFork(phiNode)
+    _enterFork()
     _nextFork()
 
-def _enterFork(phiNode):
+def _enterFork():
     "Setup internal structures for entering a control flow fork"
-    _joinNodeStack.append({})
-    _joinNodeList.append(phiNode)
+    _phiNodeStack.append({})
 
-def _joinFork():
+def _joinFork(truefall, falsefall, joinNode, hasret):
     "Join the paths of control flow from the most recent fork"
-    phiNodes = []
-    for var in set(_joinNodeStack[-1].keys()) | set(_savedForks[-1].keys()):
+    phiNodes = {} 
+    joinNode.setPhis(phiNodes)
+    for var in set(_phiNodeStack[-1].keys()) | set(_savedForks[-1].keys()):
         forkone = -1
         forktwo = -1
-        if var in _joinNodeStack[-1].keys():
-            forktwo , orig = _joinNodeStack[-1][var]
+        if var in _phiNodeStack[-1].keys():
+            forktwo , forkone = _phiNodeStack[-1][var]
+        else: #var must be in _savedForks
+            forkone , forktwo = _savedForks[-1][var]
         if var in _savedForks[-1].keys():
             forkone , orig = _savedForks[-1][var]
+        else: #both forks have already been set correctly
+            pass
+
         #Create a new SSA version for every assigned variable
-        var.ssaver = var.topssaver+1
-        var.topssaver = var.ssaver
+        #_nextVarSSA(var)
+        #phiList = []
+        if truefall is not None:
+            joinNode.addPhi(var, truefall, forkone) 
+            #phiList.append( (truefall, forkone) )
+        if falsefall is not None:
+            joinNode.addPhi(var, falsefall, forktwo) 
+            #phiList.append( (falsefall, forktwo) )
         
-        phiNodes.append( (var, var.ssaver, forkone, forktwo) )
+        #phiNodes[var] = PhiNode(var.ssaver, phiList)
 
         orig = -1
-        if var in _joinNodeStack[-2]:
-            _, orig = _joinNodeStack[-2][var]
-        _joinNodeStack[-2][var] = (var.ssaver, orig)
-    _joinNodeStack.pop()
+        if var in _phiNodeStack[-2]:
+            _, orig = _phiNodeStack[-2][var]
+        _phiNodeStack[-2][var] = (var.ssaver, orig)
+    _phiNodeStack.pop()
     _savedForks.pop()
-    if len(phiNodes) > 0:
-        _joinNodeList[-1].phiNodes = phiNodes
-    _joinNodeList.pop()
+    joinNode.hasret = hasret
 
 def _nextFork():
     """Save state of the first path of a fork, and begin 
     recording the second path's state"""
-    _savedForks.append(_joinNodeStack[-1])
-    _joinNodeStack[-1] = {}
+    _savedForks.append(_phiNodeStack[-1])
+    _phiNodeStack[-1] = {}
     for var in _savedForks[-1].keys():
         _ , var.ssaver = _savedForks[-1][var]
 
 def _doIter(iter):
     """Perform SSA evaluation on an iterator"""
-    if isinstance(iter, ForIter):
+    if isinstance(iter, ast.ForIter):
         _doExpr(iter.argument)
-        _enterFork(iter)
+        _makeSSA(iter.parameter)
         _doIter(iter.body)
-    elif isinstance(iter, IfIter):
+    elif isinstance(iter, ast.IfIter):
         _doExpr(guard)
-    elif isinstance(iter, DoIter):
-        #Huh?  Seems like the body really ought to be a statement (list?)
-        #_doExpr(iter.body)
-        pass
+        _doIter(iter.body)
+    elif isinstance(iter, ast.DoIter):
+        _doExpr(iter.body)
     else:
         raise TypeError, type(iter)
 
 def _doExpr(expr):
     """Perform SSA evaluation on an expression"""
-    if isinstance(expr, BinaryExpr):
+    if isinstance(expr, ast.BinaryExpr):
         _doExpr(expr.left)
         _doExpr(expr.right)
-    elif isinstance(expr, VariableExpr):
+    elif isinstance(expr, ast.VariableExpr):
         expr.ssaver = expr.variable.ssaver
-    elif isinstance(expr, LiteralExpr):
+    elif isinstance(expr, ast.LiteralExpr):
         pass #Nothing to do
-    elif isinstance(expr, UnaryExpr):
+    elif isinstance(expr, ast.UnaryExpr):
         _doExpr(expr.argument)
-    elif isinstance(expr, CallExpr):
+    elif isinstance(expr, ast.CallExpr):
         _doExpr(expr.operator)
         [_doExpr(a) for a in expr.arguments]
-    elif isinstance(expr, ListCompExpr):
+    elif isinstance(expr, ast.ListCompExpr):
         _doIter(expr.iterator)
-    elif isinstance(expr, GeneratorExpr):
+    elif isinstance(expr, ast.GeneratorExpr):
         #Should this be treated differently than ListComp?
         _doIter(expr.iterator)
-    elif isinstance(expr, CondExpr):
+    elif isinstance(expr, ast.CondExpr):
         #Conditional expressions actually can't contain any local 
         # definitions, so this is a trivial case
         _doExpr(expr.argument)
         _doExpr(expr.ifTrue)
         _doExpr(expr.ifFalse)
-    elif isinstance(expr, LambdaExpr):
+    elif isinstance(expr, ast.LambdaExpr):
         #parameters should have gotten different variables
         _doExpr(expr.body)
+    elif isinstance(expr, ast.TupleExpr):
+        [_doExpr(ex) for ex in expr.arguments]
     else:
         raise TypeError, type(expr)
 
+def _separateReturns(stmtlist):
+    fdef, var = _functionStack[-1]
+    global _returnVarCnt
+    for i in reversed(range(len(stmtlist))):
+        s = stmtlist[i]
+        if isinstance(s, ast.ReturnStmt):
+            retparam = ast.VariableParam(var)
+            newretexpr = ast.VariableExpr(var)
 
-def _doStmt(stmt):
-    """Perform SSA evaluation on a statement"""
-    if isinstance(stmt, ExprStmt):
+            retcopy = ast.AssignStmt(retparam, s.expression)
+            #newretstmt = ast.ReturnStmt(newretexpr)
+            s.expression = newretexpr
+            stmtlist.insert(i, retcopy)
+
+def _doStmtList(stmts, fallthrough):
+    """Perform SSA evaluation on a list of statements
+    The second argument provides the fallthrough mechanism, which 
+    is inserted if the statement list does not end in a return statement"""
+    retval = None
+    fallthrough.hasret = False
+    if len(stmts) == 0 or not isinstance(stmts[-1], ast.ReturnStmt):
+        stmts.append(fallthrough)
+        retval = fallthrough
+    _separateReturns(stmts)
+    join = None
+    for s in stmts:
+        x, y = _functionStack[-1]
+        if join is not None:
+            join.setJoin(s)
+        if isinstance(s, ast.ReturnStmt):
+            fallthrough.hasret = True
+        join = _doStmt(s, fallthrough)
+    return retval
+
+def _doStmt(stmt, listfallthrough):
+    """Perform SSA evaluation on a statement.  The second argument is 
+    used only to mark if a return statement is seen in the subtree of the 
+    particular statement."""
+    if isinstance(stmt, ast.ExprStmt):
         _doExpr(stmt.expression)
-    elif isinstance(stmt, ReturnStmt):
+    elif isinstance(stmt, ast.ReturnStmt):
         _doExpr(stmt.expression)
-        #Need to mark the rest of this path as dead
-    elif isinstance(stmt, AssignStmt):
+        fdef, var = _functionStack[-1]
+        stmt.joinNode = fdef.joinPoint
+        #if isinstance(stmt.expression, ast.TupleExpr):
+        #    for var, ex in zip(varlist, stmt.expression.arguments):
+        #        stmt.joinNode.addPhi(var, stmt, ex.ssaver)
+        #else:
+        stmt.joinNode.addPhi(var, stmt, stmt.expression.ssaver)
+    elif isinstance(stmt, ast.AssignStmt):
         _doExpr(stmt.expression)
-        _makeSSA(stmt.lhs)
-    elif isinstance(stmt, IfStmt):
-        #Same issues here as with CondExpr: need to fork and rejoin SSA paths
+        if isinstance(stmt.lhs, ast.VariableParam):
+            _makeSSA(stmt.lhs)
+        elif isinstance(stmt.lhs, ast.TupleParam):
+            [_makeSSA(x) for x in stmt.lhs.fields]
+        else:
+            raise TypeError, type(stmt.lhs)
+    elif isinstance(stmt, ast.IfStmt):
+        #Expression evaluation happens first
         _doExpr(stmt.cond)
-        _enterFork(stmt)
-        for s in stmt.ifTrue:
-            _doStmt(s)
+        reconverge = IfNode()
+        stmt.joinPoint = reconverge
+        truefall = FallStmt(reconverge)
+        #set up new control flow fork in the SSA structures
+        _enterFork()
+        _doStmtList(stmt.ifTrue, truefall)
+        #switch to the other fork
         _nextFork()
-        for s in stmt.ifFalse:
-            _doStmt(s)
-        _joinFork()
-    elif isinstance(stmt, DefGroupStmt):
+        falsefall = FallStmt(reconverge)
+        _doStmtList(stmt.ifFalse, falsefall)
+        #merge the two forks into the join node
+        ifhasret = truefall.hasret or falsefall.hasret
+        if isinstance(stmt.ifTrue[-1], ast.ReturnStmt):
+            truefall = None
+        if len(stmt.ifFalse) == 0 or isinstance(stmt.ifFalse[-1], ast.ReturnStmt):
+            falsefall = None
+        _joinFork(truefall, falsefall, reconverge, ifhasret)
+        listfallthrough.hasret = listfallthrough.hasret or ifhasret
+        #following statement is recorded in the join node lazily
+        return reconverge
+    elif isinstance(stmt, ast.DefGroupStmt):
         for d in stmt.definitions:
             #I remember something about doing SSA on functions 
             # at their declaration.  Is this all there is?
             _doFunction(d)
+    elif isinstance(stmt, FallStmt):
+        pass
     else:
         raise TypeError, type(stmt)
 
+
+
+
 def _doFunction(f):
-    """Perform SSA for the parameters and body of a function
-    Does not currently handle function definitions inside conditional structures"""
+    """Perform SSA for the parameters and body of a function"""
+    assert isinstance(f, ast.Function)
+    global _returnVarCnt
     _makeSSA(f)
+    f.joinPoint = ReturnNode()
+    retvar = ast.PythonVariable('fret', _returnVarCnt)
+    #_nextVarSSA(retvar)
+    _functionStack.append((f, retvar))
+    _returnVarCnt = _returnVarCnt + 1
     for p in f.parameters:
         _makeSSA(p)
-    for s in f.body:
-        _doStmt(s)
-    
+    _doStmtList(f.body, ast.ReturnStmt(ast.LiteralExpr(None)))
+    _functionStack.pop()
 
 
