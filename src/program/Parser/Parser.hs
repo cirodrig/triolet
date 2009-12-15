@@ -455,6 +455,8 @@ parameters xs = traverse parameter xs
 
 exprToParam :: Py.Expr -> Cvt Parameter
 exprToParam e@(Py.Var name) = Parameter <$> parameterDefinition name
+exprToParam e@(Py.Tuple es) = TupleParam <$> traverse exprToParam es
+exprToParam _               = error "Unsupported variable binding"
 
 exprToLHS :: Py.Expr -> Cvt Parameter
 exprToLHS e@(Py.Var name) = Parameter <$> definition name
