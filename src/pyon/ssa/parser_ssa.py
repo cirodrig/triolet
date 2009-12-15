@@ -87,6 +87,11 @@ def convertSSA(obj):
 
 _savedForks = []
 _phiNodeStack = [{}]
+
+# The stack of functions being visited by SSA analysis.  The current function
+# is on the top of the stack.
+# Each element is a (function, return-variable) pair, where return-variable
+# is a new PythonVariable representing the function's return value.
 _functionStack = []
 _returnVarCnt = 0
 
@@ -222,6 +227,14 @@ def _doExpr(expr):
         raise TypeError, type(expr)
 
 def _separateReturns(stmtlist):
+    """
+    Find all 'return' statements in stmtlist and split them into an assignment
+    of a temporary variable and a return statement.
+
+    By performing this change, we ensure that the parameter of a return
+    statement is always a simple variable.  This is assumed by later steps
+    of SSA.
+    """
     _, var = _functionStack[-1]
     global _returnVarCnt
     for i in reversed(range(len(stmtlist))):
@@ -243,7 +256,10 @@ def _doStmtList(stmts, fallthrough):
     if len(stmts) == 0 or not isinstance(stmts[-1], ast.ReturnStmt):
         stmts.append(fallthrough)
         retval = fallthrough
+
+    # Ensure that all return statements are returning single variables
     _separateReturns(stmts)
+
     join = None
     for s in stmts:
         if join is not None:
