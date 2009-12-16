@@ -3,7 +3,7 @@
 # Prints the AST in human-readable form
 
 from pyon.ast.ast import *
-from pyon.pretty import *
+import pyon.pretty as pretty
 import pyon.ast.operators
 import sys 
 
@@ -16,11 +16,11 @@ def printAst(root, file = sys.stdout):
     root: an AST node marking the subtree to be printed"""
 #    _indentation = 0
     if isinstance(root, Expression):
-        doc = printExpression(root)
+        doc = printExpression(root, _OUTER_PREC)
     elif isinstance(root, FunctionDef):
         doc = printFuncDef(root)
     elif isinstance(root, Function):
-        doc = printFunction(root)
+        doc = printLambdaFunction(root)
     elif isinstance(root, Variable):
         doc = printVar(root)
     elif isinstance(root, Parameter):
@@ -29,139 +29,107 @@ def printAst(root, file = sys.stdout):
         doc = printModule(root)
     else:
         raise TypeError("Called printAst on a non-AST object")
-    render(stack(doc, ''), file)
 
+    pretty.render(pretty.stack(doc, ''), file)
 
-def _printStr(s):
-    """Function checks argument for None before printing
-    Useful as a default printing function parameter
-    
-    s: None or an object suitable to pass to print directly"""
-    if s is not None:
-        print s,
+# Precedences, used for inserting parentheses
+_OUTER_PREC = 0
+_LAM_PREC = 1
+_IF_PREC = 1
+_APP_PREC = 2
 
-def _printFlat(irtype, children, childprint = _printStr, 
-                       separator = None, prequel = None, sequel = None):
-    """Prints an IR node and its children 'flatly'
+def printExpression(expr, precedence):
+    """
+    Returns a pretty-printable object for an expression IR node
 
-    irtype: printable object denoting the IR type
-    children: list of children to print
-    childprint: function to invoke to print each child
-    separator: optional printable separator between children
-    prequel: parameterless function to invoke before printing children
-    sequel: " " " " after " " """
-    print '(' + irtype,
-    if prequel is not None:
-        prequel()
-    for c in children[:-1]:
-        childprint(c)
-        _printStr(separator)
-    childprint(children[-1])
-    if sequel is not None:
-        print #newline
-        sequel()
-        print
-    print ')',
-
-def _printNested(irtype, children, childprint = _printStr, 
-                  prequel = None, separator = None, sequel = None):
-    """Prints an IR node and its children using nesting 
-    (intended to somewhat replicate scopes)
-
-    irtype: pretty-printable object denoting the IR type
-    children: list of children to print
-    childprint: function to invoke to print each child
-    separator: optional printable separator between children
-    prequel: parameterless function to invoke before printing children
-    sequel: " " " " after " " """
-
-    print '(' + irtype
-    if prequel is not None:
-        prequel()
-#    _indentation = _indentation + 1
-    for c in children[:-1]:
-        childprint(c)
-        _printStr(separator),
-    childprint(children[-1])
-    if sequel is not None:
-        print
-        sequel()
-#    _indentation = _indentation - 1
-    print ')'
-
-def printExpression(expr):
-    """Returns a pretty-printable object for an expression IR node
-
-    expr: Expression node in the AST"""
+    expr: Expression node in the AST
+    precedence: Operator precedence implied by context
+    """
     if isinstance(expr, VariableExpr):
-        var = space('VAR', printVar(expr.variable))
-        if hasattr(expr, 'ssaver'):
-            var = space(var, abut('S', expr.ssaver))
-        return parens(var)
+        return printVar(expr.variable)
+
     elif isinstance(expr, LiteralExpr):
-        return parens(space('LIT', expr.literal))
+        lit = expr.literal
+        if lit is None:
+            return "None"
+        elif isinstance(lit, (int, float, bool)):
+            return lit
+        else:
+            raise TypeError, type(lit)
+
     elif isinstance(expr, IfExpr):
-        thendoc = nest(printExpression(expr.ifTrue), 2)
-        elsedoc = nest(printExpression(expr.ifFalse), 2)
-        stacklist = [ linewr('IF', 4, printExpression(expr.argument)),
-                      thendoc,
-                      'ELSE',
-                      elsedoc,
-                      'ENDIF' ]
-        return parens(stack(stacklist))
+        ifdoc = pretty.space("if", printExpression(expr.argument, _IF_PREC))
+        thendoc = pretty.space("then",
+                               printExpression(expr.ifTrue, _IF_PREC))
+        elsedoc = pretty.space("else",
+                               printExpression(expr.ifFalse, _IF_PREC))
+        doc = pretty.stack([ifdoc, thendoc, elsedoc])
+        if precedence >= _IF_PREC: doc = pretty.parens(doc)
+        return doc
+
     elif isinstance(expr, TupleExpr):
-        fs = space(punctuate(',', [printExpression(e) for e in expr.arguments]))
-        return parens(fs)
+        # Insert a comma at the end, if it's a 1-element-tuple 
+        args = expr.arguments
+        if len(args) == 1:
+            fs = pretty.abut(printExpression(args[0], _OUTER_PREC), ',')
+        else:
+            argdocs = [printExpression(e, _OUTER_PREC)
+                       for e in expr.arguments]
+            fs = pretty.space(pretty.punctuate(',', argdocs)) 
+        return pretty.parens(fs)
+
     elif isinstance(expr, CallExpr):
-        arglist = punctuate(',', [printExpression(e) for e in expr.arguments])
-        hungarg = None
-        for init in arglist[:1]:
-            hungarg = init
-            for a in arglist[1:]:
-                hungarg = linewr(hungarg, a, 0)
-        return parens(space(['CALL', 
-                             printExpression(expr.operator), 
-                             brackets(hungarg)]))
+        arglist = pretty.punctuate(',', [printExpression(e, _OUTER_PREC)
+                                         for e in expr.arguments])
+        operator = printExpression(expr.operator, _APP_PREC)
+        doc = pretty.abut(operator, pretty.parens(pretty.space(arglist)))
+        if precedence >= _APP_PREC: doc = pretty.parens(doc)
+        return doc
+
     elif isinstance(expr, LetExpr):
-        nextLet = None
-        if expr.body is not None:
-            nextLet = printExpression(expr.body)
-        assigndoc = space(['LET', printParam(expr.name), '='])
-        exprdoc = parens(linewr(assigndoc, printExpression(expr.rhs), 4))
-        if expr.body is not None:
-            exprdoc = abut(exprdoc, '...')
-        return stack(exprdoc, nextLet) 
+        rhsdoc = printExpression(expr.rhs, _OUTER_PREC)
+        assndoc = pretty.stack(pretty.space(['let',
+                                             printParam(expr.parameter),
+                                             '=']),
+                               pretty.nest(pretty.abut(rhsdoc, ';'), 4))
+        bodydoc = printExpression(expr.body, _OUTER_PREC)
+        return pretty.stack(assndoc, bodydoc)
     elif isinstance(expr, LetrecExpr):
-        defdoclist = [nest(printFuncDef(f), 2) for f in expr.definitions]
-        return bracesStack(['LETREC'] + defdoclist + 
-                               [nest(printExpression(expr.body), 2)])
+        defdoclist = pretty.punctuate(';',
+                                      [printFuncDef(f)
+                                       for f in expr.definitions])
+        return pretty.stack(['letrec', pretty.bracesStack(defdoclist, 2),
+                             printExpression(expr.body, _OUTER_PREC)])
     elif isinstance(expr, FunExpr):
-        return brackets(linewr('LAMBDA', printFunction(expr.function)))
+        doc = printLambdaFunction(expr.function)
+        if precedence >= _LAM_PREC: doc = pretty.parens(doc)
+        return doc
     else:
         raise TypeError, type(expr)
+
+def printLambdaFunction(func):
+    paramdoc = pretty.punctuate(',', [printParam(p) for p in func.parameters])
+    bodydoc = printExpression(func.body, _LAM_PREC)
+    return pretty.stack(pretty.abut(pretty.space(['lambda'] + paramdoc), ':'),
+                        pretty.nest(bodydoc, 4))
 
 def printFuncDef(fdef):
     """Returns a pretty-printable object for a FunctionDef node in the AST
 
     fdef: FunctionDef to be printed"""
-    return parens(stack( [space('DEF', printVar(fdef.name)), 
-                        nest(printFunction(fdef.function), 2), '']))
-
-def printFunction(f):
-    """Returns a pretty-printable object for a Function node in the AST
-
-    f: Function to be printed"""
-    paramsdoc = []
-    for p in f.parameters:
-        paramsdoc.append(printParam(p))
-    paramsdoc = brackets(abut(punctuate(',', paramsdoc)))
-    fdoc = space('FUNCTION', paramsdoc)
-    return parens(stack([fdoc, nest(printExpression(f.body), 2)]))
+    # Begin with syntax that resembles a function call
+    paramdoc = pretty.punctuate(',', [printParam(p)
+                                      for p in fdef.function.parameters])
+    calldoc = pretty.abut(printVar(fdef.name),
+                          pretty.parens(pretty.space(paramdoc)))
+    return pretty.stack(pretty.space(calldoc, '='),
+                        pretty.nest(printExpression(fdef.function.body, _OUTER_PREC), 4))
 
 def printVar(v):
     """Returns a pretty-printable object for a variable in the AST
     v: Variable to be printed"""
-    return abut(v.name, v.identifier)
+    # If variable is anonymous, print a dollar-sign
+    return pretty.abut(v.name or '$', v.identifier)
 
 def printParam(p):
     """Returns a pretty-printable object for a parameter in the AST
@@ -172,13 +140,11 @@ def printParam(p):
         if p.annotation is not None:
             pass #Unimplemented?
         printlist.append(printVar(p.name))
-        if hasattr(p, 'ssaver'):
-            printlist.append(abut('S', p.ssaver))
         if p.default is not None:
-            printlist.append(space('=', printVar(p.default)))
-        return space(printlist)
+            printlist.append(pretty.space('=', printVar(p.default)))
+        return pretty.space(printlist)
     elif isinstance(p, TupleParam):
-        return braces( space([printParam(f) for f in p.fields]))
+        return pretty.braces(pretty.space(pretty.punctuate(',', [printParam(f) for f in p.fields])))
     else:
         raise TypeError('Called printParam with unknown param type')
 
@@ -186,8 +152,11 @@ def printModule(m):
     """Returns a pretty-printable object for a Module in the AST
     As of yet untested.
     m: Module to be printed"""
-    defdoclist = []
-    for dg in m.definitions:
-        defdoclist = defdoclist + [printFuncDef(d) for d in dg]
-    return bracesStack(['MODULE'] + defdoclist + ['END MODULE'])
+    def defgroup(dg):
+        return [printFuncDef(d) for d in dg]
+
+    defdoclist = [pretty.bracesStack(pretty.punctuate(';', defgroup(dg)))
+                  for dg in m.definitions]
+
+    return pretty.stack('module', pretty.bracesStack(defdoclist))
 

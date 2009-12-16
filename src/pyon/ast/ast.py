@@ -206,7 +206,7 @@ class LetExpr(Expression):
         assert lhs is None or isinstance(lhs, Parameter)
         assert isinstance(rhs, Expression)
         assert isinstance(body, Expression)
-        self.name = lhs
+        self.parameter = lhs
         self.rhs = rhs
         self.body = body
 
