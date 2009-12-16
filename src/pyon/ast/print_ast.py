@@ -17,8 +17,6 @@ def printAst(root, file = sys.stdout):
 #    _indentation = 0
     if isinstance(root, Expression):
         doc = printExpression(root)
-    elif isinstance(root, Iterator):
-        doc = printIterator(root)
     elif isinstance(root, FunctionDef):
         doc = printFuncDef(root)
     elif isinstance(root, Function):
@@ -102,15 +100,6 @@ def printExpression(expr):
         return parens(var)
     elif isinstance(expr, LiteralExpr):
         return parens(space('LIT', expr.literal))
-    elif isinstance(expr, UnaryExpr):
-        exprdoc = printExpressoin(expr.argument)
-        return parens(space(['UEXPR', expr.operator.display, exprdoc]))
-    elif isinstance(expr, BinaryExpr):
-        exprdoclist = ['BEXPR',
-                       printExpression(expr.left), 
-                       expr.operator.display, 
-                       printExpression(expr.right)]
-        return parens(space(exprdoclist))
     elif isinstance(expr, IfExpr):
         thendoc = nest(printExpression(expr.ifTrue), 2)
         elsedoc = nest(printExpression(expr.ifFalse), 2)
@@ -120,10 +109,9 @@ def printExpression(expr):
                       elsedoc,
                       'ENDIF' ]
         return parens(stack(stacklist))
-    elif isinstance(expr, ListCompExpr):
-        return parensStack('LISTCOMP', nest(printIterator(expr.iterator), 2))
-    elif isinstance(expr, GeneratorExpr):
-        return paresStack('GENERATOR', nest(printIterator(expr.iterator), 2))
+    elif isinstance(expr, TupleExpr):
+        fs = space(punctuate(',', [printExpression(e) for e in expr.arguments]))
+        return parens(fs)
     elif isinstance(expr, CallExpr):
         arglist = punctuate(',', [printExpression(e) for e in expr.arguments])
         hungarg = None
@@ -149,28 +137,8 @@ def printExpression(expr):
                                [nest(printExpression(expr.body), 2)])
     elif isinstance(expr, FunExpr):
         return brackets(linewr('LAMBDA', printFunction(expr.function)))
-    elif isinstance(expr, ReturnExpr):
-        return parens(space('RETURN', printExpression(expr.argument)))
     else:
-        raise TypeError('Called printExpression on an unknown expression type')
-
-def printIterator(iter):
-    """Returns a pretty-printable object for an Iterator node in the AST
-
-    iter: Iterator to be printed"""
-    if isinstance(iter, ForIter):
-        declclause = linewr(space(['FOR', printParam(iter.parameter), 'IN']), 
-                          printExpression(iter.argument), 4)
-        bodynest = nest(printIterator(iter.body), 2)
-        return parenStack(declclause, bodynest)
-    elif isinstance(iter, IfIter):
-        return parenStack(linewr('GUARDIF', printExpression(iter.guard), 4),
-                            nest(printIterator(iter.body)))
-    elif isinstance(iter, DoIter):
-        parenStack('DO', nest(printExpression(iter.body)))
-    else:
-        raise TypeError('Called printIterator on an unknown iterator type')
-
+        raise TypeError, type(expr)
 
 def printFuncDef(fdef):
     """Returns a pretty-printable object for a FunctionDef node in the AST
@@ -219,7 +187,7 @@ def printModule(m):
     As of yet untested.
     m: Module to be printed"""
     defdoclist = []
-    for df in m.definitions:
+    for dg in m.definitions:
         defdoclist = defdoclist + [printFuncDef(d) for d in dg]
-    return bracesStack(['MODULE'] + defdoclist + 'END MODULE')
+    return bracesStack(['MODULE'] + defdoclist + ['END MODULE'])
 

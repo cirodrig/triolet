@@ -68,7 +68,7 @@ class Variable(object):
             canon = canon._representative
         return canon
 
-    def unifyWith(self, other, constraints):
+    def unifyWith(self, other):
         self._representative = other
 
     def occursCheck(self, v):
@@ -80,11 +80,11 @@ class Variable(object):
 class UnificationError(Exception):
     pass
 
-def unify(x, y, constraints):
+def unify(x, y):
     """
-    unify(x, y, constraints) -> z
-    Unify two objects and update the constraint set.  A unified object is
-    returned.  Constraints may be added to the constraint set.
+    unify(x, y) -> z
+    Unify two objects.  If the objects can be unified, the unified object
+    is returned.
     If the objects cannot be unified, a UnificationError is raised.
     """
     # Canonicalize x and y
@@ -116,17 +116,17 @@ def unify(x, y, constraints):
                           "wrong number of parameters to constructor"
 
                 for x_p, y_p in zip(x_params, y_params):
-                    unify(x_p, y_p, constraints)
+                    unify(x_p, y_p)
             else:
                 raise UnificationError, "type mismatch"
 
         else:                           # Variable
-            y.unifyWithTerm(x, constraints)
+            y.unifyWithTerm(x)
 
         # Return x, since it is canonical
         return x
     else:                               # Variable
-        x.unifyWith(y, constraints)
-            
+        x.unifyWith(y)
+
         # Return y, since it is still canonical
         return y
