@@ -74,7 +74,7 @@ def convertSSA(obj):
     elif isinstance(obj, ast.Function):
         _doFunction(obj)
     elif isinstance(obj, ast.Statement):
-        _doStmt(obj, FallStmt(JoinNode()))
+        _doStmt(obj)
     elif isinstance(obj, ast.Expression):
         _doExpr(obj)
     elif isinstance(obj, ast.Parameter):
@@ -260,7 +260,6 @@ def _doStmtList(stmts, fallthrough):
     The second argument provides the fallthrough mechanism, which 
     is inserted if the statement list does not end in a return statement"""
     retval = None
-    fallthrough.hasret = False
     if len(stmts) == 0 or not isinstance(stmts[-1], ast.ReturnStmt):
         stmts.append(fallthrough)
         retval = fallthrough
@@ -274,12 +273,10 @@ def _doStmtList(stmts, fallthrough):
     for s in stmts:
         if join is not None:
             join.setJoin(s)
-        if isinstance(s, ast.ReturnStmt):
-            fallthrough.hasret = True
-        join = _doStmt(s, fallthrough)
+        join = _doStmt(s)
     return retval
 
-def _doStmt(stmt, listfallthrough):
+def _doStmt(stmt):
     """Perform SSA evaluation on a statement.  The second argument is 
     used only to mark if a return statement is seen in the subtree of the 
     particular statement."""
@@ -290,6 +287,7 @@ def _doStmt(stmt, listfallthrough):
         fdef, var = _functionStack[-1]
         stmt.joinNode = fdef.joinPoint
         stmt.joinNode.addPhi(var, stmt, stmt.expression.ssaver)
+        _joinNodeStack[-1].hasret = True
     elif isinstance(stmt, ast.AssignStmt):
         _doExpr(stmt.expression)
         _makeSSA(stmt.lhs)
@@ -311,10 +309,11 @@ def _doStmt(stmt, listfallthrough):
                     not (len(stmt.ifFalse) == 0 
                        or isinstance(stmt.ifFalse[-1], ast.ReturnStmt) ) )
 
-        #Collect return-node information
-        ifhasret = truefall.hasret or falsefall.hasret
-        listfallthrough.hasret = listfallthrough.hasret or ifhasret
-        #following statement is recorded in the join node lazily
+        #Propagate return-node information
+        if isinstance(_joinNodeStack[-1], IfNode):
+            _joinNodeStack[-1].hasret = ( _joinNodeStack[-1].hasret 
+                                            or reconverge.hasret  )
+        #succeeding statement is recorded in the join node lazily
         return reconverge
     elif isinstance(stmt, ast.DefGroupStmt):
         for d in stmt.definitions:
