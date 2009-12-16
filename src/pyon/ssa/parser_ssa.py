@@ -1,9 +1,6 @@
 """SSA generation module for the Pyon Parser AST"""
 
 import pyon.ast.parser_ast as ast 
-#Stack of "join nodes": repositories for phi nodes
-
-
 
 class FallStmt(ast.Statement):
     """A statement representing the transfer of control flow 
@@ -21,7 +18,8 @@ class PhiNode(object):
     def __init__(self, ssaver, paths):
         assert isinstance(ssaver, int)
         for stmt, ver in paths:
-            assert isinstance(stmt, FallStmt) or isinstance(stmt, ast.ReturnStmt)
+            assert ( isinstance(stmt, FallStmt) 
+                           or isinstance(stmt, ast.ReturnStmt) )
             assert isinstance(ver, int)
         self.ssaVersion = ssaver
         self.paths = paths
@@ -33,6 +31,7 @@ class JoinNode(object):
         self.num = JoinNode.enum
         JoinNode.enum = JoinNode.enum + 1
         self.phiNodes = {}
+        self._pathDefs = {}
         #Structure is filled in lazily
 
     def setPhis(self, phis):
@@ -85,8 +84,10 @@ def convertSSA(obj):
     else:
         raise TypeError, type(obj)
 
-_savedForks = []
-_phiNodeStack = [{}]
+
+# The stack of join nodes being visited by SSA analysis.  The join nodes 
+# on this stack represent nested control dependence.
+_joinNodeStack = [JoinNode()]
 
 # The stack of functions being visited by SSA analysis.  The current function
 # is on the top of the stack.
@@ -102,81 +103,90 @@ def _nextVarSSA(var):
         var._ssaver = var._topssaver+1
         var._topssaver = var._ssaver
     else:
-        oldssaver = 0
+        oldssaver = -1 
         var._ssaver = 0
         var._topssaver = 0
     return oldssaver
 
+def _updatePathDef(var, newver, oldver):
+    """Updates the current path's lastest killing definition of var to
+    newver.  If a value for the original version of the variable on path 
+    entry is not recorded, oldver will be recorded as that value"""
+    pathdefs = _joinNodeStack[-1]._pathDefs
+
+    if var in pathdefs:
+        _ , oldver = pathdefs[var]
+    pathdefs[var] = (newver, oldver)
 
 def _makeSSA(paramorfunc):
     "Converts a variable definition to SSA form"
+    if isinstance(paramorfunc, ast.TupleParam):
+        [_makeSSA(param) for param in paramorfunc.fields]
+    else:
     #Taking advantage of the fact that both parameters and 
     # functions reference their corresponding variable object 
     # with the attribute 'name', even though they do not share 
     # it from a common inheritence heirarchy
-    if isinstance(paramorfunc, ast.TupleParam):
-        [_makeSSA(param) for param in paramorfunc.fields]
-    else:
         var = paramorfunc.name
         oldssaver = _nextVarSSA(var)
-
-        if var in _phiNodeStack[-1]:
-            current, orig = _phiNodeStack[-1][var]
-            _phiNodeStack[-1][var] = (var._ssaver, orig)
-        else:
-            _phiNodeStack[-1][var] = (var._ssaver, oldssaver)
-
+        pathdefs = _joinNodeStack[-1]._pathDefs
         paramorfunc.ssaver = var._ssaver
 
-def _enterLoop(phiNode):
-    "Setup data structure for entering a looping structure"
-    _enterFork()
-    _nextFork()
+        _updatePathDef(var, var._ssaver, oldssaver)
 
-def _enterFork():
-    "Setup internal structures for entering a control flow fork"
-    _phiNodeStack.append({})
 
-def _joinFork(truefall, falsefall, joinNode, hasret):
-    "Join the paths of control flow from the most recent fork"
-    phiNodes = {} 
-    joinNode.setPhis(phiNodes)
-    for var in set(_phiNodeStack[-1].keys()) | set(_savedForks[-1].keys()):
-        forkone = -1
-        forktwo = -1
-        if var in _phiNodeStack[-1].keys():
-            forktwo , forkone = _phiNodeStack[-1][var]
-        else: #var must be in _savedForks
-            forkone , forktwo = _savedForks[-1][var]
-        if var in _savedForks[-1].keys():
-            forkone , orig = _savedForks[-1][var]
-        else: #both forks have already been set correctly
-            pass
+def _initPath(join):
+    """Setup internal structures for entering a new control-flow path.
+    join is the join node where the new path will need to record its 
+    SSA dataflow into phi nodes"""
+    _joinNodeStack.append(join)
+    join._pathDefs = {}
 
+def _terminatePath():
+    """Cease exploring the current path, without recording any further 
+    dataflow.  Resets variables to their pre-path SSA versions"""
+    pathdefs = _joinNodeStack[-1]._pathDefs
+    _joinNodeStack.pop()
+    # Restore variables to their version live at path entry
+    for var in pathdefs.keys():
+        _ , var._ssaver = pathdefs[var]
+
+def _recordPhis(fallthrough):
+    """Record the definitions of the path currently being explored into 
+    the phi nodes of the join node provided to the corresponding _initPath
+    invocation.  fallthough is recorded as the statement where this 
+    path ends and control and dataflow merges with the join node"""
+    joinNode = _joinNodeStack[-1]
+    pathdefs = joinNode._pathDefs
+    for var, (flow_ver, _) in pathdefs.iteritems():
+        #flow_ver, _ = _joinNodeStack[-1][var]
         #Add phi nodes for each path it was assigned from
-        if truefall is not None:
-            joinNode.addPhi(var, truefall, forkone) 
-        if falsefall is not None:
-            joinNode.addPhi(var, falsefall, forktwo) 
-        
-        #A phi node generates a new SSA assignment, which should be 
-        #  recorded in the previous fork nest (if any)
-        orig = -1
-        if var in _phiNodeStack[-2]:
-            _, orig = _phiNodeStack[-2][var]
-        _phiNodeStack[-2][var] = (var._ssaver, orig)
+        joinNode.addPhi(var, fallthrough, flow_ver) 
 
-    _phiNodeStack.pop()
-    _savedForks.pop()
-    joinNode.hasret = hasret
+def _finishPath(fallthrough, record):
+    """Terminate current path exploration, and register phiNodes as 
+    assignments reaching the join block of statements if boolean @record is 
+    true"""
+    joinNode = _joinNodeStack[-1]
+    if record:
+        _recordPhis(fallthrough)
+    _terminatePath()
+    #A phi node generates a new SSA assignment, which should be 
+    #  recorded in the previous fork nest, and as the variable's current
+    #  ssa version
+    for var, phi in joinNode.phiNodes.iteritems():
+        _updatePathDef(var, phi.ssaVersion, -1)
+        var._ssaver = phi.ssaVersion
 
-def _nextFork():
-    """Save state of the first path of a fork, and begin 
-    recording the second path's state"""
-    _savedForks.append(_phiNodeStack[-1])
-    _phiNodeStack[-1] = {}
-    for var in _savedForks[-1].keys():
-        _ , var._ssaver = _savedForks[-1][var]
+def _nextPath(firstPathFallthrough, record):
+    """Begin recording a new path beginning from the same point as the 
+    path currently being explored.  The current path's definitions 
+    are recorded into phi nodes if the boolean @record is true"""
+    join = _joinNodeStack[-1]
+    if record:
+        _recordPhis(firstPathFallthrough)
+    _terminatePath()
+    _initPath(join)
 
 def _doIter(iter):
     """Perform SSA evaluation on an iterator"""
@@ -255,9 +265,11 @@ def _doStmtList(stmts, fallthrough):
         stmts.append(fallthrough)
         retval = fallthrough
 
-    # Ensure that all return statements are returning single variables
+    # Bind all return statements to a single return variable
     _separateReturns(stmts)
 
+    # Need to mark join nodes, after they are processed, with the 
+    # statement immediately following them in the list (no parent pointer)
     join = None
     for s in stmts:
         if join is not None:
@@ -288,19 +300,19 @@ def _doStmt(stmt, listfallthrough):
         stmt.joinPoint = reconverge
         truefall = FallStmt(reconverge)
         #set up new control flow fork in the SSA structures
-        _enterFork()
+        _initPath(reconverge)
         _doStmtList(stmt.ifTrue, truefall)
-        #switch to the other fork
-        _nextFork()
+        #Wrap up the true path and switch to the other 
+        _nextPath(truefall, not isinstance(stmt.ifTrue[-1], ast.ReturnStmt))
+
         falsefall = FallStmt(reconverge)
         _doStmtList(stmt.ifFalse, falsefall)
-        #merge the two forks into the join node
+        _finishPath(falsefall, 
+                    not (len(stmt.ifFalse) == 0 
+                       or isinstance(stmt.ifFalse[-1], ast.ReturnStmt) ) )
+
+        #Collect return-node information
         ifhasret = truefall.hasret or falsefall.hasret
-        if isinstance(stmt.ifTrue[-1], ast.ReturnStmt):
-            truefall = None
-        if len(stmt.ifFalse) == 0 or isinstance(stmt.ifFalse[-1], ast.ReturnStmt):
-            falsefall = None
-        _joinFork(truefall, falsefall, reconverge, ifhasret)
         listfallthrough.hasret = listfallthrough.hasret or ifhasret
         #following statement is recorded in the join node lazily
         return reconverge
@@ -314,9 +326,6 @@ def _doStmt(stmt, listfallthrough):
     else:
         raise TypeError, type(stmt)
 
-
-
-
 def _doFunction(f):
     """Perform SSA for the parameters and body of a function"""
     assert isinstance(f, ast.Function)
@@ -324,9 +333,13 @@ def _doFunction(f):
     f.joinPoint = ReturnNode()
     retvar = ast.PythonVariable('fret')
     _functionStack.append((f, retvar))
+    # Need to insulate code containing the function definition from 
+    # variable definitions inside the function 
+    _joinNodeStack.append(JoinNode())
     for p in f.parameters:
         _makeSSA(p)
     _doStmtList(f.body, ast.ReturnStmt(ast.LiteralExpr(None)))
+    _joinNodeStack.pop()
     _functionStack.pop()
 
 
