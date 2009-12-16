@@ -93,7 +93,6 @@ _phiNodeStack = [{}]
 # Each element is a (function, return-variable) pair, where return-variable
 # is a new PythonVariable representing the function's return value.
 _functionStack = []
-_returnVarCnt = 0
 
 def _nextVarSSA(var):
     """returns the current SSA version number for this variable, and 
@@ -236,7 +235,6 @@ def _separateReturns(stmtlist):
     of SSA.
     """
     _, var = _functionStack[-1]
-    global _returnVarCnt
     for i in reversed(range(len(stmtlist))):
         s = stmtlist[i]
         if isinstance(s, ast.ReturnStmt):
@@ -322,12 +320,10 @@ def _doStmt(stmt, listfallthrough):
 def _doFunction(f):
     """Perform SSA for the parameters and body of a function"""
     assert isinstance(f, ast.Function)
-    global _returnVarCnt
     _makeSSA(f)
     f.joinPoint = ReturnNode()
-    retvar = ast.PythonVariable('fret', _returnVarCnt)
+    retvar = ast.PythonVariable('fret')
     _functionStack.append((f, retvar))
-    _returnVarCnt = _returnVarCnt + 1
     for p in f.parameters:
         _makeSSA(p)
     _doStmtList(f.body, ast.ReturnStmt(ast.LiteralExpr(None)))

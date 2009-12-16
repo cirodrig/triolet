@@ -28,5 +28,6 @@ parseFile inPath = do
   text <- readFile inPath
   case parseModule text inPath of
     Left errs  -> raisePythonExc pyRuntimeError (head errs)
-    Right defs -> runExport $ toPythonEx defs
+    Right defs -> case defs
+                  of (n, mod) -> runExport $ toPythonEx (Inherit n, mod)
 

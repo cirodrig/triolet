@@ -13,8 +13,9 @@ testDir = os.path.join(DATA_DIR, 'testcases')
 # Try to compile a test program
 def tryCompile(fname):
     try:
-        # Currently we only run the parser
-        test_ast = haskell.parse(fname)
+        # Run everything up to and including SSA
+        (variable_id, test_ast) = haskell.parse(fname)
+        pyon.ast.parser_ast.PythonVariable.setIDGenerator(variable_id) 
         ssa.convertSSA(test_ast)
     except Exception, e:
         print e

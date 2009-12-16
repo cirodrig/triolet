@@ -17,7 +17,11 @@ class Variable(object):
         raise NotImplementedError, "'Variable' is an abstract base class"
 
 class ANFVariable(Variable):
-    """A single-assignment variable used in ANF."""
+    """
+    A single-assignment variable used in ANF.
+
+    This object is immutable.
+    """
 
     def __init__(self, name, identifier):
         """ANFVariable(string-or-None, int) -> new variable
@@ -31,6 +35,15 @@ class ANFVariable(Variable):
 
     def __eq__(self, other):
         return self.identifier == other.identifier
+
+    _nextID = 0
+
+    @classmethod
+    def getNewID(cls):
+        "Get a new, globally unique identifier"
+        n = ANFVariable._nextID
+        ANFVariable._nextID = n + 1
+        return n
 
 ###############################################################################
 # Parameters

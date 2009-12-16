@@ -20,7 +20,9 @@ static struct PyMethodDef haskell_methods[] = {
   { "parse",
     parsePyonFile_wrapper,
     METH_VARARGS,
-    "Parse a Pyon source file"
+    "parse(filename) -> (counter, module)\n"
+    "Parse a Pyon source file.  Returns the first unassigned variable ID\n"
+    "and the parsed module."
   },
   { NULL }
 };

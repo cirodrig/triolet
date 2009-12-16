@@ -21,11 +21,33 @@ class PythonVariable(Variable):
     def __eq__(self, other):
         return (self.name == other.name) and (self.identifier == other.identifier)
 
-    def __init__(self, name, identifier):
+    def __init__(self, name, identifier = None):
         assert isinstance(name, str)
+        if identifier is None: identifier = PythonVariable.getNewID()
         assert isinstance(identifier, int)
         self.name = name
         self.identifier = identifier
+
+        # A map from python variable identifiers (uniquely identifying
+        # Python variables) to SSA identifiers (uniquely identifying SSA
+        # instances of Python variables).
+        self.ssaVersionMap = {}         # Private to ANF conversion
+
+    _nextID = 1
+
+    @classmethod
+    def setIDGenerator(cls, n):
+        """
+        Set the value of the counter used to assign new variable IDs.
+        The value should be larger than any already assigned value.
+        """
+        PythonVariable._nextID = n
+
+    @classmethod
+    def getNewID(cls):
+        n = PythonVariable._nextID
+        PythonVariable._nextID = n + 1
+        return n
 
 ###############################################################################
 # Parameters

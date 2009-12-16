@@ -98,8 +98,6 @@ emptyScope = []
 -- A set of variable names
 type NameSet = Set.Set String
 
-type NameSupply = [Int]
-
 -- Some errors are generated lazily
 type Err = String
 type Errors = [Err] -> [Err]
@@ -120,7 +118,7 @@ identName (Py.Ident name) = name
 -- Computation may fail.
 -- Computation may also lazily generate errors, which are stored in a list.
 
-data CvtState = S NameSupply !Scopes Errors
+data CvtState = S !Int !Scopes Errors
 
 newtype Cvt a = Cvt {run :: CvtState -> Cvt' a}
 
@@ -245,7 +243,7 @@ updateScopes f = Cvt $ \(S ns scopes errs) ->
                            in ok (S ns scopes' (errs' . errs)) ()
 
 newID :: Cvt Int
-newID = Cvt $ \(S (n:ns) s errs) -> ok (S ns s errs) n
+newID = Cvt $ \(S n s errs) -> ok (S (n+1) s errs) n
 
 logErrors :: Errors -> Cvt ()
 logErrors es = Cvt $ \(S ns scopes errs) -> ok (S ns scopes (es . errs)) ()
@@ -256,14 +254,14 @@ logError e = logErrors (toErrors e)
       toErrors Nothing  = noError
       toErrors (Just e) = oneError e
 
-runAndGetErrors :: Cvt a -> NameSupply -> (NameSupply, Either [String] a)
-runAndGetErrors m names =
-    case run m (S names emptyScope noError)
-    of Fail msg -> (names, Left [msg])
-       OK (S names _ errs) _ _ x ->
+runAndGetErrors :: Cvt a -> Int -> (Int, Either [String] a)
+runAndGetErrors m nextName =
+    case run m (S nextName emptyScope noError)
+    of Fail msg -> (nextName, Left [msg])
+       OK (S nextName' _ errs) _ _ x ->
            case errs []
-           of [] -> (names, Right x)
-              xs -> (names, Left xs)
+           of [] -> (nextName', Right x)
+              xs -> (nextName', Left xs)
 
 -------------------------------------------------------------------------------
 -- Low-level editing of bindings
@@ -538,28 +536,33 @@ funDefinition (Py.Fun name params _ body) =
 -- Exported functions
 
 -- | Convert a Python statement to a Pyon expression.
-convertStatement :: Py.Statement -> NameSupply -> Either [String] [Stmt]
+-- The lowest unassigned variable ID is returned.
+convertStatement :: Py.Statement -> Int -> Either [String] (Int, [Stmt])
 convertStatement stmt names =
     let computation = singleStatement stmt
     in case runAndGetErrors computation names
-       of (_, result) -> result
+       of (ns, Left errs)    -> Left errs
+          (ns, Right result) -> Right (ns, result)
 
 -- | Convert a Python module to a Pyon module.
-convertModule :: Py.Module -> NameSupply -> Either [String] [Func]
+-- The lowest unassigned variable ID is returned.
+convertModule :: Py.Module -> Int -> Either [String] (Int, [Func])
 convertModule mod names =
     let computation =
             case mod
             of Py.Module statements -> enterGlobal $ \_ -> topLevel statements
     in case runAndGetErrors computation names
-       of (_, result) -> result
+       of (ns, Left errs)    -> Left errs
+          (ns, Right result) -> Right (ns, result)
 
 -- | Parse a Python module.
+-- The lowest unassigned variable ID is returned.
 parseModule :: String           -- ^ File contents
             -> String           -- ^ File name
-            -> Either [String] Module
+            -> Either [String] (Int, Module)
 parseModule stream path =
     case Py.parseModule stream path
     of Left err  -> Left [show err]
-       Right mod -> case convertModule mod [1..]
-                    of Left err   -> Left err
-                       Right defs -> Right (Module [defs])
+       Right mod -> case convertModule mod 1
+                    of Left err        -> Left err
+                       Right (n, defs) -> Right (n, Module [defs])
