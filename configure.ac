@@ -34,10 +34,10 @@ CIR_PY_INCDIR()
 
 ## Output
 
-# Force 32-bit build on darwin.
+# Force 32-bit build on x86_64 darwin.
 case $host in
-  i?86-*-darwin*) BUILD_32BIT=yes;;
-  *)              BUILD_32BIT=no;;
+  x86_64-*-darwin*) BUILD_32BIT=yes;;
+  *)                BUILD_32BIT=no;;
 esac
 
 AC_SUBST(cir_hs_libdir)
