@@ -45,6 +45,7 @@ def main(show_traceback = False):
     # For each test file
     print "Starting tests..."
     for dir, subdirs, files in os.walk(testDir):
+        files.sort()
         for f in files:
             # Run test
             path = os.path.join(dir, f)
