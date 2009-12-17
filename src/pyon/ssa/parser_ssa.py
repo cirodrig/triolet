@@ -18,8 +18,7 @@ class PhiNode(object):
     def __init__(self, ssaver, paths):
         assert isinstance(ssaver, int)
         for stmt, ver in paths:
-            assert ( isinstance(stmt, FallStmt) 
-                           or isinstance(stmt, ast.ReturnStmt) )
+            assert isinstance(stmt, (FallStmt, ast.ReturnStmt))
             assert isinstance(ver, int)
         self.ssaVersion = ssaver
         self.paths = paths
@@ -70,7 +69,9 @@ JoinNode.enum = 0
 def convertSSA(obj):
     "Convert a parser object into SSA format"
     if isinstance(obj, ast.Module):
-        [[_doFunction(f) for f in f_list] for f_list in obj.definitions]
+        for f_list in obj.definitions:
+            for f in f_list:
+                _doFunction(f)
     elif isinstance(obj, ast.Function):
         _doFunction(obj)
     elif isinstance(obj, ast.Statement):
@@ -121,7 +122,7 @@ def _updatePathDef(var, newver, oldver):
 def _makeSSA(paramorfunc):
     "Converts a variable definition to SSA form"
     if isinstance(paramorfunc, ast.TupleParam):
-        [_makeSSA(param) for param in paramorfunc.fields]
+        for param in paramorfunc.fields: _makeSSA(param)
     else:
     #Taking advantage of the fact that both parameters and 
     # functions reference their corresponding variable object 
@@ -215,7 +216,7 @@ def _doExpr(expr):
         _doExpr(expr.argument)
     elif isinstance(expr, ast.CallExpr):
         _doExpr(expr.operator)
-        [_doExpr(a) for a in expr.arguments]
+        for a in expr.arguments: _doExpr(a)
     elif isinstance(expr, ast.ListCompExpr):
         _doIter(expr.iterator)
     elif isinstance(expr, ast.GeneratorExpr):
@@ -231,7 +232,7 @@ def _doExpr(expr):
         #parameters should have gotten different variables
         _doExpr(expr.body)
     elif isinstance(expr, ast.TupleExpr):
-        [_doExpr(ex) for ex in expr.arguments]
+        for ex in expr.arguments: _doExpr(ex)
     else:
         raise TypeError, type(expr)
 
@@ -335,8 +336,7 @@ def _doFunction(f):
     # Need to insulate code containing the function definition from 
     # variable definitions inside the function 
     _joinNodeStack.append(JoinNode())
-    for p in f.parameters:
-        _makeSSA(p)
+    for p in f.parameters: _makeSSA(p)
     _doStmtList(f.body, ast.ReturnStmt(ast.LiteralExpr(None)))
     _joinNodeStack.pop()
     _functionStack.pop()
