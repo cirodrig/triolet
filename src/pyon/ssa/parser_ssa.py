@@ -39,12 +39,24 @@ class JoinNode(object):
             assert isinstance(phiNode, PhiNode)
         self.phiNodes = phis
 
-    def addPhi(self, var, stmt, version):
+    def addPhi(self, var, stmt, version, alternate_fallthroughs = []):
+        """    alternate_fallthroughs is a list of other fallthrough statements reaching this 
+        join node for which variable definitionas have already been incorporated into 
+        the current join's phi nodes.  If no phi node for that variable currently exists, 
+        the definition of the variable live on the current fork's entry will be recorded 
+        for every already-explored path. """ 
         if var in self.phiNodes:
             self.phiNodes[var].paths.append( (stmt, version) )
         else:
             _nextVarSSA(var)
             self.phiNodes[var] = PhiNode(var._ssaver, [(stmt, version)])
+
+            #Retroactively create fallthough defintions for already-explored paths
+            for alt_stmt in alternate_fallthroughs:
+                # Assumes addPhi will only be called on variables present in _pathDefs
+                assert (var in self._pathDefs)
+                _ , origVersion = self._pathDefs[var] 
+                self.phiNodes[var].paths.insert(-1, (alt_stmt, origVersion))
             
 
 class IfNode(JoinNode):
@@ -141,36 +153,44 @@ def _initPath(join):
     join is the join node where the new path will need to record its 
     SSA dataflow into phi nodes"""
     _joinNodeStack.append(join)
-    join._pathDefs = {}
+    #join._pathDefs = {}
 
 def _terminatePath():
     """Cease exploring the current path, without recording any further 
-    dataflow.  Resets variables to their pre-path SSA versions"""
+    dataflow.  Resets variables to their pre-path SSA versions in their 
+    own structures and in the join node's pathdefs dictionary"""
     pathdefs = _joinNodeStack[-1]._pathDefs
     _joinNodeStack.pop()
     # Restore variables to their version live at path entry
     for var in pathdefs.keys():
         _ , var._ssaver = pathdefs[var]
+        pathdefs[var] = (var._ssaver, var._ssaver)
 
-def _recordPhis(fallthrough):
+def _recordPhis(fallthrough, alternate_fallthroughs = []):
     """Record the definitions of the path currently being explored into 
     the phi nodes of the join node provided to the corresponding _initPath
     invocation.  fallthough is recorded as the statement where this 
     path ends and control and dataflow merges with the join node"""
     joinNode = _joinNodeStack[-1]
     pathdefs = joinNode._pathDefs
-    for var, (flow_ver, _) in pathdefs.iteritems():
+    for var, (flow_ver, orig) in pathdefs.iteritems():
         #flow_ver, _ = _joinNodeStack[-1][var]
         #Add phi nodes for each path it was assigned from
-        joinNode.addPhi(var, fallthrough, flow_ver) 
+        joinNode.addPhi(var, fallthrough, flow_ver, alternate_fallthroughs) 
 
-def _finishPath(fallthrough, record):
-    """Terminate current path exploration, and register phiNodes as 
-    assignments reaching the join block of statements if boolean @record is 
-    true"""
+def _finishPath(fallthrough, alternate_fallthroughs = []):
+    """Terminate current path exploration, and register defintions as 
+    assignments reaching the join block of statements, through phi nodes.  
+
+    alternate_fallthroughs is a list of other fallthrough statements reaching this 
+    join node for which variable definitionas have already been incorporated into 
+    the current join's phi nodes.  If no phi node for that variable currently exists, 
+    the definition of the variable live on the current fork's entry will be recorded 
+    for every already-explored path.  
+    """
     joinNode = _joinNodeStack[-1]
-    if record:
-        _recordPhis(fallthrough)
+    pathdefs = joinNode._pathDefs
+    _recordPhis(fallthrough, alternate_fallthroughs)
     _terminatePath()
     #A phi node generates a new SSA assignment, which should be 
     #  recorded in the previous fork nest, and as the variable's current
@@ -179,13 +199,18 @@ def _finishPath(fallthrough, record):
         _updatePathDef(var, phi.ssaVersion, -1)
         var._ssaver = phi.ssaVersion
 
-def _nextPath(firstPathFallthrough, record):
+def _nextPath(firstPathFallthrough, alternate_fallthroughs = []):
     """Begin recording a new path beginning from the same point as the 
-    path currently being explored.  The current path's definitions 
-    are recorded into phi nodes if the boolean @record is true"""
+    path currently being explored.  
+    
+    @alternate_fallthroughs is a list of other fallthrough statements reaching this 
+    join node for which variable definitionas have already been incorporated into 
+    the current join's phi nodes.  If no phi node for that variable currently exists, 
+    the definition of the variable live on the current fork's entry will be recorded 
+    for every already-explored path.  
+    """
     join = _joinNodeStack[-1]
-    if record:
-        _recordPhis(firstPathFallthrough)
+    _recordPhis(firstPathFallthrough, alternate_fallthroughs)
     _terminatePath()
     _initPath(join)
 
@@ -302,13 +327,11 @@ def _doStmt(stmt):
         _initPath(reconverge)
         _doStmtList(stmt.ifTrue, truefall)
         #Wrap up the true path and switch to the other 
-        _nextPath(truefall, not isinstance(stmt.ifTrue[-1], ast.ReturnStmt))
+        _nextPath(truefall)
 
         falsefall = FallStmt(reconverge)
         _doStmtList(stmt.ifFalse, falsefall)
-        _finishPath(falsefall, 
-                    not (len(stmt.ifFalse) == 0 
-                       or isinstance(stmt.ifFalse[-1], ast.ReturnStmt) ) )
+        _finishPath(falsefall, [truefall])
 
         #Propagate return-node information
         if isinstance(_joinNodeStack[-1], IfNode):
