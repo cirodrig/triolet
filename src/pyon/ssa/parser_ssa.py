@@ -82,18 +82,11 @@ def convertSSA(obj):
     "Convert a parser object into SSA format"
     if isinstance(obj, ast.Module):
         for f_list in obj.definitions:
-            for f in f_list:
-                _doFunction(f)
-    elif isinstance(obj, ast.Function):
-        _doFunction(obj)
+            _doDefGroup(f_list)
     elif isinstance(obj, ast.Statement):
         _doStmt(obj)
     elif isinstance(obj, ast.Expression):
         _doExpr(obj)
-    elif isinstance(obj, ast.Parameter):
-        pass
-    elif isinstance(obj, ast.PythonVariable):
-        pass
     else:
         raise TypeError, type(obj)
 
@@ -340,10 +333,7 @@ def _doStmt(stmt):
         #succeeding statement is recorded in the join node lazily
         return reconverge
     elif isinstance(stmt, ast.DefGroupStmt):
-        for d in stmt.definitions:
-            #I remember something about doing SSA on functions 
-            # at their declaration.  Is this all there is?
-            _doFunction(d)
+        _doDefGroup(stmt.definitions)
     elif isinstance(stmt, FallStmt):
         pass
     else:
@@ -352,7 +342,6 @@ def _doStmt(stmt):
 def _doFunction(f):
     """Perform SSA for the parameters and body of a function"""
     assert isinstance(f, ast.Function)
-    _makeSSA(f)
     f.joinPoint = ReturnNode()
     retvar = ast.PythonVariable('fret')
     _functionStack.append((f, retvar))
@@ -364,4 +353,11 @@ def _doFunction(f):
     _joinNodeStack.pop()
     _functionStack.pop()
 
+def _doDefGroup(f_list):
+    """Perform SSA on a definition group."""
+    # Define all functions
+    for f in f_list: _makeSSA(f)
+
+    # Do SSA on the bodies of all functions
+    for f in f_list: _doFunction(f)
 
