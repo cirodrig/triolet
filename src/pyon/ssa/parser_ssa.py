@@ -274,15 +274,23 @@ def _separateReturns(stmtlist):
             s.expression = newretexpr
             stmtlist.insert(i, retcopy)
 
-def _doStmtList(stmts, fallthrough):
+def _regularizeControl(stmts, fallthrough):
+    """
+    Restructure a statement list so that the list has exactly one control flow
+    transfer statement, at the end of the list.  If one needs to be inserted,
+    insert @fallthrough.
+    """
+    for i in range(len(stmts)):
+        if isinstance(stmts[i], (ast.ReturnStmt, FallStmt)):
+            del stmts[i+1:]
+            break
+    else:
+        stmts.append(fallthrough)
+
+def _doStmtList(stmts):
     """Perform SSA evaluation on a list of statements
     The second argument provides the fallthrough mechanism, which 
     is inserted if the statement list does not end in a return statement"""
-    retval = None
-    if len(stmts) == 0 or not isinstance(stmts[-1], ast.ReturnStmt):
-        stmts.append(fallthrough)
-        retval = fallthrough
-
     # Bind all return statements to a single return variable
     _separateReturns(stmts)
 
@@ -293,7 +301,6 @@ def _doStmtList(stmts, fallthrough):
         if join is not None:
             join.setJoin(s)
         join = _doStmt(s)
-    return retval
 
 def _doStmt(stmt):
     """Perform SSA evaluation on a statement.  The second argument is 
@@ -318,12 +325,14 @@ def _doStmt(stmt):
         truefall = FallStmt(reconverge)
         #set up new control flow fork in the SSA structures
         _initPath(reconverge)
-        _doStmtList(stmt.ifTrue, truefall)
+        _regularizeControl(stmt.ifTrue, truefall)
+        _doStmtList(stmt.ifTrue)
         #Wrap up the true path and switch to the other 
         _nextPath(truefall)
 
         falsefall = FallStmt(reconverge)
-        _doStmtList(stmt.ifFalse, falsefall)
+        _regularizeControl(stmt.ifFalse, falsefall)
+        _doStmtList(stmt.ifFalse)
         _finishPath(falsefall, [truefall])
 
         #Propagate return-node information
@@ -349,7 +358,8 @@ def _doFunction(f):
     # variable definitions inside the function 
     _joinNodeStack.append(JoinNode())
     for p in f.parameters: _makeSSA(p)
-    _doStmtList(f.body, ast.ReturnStmt(ast.LiteralExpr(None)))
+    _regularizeControl(f.body, ast.ReturnStmt(ast.LiteralExpr(None)))
+    _doStmtList(f.body)
     _joinNodeStack.pop()
     _functionStack.pop()
 
