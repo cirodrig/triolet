@@ -80,8 +80,6 @@ def convertSSA(obj):
     if isinstance(obj, ast.Module):
         for f_list in obj.definitions:
             _doDefGroup(f_list)
-    elif isinstance(obj, ast.Statement):
-        _doStmt(obj)
     elif isinstance(obj, ast.Expression):
         _doExpr(obj)
     else:
@@ -91,12 +89,6 @@ def convertSSA(obj):
 # The stack of join nodes being visited by SSA analysis.  The join nodes 
 # on this stack represent nested control dependence.
 _joinNodeStack = [JoinNode()]
-
-# The stack of functions being visited by SSA analysis.  The current function
-# is on the top of the stack.
-# Each element is a (function, return-variable) pair, where return-variable
-# is a new PythonVariable representing the function's return value.
-_functionStack = []
 
 def _nextVarSSA(var):
     """returns the current SSA version number for this variable, and 
@@ -251,7 +243,7 @@ def _doExpr(expr):
     else:
         raise TypeError, type(expr)
 
-def _separateReturns(stmtlist):
+def _separateReturns(fn_ctx, stmtlist):
     """
     Find all 'return' statements in stmtlist and split them into an assignment
     of a temporary variable and a return statement.
@@ -260,7 +252,7 @@ def _separateReturns(stmtlist):
     statement is always a simple variable.  This is assumed by later steps
     of SSA.
     """
-    _, var = _functionStack[-1]
+    _, var = fn_ctx
     for i in reversed(range(len(stmtlist))):
         s = stmtlist[i]
         if isinstance(s, ast.ReturnStmt):
@@ -284,24 +276,30 @@ def _regularizeControl(stmts, fallthrough):
     else:
         stmts.append(fallthrough)
 
-def _doStmtList(stmts):
-    """Perform SSA evaluation on a list of statements
-    The second argument provides the fallthrough mechanism, which 
-    is inserted if the statement list does not end in a return statement"""
+def _doStmtList(fn_ctx, stmts):
+    """
+    Perform SSA evaluation on a list of statements.
+
+    fn_ctx : (Function, PythonVariable)
+      The current function context.  It includes the current function and
+      a variable representing the function's return value.
+    stmts : [Statement]
+      The list of statements to process.
+    """
     # Bind all return statements to a single return variable
-    _separateReturns(stmts)
+    _separateReturns(fn_ctx, stmts)
 
     # Pass the successor of each statement to doStmt, so that control flow
     # join points can be marked.
     # Detect whether any statements contain escaping control flow.
     escaping_control = False
     for s, next_s in zip(stmts, stmts[1:] + [None]):
-        ec = _doStmt(s, next_s)
+        ec = _doStmt(fn_ctx, s, next_s)
         escaping_control = escaping_control or ec
 
     return escaping_control
 
-def _doStmt(stmt, next_stmt):
+def _doStmt(fn_ctx, stmt, next_stmt):
     """
     Perform SSA evaluation on a statement.  The second argument is 
     used only to mark if a return statement is seen in the subtree of the 
@@ -315,7 +313,7 @@ def _doStmt(stmt, next_stmt):
 
     elif isinstance(stmt, ast.ReturnStmt):
         _doExpr(stmt.expression)
-        fdef, var = _functionStack[-1]
+        fdef, var = fn_ctx
         stmt.joinNode = fdef.joinPoint
         stmt.joinNode.addPhi(var, stmt, stmt.expression.ssaver)
         return True
@@ -336,13 +334,13 @@ def _doStmt(stmt, next_stmt):
         _initPath(reconverge)
         truefall = FallStmt(reconverge)
         _regularizeControl(stmt.ifTrue, truefall)
-        ec1 = _doStmtList(stmt.ifTrue)
+        ec1 = _doStmtList(fn_ctx, stmt.ifTrue)
 
         #Wrap up the true path and switch to the other 
         _nextPath(truefall)
         falsefall = FallStmt(reconverge)
         _regularizeControl(stmt.ifFalse, falsefall)
-        ec2 = _doStmtList(stmt.ifFalse)
+        ec2 = _doStmtList(fn_ctx, stmt.ifFalse)
 
         _finishPath(falsefall, [truefall])
 
@@ -365,15 +363,15 @@ def _doFunction(f):
     assert isinstance(f, ast.Function)
     f.joinPoint = ReturnNode()
     retvar = ast.PythonVariable('fret')
-    _functionStack.append((f, retvar))
+    fn_ctx = (f, retvar)
+
     # Need to insulate code containing the function definition from 
     # variable definitions inside the function 
     _joinNodeStack.append(JoinNode())
     for p in f.parameters: _makeSSA(p)
     _regularizeControl(f.body, ast.ReturnStmt(ast.LiteralExpr(None)))
-    _doStmtList(f.body)
+    _doStmtList(fn_ctx, f.body)
     _joinNodeStack.pop()
-    _functionStack.pop()
 
 def _doDefGroup(f_list):
     """Perform SSA on a definition group."""
