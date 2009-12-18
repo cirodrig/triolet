@@ -62,13 +62,10 @@ class JoinNode(object):
 class IfNode(JoinNode):
     """Represents the control-flow join of an if or if-else 
     construct"""
-    def __init__(self):
+    def __init__(self, join_stmt):
         JoinNode.__init__(self)
         self.hasret = False
-
-    def setJoin(self, stmt):
-        assert isinstance(stmt, ast.Statement)
-        self.joinStmt = stmt
+        self.joinStmt = join_stmt
 
 class ReturnNode(JoinNode):
     """Represents the control-flow join from exiting a function 
@@ -294,57 +291,72 @@ def _doStmtList(stmts):
     # Bind all return statements to a single return variable
     _separateReturns(stmts)
 
-    # Need to mark join nodes, after they are processed, with the 
-    # statement immediately following them in the list (no parent pointer)
-    join = None
-    for s in stmts:
-        if join is not None:
-            join.setJoin(s)
-        join = _doStmt(s)
+    # Pass the successor of each statement to doStmt, so that control flow
+    # join points can be marked.
+    # Detect whether any statements contain escaping control flow.
+    escaping_control = False
+    for s, next_s in zip(stmts, stmts[1:] + [None]):
+        ec = _doStmt(s, next_s)
+        escaping_control = escaping_control or ec
 
-def _doStmt(stmt):
-    """Perform SSA evaluation on a statement.  The second argument is 
+    return escaping_control
+
+def _doStmt(stmt, next_stmt):
+    """
+    Perform SSA evaluation on a statement.  The second argument is 
     used only to mark if a return statement is seen in the subtree of the 
-    particular statement."""
+    particular statement.
+
+    Return true if this statement contains any escpaing control flow.
+    """
     if isinstance(stmt, ast.ExprStmt):
         _doExpr(stmt.expression)
+        return False
+
     elif isinstance(stmt, ast.ReturnStmt):
         _doExpr(stmt.expression)
         fdef, var = _functionStack[-1]
         stmt.joinNode = fdef.joinPoint
         stmt.joinNode.addPhi(var, stmt, stmt.expression.ssaver)
-        _joinNodeStack[-1].hasret = True
+        return True
+
     elif isinstance(stmt, ast.AssignStmt):
         _doExpr(stmt.expression)
         _makeSSA(stmt.lhs)
+        return False
+
     elif isinstance(stmt, ast.IfStmt):
+        assert next_stmt is not None
         #Expression evaluation happens first
         _doExpr(stmt.cond)
-        reconverge = IfNode()
+        reconverge = IfNode(next_stmt)
         stmt.joinPoint = reconverge
-        truefall = FallStmt(reconverge)
+
         #set up new control flow fork in the SSA structures
         _initPath(reconverge)
+        truefall = FallStmt(reconverge)
         _regularizeControl(stmt.ifTrue, truefall)
-        _doStmtList(stmt.ifTrue)
+        ec1 = _doStmtList(stmt.ifTrue)
+
         #Wrap up the true path and switch to the other 
         _nextPath(truefall)
-
         falsefall = FallStmt(reconverge)
         _regularizeControl(stmt.ifFalse, falsefall)
-        _doStmtList(stmt.ifFalse)
+        ec2 = _doStmtList(stmt.ifFalse)
+
         _finishPath(falsefall, [truefall])
 
-        #Propagate return-node information
-        if isinstance(_joinNodeStack[-1], IfNode):
-            _joinNodeStack[-1].hasret = ( _joinNodeStack[-1].hasret 
-                                            or reconverge.hasret  )
-        #succeeding statement is recorded in the join node lazily
-        return reconverge
+        escaping_control = ec1 or ec2
+        reconverge.hasret = escaping_control
+        return escaping_control
+
     elif isinstance(stmt, ast.DefGroupStmt):
         _doDefGroup(stmt.definitions)
+        return False
+
     elif isinstance(stmt, FallStmt):
-        pass
+        return False
+
     else:
         raise TypeError, type(stmt)
 
