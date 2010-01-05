@@ -136,14 +136,11 @@ def convertExpression(expr):
     if isinstance(expr, p_ast.VariableExpr):
         return a_ast.VariableExpr(convertVariable(expr.variable, expr.ssaver))
 
-    if isinstance(expr, p_ast.TupleExpr):
+    elif isinstance(expr, p_ast.TupleExpr):
         return a_ast.TupleExpr([convertExpression(e) for e in expr.arguments])
 
     elif isinstance(expr, p_ast.LiteralExpr):
         return a_ast.LiteralExpr(expr.literal)
-
-    elif isinstance(expr, p_ast.TupleExpr):
-        return a_ast.TupleExpr([convertExpression(e) for e in expr.arguments])
 
     elif isinstance(expr, p_ast.UnaryExpr):
         return _callVariable(convertUnaryOperator(expr.operator),
