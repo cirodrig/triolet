@@ -25,7 +25,11 @@ def convertFunction(func):
     parameters = [convertParameter(p) for p in func.parameters]
 
     # Convert body
-    body = convertSuite(func.body, _consumeValue(func.joinPoint))
+    def cannot_fallthrough(*args):
+        # Control flow should never "fall through" out of a function body;
+        # It should always end at a return statement
+        raise ValueError, "Function body has no fallthrough path"
+    body = convertSuite(func.body, cannot_fallthrough)
 
     return a_ast.FunctionDef(name, a_ast.exprFunction(parameters, body))
              
@@ -63,8 +67,11 @@ def convertStatement(stmt, make_fallthrough):
         lhs = convertParameter(stmt.lhs)
         return a_ast.LetExpr(lhs, first, make_fallthrough())
 
-    elif isinstance(stmt, (p_ast.ReturnStmt, ssa.FallStmt)):
+    elif isinstance(stmt, ssa.FallStmt):
         return _produceValue(stmt)
+
+    elif isinstance(stmt, p_ast.ReturnStmt):
+        return _produceReturnValue(stmt)
 
     elif isinstance(stmt, p_ast.IfStmt):
         join_node = stmt.joinPoint
@@ -109,19 +116,35 @@ def _produceValue(control_flow_stmt):
         """
         Create an expression corresponding to the value of 'variable'.
         """
-        # Search for the path from the current statement into the phi node
-        for (phi_stmt, version) in phi_node.paths:
-            if phi_stmt is control_flow_stmt: break
-        else:
-            raise KeyError, "Missing SSA information for a control flow path"
-
-        # Convert to an ANF variable
+        version = phi_node.getVersion(variable, control_flow_stmt)
         return convertVariable(variable, version)
 
     values = [a_ast.VariableExpr(find_var(var, phi_node))
               for var, phi_node in join_node.phiNodes.iteritems()]
 
     return a_ast.TupleExpr(values)
+
+def _produceReturnValue(control_flow_stmt):
+    """
+    Create an expression with the value of the live-in variable of
+    join_node on the path coming from stmt.  There must be exactly one
+    live-in variable.
+    """
+    join_node = control_flow_stmt.joinNode
+
+    def find_var(variable, phi_node):
+        """
+        Create an expression corresponding to the value of 'variable'.
+        """
+        version = phi_node.getVersion(variable, control_flow_stmt)
+        return convertVariable(variable, version)
+
+    if len(join_node.phiNodes) != 1:
+        # There should be exactly one returned value
+        raise ValueError, "Expecting one (explicit or implicit) return value"
+
+    [(var, phi_node)] = join_node.phiNodes.iteritems()
+    return a_ast.VariableExpr(find_var(var, phi_node))
 
 def _consumeValue(join_point):
     """

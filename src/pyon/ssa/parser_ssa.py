@@ -23,6 +23,20 @@ class PhiNode(object):
         self.ssaVersion = ssaver
         self.paths = paths
 
+    def getVersion(self, var, stmt):
+        """
+        Look up the SSA version of @var that flows along the path from
+        @stmt into this phi node.  The statment should be a fallthrough or
+        return statement.
+
+        This should only be called after SSA is completely constructed.
+        """
+        for phi_stmt, version in self.paths:
+            if phi_stmt is stmt: return version
+
+        # Error, not found
+        raise KeyError, "Missing SSA information for a control flow path"
+
 class JoinNode(object):
     """An object representing a control-flow join, and containing the 
     phi nodes representing the dataflow through that join"""
