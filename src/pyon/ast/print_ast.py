@@ -78,6 +78,9 @@ def printExpression(expr, precedence):
             fs = pretty.space(pretty.punctuate(',', argdocs)) 
         return pretty.parens(fs)
 
+    elif isinstance(expr, UndefinedExpr):
+        return "__undefined__"
+
     elif isinstance(expr, CallExpr):
         arglist = pretty.punctuate(',', [printExpression(e, _OUTER_PREC)
                                          for e in expr.arguments])

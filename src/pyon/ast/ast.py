@@ -154,6 +154,12 @@ class LiteralExpr(Expression):
         base.initializeExpr(self)
         self.literal = l
 
+class UndefinedExpr(Expression):
+    """An undefined value of any type."""
+
+    def __init__(self, base = ExprInit.default):
+        base.initializeExpr(self)
+
 class TupleExpr(Expression):
     """A tuple expression."""
 

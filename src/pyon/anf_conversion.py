@@ -117,9 +117,9 @@ def _produceValue(control_flow_stmt):
         Create an expression corresponding to the value of 'variable'.
         """
         version = phi_node.getVersion(variable, control_flow_stmt)
-        return convertVariable(variable, version)
+        return convertVariableRef(variable, version)
 
-    values = [a_ast.VariableExpr(find_var(var, phi_node))
+    values = [find_var(var, phi_node)
               for var, phi_node in join_node.phiNodes.iteritems()]
 
     return a_ast.TupleExpr(values)
@@ -132,19 +132,18 @@ def _produceReturnValue(control_flow_stmt):
     """
     join_node = control_flow_stmt.joinNode
 
-    def find_var(variable, phi_node):
-        """
-        Create an expression corresponding to the value of 'variable'.
-        """
-        version = phi_node.getVersion(variable, control_flow_stmt)
-        return convertVariable(variable, version)
-
     if len(join_node.phiNodes) != 1:
         # There should be exactly one returned value
         raise ValueError, "Expecting one (explicit or implicit) return value"
 
+    # Get the return variable and its corresponding phi node
     [(var, phi_node)] = join_node.phiNodes.iteritems()
-    return a_ast.VariableExpr(find_var(var, phi_node))
+
+    # Get the SSA version
+    version = phi_node.getVersion(var, control_flow_stmt)
+
+    # Create an expression
+    return convertVariableRef(var, version)
 
 def _consumeValue(join_point):
     """
@@ -157,7 +156,7 @@ def _consumeValue(join_point):
 def convertExpression(expr):
     "Convert a parser expression to an ANF expression"
     if isinstance(expr, p_ast.VariableExpr):
-        return a_ast.VariableExpr(convertVariable(expr.variable, expr.ssaver))
+        return convertVariableRef(expr.variable, expr.ssaver)
 
     elif isinstance(expr, p_ast.TupleExpr):
         return a_ast.TupleExpr([convertExpression(e) for e in expr.arguments])
@@ -246,6 +245,8 @@ def convertVariable(var, ssaver):
     Convert a variable to ANF.  The SSA version is used to pick
     an identifier for the variable.
     """
+    assert ssaver != -1
+
     # Choose an identifier for this variable
     try:
         n = var.ssaVersionMap[ssaver]
@@ -253,6 +254,19 @@ def convertVariable(var, ssaver):
         n = var.ssaVersionMap[ssaver] = a_ast.ANFVariable.getNewID()
 
     return a_ast.ANFVariable(var.name, n)
+
+def convertVariableRef(var, ssaver):
+    """
+    convertVariableRef(PythonVariable, ssa-version) -> Expression
+    Convert a variable reference to an ANF expression.  The SSA
+    version is used to pick an identifier for the variable.  If the
+    SSA version is -1, then an undefined expression is returned.
+    """
+    # If version is -1, then use the special expression 'undefined'
+    if ssaver == -1:
+        return a_ast.UndefinedExpr()
+    else:
+        return a_ast.VariableExpr(convertVariable(var, ssaver))
 
 # A mapping from parser operator to ANF variable
 _convertBinaryOperatorMap = {
