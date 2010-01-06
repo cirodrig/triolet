@@ -202,13 +202,15 @@ def convertExpression(expr):
 def convertIterator(iter):
     "Convert an iterator to an ANF iterator"
     if isinstance(iter, p_ast.ForIter):
+        arg = convertExpression(iter.argument)
+        
         # Convert the body to a function
         param = convertParameter(iter.parameter)
         body_func = a_ast.iterFunction([param], convertIterator(iter.body))
 
         # Create a call to 'FOREACH'
         return _callVariable(builtin_data.oper_FOREACH,
-                             [a_ast.FunExpr(body_func)])
+                             [arg, a_ast.FunExpr(body_func)])
     elif isinstance(iter, p_ast.IfIter):
         # Convert guard and body to nullary functions
         guard = convertExpression(iter.guard)
