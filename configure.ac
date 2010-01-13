@@ -7,15 +7,17 @@ AC_CANONICAL_HOST
 AC_PROG_CC
 AC_PROG_CPP
 AC_CHECK_PROG([HAVE_HC], [ghc], [yes], [no])
+if test "$HAVE_HC" != "yes"; then AC_MSG_ERROR([Cannot find ghc]); fi
 AC_CHECK_PROG([HAVE_HSC2HS], [hsc2hs], [yes], [no])
+if test "$HAVE_HSC2HS" != "yes"; then AC_MSG_ERROR([Cannot find hsc2hs]); fi
 AC_PATH_PROG([cir_ghc_pkg], [ghc-pkg])
 CIR_PROG_PYTHON()
 CIR_PY_VERSION()
 CIR_HS_VERSION()
 
-case $(($cir_hs_major_version >= 6 && $cir_hs_minor_version >= 10)) in
+case $((($cir_hs_major_version == 6 && $cir_hs_minor_version >= 10) || $cir_hs_major_version > 6)) in
   1) ;;
-  *) AC_MSG_ERROR([[need ghc 6.10 or above; found $cir_hs_version]]) ;;
+  *) AC_MSG_ERROR([need ghc 6.10 or above; found $cir_hs_version]) ;;
 esac
 
 ## Find paths to libraries
@@ -25,8 +27,9 @@ CIR_PY_LIBDIR()
 
 ## Check for libraries
 
-CIR_HS_CHECK_PACKAGE([[mtl]])
-CIR_HS_CHECK_PACKAGE([[language-python-0.1.1]])
+CIR_HS_CHECK_PACKAGE([mtl])
+CIR_HS_CHECK_PACKAGE([language-python-0.1.1])
+CIR_HS_CHECK_PACKAGE([gluon])
 
 ## Check for header files
 
