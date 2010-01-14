@@ -2,6 +2,8 @@
 First-order unification.
 """
 
+import pyon.pretty as pretty
+
 class Unifiable(object):
     """Abstract base class of objects that can be unified."""
 
@@ -64,9 +66,16 @@ class Variable(object):
 
     def canonicalize(self):
         canon = self
-        while canon._representative:
-            canon = canon._representative
-        return canon
+        # TODO
+        # EntTy does not have _representative, thus raises an exception
+        # Below try-except does not look good
+        try:
+            while canon._representative:
+                canon = canon._representative
+        except:
+            pass
+        finally:
+            return canon
 
     def unifyWith(self, other):
         self._representative = other
@@ -121,7 +130,7 @@ def unify(x, y):
                 raise UnificationError, "type mismatch"
 
         else:                           # Variable
-            y.unifyWithTerm(x)
+            y.unifyWith(x)
 
         # Return x, since it is canonical
         return x

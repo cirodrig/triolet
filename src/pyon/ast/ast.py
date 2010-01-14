@@ -52,7 +52,7 @@ class ANFVariable(Variable):
         self.identifier = identifier
 
     def __eq__(self, other):
-        return self.identifier == other.identifier
+        return (self.name == other.name) and (self.identifier == other.identifier)
 
     _nextID = 0
 

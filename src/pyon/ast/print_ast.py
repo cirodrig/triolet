@@ -9,6 +9,24 @@ import sys
 
 #_indentation = 0
 
+def prettyType(ty):
+    if isinstance(ty, pyon.types.hmtype.TyScheme):
+        ty = ty.instantiate()
+        fmt = '!<%s>'
+    else:
+        fmt = '<%s>'
+
+    if isinstance(ty, pyon.types.hmtype.EntTy):
+        return pretty.abut(fmt % ty.canonicalize().pretty())
+    elif isinstance(ty, pyon.types.hmtype.TyVar):
+        return pretty.abut(fmt % ty.canonicalize().pretty())
+    elif isinstance(ty, pyon.types.hmtype.AppTy):
+        return pretty.abut(fmt % ty.canonicalize().pretty())
+    elif isinstance(ty, pyon.types.hmtype.TupleTy):
+        return pretty.braces(pretty.space(pretty.punctuate(',', [prettyType(f) for f in ty.arguments])))
+    else:
+        return pretty.space('?')
+
 def printAst(root, file = sys.stdout):
     """A generic, recursive printing function.
     Examines the argument type and calls the appropriate print function.
@@ -145,6 +163,8 @@ def printParam(p):
         printlist.append(printVar(p.name))
         if p.default is not None:
             printlist.append(pretty.space('=', printVar(p.default)))
+        if p.type:
+            printlist.append(prettyType(p.type))
         return pretty.space(printlist)
     elif isinstance(p, TupleParam):
         return pretty.braces(pretty.space(pretty.punctuate(',', [printParam(f) for f in p.fields])))

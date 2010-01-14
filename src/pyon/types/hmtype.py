@@ -8,6 +8,9 @@ Classes are members of the class Class.
 
 import pyon.ast.ast as ast
 import pyon.unification as unification
+import pyon.pretty as pretty
+
+import pdb
 
 class PyonTypeBase(object):
     """
@@ -32,12 +35,15 @@ class PyonTypeBase(object):
         Get the set of free type variables in this object.  This returns
         a new set that the caller may modify.
         """
-        return addFreeVariables(self, set())
+        s = set()
+        self.addFreeVariables(s)
+        return s
 
     def addFreeVariables(self, s):
         """
         x.addFreeVariables(s) -- Add x's free variables to the set
         """
+        print "Error: called addFreeVariables()"
         raise NotImplementedError
 
     def showWorker(self, precedence, visible_vars):
@@ -90,7 +96,7 @@ class TupleTyCon(TyEnt):
 
     def __eq__(self, other):
         if not isinstance(other, TupleTyCon): return False
-        self.numArguments == other.numArguments
+        return self.numArguments == other.numArguments
 
     def __str__(self):
         return "Tuple" + str(self.numArguments) + "Type"
@@ -103,7 +109,9 @@ class FunTyCon(TyEnt):
 
     def __new__(cls):
         # This is a singleton class
-        if cls.instance is None: return TyEnt.__new__(cls)
+        if cls.instance is None:
+            FunTyCon.instance = t = TyEnt.__new__(cls)
+            return t
         else: return cls.instance
 
     def __init__(self): pass
@@ -125,7 +133,9 @@ class AppTyCon(TyEnt):
 
     def __new__(cls):
         # This is a singleton class
-        if AppTyCon.instance is None: return TyEnt.__new__(cls)
+        if AppTyCon.instance is None:
+            AppTyCon.instance = t = TyEnt.__new__(cls)
+            return t
         else: return AppTyCon.instance
 
     def __init__(self): pass
@@ -180,7 +190,6 @@ class TyVar(PyonTypeBase, unification.Variable):
         try: return mapping[v]
         except KeyError: return v
 
-
 class EntTy(PyonTypeBase, unification.Term):
     """
     A type consisting of a single entity.
@@ -215,6 +224,9 @@ class FunTy(PyonTypeBase, unification.Term):
     """
 
     def __init__(self, dom, rng):
+        assert isinstance(dom, PyonTypeBase)
+        assert isinstance(rng, PyonTypeBase)
+        assert dom != None and rng != None
         self.domain = dom
         self.range = rng
 
@@ -234,8 +246,8 @@ class FunTy(PyonTypeBase, unification.Term):
 
     def showWorker(self, precedence, in_scope_vars):
         PREC_FUN = PyonTypeBase.PREC_FUN
-        dom_doc = showWorker(self.domain, PREC_FUN, in_scope_vars)
-        rng_doc = showWorker(self.range, PREC_FUN - 1, in_scope_vars)
+        dom_doc = self.domain.showWorker(PREC_FUN, in_scope_vars)
+        rng_doc = self.range.showWorker(PREC_FUN - 1, in_scope_vars)
         fun_doc = pretty.space([dom_doc, "->", rng_doc])
 
         if precedence >= PREC_FUN: fun_doc = pretty.parens(fun_doc)
@@ -246,7 +258,7 @@ class FunTy(PyonTypeBase, unification.Term):
         Apply a substitution to all type variables in this term.  A new
         type is returned.
         """
-        return FunTy(self.domain.rename(), self.range.rename())
+        return FunTy(self.domain.rename(mapping), self.range.rename(mapping))
 
 class TupleTy(PyonTypeBase, unification.Term):
     """
@@ -274,8 +286,11 @@ class TupleTy(PyonTypeBase, unification.Term):
 
     def showWorker(self, precedence, visible_vars):
         PREC_OUTER = PyonTypeBase.PREC_OUTER
-        fields = [p.showWorker(PREC_OUTER, visible_vars) for p in params]
+        fields = [p.showWorker(PREC_OUTER, visible_vars) for p in self.arguments]
         return pretty.parens(pretty.space(pretty.punctuate(',', fields)))
+
+    def rename(self, mapping):
+        return TupleTy([arg.rename(mapping) for arg in self.arguments])
 
 class AppTy(PyonTypeBase, unification.Term):
     """
@@ -296,7 +311,7 @@ class AppTy(PyonTypeBase, unification.Term):
         oper = self
         rev_args = []           # Store arguments in reverse order
         while isinstance(oper, AppTy):
-            rev_args.append(oper.operand)
+            rev_args.append(oper.argument)
             oper = oper.operator
 
         # If operator is a FunTyCon or TupleTyCon, then replace with that type
@@ -599,7 +614,7 @@ class TyScheme(PyonTypeBase):
         # Bound variables should never be renamed and variables should not be
         # shadowed
         for v in self.qvars:
-            if v in mapping:
+            if v in mapping.keys():
                 raise ValueError, "Attempt to rename variable bound by type scheme"
 
         # Rename variables in this type scheme
@@ -609,8 +624,8 @@ class TyScheme(PyonTypeBase):
 
     def showWorker(self, precedence, visible_vars):
         # Show as forall a b c. 
-        var_list = (showWorker(PyonTypeBase.PREC_OUTER, visible_vars) \
-            for v in self.qvars)
+        var_list = [v.showWorker(PyonTypeBase.PREC_OUTER, visible_vars) \
+            for v in self.qvars]
         var_doc = pretty.space(pretty.punctuate(',', var_list))
         quantifier = pretty.space("forall", pretty.abut(var_doc, '.'))
         monotype = self.type.showWorker(PyonTypeBase.PREC_FUN - 1,
@@ -626,6 +641,9 @@ class TyScheme(PyonTypeBase):
         mapping = dict((v, TyVar()) for v in self.qvars)
         return self.type.rename(mapping)
 
+    def addFreeVariables(self, s):
+        pass
+
 def generalize(t, constraints):
     """
     generalize(t, constraints) -> (scheme, constraints)
@@ -633,7 +651,8 @@ def generalize(t, constraints):
     Generalize a type by quantifying over all free type variables.
     """
     (dependent_constraints, free_constraints) = \
-        constraints.generalizeOver(freeTypeVariables(t))
+        constraints.generalizeOver(t.freeVariables())
 
-    scheme = TyScheme(list(freeVariables(t)), dependent_constraints, t)
+    scheme = TyScheme(list(t.freeVariables()), dependent_constraints, t)
     return (scheme, free_constraints)
+
