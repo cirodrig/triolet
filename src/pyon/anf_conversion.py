@@ -272,11 +272,12 @@ def convertVariable(var, ssaver):
 
     # Choose an identifier for this variable
     try:
-        n = var.ssaVersionMap[ssaver]
+        v = var.ssaVersionMap[ssaver]
     except KeyError:
-        n = var.ssaVersionMap[ssaver] = a_ast.ANFVariable.getNewID()
+        v = a_ast.ANFVariable(var.name, a_ast.ANFVariable.getNewID())
+        var.ssaVersionMap[ssaver] = v
 
-    return a_ast.ANFVariable(var.name, n)
+    return v
 
 def convertVariableRef(var, ssaver):
     """
