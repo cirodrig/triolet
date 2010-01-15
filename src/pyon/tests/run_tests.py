@@ -5,13 +5,13 @@ import sys
 import traceback
 
 import haskell
-import pyon.ast
+import pyon.ast.parser_ast as parser_ast
 import pyon.ast.print_ast as print_ast
 from pyon.data_dir import *
 import pyon.ssa.parser_ssa as ssa
 import pyon.anf_conversion as anf_conversion
 
-import pyon.types.type_inference as type_inference
+import pyon.type_inference as type_inference
 
 # Find path to source files
 testDir = os.path.join(DATA_DIR, 'testcases')
@@ -21,7 +21,7 @@ def tryCompile(fname, show_traceback = False):
     try:
         # Run everything up to and including ANF conversion
         (variable_id, test_ast) = haskell.parse(fname)
-        pyon.ast.parser_ast.PythonVariable.setIDGenerator(variable_id) 
+        parser_ast.PythonVariable.setIDGenerator(variable_id) 
         ssa.convertSSA(test_ast)
         test_anf = anf_conversion.convertModule(test_ast)
 

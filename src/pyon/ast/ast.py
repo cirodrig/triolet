@@ -36,12 +36,21 @@ class ANFVariable(Variable):
     This object is immutable.
     """
 
-    def __init__(self, name = None, identifier = None):
-        """ANFVariable(string-or-None, int) -> new variable
+    def __init__(self, name = None, identifier = None, type_scheme = None):
+        """
         Create a new variable.  The variable should have a globally
-        unique ID."""
-        # Variables have an optional name 
-        assert isinstance(name, str) or name is None
+        unique ID.
+
+        Optional parameters:
+        name:
+          The variable's name as it appears in source code
+        identifier:
+          An integer that uniquely identifies this variable
+          (If not given, a new integer will be assigned to the variable)
+        type_scheme:
+          The variable's type; if not given, the type should be inferred
+        """
+        assert name is None or isinstance(name, str)
 
         # If no identifier is given, create a new variable
         if identifier is None:
@@ -50,6 +59,7 @@ class ANFVariable(Variable):
             assert isinstance(identifier, int)
         self.name = name
         self.identifier = identifier
+        self.typeScheme = type_scheme
 
     def __eq__(self, other):
         return (self.name == other.name) and (self.identifier == other.identifier)

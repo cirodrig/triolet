@@ -175,20 +175,26 @@ class TyVar(PyonTypeBase, unification.Variable):
     """
 
     def addFreeVariables(self, s):
+        canon = self.canonicalize()
+        if canon is not self: return canon.addFreeVariables(s)
         s.add(self)
 
     def showWorker(self, precedence, visible_vars):
         # Use this variable's position in the list to make a name
+        canon = self.canonicalize()
+        if canon is not self: return canon.showWorker(precedence, visible_vars)
+        
         return _tyVarNames[visible_vars.index(self)]
 
     def rename(self, mapping):
         # First, canonicalize the variable.
-        v = self.canonicalize()
+        canon = self.canonicalize()
+        if canon is not self: return canon.rename(mapping)
 
         # If this variable is a key in the mapping, then return its associated
         # value.  Otherwise, no change.
-        try: return mapping[v]
-        except KeyError: return v
+        try: return mapping[self]
+        except KeyError: return self
 
 class EntTy(PyonTypeBase, unification.Term):
     """
@@ -224,9 +230,11 @@ class FunTy(PyonTypeBase, unification.Term):
     """
 
     def __init__(self, dom, rng):
+        if not isinstance(dom, PyonTypeBase) or not isinstance(rng, PyonTypeBase):
+            print type(dom)
+            print type(rng)
         assert isinstance(dom, PyonTypeBase)
         assert isinstance(rng, PyonTypeBase)
-        assert dom != None and rng != None
         self.domain = dom
         self.range = rng
 
@@ -608,7 +616,7 @@ class TyScheme(PyonTypeBase):
         vars = tuple(TyVar() for v in range(num_vars))
         t = apply(body, vars)
         csts = apply(constraints, vars)
-        return cls(vars, constraints, t)
+        return cls(vars, csts, t)
 
     def rename(self, mapping):
         # Bound variables should never be renamed and variables should not be

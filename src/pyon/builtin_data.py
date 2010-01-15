@@ -34,6 +34,12 @@ def _iterFunctionType(param_types, return_type):
     for param_t in rparam_types: t = hm.FunTy(param_t, t)
     return t
 
+def functionType(param_types, return_type):
+    # Affix parameter types onto the return type, starting with the last
+    t = return_type
+    for param_t in reversed(param_types): t = hm.FunTy(param_t, t)
+    return t
+
 def _makeClasses():
     "Create type classes."
     global class_Eq, class_Ord, class_Num, class_Traversable
@@ -96,43 +102,78 @@ def _makeClasses():
                               [member_Tra_foreach])
 
 
+def create_type_schemes():
+    global _unaryScheme, _binaryScheme, _compareScheme, _binaryIntScheme
+    a = hm.TyVar()
+    _unaryScheme = hm.TyScheme([a], hm.noConstraints, hm.FunTy(a, a))
+    _binaryScheme = hm.TyScheme([a], hm.noConstraints,
+                                functionType([a,a], a))
+    _compareScheme = hm.TyScheme([a], hm.noConstraints,
+                                 functionType([a,a], type_bool))
+    _binaryIntScheme = hm.TyScheme([], hm.noConstraints,
+                                   functionType([type_int,type_int], type_int))
+
 ###############################################################################
 
+# Builtin primitive types
+tycon_int = hm.TyCon("int")
+tycon_float = hm.TyCon("float")
+tycon_bool = hm.TyCon("bool")
+tycon_None = hm.TyCon("NoneType")
+tycon_it = hm.TyCon("It")
+tycon_list = hm.TyCon("list")
+
+# Builtin types
+type_int = hm.EntTy(tycon_int)
+type_bool = hm.EntTy(tycon_bool)
+type_float = hm.EntTy(tycon_float)
+type_None = hm.EntTy(tycon_None)
+type_it = hm.EntTy(tycon_it)
+type_list = hm.EntTy(tycon_list)
+
+create_type_schemes()
+
 # Builtin binary functions with no Pyon implementation
-oper_EQ = ast.ANFVariable()
-oper_NE = ast.ANFVariable()
-oper_LT = ast.ANFVariable()
-oper_LE = ast.ANFVariable()
-oper_GT = ast.ANFVariable()
-oper_GE = ast.ANFVariable()
-oper_ADD = ast.ANFVariable()
-oper_SUB = ast.ANFVariable()
-oper_MUL = ast.ANFVariable()
-oper_DIV = ast.ANFVariable()
-oper_MOD = ast.ANFVariable()
-oper_POWER = ast.ANFVariable()
-oper_FLOORDIV = ast.ANFVariable()
-oper_BITWISEAND = ast.ANFVariable()
-oper_BITWISEOR = ast.ANFVariable()
-oper_BITWISEXOR = ast.ANFVariable()
+oper_EQ = ast.ANFVariable(name = "__eq__", type_scheme = _compareScheme)
+oper_NE = ast.ANFVariable(name = "__ne__", type_scheme = _compareScheme)
+oper_LT = ast.ANFVariable(name = "__lt__", type_scheme = _compareScheme)
+oper_LE = ast.ANFVariable(name = "__le__", type_scheme = _compareScheme)
+oper_GT = ast.ANFVariable(name = "__gt__", type_scheme = _compareScheme)
+oper_GE = ast.ANFVariable(name = "__ge__", type_scheme = _compareScheme)
+oper_ADD = ast.ANFVariable(name = "__add__", type_scheme = _binaryScheme)
+oper_SUB = ast.ANFVariable(name = "__sub__", type_scheme = _binaryScheme)
+oper_MUL = ast.ANFVariable(name = "__mul__", type_scheme = _binaryScheme)
+oper_DIV = ast.ANFVariable(name = "__div__", type_scheme = _binaryScheme)
+oper_MOD = ast.ANFVariable(name = "__mod__", type_scheme = _binaryIntScheme)
+oper_POWER = ast.ANFVariable(name = "__power__", type_scheme = _binaryScheme)
+oper_FLOORDIV = ast.ANFVariable(name = "__floordiv__", type_scheme = _binaryScheme) # FIXME
+oper_BITWISEAND = ast.ANFVariable(type_scheme = _binaryIntScheme)
+oper_BITWISEOR = ast.ANFVariable(type_scheme = _binaryIntScheme)
+oper_BITWISEXOR = ast.ANFVariable(type_scheme = _binaryIntScheme)
 
 # Builtin unary functions with no Pyon implementation
-oper_NEGATE = ast.ANFVariable()
+oper_NEGATE = ast.ANFVariable(type_scheme = _unaryScheme)
 
 # Translations of generators and list comprehensions
-oper_LIST = ast.ANFVariable()    # Turn generator into list comprehension
-oper_FOREACH = ast.ANFVariable() # Translation of 'for' generators
-oper_GUARD = ast.ANFVariable()   # Translation of 'if' generators
-oper_DO = ast.ANFVariable()      # Generator body
 
-# Builtin primitive types
-type_int = hm.TyCon("int")
-type_float = hm.TyCon("float")
-type_bool = hm.TyCon("bool")
+# Turn generator into list comprehension
+_list_type = hm.TyScheme.forall(1, lambda a: hm.FunTy(hm.AppTy(type_it, a),
+                                                      hm.AppTy(type_list, a)))
+oper_LIST = ast.ANFVariable(name = "list", type_scheme = _list_type)
 
-# Builtin types for statements and iterators
-type_St = hm.TyCon("St")
-type_It = hm.TyCon("It")
+# Translation of 'for' generators
+_foreach_type = hm.TyScheme.forall(3, lambda a, b, t: \
+  functionType([hm.AppTy(t, a), hm.FunTy(a, hm.AppTy(type_it, b))], hm.AppTy(type_it, b)))
+oper_FOREACH = ast.ANFVariable(name = "__foreach__", type_scheme = _foreach_type)
+
+# Translation of 'if' generators
+_guard_type = hm.TyScheme.forall(1, lambda a: \
+  functionType([type_bool, a], hm.AppTy(type_it, a)))
+oper_GUARD = ast.ANFVariable(name = "__guard__", type_scheme = _guard_type)
+
+# Generator body
+_do_type = hm.TyScheme.forall(1, lambda a: hm.FunTy(a, hm.AppTy(type_it, a)))
+oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
 
 # Define classes and instances.
 # Each global identifier is initialized to None for reasons of documentation.
@@ -142,4 +183,4 @@ class_Ord = None
 class_Num = None
 class_Traversable = None
 
-_makeClasses()
+# _makeClasses()

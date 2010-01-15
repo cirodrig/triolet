@@ -66,16 +66,17 @@ class Variable(object):
 
     def canonicalize(self):
         canon = self
-        # TODO
-        # EntTy does not have _representative, thus raises an exception
-        # Below try-except does not look good
-        try:
-            while canon._representative:
-                canon = canon._representative
-        except:
-            pass
-        finally:
-            return canon
+
+        # Find representative of this variable
+        while canon._representative:
+            canon = canon._representative
+
+            # If representative is not a variable, then call its
+            # canonicalize method
+            if isinstance(canon, Term):
+                return canon.canonicalize()
+
+        return canon
 
     def unifyWith(self, other):
         self._representative = other
@@ -126,6 +127,8 @@ def unify(x, y):
 
                 for x_p, y_p in zip(x_params, y_params):
                     unify(x_p, y_p)
+
+                return x
             else:
                 raise UnificationError, "type mismatch"
 
