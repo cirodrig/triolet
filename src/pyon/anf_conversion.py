@@ -1,7 +1,7 @@
-# Conversion from Python ASTs to ANF
-# This file is very incomplete.
-
-# TODO: How to convert control flow?
+"""
+These functions convert the parser-generated program representation to an
+ANF-based one.  The main entry point is @convertModule.
+"""
 
 import pyon.ast.operators as operators
 import pyon.ast.parser_ast as p_ast
@@ -32,7 +32,7 @@ def convertFunction(func):
     body = convertSuite(func.body, cannot_fallthrough)
 
     return a_ast.FunctionDef(name, a_ast.exprFunction(parameters, body))
-             
+
 def convertSuite(suite, make_fallthrough):
     """
     Convert a suite of statements together with a fallthrough path.

@@ -7,6 +7,15 @@ import itertools
 # Operator names
 import pyon.ast.operators
 
+# Code executes in one of two modes, as an expression or as an iterator.
+# All user-defined functions are in EXPRESSION mode.  Generator
+# expressions and some built-in functions are in ITERATOR mode.
+EXPRESSION = 1
+ITERATOR = 2
+
+###############################################################################
+# Variables
+
 class Variable(object):
     """Abstract base class of variables"""
 
@@ -123,6 +132,14 @@ class Parameter(object):
 class VariableParam(Parameter):
     """
     A variable parameter.
+
+    Fields:
+    name : string or None
+      The variable name as it appeard in source code
+    annotation : None
+      Unused
+    default : None
+      Unused
     """
 
     def __init__(self, v, annotation = None, default = None):
@@ -276,14 +293,8 @@ class FunctionDef(object):
 class Function(object):
     """A function or lambda term"""
 
-    # A function runs either as an ordinary expression or as an iterator.
-    # All user-defined functions are EXPRESSION functions.  Generator
-    # expressions and some built-in functions are ITERATOR functions.
-    EXPRESSION = 1
-    ITERATOR = 2
-
     def __init__(self, mode, parameters, body):
-        assert mode == Function.EXPRESSION or mode == Function.ITERATOR
+        assert mode == EXPRESSION or mode == ITERATOR
         for p in parameters:
             assert isinstance(p, Parameter)
         assert isinstance(body, Expression)
@@ -295,11 +306,11 @@ class Function(object):
 
 def exprFunction(parameters, body):
     "Create an expression function"
-    return Function(Function.EXPRESSION, parameters, body)
+    return Function(EXPRESSION, parameters, body)
 
 def iterFunction(parameters, body):
     "Create an iterator function"
-    return Function(Function.ITERATOR, parameters, body)
+    return Function(ITERATOR, parameters, body)
 
 ###############################################################################
 # Modules
