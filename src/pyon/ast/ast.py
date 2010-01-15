@@ -115,13 +115,10 @@ class InstanceVariable(Variable):
 class Parameter(object):
     """
     A parameter of a function or destination of an assignment.
-
-    Fields created by type inference:
-      type: HM type
     """
 
     def __init__(self):
-        self.type = None        # Assigned by type inference
+        pass
 
 class VariableParam(Parameter):
     """

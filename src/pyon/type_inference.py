@@ -263,9 +263,10 @@ def inferFunctionType(gamma, func):
 def inferDefGroup(gamma, group):
     """
     inferDefGroup(gamma, group) -> new environment
-    
+
     Infer types in a definition group.  Each function in the group is assigned
-    a type scheme.
+    a type scheme.  The definition group's type assignments are returned as a
+    new environment.
     """
     # Describe the variables bound by the definition group
     bindings = [ast.VariableParam(d.name) for d in group]
@@ -296,7 +297,9 @@ def inferDefGroup(gamma, group):
 
 def inferExpressionType(gamma, expr):
     """
-    Infer the type of an expression in environment @gamma.
+    inferExpressionType(env, expr) -> first-order type
+
+    Infer the type of an expression in environment @env.
     """
     assert isinstance(gamma, Environment)
     assert isinstance(expr, ast.Expression)
