@@ -626,15 +626,6 @@ class TyScheme(PyonTypeBase):
         csts = apply(constraints, vars)
         return cls(vars, csts, t)
 
-    def addFreeVariables(self, s):
-        # The type scheme's quantified variables must not be free
-        assert not len(set.intersection(set(self.qvars), s))
-
-        self.constraints.addFreeVariables(s)
-        self.type.addFreeVariables(s)
-
-        for v in self.qvars: s.discard(v)
-
     def rename(self, mapping):
         # Bound variables should never be renamed and variables should not be
         # shadowed
@@ -667,7 +658,13 @@ class TyScheme(PyonTypeBase):
         return self.type.rename(mapping)
 
     def addFreeVariables(self, s):
-        pass
+        # The type scheme's quantified variables must not be free
+        assert not len(set.intersection(set(self.qvars), s))
+
+        self.constraints.addFreeVariables(s)
+        self.type.addFreeVariables(s)
+
+        for v in self.qvars: s.discard(v)
 
 def generalize(t, constraints):
     """

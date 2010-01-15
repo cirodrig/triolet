@@ -46,62 +46,60 @@ def literalSignature(c):
 ###############################################################################
 # Environments and type updates
 
-class Gamma(object):
-    def __init__(self, xs=[]):
-        # Either use xs as a dictionary, or make a dictionary from it
-        if type(xs) is dict: self.env = xs
-        else: self.env = dict(xs)
+class Environment(dict):
+    """
+    A type environment, which is a finite map from variables to types or
+    type schemes.
 
+    For a given variable v, if v is in scope, then either
+    * self[v] = None and v.getTypeScheme() is the variable's type scheme, or
+    * self[v] = t where t is the variable's first-order type.
+    """
     @classmethod
     def singleton(cls, name, ty):
-        "Create an environment containing exactly one assignment"
+        """
+        Environment.singleton(name, ty) -> new environment
+        Create an environment containing exactly one assignment
+        """
         return cls([(name, ty)])
 
     @classmethod
     def union(cls, g1, g2):
-        d = g1.env.copy()
-        d.update(g2.env)
-        return cls(d)
+        """
+        Environment.union(x, y) -> union of x and y
+        Create the union of two environments
+        """
+        d = Environment(g1)
+        d.update(g2)
+        return d
 
     @classmethod
     def unions(cls, xs):
-        d = dict()
-        for x in xs: d.update(x.env)
-        return cls(d)
-
-    def lookup(self, var):
-        ty = self.env[var]
-        assert isinstance(ty, hmtype.FirstOrderType)
-        return ty
-
-    def subst(self, s):
-        for tv in self.env:
-            if isinstance(tv.type, hmtype.TyScheme):
-                continue
-            try:
-                tv.type.rename(s)
-            except:
-                debug("Gamma.subst")
-
-    def add(self, var, ty):
-        assert isinstance(var, ast.Variable)
-        assert isinstance(ty, hmtype.FirstOrderType)
-        assert var != None and ty != None
-        self.env[var] = ty
-
-    def remove(self, var):
-        self.env.remove(var)
+        """
+        Environment.unions(seq) -> union of elements of seq
+        Create tue union of all environments in a sequence
+        """
+        d = Environment()
+        for x in xs: d.update(x)
+        return d
 
     def freeVariables(self):
+        """
+        env.freeVariables() -> set
+
+        Get the set of all free type variables mentioned in the environment
+        """
         s = set()
-        for v, ty in self.env.iteritems():
-            if ty: s.update(ty.freeVariables())
-            else: s.update(v.getTypeScheme().freeVariables())
-        return list(s)
+
+        # Add the free type variables of each local binding to the set
+        for v, ty in self.iteritems():
+            if ty: ty.addFreeVariables(s)
+            else: v.getTypeScheme().addFreeVariables(s)
+        return s
 
     def dump(self):
         print "************************************"
-        for v, ty in self.env.items():
+        for v, ty in self.iteritems():
             if v.name == None:
                 print '?%d :' % v.identifier,
             else:
@@ -120,28 +118,30 @@ def findVariableType(env, v):
     scm = v.getTypeScheme()
     if scm: return scm.instantiate()
 
-    ty = env.lookup(v)
+    ty = env[v]
     assert isinstance(ty, hmtype.FirstOrderType)
     return ty
 
 def assumeFirstOrderType(v, t):
     """
-    Create a new type variable representing the type of 'v'.
-    Return an environment with this type assignment.
+    Assign the first-order type @t to @v.  The assignment is recorded in
+    a new environment, which is returned.
     """
     assert isinstance(v, ast.ANFVariable)
+    assert isinstance(t, hmtype.FirstOrderType)
     
-    return Gamma.singleton(v, t)
+    return Environment.singleton(v, t)
 
 def assignTypeScheme(v, scm):
     """
-    Assign the type scheme of a variable.
-    Return an environment with this type assignment.
+    Assign the type scheme @scm to @v.  The assignment is recorded globally,
+    and a new environment is returned.
     """
     assert isinstance(v, ast.ANFVariable)
+    assert isinstance(scm, hmtype.TyScheme)
 
     v.setTypeScheme(scm)
-    return Gamma.singleton(v, None)
+    return Environment.singleton(v, None)
 
 ###############################################################################
 # Type operations
@@ -170,13 +170,13 @@ def inferLetBindingType(gamma, param, bound_type, expr):
             raise TypeCheckError, "Type mismatch in parameter binding"
 
         # Bind each tuple field to a variable
-        envs = []
+        local_env = Environment()
         for p, t in zip(param.fields, field_types):
             e = inferLetBindingType(gamma, p, t, expr)
-            envs.append(e)
+            local_env.update(e)
 
         # Return the new environment
-        return Gamma.unions(envs)
+        return local_env
 
     elif isinstance(param, ast.VariableParam):
         # Generalize this type and assign the variable's type
@@ -209,16 +209,16 @@ def exposeFirstOrderBindings(gamma, params):
     """
     Expose a list of bindings.
     """
-    envs = []
+    local_env = Environment()
     types = []
     for p in params:
         env, t = exposeFirstOrderBinding(gamma, p)
-        assert isinstance(env, Gamma)
+        assert isinstance(env, Environment)
         assert isinstance(t, hmtype.FirstOrderType)
-        envs.append(env)
+        local_env.update(env)
         types.append(t)
 
-    return (Gamma.unions(envs), types)
+    return (local_env, types)
 
 def recordFirstOrderBindingType(gamma, param):
     """
@@ -228,10 +228,13 @@ def recordFirstOrderBindingType(gamma, param):
     """
     if isinstance(param, ast.VariableParam):
         v = param.name
-        ty = gamma.lookup(v)
-        return assignTypeScheme(v, hmtype.TyScheme([], hmtype.noConstraints, ty))
+        ty = findVariableType(gamma, v)
+        scm = hmtype.TyScheme([], hmtype.noConstraints, ty)
+        return assignTypeScheme(v, scm)
+
     elif isinstance(param, ast.TupleParam):
         return recordFirstOrderBindingTypes(gamma, param.fields)
+
     else:
         raise TypeError, type(param)
 
@@ -242,7 +245,7 @@ def recordFirstOrderBindingTypes(gamma, params):
     """
     # Process each binder in the list.
     # Return the union of the generated environments.
-    return Gamma.unions(recordFirstOrderBindingTypes(gamma, p) for p in params)
+    return Environment.unions(recordFirstOrderBindingTypes(gamma, p) for p in params)
 
 def inferFunctionType(gamma, func):
     """
@@ -250,7 +253,7 @@ def inferFunctionType(gamma, func):
     """
     # Create local environment
     (local_env, param_types) = exposeFirstOrderBindings(gamma, func.parameters)
-    gamma = Gamma.union(gamma, local_env)
+    gamma = Environment.union(gamma, local_env)
 
     # Process body
     rng = inferExpressionType(gamma, func.body)
@@ -269,33 +272,33 @@ def inferDefGroup(gamma, group):
     
     # Add definitions to local environment
     (local_env, _) = exposeFirstOrderBindings(gamma, bindings)
-    local_gamma = Gamma.union(gamma, local_env)
+    local_gamma = Environment.union(gamma, local_env)
+    binding_types = [findVariableType(local_gamma, d.name) for d in group]
 
-    # Infer function types
-    for d in group:
+    # Infer all function types
+    for d, d_type in zip(group, binding_types):
         fn_type = inferFunctionType(local_gamma, d.function)
 
         # Unify the function's assumed type with the inferred type
-        try: unification.unify(fn_type, local_gamma.lookup(d.name))
+        try: unification.unify(fn_type, d_type)
         except UnificationError, e:
             raise TypeCheckError, "Type error in recursive definition group"
 
     # Generalize the function types
     # Note that we generalize with the environment that will be seen in
     # subsequent code (gamma), not the local environment
-    envs = []
-    for d in group:
-        ty = local_gamma.lookup(d.name)
-        e = assignTypeScheme(d.name, generalize(gamma, ty))
-        envs.append(e)
+    body_env = Environment()
+    for d, d_type in zip(group, binding_types):
+        e = assignTypeScheme(d.name, generalize(gamma, d_type))
+        body_env.update(e)
 
-    return Gamma.unions(envs)
+    return body_env
 
 def inferExpressionType(gamma, expr):
     """
     Infer the type of an expression in environment @gamma.
     """
-    assert isinstance(gamma, Gamma)
+    assert isinstance(gamma, Environment)
     assert isinstance(expr, ast.Expression)
 
     # Structural recursion.  Infer types of subexpressions and put
@@ -352,7 +355,7 @@ def inferExpressionType(gamma, expr):
 
         # Bind the LHS
         local_env = inferLetBindingType(gamma, expr.parameter, ty_rhs, expr)
-        gamma = Gamma.union(gamma, local_env)
+        gamma = Environment.union(gamma, local_env)
 
         # Process the body
         ty = inferExpressionType(gamma, expr.body)
@@ -360,7 +363,7 @@ def inferExpressionType(gamma, expr):
     elif isinstance(expr, ast.LetrecExpr):
         # Process the local functions and assign type schemes
         local_env = inferDefGroup(gamma, expr.definitions)
-        gamma = Gamma.union(gamma, local_env)
+        gamma = Environment.union(gamma, local_env)
 
         # Infer body of letrec
         ty = inferExpressionType(gamma, expr.body)
@@ -382,10 +385,10 @@ def inferExpressionType(gamma, expr):
 
 def doTypeInference(anf_form):
     if isinstance(anf_form, ast.Module):
-        global_gamma = Gamma()
+        global_gamma = Environment()
         for defgroup in anf_form.iterDefinitionGroups():
             new_env = inferDefGroup(global_gamma, defgroup)
-            global_gamma = Gamma.union(global_gamma, new_env)
+            global_gamma = Environment.union(global_gamma, new_env)
 
 def inferTypes(anf_form):
     doTypeInference(anf_form)
