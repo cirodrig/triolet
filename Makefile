@@ -10,7 +10,8 @@ INCLUDEDIR_FLAGS=$(foreach dir, $(INCLUDEDIRS), -I$(dir))
 LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
 
 HS_HSC2HS_OPTS=$(HSC2HSFLAGS) $(INCLUDEDIR_FLAGS)
-HS_C_OPTS=$(HCFLAGS) $(INCLUDEDIR_FLAGS) $(PACKAGE_FLAGS)
+HS_C_OPTS=$(HCFLAGS) \
+	-XMultiParamTypeClasses $(INCLUDEDIR_FLAGS) $(PACKAGE_FLAGS)
 C_C_OPTS=$(CCFLAGS) $(INCLUDEDIR_FLAGS)
 L_OPTS=$(LFLAGS) $(PACKAGE_FLAGS) $(LIDIR_FLAGS) $(LIB_FLAGS)
 
@@ -22,7 +23,11 @@ PYON_HS_SRCS=Main.hs \
 	Parser/Driver.hs \
 	Parser/Parser.hs \
 	Parser/Output.hs \
-	Parser/ParserSyntax.hs
+	Parser/ParserSyntax.hs \
+	Gluon/Pyon/Syntax.hs \
+	Gluon/Pyon/Rename.hs \
+	Gluon/Pyon/Typecheck.hs
+
 PYON_HS_GENERATED_SRCS=Python.hs
 
 PYON_HS_OBJECTS=$(patsubst %.hs, %.o, $(PYON_HS_SRCS) $(PYON_HS_GENERATED_SRCS))
@@ -105,6 +110,9 @@ $(BUILDDIR)/Parser/Driver_stub.c \
 $(BUILDDIR)/Parser/Output.o : $(BUILDDIR)/Python.hi
 $(BUILDDIR)/Parser/Output.o : $(BUILDDIR)/Parser/ParserSyntax.hi
 $(BUILDDIR)/Parser/Parser.o : $(BUILDDIR)/Parser/ParserSyntax.hi
+$(BUILDDIR)/Gluon/Pyon/Rename.o : $(BUILDDIR)/Gluon/Pyon/Syntax.hi
+$(BUILDDIR)/Gluon/Pyon/Typecheck.o : $(BUILDDIR)/Gluon/Pyon/Syntax.hi
+$(BUILDDIR)/Gluon/Pyon/Typecheck.o : $(BUILDDIR)/Gluon/Pyon/Rename.hi
 
 # After invoking the compiler,
 # touch interface files to ensure that their timestamps are updated
@@ -123,6 +131,9 @@ $(eval $(call PYON_COMPILE_HS_SOURCE,Python.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/Parser.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/Output.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/ParserSyntax.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Syntax.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Rename.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Typecheck.hs))
 
 # 'Driver.hs' has multiple targets, so it needs a distinct rule
 # Touch output files to ensure their timestamps are updated
