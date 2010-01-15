@@ -31,9 +31,18 @@ class Variable(object):
 
 class ANFVariable(Variable):
     """
-    A single-assignment variable used in ANF.
+    A single-assignment variable used in ANF.  Only one instance of this
+    object exists for each variable.
 
-    This object is immutable.
+    Variables can carry type information, which may be a first-order
+    type or a type scheme.  Type information is inserted when the
+    variable is created or during type inference.
+
+    Fields:
+    name:
+      The variable's name as it appears in source code.
+    identifier:
+      An integer that uniquely identifies this variable.
     """
 
     def __init__(self, name = None, identifier = None, type_scheme = None):
@@ -48,7 +57,7 @@ class ANFVariable(Variable):
           An integer that uniquely identifies this variable
           (If not given, a new integer will be assigned to the variable)
         type_scheme:
-          The variable's type; if not given, the type should be inferred
+          The variable's type; if None, the type should be inferred
         """
         assert name is None or isinstance(name, str)
 
@@ -59,10 +68,31 @@ class ANFVariable(Variable):
             assert isinstance(identifier, int)
         self.name = name
         self.identifier = identifier
-        self.typeScheme = type_scheme
+        self._typeScheme = type_scheme
 
     def __eq__(self, other):
-        return (self.name == other.name) and (self.identifier == other.identifier)
+        return self.identifier == other.identifier
+
+    def setTypeScheme(self, type_scheme):
+        # Cannot change a variable's type
+        if self._typeScheme:
+            raise RuntimeError, "Attempted to re-assign a variable's type"
+
+        self._typeScheme = type_scheme
+
+    def getTypeScheme(self):
+        """
+        Return this variable's type scheme, or None if it does not have a
+        type scheme.
+        """
+        return self._typeScheme
+
+    def getType(self):
+        """
+        Create the type of an instance of this variable.  Returns a type.
+        The variable must have been assigned a type.
+        """
+        return self._typeScheme.instantiate()
 
     _nextID = 0
 

@@ -1,7 +1,8 @@
 """
 Hindley-Milner types with type classes.
 
-Monotypes are constructed from the classes TyVar, FunTy, and TyConApp.
+First-order types (the subclasses of FirstOrderType) should only be inspected
+by calling methods or after calling the canonicalize() method.
 Type schemes are constructed with TyScheme.
 Classes are members of the class Class.
 """
@@ -65,6 +66,12 @@ class PyonTypeBase(object):
         "Show as a pretty-printable object.  This calls showWorker."
         return self.showWorker(PyonTypeBase.PREC_OUTER,
                                list(self.freeVariables()))
+
+class FirstOrderType(PyonTypeBase):
+    """
+    A first-order type.
+    """
+    pass
 
 ###############################################################################
 # Atomic type-level entities
@@ -169,7 +176,7 @@ class TyCon(TyEnt):
 # Use one alphabetic character to represent a type variable
 _tyVarNames = 'abcdefghijklmnopqrstuvwxyz'
 
-class TyVar(PyonTypeBase, unification.Variable):
+class TyVar(FirstOrderType, unification.Variable):
     """
     A unifiable type variable.
     """
@@ -196,7 +203,7 @@ class TyVar(PyonTypeBase, unification.Variable):
         try: return mapping[self]
         except KeyError: return self
 
-class EntTy(PyonTypeBase, unification.Term):
+class EntTy(FirstOrderType, unification.Term):
     """
     A type consisting of a single entity.
     """
@@ -221,7 +228,7 @@ class EntTy(PyonTypeBase, unification.Term):
         # No flexible type variables
         return self
 
-class FunTy(PyonTypeBase, unification.Term):
+class FunTy(FirstOrderType, unification.Term):
     """
     A function type.
 
@@ -230,11 +237,8 @@ class FunTy(PyonTypeBase, unification.Term):
     """
 
     def __init__(self, dom, rng):
-        if not isinstance(dom, PyonTypeBase) or not isinstance(rng, PyonTypeBase):
-            print type(dom)
-            print type(rng)
-        assert isinstance(dom, PyonTypeBase)
-        assert isinstance(rng, PyonTypeBase)
+        assert isinstance(dom, FirstOrderType)
+        assert isinstance(rng, FirstOrderType)
         self.domain = dom
         self.range = rng
 
@@ -268,7 +272,7 @@ class FunTy(PyonTypeBase, unification.Term):
         """
         return FunTy(self.domain.rename(mapping), self.range.rename(mapping))
 
-class TupleTy(PyonTypeBase, unification.Term):
+class TupleTy(FirstOrderType, unification.Term):
     """
     A tuple type.
 
@@ -300,7 +304,7 @@ class TupleTy(PyonTypeBase, unification.Term):
     def rename(self, mapping):
         return TupleTy([arg.rename(mapping) for arg in self.arguments])
 
-class AppTy(PyonTypeBase, unification.Term):
+class AppTy(FirstOrderType, unification.Term):
     """
     A type application.
     """
@@ -556,6 +560,10 @@ class Constraints(PyonTypeBase):
         else:
             self.constraints = []
 
+    def addFreeVariables(self, s):
+        # Not implemented
+        pass
+
     def rename(self, mapping):
         """
         Apply a renaming to this constraint set.
@@ -617,6 +625,15 @@ class TyScheme(PyonTypeBase):
         t = apply(body, vars)
         csts = apply(constraints, vars)
         return cls(vars, csts, t)
+
+    def addFreeVariables(self, s):
+        # The type scheme's quantified variables must not be free
+        assert not len(set.intersection(set(self.qvars), s))
+
+        self.constraints.addFreeVariables(s)
+        self.type.addFreeVariables(s)
+
+        for v in self.qvars: s.discard(v)
 
     def rename(self, mapping):
         # Bound variables should never be renamed and variables should not be
