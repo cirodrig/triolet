@@ -1,2 +1,2 @@
 import pyon.tests
-pyon.tests.main()
+pyon.tests.main(show_traceback=True)

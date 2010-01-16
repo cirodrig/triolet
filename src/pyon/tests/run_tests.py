@@ -26,12 +26,12 @@ def tryCompile(fname, show_traceback = False):
         test_anf = anf_conversion.convertModule(test_ast)
 
         # (DEBUG) print the output
-        print_ast.printAst(test_anf)
+        # print_ast.printAst(test_anf)
 
         # Type inference
         type_inference.inferTypes(test_anf)
 
-        # print the output with type?
+        # (DEBUG) print the output with type?
         print_ast.printAst(test_anf)
 
     except Exception, e:
