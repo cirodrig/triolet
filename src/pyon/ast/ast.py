@@ -112,11 +112,31 @@ class ANFVariable(Variable):
         ANFVariable._nextID = n + 1
         return n
 
-class InstanceVariable(Variable):
-    """A class dictionary variable."""
+class DictionaryVariable(ANFVariable, unification.Variable):
+    """
+    A class dictionary variable.  Dictionary variables can be unified with
+    one another during type inference.
+    """
 
-    def __init__(self):
-        raise NotImplementedError
+    def __init__(self, cls, type_scheme):
+        ANFVariable.__init__(self, type_scheme = type_scheme)
+        self.typeClass = cls
+
+    def unifyWith(self, other):
+        assert isinstance(other, DictionaryVariable)
+
+        # First perform unification
+        super(DictionaryVariable, self).unifyWith(self, other)
+
+        # Copy attributes of target variable into this variable.
+        # Copy the 'identifier' and 'typeScheme' attributes.
+        # Note that when type checking error-free code, only variables with
+        # the same type scheme will be unified, but it's hard to reason about
+        # whether that is also true in code with type errors.
+        rep = self.canonicalize()
+        assert isinstance(rep, DictionaryVariable)
+        self.identifier = rep.identifier
+        self.typeScheme = rep.typeScheme
 
 ###############################################################################
 # Parameters
@@ -223,6 +243,22 @@ class TupleExpr(Expression):
             assert isinstance(f, Expression)
         self.arguments = arguments
 
+class TupleSelectExpr(Expression):
+    """
+    An expression that extracts one field of a tuple.  The tuple size and
+    the selected field are fixed.
+    """
+
+    def __init__(self, argument, size, index, base = ExprInit.default):
+        base.initializeExpr(self)
+        assert isinstance(argument, Expression)
+        # Ensure that index is in bounds and size is nonnegative
+        assert 0 <= index and index < size
+
+        self.argument = argument
+        self.size = size
+        self.index = index
+
 class CallExpr(Expression):
     """A function call."""
 
@@ -233,7 +269,6 @@ class CallExpr(Expression):
             assert isinstance(arg, Expression)
         self.operator = operator
         self.arguments = arguments
-        self.cstArguments = None # Assigned by type inference
 
 ## These expressions can be generated from either Python expressions
 ## or Python statements
