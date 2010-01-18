@@ -76,9 +76,21 @@ AC_MSG_RESULT([$cir_python_version])
 # Get the python include directory and put it into 'cir_python_incdir'
 AC_DEFUN([CIR_PY_INCDIR],[
 AC_REQUIRE([CIR_PROG_PYTHON])
+
+# Find include directory
 AC_MSG_CHECKING([python include directory])
 CIR_PY_COMMAND([[import distutils.sysconfig; print distutils.sysconfig.get_python_inc()]],[cir_python_incdir])
+if test ! -d "$cir_python_incdir"; then
+  AC_MSG_ERROR([registered with Python distutils as $cir_python_incdir, but this directory does not exist])
+fi
 AC_MSG_RESULT([$cir_python_incdir])
+
+# Make sure the directory exists and contains Python.h
+AC_MSG_CHECKING([whether $cir_python_incdir/Python.h exists])
+if test ! -f "$cir_python_incdir/Python.h"; then
+  AC_MSG_ERROR([not found])
+fi
+AC_MSG_RESULT([found])
 ])
 
 ########################################
