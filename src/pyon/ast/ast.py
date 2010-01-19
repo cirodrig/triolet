@@ -112,31 +112,31 @@ class ANFVariable(Variable):
         ANFVariable._nextID = n + 1
         return n
 
-class DictionaryVariable(ANFVariable, unification.Variable):
-    """
-    A class dictionary variable.  Dictionary variables can be unified with
-    one another during type inference.
-    """
+#class DictionaryVariable(ANFVariable, unification.Variable):
+#    """
+#    A class dictionary variable.  Dictionary variables can be unified with
+#    one another during type inference.
+#    """
+#
+#    def __init__(self, cls, type_scheme):
+#        ANFVariable.__init__(self, type_scheme = type_scheme)
+#        self.typeClass = cls
+#
+#    def unifyWith(self, other):
+#        assert isinstance(other, DictionaryVariable)
+#
+#        # First perform unification
+#         super(DictionaryVariable, self).unifyWith(self, other)
 
-    def __init__(self, cls, type_scheme):
-        ANFVariable.__init__(self, type_scheme = type_scheme)
-        self.typeClass = cls
-
-    def unifyWith(self, other):
-        assert isinstance(other, DictionaryVariable)
-
-        # First perform unification
-        super(DictionaryVariable, self).unifyWith(self, other)
-
-        # Copy attributes of target variable into this variable.
-        # Copy the 'identifier' and 'typeScheme' attributes.
-        # Note that when type checking error-free code, only variables with
-        # the same type scheme will be unified, but it's hard to reason about
-        # whether that is also true in code with type errors.
-        rep = self.canonicalize()
-        assert isinstance(rep, DictionaryVariable)
-        self.identifier = rep.identifier
-        self.typeScheme = rep.typeScheme
+#         # Copy attributes of target variable into this variable.
+#         # Copy the 'identifier' and 'typeScheme' attributes.
+#         # Note that when type checking error-free code, only variables with
+#         # the same type scheme will be unified, but it's hard to reason about
+#         # whether that is also true in code with type errors.
+#         rep = self.canonicalize()
+#         assert isinstance(rep, DictionaryVariable)
+#         self.identifier = rep.identifier
+#         self.typeScheme = rep.typeScheme
 
 ###############################################################################
 # Parameters

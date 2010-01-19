@@ -37,7 +37,7 @@ INCLUDEDIRS=@cir_hs_libdir@/include \
 LIBDIRS=
 
 # Haskell package names
-PACKAGES=language-python-0.1.1 mtl
+PACKAGES=language-python-pyon mtl gluon
 
 # Library names
 LIBS=python@cir_python_version@

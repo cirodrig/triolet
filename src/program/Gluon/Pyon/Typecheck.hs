@@ -32,6 +32,7 @@ import Gluon.Eval.Environment
 import Gluon.Eval.Eval
 import Gluon.Eval.Typecheck
 
+import Gluon.Builtins.Pyon
 import Gluon.Pyon.Syntax
 import Gluon.Pyon.Rename
 
@@ -284,7 +285,7 @@ inferCallType tcWorker (CallS { cexpInfo = inf
   (eff, ret) <-
       case unpackWhnfAppE resultTy
       of Just (con, [eff, ret])
-             | con `isBuiltin` the_Action -> do
+             | con == the_Action -> do
                  eff' <- evalHead' eff
                  ret' <- evalHead' ret
                  return (Whnf eff, Whnf ret)
@@ -725,7 +726,7 @@ inferStreamCallType tcWorker str@(CallR { sexpInfo = info
   (eff, ret) <-
       case unpackWhnfAppE resultTy
       of Just (con, [eff, ret])
-             | con `isBuiltin` the_Stream -> do
+             | con == the_Stream -> do
                  eff' <- evalHead' eff
                  ret' <- evalHead' ret
                  return (Whnf eff, Whnf ret)
@@ -755,8 +756,8 @@ getProcedureType proc = liftM verbatim $ toType $ procParams proc
       -- Pick a monad type constructor depending on whether this is a statement
       -- procedure or a stream procedure
       monad = if isStmtProc proc
-              then builtin the_Action
-              else builtin the_Stream
+              then the_Action
+              else the_Stream
 
       -- Each parameter translates to one function parameter.
       -- For each parameter, we decide whether to produce a dependent or

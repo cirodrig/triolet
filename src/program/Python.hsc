@@ -266,6 +266,24 @@ foreign import ccall "Python.h PyList_New"
 newList :: Int -> IO PyPtr
 newList n = checkNull $ pyList_New (fromIntegral n)
 
+
+-- | Function defined in Python_c.c, which just invokes the CPP macro 
+-- \'PyList_Check\'.
+foreign import ccall "PyList_Check_Function"
+  pyList_Check :: PyPtr -> IO CInt
+                  
+isList :: PyPtr -> IO Bool
+isList p = do
+  liftM (0 /=) $ pyList_Check p
+
+foreign import ccall "Python.h PyList_Size"
+  pyList_Size :: PyPtr -> IO Py_ssize_t
+
+getListSize :: PyPtr -> IO Int
+getListSize xs = do
+  n <- pyList_Size xs
+  return $ fromIntegral n
+
 foreign import ccall "Python.h PyList_SetItem"
     pyList_SetItem :: PyPtr -> Py_ssize_t -> PyPtr -> IO CInt
 

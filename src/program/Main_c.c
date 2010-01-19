@@ -2,6 +2,8 @@
 #include <Python.h>
 #include <HsFFI.h>
 
+#include "PythonInterface/HsObject.h"
+
 /* Defined in Driver.hs */
 extern PyObject *
 parsePyonFile(const char *);
@@ -30,6 +32,9 @@ static struct PyMethodDef haskell_methods[] = {
 extern void
 createHaskellModule(void)
 {
-  Py_InitModule("haskell", haskell_methods);
+  PyObject *haskell_module = Py_InitModule("haskell", haskell_methods);
+
+  if (PyType_Ready(&HsObject_type) < 0) return;
+  PyModule_AddObject(haskell_module, "HsObject", (PyObject *)&HsObject_type);
 }
 

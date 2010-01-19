@@ -431,6 +431,8 @@ expression expr =
          enter $ \locals -> Generator locals <$> comprehension expression comp
        Py.ListComp {Py.list_comprehension = comp} -> 
          enter $ \locals -> ListComp <$> comprehension expression comp
+                            
+       Py.Paren {Py.paren_expr = e} -> expression e
        _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
 
 -- Convert an optional expression into an expression or None
@@ -477,11 +479,13 @@ exprToParam e@(Py.Var name _) =
   Parameter <$> parameterDefinition name <*> pure Nothing
 exprToParam e@(Py.Tuple es _) =
   TupleParam <$> traverse exprToParam es
+exprToParam (Py.Paren e _) = exprToParam e
 exprToParam _                 = error "Unsupported variable binding"
 
 exprToLHS :: PyExpr -> Cvt Parameter
 exprToLHS e@(Py.Var name _) = Parameter <$> definition name <*> pure Nothing
 exprToLHS e@(Py.Tuple es _) = TupleParam <$> traverse exprToLHS es
+exprToLHS (Py.Paren e _) = exprToLHS e
 exprToLHS _                 = error "Unsupported assignment target"
 
 -- Convert a single statement.
