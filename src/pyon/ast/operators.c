@@ -220,6 +220,7 @@ static struct Pyon_BinaryOp ast_binary_operators[] = {
   BINARY_OP_DECL("LE", "<=", 4, ASSOC_NONE),
   BINARY_OP_DECL("GE", ">=", 4, ASSOC_NONE),
   BINARY_OP_DECL("NE", "!=", 4, ASSOC_NONE),
+  BINARY_OP_DECL("ARROW", "->", 3, ASSOC_RIGHT),
   BINARY_OP_DECL(NULL, NULL, 0, 0)	/* sentinel */
 };
 
@@ -239,6 +240,7 @@ BINARY_OP_NAME(EQ,      12);
 BINARY_OP_NAME(LE,      13);
 BINARY_OP_NAME(GE,      14);
 BINARY_OP_NAME(NE,      15);
+BINARY_OP_NAME(ARROW,   16);
 
 #define UNARY_OP_DECL(name, display, prec)			\
   { PyObject_HEAD_INIT(&UnaryOp_type) name, display, prec }

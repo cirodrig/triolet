@@ -28,7 +28,7 @@ CIR_PY_LIBDIR()
 ## Check for libraries
 
 CIR_HS_CHECK_PACKAGE([mtl])
-CIR_HS_CHECK_PACKAGE([language-python-0.1.1])
+CIR_HS_CHECK_PACKAGE([language-python-pyon])
 CIR_HS_CHECK_PACKAGE([gluon])
 
 ## Check for header files

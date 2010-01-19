@@ -21,9 +21,12 @@ import qualified Data.Set as Set
 import Data.Traversable
 
 import qualified Language.Python.Version3.Parser as Py
-import qualified Language.Python.Version3.Syntax.AST as Py
-import qualified Language.Python.Version3.Syntax.Pretty as Py
+import qualified Language.Python.Common.AST as Py
+import qualified Language.Python.Common.Pretty as Py
+import Language.Python.Common.PrettyAST()
 import Parser.ParserSyntax
+
+type PyIdent = Py.IdentSpan
 
 data Binding =
     Local                       -- A locally defined variable
@@ -43,7 +46,7 @@ data Binding =
     deriving(Show)
 
 -- A map from variable names to bindings
-type Bindings = Map.Map Py.Ident Binding
+type Bindings = Map.Map String Binding
 
 -- Given a binding and the set of nonlocal uses and defs, produce scope
 -- information for the variable.
@@ -108,7 +111,7 @@ noError = id
 oneError :: Err -> Errors
 oneError = (:)
 
-identName (Py.Ident name) = name
+identName id = Py.ident_string id
 
 -------------------------------------------------------------------------------
 -- The process of converting to a Pyon AST.
@@ -190,11 +193,9 @@ enter_ isGlobalScope f = Cvt $ \initialState ->
         -- propagate upward
         boundHere = Set.fromList $ mapMaybe localBindingName $ Map.elems final
         usesNotBoundHere = Set.fromList $
-                           map identName $
                            Map.keys $
                            Map.filter isNonlocalUse final
         defsNotBoundHere = Set.fromList $
-                           map identName $
                            Map.keys $
                            Map.filter isNonlocalDef final
         nonlocalUses = Set.union
@@ -267,10 +268,10 @@ runAndGetErrors m nextName =
 -- Low-level editing of bindings
 
 -- Look up a variable in the environment.  The result must be used lazily.
-lookupVar :: Py.Ident -> Cvt Var
+lookupVar :: PyIdent -> Cvt Var
 lookupVar name = withScopes $ \s -> lookup s
     where
-      lookup (s:ss) = case Map.lookup name $ finalMembers s
+      lookup (s:ss) = case Map.lookup (identName name) $ finalMembers s
                       of Just (Local _ v) -> (v, noError)
                          Just (Param _ v) -> (v, noError)
                          _                -> lookup ss
@@ -282,47 +283,48 @@ lookupVar name = withScopes $ \s -> lookup s
       noVariable = error "Invalid variable due to parse error"
 
 -- Look up a binding in the current, incomplete local scope.
-lookupCurrentLocalBinding :: Py.Ident -> Cvt (Maybe Binding)
+lookupCurrentLocalBinding :: PyIdent -> Cvt (Maybe Binding)
 lookupCurrentLocalBinding name =
     withScopes $ \s -> (lookup (head s), noError)
     where
-      lookup s = Map.lookup name $ currentMembers s
+      lookup s = Map.lookup (identName name) $ currentMembers s
 
 -- Insert or modify a binding
-addLocalBinding :: Py.Ident -> Binding -> Cvt ()
+addLocalBinding :: PyIdent -> Binding -> Cvt ()
 addLocalBinding name binding =
     updateScopes $ \s -> (addBinding s, noError)
     where
       addBinding (s:ss) = addBindingToScope s : ss
 
-      addBindingToScope s = s {currentMembers = Map.insert name binding $
-                                                currentMembers s}
+      addBindingToScope s =
+        s {currentMembers = Map.insert (identName name) binding $
+                            currentMembers s}
 
 -- Indicate that a definition was seen
-signalDef :: Py.Ident -> Cvt ()
-signalDef (Py.Ident nm) = Cvt $ \s -> OK s Set.empty (Set.singleton nm) ()
+signalDef :: PyIdent -> Cvt ()
+signalDef id = Cvt $ \s -> OK s Set.empty (Set.singleton $ identName id) ()
 
 -- Indicate that a use was seen
-signalUse :: Py.Ident -> Cvt ()
-signalUse (Py.Ident nm) = Cvt $ \s -> OK s (Set.singleton nm) Set.empty ()
+signalUse :: PyIdent -> Cvt ()
+signalUse id = Cvt $ \s -> OK s (Set.singleton $ identName id) Set.empty ()
 
 -------------------------------------------------------------------------------
 -- High-level editing of bindings
 
 -- Record that a binding has a definition 
-markAsDefinition :: Py.Ident -> Binding -> Cvt ()
+markAsDefinition :: PyIdent -> Binding -> Cvt ()
 markAsDefinition name b
     | bIsDef b = return ()
     | otherwise = addLocalBinding name (b {bIsDef = True})
 
 -- Create a new variable from an identifier.
 -- This is different from all other variables created by newVar.
-newVar :: Py.Ident -> Cvt Var
-newVar (Py.Ident name) = Var name <$> newID
+newVar :: PyIdent -> Cvt Var
+newVar id = Var (identName id) <$> newID
 
 -- Process a definition of an identifier.  Return the corresponding variable,
 -- which must be used lazily.
-definition :: Py.Ident -> Cvt Var
+definition :: PyIdent -> Cvt Var
 definition name = do
   signalDef name
   -- Insert a new binding if appropriate
@@ -339,7 +341,7 @@ definition name = do
 -- Process a parameter definition.
 -- Unlike ordinary definitions, parameters cannot be redefined.
 -- Return the corresponding variable.
-parameterDefinition :: Py.Ident -> Cvt Var
+parameterDefinition :: PyIdent -> Cvt Var
 parameterDefinition name = do
   signalDef name
   mb <- lookupCurrentLocalBinding name
@@ -349,14 +351,14 @@ parameterDefinition name = do
                   addLocalBinding name (Param True v)
                   return v
 
-parameterRedefined :: Py.Ident -> Cvt a
+parameterRedefined :: PyIdent -> Cvt a
 parameterRedefined name =
     let msg = "Parameter variable '" ++ identName name ++ "' redefined"
     in fail msg
 
 -- Record that a variable is globally or nonlocally defined.  If this
 -- conflicts with an existing definition, report an error.
-globalDeclaration, nonlocalDeclaration :: Py.Ident -> Cvt ()
+globalDeclaration, nonlocalDeclaration :: PyIdent -> Cvt ()
 globalDeclaration name = do
   b <- lookupCurrentLocalBinding name
   case b of
@@ -389,39 +391,54 @@ use name = do
 -------------------------------------------------------------------------------
 -- Conversions for Python 3 Syntax
 
-expression :: Py.Expr -> Cvt Expr
+type PyExpr = Py.ExprSpan
+type PyStmt = Py.StatementSpan
+type PyComp a = Py.ComprehensionSpan a
+
+expression :: PyExpr -> Cvt Expr
 expression expr =
     case expr
-    of Py.Var ident        -> Variable <$> use ident
-       Py.Int n            -> pure (Literal (IntLit n))
-       Py.Float d          -> pure (Literal (FloatLit d))
-       Py.Bool b           -> pure (Literal (BoolLit b))
-       Py.None             -> pure (Literal NoneLit)
-       Py.Tuple es         -> Tuple <$> traverse expression es
-       Py.Call f xs        -> Call <$> expression f <*> traverse argument xs
-       Py.CondExpr tr c fa -> let mkCond tr c fa = Cond c tr fa
-                              in mkCond <$> expression tr
-                                        <*> expression c
-                                        <*> expression fa
-       Py.BinaryOp op l r  -> Binary op <$> expression l <*> expression r
-       Py.UnaryOp op arg   -> Unary op <$> expression arg
-       Py.Lambda args body -> enter $ \_ -> Lambda <$> traverse parameter args
-                                                   <*> expression body
+    of Py.Var {Py.var_ident = ident} -> 
+         Variable <$> use ident
+       Py.Int {Py.int_value = n} -> 
+         pure (Literal (IntLit n))
+       Py.Float {Py.float_value = d} ->
+         pure (Literal (FloatLit d))
+       Py.Bool {Py.bool_value = b} ->
+         pure (Literal (BoolLit b))
+       Py.None {} -> 
+         pure(Literal NoneLit)
+       Py.Tuple {Py.tuple_exprs = es} -> 
+         Tuple <$> traverse expression es
+       Py.Call {Py.call_fun = f, Py.call_args = xs} -> 
+         Call <$> expression f <*> traverse argument xs
+       Py.CondExpr { Py.ce_true_branch = tr
+                   , Py.ce_condition = c
+                   , Py.ce_false_branch = fa} -> 
+         let mkCond tr c fa = Cond c tr fa
+         in mkCond <$> expression tr <*> expression c <*> expression fa
+       Py.BinaryOp { Py.operator = op
+                   , Py.left_op_arg = l
+                   , Py.right_op_arg = r} -> 
+         Binary op <$> expression l <*> expression r
+       Py.UnaryOp {Py.operator = op, Py.op_arg = arg} -> 
+         Unary op <$> expression arg
+       Py.Lambda {Py.lambda_args = args, Py.lambda_body = body} -> 
+         enter $ \_ -> Lambda <$> traverse parameter args <*> expression body
 
        -- Generators and list comprehensions have a separate scope
-       Py.Generator comp   -> enter $ \locals ->
-                                  Generator locals <$>
-                                  comprehension expression comp
-       Py.ListComp comp    -> enter $ \locals ->
-                                  ListComp <$> comprehension expression comp
+       Py.Generator {Py.gen_comprehension = comp} -> 
+         enter $ \locals -> Generator locals <$> comprehension expression comp
+       Py.ListComp {Py.list_comprehension = comp} -> 
+         enter $ \locals -> ListComp <$> comprehension expression comp
        _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
 
 -- Convert an optional expression into an expression or None
-maybeExpression :: Maybe Py.Expr -> Cvt Expr
+maybeExpression :: Maybe PyExpr -> Cvt Expr
 maybeExpression (Just e) = expression e
 maybeExpression Nothing  = pure noneExpr
 
-comprehension :: (a -> Cvt b) -> Py.Comprehension a -> Cvt (IterFor b)
+comprehension :: (a -> Cvt b) -> PyComp a -> Cvt (IterFor b)
 comprehension convertBody comprehension =
     compFor $ Py.comprehension_for comprehension
     where
@@ -436,33 +453,39 @@ comprehension convertBody comprehension =
 
       compBody = convertBody (Py.comprehension_expr comprehension)
 
-      compIter Nothing                = CompBody <$> compBody
-      compIter (Just (Py.IterFor cf)) = CompFor <$> compFor cf
-      compIter (Just (Py.IterIf ci))  = CompIf <$> compIf ci
+      compIter Nothing =
+        CompBody <$> compBody
+      compIter (Just (Py.IterFor {Py.comp_iter_for = cf})) = 
+        CompFor <$> compFor cf
+      compIter (Just (Py.IterIf {Py.comp_iter_if = ci})) = 
+        CompIf <$> compIf ci
 
 noneExpr = Literal NoneLit
 
-argument :: Py.Argument -> Cvt Expr
-argument (Py.ArgExpr e) = expression e
+argument :: Py.ArgumentSpan -> Cvt Expr
+argument (Py.ArgExpr {Py.arg_expr = e}) = expression e
 argument _ = error "Unsupported argument type"
 
-parameter :: Py.Parameter -> Cvt Parameter
-parameter (Py.Param name _ _) = Parameter <$> parameterDefinition name
+parameter :: Py.ParameterSpan -> Cvt Parameter
+parameter (Py.Param {Py.param_name = name, Py.param_py_annotation = ann}) = 
+  Parameter <$> parameterDefinition name <*> traverse expression ann
 
 parameters xs = traverse parameter xs
 
-exprToParam :: Py.Expr -> Cvt Parameter
-exprToParam e@(Py.Var name) = Parameter <$> parameterDefinition name
-exprToParam e@(Py.Tuple es) = TupleParam <$> traverse exprToParam es
-exprToParam _               = error "Unsupported variable binding"
+exprToParam :: PyExpr -> Cvt Parameter
+exprToParam e@(Py.Var name _) =
+  Parameter <$> parameterDefinition name <*> pure Nothing
+exprToParam e@(Py.Tuple es _) =
+  TupleParam <$> traverse exprToParam es
+exprToParam _                 = error "Unsupported variable binding"
 
-exprToLHS :: Py.Expr -> Cvt Parameter
-exprToLHS e@(Py.Var name) = Parameter <$> definition name
-exprToLHS e@(Py.Tuple es) = TupleParam <$> traverse exprToLHS es
-exprToLHS _               = error "Unsupported assignment target"
+exprToLHS :: PyExpr -> Cvt Parameter
+exprToLHS e@(Py.Var name _) = Parameter <$> definition name <*> pure Nothing
+exprToLHS e@(Py.Tuple es _) = TupleParam <$> traverse exprToLHS es
+exprToLHS _                 = error "Unsupported assignment target"
 
 -- Convert a single statement.
-singleStatement :: Py.Statement -> Cvt [Stmt]
+singleStatement :: PyStmt -> Cvt [Stmt]
 singleStatement stmt =
     case stmt
     of {- Py.For targets generator bodyClause _ ->
@@ -471,16 +494,20 @@ singleStatement stmt =
            in addLabel $ mkFor <$> expression generator
                                <*> traverse exprToLHS targets
                                <*> suite bodyClause -}
-       Py.StmtExpr e ->
-           singleton . ExprStmt <$> expression e
-       Py.Conditional guards els ->
-           foldr ifelse (suite els) guards
-       Py.Assign dsts src -> assignments (reverse dsts) (expression src)
-       Py.Return me -> -- Process, then discard statements after the return
-                       singleton <$> Return <$> maybeExpression me
-       Py.Pass -> pure []
-       Py.NonLocal xs -> [] <$ mapM_ nonlocalDeclaration xs
-       Py.Global xs -> [] <$ mapM_ globalDeclaration xs
+       Py.StmtExpr {Py.stmt_expr = e} ->
+         singleton . ExprStmt <$> expression e
+       Py.Conditional {Py.cond_guards = guards, Py.cond_else = els} ->
+         foldr ifelse (suite els) guards
+       Py.Assign {Py.assign_to = dsts, Py.assign_expr = src} -> 
+         assignments (reverse dsts) (expression src)
+       Py.Return {Py.return_expr = me} -> 
+         -- Process, then discard statements after the return
+         singleton <$> Return <$> maybeExpression me
+       Py.Pass {} -> pure []
+       Py.NonLocal {Py.nonLocal_vars = xs} -> 
+         [] <$ mapM_ nonlocalDeclaration xs
+       Py.Global {Py.global_vars = xs} -> 
+         [] <$ mapM_ globalDeclaration xs
        _ -> fail $ "Cannot translate statement:\n" ++ Py.prettyText stmt
     where
       -- An if-else clause
@@ -489,13 +516,13 @@ singleStatement stmt =
 
       singleton x = [x]
 
-defStatements :: [Py.Statement] -> Cvt Stmt
+defStatements :: [PyStmt] -> Cvt Stmt
 defStatements stmts = DefGroup <$> traverse funDefinition stmts
 
 -- For each assignment in a multiple-assignment statement,
 -- assign to one variable, then use that variable as the source value
 -- for the next assignment.
-assignments :: [Py.Expr] -> Cvt Expr -> Cvt [Stmt]
+assignments :: [PyExpr] -> Cvt Expr -> Cvt [Stmt]
 assignments (v:vs) src = (:) <$> assign v src
                              <*> assignments vs (expression v)
     where
@@ -504,7 +531,7 @@ assignments (v:vs) src = (:) <$> assign v src
 assignments [] src = pure []
 
 -- Convert a suite of statements.  A suite must have at least one statement.
-suite :: [Py.Statement] -> Cvt Suite
+suite :: [PyStmt] -> Cvt Suite
 suite ss = let groups = groupBy ((==) `on` isDefStatement) ss
            in concat <$> traverse suiteComponent groups
     where
@@ -515,18 +542,24 @@ suite ss = let groups = groupBy ((==) `on` isDefStatement) ss
           | isDefStatement (head ss) = fmap (:[]) $ defStatements ss
           | otherwise                = concat <$> traverse singleStatement ss
 
-topLevel :: [Py.Statement] -> Cvt [Func]
+topLevel :: [PyStmt] -> Cvt [Func]
 topLevel xs = traverse topLevelFunction xs
     where
       topLevelFunction stmt@(Py.Fun {}) = funDefinition stmt
       topLevelFunction _ =
           fail "Only function definitions permitted at global scpoe"
 
-funDefinition :: Py.Statement -> Cvt Func
-funDefinition (Py.Fun name params _ body) =
-    mkFunction <$> definition name <*> functionBody
+funDefinition :: PyStmt -> Cvt Func
+funDefinition (Py.Fun { Py.fun_name = name
+                      , Py.fun_args = params
+                      , Py.fun_result_annotation = result
+                      , Py.fun_body = body}) =
+    mkFunction <$> definition name <*> functionBody <*> resultAnnotation
     where
-      mkFunction name (locals, params, body) = Func name locals params body
+      mkFunction name (locals, params, body) result = 
+        Func name locals params result body
+      
+      resultAnnotation = traverse expression result
 
       functionBody = enter $ \locals -> (,,) <$> pure locals
                                              <*> parameters params
@@ -537,7 +570,7 @@ funDefinition (Py.Fun name params _ body) =
 
 -- | Convert a Python statement to a Pyon expression.
 -- The lowest unassigned variable ID is returned.
-convertStatement :: Py.Statement -> Int -> Either [String] (Int, [Stmt])
+convertStatement :: PyStmt -> Int -> Either [String] (Int, [Stmt])
 convertStatement stmt names =
     let computation = singleStatement stmt
     in case runAndGetErrors computation names
@@ -546,7 +579,7 @@ convertStatement stmt names =
 
 -- | Convert a Python module to a Pyon module.
 -- The lowest unassigned variable ID is returned.
-convertModule :: Py.Module -> Int -> Either [String] (Int, [Func])
+convertModule :: Py.ModuleSpan -> Int -> Either [String] (Int, [Func])
 convertModule mod names =
     let computation =
             case mod
@@ -563,6 +596,6 @@ parseModule :: String           -- ^ File contents
 parseModule stream path =
     case Py.parseModule stream path
     of Left err  -> Left [show err]
-       Right mod -> case convertModule mod 1
-                    of Left err        -> Left err
-                       Right (n, defs) -> Right (n, Module [defs])
+       Right (mod, _) -> case convertModule mod 1
+                         of Left err        -> Left err
+                            Right (n, defs) -> Right (n, Module [defs])

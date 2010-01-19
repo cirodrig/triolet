@@ -321,14 +321,16 @@ class DefGroupStmt(Statement):
 
 class Function(object):
     """A function definition"""
-    def __init__(self, name, parameters, body, local_scope = None):
+    def __init__(self, name, parameters, annotation, body, local_scope = None):
         assert isinstance(name, Variable)
         for p in parameters:
             assert isinstance(p, Parameter)
         for s in body:
             assert isinstance(s, Statement)
+            assert annotation is None or isinstance(annotation, Expression)
         self.name = name
         self.parameters = parameters
+        self.annotation = annotation
         self.body = body
         self.localScope = local_scope
 

@@ -14,8 +14,9 @@ import Control.Monad.Trans
 import Data.List
 import qualified Data.Map as Map
 import System.IO.Unsafe(unsafePerformIO)
-import qualified Language.Python.Version3.Syntax.AST as Py
-import qualified Language.Python.Version3.Syntax.Pretty as Py
+import qualified Language.Python.Common.AST as Py
+import qualified Language.Python.Common.Pretty as Py
+import Language.Python.Common.PrettyAST()
 
 import Parser.ParserSyntax
 import Python
@@ -62,6 +63,7 @@ data Env =
     , py_GE                 :: !PyPtr
     , py_LE                 :: !PyPtr
     , py_NE                 :: !PyPtr
+    , py_ARROW              :: !PyPtr
     , py_NEGATE             :: !PyPtr
     , py_COMPLEMENT         :: !PyPtr
     , py_NOT                :: !PyPtr
@@ -117,6 +119,7 @@ mkEnv =
         leOp  <- getAttr op "LE"
         geOp  <- getAttr op "GE"
         neOp  <- getAttr op "NE"
+        arrowOp <- getAttr op "ARROW"
         negateOp <- getAttr op "NEGATE"
         complementOp <- getAttr op "COMPLEMENT"
         notOp <- getAttr op "NOT"
@@ -161,6 +164,7 @@ mkEnv =
                      , py_LE = leOp
                      , py_GE = geOp
                      , py_NE = neOp
+                     , py_ARROW = arrowOp
                      , py_NEGATE = negateOp
                      , py_COMPLEMENT = complementOp
                      , py_NOT = notOp
@@ -209,6 +213,7 @@ freeEnv env = mapM_ decrefField
               , py_LE
               , py_GE
               , py_NE
+              , py_ARROW
               , py_NEGATE
               , py_COMPLEMENT
               , py_NOT
@@ -383,6 +388,17 @@ call4Ex fun mkx mky mkz mkw =
         do ptr <- fun
            liftIO $ checkNull $ pyObject_CallObject ptr tuple
 
+call5Ex :: (Exportable a, Exportable b, Exportable c, Exportable d, Exportable e) =>
+           Export PyPtr -> a -> b -> c -> d -> e -> Export PyPtr
+call5Ex fun mkx mky mkz mkw mkv =
+    withPyPtrExcEx (toPythonTupleEx [ toPythonEx mkx
+                                    , toPythonEx mky
+                                    , toPythonEx mkz
+                                    , toPythonEx mkw
+                                    , toPythonEx mkv]) $ \tuple ->
+        do ptr <- fun
+           liftIO $ checkNull $ pyObject_CallObject ptr tuple
+
 -- Convert an association list to a Python dictionary
 toPythonDictEx :: (Exportable key, Exportable value) =>
                   [(key, value)] -> Export PyPtr
@@ -404,38 +420,39 @@ instance Python Literal where
     toPython (BoolLit b)  = toPython b
     toPython NoneLit      = pyNone
 
-instance Exportable Py.Op where
-    toPythonEx Py.Plus        = readEnv py_ADD
-    toPythonEx Py.Minus       = readEnv py_SUB
-    toPythonEx Py.Divide      = readEnv py_DIV
-    toPythonEx Py.Multiply    = readEnv py_MUL
-    toPythonEx Py.Modulo      = readEnv py_MOD
-    toPythonEx Py.FloorDivide = readEnv py_FLOORDIV
-    toPythonEx Py.Exponent    = readEnv py_POWER
-    toPythonEx Py.LessThan    = readEnv py_LT
-    toPythonEx Py.GreaterThan = readEnv py_GT
-    toPythonEx Py.Equality    = readEnv py_EQ
-    toPythonEx Py.GreaterThanEquals = readEnv py_GE
-    toPythonEx Py.LessThanEquals = readEnv py_LE
-    toPythonEx Py.NotEquals   = readEnv py_NE
-    toPythonEx Py.BinaryAnd   = readEnv py_BITWISEAND
-    toPythonEx Py.BinaryOr    = readEnv py_BITWISEOR
-    toPythonEx Py.Xor         = readEnv py_BITWISEXOR
-    toPythonEx op             = error $ "Cannot translate operator to Python: " ++ Py.prettyText op
+instance Exportable (Py.Op a) where
+  toPythonEx (Py.Plus {})        = readEnv py_ADD
+  toPythonEx (Py.Minus {})       = readEnv py_SUB
+  toPythonEx (Py.Divide {})      = readEnv py_DIV
+  toPythonEx (Py.Multiply {})    = readEnv py_MUL
+  toPythonEx (Py.Modulo {})      = readEnv py_MOD
+  toPythonEx (Py.FloorDivide {}) = readEnv py_FLOORDIV
+  toPythonEx (Py.Exponent {})    = readEnv py_POWER
+  toPythonEx (Py.LessThan {})    = readEnv py_LT
+  toPythonEx (Py.GreaterThan {}) = readEnv py_GT
+  toPythonEx (Py.Equality {})    = readEnv py_EQ
+  toPythonEx (Py.GreaterThanEquals {}) = readEnv py_GE
+  toPythonEx (Py.LessThanEquals {}) = readEnv py_LE
+  toPythonEx (Py.NotEquals {})   = readEnv py_NE
+  toPythonEx (Py.Arrow {})       = readEnv py_ARROW
+  toPythonEx (Py.BinaryAnd {})   = readEnv py_BITWISEAND
+  toPythonEx (Py.BinaryOr {})    = readEnv py_BITWISEOR
+  toPythonEx (Py.Xor {})         = readEnv py_BITWISEXOR
+  toPythonEx op             = error $ "Cannot translate operator to Python: " ++ Py.prettyText op
 
 -- Language-Python uses the same names for unary and binary operators.
 -- This newtype wrapper is used to disambiguate the 'Exportable' instance.
-newtype AsUnary = AsUnary Py.Op
+newtype AsUnary a = AsUnary (Py.Op a)
 
-instance Exportable AsUnary where
-    toPythonEx (AsUnary Py.Minus)  = readEnv py_NEGATE
-    toPythonEx (AsUnary Py.Invert) = readEnv py_COMPLEMENT
-    toPythonEx (AsUnary Py.Not)    = readEnv py_NOT
+instance Exportable (AsUnary a) where
+    toPythonEx (AsUnary (Py.Minus {}))  = readEnv py_NEGATE
+    toPythonEx (AsUnary (Py.Invert {})) = readEnv py_COMPLEMENT
+    toPythonEx (AsUnary (Py.Not {}))    = readEnv py_NOT
     toPythonEx (AsUnary op)        = error $ "Cannot translate operator to Python: " ++ Py.prettyText op
 
 instance Exportable Parameter where
-    toPythonEx (Parameter v)   = call1Ex (readEnv py_VariableParam) v
-    toPythonEx (TupleParam es) = call1Ex (readEnv py_TupleParam) es
+    toPythonEx (Parameter v ann) = call2Ex (readEnv py_VariableParam) v ann
+    toPythonEx (TupleParam es)   = call1Ex (readEnv py_TupleParam) es
 
 -- Convert locals to a map from variable to (bool, bool, bool)
 instance Exportable Locals where
@@ -464,6 +481,10 @@ instance Exportable Expr where
     toPythonEx (Call f xs)     = call2Ex (readEnv py_CallExpr) f xs
     toPythonEx (Cond c tr fa)  = call3Ex (readEnv py_CondExpr) c tr fa
     toPythonEx (Lambda ps e)   = call2Ex (readEnv py_LambdaExpr) ps e
+    
+instance Exportable Annotation where
+  toPythonEx Nothing = liftIO pyNone
+  toPythonEx (Just e) = toPythonEx e
 
 instance Exportable (IterFor Expr) where
     toPythonEx (IterFor [param] e comp) =
@@ -482,8 +503,8 @@ instance Exportable (Comprehension Expr) where
     toPythonEx (CompBody x)   = call1Ex (readEnv py_DoIter) x
 
 instance Exportable Func where
-    toPythonEx (Func name locals params body) =
-        call4Ex (readEnv py_Function) name params body locals
+    toPythonEx (Func name locals params ann body) =
+        call5Ex (readEnv py_Function) name params ann body locals
 
 instance Exportable Module where
     toPythonEx (Module groups) = call1Ex (readEnv py_Module) groups

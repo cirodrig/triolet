@@ -8,8 +8,8 @@
 {-# LANGUAGE ExistentialQuantification #-}
 module Parser.ParserSyntax where
 
-import qualified Language.Python.Version3.Syntax.AST as Python
-import Language.Python.Version3.Syntax.AST(Ident, AssignOp, Op)
+import qualified Language.Python.Common.AST as Python
+import Language.Python.Common.AST(Ident, AssignOp, Op)
 
 -- | A Python variable.
 -- Different variables have different IDs, though they can have
@@ -53,13 +53,15 @@ data Expr =
   | Literal Literal
     -- Python expressions
   | Tuple [Expr]
-  | Unary !Op Expr
-  | Binary !Op Expr Expr
+  | Unary !Python.OpSpan Expr
+  | Binary !Python.OpSpan Expr Expr
   | ListComp (IterFor Expr)
   | Generator Locals (IterFor Expr)
   | Call Expr [Expr]
   | Cond Expr Expr Expr -- condition, true, false
   | Lambda [Parameter] Expr
+
+type Annotation = Maybe Expr
 
 data IterFor a =
     IterFor [Parameter] Expr (Comprehension a)
@@ -82,9 +84,9 @@ data Stmt =
 type Suite = [Stmt]
 
 data Parameter =
-    Parameter Var
+    Parameter Var Annotation
   | TupleParam [Parameter]
 
-data Func = Func Var Locals [Parameter] Suite
+data Func = Func Var Locals [Parameter] Annotation Suite
 
 data Module = Module [[Func]]

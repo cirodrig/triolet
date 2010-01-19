@@ -75,8 +75,14 @@ newtype PythonExcType = PythonExcType {fromPythonExcType :: Ptr PyPtr}
 foreign import ccall "Python.h &PyExc_RuntimeError"
     pyExc_RuntimeError :: Ptr PyPtr
 
+foreign import ccall "Python.h &PyExc_TypeError"
+    pyExc_TypeError :: Ptr PyPtr
+
 pyRuntimeError :: PythonExcType
 pyRuntimeError = PythonExcType pyExc_RuntimeError
+
+pyTypeError :: PythonExcType
+pyTypeError = PythonExcType pyExc_TypeError
 
 foreign import ccall safe "Python.h PyErr_SetString"
     pyErr_SetString :: PyPtr -> CString -> IO ()
@@ -87,6 +93,12 @@ setPythonExc exctypePtr msg =
     withCString msg $ \msgPtr -> do
       exctype <- peek (fromPythonExcType exctypePtr)
       pyErr_SetString exctype msgPtr
+      
+-- Raise an exception in the Python runtime and throw an exception.
+throwPythonExc :: PythonExcType -> String -> IO a
+throwPythonExc exctypePtr msg = do
+  setPythonExc exctypePtr msg
+  throwIO PythonExc
 
 -- Raise an exception in the Python runtime and return a null pointer.
 -- This function behaves as the Python interpreter expects from a C
@@ -185,6 +197,17 @@ safeToPythonExc x f = withPyPtrExc (toPython x) f
 -------------------------------------------------------------------------------
 -- Python objects
 
+foreign import ccall "Python.h PyObject_IsInstance" py_IsInstance 
+  :: PyPtr -> PyPtr -> IO CInt
+
+isInstance :: PyPtr -> PyPtr -> IO Bool
+x `isInstance` t = do
+  n <- py_IsInstance x t
+  case n of
+    1 -> return True
+    0 -> return False
+    _ -> throwIO PythonExc      -- Other values indicate an error
+
 foreign import ccall "Python.h &_Py_NoneStruct"
     py_None :: PyPtr
 
@@ -259,6 +282,14 @@ instance Python a => Python [a] where
                     safeToPythonExc x $ setListItem list index
             in do mapMIndex_ marshalItem xs
                   return list
+
+foreign import ccall "Python.h PyList_GetItem"
+  pyList_GetItem :: PyPtr -> Py_ssize_t -> IO PyPtr
+                    
+-- | Get a borrowed reference to the n_th list item.
+getListItem :: PyPtr -> Int -> IO PyPtr
+getListItem xs n = do
+  checkNull $ pyList_GetItem xs (fromIntegral n)
 
 foreign import ccall "Python.h PyDict_New"
     pyDict_New :: IO PyPtr
