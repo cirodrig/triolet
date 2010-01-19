@@ -26,20 +26,20 @@ def _functionType(param_types, return_type):
     for param_t in reversed(param_types): t = hmtype.FunTy(param_t, t)
     return t
 
+# Mapping from a Python literal type to the corresponding Pyon type constructor
+_literalSignatureTable = {
+    bool       : builtin_data.type_bool,
+    int        : builtin_data.type_int,
+    float      : builtin_data.type_float,
+    type(None) : builtin_data.type_None
+    }
+
 def literalSignature(c):
     """
     Get the type of a literal value.
     """
-    tyc = c.__class__
-    if tyc is bool:
-        return builtin_data.type_bool
-    elif tyc is int:
-        return builtin_data.type_int
-    elif tyc is float:
-        return builtin_data.type_float
-    elif c is None:
-        return builtin_data.type_None
-    else:
+    try: return _literalSignatureTable[type(c)]
+    except IndexError:
         debug("unknown literal")
         raise TypeError
 
