@@ -75,6 +75,8 @@ mkEnv =
         builtins <- getBuiltins
 
         runtimeError <- getItemString builtins "RuntimeError"
+        py_IncRef runtimeError  -- getItemString doesn't return a new reference
+
         pythonVariable <- getAttr mod "PythonVariable"
         variableParam <- getAttr mod "VariableParam"
         tupleParam <- getAttr mod "TupleParam"
