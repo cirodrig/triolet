@@ -167,6 +167,7 @@ def inferLetBindingType(gamma, param, bound_type, expr):
                                            bound_type)
         except unification.UnificationError, e:
             print_ast.printAst(expr)
+            print "Value type:", pretty.renderString(bound_type.pretty())
             raise TypeCheckError, "Type mismatch in parameter binding"
 
         # Bind each tuple field to a variable

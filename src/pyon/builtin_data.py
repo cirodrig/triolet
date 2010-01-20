@@ -176,10 +176,21 @@ _do_type = hm.TyScheme.forall(1, lambda a: hm.FunTy(a, hm.AppTy(type_it, a)))
 oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
 
 # Builtin list functions
+_reduce_type = hm.TyScheme.forall(2, lambda a, t: \
+  functionType([functionType([a, a], a), hm.AppTy(t, a), a], a))
+fun_reduce = ast.ANFVariable(name = "reduce", type_scheme = _reduce_type)
+
+_reduce1_type = hm.TyScheme.forall(2, lambda a, t: \
+  functionType([functionType([a, a], a), hm.AppTy(t, a)], a))
+fun_reduce1 = ast.ANFVariable(name = "reduce1", type_scheme = _reduce1_type)
+
 _zip_type = hm.TyScheme.forall(4, lambda a, b, c, d: \
   functionType([hm.AppTy(c, a), hm.AppTy(d, b)], \
                hm.AppTy(type_it, hm.TupleTy([a, b]))))
 fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
+
+_iota_type = hm.TyScheme.forall(1, lambda t: hm.AppTy(t, type_int))
+fun_iota = ast.ANFVariable(name = "iota", type_scheme = _iota_type)
 
 # Define classes and instances.
 # Each global identifier is initialized to None for reasons of documentation.
@@ -192,4 +203,4 @@ class_Traversable = None
 # _makeClasses()
 
 # The list of all builtin functions
-BUILTIN_FUNCTIONS = [fun_zip]
+BUILTIN_FUNCTIONS = [fun_reduce, fun_reduce1, fun_zip, fun_iota]

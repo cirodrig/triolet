@@ -3,18 +3,6 @@ def dist(x, y):
     # Should be a built-in function
     pass
 
-def reduce1(f, xs):
-    # Should be a built-in function
-    pass
-
-def iota():
-    # Should be a built-in function
-    pass
-
-def zip(xs, ys):
-    # Should be a built-in function
-    pass
-
 def minIndex(f, xs):
     def pickMin(x, y):
         ix_x, val_x = x
