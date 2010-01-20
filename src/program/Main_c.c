@@ -6,16 +6,21 @@
 
 /* Defined in Driver.hs */
 extern PyObject *
-parsePyonFile(const char *);
+parsePyonFile(const char *, PyObject *, int);
 
 /* Python wrapper around parsePyonFile */ 
 static PyObject *
 parsePyonFile_wrapper(PyObject *self, PyObject *args)
 {
   const char *filename;
-  if (PyArg_ParseTuple(args, "s", &filename) == 0)
+  PyObject *globals_list;
+  int next_id;
+
+  if (PyArg_ParseTuple(args, "sO!i",
+		       &filename, &PyList_Type, &globals_list, &next_id) == 0)
     return NULL;
-  return parsePyonFile((void *)filename);
+
+  return parsePyonFile((void *)filename, globals_list, next_id);
 }
 
 static struct PyMethodDef haskell_methods[] = {

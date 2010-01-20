@@ -221,10 +221,30 @@ foreign import ccall "Python.h PyString_FromString"
 stringToPython :: String -> IO PyPtr
 stringToPython s = checkNull $ withCString s $ \p -> pyString_FromString p
 
+foreign import ccall "Python.h PyString_AsString"
+  pyString_AsString :: PyPtr -> IO CString
+                       
+fromPythonString :: PyPtr -> IO String
+fromPythonString p = do
+  s <- pyString_AsString p
+  when (s == nullPtr) $ throwIO PythonExc
+  peekCString s
+
 newtype AsString = AsString String
 
 foreign import ccall "Python.h PyInt_FromLong"
     pyInt_FromLong :: CLong -> IO PyPtr
+
+foreign import ccall "Python.h PyNumber_Int"
+  pyNumber_Int :: PyPtr -> IO PyPtr
+
+foreign import ccall "Python.h PyInt_AsLong"
+  pyInt_AsLong :: PyPtr -> IO CLong
+
+fromPythonInt :: PyPtr -> IO Int
+fromPythonInt p = do
+  withPyPtr (checkNull $ pyNumber_Int p) $ \intp ->
+    return . fromIntegral =<< pyInt_AsLong intp
 
 instance Python Int where
     toPython n = pyInt_FromLong $ fromIntegral n
@@ -326,6 +346,11 @@ foreign import ccall "Python.h PyTuple_New"
 newTuple :: Int -> IO PyPtr
 newTuple n = checkNull $ pyTuple_New (fromIntegral n)
 
+foreign import ccall "Python.h PyTuple_Check_Function"
+  pyTuple_Check :: PyPtr -> IO CInt
+
+isTuple p = liftM (/= 0) $ pyTuple_Check p
+
 foreign import ccall "Python.h PyTuple_SetItem"
     pyTuple_SetItem :: PyPtr -> Py_ssize_t -> PyPtr -> IO CInt
 
@@ -350,6 +375,14 @@ instance (Python a, Python b) => Python (a, b) where
 instance (Python a, Python b, Python c) => Python (a, b, c) where
     toPython (x, y, z) =
         toPythonTuple [toPython x, toPython y, toPython z]
+
+foreign import ccall "Python.h PyTuple_GetItem"
+  pyTuple_GetItem :: PyPtr -> Py_ssize_t -> IO PyPtr
+
+-- | Get a borrowed reference to the n_th tuple item.
+getTupleItem :: PyPtr -> Int -> IO PyPtr
+getTupleItem ptr n = do
+  checkNull $ pyTuple_GetItem ptr (fromIntegral n)
 
 foreign import ccall "Python.h PyObject_CallObject"
   pyObject_CallObject :: PyPtr -> PyPtr -> IO PyPtr

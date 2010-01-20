@@ -23,6 +23,7 @@ import Data.Traversable
 import qualified Language.Python.Version3.Parser as Py
 import qualified Language.Python.Common.AST as Py
 import qualified Language.Python.Common.Pretty as Py
+import qualified Language.Python.Common.SrcLocation as Py
 import Language.Python.Common.PrettyAST()
 import Parser.ParserSyntax
 
@@ -96,7 +97,7 @@ data Scope =
 type Scopes = [Scope]
 
 emptyScope :: Scopes
-emptyScope = [] 
+emptyScope = []
 
 -- A set of variable names
 type NameSet = Set.Set String
@@ -299,6 +300,16 @@ addLocalBinding name binding =
       addBindingToScope s =
         s {currentMembers = Map.insert (identName name) binding $
                             currentMembers s}
+
+-- Insert a binding with the specified ID.  This should only be used at
+-- global scope before parsing a module.
+defineGlobal :: String -> Int -> Cvt ()
+defineGlobal nm id =
+  let v = Var nm id
+      binding = Local True v
+  in addLocalBinding (Py.Ident nm Py.SpanEmpty) binding
+
+defineGlobals xs = mapM_ (uncurry defineGlobal) xs
 
 -- Indicate that a definition was seen
 signalDef :: PyIdent -> Cvt ()
@@ -583,11 +594,16 @@ convertStatement stmt names =
 
 -- | Convert a Python module to a Pyon module.
 -- The lowest unassigned variable ID is returned.
-convertModule :: Py.ModuleSpan -> Int -> Either [String] (Int, [Func])
-convertModule mod names =
+convertModule :: [(String, Int)] -- ^ Predefined global variables
+              -> Py.ModuleSpan   -- ^ Module to scan
+              -> Int             -- ^ First unique variable ID to use
+              -> Either [String] (Int, [Func])
+convertModule globals mod names =
     let computation =
             case mod
-            of Py.Module statements -> enterGlobal $ \_ -> topLevel statements
+            of Py.Module statements -> 
+                 enterGlobal $ \_ -> do defineGlobals globals
+                                        topLevel statements
     in case runAndGetErrors computation names
        of (ns, Left errs)    -> Left errs
           (ns, Right result) -> Right (ns, result)
@@ -596,10 +612,12 @@ convertModule mod names =
 -- The lowest unassigned variable ID is returned.
 parseModule :: String           -- ^ File contents
             -> String           -- ^ File name
+            -> [(String, Int)]  -- ^ Predefined global variables
+            -> Int              -- ^ First unique variable ID to use
             -> Either [String] (Int, Module)
-parseModule stream path =
+parseModule stream path globals nextID =
     case Py.parseModule stream path
     of Left err  -> Left [show err]
-       Right (mod, _) -> case convertModule mod 1
+       Right (mod, _) -> case convertModule globals mod nextID
                          of Left err        -> Left err
                             Right (n, defs) -> Right (n, Module [defs])
