@@ -22,7 +22,7 @@ foreign export ccall parsePyonFile :: CString
                                    -> CInt
                                    -> IO PyPtr
 
-readGlobalsList :: PyPtr -> IO [(String, Int)]
+readGlobalsList :: PyPtr -> IO [(String, Int, PyPtr)]
 readGlobalsList globals = do
   is_list <- isList globals
   unless is_list $ throwPythonExc pyTypeError "Expecting a list" 
@@ -39,7 +39,8 @@ readGlobalsList globals = do
       
       s <- fromPythonString =<< getTupleItem item 0
       n <- fromPythonInt =<< getTupleItem item 1
-      return (s, n)
+      v <- getTupleItem item 2
+      return (s, n, v)
 
 -- Read and parse a Pyon file.  On success, a pointer to a Python
 -- object is returned.

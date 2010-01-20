@@ -17,7 +17,8 @@
 {-# LANGUAGE ForeignFunctionInterface,
              EmptyDataDecls,
              DeriveDataTypeable,
-             BangPatterns #-}
+             BangPatterns, 
+             FlexibleInstances #-}
 module Python where
 
 import Prelude hiding(catch)
@@ -55,7 +56,12 @@ type PyPtr = Ptr PyObject
 
 -- A class for data that can be marshaled to Python
 class Python a where
-    toPython :: a -> IO PyPtr
+  -- | Convert to a Python object.  Return a new reference.
+  toPython :: a -> IO PyPtr
+    
+instance Python (Ptr PyObject) where
+  toPython p = do py_IncRef p
+                  return p
 
 -------------------------------------------------------------------------------
 -- Python exceptions

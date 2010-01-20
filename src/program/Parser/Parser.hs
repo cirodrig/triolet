@@ -25,6 +25,7 @@ import qualified Language.Python.Common.AST as Py
 import qualified Language.Python.Common.Pretty as Py
 import qualified Language.Python.Common.SrcLocation as Py
 import Language.Python.Common.PrettyAST()
+import Python(PyPtr)
 import Parser.ParserSyntax
 
 type PyIdent = Py.IdentSpan
@@ -48,6 +49,10 @@ data Binding =
 
 -- A map from variable names to bindings
 type Bindings = Map.Map String Binding
+
+-- List of predefined variables.  Each variable's name, ID, and Python object
+-- is given.  The PyPtr values are borrowed references.
+type PredefinedVars = [(String, Int, PyPtr)]
 
 -- Given a binding and the set of nonlocal uses and defs, produce scope
 -- information for the variable.
@@ -303,13 +308,13 @@ addLocalBinding name binding =
 
 -- Insert a binding with the specified ID.  This should only be used at
 -- global scope before parsing a module.
-defineGlobal :: String -> Int -> Cvt ()
-defineGlobal nm id =
-  let v = Var nm id
+defineGlobal :: (String, Int, PyPtr) -> Cvt ()
+defineGlobal (nm, id, python_var) =
+  let v = makePredefinedVar nm id python_var
       binding = Local True v
   in addLocalBinding (Py.Ident nm Py.SpanEmpty) binding
 
-defineGlobals xs = mapM_ (uncurry defineGlobal) xs
+defineGlobals xs = mapM_ defineGlobal xs
 
 -- Indicate that a definition was seen
 signalDef :: PyIdent -> Cvt ()
@@ -331,7 +336,7 @@ markAsDefinition name b
 -- Create a new variable from an identifier.
 -- This is different from all other variables created by newVar.
 newVar :: PyIdent -> Cvt Var
-newVar id = Var (identName id) <$> newID
+newVar id = makeVar (identName id) <$> newID
 
 -- Process a definition of an identifier.  Return the corresponding variable,
 -- which must be used lazily.
@@ -594,7 +599,7 @@ convertStatement stmt names =
 
 -- | Convert a Python module to a Pyon module.
 -- The lowest unassigned variable ID is returned.
-convertModule :: [(String, Int)] -- ^ Predefined global variables
+convertModule :: PredefinedVars -- ^ Predefined global variables
               -> Py.ModuleSpan   -- ^ Module to scan
               -> Int             -- ^ First unique variable ID to use
               -> Either [String] (Int, [Func])
@@ -612,7 +617,7 @@ convertModule globals mod names =
 -- The lowest unassigned variable ID is returned.
 parseModule :: String           -- ^ File contents
             -> String           -- ^ File name
-            -> [(String, Int)]  -- ^ Predefined global variables
+            -> PredefinedVars   -- ^ Predefined global variables
             -> Int              -- ^ First unique variable ID to use
             -> Either [String] (Int, Module)
 parseModule stream path globals nextID =

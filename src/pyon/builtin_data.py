@@ -175,6 +175,12 @@ oper_GUARD = ast.ANFVariable(name = "__guard__", type_scheme = _guard_type)
 _do_type = hm.TyScheme.forall(1, lambda a: hm.FunTy(a, hm.AppTy(type_it, a)))
 oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
 
+# Builtin list functions
+_zip_type = hm.TyScheme.forall(4, lambda a, b, c, d: \
+  functionType([hm.AppTy(c, a), hm.AppTy(d, b)], \
+               hm.AppTy(type_it, hm.TupleTy([a, b]))))
+fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
+
 # Define classes and instances.
 # Each global identifier is initialized to None for reasons of documentation.
 # Their actual values come from the call to _makeClasses().
@@ -184,3 +190,6 @@ class_Num = None
 class_Traversable = None
 
 # _makeClasses()
+
+# The list of all builtin functions
+BUILTIN_FUNCTIONS = [fun_zip]

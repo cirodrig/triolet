@@ -269,6 +269,7 @@ def convertVariable(var, ssaver):
     an identifier for the variable.
     """
     assert ssaver != -1
+    assert ssaver != ssa.notSSA
 
     # Choose an identifier for this variable
     try:
@@ -289,6 +290,8 @@ def convertVariableRef(var, ssaver):
     # If version is -1, then use the special expression 'undefined'
     if ssaver == -1:
         return a_ast.UndefinedExpr()
+    elif ssaver == ssa.notSSA:
+        return a_ast.VariableExpr(var.anfVariable)
     else:
         return a_ast.VariableExpr(convertVariable(var, ssaver))
 

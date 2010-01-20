@@ -2,6 +2,13 @@
 
 import pyon.ast.parser_ast as ast 
 
+class _NotSSA(object):
+    """The single instance of this class is used in place of the SSA version
+    for variables that do not have SSA versions."""
+    pass
+
+notSSA = _NotSSA()
+
 class FallStmt(ast.Statement):
     """A statement representing the transfer of control flow 
     to another statement within the function"""
@@ -112,6 +119,10 @@ def _nextVarSSA(var):
         var._ssaver = var._topssaver+1
         var._topssaver = var._ssaver
     else:
+        # If the variable is already associated with an ANF variable, it can't
+        # be redefined
+        if var.hasANFVariable():
+            raise RuntimeError, "Found definition of a non-SSA variable"
         oldssaver = -1 
         var._ssaver = 0
         var._topssaver = 0
@@ -230,7 +241,9 @@ def _doExpr(expr):
         _doExpr(expr.left)
         _doExpr(expr.right)
     elif isinstance(expr, ast.VariableExpr):
-        expr.ssaver = expr.variable._ssaver
+        v = expr.variable
+        if v.hasANFVariable(): expr.ssaver = notSSA
+        else: expr.ssaver = v._ssaver
     elif isinstance(expr, ast.LiteralExpr):
         pass #Nothing to do
     elif isinstance(expr, ast.UnaryExpr):

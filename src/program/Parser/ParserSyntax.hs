@@ -8,18 +8,33 @@
 {-# LANGUAGE ExistentialQuantification #-}
 module Parser.ParserSyntax where
 
+import Foreign.Ptr
+import Python(PyPtr)
+
 import qualified Language.Python.Common.AST as Python
 import Language.Python.Common.AST(Ident, AssignOp, Op)
 
 -- | A Python variable.
 -- Different variables have different IDs, though they can have
 -- the same name.
+-- There is already a Python object created for preexisting variables 
+-- (such as builtin functions).  If no Python object already exists, 
+-- 'varPythonPtr' is NULL.  Otherwise, it holds a borrowed reference
+-- to the corresponding object.
+-- already have that existed 
 data Var =
     Var
     { varName           :: String
     , varID             :: {-# UNPACK #-} !Int
+    , varPythonPtr      :: {-# UNPACK #-} !PyPtr
     }
     deriving(Eq, Ord, Show)
+            
+makeVar :: String -> Int -> Var
+makeVar name id = Var name id nullPtr            
+
+makePredefinedVar :: String -> Int -> PyPtr -> Var
+makePredefinedVar = Var
 
 -- | A Python variable with scope information.
 --

@@ -6,6 +6,7 @@ import itertools
 
 # Operator names
 import pyon.ast.operators
+import pyon.ast.ast as ast
 
 class Variable(object):
     """Abstract base class of variables"""
@@ -19,19 +20,41 @@ class Variable(object):
 class PythonVariable(Variable):
     """A variable as determined by Python's name resolution rules"""
     def __eq__(self, other):
-        return (self.name == other.name) and (self.identifier == other.identifier)
+        return self.identifier == other.identifier
 
-    def __init__(self, name, identifier = None):
+    def __init__(self, name, identifier = None, anf_variable = None):
+        """
+        Create a new Python variable.
+        name: The name of the variable as it appears in the source code; None
+          if the variable has no name.
+        identifier: An integer that uniquely identifies this variable.  Two
+          PythonVariable objects denote the same variable iff they have the
+          same identifier.  If no identifer is given, a new integer will be
+          assigned.
+        anf_variable: If not None, this is the ANF variable corresponding to
+          this variable in the parser output.  This is used for source code
+          references to variables that are already in the IR, such as
+          previously loaded modules.
+
+        If two variables have the same identifier, they must also have the same
+        ANF variable.  They are not required to have the same name.
+        """
         assert isinstance(name, str)
         if identifier is None: identifier = PythonVariable.getNewID()
         assert isinstance(identifier, int)
+        assert anf_variable is None or \
+            isinstance(anf_variable, ast.ANFVariable)
         self.name = name
         self.identifier = identifier
+        self.anfVariable = anf_variable
 
         # A map from python variable identifiers (uniquely identifying
         # Python variables) to SSA identifiers (uniquely identifying SSA
         # instances of Python variables).
         self.ssaVersionMap = {}         # Private to ANF conversion
+
+    def hasANFVariable(self):
+        return self.anfVariable is not None
 
     _nextID = 1
 
@@ -41,7 +64,15 @@ class PythonVariable(Variable):
         Set the value of the counter used to assign new variable IDs.
         The value should be larger than any already assigned value.
         """
+        assert type(n) is int
         PythonVariable._nextID = n
+
+    @classmethod
+    def getIDGenerator(cls):
+        """
+        Get the value of the counter used to assign new variable IDs.
+        """
+        return PythonVariable._nextID
 
     @classmethod
     def getNewID(cls):

@@ -13,6 +13,7 @@ import Control.Monad.State
 import Control.Monad.Trans
 import Data.List
 import qualified Data.Map as Map
+import Foreign.Ptr
 import System.IO.Unsafe(unsafePerformIO)
 import qualified Language.Python.Common.AST as Py
 import qualified Language.Python.Common.Pretty as Py
@@ -328,11 +329,14 @@ createPythonVar v = lookupPtrOfVar v >>= check
       -- If found, return a new reference
       check (Just ptr) = do liftIO $ py_IncRef ptr
                             return ptr
-      -- Otherwise, create a new object
       check Nothing = do
-        ptr <- call2Ex (readEnv py_PythonVariable)
-                       (Inherit $ AsString $ varName v)
-                       (Inherit $ varID v)
+        let py_var = varPythonPtr v
+        ptr <- if py_var == nullPtr
+               then do mk_python_var <- readEnv py_PythonVariable
+                       liftIO $ call2 mk_python_var 
+                         (AsString $ varName v) (varID v)
+               else liftIO $ do py_IncRef py_var
+                                return py_var
         savePtrOfVar v ptr
         return ptr
 
