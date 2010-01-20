@@ -243,21 +243,23 @@ class TupleExpr(Expression):
             assert isinstance(f, Expression)
         self.arguments = arguments
 
-class TupleSelectExpr(Expression):
+class DictionarySelectExpr(Expression):
     """
-    An expression that extracts one field of a tuple.  The tuple size and
-    the selected field are fixed.
+    An expression that extracts one field of a class dictionary.
+
+    Instances of this expression appear in code that uses type classes.
+    They are inserted by type inference.
     """
 
-    def __init__(self, argument, size, index, base = ExprInit.default):
+    def __init__(self, cls, index, argument, base = ExprInit.default):
         base.initializeExpr(self)
+        assert isinstance(cls, hmtype.Class)
+        assert isinstance(index, int)
         assert isinstance(argument, Expression)
-        # Ensure that index is in bounds and size is nonnegative
-        assert 0 <= index and index < size
 
-        self.argument = argument
-        self.size = size
+        self.cls = cls
         self.index = index
+        self.argument = argument
 
 class CallExpr(Expression):
     """A function call."""

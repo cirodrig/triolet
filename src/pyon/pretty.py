@@ -20,6 +20,10 @@ Haskell library Text.PrettyPrint.HughesPJ.
 
 import sys
 import cStringIO
+import codecs
+
+# UTF-8 encoder
+_utf8enc = codecs.getencoder('UTF-8')
 
 # Number of columns in output
 _COLUMNS = 80
@@ -124,7 +128,7 @@ def renderString(doc):
     return ret
 
 def _prettyPrint(doc, file = sys.stdout, pos = posinfo(0, 0)):
-    if isinstance(doc, str):            # string
+    if isinstance(doc, basestring): # string
         return _prettyPrintText(doc, file, pos)
     elif isinstance(doc, pretty):       # pretty instance
         return doc.format(file, pos)
@@ -134,13 +138,18 @@ def _prettyPrint(doc, file = sys.stdout, pos = posinfo(0, 0)):
         return None
 
     else:
-        raise TypeError, doc
+        raise TypeError, type(doc)
 
 # All pretty-printing (other than whitespace) goes through this function
 def _prettyPrintText(text, file, pos):
     "Print a string and update position information."
+
+    # Encode UTF-8 text for display
+    if isinstance(text, unicode): text_bytes, _ = _utf8enc(text)
+    else: text_bytes = text
+
     pos = pos.pre(file, pos)            # Run preformatter
-    file.write(text)                    # Write string
+    file.write(text_bytes)              # Write string
     start = pos.column                  # Get starting position
     end = start + len(text)             # Compute ending position
     return (start, end)                 # Return interval
@@ -156,7 +165,7 @@ class pretty(object):
             arg = args[0]
             if isinstance(args[0], pretty):
                 return args[0]
-            elif isinstance(args[0], str):
+            elif isinstance(args[0], basestring):
                 return args[0]
             elif args[0] is None:
                 return None

@@ -4,41 +4,9 @@ module.
 """
 
 import pyon.ast.ast as ast
-import pyon.types.hmtype as hm
+import pyon.types.types as hm
 
-def _stmtFunctionType(param_types, return_type):
-    """
-    stmtFunctionType(param-types, return-type) -> type
-    Create the type (p1 -> p2 -> ... -> St r) of a statement function.
-    """
-    # Start with return type
-    t = hm.AppTy(hm.EntTy(type_St), return_type)
-
-    # Affix parameter types onto the return type, starting with the last
-    rparam_types = list(param_types)
-    rparam_types.reverse()
-    for param_t in rparam_types: t = hm.FunTy(param_t, t)
-    return t
-
-def _iterFunctionType(param_types, return_type):
-    """
-    iterFunctionType(param-types, return-type) -> type
-    Create the type (p1 -> p2 -> ... -> St r) of a statement function.
-    """
-    # Start with return type
-    t = hm.AppTy(hm.EntTy(type_St), return_type)
-
-    # Affix parameter types onto the return type, starting with the last
-    rparam_types = list(param_types)
-    rparam_types.reverse()
-    for param_t in rparam_types: t = hm.FunTy(param_t, t)
-    return t
-
-def functionType(param_types, return_type):
-    # Affix parameter types onto the return type, starting with the last
-    t = return_type
-    for param_t in reversed(param_types): t = hm.FunTy(param_t, t)
-    return t
+functionType = hm.FunTy
 
 def _makeClasses():
     "Create type classes."
@@ -105,7 +73,7 @@ def _makeClasses():
 def create_type_schemes():
     global _unaryScheme, _binaryScheme, _compareScheme, _binaryIntScheme
     a = hm.TyVar()
-    _unaryScheme = hm.TyScheme([a], hm.noConstraints, hm.FunTy(a, a))
+    _unaryScheme = hm.TyScheme([a], hm.noConstraints, functionType([a], a))
     _binaryScheme = hm.TyScheme([a], hm.noConstraints,
                                 functionType([a,a], a))
     _compareScheme = hm.TyScheme([a], hm.noConstraints,
@@ -157,13 +125,13 @@ oper_NEGATE = ast.ANFVariable(type_scheme = _unaryScheme)
 # Translations of generators and list comprehensions
 
 # Turn generator into list comprehension
-_list_type = hm.TyScheme.forall(1, lambda a: hm.FunTy(hm.AppTy(type_it, a),
+_list_type = hm.TyScheme.forall(1, lambda a: functionType([hm.AppTy(type_it, a)],
                                                       hm.AppTy(type_list, a)))
 oper_LIST = ast.ANFVariable(name = "list", type_scheme = _list_type)
 
 # Translation of 'for' generators
 _foreach_type = hm.TyScheme.forall(3, lambda a, b, t: \
-  functionType([hm.AppTy(t, a), hm.FunTy(a, hm.AppTy(type_it, b))], hm.AppTy(type_it, b)))
+  functionType([hm.AppTy(t, a), functionType([a], hm.AppTy(type_it, b))], hm.AppTy(type_it, b)))
 oper_FOREACH = ast.ANFVariable(name = "__foreach__", type_scheme = _foreach_type)
 
 # Translation of 'if' generators
@@ -172,7 +140,7 @@ _guard_type = hm.TyScheme.forall(1, lambda a: \
 oper_GUARD = ast.ANFVariable(name = "__guard__", type_scheme = _guard_type)
 
 # Generator body
-_do_type = hm.TyScheme.forall(1, lambda a: hm.FunTy(a, hm.AppTy(type_it, a)))
+_do_type = hm.TyScheme.forall(1, lambda a: functionType([a], hm.AppTy(type_it, a)))
 oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
 
 # Builtin list functions
@@ -189,7 +157,7 @@ _zip_type = hm.TyScheme.forall(4, lambda a, b, c, d: \
                hm.AppTy(type_it, hm.TupleTy([a, b]))))
 fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
 
-_iota_type = hm.TyScheme.forall(1, lambda t: hm.AppTy(t, type_int))
+_iota_type = hm.TyScheme.forall(1, lambda t: functionType([], hm.AppTy(t, type_int)))
 fun_iota = ast.ANFVariable(name = "iota", type_scheme = _iota_type)
 
 # Define classes and instances.

@@ -246,9 +246,7 @@ def convertIterator(iter):
     elif isinstance(iter, p_ast.DoIter):
         # create a call to 'DO'
         body = convertExpression(iter.body)
-        body_func = a_ast.exprFunction([], body)
-        return _callVariable(builtin_data.oper_DO,
-                             [a_ast.FunExpr(body_func)])
+        return _callVariable(builtin_data.oper_DO, [body])
     else:
         raise TypeError, type(iter)
 

@@ -3,7 +3,7 @@ def dist(x, y):
     # Should be a built-in function
     pass
 
-def minIndex(f, xs):
+def minIndex(xs):
     def pickMin(x, y):
         ix_x, val_x = x
 	ix_y, val_y = y

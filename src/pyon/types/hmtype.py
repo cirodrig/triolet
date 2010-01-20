@@ -11,8 +11,6 @@ import pyon.ast.ast as ast
 import pyon.unification as unification
 import pyon.pretty as pretty
 
-import pdb
-
 class PyonTypeBase(object):
     """
     An interface for type-level Pyon data, including types, classes, and type
@@ -67,7 +65,13 @@ class PyonTypeBase(object):
         return self.showWorker(PyonTypeBase.PREC_OUTER,
                                list(self.freeVariables()))
 
-class FirstOrderType(PyonTypeBase):
+class PyonType(PyonTypeBase):
+    """
+    A type.
+    """
+    pass
+
+class FirstOrderType(PyonType):
     """
     A first-order type.
     """
@@ -110,25 +114,17 @@ class TupleTyCon(TyEnt):
 
 class FunTyCon(TyEnt):
     """
-    A function type constructor.
+    An n-ary function type constructor.
     """
-    instance = None
-
-    def __new__(cls):
-        # This is a singleton class
-        if cls.instance is None:
-            FunTyCon.instance = t = TyEnt.__new__(cls)
-            return t
-        else: return cls.instance
-
-    def __init__(self): pass
+    def __init__(self, arity):
+        self.arity = arity
 
     def __eq__(self, other):
-        # Singleton class, just compare object identity 
-        return self is other
+        if not isinstance(other, FunTyCon): return False
+        return self.arity == other.arity
 
     def __str__(self):
-        return "(->)"
+        return "Fun" + str(self.arity) + "Type"
 
 class AppTyCon(TyEnt):
     """
@@ -230,14 +226,16 @@ class EntTy(FirstOrderType, unification.Term):
 
 class FunTy(FirstOrderType, unification.Term):
     """
-    A function type.
+    An n-ary function type.
 
-    A function type is equivalent to an application of FunTyCon to two
-    arguments.  It's common enough to merit using a special form.
+    An n-ary function type is equivalent to an application of FunTyCon to
+    n+1 arguments.  It's common enough to merit using a special form.
     """
 
     def __init__(self, dom, rng):
-        assert isinstance(dom, FirstOrderType)
+        assert isinstance(dom, list)
+        for param in dom:
+            assert isinstance(param, FirstOrderType)
         assert isinstance(rng, FirstOrderType)
         self.domain = dom
         self.range = rng
@@ -247,18 +245,30 @@ class FunTy(FirstOrderType, unification.Term):
         return self.domain == other.domain and self.range == other.range
 
     def getConstructor(self):
-        return FunTyCon()
+        return FunTyCon(len(self.domain))
 
     def getParameters(self):
-        return [self.domain, self.range]
+        return self.domain + [self.range]
 
     def addFreeVariables(self, s):
-        self.domain.addFreeVariables(s)
+        for d in self.domain: d.addFreeVariables(s)
         self.range.addFreeVariables(s)
 
     def showWorker(self, precedence, in_scope_vars):
         PREC_FUN = PyonTypeBase.PREC_FUN
-        dom_doc = self.domain.showWorker(PREC_FUN, in_scope_vars)
+
+        def product(xs):
+            # [ x_0, times, x_1, times ... times, x_N]
+            last = None
+            for x in xs:
+                if last:
+                    yield x
+                    yield u'\xd7' # "times"
+                last = x
+            yield last
+
+        dom_doc = pretty.space(list(product(x.showWorker(PREC_FUN, in_scope_vars)
+                                            for x in self.domain)))
         rng_doc = self.range.showWorker(PREC_FUN - 1, in_scope_vars)
         fun_doc = pretty.space([dom_doc, "->", rng_doc])
 
@@ -270,7 +280,8 @@ class FunTy(FirstOrderType, unification.Term):
         Apply a substitution to all type variables in this term.  A new
         type is returned.
         """
-        return FunTy(self.domain.rename(mapping), self.range.rename(mapping))
+        return FunTy([x.rename(mapping) for x in self.domain],
+                     self.range.rename(mapping))
 
 class TupleTy(FirstOrderType, unification.Term):
     """
@@ -328,8 +339,8 @@ class AppTy(FirstOrderType, unification.Term):
 
         # If operator is a FunTyCon or TupleTyCon, then replace with that type
         if isinstance(oper, FunTyCon):
-            assert len(rev_args) == 2
-            return FunTy(rev_args[1], rev_args[0])
+            assert len(rev_args) == oper.arity + 1
+            return FunTy(reversed(rev_args[1:]), rev_args[0])
         elif isinstance(oper, TupleTyCon):
             assert len(rev_args) == oper.numArguments
             rev_args.reverse()
@@ -390,291 +401,3 @@ def typeApplication(oper, args):
     t = oper
     for arg in args: t = AppTy(t, arg)
     return t
-
-###############################################################################
-# Type classes
-
-class Class(PyonTypeBase):
-    """
-    A type class.
-
-    fields:
-    name : string
-      The class name
-    param : TyVar
-      A type variable that stands for an arbitrary member of the class
-    constraint : Constraints
-      Constraints that class members must satisfy
-    methods : [ClassMethod]
-      The class's methods
-    """
-
-    def __init__(self, name, param, constraints, methods):
-        """
-        Create a new class.
-        """
-        assert isinstance(param, TyVar)
-        assert isinstance(constraints, Constraints)
-        for m in methods:
-            assert isinstance(m, ClassMethod)
-
-        self.name = name
-        self.parameter = param
-        self.methods = methods
-        self.instances = []
-
-    def addInstance(self, inst):
-        self.instances.append(inst)
-
-    def findInstance(self, ty):
-        """
-        cls.findInstance(ty) -> (methods, constraints) or None
-
-        Find a class instance that matches the given type.
-        If an instance is found, return the instance's methods and a set of
-        constraints.  If no instance can be found, then None is returned.
-        """
-        def return_result((methods, constraints)):
-            # Add in the class's constraint set
-            instantiation = instantiateVariables([self.param])
-            return (methods,
-                    self.constraints.rename(instantiation) * constraints)
-
-        # Try each instance until a match is found
-        for i in self.instances:
-            result = i.matchWith(ty)
-            if result is not None: return return_result(result)
-        return None
-
-class ClassMethod(PyonTypeBase):
-    """
-    A method of a type class.
-
-    A method is specified by a name and type signature.  The type signature
-    may refer to class variables.  The method's implementation is provided
-    as part of each class instance.
-
-    fields:
-    name : ANFVariable
-      The variable name that Pyon programs use to invoke the method.
-    signature : TyScheme
-      The method's type signature.
-    """
-    def __init__(self, name, sig):
-        assert isinstance(name, ast.ANFVariable)
-        assert isinstance(sig, TyScheme)
-        self.name = name
-        self.signature = sig
-
-class Instance(PyonTypeBase):
-    """
-    An instance of a type class.
-
-    fields:
-    qvars : [TyVar]
-      Universally quantified type variables.
-    constraints : Constraints
-      Constraints that types must satisfy to inhabit this instance.
-    cls : Class
-      The class that this is an instance of.
-    instanceType : type
-      The types described by this Instance object.
-    methods : [InstanceMethod]
-      A list of instance methods.  Each element of the list must match
-      the corresponding list of class methods.
-    """
-
-    def __init__(self, qvars, constraints, cls, instance_type, methods):
-        assert isinstance(cls, Class)
-        for v in qvars: assert isinstance(v, TyVar)
-        assert isinstance(c, Constraints)
-        assert isinstance(methods, InstanceMethod)
-
-        self.qvars = qvars
-        self.constraints = constraints
-        self.typeClass = cls
-        self.instanceType = instance_type
-        self.methods = methods
-        self.instanceVariable = instance_variable
-
-    def matchWith(self, ty):
-        """
-        inst.matchWith(t) -> (methods, constraints) or None
-
-        Check whether type 't' matches this instance rule.  If so, then return
-        a list of class methods and an extra constraint that
-        must be satisfied.  If 't' does not match this instance declaration,
-        return None."""
-        # Attempt to unify this instance with the given type
-        instantiation = instantiateVariables(self.qvars)
-        try: unify(ty, param.rename(instantiation))
-        except UnificationError: return None
-
-        # Instantiate and return the methods and constraints
-        methods = [m.rename(instantiation) for m in self.methods]
-        constraints = self.constraints.rename(instantiation)
-        return (methods, constraints)
-
-class InstanceMethod(PyonTypeBase):
-    """
-    A method of a type class instance.
-
-    fields:
-    name : ANFVariable
-      The variable name that Pyon programs use to invoke the method.  This
-      should be the same as the corresponding ClassMethod name.
-    func : Function
-      The implementation of this instance.  This should have the same type
-      as the type signature of the corresponding ClassMethod.
-    """
-    def __init__(self, name, func):
-        assert isinstance(name. ast.ANFVariable)
-        assert isinstance(func, ast.Function)
-        self.name = name
-        self.function = func
-
-class ClassPredicate(PyonTypeBase):
-    """
-    A single-parameter type class constraint.
-    ClassPredicate values are immutable.
-    """
-    def __init__(self, ty, cls):
-        assert isinstance(cls, Class)
-        self.type = ty
-        self.typeClass = cls
-
-class Constraints(PyonTypeBase):
-    """
-    A set of class constraints.  Constraints values are immutable.
-
-    Constraint sets maintain the invariant that no member of the set is
-    entailed by any other.
-    """
-
-    def __init__(self, sq = None):
-        if sq:
-            # Create a set of class constraints from 'sq', simplifying and
-            # discarding redundancies.
-            print "Not implemented: hmtype.Constraints.__init__"
-            self.constraints = []
-        else:
-            self.constraints = []
-
-    def addFreeVariables(self, s):
-        # Not implemented
-        pass
-
-    def rename(self, mapping):
-        """
-        Apply a renaming to this constraint set.
-        Raise an error if the renamed constraint set is unsatisfiable.
-        """
-        raise NotImplementedError
-
-    def generalizeOver(self, variables):
-        """
-        s.generalizeOver(variable-list) -> (dependent set, free set)
-
-        Generalize this constraint set over a set of variables.
-        Return a constraint set that depends on the given variables and a
-        constraint set that does not.  The union of the returned constraints
-        is equal to the original set.
-        """
-        raise NotImplementedError
-
-    def __mul__(self, other):
-        """Compute the intersection of two class constraint sets by combining
-        the constraints from each set and removing redundant constraints.
-        A new object is returned."""
-        raise NotImplementedError
-
-noConstraints = Constraints()
-
-###############################################################################
-# Type schemes
-
-def instantiateVariables(vars):
-    """
-    instantiateVariables(variable-list) -> mapping
-
-    Instantiate some type variables.  Each variable is mapped to a fresh type
-    variable, and the mapping is returned.
-    """
-    return dict((v, TyVar()) for v in vars)
-
-class TyScheme(PyonTypeBase):
-    """
-    A type scheme: forall (qvars). (constraints) => (t)
-    """
-
-    def __init__(self, qvars, constraints, t):
-        assert isinstance(constraints, Constraints)
-        self.qvars = qvars
-        self.constraints = constraints
-        self.type = t
-
-    @classmethod
-    def forall(cls, num_vars, body, constraints = lambda *xs: noConstraints):
-        """
-        TyScheme.forall(int, make-body) -> new type scheme
-        TyScheme.forall(int, make-body, make-constraints) -> new type scheme
-
-        Create a new type scheme quantified over new variables.
-        """
-        vars = tuple(TyVar() for v in range(num_vars))
-        t = apply(body, vars)
-        csts = apply(constraints, vars)
-        return cls(vars, csts, t)
-
-    def rename(self, mapping):
-        # Bound variables should never be renamed and variables should not be
-        # shadowed
-        for v in self.qvars:
-            if v in mapping.keys():
-                raise ValueError, "Attempt to rename variable bound by type scheme"
-
-        # Rename variables in this type scheme
-        return TyScheme(self.qvars,
-                        self.constraints.rename(mapping),
-                        self.type.rename(mapping))
-
-    def showWorker(self, precedence, visible_vars):
-        # Show as forall a b c. 
-        var_list = [v.showWorker(PyonTypeBase.PREC_OUTER, visible_vars) \
-            for v in self.qvars]
-        var_doc = pretty.space(pretty.punctuate(',', var_list))
-        quantifier = pretty.space("forall", pretty.abut(var_doc, '.'))
-        monotype = self.type.showWorker(PyonTypeBase.PREC_FUN - 1,
-                                        visible_vars + qvars)
-        return pretty.linewr(quantifier, monotype, 2)
-
-    def instantiate(self):
-        """
-        scheme.instantiate() -> type
-        Instantiate a type scheme by creating fresh variables for each type.
-        """
-        # Rename each type variable to a fresh variable
-        mapping = dict((v, TyVar()) for v in self.qvars)
-        return self.type.rename(mapping)
-
-    def addFreeVariables(self, s):
-        # The type scheme's quantified variables must not be free
-        assert not len(set.intersection(set(self.qvars), s))
-
-        self.constraints.addFreeVariables(s)
-        self.type.addFreeVariables(s)
-
-        for v in self.qvars: s.discard(v)
-
-def generalize(t, constraints):
-    """
-    generalize(t, constraints) -> (scheme, constraints)
-
-    Generalize a type by quantifying over all free type variables.
-    """
-    (dependent_constraints, free_constraints) = \
-        constraints.generalizeOver(t.freeVariables())
-
-    scheme = TyScheme(list(t.freeVariables()), dependent_constraints, t)
-    return (scheme, free_constraints)
-

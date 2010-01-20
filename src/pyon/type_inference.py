@@ -5,7 +5,7 @@ import pyon
 import pyon.pretty as pretty
 import pyon.builtin_data as builtin_data
 import pyon.unification as unification
-import pyon.types.hmtype as hmtype
+import pyon.types.types as hmtype
 import pdb
 
 class TypeCheckError(Exception): pass
@@ -17,14 +17,7 @@ def debug(msg):
 def typrn(ty):
     pretty.render(ty.canonicalize().pretty())
 
-def _functionType(param_types, return_type):
-    """
-    _functionType([p1, p2 ... pN], r) -> FirstOrderType "p1 -> p2 ... pN -> r"
-    """
-    # Affix parameter types onto the return type, starting with the last
-    t = return_type
-    for param_t in reversed(param_types): t = hmtype.FunTy(param_t, t)
-    return t
+_functionType = hmtype.FunTy
 
 # Mapping from a Python literal type to the corresponding Pyon type constructor
 _literalSignatureTable = {
