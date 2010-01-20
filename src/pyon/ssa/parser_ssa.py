@@ -1,4 +1,21 @@
-"""SSA generation module for the Pyon Parser AST"""
+"""
+SSA generation module for the Pyon Parser AST.
+
+The entry point for SSA generation, @convertSSA, converts a Module to SSA form.
+The following things are true of the output: 
+
+* Every suite of statements contains exactly one control flow statement, at
+  the end.
+* Every control flow join point is labeled with a PhiNode object.  The control
+  flow out of a function is annotated onto the Function.  The control
+  flow out of an if-else is annotated onto the IfStmt.
+* Every definition of a variable is annotated with an SSA ID.  Variables are
+  defined by Function and VariableParam objects.
+* Every use of a variable is annotated with an SSA ID, unless that variable
+  is not tracked by SSA.  VariableExpr objects are variable uses.
+
+Variables are tracked by SSA if they do not have an associated ANFVariable.
+"""
 
 import pyon.ast.parser_ast as ast 
 
