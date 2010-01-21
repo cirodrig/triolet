@@ -40,18 +40,13 @@ def convertSuite(suite, make_fallthrough):
     fall-through (not a return).
     """
     suite_len = len(suite)
-    def convertSuiteMember(i):
-        # To convert the i_th element of the suite, call convertStatement.
-        # The fallthrough path for the i_th element is the i+1_th element,
-        # so pass a function that converts the i+1_th element of the suite
-        # as a parameter.  When we reach the end of the list, pass the
-        # make_fallthrough function.
-        if i < suite_len - 1:
-            return lambda: convertStatement(suite[i], convertSuiteMember(i+1))
-        else:
-            return lambda: convertControlStatement(suite[i], make_fallthrough)
 
-    return convertSuiteMember(0)()
+    # Start at the end and work backwards
+    suite_expr = convertControlStatement(suite[-1], make_fallthrough)
+    for stmt in reversed(suite[:-1]):
+        suite_expr = convertStatement(stmt, suite_expr)
+
+    return suite_expr
 
 def convertControlStatement(stmt, make_fallthrough):
     """
@@ -70,43 +65,27 @@ def convertControlStatement(stmt, make_fallthrough):
 def convertStatement(stmt, successor):
     """
     Convert a statement to an ANF statement.  The following statement
-    is passed as the second parameter, in the form of a nullary function.
-
-    A nullary function is passed because the code may be generated twice.
-    This should be fixed in the future by using a local function to avoid
-    ever generating code twice.  Then the value can be passed directly.
+    is passed as the second parameter.  The following statement will appear
+    exactly once in the generated ANF code.
     """
     if isinstance(stmt, p_ast.ExprStmt):
         # let _ = first in next
         first = convertExpression(stmt.expression)
-        return a_ast.LetExpr(None, first, successor())
+        return a_ast.LetExpr(None, first, successor)
 
     elif isinstance(stmt, p_ast.AssignStmt):
         # let x = first in next
         first = convertExpression(stmt.expression)
         lhs = convertParameter(stmt.lhs)
-        return a_ast.LetExpr(lhs, first, successor())
+        return a_ast.LetExpr(lhs, first, successor)
 
     elif isinstance(stmt, p_ast.IfStmt):
         join_node = stmt.joinPoint
 
         cond = convertExpression(stmt.cond)
 
-        # If there's a return statement inside the block, then generate code
-        # on each path
-        # FIXME: Doing it this way may cause code duplication.  We really
-        # should use a letrec if there will be code duplication.
-        if join_node.hasret:
-            # The fallthrough path will be incorporated into any
-            # branches of the if expression that fall through
-            def make_join(live_out_expr):
-                param = _consumeValue(join_node)
-                return a_ast.LetExpr(param, live_out_expr, successor())
-
-            true_path = convertSuite(stmt.ifTrue, make_join)
-            false_path = convertSuite(stmt.ifFalse, make_join)
-            return a_ast.IfExpr(cond, true_path, false_path)
-        else:
+        # If there is no escaping control, generate an if-else expression
+        if not join_node.hasret:
             # let (x, y) = (if cond then true_path else false_path) in next
 
             # Create the if-else expression
@@ -117,11 +96,54 @@ def convertStatement(stmt, successor):
 
             # Create the subsequent code
             param = _consumeValue(join_node)
-            return a_ast.LetExpr(param, if_expr, successor())
+            return a_ast.LetExpr(param, if_expr, successor)
+
+        # If there's exactly one fallthrough path, then generate code
+        # on each path and inline the continuation
+        elif join_node.hasft == 1:
+            # if cond then true_path else false_path
+
+            # The fallthrough path will be incorporated into any
+            # branches of the if expression that fall through
+            def make_join(live_out_expr):
+                param = _consumeValue(join_node)
+                return a_ast.LetExpr(param, live_out_expr, successor)
+
+            true_path = convertSuite(stmt.ifTrue, make_join)
+            false_path = convertSuite(stmt.ifFalse, make_join)
+            return a_ast.IfExpr(cond, true_path, false_path)
+
+        # Otherwise, generate a local function for the continuation
+        else:
+            # let k (x1, x2 ... xn) = successor
+            # in if cond then true_path else false_path
+
+            # The name of the continuation function
+            cont_var = a_ast.ANFVariable()
+
+            # The live-ins of the continuation.  Unpack the tuple.
+            params = _consumeValue(join_node).fields
+
+            # Define the continuation function
+            cont_fun = a_ast.Function(a_ast.EXPRESSION, params, successor)
+
+            # At the end of the if/else branches, call the continuation
+            # function
+            def make_join(live_out_expr):
+                return a_ast.CallExpr(a_ast.VariableExpr(cont_var),
+                                      live_out_expr.arguments)
+
+            # Define the if-else expression
+            true_path = convertSuite(stmt.ifTrue, make_join)
+            false_path = convertSuite(stmt.ifFalse, make_join)
+            if_expr = a_ast.IfExpr(cond, true_path, false_path)
+
+            return a_ast.LetrecExpr([a_ast.FunctionDef(cont_var, cont_fun)],
+                                    if_expr)
 
     elif isinstance(stmt, p_ast.DefGroupStmt):
         defs = [convertFunction(d) for d in stmt.definitions]
-        return a_ast.LetrecExpr(defs, successor())
+        return a_ast.LetrecExpr(defs, successor)
 
     else:
         raise TypeError, type(stmt)

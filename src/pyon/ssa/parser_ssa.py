@@ -103,6 +103,7 @@ class IfNode(JoinNode):
     def __init__(self, join_stmt):
         JoinNode.__init__(self)
         self.hasret = False
+        self.hasft = 0
         self.joinStmt = join_stmt
 
 class ReturnNode(JoinNode):
@@ -336,12 +337,13 @@ def _doStmtList(fn_ctx, stmts):
     # Pass the successor of each statement to doStmt, so that control flow
     # join points can be marked.
     # Detect whether any statements contain escaping control flow.
-    escaping_control = False
+    hasret = False
+    hasft = 1
     for s, next_s in zip(stmts, stmts[1:] + [None]):
-        ec = _doStmt(fn_ctx, s, next_s)
-        escaping_control = escaping_control or ec
+        this_hasret, hasft = _doStmt(fn_ctx, s, next_s)
+        hasret = hasret or this_hasret
 
-    return escaping_control
+    return (hasret, hasft)
 
 def _doStmt(fn_ctx, stmt, next_stmt):
     """
@@ -349,23 +351,25 @@ def _doStmt(fn_ctx, stmt, next_stmt):
     used only to mark if a return statement is seen in the subtree of the 
     particular statement.
 
-    Return true if this statement contains any escpaing control flow.
+    Return the control flow behavior of the statement: whether it has any
+    escaping control flow, and the number of fallthrough paths it has (zero,
+    one, or many).
     """
     if isinstance(stmt, ast.ExprStmt):
         _doExpr(stmt.expression)
-        return False
+        return (False, 1)
 
     elif isinstance(stmt, ast.ReturnStmt):
         _doExpr(stmt.expression)
         fdef, var = fn_ctx
         stmt.joinNode = fdef.joinPoint
         stmt.joinNode.addPhi(var, stmt, stmt.expression.ssaver)
-        return True
+        return (True, 0)
 
     elif isinstance(stmt, ast.AssignStmt):
         _doExpr(stmt.expression)
         _makeSSA(stmt.lhs)
-        return False
+        return (False, 1)
 
     elif isinstance(stmt, ast.IfStmt):
         assert next_stmt is not None
@@ -378,26 +382,26 @@ def _doStmt(fn_ctx, stmt, next_stmt):
         _initPath(reconverge)
         truefall = FallStmt(reconverge)
         _regularizeControl(stmt.ifTrue, truefall)
-        ec1 = _doStmtList(fn_ctx, stmt.ifTrue)
+        hasret1, hasft1 = _doStmtList(fn_ctx, stmt.ifTrue)
 
         #Wrap up the true path and switch to the other 
         _nextPath(truefall)
         falsefall = FallStmt(reconverge)
         _regularizeControl(stmt.ifFalse, falsefall)
-        ec2 = _doStmtList(fn_ctx, stmt.ifFalse)
+        hasret2, hasft2 = _doStmtList(fn_ctx, stmt.ifFalse)
 
         _finishPath(falsefall, [truefall])
 
-        escaping_control = ec1 or ec2
-        reconverge.hasret = escaping_control
-        return escaping_control
+        hasret = reconverge.hasret = hasret1 or hasret2
+        hasft = reconverge.hasft = min(2, hasft1 + hasft2)
+        return (hasret, hasft)
 
     elif isinstance(stmt, ast.DefGroupStmt):
         _doDefGroup(stmt.definitions)
-        return False
+        return (False, 1)
 
     elif isinstance(stmt, FallStmt):
-        return False
+        return (False, 1)
 
     else:
         raise TypeError, type(stmt)
