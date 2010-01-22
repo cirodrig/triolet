@@ -9,24 +9,6 @@ import sys
 
 #_indentation = 0
 
-def prettyType(ty):
-    if isinstance(ty, pyon.types.hmtype.TyScheme):
-        ty = ty.instantiate()
-        fmt = '!<%s>'
-    else:
-        fmt = '<%s>'
-
-    if isinstance(ty, pyon.types.hmtype.EntTy):
-        return pretty.abut(fmt % ty.canonicalize().pretty())
-    elif isinstance(ty, pyon.types.hmtype.TyVar):
-        return pretty.abut(fmt % ty.canonicalize().pretty())
-    elif isinstance(ty, pyon.types.hmtype.AppTy):
-        return pretty.abut(fmt % ty.canonicalize().pretty())
-    elif isinstance(ty, pyon.types.hmtype.TupleTy):
-        return pretty.braces(pretty.space(pretty.punctuate(',', [prettyType(f) for f in ty.arguments])))
-    else:
-        return pretty.space('?')
-
 def printAst(root, file = sys.stdout):
     """A generic, recursive printing function.
     Examines the argument type and calls the appropriate print function.
@@ -108,10 +90,9 @@ def printExpression(expr, precedence):
         return doc
 
     elif isinstance(expr, LetExpr):
+        paramdoc = printParam(expr.parameter)
         rhsdoc = printExpression(expr.rhs, _OUTER_PREC)
-        assndoc = pretty.stack(pretty.space(['let',
-                                             printParam(expr.parameter),
-                                             '=']),
+        assndoc = pretty.stack(pretty.space(['let', paramdoc, '=']),
                                pretty.nest(pretty.abut(rhsdoc, ';'), 4))
         bodydoc = printExpression(expr.body, _OUTER_PREC)
         return pretty.stack(assndoc, bodydoc)
@@ -141,10 +122,18 @@ def printFuncDef(fdef):
     # Begin with syntax that resembles a function call
     paramdoc = pretty.punctuate(',', [printParam(p)
                                       for p in fdef.function.parameters])
+    scm = fdef.name.getTypeScheme()
+    if scm:
+        typedoc = pretty.abut(pretty.space([printVar(fdef.name),
+                                            ':', scm.pretty()]),
+                              ';')
+    else:
+        typedoc = None
     calldoc = pretty.abut(printVar(fdef.name),
                           pretty.parens(pretty.space(paramdoc)))
-    return pretty.stack(pretty.space(calldoc, '='),
-                        pretty.nest(printExpression(fdef.function.body, _OUTER_PREC), 4))
+    return pretty.stack([typedoc,
+                         pretty.space(calldoc, '='),
+                         pretty.nest(printExpression(fdef.function.body, _OUTER_PREC), 4)])
 
 def printVar(v):
     """Returns a pretty-printable object for a variable in the AST
@@ -157,13 +146,14 @@ def printParam(p):
     TupleParams untested as of yet...
     p: Parameter to be printed"""
     if isinstance(p, VariableParam):
-        printlist = []
         if p.annotation is not None:
             pass #Unimplemented?
-        printlist.append(printVar(p.name))
-        if p.default is not None:
-            printlist.append(pretty.space('=', printVar(p.default)))
-        return pretty.space(printlist)
+
+        scm = p.name.getTypeScheme()
+        if scm: typedoc = pretty.space(':', scm.pretty())
+        else: typedoc = None
+
+        return pretty.space(printVar(p.name), typedoc)
     elif isinstance(p, TupleParam):
         return pretty.braces(pretty.space(pretty.punctuate(',', [printParam(f) for f in p.fields])))
     else:

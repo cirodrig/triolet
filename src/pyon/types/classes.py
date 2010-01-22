@@ -1,16 +1,11 @@
 
+import itertools
+import pyon.ast.ast
 from pyon.types.hmtype import *
 import pyon.types.schemes
 
-class DictionaryTy(PyonType):
-    """
-    The type of a class dictionary.  A class dictionary type is like a tuple,
-    but its members may be polymorphic.  Because it contains type schemes, it
-    is not a first-order type.
-    """
-    def __init__(self, cls):
-        assert isinstance(cls, Class)
-        self.cls = cls
+def _concatMap(f, sq):
+    return itertools.chain(*(f(x) for x in sq))
 
 ###############################################################################
 # Type classes
@@ -26,12 +21,13 @@ class Class(PyonTypeBase):
       A type variable that stands for an arbitrary member of the class
     constraint : Constraints
       Constraints that class members must satisfy
+    methods: [ClassMethod]
+      Declarations of the class's methods
     instances : [ClassInstance]
       Instances of the class
-    dictionaryType : The type of a class dictionary
     """
 
-    def __init__(self, name, param, constraint):
+    def __init__(self, name, param, constraint, methods):
         """
         Class(name, var, constraint) -> new class
 
@@ -39,28 +35,35 @@ class Class(PyonTypeBase):
         performed by defineClass(). 
         """
         assert isinstance(param, TyVar)
-        assert isinstance(constraints, Constraints)
+        for c in constraint: assert isinstance(c, ClassPredicate)
+        for t in methods: assert isinstance(t, ClassMethod)
 
         self.name = name
         self.parameter = param
         self.constraint = constraint
-        self.dictionaryType = None # assigned by defineClass
+        self.methods = methods
         self.instances = []
-
-    def setMethods(self, methods):
-        for m in methods:
-            assert isinstance(m, ClassMethod)
-        if self.methods is not None:
-            raise ValueError, "Class methods have already been assigned"
-        self._methods = methods
-
-    def getMethods(self):
-        if self._methods is None:
-            raise ValueError, "Class methods have not been assigned"
-        return self._methods
 
     def addInstance(self, inst):
         self.instances.append(inst)
+
+    def getMethod(self, method):
+        """
+        c.getMethod(method-index) -> ANFVariable
+        c.getMethod(method-name) -> ANFVariable
+        Get the specified class member.
+        """
+        if isinstance(method, str):
+            for m in self.methods:
+                v = m.getVariable(self)
+                if v.name == method:
+                    return v
+            raise IndexError, method
+        elif isinstance(method, int):
+            return self.methods[method].getVariable(self)
+        else:
+            raise TypeError, "argument must be string or int"
+            
 
     def findInstance(self, ty):
         """
@@ -99,31 +102,9 @@ class Class(PyonTypeBase):
         Get the type of a class method dictionary, given the types of the
         class's type parameter.
         """
+        return EntTy(DictionaryTyCon(self))
 
-def defineClass(name, param, constraint, method_defs):
-    """
-    defineClass(name, var, constraint, method-type-list) -> (class, methods)
-
-    Define a type class.  The class is returned along with a list of generic
-    class methods.
-    """
-
-    cls = Class(name, param, constraint)
-
-    # Initialize methods and compute their types
-    method_index = 0
-    methods = []
-    method_types = []
-    for meth_vars, meth_constraint, fo_type in method_defs:
-
-        # Method type definition:
-        # forall param, meth_vars. (class dictionary type)
-        #   let f = select method_index n_methods cls
-        #   in f a b
-        ast.Function(ast.EXPRESSION, [param] + meth_vars, body)
-    dict_type = TupleTy([TySchemeTy(t) for t in method_types])
-
-class ClassMethod(PyonTypeBase):
+class ClassMethod(object):
     """
     A method of a type class.
 
@@ -132,26 +113,50 @@ class ClassMethod(PyonTypeBase):
     as part of each class instance.
 
     fields:
-    _name : ANFVariable
+    name : String
       The variable name that Pyon programs use to invoke the method.
       The name is initialized to None.  It ahould be assigned before any
       objects look up this value.
-    signature : TyScheme
+    _signatureFun : () -> TyScheme
+      A lambda function that returns the method's type signature.
+      This is a lambda function because it may refer to a type object that
+      has not been created yet.
+    _signature : TyScheme
       The method's type signature.
+    _variable : ANFVariable
+      The ANF variable used to refer to this method.  This is created lazily.
+      The variable's type is the type before type class desugaring.
     """
-    def __init__(self, sig):
-        assert isinstance(sig, TyScheme)
-        self._name = None
-        self.signature = sig
+    def __init__(self, name, sig):
+        self.name = name
+        self._signatureFun = sig
+        self._signature = None
+        self._variable = None
 
-    def setName(self, name):
-        assert isinstance(name, ast.ANFVariable)
-        if self._name: raise ValueError, "Instance name is already assigned"
-        self._name = name
+    def getSignature(self):
+        if self._signature: return self._signature
+        sig = self._signature = self._signatureFun()
+        return sig
 
-    def getName(self):
-        if not self._name: raise ValueError, "Instance name has not been assigned"
-        return self._name
+    def getVariable(self, cls):
+        v = self._variable
+        if not v:
+            # Extend the given signature with class constraints to get
+            # the actual method signature
+            sig = self.getSignature()
+            cls_var = cls.parameter
+            qvars = [cls_var] + sig.qvars
+            constraints = [ClassPredicate(None, cls_var, cls)] + sig.constraints
+            actual_sig = pyon.types.schemes.TyScheme(qvars, constraints,
+                                                     sig.type)
+            
+            v = self._variable = \
+                pyon.ast.ast.ANFVariable(self.name,
+                                         type_scheme = actual_sig)
+        return v
+
+    def getTypeScheme(self):
+        return self.getVariable().getTypeScheme()
 
 class Instance(PyonTypeBase):
     """
@@ -164,7 +169,7 @@ class Instance(PyonTypeBase):
       Constraints that types must satisfy to inhabit this instance.
     cls : Class
       The class that this is an instance of.
-    instanceType : type
+    instanceType : FirstOrderType
       The types described by this Instance object.
     methods : [InstanceMethod]
       A list of instance methods.  Each element of the list must match
@@ -172,17 +177,16 @@ class Instance(PyonTypeBase):
     """
 
     def __init__(self, qvars, constraints, cls, instance_type, methods):
-        assert isinstance(cls, Class)
         for v in qvars: assert isinstance(v, TyVar)
-        assert isinstance(c, Constraints)
-        assert isinstance(methods, InstanceMethod)
+        for c in constraints: assert isinstance(c, ClassPredicate)
+        assert isinstance(cls, Class)
+        assert isinstance(instance_type, FirstOrderType)
 
         self.qvars = qvars
         self.constraints = constraints
         self.typeClass = cls
         self.instanceType = instance_type
         self.methods = methods
-        self.instanceVariable = instance_variable
 
     def matchWith(self, ty):
         """
@@ -202,23 +206,10 @@ class Instance(PyonTypeBase):
         constraints = self.constraints.rename(instantiation)
         return (methods, constraints)
 
-class InstanceMethod(PyonTypeBase):
-    """
-    A method of a type class instance.
-
-    fields:
-    name : ANFVariable
-      The variable name that Pyon programs use to invoke the method.  This
-      should be the same as the corresponding ClassMethod name.
-    func : Function
-      The implementation of this instance.  This should have the same type
-      as the type signature of the corresponding ClassMethod.
-    """
-    def __init__(self, name, func):
-        assert isinstance(name. ast.ANFVariable)
-        assert isinstance(func, ast.Function)
-        self.name = name
-        self.function = func
+def addInstance(cls, qvars, constraints, instance_type, methods):
+    inst = Instance(qvars, constraints, cls, instance_type, methods)
+    cls.addInstance(inst)
+    return inst
 
 class ClassPredicate(PyonTypeBase):
     """
@@ -239,55 +230,219 @@ class ClassPredicate(PyonTypeBase):
         self.type = ty
         self.typeClass = cls
 
+    def __eq__(self, other):
+        if not isinstance(other, ClassPredicate): return False
+
+        return self.typeClass is other.typeClass and self.type == other.type
+
+    def match(self, other):
+        if not isinstance(other, ClassPredicate):
+            raise TypeError, type(other)
+
+        # If classes don't match, then fail
+        if self.typeClass is not other.typeClass: return None
+
+        # Otherwise, match types
+        return unification.match(self.type, other.type)
+
+    def isHNF(self):
+        "Return true if this predicate is in head-normal form"
+        ty = self.type
+        while True:
+            prj = ty.project()
+            if isinstance(prj, ProjectedTyVar): return True
+            elif isinstance(prj, ProjectedTyCon): return False
+            elif isinstance(prj, ProjectedTyApp): ty = prj.operator
+            else: raise TypeError, type(ty)
+
+    def toHNF(self):
+        """
+        Return a list of head-normal-form predicates that are logically
+        equivalent to this predicate.  The list may contain duplicates.
+
+        An error is raised if this predicate cannot be converted to
+        head-normal form.  If an error is raised, then it represents a
+        type class error that should be reported to the user.
+        """
+        # Decide whether we're in head-normal form
+        if self.isHNF(): return [self]
+
+        # Perform context reduction
+        ip = self.instancePredicates()
+        if ip is None:
+            instance_text = pretty.renderString(self.pretty())
+            raise RuntimeError, "Cannot derive an instance for " + instance_text
+
+        (inst, constraints) = ip
+        return list(_concatMap(lambda p: p.toHNF(), constraints))
+
+    def superclassPredicates(self):
+        """
+        Returns an iterator over all superclass predicates entailed by
+        this predicate.  The iterator may contain duplicates.
+        """
+        return _concatMap(lambda c: c.andSuperclassPredicates(),
+                          self.typeClass.constraint)
+
+    def andSuperclassPredicates(self):
+        "Like superclassPredicates, except that the output includes self"
+        yield self
+        for p in self.superclassPredicates():
+            assert isinstance(p, ClassPredicate)
+            yield p
+
+    def instancePredicates(self):
+        """
+        Try to satisfy this predicate with the known class instances.
+        Returns the matching instance and a list of subgoals, or None if
+        no instance matches.
+        """
+        ty = self.type.canonicalize()
+
+        # Common case shortcut: If this predicate pertains to a type
+        # variable, we won't find any instances
+        if isinstance(ty, TyVar): return None
+
+        # For each instance
+        for inst in self.typeClass.instances:
+            # If this type does not match the instance head, go to next
+            subst = unification.match(ty, inst.instanceType)
+            if subst is None: continue
+
+            # Get the constraints entailed by this type
+            constraints = [c.applySubstitution(subst)
+                           for c in inst.constraints]
+            return (inst, constraints)
+
+        # Otherwise, no instances match
+        return None
+
+    def addFreeVariables(self, s):
+        self.type.addFreeVariables(s)
+
+    def rename(self, substitution):
+        return ClassPredicate(self.dictVar,
+                              self.type.rename(substitution),
+                              self.typeClass)
+
+    def showWorker(self, precedence, visible_vars):
+        type_doc = self.type.showWorker(PyonTypeBase.PREC_APP, visible_vars)
+        return pretty.space(self.typeClass.name, type_doc)
+
+def entails(context, predicate):
+    """
+    entails(predicate-list, predicate) -> bool
+
+    Returns true iff the conjunction of the predicates in the first list,
+    together with class instances, implies the second predicate.
+    """
+    # Scan entire context, including superclasses, first
+    for p in _concatMap(lambda c: c.andSuperclassPredicates(), context):
+        # Try to match this predicate from the context against the
+        # sought predicate
+        substitution = p.match(predicate)
+        if substitution is not None: return True
+
+    # Then scan available instances 
+    by_instance = predicate.instancePredicates()
+    if by_instance is not None:
+        # All subgoals must be entailed by the context
+        _, constraints = by_instance
+        for p in constraints:
+            if not entails(context, p): return False
+
+        return True
+    # else
+    return False
+
+def entailsHNF(context, predicate):
+    """
+    entailsHNF(hnf-predicate-list, hnf-predicate) -> bool
+
+    Returns true iff the conjunction of the predicates in the first list,
+    together with class instances, implies the second predicate.
+    This is a faster version of entailment that assumes that all input
+    predicates are in head-normal form.
+    """
+    # Scan entire context, including superclasses, first
+    for p in _concatMap(lambda c: c.andSuperclassPredicates(), context):
+        # Try to match this predicate from the context against the
+        # sought predicate
+        substitution = p.match(predicate)
+        if substitution is not None: return True
+
+    return False
+
+def simplify(context):
+    """
+    simplify(predicate-list) -> simplified predicate list
+    """
+    assert isinstance(context, list)
+
+    # Simplified predicates will be put into a new list
+    simplified = []
+
+    # For each element of context
+    for i in range(len(context)):
+        p = context[i]
+
+        # If this predicate is not entailed by the others, put it into the
+        # simplified context
+        if not entailsHNF(simplified + context[i+1:], p):
+            simplified.append(p)
+
+    return simplified
+
+def reduce(context):
+    """
+    reduce(constraints) -> reduced constraints
+    """
+    return simplify(list(_concatMap(lambda p: p.toHNF(), context)))
+
+def splitConstraints(constraints, free_vars, qvars):
+    """
+    splitConstraints(constraints, free-vars, quantified-vars)
+        -> (retained-constraints, deferred-constraints)
+
+    Split a set of constraints into a retained set and a deferred set.
+    The retained set is added to a type scheme in which 'qvars' is the set
+    of quantified variables.
+    """
+    constraints = reduce(constraints)
+
+    # Partition constraints into retained and deferred sets
+    deferred = []
+    retained = []
+    for p in constraints:
+        constraint_vars = p.freeVariables()
+
+        # If all of this constraint's variables are free in the environment,
+        # then it is deferred
+        for v in constraint_vars:
+            if v not in free_vars: break
+        else:
+            deferred.append(p)
+            continue
+
+        # If all of this constraint's variables are in the environment or
+        # qvars, then it is retained
+        for v in constraint_vars:
+            if v not in free_vars and v not in qvars: break
+        else:
+            retained.append(p)
+            continue
+
+        # Otherwise, apply defaulting rules
+        print "Ambiguous constraint:", pretty.renderString(p.pretty())
+        raise NotImplementedError, "defaulting"
+
+    return (retained, deferred)
+
 def unifyClassPredicates(p1, p2):
+    # Not needed?
     assert p1.typeClass == p2.typeClass
     p1.type.unifyWith(p2.type)
     p1.dictVar.unifyWith(p2.dictVar)
 
-class Constraints(PyonTypeBase):
-    """
-    A set of class constraints.  Constraints values are immutable.
-
-    Constraint sets maintain the invariant that no member of the set is
-    entailed by any other.
-    """
-
-    def __init__(self, sq = None):
-        if sq:
-            # Create a set of class constraints from 'sq', simplifying and
-            # discarding redundancies.
-            print "Not implemented: hmtype.Constraints.__init__"
-            self.constraints = []
-        else:
-            self.constraints = []
-
-    def addFreeVariables(self, s):
-        # Not implemented
-        pass
-
-    def rename(self, mapping):
-        """
-        Apply a renaming to this constraint set.
-        Raise an error if the renamed constraint set is unsatisfiable.
-        """
-        raise NotImplementedError
-
-    def generalizeOver(self, variables):
-        """
-        s.generalizeOver(variable-list) -> (dependent set, free set)
-
-        Generalize this constraint set over a set of variables.
-        Return a constraint set that depends on the given variables and a
-        constraint set that does not.  The union of the returned constraints
-        is equal to the original set.
-        """
-        raise NotImplementedError
-
-    def __mul__(self, other):
-        """Compute the intersection of two class constraint sets by combining
-        the constraints from each set and removing redundant constraints.
-        A new object is returned."""
-        raise NotImplementedError
-
-noConstraints = Constraints()
+noConstraints = []
 

@@ -3,6 +3,7 @@ Predefined Pyon variables, types, classes, and instances are defined in this
 module.
 """
 
+import pyon.pretty as pretty
 import pyon.ast.ast as ast
 import pyon.types.types as hm
 
@@ -12,62 +13,98 @@ def _makeClasses():
     "Create type classes."
     global class_Eq, class_Ord, class_Num, class_Traversable
 
+    def cmp_scheme(a):
+        return hm.TyScheme([], hm.noConstraints,
+                           functionType([a,a], type_bool))
     # class Eq a where
-    #   (==) : a -> a -> St a
-    #   (!=) : a -> a -> St a
+    #   (==) : a -> a -> bool
+    #   (!=) : a -> a -> bool
     a = hm.TyVar()
-    binary_scheme = hm.TyScheme([], hm.noConstraints,
-                             _stmtFunctionType([a,a], a))
-    member_Eq_EQ = hm.ClassMethod(oper_EQ, binary_scheme)
-    member_Eq_NE = hm.ClassMethod(oper_NE, binary_scheme)
+    def make_cmp_scheme_a(): return cmp_scheme(a)
+
     class_Eq = hm.Class("Eq", a, hm.noConstraints,
-                     [member_Eq_EQ, member_Eq_NE])
+                        [hm.ClassMethod("__eq__", make_cmp_scheme_a),
+                         hm.ClassMethod("__ne__", make_cmp_scheme_a)])
 
     # class Eq a => Ord a where
-    #   (<) : a -> a -> St a
-    #   (<=) : a -> a -> St a
-    #   (>) : a -> a -> St a
-    #   (>=) : a -> a -> St a
-    a = hm.TyVar()
-    binary_scheme = hm.TyScheme([], hm.noConstraints,
-                             _stmtFunctionType([a,a], a))
-    member_Ord_LT = hm.ClassMethod(oper_LT, binary_scheme)
-    member_Ord_LE = hm.ClassMethod(oper_LE, binary_scheme)
-    member_Ord_GT = hm.ClassMethod(oper_GT, binary_scheme)
-    member_Ord_GE = hm.ClassMethod(oper_GE, binary_scheme)
-    class_Ord = hm.Class("Ord", a,
-                      hm.Constraints([hm.ClassPredicate(a, class_Eq)]),
-                      [member_Ord_LT, member_Ord_LE, member_Ord_GT,
-                       member_Ord_GE])
+    #   (<) : a -> a -> bool
+    #   (<=) : a -> a -> bool
+    #   (>) : a -> a -> bool
+    #   (>=) : a -> a -> bool
+    class_Ord = hm.Class("Ord", a, [hm.ClassPredicate(None, a, class_Eq)],
+                         [hm.ClassMethod("__lt__", make_cmp_scheme_a),
+                          hm.ClassMethod("__le__", make_cmp_scheme_a),
+                          hm.ClassMethod("__gt__", make_cmp_scheme_a),
+                          hm.ClassMethod("__ge__", make_cmp_scheme_a)])
 
-    # class Eq a => Num a where
-    #   (+) : a -> a -> St a
-    #   (-) : a -> a -> St a
-    #   (*) : a -> a -> St a
-    #   negate : a -> St a
-    a = hm.TyVar()
-    binary_scheme = hm.TyScheme([], hm.noConstraints,
-                             _stmtFunctionType([a,a], a))
-    unary_scheme = hm.TyScheme([], hm.noConstraints,
-                            _stmtFunctionType([a], a))
-    member_Num_ADD = hm.ClassMethod(oper_ADD, binary_scheme)
-    member_Num_SUB = hm.ClassMethod(oper_SUB, binary_scheme)
-    member_Num_MUL = hm.ClassMethod(oper_MUL, binary_scheme)
-    member_Num_NEGATE = hm.ClassMethod(oper_NEGATE, unary_scheme)
-    class_Num = hm.Class("Num", a,
-                      hm.Constraints([hm.ClassPredicate(a, class_Eq)]),
-                      [member_Num_ADD, member_Num_SUB, member_Num_MUL,
-                       member_Num_NEGATE])
+    # Instance declarations
 
-    # class Traversable t where
-    #   foreach : t a -> It a
-    t = hm.TyVar()
-    a = hm.TyVar()
-    foreach_scheme = hm.TyScheme([a], hm.noConstraints,
-                                 _iterFunctionType([hm.AppTy(t, a)], a))
-    member_Tra_foreach = hm.ClassMethod(oper_FOREACH, foreach_scheme)
-    class_Traversable = hm.Class("Traversable", t, hm.noConstraints,
-                              [member_Tra_foreach])
+    oper_Eq_EQ_int = ast.ANFVariable(name = "__eq__",
+                                     type_scheme = cmp_scheme(type_int))
+    oper_Eq_NE_int = ast.ANFVariable(name = "__ne__",
+                                     type_scheme = cmp_scheme(type_int))
+    hm.addInstance(class_Eq, [], hm.noConstraints, type_int,
+                   [oper_Eq_EQ_int, oper_Eq_NE_int])
+
+    oper_Eq_EQ_float = ast.ANFVariable(name = "__eq__",
+                                       type_scheme = cmp_scheme(type_float))
+    oper_Eq_NE_float = ast.ANFVariable(name = "__ne__",
+                                       type_scheme = cmp_scheme(type_float))
+    hm.addInstance(class_Eq, [], hm.noConstraints, type_float,
+                   [oper_Eq_EQ_float, oper_Eq_NE_float])
+
+    oper_Ord_LT_int = ast.ANFVariable(name = "__lt__",
+                                     type_scheme = cmp_scheme(type_int))
+    oper_Ord_LE_int = ast.ANFVariable(name = "__le__",
+                                     type_scheme = cmp_scheme(type_int))
+    oper_Ord_GT_int = ast.ANFVariable(name = "__gt__",
+                                     type_scheme = cmp_scheme(type_int))
+    oper_Ord_GE_int = ast.ANFVariable(name = "__ge__",
+                                     type_scheme = cmp_scheme(type_int))
+    hm.addInstance(class_Ord, [], hm.noConstraints, type_int,
+                   [oper_Ord_LT_int, oper_Ord_LE_int,
+                    oper_Ord_GT_int, oper_Ord_GE_int])
+
+    oper_Ord_LT_float = ast.ANFVariable(name = "__lt__",
+                                        type_scheme = cmp_scheme(type_float))
+    oper_Ord_LE_float = ast.ANFVariable(name = "__le__",
+                                        type_scheme = cmp_scheme(type_float))
+    oper_Ord_GT_float = ast.ANFVariable(name = "__gt__",
+                                        type_scheme = cmp_scheme(type_float))
+    oper_Ord_GE_float = ast.ANFVariable(name = "__ge__",
+                                        type_scheme = cmp_scheme(type_float))
+    hm.addInstance(class_Ord, [], hm.noConstraints, type_float,
+                   [oper_Ord_LT_float, oper_Ord_LE_float,
+                    oper_Ord_GT_float, oper_Ord_GE_float])
+
+#     # class Eq a => Num a where
+#     #   (+) : a -> a -> St a
+#     #   (-) : a -> a -> St a
+#     #   (*) : a -> a -> St a
+#     #   negate : a -> St a
+#     a = hm.TyVar()
+#     binary_scheme = hm.TyScheme([], hm.noConstraints,
+#                              _stmtFunctionType([a,a], a))
+#     unary_scheme = hm.TyScheme([], hm.noConstraints,
+#                             _stmtFunctionType([a], a))
+#     member_Num_ADD = hm.ClassMethod(oper_ADD, binary_scheme)
+#     member_Num_SUB = hm.ClassMethod(oper_SUB, binary_scheme)
+#     member_Num_MUL = hm.ClassMethod(oper_MUL, binary_scheme)
+#     member_Num_NEGATE = hm.ClassMethod(oper_NEGATE, unary_scheme)
+#     class_Num = hm.Class("Num", a,
+#                       hm.Constraints([hm.ClassPredicate(a, class_Eq)]),
+#                       [member_Num_ADD, member_Num_SUB, member_Num_MUL,
+#                        member_Num_NEGATE])
+
+#     # class Traversable t where
+#     #   foreach : t a -> It a
+#     t = hm.TyVar()
+#     a = hm.TyVar()
+#     foreach_scheme = hm.TyScheme([a], hm.noConstraints,
+#                                  _iterFunctionType([hm.AppTy(t, a)], a))
+#     member_Tra_foreach = hm.ClassMethod(oper_FOREACH, foreach_scheme)
+#     class_Traversable = hm.Class("Traversable", t, hm.noConstraints,
+#                               [member_Tra_foreach])
 
 
 def create_type_schemes():
@@ -101,13 +138,15 @@ type_list = hm.EntTy(tycon_list)
 
 create_type_schemes()
 
+_makeClasses()
+
 # Builtin binary functions with no Pyon implementation
-oper_EQ = ast.ANFVariable(name = "__eq__", type_scheme = _compareScheme)
-oper_NE = ast.ANFVariable(name = "__ne__", type_scheme = _compareScheme)
-oper_LT = ast.ANFVariable(name = "__lt__", type_scheme = _compareScheme)
-oper_LE = ast.ANFVariable(name = "__le__", type_scheme = _compareScheme)
-oper_GT = ast.ANFVariable(name = "__gt__", type_scheme = _compareScheme)
-oper_GE = ast.ANFVariable(name = "__ge__", type_scheme = _compareScheme)
+oper_EQ = class_Eq.getMethod("__eq__")
+oper_NE = class_Eq.getMethod("__ne__")
+oper_LT = class_Ord.getMethod("__lt__")
+oper_LE = class_Ord.getMethod("__le__")
+oper_GT = class_Ord.getMethod("__gt__")
+oper_GE = class_Ord.getMethod("__ge__")
 oper_ADD = ast.ANFVariable(name = "__add__", type_scheme = _binaryScheme)
 oper_SUB = ast.ANFVariable(name = "__sub__", type_scheme = _binaryScheme)
 oper_MUL = ast.ANFVariable(name = "__mul__", type_scheme = _binaryScheme)
@@ -160,15 +199,13 @@ fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
 _iota_type = hm.TyScheme.forall(1, lambda t: functionType([], hm.AppTy(t, type_int)))
 fun_iota = ast.ANFVariable(name = "iota", type_scheme = _iota_type)
 
+const_undefined = ast.ANFVariable(name = "__undefined__", type_scheme = hm.TyScheme.forall(1, lambda a: a))
+
 # Define classes and instances.
 # Each global identifier is initialized to None for reasons of documentation.
 # Their actual values come from the call to _makeClasses().
-class_Eq = None
-class_Ord = None
 class_Num = None
 class_Traversable = None
 
-# _makeClasses()
-
 # The list of all builtin functions
-BUILTIN_FUNCTIONS = [fun_reduce, fun_reduce1, fun_zip, fun_iota]
+BUILTIN_FUNCTIONS = [fun_reduce, fun_reduce1, fun_zip, fun_iota, const_undefined]

@@ -1,6 +1,10 @@
 
+import unicodedata
+
 from pyon.types.hmtype import *
 import pyon.types.classes
+
+_FORALL = unicodedata.lookup('FOR ALL')
 
 ###############################################################################
 # Type schemes
@@ -20,7 +24,8 @@ class TyScheme(PyonTypeBase):
     """
 
     def __init__(self, qvars, constraints, t):
-        assert isinstance(constraints, pyon.types.classes.Constraints)
+        for c in constraints:
+            assert isinstance(c, pyon.types.classes.ClassPredicate)
         self.qvars = qvars
         self.constraints = constraints
         self.type = t
@@ -51,42 +56,49 @@ class TyScheme(PyonTypeBase):
                         self.type.rename(mapping))
 
     def showWorker(self, precedence, visible_vars):
-        # Show as forall a b c. 
-        var_list = [v.showWorker(PyonTypeBase.PREC_OUTER, visible_vars) \
-            for v in self.qvars]
+        # Show as forall a b c. constraints => type
+        visible_vars = visible_vars + self.qvars
+        var_list = [v.showWorker(PyonTypeBase.PREC_OUTER, visible_vars)
+                    for v in self.qvars]
         var_doc = pretty.space(pretty.punctuate(',', var_list))
-        quantifier = pretty.space("forall", pretty.abut(var_doc, '.'))
-        monotype = self.type.showWorker(PyonTypeBase.PREC_FUN - 1,
-                                        visible_vars + qvars)
-        return pretty.linewr(quantifier, monotype, 2)
+        quantifier = pretty.abut(pretty.space(_FORALL, var_doc), '.')
+
+        constraints = self.constraints
+        if len(constraints) == 0:
+            constraint_doc = None
+        elif len(constraints) == 1:
+            constraint_doc = constraints[0].showWorker(PyonTypeBase.PREC_OUTER,
+                                                       visible_vars)
+            constraint_doc = pretty.space(constraint_doc, '=>')
+        else:
+            constraint_docs = [c.showWorker(PyonTypeBase.PREC_OUTER,
+                                            visible_vars)
+                               for c in constraints]
+            constraint_doc = pretty.parens(pretty.space(pretty.punctuate(',', constraint_docs)))
+            constraint_doc = pretty.space(constraint_doc, '=>')
+
+        fotype = self.type.showWorker(PyonTypeBase.PREC_FUN - 1,
+                                      visible_vars)
+        return pretty.linewr(pretty.space(quantifier, constraint_doc),
+                             fotype, 2)
 
     def instantiate(self):
         """
-        scheme.instantiate() -> type
+        scheme.instantiate() -> (constraints, type)
         Instantiate a type scheme by creating fresh variables for each type.
         """
         # Rename each type variable to a fresh variable
         mapping = dict((v, TyVar()) for v in self.qvars)
-        return self.type.rename(mapping)
+        t = self.type.rename(mapping)
+        cs = [c.rename(mapping) for c in self.constraints]
+        return (cs, t)
 
     def addFreeVariables(self, s):
         # The type scheme's quantified variables must not be free
         assert not len(set.intersection(set(self.qvars), s))
 
-        self.constraints.addFreeVariables(s)
+        for c in self.constraints: c.addFreeVariables(s)
         self.type.addFreeVariables(s)
 
         for v in self.qvars: s.discard(v)
-
-def generalize(t, constraints):
-    """
-    generalize(t, constraints) -> (scheme, constraints)
-
-    Generalize a type by quantifying over all free type variables.
-    """
-    (dependent_constraints, free_constraints) = \
-        constraints.generalizeOver(t.freeVariables())
-
-    scheme = TyScheme(list(t.freeVariables()), dependent_constraints, t)
-    return (scheme, free_constraints)
 

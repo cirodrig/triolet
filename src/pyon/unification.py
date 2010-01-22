@@ -34,11 +34,24 @@ class Unifiable(object):
         """
         raise NotImplementedError
 
+    def rename(self, substitution):
+        """
+        x.rename(substitution) -> object
+
+        Apply a substitution to x, possibly creating a new object.  The
+        originalal object remains unchanged.  The substituted value is
+        returned.
+        """
+        raise NotImplementedError
+
 class Term(object):
     """Abstract base class of unifiable constructor applications."""
 
     def __init__(self):
         raise NotImplementedError, "'Term' is an abstract base class"
+
+    def __eq__(self, other):
+        raise NotImplementedError
 
     def canonicalize(self):
         return self
@@ -85,7 +98,16 @@ class Variable(object):
         return self is v
 
     def addFreeVariables(self, s):
-        s.add(self)
+        if self._representative: self.canonicalize().addFreeVariables(s)
+        else: s.add(self)
+
+    def rename(self, s):
+        if self._representative: return self.canonicalize().rename(s)
+        else:
+            # Look up this variable's value in the substitution;
+            # default to self.  Then canonicalize.
+            # Don't apply the substitution to the result.
+            return s.get(self, self).canonicalize()
 
 class UnificationError(Exception):
     pass
@@ -142,3 +164,73 @@ def unify(x, y):
 
         # Return y, since it is still canonical
         return y
+
+def match(x, y):
+    """
+    match(x, y) -> substitution or None
+
+    Match x against y.  If there is a substitution that unifies x with y, the
+    substitution is returned.  The inputs are not modified.
+
+    Substitutions may be rendered invalid if unify() is called.
+    """
+    substitution = {}
+
+    def semi_unify(x, y):
+        "Semi-unification: extend the substitution as needed to make x match y"
+        # Canonicalize x and y
+        x = x.canonicalize()
+        y = y.canonicalize()
+
+        # If x is a term, match its head against y
+        if isinstance(x, Term): match_head(x, y, semi_unify)
+
+        else:
+            # X is a variable; try substituting it
+            # Is x in the mapping already?
+            x_value = substitution.get(x)
+
+            # If substitution succeeded, match x against y without further
+            # substitution
+            if x_value is not None: match_head(x, y, compare)
+
+            # Otherwise, add the mapping x |-> y and succeed
+            else: substitution[x] = y
+
+    def compare(x, y):
+        "Comparison: decide whether x is equal to y (don't substitute)"
+        # Canonicalize x and y
+        x = x.canonicalize()
+        y = y.canonicalize()
+
+        match_head(x, y, compare)
+
+    def match_head(x, y, compare_subterm):
+        # x and y have been canonicalized
+        if isinstance(x, Term):
+            if isinstance(y, Term):
+                # Terms are equal if they are the same constructor applied to
+                # the same arguments
+                if x.getConstructor() == y.getConstructor():
+                    x_params = x.getParameters()
+                    y_params = y.getParameters()
+
+                    # If this happens, the input is malformed
+                    if len(x_params) != len(y_params):
+                        raise UnificationError, \
+                            "wrong number of parameters to constructor"
+
+                    for x_p, y_p in zip(x_params, y_params):
+                        compare_subterm(x_p, y_p)
+                else: raise UnificationError
+            else: raise UnificationError
+        else:
+            # X is a variable; y must be identical
+            if x is not y: raise UnificationError
+            # Otherwise, succeed
+
+    # Body of function
+    try:
+        semi_unify(x, y)
+        return substitution
+    except UnificationError, e: return None

@@ -7,9 +7,13 @@ Type schemes are constructed with TyScheme.
 Classes are members of the class Class.
 """
 
+import unicodedata
+
 import pyon.ast.ast as ast
 import pyon.unification as unification
 import pyon.pretty as pretty
+
+_TIMES = unicodedata.lookup('MULTIPLICATION SIGN')
 
 class PyonTypeBase(object):
     """
@@ -42,7 +46,6 @@ class PyonTypeBase(object):
         """
         x.addFreeVariables(s) -- Add x's free variables to the set
         """
-        print "Error: called addFreeVariables()"
         raise NotImplementedError
 
     def showWorker(self, precedence, visible_vars):
@@ -75,7 +78,35 @@ class FirstOrderType(PyonType):
     """
     A first-order type.
     """
-    pass
+    def project(self):
+        "Project the head of this type into a Herbrand term."
+        self = self.canonicalize()
+        if isinstance(self, TyVar): return ProjectedTyVar(self)
+        elif isinstance(self, EntTy): return ProjectedTyCon(self.entity)
+        elif isinstance(self, (FunTy, TupleTy)):
+            return ProjectedTyApp(self.getConstructor(), self.getArguments())
+        elif isinstance(self, AppTy):
+            # Collect all operands into a single ProjectedTyApp value
+            op_type = self.operator.project()
+            return ProjectedTyApp(op_type, self.arg)
+        else:
+            raise TypeError, type(self)
+
+class ProjectedType(object): pass
+
+class ProjectedTyVar(ProjectedType):
+    def __init__(self, v):
+        self.variable = v
+
+class ProjectedTyCon(ProjectedType):
+    def __init__(self, entity):
+        self.entity = entity
+
+class ProjectedTyApp(ProjectedType):
+    def __init__(self, operator, argument):
+        assert isinstance(operator, ProjectedType)
+        self.operator = operator
+        self.argument = argument
 
 ###############################################################################
 # Atomic type-level entities
@@ -166,6 +197,23 @@ class TyCon(TyEnt):
     def __str__(self):
         return self.name
 
+class DictionaryTyCon(FirstOrderType):
+    """
+    The type of a class dictionary.  A class dictionary type is like a tuple,
+    but its members may be polymorphic.  Functions that manipulate dictionary
+    types are not first-order types.
+    """
+    def __init__(self, cls):
+        assert isinstance(cls, hmtype.classes.Class)
+        self.cls = cls
+
+    def __eq__(self, other):
+        if not isinstance(other, DictionaryTyCon): return False
+        return self.cls == other.cls
+
+    def __str__(self):
+        return "Dict(" + self.cls.name + ")"
+
 ###############################################################################
 # Type expressions
 
@@ -189,15 +237,8 @@ class TyVar(FirstOrderType, unification.Variable):
         
         return _tyVarNames[visible_vars.index(self)]
 
-    def rename(self, mapping):
-        # First, canonicalize the variable.
-        canon = self.canonicalize()
-        if canon is not self: return canon.rename(mapping)
-
-        # If this variable is a key in the mapping, then return its associated
-        # value.  Otherwise, no change.
-        try: return mapping[self]
-        except KeyError: return self
+    # Inherit 'rename' from unification.Variable
+    rename = unification.Variable.rename
 
 class EntTy(FirstOrderType, unification.Term):
     """
@@ -263,7 +304,7 @@ class FunTy(FirstOrderType, unification.Term):
             for x in xs:
                 if last:
                     yield x
-                    yield u'\xd7' # "times"
+                    yield _TIMES
                 last = x
             yield last
 

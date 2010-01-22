@@ -1,7 +1,7 @@
 
 def dist(x, y):
     # Should be a built-in function
-    pass
+    return 1.0
 
 def minIndex(xs):
     def pickMin(x, y):
