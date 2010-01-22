@@ -170,7 +170,7 @@ class pretty(object):
             elif args[0] is None:
                 return None
 
-        return object.__new__(self, *args, **kwargs)
+        return object.__new__(self)
 
     def __init__(self, arg):
         raise NotImplementedError, "'pretty' is an abstract base class"
@@ -343,7 +343,7 @@ class linewr(pretty):
             pos = posinfo(fst_start, fst_end)
             if strlen < _COLUMNS - fst_end:
                 #It's fine, print on this line
-                _prettyPrint(self.doc2, file, pos)
+                _prettyPrint(self.doc2, file, pos.addPre(_printOneSpace))
             else:
                 #Too big, print on next
                 _prettyPrint(self.doc2, file, pos.addPre(_printNewlineIndent))
