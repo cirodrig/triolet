@@ -144,10 +144,20 @@ class ANFVariable(Variable):
 class Parameter(object):
     """
     A parameter of a function or destination of an assignment.
+
+    After type inference, a parameter that is not generalized by HM type
+    inference has a type.  Parameters that are generalized do not have a
+    type, but variables bound by them have type schemes.
     """
 
     def __init__(self):
         pass
+
+    def getType(self):
+        t = self._type
+        if t: return t
+
+        raise RuntimeError, "Parameter does not have a type"
 
 class VariableParam(Parameter):
     """
@@ -162,23 +172,28 @@ class VariableParam(Parameter):
       Unused
     """
 
-    def __init__(self, v, annotation = None, default = None):
+    def __init__(self, v, annotation = None, default = None, type = None):
         assert isinstance(v, Variable)
+        assert type is None or isinstance(type, pyon.types.hmtype.FirstOrderType)
         Parameter.__init__(self)
         self.name = v
         self.annotation = annotation
         self.default = default
+        self._type = type
 
 class TupleParam(Parameter):
     """
     A tuple parameter.
     """
 
-    def __init__(self, fields):
+    def __init__(self, fields, type = None):
         for p in fields:
             assert isinstance(p, Parameter)
+        assert type is None or isinstance(type, pyon.types.hmtype.FirstOrderType)
+
         Parameter.__init__(self)
         self.fields = fields
+        self._type = type
 
 ###############################################################################
 # Expressions
@@ -186,14 +201,14 @@ class TupleParam(Parameter):
 class ExprInit(object):
     """An initializer for expression base types"""
 
-    def __init__(self):
+    def __init__(self, type = None):
         """Initialize this expression."""
-        pass
+        self._type = type
 
     def initializeExpr(self, expr):
         """Initialize an 'Expression'.
         This is called from the expression's __init__ method."""
-        expr.type = None        # Assigned by type inference
+        expr.type = self._type
         return None
 
 # The default value of ExprInit
@@ -209,6 +224,8 @@ class Expression(object):
 
     def __init__(self, arg):
         raise NotImplementedError, "'Expression' is an abstract base class"
+
+    def getType(self): return self.type
 
 ## These expressions are generated from Python expressions (not statements)
 
@@ -330,16 +347,18 @@ class FunctionDef(object):
 class Function(object):
     """A function or lambda term"""
 
-    def __init__(self, mode, parameters, body):
+    def __init__(self, mode, parameters, body, type = None):
         assert mode == EXPRESSION or mode == ITERATOR
         for p in parameters:
             assert isinstance(p, Parameter)
         assert isinstance(body, Expression)
+        assert type is None or isinstance(type, pyon.types.hmtype.FirstOrderType)
         self.mode = mode
-        self.qvars = None       # Assigned by type inference
         self.parameters = parameters
-        self.instanceParameters = None # Assigned by type inference
         self.body = body
+        self.type = type
+
+    def getType(self): return self.type
 
 def exprFunction(parameters, body):
     "Create an expression function"

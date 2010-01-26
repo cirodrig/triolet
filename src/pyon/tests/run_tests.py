@@ -27,7 +27,7 @@ def tryCompile(fname, show_traceback = False):
         # print_ast.printAst(test_anf)
 
         # Type inference
-        type_inference.inferTypes(test_anf)
+        test_anf = type_inference.inferTypes(test_anf)
 
         # (DEBUG) print the output with type?
         print_ast.printAst(test_anf)
