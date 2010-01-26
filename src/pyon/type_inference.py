@@ -115,27 +115,34 @@ def findVariableType(env, v):
     assert isinstance(ty, hmtype.FirstOrderType)
     return ([], ty)
 
-def assumeFirstOrderType(v, t):
+def assumeFirstOrderType(env, v, t):
     """
-    Assign the first-order type @t to @v.  The assignment is recorded in
-    a new environment, which is returned.
+    assumeFirstOrderType(env, v, t) -- add the assignment v |-> t to env
+
+    Assign the first-order type @t to @v in env.
     """
     assert isinstance(v, ast.ANFVariable)
     assert isinstance(t, hmtype.FirstOrderType)
-    
-    return Environment.singleton(v, t)
+    assert v not in env
 
-def assignFirstOrderTypeScheme(v, ty):
+    env[v] = t
+
+    return None
+
+def assignFirstOrderTypeScheme(env, v, ty):
     """
-    Assign the type scheme @scm to @v.  The assignment is recorded globally,
-    and a new environment is returned.
+    Assign the type scheme @scm to @v.  The assignment is recorded globally
+    and in the given environment.
     """
     assert isinstance(v, ast.ANFVariable)
     assert isinstance(ty, hmtype.FirstOrderType)
+    assert v not in env
 
     scm = hmtype.TyScheme([], hmtype.noConstraints, ty)
     v.setTypeScheme(scm)
-    return (Environment.singleton(v, None), [], None)
+    env[v] = None
+
+    return ([], None)
 
 def generalize(gamma, constraints, ty):
     ftv_ty = ty.freeVariables()
@@ -149,7 +156,7 @@ def generalize(gamma, constraints, ty):
 def assignGeneralizedType(gamma, v, ty, constraints):
     """
     assignGeneralizedType(Environment, TyVar, FirstOrderType, constraints)
-        -> (constraints, TyScheme, None)
+        -> (constraints, None)
 
     Generalize the type and constraints to a type scheme.
     Assign the type scheme @scm to @v.  The assignment is recorded globally.
@@ -158,10 +165,12 @@ def assignGeneralizedType(gamma, v, ty, constraints):
     assert isinstance(v, ast.ANFVariable)
     assert isinstance(ty, hmtype.FirstOrderType)
     for c in constraints: assert isinstance(c, hmtype.ClassPredicate)
+    assert v not in gamma
 
     deferred, scm = generalize(gamma, constraints, ty)
     v.setTypeScheme(scm)
-    return (Environment.singleton(v, None), deferred, None)
+    gamma[v] = None
+    return (deferred, None)
 
 ###############################################################################
 # Type operations
@@ -197,12 +206,13 @@ def collectEnvAndConstraints(sq):
 def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
     """
     inferLetBindingType(Environment, Parameter, constraints, FirstOrderType,
-                        Expression) -> (Environment, constraints, None)
+                        Expression) -> (constraints, None)
 
     Infer types in a let-binding.  Bound variables are assigned a type scheme.
-    The expression 'expr' is only used for error reporting.
+    The expression 'expr' is only used for error reporting.  The types are
+    added to the environment.
 
-    Returns an environment, a list of deferred constraints, and None.
+    Returns a list of deferred constraints, and None.
     """
 
     if isinstance(param, ast.TupleParam):
@@ -219,12 +229,12 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
 
         # Bind each tuple field to a variable; return the results
         return \
-            collectEnvAndConstraints(inferLetBindingType(gamma,
-                                                         p,
-                                                         bound_constraints,
-                                                         t,
-                                                         expr)
-                                     for p,t in zip(param.fields, field_types))
+            collectConstraints(inferLetBindingType(gamma,
+                                                   p,
+                                                   bound_constraints,
+                                                   t,
+                                                   expr)
+                               for p,t in zip(param.fields, field_types))
 
     elif isinstance(param, ast.VariableParam):
         # Generalize this type
@@ -236,38 +246,34 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
 
 def exposeFirstOrderBinding(gamma, param):
     """
-    exposeFirstOrderBinding(gamma, param) -> (environment, type)
+    exposeFirstOrderBinding(gamma, param) -> type
     Create new types for a first-order binding.
-    Bound variables are returned as a new environment that is disjoint from
-    the given environment.
+    The environment is updated with type assumptions for bound variables.
     """
 
     if isinstance(param, ast.TupleParam):
-        (env, field_types) = exposeFirstOrderBindings(gamma, param.fields)
-        return (env, hmtype.TupleTy(field_types))
+        field_types = exposeFirstOrderBindings(gamma, param.fields)
+        return hmtype.TupleTy(field_types)
 
     elif isinstance(param, ast.VariableParam):
         # Create a new type variable for this parameter
         t = hmtype.TyVar()
-        return (assumeFirstOrderType(param.name, t), t)
+        assumeFirstOrderType(gamma, param.name, t)
+        return t
 
     else:
         raise TypeError, type(param)
 
 def exposeFirstOrderBindings(gamma, params):
     """
-    Expose a list of bindings.
+    Expose a list of bindings.  The environment is updated with all bindings.
     """
-    local_env = Environment()
     types = []
     for p in params:
-        env, t = exposeFirstOrderBinding(gamma, p)
-        assert isinstance(env, Environment)
-        assert isinstance(t, hmtype.FirstOrderType)
-        local_env.update(env)
+        t = exposeFirstOrderBinding(gamma, p)
         types.append(t)
 
-    return (local_env, types)
+    return types
 
 def recordFirstOrderBindingType(gamma, param):
     """
@@ -282,8 +288,8 @@ def recordFirstOrderBindingType(gamma, param):
         return assignFirstOrderTypeScheme(v, ty)
 
     elif isinstance(param, ast.TupleParam):
-        return collectEnvAndConstraints(recordFirstOrderBindingTypes(gamma, f)
-                                        for f in param.fields)
+        return collectConstraints(recordFirstOrderBindingTypes(gamma, f)
+                                  for f in param.fields)
 
     else:
         raise TypeError, type(param)
@@ -294,12 +300,12 @@ def inferFunctionType(gamma, func):
 
     Infer and return the type of a function.  The result is a first-order type.
     """
-    # Create local environment
-    (local_env, param_types) = exposeFirstOrderBindings(gamma, func.parameters)
-    gamma = Environment.union(gamma, local_env)
+    # Create local environment by extending gamma with the function parameters
+    local_env = Environment(gamma)
+    param_types = exposeFirstOrderBindings(local_env, func.parameters)
 
     # Process body
-    csts, rng = inferExpressionType(gamma, func.body)
+    csts, rng = inferExpressionType(local_env, func.body)
 
     return (csts, _functionType(param_types, rng))
 
@@ -314,12 +320,15 @@ def inferDefGroup(gamma, group):
     # Describe the variables bound by the definition group
     bindings = [ast.VariableParam(d.name) for d in group]
     
-    # Add definitions to local environment
-    (local_env, _) = exposeFirstOrderBindings(gamma, bindings)
-    local_gamma = Environment.union(gamma, local_env)
+    # Make a local copy of the environment containing the mutually recursive
+    # definitions.  The definitions are given first-order types in the local
+    # environment.
+    rec_gamma = Environment(gamma)
+
+    # Add definitions to a local copy of the environment
+    exposeFirstOrderBindings(rec_gamma, bindings)
     csts, binding_types = \
-        collectConstraints(findVariableType(local_gamma, d.name)
-                           for d in group)
+        collectConstraints(findVariableType(rec_gamma, d.name) for d in group)
 
     # These are first-order variable bindings, and therefore shouldn't have
     # any constraints in the recursive part of the code
@@ -328,7 +337,7 @@ def inferDefGroup(gamma, group):
 
     # Infer all function types in the definition group.
     def inferFun(d, d_type):
-        fn_csts, fn_type = inferFunctionType(local_gamma, d.function)
+        fn_csts, fn_type = inferFunctionType(rec_gamma, d.function)
 
         # Unify the function's assumed type with the inferred type
         try: unification.unify(fn_type, d_type)
@@ -346,11 +355,11 @@ def inferDefGroup(gamma, group):
     # Note that we generalize with the environment that will be seen in
     # subsequent code (gamma), not the local environment
     return \
-        collectEnvAndConstraints(assignGeneralizedType(gamma,
-                                                       d.name,
-                                                       d_type,
-                                                       group_csts)
-                                 for d, d_type in zip(group, binding_types))
+        collectConstraints(assignGeneralizedType(gamma,
+                                                 d.name,
+                                                 d_type,
+                                                 group_csts)
+                           for d, d_type in zip(group, binding_types))
 
 def inferExpressionType(gamma, expr):
     """
@@ -425,18 +434,20 @@ def inferExpressionType(gamma, expr):
         # Bind the LHS
         # The deferred constraints and local environment will be used while
         # processing the body
-        local_env, csts_rhs_deferred, _ = \
-            inferLetBindingType(gamma, expr.parameter, csts_rhs, ty_rhs, expr)
-        gamma = Environment.union(gamma, local_env)
+        local_gamma = Environment(gamma)
+        csts_rhs_deferred, _ = \
+            inferLetBindingType(local_gamma, expr.parameter, csts_rhs,
+                                ty_rhs, expr)
 
         # Process the body
-        csts_body, ty = inferExpressionType(gamma, expr.body)
+        csts_body, ty = inferExpressionType(local_gamma, expr.body)
         csts = csts_rhs_deferred + csts_body
 
     elif isinstance(expr, ast.LetrecExpr):
         # Process the local functions and assign type schemes
-        local_env, csts_deferred, _ = inferDefGroup(gamma, expr.definitions)
-        gamma = Environment.union(gamma, local_env)
+        local_gamma = Environment(gamma)
+        csts_deferred, _ = \
+            inferDefGroup(local_gamma, expr.definitions)
 
         # Infer body of letrec
         csts_body, ty = inferExpressionType(gamma, expr.body)
@@ -460,12 +471,13 @@ def inferExpressionType(gamma, expr):
     return (csts, ty)
 
 def doTypeInference(anf_form):
-    if isinstance(anf_form, ast.Module):
-        global_gamma = Environment()
-        for defgroup in anf_form.iterDefinitionGroups():
-            new_env, csts, _ = inferDefGroup(global_gamma, defgroup)
-            assert not csts     # There should be no deferred constraints here
-            global_gamma = Environment.union(global_gamma, new_env)
+    assert isinstance(anf_form, ast.Module)
+
+    global_gamma = Environment()
+    for defgroup in anf_form.iterDefinitionGroups():
+        csts, _ = \
+            inferDefGroup(global_gamma, defgroup)
+        assert not csts     # There should be no deferred constraints here
 
 def inferTypes(anf_form):
     doTypeInference(anf_form)
