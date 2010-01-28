@@ -56,8 +56,15 @@ class TyScheme(PyonTypeBase):
                         self.type.rename(mapping))
 
     def showWorker(self, precedence, visible_vars):
+        return self.showWorkerReal(precedence, visible_vars, True)
+
+    def showWorkerReal(self, precedence, visible_vars, shadowing):
         # Show as forall a b c. constraints => type
-        visible_vars = visible_vars + self.qvars
+
+        # If we have shadowing, add local variables to the end of the list
+        if shadowing:
+            visible_vars = visible_vars + self.qvars
+
         var_list = [v.showWorker(PyonTypeBase.PREC_OUTER, visible_vars)
                     for v in self.qvars]
         var_doc = pretty.space(pretty.punctuate(',', var_list))
@@ -93,12 +100,50 @@ class TyScheme(PyonTypeBase):
         cs = [c.rename(mapping) for c in self.constraints]
         return (cs, t)
 
-    def addFreeVariables(self, s):
-        # The type scheme's quantified variables must not be free
-        assert not len(set.intersection(set(self.qvars), s))
+    def instantiateFirstOrder(self):
+        """
+        scheme.instantiateFirstOrder() -> FirstOrderType
+        Instantiate a type scheme, which must have no constraints and no
+        quantified variables.
+        """
+        if self.qvars: raise ValueError, "Scheme is not a first-order type"
 
+        # There will be no constraints since there are no bound variables
+        assert not self.constraints
+
+        return self.type
+
+    def addFreeVariables(self, s):
+        # The type scheme's quantified variables are not free, and consequently
+        # aren't added to the set.
+        # Shadow variables already present in the set.
+        local_s = set()
+        for c in self.constraints: c.addFreeVariables(local_s)
+        self.type.addFreeVariables(local_s)
+        for v in self.qvars: local_s.discard(v)
+        s.update(local_s)
+
+    def addFreeVariablesUnshadowed(self, s):
+        """
+        Add this scheme's type variables to the environment, but allow the
+        variables to be synonyms of the same variable seen elsewhere.
+
+        The set this function updates can be passed to the
+        prettyUnshadowed() method of this object.  It is not guaranteed to
+        work with pretty().  It can be used with the pretty() method of
+        other objects.
+        """
+        # Like addFreeVariables, but we don't need to discard qvars, so
+        # update the parameter directly
         for c in self.constraints: c.addFreeVariables(s)
         self.type.addFreeVariables(s)
 
-        for v in self.qvars: s.discard(v)
+    def prettyUnshadowed(self, type_variables):
+        """
+        Pretty-print this type scheme, allowing bound variables to have the
+        same name as other variables.
+        """
+        return self.showWorkerReal(PyonTypeBase.PREC_OUTER,
+                                   list(type_variables),
+                                   False)
 

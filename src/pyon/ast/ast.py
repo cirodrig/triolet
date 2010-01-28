@@ -43,9 +43,13 @@ class ANFVariable(Variable):
     A single-assignment variable used in ANF.  Only one instance of this
     object exists for each variable.
 
-    Variables can carry type information, which may be a first-order
-    type or a type scheme.  Type information is inserted when the
+    Variables can have a polymorphic type.  Variable types are stored as
+    type schemes.  Type information is inserted when the
     variable is created or during type inference.
+
+    In variables that are function names, the type variables bound in
+    the variable's type scheme are the same type variables used in the
+    function body.
 
     Fields:
     name:
@@ -112,32 +116,6 @@ class ANFVariable(Variable):
         ANFVariable._nextID = n + 1
         return n
 
-#class DictionaryVariable(ANFVariable, unification.Variable):
-#    """
-#    A class dictionary variable.  Dictionary variables can be unified with
-#    one another during type inference.
-#    """
-#
-#    def __init__(self, cls, type_scheme):
-#        ANFVariable.__init__(self, type_scheme = type_scheme)
-#        self.typeClass = cls
-#
-#    def unifyWith(self, other):
-#        assert isinstance(other, DictionaryVariable)
-#
-#        # First perform unification
-#         super(DictionaryVariable, self).unifyWith(self, other)
-
-#         # Copy attributes of target variable into this variable.
-#         # Copy the 'identifier' and 'typeScheme' attributes.
-#         # Note that when type checking error-free code, only variables with
-#         # the same type scheme will be unified, but it's hard to reason about
-#         # whether that is also true in code with type errors.
-#         rep = self.canonicalize()
-#         assert isinstance(rep, DictionaryVariable)
-#         self.identifier = rep.identifier
-#         self.typeScheme = rep.typeScheme
-
 ###############################################################################
 # Parameters
 
@@ -181,6 +159,11 @@ class VariableParam(Parameter):
         self.default = default
         self._type = type
 
+    def addAllTypeVariables(self, s):
+        if self._type: self._type.addFreeVariables(s)
+        scm = self.name.getTypeScheme()
+        if scm: scm.addFreeVariables(s)
+
 class TupleParam(Parameter):
     """
     A tuple parameter.
@@ -195,6 +178,9 @@ class TupleParam(Parameter):
         self.fields = fields
         self._type = type
 
+    def addAllTypeVariables(self, s):
+        for p in self.fields: p.addAllTypeVariables(s)
+
 ###############################################################################
 # Expressions
 
@@ -203,6 +189,7 @@ class ExprInit(object):
 
     def __init__(self, type = None):
         """Initialize this expression."""
+        if type: assert isinstance(type, pyon.types.hmtype.FirstOrderType)
         self._type = type
 
     def initializeExpr(self, expr):
@@ -227,6 +214,13 @@ class Expression(object):
 
     def getType(self): return self.type
 
+    def addAllTypeVariables(self, s):
+        """
+        Add all type variables referenced in this expression to the set.
+        This is used when printing expressions.
+        """
+        if self.type: self.type.addFreeVariables(s)
+
 ## These expressions are generated from Python expressions (not statements)
 
 class VariableExpr(Expression):
@@ -235,6 +229,11 @@ class VariableExpr(Expression):
     def __init__(self, v, base = ExprInit.default):
         base.initializeExpr(self)
         self.variable = v
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        scm = self.variable.getTypeScheme()
+        if scm: scm.addFreeVariables(s)
 
 class LiteralExpr(Expression):
     """A reference to a primitive, immutable literal value.
@@ -245,11 +244,17 @@ class LiteralExpr(Expression):
         base.initializeExpr(self)
         self.literal = l
 
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+
 class UndefinedExpr(Expression):
     """An undefined value of any type."""
 
     def __init__(self, base = ExprInit.default):
         base.initializeExpr(self)
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
 
 class TupleExpr(Expression):
     """A tuple expression."""
@@ -259,6 +264,32 @@ class TupleExpr(Expression):
         for f in arguments:
             assert isinstance(f, Expression)
         self.arguments = arguments
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        for f in self.arguments: f.addAllTypeVariables(s)
+
+class DictionaryBuildExpr(Expression):
+    """
+    An expression that constructs a class dictionary.
+
+    Instances of this expression appear in code that uses type classes.
+    They are inserted by type inference.
+    """
+    def __init__(self, cls, superclasses, methods, base = ExprInit.default):
+        base.initializeExpr(self)
+        assert isinstance(cls, pyon.types.classes.Class)
+        for sc in superclasses: assert isinstance(sc, Expression)
+        for m in methods: assert isinstance(m, Expression)
+
+        self.cls = cls
+        self.superclasses = superclasses
+        self.methods = methods
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        for sc in self.superclasses: sc.addAllTypeVariables(s)
+        for m in self.methods: m.addAllTypeVariables(s)
 
 class DictionarySelectExpr(Expression):
     """
@@ -270,13 +301,17 @@ class DictionarySelectExpr(Expression):
 
     def __init__(self, cls, index, argument, base = ExprInit.default):
         base.initializeExpr(self)
-        assert isinstance(cls, hmtype.Class)
+        assert isinstance(cls, pyon.types.hmtype.Class)
         assert isinstance(index, int)
         assert isinstance(argument, Expression)
 
         self.cls = cls
         self.index = index
         self.argument = argument
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        self.argument.addAllTypeVariables(s)
 
 class CallExpr(Expression):
     """A function call."""
@@ -288,6 +323,11 @@ class CallExpr(Expression):
             assert isinstance(arg, Expression)
         self.operator = operator
         self.arguments = arguments
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        self.operator.addAllTypeVariables(s)
+        for arg in self.arguments: arg.addAllTypeVariables(s)
 
 ## These expressions can be generated from either Python expressions
 ## or Python statements
@@ -304,12 +344,22 @@ class IfExpr(Expression):
         self.ifTrue = ifTrue
         self.ifFalse = ifFalse
 
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        self.argument.addAllTypeVariables(s)
+        self.ifTrue.addAllTypeVariables(s)
+        self.ifFalse.addAllTypeVariables(s)
+
 class FunExpr(Expression):
     """A lambda function"""
     def __init__(self, function, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(function, Function)
         self.function = function
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        self.function.addAllTypeVariables(s)
 
 ## These expressions are generated from Python statements
 
@@ -324,6 +374,12 @@ class LetExpr(Expression):
         self.rhs = rhs
         self.body = body
 
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        self.parameter.addAllTypeVariables(s)
+        self.rhs.addAllTypeVariables(s)
+        self.body.addAllTypeVariables(s)
+
 class LetrecExpr(Expression):
     """A set of function definitions"""
     def __init__(self, definitions, body, base = ExprInit.default):
@@ -333,30 +389,149 @@ class LetrecExpr(Expression):
         self.definitions = definitions
         self.body = body
 
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        for d in self.definitions:
+            d.addAllTypeVariables(s)
+        self.body.addAllTypeVariables(s)
+
+class PlaceholderExpr(Expression):
+    """
+    A placeholder for dictionary-passing translation.  Placeholders are
+    used during type inference and should not be seen by other code.
+
+    Fields:
+    _elaboration : Expression
+      The expression that this placeholder should be replaced with.
+    """
+    def __init__(self, base = ExprInit.default):
+        base.initializeExpr(self)
+        self._elaboration = None
+
+    def setElaboration(self, e):
+        assert isinstance(e, Expression)
+        if self._elaboration:
+            raise RuntimeError, "Placeholder has already been elaborated"
+        self._elaboration = e
+
+    def getElaboration(self):
+        if not self._elaboration:
+            raise RuntimeError, "Placeholder has not been elaborated"
+        return self._elaboration
+
+    def isElaborated(self):
+        return self._elaboration is not None
+
+class DictPlaceholderExpr(PlaceholderExpr):
+    """
+    A placeholder for a class dictionary.
+    """
+    def __init__(self, constraint, base = ExprInit.default):
+        PlaceholderExpr.__init__(self, base = base)
+        assert isinstance(constraint, pyon.types.classes.ClassPredicate)
+        self._constraint = constraint
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        self._constraint.addFreeVariables(s)
+
+    def getConstraint(self): return self._constraint
+
+class RecVarPlaceholderExpr(PlaceholderExpr):
+    """
+    A placehlder for a reference to a recursively defined variable.
+    """
+    def __init__(self, v, base = ExprInit.default):
+        PlaceholderExpr.__init__(self, base = base)
+        assert self.type        # Type must be assigned
+        assert isinstance(v, ANFVariable)
+        self._variable = v
+
+        # Dictionary variable arguments.  This is initially None;
+        # after the variable's type is resolved, it becomes a
+        # list(None or ANFVariable).
+        # This field is modified during type inference. 
+        self.dictionaryArguments = None
+
+    def addAllTypeVariables(self, s):
+        Expression.addAllTypeVariables(self, s)
+        scm = self._variable.getTypeScheme()
+        if scm: scm.addFreeVariablesUnshadowed(s)
+
+    def getVariable(self):
+        return self._variable
+
+    def makeElaboration(self):
+        """
+        Create the dictionary-passing elaboration of this expression.  This
+        should be called by type inference after the variable type has been
+        inferred and after all expressions in 'dictionaryArguments' have
+        been assigned.
+        """
+        arguments = self.dictionaryArguments
+        new_expr = pyon.types.classes.makeDictionaryPassingCall(self._variable,
+                                                                self.dictionaryArguments,
+                                                                self.getType())
+        self.setElaboration(new_expr)
+
 ###############################################################################
 # Functions
 
 class FunctionDef(object):
-    """A named function definition"""
+    """
+    A named function definition.
+
+    If the function has type information, then the function name has a
+    type scheme and the function's parameters and body carry type information.
+    Type variables used in type scheme are also used in the function body.
+    """
     def __init__(self, name, function):
         assert isinstance(name, Variable)
         assert isinstance(function, Function)
         self.name = name
         self.function = function
 
-class Function(object):
-    """A function or lambda term"""
+    def addAllTypeVariables(self, s):
+        scm = self.name.getTypeScheme()
+        if scm: scm.addFreeVariablesUnshadowed(s)
+        self.function.addAllTypeVariables(s)
 
-    def __init__(self, mode, parameters, body, type = None):
+class Function(object):
+    """
+    A function or lambda term.  Functions always have first-order types.
+
+    The dictionary parameters must be None before type inference, and must
+    be the same length as the constraint list in the function's type scheme
+    after type inference.  (The type scheme is stored in the FunctionDef.)
+    """
+
+    def __init__(self, mode, parameters, body,
+                 dictionary_parameters = None, type = None):
         assert mode == EXPRESSION or mode == ITERATOR
         for p in parameters:
             assert isinstance(p, Parameter)
         assert isinstance(body, Expression)
+        if dictionary_parameters:
+            for p in dictionary_parameters:
+                assert isinstance(p, VariableParam)
         assert type is None or isinstance(type, pyon.types.hmtype.FirstOrderType)
         self.mode = mode
         self.parameters = parameters
+        self.dictionaryParameters = dictionary_parameters
         self.body = body
         self.type = type
+
+    def setDictionaryParameters(self, dictionary_parameters):
+        "Set the dictionary parameters.  Called by type inference."
+        assert self.dictionaryParameters is None
+        self.dictionaryParameters = dictionary_parameters
+
+    def addAllTypeVariables(self, s):
+        for p in self.parameters: p.addAllTypeVariables(s)
+        if self.dictionaryParameters:
+            for p in self.dictionaryParameters: p.addAllTypeVariables(s)
+        self.body.addAllTypeVariables(s)
+        self.type.addFreeVariables(s)
 
     def getType(self): return self.type
 
@@ -389,3 +564,6 @@ class Module(object):
     def iterDefinitions(self):
         """Get an iterator over all definitions in the module"""
         return itertools.chain(*self.definitions)
+
+    def addAllTypeVariables(self, s):
+        for d in self.iterDefinitions(): d.addAllTypeVariables(s)

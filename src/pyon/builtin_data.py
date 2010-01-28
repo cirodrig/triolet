@@ -31,7 +31,7 @@ def _makeClasses():
     #   (<=) : a -> a -> bool
     #   (>) : a -> a -> bool
     #   (>=) : a -> a -> bool
-    class_Ord = hm.Class("Ord", a, [hm.ClassPredicate(None, a, class_Eq)],
+    class_Ord = hm.Class("Ord", a, [hm.ClassPredicate(a, class_Eq)],
                          [hm.ClassMethod("__lt__", make_cmp_scheme_a),
                           hm.ClassMethod("__le__", make_cmp_scheme_a),
                           hm.ClassMethod("__gt__", make_cmp_scheme_a),

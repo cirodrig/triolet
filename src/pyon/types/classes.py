@@ -102,7 +102,7 @@ class Class(PyonTypeBase):
         Get the type of a class method dictionary, given the types of the
         class's type parameter.
         """
-        return EntTy(DictionaryTyCon(self))
+        return AppTy(EntTy(DictionaryTyCon(self)), type)
 
 class ClassMethod(object):
     """
@@ -146,7 +146,7 @@ class ClassMethod(object):
             sig = self.getSignature()
             cls_var = cls.parameter
             qvars = [cls_var] + sig.qvars
-            constraints = [ClassPredicate(None, cls_var, cls)] + sig.constraints
+            constraints = [ClassPredicate(cls_var, cls)] + sig.constraints
             actual_sig = pyon.types.schemes.TyScheme(qvars, constraints,
                                                      sig.type)
             
@@ -188,28 +188,66 @@ class Instance(PyonTypeBase):
         self.instanceType = instance_type
         self.methods = methods
 
-    def matchWith(self, ty):
-        """
-        inst.matchWith(t) -> (methods, constraints) or None
-
-        Check whether type 't' matches this instance rule.  If so, then return
-        a list of class methods and an extra constraint that
-        must be satisfied.  If 't' does not match this instance declaration,
-        return None."""
-        # Attempt to unify this instance with the given type
-        instantiation = instantiateVariables(self.qvars)
-        try: unify(ty, param.rename(instantiation))
-        except UnificationError: return None
-
-        # Instantiate and return the methods and constraints
-        methods = [m.rename(instantiation) for m in self.methods]
-        constraints = self.constraints.rename(instantiation)
-        return (methods, constraints)
+    def getMethodCode(self):
+        return [ast.VariableExpr(m) for m in self.methods]
 
 def addInstance(cls, qvars, constraints, instance_type, methods):
     inst = Instance(qvars, constraints, cls, instance_type, methods)
     cls.addInstance(inst)
     return inst
+
+class Derivation(object):
+    "A derivation of a class instance."
+
+    def getCode(self, environment):
+        """
+        d.getCode([(ClassPredicate, ANFVariable)])
+            -> ([PlaceholderExpr], Expression)
+
+        Get code that performs this derivation.  If the derivation cannot
+        be performed, raise an exception.
+        """
+        raise NotImplementedError, "'Derivation' is an abstract base class"
+
+class IdDerivation(Derivation):
+    "A derivation that uses an existing class instance."
+    def __init__(self, constraint):
+        self.constraint = constraint
+
+    def getCode(self, environment):
+        constraint = self.constraint
+        for dc, v in environment:
+            if constraint == dc:
+                return ([], ast.VariableExpr(v, base = ast.ExprInit(type = v.getTypeScheme().instantiateFirstOrder())))
+
+        # Needed class is not in the environment
+        expr = ast.DictPlaceholderExpr(self.constraint,
+                                       base = ast.ExprInit(type = self.constraint.getDictionaryType()))
+        return ([expr], expr)
+
+class InstanceDerivation(Derivation):
+    "A derivation that uses a class instance definition."
+    def __init__(self, instance, superclasses):
+        assert isinstance(instance, Instance)
+        for sc in superclasses:
+            assert isinstance(sc, Derivation)
+        self.instance = instance
+        self.superclasses = superclasses
+
+    def getCode(self, environment):
+        superclass_code = []
+        placeholders = []
+        for sc in self.superclasses:
+            sc_ph, sc_code = sc.getCode(environment)
+            superclass_code.append(sc_code)
+            placeholders += sc_ph
+
+        # TODO: methods that depend on superclasses
+        method_code = self.instance.getMethodCode()
+        expr = ast.DictionaryBuildExpr(self.instance.typeClass,
+                                       superclass_code,
+                                       method_code)
+        return (placeholders, expr)
 
 class ClassPredicate(PyonTypeBase):
     """
@@ -217,16 +255,13 @@ class ClassPredicate(PyonTypeBase):
     ClassPredicate values are immutable (other than unification).
 
     fields:
-    dictVar : DictionaryVariable
-      A variable representing a class dictionary for this type.
     ty : Type
       A type.
     cls : Class
       The class the type inhabits.
     """
-    def __init__(self, dict_var, ty, cls):
+    def __init__(self, ty, cls):
         assert isinstance(cls, Class)
-        self.dictVar = dict_var
         self.type = ty
         self.typeClass = cls
 
@@ -265,7 +300,7 @@ class ClassPredicate(PyonTypeBase):
         type class error that should be reported to the user.
         """
         # Decide whether we're in head-normal form
-        if self.isHNF(): return [self]
+        if self.isHNF(): return (IdDerivation(self), [self])
 
         # Perform context reduction
         ip = self.instancePredicates()
@@ -273,8 +308,16 @@ class ClassPredicate(PyonTypeBase):
             instance_text = pretty.renderString(self.pretty())
             raise RuntimeError, "Cannot derive an instance for " + instance_text
 
+        # Continue context reduction with superclasses
         (inst, constraints) = ip
-        return list(_concatMap(lambda p: p.toHNF(), constraints))
+        superclasses = []
+        out_constraints = []
+        for c in constraints:
+            sc, local_constraints = c.toHNF()
+            out_constraints += local_constraints
+            superclasses.append(sc)
+
+        return (InstanceDerivation(inst, superclasses), out_constraints)
 
     def superclassPredicates(self):
         """
@@ -317,12 +360,15 @@ class ClassPredicate(PyonTypeBase):
         # Otherwise, no instances match
         return None
 
+    def getDictionaryType(self):
+        "Return the type of a class dictionary proving this instance"
+        return self.typeClass.getDictionaryType(self.type)
+
     def addFreeVariables(self, s):
         self.type.addFreeVariables(s)
 
     def rename(self, substitution):
-        return ClassPredicate(self.dictVar,
-                              self.type.rename(substitution),
+        return ClassPredicate(self.type.rename(substitution),
                               self.typeClass)
 
     def showWorker(self, precedence, visible_vars):
@@ -397,7 +443,7 @@ def reduce(context):
     """
     reduce(constraints) -> reduced constraints
     """
-    return simplify(list(_concatMap(lambda p: p.toHNF(), context)))
+    return simplify(list(_concatMap(lambda p: p.toHNF()[1], context)))
 
 def splitConstraints(constraints, free_vars, qvars):
     """
@@ -438,11 +484,54 @@ def splitConstraints(constraints, free_vars, qvars):
 
     return (retained, deferred)
 
-def unifyClassPredicates(p1, p2):
-    # Not needed?
-    assert p1.typeClass == p2.typeClass
-    p1.type.unifyWith(p2.type)
-    p1.dictVar.unifyWith(p2.dictVar)
+def makeDictionaryPassingType(scm):
+    """
+    makeDictionaryPassingType(TyScheme) -> TyScheme
+
+    Convert a type scheme's constraints to ordinary parameters.
+    """
+    # Un-constrained schemes don't change
+    if not scm.constraints: return scm
+
+    dict_params = [c.getDictionaryType() for c in scm.constraints]
+    return pyon.types.schemes.TyScheme(scm.qvars,
+                                       noConstraints,
+                                       FunTy(dict_params, scm.type))
+
+def makeDictionaryPassingCall(variable, arguments, result_type):
+    """
+    makeDictionaryPassingCall(ANFVariable, [Expression], FirstOrderType)
+        -> Expression
+
+    Make an expression representing an instantiation of @variable with
+    dictionary arguments @arguments.  The variable must have a type scheme,
+    and the dictionary arguments must have types consistent with the type
+    scheme.  This function is not guaranteed to detect type errors.
+    """
+    scm = variable.getTypeScheme()
+
+    # Type scheme with no constraints doesn't require dictionary-passing
+    if not len(scm.constraints):
+        oper = ast.VariableExpr(variable,
+                                base = ast.ExprInit(type = result_type))
+        return oper
+
+    # Instantiate variable and determine its type
+    constraints, oper_type = makeDictionaryPassingType(scm).instantiate()
+    assert not constraints
+    call_type = pyon.types.hmtype.FunTy([e.getType() for e in arguments],
+                                        result_type)
+    oper_type_substitution = unification.match(oper_type, call_type)
+    if oper_type_substitution is None:
+        raise RuntimeError, "Type error during dictionary-passing conversion"
+    
+    oper_type = oper_type.rename(oper_type_substitution)
+    
+    # Build the expression
+    oper = ast.VariableExpr(variable, base = ast.ExprInit(type = oper_type))
+    expr = ast.CallExpr(oper, arguments,
+                        base = ast.ExprInit(type = result_type))
+    return expr
 
 noConstraints = []
 

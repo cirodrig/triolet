@@ -63,10 +63,16 @@ class PyonTypeBase(object):
         """
         raise NotImplementedError
 
-    def pretty(self):
+    def pretty(self, type_variables = None):
         "Show as a pretty-printable object.  This calls showWorker."
-        return self.showWorker(PyonTypeBase.PREC_OUTER,
-                               list(self.freeVariables()))
+        if type_variables is None:
+            type_variables = self.freeVariables()
+        if isinstance(type_variables, set):
+            type_variables = list(type_variables)
+        else:
+            assert isinstance(type_variables, list)
+
+        return self.showWorker(PyonTypeBase.PREC_OUTER, type_variables)
 
 class PyonType(PyonTypeBase):
     """
@@ -197,14 +203,15 @@ class TyCon(TyEnt):
     def __str__(self):
         return self.name
 
-class DictionaryTyCon(FirstOrderType):
+class DictionaryTyCon(TyEnt):
     """
     The type of a class dictionary.  A class dictionary type is like a tuple,
     but its members may be polymorphic.  Functions that manipulate dictionary
     types are not first-order types.
     """
     def __init__(self, cls):
-        assert isinstance(cls, hmtype.classes.Class)
+        # Cannot refer to classes due to module dependences
+        # assert isinstance(cls, pyon.types.classes.Class)
         self.cls = cls
 
     def __eq__(self, other):
@@ -225,6 +232,16 @@ class TyVar(FirstOrderType, unification.Variable):
     A unifiable type variable.
     """
 
+    def __eq__(self, other):
+        canon = self.canonicalize()
+        if canon is not self:
+            return canon == other
+
+        if isinstance(other, TyVar):
+            other = other.canonicalize()
+
+        return self is other
+
     def addFreeVariables(self, s):
         canon = self.canonicalize()
         if canon is not self: return canon.addFreeVariables(s)
@@ -234,8 +251,13 @@ class TyVar(FirstOrderType, unification.Variable):
         # Use this variable's position in the list to make a name
         canon = self.canonicalize()
         if canon is not self: return canon.showWorker(precedence, visible_vars)
-        
-        return _tyVarNames[visible_vars.index(self)]
+
+        # Find the _last_ occurence of the variable in the list
+        index = len(visible_vars) - 1
+        for v in reversed(visible_vars):
+            if v is canon: return _tyVarNames[index]
+            index -= 1
+        raise IndexError, self
 
     # Inherit 'rename' from unification.Variable
     rename = unification.Variable.rename
@@ -247,6 +269,11 @@ class EntTy(FirstOrderType, unification.Term):
     def __init__(self, ent):
         assert isinstance(ent, TyEnt)
         self.entity = ent
+
+    def __eq__(self, other):
+        other = other.canonicalize()
+        if not isinstance(other, EntTy): return False
+        return self.entity == other.entity
 
     def addFreeVariables(self, s):
         # No free type variables
@@ -282,6 +309,7 @@ class FunTy(FirstOrderType, unification.Term):
         self.range = rng
 
     def __eq__(self, other):
+        other = other.canonicalize()
         if not isinstance(other, FunTy): return False
         return self.domain == other.domain and self.range == other.range
 
@@ -336,6 +364,7 @@ class TupleTy(FirstOrderType, unification.Term):
         self.arguments = args
 
     def __eq__(self, other):
+        other = other.canonicalize()
         if not isinstance(other, TupleTy): return False
         return self.arguments == other.arguments
 
@@ -366,6 +395,11 @@ class AppTy(FirstOrderType, unification.Term):
         self.argument = arg
 
     def __eq__(self, other):
+        canon = self.canonicalize()
+        if canon is not self:
+            return canon == other
+
+        other = other.canonicalize()
         if not isinstance(other, AppTy): return False
         return self.operator == other.operator and \
             self.argument == other.argument
