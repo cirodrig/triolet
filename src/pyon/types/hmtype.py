@@ -303,7 +303,7 @@ class FunTy(FirstOrderType, unification.Term):
             last = None
             for x in xs:
                 if last:
-                    yield x
+                    yield last
                     yield _TIMES
                 last = x
             yield last
