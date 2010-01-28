@@ -192,7 +192,7 @@ def match(x, y):
 
             # If substitution succeeded, match x against y without further
             # substitution
-            if x_value is not None: match_head(x, y, compare)
+            if x_value is not None: match_head(x_value, y, compare)
 
             # Otherwise, add the mapping x |-> y and succeed
             else: substitution[x] = y
