@@ -320,6 +320,10 @@ instance Exportable a => Exportable [a] where
                         liftIO $ setListItem list index obj
             in do mapMIndex_ marshalItem xs
                   return list
+                  
+instance Exportable a => Exportable (Maybe a) where
+  toPythonEx Nothing = liftIO pyNone
+  toPythonEx (Just x) = toPythonEx x
 
 -- Return a Python variable corresponding to the current variable.
 -- Only one Python variable is created for each variable.
@@ -400,6 +404,18 @@ call5Ex fun mkx mky mkz mkw mkv =
                                     , toPythonEx mkz
                                     , toPythonEx mkw
                                     , toPythonEx mkv]) $ \tuple ->
+        do ptr <- fun
+           liftIO $ checkNull $ pyObject_CallObject ptr tuple
+
+call6Ex :: (Exportable a, Exportable b, Exportable c, Exportable d, Exportable e, Exportable f) =>
+           Export PyPtr -> a -> b -> c -> d -> e -> f -> Export PyPtr
+call6Ex fun mkx mky mkz mkw mkv mku =
+    withPyPtrExcEx (toPythonTupleEx [ toPythonEx mkx
+                                    , toPythonEx mky
+                                    , toPythonEx mkz
+                                    , toPythonEx mkw
+                                    , toPythonEx mkv
+                                    , toPythonEx mku]) $ \tuple ->
         do ptr <- fun
            liftIO $ checkNull $ pyObject_CallObject ptr tuple
 
@@ -486,10 +502,6 @@ instance Exportable Expr where
     toPythonEx (Cond c tr fa)  = call3Ex (readEnv py_CondExpr) c tr fa
     toPythonEx (Lambda ps e)   = call2Ex (readEnv py_LambdaExpr) ps e
     
-instance Exportable Annotation where
-  toPythonEx Nothing = liftIO pyNone
-  toPythonEx (Just e) = toPythonEx e
-
 instance Exportable (IterFor Expr) where
     toPythonEx (IterFor [param] e comp) =
         call3Ex (readEnv py_ForIter) param e comp
@@ -507,8 +519,8 @@ instance Exportable (Comprehension Expr) where
     toPythonEx (CompBody x)   = call1Ex (readEnv py_DoIter) x
 
 instance Exportable Func where
-    toPythonEx (Func name locals params ann body) =
-        call5Ex (readEnv py_Function) name params ann body locals
+    toPythonEx (Func name locals qvars params ann body) =
+        call6Ex (readEnv py_Function) name qvars params ann body locals
 
 instance Exportable Module where
     toPythonEx (Module groups) = call1Ex (readEnv py_Module) groups

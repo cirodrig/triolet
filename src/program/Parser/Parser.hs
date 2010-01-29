@@ -11,8 +11,10 @@
 module Parser.Parser(convertStatement, convertModule, parseModule)
 where
 
+import Prelude hiding(mapM)
+  
 import Control.Applicative
-import Control.Monad
+import Control.Monad hiding(mapM)
 import Data.Function
 import Data.List
 import Data.Maybe
@@ -555,35 +557,66 @@ suite :: [PyStmt] -> Cvt Suite
 suite ss = let groups = groupBy ((==) `on` isDefStatement) ss
            in concat <$> traverse suiteComponent groups
     where
-      isDefStatement (Py.Fun {}) = True
-      isDefStatement _           = False
-
       suiteComponent ss
           | isDefStatement (head ss) = fmap (:[]) $ defStatements ss
           | otherwise                = concat <$> traverse singleStatement ss
 
+isDefStatement (Py.Fun {}) = True
+isDefStatement (Py.Decorated {Py.decorated_def = Py.Fun {}}) = True
+isDefStatement _           = False
+
 topLevel :: [PyStmt] -> Cvt [Func]
 topLevel xs = traverse topLevelFunction xs
     where
-      topLevelFunction stmt@(Py.Fun {}) = funDefinition stmt
+      topLevelFunction stmt | isDefStatement stmt = funDefinition stmt
       topLevelFunction _ =
           fail "Only function definitions permitted at global scpoe"
 
+-- Unpack a function definition into decorator and real definition
 funDefinition :: PyStmt -> Cvt Func
-funDefinition (Py.Fun { Py.fun_name = name
-                      , Py.fun_args = params
-                      , Py.fun_result_annotation = result
-                      , Py.fun_body = body}) =
-    mkFunction <$> definition name <*> functionBody <*> resultAnnotation
-    where
-      mkFunction name (locals, params, body) result = 
-        Func name locals params result body
-      
-      resultAnnotation = traverse expression result
+funDefinition stmt@(Py.Fun {}) = funDefinition' [] stmt
+funDefinition (Py.Decorated { Py.decorated_decorators = decorators
+                            , Py.decorated_def = stmt@(Py.Fun {})}) = 
+  funDefinition' decorators stmt
 
-      functionBody = enter $ \locals -> (,,) <$> pure locals
-                                             <*> parameters params
-                                             <*> suite body
+data Decorators = Decorators (Maybe [PyIdent])
+
+funDefinition' decorators (Py.Fun { Py.fun_name = name
+                                  , Py.fun_args = params
+                                  , Py.fun_result_annotation = result
+                                  , Py.fun_body = body}) =
+  case extractDecorators decorators
+  of Decorators forall_decorator -> do
+       nameVar <- definition name
+       enter $ \locals -> do
+         qvars <- traverse (mapM parameterDefinition) forall_decorator
+         params' <- parameters params
+         result' <- traverse expression result
+         body' <- suite body
+         return $ Func nameVar locals qvars params' result' body'
+
+extractDecorators decorators = 
+  foldr extract (Decorators Nothing) decorators
+  where
+    extract (Py.Decorator { Py.decorator_name = name
+                          , Py.decorator_args = arguments
+                          , Py.decorator_annot = annot
+                          })
+            (Decorators oldQvars)
+      | name `isName` "forall" =
+        if isJust oldQvars
+        then error "Only one 'forall' permitted per function"
+        else case readArguments arguments
+             of Just varNames -> Decorators (Just varNames)
+                Nothing -> error "Invalid parameter to forall"
+
+    name `isName` s = case name of [ident] -> identName ident == s
+                                   _ -> False
+    
+    readArguments args = mapM readArgument args 
+    readArgument (Py.ArgExpr {Py.arg_expr = Py.Var {Py.var_ident = ident}}) =
+      Just ident
+    readArgument _ = Nothing
 
 -------------------------------------------------------------------------------
 -- Exported functions

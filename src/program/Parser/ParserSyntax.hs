@@ -102,6 +102,6 @@ data Parameter =
     Parameter Var Annotation
   | TupleParam [Parameter]
 
-data Func = Func Var Locals [Parameter] Annotation Suite
+data Func = Func Var Locals (Maybe [Var]) [Parameter] Annotation Suite
 
 data Module = Module [[Func]]
