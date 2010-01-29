@@ -40,7 +40,7 @@ PYON_HS_OBJECTS=$(patsubst %.hs, %.o, $(PYON_HS_SRCS) $(PYON_HS_GENERATED_SRCS))
 PYON_C_OBJECTS=$(patsubst %.c, %.o, $(PYON_C_SRCS) $(PYON_C_GENERATED_SRCS))
 PYON_OBJECTS=$(PYON_HS_OBJECTS) $(PYON_C_OBJECTS)
 
-PYON_SCRIPTS=pyon_testsuite
+PYON_SCRIPTS=pyon_testsuite pyon_compile
 PYON_GENERATED_SCRIPTS=$(foreach sc, $(PYON_SCRIPTS), build/scripts/$(sc))
 
 PYON_TARGET=build/program/pyon
