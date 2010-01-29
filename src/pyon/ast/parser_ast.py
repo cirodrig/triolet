@@ -351,7 +351,22 @@ class DefGroupStmt(Statement):
 # Functions
 
 class Function(object):
-    """A function definition"""
+    """
+    A function definition.
+
+    fields:
+    name:
+      The function's name
+    qvars : [Variable] or None
+      If the function declaration had a 'forall' annotation, this is the list
+      of universally quantified variables that were declared.
+    parameters: [Parameter]
+      The function's parameters
+    body:
+      The function's body
+    local_scope:
+      The function's local variables.  (Not used.)
+    """
     def __init__(self, name, qvars, parameters, annotation, body,
                  local_scope = None):
         assert isinstance(name, Variable)
