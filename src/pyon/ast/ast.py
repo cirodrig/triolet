@@ -461,19 +461,6 @@ class RecVarPlaceholderExpr(PlaceholderExpr):
     def getVariable(self):
         return self._variable
 
-    def makeElaboration(self):
-        """
-        Create the dictionary-passing elaboration of this expression.  This
-        should be called by type inference after the variable type has been
-        inferred and after all expressions in 'dictionaryArguments' have
-        been assigned.
-        """
-        arguments = self.dictionaryArguments
-        new_expr = pyon.types.classes.makeDictionaryPassingCall(self._variable,
-                                                                self.dictionaryArguments,
-                                                                self.getType())
-        self.setElaboration(new_expr)
-
 ###############################################################################
 # Functions
 
