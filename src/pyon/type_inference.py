@@ -821,7 +821,6 @@ def doTypeInference(anf_form):
 
 def inferTypes(anf_form):
     new_ast = doTypeInference(anf_form)
-    print_ast.printAst(new_ast)
     removePlaceholders(new_ast)
     return new_ast
 
