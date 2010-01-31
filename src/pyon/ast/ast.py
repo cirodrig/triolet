@@ -376,7 +376,7 @@ class LetExpr(Expression):
 
     def addAllTypeVariables(self, s):
         Expression.addAllTypeVariables(self, s)
-        self.parameter.addAllTypeVariables(s)
+        if self.parameter: self.parameter.addAllTypeVariables(s)
         self.rhs.addAllTypeVariables(s)
         self.body.addAllTypeVariables(s)
 

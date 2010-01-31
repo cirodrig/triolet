@@ -108,7 +108,10 @@ def printExpression(expr, precedence, type_variables = None):
         return doc
 
     elif isinstance(expr, LetExpr):
-        paramdoc = printParam(expr.parameter, type_variables)
+        if expr.parameter is None:
+            paramdoc = '_'
+        else:
+            paramdoc = printParam(expr.parameter, type_variables)
         rhsdoc = printRec(expr.rhs, _OUTER_PREC)
         assndoc = pretty.stack(pretty.space(['let', paramdoc, '=']),
                                pretty.nest(pretty.abut(rhsdoc, ';'), 4))

@@ -90,7 +90,8 @@ class FirstOrderType(PyonType):
         if isinstance(self, TyVar): return ProjectedTyVar(self)
         elif isinstance(self, EntTy): return ProjectedTyCon(self.entity)
         elif isinstance(self, (FunTy, TupleTy)):
-            return ProjectedTyApp(self.getConstructor(), self.getArguments())
+            con = ProjectedTyCon(self.getConstructor())
+            return ProjectedTyApp(con, self.getParameters())
         elif isinstance(self, AppTy):
             # Collect all operands into a single ProjectedTyApp value
             op_type = self.operator.project()
@@ -391,6 +392,8 @@ class AppTy(FirstOrderType, unification.Term):
     """
 
     def __init__(self, oper, arg):
+        assert isinstance(oper, FirstOrderType)
+        assert isinstance(arg, FirstOrderType)
         self.operator = oper
         self.argument = arg
 

@@ -9,6 +9,10 @@ import pyon.types.types as hm
 
 functionType = hm.FunTy
 
+def dictionaryType(cls, ty):
+    # Return the type of a dictionary for class 'cls' instance 'ty'
+    return hm.AppTy(hm.EntTy(hm.DictionaryTyCon(cls)), ty)
+
 def _makeClasses():
     "Create type classes."
     global class_Eq, class_Ord, class_Num, class_Traversable
@@ -52,6 +56,24 @@ def _makeClasses():
                                        type_scheme = cmp_scheme(type_float))
     hm.addInstance(class_Eq, [], hm.noConstraints, type_float,
                    [oper_Eq_EQ_float, oper_Eq_NE_float])
+
+    b = hm.TyVar()
+    # forall a b. Dict(Eq) a * Dict(Eq) b -> (a, b) * (a, b) -> bool
+    tuple2_compare_scheme = \
+        hm.TyScheme([a,b], hm.noConstraints,
+                    hm.FunTy([dictionaryType(class_Eq, a),
+                              dictionaryType(class_Eq, b)],
+                             hm.FunTy([hm.TupleTy([a,b]), hm.TupleTy([a,b])],
+                                      type_bool)))
+    oper_Eq_EQ_tuple2 = ast.ANFVariable(name = "__eq__",
+                                        type_scheme = tuple2_compare_scheme)
+    oper_Eq_NE_tuple2 = ast.ANFVariable(name = "__ne__",
+                                        type_scheme = tuple2_compare_scheme)
+    hm.addInstance(class_Eq, [a, b],
+                   [hm.ClassPredicate(a, class_Eq),
+                    hm.ClassPredicate(b, class_Eq)],
+                   hm.TupleTy([a,b]),
+                   [oper_Eq_EQ_tuple2, oper_Eq_NE_tuple2])
 
     oper_Ord_LT_int = ast.ANFVariable(name = "__lt__",
                                      type_scheme = cmp_scheme(type_int))

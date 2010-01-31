@@ -482,7 +482,7 @@ def updateRecVarPlaceholders(gamma, dict_env, placeholders):
 def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
     """
     inferLetBindingType(Environment, Parameter, constraints, FirstOrderType,
-                        Expression) -> (constraints, placeholders, Parameter)
+                        Expression) -> (constraints, Parameter)
 
     Infer types in a let-binding.  Bound variables are assigned a type scheme.
     The expression 'expr' is only used for error reporting.  The types are
@@ -491,7 +491,10 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
     Returns a list of deferred constraints, and a type-annotated parameter.
     """
 
-    if isinstance(param, ast.TupleParam):
+    if param is None:
+        # No constraints
+        return (bound_constraints, None)
+    elif isinstance(param, ast.TupleParam):
         # Unify the bound type with a tuple type
         field_types = [hmtype.TyVar() for _ in param.fields]
 

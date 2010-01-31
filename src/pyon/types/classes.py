@@ -188,8 +188,19 @@ class Instance(PyonTypeBase):
         self.instanceType = instance_type
         self.methods = methods
 
-    def getMethodCode(self):
-        return [ast.VariableExpr(m) for m in self.methods]
+    def getMethodCode(self, superclasses):
+        # Each superclass corresponds to one element of the constraint list
+        if len(superclasses) != len(self.constraints):
+            raise ValueError, "Wrong number of superclasses"
+
+        if not len(superclasses):
+            # If there are no superclasses, don't apply anything
+            return [ast.VariableExpr(m) for m in self.methods]
+        else:
+            # Apply method to superclasses
+            return [ast.CallExpr(ast.VariableExpr(m), superclasses)
+                    for m in self.methods]
+
 
 def addInstance(cls, qvars, constraints, instance_type, methods):
     inst = Instance(qvars, constraints, cls, instance_type, methods)
@@ -209,10 +220,16 @@ class Derivation(object):
         """
         raise NotImplementedError, "'Derivation' is an abstract base class"
 
+    def getDictionaryType(self):
+        raise NotImplementedError, "'Derivation' is an abstract base class"
+
 class IdDerivation(Derivation):
     "A derivation that uses an existing class instance."
     def __init__(self, constraint):
         self.constraint = constraint
+
+    def getDictionaryType(self):
+        return self.constraint.getDictionaryType()
 
     def getCode(self, environment):
         constraint = self.constraint
@@ -227,26 +244,48 @@ class IdDerivation(Derivation):
 
 class InstanceDerivation(Derivation):
     "A derivation that uses a class instance definition."
-    def __init__(self, instance, superclasses):
+    def __init__(self, instance, superclasses, dict_type):
         assert isinstance(instance, Instance)
         for sc in superclasses:
             assert isinstance(sc, Derivation)
+        assert isinstance(dict_type, FirstOrderType)
         self.instance = instance
         self.superclasses = superclasses
+        self.dictionaryType = dict_type
+
+    def getDictionaryType(self):
+        return self.dictionaryType
 
     def getCode(self, environment):
+        # Get code that constructs this dictionary.
+
+        # Get the code and type for each superclass.
+        superclass_vars = []
+        superclass_types = []
         superclass_code = []
         placeholders = []
         for sc in self.superclasses:
             sc_ph, sc_code = sc.getCode(environment)
+            sc_type = sc.getDictionaryType()
+            superclass_vars.append(ast.ANFVariable(type_scheme = pyon.types.schemes.TyScheme([], noConstraints, sc_type)))
+            superclass_types.append(sc_type)
             superclass_code.append(sc_code)
             placeholders += sc_ph
 
-        # TODO: methods that depend on superclasses
-        method_code = self.instance.getMethodCode()
+        # Build the dictionary
+        superclass_variable_exprs = \
+            [ast.VariableExpr(v, base = ast.ExprInit(type = t))
+             for v, t in zip(superclass_vars, superclass_types)]
+        method_code = self.instance.getMethodCode(superclass_variable_exprs)
         expr = ast.DictionaryBuildExpr(self.instance.typeClass,
-                                       superclass_code,
+                                       superclass_variable_exprs,
                                        method_code)
+
+        # Bind each superclass dictionary with let expressions
+        for v, t, c in reversed(zip(superclass_vars,
+                                    superclass_types,
+                                    superclass_code)):
+            expr = ast.LetExpr(ast.VariableParam(v), c, expr)
         return (placeholders, expr)
 
 class ClassPredicate(PyonTypeBase):
@@ -282,13 +321,12 @@ class ClassPredicate(PyonTypeBase):
 
     def isHNF(self):
         "Return true if this predicate is in head-normal form"
-        ty = self.type
+        prj = self.type.project()
         while True:
-            prj = ty.project()
             if isinstance(prj, ProjectedTyVar): return True
             elif isinstance(prj, ProjectedTyCon): return False
-            elif isinstance(prj, ProjectedTyApp): ty = prj.operator
-            else: raise TypeError, type(ty)
+            elif isinstance(prj, ProjectedTyApp): prj = prj.operator
+            else: raise TypeError, type(prj)
 
     def toHNF(self):
         """
@@ -317,7 +355,9 @@ class ClassPredicate(PyonTypeBase):
             out_constraints += local_constraints
             superclasses.append(sc)
 
-        return (InstanceDerivation(inst, superclasses), out_constraints)
+        return (InstanceDerivation(inst, superclasses,
+                                   self.getDictionaryType()),
+                out_constraints)
 
     def superclassPredicates(self):
         """
@@ -349,12 +389,11 @@ class ClassPredicate(PyonTypeBase):
         # For each instance
         for inst in self.typeClass.instances:
             # If this type does not match the instance head, go to next
-            subst = unification.match(ty, inst.instanceType)
+            subst = unification.match(inst.instanceType, ty)
             if subst is None: continue
 
             # Get the constraints entailed by this type
-            constraints = [c.applySubstitution(subst)
-                           for c in inst.constraints]
+            constraints = [c.rename(subst) for c in inst.constraints]
             return (inst, constraints)
 
         # Otherwise, no instances match
