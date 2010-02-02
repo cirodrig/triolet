@@ -198,6 +198,13 @@ class ExprInit(object):
         expr.type = self._type
         return None
 
+def copyTypedExpr(expr):
+    """
+    Copy properties of an expression for use in initializing another
+    expression.
+    """
+    return ExprInit(type = expr.getType())
+
 # The default value of ExprInit
 ExprInit.default = ExprInit() 
 

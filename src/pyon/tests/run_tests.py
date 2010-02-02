@@ -9,8 +9,8 @@ import pyon.ast.print_ast as print_ast
 from pyon.data_dir import *
 import pyon.ssa.parser_ssa as ssa
 import pyon.anf_conversion as anf_conversion
-
 import pyon.type_inference as type_inference
+import pyon.partial_eval as partial_eval
 
 # Find path to source files
 testDir = os.path.join(DATA_DIR, 'testcases')
@@ -29,6 +29,10 @@ def tryCompile(fname, show_traceback = False):
         # Type inference
         test_anf = type_inference.inferTypes(test_anf)
 
+        # Partial evaluation
+        test_anf = partial_eval.partialEval(test_anf)
+        test_anf = partial_eval.eliminateDeadCode(test_anf)
+        
         # (DEBUG) print the output with type?
         print_ast.printAst(test_anf)
 
