@@ -227,7 +227,8 @@ class AnnotatedTyCon(TyEnt):
         self.name = name
 
     def __eq__(self, other):
-        return id(self) == id(other)
+        # Equality of AnnotatedTyCon is by object identity
+        return self is other
 
     def __str__(self):
         return "'" + self.name

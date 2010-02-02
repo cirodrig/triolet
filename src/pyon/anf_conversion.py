@@ -30,13 +30,23 @@ def getAnnotatedFuncType(annotation, a_tyvars):
 
 def getAnnotatedFuncParams(annotation, a_tyvars):
     "Get list of function parameter(s)"
-    if isinstance(annotation, p_ast.BinaryExpr):
-        if annotation.operator == operators.MUL:
-            left_param = getAnnotatedFuncParams(annotation.left, a_tyvars)
-            right_param = convertAnnotation(annotation.right, a_tyvars)
-        return left_param + [right_param]
-    else:
-        return [convertAnnotation(annotation, a_tyvars)]
+    params = []
+
+    def addParameters(expr):
+        # If a parameter list is given, process the left side of the list
+        # recursively, then the right side.
+        if isinstance(expr, p_ast.BinaryExpr):
+            if expr.operator == operators.MUL:
+                addParameters(expr.left)
+                params.append(convertAnnotation(expr.right, a_tyvars))
+            else:
+                raise TypeError, expr.operator.name
+        else:
+            params.append(convertAnnotation(expr, a_tyvars))
+
+    addParameters(annotation)
+
+    return params
 
 def getAnnotatedListType(annotation, a_tyvars):
     if annotation.operator.variable.anfVariable != builtin_data.type_list:
@@ -52,16 +62,23 @@ def getAnnotatedListType(annotation, a_tyvars):
 def convertAnnotation(annotation, a_tyvars):
     "Convert type annotation to corresponding type"
     if isinstance(annotation, p_ast.VariableExpr):
-        if annotation.variable.hasANFVariable():
-            if isinstance(annotation.variable.anfVariable, hmtype.PyonType):
-                return annotation.variable.anfVariable
-            raise TypeError, "variable used as a type"
-        else:
+        # If there's no pre-assigned ANF variable, then this variable should
+        # represent a type variable
+        if not annotation.variable.hasANFVariable():
             try: return a_tyvars[annotation.variable]
             except: raise TypeError, "unspecified type variable used"
 
+        # Otherwise, make sure it's a type variable
+        if not isinstance(annotation.variable.anfVariable,
+                          hmtype.FirstOrderType):
+            raise TypeError, "variable used as a type"
+
+        # Return the associated type
+        return annotation.variable.anfVariable
+
     elif isinstance(annotation, p_ast.TupleExpr):
-        t = hmtype.TupleTy([convertAnnotation(arg, a_tyvars) for arg in annotation.arguments])
+        t = hmtype.TupleTy([convertAnnotation(arg, a_tyvars)
+                            for arg in annotation.arguments])
         return t
 
     elif isinstance(annotation, p_ast.BinaryExpr):
@@ -82,7 +99,7 @@ def convertAnnotatedType(p):
     "Convert type variable annotation to non-unifiable type variable"
     return hmtype.EntTy(hmtype.AnnotatedTyCon(p.name))
 
-def convertFunction(func, a_tyvars):
+def convertFunction(func, outer_tyvars):
     "Convert a parser function to an ANF function definition"
 
     # Convert to the SSA name
@@ -90,7 +107,10 @@ def convertFunction(func, a_tyvars):
 
     # Get annotated type variables and merge with already defined
     if func.qvars:
-        a_tyvars = dict(a_tyvars.items() + [(p, convertAnnotatedType(p)) for p in func.qvars])
+        a_tyvars = dict((p, convertAnnotatedType(p)) for p in func.qvars)
+        a_tyvars.update(outer_tyvars)
+    else:
+        a_tyvars = outer_tyvars
 
     # Convert annotated return type
     if func.annotation:
