@@ -9,31 +9,108 @@ import pyon.ast.ast as a_ast
 import pyon.ssa.parser_ssa as ssa
 
 import pyon.builtin_data as builtin_data
+import pyon.types.types as hmtype
+import pyon.types.schemes as schemes
 
-def convertModule(module):
+def convertModule(module, a_tyvars = {}):
     "Convert a module to ANF"
-    return a_ast.Module([[convertFunction(f) for f in dg]
+    return a_ast.Module([[convertFunction(f, a_tyvars) for f in dg]
                          for dg in module.definitions])
 
-def convertFunction(func):
+def getAnnotatedFuncType(annotation, a_tyvars):
+    "Convert function type annotation to an actual function type"
+    assert isinstance(annotation, p_ast.BinaryExpr)
+    assert annotation.operator == operators.ARROW
+
+    param_ty = getAnnotatedFuncParams(annotation.left, a_tyvars)
+    ret_ty = convertAnnotation(annotation.right, a_tyvars)
+
+    t = hmtype.FunTy(param_ty, ret_ty)
+    return t
+
+def getAnnotatedFuncParams(annotation, a_tyvars):
+    "Get list of function parameter(s)"
+    if isinstance(annotation, p_ast.BinaryExpr):
+        if annotation.operator == operators.MUL:
+            left_param = getAnnotatedFuncParams(annotation.left, a_tyvars)
+            right_param = convertAnnotation(annotation.right, a_tyvars)
+        return left_param + [right_param]
+    else:
+        return [convertAnnotation(annotation, a_tyvars)]
+
+def getAnnotatedListType(annotation, a_tyvars):
+    if annotation.operator.variable.anfVariable != builtin_data.type_list:
+        raise TypeError, type(annotation.operator)
+    try:
+        oper_ty = annotation.operator.variable.anfVariable
+        t = hmtype.typeApplication(oper_ty,
+                                   [convertAnnotation(a, a_tyvars) for a in annotation.arguments])
+        return t
+    except:
+        raise TypeError, type(annotation)
+
+def convertAnnotation(annotation, a_tyvars):
+    "Convert type annotation to corresponding type"
+    if isinstance(annotation, p_ast.VariableExpr):
+        if annotation.variable.hasANFVariable():
+            if isinstance(annotation.variable.anfVariable, hmtype.PyonType):
+                return annotation.variable.anfVariable
+            raise TypeError, "variable used as a type"
+        else:
+            try: return a_tyvars[annotation.variable]
+            except: raise TypeError, "unspecified type variable used"
+
+    elif isinstance(annotation, p_ast.TupleExpr):
+        t = hmtype.TupleTy([convertAnnotation(arg, a_tyvars) for arg in annotation.arguments])
+        return t
+
+    elif isinstance(annotation, p_ast.BinaryExpr):
+        if annotation.operator == operators.ARROW:
+            t = getAnnotatedFuncType(annotation, a_tyvars)
+            return t
+        else:
+            raise TypeError, annotation.operator.name
+
+    elif isinstance(annotation, p_ast.CallExpr):
+        t = getAnnotatedListType(annotation, a_tyvars)
+        return t
+
+    else:
+        raise TypeError, type(annotation)
+
+def convertAnnotatedType(p):
+    "Convert type variable annotation to non-unifiable type variable"
+    return hmtype.EntTy(hmtype.AnnotatedTyCon(p.name))
+
+def convertFunction(func, a_tyvars):
     "Convert a parser function to an ANF function definition"
 
     # Convert to the SSA name
     name = convertVariable(func.name, func.ssaver)
 
+    # Get annotated type variables and merge with already defined
+    if func.qvars:
+        a_tyvars = dict(a_tyvars.items() + [(p, convertAnnotatedType(p)) for p in func.qvars])
+
+    # Convert annotated return type
+    if func.annotation:
+        annotation = convertAnnotation(func.annotation, a_tyvars)
+    else:
+        annotation = None
+
     # Convert parameters
-    parameters = [convertParameter(p) for p in func.parameters]
+    parameters = [convertParameter(p, a_tyvars) for p in func.parameters]
 
     # Convert body
     def cannot_fallthrough(*args):
         # Control flow should never "fall through" out of a function body;
         # It should always end at a return statement
         raise ValueError, "Function body has no fallthrough path"
-    body = convertSuite(func.body, cannot_fallthrough)
+    body = convertSuite(func.body, cannot_fallthrough, a_tyvars)
 
-    return a_ast.FunctionDef(name, a_ast.exprFunction(parameters, body))
+    return a_ast.FunctionDef(name, a_ast.exprFunction(parameters, body, annotation = annotation))
 
-def convertSuite(suite, make_fallthrough):
+def convertSuite(suite, make_fallthrough, a_tyvars):
     """
     Convert a suite of statements together with a fallthrough path.
     The fallthrough path is executed if the statements terminates with a
@@ -44,7 +121,7 @@ def convertSuite(suite, make_fallthrough):
     # Start at the end and work backwards
     suite_expr = convertControlStatement(suite[-1], make_fallthrough)
     for stmt in reversed(suite[:-1]):
-        suite_expr = convertStatement(stmt, suite_expr)
+        suite_expr = convertStatement(stmt, suite_expr, a_tyvars)
 
     return suite_expr
 
@@ -62,7 +139,7 @@ def convertControlStatement(stmt, make_fallthrough):
     else:
         raise TypeError, type(stmt)
 
-def convertStatement(stmt, successor):
+def convertStatement(stmt, successor, a_tyvars):
     """
     Convert a statement to an ANF statement.  The following statement
     is passed as the second parameter.  The following statement will appear
@@ -90,8 +167,8 @@ def convertStatement(stmt, successor):
 
             # Create the if-else expression
             def returnValue(tuple_expr): return tuple_expr
-            true_path = convertSuite(stmt.ifTrue, returnValue)
-            false_path = convertSuite(stmt.ifFalse, returnValue)
+            true_path = convertSuite(stmt.ifTrue, returnValue, a_tyvars)
+            false_path = convertSuite(stmt.ifFalse, returnValue, a_tyvars)
             if_expr = a_ast.IfExpr(cond, true_path, false_path)
 
             # Create the subsequent code
@@ -109,8 +186,8 @@ def convertStatement(stmt, successor):
                 param = _consumeValue(join_node)
                 return a_ast.LetExpr(param, live_out_expr, successor)
 
-            true_path = convertSuite(stmt.ifTrue, make_join)
-            false_path = convertSuite(stmt.ifFalse, make_join)
+            true_path = convertSuite(stmt.ifTrue, make_join, a_tyvars)
+            false_path = convertSuite(stmt.ifFalse, make_join, a_tyvars)
             return a_ast.IfExpr(cond, true_path, false_path)
 
         # Otherwise, generate a local function for the continuation
@@ -134,15 +211,15 @@ def convertStatement(stmt, successor):
                                       live_out_expr.arguments)
 
             # Define the if-else expression
-            true_path = convertSuite(stmt.ifTrue, make_join)
-            false_path = convertSuite(stmt.ifFalse, make_join)
+            true_path = convertSuite(stmt.ifTrue, make_join, a_tyvars)
+            false_path = convertSuite(stmt.ifFalse, make_join, a_tyvars)
             if_expr = a_ast.IfExpr(cond, true_path, false_path)
 
             return a_ast.LetrecExpr([a_ast.FunctionDef(cont_var, cont_fun)],
                                     if_expr)
 
     elif isinstance(stmt, p_ast.DefGroupStmt):
-        defs = [convertFunction(d) for d in stmt.definitions]
+        defs = [convertFunction(d, a_tyvars) for d in stmt.definitions]
         return a_ast.LetrecExpr(defs, successor)
 
     else:
@@ -272,13 +349,20 @@ def convertIterator(iter):
     else:
         raise TypeError, type(iter)
 
-def convertParameter(param):
+def convertParameter(param, a_tyvars = {}):
     "Convert a parser parameter to an ANF parameter"
     if isinstance(param, p_ast.VariableParam):
         var = convertVariable(param.name, param.ssaver)
-        return a_ast.VariableParam(var)
+
+        # Convert annotated parameter type
+        if param.annotation:
+            annotation = convertAnnotation(param.annotation, a_tyvars)
+        else:
+            annotation = None
+
+        return a_ast.VariableParam(var, annotation = annotation)
     elif isinstance(param, p_ast.TupleParam):
-        return a_ast.TupleParam([convertParameter(p) for p in param.fields])
+        return a_ast.TupleParam([convertParameter(p, a_tyvars) for p in param.fields])
     else:
         raise TypeError, type(param)
 
@@ -311,6 +395,8 @@ def convertVariableRef(var, ssaver):
     if ssaver == -1:
         return a_ast.UndefinedExpr()
     elif ssaver == ssa.notSSA:
+        if isinstance(var.anfVariable, hmtype.PyonType):
+            raise TypeError, "type used as a variable" 
         return a_ast.VariableExpr(var.anfVariable)
     else:
         return a_ast.VariableExpr(convertVariable(var, ssaver))
@@ -332,7 +418,8 @@ _convertBinaryOperatorMap = {
     operators.GE        : builtin_data.oper_GE,
     operators.BITWISEAND : builtin_data.oper_BITWISEAND,
     operators.BITWISEOR : builtin_data.oper_BITWISEOR,
-    operators.BITWISEXOR : builtin_data.oper_BITWISEXOR
+    operators.BITWISEXOR : builtin_data.oper_BITWISEXOR,
+    operators.ARROW     : builtin_data.oper_ARROW
     }
 
 def convertBinaryOperator(oper):

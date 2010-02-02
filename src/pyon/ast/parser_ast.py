@@ -7,6 +7,7 @@ import itertools
 # Operator names
 import pyon.ast.operators
 import pyon.ast.ast as ast
+import pyon.types.hmtype as hmtype
 
 class Variable(object):
     """Abstract base class of variables"""
@@ -43,7 +44,8 @@ class PythonVariable(Variable):
         if identifier is None: identifier = PythonVariable.getNewID()
         assert isinstance(identifier, int)
         assert anf_variable is None or \
-            isinstance(anf_variable, ast.ANFVariable)
+            isinstance(anf_variable, ast.ANFVariable) or \
+            isinstance(anf_variable, hmtype.PyonType)
         self.name = name
         self.identifier = identifier
         self.anfVariable = anf_variable

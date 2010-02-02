@@ -539,7 +539,10 @@ def exposeFirstOrderBinding(gamma, param):
 
     elif isinstance(param, ast.VariableParam):
         # Create a new type variable for this parameter
-        t = hmtype.TyVar()
+        if param.annotation:
+            t = param.annotation
+        else:
+            t = hmtype.TyVar()
         assumeFirstOrderType(gamma, param.name, t)
         return ast.VariableParam(param.name, type = t)
 
@@ -608,6 +611,12 @@ def inferFunctionType(gamma, func):
     # Process body
     (csts, placeholders), body = inferExpressionType(local_env, func.body)
 
+    # check return type with the annotated type, if there is any
+    if func.annotation:
+        try: fn_ret_type = unification.unify(body.getType(), func.annotation)
+        except unification.UnificationError, e:
+            raise TypeCheckError, "Return type does not unify with the annotated type"
+
     new_func = ast.Function(func.mode, parameters, body,
                             type = hmtype.functionType(param_types, body.getType()))
 
@@ -622,6 +631,7 @@ def inferDefGroup(gamma, group):
     a type scheme.  The definition group's type assignments are returned as a
     new environment.
     """
+
     # Describe the variables bound by the definition group
     bound_vars = [d.name for d in group]
     
@@ -746,8 +756,8 @@ def inferExpressionType(gamma, expr):
         try: unification.unify(oper.getType(), ty_fn)
         except unification.UnificationError, e:
             print_ast.printAst(expr)
-            print "Function type:", pretty.renderString(ty_oper.pretty())
-            print "Argument types:", [pretty.renderString(x.pretty()) for x in ty_args]
+            print "Function type:", pretty.renderString(ty_fn.pretty())
+            print "Argument types:", [pretty.renderString(x.getType().pretty()) for x in args]
             raise TypeCheckError, "Type mismatch in function call"
 
         new_expr = ast.CallExpr(oper, args,

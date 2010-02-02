@@ -219,6 +219,19 @@ class DictionaryTyCon(TyEnt):
     def __str__(self):
         return "Dict(" + self.cls.name + ")"
 
+class AnnotatedTyCon(TyEnt):
+    """
+    A type to represent annotated type variable
+    """
+    def __init__(self, name):
+        self.name = name
+
+    def __eq__(self, other):
+        return id(self) == id(other)
+
+    def __str__(self):
+        return "'" + self.name
+
 ###############################################################################
 # Type expressions
 

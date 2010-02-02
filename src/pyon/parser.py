@@ -2,6 +2,7 @@
 import haskell
 import pyon.ast.parser_ast as ast
 from pyon.builtin_data import BUILTIN_FUNCTIONS
+from pyon.builtin_data import BUILTIN_DATATYPES
 
 # A list of PythonVariable used for resolving the names of predefined
 # variables while parsing.
@@ -19,7 +20,15 @@ def _getBuiltinVariableList():
             # create a new ID.
             return ast.PythonVariable(anf_var.name, anf_variable = anf_var)
 
-        _builtinVariableList = [mv(v) for v in BUILTIN_FUNCTIONS]
+        def mv2(name, ty):
+            "Create the list entry for builtin data type."
+            pv = ast.PythonVariable(name, anf_variable = ty)
+            return pv
+
+        _builtinVarFunctions = [mv(v) for v in BUILTIN_FUNCTIONS]
+        _builtinVarDatatypes = [mv2(name, ty) for (name, ty) in BUILTIN_DATATYPES.items()]
+
+        _builtinVariableList = _builtinVarFunctions + _builtinVarDatatypes 
 
     return _builtinVariableList
 

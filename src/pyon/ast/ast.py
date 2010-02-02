@@ -493,7 +493,7 @@ class Function(object):
     """
 
     def __init__(self, mode, parameters, body,
-                 dictionary_parameters = None, type = None):
+                 dictionary_parameters = None, type = None, annotation = None):
         assert mode == EXPRESSION or mode == ITERATOR
         for p in parameters:
             assert isinstance(p, Parameter)
@@ -506,6 +506,7 @@ class Function(object):
         self.parameters = parameters
         self.dictionaryParameters = dictionary_parameters
         self.body = body
+        self.annotation = annotation
         self.type = type
 
     def setDictionaryParameters(self, dictionary_parameters):
@@ -522,13 +523,13 @@ class Function(object):
 
     def getType(self): return self.type
 
-def exprFunction(parameters, body):
+def exprFunction(parameters, body, annotation = None):
     "Create an expression function"
-    return Function(EXPRESSION, parameters, body)
+    return Function(EXPRESSION, parameters, body, annotation = annotation)
 
-def iterFunction(parameters, body):
+def iterFunction(parameters, body, annotation = None):
     "Create an iterator function"
-    return Function(ITERATOR, parameters, body)
+    return Function(ITERATOR, parameters, body, annotation = annotation)
 
 ###############################################################################
 # Modules
