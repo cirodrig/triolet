@@ -238,8 +238,10 @@ class TyVar(FirstOrderType, unification.Variable):
 
     def addFreeVariables(self, s):
         canon = self.canonicalize()
-        if canon is not self: return canon.addFreeVariables(s)
-        s.add(self)
+        if canon is not self:
+            canon.addFreeVariables(s)
+        else:
+            s.add(self)
 
     def showWorker(self, precedence, visible_vars):
         # Use this variable's position in the list to make a name
@@ -351,10 +353,6 @@ class AppTy(FirstOrderType, unification.Term):
         self.argument = arg
 
     def __eq__(self, other):
-        canon = self.canonicalize()
-        if canon is not self:
-            return canon == other
-
         other = unification.canonicalize(other)
         if not isinstance(other, AppTy): return False
         return self.operator == other.operator and \
@@ -397,7 +395,7 @@ class AppTy(FirstOrderType, unification.Term):
         else:
             show = _genericShowApplication
 
-        return show(arguments, precedence, visible_vars)
+        return show(operator, arguments, precedence, visible_vars)
 
     def rename(self, mapping):
         """
@@ -407,7 +405,7 @@ class AppTy(FirstOrderType, unification.Term):
         return AppTy(self.operator.rename(mapping),
                      self.argument.rename(mapping))
 
-def _genericShowApplication(arguments, precedence, visible_vars):
+def _genericShowApplication(operator, arguments, precedence, visible_vars):
     """
     _genericShowApplication(type-list, int, vars) -> pretty
     Show a type application using juxtapoxition: operator arg1 arg2 .. argN.
@@ -416,15 +414,15 @@ def _genericShowApplication(arguments, precedence, visible_vars):
     PREC_APP = PyonTypeBase.PREC_APP
 
     # Show operator and operands.  Application is left-associative.
-    operator_doc = arguments[0].showWorker(PREC_APP - 1, visible_vars)
-    args_doc = [a.showWorker(PREC_APP, visible_vars) for a in arguments[1:]]
+    operator_doc = operator.showWorker(PREC_APP - 1, visible_vars)
+    args_doc = [a.showWorker(PREC_APP, visible_vars) for a in arguments]
 
     # Concatenate and parenthesize
     doc = pretty.space([operator_doc] + args_doc)
     if precedence >= PREC_APP: doc = pretty.parens(doc)
     return doc
 
-def _showFunction(args, precedence, in_scope_vars):
+def _showFunction(operator, args, precedence, in_scope_vars):
     PREC_FUN = PyonTypeBase.PREC_FUN
 
     def product(xs):
@@ -445,7 +443,7 @@ def _showFunction(args, precedence, in_scope_vars):
     if precedence >= PREC_FUN: fun_doc = pretty.parens(fun_doc)
     return fun_doc
 
-def _showTuple(args, precedence, visible_vars):
+def _showTuple(operator, args, precedence, visible_vars):
     PREC_OUTER = PyonTypeBase.PREC_OUTER
     fields = [p.showWorker(PREC_OUTER, visible_vars) for p in args]
     return pretty.parens(pretty.space(pretty.punctuate(',', fields)))
