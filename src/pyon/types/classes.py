@@ -380,7 +380,7 @@ class ClassPredicate(PyonTypeBase):
         Returns the matching instance and a list of subgoals, or None if
         no instance matches.
         """
-        ty = self.type.canonicalize()
+        ty = unification.canonicalize(self.type)
 
         # Common case shortcut: If this predicate pertains to a type
         # variable, we won't find any instances

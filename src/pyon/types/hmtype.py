@@ -86,7 +86,7 @@ class FirstOrderType(PyonType):
     """
     def project(self):
         "Project the head of this type into a Herbrand term."
-        self = self.canonicalize()
+        self = unification.canonicalize(self)
         if isinstance(self, TyVar): return ProjectedTyVar(self)
         elif isinstance(self, EntTy): return ProjectedTyCon(self.entity)
         elif isinstance(self, AppTy):
@@ -249,10 +249,7 @@ class TyVar(FirstOrderType, unification.Variable):
         if canon is not self:
             return canon == other
 
-        if isinstance(other, TyVar):
-            other = other.canonicalize()
-
-        return self is other
+        return self is unification.canonicalize(other)
 
     def addFreeVariables(self, s):
         canon = self.canonicalize()
@@ -267,7 +264,7 @@ class TyVar(FirstOrderType, unification.Variable):
         # Find the _last_ occurence of the variable in the list
         index = len(visible_vars) - 1
         for v in reversed(visible_vars):
-            if v is canon: return _tyVarNames[index]
+            if v is self: return _tyVarNames[index]
             index -= 1
         raise IndexError, self
 
@@ -283,7 +280,7 @@ class EntTy(FirstOrderType, unification.Term):
         self.entity = ent
 
     def __eq__(self, other):
-        other = other.canonicalize()
+        other = unification.canonicalize(other)
         if not isinstance(other, EntTy): return False
         return self.entity == other.entity
 
@@ -343,7 +340,7 @@ class AppTy(FirstOrderType, unification.Term):
         if canon is not self:
             return canon == other
 
-        other = other.canonicalize()
+        other = unification.canonicalize(other)
         if not isinstance(other, AppTy): return False
         return self.operator == other.operator and \
             self.argument == other.argument

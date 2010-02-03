@@ -10,13 +10,6 @@ class Unifiable(object):
     def __init__(self):
         raise NotImplementedError, "'Unifiable' is an abstract base class"
 
-    def canonicalize(self):
-        """
-        Get the canonical representation of this unifiable object.
-        Only this object (not sub-objects) is canonicalized.
-        """
-        raise NotImplementedError
-
     def occursCheck(self, v):
         """
         x.occursCheck(v) -> bool
@@ -44,7 +37,7 @@ class Unifiable(object):
         """
         raise NotImplementedError
 
-class Term(object):
+class Term(Unifiable):
     """Abstract base class of unifiable constructor applications."""
 
     def __init__(self):
@@ -52,9 +45,6 @@ class Term(object):
 
     def __eq__(self, other):
         raise NotImplementedError
-
-    def canonicalize(self):
-        return self
 
     def occursCheck(self, v):
         # Return 'True' if any parameter mentions v
@@ -71,7 +61,7 @@ class Term(object):
     def addFreeVariables(self, s):
         for p in self.getParameters(): p.addFreeVariables(s)
 
-class Variable(object):
+class Variable(Unifiable):
     """Abstract base class of unification variables."""
 
     def __init__(self):
@@ -84,10 +74,9 @@ class Variable(object):
         while canon._representative:
             canon = canon._representative
 
-            # If representative is not a variable, then call its
+            # If representative is not a variable, it is canonical
             # canonicalize method
-            if isinstance(canon, Term):
-                return canon.canonicalize()
+            if not isinstance(canon, Variable): return canon
 
         return canon
 
@@ -107,7 +96,11 @@ class Variable(object):
             # Look up this variable's value in the substitution;
             # default to self.  Then canonicalize.
             # Don't apply the substitution to the result.
-            return s.get(self, self).canonicalize()
+            return canonicalize(s.get(self, self))
+
+def canonicalize(x):
+    if isinstance(x, Variable): return x.canonicalize()
+    else: return x
 
 class UnificationError(Exception):
     pass
@@ -120,8 +113,8 @@ def unify(x, y):
     If the objects cannot be unified, a UnificationError is raised.
     """
     # Canonicalize x and y
-    x = x.canonicalize()
-    y = y.canonicalize()
+    x = canonicalize(x)
+    y = canonicalize(y)
 
     # If equal, then succeed
     if x is y: return x
@@ -179,8 +172,8 @@ def match(x, y):
     def semi_unify(x, y):
         "Semi-unification: extend the substitution as needed to make x match y"
         # Canonicalize x and y
-        x = x.canonicalize()
-        y = y.canonicalize()
+        x = canonicalize(x)
+        y = canonicalize(y)
 
         # If x is a term, match its head against y
         if isinstance(x, Term): match_head(x, y, semi_unify)
@@ -200,8 +193,8 @@ def match(x, y):
     def compare(x, y):
         "Comparison: decide whether x is equal to y (don't substitute)"
         # Canonicalize x and y
-        x = x.canonicalize()
-        y = y.canonicalize()
+        x = canonicalize(x)
+        y = canonicalize(y)
 
         match_head(x, y, compare)
 
