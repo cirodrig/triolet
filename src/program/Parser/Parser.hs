@@ -8,17 +8,22 @@
 -- names and redefinitions of parameter variables, are detected here. 
 -}
 
+{-# LANGUAGE FlexibleInstances #-}
 module Parser.Parser(convertStatement, convertModule, parseModule)
 where
 
 import Prelude hiding(mapM)
-  
+
 import Control.Applicative
 import Control.Monad hiding(mapM)
 import Data.Function
+import qualified Data.Graph.Inductive as Graph
+import qualified Data.Graph.Inductive.Query.DFS as Graph
 import Data.List
 import Data.Maybe
+import Data.Map(Map)
 import qualified Data.Map as Map
+import Data.Set(Set)
 import qualified Data.Set as Set
 import Data.Traversable
 
@@ -619,6 +624,89 @@ extractDecorators decorators =
     readArgument _ = Nothing
 
 -------------------------------------------------------------------------------
+-- Definition group partitioning
+
+-- Partition the top-level definitions into a sequence of definition groups.
+-- A definition may only refer to other definitions in its group and to
+-- definitions in previous definition groups.  Basically, we search for SCCs.
+definitionGroups :: [Func] -> [[Func]]
+definitionGroups fs =
+    -- Find strongly-connected components of the reference graph.
+    -- The root belongs at the head of the list.
+    let g = Graph.mkGraph nodes edges :: Graph.Gr Func ()
+        components = reverse $ Graph.scc g
+    -- Build the list of functions
+    in map (map labelOf) components
+    where
+      nodes :: [Graph.LNode Func]
+      nodes = zip [0..] fs
+
+      labelMap = Map.fromList nodes
+      labelOf nodeID = labelMap Map.! nodeID
+
+      -- Map from function name to graph node ID
+      nodeMap :: Map Int Int
+      nodeMap = Map.fromList [(varID (funcName f), n) | (n, f) <- nodes]
+          where
+            funcName (Func name _ _ _ _ _) = name
+
+      nodeOf varID = Map.lookup varID nodeMap
+
+      -- There is an edge from F to G if F refers to G by name
+      edges :: [Graph.UEdge]
+      edges = do (fromNode, f) <- nodes
+                 v <- Set.toList $ mentionedVars f
+                 toNode <- maybeToList $ nodeOf v
+                 return (fromNode, toNode, ())
+
+class MentionsVars a where
+    -- Get the set of variable IDs mentioned in the term.
+    -- We don't care whether the variable is in-scope or not.
+    mentionedVars :: a -> Set Int
+
+instance MentionsVars a => MentionsVars [a] where
+    mentionedVars xs = Set.unions $ map mentionedVars xs
+
+instance MentionsVars Stmt where
+    mentionedVars s =
+        case s
+        of ExprStmt e -> mentionedVars e
+           Assign _ e -> mentionedVars e
+           Return e   -> mentionedVars e
+           If e s1 s2 -> mentionedVars e `Set.union`
+                         mentionedVars s1 `Set.union`
+                         mentionedVars s2
+           DefGroup fs -> mentionedVars fs
+
+instance MentionsVars Func where
+    mentionedVars (Func _ _ _ _ _ s) = mentionedVars s
+
+instance MentionsVars Expr where
+    mentionedVars e =
+        case e
+        of Variable v -> Set.singleton (varID v)
+           Literal _ -> Set.empty
+           Tuple es -> mentionedVars es
+           Unary _ e -> mentionedVars e
+           Binary _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
+           ListComp it -> mentionedVars it
+           Generator _ it -> mentionedVars it
+           Call e es -> mentionedVars (e:es)
+           Cond e1 e2 e3 -> mentionedVars [e1, e2, e3]
+           Lambda _ e -> mentionedVars e
+
+instance MentionsVars (IterFor Expr) where
+    mentionedVars (IterFor _ e c) = mentionedVars e `Set.union` mentionedVars c
+
+instance MentionsVars (IterIf Expr) where
+    mentionedVars (IterIf e c) = mentionedVars e `Set.union` mentionedVars c
+
+instance MentionsVars (Comprehension Expr) where
+    mentionedVars (CompFor it) = mentionedVars it
+    mentionedVars (CompIf it) = mentionedVars it
+    mentionedVars (CompBody e) = mentionedVars e
+
+-------------------------------------------------------------------------------
 -- Exported functions
 
 -- | Convert a Python statement to a Pyon expression.
@@ -656,6 +744,8 @@ parseModule :: String           -- ^ File contents
 parseModule stream path globals nextID =
     case Py.parseModule stream path
     of Left err  -> Left [show err]
-       Right (mod, _) -> case convertModule globals mod nextID
-                         of Left err        -> Left err
-                            Right (n, defs) -> Right (n, Module [defs])
+       Right (mod, _) ->
+           case convertModule globals mod nextID
+           of Left err        -> Left err
+              Right (n, defs) -> let groups = definitionGroups defs
+                                 in Right (n, Module groups)
