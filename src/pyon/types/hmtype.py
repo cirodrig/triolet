@@ -58,19 +58,20 @@ class PyonTypeBase(object):
 
     def rename(self, mapping):
         """
-        Apply a substitution to all type variables in this term.  This creates
-        a new object; the original remains unchanged.
+        Apply a substitution to all type variables in this term (including
+        rigid and flexible type variables).  This creates a new object;
+        the original remains unchanged.
         """
         raise NotImplementedError
 
     def pretty(self, type_variables = None):
         "Show as a pretty-printable object.  This calls showWorker."
+
+        # Get the set of anonymous type variables
         if type_variables is None:
             type_variables = self.freeVariables()
-        if isinstance(type_variables, set):
-            type_variables = list(type_variables)
-        else:
-            assert isinstance(type_variables, list)
+
+        type_variables = [v for v in type_variables if isinstance(v, TyVar)]
 
         return self.showWorker(PyonTypeBase.PREC_OUTER, type_variables)
 
@@ -219,20 +220,6 @@ class DictionaryTyCon(TyEnt):
     def __str__(self):
         return "Dict(" + self.cls.name + ")"
 
-class AnnotatedTyCon(TyEnt):
-    """
-    A type to represent annotated type variable
-    """
-    def __init__(self, name):
-        self.name = name
-
-    def __eq__(self, other):
-        # Equality of AnnotatedTyCon is by object identity
-        return self is other
-
-    def __str__(self):
-        return "'" + self.name
-
 ###############################################################################
 # Type expressions
 
@@ -246,9 +233,7 @@ class TyVar(FirstOrderType, unification.Variable):
 
     def __eq__(self, other):
         canon = self.canonicalize()
-        if canon is not self:
-            return canon == other
-
+        if canon is not self: return canon == other
         return self is unification.canonicalize(other)
 
     def addFreeVariables(self, s):
@@ -270,6 +255,36 @@ class TyVar(FirstOrderType, unification.Variable):
 
     # Inherit 'rename' from unification.Variable
     rename = unification.Variable.rename
+
+class RigidTyVar(FirstOrderType, unification.Term):
+    """
+    A rigid type variable.  Rigid type variables can be generalized over
+    like type variables, but cannot be unified.
+    """
+    def __init__(self, name):
+        self.name = name
+
+    def __eq__(self, other):
+        return self is other
+
+    def __str__(self):
+        return "'" + self.name
+
+    def addFreeVariables(self, s):
+        s.add(self)
+
+    def getConstructor(self):
+        return self
+
+    def getParameters(self):
+        return []
+
+    def showWorker(self, precedence, visible_vars):
+        return str(self)
+
+    def rename(self, mapping):
+        # Rename this variable
+        return unification.canonicalize(mapping.get(self, self))
 
 class EntTy(FirstOrderType, unification.Term):
     """

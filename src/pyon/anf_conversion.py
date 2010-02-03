@@ -97,7 +97,7 @@ def convertAnnotation(annotation, a_tyvars):
 
 def convertAnnotatedType(p):
     "Convert type variable annotation to non-unifiable type variable"
-    return hmtype.EntTy(hmtype.AnnotatedTyCon(p.name))
+    return hmtype.RigidTyVar(p.name)
 
 def convertFunction(func, outer_tyvars):
     "Convert a parser function to an ANF function definition"
