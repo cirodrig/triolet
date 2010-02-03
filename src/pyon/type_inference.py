@@ -29,8 +29,6 @@ class TypeCheckError(Exception): pass
 def typrn(ty):
     pretty.render(ty.canonicalize().pretty())
 
-_functionType = hmtype.FunTy
-
 # Mapping from a Python literal type to the corresponding Pyon type constructor
 _literalSignatureTable = {
     bool       : builtin_data.type_bool,
@@ -437,7 +435,7 @@ def updateRecVarPlaceholder(gamma, dict_env, placeholder):
         dict_type_parameters.append(ty)
 
     # Make dictionary-passing type
-    oper_type = _functionType(dict_type_parameters, result_type)
+    oper_type = hmtype.functionType(dict_type_parameters, result_type)
     
     # Build call expression
     oper = ast.VariableExpr(variable,
@@ -499,7 +497,7 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
         field_types = [hmtype.TyVar() for _ in param.fields]
 
         try:
-            tuple_type = unification.unify(hmtype.TupleTy(field_types),
+            tuple_type = unification.unify(hmtype.tupleType(field_types),
                                            bound_type)
         except unification.UnificationError, e:
             print_ast.printAst(expr)
@@ -537,7 +535,7 @@ def exposeFirstOrderBinding(gamma, param):
     if isinstance(param, ast.TupleParam):
         new_fields = exposeFirstOrderBindings(gamma, param.fields)
         return ast.TupleParam(new_fields,
-                              type = hmtype.TupleTy([p.getType() for p in new_fields]))
+                              type = hmtype.tupleType([p.getType() for p in new_fields]))
 
     elif isinstance(param, ast.VariableParam):
         # Create a new type variable for this parameter
@@ -583,7 +581,7 @@ def exposeRecursiveBinding(gamma, param):
     """
     if isinstance(param, ast.TupleParam):
         field_types = exposeRecursiveBindings(gamma, param.fields)
-        return hmtype.TupleTy(field_types)
+        return hmtype.tupleType(field_types)
 
     elif isinstance(param, ast.VariableParam):
         return exposeRecursiveVariable(gamma, param.name)
@@ -611,7 +609,7 @@ def inferFunctionType(gamma, func):
     (csts, placeholders), body = inferExpressionType(local_env, func.body)
 
     new_func = ast.Function(func.mode, parameters, body,
-                            type = _functionType(param_types, body.getType()))
+                            type = hmtype.functionType(param_types, body.getType()))
 
     return (csts, placeholders, new_func)
 
@@ -731,7 +729,7 @@ def inferExpressionType(gamma, expr):
                        for arg in expr.arguments)
 
         # Construct tuple type
-        ty = hmtype.TupleTy([arg.getType() for arg in args])
+        ty = hmtype.tupleType([arg.getType() for arg in args])
         new_expr = ast.TupleExpr(args,
                                  base = ast.ExprInit(type = ty))
 
@@ -744,7 +742,7 @@ def inferExpressionType(gamma, expr):
 
         # Create function type; unify
         ty = hmtype.TyVar()
-        ty_fn = _functionType([a.getType() for a in args], ty)
+        ty_fn = hmtype.functionType([a.getType() for a in args], ty)
         try: unification.unify(oper.getType(), ty_fn)
         except unification.UnificationError, e:
             print_ast.printAst(expr)

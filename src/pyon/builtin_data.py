@@ -7,7 +7,7 @@ import pyon.pretty as pretty
 import pyon.ast.ast as ast
 import pyon.types.types as hm
 
-functionType = hm.FunTy
+functionType = hm.functionType
 
 def dictionaryType(cls, ty):
     # Return the type of a dictionary for class 'cls' instance 'ty'
@@ -61,10 +61,10 @@ def _makeClasses():
     # forall a b. Dict(Eq) a * Dict(Eq) b -> (a, b) * (a, b) -> bool
     tuple2_compare_scheme = \
         hm.TyScheme([a,b], hm.noConstraints,
-                    hm.FunTy([dictionaryType(class_Eq, a),
-                              dictionaryType(class_Eq, b)],
-                             hm.FunTy([hm.TupleTy([a,b]), hm.TupleTy([a,b])],
-                                      type_bool)))
+                    functionType([dictionaryType(class_Eq, a),
+                                  dictionaryType(class_Eq, b)],
+                                 functionType([hm.tupleType([a,b]), hm.tupleType([a,b])],
+                                              type_bool)))
     oper_Eq_EQ_tuple2 = ast.ANFVariable(name = "__eq__",
                                         type_scheme = tuple2_compare_scheme)
     oper_Eq_NE_tuple2 = ast.ANFVariable(name = "__ne__",
@@ -72,7 +72,7 @@ def _makeClasses():
     hm.addInstance(class_Eq, [a, b],
                    [hm.ClassPredicate(a, class_Eq),
                     hm.ClassPredicate(b, class_Eq)],
-                   hm.TupleTy([a,b]),
+                   hm.tupleType([a,b]),
                    [oper_Eq_EQ_tuple2, oper_Eq_NE_tuple2])
 
     oper_Ord_LT_int = ast.ANFVariable(name = "__lt__",
@@ -215,7 +215,7 @@ fun_reduce1 = ast.ANFVariable(name = "reduce1", type_scheme = _reduce1_type)
 
 _zip_type = hm.TyScheme.forall(4, lambda a, b, c, d: \
   functionType([hm.AppTy(c, a), hm.AppTy(d, b)], \
-               hm.AppTy(type_it, hm.TupleTy([a, b]))))
+               hm.AppTy(type_it, hm.tupleType([a, b]))))
 fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
 
 _iota_type = hm.TyScheme.forall(1, lambda t: functionType([], hm.AppTy(t, type_int)))

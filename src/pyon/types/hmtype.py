@@ -89,13 +89,10 @@ class FirstOrderType(PyonType):
         self = self.canonicalize()
         if isinstance(self, TyVar): return ProjectedTyVar(self)
         elif isinstance(self, EntTy): return ProjectedTyCon(self.entity)
-        elif isinstance(self, (FunTy, TupleTy)):
-            con = ProjectedTyCon(self.getConstructor())
-            return ProjectedTyApp(con, self.getParameters())
         elif isinstance(self, AppTy):
             # Collect all operands into a single ProjectedTyApp value
             op_type = self.operator.project()
-            return ProjectedTyApp(op_type, self.arg)
+            return ProjectedTyApp(op_type, self.argument)
         else:
             raise TypeError, type(self)
 
@@ -293,98 +290,28 @@ class EntTy(FirstOrderType, unification.Term):
         # No flexible type variables
         return self
 
-class FunTy(FirstOrderType, unification.Term):
+def functionType(domain, range):
     """
-    An n-ary function type.
+    functionType(domain, range) -> first-order type
 
-    An n-ary function type is equivalent to an application of FunTyCon to
-    n+1 arguments.  It's common enough to merit using a special form.
+    Create the type of a function.
     """
+    con = FunTyCon(len(domain))
+    ty = EntTy(con)
+    for t in domain: ty = AppTy(ty, t)
+    ty = AppTy(ty, range)
+    return ty
 
-    def __init__(self, dom, rng):
-        assert isinstance(dom, list)
-        for param in dom:
-            assert isinstance(param, FirstOrderType)
-        assert isinstance(rng, FirstOrderType)
-        self.domain = dom
-        self.range = rng
-
-    def __eq__(self, other):
-        other = other.canonicalize()
-        if not isinstance(other, FunTy): return False
-        return self.domain == other.domain and self.range == other.range
-
-    def getConstructor(self):
-        return FunTyCon(len(self.domain))
-
-    def getParameters(self):
-        return self.domain + [self.range]
-
-    def addFreeVariables(self, s):
-        for d in self.domain: d.addFreeVariables(s)
-        self.range.addFreeVariables(s)
-
-    def showWorker(self, precedence, in_scope_vars):
-        PREC_FUN = PyonTypeBase.PREC_FUN
-
-        def product(xs):
-            # [ x_0, times, x_1, times ... times, x_N]
-            last = None
-            for x in xs:
-                if last:
-                    yield last
-                    yield _TIMES
-                last = x
-            yield last
-
-        dom_doc = pretty.space(list(product(x.showWorker(PREC_FUN, in_scope_vars)
-                                            for x in self.domain)))
-        rng_doc = self.range.showWorker(PREC_FUN - 1, in_scope_vars)
-        fun_doc = pretty.space([dom_doc, "->", rng_doc])
-
-        if precedence >= PREC_FUN: fun_doc = pretty.parens(fun_doc)
-        return fun_doc
-
-    def rename(self, mapping):
-        """
-        Apply a substitution to all type variables in this term.  A new
-        type is returned.
-        """
-        return FunTy([x.rename(mapping) for x in self.domain],
-                     self.range.rename(mapping))
-
-class TupleTy(FirstOrderType, unification.Term):
+def tupleType(fields):
     """
-    A tuple type.
+    tupleType(fields) -> first-order type
 
-    fields:
-      arguments : [TyEnt]
+    Create the type of a tuple.
     """
-
-    def __init__(self, args):
-        self.arguments = args
-
-    def __eq__(self, other):
-        other = other.canonicalize()
-        if not isinstance(other, TupleTy): return False
-        return self.arguments == other.arguments
-
-    def getConstructor(self):
-        return TupleTyCon(len(self.arguments))
-
-    def getParameters(self):
-        return self.arguments
-
-    def addFreeVariables(self, s):
-        for t in self.arguments: t.addFreeVariables(s)
-
-    def showWorker(self, precedence, visible_vars):
-        PREC_OUTER = PyonTypeBase.PREC_OUTER
-        fields = [p.showWorker(PREC_OUTER, visible_vars) for p in self.arguments]
-        return pretty.parens(pretty.space(pretty.punctuate(',', fields)))
-
-    def rename(self, mapping):
-        return TupleTy([arg.rename(mapping) for arg in self.arguments])
+    con = TupleTyCon(len(fields))
+    ty = EntTy(con)
+    for t in fields: ty = AppTy(ty, t)
+    return ty
 
 class AppTy(FirstOrderType, unification.Term):
     """
@@ -407,26 +334,6 @@ class AppTy(FirstOrderType, unification.Term):
         return self.operator == other.operator and \
             self.argument == other.argument
 
-    def canonicalize(self):
-        # Uncurry nested applications
-        oper = self
-        rev_args = []           # Store arguments in reverse order
-        while isinstance(oper, AppTy):
-            rev_args.append(oper.argument)
-            oper = oper.operator
-
-        # If operator is a FunTyCon or TupleTyCon, then replace with that type
-        if isinstance(oper, FunTyCon):
-            assert len(rev_args) == oper.arity + 1
-            return FunTy(reversed(rev_args[1:]), rev_args[0])
-        elif isinstance(oper, TupleTyCon):
-            assert len(rev_args) == oper.numArguments
-            rev_args.reverse()
-            return TupleTy(rev_args)
-
-        # Else, already in canonical form
-        return self
-
     def getConstructor(self):
         return AppTyCon()
 
@@ -437,9 +344,34 @@ class AppTy(FirstOrderType, unification.Term):
         self.operator.addFreeVariables(s)
         self.argument.addFreeVariables(s)
 
+    def _uncurry(self):
+        # Get all arguments from a sequence of applications
+         oper = self
+         rev_args = []           # Store arguments in reverse order
+         while isinstance(oper, AppTy):
+             rev_args.append(oper.argument)
+             oper = oper.operator
+
+         rev_args.reverse()
+         return (oper, rev_args)
+
     def showWorker(self, precedence, visible_vars):
-        return _genericShowApplication(self.operator, [self.argument],
-                                       precedence, visible_vars)
+        (operator, arguments) = self._uncurry()
+
+        # Show saturated function and tuple types differently
+        if isinstance(operator, EntTy):
+            if isinstance(operator.entity, FunTyCon) and \
+                    len(arguments) == operator.entity.arity + 1:
+                show = _showFunction
+            elif isinstance(operator.entity, TupleTyCon) and \
+                    len(arguments) == operator.entity.numArguments:
+                show = _showTuple
+            else:
+                show = _genericShowApplication
+        else:
+            show = _genericShowApplication
+
+        return show(arguments, precedence, visible_vars)
 
     def rename(self, mapping):
         """
@@ -449,25 +381,48 @@ class AppTy(FirstOrderType, unification.Term):
         return AppTy(self.operator.rename(mapping),
                      self.argument.rename(mapping))
 
-def _genericShowApplication(operator, operands, precedence, visible_vars):
+def _genericShowApplication(arguments, precedence, visible_vars):
     """
-    _genericShowApplication(type-or-string, type-list, int, vars) -> pretty
+    _genericShowApplication(type-list, int, vars) -> pretty
     Show a type application using juxtapoxition: operator arg1 arg2 .. argN.
     This is called from showWorker methods.
     """
     PREC_APP = PyonTypeBase.PREC_APP
 
     # Show operator and operands.  Application is left-associative.
-    if isinstance(operator, str):
-        operator_doc = operator
-    else:
-        operator_doc = operator.showWorker(PREC_APP - 1, visible_vars)
-    args_doc = [a.showWorker(PREC_APP, visible_vars) for a in operands]
+    operator_doc = arguments[0].showWorker(PREC_APP - 1, visible_vars)
+    args_doc = [a.showWorker(PREC_APP, visible_vars) for a in arguments[1:]]
 
     # Concatenate and parenthesize
     doc = pretty.space([operator_doc] + args_doc)
     if precedence >= PREC_APP: doc = pretty.parens(doc)
     return doc
+
+def _showFunction(args, precedence, in_scope_vars):
+    PREC_FUN = PyonTypeBase.PREC_FUN
+
+    def product(xs):
+        # [ x_0, times, x_1, times ... times, x_N]
+        last = None
+        for x in xs:
+            if last:
+                yield last
+                yield _TIMES
+            last = x
+        yield last
+
+    dom_doc = pretty.space(list(product(x.showWorker(PREC_FUN, in_scope_vars)
+                                        for x in args[:-1])))
+    rng_doc = args[-1].showWorker(PREC_FUN - 1, in_scope_vars)
+    fun_doc = pretty.space([dom_doc, "->", rng_doc])
+
+    if precedence >= PREC_FUN: fun_doc = pretty.parens(fun_doc)
+    return fun_doc
+
+def _showTuple(args, precedence, visible_vars):
+    PREC_OUTER = PyonTypeBase.PREC_OUTER
+    fields = [p.showWorker(PREC_OUTER, visible_vars) for p in args]
+    return pretty.parens(pretty.space(pretty.punctuate(',', fields)))
 
 def typeApplication(oper, args):
     """
@@ -479,3 +434,4 @@ def typeApplication(oper, args):
     t = oper
     for arg in args: t = AppTy(t, arg)
     return t
+

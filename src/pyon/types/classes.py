@@ -5,7 +5,7 @@ from pyon.types.hmtype import *
 import pyon.types.schemes
 
 def _concatMap(f, sq):
-    return itertools.chain(*(f(x) for x in sq))
+    return itertools.chain(*[f(x) for x in sq])
 
 ###############################################################################
 # Type classes
@@ -535,7 +535,7 @@ def makeDictionaryPassingType(scm):
     dict_params = [c.getDictionaryType() for c in scm.constraints]
     return pyon.types.schemes.TyScheme(scm.qvars,
                                        noConstraints,
-                                       FunTy(dict_params, scm.type))
+                                       functionType(dict_params, scm.type))
 
 def makeDictionaryPassingCall(variable, arguments, result_type):
     """
@@ -558,7 +558,7 @@ def makeDictionaryPassingCall(variable, arguments, result_type):
     # Instantiate variable and determine its type
     constraints, oper_type = makeDictionaryPassingType(scm).instantiate()
     assert not constraints
-    call_type = pyon.types.hmtype.FunTy([e.getType() for e in arguments],
+    call_type = pyon.types.hmtype.functionType([e.getType() for e in arguments],
                                         result_type)
     oper_type_substitution = unification.match(oper_type, call_type)
     if oper_type_substitution is None:
