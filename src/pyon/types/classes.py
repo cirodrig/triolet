@@ -23,16 +23,13 @@ class Class(PyonTypeBase):
       Constraints that class members must satisfy
     methods: [ClassMethod]
       Declarations of the class's methods
-    instances : [ClassInstance]
+    instances : [Instance]
       Instances of the class
     """
 
     def __init__(self, name, param, constraint, methods):
         """
-        Class(name, var, constraint) -> new class
-
-        The constructed class is not valid; the remaining initalization is
-        performed by defineClass(). 
+        Class(name, var, constraint, methods) -> new class
         """
         assert isinstance(param, TyVar)
         for c in constraint: assert isinstance(c, ClassPredicate)
@@ -64,26 +61,6 @@ class Class(PyonTypeBase):
         else:
             raise TypeError, "argument must be string or int"
             
-
-    def findInstance(self, ty):
-        """
-        cls.findInstance(ty) -> (methods, constraints) or None
-
-        Find a class instance that matches the given type.
-        If an instance is found, return the instance's methods and a set of
-        constraints.  If no instance can be found, then None is returned.
-        """
-        def return_result((methods, constraints)):
-            # Add in the class's constraint set
-            instantiation = instantiateVariables([self.param])
-            return (methods,
-                    self.constraints.rename(instantiation) * constraints)
-
-        # Try each instance until a match is found
-        for i in self.instances:
-            result = i.matchWith(ty)
-            if result is not None: return return_result(result)
-        return None
 
     def getMethodExpression(self, dictionary, method_name):
         """
@@ -171,9 +148,10 @@ class Instance(PyonTypeBase):
       The class that this is an instance of.
     instanceType : FirstOrderType
       The types described by this Instance object.
-    methods : [InstanceMethod]
-      A list of instance methods.  Each element of the list must match
-      the corresponding list of class methods.
+    methods : [TyVar]
+      A list of instance methods.  Each method is a globally defined function.
+      Each element of the list must match the corresponding list of class
+      methods.
     """
 
     def __init__(self, qvars, constraints, cls, instance_type, methods):
