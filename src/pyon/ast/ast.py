@@ -492,7 +492,10 @@ class FunctionDef(object):
 
 class Function(object):
     """
-    A function or lambda term.  Functions always have first-order types.
+    A function or lambda term.
+
+    If the function has an explicit 'forall' annotation, the type
+    variables from the list are given in 'qvars'.
 
     The dictionary parameters must be None before type inference, and must
     be the same length as the constraint list in the function's type scheme
@@ -500,7 +503,10 @@ class Function(object):
     """
 
     def __init__(self, mode, parameters, body,
-                 dictionary_parameters = None, type = None, annotation = None):
+                 qvars = None,
+                 dictionary_parameters = None,
+                 type = None,
+                 annotation = None):
         assert mode == EXPRESSION or mode == ITERATOR
         for p in parameters:
             assert isinstance(p, Parameter)
@@ -511,6 +517,7 @@ class Function(object):
         assert type is None or isinstance(type, pyon.types.hmtype.FirstOrderType)
         self.mode = mode
         self.parameters = parameters
+        self.qvars = qvars
         self.dictionaryParameters = dictionary_parameters
         self.body = body
         self.annotation = annotation
@@ -530,13 +537,15 @@ class Function(object):
 
     def getType(self): return self.type
 
-def exprFunction(parameters, body, annotation = None):
+def exprFunction(parameters, body, qvars = None, annotation = None):
     "Create an expression function"
-    return Function(EXPRESSION, parameters, body, annotation = annotation)
+    return Function(EXPRESSION, parameters, body, qvars = qvars,
+                    annotation = annotation)
 
-def iterFunction(parameters, body, annotation = None):
+def iterFunction(parameters, body, qvars = None, annotation = None):
     "Create an iterator function"
-    return Function(ITERATOR, parameters, body, annotation = annotation)
+    return Function(ITERATOR, parameters, body, qvars = qvars,
+                    annotation = annotation)
 
 ###############################################################################
 # Modules

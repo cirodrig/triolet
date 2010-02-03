@@ -106,10 +106,12 @@ def convertFunction(func, outer_tyvars):
     name = convertVariable(func.name, func.ssaver)
 
     # Get annotated type variables and merge with already defined
-    if func.qvars:
-        a_tyvars = dict((p, convertAnnotatedType(p)) for p in func.qvars)
+    if func.qvars is not None:
+        new_qvars = [convertAnnotatedType(p) for p in func.qvars]
+        a_tyvars = dict(zip(func.qvars, new_qvars))
         a_tyvars.update(outer_tyvars)
     else:
+        new_qvars = None
         a_tyvars = outer_tyvars
 
     # Convert annotated return type
@@ -128,7 +130,9 @@ def convertFunction(func, outer_tyvars):
         raise ValueError, "Function body has no fallthrough path"
     body = convertSuite(func.body, cannot_fallthrough, a_tyvars)
 
-    return a_ast.FunctionDef(name, a_ast.exprFunction(parameters, body, annotation = annotation))
+    return a_ast.FunctionDef(name, a_ast.exprFunction(parameters, body,
+                                                      annotation = annotation,
+                                                      qvars = new_qvars))
 
 def convertSuite(suite, make_fallthrough, a_tyvars):
     """

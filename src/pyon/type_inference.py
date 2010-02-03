@@ -227,22 +227,45 @@ def generalize(gamma, constraints, ty):
 
     return (deferred, hmtype.TyScheme(list(qvars), retained, ty))
 
-def generalizeGroup(gamma, constraints, ty_list):
+def generalizeGroup(gamma, constraints, explicit_qvars, ty_list):
     # Determine which type variables to generalize over
     ftv_ty = set()
     for ty in ty_list: ty.addFreeVariables(ftv_ty)
     ftv_gamma = gamma.freeVariables()
-    qvars = ftv_ty.difference(ftv_gamma)
+    local_vars = ftv_ty.difference(ftv_gamma)
 
     # Determine which constraints to generalize over
     (retained, deferred) = hmtype.splitConstraints(constraints,
                                                    ftv_gamma,
-                                                   qvars)
+                                                   local_vars)
 
     # Create type schemes
-    qvars_list = list(qvars)
-    schemes = [hmtype.TyScheme(qvars_list, retained, ty) for ty in ty_list]
-        
+    schemes = []
+    for x_qvars, ty in zip(explicit_qvars, ty_list):
+        # Determine which variables the type scheme is parameterized over.
+        qvars_set = ty.freeVariables().difference(ftv_gamma)
+
+        # If an explicit list of variables is given, these variables must be
+        # a subset of that list.
+        # Otherwise, these variables must contain no rigid type variables.
+
+        if x_qvars is None:
+            for v in qvars_set:
+                if isinstance(v, hmtype.RigidTyVar):
+                    raise TypeCheckError, "Type is less polymorphic than expeced"
+        else:
+            for v in qvars_set:
+                if v not in x_qvars:
+                    raise TypeCheckError, "Type is more polymorphic than expected"
+
+        # The retained constraints must only mention these variables
+        for c in retained:
+            if not c.freeVariables().issubset(qvars_set):
+                raise TypeCheckError, "Ambiguous type variable in constraint"
+
+        sch = hmtype.TyScheme(list(qvars_set), retained, ty)
+        schemes.append(sch)
+
     return (deferred, retained, schemes)
 
 def assignGeneralizedType(gamma, v, ty, constraints):
@@ -266,20 +289,23 @@ def assignGeneralizedType(gamma, v, ty, constraints):
 
 def assignGeneralizedTypes(gamma, assignments, constraints):
     """
-    assignGeneralizedTypes(Environment, sequence((TyVar, FirstOrderType)), constraints)
+    assignGeneralizedTypes(Environment, sequence((TyVar, [RigidTyVar] or None, FirstOrderType)), constraints)
         -> (deferred constraints, retained constraints)
 
     Generalize a list of types in a common context.  All types in the list will
     have the same quantified variables and constraints.
     """
     vars = []
+    explicit_qvars = []
     types = []
-    for v, ty in assignments:
+    for v, qvars, ty in assignments:
         vars.append(v)
+        explicit_qvars.append(qvars)
         types.append(ty)
 
     # Generalize with a common context
-    (deferred, retained, schemes) = generalizeGroup(gamma, constraints, types)
+    (deferred, retained, schemes) = generalizeGroup(gamma, constraints,
+                                                    explicit_qvars, types)
 
     # Assign each type
     for v, scm in itertools.izip(vars, schemes):
@@ -634,6 +660,9 @@ def inferDefGroup(gamma, group):
 
     # Describe the variables bound by the definition group
     bound_vars = [d.name for d in group]
+
+    # For each definition, get the annotated parameter variables
+    explicit_qvars = [d.function.qvars for d in group]
     
     # Make a local copy of the environment containing the mutually recursive
     # definitions.  The definitions are given first-order types in the local
@@ -668,7 +697,7 @@ def inferDefGroup(gamma, group):
     # subsequent code (gamma), not the local environment
     deferred_csts, retained_csts = \
         assignGeneralizedTypes(gamma,
-                               zip(bound_vars, binding_types),
+                               zip(bound_vars, explicit_qvars, binding_types),
                                group_csts)
 
     # Add dictionary variable parameters to each function
