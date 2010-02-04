@@ -85,33 +85,7 @@ class FirstOrderType(PyonType):
     """
     A first-order type.
     """
-    def project(self):
-        "Project the head of this type into a Herbrand term."
-        self = unification.canonicalize(self)
-        if isinstance(self, TyVar): return ProjectedTyVar(self)
-        elif isinstance(self, EntTy): return ProjectedTyCon(self.entity)
-        elif isinstance(self, AppTy):
-            # Collect all operands into a single ProjectedTyApp value
-            op_type = self.operator.project()
-            return ProjectedTyApp(op_type, self.argument)
-        else:
-            raise TypeError, type(self)
-
-class ProjectedType(object): pass
-
-class ProjectedTyVar(ProjectedType):
-    def __init__(self, v):
-        self.variable = v
-
-class ProjectedTyCon(ProjectedType):
-    def __init__(self, entity):
-        self.entity = entity
-
-class ProjectedTyApp(ProjectedType):
-    def __init__(self, operator, argument):
-        assert isinstance(operator, ProjectedType)
-        self.operator = operator
-        self.argument = argument
+    pass
 
 ###############################################################################
 # Atomic type-level entities

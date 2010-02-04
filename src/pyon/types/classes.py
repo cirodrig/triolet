@@ -299,12 +299,12 @@ class ClassPredicate(PyonTypeBase):
 
     def isHNF(self):
         "Return true if this predicate is in head-normal form"
-        prj = self.type.project()
+        t = unification.canonicalize(self.type)
         while True:
-            if isinstance(prj, ProjectedTyVar): return True
-            elif isinstance(prj, ProjectedTyCon): return False
-            elif isinstance(prj, ProjectedTyApp): prj = prj.operator
-            else: raise TypeError, type(prj)
+            if isinstance(t, TyVar): return True
+            elif isinstance(t, EntTy): return False
+            elif isinstance(t, AppTy): t = unification.canonicalize(t.operator)
+            else: raise TypeError, type(t)
 
     def toHNF(self):
         """
