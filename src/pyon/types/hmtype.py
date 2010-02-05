@@ -9,6 +9,7 @@ Classes are members of the class Class.
 
 import unicodedata
 
+import pyon.types.kind as kind
 import pyon.ast.ast as ast
 import pyon.unification as unification
 import pyon.pretty as pretty
@@ -85,7 +86,8 @@ class FirstOrderType(PyonType):
     """
     A first-order type.
     """
-    pass
+    def getKind(self):
+        raise NotImplementedError
 
 ###############################################################################
 # Atomic type-level entities
@@ -107,6 +109,9 @@ class TyEnt(object):
         "Show this entity as a pretty-printable document"
         raise NotImplementedError
 
+    def getKind(self):
+        raise NotImplementedError
+
 class TupleTyCon(TyEnt):
     """
     A tuple type constructor.
@@ -122,6 +127,9 @@ class TupleTyCon(TyEnt):
     def __str__(self):
         return "Tuple" + str(self.numArguments) + "Type"
 
+    def getKind(self):
+        return functionKind(self.numArguments)
+
 class FunTyCon(TyEnt):
     """
     An n-ary function type constructor.
@@ -135,6 +143,9 @@ class FunTyCon(TyEnt):
 
     def __str__(self):
         return "Fun" + str(self.arity) + "Type"
+
+    def getKind(self):
+        return functionKind(1 + self.arity)
 
 class AppTyCon(TyEnt):
     """
@@ -161,14 +172,19 @@ class AppTyCon(TyEnt):
         # This should never actually be called
         return "@"
 
+    def getKind(self):
+        raise ValueError, "Should not request the kind of 'AppTy' (it is not a real type constructor)"
+
 class TyCon(TyEnt):
     """
     A named type constructor.
     """
 
-    def __init__(self, name, gluon_constructor = None):
+    def __init__(self, name, con_kind, gluon_constructor = None):
+        assert isinstance(con_kind, kind.Kind)
         self.gluonConstructor = gluon_constructor
         self.name = name
+        self._kind = con_kind
 
     def __eq__(self, other):
         # Identity of type constructors is object identity
@@ -176,6 +192,9 @@ class TyCon(TyEnt):
 
     def __str__(self):
         return self.name
+
+    def getKind(self):
+        return self._kind
 
 class DictionaryTyCon(TyEnt):
     """
@@ -195,6 +214,9 @@ class DictionaryTyCon(TyEnt):
     def __str__(self):
         return "Dict(" + self.cls.name + ")"
 
+    def getKind(self):
+        return kind.Arrow(kind.Star(), kind.Star())
+
 ###############################################################################
 # Type expressions
 
@@ -213,6 +235,9 @@ class TyVar(FirstOrderType, unification.Variable):
         canon = self.canonicalize()
         if canon is not self: return canon == other
         return self is unification.canonicalize(other)
+
+    def getKind(self):
+        return kind.Star()
 
     def addFreeVariables(self, s):
         canon = self.canonicalize()
@@ -251,6 +276,9 @@ class RigidTyVar(FirstOrderType, unification.Term):
     def __str__(self):
         return "'" + self.name
 
+    def getKind(self):
+        return kind.Star()
+
     def addFreeVariables(self, s):
         s.add(self)
 
@@ -279,6 +307,9 @@ class EntTy(FirstOrderType, unification.Term):
         other = unification.canonicalize(other)
         if not isinstance(other, EntTy): return False
         return self.entity == other.entity
+
+    def getKind(self):
+        return self.entity.getKind()
 
     def addFreeVariables(self, s):
         # No free type variables
@@ -336,6 +367,12 @@ class AppTy(FirstOrderType, unification.Term):
         if not isinstance(other, AppTy): return False
         return self.operator == other.operator and \
             self.argument == other.argument
+
+    def getKind(self):
+        op_k = self.operator.getKind()
+        if isinstance(op_k, kind.Arrow): return op_k.range
+        else:
+            raise ValueError, "Kind error in type application"
 
     def getConstructor(self):
         return AppTyCon()

@@ -7,6 +7,7 @@ import gluon
 
 import pyon.pretty as pretty
 import pyon.ast.ast as ast
+import pyon.types.kind as kind
 import pyon.types.types as hm
 
 functionType = hm.functionType
@@ -30,7 +31,8 @@ def _makeClasses():
 
     class_Eq = hm.Class("Eq", a, hm.noConstraints,
                         [hm.ClassMethod("__eq__", make_cmp_scheme_a),
-                         hm.ClassMethod("__ne__", make_cmp_scheme_a)])
+                         hm.ClassMethod("__ne__", make_cmp_scheme_a)],
+                        gluon.con_EqDict)
 
     # class Eq a => Ord a where
     #   (<) : a -> a -> bool
@@ -41,7 +43,8 @@ def _makeClasses():
                          [hm.ClassMethod("__lt__", make_cmp_scheme_a),
                           hm.ClassMethod("__le__", make_cmp_scheme_a),
                           hm.ClassMethod("__gt__", make_cmp_scheme_a),
-                          hm.ClassMethod("__ge__", make_cmp_scheme_a)])
+                          hm.ClassMethod("__ge__", make_cmp_scheme_a)],
+                         gluon.con_OrdDict)
 
     # Instance declarations
 
@@ -145,12 +148,17 @@ def create_type_schemes():
 ###############################################################################
 
 # Builtin primitive types
-tycon_int = hm.TyCon("int", gluon_constructor = gluon.type_Int)
-tycon_float = hm.TyCon("float", gluon_constructor = gluon.type_Float)
-tycon_bool = hm.TyCon("bool", gluon_constructor = gluon.type_Bool)
-tycon_None = hm.TyCon("NoneType", gluon_constructor = gluon.type_NoneType)
-tycon_it = hm.TyCon("It")
-tycon_list = hm.TyCon("list", gluon_constructor = gluon.type_List)
+tycon_int = hm.TyCon("int", kind.Star(),
+                     gluon_constructor = gluon.con_Int)
+tycon_float = hm.TyCon("float", kind.Star(),
+                       gluon_constructor = gluon.con_Float)
+tycon_bool = hm.TyCon("bool", kind.Star(),
+                      gluon_constructor = gluon.con_bool)
+tycon_None = hm.TyCon("NoneType", kind.Star(),
+                      gluon_constructor = gluon.con_NoneType)
+tycon_it = hm.TyCon("It", kind.Arrow(kind.Star(), kind.Star()))
+tycon_list = hm.TyCon("list", kind.Arrow(kind.Star(), kind.Star()),
+                      gluon_constructor = gluon.con_list)
 
 # Builtin types
 type_int = hm.EntTy(tycon_int)

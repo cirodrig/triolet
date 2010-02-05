@@ -1,11 +1,12 @@
 
 module Gluon.Builtins.Pyon
-       (loadPyonBuiltins,
-        the_Action, the_Stream, the_NoneType, the_Bool, the_List,
-        the_NthTupleType
+       (loadPyonBuiltins, getPyonBuiltin,
+        the_Action, the_Stream, the_bool, the_list,
+        the_NoneType, the_EqDict, the_OrdDict, getPyonTupleType
        )
 where
 
+import Control.Exception
 import Control.Monad
 import Control.Concurrent.MVar
 import Data.List
@@ -21,80 +22,101 @@ import Gluon.Parser.Setup
 import Gluon.Parser.Driver
 import Paths_pyon
 
-the_ActionType :: MVar Con
-{-# NOINLINE the_ActionType #-}
-the_ActionType = unsafePerformIO newEmptyMVar
+data PyonBuiltins =
+  PyonBuiltins
+  { the_Action :: Con
+  , the_Stream :: Con
+  , the_bool   :: Con
+  , the_list   :: Con
+  , the_NoneType :: Con
+  , the_EqDict :: Con
+  , the_OrdDict :: Con
+  , the_tuples :: [Con]
+  }
 
-the_StreamType :: MVar Con
-{-# NOINLINE the_StreamType #-}
-the_StreamType = unsafePerformIO newEmptyMVar
+assign_Action x b = b {the_Action = x}
+assign_Stream x b = b {the_Stream = x}
+assign_bool x b = b {the_bool = x}
+assign_list x b = b {the_list = x}
+assign_NoneType x b = b {the_NoneType = x}
+assign_EqDict x b = b {the_EqDict = x}
+assign_OrdDict x b = b {the_OrdDict = x}
 
-the_NoneTypeType :: MVar Con
-{-# NOINLINE the_NoneTypeType #-}
-the_NoneTypeType = unsafePerformIO newEmptyMVar
+the_PyonBuiltins :: MVar PyonBuiltins
+{-# NOINLINE the_PyonBuiltins #-}
+the_PyonBuiltins = unsafePerformIO newEmptyMVar
 
-the_BoolType :: MVar Con
-{-# NOINLINE the_BoolType #-}
-the_BoolType = unsafePerformIO newEmptyMVar
+getPyonBuiltin :: (PyonBuiltins -> Con) -> Con
+getPyonBuiltin field = unsafePerformIO $ do
+  -- Ensure that we've already initialized these
+  bi_is_empty <- isEmptyMVar the_PyonBuiltins
+  when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+  
+  -- Load and return the desired field
+  bi <- readMVar the_PyonBuiltins
+  return $ field bi
 
-the_ListType :: MVar Con
-{-# NOINLINE the_ListType #-}
-the_ListType = unsafePerformIO newEmptyMVar
-
-the_TupleTypes :: MVar [Con]
-{-# NOINLINE the_TupleTypes #-}
-the_TupleTypes = unsafePerformIO newEmptyMVar
-
-the_Action :: Con
-the_Action = unsafePerformIO $ readMVar the_ActionType
-
-the_Stream :: Con
-the_Stream = unsafePerformIO $ readMVar the_StreamType
-
-the_NoneType :: Con
-the_NoneType = unsafePerformIO $ readMVar the_NoneTypeType
-
-the_Bool :: Con
-the_Bool = unsafePerformIO $ readMVar the_BoolType
-
-the_List :: Con
-the_List = unsafePerformIO $ readMVar the_ListType
-
-the_NthTupleType :: Int -> Maybe Con
-the_NthTupleType n =
-  let ts = unsafePerformIO $ readMVar the_TupleTypes
-  in if n >= 0 && n < length ts 
-     then Just (ts !! n) 
-     else Nothing
+getPyonTupleType :: Int -> Maybe Con
+getPyonTupleType size = unsafePerformIO $ do
+  -- Ensure that we've already initialized these
+  bi_is_empty <- isEmptyMVar the_PyonBuiltins
+  when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+  
+  bi <- readMVar the_PyonBuiltins
+  let ts = the_tuples bi
+  return $! if size >= 0 && size < length ts
+            then Just (ts !! size)
+            else Nothing
 
 findConByName mod name =
   let label = pgmLabel (moduleName "PyonBuiltin") name
   in case find ((label ==) . conName) $ moduleConstructors mod
-     of Just c  -> return c
+     of Just c  -> c
         Nothing -> internalError $ "Missing Pyon builtin '" ++ name ++ "'"
 
--- Look up a value in a module and store it in the given reference
-setBuiltinValue :: String -> MVar Con -> Module () -> IO ()
-setBuiltinValue name ref mod = do
-  c <- findConByName mod name 
-  putMVar ref c
+-- Look up a constructor in a module, and store it.
+setBuiltinValue :: Module ()
+                -> String 
+                -> (Con -> PyonBuiltins -> PyonBuiltins) 
+                -> PyonBuiltins
+                -> PyonBuiltins
+setBuiltinValue mod name updater bi =
+  let c = findConByName mod name
+  in c `seq` updater c bi
 
+-- Load symbols from the module and use them to initialize the builtins
 initializePyonBuiltins :: Module () -> IO ()
-initializePyonBuiltins mod = do
-  setBuiltinValues [ ("Action", the_ActionType)
-                   , ("Stream", the_StreamType)
-                   , ("NoneType", the_NoneTypeType)
-                   , ("Bool", the_BoolType)
-                   ]
-  setTupleTypes
+initializePyonBuiltins mod =
+  let bi = setTupleTypes $ 
+           setBuiltinValues [ ("Action", assign_Action)
+                            , ("Stream", assign_Stream)
+                            , ("bool", assign_bool)
+                            , ("list", assign_list)
+                            , ("NoneType", assign_NoneType)
+                            , ("EqDict", assign_EqDict)
+                            , ("OrdDict", assign_OrdDict)
+                            ] $ 
+           PyonBuiltins { the_Action = uninitialized
+                        , the_Stream = uninitialized
+                        , the_bool = uninitialized
+                        , the_list = uninitialized
+                        , the_NoneType = uninitialized
+                        , the_EqDict = uninitialized
+                        , the_OrdDict = uninitialized
+                        , the_tuples = uninitialized
+                        }
+  in do evaluate bi
+        putMVar the_PyonBuiltins bi
   where
-    setBuiltinValues xs =
-      forM_ xs $ \(name, ref) -> setBuiltinValue name ref mod
+    uninitialized = internalError $ "Uninitialized Pyon builtin accessed"
+    setBuiltinValues xs bi =
+      foldl' (\bi (name, ref) -> setBuiltinValue mod name ref bi) bi xs
     
-    setTupleTypes = do
-      tupleTypes <- mapM (findConByName mod) $
-                    map (("PyonTuple" ++) . show) [0..5]
-      putMVar the_TupleTypes tupleTypes
+    setTupleTypes bi =
+      let tupleTypeNames = ["PyonTuple" ++ show n | n <- [0..5]]
+          tupleTypes = map (findConByName mod) tupleTypeNames
+          bi' = bi {the_tuples = tupleTypes}
+      in foldl' (flip seq) bi' tupleTypes
 
 loadPyonBuiltins :: IdentSupply Var
                  -> IdentSupply Con

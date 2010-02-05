@@ -55,3 +55,14 @@ class Arrow(Kind):
         if self.domain != Star(): d = pretty.parens(d)
         r = self.range.pretty()
         return pretty.space([d, "->", r])
+
+def functionKind(num_parameters):
+    """functionKind(int) -> kind
+
+    Create the kind of an N-parameter type constructor where each parameter
+    has kind '*'.
+    """
+    star = Star()
+    k = star
+    for n in range(num_parameters): k = Arrow(star, k)
+    return k

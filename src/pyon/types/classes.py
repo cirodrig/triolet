@@ -27,7 +27,7 @@ class Class(PyonTypeBase):
       Instances of the class
     """
 
-    def __init__(self, name, param, constraint, methods):
+    def __init__(self, name, param, constraint, methods, gluon_dictionary):
         """
         Class(name, var, constraint, methods) -> new class
         """
@@ -40,6 +40,7 @@ class Class(PyonTypeBase):
         self.constraint = constraint
         self.methods = methods
         self.instances = []
+        self.gluonDictionary = gluon_dictionary
 
     def addInstance(self, inst):
         self.instances.append(inst)
@@ -60,7 +61,10 @@ class Class(PyonTypeBase):
             return self.methods[method].getVariable(self)
         else:
             raise TypeError, "argument must be string or int"
-            
+
+    def getGluonDictionaryCon(self):
+        "Get the Gluon dictionary type constructor for this class"
+        return self.gluonDictionary
 
     def getMethodExpression(self, dictionary, method_name):
         """

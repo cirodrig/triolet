@@ -353,9 +353,12 @@ createGluonModule(void)
   ADD_GLUON_OBJECT("SortLevel", gluon_mkSortLevel);
   ADD_GLUON_OBJECT("Tuple_Core_nil", gluon_Tuple_Core_nil);
   ADD_GLUON_OBJECT("Prod_Core_nil", gluon_Prod_Core_nil);
-  ADD_GLUON_OBJECT("type_Int", gluon_type_Int);
-  ADD_GLUON_OBJECT("type_Float", gluon_type_Float);
-  ADD_GLUON_OBJECT("type_NoneType", gluon_type_NoneType);
-  ADD_GLUON_OBJECT("type_Bool", gluon_type_Bool);
-  ADD_GLUON_OBJECT("type_List", gluon_type_List);
+  ADD_GLUON_OBJECT("con_Int", gluon_con_Int);
+  ADD_GLUON_OBJECT("con_Float", gluon_con_Float);
+  ADD_GLUON_OBJECT("con_NoneType", gluon_con_NoneType);
+  ADD_GLUON_OBJECT("con_bool", gluon_con_bool);
+  ADD_GLUON_OBJECT("con_list", gluon_con_list);
+  ADD_GLUON_OBJECT("con_EqDict", gluon_con_EqDict);
+  ADD_GLUON_OBJECT("con_OrdDict", gluon_con_OrdDict);
+  ADD_GLUON_OBJECT("type_Pure", gluon_type_Pure);
 }

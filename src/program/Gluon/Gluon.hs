@@ -46,17 +46,25 @@ gluon_mkTypeLevel = newHsObject TypeLevel
 gluon_mkKindLevel = newHsObject KindLevel
 gluon_mkSortLevel = newHsObject SortLevel
 
-foreign export ccall gluon_type_Int :: IO PyPtr
-foreign export ccall gluon_type_Float :: IO PyPtr
-foreign export ccall gluon_type_NoneType :: IO PyPtr
-foreign export ccall gluon_type_Bool :: IO PyPtr
-foreign export ccall gluon_type_List :: IO PyPtr
+foreign export ccall gluon_con_Int :: IO PyPtr
+foreign export ccall gluon_con_Float :: IO PyPtr
+foreign export ccall gluon_con_NoneType :: IO PyPtr
+foreign export ccall gluon_con_bool :: IO PyPtr
+foreign export ccall gluon_con_list :: IO PyPtr
+foreign export ccall gluon_con_EqDict :: IO PyPtr
+foreign export ccall gluon_con_OrdDict :: IO PyPtr
+foreign export ccall gluon_type_Pure :: IO PyPtr
 
-gluon_type_Int = rethrowExceptionsInPython $ newHsObject $ builtin the_Int
-gluon_type_Float = rethrowExceptionsInPython $ newHsObject $ builtin the_Float
-gluon_type_NoneType = rethrowExceptionsInPython $ newHsObject the_NoneType
-gluon_type_Bool = rethrowExceptionsInPython $ newHsObject the_Bool
-gluon_type_List = rethrowExceptionsInPython $ newHsObject the_List
+asGlobalObject :: Typeable a => a -> IO PyPtr
+asGlobalObject = rethrowExceptionsInPython . newHsObject
+gluon_con_Int = asGlobalObject $ builtin the_Int
+gluon_con_Float = asGlobalObject $ builtin the_Float
+gluon_con_NoneType = asGlobalObject $ getPyonBuiltin the_NoneType
+gluon_con_bool = asGlobalObject $ getPyonBuiltin the_bool
+gluon_con_list = asGlobalObject $ getPyonBuiltin the_list
+gluon_con_EqDict = asGlobalObject $ getPyonBuiltin the_EqDict
+gluon_con_OrdDict = asGlobalObject $ getPyonBuiltin the_OrdDict
+gluon_type_Pure = asGlobalObject pureKindE
 
 foreign export ccall gluon_pgmLabel :: CString -> CString -> IO PyPtr
 
@@ -98,7 +106,7 @@ gluon_mkNewAnonymousVariable lv = rethrowExceptionsInPython $ do
 foreign export ccall gluon_getTupleCon :: CInt -> IO PyPtr
 
 gluon_getTupleCon n = rethrowExceptionsInPython $
-  case the_NthTupleType (fromIntegral n)
+  case getPyonTupleType (fromIntegral n)
   of Just c  -> newHsObject c
      Nothing -> throwPythonExc pyIndexError $ 
                 "Tuple type of size " ++ show n ++ " not available"
