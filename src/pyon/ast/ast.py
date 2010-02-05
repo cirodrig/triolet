@@ -107,14 +107,8 @@ class ANFVariable(Variable):
         """
         return self._typeScheme.instantiate()
 
-    _nextID = 0
-
-    @classmethod
-    def getNewID(cls):
-        "Get a new, globally unique identifier"
-        n = ANFVariable._nextID
-        ANFVariable._nextID = n + 1
-        return n
+    # A counter used to assign unique IDs to variables
+    _nextID = 1
 
 ###############################################################################
 # Parameters
