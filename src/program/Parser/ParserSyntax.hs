@@ -9,7 +9,7 @@
 module Parser.ParserSyntax where
 
 import Foreign.Ptr
-import Python(PyPtr)
+import PythonInterface.Python(PyPtr)
 
 import qualified Language.Python.Common.AST as Python
 import Language.Python.Common.AST(Ident, AssignOp, Op)

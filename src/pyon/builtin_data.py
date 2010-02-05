@@ -3,6 +3,8 @@ Predefined Pyon variables, types, classes, and instances are defined in this
 module.
 """
 
+import gluon
+
 import pyon.pretty as pretty
 import pyon.ast.ast as ast
 import pyon.types.types as hm
@@ -143,12 +145,12 @@ def create_type_schemes():
 ###############################################################################
 
 # Builtin primitive types
-tycon_int = hm.TyCon("int")
-tycon_float = hm.TyCon("float")
-tycon_bool = hm.TyCon("bool")
-tycon_None = hm.TyCon("NoneType")
+tycon_int = hm.TyCon("int", gluon_constructor = gluon.type_Int)
+tycon_float = hm.TyCon("float", gluon_constructor = gluon.type_Float)
+tycon_bool = hm.TyCon("bool", gluon_constructor = gluon.type_Bool)
+tycon_None = hm.TyCon("NoneType", gluon_constructor = gluon.type_NoneType)
 tycon_it = hm.TyCon("It")
-tycon_list = hm.TyCon("list")
+tycon_list = hm.TyCon("list", gluon_constructor = gluon.type_List)
 
 # Builtin types
 type_int = hm.EntTy(tycon_int)

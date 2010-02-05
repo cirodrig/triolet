@@ -1,3 +1,17 @@
 
 constant Action : Effect -> Linear -> Linear;
 constant Stream : Effect -> Linear -> Linear;
+
+constant List : Pure -> Pure;
+data NoneType : Pure where none : NoneType;
+data Bool : Pure where True : Bool | False : Bool;
+
+-- Pyon's tuple types.
+-- These types are not inhabited by Gluon values; Pyon tuples are not part of
+-- Gluon.
+constant PyonTuple0 : Pure;
+constant PyonTuple1 : Pure -> Pure;
+constant PyonTuple2 : Pure -> Pure -> Pure;
+constant PyonTuple3 : Pure -> Pure -> Pure -> Pure;
+constant PyonTuple4 : Pure -> Pure -> Pure -> Pure -> Pure;
+constant PyonTuple5 : Pure -> Pure -> Pure -> Pure -> Pure -> Pure;

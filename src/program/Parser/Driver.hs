@@ -13,7 +13,7 @@ import Foreign.C.String
 import System.Environment
 import System.IO
 import System.IO.Error hiding(catch)
-import Python
+import PythonInterface.Python
 import Parser.Parser
 import Parser.Output
 

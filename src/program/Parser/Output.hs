@@ -20,7 +20,7 @@ import qualified Language.Python.Common.Pretty as Py
 import Language.Python.Common.PrettyAST()
 
 import Parser.ParserSyntax
-import Python
+import PythonInterface.Python
 
 data Env =
     Env

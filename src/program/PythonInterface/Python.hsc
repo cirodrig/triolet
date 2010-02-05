@@ -19,7 +19,7 @@
              DeriveDataTypeable,
              BangPatterns, 
              FlexibleInstances #-}
-module Python where
+module PythonInterface.Python where
 
 import Prelude hiding(catch)
 
@@ -81,11 +81,17 @@ newtype PythonExcType = PythonExcType {fromPythonExcType :: Ptr PyPtr}
 foreign import ccall "Python.h &PyExc_RuntimeError"
     pyExc_RuntimeError :: Ptr PyPtr
 
+foreign import ccall "Python.h &PyExc_IndexError"
+    pyExc_IndexError :: Ptr PyPtr
+
 foreign import ccall "Python.h &PyExc_TypeError"
     pyExc_TypeError :: Ptr PyPtr
 
 pyRuntimeError :: PythonExcType
 pyRuntimeError = PythonExcType pyExc_RuntimeError
+
+pyIndexError :: PythonExcType
+pyIndexError = PythonExcType pyExc_IndexError
 
 pyTypeError :: PythonExcType
 pyTypeError = PythonExcType pyExc_TypeError

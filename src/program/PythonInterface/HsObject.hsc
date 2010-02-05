@@ -7,7 +7,7 @@ import Control.Monad
 import Data.Typeable
 import Foreign.StablePtr
 import Foreign.Storable
-import Python
+import PythonInterface.Python
 
 #include "PythonInterface/HsObject.h"
 

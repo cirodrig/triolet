@@ -166,7 +166,8 @@ class TyCon(TyEnt):
     A named type constructor.
     """
 
-    def __init__(self, name):
+    def __init__(self, name, gluon_constructor = None):
+        self.gluonConstructor = gluon_constructor
         self.name = name
 
     def __eq__(self, other):
@@ -204,6 +205,9 @@ class TyVar(FirstOrderType, unification.Variable):
     """
     A unifiable type variable.
     """
+    def __init__(self):
+        unification.Variable.__init__(self)
+        self.gluonVariable = None
 
     def __eq__(self, other):
         canon = self.canonicalize()
@@ -239,6 +243,7 @@ class RigidTyVar(FirstOrderType, unification.Term):
     """
     def __init__(self, name):
         self.name = name
+        self.gluonVariable = None
 
     def __eq__(self, other):
         return self is other
@@ -342,19 +347,25 @@ class AppTy(FirstOrderType, unification.Term):
         self.operator.addFreeVariables(s)
         self.argument.addFreeVariables(s)
 
-    def _uncurry(self):
-        # Get all arguments from a sequence of applications
-         oper = self
-         rev_args = []           # Store arguments in reverse order
-         while isinstance(oper, AppTy):
-             rev_args.append(oper.argument)
-             oper = oper.operator
+    def uncurry(self):
+        """
+        t.uncurry() -> (operator, argument-list)
 
-         rev_args.reverse()
-         return (oper, rev_args)
+        Deconstruct a type application into an operator and list of arguments.
+        The returned types are not guaranteed to be in canonical form.
+        """
+        # Get all arguments from a sequence of applications
+        oper = self
+        rev_args = []           # Store arguments in reverse order
+        while isinstance(oper, AppTy):
+            rev_args.append(oper.argument)
+            oper = oper.operator
+
+        rev_args.reverse()
+        return (oper, rev_args)
 
     def showWorker(self, precedence, visible_vars):
-        (operator, arguments) = self._uncurry()
+        (operator, arguments) = self.uncurry()
 
         # Show saturated function and tuple types differently
         if isinstance(operator, EntTy):

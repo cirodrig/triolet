@@ -18,23 +18,26 @@ L_OPTS=$(LFLAGS) $(PACKAGE_FLAGS) $(LIDIR_FLAGS) $(LIB_FLAGS)
 ## File lists
 
 PYON_C_SRCS=Main_c.c \
-	Python_c.c \
+	PythonInterface/Python_c.c \
 	PythonInterface/HsObject_c.c \
-	PythonInterface/Gluon_c.c
-PYON_C_GENERATED_SRCS=Parser/Driver_stub.c PythonInterface/Gluon_stub.c
+	Gluon/Gluon_c.c
+PYON_C_GENERATED_SRCS=Parser/Driver_stub.c \
+	Gluon/Gluon_stub.c
 PYON_HS_SRCS=Main.hs \
-	GluonBackend.hs \
-	PythonInterface/Gluon.hs \
 	Parser/Driver.hs \
 	Parser/Parser.hs \
 	Parser/Output.hs \
 	Parser/ParserSyntax.hs \
+	Gluon/Gluon.hs \
+	Gluon/Globals.hs \
 	Gluon/Builtins/Pyon.hs \
 	Gluon/Pyon/Syntax.hs \
 	Gluon/Pyon/Rename.hs \
 	Gluon/Pyon/Typecheck.hs
 
-PYON_HS_GENERATED_SRCS=Paths_pyon.hs Python.hs PythonInterface/HsObject.hs
+PYON_HS_GENERATED_SRCS=Paths_pyon.hs \
+	PythonInterface/Python.hs \
+	PythonInterface/HsObject.hs
 
 PYON_HS_OBJECTS=$(patsubst %.hs, %.o, $(PYON_HS_SRCS) $(PYON_HS_GENERATED_SRCS))
 PYON_C_OBJECTS=$(patsubst %.c, %.o, $(PYON_C_SRCS) $(PYON_C_GENERATED_SRCS))
@@ -103,27 +106,31 @@ src/pyon/data_dir.py :
 # Dependences
 $(BUILDDIR)/Main_c.o : $(BUILDDIR)/Parser/Driver_stub.h
 $(BUILDDIR)/Main_c.o : $(SRCDIR)/PythonInterface/HsObject.h
-$(BUILDDIR)/Gluon_c.o : $(BUILDDIR)/PythonInterface/Gluon_stub.h
 $(BUILDDIR)/PythonInterface/HsObject.o : $(SRCDIR)/PythonInterface/HsObject.h
-$(BUILDDIR)/PythonInterface/Gluon_stub.c \
- $(BUILDDIR)/PythonInterface/Gluon_stub.h \
- $(BUILDDIR)/PythonInterface/Gluon.o \
- : $(BUILDDIR)/PythonInterface/HsObject.o
 $(BUILDDIR)/Main.o : $(BUILDDIR)/Parser/Driver_stub.h
-$(BUILDDIR)/Main.o : $(BUILDDIR)/Python.hi
-$(BUILDDIR)/GluonBackend.o : $(BUILDDIR)/Gluon/Builtins/Pyon.hi
+$(BUILDDIR)/Main.o : $(BUILDDIR)/PythonInterface/Python.hi
 $(BUILDDIR)/Parser/Driver_stub.c \
  $(BUILDDIR)/Parser/Driver_stub.h \
- $(BUILDDIR)/Parser/Driver.o : $(BUILDDIR)/Python.hi
+ $(BUILDDIR)/Parser/Driver.o : $(BUILDDIR)/PythonInterface/Python.hi
 $(BUILDDIR)/Parser/Driver_stub.c \
  $(BUILDDIR)/Parser/Driver_stub.h \
  $(BUILDDIR)/Parser/Driver.o : $(BUILDDIR)/Parser/Parser.hi
 $(BUILDDIR)/Parser/Driver_stub.c \
  $(BUILDDIR)/Parser/Driver_stub.h \
  $(BUILDDIR)/Parser/Driver.o : $(BUILDDIR)/Parser/Output.hi
-$(BUILDDIR)/Parser/Output.o : $(BUILDDIR)/Python.hi
+$(BUILDDIR)/Parser/Output.o : $(BUILDDIR)/PythonInterface/Python.hi
 $(BUILDDIR)/Parser/Output.o : $(BUILDDIR)/Parser/ParserSyntax.hi
 $(BUILDDIR)/Parser/Parser.o : $(BUILDDIR)/Parser/ParserSyntax.hi
+$(BUILDDIR)/Gluon/Globals.o : $(BUILDDIR)/Gluon/Builtins/Pyon.hi
+$(BUILDDIR)/Gluon/Gluon_stub.c \
+ $(BUILDDIR)/Gluon/Gluon_stub.h \
+ $(BUILDDIR)/Gluon/Gluon.o \
+ : $(BUILDDIR)/PythonInterface/HsObject.o
+$(BUILDDIR)/Gluon/Gluon_stub.c \
+ $(BUILDDIR)/Gluon/Gluon_stub.h \
+ $(BUILDDIR)/Gluon/Gluon.o \
+ : $(BUILDDIR)/Gluon/Globals.o
+$(BUILDDIR)/Gluon/Gluon_c.o : $(BUILDDIR)/Gluon/Gluon_stub.h
 $(BUILDDIR)/Gluon/Builtins/Pyon.o : $(BUILDDIR)/Paths_pyon.hi
 $(BUILDDIR)/Gluon/Pyon/Rename.o : $(BUILDDIR)/Gluon/Pyon/Syntax.hi
 $(BUILDDIR)/Gluon/Pyon/Typecheck.o : $(BUILDDIR)/Gluon/Pyon/Syntax.hi
@@ -138,7 +145,8 @@ $(BUILDDIR)/$(patsubst %.hs,%.o,$(1)) : $(BUILDDIR)/$(1)
 
 endef
 
-$(BUILDDIR)/Python.hs : $(SRCDIR)/Python.hsc
+$(BUILDDIR)/PythonInterface/Python.hs : $(SRCDIR)/PythonInterface/Python.hsc
+	mkdir -p $(BUILDDIR)/PythonInterface
 	$(HSC2HS) $(HS_HSC2HS_OPTS) $< -o $@
 
 $(BUILDDIR)/PythonInterface/HsObject.hs : $(SRCDIR)/PythonInterface/HsObject.hsc
@@ -146,13 +154,12 @@ $(BUILDDIR)/PythonInterface/HsObject.hs : $(SRCDIR)/PythonInterface/HsObject.hsc
 	$(HSC2HS) $(HS_HSC2HS_OPTS) $< -o $@
 
 $(eval $(call PYON_COMPILE_HS_SOURCE,Main.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE,GluonBackend.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE,Python.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,PythonInterface/Python.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,PythonInterface/HsObject.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE,PythonInterface/Gluon.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/Parser.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/Output.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/ParserSyntax.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Globals.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Builtins/Pyon.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Syntax.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Rename.hs))
@@ -160,14 +167,14 @@ $(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Typecheck.hs))
 
 # 'Gluon.hs' has multiple targets, so it needs a distinct rule
 # Touch output files to ensure their timestamps are updated
-$(BUILDDIR)/PythonInterface/Gluon_stub.c \
- $(BUILDDIR)/PythonInterface/Gluon_stub.h \
- $(BUILDDIR)/PythonInterface/Gluon.o : $(BUILDDIR)/PythonInterface/Gluon.hs
-	$(HC) -c $< -o $(BUILDDIR)/PythonInterface/Gluon.o -i$(BUILDDIR) \
+$(BUILDDIR)/Gluon/Gluon_stub.c \
+ $(BUILDDIR)/Gluon/Gluon_stub.h \
+ $(BUILDDIR)/Gluon/Gluon.o : $(BUILDDIR)/Gluon/Gluon.hs
+	$(HC) -c $< -o $(BUILDDIR)/Gluon/Gluon.o -i$(BUILDDIR) \
 	 $(HS_C_OPTS)
-	touch $(BUILDDIR)/PythonInterface/Gluon.hi
-	touch $(BUILDDIR)/PythonInterface/Gluon_stub.c
-	touch $(BUILDDIR)/PythonInterface/Gluon_stub.h
+	touch $(BUILDDIR)/Gluon/Gluon.hi
+	touch $(BUILDDIR)/Gluon/Gluon_stub.c
+	touch $(BUILDDIR)/Gluon/Gluon_stub.h
 
 # 'Driver.hs' has multiple targets, so it needs a distinct rule
 # Touch output files to ensure their timestamps are updated
@@ -182,7 +189,7 @@ $(BUILDDIR)/Parser/Driver_stub.c \
 
 # Generate a file with path information
 $(BUILDDIR)/Paths_pyon.hs :
-	echo "{- Auto-generated source file -} module Paths_pyon where { import System.FilePath; getDataFileName :: String -> IO String; getDataFileName n = return (\"$(prefix)/share\" </> n) }" > $@
+	echo "{- Auto-generated source file -} module Paths_pyon where { import System.FilePath; getDataFileName :: String -> IO String; getDataFileName n = return (\"$(prefix)/share/pyon\" </> n) }" > $@
 
 $(BUILDDIR)/Paths_pyon.o : $(BUILDDIR)/Paths_pyon.hs
 	$(HC) -c $< -o $@ $(HS_C_OPTS)
@@ -190,21 +197,22 @@ $(BUILDDIR)/Paths_pyon.o : $(BUILDDIR)/Paths_pyon.hs
 $(BUILDDIR)/Main_c.o : $(SRCDIR)/Main_c.c
 	$(CC) -c $< -o $@ $(C_C_OPTS)
 
-$(BUILDDIR)/Python_c.o : $(SRCDIR)/Python_c.c
+$(BUILDDIR)/PythonInterface/Python_c.o : $(SRCDIR)/PythonInterface/Python_c.c
+	mkdir -p $(BUILDDIR)/PythonInterface
 	$(CC) -c $< -o $@ $(C_C_OPTS)
 
 $(BUILDDIR)/PythonInterface/HsObject_c.o : $(SRCDIR)/PythonInterface/HsObject_c.c
 	mkdir -p $(BUILDDIR)/PythonInterface
 	$(CC) -c $< -o $@ $(C_C_OPTS)
 
-$(BUILDDIR)/PythonInterface/Gluon_c.o : $(SRCDIR)/PythonInterface/Gluon_c.c
+$(BUILDDIR)/Gluon/Gluon_c.o : $(SRCDIR)/Gluon/Gluon_c.c
 	mkdir -p $(BUILDDIR)/PythonInterface
 	$(CC) -c $< -o $@ $(C_C_OPTS)
 
 $(BUILDDIR)/Parser/Driver_stub.o : $(BUILDDIR)/Parser/Driver_stub.c
 	$(CC) -c $< -o $@ $(C_C_OPTS)
 
-$(BUILDDIR)/PythonInterface/Gluon_stub.o : $(BUILDDIR)/PythonInterface/Gluon_stub.c
+$(BUILDDIR)/Gluon/Gluon_stub.o : $(BUILDDIR)/Gluon/Gluon_stub.c
 	$(CC) -c $< -o $@ $(C_C_OPTS)
 
 $(PYON_TARGET) : bin $(PYON_OBJECT_FILES)

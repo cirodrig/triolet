@@ -14,6 +14,8 @@ setup(name = 'Pyon',
       version = '0.1',
       description = 'Pyon compiler',
       packages = ['pyon', 'pyon.ast', 'pyon.tests', 'pyon.types', 'pyon.ssa'],
-      data_files = [("share/pyon/testcases", testcases)],
+      data_files =
+	[("share/pyon/library", ["library/PyonBuiltin.glu"])] +
+	[("share/pyon/testcases", testcases)],
       package_dir = {'': 'src'},
       ext_modules = [operators_ext])

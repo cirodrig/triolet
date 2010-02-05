@@ -32,7 +32,7 @@ import qualified Language.Python.Common.AST as Py
 import qualified Language.Python.Common.Pretty as Py
 import qualified Language.Python.Common.SrcLocation as Py
 import Language.Python.Common.PrettyAST()
-import Python(PyPtr)
+import PythonInterface.Python(PyPtr)
 import Parser.ParserSyntax
 
 type PyIdent = Py.IdentSpan
@@ -492,7 +492,7 @@ argument (Py.ArgExpr {Py.arg_expr = e}) = expression e
 argument _ = error "Unsupported argument type"
 
 parameter :: Py.ParameterSpan -> Cvt Parameter
-parameter (Py.Param {Py.param_name = name, Py.param_py_annotation = ann}) = 
+parameter (Py.Param {Py.param_name = name, Py.param_py_annotation = ann}) =
   Parameter <$> parameterDefinition name <*> traverse expression ann
 
 parameters xs = traverse parameter xs

@@ -2,16 +2,10 @@
 #include <Python.h>
 
 #include "PythonInterface/HsObject.h"
-#include "PythonInterface/Gluon_stub.h"
+#include "Gluon/Gluon_stub.h"
 
 /*****************************************************************************/
 /* C wrappers for argument marshaling */
-
-static PyObject *
-loadBuiltins(PyObject *self, PyObject *args)
-{
-  return gluon_loadBuiltins();
-}
 
 static PyObject *
 pgmLabel(PyObject *self, PyObject *args)
@@ -40,6 +34,19 @@ mkVariable(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+mkNewVariable(PyObject *self, PyObject *args)
+{
+  PyObject *label;
+  PyObject *level;
+
+  if (!PyArg_ParseTuple(args, "O!O!",
+			&HsObject_type, &label, &HsObject_type, &level))
+    return NULL;
+
+  return gluon_mkNewVariable(label, level);
+}
+
+static PyObject *
 mkAnonymousVariable(PyObject *self, PyObject *args)
 {
   int id;
@@ -50,6 +57,28 @@ mkAnonymousVariable(PyObject *self, PyObject *args)
     return NULL;
 
   return gluon_mkAnonymousVariable(id, level);
+}
+
+static PyObject *
+mkNewAnonymousVariable(PyObject *self, PyObject *args)
+{
+  PyObject *level;
+
+  if (!PyArg_ParseTuple(args, "O!",
+		        &HsObject_type, &level))
+    return NULL;
+
+  return gluon_mkNewAnonymousVariable(level);
+}
+
+static PyObject *
+getTupleCon(PyObject *self, PyObject *args)
+{
+  int size;
+  if (!PyArg_ParseTuple(args, "i", &size))
+    return NULL;
+
+  return gluon_getTupleCon(size);
 }
 
 static PyObject *
@@ -90,6 +119,20 @@ mkAppE(PyObject *self, PyObject *args)
     return NULL;
 
   return gluon_mkAppE(pos, operator, arguments);
+}
+
+static PyObject *
+mkConAppE(PyObject *self, PyObject *args)
+{
+  PyObject *pos;
+  PyObject *operator;
+  PyObject *arguments;
+
+  if (!PyArg_ParseTuple(args, "O!O!O",
+			&HsObject_type, &pos, &HsObject_type, &operator, &arguments))
+    return NULL;
+
+  return gluon_mkConAppE(pos, operator, arguments);
 }
 
 static PyObject *
@@ -237,18 +280,28 @@ Prod_Core_cons(PyObject *self, PyObject *args)
 /* Module definition */
 
 static struct PyMethodDef gluon_methods[] = {
-  {"loadBuiltins", loadBuiltins, METH_NOARGS,
-   "Load the 'Builtin' gluon module."},
   {"pgmLabel", pgmLabel, METH_VARARGS,
    "Create a label value, given a module name and entity name."},
   {"mkVariable", mkVariable, METH_VARARGS,
    "Create a variable given an ID, label, and level."},
+  {"mkNewVariable", mkNewVariable, METH_VARARGS,
+   "Create a new variable given a label and level.  The variable is assigned\n"
+   "a fresh ID."},
+  {"mkAnonymousVariable", mkAnonymousVariable, METH_VARARGS,
+   "Create an anonymous variable given an ID, and level."},
+  {"mkNewAnonymousVariable", mkNewAnonymousVariable, METH_VARARGS,
+   "Create a new variable given a level.  The variable is assigned\n"
+   "a fresh ID."},
+  {"getTupleCon", getTupleCon, METH_VARARGS,
+   "Get the type constructor for an N-tuple"},
   {"Binder_plain", Binder_plain, METH_VARARGS,
    "Constructor for \"Binder Core ()\"."},
   {"Binder2_plain", Binder2_plain, METH_VARARGS,
    "Constructor for \"Binder' Core ()\"."},
   {"mkAppE", mkAppE, METH_VARARGS,
    "Create an application expression."},
+  {"mkConAppE", mkConAppE, METH_VARARGS,
+   "Create a constructor application expression."},
   {"mkLamE", mkLamE, METH_VARARGS,
    "Create a lambda expression."},
   {"mkFunE", mkFunE, METH_VARARGS,
@@ -272,18 +325,37 @@ static struct PyMethodDef gluon_methods[] = {
   { NULL, NULL, 0, NULL}
 };
 
-extern void
+static int
+addGluonObject(PyObject *module, const char *name, void *(*factory)(void))
+{
+  PyObject *ptr = (PyObject *)factory();
+  if (!ptr) return 0;
+
+  PyModule_AddObject(module, name, ptr);
+  return 1;
+}
+
+extern int
 createGluonModule(void)
 {
+  /* Load the builtin Gluon definitions first */
+  if (!gluon_loadBuiltins()) return 0;
+
   PyObject *module = Py_InitModule("gluon", gluon_methods);
 
-  PyModule_AddObject(module, "noSourcePos", (PyObject *)gluon_noSourcePos());
-  PyModule_AddObject(module, "ObjectLevel", (PyObject *)gluon_mkObjectLevel());
-  PyModule_AddObject(module, "TypeLevel", (PyObject *)gluon_mkTypeLevel());
-  PyModule_AddObject(module, "KindLevel", (PyObject *)gluon_mkKindLevel());
-  PyModule_AddObject(module, "SortLevel", (PyObject *)gluon_mkSortLevel());
-  PyModule_AddObject(module, "Tuple_Core_nil",
-		     (PyObject *)gluon_Tuple_Core_nil());
-  PyModule_AddObject(module, "Prod_Core_nil",
-		     (PyObject *)gluon_Prod_Core_nil());
+#define ADD_GLUON_OBJECT(name, factory) \
+  if (!addGluonObject(module, name, factory)) return;
+
+  ADD_GLUON_OBJECT("noSourcePos", gluon_noSourcePos);
+  ADD_GLUON_OBJECT("ObjectLevel", gluon_mkObjectLevel);
+  ADD_GLUON_OBJECT("TypeLevel", gluon_mkTypeLevel);
+  ADD_GLUON_OBJECT("KindLevel", gluon_mkKindLevel);
+  ADD_GLUON_OBJECT("SortLevel", gluon_mkSortLevel);
+  ADD_GLUON_OBJECT("Tuple_Core_nil", gluon_Tuple_Core_nil);
+  ADD_GLUON_OBJECT("Prod_Core_nil", gluon_Prod_Core_nil);
+  ADD_GLUON_OBJECT("type_Int", gluon_type_Int);
+  ADD_GLUON_OBJECT("type_Float", gluon_type_Float);
+  ADD_GLUON_OBJECT("type_NoneType", gluon_type_NoneType);
+  ADD_GLUON_OBJECT("type_Bool", gluon_type_Bool);
+  ADD_GLUON_OBJECT("type_List", gluon_type_List);
 }

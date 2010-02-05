@@ -1,5 +1,5 @@
 
-module GluonBackend where
+module Gluon.Globals where
 
 import Control.Monad
 import Data.IORef

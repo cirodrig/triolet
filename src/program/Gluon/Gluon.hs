@@ -4,6 +4,10 @@
 
 module PythonInterface.Gluon where
 
+import Prelude hiding(catch)
+
+import Control.Exception
+
 import Foreign.C.Types
 import Foreign.C.String
 
@@ -12,15 +16,21 @@ import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Core
 
-import Python
+import PythonInterface.Python
 import PythonInterface.HsObject
-import GluonBackend
+import Gluon.Globals
+import Gluon.Builtins.Pyon
 
-foreign export ccall gluon_loadBuiltins :: IO PyPtr
+foreign export ccall gluon_loadBuiltins :: IO CInt
 
-gluon_loadBuiltins = rethrowExceptionsInPython $ do
-  loadBuiltins
-  pyNone
+-- Perform initialization by loading builtin modules.
+-- Return nonzero on success, 0 otherwise.
+gluon_loadBuiltins =
+  (loadBuiltins >> return 1) `catch` printExceptionAndReturn
+    where
+      printExceptionAndReturn e = do
+        print (e :: SomeException)
+        return 0
 
 foreign export ccall gluon_noSourcePos :: IO PyPtr
 
@@ -35,6 +45,18 @@ gluon_mkObjectLevel = newHsObject ObjectLevel
 gluon_mkTypeLevel = newHsObject TypeLevel
 gluon_mkKindLevel = newHsObject KindLevel
 gluon_mkSortLevel = newHsObject SortLevel
+
+foreign export ccall gluon_type_Int :: IO PyPtr
+foreign export ccall gluon_type_Float :: IO PyPtr
+foreign export ccall gluon_type_NoneType :: IO PyPtr
+foreign export ccall gluon_type_Bool :: IO PyPtr
+foreign export ccall gluon_type_List :: IO PyPtr
+
+gluon_type_Int = rethrowExceptionsInPython $ newHsObject $ builtin the_Int
+gluon_type_Float = rethrowExceptionsInPython $ newHsObject $ builtin the_Float
+gluon_type_NoneType = rethrowExceptionsInPython $ newHsObject the_NoneType
+gluon_type_Bool = rethrowExceptionsInPython $ newHsObject the_Bool
+gluon_type_List = rethrowExceptionsInPython $ newHsObject the_List
 
 foreign export ccall gluon_pgmLabel :: CString -> CString -> IO PyPtr
 
@@ -51,12 +73,35 @@ gluon_mkVariable id label lv = rethrowExceptionsInPython $ do
   hs_lv <- fromHsObject' lv
   newHsObject $ mkVariable hs_id hs_label hs_lv
 
+foreign export ccall gluon_mkNewVariable :: PyPtr -> PyPtr -> IO PyPtr
+
+gluon_mkNewVariable label lv = rethrowExceptionsInPython $ do
+  id <- getNextVarIdent
+  hs_label <- fromHsObject' label
+  hs_lv <- fromHsObject' lv
+  newHsObject $ mkVariable id hs_label hs_lv
+
 foreign export ccall gluon_mkAnonymousVariable :: CInt -> PyPtr -> IO PyPtr
 
 gluon_mkAnonymousVariable id lv = rethrowExceptionsInPython $ do
   let hs_id = toIdent $ fromIntegral id
   hs_lv <- fromHsObject' lv
   newHsObject $ mkAnonymousVariable hs_id hs_lv
+
+foreign export ccall gluon_mkNewAnonymousVariable :: PyPtr -> IO PyPtr
+
+gluon_mkNewAnonymousVariable lv = rethrowExceptionsInPython $ do
+  hs_id <- getNextVarIdent
+  hs_lv <- fromHsObject' lv
+  newHsObject $ mkAnonymousVariable hs_id hs_lv
+
+foreign export ccall gluon_getTupleCon :: CInt -> IO PyPtr
+
+gluon_getTupleCon n = rethrowExceptionsInPython $
+  case the_NthTupleType (fromIntegral n)
+  of Just c  -> newHsObject c
+     Nothing -> throwPythonExc pyIndexError $ 
+                "Tuple type of size " ++ show n ++ " not available"
 
 -- * Core syntax
 
@@ -74,6 +119,7 @@ gluon_Binder2_plain var ty = rethrowExceptionsInPython $ do
   newHsObject (Binder' hs_var hs_ty () :: Binder' Core ())
 
 foreign export ccall gluon_mkAppE :: PyPtr -> PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall gluon_mkConAppE :: PyPtr -> PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall gluon_mkLamE :: PyPtr -> PyPtr -> PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall gluon_mkFunE :: PyPtr -> Int -> PyPtr -> PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall gluon_mkArrowE :: PyPtr -> Int -> PyPtr -> PyPtr -> IO PyPtr
@@ -89,6 +135,12 @@ gluon_mkAppE pos operator arguments = rethrowExceptionsInPython $ do
   hs_operator <- fromHsObject' operator
   hs_arguments <- fromListOfHsObject' arguments
   newHsObject (mkAppE hs_pos hs_operator hs_arguments :: Exp Core)
+
+gluon_mkConAppE pos operator arguments = rethrowExceptionsInPython $ do
+  hs_pos <- fromHsObject' pos
+  hs_operator <- fromHsObject' operator
+  hs_arguments <- fromListOfHsObject' arguments
+  newHsObject (mkConAppE hs_pos hs_operator hs_arguments :: Exp Core)
 
 gluon_mkLamE pos var ty body = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
