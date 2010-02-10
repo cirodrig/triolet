@@ -14,9 +14,6 @@ import qualified Gluon.Core as Gluon
 import qualified Gluon.Core.Print as Gluon
 import Pyon.SystemF.Syntax
 
-tuple :: [Doc] -> Doc
-tuple xs = parens $ sep $ punctuate comma xs
-
 pprVar :: Var -> Doc
 pprVar = pprVarFlags defaultPrintFlags
 
@@ -42,13 +39,17 @@ defaultPrintFlags =
   { printVariableIDs = True
   }
 
+-- Helper function for printing tuple syntax
+tuple :: [Doc] -> Doc
+tuple xs = parens $ sep $ punctuate comma xs
+
 pprVarFlags :: PrintFlags -> Var -> Doc
 pprVarFlags flags v =
   let lab = case varName v
             of Nothing -> empty
                Just label -> text (showLabel label)
       id = if printVariableIDs flags || isNothing (varName v)
-           then text $ '#' : show (fromIdent $ varID v)
+           then text $ '\'' : show (fromIdent $ varID v)
            else empty
   in lab <> id
 
@@ -69,16 +70,39 @@ pprTyPatFlags flags (TyPat v ty) =
   Gluon.pprVar v <+> colon <+> Gluon.pprExp ty
 
 pprExpFlags :: PrintFlags -> Exp -> Doc
-pprExpFlags flags expression =
+pprExpFlags flags expression = pprExpFlagsPrec flags precOuter expression
+
+-- Precedences for expression printing.
+-- If an expression has precedence P, and it's shown in a context with
+-- precedence Q > P, then it needs parentheses.
+parenthesize prec doc context
+  | context > prec = parens doc
+  | otherwise      = doc
+
+precOuter = 0                   -- Outermost precedence; commas; parentheses
+precTyAnnot = 1                 -- Type annotation (x : t)
+precTyApp = 10                  -- Type application (f @ x)
+precApp = 10                    -- Application (f x)
+
+pprTypeAnnotation :: Doc -> Doc -> Int -> Doc
+pprTypeAnnotation val ty context = 
+  parenthesize precTyAnnot (val <+> colon <+> ty) context
+
+pprExpFlagsPrec :: PrintFlags -> Int -> Exp -> Doc
+pprExpFlagsPrec flags prec expression =
   case expression
   of VarE v -> pprVarFlags flags v
      ConE c -> text (showLabel $ Gluon.conName c)
-     LitE l t -> parens $ pprLit l <+> colon <+> Gluon.pprExp t
-     UndefinedE t -> text "_" <+> colon <+> Gluon.pprExp t
-     TupleE ts -> tuple $ map (pprExpFlags flags) ts
-     TyAppE e t -> parens $ pprExpFlags flags e <+> Gluon.pprExp t
-     CallE e es -> let args = tuple $ map (pprExpFlags flags) es
-                   in cat [pprExpFlags flags e, nest 4 args]
+     LitE l t -> pprTypeAnnotation (pprLit l) (Gluon.pprExp t) prec
+     UndefinedE t -> pprTypeAnnotation (text "_") (Gluon.pprExp t) prec
+     TupleE ts -> tuple $ map (pprExpFlagsPrec flags precOuter) ts
+     TyAppE e t -> let eDoc = pprExpFlagsPrec flags precTyApp e
+                       tDoc = Gluon.pprExp t
+                       doc = eDoc <+> text "@" <> tDoc
+                   in parenthesize precTyApp doc prec
+     CallE e es -> let args = tuple $ map (pprExpFlagsPrec flags precOuter) es
+                       oper = pprExpFlagsPrec flags precApp e
+                   in sep [oper, nest 4 args]
      IfE cond tr fa -> let condText = pprExpFlags flags cond
                            trText = pprExpFlags flags tr
                            faText = pprExpFlags flags fa
@@ -108,13 +132,17 @@ lambda = text [toEnum 0xCE, toEnum 0xBB]
 
 pprFunFlags :: PrintFlags -> Fun -> Doc
 pprFunFlags flags fun =
-  let params = map (parens . pprTyPatFlags flags) (funTyParams fun) ++
-               map (parens . pprPatFlags flags) (funParams fun)
+  let params = map pprTyParam (funTyParams fun) ++
+               [tuple $ map (pprPatFlags flags) (funParams fun)]
       body = pprExpFlags flags $ funBody fun
   in hang (lambda <+> sep params <> text ".") 4 body
+  where
+    pprTyParam p = text "@" <> parens (pprTyPatFlags flags p)
 
 pprDefFlags flags (Def v fun) =
-  let params = map (parens . pprTyPatFlags flags) (funTyParams fun) ++
-               map (parens . pprPatFlags flags) (funParams fun)
+  let params = map pprTyParam (funTyParams fun) ++
+               [tuple $ map (pprPatFlags flags) (funParams fun)]
       body = pprExpFlags flags $ funBody fun
   in hang (pprVarFlags flags v <+> sep params <+> equals) 4 body
+  where
+    pprTyParam p = text "@" <> parens (pprTyPatFlags flags p)
