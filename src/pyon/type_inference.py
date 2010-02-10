@@ -18,11 +18,14 @@ import sys
 
 import pyon
 import pyon.ast.ast as ast
+import system_f as sf
 import pyon.ast.print_ast as print_ast
 import pyon.pretty as pretty
 import pyon.builtin_data as builtin_data
 import pyon.unification as unification
 import pyon.types.types as hmtype
+import pyon.types.gluon_types as gluon_types
+from pyon.types.placeholders import RecVarPlaceholder, DictPlaceholder, IdDerivation, InstanceDerivation
 
 class TypeCheckError(Exception): pass
 
@@ -107,8 +110,8 @@ class Environment(dict):
             if ty is None: v.getTypeScheme().addFreeVariables(s)
             elif isinstance(ty, hmtype.FirstOrderType):
                 ty.addFreeVariables(s)
-            elif isinstance(ty, ast.RecVarPlaceholderExpr):
-                ty.getType().addFreeVariables(s)
+            elif isinstance(ty, RecVarPlaceholder):
+                ty.getFirstOrderType().addFreeVariables(s)
             else:
                 raise TypeError, type(ty)
         return s
@@ -129,36 +132,28 @@ class Environment(dict):
 def findVariableType(env, v):
     """
     findVariableType(Environment, ANFVariable)
-        -> (constraints, placeholders, Expression, FirstOrderType)
+        -> ((constraints, placeholders), (sf.Exp, FirstOrderType))
 
     Get the type of a variable and a list of class constraints.  If the
     variable has a type scheme, instantiate it.
     """
     scm = v.getTypeScheme()
 
+    base_expr = sf.mkVarE(v.getSystemFVariable())
+
     # Case 1: type scheme
-    if scm:
-        constraints, ty = scm.instantiate()
+    if scm: return gluon_types.instantiate(lambda t: base_expr, scm)
 
-        # Convert to dictionary-passing form
-        params = [ast.DictPlaceholderExpr(c, base = ast.ExprInit(type = c.getDictionaryType()))
-                  for c in constraints]
-
-        expr = hmtype.makeDictionaryPassingCall(v, params, ty)
-        return (constraints, params, expr, ty)
-
-    # else
     entry = env[v]
 
     # Case 2: placeholder
-    if isinstance(entry, ast.RecVarPlaceholderExpr):
-        return ([], [entry], entry, entry.getType())
+    if isinstance(entry, RecVarPlaceholder):
+        return (([], [entry]),
+                (entry.getExpression(), entry.getFirstOrderType()))
 
-    # else
     # Case 3: first-order type
     assert isinstance(entry, hmtype.FirstOrderType)
-    oper = ast.VariableExpr(v, base = ast.ExprInit(type = entry))
-    return ([], [], oper, entry)
+    return (([], []), (base_expr, entry))
 
 def findVariableTypeScheme(env, v):
     """
@@ -179,6 +174,7 @@ def assumeFirstOrderType(env, v, t):
     assert isinstance(t, hmtype.FirstOrderType)
     assert v not in env
 
+    v.setFirstOrderType(t)
     env[v] = t
 
     return None
@@ -194,10 +190,7 @@ def assumePlaceholderType(env, v, t):
     assert isinstance(t, hmtype.FirstOrderType)
     assert v not in env
 
-    env[v] = ast.RecVarPlaceholderExpr(v, base = ast.ExprInit(type = t))
-
-    return None
-
+    env[v] = RecVarPlaceholder(v, t)
 
 def assignFirstOrderTypeScheme(env, v, ty):
     """
@@ -245,14 +238,16 @@ def generalizeGroup(gamma, constraints, explicit_qvars, ty_list):
         # Determine which variables the type scheme is parameterized over.
         qvars_set = ty.freeVariables().difference(ftv_gamma)
 
-        # If an explicit list of variables is given, these variables must be
-        # a subset of that list.
-        # Otherwise, these variables must contain no rigid type variables.
-
+        # If no explicit type variables are given, then we should not
+        # parameterize over any rigid type variables.
         if x_qvars is None:
             for v in qvars_set:
                 if isinstance(v, hmtype.RigidTyVar):
                     raise TypeCheckError, "Type is less polymorphic than expeced"
+
+        # Otherwise, we should parameterize over only the given type variables.
+        # It's acceptable to parameterize over a subset.
+        # All variables in the set are rigid.
         else:
             for v in qvars_set:
                 if v not in x_qvars:
@@ -271,10 +266,10 @@ def generalizeGroup(gamma, constraints, explicit_qvars, ty_list):
 def assignGeneralizedType(gamma, v, ty, constraints):
     """
     assignGeneralizedType(Environment, TyVar, FirstOrderType, constraints)
-        -> (DictEnvironment, constraints)
+        -> constraints
 
     Generalize the type and constraints to a type scheme.
-    Assign the type scheme @scm to @v.  The assignment is recorded globally.
+    Assign the type @ty to @v.  The assignment is recorded globally.
     A new environment and the deferred constraints are returned.
     """
     assert isinstance(v, ast.ANFVariable)
@@ -295,13 +290,7 @@ def assignGeneralizedTypes(gamma, assignments, constraints):
     Generalize a list of types in a common context.  All types in the list will
     have the same quantified variables and constraints.
     """
-    vars = []
-    explicit_qvars = []
-    types = []
-    for v, qvars, ty in assignments:
-        vars.append(v)
-        explicit_qvars.append(qvars)
-        types.append(ty)
+    vars, explicit_qvars, types = unzip3(assignments)
 
     # Generalize with a common context
     (deferred, retained, schemes) = generalizeGroup(gamma, constraints,
@@ -315,6 +304,59 @@ def assignGeneralizedTypes(gamma, assignments, constraints):
 
 ###############################################################################
 # Helper functions for collecting results
+
+def unzip(xs):
+    """
+    unzip : [(a, b)] -> ([a], [b])
+    """
+    ys = []
+    zs = []
+    for y,z in xs:
+        ys.append(y)
+        zs.append(z)
+    return (ys, zs)
+
+def unzip3(xs):
+    """
+    unzip3 : [(a, b, c)] -> ([a], [b], [c])
+    """
+    ws = []
+    ys = []
+    zs = []
+    for w,y,z in xs:
+        ws.append(w)
+        ys.append(y)
+        zs.append(z)
+    return (ws, ys, zs)
+
+# Many functions return lists of constraints and placeholders.
+# These lists form a monoid under concatenation.
+unitCPh = ([], [])
+
+def catCPh(*args):
+    if len(args) == 1:
+        constraints = []
+        placeholders = []
+        for c, p in args[0]:
+            constraints.extend(c)
+            placeholders.extend(p)
+        return (constraints, placeholders)
+    elif len(args) == 2:
+        (c1, p1), (c2, p2) = args
+        return (c1 + c2, p1 + p2)
+    else:
+        raise TypeError, "Expecting one or two arguments"
+
+def isValidCPh((constraints, placeholders)):
+    for c in constraints:
+        if not isinstance(c, hmtype.ClassPredicate):
+            return False
+
+    for ph in placeholders:
+        if not isinstance(ph, (RecVarPlaceholder, DictPlaceholder)):
+            return False
+
+    return True
 
 def combine(combiner, accumulator, sq):
     """
@@ -351,32 +393,47 @@ def collectCPh(sq):
 
 def makeDictionaryEnvironment(constraints):
     """
-    Create a dictionary environment.  Assign a fresh variable (that stands for
-    a class dictionary) to each constraint.
+    Create a dictionary environment.  Assign a fresh System-F variable to each
+    constraint.  The variable represents the class dictionary for the
+    constraint.
     """
-    def mkvar(cst):
-        type = cst.getDictionaryType()
-        scm = hmtype.TyScheme([], hmtype.noConstraints, type)
-        return ast.ANFVariable(type_scheme = scm)
+    return [(c, sf.newVar(None)) for c in constraints]
 
-    return [(c, mkvar(c)) for c in constraints]
-
-def addDictionaryParameters(dict_env, fn_def):
+def makePolymorphicFunction(dict_env, name, old_parameters, old_body):
     """
-    Add parameters corresponding to a dictionary environment to a function
-    definition.  The function definition's body is updated in-place.
-    """
-    dict_parameters = \
-        [ast.VariableParam(v, type = v.getTypeScheme().instantiateFirstOrder())
-         for _, v in dict_env]
+    makePolymorphicFunction(dict(Constraint, ObVariable),
+                            anf.ANFVariable, [sf.Pat], sf.Exp)
+        -> sf.Def
 
-    fn_def.function.setDictionaryParameters(dict_parameters)
+    Given the System F translation of a first-order function,
+    add extra parameters that turn it into the System F translation of a
+    polymorphic function.  The extra parameters are type parameters and
+    dictionary parameters, derived from the 'qvars' and 'constraints' fields
+    of the type.
+    """
+    scm = name.getTypeScheme()
+
+    # Use the dictionary environment to determine dictionary parameters.
+    # Dictionary environment's constraints are the same as the type
+    # scheme's constraints.
+    dict_parameters = [sf.mkVarP(v, d.getDictionaryType())
+                       for d, v in dict_env]
+
+    # Convert the type parameters to type variables.
+    type_parameters = [sf.mkTyPat(gluon_types.convertVariable(t),
+                                  gluon_types.convertKind(t.getKind()))
+                       for t in scm.qvars]
+
+    new_fn = sf.mkFun(type_parameters,
+                      dict_parameters + old_parameters,
+                      old_body)
+    return sf.mkDef(name.getSystemFVariable(), new_fn)
 
 def findConstraintDictionary(dict_env, constraint):
     """
     findConstraintDictionary([(ClassPredicate, ANFVariable)], ClassPredicate)
-        -> (placeholders, Expression) or None
-        
+        -> (placeholders, sf.Expression) or None
+
     Generate a dictionary for the given constraint from the dictionary
     environment.  If it can't be generated, return None.
     """
@@ -384,8 +441,9 @@ def findConstraintDictionary(dict_env, constraint):
     derivation, hnf_predicates = constraint.toHNF()
     placeholders, expr = derivation.getCode(dict_env)
 
-    # If the expression is a dictionary placeholder, then no progress was made
-    if isinstance(expr, ast.DictPlaceholderExpr): return None
+    # If an IdDerivation was returned and it became a placeholder, then
+    # no progress was made
+    if isinstance(derivation, IdDerivation) and placeholders: return None
 
     # Otherwise, use the results
     return (placeholders, expr)
@@ -394,7 +452,7 @@ def updateDictPlaceholder(gamma, dict_env, placeholder):
     """
     Update a placeholder that represents a class dictionary.
     """
-    assert isinstance(placeholder, ast.DictPlaceholderExpr)
+    assert isinstance(placeholder, DictPlaceholder)
 
     # Search for the dictionary in the environment
     result = findConstraintDictionary(dict_env, placeholder.getConstraint())
@@ -417,60 +475,33 @@ def updateRecVarPlaceholder(gamma, dict_env, placeholder):
     The placeholder is resolved, and new dictionary placeholders may be
     created.  A list of new, unresolved placeholders is returned.
     """
-    assert isinstance(placeholder, ast.RecVarPlaceholderExpr)
-    assert placeholder.dictionaryArguments is None
+    assert isinstance(placeholder, RecVarPlaceholder)
 
-    result_type = placeholder.getType()
+    result_type = placeholder.getFirstOrderType()
     variable = placeholder.getVariable()
 
     # The variable should have a type scheme now.  Use the type scheme to
-    # determine what dictionary placeholders are.
+    # determine what dictionary placeholders are needed.
     scm = findVariableTypeScheme(gamma, variable)
     if not scm:
         raise RuntimeError, "No type inferred for recursive variable"
 
-    # If there are no class constraints, then instantiate it as an
-    # ordinary variable.  No further work remains.
-    if not len(scm.constraints):
-        oper = ast.VariableExpr(variable,
-                                base = ast.ExprInit(type = result_type))
-        placeholder.setElaboration(oper)
-        return []
-
-    # Else, create a dictionary-passing function call.
-    # Create a parameter placeholder for each dictionary constraint
-    oper_constraints, oper_result_type = scm.instantiate()
+    # Create a dictionary-passing expression.
+    _, placeholders, expr, inst_result_type = scm.instantiate()
 
     # Make the instantiated type and constraints match the expected type.
     # This must succeed, because type inference has succeeded.
-    try: unification.unify(oper_result_type, result_type)
+    try: unification.unify(inst_result_type, result_type)
     except UnificationError, e:
         raise RuntimeError, "Dictionary elaboration failed"
 
-    # Make dictionary parameters.  Also, resolve them.
-    dict_parameters = []
-    unresolved_dict_parameters = []
-    dict_type_parameters = []
-    for cst in oper_constraints:
-        ty = cst.getDictionaryType()
-        param = ast.DictPlaceholderExpr(cst, base = ast.ExprInit(type = ty))
-        local_unresolved = updateDictPlaceholder(gamma, dict_env, param)
+    # Try to resolve dictionary parameters now
+    unresolved_placeholders = []
+    for ph in placeholders:
+        unresolved_placeholders += updateDictPlaceholder(gamma, dict_env, ph)
 
-        unresolved_dict_parameters += local_unresolved
-        dict_parameters.append(param)
-        dict_type_parameters.append(ty)
-
-    # Make dictionary-passing type
-    oper_type = hmtype.functionType(dict_type_parameters, result_type)
-    
-    # Build call expression
-    oper = ast.VariableExpr(variable,
-                            base = ast.ExprInit(type = oper_type))
-    call = ast.CallExpr(oper, dict_parameters,
-                        base = ast.ExprInit(type = result_type))
-
-    # Record resolution for this placeholder
-    placeholder.setElaboration(call)
+    # Record the resolution for this placeholder
+    placeholder.setElaboration(expr)
 
     # Return the unresolved dictionaries
     return unresolved_dict_parameters
@@ -489,9 +520,9 @@ def updateRecVarPlaceholders(gamma, dict_env, placeholders):
     deferred = []
 
     for ph in placeholders:
-        if isinstance(ph, ast.RecVarPlaceholderExpr):
+        if isinstance(ph, RecVarPlaceholder):
             new_phs = updateRecVarPlaceholder(gamma, dict_env, ph)
-        elif isinstance(ph, ast.DictPlaceholderExpr):
+        elif isinstance(ph, DictPlaceholder):
             new_phs = updateDictPlaceholder(gamma, dict_env, ph)
         else:
             raise TypeError, type(ph)
@@ -505,8 +536,9 @@ def updateRecVarPlaceholders(gamma, dict_env, placeholders):
 
 def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
     """
-    inferLetBindingType(Environment, Parameter, constraints, FirstOrderType,
-                        Expression) -> (constraints, Parameter)
+    inferLetBindingType(Environment, ast.Parameter, constraints,
+                        FirstOrderType, ast.Expression)
+        -> (constraints, sf.Pat)
 
     Infer types in a let-binding.  Bound variables are assigned a type scheme.
     The expression 'expr' is only used for error reporting.  The types are
@@ -516,8 +548,10 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
     """
 
     if param is None:
-        # No constraints
-        return (bound_constraints, None)
+        # Use a wildcard parameter.
+        return (bound_constraints,
+                sf.mkWildP(gluon_types.convertType(bound_type)))
+
     elif isinstance(param, ast.TupleParam):
         # Unify the bound type with a tuple type
         field_types = [hmtype.TyVar() for _ in param.fields]
@@ -539,49 +573,50 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
                                                    expr)
                                for p,t in zip(param.fields, field_types))
 
-        return (csts, ast.TupleParam(new_params))
+        return (csts, sf.mkTupleP(new_params))
 
     elif isinstance(param, ast.VariableParam):
         # Generalize this type
         csts = assignGeneralizedType(gamma, param.name, bound_type,
                                      bound_constraints)
-        return (csts, ast.VariableParam(param.name))
+        return (csts, sf.mkVarP(param.name.getSystemFVariable(),
+                                gluon_types.convertType(param.name.getTypeScheme())))
 
     else:
         raise TypeError, type(param)
 
-def exposeFirstOrderBinding(gamma, param):
+def exposeParameterBinding(gamma, param):
     """
-    exposeFirstOrderBinding(gamma, param) -> parameter
-    Create new types for a first-order binding.
+    exposeParameterBinding(gamma, ast.Parameter)
+        -> (sf.Parameter, FirstOrderType)
+    Create new types for a first-order parameter binding.
     The environment is updated with type assumptions for bound variables.
-    The parameter, with type attached, is returned.
+    The parameter and its type are returned.
     """
 
     if isinstance(param, ast.TupleParam):
-        new_fields = exposeFirstOrderBindings(gamma, param.fields)
-        return ast.TupleParam(new_fields,
-                              type = hmtype.tupleType([p.getType() for p in new_fields]))
+        new_fields, types = exposeParameterBindings(gamma, param.fields)
+        return (sf.mkTupleP(new_fields), hmtype.tupleType(types))
 
     elif isinstance(param, ast.VariableParam):
-        # Create a new type variable for this parameter
-        if param.annotation:
-            t = param.annotation
-        else:
-            t = hmtype.TyVar()
+        # If this parameter's type has been declared, use that type;
+        # otherwise, create a new type variable
+        t = param.annotation or hmtype.TyVar()
         assumeFirstOrderType(gamma, param.name, t)
-        return ast.VariableParam(param.name, type = t)
+        return (sf.mkVarP(param.name.getSystemFVariable(),
+                          gluon_types.convertType(t)), t)
 
     else:
         raise TypeError, type(param)
 
-def exposeFirstOrderBindings(gamma, params):
+def exposeParameterBindings(gamma, params):
     """
-    Expose a list of bindings.  The environment is updated with all bindings.
-    A new set of parameters, labeled with types, is returned.
+    Expose a list of first-order parameter bindings.
+    The environment is updated with all bindings.
+    A new set of parameters and their types are returned.
     """
     # Expose bindings, updating the environment
-    return [exposeFirstOrderBinding(gamma, p) for p in params]
+    return unzip(exposeParameterBinding(gamma, p) for p in params)
 
 def exposeRecursiveVariable(gamma, v):
     """
@@ -600,58 +635,51 @@ def exposeRecursiveVariable(gamma, v):
 def exposeRecursiveVariables(gamma, vars):
     return [exposeRecursiveVariable(gamma, v) for v in vars]
 
-def exposeRecursiveBinding(gamma, param):
+def inferFunctionTypeAndReturnParts(gamma, func):
     """
-    exposeRecursiveBinding(gamma, param) -> first-order type
+    inferFunctionType(Environment, ast.Function)
+        -> ((constraints, placeholders), ([sf.Pat], sf.Exp, FirstOrderType))
 
-    Create new first-order types for a recursive binding.
-    The environment is updated with types and dictionary-passing placeholder
-    information.
-    """
-    if isinstance(param, ast.TupleParam):
-        field_types = exposeRecursiveBindings(gamma, param.fields)
-        return hmtype.tupleType(field_types)
-
-    elif isinstance(param, ast.VariableParam):
-        return exposeRecursiveVariable(gamma, param.name)
-
-    else:
-        raise TypeError, type(param)
-
-def exposeRecursiveBindings(gamma, params):
-    return [exposeRecursiveBinding(gamma, p) for p in params]
-
-def inferFunctionType(gamma, func):
-    """
-    inferFunctionType(Environment, Function)
-        -> (constraints, placeholders, Function)
-
-    Infer the type of a function.  Return a copy of the function with type
-    information attached.
+    Infer the type of a function.  Return the function's parameters and body.
     """
     # Create local environment by extending gamma with the function parameters
     local_env = Environment(gamma)
-    parameters = exposeFirstOrderBindings(local_env, func.parameters)
-    param_types = [p.getType() for p in parameters]
+    parameters, param_types = \
+        exposeParameterBindings(local_env, func.parameters)
 
     # Process body
-    (csts, placeholders), body = inferExpressionType(local_env, func.body)
+    (csts, placeholders), (body, body_type) = \
+        inferExpressionType(local_env, func.body)
 
-    # check return type with the annotated type, if there is any
+    # Check return type against the annotated type, if there is any
     if func.annotation:
-        try: fn_ret_type = unification.unify(body.getType(), func.annotation)
+        try: fn_ret_type = unification.unify(body_type, func.annotation)
         except unification.UnificationError, e:
             raise TypeCheckError, "Return type does not unify with the annotated type"
 
-    new_func = ast.Function(func.mode, parameters, body,
-                            type = hmtype.functionType(param_types, body.getType()))
+    fn_type = hmtype.functionType(param_types, body_type)
 
-    return (csts, placeholders, new_func)
+    return ((csts, placeholders), (parameters, body, fn_type))
+
+def inferFunctionType(gamma, func):
+    """
+    inferFunctionType(Environment, ast.Function)
+        -> ((constraints, placeholders), (sf.Fun, FirstOrderType))
+
+    Infer the type of a function.  Return a system-F function.
+    """
+    (cph, (parameters, body, fn_type)) = \
+        inferFunctionTypeAndReturnParts(gamma, func)
+
+    # Create a function.  It has no type parameters.
+    new_func = sf.mkFun([], parameters, body)
+
+    return (cph, (new_func, fn_type))
 
 def inferDefGroup(gamma, group):
     """
-    inferDefGroup(gamma, group)
-        -> (environment, constraints, placeholders, group)
+    inferDefGroup(gamma, [ast.FunctionDef])
+        -> ((constraints, placeholders), [sf.FunctionDef])
 
     Infer types in a definition group.  Each function in the group is assigned
     a type scheme.  The definition group's type assignments are returned as a
@@ -675,21 +703,21 @@ def inferDefGroup(gamma, group):
     # Infer all function types in the definition group.
     # Return the rewritten functions.
     def inferFun(d, d_type):
-        fn_csts, fn_ph, fn = inferFunctionType(rec_gamma, d.function)
+        (fn_csts, fn_ph), (fn_params, fn_body, fn_type) = \
+            inferFunctionTypeAndReturnParts(rec_gamma, d.function)
 
         # Unify the function's assumed type with the inferred type
-        try: unification.unify(fn.type, d_type)
+        try: unification.unify(fn_type, d_type)
         except unification.UnificationError, e:
             raise TypeCheckError, "Type error in recursive definition group"
 
-        # Save the function's name and body
-        new_fn = ast.FunctionDef(d.name, fn)
-
-        return ((fn_csts, fn_ph), new_fn)
+        return ((fn_csts, fn_ph), (d.name, fn_params, fn_body))
 
     # The functions in the definition group will have the same
     # class constraint context.
-    (group_csts, group_phs), new_group = \
+    # This performs unification, setting binding_types to the correct
+    # first-order types for this definition group.
+    (group_csts, group_phs), new_group_functions = \
         collectCPh(inferFun(*x) for x in zip(group, binding_types))
 
     # Generalize the function types
@@ -700,19 +728,21 @@ def inferDefGroup(gamma, group):
                                zip(bound_vars, explicit_qvars, binding_types),
                                group_csts)
 
-    # Add dictionary variable parameters to each function
+    # Build function definitions; add System F parameters
     dict_env = makeDictionaryEnvironment(retained_csts)
-    for f in new_group:
-        addDictionaryParameters(dict_env, f)
 
-    # Update placeholders from the old environment
+    new_group = [makePolymorphicFunction(dict_env, name, fn_params, fn_body)
+                 for name, fn_params, fn_body in new_group_functions]
+
+    # Update recursive variable placeholders
     deferred_phs = updateRecVarPlaceholders(gamma, dict_env, group_phs)
 
-    return (deferred_csts, deferred_phs, new_group)
+    return ((deferred_csts, deferred_phs), new_group)
 
 def inferExpressionType(gamma, expr):
     """
-    inferExpressionType(env, expr) -> ((constraints, placeholders), Expression)
+    inferExpressionType(Environment, ast.Expression)
+        -> ((constraints, placeholders), (sf.Expression, FirstOrderType))
 
     Infer the type of an expression in environment @env.
     Return a new copy of the expression; the returned expression's type is
@@ -724,79 +754,87 @@ def inferExpressionType(gamma, expr):
     # Structural recursion.  Infer types of subexpressions.
     # In each branch:
     #   put the new, typed expression in 'new_expr'
-    #   put the set of constraints in 'csts'
-    #   put the list of generated placeholders in 'placeholders'
+    #   put its type in 'new_expr_type'
+    #   put the list of constraints and placeholders in 'cph'
     #   do not update the environment
     if isinstance(expr, ast.VariableExpr):
         # If the variable has a type scheme, then instantiate it.
         # Otherwise, look up its type in the environment.
-        csts, placeholders, new_expr, ty = findVariableType(gamma,
-                                                            expr.variable)
+        cph, (new_expr, new_expr_type) = findVariableType(gamma, expr.variable)
 
     elif isinstance(expr, ast.LiteralExpr):
-        ty = literalSignature(expr.literal)
-        new_expr = ast.LiteralExpr(expr.literal,
-                                   base = ast.ExprInit(type = ty))
-        csts = []
-        placeholders = []
+        new_expr_type = literalSignature(expr.literal)
+        sf_type = gluon_types.convertType(new_expr_type)
+        if isinstance(expr.literal, int):
+            literal = sf.mkIntL(expr.literal)
+        elif isinstance(expr.literal, float):
+            literal = sf.mkFloatL(expr.literal)
+        elif isinstance(expr.literal, bool):
+            literal = sf.mkBoolL(expr.literal)
+        elif expr.literal is None:
+            literal = sf.NoneL
+        else:
+            raise TypeError, type(expr.literal)
+        new_expr = sf.mkLitE(literal, sf_type)
+        cph = unitCPh
 
     elif isinstance(expr, ast.IfExpr):
-        (csts_cond, ph_cond), cond = inferExpressionType(gamma, expr.argument)
+        cph_cond, (cond, cond_type) = \
+            inferExpressionType(gamma, expr.argument)
         try:
-            unification.unify(cond.getType(), builtin_data.type_bool)
+            unification.unify(cond_type, builtin_data.type_bool)
         except unification.UnificationError, e:
             print_ast.printAst(expr.argument)
             raise TypeCheckError, "Condition of 'if' expression msut be a boolean"
-        (csts_true, ph_true), if_true = inferExpressionType(gamma, expr.ifTrue)
-        (csts_false, ph_false), if_false = inferExpressionType(gamma, expr.ifFalse)
+        cph_true, (if_true, if_true_type) = \
+            inferExpressionType(gamma, expr.ifTrue)
+        cph_false, (if_false, if_false_type) = \
+            inferExpressionType(gamma, expr.ifFalse)
 
         try:
-            ty = unification.unify(if_true.getType(), if_false.getType())
+            new_expr_type = unification.unify(if_true_type, if_false_type)
         except unification.UnificationError, e:
             print_ast.printAst(expr)
             raise TypeCheckError, "Branches of 'if' expression have different types"
 
-        new_expr = ast.IfExpr(cond, if_true, if_false,
-                              base = ast.ExprInit(type = ty))
-        csts = csts_cond + csts_true + csts_false
-        placeholders = ph_cond + ph_true + ph_false
+        new_expr = sf.mkIfE(cond, if_true, if_false)
+        cph = catCPh((cph_cond, cph_true, cph_false))
 
     elif isinstance(expr, ast.TupleExpr):
         # Process subexpressions
-        (csts, placeholders), args = \
-            collectCPh(inferExpressionType(gamma, arg)
-                       for arg in expr.arguments)
+        cph, args_types = collectCPh(inferExpressionType(gamma, arg)
+                                     for arg in expr.arguments)
+        args, arg_types = unzip(args_types)
 
         # Construct tuple type
-        ty = hmtype.tupleType([arg.getType() for arg in args])
-        new_expr = ast.TupleExpr(args,
-                                 base = ast.ExprInit(type = ty))
+        new_expr_type = hmtype.tupleType(arg_types)
+        new_expr = sf.mkTupleE(args)
 
     elif isinstance(expr, ast.CallExpr):
         # Infer types of subexpressions
-        (csts_oper, ph_oper), oper = inferExpressionType(gamma, expr.operator)
-        (csts_args, ph_args), args = \
+        cph_oper, (oper, oper_type) = inferExpressionType(gamma, expr.operator)
+        cph_args, args_types = \
             collectCPh(inferExpressionType(gamma, arg)
                                for arg in expr.arguments)
+        args, arg_types = unzip(args_types)
 
         # Create function type; unify
-        ty = hmtype.TyVar()
-        ty_fn = hmtype.functionType([a.getType() for a in args], ty)
-        try: unification.unify(oper.getType(), ty_fn)
+        new_expr_type = hmtype.TyVar()
+        try: unification.unify(oper_type,
+                               hmtype.functionType(arg_types, new_expr_type))
         except unification.UnificationError, e:
             print_ast.printAst(expr)
             print "Function type:", pretty.renderString(ty_fn.pretty())
             print "Argument types:", [pretty.renderString(x.getType().pretty()) for x in args]
             raise TypeCheckError, "Type mismatch in function call"
 
-        new_expr = ast.CallExpr(oper, args,
-                                base = ast.ExprInit(type = ty))
-        csts = csts_oper + csts_args
-        placeholders = ph_oper + ph_args
+        new_expr = sf.mkCallE(oper, args)
+        cph = catCPh(cph_oper, cph_args)
 
     elif isinstance(expr, ast.LetExpr):
         # Process the RHS
-        (csts_rhs, ph_rhs), rhs = inferExpressionType(gamma, expr.rhs)
+        (csts_rhs, ph_rhs), (rhs, rhs_type) = \
+            inferExpressionType(gamma, expr.rhs)
 
         # Bind the LHS
         # The deferred constraints and local environment will be used while
@@ -804,46 +842,44 @@ def inferExpressionType(gamma, expr):
         local_gamma = Environment(gamma)
         csts_rhs_deferred, lhs = \
             inferLetBindingType(local_gamma, expr.parameter, csts_rhs,
-                                rhs.getType(), expr)
+                                rhs_type, expr)
 
         # Process the body
-        (csts_body, ph_body), body = inferExpressionType(local_gamma, expr.body)
-        new_expr = ast.LetExpr(lhs, rhs, body,
-                               base = ast.ExprInit(type = body.getType()))
-        csts = csts_rhs_deferred + csts_body
-        placeholders = ph_rhs + ph_body
+        cph_body, (body, new_expr_type) = \
+            inferExpressionType(local_gamma, expr.body)
+
+        new_expr = sf.mkLetE(lhs, rhs, body)
+        cph = catCPh((csts_rhs_deferred, ph_rhs), cph_body)
 
     elif isinstance(expr, ast.LetrecExpr):
         # Process the local functions and assign type schemes
         local_gamma = Environment(gamma)
-        csts_deferred, ph_group, def_group = \
-            inferDefGroup(local_gamma, expr.definitions)
+        cph_group, def_group = inferDefGroup(local_gamma, expr.definitions)
 
         # Infer body of letrec
-        (csts_body, ph_body), body = inferExpressionType(gamma, expr.body)
-        new_expr = ast.LetrecExpr(def_group, body,
-                                  base = ast.ExprInit(type = body.getType()))
-        csts = csts_deferred + csts_body
-        placeholders = ph_group + ph_body
+        cph_body, (body, new_expr_type) = inferExpressionType(gamma, expr.body)
+
+        new_expr = sf.mkLetrecE(def_group, body)
+        cph = catCPh(cph_group, cph_body)
 
     elif isinstance(expr, ast.UndefinedExpr):
-        new_expr = ast.UndefinedExpr(base = ast.ExprInit(type = hmtype.TyVar()))
-        csts = []
-        placeholders = []
+        new_expr_type = hmtype.TyVar()
+        new_expr = sf.mkUndefinedE(gluon_types.convertType(new_expr_type))
+        cph = unitCPh
 
     elif isinstance(expr, ast.FunExpr):
-        csts, placeholders, func = inferFunctionType(gamma, expr.function)
-        new_expr = ast.FunExpr(func, base = ast.ExprInit(type = func.type))
+        cph, (fun, new_expr_type) = inferFunctionType(gamma, expr.function)
+        new_expr = sf.mkFunE(fun)
 
     else:
         raise TypeError, type(expr)
 
     # Save and return the computed type
-    assert isinstance(new_expr, ast.Expression)
-    for c in csts: assert isinstance(c, hmtype.ClassPredicate)
-    for ph in placeholders: assert isinstance(ph, ast.PlaceholderExpr)
+    assert sf.isExp(new_expr)
+    assert isinstance(new_expr_type, hmtype.FirstOrderType)
+    assert isValidCPh(cph)
 
-    return ((csts, placeholders), new_expr)
+    return (cph, (new_expr, new_expr_type))
 
 def doTypeInference(anf_form):
     assert isinstance(anf_form, ast.Module)
@@ -851,72 +887,14 @@ def doTypeInference(anf_form):
     global_gamma = Environment()
     new_groups = []
     for defgroup in anf_form.iterDefinitionGroups():
-        csts, placeholders, new_group = \
+        (csts, placeholders), new_group = \
             inferDefGroup(global_gamma, defgroup)
         assert not csts     # There should be no deferred constraints here
-        # assert not placeholders # All placeholders should have been resolved
+        assert not placeholders # All placeholders should have been resolved
         new_groups.append(new_group)
 
-    return ast.Module(new_groups)
+    return sf.makeAndEvaluateModule(sum(new_groups, []))
 
 def inferTypes(anf_form):
-    new_ast = doTypeInference(anf_form)
-    removePlaceholders(new_ast)
-    return new_ast
-
-###############################################################################
-# Placeholder removal: replace placeholder expressions with their actual values
-
-def removePlaceholders(module):
-    for definition in module.iterDefinitions():
-        removePlaceholdersFunctionDef(definition)
-
-def removePlaceholdersFunctionDef(fundef):
-    removePlaceholdersFunction(fundef.function)
-
-def removePlaceholdersFunction(fun):
-    fun.body = removePlaceholdersExpression(fun.body)
-
-def removePlaceholdersExpression(expr):
-    if isinstance(expr, (ast.VariableExpr, ast.LiteralExpr, ast.UndefinedExpr)):
-        return expr
-    elif isinstance(expr, ast.TupleExpr):
-        expr.arguments = [removePlaceholdersExpression(e)
-                          for e in expr.arguments]
-        return expr
-    elif isinstance(expr, ast.DictionaryBuildExpr):
-        expr.superclasses = [removePlaceholdersExpression(e)
-                             for e in expr.superclasses]
-        expr.methods = [removePlaceholdersExpression(e)
-                        for e in expr.methods]
-        return expr
-    elif isinstance(expr, ast.CallExpr):
-        expr.arguments = [removePlaceholdersExpression(e)
-                          for e in expr.arguments]
-        expr.operator = removePlaceholdersExpression(expr.operator)
-        return expr
-    elif isinstance(expr, ast.IfExpr): 
-        expr.argument = removePlaceholdersExpression(expr.argument)
-        expr.ifTrue = removePlaceholdersExpression(expr.ifTrue)
-        expr.ifFalse = removePlaceholdersExpression(expr.ifFalse)
-        return expr
-    elif isinstance(expr, ast.FunExpr):
-        removePlaceholdersFunction(expr.function)
-        return expr
-    elif isinstance(expr, ast.LetExpr):
-        expr.rhs = removePlaceholdersExpression(expr.rhs)
-        expr.body = removePlaceholdersExpression(expr.body)
-        return expr
-    elif isinstance(expr, ast.LetrecExpr):
-        for e in expr.definitions: removePlaceholdersFunctionDef(e)
-        expr.body = removePlaceholdersExpression(expr.body)
-        return expr
-    elif isinstance(expr, ast.PlaceholderExpr):
-        # Replace with the placeholder's actual value
-        return removePlaceholdersExpression(expr.getElaboration())
-    else:
-        raise TypeError, type(expr)
-
-
-       
+    return doTypeInference(anf_form)
 

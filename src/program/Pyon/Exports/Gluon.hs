@@ -2,12 +2,14 @@
 
 {-# LANGUAGE ForeignFunctionInterface #-}
 
-module PythonInterface.Gluon where
+module Pyon.Exports.Gluon() where
 
 import Prelude hiding(catch)
 
+import Control.Applicative
 import Control.Exception
-
+import Data.Traversable
+import Data.Typeable
 import Foreign.C.Types
 import Foreign.C.String
 
@@ -18,19 +20,15 @@ import Gluon.Core
 
 import PythonInterface.Python
 import PythonInterface.HsObject
-import Gluon.Globals
-import Gluon.Builtins.Pyon
+import Pyon.Globals
+import Pyon.Exports.Delayed
 
-foreign export ccall gluon_loadBuiltins :: IO CInt
+-------------------------------------------------------------------------------
+-- Constants
 
--- Perform initialization by loading builtin modules.
--- Return nonzero on success, 0 otherwise.
-gluon_loadBuiltins =
-  (loadBuiltins >> return 1) `catch` printExceptionAndReturn
-    where
-      printExceptionAndReturn e = do
-        print (e :: SomeException)
-        return 0
+-- Helper function for exporting constants that may raise an exception
+asGlobalObject :: Typeable a => a -> IO PyPtr
+asGlobalObject = rethrowExceptionsInPython . newHsObject
 
 foreign export ccall gluon_noSourcePos :: IO PyPtr
 
@@ -48,23 +46,14 @@ gluon_mkSortLevel = newHsObject SortLevel
 
 foreign export ccall gluon_con_Int :: IO PyPtr
 foreign export ccall gluon_con_Float :: IO PyPtr
-foreign export ccall gluon_con_NoneType :: IO PyPtr
-foreign export ccall gluon_con_bool :: IO PyPtr
-foreign export ccall gluon_con_list :: IO PyPtr
-foreign export ccall gluon_con_EqDict :: IO PyPtr
-foreign export ccall gluon_con_OrdDict :: IO PyPtr
 foreign export ccall gluon_type_Pure :: IO PyPtr
 
-asGlobalObject :: Typeable a => a -> IO PyPtr
-asGlobalObject = rethrowExceptionsInPython . newHsObject
 gluon_con_Int = asGlobalObject $ builtin the_Int
 gluon_con_Float = asGlobalObject $ builtin the_Float
-gluon_con_NoneType = asGlobalObject $ getPyonBuiltin the_NoneType
-gluon_con_bool = asGlobalObject $ getPyonBuiltin the_bool
-gluon_con_list = asGlobalObject $ getPyonBuiltin the_list
-gluon_con_EqDict = asGlobalObject $ getPyonBuiltin the_EqDict
-gluon_con_OrdDict = asGlobalObject $ getPyonBuiltin the_OrdDict
-gluon_type_Pure = asGlobalObject pureKindE
+gluon_type_Pure = asGlobalObject (pure pureKindE :: Delayed (Exp Core))
+
+-------------------------------------------------------------------------------
+-- Constructors
 
 foreign export ccall gluon_pgmLabel :: CString -> CString -> IO PyPtr
 
@@ -103,14 +92,6 @@ gluon_mkNewAnonymousVariable lv = rethrowExceptionsInPython $ do
   hs_lv <- fromHsObject' lv
   newHsObject $ mkAnonymousVariable hs_id hs_lv
 
-foreign export ccall gluon_getTupleCon :: CInt -> IO PyPtr
-
-gluon_getTupleCon n = rethrowExceptionsInPython $
-  case getPyonTupleType (fromIntegral n)
-  of Just c  -> newHsObject c
-     Nothing -> throwPythonExc pyIndexError $ 
-                "Tuple type of size " ++ show n ++ " not available"
-
 -- * Core syntax
 
 foreign export ccall gluon_Binder_plain :: PyPtr -> PyPtr -> IO PyPtr
@@ -138,24 +119,27 @@ foreign export ccall gluon_mkTupTyE :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall gluon_mkLitE :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall gluon_mkInternalIntLitE :: CInt -> IO PyPtr
 
+expHsObject :: Delayed (Exp Core) -> IO PyPtr
+expHsObject = newHsObject
+
 gluon_mkAppE pos operator arguments = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   hs_operator <- fromHsObject' operator
   hs_arguments <- fromListOfHsObject' arguments
-  newHsObject (mkAppE hs_pos hs_operator hs_arguments :: Exp Core)
+  expHsObject $ mkAppE hs_pos <$> hs_operator <*> sequenceA hs_arguments
 
 gluon_mkConAppE pos operator arguments = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   hs_operator <- fromHsObject' operator
   hs_arguments <- fromListOfHsObject' arguments
-  newHsObject (mkConAppE hs_pos hs_operator hs_arguments :: Exp Core)
+  expHsObject $ mkConAppE hs_pos hs_operator <$> sequenceA hs_arguments
 
 gluon_mkLamE pos var ty body = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   hs_var <- fromHsObject' var
   hs_ty <- fromHsObject' ty
   hs_body <- fromHsObject' body
-  newHsObject (mkLamE hs_pos hs_var hs_ty hs_body :: Exp Core)
+  expHsObject $ mkLamE hs_pos hs_var <$> hs_ty <*> hs_body
 
 gluon_mkFunE pos isLin var dom rng = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
@@ -163,42 +147,42 @@ gluon_mkFunE pos isLin var dom rng = rethrowExceptionsInPython $ do
   hs_var <- fromHsObject' var
   hs_dom <- fromHsObject' dom
   hs_rng <- fromHsObject' rng
-  newHsObject (mkFunE hs_pos hs_isLin hs_var hs_dom hs_rng :: Exp Core)
+  expHsObject $ mkFunE hs_pos hs_isLin hs_var <$> hs_dom <*> hs_rng
 
 gluon_mkArrowE pos isLin dom rng = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   let hs_isLin = isLin /= 0
   hs_dom <- fromHsObject' dom
   hs_rng <- fromHsObject' rng
-  newHsObject (mkArrowE hs_pos hs_isLin hs_dom hs_rng :: Exp Core)
+  expHsObject $ mkArrowE hs_pos hs_isLin <$> hs_dom <*> hs_rng
 
 gluon_mkVarE pos v = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   hs_v <- fromHsObject' v
-  newHsObject (mkVarE hs_pos hs_v :: Exp Core)
+  expHsObject $ pure $ mkVarE hs_pos hs_v
 
 gluon_mkConE pos c = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   hs_c <- fromHsObject' c
-  newHsObject (mkConE hs_pos hs_c :: Exp Core)
+  expHsObject $ pure $ mkConE hs_pos hs_c
 
 gluon_mkTupE pos t = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   hs_t <- fromHsObject' t
-  newHsObject (mkTupE hs_pos hs_t :: Exp Core)
+  expHsObject $ mkTupE hs_pos <$> hs_t
 
 gluon_mkTupTyE pos t = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   hs_t <- fromHsObject' t
-  newHsObject (mkTupTyE hs_pos hs_t :: Exp Core)
+  expHsObject $ mkTupTyE hs_pos <$> hs_t
 
 gluon_mkLitE pos t = rethrowExceptionsInPython $ do
   hs_pos <- fromHsObject' pos
   hs_t <- fromHsObject' t
-  newHsObject (mkLitE hs_pos hs_t :: Exp Core)
+  expHsObject $ mkLitE hs_pos <$> hs_t
 
 gluon_mkInternalIntLitE n = rethrowExceptionsInPython $ do
-  newHsObject (mkInternalIntLitE (fromIntegral n) :: Exp Core)
+  expHsObject $ pure $ mkInternalIntLitE (fromIntegral n)
 
 foreign export ccall gluon_Tuple_Core_cons :: PyPtr -> PyPtr -> IO PyPtr
 
@@ -221,3 +205,36 @@ gluon_Prod_Core_cons param tail = rethrowExceptionsInPython $ do
 foreign export ccall gluon_Prod_Core_nil :: IO PyPtr
 
 gluon_Prod_Core_nil = newHsObject (Unit :: Prod Core)
+
+-------------------------------------------------------------------------------
+-- Predicates
+-- These functions return nonzero for 'True', zero for 'False'.
+
+test :: IO a -> (a -> Bool) -> IO Bool
+m `test` f = return . f =<< m
+
+testJust :: IO (Maybe a) -> (a -> Bool) -> IO Bool
+m `testJust` f = m `test` maybe False f
+
+foreign export ccall gluon_isExp :: PyPtr -> IO Bool
+
+gluon_isExp p = do
+  t <- hsObjectType p 
+  return $ t == typeOf (undefined :: Delayed CExp)
+
+-------------------------------------------------------------------------------
+-- Other functions
+
+foreign export ccall gluon_loadBuiltins :: IO Bool
+
+-- Perform initialization by loading builtin modules.
+-- Return nonzero on success, 0 otherwise.
+gluon_loadBuiltins =
+  (loadBuiltins >> return True) `catch` printExceptionAndReturn
+    where
+      printExceptionAndReturn e = do
+        print (e :: SomeException)
+        return False
+
+foreign export ccall gluon_builtinsLoaded :: IO Bool
+gluon_builtinsLoaded = checkBuiltinsStatus

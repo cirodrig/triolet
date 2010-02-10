@@ -19,7 +19,54 @@
              DeriveDataTypeable,
              BangPatterns, 
              FlexibleInstances #-}
-module PythonInterface.Python where
+module PythonInterface.Python
+       (-- * Python data types
+        PyObject, 
+        PyPtr,
+        Python(toPython),
+        
+        -- * Exceptions
+        PythonExc,
+        PythonExcType,
+        pyRuntimeError, pyIndexError, pyTypeError,
+        setPythonExc, throwPythonExc, raisePythonExc,
+        rethrowExceptionsInPython,
+        checkNull,
+        catchPythonExc,
+        convertPythonExcToNull,
+        
+        -- * High-level routines
+        initializePython,
+        runPythonMain,
+        
+        -- * Reference counting
+        py_IncRef, py_DecRef,
+        withPyPtr, withPyPtrExc,
+        safeToPython, safeToPythonExc,
+        
+        -- * Python object protocols
+        isInstance,
+        getBuiltins, importModule,
+        
+        -- ** Primitive objects
+        pyNone, isPyNone,
+        stringToPython, fromPythonString, AsString(..),
+        fromPythonInt,
+        
+        -- ** Lists
+        newList, isList, getListSize, setListItem, getListItem,
+        
+        -- ** Dictionaries
+        newDict, setDictItem,
+        
+        -- ** Tuples
+        newTuple, isTuple, setTupleItem, getTupleItem, toPythonTuple,
+        
+        -- ** Abstract protocols
+        call0, call1, call2, call3, call4, callWithTuple,
+        getAttr, getItemString        
+       )
+where
 
 import Prelude hiding(catch)
 
@@ -66,8 +113,8 @@ instance Python (Ptr PyObject) where
 -------------------------------------------------------------------------------
 -- Python exceptions
 
--- Indicates that an error occurred in the Python runtime.
--- The Python runtime has the details of the error.
+-- | A Haskell exception that indicates a Python-related error. 
+-- Details of the error are recorded in the Python runtime.
 data PythonExc = PythonExc deriving(Typeable)
 
 instance Show PythonExc where
@@ -75,7 +122,8 @@ instance Show PythonExc where
 
 instance Exception PythonExc
 
--- An exception type from Python.
+-- | A reference to one of Python's exception types.
+-- It is not necessary to adjust a PythonExcType's reference count.
 newtype PythonExcType = PythonExcType {fromPythonExcType :: Ptr PyPtr}
 
 foreign import ccall "Python.h &PyExc_RuntimeError"
@@ -226,6 +274,9 @@ foreign import ccall "Python.h &_Py_NoneStruct"
 pyNone :: IO PyPtr
 pyNone = do py_IncRef py_None
             return py_None
+            
+isPyNone :: PyPtr -> Bool
+isPyNone x = x == py_None
 
 foreign import ccall "Python.h PyString_FromString"
     pyString_FromString :: CString -> IO PyPtr
@@ -235,7 +286,7 @@ stringToPython s = checkNull $ withCString s $ \p -> pyString_FromString p
 
 foreign import ccall "Python.h PyString_AsString"
   pyString_AsString :: PyPtr -> IO CString
-                       
+
 fromPythonString :: PyPtr -> IO String
 fromPythonString p = do
   s <- pyString_AsString p
@@ -344,6 +395,9 @@ getListItem xs n = do
 foreign import ccall "Python.h PyDict_New"
     pyDict_New :: IO PyPtr
 
+newDict :: IO PyPtr
+newDict = pyDict_New
+
 foreign import ccall "Python.h PyDict_SetItem"
     pyDict_SetItem :: PyPtr -> PyPtr -> PyPtr -> IO CInt
 
@@ -398,6 +452,9 @@ getTupleItem ptr n = do
 
 foreign import ccall "Python.h PyObject_CallObject"
   pyObject_CallObject :: PyPtr -> PyPtr -> IO PyPtr
+                         
+callWithTuple :: PyPtr -> PyPtr -> IO PyPtr
+callWithTuple = pyObject_CallObject
 
 call0 :: PyPtr -> IO PyPtr
 call0 ptr = checkNull $ pyObject_CallObject ptr nullPtr

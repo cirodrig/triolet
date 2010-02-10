@@ -5,7 +5,7 @@
              TypeSynonymInstances,
              FlexibleContexts,
              TypeFamilies #-}
-module Gluon.Pyon.Rename()
+module Pyon.Core.Rename()
 where
 
 import Gluon.Common.Error
@@ -14,7 +14,7 @@ import Gluon.Core.Syntax
 import Gluon.Core.RenameBase
 import Gluon.Core.Rename
 
-import Gluon.Pyon.Syntax
+import Pyon.Core.Syntax
 
 -- Constraints for the expression component of a syntax to be recursive
 #define RecursiveSyntax(syn) \

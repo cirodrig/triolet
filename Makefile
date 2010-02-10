@@ -20,20 +20,26 @@ L_OPTS=$(LFLAGS) $(PACKAGE_FLAGS) $(LIDIR_FLAGS) $(LIB_FLAGS)
 PYON_C_SRCS=Main_c.c \
 	PythonInterface/Python_c.c \
 	PythonInterface/HsObject_c.c \
-	Gluon/Gluon_c.c
+	Pyon/Exports/Gluon_c.c \
+	Pyon/Exports/SystemF_c.c
 PYON_C_GENERATED_SRCS=Parser/Driver_stub.c \
-	Gluon/Gluon_stub.c
+	Pyon/Exports/Gluon_stub.c \
+	Pyon/Exports/SystemF_stub.c
 PYON_HS_SRCS=Main.hs \
 	Parser/Driver.hs \
 	Parser/Parser.hs \
 	Parser/Output.hs \
 	Parser/ParserSyntax.hs \
-	Gluon/Gluon.hs \
-	Gluon/Globals.hs \
-	Gluon/Builtins/Pyon.hs \
-	Gluon/Pyon/Syntax.hs \
-	Gluon/Pyon/Rename.hs \
-	Gluon/Pyon/Typecheck.hs
+	Pyon/Exports/Delayed.hs \
+	Pyon/Exports/Gluon.hs \
+	Pyon/Exports/SystemF.hs \
+	Pyon/Globals.hs \
+	Pyon/SystemF/Syntax.hs \
+	Pyon/SystemF/Builtins.hs \
+	Pyon/SystemF/Print.hs \
+	Pyon/Core/Syntax.hs \
+	Pyon/Core/Rename.hs \
+	Pyon/Core/Typecheck.hs
 
 PYON_HS_GENERATED_SRCS=Paths_pyon.hs \
 	PythonInterface/Python.hs \
@@ -46,7 +52,7 @@ PYON_OBJECTS=$(PYON_HS_OBJECTS) $(PYON_C_OBJECTS)
 PYON_SCRIPTS=pyon_testsuite pyon_compile
 PYON_GENERATED_SCRIPTS=$(foreach sc, $(PYON_SCRIPTS), build/scripts/$(sc))
 
-PYON_TARGET=build/program/pyon
+PYON_TARGET=build/pyon
 
 # Object files with full path
 PYON_OBJECT_FILES=$(foreach obj, $(PYON_OBJECTS), $(BUILDDIR)/$(obj))
@@ -107,6 +113,7 @@ src/pyon/data_dir.py :
 $(BUILDDIR)/Main_c.o : $(BUILDDIR)/Parser/Driver_stub.h
 $(BUILDDIR)/Main_c.o : $(SRCDIR)/PythonInterface/HsObject.h
 $(BUILDDIR)/PythonInterface/HsObject.o : $(SRCDIR)/PythonInterface/HsObject.h
+$(BUILDDIR)/PythonInterface/HsObject.o : $(BUILDDIR)/PythonInterface/Python.hi
 $(BUILDDIR)/Main.o : $(BUILDDIR)/Parser/Driver_stub.h
 $(BUILDDIR)/Main.o : $(BUILDDIR)/PythonInterface/Python.hi
 $(BUILDDIR)/Parser/Driver_stub.c \
@@ -121,27 +128,39 @@ $(BUILDDIR)/Parser/Driver_stub.c \
 $(BUILDDIR)/Parser/Output.o : $(BUILDDIR)/PythonInterface/Python.hi
 $(BUILDDIR)/Parser/Output.o : $(BUILDDIR)/Parser/ParserSyntax.hi
 $(BUILDDIR)/Parser/Parser.o : $(BUILDDIR)/Parser/ParserSyntax.hi
-$(BUILDDIR)/Gluon/Globals.o : $(BUILDDIR)/Gluon/Builtins/Pyon.hi
-$(BUILDDIR)/Gluon/Gluon_stub.c \
- $(BUILDDIR)/Gluon/Gluon_stub.h \
- $(BUILDDIR)/Gluon/Gluon.o \
+$(BUILDDIR)/Pyon/Globals.o : $(BUILDDIR)/Pyon/SystemF/Builtins.hi
+$(BUILDDIR)/Pyon/Globals.o : $(BUILDDIR)/Pyon/SystemF/Syntax.hi
+$(BUILDDIR)/Pyon/Exports/Gluon_stub.c \
+ $(BUILDDIR)/Pyon/Exports/Gluon_stub.h \
+ $(BUILDDIR)/Pyon/Exports/Gluon.o \
  : $(BUILDDIR)/PythonInterface/HsObject.o
-$(BUILDDIR)/Gluon/Gluon_stub.c \
- $(BUILDDIR)/Gluon/Gluon_stub.h \
- $(BUILDDIR)/Gluon/Gluon.o \
- : $(BUILDDIR)/Gluon/Globals.o
-$(BUILDDIR)/Gluon/Gluon_c.o : $(BUILDDIR)/Gluon/Gluon_stub.h
-$(BUILDDIR)/Gluon/Builtins/Pyon.o : $(BUILDDIR)/Paths_pyon.hi
-$(BUILDDIR)/Gluon/Pyon/Rename.o : $(BUILDDIR)/Gluon/Pyon/Syntax.hi
-$(BUILDDIR)/Gluon/Pyon/Typecheck.o : $(BUILDDIR)/Gluon/Pyon/Syntax.hi
-$(BUILDDIR)/Gluon/Pyon/Typecheck.o : $(BUILDDIR)/Gluon/Pyon/Rename.hi
+$(BUILDDIR)/Pyon/Exports/Gluon_stub.c \
+ $(BUILDDIR)/Pyon/Exports/Gluon_stub.h \
+ $(BUILDDIR)/Pyon/Exports/Gluon.o \
+ : $(BUILDDIR)/Pyon/Globals.o
+$(BUILDDIR)/Pyon/Exports/Gluon_c.o : $(BUILDDIR)/Pyon/Exports/Gluon_stub.h
+$(BUILDDIR)/Pyon/Exports/SystemF_c.o : $(BUILDDIR)/Pyon/Exports/SystemF_stub.h
+$(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/SystemF/Syntax.hi
+$(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/SystemF/Print.hi
+$(BUILDDIR)/Pyon/SystemF/Builtins.o : $(BUILDDIR)/Paths_pyon.hi
+$(BUILDDIR)/Pyon/Core/Rename.o : $(BUILDDIR)/Pyon/Core/Syntax.hi
+$(BUILDDIR)/Pyon/Core/Typecheck.o : $(BUILDDIR)/Pyon/Core/Syntax.hi
+$(BUILDDIR)/Pyon/Core/Typecheck.o : $(BUILDDIR)/Pyon/Core/Rename.hi
 
 # After invoking the compiler,
 # touch interface files to ensure that their timestamps are updated
 define PYON_COMPILE_HS_SOURCE
-$(BUILDDIR)/$(patsubst %.hs,%.o,$(1)) : $(BUILDDIR)/$(1)
+$(BUILDDIR)/$(1:.hs=.o) : $(BUILDDIR)/$(1)
+	mkdir -p $(BUILDDIR)/$(dir $(1))
 	$(HC) -c $$< -o $$@ -i$(BUILDDIR) $(HS_C_OPTS)
 	touch $(BUILDDIR)/$(patsubst %.hs,%.hi,$(1))
+
+endef
+
+define PYON_COMPILE_C_SOURCE
+$(BUILDDIR)/$(1:.c=.o) : $(SRCDIR)/$(1)
+	mkdir -p $(BUILDDIR)/$(dir $(1))
+	$(CC) -c $$< -o $$@ $(C_C_OPTS)
 
 endef
 
@@ -159,28 +178,45 @@ $(eval $(call PYON_COMPILE_HS_SOURCE,PythonInterface/HsObject.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/Parser.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/Output.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Parser/ParserSyntax.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Globals.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Builtins/Pyon.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Syntax.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Rename.hs))
-$(eval $(call PYON_COMPILE_HS_SOURCE,Gluon/Pyon/Typecheck.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Globals.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/SystemF/Syntax.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/SystemF/Builtins.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/SystemF/Print.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Exports/Delayed.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Core/Syntax.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Core/Rename.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Core/Typecheck.hs))
 
 # 'Gluon.hs' has multiple targets, so it needs a distinct rule
 # Touch output files to ensure their timestamps are updated
-$(BUILDDIR)/Gluon/Gluon_stub.c \
- $(BUILDDIR)/Gluon/Gluon_stub.h \
- $(BUILDDIR)/Gluon/Gluon.o : $(BUILDDIR)/Gluon/Gluon.hs
-	$(HC) -c $< -o $(BUILDDIR)/Gluon/Gluon.o -i$(BUILDDIR) \
+$(BUILDDIR)/Pyon/Exports/Gluon_stub.c \
+ $(BUILDDIR)/Pyon/Exports/Gluon_stub.h \
+ $(BUILDDIR)/Pyon/Exports/Gluon.o : $(BUILDDIR)/Pyon/Exports/Gluon.hs
+	mkdir -p $(BUILDDIR)/Pyon/Exports
+	$(HC) -c $< -o $(BUILDDIR)/Pyon/Exports/Gluon.o -i$(BUILDDIR) \
 	 $(HS_C_OPTS)
-	touch $(BUILDDIR)/Gluon/Gluon.hi
-	touch $(BUILDDIR)/Gluon/Gluon_stub.c
-	touch $(BUILDDIR)/Gluon/Gluon_stub.h
+	touch $(BUILDDIR)/Pyon/Exports/Gluon.hi
+	touch $(BUILDDIR)/Pyon/Exports/Gluon_stub.c
+	touch $(BUILDDIR)/Pyon/Exports/Gluon_stub.h
+
+# 'SystemF.hs' has multiple targets, so it needs a distinct rule
+# Touch output files to ensure their timestamps are updated
+$(BUILDDIR)/Pyon/Exports/SystemF_stub.c \
+ $(BUILDDIR)/Pyon/Exports/SystemF_stub.h \
+ $(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/Exports/SystemF.hs
+	mkdir -p $(BUILDDIR)/Pyon/Exports
+	$(HC) -c $< -o $(BUILDDIR)/Pyon/Exports/SystemF.o -i$(BUILDDIR) \
+	 $(HS_C_OPTS)
+	touch $(BUILDDIR)/Pyon/Exports/SystemF.hi
+	touch $(BUILDDIR)/Pyon/Exports/SystemF_stub.c
+	touch $(BUILDDIR)/Pyon/Exports/SystemF_stub.h
 
 # 'Driver.hs' has multiple targets, so it needs a distinct rule
 # Touch output files to ensure their timestamps are updated
 $(BUILDDIR)/Parser/Driver_stub.c \
  $(BUILDDIR)/Parser/Driver_stub.h \
  $(BUILDDIR)/Parser/Driver.o : $(BUILDDIR)/Parser/Driver.hs
+	mkdir -p $(BUILDDIR)/Parser
 	$(HC) -c $< -o $(BUILDDIR)/Parser/Driver.o -i$(BUILDDIR) \
 	 $(HS_C_OPTS)
 	touch $(BUILDDIR)/Parser/Driver.hi
@@ -194,25 +230,19 @@ $(BUILDDIR)/Paths_pyon.hs :
 $(BUILDDIR)/Paths_pyon.o : $(BUILDDIR)/Paths_pyon.hs
 	$(HC) -c $< -o $@ $(HS_C_OPTS)
 
-$(BUILDDIR)/Main_c.o : $(SRCDIR)/Main_c.c
-	$(CC) -c $< -o $@ $(C_C_OPTS)
-
-$(BUILDDIR)/PythonInterface/Python_c.o : $(SRCDIR)/PythonInterface/Python_c.c
-	mkdir -p $(BUILDDIR)/PythonInterface
-	$(CC) -c $< -o $@ $(C_C_OPTS)
-
-$(BUILDDIR)/PythonInterface/HsObject_c.o : $(SRCDIR)/PythonInterface/HsObject_c.c
-	mkdir -p $(BUILDDIR)/PythonInterface
-	$(CC) -c $< -o $@ $(C_C_OPTS)
-
-$(BUILDDIR)/Gluon/Gluon_c.o : $(SRCDIR)/Gluon/Gluon_c.c
-	mkdir -p $(BUILDDIR)/PythonInterface
-	$(CC) -c $< -o $@ $(C_C_OPTS)
+$(eval $(call PYON_COMPILE_C_SOURCE,Main_c.c))
+$(eval $(call PYON_COMPILE_C_SOURCE,PythonInterface/Python_c.c))
+$(eval $(call PYON_COMPILE_C_SOURCE,PythonInterface/HsObject_c.c))
+$(eval $(call PYON_COMPILE_C_SOURCE,Pyon/Exports/Gluon_c.c))
+$(eval $(call PYON_COMPILE_C_SOURCE,Pyon/Exports/SystemF_c.c))
 
 $(BUILDDIR)/Parser/Driver_stub.o : $(BUILDDIR)/Parser/Driver_stub.c
 	$(CC) -c $< -o $@ $(C_C_OPTS)
 
-$(BUILDDIR)/Gluon/Gluon_stub.o : $(BUILDDIR)/Gluon/Gluon_stub.c
+$(BUILDDIR)/Pyon/Exports/Gluon_stub.o : $(BUILDDIR)/Pyon/Exports/Gluon_stub.c
+	$(CC) -c $< -o $@ $(C_C_OPTS)
+
+$(BUILDDIR)/Pyon/Exports/SystemF_stub.o : $(BUILDDIR)/Pyon/Exports/SystemF_stub.c
 	$(CC) -c $< -o $@ $(C_C_OPTS)
 
 $(PYON_TARGET) : bin $(PYON_OBJECT_FILES)

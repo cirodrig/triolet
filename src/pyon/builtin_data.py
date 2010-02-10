@@ -4,11 +4,13 @@ module.
 """
 
 import gluon
+import system_f as sf
 
 import pyon.pretty as pretty
 import pyon.ast.ast as ast
 import pyon.types.kind as kind
 import pyon.types.types as hm
+import pyon.types.gluon_types as gluon_types
 
 functionType = hm.functionType
 
@@ -16,23 +18,55 @@ def dictionaryType(cls, ty):
     # Return the type of a dictionary for class 'cls' instance 'ty'
     return hm.AppTy(hm.EntTy(hm.DictionaryTyCon(cls)), ty)
 
+def _makeTuple2CompareType():
+    # forall a b. (Eq a, Eq b) => (a, b) * (a, b) -> bool
+    a = gluon.mkNewAnonymousVariable(gluon.TypeLevel)
+    b = gluon.mkNewAnonymousVariable(gluon.TypeLevel)
+    a_type = gluon.mkVarE(gluon.noSourcePos, a)
+    b_type = gluon.mkVarE(gluon.noSourcePos, b)
+    bool_type = gluon.mkConE(gluon.noSourcePos, gluon.con_bool)
+    tuple_type = gluon.mkConAppE(gluon.noSourcePos, gluon.getTupleCon(2),
+                                 [a_type, b_type])
+    function_type = gluon_types.mkPyonFunE([tuple_type, tuple_type],
+                                           bool_type)
+
+    dict_a_type = gluon.mkConAppE(gluon.noSourcePos, gluon.con_EqDict,
+                                  [a_type])
+    dict_b_type = gluon.mkConAppE(gluon.noSourcePos, gluon.con_EqDict,
+                                  [b_type])
+    dict_function_type = gluon_types.mkPyonFunE([dict_a_type, dict_b_type],
+                                                function_type)
+
+    dict_function_type = gluon.mkFunE(gluon.noSourcePos, False, b,
+                                      gluon.type_Pure, dict_function_type)
+    dict_function_type = gluon.mkFunE(gluon.noSourcePos, False, a,
+                                      gluon.type_Pure, dict_function_type)
+    return dict_function_type    
+
 def _makeClasses():
     "Create type classes."
     global class_Eq, class_Ord, class_Num, class_Traversable
 
     def cmp_scheme(a):
+        # Type scheme for comparsion operators:
+        # forall a. a * a -> bool
         return hm.TyScheme([], hm.noConstraints,
                            functionType([a,a], type_bool))
+
+    def addPyonInstance(cls, qvars, constraints, type, members):
+        # Add a class instance where all the members are constructors
+        hm.addInstance(cls, qvars, constraints, type, map(sf.mkConE, members))
+
     # class Eq a where
     #   (==) : a -> a -> bool
     #   (!=) : a -> a -> bool
     a = hm.TyVar()
     def make_cmp_scheme_a(): return cmp_scheme(a)
 
-    class_Eq = hm.Class("Eq", a, hm.noConstraints,
+    class_Eq = hm.Class("Eq", a, [],
                         [hm.ClassMethod("__eq__", make_cmp_scheme_a),
                          hm.ClassMethod("__ne__", make_cmp_scheme_a)],
-                        gluon.con_EqDict)
+                        sf.EqClass, sf.con_EqDict)
 
     # class Eq a => Ord a where
     #   (<) : a -> a -> bool
@@ -44,65 +78,30 @@ def _makeClasses():
                           hm.ClassMethod("__le__", make_cmp_scheme_a),
                           hm.ClassMethod("__gt__", make_cmp_scheme_a),
                           hm.ClassMethod("__ge__", make_cmp_scheme_a)],
-                         gluon.con_OrdDict)
+                         sf.OrdClass, sf.con_OrdDict)
 
     # Instance declarations
-
-    oper_Eq_EQ_int = ast.ANFVariable(name = "__eq__",
-                                     type_scheme = cmp_scheme(type_int))
-    oper_Eq_NE_int = ast.ANFVariable(name = "__ne__",
-                                     type_scheme = cmp_scheme(type_int))
-    hm.addInstance(class_Eq, [], hm.noConstraints, type_int,
-                   [oper_Eq_EQ_int, oper_Eq_NE_int])
-
-    oper_Eq_EQ_float = ast.ANFVariable(name = "__eq__",
-                                       type_scheme = cmp_scheme(type_float))
-    oper_Eq_NE_float = ast.ANFVariable(name = "__ne__",
-                                       type_scheme = cmp_scheme(type_float))
-    hm.addInstance(class_Eq, [], hm.noConstraints, type_float,
-                   [oper_Eq_EQ_float, oper_Eq_NE_float])
+    addPyonInstance(class_Eq, [], [], type_int,
+                    [sf.con_EQ_Int, sf.con_NE_Int])
+    addPyonInstance(class_Eq, [], [], type_float,
+                    [sf.con_EQ_Float, sf.con_NE_Float])
 
     b = hm.TyVar()
-    # forall a b. Dict(Eq) a * Dict(Eq) b -> (a, b) * (a, b) -> bool
-    tuple2_compare_scheme = \
-        hm.TyScheme([a,b], hm.noConstraints,
-                    functionType([dictionaryType(class_Eq, a),
-                                  dictionaryType(class_Eq, b)],
-                                 functionType([hm.tupleType([a,b]), hm.tupleType([a,b])],
-                                              type_bool)))
-    oper_Eq_EQ_tuple2 = ast.ANFVariable(name = "__eq__",
-                                        type_scheme = tuple2_compare_scheme)
-    oper_Eq_NE_tuple2 = ast.ANFVariable(name = "__ne__",
-                                        type_scheme = tuple2_compare_scheme)
-    hm.addInstance(class_Eq, [a, b],
-                   [hm.ClassPredicate(a, class_Eq),
-                    hm.ClassPredicate(b, class_Eq)],
-                   hm.tupleType([a,b]),
-                   [oper_Eq_EQ_tuple2, oper_Eq_NE_tuple2])
+    c = hm.TyVar()
+    addPyonInstance(class_Eq, [b, c],
+                    [hm.ClassPredicate(b, class_Eq),
+                     hm.ClassPredicate(c, class_Eq)],
+                    hm.tupleType([b,c]),
+                    [sf.con_EQ_Tuple2, sf.con_NE_Tuple2])
+    del b, c
 
-    oper_Ord_LT_int = ast.ANFVariable(name = "__lt__",
-                                     type_scheme = cmp_scheme(type_int))
-    oper_Ord_LE_int = ast.ANFVariable(name = "__le__",
-                                     type_scheme = cmp_scheme(type_int))
-    oper_Ord_GT_int = ast.ANFVariable(name = "__gt__",
-                                     type_scheme = cmp_scheme(type_int))
-    oper_Ord_GE_int = ast.ANFVariable(name = "__ge__",
-                                     type_scheme = cmp_scheme(type_int))
-    hm.addInstance(class_Ord, [], hm.noConstraints, type_int,
-                   [oper_Ord_LT_int, oper_Ord_LE_int,
-                    oper_Ord_GT_int, oper_Ord_GE_int])
+    addPyonInstance(class_Ord, [], hm.noConstraints, type_int,
+                    [sf.con_LT_Int, sf.con_LE_Int,
+                     sf.con_GT_Int, sf.con_GE_Int])
 
-    oper_Ord_LT_float = ast.ANFVariable(name = "__lt__",
-                                        type_scheme = cmp_scheme(type_float))
-    oper_Ord_LE_float = ast.ANFVariable(name = "__le__",
-                                        type_scheme = cmp_scheme(type_float))
-    oper_Ord_GT_float = ast.ANFVariable(name = "__gt__",
-                                        type_scheme = cmp_scheme(type_float))
-    oper_Ord_GE_float = ast.ANFVariable(name = "__ge__",
-                                        type_scheme = cmp_scheme(type_float))
-    hm.addInstance(class_Ord, [], hm.noConstraints, type_float,
-                   [oper_Ord_LT_float, oper_Ord_LE_float,
-                    oper_Ord_GT_float, oper_Ord_GE_float])
+    addPyonInstance(class_Ord, [], hm.noConstraints, type_float,
+                    [sf.con_LT_Float, sf.con_LE_Float,
+                     sf.con_GT_Float, sf.con_GE_Float])
 
 #     # class Eq a => Num a where
 #     #   (+) : a -> a -> St a
@@ -153,19 +152,20 @@ tycon_int = hm.TyCon("int", kind.Star(),
 tycon_float = hm.TyCon("float", kind.Star(),
                        gluon_constructor = gluon.con_Float)
 tycon_bool = hm.TyCon("bool", kind.Star(),
-                      gluon_constructor = gluon.con_bool)
+                      gluon_constructor = sf.con_bool)
 tycon_None = hm.TyCon("NoneType", kind.Star(),
-                      gluon_constructor = gluon.con_NoneType)
-tycon_it = hm.TyCon("It", kind.Arrow(kind.Star(), kind.Star()))
+                      gluon_constructor = sf.con_NoneType)
+tycon_iter = hm.TyCon("iter", kind.Arrow(kind.Star(), kind.Star()),
+                      gluon_constructor = sf.con_iter)
 tycon_list = hm.TyCon("list", kind.Arrow(kind.Star(), kind.Star()),
-                      gluon_constructor = gluon.con_list)
+                      gluon_constructor = sf.con_list)
 
 # Builtin types
 type_int = hm.EntTy(tycon_int)
 type_bool = hm.EntTy(tycon_bool)
 type_float = hm.EntTy(tycon_float)
 type_None = hm.EntTy(tycon_None)
-type_it = hm.EntTy(tycon_it)
+type_iter = hm.EntTy(tycon_iter)
 type_list = hm.EntTy(tycon_list)
 
 create_type_schemes()
@@ -197,22 +197,22 @@ oper_NEGATE = ast.ANFVariable(type_scheme = _unaryScheme)
 # Translations of generators and list comprehensions
 
 # Turn generator into list comprehension
-_list_type = hm.TyScheme.forall(1, lambda a: functionType([hm.AppTy(type_it, a)],
+_list_type = hm.TyScheme.forall(1, lambda a: functionType([hm.AppTy(type_iter, a)],
                                                       hm.AppTy(type_list, a)))
 oper_LIST = ast.ANFVariable(name = "list", type_scheme = _list_type)
 
 # Translation of 'for' generators
 _foreach_type = hm.TyScheme.forall(3, lambda a, b, t: \
-  functionType([hm.AppTy(t, a), functionType([a], hm.AppTy(type_it, b))], hm.AppTy(type_it, b)))
+  functionType([hm.AppTy(t, a), functionType([a], hm.AppTy(type_iter, b))], hm.AppTy(type_iter, b)))
 oper_FOREACH = ast.ANFVariable(name = "__foreach__", type_scheme = _foreach_type)
 
 # Translation of 'if' generators
 _guard_type = hm.TyScheme.forall(1, lambda a: \
-  functionType([type_bool, a], hm.AppTy(type_it, a)))
+  functionType([type_bool, a], hm.AppTy(type_iter, a)))
 oper_GUARD = ast.ANFVariable(name = "__guard__", type_scheme = _guard_type)
 
 # Generator body
-_do_type = hm.TyScheme.forall(1, lambda a: functionType([a], hm.AppTy(type_it, a)))
+_do_type = hm.TyScheme.forall(1, lambda a: functionType([a], hm.AppTy(type_iter, a)))
 oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
 
 # Builtin list functions
@@ -226,7 +226,7 @@ fun_reduce1 = ast.ANFVariable(name = "reduce1", type_scheme = _reduce1_type)
 
 _zip_type = hm.TyScheme.forall(4, lambda a, b, c, d: \
   functionType([hm.AppTy(c, a), hm.AppTy(d, b)], \
-               hm.AppTy(type_it, hm.tupleType([a, b]))))
+               hm.AppTy(type_iter, hm.tupleType([a, b]))))
 fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
 
 _iota_type = hm.TyScheme.forall(1, lambda t: functionType([], hm.AppTy(t, type_int)))

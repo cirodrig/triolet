@@ -91,14 +91,16 @@ class TyScheme(PyonTypeBase):
 
     def instantiate(self):
         """
-        scheme.instantiate() -> (constraints, type)
+        scheme.instantiate() -> (type-variables, constraints, type)
+
         Instantiate a type scheme by creating fresh variables for each type.
         """
         # Rename each type variable to a fresh variable
-        mapping = dict((v, TyVar()) for v in self.qvars)
+        tyvars = [TyVar() for v in self.qvars]
+        mapping = dict(zip(self.qvars, tyvars))
         t = self.type.rename(mapping)
         cs = [c.rename(mapping) for c in self.constraints]
-        return (cs, t)
+        return (tyvars, cs, t)
 
     def instantiateFirstOrder(self):
         """

@@ -7,6 +7,10 @@ import itertools
 # Operator names
 import pyon.ast.operators
 
+# Connection to next stage of compiler 
+import system_f
+import pyon.types.gluon_types
+
 # Code executes in one of two modes, as an expression or as an iterator.
 # All user-defined functions are in EXPRESSION mode.  Generator
 # expressions and some built-in functions are in ITERATOR mode.
@@ -56,6 +60,12 @@ class ANFVariable(Variable):
       The variable's name as it appears in source code.
     identifier:
       An integer that uniquely identifies this variable.
+    typeScheme:
+      This variable's type scheme, if it has a type scheme.  The scheme is
+      assigned for predefined global variables or by type inference.  Variables
+      only have a type scheme if one can be inferred by HM type inference.
+    systemFVariable:
+      The system F translation of this variable, created by type inference.
     """
 
     def __init__(self, name = None, identifier = None, type_scheme = None):
@@ -81,7 +91,10 @@ class ANFVariable(Variable):
             assert isinstance(identifier, int)
         self.name = name
         self.identifier = identifier
-        self._typeScheme = type_scheme
+        self._typeScheme = None
+        self._sfVariable = None
+
+        if type_scheme: self.setTypeScheme(type_scheme)
 
     def __eq__(self, other):
         return self.identifier == other.identifier
@@ -92,6 +105,17 @@ class ANFVariable(Variable):
             raise RuntimeError, "Attempted to re-assign a variable's type"
 
         self._typeScheme = type_scheme
+
+        # Assign self a variable
+        sftype = pyon.types.gluon_types.convertType(type_scheme)
+        sfvar = system_f.newVar(self.name)
+        self.setSystemFVariable(sfvar)
+
+    def setFirstOrderType(self, first_order_type):
+        # Assign self a variable
+        sftype = pyon.types.gluon_types.convertType(first_order_type)
+        sfvar = system_f.newVar(self.name)
+        self.setSystemFVariable(sfvar)
 
     def getTypeScheme(self):
         """
@@ -106,6 +130,16 @@ class ANFVariable(Variable):
         The variable must have been assigned a type.
         """
         return self._typeScheme.instantiate()
+
+    def setSystemFVariable(self, v):
+        if self._sfVariable:
+            raise RuntimeError, "Variable has already been translated"
+        self._sfVariable = v
+
+    def getSystemFVariable(self):
+        if not self._sfVariable:
+            raise RuntimeError, "Variable has not been translated"
+        return self._sfVariable
 
     # A counter used to assign unique IDs to variables
     _nextID = 1
@@ -125,12 +159,6 @@ class Parameter(object):
     def __init__(self):
         pass
 
-    def getType(self):
-        t = self._type
-        if t: return t
-
-        raise RuntimeError, "Parameter does not have a type"
-
 class VariableParam(Parameter):
     """
     A variable parameter.
@@ -144,17 +172,14 @@ class VariableParam(Parameter):
       Unused
     """
 
-    def __init__(self, v, annotation = None, default = None, type = None):
+    def __init__(self, v, annotation = None, default = None):
         assert isinstance(v, Variable)
-        assert type is None or isinstance(type, pyon.types.hmtype.FirstOrderType)
         Parameter.__init__(self)
         self.name = v
         self.annotation = annotation
         self.default = default
-        self._type = type
 
     def addAllTypeVariables(self, s):
-        if self._type: self._type.addFreeVariables(s)
         scm = self.name.getTypeScheme()
         if scm: scm.addFreeVariables(s)
 
@@ -163,14 +188,10 @@ class TupleParam(Parameter):
     A tuple parameter.
     """
 
-    def __init__(self, fields, type = None):
-        for p in fields:
-            assert isinstance(p, Parameter)
-        assert type is None or isinstance(type, pyon.types.hmtype.FirstOrderType)
-
+    def __init__(self, fields):
+        for p in fields: assert isinstance(p, Parameter)
         Parameter.__init__(self)
         self.fields = fields
-        self._type = type
 
     def addAllTypeVariables(self, s):
         for p in self.fields: p.addAllTypeVariables(s)
@@ -181,23 +202,21 @@ class TupleParam(Parameter):
 class ExprInit(object):
     """An initializer for expression base types"""
 
-    def __init__(self, type = None):
+    def __init__(self):
         """Initialize this expression."""
-        if type: assert isinstance(type, pyon.types.hmtype.FirstOrderType)
-        self._type = type
+        pass
 
     def initializeExpr(self, expr):
         """Initialize an 'Expression'.
         This is called from the expression's __init__ method."""
-        expr.type = self._type
-        return None
+        return
 
 def copyTypedExpr(expr):
     """
     Copy properties of an expression for use in initializing another
     expression.
     """
-    return ExprInit(type = expr.getType())
+    return ExprInit()
 
 # The default value of ExprInit
 ExprInit.default = ExprInit() 
@@ -220,7 +239,7 @@ class Expression(object):
         Add all type variables referenced in this expression to the set.
         This is used when printing expressions.
         """
-        if self.type: self.type.addFreeVariables(s)
+        pass
 
 ## These expressions are generated from Python expressions (not statements)
 
@@ -396,72 +415,6 @@ class LetrecExpr(Expression):
             d.addAllTypeVariables(s)
         self.body.addAllTypeVariables(s)
 
-class PlaceholderExpr(Expression):
-    """
-    A placeholder for dictionary-passing translation.  Placeholders are
-    used during type inference and should not be seen by other code.
-
-    Fields:
-    _elaboration : Expression
-      The expression that this placeholder should be replaced with.
-    """
-    def __init__(self, base = ExprInit.default):
-        base.initializeExpr(self)
-        self._elaboration = None
-
-    def setElaboration(self, e):
-        assert isinstance(e, Expression)
-        if self._elaboration:
-            raise RuntimeError, "Placeholder has already been elaborated"
-        self._elaboration = e
-
-    def getElaboration(self):
-        if not self._elaboration:
-            raise RuntimeError, "Placeholder has not been elaborated"
-        return self._elaboration
-
-    def isElaborated(self):
-        return self._elaboration is not None
-
-class DictPlaceholderExpr(PlaceholderExpr):
-    """
-    A placeholder for a class dictionary.
-    """
-    def __init__(self, constraint, base = ExprInit.default):
-        PlaceholderExpr.__init__(self, base = base)
-        assert isinstance(constraint, pyon.types.classes.ClassPredicate)
-        self._constraint = constraint
-
-    def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
-        self._constraint.addFreeVariables(s)
-
-    def getConstraint(self): return self._constraint
-
-class RecVarPlaceholderExpr(PlaceholderExpr):
-    """
-    A placehlder for a reference to a recursively defined variable.
-    """
-    def __init__(self, v, base = ExprInit.default):
-        PlaceholderExpr.__init__(self, base = base)
-        assert self.type        # Type must be assigned
-        assert isinstance(v, ANFVariable)
-        self._variable = v
-
-        # Dictionary variable arguments.  This is initially None;
-        # after the variable's type is resolved, it becomes a
-        # list(None or ANFVariable).
-        # This field is modified during type inference. 
-        self.dictionaryArguments = None
-
-    def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
-        scm = self._variable.getTypeScheme()
-        if scm: scm.addFreeVariablesUnshadowed(s)
-
-    def getVariable(self):
-        return self._variable
-
 ###############################################################################
 # Functions
 
@@ -491,6 +444,10 @@ class Function(object):
     If the function has an explicit 'forall' annotation, the type
     variables from the list are given in 'qvars'.
 
+    The optional parameters 'qvars' and 'annotation' are the type variables
+    declared in a 'forall' annotation and the declared return type,
+    respectively.
+
     The dictionary parameters must be None before type inference, and must
     be the same length as the constraint list in the function's type scheme
     after type inference.  (The type scheme is stored in the FunctionDef.)
@@ -498,24 +455,16 @@ class Function(object):
 
     def __init__(self, mode, parameters, body,
                  qvars = None,
-                 dictionary_parameters = None,
-                 type = None,
                  annotation = None):
         assert mode == EXPRESSION or mode == ITERATOR
         for p in parameters:
             assert isinstance(p, Parameter)
         assert isinstance(body, Expression)
-        if dictionary_parameters:
-            for p in dictionary_parameters:
-                assert isinstance(p, VariableParam)
-        assert type is None or isinstance(type, pyon.types.hmtype.FirstOrderType)
         self.mode = mode
         self.parameters = parameters
         self.qvars = qvars
-        self.dictionaryParameters = dictionary_parameters
         self.body = body
         self.annotation = annotation
-        self.type = type
 
     def setDictionaryParameters(self, dictionary_parameters):
         "Set the dictionary parameters.  Called by type inference."

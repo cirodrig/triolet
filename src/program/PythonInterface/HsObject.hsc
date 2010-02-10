@@ -1,7 +1,12 @@
 -- Code for creating Python-to-Haskell references.
 
 {-# LANGUAGE ForeignFunctionInterface #-}
-module PythonInterface.HsObject where
+module PythonInterface.HsObject
+       (newHsObject, hsObjectType,
+        fromHsObject, fromHsObject',
+        fromMaybeHsObject', fromListOfHsObject'
+       )
+where
 
 import Control.Monad
 import Data.Typeable
@@ -22,6 +27,12 @@ newHsObject x = do
   x_ptr <- newStablePtr x
   x_type_ptr <- newStablePtr (typeOf x)
   hsObject_new x_ptr x_type_ptr
+
+-- | Get the type of a HsObject.
+hsObjectType :: PyPtr -> IO TypeRep
+hsObjectType x = do
+  type_rep_ptr <- #{peek struct HsObject, type_rep} x
+  deRefStablePtr type_rep_ptr
 
 -- | Extract a Haskell value of type 'a' from the given object,
 -- which must be an HsObject (this property is not checked).
@@ -59,7 +70,7 @@ fromHsObject' x = do
 -- Interpret Python 'None' as 'Nothing' and other values as 'Just' values.
 fromMaybeHsObject' :: Typeable a => PyPtr -> IO (Maybe a)
 fromMaybeHsObject' x
-  | x == py_None = return Nothing
+  | isPyNone x = return Nothing
   | otherwise = do
       isinst <- isInstance x hsObject_type
       if isinst 

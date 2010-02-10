@@ -9,7 +9,7 @@
              ScopedTypeVariables,
              TypeFamilies #-}
 
-module Gluon.Pyon.Typecheck
+module Pyon.Core.Typecheck
 where
 
 import Control.Monad
@@ -32,9 +32,9 @@ import Gluon.Eval.Environment
 import Gluon.Eval.Eval
 import Gluon.Eval.Typecheck
 
-import Gluon.Builtins.Pyon
-import Gluon.Pyon.Syntax
-import Gluon.Pyon.Rename
+import Pyon.SystemF.Builtins
+import Pyon.Core.Syntax
+import Pyon.Core.Rename
 
 printTypeInferenceSteps = False
 
@@ -285,7 +285,7 @@ inferCallType tcWorker (CallS { cexpInfo = inf
   (eff, ret) <-
       case unpackWhnfAppE resultTy
       of Just (con, [eff, ret])
-             | con == the_Action -> do
+             | con == pyonBuiltin the_Action -> do
                  eff' <- evalHead' eff
                  ret' <- evalHead' ret
                  return (Whnf eff, Whnf ret)
@@ -726,7 +726,7 @@ inferStreamCallType tcWorker str@(CallR { sexpInfo = info
   (eff, ret) <-
       case unpackWhnfAppE resultTy
       of Just (con, [eff, ret])
-             | con == the_Stream -> do
+             | con == pyonBuiltin the_Stream -> do
                  eff' <- evalHead' eff
                  ret' <- evalHead' ret
                  return (Whnf eff, Whnf ret)
@@ -755,9 +755,9 @@ getProcedureType proc = liftM verbatim $ toType $ procParams proc
     where
       -- Pick a monad type constructor depending on whether this is a statement
       -- procedure or a stream procedure
-      monad = if isStmtProc proc
-              then the_Action
-              else the_Stream
+      monad = pyonBuiltin $ if isStmtProc proc
+                            then the_Action
+                            else the_Stream
 
       -- Each parameter translates to one function parameter.
       -- For each parameter, we decide whether to produce a dependent or

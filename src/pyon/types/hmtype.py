@@ -10,7 +10,6 @@ Classes are members of the class Class.
 import unicodedata
 
 import pyon.types.kind as kind
-import pyon.ast.ast as ast
 import pyon.unification as unification
 import pyon.pretty as pretty
 

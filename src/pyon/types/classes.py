@@ -3,6 +3,10 @@ import itertools
 import pyon.ast.ast
 from pyon.types.hmtype import *
 import pyon.types.schemes
+import pyon.types.gluon_types
+from pyon.types.placeholders import IdDerivation, InstanceDerivation
+import gluon
+import system_f
 
 def _concatMap(f, sq):
     return itertools.chain(*[f(x) for x in sq])
@@ -25,9 +29,14 @@ class Class(PyonTypeBase):
       Declarations of the class's methods
     instances : [Instance]
       Instances of the class
+    systemFClass : HsObject(PyonClass)
+      The PyonClass value denoting this class
+    systemFCon : HsObject(Con)
+      The Gluon constructor denoting this class's dictionary type
     """
 
-    def __init__(self, name, param, constraint, methods, gluon_dictionary):
+    def __init__(self, name, param, constraint, methods,
+                 system_f_class, system_f_con):
         """
         Class(name, var, constraint, methods) -> new class
         """
@@ -40,7 +49,8 @@ class Class(PyonTypeBase):
         self.constraint = constraint
         self.methods = methods
         self.instances = []
-        self.gluonDictionary = gluon_dictionary
+        self.systemFClass = system_f_class
+        self.systemFCon = system_f_con
 
     def addInstance(self, inst):
         self.instances.append(inst)
@@ -62,9 +72,13 @@ class Class(PyonTypeBase):
         else:
             raise TypeError, "argument must be string or int"
 
-    def getGluonDictionaryCon(self):
-        "Get the Gluon dictionary type constructor for this class"
-        return self.gluonDictionary
+    def getSystemFCon(self):
+        "Get the System F dictionary type constructor for this class"
+        return self.systemFCon
+
+    def getSystemFClass(self):
+        "Get the System F identifier for this class"
+        return self.systemFClass
 
     def getMethodExpression(self, dictionary, method_name):
         """
@@ -78,12 +92,13 @@ class Class(PyonTypeBase):
 
     def getDictionaryType(self, type):
         """
-        c.getDictionaryType(type) -> type
+        c.getDictionaryType(delayed-gluon-type) -> delayed-gluon-type
 
         Get the type of a class method dictionary, given the types of the
         class's type parameter.
         """
-        return AppTy(EntTy(DictionaryTyCon(self)), type)
+        con_type = gluon.mkConE(gluon.noSourcePos, self.getSystemFCon())
+        return gluon.mkAppE(gluon.noSourcePos, con_type, [type])
 
 class ClassMethod(object):
     """
@@ -152,8 +167,9 @@ class Instance(PyonTypeBase):
       The class that this is an instance of.
     instanceType : FirstOrderType
       The types described by this Instance object.
-    methods : [TyVar]
-      A list of instance methods.  Each method is a globally defined function.
+    methods : [ObVariable]
+      A list of instance methods.
+      Each method is a globally defined function in System F.
       Each element of the list must match the corresponding list of class
       methods.
     """
@@ -163,6 +179,7 @@ class Instance(PyonTypeBase):
         for c in constraints: assert isinstance(c, ClassPredicate)
         assert isinstance(cls, Class)
         assert isinstance(instance_type, FirstOrderType)
+        for m in methods: assert system_f.isExp(m)
 
         self.qvars = qvars
         self.constraints = constraints
@@ -177,10 +194,10 @@ class Instance(PyonTypeBase):
 
         if not len(superclasses):
             # If there are no superclasses, don't apply anything
-            return [ast.VariableExpr(m) for m in self.methods]
+            return self.methods
         else:
             # Apply method to superclasses
-            return [ast.CallExpr(ast.VariableExpr(m), superclasses)
+            return [system_f.mkCallE(m, superclasses)
                     for m in self.methods]
 
 
@@ -188,87 +205,6 @@ def addInstance(cls, qvars, constraints, instance_type, methods):
     inst = Instance(qvars, constraints, cls, instance_type, methods)
     cls.addInstance(inst)
     return inst
-
-class Derivation(object):
-    "A derivation of a class instance."
-
-    def getCode(self, environment):
-        """
-        d.getCode([(ClassPredicate, ANFVariable)])
-            -> ([PlaceholderExpr], Expression)
-
-        Get code that performs this derivation.  If the derivation cannot
-        be performed, raise an exception.
-        """
-        raise NotImplementedError, "'Derivation' is an abstract base class"
-
-    def getDictionaryType(self):
-        raise NotImplementedError, "'Derivation' is an abstract base class"
-
-class IdDerivation(Derivation):
-    "A derivation that uses an existing class instance."
-    def __init__(self, constraint):
-        self.constraint = constraint
-
-    def getDictionaryType(self):
-        return self.constraint.getDictionaryType()
-
-    def getCode(self, environment):
-        constraint = self.constraint
-        for dc, v in environment:
-            if constraint == dc:
-                return ([], ast.VariableExpr(v, base = ast.ExprInit(type = v.getTypeScheme().instantiateFirstOrder())))
-
-        # Needed class is not in the environment
-        expr = ast.DictPlaceholderExpr(self.constraint,
-                                       base = ast.ExprInit(type = self.constraint.getDictionaryType()))
-        return ([expr], expr)
-
-class InstanceDerivation(Derivation):
-    "A derivation that uses a class instance definition."
-    def __init__(self, instance, superclasses, dict_type):
-        assert isinstance(instance, Instance)
-        for sc in superclasses:
-            assert isinstance(sc, Derivation)
-        assert isinstance(dict_type, FirstOrderType)
-        self.instance = instance
-        self.superclasses = superclasses
-        self.dictionaryType = dict_type
-
-    def getDictionaryType(self):
-        return self.dictionaryType
-
-    def getCode(self, environment):
-        # Get code that constructs this dictionary.
-
-        # Get the code and type for each superclass.
-        superclass_vars = []
-        superclass_types = []
-        superclass_code = []
-        placeholders = []
-        for sc in self.superclasses:
-            sc_ph, sc_code = sc.getCode(environment)
-            sc_type = sc.getDictionaryType()
-            superclass_vars.append(ast.ANFVariable(type_scheme = pyon.types.schemes.TyScheme([], noConstraints, sc_type)))
-            superclass_types.append(sc_type)
-            superclass_code.append(sc_code)
-            placeholders += sc_ph
-
-        # Build the dictionary
-        superclass_variable_exprs = \
-            [ast.VariableExpr(v, base = ast.ExprInit(type = t))
-             for v, t in zip(superclass_vars, superclass_types)]
-        method_code = self.instance.getMethodCode(superclass_variable_exprs)
-        expr = ast.DictionaryBuildExpr(self.instance.typeClass,
-                                       superclass_variable_exprs,
-                                       method_code)
-
-        # Bind each superclass dictionary with let expressions
-        for v, t, c in reversed(zip(superclass_vars,
-                                    superclass_types,
-                                    superclass_code)):
-            expr = ast.LetExpr(ast.VariableParam(v), c, expr)
-        return (placeholders, expr)
 
 class ClassPredicate(PyonTypeBase):
     """
@@ -382,8 +318,9 @@ class ClassPredicate(PyonTypeBase):
         return None
 
     def getDictionaryType(self):
-        "Return the type of a class dictionary proving this instance"
-        return self.typeClass.getDictionaryType(self.type)
+        "Return the type of a class dictionary representing this instance"
+        t = pyon.types.gluon_types.convertType(self.type)
+        return self.typeClass.getDictionaryType(t)
 
     def addFreeVariables(self, s):
         self.type.addFreeVariables(s)
@@ -504,55 +441,6 @@ def splitConstraints(constraints, free_vars, qvars):
         raise NotImplementedError, "defaulting"
 
     return (retained, deferred)
-
-def makeDictionaryPassingType(scm):
-    """
-    makeDictionaryPassingType(TyScheme) -> TyScheme
-
-    Convert a type scheme's constraints to ordinary parameters.
-    """
-    # Un-constrained schemes don't change
-    if not scm.constraints: return scm
-
-    dict_params = [c.getDictionaryType() for c in scm.constraints]
-    return pyon.types.schemes.TyScheme(scm.qvars,
-                                       noConstraints,
-                                       functionType(dict_params, scm.type))
-
-def makeDictionaryPassingCall(variable, arguments, result_type):
-    """
-    makeDictionaryPassingCall(ANFVariable, [Expression], FirstOrderType)
-        -> Expression
-
-    Make an expression representing an instantiation of @variable with
-    dictionary arguments @arguments.  The variable must have a type scheme,
-    and the dictionary arguments must have types consistent with the type
-    scheme.  This function is not guaranteed to detect type errors.
-    """
-    scm = variable.getTypeScheme()
-
-    # Type scheme with no constraints doesn't require dictionary-passing
-    if not len(scm.constraints):
-        oper = ast.VariableExpr(variable,
-                                base = ast.ExprInit(type = result_type))
-        return oper
-
-    # Instantiate variable and determine its type
-    constraints, oper_type = makeDictionaryPassingType(scm).instantiate()
-    assert not constraints
-    call_type = pyon.types.hmtype.functionType([e.getType() for e in arguments],
-                                        result_type)
-    oper_type_substitution = unification.match(oper_type, call_type)
-    if oper_type_substitution is None:
-        raise RuntimeError, "Type error during dictionary-passing conversion"
-    
-    oper_type = oper_type.rename(oper_type_substitution)
-    
-    # Build the expression
-    oper = ast.VariableExpr(variable, base = ast.ExprInit(type = oper_type))
-    expr = ast.CallExpr(oper, arguments,
-                        base = ast.ExprInit(type = result_type))
-    return expr
 
 noConstraints = []
 

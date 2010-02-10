@@ -2,7 +2,8 @@
 {-# LANGUAGE MultiParamTypeClasses,
              TypeSynonymInstances,
              FlexibleInstances,
-             Rank2Types #-}
+             Rank2Types, 
+             BangPatterns #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 module Parser.Output
     (Exportable(..), runExport, Inherit(Inherit))
@@ -21,6 +22,14 @@ import Language.Python.Common.PrettyAST()
 
 import Parser.ParserSyntax
 import PythonInterface.Python
+
+-- Like mapM_, but also keep track of the current array index
+mapMIndex_ :: Monad m => (Int -> a -> m b) -> [a] -> m ()
+mapMIndex_ f xs = go 0 xs
+    where
+      go (!n) (x:xs) = do f n x
+                          go (n + 1) xs
+      go _ []        = return ()
 
 data Env =
     Env
@@ -367,7 +376,7 @@ call1Ex :: Exportable a => Export PyPtr -> a -> Export PyPtr
 call1Ex fun mkx =
     withPyPtrExcEx (toPythonTupleEx [toPythonEx mkx]) $ \tuple ->
         do ptr <- fun
-           liftIO $ checkNull $ pyObject_CallObject ptr tuple
+           liftIO $ checkNull $ callWithTuple ptr tuple
 
 call2Ex :: (Exportable a, Exportable b) =>
            Export PyPtr -> a -> b -> Export PyPtr
@@ -375,7 +384,7 @@ call2Ex fun mkx mky =
     withPyPtrExcEx (toPythonTupleEx [ toPythonEx mkx
                                     , toPythonEx mky]) $ \tuple ->
         do ptr <- fun
-           liftIO $ checkNull $ pyObject_CallObject ptr tuple
+           liftIO $ checkNull $ callWithTuple ptr tuple
 
 call3Ex :: (Exportable a, Exportable b, Exportable c) =>
            Export PyPtr -> a -> b -> c -> Export PyPtr
@@ -384,7 +393,7 @@ call3Ex fun mkx mky mkz =
                                     , toPythonEx mky
                                     , toPythonEx mkz]) $ \tuple ->
         do ptr <- fun
-           liftIO $ checkNull $ pyObject_CallObject ptr tuple
+           liftIO $ checkNull $ callWithTuple ptr tuple
 
 call4Ex :: (Exportable a, Exportable b, Exportable c, Exportable d) =>
            Export PyPtr -> a -> b -> c -> d -> Export PyPtr
@@ -394,7 +403,7 @@ call4Ex fun mkx mky mkz mkw =
                                     , toPythonEx mkz
                                     , toPythonEx mkw]) $ \tuple ->
         do ptr <- fun
-           liftIO $ checkNull $ pyObject_CallObject ptr tuple
+           liftIO $ checkNull $ callWithTuple ptr tuple
 
 call5Ex :: (Exportable a, Exportable b, Exportable c, Exportable d, Exportable e) =>
            Export PyPtr -> a -> b -> c -> d -> e -> Export PyPtr
@@ -405,7 +414,7 @@ call5Ex fun mkx mky mkz mkw mkv =
                                     , toPythonEx mkw
                                     , toPythonEx mkv]) $ \tuple ->
         do ptr <- fun
-           liftIO $ checkNull $ pyObject_CallObject ptr tuple
+           liftIO $ checkNull $ callWithTuple ptr tuple
 
 call6Ex :: (Exportable a, Exportable b, Exportable c, Exportable d, Exportable e, Exportable f) =>
            Export PyPtr -> a -> b -> c -> d -> e -> f -> Export PyPtr
@@ -417,13 +426,13 @@ call6Ex fun mkx mky mkz mkw mkv mku =
                                     , toPythonEx mkv
                                     , toPythonEx mku]) $ \tuple ->
         do ptr <- fun
-           liftIO $ checkNull $ pyObject_CallObject ptr tuple
+           liftIO $ checkNull $ callWithTuple ptr tuple
 
 -- Convert an association list to a Python dictionary
 toPythonDictEx :: (Exportable key, Exportable value) =>
                   [(key, value)] -> Export PyPtr
 toPythonDictEx xs = do
-  withPyPtrExcEx (liftIO pyDict_New) $ \dict -> do
+  withPyPtrExcEx (liftIO newDict) $ \dict -> do
       -- For each element, marshal key and value, and put them into the dict
       forM_ xs $ \(k, v) ->
           withPyPtrEx (toPythonEx k) $ \kPtr ->

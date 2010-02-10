@@ -30,11 +30,11 @@ def tryCompile(fname, show_traceback = False):
         test_anf = type_inference.inferTypes(test_anf)
 
         # Partial evaluation
-        test_anf = partial_eval.partialEval(test_anf)
-        test_anf = partial_eval.eliminateDeadCode(test_anf)
+        #test_anf = partial_eval.partialEval(test_anf)
+        #test_anf = partial_eval.eliminateDeadCode(test_anf)
         
         # (DEBUG) print the output with type?
-        print_ast.printAst(test_anf)
+        # print_system_f.renderAst(test_anf)
 
     except Exception, e:
         print e

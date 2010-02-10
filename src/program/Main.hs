@@ -1,6 +1,6 @@
 
 {-# LANGUAGE ForeignFunctionInterface #-}
-module Main where
+module Main(main) where
 
 import Control.Monad
 import Foreign.C.Types
@@ -13,7 +13,18 @@ import PythonInterface.Python
 foreign import ccall createHaskellModule :: IO ()
 
 -- Defined in Gluon_c.c
-foreign import ccall createGluonModule :: IO CInt
+foreign import ccall createGluonModule :: IO Bool
+
+-- Defined in SystemF_c.c
+foreign import ccall createSystemFModule :: IO Bool
+
+-- Try to load a module; exit on error
+tryLoad :: String -> IO Bool -> IO ()
+tryLoad moduleName loader = do
+  rc <- loader
+  unless rc $ do 
+    putStrLn $ "Could not initialize module '" ++ moduleName ++ "'"
+    exitFailure
 
 -- Main: initialize Python runtime and
 -- launch the interpreter
@@ -26,9 +37,8 @@ main = do
   
   -- Create Python modules and initialize Gluon
   createHaskellModule
-  rc <- createGluonModule
-  when (rc == 0) $ do putStrLn "Could not initialize Gluon module"
-                      exitFailure
-  
+  tryLoad "gluon" createGluonModule
+  tryLoad "system_f" createSystemFModule
+
   -- Run interpreter
   runPythonMain progName args

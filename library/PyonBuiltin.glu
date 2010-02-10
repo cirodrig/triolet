@@ -6,6 +6,7 @@ constant Stream : Effect -> Linear -> Linear;
 constant NoneType : Pure;
 constant bool : Pure;
 constant list : Pure -> Pure;
+constant iter : Pure -> Pure;
 
 constant PyonTuple0 : Pure;
 constant PyonTuple1 : Pure -> Pure;
@@ -18,3 +19,44 @@ constant PyonTuple5 : Pure -> Pure -> Pure -> Pure -> Pure -> Pure;
 constant EqDict : Pure -> Pure;
 
 constant OrdDict : Pure -> Pure;
+
+-- Class dictionary members for predefined instances.
+
+constant Eq_EQ_Int : PyonTuple2 Int Int -> bool;
+constant Eq_NE_Int : PyonTuple2 Int Int -> bool;
+constant Ord_GT_Int : PyonTuple2 Int Int -> bool;
+constant Ord_GE_Int : PyonTuple2 Int Int -> bool;
+constant Ord_LT_Int : PyonTuple2 Int Int -> bool;
+constant Ord_LE_Int : PyonTuple2 Int Int -> bool;
+
+constant Eq_EQ_Float : PyonTuple2 Float Float -> bool;
+constant Eq_NE_Float : PyonTuple2 Float Float -> bool;
+constant Ord_GT_Float : PyonTuple2 Float Float -> bool;
+constant Ord_GE_Float : PyonTuple2 Float Float -> bool;
+constant Ord_LT_Float : PyonTuple2 Float Float -> bool;
+constant Ord_LE_Float : PyonTuple2 Float Float -> bool;
+
+constant Eq_EQ_Tuple2 : (a : Pure) -> (b : Pure)
+                     -> PyonTuple2 (EqDict a) (EqDict b)
+                     -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
+                     -> bool;
+constant Eq_NE_Tuple2 : (a : Pure) -> (b : Pure)
+                     -> PyonTuple2 (EqDict a) (EqDict b)
+                     -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
+                     -> bool;
+constant Ord_GT_Tuple2 : (a : Pure) -> (b : Pure)
+                      -> PyonTuple2 (EqDict a) (EqDict b)
+                      -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
+                      -> bool;
+constant Ord_GE_Tuple2 : (a : Pure) -> (b : Pure)
+                      -> PyonTuple2 (EqDict a) (EqDict b)
+                      -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
+                      -> bool;
+constant Ord_LT_Tuple2 : (a : Pure) -> (b : Pure)
+                      -> PyonTuple2 (EqDict a) (EqDict b)
+                      -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
+                      -> bool;
+constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
+                      -> PyonTuple2 (EqDict a) (EqDict b)
+                      -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
+                      -> bool;

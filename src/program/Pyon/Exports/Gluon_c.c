@@ -2,7 +2,7 @@
 #include <Python.h>
 
 #include "PythonInterface/HsObject.h"
-#include "Gluon/Gluon_stub.h"
+#include "Pyon/Exports/Gluon_stub.h"
 
 /*****************************************************************************/
 /* C wrappers for argument marshaling */
@@ -69,16 +69,6 @@ mkNewAnonymousVariable(PyObject *self, PyObject *args)
     return NULL;
 
   return gluon_mkNewAnonymousVariable(level);
-}
-
-static PyObject *
-getTupleCon(PyObject *self, PyObject *args)
-{
-  int size;
-  if (!PyArg_ParseTuple(args, "i", &size))
-    return NULL;
-
-  return gluon_getTupleCon(size);
 }
 
 static PyObject *
@@ -276,6 +266,17 @@ Prod_Core_cons(PyObject *self, PyObject *args)
   return gluon_Prod_Core_cons(param, tail);
 }
 
+static PyObject *
+isExp(PyObject *self, PyObject *arg)
+{
+  if (!PyObject_IsInstance(arg, (PyObject *)&HsObject_type)) {
+    Py_RETURN_FALSE;
+  }
+
+  int rc = gluon_isExp(arg);
+  return PyBool_FromLong((long)rc);
+}
+
 /*****************************************************************************/
 /* Module definition */
 
@@ -292,8 +293,6 @@ static struct PyMethodDef gluon_methods[] = {
   {"mkNewAnonymousVariable", mkNewAnonymousVariable, METH_VARARGS,
    "Create a new variable given a level.  The variable is assigned\n"
    "a fresh ID."},
-  {"getTupleCon", getTupleCon, METH_VARARGS,
-   "Get the type constructor for an N-tuple"},
   {"Binder_plain", Binder_plain, METH_VARARGS,
    "Constructor for \"Binder Core ()\"."},
   {"Binder2_plain", Binder2_plain, METH_VARARGS,
@@ -322,6 +321,8 @@ static struct PyMethodDef gluon_methods[] = {
    "Create a tuple."},
   {"Prod_Core_cons", Prod_Core_cons, METH_VARARGS,
    "Create a tuple type."},
+  {"isExp", isExp, METH_O,
+   "Return True if the parameter is a Gluon expression, False otherwise."},
   { NULL, NULL, 0, NULL}
 };
 
@@ -338,8 +339,8 @@ addGluonObject(PyObject *module, const char *name, void *(*factory)(void))
 extern int
 createGluonModule(void)
 {
-  /* Load the builtin Gluon definitions first */
-  if (!gluon_loadBuiltins()) return 0;
+  /* Load the builtin Gluon definitions, if not already loaded */
+  if (!gluon_builtinsLoaded() && !gluon_loadBuiltins()) return 0;
 
   PyObject *module = Py_InitModule("gluon", gluon_methods);
 
@@ -355,10 +356,5 @@ createGluonModule(void)
   ADD_GLUON_OBJECT("Prod_Core_nil", gluon_Prod_Core_nil);
   ADD_GLUON_OBJECT("con_Int", gluon_con_Int);
   ADD_GLUON_OBJECT("con_Float", gluon_con_Float);
-  ADD_GLUON_OBJECT("con_NoneType", gluon_con_NoneType);
-  ADD_GLUON_OBJECT("con_bool", gluon_con_bool);
-  ADD_GLUON_OBJECT("con_list", gluon_con_list);
-  ADD_GLUON_OBJECT("con_EqDict", gluon_con_EqDict);
-  ADD_GLUON_OBJECT("con_OrdDict", gluon_con_OrdDict);
   ADD_GLUON_OBJECT("type_Pure", gluon_type_Pure);
 }

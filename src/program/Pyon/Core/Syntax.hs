@@ -2,7 +2,7 @@
 
 {-# LANGUAGE FlexibleContexts, TypeFamilies #-}
 
-module Gluon.Pyon.Syntax
+module Pyon.Core.Syntax
     (CStmt, CAlt, CPat, CProc, CProcDef,
 
      PyonSyntax(..),

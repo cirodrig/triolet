@@ -2,25 +2,48 @@
 import pyon.pretty as pretty
 
 import pyon.types.kind as kind
-import pyon.types.types as hmtype
+import pyon.types.hmtype as hmtype
+import pyon.types.classes as classes
+import pyon.types.schemes as schemes
 import pyon.unification as unification
+import pyon.types.placeholders
 
 import gluon
+import system_f
 
 noSourcePos = gluon.noSourcePos
 
-def _convertKind(k):
+def mkPyonFunE(domain, range):
+    """
+    Create the Gluon function type corresponding to a Pyon function.
+    The function's parameter types are gathered into a tuple.
+    """
+    dom = gluon.mkConAppE(noSourcePos,
+                          system_f.getTupleCon(len(domain)),
+                          domain)
+    return gluon.mkArrowE(noSourcePos, False, dom, range)
+
+def _makeFunctionType(domain, range):
+    """
+    Make the type of a function from @domain to @range.  The domain is a list
+    of types, and is translated to a tuple type.
+    """
+    return mkPyonFunE(map(_convertFirstOrderType, domain),
+                      _convertFirstOrderType(range))
+    
+
+def convertKind(k):
     if isinstance(k, kind.Star):
         return gluon.type_Pure
     elif isinstance(k, kind.Arrow):
-        dom = _convertKind(k.domain)
-        rng = _convertKind(k.range)
+        dom = convertKind(k.domain)
+        rng = convertKind(k.range)
         return gluon.mkArrowE(noSourcePos, False, dom, rng)
     else:
         raise TypeError, type(k)
 
-def _convertVariable(v):
-    "_convertVariable(TyVar or RigidTyVar) -> gluon variable"
+def convertVariable(v):
+    "convertVariable(TyVar or RigidTyVar) -> gluon variable"
     if not v.gluonVariable:
         # Create a Gluon variable for this variable
         if isinstance(v, hmtype.RigidTyVar) and v.name:
@@ -37,7 +60,7 @@ def _constructorType(con):
 
     # Put the constructor in gluon_con
     if isinstance(con, hmtype.TupleTyCon):
-        gluon_con = gluon.getTupleCon(con.numArguments)
+        gluon_con = system_f.getTupleCon(con.numArguments)
     elif isinstance(con, hmtype.TyCon):
         if con.gluonConstructor is None:
             raise ValueError, "Cannot translate constructor"
@@ -55,7 +78,7 @@ def _convertFirstOrderType(ty):
 
     ty = unification.canonicalize(ty)
     if isinstance(ty, (hmtype.TyVar, hmtype.RigidTyVar)):
-        return gluon.mkVarE(noSourcePos, _convertVariable(ty))
+        return gluon.mkVarE(noSourcePos, convertVariable(ty))
 
     elif isinstance(ty, hmtype.EntTy):
         return _constructorType(ty.entity)
@@ -69,16 +92,7 @@ def _convertFirstOrderType(ty):
                 isinstance(operator.entity, hmtype.FunTyCon):
             # Constructor must be fully applied
             assert 1 + operator.entity.arity == len(args)
-            domain = args[:-1]
-            range = args[-1]
-
-            # Make the domain a tuple
-            fun_domain = gluon.mkConAppE(noSourcePos,
-                                         gluon.getTupleCon(len(domain)),
-                                         map(_convertFirstOrderType, domain))
-            fun_range = _convertFirstOrderType(range)
-
-            return gluon.mkArrowE(noSourcePos, False, fun_domain, fun_range)
+            return _makeFunctionType(args[:-1], args[-1])
 
         # Other things translate as type application
         oper = _convertFirstOrderType(operator)
@@ -88,10 +102,10 @@ def _convertFirstOrderType(ty):
 def _convertConstraint(cst):
     "_convertConstraint(ClassPredicate) -> gluon type"
     # Convert a constraint to the corresponding dictionary type
-    assert isinstance(cst, hmtype.ClassPredicate)
+    assert isinstance(cst, classes.ClassPredicate)
 
     ty = _convertFirstOrderType(cst.type)
-    con = cst.typeClass.getGluonDictionaryCon()
+    con = cst.typeClass.getSystemFCon()
     return gluon.mkConAppE(noSourcePos, con, [ty])
 
 def _convertTyScheme(scm):
@@ -105,15 +119,15 @@ def _convertTyScheme(scm):
         num_constraints = len(scm.constraints)
 
         dict_params = gluon.mkConAppE(noSourcePos,
-                                      gluon.getTupleCon(num_constraints),
+                                      system_f.getTupleCon(num_constraints),
                                       map(_convertConstraint, scm.constraints))
         gluon_type = gluon.mkArrowE(noSourcePos, False, dict_params,
                                     gluon_type)
 
     # For each qvar, add a dependent type parameter
     for v in reversed(scm.qvars):
-        gluon_type = gluon.mkFunE(noSourcePos, False, _convertVariable(v),
-                                  _convertKind(v.getKind()), gluon_type)
+        gluon_type = gluon.mkFunE(noSourcePos, False, convertVariable(v),
+                                  convertKind(v.getKind()), gluon_type)
 
     return gluon_type
 
@@ -126,7 +140,44 @@ def convertType(ty):
     """
     if isinstance(ty, hmtype.FirstOrderType):
         return _convertFirstOrderType(ty)
-    if isinstance(ty, hmtype.TyScheme):
+    if isinstance(ty, schemes.TyScheme):
         return _convertTyScheme(ty)
     else:
-        raise NotImplementedError
+        raise TypeError, type(ty)
+
+def instantiate(make_expr, scm):
+    """
+    instantiate((hmtype.FirstOrderType -> system_f.Expression), TyScheme)
+        -> ((constraints, placeholders),
+            (system_f.Expression, hmtype.FirstOrderType))
+
+    Given an expression whose Hindley-Milner type is a type scheme, create
+    code that represents an instantiation of the type scheme.  Return the code
+    together with a list of constraints and placeholders.
+    """
+    # Append placeholders to this list as they are created
+    placeholders = []
+
+    (tyvars, constraints, first_order_type) = scm.instantiate()
+    expr = make_expr(first_order_type)
+
+    # For each type parameter, apply the instantiated type to a placeholder
+    # type.  After type inference completes, these will be the actual type
+    # parameters.
+    for tv in tyvars:
+        expr = system_f.mkTyAppE(expr,
+                                 gluon.mkVarE(noSourcePos, convertVariable(tv)))
+
+    # If there are constraints, then create a call expression for the
+    # dictionary parameters
+    if constraints:
+        # For each constraint, make a dictionary parameter placeholder
+        dict_placeholders = map(pyon.types.placeholders.DictPlaceholder,
+                                constraints)
+        dict_params = [p.getExpression() for p in dict_placeholders]
+        placeholders.extend(dict_placeholders)
+
+        # Apply the expression to all dictionary parameters
+        expr = system_f.mkCallE(expr, dict_params)
+
+    return ((constraints, placeholders), (expr, first_order_type))
