@@ -232,8 +232,6 @@ class Expression(object):
     def __init__(self, arg):
         raise NotImplementedError, "'Expression' is an abstract base class"
 
-    def getType(self): return self.type
-
     def addAllTypeVariables(self, s):
         """
         Add all type variables referenced in this expression to the set.
@@ -288,50 +286,6 @@ class TupleExpr(Expression):
     def addAllTypeVariables(self, s):
         Expression.addAllTypeVariables(self, s)
         for f in self.arguments: f.addAllTypeVariables(s)
-
-class DictionaryBuildExpr(Expression):
-    """
-    An expression that constructs a class dictionary.
-
-    Instances of this expression appear in code that uses type classes.
-    They are inserted by type inference.
-    """
-    def __init__(self, cls, superclasses, methods, base = ExprInit.default):
-        base.initializeExpr(self)
-        assert isinstance(cls, pyon.types.classes.Class)
-        for sc in superclasses: assert isinstance(sc, Expression)
-        for m in methods: assert isinstance(m, Expression)
-
-        self.cls = cls
-        self.superclasses = superclasses
-        self.methods = methods
-
-    def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
-        for sc in self.superclasses: sc.addAllTypeVariables(s)
-        for m in self.methods: m.addAllTypeVariables(s)
-
-class DictionarySelectExpr(Expression):
-    """
-    An expression that extracts one field of a class dictionary.
-
-    Instances of this expression appear in code that uses type classes.
-    They are inserted by type inference.
-    """
-
-    def __init__(self, cls, index, argument, base = ExprInit.default):
-        base.initializeExpr(self)
-        assert isinstance(cls, pyon.types.hmtype.Class)
-        assert isinstance(index, int)
-        assert isinstance(argument, Expression)
-
-        self.cls = cls
-        self.index = index
-        self.argument = argument
-
-    def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
-        self.argument.addAllTypeVariables(s)
 
 class CallExpr(Expression):
     """A function call."""
@@ -447,10 +401,6 @@ class Function(object):
     The optional parameters 'qvars' and 'annotation' are the type variables
     declared in a 'forall' annotation and the declared return type,
     respectively.
-
-    The dictionary parameters must be None before type inference, and must
-    be the same length as the constraint list in the function's type scheme
-    after type inference.  (The type scheme is stored in the FunctionDef.)
     """
 
     def __init__(self, mode, parameters, body,
@@ -466,19 +416,9 @@ class Function(object):
         self.body = body
         self.annotation = annotation
 
-    def setDictionaryParameters(self, dictionary_parameters):
-        "Set the dictionary parameters.  Called by type inference."
-        assert self.dictionaryParameters is None
-        self.dictionaryParameters = dictionary_parameters
-
     def addAllTypeVariables(self, s):
         for p in self.parameters: p.addAllTypeVariables(s)
-        if self.dictionaryParameters:
-            for p in self.dictionaryParameters: p.addAllTypeVariables(s)
         self.body.addAllTypeVariables(s)
-        self.type.addFreeVariables(s)
-
-    def getType(self): return self.type
 
 def exprFunction(parameters, body, qvars = None, annotation = None):
     "Create an expression function"

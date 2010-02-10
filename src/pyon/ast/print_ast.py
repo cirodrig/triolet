@@ -90,12 +90,6 @@ def printExpression(expr, precedence, type_variables = None):
             fs = pretty.space(pretty.punctuate(',', argdocs)) 
         return pretty.parens(fs)
 
-    elif isinstance(expr, DictionaryBuildExpr):
-        class_name = expr.cls.name
-        superclasses = pretty.parens(pretty.space(pretty.punctuate(',', [printRec(e, _OUTER_PREC) for e in expr.superclasses])))
-        methods = pretty.parens(pretty.space(pretty.punctuate(',', [printRec(e, _OUTER_PREC) for e in expr.methods])))
-        return pretty.abut('DICT', pretty.parens(pretty.space([class_name, superclasses, methods])))
-
     elif isinstance(expr, UndefinedExpr):
         return "__undefined__"
 
@@ -159,14 +153,6 @@ def printFuncDef(fdef, type_variables = None):
                                       for p in func.parameters])
     paramdoc = pretty.parens(pretty.space(paramdoc))
 
-    if func.dictionaryParameters:
-        typaramdoc = pretty.punctuate(',',
-                                      [printParam(p, type_variables)
-                                       for p in func.dictionaryParameters])
-        typaramdoc = pretty.braces(pretty.space(typaramdoc))
-    else:
-        typaramdoc = None
-
     scm = fdef.name.getTypeScheme()
     if scm:
         typedoc = pretty.abut(pretty.space([printVar(fdef.name, shadowing = False),
@@ -174,7 +160,7 @@ def printFuncDef(fdef, type_variables = None):
                               ';')
     else:
         typedoc = None
-    calldoc = pretty.abut([printVar(fdef.name), typaramdoc, paramdoc])
+    calldoc = pretty.abut(printVar(fdef.name), paramdoc)
     bodydoc = printExpression(func.body, _OUTER_PREC, type_variables)
     return pretty.stack([typedoc,
                          pretty.space(calldoc, '='),
