@@ -352,20 +352,19 @@ def convertIterator(iter):
         param = convertParameter(iter.parameter)
         body_func = a_ast.iterFunction([param], convertIterator(iter.body))
 
-        # Create a call to 'FOREACH'
-        return _callVariable(builtin_data.oper_FOREACH,
-                             [arg, a_ast.FunExpr(body_func)])
+        # Call __iter__ on the thing being traversed
+        iterator = _callVariable(builtin_data.oper_ITER, [arg])
+
+        # Create a call to 'cat_map'
+        return _callVariable(builtin_data.oper_CAT_MAP,
+                             [a_ast.FunExpr(body_func), iterator])
     elif isinstance(iter, p_ast.IfIter):
-        # Convert guard and body to nullary functions
+        # Convert guard and body
         guard = convertExpression(iter.guard)
-        guard_func = a_ast.exprFunction([], guard)
         body = convertIterator(iter.body)
-        body_func = a_ast.iterFunction([], body)
 
         # Create a call to 'GUARD'
-        return _callVariable(builtin_data.oper_GUARD,
-                             [a_ast.FunExpr(guard_func),
-                              a_ast.FunExpr(body_func)])
+        return _callVariable(builtin_data.oper_GUARD, [guard, body])
     elif isinstance(iter, p_ast.DoIter):
         # create a call to 'DO'
         body = convertExpression(iter.body)

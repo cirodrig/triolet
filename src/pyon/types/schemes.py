@@ -26,22 +26,23 @@ class TyScheme(PyonTypeBase):
     def __init__(self, qvars, constraints, t):
         for c in constraints:
             assert isinstance(c, pyon.types.classes.ClassPredicate)
+        assert isinstance(qvars, list)
         self.qvars = qvars
         self.constraints = constraints
         self.type = t
 
     @classmethod
-    def forall(cls, num_vars, body, constraints = lambda *xs: pyon.types.classes.noConstraints):
+    def forall(cls, num_vars, body, constraints = lambda *xs: []):
         """
         TyScheme.forall(int, make-body) -> new type scheme
         TyScheme.forall(int, make-body, make-constraints) -> new type scheme
 
         Create a new type scheme quantified over new variables.
         """
-        vars = tuple(TyVar() for v in range(num_vars))
+        vars = tuple(TyVar(kind.Star()) for v in range(num_vars))
         t = apply(body, vars)
         csts = apply(constraints, vars)
-        return cls(vars, csts, t)
+        return cls(list(vars), csts, t)
 
     def rename(self, mapping):
         # Bound variables should never be renamed and variables should not be
@@ -96,7 +97,7 @@ class TyScheme(PyonTypeBase):
         Instantiate a type scheme by creating fresh variables for each type.
         """
         # Rename each type variable to a fresh variable
-        tyvars = [TyVar() for v in self.qvars]
+        tyvars = [TyVar(v.getKind()) for v in self.qvars]
         mapping = dict(zip(self.qvars, tyvars))
         t = self.type.rename(mapping)
         cs = [c.rename(mapping) for c in self.constraints]

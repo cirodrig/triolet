@@ -22,7 +22,9 @@ def printAst(root, file = sys.stdout):
     elif isinstance(root, Function):
         doc = printLambdaFunction(root)
     elif isinstance(root, Variable):
-        doc = printVar(root)
+        type_variables = set()
+        root.addAllTypeVariables(type_variables)
+        doc = printVar(root, list(type_variables))
     elif isinstance(root, Parameter):
         doc = printParam(root)
     elif isinstance(root, Module):
@@ -59,7 +61,7 @@ def printExpression(expr, precedence, type_variables = None):
         return printExpression(expr, precedence, type_variables)
 
     if isinstance(expr, VariableExpr):
-        return printVar(expr.variable)
+        return printVar(expr.variable, type_variables)
 
     elif isinstance(expr, LiteralExpr):
         lit = expr.literal
@@ -121,14 +123,6 @@ def printExpression(expr, precedence, type_variables = None):
         doc = printLambdaFunction(expr.function, type_variables)
         if precedence >= _LAM_PREC: doc = pretty.parens(doc)
         return doc
-    elif isinstance(expr, DictPlaceholderExpr):
-        doc = pretty.abut('PLACEHOLDER',
-                          pretty.parens(expr.getConstraint().pretty(type_variables)))
-        return doc
-    elif isinstance(expr, RecVarPlaceholderExpr):
-        doc = pretty.abut('PLACEHOLDER',
-                          pretty.parens(printVar(expr.getVariable())))
-        return doc
     else:
         raise TypeError, type(expr)
 
@@ -155,22 +149,32 @@ def printFuncDef(fdef, type_variables = None):
 
     scm = fdef.name.getTypeScheme()
     if scm:
-        typedoc = pretty.abut(pretty.space([printVar(fdef.name, shadowing = False),
+        typedoc = pretty.abut(pretty.space([printVar(fdef.name, type_variables, shadowing = False),
                                             ':', scm.prettyUnshadowed(type_variables)]),
                               ';')
     else:
         typedoc = None
-    calldoc = pretty.abut(printVar(fdef.name), paramdoc)
+    calldoc = pretty.abut(printVar(fdef.name, type_variables), paramdoc)
     bodydoc = printExpression(func.body, _OUTER_PREC, type_variables)
     return pretty.stack([typedoc,
                          pretty.space(calldoc, '='),
                          pretty.nest(bodydoc, 4)])
 
-def printVar(v, shadowing = True):
+def printVar(v, type_variables, shadowing = True):
     """Returns a pretty-printable object for a variable in the AST
     v: Variable to be printed"""
-    # If variable is anonymous, print a dollar-sign
-    return pretty.abut(v.name or '$', v.identifier)
+    # If variable is anonymous, print an underscore
+    name_doc = pretty.abut(v.name or '_\'', v.identifier)
+    scm = v.getTypeScheme()
+    if scm:
+        if shadowing:
+            type_doc = pretty.space(':', scm.pretty(type_variables))
+        else:
+            type_doc = pretty.space(':', scm.prettyUnshadowed(type_variables))
+    else:
+        type_doc = None
+
+    return pretty.parens(pretty.space(name_doc, type_doc))
 
 def printParam(p, type_variables = None):
     """Returns a pretty-printable object for a parameter in the AST
@@ -188,7 +192,7 @@ def printParam(p, type_variables = None):
         if scm: typedoc = pretty.space(':', scm.pretty(type_variables))
         else: typedoc = None
 
-        return pretty.space(printVar(p.name), typedoc)
+        return pretty.space(printVar(p.name, type_variables), typedoc)
     elif isinstance(p, TupleParam):
         fields = [printParam(f, type_variables) for f in p.fields]
         return pretty.braces(pretty.space(pretty.punctuate(',', fields)))

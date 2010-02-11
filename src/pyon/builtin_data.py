@@ -12,36 +12,8 @@ import pyon.types.kind as kind
 import pyon.types.types as hm
 import pyon.types.gluon_types as gluon_types
 
-functionType = hm.functionType
-
-def dictionaryType(cls, ty):
-    # Return the type of a dictionary for class 'cls' instance 'ty'
-    return hm.AppTy(hm.EntTy(hm.DictionaryTyCon(cls)), ty)
-
-def _makeTuple2CompareType():
-    # forall a b. (Eq a, Eq b) => (a, b) * (a, b) -> bool
-    a = gluon.mkNewAnonymousVariable(gluon.TypeLevel)
-    b = gluon.mkNewAnonymousVariable(gluon.TypeLevel)
-    a_type = gluon.mkVarE(gluon.noSourcePos, a)
-    b_type = gluon.mkVarE(gluon.noSourcePos, b)
-    bool_type = gluon.mkConE(gluon.noSourcePos, gluon.con_bool)
-    tuple_type = gluon.mkConAppE(gluon.noSourcePos, gluon.getTupleCon(2),
-                                 [a_type, b_type])
-    function_type = gluon_types.mkPyonFunE([tuple_type, tuple_type],
-                                           bool_type)
-
-    dict_a_type = gluon.mkConAppE(gluon.noSourcePos, gluon.con_EqDict,
-                                  [a_type])
-    dict_b_type = gluon.mkConAppE(gluon.noSourcePos, gluon.con_EqDict,
-                                  [b_type])
-    dict_function_type = gluon_types.mkPyonFunE([dict_a_type, dict_b_type],
-                                                function_type)
-
-    dict_function_type = gluon.mkFunE(gluon.noSourcePos, False, b,
-                                      gluon.type_Pure, dict_function_type)
-    dict_function_type = gluon.mkFunE(gluon.noSourcePos, False, a,
-                                      gluon.type_Pure, dict_function_type)
-    return dict_function_type    
+_forall = hm.TyScheme.forall
+_funType = hm.functionType
 
 def _makeClasses():
     "Create type classes."
@@ -51,7 +23,7 @@ def _makeClasses():
         # Type scheme for comparsion operators:
         # forall a. a * a -> bool
         return hm.TyScheme([], hm.noConstraints,
-                           functionType([a,a], type_bool))
+                           _funType([a,a], type_bool))
 
     def addPyonInstance(cls, qvars, constraints, type, members):
         # Add a class instance where all the members are constructors
@@ -60,25 +32,46 @@ def _makeClasses():
     # class Eq a where
     #   (==) : a -> a -> bool
     #   (!=) : a -> a -> bool
-    a = hm.TyVar()
-    def make_cmp_scheme_a(): return cmp_scheme(a)
-
+    a = hm.TyVar(kind.Star())
+    scheme_1 = cmp_scheme(a)
+    scheme_fn = lambda: scheme_1
     class_Eq = hm.Class("Eq", a, [],
-                        [hm.ClassMethod("__eq__", make_cmp_scheme_a),
-                         hm.ClassMethod("__ne__", make_cmp_scheme_a)],
+                        [hm.ClassMethod("__eq__", scheme_fn),
+                         hm.ClassMethod("__ne__", scheme_fn)],
                         sf.EqClass, sf.con_EqDict)
+    del a, scheme_fn
 
     # class Eq a => Ord a where
     #   (<) : a -> a -> bool
     #   (<=) : a -> a -> bool
     #   (>) : a -> a -> bool
     #   (>=) : a -> a -> bool
+    a = hm.TyVar(kind.Star())
+    scheme_2 = cmp_scheme(a)
+    scheme_fn = lambda: scheme_2
     class_Ord = hm.Class("Ord", a, [hm.ClassPredicate(a, class_Eq)],
-                         [hm.ClassMethod("__lt__", make_cmp_scheme_a),
-                          hm.ClassMethod("__le__", make_cmp_scheme_a),
-                          hm.ClassMethod("__gt__", make_cmp_scheme_a),
-                          hm.ClassMethod("__ge__", make_cmp_scheme_a)],
+                         [hm.ClassMethod("__lt__", scheme_fn),
+                          hm.ClassMethod("__le__", scheme_fn),
+                          hm.ClassMethod("__gt__", scheme_fn),
+                          hm.ClassMethod("__ge__", scheme_fn)],
                          sf.OrdClass, sf.con_OrdDict)
+    del a, scheme_fn
+
+    # class Traversable (t : * -> *) where
+    #   foreach : t a -> iter a
+    t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
+
+    a = hm.TyVar(kind.Star())
+    scheme_3 = hm.TyScheme([a], [],
+                           _funType([hm.AppTy(t, a)],
+                                    hm.AppTy(type_iter, a)))
+    del a
+    scheme_fn = lambda: scheme_3
+    class_Traversable = \
+        hm.Class("Traversable", t, [],
+                 [hm.ClassMethod("__iter__", scheme_fn)],
+                 sf.TraversableClass, sf.con_TraversableDict)
+    del t, scheme_fn
 
     # Instance declarations
     addPyonInstance(class_Eq, [], [], type_int,
@@ -86,8 +79,8 @@ def _makeClasses():
     addPyonInstance(class_Eq, [], [], type_float,
                     [sf.con_EQ_Float, sf.con_NE_Float])
 
-    b = hm.TyVar()
-    c = hm.TyVar()
+    b = hm.TyVar(kind.Star())
+    c = hm.TyVar(kind.Star())
     addPyonInstance(class_Eq, [b, c],
                     [hm.ClassPredicate(b, class_Eq),
                      hm.ClassPredicate(c, class_Eq)],
@@ -102,6 +95,11 @@ def _makeClasses():
     addPyonInstance(class_Ord, [], hm.noConstraints, type_float,
                     [sf.con_LT_Float, sf.con_LE_Float,
                      sf.con_GT_Float, sf.con_GE_Float])
+
+    addPyonInstance(class_Traversable, [], hm.noConstraints, type_iter,
+                    [sf.con_TRAVERSE_iter])
+    addPyonInstance(class_Traversable, [], hm.noConstraints, type_list,
+                    [sf.con_TRAVERSE_list])
 
 #     # class Eq a => Num a where
 #     #   (+) : a -> a -> St a
@@ -135,14 +133,13 @@ def _makeClasses():
 
 def create_type_schemes():
     global _unaryScheme, _binaryScheme, _compareScheme, _binaryIntScheme
-    a = hm.TyVar()
-    _unaryScheme = hm.TyScheme([a], hm.noConstraints, functionType([a], a))
-    _binaryScheme = hm.TyScheme([a], hm.noConstraints,
-                                functionType([a,a], a))
+    a = hm.TyVar(kind.Star())
+    _unaryScheme = hm.TyScheme([a], hm.noConstraints, _funType([a], a))
+    _binaryScheme = hm.TyScheme([a], hm.noConstraints, _funType([a,a], a))
     _compareScheme = hm.TyScheme([a], hm.noConstraints,
-                                 functionType([a,a], type_bool))
+                                 _funType([a,a], type_bool))
     _binaryIntScheme = hm.TyScheme([], hm.noConstraints,
-                                   functionType([type_int,type_int], type_int))
+                                   _funType([type_int,type_int], type_int))
 
 ###############################################################################
 
@@ -194,45 +191,92 @@ oper_ARROW = ast.ANFVariable(type_scheme = _binaryScheme)
 # Builtin unary functions with no Pyon implementation
 oper_NEGATE = ast.ANFVariable(type_scheme = _unaryScheme)
 
+# Traversal
+oper_ITER = class_Traversable.getMethod("__iter__")
+
 # Translations of generators and list comprehensions
+# use traversal along with 'cat_map', 'guard', and 'do'
 
-# Turn generator into list comprehension
-_list_type = hm.TyScheme.forall(1, lambda a: functionType([hm.AppTy(type_iter, a)],
-                                                      hm.AppTy(type_list, a)))
-oper_LIST = ast.ANFVariable(name = "list", type_scheme = _list_type)
+# __cat_map__ : forall a b. (a -> iter b) * iter a -> iter b
+_cat_map_type = \
+    _forall(2, lambda a, b: _funType([_funType([a], hm.AppTy(type_iter, b)),
+                                      hm.AppTy(type_iter, a)],
+                                     hm.AppTy(type_iter, b)))
+oper_CAT_MAP = ast.ANFVariable(name = "__cat_map__",
+                               type_scheme = _cat_map_type)
 
-# Translation of 'for' generators
-_foreach_type = hm.TyScheme.forall(3, lambda a, b, t: \
-  functionType([hm.AppTy(t, a), functionType([a], hm.AppTy(type_iter, b))], hm.AppTy(type_iter, b)))
-oper_FOREACH = ast.ANFVariable(name = "__foreach__", type_scheme = _foreach_type)
-
-# Translation of 'if' generators
-_guard_type = hm.TyScheme.forall(1, lambda a: \
-  functionType([type_bool, a], hm.AppTy(type_iter, a)))
+# __guard__ : forall a. bool * iter a -> iter a
+_guard_type = _forall(1, lambda a: \
+                          _funType([type_bool, hm.AppTy(type_iter, a)],
+                                   hm.AppTy(type_iter, a)))
 oper_GUARD = ast.ANFVariable(name = "__guard__", type_scheme = _guard_type)
 
-# Generator body
-_do_type = hm.TyScheme.forall(1, lambda a: functionType([a], hm.AppTy(type_iter, a)))
+# __do__ : forall a. a -> iter a
+_do_type = _forall(1, lambda a: _funType([a], hm.AppTy(type_iter, a)))
 oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
 
-# Builtin list functions
-_reduce_type = hm.TyScheme.forall(2, lambda a, t: \
-  functionType([functionType([a, a], a), hm.AppTy(t, a), a], a))
+# The list-building operator
+# list : forall t a. Traversable t => t a -> list a
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
+a = hm.TyVar(kind.Star())
+_list_type = hm.TyScheme([t, a],
+                         [hm.ClassPredicate(t, class_Traversable)],
+                         _funType([hm.AppTy(t, a)], hm.AppTy(type_list, a)))
+del t, a
+oper_LIST = ast.ANFVariable(name = "list", type_scheme = _list_type)
+
+# Builtin list and iterator functions
+# 'map', 'reduce', 'reduce1', 'zip', 'iota'
+
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
+a = hm.TyVar(kind.Star())
+b = hm.TyVar(kind.Star())
+_map_type = hm.TyScheme([t, a],
+                        [hm.ClassPredicate(t, class_Traversable)],
+                        _funType([_funType([a], b),
+                                  hm.AppTy(t, a)],
+                                 hm.AppTy(t, b)))
+del t, a, b
+fun_map = ast.ANFVariable(name = "map", type_scheme = _map_type)
+                     
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
+a = hm.TyVar(kind.Star())
+_reduce_type = hm.TyScheme([t, a],
+                           [hm.ClassPredicate(t, class_Traversable)],
+                           _funType([_funType([a, a], a),
+                                     a,
+                                     hm.AppTy(t, a)],
+                                    a))
+del t, a
 fun_reduce = ast.ANFVariable(name = "reduce", type_scheme = _reduce_type)
 
-_reduce1_type = hm.TyScheme.forall(2, lambda a, t: \
-  functionType([functionType([a, a], a), hm.AppTy(t, a)], a))
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
+a = hm.TyVar(kind.Star())
+_reduce1_type = hm.TyScheme([t, a],
+                            [hm.ClassPredicate(t, class_Traversable)],
+                            _funType([_funType([a, a], a),
+                                      hm.AppTy(t, a)],
+                                     a))
+del t, a
 fun_reduce1 = ast.ANFVariable(name = "reduce1", type_scheme = _reduce1_type)
 
-_zip_type = hm.TyScheme.forall(4, lambda a, b, c, d: \
-  functionType([hm.AppTy(c, a), hm.AppTy(d, b)], \
-               hm.AppTy(type_iter, hm.tupleType([a, b]))))
+s = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
+a = hm.TyVar(kind.Star())
+b = hm.TyVar(kind.Star())
+_zip_type = hm.TyScheme([s,t,a,b],
+                        [hm.ClassPredicate(s, class_Traversable),
+                         hm.ClassPredicate(t, class_Traversable)],
+                        _funType([hm.AppTy(s, a), hm.AppTy(t, b)],
+                                 hm.AppTy(type_iter, hm.tupleType([a, b]))))
+del s, t, a, b
 fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
 
-_iota_type = hm.TyScheme.forall(1, lambda t: functionType([], hm.AppTy(t, type_int)))
+_iota_type = _forall(0, lambda: _funType([], hm.AppTy(type_iter, type_int)))
 fun_iota = ast.ANFVariable(name = "iota", type_scheme = _iota_type)
 
-const_undefined = ast.ANFVariable(name = "__undefined__", type_scheme = hm.TyScheme.forall(1, lambda a: a))
+const_undefined = ast.ANFVariable(name = "__undefined__",
+                                  type_scheme = hm.TyScheme.forall(1, lambda a: a))
 
 # Define classes and instances.
 # Each global identifier is initialized to None for reasons of documentation.

@@ -142,6 +142,8 @@ $(BUILDDIR)/Pyon/Exports/Gluon_c.o : $(BUILDDIR)/Pyon/Exports/Gluon_stub.h
 $(BUILDDIR)/Pyon/Exports/SystemF_c.o : $(BUILDDIR)/Pyon/Exports/SystemF_stub.h
 $(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/SystemF/Syntax.hi
 $(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/SystemF/Print.hi
+$(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/Exports/Delayed.hi
+$(BUILDDIR)/Pyon/Exports/Gluon.o : $(BUILDDIR)/Pyon/Exports/Delayed.hi
 $(BUILDDIR)/Pyon/SystemF/Builtins.o : $(BUILDDIR)/Paths_pyon.hi
 $(BUILDDIR)/Pyon/Core/Rename.o : $(BUILDDIR)/Pyon/Core/Syntax.hi
 $(BUILDDIR)/Pyon/Core/Typecheck.o : $(BUILDDIR)/Pyon/Core/Syntax.hi

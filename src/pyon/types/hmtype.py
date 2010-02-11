@@ -226,9 +226,11 @@ class TyVar(FirstOrderType, unification.Variable):
     """
     A unifiable type variable.
     """
-    def __init__(self):
+    def __init__(self, _kind):
+        assert isinstance(_kind, kind.Kind)
         unification.Variable.__init__(self)
         self.gluonVariable = None
+        self._kind = _kind
 
     def __eq__(self, other):
         canon = self.canonicalize()
@@ -236,7 +238,7 @@ class TyVar(FirstOrderType, unification.Variable):
         return self is unification.canonicalize(other)
 
     def getKind(self):
-        return kind.Star()
+        return self._kind
 
     def addFreeVariables(self, s):
         canon = self.canonicalize()

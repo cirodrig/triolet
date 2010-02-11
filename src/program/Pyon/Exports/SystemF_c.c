@@ -18,12 +18,6 @@ getTupleCon(PyObject *self, PyObject *args)
 }
 
 static PyObject *
-delayedType(PyObject *self, PyObject *arg)
-{
-  return pyon_delayedType(arg);
-}
-
-static PyObject *
 newExpPlaceholder(PyObject *self, PyObject *args)
 {
   return pyon_newExpPlaceholder();
@@ -359,9 +353,6 @@ isExp(PyObject *self, PyObject *arg)
 static PyMethodDef system_f_methods[] = {
   {"getTupleCon", getTupleCon, METH_VARARGS,
    "Get the type constructor for an N-tuple"},
-  {"delayedType", delayedType, METH_O,
-   "Create a delayed type expression.  The parameter should be a\n"
-   "zero-argument function.  It will be run when evaluation is forced."},
   {"newExpPlaceholder", newExpPlaceholder, METH_NOARGS,
    "Create a new placeholder expression."},
   {"setExpPlaceholder", setExpPlaceholder, METH_VARARGS,
@@ -449,6 +440,7 @@ createSystemFModule(void)
   ADD_OBJECT("con_iter", pyon_con_iter);
   ADD_OBJECT("con_EqDict", pyon_con_EqDict);
   ADD_OBJECT("con_OrdDict", pyon_con_OrdDict);
+  ADD_OBJECT("con_TraversableDict", pyon_con_TraversableDict);
   ADD_OBJECT("con_EQ_Int", pyon_con_EQ_Int);
   ADD_OBJECT("con_NE_Int", pyon_con_NE_Int);
   ADD_OBJECT("con_LT_Int", pyon_con_LT_Int);
@@ -467,6 +459,8 @@ createSystemFModule(void)
   ADD_OBJECT("con_LE_Tuple2", pyon_con_LE_Tuple2);
   ADD_OBJECT("con_GT_Tuple2", pyon_con_GT_Tuple2);
   ADD_OBJECT("con_GE_Tuple2", pyon_con_GE_Tuple2);
+  ADD_OBJECT("con_TRAVERSE_iter", pyon_con_TRAVERSE_iter);
+  ADD_OBJECT("con_TRAVERSE_list", pyon_con_TRAVERSE_list);
   ADD_OBJECT("EqClass", pyon_EqClass);
   ADD_OBJECT("OrdClass", pyon_OrdClass);
   ADD_OBJECT("TraversableClass", pyon_TraversableClass);

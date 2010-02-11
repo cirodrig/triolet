@@ -8,6 +8,7 @@ import Prelude hiding(catch)
 
 import Control.Applicative
 import Control.Exception
+import Control.Monad
 import Data.Traversable
 import Data.Typeable
 import Foreign.C.Types
@@ -54,6 +55,21 @@ gluon_type_Pure = asGlobalObject (pure pureKindE :: Delayed (Exp Core))
 
 -------------------------------------------------------------------------------
 -- Constructors
+
+foreign export ccall gluon_delayedType :: PyPtr -> IO PyPtr
+
+-- Take a Python callable object that returns an Exp, and wrap it in a
+-- delayed object.
+-- Since a pointer to the object is retained, use a ForeignPtr to manage its
+-- reference count.
+gluon_delayedType :: PyPtr -> IO PyPtr
+gluon_delayedType callback = do
+  callback_ref <- toPyRef callback
+  newHsObject $ Unevaluated (runCallback callback_ref)
+  where
+    runCallback :: PyRef -> IO (Exp Core)
+    runCallback callback_ref =
+      withPyRef callback_ref $ force <=< fromHsObject' <=< call0
 
 foreign export ccall gluon_pgmLabel :: CString -> CString -> IO PyPtr
 

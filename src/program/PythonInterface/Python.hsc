@@ -25,6 +25,11 @@ module PythonInterface.Python
         PyPtr,
         Python(toPython),
         
+        -- * Python owned references
+        PyRef,
+        toPyRef,
+        withPyRef,
+        
         -- * Exceptions
         PythonExc,
         PythonExcType,
@@ -78,6 +83,7 @@ import Foreign.C.String
 import Foreign.C.Types
 import Foreign.Marshal
 import Foreign.Ptr
+import Foreign.ForeignPtr
 import Foreign.Storable
 
 #undef _POSIX_C_SOURCE // Silences a warning. Defined in HsFFI.h and Python.h
@@ -234,6 +240,10 @@ foreign import ccall safe "Python.h Py_IncRef"
 
 foreign import ccall "Python.h Py_DecRef"
     py_DecRef :: PyPtr -> IO ()
+                 
+-- Function pointer used as a finalizer
+foreign import ccall "Python.h &Py_DecRef"
+  py_DecRef_function :: FunPtr (PyPtr -> IO ())
 
 -- Create a temporary Python object reference.
 -- Decrement its reference count when leaving the scope, whether
@@ -253,6 +263,23 @@ safeToPython x f = withPyPtr (toPython x) f
 -- Like safeToPython, but only decrement the reference counter on an exception.
 safeToPythonExc :: Python a => a -> (PyPtr -> IO b) -> IO b
 safeToPythonExc x f = withPyPtrExc (toPython x) f
+
+newtype PyRef = PyRef (ForeignPtr PyObject)
+
+-- | Create a new owned reference to a Python object.  The object's reference
+-- count is incremented.
+-- The reference count will be decremented when the created reference is 
+-- reclaimed by the Haskell garbage collector.
+toPyRef :: PyPtr -> IO PyRef
+toPyRef ptr = do
+  py_IncRef ptr
+  ptr <- newForeignPtr py_DecRef_function ptr
+  return (PyRef ptr)
+
+-- | Use an owned reference to a Python object.  The reference count is not
+--   adjusted.
+withPyRef :: PyRef -> (PyPtr -> IO a) -> IO a
+withPyRef (PyRef p) f = withForeignPtr p f
 
 -------------------------------------------------------------------------------
 -- Python objects

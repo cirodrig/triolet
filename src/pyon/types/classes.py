@@ -222,6 +222,10 @@ class ClassPredicate(PyonTypeBase):
         self.type = ty
         self.typeClass = cls
 
+    def __str__(self):
+        return str(self.typeClass.name) + ' ' + \
+            pretty.renderString(self.type.pretty())
+
     def __eq__(self, other):
         if not isinstance(other, ClassPredicate): return False
 

@@ -14,6 +14,9 @@ class RecVarPlaceholder(object):
         self._type = first_order_type
         self._expression = sf.newExpPlaceholder()
 
+    def __str__(self):
+        return "RecVarPlaceholder(" + str(self._variable) + str(self._type) + ")"
+
     def getVariable(self):
         return self._variable
 
@@ -30,6 +33,9 @@ class DictPlaceholder(object):
     def __init__(self, constraint):
         self._constraint = constraint
         self._expression = sf.newExpPlaceholder()
+
+    def __str__(self):
+        return "DictPlaceholder(" + str(self._constraint) + ")"
 
     def getConstraint(self):
         return self._constraint

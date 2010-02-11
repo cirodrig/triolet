@@ -131,6 +131,9 @@ class ANFVariable(Variable):
         """
         return self._typeScheme.instantiate()
 
+    def hasSystemFVariable(self):
+        return self._sfVariable is not None
+
     def setSystemFVariable(self, v):
         if self._sfVariable:
             raise RuntimeError, "Variable has already been translated"
@@ -140,6 +143,10 @@ class ANFVariable(Variable):
         if not self._sfVariable:
             raise RuntimeError, "Variable has not been translated"
         return self._sfVariable
+
+    def addAllTypeVariables(self, s):
+        if self._typeScheme:
+            self._typeScheme.addFreeVariables(s)
 
     # A counter used to assign unique IDs to variables
     _nextID = 1
@@ -180,8 +187,7 @@ class VariableParam(Parameter):
         self.default = default
 
     def addAllTypeVariables(self, s):
-        scm = self.name.getTypeScheme()
-        if scm: scm.addFreeVariables(s)
+        self.name.addAllTypeVariables(s)
 
 class TupleParam(Parameter):
     """
@@ -249,9 +255,7 @@ class VariableExpr(Expression):
         self.variable = v
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
-        scm = self.variable.getTypeScheme()
-        if scm: scm.addFreeVariables(s)
+        self.variable.addAllTypeVariables(s)
 
 class LiteralExpr(Expression):
     """A reference to a primitive, immutable literal value.
@@ -263,7 +267,7 @@ class LiteralExpr(Expression):
         self.literal = l
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
+        pass
 
 class UndefinedExpr(Expression):
     """An undefined value of any type."""
@@ -272,7 +276,7 @@ class UndefinedExpr(Expression):
         base.initializeExpr(self)
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
+        pass
 
 class TupleExpr(Expression):
     """A tuple expression."""
@@ -284,7 +288,6 @@ class TupleExpr(Expression):
         self.arguments = arguments
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
         for f in self.arguments: f.addAllTypeVariables(s)
 
 class CallExpr(Expression):
@@ -299,7 +302,6 @@ class CallExpr(Expression):
         self.arguments = arguments
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
         self.operator.addAllTypeVariables(s)
         for arg in self.arguments: arg.addAllTypeVariables(s)
 
@@ -319,7 +321,6 @@ class IfExpr(Expression):
         self.ifFalse = ifFalse
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
         self.argument.addAllTypeVariables(s)
         self.ifTrue.addAllTypeVariables(s)
         self.ifFalse.addAllTypeVariables(s)
@@ -332,7 +333,6 @@ class FunExpr(Expression):
         self.function = function
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
         self.function.addAllTypeVariables(s)
 
 ## These expressions are generated from Python statements
@@ -349,7 +349,6 @@ class LetExpr(Expression):
         self.body = body
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
         if self.parameter: self.parameter.addAllTypeVariables(s)
         self.rhs.addAllTypeVariables(s)
         self.body.addAllTypeVariables(s)
@@ -364,7 +363,6 @@ class LetrecExpr(Expression):
         self.body = body
 
     def addAllTypeVariables(self, s):
-        Expression.addAllTypeVariables(self, s)
         for d in self.definitions:
             d.addAllTypeVariables(s)
         self.body.addAllTypeVariables(s)

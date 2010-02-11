@@ -1,5 +1,13 @@
+"""
+The routines in this module convert Pyon's Hindley-Milner types and kinds to
+Gluon types.
 
-import pyon.pretty as pretty
+Conversion functions are called during type inference, but conversion occurs
+after type inference.  Conversion actually passes a callback to Haskell via
+the 'delayedType' function.  The callback is evaluated when the value is
+demanded.  Delayed evaluation is necessary to observe the final result of
+unification.
+"""
 
 import pyon.types.kind as kind
 import pyon.types.hmtype as hmtype
@@ -33,6 +41,11 @@ def _makeFunctionType(domain, range):
     
 
 def convertKind(k):
+    """
+    convertKind(Kind) -> gluon kind
+
+    Convert a kind to a Gluon kind expression.
+    """
     if isinstance(k, kind.Star):
         return gluon.type_Pure
     elif isinstance(k, kind.Arrow):
@@ -44,6 +57,11 @@ def convertKind(k):
 
 def convertVariable(v):
     "convertVariable(TyVar or RigidTyVar) -> gluon variable"
+    # If the variable has been unified with something, it's a type; we can't
+    # create a Gluon variable out of it
+    if unification.canonicalize(v) is not v:
+        raise ValueError, "Cannot convert a variable that has been unified"
+
     if not v.gluonVariable:
         # Create a Gluon variable for this variable
         if isinstance(v, hmtype.RigidTyVar) and v.name:
@@ -73,7 +91,13 @@ def _constructorType(con):
     return gluon.mkConE(noSourcePos, gluon_con)
 
 def _convertFirstOrderType(ty):
-    "_convertFirstOrderType(FirstOrderType) -> gluon type"
+    """
+    _convertFirstOrderType(FirstOrderType) -> gluon type
+
+    This must be called after unification is performed.  (Note that it calls
+    'canonicalize', which produces a different result after unification).
+    It is only called in a delayed manner by exported routines.
+    """
     assert isinstance(ty, hmtype.FirstOrderType)
 
     ty = unification.canonicalize(ty)
@@ -139,9 +163,9 @@ def convertType(ty):
     Convert a Pyon type to a gluon type.
     """
     if isinstance(ty, hmtype.FirstOrderType):
-        return _convertFirstOrderType(ty)
+        return gluon.delayedType(lambda: _convertFirstOrderType(ty))
     if isinstance(ty, schemes.TyScheme):
-        return _convertTyScheme(ty)
+        return gluon.delayedType(lambda: _convertTyScheme(ty))
     else:
         raise TypeError, type(ty)
 
@@ -165,8 +189,7 @@ def instantiate(make_expr, scm):
     # type.  After type inference completes, these will be the actual type
     # parameters.
     for tv in tyvars:
-        expr = system_f.mkTyAppE(expr,
-                                 gluon.mkVarE(noSourcePos, convertVariable(tv)))
+        expr = system_f.mkTyAppE(expr, convertType(tv))
 
     # If there are constraints, then create a call expression for the
     # dictionary parameters

@@ -23,6 +23,7 @@ import pyon.ast.print_ast as print_ast
 import pyon.pretty as pretty
 import pyon.builtin_data as builtin_data
 import pyon.unification as unification
+import pyon.types.kind as kind
 import pyon.types.types as hmtype
 import pyon.types.gluon_types as gluon_types
 from pyon.types.placeholders import RecVarPlaceholder, DictPlaceholder, IdDerivation, InstanceDerivation
@@ -554,7 +555,7 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
 
     elif isinstance(param, ast.TupleParam):
         # Unify the bound type with a tuple type
-        field_types = [hmtype.TyVar() for _ in param.fields]
+        field_types = [hmtype.TyVar(kind.Star()) for _ in param.fields]
 
         try:
             tuple_type = unification.unify(hmtype.tupleType(field_types),
@@ -601,7 +602,7 @@ def exposeParameterBinding(gamma, param):
     elif isinstance(param, ast.VariableParam):
         # If this parameter's type has been declared, use that type;
         # otherwise, create a new type variable
-        t = param.annotation or hmtype.TyVar()
+        t = param.annotation or hmtype.TyVar(kind.Star())
         assumeFirstOrderType(gamma, param.name, t)
         return (sf.mkVarP(param.name.getSystemFVariable(),
                           gluon_types.convertType(t)), t)
@@ -628,7 +629,7 @@ def exposeRecursiveVariable(gamma, v):
     information.
     """
     # Create a new type variable for this parameter
-    t = hmtype.TyVar()
+    t = hmtype.TyVar(kind.Star())
     assumePlaceholderType(gamma, v, t)
     return t
 
@@ -819,7 +820,7 @@ def inferExpressionType(gamma, expr):
         args, arg_types = unzip(args_types)
 
         # Create function type; unify
-        new_expr_type = hmtype.TyVar()
+        new_expr_type = hmtype.TyVar(kind.Star())
         try: unification.unify(oper_type,
                                hmtype.functionType(arg_types, new_expr_type))
         except unification.UnificationError, e:
@@ -863,7 +864,7 @@ def inferExpressionType(gamma, expr):
         cph = catCPh(cph_group, cph_body)
 
     elif isinstance(expr, ast.UndefinedExpr):
-        new_expr_type = hmtype.TyVar()
+        new_expr_type = hmtype.TyVar(kind.Star())
         new_expr = sf.mkUndefinedE(gluon_types.convertType(new_expr_type))
         cph = unitCPh
 

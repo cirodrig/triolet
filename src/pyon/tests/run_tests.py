@@ -23,9 +23,6 @@ def tryCompile(fname, show_traceback = False):
         ssa.convertSSA(test_ast)
         test_anf = anf_conversion.convertModule(test_ast)
 
-        # (DEBUG) print the output
-        # print_ast.printAst(test_anf)
-
         # Type inference
         test_anf = type_inference.inferTypes(test_anf)
 

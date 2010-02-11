@@ -72,6 +72,12 @@ mkNewAnonymousVariable(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+delayedType(PyObject *self, PyObject *arg)
+{
+  return gluon_delayedType(arg);
+}
+
+static PyObject *
 Binder_plain(PyObject *self, PyObject *args)
 {
   PyObject *var;
@@ -293,6 +299,9 @@ static struct PyMethodDef gluon_methods[] = {
   {"mkNewAnonymousVariable", mkNewAnonymousVariable, METH_VARARGS,
    "Create a new variable given a level.  The variable is assigned\n"
    "a fresh ID."},
+  {"delayedType", delayedType, METH_O,
+   "Create a delayed type expression.  The parameter should be a\n"
+   "zero-argument function.  It will be run when evaluation is forced."},
   {"Binder_plain", Binder_plain, METH_VARARGS,
    "Constructor for \"Binder Core ()\"."},
   {"Binder2_plain", Binder2_plain, METH_VARARGS,

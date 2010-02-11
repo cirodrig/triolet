@@ -15,6 +15,7 @@ import Foreign.C.Types
 import PythonInterface.Python
 import PythonInterface.HsObject
 import Gluon.Common.Label
+import qualified Gluon.Core
 import Pyon.Globals
 import Pyon.SystemF.Builtins
 import Pyon.SystemF.Syntax
@@ -23,16 +24,6 @@ import Pyon.Exports.Delayed
 
 -------------------------------------------------------------------------------
 -- Exported placeholder operations
-
-foreign export ccall pyon_delayedType :: PyPtr -> IO PyPtr
-
--- Take a Python callable object that returns a PyonType, and wrap it in a
--- delayed object.
-pyon_delayedType :: PyPtr -> IO PyPtr
-pyon_delayedType callback = newHsObject $ Unevaluated runCallback
-  where
-    runCallback :: IO PyonType
-    runCallback = fromHsObject' =<< call0 callback
 
 foreign export ccall pyon_newExpPlaceholder :: IO PyPtr
 
@@ -60,6 +51,7 @@ foreign export ccall pyon_con_list :: IO PyPtr
 foreign export ccall pyon_con_iter :: IO PyPtr
 foreign export ccall pyon_con_EqDict :: IO PyPtr
 foreign export ccall pyon_con_OrdDict :: IO PyPtr
+foreign export ccall pyon_con_TraversableDict :: IO PyPtr
 foreign export ccall pyon_con_EQ_Int :: IO PyPtr
 foreign export ccall pyon_con_NE_Int :: IO PyPtr
 foreign export ccall pyon_con_LT_Int :: IO PyPtr
@@ -78,6 +70,8 @@ foreign export ccall pyon_con_LT_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_LE_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_GT_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_GE_Tuple2 :: IO PyPtr
+foreign export ccall pyon_con_TRAVERSE_iter :: IO PyPtr
+foreign export ccall pyon_con_TRAVERSE_list :: IO PyPtr
 
 pyon_con_NoneType = asGlobalObject $ pyonBuiltin the_NoneType
 pyon_con_bool = asGlobalObject $ pyonBuiltin the_bool
@@ -85,6 +79,7 @@ pyon_con_list = asGlobalObject $ pyonBuiltin the_list
 pyon_con_iter = asGlobalObject $ pyonBuiltin the_iter
 pyon_con_EqDict = asGlobalObject $ pyonBuiltin the_EqDict
 pyon_con_OrdDict = asGlobalObject $ pyonBuiltin the_OrdDict
+pyon_con_TraversableDict = asGlobalObject $ pyonBuiltin the_TraversableDict
 pyon_con_EQ_Int = asGlobalObject $ eqMember $ pyonBuiltin the_EqDict_Int
 pyon_con_NE_Int = asGlobalObject $ neMember $ pyonBuiltin the_EqDict_Int
 pyon_con_LT_Int = asGlobalObject $ ltMember $ pyonBuiltin the_OrdDict_Int
@@ -103,6 +98,8 @@ pyon_con_LT_Tuple2 = asGlobalObject $ ltMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_LE_Tuple2 = asGlobalObject $ leMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_GT_Tuple2 = asGlobalObject $ gtMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_GE_Tuple2 = asGlobalObject $ geMember $ pyonBuiltin the_OrdDict_Tuple2
+pyon_con_TRAVERSE_iter = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_iter
+pyon_con_TRAVERSE_list = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_list
   
 foreign export ccall pyon_getTupleCon :: CInt -> IO PyPtr
 

@@ -17,8 +17,8 @@ constant PyonTuple5 : Pure -> Pure -> Pure -> Pure -> Pure -> Pure;
 
 -- Dictionary types for Pyon classes.
 constant EqDict : Pure -> Pure;
-
 constant OrdDict : Pure -> Pure;
+constant TraversableDict : Pure -> Pure;
 
 -- Class dictionary members for predefined instances.
 
@@ -60,3 +60,7 @@ constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
                       -> PyonTuple2 (EqDict a) (EqDict b)
                       -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
                       -> bool;
+
+constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> iter a;
+constant Traversable_TRAVERSE_iter : (a : Pure) -> iter a -> iter a;
+
