@@ -23,7 +23,7 @@ class Class(PyonTypeBase):
       The class name
     param : TyVar
       A type variable that stands for an arbitrary member of the class
-    constraint : Constraints
+    constraint : [ClassPredicate]
       Constraints that class members must satisfy
     methods: [ClassMethod]
       Declarations of the class's methods
@@ -342,10 +342,8 @@ def entails(context, predicate):
     """
     # Scan entire context, including superclasses, first
     for p in _concatMap(lambda c: c.andSuperclassPredicates(), context):
-        # Try to match this predicate from the context against the
-        # sought predicate
-        substitution = p.match(predicate)
-        if substitution is not None: return True
+        # Is this predicate in the context?
+        if p == predicate: return True
 
     # Then scan available instances 
     by_instance = predicate.instancePredicates()
@@ -372,8 +370,7 @@ def entailsHNF(context, predicate):
     for p in _concatMap(lambda c: c.andSuperclassPredicates(), context):
         # Try to match this predicate from the context against the
         # sought predicate
-        substitution = p.match(predicate)
-        if substitution is not None: return True
+        if p == predicate: return True
 
     return False
 
