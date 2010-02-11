@@ -1,7 +1,7 @@
 
 module Pyon.SystemF.Print
        (PrintFlags(..), defaultPrintFlags,
-        pprVar, pprPat, pprExp, pprFun, pprDef,
+        pprVar, pprPat, pprExp, pprFun, pprDef, pprModule,
         pprVarFlags, pprPatFlags, pprExpFlags, pprFunFlags, pprDefFlags
         )
 where
@@ -28,6 +28,9 @@ pprFun = pprFunFlags defaultPrintFlags
 
 pprDef :: Def -> Doc
 pprDef = pprDefFlags defaultPrintFlags
+
+pprModule :: Module -> Doc
+pprModule (Module defs) = vcat $ map pprDef defs
 
 data PrintFlags =
   PrintFlags

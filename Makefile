@@ -37,6 +37,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/Syntax.hs \
 	Pyon/SystemF/Builtins.hs \
 	Pyon/SystemF/Print.hs \
+	Pyon/SystemF/Optimizations.hs \
 	Pyon/Core/Syntax.hs \
 	Pyon/Core/Rename.hs \
 	Pyon/Core/Typecheck.hs
@@ -142,9 +143,11 @@ $(BUILDDIR)/Pyon/Exports/Gluon_c.o : $(BUILDDIR)/Pyon/Exports/Gluon_stub.h
 $(BUILDDIR)/Pyon/Exports/SystemF_c.o : $(BUILDDIR)/Pyon/Exports/SystemF_stub.h
 $(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/SystemF/Syntax.hi
 $(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/SystemF/Print.hi
+$(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/SystemF/Optimizations.hi
 $(BUILDDIR)/Pyon/Exports/SystemF.o : $(BUILDDIR)/Pyon/Exports/Delayed.hi
 $(BUILDDIR)/Pyon/Exports/Gluon.o : $(BUILDDIR)/Pyon/Exports/Delayed.hi
 $(BUILDDIR)/Pyon/SystemF/Builtins.o : $(BUILDDIR)/Paths_pyon.hi
+$(BUILDDIR)/Pyon/SystemF/Optimizations.o : $(BUILDDIR)/Pyon/SystemF/Syntax.hi
 $(BUILDDIR)/Pyon/Core/Rename.o : $(BUILDDIR)/Pyon/Core/Syntax.hi
 $(BUILDDIR)/Pyon/Core/Typecheck.o : $(BUILDDIR)/Pyon/Core/Syntax.hi
 $(BUILDDIR)/Pyon/Core/Typecheck.o : $(BUILDDIR)/Pyon/Core/Rename.hi
@@ -184,6 +187,7 @@ $(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Globals.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/SystemF/Syntax.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/SystemF/Builtins.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/SystemF/Print.hs))
+$(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/SystemF/Optimizations.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Exports/Delayed.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Core/Syntax.hs))
 $(eval $(call PYON_COMPILE_HS_SOURCE,Pyon/Core/Rename.hs))

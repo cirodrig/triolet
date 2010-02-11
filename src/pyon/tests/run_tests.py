@@ -10,7 +10,7 @@ from pyon.data_dir import *
 import pyon.ssa.parser_ssa as ssa
 import pyon.anf_conversion as anf_conversion
 import pyon.type_inference as type_inference
-import pyon.partial_eval as partial_eval
+import system_f
 
 # Find path to source files
 testDir = os.path.join(DATA_DIR, 'testcases')
@@ -22,15 +22,20 @@ def tryCompile(fname, show_traceback = False):
         test_ast = pyon.parser.parse(fname)
         ssa.convertSSA(test_ast)
         test_anf = anf_conversion.convertModule(test_ast)
+	del test_ast
 
         # Type inference
-        test_anf = type_inference.inferTypes(test_anf)
+        test_sf = type_inference.inferTypes(test_anf)
+	del test_anf
+
+        # (DEBUG) print the output
+	test_sf = system_f.optimizeModule(test_sf)
+	system_f.printModule(test_sf)
 
         # Partial evaluation
         #test_anf = partial_eval.partialEval(test_anf)
         #test_anf = partial_eval.eliminateDeadCode(test_anf)
         
-        # (DEBUG) print the output with type?
         # print_system_f.renderAst(test_anf)
 
     except Exception, e:

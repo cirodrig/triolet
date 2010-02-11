@@ -343,6 +343,24 @@ makeAndEvaluateModule(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+printModule(PyObject *self, PyObject *arg)
+{
+  if (!PyObject_IsInstance(arg, (PyObject *)&HsObject_type))
+    return NULL;
+
+  return pyon_printModule(arg);
+}
+
+static PyObject *
+optimizeModule(PyObject *self, PyObject *arg)
+{
+  if (!PyObject_IsInstance(arg, (PyObject *)&HsObject_type))
+    return NULL;
+
+  return pyon_optimizeModule(arg);
+}
+
+static PyObject *
 isExp(PyObject *self, PyObject *arg)
 {
   if (!PyObject_IsInstance(arg, (PyObject *)&HsObject_type)) {
@@ -410,8 +428,12 @@ static PyMethodDef system_f_methods[] = {
   {"mkDef", mkDef, METH_VARARGS,
    "Create a function definition."},
   {"makeAndEvaluateModule", makeAndEvaluateModule, METH_VARARGS,
-   "Create a module from a list of definitions.  Evaluation of the module's\n"
-   "contents is forced."},
+   "Create a module from a list of definitions.  This function also runs\n"
+   "any delayed computation of the module's contents."},
+  {"printModule", printModule, METH_O,
+   "Print a module to standard output."},
+  {"optimizeModule", optimizeModule, METH_O,
+   "Run System F optimizations on a module."},
   {"isExp", isExp, METH_O,
    "Determine whether the parameter is a System F expression."},
   {NULL, NULL, 0, NULL}

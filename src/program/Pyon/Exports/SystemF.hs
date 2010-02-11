@@ -20,6 +20,7 @@ import Pyon.Globals
 import Pyon.SystemF.Builtins
 import Pyon.SystemF.Syntax
 import Pyon.SystemF.Print
+import Pyon.SystemF.Optimizations
 import Pyon.Exports.Delayed
 
 -------------------------------------------------------------------------------
@@ -271,8 +272,6 @@ pyon_makeAndEvaluateModule :: PyPtr -> IO PyPtr
 pyon_makeAndEvaluateModule def_list = rethrowExceptionsInPython $ do
   defs <- fromListOfHsObject' def_list
   real_defs <- mapM force defs
-  -- DEBUG: print definitions
-  mapM_ (print . pprDef) real_defs
   newHsObject $ Module real_defs
   
 -------------------------------------------------------------------------------
@@ -284,3 +283,20 @@ pyon_isExp :: PyPtr -> IO Bool
 pyon_isExp ptr = do
   type_rep <- hsObjectType ptr
   return $ type_rep == typeOf (undefined :: Delayed Exp)
+
+-------------------------------------------------------------------------------
+-- Other exported functions.
+
+foreign export ccall pyon_printModule :: PyPtr -> IO PyPtr
+foreign export ccall pyon_optimizeModule :: PyPtr -> IO PyPtr
+
+pyon_printModule :: PyPtr -> IO PyPtr
+pyon_printModule mod = rethrowExceptionsInPython $ do
+  m <- fromHsObject' mod
+  print $ pprModule m
+  pyNone
+
+pyon_optimizeModule :: PyPtr -> IO PyPtr
+pyon_optimizeModule mod = rethrowExceptionsInPython $ do
+  m <- fromHsObject' mod
+  newHsObject $ optimizeModule m
