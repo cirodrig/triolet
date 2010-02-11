@@ -1,4 +1,11 @@
 
+#include <HsFFI.h>
+
+// Undefine this symbol, which is redefined in Python.h, to eliminate a warning
+#ifdef _POSIX_C_SOURCE
+#undef _POSIX_C_SOURCE
+#endif
+
 #include <Python.h>
 
 #include "PythonInterface/HsObject.h"
@@ -341,7 +348,7 @@ addGluonObject(PyObject *module, const char *name, void *(*factory)(void))
   PyObject *ptr = (PyObject *)factory();
   if (!ptr) return 0;
 
-  PyModule_AddObject(module, name, ptr);
+  PyModule_AddObject(module, (char *)name, ptr);
   return 1;
 }
 
