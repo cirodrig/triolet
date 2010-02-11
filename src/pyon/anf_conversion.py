@@ -48,16 +48,11 @@ def getAnnotatedFuncParams(annotation, a_tyvars):
 
     return params
 
-def getAnnotatedListType(annotation, a_tyvars):
-    if annotation.operator.variable.anfVariable != builtin_data.type_list:
-        raise TypeError, type(annotation.operator)
-    try:
-        oper_ty = annotation.operator.variable.anfVariable
-        t = hmtype.typeApplication(oper_ty,
-                                   [convertAnnotation(a, a_tyvars) for a in annotation.arguments])
-        return t
-    except:
-        raise TypeError, type(annotation)
+def getAnnotatedAppType(operator, arguments, a_tyvars):
+    "Convert a type application to a type"
+    oper_ty = convertAnnotation(operator, a_tyvars)
+    arg_tys =[convertAnnotation(a, a_tyvars) for a in arguments]
+    return hmtype.typeApplication(oper_ty, arg_tys)
 
 def convertAnnotation(annotation, a_tyvars):
     "Convert type annotation to corresponding type"
@@ -89,7 +84,8 @@ def convertAnnotation(annotation, a_tyvars):
             raise TypeError, annotation.operator.name
 
     elif isinstance(annotation, p_ast.CallExpr):
-        t = getAnnotatedListType(annotation, a_tyvars)
+        t = getAnnotatedAppType(annotation.operator, annotation.arguments,
+                                a_tyvars)
         return t
 
     else:
