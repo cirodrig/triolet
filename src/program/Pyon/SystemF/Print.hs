@@ -117,12 +117,12 @@ pprExpFlagsPrec flags prec expression =
      LetrecE ds body -> let defsText = vcat $ map (pprDefFlags flags) ds
                             e = pprExpFlags flags body
                         in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
-     DictE cls ty scs ms -> let clsText = Gluon.pprExp ty
+     DictE cls ty scs ms -> let clsText = parens $ Gluon.pprExp ty
                                 scsText = tuple $ map (pprExpFlags flags) scs
                                 msText = tuple $ map (pprExpFlags flags) ms
                             in text "dict" <> cat [clsText, scsText, msText]
      MethodSelectE cls ty index arg ->
-       let clsText = Gluon.pprExp ty
+       let clsText = parens $ Gluon.pprExp ty
            indexText = parens $ text (show index)
            argText = parens $ pprExpFlags flags arg
        in text "method" <> cat [clsText, indexText, argText]
