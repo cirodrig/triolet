@@ -10,9 +10,12 @@ DEPEND_DEPENDENCES=$(PYON_HS_GENERATED_FILES) depend
 ###############################################################################
 # Targets
 
-.PHONY : all depend clean veryclean build install
+.PHONY : all depend clean veryclean doc build install
 
 all : build
+
+doc : $(DEPEND_DEPENDENCES)
+	$(MAKE) -f build.mk doc
 
 build : $(DEPEND_DEPENDENCES)
 	$(MAKE) -f build.mk build

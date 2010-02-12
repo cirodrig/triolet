@@ -12,6 +12,7 @@ bindir=@bindir@
 CC=@CC@
 HC=ghc
 HSC2HS=hsc2hs
+ESED=@cir_esed@
 
 ## System-dependent flags
 
@@ -37,7 +38,7 @@ INCLUDEDIRS=@cir_hs_libdir@/include \
 LIBDIRS=
 
 # Haskell package names
-PACKAGES=language-python-pyon mtl fgl gluon
+PACKAGES=base containers mtl fgl language-python-pyon gluon
 
 # Library names
 LIBS=python@cir_python_version@

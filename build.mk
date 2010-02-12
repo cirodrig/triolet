@@ -4,12 +4,29 @@
 # Commands that run before dependency generation are in 'Makefile'.
 
 include variables.mk
-include depend_hs.mk
 
-.PHONY : default build install
+# GHC options passed to haddock.
+HADDOCK_HC_OPTS=$(foreach opt, $(HS_C_OPTS), "--optghc=$(opt)")
+
+# For each package, get the location of its haddock interface file
+# using ghc-pkg
+HADDOCK_INTERFACE_FILES=$(foreach pkg, $(PACKAGES), $(shell ghc-pkg describe $(pkg) --simple-output | $(ESED) -n "s/^haddock-interfaces: (.*)/\1/p"))
+HADDOCK_INTERFACE_OPTS=$(foreach ifile, $(HADDOCK_INTERFACE_FILES), -i $(ifile))
+
+###############################################################################
+# Targets
+
+.PHONY : default doc build install
 
 default :
-	echo "No target specified"
+	@echo "No target specified"
+
+doc : dist/doc/html/pyon/index.html
+
+# Delegate documentation to a script
+dist/doc/html/pyon/index.html : $(PYON_SOURCE_FILES)
+	@echo "Building documentation..."
+	@env ESED="$(ESED)" HADDOCK_HC_OPTS="$(HADDOCK_HC_OPTS)" PYON_SOURCE_FILES="$(PYON_SOURCE_FILES)" PACKAGES="$(PACKAGES)" sh makedoc.sh
 
 # Create executable and scripts; then run Python's setup script 
 build : $(PYON_TARGET) $(PYON_GENERATED_SCRIPTS) src/pyon/data_dir.py
@@ -44,7 +61,7 @@ $(BUILDDIR)/$(1:.hs=.o) :
 endif
 endif
 	mkdir -p $(BUILDDIR)/$(dir $(1))
-	$(HC) -c $$< -odir $(BUILDDIR) -hidir $(BUILDDIR) -i$(BUILDDIR) $(HS_C_OPTS)
+	$(HC) -c $$< $(HS_C_OPTS)
 	touch $(BUILDDIR)/$(patsubst %.hs,%.hi,$(1))
 
 endef
@@ -90,3 +107,6 @@ build/scripts/% : src/scripts/%
 %.hi : %.o ;
 %_stub.c : %.o ;
 %_stub.h : %.o ;
+
+# Dependences
+include depend_hs.mk

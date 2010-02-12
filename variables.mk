@@ -8,13 +8,15 @@ include config.mk
 
 PACKAGE_FLAGS=$(foreach pkg, $(PACKAGES), -package $(pkg))
 LIB_FLAGS=$(foreach lib, $(LIBS), -l$(lib))
-INCLUDEDIR_FLAGS=-Isrc/program -I$(BUILDDIR) $(foreach dir, $(INCLUDEDIRS), -I$(dir))
+HS_INCLUDEDIR_FLAGS=-isrc/program -i$(BUILDDIR) $(foreach dir, $(INCLUDEDIRS), -I$(dir))
+C_INCLUDEDIR_FLAGS=-Isrc/program -I$(BUILDDIR) $(foreach dir, $(INCLUDEDIRS), -I$(dir))
 LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
 
-HS_HSC2HS_OPTS=$(HSC2HSFLAGS) $(INCLUDEDIR_FLAGS)
+HS_HSC2HS_OPTS=$(HSC2HSFLAGS) $(C_INCLUDEDIR_FLAGS)
 HS_C_OPTS=$(HCFLAGS) \
-	-XMultiParamTypeClasses $(INCLUDEDIR_FLAGS) $(PACKAGE_FLAGS)
-C_C_OPTS=$(CCFLAGS) $(INCLUDEDIR_FLAGS)
+	-odir $(BUILDDIR) -hidir $(BUILDDIR) \
+	-XMultiParamTypeClasses $(HS_INCLUDEDIR_FLAGS) $(PACKAGE_FLAGS)
+C_C_OPTS=$(CCFLAGS) $(C_INCLUDEDIR_FLAGS)
 L_OPTS=$(LFLAGS) $(PACKAGE_FLAGS) $(LIDIR_FLAGS) $(LIB_FLAGS)
 
 ## File lists
@@ -62,3 +64,6 @@ PYON_HS_GENERATED_FILES=$(foreach src, $(PYON_HS_GENERATED_SRCS), $(BUILDDIR)/$(
 # Object files with full path
 PYON_OBJECT_FILES=$(foreach obj, $(PYON_OBJECTS), $(BUILDDIR)/$(obj))
 
+# All source files with full path
+PYON_SOURCE_FILES=$(foreach src, $(PYON_HS_SRCS), $(SRCDIR)/$(src)) \
+	$(foreach src, $(PYON_HS_GENERATED_SRCS), $(BUILDDIR)/$(src))

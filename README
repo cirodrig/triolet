@@ -9,6 +9,8 @@ autoconf
 make
 make install
 
+You can also run 'make doc' to build Haddock documentation.
+
 Using
 -----
 
@@ -19,6 +21,7 @@ need to add the directory containing the Python 'pyon' package to PYTHONPATH.
 
 At this point, you can import and run compiler modules from pyon.
 The script 'pyon_testsuite' runs the test suite.
+The script 'pyon_compile' compiles a single source file.
 
 Hacking
 -------

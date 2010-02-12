@@ -27,6 +27,8 @@ CIR_PY_LIBDIR()
 
 ## Check for libraries
 
+CIR_HS_CHECK_PACKAGE([base])
+CIR_HS_CHECK_PACKAGE([containers])
 CIR_HS_CHECK_PACKAGE([mtl])
 CIR_HS_CHECK_PACKAGE([fgl])
 CIR_HS_CHECK_PACKAGE([language-python-pyon])
@@ -49,6 +51,7 @@ AC_SUBST(cir_python_version)
 AC_SUBST(cir_python_incdir)
 AC_SUBST(cir_python_libdir)
 AC_SUBST(BUILD_32BIT)
+AC_SUBST(cir_esed)
 
 AC_CONFIG_FILES([config.mk])
 AC_OUTPUT()
