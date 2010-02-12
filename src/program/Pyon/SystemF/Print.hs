@@ -49,7 +49,7 @@ tuple xs = parens $ sep $ punctuate comma xs
 pprVarFlags :: PrintFlags -> Var -> Doc
 pprVarFlags flags v =
   let lab = case varName v
-            of Nothing -> empty
+            of Nothing -> text "_"
                Just label -> text (showLabel label)
       id = if printVariableIDs flags || isNothing (varName v)
            then text $ '\'' : show (fromIdent $ varID v)
