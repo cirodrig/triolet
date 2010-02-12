@@ -188,68 +188,68 @@ expHsObject = newHsObject
 
 pyon_mkVarE var = rethrowExceptionsInPython $ do
   v <- fromHsObject' var
-  expHsObject $ pure $ VarE v
+  expHsObject $ pure $ VarE defaultExpInfo v
 
 pyon_mkConE con = rethrowExceptionsInPython $ do
   c <- fromHsObject' con
-  expHsObject $ pure $ ConE c
+  expHsObject $ pure $ ConE defaultExpInfo c
 
 pyon_mkLitE lit ty = rethrowExceptionsInPython $ do
   l <- fromHsObject' lit
   t <- fromHsObject' ty
-  expHsObject $ LitE l <$> t
+  expHsObject $ LitE defaultExpInfo l <$> t
 
 pyon_mkUndefinedE ty = rethrowExceptionsInPython $ do
   t <- fromHsObject' ty
-  expHsObject $ UndefinedE <$> t
+  expHsObject $ UndefinedE defaultExpInfo <$> t
 
 pyon_mkTupleE args = rethrowExceptionsInPython $ do
   hs_args <- fromListOfHsObject' args
-  expHsObject $ TupleE <$> sequenceA hs_args
+  expHsObject $ TupleE defaultExpInfo <$> sequenceA hs_args
 
 pyon_mkTyAppE oper ty = rethrowExceptionsInPython $ do
   e <- fromHsObject' oper
   t <- fromHsObject' ty
-  expHsObject $ TyAppE <$> e <*> t
+  expHsObject $ TyAppE defaultExpInfo <$> e <*> t
 
 pyon_mkCallE oper args = rethrowExceptionsInPython $ do
   e <- fromHsObject' oper
   es <- fromListOfHsObject' args
-  expHsObject $ CallE <$> e <*> sequenceA es
+  expHsObject $ CallE defaultExpInfo <$> e <*> sequenceA es
 
 pyon_mkIfE oper true false = rethrowExceptionsInPython $ do
   e <- fromHsObject' oper
   t <- fromHsObject' true
   f <- fromHsObject' false
-  expHsObject $ IfE <$> e <*> t <*> f
+  expHsObject $ IfE defaultExpInfo <$> e <*> t <*> f
 
 pyon_mkFunE fun = rethrowExceptionsInPython $ do
   f <- fromHsObject' fun
-  expHsObject $ FunE <$> f
+  expHsObject $ FunE defaultExpInfo <$> f
 
 pyon_mkLetE pat rhs body = rethrowExceptionsInPython $ do
   p <- fromHsObject' pat
   e <- fromHsObject' rhs
   b <- fromHsObject' body
-  expHsObject $ LetE <$> p <*> e <*> b
+  expHsObject $ LetE defaultExpInfo <$> p <*> e <*> b
 
 pyon_mkLetrecE defs body = rethrowExceptionsInPython $ do
   ds <- fromListOfHsObject' defs
   b <- fromHsObject' body
-  expHsObject $ LetrecE <$> sequenceA ds <*> b
+  expHsObject $ LetrecE defaultExpInfo <$> sequenceA ds <*> b
 
 pyon_mkDictE cls ty superclasses methods = rethrowExceptionsInPython $ do
   c <- fromHsObject' cls
   t <- fromHsObject' ty
   scs <- fromListOfHsObject' superclasses
   ms <- fromListOfHsObject' methods
-  expHsObject $ DictE c <$> t <*> sequenceA scs <*> sequenceA ms
+  expHsObject $ DictE defaultExpInfo c <$> t <*> sequenceA scs <*> sequenceA ms
 
 pyon_mkMethodSelectE cls ty n exp = rethrowExceptionsInPython $ do
   c <- fromHsObject' cls
   t <- fromHsObject' ty
   e <- fromHsObject' exp
-  expHsObject $ MethodSelectE <$> c <*> t <*> pure (fromIntegral n) <*> e
+  expHsObject $ MethodSelectE defaultExpInfo <$> c <*> t <*> pure (fromIntegral n) <*> e
 
 foreign export ccall pyon_mkFun :: PyPtr -> PyPtr -> PyPtr -> IO PyPtr
 
