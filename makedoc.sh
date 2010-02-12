@@ -17,7 +17,7 @@ fi
 function readpkgfield()
 {
     # Get package description; find field; print value; stop
-    ghc-pkg describe --simple-output $1 | ${ESED} -n "/^$2:/{s/^$2: (.*)/\1/p;q}"
+    ghc-pkg describe --simple-output $1 | ${ESED} -n "/^$2:/{s/^$2: (.*)/\1/p;q;}"
 }
 
 # Construct a list of interface file parameters, giving the file name and
