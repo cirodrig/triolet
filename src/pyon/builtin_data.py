@@ -287,11 +287,7 @@ class_Traversable = None
 # The list of all builtin functions
 BUILTIN_FUNCTIONS = [fun_reduce, fun_reduce1, fun_zip, fun_iota, const_undefined]
 
-# The map of all builtin data types
-BUILTIN_DATATYPES = {
-  "bool":type_bool,
-  "int":type_int,
-  "float":type_float,
-  "list":type_list
-}
+# The list of all builtin constructors
+BUILTIN_DATATYPES = [tycon_int, tycon_bool, tycon_float, tycon_None,
+                     tycon_list, tycon_iter]
 

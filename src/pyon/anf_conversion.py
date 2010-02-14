@@ -57,19 +57,17 @@ def getAnnotatedAppType(operator, arguments, a_tyvars):
 def convertAnnotation(annotation, a_tyvars):
     "Convert type annotation to corresponding type"
     if isinstance(annotation, p_ast.VariableExpr):
-        # If there's no pre-assigned ANF variable, then this variable should
-        # represent a type variable
-        if not annotation.variable.hasANFVariable():
-            try: return a_tyvars[annotation.variable]
-            except: raise TypeError, "unspecified type variable used"
+        # If there's a pre-assigned type, return it
+        if annotation.variable.anfType:
+            return annotation.variable.anfType
 
-        # Otherwise, make sure it's a type variable
-        if not isinstance(annotation.variable.anfVariable,
-                          hmtype.FirstOrderType):
-            raise TypeError, "variable used as a type"
-
-        # Return the associated type
-        return annotation.variable.anfVariable
+        # If there's any other pre-assigned other meaning, then raise an error
+        if not annotation.variable.hasANFDefinition():
+            raise RuntimeError, "Not a type"
+        
+        # Otherwise, this variable should represent a type variable
+        try: return a_tyvars[annotation.variable]
+        except: raise RuntimeError, "Not a type"
 
     elif isinstance(annotation, p_ast.TupleExpr):
         t = hmtype.TupleTy([convertAnnotation(arg, a_tyvars)
@@ -413,10 +411,14 @@ def convertVariableRef(var, ssaver):
     # If version is -1, then use the special expression 'undefined'
     if ssaver == -1:
         return a_ast.UndefinedExpr()
+
+    # If not tracked by SSA, then return the pre-assigned value.
+    # It must be a variable, not a type.
     elif ssaver == ssa.notSSA:
-        if isinstance(var.anfVariable, hmtype.PyonType):
-            raise TypeError, "type used as a variable" 
-        return a_ast.VariableExpr(var.anfVariable)
+        t = var.anfVariable
+        if not t:
+            raise RuntimeError, "Not a variable"
+        return a_ast.VariableExpr(t)
     else:
         return a_ast.VariableExpr(convertVariable(var, ssaver))
 

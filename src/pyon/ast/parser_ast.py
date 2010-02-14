@@ -23,7 +23,10 @@ class PythonVariable(Variable):
     def __eq__(self, other):
         return self.identifier == other.identifier
 
-    def __init__(self, name, identifier = None, anf_variable = None):
+    def __init__(self, name, identifier = None,
+                 anf_variable = None,
+                 anf_type = None,
+                 anf_iterator_tag = None):
         """
         Create a new Python variable.
         name: The name of the variable as it appears in the source code; None
@@ -32,10 +35,14 @@ class PythonVariable(Variable):
           PythonVariable objects denote the same variable iff they have the
           same identifier.  If no identifer is given, a new integer will be
           assigned.
-        anf_variable: If not None, this is the ANF variable corresponding to
+        anfVariable: If not None, this is the ANF variable corresponding to
           this variable in the parser output.  This is used for source code
           references to variables that are already in the IR, such as
           previously loaded modules.
+        anfType: If not None, this is the type corresponding to this variable
+          in the parser output.
+        anfIteratorIag: If not None, this is the iterator tag corresponding
+          to this variable in the parser output.
 
         If two variables have the same identifier, they must also have the same
         ANF variable.  They are not required to have the same name.
@@ -43,20 +50,34 @@ class PythonVariable(Variable):
         assert isinstance(name, str)
         if identifier is None: identifier = PythonVariable.getNewID()
         assert isinstance(identifier, int)
-        assert anf_variable is None or \
-            isinstance(anf_variable, ast.ANFVariable) or \
-            isinstance(anf_variable, hmtype.PyonType)
+
+        # At most one of these parameters may be given
+        assert len([x for x in [anf_variable, anf_type, anf_iterator_tag]
+                    if x]) <= 1
+        if anf_variable: assert isinstance(anf_variable, ast.ANFVariable)
+        if anf_type: assert isinstance(anf_type, hmtype.FirstOrderType)
+        if anf_iterator_tag:
+            assert isinstance(anf_iterator_tag,
+                              pyon.types.iterator_tag.IteratorTag)
         self.name = name
         self.identifier = identifier
         self.anfVariable = anf_variable
+        self.anfType = anf_type
+        self.anfIteratorTag = anf_iterator_tag
 
         # A map from python variable identifiers (uniquely identifying
         # Python variables) to SSA identifiers (uniquely identifying SSA
         # instances of Python variables).
         self.ssaVersionMap = {}         # Private to ANF conversion
 
-    def hasANFVariable(self):
-        return self.anfVariable is not None
+    def hasANFDefinition(self):
+        """
+        v.hasANFDefinition() -> bool
+
+        Returns True if this variable has a predefined meaning, such as a
+        global variable or type.
+        """
+        return bool(self.anfVariable or self.anfType or self.anfIteratorTag)
 
     _nextID = 1
 

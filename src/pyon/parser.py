@@ -1,8 +1,8 @@
 
 import haskell
+import pyon.types.hmtype
 import pyon.ast.parser_ast as ast
-from pyon.builtin_data import BUILTIN_FUNCTIONS
-from pyon.builtin_data import BUILTIN_DATATYPES
+from pyon.builtin_data import BUILTIN_FUNCTIONS, BUILTIN_DATATYPES
 
 # A list of PythonVariable used for resolving the names of predefined
 # variables while parsing.
@@ -11,7 +11,7 @@ _builtinVariableList = None
 def _getBuiltinVariableList():
     global _builtinVariableList
 
-    # Initialize the list if needed, do nothing
+    # Initialize the list if needed, do nothing otherwise
     if _builtinVariableList is None:
         def mv(anf_var):
             "Create the list entry for @anf_var."
@@ -20,15 +20,15 @@ def _getBuiltinVariableList():
             # create a new ID.
             return ast.PythonVariable(anf_var.name, anf_variable = anf_var)
 
-        def mv2(name, ty):
-            "Create the list entry for builtin data type."
-            pv = ast.PythonVariable(name, anf_variable = ty)
-            return pv
+        def mv2(con):
+            "Create the list entry for the data type constructor @con."
+            return ast.PythonVariable(con.name,
+                                      anf_type = pyon.types.hmtype.EntTy(con))
 
-        _builtinVarFunctions = [mv(v) for v in BUILTIN_FUNCTIONS]
-        _builtinVarDatatypes = [mv2(name, ty) for (name, ty) in BUILTIN_DATATYPES.items()]
+        functions = [mv(v) for v in BUILTIN_FUNCTIONS]
+        types = [mv2(con) for con in BUILTIN_DATATYPES]
 
-        _builtinVariableList = _builtinVarFunctions + _builtinVarDatatypes 
+        _builtinVariableList = functions + types
 
     return _builtinVariableList
 

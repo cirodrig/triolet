@@ -139,7 +139,7 @@ def _nextVarSSA(var):
     else:
         # If the variable is already associated with an ANF variable, it can't
         # be redefined
-        if var.hasANFVariable():
+        if var.hasANFDefinition():
             raise RuntimeError, "Found definition of a non-SSA variable"
         oldssaver = -1 
         var._ssaver = 0
@@ -260,7 +260,7 @@ def _doExpr(expr):
         _doExpr(expr.right)
     elif isinstance(expr, ast.VariableExpr):
         v = expr.variable
-        if v.hasANFVariable(): expr.ssaver = notSSA
+        if v.hasANFDefinition(): expr.ssaver = notSSA
         else: expr.ssaver = v._ssaver
     elif isinstance(expr, ast.LiteralExpr):
         pass #Nothing to do
