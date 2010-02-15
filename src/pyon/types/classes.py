@@ -21,6 +21,8 @@ class Class(PyonTypeBase):
     fields:
     name : string
       The class name
+    tag_params : [StreamTagVar]
+      Stream tag parameters
     param : TyVar
       A type variable that stands for an arbitrary member of the class
     constraint : [ClassPredicate]
@@ -35,16 +37,18 @@ class Class(PyonTypeBase):
       The Gluon constructor denoting this class's dictionary type
     """
 
-    def __init__(self, name, param, constraint, methods,
+    def __init__(self, name, tag_params, param, constraint, methods,
                  system_f_class, system_f_con):
         """
         Class(name, var, constraint, methods) -> new class
         """
+        for p in tag_params: assert isinstance(p, stream_tag.StreamTagVar)
         assert isinstance(param, TyVar)
         for c in constraint: assert isinstance(c, ClassPredicate)
         for t in methods: assert isinstance(t, ClassMethod)
 
         self.name = name
+        self.streamTagParams = tag_params
         self.parameter = param
         self.constraint = constraint
         self.methods = methods
@@ -141,9 +145,11 @@ class ClassMethod(object):
             # the actual method signature
             sig = self.getSignature()
             cls_var = cls.parameter
+            tagvars = cls.streamTagParams + sig.streamTags
             qvars = [cls_var] + sig.qvars
             constraints = [ClassPredicate(cls_var, cls)] + sig.constraints
-            actual_sig = pyon.types.schemes.TyScheme(qvars, constraints,
+            actual_sig = pyon.types.schemes.TyScheme(tagvars, qvars,
+                                                     constraints,
                                                      sig.type)
             
             v = self._variable = \
@@ -329,6 +335,9 @@ class ClassPredicate(PyonTypeBase):
     def addFreeVariables(self, s):
         self.type.addFreeVariables(s)
 
+    def addFreeTypeSymbols(self, s):
+        self.type.addFreeTypeSymbols(s)
+
     def rename(self, substitution):
         return ClassPredicate(self.type.rename(substitution),
                               self.typeClass)
@@ -406,7 +415,7 @@ def reduce(context):
 
 def splitConstraints(constraints, free_vars, qvars):
     """
-    splitConstraints(constraints, free-vars, quantified-vars)
+    splitConstraints(constraints, FreeVariableSet, FreeVariableSet)
         -> (retained-constraints, deferred-constraints)
 
     Split a set of constraints into a retained set and a deferred set.

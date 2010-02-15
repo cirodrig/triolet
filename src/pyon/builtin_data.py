@@ -9,6 +9,7 @@ import system_f as sf
 import pyon.pretty as pretty
 import pyon.ast.ast as ast
 import pyon.types.kind as kind
+import pyon.types.stream_tag as stream_tag
 import pyon.types.types as hm
 import pyon.types.gluon_types as gluon_types
 
@@ -22,7 +23,8 @@ def _makeClasses():
     def cmp_scheme(a):
         # Type scheme for comparsion operators:
         # forall a. a * a -> bool
-        return hm.TyScheme([], hm.noConstraints,
+        # ('a' is not a stream)
+        return hm.TyScheme([], [], hm.noConstraints,
                            _funType([a,a], type_bool))
 
     def addPyonInstance(cls, qvars, constraints, type, members):
@@ -32,10 +34,10 @@ def _makeClasses():
     # class Eq a where
     #   (==) : a -> a -> bool
     #   (!=) : a -> a -> bool
-    a = hm.TyVar(kind.Star())
+    a = hm.TyVar(kind.Star(), stream_tag.IsAction())
     scheme_1 = cmp_scheme(a)
     scheme_fn = lambda: scheme_1
-    class_Eq = hm.Class("Eq", a, [],
+    class_Eq = hm.Class("Eq", [], a, [],
                         [hm.ClassMethod("__eq__", scheme_fn),
                          hm.ClassMethod("__ne__", scheme_fn)],
                         sf.EqClass, sf.con_EqDict)
@@ -46,10 +48,10 @@ def _makeClasses():
     #   (<=) : a -> a -> bool
     #   (>) : a -> a -> bool
     #   (>=) : a -> a -> bool
-    a = hm.TyVar(kind.Star())
+    a = hm.TyVar(kind.Star(), stream_tag.IsAction())
     scheme_2 = cmp_scheme(a)
     scheme_fn = lambda: scheme_2
-    class_Ord = hm.Class("Ord", a, [hm.ClassPredicate(a, class_Eq)],
+    class_Ord = hm.Class("Ord", [], a, [hm.ClassPredicate(a, class_Eq)],
                          [hm.ClassMethod("__lt__", scheme_fn),
                           hm.ClassMethod("__le__", scheme_fn),
                           hm.ClassMethod("__gt__", scheme_fn),
@@ -57,21 +59,22 @@ def _makeClasses():
                          sf.OrdClass, sf.con_OrdDict)
     del a, scheme_fn
 
-    # class Traversable (t : * -> *) where
-    #   foreach : t a -> iter a
-    t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
+    # class Traversable (T : StreamTag) (t : * -> *) where
+    #   foreach : t<T> a -> iter a
+    T = stream_tag.StreamTagVar()
+    t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
 
-    a = hm.TyVar(kind.Star())
-    scheme_3 = hm.TyScheme([a], [],
+    a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+    scheme_3 = hm.TyScheme([], [a], [],
                            _funType([hm.AppTy(t, a)],
                                     hm.AppTy(type_iter, a)))
     del a
     scheme_fn = lambda: scheme_3
     class_Traversable = \
-        hm.Class("Traversable", t, [],
+        hm.Class("Traversable", [T], t, [],
                  [hm.ClassMethod("__iter__", scheme_fn)],
                  sf.TraversableClass, sf.con_TraversableDict)
-    del t, scheme_fn
+    del T, t, scheme_fn
 
     # Instance declarations
     addPyonInstance(class_Eq, [], [], type_int,
@@ -133,28 +136,30 @@ def _makeClasses():
 
 def create_type_schemes():
     global _unaryScheme, _binaryScheme, _compareScheme, _binaryIntScheme
-    a = hm.TyVar(kind.Star())
-    _unaryScheme = hm.TyScheme([a], hm.noConstraints, _funType([a], a))
-    _binaryScheme = hm.TyScheme([a], hm.noConstraints, _funType([a,a], a))
-    _compareScheme = hm.TyScheme([a], hm.noConstraints,
+    a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+    _unaryScheme = hm.TyScheme([], [a], hm.noConstraints, _funType([a], a))
+    _binaryScheme = hm.TyScheme([], [a], hm.noConstraints, _funType([a,a], a))
+    _compareScheme = hm.TyScheme([], [a], hm.noConstraints,
                                  _funType([a,a], type_bool))
-    _binaryIntScheme = hm.TyScheme([], hm.noConstraints,
+    _binaryIntScheme = hm.TyScheme([], [], hm.noConstraints,
                                    _funType([type_int,type_int], type_int))
 
 ###############################################################################
 
 # Builtin primitive types
-tycon_int = hm.TyCon("int", kind.Star(),
+tycon_int = hm.TyCon("int", kind.Star(), stream_tag.IsAction(),
                      gluon_constructor = gluon.con_Int)
-tycon_float = hm.TyCon("float", kind.Star(),
+tycon_float = hm.TyCon("float", kind.Star(), stream_tag.IsAction(),
                        gluon_constructor = gluon.con_Float)
-tycon_bool = hm.TyCon("bool", kind.Star(),
+tycon_bool = hm.TyCon("bool", kind.Star(), stream_tag.IsAction(),
                       gluon_constructor = sf.con_bool)
-tycon_None = hm.TyCon("NoneType", kind.Star(),
+tycon_None = hm.TyCon("NoneType", kind.Star(), stream_tag.IsAction(),
                       gluon_constructor = sf.con_NoneType)
 tycon_iter = hm.TyCon("iter", kind.Arrow(kind.Star(), kind.Star()),
+                      stream_tag.IsStream(),
                       gluon_constructor = sf.con_iter)
 tycon_list = hm.TyCon("list", kind.Arrow(kind.Star(), kind.Star()),
+                      stream_tag.IsAction(),
                       gluon_constructor = sf.con_list)
 
 # Builtin types
@@ -166,6 +171,14 @@ type_iter = hm.EntTy(tycon_iter)
 type_list = hm.EntTy(tycon_list)
 
 create_type_schemes()
+
+# Define classes and instances.
+# Each global identifier is initialized to None for reasons of documentation.
+# Their actual values come from the call to _makeClasses().
+class_Eq = None
+class_Ord = None
+class_Num = None
+class_Traversable = None
 
 _makeClasses()
 
@@ -217,72 +230,75 @@ oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
 
 # The list-building operator
 # list : forall t a. Traversable t => t a -> list a
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
-a = hm.TyVar(kind.Star())
-_list_type = hm.TyScheme([t, a],
+T = stream_tag.StreamTagVar()
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
+a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+_list_type = hm.TyScheme([T], [t, a],
                          [hm.ClassPredicate(t, class_Traversable)],
                          _funType([hm.AppTy(t, a)], hm.AppTy(type_list, a)))
-del t, a
+del T, t, a
 oper_LIST = ast.ANFVariable(name = "list", type_scheme = _list_type)
 
 # Builtin list and iterator functions
 # 'map', 'reduce', 'reduce1', 'zip', 'iota'
 
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
-a = hm.TyVar(kind.Star())
-b = hm.TyVar(kind.Star())
-_map_type = hm.TyScheme([t, a],
+T = stream_tag.StreamTagVar()
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
+a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+b = hm.TyVar(kind.Star(), stream_tag.IsAction())
+_map_type = hm.TyScheme([T], [t, a],
                         [hm.ClassPredicate(t, class_Traversable)],
                         _funType([_funType([a], b),
                                   hm.AppTy(t, a)],
                                  hm.AppTy(t, b)))
-del t, a, b
+del T, t, a, b
 fun_map = ast.ANFVariable(name = "map", type_scheme = _map_type)
-                     
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
-a = hm.TyVar(kind.Star())
-_reduce_type = hm.TyScheme([t, a],
+
+T = stream_tag.StreamTagVar()
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
+a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+_reduce_type = hm.TyScheme([T], [t, a],
                            [hm.ClassPredicate(t, class_Traversable)],
                            _funType([_funType([a, a], a),
                                      a,
                                      hm.AppTy(t, a)],
                                     a))
-del t, a
+del T, t, a
 fun_reduce = ast.ANFVariable(name = "reduce", type_scheme = _reduce_type)
 
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
-a = hm.TyVar(kind.Star())
-_reduce1_type = hm.TyScheme([t, a],
+T = stream_tag.StreamTagVar()
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
+a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+_reduce1_type = hm.TyScheme([T], [t, a],
                             [hm.ClassPredicate(t, class_Traversable)],
                             _funType([_funType([a, a], a),
                                       hm.AppTy(t, a)],
                                      a))
-del t, a
+del T, t, a
 fun_reduce1 = ast.ANFVariable(name = "reduce1", type_scheme = _reduce1_type)
 
-s = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()))
-a = hm.TyVar(kind.Star())
-b = hm.TyVar(kind.Star())
-_zip_type = hm.TyScheme([s,t,a,b],
+T1 = stream_tag.StreamTagVar()
+T2 = stream_tag.StreamTagVar()
+s = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T1)
+t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T2)
+a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+b = hm.TyVar(kind.Star(), stream_tag.IsAction())
+_zip_type = hm.TyScheme([T1, T2], [s,t,a,b],
                         [hm.ClassPredicate(s, class_Traversable),
                          hm.ClassPredicate(t, class_Traversable)],
                         _funType([hm.AppTy(s, a), hm.AppTy(t, b)],
                                  hm.AppTy(type_iter, hm.tupleType([a, b]))))
-del s, t, a, b
+del T1, T2, s, t, a, b
 fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
 
 _iota_type = _forall(0, lambda: _funType([], hm.AppTy(type_iter, type_int)))
 fun_iota = ast.ANFVariable(name = "iota", type_scheme = _iota_type)
 
+T = stream_tag.StreamTagVar()
+a = hm.TyVar(kind.Star(), T)
 const_undefined = ast.ANFVariable(name = "__undefined__",
-                                  type_scheme = hm.TyScheme.forall(1, lambda a: a))
-
-# Define classes and instances.
-# Each global identifier is initialized to None for reasons of documentation.
-# Their actual values come from the call to _makeClasses().
-class_Num = None
-class_Traversable = None
+                                  type_scheme = hm.TyScheme([T], [a], [], a))
+del T, a
 
 # The list of all builtin functions
 BUILTIN_FUNCTIONS = [fun_reduce, fun_reduce1, fun_zip, fun_iota, const_undefined]

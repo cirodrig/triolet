@@ -55,7 +55,7 @@ def literalSignature(c):
 
 class Environment(dict):
     """
-    A type environment, which is a finite map from variables to types or
+    A type environment.  The environment maps variables to types or
     type schemes.
 
     For a given variable v, if v is in scope, then
@@ -100,19 +100,19 @@ class Environment(dict):
 
     def freeVariables(self):
         """
-        env.freeVariables() -> set
+        env.freeVariables() -> FreeVariableSet
 
         Get the set of all free type variables mentioned in the environment
         """
-        s = set()
+        s = hmtype.FreeVariableSet()
 
         # Add the free type variables of each local binding to the set
         for v, ty in self.iteritems():
-            if ty is None: v.getTypeScheme().addFreeVariables(s)
+            if ty is None: v.getTypeScheme().addFreeTypeSymbols(s)
             elif isinstance(ty, hmtype.FirstOrderType):
-                ty.addFreeVariables(s)
+                ty.addFreeTypeSymbols(s)
             elif isinstance(ty, RecVarPlaceholder):
-                ty.getFirstOrderType().addFreeVariables(s)
+                ty.getFirstOrderType().addFreeTypeSymbols(s)
             else:
                 raise TypeError, type(ty)
         return s
@@ -202,7 +202,7 @@ def assignFirstOrderTypeScheme(env, v, ty):
     assert isinstance(ty, hmtype.FirstOrderType)
     assert v not in env
 
-    scm = hmtype.TyScheme([], hmtype.noConstraints, ty)
+    scm = hmtype.TyScheme([], [], hmtype.noConstraints, ty)
     v.setTypeScheme(scm)
     env[v] = None
 
@@ -210,7 +210,7 @@ def assignFirstOrderTypeScheme(env, v, ty):
 
 def generalize(gamma, constraints, ty):
     # Determine which type variables to generalize over
-    ftv_ty = ty.freeVariables()
+    ftv_ty = ty.freeTypeSymbols()
     ftv_gamma = gamma.freeVariables()
     qvars = ftv_ty.difference(ftv_gamma)
 
@@ -219,12 +219,14 @@ def generalize(gamma, constraints, ty):
                                                    ftv_gamma,
                                                    qvars)
 
-    return (deferred, hmtype.TyScheme(list(qvars), retained, ty))
+    return (deferred, hmtype.TyScheme(list(qvars.iterStreamTags()),
+                                      list(qvars.iterTyVars()),
+                                      retained, ty))
 
 def generalizeGroup(gamma, constraints, explicit_qvars, ty_list):
     # Determine which type variables to generalize over
-    ftv_ty = set()
-    for ty in ty_list: ty.addFreeVariables(ftv_ty)
+    ftv_ty = hmtype.FreeVariableSet()
+    for ty in ty_list: ty.addFreeTypeSymbols(ftv_ty)
     ftv_gamma = gamma.freeVariables()
     local_vars = ftv_ty.difference(ftv_gamma)
 
@@ -237,12 +239,12 @@ def generalizeGroup(gamma, constraints, explicit_qvars, ty_list):
     schemes = []
     for x_qvars, ty in zip(explicit_qvars, ty_list):
         # Determine which variables the type scheme is parameterized over.
-        qvars_set = ty.freeVariables().difference(ftv_gamma)
+        qvars_set = ty.freeTypeSymbols().difference(ftv_gamma)
 
         # If no explicit type variables are given, then we should not
         # parameterize over any rigid type variables.
         if x_qvars is None:
-            for v in qvars_set:
+            for v in qvars_set.iterTyVars():
                 if isinstance(v, hmtype.RigidTyVar):
                     raise TypeCheckError, "Type is less polymorphic than expeced"
 
@@ -250,16 +252,17 @@ def generalizeGroup(gamma, constraints, explicit_qvars, ty_list):
         # It's acceptable to parameterize over a subset.
         # All variables in the set are rigid.
         else:
-            for v in qvars_set:
+            for v in qvars_set.iterTyVars():
                 if v not in x_qvars:
                     raise TypeCheckError, "Type is more polymorphic than expected"
 
         # The retained constraints must only mention these variables
         for c in retained:
-            if not c.freeVariables().issubset(qvars_set):
+            if not c.freeVariables().issubset(set(qvars_set.iterTyVars())):
                 raise TypeCheckError, "Ambiguous type variable in constraint"
 
-        sch = hmtype.TyScheme(list(qvars_set), retained, ty)
+        # Do not parameterize over any stream tag variables
+        sch = hmtype.TyScheme([], list(qvars_set.iterTyVars()), retained, ty)
         schemes.append(sch)
 
     return (deferred, retained, schemes)
@@ -825,9 +828,9 @@ def inferExpressionType(gamma, expr):
                                hmtype.functionType(arg_types, new_expr_type))
         except unification.UnificationError, e:
             print_ast.printAst(expr)
-            print "Function type:", pretty.renderString(ty_fn.pretty())
-            print "Argument types:", [pretty.renderString(x.getType().pretty()) for x in args]
-            raise TypeCheckError, "Type mismatch in function call"
+            print "Function type:", pretty.renderString(oper_type.pretty())
+            print "Argument types:", ", ".join([pretty.renderString(at.pretty()) for at in arg_types])
+            raise TypeCheckError, "Type mismatch in function call (" + str(e) + ")"
 
         new_expr = sf.mkCallE(oper, args)
         cph = catCPh(cph_oper, cph_args)
