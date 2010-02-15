@@ -32,7 +32,7 @@ class Unifiable(object):
         x.rename(substitution) -> object
 
         Apply a substitution to x, possibly creating a new object.  The
-        originalal object remains unchanged.  The substituted value is
+        original object remains unchanged.  The substituted value is
         returned.
         """
         raise NotImplementedError
@@ -53,7 +53,7 @@ class Term(Unifiable):
         return False
 
     def getConstructor(self):
-        raise NotImplemetnedError
+        raise NotImplementedError
 
     def getParameters(self):
         raise NotImplementedError
