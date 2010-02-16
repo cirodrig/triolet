@@ -44,7 +44,7 @@ def getAnnotatedFuncType(annotation, a_tyvars):
     param_ty = getAnnotatedFuncParams(annotation.left, a_tyvars)
     ret_ty = convertAnnotation(annotation.right, a_tyvars)
 
-    t = hmtype.FunTy(param_ty, ret_ty)
+    t = hmtype.functionType(param_ty, ret_ty)
     return t
 
 def getAnnotatedFuncParams(annotation, a_tyvars):
