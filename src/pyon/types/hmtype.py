@@ -303,27 +303,6 @@ class TyCon(TyEnt):
     def getKind(self):
         return self._kind
 
-class DictionaryTyCon(TyEnt):
-    """
-    The type of a class dictionary.  A class dictionary type is like a tuple,
-    but its members may be polymorphic.  Functions that manipulate dictionary
-    types are not first-order types.
-    """
-    def __init__(self, cls):
-        # Cannot refer to classes due to module dependences
-        # assert isinstance(cls, pyon.types.classes.Class)
-        self.cls = cls
-
-    def __eq__(self, other):
-        if not isinstance(other, DictionaryTyCon): return False
-        return self.cls == other.cls
-
-    def __str__(self):
-        return "Dict(" + self.cls.name + ")"
-
-    def getKind(self):
-        return kind.Arrow(kind.Star(), kind.Star())
-
 ###############################################################################
 # Type expressions
 

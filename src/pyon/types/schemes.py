@@ -10,15 +10,6 @@ _FORALL = unicodedata.lookup('FOR ALL')
 ###############################################################################
 # Type schemes
 
-def instantiateVariables(vars):
-    """
-    instantiateVariables(variable-list) -> mapping
-
-    Instantiate some type variables.  Each variable is mapped to a fresh type
-    variable, and the mapping is returned.
-    """
-    return dict((v, TyVar()) for v in vars)
-
 class TyScheme(PyonTypeBase):
     """
     A type scheme: forall (stream-tags) (qvars). (constraints) => (t)
