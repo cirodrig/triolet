@@ -1,6 +1,6 @@
 
-constant Action : Effect -> Linear -> Linear;
-constant Stream : Effect -> Linear -> Linear;
+constant Action : Pure -> Pure;
+constant Stream : Pure -> Pure;
 
 -- Pyon types.  We don't care about values for now.
 constant NoneType : Pure;
@@ -61,6 +61,6 @@ constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
                       -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
                       -> bool;
 
+constant Traversable_TRAVERSE_Stream : (a : Pure) -> iter a -> iter a;
 constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> iter a;
-constant Traversable_TRAVERSE_iter : (a : Pure) -> iter a -> iter a;
 

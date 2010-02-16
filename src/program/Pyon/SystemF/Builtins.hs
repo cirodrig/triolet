@@ -7,7 +7,7 @@ module Pyon.SystemF.Builtins
         the_EqDict_Int, the_OrdDict_Int,
         the_EqDict_Float, the_OrdDict_Float,
         the_EqDict_Tuple2, the_OrdDict_Tuple2,
-        the_TraversableDict_iter, the_TraversableDict_list,
+        the_TraversableDict_Stream, the_TraversableDict_list,
         getPyonTupleType
        )
 where
@@ -66,7 +66,7 @@ data PyonBuiltins =
   , the_OrdDict_Float :: OrdDictMembers
   , the_EqDict_Tuple2 :: EqDictMembers
   , the_OrdDict_Tuple2 :: OrdDictMembers
-  , the_TraversableDict_iter :: TraversableDictMembers
+  , the_TraversableDict_Stream :: TraversableDictMembers
   , the_TraversableDict_list :: TraversableDictMembers
   
   , the_tuples :: [Con]
@@ -87,8 +87,8 @@ assign_EqDict_Float x b = b {the_EqDict_Float = x}
 assign_OrdDict_Float x b = b {the_OrdDict_Float = x}
 assign_EqDict_Tuple2 x b = b {the_EqDict_Tuple2 = x}
 assign_OrdDict_Tuple2 x b = b {the_OrdDict_Tuple2 = x}
+assign_TraversableDict_Stream x b = b {the_TraversableDict_Stream = x}
 assign_TraversableDict_list x b = b {the_TraversableDict_list = x}
-assign_TraversableDict_iter x b = b {the_TraversableDict_iter = x}
 
 the_PyonBuiltins :: MVar PyonBuiltins
 {-# NOINLINE the_PyonBuiltins #-}
@@ -169,7 +169,7 @@ initializePyonBuiltins mod =
                            , the_OrdDict_Float = uninitialized
                            , the_EqDict_Tuple2 = uninitialized
                            , the_OrdDict_Tuple2 = uninitialized
-                           , the_TraversableDict_iter = uninitialized
+                           , the_TraversableDict_Stream = uninitialized
                            , the_TraversableDict_list = uninitialized
                            , the_tuples = uninitialized
                            }
@@ -194,8 +194,8 @@ initializePyonBuiltins mod =
         setEqDict "Eq_EQ_Tuple2" "Eq_NE_Tuple2" assign_EqDict_Tuple2 .
         setOrdDict "Ord_LT_Tuple2" "Ord_LE_Tuple2"
                    "Ord_GT_Tuple2" "Ord_GE_Tuple2" assign_OrdDict_Tuple2 .
-        setTraversableDict "Traversable_TRAVERSE_iter" 
-                           assign_TraversableDict_iter .
+        setTraversableDict "Traversable_TRAVERSE_Stream" 
+                           assign_TraversableDict_Stream .
         setTraversableDict "Traversable_TRAVERSE_list"
                            assign_TraversableDict_list
   in do bi <- evaluate $ setTupleTypes $ setGlobalCons $ setClassDicts start

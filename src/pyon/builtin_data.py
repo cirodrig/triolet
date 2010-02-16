@@ -7,15 +7,15 @@ import gluon
 import system_f as sf
 
 import pyon.pretty as pretty
-import pyon.ast.ast as ast
+import pyon.ast.ast
 import pyon.types.kind as kind
 import pyon.types.stream_tag as stream_tag
 import pyon.types.types as hm
-import pyon.types.gluon_types as gluon_types
 
 _star = kind.Star()
 _forall = hm.TyScheme.forall
 _funType = hm.functionType
+_anfVariable = pyon.ast.ast.ANFVariable
 
 def _makeClasses():
     "Create type classes."
@@ -101,7 +101,7 @@ def _makeClasses():
                      sf.con_GT_Float, sf.con_GE_Float])
 
     addPyonInstance(class_Traversable, [], hm.noConstraints, type_iter,
-                    [sf.con_TRAVERSE_iter])
+                    [sf.con_TRAVERSE_Stream])
     addPyonInstance(class_Traversable, [], hm.noConstraints, type_list,
                     [sf.con_TRAVERSE_list])
 
@@ -158,7 +158,7 @@ tycon_None = hm.TyCon("NoneType", _star, stream_tag.IsAction(),
                       gluon_constructor = sf.con_NoneType)
 tycon_iter = hm.TyCon("iter", kind.Arrow(_star, _star),
                       stream_tag.IsStream(),
-                      gluon_constructor = sf.con_iter)
+                      gluon_constructor = sf.con_Stream)
 tycon_list = hm.TyCon("list", kind.Arrow(_star, _star),
                       stream_tag.IsAction(),
                       gluon_constructor = sf.con_list)
@@ -190,20 +190,20 @@ oper_LT = class_Ord.getMethod("__lt__")
 oper_LE = class_Ord.getMethod("__le__")
 oper_GT = class_Ord.getMethod("__gt__")
 oper_GE = class_Ord.getMethod("__ge__")
-oper_ADD = ast.ANFVariable(name = "__add__", type_scheme = _binaryScheme)
-oper_SUB = ast.ANFVariable(name = "__sub__", type_scheme = _binaryScheme)
-oper_MUL = ast.ANFVariable(name = "__mul__", type_scheme = _binaryScheme)
-oper_DIV = ast.ANFVariable(name = "__div__", type_scheme = _binaryScheme)
-oper_MOD = ast.ANFVariable(name = "__mod__", type_scheme = _binaryIntScheme)
-oper_POWER = ast.ANFVariable(name = "__power__", type_scheme = _binaryScheme)
-oper_FLOORDIV = ast.ANFVariable(name = "__floordiv__", type_scheme = _binaryScheme) # FIXME
-oper_BITWISEAND = ast.ANFVariable(type_scheme = _binaryIntScheme)
-oper_BITWISEOR = ast.ANFVariable(type_scheme = _binaryIntScheme)
-oper_BITWISEXOR = ast.ANFVariable(type_scheme = _binaryIntScheme)
-oper_ARROW = ast.ANFVariable(type_scheme = _binaryScheme)
+oper_ADD = _anfVariable(name = "__add__", type_scheme = _binaryScheme)
+oper_SUB = _anfVariable(name = "__sub__", type_scheme = _binaryScheme)
+oper_MUL = _anfVariable(name = "__mul__", type_scheme = _binaryScheme)
+oper_DIV = _anfVariable(name = "__div__", type_scheme = _binaryScheme)
+oper_MOD = _anfVariable(name = "__mod__", type_scheme = _binaryIntScheme)
+oper_POWER = _anfVariable(name = "__power__", type_scheme = _binaryScheme)
+oper_FLOORDIV = _anfVariable(name = "__floordiv__", type_scheme = _binaryScheme) # FIXME
+oper_BITWISEAND = _anfVariable(type_scheme = _binaryIntScheme)
+oper_BITWISEOR = _anfVariable(type_scheme = _binaryIntScheme)
+oper_BITWISEXOR = _anfVariable(type_scheme = _binaryIntScheme)
+oper_ARROW = _anfVariable(type_scheme = _binaryScheme)
 
 # Builtin unary functions with no Pyon implementation
-oper_NEGATE = ast.ANFVariable(type_scheme = _unaryScheme)
+oper_NEGATE = _anfVariable(type_scheme = _unaryScheme)
 
 # Traversal
 oper_ITER = class_Traversable.getMethod("__iter__")
@@ -217,18 +217,18 @@ _cat_map_type = \
             lambda a, b: _funType([_funType([a], hm.AppTy(type_iter, b)),
                                    hm.AppTy(type_iter, a)],
                                   hm.AppTy(type_iter, b)))
-oper_CAT_MAP = ast.ANFVariable(name = "__cat_map__",
+oper_CAT_MAP = _anfVariable(name = "__cat_map__",
                                type_scheme = _cat_map_type)
 
 # __guard__ : forall a. bool * iter a -> iter a
 _guard_type = _forall([_star], lambda a: \
                           _funType([type_bool, hm.AppTy(type_iter, a)],
                                    hm.AppTy(type_iter, a)))
-oper_GUARD = ast.ANFVariable(name = "__guard__", type_scheme = _guard_type)
+oper_GUARD = _anfVariable(name = "__guard__", type_scheme = _guard_type)
 
 # __do__ : forall a. a -> iter a
 _do_type = _forall([_star], lambda a: _funType([a], hm.AppTy(type_iter, a)))
-oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
+oper_DO = _anfVariable(name = "__do__", type_scheme = _do_type)
 
 # The list-building operator
 # list : forall t a. Traversable t => t a -> list a
@@ -239,7 +239,7 @@ _list_type = hm.TyScheme([T], [t, a],
                          [hm.ClassPredicate(t, class_Traversable)],
                          _funType([hm.AppTy(t, a)], hm.AppTy(type_list, a)))
 del T, t, a
-oper_LIST = ast.ANFVariable(name = "list", type_scheme = _list_type)
+fun_list = _anfVariable(name = "makelist", type_scheme = _list_type)
 
 # Builtin list and iterator functions
 # 'map', 'reduce', 'reduce1', 'zip', 'iota'
@@ -254,7 +254,7 @@ _map_type = hm.TyScheme([T], [t, a],
                                   hm.AppTy(t, a)],
                                  hm.AppTy(t, b)))
 del T, t, a, b
-fun_map = ast.ANFVariable(name = "map", type_scheme = _map_type)
+fun_map = _anfVariable(name = "map", type_scheme = _map_type)
 
 T = stream_tag.StreamTagVar()
 t = hm.TyVar(kind.Arrow(_star, _star), T)
@@ -266,7 +266,7 @@ _reduce_type = hm.TyScheme([T], [t, a],
                                      hm.AppTy(t, a)],
                                     a))
 del T, t, a
-fun_reduce = ast.ANFVariable(name = "reduce", type_scheme = _reduce_type)
+fun_reduce = _anfVariable(name = "reduce", type_scheme = _reduce_type)
 
 T = stream_tag.StreamTagVar()
 t = hm.TyVar(kind.Arrow(_star, _star), T)
@@ -277,7 +277,7 @@ _reduce1_type = hm.TyScheme([T], [t, a],
                                       hm.AppTy(t, a)],
                                      a))
 del T, t, a
-fun_reduce1 = ast.ANFVariable(name = "reduce1", type_scheme = _reduce1_type)
+fun_reduce1 = _anfVariable(name = "reduce1", type_scheme = _reduce1_type)
 
 T1 = stream_tag.StreamTagVar()
 T2 = stream_tag.StreamTagVar()
@@ -291,19 +291,20 @@ _zip_type = hm.TyScheme([T1, T2], [s,t,a,b],
                         _funType([hm.AppTy(s, a), hm.AppTy(t, b)],
                                  hm.AppTy(type_iter, hm.tupleType([a, b]))))
 del T1, T2, s, t, a, b
-fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
+fun_zip = _anfVariable(name = "zip", type_scheme = _zip_type)
 
 _iota_type = _forall([], lambda: _funType([], hm.AppTy(type_iter, type_int)))
-fun_iota = ast.ANFVariable(name = "iota", type_scheme = _iota_type)
+fun_iota = _anfVariable(name = "iota", type_scheme = _iota_type)
 
 T = stream_tag.StreamTagVar()
 a = hm.TyVar(kind.Star(), T)
-const_undefined = ast.ANFVariable(name = "__undefined__",
-                                  type_scheme = hm.TyScheme([T], [a], [], a))
+const_undefined = _anfVariable(name = "__undefined__",
+                               type_scheme = hm.TyScheme([T], [a], [], a))
 del T, a
 
 # The list of all builtin functions
-BUILTIN_FUNCTIONS = [fun_reduce, fun_reduce1, fun_zip, fun_iota, const_undefined]
+BUILTIN_FUNCTIONS = [fun_list, fun_reduce, fun_reduce1, fun_zip, fun_iota,
+                     const_undefined]
 
 # The list of all builtin constructors
 BUILTIN_DATATYPES = [tycon_int, tycon_bool, tycon_float, tycon_None,

@@ -339,7 +339,7 @@ def convertExpression(expr):
     elif isinstance(expr, p_ast.ListCompExpr):
         # Convert the comprehension [blah for blah in blah] to a
         # function call list(blah for blah in blah)
-        return _callVariable(builtin_data.oper_LIST,
+        return _callVariable(builtin_data.fun_list,
                              [convertIterator(expr.iterator)])
 
     elif isinstance(expr, p_ast.GeneratorExpr):

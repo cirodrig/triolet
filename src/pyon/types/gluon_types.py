@@ -9,6 +9,7 @@ demanded.  Delayed evaluation is necessary to observe the final result of
 unification.
 """
 
+import pyon.types.stream_tag as stream_tag
 import pyon.types.kind as kind
 import pyon.types.hmtype as hmtype
 import pyon.types.classes as classes
@@ -21,24 +22,43 @@ import system_f
 
 noSourcePos = gluon.noSourcePos
 
-def mkPyonFunE(domain, range):
-    """
-    Create the Gluon function type corresponding to a Pyon function.
-    The function's parameter types are gathered into a tuple.
-    """
-    dom = gluon.mkConAppE(noSourcePos,
-                          system_f.getTupleCon(len(domain)),
-                          domain)
-    return gluon.mkArrowE(noSourcePos, False, dom, range)
-
 def _makeFunctionType(domain, range):
     """
     Make the type of a function from @domain to @range.  The domain is a list
     of types, and is translated to a tuple type.
+
+    If @range is tagged as a 'stream', then it must have type 'iter a' for
+    some type 'a'; the generated function type is
+        dom1 -> dom2 -> ... -> Stream a
+
+    If tagged as 'action', it generates the type
+        dom1 -> dom2 -> ... -> Action range
+
+    If the tag is a variable, then default to 'action'. 
     """
-    return mkPyonFunE(map(_convertFirstOrderType, domain),
-                      _convertFirstOrderType(range))
-    
+    # Not imported at global scope due to module import dependences
+    import pyon.builtin_data
+
+    if range.getStreamTag() == pyon.types.stream_tag.IsStream():
+        range = unification.canonicalize(range)
+        if not isinstance(range, hmtype.AppTy) or \
+                not range.operator == pyon.builtin_data.type_iter:
+            raise ValueError, "Only 'iter' types can be streams"
+
+        gluon_type = gluon.mkConAppE(noSourcePos,
+                                     system_f.con_Stream,
+                                     [_convertFirstOrderType(range.argument)])
+    else:
+        gluon_type = gluon.mkConAppE(noSourcePos,
+                                     system_f.con_Action,
+                                     [_convertFirstOrderType(range)])
+
+    # Add an arrow for each element of the domain
+    for t in reversed(domain):
+        gluon_type = gluon.mkArrowE(noSourcePos, False,
+                                    _convertFirstOrderType(t), gluon_type)
+
+    return gluon_type
 
 def convertKind(k):
     """

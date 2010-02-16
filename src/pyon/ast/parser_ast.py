@@ -5,7 +5,7 @@
 import itertools
 
 import pyon.ast.operators
-import pyon.ast.ast as ast
+import pyon.ast.ast
 import pyon.types.kind as kind
 import pyon.types.hmtype as hmtype
 
@@ -54,7 +54,7 @@ class PythonVariable(Variable):
         # At most one of these parameters may be given
         assert len([x for x in [anf_variable, anf_type, anf_kind]
                     if x]) <= 1
-        if anf_variable: assert isinstance(anf_variable, ast.ANFVariable)
+        if anf_variable: assert isinstance(anf_variable, pyon.ast.ast.ANFVariable)
         if anf_type: assert isinstance(anf_type, hmtype.FirstOrderType)
         if anf_kind: assert isinstance(anf_kind, kind.Kind)
         self.name = name

@@ -462,6 +462,8 @@ createSystemFModule(void)
 
   ADD_OBJECT("NoneL", pyon_mkNoneL);
 
+  ADD_OBJECT("con_Action", pyon_con_Action);
+  ADD_OBJECT("con_Stream", pyon_con_Stream);
   ADD_OBJECT("con_NoneType", pyon_con_NoneType);
   ADD_OBJECT("con_bool", pyon_con_bool);
   ADD_OBJECT("con_list", pyon_con_list);
@@ -487,7 +489,7 @@ createSystemFModule(void)
   ADD_OBJECT("con_LE_Tuple2", pyon_con_LE_Tuple2);
   ADD_OBJECT("con_GT_Tuple2", pyon_con_GT_Tuple2);
   ADD_OBJECT("con_GE_Tuple2", pyon_con_GE_Tuple2);
-  ADD_OBJECT("con_TRAVERSE_iter", pyon_con_TRAVERSE_iter);
+  ADD_OBJECT("con_TRAVERSE_Stream", pyon_con_TRAVERSE_Stream);
   ADD_OBJECT("con_TRAVERSE_list", pyon_con_TRAVERSE_list);
   ADD_OBJECT("EqClass", pyon_EqClass);
   ADD_OBJECT("OrdClass", pyon_OrdClass);

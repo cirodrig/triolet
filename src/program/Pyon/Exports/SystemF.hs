@@ -46,6 +46,8 @@ pyon_setExpPlaceholder placeholder value = rethrowExceptionsInPython $ do
 asGlobalObject :: Typeable a => a -> IO PyPtr
 asGlobalObject = rethrowExceptionsInPython . newHsObject
 
+foreign export ccall pyon_con_Action :: IO PyPtr
+foreign export ccall pyon_con_Stream :: IO PyPtr
 foreign export ccall pyon_con_NoneType :: IO PyPtr
 foreign export ccall pyon_con_bool :: IO PyPtr
 foreign export ccall pyon_con_list :: IO PyPtr
@@ -71,9 +73,11 @@ foreign export ccall pyon_con_LT_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_LE_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_GT_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_GE_Tuple2 :: IO PyPtr
-foreign export ccall pyon_con_TRAVERSE_iter :: IO PyPtr
+foreign export ccall pyon_con_TRAVERSE_Stream :: IO PyPtr
 foreign export ccall pyon_con_TRAVERSE_list :: IO PyPtr
 
+pyon_con_Action = asGlobalObject $ pyonBuiltin the_Action
+pyon_con_Stream = asGlobalObject $ pyonBuiltin the_Stream
 pyon_con_NoneType = asGlobalObject $ pyonBuiltin the_NoneType
 pyon_con_bool = asGlobalObject $ pyonBuiltin the_bool
 pyon_con_list = asGlobalObject $ pyonBuiltin the_list
@@ -99,7 +103,7 @@ pyon_con_LT_Tuple2 = asGlobalObject $ ltMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_LE_Tuple2 = asGlobalObject $ leMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_GT_Tuple2 = asGlobalObject $ gtMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_GE_Tuple2 = asGlobalObject $ geMember $ pyonBuiltin the_OrdDict_Tuple2
-pyon_con_TRAVERSE_iter = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_iter
+pyon_con_TRAVERSE_Stream = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_Stream
 pyon_con_TRAVERSE_list = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_list
   
 foreign export ccall pyon_getTupleCon :: CInt -> IO PyPtr
