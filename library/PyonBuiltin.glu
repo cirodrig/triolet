@@ -6,7 +6,6 @@ constant Stream : Pure -> Pure;
 constant NoneType : Pure;
 constant bool : Pure;
 constant list : Pure -> Pure;
-constant iter : Pure -> Pure;
 
 constant PyonTuple0 : Pure;
 constant PyonTuple1 : Pure -> Pure;
@@ -22,45 +21,39 @@ constant TraversableDict : Pure -> Pure;
 
 -- Class dictionary members for predefined instances.
 
-constant Eq_EQ_Int : PyonTuple2 Int Int -> bool;
-constant Eq_NE_Int : PyonTuple2 Int Int -> bool;
-constant Ord_GT_Int : PyonTuple2 Int Int -> bool;
-constant Ord_GE_Int : PyonTuple2 Int Int -> bool;
-constant Ord_LT_Int : PyonTuple2 Int Int -> bool;
-constant Ord_LE_Int : PyonTuple2 Int Int -> bool;
+constant Eq_EQ_Int : Int -> Int -> Action bool;
+constant Eq_NE_Int : Int -> Int -> Action bool;
+constant Ord_GT_Int : Int -> Int -> Action bool;
+constant Ord_GE_Int : Int -> Int -> Action bool;
+constant Ord_LT_Int : Int -> Int -> Action bool;
+constant Ord_LE_Int : Int -> Int -> Action bool;
 
-constant Eq_EQ_Float : PyonTuple2 Float Float -> bool;
-constant Eq_NE_Float : PyonTuple2 Float Float -> bool;
-constant Ord_GT_Float : PyonTuple2 Float Float -> bool;
-constant Ord_GE_Float : PyonTuple2 Float Float -> bool;
-constant Ord_LT_Float : PyonTuple2 Float Float -> bool;
-constant Ord_LE_Float : PyonTuple2 Float Float -> bool;
+constant Eq_EQ_Float : Float -> Float -> Action bool;
+constant Eq_NE_Float : Float -> Float -> Action bool;
+constant Ord_GT_Float : Float -> Float -> Action bool;
+constant Ord_GE_Float : Float -> Float -> Action bool;
+constant Ord_LT_Float : Float -> Float -> Action bool;
+constant Ord_LE_Float : Float -> Float -> Action bool;
 
 constant Eq_EQ_Tuple2 : (a : Pure) -> (b : Pure)
-                     -> PyonTuple2 (EqDict a) (EqDict b)
-                     -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
-                     -> bool;
+                     -> EqDict a -> EqDict b
+                     -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
 constant Eq_NE_Tuple2 : (a : Pure) -> (b : Pure)
-                     -> PyonTuple2 (EqDict a) (EqDict b)
-                     -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
-                     -> bool;
+                     -> EqDict a -> EqDict b
+                     -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
 constant Ord_GT_Tuple2 : (a : Pure) -> (b : Pure)
-                      -> PyonTuple2 (EqDict a) (EqDict b)
-                      -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
-                      -> bool;
+                      -> OrdDict a -> OrdDict b
+                      -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
 constant Ord_GE_Tuple2 : (a : Pure) -> (b : Pure)
-                      -> PyonTuple2 (EqDict a) (EqDict b)
-                      -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
-                      -> bool;
+                      -> OrdDict a -> OrdDict b
+                      -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
 constant Ord_LT_Tuple2 : (a : Pure) -> (b : Pure)
-                      -> PyonTuple2 (EqDict a) (EqDict b)
-                      -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
-                      -> bool;
+                      -> OrdDict a -> OrdDict b
+                      -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
 constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
-                      -> PyonTuple2 (EqDict a) (EqDict b)
-                      -> PyonTuple2 (PyonTuple2 a b) (PyonTuple2 a b)
-                      -> bool;
+                      -> OrdDict a -> OrdDict b
+                      -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
 
-constant Traversable_TRAVERSE_Stream : (a : Pure) -> iter a -> iter a;
-constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> iter a;
+constant Traversable_TRAVERSE_Stream : (a : Pure) -> Stream a -> Stream a;
+constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream a;
 

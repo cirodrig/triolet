@@ -51,7 +51,6 @@ foreign export ccall pyon_con_Stream :: IO PyPtr
 foreign export ccall pyon_con_NoneType :: IO PyPtr
 foreign export ccall pyon_con_bool :: IO PyPtr
 foreign export ccall pyon_con_list :: IO PyPtr
-foreign export ccall pyon_con_iter :: IO PyPtr
 foreign export ccall pyon_con_EqDict :: IO PyPtr
 foreign export ccall pyon_con_OrdDict :: IO PyPtr
 foreign export ccall pyon_con_TraversableDict :: IO PyPtr
@@ -81,7 +80,6 @@ pyon_con_Stream = asGlobalObject $ pyonBuiltin the_Stream
 pyon_con_NoneType = asGlobalObject $ pyonBuiltin the_NoneType
 pyon_con_bool = asGlobalObject $ pyonBuiltin the_bool
 pyon_con_list = asGlobalObject $ pyonBuiltin the_list
-pyon_con_iter = asGlobalObject $ pyonBuiltin the_iter
 pyon_con_EqDict = asGlobalObject $ pyonBuiltin the_EqDict
 pyon_con_OrdDict = asGlobalObject $ pyonBuiltin the_OrdDict
 pyon_con_TraversableDict = asGlobalObject $ pyonBuiltin the_TraversableDict

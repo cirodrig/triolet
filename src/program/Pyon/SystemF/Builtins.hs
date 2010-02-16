@@ -2,7 +2,7 @@
 module Pyon.SystemF.Builtins
        (EqDictMembers(..), OrdDictMembers(..), TraversableDictMembers(..),
         loadPyonBuiltins, pyonBuiltin,
-        the_Action, the_Stream, the_bool, the_list, the_iter,
+        the_Action, the_Stream, the_bool, the_list,
         the_NoneType, the_EqDict, the_OrdDict, the_TraversableDict,
         the_EqDict_Int, the_OrdDict_Int,
         the_EqDict_Float, the_OrdDict_Float,
@@ -76,7 +76,6 @@ assign_Action x b = b {the_Action = x}
 assign_Stream x b = b {the_Stream = x}
 assign_bool x b = b {the_bool = x}
 assign_list x b = b {the_list = x}
-assign_iter x b = b {the_iter = x}
 assign_NoneType x b = b {the_NoneType = x}
 assign_EqDict x b = b {the_EqDict = x}
 assign_OrdDict x b = b {the_OrdDict = x}
@@ -158,7 +157,6 @@ initializePyonBuiltins mod =
                            , the_Stream = uninitialized
                            , the_bool = uninitialized
                            , the_list = uninitialized
-                           , the_iter = uninitialized
                            , the_NoneType = uninitialized
                            , the_EqDict = uninitialized
                            , the_OrdDict = uninitialized
@@ -178,7 +176,6 @@ initializePyonBuiltins mod =
                          , ("Stream", assign_Stream)
                          , ("bool", assign_bool)
                          , ("list", assign_list)
-                         , ("iter", assign_iter)
                          , ("NoneType", assign_NoneType)
                          , ("EqDict", assign_EqDict)
                          , ("OrdDict", assign_OrdDict)

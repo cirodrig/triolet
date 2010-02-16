@@ -467,7 +467,6 @@ createSystemFModule(void)
   ADD_OBJECT("con_NoneType", pyon_con_NoneType);
   ADD_OBJECT("con_bool", pyon_con_bool);
   ADD_OBJECT("con_list", pyon_con_list);
-  ADD_OBJECT("con_iter", pyon_con_iter);
   ADD_OBJECT("con_EqDict", pyon_con_EqDict);
   ADD_OBJECT("con_OrdDict", pyon_con_OrdDict);
   ADD_OBJECT("con_TraversableDict", pyon_con_TraversableDict);
