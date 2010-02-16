@@ -423,7 +423,7 @@ class RigidTyVar(FirstOrderType, unification.Term):
         # Add the stream tag
         stream_doc = self._streamTag.pretty()
 
-        return pretty.abut([var_doc, '<', stream_doc, '>'])
+        return pretty.abut([vardoc, '<', stream_doc, '>'])
 
     def rename(self, mapping):
         # Rename this variable
