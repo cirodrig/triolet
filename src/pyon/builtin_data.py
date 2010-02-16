@@ -303,7 +303,8 @@ const_undefined = _anfVariable(name = "__undefined__",
 del T, a
 
 # The list of all builtin functions
-BUILTIN_FUNCTIONS = [fun_list, fun_reduce, fun_reduce1, fun_zip, fun_iota,
+BUILTIN_FUNCTIONS = [fun_list, fun_reduce, fun_reduce1, fun_map, fun_zip,
+                     fun_iota,
                      const_undefined]
 
 # The list of all builtin constructors
