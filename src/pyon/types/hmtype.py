@@ -334,7 +334,7 @@ class TyVar(FirstOrderType, unification.Variable):
     def unifyWith(self, other):
         # First, compare and unify kinds and stream tags
         if self.getKind() != other.getKind():
-           raise unification.UnificationError, "Kind mismatch"
+            raise unification.UnificationError, "Kind mismatch"
 
         unification.unify(self.getStreamTag(), other.getStreamTag())
 
@@ -385,10 +385,11 @@ class RigidTyVar(FirstOrderType, unification.Term):
     A rigid type variable.  Rigid type variables can be generalized over
     like type variables, but cannot be unified.
     """
-    def __init__(self, name):
+    def __init__(self, name, _kind = kind.Star()):
         self.name = name
         self.gluonVariable = None
         self._streamTag = stream_tag.StreamTagVar()
+        self._kind = _kind
 
     def __eq__(self, other):
         return self is other
@@ -400,7 +401,7 @@ class RigidTyVar(FirstOrderType, unification.Term):
         return self._streamTag
 
     def getKind(self):
-        return kind.Star()
+        return self._kind
 
     def addFreeVariables(self, s):
         s.add(self)

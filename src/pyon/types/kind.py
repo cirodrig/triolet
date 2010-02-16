@@ -2,7 +2,7 @@
 Kinds (types of types).
 """
 
-import pyon.pretty
+import pyon.pretty as pretty
 
 class Kind(object):
     def __init__(self):
@@ -29,6 +29,9 @@ class Star(Kind):
     def __eq__(self, other):
         return self is other
 
+    def __ne__(self, other):
+        return self is not other
+
     def pretty(self):
         "k.pretty() -> pretty-printable object"
         return "*"
@@ -48,6 +51,10 @@ class Arrow(Kind):
     def __eq__(self, other):
         if not isinstance(other, Arrow): return False
         return self.domain == other.domain and self.range == other.range
+
+    def __ne__(self, other):
+        if not isinstance(other, Arrow): return True
+        return self.domain != other.domain or self.range != other.range
 
     def pretty(self):
         "k.pretty() -> pretty-printable object"

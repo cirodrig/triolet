@@ -1,6 +1,7 @@
 
 import haskell
 import pyon.types.hmtype
+import pyon.types.kind as kind
 import pyon.ast.parser_ast as ast
 from pyon.builtin_data import BUILTIN_FUNCTIONS, BUILTIN_DATATYPES
 
@@ -28,7 +29,9 @@ def _getBuiltinVariableList():
         functions = [mv(v) for v in BUILTIN_FUNCTIONS]
         types = [mv2(con) for con in BUILTIN_DATATYPES]
 
-        _builtinVariableList = functions + types
+        kinds = [ast.PythonVariable("type", anf_kind = kind.Star())]
+
+        _builtinVariableList = functions + types + kinds
 
     return _builtinVariableList
 

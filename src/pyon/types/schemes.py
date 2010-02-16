@@ -28,14 +28,14 @@ class TyScheme(PyonTypeBase):
         self.type = t
 
     @classmethod
-    def forall(cls, num_vars, body, constraints = lambda *xs: []):
+    def forall(cls, var_kinds, body, constraints = lambda *xs: []):
         """
-        TyScheme.forall(int, make-body) -> new type scheme
-        TyScheme.forall(int, make-body, make-constraints) -> new type scheme
+        TyScheme.forall(kinds, make-body) -> new type scheme
+        TyScheme.forall(kinds, make-body, make-constraints) -> new type scheme
 
         Create a new type scheme quantified over new variables.
         """
-        vars = tuple(TyVar(kind.Star()) for v in range(num_vars))
+        vars = tuple(TyVar(k) for k in var_kinds)
         t = apply(body, vars)
         csts = apply(constraints, vars)
         return cls([], list(vars), csts, t)

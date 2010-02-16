@@ -13,6 +13,7 @@ import pyon.types.stream_tag as stream_tag
 import pyon.types.types as hm
 import pyon.types.gluon_types as gluon_types
 
+_star = kind.Star()
 _forall = hm.TyScheme.forall
 _funType = hm.functionType
 
@@ -34,7 +35,7 @@ def _makeClasses():
     # class Eq a where
     #   (==) : a -> a -> bool
     #   (!=) : a -> a -> bool
-    a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+    a = hm.TyVar(_star, stream_tag.IsAction())
     scheme_1 = cmp_scheme(a)
     scheme_fn = lambda: scheme_1
     class_Eq = hm.Class("Eq", [], a, [],
@@ -48,7 +49,7 @@ def _makeClasses():
     #   (<=) : a -> a -> bool
     #   (>) : a -> a -> bool
     #   (>=) : a -> a -> bool
-    a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+    a = hm.TyVar(_star, stream_tag.IsAction())
     scheme_2 = cmp_scheme(a)
     scheme_fn = lambda: scheme_2
     class_Ord = hm.Class("Ord", [], a, [hm.ClassPredicate(a, class_Eq)],
@@ -62,9 +63,9 @@ def _makeClasses():
     # class Traversable (T : StreamTag) (t : * -> *) where
     #   foreach : t<T> a -> iter a
     T = stream_tag.StreamTagVar()
-    t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
+    t = hm.TyVar(kind.Arrow(_star, _star), T)
 
-    a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+    a = hm.TyVar(_star, stream_tag.IsAction())
     scheme_3 = hm.TyScheme([], [a], [],
                            _funType([hm.AppTy(t, a)],
                                     hm.AppTy(type_iter, a)))
@@ -82,8 +83,8 @@ def _makeClasses():
     addPyonInstance(class_Eq, [], [], type_float,
                     [sf.con_EQ_Float, sf.con_NE_Float])
 
-    b = hm.TyVar(kind.Star())
-    c = hm.TyVar(kind.Star())
+    b = hm.TyVar(_star)
+    c = hm.TyVar(_star)
     addPyonInstance(class_Eq, [b, c],
                     [hm.ClassPredicate(b, class_Eq),
                      hm.ClassPredicate(c, class_Eq)],
@@ -136,7 +137,7 @@ def _makeClasses():
 
 def create_type_schemes():
     global _unaryScheme, _binaryScheme, _compareScheme, _binaryIntScheme
-    a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+    a = hm.TyVar(_star, stream_tag.IsAction())
     _unaryScheme = hm.TyScheme([], [a], hm.noConstraints, _funType([a], a))
     _binaryScheme = hm.TyScheme([], [a], hm.noConstraints, _funType([a,a], a))
     _compareScheme = hm.TyScheme([], [a], hm.noConstraints,
@@ -147,18 +148,18 @@ def create_type_schemes():
 ###############################################################################
 
 # Builtin primitive types
-tycon_int = hm.TyCon("int", kind.Star(), stream_tag.IsAction(),
+tycon_int = hm.TyCon("int", _star, stream_tag.IsAction(),
                      gluon_constructor = gluon.con_Int)
-tycon_float = hm.TyCon("float", kind.Star(), stream_tag.IsAction(),
+tycon_float = hm.TyCon("float", _star, stream_tag.IsAction(),
                        gluon_constructor = gluon.con_Float)
-tycon_bool = hm.TyCon("bool", kind.Star(), stream_tag.IsAction(),
+tycon_bool = hm.TyCon("bool", _star, stream_tag.IsAction(),
                       gluon_constructor = sf.con_bool)
-tycon_None = hm.TyCon("NoneType", kind.Star(), stream_tag.IsAction(),
+tycon_None = hm.TyCon("NoneType", _star, stream_tag.IsAction(),
                       gluon_constructor = sf.con_NoneType)
-tycon_iter = hm.TyCon("iter", kind.Arrow(kind.Star(), kind.Star()),
+tycon_iter = hm.TyCon("iter", kind.Arrow(_star, _star),
                       stream_tag.IsStream(),
                       gluon_constructor = sf.con_iter)
-tycon_list = hm.TyCon("list", kind.Arrow(kind.Star(), kind.Star()),
+tycon_list = hm.TyCon("list", kind.Arrow(_star, _star),
                       stream_tag.IsAction(),
                       gluon_constructor = sf.con_list)
 
@@ -212,27 +213,28 @@ oper_ITER = class_Traversable.getMethod("__iter__")
 
 # __cat_map__ : forall a b. (a -> iter b) * iter a -> iter b
 _cat_map_type = \
-    _forall(2, lambda a, b: _funType([_funType([a], hm.AppTy(type_iter, b)),
-                                      hm.AppTy(type_iter, a)],
-                                     hm.AppTy(type_iter, b)))
+    _forall([_star, _star],
+            lambda a, b: _funType([_funType([a], hm.AppTy(type_iter, b)),
+                                   hm.AppTy(type_iter, a)],
+                                  hm.AppTy(type_iter, b)))
 oper_CAT_MAP = ast.ANFVariable(name = "__cat_map__",
                                type_scheme = _cat_map_type)
 
 # __guard__ : forall a. bool * iter a -> iter a
-_guard_type = _forall(1, lambda a: \
+_guard_type = _forall([_star], lambda a: \
                           _funType([type_bool, hm.AppTy(type_iter, a)],
                                    hm.AppTy(type_iter, a)))
 oper_GUARD = ast.ANFVariable(name = "__guard__", type_scheme = _guard_type)
 
 # __do__ : forall a. a -> iter a
-_do_type = _forall(1, lambda a: _funType([a], hm.AppTy(type_iter, a)))
+_do_type = _forall([_star], lambda a: _funType([a], hm.AppTy(type_iter, a)))
 oper_DO = ast.ANFVariable(name = "__do__", type_scheme = _do_type)
 
 # The list-building operator
 # list : forall t a. Traversable t => t a -> list a
 T = stream_tag.StreamTagVar()
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
-a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+t = hm.TyVar(kind.Arrow(_star, _star), T)
+a = hm.TyVar(_star, stream_tag.IsAction())
 _list_type = hm.TyScheme([T], [t, a],
                          [hm.ClassPredicate(t, class_Traversable)],
                          _funType([hm.AppTy(t, a)], hm.AppTy(type_list, a)))
@@ -243,9 +245,9 @@ oper_LIST = ast.ANFVariable(name = "list", type_scheme = _list_type)
 # 'map', 'reduce', 'reduce1', 'zip', 'iota'
 
 T = stream_tag.StreamTagVar()
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
-a = hm.TyVar(kind.Star(), stream_tag.IsAction())
-b = hm.TyVar(kind.Star(), stream_tag.IsAction())
+t = hm.TyVar(kind.Arrow(_star, _star), T)
+a = hm.TyVar(_star, stream_tag.IsAction())
+b = hm.TyVar(_star, stream_tag.IsAction())
 _map_type = hm.TyScheme([T], [t, a],
                         [hm.ClassPredicate(t, class_Traversable)],
                         _funType([_funType([a], b),
@@ -255,8 +257,8 @@ del T, t, a, b
 fun_map = ast.ANFVariable(name = "map", type_scheme = _map_type)
 
 T = stream_tag.StreamTagVar()
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
-a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+t = hm.TyVar(kind.Arrow(_star, _star), T)
+a = hm.TyVar(_star, stream_tag.IsAction())
 _reduce_type = hm.TyScheme([T], [t, a],
                            [hm.ClassPredicate(t, class_Traversable)],
                            _funType([_funType([a, a], a),
@@ -267,8 +269,8 @@ del T, t, a
 fun_reduce = ast.ANFVariable(name = "reduce", type_scheme = _reduce_type)
 
 T = stream_tag.StreamTagVar()
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T)
-a = hm.TyVar(kind.Star(), stream_tag.IsAction())
+t = hm.TyVar(kind.Arrow(_star, _star), T)
+a = hm.TyVar(_star, stream_tag.IsAction())
 _reduce1_type = hm.TyScheme([T], [t, a],
                             [hm.ClassPredicate(t, class_Traversable)],
                             _funType([_funType([a, a], a),
@@ -279,10 +281,10 @@ fun_reduce1 = ast.ANFVariable(name = "reduce1", type_scheme = _reduce1_type)
 
 T1 = stream_tag.StreamTagVar()
 T2 = stream_tag.StreamTagVar()
-s = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T1)
-t = hm.TyVar(kind.Arrow(kind.Star(), kind.Star()), T2)
-a = hm.TyVar(kind.Star(), stream_tag.IsAction())
-b = hm.TyVar(kind.Star(), stream_tag.IsAction())
+s = hm.TyVar(kind.Arrow(_star, _star), T1)
+t = hm.TyVar(kind.Arrow(_star, _star), T2)
+a = hm.TyVar(_star, stream_tag.IsAction())
+b = hm.TyVar(_star, stream_tag.IsAction())
 _zip_type = hm.TyScheme([T1, T2], [s,t,a,b],
                         [hm.ClassPredicate(s, class_Traversable),
                          hm.ClassPredicate(t, class_Traversable)],
@@ -291,7 +293,7 @@ _zip_type = hm.TyScheme([T1, T2], [s,t,a,b],
 del T1, T2, s, t, a, b
 fun_zip = ast.ANFVariable(name = "zip", type_scheme = _zip_type)
 
-_iota_type = _forall(0, lambda: _funType([], hm.AppTy(type_iter, type_int)))
+_iota_type = _forall([], lambda: _funType([], hm.AppTy(type_iter, type_int)))
 fun_iota = ast.ANFVariable(name = "iota", type_scheme = _iota_type)
 
 T = stream_tag.StreamTagVar()

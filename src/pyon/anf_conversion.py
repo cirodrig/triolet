@@ -9,6 +9,7 @@ import pyon.ast.ast as a_ast
 import pyon.ssa.parser_ssa as ssa
 
 import pyon.builtin_data as builtin_data
+import pyon.types.kind as kind
 import pyon.types.types as hmtype
 import pyon.types.schemes as schemes
 
@@ -16,6 +17,24 @@ def convertModule(module, a_tyvars = {}):
     "Convert a module to ANF"
     return a_ast.Module([[convertFunction(f, a_tyvars) for f in dg]
                          for dg in module.definitions])
+
+def convertAnnotatedKind(annotation):
+    "Convert a kind annotation to an actual kind"
+    assert isinstance(annotation, p_ast.Expression)
+
+    # Kinds can be the arrow kind (k1 -> k2) or the base kind (*)
+    if isinstance(annotation, p_ast.BinaryExpr):
+        param_k = convertAnnotatedKind(annotation.left)
+        result_k = convertAnnotatedKind(annotation.right)
+        return kind.Arrow(param_k, result_k)
+
+    elif isinstance(annotation, p_ast.VariableExpr):
+        if not annotation.variable.anfKind:
+            raise RuntimeError, "Not a kind"
+        return annotation.variable.anfKind
+
+    else:
+        raise RuntimeError, "Not a valid kind expression"
 
 def getAnnotatedFuncType(annotation, a_tyvars):
     "Convert function type annotation to an actual function type"
@@ -62,7 +81,7 @@ def convertAnnotation(annotation, a_tyvars):
             return annotation.variable.anfType
 
         # If there's any other pre-assigned other meaning, then raise an error
-        if not annotation.variable.hasANFDefinition():
+        if annotation.variable.hasANFDefinition():
             raise RuntimeError, "Not a type"
         
         # Otherwise, this variable should represent a type variable
@@ -89,9 +108,15 @@ def convertAnnotation(annotation, a_tyvars):
     else:
         raise TypeError, type(annotation)
 
-def convertAnnotatedType(p):
+def convertAnnotatedType(p, kind_annotation):
     "Convert type variable annotation to non-unifiable type variable"
-    return hmtype.RigidTyVar(p.name)
+    if kind_annotation:
+        k = convertAnnotatedKind(kind_annotation)
+    else:
+        # Default to kind '*'
+        k = kind.Star()
+
+    return hmtype.RigidTyVar(p.name, k)
 
 def convertFunction(func, outer_tyvars):
     "Convert a parser function to an ANF function definition"
@@ -101,8 +126,8 @@ def convertFunction(func, outer_tyvars):
 
     # Get annotated type variables and merge with already defined
     if func.qvars is not None:
-        new_qvars = [convertAnnotatedType(p) for p in func.qvars]
-        a_tyvars = dict(zip(func.qvars, new_qvars))
+        new_qvars = [convertAnnotatedType(p, k) for p, k in func.qvars]
+        a_tyvars = dict(zip([p for p, _ in func.qvars], new_qvars))
         a_tyvars.update(outer_tyvars)
     else:
         new_qvars = None

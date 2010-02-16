@@ -4,9 +4,9 @@
 
 import itertools
 
-# Operator names
 import pyon.ast.operators
 import pyon.ast.ast as ast
+import pyon.types.kind as kind
 import pyon.types.hmtype as hmtype
 
 class Variable(object):
@@ -26,7 +26,7 @@ class PythonVariable(Variable):
     def __init__(self, name, identifier = None,
                  anf_variable = None,
                  anf_type = None,
-                 anf_iterator_tag = None):
+                 anf_kind = None):
         """
         Create a new Python variable.
         name: The name of the variable as it appears in the source code; None
@@ -41,7 +41,7 @@ class PythonVariable(Variable):
           previously loaded modules.
         anfType: If not None, this is the type corresponding to this variable
           in the parser output.
-        anfIteratorIag: If not None, this is the iterator tag corresponding
+        anfKind: If not None, this is the kind tag corresponding
           to this variable in the parser output.
 
         If two variables have the same identifier, they must also have the same
@@ -52,18 +52,16 @@ class PythonVariable(Variable):
         assert isinstance(identifier, int)
 
         # At most one of these parameters may be given
-        assert len([x for x in [anf_variable, anf_type, anf_iterator_tag]
+        assert len([x for x in [anf_variable, anf_type, anf_kind]
                     if x]) <= 1
         if anf_variable: assert isinstance(anf_variable, ast.ANFVariable)
         if anf_type: assert isinstance(anf_type, hmtype.FirstOrderType)
-        if anf_iterator_tag:
-            assert isinstance(anf_iterator_tag,
-                              pyon.types.iterator_tag.IteratorTag)
+        if anf_kind: assert isinstance(anf_kind, kind.Kind)
         self.name = name
         self.identifier = identifier
         self.anfVariable = anf_variable
         self.anfType = anf_type
-        self.anfIteratorTag = anf_iterator_tag
+        self.anfKind = anf_kind
 
         # A map from python variable identifiers (uniquely identifying
         # Python variables) to SSA identifiers (uniquely identifying SSA
@@ -77,7 +75,7 @@ class PythonVariable(Variable):
         Returns True if this variable has a predefined meaning, such as a
         global variable or type.
         """
-        return bool(self.anfVariable or self.anfType or self.anfIteratorTag)
+        return bool(self.anfVariable or self.anfType or self.anfKind)
 
     _nextID = 1
 
@@ -380,9 +378,10 @@ class Function(object):
     fields:
     name:
       The function's name
-    qvars : [Variable] or None
+    qvars : [(Variable, Expression-or-None)] or None
       If the function declaration had a 'forall' annotation, this is the list
-      of universally quantified variables that were declared.
+      of universally quantified variables that were declared.  Each variable
+      has an optional kind annotation, which is a kind expression.
     parameters: [Parameter]
       The function's parameters
     body:
@@ -394,7 +393,9 @@ class Function(object):
                  local_scope = None):
         assert isinstance(name, Variable)
         if qvars is not None:
-            for v in qvars: assert isinstance(v, Variable)
+            for v, k in qvars:
+                assert isinstance(v, Variable)
+                assert not k or isinstance(k, Expression)
         for p in parameters:
             assert isinstance(p, Parameter)
         for s in body:

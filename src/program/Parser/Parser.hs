@@ -12,10 +12,10 @@
 module Parser.Parser(convertStatement, convertModule, parseModule)
 where
 
-import Prelude hiding(mapM)
+import Prelude hiding(mapM, sequence)
 
 import Control.Applicative
-import Control.Monad hiding(mapM)
+import Control.Monad hiding(mapM, sequence)
 import Data.Function
 import qualified Data.Graph.Inductive as Graph
 import qualified Data.Graph.Inductive.Query.DFS as Graph
@@ -488,7 +488,10 @@ comprehension convertBody comprehension =
 noneExpr = Literal NoneLit
 
 argument :: Py.ArgumentSpan -> Cvt Expr
-argument (Py.ArgExpr {Py.arg_expr = e}) = expression e
+argument (Py.ArgExpr {Py.arg_py_annotation = Just _}) = 
+  error "Type annotation not allowed here"
+argument (Py.ArgExpr {Py.arg_expr = e, Py.arg_py_annotation = Nothing}) = 
+  expression e
 argument _ = error "Unsupported argument type"
 
 parameter :: Py.ParameterSpan -> Cvt Parameter
@@ -584,44 +587,56 @@ funDefinition (Py.Decorated { Py.decorated_decorators = decorators
                             , Py.decorated_def = stmt@(Py.Fun {})}) = 
   funDefinition' decorators stmt
 
-data Decorators = Decorators (Maybe [PyIdent])
+-- A function can be decorated with a list of type variable parameters,
+-- specified with a 'forall' annotation. 
+-- Each parameter consists of a variable and an optional kind expression.
+data Decorators = Decorators (Maybe [(PyIdent, Maybe Expr)])
 
 funDefinition' decorators (Py.Fun { Py.fun_name = name
                                   , Py.fun_args = params
                                   , Py.fun_result_annotation = result
-                                  , Py.fun_body = body}) =
-  case extractDecorators decorators
-  of Decorators forall_decorator -> do
-       nameVar <- definition name
-       enter $ \locals -> do
-         qvars <- traverse (mapM parameterDefinition) forall_decorator
-         params' <- parameters params
-         result' <- traverse expression result
-         body' <- suite body
-         return $ Func nameVar locals qvars params' result' body'
-
-extractDecorators decorators = 
-  foldr extract (Decorators Nothing) decorators
+                                  , Py.fun_body = body}) = do
+  Decorators forall_decorator <- extractDecorators decorators
+  nameVar <- definition name
+  enter $ \locals -> do
+    qvars <- traverse (mapM qvarDefinition) forall_decorator
+    params' <- parameters params
+    result' <- traverse expression result
+    body' <- suite body
+    return $ Func nameVar locals qvars params' result' body'
+    
   where
-    extract (Py.Decorator { Py.decorator_name = name
+    qvarDefinition (qvar_name, qvar_kind) = do
+      qvar <- parameterDefinition qvar_name
+      return (qvar, qvar_kind)
+
+extractDecorators decorators =
+  foldM extract (Decorators Nothing) decorators
+  where
+    extract (Decorators oldQvars)
+            (Py.Decorator { Py.decorator_name = name
                           , Py.decorator_args = arguments
                           , Py.decorator_annot = annot
                           })
-            (Decorators oldQvars)
       | name `isName` "forall" =
         if isJust oldQvars
         then error "Only one 'forall' permitted per function"
-        else case readArguments arguments
-             of Just varNames -> Decorators (Just varNames)
-                Nothing -> error "Invalid parameter to forall"
+        else do args <- readArguments arguments
+                case sequence args
+                  of Just varNames -> return $ Decorators (Just varNames)
+                     Nothing -> error "Invalid parameter to forall"
+      | otherwise =
+        error "Unrecognized decorator"
 
     name `isName` s = case name of [ident] -> identName ident == s
                                    _ -> False
     
     readArguments args = mapM readArgument args 
-    readArgument (Py.ArgExpr {Py.arg_expr = Py.Var {Py.var_ident = ident}}) =
-      Just ident
-    readArgument _ = Nothing
+    readArgument (Py.ArgExpr { Py.arg_expr = Py.Var {Py.var_ident = ident}
+                             , Py.arg_py_annotation = annot}) = do
+      annot_expr <- traverse expression annot
+      return $ Just (ident, annot_expr)
+    readArgument _ = return Nothing
 
 -------------------------------------------------------------------------------
 -- Definition group partitioning
