@@ -27,7 +27,8 @@ PYON_C_SRCS=Main_c.c \
 	Pyon/Exports/SystemF_c.c
 PYON_C_GENERATED_SRCS=Parser/Driver_stub.c \
 	Pyon/Exports/Gluon_stub.c \
-	Pyon/Exports/SystemF_stub.c
+	Pyon/Exports/SystemF_stub.c \
+	PythonInterface/HsObject_stub.c
 PYON_HS_SRCS=Main.hs \
 	Parser/Driver.hs \
 	Parser/Parser.hs \

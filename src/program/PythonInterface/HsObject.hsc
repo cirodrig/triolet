@@ -9,7 +9,10 @@ module PythonInterface.HsObject
 where
 
 import Control.Monad
+import Data.Maybe
 import Data.Typeable
+import Foreign.C.Types
+import Foreign.C.String
 import Foreign.StablePtr
 import Foreign.Storable
 import PythonInterface.Python
@@ -20,7 +23,7 @@ foreign import ccall "HsObject.h &HsObject_type" hsObject_type :: PyPtr
 
 foreign import ccall "HsObject.h HsObject_new" hsObject_new 
   :: StablePtr a -> StablePtr TypeRep -> IO PyPtr
-     
+
 -- | Create a new Python reference to the given value 
 newHsObject :: Typeable a => a -> IO PyPtr
 newHsObject x = do
@@ -51,20 +54,20 @@ fromHsObject x = do
 -- which must be an HsObject (this property is not checked).
 -- If it has the wrong type, throw an exception.
 fromHsObject' :: Typeable a => PyPtr -> IO a
-fromHsObject' x = do 
-  return_type <- return undefined
-  type_rep_ptr <- #{peek struct HsObject, type_rep} x
-  type_rep <- deRefStablePtr type_rep_ptr
-  if type_rep /= typeOf return_type
-    then let expected_type = show (typeOf return_type)
-             got_type = show type_rep
-             message = "Expected Haskell object of type " ++ expected_type ++
-                       ", got " ++ got_type
-         in throwPythonExc pyTypeError message
-    else do
-      value_ptr <- #{peek struct HsObject, value} x
-      value <- deRefStablePtr value_ptr
-      return (value `asTypeOf` return_type)
+fromHsObject' x = do
+  val <- fromHsObject x
+  case val of
+    Just v -> return v
+    Nothing -> let return_type = let x = undefined `asTypeOf` val
+                                 in typeOf (fromJust x)
+               in do type_rep_ptr <- #{peek struct HsObject, type_rep} x
+                     type_rep <- deRefStablePtr type_rep_ptr
+                     let expected_type = show (typeOf return_type)
+                         got_type = show (type_rep :: TypeRep)
+                         message = "Expected Haskell object of type " ++ 
+                                   expected_type ++
+                                   ", got " ++ got_type
+                     throwPythonExc pyTypeError message
 
 -- | Extract a Haskell value of type 'a' from the given object.
 -- Interpret Python 'None' as 'Nothing' and other values as 'Just' values.
@@ -90,3 +93,12 @@ fromListOfHsObject' x = do
   mapM fromListItem [0 .. sz - 1]
   where
     fromListItem index = fromHsObject' =<< getListItem x index
+
+foreign export ccall hsObject_getTypeString :: PyPtr -> IO CString
+
+-- | Create a new string representing the object's type.  The parameter must  
+-- be a pointer to a HsObject.  The string is dynamically allocated and must 
+-- be freed by the caller.
+hsObject_getTypeString obj = do
+  type_rep <- hsObjectType obj
+  newCString $ show type_rep

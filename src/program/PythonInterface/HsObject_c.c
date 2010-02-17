@@ -1,5 +1,6 @@
 
 #include "HsObject.h"
+#include "PythonInterface/HsObject_stub.h"
 
 /* Create a new reference to a Haskell value.  The second parameter should
  * be the value's type.  Ownership of the two
@@ -9,7 +10,6 @@ struct HsObject*
 HsObject_new(HsStablePtr value, HsStablePtr type_rep)
 {
   struct HsObject *obj = PyObject_New(struct HsObject, &HsObject_type);
-
   obj->value = value;
   obj->type_rep = type_rep;
 
@@ -60,7 +60,15 @@ HsObject_str(struct HsObject *self)
   static PyObject *empty_ref_str = NULL;
 
   if (self->value) {
-    return PyString_FromFormat("<hs ref to %p>", (void *)self->value);
+    /* Get description of type */
+    char *type_name = hsObject_getTypeString(self);
+
+    /* Create description of object */
+    PyObject *ret = PyString_FromFormat("<hs ref to %s at %p>",
+					type_name, (void *)self->value);
+
+    free(type_name);
+    return ret;
   }
   /* else */
   /* Ensure that empty_ref_str is initialized */
