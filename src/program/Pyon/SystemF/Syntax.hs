@@ -3,7 +3,7 @@
 module Pyon.SystemF.Syntax
     (PyonType,
      PyonClass(..),
-     Var(..),
+     Var,
      Lit(..),
      Pat(..),
      TyPat(..),
@@ -28,17 +28,8 @@ type PyonType = Gluon.Exp Gluon.Core
 data PyonClass = EqClass | OrdClass | TraversableClass
                deriving(Show, Typeable)
 
--- | Pyon variables.
-data Var =
-  Var
-  { -- | An identifier that uniquely identifies this variable.
-    --   Identifiers follow the no-shadowing rule.
-    varID   :: {-# UNPACK #-} !(Ident Var)
-
-    -- | The variable's name.
-  , varName :: !(Maybe Label)
-  }
-  deriving(Typeable)
+-- | Pyon variables are the same as Gluon variables.
+type Var = Gluon.Var
 
 -- | Literal values.
 --
@@ -57,7 +48,7 @@ data Pat =
   | VarP Var PyonType           -- ^ Variable pattern binding
   | TupleP [Pat]                -- ^ Tuple pattern
   deriving(Typeable)
-
+          
 -- | Type-level patterns.
 data TyPat = TyPat Gluon.Var PyonType
            deriving(Typeable)
@@ -155,6 +146,7 @@ data Exp =
 data Fun =
   Fun { funTyParams :: [TyPat]  -- ^ Type parameters
       , funParams :: [Pat]      -- ^ Object parameters
+      , funReturnType :: PyonType -- ^ Return type
       , funBody :: Exp
       }
   deriving(Typeable)

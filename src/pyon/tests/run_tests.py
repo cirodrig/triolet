@@ -29,8 +29,9 @@ def tryCompile(fname, show_traceback = False):
 	del test_anf
 
         # (DEBUG) print the output
-	test_sf = system_f.optimizeModule(test_sf)
 	system_f.printModule(test_sf)
+        system_f.typeCheckModule(test_sf)
+	test_sf = system_f.optimizeModule(test_sf)
 
         # Partial evaluation
         #test_anf = partial_eval.partialEval(test_anf)

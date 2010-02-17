@@ -309,13 +309,15 @@ mkFun(PyObject *self, PyObject *args)
 {
   PyObject *type_params;
   PyObject *params;
+  PyObject *return_type;
   PyObject *body;
 
-  if (!PyArg_ParseTuple(args, "OOO!", &type_params, &params,
+  if (!PyArg_ParseTuple(args, "OOO!O!", &type_params, &params,
+			&HsObject_type, &return_type,
 			&HsObject_type, &body))
     return NULL;
 
-  return pyon_mkFun(type_params, params, body);
+  return pyon_mkFun(type_params, params, return_type, body);
 }
 
 static PyObject *
@@ -340,24 +342,6 @@ makeAndEvaluateModule(PyObject *self, PyObject *args)
     return NULL;
 
   return pyon_makeAndEvaluateModule(defs);
-}
-
-static PyObject *
-printModule(PyObject *self, PyObject *arg)
-{
-  if (!PyObject_IsInstance(arg, (PyObject *)&HsObject_type))
-    return NULL;
-
-  return pyon_printModule(arg);
-}
-
-static PyObject *
-optimizeModule(PyObject *self, PyObject *arg)
-{
-  if (!PyObject_IsInstance(arg, (PyObject *)&HsObject_type))
-    return NULL;
-
-  return pyon_optimizeModule(arg);
 }
 
 static PyObject *
@@ -430,10 +414,12 @@ static PyMethodDef system_f_methods[] = {
   {"makeAndEvaluateModule", makeAndEvaluateModule, METH_VARARGS,
    "Create a module from a list of definitions.  This function also runs\n"
    "any delayed computation of the module's contents."},
-  {"printModule", printModule, METH_O,
+  {"printModule", pyon_printModule, METH_O,
    "Print a module to standard output."},
-  {"optimizeModule", optimizeModule, METH_O,
+  {"optimizeModule", pyon_optimizeModule, METH_O,
    "Run System F optimizations on a module."},
+  {"typeCheckModule", pyon_typeCheckModule, METH_O,
+   "Typecheck a module."},
   {"isExp", isExp, METH_O,
    "Determine whether the parameter is a System F expression."},
   {NULL, NULL, 0, NULL}

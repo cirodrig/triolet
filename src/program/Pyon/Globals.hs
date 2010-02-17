@@ -2,7 +2,7 @@
 module Pyon.Globals where
 
 import Control.Monad
-import Data.IORef
+import Control.Concurrent.MVar
 import Data.Maybe
 import System.IO.Unsafe
 
@@ -14,40 +14,44 @@ import Gluon.Parser.Driver
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.SystemF.Builtins
 
-the_systemFVarIdentSupply :: IORef (Supply (Ident SystemF.Var))
-the_systemFVarIdentSupply = unsafePerformIO $ newIORef =<< newIdentSupply
+the_varIdentSupply :: MVar (Supply (Ident Var))
+the_varIdentSupply = unsafePerformIO $ newMVar =<< newIdentSupply
 
-the_varIdentSupply :: IORef (Supply (Ident Var))
-the_varIdentSupply = unsafePerformIO $ newIORef =<< newIdentSupply
+the_conIdentSupply :: MVar (Supply (Ident Con))
+the_conIdentSupply = unsafePerformIO $ newMVar =<< newIdentSupply
 
-the_conIdentSupply :: IORef (Supply (Ident Con))
-the_conIdentSupply = unsafePerformIO $ newIORef =<< newIdentSupply
+-- | The Gluon builtin module.  This starts out empty, and is written
+-- when the module is loaded.
+the_builtinModule :: MVar (Module ())
+the_builtinModule = unsafePerformIO $ newEmptyMVar
 
-the_builtinModule :: IORef (Maybe (Module ()))
-the_builtinModule = unsafePerformIO $ newIORef Nothing
+withTheVarIdentSupply :: (Supply (Ident Var) -> IO a) -> IO a
+withTheVarIdentSupply f = withMVar the_varIdentSupply f
 
-getNextSystemFVarIdent :: IO (Ident SystemF.Var)
-getNextSystemFVarIdent = supplyValue =<< readIORef the_systemFVarIdentSupply
+withTheConIdentSupply :: (Supply (Ident Con) -> IO a) -> IO a
+withTheConIdentSupply f = withMVar the_conIdentSupply f
 
 getNextVarIdent :: IO (Ident Var)
-getNextVarIdent = supplyValue =<< readIORef the_varIdentSupply
+getNextVarIdent = supplyValue =<< readMVar the_varIdentSupply
 
 setNextVarIdent :: Ident Var -> IO ()
-setNextVarIdent ident = 
+setNextVarIdent ident =
   let last = toIdent $ pred $ fromIdent ident
-  in writeIORef the_varIdentSupply =<< newIdentSupplyAfter last
+  in do swapMVar the_varIdentSupply =<< newIdentSupplyAfter last
+        return ()
 
 getNextConIdent :: IO (Ident Con)
-getNextConIdent = supplyValue =<< readIORef the_conIdentSupply
+getNextConIdent = supplyValue =<< readMVar the_conIdentSupply
 
 setNextConIdent :: Ident Con -> IO ()
-setNextConIdent ident = 
+setNextConIdent ident =
   let last = toIdent $ pred $ fromIdent ident
-  in writeIORef the_conIdentSupply =<< newIdentSupplyAfter last
+  in do swapMVar the_conIdentSupply =<< newIdentSupplyAfter last
+        return ()
 
 -- Return True if builtins are loaded, False otherwise
 checkBuiltinsStatus :: IO Bool
-checkBuiltinsStatus = return . isJust =<< readIORef the_builtinModule
+checkBuiltinsStatus = return . not =<< isEmptyMVar the_builtinModule
 
 loadBuiltins :: IO ()
 loadBuiltins = do
@@ -55,11 +59,11 @@ loadBuiltins = do
   builtinsLoaded <- checkBuiltinsStatus
   when builtinsLoaded $ fail "Builtins already loaded"
   
-  varIDs <- readIORef the_varIdentSupply
-  conIDs <- readIORef the_conIdentSupply
-  result <- Gluon.Parser.Driver.loadBuiltins varIDs conIDs
-  case result of
-    Just bi -> do writeIORef the_builtinModule (Just bi)
-                  _ <- loadPyonBuiltins varIDs conIDs bi
-                  return ()
-    Nothing -> fail "Could not load builtins"
+  withTheVarIdentSupply $ \varIDs ->
+    withTheConIdentSupply $ \conIDs -> do
+      result <- Gluon.Parser.Driver.loadBuiltins varIDs conIDs
+      case result of
+        Just bi -> do putMVar the_builtinModule bi
+                      _ <- loadPyonBuiltins varIDs conIDs bi
+                      return ()
+        Nothing -> fail "Could not load builtins"

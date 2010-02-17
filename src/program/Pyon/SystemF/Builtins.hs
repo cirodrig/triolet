@@ -1,7 +1,7 @@
 
 module Pyon.SystemF.Builtins
        (EqDictMembers(..), OrdDictMembers(..), TraversableDictMembers(..),
-        loadPyonBuiltins, pyonBuiltin,
+        loadPyonBuiltins, pyonBuiltin, isPyonBuiltin,
         the_Action, the_Stream, the_bool, the_list,
         the_NoneType, the_EqDict, the_OrdDict, the_TraversableDict,
         the_EqDict_Int, the_OrdDict_Int,
@@ -53,7 +53,6 @@ data PyonBuiltins =
   , the_Stream :: Con
   , the_bool   :: Con
   , the_list   :: Con
-  , the_iter   :: Con
   , the_NoneType :: Con
   , the_EqDict :: Con
   , the_OrdDict :: Con
@@ -102,6 +101,9 @@ pyonBuiltin field = unsafePerformIO $ do
   -- Load and return the desired field
   bi <- readMVar the_PyonBuiltins
   return $ field bi
+
+isPyonBuiltin :: Con -> (PyonBuiltins -> Con) -> Bool
+c `isPyonBuiltin` name = c == pyonBuiltin name
 
 getPyonTupleType :: Int -> Maybe Con
 getPyonTupleType size = unsafePerformIO $ do

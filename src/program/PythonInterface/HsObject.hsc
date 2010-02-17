@@ -3,6 +3,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 module PythonInterface.HsObject
        (newHsObject, hsObjectType,
+        isHsObject, expectHsObject,
         fromHsObject, fromHsObject',
         fromMaybeHsObject', fromListOfHsObject'
        )
@@ -36,6 +37,17 @@ hsObjectType :: PyPtr -> IO TypeRep
 hsObjectType x = do
   type_rep_ptr <- #{peek struct HsObject, type_rep} x
   deRefStablePtr type_rep_ptr
+
+-- | Return True if the Python object is an HsObject instance.
+isHsObject :: PyPtr -> IO Bool
+isHsObject x = x `isInstance` hsObject_type
+
+-- | If the parameter is not a HsObject, raise a Python TypeError.
+expectHsObject :: PyPtr -> IO ()
+expectHsObject x = isHsObject x >>= check
+  where
+    check True = return ()
+    check False = throwPythonExc pyTypeError "Expecting a HsObject"
 
 -- | Extract a Haskell value of type 'a' from the given object,
 -- which must be an HsObject (this property is not checked).

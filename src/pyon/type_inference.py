@@ -403,10 +403,10 @@ def makeDictionaryEnvironment(constraints):
     """
     return [(c, sf.newVar(None)) for c in constraints]
 
-def makePolymorphicFunction(dict_env, name, old_parameters, old_body):
+def makePolymorphicFunction(dict_env, name, old_parameters, old_body, body_type):
     """
     makePolymorphicFunction(dict(Constraint, ObVariable),
-                            anf.ANFVariable, [sf.Pat], sf.Exp)
+                            anf.ANFVariable, [sf.Pat], sf.Exp, sf.type)
         -> sf.Def
 
     Given the System F translation of a first-order function,
@@ -430,6 +430,7 @@ def makePolymorphicFunction(dict_env, name, old_parameters, old_body):
 
     new_fn = sf.mkFun(type_parameters,
                       dict_parameters + old_parameters,
+                      gluon_types.convertType(body_type),
                       old_body)
     return sf.mkDef(name.getSystemFVariable(), new_fn)
 
@@ -642,7 +643,8 @@ def exposeRecursiveVariables(gamma, vars):
 def inferFunctionTypeAndReturnParts(gamma, func):
     """
     inferFunctionType(Environment, ast.Function)
-        -> ((constraints, placeholders), ([sf.Pat], sf.Exp, FirstOrderType))
+        -> ((constraints, placeholders),
+            ([sf.Pat], sf.Exp, FirstOrderType, FirstOrderType))
 
     Infer the type of a function.  Return the function's parameters and body.
     """
@@ -663,7 +665,7 @@ def inferFunctionTypeAndReturnParts(gamma, func):
 
     fn_type = hmtype.functionType(param_types, body_type)
 
-    return ((csts, placeholders), (parameters, body, fn_type))
+    return ((csts, placeholders), (parameters, body, body_type, fn_type))
 
 def inferFunctionType(gamma, func):
     """
@@ -672,11 +674,12 @@ def inferFunctionType(gamma, func):
 
     Infer the type of a function.  Return a system-F function.
     """
-    (cph, (parameters, body, fn_type)) = \
+    (cph, (parameters, body, body_type, fn_type)) = \
         inferFunctionTypeAndReturnParts(gamma, func)
 
     # Create a function.  It has no type parameters.
-    new_func = sf.mkFun([], parameters, body)
+    new_func = sf.mkFun([], parameters, gluon_types.convertType(body_type),
+                        body)
 
     return (cph, (new_func, fn_type))
 
@@ -707,7 +710,7 @@ def inferDefGroup(gamma, group):
     # Infer all function types in the definition group.
     # Return the rewritten functions.
     def inferFun(d, d_type):
-        (fn_csts, fn_ph), (fn_params, fn_body, fn_type) = \
+        (fn_csts, fn_ph), (fn_params, fn_body, fn_body_type, fn_type) = \
             inferFunctionTypeAndReturnParts(rec_gamma, d.function)
 
         # Unify the function's assumed type with the inferred type
@@ -715,7 +718,7 @@ def inferDefGroup(gamma, group):
         except unification.UnificationError, e:
             raise TypeCheckError, "Type error in recursive definition group"
 
-        return ((fn_csts, fn_ph), (d.name, fn_params, fn_body))
+        return ((fn_csts, fn_ph), (d.name, fn_params, fn_body, fn_body_type))
 
     # The functions in the definition group will have the same
     # class constraint context.
@@ -735,8 +738,10 @@ def inferDefGroup(gamma, group):
     # Build function definitions; add System F parameters
     dict_env = makeDictionaryEnvironment(retained_csts)
 
-    new_group = [makePolymorphicFunction(dict_env, name, fn_params, fn_body)
-                 for name, fn_params, fn_body in new_group_functions]
+    new_group = [makePolymorphicFunction(dict_env, name, fn_params, fn_body,
+                                         fn_body_type)
+                 for name, fn_params, fn_body, fn_body_type
+                 in new_group_functions]
 
     # Update recursive variable placeholders
     deferred_phs = updateRecVarPlaceholders(gamma, dict_env, group_phs)

@@ -48,11 +48,11 @@ tuple xs = parens $ sep $ punctuate comma xs
 
 pprVarFlags :: PrintFlags -> Var -> Doc
 pprVarFlags flags v =
-  let lab = case varName v
+  let lab = case Gluon.varName v
             of Nothing -> text "_"
                Just label -> text (showLabel label)
-      id = if printVariableIDs flags || isNothing (varName v)
-           then text $ '\'' : show (fromIdent $ varID v)
+      id = if printVariableIDs flags || isNothing (Gluon.varName v)
+           then text $ '\'' : show (fromIdent $ Gluon.varID v)
            else empty
   in lab <> id
 
@@ -151,19 +151,32 @@ pprExpFlagsPrec flags prec expression =
 -- UTF-8 for lowercase lambda
 lambda = text [toEnum 0xCE, toEnum 0xBB]
 
+-- Print the function parameters, as they would appear in a lambda expression
+-- or function definition.
+pprFunParameters :: Bool -> PrintFlags -> Fun -> Doc
+pprFunParameters isLambda flags fun = sep param_doc
+  where
+    param_doc =
+      -- Type parameters
+      map ty_param (funTyParams fun) ++
+      -- Value parameters
+      map (parens . pprPatFlags flags) (funParams fun) ++
+      -- Return type
+      [introduce_return_type $ Gluon.pprExp (funReturnType fun)]
+
+    introduce_return_type t
+      | isLambda  = nest (-3) $ text "->" <+> t
+      | otherwise = nest (-2) $ colon <+> t
+
+    ty_param p = text "@" <> parens (pprTyPatFlags flags p)
+
 pprFunFlags :: PrintFlags -> Fun -> Doc
 pprFunFlags flags fun =
-  let params = map pprTyParam (funTyParams fun) ++
-               [tuple $ map (pprPatFlags flags) (funParams fun)]
+  let params = pprFunParameters True flags fun
       body = pprExpFlags flags $ funBody fun
-  in hang (lambda <+> sep params <> text ".") 4 body
-  where
-    pprTyParam p = text "@" <> parens (pprTyPatFlags flags p)
+  in hang (lambda <+> params <> text ".") 4 body
 
 pprDefFlags flags (Def v fun) =
-  let params = map pprTyParam (funTyParams fun) ++
-               [tuple $ map (pprPatFlags flags) (funParams fun)]
+  let params = pprFunParameters False flags fun
       body = pprExpFlags flags $ funBody fun
-  in hang (pprVarFlags flags v <+> sep params <+> equals) 4 body
-  where
-    pprTyParam p = text "@" <> parens (pprTyPatFlags flags p)
+  in hang (pprVarFlags flags v <+> params <+> equals) 4 body

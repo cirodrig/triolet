@@ -15,12 +15,15 @@ import Foreign.C.Types
 import PythonInterface.Python
 import PythonInterface.HsObject
 import Gluon.Common.Label
+import Gluon.Core.Level
 import qualified Gluon.Core
 import Pyon.Globals
 import Pyon.SystemF.Builtins
 import Pyon.SystemF.Syntax
 import Pyon.SystemF.Print
 import Pyon.SystemF.Optimizations
+import Pyon.SystemF.Typecheck
+
 import Pyon.Exports.Delayed
 
 -------------------------------------------------------------------------------
@@ -122,7 +125,7 @@ pyon_TraversableClass = asGlobalObject TraversableClass
 
 -------------------------------------------------------------------------------
 -- Exportable constructors for System F things.
-                               
+
 -- Expressions, functions, definitions, and types are all constructed as
 -- delayed objects.
 
@@ -133,8 +136,8 @@ pyon_newVar name = rethrowExceptionsInPython $ do
            then return Nothing
            else do s <- peekCString name
                    return $ Just $ pgmLabel (moduleName "PyonInput") s
-  id <- getNextSystemFVarIdent
-  newHsObject $ Var id label
+  id <- getNextVarIdent
+  newHsObject $ Gluon.Core.mkVar id label ObjectLevel
 
 foreign export ccall pyon_mkIntL :: CLong -> IO PyPtr
 foreign export ccall pyon_mkFloatL :: CDouble -> IO PyPtr
@@ -253,13 +256,14 @@ pyon_mkMethodSelectE cls ty n exp = rethrowExceptionsInPython $ do
   e <- fromHsObject' exp
   expHsObject $ MethodSelectE defaultExpInfo <$> c <*> t <*> pure (fromIntegral n) <*> e
 
-foreign export ccall pyon_mkFun :: PyPtr -> PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall pyon_mkFun :: PyPtr -> PyPtr -> PyPtr -> PyPtr -> IO PyPtr
 
-pyon_mkFun tyParams params body = rethrowExceptionsInPython $ do
+pyon_mkFun tyParams params ret_type body = rethrowExceptionsInPython $ do
   tps <- fromListOfHsObject' tyParams
   ps <- fromListOfHsObject' params
+  rt <- fromHsObject' ret_type
   e <- fromHsObject' body
-  newHsObject $ (Fun <$> sequenceA tps <*> sequenceA ps <*> e :: Delayed Fun)
+  newHsObject $ (Fun <$> sequenceA tps <*> sequenceA ps <*> rt <*> e :: Delayed Fun)
 
 foreign export ccall pyon_mkDef :: PyPtr -> PyPtr -> IO PyPtr
 
@@ -289,16 +293,26 @@ pyon_isExp ptr = do
 -------------------------------------------------------------------------------
 -- Other exported functions.
 
-foreign export ccall pyon_printModule :: PyPtr -> IO PyPtr
-foreign export ccall pyon_optimizeModule :: PyPtr -> IO PyPtr
+foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall pyon_typeCheckModule :: PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall pyon_optimizeModule :: PyPtr -> PyPtr -> IO PyPtr
 
-pyon_printModule :: PyPtr -> IO PyPtr
-pyon_printModule mod = rethrowExceptionsInPython $ do
+pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
+pyon_printModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
   m <- fromHsObject' mod
   print $ pprModule m
   pyNone
 
-pyon_optimizeModule :: PyPtr -> IO PyPtr
-pyon_optimizeModule mod = rethrowExceptionsInPython $ do
+pyon_optimizeModule :: PyPtr -> PyPtr -> IO PyPtr
+pyon_optimizeModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
   m <- fromHsObject' mod
   newHsObject $ optimizeModule m
+
+pyon_typeCheckModule :: PyPtr -> PyPtr -> IO PyPtr
+pyon_typeCheckModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  typeCheckModule m
+  pyNone

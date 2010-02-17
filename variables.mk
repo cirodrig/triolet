@@ -38,10 +38,11 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/Exports/Gluon.hs \
 	Pyon/Exports/SystemF.hs \
 	Pyon/Globals.hs \
-	Pyon/SystemF/Syntax.hs \
 	Pyon/SystemF/Builtins.hs \
-	Pyon/SystemF/Print.hs \
 	Pyon/SystemF/Optimizations.hs \
+	Pyon/SystemF/Print.hs \
+	Pyon/SystemF/Syntax.hs \
+	Pyon/SystemF/Typecheck.hs \
 	Pyon/Core/Syntax.hs \
 	Pyon/Core/Rename.hs \
 	Pyon/Core/Typecheck.hs
