@@ -245,7 +245,7 @@ def convertStatement(stmt, successor, a_tyvars):
             params = _consumeValue(join_node).fields
 
             # Define the continuation function
-            cont_fun = a_ast.Function(a_ast.EXPRESSION, params, successor)
+            cont_fun = a_ast.Function(params, successor)
 
             # At the end of the if/else branches, call the continuation
             # function

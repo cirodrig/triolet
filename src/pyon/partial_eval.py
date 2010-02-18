@@ -220,7 +220,7 @@ def _elimDeadCodeFunc(func):
         for param_var in _parameterVariables(param):
             s.discard(param_var)
 
-    return (s, ast.Function(func.mode, func.parameters, body,
+    return (s, ast.Function(func.parameters, body,
                             dictionary_parameters = func.dictionaryParameters,
                             type = func.type))
 
@@ -423,7 +423,7 @@ def _pevalExpr(env, expr, context = _CTX_DEFAULT):
 def _pevalFunc(env, f):
     "Partial evaluation of one lambda function or named function"
     body = _pevalExpr(env, f.body)
-    return ast.Function(f.mode, f.parameters, body,
+    return ast.Function(f.parameters, body,
                         dictionary_parameters = f.dictionaryParameters,
                         type = f.type)
 

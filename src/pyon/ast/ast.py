@@ -11,12 +11,6 @@ import system_f
 import pyon.types.gluon_types
 import pyon.types.type_assignment
 
-# Code executes in one of two modes, as an expression or as an iterator.
-# All user-defined functions are in EXPRESSION mode.  Generator
-# expressions and some built-in functions are in ITERATOR mode.
-EXPRESSION = 1
-ITERATOR = 2
-
 ###############################################################################
 # Variables
 
@@ -378,14 +372,12 @@ class Function(object):
     respectively.
     """
 
-    def __init__(self, mode, parameters, body,
+    def __init__(self, parameters, body,
                  qvars = None,
                  annotation = None):
-        assert mode == EXPRESSION or mode == ITERATOR
         for p in parameters:
             assert isinstance(p, Parameter)
         assert isinstance(body, Expression)
-        self.mode = mode
         self.parameters = parameters
         self.qvars = qvars
         self.body = body
@@ -397,12 +389,12 @@ class Function(object):
 
 def exprFunction(parameters, body, qvars = None, annotation = None):
     "Create an expression function"
-    return Function(EXPRESSION, parameters, body, qvars = qvars,
+    return Function(parameters, body, qvars = qvars,
                     annotation = annotation)
 
 def iterFunction(parameters, body, qvars = None, annotation = None):
     "Create an iterator function"
-    return Function(ITERATOR, parameters, body, qvars = qvars,
+    return Function(parameters, body, qvars = qvars,
                     annotation = annotation)
 
 ###############################################################################
