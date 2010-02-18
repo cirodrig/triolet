@@ -199,6 +199,17 @@ class Instance(PyonTypeBase):
         self.instanceType = instance_type
         self.methods = methods
 
+    def getScheme(self):
+        """
+        inst.getScheme() -> TyScheme
+
+        Get a type scheme representing the type described by the instance.
+        For example, given the instance forall a b. (Eq a, Eq b) => Eq (a, b),
+        this returns the scheme forall a b. (Eq a, Eq b) => (a, b).
+        """
+        return pyon.types.schemes.TyScheme([], self.qvars, self.constraints,
+                                           self.instanceType)
+
     def getMethodCode(self, superclasses):
         # Each superclass corresponds to one element of the constraint list
         if len(superclasses) != len(self.constraints):
@@ -289,7 +300,7 @@ class ClassPredicate(PyonTypeBase):
             out_constraints += local_constraints
             superclasses.append(sc)
 
-        return (InstanceDerivation(inst, superclasses,
+        return (InstanceDerivation(self, inst, superclasses,
                                    self.getDictionaryType()),
                 out_constraints)
 
