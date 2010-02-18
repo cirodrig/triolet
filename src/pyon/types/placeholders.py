@@ -98,17 +98,20 @@ class InstanceDerivation(Derivation):
         return self.dictionaryType
 
     def getCode(self, environment):
+        gluon_types = pyon.types.gluon_types
+
         # Get the code and type for each superclass.
         superclass_vars = []    # Let-bound variables
-        superclass_code = []
         placeholders = []
 
         # Build the superclass dictionaries
         for sc in self.superclasses:
+            cst = sc.constraint
             sc_ph, sc_code = sc.getCode(environment)
-            sc_type = sc.getDictionaryType()
-            superclass_vars.append((sf.newVar(None), sc_type))
-            superclass_code.append(sc_code)
+            sc_type = gluon.mkConAppE(gluon.noSourcePos,
+                                      cst.typeClass.getSystemFCon(),
+                                      [gluon_types.convertType(cst.type)])
+            superclass_vars.append((sf.newVar(None), sc_type, sc_code))
             placeholders += sc_ph
 
         # Determine type and dictionary parameters to use for constructing
@@ -118,7 +121,7 @@ class InstanceDerivation(Derivation):
 
         def find_matching_constraint(c):
             # Find the superclass variable that matches this class constraint
-            for (v, _), sc in zip(superclass_vars, self.superclasses):
+            for (v, _, _), sc in zip(superclass_vars, self.superclasses):
                 if sc.constraint == c: return sf.mkVarE(v)
 
             # Else, a matching constraint was not found
@@ -139,15 +142,15 @@ class InstanceDerivation(Derivation):
             methods.append(m)
 
         # Build the dictionary
-        superclass_variable_exprs = [sf.mkVarE(v) for v, _ in superclass_vars]
+        superclass_variable_exprs = [sf.mkVarE(v)
+                                     for v, _, _ in superclass_vars]
         expr = sf.mkDictE(self.instance.typeClass.getSystemFClass(),
-                          self.dictionaryType,
+                          pyon.types.gluon_types.convertType(self.constraint.type),
                           superclass_variable_exprs,
                           methods)
 
         # Bind each superclass dictionary with let expressions
-        for (v, ty), c in reversed(zip(superclass_vars,
-                                       superclass_code)):
+        for v, ty, c in reversed(superclass_vars):
             pat = sf.mkVarP(v, ty)
             expr = sf.mkLetE(pat, c, expr)
         return (placeholders, expr)

@@ -292,13 +292,13 @@ typeInferDictE cls ty scs ms = do
   m_types <- mapM typeInferExp ms
   
   -- TODO: check that superclass and method types are correct
-  let return_type = ty -- Gluon.mkInternalConAppE (classDictCon cls) [ty]
+  let return_type = Gluon.mkInternalConAppE (classDictCon cls) [ty]
   liftEvaluation $ Gluon.evalFully' return_type
 
 typeInferMethodSelectE cls ty index arg = do
   -- The argument must be a dictionary of the given class
   arg_ty <- typeInferExp arg
-  ty' <- liftEvaluation $ Gluon.evalFully' $ 
+  ty' <- liftEvaluation $ Gluon.evalFully' $
          Gluon.mkInternalConAppE (classDictCon cls) [ty]
   tcAssertEqual noSourcePos (verbatim $ whnfExp ty') (verbatim $ whnfExp arg_ty)
   

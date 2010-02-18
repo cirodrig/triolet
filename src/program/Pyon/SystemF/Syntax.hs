@@ -129,7 +129,7 @@ data Exp =
   | DictE
     { expInfo :: ExpInfo
     , expClass :: PyonClass
-    , expType :: PyonType       -- ^ Dictionary type
+    , expType :: PyonType       -- ^ Class instance type
     , expSuperclasses :: [Exp]
     , expMethods :: [Exp]
     }
