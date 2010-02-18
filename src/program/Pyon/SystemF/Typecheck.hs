@@ -82,13 +82,12 @@ funType (Fun { funTyParams = ty_params
              , funParams = params
              , funReturnType = ret 
              }) =
-  let -- Inject the return type into the 'Action' monad
-      result_type = Gluon.mkInternalConAppE (pyonBuiltin the_Action) [ret]
-      -- Create an arrow type for each value parameter
-      function_type1 = foldr makeParamArrow result_type params
-      -- Create a dependent type for each type parameter
-      function_type2 = foldr makeTyFun result_type ty_params
-  in function_type2
+  -- Create a dependent type for each type parameter
+  catEndo (map makeTyFun ty_params) $
+  -- Create an arrow type for each value parameter
+  catEndo (map makeParamArrow params) $
+  -- Inject the return type into the 'Action' monad
+  Gluon.mkInternalConAppE (pyonBuiltin the_Action) [ret]
   where
     makeParamArrow p t = Gluon.mkInternalArrowE False (patType p) t
     makeTyFun (TyPat v t) t2 = Gluon.mkInternalFunE False v t t2
