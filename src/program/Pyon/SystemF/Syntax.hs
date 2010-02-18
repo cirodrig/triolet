@@ -129,7 +129,7 @@ data Exp =
   | DictE
     { expInfo :: ExpInfo
     , expClass :: PyonClass
-    , expType :: PyonType
+    , expType :: PyonType       -- ^ Dictionary type
     , expSuperclasses :: [Exp]
     , expMethods :: [Exp]
     }
@@ -137,9 +137,9 @@ data Exp =
   | MethodSelectE
     { expInfo :: ExpInfo
     , expClass :: PyonClass
-    , expType :: PyonType
+    , expType :: PyonType       -- ^ Class instance type
     , expMethodIndex :: {-# UNPACK #-} !Int
-    , expArg :: Exp
+    , expArg :: Exp             -- ^ Class dictionary
     }
   deriving(Typeable)
 
@@ -147,6 +147,8 @@ data Fun =
   Fun { funTyParams :: [TyPat]  -- ^ Type parameters
       , funParams :: [Pat]      -- ^ Object parameters
       , funReturnType :: PyonType -- ^ Return type
+      , funMonad :: !Gluon.Con -- ^ Which monad this function inhabits 
+                              -- (Stream or Action)
       , funBody :: Exp
       }
   deriving(Typeable)

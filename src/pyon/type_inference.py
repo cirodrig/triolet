@@ -361,6 +361,7 @@ def makePolymorphicFunction(gamma, dict_env, name, old_parameters, old_body, bod
     new_fn = sf.mkFun(type_parameters,
                       dict_parameters + old_parameters,
                       gluon_types.convertType(body_type),
+                      gluon_types.convertStreamTag(body_type),
                       old_body)
     return sf.mkDef(name.getSystemFVariable(), new_fn)
 
@@ -623,6 +624,7 @@ def inferFunctionType(gamma, func):
 
     # Create a function.  It has no type parameters.
     new_func = sf.mkFun([], parameters, gluon_types.convertType(body_type),
+                        gluon_types.convertStreamTag(body_type),
                         body)
 
     return (cph, (new_func, fn_type))

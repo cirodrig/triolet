@@ -189,6 +189,22 @@ def convertType(ty):
     else:
         raise TypeError, type(ty)
 
+def convertStreamTag(ty):
+    """
+    convertStreamTag(first-order-type) -> callback returning constructor
+
+    Lazily check the type's stream tag.  If it's a stream, return the
+    Stream constructor; otherwise, return the Action constructor
+    """
+    def check():
+        real_ty = unification.canonicalize(ty)
+        if real_ty.getStreamTag() == pyon.types.stream_tag.IsStream():
+            return system_f.con_Stream
+        else:
+            return system_f.con_Action
+
+    return check
+
 def makeInstanceExpression(typarams, constraints, expr):
     """
     makeInstanceExpression([FirstOrderType], [ClassPredicate], sf.Exp)

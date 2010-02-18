@@ -12,6 +12,7 @@ import Gluon.Common.Identifier
 import Gluon.Common.Label
 import qualified Gluon.Core as Gluon
 import qualified Gluon.Core.Print as Gluon
+import Pyon.SystemF.Builtins
 import Pyon.SystemF.Syntax
 
 pprVar :: Var -> Doc
@@ -174,7 +175,12 @@ pprFunFlags :: PrintFlags -> Fun -> Doc
 pprFunFlags flags fun =
   let params = pprFunParameters True flags fun
       body = pprExpFlags flags $ funBody fun
-  in hang (lambda <+> params <> text ".") 4 body
+      stream = if funMonad fun `isPyonBuiltin` the_Action
+               then empty
+               else if funMonad fun `isPyonBuiltin` the_Stream
+                    then text "_s"
+                    else text "_ERROR"
+  in hang (lambda <> stream <+> params <> text ".") 4 body
 
 pprDefFlags flags (Def v fun) =
   let params = pprFunParameters False flags fun

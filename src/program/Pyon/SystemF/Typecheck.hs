@@ -80,18 +80,26 @@ patType (TupleP ps) = let size = length ps
 funType :: Fun -> PyonType 
 funType (Fun { funTyParams = ty_params
              , funParams = params
+             , funMonad = monad
              , funReturnType = ret 
              }) =
   -- Create a dependent type for each type parameter
   catEndo (map makeTyFun ty_params) $
   -- Create an arrow type for each value parameter
   catEndo (map makeParamArrow params) $
-  -- Inject the return type into the 'Action' monad
-  Gluon.mkInternalConAppE (pyonBuiltin the_Action) [ret]
+  -- Create the return type
+  return_type
   where
     makeParamArrow p t = Gluon.mkInternalArrowE False (patType p) t
     makeTyFun (TyPat v t) t2 = Gluon.mkInternalFunE False v t t2
-
+    return_type
+      | monad == pyonBuiltin the_Stream =
+        ret
+      | monad == pyonBuiltin the_Action = 
+        Gluon.mkInternalConAppE (pyonBuiltin the_Action) [ret]
+      | otherwise =
+        error "funType: Invalid monad"
+      
 assumePat :: Pat -> PureTC a -> PureTC a
 assumePat p k = 
   case p
@@ -230,7 +238,7 @@ computeAppliedType op_type arg_types = apply (verbatim op_type) arg_types
         Gluon.FunE { Gluon.expMParam = Gluon.Binder' Nothing dom ()
                    , Gluon.expRange = rng} -> do
           -- parameter type must match argument type
-          tcAssertEqual noSourcePos dom (return arg_t)
+          tcAssertEqual noSourcePos dom (verbatim arg_t)
           
           -- continue with range
           apply rng arg_ts

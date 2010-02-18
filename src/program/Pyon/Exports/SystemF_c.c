@@ -310,14 +310,16 @@ mkFun(PyObject *self, PyObject *args)
   PyObject *type_params;
   PyObject *params;
   PyObject *return_type;
+  PyObject *stream_tag_callback;
   PyObject *body;
 
-  if (!PyArg_ParseTuple(args, "OOO!O!", &type_params, &params,
+  if (!PyArg_ParseTuple(args, "OOO!OO!", &type_params, &params,
 			&HsObject_type, &return_type,
+			&stream_tag_callback,
 			&HsObject_type, &body))
     return NULL;
 
-  return pyon_mkFun(type_params, params, return_type, body);
+  return pyon_mkFun(type_params, params, return_type, stream_tag_callback, body);
 }
 
 static PyObject *

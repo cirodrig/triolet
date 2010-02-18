@@ -298,14 +298,21 @@ pyon_mkMethodSelectE cls ty n exp = rethrowExceptionsInPython $ do
   e <- fromHsObject' exp
   expHsObject $ MethodSelectE defaultExpInfo c <$> t <*> pure (fromIntegral n) <*> e
 
-foreign export ccall pyon_mkFun :: PyPtr -> PyPtr -> PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall pyon_mkFun
+  :: PyPtr -> PyPtr -> PyPtr -> PyPtr -> PyPtr -> IO PyPtr
 
-pyon_mkFun tyParams params ret_type body = rethrowExceptionsInPython $ do
-  tps <- fromListOfHsObject' tyParams
-  ps <- fromListOfHsObject' params
-  rt <- fromHsObject' ret_type
-  e <- fromHsObject' body
-  newHsObject $ (Fun <$> sequenceA tps <*> sequenceA ps <*> rt <*> e :: Delayed Fun)
+pyon_mkFun tyParams params ret_type ret_stream_tag body = 
+  rethrowExceptionsInPython $ do
+    tps <- fromListOfHsObject' tyParams
+    ps <- fromListOfHsObject' params
+    rt <- fromHsObject' ret_type
+    
+    -- This is a Python callback returning a constructor
+    stream_tag_callback <- toPyRef ret_stream_tag
+    let stream_tag = Unevaluated $
+                     withPyRef stream_tag_callback $ fromHsObject' <=< call0
+    e <- fromHsObject' body
+    newHsObject $ (Fun <$> sequenceA tps <*> sequenceA ps <*> rt <*> stream_tag <*> e :: Delayed Fun)
 
 foreign export ccall pyon_mkDef :: PyPtr -> PyPtr -> IO PyPtr
 
