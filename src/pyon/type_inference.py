@@ -477,7 +477,8 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
                         FirstOrderType, ast.Expression)
         -> (constraints, sf.Pat)
 
-    Infer types in a let-binding.  Bound variables are assigned a type scheme.
+    Infer types in a let-binding.  Bound variables are assigned a
+    first-order type.
     The expression 'expr' is only used for error reporting.  The types are
     added to the environment.
 
@@ -513,9 +514,16 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
         return (csts, sf.mkTupleP(new_params))
 
     elif isinstance(param, ast.VariableParam):
-        # Generalize this type
-        csts = assignGeneralizedType(gamma, param.name, bound_type,
-                                     bound_constraints)
+        if False:
+            # Generalize this type
+            csts = assignGeneralizedType(gamma, param.name, bound_type,
+                                         bound_constraints)
+        else:
+            # Assign a monomorphic type
+            v = sf.mkVarE(param.name.getSystemFVariable())
+            assumeType(gamma, param.name, FirstOrderAssignment(bound_type, v))
+            csts = bound_constraints
+
         scm = gamma[param.name].getTypeScheme()
         return (csts, sf.mkVarP(param.name.getSystemFVariable(),
                                 gluon_types.convertType(scm)))
