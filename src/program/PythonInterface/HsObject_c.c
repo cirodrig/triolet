@@ -50,7 +50,7 @@ HsObject_dealloc(struct HsObject *obj)
     hs_free_stable_ptr(obj->value);
     hs_free_stable_ptr(obj->type_rep);
   }
-  PyObject_Del(obj);
+  obj->ob_type->tp_free((PyObject *)obj);
 }
 
 static PyObject *
