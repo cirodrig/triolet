@@ -333,10 +333,12 @@ def makeDictionaryEnvironment(constraints):
     """
     return [(c, sf.newVar(None)) for c in constraints]
 
-def makePolymorphicFunction(gamma, dict_env, name, old_parameters, old_body, body_type):
+def makePolymorphicFunction(gamma, dict_env, name, fn_type, old_parameters,
+                            old_body, body_type):
     """
     makePolymorphicFunction(Environment, dict(Constraint, ObVariable),
-                            anf.ANFVariable, [sf.Pat], sf.Exp, sf.type)
+                            anf.ANFVariable, FirstOrderType, [sf.Pat], sf.Exp,
+                            FirstOrderType)
         -> sf.Def
 
     Given the System F translation of a first-order function,
@@ -358,11 +360,30 @@ def makePolymorphicFunction(gamma, dict_env, name, old_parameters, old_body, bod
                                   gluon_types.convertKind(t.getKind()))
                        for t in scm.qvars]
 
-    new_fn = sf.mkFun(type_parameters,
-                      dict_parameters + old_parameters,
-                      gluon_types.convertType(body_type),
-                      gluon_types.convertStreamTag(body_type),
-                      old_body)
+    if dict_parameters:
+        # If there are dictionary parameters, then they need to be curried.
+        # First, create an inner function corresponding to the first-order
+        # function type.
+        inner_fn = sf.mkFun([],
+                            old_parameters,
+                            gluon_types.convertType(body_type),
+                            gluon_types.convertStreamTag(body_type),
+                            old_body)
+
+        # Then, create an outer function that takes type and dictionary
+        # parameters.
+        new_fn = sf.mkFun(type_parameters,
+                          dict_parameters,
+                          gluon_types.convertType(fn_type),
+                          gluon_types.convertStreamTag(fn_type),
+                          sf.mkFunE(inner_fn))
+    else:
+        # Otherwise, return a single function 
+        new_fn = sf.mkFun(type_parameters,
+                          old_parameters,
+                          gluon_types.convertType(body_type),
+                          gluon_types.convertStreamTag(body_type),
+                          old_body)
     return sf.mkDef(name.getSystemFVariable(), new_fn)
 
 def findConstraintDictionary(dict_env, constraint):
@@ -664,7 +685,8 @@ def inferDefGroup(gamma, group):
         except unification.UnificationError, e:
             raise TypeCheckError, "Type error in recursive definition group"
 
-        return ((fn_csts, fn_ph), (d.name, fn_params, fn_body, fn_body_type))
+        return ((fn_csts, fn_ph),
+                (d.name, fn_type, fn_params, fn_body, fn_body_type))
 
     # The functions in the definition group will have the same
     # class constraint context.
@@ -684,9 +706,9 @@ def inferDefGroup(gamma, group):
     # Build function definitions; add System F parameters
     dict_env = makeDictionaryEnvironment(retained_csts)
 
-    new_group = [makePolymorphicFunction(gamma, dict_env, name, fn_params,
-                                         fn_body, fn_body_type)
-                 for name, fn_params, fn_body, fn_body_type
+    new_group = [makePolymorphicFunction(gamma, dict_env, name, fn_type,
+                                         fn_params, fn_body, fn_body_type)
+                 for name, fn_type, fn_params, fn_body, fn_body_type
                  in new_group_functions]
 
     # Update recursive variable placeholders
