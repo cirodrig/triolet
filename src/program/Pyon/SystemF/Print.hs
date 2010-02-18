@@ -1,7 +1,7 @@
 
 module Pyon.SystemF.Print
        (PrintFlags(..), defaultPrintFlags,
-        pprVar, pprPat, pprExp, pprFun, pprDef, pprModule,
+        pprLit, pprVar, pprPat, pprExp, pprFun, pprDef, pprModule,
         pprVarFlags, pprPatFlags, pprExpFlags, pprFunFlags, pprDefFlags
         )
 where

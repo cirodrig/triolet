@@ -66,13 +66,12 @@ class Class(PyonTypeBase):
         Get the specified class member.
         """
         if isinstance(method, str):
-            for m in self.methods:
-                v = m.getVariable(self)
-                if v.name == method:
-                    return v
+            for m, index in zip(self.methods, itertools.count()):
+                if m.name == method:
+                    return m.getVariable(self, index)
             raise IndexError, method
         elif isinstance(method, int):
-            return self.methods[method].getVariable(self)
+            return self.methods[method].getVariable(self, method)
         else:
             raise TypeError, "argument must be string or int"
 
@@ -138,11 +137,14 @@ class ClassMethod(object):
         sig = self._signature = self._signatureFun()
         return sig
 
-    def getVariable(self, cls):
+    def getVariable(self, cls, index):
         v = self._variable
         if not v:
+            import pyon.types.type_assignment as type_assignment
+
             # Extend the given signature with class constraints to get
-            # the actual method signature
+            # the actual method signature.
+            # The order of qvars and constraints is important.
             sig = self.getSignature()
             cls_var = cls.parameter
             tagvars = cls.streamTagParams + sig.streamTags
@@ -151,10 +153,14 @@ class ClassMethod(object):
             actual_sig = pyon.types.schemes.TyScheme(tagvars, qvars,
                                                      constraints,
                                                      sig.type)
+
+            # Create system F code that selects a dictionary element
+            sf_info = \
+                type_assignment.MethodAssignment(cls, index, actual_sig)
             
             v = self._variable = \
                 pyon.ast.ast.ANFVariable(self.name,
-                                         type_scheme = actual_sig)
+                                         system_f_translation = sf_info)
         return v
 
     def getTypeScheme(self):

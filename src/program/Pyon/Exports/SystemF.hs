@@ -77,6 +77,27 @@ foreign export ccall pyon_con_GT_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_GE_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_TRAVERSE_Stream :: IO PyPtr
 foreign export ccall pyon_con_TRAVERSE_list :: IO PyPtr
+foreign export ccall pyon_con_oper_ADD :: IO PyPtr
+foreign export ccall pyon_con_oper_SUB :: IO PyPtr
+foreign export ccall pyon_con_oper_MUL :: IO PyPtr
+foreign export ccall pyon_con_oper_DIV :: IO PyPtr
+foreign export ccall pyon_con_oper_MOD :: IO PyPtr
+foreign export ccall pyon_con_oper_POWER :: IO PyPtr
+foreign export ccall pyon_con_oper_FLOORDIV :: IO PyPtr
+foreign export ccall pyon_con_oper_BITWISEAND :: IO PyPtr
+foreign export ccall pyon_con_oper_BITWISEOR :: IO PyPtr
+foreign export ccall pyon_con_oper_BITWISEXOR :: IO PyPtr
+foreign export ccall pyon_con_oper_NEGATE :: IO PyPtr
+foreign export ccall pyon_con_oper_CAT_MAP :: IO PyPtr
+foreign export ccall pyon_con_oper_GUARD :: IO PyPtr
+foreign export ccall pyon_con_oper_DO :: IO PyPtr
+foreign export ccall pyon_con_fun_makelist :: IO PyPtr
+foreign export ccall pyon_con_fun_map :: IO PyPtr
+foreign export ccall pyon_con_fun_reduce :: IO PyPtr
+foreign export ccall pyon_con_fun_reduce1 :: IO PyPtr
+foreign export ccall pyon_con_fun_zip :: IO PyPtr
+foreign export ccall pyon_con_fun_iota :: IO PyPtr
+foreign export ccall pyon_con_fun_undefined :: IO PyPtr
 
 pyon_con_Action = asGlobalObject $ pyonBuiltin the_Action
 pyon_con_Stream = asGlobalObject $ pyonBuiltin the_Stream
@@ -106,6 +127,27 @@ pyon_con_GT_Tuple2 = asGlobalObject $ gtMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_GE_Tuple2 = asGlobalObject $ geMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_TRAVERSE_Stream = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_Stream
 pyon_con_TRAVERSE_list = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_list
+pyon_con_oper_ADD = asGlobalObject $ pyonBuiltin the_oper_ADD
+pyon_con_oper_SUB = asGlobalObject $ pyonBuiltin the_oper_SUB
+pyon_con_oper_MUL = asGlobalObject $ pyonBuiltin the_oper_MUL
+pyon_con_oper_DIV = asGlobalObject $ pyonBuiltin the_oper_DIV
+pyon_con_oper_MOD = asGlobalObject $ pyonBuiltin the_oper_MOD
+pyon_con_oper_POWER = asGlobalObject $ pyonBuiltin the_oper_POWER
+pyon_con_oper_FLOORDIV = asGlobalObject $ pyonBuiltin the_oper_FLOORDIV
+pyon_con_oper_BITWISEAND = asGlobalObject $ pyonBuiltin the_oper_BITWISEAND
+pyon_con_oper_BITWISEOR = asGlobalObject $ pyonBuiltin the_oper_BITWISEOR
+pyon_con_oper_BITWISEXOR = asGlobalObject $ pyonBuiltin the_oper_BITWISEXOR
+pyon_con_oper_NEGATE = asGlobalObject $ pyonBuiltin the_oper_NEGATE
+pyon_con_oper_CAT_MAP = asGlobalObject $ pyonBuiltin the_oper_CAT_MAP
+pyon_con_oper_GUARD = asGlobalObject $ pyonBuiltin the_oper_GUARD
+pyon_con_oper_DO = asGlobalObject $ pyonBuiltin the_oper_DO
+pyon_con_fun_makelist = asGlobalObject $ pyonBuiltin the_fun_makelist
+pyon_con_fun_map = asGlobalObject $ pyonBuiltin the_fun_map
+pyon_con_fun_reduce = asGlobalObject $ pyonBuiltin the_fun_reduce
+pyon_con_fun_reduce1 = asGlobalObject $ pyonBuiltin the_fun_reduce1
+pyon_con_fun_zip = asGlobalObject $ pyonBuiltin the_fun_zip
+pyon_con_fun_iota = asGlobalObject $ pyonBuiltin the_fun_iota
+pyon_con_fun_undefined = asGlobalObject $ pyonBuiltin the_fun_undefined
   
 foreign export ccall pyon_getTupleCon :: CInt -> IO PyPtr
 
@@ -254,7 +296,7 @@ pyon_mkMethodSelectE cls ty n exp = rethrowExceptionsInPython $ do
   c <- fromHsObject' cls
   t <- fromHsObject' ty
   e <- fromHsObject' exp
-  expHsObject $ MethodSelectE defaultExpInfo <$> c <*> t <*> pure (fromIntegral n) <*> e
+  expHsObject $ MethodSelectE defaultExpInfo c <$> t <*> pure (fromIntegral n) <*> e
 
 foreign export ccall pyon_mkFun :: PyPtr -> PyPtr -> PyPtr -> PyPtr -> IO PyPtr
 
@@ -314,5 +356,5 @@ pyon_typeCheckModule :: PyPtr -> PyPtr -> IO PyPtr
 pyon_typeCheckModule _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
   m <- fromHsObject' mod
-  typeCheckModule m
+  typeCheckModulePython m
   pyNone

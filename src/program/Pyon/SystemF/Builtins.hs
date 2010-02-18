@@ -8,6 +8,27 @@ module Pyon.SystemF.Builtins
         the_EqDict_Float, the_OrdDict_Float,
         the_EqDict_Tuple2, the_OrdDict_Tuple2,
         the_TraversableDict_Stream, the_TraversableDict_list,
+        the_oper_ADD,
+        the_oper_SUB,
+        the_oper_MUL,
+        the_oper_DIV,
+        the_oper_MOD,
+        the_oper_POWER,
+        the_oper_FLOORDIV,
+        the_oper_BITWISEAND,
+        the_oper_BITWISEOR,
+        the_oper_BITWISEXOR,
+        the_oper_NEGATE,
+        the_oper_CAT_MAP,
+        the_oper_GUARD,
+        the_oper_DO,
+        the_fun_makelist,
+        the_fun_map,
+        the_fun_reduce,
+        the_fun_reduce1,
+        the_fun_zip,
+        the_fun_iota,
+        the_fun_undefined,
         getPyonTupleType
        )
 where
@@ -69,6 +90,29 @@ data PyonBuiltins =
   , the_TraversableDict_list :: TraversableDictMembers
   
   , the_tuples :: [Con]
+    
+    -- Functions
+  , the_oper_ADD :: Con
+  , the_oper_SUB :: Con
+  , the_oper_MUL :: Con
+  , the_oper_DIV :: Con
+  , the_oper_MOD :: Con
+  , the_oper_POWER :: Con
+  , the_oper_FLOORDIV :: Con
+  , the_oper_BITWISEAND :: Con
+  , the_oper_BITWISEOR :: Con
+  , the_oper_BITWISEXOR :: Con
+  , the_oper_NEGATE :: Con
+  , the_oper_CAT_MAP :: Con
+  , the_oper_GUARD :: Con
+  , the_oper_DO :: Con
+  , the_fun_makelist :: Con
+  , the_fun_map :: Con
+  , the_fun_reduce :: Con
+  , the_fun_reduce1 :: Con
+  , the_fun_zip :: Con
+  , the_fun_iota :: Con
+  , the_fun_undefined :: Con
   }
 
 assign_Action x b = b {the_Action = x}
@@ -87,6 +131,27 @@ assign_EqDict_Tuple2 x b = b {the_EqDict_Tuple2 = x}
 assign_OrdDict_Tuple2 x b = b {the_OrdDict_Tuple2 = x}
 assign_TraversableDict_Stream x b = b {the_TraversableDict_Stream = x}
 assign_TraversableDict_list x b = b {the_TraversableDict_list = x}
+assign_oper_ADD x b = b {the_oper_ADD = x}
+assign_oper_SUB x b = b {the_oper_SUB = x}
+assign_oper_MUL x b = b {the_oper_MUL = x}
+assign_oper_DIV x b = b {the_oper_DIV = x}
+assign_oper_MOD x b = b {the_oper_MOD = x}
+assign_oper_POWER x b = b {the_oper_POWER = x}
+assign_oper_FLOORDIV x b = b {the_oper_FLOORDIV = x}
+assign_oper_BITWISEAND x b = b {the_oper_BITWISEAND = x}
+assign_oper_BITWISEOR x b = b {the_oper_BITWISEOR = x}
+assign_oper_BITWISEXOR x b = b {the_oper_BITWISEXOR = x}
+assign_oper_NEGATE x b = b {the_oper_NEGATE = x}
+assign_oper_CAT_MAP x b = b {the_oper_CAT_MAP = x}
+assign_oper_GUARD x b = b {the_oper_GUARD = x}
+assign_oper_DO x b = b {the_oper_DO = x}
+assign_fun_makelist x b = b {the_fun_makelist = x}
+assign_fun_map x b = b {the_fun_map = x}
+assign_fun_reduce x b = b {the_fun_reduce = x}
+assign_fun_reduce1 x b = b {the_fun_reduce1 = x}
+assign_fun_zip x b = b {the_fun_zip = x}
+assign_fun_iota x b = b {the_fun_iota = x}
+assign_fun_undefined x b = b {the_fun_undefined = x}
 
 the_PyonBuiltins :: MVar PyonBuiltins
 {-# NOINLINE the_PyonBuiltins #-}
@@ -172,6 +237,27 @@ initializePyonBuiltins mod =
                            , the_TraversableDict_Stream = uninitialized
                            , the_TraversableDict_list = uninitialized
                            , the_tuples = uninitialized
+                           , the_oper_ADD = uninitialized
+                           , the_oper_SUB = uninitialized
+                           , the_oper_MUL = uninitialized
+                           , the_oper_DIV = uninitialized
+                           , the_oper_MOD = uninitialized
+                           , the_oper_POWER = uninitialized
+                           , the_oper_FLOORDIV = uninitialized
+                           , the_oper_BITWISEAND = uninitialized
+                           , the_oper_BITWISEOR = uninitialized
+                           , the_oper_BITWISEXOR = uninitialized
+                           , the_oper_NEGATE = uninitialized
+                           , the_oper_CAT_MAP = uninitialized
+                           , the_oper_GUARD = uninitialized
+                           , the_oper_DO = uninitialized
+                           , the_fun_makelist = uninitialized
+                           , the_fun_map = uninitialized
+                           , the_fun_reduce = uninitialized
+                           , the_fun_reduce1 = uninitialized
+                           , the_fun_zip = uninitialized
+                           , the_fun_iota = uninitialized
+                           , the_fun_undefined = uninitialized
                            }
       setGlobalCons =
         setBuiltinValues [ ("Action", assign_Action)
@@ -182,6 +268,27 @@ initializePyonBuiltins mod =
                          , ("EqDict", assign_EqDict)
                          , ("OrdDict", assign_OrdDict)
                          , ("TraversableDict", assign_TraversableDict)
+                         , ("oper_ADD", assign_oper_ADD)
+                         , ("oper_SUB", assign_oper_SUB)
+                         , ("oper_MUL", assign_oper_MUL)
+                         , ("oper_DIV", assign_oper_DIV)
+                         , ("oper_MOD", assign_oper_MOD)
+                         , ("oper_POWER", assign_oper_POWER)
+                         , ("oper_FLOORDIV", assign_oper_FLOORDIV)
+                         , ("oper_BITWISEAND", assign_oper_BITWISEAND)
+                         , ("oper_BITWISEOR", assign_oper_BITWISEOR)
+                         , ("oper_BITWISEXOR", assign_oper_BITWISEXOR)
+                         , ("oper_NEGATE", assign_oper_NEGATE)
+                         , ("oper_CAT_MAP", assign_oper_CAT_MAP)
+                         , ("oper_GUARD", assign_oper_GUARD)
+                         , ("oper_DO", assign_oper_DO)
+                         , ("fun_makelist", assign_fun_makelist)
+                         , ("fun_map", assign_fun_map)
+                         , ("fun_reduce", assign_fun_reduce)
+                         , ("fun_reduce1", assign_fun_reduce1)
+                         , ("fun_zip", assign_fun_zip)
+                         , ("fun_iota", assign_fun_iota)
+                         , ("fun_undefined", assign_fun_undefined)
                          ]
       setClassDicts =
         setEqDict "Eq_EQ_Int" "Eq_NE_Int" assign_EqDict_Int .

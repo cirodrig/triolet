@@ -189,38 +189,37 @@ def convertType(ty):
     else:
         raise TypeError, type(ty)
 
-def instantiate(make_expr, scm):
+def makeInstanceExpression(typarams, constraints, expr):
     """
-    instantiate((hmtype.FirstOrderType -> system_f.Expression), TyScheme)
-        -> ((constraints, placeholders),
-            (system_f.Expression, hmtype.FirstOrderType))
+    makeInstanceExpression([FirstOrderType], [ClassPredicate], sf.Exp)
+        -> (placeholders, sf.Exp)
 
-    Given an expression whose Hindley-Milner type is a type scheme, create
-    code that represents an instantiation of the type scheme.  Return the code
-    together with a list of constraints and placeholders.
+    Given an instantiated Hindley-Milner type scheme, create System F code
+    corresponding to the instantiation process.  The @typarams and
+    @constraints parameters should have been produced by instantiating
+    the type of @expr (whose type is a HM type scheme).
+
+    The returned expression is the original expression applied to type
+    variables and class dictionaries.  A list of created placeholders is
+    also returned.
     """
-    # Append placeholders to this list as they are created
-    placeholders = []
-
-    (tyvars, constraints, first_order_type) = scm.instantiate()
-    expr = make_expr(first_order_type)
-
     # For each type parameter, apply the instantiated type to a placeholder
     # type.  After type inference completes, these will be the actual type
     # parameters.
-    for tv in tyvars:
-        expr = system_f.mkTyAppE(expr, convertType(tv))
+    for tp in typarams:
+        expr = system_f.mkTyAppE(expr, convertType(tp))
 
     # If there are constraints, then create a call expression for the
     # dictionary parameters
     if constraints:
         # For each constraint, make a dictionary parameter placeholder
-        dict_placeholders = map(pyon.types.placeholders.DictPlaceholder,
-                                constraints)
-        dict_params = [p.getExpression() for p in dict_placeholders]
-        placeholders.extend(dict_placeholders)
+        placeholders = map(pyon.types.placeholders.DictPlaceholder,
+                           constraints)
+        dict_params = [p.getExpression() for p in placeholders]
 
         # Apply the expression to all dictionary parameters
         expr = system_f.mkCallE(expr, dict_params)
+    else:
+        placeholders = []
 
-    return ((constraints, placeholders), (expr, first_order_type))
+    return (placeholders, expr)

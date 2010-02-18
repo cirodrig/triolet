@@ -26,7 +26,11 @@ import pyon.unification as unification
 import pyon.types.kind as kind
 import pyon.types.types as hmtype
 import pyon.types.gluon_types as gluon_types
-from pyon.types.placeholders import RecVarPlaceholder, DictPlaceholder, IdDerivation, InstanceDerivation
+from pyon.types.type_assignment import \
+    TypeAssignment, \
+    FirstOrderAssignment, PolymorphicAssignment, RecursiveAssignment
+from pyon.types.placeholders import \
+    RecVarPlaceholder, DictPlaceholder, IdDerivation, InstanceDerivation
 
 class TypeCheckError(Exception): pass
 
@@ -60,29 +64,24 @@ class Environment(dict):
 
     For a given variable v, if v is in scope, then
     * self[v] is undefined, v's type was already defined before type inference
-      began, and v.getTypeScheme() is the variable's type scheme, or
-    * self[v] = None and v.getTypeScheme() is the variable's type scheme, or
-    * self[v] = RecVarPlaceholder(v, t) where t is the variable's type
-                before generalization, or
-    * self[v] = t where t is the variable's first-order type.
-
-    In the first case, a VariableExpr is replaced by a placeholder when its
-    type is looked up, because creation of dictionaries is deferred.  In the
-    latter two cases, a VariableExpr remains itself.
+      began, and v.getSystemFTranslation() is the variable's type
+      information, or
+    * self[v] is the variable's type information.
     """
     @classmethod
-    def singleton(cls, name, ty):
+    def singleton(cls, name, information):
         """
-        Environment.singleton(name, ty) -> new environment
-        Create an environment containing exactly one assignment
+        Environment.singleton(name, information) -> new environment
+        Create an environment containing exactly one assignment.
         """
-        return cls([(name, ty)])
+        assert isinstance(information, TypeAssignment)
+        return cls([(name, information)])
 
     @classmethod
     def union(cls, g1, g2):
         """
         Environment.union(x, y) -> union of x and y
-        Create the union of two environments
+        Create the union of two environments.
         """
         d = Environment(g1)
         d.update(g2)
@@ -92,7 +91,7 @@ class Environment(dict):
     def unions(cls, xs):
         """
         Environment.unions(seq) -> union of elements of seq
-        Create tue union of all environments in a sequence
+        Create the union of all environments in a sequence.
         """
         d = Environment()
         for x in xs: d.update(x)
@@ -107,106 +106,39 @@ class Environment(dict):
         s = hmtype.FreeVariableSet()
 
         # Add the free type variables of each local binding to the set
-        for v, ty in self.iteritems():
-            if ty is None: v.getTypeScheme().addFreeTypeSymbols(s)
-            elif isinstance(ty, hmtype.FirstOrderType):
-                ty.addFreeTypeSymbols(s)
-            elif isinstance(ty, RecVarPlaceholder):
-                ty.getFirstOrderType().addFreeTypeSymbols(s)
-            else:
-                raise TypeError, type(ty)
+        for v, assignment in self.iteritems():
+            assignment.getFreeTypeVariables(s)
+
         return s
 
-    def dump(self):
-        print "************************************"
-        for v, ty in self.iteritems():
-            if v.name == None:
-                print '?%d :' % v.identifier,
-            else:
-                print '%s%d :' % (v.name, v.identifier),
-            if isinstance(ty, hmtype.TyScheme):
-                ty = ty.instantiate()
-                print "(scheme) ",
-            print "%s" % pretty.render(ty.pretty())
-        print "************************************"
+    def printKeys(self):
+        print "Dictionary contains:"
+        for v in self:
+            print " ", print_ast.printAstString(v)
 
-def findVariableType(env, v):
+def instantiateVariable(env, v):
     """
-    findVariableType(Environment, ANFVariable)
+    instantiateVariable(Environment, ANFVariable)
         -> ((constraints, placeholders), (sf.Exp, FirstOrderType))
 
-    Get the type of a variable and a list of class constraints.  If the
-    variable has a type scheme, instantiate it.
+    Create the System F code representing a reference to a variable.
     """
-    scm = v.getTypeScheme()
-
-    base_expr = sf.mkVarE(v.getSystemFVariable())
-
-    # Case 1: type scheme
-    if scm: return gluon_types.instantiate(lambda t: base_expr, scm)
-
-    entry = env[v]
-
-    # Case 2: placeholder
-    if isinstance(entry, RecVarPlaceholder):
-        return (([], [entry]),
-                (entry.getExpression(), entry.getFirstOrderType()))
-
-    # Case 3: first-order type
-    assert isinstance(entry, hmtype.FirstOrderType)
-    return (([], []), (base_expr, entry))
+    assert isinstance(env, Environment)
+    return (v.getSystemFTranslation() or env[v]).instantiate()
 
 def findVariableTypeScheme(env, v):
     """
-    Get the type scheme of a variable, if it has been assigned one.
-    Otherwise, return None.
-    The variable must be in the environment.
+    Get the type scheme of a variable.  The variable must have a type scheme.
     """
-    if env[v] is None: return v.getTypeScheme()
-    else: return None
+    return (v.getSystemFTranslation() or env[v]).getTypeScheme()
 
-def assumeFirstOrderType(env, v, t):
+def assumeType(env, v, information):
     """
-    assumeFirstOrderType(env, v, t) -- add the assignment v |-> t to env
-
-    Assign the first-order type @t to @v in env.
+    Extend the environment with a type assignment for v.
     """
-    assert isinstance(v, ast.ANFVariable)
-    assert isinstance(t, hmtype.FirstOrderType)
+    assert isinstance(information, TypeAssignment)
     assert v not in env
-
-    v.setFirstOrderType(t)
-    env[v] = t
-
-    return None
-
-def assumePlaceholderType(env, v, t):
-    """
-    assumePlaceholderType(env, v, t) -- add a placeholder to env[v]
-
-    Create a dictionary-passing placeholder for @v, and record it in the
-    environment.  The first-order type @t is assigned to @v.
-    """
-    assert isinstance(v, ast.ANFVariable)
-    assert isinstance(t, hmtype.FirstOrderType)
-    assert v not in env
-
-    env[v] = RecVarPlaceholder(v, t)
-
-def assignFirstOrderTypeScheme(env, v, ty):
-    """
-    Assign the type scheme @scm to @v.  The assignment is recorded globally
-    and in the given environment.
-    """
-    assert isinstance(v, ast.ANFVariable)
-    assert isinstance(ty, hmtype.FirstOrderType)
-    assert v not in env
-
-    scm = hmtype.TyScheme([], [], hmtype.noConstraints, ty)
-    v.setTypeScheme(scm)
-    env[v] = None
-
-    return ([], None)
+    env[v] = information
 
 def generalize(gamma, constraints, ty):
     # Determine which type variables to generalize over
@@ -282,8 +214,7 @@ def assignGeneralizedType(gamma, v, ty, constraints):
     assert v not in gamma
 
     deferred, scm = generalize(gamma, constraints, ty)
-    v.setTypeScheme(scm)
-    gamma[v] = None
+    gamma[v] = PolymorphicAssignment(scm, sf.mkVarE(v.getSystemFVariable()))
     return deferred
 
 def assignGeneralizedTypes(gamma, assignments, constraints):
@@ -302,8 +233,7 @@ def assignGeneralizedTypes(gamma, assignments, constraints):
 
     # Assign each type
     for v, scm in itertools.izip(vars, schemes):
-        v.setTypeScheme(scm)
-        gamma[v] = None
+        gamma[v] = PolymorphicAssignment(scm, sf.mkVarE(v.getSystemFVariable()))
     return (deferred, retained)
 
 ###############################################################################
@@ -403,9 +333,9 @@ def makeDictionaryEnvironment(constraints):
     """
     return [(c, sf.newVar(None)) for c in constraints]
 
-def makePolymorphicFunction(dict_env, name, old_parameters, old_body, body_type):
+def makePolymorphicFunction(gamma, dict_env, name, old_parameters, old_body, body_type):
     """
-    makePolymorphicFunction(dict(Constraint, ObVariable),
+    makePolymorphicFunction(Environment, dict(Constraint, ObVariable),
                             anf.ANFVariable, [sf.Pat], sf.Exp, sf.type)
         -> sf.Def
 
@@ -415,7 +345,7 @@ def makePolymorphicFunction(dict_env, name, old_parameters, old_body, body_type)
     dictionary parameters, derived from the 'qvars' and 'constraints' fields
     of the type.
     """
-    scm = name.getTypeScheme()
+    scm = findVariableTypeScheme(gamma, name)
 
     # Use the dictionary environment to determine dictionary parameters.
     # Dictionary environment's constraints are the same as the type
@@ -484,32 +414,34 @@ def updateRecVarPlaceholder(gamma, dict_env, placeholder):
 
     result_type = placeholder.getFirstOrderType()
     variable = placeholder.getVariable()
-
-    # The variable should have a type scheme now.  Use the type scheme to
-    # determine what dictionary placeholders are needed.
+    
+    # The variable should have a type scheme now.
     scm = findVariableTypeScheme(gamma, variable)
-    if not scm:
-        raise RuntimeError, "No type inferred for recursive variable"
 
-    # Create a dictionary-passing expression.
-    _, placeholders, expr, inst_result_type = scm.instantiate()
-
-    # Make the instantiated type and constraints match the expected type.
-    # This must succeed, because type inference has succeeded.
+    # Instantiate the type scheme, then unify it with the inferred type to
+    # get the real type of this instance.  Unification must succeed, because
+    # type inference has succeeded.
+    tyvars, constraints, inst_result_type = scm.instantiate()
     try: unification.unify(inst_result_type, result_type)
     except UnificationError, e:
         raise RuntimeError, "Dictionary elaboration failed"
 
+    # Create the call expression
+    var_expr = sf.mkVarE(variable.getSystemFVariable())
+    new_placeholders, expr = \
+        gluon_types.makeInstanceExpression(tyvars, constraints, var_expr)
+
     # Try to resolve dictionary parameters now
     unresolved_placeholders = []
-    for ph in placeholders:
+    for ph in new_placeholders:
         unresolved_placeholders += updateDictPlaceholder(gamma, dict_env, ph)
+    del new_placeholders
 
     # Record the resolution for this placeholder
     placeholder.setElaboration(expr)
 
-    # Return the unresolved dictionaries
-    return unresolved_dict_parameters
+    # Return the unresolved dictionary placeholders
+    return unresolved_placeholders
 
 def updateRecVarPlaceholders(gamma, dict_env, placeholders):
     """
@@ -584,8 +516,9 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
         # Generalize this type
         csts = assignGeneralizedType(gamma, param.name, bound_type,
                                      bound_constraints)
+        scm = gamma[param.name].getTypeScheme()
         return (csts, sf.mkVarP(param.name.getSystemFVariable(),
-                                gluon_types.convertType(param.name.getTypeScheme())))
+                                gluon_types.convertType(scm)))
 
     else:
         raise TypeError, type(param)
@@ -607,8 +540,11 @@ def exposeParameterBinding(gamma, param):
         # If this parameter's type has been declared, use that type;
         # otherwise, create a new type variable
         t = param.annotation or hmtype.TyVar(kind.Star())
-        assumeFirstOrderType(gamma, param.name, t)
-        return (sf.mkVarP(param.name.getSystemFVariable(),
+        v = param.name
+
+        sf_expr = sf.mkVarE(v.getSystemFVariable())
+        assumeType(gamma, v, FirstOrderAssignment(t, sf_expr))
+        return (sf.mkVarP(v.getSystemFVariable(),
                           gluon_types.convertType(t)), t)
 
     else:
@@ -634,7 +570,7 @@ def exposeRecursiveVariable(gamma, v):
     """
     # Create a new type variable for this parameter
     t = hmtype.TyVar(kind.Star())
-    assumePlaceholderType(gamma, v, t)
+    assumeType(gamma, v, RecursiveAssignment(v, t))
     return t
 
 def exposeRecursiveVariables(gamma, vars):
@@ -738,8 +674,8 @@ def inferDefGroup(gamma, group):
     # Build function definitions; add System F parameters
     dict_env = makeDictionaryEnvironment(retained_csts)
 
-    new_group = [makePolymorphicFunction(dict_env, name, fn_params, fn_body,
-                                         fn_body_type)
+    new_group = [makePolymorphicFunction(gamma, dict_env, name, fn_params,
+                                         fn_body, fn_body_type)
                  for name, fn_params, fn_body, fn_body_type
                  in new_group_functions]
 
@@ -769,17 +705,18 @@ def inferExpressionType(gamma, expr):
     if isinstance(expr, ast.VariableExpr):
         # If the variable has a type scheme, then instantiate it.
         # Otherwise, look up its type in the environment.
-        cph, (new_expr, new_expr_type) = findVariableType(gamma, expr.variable)
+        cph, (new_expr, new_expr_type) = \
+            instantiateVariable(gamma, expr.variable)
 
     elif isinstance(expr, ast.LiteralExpr):
         new_expr_type = literalSignature(expr.literal)
         sf_type = gluon_types.convertType(new_expr_type)
-        if isinstance(expr.literal, int):
+        if isinstance(expr.literal, bool):
+            literal = sf.mkBoolL(expr.literal)
+        elif isinstance(expr.literal, int):
             literal = sf.mkIntL(expr.literal)
         elif isinstance(expr.literal, float):
             literal = sf.mkFloatL(expr.literal)
-        elif isinstance(expr.literal, bool):
-            literal = sf.mkBoolL(expr.literal)
         elif expr.literal is None:
             literal = sf.NoneL
         else:
@@ -866,7 +803,7 @@ def inferExpressionType(gamma, expr):
         cph_group, def_group = inferDefGroup(local_gamma, expr.definitions)
 
         # Infer body of letrec
-        cph_body, (body, new_expr_type) = inferExpressionType(gamma, expr.body)
+        cph_body, (body, new_expr_type) = inferExpressionType(local_gamma, expr.body)
 
         new_expr = sf.mkLetrecE(def_group, body)
         cph = catCPh(cph_group, cph_body)

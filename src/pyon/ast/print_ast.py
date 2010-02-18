@@ -10,6 +10,12 @@ import sys
 #_indentation = 0
 
 def printAst(root, file = sys.stdout):
+    pretty.render(pretty.stack(_printAstWorker(root), ''), file)
+
+def printAstString(root):
+    return pretty.renderString(_printAstWorker(root))
+
+def _printAstWorker(root):
     """A generic, recursive printing function.
     Examines the argument type and calls the appropriate print function.
 
@@ -32,7 +38,7 @@ def printAst(root, file = sys.stdout):
     else:
         raise TypeError("Called printAst on a non-AST object")
 
-    pretty.render(pretty.stack(doc, ''), file)
+    return doc
 
 # Precedences, used for inserting parentheses
 _OUTER_PREC = 0
@@ -147,17 +153,9 @@ def printFuncDef(fdef, type_variables = None):
                                       for p in func.parameters])
     paramdoc = pretty.parens(pretty.space(paramdoc))
 
-    scm = fdef.name.getTypeScheme()
-    if scm:
-        typedoc = pretty.abut(pretty.space([printVar(fdef.name, type_variables, shadowing = False),
-                                            ':', scm.prettyUnshadowed(type_variables)]),
-                              ';')
-    else:
-        typedoc = None
     calldoc = pretty.abut(printVar(fdef.name, type_variables), paramdoc)
     bodydoc = printExpression(func.body, _OUTER_PREC, type_variables)
-    return pretty.stack([typedoc,
-                         pretty.space(calldoc, '='),
+    return pretty.stack([pretty.space(calldoc, '='),
                          pretty.nest(bodydoc, 4)])
 
 def printVar(v, type_variables, shadowing = True):
@@ -165,16 +163,7 @@ def printVar(v, type_variables, shadowing = True):
     v: Variable to be printed"""
     # If variable is anonymous, print an underscore
     name_doc = pretty.abut(v.name or '_\'', v.identifier)
-    scm = v.getTypeScheme()
-    if scm:
-        if shadowing:
-            type_doc = pretty.space(':', scm.pretty(type_variables))
-        else:
-            type_doc = pretty.space(':', scm.prettyUnshadowed(type_variables))
-    else:
-        type_doc = None
-
-    return pretty.parens(pretty.space(name_doc, type_doc))
+    return name_doc
 
 def printParam(p, type_variables = None):
     """Returns a pretty-printable object for a parameter in the AST
@@ -188,11 +177,7 @@ def printParam(p, type_variables = None):
         if p.annotation is not None:
             pass #Unimplemented?
 
-        scm = p.name.getTypeScheme()
-        if scm: typedoc = pretty.space(':', scm.pretty(type_variables))
-        else: typedoc = None
-
-        return pretty.space(printVar(p.name, type_variables), typedoc)
+        return printVar(p.name, type_variables)
     elif isinstance(p, TupleParam):
         fields = [printParam(f, type_variables) for f in p.fields]
         return pretty.braces(pretty.space(pretty.punctuate(',', fields)))

@@ -74,7 +74,7 @@ fromHsObject' x = do
                                  in typeOf (fromJust x)
                in do type_rep_ptr <- #{peek struct HsObject, type_rep} x
                      type_rep <- deRefStablePtr type_rep_ptr
-                     let expected_type = show (typeOf return_type)
+                     let expected_type = show return_type
                          got_type = show (type_rep :: TypeRep)
                          message = "Expected Haskell object of type " ++ 
                                    expected_type ++

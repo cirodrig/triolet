@@ -7,9 +7,9 @@ import itertools
 # Operator names
 import pyon.ast.operators
 
-# Connection to next stage of compiler 
 import system_f
 import pyon.types.gluon_types
+import pyon.types.type_assignment
 
 # Code executes in one of two modes, as an expression or as an iterator.
 # All user-defined functions are in EXPRESSION mode.  Generator
@@ -60,15 +60,17 @@ class ANFVariable(Variable):
       The variable's name as it appears in source code.
     identifier:
       An integer that uniquely identifies this variable.
-    typeScheme:
-      This variable's type scheme, if it has a type scheme.  The scheme is
-      assigned for predefined global variables or by type inference.  Variables
-      only have a type scheme if one can be inferred by HM type inference.
-    systemFVariable:
-      The system F translation of this variable, created by type inference.
+    sfTranslation:
+      The System F translation of this variable, if this variable is created
+      to represent a preexisting System F object.  If the translation is to
+      be determined by type inference, this field is None.
+    sfVariable:
+      The system F translation of this variable, created on demand.  This is
+      only used if sfTranslation is None.
     """
 
-    def __init__(self, name = None, identifier = None, type_scheme = None):
+    def __init__(self, name = None, identifier = None,
+                 system_f_translation = None):
         """
         Create a new variable.  The variable should have a globally
         unique ID.
@@ -79,74 +81,51 @@ class ANFVariable(Variable):
         identifier:
           An integer that uniquely identifies this variable
           (If not given, a new integer will be assigned to the variable)
-        type_scheme:
-          The variable's type; if None, the type should be inferred
+        system_f_translation:
+          A system F translation of this variable, and HM type information.
+          This parameter should be
+          given iff the variable is not defined in Pyon code.  For example,
+          built-in variables have a system F value.
         """
         assert name is None or isinstance(name, str)
+        assert system_f_translation is None or \
+            isinstance(system_f_translation, pyon.types.type_assignment.TypeAssignment)
 
         # If no identifier is given, create a new variable
         if identifier is None:
             identifier = Variable.getNewID()
         else:
             assert isinstance(identifier, int)
+
         self.name = name
         self.identifier = identifier
-        self._typeScheme = None
+        self._sfTranslation = system_f_translation
         self._sfVariable = None
-
-        if type_scheme: self.setTypeScheme(type_scheme)
 
     def __eq__(self, other):
         return self.identifier == other.identifier
 
-    def setTypeScheme(self, type_scheme):
-        # Cannot change a variable's type
-        if self._typeScheme:
-            raise RuntimeError, "Attempted to re-assign a variable's type"
-
-        self._typeScheme = type_scheme
-
-        # Assign self a variable
-        sftype = pyon.types.gluon_types.convertType(type_scheme)
-        sfvar = system_f.newVar(self.name)
-        self.setSystemFVariable(sfvar)
-
-    def setFirstOrderType(self, first_order_type):
-        # Assign self a variable
-        sftype = pyon.types.gluon_types.convertType(first_order_type)
-        sfvar = system_f.newVar(self.name)
-        self.setSystemFVariable(sfvar)
-
-    def getTypeScheme(self):
-        """
-        Return this variable's type scheme, or None if it does not have a
-        type scheme.
-        """
-        return self._typeScheme
-
-    def getType(self):
-        """
-        Create the type of an instance of this variable.  Returns a type.
-        The variable must have been assigned a type.
-        """
-        return self._typeScheme.instantiate()
-
-    def hasSystemFVariable(self):
-        return self._sfVariable is not None
-
-    def setSystemFVariable(self, v):
-        if self._sfVariable:
-            raise RuntimeError, "Variable has already been translated"
-        self._sfVariable = v
+    def isPredefined(self): return bool(self._sfTranslation)
 
     def getSystemFVariable(self):
-        if not self._sfVariable:
-            raise RuntimeError, "Variable has not been translated"
-        return self._sfVariable
+        if self._sfTranslation:
+            raise RuntimeError, \
+                "Variable translates to an expression, not a variable"
+
+        v = self._sfVariable
+        if not v: v = self._sfVariable = system_f.newVar(self.name)
+        return v
+
+    def getSystemFTranslation(self):
+        """
+        v.getSystemFTranslation() -> TypeAssignment or None
+
+        Get the System F assignment of this variable, if it has one.
+        """
+        return self._sfTranslation
 
     def addAllTypeVariables(self, s):
-        if self._typeScheme:
-            self._typeScheme.addFreeVariables(s)
+        pass
 
     # A counter used to assign unique IDs to variables
     _nextID = 1
@@ -385,8 +364,6 @@ class FunctionDef(object):
         self.function = function
 
     def addAllTypeVariables(self, s):
-        scm = self.name.getTypeScheme()
-        if scm: scm.addFreeVariablesUnshadowed(s)
         self.function.addAllTypeVariables(s)
 
 class Function(object):

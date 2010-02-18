@@ -479,6 +479,27 @@ createSystemFModule(void)
   ADD_OBJECT("EqClass", pyon_EqClass);
   ADD_OBJECT("OrdClass", pyon_OrdClass);
   ADD_OBJECT("TraversableClass", pyon_TraversableClass);
+  ADD_OBJECT("con_oper_ADD", pyon_con_oper_ADD);
+  ADD_OBJECT("con_oper_SUB", pyon_con_oper_SUB);
+  ADD_OBJECT("con_oper_MUL", pyon_con_oper_MUL);
+  ADD_OBJECT("con_oper_DIV", pyon_con_oper_DIV);
+  ADD_OBJECT("con_oper_MOD", pyon_con_oper_MOD);
+  ADD_OBJECT("con_oper_POWER", pyon_con_oper_POWER);
+  ADD_OBJECT("con_oper_FLOORDIV", pyon_con_oper_FLOORDIV);
+  ADD_OBJECT("con_oper_BITWISEAND", pyon_con_oper_BITWISEAND);
+  ADD_OBJECT("con_oper_BITWISEOR", pyon_con_oper_BITWISEOR);
+  ADD_OBJECT("con_oper_BITWISEXOR", pyon_con_oper_BITWISEXOR);
+  ADD_OBJECT("con_oper_NEGATE", pyon_con_oper_NEGATE);
+  ADD_OBJECT("con_oper_CAT_MAP", pyon_con_oper_CAT_MAP);
+  ADD_OBJECT("con_oper_GUARD", pyon_con_oper_GUARD);
+  ADD_OBJECT("con_oper_DO", pyon_con_oper_DO);
+  ADD_OBJECT("con_fun_makelist", pyon_con_fun_makelist);
+  ADD_OBJECT("con_fun_map", pyon_con_fun_map);
+  ADD_OBJECT("con_fun_reduce", pyon_con_fun_reduce);
+  ADD_OBJECT("con_fun_reduce1", pyon_con_fun_reduce1);
+  ADD_OBJECT("con_fun_zip", pyon_con_fun_zip);
+  ADD_OBJECT("con_fun_iota", pyon_con_fun_iota);
+  ADD_OBJECT("con_fun_undefined", pyon_con_fun_undefined);
 
   return 1;
 }

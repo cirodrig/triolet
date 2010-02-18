@@ -1,10 +1,12 @@
 
 module Pyon.SystemF.Typecheck
-       (typeCheckModule)
+       (typeCheckModule, typeCheckModulePython)
 where
 
 import Control.Exception
+import Data.Maybe
   
+import Gluon.Common.Label
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
 import Gluon.Core.Rename
@@ -15,12 +17,50 @@ import Gluon.Eval.Environment
 import qualified Gluon.Eval.Typecheck as Gluon
 import Gluon.Eval.Typecheck(tcAssertEqual)
 
+import PythonInterface.Python
 import Pyon.Globals
+import Pyon.SystemF.Print
 import Pyon.SystemF.Builtins
 import Pyon.SystemF.Syntax
 
 -- Endomorphism concatenation
 catEndo xs k = foldr ($) k xs
+
+classDictCon EqClass = pyonBuiltin the_EqDict
+classDictCon OrdClass = pyonBuiltin the_OrdDict
+classDictCon TraversableClass = pyonBuiltin the_TraversableDict
+
+classMethodType cls clsType index =
+  case cls
+  of EqClass ->
+       case index
+       of 0 -> binaryFunctionType
+          1 -> binaryFunctionType
+     OrdClass ->
+       case index
+       of 0 -> binaryFunctionType
+          1 -> binaryFunctionType
+          2 -> binaryFunctionType
+          3 -> binaryFunctionType
+     TraversableClass ->
+       case index
+       of 0 -> traverseType
+  where
+    traverseType = do
+      a <- newTemporary Gluon.TypeLevel Nothing
+      let a_exp = Gluon.mkInternalVarE a
+          cls_exp = Gluon.mkInternalAppE clsType [a_exp]
+          iter_exp = Gluon.mkInternalConAppE (pyonBuiltin the_Stream) [a_exp]
+          ty = Gluon.mkInternalFunE False a Gluon.pureKindE $
+               Gluon.mkInternalArrowE False cls_exp iter_exp
+      return ty
+    binaryFunctionType = do
+      let return_bool = Gluon.mkInternalConAppE (pyonBuiltin the_Action) 
+                        [Gluon.mkInternalConE (pyonBuiltin the_bool)]
+          ty = Gluon.mkInternalArrowE False clsType $
+               Gluon.mkInternalArrowE False clsType $
+               return_bool
+      return ty
 
 boolType = Gluon.mkInternalConE $ pyonBuiltin the_bool
 
@@ -94,7 +134,16 @@ typeInferExp expression = do
          typeInferLetE pat e body
        LetrecE {expDefs = defs, expBody = body} ->
          typeInferLetrecE defs body
-       _ -> error "typeInferExp: not implemented"
+       DictE { expClass = cls
+             , expType = ty
+             , expSuperclasses = scs
+             , expMethods = ms} ->
+         typeInferDictE cls ty scs ms
+       MethodSelectE { expClass = cls
+                     , expType = ty
+                     , expMethodIndex = n
+                     , expArg = e} ->
+         typeInferMethodSelectE cls ty n e
   return e_type
          
 -- To infer a variable's type, just look it up in the environment
@@ -109,7 +158,7 @@ checkLiteralType l t = do
   t' <- liftEvaluation $ Gluon.evalFully' t
   if isValidLiteralType t' l
     then return t'
-    else throwError $ OtherErr "Not a valid literal type"
+    else throwError $ OtherErr $ "Not a valid literal type " ++ show (Gluon.pprExp (whnfExp t')) ++ "; " ++ show (pprLit l)
 
 isValidLiteralType ty lit =
   -- Get the type constructor
@@ -134,12 +183,22 @@ typeInferTupleE fs = do
        Just c -> return $ Gluon.mkInternalWhnfAppE c $ map whnfExp f_types
        
 typeInferTyAppE op arg = do
-  op_type <- typeInferExp op
-  
-  -- Apply operator type to argument type
-  liftEvaluation $
-    Gluon.evalFully' $
-    Gluon.mkInternalAppE (whnfExp op_type) [arg]
+  Whnf op_type <- typeInferExp op
+  Whnf arg_type <- Gluon.typeInferExp arg
+
+  -- Apply operator to argument
+  case op_type of
+    Gluon.FunE {Gluon.expMParam = param, Gluon.expRange = range} -> do
+      -- Operand type must match
+      Gluon.tcAssertEqual noSourcePos (verbatim $ Gluon.binder'Type param) 
+                                      (verbatim arg_type)
+      
+      -- Result value is the range, after substituting operand in argument
+      result <- liftEvaluation $ Gluon.evalFully $ assignBinder' param arg $ 
+                verbatim range
+      return result
+      
+    _ -> throwError $ Gluon.NonFunctionApplicationErr noSourcePos op_type
 
 typeInferCallE op args = do
   -- Infer types of parameters
@@ -221,12 +280,31 @@ typeInferLetE pat expression body = do
 
 typeInferLetrecE defs body = typeCheckDefGroup defs $ typeInferExp body
 
+typeInferDictE cls ty scs ms = do
+  sc_types <- mapM typeInferExp scs
+  m_types <- mapM typeInferExp ms
+  
+  -- TODO: check that superclass and method types are correct
+  let return_type = ty -- Gluon.mkInternalConAppE (classDictCon cls) [ty]
+  liftEvaluation $ Gluon.evalFully' return_type
+
+typeInferMethodSelectE cls ty index arg = do
+  -- The argument must be a dictionary of the given class
+  arg_ty <- typeInferExp arg
+  ty' <- liftEvaluation $ Gluon.evalFully' $ 
+         Gluon.mkInternalConAppE (classDictCon cls) [ty]
+  tcAssertEqual noSourcePos (verbatim $ whnfExp ty') (verbatim $ whnfExp arg_ty)
+  
+  -- Determine the return value based on the class type and method index
+  return_type <- classMethodType cls ty index
+  liftEvaluation $ Gluon.evalFully' return_type
+
 typeCheckDefGroup :: [Def] -> PureTC a -> PureTC a
 typeCheckDefGroup defs k =
   -- Assume all defined function types
   catEndo (map assumeDef defs) $ do
     -- Check all defined function bodies
-    mapM_ typeCheckDef defs
+    xs <- mapM typeCheckDef defs
     
     -- Run the continuation in this environment
     k
@@ -236,4 +314,11 @@ typeCheckDefGroup defs k =
 
 typeCheckModule (Module defs) =
   withTheVarIdentSupply $ \varIDs -> do
-    evaluate =<< (runPureTCIO varIDs $ typeCheckDefGroup defs $ return ())
+    runPureTCIO varIDs $ typeCheckDefGroup defs $ return ()
+    
+typeCheckModulePython mod = do
+  result <- typeCheckModule mod
+  case result of
+    Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
+                    throwPythonExc pyRuntimeError "Type checking failed"
+    Right _ -> return ()

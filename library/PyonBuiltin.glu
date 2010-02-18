@@ -57,3 +57,50 @@ constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
 constant Traversable_TRAVERSE_Stream : (a : Pure) -> Stream a -> Stream a;
 constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream a;
 
+-- Builtin functions
+constant oper_ADD : (a : Pure) -> a -> a -> Action a;
+constant oper_SUB : (a : Pure) -> a -> a -> Action a;
+constant oper_MUL : (a : Pure) -> a -> a -> Action a;
+constant oper_DIV : (a : Pure) -> a -> a -> Action a;
+constant oper_MOD : Int -> Int -> Action Int;
+constant oper_POWER : (a : Pure) -> a -> a -> Action a;
+constant oper_FLOORDIV : (a : Pure) -> a -> a -> Action a;
+constant oper_BITWISEAND : Int -> Int -> Action Int;
+constant oper_BITWISEOR : Int -> Int -> Action Int;
+constant oper_BITWISEXOR : Int -> Int -> Action Int;
+constant oper_NEGATE : (a : Pure) -> a -> Action a;
+
+constant oper_CAT_MAP : (a : Pure) -> (b : Pure)
+                     -> (a -> Stream b) -> Stream a -> Stream b;
+
+constant oper_GUARD : (a : Pure) -> bool -> Stream a -> Stream a;
+
+constant oper_DO : (a : Pure) -> a -> Stream a;
+
+constant fun_makelist : (t : Pure -> Pure) -> (a : Pure)
+                     -> TraversableDict t
+                     -> Action (t a -> Action (list a));
+
+constant fun_map : (t : Pure -> Pure) -> (a : Pure) -> (b : Pure)
+                -> TraversableDict t
+                -> Action ((a -> Action b) -> t a -> Action (t b));
+
+constant fun_reduce : (t : Pure -> Pure) -> (a : Pure)
+                   -> TraversableDict t
+                   -> Action ((a -> a -> Action a) -> a -> t a -> Action a);
+
+constant fun_reduce1 : (t : Pure -> Pure) -> (a : Pure)
+                    -> TraversableDict t
+                    -> Action ((a -> a -> Action a) -> t a -> Action a);
+
+constant fun_zip : (s : Pure -> Pure)
+                -> (t : Pure -> Pure)
+                -> (a : Pure)
+                -> (b : Pure)
+                -> TraversableDict s
+                -> TraversableDict t
+                -> Action (s a -> t b -> Stream (PyonTuple2 a b));
+
+constant fun_iota : Stream Int;
+
+constant fun_undefined : (a : Pure) -> Action a;

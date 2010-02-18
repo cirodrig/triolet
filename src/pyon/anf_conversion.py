@@ -464,14 +464,17 @@ _convertBinaryOperatorMap = {
     operators.GE        : builtin_data.oper_GE,
     operators.BITWISEAND : builtin_data.oper_BITWISEAND,
     operators.BITWISEOR : builtin_data.oper_BITWISEOR,
-    operators.BITWISEXOR : builtin_data.oper_BITWISEXOR,
-    operators.ARROW     : builtin_data.oper_ARROW
+    operators.BITWISEXOR : builtin_data.oper_BITWISEXOR
     }
 
 def convertBinaryOperator(oper):
     """
     Return the Pyon ANF variable denoting a binary operator.
     """
+    # The arrow should only be used in type expressions
+    if oper == operators.ARROW:
+        raise RuntimeError, "'->' used as a binary operator"
+
     try: return _convertBinaryOperatorMap[oper]
     except KeyError:
         raise KeyError, "Cannot find variable for binary operator " + \
