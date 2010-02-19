@@ -8,6 +8,10 @@ import pyon.types.classes as classes
 import pyon.types.schemes as schemes
 import pyon.types.gluon_types as gluon_types
 
+def _unifiableTypeVariables(t):
+    """Get all unifiable type variables in the first-order-type 't'"""
+    return list(v for v in t.freeVariables() if isinstance(v, hmtype.TyVar))
+
 # This module needs to be separate to avoid module import cycles
 
 class TypeAssignment(object):
@@ -48,7 +52,8 @@ class TypeAssignment(object):
     def instantiate(self):
         """
         a.instantiate()
-          -> ((constraints, placeholders), (sf.Exp, FirstOrderType))
+          -> ((constraints, unbound-variables, placeholders),
+              (sf.Exp, FirstOrderType))
 
         Create a System F use of this variable.
         """
@@ -63,6 +68,7 @@ class FirstOrderAssignment(TypeAssignment):
     def __init__(self, type, value):
         assert isinstance(type, hmtype.FirstOrderType)
         self._type = type
+        self._type_variables = _unifiableTypeVariables(type)
         self._value = value
 
     def getFreeTypeVariables(self, s):
@@ -72,7 +78,7 @@ class FirstOrderAssignment(TypeAssignment):
         return schemes.TyScheme([], [], [], self._type)
 
     def instantiate(self):
-        return (([], []), (self._value, self._type))
+        return (([], self._type_variables, []), (self._value, self._type))
 
 class PolymorphicAssignment(TypeAssignment):
     """
@@ -98,7 +104,9 @@ class PolymorphicAssignment(TypeAssignment):
             gluon_types.makeInstanceExpression(tyvars, constraints,
                                                self._value)
 
-        return ((constraints, placeholders), (expr, first_order_type))
+        all_tyvars = _unifiableTypeVariables(first_order_type)
+        return ((constraints, all_tyvars, placeholders),
+                (expr, first_order_type))
 
 class RecursiveAssignment(TypeAssignment):
     """
@@ -109,6 +117,7 @@ class RecursiveAssignment(TypeAssignment):
     """
     def __init__(self, variable, type):
         self._placeholder = RecVarPlaceholder(variable, type)
+        self._typeVariables = _unifiableTypeVariables(type)
 
     def getFreeTypeVariables(self, s):
         self._placeholder.getFirstOrderType().addFreeTypeSymbols(s)
@@ -119,7 +128,8 @@ class RecursiveAssignment(TypeAssignment):
 
     def instantiate(self):
         ph = self._placeholder
-        return (([], [ph]), (ph.getExpression(), ph.getFirstOrderType()))
+        return (([], self._typeVariables, [ph]),
+                (ph.getExpression(), ph.getFirstOrderType()))
 
 class MethodAssignment(TypeAssignment):
     """
@@ -167,5 +177,6 @@ class MethodAssignment(TypeAssignment):
                                                other_constraints,
                                                selector_expr)
 
-        return ((constraints, placeholders + [dict_placeholder]),
+        all_ty_vars = _unifiableTypeVariables(fotype)
+        return ((constraints, all_ty_vars, placeholders + [dict_placeholder]),
                 (expr, fotype))

@@ -3,7 +3,8 @@ module Pyon.SystemF.Builtins
        (EqDictMembers(..), OrdDictMembers(..), TraversableDictMembers(..),
         loadPyonBuiltins, pyonBuiltin, isPyonBuiltin,
         the_Action, the_Stream, the_bool, the_list,
-        the_NoneType, the_EqDict, the_OrdDict, the_TraversableDict,
+        the_NoneType, the_Any, 
+        the_EqDict, the_OrdDict, the_TraversableDict,
         the_EqDict_Int, the_OrdDict_Int,
         the_EqDict_Float, the_OrdDict_Float,
         the_EqDict_Tuple2, the_OrdDict_Tuple2,
@@ -75,6 +76,7 @@ data PyonBuiltins =
   , the_bool   :: Con
   , the_list   :: Con
   , the_NoneType :: Con
+  , the_Any :: Con
   , the_EqDict :: Con
   , the_OrdDict :: Con
   , the_TraversableDict :: Con
@@ -120,6 +122,7 @@ assign_Stream x b = b {the_Stream = x}
 assign_bool x b = b {the_bool = x}
 assign_list x b = b {the_list = x}
 assign_NoneType x b = b {the_NoneType = x}
+assign_Any x b = b {the_Any = x}
 assign_EqDict x b = b {the_EqDict = x}
 assign_OrdDict x b = b {the_OrdDict = x}
 assign_TraversableDict x b = b {the_TraversableDict = x}
@@ -225,6 +228,7 @@ initializePyonBuiltins mod =
                            , the_bool = uninitialized
                            , the_list = uninitialized
                            , the_NoneType = uninitialized
+                           , the_Any = uninitialized
                            , the_EqDict = uninitialized
                            , the_OrdDict = uninitialized
                            , the_TraversableDict = uninitialized
@@ -265,6 +269,7 @@ initializePyonBuiltins mod =
                          , ("bool", assign_bool)
                          , ("list", assign_list)
                          , ("NoneType", assign_NoneType)
+                         , ("Any", assign_Any)
                          , ("EqDict", assign_EqDict)
                          , ("OrdDict", assign_OrdDict)
                          , ("TraversableDict", assign_TraversableDict)

@@ -52,6 +52,7 @@ asGlobalObject = rethrowExceptionsInPython . newHsObject
 foreign export ccall pyon_con_Action :: IO PyPtr
 foreign export ccall pyon_con_Stream :: IO PyPtr
 foreign export ccall pyon_con_NoneType :: IO PyPtr
+foreign export ccall pyon_con_Any :: IO PyPtr
 foreign export ccall pyon_con_bool :: IO PyPtr
 foreign export ccall pyon_con_list :: IO PyPtr
 foreign export ccall pyon_con_EqDict :: IO PyPtr
@@ -102,6 +103,7 @@ foreign export ccall pyon_con_fun_undefined :: IO PyPtr
 pyon_con_Action = asGlobalObject $ pyonBuiltin the_Action
 pyon_con_Stream = asGlobalObject $ pyonBuiltin the_Stream
 pyon_con_NoneType = asGlobalObject $ pyonBuiltin the_NoneType
+pyon_con_Any = asGlobalObject $ pyonBuiltin the_Any
 pyon_con_bool = asGlobalObject $ pyonBuiltin the_bool
 pyon_con_list = asGlobalObject $ pyonBuiltin the_list
 pyon_con_EqDict = asGlobalObject $ pyonBuiltin the_EqDict

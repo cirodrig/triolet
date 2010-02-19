@@ -151,9 +151,11 @@ def generalize(gamma, constraints, ty):
                                                    ftv_gamma,
                                                    qvars)
 
-    return (deferred, hmtype.TyScheme(list(qvars.iterStreamTags()),
-                                      list(qvars.iterTyVars()),
-                                      retained, ty))
+    return (deferred,
+            list(qvars.iterTyVars()),
+            hmtype.TyScheme(list(qvars.iterStreamTags()),
+                            list(qvars.iterTyVars()),
+                            retained, ty))
 
 def generalizeGroup(gamma, constraints, explicit_qvars, ty_list):
     # Determine which type variables to generalize over
@@ -197,12 +199,12 @@ def generalizeGroup(gamma, constraints, explicit_qvars, ty_list):
         sch = hmtype.TyScheme([], list(qvars_set.iterTyVars()), retained, ty)
         schemes.append(sch)
 
-    return (deferred, retained, schemes)
+    return (deferred, retained, list(local_vars.iterTyVars()), schemes)
 
 def assignGeneralizedType(gamma, v, ty, constraints):
     """
     assignGeneralizedType(Environment, TyVar, FirstOrderType, constraints)
-        -> constraints
+        -> (constraints, bound-variables)
 
     Generalize the type and constraints to a type scheme.
     Assign the type @ty to @v.  The assignment is recorded globally.
@@ -213,14 +215,18 @@ def assignGeneralizedType(gamma, v, ty, constraints):
     for c in constraints: assert isinstance(c, hmtype.ClassPredicate)
     assert v not in gamma
 
-    deferred, scm = generalize(gamma, constraints, ty)
-    gamma[v] = PolymorphicAssignment(scm, sf.mkVarE(v.getSystemFVariable()))
-    return deferred
+    deferred, bound_vars, scm = generalize(gamma, constraints, ty)
+    assumeType(gamma, v,
+               PolymorphicAssignment(scm, sf.mkVarE(v.getSystemFVariable())))
+    return (deferred, bound_vars)
 
 def assignGeneralizedTypes(gamma, assignments, constraints):
     """
-    assignGeneralizedTypes(Environment, sequence((TyVar, [RigidTyVar] or None, FirstOrderType)), constraints)
-        -> (deferred constraints, retained constraints)
+    assignGeneralizedTypes(Environment,
+                           sequence((TyVar, [RigidTyVar] or None,
+                           FirstOrderType)),
+                           constraints)
+        -> (deferred constraints, retained constraints, bound-variables)
 
     Generalize a list of types in a common context.  All types in the list will
     have the same quantified variables and constraints.
@@ -228,16 +234,34 @@ def assignGeneralizedTypes(gamma, assignments, constraints):
     vars, explicit_qvars, types = unzip3(assignments)
 
     # Generalize with a common context
-    (deferred, retained, schemes) = generalizeGroup(gamma, constraints,
-                                                    explicit_qvars, types)
+    deferred, retained, bound_vars, schemes = \
+        generalizeGroup(gamma, constraints, explicit_qvars, types)
 
     # Assign each type
     for v, scm in itertools.izip(vars, schemes):
-        gamma[v] = PolymorphicAssignment(scm, sf.mkVarE(v.getSystemFVariable()))
-    return (deferred, retained)
+        assumeType(gamma, v, PolymorphicAssignment(scm, sf.mkVarE(v.getSystemFVariable())))
+    return (deferred, retained, bound_vars)
 
 ###############################################################################
 # Helper functions for collecting results
+
+def discardUnboundVars(unbound_vars):
+    """
+    discardUnboundVars(unbound-variables) -> unbound-variables
+
+    Discard from the list duplicate elements and type variables that have
+    been unified with something.  Element order is not preserved.
+    """
+    return list(v for v in set(unbound_vars) if v is v.canonicalize())
+
+def filterUnboundVars(unbound_vars, bound_vars):
+    """
+    filterUnboundVars(unbound-variables, bound-variables) -> unbound-variables
+
+    Create a list of only the elements of unbound-variables that are not in
+    bound-variables.
+    """
+    return [v for v in unbound_vars if v not in bound_vars]
 
 def unzip(xs):
     """
@@ -265,25 +289,31 @@ def unzip3(xs):
 
 # Many functions return lists of constraints and placeholders.
 # These lists form a monoid under concatenation.
-unitCPh = ([], [])
+unitCPh = ([], [], [])
 
 def catCPh(*args):
     if len(args) == 1:
         constraints = []
+        variables = []
         placeholders = []
-        for c, p in args[0]:
+        for c, v, p in args[0]:
             constraints.extend(c)
+            variables.extend(v)
             placeholders.extend(p)
-        return (constraints, placeholders)
+        return (constraints, variables, placeholders)
     elif len(args) == 2:
-        (c1, p1), (c2, p2) = args
-        return (c1 + c2, p1 + p2)
+        (c1, v1, p1), (c2, v2, p2) = args
+        return (c1 + c2, v1 + v2, p1 + p2)
     else:
         raise TypeError, "Expecting one or two arguments"
 
-def isValidCPh((constraints, placeholders)):
+def isValidCPh((constraints, variables, placeholders)):
     for c in constraints:
         if not isinstance(c, hmtype.ClassPredicate):
+            return False
+
+    for v in variables:
+        if not isinstance(v, hmtype.TyVar):
             return False
 
     for ph in placeholders:
@@ -308,19 +338,23 @@ def combine(combiner, accumulator, sq):
 
 def collectConstraints(sq):
     constraints = []
-    def combiner(csts):
+    bound_vars = []
+    def combiner((csts, bvs)):
         constraints.extend(csts)
+        bound_vars.extend(bvs)
 
-    return combine(combiner, constraints, sq)
+    return combine(combiner, (constraints, bound_vars), sq)
 
 def collectCPh(sq):
     constraints = []
+    unbound_vars = []
     placeholders = []
-    def combiner((csts, phs)):
+    def combiner((csts, vars, phs)):
         constraints.extend(csts)
+        unbound_vars.extend(vars)
         placeholders.extend(phs)
 
-    return combine(combiner, (constraints, placeholders), sq)
+    return combine(combiner, (constraints, unbound_vars, placeholders), sq)
 
 ###############################################################################
 # Dictionary-passing translation
@@ -497,7 +531,7 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
     """
     inferLetBindingType(Environment, ast.Parameter, constraints,
                         FirstOrderType, ast.Expression)
-        -> (constraints, sf.Pat)
+        -> ((constraints, bound-vars), sf.Pat)
 
     Infer types in a let-binding.  Bound variables are assigned a
     first-order type.
@@ -509,7 +543,7 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
 
     if param is None:
         # Use a wildcard parameter.
-        return (bound_constraints,
+        return ((bound_constraints, []),
                 sf.mkWildP(gluon_types.convertType(bound_type)))
 
     elif isinstance(param, ast.TupleParam):
@@ -525,7 +559,7 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
             raise TypeCheckError, "Type mismatch in parameter binding"
 
         # Bind each tuple field to a variable; return the results
-        csts, new_params = \
+        csts_and_bound_vars, new_params = \
             collectConstraints(inferLetBindingType(gamma,
                                                    p,
                                                    bound_constraints,
@@ -533,22 +567,25 @@ def inferLetBindingType(gamma, param, bound_constraints, bound_type, expr):
                                                    expr)
                                for p,t in zip(param.fields, field_types))
 
-        return (csts, sf.mkTupleP(new_params))
+        return (csts_and_bound_vars, sf.mkTupleP(new_params))
 
     elif isinstance(param, ast.VariableParam):
         if False:
             # Generalize this type
-            csts = assignGeneralizedType(gamma, param.name, bound_type,
-                                         bound_constraints)
+            csts, bound_vars = \
+                assignGeneralizedType(gamma, param.name, bound_type,
+                                      bound_constraints)
         else:
             # Assign a monomorphic type
             v = sf.mkVarE(param.name.getSystemFVariable())
             assumeType(gamma, param.name, FirstOrderAssignment(bound_type, v))
             csts = bound_constraints
+            bound_vars = []
 
         scm = gamma[param.name].getTypeScheme()
-        return (csts, sf.mkVarP(param.name.getSystemFVariable(),
-                                gluon_types.convertType(scm)))
+        return ((csts, bound_vars),
+                sf.mkVarP(param.name.getSystemFVariable(),
+                          gluon_types.convertType(scm)))
 
     else:
         raise TypeError, type(param)
@@ -569,8 +606,8 @@ def exposeParameterBinding(gamma, param):
     elif isinstance(param, ast.VariableParam):
         # If this parameter's type has been declared, use that type;
         # otherwise, create a new type variable
-        t = param.annotation or hmtype.TyVar(kind.Star())
         v = param.name
+        t = param.annotation or hmtype.TyVar(kind.Star())
 
         sf_expr = sf.mkVarE(v.getSystemFVariable())
         assumeType(gamma, v, FirstOrderAssignment(t, sf_expr))
@@ -609,7 +646,7 @@ def exposeRecursiveVariables(gamma, vars):
 def inferFunctionTypeAndReturnParts(gamma, func):
     """
     inferFunctionType(Environment, ast.Function)
-        -> ((constraints, placeholders),
+        -> ((constraints, unbound_vars, placeholders),
             ([sf.Pat], sf.Exp, FirstOrderType, FirstOrderType))
 
     Infer the type of a function.  Return the function's parameters and body.
@@ -620,8 +657,7 @@ def inferFunctionTypeAndReturnParts(gamma, func):
         exposeParameterBindings(local_env, func.parameters)
 
     # Process body
-    (csts, placeholders), (body, body_type) = \
-        inferExpressionType(local_env, func.body)
+    cph, (body, body_type) = inferExpressionType(local_env, func.body)
 
     # Check return type against the annotated type, if there is any
     if func.annotation:
@@ -631,12 +667,12 @@ def inferFunctionTypeAndReturnParts(gamma, func):
 
     fn_type = hmtype.functionType(param_types, body_type)
 
-    return ((csts, placeholders), (parameters, body, body_type, fn_type))
+    return (cph, (parameters, body, body_type, fn_type))
 
 def inferFunctionType(gamma, func):
     """
     inferFunctionType(Environment, ast.Function)
-        -> ((constraints, placeholders), (sf.Fun, FirstOrderType))
+        -> ((constraints, unbound_vars, placeholders), (sf.Fun, FirstOrderType))
 
     Infer the type of a function.  Return a system-F function.
     """
@@ -653,11 +689,12 @@ def inferFunctionType(gamma, func):
 def inferDefGroup(gamma, group):
     """
     inferDefGroup(gamma, [ast.FunctionDef])
-        -> ((constraints, placeholders), [sf.FunctionDef])
+        -> ((constraints, unbound_vars, placeholders),
+            bound_vars, [sf.FunctionDef])
 
     Infer types in a definition group.  Each function in the group is assigned
-    a type scheme.  The definition group's type assignments are returned as a
-    new environment.
+    a type scheme.  The definition group's type assignments are added to the
+    environment.
     """
 
     # Describe the variables bound by the definition group
@@ -677,7 +714,7 @@ def inferDefGroup(gamma, group):
     # Infer all function types in the definition group.
     # Return the rewritten functions.
     def inferFun(d, d_type):
-        (fn_csts, fn_ph), (fn_params, fn_body, fn_body_type, fn_type) = \
+        fn_cph, (fn_params, fn_body, fn_body_type, fn_type) = \
             inferFunctionTypeAndReturnParts(rec_gamma, d.function)
 
         # Unify the function's assumed type with the inferred type
@@ -685,23 +722,25 @@ def inferDefGroup(gamma, group):
         except unification.UnificationError, e:
             raise TypeCheckError, "Type error in recursive definition group"
 
-        return ((fn_csts, fn_ph),
-                (d.name, fn_type, fn_params, fn_body, fn_body_type))
+        return (fn_cph, (d.name, fn_type, fn_params, fn_body, fn_body_type))
 
     # The functions in the definition group will have the same
     # class constraint context.
     # This performs unification, setting binding_types to the correct
     # first-order types for this definition group.
-    (group_csts, group_phs), new_group_functions = \
+    (group_csts, group_unbound_vars, group_phs), new_group_functions = \
         collectCPh(inferFun(*x) for x in zip(group, binding_types))
 
     # Generalize the function types
     # Note that we generalize with the environment that will be seen in
     # subsequent code (gamma), not the local environment
-    deferred_csts, retained_csts = \
+    deferred_csts, retained_csts, locally_bound_vars = \
         assignGeneralizedTypes(gamma,
                                zip(bound_vars, explicit_qvars, binding_types),
                                group_csts)
+
+    group_unbound_vars = \
+        filterUnboundVars(group_unbound_vars, locally_bound_vars)
 
     # Build function definitions; add System F parameters
     dict_env = makeDictionaryEnvironment(retained_csts)
@@ -714,12 +753,14 @@ def inferDefGroup(gamma, group):
     # Update recursive variable placeholders
     deferred_phs = updateRecVarPlaceholders(gamma, dict_env, group_phs)
 
-    return ((deferred_csts, deferred_phs), new_group)
+    return ((deferred_csts, group_unbound_vars, deferred_phs),
+            locally_bound_vars, new_group)
 
 def inferExpressionType(gamma, expr):
     """
     inferExpressionType(Environment, ast.Expression)
-        -> ((constraints, placeholders), (sf.Expression, FirstOrderType))
+        -> ((constraints, unbound_vars, placeholders),
+            (sf.Expression, FirstOrderType))
 
     Infer the type of an expression in environment @env.
     Return a new copy of the expression; the returned expression's type is
@@ -811,39 +852,48 @@ def inferExpressionType(gamma, expr):
 
     elif isinstance(expr, ast.LetExpr):
         # Process the RHS
-        (csts_rhs, ph_rhs), (rhs, rhs_type) = \
+        (csts_rhs, unbound_vars_rhs, ph_rhs), (rhs, rhs_type) = \
             inferExpressionType(gamma, expr.rhs)
 
         # Bind the LHS
         # The deferred constraints and local environment will be used while
         # processing the body
         local_gamma = Environment(gamma)
-        csts_rhs_deferred, lhs = \
+        (csts_rhs_deferred, bound_vars_rhs), lhs = \
             inferLetBindingType(local_gamma, expr.parameter, csts_rhs,
                                 rhs_type, expr)
 
         # Process the body
-        cph_body, (body, new_expr_type) = \
+        (csts_body, unbound_vars_body, ph_body), (body, new_expr_type) = \
             inferExpressionType(local_gamma, expr.body)
 
+        unbound_vars_body = filterUnboundVars(unbound_vars_body,
+                                              bound_vars_rhs)
+
         new_expr = sf.mkLetE(lhs, rhs, body)
-        cph = catCPh((csts_rhs_deferred, ph_rhs), cph_body)
+        cph = catCPh((csts_rhs_deferred, unbound_vars_rhs, ph_rhs),
+                     (csts_body, unbound_vars_body, ph_body))
 
     elif isinstance(expr, ast.LetrecExpr):
         # Process the local functions and assign type schemes
         local_gamma = Environment(gamma)
-        cph_group, def_group = inferDefGroup(local_gamma, expr.definitions)
+        cph_group, bound_vars_group, def_group = \
+            inferDefGroup(local_gamma, expr.definitions)
 
         # Infer body of letrec
-        cph_body, (body, new_expr_type) = inferExpressionType(local_gamma, expr.body)
+        (csts_body, unbound_vars_body, ph_body), (body, new_expr_type) = \
+            inferExpressionType(local_gamma, expr.body)
+
+        unbound_vars_body = filterUnboundVars(unbound_vars_body,
+                                              bound_vars_group)
 
         new_expr = sf.mkLetrecE(def_group, body)
-        cph = catCPh(cph_group, cph_body)
+        cph = catCPh(cph_group, (csts_body, unbound_vars_body, ph_body))
 
     elif isinstance(expr, ast.UndefinedExpr):
         new_expr_type = hmtype.TyVar(kind.Star())
         new_expr = sf.mkUndefinedE(gluon_types.convertType(new_expr_type))
-        cph = unitCPh
+        cph = ([], [new_expr_type], [])
 
     elif isinstance(expr, ast.FunExpr):
         cph, (fun, new_expr_type) = inferFunctionType(gamma, expr.function)
@@ -863,13 +913,23 @@ def doTypeInference(anf_form):
     assert isinstance(anf_form, ast.Module)
 
     global_gamma = Environment()
+    global_unbound_vars = []
     new_groups = []
     for defgroup in anf_form.iterDefinitionGroups():
-        (csts, placeholders), new_group = \
+        (csts, unbound_vars, placeholders), bound_vars, new_group = \
             inferDefGroup(global_gamma, defgroup)
+        unbound_vars = filterUnboundVars(unbound_vars, bound_vars)
+
         assert not csts     # There should be no deferred constraints here
         assert not placeholders # All placeholders should have been resolved
         new_groups.append(new_group)
+        global_unbound_vars.extend(discardUnboundVars(unbound_vars))
+
+    # Any unbound variables that haven't been unified shall now be converted
+    # to the special type 'Any'
+    global_unbound_vars = discardUnboundVars(global_unbound_vars)
+    for v in global_unbound_vars:
+        unification.unify(v, builtin_data.type_Any)
 
     return sf.makeAndEvaluateModule(sum(new_groups, []))
 

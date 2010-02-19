@@ -170,6 +170,8 @@ tycon_iter = hm.TyCon("iter", kind.Arrow(_star, _star),
 tycon_list = hm.TyCon("list", kind.Arrow(_star, _star),
                       stream_tag.IsAction(),
                       gluon_constructor = sf.con_list)
+tycon_Any = hm.TyCon("Any", _star, stream_tag.IsAction(),
+                     gluon_constructor = sf.con_Any)
 
 # Builtin types
 type_int = hm.EntTy(tycon_int)
@@ -178,6 +180,7 @@ type_float = hm.EntTy(tycon_float)
 type_None = hm.EntTy(tycon_None)
 type_iter = hm.EntTy(tycon_iter)
 type_list = hm.EntTy(tycon_list)
+type_Any = hm.EntTy(tycon_Any)
 
 create_type_schemes()
 

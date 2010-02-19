@@ -453,6 +453,7 @@ createSystemFModule(void)
   ADD_OBJECT("con_Action", pyon_con_Action);
   ADD_OBJECT("con_Stream", pyon_con_Stream);
   ADD_OBJECT("con_NoneType", pyon_con_NoneType);
+  ADD_OBJECT("con_Any", pyon_con_Any);
   ADD_OBJECT("con_bool", pyon_con_bool);
   ADD_OBJECT("con_list", pyon_con_list);
   ADD_OBJECT("con_EqDict", pyon_con_EqDict);

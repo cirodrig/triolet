@@ -4,6 +4,7 @@ constant Stream : Pure -> Pure;
 
 -- Pyon types.  We don't care about values for now.
 constant NoneType : Pure;
+constant Any : Pure;
 constant bool : Pure;
 constant list : Pure -> Pure;
 
