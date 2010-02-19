@@ -336,7 +336,9 @@ class TyVar(FirstOrderType, unification.Variable):
         if self.getKind() != other.getKind():
             raise unification.UnificationError, "Kind mismatch"
 
-        unification.unify(self.getStreamTag(), other.getStreamTag())
+        try: unification.unify(self.getStreamTag(), other.getStreamTag())
+        except unification.UnificationError:
+            raise unification.UnificationError, "Stream tag mismatch"
 
         # Then unify this variable with the other object
         return unification.Variable.unifyWith(self, other)
