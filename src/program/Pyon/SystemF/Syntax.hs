@@ -11,7 +11,8 @@ module Pyon.SystemF.Syntax
      Exp(..),
      Fun(..),
      Def(..),
-     Module(..)
+     Module(..),
+     isValueExp
     )
 where
 
@@ -158,3 +159,30 @@ data Def = Def Var Fun
 
 data Module = Module [Def]
             deriving(Typeable)
+
+-- | Return True only if the given expression has no side effects.
+-- This function examines only expression constructors, and avoids inspecting
+-- let or letrec expressions.
+--
+-- Constructors 'CallE', 'LetE', and 'LetrecE' are assumed to have side
+-- effects.  Lambda expressions have no side effects, since they return but
+-- do not execute their function.
+
+isValueExp :: Exp -> Bool
+isValueExp expression =
+  case expression
+  of VarE {} -> True
+     ConE {} -> True
+     LitE {} -> True
+     UndefinedE {} -> True
+     TupleE {expFields = fs} -> all isValueExp fs
+     TyAppE {expOper = e} -> isValueExp e
+     CallE {} -> False
+     IfE {expCond = c, expTrueCase = t, expFalseCase = f} ->
+       isValueExp c && isValueExp t && isValueExp f
+     FunE {} -> True
+     LetE {} -> False
+     LetrecE {} -> False
+     DictE {expSuperclasses = scs, expMethods = ms} ->
+       all isValueExp scs && all isValueExp ms
+     MethodSelectE {expArg = a} -> isValueExp a

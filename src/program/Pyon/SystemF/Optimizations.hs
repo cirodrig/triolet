@@ -4,14 +4,18 @@ module Pyon.SystemF.Optimizations
 where
 
 import Control.Monad
+import Control.Monad.Reader
 import Control.Monad.Writer
 
+import Data.Map(Map)
+import qualified Data.Map as Map
 import Data.Set(Set)
 import qualified Data.Set as Set
 
 import qualified Gluon.Core as Gluon
 import qualified Gluon.Eval.Typecheck as Gluon
 import Pyon.SystemF.Syntax
+import Pyon.SystemF.Builtins
 
 catEndo :: [a -> a] -> a -> a
 catEndo fs x = foldr ($) x fs
@@ -19,10 +23,128 @@ catEndo fs x = foldr ($) x fs
 -- | Apply optimizations to a module.
 optimizeModule :: Module -> Module
 optimizeModule mod =
-  mapModule elimDeadCode mod
+  mapModule elimDeadCode $
+  mapModule doPartialEvaluation $
+  mod
 
 mapModule :: (Def -> Def) -> Module -> Module
 mapModule f (Module ds) = Module (map f ds)
+
+-------------------------------------------------------------------------------
+-- Partial evaluation
+
+doPartialEvaluation :: Def -> Def
+doPartialEvaluation def = runPEval $ pevalDef def
+
+-- | The 'PEval' monad holds a variable-to-value mapping for constant
+-- propagation, copy propagation, and inlining.  Expressions in the map have
+-- no side effects, and therefore are safe to inline.
+type PEval a = Reader (Map Var Exp) a
+
+-- | Perform partial evaluation in an empty environment.
+runPEval :: PEval a -> a
+runPEval m = runReader m Map.empty
+
+lookupVar :: Var -> PEval (Maybe Exp)
+lookupVar v = asks (Map.lookup v)
+
+lookupVarDefault :: Exp -> Var -> PEval Exp
+lookupVarDefault defl v = asks (Map.findWithDefault defl v)
+
+-- | Given a value and the pattern it is bound to, add the bound value(s)
+-- to the environment.  The caller should verify that the value has no
+-- side effects.  Any values that cannot be added to the environment will be
+-- ignored.
+bindValue :: Pat -> Exp -> PEval a -> PEval a
+bindValue (WildP _)   _ m = m
+bindValue (VarP v t)  e m = local (Map.insert v e) m
+bindValue (TupleP ps) e m =
+  case e
+  of TupleE {expFields = es}
+       | length ps == length es ->
+           catEndo (zipWith bindValue ps es) m
+       | otherwise -> error "Tuple pattern mismatch"
+     _ ->
+       -- Cannot bind, because we cannot statically deconstruct this tuple
+       m
+
+-- | Partial evaluation of an expression.  First, evaluate subexpressions;
+-- then, try to statically evaluate.
+pevalExp :: Exp -> PEval Exp
+pevalExp expression =
+  return . partialEvaluate =<< pevalExpRecursive expression
+
+partialEvaluate :: Exp -> Exp
+partialEvaluate expression =
+  case expression
+  of MethodSelectE {expArg = argument} ->
+       case argument
+       of DictE {} ->
+            -- Select a method from the dictionary
+            expMethods argument !! expMethodIndex expression
+
+          _ -> expression
+
+     -- Default: return the expression unchanged
+     _ -> expression
+
+pevalExpRecursive :: Exp -> PEval Exp
+pevalExpRecursive expression =
+  case expression
+  of VarE {expVar = v} -> lookupVarDefault expression v
+     ConE {} -> return expression
+     LitE {} -> return expression
+     UndefinedE {} -> return expression
+     TupleE {expFields = fs} -> do
+       fs' <- mapM pevalExp fs
+       return $ expression {expFields = fs'}
+     TyAppE {expOper = op} -> do
+       op' <- pevalExp op
+       return $ expression {expOper = op'}
+     CallE {expOper = op, expArgs = args} -> do
+       op' <- pevalExp op
+       args' <- mapM pevalExp args
+       return $ expression {expOper = op', expArgs = args'}
+     IfE {expCond = c, expTrueCase = tr, expFalseCase = fa} -> do
+       c' <- pevalExp c
+       tr' <- pevalExp tr
+       fa' <- pevalExp fa
+       return $ expression { expCond = c'
+                           , expTrueCase = tr'
+                           , expFalseCase = fa'}
+     FunE {expFun = f} -> do
+       f' <- pevalFun f
+       return $ expression {expFun = f'}
+     LetE {expBinder = p, expValue = e1, expBody = e2} -> do
+       e1' <- pevalExp e1
+
+       -- If the let-bound value has no side effects, it is a candidate for
+       -- inlining
+       e2' <- if isValueExp e1'
+              then bindValue p e1' $ pevalExp e2
+              else pevalExp e2
+       return $ expression {expValue = e1', expBody = e2'}
+     LetrecE {expDefs = ds, expBody = b} -> do
+       ds' <- mapM pevalDef ds
+       b' <- pevalExp b
+       return $ expression {expDefs = ds', expBody = b'}
+     DictE {expSuperclasses = scs, expMethods = ms} -> do
+       scs' <- mapM pevalExp scs
+       ms' <- mapM pevalExp ms
+       return $ expression {expSuperclasses = scs', expMethods = ms'}
+     MethodSelectE {expArg = e} -> do
+       e' <- pevalExp e
+       return $ expression {expArg = e'}
+
+pevalFun :: Fun -> PEval Fun
+pevalFun f = do
+  body <- pevalExp $ funBody f
+  return $ f {funBody = body}
+
+pevalDef :: Def -> PEval Def
+pevalDef (Def v f) = do
+  f' <- pevalFun f
+  return $ Def v f'
 
 -------------------------------------------------------------------------------
 -- Dead code elimination
@@ -60,6 +182,14 @@ mention v = tell (SetUnion $ Set.singleton v)
 mask :: Var -> GetMentionsSet a -> GetMentionsSet a
 mask v m = pass $ do x <- m
                      return (x, onSetUnion $ Set.delete v)
+
+-- | Filter out a mention of a variable, and also check whether the variable
+-- is mentioned.  Return True if the variable is mentioned.
+maskAndCheck :: Var -> GetMentionsSet a -> GetMentionsSet (Bool, a)
+maskAndCheck v m = pass $ do
+  (x, mentions_set) <- listen m
+  return ( (v `Set.member` setUnion mentions_set, x)
+         , onSetUnion $ Set.delete v)
 
 maskSet :: Set Var -> GetMentionsSet a -> GetMentionsSet a
 maskSet vs m = pass $ do x <- m
@@ -121,11 +251,28 @@ edcMaskPat pat m =
        return (pat, x)
      VarP v t -> do
        edcScanType t
-       x <- mask v m
-       return (pat, x)
+       (mentioned, x) <- maskAndCheck v m
+
+       -- If not mentioned, replace this pattern with a wildcard
+       let new_pat = if mentioned then pat else WildP t
+       return (new_pat, x)
      TupleP ps -> do
        (pats', x) <- edcMaskPats ps m
-       return (TupleP pats', x)
+
+       -- If all patterns are wildcards, then use a single wildcard pattern
+       let new_pat = if all isWildcard pats'
+                     then let con = getPyonTupleType' (length pats')
+                              ty = Gluon.mkInternalConAppE con $
+                                   map wildcardType pats'
+                          in WildP ty
+                     else TupleP pats'
+       return (new_pat, x)
+  where
+    isWildcard (WildP _) = True
+    isWildcard _ = False
+
+    wildcardType (WildP t) = t
+    wildcardType _ = error "Not a wildcard pattern"
 
 edcMaskPats :: [Pat] -> GetMentionsSet a -> GetMentionsSet ([Pat], a)
 edcMaskPats (pat:pats) m = do
@@ -201,10 +348,8 @@ edcExp expression =
      FunE {expFun = f} -> do
        f' <- edcFun f
        return $ expression {expFun = f'}
-     LetE {expBinder = p, expValue = e1, expBody = e2} -> do
-       (p', e1') <- edcMaskPat p $ edcExp e1
-       e2' <- edcExp e2
-       return $ expression {expBinder = p', expValue = e1', expBody = e2'}
+     LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->
+       edcLetE info p e1 e2
      LetrecE {expDefs = ds, expBody = e} ->
        maskSet (Set.fromList [v | Def v _ <- ds]) $ do
          ds' <- mapM edcDef ds
@@ -219,3 +364,58 @@ edcExp expression =
        edcScanType t
        e' <- edcExp e
        return $ expression {expArg = e'}
+
+-- | Dead code elimination for a \"let\" expression
+edcLetE :: ExpInfo -> Pat -> Exp -> Exp -> GetMentionsSet Exp
+edcLetE info lhs rhs body =
+  -- Replace the pattern "let x = foobar in x" with "foobar"
+  case body
+  of VarE {expVar = v} ->
+       case lhs
+       of VarP v2 _ | v == v2 -> edcExp rhs
+          _ -> dce_let
+     _ -> dce_let
+  where
+    dce_let = do
+      -- Structural recursion.  Try to eliminate some or all of the
+      -- pattern-bound variables using knowledge of what variables are
+      -- referenced in the expression body.
+      (lhs', body') <- edcMaskPat lhs $ edcExp body
+      rhs' <- edcExp rhs
+
+      -- Decompose/eliminate bindings.
+      return $ reconstruct_let body' $ eliminate_bindings lhs' rhs'
+
+    -- Given a list of bindings, create some let expressions
+    reconstruct_let body bindings = foldr make_let body bindings
+      where
+        make_let (lhs, rhs) body =
+          LetE { expInfo = info
+               , expBinder = lhs
+               , expValue = rhs
+               , expBody = body}
+
+    -- Given the pattern and expression from a let-binding, decompose it into
+    -- simpler let-bindings.  Discard unused bindings.
+    --
+    -- For example,
+    --
+    -- > let (_, a, (_, b)) = (1, foo(), (3, 4)) in ...
+    --
+    -- becomes
+    --
+    -- > let a = foo() in let b = 4 in ...
+    eliminate_bindings lhs body =
+      case lhs
+      of -- If a side-effect-free value is not bound to anything,
+         -- then this code can be eliminated.
+         WildP _ | isValueExp body -> []
+         TupleP ps ->
+           -- If the body is a tuple expression, then decompose this into
+           -- a sequence of let-bindings.
+           case body
+           of TupleE {expFields = es} ->
+                concat $ zipWith eliminate_bindings ps es
+              _ -> [(lhs, body)] 
+         -- Otherwise, no change
+         _ -> [(lhs, body)]

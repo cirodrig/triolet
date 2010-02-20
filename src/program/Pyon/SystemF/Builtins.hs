@@ -30,7 +30,7 @@ module Pyon.SystemF.Builtins
         the_fun_zip,
         the_fun_iota,
         the_fun_undefined,
-        getPyonTupleType
+        getPyonTupleType, getPyonTupleType'
        )
 where
 
@@ -184,6 +184,11 @@ getPyonTupleType size = unsafePerformIO $ do
   return $! if size >= 0 && size < length ts
             then Just (ts !! size)
             else Nothing
+
+getPyonTupleType' :: Int -> Con
+getPyonTupleType' n = case getPyonTupleType n
+                      of Just t -> t
+                         Nothing -> internalError "Unsupported tuple size"
 
 findConByName mod name =
   let label = pgmLabel (moduleName "PyonBuiltin") name

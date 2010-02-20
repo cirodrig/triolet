@@ -28,10 +28,12 @@ def tryCompile(fname, show_traceback = False):
         test_sf = type_inference.inferTypes(test_anf)
 	del test_anf
 
-        # (DEBUG) print the output
-	system_f.printModule(test_sf)
         system_f.typeCheckModule(test_sf)
 	test_sf = system_f.optimizeModule(test_sf)
+        system_f.typeCheckModule(test_sf)
+
+        # (DEBUG) print the output
+	system_f.printModule(test_sf)
 
         # Partial evaluation
         #test_anf = partial_eval.partialEval(test_anf)
