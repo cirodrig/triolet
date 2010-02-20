@@ -35,12 +35,6 @@ def tryCompile(fname, show_traceback = False):
         # (DEBUG) print the output
 	system_f.printModule(test_sf)
 
-        # Partial evaluation
-        #test_anf = partial_eval.partialEval(test_anf)
-        #test_anf = partial_eval.eliminateDeadCode(test_anf)
-        
-        # print_system_f.renderAst(test_anf)
-
     except Exception, e:
         print e
         if show_traceback:
