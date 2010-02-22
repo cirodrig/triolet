@@ -100,7 +100,7 @@ $(foreach csrc, $(PYON_C_SRCS),$(eval $(call COMPILE_C_SOURCE,$(csrc))))
 $(foreach csrc, $(PYON_C_GENERATED_SRCS),$(eval $(call COMPILE_C_STUB,$(csrc))))
 
 # Link all object files
-$(PYON_TARGET) : bin $(PYON_OBJECT_FILES)
+$(PYON_TARGET) : $(PYON_OBJECT_FILES)
 	$(HC) $(PYON_OBJECT_FILES) -o $@ $(L_OPTS)
 
 ###############################################################################
