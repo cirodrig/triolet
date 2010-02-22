@@ -42,10 +42,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/Optimizations.hs \
 	Pyon/SystemF/Print.hs \
 	Pyon/SystemF/Syntax.hs \
-	Pyon/SystemF/Typecheck.hs \
-	Pyon/Core/Syntax.hs \
-	Pyon/Core/Rename.hs \
-	Pyon/Core/Typecheck.hs
+	Pyon/SystemF/Typecheck.hs
 PYON_HS_GENERATED_SRCS=Paths_pyon.hs \
 	PythonInterface/Python.hs \
 	PythonInterface/HsObject.hs
