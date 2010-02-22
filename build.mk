@@ -24,9 +24,9 @@ default :
 doc : dist/doc/html/pyon/index.html
 
 # Delegate documentation to a script
-dist/doc/html/pyon/index.html : $(PYON_SOURCE_FILES)
+dist/doc/html/pyon/index.html : $(PYON_HS_SOURCE_FILES)
 	@echo "Building documentation..."
-	@env ESED="$(ESED)" HADDOCK_HC_OPTS="$(HADDOCK_HC_OPTS)" PYON_SOURCE_FILES="$(PYON_SOURCE_FILES)" PACKAGES="$(PACKAGES)" sh makedoc.sh
+	@env ESED="$(ESED)" HADDOCK_HC_OPTS="$(HADDOCK_HC_OPTS)" PYON_HS_SOURCE_FILES="$(PYON_HS_SOURCE_FILES)" PACKAGES="$(PACKAGES)" sh makedoc.sh
 
 # Create executable and scripts; then run Python's setup script 
 build : $(PYON_TARGET) $(PYON_GENERATED_SCRIPTS) src/pyon/data_dir.py

@@ -66,5 +66,5 @@ PYON_HS_GENERATED_FILES=$(foreach src, $(PYON_HS_GENERATED_SRCS), $(BUILDDIR)/$(
 PYON_OBJECT_FILES=$(foreach obj, $(PYON_OBJECTS), $(BUILDDIR)/$(obj))
 
 # All source files with full path
-PYON_SOURCE_FILES=$(foreach src, $(PYON_HS_SRCS), $(SRCDIR)/$(src)) \
+PYON_HS_SOURCE_FILES=$(foreach src, $(PYON_HS_SRCS), $(SRCDIR)/$(src)) \
 	$(foreach src, $(PYON_HS_GENERATED_SRCS), $(BUILDDIR)/$(src))

@@ -5,7 +5,7 @@
 
 include variables.mk
 
-DEPEND_DEPENDENCES=$(PYON_HS_GENERATED_FILES) depend
+DEPEND_DEPENDENCES=$(PYON_HS_SOURCE_FILES) depend
 
 ###############################################################################
 # Targets
@@ -39,7 +39,7 @@ veryclean : clean
 
 depend : depend_hs.mk
 
-depend_hs.mk : $(PYON_HS_GENERATED_FILES)
+depend_hs.mk : $(PYON_HS_SOURCE_FILES)
 	sh makedepend.sh
 
 ###############################################################################
