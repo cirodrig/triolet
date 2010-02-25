@@ -29,8 +29,9 @@ notSSA = _NotSSA()
 class FallStmt(ast.Statement):
     """A statement representing the transfer of control flow 
     to another statement within the function"""
-    def __init__(self, join):
+    def __init__(self, source_pos, join):
         assert isinstance(join, JoinNode)
+        self.sourcePos = source_pos
         self.joinNode = join
 
 class PhiNode(object):
@@ -302,9 +303,9 @@ def _separateReturns(fn_ctx, stmtlist):
         s = stmtlist[i]
         if isinstance(s, ast.ReturnStmt):
             retparam = ast.VariableParam(var)
-            newretexpr = ast.VariableExpr(var)
+            newretexpr = ast.VariableExpr(s.sourcePos, var)
 
-            retcopy = ast.AssignStmt(retparam, s.expression)
+            retcopy = ast.AssignStmt(s.sourcePos, retparam, s.expression)
             s.expression = newretexpr
             stmtlist.insert(i, retcopy)
 
@@ -380,13 +381,13 @@ def _doStmt(fn_ctx, stmt, next_stmt):
 
         #set up new control flow fork in the SSA structures
         _initPath(reconverge)
-        truefall = FallStmt(reconverge)
+        truefall = FallStmt(stmt.sourcePos, reconverge)
         _regularizeControl(stmt.ifTrue, truefall)
         hasret1, hasft1 = _doStmtList(fn_ctx, stmt.ifTrue)
 
         #Wrap up the true path and switch to the other 
         _nextPath(truefall)
-        falsefall = FallStmt(reconverge)
+        falsefall = FallStmt(stmt.sourcePos, reconverge)
         _regularizeControl(stmt.ifFalse, falsefall)
         hasret2, hasft2 = _doStmtList(fn_ctx, stmt.ifFalse)
 
@@ -417,7 +418,7 @@ def _doFunction(f):
     # variable definitions inside the function 
     _joinNodeStack.append(JoinNode())
     for p in f.parameters: _makeSSA(p)
-    _regularizeControl(f.body, ast.ReturnStmt(ast.LiteralExpr(None)))
+    _regularizeControl(f.body, ast.ReturnStmt(None, ast.LiteralExpr(None, None)))
     _doStmtList(fn_ctx, f.body)
     _joinNodeStack.pop()
 

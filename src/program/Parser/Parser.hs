@@ -35,6 +35,12 @@ import Language.Python.Common.PrettyAST()
 import PythonInterface.Python(PyPtr)
 import Parser.ParserSyntax
 
+import Gluon.Common.SourcePos(SourcePos, noSourcePos, fileSourcePos)
+
+toSourcePos :: Py.SrcSpan -> SourcePos
+toSourcePos pos =
+  fileSourcePos (Py.span_filename pos) (Py.startRow pos) (Py.startCol pos)
+
 type PyIdent = Py.IdentSpan
 
 data Binding =
@@ -422,46 +428,51 @@ expression :: PyExpr -> Cvt Expr
 expression expr =
     case expr
     of Py.Var {Py.var_ident = ident} -> 
-         Variable <$> use ident
+         Variable source_pos <$> use ident
        Py.Int {Py.int_value = n} -> 
-         pure (Literal (IntLit n))
+         pure (Literal source_pos (IntLit n))
        Py.Float {Py.float_value = d} ->
-         pure (Literal (FloatLit d))
+         pure (Literal source_pos (FloatLit d))
        Py.Bool {Py.bool_value = b} ->
-         pure (Literal (BoolLit b))
+         pure (Literal source_pos (BoolLit b))
        Py.None {} -> 
-         pure(Literal NoneLit)
+         pure(Literal source_pos NoneLit)
        Py.Tuple {Py.tuple_exprs = es} -> 
-         Tuple <$> traverse expression es
+         Tuple source_pos <$> traverse expression es
        Py.Call {Py.call_fun = f, Py.call_args = xs} -> 
-         Call <$> expression f <*> traverse argument xs
+         Call source_pos <$> expression f <*> traverse argument xs
        Py.CondExpr { Py.ce_true_branch = tr
                    , Py.ce_condition = c
                    , Py.ce_false_branch = fa} -> 
-         let mkCond tr c fa = Cond c tr fa
+         let mkCond tr c fa = Cond source_pos c tr fa
          in mkCond <$> expression tr <*> expression c <*> expression fa
        Py.BinaryOp { Py.operator = op
                    , Py.left_op_arg = l
                    , Py.right_op_arg = r} -> 
-         Binary op <$> expression l <*> expression r
+         Binary source_pos op <$> expression l <*> expression r
        Py.UnaryOp {Py.operator = op, Py.op_arg = arg} -> 
-         Unary op <$> expression arg
+         Unary source_pos op <$> expression arg
        Py.Lambda {Py.lambda_args = args, Py.lambda_body = body} -> 
-         enter $ \_ -> Lambda <$> traverse parameter args <*> expression body
+         enter $ \_ -> Lambda source_pos <$> traverse parameter args 
+                                         <*> expression body
 
        -- Generators and list comprehensions have a separate scope
        Py.Generator {Py.gen_comprehension = comp} -> 
-         enter $ \locals -> Generator locals <$> comprehension expression comp
+         enter $ \locals -> Generator source_pos locals <$> 
+                            comprehension expression comp
        Py.ListComp {Py.list_comprehension = comp} -> 
-         enter $ \locals -> ListComp <$> comprehension expression comp
+         enter $ \locals -> ListComp source_pos <$>
+                            comprehension expression comp
                             
        Py.Paren {Py.paren_expr = e} -> expression e
        _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
+    where
+      source_pos = toSourcePos $ Py.expr_annot expr
 
 -- Convert an optional expression into an expression or None
-maybeExpression :: Maybe PyExpr -> Cvt Expr
-maybeExpression (Just e) = expression e
-maybeExpression Nothing  = pure noneExpr
+maybeExpression :: SourcePos -> Maybe PyExpr -> Cvt Expr
+maybeExpression _   (Just e) = expression e
+maybeExpression pos Nothing  = pure (noneExpr pos)
 
 comprehension :: (a -> Cvt b) -> PyComp a -> Cvt (IterFor b)
 comprehension convertBody comprehension =
@@ -485,7 +496,7 @@ comprehension convertBody comprehension =
       compIter (Just (Py.IterIf {Py.comp_iter_if = ci})) = 
         CompIf <$> compIf ci
 
-noneExpr = Literal NoneLit
+noneExpr pos = Literal pos NoneLit
 
 argument :: Py.ArgumentSpan -> Cvt Expr
 argument (Py.ArgExpr {Py.arg_py_annotation = Just _}) = 
@@ -525,14 +536,14 @@ singleStatement stmt =
                                <*> traverse exprToLHS targets
                                <*> suite bodyClause -}
        Py.StmtExpr {Py.stmt_expr = e} ->
-         singleton . ExprStmt <$> expression e
+         singleton . ExprStmt source_pos <$> expression e
        Py.Conditional {Py.cond_guards = guards, Py.cond_else = els} ->
          foldr ifelse (suite els) guards
        Py.Assign {Py.assign_to = dsts, Py.assign_expr = src} -> 
          assignments (reverse dsts) (expression src)
        Py.Return {Py.return_expr = me} -> 
          -- Process, then discard statements after the return
-         singleton <$> Return <$> maybeExpression me
+         singleton <$> Return source_pos <$> maybeExpression source_pos me
        Py.Pass {} -> pure []
        Py.NonLocal {Py.nonLocal_vars = xs} -> 
          [] <$ mapM_ nonlocalDeclaration xs
@@ -540,14 +551,19 @@ singleStatement stmt =
          [] <$ mapM_ globalDeclaration xs
        _ -> fail $ "Cannot translate statement:\n" ++ Py.prettyText stmt
     where
+      source_pos = toSourcePos $ Py.stmt_annot stmt
       -- An if-else clause
       ifelse (guard, ifTrue) ifFalse = 
-          singleton <$> (If <$> expression guard <*> suite ifTrue <*> ifFalse)
+          singleton <$> (If source_pos <$> expression guard 
+                                       <*> suite ifTrue 
+                                       <*> ifFalse)
 
       singleton x = [x]
 
 defStatements :: [PyStmt] -> Cvt Stmt
-defStatements stmts = DefGroup <$> traverse funDefinition stmts
+defStatements stmts =
+  let pos = toSourcePos $ Py.stmt_annot (head stmts)
+  in DefGroup pos <$> traverse funDefinition stmts
 
 -- For each assignment in a multiple-assignment statement,
 -- assign to one variable, then use that variable as the source value
@@ -556,7 +572,9 @@ assignments :: [PyExpr] -> Cvt Expr -> Cvt [Stmt]
 assignments (v:vs) src = (:) <$> assign v src
                              <*> assignments vs (expression v)
     where
-      assign v src = Assign <$> exprToLHS v <*> src
+      assign v src = 
+        let pos = toSourcePos $ Py.expr_annot v
+        in Assign pos <$> exprToLHS v <*> src
 
 assignments [] src = pure []
 
@@ -685,13 +703,13 @@ instance MentionsVars a => MentionsVars [a] where
 instance MentionsVars Stmt where
     mentionedVars s =
         case s
-        of ExprStmt e -> mentionedVars e
-           Assign _ e -> mentionedVars e
-           Return e   -> mentionedVars e
-           If e s1 s2 -> mentionedVars e `Set.union`
-                         mentionedVars s1 `Set.union`
-                         mentionedVars s2
-           DefGroup fs -> mentionedVars fs
+        of ExprStmt _ e -> mentionedVars e
+           Assign _ _ e -> mentionedVars e
+           Return _ e   -> mentionedVars e
+           If _ e s1 s2 -> mentionedVars e `Set.union`
+                           mentionedVars s1 `Set.union`
+                           mentionedVars s2
+           DefGroup _ fs -> mentionedVars fs
 
 instance MentionsVars Func where
     mentionedVars (Func _ _ _ _ _ s) = mentionedVars s
@@ -699,16 +717,16 @@ instance MentionsVars Func where
 instance MentionsVars Expr where
     mentionedVars e =
         case e
-        of Variable v -> Set.singleton (varID v)
-           Literal _ -> Set.empty
-           Tuple es -> mentionedVars es
-           Unary _ e -> mentionedVars e
-           Binary _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
-           ListComp it -> mentionedVars it
-           Generator _ it -> mentionedVars it
-           Call e es -> mentionedVars (e:es)
-           Cond e1 e2 e3 -> mentionedVars [e1, e2, e3]
-           Lambda _ e -> mentionedVars e
+        of Variable _ v -> Set.singleton (varID v)
+           Literal _ _ -> Set.empty
+           Tuple _ es -> mentionedVars es
+           Unary _ _ e -> mentionedVars e
+           Binary _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
+           ListComp _ it -> mentionedVars it
+           Generator _ _ it -> mentionedVars it
+           Call _ e es -> mentionedVars (e:es)
+           Cond _ e1 e2 e3 -> mentionedVars [e1, e2, e3]
+           Lambda _ _ e -> mentionedVars e
 
 instance MentionsVars (IterFor Expr) where
     mentionedVars (IterFor _ e c) = mentionedVars e `Set.union` mentionedVars c

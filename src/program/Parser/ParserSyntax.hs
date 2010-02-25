@@ -13,6 +13,7 @@ import PythonInterface.Python(PyPtr)
 
 import qualified Language.Python.Common.AST as Python
 import Language.Python.Common.AST(Ident, AssignOp, Op)
+import Gluon.Common.SourcePos(SourcePos)
 
 -- | A Python variable.
 -- Different variables have different IDs, though they can have
@@ -64,17 +65,17 @@ data Literal =
 
 data Expr =
     -- Terminals
-    Variable Var
-  | Literal Literal
+    Variable SourcePos Var
+  | Literal SourcePos Literal
     -- Python expressions
-  | Tuple [Expr]
-  | Unary !Python.OpSpan Expr
-  | Binary !Python.OpSpan Expr Expr
-  | ListComp (IterFor Expr)
-  | Generator Locals (IterFor Expr)
-  | Call Expr [Expr]
-  | Cond Expr Expr Expr -- condition, true, false
-  | Lambda [Parameter] Expr
+  | Tuple SourcePos [Expr]
+  | Unary SourcePos !Python.OpSpan Expr
+  | Binary SourcePos !Python.OpSpan Expr Expr
+  | ListComp SourcePos (IterFor Expr)
+  | Generator SourcePos Locals (IterFor Expr)
+  | Call SourcePos Expr [Expr]
+  | Cond SourcePos Expr Expr Expr -- condition, true, false
+  | Lambda SourcePos [Parameter] Expr
 
 type Annotation = Maybe Expr
 
@@ -90,11 +91,11 @@ data Comprehension a =
   | CompBody a
 
 data Stmt =
-    ExprStmt Expr
-  | Assign Parameter Expr
-  | Return Expr
-  | If Expr Suite Suite
-  | DefGroup [Func]
+    ExprStmt SourcePos Expr
+  | Assign SourcePos Parameter Expr
+  | Return SourcePos Expr
+  | If SourcePos Expr Suite Suite
+  | DefGroup SourcePos [Func]
 
 type Suite = [Stmt]
 

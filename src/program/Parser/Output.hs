@@ -20,8 +20,10 @@ import qualified Language.Python.Common.AST as Py
 import qualified Language.Python.Common.Pretty as Py
 import Language.Python.Common.PrettyAST()
 
+import Gluon.Common.SourcePos(SourcePos)
 import Parser.ParserSyntax
 import PythonInterface.Python
+import PythonInterface.HsObject
 
 -- Like mapM_, but also keep track of the current array index
 mapMIndex_ :: Monad m => (Int -> a -> m b) -> [a] -> m ()
@@ -440,6 +442,9 @@ toPythonDictEx xs = do
                   liftIO (setDictItem dict kPtr vPtr)
       return dict
 
+instance Exportable SourcePos where
+  toPythonEx pos = liftIO $ newHsObject pos
+
 instance Exportable Var where
     toPythonEx v = createPythonVar v
 
@@ -493,23 +498,33 @@ instance Exportable Locals where
               )
 
 instance Exportable Stmt where
-    toPythonEx (ExprStmt e) = call1Ex (readEnv py_ExprStmt) e
-    toPythonEx (Assign lhs e) = call2Ex (readEnv py_AssignStmt) lhs e
-    toPythonEx (Return e) = call1Ex (readEnv py_ReturnStmt) e
-    toPythonEx (If e tr fa) = call3Ex (readEnv py_IfStmt) e tr fa
-    toPythonEx (DefGroup fs) = call1Ex (readEnv py_DefGroupStmt) fs
+    toPythonEx (ExprStmt pos e) = call2Ex (readEnv py_ExprStmt) pos e
+    toPythonEx (Assign pos lhs e) = call3Ex (readEnv py_AssignStmt) pos lhs e
+    toPythonEx (Return pos e) = call2Ex (readEnv py_ReturnStmt) pos e
+    toPythonEx (If pos e tr fa) = call4Ex (readEnv py_IfStmt) pos e tr fa
+    toPythonEx (DefGroup pos fs) = call2Ex (readEnv py_DefGroupStmt) pos fs
 
 instance Exportable Expr where
-    toPythonEx (Variable v)    = call1Ex (readEnv py_VariableExpr) v
-    toPythonEx (Literal l)     = call1Ex (readEnv py_LiteralExpr) (Inherit l)
-    toPythonEx (Tuple es)      = call1Ex (readEnv py_TupleExpr) es
-    toPythonEx (Unary op e)    = call2Ex (readEnv py_UnaryExpr) (AsUnary op) e
-    toPythonEx (Binary op e f) = call3Ex (readEnv py_BinaryExpr) op e f
-    toPythonEx (ListComp it)   = call1Ex (readEnv py_ListCompExpr) it
-    toPythonEx (Generator l f) = call2Ex (readEnv py_GeneratorExpr) f l
-    toPythonEx (Call f xs)     = call2Ex (readEnv py_CallExpr) f xs
-    toPythonEx (Cond c tr fa)  = call3Ex (readEnv py_CondExpr) c tr fa
-    toPythonEx (Lambda ps e)   = call2Ex (readEnv py_LambdaExpr) ps e
+    toPythonEx (Variable pos v) = 
+      call2Ex (readEnv py_VariableExpr) pos v
+    toPythonEx (Literal pos l) = 
+      call2Ex (readEnv py_LiteralExpr) pos (Inherit l)
+    toPythonEx (Tuple pos es) = 
+      call2Ex (readEnv py_TupleExpr) pos es
+    toPythonEx (Unary pos op e) = 
+      call3Ex (readEnv py_UnaryExpr) pos (AsUnary op) e
+    toPythonEx (Binary pos op e f) = 
+      call4Ex (readEnv py_BinaryExpr) pos op e f
+    toPythonEx (ListComp pos it) = 
+      call2Ex (readEnv py_ListCompExpr) pos it
+    toPythonEx (Generator pos l f) = 
+      call3Ex (readEnv py_GeneratorExpr) pos f l
+    toPythonEx (Call pos f xs) = 
+      call3Ex (readEnv py_CallExpr) pos f xs
+    toPythonEx (Cond pos c tr fa) = 
+      call4Ex (readEnv py_CondExpr) pos c tr fa
+    toPythonEx (Lambda pos ps e) = 
+      call3Ex (readEnv py_LambdaExpr) pos ps e
     
 instance Exportable (IterFor Expr) where
     toPythonEx (IterFor [param] e comp) =

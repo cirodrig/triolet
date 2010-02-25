@@ -156,8 +156,9 @@ class Expression(object):
 class VariableExpr(Expression):
     """A reference to a variable"""
     
-    def __init__(self, v, base = ExprInit.default):
+    def __init__(self, source_pos, v, base = ExprInit.default):
         base.initializeExpr(self)
+        self.sourcePos = source_pos
         self.variable = v
 
 class LiteralExpr(Expression):
@@ -165,36 +166,40 @@ class LiteralExpr(Expression):
 
     Literals can be numbers, booleans, or the None value."""
 
-    def __init__(self, l, base = ExprInit.default):
+    def __init__(self, source_pos, l, base = ExprInit.default):
         base.initializeExpr(self)
+        self.sourcePos = source_pos
         self.literal = l
 
 class TupleExpr(Expression):
     """A tuple construction."""
-    def __init__(self, args, base = ExprInit.default):
+    def __init__(self, source_pos, args, base = ExprInit.default):
         base.initializeExpr(self)
         for e in args:
             assert isinstance(e, Expression)
+        self.sourcePos = source_pos
         self.arguments = args
 
 class UnaryExpr(Expression):
     """An application of a unary operator to an operand."""
 
-    def __init__(self, op, arg, base = ExprInit.default):
+    def __init__(self, source_pos, op, arg, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(op, pyon.ast.operators.UnaryOp)
         assert isinstance(arg, Expression)
+        self.sourcePos = source_pos
         self.operator = op
         self.argument = arg
 
 class BinaryExpr(Expression):
     """An application of a binary operator to left and right operands."""
 
-    def __init__(self, op, left, right, base = ExprInit.default):
+    def __init__(self, source_pos, op, left, right, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(op, pyon.ast.operators.BinaryOp)
         assert isinstance(left, Expression)
         assert isinstance(right, Expression)
+        self.sourcePos = source_pos
         self.operator = op
         self.left = left
         self.right = right
@@ -202,50 +207,55 @@ class BinaryExpr(Expression):
 class ListCompExpr(Expression):
     """A list comprehension."""
 
-    def __init__(self, iterator, base = ExprInit.default):
+    def __init__(self, source_pos, iterator, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(iterator, ForIter) # Must start with 'for'
+        self.sourcePos = source_pos
         self.iterator = iterator
 
 class GeneratorExpr(Expression):
     """A generator expression."""
 
-    def __init__(self, iterator, local_scope = None, base = ExprInit.default):
+    def __init__(self, source_pos, iterator, local_scope = None, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(iterator, ForIter) # Must start with 'for'
+        self.sourcePos = source_pos
         self.iterator = iterator
         self.localScope = local_scope
 
 class CallExpr(Expression):
     """A function call."""
 
-    def __init__(self, operator, arguments, base = ExprInit.default):
+    def __init__(self, source_pos, operator, arguments, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(operator, Expression)
         for arg in arguments:
             assert isinstance(arg, Expression)
+        self.sourcePos = source_pos
         self.operator = operator
         self.arguments = arguments
 
 class CondExpr(Expression):
     """An if-else expression."""
 
-    def __init__(self, argument, ifTrue, ifFalse, base = ExprInit.default):
+    def __init__(self, source_pos, argument, ifTrue, ifFalse, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(argument, Expression)
         assert isinstance(ifTrue, Expression)
         assert isinstance(ifFalse, Expression)
+        self.sourcePos = source_pos
         self.argument = argument
         self.ifTrue = ifTrue
         self.ifFalse = ifFalse
 
 class LambdaExpr(Expression):
     """A lambda function"""
-    def __init__(self, parameters, body, base = ExprInit.default):
+    def __init__(self, source_pos, parameters, body, base = ExprInit.default):
         base.initializeExpr(self)
         for p in parameters:
             assert isinstance(p, Parameter)
         assert isinstance(body, Expression)
+        self.sourcePos = source_pos
         self.parameters = parameters
         self.body = body
 
@@ -327,35 +337,39 @@ class Statement(object):
 class ExprStmt(Statement):
     """A statement consisting of a single expression"""
 
-    def __init__(self, expr):
+    def __init__(self, source_pos, expr):
         assert isinstance(expr, Expression)
+        self.sourcePos = source_pos
         self.expression = expr
 
 class AssignStmt(Statement):
     """An assignment statement"""
 
-    def __init__(self, lhs, expr):
+    def __init__(self, source_pos, lhs, expr):
         assert isinstance(lhs, Parameter)
         assert isinstance(expr, Expression)
+        self.sourcePos = source_pos
         self.lhs = lhs
         self.expression = expr
 
 class ReturnStmt(Statement):
     """A return statement"""
 
-    def __init__(self, expr):
+    def __init__(self, source_pos, expr):
         assert isinstance(expr, Expression)
+        self.sourcePos = source_pos
         self.expression = expr
 
 class IfStmt(Statement):
     """An if-else statement"""
 
-    def __init__(self, cond, if_true, if_false):
+    def __init__(self, source_pos, cond, if_true, if_false):
         assert isinstance(cond, Expression)
         for s in if_true:
             assert isinstance(s, Statement)
         for s in if_false:
             assert isinstance(s, Statement)
+        self.sourcePos = source_pos
         self.cond = cond
         self.ifTrue = if_true
         self.ifFalse = if_false
@@ -363,9 +377,10 @@ class IfStmt(Statement):
 class DefGroupStmt(Statement):
     """A group of function definitions"""
 
-    def __init__(self, defs):
+    def __init__(self, source_pos, defs):
         for d in defs:
             assert isinstance(d, Function)
+        self.sourcePos = source_pos
         self.definitions = defs
 
 ###############################################################################
