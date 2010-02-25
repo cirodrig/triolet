@@ -201,7 +201,7 @@ typeInferTyAppE op arg = do
                                       (verbatim arg_type)
       
       -- Result value is the range, after substituting operand in argument
-      result <- liftEvaluation $ Gluon.evalFully $ assignBinder' param arg $ 
+      result <- liftEvaluation $ Gluon.evalFully $ assignBinder'Syn param arg $ 
                 verbatim range
       return result
       

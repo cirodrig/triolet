@@ -211,16 +211,16 @@ foreign export ccall gluon_Tuple_Core_nil :: IO PyPtr
 
 gluon_Tuple_Core_nil = newHsObject (Nil :: Tuple Core)
 
-foreign export ccall gluon_Prod_Core_cons :: PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall gluon_Sum_Core_cons :: PyPtr -> PyPtr -> IO PyPtr
 
-gluon_Prod_Core_cons param tail = rethrowExceptionsInPython $ do
+gluon_Sum_Core_cons param tail = rethrowExceptionsInPython $ do
   hs_param <- fromHsObject' param
   hs_tail <- fromHsObject' tail
-  newHsObject (hs_param :*: hs_tail :: Prod Core)
+  newHsObject (hs_param :*: hs_tail :: Sum Core)
 
-foreign export ccall gluon_Prod_Core_nil :: IO PyPtr
+foreign export ccall gluon_Sum_Core_nil :: IO PyPtr
 
-gluon_Prod_Core_nil = newHsObject (Unit :: Prod Core)
+gluon_Sum_Core_nil = newHsObject (Unit :: Sum Core)
 
 -------------------------------------------------------------------------------
 -- Predicates

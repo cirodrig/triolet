@@ -267,7 +267,7 @@ Tuple_Core_cons(PyObject *self, PyObject *args)
 }
 
 static PyObject *
-Prod_Core_cons(PyObject *self, PyObject *args)
+Sum_Core_cons(PyObject *self, PyObject *args)
 {
   PyObject *param;
   PyObject *tail;
@@ -276,7 +276,7 @@ Prod_Core_cons(PyObject *self, PyObject *args)
 			&HsObject_type, &param, &HsObject_type, &tail))
     return NULL;
 
-  return gluon_Prod_Core_cons(param, tail);
+  return gluon_Sum_Core_cons(param, tail);
 }
 
 static PyObject *
@@ -335,7 +335,7 @@ static struct PyMethodDef gluon_methods[] = {
    "Create a literal expression."},
   {"Tuple_Core_cons", Tuple_Core_cons, METH_VARARGS,
    "Create a tuple."},
-  {"Prod_Core_cons", Prod_Core_cons, METH_VARARGS,
+  {"Sum_Core_cons", Sum_Core_cons, METH_VARARGS,
    "Create a tuple type."},
   {"isExp", isExp, METH_O,
    "Return True if the parameter is a Gluon expression, False otherwise."},
@@ -369,7 +369,7 @@ createGluonModule(void)
   ADD_GLUON_OBJECT("KindLevel", gluon_mkKindLevel);
   ADD_GLUON_OBJECT("SortLevel", gluon_mkSortLevel);
   ADD_GLUON_OBJECT("Tuple_Core_nil", gluon_Tuple_Core_nil);
-  ADD_GLUON_OBJECT("Prod_Core_nil", gluon_Prod_Core_nil);
+  ADD_GLUON_OBJECT("Sum_Core_nil", gluon_Sum_Core_nil);
   ADD_GLUON_OBJECT("con_Int", gluon_con_Int);
   ADD_GLUON_OBJECT("con_Float", gluon_con_Float);
   ADD_GLUON_OBJECT("type_Pure", gluon_type_Pure);

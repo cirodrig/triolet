@@ -3,6 +3,7 @@ module Pyon.SystemF.Optimizations
     (optimizeModule)
 where
 
+import Control.Applicative(Const(..))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -199,8 +200,8 @@ maskSet vs m = pass $ do x <- m
 edcScanType :: PyonType -> GetMentionsSet ()
 edcScanType t = scanType t >> return ()
   where
-    scanType :: Gluon.ExpOf Gluon.Core
-             -> GetMentionsSet (Gluon.ExpOf Gluon.TrivialSyntax)
+    scanType :: Gluon.RecExp Gluon.Core
+             -> GetMentionsSet (Gluon.RecExp Gluon.TrivialSyntax)
     scanType expression =
       case expression
       of -- Scan the body of lambda/function type expressions, then delete
@@ -215,25 +216,27 @@ edcScanType t = scanType t >> return ()
            maybe id mask v $ scanType b
 
          -- Mention variables
-         Gluon.VarE {Gluon.expVar = v} -> mention v
+         Gluon.VarE {Gluon.expVar = v} -> do
+           mention v
+           return $ Const ()
 
          -- Recurse on other expressions
          _ -> do (Gluon.traverseExp scanType scanTuple scanProd expression
                     :: GetMentionsSet (Gluon.Exp Gluon.TrivialSyntax))
-                 return ()
+                 return $ Const ()
 
-    scanTuple :: Gluon.TupOf Gluon.Core
-              -> GetMentionsSet (Gluon.TupOf Gluon.TrivialSyntax)
+    scanTuple :: Gluon.RecTuple Gluon.Core
+              -> GetMentionsSet (Gluon.RecTuple Gluon.TrivialSyntax)
     scanTuple t =
       case t
       of Gluon.Binder' v ty val Gluon.:&: b -> do
            scanType ty
            scanType val
            maybe id mask v $ scanTuple b
-         Gluon.Nil -> return ()
+         Gluon.Nil -> return $ Const ()
 
-    scanProd :: Gluon.ProdOf Gluon.Core
-             -> GetMentionsSet (Gluon.ProdOf Gluon.TrivialSyntax)
+    scanProd :: Gluon.RecSum Gluon.Core
+             -> GetMentionsSet (Gluon.RecSum Gluon.TrivialSyntax)
     scanProd p =
       case p
       of Gluon.Binder' v ty () Gluon.:*: b -> do

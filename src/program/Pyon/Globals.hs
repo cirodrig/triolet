@@ -14,6 +14,9 @@ import Gluon.Parser.Driver
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.SystemF.Builtins
 
+-- Not used, but included for debugging to make sure it's compiled
+import Pyon.NewCore.Syntax()
+
 the_varIdentSupply :: MVar (Supply (Ident Var))
 the_varIdentSupply = unsafePerformIO $ newMVar =<< newIdentSupply
 
