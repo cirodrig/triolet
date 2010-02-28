@@ -145,6 +145,15 @@ def create_type_schemes():
     _binaryIntScheme = hm.TyScheme([], [], hm.noConstraints,
                                    _funType([type_int,type_int], type_int))
 
+def _tycon(name, kind, constructor):
+    """
+    Create a type constructor of kind Star() that is not a stream and
+    translates to a Gluon constructor type.
+    """
+    type = gluon.mkConE(gluon.noSourcePos, constructor)
+    return hm.TyCon(name, kind, stream_tag.IsAction(),
+                    gluon_type = type)
+
 def _builtin(name, type_scheme, gluon_constructor):
     """Create a built-in variable"""
     expression = sf.mkConE(gluon_constructor)
@@ -156,22 +165,17 @@ def _builtin(name, type_scheme, gluon_constructor):
 ###############################################################################
 
 # Builtin primitive types
-tycon_int = hm.TyCon("int", _star, stream_tag.IsAction(),
-                     gluon_constructor = gluon.con_Int)
-tycon_float = hm.TyCon("float", _star, stream_tag.IsAction(),
-                       gluon_constructor = gluon.con_Float)
-tycon_bool = hm.TyCon("bool", _star, stream_tag.IsAction(),
-                      gluon_constructor = sf.con_bool)
-tycon_None = hm.TyCon("NoneType", _star, stream_tag.IsAction(),
-                      gluon_constructor = sf.con_NoneType)
+tycon_int = _tycon("int", _star, gluon.con_Int)
+tycon_float = _tycon("float", _star, gluon.con_Float)
+tycon_bool = _tycon("bool", _star, sf.con_bool)
+tycon_None = _tycon("NoneType", _star, sf.con_NoneType)
 tycon_iter = hm.TyCon("iter", kind.Arrow(_star, _star),
                       stream_tag.IsStream(),
-                      gluon_constructor = sf.con_Stream)
-tycon_list = hm.TyCon("list", kind.Arrow(_star, _star),
-                      stream_tag.IsAction(),
-                      gluon_constructor = sf.con_list)
-tycon_Any = hm.TyCon("Any", _star, stream_tag.IsAction(),
-                     gluon_constructor = sf.con_Any)
+                      gluon_type = gluon.mkConAppE(gluon.noSourcePos,
+                                                   sf.con_Stream,
+                                                   [gluon.mkConE(gluon.noSourcePos, gluon.con_EmpE)]))
+tycon_list = _tycon("list", kind.Arrow(_star, _star), sf.con_list)
+tycon_Any = _tycon("Any", _star, sf.con_Any)
 
 # Builtin types
 type_int = hm.EntTy(tycon_int)

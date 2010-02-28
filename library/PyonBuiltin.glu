@@ -1,98 +1,125 @@
 
-constant Action : Pure -> Pure;
-constant Stream : Pure -> Pure;
+constant Action : Effect -> Pure -> Pure;
+constant Stream : Effect -> Pure -> Pure;
 
--- Pyon types.  We don't care about values for now.
-constant NoneType : Pure;
+-- Pyon types.
+data NoneType : Pure where None : NoneType;
 constant Any : Pure;
-constant bool : Pure;
+data bool : Pure where True : bool | False : bool;
 constant list : Pure -> Pure;
 
-constant PyonTuple0 : Pure;
-constant PyonTuple1 : Pure -> Pure;
-constant PyonTuple2 : Pure -> Pure -> Pure;
-constant PyonTuple3 : Pure -> Pure -> Pure -> Pure;
-constant PyonTuple4 : Pure -> Pure -> Pure -> Pure -> Pure;
-constant PyonTuple5 : Pure -> Pure -> Pure -> Pure -> Pure -> Pure;
+data PyonTuple0 : Pure where
+  pyonTuple0 : PyonTuple0;
+data PyonTuple1 : Pure -> Pure where
+  pyonTuple1 : (a : Pure) -> a -> PyonTuple1 a;
+data PyonTuple2 : Pure -> Pure -> Pure where
+  pyonTuple2 : (a : Pure) -> (b : Pure) -> a -> b -> PyonTuple2 a b;
+data PyonTuple3 : Pure -> Pure -> Pure -> Pure where
+  pyonTuple3 : (a : Pure) -> (b : Pure) -> (c : Pure)
+            -> a -> b -> c -> PyonTuple3 a b c;
+data PyonTuple4 : Pure -> Pure -> Pure -> Pure -> Pure where
+  pyonTuple4 : (a : Pure) -> (b : Pure) -> (c : Pure) -> (d : Pure)
+            -> a -> b -> c -> d -> PyonTuple4 a b c d;
+data PyonTuple5 : Pure -> Pure -> Pure -> Pure -> Pure -> Pure where
+  pyonTuple5 : (a : Pure) -> (b : Pure) -> (c : Pure) -> (d : Pure)
+            -> (e : Pure)
+            -> a -> b -> c -> d -> e -> PyonTuple4 a b c d e;
+
+let comparison (a : Pure) -> Pure = a -> a -> Action EmpE bool;
+let binary (a : Pure) -> Pure = a -> a -> Action EmpE a;
+let binary_any -> Pure = (a : Pure) -> binary a;
 
 -- Dictionary types for Pyon classes.
-constant EqDict : Pure -> Pure;
-constant OrdDict : Pure -> Pure;
-constant TraversableDict : Pure -> Pure;
+data EqDict : Pure -> Pure where
+  eqDict : (a : Pure) -> comparison a -> comparison a -> EqDict a;
+
+data OrdDict : Pure -> Pure where
+  ordDict : (a : Pure)
+         -> EqDict a
+         -> comparison a
+         -> comparison a
+         -> comparison a
+         -> comparison a
+         -> OrdDict a;
+
+data TraversableDict : (Pure -> Pure) -> Pure where
+  traversableDict : (t : Pure -> Pure)
+                 -> ((a : Pure) -> t a -> Stream EmpE a)
+                 -> TraversableDict t;
 
 -- Class dictionary members for predefined instances.
 
-constant Eq_EQ_Int : Int -> Int -> Action bool;
-constant Eq_NE_Int : Int -> Int -> Action bool;
-constant Ord_GT_Int : Int -> Int -> Action bool;
-constant Ord_GE_Int : Int -> Int -> Action bool;
-constant Ord_LT_Int : Int -> Int -> Action bool;
-constant Ord_LE_Int : Int -> Int -> Action bool;
+constant Eq_EQ_Int : comparison Int;
+constant Eq_NE_Int : comparison Int;
+constant Ord_GT_Int : comparison Int;
+constant Ord_GE_Int : comparison Int;
+constant Ord_LT_Int : comparison Int;
+constant Ord_LE_Int : comparison Int;
 
-constant Eq_EQ_Float : Float -> Float -> Action bool;
-constant Eq_NE_Float : Float -> Float -> Action bool;
-constant Ord_GT_Float : Float -> Float -> Action bool;
-constant Ord_GE_Float : Float -> Float -> Action bool;
-constant Ord_LT_Float : Float -> Float -> Action bool;
-constant Ord_LE_Float : Float -> Float -> Action bool;
+constant Eq_EQ_Float : comparison Float;
+constant Eq_NE_Float : comparison Float;
+constant Ord_GT_Float : comparison Float;
+constant Ord_GE_Float : comparison Float;
+constant Ord_LT_Float : comparison Float;
+constant Ord_LE_Float : comparison Float;
 
 constant Eq_EQ_Tuple2 : (a : Pure) -> (b : Pure)
                      -> EqDict a -> EqDict b
-                     -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
+                     -> Action EmpE (comparison (PyonTuple2 a b));
 constant Eq_NE_Tuple2 : (a : Pure) -> (b : Pure)
                      -> EqDict a -> EqDict b
-                     -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
+                     -> Action EmpE (comparison (PyonTuple2 a b));
 constant Ord_GT_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
-                      -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
+                      -> Action EmpE (comparison (PyonTuple2 a b));
 constant Ord_GE_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
-                      -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
+                      -> Action EmpE (comparison (PyonTuple2 a b));
 constant Ord_LT_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
-                      -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
+                      -> Action EmpE (comparison (PyonTuple2 a b));
 constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
-                      -> Action ((PyonTuple2 a b) -> (PyonTuple2 a b) -> Action bool);
+                      -> Action EmpE (comparison (PyonTuple2 a b));
 
-constant Traversable_TRAVERSE_Stream : (a : Pure) -> Stream a -> Stream a;
-constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream a;
+constant Traversable_TRAVERSE_Stream : (a : Pure) -> Stream EmpE a -> Stream EmpE a;
+constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream EmpE a;
 
 -- Builtin functions
-constant oper_ADD : (a : Pure) -> a -> a -> Action a;
-constant oper_SUB : (a : Pure) -> a -> a -> Action a;
-constant oper_MUL : (a : Pure) -> a -> a -> Action a;
-constant oper_DIV : (a : Pure) -> a -> a -> Action a;
-constant oper_MOD : Int -> Int -> Action Int;
-constant oper_POWER : (a : Pure) -> a -> a -> Action a;
-constant oper_FLOORDIV : (a : Pure) -> a -> a -> Action a;
-constant oper_BITWISEAND : Int -> Int -> Action Int;
-constant oper_BITWISEOR : Int -> Int -> Action Int;
-constant oper_BITWISEXOR : Int -> Int -> Action Int;
-constant oper_NEGATE : (a : Pure) -> a -> Action a;
+constant oper_ADD : binary_any;
+constant oper_SUB : binary_any;
+constant oper_MUL : binary_any;
+constant oper_DIV : binary_any;
+constant oper_MOD : binary Int;
+constant oper_POWER : binary_any;
+constant oper_FLOORDIV : binary_any;
+constant oper_BITWISEAND : binary Int;
+constant oper_BITWISEOR : binary Int;
+constant oper_BITWISEXOR : binary Int;
+constant oper_NEGATE : (a : Pure) -> a -> Action EmpE a;
 
 constant oper_CAT_MAP : (a : Pure) -> (b : Pure)
-                     -> (a -> Stream b) -> Stream a -> Stream b;
+                     -> (a -> Stream EmpE b) -> Stream EmpE a -> Stream EmpE b;
 
-constant oper_GUARD : (a : Pure) -> bool -> Stream a -> Stream a;
+constant oper_GUARD : (a : Pure) -> bool -> Stream EmpE a -> Stream EmpE a;
 
-constant oper_DO : (a : Pure) -> a -> Stream a;
+constant oper_DO : (a : Pure) -> a -> Stream EmpE a;
 
 constant fun_makelist : (t : Pure -> Pure) -> (a : Pure)
                      -> TraversableDict t
-                     -> Action (t a -> Action (list a));
+                     -> Action EmpE (t a -> Action EmpE (list a));
 
 constant fun_map : (t : Pure -> Pure) -> (a : Pure) -> (b : Pure)
                 -> TraversableDict t
-                -> Action ((a -> Action b) -> t a -> Action (t b));
+                -> Action EmpE ((a -> Action EmpE b) -> t a -> Action EmpE (t b));
 
 constant fun_reduce : (t : Pure -> Pure) -> (a : Pure)
                    -> TraversableDict t
-                   -> Action ((a -> a -> Action a) -> a -> t a -> Action a);
+                   -> Action EmpE ((a -> a -> Action EmpE a) -> a -> t a -> Action EmpE a);
 
 constant fun_reduce1 : (t : Pure -> Pure) -> (a : Pure)
                     -> TraversableDict t
-                    -> Action ((a -> a -> Action a) -> t a -> Action a);
+                    -> Action EmpE ((a -> a -> Action EmpE a) -> t a -> Action EmpE a);
 
 constant fun_zip : (s : Pure -> Pure)
                 -> (t : Pure -> Pure)
@@ -100,8 +127,8 @@ constant fun_zip : (s : Pure -> Pure)
                 -> (b : Pure)
                 -> TraversableDict s
                 -> TraversableDict t
-                -> Action (s a -> t b -> Stream (PyonTuple2 a b));
+                -> Action EmpE (s a -> t b -> Stream EmpE (PyonTuple2 a b));
 
-constant fun_iota : Stream Int;
+constant fun_iota : Stream EmpE Int;
 
-constant fun_undefined : (a : Pure) -> Action a;
+constant fun_undefined : (a : Pure) -> Action EmpE a;

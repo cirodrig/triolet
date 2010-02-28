@@ -1,8 +1,19 @@
+-- | System F representation of Pyon code.
+--
+-- This is a short-lived representation produced as the output of type
+-- inference.  It is translated to another form with the help of type
+-- information.
+-- Since it has no dependent types, renaming is not required.
 
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveDataTypeable, EmptyDataDecls, TypeFamilies, FlexibleInstances #-}
 module Pyon.SystemF.Syntax
-    (PyonType,
-     PyonClass(..),
+    (PyonClass(..),
+     pyonClassConstructor, pyonClassNumSuperclasses, pyonClassNumMethods,
+     Vanilla,
+     ExpOf, TypeOf,
+     VanillaExp, VanillaType, VanillaPat, VanillaTyPat, VanillaFun,
+     VanillaDef, VanillaModule,
+     PyonType,
      Var,
      Lit(..),
      Pat(..),
@@ -18,16 +29,51 @@ where
 
 import Data.Typeable
 
+import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Label
+import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
 
--- | Pyon types are type-level Gluon expressions.
-type PyonType = Gluon.Exp Gluon.Core
+import Pyon.SystemF.Builtins
 
 -- | The Pyon type classes.
 data PyonClass = EqClass | OrdClass | TraversableClass
                deriving(Show, Typeable)
+
+pyonClassConstructor :: PyonClass -> Gluon.Con
+pyonClassConstructor EqClass = pyonBuiltin the_eqDict
+pyonClassConstructor OrdClass = pyonBuiltin the_ordDict
+pyonClassConstructor TraversableClass = pyonBuiltin the_traversableDict
+
+pyonClassNumSuperclasses :: PyonClass -> Int
+pyonClassNumSuperclasses EqClass = 0
+pyonClassNumSuperclasses OrdClass = 1
+pyonClassNumSuperclasses TraversableClass = 0
+
+pyonClassNumMethods :: PyonClass -> Int
+pyonClassNumMethods EqClass = 2
+pyonClassNumMethods OrdClass = 4
+pyonClassNumMethods TraversableClass = 1
+
+type family ExpOf a :: *
+type family TypeOf a :: *
+     
+data Vanilla deriving(Typeable)
+
+type instance ExpOf Vanilla = Exp Vanilla
+type instance TypeOf Vanilla = PyonType
+
+type VanillaExp = Exp Vanilla
+type VanillaType = PyonType
+type VanillaPat = Pat Vanilla
+type VanillaTyPat = TyPat Vanilla
+type VanillaDef = Def Vanilla
+type VanillaFun = Fun Vanilla
+type VanillaModule = Module Vanilla
+
+-- | Pyon types are type-level Gluon expressions.
+type PyonType = Gluon.Exp Gluon.Core
 
 -- | Pyon variables are the same as Gluon variables.
 type Var = Gluon.Var
@@ -44,25 +90,25 @@ data Lit =
   deriving(Typeable)
 
 -- | Patterns.
-data Pat =
-    WildP PyonType              -- ^ Wildcard pattern
-  | VarP Var PyonType           -- ^ Variable pattern binding
-  | TupleP [Pat]                -- ^ Tuple pattern
+data Pat syn =
+    WildP (TypeOf syn)              -- ^ Wildcard pattern
+  | VarP Var (TypeOf syn)           -- ^ Variable pattern binding
+  | TupleP [Pat syn]                -- ^ Tuple pattern
   deriving(Typeable)
           
 -- | Type-level patterns.
-data TyPat = TyPat Gluon.Var PyonType
+data TyPat syn = TyPat Gluon.Var (TypeOf syn)
            deriving(Typeable)
 
 -- | Information common to all expressions.
-data ExpInfo = ExpInfo
+type ExpInfo = Gluon.SynInfo
 
 -- | Default values of 'ExpInfo'.
 defaultExpInfo :: ExpInfo
-defaultExpInfo = ExpInfo
+defaultExpInfo = Gluon.internalSynInfo Gluon.ObjectLevel
 
 -- | Expressions.
-data Exp =
+data Exp syn =
     -- | A variable reference
     VarE
     { expInfo :: ExpInfo
@@ -77,87 +123,92 @@ data Exp =
   | LitE
     { expInfo :: ExpInfo
     , expLit :: !Lit
-    , expType :: PyonType
+    , expType :: TypeOf syn
     }
     -- | An undefined value
   | UndefinedE
     { expInfo :: ExpInfo
-    , expType ::  PyonType
+    , expType ::  TypeOf syn
     }
     -- | Build a tuple
   | TupleE
     { expInfo :: ExpInfo
-    , expFields :: [Exp]
+    , expFields :: [ExpOf syn]
     }
     -- | Type application
   | TyAppE
     { expInfo :: ExpInfo
-    , expOper :: Exp
-    , expTyArg :: PyonType
+    , expOper :: ExpOf syn
+    , expTyArg :: TypeOf syn
     }
     -- | Function call
   | CallE
     { expInfo :: ExpInfo
-    , expOper :: Exp
-    , expArgs :: [Exp]
+    , expOper :: ExpOf syn
+    , expArgs :: [ExpOf syn]
     }
     -- | If-then-else expression
   | IfE
     { expInfo :: ExpInfo
-    , expCond :: Exp
-    , expTrueCase :: Exp
-    , expFalseCase :: Exp
+    , expCond :: ExpOf syn
+    , expTrueCase :: ExpOf syn
+    , expFalseCase :: ExpOf syn
     }
     -- | Lambda expression
   | FunE
     { expInfo :: ExpInfo
-    , expFun :: Fun
+    , expFun :: Fun syn
     }
     -- | Let expression
   | LetE
     { expInfo :: ExpInfo
-    , expBinder :: Pat
-    , expValue :: Exp
-    , expBody :: Exp
+    , expBinder :: Pat syn
+    , expValue :: ExpOf syn
+    , expBody :: ExpOf syn
     }
     -- | Recursive definition group
   | LetrecE
     { expInfo :: ExpInfo
-    , expDefs :: [Def]
-    , expBody :: Exp
+    , expDefs :: [Def syn]
+    , expBody :: ExpOf syn
     }
     -- | Create a class dictionary
   | DictE
     { expInfo :: ExpInfo
     , expClass :: PyonClass
-    , expType :: PyonType       -- ^ Class instance type
-    , expSuperclasses :: [Exp]
-    , expMethods :: [Exp]
+    , expType :: TypeOf syn     -- ^ Class instance type
+    , expSuperclasses :: [ExpOf syn]
+    , expMethods :: [ExpOf syn]
     }
     -- | Select a class method
   | MethodSelectE
     { expInfo :: ExpInfo
     , expClass :: PyonClass
-    , expType :: PyonType       -- ^ Class instance type
+    , expType :: TypeOf syn     -- ^ Class instance type
     , expMethodIndex :: {-# UNPACK #-} !Int
-    , expArg :: Exp             -- ^ Class dictionary
+    , expArg :: ExpOf syn       -- ^ Class dictionary
     }
   deriving(Typeable)
+          
+instance HasSourcePos (Exp syn) where
+  getSourcePos _ = noSourcePos
+  -- Not implemented!
+  setSourcePos _ _ = internalError "HasSourcePos.setSourcePos"
 
-data Fun =
-  Fun { funTyParams :: [TyPat]  -- ^ Type parameters
-      , funParams :: [Pat]      -- ^ Object parameters
-      , funReturnType :: PyonType -- ^ Return type
+data Fun syn =
+  Fun { funTyParams :: [TyPat syn] -- ^ Type parameters
+      , funParams :: [Pat syn]      -- ^ Object parameters
+      , funReturnType :: TypeOf syn -- ^ Return type
       , funMonad :: !Gluon.Con -- ^ Which monad this function inhabits 
                               -- (Stream or Action)
-      , funBody :: Exp
+      , funBody :: ExpOf syn
       }
   deriving(Typeable)
 
-data Def = Def Var Fun
+data Def syn = Def Var (Fun syn)
          deriving(Typeable)
 
-data Module = Module [Def]
+data Module syn = Module [Def syn]
             deriving(Typeable)
 
 -- | Return True only if the given expression has no side effects.
@@ -168,7 +219,7 @@ data Module = Module [Def]
 -- effects.  Lambda expressions have no side effects, since they return but
 -- do not execute their function.
 
-isValueExp :: Exp -> Bool
+isValueExp :: Exp Vanilla -> Bool
 isValueExp expression =
   case expression
   of VarE {} -> True

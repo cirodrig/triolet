@@ -75,6 +75,19 @@ class Class(PyonTypeBase):
         else:
             raise TypeError, "argument must be string or int"
 
+    def getScheme(self):
+        """
+        cls.getScheme() -> TyScheme
+
+        Get a type scheme representing the type described by the class.
+        For example, given the class forall a. Eq a => Ord a,
+        this returns the scheme forall a. Eq a => a.
+        """
+        return pyon.types.schemes.TyScheme([],
+                                           [self.parameter],
+                                           self.constraint,
+                                           self.parameter)
+
     def getSystemFCon(self):
         "Get the System F dictionary type constructor for this class"
         return self.systemFCon
@@ -292,15 +305,25 @@ class ClassPredicate(PyonTypeBase):
             raise RuntimeError, "Cannot derive an instance for " + instance_text
 
         # Continue context reduction with superclasses
-        (inst, constraints) = ip
-        superclasses = []
-        out_constraints = []
-        for c in constraints:
-            sc, local_constraints = c.toHNF()
-            out_constraints += local_constraints
+        (inst, inst_constraints, cls_constraints) = ip
+
+        out_constraints = []    # List of new constraints to resolve
+        def superclass_to_hnf(constraint, superclasses):
+            """
+            Convert a superclass constraint to HNF.  This may produce
+            additional constraints, which are added to out_constraints."""
+            sc, local_constraints = constraint.toHNF()
+            out_constraints.extend(local_constraints)
             superclasses.append(sc)
 
-        return (InstanceDerivation(self, inst, superclasses,
+        inst_superclasses = []
+        for c in inst_constraints: superclass_to_hnf(c, inst_superclasses)
+        cls_superclasses = []
+        for c in cls_constraints: superclass_to_hnf(c, cls_superclasses)
+
+        return (InstanceDerivation(self, inst,
+                                   inst_superclasses,
+                                   cls_superclasses,
                                    self.getDictionaryType()),
                 out_constraints)
 
@@ -338,8 +361,17 @@ class ClassPredicate(PyonTypeBase):
             if subst is None: continue
 
             # Get the constraints entailed by this type
-            constraints = [c.rename(subst) for c in inst.constraints]
-            return (inst, constraints)
+            inst_constraints = [c.rename(subst) for c in inst.constraints]
+
+            cls_constraints = []
+            for c in inst.typeClass.constraint:
+                # Make a copy of the constraint and unify it with this
+                # predicate's type, then apply the substitution to it
+                c_subst = unification.match(c.type, ty)
+                c = c.rename(c_subst).rename(subst)
+                cls_constraints.append(c)
+
+            return (inst, inst_constraints, cls_constraints)
 
         # Otherwise, no instances match
         return None
@@ -379,8 +411,8 @@ def entails(context, predicate):
     by_instance = predicate.instancePredicates()
     if by_instance is not None:
         # All subgoals must be entailed by the context
-        _, constraints = by_instance
-        for p in constraints:
+        _, inst_constraints, cls_constraints = by_instance
+        for p in inst_constraints + cls_constraints:
             if not entails(context, p): return False
 
         return True

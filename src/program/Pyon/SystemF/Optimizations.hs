@@ -22,41 +22,41 @@ catEndo :: [a -> a] -> a -> a
 catEndo fs x = foldr ($) x fs
 
 -- | Apply optimizations to a module.
-optimizeModule :: Module -> Module
+optimizeModule :: VanillaModule -> VanillaModule
 optimizeModule mod =
   mapModule elimDeadCode $
   mapModule doPartialEvaluation $
   mod
 
-mapModule :: (Def -> Def) -> Module -> Module
+mapModule :: (VanillaDef -> VanillaDef) -> VanillaModule -> VanillaModule
 mapModule f (Module ds) = Module (map f ds)
 
 -------------------------------------------------------------------------------
 -- Partial evaluation
 
-doPartialEvaluation :: Def -> Def
+doPartialEvaluation :: VanillaDef -> VanillaDef
 doPartialEvaluation def = runPEval $ pevalDef def
 
 -- | The 'PEval' monad holds a variable-to-value mapping for constant
 -- propagation, copy propagation, and inlining.  Expressions in the map have
 -- no side effects, and therefore are safe to inline.
-type PEval a = Reader (Map Var Exp) a
+type PEval a = Reader (Map Var VanillaExp) a
 
 -- | Perform partial evaluation in an empty environment.
 runPEval :: PEval a -> a
 runPEval m = runReader m Map.empty
 
-lookupVar :: Var -> PEval (Maybe Exp)
+lookupVar :: Var -> PEval (Maybe VanillaExp)
 lookupVar v = asks (Map.lookup v)
 
-lookupVarDefault :: Exp -> Var -> PEval Exp
+lookupVarDefault :: VanillaExp -> Var -> PEval VanillaExp
 lookupVarDefault defl v = asks (Map.findWithDefault defl v)
 
 -- | Given a value and the pattern it is bound to, add the bound value(s)
 -- to the environment.  The caller should verify that the value has no
 -- side effects.  Any values that cannot be added to the environment will be
 -- ignored.
-bindValue :: Pat -> Exp -> PEval a -> PEval a
+bindValue :: VanillaPat -> VanillaExp -> PEval a -> PEval a
 bindValue (WildP _)   _ m = m
 bindValue (VarP v t)  e m = local (Map.insert v e) m
 bindValue (TupleP ps) e m =
@@ -71,11 +71,11 @@ bindValue (TupleP ps) e m =
 
 -- | Partial evaluation of an expression.  First, evaluate subexpressions;
 -- then, try to statically evaluate.
-pevalExp :: Exp -> PEval Exp
+pevalExp :: VanillaExp -> PEval VanillaExp
 pevalExp expression =
   return . partialEvaluate =<< pevalExpRecursive expression
 
-partialEvaluate :: Exp -> Exp
+partialEvaluate :: VanillaExp -> VanillaExp
 partialEvaluate expression =
   case expression
   of MethodSelectE {expArg = argument} ->
@@ -89,7 +89,7 @@ partialEvaluate expression =
      -- Default: return the expression unchanged
      _ -> expression
 
-pevalExpRecursive :: Exp -> PEval Exp
+pevalExpRecursive :: VanillaExp -> PEval VanillaExp
 pevalExpRecursive expression =
   case expression
   of VarE {expVar = v} -> lookupVarDefault expression v
@@ -137,12 +137,12 @@ pevalExpRecursive expression =
        e' <- pevalExp e
        return $ expression {expArg = e'}
 
-pevalFun :: Fun -> PEval Fun
+pevalFun :: VanillaFun -> PEval VanillaFun
 pevalFun f = do
   body <- pevalExp $ funBody f
   return $ f {funBody = body}
 
-pevalDef :: Def -> PEval Def
+pevalDef :: VanillaDef -> PEval VanillaDef
 pevalDef (Def v f) = do
   f' <- pevalFun f
   return $ Def v f'
@@ -162,7 +162,7 @@ onSetUnion f (SetUnion s) = SetUnion (f s)
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
-elimDeadCode :: Def -> Def
+elimDeadCode :: VanillaDef -> VanillaDef
 elimDeadCode def = evalEDC edcDef def
 
 -- | Dead code elimination on a value produces a new value and a set of
@@ -245,7 +245,7 @@ edcScanType t = scanType t >> return ()
 
 -- | Run the computation in a scope where the pattern is bound.
 -- Return a new pattern and the result of the computation.
-edcMaskPat :: Pat -> GetMentionsSet a -> GetMentionsSet (Pat, a)
+edcMaskPat :: VanillaPat -> GetMentionsSet a -> GetMentionsSet (VanillaPat, a)
 edcMaskPat pat m =
   case pat
   of WildP t -> do
@@ -277,7 +277,7 @@ edcMaskPat pat m =
     wildcardType (WildP t) = t
     wildcardType _ = error "Not a wildcard pattern"
 
-edcMaskPats :: [Pat] -> GetMentionsSet a -> GetMentionsSet ([Pat], a)
+edcMaskPats :: [VanillaPat] -> GetMentionsSet a -> GetMentionsSet ([VanillaPat], a)
 edcMaskPats (pat:pats) m = do
   (pat', (pats', x)) <- edcMaskPat pat $ edcMaskPats pats m
   return (pat':pats', x)
@@ -285,13 +285,13 @@ edcMaskPats (pat:pats) m = do
 edcMaskPats [] m = do x <- m
                       return ([], x)
 
-edcMaskTyPat :: TyPat -> GetMentionsSet a -> GetMentionsSet (TyPat, a)
+edcMaskTyPat :: VanillaTyPat -> GetMentionsSet a -> GetMentionsSet (VanillaTyPat, a)
 edcMaskTyPat pat@(TyPat v ty) m = do
   edcScanType ty
   x <- mask v m
   return (pat, x)
 
-edcMaskTyPats :: [TyPat] -> GetMentionsSet a -> GetMentionsSet ([TyPat], a)
+edcMaskTyPats :: [VanillaTyPat] -> GetMentionsSet a -> GetMentionsSet ([VanillaTyPat], a)
 edcMaskTyPats (pat:pats) m = do
   (pat', (pats', x)) <- edcMaskTyPat pat $ edcMaskTyPats pats m
   return (pat':pats', x)
@@ -299,12 +299,12 @@ edcMaskTyPats (pat:pats) m = do
 edcMaskTyPats [] m = do x <- m
                         return ([], x)
 
-edcDef :: EDC Def
+edcDef :: EDC VanillaDef
 edcDef (Def v f) = do
   f' <- edcFun f
   return $ Def v f'
 
-edcFun :: EDC Fun
+edcFun :: EDC VanillaFun
 edcFun function@(Fun { funTyParams = tps
                      , funParams = ps
                      , funReturnType = return_type
@@ -317,7 +317,7 @@ edcFun function@(Fun { funTyParams = tps
       edcExp body
   return $ function {funTyParams = tps', funParams = ps', funBody = b'}
 
-edcExp :: EDC Exp
+edcExp :: EDC VanillaExp
 edcExp expression =
   case expression
   of VarE {expVar = v} ->
@@ -369,7 +369,7 @@ edcExp expression =
        return $ expression {expArg = e'}
 
 -- | Dead code elimination for a \"let\" expression
-edcLetE :: ExpInfo -> Pat -> Exp -> Exp -> GetMentionsSet Exp
+edcLetE :: ExpInfo -> VanillaPat -> VanillaExp -> VanillaExp -> GetMentionsSet VanillaExp
 edcLetE info lhs rhs body =
   -- Replace the pattern "let x = foobar in x" with "foobar"
   case body

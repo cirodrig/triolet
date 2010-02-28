@@ -1,11 +1,16 @@
 
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, TypeFamilies #-}
 module Pyon.NewCore.Typecheck where
 
+import Control.Applicative
 import Control.Monad
+import Data.List
 import Data.Maybe
 import Data.Monoid
+import Debug.Trace
+import Text.PrettyPrint.HughesPJ(text, (<+>), ($$), vcat)
 
+import Gluon.Common.Label
 import Gluon.Common.Error
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
@@ -18,8 +23,11 @@ import Gluon.Eval.Environment
 import Gluon.Eval.Eval
 import qualified Gluon.Eval.Typecheck as Gluon
 
+import PythonInterface.Python
+import Pyon.Globals
 import Pyon.NewCore.Syntax
 import Pyon.NewCore.Rename
+import Pyon.NewCore.Print
 import Pyon.SystemF.Builtins
 
 data PyonWorker a =
@@ -28,6 +36,13 @@ data PyonWorker a =
   , doVal       :: !(Val a -> CWhnf -> RecVal a)
   , doStm       :: !(Stm a -> CWhnf -> CWhnf -> RecStm a)
   }
+
+instance PyonSyntax Gluon.TrivialSyntax where
+  type ValOf Gluon.TrivialSyntax = Const ()
+  type StmOf Gluon.TrivialSyntax = Const ()
+
+noWork :: PyonWorker Gluon.TrivialSyntax
+noWork = PyonWorker Gluon.tcNoWork (\_ _ -> Const ()) (\_ _ _ -> Const ())
 
 -- | Result of type checking a Val
 type TCVal syn = (CWhnf, RecVal syn)
@@ -46,12 +61,12 @@ typeScanVal' worker value = do
     of GluonV {valInfo = inf, valGluonTerm = t} -> do
          (ty, ty_val) <- Gluon.typeScanExp' (getTCWorker worker) t
          return (ty, GluonV {valInfo = inf, valGluonTerm = ty_val})
-       VarV {valInfo = inf, valVar = v} -> 
+{-       VarV {valInfo = inf, valVar = v} -> 
          typeScanVarV inf v
        LitV {valInfo = inf, valLit = l} ->
          typeScanLitV inf l
        ConV {valInfo = inf, valCon = c} ->
-         typeScanConV inf c
+         typeScanConV inf c-}
        AppV {valInfo = inf, valOper = op, valArgs = args} ->
          typeScanAppV worker inf op args
        ALamV {valInfo = inf, valAFun = fun} ->
@@ -62,7 +77,7 @@ typeScanVal' worker value = do
          typeScanSDoV worker inf stm
   return (ty, doVal worker (new_val :: Val syn) ty)
 
-typeScanVarV :: Syntax syn => SynInfo -> Var -> LinTC (CWhnf, Val syn)
+{-typeScanVarV :: Syntax syn => SynInfo -> Var -> LinTC (CWhnf, Val syn)
 typeScanVarV inf v = do
   ty <- evalFully' =<< getType' (getSourcePos inf) v
   return (ty, VarV inf v)
@@ -75,7 +90,7 @@ typeScanLitV inf l =
 
 typeScanConV inf c = do
   ty <- liftPure $ evalFully =<< Gluon.getConstructorType c
-  return (ty, ConV inf c)
+  return (ty, ConV inf c)-}
 
 typeScanAppV :: Syntax syn => PyonWorker syn -> SynInfo -> SCVal
              -> [SCVal]
@@ -199,10 +214,10 @@ typeScanActionFun worker function = enterLinearScope $
 -- a function type
 mkFunctionType :: [(Binder syn (), CWhnf)] -> CWhnf -> CWhnf
 mkFunctionType ((Binder v _ _, binder_ty) : params) rng =
-  let rng' = mkFunctionType params rng
-  in Whnf $ if whnfExp rng' `Gluon.mentions` v
-            then Gluon.mkInternalFunE False v (whnfExp binder_ty) (whnfExp rng)
-            else Gluon.mkInternalArrowE False (whnfExp binder_ty) (whnfExp rng)
+  let rng' = whnfExp $ mkFunctionType params rng
+  in Whnf $ if rng' `Gluon.mentions` v
+            then Gluon.mkInternalFunE False v (whnfExp binder_ty) rng'
+            else Gluon.mkInternalArrowE False (whnfExp binder_ty) rng'
           
 mkFunctionType [] rng = rng
 
@@ -219,12 +234,12 @@ typeScanStreamFun worker function = enterLinearScope $
     -- Get the annotated return type
     -- (Ignore the effect annotation)
     let ret_pos = getSourcePos $ funReturnType function
-    (ann_ret_type, ann_ret_val) <-
-      Gluon.typeScanExp' (getTCWorker worker) $ funReturnType function
+    ann_ret_val <- Gluon.tcCheck (getTCWorker worker) $ funReturnType function
+    ann_ret_type <- evalFully $ funReturnType function
 
     -- Actual type must be equal to the annotated type
-    Gluon.tcAssertEqual ret_pos (verbatim $ whnfExp ret_type) 
-                                (verbatim $ whnfExp ann_ret_type)
+    Gluon.tcAssertEqual ret_pos (verbatim $ whnfExp ann_ret_type) 
+                                  (verbatim $ whnfExp ret_type)
 
     -- Return type must be a Stream
     case Gluon.unpackWhnfAppE ret_type of 
@@ -404,10 +419,11 @@ typeScanDefs :: Syntax syn =>
              -> [Def (SubstitutingT Core)]
              -> ([Def syn] -> LinTC a)
              -> LinTC a
-typeScanDefs worker defs k = 
+typeScanDefs worker defs k =
   assumeDefinienda defs $ mapM scanDefiniens defs >>= k
   where
-    assumeDefinienda (def:defs) k = do
+    assumeDefinienda defs k = foldr assumeDefiniendum k defs
+    assumeDefiniendum def k = do
       t <- liftPure $ definiensType $ definiens def
       assumePure (definiendum def) t k
       
@@ -420,6 +436,17 @@ typeScanDefs worker defs k =
                    (_, fun') <- typeScanStreamFun worker fun
                    return $ StreamFunDef fun'
       return $ Def info v def'
+
+typeCheckModule :: Module Core -> IO ()
+typeCheckModule (Module defs) = do
+  result <- withTheVarIdentSupply $ \supply ->
+    runLinTCIO supply $ do
+      (rename_defs, _) <- freshenDefGroupHead mempty defs (const $ return ()) 
+      typeScanDefs noWork rename_defs $ \_ -> return ()
+  case result of
+    Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
+                    throwPythonExc pyRuntimeError "Type checking failed"
+    Right () -> return ()
 
 definiensType (ActionFunDef fun) = getActionFunType fun 
 definiensType (StreamFunDef fun) = getStreamFunType fun 
@@ -451,7 +478,8 @@ typeScanCaseS worker inf v alts = do
       effect_type = head effect_types
   return (result_type, effect_type, CaseS inf scr_val values)
   where
-    compareAllTypes pos xs = zipWithM_ (Gluon.tcAssertEqual pos) xs (tail xs)
+    compareAllTypes pos xs = 
+      zipWithM_ (Gluon.tcAssertEqual pos) xs (tail xs)
 
 typeScanAlt :: Syntax syn =>
                PyonWorker syn
@@ -529,6 +557,10 @@ matchPattern worker scr_type (ConP con p_params) continuation = do
       let new_pat = ConP con (reverse new_p_params)
           
       in continuation new_pat p_sub
+    
+    -- Error if argument lists aren't the same length
+    matchConArgs _ _ _ _ _ _ =
+      internalError "Wrong number of parameters to pattern" 
 
     -- Match a rigid argument.  Bind parameters for this argument to the 
     -- actual type, determined from the scrutinee type.

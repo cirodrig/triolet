@@ -32,7 +32,7 @@ def _makeFunctionType(domain, range):
         dom1 -> dom2 -> ... -> Stream a
 
     If tagged as 'action', it generates the type
-        dom1 -> dom2 -> ... -> Action range
+        dom1 -> dom2 -> ... -> Action EmpE range
 
     If the tag is a variable, then default to 'action'. 
     """
@@ -47,11 +47,15 @@ def _makeFunctionType(domain, range):
 
         gluon_type = gluon.mkConAppE(noSourcePos,
                                      system_f.con_Stream,
-                                     [_convertFirstOrderType(range.argument)])
+                                     [gluon.mkConE(noSourcePos,
+                                                   gluon.con_EmpE),
+                                      _convertFirstOrderType(range.argument)])
     else:
         gluon_type = gluon.mkConAppE(noSourcePos,
                                      system_f.con_Action,
-                                     [_convertFirstOrderType(range)])
+                                     [gluon.mkConE(noSourcePos,
+                                                   gluon.con_EmpE),
+                                      _convertFirstOrderType(range)])
 
     # Add an arrow for each element of the domain
     for t in reversed(domain):
@@ -99,16 +103,17 @@ def _constructorType(con):
     # Put the constructor in gluon_con
     if isinstance(con, hmtype.TupleTyCon):
         gluon_con = system_f.getTupleCon(con.numArguments)
+        gluon_type = gluon.mkConE(noSourcePos, gluon_con)
     elif isinstance(con, hmtype.TyCon):
-        if con.gluonConstructor is None:
+        if con.gluonType is None:
             raise ValueError, "Cannot translate constructor"
-        gluon_con = con.gluonConstructor
+        gluon_type = con.gluonType
     elif isinstance(con, hmtype.FunTyCon):
         raise ValueError, "Cannot translate an un-applied function type constructor"
     else:
         raise TypeError, type(con)
 
-    return gluon.mkConE(noSourcePos, gluon_con)
+    return gluon_type
 
 def _convertFirstOrderType(ty):
     """

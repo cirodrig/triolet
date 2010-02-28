@@ -373,4 +373,5 @@ createGluonModule(void)
   ADD_GLUON_OBJECT("con_Int", gluon_con_Int);
   ADD_GLUON_OBJECT("con_Float", gluon_con_Float);
   ADD_GLUON_OBJECT("type_Pure", gluon_type_Pure);
+  ADD_GLUON_OBJECT("con_EmpE", gluon_con_EmpE);
 }

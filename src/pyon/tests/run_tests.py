@@ -30,10 +30,11 @@ def tryCompile(fname, show_traceback = False):
 
         system_f.typeCheckModule(test_sf)
 	test_sf = system_f.optimizeModule(test_sf)
-        system_f.typeCheckModule(test_sf)
+        test_flat = system_f.flattenModule(test_sf)
 
         # (DEBUG) print the output
-	system_f.printModule(test_sf)
+	system_f.printCoreModule(test_flat)
+	system_f.typeCheckCoreModule(test_flat)
 
     except Exception, e:
         print e

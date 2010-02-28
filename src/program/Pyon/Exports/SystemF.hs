@@ -11,18 +11,23 @@ import Data.Typeable
 import Foreign.Ptr(nullPtr)
 import Foreign.C.String
 import Foreign.C.Types
+import System.IO
 
 import PythonInterface.Python
 import PythonInterface.HsObject
 import Gluon.Common.Label
 import Gluon.Core.Level
 import qualified Gluon.Core
+import Gluon.Eval.Error(showTypeCheckError)
 import Pyon.Globals
 import Pyon.SystemF.Builtins
 import Pyon.SystemF.Syntax
 import Pyon.SystemF.Print
 import Pyon.SystemF.Optimizations
 import Pyon.SystemF.Typecheck
+import Pyon.SystemF.Flatten
+import qualified Pyon.NewCore.Print
+import qualified Pyon.NewCore.Typecheck
 
 import Pyon.Exports.Delayed
 
@@ -31,7 +36,8 @@ import Pyon.Exports.Delayed
 
 foreign export ccall pyon_newExpPlaceholder :: IO PyPtr
 
-pyon_newExpPlaceholder = newHsObject =<< (newPlaceholder :: IO (Delayed Exp))
+pyon_newExpPlaceholder =
+  newHsObject =<< (newPlaceholder :: IO (Delayed VanillaExp))
 
 foreign export ccall pyon_setExpPlaceholder :: PyPtr -> PyPtr -> IO PyPtr
 
@@ -39,7 +45,7 @@ pyon_setExpPlaceholder :: PyPtr -> PyPtr -> IO PyPtr
 pyon_setExpPlaceholder placeholder value = rethrowExceptionsInPython $ do
   ph <- fromHsObject' placeholder
   val <- fromHsObject' value
-  setPlaceholder ph (val :: Delayed Exp)
+  setPlaceholder ph (val :: Delayed VanillaExp)
   pyNone
 
 -------------------------------------------------------------------------------
@@ -201,20 +207,20 @@ foreign export ccall pyon_mkTupleP :: PyPtr -> IO PyPtr
 pyon_mkTyPat tyvar kind = rethrowExceptionsInPython $ do
   t <- fromHsObject' tyvar
   k <- fromHsObject' kind
-  newHsObject $ (TyPat t <$> k :: Delayed TyPat)
+  newHsObject $ (TyPat t <$> k :: Delayed VanillaTyPat)
 
 pyon_mkWildP ty = rethrowExceptionsInPython $ do
   t <- fromHsObject' ty
-  newHsObject $ (WildP <$> t :: Delayed Pat)
+  newHsObject $ (WildP <$> t :: Delayed VanillaPat)
 
 pyon_mkVarP var ty = rethrowExceptionsInPython $ do
   v <- fromHsObject' var
   t <- fromHsObject' ty
-  newHsObject $ (VarP v <$> t :: Delayed Pat)
+  newHsObject $ (VarP v <$> t :: Delayed VanillaPat)
 
 pyon_mkTupleP pats = rethrowExceptionsInPython $ do
   ps <- fromListOfHsObject' pats
-  newHsObject $ (TupleP <$> sequenceA ps :: Delayed Pat)
+  newHsObject $ (TupleP <$> sequenceA ps :: Delayed VanillaPat)
 
 foreign export ccall pyon_mkVarE :: PyPtr -> IO PyPtr
 foreign export ccall pyon_mkConE :: PyPtr -> IO PyPtr
@@ -232,7 +238,7 @@ foreign export ccall pyon_mkDictE
 foreign export ccall pyon_mkMethodSelectE
   :: PyPtr -> PyPtr -> CInt -> PyPtr -> IO PyPtr
 
-expHsObject :: Delayed Exp -> IO PyPtr
+expHsObject :: Delayed VanillaExp -> IO PyPtr
 expHsObject = newHsObject
 
 pyon_mkVarE var = rethrowExceptionsInPython $ do
@@ -314,14 +320,18 @@ pyon_mkFun tyParams params ret_type ret_stream_tag body =
     let stream_tag = Unevaluated $
                      withPyRef stream_tag_callback $ fromHsObject' <=< call0
     e <- fromHsObject' body
-    newHsObject $ (Fun <$> sequenceA tps <*> sequenceA ps <*> rt <*> stream_tag <*> e :: Delayed Fun)
+    newHsObject $ (Fun <$> sequenceA tps 
+                       <*> sequenceA ps 
+                       <*> rt 
+                       <*> stream_tag 
+                       <*> e :: Delayed VanillaFun)
 
 foreign export ccall pyon_mkDef :: PyPtr -> PyPtr -> IO PyPtr
 
 pyon_mkDef defVar defFun = rethrowExceptionsInPython $ do
   d <- fromHsObject' defVar
   f <- fromHsObject' defFun
-  newHsObject $ (Def d <$> f :: Delayed Def)
+  newHsObject $ (Def d <$> f :: Delayed VanillaDef)
 
 foreign export ccall pyon_makeAndEvaluateModule :: PyPtr -> IO PyPtr
 
@@ -329,7 +339,7 @@ pyon_makeAndEvaluateModule :: PyPtr -> IO PyPtr
 pyon_makeAndEvaluateModule def_list = rethrowExceptionsInPython $ do
   defs <- fromListOfHsObject' def_list
   real_defs <- mapM force defs
-  newHsObject $ Module real_defs
+  newHsObject (Module real_defs :: VanillaModule)
   
 -------------------------------------------------------------------------------
 -- Exported predicates.
@@ -339,7 +349,7 @@ foreign export ccall pyon_isExp :: PyPtr -> IO Bool
 pyon_isExp :: PyPtr -> IO Bool
 pyon_isExp ptr = do
   type_rep <- hsObjectType ptr
-  return $ type_rep == typeOf (undefined :: Delayed Exp)
+  return $ type_rep == typeOf (undefined :: Delayed VanillaExp)
 
 -------------------------------------------------------------------------------
 -- Other exported functions.
@@ -347,12 +357,16 @@ pyon_isExp ptr = do
 foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall pyon_typeCheckModule :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall pyon_optimizeModule :: PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall pyon_flattenModule :: PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall pyon_printCoreModule :: PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall pyon_typeCheckCoreModule :: PyPtr -> PyPtr -> IO PyPtr
 
 pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 pyon_printModule _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
   m <- fromHsObject' mod
   print $ pprModule m
+  hFlush stdout
   pyNone
 
 pyon_optimizeModule :: PyPtr -> PyPtr -> IO PyPtr
@@ -366,4 +380,29 @@ pyon_typeCheckModule _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
   m <- fromHsObject' mod
   typeCheckModulePython m
+  pyNone
+
+pyon_flattenModule :: PyPtr -> PyPtr -> IO PyPtr
+pyon_flattenModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  m' <- flatten m
+  case m' of
+    Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
+                    throwPythonExc pyRuntimeError "Flattening failed"
+    Right mod -> newHsObject mod
+
+pyon_printCoreModule :: PyPtr -> PyPtr -> IO PyPtr
+pyon_printCoreModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  print $ Pyon.NewCore.Print.pprModule m
+  hFlush stdout
+  pyNone
+
+pyon_typeCheckCoreModule :: PyPtr -> PyPtr -> IO PyPtr
+pyon_typeCheckCoreModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  Pyon.NewCore.Typecheck.typeCheckModule m
   pyNone

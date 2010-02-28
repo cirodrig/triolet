@@ -6,7 +6,8 @@ module Pyon.NewCore.Rename
         renameValFully,
         renameValHead, freshenValHead,
         renameStmFully,
-        renameStmHead, freshenStmHead)
+        renameStmHead, freshenStmHead,
+        freshenDefGroupHead)
 where
 
 import Control.Monad
@@ -58,9 +59,9 @@ renameValHead :: RecVal (SubstitutingT Core) -> Val (SubstitutingT Core)
 renameValHead (SubstitutingSyntax (sub :@ value)) =
   let r = suspendPyon sub
   in case value
-     of VarV info v -> case substituteForVar (substSubstituter sub) info v
+     of {-VarV info v -> case substituteForVar (substSubstituter sub) info v
                        of Nothing -> VarV info v
-                          Just e  -> GluonV info (verbatim e)
+                          Just e  -> GluonV info (verbatim e) -}
         _ -> mapVal (suspendPyon sub) (suspendPyon sub) (suspendGluon sub)
              value
 
@@ -102,6 +103,24 @@ freshenDefiniensHead sub (ActionFunDef f) =
   liftM ActionFunDef $ freshenActionFunHead sub f
 freshenDefiniensHead sub (StreamFunDef f) = 
   liftM StreamFunDef $ freshenStreamFunHead sub f
+
+freshenDefGroupHead :: (Monad m, Supplies m VarID) =>
+                       PyonSubst
+                    -> [Def Core]
+                    -> (PyonSubst -> m a)
+                    -> m ([Def (SubstitutingT Core)], a)
+freshenDefGroupHead sub defs body = do
+  -- Create new definitions of local variables
+  (sub', newLocalVars) <- mapAccumM freshenVar sub $ map definiendum defs
+  
+  -- Apply the renaming to definienda
+  definienda <- mapM (freshenDefiniensHead sub' . definiens) defs
+  let defs' = zipWith3 Def (map defInfo defs) newLocalVars definienda
+
+  -- Visit other things in the group's scope
+  body' <- body sub'
+  
+  return (defs', body')
 
 freshenBinder :: (Monad m, Supplies m VarID) =>
                  PyonSubst -> Binder Core () 
@@ -160,13 +179,8 @@ freshenStmHead sub_statement@(SubstitutingSyntax (sub :@ statement)) =
        return $ LetS inf mv' rhs' body'
      
      LetrecS {stmInfo = inf, stmDefs = defs, stmBody = body} -> do
-       -- Create new definitions of local variables
-       (sub', newLocalVars) <- mapAccumM freshenVar sub $ map definiendum defs
-       
-       -- Visit subexpressions 
-       functions <- mapM (freshenDefiniensHead sub') $ map definiens defs
-       let defs' = zipWith3 Def (map defInfo defs) newLocalVars functions
-       let body' = suspendPyon sub' body
+       (defs', body') <-
+         freshenDefGroupHead sub defs (\sub' -> return $ suspendPyon sub' body)
        
        -- Rebuild expression
        return $ LetrecS inf defs' body'

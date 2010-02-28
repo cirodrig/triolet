@@ -512,7 +512,8 @@ def updateRecVarPlaceholders(gamma, dict_env, placeholders):
     # Unresolved placeholders are put into this list
     deferred = []
 
-    for ph in placeholders:
+    # Process each placeholder, but ignore duplicates
+    for ph in set(placeholders):
         if isinstance(ph, RecVarPlaceholder):
             new_phs = updateRecVarPlaceholder(gamma, dict_env, ph)
         elif isinstance(ph, DictPlaceholder):

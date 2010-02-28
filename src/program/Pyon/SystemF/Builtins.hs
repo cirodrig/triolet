@@ -9,6 +9,8 @@ module Pyon.SystemF.Builtins
         the_EqDict_Float, the_OrdDict_Float,
         the_EqDict_Tuple2, the_OrdDict_Tuple2,
         the_TraversableDict_Stream, the_TraversableDict_list,
+        the_None, the_True, the_False,
+        the_eqDict, the_ordDict, the_traversableDict,
         the_oper_ADD,
         the_oper_SUB,
         the_oper_MUL,
@@ -30,7 +32,8 @@ module Pyon.SystemF.Builtins
         the_fun_zip,
         the_fun_iota,
         the_fun_undefined,
-        getPyonTupleType, getPyonTupleType'
+        getPyonTupleType, getPyonTupleType',
+        getPyonTupleCon, getPyonTupleCon'
        )
 where
 
@@ -91,7 +94,18 @@ data PyonBuiltins =
   , the_TraversableDict_Stream :: TraversableDictMembers
   , the_TraversableDict_list :: TraversableDictMembers
   
+    -- Tuple type constructors
   , the_tuples :: [Con]
+    -- Tuple constructors
+  , the_tupleConstructors :: [Con]
+    
+    -- Data constructors
+  , the_None :: Con
+  , the_True :: Con
+  , the_False :: Con
+  , the_eqDict :: Con
+  , the_ordDict :: Con
+  , the_traversableDict :: Con
     
     -- Functions
   , the_oper_ADD :: Con
@@ -134,6 +148,12 @@ assign_EqDict_Tuple2 x b = b {the_EqDict_Tuple2 = x}
 assign_OrdDict_Tuple2 x b = b {the_OrdDict_Tuple2 = x}
 assign_TraversableDict_Stream x b = b {the_TraversableDict_Stream = x}
 assign_TraversableDict_list x b = b {the_TraversableDict_list = x}
+assign_None x b = b {the_None = x}
+assign_True x b = b {the_True = x}
+assign_False x b = b {the_False = x}
+assign_eqDict x b = b {the_eqDict = x}
+assign_ordDict x b = b {the_ordDict = x}
+assign_traversableDict x b = b {the_traversableDict = x}
 assign_oper_ADD x b = b {the_oper_ADD = x}
 assign_oper_SUB x b = b {the_oper_SUB = x}
 assign_oper_MUL x b = b {the_oper_MUL = x}
@@ -190,11 +210,30 @@ getPyonTupleType' n = case getPyonTupleType n
                       of Just t -> t
                          Nothing -> internalError "Unsupported tuple size"
 
+getPyonTupleCon :: Int -> Maybe Con
+getPyonTupleCon size = unsafePerformIO $ do
+  -- Ensure that we've already initialized these
+  bi_is_empty <- isEmptyMVar the_PyonBuiltins
+  when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+  
+  bi <- readMVar the_PyonBuiltins
+  let ts = the_tupleConstructors bi
+  return $! if size >= 0 && size < length ts
+            then Just (ts !! size)
+            else Nothing
+
+getPyonTupleCon' :: Int -> Con
+getPyonTupleCon' n = case getPyonTupleCon n
+                     of Just t -> t
+                        Nothing -> internalError "Unsupported tuple size"
+
 findConByName mod name =
   let label = pgmLabel (moduleName "PyonBuiltin") name
-  in case find ((label ==) . conName) $ moduleConstructors mod
+  in case find ((label ==) . conName) $ getConstructors mod
      of Just c  -> c
         Nothing -> internalError $ "Missing Pyon builtin '" ++ name ++ "'"
+  where
+    getConstructors mod = concat [c : conCtors c | c <- moduleConstructors mod]
 
 -- Look up a constructor in a module, and store it.
 setBuiltinValue :: Module ()
@@ -246,6 +285,13 @@ initializePyonBuiltins mod =
                            , the_TraversableDict_Stream = uninitialized
                            , the_TraversableDict_list = uninitialized
                            , the_tuples = uninitialized
+                           , the_tupleConstructors = uninitialized
+                           , the_None = uninitialized
+                           , the_True = uninitialized
+                           , the_False = uninitialized
+                           , the_eqDict = uninitialized
+                           , the_ordDict = uninitialized
+                           , the_traversableDict = uninitialized
                            , the_oper_ADD = uninitialized
                            , the_oper_SUB = uninitialized
                            , the_oper_MUL = uninitialized
@@ -278,6 +324,12 @@ initializePyonBuiltins mod =
                          , ("EqDict", assign_EqDict)
                          , ("OrdDict", assign_OrdDict)
                          , ("TraversableDict", assign_TraversableDict)
+                         , ("None", assign_None)
+                         , ("True", assign_True)
+                         , ("False", assign_False)
+                         , ("eqDict", assign_eqDict)
+                         , ("ordDict", assign_ordDict)
+                         , ("traversableDict", assign_traversableDict)
                          , ("oper_ADD", assign_oper_ADD)
                          , ("oper_SUB", assign_oper_SUB)
                          , ("oper_MUL", assign_oper_MUL)
@@ -314,7 +366,7 @@ initializePyonBuiltins mod =
                            assign_TraversableDict_Stream .
         setTraversableDict "Traversable_TRAVERSE_list"
                            assign_TraversableDict_list
-  in do bi <- evaluate $ setTupleTypes $ setGlobalCons $ setClassDicts start
+  in do bi <- evaluate $ setTupleFields $ setGlobalCons $ setClassDicts start
         putMVar the_PyonBuiltins bi
   where
     uninitialized = internalError $ "Uninitialized Pyon builtin accessed"
@@ -326,10 +378,16 @@ initializePyonBuiltins mod =
     setOrdDict = setBuiltinOrdDict mod
     setTraversableDict = setBuiltinTraversableDict mod
     
-    setTupleTypes bi =
-      let tupleTypeNames = ["PyonTuple" ++ show n | n <- [0..5]]
+    setTupleFields bi =
+      let -- Tuple type constructors
+          tupleTypeNames = ["PyonTuple" ++ show n | n <- [0..5]]
           tupleTypes = map (findConByName mod) tupleTypeNames
-          bi' = bi {the_tuples = tupleTypes}
+          
+          -- Tuple constructors
+          tupleNames = ["pyonTuple" ++ show n | n <- [0..5]]
+          tupleConstructors = map (findConByName mod) tupleNames
+          bi' = bi { the_tuples = tupleTypes
+                   , the_tupleConstructors = tupleConstructors}
       in foldl' (flip seq) bi' tupleTypes
 
 loadPyonBuiltins :: IdentSupply Var

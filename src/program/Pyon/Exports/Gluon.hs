@@ -48,10 +48,12 @@ gluon_mkSortLevel = newHsObject SortLevel
 foreign export ccall gluon_con_Int :: IO PyPtr
 foreign export ccall gluon_con_Float :: IO PyPtr
 foreign export ccall gluon_type_Pure :: IO PyPtr
+foreign export ccall gluon_con_EmpE :: IO PyPtr
 
 gluon_con_Int = asGlobalObject $ builtin the_Int
 gluon_con_Float = asGlobalObject $ builtin the_Float
 gluon_type_Pure = asGlobalObject (pure pureKindE :: Delayed (Exp Core))
+gluon_con_EmpE = asGlobalObject $ builtin the_EmpE
 
 -------------------------------------------------------------------------------
 -- Constructors

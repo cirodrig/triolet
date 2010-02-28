@@ -277,15 +277,14 @@ class TyCon(TyEnt):
     A named type constructor.
     """
 
-    def __init__(self, name, con_kind, con_stream_tag,
-                 gluon_constructor = None):
+    def __init__(self, name, con_kind, con_stream_tag, gluon_type = None):
         assert isinstance(con_kind, kind.Kind)
 
         # The stream tag must not be a variable
         assert isinstance(con_stream_tag, StreamTag)
         assert isinstance(con_stream_tag, unification.Term)
 
-        self.gluonConstructor = gluon_constructor
+        self.gluonType = gluon_type
         self.name = name
         self._kind = con_kind
         self._streamTag = con_stream_tag

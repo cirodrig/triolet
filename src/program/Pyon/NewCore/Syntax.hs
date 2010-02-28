@@ -1,34 +1,45 @@
 
-{-# LANGUAGE TypeFamilies, EmptyDataDecls #-}
+{-# LANGUAGE TypeFamilies, EmptyDataDecls, DeriveDataTypeable #-}
 module Pyon.NewCore.Syntax
        (Syntax(..), PyonSyntax(..), Core,
+        CVal, CStm, CDef, CType,
         SynInfo,
         Type,
         Con(..), Var, varName, VarID,
         Binder(..), Binder'(..),
         
         Lit(..),
-        Val(..), RecVal,
+        Val(..), RecVal, mkVarV, mkConV, mkLitV,
         Stm(..), RecStm,
         Alt(..), Pat(..), ConParamPat(..),
         Fun(..), ActionFun, StreamFun,
         Def(..), Definiens(..),
+        Module(..),
         
         mapBinder, mapBinder',
         mapVal, mapStm, mapDef
        )
 where
 
+import Data.Typeable
+  
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
 import Gluon.Core(Core, Syntax(..),
                   SynInfo,
                   RecExp,
-                  Con(..), Var, varName, VarID,
+                  Con(..), Lit(..),
+                  Var, varName, VarID,
                   Binder(..), Binder'(..),
                   mapBinder, mapBinder',
                   traverseBinder, traverseBinder')
 import Gluon.Core.Rename(SubstitutingT)
+import Gluon.Core.Level
+
+type CVal = Val Core
+type CStm = Stm Core
+type CDef = Def Core
+type CType = Type Core
 
 class Syntax syn => PyonSyntax syn where
   type ValOf syn :: * -> *
@@ -44,29 +55,12 @@ type RecStm syn = StmOf syn syn
 -- | Pyon uses Gluon as its type system.
 type Type syn = Gluon.RecExp syn
 
--- | A literal value.
-data Lit = IntL {-# UNPACK #-} !Integer 
-         | FloatL {-# UNPACK #-} !Double
-
 -- | Values.  Evaluating a value has no side effects.
 data Val syn =
     -- | A Gluon term.  All type expressions are Gluon terms.
     GluonV
     { valInfo :: !SynInfo
     , valGluonTerm :: Type syn
-    }
-    -- | An object-level variable reference.
-  | VarV
-    { valInfo :: !SynInfo
-    , valVar :: Var
-    }
-  | LitV
-    { valInfo :: !SynInfo
-    , valLit :: Lit
-    }
-  | ConV
-    { valInfo :: !SynInfo
-    , valCon :: Con
     }
   | AppV
     { valInfo :: !SynInfo
@@ -89,6 +83,7 @@ data Val syn =
     { valInfo :: !SynInfo
     , valStm :: RecStm syn
     }
+    deriving(Typeable)
 
 -- | Statements.
 data Stm syn =
@@ -122,10 +117,27 @@ data Stm syn =
     , stmScrutinee :: RecVal syn
     , stmAlts :: [Alt syn]
     }
+    deriving(Typeable)
+
+mkVarV :: SourcePos -> Var -> Val Core
+mkVarV pos v = GluonV (Gluon.mkSynInfo pos (getLevel v)) $
+               Gluon.mkVarE pos v
+
+mkConV :: SourcePos -> Con -> Val Core
+mkConV pos c = GluonV (Gluon.mkSynInfo pos (getLevel $ conInfo c)) $
+               Gluon.mkConE pos c
+
+mkLitV :: SourcePos -> Lit -> Val Core
+mkLitV pos l = GluonV (Gluon.mkSynInfo pos (Gluon.litLevel l)) $
+               Gluon.mkLitE pos l
 
 instance HasSourcePos (Val syn) where
   getSourcePos v = getSourcePos $ valInfo v
   setSourcePos v p = v {valInfo = setSourcePos (valInfo v) p}
+
+instance HasSourcePos (Stm syn) where
+  getSourcePos s = getSourcePos $ stmInfo s
+  setSourcePos s p = s {stmInfo = setSourcePos (stmInfo s) p}
 
 -- | A case alternative.
 -- The scrutinee is matched to the pattern, which binds local variables; then
@@ -136,6 +148,7 @@ data Alt syn =
     , altPat :: Pat
     , altBody :: StmOf syn syn
     }
+    deriving(Typeable)
 
 -- | A pattern.
 data Pat = 
@@ -143,6 +156,7 @@ data Pat =
   { patCon :: Con 
   , patParams :: [ConParamPat]
   }
+  deriving(Typeable)
 
 -- | A parameter of a constructor pattern.
 -- Each parameter corresponds to one parameter of the constructor.
@@ -164,6 +178,7 @@ data Fun syn body =
   , funEffectType :: Type syn
   , funBody :: body
   }
+  deriving(Typeable)
 
 -- | An ordinary function.
 type ActionFun syn = Fun syn (RecStm syn)
@@ -178,10 +193,14 @@ data Def syn =
   , definiendum :: Var
   , definiens :: Definiens syn
   }
+  deriving(Typeable)
 
 data Definiens syn =
   ActionFunDef (ActionFun syn) | StreamFunDef (StreamFun syn)
+  deriving(Typeable)
                                
+data Module syn = Module [Def syn] deriving(Typeable)
+
 mapVal :: (PyonSyntax a, PyonSyntax b) =>
           (RecVal a -> RecVal b)
        -> (RecStm a -> RecStm b)
@@ -190,9 +209,9 @@ mapVal :: (PyonSyntax a, PyonSyntax b) =>
 mapVal val stm typ value =
   case value
   of GluonV info g -> GluonV info (typ g)
-     VarV info v -> VarV info v
+{-     VarV info v -> VarV info v
      LitV info l -> LitV info l 
-     ConV info c -> ConV info c 
+     ConV info c -> ConV info c -}
      AppV info oper args -> AppV info (val oper) (map val args)
      ALamV info fun -> ALamV info (mapAFun stm typ fun)
      SLamV info fun -> SLamV info (mapSFun val typ fun)

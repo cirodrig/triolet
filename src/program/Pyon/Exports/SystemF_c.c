@@ -422,6 +422,12 @@ static PyMethodDef system_f_methods[] = {
    "Run System F optimizations on a module."},
   {"typeCheckModule", pyon_typeCheckModule, METH_O,
    "Typecheck a module."},
+  {"flattenModule", pyon_flattenModule, METH_O,
+   "Flatten a module."},
+  {"printCoreModule", pyon_printCoreModule, METH_O,
+   "Print a module in core form."},
+  {"typeCheckCoreModule", pyon_typeCheckCoreModule, METH_O,
+   "Typecheck a module in core form."},
   {"isExp", isExp, METH_O,
    "Determine whether the parameter is a System F expression."},
   {NULL, NULL, 0, NULL}

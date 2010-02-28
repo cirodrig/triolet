@@ -83,15 +83,19 @@ class IdDerivation(Derivation):
 
 class InstanceDerivation(Derivation):
     "A derivation that uses a class instance definition."
-    def __init__(self, constraint, instance, superclasses, dict_type):
+    def __init__(self, constraint, instance, inst_superclasses,
+                 cls_superclasses, dict_type):
         assert isinstance(instance, pyon.types.classes.Instance)
-        for sc in superclasses:
+        for sc in inst_superclasses:
+            assert isinstance(sc, Derivation)
+        for sc in cls_superclasses:
             assert isinstance(sc, Derivation)
         assert gluon.isExp(dict_type)
 
         self.constraint = constraint
         self.instance = instance
-        self.superclasses = superclasses
+        self.instSuperclasses = inst_superclasses
+        self.clsSuperclasses = cls_superclasses
         self.dictionaryType = dict_type
 
     def getDictionaryType(self):
@@ -100,28 +104,38 @@ class InstanceDerivation(Derivation):
     def getCode(self, environment):
         gluon_types = pyon.types.gluon_types
 
+        # The type for which this dictionary is derived
+        this_instance_type = self.constraint.type
+
         # Get the code and type for each superclass.
-        superclass_vars = []    # Let-bound variables
+        cls_superclass_vars = []    # Let-bound variables
+        inst_superclass_vars = []    # Let-bound variables
         placeholders = []
 
         # Build the superclass dictionaries
-        for sc in self.superclasses:
+        def make_superclass_dict(sc, var_list):
             cst = sc.constraint
             sc_ph, sc_code = sc.getCode(environment)
-            sc_type = gluon.mkConAppE(gluon.noSourcePos,
-                                      cst.typeClass.getSystemFCon(),
-                                      [gluon_types.convertType(cst.type)])
-            superclass_vars.append((sf.newVar(None), sc_type, sc_code))
-            placeholders += sc_ph
+            sc_type = _classDictType(cst.typeClass, cst.type)
+            var_list.append((sf.newVar(None), sc_type, sc_code))
+            placeholders.extend(sc_ph)
+
+        for sc in self.clsSuperclasses:
+            make_superclass_dict(sc, cls_superclass_vars)
+
+        for sc in self.instSuperclasses:
+            make_superclass_dict(sc, inst_superclass_vars)
 
         # Determine type and dictionary parameters to use for constructing
         # instance methods
         typarams, constraints, head = self.instance.getScheme().instantiate()
-        subst = unification.match(head, self.constraint.type)
+        subst = unification.match(head, this_instance_type)
 
         def find_matching_constraint(c):
             # Find the superclass variable that matches this class constraint
-            for (v, _, _), sc in zip(superclass_vars, self.superclasses):
+            for (v, _, _), sc in \
+                    zip(inst_superclass_vars, self.instSuperclasses) \
+                    + zip(cls_superclass_vars, self.clsSuperclasses):
                 if sc.constraint == c: return sf.mkVarE(v)
 
             # Else, a matching constraint was not found
@@ -136,22 +150,29 @@ class InstanceDerivation(Derivation):
         methods = []
         for m in self.instance.methods:
             for tp in typarams:
-                m = sf.mkTyAppE(m, pyon.types.gluon_types.convertType(tp))
+                m = sf.mkTyAppE(m, gluon_types.convertType(tp))
             if constraint_vars:
                 m = sf.mkCallE(m, constraint_vars)
             methods.append(m)
 
         # Build the dictionary
         superclass_variable_exprs = [sf.mkVarE(v)
-                                     for v, _, _ in superclass_vars]
+                                     for v, _, _ in cls_superclass_vars]
         expr = sf.mkDictE(self.instance.typeClass.getSystemFClass(),
-                          pyon.types.gluon_types.convertType(self.constraint.type),
+                          gluon_types.convertType(this_instance_type),
                           superclass_variable_exprs,
                           methods)
 
         # Bind each superclass dictionary with let expressions
-        for v, ty, c in reversed(superclass_vars):
+        for v, ty, c in reversed(cls_superclass_vars + inst_superclass_vars):
             pat = sf.mkVarP(v, ty)
             expr = sf.mkLetE(pat, c, expr)
         return (placeholders, expr)
 
+def _classDictType(cls, type):
+    """
+    _classDictType(Class, FirstOrderType) -> Exp
+    Create a System F class dictionary type.
+    """
+    return gluon.mkConAppE(gluon.noSourcePos, cls.getSystemFCon(),
+                           [pyon.types.gluon_types.convertType(type)])
