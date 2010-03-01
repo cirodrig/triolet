@@ -339,6 +339,8 @@ static struct PyMethodDef gluon_methods[] = {
    "Create a tuple type."},
   {"isExp", isExp, METH_O,
    "Return True if the parameter is a Gluon expression, False otherwise."},
+  {"showSourcePos", gluon_showSourcePos, METH_O,
+   "Convert a SourcePos to a string."},
   { NULL, NULL, 0, NULL}
 };
 

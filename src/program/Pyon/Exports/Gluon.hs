@@ -243,6 +243,12 @@ gluon_isExp p = do
 -------------------------------------------------------------------------------
 -- Other functions
 
+foreign export ccall gluon_showSourcePos :: PyPtr -> PyPtr -> IO PyPtr
+
+gluon_showSourcePos _self pos = rethrowExceptionsInPython $ do
+  hs_pos <- fromHsObject' pos
+  stringToPython (show (hs_pos :: SourcePos))
+
 foreign export ccall gluon_loadBuiltins :: IO Bool
 
 -- Perform initialization by loading builtin modules.
