@@ -223,8 +223,9 @@ class Expression(object):
 class VariableExpr(Expression):
     """A reference to a variable"""
 
-    def __init__(self, v, base = ExprInit.default):
+    def __init__(self, source_pos, v, base = ExprInit.default):
         base.initializeExpr(self)
+        self.sourcePos = source_pos
         self.variable = v
 
     def addAllTypeVariables(self, s):
@@ -235,8 +236,9 @@ class LiteralExpr(Expression):
 
     Literals can be numbers, booleans, or the None value."""
 
-    def __init__(self, l, base = ExprInit.default):
+    def __init__(self, source_pos, l, base = ExprInit.default):
         base.initializeExpr(self)
+        self.sourcePos = source_pos
         self.literal = l
 
     def addAllTypeVariables(self, s):
@@ -245,8 +247,9 @@ class LiteralExpr(Expression):
 class UndefinedExpr(Expression):
     """An undefined value of any type."""
 
-    def __init__(self, base = ExprInit.default):
+    def __init__(self, source_pos, base = ExprInit.default): 
         base.initializeExpr(self)
+        self.sourcePos = source_pos
 
     def addAllTypeVariables(self, s):
         pass
@@ -254,10 +257,11 @@ class UndefinedExpr(Expression):
 class TupleExpr(Expression):
     """A tuple expression."""
 
-    def __init__(self, arguments, base = ExprInit.default):
+    def __init__(self, source_pos, arguments, base = ExprInit.default):
         base.initializeExpr(self)
         for f in arguments:
             assert isinstance(f, Expression)
+        self.sourcePos = source_pos
         self.arguments = arguments
 
     def addAllTypeVariables(self, s):
@@ -266,11 +270,12 @@ class TupleExpr(Expression):
 class CallExpr(Expression):
     """A function call."""
 
-    def __init__(self, operator, arguments, base = ExprInit.default):
+    def __init__(self, source_pos, operator, arguments, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(operator, Expression)
         for arg in arguments:
             assert isinstance(arg, Expression)
+        self.sourcePos = source_pos
         self.operator = operator
         self.arguments = arguments
 
@@ -284,11 +289,12 @@ class CallExpr(Expression):
 class IfExpr(Expression):
     """An if-else expression."""
 
-    def __init__(self, argument, ifTrue, ifFalse, base = ExprInit.default):
+    def __init__(self, source_pos, argument, ifTrue, ifFalse, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(argument, Expression)
         assert isinstance(ifTrue, Expression)
         assert isinstance(ifFalse, Expression)
+        self.sourcePos = source_pos
         self.argument = argument
         self.ifTrue = ifTrue
         self.ifFalse = ifFalse
@@ -300,9 +306,10 @@ class IfExpr(Expression):
 
 class FunExpr(Expression):
     """A lambda function"""
-    def __init__(self, function, base = ExprInit.default):
+    def __init__(self, source_pos, function, base = ExprInit.default):
         base.initializeExpr(self)
         assert isinstance(function, Function)
+        self.sourcePos = source_pos
         self.function = function
 
     def addAllTypeVariables(self, s):
@@ -312,11 +319,12 @@ class FunExpr(Expression):
 
 class LetExpr(Expression):
     """An assignment expression"""
-    def __init__(self, lhs, rhs, body, base = ExprInit.default):
+    def __init__(self, source_pos, lhs, rhs, body, base = ExprInit.default):
         base.initializeExpr(self)
         assert lhs is None or isinstance(lhs, Parameter)
         assert isinstance(rhs, Expression)
         assert isinstance(body, Expression)
+        self.sourcePos = source_pos
         self.parameter = lhs
         self.rhs = rhs
         self.body = body
@@ -328,10 +336,11 @@ class LetExpr(Expression):
 
 class LetrecExpr(Expression):
     """A set of function definitions"""
-    def __init__(self, definitions, body, base = ExprInit.default):
+    def __init__(self, source_pos, definitions, body, base = ExprInit.default):
         base.initializeExpr(self)
         for d in definitions: assert isinstance(d, FunctionDef)
         assert isinstance(body, Expression)
+        self.sourcePos = source_pos
         self.definitions = definitions
         self.body = body
 

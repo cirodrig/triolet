@@ -191,13 +191,13 @@ def convertStatement(stmt, successor, a_tyvars):
     if isinstance(stmt, p_ast.ExprStmt):
         # let _ = first in next
         first = convertExpression(stmt.expression)
-        return a_ast.LetExpr(None, first, successor)
+        return a_ast.LetExpr(stmt.sourcePos, None,  first, successor)
 
     elif isinstance(stmt, p_ast.AssignStmt):
         # let x = first in next
         first = convertExpression(stmt.expression)
         lhs = convertParameter(stmt.lhs)
-        return a_ast.LetExpr(lhs, first, successor)
+        return a_ast.LetExpr(stmt.sourcePos, lhs, first, successor)
 
     elif isinstance(stmt, p_ast.IfStmt):
         join_node = stmt.joinPoint
@@ -212,11 +212,11 @@ def convertStatement(stmt, successor, a_tyvars):
             def returnValue(tuple_expr): return tuple_expr
             true_path = convertSuite(stmt.ifTrue, returnValue, a_tyvars)
             false_path = convertSuite(stmt.ifFalse, returnValue, a_tyvars)
-            if_expr = a_ast.IfExpr(cond, true_path, false_path)
+            if_expr = a_ast.IfExpr(stmt.sourcePos, cond, true_path, false_path)
 
             # Create the subsequent code
             param = _consumeValue(join_node)
-            return a_ast.LetExpr(param, if_expr, successor)
+            return a_ast.LetExpr(stmt.sourcePos, param, if_expr, successor)
 
         # If there's exactly one fallthrough path, then generate code
         # on each path and inline the continuation
@@ -227,11 +227,11 @@ def convertStatement(stmt, successor, a_tyvars):
             # branches of the if expression that fall through
             def make_join(live_out_expr):
                 param = _consumeValue(join_node)
-                return a_ast.LetExpr(param, live_out_expr, successor)
+                return a_ast.LetExpr(stmt.sourcePos, param, live_out_expr, successor)
 
             true_path = convertSuite(stmt.ifTrue, make_join, a_tyvars)
             false_path = convertSuite(stmt.ifFalse, make_join, a_tyvars)
-            return a_ast.IfExpr(cond, true_path, false_path)
+            return a_ast.IfExpr(stmt.sourcePos, cond, true_path, false_path)
 
         # Otherwise, generate a local function for the continuation
         else:
@@ -250,20 +250,20 @@ def convertStatement(stmt, successor, a_tyvars):
             # At the end of the if/else branches, call the continuation
             # function
             def make_join(live_out_expr):
-                return a_ast.CallExpr(a_ast.VariableExpr(cont_var),
+                return a_ast.CallExpr(stmt.sourcePos, a_ast.VariableExpr(stmt.sourcePos, cont_var),
                                       live_out_expr.arguments)
 
             # Define the if-else expression
             true_path = convertSuite(stmt.ifTrue, make_join, a_tyvars)
             false_path = convertSuite(stmt.ifFalse, make_join, a_tyvars)
-            if_expr = a_ast.IfExpr(cond, true_path, false_path)
+            if_expr = a_ast.IfExpr(stmt.sourcePos, cond, true_path, false_path)
 
-            return a_ast.LetrecExpr([a_ast.FunctionDef(cont_var, cont_fun)],
+            return a_ast.LetrecExpr(stmt.sourcePos, [a_ast.FunctionDef(cont_var, cont_fun)],
                                     if_expr)
 
     elif isinstance(stmt, p_ast.DefGroupStmt):
         defs = [convertFunction(d, a_tyvars) for d in stmt.definitions]
-        return a_ast.LetrecExpr(defs, successor)
+        return a_ast.LetrecExpr(stmt.sourcePos, defs, successor)
 
     else:
         raise TypeError, type(stmt)
@@ -280,12 +280,12 @@ def _produceValue(control_flow_stmt):
         Create an expression corresponding to the value of 'variable'.
         """
         version = phi_node.getVersion(variable, control_flow_stmt)
-        return convertVariableRef(variable, version)
+        return convertVariableRef(control_flow_stmt.sourcePos , variable, version)
 
     values = [find_var(var, phi_node)
               for var, phi_node in join_node.phiNodes.iteritems()]
 
-    return a_ast.TupleExpr(values)
+    return a_ast.TupleExpr(control_flow_stmt.sourcePos, values)
 
 def _produceReturnValue(control_flow_stmt):
     """
@@ -306,7 +306,7 @@ def _produceReturnValue(control_flow_stmt):
     version = phi_node.getVersion(var, control_flow_stmt)
 
     # Create an expression
-    return convertVariableRef(var, version)
+    return convertVariableRef(control_flow_stmt.sourcePos, var, version)
 
 def _consumeValue(join_point):
     """
@@ -319,45 +319,45 @@ def _consumeValue(join_point):
 def convertExpression(expr):
     "Convert a parser expression to an ANF expression"
     if isinstance(expr, p_ast.VariableExpr):
-        return convertVariableRef(expr.variable, expr.ssaver)
+        return convertVariableRef(expr.sourcePos, expr.variable, expr.ssaver)
 
     elif isinstance(expr, p_ast.TupleExpr):
-        return a_ast.TupleExpr([convertExpression(e) for e in expr.arguments])
+        return a_ast.TupleExpr(expr.sourcePos, [convertExpression(e) for e in expr.arguments])
 
     elif isinstance(expr, p_ast.LiteralExpr):
-        return a_ast.LiteralExpr(expr.literal)
+        return a_ast.LiteralExpr(expr.sourcePos, expr.literal)
 
     elif isinstance(expr, p_ast.UnaryExpr):
-        return _callVariable(convertUnaryOperator(expr.operator),
+        return _callVariable(expr.sourcePos, convertUnaryOperator(expr.operator),
                              [convertExpression(expr.argument)])
 
     elif isinstance(expr, p_ast.BinaryExpr):
-        return _callVariable(convertBinaryOperator(expr.operator),
+        return _callVariable(expr.sourcePos, convertBinaryOperator(expr.operator),
                              [convertExpression(expr.left),
                               convertExpression(expr.right)])
 
     elif isinstance(expr, p_ast.ListCompExpr):
         # Convert the comprehension [blah for blah in blah] to a
         # function call list(blah for blah in blah)
-        return _callVariable(builtin_data.fun_list,
+        return _callVariable(expr.sourcePos, builtin_data.fun_list,
                              [convertIterator(expr.iterator)])
 
     elif isinstance(expr, p_ast.GeneratorExpr):
         return convertIterator(expr.iterator)
 
     elif isinstance(expr, p_ast.CallExpr):
-        return a_ast.CallExpr(convertExpression(expr.operator),
+        return a_ast.CallExpr(expr.sourcePos, convertExpression(expr.operator),
                               [convertExpression(e) for e in expr.arguments])
 
     elif isinstance(expr, p_ast.CondExpr):
-        return a_ast.IfExpr(convertExpression(expr.argument),
+        return a_ast.IfExpr(expr.sourcePos, convertExpression(expr.argument),
                             convertExpression(expr.ifTrue),
                             convertExpression(expr.ifFalse))
 
     elif isinstance(expr, p_ast.LambdaExpr):
         parameters = [convertParameter(p) for p in expr.parameters]
         body = convertExpression(expr.body)
-        return a_ast.FunExpr(a_ast.exprFunction(parameters, body))
+        return a_ast.FunExpr(expr.sourcePos, a_ast.exprFunction(parameters, body))
 
     else:
         raise TypeError, type(p_ast)
@@ -372,22 +372,22 @@ def convertIterator(iter):
         body_func = a_ast.iterFunction([param], convertIterator(iter.body))
 
         # Call __iter__ on the thing being traversed
-        iterator = _callVariable(builtin_data.oper_ITER, [arg])
+        iterator = _callVariable(None, builtin_data.oper_ITER, [arg])
 
         # Create a call to 'cat_map'
-        return _callVariable(builtin_data.oper_CAT_MAP,
-                             [a_ast.FunExpr(body_func), iterator])
+        return _callVariable(None, builtin_data.oper_CAT_MAP,
+                             [a_ast.FunExpr(arg.sourcePos, body_func), iterator])
     elif isinstance(iter, p_ast.IfIter):
         # Convert guard and body
         guard = convertExpression(iter.guard)
         body = convertIterator(iter.body)
 
         # Create a call to 'GUARD'
-        return _callVariable(builtin_data.oper_GUARD, [guard, body])
+        return _callVariable(None, builtin_data.oper_GUARD, [guard, body])
     elif isinstance(iter, p_ast.DoIter):
         # create a call to 'DO'
         body = convertExpression(iter.body)
-        return _callVariable(builtin_data.oper_DO, [body])
+        return _callVariable(None, builtin_data.oper_DO, [body])
     else:
         raise TypeError, type(iter)
 
@@ -426,7 +426,7 @@ def convertVariable(var, ssaver):
 
     return v
 
-def convertVariableRef(var, ssaver):
+def convertVariableRef(sourcePos,var, ssaver):
     """
     convertVariableRef(PythonVariable, ssa-version) -> Expression
     Convert a variable reference to an ANF expression.  The SSA
@@ -435,7 +435,7 @@ def convertVariableRef(var, ssaver):
     """
     # If version is -1, then use the special expression 'undefined'
     if ssaver == -1:
-        return a_ast.UndefinedExpr()
+        return a_ast.UndefinedExpr(sourcePos)
 
     # If not tracked by SSA, then return the pre-assigned value.
     # It must be a variable, not a type.
@@ -443,9 +443,9 @@ def convertVariableRef(var, ssaver):
         t = var.anfVariable
         if not t:
             raise RuntimeError, "Not a variable"
-        return a_ast.VariableExpr(t)
+        return a_ast.VariableExpr(sourcePos,t)
     else:
-        return a_ast.VariableExpr(convertVariable(var, ssaver))
+        return a_ast.VariableExpr(sourcePos,convertVariable(var, ssaver))
 
 # A mapping from parser operator to ANF variable
 _convertBinaryOperatorMap = {
@@ -494,8 +494,8 @@ def convertUnaryOperator(oper):
         raise KeyError, "Cannot find variable for unary operator " + \
             oper.display
 
-def _callVariable(func, arguments):
+def _callVariable(sourcePos, func, arguments):
     """
     Create the ANF code for a function call to a variable.
     """
-    return a_ast.CallExpr(a_ast.VariableExpr(func), arguments)
+    return a_ast.CallExpr(sourcePos, a_ast.VariableExpr(sourcePos,func), arguments)
