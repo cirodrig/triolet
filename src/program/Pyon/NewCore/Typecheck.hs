@@ -126,14 +126,16 @@ computeAppliedType worker pos fun_type args = do
       -- If this is a dependently typed binding, assign the bound variable
       -- before processing the next argument.  
       -- If dependently typed, the bound variable must be a 'GluonV'.
-      let rng' = case renameValFully arg
-                 of GluonV {valGluonTerm = arg_value} ->
+      let rng' = case valToMaybeExp $ renameValFully arg
+                 of Just arg_value ->
                       Gluon.assignBinder'Syn 
                       (Binder' mv (Gluon.renameFully dom) ())
                       arg_value
                       rng
-                    _ | isJust mv -> internalError 
-                                     "Dependently typed function got a non-Gluon parameter"
+                    Nothing 
+                      | isJust mv ->
+                          internalError
+                          "Dependently typed function got a non-Gluon parameter"
                       | otherwise -> rng
       rng'' <- evalHead rng'
       (arg_vals, ret_ty) <- go rng'' args
