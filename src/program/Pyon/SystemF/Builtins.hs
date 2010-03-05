@@ -2,8 +2,12 @@
 module Pyon.SystemF.Builtins
        (EqDictMembers(..), OrdDictMembers(..), TraversableDictMembers(..),
         loadPyonBuiltins, pyonBuiltin, isPyonBuiltin,
-        the_Action, the_Stream, the_bool, the_list,
-        the_NoneType, the_Any, 
+        the_Action, the_Stream, the_Stored,
+        the_listElementEffect, the_listContentsEffect,
+        the_bool, 
+        the_list,
+        the_NoneType, 
+        the_Any, 
         the_EqDict, the_OrdDict, the_TraversableDict,
         the_EqDict_Int, the_OrdDict_Int,
         the_EqDict_Float, the_OrdDict_Float,
@@ -23,6 +27,7 @@ module Pyon.SystemF.Builtins
         the_oper_BITWISEXOR,
         the_oper_NEGATE,
         the_oper_CAT_MAP,
+        the_oper_CAT_MAP_noeffect,
         the_oper_GUARD,
         the_oper_DO,
         the_fun_makelist,
@@ -32,6 +37,8 @@ module Pyon.SystemF.Builtins
         the_fun_zip,
         the_fun_iota,
         the_fun_undefined,
+        the_loadListElement,
+        the_generate,
         getPyonTupleType, getPyonTupleType',
         getPyonTupleCon, getPyonTupleCon'
        )
@@ -76,6 +83,9 @@ data PyonBuiltins =
   PyonBuiltins
   { the_Action :: Con
   , the_Stream :: Con
+  , the_Stored :: Con
+  , the_listElementEffect :: Con
+  , the_listContentsEffect :: Con
   , the_bool   :: Con
   , the_list   :: Con
   , the_NoneType :: Con
@@ -120,6 +130,7 @@ data PyonBuiltins =
   , the_oper_BITWISEXOR :: Con
   , the_oper_NEGATE :: Con
   , the_oper_CAT_MAP :: Con
+  , the_oper_CAT_MAP_noeffect :: Con
   , the_oper_GUARD :: Con
   , the_oper_DO :: Con
   , the_fun_makelist :: Con
@@ -129,10 +140,15 @@ data PyonBuiltins =
   , the_fun_zip :: Con
   , the_fun_iota :: Con
   , the_fun_undefined :: Con
+  , the_loadListElement :: Con
+  , the_generate :: Con
   }
 
 assign_Action x b = b {the_Action = x}
 assign_Stream x b = b {the_Stream = x}
+assign_Stored x b = b {the_Stored = x}
+assign_listElementEffect x b = b {the_listElementEffect = x}
+assign_listContentsEffect x b = b {the_listContentsEffect = x}
 assign_bool x b = b {the_bool = x}
 assign_list x b = b {the_list = x}
 assign_NoneType x b = b {the_NoneType = x}
@@ -166,6 +182,7 @@ assign_oper_BITWISEOR x b = b {the_oper_BITWISEOR = x}
 assign_oper_BITWISEXOR x b = b {the_oper_BITWISEXOR = x}
 assign_oper_NEGATE x b = b {the_oper_NEGATE = x}
 assign_oper_CAT_MAP x b = b {the_oper_CAT_MAP = x}
+assign_oper_CAT_MAP_noeffect x b = b {the_oper_CAT_MAP_noeffect = x}
 assign_oper_GUARD x b = b {the_oper_GUARD = x}
 assign_oper_DO x b = b {the_oper_DO = x}
 assign_fun_makelist x b = b {the_fun_makelist = x}
@@ -175,6 +192,8 @@ assign_fun_reduce1 x b = b {the_fun_reduce1 = x}
 assign_fun_zip x b = b {the_fun_zip = x}
 assign_fun_iota x b = b {the_fun_iota = x}
 assign_fun_undefined x b = b {the_fun_undefined = x}
+assign_loadListElement x b = b {the_loadListElement = x}
+assign_generate x b = b {the_generate = x}
 
 the_PyonBuiltins :: MVar PyonBuiltins
 {-# NOINLINE the_PyonBuiltins #-}
@@ -190,6 +209,7 @@ pyonBuiltin field = unsafePerformIO $ do
   bi <- readMVar the_PyonBuiltins
   return $ field bi
 
+infix 4 `isPyonBuiltin`
 isPyonBuiltin :: Con -> (PyonBuiltins -> Con) -> Bool
 c `isPyonBuiltin` name = c == pyonBuiltin name
 
@@ -269,6 +289,9 @@ initializePyonBuiltins :: Module () -> IO ()
 initializePyonBuiltins mod =
   let start = PyonBuiltins { the_Action = uninitialized
                            , the_Stream = uninitialized
+                           , the_Stored = uninitialized
+                           , the_listElementEffect = uninitialized
+                           , the_listContentsEffect = uninitialized
                            , the_bool = uninitialized
                            , the_list = uninitialized
                            , the_NoneType = uninitialized
@@ -304,6 +327,7 @@ initializePyonBuiltins mod =
                            , the_oper_BITWISEXOR = uninitialized
                            , the_oper_NEGATE = uninitialized
                            , the_oper_CAT_MAP = uninitialized
+                           , the_oper_CAT_MAP_noeffect = uninitialized
                            , the_oper_GUARD = uninitialized
                            , the_oper_DO = uninitialized
                            , the_fun_makelist = uninitialized
@@ -313,10 +337,15 @@ initializePyonBuiltins mod =
                            , the_fun_zip = uninitialized
                            , the_fun_iota = uninitialized
                            , the_fun_undefined = uninitialized
+                           , the_loadListElement = uninitialized
+                           , the_generate = uninitialized
                            }
       setGlobalCons =
         setBuiltinValues [ ("Action", assign_Action)
                          , ("Stream", assign_Stream)
+                         , ("Stored", assign_Stored)
+                         , ("listElementEffect", assign_listElementEffect)
+                         , ("listContentsEffect", assign_listContentsEffect)
                          , ("bool", assign_bool)
                          , ("list", assign_list)
                          , ("NoneType", assign_NoneType)
@@ -342,6 +371,7 @@ initializePyonBuiltins mod =
                          , ("oper_BITWISEXOR", assign_oper_BITWISEXOR)
                          , ("oper_NEGATE", assign_oper_NEGATE)
                          , ("oper_CAT_MAP", assign_oper_CAT_MAP)
+                         , ("oper_CAT_MAP_noeffect", assign_oper_CAT_MAP_noeffect)
                          , ("oper_GUARD", assign_oper_GUARD)
                          , ("oper_DO", assign_oper_DO)
                          , ("fun_makelist", assign_fun_makelist)
@@ -351,6 +381,8 @@ initializePyonBuiltins mod =
                          , ("fun_zip", assign_fun_zip)
                          , ("fun_iota", assign_fun_iota)
                          , ("fun_undefined", assign_fun_undefined)
+                         , ("loadListElement", assign_loadListElement)
+                         , ("generate", assign_generate)
                          ]
       setClassDicts =
         setEqDict "Eq_EQ_Int" "Eq_NE_Int" assign_EqDict_Int .

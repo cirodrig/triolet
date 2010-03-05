@@ -1,8 +1,58 @@
 
-constant Action : Effect -> Pure -> Pure;
-constant Stream : Effect -> Pure -> Pure;
+constant Action : Effect is(covar) -> Pure -> Pure;
+constant Stream : Effect is(covar) -> Pure -> Pure;
 
--- Pyon types.
+-- Integer arithmetic
+
+operator left 45 * = timesZ;
+operator left 40 + = plusZ;
+operator left 40 - = subtractZ;
+
+let subtractZ (x : Int) (y : Int) -> Int = x + -1 * y;
+
+-- Integer comparison propositions
+
+operator 20 == = equalZ;
+operator 20 /= = notEqualZ;
+operator 20 >= = greaterOrEqualZ;
+operator 20 >  = greaterThanZ;
+operator 20 <= = lessOrEqualZ;
+operator 20 <  = lessThanZ;
+
+let equalZ          (x : Int) (y : Int) -> Prop = isZeroZ (x - y);
+let notEqualZ       (x : Int) (y : Int) -> Prop = x > y || x < y;
+let greaterOrEqualZ (x : Int) (y : Int) -> Prop = isNnegZ (x - y);
+let greaterThanZ    (x : Int) (y : Int) -> Prop = isNnegZ (x - y + -1);
+let lessOrEqualZ    (x : Int) (y : Int) -> Prop = isNnegZ (y - x);
+let lessThanZ       (x : Int) (y : Int) -> Prop = isNnegZ (y - x + -1);
+
+-- Logical propositions
+
+operator right 10 || = or;
+operator right 15 && = and;
+
+constant addF : Float -> Float -> Float;
+constant mulF : Float -> Float -> Float;
+
+-- Side effect stuff
+
+constant Ptr : Addr -> Pure;
+constant Stored : Pure -> Object;
+constant subscript : Addr -> Int -> Addr;
+
+operator 5 :|: = reversed_WhereE;
+operator right 45 :**: = SconjE;
+operator 50 :@: = AtE;
+
+let reversed_WhereE (e : Effect) (p : Prop) -> Effect = WhereE p e;
+
+let listElementEffect (base : Addr) (o : Object) (offset : Int) -> Effect =
+  o :@: subscript base offset;
+
+let listContentsEffect (base : Addr) (o : Object) (size : Int) -> Effect =
+  SetE (fun i : Int => listElementEffect base o i :|: 0 <= i && i < size);
+
+-- Pyon types
 data NoneType : Pure where None : NoneType;
 constant Any : Pure;
 data bool : Pure where True : bool | False : bool;
@@ -82,7 +132,9 @@ constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
                       -> Action EmpE (comparison (PyonTuple2 a b));
 
-constant Traversable_TRAVERSE_Stream : (a : Pure) -> Stream EmpE a -> Stream EmpE a;
+let Traversable_TRAVERSE_Stream (a : Pure) (s : Stream EmpE a)
+  -> Stream EmpE a =
+  s;
 constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream EmpE a;
 
 -- Builtin functions
@@ -98,8 +150,19 @@ constant oper_BITWISEOR : binary Int;
 constant oper_BITWISEXOR : binary Int;
 constant oper_NEGATE : (a : Pure) -> a -> Action EmpE a;
 
-constant oper_CAT_MAP : (a : Pure) -> (b : Pure)
-                     -> (a -> Stream EmpE b) -> Stream EmpE a -> Stream EmpE b;
+constant oper_CAT_MAP : (eff : Effect)
+                     -> (a : Pure)
+                     -> (b : Pure)
+                     -> (a -> Stream eff b)
+                     -> Stream eff a
+                     -> Stream eff b;
+
+let oper_CAT_MAP_noeffect -> (   (a : Pure)
+                              -> (b : Pure)
+                              -> (a -> Stream EmpE b)
+                              -> Stream EmpE a
+                              -> Stream EmpE b)
+ = oper_CAT_MAP EmpE;
 
 constant oper_GUARD : (a : Pure) -> bool -> Stream EmpE a -> Stream EmpE a;
 
@@ -132,3 +195,31 @@ constant fun_zip : (s : Pure -> Pure)
 constant fun_iota : Stream EmpE Int;
 
 constant fun_undefined : (a : Pure) -> Action EmpE a;
+
+-- List traversal with side effects
+constant loadListElement : (a : Pure)
+                        -> (base : Addr)
+                        -> Ptr base
+                        -> (index : Int)
+                        -> Action (Stored a :@: subscript base index) a;
+
+-- Stream that loops over an index range
+constant generate : (eff : Effect)
+                 -> (a : Pure)
+                 -> (bound : Int)
+                 -> ((i : Int) -> Stream eff a)
+                 -> Stream eff a;
+
+constant unpackList :
+    (a : Pure)                          -- List element type
+ -> (r : Pure)                          -- Return type
+ -> (inv : Effect)                      -- Invariant effect type
+ -> (base : Addr)                       -- List base address
+ -> Ptr base                            -- List pointer
+ -> (   (size : Int)
+     -> (data_base : Addr)
+     -> Ptr data_base
+     -> Action (Stored (list a) :@: base :**:
+                listContentsEffect data_base (Stored a) size :**:
+                inv) r)
+ -> Action (Stored (list a) :@: base :**: inv) r;

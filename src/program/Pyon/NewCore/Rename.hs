@@ -7,10 +7,15 @@ module Pyon.NewCore.Rename
         renameValHead, freshenValHead,
         renameStmFully,
         renameStmHead, freshenStmHead,
-        freshenDefGroupHead)
+        freshenActionFunHead,
+        freshenActionFunFully,
+        freshenStreamFunHead,
+        freshenDefGroupHead,
+        freshenModuleHead)
 where
 
 import Control.Monad
+import Data.Monoid
 import Data.Map(Map)
 import qualified Data.Map as Map
 import Data.Maybe
@@ -51,6 +56,9 @@ suspendGluon :: PyonSubst -> t Core
              -> SubstitutingSyntax Core t (SubstitutingT Core)
 suspendGluon subst x = SubstitutingSyntax (subst :@ x)
 
+renameBinder :: Binder (SubstitutingT Core) () -> Binder Core ()
+renameBinder (Binder v ty ()) = Binder v (renameFully ty) ()
+
 renameValFully :: RecVal (SubstitutingT Core) -> Val Core
 renameValFully v = mapVal renameValFully renameStmFully renameFully $
                    renameValHead v
@@ -64,6 +72,11 @@ renameValHead (SubstitutingSyntax (sub :@ value)) =
                           Just e  -> GluonV info (verbatim e) -}
         _ -> mapVal (suspendPyon sub) (suspendPyon sub) (suspendGluon sub)
              value
+
+freshenValFully :: (Monad m, Supplies m VarID) =>
+                   RecVal (SubstitutingT Core) -> m (Val Core)
+freshenValFully v = traverseVal freshenValFully freshenStmFully freshenFully =<<
+                    freshenValHead v
 
 freshenValHead :: (Monad m, Supplies m VarID) =>
                   RecVal (SubstitutingT Core) -> m (Val (SubstitutingT Core))
@@ -80,6 +93,19 @@ freshenActionFunHead :: (Monad m, Supplies m VarID) =>
                         PyonSubst -> ActionFun Core
                      -> m (ActionFun (SubstitutingT Core))
 freshenActionFunHead = freshenFunHead suspendPyon
+
+freshenActionFunFully :: (Monad m, Supplies m VarID) =>
+                         PyonSubst -> ActionFun Core
+                      -> m (ActionFun Core)
+freshenActionFunFully subst f = do
+  f' <- freshenActionFunHead subst f
+  -- No important variables are bound in types, so just rename them
+  let params = map renameBinder $ funParams f'
+      ret_ty = renameFully $ funReturnType f'
+      eff_ty = renameFully $ funEffectType f'
+  body <- freshenStmFully $ funBody f'
+  return $ Fun params ret_ty eff_ty body
+
 freshenStreamFunHead :: (Monad m, Supplies m VarID) =>
                         PyonSubst -> StreamFun Core
                      -> m (StreamFun (SubstitutingT Core))
@@ -208,3 +234,16 @@ freshenStmHead sub_statement@(SubstitutingSyntax (sub :@ statement)) =
       (sub', v') <- freshenVar sub v
       return (sub', FlexibleP v')
       
+freshenStmFully :: (Monad m, Supplies m VarID) =>
+                   RecStm (SubstitutingT Core) -> m (Stm Core)
+freshenStmFully s = traverseStm freshenValFully freshenStmFully freshenFully =<<
+                    freshenStmHead s
+
+freshenModuleHead :: (Monad m, Supplies m VarID) =>
+                     Module Core
+                  -> m (Module (SubstitutingT Core))
+freshenModuleHead (Module defs) = do
+  (rename_defs, _) <- freshenDefGroupHead mempty defs (const $ return ())
+  return $ Module rename_defs
+
+                  

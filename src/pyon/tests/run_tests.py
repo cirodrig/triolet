@@ -35,6 +35,8 @@ def tryCompile(fname, show_traceback = False):
         # (DEBUG) print the output
 	system_f.printCoreModule(test_flat)
 	system_f.typeCheckCoreModule(test_flat)
+        # test_flat = system_f.effectInferCoreModule(test_flat)
+	#system_f.printCoreModule(test_flat)
 
     except Exception, e:
         print e

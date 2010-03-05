@@ -69,12 +69,18 @@ bindValue (TupleP ps) e m =
        -- Cannot bind, because we cannot statically deconstruct this tuple
        m
 
+bindDefs :: ExpInfo -> [VanillaDef] -> PEval a -> PEval a
+bindDefs info defs m = foldr bindDef m defs
+  where
+    bindDef (Def v f) m =
+      let e = FunE info f
+      in local (Map.insert v e) m
+
 -- | Partial evaluation of an expression.  First, evaluate subexpressions;
 -- then, try to statically evaluate.
 pevalExp :: VanillaExp -> PEval VanillaExp
 pevalExp expression =
   return . partialEvaluate =<< pevalExpRecursive expression
-
 partialEvaluate :: VanillaExp -> VanillaExp
 partialEvaluate expression =
   case expression
@@ -85,9 +91,16 @@ partialEvaluate expression =
             expMethods argument !! expMethodIndex expression
 
           _ -> expression
-
+           
      -- Default: return the expression unchanged
      _ -> expression
+  where
+    unpackTypeApplication e = unpack e []
+      where
+        unpack e tail =
+          case e
+          of TyAppE {expOper = op, expTyArg = ty} -> unpack op (ty : tail)
+             _ -> Just (e, tail)
 
 pevalExpRecursive :: VanillaExp -> PEval VanillaExp
 pevalExpRecursive expression =
@@ -125,7 +138,7 @@ pevalExpRecursive expression =
               then bindValue p e1' $ pevalExp e2
               else pevalExp e2
        return $ expression {expValue = e1', expBody = e2'}
-     LetrecE {expDefs = ds, expBody = b} -> do
+     LetrecE {expInfo = inf, expDefs = ds, expBody = b} -> do
        ds' <- mapM pevalDef ds
        b' <- pevalExp b
        return $ expression {expDefs = ds', expBody = b'}

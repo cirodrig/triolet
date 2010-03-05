@@ -66,8 +66,8 @@ pprStmFlags flags stm =
   case stm
   of ReturnS {stmVal = val} ->
        text "return" <+> pprValFlags flags val
-     CallS {stmOper = oper, stmArgs = args} ->
-       sep $ map (parens . pprValFlags flags) (oper : args)
+     CallS {stmVal = val} ->
+       pprValFlags flags val
      CaseS {stmScrutinee = scr, stmAlts = alts} -> 
        text "case" <+> pprValFlags flags scr $$ 
        text "of" <+> vcat (map (pprAltFlags flags) alts)

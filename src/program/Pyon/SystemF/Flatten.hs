@@ -241,7 +241,7 @@ flattenExp' expression expression_type =
      UndefinedE {expInfo = inf, expType = t} ->
        let fun = NewCore.mkConV pos $ pyonBuiltin the_fun_undefined
            arg = NewCore.GluonV (Gluon.mkSynInfo (Gluon.getSourcePos inf) TypeLevel) t
-       in returnStatement $ NewCore.CallS inf fun [arg]
+       in returnStatement $ NewCore.CallS inf $ NewCore.AppV inf fun [arg]
      TupleE {expInfo = inf, expFields = fs} -> do
        (field_types, fields) <- mapAndUnzipM asValueWithType fs
        
@@ -273,10 +273,11 @@ flattenExp' expression expression_type =
            -- Based on the operator's type, decide whether to generate a 
            -- statement or a value.  Calls in the 'Action' monad become 
            -- statements.  Calls in the 'Stream' monad become values.
+           let call = NewCore.AppV inf op' args'
            is_stm <- is_statement (Gluon.verbatim op_type)
            if is_stm
-             then returnStatement $ NewCore.CallS inf op' args'
-             else returnValue $ NewCore.AppV inf op' args'
+             then returnStatement $ NewCore.CallS inf call
+             else returnValue call
      IfE { expInfo = inf
          , expCond = cond
          , expTrueCase = tr

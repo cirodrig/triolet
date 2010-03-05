@@ -428,6 +428,8 @@ static PyMethodDef system_f_methods[] = {
    "Print a module in core form."},
   {"typeCheckCoreModule", pyon_typeCheckCoreModule, METH_O,
    "Typecheck a module in core form."},
+  {"effectInferCoreModule", pyon_effectInferCoreModule, METH_O,
+   "Do effect inference on a module in core form."},
   {"isExp", isExp, METH_O,
    "Determine whether the parameter is a System F expression."},
   {NULL, NULL, 0, NULL}
@@ -499,7 +501,7 @@ createSystemFModule(void)
   ADD_OBJECT("con_oper_BITWISEOR", pyon_con_oper_BITWISEOR);
   ADD_OBJECT("con_oper_BITWISEXOR", pyon_con_oper_BITWISEXOR);
   ADD_OBJECT("con_oper_NEGATE", pyon_con_oper_NEGATE);
-  ADD_OBJECT("con_oper_CAT_MAP", pyon_con_oper_CAT_MAP);
+  ADD_OBJECT("con_oper_CAT_MAP_noeffect", pyon_con_oper_CAT_MAP_noeffect);
   ADD_OBJECT("con_oper_GUARD", pyon_con_oper_GUARD);
   ADD_OBJECT("con_oper_DO", pyon_con_oper_DO);
   ADD_OBJECT("con_fun_makelist", pyon_con_fun_makelist);

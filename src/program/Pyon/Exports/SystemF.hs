@@ -28,6 +28,8 @@ import Pyon.SystemF.Typecheck
 import Pyon.SystemF.Flatten
 import qualified Pyon.NewCore.Print
 import qualified Pyon.NewCore.Typecheck
+import qualified Pyon.NewCore.EffectInference
+import qualified Pyon.NewCore.Optimizations
 
 import Pyon.Exports.Delayed
 
@@ -95,7 +97,7 @@ foreign export ccall pyon_con_oper_BITWISEAND :: IO PyPtr
 foreign export ccall pyon_con_oper_BITWISEOR :: IO PyPtr
 foreign export ccall pyon_con_oper_BITWISEXOR :: IO PyPtr
 foreign export ccall pyon_con_oper_NEGATE :: IO PyPtr
-foreign export ccall pyon_con_oper_CAT_MAP :: IO PyPtr
+foreign export ccall pyon_con_oper_CAT_MAP_noeffect :: IO PyPtr
 foreign export ccall pyon_con_oper_GUARD :: IO PyPtr
 foreign export ccall pyon_con_oper_DO :: IO PyPtr
 foreign export ccall pyon_con_fun_makelist :: IO PyPtr
@@ -146,7 +148,7 @@ pyon_con_oper_BITWISEAND = asGlobalObject $ pyonBuiltin the_oper_BITWISEAND
 pyon_con_oper_BITWISEOR = asGlobalObject $ pyonBuiltin the_oper_BITWISEOR
 pyon_con_oper_BITWISEXOR = asGlobalObject $ pyonBuiltin the_oper_BITWISEXOR
 pyon_con_oper_NEGATE = asGlobalObject $ pyonBuiltin the_oper_NEGATE
-pyon_con_oper_CAT_MAP = asGlobalObject $ pyonBuiltin the_oper_CAT_MAP
+pyon_con_oper_CAT_MAP_noeffect = asGlobalObject $ pyonBuiltin the_oper_CAT_MAP_noeffect
 pyon_con_oper_GUARD = asGlobalObject $ pyonBuiltin the_oper_GUARD
 pyon_con_oper_DO = asGlobalObject $ pyonBuiltin the_oper_DO
 pyon_con_fun_makelist = asGlobalObject $ pyonBuiltin the_fun_makelist
@@ -360,6 +362,7 @@ foreign export ccall pyon_optimizeModule :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall pyon_flattenModule :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall pyon_printCoreModule :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall pyon_typeCheckCoreModule :: PyPtr -> PyPtr -> IO PyPtr
+foreign export ccall pyon_effectInferCoreModule :: PyPtr -> PyPtr -> IO PyPtr
 
 pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 pyon_printModule _self mod = rethrowExceptionsInPython $ do
@@ -390,7 +393,13 @@ pyon_flattenModule _self mod = rethrowExceptionsInPython $ do
   case m' of
     Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
                     throwPythonExc pyRuntimeError "Flattening failed"
-    Right mod -> newHsObject mod
+    Right mod -> do
+      -- Flatten nested applications and evaluate terms in the output
+      mod' <- Pyon.NewCore.Optimizations.inline . 
+              Pyon.NewCore.Optimizations.flattenApplications =<<
+              Pyon.NewCore.Optimizations.evaluate
+              (Pyon.NewCore.Optimizations.flattenApplications mod)
+      newHsObject mod'
 
 pyon_printCoreModule :: PyPtr -> PyPtr -> IO PyPtr
 pyon_printCoreModule _self mod = rethrowExceptionsInPython $ do
@@ -406,3 +415,9 @@ pyon_typeCheckCoreModule _self mod = rethrowExceptionsInPython $ do
   m <- fromHsObject' mod
   Pyon.NewCore.Typecheck.typeCheckModule m
   pyNone
+
+pyon_effectInferCoreModule :: PyPtr -> PyPtr -> IO PyPtr
+pyon_effectInferCoreModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  newHsObject =<< Pyon.NewCore.EffectInference.effectInferModule m

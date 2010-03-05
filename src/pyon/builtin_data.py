@@ -231,7 +231,8 @@ _cat_map_type = \
             lambda a, b: _funType([_funType([a], hm.AppTy(type_iter, b)),
                                    hm.AppTy(type_iter, a)],
                                   hm.AppTy(type_iter, b)))
-oper_CAT_MAP = _builtin("__cat_map__", _cat_map_type, sf.con_oper_CAT_MAP)
+oper_CAT_MAP = _builtin("__cat_map__", _cat_map_type,
+                        sf.con_oper_CAT_MAP_noeffect)
 
 # __guard__ : forall a. bool * iter a -> iter a
 _guard_type = _forall([_star], lambda a: \

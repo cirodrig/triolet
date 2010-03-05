@@ -1,5 +1,5 @@
 
-{-# LANGUAGE ScopedTypeVariables, TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables, TypeFamilies, EmptyDataDecls #-}
 module Pyon.NewCore.Typecheck where
 
 import Control.Applicative
@@ -16,7 +16,7 @@ import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
 import Gluon.Core.RenameBase(Subst, substitute, assignment, renaming)
 import Gluon.Core.Rename(mapSubstitutingSyntax, verbatim, SubstitutingT)
-import Gluon.Core(Whnf(..), CWhnf)
+import Gluon.Core(Exp(..), Whnf(..), CWhnf)
 import Gluon.Core.Builtins
 import Gluon.Core.Builtins.Effect as Builtins.Effect
 import Gluon.Eval.Environment
@@ -43,6 +43,61 @@ instance PyonSyntax Gluon.TrivialSyntax where
 
 noWork :: PyonWorker Gluon.TrivialSyntax
 noWork = PyonWorker Gluon.tcNoWork (\_ _ -> Const ()) (\_ _ _ -> Const ())
+
+data Typed a
+
+data TypeAnn t a =
+  TypeAnn { typeAnnotation :: CWhnf
+          , typeAnnValue :: t a
+          }
+
+mapTypeAnn :: (t a -> s b) -> TypeAnn t a -> TypeAnn s b
+mapTypeAnn f (TypeAnn t x) = TypeAnn t (f x)
+
+traverseTypeAnn :: Monad m =>
+                   (t a -> m (s b)) -> TypeAnn t a -> m (TypeAnn s b)
+traverseTypeAnn f (TypeAnn t x) = do
+  y <- f x
+  return $ TypeAnn t y
+
+data EffAnn t a =
+  EffAnn { returnAnnotation :: CWhnf 
+         , effectAnnotation :: CWhnf 
+         , effAnnValue :: t a
+         }
+
+mapEffAnn :: (t a -> s b) -> EffAnn t a -> EffAnn s b
+mapEffAnn f (EffAnn return_type effect_type x) = 
+  EffAnn return_type effect_type (f x)
+
+traverseEffAnn :: Monad m => (t a -> m (s b)) 
+               -> EffAnn t a -> m (EffAnn s b)
+traverseEffAnn f (EffAnn return_type effect_type x) = do
+  y <- f x
+  return $ EffAnn return_type effect_type y
+
+instance Syntax a => Syntax (Typed a) where
+  type ExpOf (Typed a) = TypeAnn (ExpOf a)
+  type TupleOf (Typed a) = TupleOf a
+  type SumOf (Typed a) = SumOf a
+
+instance PyonSyntax a => PyonSyntax (Typed a) where
+  type ValOf (Typed a) = TypeAnn (ValOf a)
+  type StmOf (Typed a) = EffAnn (StmOf a)
+
+saveType :: PyonWorker (Typed Core)
+saveType = PyonWorker gluonWorker doVal doStm
+  where
+    gluonWorker = Gluon.tcWorker doExp doTuple doProd sortValue
+    doExp :: Exp (Typed Core) -> CWhnf -> Gluon.RecExp (Typed Core)
+    doExp e t = TypeAnn t e
+    doTuple = id
+    doProd = id
+    sortValue = let k = Gluon.LitE (Gluon.internalSynInfo Gluon.SortLevel) Gluon.SortL
+                    err = internalError "Cannot inspect type of 'kind'"
+                in TypeAnn err k
+    doVal v t = TypeAnn t v
+    doStm s ty eff = EffAnn ty eff s
 
 -- | Result of type checking a Val
 type TCVal syn = (CWhnf, RecVal syn)
@@ -340,8 +395,8 @@ typeScanStm' worker statement = do
     case statement'
     of ReturnS {stmInfo = inf, stmVal = val} ->
          typeScanReturnS worker inf val
-       CallS {stmInfo = inf, stmOper = op, stmArgs = args} ->
-         typeScanCallS worker inf op args
+       CallS {stmInfo = inf, stmVal = val} ->
+         typeScanCallS worker inf val
        LetS {stmInfo = inf, stmVar = lhs, stmStm = rhs, stmBody = body} ->
          typeScanLetS worker inf lhs rhs body
        LetrecS {stmInfo = inf, stmDefs = defs, stmBody = body} -> 
@@ -359,15 +414,10 @@ typeScanCallS :: Syntax syn =>
                  PyonWorker syn
               -> SynInfo
               -> SCVal
-              -> [SCVal]
               -> LinTC (CWhnf, CWhnf, Stm syn)
-typeScanCallS worker inf op args = do 
-  -- Infer function type
-  (op_ty, op_val) <- typeScanVal' worker op
-  
-  -- Infer types and reconstruct expressions in all arguments
-  (arg_vals, result_ty) <- 
-    computeAppliedType worker (getSourcePos inf) (whnfExp op_ty) args
+typeScanCallS worker inf val = do 
+  -- Infer the action's type
+  (result_ty, val_val) <- typeScanVal' worker val
   
   -- The result type must be an 'Action'
   (eff_ty, ret_ty) <-
@@ -377,7 +427,7 @@ typeScanCallS worker inf op args = do
       Nothing ->
         throwError $ OtherErr "Function call in statement does not have 'Action' type"
   
-  return (ret_ty, eff_ty, CallS inf op_val arg_vals)
+  return (ret_ty, eff_ty, CallS inf val_val)
 
 typeScanLetS worker inf lhs rhs body = do
   -- Process RHS
@@ -439,11 +489,18 @@ typeScanDefs worker defs k =
                    return $ StreamFunDef fun'
       return $ Def info v def'
 
+typeScanModule :: PyonSyntax syn =>
+                  PyonWorker syn -> Module Core 
+               -> PureTC (Module syn)
+typeScanModule worker mod = enterLinearScope $ do
+  Module rename_defs <- freshenModuleHead mod
+  typeScanDefs worker rename_defs $ return . Module
+
 typeCheckModule :: Module Core -> IO ()
-typeCheckModule (Module defs) = do
+typeCheckModule mod = do
   result <- withTheVarIdentSupply $ \supply ->
     runLinTCIO supply $ do
-      (rename_defs, _) <- freshenDefGroupHead mempty defs (const $ return ()) 
+      Module rename_defs <- freshenModuleHead mod
       typeScanDefs noWork rename_defs $ \_ -> return ()
   case result of
     Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
@@ -489,11 +546,10 @@ typeScanAlt :: Syntax syn =>
             -> Alt (SubstitutingT Core)
             -> LinTC (CWhnf, CWhnf, Alt syn)
 typeScanAlt worker scr_type alt = 
-  matchPattern worker scr_type (altPat alt) $ \new_pat body_subst -> do
-    let body = mapSubstitutingSyntax (substitute body_subst) (altBody alt)
-    (body_type, body_eff, body_val) <- typeScanStm' worker body
+  matchPattern scr_type (altPat alt) $ do
+    (body_type, body_eff, body_val) <- typeScanStm' worker (altBody alt)
     
-    let pat_vars = patternVariables new_pat
+    let pat_vars = patternVariables (altPat alt)
     
     -- Ensure that pattern-bound variables are not mentioned in the return type
     when (whnfExp body_type `Gluon.mentionsAny` pat_vars) $
@@ -501,20 +557,13 @@ typeScanAlt worker scr_type alt =
     when (whnfExp body_eff `Gluon.mentionsAny` pat_vars) $
       throwError $ OtherErr "Effect type mentions pattern-bound variable"
       
-    return (body_type, body_eff, Alt (altInfo alt) new_pat body_val)
+    return (body_type, body_eff, Alt (altInfo alt) (altPat alt) body_val)
 
-patternVariables (ConP con ps) = catMaybes $ map patternVariable ps
-  where
-    patternVariable (FlexibleP v) = Just v
-    patternVariable RigidP = Nothing
-
-matchPattern :: Syntax syn =>
-                PyonWorker syn
-             -> CWhnf           -- ^ Type to match
+matchPattern :: CWhnf           -- ^ Type to match
              -> Pat             -- ^ Pattern to match against
-             -> (Pat -> PyonSubst -> LinTC a) -- ^ Continuation
+             -> LinTC a         -- ^ Computation to run with pattern matched
              -> LinTC a
-matchPattern worker scr_type (ConP con p_params) continuation = do
+matchPattern scr_type (ConP con p_params) continuation = do
   let c_params = map (mapBinder' id verbatim) $ conParams con
   
   -- Scrutinee type must be a constructor application.
@@ -523,7 +572,7 @@ matchPattern worker scr_type (ConP con p_params) continuation = do
   case Gluon.unpackWhnfAppE scr_type of
     Just (scr_con, c_args) 
       | con `Gluon.isDataConstructorOf` scr_con -> 
-          matchConArgs mempty mempty c_args c_params p_params []
+          matchConArgs mempty c_args c_params p_params
     _ -> throwError $ OtherErr "Pattern match failure"
 
   where
@@ -531,11 +580,9 @@ matchPattern worker scr_type (ConP con p_params) continuation = do
     -- At each argument, compare the pattern's parameter type @p_param@ to the
     -- actual type @c_arg@ inferred from the scrutinee.
     matchConArgs c_sub          -- Substitution to apply to constructor
-                 p_sub          -- Substitution to apply to pattern
                  c_args         -- Scrutinee constructor arguments
                  (c_param:c_params) -- Constructor parameters
-                 (p_param:p_params) -- Pattern parameters
-                 new_p_params =     -- New pattern parameters (reversed)
+                 (p_param:p_params) = -- Pattern parameters
       -- Is this a rigid parameter?
       -- The pattern must agree with the constructor definition
       case (p_param, Gluon.paramRigidity $ Gluon.binder'Value c_param)
@@ -544,43 +591,38 @@ matchPattern worker scr_type (ConP con p_params) continuation = do
            -- type.
            if n < 0 || n > length c_args
            then internalError "Bad rigid parameter index"
-           else matchRigidArg c_sub p_sub (c_args !! n) c_param goToNext
+           else matchRigidArg c_sub (c_args !! n) c_param goToNext
          (FlexibleP p_var, Gluon.Flexible) ->
-           matchFlexibleArg c_sub p_sub p_var c_param goToNext
+           matchFlexibleArg c_sub p_var c_param goToNext
          _ ->
            throwError $ OtherErr "pattern mismatch in constructor"
       where
-        goToNext c_sub' p_sub' new_p_param =
-          matchConArgs c_sub' p_sub' c_args c_params p_params 
-                       (new_p_param:new_p_params)
+        goToNext c_sub' =
+          matchConArgs c_sub' c_args c_params p_params
     
     -- With all arguments pattern-matched, run the continuation
-    matchConArgs _ p_sub _ [] [] new_p_params =
-      let new_pat = ConP con (reverse new_p_params)
-          
-      in continuation new_pat p_sub
+    matchConArgs _ _ [] [] = continuation
     
     -- Error if argument lists aren't the same length
-    matchConArgs _ _ _ _ _ _ =
+    matchConArgs _ _ _ _ =
       internalError "Wrong number of parameters to pattern" 
 
     -- Match a rigid argument.  Bind parameters for this argument to the 
     -- actual type, determined from the scrutinee type.
-    matchRigidArg c_sub p_sub rigid_type (Binder' (Just c_var) _ _) k =
+    matchRigidArg c_sub rigid_type (Binder' (Just c_var) _ _) k =
       -- Substitute this value in parameters of the constructor
       let c_sub' = assignment c_var rigid_type `mappend` c_sub
-      in k c_sub' p_sub RigidP
+      in k c_sub'
     
     -- Match a flexible argument.
-    matchFlexibleArg c_sub p_sub p_var (Binder' c_mv c_ty _) k = do
+    matchFlexibleArg c_sub p_var (Binder' c_mv c_ty _) k = do
       -- Compute the actual constructor parameter's type
       let param_type = Gluon.renameFully $ mapSubstitutingSyntax (substitute c_sub) c_ty
       
-      -- Rename the pattern variable
-      (p_sub', p_var') <- freshenVar p_sub p_var
+      -- Rename the constructor's bound variable to the pattern variable
       let c_sub' = case c_mv
                    of Nothing -> c_sub
-                      Just v -> renaming v p_var' `mappend` c_sub
+                      Just v -> renaming v p_var `mappend` c_sub
       
       -- Assume the bound variable and continue
-      assume p_var' param_type $ k c_sub' p_sub' (FlexibleP p_var')
+      assume p_var param_type $ k c_sub'
