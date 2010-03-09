@@ -291,7 +291,7 @@ class TyCon(TyEnt):
 
     def __eq__(self, other):
         # Identity of type constructors is object identity
-        return id(self) == id(other)
+        return self is other
 
     def __str__(self):
         return self.name
@@ -393,7 +393,7 @@ class RigidTyVar(FirstOrderType, unification.Term):
         self._kind = _kind
 
     def __eq__(self, other):
-        return self is other
+        return self is unification.canonicalize(other)
 
     def __str__(self):
         return "'" + self.name
