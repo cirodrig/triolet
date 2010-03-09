@@ -31,9 +31,6 @@ let lessThanZ       (x : Int) (y : Int) -> Prop = isNnegZ (y - x + -1);
 operator right 10 || = or;
 operator right 15 && = and;
 
-constant addF : Float -> Float -> Float;
-constant mulF : Float -> Float -> Float;
-
 -- Side effect stuff
 
 constant Ptr : Addr -> Pure;
@@ -97,6 +94,17 @@ data TraversableDict : (Pure -> Pure) -> Pure where
                  -> ((a : Pure) -> t a -> Stream EmpE a)
                  -> TraversableDict t;
 
+data AdditiveDict : Pure -> Pure where
+  additiveDict : (a : Pure) -> a -> binary a -> binary a
+              -> AdditiveDict a;
+
+data VectorDict : Pure -> Pure where
+  vectorDict : (a : Pure)
+            -> AdditiveDict a
+            -> (a -> Float -> Action EmpE a)
+            -> (a -> Action EmpE Float)
+            -> VectorDict a;
+
 -- Class dictionary members for predefined instances.
 
 constant Eq_EQ_Int : comparison Int;
@@ -137,9 +145,15 @@ let Traversable_TRAVERSE_Stream (a : Pure) (s : Stream EmpE a)
   s;
 constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream EmpE a;
 
+constant Additive_ZERO_Int : Int;
+constant Additive_ADD_Int : binary Int;
+constant Additive_SUB_Int : binary Int;
+
+constant Additive_ZERO_Float : Float;
+constant Additive_ADD_Float : binary Float;
+constant Additive_SUB_Float : binary Float;
+
 -- Builtin functions
-constant oper_ADD : binary_any;
-constant oper_SUB : binary_any;
 constant oper_MUL : binary_any;
 constant oper_DIV : binary_any;
 constant oper_MOD : binary Int;

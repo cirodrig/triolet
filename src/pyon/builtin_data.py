@@ -20,6 +20,7 @@ _funType = hm.functionType
 def _makeClasses():
     "Create type classes."
     global class_Eq, class_Ord, class_Num, class_Traversable
+    global class_Additive, class_Vector
 
     def cmp_scheme(a):
         # Type scheme for comparsion operators:
@@ -27,6 +28,13 @@ def _makeClasses():
         # ('a' is not a stream)
         return hm.TyScheme([], [], hm.noConstraints,
                            _funType([a,a], type_bool))
+
+    def bin_scheme(a):
+        # Type scheme for binary operators:
+        # forall a. a * a -> a
+        # ('a' is not a stream)
+        return hm.TyScheme([], [], hm.noConstraints,
+                           _funType([a,a], a))
 
     def addPyonInstance(cls, qvars, constraints, type, members):
         # Add a class instance where all the members are constructors
@@ -77,6 +85,36 @@ def _makeClasses():
                  sf.TraversableClass, sf.con_TraversableDict)
     del T, t, scheme_fn
 
+    # class Additive a where
+    #   zero : a
+    #   add : a -> a -> a
+    #   subtract : a -> a -> a
+    a = hm.TyVar(_star, stream_tag.IsAction())
+    value_scheme = hm.TyScheme([], [], [], a)
+    value_scheme_fn = lambda: value_scheme
+    scheme_4 = bin_scheme(a)
+    scheme_fn = lambda: scheme_4
+    class_Additive = \
+        hm.Class("Additive", [], a, [],
+                 [hm.ClassMethod("__zero__", value_scheme_fn),
+                  hm.ClassMethod("__add__", scheme_fn),
+                  hm.ClassMethod("__sub__", scheme_fn)],
+                 sf.AdditiveClass, sf.con_AdditiveDict)
+    del a, scheme_fn, value_scheme_fn
+
+    # class Vector v where
+    #   scale : v -> Float -> v
+    #   norm : v -> Float
+    v = hm.TyVar(_star, stream_tag.IsAction())
+    scale_scheme = hm.TyScheme([], [], [], _funType([v, type_float], v))
+    norm_scheme = hm.TyScheme([], [], [], _funType([v], type_float))
+    class_Vector = \
+        hm.Class("Vector", [], v, [hm.ClassPredicate(v, class_Additive)],
+                 [hm.ClassMethod("scale", lambda: scale_scheme),
+                  hm.ClassMethod("norm", lambda: norm_scheme)],
+                 sf.VectorClass, sf.con_VectorDict)
+    del v
+
     # Instance declarations
     addPyonInstance(class_Eq, [], [], type_int,
                     [sf.con_EQ_Int, sf.con_NE_Int])
@@ -104,6 +142,11 @@ def _makeClasses():
                     [sf.con_TRAVERSE_Stream])
     addPyonInstance(class_Traversable, [], hm.noConstraints, type_list,
                     [sf.con_TRAVERSE_list])
+
+    addPyonInstance(class_Additive, [], hm.noConstraints, type_int,
+                    [sf.con_ZERO_Int, sf.con_ADD_Int, sf.con_SUB_Int])
+    addPyonInstance(class_Additive, [], hm.noConstraints, type_float,
+                    [sf.con_ZERO_Float, sf.con_ADD_Float, sf.con_SUB_Float])
 
 #     # class Eq a => Num a where
 #     #   (+) : a -> a -> St a
@@ -195,6 +238,8 @@ class_Eq = None
 class_Ord = None
 class_Num = None
 class_Traversable = None
+class_Additive = None
+class_Vector = None
 
 _makeClasses()
 
@@ -205,8 +250,9 @@ oper_LT = class_Ord.getMethod("__lt__")
 oper_LE = class_Ord.getMethod("__le__")
 oper_GT = class_Ord.getMethod("__gt__")
 oper_GE = class_Ord.getMethod("__ge__")
-oper_ADD = _builtin("__add__", _binaryScheme, sf.con_oper_ADD)
-oper_SUB = _builtin("__sub__", _binaryScheme, sf.con_oper_SUB)
+oper_ADD = class_Additive.getMethod("__add__")
+oper_SUB = class_Additive.getMethod("__sub__")
+oper_norm = class_Vector.getMethod("norm")
 oper_MUL = _builtin("__mul__", _binaryScheme, sf.con_oper_MUL)
 oper_DIV = _builtin("__div__", _binaryScheme, sf.con_oper_DIV)
 oper_MOD = _builtin("__mod__", _binaryIntScheme, sf.con_oper_MOD)
@@ -318,6 +364,7 @@ del T, a
 # The list of all builtin functions
 BUILTIN_FUNCTIONS = [fun_list, fun_reduce, fun_reduce1, fun_map, fun_zip,
                      fun_iota,
+                     oper_norm,
                      const_undefined]
 
 # The list of all builtin constructors

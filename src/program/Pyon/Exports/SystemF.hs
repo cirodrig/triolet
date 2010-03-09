@@ -66,6 +66,8 @@ foreign export ccall pyon_con_list :: IO PyPtr
 foreign export ccall pyon_con_EqDict :: IO PyPtr
 foreign export ccall pyon_con_OrdDict :: IO PyPtr
 foreign export ccall pyon_con_TraversableDict :: IO PyPtr
+foreign export ccall pyon_con_AdditiveDict :: IO PyPtr
+foreign export ccall pyon_con_VectorDict :: IO PyPtr
 foreign export ccall pyon_con_EQ_Int :: IO PyPtr
 foreign export ccall pyon_con_NE_Int :: IO PyPtr
 foreign export ccall pyon_con_LT_Int :: IO PyPtr
@@ -86,8 +88,12 @@ foreign export ccall pyon_con_GT_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_GE_Tuple2 :: IO PyPtr
 foreign export ccall pyon_con_TRAVERSE_Stream :: IO PyPtr
 foreign export ccall pyon_con_TRAVERSE_list :: IO PyPtr
-foreign export ccall pyon_con_oper_ADD :: IO PyPtr
-foreign export ccall pyon_con_oper_SUB :: IO PyPtr
+foreign export ccall pyon_con_ZERO_Int :: IO PyPtr
+foreign export ccall pyon_con_ADD_Int :: IO PyPtr
+foreign export ccall pyon_con_SUB_Int :: IO PyPtr
+foreign export ccall pyon_con_ZERO_Float :: IO PyPtr
+foreign export ccall pyon_con_ADD_Float :: IO PyPtr
+foreign export ccall pyon_con_SUB_Float :: IO PyPtr
 foreign export ccall pyon_con_oper_MUL :: IO PyPtr
 foreign export ccall pyon_con_oper_DIV :: IO PyPtr
 foreign export ccall pyon_con_oper_MOD :: IO PyPtr
@@ -117,6 +123,8 @@ pyon_con_list = asGlobalObject $ pyonBuiltin the_list
 pyon_con_EqDict = asGlobalObject $ pyonBuiltin the_EqDict
 pyon_con_OrdDict = asGlobalObject $ pyonBuiltin the_OrdDict
 pyon_con_TraversableDict = asGlobalObject $ pyonBuiltin the_TraversableDict
+pyon_con_AdditiveDict = asGlobalObject $ pyonBuiltin the_AdditiveDict
+pyon_con_VectorDict = asGlobalObject $ pyonBuiltin the_VectorDict
 pyon_con_EQ_Int = asGlobalObject $ eqMember $ pyonBuiltin the_EqDict_Int
 pyon_con_NE_Int = asGlobalObject $ neMember $ pyonBuiltin the_EqDict_Int
 pyon_con_LT_Int = asGlobalObject $ ltMember $ pyonBuiltin the_OrdDict_Int
@@ -137,8 +145,12 @@ pyon_con_GT_Tuple2 = asGlobalObject $ gtMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_GE_Tuple2 = asGlobalObject $ geMember $ pyonBuiltin the_OrdDict_Tuple2
 pyon_con_TRAVERSE_Stream = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_Stream
 pyon_con_TRAVERSE_list = asGlobalObject $ traverseMember $ pyonBuiltin the_TraversableDict_list
-pyon_con_oper_ADD = asGlobalObject $ pyonBuiltin the_oper_ADD
-pyon_con_oper_SUB = asGlobalObject $ pyonBuiltin the_oper_SUB
+pyon_con_ZERO_Int = asGlobalObject $ zeroMember $ pyonBuiltin the_AdditiveDict_Int
+pyon_con_ADD_Int = asGlobalObject $ addMember $ pyonBuiltin the_AdditiveDict_Int
+pyon_con_SUB_Int = asGlobalObject $ subMember $ pyonBuiltin the_AdditiveDict_Int
+pyon_con_ZERO_Float = asGlobalObject $ zeroMember $ pyonBuiltin the_AdditiveDict_Float
+pyon_con_ADD_Float = asGlobalObject $ addMember $ pyonBuiltin the_AdditiveDict_Float
+pyon_con_SUB_Float = asGlobalObject $ subMember $ pyonBuiltin the_AdditiveDict_Float
 pyon_con_oper_MUL = asGlobalObject $ pyonBuiltin the_oper_MUL
 pyon_con_oper_DIV = asGlobalObject $ pyonBuiltin the_oper_DIV
 pyon_con_oper_MOD = asGlobalObject $ pyonBuiltin the_oper_MOD
@@ -170,10 +182,14 @@ pyon_getTupleCon n = rethrowExceptionsInPython $
 foreign export ccall pyon_EqClass :: IO PyPtr
 foreign export ccall pyon_OrdClass :: IO PyPtr
 foreign export ccall pyon_TraversableClass :: IO PyPtr
+foreign export ccall pyon_AdditiveClass :: IO PyPtr
+foreign export ccall pyon_VectorClass :: IO PyPtr
 
 pyon_EqClass = asGlobalObject EqClass
 pyon_OrdClass = asGlobalObject OrdClass
 pyon_TraversableClass = asGlobalObject TraversableClass
+pyon_AdditiveClass = asGlobalObject AdditiveClass
+pyon_VectorClass = asGlobalObject VectorClass
 
 -------------------------------------------------------------------------------
 -- Exportable constructors for System F things.

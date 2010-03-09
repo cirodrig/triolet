@@ -1,6 +1,7 @@
 
 module Pyon.SystemF.Builtins
        (EqDictMembers(..), OrdDictMembers(..), TraversableDictMembers(..),
+        AdditiveDictMembers(..),
         loadPyonBuiltins, pyonBuiltin, isPyonBuiltin,
         the_Action, the_Stream, the_Stored,
         the_listElementEffect, the_listContentsEffect,
@@ -9,14 +10,15 @@ module Pyon.SystemF.Builtins
         the_NoneType, 
         the_Any, 
         the_EqDict, the_OrdDict, the_TraversableDict,
+        the_AdditiveDict, the_VectorDict,
         the_EqDict_Int, the_OrdDict_Int,
         the_EqDict_Float, the_OrdDict_Float,
         the_EqDict_Tuple2, the_OrdDict_Tuple2,
         the_TraversableDict_Stream, the_TraversableDict_list,
+        the_AdditiveDict_Int, the_AdditiveDict_Float,
         the_None, the_True, the_False,
         the_eqDict, the_ordDict, the_traversableDict,
-        the_oper_ADD,
-        the_oper_SUB,
+        the_additiveDict, the_vectorDict,
         the_oper_MUL,
         the_oper_DIV,
         the_oper_MOD,
@@ -79,6 +81,19 @@ data TraversableDictMembers =
   { traverseMember :: !Con
   }
 
+data AdditiveDictMembers =
+  AdditiveDictMembers
+  { zeroMember :: !Con
+  , addMember :: !Con
+  , subMember :: !Con
+  }
+
+data VectorDictMembers =
+  VectorDictMembers
+  { scaleMember :: !Con
+  , normMember :: !Con
+  }
+
 data PyonBuiltins =
   PyonBuiltins
   { the_Action :: Con
@@ -93,6 +108,8 @@ data PyonBuiltins =
   , the_EqDict :: Con
   , the_OrdDict :: Con
   , the_TraversableDict :: Con
+  , the_AdditiveDict :: Con
+  , the_VectorDict :: Con
     
     -- Class dictionary members
   , the_EqDict_Int :: EqDictMembers
@@ -103,6 +120,8 @@ data PyonBuiltins =
   , the_OrdDict_Tuple2 :: OrdDictMembers
   , the_TraversableDict_Stream :: TraversableDictMembers
   , the_TraversableDict_list :: TraversableDictMembers
+  , the_AdditiveDict_Int :: AdditiveDictMembers
+  , the_AdditiveDict_Float :: AdditiveDictMembers
   
     -- Tuple type constructors
   , the_tuples :: [Con]
@@ -116,10 +135,10 @@ data PyonBuiltins =
   , the_eqDict :: Con
   , the_ordDict :: Con
   , the_traversableDict :: Con
+  , the_additiveDict :: Con
+  , the_vectorDict :: Con
     
     -- Functions
-  , the_oper_ADD :: Con
-  , the_oper_SUB :: Con
   , the_oper_MUL :: Con
   , the_oper_DIV :: Con
   , the_oper_MOD :: Con
@@ -156,6 +175,8 @@ assign_Any x b = b {the_Any = x}
 assign_EqDict x b = b {the_EqDict = x}
 assign_OrdDict x b = b {the_OrdDict = x}
 assign_TraversableDict x b = b {the_TraversableDict = x}
+assign_AdditiveDict x b = b {the_AdditiveDict = x}
+assign_VectorDict x b = b {the_VectorDict = x}
 assign_EqDict_Int x b = b {the_EqDict_Int = x}
 assign_OrdDict_Int x b = b {the_OrdDict_Int = x}
 assign_EqDict_Float x b = b {the_EqDict_Float = x}
@@ -164,14 +185,16 @@ assign_EqDict_Tuple2 x b = b {the_EqDict_Tuple2 = x}
 assign_OrdDict_Tuple2 x b = b {the_OrdDict_Tuple2 = x}
 assign_TraversableDict_Stream x b = b {the_TraversableDict_Stream = x}
 assign_TraversableDict_list x b = b {the_TraversableDict_list = x}
+assign_AdditiveDict_Int x b = b {the_AdditiveDict_Int = x}  
+assign_AdditiveDict_Float x b = b {the_AdditiveDict_Float = x}
 assign_None x b = b {the_None = x}
 assign_True x b = b {the_True = x}
 assign_False x b = b {the_False = x}
 assign_eqDict x b = b {the_eqDict = x}
 assign_ordDict x b = b {the_ordDict = x}
 assign_traversableDict x b = b {the_traversableDict = x}
-assign_oper_ADD x b = b {the_oper_ADD = x}
-assign_oper_SUB x b = b {the_oper_SUB = x}
+assign_additiveDict x b = b {the_additiveDict = x}
+assign_vectorDict x b = b {the_vectorDict = x}
 assign_oper_MUL x b = b {the_oper_MUL = x}
 assign_oper_DIV x b = b {the_oper_DIV = x}
 assign_oper_MOD x b = b {the_oper_MOD = x}
@@ -284,6 +307,13 @@ setBuiltinTraversableDict mod traverse_name updater bi =
       dict = TraversableDictMembers c
   in dict `seq` updater dict bi
 
+setBuiltinAdditiveDict mod zero_name add_name sub_name updater bi =
+  let c_zero = findConByName mod zero_name
+      c_add = findConByName mod add_name
+      c_sub = findConByName mod add_name
+      dict = AdditiveDictMembers c_zero c_add c_sub
+  in dict `seq` updater dict bi
+
 -- Load symbols from the module and use them to initialize the builtins
 initializePyonBuiltins :: Module () -> IO ()
 initializePyonBuiltins mod =
@@ -299,6 +329,8 @@ initializePyonBuiltins mod =
                            , the_EqDict = uninitialized
                            , the_OrdDict = uninitialized
                            , the_TraversableDict = uninitialized
+                           , the_AdditiveDict = uninitialized
+                           , the_VectorDict = uninitialized
                            , the_EqDict_Int = uninitialized
                            , the_OrdDict_Int = uninitialized
                            , the_EqDict_Float = uninitialized
@@ -307,6 +339,8 @@ initializePyonBuiltins mod =
                            , the_OrdDict_Tuple2 = uninitialized
                            , the_TraversableDict_Stream = uninitialized
                            , the_TraversableDict_list = uninitialized
+                           , the_AdditiveDict_Int = uninitialized
+                           , the_AdditiveDict_Float = uninitialized
                            , the_tuples = uninitialized
                            , the_tupleConstructors = uninitialized
                            , the_None = uninitialized
@@ -315,8 +349,8 @@ initializePyonBuiltins mod =
                            , the_eqDict = uninitialized
                            , the_ordDict = uninitialized
                            , the_traversableDict = uninitialized
-                           , the_oper_ADD = uninitialized
-                           , the_oper_SUB = uninitialized
+                           , the_additiveDict = uninitialized
+                           , the_vectorDict = uninitialized
                            , the_oper_MUL = uninitialized
                            , the_oper_DIV = uninitialized
                            , the_oper_MOD = uninitialized
@@ -353,14 +387,16 @@ initializePyonBuiltins mod =
                          , ("EqDict", assign_EqDict)
                          , ("OrdDict", assign_OrdDict)
                          , ("TraversableDict", assign_TraversableDict)
+                         , ("AdditiveDict", assign_AdditiveDict)
+                         , ("VectorDict", assign_VectorDict)
                          , ("None", assign_None)
                          , ("True", assign_True)
                          , ("False", assign_False)
                          , ("eqDict", assign_eqDict)
                          , ("ordDict", assign_ordDict)
                          , ("traversableDict", assign_traversableDict)
-                         , ("oper_ADD", assign_oper_ADD)
-                         , ("oper_SUB", assign_oper_SUB)
+                         , ("additiveDict", assign_additiveDict)
+                         , ("vectorDict", assign_vectorDict)
                          , ("oper_MUL", assign_oper_MUL)
                          , ("oper_DIV", assign_oper_DIV)
                          , ("oper_MOD", assign_oper_MOD)
@@ -397,7 +433,11 @@ initializePyonBuiltins mod =
         setTraversableDict "Traversable_TRAVERSE_Stream" 
                            assign_TraversableDict_Stream .
         setTraversableDict "Traversable_TRAVERSE_list"
-                           assign_TraversableDict_list
+                           assign_TraversableDict_list .
+        setAdditiveDict "Additive_ZERO_Int" "Additive_ADD_Int" 
+                        "Additive_SUB_Int" assign_AdditiveDict_Int .
+        setAdditiveDict "Additive_ZERO_Float" "Additive_ADD_Float" 
+                        "Additive_SUB_Float" assign_AdditiveDict_Float
   in do bi <- evaluate $ setTupleFields $ setGlobalCons $ setClassDicts start
         putMVar the_PyonBuiltins bi
   where
@@ -409,6 +449,7 @@ initializePyonBuiltins mod =
     setEqDict = setBuiltinEqDict mod
     setOrdDict = setBuiltinOrdDict mod
     setTraversableDict = setBuiltinTraversableDict mod
+    setAdditiveDict = setBuiltinAdditiveDict mod
     
     setTupleFields bi =
       let -- Tuple type constructors

@@ -56,22 +56,33 @@ makeActionType return_type =
 classDictCon EqClass = pyonBuiltin the_EqDict
 classDictCon OrdClass = pyonBuiltin the_OrdDict
 classDictCon TraversableClass = pyonBuiltin the_TraversableDict
+classDictCon AdditiveClass = pyonBuiltin the_AdditiveDict
+classDictCon VectorClass = pyonBuiltin the_VectorDict
 
 classMethodType cls clsType index =
   case cls
   of EqClass ->
        case index
-       of 0 -> binaryFunctionType
-          1 -> binaryFunctionType
+       of 0 -> comparisonType
+          1 -> comparisonType
      OrdClass ->
        case index
-       of 0 -> binaryFunctionType
-          1 -> binaryFunctionType
-          2 -> binaryFunctionType
-          3 -> binaryFunctionType
+       of 0 -> comparisonType
+          1 -> comparisonType
+          2 -> comparisonType
+          3 -> comparisonType
      TraversableClass ->
        case index
        of 0 -> traverseType
+     AdditiveClass ->
+       case index
+       of 0 -> valueType
+          1 -> binaryFunctionType
+          2 -> binaryFunctionType
+     VectorClass ->
+       case index
+       of 0 -> scaleType
+          1 -> normType
   where
     traverseType = do
       a <- newTemporary Gluon.TypeLevel Nothing
@@ -84,12 +95,27 @@ classMethodType cls clsType index =
                Gluon.mkInternalArrowE False cls_exp iter_exp
       return ty
     binaryFunctionType = do
+      let ty = Gluon.mkInternalArrowE False clsType $
+               Gluon.mkInternalArrowE False clsType $
+               makeActionType $ clsType
+      return ty
+    comparisonType = do
       let return_bool = makeActionType $
                         Gluon.mkInternalConE (pyonBuiltin the_bool)
           ty = Gluon.mkInternalArrowE False clsType $
                Gluon.mkInternalArrowE False clsType $
                return_bool
       return ty
+    valueType = return $ makeActionType clsType
+    scaleType =
+      let float_type = Gluon.mkInternalConE (Gluon.builtin Gluon.the_Float)
+      in return $ Gluon.mkInternalArrowE False clsType $
+                  Gluon.mkInternalArrowE False float_type $
+                  makeActionType clsType
+    normType =
+      let float_type = Gluon.mkInternalConE (Gluon.builtin Gluon.the_Float)
+      in return $ Gluon.mkInternalArrowE False clsType $
+                  makeActionType float_type
 
 boolType = Gluon.mkInternalConE $ pyonBuiltin the_bool
 
@@ -244,8 +270,8 @@ typeInferTyAppE worker inf op arg = do
   case op_type of
     Gluon.FunE {Gluon.expMParam = param, Gluon.expRange = range} -> do
       -- Operand type must match
-      Gluon.tcAssertEqual noSourcePos (verbatim $ Gluon.binder'Type param) 
-                                      (verbatim arg_type)
+      tcAssertEqual noSourcePos (verbatim $ Gluon.binder'Type param) 
+                                (verbatim arg_type)
       
       -- Result type is the range, after substituting operand in argument
       result <- liftEvaluation $

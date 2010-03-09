@@ -38,23 +38,30 @@ import qualified Gluon.Core as Gluon
 import Pyon.SystemF.Builtins
 
 -- | The Pyon type classes.
-data PyonClass = EqClass | OrdClass | TraversableClass
-               deriving(Show, Typeable)
+data PyonClass =
+  EqClass | OrdClass | TraversableClass | AdditiveClass | VectorClass
+  deriving(Show, Typeable)
 
 pyonClassConstructor :: PyonClass -> Gluon.Con
 pyonClassConstructor EqClass = pyonBuiltin the_eqDict
 pyonClassConstructor OrdClass = pyonBuiltin the_ordDict
 pyonClassConstructor TraversableClass = pyonBuiltin the_traversableDict
+pyonClassConstructor AdditiveClass = pyonBuiltin the_additiveDict
+pyonClassConstructor VectorClass = pyonBuiltin the_vectorDict
 
 pyonClassNumSuperclasses :: PyonClass -> Int
 pyonClassNumSuperclasses EqClass = 0
 pyonClassNumSuperclasses OrdClass = 1
 pyonClassNumSuperclasses TraversableClass = 0
+pyonClassNumSuperclasses AdditiveClass = 0
+pyonClassNumSuperclasses VectorClass = 1
 
 pyonClassNumMethods :: PyonClass -> Int
 pyonClassNumMethods EqClass = 2
 pyonClassNumMethods OrdClass = 4
 pyonClassNumMethods TraversableClass = 1
+pyonClassNumMethods AdditiveClass = 3
+pyonClassNumMethods VectorClass = 2
 
 type family ExpOf a :: *
 type family TypeOf a :: *

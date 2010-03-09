@@ -281,7 +281,7 @@ class ClassPredicate(PyonTypeBase):
         "Return true if this predicate is in head-normal form"
         t = unification.canonicalize(self.type)
         while True:
-            if isinstance(t, TyVar): return True
+            if isinstance(t, (TyVar, RigidTyVar)): return True
             elif isinstance(t, EntTy): return False
             elif isinstance(t, AppTy): t = unification.canonicalize(t.operator)
             else: raise TypeError, type(t)
@@ -352,7 +352,7 @@ class ClassPredicate(PyonTypeBase):
 
         # Common case shortcut: If this predicate pertains to a type
         # variable, we won't find any instances
-        if isinstance(ty, TyVar): return None
+        if isinstance(ty, (TyVar, RigidTyVar)): return None
 
         # For each instance
         for inst in self.typeClass.instances:
