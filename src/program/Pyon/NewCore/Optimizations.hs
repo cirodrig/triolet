@@ -210,7 +210,7 @@ sortDefGroup defgroup =
                                 , y <- Set.toList $
                                        mentionedInDefiniens $
                                        definiens def
-                                , let y_id = var_map Map.! y
+                                , y_id <- maybeToList $ Map.lookup y var_map
                                 ]
       
       -- Build a graph
