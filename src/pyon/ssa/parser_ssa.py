@@ -283,6 +283,8 @@ def _doExpr(expr):
         _doExpr(expr.ifFalse)
     elif isinstance(expr, ast.LambdaExpr):
         #parameters should have gotten different variables
+        # Assign each parameter
+        for p in expr.parameters: _makeSSA(p)
         _doExpr(expr.body)
     elif isinstance(expr, ast.TupleExpr):
         for ex in expr.arguments: _doExpr(ex)
