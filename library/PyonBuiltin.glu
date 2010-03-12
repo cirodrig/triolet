@@ -208,7 +208,7 @@ constant fun_zip : (s : Pure -> Pure)
 
 constant fun_iota : Stream EmpE Int;
 
-constant fun_undefined : (a : Pure) -> Action EmpE a;
+constant fun_undefined : (a : Pure) -> a;
 
 -- List traversal with side effects
 constant loadListElement : (a : Pure)
