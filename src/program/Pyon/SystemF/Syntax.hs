@@ -9,10 +9,8 @@
 module Pyon.SystemF.Syntax
     (PyonClass(..),
      pyonClassConstructor, pyonClassNumSuperclasses, pyonClassNumMethods,
-     Vanilla,
      ExpOf, TypeOf,
-     VanillaExp, VanillaType, VanillaPat, VanillaTyPat, VanillaFun,
-     VanillaDef, VanillaModule,
+     RExp, RType, RPat, RTyPat, RFun, RDef, RModule,
      PyonType,
      Var,
      Lit(..),
@@ -34,6 +32,7 @@ import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
+import Gluon.Core(Rec)
 
 import Pyon.SystemF.Builtins
 
@@ -65,22 +64,20 @@ pyonClassNumMethods VectorClass = 2
 
 type family ExpOf a :: *
 type family TypeOf a :: *
-     
-data Vanilla deriving(Typeable)
 
-type instance ExpOf Vanilla = Exp Vanilla
-type instance TypeOf Vanilla = PyonType
+type instance ExpOf Rec = Exp Rec
+type instance TypeOf Rec = Gluon.ExpOf Rec Rec
 
-type VanillaExp = Exp Vanilla
-type VanillaType = PyonType
-type VanillaPat = Pat Vanilla
-type VanillaTyPat = TyPat Vanilla
-type VanillaDef = Def Vanilla
-type VanillaFun = Fun Vanilla
-type VanillaModule = Module Vanilla
+type RExp = Exp Rec
+type RType = PyonType
+type RPat = Pat Rec
+type RTyPat = TyPat Rec
+type RDef = Def Rec
+type RFun = Fun Rec
+type RModule = Module Rec
 
 -- | Pyon types are type-level Gluon expressions.
-type PyonType = Gluon.Exp Gluon.Core
+type PyonType = TypeOf Rec
 
 -- | Pyon variables are the same as Gluon variables.
 type Var = Gluon.Var
@@ -226,7 +223,7 @@ data Module syn = Module [Def syn]
 -- effects.  Lambda expressions have no side effects, since they return but
 -- do not execute their function.
 
-isValueExp :: Exp Vanilla -> Bool
+isValueExp :: Exp Rec -> Bool
 isValueExp expression =
   case expression
   of VarE {} -> True

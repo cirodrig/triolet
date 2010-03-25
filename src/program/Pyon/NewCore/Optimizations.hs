@@ -20,38 +20,40 @@ import qualified Data.Set as Set
 import Gluon.Common.Error
 import Gluon.Common.Supply
 import Gluon.Core
+import Gluon.Core.RenameBase
 import Gluon.Eval.Environment
 import Gluon.Eval.Eval
 import Pyon.Globals
 import Pyon.NewCore.Syntax
 import Pyon.NewCore.Rename
+import Pyon.NewCore.Print
   
 -- | Evaluate Gluon code in a module.
-evaluate :: Module Core -> IO (Module Core)
+evaluate :: Module Rec -> IO (Module Rec)
 evaluate (Module defs) =
   withTheVarIdentSupply $ \ident ->
   case runEval ident $ mapM evalDef defs
   of Nothing -> fail "Evaluation failed"
      Just defs' -> return $ Module defs'
 
-evalExp :: Exp Core -> Eval (Exp Core)
-evalExp expression = liftM whnfExp $ evalFully' expression
+evalExp :: Exp Rec -> Eval (Exp Rec)
+evalExp expression = liftM fromWhnf $ evalFully' expression
 
-evalVal :: Val Core -> Eval (Val Core)
+evalVal :: Val Rec -> Eval (Val Rec)
 evalVal = traverseVal evalVal evalStm evalExp
 
-evalStm :: Stm Core -> Eval (Stm Core)
+evalStm :: Stm Rec -> Eval (Stm Rec)
 evalStm = traverseStm evalVal evalStm evalExp
 
-evalDef :: Def Core -> Eval (Def Core)
+evalDef :: Def Rec -> Eval (Def Rec)
 evalDef = traverseDef evalVal evalStm evalExp
 
 -- | Search for nested application terms ('AppV' or 'AppE') and convert them
 -- to non-nested applications.
-flattenApplications :: Module Core -> Module Core
+flattenApplications :: Module Rec -> Module Rec
 flattenApplications (Module defs) = Module $ map faDef defs
 
-faExp :: Exp Core -> Exp Core
+faExp :: Exp Rec -> Exp Rec
 faExp expression =
   case expression
   of AppE {expInfo = inf, expOper = op, expArgs = args} ->
@@ -71,7 +73,7 @@ faExp expression =
 -- | Flatten a value.
 -- Note that we check for both Gluon application terms and Pyon application 
 -- terms.
-faVal :: Val Core -> Val Core
+faVal :: Val Rec -> Val Rec
 faVal value =
   case value
   of AppV {valInfo = inf, valOper = op, valArgs = args} ->
@@ -104,25 +106,25 @@ faVal value =
   where
     flattenSubexpressions = mapVal faVal faStm faExp value
 
-faStm :: Stm Core -> Stm Core
+faStm :: Stm Rec -> Stm Rec
 faStm statement = mapStm faVal faStm faExp statement
 
-faDef :: Def Core -> Def Core
+faDef :: Def Rec -> Def Rec
 faDef def = mapDef faVal faStm faExp def
 
 -------------------------------------------------------------------------------
 
 type GetMentions a = a -> Set Var
 
-getMentionsBinder :: Binder Core () -> Set Var -> Set Var
+getMentionsBinder :: Binder Rec () -> Set Var -> Set Var
 getMentionsBinder (Binder v ty ()) s =
   mentionedInExp ty `Set.union` Set.delete v s
 
-getMentionsBinder' :: Binder' Core () -> Set Var -> Set Var
+getMentionsBinder' :: Binder' Rec () -> Set Var -> Set Var
 getMentionsBinder' (Binder' mv ty ()) s =
   mentionedInExp ty `Set.union` maybe id Set.delete mv s
 
-mentionedInExp :: GetMentions (Exp Core)
+mentionedInExp :: GetMentions (Exp Rec)
 mentionedInExp expression =
   case expression
   of VarE {expVar = v} -> Set.singleton v
@@ -147,7 +149,7 @@ mentionedInExp expression =
       getMentionsBinder' param $ mentionedInTyFields rest
     mentionedInTyFields Unit = Set.empty
 
-mentionedInVal :: GetMentions (Val Core)
+mentionedInVal :: GetMentions (Val Rec)
 mentionedInVal value =
   case value
   of GluonV {valGluonTerm = ty} -> mentionedInExp ty
@@ -157,7 +159,7 @@ mentionedInVal value =
      SLamV {valSFun = sf} -> mentionedInStreamFun sf
      SDoV {valStm = stm} -> mentionedInStm stm
 
-mentionedInStm :: GetMentions (Stm Core)
+mentionedInStm :: GetMentions (Stm Rec)
 mentionedInStm statement =
   case statement
   of ReturnS {stmVal = val} -> mentionedInVal val
@@ -195,7 +197,7 @@ mentionedInStreamFun f = foldr getMentionsBinder body $ funParams f
                       ]
 
 -- Find SCCs in a definition group
-sortDefGroup :: [Def Core] -> [[Def Core]]
+sortDefGroup :: [Def Rec] -> [[Def Rec]]
 sortDefGroup defgroup =
   let -- Map definienda to graph node IDs.
       -- ID is position in the original defgroup list.
@@ -222,14 +224,14 @@ sortDefGroup defgroup =
   in -- Create the new definition groups
      map (map (defgroup !!)) sccs
 
-type Inl a = ReaderT (Map Var (Val Core)) Eval a
+type Inl a = ReaderT (Map Var (Val Rec)) Eval a
 
-instance Supplies (ReaderT (Map Var (Val Core)) Eval) VarID where
+instance Supplies (ReaderT (Map Var (Val Rec)) Eval) VarID where
   fresh = lift fresh
 
 runInl supply m = runEval supply $ runReaderT m Map.empty
 
-inline :: Module Core -> IO (Module Core)
+inline :: Module Rec -> IO (Module Rec)
 inline mod = do
   mod' <- withTheVarIdentSupply $ \supply -> return $ runInl supply $ do
     let Module defs = mod
@@ -239,36 +241,36 @@ inline mod = do
     Nothing -> fail "Evaluation failed"
     Just m  -> return m
 
-lookupName :: Var -> Inl (Maybe (Val Core))
+lookupName :: Var -> Inl (Maybe (Val Rec))
 lookupName v = asks (Map.lookup v)
 
-withInlineFunctions :: [Def Core] -> Inl a -> Inl a
+withInlineFunctions :: [Def Rec] -> Inl a -> Inl a
 withInlineFunctions defs m = foldr withInlineFunction m defs
 
-withInlineFunction :: Def Core -> Inl a -> Inl a
+withInlineFunction :: Def Rec -> Inl a -> Inl a
 withInlineFunction (Def inf v f) = local $ Map.insert v (asValue f)
   where
     asValue (ActionFunDef f) = ALamV inf f
     asValue (StreamFunDef f) = SLamV inf f
 
-withAssignment :: Var -> Val Core -> Inl a -> Inl a
+withAssignment :: Var -> Val Rec -> Inl a -> Inl a
 withAssignment v value = local $ Map.insert v value
 
-bindParameter :: Binder Core () -> Val Core -> Inl a -> Inl a
+bindParameter :: Binder Rec () -> Val Rec -> Inl a -> Inl a
 bindParameter (Binder v _ ()) value = withAssignment v value
 
-bindParameters :: [(Binder Core (), Val Core)] -> Inl a -> Inl a
+bindParameters :: [(Binder Rec (), Val Rec)] -> Inl a -> Inl a
 bindParameters xs m = foldr (uncurry bindParameter) m xs
 
-inlineBinder :: Binder Core () -> Inl (Binder Core ())
+inlineBinder :: Binder Rec () -> Inl (Binder Rec ())
 inlineBinder (Binder v ty ()) = do
   ty' <- inlineExp' ty
   return $ Binder v ty' ()
 
 inlineDefGroup :: Bool
-               -> [Def Core]
+               -> [Def Rec]
                -> Inl (a, Set Var)
-               -> Inl ([[Def Core]], a)
+               -> Inl ([[Def Rec]], a)
 inlineDefGroup removeUnmentionedDefs defs doBody = do
   (defs, x, _) <- inlineLocally $ sortDefGroup defs
   return (defs, x)
@@ -307,7 +309,7 @@ inlineDefGroup removeUnmentionedDefs defs doBody = do
       (x, mentions) <- doBody
       return ([], x, mentions)
 
-inlineDef :: Def Core -> Inl (Def Core)
+inlineDef :: Def Rec -> Inl (Def Rec)
 inlineDef def =
   case definiens def
   of ActionFunDef f -> do f' <- inlineActionFun f
@@ -317,7 +319,7 @@ inlineDef def =
 
 inlineActionFunDef fun = undefined
 
-inlineActionCallVal :: SynInfo -> Val Core -> Inl (Stm Core)
+inlineActionCallVal :: SynInfo -> Val Rec -> Inl (Stm Rec)
 inlineActionCallVal info value = evalActionCall info =<< inlineVal value
   
 inlineVal value =
@@ -348,7 +350,7 @@ inlineExp exp =
        return $ AppV {valInfo = inf, valOper = op', valArgs = args'}
      _ -> liftM expToVal $ inlineExp' exp
      
-inlineExp' :: Exp Core -> Inl (Exp Core)
+inlineExp' :: Exp Rec -> Inl (Exp Rec)
 inlineExp' exp =
   case exp
   of VarE {expVar = v} -> do
@@ -431,8 +433,8 @@ evalActionCall info val =
        when (length (funParams f) /= length args) $
          internalError "Cannot evaluate a partially applied function"
        
-       -- Rename the function to avoid name collisions
-       f_renamed <- freshenActionFunFully mempty f
+       -- Rename the function's parameters to avoid name collisions
+       f_renamed <- withEmptySubstitution $ freshenActionFunFully $ verbatimActionFun f
        
        bindParameters (zip (funParams f_renamed) args) $ do
          -- Substitute arguments for parameters in function body

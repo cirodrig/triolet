@@ -22,41 +22,41 @@ catEndo :: [a -> a] -> a -> a
 catEndo fs x = foldr ($) x fs
 
 -- | Apply optimizations to a module.
-optimizeModule :: VanillaModule -> VanillaModule
+optimizeModule :: RModule -> RModule
 optimizeModule mod =
   mapModule elimDeadCode $
   mapModule doPartialEvaluation $
   mod
 
-mapModule :: (VanillaDef -> VanillaDef) -> VanillaModule -> VanillaModule
+mapModule :: (RDef -> RDef) -> RModule -> RModule
 mapModule f (Module ds) = Module (map f ds)
 
 -------------------------------------------------------------------------------
 -- Partial evaluation
 
-doPartialEvaluation :: VanillaDef -> VanillaDef
+doPartialEvaluation :: RDef -> RDef
 doPartialEvaluation def = runPEval $ pevalDef def
 
 -- | The 'PEval' monad holds a variable-to-value mapping for constant
 -- propagation, copy propagation, and inlining.  Expressions in the map have
 -- no side effects, and therefore are safe to inline.
-type PEval a = Reader (Map Var VanillaExp) a
+type PEval a = Reader (Map Var RExp) a
 
 -- | Perform partial evaluation in an empty environment.
 runPEval :: PEval a -> a
 runPEval m = runReader m Map.empty
 
-lookupVar :: Var -> PEval (Maybe VanillaExp)
+lookupVar :: Var -> PEval (Maybe RExp)
 lookupVar v = asks (Map.lookup v)
 
-lookupVarDefault :: VanillaExp -> Var -> PEval VanillaExp
+lookupVarDefault :: RExp -> Var -> PEval RExp
 lookupVarDefault defl v = asks (Map.findWithDefault defl v)
 
 -- | Given a value and the pattern it is bound to, add the bound value(s)
 -- to the environment.  The caller should verify that the value has no
 -- side effects.  Any values that cannot be added to the environment will be
 -- ignored.
-bindValue :: VanillaPat -> VanillaExp -> PEval a -> PEval a
+bindValue :: RPat -> RExp -> PEval a -> PEval a
 bindValue (WildP _)   _ m = m
 bindValue (VarP v t)  e m = local (Map.insert v e) m
 bindValue (TupleP ps) e m =
@@ -69,7 +69,7 @@ bindValue (TupleP ps) e m =
        -- Cannot bind, because we cannot statically deconstruct this tuple
        m
 
-bindDefs :: ExpInfo -> [VanillaDef] -> PEval a -> PEval a
+bindDefs :: ExpInfo -> [RDef] -> PEval a -> PEval a
 bindDefs info defs m = foldr bindDef m defs
   where
     bindDef (Def v f) m =
@@ -78,10 +78,10 @@ bindDefs info defs m = foldr bindDef m defs
 
 -- | Partial evaluation of an expression.  First, evaluate subexpressions;
 -- then, try to statically evaluate.
-pevalExp :: VanillaExp -> PEval VanillaExp
+pevalExp :: RExp -> PEval RExp
 pevalExp expression =
   return . partialEvaluate =<< pevalExpRecursive expression
-partialEvaluate :: VanillaExp -> VanillaExp
+partialEvaluate :: RExp -> RExp
 partialEvaluate expression =
   case expression
   of MethodSelectE {expArg = argument} ->
@@ -102,7 +102,7 @@ partialEvaluate expression =
           of TyAppE {expOper = op, expTyArg = ty} -> unpack op (ty : tail)
              _ -> Just (e, tail)
 
-pevalExpRecursive :: VanillaExp -> PEval VanillaExp
+pevalExpRecursive :: RExp -> PEval RExp
 pevalExpRecursive expression =
   case expression
   of VarE {expVar = v} -> lookupVarDefault expression v
@@ -150,12 +150,12 @@ pevalExpRecursive expression =
        e' <- pevalExp e
        return $ expression {expArg = e'}
 
-pevalFun :: VanillaFun -> PEval VanillaFun
+pevalFun :: RFun -> PEval RFun
 pevalFun f = do
   body <- pevalExp $ funBody f
   return $ f {funBody = body}
 
-pevalDef :: VanillaDef -> PEval VanillaDef
+pevalDef :: RDef -> PEval RDef
 pevalDef (Def v f) = do
   f' <- pevalFun f
   return $ Def v f'
@@ -175,7 +175,7 @@ onSetUnion f (SetUnion s) = SetUnion (f s)
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
-elimDeadCode :: VanillaDef -> VanillaDef
+elimDeadCode :: RDef -> RDef
 elimDeadCode def = evalEDC edcDef def
 
 -- | Dead code elimination on a value produces a new value and a set of
@@ -213,8 +213,8 @@ maskSet vs m = pass $ do x <- m
 edcScanType :: PyonType -> GetMentionsSet ()
 edcScanType t = scanType t >> return ()
   where
-    scanType :: Gluon.RecExp Gluon.Core
-             -> GetMentionsSet (Gluon.RecExp Gluon.TrivialSyntax)
+    scanType :: Gluon.RExp 
+             -> GetMentionsSet (Gluon.RecExp Gluon.TrivialStructure)
     scanType expression =
       case expression
       of -- Scan the body of lambda/function type expressions, then delete
@@ -231,34 +231,35 @@ edcScanType t = scanType t >> return ()
          -- Mention variables
          Gluon.VarE {Gluon.expVar = v} -> do
            mention v
-           return $ Const ()
+           return Gluon.TrivialExp
 
          -- Recurse on other expressions
          _ -> do (Gluon.traverseExp scanType scanTuple scanProd expression
-                    :: GetMentionsSet (Gluon.Exp Gluon.TrivialSyntax))
-                 return $ Const ()
+                    :: GetMentionsSet (Gluon.Exp Gluon.TrivialStructure))
+                 return Gluon.TrivialExp
 
-    scanTuple :: Gluon.RecTuple Gluon.Core
-              -> GetMentionsSet (Gluon.RecTuple Gluon.TrivialSyntax)
+    scanTuple :: Gluon.RTuple
+              -> GetMentionsSet (Gluon.RecTuple Gluon.TrivialStructure)
     scanTuple t =
       case t
       of Gluon.Binder' v ty val Gluon.:&: b -> do
            scanType ty
            scanType val
            maybe id mask v $ scanTuple b
-         Gluon.Nil -> return $ Const ()
+         Gluon.Nil -> return Gluon.TrivialTuple
 
-    scanProd :: Gluon.RecSum Gluon.Core
-             -> GetMentionsSet (Gluon.RecSum Gluon.TrivialSyntax)
+    scanProd :: Gluon.RSum
+             -> GetMentionsSet (Gluon.RecSum Gluon.TrivialStructure)
     scanProd p =
       case p
       of Gluon.Binder' v ty () Gluon.:*: b -> do
            scanType ty
            maybe id mask v $ scanProd b
+         Gluon.Unit -> return Gluon.TrivialSum
 
 -- | Run the computation in a scope where the pattern is bound.
 -- Return a new pattern and the result of the computation.
-edcMaskPat :: VanillaPat -> GetMentionsSet a -> GetMentionsSet (VanillaPat, a)
+edcMaskPat :: RPat -> GetMentionsSet a -> GetMentionsSet (RPat, a)
 edcMaskPat pat m =
   case pat
   of WildP t -> do
@@ -290,7 +291,7 @@ edcMaskPat pat m =
     wildcardType (WildP t) = t
     wildcardType _ = error "Not a wildcard pattern"
 
-edcMaskPats :: [VanillaPat] -> GetMentionsSet a -> GetMentionsSet ([VanillaPat], a)
+edcMaskPats :: [RPat] -> GetMentionsSet a -> GetMentionsSet ([RPat], a)
 edcMaskPats (pat:pats) m = do
   (pat', (pats', x)) <- edcMaskPat pat $ edcMaskPats pats m
   return (pat':pats', x)
@@ -298,13 +299,13 @@ edcMaskPats (pat:pats) m = do
 edcMaskPats [] m = do x <- m
                       return ([], x)
 
-edcMaskTyPat :: VanillaTyPat -> GetMentionsSet a -> GetMentionsSet (VanillaTyPat, a)
+edcMaskTyPat :: RTyPat -> GetMentionsSet a -> GetMentionsSet (RTyPat, a)
 edcMaskTyPat pat@(TyPat v ty) m = do
   edcScanType ty
   x <- mask v m
   return (pat, x)
 
-edcMaskTyPats :: [VanillaTyPat] -> GetMentionsSet a -> GetMentionsSet ([VanillaTyPat], a)
+edcMaskTyPats :: [RTyPat] -> GetMentionsSet a -> GetMentionsSet ([RTyPat], a)
 edcMaskTyPats (pat:pats) m = do
   (pat', (pats', x)) <- edcMaskTyPat pat $ edcMaskTyPats pats m
   return (pat':pats', x)
@@ -312,12 +313,12 @@ edcMaskTyPats (pat:pats) m = do
 edcMaskTyPats [] m = do x <- m
                         return ([], x)
 
-edcDef :: EDC VanillaDef
+edcDef :: EDC RDef
 edcDef (Def v f) = do
   f' <- edcFun f
   return $ Def v f'
 
-edcFun :: EDC VanillaFun
+edcFun :: EDC RFun
 edcFun function@(Fun { funTyParams = tps
                      , funParams = ps
                      , funReturnType = return_type
@@ -330,7 +331,7 @@ edcFun function@(Fun { funTyParams = tps
       edcExp body
   return $ function {funTyParams = tps', funParams = ps', funBody = b'}
 
-edcExp :: EDC VanillaExp
+edcExp :: EDC RExp
 edcExp expression =
   case expression
   of VarE {expVar = v} ->
@@ -382,7 +383,7 @@ edcExp expression =
        return $ expression {expArg = e'}
 
 -- | Dead code elimination for a \"let\" expression
-edcLetE :: ExpInfo -> VanillaPat -> VanillaExp -> VanillaExp -> GetMentionsSet VanillaExp
+edcLetE :: ExpInfo -> RPat -> RExp -> RExp -> GetMentionsSet RExp
 edcLetE info lhs rhs body =
   -- Replace the pattern "let x = foobar in x" with "foobar"
   case body

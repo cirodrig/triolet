@@ -44,7 +44,6 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/Syntax.hs \
 	Pyon/SystemF/Typecheck.hs \
 	Pyon/SystemF/Flatten.hs \
-	Pyon/NewCore/EffectInference.hs \
 	Pyon/NewCore/Optimizations.hs \
 	Pyon/NewCore/Print.hs \
 	Pyon/NewCore/Rename.hs \

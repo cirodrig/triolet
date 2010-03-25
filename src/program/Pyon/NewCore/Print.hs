@@ -29,22 +29,22 @@ defaultPrintFlags = PrintFlags
 pprVar :: Var -> Doc
 pprVar = pprVarFlags defaultPrintFlags
 
-pprVal :: CVal -> Doc
+pprVal :: RVal -> Doc
 pprVal = pprValFlags defaultPrintFlags
 
-pprStm :: CStm -> Doc
+pprStm :: RStm -> Doc
 pprStm = pprStmFlags defaultPrintFlags
 
-pprDef :: CDef -> Doc
+pprDef :: RDef -> Doc
 pprDef = pprDefFlags defaultPrintFlags
 
-pprModule :: Module Core -> Doc
+pprModule :: Module Rec -> Doc
 pprModule (Module m) = vcat $ map (<> semi) $ map pprDef m 
 
 pprVarFlags :: PrintFlags -> Var -> Doc
 pprVarFlags _ v = Gluon.pprVar v
 
-pprValFlags :: PrintFlags -> CVal -> Doc
+pprValFlags :: PrintFlags -> RVal -> Doc
 pprValFlags flags val =
   case val
   of GluonV {valGluonTerm = t} -> Gluon.pprExp t
@@ -57,11 +57,11 @@ pprValFlags flags val =
      SDoV {valStm = stm} ->
        text "do" <+> pprStmFlags flags stm
 
-pprBinderFlags :: PrintFlags -> Binder Core () -> Doc
+pprBinderFlags :: PrintFlags -> Binder Rec () -> Doc
 pprBinderFlags flags (Binder v ty ()) =
   pprVarFlags flags v <+> colon <+> Gluon.pprExp ty
 
-pprStmFlags :: PrintFlags -> CStm -> Doc
+pprStmFlags :: PrintFlags -> RStm -> Doc
 pprStmFlags flags stm =
   case stm
   of ReturnS {stmVal = val} ->
@@ -74,7 +74,7 @@ pprStmFlags flags stm =
      _ -> pprBlockFlags flags stm
 
 -- Print a statement in "block" format
-pprBlockFlags :: PrintFlags -> CStm -> Doc
+pprBlockFlags :: PrintFlags -> RStm -> Doc
 pprBlockFlags flags stm = bracesStack $ pprStatements stm
   where
     pprStatements (LetS {stmVar = Nothing, stmStm = rhs, stmBody = body}) =

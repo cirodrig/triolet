@@ -1,8 +1,12 @@
 
-{-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, Rank2Types, FlexibleInstances, FlexibleContexts #-}
 module Pyon.NewCore.Rename
-       (PyonSubst(..),
-        freshenVar,
+       (SRVal, SRStm,
+        freshenActionFun,
+        freshenActionFunFully,
+        verbatimActionFun,
+        freshenStreamFun,
+        freshenModuleHead) {-freshenVar,
         renameValFully,
         renameValHead, freshenValHead,
         renameStmFully,
@@ -11,7 +15,7 @@ module Pyon.NewCore.Rename
         freshenActionFunFully,
         freshenStreamFunHead,
         freshenDefGroupHead,
-        freshenModuleHead)
+        freshenModuleHead) -}
 where
 
 import Control.Monad
@@ -25,225 +29,211 @@ import Gluon.Common.Identifier
 import Gluon.Common.MonadLogic
 import Gluon.Common.Supply
 import Gluon.Core.Level
-import Gluon.Core(Core, mkVar)
-import Gluon.Core.Rename hiding(freshenBinder, freshenBinder')
-import Gluon.Core.RenameBase hiding(freshenVar)
+import Gluon.Core(Rec, mkVar)
+import Gluon.Core.Rename
+import Gluon.Core.RenameBase
 import Pyon.NewCore.Syntax
 
-{-
--- | Pyon variables may only be renamed (not substituted).
--- Pyon types may be substituted in the manner of Gluon types.
-data PyonSubst =
-  PyonSubst
-  { pyonRenaming :: Map Var Var
-  , gluonSubst :: Subst Core
-  }
--}
-type PyonSubst = Subst Core
+withMany :: Monad m =>
+            (a -> (b -> m c) -> m c) -> [a] -> ([b] -> m c) -> m c
+withMany f (x:xs) k = f x $ \y -> withMany f xs $ \ys -> k (y:ys)
+withMany _ []     k = k []
 
-instance PyonSyntax (SubstitutingT Core) where
-  type ValOf (SubstitutingT Core) = SubstitutingSyntax Core Val
-  type StmOf (SubstitutingT Core) = SubstitutingSyntax Core Stm
+freshenMany :: Monad m =>
+               (forall b. a -> m b -> m (a, b)) -> [a] -> m b -> m ([a], b)
+freshenMany f (x:xs) m = do
+  (y, (ys, z)) <- f x $ freshenMany f xs m
+  return (y:ys, z)
 
--- renameVariable :: PyonSubst -> Var -> Var
--- renameVariable subst v = fromMaybe v $ Map.lookup v (pyonRenaming subst)
+freshenMany _ [] m = do
+  z <- m
+  return ([], z)
 
-suspendPyon :: PyonSubst -> t Core 
-            -> SubstitutingSyntax Core t (SubstitutingT Core)
-suspendPyon subst x = SubstitutingSyntax (subst :@ x)
+newtype instance ValOf (Subst s) (Subst s) = SVal (SubstWrapped ValOf)
+newtype instance StmOf (Subst s) (Subst s) = SStm (SubstWrapped StmOf)
 
-suspendGluon :: PyonSubst -> t Core 
-             -> SubstitutingSyntax Core t (SubstitutingT Core)
-suspendGluon subst x = SubstitutingSyntax (subst :@ x)
+type SRVal = RecVal SubstRec
+type SRStm = RecStm SubstRec
 
-renameBinder :: Binder (SubstitutingT Core) () -> Binder Core ()
-renameBinder (Binder v ty ()) = Binder v (renameFully ty) ()
+instance HasSourcePos (ValOf SubstRec SubstRec) where
+  getSourcePos (SVal x) = getSourcePos x
+  setSourcePos (SVal x) p = SVal (setSourcePos x p)
 
-renameValFully :: RecVal (SubstitutingT Core) -> Val Core
-renameValFully v = mapVal renameValFully renameStmFully renameFully $
-                   renameValHead v
+instance Substitutable ValOf where
+  asSubst = SVal
+  fromSubst (SVal s) = s
+  mapSubstitutable f = mapVal f f f
+  applySubstitution sub val =
+    mapVal (joinSubst sub) (joinSubst sub) (joinSubst sub) val
 
-renameValHead :: RecVal (SubstitutingT Core) -> Val (SubstitutingT Core)
-renameValHead (SubstitutingSyntax (sub :@ value)) =
-  let r = suspendPyon sub
-  in case value
-     of {-VarV info v -> case substituteForVar (substSubstituter sub) info v
-                       of Nothing -> VarV info v
-                          Just e  -> GluonV info (verbatim e) -}
-        _ -> mapVal (suspendPyon sub) (suspendPyon sub) (suspendGluon sub)
-             value
+instance Substitutable StmOf where
+  asSubst = SStm
+  fromSubst (SStm s) = s
+  mapSubstitutable f = mapStm f f f
+  applySubstitution sub stm =
+    mapStm (joinSubst sub) (joinSubst sub) (joinSubst sub) stm
 
-freshenValFully :: (Monad m, Supplies m VarID) =>
-                   RecVal (SubstitutingT Core) -> m (Val Core)
-freshenValFully v = traverseVal freshenValFully freshenStmFully freshenFully =<<
-                    freshenValHead v
+instance Renameable ValOf where
+  freshenHead x = withSubstitutable x f
+    where
+      f value =
+        case value
+        of GluonV info t -> GluonV info `liftM` joinSubstitution t
+           AppV info op args -> AppV info `liftM`
+                                joinSubstitution op `ap`
+                                mapM joinSubstitution args
+           ALamV info f -> ALamV info `liftM` freshenActionFun f
+           SLamV info f -> SLamV info `liftM` freshenStreamFun f
+           SDoV info s -> SDoV info `liftM` joinSubstitution s
+  
+  freshenFully v = traverseVal freshenFully freshenFully freshenFully =<<
+                   freshenHead v
 
-freshenValHead :: (Monad m, Supplies m VarID) =>
-                  RecVal (SubstitutingT Core) -> m (Val (SubstitutingT Core))
-freshenValHead subst_value@(SubstitutingSyntax (sub :@ value)) =
-  case value
-  of ALamV info afun ->
-       liftM (ALamV info) $ freshenActionFunHead sub afun
-     SLamV info sfun ->
-       liftM (SLamV info) $ freshenStreamFunHead sub sfun
-     -- Other terms do not bind variables
-     _ -> return $ renameValHead subst_value
+instance Renameable StmOf where
+  freshenHead x = withSubstitutable x f
+    where
+      f statement =
+        case statement
+        of ReturnS info val -> ReturnS info `liftM` joinSubstitution val
+           CallS info val -> CallS info `liftM` joinSubstitution val
+           LetS info mv s1 s2 -> do
+             s1' <- joinSubstitution s1
+             (mv', s2') <- withFreshVarMaybe mv $ joinSubstitution s2
+             return $ LetS info mv' s1' s2'
+           LetrecS info defs body -> do
+             (defs', body') <- withDefinitions defs $ joinSubstitution body
+             return $ LetrecS info defs' body'
+           CaseS info scr alts ->
+             CaseS info `liftM` joinSubstitution scr `ap` mapM freshenAlt alts
 
-freshenActionFunHead :: (Monad m, Supplies m VarID) =>
-                        PyonSubst -> ActionFun Core
-                     -> m (ActionFun (SubstitutingT Core))
-freshenActionFunHead = freshenFunHead suspendPyon
+  freshenFully s = traverseStm freshenFully freshenFully freshenFully =<<
+                   freshenHead s
+
+withFreshVarMaybe Nothing m = do
+  x <- m
+  return (Nothing, x)
+
+withFreshVarMaybe (Just v) m = do
+  (v', x) <- withFreshVar v m
+  return (Just v', x)
+
+freshenBinders :: (Monad m, Supplies m VarID) =>
+                  [Binder SubstRec ()]
+               -> WithSubstitution m a
+               -> WithSubstitution m ([Binder SubstRec ()], a)
+freshenBinders = freshenMany freshenBinder
+
+withFreshVars :: (Monad m, Supplies m VarID) =>
+                 [Var] 
+              -> WithSubstitution m a 
+              -> WithSubstitution m ([Var], a)
+withFreshVars = freshenMany withFreshVar
+
+withDefinitions :: (Monad m, Supplies m VarID) =>
+                   [Def SubstRec]
+                -> WithSubstitution m a
+                -> WithSubstitution m ([Def SubstRec], a)
+withDefinitions defs m = do
+  -- Create new definitions of local variables
+  (definienda, (definientia, x)) <- withFreshVars (map definiendum defs) $ do
+    -- Apply the renaming to definientia
+    definientia <- mapM (substituteInDefiniens . definiens) defs
+    x <- m
+    return (definientia, x)
+  let defs' = zipWith3 Def (map defInfo defs) definienda definientia
+  return (defs', x)
+  where
+    substituteInDefiniens (ActionFunDef f) =
+      ActionFunDef `liftM` freshenActionFun f
+    substituteInDefiniens (StreamFunDef f) =
+      StreamFunDef `liftM` freshenStreamFun f
+
+freshenActionFun f = do
+  (params, (rt, et, b)) <- freshenBinders (funParams f) $ do
+    rt <- joinSubstitution $ funReturnType f
+    et <- joinSubstitution $ funEffectType f
+    b <- joinSubstitution $ funBody f
+    return (rt, et, b)
+  return $ Fun params rt et b
+
+freshenStreamFun f = do             
+  (params, (rt, et, b)) <- freshenBinders (funParams f) $ do
+    rt <- joinSubstitution $ funReturnType f
+    -- Effect type is ignored
+    let et = funEffectType f
+    b <- joinSubstitution $ funBody f
+    return (rt, et, b)
+  return $ Fun params rt et b
 
 freshenActionFunFully :: (Monad m, Supplies m VarID) =>
-                         PyonSubst -> ActionFun Core
-                      -> m (ActionFun Core)
-freshenActionFunFully subst f = do
-  f' <- freshenActionFunHead subst f
-  -- No important variables are bound in types, so just rename them
-  let params = map renameBinder $ funParams f'
-      ret_ty = renameFully $ funReturnType f'
-      eff_ty = renameFully $ funEffectType f'
-  body <- freshenStmFully $ funBody f'
-  return $ Fun params ret_ty eff_ty body
+                         ActionFun SubstRec 
+                      -> WithSubstitution m (ActionFun Rec)
+freshenActionFunFully f = do
+  (params, (rt, et, b)) <- freshenBinders (funParams f) $ do
+    rt <- joinAndFreshenFully $ funReturnType f
+    et <- joinAndFreshenFully $ funEffectType f
+    b <- joinAndFreshenFully $ funBody f
+    return (rt, et, b)
+  params' <- mapM (traverseBinder return freshenFully) params
+  return $ Fun params' rt et b
 
-freshenStreamFunHead :: (Monad m, Supplies m VarID) =>
-                        PyonSubst -> StreamFun Core
-                     -> m (StreamFun (SubstitutingT Core))
-freshenStreamFunHead = freshenFunHead suspendPyon
+verbatimActionFun :: ActionFun Rec -> ActionFun SubstRec
+verbatimActionFun f =
+  let params = map (mapBinder id verbatim) $ funParams f
+      rt = verbatim $ funReturnType f
+      et = verbatim $ funEffectType f
+      b = verbatim $ funBody f
+  in Fun params rt et b
 
-freshenFunHead :: (Monad m, Supplies m VarID) =>
-                  (PyonSubst -> a -> b)
-               -> PyonSubst -> Fun Core a
-               -> m (Fun (SubstitutingT Core) b)
-freshenFunHead suspendBody sub fun = do
-  (sub', params') <- mapAccumM freshenBinder sub (funParams fun)
-  let rt = suspendGluon sub' $ funReturnType fun
-      et = suspendGluon sub' $ funEffectType fun
-      body = suspendBody sub' $ funBody fun
-  return $ Fun params' rt et body
+substActionFun :: ActionFun SubstRec -> ActionFun Rec
+substActionFun f =
+  let params = map (mapBinder id substFully) $ funParams f
+      rt = substFully $ funReturnType f
+      et = substFully $ funEffectType f
+      body = substFully $ funBody f
+  in Fun params rt et body
 
-freshenDefiniensHead :: (Monad m, Supplies m VarID) =>
-                        PyonSubst -> Definiens Core 
-                     -> m (Definiens (SubstitutingT Core))
-freshenDefiniensHead sub (ActionFunDef f) = 
-  liftM ActionFunDef $ freshenActionFunHead sub f
-freshenDefiniensHead sub (StreamFunDef f) = 
-  liftM StreamFunDef $ freshenStreamFunHead sub f
+substStreamFun :: StreamFun SubstRec -> StreamFun Rec
+substStreamFun f =
+  let params = map (mapBinder id substFully) $ funParams f
+      rt = substFully $ funReturnType f
+      et = substFully $ funEffectType f
+      body = substFully $ funBody f
+  in Fun params rt et body
 
-freshenDefGroupHead :: (Monad m, Supplies m VarID) =>
-                       PyonSubst
-                    -> [Def Core]
-                    -> (PyonSubst -> m a)
-                    -> m ([Def (SubstitutingT Core)], a)
-freshenDefGroupHead sub defs body = do
-  -- Create new definitions of local variables
-  (sub', newLocalVars) <- mapAccumM freshenVar sub $ map definiendum defs
-  
-  -- Apply the renaming to definienda
-  definienda <- mapM (freshenDefiniensHead sub' . definiens) defs
-  let defs' = zipWith3 Def (map defInfo defs) newLocalVars definienda
 
-  -- Visit other things in the group's scope
-  body' <- body sub'
-  
-  return (defs', body')
+freshenAlt alt = do
+  (pat, body) <- withFreshPattern (altPat alt) $ joinSubstitution (altBody alt)
+  return $ Alt (altInfo alt) pat body
 
-freshenBinder :: (Monad m, Supplies m VarID) =>
-                 PyonSubst -> Binder Core () 
-              -> m (PyonSubst, Binder (SubstitutingT Core) ())
-freshenBinder sub (Binder v ty ()) = do
-  let ty' = suspendGluon sub ty
-  (sub', v') <- freshenVar sub v
-  return (sub', Binder v' ty' ())
-
-freshenBinder' :: (Monad m, Supplies m VarID) =>
-                  PyonSubst -> Binder' Core () 
-               -> m (PyonSubst, Binder' (SubstitutingT Core) ())
-freshenBinder' sub (Binder' mv ty ()) = do
-  let ty' = suspendGluon sub ty
-  (sub', mv') <- case mv
-                 of Nothing -> return (sub, Nothing)
-                    Just v -> do (sub, v') <- freshenVar sub v
-                                 return (sub, Just v')
-  return (sub', Binder' mv' ty' ())
-
-freshenVar :: (Monad m, Supplies m VarID) =>
-              PyonSubst -> Var -> m (PyonSubst, Var)
-freshenVar sub v = do
-  newID <- fresh
-  let lv = getLevel v
-      v' = mkVar newID (varName v) lv
-      sub' = extend v (VarRep v') sub {-if lv == ObjectLevel
-             -- Object-level variables go into the Pyon map
-             then sub {pyonRenaming = Map.insert v v' $ pyonRenaming sub}
-             -- Type-level variables go into the Gluon substitution
-             else sub {gluonSubst = extend v (VarRep v') $ gluonSubst sub} -}
-  return (sub', v')
-
-renameStmFully :: RecStm (SubstitutingT Core) -> Stm Core
-renameStmFully s = mapStm renameValFully renameStmFully renameFully $
-                   renameStmHead s
-
-renameStmHead :: RecStm (SubstitutingT Core) -> Stm (SubstitutingT Core)
-renameStmHead (SubstitutingSyntax (sub :@ statement)) =
-  mapStm (suspendPyon sub) (suspendPyon sub) (suspendGluon sub) statement
-
-freshenStmHead :: (Monad m, Supplies m VarID) =>
-                  RecStm (SubstitutingT Core) 
-               -> m (Stm (SubstitutingT Core))
-freshenStmHead sub_statement@(SubstitutingSyntax (sub :@ statement)) =
-  case statement
-  of LetS {stmInfo = inf, stmVar = mv, stmStm = rhs, stmBody = body} -> do
-       let rhs' = suspendPyon sub rhs
-       (body', mv') <-
-         case mv
-         of Nothing -> do let body' = suspendPyon sub body
-                          return (body', Nothing)
-            Just v  -> do (sub', v') <- freshenVar sub v
-                          let body' = suspendPyon sub' body
-                          return (body', Just v')
-       return $ LetS inf mv' rhs' body'
-     
-     LetrecS {stmInfo = inf, stmDefs = defs, stmBody = body} -> do
-       (defs', body') <-
-         freshenDefGroupHead sub defs (\sub' -> return $ suspendPyon sub' body)
-       
-       -- Rebuild expression
-       return $ LetrecS inf defs' body'
-     
-     CaseS {stmInfo = inf, stmScrutinee = val, stmAlts = alts} -> do 
-       let val' = suspendPyon sub val
-       alts' <- mapM (freshenAlt sub) alts
-       return $ CaseS inf val' alts'
-       
-     -- Other forms don't bind variables
-     _ -> return $ renameStmHead sub_statement
-  
+withFreshPattern (ConP con params) m = do
+  (params', x) <- freshenMany freshenConParam params m
+  return (ConP con params', x)
   where
-    freshenAlt sub (Alt info pat body) = do
-      (sub', pat') <- freshenPat sub pat
-      let body' = suspendPyon sub' body
-      return $ Alt info pat' body'
-      
-    freshenPat sub (ConP con params) = do
-      (sub', params') <- mapAccumM freshenConParamPat sub params
-      return (sub', ConP con params')
-    
-    freshenConParamPat sub RigidP = return (sub, RigidP)
-    freshenConParamPat sub (FlexibleP v) = do
-      (sub', v') <- freshenVar sub v
-      return (sub', FlexibleP v')
-      
-freshenStmFully :: (Monad m, Supplies m VarID) =>
-                   RecStm (SubstitutingT Core) -> m (Stm Core)
-freshenStmFully s = traverseStm freshenValFully freshenStmFully freshenFully =<<
-                    freshenStmHead s
+    freshenConParam RigidP m = do x <- m 
+                                  return (RigidP, x)
+    freshenConParam (FlexibleP v) m = do (v', x) <- withFreshVar v m
+                                         return (FlexibleP v', x)
 
 freshenModuleHead :: (Monad m, Supplies m VarID) =>
-                     Module Core
-                  -> m (Module (SubstitutingT Core))
+                     Module Rec -> m (Module SubstRec)
 freshenModuleHead (Module defs) = do
-  (rename_defs, _) <- freshenDefGroupHead mempty defs (const $ return ())
-  return $ Module rename_defs
-
-                  
+  (rn_defs, _) <- withEmptySubstitution $
+                  withDefinitions (map toVerbatim defs) $
+                  return ()
+  return $ Module rn_defs
+  where
+    toVerbatim (Def info name definiens) = 
+      let new_definiens =
+            case definiens
+            of ActionFunDef f -> ActionFunDef $ toVerbatimA f
+               StreamFunDef f -> StreamFunDef $ toVerbatimS f
+      in Def info name new_definiens
+    
+    toVerbatimA (Fun params rt et body) =
+      Fun (map (mapBinder id verbatim) params)
+          (verbatim rt) (verbatim et) (verbatim body)
+    
+    toVerbatimS (Fun params rt et body) =
+      Fun (map (mapBinder id verbatim) params)
+          (verbatim rt) (verbatim et) (verbatim body)

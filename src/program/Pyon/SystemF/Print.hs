@@ -18,19 +18,19 @@ import Pyon.SystemF.Syntax
 pprVar :: Var -> Doc
 pprVar = pprVarFlags defaultPrintFlags
 
-pprPat :: VanillaPat -> Doc
+pprPat :: RPat -> Doc
 pprPat = pprPatFlags defaultPrintFlags
 
-pprExp :: VanillaExp -> Doc
+pprExp :: RExp -> Doc
 pprExp = pprExpFlags defaultPrintFlags
 
-pprFun :: VanillaFun -> Doc
+pprFun :: RFun -> Doc
 pprFun = pprFunFlags defaultPrintFlags
 
-pprDef :: VanillaDef -> Doc
+pprDef :: RDef -> Doc
 pprDef = pprDefFlags defaultPrintFlags
 
-pprModule :: VanillaModule -> Doc
+pprModule :: RModule -> Doc
 pprModule (Module defs) = vcat $ map pprDef defs
 
 data PrintFlags =
@@ -62,18 +62,18 @@ pprLit (FloatL f) = text (show f)
 pprLit (BoolL b) = text (show b)
 pprLit NoneL = text "None"
 
-pprPatFlags :: PrintFlags -> VanillaPat -> Doc
+pprPatFlags :: PrintFlags -> RPat -> Doc
 pprPatFlags flags pat = 
   case pat
   of WildP ty  -> text "_" <+> colon <+> Gluon.pprExp ty
      VarP v ty -> pprVarFlags flags v <+> colon <+> Gluon.pprExp ty
      TupleP ps -> tuple $ map (pprPatFlags flags) ps
 
-pprTyPatFlags :: PrintFlags -> VanillaTyPat -> Doc
+pprTyPatFlags :: PrintFlags -> RTyPat -> Doc
 pprTyPatFlags flags (TyPat v ty) =
   Gluon.pprVar v <+> colon <+> Gluon.pprExp ty
 
-pprExpFlags :: PrintFlags -> VanillaExp -> Doc
+pprExpFlags :: PrintFlags -> RExp -> Doc
 pprExpFlags flags expression = pprExpFlagsPrec flags precOuter expression
 
 -- Precedences for expression printing.
@@ -92,7 +92,7 @@ pprTypeAnnotation :: Doc -> Doc -> Int -> Doc
 pprTypeAnnotation val ty context = 
   parenthesize precTyAnnot (val <+> colon <+> ty) context
 
-pprExpFlagsPrec :: PrintFlags -> Int -> VanillaExp -> Doc
+pprExpFlagsPrec :: PrintFlags -> Int -> RExp -> Doc
 pprExpFlagsPrec flags prec expression =
   case expression
   of VarE {expVar = v} ->
@@ -154,7 +154,7 @@ lambda = text [toEnum 0xCE, toEnum 0xBB]
 
 -- Print the function parameters, as they would appear in a lambda expression
 -- or function definition.
-pprFunParameters :: Bool -> PrintFlags -> VanillaFun -> Doc
+pprFunParameters :: Bool -> PrintFlags -> RFun -> Doc
 pprFunParameters isLambda flags fun = sep param_doc
   where
     param_doc =
@@ -171,7 +171,7 @@ pprFunParameters isLambda flags fun = sep param_doc
 
     ty_param p = text "@" <> parens (pprTyPatFlags flags p)
 
-pprFunFlags :: PrintFlags -> VanillaFun -> Doc
+pprFunFlags :: PrintFlags -> RFun -> Doc
 pprFunFlags flags fun =
   let params = pprFunParameters True flags fun
       body = pprExpFlags flags $ funBody fun

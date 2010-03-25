@@ -28,7 +28,6 @@ import Pyon.SystemF.Typecheck
 import Pyon.SystemF.Flatten
 import qualified Pyon.NewCore.Print
 import qualified Pyon.NewCore.Typecheck
-import qualified Pyon.NewCore.EffectInference
 import qualified Pyon.NewCore.Optimizations
 
 import Pyon.Exports.Delayed
@@ -39,7 +38,7 @@ import Pyon.Exports.Delayed
 foreign export ccall pyon_newExpPlaceholder :: IO PyPtr
 
 pyon_newExpPlaceholder =
-  newHsObject =<< (newPlaceholder :: IO (Delayed VanillaExp))
+  newHsObject =<< (newPlaceholder :: IO (Delayed RExp))
 
 foreign export ccall pyon_setExpPlaceholder :: PyPtr -> PyPtr -> IO PyPtr
 
@@ -47,7 +46,7 @@ pyon_setExpPlaceholder :: PyPtr -> PyPtr -> IO PyPtr
 pyon_setExpPlaceholder placeholder value = rethrowExceptionsInPython $ do
   ph <- fromHsObject' placeholder
   val <- fromHsObject' value
-  setPlaceholder ph (val :: Delayed VanillaExp)
+  setPlaceholder ph (val :: Delayed RExp)
   pyNone
 
 -------------------------------------------------------------------------------
@@ -225,20 +224,20 @@ foreign export ccall pyon_mkTupleP :: PyPtr -> IO PyPtr
 pyon_mkTyPat tyvar kind = rethrowExceptionsInPython $ do
   t <- fromHsObject' tyvar
   k <- fromHsObject' kind
-  newHsObject $ (TyPat t <$> k :: Delayed VanillaTyPat)
+  newHsObject $ (TyPat t <$> k :: Delayed RTyPat)
 
 pyon_mkWildP ty = rethrowExceptionsInPython $ do
   t <- fromHsObject' ty
-  newHsObject $ (WildP <$> t :: Delayed VanillaPat)
+  newHsObject $ (WildP <$> t :: Delayed RPat)
 
 pyon_mkVarP var ty = rethrowExceptionsInPython $ do
   v <- fromHsObject' var
   t <- fromHsObject' ty
-  newHsObject $ (VarP v <$> t :: Delayed VanillaPat)
+  newHsObject $ (VarP v <$> t :: Delayed RPat)
 
 pyon_mkTupleP pats = rethrowExceptionsInPython $ do
   ps <- fromListOfHsObject' pats
-  newHsObject $ (TupleP <$> sequenceA ps :: Delayed VanillaPat)
+  newHsObject $ (TupleP <$> sequenceA ps :: Delayed RPat)
 
 foreign export ccall pyon_mkVarE :: PyPtr -> IO PyPtr
 foreign export ccall pyon_mkConE :: PyPtr -> IO PyPtr
@@ -256,7 +255,7 @@ foreign export ccall pyon_mkDictE
 foreign export ccall pyon_mkMethodSelectE
   :: PyPtr -> PyPtr -> CInt -> PyPtr -> IO PyPtr
 
-expHsObject :: Delayed VanillaExp -> IO PyPtr
+expHsObject :: Delayed RExp -> IO PyPtr
 expHsObject = newHsObject
 
 pyon_mkVarE var = rethrowExceptionsInPython $ do
@@ -342,14 +341,14 @@ pyon_mkFun tyParams params ret_type ret_stream_tag body =
                        <*> sequenceA ps 
                        <*> rt 
                        <*> stream_tag 
-                       <*> e :: Delayed VanillaFun)
+                       <*> e :: Delayed RFun)
 
 foreign export ccall pyon_mkDef :: PyPtr -> PyPtr -> IO PyPtr
 
 pyon_mkDef defVar defFun = rethrowExceptionsInPython $ do
   d <- fromHsObject' defVar
   f <- fromHsObject' defFun
-  newHsObject $ (Def d <$> f :: Delayed VanillaDef)
+  newHsObject $ (Def d <$> f :: Delayed RDef)
 
 foreign export ccall pyon_makeAndEvaluateModule :: PyPtr -> IO PyPtr
 
@@ -357,7 +356,7 @@ pyon_makeAndEvaluateModule :: PyPtr -> IO PyPtr
 pyon_makeAndEvaluateModule def_list = rethrowExceptionsInPython $ do
   defs <- fromListOfHsObject' def_list
   real_defs <- mapM force defs
-  newHsObject (Module real_defs :: VanillaModule)
+  newHsObject (Module real_defs :: RModule)
   
 -------------------------------------------------------------------------------
 -- Exported predicates.
@@ -367,7 +366,7 @@ foreign export ccall pyon_isExp :: PyPtr -> IO Bool
 pyon_isExp :: PyPtr -> IO Bool
 pyon_isExp ptr = do
   type_rep <- hsObjectType ptr
-  return $ type_rep == typeOf (undefined :: Delayed VanillaExp)
+  return $ type_rep == typeOf (undefined :: Delayed RExp)
 
 -------------------------------------------------------------------------------
 -- Other exported functions.
@@ -433,7 +432,9 @@ pyon_typeCheckCoreModule _self mod = rethrowExceptionsInPython $ do
   pyNone
 
 pyon_effectInferCoreModule :: PyPtr -> PyPtr -> IO PyPtr
-pyon_effectInferCoreModule _self mod = rethrowExceptionsInPython $ do
-  expectHsObject mod
-  m <- fromHsObject' mod
-  newHsObject =<< Pyon.NewCore.EffectInference.effectInferModule m
+pyon_effectInferCoreModule _self mod =
+  raisePythonExc pyRuntimeError "Effect inference is not implemented"
+  -- rethrowExceptionsInPython $ do
+  -- expectHsObject mod
+  -- m <- fromHsObject' mod
+  -- newHsObject =<< Pyon.NewCore.EffectInference.effectInferModule m

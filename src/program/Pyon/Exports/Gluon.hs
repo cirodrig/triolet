@@ -52,7 +52,7 @@ foreign export ccall gluon_con_EmpE :: IO PyPtr
 
 gluon_con_Int = asGlobalObject $ builtin the_Int
 gluon_con_Float = asGlobalObject $ builtin the_Float
-gluon_type_Pure = asGlobalObject (pure pureKindE :: Delayed (Exp Core))
+gluon_type_Pure = asGlobalObject (pure pureKindE :: Delayed (Exp Rec))
 gluon_con_EmpE = asGlobalObject $ builtin the_EmpE
 
 -------------------------------------------------------------------------------
@@ -69,7 +69,7 @@ gluon_delayedType callback = do
   callback_ref <- toPyRef callback
   newHsObject $ Unevaluated (runCallback callback_ref)
   where
-    runCallback :: PyRef -> IO (Exp Core)
+    runCallback :: PyRef -> IO (Exp Rec)
     runCallback callback_ref =
       withPyRef callback_ref $ force <=< fromHsObject' <=< call0
 
@@ -118,12 +118,12 @@ foreign export ccall gluon_Binder2_plain :: PyPtr -> PyPtr -> IO PyPtr
 gluon_Binder_plain var ty = rethrowExceptionsInPython $ do
   hs_var <- fromHsObject' var
   hs_ty <- fromHsObject' ty
-  newHsObject (Binder hs_var hs_ty () :: Binder Core ())
+  newHsObject (Binder hs_var hs_ty () :: Binder Rec ())
 
 gluon_Binder2_plain var ty = rethrowExceptionsInPython $ do
   hs_var <- fromMaybeHsObject' var
   hs_ty <- fromHsObject' ty
-  newHsObject (Binder' hs_var hs_ty () :: Binder' Core ())
+  newHsObject (Binder' hs_var hs_ty () :: Binder' Rec ())
 
 foreign export ccall gluon_mkAppE :: PyPtr -> PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall gluon_mkConAppE :: PyPtr -> PyPtr -> PyPtr -> IO PyPtr
@@ -137,7 +137,7 @@ foreign export ccall gluon_mkTupTyE :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall gluon_mkLitE :: PyPtr -> PyPtr -> IO PyPtr
 foreign export ccall gluon_mkInternalIntLitE :: CInt -> IO PyPtr
 
-expHsObject :: Delayed (Exp Core) -> IO PyPtr
+expHsObject :: Delayed (Exp Rec) -> IO PyPtr
 expHsObject = newHsObject
 
 gluon_mkAppE pos operator arguments = rethrowExceptionsInPython $ do
@@ -207,22 +207,22 @@ foreign export ccall gluon_Tuple_Core_cons :: PyPtr -> PyPtr -> IO PyPtr
 gluon_Tuple_Core_cons param tail = rethrowExceptionsInPython $ do
   hs_param <- fromHsObject' param
   hs_tail <- fromHsObject' tail
-  newHsObject (hs_param :&: hs_tail :: Tuple Core)
+  newHsObject (hs_param :&: hs_tail :: Tuple Rec)
 
 foreign export ccall gluon_Tuple_Core_nil :: IO PyPtr
 
-gluon_Tuple_Core_nil = newHsObject (Nil :: Tuple Core)
+gluon_Tuple_Core_nil = newHsObject (Nil :: Tuple Rec)
 
 foreign export ccall gluon_Sum_Core_cons :: PyPtr -> PyPtr -> IO PyPtr
 
 gluon_Sum_Core_cons param tail = rethrowExceptionsInPython $ do
   hs_param <- fromHsObject' param
   hs_tail <- fromHsObject' tail
-  newHsObject (hs_param :*: hs_tail :: Sum Core)
+  newHsObject (hs_param :*: hs_tail :: Sum Rec)
 
 foreign export ccall gluon_Sum_Core_nil :: IO PyPtr
 
-gluon_Sum_Core_nil = newHsObject (Unit :: Sum Core)
+gluon_Sum_Core_nil = newHsObject (Unit :: Sum Rec)
 
 -------------------------------------------------------------------------------
 -- Predicates
@@ -238,7 +238,7 @@ foreign export ccall gluon_isExp :: PyPtr -> IO Bool
 
 gluon_isExp p = do
   t <- hsObjectType p 
-  return $ t == typeOf (undefined :: Delayed CExp)
+  return $ t == typeOf (undefined :: Delayed RExp)
 
 -------------------------------------------------------------------------------
 -- Other functions

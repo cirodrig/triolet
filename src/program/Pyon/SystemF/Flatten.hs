@@ -12,7 +12,7 @@ import Gluon.Common.Supply
 import qualified Gluon.Core.Builtins.Effect as Gluon.Builtins.Effect
 import Gluon.Core.Level
 import qualified Gluon.Core as Gluon
-import Gluon.Core(Core, SynInfo, internalSynInfo, Binder(..), Con(..))
+import Gluon.Core(Rec, fromWhnf, asWhnf, SynInfo, internalSynInfo, Binder(..), Con(..))
 import Gluon.Eval.Environment
 import Gluon.Eval.Eval
 
@@ -24,7 +24,7 @@ import Pyon.NewCore.Print
 import qualified Pyon.NewCore.Syntax as NewCore
 
 -- | Flatten a module to imperative form
-flatten :: Module Vanilla -> IO (Either [TypeCheckError] (NewCore.Module Core))
+flatten :: Module Rec -> IO (Either [TypeCheckError] (NewCore.Module Rec))
 flatten mod = do
   tc_result <- typeCheckModule flattenWorker mod
   case tc_result of
@@ -47,13 +47,13 @@ data ConvertToNewCore
 -- | Each expression is converted to a value or a statement. 
 -- The expression's type is passed to the caller, and the caller decides
 -- how to float bindings.
-type instance ExpOf ConvertToNewCore = FloatBinds (NewCore.CType, NewCoreTerm)
+type instance ExpOf ConvertToNewCore = FloatBinds (NewCore.RType, NewCoreTerm)
 
 -- | An expression may be translated to a value, a statement, or a \"do\".
 -- An application of \"do\" becomes a special value.
 data NewCoreTerm =
-    NewCoreVal !NewCore.CVal
-  | NewCoreStm !NewCore.CStm
+    NewCoreVal !NewCore.RVal
+  | NewCoreStm !NewCore.RStm
   | NewCoreDo
     
 isDo :: NewCoreTerm -> Bool
@@ -61,10 +61,10 @@ isDo NewCoreDo = True
 isDo _ = False
 
 -- | Types are not changed.
-type instance TypeOf ConvertToNewCore = NewCore.CType
+type instance TypeOf ConvertToNewCore = NewCore.RType
 
-data LetBinding = VarBinding Var NewCore.CStm 
-                | PatBinding VanillaPat NewCore.CStm
+data LetBinding = VarBinding Var NewCore.RStm 
+                | PatBinding RPat NewCore.RStm
 type LetBindings = [LetBinding]
 
 -- | A monad for floating bindings out of an expression
@@ -85,11 +85,11 @@ instance EvalMonad FloatBinds where
                                      return ([], x)
 
 -- | Bind a variable to a value.  The binding will be floated outward. 
-floatVarBinding :: Var -> NewCore.CStm -> FloatBinds ()
+floatVarBinding :: Var -> NewCore.RStm -> FloatBinds ()
 floatVarBinding v stm = FloatBinds $ return ([VarBinding v stm], ())
 
 -- | Bind a pattern to a value.  The binding will be floated outward. 
-floatPatBinding :: VanillaPat -> NewCore.CStm -> FloatBinds ()
+floatPatBinding :: RPat -> NewCore.RStm -> FloatBinds ()
 floatPatBinding p stm = FloatBinds $ return ([PatBinding p stm], ())
 
 -- | Do not permit bindings to be floated out of the expression.  If one
@@ -102,7 +102,7 @@ don'tFloat m = FloatBinds $ do
     else internalError "Flattening failed: cannot bind here"
 
 -- | Bind variables or patterns here.
-reifyBindings :: FloatBinds (a, NewCore.CStm) -> FloatBinds (a, NewCore.CStm)
+reifyBindings :: FloatBinds (a, NewCore.RStm) -> FloatBinds (a, NewCore.RStm)
 reifyBindings m = FloatBinds $ do
   (bs, (x, body)) <- runFloatBinds m
   statement <- makeBindings body bs
@@ -116,7 +116,7 @@ makeBindings body bs = foldM makeBinding body $ reverse bs
     statement_info = NewCore.stmInfo body
     statement_pos = getSourcePos statement_info
     
-    makeBinding :: NewCore.CStm -> LetBinding -> Eval NewCore.CStm
+    makeBinding :: NewCore.RStm -> LetBinding -> Eval NewCore.RStm
     makeBinding body (VarBinding v rhs) =
       return $ NewCore.LetS statement_info (Just v) rhs body
     
@@ -168,7 +168,7 @@ statementReturningVar pos v =
 -- is a statement, then bind it to a variable.
 -- Return a value, or Nothing if the parameter is a 'do' operator.
 asValueOrDoWithType :: ExpOf ConvertToNewCore
-                       -> FloatBinds (NewCore.CType, Maybe NewCore.CVal)
+                       -> FloatBinds (NewCore.RType, Maybe NewCore.RVal)
 asValueOrDoWithType m = m >>= toValue
   where
     toValue (ty, NewCoreVal value) = return (ty, Just value)
@@ -183,25 +183,25 @@ asValueOrDoWithType m = m >>= toValue
       return (ty, Nothing)
 
 asValueWithType :: ExpOf ConvertToNewCore
-                -> FloatBinds (NewCore.CType, NewCore.CVal)
+                -> FloatBinds (NewCore.RType, NewCore.RVal)
 asValueWithType m = asValueOrDoWithType m >>= disallowDo
   where
     disallowDo (ty, Just v) = return (ty, v)
     disallowDo (ty, Nothing) =
       internalError "Cannot convert the 'do' operator to a value"
 
-asValue :: ExpOf ConvertToNewCore -> FloatBinds NewCore.CVal
+asValue :: ExpOf ConvertToNewCore -> FloatBinds NewCore.RVal
 asValue m = do x <- asValueWithType m
                return $ snd x
 
 -- | Convert to a value or to the 'do' operator.  A Nothing return value 
 -- indicates that this is the 'do' operator.
-asValueOrDo :: ExpOf ConvertToNewCore -> FloatBinds (Maybe NewCore.CVal)
+asValueOrDo :: ExpOf ConvertToNewCore -> FloatBinds (Maybe NewCore.RVal)
 asValueOrDo m = do x <- asValueOrDoWithType m 
                    return $ snd x
 
 asStatementWithType :: ExpOf ConvertToNewCore 
-                    -> FloatBinds (NewCore.CType, NewCore.CStm)
+                    -> FloatBinds (NewCore.RType, NewCore.RStm)
 asStatementWithType m = reifyBindings $ toStatement =<< m
   where 
     toStatement (ty, NewCoreVal value) =
@@ -210,19 +210,19 @@ asStatementWithType m = reifyBindings $ toStatement =<< m
     toValue (ty, NewCoreDo) =
       internalError "Cannot convert the 'do' operator to a statement"
 
-asStatement :: ExpOf ConvertToNewCore -> FloatBinds NewCore.CStm
+asStatement :: ExpOf ConvertToNewCore -> FloatBinds NewCore.RStm
 asStatement m = liftM snd $ asStatementWithType m
 
 flattenWorker :: Worker ConvertToNewCore
 flattenWorker = Worker flattenType flattenExp
 
-flattenType :: Gluon.CWhnf -> PureTC NewCore.CType
-flattenType (Gluon.Whnf t) = return t
+flattenType :: Gluon.WRExp -> PureTC NewCore.RType
+flattenType t = return $ fromWhnf t
 
-flattenExp :: Exp ConvertToNewCore -> Gluon.CWhnf 
+flattenExp :: Exp ConvertToNewCore -> Gluon.WRExp 
            -> PureTC (ExpOf ConvertToNewCore)
 flattenExp expression ty =
-  liftEvaluation $ return $ flattenExp' expression (Gluon.whnfExp ty)
+  liftEvaluation $ return $ flattenExp' expression (fromWhnf ty)
 
 flattenExp' expression expression_type =
   case expression
@@ -348,12 +348,12 @@ flattenExp' expression expression_type =
     
     -- Return True for Stream constructors, False for Action constructors
     is_statement t = do
-      Gluon.Whnf t' <- evalHead t
-      case t' of
-        Gluon.FunE {Gluon.expRange = t'} -> is_statement t'
+      t' <- evalHead t
+      case fromWhnf t' of
+        Gluon.FunE {Gluon.expRange = t2} -> is_statement t2
         Gluon.AppE {Gluon.expOper = oper} -> do
-          Gluon.Whnf oper' <- evalHead oper
-          case oper' of
+          oper' <- evalHead oper
+          case fromWhnf oper' of
             Gluon.ConE {Gluon.expCon = con}
               | con `isPyonBuiltin` the_Action -> return True
               | con `isPyonBuiltin` the_Stream -> return False
@@ -366,7 +366,7 @@ flattenExp' expression expression_type =
     returnCon inf c = returnValue $ NewCore.GluonV inf $ Gluon.ConE inf c
 {-
     -- Bind tuple field patterns.  Create a series of bindings.
-    bindFieldPatterns inf (body :: NewCore.CStm) (pat:pats) (var:vars) =
+    bindFieldPatterns inf (body :: NewCore.RStm) (pat:pats) (var:vars) =
       case pat
       of WildP _  -> bindFieldPatterns inf body pats vars
          VarP _ _ -> bindFieldPatterns inf body pats vars
@@ -379,8 +379,8 @@ flattenExp' expression expression_type =
 
     -- Bind a pattern.
     -- Pattern matches are translated into a let followed by a case.
-    bindPattern :: SynInfo -> Pat ConvertToNewCore -> NewCore.CStm -> NewCore.CStm 
-                -> Eval NewCore.CStm
+    bindPattern :: SynInfo -> Pat ConvertToNewCore -> NewCore.RStm -> NewCore.RStm 
+                -> Eval NewCore.RStm
     bindPattern inf pat rhs body =
       case pat
       of WildP _   -> return $ NewCore.LetS inf Nothing rhs body
@@ -420,7 +420,7 @@ convertParam (VarP v ty) = return $ Binder v ty ()
 
 convertParam (TupleP _) = internalError "Tuple parameters not implemented"
 
-flattenDef :: Def ConvertToNewCore -> FloatBinds (NewCore.Def Core)
+flattenDef :: Def ConvertToNewCore -> FloatBinds (NewCore.Def Rec)
 flattenDef (Def name fun) = return . rebuild_def =<< flattenFun fun
   where
     inf = Gluon.internalSynInfo ObjectLevel
@@ -429,16 +429,16 @@ flattenDef (Def name fun) = return . rebuild_def =<< flattenFun fun
     rebuild_def (Right stream_fun) =
       NewCore.Def inf name $ NewCore.StreamFunDef stream_fun
     
-flattenDefGroup :: [Def ConvertToNewCore] -> FloatBinds [NewCore.Def Core]
+flattenDefGroup :: [Def ConvertToNewCore] -> FloatBinds [NewCore.Def Rec]
 flattenDefGroup = mapM flattenDef
 
 flattenFun :: Fun ConvertToNewCore 
-           -> FloatBinds (Either (NewCore.ActionFun Core) (NewCore.StreamFun Core))
+           -> FloatBinds (Either (NewCore.ActionFun Rec) (NewCore.StreamFun Rec))
 flattenFun fun = do
   -- Convert function parameters
   ty_params <- mapM convertTyParam (funTyParams fun) 
   val_params <- mapM convertParam (funParams fun)
-  let params = ty_params ++ val_params :: [Binder Core ()]
+  let params = ty_params ++ val_params :: [Binder Rec ()]
       
   -- Get the return type
   let rt = funReturnType fun

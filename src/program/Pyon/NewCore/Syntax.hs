@@ -1,17 +1,19 @@
 
-{-# LANGUAGE TypeFamilies, EmptyDataDecls, DeriveDataTypeable #-}
+{-# LANGUAGE TypeFamilies, EmptyDataDecls, DeriveDataTypeable, FlexibleInstances #-}
 module Pyon.NewCore.Syntax
-       (Syntax(..), PyonSyntax(..), Core,
-        CVal, CStm, CDef, CType,
+       (Structure, Rec,
+        RVal, RStm, RDef, RType,
         SynInfo,
         Type,
         Con(..), Var, varName, VarID,
         Binder(..), Binder'(..),
         
         Lit(..),
-        Val(..), RecVal, mkVarV, mkConV, mkLitV, mkConAppV,
+        ValOf(..),
+        Val, RecVal, mkVarV, mkConV, mkLitV, mkConAppV,
         valToExp, valToMaybeExp, expToVal,
-        Stm(..), RecStm,
+        StmOf(..),
+        Stm, RecStm,
         Alt(..), Pat(..), ConParamPat(..),
         patternVariables,
         Fun(..), ActionFun, StreamFun,
@@ -33,7 +35,7 @@ import Data.Typeable
 import Gluon.Common.Error
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
-import Gluon.Core(Core, Syntax(..),
+import Gluon.Core(Rec, Structure(..),
                   SynInfo,
                   RecExp,
                   Con(..), Lit(..),
@@ -41,111 +43,107 @@ import Gluon.Core(Core, Syntax(..),
                   Binder(..), Binder'(..),
                   mapBinder, mapBinder',
                   traverseBinder, traverseBinder')
-import Gluon.Core.Rename(SubstitutingT)
 import Gluon.Core.Level
 
-type CVal = Val Core
-type CStm = Stm Core
-type CDef = Def Core
-type CType = Type Core
+type RVal = Val Rec
+type RStm = Stm Rec
+type RDef = Def Rec
+type RType = Type Rec
 
-class Syntax syn => PyonSyntax syn where
-  type ValOf syn :: * -> *
-  type StmOf syn :: * -> *
+data family ValOf s :: * -> *
+data family StmOf s :: * -> *
        
-instance PyonSyntax Core where
-  type ValOf Core = Val
-  type StmOf Core = Stm
-
-type RecVal syn = ValOf syn syn
-type RecStm syn = StmOf syn syn
+type RecVal s = ValOf s s
+type RecStm s = StmOf s s
 
 -- | Pyon uses Gluon as its type system.
-type Type syn = Gluon.RecExp syn
+type Type s = Gluon.RecExp s
 
 -- | Values.  Evaluating a value has no side effects.
-data Val syn =
+data instance ValOf Rec s =
     -- | A Gluon term.  All type expressions are Gluon terms.
     GluonV
     { valInfo :: !SynInfo
-    , valGluonTerm :: Type syn
+    , valGluonTerm :: Type s
     }
   | AppV
     { valInfo :: !SynInfo
-    , valOper :: RecVal syn
-    , valArgs :: [RecVal syn]
+    , valOper :: RecVal s
+    , valArgs :: [RecVal s]
     }
     -- | An ordinary lambda function
   | ALamV 
     { valInfo :: !SynInfo
-    , valAFun :: ActionFun syn
+    , valAFun :: ActionFun s
     }
     -- | A stream lambda function
   | SLamV 
     { valInfo :: !SynInfo
-    , valSFun :: StreamFun syn
+    , valSFun :: StreamFun s
     }
     -- | A \"do\" expression, which produces a stream that evaluates its
     -- statement
   | SDoV 
     { valInfo :: !SynInfo
-    , valStm :: RecStm syn
+    , valStm :: RecStm s
     }
-    deriving(Typeable)
+
+type Val = ValOf Rec
 
 -- | Statements.
-data Stm syn =
+data instance StmOf Rec s =
     -- | Yield a value
     ReturnS 
     { stmInfo :: !SynInfo
-    , stmVal :: RecVal syn
+    , stmVal :: RecVal s
     }
     -- | Call an ordinary function
   | CallS 
     { stmInfo :: !SynInfo 
-    , stmVal :: RecVal syn
+    , stmVal :: RecVal s
     }
     -- | Evaluate something and optionally assign its result to a variable
   | LetS 
     { stmInfo :: !SynInfo
     , stmVar :: !(Maybe Var)
-    , stmStm :: RecStm syn
-    , stmBody :: RecStm syn
+    , stmStm :: RecStm s
+    , stmBody :: RecStm s
     }
     -- | Define local functions
   | LetrecS 
     { stmInfo :: !SynInfo
-    , stmDefs :: [Def syn]
-    , stmBody :: RecStm syn
+    , stmDefs :: [Def s]
+    , stmBody :: RecStm s
     }
     -- | Deconstruct a value
   | CaseS 
     { stmInfo :: !SynInfo
-    , stmScrutinee :: RecVal syn
-    , stmAlts :: [Alt syn]
+    , stmScrutinee :: RecVal s
+    , stmAlts :: [Alt s]
     }
-    deriving(Typeable)
+            
+type Stm = StmOf Rec
 
-mkVarV :: SourcePos -> Var -> Val Core
+mkVarV :: SourcePos -> Var -> Val Rec
 mkVarV pos v = GluonV (Gluon.mkSynInfo pos (getLevel v)) $
                Gluon.mkVarE pos v
 
-mkConV :: SourcePos -> Con -> Val Core
+mkConV :: SourcePos -> Con -> Val Rec
 mkConV pos c = GluonV (Gluon.mkSynInfo pos (getLevel $ conInfo c)) $
                Gluon.mkConE pos c
 
-mkLitV :: SourcePos -> Lit -> Val Core
+mkLitV :: SourcePos -> Lit -> Val Rec
 mkLitV pos l = GluonV (Gluon.mkSynInfo pos (Gluon.litLevel l)) $
                Gluon.mkLitE pos l
               
-mkConAppV :: SourcePos -> Con -> [Val Core] -> Val Core
+mkConAppV :: SourcePos -> Con -> [Val Rec] -> Val Rec
 mkConAppV pos c args =
   AppV (Gluon.mkSynInfo pos (getLevel $ conInfo c)) (mkConV pos c) args
 
 -- | Convert a value to an expression.  The value must consist of only  
 -- 'GluonV' and 'AppV' terms.  If any other terms are encountered,
 -- return _|_.
-valToExp :: Val Core -> Gluon.Exp Core
+valToExp :: Val Rec -> Gluon.Exp Rec
 valToExp (GluonV {valGluonTerm = t}) = t
 valToExp (AppV {valInfo = inf, valOper = op, valArgs = args}) =
   Gluon.mkAppE (getSourcePos inf) (valToExp op) (map valToExp args) 
@@ -154,7 +152,7 @@ valToExp _ = internalError "valToExp: Cannot convert to a Gluon expression"
 -- | Convert a value to an expression.  The value must consist of only  
 -- 'GluonV' and 'AppV' terms.  If any other terms are encountered,
 -- return Nothing.
-valToMaybeExp :: Val Core -> Maybe (Gluon.Exp Core)
+valToMaybeExp :: Val Rec -> Maybe (Gluon.Exp Rec)
 valToMaybeExp (GluonV {valGluonTerm = t}) = Just t
 valToMaybeExp (AppV {valInfo = inf, valOper = op, valArgs = args}) = do
   op' <- valToMaybeExp op
@@ -162,14 +160,14 @@ valToMaybeExp (AppV {valInfo = inf, valOper = op, valArgs = args}) = do
   return $ Gluon.mkAppE (getSourcePos inf) op' args'
 valToMaybeExp _ = Nothing
 
-expToVal :: Gluon.Exp Core -> Val Core 
+expToVal :: Gluon.Exp Rec -> Val Rec 
 expToVal exp = GluonV (Gluon.expInfo exp) exp
 
-instance HasSourcePos (Val syn) where
+instance HasSourcePos (ValOf Rec syn) where
   getSourcePos v = getSourcePos $ valInfo v
   setSourcePos v p = v {valInfo = setSourcePos (valInfo v) p}
 
-instance HasSourcePos (Stm syn) where
+instance HasSourcePos (StmOf Rec syn) where
   getSourcePos s = getSourcePos $ stmInfo s
   setSourcePos s p = s {stmInfo = setSourcePos (stmInfo s) p}
 
@@ -241,7 +239,7 @@ data Definiens syn =
                                
 data Module syn = Module [Def syn] deriving(Typeable)
 
-mapVal :: (PyonSyntax a, PyonSyntax b) =>
+mapVal :: (Structure a, Structure b) =>
           (RecVal a -> RecVal b)
        -> (RecStm a -> RecStm b)
        -> (Type a -> Type b)
@@ -254,7 +252,7 @@ mapVal val stm typ value =
      SLamV info fun -> SLamV info (mapSFun val typ fun)
      SDoV info s -> SDoV info (stm s)
 
-traverseVal :: (Monad m, PyonSyntax a, PyonSyntax b) =>
+traverseVal :: (Monad m, Structure a, Structure b) =>
                (RecVal a -> m (RecVal b))
             -> (RecStm a -> m (RecStm b))
             -> (Type a -> m (Type b))
@@ -267,7 +265,7 @@ traverseVal val stm typ value =
      SLamV info fun -> SLamV info `liftM` traverseSFun val typ fun
      SDoV info s -> SDoV info `liftM` stm s
 
-mapStm :: (PyonSyntax a, PyonSyntax b) =>
+mapStm :: (Structure a, Structure b) =>
           (RecVal a -> RecVal b)
        -> (RecStm a -> RecStm b)
        -> (Type a -> Type b)
@@ -287,7 +285,7 @@ mapStm val stm typ statement =
            let pat' = pat -- Nothing in the pattern requires substitution
            in Alt info pat' (stm body)
 
-traverseStm :: (Monad m, PyonSyntax a, PyonSyntax b) =>
+traverseStm :: (Monad m, Structure a, Structure b) =>
                (RecVal a -> m (RecVal b))
             -> (RecStm a -> m (RecStm b))
             -> (Type a -> m (Type b))
@@ -308,14 +306,14 @@ traverseStm val stm typ statement =
            let pat' = pat -- Nothing in the pattern requires substitution
            in Alt info pat' `liftM` stm body
 
-mapAFun :: (PyonSyntax a, PyonSyntax b) =>
+mapAFun :: (Structure a, Structure b) =>
            (RecStm a -> RecStm b)
         -> (Type a -> Type b)
         -> ActionFun a -> ActionFun b
 mapAFun stm typ (Fun params retType effType body) =
   Fun (map (mapBinder id typ) params) (typ retType) (typ effType) (stm body)
 
-traverseAFun :: (Monad m, PyonSyntax a, PyonSyntax b) =>
+traverseAFun :: (Monad m, Structure a, Structure b) =>
                 (RecStm a -> m (RecStm b))
              -> (Type a -> m (Type b))
              -> ActionFun a -> m (ActionFun b)
@@ -323,14 +321,14 @@ traverseAFun stm typ (Fun params retType effType body) =
   Fun `liftM` mapM (traverseBinder return typ) params
       `ap` typ retType `ap` typ effType `ap` stm body
 
-mapSFun :: (PyonSyntax a, PyonSyntax b) =>
+mapSFun :: (Structure a, Structure b) =>
            (RecVal a -> RecVal b)
         -> (Type a -> Type b)
         -> StreamFun a -> StreamFun b
 mapSFun val typ (Fun params retType effType body) =
   Fun (map (mapBinder id typ) params) (typ retType) (typ effType) (val body)
 
-traverseSFun :: (Monad m, PyonSyntax a, PyonSyntax b) =>
+traverseSFun :: (Monad m, Structure a, Structure b) =>
                 (RecVal a -> m (RecVal b))
              -> (Type a -> m (Type b))
              -> StreamFun a -> m (StreamFun b)
@@ -338,7 +336,7 @@ traverseSFun val typ (Fun params retType effType body) =
   Fun `liftM` mapM (traverseBinder return typ) params
       `ap` typ retType `ap` typ effType `ap` val body
 
-mapDef :: (PyonSyntax a, PyonSyntax b) =>
+mapDef :: (Structure a, Structure b) =>
           (RecVal a -> RecVal b)
        -> (RecStm a -> RecStm b)
        -> (Type a -> Type b)
@@ -351,7 +349,7 @@ mapDef val stm typ (Def info var definition) =
                          StreamFunDef $ mapSFun val typ sfun
   in Def info var definition'
 
-traverseDef :: (Monad m, PyonSyntax a, PyonSyntax b) =>
+traverseDef :: (Monad m, Structure a, Structure b) =>
                (RecVal a -> m (RecVal b))
             -> (RecStm a -> m (RecStm b))
             -> (Type a -> m (Type b))
