@@ -247,7 +247,7 @@ def _doIter(iter):
         _makeSSA(iter.parameter)
         _doIter(iter.body)
     elif isinstance(iter, ast.IfIter):
-        _doExpr(guard)
+        _doExpr(iter.guard)
         _doIter(iter.body)
     elif isinstance(iter, ast.DoIter):
         _doExpr(iter.body)
