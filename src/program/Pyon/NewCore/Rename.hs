@@ -117,22 +117,19 @@ withFreshVarMaybe (Just v) m = do
   (v', x) <- withFreshVar v m
   return (Just v', x)
 
-freshenBinders :: (Monad m, Supplies m VarID) =>
-                  [Binder SubstRec ()]
-               -> WithSubstitution m a
-               -> WithSubstitution m ([Binder SubstRec ()], a)
+freshenBinders :: [Binder SubstRec ()]
+               -> WithSubstitution a
+               -> WithSubstitution ([Binder SubstRec ()], a)
 freshenBinders = freshenMany freshenBinder
 
-withFreshVars :: (Monad m, Supplies m VarID) =>
-                 [Var] 
-              -> WithSubstitution m a 
-              -> WithSubstitution m ([Var], a)
+withFreshVars :: [Var] 
+              -> WithSubstitution a 
+              -> WithSubstitution ([Var], a)
 withFreshVars = freshenMany withFreshVar
 
-withDefinitions :: (Monad m, Supplies m VarID) =>
-                   [Def SubstRec]
-                -> WithSubstitution m a
-                -> WithSubstitution m ([Def SubstRec], a)
+withDefinitions :: [Def SubstRec]
+                -> WithSubstitution a
+                -> WithSubstitution ([Def SubstRec], a)
 withDefinitions defs m = do
   -- Create new definitions of local variables
   (definienda, (definientia, x)) <- withFreshVars (map definiendum defs) $ do
@@ -165,9 +162,8 @@ freshenStreamFun f = do
     return (rt, et, b)
   return $ Fun params rt et b
 
-freshenActionFunFully :: (Monad m, Supplies m VarID) =>
-                         ActionFun SubstRec 
-                      -> WithSubstitution m (ActionFun Rec)
+freshenActionFunFully :: ActionFun SubstRec 
+                      -> WithSubstitution (ActionFun Rec)
 freshenActionFunFully f = do
   (params, (rt, et, b)) <- freshenBinders (funParams f) $ do
     rt <- joinAndFreshenFully $ funReturnType f

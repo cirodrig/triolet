@@ -79,6 +79,7 @@ instance Monad FloatBinds where
 
 instance Supplies FloatBinds Gluon.VarID where
   fresh = liftEvaluation fresh
+  supplyToST f = liftEvaluation (supplyToST f)
 
 instance EvalMonad FloatBinds where
   liftEvaluation m = FloatBinds $ do x <- m

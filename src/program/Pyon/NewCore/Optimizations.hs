@@ -228,6 +228,7 @@ type Inl a = ReaderT (Map Var (Val Rec)) Eval a
 
 instance Supplies (ReaderT (Map Var (Val Rec)) Eval) VarID where
   fresh = lift fresh
+  supplyToST f = lift (supplyToST f)
 
 runInl supply m = runEval supply $ runReaderT m Map.empty
 
