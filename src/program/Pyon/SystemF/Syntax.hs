@@ -9,15 +9,16 @@
 module Pyon.SystemF.Syntax
     (PyonClass(..),
      pyonClassConstructor, pyonClassNumSuperclasses, pyonClassNumMethods,
-     ExpOf, TypeOf,
+     Rec,
+     SFExpOf(..), TypeOf,
+     SFRecExp,
      RExp, RType, RPat, RTyPat, RFun, RDef, RModule,
-     PyonType,
      Var,
      Lit(..),
      Pat(..),
      TyPat(..),
      ExpInfo, defaultExpInfo,
-     Exp(..),
+     SFExp,
      Fun(..),
      Def(..),
      Module(..),
@@ -62,22 +63,21 @@ pyonClassNumMethods TraversableClass = 1
 pyonClassNumMethods AdditiveClass = 3
 pyonClassNumMethods VectorClass = 2
 
-type family ExpOf a :: *
-type family TypeOf a :: *
+data family SFExpOf a :: * -> *
 
-type instance ExpOf Rec = Exp Rec
-type instance TypeOf Rec = Gluon.ExpOf Rec Rec
+type TypeOf = Gluon.ExpOf
 
-type RExp = Exp Rec
-type RType = PyonType
+type SFRecExp s = SFExpOf s s
+type RecType s = TypeOf s s
+
+type SFExp = SFExpOf Rec
+type RExp = SFRecExp Rec
+type RType = RecType Rec
 type RPat = Pat Rec
 type RTyPat = TyPat Rec
 type RDef = Def Rec
 type RFun = Fun Rec
 type RModule = Module Rec
-
--- | Pyon types are type-level Gluon expressions.
-type PyonType = TypeOf Rec
 
 -- | Pyon variables are the same as Gluon variables.
 type Var = Gluon.Var
@@ -94,15 +94,15 @@ data Lit =
   deriving(Typeable)
 
 -- | Patterns.
-data Pat syn =
-    WildP (TypeOf syn)              -- ^ Wildcard pattern
-  | VarP Var (TypeOf syn)           -- ^ Variable pattern binding
-  | TupleP [Pat syn]                -- ^ Tuple pattern
+data Pat s =
+    WildP (RecType s)              -- ^ Wildcard pattern
+  | VarP Var (RecType s)           -- ^ Variable pattern binding
+  | TupleP [Pat s]                 -- ^ Tuple pattern
   deriving(Typeable)
           
 -- | Type-level patterns.
-data TyPat syn = TyPat Gluon.Var (TypeOf syn)
-           deriving(Typeable)
+data TyPat s = TyPat Gluon.Var (RecType s)
+             deriving(Typeable)
 
 -- | Information common to all expressions.
 type ExpInfo = Gluon.SynInfo
@@ -112,7 +112,7 @@ defaultExpInfo :: ExpInfo
 defaultExpInfo = Gluon.internalSynInfo Gluon.ObjectLevel
 
 -- | Expressions.
-data Exp syn =
+data instance SFExpOf Rec s =
     -- | A variable reference
     VarE
     { expInfo :: ExpInfo
@@ -127,92 +127,97 @@ data Exp syn =
   | LitE
     { expInfo :: ExpInfo
     , expLit :: !Lit
-    , expType :: TypeOf syn
+    , expType :: RecType s
     }
     -- | An undefined value
   | UndefinedE
     { expInfo :: ExpInfo
-    , expType ::  TypeOf syn
+    , expType ::  RecType s
     }
     -- | Build a tuple
   | TupleE
     { expInfo :: ExpInfo
-    , expFields :: [ExpOf syn]
+    , expFields :: [SFRecExp s]
     }
     -- | Type application
   | TyAppE
     { expInfo :: ExpInfo
-    , expOper :: ExpOf syn
-    , expTyArg :: TypeOf syn
+    , expOper :: SFRecExp s
+    , expTyArg :: RecType s
     }
     -- | Function call
   | CallE
     { expInfo :: ExpInfo
-    , expOper :: ExpOf syn
-    , expArgs :: [ExpOf syn]
+    , expOper :: SFRecExp s
+    , expArgs :: [SFRecExp s]
     }
     -- | If-then-else expression
   | IfE
     { expInfo :: ExpInfo
-    , expCond :: ExpOf syn
-    , expTrueCase :: ExpOf syn
-    , expFalseCase :: ExpOf syn
+    , expCond :: SFRecExp s
+    , expTrueCase :: SFRecExp s
+    , expFalseCase :: SFRecExp s
     }
     -- | Lambda expression
   | FunE
     { expInfo :: ExpInfo
-    , expFun :: Fun syn
+    , expFun :: Fun s
     }
     -- | Let expression
   | LetE
     { expInfo :: ExpInfo
-    , expBinder :: Pat syn
-    , expValue :: ExpOf syn
-    , expBody :: ExpOf syn
+    , expBinder :: Pat s
+    , expValue :: SFRecExp s
+    , expBody :: SFRecExp s
     }
     -- | Recursive definition group
   | LetrecE
     { expInfo :: ExpInfo
-    , expDefs :: [Def syn]
-    , expBody :: ExpOf syn
+    , expDefs :: [Def s]
+    , expBody :: SFRecExp s
     }
     -- | Create a class dictionary
   | DictE
     { expInfo :: ExpInfo
     , expClass :: PyonClass
-    , expType :: TypeOf syn     -- ^ Class instance type
-    , expSuperclasses :: [ExpOf syn]
-    , expMethods :: [ExpOf syn]
+    , expType :: RecType s     -- ^ Class instance type
+    , expSuperclasses :: [SFRecExp s]
+    , expMethods :: [SFRecExp s]
     }
     -- | Select a class method
   | MethodSelectE
     { expInfo :: ExpInfo
     , expClass :: PyonClass
-    , expType :: TypeOf syn     -- ^ Class instance type
+    , expType :: RecType s     -- ^ Class instance type
     , expMethodIndex :: {-# UNPACK #-} !Int
-    , expArg :: ExpOf syn       -- ^ Class dictionary
+    , expArg :: SFRecExp s       -- ^ Class dictionary
     }
-  deriving(Typeable)
+
+instance Typeable1 (SFExpOf Rec) where
+  typeOf1 x =
+    let con1 = mkTyCon "Pyon.SystemF.Syntax.SFExpOf"
+        arg1 = typeOf (undefined :: Rec)
+    in mkTyConApp con1 [arg1]
           
-instance HasSourcePos (Exp syn) where
+instance HasSourcePos (SFExpOf Rec s) where
   getSourcePos _ = noSourcePos
   -- Not implemented!
   setSourcePos _ _ = internalError "HasSourcePos.setSourcePos"
 
-data Fun syn =
-  Fun { funTyParams :: [TyPat syn] -- ^ Type parameters
-      , funParams :: [Pat syn]      -- ^ Object parameters
-      , funReturnType :: TypeOf syn -- ^ Return type
+data Fun s =
+  Fun { funTyParams :: [TyPat s] -- ^ Type parameters
+      , funParams :: [Pat s]     -- ^ Object parameters
+      , funReturnType :: RecType s -- ^ Return type
       , funMonad :: !Gluon.Con -- ^ Which monad this function inhabits 
                               -- (Stream or Action)
-      , funBody :: ExpOf syn
+      , funBody :: SFRecExp s
       }
   deriving(Typeable)
 
-data Def syn = Def Var (Fun syn)
+data Def s = Def Var (Fun s)
          deriving(Typeable)
 
-data Module syn = Module [Def syn]
+data Module s = Module [Def s]
             deriving(Typeable)
 
 -- | Return True only if the given expression has no side effects.
@@ -223,7 +228,7 @@ data Module syn = Module [Def syn]
 -- effects.  Lambda expressions have no side effects, since they return but
 -- do not execute their function.
 
-isValueExp :: Exp Rec -> Bool
+isValueExp :: SFRecExp Rec -> Bool
 isValueExp expression =
   case expression
   of VarE {} -> True

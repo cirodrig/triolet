@@ -4,6 +4,7 @@ module Pyon.SystemF.Typecheck
        (Worker(..), typeCheckModule, typeCheckModulePython)
 where
 
+import Control.Applicative(Const(..))
 import Control.Exception
 import Control.Monad
 import Data.Maybe
@@ -28,16 +29,15 @@ import Pyon.SystemF.Syntax
 
 data Worker a =
   Worker
-  { doType :: !(WRExp -> PureTC (TypeOf a))
-  , doExp  :: !(Exp a -> WRExp -> PureTC (ExpOf a))
+  { doType :: !(WRExp -> PureTC (TypeOf a a))
+  , doExp  :: !(SFExp a -> WRExp -> PureTC (SFRecExp a))
   }
 
-type instance ExpOf TrivialStructure = ()
-type instance TypeOf TrivialStructure = ()
+data instance SFExpOf TrivialStructure s = TrivialSFExp
 
 noWork :: Worker TrivialStructure
-noWork = Worker { doType = \_ -> return ()
-                , doExp = \_ _ -> return ()
+noWork = Worker { doType = \_ -> return Gluon.TrivialExp
+                , doExp = \_ _ -> return TrivialSFExp
                 }
 
 -- Endomorphism concatenation
@@ -119,10 +119,10 @@ classMethodType cls clsType index =
 
 boolType = Gluon.mkInternalConE $ pyonBuiltin the_bool
 
-tyPatType :: RTyPat -> PyonType
+tyPatType :: RTyPat -> RType
 tyPatType (TyPat _ t) = t
 
-patType :: RPat -> PyonType
+patType :: RPat -> RType
 patType (WildP t)  = t
 patType (VarP _ t) = t
 patType (TupleP ps) = let size = length ps
@@ -132,7 +132,7 @@ patType (TupleP ps) = let size = length ps
                           field_types = map patType ps
                       in Gluon.mkInternalConAppE con field_types
 
-funType :: RFun -> PyonType 
+funType :: RFun -> RType 
 funType (Fun { funTyParams = ty_params
              , funParams = params
              , funMonad = monad
@@ -170,7 +170,7 @@ assumeTyPat worker (TyPat v t) k = do
 assumeDef :: RDef -> PureTC a -> PureTC a
 assumeDef (Def v fun) = assumePure v (funType fun)
 
-typeInferExp :: Worker a -> RExp -> PureTC (WRExp, ExpOf a)
+typeInferExp :: Worker a -> RExp -> PureTC (WRExp, SFRecExp a)
 typeInferExp worker expression = do
   (e_type, new_exp) <-
     case expression
@@ -217,7 +217,7 @@ typeInferExp worker expression = do
   return (e_type, new_val)
          
 -- To infer a variable's type, just look it up in the environment
-typeInferVarE :: ExpInfo -> Var -> PureTC (WRExp, Exp a)
+typeInferVarE :: ExpInfo -> Var -> PureTC (WRExp, SFExp a)
 typeInferVarE inf var = do
   lookup_type <- getType' noSourcePos var
   ty <- liftEvaluation $ Gluon.evalFully' lookup_type
@@ -225,8 +225,8 @@ typeInferVarE inf var = do
 
 -- Use the type that was attached to the literal value, but also verify that
 -- it's a valid type
-checkLiteralType :: Worker a -> ExpInfo -> Lit -> PyonType 
-                 -> PureTC (WRExp, Exp a)
+checkLiteralType :: Worker a -> ExpInfo -> Lit -> RType 
+                 -> PureTC (WRExp, SFExp a)
 checkLiteralType worker inf l t = do
   t' <- liftEvaluation $ Gluon.evalFully' t
   t_val <- doType worker t'
@@ -246,7 +246,7 @@ isValidLiteralType ty lit =
           BoolL _ -> con `isPyonBuiltin` the_bool
           NoneL -> con `isPyonBuiltin` the_NoneType
                                      
-typeInferTupleE :: Worker a -> ExpInfo -> [RExp] -> PureTC (WRExp, Exp a)
+typeInferTupleE :: Worker a -> ExpInfo -> [RExp] -> PureTC (WRExp, SFExp a)
 typeInferTupleE worker inf fs = do
   -- Infer types of all fields
   (f_types, f_vals) <- mapAndUnzipM (typeInferExp worker) fs
@@ -259,8 +259,8 @@ typeInferTupleE worker inf fs = do
                      ty = Gluon.mkInternalWhnfAppE c $ map fromWhnf f_types
                  in return (ty, new_tuple)
 
-typeInferTyAppE :: Worker a -> ExpInfo -> RExp -> PyonType
-                -> PureTC (WRExp, Exp a)
+typeInferTyAppE :: Worker a -> ExpInfo -> RExp -> RType
+                -> PureTC (WRExp, SFExp a)
 typeInferTyAppE worker inf op arg = do
   (op_type, op_val) <- typeInferExp worker op
   arg_type <- Gluon.typeInferExp arg
@@ -283,7 +283,7 @@ typeInferTyAppE worker inf op arg = do
     _ -> throwError $ Gluon.NonFunctionApplicationErr noSourcePos (fromWhnf op_type)
 
 typeInferCallE :: Worker a -> ExpInfo -> RExp -> [RExp] 
-               -> PureTC (WRExp, Exp a)
+               -> PureTC (WRExp, SFExp a)
 typeInferCallE worker inf op args = do
   -- Infer types of parameters
   (op_type, op_val) <- typeInferExp worker op
@@ -308,7 +308,7 @@ typeInferCallE worker inf op args = do
 
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
-computeAppliedType :: PyonType -> [PyonType] -> PureTC WRExp
+computeAppliedType :: RType -> [RType] -> PureTC WRExp
 computeAppliedType op_type arg_types = apply (verbatim op_type) arg_types
   where
     apply op_type (arg_t:arg_ts) = do
@@ -329,7 +329,7 @@ computeAppliedType op_type arg_types = apply (verbatim op_type) arg_types
     apply op_type [] = Gluon.evalFully op_type
 
 typeInferIfE :: Worker a -> ExpInfo -> RExp -> RExp -> RExp
-             -> PureTC (WRExp, Exp a)
+             -> PureTC (WRExp, SFExp a)
 typeInferIfE worker inf cond if_true if_false = do
   -- Condition must be a bool
   (cond_t, cond_val) <- typeInferExp worker cond
@@ -370,7 +370,7 @@ typeInferFun worker fun@(Fun { funTyParams = ty_params
     assumeParams = withMany (assumePat worker) params
 
 typeInferLetE :: Worker a -> ExpInfo -> RPat -> RExp -> RExp
-              -> PureTC (WRExp, Exp a)
+              -> PureTC (WRExp, SFExp a)
 typeInferLetE worker inf pat expression body = do
   (e_type, e_val) <- typeInferExp worker expression
   
@@ -383,15 +383,15 @@ typeInferLetE worker inf pat expression body = do
     return (body_type, LetE inf pat' e_val body_val)
 
 typeInferLetrecE :: Worker a -> ExpInfo -> [RDef] -> RExp
-                 -> PureTC (WRExp, Exp a)
+                 -> PureTC (WRExp, SFExp a)
 typeInferLetrecE worker inf defs body =
   typeCheckDefGroup worker defs $ \defs' -> do
     (body_type, body_val) <- typeInferExp worker body
     return (body_type, LetrecE inf defs' body_val)
 
-typeInferDictE :: Worker a -> ExpInfo -> PyonClass -> PyonType
+typeInferDictE :: Worker a -> ExpInfo -> PyonClass -> RType
                -> [RExp] -> [RExp]
-               -> PureTC (WRExp, Exp a)
+               -> PureTC (WRExp, SFExp a)
 typeInferDictE worker inf cls ty scs ms = do
   (sc_types, sc_values) <- mapAndUnzipM (typeInferExp worker) scs
   (m_types, m_value) <- mapAndUnzipM (typeInferExp worker) ms
@@ -405,9 +405,9 @@ typeInferDictE worker inf cls ty scs ms = do
   
   return (return_type, DictE inf cls ty_val sc_values m_value)
 
-typeInferMethodSelectE :: Worker a -> ExpInfo -> PyonClass -> PyonType
+typeInferMethodSelectE :: Worker a -> ExpInfo -> PyonClass -> RType
                        -> Int -> RExp
-                       -> PureTC (WRExp, Exp a)
+                       -> PureTC (WRExp, SFExp a)
 typeInferMethodSelectE worker inf cls ty index arg = do
   -- The argument must be a dictionary of the given class
   (arg_ty, arg_val) <- typeInferExp worker arg

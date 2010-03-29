@@ -210,7 +210,7 @@ maskSet vs m = pass $ do x <- m
                          return (x, onSetUnion (`Set.difference` vs))
 
 -- | Mention all variables in a type.
-edcScanType :: PyonType -> GetMentionsSet ()
+edcScanType :: TypeOf Rec Rec -> GetMentionsSet ()
 edcScanType t = scanType t >> return ()
   where
     scanType :: Gluon.RExp 

@@ -47,7 +47,10 @@ data ConvertToNewCore
 -- | Each expression is converted to a value or a statement. 
 -- The expression's type is passed to the caller, and the caller decides
 -- how to float bindings.
-type instance ExpOf ConvertToNewCore = FloatBinds (NewCore.RType, NewCoreTerm)
+newtype instance SFExpOf ConvertToNewCore ConvertToNewCore = 
+  FB {convertExp :: FloatBinds (NewCore.RType, NewCoreTerm)}
+
+type ConvertingExp = SFRecExp ConvertToNewCore
 
 -- | An expression may be translated to a value, a statement, or a \"do\".
 -- An application of \"do\" becomes a special value.
@@ -61,7 +64,8 @@ isDo NewCoreDo = True
 isDo _ = False
 
 -- | Types are not changed.
-type instance TypeOf ConvertToNewCore = NewCore.RType
+newtype instance Gluon.ExpOf ConvertToNewCore ConvertToNewCore =
+  NewCoreType {newCoreType :: NewCore.RType}
 
 data LetBinding = VarBinding Var NewCore.RStm 
                 | PatBinding RPat NewCore.RStm
@@ -168,9 +172,9 @@ statementReturningVar pos v =
 -- | Convert the parameter to a value or a 'do' operator.  If the parameter
 -- is a statement, then bind it to a variable.
 -- Return a value, or Nothing if the parameter is a 'do' operator.
-asValueOrDoWithType :: ExpOf ConvertToNewCore
-                       -> FloatBinds (NewCore.RType, Maybe NewCore.RVal)
-asValueOrDoWithType m = m >>= toValue
+asValueOrDoWithType :: ConvertingExp
+                    -> FloatBinds (NewCore.RType, Maybe NewCore.RVal)
+asValueOrDoWithType m = convertExp m >>= toValue
   where
     toValue (ty, NewCoreVal value) = return (ty, Just value)
     toValue (ty, NewCoreStm statement) = do
@@ -183,7 +187,7 @@ asValueOrDoWithType m = m >>= toValue
     toValue (ty, NewCoreDo) =
       return (ty, Nothing)
 
-asValueWithType :: ExpOf ConvertToNewCore
+asValueWithType :: ConvertingExp
                 -> FloatBinds (NewCore.RType, NewCore.RVal)
 asValueWithType m = asValueOrDoWithType m >>= disallowDo
   where
@@ -191,19 +195,19 @@ asValueWithType m = asValueOrDoWithType m >>= disallowDo
     disallowDo (ty, Nothing) =
       internalError "Cannot convert the 'do' operator to a value"
 
-asValue :: ExpOf ConvertToNewCore -> FloatBinds NewCore.RVal
+asValue :: ConvertingExp -> FloatBinds NewCore.RVal
 asValue m = do x <- asValueWithType m
                return $ snd x
 
 -- | Convert to a value or to the 'do' operator.  A Nothing return value 
 -- indicates that this is the 'do' operator.
-asValueOrDo :: ExpOf ConvertToNewCore -> FloatBinds (Maybe NewCore.RVal)
+asValueOrDo :: ConvertingExp -> FloatBinds (Maybe NewCore.RVal)
 asValueOrDo m = do x <- asValueOrDoWithType m 
                    return $ snd x
 
-asStatementWithType :: ExpOf ConvertToNewCore 
+asStatementWithType :: ConvertingExp 
                     -> FloatBinds (NewCore.RType, NewCore.RStm)
-asStatementWithType m = reifyBindings $ toStatement =<< m
+asStatementWithType m = reifyBindings $ toStatement =<< convertExp m
   where 
     toStatement (ty, NewCoreVal value) =
       return (ty, NewCore.ReturnS (NewCore.valInfo value) value)
@@ -211,20 +215,20 @@ asStatementWithType m = reifyBindings $ toStatement =<< m
     toValue (ty, NewCoreDo) =
       internalError "Cannot convert the 'do' operator to a statement"
 
-asStatement :: ExpOf ConvertToNewCore -> FloatBinds NewCore.RStm
+asStatement :: ConvertingExp -> FloatBinds NewCore.RStm
 asStatement m = liftM snd $ asStatementWithType m
 
 flattenWorker :: Worker ConvertToNewCore
 flattenWorker = Worker flattenType flattenExp
 
-flattenType :: Gluon.WRExp -> PureTC NewCore.RType
-flattenType t = return $ fromWhnf t
+flattenType :: Gluon.WRExp -> PureTC (TypeOf ConvertToNewCore ConvertToNewCore)
+flattenType t = return $ NewCoreType $ fromWhnf t
 
-flattenExp :: Exp ConvertToNewCore -> Gluon.WRExp 
-           -> PureTC (ExpOf ConvertToNewCore)
+flattenExp :: SFExp ConvertToNewCore -> Gluon.WRExp -> PureTC ConvertingExp
 flattenExp expression ty =
-  liftEvaluation $ return $ flattenExp' expression (fromWhnf ty)
+  liftEvaluation $ return $ FB $ flattenExp' expression (fromWhnf ty)
 
+flattenExp' :: SFExp ConvertToNewCore -> Gluon.RExp -> FloatBinds (NewCore.RType, NewCoreTerm)
 flattenExp' expression expression_type =
   case expression
   of VarE {expVar = v} ->
@@ -239,12 +243,12 @@ flattenExp' expression expression_type =
           BoolL True  -> returnCon inf $ pyonBuiltin the_True
           BoolL False -> returnCon inf $ pyonBuiltin the_False
           NoneL       -> returnCon inf $ pyonBuiltin the_None
-     UndefinedE {expInfo = inf, expType = t} ->
+     UndefinedE {expInfo = inf, expType = NewCoreType t} ->
        let fun = NewCore.mkConV pos $ pyonBuiltin the_fun_undefined
            arg = NewCore.GluonV (Gluon.mkSynInfo (Gluon.getSourcePos inf) TypeLevel) t
        in returnStatement $ NewCore.CallS inf $ NewCore.AppV inf fun [arg]
      TupleE {expInfo = inf, expFields = fs} -> do
-       (field_types, fields) <- mapAndUnzipM asValueWithType fs
+       (field_types :: [NewCore.RType], fields :: [NewCore.RVal]) <- mapAndUnzipM asValueWithType fs
        
        -- Create a tuple expression.  Apply the tuple constructor to all
        -- types and all fields.
@@ -252,7 +256,7 @@ flattenExp' expression expression_type =
            field_type_values =
              [NewCore.GluonV (Gluon.expInfo t) t | t <- field_types]
        returnValue $ NewCore.AppV inf con (field_type_values ++ fields)
-     TyAppE {expInfo = inf, expOper = op, expTyArg = arg} -> do
+     TyAppE {expInfo = inf, expOper = op, expTyArg = NewCoreType arg} -> do
        op' <- asValueOrDo op
        case op' of
          Nothing  -> returnDo
@@ -313,7 +317,7 @@ flattenExp' expression expression_type =
        returnStatement $ NewCore.LetrecS inf defs' body'
      DictE { expInfo = inf
            , expClass = cls
-           , expType = ty
+           , expType = NewCoreType ty
            , expSuperclasses = scs
            , expMethods = ms} -> do
        let cls_con = pyonClassConstructor cls
@@ -324,7 +328,7 @@ flattenExp' expression expression_type =
        returnValue $ NewCore.AppV inf (NewCore.mkConV pos cls_con) args
      MethodSelectE { expInfo = inf
                    , expClass = cls
-                   , expType = ty
+                   , expType = NewCoreType ty
                    , expMethodIndex = n
                    , expArg = arg} -> do
        -- Construct a case statement that selects the desired method
@@ -406,18 +410,19 @@ flattenExp' expression expression_type =
         makePatternVar (VarP v _) = return v 
         makePatternVar _          = newTemporary ObjectLevel Nothing
 -}
-convertPattern (WildP ty) = WildP ty
-convertPattern (VarP v ty) = VarP v ty
+convertPattern :: Pat ConvertToNewCore -> Pat Rec
+convertPattern (WildP ty) = WildP (newCoreType ty)
+convertPattern (VarP v ty) = VarP v (newCoreType ty)
 convertPattern (TupleP ps) = TupleP $ map convertPattern ps
 
 convertTyParam (TyPat v ty) =
-  return $ Binder v ty ()
+  return $ Binder v (newCoreType ty) ()
 
 convertParam (WildP ty) = do
   v <- newTemporary ObjectLevel Nothing
-  return $ Binder v ty ()
+  return $ Binder v (newCoreType ty) ()
 
-convertParam (VarP v ty) = return $ Binder v ty ()
+convertParam (VarP v ty) = return $ Binder v (newCoreType ty) ()
 
 convertParam (TupleP _) = internalError "Tuple parameters not implemented"
 
@@ -442,7 +447,7 @@ flattenFun fun = do
   let params = ty_params ++ val_params :: [Binder Rec ()]
       
   -- Get the return type
-  let rt = funReturnType fun
+  let rt = newCoreType $ funReturnType fun
       
   -- Assume it has no side effects
   let effect = Gluon.Builtins.Effect.empty
