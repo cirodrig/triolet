@@ -66,6 +66,14 @@ endif
 
 endef
 
+# Compile a Haskell boot file
+define COMPILE_HS_BOOT_SOURCE
+$(BUILDDIR)/$(1:.hs-boot=.o-boot) :
+	mkdir -p $(BUILDDIR)/$(dir $(1))
+	$(HC) -c $$< $(HS_C_OPTS)
+
+endef
+
 # Compile a C source file, found either in the source directory or in the
 # build directory.
 define COMPILE_C_SOURCE
@@ -93,6 +101,7 @@ $(BUILDDIR)/$(1:.c=.o) : $(BUILDDIR)/$(1)
 endef
 
 # Compile all Haskell files
+$(foreach hssrc, $(PYON_HS_BOOT_SRCS),$(eval $(call COMPILE_HS_BOOT_SOURCE,$(hssrc))))
 $(foreach hssrc, $(PYON_HS_SRCS) $(PYON_HS_GENERATED_SRCS),$(eval $(call COMPILE_HS_SOURCE,$(hssrc))))
 
 # Compile all C files
@@ -115,6 +124,7 @@ build/scripts/% : src/scripts/%
 %.hi : %.o ;
 %_stub.c : %.o ;
 %_stub.h : %.o ;
+%.hi-boot : %.o-boot ;
 
 # Dependences
 include depend_hs.mk
