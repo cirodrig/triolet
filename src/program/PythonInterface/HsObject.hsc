@@ -104,7 +104,10 @@ fromListOfHsObject' x = do
   -- We don't need to clean up after execeptions, so no try/bracket/finally.
   mapM fromListItem [0 .. sz - 1]
   where
-    fromListItem index = fromHsObject' =<< getListItem x index
+    fromListItem index = do
+      item <- getListItem x index
+      expectHsObject item
+      fromHsObject' item
 
 foreign export ccall hsObject_getTypeString :: PyPtr -> IO CString
 
