@@ -132,6 +132,10 @@ pprExpFlagsPrec flags prec expression =
          let defsText = vcat $ map (pprDefFlags flags) ds
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
+     CaseE {expScrutinee = e, expAlternatives = alts} ->
+       let doc = text "case" <+> pprExpFlagsPrec flags precOuter e $$
+                 text "of" <+> vcat (map (pprAltFlags flags) alts)
+       in parenthesize precOuter doc prec
 {-     DictE { expClass = cls
            , expType = ty
            , expSuperclasses = scs
@@ -139,7 +143,7 @@ pprExpFlagsPrec flags prec expression =
          let clsText = parens $ Gluon.pprExp ty
              scsText = tuple $ map (pprExpFlags flags) scs
              msText = tuple $ map (pprExpFlags flags) ms
-         in text "dict" <> cat [clsText, scsText, msText] -}
+         in text "dict" <> cat [clsText, scsText, msText]
      MethodSelectE { expClass = cls
                    , expType = ty
                    , expMethodIndex = index
@@ -147,7 +151,19 @@ pprExpFlagsPrec flags prec expression =
        let clsText = parens $ Gluon.pprExp ty
            indexText = parens $ text (show index)
            argText = parens $ pprExpFlags flags arg
-       in text "method" <> cat [clsText, indexText, argText]
+       in text "method" <> cat [clsText, indexText, argText] -}
+
+pprAltFlags :: PrintFlags -> Alt Rec -> Doc
+pprAltFlags flags (Alt { altConstructor = c
+                       , altTyArgs = ty_args
+                       , altParams = vars
+                       , altBody = body
+                       }) =
+  let pattern =
+        text (showLabel $ Gluon.conName c) <+>
+        hsep (map Gluon.pprExp ty_args ++ map (pprVarFlags flags) vars)
+      body_doc = pprExpFlagsPrec flags precOuter body 
+  in hang (pattern <> text ".") 2 body_doc
 
 -- UTF-8 for lowercase lambda
 lambda = text [toEnum 0xCE, toEnum 0xBB]

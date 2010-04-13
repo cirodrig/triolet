@@ -61,10 +61,18 @@ evExp expression =
           LetrecE info defs b -> do defs' <- mapM evDef defs
                                     b' <- evExp b
                                     return $ LetrecE info defs' b'
-          MethodSelectE inf cls t i e -> do t' <- evType t
+          CaseE info scr alts -> do scr' <- evExp scr
+                                    alts' <- mapM evAlt alts
+                                    return $ CaseE info scr' alts'
+          {- MethodSelectE inf cls t i e -> do t' <- evType t
                                             e' <- evExp e
-                                            return $ MethodSelectE inf cls t' i e'
+                                            return $ MethodSelectE inf cls t' i e' -}
      Untyped.TIRecExp e -> return e
+
+evAlt (Alt c ty_params params body) = do
+  ty_params' <- mapM evType ty_params
+  body' <- evExp body
+  return $ Alt c ty_params' params body'
 
 -- | Get the expression that was stored for a placeholder, and evaluate it
 getPlaceholderElaboration ph = do

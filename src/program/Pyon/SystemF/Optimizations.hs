@@ -84,15 +84,16 @@ pevalExp expression =
   return . partialEvaluate =<< pevalExpRecursive expression
 partialEvaluate :: RExp -> RExp
 partialEvaluate expression =
+  internalError "Not implemented: dictionary partial evaluation"
+  {-
   case expression
   of MethodSelectE {expArg = argument} ->
-       internalError "Not implemented: dictionary partial evaluation"
-       {- case argument
+       case argument
        of DictE {} ->
             -- Select a method from the dictionary
             expMethods argument !! expMethodIndex expression
 
-          _ -> expression -}
+          _ -> expression
            
      -- Default: return the expression unchanged
      _ -> expression
@@ -102,7 +103,7 @@ partialEvaluate expression =
         unpack e tail =
           case e
           of TyAppE {expOper = op, expTyArg = ty} -> unpack op (ty : tail)
-             _ -> Just (e, tail)
+             _ -> Just (e, tail) -}
 
 pevalExpRecursive :: RExp -> PEval RExp
 pevalExpRecursive expression =
@@ -147,10 +148,10 @@ pevalExpRecursive expression =
 {-     DictE {expSuperclasses = scs, expMethods = ms} -> do
        scs' <- mapM pevalExp scs
        ms' <- mapM pevalExp ms
-       return $ expression {expSuperclasses = scs', expMethods = ms'} -}
+       return $ expression {expSuperclasses = scs', expMethods = ms'}
      MethodSelectE {expArg = e} -> do
        e' <- pevalExp e
-       return $ expression {expArg = e'}
+       return $ expression {expArg = e'} -}
 
 pevalFun :: RFun -> PEval RFun
 pevalFun f = do
@@ -378,11 +379,11 @@ edcExp expression =
        edcScanType t
        scs' <- mapM edcExp scs
        ms' <- mapM edcExp ms
-       return $ expression {expSuperclasses = scs', expMethods = ms'} -}
+       return $ expression {expSuperclasses = scs', expMethods = ms'}
      MethodSelectE {expType = t, expArg = e} -> do
        edcScanType t
        e' <- edcExp e
-       return $ expression {expArg = e'}
+       return $ expression {expArg = e'} -}
 
 -- | Dead code elimination for a \"let\" expression
 edcLetE :: ExpInfo -> RPat -> RExp -> RExp -> GetMentionsSet RExp

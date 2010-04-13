@@ -84,7 +84,6 @@ mkEqClass = mdo
                                     tuple2_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_EqDict
                   , clsDictCon = pyonBuiltin SystemF.the_eqDict
-                  , clsPyonClass = SystemF.EqClass
                   }
   
   eq <- mkClassMethod cls 0 "__eq__" compareScheme
@@ -130,7 +129,6 @@ mkOrdClass = mdo
                                     tuple2_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_OrdDict
                   , clsDictCon = pyonBuiltin SystemF.the_ordDict
-                  , clsPyonClass = SystemF.OrdClass
                   }
 
   lt <- mkClassMethod cls 0 "__lt__" compareScheme
@@ -182,7 +180,6 @@ mkTraversableClass = mdo
                   , clsInstances = [list_instance, iter_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_TraversableDict
                   , clsDictCon = pyonBuiltin SystemF.the_traversableDict
-                  , clsPyonClass = SystemF.TraversableClass
                   }
 
   iter <- mkClassMethod cls 0 "__iter__" iter_scheme
@@ -213,7 +210,6 @@ mkAdditiveClass = mdo
                   , clsInstances = [int_instance, float_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_AdditiveDict
                   , clsDictCon = pyonBuiltin SystemF.the_additiveDict
-                  , clsPyonClass = SystemF.AdditiveClass
                   }
 
   zero <- mkClassMethod cls 0 "zero" $ monomorphic (ConTy a)
@@ -247,13 +243,12 @@ mkVectorClass = mdo
                     functionType [ConTy a, ConTy $ tiBuiltin the_con_int] (ConTy a)
 
   let cls = Class { clsParam = a
-                  , clsConstraint = []
+                  , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Additive]
                   , clsMethods = [scale, norm]
                   , clsName = "Vector"
                   , clsInstances = []
                   , clsTypeCon = pyonBuiltin SystemF.the_VectorDict
                   , clsDictCon = pyonBuiltin SystemF.the_vectorDict
-                  , clsPyonClass = SystemF.VectorClass
                   }
 
   scale <- mkClassMethod cls 0 "scale" scaleScheme

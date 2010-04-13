@@ -7,9 +7,7 @@
 
 {-# LANGUAGE DeriveDataTypeable, EmptyDataDecls, TypeFamilies, FlexibleInstances #-}
 module Pyon.SystemF.Syntax
-    (PyonClass(..),
-     pyonClassConstructor, pyonClassNumSuperclasses, pyonClassNumMethods,
-     Rec,
+    (Rec,
      SFExpOf(..), TypeOf,
      SFRecExp,
      RExp, RType, RPat, RTyPat, RFun, RDef, RModule,
@@ -19,6 +17,7 @@ module Pyon.SystemF.Syntax
      TyPat(..),
      ExpInfo, defaultExpInfo,
      SFExp,
+     Alt(..),
      Fun(..),
      Def(..),
      Module(..),
@@ -36,32 +35,6 @@ import qualified Gluon.Core as Gluon
 import Gluon.Core(Rec)
 
 import Pyon.SystemF.Builtins
-
--- | The Pyon type classes.
-data PyonClass =
-  EqClass | OrdClass | TraversableClass | AdditiveClass | VectorClass
-  deriving(Show, Typeable)
-
-pyonClassConstructor :: PyonClass -> Gluon.Con
-pyonClassConstructor EqClass = pyonBuiltin the_eqDict
-pyonClassConstructor OrdClass = pyonBuiltin the_ordDict
-pyonClassConstructor TraversableClass = pyonBuiltin the_traversableDict
-pyonClassConstructor AdditiveClass = pyonBuiltin the_additiveDict
-pyonClassConstructor VectorClass = pyonBuiltin the_vectorDict
-
-pyonClassNumSuperclasses :: PyonClass -> Int
-pyonClassNumSuperclasses EqClass = 0
-pyonClassNumSuperclasses OrdClass = 1
-pyonClassNumSuperclasses TraversableClass = 0
-pyonClassNumSuperclasses AdditiveClass = 0
-pyonClassNumSuperclasses VectorClass = 1
-
-pyonClassNumMethods :: PyonClass -> Int
-pyonClassNumMethods EqClass = 2
-pyonClassNumMethods OrdClass = 4
-pyonClassNumMethods TraversableClass = 1
-pyonClassNumMethods AdditiveClass = 3
-pyonClassNumMethods VectorClass = 2
 
 data family SFExpOf a :: * -> *
 
@@ -176,24 +149,19 @@ data instance SFExpOf Rec s =
     , expDefs :: [Def s]
     , expBody :: SFRecExp s
     }
-    {-
-    -- | Create a class dictionary
-  | DictE
+    -- | Case analysis 
+  | CaseE
     { expInfo :: ExpInfo
-    , expClass :: PyonClass
-    , expType :: RecType s     -- ^ Class instance type
-    , expSuperclasses :: [SFRecExp s]
-    , expMethods :: [SFRecExp s]
+    , expScrutinee :: SFRecExp s
+    , expAlternatives :: [Alt s]
     }
--}
-    -- | Select a class method
-  | MethodSelectE
-    { expInfo :: ExpInfo
-    , expClass :: PyonClass
-    , expType :: RecType s     -- ^ Class instance type
-    , expMethodIndex :: {-# UNPACK #-} !Int
-    , expArg :: SFRecExp s       -- ^ Class dictionary
-    }
+
+data Alt s =
+  Alt { altConstructor :: !Gluon.Con
+      , altTyArgs :: [RecType s]
+      , altParams :: [Var]
+      , altBody :: SFRecExp s
+      }
 
 instance Typeable1 (SFExpOf Rec) where
   typeOf1 x =
@@ -243,6 +211,5 @@ isValueExp expression =
      FunE {} -> True
      LetE {} -> False
      LetrecE {} -> False
-{-     DictE {expSuperclasses = scs, expMethods = ms} ->
-       all isValueExp scs && all isValueExp ms-}
-     MethodSelectE {expArg = a} -> isValueExp a
+     CaseE {expScrutinee = scr, expAlternatives = alts} ->
+       isValueExp scr && all (isValueExp . altBody) alts

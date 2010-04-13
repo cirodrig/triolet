@@ -51,69 +51,6 @@ withMany f xs k = go xs k
 
 makeActionType return_type = return_type
 
-classDictCon EqClass = pyonBuiltin the_EqDict
-classDictCon OrdClass = pyonBuiltin the_OrdDict
-classDictCon TraversableClass = pyonBuiltin the_TraversableDict
-classDictCon AdditiveClass = pyonBuiltin the_AdditiveDict
-classDictCon VectorClass = pyonBuiltin the_VectorDict
-
-classMethodType cls clsType index =
-  case cls
-  of EqClass ->
-       case index
-       of 0 -> comparisonType
-          1 -> comparisonType
-     OrdClass ->
-       case index
-       of 0 -> comparisonType
-          1 -> comparisonType
-          2 -> comparisonType
-          3 -> comparisonType
-     TraversableClass ->
-       case index
-       of 0 -> traverseType
-     AdditiveClass ->
-       case index
-       of 0 -> valueType
-          1 -> binaryFunctionType
-          2 -> binaryFunctionType
-     VectorClass ->
-       case index
-       of 0 -> scaleType
-          1 -> normType
-  where
-    traverseType = do
-      a <- newTemporary Gluon.TypeLevel Nothing
-      let a_exp = Gluon.mkInternalVarE a
-          cls_exp = Gluon.mkInternalAppE clsType [a_exp]
-          iter_exp = Gluon.mkInternalConAppE (pyonBuiltin the_Stream)
-                     [ a_exp]
-          ty = Gluon.mkInternalFunE False a Gluon.pureKindE $
-               Gluon.mkInternalArrowE False cls_exp iter_exp
-      return ty
-    binaryFunctionType = do
-      let ty = Gluon.mkInternalArrowE False clsType $
-               Gluon.mkInternalArrowE False clsType $
-               makeActionType $ clsType
-      return ty
-    comparisonType = do
-      let return_bool = makeActionType $
-                        Gluon.mkInternalConE (pyonBuiltin the_bool)
-          ty = Gluon.mkInternalArrowE False clsType $
-               Gluon.mkInternalArrowE False clsType $
-               return_bool
-      return ty
-    valueType = return $ makeActionType clsType
-    scaleType =
-      let float_type = Gluon.mkInternalConE (Gluon.builtin Gluon.the_Float)
-      in return $ Gluon.mkInternalArrowE False clsType $
-                  Gluon.mkInternalArrowE False float_type $
-                  makeActionType clsType
-    normType =
-      let float_type = Gluon.mkInternalConE (Gluon.builtin Gluon.the_Float)
-      in return $ Gluon.mkInternalArrowE False clsType $
-                  makeActionType float_type
-
 boolType = Gluon.mkInternalConE $ pyonBuiltin the_bool
 
 tyPatType :: RTyPat -> RType
@@ -193,18 +130,8 @@ typeInferExp worker expression = do
          typeInferLetE worker inf pat e body
        LetrecE {expInfo = inf, expDefs = defs, expBody = body} ->
          typeInferLetrecE worker inf defs body
-{-       DictE { expInfo = inf
-             , expClass = cls
-             , expType = ty
-             , expSuperclasses = scs
-             , expMethods = ms} ->
-         typeInferDictE worker inf cls ty scs ms -}
-       MethodSelectE { expInfo = inf
-                     , expClass = cls
-                     , expType = ty
-                     , expMethodIndex = n
-                     , expArg = e} ->
-         typeInferMethodSelectE worker inf cls ty n e
+       CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
+         typeInferCaseE worker inf scr alts
   new_val <- doExp worker new_exp e_type
   return (e_type, new_val)
          
@@ -285,7 +212,7 @@ typeInferCallE worker inf op args = do
   -- Compute result type
   result_type <- computeAppliedType 
                  (getSourcePos inf)
-                 (fromWhnf op_type) 
+                 (verbatim $ fromWhnf op_type) 
                  (map fromWhnf arg_types)
   
   -- The result type must be in the 'Action' or 'Stream' monads.
@@ -306,8 +233,11 @@ typeInferCallE worker inf op args = do
 
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
-computeAppliedType :: SourcePos -> RType -> [RType] -> PureTC WRExp
-computeAppliedType pos op_type arg_types = apply (verbatim op_type) arg_types
+computeAppliedType :: SourcePos 
+                   -> Gluon.RecExp SubstRec 
+                   -> [RType] 
+                   -> PureTC WRExp
+computeAppliedType pos op_type arg_types = apply op_type arg_types
   where
     apply op_type (arg_t:arg_ts) = do
       -- Operator must be a function type
@@ -320,6 +250,8 @@ computeAppliedType pos op_type arg_types = apply (verbatim op_type) arg_types
           
           -- continue with range
           apply rng arg_ts
+        
+        Gluon.FunE {} -> throwError $ OtherErr "Unexpected dependent type"
           
         _ -> do op_type' <- Gluon.evalFully op_type
                 throwError $ Gluon.NonFunctionApplicationErr pos (fromWhnf op_type')
@@ -386,37 +318,98 @@ typeInferLetrecE worker inf defs body =
     (body_type, body_val) <- typeInferExp worker body
     return (body_type, LetrecE inf defs' body_val)
 
-{-
-typeInferDictE :: Worker a -> ExpInfo -> PyonClass -> RType
-               -> [RExp] -> [RExp]
+typeInferCaseE :: Worker a -> ExpInfo -> RExp -> [Alt Rec]
                -> PureTC (WRExp, SFExp a)
-typeInferDictE worker inf cls ty scs ms = do
-  (sc_types, sc_values) <- mapAndUnzipM (typeInferExp worker) scs
-  (m_types, m_value) <- mapAndUnzipM (typeInferExp worker) ms
-  
-  -- TODO: check that superclass and method types are correct
-  ty' <- Gluon.evalFully' ty
-  let return_type_uneval = 
-        Gluon.mkInternalConAppE (classDictCon cls) [fromWhnf ty']
-  return_type <- liftEvaluation $ Gluon.evalFully' return_type_uneval
-  ty_val <- doType worker ty'
-  
-  return (return_type, DictE inf cls ty_val sc_values m_value) -}
+typeInferCaseE worker inf scr alts = do
+  let pos = getSourcePos inf
 
-typeInferMethodSelectE :: Worker a -> ExpInfo -> PyonClass -> RType
-                       -> Int -> RExp
-                       -> PureTC (WRExp, SFExp a)
-typeInferMethodSelectE worker inf cls ty index arg = do
-  -- The argument must be a dictionary of the given class
-  (arg_ty, arg_val) <- typeInferExp worker arg
-  ty' <- Gluon.evalFully' $ Gluon.mkInternalConAppE (classDictCon cls) [ty]
-  tcAssertEqual noSourcePos (verbatim $ fromWhnf ty') (verbatim $ fromWhnf arg_ty)
+  -- Get the scrutinee's type
+  (scr_type, scr_val) <- typeInferExp worker scr
   
-  ty_val <- doType worker =<< Gluon.evalFully' ty
+  when (null alts) $
+    throwError $ OtherErr "Empty case statement"
+
+  -- Match against each alternative
+  (alt_types, alt_vals) <-
+    mapAndUnzipM (typeCheckAlternative worker pos (fromWhnf scr_type)) alts
+    
+  -- All alternatives must match
+  let alt_subst_types = map (verbatim . fromWhnf) alt_types
+  zipWithM (tcAssertEqual pos) alt_subst_types (tail alt_subst_types)
+
+  return (head alt_types, CaseE inf scr_val alt_vals)
+
+typeCheckAlternative :: Worker a -> SourcePos -> Gluon.RExp -> Alt Rec
+                     -> PureTC (WRExp, Alt a)
+typeCheckAlternative worker pos scr_type (Alt { altConstructor = con
+                                              , altTyArgs = types
+                                              , altParams = fields
+                                              , altBody = body}) = do
+  -- Process arguments
+  arg_vals <- mapM (doType worker <=< Gluon.evalFully') types
   
-  -- Determine the return value based on the class type and method index
-  return_type <- Gluon.evalFully' =<< classMethodType cls ty index
-  return (return_type, MethodSelectE inf cls ty_val index arg_val)
+  -- Apply constructor to type arguments
+  con_ty <- Gluon.getConstructorType con
+  fo_type <- computeTypeApplicationType pos con_ty types
+  
+  -- Match the resulting type against the function type
+  -- field1 -> field2 -> ... -> scr_type
+  (body_ty, body_val) <-
+    bindParamTypes (fromWhnf fo_type) fields $
+    typeInferExp worker body
+
+  return (body_ty, Alt con arg_vals fields body_val)
+  where
+    -- Bind parameter variables to the constructor's parameter types
+    bindParamTypes con_type fields k = go con_type fields
+      where
+        go match_type (field:fields) =
+          case match_type
+          of Gluon.FunE { Gluon.expMParam = Gluon.Binder' Nothing dom ()
+                        , Gluon.expRange = rng} ->
+               assumePure field dom $ go rng fields
+             Gluon.FunE {} ->
+               throwError $ OtherErr "Unexpected dependent type"
+             _ -> throwError $ Gluon.NonFunctionApplicationErr pos match_type
+        go result_type [] = do
+          -- This must match the scrutinee type
+          tcAssertEqual pos (verbatim scr_type) (verbatim result_type)
+          k
+
+-- | Determine the type of the result of an application.
+-- The operator's type (not the operator itself) is taken as a parameter,
+-- along with the argument values.
+--
+-- The worker is also used on to each parameter
+computeTypeApplicationType
+  :: SourcePos 
+  -> Gluon.RecExp SubstRec      -- ^ Type of the operator to apply
+  -> [RType]                    -- ^ Parameters to apply
+  -> PureTC WRExp               -- ^ Compute the result type
+computeTypeApplicationType pos op_type args = apply op_type args
+  where
+    apply op_type (arg:args) = do
+      -- Operator must be a function type
+      op_type' <- Gluon.evalHead op_type
+      case fromWhnf op_type' of
+        Gluon.FunE { Gluon.expMParam = binder@(Gluon.Binder' _ dom ())
+                   , Gluon.expRange = rng} -> do
+          -- Get the argument's type
+          arg_type <- Gluon.typeInferExp arg
+          
+          -- parameter type must match argument type
+          tcAssertEqual pos dom (verbatim $ fromWhnf arg_type)
+          
+          -- update the range type
+          let binder' = Gluon.mapBinder' id substFully binder
+              rng' = assignBinder' binder' arg rng
+          
+          -- Continue with range
+          apply rng' args
+          
+        _ -> throwError $ NonFunctionApplicationErr pos (substFullyUnder $ fromWhnf op_type')
+        
+    apply op_type [] = Gluon.evalFully op_type
 
 typeCheckDefGroup :: Worker a -> [RDef] -> ([Def a] -> PureTC b)
                   -> PureTC b

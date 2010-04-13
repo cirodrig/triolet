@@ -325,7 +325,7 @@ flattenExp' expression expression_type =
        methods <- mapM asValue ms
        -- Arguments are the class type, superclasses, and methods
        let args = NewCore.GluonV inf ty : superclasses ++ methods
-       returnValue $ NewCore.AppV inf (NewCore.mkConV pos cls_con) args -}
+       returnValue $ NewCore.AppV inf (NewCore.mkConV pos cls_con) args
      MethodSelectE { expInfo = inf
                    , expClass = cls
                    , expType = NewCoreType ty
@@ -347,7 +347,7 @@ flattenExp' expression expression_type =
            alt = NewCore.Alt inf (NewCore.ConP cls_con pat_params) $
                  NewCore.ReturnS inf $ NewCore.mkVarV pos this_method_var
            stm = NewCore.CaseS inf scrutinee [alt]
-       returnStatement stm
+       returnStatement stm -}
   where
     pos = getSourcePos expression
     

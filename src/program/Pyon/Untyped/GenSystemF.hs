@@ -33,6 +33,7 @@ import Gluon.Core.Builtins
 import Gluon.Core(SynInfo, mkSynInfo, internalSynInfo,
                   Structure, Rec, ExpOf(..))
 import qualified Gluon.Core as Gluon
+import Pyon.Globals
 import Pyon.Untyped.Kind
 import Pyon.Untyped.HMType
 import qualified Pyon.Untyped.Syntax as Untyped
@@ -106,7 +107,6 @@ data Class =
   , clsInstances :: [Instance]
   , clsTypeCon :: !Gluon.Con    -- ^ Class dictionary type constructor
   , clsDictCon :: !Gluon.Con    -- ^ Class dictionary constructor
-  , clsPyonClass :: !SystemF.PyonClass -- ^ Old representation of the class
   }
 
 instance Eq Class where
@@ -334,16 +334,27 @@ mkLetrecE pos defs body = TIExp $ SystemF.LetrecE (synInfo pos) defs body
 
 mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> [TIExp] -> TIExp
 mkDictE pos cls inst_type scs methods =
-  let pyon_class = clsPyonClass cls
-      -- First, apply the dictionary constructor to the instance type
+  let -- First, apply the dictionary constructor to the instance type
       dict1 = mkTyAppE pos (mkConE pos $ clsDictCon cls) inst_type
       -- Then apply to all arguments
   in mkCallE pos dict1 (scs ++ methods)
 
-mkMethodSelectE :: SourcePos -> Class -> TIType -> Int -> TIExp -> TIExp
-mkMethodSelectE pos cls inst_type index dict =
-  let pyon_class = clsPyonClass cls
-  in TIExp $ SystemF.MethodSelectE (synInfo pos) pyon_class inst_type index dict
+mkMethodSelectE :: SourcePos -> Class -> TIType -> Int -> TIExp -> IO TIExp
+mkMethodSelectE pos cls inst_type index dict = do
+  let num_superclasses = length $ clsConstraint cls
+      num_methods = length $ clsMethods cls
+  
+  -- Create anonymous parameter variables
+  parameter_vars <- replicateM (num_superclasses + num_methods) $ do
+    var_id <- getNextVarIdent
+    return $ Gluon.mkAnonymousVariable var_id ObjectLevel
+
+  -- Create a case expression that matches against the class dictionary
+  -- and then selects one of its fields
+  let alt_body = mkVarE pos $ parameter_vars !! (num_superclasses + index)
+      alt = SystemF.Alt (clsDictCon cls) [inst_type] parameter_vars alt_body
+            
+  return $ TIExp $ SystemF.CaseE (synInfo pos) dict [alt]
 
 -- | Create a placeholder for a recursive variable.  The variable is assumed
 -- to have a monomorphic type, which is later generalized.

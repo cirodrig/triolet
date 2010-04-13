@@ -112,8 +112,8 @@ methodAssignment cls index scm =
       
               -- Create a method selector expression
               let inst_type = convertHMType cls_type
-              let selector_expr =
-                    mkMethodSelectE pos cls inst_type index placeholder
+              selector_expr <-
+                mkMethodSelectE pos cls inst_type index placeholder
               (placeholders, expr) <-
                 instanceExpression pos (map ConTy ty_vars') constraint' selector_expr
               
