@@ -13,6 +13,7 @@ import qualified Data.Map as Map
 import Data.Set(Set)
 import qualified Data.Set as Set
 
+import Gluon.Common.Error
 import qualified Gluon.Core as Gluon
 import qualified Gluon.Eval.Typecheck as Gluon
 import Pyon.SystemF.Syntax
@@ -29,7 +30,7 @@ optimizeModule mod =
   mod
 
 mapModule :: (RDef -> RDef) -> RModule -> RModule
-mapModule f (Module ds) = Module (map f ds)
+mapModule f (Module ds) = Module (map (map f) ds)
 
 -------------------------------------------------------------------------------
 -- Partial evaluation
@@ -85,12 +86,13 @@ partialEvaluate :: RExp -> RExp
 partialEvaluate expression =
   case expression
   of MethodSelectE {expArg = argument} ->
-       case argument
+       internalError "Not implemented: dictionary partial evaluation"
+       {- case argument
        of DictE {} ->
             -- Select a method from the dictionary
             expMethods argument !! expMethodIndex expression
 
-          _ -> expression
+          _ -> expression -}
            
      -- Default: return the expression unchanged
      _ -> expression
@@ -142,10 +144,10 @@ pevalExpRecursive expression =
        ds' <- mapM pevalDef ds
        b' <- pevalExp b
        return $ expression {expDefs = ds', expBody = b'}
-     DictE {expSuperclasses = scs, expMethods = ms} -> do
+{-     DictE {expSuperclasses = scs, expMethods = ms} -> do
        scs' <- mapM pevalExp scs
        ms' <- mapM pevalExp ms
-       return $ expression {expSuperclasses = scs', expMethods = ms'}
+       return $ expression {expSuperclasses = scs', expMethods = ms'} -}
      MethodSelectE {expArg = e} -> do
        e' <- pevalExp e
        return $ expression {expArg = e'}
@@ -372,11 +374,11 @@ edcExp expression =
          ds' <- mapM edcDef ds
          e' <- edcExp e
          return $ expression {expDefs = ds', expBody = e'}
-     DictE {expType = t, expSuperclasses = scs, expMethods = ms} -> do
+{-     DictE {expType = t, expSuperclasses = scs, expMethods = ms} -> do
        edcScanType t
        scs' <- mapM edcExp scs
        ms' <- mapM edcExp ms
-       return $ expression {expSuperclasses = scs', expMethods = ms'}
+       return $ expression {expSuperclasses = scs', expMethods = ms'} -}
      MethodSelectE {expType = t, expArg = e} -> do
        edcScanType t
        e' <- edcExp e

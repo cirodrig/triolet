@@ -31,7 +31,7 @@ pprDef :: RDef -> Doc
 pprDef = pprDefFlags defaultPrintFlags
 
 pprModule :: RModule -> Doc
-pprModule (Module defs) = vcat $ map pprDef defs
+pprModule (Module defs) = vcat $ map (braces . vcat . map pprDef) defs
 
 data PrintFlags =
   PrintFlags
@@ -132,14 +132,14 @@ pprExpFlagsPrec flags prec expression =
          let defsText = vcat $ map (pprDefFlags flags) ds
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
-     DictE { expClass = cls
+{-     DictE { expClass = cls
            , expType = ty
            , expSuperclasses = scs
            , expMethods = ms } ->
          let clsText = parens $ Gluon.pprExp ty
              scsText = tuple $ map (pprExpFlags flags) scs
              msText = tuple $ map (pprExpFlags flags) ms
-         in text "dict" <> cat [clsText, scsText, msText]
+         in text "dict" <> cat [clsText, scsText, msText] -}
      MethodSelectE { expClass = cls
                    , expType = ty
                    , expMethodIndex = index
@@ -175,12 +175,7 @@ pprFunFlags :: PrintFlags -> RFun -> Doc
 pprFunFlags flags fun =
   let params = pprFunParameters True flags fun
       body = pprExpFlags flags $ funBody fun
-      stream = if funMonad fun `isPyonBuiltin` the_Action
-               then empty
-               else if funMonad fun `isPyonBuiltin` the_Stream
-                    then text "_s"
-                    else text "_ERROR"
-  in hang (lambda <> stream <+> params <> text ".") 4 body
+  in hang (lambda <+> params <> text ".") 4 body
 
 pprDefFlags flags (Def v fun) =
   let params = pprFunParameters False flags fun

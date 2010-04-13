@@ -80,7 +80,8 @@ def _prExpression(e, precedence):
         else: return doc
 
     if isinstance(e, VariableExpr):
-        if hasattr(e, 'ssaver'):
+        if hasattr(e, 'ssaver') and \
+                isinstance(e.ssaver, int) and e.ssaver != -1:
             return pretty.abut(prettyAst(e.variable),e.ssaver)
         else:
             return prettyAst(e.variable)
@@ -135,7 +136,7 @@ def _prExpression(e, precedence):
         return parenthesize(_PREC_COND, doc)
     elif isinstance(e, LambdaExpr):
         parameter_list = pretty.space(
-            pretty.punctuate(',', (prettyAst(p) for p in e.parameters)))
+            pretty.punctuate(',', [prettyAst(p) for p in e.parameters]))
         doc = pretty.space(['lambda',
                             pretty.abut(parameter_list, ':'),
                             _prExpression(e.body, _PREC_LAMBDA)])

@@ -1,0 +1,126 @@
+
+module Pyon.Untyped.TypeAssignment
+       (TypeAssignment,
+        assignedFreeVariables,
+        assignedTyScheme,
+        instantiateTypeAssignment,
+        firstOrderAssignment,
+        polymorphicAssignment,
+        recursiveAssignment,
+        methodAssignment)
+where
+
+import Control.Monad
+import qualified Data.Map as Map
+import qualified Data.Set as Set
+
+import Gluon.Common.Error
+import Gluon.Common.SourcePos
+import Pyon.Untyped.Classes
+import Pyon.Untyped.GenSystemF
+import Pyon.Untyped.HMType
+import Pyon.Untyped.Kind
+import Pyon.Untyped.Syntax
+
+-- | A variable's type assignment, containing information about how to create 
+-- its corresponding expression in System F
+data TypeAssignment =
+  TypeAssignment
+  { -- | Get a type assignment's free type variables
+    _typeAssignmentFreeVariables :: !(IO TyVarSet)
+    -- | Get a type assignment's scheme, if it can be ascribed one
+    -- This will evaluate to an error for recursive variable type assignments
+  , _typeAssignmentScheme :: TyScheme
+    -- | Instantiate a type assignment
+  , _instantiateTypeAssignment :: !(SourcePos -> IO (Placeholders, TyVarSet, Constraint, HMType, TIExp))
+  }
+
+assignedFreeVariables :: TypeAssignment -> IO TyVarSet
+assignedFreeVariables = _typeAssignmentFreeVariables
+
+assignedTyScheme :: TypeAssignment -> TyScheme
+assignedTyScheme = _typeAssignmentScheme
+
+instantiateTypeAssignment :: SourcePos
+                          -> TypeAssignment
+                          -> IO (Placeholders, TyVarSet, Constraint, HMType, TIExp)
+instantiateTypeAssignment pos ass = _instantiateTypeAssignment ass pos
+
+firstOrderAssignment :: HMType  -- ^ First-order type
+                     -> (SourcePos -> TIExp) 
+                        -- ^ Factory for an expression of this type 
+                     -> TypeAssignment
+firstOrderAssignment ty value =
+  TypeAssignment (freeTypeVariables ty) (monomorphic ty) instantiate_function
+  where
+    instantiate_function pos = do
+      free_vars <- unifiableTypeVariables ty
+      return ([], free_vars, [], ty, value pos)
+
+polymorphicAssignment :: TyScheme -- ^ Polymorphic type
+                      -> (SourcePos -> TIExp) 
+                         -- ^ Factory for an expression of this type
+                      -> TypeAssignment
+polymorphicAssignment ty mk_value =
+  TypeAssignment (freeTypeVariables ty) ty instantiate_function
+  where
+    instantiate_function pos = do
+      (ty_vars, constraint, fot) <- instantiate ty
+      (placeholders, exp) <-
+        instanceExpression pos (map ConTy ty_vars) constraint (mk_value pos)
+      free_vars <- unifiableTypeVariables fot
+      return (placeholders, free_vars, constraint, fot, exp)
+
+-- | Create a type assignment for a recursively defined variable.  The variable
+-- is assumed to have an unknown monotype represented by a new type variable.
+-- A placeholder expression is inserted wherever the variable is used.
+recursiveAssignment :: Variable -- ^ Recursively defined variable
+                    -> IO (TypeAssignment, TyCon)
+recursiveAssignment var = do
+  -- Create a new type variable representing the variable's unknown type
+  tyvar <- newTyVar Star () Nothing
+  
+  let ty = ConTy tyvar
+  let instantiate_function pos = do
+        -- Create a placeholder expression
+        placeholder <- mkRecVarPlaceholder pos var tyvar
+        free_vars <- unifiableTypeVariables ty
+        return ([placeholder], free_vars, [], ty, placeholder)
+
+      scheme = internalError "Cannot get type scheme of recursive variable"
+  return ( TypeAssignment (freeTypeVariables ty) scheme instantiate_function
+         , tyvar)
+
+-- | Create a class method assignment
+methodAssignment :: Class -> Int -> TyScheme -> TypeAssignment
+methodAssignment cls index scm =
+  TypeAssignment (freeTypeVariables scm) scm instantiate_function
+  where
+    instantiate_function pos = do
+      (ty_vars, constraint, fot) <- instantiate scm
+      free_vars <- unifiableTypeVariables fot
+
+      -- The head of the constraint list is always the class constraint
+      case constraint of
+        cls_predicate@(IsInst cls_type cls2) : constraint'
+          | cls == cls2 -> do
+              -- The first type variable is the class variable
+              let (cls_var : ty_vars') = ty_vars
+          
+              -- Create a placeholder for the class dictionary
+              placeholder <- mkDictPlaceholder pos cls_predicate
+      
+              -- Create a method selector expression
+              let inst_type = convertHMType cls_type
+              let selector_expr =
+                    mkMethodSelectE pos cls inst_type index placeholder
+              (placeholders, expr) <-
+                instanceExpression pos (map ConTy ty_vars') constraint' selector_expr
+              
+              return ( placeholder : placeholders 
+                     , free_vars
+                     , constraint
+                     , fot
+                     , expr
+                     )
+        _ -> internalError "Unexpected constraint on class method"

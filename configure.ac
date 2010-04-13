@@ -30,9 +30,11 @@ CIR_PY_LIBDIR()
 CIR_HS_CHECK_PACKAGE([base])
 CIR_HS_CHECK_PACKAGE([containers])
 CIR_HS_CHECK_PACKAGE([mtl])
+CIR_HS_CHECK_PACKAGE([MaybeT])
 CIR_HS_CHECK_PACKAGE([fgl])
 CIR_HS_CHECK_PACKAGE([language-python-pyon])
 CIR_HS_CHECK_PACKAGE([gluon])
+CIR_HS_CHECK_PACKAGE([gluon-eval])
 
 ## Check for header files
 

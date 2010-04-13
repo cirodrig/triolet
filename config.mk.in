@@ -38,7 +38,7 @@ INCLUDEDIRS=@cir_hs_libdir@/include \
 LIBDIRS=
 
 # Haskell package names
-PACKAGES=base containers mtl fgl language-python-pyon gluon
+PACKAGES=base containers mtl fgl MaybeT language-python-pyon gluon gluon-eval
 
 # Library names
 LIBS=python@cir_python_version@

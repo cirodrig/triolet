@@ -1,6 +1,8 @@
-
-constant Action : Effect is(covar) -> Pure -> Pure;
-constant Stream : Effect is(covar) -> Pure -> Pure;
+{- System F builtin constructors.
+--
+-- At this point in compilation, side effects are ignored.  These constructors
+-- therefore have no side effects.
+-}
 
 -- Integer arithmetic
 
@@ -31,29 +33,12 @@ let lessThanZ       (x : Int) (y : Int) -> Prop = isNnegZ (y - x + -1);
 operator right 10 || = or;
 operator right 15 && = and;
 
--- Side effect stuff
-
-constant Ptr : Addr -> Pure;
-constant Stored : Pure -> Object;
-constant subscript : Addr -> Int -> Addr;
-
-operator 5 :|: = reversed_WhereE;
-operator right 45 :**: = SconjE;
-operator 50 :@: = AtE;
-
-let reversed_WhereE (e : Effect) (p : Prop) -> Effect = WhereE p e;
-
-let listElementEffect (base : Addr) (o : Object) (offset : Int) -> Effect =
-  o :@: subscript base offset;
-
-let listContentsEffect (base : Addr) (o : Object) (size : Int) -> Effect =
-  SetE (fun i : Int => listElementEffect base o i :|: 0 <= i && i < size);
-
 -- Pyon types
 data NoneType : Pure where None : NoneType;
 constant Any : Pure;
 data bool : Pure where True : bool | False : bool;
 constant list : Pure -> Pure;
+constant Stream : Pure -> Pure;
 
 data PyonTuple0 : Pure where
   pyonTuple0 : PyonTuple0;
@@ -72,8 +57,8 @@ data PyonTuple5 : Pure -> Pure -> Pure -> Pure -> Pure -> Pure where
             -> (e : Pure)
             -> a -> b -> c -> d -> e -> PyonTuple4 a b c d e;
 
-let comparison (a : Pure) -> Pure = a -> a -> Action EmpE bool;
-let binary (a : Pure) -> Pure = a -> a -> Action EmpE a;
+let comparison (a : Pure) -> Pure = a -> a -> bool;
+let binary (a : Pure) -> Pure = a -> a -> a;
 let binary_any -> Pure = (a : Pure) -> binary a;
 
 -- Dictionary types for Pyon classes.
@@ -91,7 +76,7 @@ data OrdDict : Pure -> Pure where
 
 data TraversableDict : (Pure -> Pure) -> Pure where
   traversableDict : (t : Pure -> Pure)
-                 -> ((a : Pure) -> t a -> Stream EmpE a)
+                 -> ((a : Pure) -> t a -> Stream a)
                  -> TraversableDict t;
 
 data AdditiveDict : Pure -> Pure where
@@ -101,8 +86,8 @@ data AdditiveDict : Pure -> Pure where
 data VectorDict : Pure -> Pure where
   vectorDict : (a : Pure)
             -> AdditiveDict a
-            -> (a -> Float -> Action EmpE a)
-            -> (a -> Action EmpE Float)
+            -> (a -> Float -> a)
+            -> (a -> Float)
             -> VectorDict a;
 
 -- Class dictionary members for predefined instances.
@@ -123,27 +108,25 @@ constant Ord_LE_Float : comparison Float;
 
 constant Eq_EQ_Tuple2 : (a : Pure) -> (b : Pure)
                      -> EqDict a -> EqDict b
-                     -> Action EmpE (comparison (PyonTuple2 a b));
+                     -> (comparison (PyonTuple2 a b));
 constant Eq_NE_Tuple2 : (a : Pure) -> (b : Pure)
                      -> EqDict a -> EqDict b
-                     -> Action EmpE (comparison (PyonTuple2 a b));
+                     -> (comparison (PyonTuple2 a b));
 constant Ord_GT_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
-                      -> Action EmpE (comparison (PyonTuple2 a b));
+                      -> (comparison (PyonTuple2 a b));
 constant Ord_GE_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
-                      -> Action EmpE (comparison (PyonTuple2 a b));
+                      -> (comparison (PyonTuple2 a b));
 constant Ord_LT_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
-                      -> Action EmpE (comparison (PyonTuple2 a b));
+                      -> (comparison (PyonTuple2 a b));
 constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
-                      -> Action EmpE (comparison (PyonTuple2 a b));
+                      -> (comparison (PyonTuple2 a b));
 
-let Traversable_TRAVERSE_Stream (a : Pure) (s : Stream EmpE a)
-  -> Stream EmpE a =
-  s;
-constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream EmpE a;
+let Traversable_TRAVERSE_Stream (a : Pure) (s : Stream a) -> Stream a = s;
+constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream a;
 
 constant Additive_ZERO_Int : Int;
 constant Additive_ADD_Int : binary Int;
@@ -162,41 +145,32 @@ constant oper_FLOORDIV : binary_any;
 constant oper_BITWISEAND : binary Int;
 constant oper_BITWISEOR : binary Int;
 constant oper_BITWISEXOR : binary Int;
-constant oper_NEGATE : (a : Pure) -> a -> Action EmpE a;
+constant oper_NEGATE : (a : Pure) -> a -> a;
 
-constant oper_CAT_MAP : (eff : Effect)
-                     -> (a : Pure)
+constant oper_CAT_MAP : (a : Pure)
                      -> (b : Pure)
-                     -> (a -> Stream eff b)
-                     -> Stream eff a
-                     -> Stream eff b;
+                     -> Stream a
+                     -> (a -> Stream b)
+                     -> Stream b;
 
-let oper_CAT_MAP_noeffect -> (   (a : Pure)
-                              -> (b : Pure)
-                              -> (a -> Stream EmpE b)
-                              -> Stream EmpE a
-                              -> Stream EmpE b)
- = oper_CAT_MAP EmpE;
+constant oper_GUARD : (a : Pure) -> bool -> Stream a -> Stream a;
 
-constant oper_GUARD : (a : Pure) -> bool -> Stream EmpE a -> Stream EmpE a;
+constant oper_DO : (a : Pure) -> a -> Stream a;
 
-constant oper_DO : (a : Pure) -> a -> Stream EmpE a;
-
-constant fun_makelist : (t : Pure -> Pure) -> (a : Pure)
-                     -> TraversableDict t
-                     -> Action EmpE (t a -> Action EmpE (list a));
+constant fun_makelist : (a : Pure)
+                     -> (Stream a -> list a);
 
 constant fun_map : (t : Pure -> Pure) -> (a : Pure) -> (b : Pure)
                 -> TraversableDict t
-                -> Action EmpE ((a -> Action EmpE b) -> t a -> Action EmpE (t b));
+                -> ((a -> b) -> t a -> t b);
 
 constant fun_reduce : (t : Pure -> Pure) -> (a : Pure)
                    -> TraversableDict t
-                   -> Action EmpE ((a -> a -> Action EmpE a) -> a -> t a -> Action EmpE a);
+                   -> ((a -> a -> a) -> a -> t a -> a);
 
 constant fun_reduce1 : (t : Pure -> Pure) -> (a : Pure)
                     -> TraversableDict t
-                    -> Action EmpE ((a -> a -> Action EmpE a) -> t a -> Action EmpE a);
+                    -> ((a -> a -> a) -> t a -> a);
 
 constant fun_zip : (s : Pure -> Pure)
                 -> (t : Pure -> Pure)
@@ -204,36 +178,9 @@ constant fun_zip : (s : Pure -> Pure)
                 -> (b : Pure)
                 -> TraversableDict s
                 -> TraversableDict t
-                -> Action EmpE (s a -> t b -> Stream EmpE (PyonTuple2 a b));
+                -> (s a -> t b -> Stream (PyonTuple2 a b));
 
-constant fun_iota : Stream EmpE Int;
+constant fun_iota : Stream Int;
 
 constant fun_undefined : (a : Pure) -> a;
 
--- List traversal with side effects
-constant loadListElement : (a : Pure)
-                        -> (base : Addr)
-                        -> Ptr base
-                        -> (index : Int)
-                        -> Action (Stored a :@: subscript base index) a;
-
--- Stream that loops over an index range
-constant generate : (eff : Effect)
-                 -> (a : Pure)
-                 -> (bound : Int)
-                 -> ((i : Int) -> Stream eff a)
-                 -> Stream eff a;
-
-constant unpackList :
-    (a : Pure)                          -- List element type
- -> (r : Pure)                          -- Return type
- -> (inv : Effect)                      -- Invariant effect type
- -> (base : Addr)                       -- List base address
- -> Ptr base                            -- List pointer
- -> (   (size : Int)
-     -> (data_base : Addr)
-     -> Ptr data_base
-     -> Action (Stored (list a) :@: base :**:
-                listContentsEffect data_base (Stored a) size :**:
-                inv) r)
- -> Action (Stored (list a) :@: base :**: inv) r;

@@ -80,10 +80,10 @@ data Expr =
 type Annotation = Maybe Expr
 
 data IterFor a =
-    IterFor [Parameter] Expr (Comprehension a)
+    IterFor SourcePos [Parameter] Expr (Comprehension a)
 
 data IterIf a =
-    IterIf Expr (Comprehension a)
+    IterIf SourcePos Expr (Comprehension a)
 
 data Comprehension a =
     CompFor (IterFor a)
@@ -105,6 +105,6 @@ data Parameter =
 
 type ForallAnnotation = [(Var, Maybe Expr)] 
 
-data Func = Func Var Locals (Maybe ForallAnnotation) [Parameter] Annotation Suite
+data Func = Func SourcePos Var (Maybe ForallAnnotation) [Parameter] Annotation Suite
 
 data Module = Module [[Func]]

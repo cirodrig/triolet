@@ -9,7 +9,7 @@ for sourcefile in \
     Main.hs \
     Parser/Driver.hs \
     Pyon/Exports/Gluon.hs \
-    Pyon/Exports/SystemF.hs
+    Pyon/Exports/Untyped.hs
   do
     # The file must be found in one of these paths.
     for basepath in src/program build/program

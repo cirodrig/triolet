@@ -527,15 +527,15 @@ instance Exportable Expr where
       call3Ex (readEnv py_LambdaExpr) pos ps e
     
 instance Exportable (IterFor Expr) where
-    toPythonEx (IterFor [param] e comp) =
-        call3Ex (readEnv py_ForIter) param e comp
+    toPythonEx (IterFor pos [param] e comp) =
+        call4Ex (readEnv py_ForIter) pos param e comp
 
-    toPythonEx (IterFor _ e comp) =
+    toPythonEx (IterFor pos _ e comp) =
         error "Cannot translate 'for' generator to Python"
 
 instance Exportable (IterIf Expr) where
-    toPythonEx (IterIf e comp) =
-        call2Ex (readEnv py_IfIter) e comp
+    toPythonEx (IterIf pos e comp) =
+        call3Ex (readEnv py_IfIter) pos e comp
 
 instance Exportable (Comprehension Expr) where
     toPythonEx (CompFor iter) = toPythonEx iter
@@ -543,8 +543,8 @@ instance Exportable (Comprehension Expr) where
     toPythonEx (CompBody x)   = call1Ex (readEnv py_DoIter) x
 
 instance Exportable Func where
-    toPythonEx (Func name locals qvars params ann body) =
-        call6Ex (readEnv py_Function) name qvars params ann body locals
+    toPythonEx (Func pos name qvars params ann body) =
+        call6Ex (readEnv py_Function) pos name qvars params ann body
 
 instance Exportable Module where
     toPythonEx (Module groups) = call1Ex (readEnv py_Module) groups

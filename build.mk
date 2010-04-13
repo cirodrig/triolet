@@ -48,6 +48,9 @@ src/pyon/data_dir.py :
 
 # Compile a Haskell source file, found either in the source directory or in the
 # build directory.
+# Parameters:
+#  $(1): File path rooted at the source directory
+#  $(2): Haskell compiler options, either $(HS_C_OPTS) or $(HS_TH_C_OPTS)
 define COMPILE_HS_SOURCE
 ifeq ($(shell test -f $(SRCDIR)/$(1) && echo yes),yes)
 $(BUILDDIR)/$(1:.hs=.o) : $(SRCDIR)/$(1)
@@ -61,7 +64,7 @@ $(BUILDDIR)/$(1:.hs=.o) :
 endif
 endif
 	mkdir -p $(BUILDDIR)/$(dir $(1))
-	$(HC) -c $$< $(HS_C_OPTS)
+	$(HC) -c $$< $(2)
 	touch $(BUILDDIR)/$(patsubst %.hs,%.hi,$(1))
 
 endef
@@ -70,7 +73,7 @@ endef
 define COMPILE_HS_BOOT_SOURCE
 $(BUILDDIR)/$(1:.hs-boot=.o-boot) :
 	mkdir -p $(BUILDDIR)/$(dir $(1))
-	$(HC) -c $$< $(HS_C_OPTS)
+	$(HC) -c $(SRCDIR)/$(1) $(HS_C_OPTS)
 
 endef
 
@@ -102,7 +105,8 @@ endef
 
 # Compile all Haskell files
 $(foreach hssrc, $(PYON_HS_BOOT_SRCS),$(eval $(call COMPILE_HS_BOOT_SOURCE,$(hssrc))))
-$(foreach hssrc, $(PYON_HS_SRCS) $(PYON_HS_GENERATED_SRCS),$(eval $(call COMPILE_HS_SOURCE,$(hssrc))))
+$(foreach hssrc, $(PYON_HS_SRCS) $(PYON_HS_GENERATED_SRCS),$(eval $(call COMPILE_HS_SOURCE,$(hssrc),$(HS_C_OPTS))))
+$(foreach hssrc, $(PYON_TH_HS_SRCS),$(eval $(call COMPILE_HS_SOURCE,$(hssrc),$(HS_TH_C_OPTS))))
 
 # Compile all C files
 $(foreach csrc, $(PYON_C_SRCS),$(eval $(call COMPILE_C_SOURCE,$(csrc))))

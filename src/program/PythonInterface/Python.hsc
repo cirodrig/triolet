@@ -57,6 +57,8 @@ module PythonInterface.Python
         pyNone, isPyNone,
         stringToPython, fromPythonString, AsString(..),
         fromPythonInt,
+        fromPythonFloat,
+        fromPythonBool,
         
         -- ** Lists
         newList, isList, getListSize, setListItem, getListItem,
@@ -345,11 +347,21 @@ instance Python Integer where
 foreign import ccall "Python.h PyFloat_FromDouble"
     pyFloat_FromDouble :: CDouble -> IO PyPtr
 
+foreign import ccall "Python.h PyFloat_AsDouble"
+  pyFloat_AsDouble :: PyPtr -> IO CDouble
+
+foreign import ccall "Python.h PyNumber_Float"
+  pyNumber_Float :: PyPtr -> IO PyPtr
+
 instance Python Float where
     toPython d = pyFloat_FromDouble $ fromRational $ toRational d
 
 instance Python Double where
     toPython d = pyFloat_FromDouble $ fromRational $ toRational d
+
+fromPythonFloat d = do
+  withPyPtr (checkNull $ pyNumber_Float d) $
+    return . realToFrac <=< pyFloat_AsDouble
 
 foreign import ccall "Python.h &_Py_ZeroStruct"
     py_False :: PyPtr
@@ -361,6 +373,11 @@ instance Python Bool where
     toPython b = do let bool = if b then py_True else py_False
                     py_IncRef bool
                     return bool
+
+fromPythonBool b
+  | b == py_False = return False
+  | b == py_True = return True
+  | otherwise = throwPythonExc pyTypeError "Expecting a bool"
 
 instance Python AsString where
     toPython (AsString s) = stringToPython s

@@ -32,10 +32,10 @@ flatten mod = do
     Right (Module new_defs) -> do
       (_, converted_defs) <-
         withTheVarIdentSupply $ \varIDs ->
-        case runEval varIDs $ runFloatBinds $ don'tFloat $ flattenDefGroup new_defs
+        case runEval varIDs $ runFloatBinds $ mapM (don'tFloat . flattenDefGroup) new_defs
         of Just x -> return x
            Nothing -> internalError "Flattening failed"
-      return $ Right (NewCore.Module converted_defs)
+      return $ Right (NewCore.Module $ concat converted_defs)
   where
     makeNewModule new_defs = return $ NewCore.Module new_defs
 
@@ -315,7 +315,7 @@ flattenExp' expression expression_type =
        defs' <- flattenDefGroup defs
        body' <- asStatement body
        returnStatement $ NewCore.LetrecS inf defs' body'
-     DictE { expInfo = inf
+{-     DictE { expInfo = inf
            , expClass = cls
            , expType = NewCoreType ty
            , expSuperclasses = scs
@@ -325,7 +325,7 @@ flattenExp' expression expression_type =
        methods <- mapM asValue ms
        -- Arguments are the class type, superclasses, and methods
        let args = NewCore.GluonV inf ty : superclasses ++ methods
-       returnValue $ NewCore.AppV inf (NewCore.mkConV pos cls_con) args
+       returnValue $ NewCore.AppV inf (NewCore.mkConV pos cls_con) args -}
      MethodSelectE { expInfo = inf
                    , expClass = cls
                    , expType = NewCoreType ty
@@ -352,7 +352,7 @@ flattenExp' expression expression_type =
     pos = getSourcePos expression
     
     -- Return True for Stream constructors, False for Action constructors
-    is_statement t = do
+    is_statement t = return False {-do
       t' <- evalHead t
       case fromWhnf t' of
         Gluon.FunE {Gluon.expRange = t2} -> is_statement t2
@@ -363,7 +363,7 @@ flattenExp' expression expression_type =
               | con `isPyonBuiltin` the_Action -> return True
               | con `isPyonBuiltin` the_Stream -> return False
             _ -> internalError "Not a valid function type"
-        _ -> internalError "Not a valid function type"
+        _ -> internalError "Not a valid function type" -}
     
     returnValue v = return (expression_type, NewCoreVal v)
     returnStatement s = return (expression_type, NewCoreStm s)
@@ -453,10 +453,12 @@ flattenFun fun = do
   let effect = Gluon.Builtins.Effect.empty
       
   -- Create either an action function or a stream function
+  internalError "Not implemented: function flattening"
+  {-
   if funMonad fun `isPyonBuiltin` the_Action
     then do body <- asStatement $ funBody fun
             return $ Left $ NewCore.Fun params rt effect body
     else do body <- don'tFloat $ asValue $ funBody fun
-            return $ Right $ NewCore.Fun params rt effect body
+            return $ Right $ NewCore.Fun params rt effect body -}
 
   

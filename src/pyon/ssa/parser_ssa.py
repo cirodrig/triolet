@@ -420,7 +420,9 @@ def _doFunction(f):
     # variable definitions inside the function 
     _joinNodeStack.append(JoinNode())
     for p in f.parameters: _makeSSA(p)
-    _regularizeControl(f.body, ast.ReturnStmt(None, ast.LiteralExpr(None, None)))
+    _regularizeControl(f.body,
+                       ast.ReturnStmt(f.sourcePos,
+                                      ast.LiteralExpr(f.sourcePos, None)))
     _doStmtList(fn_ctx, f.body)
     _joinNodeStack.pop()
 

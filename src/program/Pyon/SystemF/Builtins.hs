@@ -1,10 +1,11 @@
 
+{-# LANGUAGE TemplateHaskell #-}
 module Pyon.SystemF.Builtins
        (EqDictMembers(..), OrdDictMembers(..), TraversableDictMembers(..),
         AdditiveDictMembers(..),
-        loadPyonBuiltins, pyonBuiltin, isPyonBuiltin,
-        the_Action, the_Stream, the_Stored,
-        the_listElementEffect, the_listContentsEffect,
+        loadPyonBuiltins, arePyonBuiltinsInitialized,
+        pyonBuiltin, isPyonBuiltin,
+        the_Stream,
         the_bool, 
         the_list,
         the_NoneType, 
@@ -29,7 +30,6 @@ module Pyon.SystemF.Builtins
         the_oper_BITWISEXOR,
         the_oper_NEGATE,
         the_oper_CAT_MAP,
-        the_oper_CAT_MAP_noeffect,
         the_oper_GUARD,
         the_oper_DO,
         the_fun_makelist,
@@ -39,8 +39,6 @@ module Pyon.SystemF.Builtins
         the_fun_zip,
         the_fun_iota,
         the_fun_undefined,
-        the_loadListElement,
-        the_generate,
         getPyonTupleType, getPyonTupleType',
         getPyonTupleCon, getPyonTupleCon'
        )
@@ -50,9 +48,11 @@ import Control.Exception
 import Control.Monad
 import Control.Concurrent.MVar
 import Data.List
+import Language.Haskell.TH(stringE)
 import System.FilePath
 import System.IO.Unsafe
 
+import Gluon.Common.THRecord
 import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Label
@@ -62,161 +62,13 @@ import Gluon.Parser.Setup
 import Gluon.Parser.Driver
 import Paths_pyon
 
-data EqDictMembers =
-  EqDictMembers
-  { eqMember :: !Con
-  , neMember :: !Con
-  }
+import Pyon.SystemF.BuiltinsTH
 
-data OrdDictMembers =
-  OrdDictMembers
-  { ltMember :: !Con
-  , leMember :: !Con
-  , gtMember :: !Con
-  , geMember :: !Con
-  }
+$(do d <- declareRecord pyonBuiltinsSpecification
+     return [d])
 
-data TraversableDictMembers =
-  TraversableDictMembers
-  { traverseMember :: !Con
-  }
-
-data AdditiveDictMembers =
-  AdditiveDictMembers
-  { zeroMember :: !Con
-  , addMember :: !Con
-  , subMember :: !Con
-  }
-
-data VectorDictMembers =
-  VectorDictMembers
-  { scaleMember :: !Con
-  , normMember :: !Con
-  }
-
-data PyonBuiltins =
-  PyonBuiltins
-  { the_Action :: Con
-  , the_Stream :: Con
-  , the_Stored :: Con
-  , the_listElementEffect :: Con
-  , the_listContentsEffect :: Con
-  , the_bool   :: Con
-  , the_list   :: Con
-  , the_NoneType :: Con
-  , the_Any :: Con
-  , the_EqDict :: Con
-  , the_OrdDict :: Con
-  , the_TraversableDict :: Con
-  , the_AdditiveDict :: Con
-  , the_VectorDict :: Con
-    
-    -- Class dictionary members
-  , the_EqDict_Int :: EqDictMembers
-  , the_OrdDict_Int :: OrdDictMembers
-  , the_EqDict_Float :: EqDictMembers
-  , the_OrdDict_Float :: OrdDictMembers
-  , the_EqDict_Tuple2 :: EqDictMembers
-  , the_OrdDict_Tuple2 :: OrdDictMembers
-  , the_TraversableDict_Stream :: TraversableDictMembers
-  , the_TraversableDict_list :: TraversableDictMembers
-  , the_AdditiveDict_Int :: AdditiveDictMembers
-  , the_AdditiveDict_Float :: AdditiveDictMembers
-  
-    -- Tuple type constructors
-  , the_tuples :: [Con]
-    -- Tuple constructors
-  , the_tupleConstructors :: [Con]
-    
-    -- Data constructors
-  , the_None :: Con
-  , the_True :: Con
-  , the_False :: Con
-  , the_eqDict :: Con
-  , the_ordDict :: Con
-  , the_traversableDict :: Con
-  , the_additiveDict :: Con
-  , the_vectorDict :: Con
-    
-    -- Functions
-  , the_oper_MUL :: Con
-  , the_oper_DIV :: Con
-  , the_oper_MOD :: Con
-  , the_oper_POWER :: Con
-  , the_oper_FLOORDIV :: Con
-  , the_oper_BITWISEAND :: Con
-  , the_oper_BITWISEOR :: Con
-  , the_oper_BITWISEXOR :: Con
-  , the_oper_NEGATE :: Con
-  , the_oper_CAT_MAP :: Con
-  , the_oper_CAT_MAP_noeffect :: Con
-  , the_oper_GUARD :: Con
-  , the_oper_DO :: Con
-  , the_fun_makelist :: Con
-  , the_fun_map :: Con
-  , the_fun_reduce :: Con
-  , the_fun_reduce1 :: Con
-  , the_fun_zip :: Con
-  , the_fun_iota :: Con
-  , the_fun_undefined :: Con
-  , the_loadListElement :: Con
-  , the_generate :: Con
-  }
-
-assign_Action x b = b {the_Action = x}
-assign_Stream x b = b {the_Stream = x}
-assign_Stored x b = b {the_Stored = x}
-assign_listElementEffect x b = b {the_listElementEffect = x}
-assign_listContentsEffect x b = b {the_listContentsEffect = x}
-assign_bool x b = b {the_bool = x}
-assign_list x b = b {the_list = x}
-assign_NoneType x b = b {the_NoneType = x}
-assign_Any x b = b {the_Any = x}
-assign_EqDict x b = b {the_EqDict = x}
-assign_OrdDict x b = b {the_OrdDict = x}
-assign_TraversableDict x b = b {the_TraversableDict = x}
-assign_AdditiveDict x b = b {the_AdditiveDict = x}
-assign_VectorDict x b = b {the_VectorDict = x}
-assign_EqDict_Int x b = b {the_EqDict_Int = x}
-assign_OrdDict_Int x b = b {the_OrdDict_Int = x}
-assign_EqDict_Float x b = b {the_EqDict_Float = x}
-assign_OrdDict_Float x b = b {the_OrdDict_Float = x}
-assign_EqDict_Tuple2 x b = b {the_EqDict_Tuple2 = x}
-assign_OrdDict_Tuple2 x b = b {the_OrdDict_Tuple2 = x}
-assign_TraversableDict_Stream x b = b {the_TraversableDict_Stream = x}
-assign_TraversableDict_list x b = b {the_TraversableDict_list = x}
-assign_AdditiveDict_Int x b = b {the_AdditiveDict_Int = x}  
-assign_AdditiveDict_Float x b = b {the_AdditiveDict_Float = x}
-assign_None x b = b {the_None = x}
-assign_True x b = b {the_True = x}
-assign_False x b = b {the_False = x}
-assign_eqDict x b = b {the_eqDict = x}
-assign_ordDict x b = b {the_ordDict = x}
-assign_traversableDict x b = b {the_traversableDict = x}
-assign_additiveDict x b = b {the_additiveDict = x}
-assign_vectorDict x b = b {the_vectorDict = x}
-assign_oper_MUL x b = b {the_oper_MUL = x}
-assign_oper_DIV x b = b {the_oper_DIV = x}
-assign_oper_MOD x b = b {the_oper_MOD = x}
-assign_oper_POWER x b = b {the_oper_POWER = x}
-assign_oper_FLOORDIV x b = b {the_oper_FLOORDIV = x}
-assign_oper_BITWISEAND x b = b {the_oper_BITWISEAND = x}
-assign_oper_BITWISEOR x b = b {the_oper_BITWISEOR = x}
-assign_oper_BITWISEXOR x b = b {the_oper_BITWISEXOR = x}
-assign_oper_NEGATE x b = b {the_oper_NEGATE = x}
-assign_oper_CAT_MAP x b = b {the_oper_CAT_MAP = x}
-assign_oper_CAT_MAP_noeffect x b = b {the_oper_CAT_MAP_noeffect = x}
-assign_oper_GUARD x b = b {the_oper_GUARD = x}
-assign_oper_DO x b = b {the_oper_DO = x}
-assign_fun_makelist x b = b {the_fun_makelist = x}
-assign_fun_map x b = b {the_fun_map = x}
-assign_fun_reduce x b = b {the_fun_reduce = x}
-assign_fun_reduce1 x b = b {the_fun_reduce1 = x}
-assign_fun_zip x b = b {the_fun_zip = x}
-assign_fun_iota x b = b {the_fun_iota = x}
-assign_fun_undefined x b = b {the_fun_undefined = x}
-assign_loadListElement x b = b {the_loadListElement = x}
-assign_generate x b = b {the_generate = x}
+$(do declareFieldReaders pyonBuiltinsSpecification "the")
+$(do declareFieldWriters pyonBuiltinsSpecification "setThe")
 
 the_PyonBuiltins :: MVar PyonBuiltins
 {-# NOINLINE the_PyonBuiltins #-}
@@ -271,197 +123,92 @@ getPyonTupleCon' n = case getPyonTupleCon n
                         Nothing -> internalError "Unsupported tuple size"
 
 findConByName mod name =
-  let label = pgmLabel (moduleName "PyonBuiltin") name
+  let label = pgmLabel (moduleName "SFBuiltin") name
   in case find ((label ==) . conName) $ getConstructors mod
      of Just c  -> c
         Nothing -> internalError $ "Missing Pyon builtin '" ++ name ++ "'"
   where
     getConstructors mod = concat [c : conCtors c | c <- moduleConstructors mod]
 
--- Look up a constructor in a module, and store it.
-setBuiltinValue :: Module ()
-                -> String 
-                -> (Con -> PyonBuiltins -> PyonBuiltins) 
-                -> PyonBuiltins
-                -> PyonBuiltins
-setBuiltinValue mod name updater bi =
-  let c = findConByName mod name
-  in c `seq` updater c bi
-
-setBuiltinEqDict mod eq_name ne_name updater bi =
-  let c_eq = findConByName mod eq_name
-      c_ne = findConByName mod ne_name
-      dict = EqDictMembers c_eq c_ne
-  in dict `seq` updater dict bi
-
-setBuiltinOrdDict mod lt_name le_name gt_name ge_name updater bi =
-  let c_lt = findConByName mod lt_name
-      c_le = findConByName mod le_name
-      c_gt = findConByName mod gt_name
-      c_ge = findConByName mod ge_name
-      dict = OrdDictMembers c_lt c_le c_gt c_ge
-  in dict `seq` updater dict bi
-
-setBuiltinTraversableDict mod traverse_name updater bi =
-  let c = findConByName mod traverse_name
-      dict = TraversableDictMembers c
-  in dict `seq` updater dict bi
-
-setBuiltinAdditiveDict mod zero_name add_name sub_name updater bi =
-  let c_zero = findConByName mod zero_name
-      c_add = findConByName mod add_name
-      c_sub = findConByName mod add_name
-      dict = AdditiveDictMembers c_zero c_add c_sub
-  in dict `seq` updater dict bi
-
 -- Load symbols from the module and use them to initialize the builtins
 initializePyonBuiltins :: Module () -> IO ()
-initializePyonBuiltins mod =
-  let start = PyonBuiltins { the_Action = uninitialized
-                           , the_Stream = uninitialized
-                           , the_Stored = uninitialized
-                           , the_listElementEffect = uninitialized
-                           , the_listContentsEffect = uninitialized
-                           , the_bool = uninitialized
-                           , the_list = uninitialized
-                           , the_NoneType = uninitialized
-                           , the_Any = uninitialized
-                           , the_EqDict = uninitialized
-                           , the_OrdDict = uninitialized
-                           , the_TraversableDict = uninitialized
-                           , the_AdditiveDict = uninitialized
-                           , the_VectorDict = uninitialized
-                           , the_EqDict_Int = uninitialized
-                           , the_OrdDict_Int = uninitialized
-                           , the_EqDict_Float = uninitialized
-                           , the_OrdDict_Float = uninitialized
-                           , the_EqDict_Tuple2 = uninitialized
-                           , the_OrdDict_Tuple2 = uninitialized
-                           , the_TraversableDict_Stream = uninitialized
-                           , the_TraversableDict_list = uninitialized
-                           , the_AdditiveDict_Int = uninitialized
-                           , the_AdditiveDict_Float = uninitialized
-                           , the_tuples = uninitialized
-                           , the_tupleConstructors = uninitialized
-                           , the_None = uninitialized
-                           , the_True = uninitialized
-                           , the_False = uninitialized
-                           , the_eqDict = uninitialized
-                           , the_ordDict = uninitialized
-                           , the_traversableDict = uninitialized
-                           , the_additiveDict = uninitialized
-                           , the_vectorDict = uninitialized
-                           , the_oper_MUL = uninitialized
-                           , the_oper_DIV = uninitialized
-                           , the_oper_MOD = uninitialized
-                           , the_oper_POWER = uninitialized
-                           , the_oper_FLOORDIV = uninitialized
-                           , the_oper_BITWISEAND = uninitialized
-                           , the_oper_BITWISEOR = uninitialized
-                           , the_oper_BITWISEXOR = uninitialized
-                           , the_oper_NEGATE = uninitialized
-                           , the_oper_CAT_MAP = uninitialized
-                           , the_oper_CAT_MAP_noeffect = uninitialized
-                           , the_oper_GUARD = uninitialized
-                           , the_oper_DO = uninitialized
-                           , the_fun_makelist = uninitialized
-                           , the_fun_map = uninitialized
-                           , the_fun_reduce = uninitialized
-                           , the_fun_reduce1 = uninitialized
-                           , the_fun_zip = uninitialized
-                           , the_fun_iota = uninitialized
-                           , the_fun_undefined = uninitialized
-                           , the_loadListElement = uninitialized
-                           , the_generate = uninitialized
-                           }
-      setGlobalCons =
-        setBuiltinValues [ ("Action", assign_Action)
-                         , ("Stream", assign_Stream)
-                         , ("Stored", assign_Stored)
-                         , ("listElementEffect", assign_listElementEffect)
-                         , ("listContentsEffect", assign_listContentsEffect)
-                         , ("bool", assign_bool)
-                         , ("list", assign_list)
-                         , ("NoneType", assign_NoneType)
-                         , ("Any", assign_Any)
-                         , ("EqDict", assign_EqDict)
-                         , ("OrdDict", assign_OrdDict)
-                         , ("TraversableDict", assign_TraversableDict)
-                         , ("AdditiveDict", assign_AdditiveDict)
-                         , ("VectorDict", assign_VectorDict)
-                         , ("None", assign_None)
-                         , ("True", assign_True)
-                         , ("False", assign_False)
-                         , ("eqDict", assign_eqDict)
-                         , ("ordDict", assign_ordDict)
-                         , ("traversableDict", assign_traversableDict)
-                         , ("additiveDict", assign_additiveDict)
-                         , ("vectorDict", assign_vectorDict)
-                         , ("oper_MUL", assign_oper_MUL)
-                         , ("oper_DIV", assign_oper_DIV)
-                         , ("oper_MOD", assign_oper_MOD)
-                         , ("oper_POWER", assign_oper_POWER)
-                         , ("oper_FLOORDIV", assign_oper_FLOORDIV)
-                         , ("oper_BITWISEAND", assign_oper_BITWISEAND)
-                         , ("oper_BITWISEOR", assign_oper_BITWISEOR)
-                         , ("oper_BITWISEXOR", assign_oper_BITWISEXOR)
-                         , ("oper_NEGATE", assign_oper_NEGATE)
-                         , ("oper_CAT_MAP", assign_oper_CAT_MAP)
-                         , ("oper_CAT_MAP_noeffect", assign_oper_CAT_MAP_noeffect)
-                         , ("oper_GUARD", assign_oper_GUARD)
-                         , ("oper_DO", assign_oper_DO)
-                         , ("fun_makelist", assign_fun_makelist)
-                         , ("fun_map", assign_fun_map)
-                         , ("fun_reduce", assign_fun_reduce)
-                         , ("fun_reduce1", assign_fun_reduce1)
-                         , ("fun_zip", assign_fun_zip)
-                         , ("fun_iota", assign_fun_iota)
-                         , ("fun_undefined", assign_fun_undefined)
-                         , ("loadListElement", assign_loadListElement)
-                         , ("generate", assign_generate)
-                         ]
-      setClassDicts =
-        setEqDict "Eq_EQ_Int" "Eq_NE_Int" assign_EqDict_Int .
-        setOrdDict "Ord_LT_Int" "Ord_LE_Int" 
-                   "Ord_GT_Int" "Ord_GE_Int" assign_OrdDict_Int .
-        setEqDict "Eq_EQ_Float" "Eq_NE_Float" assign_EqDict_Float .
-        setOrdDict "Ord_LT_Float" "Ord_LE_Float" 
-                   "Ord_GT_Float" "Ord_GE_Float" assign_OrdDict_Float .
-        setEqDict "Eq_EQ_Tuple2" "Eq_NE_Tuple2" assign_EqDict_Tuple2 .
-        setOrdDict "Ord_LT_Tuple2" "Ord_LE_Tuple2"
-                   "Ord_GT_Tuple2" "Ord_GE_Tuple2" assign_OrdDict_Tuple2 .
-        setTraversableDict "Traversable_TRAVERSE_Stream" 
-                           assign_TraversableDict_Stream .
-        setTraversableDict "Traversable_TRAVERSE_list"
-                           assign_TraversableDict_list .
-        setAdditiveDict "Additive_ZERO_Int" "Additive_ADD_Int" 
-                        "Additive_SUB_Int" assign_AdditiveDict_Int .
-        setAdditiveDict "Additive_ZERO_Float" "Additive_ADD_Float" 
-                        "Additive_SUB_Float" assign_AdditiveDict_Float
-  in do bi <- evaluate $ setTupleFields $ setGlobalCons $ setClassDicts start
-        putMVar the_PyonBuiltins bi
-  where
-    uninitialized = internalError $ "Uninitialized Pyon builtin accessed"
-    
-    setBuiltinValues xs bi =
-      foldl' (\bi (name, ref) -> setBuiltinValue mod name ref bi) bi xs
-    
-    setEqDict = setBuiltinEqDict mod
-    setOrdDict = setBuiltinOrdDict mod
-    setTraversableDict = setBuiltinTraversableDict mod
-    setAdditiveDict = setBuiltinAdditiveDict mod
-    
-    setTupleFields bi =
-      let -- Tuple type constructors
-          tupleTypeNames = ["PyonTuple" ++ show n | n <- [0..5]]
-          tupleTypes = map (findConByName mod) tupleTypeNames
+initializePyonBuiltins mod = do
+  -- Must not have been initialized yet
+  is_empty <- isEmptyMVar the_PyonBuiltins
+  unless is_empty $ fail "Cannot re-initialize pyon builtins"
+  
+  -- Load and create builtins
+  bi <-
+    $(let -- Initialize each constructor field
+        assign_ctor_field fname name =
+          (fname, [| evaluate $ findConByName mod name |])
+        constructors = zipWith assign_ctor_field
+                       pyonBuiltinConstructorNames pyonBuiltinConstructors
+        
+        -- Initialize tuple fields; force evaluation when initializing
+        assign_tuples =
+          [| let tupleNames = ["pyonTuple" ++ show n | n <- [0..5]]
+                 tupleConstructors = map (findConByName mod) tupleNames
+                 force x = foldl' (flip seq) x tupleConstructors
+             in force $ return tupleConstructors |]
+        assign_tuple_types =
+          [| let tupleTypeNames = ["PyonTuple" ++ show n | n <- [0..5]]
+                 tupleTypes = map (findConByName mod) tupleTypeNames
+                 force x = foldl' (flip seq) x tupleTypes
+             in force $ return tupleTypes |]
+
+        -- Initialize class dictionaries
+        findNameWithPrefix name pfx =
+          [| findConByName mod $(stringE $ pfx ++ name) |]
+        eq_dict name =
+          ("_EqDict_" ++ name, 
+           [| let c_eq = $(findNameWithPrefix name "Eq_EQ_")
+                  c_ne = $(findNameWithPrefix name "Eq_NE_")
+              in evaluate $ EqDictMembers c_eq c_ne |])
+        ord_dict name =
+          ("_OrdDict_" ++ name,
+           [| let c_gt = $(findNameWithPrefix name "Ord_GT_")
+                  c_ge = $(findNameWithPrefix name "Ord_GE_")
+                  c_lt = $(findNameWithPrefix name "Ord_LT_")
+                  c_le = $(findNameWithPrefix name "Ord_LE_")
+              in evaluate $ OrdDictMembers c_lt c_le c_gt c_ge |])
           
-          -- Tuple constructors
-          tupleNames = ["pyonTuple" ++ show n | n <- [0..5]]
-          tupleConstructors = map (findConByName mod) tupleNames
-          bi' = bi { the_tuples = tupleTypes
-                   , the_tupleConstructors = tupleConstructors}
-      in foldl' (flip seq) bi' tupleTypes
+        traversable_dict name =
+          ("_TraversableDict_" ++ name,
+           [| let c = $(findNameWithPrefix name "Traversable_TRAVERSE_")
+              in evaluate $ TraversableDictMembers c |])
+
+        additive_dict name =
+          ("_AdditiveDict_" ++ name,
+           [| let c_zero = $(findNameWithPrefix name "Additive_ZERO_")
+                  c_add = $(findNameWithPrefix name "Additive_ADD_")
+                  c_sub = $(findNameWithPrefix name "Additive_SUB_")
+              in evaluate $ AdditiveDictMembers c_zero c_add c_sub |])
+
+        -- All field initializers
+        initializers =
+          constructors ++
+          [ ("_tuples", assign_tuple_types)
+          , ("_tupleConstructors", assign_tuples)
+          , eq_dict "Int"
+          , eq_dict "Float"
+          , eq_dict "Tuple2"
+          , ord_dict "Int"
+          , ord_dict "Float"
+          , ord_dict "Tuple2"
+          , traversable_dict "Stream"
+          , traversable_dict "list"
+          , additive_dict "Int"
+          , additive_dict "Float"
+          ]
+      in initializeRecordM pyonBuiltinsSpecification initializers)
+    
+  -- Store builtins in a global variable
+  putMVar the_PyonBuiltins bi
+
+arePyonBuiltinsInitialized :: IO Bool
+arePyonBuiltinsInitialized =
+  liftM not $ isEmptyMVar the_PyonBuiltins
 
 loadPyonBuiltins :: IdentSupply Var
                  -> IdentSupply Con
@@ -469,7 +216,7 @@ loadPyonBuiltins :: IdentSupply Var
                  -> IO (Maybe (Module ()))
 loadPyonBuiltins varIDs conIDs builtins = do
   let setup = contextParserSetup varIDs conIDs [builtins]
-  fileName <- getDataFileName ("library"</>"PyonBuiltin.glu")
+  fileName <- getDataFileName ("library"</>"SFBuiltin.glu")
   m <- loadSourceFile setup fileName
   case m of
     Just cu -> do initializePyonBuiltins cu

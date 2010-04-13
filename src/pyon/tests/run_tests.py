@@ -5,12 +5,10 @@ import sys
 import traceback
 
 import pyon.parser
-import pyon.ast.print_ast as print_ast
 from pyon.data_dir import *
 import pyon.ssa.parser_ssa as ssa
-import pyon.anf_conversion as anf_conversion
-import pyon.type_inference as type_inference
-import system_f
+import pyon.functional_conversion as functional_conversion
+import untyped
 
 # Find path to source files
 testDir = os.path.join(DATA_DIR, 'testcases')
@@ -21,20 +19,28 @@ def tryCompile(fname, show_traceback = False):
         # Run everything up to and including ANF conversion
         test_ast = pyon.parser.parse(fname)
         ssa.convertSSA(test_ast)
-        test_anf = anf_conversion.convertModule(test_ast)
-	del test_ast
+        # test_anf = anf_conversion.convertModule(test_ast)
+	# del test_ast
+
+        # Export the module
+        test_untyped = functional_conversion.convertModule(test_ast)
+        del test_ast
+        # test_untyped = pyon.ast.export_ast.exportModule(test_anf)
 
         # Type inference
-        test_sf = type_inference.inferTypes(test_anf)
-	del test_anf
+        untyped.printModule(test_untyped)
+        test_inf = untyped.typeInferModule(test_untyped)
+        untyped.printModule(test_inf)
 
-        system_f.typeCheckModule(test_sf)
-	test_sf = system_f.optimizeModule(test_sf)
-        test_flat = system_f.flattenModule(test_sf)
+        # test_sf = type_inference.inferTypes(test_anf)
+
+        untyped.typeCheckModule(test_inf)
+	# test_sf = system_f.optimizeModule(test_sf)
+        # test_flat = system_f.flattenModule(test_sf)
 
         # (DEBUG) print the output
-	system_f.printCoreModule(test_flat)
-	system_f.typeCheckCoreModule(test_flat)
+        # system_f.printCoreModule(test_flat)
+	# system_f.typeCheckCoreModule(test_flat)
         # test_flat = system_f.effectInferCoreModule(test_flat)
 	#system_f.printCoreModule(test_flat)
 

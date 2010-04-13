@@ -5,9 +5,6 @@
 import itertools
 
 import pyon.ast.operators
-import pyon.ast.ast
-import pyon.types.kind as kind
-import pyon.types.hmtype as hmtype
 
 class Variable(object):
     """Abstract base class of variables"""
@@ -54,9 +51,9 @@ class PythonVariable(Variable):
         # At most one of these parameters may be given
         assert len([x for x in [anf_variable, anf_type, anf_kind]
                     if x]) <= 1
-        if anf_variable: assert isinstance(anf_variable, pyon.ast.ast.ANFVariable)
-        if anf_type: assert isinstance(anf_type, hmtype.FirstOrderType)
-        if anf_kind: assert isinstance(anf_kind, kind.Kind)
+        # if anf_variable: assert isinstance(anf_variable, pyon.ast.ast.ANFVariable)
+        # if anf_type: assert isinstance(anf_type, hmtype.FirstOrderType)
+        # if anf_kind: assert isinstance(anf_kind, kind.Kind)
         self.name = name
         self.identifier = identifier
         self.anfVariable = anf_variable
@@ -281,11 +278,13 @@ class Iterator(object):
 class ForIter(Iterator):
     """A 'for' term in an iterator."""
     
-    def __init__(self, param, argument, body, base = IterInit.default):
+    def __init__(self, source_pos,
+                 param, argument, body, base = IterInit.default):
         base.initializeIter(self)
         assert isinstance(param, Parameter)
         assert isinstance(argument, Expression)
         assert isinstance(body, Iterator)
+        self.sourcePos = source_pos
         self.parameter = param
         self.argument = argument
         self.body = body
@@ -293,10 +292,11 @@ class ForIter(Iterator):
 class IfIter(Iterator):
     """An 'if' term in an iterator."""
 
-    def __init__(self, guard, body, base = IterInit.default):
+    def __init__(self, source_pos, guard, body, base = IterInit.default):
         base.initializeIter(self)
         assert isinstance(guard, Expression)
         assert isinstance(body, Iterator)
+        self.sourcePos = source_pos
         self.guard = guard
         self.body = body
 
@@ -306,6 +306,8 @@ class DoIter(Iterator):
     def __init__(self, body, base = IterInit.default):
         base.initializeIter(self)
         assert isinstance(body, Expression)
+        # Same source code position as the body expression
+        self.sourcePos = body.sourcePos
         self.body = body
 
 ###############################################################################
@@ -404,7 +406,7 @@ class Function(object):
     local_scope:
       The function's local variables.  (Not used.)
     """
-    def __init__(self, name, qvars, parameters, annotation, body,
+    def __init__(self, source_pos, name, qvars, parameters, annotation, body,
                  local_scope = None):
         assert isinstance(name, Variable)
         if qvars is not None:
@@ -416,6 +418,7 @@ class Function(object):
         for s in body:
             assert isinstance(s, Statement)
             assert annotation is None or isinstance(annotation, Expression)
+        self.sourcePos = source_pos
         self.name = name
         self.qvars = qvars
         self.parameters = parameters

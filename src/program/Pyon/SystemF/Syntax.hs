@@ -176,6 +176,7 @@ data instance SFExpOf Rec s =
     , expDefs :: [Def s]
     , expBody :: SFRecExp s
     }
+    {-
     -- | Create a class dictionary
   | DictE
     { expInfo :: ExpInfo
@@ -184,6 +185,7 @@ data instance SFExpOf Rec s =
     , expSuperclasses :: [SFRecExp s]
     , expMethods :: [SFRecExp s]
     }
+-}
     -- | Select a class method
   | MethodSelectE
     { expInfo :: ExpInfo
@@ -208,8 +210,6 @@ data Fun s =
   Fun { funTyParams :: [TyPat s] -- ^ Type parameters
       , funParams :: [Pat s]     -- ^ Object parameters
       , funReturnType :: RecType s -- ^ Return type
-      , funMonad :: !Gluon.Con -- ^ Which monad this function inhabits 
-                              -- (Stream or Action)
       , funBody :: SFRecExp s
       }
   deriving(Typeable)
@@ -217,7 +217,7 @@ data Fun s =
 data Def s = Def Var (Fun s)
          deriving(Typeable)
 
-data Module s = Module [Def s]
+data Module s = Module [[Def s]]
             deriving(Typeable)
 
 -- | Return True only if the given expression has no side effects.
@@ -243,6 +243,6 @@ isValueExp expression =
      FunE {} -> True
      LetE {} -> False
      LetrecE {} -> False
-     DictE {expSuperclasses = scs, expMethods = ms} ->
-       all isValueExp scs && all isValueExp ms
+{-     DictE {expSuperclasses = scs, expMethods = ms} ->
+       all isValueExp scs && all isValueExp ms-}
      MethodSelectE {expArg = a} -> isValueExp a

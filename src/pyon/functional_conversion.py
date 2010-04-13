@@ -1,22 +1,10 @@
-"""
-These functions convert the parser-generated program representation to an
-ANF-based one.  The main entry point is @convertModule.
-"""
+"Convert the parser AST data structures to an untyped functional form."
 
+import gluon
+import untyped
 import pyon.ast.operators as operators
 import pyon.ast.parser_ast as p_ast
-import pyon.ast.ast as a_ast
 import pyon.ssa.parser_ssa as ssa
-
-import pyon.builtin_data as builtin_data
-import pyon.types.kind as kind
-import pyon.types.types as hmtype
-import pyon.types.schemes as schemes
-
-def convertModule(module, a_tyvars = {}):
-    "Convert a module to ANF"
-    return a_ast.Module([[convertFunction(f, a_tyvars) for f in dg]
-                         for dg in module.definitions])
 
 def convertAnnotatedKind(annotation):
     "Convert a kind annotation to an actual kind"
@@ -26,7 +14,7 @@ def convertAnnotatedKind(annotation):
     if isinstance(annotation, p_ast.BinaryExpr):
         param_k = convertAnnotatedKind(annotation.left)
         result_k = convertAnnotatedKind(annotation.right)
-        return kind.Arrow(param_k, result_k)
+        return untyped.ArrowK(param_k, result_k)
 
     elif isinstance(annotation, p_ast.VariableExpr):
         if not annotation.variable.anfKind:
@@ -44,7 +32,7 @@ def getAnnotatedFuncType(annotation, a_tyvars):
     param_ty = getAnnotatedFuncParams(annotation.left, a_tyvars)
     ret_ty = convertAnnotation(annotation.right, a_tyvars)
 
-    t = hmtype.functionType(param_ty, ret_ty)
+    t = untyped.functionType(param_ty, ret_ty)
     return t
 
 def getAnnotatedFuncParams(annotation, a_tyvars):
@@ -71,7 +59,7 @@ def getAnnotatedAppType(operator, arguments, a_tyvars):
     "Convert a type application to a type"
     oper_ty = convertAnnotation(operator, a_tyvars)
     arg_tys =[convertAnnotation(a, a_tyvars) for a in arguments]
-    return hmtype.typeApplication(oper_ty, arg_tys)
+    return untyped.typeApplication(oper_ty, arg_tys)
 
 def convertAnnotation(annotation, a_tyvars):
     "Convert type annotation to corresponding type"
@@ -89,8 +77,8 @@ def convertAnnotation(annotation, a_tyvars):
         except: raise RuntimeError, "Not a type"
 
     elif isinstance(annotation, p_ast.TupleExpr):
-        t = hmtype.TupleTy([convertAnnotation(arg, a_tyvars)
-                            for arg in annotation.arguments])
+        t = untyped.tupleType([convertAnnotation(arg, a_tyvars)
+                               for arg in annotation.arguments])
         return t
 
     elif isinstance(annotation, p_ast.BinaryExpr):
@@ -114,13 +102,15 @@ def convertAnnotatedType(p, kind_annotation):
         k = convertAnnotatedKind(kind_annotation)
     else:
         # Default to kind '*'
-        k = kind.Star()
+        k = untyped.Star
 
-    return hmtype.RigidTyVar(p.name, k)
+    return untyped.RigidTyVar(gluon.pgmLabel("pyonfile", p.name), k)
 
-def convertFunction(func, outer_tyvars):
-    "Convert a parser function to an ANF function definition"
+def convertModule(module):
+    return untyped.Module([[convertFunction({}, f) for f in dg]
+                           for dg in module.definitions])
 
+def convertFunction(outer_tyvars, func):
     # Convert to the SSA name
     name = convertVariable(func.name, func.ssaver)
 
@@ -140,7 +130,7 @@ def convertFunction(func, outer_tyvars):
         annotation = None
 
     # Convert parameters
-    parameters = [convertParameter(p, a_tyvars) for p in func.parameters]
+    parameters = [convertParameter(a_tyvars, p) for p in func.parameters]
 
     # Convert body
     def cannot_fallthrough(*args):
@@ -149,9 +139,9 @@ def convertFunction(func, outer_tyvars):
         raise ValueError, "Function body has no fallthrough path"
     body = convertSuite(func.body, cannot_fallthrough, a_tyvars)
 
-    return a_ast.FunctionDef(name, a_ast.exprFunction(parameters, body,
-                                                      annotation = annotation,
-                                                      qvars = new_qvars))
+    return untyped.Def(name,
+                       untyped.Function(func.sourcePos, new_qvars, parameters,
+                                        annotation, body))
 
 def convertSuite(suite, make_fallthrough, a_tyvars):
     """
@@ -170,7 +160,7 @@ def convertSuite(suite, make_fallthrough, a_tyvars):
 
 def convertControlStatement(stmt, make_fallthrough):
     """
-    Convert a control flow statement to an ANF statement.  The continuation
+    Convert a control flow statement to an untyped statement.  The continuation
     is passed as the second parameter.  The continuation is a function that
     takes a set of live-out variables as a parameter and returns an
     expression.
@@ -184,39 +174,42 @@ def convertControlStatement(stmt, make_fallthrough):
 
 def convertStatement(stmt, successor, a_tyvars):
     """
-    Convert a statement to an ANF statement.  The following statement
+    Convert a statement to an untyped expression.  The following statement
     is passed as the second parameter.  The following statement will appear
-    exactly once in the generated ANF code.
+    exactly once in the generated untyped code.
     """
     if isinstance(stmt, p_ast.ExprStmt):
         # let _ = first in next
-        first = convertExpression(stmt.expression)
-        return a_ast.LetExpr(stmt.sourcePos, None,  first, successor)
+        first = convertExpression(a_tyvars, stmt.expression)
+        return untyped.LetE(stmt.sourcePos, untyped.WildP(), first, successor)
 
     elif isinstance(stmt, p_ast.AssignStmt):
         # let x = first in next
-        first = convertExpression(stmt.expression)
-        lhs = convertParameter(stmt.lhs)
-        return a_ast.LetExpr(stmt.sourcePos, lhs, first, successor)
+        first = convertExpression(a_tyvars, stmt.expression)
+        lhs = convertParameter(a_tyvars, stmt.lhs)
+        return untyped.LetE(stmt.sourcePos, lhs, first, successor)
 
     elif isinstance(stmt, p_ast.IfStmt):
         join_node = stmt.joinPoint
 
-        cond = convertExpression(stmt.cond)
+        cond = convertExpression(a_tyvars, stmt.cond)
 
         # If there is no escaping control, generate an if-else expression
         if not join_node.hasret:
             # let (x, y) = (if cond then true_path else false_path) in next
 
             # Create the if-else expression
-            def returnValue(tuple_expr): return tuple_expr
+            def returnValue(live_outs):
+                # Return a tuple of the live-out variables
+                return untyped.TupleE(stmt.sourcePos, live_outs)
+
             true_path = convertSuite(stmt.ifTrue, returnValue, a_tyvars)
             false_path = convertSuite(stmt.ifFalse, returnValue, a_tyvars)
-            if_expr = a_ast.IfExpr(stmt.sourcePos, cond, true_path, false_path)
+            if_expr = untyped.IfE(stmt.sourcePos, cond, true_path, false_path)
 
             # Create the subsequent code
-            param = _consumeValue(join_node)
-            return a_ast.LetExpr(stmt.sourcePos, param, if_expr, successor)
+            param = untyped.TupleP(_consumeValue(join_node))
+            return untyped.LetE(stmt.sourcePos, param, if_expr, successor)
 
         # If there's exactly one fallthrough path, then generate code
         # on each path and inline the continuation
@@ -225,13 +218,18 @@ def convertStatement(stmt, successor, a_tyvars):
 
             # The fallthrough path will be incorporated into any
             # branches of the if expression that fall through
-            def make_join(live_out_expr):
-                param = _consumeValue(join_node)
-                return a_ast.LetExpr(stmt.sourcePos, param, live_out_expr, successor)
+            def make_join(live_outs):
+                # Make a 'let' expression for each variable
+                ret_val = successor
+                for pattern, value in reversed(zip(_consumeValue(join_node),
+                                                   live_outs)):
+                    ret_val = untyped.LetE(stmt.sourcePos,
+                                           pattern, value, ret_val)
+                return ret_val
 
             true_path = convertSuite(stmt.ifTrue, make_join, a_tyvars)
             false_path = convertSuite(stmt.ifFalse, make_join, a_tyvars)
-            return a_ast.IfExpr(stmt.sourcePos, cond, true_path, false_path)
+            return untyped.IfE(stmt.sourcePos, cond, true_path, false_path)
 
         # Otherwise, generate a local function for the continuation
         else:
@@ -239,38 +237,42 @@ def convertStatement(stmt, successor, a_tyvars):
             # in if cond then true_path else false_path
 
             # The name of the continuation function
-            cont_var = a_ast.ANFVariable()
+            cont_var = untyped.Variable(None)
 
             # The live-ins of the continuation.  Unpack the tuple.
-            params = _consumeValue(join_node).fields
+            params = _consumeValue(join_node)
 
             # Define the continuation function
-            cont_fun = a_ast.Function(params, successor)
+            cont_fun = untyped.Function(stmt.sourcePos,
+                                        None, params, None, successor)
 
             # At the end of the if/else branches, call the continuation
             # function
-            def make_join(live_out_expr):
-                return a_ast.CallExpr(stmt.sourcePos, a_ast.VariableExpr(stmt.sourcePos, cont_var),
-                                      live_out_expr.arguments)
+            def make_join(live_outs):
+                return untyped.CallE(stmt.sourcePos,
+                                     untyped.VariableE(stmt.sourcePos,
+                                                       cont_var),
+                                     live_outs)
 
             # Define the if-else expression
             true_path = convertSuite(stmt.ifTrue, make_join, a_tyvars)
             false_path = convertSuite(stmt.ifFalse, make_join, a_tyvars)
-            if_expr = a_ast.IfExpr(stmt.sourcePos, cond, true_path, false_path)
+            if_expr = untyped.IfE(stmt.sourcePos, cond, true_path, false_path)
 
-            return a_ast.LetrecExpr(stmt.sourcePos, [a_ast.FunctionDef(cont_var, cont_fun)],
-                                    if_expr)
+            return untyped.LetrecE(stmt.sourcePos,
+                                   [untyped.Def(cont_var, cont_fun)],
+                                   if_expr)
 
     elif isinstance(stmt, p_ast.DefGroupStmt):
-        defs = [convertFunction(d, a_tyvars) for d in stmt.definitions]
-        return a_ast.LetrecExpr(stmt.sourcePos, defs, successor)
+        defs = [convertFunction(a_tyvars, d) for d in stmt.definitions]
+        return untyped.LetrecE(stmt.sourcePos, defs, successor)
 
     else:
         raise TypeError, type(stmt)
 
 def _produceValue(control_flow_stmt):
     """
-    Create a tuple expression with the values of the live-in variables of
+    Create the values of the live-in variables of
     join_node on the path coming from stmt.
     """
     join_node = control_flow_stmt.joinNode
@@ -280,12 +282,13 @@ def _produceValue(control_flow_stmt):
         Create an expression corresponding to the value of 'variable'.
         """
         version = phi_node.getVersion(variable, control_flow_stmt)
-        return convertVariableRef(control_flow_stmt.sourcePos , variable, version)
+        return convertVariableRef(control_flow_stmt.sourcePos,
+                                  variable, version)
 
     values = [find_var(var, phi_node)
               for var, phi_node in join_node.phiNodes.iteritems()]
 
-    return a_ast.TupleExpr(control_flow_stmt.sourcePos, values)
+    return values
 
 def _produceReturnValue(control_flow_stmt):
     """
@@ -310,89 +313,110 @@ def _produceReturnValue(control_flow_stmt):
 
 def _consumeValue(join_point):
     """
-    Create a parameter expression with the live-in variables of join_node.
+    Create a list of parameter expressions.  Each parameter is one live-in
+    variable of join_node.
     """
-    values = [a_ast.VariableParam(convertVariable(var, phi_node.ssaVersion))
-              for var, phi_node in join_point.phiNodes.iteritems()]
-    return a_ast.TupleParam(values)
+    return [untyped.VariableP(convertVariable(var, phi_node.ssaVersion))
+            for var, phi_node in join_point.phiNodes.iteritems()]
 
-def convertExpression(expr):
-    "Convert a parser expression to an ANF expression"
+def convertExpression(a_tyvars, expr):
+    "Convert a parser expression to an untyped expression"
     if isinstance(expr, p_ast.VariableExpr):
         return convertVariableRef(expr.sourcePos, expr.variable, expr.ssaver)
 
     elif isinstance(expr, p_ast.TupleExpr):
-        return a_ast.TupleExpr(expr.sourcePos, [convertExpression(e) for e in expr.arguments])
+        return untyped.TupleE(expr.sourcePos,
+                              [convertExpression(a_tyvars, e)
+                               for e in expr.arguments])
 
     elif isinstance(expr, p_ast.LiteralExpr):
-        return a_ast.LiteralExpr(expr.sourcePos, expr.literal)
+        l = expr.literal
+        if l is None:
+            return untyped.NoneLiteral(expr.sourcePos)
+        elif isinstance(l, bool):
+            return untyped.BoolLiteral(expr.sourcePos, l)
+        elif isinstance(l, float):
+            return untyped.FloatLiteral(expr.sourcePos, l)
+        elif isinstance(l, int):
+            return untyped.IntLiteral(expr.sourcePos, l)
+        else:
+            raise TypeError, type(l)
 
     elif isinstance(expr, p_ast.UnaryExpr):
-        return _callVariable(expr.sourcePos, convertUnaryOperator(expr.operator),
-                             [convertExpression(expr.argument)])
+        return _callVariable(expr.sourcePos,
+                             convertUnaryOperator(expr.operator),
+                             [convertExpression(a_tyvars, expr.argument)])
 
     elif isinstance(expr, p_ast.BinaryExpr):
-        return _callVariable(expr.sourcePos, convertBinaryOperator(expr.operator),
-                             [convertExpression(expr.left),
-                              convertExpression(expr.right)])
+        return _callVariable(expr.sourcePos,
+                             convertBinaryOperator(expr.operator),
+                             [convertExpression(a_tyvars, expr.left),
+                              convertExpression(a_tyvars, expr.right)])
 
     elif isinstance(expr, p_ast.ListCompExpr):
         # Convert the comprehension [blah for blah in blah] to a
         # function call list(blah for blah in blah)
-        return _callVariable(expr.sourcePos, builtin_data.fun_list,
-                             [convertIterator(expr.iterator)])
+        iter = convertIterator(a_tyvars, expr.iterator)
+        return _callVariable(expr.sourcePos, untyped.fun_makelist, [iter])
 
     elif isinstance(expr, p_ast.GeneratorExpr):
-        return convertIterator(expr.iterator)
+        return convertIterator(a_tyvars, expr.iterator)
 
     elif isinstance(expr, p_ast.CallExpr):
-        return a_ast.CallExpr(expr.sourcePos, convertExpression(expr.operator),
-                              [convertExpression(e) for e in expr.arguments])
+        return untyped.CallE(expr.sourcePos,
+                             convertExpression(a_tyvars, expr.operator),
+                             [convertExpression(a_tyvars, e)
+                              for e in expr.arguments])
 
     elif isinstance(expr, p_ast.CondExpr):
-        return a_ast.IfExpr(expr.sourcePos, convertExpression(expr.argument),
-                            convertExpression(expr.ifTrue),
-                            convertExpression(expr.ifFalse))
+        return untyped.IfE(expr.sourcePos,
+                           convertExpression(a_tyvars, expr.argument),
+                           convertExpression(a_tyvars, expr.ifTrue),
+                           convertExpression(a_tyvars, expr.ifFalse))
 
     elif isinstance(expr, p_ast.LambdaExpr):
-        parameters = [convertParameter(p) for p in expr.parameters]
-        body = convertExpression(expr.body)
-        return a_ast.FunExpr(expr.sourcePos, a_ast.exprFunction(parameters, body))
+        parameters = [convertParameter(a_tyvars, p) for p in expr.parameters]
+        body = convertExpression(a_tyvars, expr.body)
+        return untyped.FunE(expr.sourcePos,
+                            untyped.Function(expr.sourcePos,
+                                             None, parameters, None, body))
 
     else:
         raise TypeError, type(p_ast)
 
-def convertIterator(iter):
-    "Convert an iterator to an ANF iterator"
+def convertIterator(a_tyvars, iter):
+    "Convert an iterator to an untyped iterator expression"
     if isinstance(iter, p_ast.ForIter):
-        arg = convertExpression(iter.argument)
+        arg = convertExpression(a_tyvars, iter.argument)
         
         # Convert the body to a function
-        param = convertParameter(iter.parameter)
-        body_func = a_ast.iterFunction([param], convertIterator(iter.body))
+        param = convertParameter(a_tyvars, iter.parameter)
+        body_func = untyped.Function(iter.sourcePos, None, [param], None,
+                                     convertIterator(a_tyvars, iter.body))
 
         # Call __iter__ on the thing being traversed
-        iterator = _callVariable(None, builtin_data.oper_ITER, [arg])
+        iterator = _callVariable(iter.sourcePos, untyped.fun_iter, [arg])
 
-        # Create a call to 'cat_map'
-        return _callVariable(None, builtin_data.oper_CAT_MAP,
-                             [a_ast.FunExpr(arg.sourcePos, body_func), iterator])
+        # Create a call to iterBind
+        return _callVariable(iter.sourcePos, untyped.fun_iterBind,
+                             [iterator, untyped.FunE(iter.sourcePos,
+                                                     body_func)])
     elif isinstance(iter, p_ast.IfIter):
         # Convert guard and body
-        guard = convertExpression(iter.guard)
-        body = convertIterator(iter.body)
+        guard = convertExpression(a_tyvars, iter.guard)
+        body = convertIterator(a_tyvars, iter.body)
 
         # Create a call to 'GUARD'
-        return _callVariable(None, builtin_data.oper_GUARD, [guard, body])
+        return _callVariable(iter.sourcePos, untyped.fun_guard, [guard, body])
     elif isinstance(iter, p_ast.DoIter):
         # create a call to 'DO'
-        body = convertExpression(iter.body)
-        return _callVariable(None, builtin_data.oper_DO, [body])
+        body = convertExpression(a_tyvars, iter.body)
+        return _callVariable(iter.sourcePos, untyped.fun_do, [body])
     else:
         raise TypeError, type(iter)
 
-def convertParameter(param, a_tyvars = {}):
-    "Convert a parser parameter to an ANF parameter"
+def convertParameter(a_tyvars, param):
+    "Convert a parser parameter to an untyped parameter"
     if isinstance(param, p_ast.VariableParam):
         var = convertVariable(param.name, param.ssaver)
 
@@ -402,16 +426,17 @@ def convertParameter(param, a_tyvars = {}):
         else:
             annotation = None
 
-        return a_ast.VariableParam(var, annotation = annotation)
+        return untyped.VariableP(var, annotation)
     elif isinstance(param, p_ast.TupleParam):
-        return a_ast.TupleParam([convertParameter(p, a_tyvars) for p in param.fields])
+        return untyped.TupleP([convertParameter(a_tyvars, p)
+                               for p in param.fields])
     else:
         raise TypeError, type(param)
 
 def convertVariable(var, ssaver):
     """
-    convertVariable(PythonVariable, ssa-version) -> ANFVariable
-    Convert a variable to ANF.  The SSA version is used to pick
+    convertVariable(PythonVariable, ssa-version) -> Variable
+    Convert a variable to an untyped variable.  The SSA version is used to pick
     an identifier for the variable.
     """
     assert ssaver != -1
@@ -421,7 +446,9 @@ def convertVariable(var, ssaver):
     try:
         v = var.ssaVersionMap[ssaver]
     except KeyError:
-        v = a_ast.ANFVariable(var.name, a_ast.ANFVariable.getNewID())
+        if var.name: label = gluon.pgmLabel("pyonfile", var.name)
+        else: label = None
+        v = untyped.Variable(label)
         var.ssaVersionMap[ssaver] = v
 
     return v
@@ -435,7 +462,7 @@ def convertVariableRef(sourcePos,var, ssaver):
     """
     # If version is -1, then use the special expression 'undefined'
     if ssaver == -1:
-        return a_ast.UndefinedExpr(sourcePos)
+        return untyped.UndefinedE(sourcePos)
 
     # If not tracked by SSA, then return the pre-assigned value.
     # It must be a variable, not a type.
@@ -443,33 +470,33 @@ def convertVariableRef(sourcePos,var, ssaver):
         t = var.anfVariable
         if not t:
             raise RuntimeError, "Not a variable"
-        return a_ast.VariableExpr(sourcePos,t)
+        return untyped.VariableE(sourcePos, t)
     else:
-        return a_ast.VariableExpr(sourcePos,convertVariable(var, ssaver))
+        return untyped.VariableE(sourcePos, convertVariable(var, ssaver))
 
 # A mapping from parser operator to ANF variable
 _convertBinaryOperatorMap = {
-    operators.ADD       : builtin_data.oper_ADD,
-    operators.SUB       : builtin_data.oper_SUB,
-    operators.MUL       : builtin_data.oper_MUL,
-    operators.DIV       : builtin_data.oper_DIV,
-    operators.MOD       : builtin_data.oper_MOD,
-    operators.FLOORDIV  : builtin_data.oper_FLOORDIV,
-    operators.POWER     : builtin_data.oper_POWER,
-    operators.EQ        : builtin_data.oper_EQ,
-    operators.NE        : builtin_data.oper_NE,
-    operators.LT        : builtin_data.oper_LT,
-    operators.LE        : builtin_data.oper_LE,
-    operators.GT        : builtin_data.oper_GT,
-    operators.GE        : builtin_data.oper_GE,
-    operators.BITWISEAND : builtin_data.oper_BITWISEAND,
-    operators.BITWISEOR : builtin_data.oper_BITWISEOR,
-    operators.BITWISEXOR : builtin_data.oper_BITWISEXOR
+    operators.ADD       : untyped.oper_ADD,
+    operators.SUB       : untyped.oper_SUB,
+    operators.MUL       : untyped.oper_MUL,
+    operators.DIV       : untyped.oper_DIV,
+    operators.MOD       : untyped.oper_MOD,
+    operators.FLOORDIV  : untyped.oper_FLOORDIV,
+    operators.POWER     : untyped.oper_POWER,
+    operators.EQ        : untyped.oper_EQ,
+    operators.NE        : untyped.oper_NE,
+    operators.LT        : untyped.oper_LT,
+    operators.LE        : untyped.oper_LE,
+    operators.GT        : untyped.oper_GT,
+    operators.GE        : untyped.oper_GE,
+    operators.BITWISEAND : untyped.oper_BITWISEAND,
+    operators.BITWISEOR : untyped.oper_BITWISEOR,
+    operators.BITWISEXOR : untyped.oper_BITWISEXOR
     }
 
 def convertBinaryOperator(oper):
     """
-    Return the Pyon ANF variable denoting a binary operator.
+    Return the untyped variable denoting a binary operator.
     """
     # The arrow should only be used in type expressions
     if oper == operators.ARROW:
@@ -482,12 +509,12 @@ def convertBinaryOperator(oper):
 
 # A mapping from parser operator to ANF variable
 _convertUnaryOperatorMap = {
-    operators.NEGATE    : builtin_data.oper_NEGATE
+    operators.NEGATE    : untyped.oper_NEGATE
     }
 
 def convertUnaryOperator(oper):
     """
-    Return the Pyon ANF variable denoting a unary operator.
+    Return the untyped variable denoting a unary operator.
     """
     try: return _convertUnaryOperatorMap[oper]
     except KeyError:
@@ -498,4 +525,6 @@ def _callVariable(sourcePos, func, arguments):
     """
     Create the ANF code for a function call to a variable.
     """
-    return a_ast.CallExpr(sourcePos, a_ast.VariableExpr(sourcePos,func), arguments)
+    return untyped.CallE(sourcePos,
+                         untyped.VariableE(sourcePos, func),
+                         arguments)

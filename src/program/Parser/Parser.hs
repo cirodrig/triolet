@@ -482,10 +482,13 @@ comprehension convertBody comprehension =
                           <*> traverse exprToParam (Py.comp_for_exprs cf)
                           <*> compIter (Py.comp_for_iter cf)
           where
-            mkIter e params body = IterFor params e body
+            pos = toSourcePos $ Py.comp_for_annot cf
+            mkIter e params body = IterFor pos params e body
 
-      compIf ci = IterIf <$> expression (Py.comp_if ci)
-                         <*> compIter (Py.comp_if_iter ci)
+      compIf ci = IterIf pos <$> expression (Py.comp_if ci)
+                             <*> compIter (Py.comp_if_iter ci)
+        where
+          pos = toSourcePos $ Py.comp_if_annot ci
 
       compBody = convertBody (Py.comprehension_expr comprehension)
 
@@ -613,15 +616,17 @@ data Decorators = Decorators (Maybe [(PyIdent, Maybe Expr)])
 funDefinition' decorators (Py.Fun { Py.fun_name = name
                                   , Py.fun_args = params
                                   , Py.fun_result_annotation = result
-                                  , Py.fun_body = body}) = do
+                                  , Py.fun_body = body
+                                  , Py.stmt_annot = annotation}) = do
   Decorators forall_decorator <- extractDecorators decorators
   nameVar <- definition name
-  enter $ \locals -> do
+  let pos = toSourcePos annotation
+  enter $ \_ -> do
     qvars <- traverse (mapM qvarDefinition) forall_decorator
     params' <- parameters params
     result' <- traverse expression result
     body' <- suite body
-    return $ Func nameVar locals qvars params' result' body'
+    return $ Func pos nameVar qvars params' result' body'
     
   where
     qvarDefinition (qvar_name, qvar_kind) = do
@@ -681,7 +686,7 @@ definitionGroups fs =
       nodeMap :: Map Int Int
       nodeMap = Map.fromList [(varID (funcName f), n) | (n, f) <- nodes]
           where
-            funcName (Func name _ _ _ _ _) = name
+            funcName (Func _ name _ _ _ _) = name
 
       nodeOf varID = Map.lookup varID nodeMap
 
@@ -729,10 +734,12 @@ instance MentionsVars Expr where
            Lambda _ _ e -> mentionedVars e
 
 instance MentionsVars (IterFor Expr) where
-    mentionedVars (IterFor _ e c) = mentionedVars e `Set.union` mentionedVars c
+    mentionedVars (IterFor _ _ e c) =
+      mentionedVars e `Set.union` mentionedVars c
 
 instance MentionsVars (IterIf Expr) where
-    mentionedVars (IterIf e c) = mentionedVars e `Set.union` mentionedVars c
+    mentionedVars (IterIf _ e c) =
+      mentionedVars e `Set.union` mentionedVars c
 
 instance MentionsVars (Comprehension Expr) where
     mentionedVars (CompFor it) = mentionedVars it

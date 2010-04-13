@@ -15,8 +15,8 @@ foreign import ccall createHaskellModule :: IO ()
 -- Defined in Gluon_c.c
 foreign import ccall createGluonModule :: IO Bool
 
--- Defined in SystemF_c.c
-foreign import ccall createSystemFModule :: IO Bool
+-- Defined in Untyped_c.c
+foreign import ccall createUntypedModule :: IO Bool
 
 -- Try to load a module; exit on error
 tryLoad :: String -> IO Bool -> IO ()
@@ -38,7 +38,7 @@ main = do
   -- Create Python modules and initialize Gluon
   createHaskellModule
   tryLoad "gluon" createGluonModule
-  tryLoad "system_f" createSystemFModule
+  tryLoad "untyped" createUntypedModule
 
   -- Run interpreter
   runPythonMain progName args
