@@ -62,7 +62,7 @@ monomorphic t = TyScheme [] [] t
 -- | Create a type scheme with some type parameters
 forallType :: [Kind] -> ([TyCon] -> (Constraint, HMType)) -> IO TyScheme
 forallType kinds f = do
-  qvars <- forM kinds $ \k -> newTyVar k () Nothing
+  qvars <- forM kinds $ \k -> newTyVar k Nothing
   
   -- This must be lazy, because it's used when creating classes and the
   -- constraint may refer to a class
@@ -363,7 +363,7 @@ mkRecVarPlaceholder :: SourcePos
                     -> TyCon    -- ^ Its type (a flexible type variable)
                     -> IO TIExp -- ^ Returns the created placeholder
 mkRecVarPlaceholder pos variable ty = do
-  tyvar <- newTyVar Star () Nothing
+  tyvar <- newTyVar Star Nothing
   actual <- newEmptyMVar
   return $ RecVarPH (mkSynInfo pos ObjectLevel) variable tyvar actual
 

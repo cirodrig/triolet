@@ -34,7 +34,7 @@ f @@ g = appTy f g
 -- System F type constructor
 builtinTyCon name kind sf_con =
   let y = Gluon.mkInternalConE sf_con
-  in mkTyCon (builtinLabel name) kind () y
+  in mkTyCon (builtinLabel name) kind y
 
 -------------------------------------------------------------------------------
 -- Class initialization
@@ -73,7 +73,7 @@ monomorphicInstance cls ty methods =
            }
 
 mkEqClass = mdo
-  a <- newTyVar Star () Nothing
+  a <- newTyVar Star Nothing
   let compareScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy $ tiBuiltin the_con_bool)
 
   let cls = Class { clsParam = a
@@ -98,8 +98,8 @@ mkEqClass = mdo
         (ConTy $ tiBuiltin the_con_float)
         (fromEqDict SystemF.the_EqDict_Float)
   tuple2_instance <- do
-    a <- newTyVar Star () Nothing
-    b <- newTyVar Star () Nothing
+    a <- newTyVar Star Nothing
+    b <- newTyVar Star Nothing
     return $ Instance { insQVars = [a, b]
                       , insConstraint = [ ConTy a `IsInst` cls
                                         , ConTy b `IsInst` cls
@@ -118,7 +118,7 @@ mkEqClass = mdo
            ]
 
 mkOrdClass = mdo
-  a <- newTyVar Star () Nothing
+  a <- newTyVar Star Nothing
   let compareScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy $ tiBuiltin the_con_bool)
 
   let cls = Class { clsParam = a
@@ -146,8 +146,8 @@ mkOrdClass = mdo
         (fromOrdDict SystemF.the_OrdDict_Float)
 
   tuple2_instance <- do
-    a <- newTyVar Star () Nothing
-    b <- newTyVar Star () Nothing
+    a <- newTyVar Star Nothing
+    b <- newTyVar Star Nothing
     return $ Instance { insQVars = [a, b]
                       , insConstraint = [ ConTy a `IsInst` cls
                                         , ConTy b `IsInst` cls
@@ -168,7 +168,7 @@ mkOrdClass = mdo
            ]
 
 mkTraversableClass = mdo
-  t <- newTyVar (Star :-> Star) () Nothing
+  t <- newTyVar (Star :-> Star) Nothing
   iter_scheme <-
     forallType [Star] $ \[a] ->
     ([], functionType [ConTy t @@ ConTy a] (ConTy (tiBuiltin the_con_iter) @@ ConTy a))
@@ -200,7 +200,7 @@ mkTraversableClass = mdo
       of SystemF.TraversableDictMembers iter -> [InstanceMethod iter]
 
 mkAdditiveClass = mdo
-  a <- newTyVar Star () Nothing
+  a <- newTyVar Star Nothing
   let binScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy a)
 
   let cls = Class { clsParam = a
@@ -236,7 +236,7 @@ mkAdditiveClass = mdo
            ]
 
 mkVectorClass = mdo
-  a <- newTyVar Star () Nothing
+  a <- newTyVar Star Nothing
   let normScheme = monomorphic $
                    functionType [ConTy a] (ConTy $ tiBuiltin the_con_float)
       scaleScheme = monomorphic $

@@ -56,8 +56,6 @@ tyConIDSupply = unsafePerformIO newIdentSupply
 newTyConID :: IO (Ident TyCon)
 newTyConID = supplyValue tyConIDSupply
 
-type CallConv = ()              -- not implemented
-
 -- | A substitution for type constructors
 type Substitution = Map.Map TyCon HMType
 
@@ -74,7 +72,6 @@ data TyCon =
     tcID :: {-# UNPACK #-} !(Ident TyCon)
   , tcName :: !(Maybe Label)
   , tcKind :: !Kind
-  , tcConv :: CallConv
     -- | True if this is a type variable
   , tcIsVariable :: {-# UNPACK #-} !Bool
     -- | For a flexible type variable, this is what the variable has been 
@@ -107,35 +104,35 @@ isFlexibleTyVar :: TyCon -> Bool
 isFlexibleTyVar c = isTyVar c && isJust (tcRep c)
 
 -- | Create a new flexible type variable
-newTyVar :: Kind -> CallConv -> Maybe Label -> IO TyCon
-newTyVar k cc lab = do
+newTyVar :: Kind -> Maybe Label -> IO TyCon
+newTyVar k lab = do
   id <- newTyConID
   rep <- newIORef NoRep
   sfvar <- newIORef Nothing
   let sfvalue = error "Attempted to get system f value of a variable"
-  return $! TyCon id lab k cc True (Just rep) sfvar sfvalue
+  return $! TyCon id lab k True (Just rep) sfvar sfvalue
 
 -- | Create a new rigid type variable
-newRigidTyVar :: Kind -> CallConv -> Maybe Label -> IO TyCon
-newRigidTyVar k cc lab = do
+newRigidTyVar :: Kind -> Maybe Label -> IO TyCon
+newRigidTyVar k lab = do
   id <- newTyConID
   sfvar <- newIORef Nothing
   let sfvalue = error "Attempted to get system f value of a variable"
-  return $! TyCon id lab k cc True Nothing sfvar sfvalue
+  return $! TyCon id lab k True Nothing sfvar sfvalue
 
 -- | Create a type constructor
-mkTyCon :: Label -> Kind -> CallConv -> SystemF.RType -> IO TyCon
-mkTyCon name kind cc value = do
+mkTyCon :: Label -> Kind -> SystemF.RType -> IO TyCon
+mkTyCon name kind value = do
   id <- newTyConID
   let var = error "Type constructor is not a variable" 
-  return $! TyCon id (Just name) kind cc False Nothing var value
+  return $! TyCon id (Just name) kind False Nothing var value
 
 -- | Create a new type variable that is like the given one, but independent
 -- with respect to unification
 duplicateTyVar :: TyCon -> IO TyCon
 duplicateTyVar v = 
   case isTyVar v
-  of True -> newTyVar (tcKind v) (tcConv v) (tcName v)
+  of True -> newTyVar (tcKind v) (tcName v)
      False -> fail "Expecting a type variable"
 
 -- | A type variable's value as identified by unification

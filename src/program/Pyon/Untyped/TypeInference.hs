@@ -408,7 +408,7 @@ inferExpressionType expression =
                    SystemF.NoneL -> ConTy $ tiBuiltin the_con_NoneType
        in return (mkLitE pos l (convertHMType ty), ty)
      UndefinedE {} -> do
-       tyvar <- liftIO $ newTyVar Star () Nothing
+       tyvar <- liftIO $ newTyVar Star Nothing
        let ty = ConTy tyvar
        return (mkUndefinedE pos (convertHMType ty), ty)
      TupleE {expFields = fs} -> do
@@ -420,7 +420,7 @@ inferExpressionType expression =
        
        -- Create the expected function type based on the inferred argument 
        -- types
-       result_var <- liftIO $ newTyVar Star () Nothing
+       result_var <- liftIO $ newTyVar Star Nothing
        let result_type = ConTy result_var
            function_type = functionType arg_tys result_type
        
@@ -506,12 +506,12 @@ addParameterToEnvironment pattern k =
   case pattern
   of WildP _ -> do
        -- Create a new type for this parameter
-       ty <- liftIO $ liftM ConTy $ newTyVar Star () Nothing
+       ty <- liftIO $ liftM ConTy $ newTyVar Star Nothing
        k (mkWildP (convertHMType ty)) ty
      VariableP _ v mty -> do
        -- Get or create this parameter's type
        ty <- case mty
-             of Nothing -> liftIO $ liftM ConTy $ newTyVar Star () Nothing
+             of Nothing -> liftIO $ liftM ConTy $ newTyVar Star Nothing
                 Just ty -> return ty
        sfvar <- case varSystemFVariable v
                 of Just sfvar -> return sfvar

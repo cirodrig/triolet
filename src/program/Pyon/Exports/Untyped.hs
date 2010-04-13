@@ -128,7 +128,7 @@ foreign export ccall pyon_RigidTyVar :: PyPtr -> PyPtr -> IO PyPtr
 pyon_RigidTyVar py_label py_kind = do
   label <- fromHsObject' py_label
   kind <- fromHsObject' py_kind
-  newHsObject =<< newRigidTyVar kind () (Just label)
+  newHsObject =<< newRigidTyVar kind (Just label)
 
 foreign export ccall pyon_Variable :: PyPtr -> IO PyPtr
 

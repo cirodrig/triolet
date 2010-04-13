@@ -78,7 +78,7 @@ recursiveAssignment :: Variable -- ^ Recursively defined variable
                     -> IO (TypeAssignment, TyCon)
 recursiveAssignment var = do
   -- Create a new type variable representing the variable's unknown type
-  tyvar <- newTyVar Star () Nothing
+  tyvar <- newTyVar Star Nothing
   
   let ty = ConTy tyvar
   let instantiate_function pos = do
