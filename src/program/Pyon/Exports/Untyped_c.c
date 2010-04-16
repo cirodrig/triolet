@@ -26,6 +26,19 @@ SourcePos(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+ArrowK(PyObject *self, PyObject *args)
+{
+  PyObject *k1;
+  PyObject *k2;
+
+  if (!PyArg_ParseTuple(args, "O!O!",
+			&HsObject_type, &k1, &HsObject_type, &k2))
+    return NULL;
+
+  return pyon_ArrowK(k1, k2);
+}
+
+static PyObject *
 RigidTyVar(PyObject *self, PyObject *args)
 {
   PyObject *kind;
@@ -297,6 +310,8 @@ typeApplication(PyObject *self, PyObject *args)
 static PyMethodDef untyped_methods[] = {
   {"SourcePos", SourcePos, METH_VARARGS,
    "Construct a source code position"},
+  {"ArrowK", ArrowK, METH_VARARGS,
+   "Construct an arrow kind"},
   {"RigidTyVar", RigidTyVar, METH_VARARGS,
    "Construct a rigid type variable"},
   {"Variable", Variable, METH_VARARGS,

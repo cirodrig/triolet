@@ -10,6 +10,8 @@ module Pyon.SystemF.Builtins
         the_list,
         the_NoneType, 
         the_Any, 
+        the_PassConv,
+        the_passConv,
         the_EqDict, the_OrdDict, the_TraversableDict,
         the_AdditiveDict, the_VectorDict,
         the_EqDict_Int, the_OrdDict_Int,

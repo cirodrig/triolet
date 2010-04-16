@@ -61,6 +61,10 @@ let comparison (a : Pure) -> Pure = a -> a -> bool;
 let binary (a : Pure) -> Pure = a -> a -> a;
 let binary_any -> Pure = (a : Pure) -> binary a;
 
+-- Parameter-passing conventions.
+data PassConv : Pure -> Pure where
+  passConv : (t : Pure) -> PassConv t;
+
 -- Dictionary types for Pyon classes.
 data EqDict : Pure -> Pure where
   eqDict : (a : Pure) -> comparison a -> comparison a -> EqDict a;

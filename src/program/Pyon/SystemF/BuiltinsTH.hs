@@ -50,6 +50,7 @@ pyonBuiltinConstructors =
   , "TraversableDict"
   , "AdditiveDict"
   , "VectorDict"
+  , "PassConv"
     -- Data constructors
   , "None"
   , "True"
@@ -59,6 +60,7 @@ pyonBuiltinConstructors =
   , "traversableDict"
   , "additiveDict"
   , "vectorDict"
+  , "passConv"
     -- Functions
   , "oper_MUL"
   , "oper_DIV"

@@ -1,8 +1,9 @@
 
 {-# LANGUAGE TypeFamilies, DeriveDataTypeable #-}
 module Pyon.Untyped.HMType
-       (Substitution, TyVars, TyVarSet, TyCon,
-        tyConKind,
+       (Substitution, substitutionFromList,
+        TyVars, TyVarSet, TyCon,
+        tyConKind, tyConPassConv, tyConExecMode,
         isTyVar, isRigidTyVar, isFlexibleTyVar,
         isCanonicalTyVar,
         newTyVar, newRigidTyVar, mkTyCon, duplicateTyVar,
@@ -10,13 +11,13 @@ module Pyon.Untyped.HMType
         appTy,
         tupleType, functionType,
         uncurryTypeApplication,
+        inspectTypeApplication,
         hmTypeKind,
         hmTypeMap, hmTypeMapM,
         canonicalizeHead,
         Type(..),
         unifiableTypeVariables,
         Unifiable(..),
-        runTypeDisplayer, displayType,
         tyVarToSystemF,
         tyConToSystemF
        )
@@ -25,6 +26,7 @@ where
 import Prelude hiding(sequence)
 import Control.Applicative
 import Control.Monad hiding(sequence)
+import Control.Monad.Trans
 import Data.Function
 import Data.IORef
 import Data.List
@@ -48,6 +50,8 @@ import Gluon.Core(Var(..), mkVar, Level(..), Rec)
 import Pyon.Globals
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.Untyped.Kind
+import Pyon.Untyped.Unification
+import {-# SOURCE #-} Pyon.Untyped.CallConv
 
 tyConIDSupply :: Supply (Ident TyCon)
 {-# NOINLINE tyConIDSupply #-}
@@ -55,9 +59,6 @@ tyConIDSupply = unsafePerformIO newIdentSupply
 
 newTyConID :: IO (Ident TyCon)
 newTyConID = supplyValue tyConIDSupply
-
--- | A substitution for type constructors
-type Substitution = Map.Map TyCon HMType
 
 -- | A list of type variables
 type TyVars = [TyCon]
@@ -81,6 +82,11 @@ data TyCon =
   , tcSystemFVariable :: IORef (Maybe SystemF.Var)
     -- | The System F equivalent of a type constructor; undefined for variables
   , tcSystemFValue :: SystemF.RType
+    -- | The parameter-passing convention of a type constructor; undefined
+    -- for variables
+  , tcPassConv :: PassConvCtor
+    -- | The execution mode of a type constructor; undefined for variables
+  , tcExecMode :: ExecMode
   }
   deriving(Typeable)
 
@@ -103,6 +109,14 @@ isRigidTyVar c = isTyVar c && isNothing (tcRep c)
 isFlexibleTyVar :: TyCon -> Bool
 isFlexibleTyVar c = isTyVar c && isJust (tcRep c)
 
+-- | Get the parameter-passing convention of a type constructor
+tyConPassConv :: TyCon -> PassConvCtor
+tyConPassConv = tcPassConv
+
+-- | Get the execution mode of a type constructor
+tyConExecMode :: TyCon -> ExecMode
+tyConExecMode = tcExecMode
+
 -- | Create a new flexible type variable
 newTyVar :: Kind -> Maybe Label -> IO TyCon
 newTyVar k lab = do
@@ -110,7 +124,9 @@ newTyVar k lab = do
   rep <- newIORef NoRep
   sfvar <- newIORef Nothing
   let sfvalue = error "Attempted to get system f value of a variable"
-  return $! TyCon id lab k True (Just rep) sfvar sfvalue
+      pc = error "Attempted to get the parameter-passing convention of a varible"
+      em = error "Attempted to get the execution mode of a variable"
+  return $! TyCon id lab k True (Just rep) sfvar sfvalue pc em
 
 -- | Create a new rigid type variable
 newRigidTyVar :: Kind -> Maybe Label -> IO TyCon
@@ -118,14 +134,16 @@ newRigidTyVar k lab = do
   id <- newTyConID
   sfvar <- newIORef Nothing
   let sfvalue = error "Attempted to get system f value of a variable"
-  return $! TyCon id lab k True Nothing sfvar sfvalue
+      pc = error "Attempted to get the parameter-passing convention of a variable"
+      em = error "Attempted to get the execution mode of a variable"
+  return $! TyCon id lab k True Nothing sfvar sfvalue pc em
 
 -- | Create a type constructor
-mkTyCon :: Label -> Kind -> SystemF.RType -> IO TyCon
-mkTyCon name kind value = do
+mkTyCon :: Label -> Kind -> SystemF.RType -> PassConvCtor -> ExecMode -> IO TyCon
+mkTyCon name kind value pass_conv em = do
   id <- newTyConID
   let var = error "Type constructor is not a variable" 
-  return $! TyCon id (Just name) kind False Nothing var value
+  return $! TyCon id (Just name) kind False Nothing var value pass_conv em
 
 -- | Create a new type variable that is like the given one, but independent
 -- with respect to unification
@@ -207,9 +225,13 @@ uncurryTypeApplication ty = unc ty []
         AppTy op arg -> unc op (arg:args)
         _ -> return (ty', args)
 
-class Type a where
-  -- | Get the set of free type variables mentioned in the value
-  freeTypeVariables :: a -> IO TyVarSet
+-- | Get the head and operands of a type application.  The head constructor is
+-- canonicalized.
+inspectTypeApplication :: HMType -> IO (HMType, [HMType])
+inspectTypeApplication ty = do
+  (hd, operands) <- uncurryTypeApplication ty
+  hd' <- canonicalizeHead hd
+  return (hd', operands)
 
 -- | Get the set of free and unifiable type variables mentioned in the value
 unifiableTypeVariables :: Type a => a -> IO TyVarSet
@@ -312,39 +334,17 @@ occursCheck v t = do assertCanonicalTyVar v
                  AppTy a b -> occ a >||> occ b
                  _ -> return False
 
-class Unifiable a where
-  -- | Show some unifiable objects.  Temporary names may be assigned to 
-  -- anonymous variables; the same names are used across all objects.  
-  -- This is used when constructing messages for unification failure.
-  uShow :: [a] -> IO [Doc]
-
-  -- | Rename a unifiable object
-  rename :: Substitution -> a -> IO a
-  
-  -- | Unify terms.  Flexible type variables may be modified during
-  -- unification.  Throw an error if terms cannot be unified.
-  unify :: SourcePos -> a -> a -> IO ()
-  
-  -- | Match (semi-unify) two terms. 
-  --
-  -- @match x y@ finds a substitution that unifies @x@ with @y@, if one exists.
-  -- If no substitution can be found, return None.  The terms are not modified.
-  match :: a -> a -> IO (Maybe Substitution)
-
-  -- | Decide whether two unifiable terms are equal.
-  -- The terms are not modified.
-  uEqual :: a -> a -> IO Bool
-
 instance Unifiable HMType where
-  uShow = pprTypes
+  uShow = pprType
 
   rename substitution t = hmTypeMapM (ren <=< canonicalizeHead) t
     where
       -- Look up in substitution
       ren t@(ConTy v) | isTyVar v = 
-        return $ Map.findWithDefault t v substitution
+        return $ Map.findWithDefault t v (substTc substitution)
       ren t = return t
 
+  -- Unify types.  Unification on types never produces constraints.
   unify pos t1 t2 = do
     t1_c <- canonicalizeHead t1
     t2_c <- canonicalizeHead t2
@@ -352,11 +352,14 @@ instance Unifiable HMType where
     -- Unify if either term contains a type variable.
     case (t1_c, t2_c) of
       (ConTy c1, ConTy c2)   
-        | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> unifyTyVars c1 c2
+        | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> do unifyTyVars c1 c2
+                                                         success
       (ConTy c1, _)
-        | isFlexibleTyVar c1 -> unifyTyVar c1 t2_c
+        | isFlexibleTyVar c1 -> do unifyTyVar c1 t2_c
+                                   success
       (_, ConTy c2)
-        | isFlexibleTyVar c2 -> unifyTyVar c2 t1_c
+        | isFlexibleTyVar c2 -> do unifyTyVar c2 t1_c
+                                   success
       (ConTy c1, ConTy c2)     -> require $ c1 == c2
       (FunTy n1,   FunTy n2)   -> require $ n1 == n2
       (TupleTy t1, TupleTy t2) -> require $ t1 == t2
@@ -364,9 +367,9 @@ instance Unifiable HMType where
                                      unify pos b d
       _ -> failure
     where
-      success = return ()
+      success = return []
       failure = do
-        [t1_doc, t2_doc] <- uShow [t1, t2]
+        (t1_doc, t2_doc) <- runPpr $ (,) <$> uShow t1 <*> uShow t2
         fail $ show (text (show pos) <> text ":" <+> text "Cannot unify" $$
                      nest 4 t1_doc $$
                      text "with" $$
@@ -374,7 +377,7 @@ instance Unifiable HMType where
       require True  = success
       require False = failure
 
-  match t1 t2 = match_ Map.empty t1 t2
+  match t1 t2 = match_ emptySubstitution t1 t2
     where
       match_ subst t1 t2 = do
         t1_c <- canonicalizeHead t1
@@ -384,13 +387,13 @@ instance Unifiable HMType where
           (ConTy v, _) | isFlexibleTyVar v ->
             -- Semi-unification of a variable with t2_c
             -- Look for this variable's value in the map
-            case Map.lookup v subst
+            case Map.lookup v (substTc subst)
             of Just substituted_t1 -> do
                  -- Match terms without further substitution
                  require =<< uEqual substituted_t1 t2_c
                Nothing ->
                  -- Add the mapping v |-> t2_c and succeed
-                 let subst' = Map.insert v t2_c subst
+                 let subst' = updateTc (Map.insert v t2_c) subst
                  in return (Just subst')
           
           -- Non-variable terms must match exactly
@@ -429,29 +432,7 @@ arrow_prec = 1
 prod_prec = 2
 app_prec = 4
 
-newtype Pr a = Pr {doPr :: IORef [String] 
-                        -> IORef (Map.Map (Ident TyCon) Doc) 
-                        -> IO a}
-
-instance Functor Pr where
-  fmap f (Pr g) = Pr $ \names env -> fmap f (g names env)
-
-instance Applicative Pr where
-  pure x = Pr $ \_ _ -> return x
-  Pr ff <*> Pr xx = Pr $ \names env -> do f <- ff names env
-                                          x <- xx names env
-                                          return $ f x
-
-runTypeDisplayer :: Pr a -> IO a
-runTypeDisplayer (Pr f) = do
-  -- Names for anonymous type variables
-  names <- newIORef $ concatMap sequence $ drop 1 $ inits $ repeat ['a' .. 'z']
-
-  -- Empty environment
-  env <- newIORef Map.empty
-
-  f names env
-
+{-
 -- | Uncurry a type application, and pass the operator and arguments to another
 -- function.
 uncurryPr :: (HMType -> [HMType] -> Pr a) -> (HMType -> Pr a)
@@ -480,42 +461,44 @@ prTyCon c =
            
            -- Return the document 
            return doc
+-}
 
-pprType :: HMType -> IO Doc
-pprType ty = runTypeDisplayer $ displayType ty
+pprType :: HMType -> Ppr Doc
+pprType ty = prType 0 ty
 
-pprTypes :: [HMType] -> IO [Doc]
-pprTypes tys = runTypeDisplayer $ traverse displayType tys 
+-- displayType :: HMType -> Pr Doc 
+-- displayType t = prType 0 t
 
-displayType :: HMType -> Pr Doc 
-displayType t = prType 0 t
-
-prType :: Int -> HMType -> Pr Doc
-prType prec t = 
+prType :: Int -> HMType -> Ppr Doc
+prType prec t = do
   -- Uncurry the type application and put the head in canonical form
-  flip uncurryPr t $ \hd params ->
-  case hd
-  of ConTy c -> application <$> prTyCon c <*> traverse (prType app_prec) params
-     FunTy n
-       | n + 1 == length params ->
-         let domain = sep . punctuate (text "*") <$>
-                      traverse (prType prod_prec) (init params)
-             range = prType arrow_prec $ last params
-         in parenthesize arrow_prec <$> domain `arrow` range
-       | otherwise ->
-           application (parens (text ("FunTy " ++ show n))) <$>
-           traverse (prType app_prec) params
-     TupleTy n
-       | n == length params ->
-         parens . sep . punctuate (text ",") <$>
-         traverse (prType outer_prec) params
-       | otherwise ->
-         application (parens (text ("TupleTy " ++ show n))) <$>
-         traverse (prType outer_prec) params
-     AppTy _ _ -> 
-       -- Should not happen after uncurrying
-       internalError "prType"
+  (hd, params) <- liftIO $ inspectTypeApplication t
+  case hd of
+    ConTy c -> application <$> conName c <*> traverse (prType app_prec) params
+    FunTy n
+      | n + 1 == length params ->
+        let domain = sep . intersperse (text "*") <$>
+                     traverse (prType prod_prec) (init params)
+            range = prType arrow_prec $ last params
+        in parenthesize arrow_prec <$> domain `arrow` range
+      | otherwise ->
+          application (parens (text ("FunTy " ++ show n))) <$>
+          traverse (prType app_prec) params
+    TupleTy n
+      | n == length params ->
+        parens . sep . punctuate (text ",") <$>
+        traverse (prType outer_prec) params
+      | otherwise ->
+        application (parens (text ("TupleTy " ++ show n))) <$>
+        traverse (prType outer_prec) params
+    AppTy _ _ -> 
+      -- Should not happen after uncurrying
+      internalError "prType"
   where
+    conName c =
+      case tcName c
+      of Nothing    -> pprGetTyConName (tcID c)
+         Just label -> pure $ text $ showLabel label
     parenthesize expr_prec doc
       | prec > expr_prec = parens doc
       | otherwise = doc

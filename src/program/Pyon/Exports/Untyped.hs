@@ -123,6 +123,13 @@ pyon_SourcePos fname line column = do
   s <- peekCString fname
   newHsObject $ fileSourcePos s (fromIntegral line) (fromIntegral column)
 
+foreign export ccall pyon_ArrowK :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_ArrowK py_k1 py_k2 = do
+  k1 <- fromHsObject' py_k1
+  k2 <- fromHsObject' py_k2
+  newHsObject $ k1 :-> k2
+
 foreign export ccall pyon_RigidTyVar :: PyPtr -> PyPtr -> IO PyPtr
 
 pyon_RigidTyVar py_label py_kind = do
@@ -153,7 +160,9 @@ pyon_WildP = rethrowExceptionsInPython $ do
 
 pyon_VariableP py_v py_type = rethrowExceptionsInPython $ do
   v <- fromHsObject' py_v
-  ty <- fromMaybeHsObject' py_type
+  ty <- if isPyNone py_type
+        then return Nothing 
+        else liftM Just $ fromTypeOrCon py_type
   newHsObject $ VariableP dummyAnn v ty
 
 pyon_TupleP py_fs = rethrowExceptionsInPython $ do

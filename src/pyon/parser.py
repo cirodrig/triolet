@@ -49,7 +49,7 @@ def _getBuiltinVariableList():
 
         functions = [mv(name, obj) for name, obj in untyped.GLOBAL_VARIABLES]
         types = [mt(name, ty) for name, ty in untyped.BUILTIN_TYPES]
-        kinds = [ast.PythonVariable("kind", anf_kind = untyped.Star)]
+        kinds = [ast.PythonVariable("type", anf_kind = untyped.Star)]
         _builtinVariableList = functions + types + kinds
 
     return _builtinVariableList

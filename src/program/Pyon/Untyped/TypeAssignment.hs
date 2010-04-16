@@ -18,6 +18,7 @@ import Gluon.Common.Error
 import Gluon.Common.SourcePos
 import Pyon.Untyped.Classes
 import Pyon.Untyped.GenSystemF
+import Pyon.Untyped.Unification
 import Pyon.Untyped.HMType
 import Pyon.Untyped.Kind
 import Pyon.Untyped.Syntax

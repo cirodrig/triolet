@@ -21,8 +21,10 @@ import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.Untyped.Kind
 import Pyon.Untyped.Syntax
 import Pyon.Untyped.HMType
+import Pyon.Untyped.CallConv
 import Pyon.Untyped.TypeAssignment
 import Pyon.Untyped.GenSystemF
+import Pyon.Untyped.Unification
 import Pyon.Untyped.BuiltinsTH
 import Pyon.Untyped.Builtins
 
@@ -355,13 +357,21 @@ initializeTIBuiltins = do
     $(let types =
             -- All types that can be referred to by name in source code.
             -- Their kinds and System F translations.
-            [ ("int", Star, [| Gluon.builtin Gluon.the_Int |])
-            , ("float", Star, [| Gluon.builtin Gluon.the_Float |])
-            , ("bool", Star, [| pyonBuiltin SystemF.the_bool |])
-            , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |])
-            , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |])
-            , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |])
-            , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
+            [ ("int", Star, [| Gluon.builtin Gluon.the_Int |],
+               [| PassConvVal ByVal |], [| AsAction |])
+            , ("float", Star, [| Gluon.builtin Gluon.the_Float |],
+               [| PassConvVal ByVal |], [| AsAction |])
+            , ("bool", Star, [| pyonBuiltin SystemF.the_bool |], 
+               [| PassConvVal ByVal |], [| AsAction |])
+            , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |],
+               [| PassConvVal ByVal |], [| AsAction |])
+            , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |],
+               [| PassConvFun $ \t ->
+                  PassConvVal $ ByClosure (Return AsStream (TypePassConv t)) |], [| AsStream |])
+            , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |],
+               [| PassConvFun $ \_ -> PassConvVal ByRef |], [| AsAction |])
+            , ("Any", Star, [| pyonBuiltin SystemF.the_Any |],
+               [| PassConvVal ByVal |], [| AsAction |])
             ]
             
           classes =
@@ -442,10 +452,10 @@ initializeTIBuiltins = do
             ]
 
           -- Construct initializers
-          typ_initializer (name, _, con) =
+          typ_initializer (name, _, con, _, _) =
             ('_':name, [| return $(con) |])
-          tycon_initializer (name, kind, con) =
-            ("_con_" ++ name, [| builtinTyCon name kind $(con) |])
+          tycon_initializer (name, kind, con, pass_conv, mode) =
+            ("_con_" ++ name, [| builtinTyCon name kind $(con) $(pass_conv) $(mode) |])
           cls_initializer (name, mk) =
             ('_':name, mk)
           global_initializer (name, typ, con) =

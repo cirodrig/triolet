@@ -19,6 +19,7 @@ import Control.Applicative
 import Control.Concurrent.MVar
 import Control.Monad hiding(forM, mapM)
 import Data.Function
+import Data.Maybe
 import qualified Data.Set as Set
 import Data.Traversable
 import Data.Typeable(Typeable)
@@ -34,8 +35,10 @@ import Gluon.Core(SynInfo, mkSynInfo, internalSynInfo,
                   Structure, Rec, ExpOf(..))
 import qualified Gluon.Core as Gluon
 import Pyon.Globals
-import Pyon.Untyped.Kind
+import Pyon.Untyped.CallConv
 import Pyon.Untyped.HMType
+import Pyon.Untyped.Kind
+import Pyon.Untyped.Unification
 import qualified Pyon.Untyped.Syntax as Untyped
 import qualified Pyon.SystemF.Syntax as SystemF
 import qualified Pyon.SystemF.Builtins as SystemF
@@ -74,7 +77,7 @@ instantiate :: TyScheme -> IO (TyVars, Constraint, HMType)
 instantiate (TyScheme qvars cst ty) = do
   -- Create a substitution from each qvar to a new variable 
   new_qvars <- mapM duplicateTyVar qvars
-  let substitution = Map.fromList $ zip qvars $ map ConTy new_qvars
+  let substitution = substitutionFromList $ zip qvars $ map ConTy new_qvars
 
   -- Apply the substitution to the type
   ty' <- rename substitution ty
@@ -143,34 +146,67 @@ newtype InstanceMethod = InstanceMethod {inmName :: Gluon.Con}
 insScheme :: Instance -> TyScheme
 insScheme i = TyScheme (insQVars i) (insConstraint i) (insType i)
 
--- | A predicate to be solved by type inference
-data Predicate =
-  -- | The type is an instance of the class
-  IsInst HMType !Class
-
-type Constraint = [Predicate]
-
 instance Type Predicate where
   freeTypeVariables (IsInst t _) = freeTypeVariables t
+  freeTypeVariables (HasPassConv t c) =
+    Set.union `liftM` freeTypeVariables t `ap` freeTypeVariables c
+  freeTypeVariables (EqPassConv x y) =
+    Set.union `liftM` freeTypeVariables x `ap` freeTypeVariables y
+  freeTypeVariables (EqExecMode x y) =
+    Set.union `liftM` freeTypeVariables x `ap` freeTypeVariables y
 
 instance Type [Predicate] where
   freeTypeVariables xs = liftM Set.unions $ mapM freeTypeVariables xs
 
+-- | During unification, predicates are only considered equal if
+-- they are exactly equal.  Other identities are taken care of during context
+-- reduction.
 instance Unifiable Predicate where
-  uShow xs = runTypeDisplayer $ traverse showPredicate xs
+  uShow (t `IsInst` c) = display <$> uShow t
     where
-      showPredicate (t `IsInst` c) = display <$> displayType t
-        where
-          display doc = text (clsName c) <+> parens doc
+      display doc = text (clsName c) <+> parens doc
+
+  uShow (t `HasPassConv` c) = display <$> uShow t <*> uShow c
+    where
+      display x y = x <+> text "HasPassConv" <+> y
+
+  uShow (EqPassConv c1 c2) = display <$> uShow c1 <*> uShow c2
+    where
+      display x y = x <+> text "~" <+> y
+
+  uShow (EqExecMode m1 m2) = display <$> uShow m1 <*> uShow m2
+    where
+      display x y = x <+> text "~" <+> y
 
   rename s (IsInst t c) = do 
     t' <- rename s t
     return $ IsInst t' c
+    
+  rename s (HasPassConv t pc) = do
+    t' <- rename s t
+    pc' <- rename s pc
+    return $ HasPassConv t' pc'
   
+  rename s (EqPassConv pc1 pc2) = do
+    pc1' <- rename s pc1
+    pc2' <- rename s pc2
+    return $ EqPassConv pc1' pc2'
+  
+  rename s (EqExecMode m1 m2) = do
+    m1' <- rename s m1
+    m2' <- rename s m2
+    return $ EqExecMode m1' m2'
+
   unify pos p1 p2 =
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> unify pos t1 t2
+       (HasPassConv t1 pc1, HasPassConv t2 pc2) ->
+         (++) `liftM` unify pos t1 t2 `ap` unify pos pc1 pc2
+       (EqPassConv pc1 pc2, EqPassConv pc3 pc4) ->
+         (++) `liftM` unify pos pc1 pc3 `ap` unify pos pc2 pc4
+       (EqExecMode m1 m2, EqExecMode m3 m4) ->
+         (++) `liftM` unify pos m1 m3 `ap` unify pos m2 m4
   
        _ -> fail "Cannot unify predicates"
   
@@ -178,6 +214,21 @@ instance Unifiable Predicate where
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> match t1 t2
+       (HasPassConv t1 pc1, HasPassConv t2 pc2) -> do
+         s1 <- match t1 t2
+         s2 <- match pc1 pc2
+         fromMaybe (return Nothing) $
+           mergeSubstitutions `liftM` s1 `ap` s2
+       (EqPassConv pc1 pc2, EqPassConv pc3 pc4) -> do
+         s1 <- match pc1 pc3
+         s2 <- match pc2 pc4
+         fromMaybe (return Nothing) $
+           mergeSubstitutions `liftM` s1 `ap` s2
+       (EqExecMode m1 m2, EqExecMode m3 m4) -> do
+         s1 <- match m1 m3
+         s2 <- match m2 m4
+         fromMaybe (return Nothing) $
+           mergeSubstitutions `liftM` s1 `ap` s2
        
        _ -> return Nothing
   
@@ -185,6 +236,12 @@ instance Unifiable Predicate where
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> uEqual t1 t2
+       (HasPassConv t1 pc1, HasPassConv t2 pc2) ->
+         uEqual t1 t2 >&&> uEqual pc1 pc2
+       (EqPassConv pc1 pc2, EqPassConv pc3 pc4) ->
+         uEqual pc1 pc3 >&&> uEqual pc2 pc4
+       (EqExecMode m1 m2, EqExecMode m3 m4) ->
+         uEqual m1 m3 >&&> uEqual m2 m4
        _ -> return False
 
 -- | A derivation of a predicate, containing enough information to reconstruct
@@ -201,6 +258,25 @@ data Derivation =
     , instancePremises :: [Derivation] 
     , classPremises :: [Derivation]
     }
+  | -- | Structural recursion on 'ByClosure' terms
+    StructByClosureDerivation
+    { conclusion :: Predicate
+    , byClosurePremise :: Derivation
+    }
+    -- | A derivation without evidence
+  | MagicDerivation
+    { conclusion :: Predicate
+    }
+
+-- | A derivation of calling convention equality.  Unlike 'Derivation' values,
+-- there is no predicate corresponding to the result of these derivations. 
+-- These derivations are intermediate steps in other derivations.
+--
+-- The actual derivation is not implemented; this is a \"magic\" derivation.
+data EqCallConvDerivation =
+  EqCallConvDerivation
+  { callConvConclusion :: (CallConv, CallConv)
+  }
 
 isIdDerivation :: Derivation -> Bool
 isIdDerivation (IdDerivation {}) = True
@@ -371,7 +447,7 @@ mkDictPlaceholder :: SourcePos -> Predicate -> IO TIExp
 mkDictPlaceholder pos p = do
   -- Debugging message
   when debugPlaceholders $ do
-    [ph_doc] <- uShow [p]
+    ph_doc <- runPpr $ uShow p
     print $ text "Creating placeholder for" <+> ph_doc
   actual <- newEmptyMVar
   return $ DictPH (mkSynInfo pos ObjectLevel) p actual
@@ -448,9 +524,13 @@ mkFunctionType domain range =
 convertPredicate :: Predicate -> TIType
 convertPredicate prd = DelayedType $ convertPredicate' prd 
 
-convertPredicate'(IsInst ty cls) = do
+convertPredicate' (IsInst ty cls) = do
   ty' <- convertHMType' ty
   return $ Gluon.mkConAppE noSourcePos (clsTypeCon cls) [ty']
+
+convertPredicate' (HasPassConv ty conv) = do
+  ty' <- convertHMType' ty
+  return $ Gluon.mkConAppE noSourcePos (SystemF.pyonBuiltin SystemF.the_PassConv) [ty']
 
 -- | Convert a type scheme to a function type.  Each quantified variable
 -- becomes a parameter in the function type.
