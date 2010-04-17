@@ -10,6 +10,7 @@ where
 import Control.Concurrent.MVar
 import Control.Monad
 import Debug.Trace
+import qualified Language.Haskell.TH as TH
 import System.IO.Unsafe
 
 import Gluon.Common.Error
@@ -34,9 +35,9 @@ f @@ g = appTy f g
 
 -- | Create an 'untyped' type constructor that corresponds to the given
 -- System F type constructor
-builtinTyCon name kind sf_con =
+builtinTyCon name kind sf_con pass_conv pass_conv_con pass_conv_args exec_mode =
   let y = Gluon.mkInternalConE sf_con
-  in mkTyCon (builtinLabel name) kind y
+  in mkTyCon (builtinLabel name) kind y pass_conv pass_conv_con pass_conv_args exec_mode
 
 -------------------------------------------------------------------------------
 -- Class initialization
@@ -261,11 +262,16 @@ mkVectorClass = mdo
 -------------------------------------------------------------------------------
 -- Global function initialization
 
+passable t = t `HasPassConv` TypePassConv t
+
 mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
   let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
-  in ([tT `IsInst` tiBuiltin the_Traversable],
+  in ([ tT `IsInst` tiBuiltin the_Traversable
+      , passable (tT @@ aT)
+      , passable (tT @@ bT)
+      ],
       functionType [functionType [aT] bT, tT @@ aT] (tT @@ bT))
 
 mkReduceType = forallType [Star :-> Star, Star] $ \ [t, a] ->
@@ -315,10 +321,13 @@ mkGuardType =
 
 mkIterBindType =
   forallType [Star, Star] $ \[a, b] ->
-  ([], functionType [ ConTy (tiBuiltin the_con_iter) @@ ConTy a
-                    , functionType [ConTy a] (ConTy (tiBuiltin the_con_iter) @@ ConTy b)
-                    ]
-       (ConTy (tiBuiltin the_con_iter) @@ ConTy b))
+  let aT = ConTy a
+      bT = ConTy b
+  in ([passable aT, passable bT],
+   functionType [ ConTy (tiBuiltin the_con_iter) @@ aT
+                , functionType [aT] (ConTy (tiBuiltin the_con_iter) @@ bT)
+                ]
+   (ConTy (tiBuiltin the_con_iter) @@ ConTy b))
 
 mkNegateType =
   forallType [Star] $ \[a] ->
@@ -356,22 +365,43 @@ initializeTIBuiltins = do
   bi <-
     $(let types =
             -- All types that can be referred to by name in source code.
-            -- Their kinds and System F translations.
+            -- The tuple structure contains:
+            -- 1. Gluon name
+            -- 2. kind
+            -- 3. system F constructor
+            -- 4. parameter-passing convention
+            -- 5. parameter-passing constructor Gluon name
+            -- 6. parameter-passing constructor arguments needed
+            -- 6. execution mode
             [ ("int", Star, [| Gluon.builtin Gluon.the_Int |],
-               [| PassConvVal ByVal |], [| AsAction |])
+               [| PassConvVal ByVal |],
+               "passConv_Int", [],
+               [| AsAction |])
             , ("float", Star, [| Gluon.builtin Gluon.the_Float |],
-               [| PassConvVal ByVal |], [| AsAction |])
+               [| PassConvVal ByVal |],
+               "passConv_Float", [],
+               [| AsAction |])
             , ("bool", Star, [| pyonBuiltin SystemF.the_bool |], 
-               [| PassConvVal ByVal |], [| AsAction |])
+               [| PassConvVal ByVal |],
+               "passConv_bool", [],
+               [| AsAction |])
             , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |],
-               [| PassConvVal ByVal |], [| AsAction |])
+               [| PassConvVal ByVal |],
+               "passConv_NoneType", [],
+               [| AsAction |])
             , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |],
                [| PassConvFun $ \t ->
-                  PassConvVal $ ByClosure (Return AsStream (TypePassConv t)) |], [| AsStream |])
+                  PassConvVal $ ByClosure (Return AsStream (TypePassConv t)) |],
+               "passConv_iter", [True],
+               [| AsStream |])
             , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |],
-               [| PassConvFun $ \_ -> PassConvVal ByRef |], [| AsAction |])
+               [| PassConvFun $ \_ -> PassConvVal ByRef |],
+               "passConv_list", [False],
+               [| AsAction |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |],
-               [| PassConvVal ByVal |], [| AsAction |])
+               [| PassConvVal ByVal |],
+               "passConv_Any", [],
+               [| AsAction |])
             ]
             
           classes =
@@ -452,10 +482,14 @@ initializeTIBuiltins = do
             ]
 
           -- Construct initializers
-          typ_initializer (name, _, con, _, _) =
+          typ_initializer (name, _, con, _, _, _, _) =
             ('_':name, [| return $(con) |])
-          tycon_initializer (name, kind, con, pass_conv, mode) =
-            ("_con_" ++ name, [| builtinTyCon name kind $(con) $(pass_conv) $(mode) |])
+          tycon_initializer (name, kind, con, pass_conv, pass_conv_name,
+                             pass_conv_args, mode) =
+            let pass_conv_field =
+                  TH.varE $ TH.mkName ("SystemF.the_" ++ pass_conv_name)
+            in ("_con_" ++ name,
+                [| builtinTyCon name kind $(con) $(pass_conv) (pyonBuiltin $(pass_conv_field)) pass_conv_args $(mode) |])
           cls_initializer (name, mk) =
             ('_':name, mk)
           global_initializer (name, typ, con) =

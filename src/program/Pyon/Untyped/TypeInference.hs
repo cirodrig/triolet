@@ -391,9 +391,6 @@ makePolymorphicFunction proofs pos (TyScheme qvars cst fot) fo_function
       mpat <- lookupProofParam prd proofs
       case mpat of
         Nothing -> do
-          -- DEBUG
-          print =<< runPpr (uShow prd)
-          print =<< uEqual prd prd
           internalError "Cannot find proof variable"
         Just p  -> return p
 

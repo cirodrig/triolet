@@ -53,6 +53,9 @@ doAny xs = MaybeT $ case xs of
       Just _  -> return x
   [] -> return Nothing
 
+mapAndUnzip3M :: Monad m => (a -> m (b, c, d)) -> [a] -> m ([b], [c], [d])
+mapAndUnzip3M f xs = liftM unzip3 $ mapM f xs
+
 isInstancePredicate (IsInst _ _) = True
 isInstancePredicate _ = False
 
@@ -129,22 +132,20 @@ addPassConvToContext context pred@(HasPassConv p_ty p_pc) =
       -- Insert the new constraints
       foldM addToContext context new_cst
 
--- | Determine whether a predicate is in head-normal form.
+-- | Determine whether a class instance predicate is in head-normal form.
 --
 -- If the predicate's head is a variable, it is in head-normal form.
 -- Otherwise, it is a type constructor and it should be possible to reduce it.
---
--- Resolution of a 'HasPassConv' predicate is determined based on its type, so
--- only the type need be HNF.
 isHnf :: Predicate -> IO Bool
-isHnf (IsInst t c) = canonicalizeHead t >>= checkTypeHead
+isHnf (IsInst t c) = checkTypeHead t
   where
-    checkTypeHead t =
-      case t
-      of ConTy c   -> return $ isTyVar c
-         FunTy _   -> return False
-         TupleTy _ -> return False
-         AppTy t _ -> checkTypeHead t
+    checkTypeHead t = do
+      t' <- canonicalizeHead t
+      case t' of
+        ConTy c     -> return $ isTyVar c
+        FunTy _     -> return False
+        TupleTy _   -> return False
+        AppTy t'' _ -> checkTypeHead t''
 
 isHnf _ = internalError "isHnf: Not an instance constraint"
 
@@ -175,6 +176,7 @@ toHnfConstraint p = liftM snd $ toHnf noSourcePos p
 -- Reduction rules for predicates
 
 -- | Context reduction for an IsInst predicate
+instanceReduction :: SourcePos -> Predicate -> IO (Derivation, Constraint)
 instanceReduction pos pred = do
     ip <- instancePredicates pred
     case ip of
@@ -203,11 +205,13 @@ instanceReduction pos pred = do
                          }
         return (derivation, cls_hnf_cst ++ inst_hnf_cst)
 
+hasPassConvPredicate :: HMType -> Predicate
+hasPassConvPredicate ty = ty `HasPassConv` TypePassConv ty
+
+reduceHasPassConv :: SourcePos -> Predicate -> IO (Derivation, Constraint)
 reduceHasPassConv pos pred@(HasPassConv ty pc) = do
-  m_new_pc <- pickPassConv pos ty
-  case m_new_pc of
-    Nothing         -> return (IdDerivation pred, [pred])
-    Just (pc', cst) -> return (MagicDerivation pred, cst)
+  (deriv, pc', types) <- pickPassConv pos ty
+  return (deriv, map hasPassConvPredicate types)
 
 -- | Reduce an equality predicate to a simplified form.
 reduceEquality :: SourcePos -> Predicate -> IO (Derivation, Constraint)
@@ -233,8 +237,8 @@ reduceEquality pos pred =
 
     structurallyP c1 c2 = do
       -- Reduce the head of each term as much as possible
-      c1' <- reducePassConv c1
-      c2' <- reducePassConv c2
+      (c1', _) <- reducePassConv c1
+      (c2', _) <- reducePassConv c2
       let pred' = EqPassConv c1' c2'
 
       -- Case analysis
@@ -300,39 +304,6 @@ reduceEquality pos pred =
     symmetryM pred' derive = do (d, new_cst) <- derive
                                 return (MagicDerivation pred', new_cst)
 
--- | Simplify a parameter-passing convention as much as possible
-reducePassConv :: PassConv -> IO PassConv
-reducePassConv conv = canonicalizePassConv conv >>= reduce
-  where
-    -- Evaluate functions terms here
-    reduce conv = 
-      case conv
-      of TuplePassConv xs -> do
-           -- Reduce all subterms
-           xs' <- mapM reducePassConv xs
-
-           -- Try to simplify this term
-           ifM (allM isByVal xs') (return ByVal) $
-              ifM (allM isByValOrRef xs') (return ByRef) $
-              return conv
-         TypePassConv ty -> do
-           new_conv <- pickPassConv noSourcePos ty
-           return $ maybe conv fst new_conv
-         
-         -- Other terms can't be evaluated further
-         _ -> return conv
-    
-    isByVal pc = do
-      pc' <- canonicalizePassConv pc
-      case pc' of ByVal -> return True
-                  _     -> return False
-    
-    isByValOrRef pc = do
-      pc' <- canonicalizePassConv pc
-      case pc' of ByVal -> return True
-                  ByRef -> return True
-                  _     -> return False
-
 -- | Simplify an execution mode as much as possible
 reduceExecMode :: ExecMode -> IO ExecMode
 reduceExecMode mode =
@@ -366,47 +337,92 @@ pickExecMode ty = do
     TupleTy _ -> return (Just AsAction)
     AppTy _ _ -> internalError "pickExecMode"
 
--- | Try to determine a type's parameter-passing convention.  Create a 
--- variable to represent an unknown convention.
-pickPassConv' :: SourcePos -> HMType -> IO (PassConv, Constraint)
-pickPassConv' pos ty = pickPassConv pos ty >>= ret
+-- | Simplify a parameter-passing convention as much as possible.
+-- Return the simplified convention and any unresolved type variables.
+reducePassConv :: PassConv -> IO (PassConv, [HMType])
+reducePassConv conv = canonicalizePassConv conv >>= reduce
   where
-    ret Nothing = do pc <- anyPassConv
-                     return (pc, [ty `HasPassConv` pc])
-    ret (Just (conv, cst)) = return (conv, cst)
+    -- Evaluate functions terms here
+    reduce conv = 
+      case conv
+      of TuplePassConv xs -> do
+           -- Reduce all subterms
+           (xs', variables) <- mapAndUnzipM reducePassConv xs
+
+           -- Try to simplify this term
+           let conv' =
+                 case () of
+                   _ | all isByVal xs' -> ByVal 
+                     | all isByValOrRef xs' -> ByRef 
+                     | otherwise -> TuplePassConv xs'
+
+           return (conv', concat variables)
+         
+         TypePassConv ty -> do
+           (_, pc, types) <- pickPassConv noSourcePos ty
+           return (pc, types)
+         
+         -- Other terms can't be evaluated further
+         _ -> return (conv, [])
+    
+    isByVal ByVal = True
+    isByVal _     = False
+    
+    isByValOrRef ByVal = True
+    isByValOrRef ByRef = True
+    isByValOrRef _     = False
 
 -- | Try to determine a type's parameter-passing convention.
 -- Return the convention and a constraint for the parameter-passing 
 -- convention of for unknown types.
-pickPassConv :: SourcePos -> HMType -> IO (Maybe (PassConv, Constraint))
-pickPassConv pos ty = do 
+pickPassConv :: SourcePos -> HMType -> IO (Derivation, PassConv, [HMType])
+pickPassConv pos ty = do
   (oper, args) <- inspectTypeApplication ty
   case oper of
     ConTy c
-      | isTyVar c -> return Nothing
-      | otherwise -> let conv = applyPassConvCtor (tyConPassConv c) args
-                     in return $ Just (conv, [])
+      | isTyVar c ->
+          return (IdDerivation (ty `HasPassConv` TypePassConv ty),
+                  TypePassConv ty, [ty])
+      | otherwise -> do
+          (derivs, _, _) <- mapAndUnzip3M (pickPassConv pos) args
+          let conv = applyPassConvCtor (tyConPassConv c) args
+              deriv = PassConvDerivation
+                      { conclusion = ty `HasPassConv` conv
+                      , derivedConstructor = tyConPassConvCtor c
+                      , passConvTypes = args
+                      , passConvPremises = map snd $ filter fst $
+                                           zip (tyConPassConvArgs c) derivs
+                      }
+          return (deriv, conv, [])
     FunTy _ -> do
       (cc, cst) <- pickCallConv pos (init args) (last args)
-      return $ Just (ByClosure cc, cst)
-    TupleTy _ -> do
-      conv_csts <- mapM (pickPassConv' pos) args
-      let fields = map fst conv_csts
-          new_csts = concatMap snd conv_csts
-      cc <- reducePassConv (TuplePassConv fields)
-      return $ Just (cc, new_csts)
+      let deriv = FunPassConvDerivation
+                  { conclusion = ty `HasPassConv` ByClosure cc
+                  }
+      return (deriv, ByClosure cc, cst)
+    TupleTy tuple_size -> do
+      (derivs, fields, new_csts) <- mapAndUnzip3M (pickPassConv pos) args
+      let new_cst = concat new_csts
+      (cc, new_cst') <- reducePassConv (TuplePassConv fields)
+      let deriv = PassConvDerivation
+                  { conclusion = ty `HasPassConv` cc
+                  , derivedConstructor = SystemF.getPyonTuplePassConv' tuple_size
+                  , passConvTypes = args
+                  , passConvPremises = derivs
+                  }
+      return (deriv, cc, new_cst ++ new_cst')
       
     AppTy _ _ -> internalError "pickPassConv"
 
-pickCallConv :: SourcePos -> [HMType] -> HMType -> IO (CallConv, Constraint)
+pickCallConv :: SourcePos -> [HMType] -> HMType -> IO (CallConv, [HMType])
 pickCallConv pos domain range = do
   mode <- pickExecMode' range
-  (conv, cst) <- pickPassConv' pos range
-  foldM addParameter (Return mode conv, cst) $ reverse domain
+  (_, conv, variables) <- pickPassConv pos range
+  foldM addParameter (Return mode conv, variables) $ reverse domain
   where
-    addParameter (call_conv, cst) param_type = do
-      (param_conv, new_cst) <- pickPassConv' pos param_type
-      return (param_conv :+> call_conv, new_cst ++ cst)
+    addParameter (call_conv, variables) param_type = do
+      (_, param_conv, new_variables) <- pickPassConv pos param_type
+      return (param_conv :+> call_conv, new_variables ++ variables)
 
 -------------------------------------------------------------------------------
 -- Context reduction
@@ -603,6 +619,23 @@ toProof pos env derivation =
            return (dict, [])
 
        return (True, placeholders, proof)
+     PassConvDerivation { conclusion = prd@(HasPassConv ty pc)
+                        , derivedConstructor = con
+                        , passConvTypes = types
+                        , passConvPremises = premises
+                        } -> do
+       -- Prove premises
+       (proof, placeholders) <-
+         toLocalProofs premises env $ \c_env c_vars -> do
+           -- Apply the constructor to premise types and premises
+           let premise_ts = map convertHMType types
+               premise_vs = map (mkVarE pos) c_vars
+               prf = mkPolyCallE pos (mkConE pos con) premise_ts premise_vs
+           return (prf, [])
+       when (not $ null placeholders) $
+         print =<< runPpr (mapM uShow $ map phExpPredicate placeholders)
+       return (True, placeholders, proof)
+       
      _ -> do
        -- Create a magic proof value
        return (True, [], mkTyAppE pos (mkConE noSourcePos $ SystemF.pyonBuiltin SystemF.the_fun_undefined) (convertPredicate $ conclusion derivation))

@@ -51,6 +51,14 @@ pyonBuiltinConstructors =
   , "AdditiveDict"
   , "VectorDict"
   , "PassConv"
+    -- Parameter-passing conventions
+  , "passConv_Int"
+  , "passConv_Float"
+  , "passConv_bool"
+  , "passConv_NoneType"
+  , "passConv_iter"
+  , "passConv_list"
+  , "passConv_Any"
     -- Data constructors
   , "None"
   , "True"
@@ -60,7 +68,6 @@ pyonBuiltinConstructors =
   , "traversableDict"
   , "additiveDict"
   , "vectorDict"
-  , "passConv"
     -- Functions
   , "oper_MUL"
   , "oper_DIV"
@@ -93,6 +100,7 @@ pyonBuiltinsSpecification =
 
     others = [ ("_tuples", NotStrict, [t| [Con] |])
              , ("_tupleConstructors", NotStrict, [t| [Con] |])
+             , ("_tuplePassConvConstructors", NotStrict, [t| [Con] |])
              , ("_EqDict_Int", IsStrict, [t| EqDictMembers |])
              , ("_OrdDict_Int", IsStrict, [t| OrdDictMembers |])
              , ("_EqDict_Float", IsStrict, [t| EqDictMembers |])

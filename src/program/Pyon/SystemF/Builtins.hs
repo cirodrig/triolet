@@ -11,7 +11,13 @@ module Pyon.SystemF.Builtins
         the_NoneType, 
         the_Any, 
         the_PassConv,
-        the_passConv,
+        the_passConv_Int,
+        the_passConv_Float,
+        the_passConv_bool,
+        the_passConv_NoneType,
+        the_passConv_iter,
+        the_passConv_list,
+        the_passConv_Any,
         the_EqDict, the_OrdDict, the_TraversableDict,
         the_AdditiveDict, the_VectorDict,
         the_EqDict_Int, the_OrdDict_Int,
@@ -42,7 +48,8 @@ module Pyon.SystemF.Builtins
         the_fun_iota,
         the_fun_undefined,
         getPyonTupleType, getPyonTupleType',
-        getPyonTupleCon, getPyonTupleCon'
+        getPyonTupleCon, getPyonTupleCon',
+        getPyonTuplePassConv, getPyonTuplePassConv'
        )
 where
 
@@ -124,6 +131,24 @@ getPyonTupleCon' n = case getPyonTupleCon n
                      of Just t -> t
                         Nothing -> internalError "Unsupported tuple size"
 
+getPyonTuplePassConv :: Int -> Maybe Con
+getPyonTuplePassConv size = unsafePerformIO $ do
+  -- Ensure that we've already initialized these
+  bi_is_empty <- isEmptyMVar the_PyonBuiltins
+  when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+
+  bi <- readMVar the_PyonBuiltins
+  let ts = the_tuplePassConvConstructors bi
+  return $! if size >= 0 && size < length ts
+            then Just (ts !! size)
+            else Nothing
+  
+getPyonTuplePassConv' :: Int -> Con
+getPyonTuplePassConv' size =
+  case getPyonTuplePassConv size
+  of Just t -> t
+     Nothing -> internalError "Unsupported tuple size"
+
 findConByName mod name =
   let label = pgmLabel (moduleName "SFBuiltin") name
   in case find ((label ==) . conName) $ getConstructors mod
@@ -158,6 +183,11 @@ initializePyonBuiltins mod = do
                  tupleTypes = map (findConByName mod) tupleTypeNames
                  force x = foldl' (flip seq) x tupleTypes
              in force $ return tupleTypes |]
+        assign_tuple_pass_convs =
+          [| let names = ["passConv_pyonTuple" ++ show n | n <- [0..5]]
+                 cons = map (findConByName mod) names
+                 force x = foldl' (flip seq) x cons
+             in force $ return cons |]
 
         -- Initialize class dictionaries
         findNameWithPrefix name pfx =
@@ -192,6 +222,7 @@ initializePyonBuiltins mod = do
           constructors ++
           [ ("_tuples", assign_tuple_types)
           , ("_tupleConstructors", assign_tuples)
+          , ("_tuplePassConvConstructors", assign_tuple_pass_convs)
           , eq_dict "Int"
           , eq_dict "Float"
           , eq_dict "Tuple2"

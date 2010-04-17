@@ -52,6 +52,17 @@ RigidTyVar(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+tupleType(PyObject *self, PyObject *args)
+{
+  PyObject *fields;
+
+  if (!PyArg_ParseTuple(args, "O", &fields))
+    return NULL;
+
+  return pyon_tupleType(fields);
+}
+
+static PyObject *
 Variable(PyObject *self, PyObject *args)
 {
   PyObject *var;
@@ -314,6 +325,8 @@ static PyMethodDef untyped_methods[] = {
    "Construct an arrow kind"},
   {"RigidTyVar", RigidTyVar, METH_VARARGS,
    "Construct a rigid type variable"},
+  {"tupleType", tupleType, METH_VARARGS,
+   "Construct a tuple type"},
   {"Variable", Variable, METH_VARARGS,
    "Construct an untyped variable"},
   {"WildP", WildP, METH_VARARGS,

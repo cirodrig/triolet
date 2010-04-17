@@ -125,17 +125,23 @@ pyon_SourcePos fname line column = do
 
 foreign export ccall pyon_ArrowK :: PyPtr -> PyPtr -> IO PyPtr
 
-pyon_ArrowK py_k1 py_k2 = do
+pyon_ArrowK py_k1 py_k2 = rethrowExceptionsInPython $ do
   k1 <- fromHsObject' py_k1
   k2 <- fromHsObject' py_k2
   newHsObject $ k1 :-> k2
 
 foreign export ccall pyon_RigidTyVar :: PyPtr -> PyPtr -> IO PyPtr
 
-pyon_RigidTyVar py_label py_kind = do
+pyon_RigidTyVar py_label py_kind = rethrowExceptionsInPython $ do
   label <- fromHsObject' py_label
   kind <- fromHsObject' py_kind
   newHsObject =<< newRigidTyVar kind (Just label)
+
+foreign export ccall pyon_tupleType :: PyPtr -> IO PyPtr
+
+pyon_tupleType py_fields = rethrowExceptionsInPython $ do
+  fields <- fromTypeOrConList py_fields
+  newHsObject $ tupleType fields
 
 foreign export ccall pyon_Variable :: PyPtr -> IO PyPtr
 

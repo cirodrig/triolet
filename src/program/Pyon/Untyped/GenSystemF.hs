@@ -24,7 +24,7 @@ import qualified Data.Set as Set
 import Data.Traversable
 import Data.Typeable(Typeable)
 import qualified Data.Map as Map
-import Text.PrettyPrint.HughesPJ(text, (<+>), parens)
+import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Error
 import Gluon.Common.MonadLogic
@@ -258,10 +258,16 @@ data Derivation =
     , instancePremises :: [Derivation] 
     , classPremises :: [Derivation]
     }
-  | -- | Structural recursion on 'ByClosure' terms
-    StructByClosureDerivation
+  | -- | Parameter-passing convention derivation for data
+    PassConvDerivation
     { conclusion :: Predicate
-    , byClosurePremise :: Derivation
+    , derivedConstructor :: Gluon.Con
+    , passConvTypes :: [HMType]
+    , passConvPremises :: [Derivation]
+    }
+  | -- | Parameter-passing convention derivation for functions
+    FunPassConvDerivation
+    { conclusion :: Predicate
     }
     -- | A derivation without evidence
   | MagicDerivation
@@ -291,6 +297,12 @@ lookupProof :: Predicate -> ProofEnvironment -> IO (Maybe TIExp)
 lookupProof prd env = do
   assoc <- findM ((prd `uEqual`) . fst) env
   return $ fmap snd assoc
+
+-- | Render the proofs in a proof environment (for debugging)
+pprProofEnvironment :: ProofEnvironment -> Ppr Doc
+pprProofEnvironment env = do
+  docs <- mapM uShow $ map fst env
+  return $ vcat $ punctuate semi docs
 
 -------------------------------------------------------------------------------
 -- Type inference System F data structures
@@ -398,6 +410,16 @@ mkTupleE pos fields = TIExp $ SystemF.TupleE (synInfo pos) fields
 
 mkCallE :: SourcePos -> TIExp -> [TIExp] -> TIExp
 mkCallE pos oper args = TIExp $ SystemF.CallE (synInfo pos) oper args
+
+-- | Create a call of a polymorphic function with no constraint arguments.
+-- This does not follow the calling convention for constraint arguments, which
+-- should be \"called\" separately.
+mkPolyCallE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
+mkPolyCallE pos oper ty_args args =
+  let mono_oper = foldl (mkTyAppE pos) oper ty_args
+  in if null args
+     then mono_oper
+     else TIExp $ SystemF.CallE (synInfo pos) mono_oper args
 
 mkLetE :: SourcePos -> SystemF.Pat TI -> TIExp -> TIExp -> TIExp
 mkLetE pos lhs rhs body = TIExp $ SystemF.LetE (synInfo pos) lhs rhs body 

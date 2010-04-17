@@ -3,7 +3,8 @@
 module Pyon.Untyped.HMType
        (Substitution, substitutionFromList,
         TyVars, TyVarSet, TyCon,
-        tyConKind, tyConPassConv, tyConExecMode,
+        tyConKind, tyConPassConv, tyConPassConvCtor, tyConPassConvArgs, 
+        tyConExecMode,
         isTyVar, isRigidTyVar, isFlexibleTyVar,
         isCanonicalTyVar,
         newTyVar, newRigidTyVar, mkTyCon, duplicateTyVar,
@@ -45,7 +46,7 @@ import Gluon.Common.SourcePos
 import Gluon.Common.Supply
 import Gluon.Common.Identifier
 import Gluon.Common.Label
-import Gluon.Core(Var(..), mkVar, Level(..), Rec)
+import Gluon.Core(Var(..), mkVar, Level(..), Rec, Con)
 
 import Pyon.Globals
 import qualified Pyon.SystemF.Syntax as SystemF
@@ -66,6 +67,23 @@ type TyVars = [TyCon]
 -- | A set of type variables
 type TyVarSet = Set.Set TyCon
 
+-- | Information about a type constructor
+data TyConDescr =
+  TyConDescr
+  { -- | The System F constructor
+    tcSystemFValue :: SystemF.RType
+    -- | Parameter-passing convention for values of this type constructor
+  , tcPassConv :: PassConvCtor
+    -- | A proof or proof constructor for the parameter-passing convention.
+    -- The proof constructor's type must match the constructor's kind.
+  , tcPassConvProof :: Con
+    -- | Which arguments need to be passed to the proof constructor.  There
+    -- is one list element per type parameter.
+  , tcPassConvArgs :: [Bool]
+    -- | Execution mode for functions returning this type constructor
+  , tcExecMode :: ExecMode
+  }
+
 -- | An atomic type-level entity, such as a type variable or constructor
 data TyCon =
   TyCon
@@ -80,13 +98,8 @@ data TyCon =
   , tcRep  :: {-# UNPACK #-} !(Maybe (IORef TyVarRep))
     -- | The System F equivalent of a type variable
   , tcSystemFVariable :: IORef (Maybe SystemF.Var)
-    -- | The System F equivalent of a type constructor; undefined for variables
-  , tcSystemFValue :: SystemF.RType
-    -- | The parameter-passing convention of a type constructor; undefined
-    -- for variables
-  , tcPassConv :: PassConvCtor
-    -- | The execution mode of a type constructor; undefined for variables
-  , tcExecMode :: ExecMode
+    -- | Information pertaining to type constructors; undefined for variables
+  , tcConInfo :: TyConDescr
   }
   deriving(Typeable)
 
@@ -111,11 +124,20 @@ isFlexibleTyVar c = isTyVar c && isJust (tcRep c)
 
 -- | Get the parameter-passing convention of a type constructor
 tyConPassConv :: TyCon -> PassConvCtor
-tyConPassConv = tcPassConv
+tyConPassConv = tcPassConv . tcConInfo
+
+-- | Get the proof constructor for a type constructor's parameter-passing
+-- convention
+tyConPassConvCtor :: TyCon -> Con
+tyConPassConvCtor = tcPassConvProof . tcConInfo
+
+-- | Get the parameter-passing convention proof arguments
+tyConPassConvArgs :: TyCon -> [Bool]
+tyConPassConvArgs = tcPassConvArgs . tcConInfo
 
 -- | Get the execution mode of a type constructor
 tyConExecMode :: TyCon -> ExecMode
-tyConExecMode = tcExecMode
+tyConExecMode = tcExecMode . tcConInfo
 
 -- | Create a new flexible type variable
 newTyVar :: Kind -> Maybe Label -> IO TyCon
@@ -123,27 +145,34 @@ newTyVar k lab = do
   id <- newTyConID
   rep <- newIORef NoRep
   sfvar <- newIORef Nothing
-  let sfvalue = error "Attempted to get system f value of a variable"
-      pc = error "Attempted to get the parameter-passing convention of a varible"
-      em = error "Attempted to get the execution mode of a variable"
-  return $! TyCon id lab k True (Just rep) sfvar sfvalue pc em
+  let con_descr = internalError 
+                  "Type variables do not have constructor information"
+  return $! TyCon id lab k True (Just rep) sfvar con_descr
 
 -- | Create a new rigid type variable
 newRigidTyVar :: Kind -> Maybe Label -> IO TyCon
 newRigidTyVar k lab = do
   id <- newTyConID
   sfvar <- newIORef Nothing
-  let sfvalue = error "Attempted to get system f value of a variable"
-      pc = error "Attempted to get the parameter-passing convention of a variable"
-      em = error "Attempted to get the execution mode of a variable"
-  return $! TyCon id lab k True Nothing sfvar sfvalue pc em
+  let con_descr = internalError
+                  "Type variables do not have constructor information"
+  return $! TyCon id lab k True Nothing sfvar con_descr
 
 -- | Create a type constructor
-mkTyCon :: Label -> Kind -> SystemF.RType -> PassConvCtor -> ExecMode -> IO TyCon
-mkTyCon name kind value pass_conv em = do
+mkTyCon :: Label -> Kind -> SystemF.RType -> PassConvCtor -> Con -> [Bool]
+        -> ExecMode
+        -> IO TyCon
+mkTyCon name kind value pass_conv pass_conv_proof pass_conv_args em = do
   id <- newTyConID
-  let var = error "Type constructor is not a variable" 
-  return $! TyCon id (Just name) kind False Nothing var value pass_conv em
+  let var = error "Type constructor is not a variable"
+      con_descr = TyConDescr
+                  { tcSystemFValue = value
+                  , tcPassConv = pass_conv
+                  , tcPassConvProof = pass_conv_proof
+                  , tcPassConvArgs = pass_conv_args
+                  , tcExecMode = em
+                  }
+  return $! TyCon id (Just name) kind False Nothing var con_descr
 
 -- | Create a new type variable that is like the given one, but independent
 -- with respect to unification
@@ -534,4 +563,4 @@ tyVarToSystemF c
 tyConToSystemF :: TyCon -> IO SystemF.RType
 tyConToSystemF c
   | isTyVar c = fail "Expecting a constructor"
-  | otherwise = return $ tcSystemFValue c
+  | otherwise = return $ tcSystemFValue $ tcConInfo c

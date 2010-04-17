@@ -63,7 +63,39 @@ let binary_any -> Pure = (a : Pure) -> binary a;
 
 -- Parameter-passing conventions.
 data PassConv : Pure -> Pure where
-  passConv : (t : Pure) -> PassConv t;
+    byVal : (t : Pure) -> PassConv t
+  | byRef : (t : Pure) -> PassConv t
+  | byClosure : (t : Pure) -> PassConv t;
+
+let passConv_Int -> PassConv Int = byVal Int;
+let passConv_Float -> PassConv Float = byVal Float;
+let passConv_bool -> PassConv bool = byVal bool;
+let passConv_NoneType -> PassConv NoneType = byVal NoneType;
+let passConv_iter (t : Pure) (elt : PassConv t) -> PassConv (Stream t) =
+  byClosure (Stream t);
+let passConv_list (t : Pure) -> PassConv (list t) =
+  byRef (list t);
+let passConv_Any -> PassConv Any = byVal Any;
+
+constant passConv_pyonTuple0 : PassConv PyonTuple0;
+constant passConv_pyonTuple1 :
+    (t : Pure) -> PassConv t -> PassConv (PyonTuple1 t);
+constant passConv_pyonTuple2 :
+    (t : Pure) -> (u : Pure)
+ -> PassConv t -> PassConv u
+ -> PassConv (PyonTuple2 t u);
+constant passConv_pyonTuple3 :
+    (t : Pure) -> (u : Pure) -> (v : Pure)
+ -> PassConv t -> PassConv u -> PassConv v
+ -> PassConv (PyonTuple3 t u v);
+constant passConv_pyonTuple4 :
+    (t : Pure) -> (u : Pure) -> (v : Pure) -> (w : Pure)
+ -> PassConv t -> PassConv u -> PassConv v -> PassConv w
+ -> PassConv (PyonTuple4 t u v w);
+constant passConv_pyonTuple5 :
+    (t : Pure) -> (u : Pure) -> (v : Pure) -> (w : Pure) -> (x : Pure)
+ -> PassConv t -> PassConv u -> PassConv v -> PassConv w -> PassConv x
+ -> PassConv (PyonTuple5 t u v w x);
 
 -- Dictionary types for Pyon classes.
 data EqDict : Pure -> Pure where
@@ -153,9 +185,9 @@ constant oper_NEGATE : (a : Pure) -> a -> a;
 
 constant oper_CAT_MAP : (a : Pure)
                      -> (b : Pure)
-                     -> Stream a
-                     -> (a -> Stream b)
-                     -> Stream b;
+                     -> PassConv a
+                     -> PassConv b
+                     -> (Stream a -> (a -> Stream b) -> Stream b);
 
 constant oper_GUARD : (a : Pure) -> bool -> Stream a -> Stream a;
 
@@ -166,6 +198,8 @@ constant fun_makelist : (a : Pure)
 
 constant fun_map : (t : Pure -> Pure) -> (a : Pure) -> (b : Pure)
                 -> TraversableDict t
+                -> PassConv (t a)
+                -> PassConv (t b)
                 -> ((a -> b) -> t a -> t b);
 
 constant fun_reduce : (t : Pure -> Pure) -> (a : Pure)
