@@ -294,14 +294,28 @@ Def(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+Export(PyObject *self, PyObject *args)
+{
+  PyObject *pos;
+  PyObject *var;
+
+  if (!PyArg_ParseTuple(args, "O!O!",
+			&HsObject_type, &pos, &HsObject_type, &var))
+    return NULL;
+
+  return pyon_Export(pos, var);
+}
+
+static PyObject *
 Module(PyObject *self, PyObject *args)
 {
   PyObject *defgroups;
+  PyObject *exports;
 
-  if (!PyArg_ParseTuple(args, "O", &defgroups))
+  if (!PyArg_ParseTuple(args, "OO", &defgroups, &exports))
     return NULL;
 
-  return pyon_Module(defgroups);
+  return pyon_Module(defgroups, exports);
 }
 
 static PyObject *
@@ -363,6 +377,8 @@ static PyMethodDef untyped_methods[] = {
    "Consruct a function object"},
   {"Def", Def, METH_VARARGS,
    "Construct a function definition"},
+  {"Export", Export, METH_VARARGS,
+   "Construct an export delcaration"},
   {"Module", Module, METH_VARARGS,
    "Construct a module object"},
   {"printModule", pyon_printModule, METH_O,

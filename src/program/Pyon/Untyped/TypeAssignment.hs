@@ -11,30 +11,14 @@ module Pyon.Untyped.TypeAssignment
 where
 
 import Control.Monad
-import qualified Data.Map as Map
-import qualified Data.Set as Set
 
 import Gluon.Common.Error
 import Gluon.Common.SourcePos
-import Pyon.Untyped.Classes
 import Pyon.Untyped.GenSystemF
-import Pyon.Untyped.Unification
 import Pyon.Untyped.HMType
 import Pyon.Untyped.Kind
 import Pyon.Untyped.Syntax
-
--- | A variable's type assignment, containing information about how to create 
--- its corresponding expression in System F
-data TypeAssignment =
-  TypeAssignment
-  { -- | Get a type assignment's free type variables
-    _typeAssignmentFreeVariables :: !(IO TyVarSet)
-    -- | Get a type assignment's scheme, if it can be ascribed one
-    -- This will evaluate to an error for recursive variable type assignments
-  , _typeAssignmentScheme :: TyScheme
-    -- | Instantiate a type assignment
-  , _instantiateTypeAssignment :: !(SourcePos -> IO (Placeholders, TyVarSet, Constraint, HMType, TIExp))
-  }
+import Pyon.Untyped.Data
 
 assignedFreeVariables :: TypeAssignment -> IO TyVarSet
 assignedFreeVariables = _typeAssignmentFreeVariables

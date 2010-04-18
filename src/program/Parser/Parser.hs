@@ -594,12 +594,39 @@ isDefStatement (Py.Fun {}) = True
 isDefStatement (Py.Decorated {Py.decorated_def = Py.Fun {}}) = True
 isDefStatement _           = False
 
-topLevel :: [PyStmt] -> Cvt [Func]
-topLevel xs = traverse topLevelFunction xs
-    where
-      topLevelFunction stmt | isDefStatement stmt = funDefinition stmt
-      topLevelFunction _ =
-          fail "Only function definitions permitted at global scpoe"
+isExportStatement (Py.Export {}) = True
+isExportStatement _ = False
+
+topLevel :: [PyStmt] -> Cvt ([Func], [ExportItem])
+topLevel xs = do
+  items <- traverse topLevelFunction xs
+  let (functions, exports) = partitionEither items
+  return (functions, concat exports)
+  where
+    partitionEither xs = part xs id id
+      where
+        part (Left y : xs)  ys zs = part xs ((y:) . ys) zs
+        part (Right z : xs) ys zs = part xs ys ((z:) . zs)
+        part []             ys zs = (ys [], zs [])
+
+    topLevelFunction stmt
+      | isDefStatement stmt = do x <- funDefinition stmt
+                                 return (Left x)
+      | isExportStatement stmt = do xs <- exportStatement stmt
+                                    return (Right xs)
+      | otherwise =
+          fail "Only functions and exports permitted at global scpoe"
+
+-- Process an export statement
+exportStatement :: PyStmt -> Cvt [ExportItem]
+exportStatement stmt@(Py.Export {Py.export_items = items,
+                                 Py.stmt_annot = ann}) =
+  -- Export each item
+  mapM export_item items 
+  where
+    export_item item = do
+      var <- use item
+      return $ ExportItem (toSourcePos ann) var
 
 -- Unpack a function definition into decorator and real definition
 funDefinition :: PyStmt -> Cvt Func
@@ -763,7 +790,7 @@ convertStatement stmt names =
 convertModule :: PredefinedVars -- ^ Predefined global variables
               -> Py.ModuleSpan   -- ^ Module to scan
               -> Int             -- ^ First unique variable ID to use
-              -> Either [String] (Int, [Func])
+              -> Either [String] (Int, ([Func], [ExportItem]))
 convertModule globals mod names =
     let computation =
             case mod
@@ -786,6 +813,7 @@ parseModule stream path globals nextID =
     of Left err  -> Left [show err]
        Right (mod, _) ->
            case convertModule globals mod nextID
-           of Left err        -> Left err
-              Right (n, defs) -> let groups = definitionGroups defs
-                                 in Right (n, Module groups)
+           of Left err -> Left err
+              Right (n, (defs, exps)) ->
+                let groups = definitionGroups defs
+                in Right (n, Module groups exps)

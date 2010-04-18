@@ -107,4 +107,6 @@ type ForallAnnotation = [(Var, Maybe Expr)]
 
 data Func = Func SourcePos Var (Maybe ForallAnnotation) [Parameter] Annotation Suite
 
-data Module = Module [[Func]]
+data ExportItem = ExportItem SourcePos Var
+
+data Module = Module [[Func]] [ExportItem]

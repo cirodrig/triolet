@@ -58,6 +58,7 @@ data Env =
     , py_IfStmt             :: !PyPtr
     , py_DefGroupStmt       :: !PyPtr
     , py_Function           :: !PyPtr
+    , py_ExportItem         :: !PyPtr
     , py_Module             :: !PyPtr
     , py_BITWISEAND         :: !PyPtr
     , py_BITWISEOR          :: !PyPtr
@@ -113,6 +114,7 @@ mkEnv =
         ifStmt <- getAttr mod "IfStmt"
         defGroupStmt <- getAttr mod "DefGroupStmt"
         function <- getAttr mod "Function"
+        exportItem <- getAttr mod "ExportItem"
         module_ <- getAttr mod "Module"
 
         bitwiseandOp <- getAttr op "BITWISEAND"
@@ -159,6 +161,7 @@ mkEnv =
                      , py_IfStmt = ifStmt
                      , py_DefGroupStmt = defGroupStmt
                      , py_Function = function
+                     , py_ExportItem = exportItem
                      , py_Module = module_
                      , py_BITWISEAND = bitwiseandOp
                      , py_BITWISEOR = bitwiseorOp
@@ -208,6 +211,7 @@ freeEnv env = mapM_ decrefField
               , py_IfStmt
               , py_DefGroupStmt
               , py_Function
+              , py_ExportItem
               , py_Module
               , py_BITWISEAND
               , py_BITWISEOR
@@ -546,5 +550,9 @@ instance Exportable Func where
     toPythonEx (Func pos name qvars params ann body) =
         call6Ex (readEnv py_Function) pos name qvars params ann body
 
+instance Exportable ExportItem where
+  toPythonEx (ExportItem pos var) =
+    call2Ex (readEnv py_ExportItem) pos var
+
 instance Exportable Module where
-    toPythonEx (Module groups) = call1Ex (readEnv py_Module) groups
+    toPythonEx (Module groups exps) = call2Ex (readEnv py_Module) groups exps

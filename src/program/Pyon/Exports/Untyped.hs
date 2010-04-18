@@ -273,11 +273,19 @@ pyon_Def py_v py_f = rethrowExceptionsInPython $ do
   f <- fromHsObject' py_f
   newHsObject $ FunctionDef v f
 
-foreign export ccall pyon_Module :: PyPtr -> IO PyPtr 
+foreign export ccall pyon_Export :: PyPtr -> PyPtr -> IO PyPtr
 
-pyon_Module py_defs = rethrowExceptionsInPython $ do
+pyon_Export py_pos py_name = rethrowExceptionsInPython $ do
+  p <- fromHsObject' py_pos
+  n <- fromHsObject' py_name
+  newHsObject $ Export (posAnn p) n
+
+foreign export ccall pyon_Module :: PyPtr -> PyPtr -> IO PyPtr 
+
+pyon_Module py_defs py_exports = rethrowExceptionsInPython $ do
   defgroups <- mapList (mapList fromHsObject') py_defs
-  newHsObject $ Module defgroups
+  exports <- fromListOfHsObject' py_exports
+  newHsObject $ Module defgroups exports
   where
     mapList f list = do
       -- Argument must be a list

@@ -32,7 +32,6 @@ import Data.Function
 import Data.IORef
 import Data.List
 import Data.Traversable
-import Data.Typeable(Typeable)
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import Data.Maybe
@@ -50,9 +49,9 @@ import Gluon.Core(Var(..), mkVar, Level(..), Rec, Con)
 
 import Pyon.Globals
 import qualified Pyon.SystemF.Syntax as SystemF
+import Pyon.Untyped.Data
 import Pyon.Untyped.Kind
 import Pyon.Untyped.Unification
-import {-# SOURCE #-} Pyon.Untyped.CallConv
 
 tyConIDSupply :: Supply (Ident TyCon)
 {-# NOINLINE tyConIDSupply #-}
@@ -61,57 +60,8 @@ tyConIDSupply = unsafePerformIO newIdentSupply
 newTyConID :: IO (Ident TyCon)
 newTyConID = supplyValue tyConIDSupply
 
--- | A list of type variables
-type TyVars = [TyCon]
-
--- | A set of type variables
-type TyVarSet = Set.Set TyCon
-
--- | Information about a type constructor
-data TyConDescr =
-  TyConDescr
-  { -- | The System F constructor
-    tcSystemFValue :: SystemF.RType
-    -- | Parameter-passing convention for values of this type constructor
-  , tcPassConv :: PassConvCtor
-    -- | A proof or proof constructor for the parameter-passing convention.
-    -- The proof constructor's type must match the constructor's kind.
-  , tcPassConvProof :: Con
-    -- | Which arguments need to be passed to the proof constructor.  There
-    -- is one list element per type parameter.
-  , tcPassConvArgs :: [Bool]
-    -- | Execution mode for functions returning this type constructor
-  , tcExecMode :: ExecMode
-  }
-
--- | An atomic type-level entity, such as a type variable or constructor
-data TyCon =
-  TyCon
-  { -- | Unique ID, used for comparing TyCon instances
-    tcID :: {-# UNPACK #-} !(Ident TyCon)
-  , tcName :: !(Maybe Label)
-  , tcKind :: !Kind
-    -- | True if this is a type variable
-  , tcIsVariable :: {-# UNPACK #-} !Bool
-    -- | For a flexible type variable, this is what the variable has been 
-    -- unified with
-  , tcRep  :: {-# UNPACK #-} !(Maybe (IORef TyVarRep))
-    -- | The System F equivalent of a type variable
-  , tcSystemFVariable :: IORef (Maybe SystemF.Var)
-    -- | Information pertaining to type constructors; undefined for variables
-  , tcConInfo :: TyConDescr
-  }
-  deriving(Typeable)
-
 tyConKind :: TyCon -> Kind
 tyConKind = tcKind
-
-instance Eq TyCon where
-  (==) = (==) `on` tcID
-  (/=) = (/=) `on` tcID
-
-instance Ord TyCon where
-  compare = compare `on` tcID
 
 isTyVar :: TyCon -> Bool
 isTyVar = tcIsVariable
@@ -182,25 +132,8 @@ duplicateTyVar v =
   of True -> newTyVar (tcKind v) (tcName v)
      False -> fail "Expecting a type variable"
 
--- | A type variable's value as identified by unification
---
--- 'TyVarRep' always holds a reference to a unifiable type variable
-data TyVarRep = NoRep | TyVarRep !TyCon | TypeRep !HMType
-
 isNoRep NoRep = True
 isNoRep _ = False
-
--- | A first-order Hindley-Milner type
-data HMType =
-    -- | A type constructor or variable
-    ConTy !TyCon
-    -- | An N-ary function type
-  | FunTy {-# UNPACK #-} !Int
-    -- | An N-element tuple type
-  | TupleTy {-# UNPACK #-} !Int
-    -- | A type application
-  | AppTy HMType HMType
-    deriving(Typeable)
 
 kindError = error "Kind error in type application"
 
@@ -461,42 +394,8 @@ arrow_prec = 1
 prod_prec = 2
 app_prec = 4
 
-{-
--- | Uncurry a type application, and pass the operator and arguments to another
--- function.
-uncurryPr :: (HMType -> [HMType] -> Pr a) -> (HMType -> Pr a)
-uncurryPr f ty = Pr $ \names env -> do
-  (op, args) <- uncurryTypeApplication ty 
-  case f op args of Pr g -> g names env
-
-prTyCon :: TyCon -> Pr Doc
-prTyCon c = 
-  case tcName c
-  of Just nm -> pure (text $ showLabel nm)
-     Nothing -> Pr $ \names_ref env_ref -> do
-       env <- readIORef env_ref
-  
-       -- If the variable is in the environment, then return its document
-       case Map.lookup (tcID c) env of
-         Just doc -> return doc
-         Nothing  -> do
-           -- Otherwise, give it a new name
-           (nm:names') <- readIORef names_ref
-           writeIORef names_ref names'
-           let doc = text nm
-               
-           -- Save name in environment
-           writeIORef env_ref $ Map.insert (tcID c) doc env
-           
-           -- Return the document 
-           return doc
--}
-
 pprType :: HMType -> Ppr Doc
 pprType ty = prType 0 ty
-
--- displayType :: HMType -> Pr Doc 
--- displayType t = prType 0 t
 
 prType :: Int -> HMType -> Ppr Doc
 prType prec t = do
@@ -537,7 +436,6 @@ prType prec t = do
     application hd params =
       parenthesize app_prec $ sep (hd : params)
 
-
 -------------------------------------------------------------------------------
 -- Conversion to System F
 
@@ -564,3 +462,4 @@ tyConToSystemF :: TyCon -> IO SystemF.RType
 tyConToSystemF c
   | isTyVar c = fail "Expecting a constructor"
   | otherwise = return $ tcSystemFValue $ tcConInfo c
+

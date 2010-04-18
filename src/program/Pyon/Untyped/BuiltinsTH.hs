@@ -6,8 +6,7 @@ import Language.Haskell.TH(Strict(..))
 import Language.Haskell.TH.Syntax(Lift(..))
 import Gluon.Common.THRecord
 import Gluon.Core hiding(Kind)
-import Pyon.Untyped.GenSystemF
-import Pyon.Untyped.HMType
+import Pyon.Untyped.Data
 import Pyon.Untyped.Kind
 import Pyon.Untyped.Syntax
 

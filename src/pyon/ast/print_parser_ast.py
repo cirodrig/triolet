@@ -214,6 +214,11 @@ def _prFunction(f):
     f_body = pretty.stack(prettyAst(s) for s in f.body)
     return pretty.stack(f_decl, pretty.nest(f_body, 4))
 
+def _prExport(e):
+    return pretty.space('export', _prVariable(e))
+
 def _prModule(m):
-    return pretty.stack(pretty.stack(_prFunction(f),'')
-                        for f in m.iterDefinitions())
+    functions = pretty.stack(pretty.stack(_prFunction(f),'')
+                             for f in m.iterDefinitions())
+    exports = pretty.stack([_prExport(e) for e in m.exports])
+    return pretty.stack(functions, exports)

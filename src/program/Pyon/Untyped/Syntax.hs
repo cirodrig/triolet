@@ -14,16 +14,9 @@ import Gluon.Common.Label
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.SystemF.Syntax(Lit(..))
 import Pyon.Untyped.HMType
-import {-# SOURCE #-} Pyon.Untyped.TypeAssignment
+import Pyon.Untyped.Data
 
 data Ann = Ann SourcePos
-
-variableIDSupply :: Supply (Ident Variable)
-{-# NOINLINE variableIDSupply #-}
-variableIDSupply = unsafePerformIO newIdentSupply
-
-getNextVariableID :: IO (Ident Variable)
-getNextVariableID = supplyValue variableIDSupply
 
 data Variable =
   Variable 
@@ -36,6 +29,13 @@ data Variable =
   , varTranslation :: {-# UNPACK #-} !(MVar TypeAssignment)
   }
   deriving(Typeable)
+
+variableIDSupply :: Supply (Ident Variable)
+{-# NOINLINE variableIDSupply #-}
+variableIDSupply = unsafePerformIO newIdentSupply
+
+getNextVariableID :: IO (Ident Variable)
+getNextVariableID = supplyValue variableIDSupply
 
 newVariable :: Maybe Label -> Maybe SystemF.Var -> IO Variable
 newVariable lab sf = do
@@ -136,7 +136,15 @@ data Function =
 data FunctionDef = FunctionDef !Variable Function
                  deriving(Typeable)
 
-data Module = Module [[FunctionDef]]
+type DefGroup = [FunctionDef]
+
+data Export = Export
+              { exportAnnotation :: Ann 
+              , exportVariable :: Variable
+              }
+              deriving(Typeable)
+
+data Module = Module [DefGroup] [Export]
             deriving(Typeable)
 
 instance HasSourcePos Expression where

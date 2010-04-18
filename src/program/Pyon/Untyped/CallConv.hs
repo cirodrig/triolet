@@ -32,10 +32,7 @@ import Gluon.Common.Supply
 
 import Pyon.Untyped.HMType
 import Pyon.Untyped.Unification
-import {-# SOURCE #-} Pyon.Untyped.GenSystemF
-
--- 'mergeSubstitutions' is out of place here, but it's here because of 
--- module dependences.
+import Pyon.Untyped.Data
 
 -- | Merge two substitutions, if the substitutions agree on their
 -- common elements; return Nothing otherwise.
@@ -84,33 +81,13 @@ pcIDSupply = unsafePerformIO newIdentSupply
 newPassConvID :: IO (Ident PassConvVar)
 newPassConvID = supplyValue pcIDSupply
 
--- | A parameter-passing convention variable.
--- These variables represent unknowns that are resolved through unification. 
--- Unlike type variables, they are monomorphic.
-data PassConvVar =
-  PassConvVar
-  { pcID :: {-# UNPACK #-} !(Ident PassConvVar)
-  , pcRep :: {-# UNPACK #-} !(IORef PassConvVarRep)
-  }
-
-instance Eq PassConvVar where
-  (==) = (==) `on` pcID
-  (/=) = (/=) `on` pcID
-
-instance Ord PassConvVar where
-  compare = compare `on` pcID
-
--- | The parameter-passing convention for a @PassConvVar@ as identified by
--- unification
-data PassConvVarRep = NoRep | PCVarRep !PassConvVar | PCRep !PassConv
-
-isNoRep NoRep = True
+isNoRep NoPCRep = True
 isNoRep _ = False
 
 newPCVar :: IO PassConvVar
 newPCVar = do
   n <- newPassConvID
-  rep <- newIORef NoRep
+  rep <- newIORef NoPCRep
   return $ PassConvVar n rep
 
 -- | Create a new parameter-passing convention variable and return it as a 
@@ -120,46 +97,10 @@ anyPassConv = do
   v <- newPCVar
   return $ By v
 
--- | A parameter-passing convention.
--- The actual conventions are 'ByVal', 'ByRef', and 'ByClosure'.
--- The convention 'TuplePassConv' represents a function that evaluates to
--- one of the above.
--- The constructor 'By' represents a variable.
-data PassConv =
-    ByVal                       -- ^ Pass by value
-  | ByRef                       -- ^ Pass by reference
-  | ByClosure CallConv          -- ^ Pass an un-evaluated function
-  | TuplePassConv [PassConv]    -- ^ Parameter-passing convention for a tuple:
-                                -- by value if all list members are by value, 
-                                -- by refernce otherwise
-  | TypePassConv HMType         -- ^ The parameter-passing convention of a
-                                -- (possibly unknown) type 
-  | By {-# UNPACK #-} !PassConvVar -- ^ Unknown parameter-passing convention
-
--- | Constructors for parameter-passing conventions
-data PassConvCtor =
-  PassConvFun (HMType -> PassConvCtor) | PassConvVal PassConv
-
 applyPassConvCtor :: PassConvCtor -> [HMType] -> PassConv
 applyPassConvCtor (PassConvVal pc) [] = pc
 applyPassConvCtor (PassConvFun f) (t:ts) = applyPassConvCtor (f t) ts
 applyPassConvCtor _ _ = internalError "applyPassConvCtor: kind mismatch"
-
--- | A function execution mode.
--- Functions execute as 'Action' or 'Stream' functions, based on their
--- return type.  If the return type is not known, then 'PickExecMode' is
--- used to delay the decision.
-data ExecMode =
-  AsAction | AsStream | PickExecMode HMType
-
--- | A function calling convention.
-data CallConv =
-    -- | Require another parameter
-    PassConv :+> CallConv
-    -- | Execute and return a value
-  | Return !ExecMode PassConv
-
-infixr 4 :+>
 
 instance Type PassConv where
   freeTypeVariables pc = 
@@ -195,7 +136,7 @@ canonicalizePCVar :: PassConvVar -> IO PassConv
 canonicalizePCVar v = do
   return . makeConv =<< canonicalizeRep (pcRep v)
   where
-    makeConv NoRep         = By v
+    makeConv NoPCRep       = By v
     makeConv (PCVarRep v') = By v'
     makeConv (PCRep x)     = x
 
@@ -203,11 +144,11 @@ canonicalizeRep :: IORef PassConvVarRep -> IO PassConvVarRep
 canonicalizeRep rep_ref = do
   rep <- readIORef rep_ref
   case rep of
-    NoRep      -> return rep
+    NoPCRep    -> return rep
     PCVarRep v -> update_self rep =<< canonicalizeRep (pcRep v)
     PCRep t    -> return rep
   where
-    update_self old_rep NoRep = return old_rep
+    update_self old_rep NoPCRep = return old_rep
     update_self _       new_rep = do writeIORef rep_ref new_rep
                                      return new_rep
 

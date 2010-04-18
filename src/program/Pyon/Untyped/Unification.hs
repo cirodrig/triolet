@@ -20,16 +20,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Identifier
 import Gluon.Common.SourcePos
-import {-# SOURCE #-} Pyon.Untyped.HMType
-import {-# SOURCE #-} Pyon.Untyped.CallConv
-import {-# SOURCE #-} Pyon.Untyped.GenSystemF
-
--- | A substitution for type constructors
-data Substitution =
-  Substitution
-  { _substTc :: Map.Map TyCon HMType
-  , _substCc :: Map.Map PassConvVar PassConv
-  }
+import Pyon.Untyped.Data
 
 substTc = _substTc
 substCc = _substCc
@@ -53,17 +44,12 @@ updateCc :: (Map.Map PassConvVar PassConv -> Map.Map PassConvVar PassConv)
          -> Substitution -> Substitution
 updateCc f s = s {_substCc = f $ substCc s}
 
--- | A pretty-printing applicative construct for giving names to
--- anonymous variables
-newtype Ppr a = Ppr {doPpr :: PprContext -> IO a}
+-------------------------------------------------------------------------------
+-- Pretty-printing
 
-data PprContext =
-  PprContext
-  { freshNames :: {-# UNPACK #-} !(IORef [String])
-  , typeNames :: {-# UNPACK #-} !(IORef (Map.Map (Ident TyCon) Doc))
-  , passNames :: {-# UNPACK #-} !(IORef (Map.Map (Ident PassConvVar) Doc))
-  }
-
+-- | Run a pretty-printer.  Within the scope of this pretty-printer, anonymous
+-- variables will be assigned a temporary name.  The name may be different
+-- between different calls to 'runPpr'.
 runPpr :: Ppr a -> IO a
 runPpr m = do
   -- Names for anonymous type variables
@@ -75,12 +61,14 @@ runPpr m = do
   
   doPpr m (PprContext names tenv penv)
 
+-- | Get a new variable name.
 pprGetFreshName :: Ppr String
 pprGetFreshName = Ppr $ \env -> do
   (nm:nms) <- readIORef $ freshNames env
   writeIORef (freshNames env) nms
   return nm
 
+-- | Get the name of a type variable; assign a new name if needed.
 pprGetTyConName :: Ident TyCon -> Ppr Doc
 pprGetTyConName ident = Ppr $ \env -> do
   nenv <- readIORef $ typeNames env
@@ -95,6 +83,8 @@ pprGetTyConName ident = Ppr $ \env -> do
       
       return doc
 
+-- | Get the name of a parameter passing convention variable; assign a
+-- new name if needed.
 pprGetPassConvVarName :: Ident PassConvVar -> Ppr Doc
 pprGetPassConvVarName ident = Ppr $ \env -> do
   nenv <- readIORef $ passNames env
@@ -126,47 +116,4 @@ instance Monad Ppr where
 instance MonadIO Ppr where
   liftIO m = Ppr $ \_ -> m
 
--- | A predicate to be solved by type inference
-data Predicate =
-    -- | Class membership.  This predicate translates to a class dictionary.
-    IsInst HMType !Class
-    -- | Parameter-passing constraint.  This predicate translates to
-    -- parameter-passing information, such as how to load, store, or
-    -- duplicate a value.
-  | HasPassConv HMType PassConv
-    -- | Equality constraint on parameter-passing conventions
-  | EqPassConv PassConv PassConv
-    -- | Equality constraint on execution modes
-  | EqExecMode ExecMode ExecMode
-
-type Constraint = [Predicate]
-
-class Unifiable a where
-  -- | Show some unifiable objects.  Temporary names may be assigned to 
-  -- anonymous variables; the same names are used across all objects.  
-  -- This is used when constructing messages for unification failure.
-  uShow :: a -> Ppr Doc
-
-  -- | Rename a unifiable object
-  rename :: Substitution -> a -> IO a
-  
-  -- | Unify terms.  Unification may produce extra constraints, which should
-  -- be added to any constraints already in the context.  Flexible type 
-  -- variables may be modified during unification.  If the arguments cannot 
-  -- be unified, an exception is thrown.
-  unify :: SourcePos -> a -> a -> IO Constraint
-  
-  -- | Match (semi-unify) two terms. 
-  --
-  -- @match x y@ finds a substitution that unifies @x@ with @y@, if one exists.
-  -- If no substitution can be found, return None.  The terms are not modified.
-  match :: a -> a -> IO (Maybe Substitution)
-
-  -- | Decide whether two unifiable terms are equal.
-  -- The terms are not modified.
-  uEqual :: a -> a -> IO Bool
-
-class Type a where
-  -- | Get the set of free type variables mentioned in the value
-  freeTypeVariables :: a -> IO TyVarSet
 

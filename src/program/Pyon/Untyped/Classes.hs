@@ -25,6 +25,7 @@ import Gluon.Common.MonadLogic
 import Gluon.Common.SourcePos
 import Gluon.Core(Level(..), Var(..))
 import qualified Gluon.Core as Gluon
+import Pyon.Untyped.Data
 import Pyon.Untyped.HMType
 import Pyon.Untyped.CallConv
 import Pyon.Untyped.Kind

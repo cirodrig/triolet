@@ -28,8 +28,6 @@ where
 import Data.Typeable
 
 import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Label
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
 import Gluon.Core(Rec)

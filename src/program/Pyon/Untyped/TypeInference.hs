@@ -9,6 +9,7 @@ import Control.Monad.Trans
 import qualified Data.Map as Map
 import Data.Maybe
 import qualified Data.Set as Set
+import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Error
 import Gluon.Common.Label
@@ -18,6 +19,7 @@ import Pyon.Globals
 import qualified Pyon.SystemF.Syntax as SystemF
 import qualified Pyon.SystemF.Builtins as SystemF
 import Pyon.Untyped.Builtins
+import Pyon.Untyped.Data
 import Pyon.Untyped.Syntax
 import Pyon.Untyped.HMType
 import Pyon.Untyped.CallConv
@@ -592,7 +594,7 @@ addParameterToEnvironment pattern k =
          k (mkTupleP fields') tuple_type tuple_pc
 
 inferModuleTypes :: Module -> Inf (SystemF.Module TI)
-inferModuleTypes (Module defss) = 
+inferModuleTypes (Module defss exports) = 
   liftM SystemF.Module $ inferDefGroups defss
   where
     inferDefGroups (defs:defss) =

@@ -427,6 +427,23 @@ class Function(object):
         self.localScope = local_scope
 
 ###############################################################################
+# Exports
+
+class ExportItem(object):
+    """An export declaration.
+
+    One function is declared to be usable outside the module.
+
+    fields:
+      name: The exported variable
+      ssaver: The SSA ID of the exported variable; inserted by SSA
+    """
+    def __init__(self, source_pos, name):
+        assert isinstance(name, Variable)
+        self.sourcePos = source_pos
+        self.name = name
+
+###############################################################################
 # Modules
 
 class Module(object):
@@ -434,11 +451,14 @@ class Module(object):
 
     The module consists of a list of definition groups.  Each definition
     group is a list of function definitions."""
-    def __init__(self, definitions):
+    def __init__(self, definitions, exports):
         for dg in definitions:
             for d in dg:
                 assert isinstance(d, Function)
+        for e in exports:
+            assert isinstance(e, ExportItem)
         self.definitions = definitions
+        self.exports = exports
 
     def iterDefinitionGroups(self):
         """Get an iterator over the module's definition groups"""

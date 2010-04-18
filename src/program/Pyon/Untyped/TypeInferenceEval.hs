@@ -9,12 +9,8 @@ import Control.Concurrent.MVar
 import Control.Monad
 
 import Gluon.Common.Error
-import Gluon.Common.Label
-import Gluon.Core(Rec)
 import Pyon.SystemF.Syntax
-import Pyon.SystemF.Builtins
-import qualified Pyon.Untyped.Syntax as Untyped
-import qualified Pyon.Untyped.GenSystemF as Untyped
+import qualified Pyon.Untyped.Data as Untyped
 
 evType :: Untyped.TIType -> IO RType
 evType (Untyped.DelayedType m) = m

@@ -120,6 +120,8 @@ def convertSSA(obj):
     if isinstance(obj, ast.Module):
         for f_list in obj.definitions:
             _doDefGroup(f_list)
+        for exp in obj.exports:
+            _doExport(exp)
     elif isinstance(obj, ast.Expression):
         _doExpr(obj)
     else:
@@ -434,3 +436,14 @@ def _doDefGroup(f_list):
     # Do SSA on the bodies of all functions
     for f in f_list: _doFunction(f)
 
+def _doExport(export):
+    """Perform SSA on an export statement."""
+    v = export.name
+
+    # Only variables defined at the top level of this module may be exported.
+    # This checks whether the variable was defined in the current module.
+    if v.hasANFDefinition():
+        raise RuntimeError, "Cannot export '" + v.name + "'; it is not defined in the current module"
+
+    export.ssaver = v._ssaver
+    return

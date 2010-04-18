@@ -39,6 +39,7 @@ import Pyon.Untyped.CallConv
 import Pyon.Untyped.HMType
 import Pyon.Untyped.Kind
 import Pyon.Untyped.Unification
+import Pyon.Untyped.Data
 import qualified Pyon.Untyped.Syntax as Untyped
 import qualified Pyon.SystemF.Syntax as SystemF
 import qualified Pyon.SystemF.Builtins as SystemF
@@ -47,9 +48,6 @@ debugPlaceholders = False
 
 -------------------------------------------------------------------------------
 -- Type schemes
-
--- | A type scheme
-data TyScheme = TyScheme TyVars Constraint HMType
 
 instance Type TyScheme where
   freeTypeVariables (TyScheme qvars cst ty) = do
@@ -95,52 +93,8 @@ instantiateAs pos scheme ty = do
 -------------------------------------------------------------------------------
 -- Type classes
 
--- | A type class.
---
--- The type class's name is used as a globally unique identifier.
---
--- The class's method and instance lists must be non-strict.  Methods and 
--- instances contain references back to the parent class.
-data Class =
-  Class
-  { clsParam :: TyCon
-  , clsConstraint :: Constraint
-  , clsMethods :: [ClassMethod]
-  , clsName :: String
-  , clsInstances :: [Instance]
-  , clsTypeCon :: !Gluon.Con    -- ^ Class dictionary type constructor
-  , clsDictCon :: !Gluon.Con    -- ^ Class dictionary constructor
-  }
-
 instance Eq Class where
   (==) = (==) `on` clsName
-
--- | A class method interface declaration.  Information used for class
--- type and constraint inference is here.  The method's implementation is in
--- the instance method.
-data ClassMethod =
-  ClassMethod
-  { clmName :: String
-    -- | The type signature of a method retrieved from the class dictionary.  
-    -- The class's parameter variables and the class constraint itself are not
-    -- part of the signature.
-  , clmSignature :: TyScheme
-    -- | The variable that represents this method in source code 
-  , clmVariable :: Untyped.Variable
-  }
-
--- | A class instance
-data Instance =
-  Instance
-  { insQVars :: TyVars
-  , insConstraint :: Constraint
-  , insClass :: Class
-  , insType :: HMType
-  , insMethods :: [InstanceMethod]
-  }
-
--- | Each instance method is defined as some constructor in System F
-newtype InstanceMethod = InstanceMethod {inmName :: Gluon.Con}
 
 -- | Construct a type scheme representing all types covered by this instance
 insScheme :: Instance -> TyScheme
@@ -244,46 +198,6 @@ instance Unifiable Predicate where
          uEqual m1 m3 >&&> uEqual m2 m4
        _ -> return False
 
--- | A derivation of a predicate, containing enough information to reconstruct
--- the derivation steps in the form of a proof object
-data Derivation =
-    -- | A trivial derivation using an already-existing proof 
-    IdDerivation 
-    { conclusion :: Predicate
-    }
-    -- | A derivation using a class instance
-  | InstanceDerivation 
-    { conclusion :: Predicate 
-    , derivedInstance :: Instance
-    , instancePremises :: [Derivation] 
-    , classPremises :: [Derivation]
-    }
-  | -- | Parameter-passing convention derivation for data
-    PassConvDerivation
-    { conclusion :: Predicate
-    , derivedConstructor :: Gluon.Con
-    , passConvTypes :: [HMType]
-    , passConvPremises :: [Derivation]
-    }
-  | -- | Parameter-passing convention derivation for functions
-    FunPassConvDerivation
-    { conclusion :: Predicate
-    }
-    -- | A derivation without evidence
-  | MagicDerivation
-    { conclusion :: Predicate
-    }
-
--- | A derivation of calling convention equality.  Unlike 'Derivation' values,
--- there is no predicate corresponding to the result of these derivations. 
--- These derivations are intermediate steps in other derivations.
---
--- The actual derivation is not implemented; this is a \"magic\" derivation.
-data EqCallConvDerivation =
-  EqCallConvDerivation
-  { callConvConclusion :: (CallConv, CallConv)
-  }
-
 isIdDerivation :: Derivation -> Bool
 isIdDerivation (IdDerivation {}) = True
 isIdDerivation _ = False
@@ -307,43 +221,6 @@ pprProofEnvironment env = do
 -------------------------------------------------------------------------------
 -- Type inference System F data structures
 
--- | Internal type inference representation of System F
-data TI deriving(Typeable)
-instance Structure TI
-
--- | Type inferred expressions, which may contain placeholders
-data instance SystemF.SFExpOf TI TI =
-    -- | A placeholder for a recursive variable
-    RecVarPH
-    { phExpInfo :: SynInfo
-    , phExpVariable :: Untyped.Variable
-    , phExpTyVar :: TyCon
-    , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
-    }
-    -- | A placeholder for a class dictionary
-  | DictPH
-    { phExpInfo :: SynInfo
-    , phExpPredicate :: Predicate
-    , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
-    }
-    -- | A non-placeholder expression
-  | TIExp !TIExp'
-    
-    -- | An expression that was written directly in System F
-    --
-    -- This kind of expression only comes from built-in terms.
-  | TIRecExp SystemF.RExp
-
--- | A type inference System F expression
-type TIExp = SystemF.SFExpOf TI TI
-
--- | Other expressions use regular System F constructors
-type TIExp' = SystemF.SFExpOf Rec TI
-
--- | A Placeholder is a RecVarPH or DictPH term
-type Placeholder = TIExp
-type Placeholders = [Placeholder]
-
 isPlaceholderExp :: Placeholder -> Bool
 isPlaceholderExp (RecVarPH {}) = True
 isPlaceholderExp (DictPH {}) = True
@@ -363,11 +240,6 @@ setPlaceholderElaboration ph exp
       unless b $ internalError "Placeholder is already resolved"
       putMVar (phExpResolution ph) exp
   | otherwise = internalError "Not a placeholder"
-
--- | Types are not evaluated until type inference completes
-newtype instance ExpOf TI TI = DelayedType (IO Gluon.RExp)
-
-type TIType = SystemF.TypeOf TI TI
 
 delayType :: Gluon.RExp -> TIType
 delayType t = DelayedType (return t)

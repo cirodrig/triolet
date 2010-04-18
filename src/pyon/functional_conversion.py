@@ -6,6 +6,9 @@ import pyon.ast.operators as operators
 import pyon.ast.parser_ast as p_ast
 import pyon.ssa.parser_ssa as ssa
 
+###############################################################################
+# Type and kind conversion
+
 def convertAnnotatedKind(annotation):
     "Convert a kind annotation to an actual kind"
     assert isinstance(annotation, p_ast.Expression)
@@ -106,9 +109,23 @@ def convertAnnotatedType(p, kind_annotation):
 
     return untyped.RigidTyVar(gluon.pgmLabel("pyonfile", p.name), k)
 
+###############################################################################
+# Top-level routine
+
 def convertModule(module):
-    return untyped.Module([[convertFunction({}, f) for f in dg]
-                           for dg in module.definitions])
+    functions = [[convertFunction({}, f) for f in dg]
+                 for dg in module.definitions]
+    exports = [convertExport(e) for e in module.exports]
+    return untyped.Module(functions, exports)
+
+def convertExport(export):
+    # Convert to the SSA name
+    name = convertVariable(export.name, export.ssaver)
+
+    return untyped.Export(export.sourcePos, name)
+
+###############################################################################
+# Function conversion
 
 def convertFunction(outer_tyvars, func):
     # Convert to the SSA name

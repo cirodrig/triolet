@@ -94,6 +94,11 @@ pprFunction fname (Function { funQVars = qvars
       param_doc = sep (map (parens . pprPattern) params ++ [rt_doc])
     in forall_doc $$ intro $$ nest 2 (pprExpression body)
 
+pprExport :: Export -> Doc
+pprExport (Export _ v) =
+  text "export" <+> pprVariable v
+  
 pprModule :: Module -> Doc
-pprModule (Module defss) =
-  vcat $ map (showBlock . map pprDefinition) defss
+pprModule (Module defss exps) =
+  vcat (map (showBlock . map pprDefinition) defss) $$
+  vcat (map pprExport exps)

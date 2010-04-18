@@ -41,6 +41,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/Exports/Gluon.hs \
 	Pyon/Globals.hs \
 	Pyon/Untyped/Classes.hs \
+	Pyon/Untyped/Data.hs \
 	Pyon/Untyped/GenSystemF.hs \
 	Pyon/Untyped/HMType.hs \
 	Pyon/Untyped/Kind.hs \
@@ -66,10 +67,7 @@ PYON_TH_HS_SRCS=Pyon/SystemF/Builtins.hs \
 	Pyon/Untyped/Builtins.hs \
 	Pyon/Untyped/BuiltinsTH.hs \
 	Pyon/Untyped/InitializeBuiltins.hs
-PYON_HS_BOOT_SRCS=Pyon/Untyped/TypeAssignment.hs-boot \
-	Pyon/Untyped/HMType.hs-boot \
-	Pyon/Untyped/CallConv.hs-boot \
-	Pyon/Untyped/GenSystemF.hs-boot
+PYON_HS_BOOT_SRCS=Pyon/Untyped/Syntax.hs-boot
 
 PYON_HS_GENERATED_SRCS=Paths_pyon.hs \
 	PythonInterface/Python.hs \

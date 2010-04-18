@@ -19,6 +19,7 @@ import Gluon.Common.THRecord
 import qualified Gluon.Core as Gluon
 import qualified Pyon.SystemF.Builtins as SystemF
 import qualified Pyon.SystemF.Syntax as SystemF
+import Pyon.Untyped.Data
 import Pyon.Untyped.Kind
 import Pyon.Untyped.Syntax
 import Pyon.Untyped.HMType
