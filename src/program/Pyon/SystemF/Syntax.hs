@@ -18,8 +18,9 @@ module Pyon.SystemF.Syntax
      ExpInfo, defaultExpInfo,
      SFExp,
      Alt(..),
-     Fun(..),
-     Def(..),
+     FunOf(..), Fun,
+     Def(..), DefGroup,
+     Export(..),
      Module(..),
      isValueExp
     )
@@ -35,10 +36,12 @@ import Gluon.Core(Rec)
 import Pyon.SystemF.Builtins
 
 data family SFExpOf a :: * -> *
+data family FunOf a :: * -> *
 
 type TypeOf = Gluon.ExpOf
 
 type SFRecExp s = SFExpOf s s
+type Fun s = FunOf s s
 type RecType s = TypeOf s s
 
 type SFExp = SFExpOf Rec
@@ -172,18 +175,32 @@ instance HasSourcePos (SFExpOf Rec s) where
   -- Not implemented!
   setSourcePos _ _ = internalError "HasSourcePos.setSourcePos"
 
-data Fun s =
+data instance FunOf Rec s =
   Fun { funTyParams :: [TyPat s] -- ^ Type parameters
       , funParams :: [Pat s]     -- ^ Object parameters
       , funReturnType :: RecType s -- ^ Return type
       , funBody :: SFRecExp s
       }
-  deriving(Typeable)
+
+instance Typeable1 (FunOf Rec) where
+  typeOf1 x =
+    let con1 = mkTyCon "Pyon.SystemF.Syntax.FunOf"
+        arg1 = typeOf (undefined :: Rec)
+    in mkTyConApp con1 [arg1]
 
 data Def s = Def Var (Fun s)
          deriving(Typeable)
 
-data Module s = Module [[Def s]]
+type DefGroup s = [Def s]
+
+-- | An exported variable declaration
+data Export =
+  Export
+  { exportSourcePos :: SourcePos
+  , exportVariable :: Var
+  }
+
+data Module s = Module [DefGroup s] [Export]
             deriving(Typeable)
 
 -- | Return True only if the given expression has no side effects.

@@ -30,8 +30,13 @@ pprFun = pprFunFlags defaultPrintFlags
 pprDef :: RDef -> Doc
 pprDef = pprDefFlags defaultPrintFlags
 
+pprExport :: Export -> Doc
+pprExport (Export _ v) = text "export" <+> pprVar v
+
 pprModule :: RModule -> Doc
-pprModule (Module defs) = vcat $ map (braces . vcat . map pprDef) defs
+pprModule (Module defs exports) =
+  vcat (map (braces . vcat . map pprDef) defs) $$
+  vcat (map pprExport exports)
 
 data PrintFlags =
   PrintFlags

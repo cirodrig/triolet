@@ -31,13 +31,16 @@ data Worker a =
   Worker
   { doType :: !(WRExp -> PureTC (TypeOf a a))
   , doExp  :: !(SFExp a -> WRExp -> PureTC (SFRecExp a))
+  , doFun  :: !([TyPat a] -> [Pat a] -> TypeOf a a -> SFRecExp a -> PureTC (Fun a))
   }
 
 data instance SFExpOf TrivialStructure s = TrivialSFExp
+data instance FunOf TrivialStructure s = TrivialFun
 
 noWork :: Worker TrivialStructure
 noWork = Worker { doType = \_ -> return Gluon.TrivialExp
                 , doExp = \_ _ -> return TrivialSFExp
+                , doFun = \_ _ _ _ -> return TrivialFun
                 }
 
 -- Endomorphism concatenation
@@ -164,6 +167,9 @@ isValidLiteralType ty lit =
           FloatL _ -> con `Gluon.isBuiltin` Gluon.the_Float
           BoolL _ -> con `isPyonBuiltin` the_bool
           NoneL -> con `isPyonBuiltin` the_NoneType
+     Nothing ->
+       -- Literals cannot have other types 
+       False
                                      
 typeInferTupleE :: Worker a -> ExpInfo -> [RExp] -> PureTC (WRExp, SFExp a)
 typeInferTupleE worker inf fs = do
@@ -288,11 +294,8 @@ typeInferFun worker fun@(Fun { funTyParams = ty_params
     -- Create the function's type
     ty <- Gluon.evalFully' $ funType fun
     
-    let new_fun = Fun { funTyParams = new_ty_params
-                      , funParams = new_params
-                      , funReturnType = return_type_val
-                      , funBody = body_val
-                      }
+    new_fun <-
+      doFun worker new_ty_params new_params return_type_val body_val
     return (ty, new_fun)
   where
     assumeTyParams = withMany (assumeTyPat worker) ty_params
@@ -427,11 +430,11 @@ typeCheckDefGroup worker defs k =
       (_, fun_val) <- typeInferFun worker fun
       return $ Def v fun_val
 
-typeCheckModule worker (Module defs) =
+typeCheckModule worker (Module defs exports) =
   withTheVarIdentSupply $ \varIDs ->
     runPureTCIO varIDs $ do
       defs' <- typeCheckDefGroups defs
-      return $ Module defs'
+      return $ Module defs' exports
   where
     typeCheckDefGroups (defs:defss) = 
       typeCheckDefGroup worker defs $ \defs' -> 

@@ -29,7 +29,7 @@ flatten mod = do
   tc_result <- typeCheckModule flattenWorker mod
   case tc_result of
     Left errs -> return (Left errs)
-    Right (Module new_defs) -> do
+    Right (Module new_defs _) -> do
       (_, converted_defs) <-
         withTheVarIdentSupply $ \varIDs ->
         case runEval varIDs $ runFloatBinds $ mapM (don'tFloat . flattenDefGroup) new_defs
@@ -49,6 +49,9 @@ data ConvertToNewCore
 -- how to float bindings.
 newtype instance SFExpOf ConvertToNewCore ConvertToNewCore = 
   FB {convertExp :: FloatBinds (NewCore.RType, NewCoreTerm)}
+
+newtype instance FunOf ConvertToNewCore a =
+  FBFun (FunOf Rec a) 
 
 type ConvertingExp = SFRecExp ConvertToNewCore
 
@@ -219,7 +222,10 @@ asStatement :: ConvertingExp -> FloatBinds NewCore.RStm
 asStatement m = liftM snd $ asStatementWithType m
 
 flattenWorker :: Worker ConvertToNewCore
-flattenWorker = Worker flattenType flattenExp
+flattenWorker = Worker flattenType flattenExp makeFunction
+  where
+    makeFunction ty_params params return_type body =
+      return $ FBFun $ Fun ty_params params return_type body
 
 flattenType :: Gluon.WRExp -> PureTC (TypeOf ConvertToNewCore ConvertToNewCore)
 flattenType t = return $ NewCoreType $ fromWhnf t
@@ -228,7 +234,9 @@ flattenExp :: SFExp ConvertToNewCore -> Gluon.WRExp -> PureTC ConvertingExp
 flattenExp expression ty =
   liftEvaluation $ return $ FB $ flattenExp' expression (fromWhnf ty)
 
-flattenExp' :: SFExp ConvertToNewCore -> Gluon.RExp -> FloatBinds (NewCore.RType, NewCoreTerm)
+flattenExp' :: SFExp ConvertToNewCore
+            -> Gluon.RExp
+            -> FloatBinds (NewCore.RType, NewCoreTerm)
 flattenExp' expression expression_type =
   case expression
   of VarE {expVar = v} ->
@@ -440,7 +448,7 @@ flattenDefGroup = mapM flattenDef
 
 flattenFun :: Fun ConvertToNewCore 
            -> FloatBinds (Either (NewCore.ActionFun Rec) (NewCore.StreamFun Rec))
-flattenFun fun = do
+flattenFun (FBFun fun) = do
   -- Convert function parameters
   ty_params <- mapM convertTyParam (funTyParams fun) 
   val_params <- mapM convertParam (funParams fun)

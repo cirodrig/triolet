@@ -77,7 +77,7 @@ getPlaceholderElaboration ph = do
   evExp =<< readMVar (Untyped.phExpResolution ph)
 
 evFun :: Fun Untyped.TI -> IO RFun
-evFun f = do
+evFun (Untyped.TIFun f) = do
   ty_params <- mapM evTyParam $ funTyParams f
   params <- mapM evPat $ funParams f
   rt <- evType $ funReturnType f
@@ -92,5 +92,6 @@ evDef :: Def Untyped.TI -> IO RDef
 evDef (Def v f) = Def v `liftM` evFun f
 
 evalTypeInferenceResult :: Module Untyped.TI -> IO RModule
-evalTypeInferenceResult (Module defs) =
-  Module `liftM` mapM (mapM evDef) defs
+evalTypeInferenceResult (Module defs exports) = do
+  defs' <- mapM (mapM evDef) defs
+  return $ Module defs' exports

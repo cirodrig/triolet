@@ -30,7 +30,7 @@ optimizeModule mod =
   mod
 
 mapModule :: (RDef -> RDef) -> RModule -> RModule
-mapModule f (Module ds) = Module (map (map f) ds)
+mapModule f (Module ds exports) = Module (map (map f) ds) exports
 
 -------------------------------------------------------------------------------
 -- Partial evaluation

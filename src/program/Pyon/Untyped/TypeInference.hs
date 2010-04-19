@@ -363,7 +363,7 @@ makePolymorphicFunction :: ProofBinding -- ^ Names of proof objects
                         -> TyScheme     -- ^ Function's type scheme
                         -> SystemF.Fun TI -- ^ First-order part of function
                         -> IO (SystemF.Fun TI) -- ^ Polymorphic function
-makePolymorphicFunction proofs pos (TyScheme qvars cst fot) fo_function
+makePolymorphicFunction proofs pos (TyScheme qvars cst fot) (TIFun fo_function)
   | not $ null $ SystemF.funTyParams fo_function =
       internalError "makePolymorphicFunction"
   | null cst = 
@@ -376,13 +376,13 @@ makePolymorphicFunction proofs pos (TyScheme qvars cst fot) fo_function
       prd_params <- mapM getProofParam cst
       -- Create a new function with these parameters.  The new function 
       -- returns the original function
-      let fun_body = mkFunE pos fo_function
+      let fun_body = mkFunE pos (TIFun fo_function)
           return_type = convertHMType fot
-      return $ SystemF.Fun ty_params prd_params return_type fun_body
+      return $ TIFun $ SystemF.Fun ty_params prd_params return_type fun_body
   where
     addTypeParameters f = do
       ty_params <- mapM convertTyParam qvars
-      return $ fo_function {SystemF.funTyParams = ty_params}
+      return $ TIFun $ fo_function {SystemF.funTyParams = ty_params}
       
     convertTyParam ty_param = do
       v <- tyVarToSystemF ty_param
@@ -593,9 +593,19 @@ addParameterToEnvironment pattern k =
              tuple_pc = TuplePassConv field_pcs
          k (mkTupleP fields') tuple_type tuple_pc
 
+inferExportType :: Export -> SystemF.Export
+inferExportType (Export ann var) =
+  case varSystemFVariable var
+  of Nothing -> internalError "Cannot export variable"
+     Just v  -> let pos = case ann
+                          of Ann pos -> pos
+                in SystemF.Export pos v
+
 inferModuleTypes :: Module -> Inf (SystemF.Module TI)
-inferModuleTypes (Module defss exports) = 
-  liftM SystemF.Module $ inferDefGroups defss
+inferModuleTypes (Module defss exports) = do
+  defss' <- inferDefGroups defss
+  let exports' = map inferExportType exports
+  return $ SystemF.Module defss' exports'
   where
     inferDefGroups (defs:defss) =
       inferDefGroup True defs $ \defs' -> do

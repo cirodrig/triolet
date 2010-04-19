@@ -350,7 +350,7 @@ mkFunction :: [TyCon] -> [SystemF.Pat TI] -> TIType -> TIExp
            -> IO (SystemF.Fun TI)
 mkFunction ty_params params ret_type body = do
   ty_params' <- mapM convertTyParam ty_params
-  return $ SystemF.Fun ty_params' params ret_type body
+  return $ TIFun $ SystemF.Fun ty_params' params ret_type body
   where
     convertTyParam ty_param = do
       v <- tyVarToSystemF ty_param
