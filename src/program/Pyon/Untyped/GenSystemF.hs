@@ -277,9 +277,6 @@ mkUndefinedE pos ty = TIExp $ SystemF.UndefinedE (synInfo pos) ty
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa = TIExp $ SystemF.IfE (synInfo pos) cond tr fa
 
-mkTupleE :: SourcePos -> [TIExp] -> TIExp
-mkTupleE pos fields = TIExp $ SystemF.TupleE (synInfo pos) fields
-
 mkCallE :: SourcePos -> TIExp -> [TIExp] -> TIExp
 mkCallE pos oper args = TIExp $ SystemF.CallE (synInfo pos) oper args
 

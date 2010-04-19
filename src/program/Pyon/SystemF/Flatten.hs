@@ -255,15 +255,6 @@ flattenExp' expression expression_type =
        let fun = NewCore.mkConV pos $ pyonBuiltin the_fun_undefined
            arg = NewCore.GluonV (Gluon.mkSynInfo (Gluon.getSourcePos inf) TypeLevel) t
        in returnStatement $ NewCore.CallS inf $ NewCore.AppV inf fun [arg]
-     TupleE {expInfo = inf, expFields = fs} -> do
-       (field_types :: [NewCore.RType], fields :: [NewCore.RVal]) <- mapAndUnzipM asValueWithType fs
-       
-       -- Create a tuple expression.  Apply the tuple constructor to all
-       -- types and all fields.
-       let con = NewCore.mkConV pos $ getPyonTupleCon' $ length fields
-           field_type_values =
-             [NewCore.GluonV (Gluon.expInfo t) t | t <- field_types]
-       returnValue $ NewCore.AppV inf con (field_type_values ++ fields)
      TyAppE {expInfo = inf, expOper = op, expTyArg = NewCoreType arg} -> do
        op' <- asValueOrDo op
        case op' of

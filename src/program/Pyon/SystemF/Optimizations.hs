@@ -60,15 +60,7 @@ lookupVarDefault defl v = asks (Map.findWithDefault defl v)
 bindValue :: RPat -> RExp -> PEval a -> PEval a
 bindValue (WildP _)   _ m = m
 bindValue (VarP v t)  e m = local (Map.insert v e) m
-bindValue (TupleP ps) e m =
-  case e
-  of TupleE {expFields = es}
-       | length ps == length es ->
-           catEndo (zipWith bindValue ps es) m
-       | otherwise -> error "Tuple pattern mismatch"
-     _ ->
-       -- Cannot bind, because we cannot statically deconstruct this tuple
-       m
+bindValue (TupleP ps) e m = error "bindValue: not implemented"
 
 bindDefs :: ExpInfo -> [RDef] -> PEval a -> PEval a
 bindDefs info defs m = foldr bindDef m defs
@@ -112,9 +104,6 @@ pevalExpRecursive expression =
      ConE {} -> return expression
      LitE {} -> return expression
      UndefinedE {} -> return expression
-     TupleE {expFields = fs} -> do
-       fs' <- mapM pevalExp fs
-       return $ expression {expFields = fs'}
      TyAppE {expOper = op} -> do
        op' <- pevalExp op
        return $ expression {expOper = op'}
@@ -347,9 +336,6 @@ edcExp expression =
      UndefinedE {expType = t} -> do
        edcScanType t
        return expression
-     TupleE {expFields = fs} -> do
-       fs' <- mapM edcExp fs
-       return $ expression {expFields = fs'}
      TyAppE {expOper = op, expTyArg = arg} -> do
        op' <- edcExp op
        edcScanType arg
@@ -430,12 +416,6 @@ edcLetE info lhs rhs body =
       of -- If a side-effect-free value is not bound to anything,
          -- then this code can be eliminated.
          WildP _ | isValueExp body -> []
-         TupleP ps ->
-           -- If the body is a tuple expression, then decompose this into
-           -- a sequence of let-bindings.
-           case body
-           of TupleE {expFields = es} ->
-                concat $ zipWith eliminate_bindings ps es
-              _ -> [(lhs, body)] 
+         TupleP ps -> error "eliminate_bindings: Not implemented"
          -- Otherwise, no change
          _ -> [(lhs, body)]

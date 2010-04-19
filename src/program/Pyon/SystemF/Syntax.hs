@@ -108,11 +108,6 @@ data instance SFExpOf Rec s =
     { expInfo :: ExpInfo
     , expType ::  RecType s
     }
-    -- | Build a tuple
-  | TupleE
-    { expInfo :: ExpInfo
-    , expFields :: [SFRecExp s]
-    }
     -- | Type application
   | TyAppE
     { expInfo :: ExpInfo
@@ -218,7 +213,6 @@ isValueExp expression =
      ConE {} -> True
      LitE {} -> True
      UndefinedE {} -> True
-     TupleE {expFields = fs} -> all isValueExp fs
      TyAppE {expOper = e} -> isValueExp e
      CallE {} -> False
      IfE {expCond = c, expTrueCase = t, expFalseCase = f} ->

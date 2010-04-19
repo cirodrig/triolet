@@ -36,8 +36,6 @@ evExp expression =
                               return $ LitE info l t'
           UndefinedE info t -> do t' <- evType t
                                   return $ UndefinedE info t'
-          TupleE info fs -> do fs' <- mapM evExp fs
-                               return $ TupleE info fs'
           TyAppE info op t -> do op' <- evExp op
                                  t' <- evType t
                                  return $ TyAppE info op' t'

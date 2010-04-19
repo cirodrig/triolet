@@ -108,8 +108,6 @@ pprExpFlagsPrec flags prec expression =
          pprTypeAnnotation (pprLit l) (Gluon.pprExp t) prec
      UndefinedE {expType = t} ->
          pprTypeAnnotation (text "_") (Gluon.pprExp t) prec
-     TupleE {expFields = ts} ->
-         tuple $ map (pprExpFlagsPrec flags precOuter) ts
      TyAppE {expOper = e, expTyArg = t} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
              tDoc = Gluon.pprExp t

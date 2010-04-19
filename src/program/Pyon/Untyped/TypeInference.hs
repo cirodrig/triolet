@@ -459,7 +459,12 @@ inferExpressionType expression =
      TupleE {expFields = fs} -> do
        (f_exps, f_tys, f_pcs) <- inferExpressionTypes fs
        let pc = TuplePassConv f_pcs
-       return (mkTupleE pos f_exps, tupleType f_tys, pc)
+           
+           -- Create the tuple expression
+           tuple_con = SystemF.getPyonTupleCon' $ length f_tys
+           f_tys' = map convertHMType f_tys
+           tuple_expr = mkPolyCallE pos (mkConE pos tuple_con) f_tys' f_exps
+       return (tuple_expr, tupleType f_tys, pc)
      CallE {expOperator = op, expOperands = args} -> do
        (op_exp, op_ty, op_conv) <- inferExpressionType op
        (arg_exps, arg_tys, arg_convs) <- inferExpressionTypes args

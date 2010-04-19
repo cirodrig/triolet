@@ -151,8 +151,6 @@ typeInferExp worker expression = do
          t' <- Gluon.evalFully' t
          val <- doType worker t'
          return (t', UndefinedE inf val)
-       TupleE {expInfo = inf, expFields = fs} ->
-         typeInferTupleE worker inf fs
        TyAppE {expInfo = inf, expOper = op, expTyArg = arg} ->
          typeInferTyAppE worker inf op arg
        CallE {expInfo = inf, expOper = op, expArgs = args} ->
@@ -204,19 +202,6 @@ isValidLiteralType ty lit =
        -- Literals cannot have other types 
        False
                                      
-typeInferTupleE :: Worker a -> ExpInfo -> [RExp] -> PureTC (WRExp, SFExp a)
-typeInferTupleE worker inf fs = do
-  -- Infer types of all fields
-  (f_types, f_vals) <- mapAndUnzipM (typeInferExp worker) fs
-
-  -- Create a tuple type
-  let size = length f_types
-  case getPyonTupleType size
-    of Nothing -> error "Unsupported tuple size"
-       Just c -> let new_tuple = TupleE inf f_vals
-                     ty = Gluon.mkInternalWhnfAppE c $ map fromWhnf f_types
-                 in return (ty, new_tuple)
-
 typeInferTyAppE :: Worker a -> ExpInfo -> RExp -> RType
                 -> PureTC (WRExp, SFExp a)
 typeInferTyAppE worker inf op arg = do
