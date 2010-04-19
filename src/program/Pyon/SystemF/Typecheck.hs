@@ -1,7 +1,10 @@
 
-{-# LANGUAGE ScopedTypeVariables, TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables, TypeFamilies, EmptyDataDecls #-}
 module Pyon.SystemF.Typecheck
-       (Worker(..), typeCheckModule, typeCheckModulePython)
+       (Worker(..), Typed, TypeAnn(..),
+        mapTypeAnn, traverseTypeAnn,
+        noWork, annotateTypes,
+        typeCheckModule, typeCheckModulePython)
 where
 
 import Control.Applicative(Const(..))
@@ -31,7 +34,7 @@ data Worker a =
   Worker
   { doType :: !(WRExp -> PureTC (TypeOf a a))
   , doExp  :: !(SFExp a -> WRExp -> PureTC (SFRecExp a))
-  , doFun  :: !([TyPat a] -> [Pat a] -> TypeOf a a -> SFRecExp a -> PureTC (Fun a))
+  , doFun  :: !([TyPat a] -> [Pat a] -> TypeOf a a -> SFRecExp a -> WRExp -> PureTC (Fun a))
   }
 
 data instance SFExpOf TrivialStructure s = TrivialSFExp
@@ -40,8 +43,38 @@ data instance FunOf TrivialStructure s = TrivialFun
 noWork :: Worker TrivialStructure
 noWork = Worker { doType = \_ -> return Gluon.TrivialExp
                 , doExp = \_ _ -> return TrivialSFExp
-                , doFun = \_ _ _ _ -> return TrivialFun
+                , doFun = \_ _ _ _ _ -> return TrivialFun
                 }
+
+data TypeAnn t a =
+  TypeAnn { typeAnnotation :: WRExp
+          , typeAnnValue :: t a
+          }
+
+mapTypeAnn :: (t a -> s b) -> TypeAnn t a -> TypeAnn s b
+mapTypeAnn f (TypeAnn t x) = TypeAnn t (f x)
+
+traverseTypeAnn :: Monad m =>
+                   (t a -> m (s b)) -> TypeAnn t a -> m (TypeAnn s b)
+traverseTypeAnn f (TypeAnn t x) = do
+  y <- f x
+  return $ TypeAnn t y
+
+data Typed a
+
+instance Gluon.Structure a => Gluon.Structure (Typed a)
+
+newtype instance Gluon.ExpOf (Typed s) (Typed s) = TypedSFType (TypeOf s s)
+newtype instance SFExpOf (Typed s) s' = TypedSFExp (TypeAnn (SFExpOf s) s')
+newtype instance FunOf (Typed s) s' = TypedSFFun (TypeAnn (FunOf s) s')
+
+annotateTypes :: Worker (Typed Rec)
+annotateTypes =
+  Worker { doType = \t -> return (TypedSFType $ fromWhnf t)
+         , doExp = \e t -> return (TypedSFExp $ TypeAnn t e)
+         , doFun = \ty_params params rt body ty -> 
+            return (TypedSFFun $ TypeAnn ty $ Fun ty_params params rt body)
+         }
 
 -- Endomorphism concatenation
 catEndo xs k = foldr ($) k xs
@@ -295,7 +328,7 @@ typeInferFun worker fun@(Fun { funTyParams = ty_params
     ty <- Gluon.evalFully' $ funType fun
     
     new_fun <-
-      doFun worker new_ty_params new_params return_type_val body_val
+      doFun worker new_ty_params new_params return_type_val body_val ty
     return (ty, new_fun)
   where
     assumeTyParams = withMany (assumeTyPat worker) ty_params
