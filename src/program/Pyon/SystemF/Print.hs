@@ -117,13 +117,6 @@ pprExpFlagsPrec flags prec expression =
          let args = tuple $ map (pprExpFlagsPrec flags precOuter) es
              oper = pprExpFlagsPrec flags precApp e
          in sep [oper, nest 4 args]
-     IfE {expCond = cond, expTrueCase = tr, expFalseCase = fa} ->
-         let condText = pprExpFlags flags cond
-             trText = pprExpFlags flags tr
-             faText = pprExpFlags flags fa
-         in text "if" <+> condText $$
-            text "then" <+> trText $$
-            text "else" <+> faText
      FunE {expFun = f} ->
          pprFunFlags flags f
      LetE {expBinder = pat, expValue = rhs, expBody = body} ->
@@ -135,6 +128,13 @@ pprExpFlagsPrec flags prec expression =
          let defsText = vcat $ map (pprDefFlags flags) ds
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
+     CaseE {expScrutinee = e, expAlternatives = [alt1, alt2]} 
+         | altConstructor alt1 == pyonBuiltin the_True &&
+           altConstructor alt2 == pyonBuiltin the_False ->
+             pprIf flags e (altBody alt1) (altBody alt2)
+         | altConstructor alt2 == pyonBuiltin the_True &&
+           altConstructor alt1 == pyonBuiltin the_False ->
+             pprIf flags e (altBody alt2) (altBody alt1)
      CaseE {expScrutinee = e, expAlternatives = alts} ->
        let doc = text "case" <+> pprExpFlagsPrec flags precOuter e $$
                  text "of" <+> vcat (map (pprAltFlags flags) alts)
@@ -155,6 +155,15 @@ pprExpFlagsPrec flags prec expression =
            indexText = parens $ text (show index)
            argText = parens $ pprExpFlags flags arg
        in text "method" <> cat [clsText, indexText, argText] -}
+
+pprIf flags cond tr fa =
+  let condText = pprExpFlags flags cond
+      trText = pprExpFlags flags tr
+      faText = pprExpFlags flags fa
+  in text "if" <+> condText $$
+     text "then" <+> trText $$
+     text "else" <+> faText
+
 
 pprAltFlags :: PrintFlags -> Alt Rec -> Doc
 pprAltFlags flags (Alt { altConstructor = c

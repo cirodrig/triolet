@@ -155,8 +155,6 @@ typeInferExp worker expression = do
          typeInferTyAppE worker inf op arg
        CallE {expInfo = inf, expOper = op, expArgs = args} ->
          typeInferCallE worker inf op args
-       IfE {expInfo = inf, expCond = cond, expTrueCase = tr, expFalseCase = fa} ->
-         typeInferIfE worker inf cond tr fa
        FunE {expInfo = inf, expFun = f} -> do
          (fun_type, fun_val) <- typeInferFun worker f
          return (fun_type, FunE inf fun_val)
@@ -281,20 +279,6 @@ computeAppliedType pos op_type arg_types = apply op_type arg_types
                 throwError $ Gluon.NonFunctionApplicationErr pos (fromWhnf op_type')
 
     apply op_type [] = Gluon.evalFully op_type
-
-typeInferIfE :: Worker a -> ExpInfo -> RExp -> RExp -> RExp
-             -> PureTC (WRExp, SFExp a)
-typeInferIfE worker inf cond if_true if_false = do
-  -- Condition must be a bool
-  (cond_t, cond_val) <- typeInferExp worker cond
-  tcAssertEqual (getSourcePos inf) (verbatim boolType) (verbatim $ fromWhnf cond_t)
-  
-  -- True and false paths must be equal
-  (if_true_t, if_true_val) <- typeInferExp worker if_true
-  (if_false_t, if_false_val) <- typeInferExp worker if_false
-  tcAssertEqual noSourcePos (verbatim $ fromWhnf if_true_t) (verbatim $ fromWhnf if_false_t)
-
-  return (if_true_t, IfE inf cond_val if_true_val if_false_val)
 
 typeInferFun :: Worker a -> RFun -> PureTC (WRExp, Fun a)
 typeInferFun worker fun@(Fun { funTyParams = ty_params

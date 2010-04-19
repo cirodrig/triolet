@@ -111,13 +111,6 @@ pevalExpRecursive expression =
        op' <- pevalExp op
        args' <- mapM pevalExp args
        return $ expression {expOper = op', expArgs = args'}
-     IfE {expCond = c, expTrueCase = tr, expFalseCase = fa} -> do
-       c' <- pevalExp c
-       tr' <- pevalExp tr
-       fa' <- pevalExp fa
-       return $ expression { expCond = c'
-                           , expTrueCase = tr'
-                           , expFalseCase = fa'}
      FunE {expFun = f} -> do
        f' <- pevalFun f
        return $ expression {expFun = f'}
@@ -344,13 +337,6 @@ edcExp expression =
        op' <- edcExp op
        args' <- mapM edcExp args
        return $ expression {expOper = op', expArgs = args'}
-     IfE {expCond = e1, expTrueCase = e2, expFalseCase = e3} -> do
-       e1' <- edcExp e1
-       e2' <- edcExp e2
-       e3' <- edcExp e3
-       return $ expression { expCond = e1'
-                           , expTrueCase = e2'
-                           , expFalseCase = e3'}
      FunE {expFun = f} -> do
        f' <- edcFun f
        return $ expression {expFun = f'}

@@ -42,10 +42,6 @@ evExp expression =
           CallE info op args -> do op' <- evExp op
                                    args' <- mapM evExp args
                                    return $ CallE info op' args'
-          IfE info c t f -> do c' <- evExp c
-                               t' <- evExp t
-                               f' <- evExp f
-                               return $ IfE info c' t' f'
           FunE info f -> do f' <- evFun f
                             return $ FunE info f'
           LetE info p r b -> do p' <- evPat p

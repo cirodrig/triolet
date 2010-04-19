@@ -282,19 +282,6 @@ flattenExp' expression expression_type =
            if is_stm
              then returnStatement $ NewCore.CallS inf call
              else returnValue call
-     IfE { expInfo = inf
-         , expCond = cond
-         , expTrueCase = tr
-         , expFalseCase = fa} -> do
-       -- Translate to a 'case' statement.
-       -- The condition is an expression; the true and false cases are
-       -- statements.
-       cond' <- asValue cond
-       tr' <- asStatement tr
-       fa' <- asStatement fa
-       let true_alt = NewCore.Alt inf (NewCore.ConP (pyonBuiltin the_True) []) tr'
-       let false_alt = NewCore.Alt inf (NewCore.ConP (pyonBuiltin the_False) []) fa'
-       returnStatement $ NewCore.CaseS inf cond' [true_alt, false_alt]
      FunE {expInfo = inf, expFun = fun} -> do
        converted_fun <- flattenFun fun
        case converted_fun of

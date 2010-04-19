@@ -275,7 +275,20 @@ mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty = TIExp $ SystemF.UndefinedE (synInfo pos) ty
 
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
-mkIfE pos cond tr fa = TIExp $ SystemF.IfE (synInfo pos) cond tr fa
+mkIfE pos cond tr fa =
+  let true_alt =
+        SystemF.Alt { SystemF.altConstructor = SystemF.pyonBuiltin SystemF.the_True
+                    , SystemF.altTyArgs = []
+                    , SystemF.altParams = []
+                    , SystemF.altBody = tr
+                    }
+      false_alt =
+        SystemF.Alt { SystemF.altConstructor = SystemF.pyonBuiltin SystemF.the_False
+                    , SystemF.altTyArgs = []
+                    , SystemF.altParams = []
+                    , SystemF.altBody = fa
+                    }
+  in TIExp $ SystemF.CaseE (synInfo pos) cond [true_alt, false_alt]
 
 mkCallE :: SourcePos -> TIExp -> [TIExp] -> TIExp
 mkCallE pos oper args = TIExp $ SystemF.CallE (synInfo pos) oper args

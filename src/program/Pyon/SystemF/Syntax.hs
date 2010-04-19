@@ -120,13 +120,6 @@ data instance SFExpOf Rec s =
     , expOper :: SFRecExp s
     , expArgs :: [SFRecExp s]
     }
-    -- | If-then-else expression
-  | IfE
-    { expInfo :: ExpInfo
-    , expCond :: SFRecExp s
-    , expTrueCase :: SFRecExp s
-    , expFalseCase :: SFRecExp s
-    }
     -- | Lambda expression
   | FunE
     { expInfo :: ExpInfo
@@ -215,8 +208,6 @@ isValueExp expression =
      UndefinedE {} -> True
      TyAppE {expOper = e} -> isValueExp e
      CallE {} -> False
-     IfE {expCond = c, expTrueCase = t, expFalseCase = f} ->
-       isValueExp c && isValueExp t && isValueExp f
      FunE {} -> True
      LetE {} -> False
      LetrecE {} -> False
