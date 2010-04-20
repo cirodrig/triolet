@@ -112,7 +112,7 @@ data OrdDict : Pure -> Pure where
 
 data TraversableDict : (Pure -> Pure) -> Pure where
   traversableDict : (t : Pure -> Pure)
-                 -> ((a : Pure) -> t a -> Stream a)
+                 -> ((a : Pure) -> PassConv a -> (t a -> Stream a))
                  -> TraversableDict t;
 
 data AdditiveDict : Pure -> Pure where
@@ -161,8 +161,17 @@ constant Ord_LE_Tuple2 : (a : Pure) -> (b : Pure)
                       -> OrdDict a -> OrdDict b
                       -> (comparison (PyonTuple2 a b));
 
-let Traversable_TRAVERSE_Stream (a : Pure) (s : Stream a) -> Stream a = s;
-constant Traversable_TRAVERSE_list : (a : Pure) -> list a -> Stream a;
+let Traversable_TRAVERSE_Stream
+    (a : Pure)
+    (pc : PassConv a)
+    (s : Stream a)
+ -> Stream a
+  = s;
+constant Traversable_TRAVERSE_list
+  : (a : Pure)
+ -> PassConv a
+ -> list a
+ -> Stream a;
 
 constant Additive_ZERO_Int : Int;
 constant Additive_ADD_Int : binary Int;

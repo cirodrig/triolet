@@ -175,7 +175,10 @@ mkTraversableClass = mdo
   t <- newTyVar (Star :-> Star) Nothing
   iter_scheme <-
     forallType [Star] $ \[a] ->
-    ([], functionType [ConTy t @@ ConTy a] (ConTy (tiBuiltin the_con_iter) @@ ConTy a))
+    let aT = ConTy a
+        tT = ConTy t
+    in ( [passable aT]
+       , functionType [tT @@ aT] (ConTy (tiBuiltin the_con_iter) @@ aT))
 
   let cls = Class { clsParam = t
                   , clsConstraint = []
