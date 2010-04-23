@@ -2,8 +2,10 @@
 {-# LANGUAGE ScopedTypeVariables, TypeFamilies, EmptyDataDecls #-}
 module Pyon.SystemF.Typecheck
        (Worker(..), Typed, TypeAnn(..),
+        SFExpOf(..), Gluon.ExpOf(TypedSFType), FunOf(..),
         mapTypeAnn, traverseTypeAnn,
         noWork, annotateTypes,
+        functionType,
         typeCheckModule, typeCheckModulePython)
 where
 
@@ -16,7 +18,7 @@ import Gluon.Common.Label
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
 import Gluon.Core.Rename
-import Gluon.Core(WRExp, asWhnf, fromWhnf)
+import Gluon.Core(Level(..), WRExp, asWhnf, fromWhnf)
 import qualified Gluon.Core.Builtins.Effect as Gluon.Builtins.Effect
 import qualified Gluon.Eval.Error as Gluon
 import qualified Gluon.Eval.Eval as Gluon
@@ -34,7 +36,7 @@ data Worker a =
   Worker
   { doType :: !(WRExp -> PureTC (TypeOf a a))
   , doExp  :: !(SFExp a -> WRExp -> PureTC (SFRecExp a))
-  , doFun  :: !([TyPat a] -> [Pat a] -> TypeOf a a -> SFRecExp a -> WRExp -> PureTC (Fun a))
+  , doFun  :: !(SourcePos -> [TyPat a] -> [Pat a] -> TypeOf a a -> SFRecExp a -> WRExp -> PureTC (Fun a))
   }
 
 data instance SFExpOf TrivialStructure s = TrivialSFExp
@@ -43,7 +45,7 @@ data instance FunOf TrivialStructure s = TrivialFun
 noWork :: Worker TrivialStructure
 noWork = Worker { doType = \_ -> return Gluon.TrivialExp
                 , doExp = \_ _ -> return TrivialSFExp
-                , doFun = \_ _ _ _ _ -> return TrivialFun
+                , doFun = \_ _ _ _ _ _ -> return TrivialFun
                 }
 
 data TypeAnn t a =
@@ -72,8 +74,8 @@ annotateTypes :: Worker (Typed Rec)
 annotateTypes =
   Worker { doType = \t -> return (TypedSFType $ fromWhnf t)
          , doExp = \e t -> return (TypedSFExp $ TypeAnn t e)
-         , doFun = \ty_params params rt body ty -> 
-            return (TypedSFFun $ TypeAnn ty $ Fun ty_params params rt body)
+         , doFun = \pos ty_params params rt body ty -> 
+            return (TypedSFFun $ TypeAnn ty $ Fun (Gluon.mkSynInfo pos ObjectLevel) ty_params params rt body)
          }
 
 -- Endomorphism concatenation
@@ -102,11 +104,11 @@ patType (TupleP ps) = let size = length ps
                           field_types = map patType ps
                       in Gluon.mkInternalConAppE con field_types
 
-funType :: RFun -> RType 
-funType (Fun { funTyParams = ty_params
-             , funParams = params
-             , funReturnType = ret 
-             }) =
+functionType :: RFun -> RType 
+functionType (Fun { funTyParams = ty_params
+                  , funParams = params
+                  , funReturnType = ret 
+                  }) =
   -- Create a dependent type for each type parameter
   catEndo (map makeTyFun ty_params) $
   -- Create an arrow type for each value parameter
@@ -133,7 +135,7 @@ assumeTyPat worker (TyPat v t) k = do
 
 -- Assume a function definition.  Do not check the function definition's body.
 assumeDef :: RDef -> PureTC a -> PureTC a
-assumeDef (Def v fun) = assumePure v (funType fun)
+assumeDef (Def v fun) = assumePure v (functionType fun)
 
 typeInferExp :: Worker a -> RExp -> PureTC (WRExp, SFRecExp a)
 typeInferExp worker expression = do
@@ -281,7 +283,8 @@ computeAppliedType pos op_type arg_types = apply op_type arg_types
     apply op_type [] = Gluon.evalFully op_type
 
 typeInferFun :: Worker a -> RFun -> PureTC (WRExp, Fun a)
-typeInferFun worker fun@(Fun { funTyParams = ty_params
+typeInferFun worker fun@(Fun { funInfo = info
+                             , funTyParams = ty_params
                              , funParams = params
                              , funReturnType = return_type
                              , funBody = body}) =
@@ -294,10 +297,10 @@ typeInferFun worker fun@(Fun { funTyParams = ty_params
                               (verbatim return_type)
     
     -- Create the function's type
-    ty <- Gluon.evalFully' $ funType fun
+    ty <- Gluon.evalFully' $ functionType fun
     
     new_fun <-
-      doFun worker new_ty_params new_params return_type_val body_val ty
+      doFun worker (getSourcePos info) new_ty_params new_params return_type_val body_val ty
     return (ty, new_fun)
   where
     assumeTyParams = withMany (assumeTyPat worker) ty_params

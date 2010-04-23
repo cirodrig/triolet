@@ -1,6 +1,6 @@
 
 module Pyon.SystemF.Optimizations
-    (optimizeModule)
+    (simplifyModule)
 where
 
 import Control.Applicative(Const(..))
@@ -22,9 +22,9 @@ import Pyon.SystemF.Builtins
 catEndo :: [a -> a] -> a -> a
 catEndo fs x = foldr ($) x fs
 
--- | Apply optimizations to a module.
-optimizeModule :: RModule -> RModule
-optimizeModule mod =
+-- | Apply optimizations that tend to simplify the code of a module.
+simplifyModule :: RModule -> RModule
+simplifyModule mod =
   mapModule elimDeadCode $
   mapModule doPartialEvaluation $
   mod

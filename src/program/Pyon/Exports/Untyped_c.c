@@ -383,6 +383,10 @@ static PyMethodDef untyped_methods[] = {
    "Construct a module object"},
   {"printModule", pyon_printModule, METH_O,
    "Print a module"},
+  /*{"specializeSystemFModule", pyon_specializeSystemFModule, METH_O,
+   "Perform calling-convention specialization on a System F module"}, */
+  {"eliminatePatternMatching", pyon_eliminatePatternMatching, METH_O,
+   "Eliminate pattern-matching constructs in a System F module"},
   {"typeApplication", typeApplication, METH_VARARGS,
    "Apply a type constructor to a list of operands"},
   {"typeInferModule", pyon_typeInferModule, METH_O,

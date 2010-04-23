@@ -76,7 +76,8 @@ evFun (Untyped.TIFun f) = do
   params <- mapM evPat $ funParams f
   rt <- evType $ funReturnType f
   body <- evExp $ funBody f
-  return $ Fun { funTyParams = ty_params
+  return $ Fun { funInfo = funInfo f
+               , funTyParams = ty_params
                , funParams = params
                , funReturnType = rt
                , funBody = body

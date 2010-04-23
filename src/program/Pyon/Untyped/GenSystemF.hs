@@ -356,11 +356,11 @@ mkDictPlaceholder pos p = do
   actual <- newEmptyMVar
   return $ DictPH (mkSynInfo pos ObjectLevel) p actual
 
-mkFunction :: [TyCon] -> [SystemF.Pat TI] -> TIType -> TIExp 
+mkFunction :: SourcePos -> [TyCon] -> [SystemF.Pat TI] -> TIType -> TIExp 
            -> IO (SystemF.Fun TI)
-mkFunction ty_params params ret_type body = do
+mkFunction pos ty_params params ret_type body = do
   ty_params' <- mapM convertTyParam ty_params
-  return $ TIFun $ SystemF.Fun ty_params' params ret_type body
+  return $ TIFun $ SystemF.Fun (mkSynInfo pos ObjectLevel) ty_params' params ret_type body
   where
     convertTyParam ty_param = do
       v <- tyVarToSystemF ty_param

@@ -23,6 +23,7 @@ import Pyon.Untyped.InitializeBuiltins
 import Pyon.SystemF.Syntax(Lit(..))
 import qualified Pyon.SystemF.Typecheck as SystemF
 import qualified Pyon.SystemF.Print as SystemF
+import qualified Pyon.SystemF.ElimPatternMatching as SystemF
 
 -- Imported for compilation dependences only
 import Pyon.SystemF.Flatten()
@@ -347,6 +348,22 @@ pyon_typeCheckSystemFModule _self mod = rethrowExceptionsInPython $ do
   m <- fromHsObject' mod
   SystemF.typeCheckModulePython m
   pyNone
+
+{-
+foreign export ccall pyon_specializeSystemFModule :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_specializeSystemFModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  newHsObject =<< SystemF.doSpecialization m
+-}
+
+foreign export ccall pyon_eliminatePatternMatching :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_eliminatePatternMatching _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  newHsObject =<< SystemF.eliminatePatternMatching m
 
 foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 

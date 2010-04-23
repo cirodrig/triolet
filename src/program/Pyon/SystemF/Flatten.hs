@@ -224,8 +224,8 @@ asStatement m = liftM snd $ asStatementWithType m
 flattenWorker :: Worker ConvertToNewCore
 flattenWorker = Worker flattenType flattenExp makeFunction
   where
-    makeFunction ty_params params return_type body _ =
-      return $ FBFun $ Fun ty_params params return_type body
+    makeFunction pos ty_params params return_type body _ =
+      return $ FBFun $ Fun (Gluon.mkSynInfo pos ObjectLevel) ty_params params return_type body
 
 flattenType :: Gluon.WRExp -> PureTC (TypeOf ConvertToNewCore ConvertToNewCore)
 flattenType t = return $ NewCoreType $ fromWhnf t

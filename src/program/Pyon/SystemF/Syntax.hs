@@ -9,7 +9,7 @@
 module Pyon.SystemF.Syntax
     (Rec,
      SFExpOf(..), TypeOf,
-     SFRecExp,
+     SFRecExp, RecType,
      RExp, RType, RPat, RTyPat, RFun, RDef, RModule,
      Var,
      Lit(..),
@@ -22,16 +22,20 @@ module Pyon.SystemF.Syntax
      Def(..), DefGroup,
      Export(..),
      Module(..),
-     isValueExp
+     isValueExp,
+     
+     mapSFExp, mapPat,
+     traverseSFExp, traversePat
     )
 where
 
+import Control.Monad
 import Data.Typeable
 
 import Gluon.Common.Error
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
-import Gluon.Core(Rec)
+import Gluon.Core(Structure, Rec, Var)
 
 import Pyon.SystemF.Builtins
 
@@ -52,9 +56,6 @@ type RTyPat = TyPat Rec
 type RDef = Def Rec
 type RFun = Fun Rec
 type RModule = Module Rec
-
--- | Pyon variables are the same as Gluon variables.
-type Var = Gluon.Var
 
 -- | Literal values.
 --
@@ -106,7 +107,7 @@ data instance SFExpOf Rec s =
     -- | An undefined value
   | UndefinedE
     { expInfo :: ExpInfo
-    , expType ::  RecType s
+    , expType :: RecType s
     }
     -- | Type application
   | TyAppE
@@ -164,7 +165,8 @@ instance HasSourcePos (SFExpOf Rec s) where
   setSourcePos _ _ = internalError "HasSourcePos.setSourcePos"
 
 data instance FunOf Rec s =
-  Fun { funTyParams :: [TyPat s] -- ^ Type parameters
+  Fun { funInfo :: ExpInfo
+      , funTyParams :: [TyPat s] -- ^ Type parameters
       , funParams :: [Pat s]     -- ^ Object parameters
       , funReturnType :: RecType s -- ^ Return type
       , funBody :: SFRecExp s
@@ -190,6 +192,73 @@ data Export =
 
 data Module s = Module [DefGroup s] [Export]
             deriving(Typeable)
+
+-- | Map a function over an expression.
+mapSFExp :: (Structure a, Structure b)
+         => (SFRecExp a -> SFRecExp b)
+         -> (FunOf a a -> FunOf b b)
+         -> (RecType a -> RecType b)
+         -> SFExpOf Rec a -> SFExpOf Rec b
+mapSFExp e f t expression =
+  case expression
+  of VarE info v -> VarE info v
+     ConE info c -> ConE info c
+     LitE info l ty -> LitE info l (t ty)
+     UndefinedE info ty -> UndefinedE info (t ty)
+     TyAppE info op arg -> TyAppE info (e op) (t arg)
+     CallE info op args -> CallE info (e op) (map e args)
+     FunE info fun -> FunE info (f fun)
+     LetE info p e1 e2 -> LetE info (mapPat t p) (e e1) (e e2)
+     LetrecE info defs body -> LetrecE info (map mapDef defs) (e body)
+     CaseE info scr alts -> CaseE info (e scr) (map mapAlt alts)
+  where
+    mapDef (Def v fun) = Def v (f fun)
+    mapAlt (Alt con ty_args params body) =
+      Alt con (map t ty_args) params (e body)
+
+-- | Map a monadic function over an expression.
+traverseSFExp :: (Monad m, Structure a, Structure b)
+              => (SFRecExp a -> m (SFRecExp b))
+              -> (FunOf a a -> m (FunOf b b))
+              -> (RecType a -> m (RecType b))
+              -> SFExpOf Rec a -> m (SFExpOf Rec b)
+traverseSFExp e f t expression =
+  case expression
+  of VarE info v -> return $ VarE info v
+     ConE info c -> return $ ConE info c
+     LitE info l ty -> LitE info l `liftM` t ty
+     UndefinedE info ty -> UndefinedE info `liftM` t ty
+     TyAppE info op arg -> TyAppE info `liftM` e op `ap` t arg
+     CallE info op args -> CallE info `liftM` e op `ap` mapM e args
+     FunE info fun -> FunE info `liftM` f fun
+     LetE info p e1 e2 ->
+       LetE info `liftM` traversePat t p `ap` e e1 `ap` e e2
+     LetrecE info defs body ->
+       LetrecE info `liftM` mapM traverseDef defs `ap` e body
+     CaseE info scr alts ->
+       CaseE info `liftM` e scr `ap` mapM traverseAlt alts
+  where
+    traverseDef (Def v fun) = Def v `liftM` f fun
+    traverseAlt (Alt con ty_args params body) =
+      Alt con `liftM` mapM t ty_args `ap` return params `ap` e body
+
+mapPat :: (Structure a, Structure b)
+       => (RecType a -> RecType b)
+       -> Pat a -> Pat b
+mapPat t pattern =
+  case pattern
+  of WildP ty -> WildP (t ty)
+     VarP v ty -> VarP v (t ty)
+     TupleP ps -> TupleP (map (mapPat t) ps)
+
+traversePat :: (Monad m, Structure a, Structure b)
+            => (RecType a -> m (RecType b))
+            -> Pat a -> m (Pat b)
+traversePat t pattern =
+  case pattern
+  of WildP ty -> WildP `liftM` t ty
+     VarP v ty -> VarP v `liftM` t ty
+     TupleP ps -> TupleP `liftM` mapM (traversePat t) ps
 
 -- | Return True only if the given expression has no side effects.
 -- This function examines only expression constructors, and avoids inspecting

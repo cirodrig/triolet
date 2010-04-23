@@ -2,7 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Pyon.SystemF.Builtins
        (EqDictMembers(..), OrdDictMembers(..), TraversableDictMembers(..),
-        AdditiveDictMembers(..),
+        AdditiveDictMembers(..), VectorDictMembers(..),
         loadPyonBuiltins, arePyonBuiltinsInitialized,
         pyonBuiltin, isPyonBuiltin,
         the_Stream,
@@ -150,12 +150,34 @@ getPyonTuplePassConv' size =
      Nothing -> internalError "Unsupported tuple size"
 
 findConByName mod name =
-  let label = pgmLabel (moduleName "SFBuiltin") name
+  let label = pgmLabel pyonBuiltinModuleName name
   in case find ((label ==) . conName) $ getConstructors mod
      of Just c  -> c
         Nothing -> internalError $ "Missing Pyon builtin '" ++ name ++ "'"
   where
     getConstructors mod = concat [c : conCtors c | c <- moduleConstructors mod]
+
+-- | Read a list of tuple type constructors from the module
+readTupleTypes mod =
+  let tupleTypeNames = ["PyonTuple" ++ show n | n <- [0..5]]
+      tupleTypes = map (findConByName mod) tupleTypeNames
+      force x = foldl' (flip seq) x tupleTypes
+  in force $ return tupleTypes
+
+-- | Read a list of tuple data constructors from the module
+readTuples mod =
+  let tupleNames = ["pyonTuple" ++ show n | n <- [0..5]]
+      tupleConstructors = map (findConByName mod) tupleNames
+      force x = foldl' (flip seq) x tupleConstructors
+  in force $ return tupleConstructors
+
+-- | Read a list of tuple parameter-passing convention constructors from
+-- the module
+readTuplePassConvs mod =
+  let names = ["passConv_pyonTuple" ++ show n | n <- [0..5]]
+      cons = map (findConByName mod) names
+      force x = foldl' (flip seq) x cons
+  in force $ return cons
 
 -- Load symbols from the module and use them to initialize the builtins
 initializePyonBuiltins :: Module () -> IO ()
@@ -172,23 +194,6 @@ initializePyonBuiltins mod = do
         constructors = zipWith assign_ctor_field
                        pyonBuiltinConstructorNames pyonBuiltinConstructors
         
-        -- Initialize tuple fields; force evaluation when initializing
-        assign_tuples =
-          [| let tupleNames = ["pyonTuple" ++ show n | n <- [0..5]]
-                 tupleConstructors = map (findConByName mod) tupleNames
-                 force x = foldl' (flip seq) x tupleConstructors
-             in force $ return tupleConstructors |]
-        assign_tuple_types =
-          [| let tupleTypeNames = ["PyonTuple" ++ show n | n <- [0..5]]
-                 tupleTypes = map (findConByName mod) tupleTypeNames
-                 force x = foldl' (flip seq) x tupleTypes
-             in force $ return tupleTypes |]
-        assign_tuple_pass_convs =
-          [| let names = ["passConv_pyonTuple" ++ show n | n <- [0..5]]
-                 cons = map (findConByName mod) names
-                 force x = foldl' (flip seq) x cons
-             in force $ return cons |]
-
         -- Initialize class dictionaries
         findNameWithPrefix name pfx =
           [| findConByName mod $(stringE $ pfx ++ name) |]
@@ -197,6 +202,7 @@ initializePyonBuiltins mod = do
            [| let c_eq = $(findNameWithPrefix name "Eq_EQ_")
                   c_ne = $(findNameWithPrefix name "Eq_NE_")
               in evaluate $ EqDictMembers c_eq c_ne |])
+
         ord_dict name =
           ("_OrdDict_" ++ name,
            [| let c_gt = $(findNameWithPrefix name "Ord_GT_")
@@ -204,7 +210,7 @@ initializePyonBuiltins mod = do
                   c_lt = $(findNameWithPrefix name "Ord_LT_")
                   c_le = $(findNameWithPrefix name "Ord_LE_")
               in evaluate $ OrdDictMembers c_lt c_le c_gt c_ge |])
-          
+
         traversable_dict name =
           ("_TraversableDict_" ++ name,
            [| let c = $(findNameWithPrefix name "Traversable_TRAVERSE_")
@@ -220,9 +226,9 @@ initializePyonBuiltins mod = do
         -- All field initializers
         initializers =
           constructors ++
-          [ ("_tuples", assign_tuple_types)
-          , ("_tupleConstructors", assign_tuples)
-          , ("_tuplePassConvConstructors", assign_tuple_pass_convs)
+          [ ("_tuples", [| readTupleTypes mod |])
+          , ("_tupleConstructors", [| readTuples mod |])
+          , ("_tuplePassConvConstructors", [| readTuplePassConvs mod |])
           , eq_dict "Int"
           , eq_dict "Float"
           , eq_dict "Tuple2"
@@ -235,7 +241,7 @@ initializePyonBuiltins mod = do
           , additive_dict "Float"
           ]
       in initializeRecordM pyonBuiltinsSpecification initializers)
-    
+
   -- Store builtins in a global variable
   putMVar the_PyonBuiltins bi
 

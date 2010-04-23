@@ -30,11 +30,14 @@ def tryCompile(fname, show_traceback = False):
         # Type inference
         untyped.printModule(test_untyped)
         test_inf = untyped.typeInferModule(test_untyped)
+        del test_untyped
+        test_inf = untyped.eliminatePatternMatching(test_inf)
         untyped.printModule(test_inf)
 
         # test_sf = type_inference.inferTypes(test_anf)
 
         untyped.typeCheckModule(test_inf)
+
 	# test_sf = system_f.optimizeModule(test_sf)
         # test_flat = system_f.flattenModule(test_sf)
 

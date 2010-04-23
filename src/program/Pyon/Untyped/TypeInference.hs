@@ -378,7 +378,8 @@ makePolymorphicFunction proofs pos (TyScheme qvars cst fot) (TIFun fo_function)
       -- returns the original function
       let fun_body = mkFunE pos (TIFun fo_function)
           return_type = convertHMType fot
-      return $ TIFun $ SystemF.Fun ty_params prd_params return_type fun_body
+          info = SystemF.funInfo fo_function
+      return $ TIFun $ SystemF.Fun info ty_params prd_params return_type fun_body
   where
     addTypeParameters f = do
       ty_params <- mapM convertTyParam qvars
@@ -552,7 +553,7 @@ inferFunctionFirstOrderType pos params body annotated_return_type =
         f_cc = foldr (:+>) return_cc param_pcs
 
     let f_type = functionType param_types body_type
-    f <- liftIO $ mkFunction [] sf_params (convertHMType body_type) body
+    f <- liftIO $ mkFunction pos [] sf_params (convertHMType body_type) body
     return (f, f_type, f_cc)
 
 -- | Bind a list of parameters with first-order types over a local scope.

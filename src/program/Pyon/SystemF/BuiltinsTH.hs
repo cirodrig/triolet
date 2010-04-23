@@ -3,6 +3,7 @@
 module Pyon.SystemF.BuiltinsTH where
 
 import Language.Haskell.TH(Strict(..))
+import Gluon.Common.Label
 import Gluon.Common.THRecord
 import Gluon.Core.Syntax
 
@@ -38,9 +39,11 @@ data VectorDictMembers =
   , normMember :: !Con
   }
 
-pyonBuiltinConstructors =
-  [ -- Types
-    "Stream"
+pyonBuiltinModuleNameString = "SFBuiltin"
+pyonBuiltinModuleName = moduleName pyonBuiltinModuleNameString
+
+pyonBuiltinTypeConstructors =
+  [ "Stream"
   , "bool"
   , "list"
   , "NoneType"
@@ -51,16 +54,10 @@ pyonBuiltinConstructors =
   , "AdditiveDict"
   , "VectorDict"
   , "PassConv"
-    -- Parameter-passing conventions
-  , "passConv_Int"
-  , "passConv_Float"
-  , "passConv_bool"
-  , "passConv_NoneType"
-  , "passConv_iter"
-  , "passConv_list"
-  , "passConv_Any"
-    -- Data constructors
-  , "None"
+  ]
+
+pyonBuiltinDataConstructors =
+  [ "None"
   , "True"
   , "False"
   , "eqDict"
@@ -68,8 +65,20 @@ pyonBuiltinConstructors =
   , "traversableDict"
   , "additiveDict"
   , "vectorDict"
-    -- Functions
-  , "oper_MUL"
+  ]
+
+pyonBuiltinPassConvConstructors =
+  [ "passConv_Int"
+  , "passConv_Float"
+  , "passConv_bool"
+  , "passConv_NoneType"
+  , "passConv_iter"
+  , "passConv_list"
+  , "passConv_Any"
+  ]
+
+pyonBuiltinFunctions =
+  [ "oper_MUL"
   , "oper_DIV"
   , "oper_FLOORDIV"
   , "oper_MOD"
@@ -89,6 +98,12 @@ pyonBuiltinConstructors =
   , "fun_iota"
   , "fun_undefined"
   ]
+
+pyonBuiltinConstructors =
+  pyonBuiltinTypeConstructors ++
+  pyonBuiltinDataConstructors ++
+  pyonBuiltinPassConvConstructors ++
+  pyonBuiltinFunctions
 
 pyonBuiltinConstructorNames = map ('_':) pyonBuiltinConstructors
 
