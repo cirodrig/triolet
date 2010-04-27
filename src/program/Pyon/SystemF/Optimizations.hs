@@ -103,7 +103,6 @@ pevalExpRecursive expression =
   of VarE {expVar = v} -> lookupVarDefault expression v
      ConE {} -> return expression
      LitE {} -> return expression
-     UndefinedE {} -> return expression
      TyAppE {expOper = op} -> do
        op' <- pevalExp op
        return $ expression {expOper = op'}
@@ -324,9 +323,6 @@ edcExp expression =
      ConE {expCon = c} ->
        return expression
      LitE {expType = t} -> do
-       edcScanType t
-       return expression
-     UndefinedE {expType = t} -> do
        edcScanType t
        return expression
      TyAppE {expOper = op, expTyArg = arg} -> do

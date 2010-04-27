@@ -34,8 +34,6 @@ evExp expression =
           ConE info c   -> return $ ConE info c
           LitE info l t -> do t' <- evType t
                               return $ LitE info l t'
-          UndefinedE info t -> do t' <- evType t
-                                  return $ UndefinedE info t'
           TyAppE info op t -> do op' <- evExp op
                                  t' <- evType t
                                  return $ TyAppE info op' t'

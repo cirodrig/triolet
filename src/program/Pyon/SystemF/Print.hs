@@ -106,8 +106,6 @@ pprExpFlagsPrec flags prec expression =
          text (showLabel $ Gluon.conName c)
      LitE {expLit = l, expType = t} ->
          pprTypeAnnotation (pprLit l) (Gluon.pprExp t) prec
-     UndefinedE {expType = t} ->
-         pprTypeAnnotation (text "_") (Gluon.pprExp t) prec
      TyAppE {expOper = e, expTyArg = t} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
              tDoc = Gluon.pprExp t

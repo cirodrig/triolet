@@ -148,11 +148,6 @@ typeInferExp worker expression = do
          return (ty, ConE inf c)
        LitE {expInfo = inf, expLit = l, expType = t} ->
          checkLiteralType worker inf l t
-       UndefinedE {expInfo = inf, expType = t} -> do
-         -- Evaluate the type; any type is acceptable
-         t' <- Gluon.evalFully' t
-         val <- doType worker t'
-         return (t', UndefinedE inf val)
        TyAppE {expInfo = inf, expOper = op, expTyArg = arg} ->
          typeInferTyAppE worker inf op arg
        CallE {expInfo = inf, expOper = op, expArgs = args} ->

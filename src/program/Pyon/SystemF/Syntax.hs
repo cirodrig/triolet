@@ -104,11 +104,6 @@ data instance SFExpOf Rec s =
     , expLit :: !Lit
     , expType :: RecType s
     }
-    -- | An undefined value
-  | UndefinedE
-    { expInfo :: ExpInfo
-    , expType :: RecType s
-    }
     -- | Type application
   | TyAppE
     { expInfo :: ExpInfo
@@ -204,7 +199,6 @@ mapSFExp e f t expression =
   of VarE info v -> VarE info v
      ConE info c -> ConE info c
      LitE info l ty -> LitE info l (t ty)
-     UndefinedE info ty -> UndefinedE info (t ty)
      TyAppE info op arg -> TyAppE info (e op) (t arg)
      CallE info op args -> CallE info (e op) (map e args)
      FunE info fun -> FunE info (f fun)
@@ -227,7 +221,6 @@ traverseSFExp e f t expression =
   of VarE info v -> return $ VarE info v
      ConE info c -> return $ ConE info c
      LitE info l ty -> LitE info l `liftM` t ty
-     UndefinedE info ty -> UndefinedE info `liftM` t ty
      TyAppE info op arg -> TyAppE info `liftM` e op `ap` t arg
      CallE info op args -> CallE info `liftM` e op `ap` mapM e args
      FunE info fun -> FunE info `liftM` f fun
@@ -274,7 +267,6 @@ isValueExp expression =
   of VarE {} -> True
      ConE {} -> True
      LitE {} -> True
-     UndefinedE {} -> True
      TyAppE {expOper = e} -> isValueExp e
      CallE {} -> False
      FunE {} -> True
