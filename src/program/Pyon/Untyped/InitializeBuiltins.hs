@@ -378,19 +378,19 @@ initializeTIBuiltins = do
             -- 6. parameter-passing constructor arguments needed
             -- 6. execution mode
             [ ("int", Star, [| Gluon.builtin Gluon.the_Int |],
-               [| PassConvVal ByVal |],
+               [| PassConvVal ByRef |],
                "passConv_Int", [],
                [| AsAction |])
             , ("float", Star, [| Gluon.builtin Gluon.the_Float |],
-               [| PassConvVal ByVal |],
+               [| PassConvVal ByRef |],
                "passConv_Float", [],
                [| AsAction |])
             , ("bool", Star, [| pyonBuiltin SystemF.the_bool |], 
-               [| PassConvVal ByVal |],
+               [| PassConvVal ByRef |],
                "passConv_bool", [],
                [| AsAction |])
             , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |],
-               [| PassConvVal ByVal |],
+               [| PassConvVal ByRef |],
                "passConv_NoneType", [],
                [| AsAction |])
             , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |],
@@ -403,7 +403,7 @@ initializeTIBuiltins = do
                "passConv_list", [False],
                [| AsAction |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |],
-               [| PassConvVal ByVal |],
+               [| PassConvVal ByRef |],
                "passConv_Any", [],
                [| AsAction |])
             ]

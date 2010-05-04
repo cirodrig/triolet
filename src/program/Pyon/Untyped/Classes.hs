@@ -245,7 +245,6 @@ reduceEquality pos pred =
       -- Case analysis
       case (c1', c2') of
         -- Injective terms
-        (ByVal, ByVal) -> tauto pred'
         (ByRef, ByRef) -> tauto pred'
         (ByClosure x1, ByClosure x2) -> do
           (d, new_csts) <- structurallyC x1 x2
@@ -353,8 +352,7 @@ reducePassConv conv = canonicalizePassConv conv >>= reduce
            -- Try to simplify this term
            let conv' =
                  case () of
-                   _ | all isByVal xs' -> ByVal 
-                     | all isByValOrRef xs' -> ByRef 
+                   _ | all isByRef xs' -> ByRef
                      | otherwise -> TuplePassConv xs'
 
            return (conv', concat variables)
@@ -366,12 +364,8 @@ reducePassConv conv = canonicalizePassConv conv >>= reduce
          -- Other terms can't be evaluated further
          _ -> return (conv, [])
     
-    isByVal ByVal = True
-    isByVal _     = False
-    
-    isByValOrRef ByVal = True
-    isByValOrRef ByRef = True
-    isByValOrRef _     = False
+    isByRef ByRef = True
+    isByRef _     = False
 
 -- | Try to determine a type's parameter-passing convention.
 -- Return the convention and a constraint for the parameter-passing 

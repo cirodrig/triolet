@@ -177,12 +177,9 @@ data PassConvVarRep = NoPCRep | PCVarRep !PassConvVar | PCRep !PassConv
 -- one of the above.
 -- The constructor 'By' represents a variable.
 data PassConv =
-    ByVal                       -- ^ Pass by value
-  | ByRef                       -- ^ Pass by reference
-  | ByClosure CallConv          -- ^ Pass an un-evaluated function
-  | TuplePassConv [PassConv]    -- ^ Parameter-passing convention for a tuple:
-                                -- by value if all list members are by value, 
-                                -- by refernce otherwise
+    ByRef                       -- ^ Pass by reference
+  | ByClosure CallConv          -- ^ Pass a function
+  | TuplePassConv [PassConv]    -- ^ Parameter-passing convention for a tuple
   | TypePassConv HMType         -- ^ The parameter-passing convention of a
                                 -- (possibly unknown) type 
   | By {-# UNPACK #-} !PassConvVar -- ^ Unknown parameter-passing convention

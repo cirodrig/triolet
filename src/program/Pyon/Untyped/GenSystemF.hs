@@ -273,7 +273,8 @@ mkTyAppE pos oper arg = TIExp $ SystemF.TyAppE (synInfo pos) oper arg
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
-  mkTyAppE pos (mkConE pos (SystemF.pyonBuiltin SystemF.the_fun_undefined)) ty
+  let con = mkConE pos (SystemF.pyonBuiltin SystemF.the_fun_undefined)
+  in mkPolyCallE pos con [ty] []
 
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =

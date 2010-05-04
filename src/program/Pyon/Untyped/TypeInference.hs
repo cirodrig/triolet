@@ -449,9 +449,7 @@ inferExpressionType expression =
                    SystemF.FloatL _ -> ConTy $ tiBuiltin the_con_float
                    SystemF.BoolL _ -> ConTy $ tiBuiltin the_con_bool
                    SystemF.NoneL -> ConTy $ tiBuiltin the_con_NoneType
-           -- All these literals are pass-by-value
-           pc = ByVal
-       in return (mkLitE pos l (convertHMType ty), ty, pc)
+       in return (mkLitE pos l (convertHMType ty), ty, ByRef)
      UndefinedE {} -> do
        tyvar <- liftIO $ newTyVar Star Nothing
        let ty = ConTy tyvar

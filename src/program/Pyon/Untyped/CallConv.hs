@@ -105,8 +105,7 @@ applyPassConvCtor _ _ = internalError "applyPassConvCtor: kind mismatch"
 instance Type PassConv where
   freeTypeVariables pc = 
     case pc
-    of ByVal -> return Set.empty
-       ByRef -> return Set.empty
+    of ByRef -> return Set.empty
        ByClosure cc -> callConvFreeTypeVariables cc
        TuplePassConv pcs -> liftM Set.unions $ mapM freeTypeVariables pcs
        TypePassConv t -> freeTypeVariables t
@@ -183,7 +182,6 @@ instance Unifiable PassConv where
   uShow pc = do
     pc' <- liftIO $ canonicalizePassConv pc
     case pc' of
-      ByVal -> pure $ text "V"
       ByRef -> pure $ text "R"
       ByClosure cc -> parens . (text "C" <+>) <$> uShow cc 
       TuplePassConv ps -> parens . (sep . (text "Tuple":)) <$>
@@ -194,7 +192,6 @@ instance Unifiable PassConv where
   rename substitution pc = do
     pc' <- canonicalizePassConv pc
     case pc' of
-      ByVal -> return pc'
       ByRef -> return pc'
       ByClosure cc -> ByClosure `liftM` rename substitution cc
       TuplePassConv pcs -> TuplePassConv `liftM` mapM (rename substitution) pcs
@@ -229,7 +226,6 @@ instance Unifiable PassConv where
       (_, TypePassConv _) -> return [EqPassConv t1_c t2_c]
 
       -- Compare other terms
-      (ByVal, ByVal) -> success
       (ByRef, ByRef) -> success
       (ByClosure c1, ByClosure c2) -> unify pos c1 c2
       _ -> failure
@@ -250,7 +246,6 @@ instance Unifiable PassConv where
     
     case (t1_c, t2_c) of
       (By v1, By v2) -> require $ v1 == v2
-      (ByVal, ByVal) -> success
       (ByRef, ByRef) -> success
       (ByClosure c1, ByClosure c2) -> uEqual c1 c2
       (TuplePassConv cs1, TuplePassConv cs2)
@@ -286,7 +281,6 @@ matchPCSubst subst t1 t2 = do
            in return (Just subst')
           
     -- Other terms must match exactly
-    (ByVal, ByVal) -> success
     (ByRef, ByRef) -> success
     (ByClosure c1, ByClosure c2) -> matchCCSubst subst c1 c2
     (TuplePassConv cs1, TuplePassConv cs2) -> matchAllPCSubst subst cs1 cs2

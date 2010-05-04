@@ -36,7 +36,8 @@ def tryCompile(fname, show_traceback = False):
 
         # test_sf = type_inference.inferTypes(test_anf)
 
-        untyped.typeCheckModule(test_inf)
+        # untyped.typeCheckModule(test_inf)
+        untyped.flattenModule(test_inf)
 
 	# test_sf = system_f.optimizeModule(test_sf)
         # test_flat = system_f.flattenModule(test_sf)

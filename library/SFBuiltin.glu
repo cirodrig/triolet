@@ -62,20 +62,15 @@ let binary (a : Pure) -> Pure = a -> a -> a;
 let binary_any -> Pure = (a : Pure) -> binary a;
 
 -- Parameter-passing conventions.
-data PassConv : Pure -> Pure where
-    byVal : (t : Pure) -> PassConv t
-  | byRef : (t : Pure) -> PassConv t
-  | byClosure : (t : Pure) -> PassConv t;
+data PassConv : Pure -> Pure;
 
-let passConv_Int -> PassConv Int = byVal Int;
-let passConv_Float -> PassConv Float = byVal Float;
-let passConv_bool -> PassConv bool = byVal bool;
-let passConv_NoneType -> PassConv NoneType = byVal NoneType;
-let passConv_iter (t : Pure) (elt : PassConv t) -> PassConv (Stream t) =
-  byClosure (Stream t);
-let passConv_list (t : Pure) -> PassConv (list t) =
-  byRef (list t);
-let passConv_Any -> PassConv Any = byVal Any;
+constant passConv_Int : PassConv Int;
+constant passConv_Float : PassConv Float;
+constant passConv_bool : PassConv bool;
+constant passConv_NoneType : PassConv NoneType;
+constant passConv_iter : (t : Pure) -> PassConv t -> PassConv (Stream t);
+constant passConv_list : (t : Pure) -> PassConv (list t);
+constant passConv_Any : PassConv Any;
 
 constant passConv_pyonTuple0 : PassConv PyonTuple0;
 constant passConv_pyonTuple1 :
@@ -116,7 +111,7 @@ data TraversableDict : (Pure -> Pure) -> Pure where
                  -> TraversableDict t;
 
 data AdditiveDict : Pure -> Pure where
-  additiveDict : (a : Pure) -> a -> binary a -> binary a
+  additiveDict : (a : Pure) -> (NoneType -> a) -> binary a -> binary a
               -> AdditiveDict a;
 
 data VectorDict : Pure -> Pure where
@@ -173,11 +168,11 @@ constant Traversable_TRAVERSE_list
  -> list a
  -> Stream a;
 
-constant Additive_ZERO_Int : Int;
+constant Additive_ZERO_Int : NoneType -> Int;
 constant Additive_ADD_Int : binary Int;
 constant Additive_SUB_Int : binary Int;
 
-constant Additive_ZERO_Float : Float;
+constant Additive_ZERO_Float : NoneType -> Float;
 constant Additive_ADD_Float : binary Float;
 constant Additive_SUB_Float : binary Float;
 
