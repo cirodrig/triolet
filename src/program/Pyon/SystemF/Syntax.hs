@@ -23,6 +23,7 @@ module Pyon.SystemF.Syntax
      Export(..),
      Module(..),
      isValueExp,
+     unpackTypeApplication,
      
      mapSFExp, mapPat,
      traverseSFExp, traversePat
@@ -274,3 +275,13 @@ isValueExp expression =
      LetrecE {} -> False
      CaseE {expScrutinee = scr, expAlternatives = alts} ->
        isValueExp scr && all (isValueExp . altBody) alts
+       
+-- | Extract all type parameters from the expression.  Return the base 
+-- expression, which is not a type application, and all the type parameters 
+-- it was applied to.
+unpackTypeApplication :: RExp -> (RExp, [RType])
+unpackTypeApplication e = unpack [] e
+  where
+    unpack types (TyAppE {expOper = op, expTyArg = ty}) =
+      unpack (ty : types) op
+    unpack types e = (e, types)

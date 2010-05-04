@@ -607,13 +607,6 @@ buildRefCaseParameters scrutinee_type alt = do
     make_effect _ _ ByVal = Nothing
     make_effect var ty ByRef = Just (varID var, ReadEff)
 
-unpackTypeApplication :: TExp -> (TExp, [TType])
-unpackTypeApplication e = unpack [] e
-  where
-    unpack types (discardExpType -> TyAppE {expOper = op, expTyArg = ty}) =
-      unpack (ty : types) op
-    unpack types e = (e, types)
-
 -------------------------------------------------------------------------------
 
 flattenValueToStmt :: ExpInfo -> F (StmtContext, Value) -> F Stmt
@@ -659,7 +652,14 @@ flattenCall inf ret mono_op margs =
     return $ CallS inf op params
   where
     -- Get the real operator and its type arguments 
-    (poly_op, ty_args) = unpackTypeApplication mono_op
+    (poly_op, ty_args) = extract_type_parameters mono_op
+    
+    extract_type_parameters :: TExp -> (TExp, [TType])
+    extract_type_parameters e = unpack [] e
+      where
+        unpack types (discardExpType -> TyAppE {expOper = op, expTyArg = ty}) =
+          unpack (ty : types) op
+        unpack types e = (e, types)
 
 -- | Flatten a \'let\' expression, making its bound variable available locally
 flattenLet :: StmtExtensible a =>
