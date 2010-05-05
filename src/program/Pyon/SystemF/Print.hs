@@ -78,6 +78,10 @@ pprTyPatFlags :: PrintFlags -> RTyPat -> Doc
 pprTyPatFlags flags (TyPat v ty) =
   Gluon.pprVar v <+> colon <+> Gluon.pprExp ty
 
+pprBinderFlags :: PrintFlags -> Gluon.RBinder () -> Doc
+pprBinderFlags flags (Gluon.Binder v ty ()) =
+  pprVarFlags flags v <+> colon <+> Gluon.pprExp ty
+
 pprExpFlags :: PrintFlags -> RExp -> Doc
 pprExpFlags flags expression = pprExpFlagsPrec flags precOuter expression
 
@@ -166,12 +170,13 @@ pprIf flags cond tr fa =
 pprAltFlags :: PrintFlags -> Alt Rec -> Doc
 pprAltFlags flags (Alt { altConstructor = c
                        , altTyArgs = ty_args
-                       , altParams = vars
+                       , altParams = params
                        , altBody = body
                        }) =
-  let pattern =
-        text (showLabel $ Gluon.conName c) <+>
-        hsep (map Gluon.pprExp ty_args ++ map (pprVarFlags flags) vars)
+  let ty_args_doc = map (text "@" <>) $ map Gluon.pprExp ty_args
+      params_doc = map (parens . pprBinderFlags flags) params
+      pattern =
+        text (showLabel $ Gluon.conName c) <+> hsep (ty_args_doc ++ params_doc)
       body_doc = pprExpFlagsPrec flags precOuter body 
   in hang (pattern <> text ".") 2 body_doc
 

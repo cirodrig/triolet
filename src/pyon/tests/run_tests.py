@@ -31,6 +31,8 @@ def tryCompile(fname, show_traceback = False):
         untyped.printModule(test_untyped)
         test_inf = untyped.typeInferModule(test_untyped)
         del test_untyped
+        test_inf = untyped.partialEvaluateModule(test_inf)
+        test_inf = untyped.eliminateDeadCode(test_inf)
         test_inf = untyped.eliminatePatternMatching(test_inf)
         untyped.printModule(test_inf)
 

@@ -9,6 +9,7 @@ import Control.Concurrent.MVar
 import Control.Monad
 
 import Gluon.Common.Error
+import qualified Gluon.Core.Syntax as Gluon
 import Pyon.SystemF.Syntax
 import qualified Pyon.Untyped.Data as Untyped
 
@@ -22,6 +23,10 @@ evPat :: Pat Untyped.TI -> IO RPat
 evPat (WildP t)   = WildP `liftM` evType t
 evPat (VarP v t)  = VarP v `liftM` evType t
 evPat (TupleP ps) = TupleP `liftM` mapM evPat ps
+
+evBinder :: Gluon.Binder Untyped.TI () -> IO (Gluon.Binder Rec ())
+evBinder (Gluon.Binder v t ()) = do t' <- evType t
+                                    return $ Gluon.Binder v t' ()
 
 evExp :: Untyped.TIExp -> IO RExp
 evExp expression =
@@ -60,7 +65,8 @@ evExp expression =
 evAlt (Alt c ty_params params body) = do
   ty_params' <- mapM evType ty_params
   body' <- evExp body
-  return $ Alt c ty_params' params body'
+  params' <- mapM evBinder params
+  return $ Alt c ty_params' params' body'
 
 -- | Get the expression that was stored for a placeholder, and evaluate it
 getPlaceholderElaboration ph = do

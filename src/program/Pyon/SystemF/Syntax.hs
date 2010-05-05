@@ -15,6 +15,7 @@ module Pyon.SystemF.Syntax
      Lit(..),
      Pat(..),
      TyPat(..),
+     Binder(..),
      ExpInfo, defaultExpInfo,
      SFExp,
      Alt(..),
@@ -23,7 +24,7 @@ module Pyon.SystemF.Syntax
      Export(..),
      Module(..),
      isValueExp,
-     unpackTypeApplication,
+     unpackTypeApplication, unpackPolymorphicCall,
      
      mapSFExp, mapPat,
      traverseSFExp, traversePat
@@ -36,7 +37,7 @@ import Data.Typeable
 import Gluon.Common.Error
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
-import Gluon.Core(Structure, Rec, Var)
+import Gluon.Core(Structure, Rec, Var, Binder(..))
 
 import Pyon.SystemF.Builtins
 
@@ -145,7 +146,7 @@ data instance SFExpOf Rec s =
 data Alt s =
   Alt { altConstructor :: !Gluon.Con
       , altTyArgs :: [RecType s]
-      , altParams :: [Var]
+      , altParams :: [Binder s ()]
       , altBody :: SFRecExp s
       }
 
@@ -209,7 +210,7 @@ mapSFExp e f t expression =
   where
     mapDef (Def v fun) = Def v (f fun)
     mapAlt (Alt con ty_args params body) =
-      Alt con (map t ty_args) params (e body)
+      Alt con (map t ty_args) (map (Gluon.mapBinder id t) params) (e body)
 
 -- | Map a monadic function over an expression.
 traverseSFExp :: (Monad m, Structure a, Structure b)
@@ -234,7 +235,7 @@ traverseSFExp e f t expression =
   where
     traverseDef (Def v fun) = Def v `liftM` f fun
     traverseAlt (Alt con ty_args params body) =
-      Alt con `liftM` mapM t ty_args `ap` return params `ap` e body
+      Alt con `liftM` mapM t ty_args `ap` mapM (Gluon.traverseBinder return t) params `ap` e body
 
 mapPat :: (Structure a, Structure b)
        => (RecType a -> RecType b)
@@ -285,3 +286,10 @@ unpackTypeApplication e = unpack [] e
     unpack types (TyAppE {expOper = op, expTyArg = ty}) =
       unpack (ty : types) op
     unpack types e = (e, types)
+
+unpackPolymorphicCall :: RExp -> Maybe (RExp, [RType], [RExp])
+unpackPolymorphicCall (CallE {expOper = op, expArgs = args}) =
+  case unpackTypeApplication op
+  of (poly_op, ty_args) -> Just (poly_op, ty_args, args)
+
+unpackPolymorphicCall _ = Nothing

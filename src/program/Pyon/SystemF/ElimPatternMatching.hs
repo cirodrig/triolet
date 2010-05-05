@@ -87,8 +87,8 @@ elimPMPat _ pat@(VarP _ _) =
 elimPMPat pos pat@(TupleP ps) = do
   -- Eliminate sub-patterns
   (fields, transformer) <- elimPMPats pos ps
-  let field_vars = [v | VarP v _ <- fields]
-      field_types = [t | VarP _ t <- fields]
+  let field_types = [t | VarP _ t <- fields]
+      field_vars = [Gluon.Binder v t () | VarP v t <- fields]
   
   -- Create a new variable pattern to replace the tuple pattern 
   pat_var <- pmNewVar

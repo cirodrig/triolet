@@ -545,7 +545,7 @@ buildValueCaseParameters :: RType    -- ^ Scrutinee type
 buildValueCaseParameters scrutinee_type alt = do
   -- Get types of the value parameters and scrutinee
   (param_types, inferred_scrutinee_type) <- getAltParameterTypes alt
-    
+  
   -- Scrutinee type should match.
   -- We assume the expression is well-typed, so skip the test.
   when False $ tcAssertEqual noSourcePos (verbatim scrutinee_type)
@@ -561,9 +561,9 @@ buildValueCaseParameters scrutinee_type alt = do
   return (altConstructor alt, ty_args, parameters)
   where
     -- Only pass-by-value parameters are permitted
-    makeParamBinder var ty ByVal = Binder var (fromWhnf ty) Value 
-    makeParamBinder var ty ByClo = Binder var (fromWhnf ty) FunRef
-    makeParamBinder _ ty _ = traceShow (Gluon.pprExp $ fromWhnf ty) $ internalError "buildValueCaseParameters"
+    makeParamBinder (Binder var _ ()) ty ByVal = Binder var (fromWhnf ty) Value 
+    makeParamBinder (Binder var _ ()) ty ByClo = Binder var (fromWhnf ty) FunRef
+    makeParamBinder (Binder _ _ ()) ty _ = traceShow (Gluon.pprExp $ fromWhnf ty) $ internalError "buildValueCaseParameters"
 
 -- | Build the parameter list for a case alternative
 buildRefCaseParameters :: RType    -- ^ Scrutinee type
@@ -596,16 +596,16 @@ buildRefCaseParameters scrutinee_type alt = do
       ty_args = map (TypeV . fromTypedType) $ altTyArgs alt
   return (altConstructor alt, ty_args, parameters, effects)
   where
-    make_addr_param var ty ByRef = Just $ Binder var (fromWhnf ty) Address 
-    make_addr_param var ty ByVal = Nothing
-    make_addr_param _ _ _ = internalError "buildRefCaseParameters"
+    make_addr_param (Binder var _ ()) ty ByRef = Just $ Binder var (fromWhnf ty) Address 
+    make_addr_param (Binder var _ ()) _ ByVal = Nothing
+    make_addr_param (Binder _ _ ()) _ _ = internalError "buildRefCaseParameters"
 
-    make_value_param var ty ByRef = Just $ Binder var (fromWhnf ty) Pointer
-    make_value_param var ty ByVal = Just $ Binder var (fromWhnf ty) Value
-    make_value_param _ _ _ = internalError "buildRefCaseParameters"
+    make_value_param (Binder var _ ()) ty ByRef = Just $ Binder var (fromWhnf ty) Pointer
+    make_value_param (Binder var _ ()) ty ByVal = Just $ Binder var (fromWhnf ty) Value
+    make_value_param (Binder _ _ ()) _ _ = internalError "buildRefCaseParameters"
 
-    make_effect _ _ ByVal = Nothing
-    make_effect var ty ByRef = Just (varID var, ReadEff)
+    make_effect (Binder _ _ ()) _ ByVal = Nothing
+    make_effect (Binder var _ ()) ty ByRef = Just (varID var, ReadEff)
 
 -------------------------------------------------------------------------------
 
@@ -672,6 +672,7 @@ flattenLet inf (VarP v (fromTypedType -> ty)) rhs body = do
   assignment <-
     case mode
     of ByVal -> flattenExpWriteValue inf v rhs
+       ByClo -> flattenExpWriteValue inf v rhs
        ByRef -> return . eval (getSourcePos inf) =<<
                 flattenExpWriteReference v rhs
   

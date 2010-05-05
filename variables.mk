@@ -52,8 +52,9 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/Untyped/TypeInference.hs \
 	Pyon/Untyped/TypeInferenceEval.hs \
 	Pyon/Untyped/Unification.hs \
+	Pyon/SystemF/DeadCode.hs \
 	Pyon/SystemF/ElimPatternMatching.hs \
-	Pyon/SystemF/Optimizations.hs \
+	Pyon/SystemF/PartialEval.hs \
 	Pyon/SystemF/Print.hs \
 	Pyon/SystemF/Syntax.hs \
 	Pyon/SystemF/Typecheck.hs \

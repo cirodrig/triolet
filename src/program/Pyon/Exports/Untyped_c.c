@@ -387,6 +387,10 @@ static PyMethodDef untyped_methods[] = {
    "Perform calling-convention specialization on a System F module"}, */
   {"eliminatePatternMatching", pyon_eliminatePatternMatching, METH_O,
    "Eliminate pattern-matching constructs in a System F module"},
+  {"eliminateDeadCode", pyon_eliminateDeadCode, METH_O,
+   "Eliminate dead code in a System F module"},
+  {"partialEvaluateModule", pyon_partialEvaluateModule, METH_O,
+   "Simplify a module by eliminating parts that can be statically evaluated"},
   {"flattenModule", pyon_flattenModule, METH_O,
    "Flatten a System F module"},
   {"typeApplication", typeApplication, METH_VARARGS,

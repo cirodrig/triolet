@@ -13,6 +13,8 @@ import Control.Applicative(Const(..))
 import Control.Exception
 import Control.Monad
 import Data.Maybe
+import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Label
 import Gluon.Common.SourcePos
@@ -32,6 +34,25 @@ import Pyon.SystemF.Print
 import Pyon.SystemF.Builtins
 import Pyon.SystemF.Syntax
 
+-- | Set to True for debugging
+printTypeAssertions :: Bool
+printTypeAssertions = False
+
+assertEqualTypesV :: SourcePos -> RType -> RType -> PureTC ()
+assertEqualTypesV pos expected actual =
+  assertEqualTypes pos (verbatim expected) (verbatim actual)
+
+assertEqualTypes :: SourcePos -> RecType (Subst Rec) -> RecType (Subst Rec)
+                 -> PureTC ()
+assertEqualTypes pos expected actual = debug (do
+  tcAssertEqual pos expected actual)
+  where
+    debug x
+      | printTypeAssertions =
+          let message = text "Expected:" <+> Gluon.pprExp (substFully expected) $$
+                        text "Actual:  " <+> Gluon.pprExp (substFully actual)
+          in traceShow message x
+      | otherwise = x
 data Worker a =
   Worker
   { doType :: !(WRExp -> PureTC (TypeOf a a))
@@ -208,9 +229,9 @@ typeInferTyAppE worker inf op arg = do
   case fromWhnf op_type of
     Gluon.FunE {Gluon.expMParam = param, Gluon.expRange = range} -> do
       -- Operand type must match
-      tcAssertEqual (getSourcePos inf)
-         (verbatim $ Gluon.binder'Type param) 
-         (verbatim $ fromWhnf arg_type)
+      assertEqualTypesV (getSourcePos inf)
+         (Gluon.binder'Type param) 
+         (fromWhnf arg_type)
       
       -- Result type is the range, after substituting operand in argument
       result <- liftEvaluation $
@@ -265,7 +286,7 @@ computeAppliedType pos op_type arg_types = apply op_type arg_types
         Gluon.FunE { Gluon.expMParam = Gluon.Binder' Nothing dom ()
                    , Gluon.expRange = rng} -> do
           -- parameter type must match argument type
-          tcAssertEqual pos dom (verbatim arg_t)
+          assertEqualTypes pos dom (verbatim arg_t)
           
           -- continue with range
           apply rng arg_ts
@@ -288,8 +309,7 @@ typeInferFun worker fun@(Fun { funInfo = info
     return_type_val <- doType worker =<< Gluon.evalFully' return_type
     
     -- Return type must match inferred type
-    tcAssertEqual noSourcePos (verbatim $ fromWhnf body_type) 
-                              (verbatim return_type)
+    assertEqualTypesV noSourcePos (fromWhnf body_type) return_type
     
     -- Create the function's type
     ty <- Gluon.evalFully' $ functionType fun
@@ -307,7 +327,7 @@ typeInferLetE worker inf pat expression body = do
   (e_type, e_val) <- typeInferExp worker expression
   
   -- Expression type must match pattern type
-  tcAssertEqual noSourcePos (verbatim $ fromWhnf e_type) (verbatim $ patType pat)
+  assertEqualTypesV noSourcePos (fromWhnf e_type) (patType pat)
 
   -- Assume the pattern while inferring the body; result is the body's type
   assumePat worker pat $ \pat' -> do
@@ -338,7 +358,7 @@ typeInferCaseE worker inf scr alts = do
     
   -- All alternatives must match
   let alt_subst_types = map (verbatim . fromWhnf) alt_types
-  zipWithM (tcAssertEqual pos) alt_subst_types (tail alt_subst_types)
+  zipWithM (assertEqualTypes pos) alt_subst_types (tail alt_subst_types)
 
   return (head alt_types, CaseE inf scr_val alt_vals)
 
@@ -361,22 +381,27 @@ typeCheckAlternative worker pos scr_type (Alt { altConstructor = con
     bindParamTypes (fromWhnf fo_type) fields $
     typeInferExp worker body
 
-  return (body_ty, Alt con arg_vals fields body_val)
+  -- Construct new field expresions
+  fields' <- forM fields $ \(Gluon.Binder v ty ()) -> do
+    ty' <- doType worker =<< Gluon.evalFully' ty
+    return $ Gluon.Binder v ty' ()
+
+  return (body_ty, Alt con arg_vals fields' body_val)
   where
     -- Bind parameter variables to the constructor's parameter types
     bindParamTypes con_type fields k = go con_type fields
       where
-        go match_type (field:fields) =
+        go match_type (Gluon.Binder field_var field_type () : fields) =
           case match_type
           of Gluon.FunE { Gluon.expMParam = Gluon.Binder' Nothing dom ()
-                        , Gluon.expRange = rng} ->
-               assumePure field dom $ go rng fields
+                        , Gluon.expRange = rng} -> do
+               assumePure field_var dom $ go rng fields
              Gluon.FunE {} ->
                throwError $ OtherErr "Unexpected dependent type"
              _ -> throwError $ Gluon.NonFunctionApplicationErr pos match_type
         go result_type [] = do
           -- This must match the scrutinee type
-          tcAssertEqual pos (verbatim scr_type) (verbatim result_type)
+          assertEqualTypesV pos scr_type result_type
           k
 
 -- | Determine the type of the result of an application.
@@ -401,7 +426,7 @@ computeTypeApplicationType pos op_type args = apply op_type args
           arg_type <- Gluon.typeInferExp arg
           
           -- parameter type must match argument type
-          tcAssertEqual pos dom (verbatim $ fromWhnf arg_type)
+          assertEqualTypes pos dom (verbatim $ fromWhnf arg_type)
           
           -- update the range type
           let binder' = Gluon.mapBinder' id substFully binder

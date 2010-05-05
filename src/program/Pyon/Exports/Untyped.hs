@@ -24,10 +24,11 @@ import Pyon.SystemF.Syntax(Lit(..))
 import qualified Pyon.SystemF.Typecheck as SystemF
 import qualified Pyon.SystemF.Print as SystemF
 import qualified Pyon.SystemF.ElimPatternMatching as SystemF
+import qualified Pyon.SystemF.PartialEval as SystemF
+import qualified Pyon.SystemF.DeadCode as SystemF
 import Pyon.SystemF.Flatten as SystemF
 
 -- Imported for compilation dependences only
-import Pyon.SystemF.Optimizations()
 import Pyon.NewCore.Optimizations()
 
 dummyAnn :: Ann
@@ -364,6 +365,21 @@ pyon_eliminatePatternMatching _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
   m <- fromHsObject' mod
   newHsObject =<< SystemF.eliminatePatternMatching m
+
+foreign export ccall pyon_eliminateDeadCode :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_eliminateDeadCode _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  newHsObject $ SystemF.eliminateDeadCode m
+
+
+foreign export ccall pyon_partialEvaluateModule :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_partialEvaluateModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  newHsObject $ SystemF.partialEvaluateModule m
 
 foreign export ccall pyon_flattenModule :: PyPtr -> PyPtr -> IO PyPtr
 

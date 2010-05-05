@@ -1,171 +1,51 @@
 
-module Pyon.SystemF.Optimizations
-    (simplifyModule)
+module Pyon.SystemF.DeadCode(eliminateDeadCode)
 where
 
-import Control.Applicative(Const(..))
-import Control.Monad
-import Control.Monad.Reader
 import Control.Monad.Writer
-
-import Data.Map(Map)
-import qualified Data.Map as Map
-import Data.Set(Set)
 import qualified Data.Set as Set
+import Data.Set(Set)
 
+import Gluon.Common.SourcePos
 import Gluon.Common.Error
 import qualified Gluon.Core as Gluon
+import Gluon.Core(VarID, varID)
 import qualified Gluon.Eval.Typecheck as Gluon
-import Pyon.SystemF.Syntax
 import Pyon.SystemF.Builtins
-
-catEndo :: [a -> a] -> a -> a
-catEndo fs x = foldr ($) x fs
-
--- | Apply optimizations that tend to simplify the code of a module.
-simplifyModule :: RModule -> RModule
-simplifyModule mod =
-  mapModule elimDeadCode $
-  mapModule doPartialEvaluation $
-  mod
-
-mapModule :: (RDef -> RDef) -> RModule -> RModule
-mapModule f (Module ds exports) = Module (map (map f) ds) exports
-
--------------------------------------------------------------------------------
--- Partial evaluation
-
-doPartialEvaluation :: RDef -> RDef
-doPartialEvaluation def = runPEval $ pevalDef def
-
--- | The 'PEval' monad holds a variable-to-value mapping for constant
--- propagation, copy propagation, and inlining.  Expressions in the map have
--- no side effects, and therefore are safe to inline.
-type PEval a = Reader (Map Var RExp) a
-
--- | Perform partial evaluation in an empty environment.
-runPEval :: PEval a -> a
-runPEval m = runReader m Map.empty
-
-lookupVar :: Var -> PEval (Maybe RExp)
-lookupVar v = asks (Map.lookup v)
-
-lookupVarDefault :: RExp -> Var -> PEval RExp
-lookupVarDefault defl v = asks (Map.findWithDefault defl v)
-
--- | Given a value and the pattern it is bound to, add the bound value(s)
--- to the environment.  The caller should verify that the value has no
--- side effects.  Any values that cannot be added to the environment will be
--- ignored.
-bindValue :: RPat -> RExp -> PEval a -> PEval a
-bindValue (WildP _)   _ m = m
-bindValue (VarP v t)  e m = local (Map.insert v e) m
-bindValue (TupleP ps) e m = error "bindValue: not implemented"
-
-bindDefs :: ExpInfo -> [RDef] -> PEval a -> PEval a
-bindDefs info defs m = foldr bindDef m defs
-  where
-    bindDef (Def v f) m =
-      let e = FunE info f
-      in local (Map.insert v e) m
-
--- | Partial evaluation of an expression.  First, evaluate subexpressions;
--- then, try to statically evaluate.
-pevalExp :: RExp -> PEval RExp
-pevalExp expression =
-  return . partialEvaluate =<< pevalExpRecursive expression
-partialEvaluate :: RExp -> RExp
-partialEvaluate expression =
-  internalError "Not implemented: dictionary partial evaluation"
-  {-
-  case expression
-  of MethodSelectE {expArg = argument} ->
-       case argument
-       of DictE {} ->
-            -- Select a method from the dictionary
-            expMethods argument !! expMethodIndex expression
-
-          _ -> expression
-           
-     -- Default: return the expression unchanged
-     _ -> expression
-  where
-    unpackTypeApplication e = unpack e []
-      where
-        unpack e tail =
-          case e
-          of TyAppE {expOper = op, expTyArg = ty} -> unpack op (ty : tail)
-             _ -> Just (e, tail) -}
-
-pevalExpRecursive :: RExp -> PEval RExp
-pevalExpRecursive expression =
-  case expression
-  of VarE {expVar = v} -> lookupVarDefault expression v
-     ConE {} -> return expression
-     LitE {} -> return expression
-     TyAppE {expOper = op} -> do
-       op' <- pevalExp op
-       return $ expression {expOper = op'}
-     CallE {expOper = op, expArgs = args} -> do
-       op' <- pevalExp op
-       args' <- mapM pevalExp args
-       return $ expression {expOper = op', expArgs = args'}
-     FunE {expFun = f} -> do
-       f' <- pevalFun f
-       return $ expression {expFun = f'}
-     LetE {expBinder = p, expValue = e1, expBody = e2} -> do
-       e1' <- pevalExp e1
-
-       -- If the let-bound value has no side effects, it is a candidate for
-       -- inlining
-       e2' <- if isValueExp e1'
-              then bindValue p e1' $ pevalExp e2
-              else pevalExp e2
-       return $ expression {expValue = e1', expBody = e2'}
-     LetrecE {expInfo = inf, expDefs = ds, expBody = b} -> do
-       ds' <- mapM pevalDef ds
-       b' <- pevalExp b
-       return $ expression {expDefs = ds', expBody = b'}
-{-     DictE {expSuperclasses = scs, expMethods = ms} -> do
-       scs' <- mapM pevalExp scs
-       ms' <- mapM pevalExp ms
-       return $ expression {expSuperclasses = scs', expMethods = ms'}
-     MethodSelectE {expArg = e} -> do
-       e' <- pevalExp e
-       return $ expression {expArg = e'} -}
-
-pevalFun :: RFun -> PEval RFun
-pevalFun f = do
-  body <- pevalExp $ funBody f
-  return $ f {funBody = body}
-
-pevalDef :: RDef -> PEval RDef
-pevalDef (Def v f) = do
-  f' <- pevalFun f
-  return $ Def v f'
-
--------------------------------------------------------------------------------
--- Dead code elimination
-
-newtype SetUnion a = SetUnion {setUnion :: Set a}
-
-instance Ord a => Monoid (SetUnion a) where
-    mempty = SetUnion (Set.empty)
-    mappend s t = SetUnion $ setUnion s `Set.union` setUnion t
-    mconcat xs = SetUnion $ Set.unions $ map setUnion xs
-
-onSetUnion :: (Set a -> Set a) -> SetUnion a -> SetUnion a
-onSetUnion f (SetUnion s) = SetUnion (f s)
+import Pyon.SystemF.Syntax
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
-elimDeadCode :: RDef -> RDef
-elimDeadCode def = evalEDC edcDef def
+eliminateDeadCode :: RModule -> RModule
+eliminateDeadCode (Module defss exports) =
+  let defss' = evalEDC edcTopLevelGroup defss
+  in Module defss' exports
+  where
+    edcTopLevelGroup (ds:dss) =
+      masks (Set.fromList [varID v | Def v _ <- ds]) $ do
+        ds' <- mapM edcDef ds
+        dss' <- edcTopLevelGroup dss 
+        return (ds' : dss')
+    
+    edcTopLevelGroup [] = return []
+
+-------------------------------------------------------------------------------
+
+-- | Sets form a monoid under the union operation
+newtype Union a = Union {getUnion :: Set a}
+
+instance Ord a => Monoid (Union a) where
+    mempty = Union (Set.empty)
+    mappend s t = Union $ getUnion s `Set.union` getUnion t
+    mconcat xs = Union $ Set.unions $ map getUnion xs
+
+onUnion :: (Set a -> Set a) -> Union a -> Union a
+onUnion f (Union s) = Union (f s)
 
 -- | Dead code elimination on a value produces a new value and a set of
 -- all variable names referenced by the value.
 type EDC a = a -> GetMentionsSet a
-type GetMentionsSet a = Writer (SetUnion Var) a
+type GetMentionsSet a = Writer (Union VarID) a
 
 evalEDC :: EDC a -> a -> a
 evalEDC f x = case runWriter $ f x of (x', _) -> x'
@@ -173,28 +53,28 @@ evalEDC f x = case runWriter $ f x of (x', _) -> x'
 -- | Mention a variable.  This prevents the assignment of this variable from
 -- being eliminated.
 mention :: Var -> GetMentionsSet ()
-mention v = tell (SetUnion $ Set.singleton v)
+mention v = tell (Union $ Set.singleton (varID v))
 
 -- | Filter out a mention of a variable.  The variable will not appear in
 -- the returned mentions set.
 mask :: Var -> GetMentionsSet a -> GetMentionsSet a
 mask v m = pass $ do x <- m
-                     return (x, onSetUnion $ Set.delete v)
+                     return (x, onUnion $ Set.delete (varID v))
 
 -- | Filter out a mention of a variable, and also check whether the variable
 -- is mentioned.  Return True if the variable is mentioned.
 maskAndCheck :: Var -> GetMentionsSet a -> GetMentionsSet (Bool, a)
 maskAndCheck v m = pass $ do
   (x, mentions_set) <- listen m
-  return ( (v `Set.member` setUnion mentions_set, x)
-         , onSetUnion $ Set.delete v)
+  return ( (varID v `Set.member` getUnion mentions_set, x)
+         , onUnion $ Set.delete (varID v))
 
-maskSet :: Set Var -> GetMentionsSet a -> GetMentionsSet a
-maskSet vs m = pass $ do x <- m
-                         return (x, onSetUnion (`Set.difference` vs))
+masks :: Set VarID -> GetMentionsSet a -> GetMentionsSet a
+masks vs m = pass $ do x <- m
+                       return (x, onUnion (`Set.difference` vs))
 
--- | Mention all variables in a type.
-edcScanType :: TypeOf Rec Rec -> GetMentionsSet ()
+-- | Mention all variables in a type
+edcScanType :: RType -> GetMentionsSet ()
 edcScanType t = scanType t >> return ()
   where
     scanType :: Gluon.RExp 
@@ -240,6 +120,10 @@ edcScanType t = scanType t >> return ()
            scanType ty
            maybe id mask v $ scanProd b
          Gluon.Unit -> return Gluon.TrivialSum
+
+-- | Scan an export declaration to find mentioned variables
+edcScanExport :: Export -> GetMentionsSet ()
+edcScanExport export = mention $ exportVariable export
 
 -- | Run the computation in a scope where the pattern is bound.
 -- Return a new pattern and the result of the computation.
@@ -339,19 +223,21 @@ edcExp expression =
      LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->
        edcLetE info p e1 e2
      LetrecE {expDefs = ds, expBody = e} ->
-       maskSet (Set.fromList [v | Def v _ <- ds]) $ do
+       masks (Set.fromList [varID v | Def v _ <- ds]) $ do
          ds' <- mapM edcDef ds
          e' <- edcExp e
          return $ expression {expDefs = ds', expBody = e'}
-{-     DictE {expType = t, expSuperclasses = scs, expMethods = ms} -> do
-       edcScanType t
-       scs' <- mapM edcExp scs
-       ms' <- mapM edcExp ms
-       return $ expression {expSuperclasses = scs', expMethods = ms'}
-     MethodSelectE {expType = t, expArg = e} -> do
-       edcScanType t
-       e' <- edcExp e
-       return $ expression {expArg = e'} -}
+     CaseE {expScrutinee = scr, expAlternatives = alts} -> do
+       scr' <- edcExp scr
+       alts' <- mapM edcAlt alts
+       return $ expression {expScrutinee = scr', expAlternatives = alts'}
+
+-- | Dead code elimination for a case alternative
+edcAlt alt = do
+  -- Mask out variables bound by the alternative and simplify the body
+  body' <- masks (Set.fromList [varID v | Binder v _ () <- altParams alt]) $ do
+    edcExp (altBody alt)
+  return $ alt {altBody = body'} 
 
 -- | Dead code elimination for a \"let\" expression
 edcLetE :: ExpInfo -> RPat -> RExp -> RExp -> GetMentionsSet RExp

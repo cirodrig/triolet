@@ -90,6 +90,14 @@ instantiateAs pos scheme ty = do
   unify pos head ty
   return (map ConTy qvars, cst)
 
+-- | Apply a substitution to a type scheme.  The substitution must only
+-- mention free variables of the type scheme.
+renameTyScheme :: Substitution -> TyScheme -> IO TyScheme
+renameTyScheme sub (TyScheme qvars cst fot) = do
+  cst' <- mapM (rename sub) cst
+  fot' <- rename sub fot
+  return $ TyScheme qvars cst' fot'
+
 -------------------------------------------------------------------------------
 -- Type classes
 
@@ -321,20 +329,32 @@ mkDictE pos cls inst_type scs methods =
       -- Then apply to all arguments
   in mkCallE pos dict1 (scs ++ methods)
 
-mkMethodSelectE :: SourcePos -> Class -> TIType -> Int -> TIExp -> IO TIExp
+mkMethodSelectE :: SourcePos -> Class -> HMType -> Int -> TIExp -> IO TIExp
 mkMethodSelectE pos cls inst_type index dict = do
+  -- The class dictionary has superclass and method fields. 
   let num_superclasses = length $ clsConstraint cls
       num_methods = length $ clsMethods cls
-  
+      
+  -- Get the type of each field.  Rename the class variable to match
+  -- this instance.
+  let instantiation = substitutionFromList [(clsParam cls, inst_type)]
+  sc_types <- mapM (return . convertPredicate <=< rename instantiation) $
+              clsConstraint cls
+  m_types <- mapM (return . convertTyScheme <=< renameTyScheme instantiation . clmSignature) $ clsMethods cls
+
   -- Create anonymous parameter variables
   parameter_vars <- replicateM (num_superclasses + num_methods) $ do
     var_id <- getNextVarIdent
     return $ Gluon.mkAnonymousVariable var_id ObjectLevel
+  
+  -- Create binders for the parameters
+  let mkParameter var ty = Gluon.Binder var ty ()
+      parameters = zipWith mkParameter parameter_vars (sc_types ++ m_types)
 
   -- Create a case expression that matches against the class dictionary
   -- and then selects one of its fields
   let alt_body = mkVarE pos $ parameter_vars !! (num_superclasses + index)
-      alt = SystemF.Alt (clsDictCon cls) [inst_type] parameter_vars alt_body
+      alt = SystemF.Alt (clsDictCon cls) [convertHMType inst_type] parameters alt_body
             
   return $ TIExp $ SystemF.CaseE (synInfo pos) dict [alt]
 
