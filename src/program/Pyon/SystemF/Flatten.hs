@@ -44,14 +44,19 @@ type TType = RecType (Typed Rec)
 data Mode = ByVal | ByRef | ByClo
 data Component = Value | FunRef | Address | Pointer | State
 
-data AtomicEffect = ReadEff | WriteEff
+-- | We keep track of the set of variables that an expression or function 
+-- reads.  This set is used to compute the side effect.
 type Effect = Map.Map VarID AtomicEffect
+type AtomicEffect = ()
 
 data FlatArgument =
   ValueArgument !Value | VariableArgument !Var
 
+-- | Data are either returned as values or by writing to a variable.
+-- We keep track of an expression's return to compute its input and output
+-- state.
 data FlatReturn =
-  ValueReturn | VariableReturn !Var
+  ValueReturn | VariableReturn !Var !RType
 
 data Value =
     VarV Var !Component
@@ -61,77 +66,94 @@ data Value =
   | FunV FlatFun
   | AppV Value [Value]
 
+data FlatInfo =
+  FlatInfo
+  { fexpExpInfo :: ExpInfo
+  , fexpReturn :: FlatReturn
+  , fexpEffect :: Effect
+  }
+
+mkFlatInfo :: SourcePos -> FlatReturn -> Effect -> FlatInfo
+mkFlatInfo pos ret eff =
+  FlatInfo (Gluon.mkSynInfo pos Gluon.ObjectLevel) ret eff
+
+fakeFlatInfo :: SourcePos -> FlatInfo
+fakeFlatInfo pos = mkFlatInfo pos undefined undefined
+
+fakeFlatInfo' :: ExpInfo -> FlatInfo
+fakeFlatInfo' inf = mkFlatInfo (getSourcePos inf) undefined undefined
+
 data Stmt =
     ValueS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpValue :: Value
     }
     -- | Store a value into a variable.  This must be the RHS of a 
     -- LetS.
   | StoreValueS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpVar :: Var
     , fexpValue :: Value
     }
+    -- | Call a function.  The function either returns a value or
+    -- writes into a variable as a side effect.
   | CallS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpOper :: Value
     , fexpArgs :: [Value]
     }
-    -- | Perform an action and store its result in a variable.
-    -- The action may have the side effect of writing some variables.
-    -- The written variables are listed in 'fexpUpdates'.  These variables
-    -- will become returned state variables.
+    -- | Perform an action that returns a result value, bind the result
+    -- to a local variable, and perform another action.
   | LetS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpBinder :: RBinder Component
-    , fexpUpdates :: [RBinder ()]
     , fexpRhs :: Stmt
     , fexpBody :: Stmt
     }
-  | ThenS
-    { fexpInfo :: ExpInfo
-    , fexpUpdates :: [RBinder ()]
+    -- | Perform an action for its side effect, then perform another action.
+  | EvalS
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpRhs :: Stmt
     , fexpBody :: Stmt
     }
   | LetrecS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpDefs :: [FlatDef]
     , fexpBody :: Stmt
     }
     -- | Case-of-value
   | CaseValS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpScrutinee :: Value
     , fexpValAlts :: [FlatValAlt]
     }
     -- | Case-of-reference
   | CaseRefS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpScrutineeVar :: Var
     , fexpRefAlts :: [FlatRefAlt]
     }
-    -- | Put a writable object into readable mode.  This is inserted by
-    -- effect inference.
+    -- | Put a writable object into readable mode.  This is inserted during
+    -- flattening.
   | ReadingS
-    { fexpInfo :: ExpInfo
-    , fexpScrutinee :: Value
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
+    , fexpScrutineeVar :: Var
+    , fexpType :: RType
     , fexpBody :: Stmt
     }
     -- | Allocate some memory that is alive only during the body of this
-    -- expression.  This is inserted by effect inference.
+    -- expression.  This is inserted during flattening.
   | LocalS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpVar :: Var
+    , fexpType :: RType
     , fexpBody :: Stmt
     }
-    -- | Copy from one variable to another.  This is inserted by effect
-    -- inference
+    -- | Copy a variable (to a destination variable).  This is inserted during
+    -- flattening.
   | CopyS
-    { fexpInfo :: ExpInfo
+    { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpSrc :: Var
-    , fexpDst :: Var
     }
 
 data FlatValAlt =
@@ -163,6 +185,10 @@ discardExpType (TypedSFExp (TypeAnn _ e)) = e
 fromTypedExp :: TExp -> RExp
 fromTypedExp e = mapSFExp fromTypedExp fromTypedFun fromTypedType $
                  discardExpType e
+
+fromTypedPat :: Pat (Typed Rec) -> RPat
+fromTypedPat (VarP v ty) = VarP v (fromTypedType ty)
+fromTypedPat _ = internalError "fromTypedPat: Expecting a variable parameter"
 
 fromTypedFun :: Fun (Typed Rec) -> RFun
 fromTypedFun (TypedSFFun (TypeAnn _ (Fun info ty_params params return_type body))) =
@@ -219,9 +245,9 @@ pprStmt statement =
      StoreValueS {fexpVar = v, fexpValue = val} ->
        text "set" <+> pprVar v <+> text "<-" <+> pprValue val
      CallS {fexpOper = op, fexpArgs = args} ->
-       pprValue op <+> fsep (map pprValue args)
+       pprValue op <+> sep (map pprValue args)
      LetS {} -> pprStmts statement
-     ThenS {} -> pprStmts statement
+     EvalS {} -> pprStmts statement
      LetrecS {} -> pprStmts statement
      ReadingS {} -> pprStmts statement
      LocalS {} -> pprStmts statement
@@ -231,8 +257,8 @@ pprStmt statement =
      CaseRefS {fexpScrutineeVar = v, fexpRefAlts = alts} ->
        text "case" <+> pprVar v $$
        text "of" <+> pprBlock (map pprRefAlt alts)
-     CopyS {fexpSrc = src, fexpDst = dst} ->
-       text "copy" <+> pprVar dst <+> text "<-" <+> pprVar src
+     CopyS {fexpSrc = src} ->
+       text "copy" <+> pprVar src
 
 pprAlt :: FlatValAlt -> Doc
 pprAlt (FlatValAlt c ty_args params body) =
@@ -264,7 +290,7 @@ pprStmts s = pprBlock $ statement_sequence s
                rhs_doc = pprStmt rhs
                body_doc = statement_sequence body
            in hang lhs_doc 4 rhs_doc : body_doc
-         ThenS { fexpRhs = rhs
+         EvalS { fexpRhs = rhs
                , fexpBody = body} ->
            pprStmt rhs : statement_sequence body
          LetrecS { fexpDefs = defs
@@ -272,8 +298,8 @@ pprStmts s = pprBlock $ statement_sequence s
            let defs_doc = map pprFlatDef defs
                body_doc = statement_sequence body
            in (text "letrec" $$ nest 2 (pprBlock defs_doc)) : body_doc
-         ReadingS {fexpScrutinee = val, fexpBody = body} ->
-           (text "reading" <+> pprValue val) : statement_sequence body
+         ReadingS {fexpScrutineeVar = v, fexpBody = body} ->
+           (text "reading" <+> pprVar v) : statement_sequence body
          LocalS {fexpVar = v, fexpBody = body} ->
            (text "local" <+> pprVar v) : statement_sequence body
          _ -> [pprStmt statement]
@@ -285,8 +311,10 @@ pprFlatFun :: FlatFun -> Doc
 pprFlatFun function =
   let params = map pprParam $ ffunParams function
       rv = case ffunReturn function
-           of ValueReturn -> parens $ Gluon.pprExp (ffunReturnType function)
-              VariableReturn v -> parens $ pprVar v `pprDotted` State <+> text ":" <+> Gluon.pprExp (ffunReturnType function)
+           of ValueReturn ->
+                parens $ Gluon.pprExp (ffunReturnType function)
+              VariableReturn v _ ->
+                parens $ pprVar v `pprDotted` State <+> text ":" <+> Gluon.pprExp (ffunReturnType function)
       header = text "lambda" <+> cat (params ++ [nest (-3) $ text "->" <+> rv])
   in header <> text "." $$ nest 2 (pprStmt (ffunBody function))
     
@@ -321,25 +349,17 @@ idContext = id
 -- | Allocate local storage for some statement
 allocateLocalMemory :: SourcePos -> Var -> RType -> StmtContext
 allocateLocalMemory pos v ty stmt =
-  LocalS (Gluon.mkSynInfo pos ObjectLevel) v stmt
+  LocalS (fakeFlatInfo pos) v ty stmt
 
 -- | Perform two actions in sequence
 eval :: SourcePos -> Stmt -> StmtContext
 eval pos s1 s2 =
-  ThenS (Gluon.mkSynInfo pos ObjectLevel) [] s1 s2
+  EvalS (fakeFlatInfo pos) s1 s2
 
 -- | Assign a value to a local variable over the scope of a statement
 assignTemporaryValue :: SourcePos -> Var -> RType -> Stmt -> StmtContext
 assignTemporaryValue pos v ty stmt body =
-  LetS (Gluon.mkSynInfo pos ObjectLevel) (Binder v ty Value) [] stmt body
-
-assignState :: SourcePos -> Var -> RType -> Stmt -> StmtContext
-assignState pos v ty stmt body =
-  LetS (Gluon.mkSynInfo pos ObjectLevel) (Binder v ty State) [] stmt body
-
-assignTemporaryFunction :: SourcePos -> Var -> RType -> Stmt -> StmtContext
-assignTemporaryFunction pos v ty stmt body =
-  LetS (Gluon.mkSynInfo pos ObjectLevel) (Binder v ty FunRef) [] stmt body
+  LetS (fakeFlatInfo pos) (Binder v ty Value) stmt body
 
 type F = PureTC
 
@@ -432,9 +452,53 @@ buildCallArguments args ret =
     (return_addr_parameter, return_ptr_parameter, return_state_parameter) =
       case ret
       of ValueReturn -> (Nothing, Nothing, Nothing)
-         VariableReturn v -> (Just (VarV v Address),
-                              Just (VarV v Pointer),
-                              Just (VarV v State))
+         VariableReturn v _ ->
+           (Just (VarV v Address),
+            Just (VarV v Pointer),
+            Just (VarV v State))
+
+addressParameter, valueParameter, valueOnlyParameter, stateParameter
+  :: RPat -> Mode -> Maybe (RBinder Component)
+
+addressParameter (VarP v ty) mode =
+  case mode
+  of ByVal -> Nothing
+     ByClo -> Nothing
+     ByRef -> Just $ Binder v ty Address
+
+addressParameter _ _ = internalError "Expecting a variable parameter"
+
+valueParameter (VarP v ty) mode =
+  case mode
+  of ByVal -> Just $ Binder v ty Value
+     ByClo -> Just $ Binder v ty FunRef
+     ByRef -> Just $ Binder v ty Pointer
+
+valueParameter _ _ = internalError "Expecting a variable parameter"
+
+valueOnlyParameter (VarP v ty) mode =
+  case mode
+  of ByVal -> Just $ Binder v ty Value
+     ByClo -> Just $ Binder v ty FunRef
+     ByRef -> internalError "Unexpected pass-by-reference parameter"
+
+valueOnlyParameter _ _ = internalError "Expecting a variable parameter"
+
+stateParameter (VarP v ty) mode =
+  case mode
+  of ByVal -> Nothing
+     ByClo -> Nothing
+     ByRef -> Just $ Binder v ty State
+
+stateParameter _ _ = internalError "Expecting a variable parameter"
+
+patternEffects :: [(RPat, Mode)] -> Effect
+patternEffects patterns = Map.fromList $ mapMaybe effect patterns
+  where
+    effect (VarP v _, ByRef) = Just (varID v, ())
+    effect (VarP v _, ByVal) = Nothing
+    effect (VarP v _, ByClo) = Nothing
+    effect _ = internalError "patternEffects"
 
 -- | Build the parameter list for a function
 buildFunctionParameters :: [TyPat (Typed Rec)]
@@ -451,30 +515,22 @@ buildFunctionParameters ty_params params return_type = do
     case return_mode
     of ByVal -> return (ValueReturn, Nothing, Nothing, Nothing)
        ByRef -> do rv <- newAnonymousVariable
-                   return (VariableReturn rv,
+                   return (VariableReturn rv return_type,
                            Just (Binder rv return_type Address),
                            Just (Binder rv return_type Pointer),
                            Just (Binder rv return_type State))
        ByClo -> return (ValueReturn, Nothing, Nothing, Nothing)
 
-  -- Construct parameter list
-  let flat_params =
+  -- Construct parameter list and side effects
+  let params' = zip (map fromTypedPat params) param_modes
+      flat_params =
         map convert_ty_param ty_params ++
-        mapMaybe param_address (zip params param_modes) ++
+        mapMaybe (uncurry addressParameter) params' ++
         maybeToList return_address ++
-        mapMaybe param_value (zip params param_modes) ++
+        mapMaybe (uncurry valueParameter) params' ++
         maybeToList return_pointer ++
         maybeToList return_state
-        
-  -- Calculate side effect
-  let effect1 = Map.fromList $ catMaybes $
-                zipWith param_effect params param_modes
-      effect = case return_mode
-               of ByVal -> effect1
-                  ByRef -> case return_var
-                           of VariableReturn rv ->
-                                Map.insert (varID rv) WriteEff effect1
-                  ByClo -> effect1
+      effect = patternEffects params'
 
   return (flat_params, effect, return_mode, return_var)
   where
@@ -482,21 +538,6 @@ buildFunctionParameters ty_params params return_type = do
     
     choose_param_mode (VarP v ty) = chooseMode (fromTypedType ty)
     choose_param_mode _ = internalError "not a variable parameter"
-
-    param_address (VarP v ty, ByVal) = Nothing
-    param_address (VarP v ty, ByRef) = Just (Binder v (fromTypedType ty) Address)
-    param_address (VarP v ty, ByClo) = Nothing
-    param_address (_, _) = internalError "not a variable parameter"
-
-    param_value (VarP v ty, ByVal) = Just (Binder v (fromTypedType ty) Value)
-    param_value (VarP v ty, ByRef) = Just (Binder v (fromTypedType ty) Pointer)
-    param_value (VarP v ty, ByClo) = Just (Binder v (fromTypedType ty) FunRef)
-    param_value (_, _) = internalError "not a variable parameter"
-    
-    param_effect (VarP v ty) ByVal = Nothing
-    param_effect (VarP v ty) ByRef = Just (varID v, ReadEff)
-    param_effect (VarP v ty) ByClo = Nothing
-    param_effect _ _ = internalError "not a variable parameter"
 
 -- | Get the parameter and result types of a case alternative
 getAltParameterTypes :: Alt (Typed Rec) -> F ([Gluon.WRExp], Gluon.WRExp)
@@ -555,15 +596,12 @@ buildValueCaseParameters scrutinee_type alt = do
   param_modes <- traceShow (text "param_types" <+> (vcat $ map (Gluon.pprExp . fromWhnf) param_types)) $ mapM (chooseMode . fromWhnf) param_types
   
   -- Construct parameter binders
-  let parameters =
-        zipWith3 makeParamBinder (altParams alt) param_types param_modes
+  let param_patterns = map fromBinder $ altParams alt
+        where fromBinder (Binder v ty ()) = VarP v (fromTypedType ty)
+      parameters =
+        catMaybes $ zipWith valueOnlyParameter param_patterns param_modes
       ty_args = map (TypeV . fromTypedType) $ altTyArgs alt
   return (altConstructor alt, ty_args, parameters)
-  where
-    -- Only pass-by-value parameters are permitted
-    makeParamBinder (Binder var _ ()) ty ByVal = Binder var (fromWhnf ty) Value 
-    makeParamBinder (Binder var _ ()) ty ByClo = Binder var (fromWhnf ty) FunRef
-    makeParamBinder (Binder _ _ ()) ty _ = traceShow (Gluon.pprExp $ fromWhnf ty) $ internalError "buildValueCaseParameters"
 
 -- | Build the parameter list for a case alternative
 buildRefCaseParameters :: RType    -- ^ Scrutinee type
@@ -582,37 +620,25 @@ buildRefCaseParameters scrutinee_type alt = do
   param_modes <- mapM (chooseMode . fromWhnf) param_types
   
   -- Construct parameter binders
-  let addr_parameters =
-        catMaybes $
-        zipWith3 make_addr_param (altParams alt) param_types param_modes
-      value_parameters =
-        catMaybes $
-        zipWith3 make_value_param (altParams alt) param_types param_modes
-      effects =
-        Map.fromList $
-        catMaybes $
-        zipWith3 make_effect (altParams alt) param_types param_modes
+  let param_patterns = zip (map fromBinder $ altParams alt) param_modes
+        where fromBinder (Binder v ty ()) = VarP v (fromTypedType ty)
+      addr_parameters = mapMaybe (uncurry addressParameter) param_patterns
+      value_parameters = mapMaybe (uncurry valueParameter) param_patterns
       parameters = addr_parameters ++ value_parameters
-      ty_args = map (TypeV . fromTypedType) $ altTyArgs alt
-  return (altConstructor alt, ty_args, parameters, effects)
-  where
-    make_addr_param (Binder var _ ()) ty ByRef = Just $ Binder var (fromWhnf ty) Address 
-    make_addr_param (Binder var _ ()) _ ByVal = Nothing
-    make_addr_param (Binder _ _ ()) _ _ = internalError "buildRefCaseParameters"
-
-    make_value_param (Binder var _ ()) ty ByRef = Just $ Binder var (fromWhnf ty) Pointer
-    make_value_param (Binder var _ ()) ty ByVal = Just $ Binder var (fromWhnf ty) Value
-    make_value_param (Binder _ _ ()) _ _ = internalError "buildRefCaseParameters"
-
-    make_effect (Binder _ _ ()) _ ByVal = Nothing
-    make_effect (Binder var _ ()) ty ByRef = Just (varID var, ReadEff)
+      
+  -- Compute side effect
+  let effect = patternEffects param_patterns
+  
+  -- Create type parameters to the pattern 
+  let ty_args = map (TypeV . fromTypedType) $ altTyArgs alt
+  return (altConstructor alt, ty_args, parameters, effect)
 
 -------------------------------------------------------------------------------
 
 flattenValueToStmt :: ExpInfo -> F (StmtContext, Value) -> F Stmt
 flattenValueToStmt inf m = do
   (context, value) <- m
-  return (context $ ValueS inf value)
+  return (context $ ValueS (fakeFlatInfo' inf) value)
 
 -- | Make the value of an expression available over some local scope
 withFlattenedExp :: StmtExtensible a =>
@@ -649,7 +675,7 @@ flattenCall inf ret mono_op margs =
         op = expectValueArgument real_op_argument
     
     -- Create the function call statement
-    return $ CallS inf op params
+    return $ CallS (fakeFlatInfo' inf) op params
   where
     -- Get the real operator and its type arguments 
     (poly_op, ty_args) = extract_type_parameters mono_op
@@ -683,7 +709,7 @@ flattenLetrec :: StmtExtensible a =>
                  ExpInfo -> [Def (Typed Rec)] -> a -> F a
 flattenLetrec inf defs body = do
   defs' <- mapM flattenDef defs
-  let context body = LetrecS inf defs' body
+  let context body = LetrecS (fakeFlatInfo' inf) defs' body
   return $ addContext context body
 
 -- | Flatten a \'case\' expression to a statement
@@ -698,12 +724,12 @@ flattenCase flattenBranch inf scrutinee alts =
     flatten (ValueArgument scrutinee_val) = do
       -- Flatten all case alternatives
       flat_alts <- mapM (flattenValAlt flattenBranch scrutinee_type) alts
-      return $ CaseValS inf scrutinee_val flat_alts
+      return $ CaseValS (fakeFlatInfo' inf) scrutinee_val flat_alts
 
     flatten (VariableArgument scrutinee_var) = do
       -- Flatten all case alternatives
       flat_alts <- mapM (flattenRefAlt flattenBranch scrutinee_type) alts
-      return $ CaseRefS inf scrutinee_var flat_alts
+      return $ CaseRefS (fakeFlatInfo' inf) scrutinee_var flat_alts
       
     -- Flatten a value-case alternative
     flattenValAlt flattenBranch scrutinee_type alt = do
@@ -728,17 +754,17 @@ flattenCase flattenBranch inf scrutinee alts =
 -- | Flatten an expression whose result is a value.  Assign the value to
 -- the given return variable.
 flattenExpWriteValue :: ExpInfo -> Var -> TExp -> F StmtContext
-flattenExpWriteValue inf dest texp@(TypedSFExp (TypeAnn ty expression)) =
+flattenExpWriteValue inf dest texp@(TypedSFExp (TypeAnn (fromWhnf -> ty) expression)) =
   case expression
   of VarE {expVar = v} -> returnValue $ VarV v Value
      ConE {expCon = c} -> returnValue $ ConV c Value
      LitE {expLit = l} -> returnValue $ LitV l
      TyAppE {expInfo = inf, expOper = op} -> do 
        stmt <- flattenCall inf ValueReturn texp Nothing
-       return $ assignTemporaryValue pos dest (fromWhnf ty) stmt
+       return $ assignTemporaryValue pos dest ty stmt
      CallE {expInfo = inf, expOper = op, expArgs = args} -> do
        stmt <- flattenCall inf ValueReturn op (Just args)
-       return $ assignTemporaryValue pos dest (fromWhnf ty) stmt
+       return $ assignTemporaryValue pos dest ty stmt
      FunE {expInfo = inf, expFun = f} -> do
        f' <- flattenFun f
        returnValue $ FunV f'
@@ -755,14 +781,14 @@ flattenExpWriteValue inf dest texp@(TypedSFExp (TypeAnn ty expression)) =
            , expScrutinee = scrutinee
            , expAlternatives = alts} -> do
        stmt <- flattenCase (flattenValueToStmt inf . flattenExpValue) inf scrutinee alts
-       return $ assignTemporaryValue pos dest (fromWhnf ty) stmt
+       return $ assignTemporaryValue pos dest ty stmt
   where
     pos = getSourcePos inf
     returnValue val =
-      return $ assignTemporaryValue pos dest (fromWhnf ty) (ValueS inf val)
+      return $ assignTemporaryValue pos dest ty (ValueS (fakeFlatInfo' inf) val)
 
 flattenExpValue :: TExp -> F (StmtContext, Value)
-flattenExpValue typed_expression@(TypedSFExp (TypeAnn ty expression)) =
+flattenExpValue typed_expression@(TypedSFExp (TypeAnn (fromWhnf -> ty) expression)) =
   case expression
   of VarE {expVar = v} -> returnValue $ VarV v Value
      ConE {expCon = c} -> returnValue $ ConV c Value
@@ -774,7 +800,7 @@ flattenExpValue typed_expression@(TypedSFExp (TypeAnn ty expression)) =
        stmt <- flattenCall inf ValueReturn typed_expression Nothing
        
        -- Bind the call's result to a variable
-       let context = assignTemporaryValue pos tmp_var (fromWhnf ty) stmt
+       let context = assignTemporaryValue pos tmp_var ty stmt
            
        return (context, VarV tmp_var Value)
      CallE {expInfo = inf, expOper = op, expArgs = args} -> do
@@ -785,7 +811,7 @@ flattenExpValue typed_expression@(TypedSFExp (TypeAnn ty expression)) =
        stmt <- flattenCall inf ValueReturn op (Just args)
        
        -- Bind the call's result to a variable
-       let context = assignTemporaryValue pos tmp_var (fromWhnf ty) stmt
+       let context = assignTemporaryValue pos tmp_var ty stmt
            
        return (context, VarV tmp_var Value)
      FunE {expInfo = inf, expFun = f} -> do
@@ -805,7 +831,7 @@ flattenExpValue typed_expression@(TypedSFExp (TypeAnn ty expression)) =
        
        -- Assign the value to a temporary variable
        tmp_var <- newAnonymousVariable
-       let context = assignTemporaryValue pos tmp_var (fromWhnf ty) stmt
+       let context = assignTemporaryValue pos tmp_var ty stmt
        return (context, VarV tmp_var Value)
   where
     pos = getSourcePos expression
@@ -814,45 +840,44 @@ flattenExpValue typed_expression@(TypedSFExp (TypeAnn ty expression)) =
 -- | Flatten an expression whose value will be read by reference.
 -- The variable representing the expression's storage will be returned. 
 flattenExpReference :: TExp -> F (StmtContext, Var)
-flattenExpReference texp@(TypedSFExp (TypeAnn ty expression)) =
+flattenExpReference texp@(TypedSFExp (TypeAnn (fromWhnf -> ty) expression)) =
   case expression
   of VarE {expVar = v} -> return (idContext, v)
      ConE {expCon = c} -> do
        -- Allocate the constructor value in a local memory area
        tmp_var <- newAnonymousVariable
-       let context = allocateLocalMemory pos tmp_var (fromWhnf ty)
+       let context = allocateLocalMemory pos tmp_var ty
        return (context, tmp_var)
      LitE {expLit = l} -> do
        -- Allocate the variable value in a local memory area
        tmp_var <- newAnonymousVariable
-       let tmp_var_ty = fromWhnf ty
-           context =
-             allocateLocalMemory pos tmp_var tmp_var_ty .
-             assignState pos tmp_var tmp_var_ty (StoreValueS (Gluon.mkSynInfo pos ObjectLevel) tmp_var (LitV l))
+       let context =
+             allocateLocalMemory pos tmp_var ty .
+             eval pos (StoreValueS (fakeFlatInfo pos) tmp_var (LitV l))
        return (context, tmp_var)
      TyAppE {expInfo = inf} -> do
        -- Create a temporary variable to hold the result
        tmp_var <- newAnonymousVariable
             
        -- Create a function call
-       stmt <- flattenCall inf (VariableReturn tmp_var) texp Nothing
+       stmt <- flattenCall inf (VariableReturn tmp_var ty) texp Nothing
 
        -- Bind the call's result to a locally allocated variable
        let context body =
-             allocateLocalMemory (getSourcePos expression) tmp_var (fromWhnf ty) $
-             LetS inf (Binder tmp_var (fromWhnf ty) State) [] stmt body
+             allocateLocalMemory (getSourcePos expression) tmp_var ty $
+             LetS (fakeFlatInfo' inf) (Binder tmp_var ty State) stmt body
        return (context, tmp_var)       
      CallE {expInfo = inf, expOper = op, expArgs = args} -> do
        -- Create a temporary variable to hold the result
        tmp_var <- newAnonymousVariable
             
        -- Create a function call
-       stmt <- flattenCall inf (VariableReturn tmp_var) op (Just args)
+       stmt <- flattenCall inf (VariableReturn tmp_var ty) op (Just args)
 
        -- Bind the call's result to a locally allocated variable
        let context body =
-             allocateLocalMemory (getSourcePos expression) tmp_var (fromWhnf ty) $
-             LetS inf (Binder tmp_var (fromWhnf ty) State) [] stmt body
+             allocateLocalMemory (getSourcePos expression) tmp_var ty $
+             LetS (fakeFlatInfo' inf) (Binder tmp_var ty State) stmt body
        return (context, tmp_var)
   where
     pos = getSourcePos expression
@@ -860,20 +885,20 @@ flattenExpReference texp@(TypedSFExp (TypeAnn ty expression)) =
 -- | Flatten an expression whose value will be written to the specified
 -- variable.
 flattenExpWriteReference :: Var -> TExp -> F Stmt
-flattenExpWriteReference return_var texp@(TypedSFExp (TypeAnn ty expression)) =
+flattenExpWriteReference return_var texp@(TypedSFExp (TypeAnn (fromWhnf -> ty) expression)) =
   case expression
   of VarE {expInfo = inf, expVar = v} -> do
        -- Copy this variable to the destination
-       pc <- getPassConv $ fromWhnf ty
-       return $ CopyS inf v return_var
+       pc <- getPassConv ty
+       return $ CopyS (fakeFlatInfo' inf) v
      ConE {expInfo = inf, expCon = c} ->
-       return $ StoreValueS inf return_var (ConV c Value)
+       return $ StoreValueS (fakeFlatInfo' inf) return_var (ConV c Value)
      LitE {expInfo = inf, expLit = l} ->
-       return $ StoreValueS inf return_var (LitV l)
+       return $ StoreValueS (fakeFlatInfo' inf) return_var (LitV l)
      TyAppE {expInfo = inf} ->
-       flattenCall inf (VariableReturn return_var) texp Nothing
+       flattenCall inf (VariableReturn return_var ty) texp Nothing
      CallE {expInfo = inf, expOper = op, expArgs = args} ->
-       flattenCall inf (VariableReturn return_var) op (Just args)
+       flattenCall inf (VariableReturn return_var ty) op (Just args)
      LetE { expInfo = inf
           , expBinder = binder
           , expValue = rhs
@@ -898,11 +923,11 @@ flattenFun (TypedSFFun (TypeAnn _ function)) = do
          -- Flatten the expression and return its result value
          (ctx, val) <- flattenExpValue (funBody function)
          let return_value =
-               ValueS (expInfo $ discardExpType (funBody function)) val
+               ValueS (fakeFlatInfo' $ expInfo $ discardExpType (funBody function)) val
          return $ ctx return_value
        ByRef ->
          case ret
-         of VariableReturn v ->
+         of VariableReturn v _ ->
               -- Flatten the expression,
               -- which writes the result as a side effect
               flattenExpWriteReference v (funBody function)
@@ -911,7 +936,7 @@ flattenFun (TypedSFFun (TypeAnn _ function)) = do
          -- Flatten the expression and return its result value 
          (ctx, val) <- flattenExpValue (funBody function)
          let return_value =
-               ValueS (expInfo $ discardExpType (funBody function)) val
+               ValueS (fakeFlatInfo' $ expInfo $ discardExpType (funBody function)) val
          return $ ctx return_value
 
   return $ FlatFun { ffunInfo = funInfo function
