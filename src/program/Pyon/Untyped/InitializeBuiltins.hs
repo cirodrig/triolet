@@ -219,7 +219,8 @@ mkAdditiveClass = mdo
                   , clsDictCon = pyonBuiltin SystemF.the_additiveDict
                   }
 
-  zero <- mkClassMethod cls 0 "zero" $ monomorphic (ConTy a)
+  zero <- mkClassMethod cls 0 "zero" $ monomorphic $
+          functionType [ConTy $ tiBuiltin the_con_NoneType] (ConTy a)
   add <- mkClassMethod cls 1 "__add__" binScheme
   sub <- mkClassMethod cls 2 "__sub__" binScheme
 
