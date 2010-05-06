@@ -29,6 +29,17 @@ eliminateDeadCode (Module defss exports) =
     
     edcTopLevelGroup [] = return []
 
+-- | If the expression is a tuple expression, then return the expression's
+-- field values.
+deconstructTupleExp :: RExp -> Maybe [RExp]
+deconstructTupleExp expression =
+  -- If the operator is a tuple value constructor, then return the arguments
+  -- otherwise, return nothing
+  case unpackPolymorphicCall expression
+  of Just (ConE {expCon = con}, ty_args, args)
+       | Just con == getPyonTupleCon (length args) -> Just args
+     _ -> Nothing
+
 -------------------------------------------------------------------------------
 
 -- | Sets form a monoid under the union operation
@@ -281,9 +292,12 @@ edcLetE info lhs rhs body =
     -- > let a = foo() in let b = 4 in ...
     eliminate_bindings lhs body =
       case lhs
-      of -- If a side-effect-free value is not bound to anything,
+      of -- If a value is not bound to anything,
          -- then this code can be eliminated.
-         WildP _ | isValueExp body -> []
-         TupleP ps -> error "eliminate_bindings: Not implemented"
+         WildP _ -> []
+         TupleP ps -> 
+           case deconstructTupleExp body
+           of Nothing -> [(lhs, body)] -- Cannot deconstruct this pattern 
+              Just fs -> concat $ zipWith eliminate_bindings ps fs
          -- Otherwise, no change
          _ -> [(lhs, body)]
