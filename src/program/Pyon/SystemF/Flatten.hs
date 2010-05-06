@@ -1181,6 +1181,8 @@ flattenExpWriteReference return_var texp@(TypedSFExp (TypeAnn (fromWhnf -> ty) e
           , expValue = rhs
           , expBody = body} -> do
        flattenLet inf binder rhs =<< flattenExpWriteReference return_var body
+     LetrecE {expInfo = inf, expDefs = defs, expBody = body} ->
+       flattenLetrec pos defs =<< flattenExpWriteReference return_var body
      CaseE { expInfo = inf
            , expScrutinee = scrutinee
            , expAlternatives = alts} ->
