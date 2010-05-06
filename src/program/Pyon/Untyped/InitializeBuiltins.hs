@@ -304,7 +304,7 @@ mkZipType =
 
 mkIotaType =
   return $ monomorphic $
-  functionType [] (ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_int))
+  functionType [ConTy (tiBuiltin the_con_NoneType)] (ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_int))
 
 mkUndefinedType =
   forallType [Star] $ \[a] -> ([], ConTy a)

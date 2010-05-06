@@ -8,7 +8,7 @@ def minIndex(xs):
 	ix_y, val_y = y
 	return x if val_x <= val_y else y
 
-    ix, val = reduce1(pickMin, zip(iota(), xs))
+    ix, val = reduce1(pickMin, zip(iota(None), xs))
     return ix
 
 def nearestNeighbor(xs, ys):

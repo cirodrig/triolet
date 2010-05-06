@@ -222,7 +222,7 @@ constant fun_zip : (s : Pure -> Pure)
                 -> TraversableDict t
                 -> (s a -> t b -> Stream (PyonTuple2 a b));
 
-constant fun_iota : Stream Int;
+constant fun_iota : NoneType -> Stream Int;
 
 constant fun_undefined : (a : Pure) -> a;
 
