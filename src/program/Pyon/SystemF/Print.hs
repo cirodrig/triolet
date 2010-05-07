@@ -141,22 +141,6 @@ pprExpFlagsPrec flags prec expression =
        let doc = text "case" <+> pprExpFlagsPrec flags precOuter e $$
                  text "of" <+> vcat (map (pprAltFlags flags) alts)
        in parenthesize precOuter doc prec
-{-     DictE { expClass = cls
-           , expType = ty
-           , expSuperclasses = scs
-           , expMethods = ms } ->
-         let clsText = parens $ Gluon.pprExp ty
-             scsText = tuple $ map (pprExpFlags flags) scs
-             msText = tuple $ map (pprExpFlags flags) ms
-         in text "dict" <> cat [clsText, scsText, msText]
-     MethodSelectE { expClass = cls
-                   , expType = ty
-                   , expMethodIndex = index
-                   , expArg = arg } ->
-       let clsText = parens $ Gluon.pprExp ty
-           indexText = parens $ text (show index)
-           argText = parens $ pprExpFlags flags arg
-       in text "method" <> cat [clsText, indexText, argText] -}
 
 pprIf flags cond tr fa =
   let condText = pprExpFlags flags cond
