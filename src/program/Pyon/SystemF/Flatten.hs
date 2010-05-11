@@ -1339,7 +1339,7 @@ flattenModule (Module defss exports) = do
   defss' <- flattenTopLevelDefGroups defss
   return defss'
 
-flatten :: RModule -> IO [Anf.ProcDefGroup Rec]
+flatten :: RModule -> IO (Anf.Module Rec)
 flatten mod = do
   -- Get type information
   result1 <- typeCheckModule annotateTypes mod
@@ -1998,7 +1998,43 @@ anfReading pos ty return_info var body = do
 
   return stmt
   where
-    mask_effect_on addr eff = undefined
+    -- Remove any effect affecting the given address variable.
+    -- We assume the effect is a composition of atomic effects on addresses.
+    mask_effect_on addr eff =
+      case eff
+      of Gluon.AppE { Gluon.expOper = Gluon.ConE {Gluon.expCon = con}
+                    , Gluon.expArgs = args}
+           | con `Gluon.isBuiltin` Gluon.the_SconjE ->
+               -- Recurse on sub-effects
+               case args
+               of [l, r] ->
+                    let l' = mask_effect_on addr l
+                        r' = mask_effect_on addr r
+                    in Gluon.Core.Builtins.Effect.sconj l' r'
+               
+           | con `Gluon.isBuiltin` Gluon.the_AtE ->
+               -- Determine whether this effect is masked out
+               case args
+               of [obj_type, addr_type] ->
+                    case addr_type
+                    of Gluon.VarE {Gluon.expVar = this_addr}
+                         | addr == this_addr ->
+                             -- Mask out this effect
+                             Gluon.Core.Builtins.Effect.empty
+                         | otherwise ->
+                             -- Leave it unchanged
+                             eff
+                             
+                       -- Other effect types should not show up
+                       _ -> internalError "anfReading: Unexpected effect"
+
+         Gluon.ConE {Gluon.expCon = con}
+           | con `Gluon.isBuiltin` Gluon.the_EmpE ->
+               -- The empty effect is unchanged
+               eff
+
+         -- Other effect types should not show up
+         _ -> internalError "anfReading: Unexpected effect"
 
     -- We don't need any extra parameters in the body function
     no_extra_parameters :: forall a. ([RBinder ()] -> Maybe RType -> ToAnf a)
@@ -2334,8 +2370,8 @@ anfCopyValue pos ty dst src = do
               Anf.mkVarV pos dst_st]
   return $ Anf.mkCallAppS pos con args
 
-anfModule :: [[FlatDef]] -> ToAnf [Anf.ProcDefGroup Rec]
-anfModule defss = top_level_group defss
+anfModule :: [[FlatDef]] -> ToAnf (Anf.Module Rec)
+anfModule defss = liftM Anf.Module $ top_level_group defss
   where
     top_level_group (defs:defss) =
       liftM (uncurry (:)) $ anfDefGroup defs $ top_level_group defss

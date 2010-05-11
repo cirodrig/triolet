@@ -88,6 +88,10 @@ data Alt s =
   , altBody :: RecStm s
   }
 
+data Module s =
+  Module [ProcDefGroup s]
+  deriving(Typeable)
+
 mkVarV :: SourcePos -> Var -> RVal
 mkVarV pos v =
   let info = mkSynInfo pos (getLevel v)
