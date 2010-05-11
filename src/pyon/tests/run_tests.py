@@ -34,12 +34,17 @@ def tryCompile(fname, show_traceback = False):
         test_inf = untyped.partialEvaluateModule(test_inf)
         test_inf = untyped.eliminateDeadCode(test_inf)
         test_inf = untyped.eliminatePatternMatching(test_inf)
+	print
+	print "System F"
         untyped.printModule(test_inf)
 
         # test_sf = type_inference.inferTypes(test_anf)
 
         # untyped.typeCheckModule(test_inf)
-        untyped.flattenModule(test_inf)
+        flat_sf = untyped.flattenModule(test_inf)
+	print
+	print "Flattened to ANF"
+	untyped.printModule(flat_sf)
 
 	# test_sf = system_f.optimizeModule(test_sf)
         # test_flat = system_f.flattenModule(test_sf)

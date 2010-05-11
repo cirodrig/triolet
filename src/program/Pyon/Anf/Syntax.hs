@@ -19,6 +19,9 @@ type RecStm s = StmOf s s
 type RStm = RecStm Rec
 type Stm s = StmOf Rec s
 
+type RAlt = Alt Rec
+type RProc = Proc Rec
+
 -- | Values.  Evaluating a value has no side effects.
 data instance ValOf Rec s =
     -- | A Gluon term.  All type expressions are Gluon terms.

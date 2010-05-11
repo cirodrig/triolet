@@ -60,6 +60,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/Typecheck.hs \
 	Pyon/SystemF/Flatten.hs \
 	Pyon/Anf/Syntax.hs \
+	Pyon/Anf/Print.hs \
 	Pyon/NewCore/Optimizations.hs \
 	Pyon/NewCore/Print.hs \
 	Pyon/NewCore/Rename.hs \

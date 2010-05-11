@@ -27,6 +27,7 @@ import qualified Pyon.SystemF.ElimPatternMatching as SystemF
 import qualified Pyon.SystemF.PartialEval as SystemF
 import qualified Pyon.SystemF.DeadCode as SystemF
 import Pyon.SystemF.Flatten as SystemF
+import qualified Pyon.Anf.Print as Anf
 
 -- Imported for compilation dependences only
 import Pyon.NewCore.Optimizations()
@@ -392,7 +393,7 @@ foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 
 pyon_printModule _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
-  doAny [print_untyped mod, print_systemF mod, print_fail]
+  doAny [print_untyped mod, print_systemF mod, print_anf mod, print_fail]
   pyNone
   where
     doAny (m:ms) = do
@@ -414,6 +415,13 @@ pyon_printModule _self mod = rethrowExceptionsInPython $ do
         Just mod -> do print $ SystemF.pprModule mod
                        return True
     
+    print_anf mod = do
+      m <- fromHsObject mod
+      case m of
+        Nothing -> return False
+        Just mod -> do print $ Anf.pprModule mod
+                       return True
+
     print_fail =
       throwPythonExc pyTypeError "Expecting an untyped or system F module"
 
