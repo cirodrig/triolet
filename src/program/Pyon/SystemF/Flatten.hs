@@ -1916,11 +1916,11 @@ anfStmt statement =
        body' <- withValueVariable v ty $ anfStmt body
        return $ Anf.LetS anf_info (Binder v ty ()) rhs' body'
      EvalS {fexpRhs = rhs, fexpBody = body} ->
-       case fexpReturn statement
+       case fexpReturn rhs
        of VariableReturn ty v -> do
+            rhs' <- anfStmt rhs
             state_v <- getStateVariableX "evalS" v
             state_ty <- getStateType v
-            rhs' <- anfStmt rhs
             body' <- anfStmt body
             return $ Anf.LetS anf_info (Binder state_v state_ty ()) rhs' body'
           _ -> internalError "anfStmt"
