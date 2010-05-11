@@ -1,10 +1,13 @@
 
-{-# LANGUAGE ViewPatterns, FlexibleInstances, RelaxedPolyRec #-}
+{-# LANGUAGE ViewPatterns, FlexibleContexts, FlexibleInstances,
+             RelaxedPolyRec, GeneralizedNewtypeDeriving, Rank2Types #-}
 module Pyon.SystemF.Flatten(flatten)
 where
 
 import Control.Monad
+import Control.Monad.RWS
 import Control.Monad.Trans
+import Data.List
 import qualified Data.Map as Map
 import Data.Maybe
 import Debug.Trace 
@@ -23,15 +26,24 @@ import Gluon.Core(Level(..), HasLevel(..),
                   VarID,
                   Binder(..), Binder'(..), RBinder, RBinder')
 import Gluon.Core.Rename
+import qualified Gluon.Core.Builtins.Effect
 import qualified Gluon.Core as Gluon
 import Gluon.Eval.Environment
 import Gluon.Eval.Eval
+import Gluon.Eval.Equality
 import Gluon.Eval.Typecheck
 import Pyon.Globals
 import Pyon.SystemF.Builtins
 import Pyon.SystemF.Syntax
 import Pyon.SystemF.Typecheck
 import Pyon.SystemF.Print
+import qualified Pyon.Anf.Syntax as Anf
+import qualified Pyon.Anf.Builtins as Anf
+
+duplicateVar :: (Monad m, Supplies m VarID) => Var -> m Var
+duplicateVar v = do
+  id <- fresh
+  return $ Gluon.mkVar id (varName v) (getLevel v)
 
 withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
 withMany f xs k = go xs k
@@ -41,6 +53,15 @@ withMany f xs k = go xs k
 
 type TExp = SFRecExp (Typed Rec)
 type TType = RecType (Typed Rec)
+
+-- | The type of an address
+addressType :: RType
+addressType = Gluon.mkInternalConE $ Gluon.builtin Gluon.the_Addr
+
+-- | The type of a pointer-to-address
+pointerType :: RType -> RType 
+pointerType referent =
+  Gluon.mkInternalConAppE (Anf.anfBuiltin Anf.the_Ptr) [referent]
 
 data Mode = ByVal | ByRef | ByClo
 data Component = Value | FunRef | Address | Pointer | State
@@ -62,16 +83,21 @@ data FlatArgument =
 -- We keep track of an expression's return to compute its input and output
 -- state.
 data FlatReturn =
-    ValueReturn
-  | ClosureReturn FunctionEffect
-  | VariableReturn !Var !RType
+    ValueReturn !RType
+  | ClosureReturn !RType FunctionEffect
+  | VariableReturn !RType !Var
 
 returnComponent :: FlatReturn -> Component
-returnComponent ValueReturn = Value
-returnComponent (ClosureReturn _) = FunRef
+returnComponent (ValueReturn _) = Value
+returnComponent (ClosureReturn _ _) = FunRef
 returnComponent (VariableReturn _ _) = internalError "returnComponent"
 
-isValueReturn ValueReturn = True
+returnType :: FlatReturn -> RType
+returnType (ValueReturn ty) = ty
+returnType (ClosureReturn ty _) = ty
+returnType (VariableReturn ty _) = ty
+
+isValueReturn (ValueReturn _) = True
 isValueReturn _ = False
 
 data Value =
@@ -93,21 +119,15 @@ mkFlatInfo :: SourcePos -> FlatReturn -> Effect -> FlatInfo
 mkFlatInfo pos ret eff =
   FlatInfo (Gluon.mkSynInfo pos Gluon.ObjectLevel) ret eff
 
-mkValueReturnInfo :: SourcePos -> FlatInfo
-mkValueReturnInfo pos = mkFlatInfo pos ValueReturn noEffect
+mkValueReturnInfo :: SourcePos -> RType -> FlatInfo
+mkValueReturnInfo pos ty = mkFlatInfo pos (ValueReturn ty) noEffect
 
-mkClosureReturnInfo :: SourcePos -> FunctionEffect -> FlatInfo
-mkClosureReturnInfo pos eff = mkFlatInfo pos (ClosureReturn eff) noEffect
+mkClosureReturnInfo :: SourcePos -> RType -> FunctionEffect -> FlatInfo
+mkClosureReturnInfo pos ty eff = mkFlatInfo pos (ClosureReturn ty eff) noEffect
 
 mkVariableReturnInfo :: SourcePos -> Var -> RType -> FlatInfo
 mkVariableReturnInfo pos v ty =
-  mkFlatInfo pos (VariableReturn v ty) noEffect
-
-fakeFlatInfo :: SourcePos -> FlatInfo
-fakeFlatInfo pos = mkFlatInfo pos undefined undefined
-
-fakeFlatInfo' :: ExpInfo -> FlatInfo
-fakeFlatInfo' inf = mkFlatInfo (getSourcePos inf) undefined undefined
+  mkFlatInfo pos (VariableReturn ty v) noEffect
 
 fexpEffect :: Stmt -> Effect
 fexpEffect e = fexpInfoEffect (fexpInfo e)
@@ -174,6 +194,7 @@ data Stmt =
   | CaseRefS
     { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpScrutineeVar :: Var
+    , fexpScrutineeType :: RType
     , fexpRefAlts :: [FlatRefAlt]
     }
     -- | Put a writable object into readable mode.  This is inserted during
@@ -181,7 +202,7 @@ data Stmt =
   | ReadingS
     { fexpInfo :: {-# UNPACK #-} !FlatInfo
     , fexpScrutineeVar :: Var
-    , fexpType :: RType
+    , fexpScrutineeType :: RType
     , fexpBody :: Stmt
     }
     -- | Allocate some memory that is alive only during the body of this
@@ -204,10 +225,16 @@ data FlatValAlt =
 
 valAltBody (FlatValAlt _ _ _ body) = body
 
+-- | A pass-by-reference alternative.
+-- The case alternative matches a constructor instantiated at type arguments,
+-- binds parameters, and then executes a body.  The body's effect and return
+-- type are recorded.
 data FlatRefAlt =
-  FlatRefAlt Con [Value] [RBinder Component] Effect Stmt
+  FlatRefAlt Con [Value] [RBinder Component] Effect FlatReturn RType Stmt
 
-refAltBody (FlatRefAlt _ _ _ _ body) = body
+refAltBody (FlatRefAlt _ _ _ _ _ _ body) = body
+
+refAltReturnType (FlatRefAlt _ _ _ _ _ rt _) = rt
 
 data FlatFun =
   FlatFun
@@ -243,6 +270,7 @@ fromTypedFun (TypedSFFun (TypeAnn _ (Fun info ty_params params return_type body)
   where
     from_ty_param (TyPat v ty) = TyPat v (fromTypedType ty)
     from_param (VarP v ty) = VarP v (fromTypedType ty)
+    from_param _ = internalError "fromTypedFun: Expecting a variable parameter"
 
 fromTypedType :: TType -> RType
 fromTypedType (TypedSFType t) = t
@@ -293,9 +321,9 @@ pprStmt statement =
                      text ">"
            stmt_doc = pprStmt' statement
            lhs_doc rhs = case ret
-                         of ValueReturn -> rhs
-                            ClosureReturn _ -> rhs
-                            VariableReturn v t -> hang (pprVar v <+> text ":=") 4 rhs
+                         of ValueReturn _ -> rhs
+                            ClosureReturn _ _ -> rhs
+                            VariableReturn t v -> hang (pprVar v <+> text ":=") 4 rhs
        in eff_doc $$ lhs_doc stmt_doc
 
 pprStmt' statement =
@@ -329,7 +357,7 @@ pprAlt (FlatValAlt c ty_args params body) =
   in hang (con_doc <+> sep (ty_docs ++ param_docs) <> text ".") 4 body_doc
 
 pprRefAlt :: FlatRefAlt -> Doc
-pprRefAlt (FlatRefAlt c ty_args params eff body) =
+pprRefAlt (FlatRefAlt c ty_args params eff _ _  body) =
   let con_doc = text (showLabel $ Gluon.conName c)
       ty_docs = map pprValue ty_args
       param_docs = map pprParam params
@@ -371,11 +399,11 @@ pprFlatFun :: FlatFun -> Doc
 pprFlatFun function =
   let params = map pprParam $ ffunParams function
       rv = case ffunReturn function
-           of ValueReturn ->
-                parens $ Gluon.pprExp (ffunReturnType function)
-              ClosureReturn _ ->
-                parens $ Gluon.pprExp (ffunReturnType function)
-              VariableReturn v _ ->
+           of ValueReturn ty ->
+                parens $ Gluon.pprExp ty
+              ClosureReturn ty _ ->
+                parens $ Gluon.pprExp ty
+              VariableReturn _ v ->
                 parens $ pprVar v `pprDotted` State <+> text ":" <+> Gluon.pprExp (ffunReturnType function)
       header = text "lambda" <+> cat (params ++ [nest (-3) $ text "->" <+> rv])
   in header <> text "." $$ nest 2 (pprStmt (ffunBody function))
@@ -424,7 +452,7 @@ eval pos s1 s2 =
         -- If s1 writes a variable, and this variable is part of s2's effect,
         -- then we need to insert a read operation around s2
         case fexpReturn s1 
-        of VariableReturn write_var write_ty
+        of VariableReturn write_ty write_var
              | varID write_var `Map.member` fexpEffect s2 ->
                  locallyRead pos write_var write_ty s2
            _ -> s2
@@ -594,9 +622,9 @@ buildCallArguments args ret =
     
     (return_addr_parameter, return_ptr_parameter, return_state_parameter) =
       case ret
-      of ValueReturn -> (Nothing, Nothing, Nothing)
-         ClosureReturn _ -> (Nothing, Nothing, Nothing)
-         VariableReturn v _ ->
+      of ValueReturn _ -> (Nothing, Nothing, Nothing)
+         ClosureReturn _ _ -> (Nothing, Nothing, Nothing)
+         VariableReturn _ v ->
            (Just (VarV v Address),
             Just (VarV v Pointer),
             Just (VarV v State))
@@ -701,14 +729,15 @@ buildFunctionParameters ty_params params return_type = do
   -- Create a new variable for the return value
   (return_var, return_address, return_pointer, return_state) <-
     case return_mode
-    of ByVal -> return (ValueReturn, Nothing, Nothing, Nothing)
+    of ByVal -> return (ValueReturn return_type, Nothing, Nothing, Nothing)
        ByRef -> do rv <- newAnonymousVariable
-                   return (VariableReturn rv return_type,
+                   return (VariableReturn return_type rv,
                            Just (Binder rv return_type Address),
                            Just (Binder rv return_type Pointer),
                            Just (Binder rv return_type State))
        ByClo -> do return_effect <- functionTypeEffect return_type
-                   return (ClosureReturn return_effect, Nothing, Nothing, Nothing)
+                   return (ClosureReturn return_type return_effect,
+                           Nothing, Nothing, Nothing)
 
   -- Construct parameter list and side effects
   let params' = zip (map fromTypedPat params) param_modes
@@ -840,25 +869,25 @@ assumeFunctionEffects dg m = do
 
 -------------------------------------------------------------------------------
 
-flattenValueToStmt :: ExpInfo -> F (StmtContext, Value) -> F Stmt
-flattenValueToStmt inf m = do
+flattenValueToStmt :: ExpInfo -> RType -> F (StmtContext, Value) -> F Stmt
+flattenValueToStmt inf ty m = do
   (context, value) <- m
-  let info = mkFlatInfo (getSourcePos inf) ValueReturn noEffect
+  let info = mkFlatInfo (getSourcePos inf) (ValueReturn ty) noEffect
   return (context $ ValueS info value)
 
 -- | Make the value of an expression available over some local scope
 withFlattenedExp :: StmtExtensible a =>
                     TExp -> (FlatArgument -> F a) -> F a
-withFlattenedExp typed_expression@(TypedSFExp (TypeAnn ty _)) k = do
-  mode <- chooseMode $ fromWhnf ty
+withFlattenedExp typed_expression@(TypedSFExp (TypeAnn (fromWhnf -> ty) _)) k = do
+  mode <- chooseMode ty
   case mode of
     ByVal -> do
-      (ctx, val) <- flattenExpValue ValueReturn typed_expression
+      (ctx, val) <- flattenExpValue (ValueReturn ty) typed_expression
       result <- k $ ValueArgument val
       return $ addContext ctx result
     ByClo -> do
-      parameterized_eff <- functionTypeEffect (fromWhnf ty)
-      (ctx, val) <- flattenExpValue (ClosureReturn parameterized_eff) typed_expression
+      parameterized_eff <- functionTypeEffect ty
+      (ctx, val) <- flattenExpValue (ClosureReturn ty parameterized_eff) typed_expression
       result <- k $ ClosureArgument val parameterized_eff
       return $ addContext ctx result
     ByRef -> do 
@@ -911,9 +940,9 @@ flattenLet inf (VarP v (fromTypedType -> ty)) rhs body = do
   -- Assign the variable in the body's context
   assignment <-
     case mode
-    of ByVal -> flattenExpWriteValue inf ValueReturn v rhs
+    of ByVal -> flattenExpWriteValue inf (ValueReturn ty) v rhs
        ByClo -> do eff <- functionTypeEffect ty
-                   flattenExpWriteValue inf (ClosureReturn eff) v rhs
+                   flattenExpWriteValue inf (ClosureReturn ty eff) v rhs
        ByRef -> do stmt <- flattenExpWriteReference v rhs
                    return $
                      allocateLocalMemory (getSourcePos inf) v ty .
@@ -933,9 +962,10 @@ flattenLetrec pos defs body = do
   return $ addContext context body
 
 -- | Flatten a \'case\' expression to a statement
-flattenCase :: (TExp -> F Stmt) -> ExpInfo -> TExp -> [Alt (Typed Rec)]
+flattenCase :: (TExp -> F Stmt) -> ExpInfo -> FlatReturn -> RType -> TExp
+            -> [Alt (Typed Rec)]
             -> F Stmt 
-flattenCase flattenBranch inf scrutinee alts =
+flattenCase flattenBranch inf return_mode return_type scrutinee alts =
   withFlattenedExp scrutinee flatten
   where
     scrutinee_type = case scrutinee of TypedSFExp (TypeAnn ty _) -> fromWhnf ty
@@ -968,11 +998,11 @@ flattenCase flattenBranch inf scrutinee alts =
       -- Read the scrutinee as part of the effect.
       let alternatives_effect =
             Map.unions [ fexpEffect stmt Map.\\ local_eff
-                       | FlatRefAlt _ _ _ local_eff stmt <- flat_alts]
+                       | FlatRefAlt _ _ _ local_eff _ _ stmt <- flat_alts]
           effect = alternatives_effect `Map.union` varEffect scrutinee_var
       
       let new_info = mkFlatInfo (getSourcePos inf) ret effect
-      return $ CaseRefS new_info scrutinee_var flat_alts
+      return $ CaseRefS new_info scrutinee_var scrutinee_type flat_alts
 
     flatten (ClosureArgument _ _) =
       internalError "flattenCase: scrutinee is a function"
@@ -993,7 +1023,7 @@ flattenCase flattenBranch inf scrutinee alts =
 
       -- Flatten the body
       body <- flattenBranch (altBody alt)
-      return $ FlatRefAlt con ty_args params eff body
+      return $ FlatRefAlt con ty_args params eff return_mode return_type body
 
 -- Expression flattening functions
 
@@ -1029,7 +1059,9 @@ flattenExpWriteValue inf return_mode dest
      CaseE { expInfo = inf
            , expScrutinee = scrutinee
            , expAlternatives = alts} -> do
-       stmt <- flattenCase (flattenValueToStmt inf . flattenExpValue return_mode) inf scrutinee alts
+       let flatten_alt_body stmt =
+             flattenValueToStmt inf ty $ flattenExpValue return_mode stmt
+       stmt <- flattenCase flatten_alt_body inf return_mode ty scrutinee alts
        return $ assignTemporaryValue pos dest ty return_component stmt
   where
     pos = getSourcePos inf
@@ -1038,17 +1070,19 @@ flattenExpWriteValue inf return_mode dest
     
     returnValue val =
       case return_mode
-      of ValueReturn ->
-           let value = ValueS (mkValueReturnInfo pos) val
+      of ValueReturn ty ->
+           let value = ValueS (mkValueReturnInfo pos ty) val
            in return $ assignTemporaryValue pos dest ty Value value
-         ClosureReturn eff ->
-           let value = ValueS (mkClosureReturnInfo pos eff) val
+         ClosureReturn ty eff ->
+           let value = ValueS (mkClosureReturnInfo pos ty eff) val
            in return $ assignTemporaryValue pos dest ty FunRef value
          _ -> internalError "flattenExpWriteValue"
 
-    return_component = case return_mode
-                       of ValueReturn -> Value
-                          ClosureReturn _ -> FunRef
+    return_component =
+      case return_mode
+      of ValueReturn _ -> Value
+         ClosureReturn _ _ -> FunRef
+         VariableReturn _ _ -> internalError "flattenExpWriteValue"
 
 flattenExpValue :: FlatReturn -> TExp -> F (StmtContext, Value)
 flattenExpValue (VariableReturn _ _) _ = internalError "flattenExpValue"
@@ -1095,7 +1129,9 @@ flattenExpValue return_mode
      CaseE { expInfo = inf
            , expScrutinee = scrutinee
            , expAlternatives = alts} -> do
-       stmt <- flattenCase (flattenValueToStmt inf . flattenExpValue return_mode) inf scrutinee alts
+       let flatten_alt_body stmt =
+             flattenValueToStmt inf ty $ flattenExpValue return_mode stmt
+       stmt <- flattenCase flatten_alt_body inf return_mode ty scrutinee alts
        
        -- Assign the value to a temporary variable
        tmp_var <- newAnonymousVariable
@@ -1104,9 +1140,11 @@ flattenExpValue return_mode
   where
     pos = getSourcePos expression
 
-    return_component = case return_mode
-                       of ValueReturn -> Value
-                          ClosureReturn _ -> FunRef
+    return_component =
+      case return_mode
+      of ValueReturn _ -> Value
+         ClosureReturn _ _ -> FunRef
+         VariableReturn _ _ -> internalError "flattenExpValue"
     
     returnValue v = return (idContext, v)
 
@@ -1136,7 +1174,7 @@ flattenExpReference texp@(TypedSFExp (TypeAnn (fromWhnf -> ty) expression)) =
        tmp_var <- newAnonymousVariable
             
        -- Create a function call
-       stmt <- flattenCall inf (VariableReturn tmp_var ty) texp Nothing
+       stmt <- flattenCall inf (VariableReturn ty tmp_var) texp Nothing
 
        -- Bind the call's result to a locally allocated variable
        let context body =
@@ -1148,7 +1186,7 @@ flattenExpReference texp@(TypedSFExp (TypeAnn (fromWhnf -> ty) expression)) =
        tmp_var <- newAnonymousVariable
             
        -- Create a function call
-       stmt <- flattenCall inf (VariableReturn tmp_var ty) op (Just args)
+       stmt <- flattenCall inf (VariableReturn ty tmp_var) op (Just args)
 
        -- Bind the call's result to a locally allocated variable
        let context body =
@@ -1166,16 +1204,17 @@ flattenExpWriteReference return_var texp@(TypedSFExp (TypeAnn (fromWhnf -> ty) e
   of VarE {expInfo = inf, expVar = v} -> do
        -- Copy this variable to the destination
        pc <- getPassConv ty
-       let new_info = mkFlatInfo pos (VariableReturn return_var ty) (varEffect v)
+       let new_info = mkFlatInfo pos return_mode (varEffect v)
        return $ CopyS new_info v
      ConE {expCon = c} ->
        returnValue $ ConV c Value
      LitE {expLit = l} ->
        returnValue $ LitV l
+     FunE {} -> internalError "flattenExpWriteReference: unexpected function"
      TyAppE {expInfo = inf} ->
-       flattenCall inf (VariableReturn return_var ty) texp Nothing
+       flattenCall inf return_mode texp Nothing
      CallE {expInfo = inf, expOper = op, expArgs = args} ->
-       flattenCall inf (VariableReturn return_var ty) op (Just args)
+       flattenCall inf return_mode op (Just args)
      LetE { expInfo = inf
           , expBinder = binder
           , expValue = rhs
@@ -1186,9 +1225,11 @@ flattenExpWriteReference return_var texp@(TypedSFExp (TypeAnn (fromWhnf -> ty) e
      CaseE { expInfo = inf
            , expScrutinee = scrutinee
            , expAlternatives = alts} ->
-       flattenCase (flattenExpWriteReference return_var) inf scrutinee alts
+       flattenCase (flattenExpWriteReference return_var) inf return_mode ty scrutinee alts
   where
     pos = getSourcePos $ expInfo expression
+    
+    return_mode = VariableReturn ty return_var
     
     returnValue val =
       return $ CopyValueS (mkVariableReturnInfo pos return_var ty) val
@@ -1240,13 +1281,13 @@ flattenFun (TypedSFFun (TypeAnn _ function)) = do
     case mode
     of ByVal -> do
          -- Flatten the expression and return its result value
-         (ctx, val) <- flattenExpValue ValueReturn (funBody function)
+         (ctx, val) <- flattenExpValue (ValueReturn return_type) (funBody function)
          let return_value =
-               ValueS (mkValueReturnInfo body_pos) val
+               ValueS (mkValueReturnInfo body_pos return_type) val
          return $ ctx return_value
        ByRef ->
          case ret
-         of VariableReturn v _ ->
+         of VariableReturn _ v ->
               -- Flatten the expression,
               -- which writes the result as a side effect
               flattenExpWriteReference v (funBody function)
@@ -1254,9 +1295,9 @@ flattenFun (TypedSFFun (TypeAnn _ function)) = do
        ByClo -> do
          -- Flatten the expression and return its result value
          parameterized_effect <- functionTypeEffect return_type
-         (ctx, val) <- flattenExpValue (ClosureReturn parameterized_effect) (funBody function)
+         (ctx, val) <- flattenExpValue (ClosureReturn return_type parameterized_effect) (funBody function)
          let return_value =
-               ValueS (mkValueReturnInfo body_pos) val
+               ValueS (mkClosureReturnInfo body_pos return_type parameterized_effect) val
          return $ ctx return_value
 
   return $ FlatFun { ffunInfo = funInfo function
@@ -1298,17 +1339,1004 @@ flattenModule (Module defss exports) = do
   defss' <- flattenTopLevelDefGroups defss
   return defss'
 
-flatten :: RModule -> IO ()
+flatten :: RModule -> IO [Anf.ProcDefGroup Rec]
 flatten mod = do
   -- Get type information
   result1 <- typeCheckModule annotateTypes mod
 
   case result1 of
     Left errs -> fail "Type checking failed"
-    Right tc_mod -> do
-      result2 <- withTheVarIdentSupply $ \var_supply ->
-        runF var_supply $ flattenModule tc_mod
-      case result2 of
-        Left errs -> fail "Flattening failed"
-        Right defss -> do print $ vcat $ map (vcat . map pprFlatDef) defss 
-                          return ()
+    Right tc_mod ->
+      withTheVarIdentSupply $ \var_supply -> do
+        result2 <- runF var_supply $ flattenModule tc_mod
+        case result2 of
+          Left errs -> fail "Flattening failed"
+          Right defss -> do print $ vcat $ map (vcat . map pprFlatDef) defss 
+                            runToAnf var_supply $ anfModule defss
+
+-------------------------------------------------------------------------------
+
+-- | Pure variable information.
+data VarElaboration =
+    ValueVar { valueType :: !RType
+             }
+  | ReferenceVar { addressVar :: !Var
+                 , pointerVar :: !Var
+                 , objectType :: !RType
+                 }
+
+-- | State variable information.
+data VarStateElaboration =
+  VarStateElaboration { isDefinedVar :: {-# UNPACK #-} !Bool
+                        -- | The type of the object associated with this
+                        -- state variable.  If the type is @a@, then the
+                        -- state variable's type is @a \@ foo@ or
+                        -- @Undef a \@ foo@ for some address @foo@.
+                      , stateVar :: !Var
+                      }
+  deriving(Eq)
+
+data ToAnfEnv =
+  ToAnfEnv
+  { anfVariableMap :: Map.Map (Ident Var) VarElaboration
+  }
+
+data ToAnfState =
+  ToAnfState
+  { anfStateMap :: Map.Map (Ident Var) VarStateElaboration
+  }
+
+-- | Find the common parts of two state maps.
+-- The state maps must have the same key set.
+anfStateMapIntersection :: Map.Map (Ident Var) VarStateElaboration
+                        -> Map.Map (Ident Var) VarStateElaboration
+                        -> Map.Map (Ident Var) VarStateElaboration
+anfStateMapIntersection m1 m2
+  | Map.keysSet m1 /= Map.keysSet m2 =
+      internalError "anfStateMapIntersection: Different states"
+  | otherwise =
+      Map.mapMaybe id $ Map.intersectionWith compare_values m1 m2
+  where
+    compare_values e1 e2
+      | e1 == e2 = Just e1
+      | otherwise = Nothing
+
+-- | Find the intersection of all maps in the list and the
+-- unique parts of each input map.
+anfStateMapDifference :: [Map.Map (Ident Var) VarStateElaboration]
+                      -> ( Map.Map (Ident Var) VarStateElaboration
+                         , [Map.Map (Ident Var) VarStateElaboration]
+                         )
+anfStateMapDifference [] = (Map.empty, [])
+anfStateMapDifference ms =
+  let isxn = foldr1 anfStateMapIntersection ms
+      uniques = map (Map.\\ isxn) ms
+  in (isxn, uniques)
+
+-- | When converting to ANF, we keep track of the variables that are in scope:
+-- For each variable, keep track of its corresponding address, pointer, value,
+-- and/or state variables.
+-- Maintain a type environment of intuitionistic variables, but not linear
+-- variables.
+-- Keep track of all parameter-passing conventions for use in code generation.
+
+newtype ToAnf a = ToAnf (RWST ToAnfEnv () ToAnfState PureTC a) deriving(Monad)
+
+instance EvalMonad ToAnf where
+  liftEvaluation m = ToAnf $ RWST $ \r s -> do
+    x <- liftEvaluation m
+    return (x, s, mempty)
+
+instance PureTypeMonad ToAnf where
+  assumePure v t = liftPureToAnfT (assumePure v t)
+  formatEnvironment f =
+    ToAnf $ RWST $ \r s ->
+    formatEnvironment $ \doc ->
+    case f doc of ToAnf m -> runRWST m r s
+
+-- | Run several computations and combine their results.  All computations 
+-- start with the same initial state.  The final states must be reconciled 
+-- to produce a consistent final state.
+anfParallel :: (ToAnfState -> [ToAnfState] -> (ToAnfState, b))
+            -> [ToAnf a]
+            -> ToAnf ([a], b)
+anfParallel reconcile ms = ToAnf $ RWST $ \r s -> do
+  -- Run all steps with the same starting state
+  results <- forM ms $ \(ToAnf m) -> runRWST m r s
+  let (final_values, final_states, final_outputs) = unzip3 results
+
+  -- Reconcile results
+  let (s', log) = reconcile s final_states
+  return ((final_values, log), s', mconcat final_outputs)
+
+-- | Do not permit access to state variables in this computation
+hideState :: ToAnf a -> ToAnf a
+hideState (ToAnf m) = ToAnf $ RWST $ \r s -> do
+  let local_s = ToAnfState Map.empty
+  (x, s', w) <- runRWST m r local_s
+  unless (Map.null $ anfStateMap s') $
+    internalError "hideState: State escapes"
+  return (x, s, w)
+
+runToAnf :: Supply (Ident Var) -> ToAnf a -> IO a
+runToAnf var_supply (ToAnf m) = do
+  let env = ToAnfEnv Map.empty
+      st  = ToAnfState Map.empty
+  result <- runPureTCIO var_supply (runRWST m env st)
+  case result of
+    Left errs -> do fail "flattening failed"
+                    return undefined
+    Right (x, _, _) -> return x
+
+instance Supplies ToAnf (Ident Var) where
+  fresh = liftPureToAnf fresh
+  supplyToST f = liftPureToAnf (supplyToST f)
+
+liftPureToAnf :: PureTC a -> ToAnf a
+liftPureToAnf m = ToAnf $ lift m
+
+liftPureToAnfT :: (forall b. PureTC b -> PureTC b) -> ToAnf a -> ToAnf a
+liftPureToAnfT t (ToAnf m) = ToAnf $ RWST $ \r s -> t (runRWST m r s)
+
+-- | Strict variant of 'asks'.
+asksStrict f = RWST $ \r s ->
+  let value = f r
+  in value `seq` return (value, s, mempty)
+  
+-- | Strict variant of 'gets'.
+getsStrict f = RWST $ \r s ->
+  let value = f s
+  in value `seq` return (value, s, mempty)
+
+getAddrVariable, getPointerVariable, getValueVariable, getStateVariable
+  :: Var -> ToAnf Var
+
+getAddrVariable v = getAddrVariable' (varID v)
+
+getAddrVariable' v =
+  ToAnf $ asksStrict (lookup_addr_variable . anfVariableMap)
+  where
+    lookup_addr_variable env =
+      case Map.lookup v env
+      of Just (ReferenceVar {addressVar = v'}) -> v'
+         Just (ValueVar {}) -> internalError "getAddrVariable: Not a reference"
+         Nothing -> internalError "getAddrVariable: No information"
+
+getPointerVariable v =
+  ToAnf $ asksStrict (lookup_pointer_variable . anfVariableMap)
+  where
+    lookup_pointer_variable env =
+      case Map.lookup (varID v) env
+      of Just (ReferenceVar {pointerVar = v'}) -> v'
+         Just (ValueVar {}) -> internalError "getPointerVariable: Not a pointer"
+         Nothing -> internalError "getPointerVariable: No information"
+
+getValueVariable v =
+  ToAnf $ asksStrict (lookup_value_variable . anfVariableMap)
+  where
+    lookup_value_variable env =
+      case Map.lookup (varID v) env
+      of Just (ValueVar {}) -> v
+         Just (ReferenceVar {}) -> internalError "getValueVariable: Not a value"
+         Nothing -> internalError $ "getValueVariable: No information"
+
+getStateVariable v = ToAnf $ getsStrict (lookup_state_variable . anfStateMap)
+  where
+    lookup_state_variable env =
+      case Map.lookup (varID v) env
+      of Just (VarStateElaboration {stateVar = v'}) -> v'
+         Nothing -> internalError $
+                    "getStateVariable: No information for " ++ show v
+
+-- | For debugging; calls 'getStateVariable'
+getStateVariableX s v = getStateVariable v 
+  -- trace s $ getStateVariable v
+
+-- | Get the address, pointer, and state variables for a reference variable
+getWriteReferenceVariables v = do
+  a <- getAddrVariable v
+  p <- getPointerVariable v
+  s <- getStateVariableX "getWriteReferenceVariables" v
+  return (a, p, s)
+
+getReadReferenceVariables v = do
+  a <- getAddrVariable v
+  p <- getPointerVariable v
+  return (a, p)
+
+getPointerType :: Var -> ToAnf RType
+getPointerType v = do
+  addr <- getAddrVariable v
+  return $ Gluon.mkInternalConAppE (Anf.anfBuiltin Anf.the_Ptr)
+           [Gluon.mkInternalVarE addr]
+
+getEffectType :: Var -> ToAnf RType
+getEffectType v = getEffectType' (varID v)
+
+getEffectType' :: VarID -> ToAnf RType
+getEffectType' v = do
+  addr <- getAddrVariable' v
+  eff_type <- ToAnf $ asksStrict (lookup_object_type . anfVariableMap)
+  return $ Gluon.mkInternalConAppE (Gluon.builtin Gluon.the_AtE) [eff_type, Gluon.mkInternalVarE addr]
+  where
+    lookup_object_type env =
+      case Map.lookup v env
+           of Just (ReferenceVar {objectType = t}) -> t
+              Just (ValueVar {}) -> internalError "getEffectType: Not a reference"
+              Nothing -> internalError "getEffectType: No information"
+
+-- | Get the object type of the data referenced by a state variable.  The
+-- type does not include modifiers indicating whether the variable is defined.
+getObjectType :: Var -> ToAnf RType
+getObjectType v = ToAnf $ asksStrict (lookup_object_type . anfVariableMap)
+  where
+    lookup_object_type env =
+      case Map.lookup (varID v) env
+           of Just (ReferenceVar {objectType = t}) -> t
+              Just (ValueVar {}) -> internalError "getStateType: Not a reference"
+              Nothing -> internalError "getStateType: No information"
+
+getStateType :: Var -> ToAnf RType
+getStateType v = do
+  addr <- getAddrVariable v
+  obj_type <- getObjectType v
+  let at = Gluon.builtin Gluon.the_AtS
+  return $ Gluon.mkInternalConAppE at [obj_type, Gluon.mkInternalVarE addr]
+
+getUndefStateType :: Var -> ToAnf RType
+getUndefStateType v = do
+  addr <- getAddrVariable v
+  obj_type <- getObjectType v
+  let at = Gluon.builtin Gluon.the_AtS
+      undef = Anf.anfBuiltin Anf.the_Undef
+  return $ Gluon.mkInternalConAppE at [Gluon.mkInternalConAppE undef [obj_type], Gluon.mkInternalVarE addr]
+
+-- | Record that a state variable has been used and had its contents defined
+defineStateVariable :: Var -> ToAnf ()
+defineStateVariable v = ToAnf $ do
+  put =<< lift . mark_as_defined =<< get
+  where
+    -- Create a new variable and mark the state as defined
+    mark_as_defined s =
+      case Map.lookup (varID v) $ anfStateMap s
+      of Just elaboration@(VarStateElaboration {stateVar = sv}) -> do
+           sv' <- duplicateVar sv
+           let elaboration' = elaboration { isDefinedVar = True
+                                          , stateVar = sv'}
+           return $ s {anfStateMap = Map.insert (varID v) elaboration' $ anfStateMap s}
+         Nothing -> internalError $ "defineStateVariable: Not in scope: " ++ show v
+
+-- | Remove a state variable from the environment
+consumeStateVariable :: Var -> ToAnf ()
+consumeStateVariable v = ToAnf $ modify (delete v)
+  where
+    delete v s = s {anfStateMap = Map.delete (varID v) $ anfStateMap s}
+
+-- | Get the parameter-passing convention for this type.
+getAnfPassConv :: RType -> ToAnf Anf.RVal
+getAnfPassConv passed_type = do
+  passed_type' <- evalHead' passed_type 
+  case unpackRenamedWhnfAppE passed_type' of
+    Just (con, [])
+      | con `Gluon.isBuiltin` Gluon.the_Int ->
+          return $ Anf.mkConV pos $ Anf.anfBuiltin Anf.the_PassConv_int
+      | con `Gluon.isBuiltin` Gluon.the_Float ->
+          return $ Anf.mkConV pos $ Anf.anfBuiltin Anf.the_PassConv_float
+    Just (con, args) 
+      | Just size <- whichPyonTupleTypeCon con -> do
+          let pass_conv_con =
+                case size
+                of 2 -> Anf.anfBuiltin Anf.the_PassConv_PyonTuple2
+                   
+          -- Compute parameter-passing conventions for tuple fields
+          field_pass_convs <- mapM getAnfPassConv (map substFully args)
+          
+          -- Pass the tuple field types and parameter-passing
+          -- conventions to the tuple parameter-passing convention constructor
+          let params = map (Anf.mkExpV . substFully) args ++
+                       field_pass_convs
+          return $ Anf.mkAppV pos (Anf.mkConV pos pass_conv_con) params
+    Nothing ->
+      case fromWhnf passed_type'
+      of Gluon.VarE {Gluon.expVar = v} -> do
+           -- Look up in the environment
+           result <- liftPureToAnf $ findM matchType =<< getPureTypes
+           case result of
+             Just (dict_var, _) -> return $ Anf.mkInternalVarV dict_var
+             Nothing -> internalError "getAnfPassConv: Can't find dictionary"
+  where
+    pos = getSourcePos passed_type
+
+    passed_type_v = verbatim passed_type
+
+    -- Return True if ty == PassConv passed_type, False otherwise
+    matchType (_, ty) = do
+      ty' <- evalHead' ty
+      case unpackRenamedWhnfAppE ty' of
+        Just (con, [arg]) | con `isPyonBuiltin` the_PassConv ->
+          testEquality passed_type_v arg
+        _ -> return False
+
+withVariableElaboration :: Var -> VarElaboration -> ToAnf a -> ToAnf a
+withVariableElaboration v elaboration (ToAnf m) =
+  ToAnf $ local add_elaboration m
+  where
+    add_elaboration env =
+      env {anfVariableMap =
+              Map.insert (varID v) elaboration $ anfVariableMap env}
+
+-- | Define the variable as a value variable
+withValueVariable :: Var -> RType -> ToAnf a -> ToAnf a
+withValueVariable v ty k =
+  withVariableElaboration v (ValueVar {valueType = ty}) $
+  assumePure v ty $
+  k
+
+withClosureVariable :: Var -> RType -> ToAnf a -> ToAnf a
+withClosureVariable v ty k =
+  withVariableElaboration v (ValueVar {valueType = ty}) $
+  assumePure v ty $
+  k
+
+-- | The variable is pass-by-reference.  Define address and pointer variables
+-- for it.
+withReferenceVariable :: Var -> RType -> ToAnf a -> ToAnf a
+withReferenceVariable v ty k = do
+  -- Create new variables for the address and pointer
+  address_var_id <- fresh
+  pointer_var_id <- fresh
+  let address_var = Gluon.mkVar address_var_id (varName v) ObjectLevel
+      pointer_var = Gluon.mkVar pointer_var_id (varName v) ObjectLevel
+    
+  -- Put into environment
+  withVariableElaboration v (ReferenceVar address_var pointer_var ty) $
+    assumePure address_var addressType $
+    assumePure pointer_var (pointerType (Gluon.mkInternalVarE address_var)) $
+    k
+
+withStateVariable :: Var -> ToAnf a -> ToAnf a
+withStateVariable v (ToAnf m) = ToAnf $ do
+  -- Create a new state variable
+  new_v_id <- lift fresh
+  let new_v = Gluon.mkVar new_v_id (varName v) ObjectLevel
+
+  -- Run the computation with the modified state.
+  -- Ensure that the state has been consumed.
+  modify (add_local_state new_v)
+  x <- m
+  verify_local_state
+  return x
+  where
+    add_local_state new_v env =
+      env {anfStateMap = add_local_state2 new_v $ anfStateMap env}
+
+    -- Ensure that the state variable was consumed
+    verify_local_state = do
+      m <- gets anfStateMap
+      when (varID v `Map.member` m) $
+        internalError "withStateVariable: state escapes"
+      
+    add_local_state2 new_v m =
+      let elaboration = VarStateElaboration False new_v
+      in Map.insert (varID v) elaboration m
+
+-------------------------------------------------------------------------------
+
+anfValue :: SourcePos -> Value -> ToAnf Anf.RVal
+anfValue pos value =
+  case value
+  of VarV v component -> do
+       real_v <- get_var_component v component
+       return $ Anf.mkVarV pos real_v
+     ConV c Value -> return $ Anf.mkConV pos c
+     ConV c FunRef -> return $ Anf.mkConV pos c
+     ConV c _ -> internalError "anfValue"
+     LitV (IntL n) -> return $ Anf.mkLitV pos (Gluon.IntL n)
+     TypeV ty -> return $ Anf.mkExpV ty
+     FunV f -> do f' <- anfProc f
+                  return $ Anf.mkLamV f'
+     AppV op args -> do op' <- anfValue pos op
+                        args' <- mapM (anfValue pos) args 
+                        return $ Anf.mkAppV pos op' args'
+  where
+    get_var_component v component =
+      case component
+      of Value -> getValueVariable v
+         FunRef -> getValueVariable v
+         Address -> getAddrVariable v
+         Pointer -> getPointerVariable v
+         State -> getStateVariableX "anfValue" v
+
+-- | Get the ANF type of a function
+anfFunctionType :: FlatFun -> ToAnf RType
+anfFunctionType ffun =
+  add_parameters (ffunParams ffun) $
+  convert_return_type (ffunReturnType ffun)
+  where
+    pos = getSourcePos (ffunInfo ffun)
+    
+    add_parameters params k = foldr add_parameter k params
+    
+    -- Create a function type by adding the parameter's type to the type
+    -- produced by the continuation 'k'.
+    -- Only type and address parameters are used dependently; we can use
+    -- the given variables as dependent type/address variables without
+    -- renaming them.
+    add_parameter :: RBinder Component -> ToAnf RType -> ToAnf RType
+    add_parameter (Binder v ty component) k =
+      case component
+      of Value
+           | getLevel ty == KindLevel -> dependent
+           | otherwise -> non_dependent
+         FunRef -> dependent
+         Address -> dependent
+         Pointer -> non_dependent
+         State -> non_dependent
+      where
+        dependent = do
+          rng <- k
+          return (Gluon.mkFunE pos False v ty rng)
+        
+        non_dependent = do
+          rng <- k
+          return (Gluon.mkArrowE pos False ty rng)
+
+    convert_return_type ty = return ty
+
+anfProc :: FlatFun -> ToAnf (Anf.Proc Rec)
+anfProc ffun = hideState $
+  -- Convert function parameters and make a local parameter mapping
+  anfBindParameters return_variable (ffunParams ffun) $ \params -> do
+    -- Convert return and effect types
+    rt <- convert_return_type (ffunReturn ffun) (ffunReturnType ffun)
+    et <- anfEffectType (ffunEffect ffun)
+
+    -- Convert body
+    body <- anfStmt $ ffunBody ffun
+    
+    -- Consume the return state, if ther is any
+    case return_variable of
+      Just v -> consumeStateVariable v
+      Nothing -> return ()
+    
+    return $ Anf.Proc (ffunInfo ffun) params rt et body
+  where
+    -- Find the parameter variable that is being used for returning stuff
+    -- It's the only parameter with component 'State'
+    return_variable =
+      case find is_return_parameter $ ffunParams ffun
+      of Just (Binder v _ _) -> Just v
+         Nothing -> Nothing
+      where
+        is_return_parameter (Binder _ _ State) = True
+        is_return_parameter _ = False
+
+    -- Not implemented: Convert return type
+    convert_return_type _ rt = return rt
+
+anfCreateParameterMaps :: Maybe Var -> [RBinder Component] -> ToAnf a -> ToAnf a
+anfCreateParameterMaps return_var params k =
+  foldr ($) k $ map (anfCreateParameterMap return_var) params
+               
+-- | Create variable elaboration information for a parameter.
+-- Skip pointer and state parameters; handle them when the address 
+-- parameter is encountered.
+anfCreateParameterMap :: Maybe Var -> RBinder Component -> ToAnf a -> ToAnf a
+anfCreateParameterMap return_var (Binder v ty component) k =
+      case component
+      of Value -> withValueVariable v ty k
+         FunRef -> withValueVariable v ty k
+         Address 
+           | Just v == return_var ->
+               withReferenceVariable v ty $ withStateVariable v k
+           | otherwise ->
+               withReferenceVariable v ty k
+         Pointer -> k
+         State -> k
+
+anfBindParameters :: Maybe Var
+                  -> [RBinder Component]
+                  -> ([RBinder ()] -> ToAnf a)
+                  -> ToAnf a
+anfBindParameters return_var params k =
+  anfCreateParameterMaps return_var params $ do
+    k =<< mapM convert_parameter params
+  where
+    -- Convert a parameter binder to the ANF equivalent binder.
+    -- Use the 'component' field of the binder to select the 
+    -- actual variable and type.
+    convert_parameter (Binder v ty component) =
+      case component
+      of Value -> do
+           real_v <- getValueVariable v
+           return $ Binder real_v ty ()
+         FunRef -> do
+           real_v <- getValueVariable v
+           return $ Binder real_v ty ()
+         Address -> do
+           real_v <- getAddrVariable v
+           return $ Binder real_v addressType ()
+         Pointer -> do
+           real_v <- getPointerVariable v
+           real_ty <- getPointerType v
+           return $ Binder real_v real_ty ()
+         State -> do
+           -- State parameters start out undefined
+           real_v <- getStateVariableX "anfBindParameters" v
+           real_ty <- getUndefStateType v
+           return $ Binder real_v real_ty ()
+
+-- | Compute the effect type corresponding to this effect.    
+anfEffectType :: Effect -> ToAnf RType
+anfEffectType eff = do
+  types <- mapM getEffectType' $ Map.keys eff
+  return $ foldr
+    Gluon.Core.Builtins.Effect.sconj
+    Gluon.Core.Builtins.Effect.empty
+    types
+
+anfDef :: FlatDef -> ToAnf (Anf.ProcDef Rec)
+anfDef (FlatDef v f) = do
+  f' <- anfProc f 
+  return $ Anf.ProcDef v f'
+
+anfDefGroup :: [FlatDef] -> ToAnf a -> ToAnf (Anf.ProcDefGroup Rec, a)
+anfDefGroup dg m =
+  -- Add the definition group to the local environment
+  flip (foldr add_def_to_environment) dg $ do
+    dg' <- mapM anfDef dg
+    x <- m
+    return (dg', x)
+  where
+    add_def_to_environment (FlatDef v fun) k = do
+      -- Compute the new function type
+      ty <- anfFunctionType fun
+      
+      -- Put it in the environment
+      withClosureVariable v ty k
+
+-- | Generate ANF code for a statement.
+--
+-- FIXME: Extra state variable parameters and returns are inserted here,
+-- in the translation of 'ReadingS' and 'LocalS'.
+-- Do we really handle those properly?
+anfStmt :: Stmt -> ToAnf Anf.RStm
+anfStmt statement =
+  case statement
+  of -- These cases have a corresponding ANF expression
+     ValueS {fexpValue = val} -> do
+       val' <- anfValue pos val
+       return $ Anf.ReturnS anf_info val'
+     CallS {fexpOper = op, fexpArgs = args} -> do
+       op' <- anfValue pos op
+       args' <- mapM (anfValue pos) args
+       return $ Anf.CallS anf_info $ Anf.AppV anf_info op' args'
+     LetS {fexpBinder = Binder v ty _, fexpRhs = rhs, fexpBody = body} -> do
+       rhs' <- anfStmt rhs
+       body' <- withValueVariable v ty $ anfStmt body
+       return $ Anf.LetS anf_info (Binder v ty ()) rhs' body'
+     EvalS {fexpRhs = rhs, fexpBody = body} ->
+       case fexpReturn statement
+       of VariableReturn ty v -> do
+            state_v <- getStateVariableX "evalS" v
+            state_ty <- getStateType v
+            rhs' <- anfStmt rhs
+            body' <- anfStmt body
+            return $ Anf.LetS anf_info (Binder state_v state_ty ()) rhs' body'
+          _ -> internalError "anfStmt"
+     LetrecS {fexpDefs = defs, fexpBody = body} -> do
+       (defs', body') <- anfDefGroup defs $ anfStmt body
+       return $ Anf.LetrecS anf_info defs' body'
+     CaseValS {fexpScrutinee = val, fexpValAlts = alts} -> do
+       val' <- anfValue pos val
+       alts' <- mapM anfAlternative alts
+       return $ Anf.CaseS anf_info val' alts'
+       
+     -- These cases do not have a direct ANF translation, and instead must be
+     -- converted to function calls
+     CopyValueS {fexpValue = val} ->
+       case fexpReturn statement
+       of VariableReturn return_type dst ->
+            anfStoreValue pos return_type dst val
+          _ -> internalError "anfStmt"
+     CaseRefS { fexpScrutineeVar = var
+              , fexpScrutineeType = scr_ty
+              , fexpRefAlts = alts} -> do
+       anfCaseRef pos var scr_ty alts
+     ReadingS { fexpScrutineeVar = var
+              , fexpScrutineeType = ty
+              , fexpBody = body} -> do
+       anfReading pos ty (fexpReturn statement) var body
+     LocalS {fexpVar = var, fexpType = ty, fexpBody = body} -> do
+       anfLocal pos ty (fexpReturn statement) var body
+     CopyS {fexpSrc = src} ->
+       case fexpReturn statement
+       of VariableReturn return_type dst ->
+            anfCopyValue pos return_type dst src
+          _ -> internalError "anfStmt"
+  where
+    pos = getSourcePos anf_info
+    anf_info = fexpInfoInfo $ fexpInfo statement
+
+anfReading :: SourcePos -> RType -> FlatReturn -> Var -> Stmt
+           -> ToAnf Anf.RStm 
+anfReading pos ty return_info var body = do
+  -- Get the type of the variable to be read
+  -- (should be a defined state variable)
+  obj_type <- getObjectType var
+  addr_var <- getAddrVariable var
+  
+  -- Turn the body into a lambda function
+  body_fn <- anfStmtToProc no_extra_parameters body
+
+  -- Create the parameter to the body function: either a state variable, or
+  -- a unit value
+  body_param <-
+    case fexpReturn body
+    of VariableReturn _ v -> liftM (Anf.mkVarV pos) $ getStateVariableX "anfReading" v 
+       _ -> return $ Anf.mkExpV unit_value
+
+  -- Get the body function's effect and return type.  Mask out the effect
+  -- of reading the parameter variable.
+  let effect_type = mask_effect_on addr_var $ Anf.procEffectType body_fn
+      return_type = Anf.procReturnType body_fn
+
+  -- Create a "reading" expression
+  let reading = Anf.mkConV pos $ Anf.anfBuiltin Anf.the_reading 
+      stmt = Anf.mkCallAppS pos reading [ Anf.mkExpV effect_type
+                                        , Anf.mkExpV return_type
+                                        , Anf.mkExpV obj_type
+                                        , Anf.mkVarV pos addr_var
+                                        , Anf.mkLamV body_fn
+                                        , body_param
+                                        ]
+             
+  -- This statement writes to the state variable
+  case fexpReturn body of
+    VariableReturn _ v -> defineStateVariable v
+    _ -> return ()
+
+  return stmt
+  where
+    mask_effect_on addr eff = undefined
+
+    -- We don't need any extra parameters in the body function
+    no_extra_parameters :: forall a. ([RBinder ()] -> Maybe RType -> ToAnf a)
+                        -> ToAnf a
+    no_extra_parameters f = f [] Nothing
+
+    unit_value = Gluon.TupE (Gluon.mkSynInfo pos ObjectLevel) Gluon.Nil
+
+-- | Create and use a local variable
+-- FIXME: This function isn't complete
+anfLocal :: SourcePos -> RType -> FlatReturn -> Var -> Stmt
+         -> ToAnf Anf.RStm 
+anfLocal pos ty return_info var body = do
+  -- The given type is the type of the local object
+  let obj_type = ty
+
+  -- Turn the body into a lambda function
+  body_fn <- anfStmtToProc add_local_object body
+    
+  -- Get the body function's effect and return type
+  let effect_type = Anf.procEffectType body_fn
+      return_type = Anf.procReturnType body_fn
+
+  -- Create the new statement
+  let local = Anf.mkConV pos $ Anf.anfBuiltin Anf.the_local
+      stmt = Anf.mkCallAppS pos local [ Anf.mkExpV effect_type
+                                      , Anf.mkExpV return_type
+                                      , Anf.mkExpV obj_type
+                                      , Anf.mkLamV body_fn
+                                      ]
+    
+  return stmt
+  where
+    -- Pass the local object as an extra parameter in the body function.
+    -- Also return it.
+    add_local_object :: forall a. ([RBinder ()] -> Maybe RType -> ToAnf a)
+                     -> ToAnf a
+    add_local_object f =
+      -- The local object is defined here
+      withReferenceVariable var ty $ withStateVariable var $ do
+        -- Create parameters for the local variable
+        (local_addr, local_ptr, local_st) <- getWriteReferenceVariables var
+        input_st_type <- getUndefStateType var
+        let params = [ Binder local_addr addressType ()
+                     , Binder local_ptr (pointerType $ Gluon.mkInternalVarE local_addr) ()
+                     , Binder local_st input_st_type ()
+                     ]
+
+        -- Create the return type
+        output_st_type <- getStateType var
+        let return_type = Just output_st_type
+        
+        x <- f params return_type
+
+        -- Consume the local state (it's returned)
+        consumeStateVariable var
+
+        return x
+
+-- | Help transform a statement to a procedure.  This function masks linear
+-- variables out of the evaluation context.  The linear variable modified by 
+-- the statement (if any) is replaced in the context.
+anfGetStmtReturnParameter :: Stmt
+                          -> (Maybe (Var, RBinder (), RType) ->
+                              ToAnf (Anf.Proc Rec))
+                          -> ToAnf (Anf.Proc Rec)
+anfGetStmtReturnParameter stm k = hideState $
+  -- No state variables are accessible.  New state variables are created
+  -- for the state that is explicitly passed to the function.
+  case linear_variable
+  of Nothing -> k Nothing
+     Just v -> withStateVariable v $ do
+       -- Create binder and return type of this variable
+       param_type <- getUndefStateType v
+       input_state_var <- getStateVariableX "anfGetStmtReturnParameter" v
+       let binder = Binder input_state_var param_type ()
+       
+       return_type <- getStateType v
+
+       -- Run a computation too create a procedure
+       x <- k (Just (v, binder, return_type))
+       
+       -- The local variable is no longer in use
+       consumeStateVariable v
+       return x
+  where
+    -- Check the return value to determine what linear variables are used
+    -- by this statement
+    linear_variable =
+      case fexpReturn stm
+      of VariableReturn _ v -> Just v
+         ValueReturn _ -> Nothing
+         ClosureReturn _ _ -> Nothing
+
+-- | Convert an ANF statement to a procedure.
+--
+-- The procedure takes either the unit value or a state object as a 
+-- parameter.  It returns either a return value or a state object.  Pure
+-- variable inputs are referenced directly.
+anfStmtToProc :: (forall a. ([RBinder ()] -> Maybe RType -> ToAnf a) -> ToAnf a)
+              -> Stmt
+              -> ToAnf (Anf.Proc Rec)
+anfStmtToProc initialize_params stm =
+  -- Set up the context for a new procedure; set up the return state
+  anfGetStmtReturnParameter stm $ \return_state ->
+  -- Set up any other context we need
+  initialize_params $ \ext_params ext_return_type ->
+  -- Create the procedure
+  make_proc return_state ext_params ext_return_type
+  where
+    -- Create a procedure that returns by value
+    make_proc Nothing ext_params ext_return_type = do
+      -- Create a dummy parameter variable
+      v_id <- fresh
+      let param_var = Gluon.mkAnonymousVariable v_id ObjectLevel
+          dummy_param = Binder param_var unit_type ()
+
+      -- Get effect type
+      effect_type <- anfEffectType $ fexpEffect stm
+      
+      -- Return the unit type.  If a return type is given, return it instead
+      let return_type = case ext_return_type
+                        of Nothing -> unit_type
+                           Just ty -> ty
+      
+      -- Create body
+      body <- anfStmt stm
+      
+      -- Return the new procedure
+      return $! Anf.Proc { Anf.procInfo = Gluon.mkSynInfo pos ObjectLevel
+                         , Anf.procParams = ext_params ++ [dummy_param]
+                         , Anf.procReturnType = return_type
+                         , Anf.procEffectType = effect_type
+                         , Anf.procBody = body
+                         }
+
+    -- Create a procedure that returns by reference 
+    make_proc (Just (_, param, rt)) ext_params ext_return_type = do
+      -- Get effect type
+      effect_type <- anfEffectType $ fexpEffect stm
+      
+      -- Return the state.  If other return types are given, return them also
+      let return_type = case ext_return_type
+                        of Nothing -> rt
+                           Just ty -> pair_type ty rt
+      -- Create body
+      body <- anfStmt stm
+  
+      -- Return the new procedure
+      return $! Anf.Proc { Anf.procInfo = Gluon.mkSynInfo pos ObjectLevel
+                         , Anf.procParams = ext_params ++ [param]
+                         , Anf.procReturnType = return_type
+                         , Anf.procEffectType = effect_type
+                         , Anf.procBody = body
+                         }
+
+    pos = fexpSourcePos stm
+    
+    unit_type = Gluon.TupTyE (Gluon.mkSynInfo pos TypeLevel) Gluon.Unit
+    pair_type t1 t2 =
+      Gluon.TupTyE (Gluon.mkSynInfo pos TypeLevel) $
+      Binder' Nothing t1 () Gluon.:*: Binder' Nothing t2 () Gluon.:*: Gluon.Unit
+
+anfAlternative :: FlatValAlt -> ToAnf (Anf.Alt Rec)
+anfAlternative (FlatValAlt con ty_args params body) = do
+  anfBindParameters Nothing params $ \params' -> do
+    body' <- anfStmt body
+    return $ Anf.Alt con params' body'
+
+-- | Convert a pass-by-reference case statement to ANF.
+-- It is converted to a call to an elimination function.
+anfCaseRef :: SourcePos -> Var -> RType -> [FlatRefAlt] -> ToAnf Anf.RStm
+anfCaseRef pos scrutinee_var scrutinee_type alts = do
+  -- Process all case alternatives using the same starting state.
+  -- They should not change the state.
+  (alternatives, _) <-
+    let keep_state_consistent initial_state ss =
+          -- All states must match
+          case anfStateMapDifference $ map anfStateMap ss
+          of (common, uniques)
+               | all Map.null uniques -> (ToAnfState common, ())
+               | otherwise -> internalError "anfCaseRef: Inconsistent state"
+    in anfParallel keep_state_consistent $ map (anfRefAlternative pos) alts
+
+  -- Dispatch based on the data type that's being inspected
+  scrutinee_type' <- liftPureToAnf $ evalHead' scrutinee_type
+  return $! case Gluon.unpackRenamedWhnfAppE scrutinee_type'
+            of Just (con, args)
+                 | con `isPyonBuiltin` the_bool ->
+                   build_bool_case args alternatives
+                 | con `isPyonBuiltin` the_PassConv ->
+                   build_PassConv_case args alternatives
+                 | Just tuple_size <- whichPyonTupleTypeCon con ->
+                   build_tuple_case tuple_size args alternatives
+                 | otherwise -> unrecognized_constructor con
+               _ -> internalError $ "anfCaseRef: Unrecognized data type"
+  where
+    -- Get the return type from one of the alternatives
+    return_type = refAltReturnType $ head alts
+
+    unrecognized_constructor con =
+      let name = showLabel (Gluon.conName con)
+      in internalError $ 
+         "anfCaseRef: Unrecognized data type with constructor " ++ name
+
+    lookupCon con_selector alternatives =
+      case lookup (pyonBuiltin con_selector) alternatives
+      of Just x -> x
+         Nothing -> internalError "anfCaseRef: Missing case alternative"
+
+    build_bool_case args alternatives =
+      let eliminator = Anf.mkInternalConV $ Anf.anfBuiltin Anf.the_elim_bool
+          true_case = lookupCon the_True alternatives
+          false_case = lookupCon the_False alternatives
+      in Anf.mkCallAppS pos eliminator [ Anf.mkExpV return_type
+                                       , Anf.mkLamV true_case
+                                       , Anf.mkLamV false_case
+                                       ]
+    
+    build_PassConv_case args alternatives =
+      internalError "build_PassConv_case: not implemented"
+
+    build_tuple_case size args alternatives =
+      let eliminator =
+            case size
+            of 2 -> Anf.mkInternalConV $ Anf.anfBuiltin Anf.the_elim_PyonTuple2
+          
+          -- There is only one pattern to match against
+          body = lookupCon (const $ getPyonTupleCon' size) alternatives
+          
+          -- Pass all type parameters to the eliminator
+          type_args = map substFully args
+          
+          elim_args = map Anf.mkExpV (return_type : type_args) ++ [Anf.mkLamV body]
+      in Anf.mkCallAppS pos eliminator elim_args
+
+-- | Convert a by-reference alternative to a function.  The function arguments
+-- are the parameters to the alternative.
+anfRefAlternative :: SourcePos -> FlatRefAlt -> ToAnf (Con, Anf.Proc Rec)
+anfRefAlternative pos (FlatRefAlt con _ params eff ret ret_ty body) = do
+  proc <- anfStmtToProc alternative_parameters body
+  return (con, proc)
+  where
+    return_value_type =
+      case ret
+      of ValueReturn ty -> Just ty
+         ClosureReturn ty _ -> Just ty
+         VariableReturn _ _ -> Nothing
+
+    alternative_parameters k =
+      -- Make each object field be a function parameter.
+      anfBindParameters Nothing params $ \anf_params ->
+        -- If returning by value, then indicate so
+        k anf_params return_value_type
+  {-do
+  let function = FlatFun { ffunInfo = Gluon.mkSynInfo pos ObjectLevel
+                         , ffunParams = params
+                         , ffunReturn = ret
+                         , ffunEffect = eff
+                         , ffunReturnType = ret_ty
+                         , ffunBody = body
+                         }
+  proc <- anfProc function
+  return (con, proc) -}
+
+anfStoreValue :: SourcePos -> RType -> Var -> Value -> ToAnf Anf.RStm
+anfStoreValue pos ty dst val = do
+  -- Storing a value will update the destination variable
+  (dst_addr, dst_ptr, dst_st) <- getWriteReferenceVariables dst
+  
+  -- Generate a function call for the store
+  stm <- create_store_statement dst_addr dst_ptr dst_st
+  
+  -- The output is now defined
+  defineStateVariable dst
+  
+  return stm
+  where
+    create_store_statement dst_addr dst_ptr dst_st =
+      case ty
+      of Gluon.ConE {Gluon.expCon = c}
+           | c `Gluon.isBuiltin` Gluon.the_Int ->
+               case val
+               of LitV (IntL n) ->
+                    let literal = Gluon.mkLitE pos (Gluon.IntL n)
+                        oper = Anf.anfBuiltin Anf.the_store_int
+                    in store_literal oper literal
+           | c `Gluon.isBuiltin` Gluon.the_Float ->
+               case val
+               of LitV (FloatL d) ->
+                    let literal = Gluon.mkLitE pos (Gluon.FloatL d)
+                        oper = Anf.anfBuiltin Anf.the_store_float
+                    in store_literal oper literal
+           | c `isPyonBuiltin` the_bool ->
+               case val
+               of LitV (BoolL b) ->
+                    let literal =
+                          Gluon.mkConE pos $ if b
+                                             then pyonBuiltin the_True
+                                             else pyonBuiltin the_False
+                        oper = Anf.anfBuiltin Anf.the_store_bool
+                    in store_literal oper literal
+           | c `isPyonBuiltin` the_NoneType ->
+                 case val
+                 of LitV NoneL ->
+                      let literal =
+                            Gluon.mkConE pos $ pyonBuiltin the_None
+                          oper = Anf.anfBuiltin Anf.the_store_NoneType
+                      in store_literal oper literal
+         _ -> internalError "Cannot store literal value"
+        where
+          -- Use function 'oper' to store literal value 'lit'
+          store_literal oper lit =
+            let oper_anf = Anf.mkConV pos oper
+                args = [ Anf.mkVarV pos dst_addr
+                       , Anf.mkVarV pos dst_ptr
+                       , Anf.mkExpV lit
+                       , Anf.mkVarV pos dst_st]
+            in return $ Anf.mkCallAppS pos oper_anf args
+
+anfCopyValue :: SourcePos -> RType -> Var -> Var -> ToAnf Anf.RStm
+anfCopyValue pos ty dst src = do
+  -- Look up all parameters
+  pc <- getAnfPassConv ty
+  (src_addr, src_ptr) <- getReadReferenceVariables src
+  (dst_addr, dst_ptr, dst_st) <- getWriteReferenceVariables dst
+  defineStateVariable dst
+
+  let con  = Anf.mkConV pos $ Anf.anfBuiltin Anf.the_copy
+      args = [Anf.mkExpV ty, pc,
+              Anf.mkVarV pos src_addr, Anf.mkVarV pos dst_addr,
+              Anf.mkVarV pos src_ptr, Anf.mkVarV pos dst_ptr,
+              Anf.mkVarV pos dst_st]
+  return $ Anf.mkCallAppS pos con args
+
+anfModule :: [[FlatDef]] -> ToAnf [Anf.ProcDefGroup Rec]
+anfModule defss = top_level_group defss
+  where
+    top_level_group (defs:defss) =
+      liftM (uncurry (:)) $ anfDefGroup defs $ top_level_group defss
+    top_level_group [] = return []

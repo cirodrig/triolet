@@ -1,0 +1,118 @@
+{- ANF builtin constructors and functions.
+-}
+
+-- Friendly notation for state expressions
+
+operator 50 @ = AtS;
+operator 50 :@: = AtE;
+
+operator right 45 ** = SconjS;
+operator right 45 :**: = SconjE;
+
+operator 5 | = reversed_WhereS;
+operator 5 :|: = reversed_WhereE;
+
+let reversed_WhereS (a : State) (p : Prop) -> State = WhereS p a;
+let reversed_WhereE (a : Effect) (p : Prop) -> Effect = WhereE p a;
+
+constant PassConv : Pure -> Pure;
+
+constant PassConv_int : PassConv Int;
+constant PassConv_float : PassConv Float;
+constant PassConv_PyonTuple2 :
+    (a : Pure) -> (b : Pure)
+ -> PassConv a -> PassConv b
+ -> PassConv (PyonTuple2 a b);
+
+constant Action : Effect -> Pure -> Pure;
+
+-- Pointer type
+constant Ptr : Addr -> Pure;
+
+-- Undefined object state
+constant Undef : Pure -> Pure;
+
+-- | Copy data from source to destination
+constant copy :
+    (a : Pure)
+ -> PassConv a
+ -> (ia : Addr)			-- Source address
+ -> (oa : Addr)			-- Destination address
+ -> Ptr ia			-- Source pointer
+ -> Ptr oa			-- Destination pointer
+ -> Undef a @ ia		-- Destination state
+ -> Action (a :@: ia) (a @ oa);
+
+constant reading :
+    (eff : Effect)		-- Effect type
+ -> (rt : Pure)			-- Return type
+ -> (a : Pure)			-- Readable object type
+ -> (l : Addr)			-- Object address
+ -> Action (eff :**: a :@: l) rt
+ -> a @ l			-- State to be read
+ -> Action eff (| a @ l, rt |); -- Return the state and return value
+
+constant local :
+    (eff : Effect)		-- Effect type
+ -> (rt : Pure)			-- Return type
+ -> (a : Pure)			-- Writable object type
+ -> PassConv a			-- Parameter passing information
+ -> ((l : Addr) -> Ptr l -> Undef a @ l -> Action eff (| a @ l, rt |))
+ -> Action eff rt;
+
+constant map :
+    (eff : Effect)
+ -> (a : Pure)
+ -> (b : Pure)
+ -> (t : Pure -> Pure)
+ -> (ita : Addr)
+ -> (ota : Addr)
+ -> Ptr ita
+ -> Ptr ota
+ -> ((ia : Addr) -> (oa : Addr) -> Ptr ia -> Ptr oa -> Undef b @ oa ->
+     Action (eff :**: a :@: ia) (b @ oa))
+ -> Undef (t b) @ ota
+ -> Action eff (t b @ ota);
+
+constant store_int :
+    (a : Addr)
+ -> Ptr a
+ -> Int
+ -> Undef Int @ a
+ -> Action EmpE (Int @ a);
+
+constant store_float :
+    (a : Addr)
+ -> Ptr a
+ -> Float
+ -> Undef Float @ a
+ -> Action EmpE (Float @ a);
+
+constant store_bool :
+    (a : Addr)
+ -> Ptr a
+ -> bool
+ -> Undef bool @ a
+ -> Action EmpE (bool @ a);
+
+constant store_NoneType :
+    (a : Addr)
+ -> Ptr a
+ -> NoneType
+ -> Undef NoneType @ a
+ -> Action EmpE (NoneType @ a);
+
+constant elim_bool :
+    (eff : Effect)
+ -> (rt : Pure)
+ -> Action eff rt
+ -> Action eff rt
+ -> Action eff rt;
+
+constant elim_PyonTuple2 :
+    (eff : Effect)
+ -> (rt : Pure)
+ -> (a : Pure)
+ -> (b : Pure)
+ -> ((la : Addr) -> (lb : Addr) -> Ptr la -> Ptr lb -> Action (eff :**: a :@: la :**: b :@: lb) rt)
+ -> Action eff rt;

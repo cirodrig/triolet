@@ -59,6 +59,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/Syntax.hs \
 	Pyon/SystemF/Typecheck.hs \
 	Pyon/SystemF/Flatten.hs \
+	Pyon/Anf/Syntax.hs \
 	Pyon/NewCore/Optimizations.hs \
 	Pyon/NewCore/Print.hs \
 	Pyon/NewCore/Rename.hs \
@@ -68,7 +69,9 @@ PYON_TH_HS_SRCS=Pyon/SystemF/Builtins.hs \
 	Pyon/Exports/Untyped.hs \
 	Pyon/Untyped/Builtins.hs \
 	Pyon/Untyped/BuiltinsTH.hs \
-	Pyon/Untyped/InitializeBuiltins.hs
+	Pyon/Untyped/InitializeBuiltins.hs \
+	Pyon/Anf/BuiltinsTH.hs \
+	Pyon/Anf/Builtins.hs
 PYON_HS_BOOT_SRCS=Pyon/Untyped/Syntax.hs-boot
 
 PYON_HS_GENERATED_SRCS=Paths_pyon.hs \

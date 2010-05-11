@@ -49,7 +49,8 @@ module Pyon.SystemF.Builtins
         the_fun_undefined,
         getPyonTupleType, getPyonTupleType',
         getPyonTupleCon, getPyonTupleCon',
-        getPyonTuplePassConv, getPyonTuplePassConv'
+        getPyonTuplePassConv, getPyonTuplePassConv',
+        whichPyonTupleCon, whichPyonTupleTypeCon
        )
 where
 
@@ -148,6 +149,28 @@ getPyonTuplePassConv' size =
   case getPyonTuplePassConv size
   of Just t -> t
      Nothing -> internalError "Unsupported tuple size"
+
+-- | If the parameter is a tuple constructor, return the tuple size.
+-- Otherwise return Nothing.
+whichPyonTupleCon :: Con -> Maybe Int
+whichPyonTupleCon c = unsafePerformIO $ do
+  -- Ensure that we've already initialized these
+  bi_is_empty <- isEmptyMVar the_PyonBuiltins
+  when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+  
+  bi <- readMVar the_PyonBuiltins
+  return $ findIndex (c ==) $ the_tupleConstructors bi
+  
+-- | If the parameter is a tuple type constructor, return the tuple size.
+-- Otherwise return Nothing.
+whichPyonTupleTypeCon :: Con -> Maybe Int
+whichPyonTupleTypeCon c = unsafePerformIO $ do
+  -- Ensure that we've already initialized these
+  bi_is_empty <- isEmptyMVar the_PyonBuiltins
+  when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+  
+  bi <- readMVar the_PyonBuiltins
+  return $ findIndex (c ==) $ the_tuples bi
 
 findConByName mod name =
   let label = pgmLabel pyonBuiltinModuleName name

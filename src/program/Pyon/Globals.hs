@@ -13,6 +13,7 @@ import Gluon.Core.Module
 import Gluon.Parser.Driver
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.SystemF.Builtins
+import Pyon.Anf.Builtins
 -- import qualified Pyon.SystemF.SpclBuiltins
 
 -- Not used, but included for debugging to make sure it's compiled
@@ -68,7 +69,8 @@ loadBuiltins = do
       result <- Gluon.Parser.Driver.loadBuiltins varIDs conIDs
       case result of
         Just bi -> do putMVar the_builtinModule bi
-                      _ <- loadPyonBuiltins varIDs conIDs bi
+                      Just pbi <- loadPyonBuiltins varIDs conIDs bi
+                      _ <- loadAnfBuiltins varIDs conIDs bi pbi
                       -- _ <- Pyon.SystemF.SpclBuiltins.loadPyonBuiltins varIDs conIDs bi
                       return ()
         Nothing -> fail "Could not load builtins"
