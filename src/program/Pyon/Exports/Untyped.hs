@@ -26,7 +26,7 @@ import qualified Pyon.SystemF.Print as SystemF
 import qualified Pyon.SystemF.ElimPatternMatching as SystemF
 import qualified Pyon.SystemF.PartialEval as SystemF
 import qualified Pyon.SystemF.DeadCode as SystemF
-import Pyon.SystemF.Flatten as SystemF
+import Pyon.SystemF.Flatten.ToAnf as SystemF
 import qualified Pyon.Anf.Print as Anf
 
 -- Imported for compilation dependences only

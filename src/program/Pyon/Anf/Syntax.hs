@@ -21,6 +21,7 @@ type Stm s = StmOf Rec s
 
 type RAlt = Alt Rec
 type RProc = Proc Rec
+type RModule = Module Rec
 
 -- | Values.  Evaluating a value has no side effects.
 data instance ValOf Rec s =
