@@ -1,5 +1,5 @@
 
-{-# LANGUAGE TypeFamilies, DeriveDataTypeable #-}
+{-# LANGUAGE TypeFamilies, DeriveDataTypeable, FlexibleInstances #-}
 module Pyon.Anf.Syntax where
 
 import Data.Typeable
@@ -40,6 +40,10 @@ data instance ValOf Rec s =
     , valProc :: Proc s
     }
 
+instance HasSourcePos (ValOf Rec s) where
+  getSourcePos x = getSourcePos (valInfo x)
+  setSourcePos x pos = x {valInfo = setSourcePos (valInfo x) pos}
+
 data instance StmOf Rec s =
     -- | Yield a value
     ReturnS
@@ -70,6 +74,10 @@ data instance StmOf Rec s =
     , stmScrutinee :: RecVal s
     , stmAlts :: [Alt s]
     }
+
+instance HasSourcePos (StmOf Rec s) where
+  getSourcePos s = getSourcePos (stmInfo s)
+  setSourcePos s pos = s {stmInfo = setSourcePos (stmInfo s) pos}
 
 data Proc s =
   Proc
@@ -129,6 +137,11 @@ mkAppV :: SourcePos -> RVal -> [RVal] -> RVal
 mkAppV pos oper args =
   let info = mkSynInfo pos ObjectLevel
   in AppV info oper args
+
+mkReturnS :: RVal -> RStm
+mkReturnS val =
+  let info = mkSynInfo (getSourcePos val) ObjectLevel
+  in ReturnS info val
 
 mkCallAppS :: SourcePos -> RVal -> [RVal] -> RStm
 mkCallAppS pos oper args =

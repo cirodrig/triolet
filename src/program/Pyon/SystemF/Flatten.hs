@@ -54,6 +54,10 @@ withMany f xs k = go xs k
 type TExp = SFRecExp (Typed Rec)
 type TType = RecType (Typed Rec)
 
+-- | The unit type
+unitType :: RType
+unitType = Gluon.TupTyE (Gluon.mkSynInfo noSourcePos TypeLevel) Gluon.Unit
+
 -- | The type of an address
 addressType :: RType
 addressType = Gluon.mkInternalConE $ Gluon.builtin Gluon.the_Addr
@@ -1967,13 +1971,14 @@ anfReading pos ty return_info var body = do
   addr_var <- getAddrVariable var
   
   -- Turn the body into a lambda function
-  body_fn <- anfStmtToProc no_extra_parameters body
+  (body_return_spec, body_fn) <- anfStmtToProc no_extra_parameters body
 
   -- Create the parameter to the body function: either a state variable, or
   -- a unit value
   body_param <-
     case fexpReturn body
-    of VariableReturn _ v -> liftM (Anf.mkVarV pos) $ getStateVariableX "anfReading" v 
+    of VariableReturn _ v ->
+         liftM (Anf.mkVarV pos) $ getStateVariableX "anfReading" v 
        _ -> return $ Anf.mkExpV unit_value
 
   -- Get the body function's effect and return type.  Mask out the effect
@@ -2037,14 +2042,14 @@ anfReading pos ty return_info var body = do
          _ -> internalError "anfReading: Unexpected effect"
 
     -- We don't need any extra parameters in the body function
-    no_extra_parameters :: forall a. ([RBinder ()] -> Maybe RType -> ToAnf a)
+    no_extra_parameters :: forall a. 
+                           ([RBinder ()] -> StmtReturn -> ToAnf a)
                         -> ToAnf a
-    no_extra_parameters f = f [] Nothing
+    no_extra_parameters = anfGetStmtReturnParameter body
 
     unit_value = Gluon.TupE (Gluon.mkSynInfo pos ObjectLevel) Gluon.Nil
 
 -- | Create and use a local variable
--- FIXME: This function isn't complete
 anfLocal :: SourcePos -> RType -> FlatReturn -> Var -> Stmt
          -> ToAnf Anf.RStm 
 anfLocal pos ty return_info var body = do
@@ -2052,11 +2057,17 @@ anfLocal pos ty return_info var body = do
   let obj_type = ty
 
   -- Turn the body into a lambda function
-  body_fn <- anfStmtToProc add_local_object body
-    
-  -- Get the body function's effect and return type
+  (body_return_spec, body_fn) <- anfStmtToProc add_local_object body
+
+  -- Get the body function's effect type
   let effect_type = Anf.procEffectType body_fn
-      return_type = Anf.procReturnType body_fn
+
+  -- The body's return type is a tuple containing the local state variable 
+  -- and other things.  Remove the local state variable.
+  let return_type =
+        case Anf.procReturnType body_fn
+        of rt@(Gluon.TupTyE {Gluon.expTyFields = _ Gluon.:*: fs}) ->
+             rt {Gluon.expTyFields = fs}
 
   -- Create the new statement
   let local = Anf.mkConV pos $ Anf.anfBuiltin Anf.the_local
@@ -2070,10 +2081,13 @@ anfLocal pos ty return_info var body = do
   where
     -- Pass the local object as an extra parameter in the body function.
     -- Also return it.
-    add_local_object :: forall a. ([RBinder ()] -> Maybe RType -> ToAnf a)
+    add_local_object :: forall a. ([RBinder ()] -> StmtReturn -> ToAnf a)
                      -> ToAnf a
     add_local_object f =
-      -- The local object is defined here
+      -- Set up return value
+      anfGetStmtReturnParameter body $ \ret_params ret_spec ->
+      
+      -- Set up the local object
       withReferenceVariable var ty $ withStateVariable var $ do
         -- Create parameters for the local variable
         (local_addr, local_ptr, local_st) <- getWriteReferenceVariables var
@@ -2083,30 +2097,31 @@ anfLocal pos ty return_info var body = do
                      , Binder local_st input_st_type ()
                      ]
 
-        -- Create the return type
+        -- Create the return specification
         output_st_type <- getStateType var
-        let return_type = Just output_st_type
+        let ret_spec' = StmtTupleReturn [ret_spec
+                                        , StmtStateReturn output_st_type var]
         
-        x <- f params return_type
-
-        -- Consume the local state (it's returned)
-        consumeStateVariable var
-
-        return x
+        -- Run the main computation
+        f (params ++ ret_params) ret_spec'
 
 -- | Help transform a statement to a procedure.  This function masks linear
 -- variables out of the evaluation context.  The linear variable modified by 
 -- the statement (if any) is replaced in the context.
 anfGetStmtReturnParameter :: Stmt
-                          -> (Maybe (Var, RBinder (), RType) ->
-                              ToAnf (Anf.Proc Rec))
-                          -> ToAnf (Anf.Proc Rec)
-anfGetStmtReturnParameter stm k = hideState $
-  -- No state variables are accessible.  New state variables are created
-  -- for the state that is explicitly passed to the function.
-  case linear_variable
-  of Nothing -> k Nothing
-     Just v -> withStateVariable v $ do
+                          -> ([RBinder ()] -> StmtReturn -> ToAnf a)
+                          -> ToAnf a
+anfGetStmtReturnParameter stm k =
+  case fexpReturn stm
+  of ValueReturn ty -> value_return ty
+     ClosureReturn ty _ -> value_return ty
+     VariableReturn ty v -> variable_return ty v
+  where 
+    value_return ty = k [] (StmtValueReturn ty)
+    
+    -- If returning a state variable, then set up the environment,
+    -- create a parameter, and indicate that it shall be returned.
+    variable_return ty v = withStateVariable v $ do
        -- Create binder and return type of this variable
        param_type <- getUndefStateType v
        input_state_var <- getStateVariableX "anfGetStmtReturnParameter" v
@@ -2114,86 +2129,135 @@ anfGetStmtReturnParameter stm k = hideState $
        
        return_type <- getStateType v
 
-       -- Run a computation too create a procedure
-       x <- k (Just (v, binder, return_type))
-       
-       -- The local variable is no longer in use
-       consumeStateVariable v
-       return x
+       -- Run the main computation
+       k [binder] (StmtStateReturn return_type v)
+
+-- | The return specification for a procedure created by 'anfStmtToProc'.
+-- This specifies what data type to return and what data it contains.
+data StmtReturn =
+    StmtValueReturn RType       -- ^ The return value of the statement
+  | StmtStateReturn RType !Var  -- ^ A state variable
+  | StmtTupleReturn [StmtReturn] -- ^ A tuple of things
+
+pprStmtReturn :: StmtReturn -> Doc
+pprStmtReturn (StmtValueReturn _) = text "Value"
+pprStmtReturn (StmtStateReturn _ v) = text "State" <+> Gluon.pprVar v
+pprStmtReturn (StmtTupleReturn xs) =
+  parens $ sep $ punctuate (text ",") $ map pprStmtReturn xs
+
+-- | Generate code to create a return value according to the specification.
+-- The return value is some combination of the statement's return value and
+-- other state variables.
+buildStmtReturnValue :: StmtReturn -- ^ What to return
+                     -> FlatReturn -- ^ Given statement's return value
+                     -> Anf.RStm   -- ^ Given statement
+                     -> ToAnf (RType, Anf.RStm)
+
+-- First, handle cases where the statement's return value is already right
+buildStmtReturnValue (StmtValueReturn ty) (ValueReturn _) stm =
+  return (ty, stm)
+
+buildStmtReturnValue (StmtValueReturn ty) (ClosureReturn _ _) stm =
+  return (ty, stm)
+
+buildStmtReturnValue (StmtStateReturn ty v) (VariableReturn _ v') stm 
+  | v == v' = do
+      return_type <- getStateType v
+      consumeStateVariable v
+      return (return_type, stm)
+
+-- Now handle other cases
+buildStmtReturnValue return_spec ret stm = do
+  -- Bind the statement's result to a temporary variable
+  stmt_result_id <- fresh
+  let stmt_result_var = Gluon.mkAnonymousVariable stmt_result_id ObjectLevel
+      result_binder = Binder stmt_result_var (returnType ret) ()
+   
+  -- Construct the return value
+  (return_exp, return_type) <- make_return_value stmt_result_var return_spec
+  
+  -- Construct a let expression out of the whole thing
+  let result_stm = Anf.mkReturnS $ Anf.mkExpV return_exp
+      complete_info = Gluon.mkSynInfo stmt_pos ObjectLevel
+      complete_stm = Anf.LetS complete_info result_binder stm result_stm
+  
+  return (return_type, complete_stm)
   where
-    -- Check the return value to determine what linear variables are used
-    -- by this statement
-    linear_variable =
-      case fexpReturn stm
-      of VariableReturn _ v -> Just v
-         ValueReturn _ -> Nothing
-         ClosureReturn _ _ -> Nothing
+    stmt_pos = getSourcePos stm
+
+    -- | Construct a return value expression and its type
+    make_return_value stmt_result_var return_spec = mrv return_spec
+      where
+        -- Return the statement's result
+        mrv (StmtValueReturn ty) =
+          return (Gluon.mkVarE stmt_pos stmt_result_var, ty)
+        
+        -- Consume and return a state variable
+        mrv (StmtStateReturn _ state_v) = do
+          v <- getStateVariableX "buildStmtReturnValue" state_v
+          ty <- getStateType state_v
+          consumeStateVariable state_v
+          return (Gluon.mkVarE stmt_pos v, ty)
+        
+        -- Construct a tuple
+        mrv (StmtTupleReturn xs) = do
+          -- Make the field values
+          fields <- mapM mrv xs
+          
+          -- Construct a tuple expression
+          let add_tuple_field (field_exp, field_ty) tuple_expr =
+                Binder' Nothing field_ty field_exp Gluon.:&: tuple_expr
+              tuple = foldr add_tuple_field Gluon.Nil fields
+          
+          -- Construct the tuple type 
+          let add_type_field (_, field_ty) type_expr =
+                Binder' Nothing field_ty () Gluon.:*: type_expr
+              tuple_type = foldr add_type_field Gluon.Unit fields
+          
+          return (Gluon.mkTupE stmt_pos tuple,
+                  Gluon.mkTupTyE stmt_pos tuple_type)
+
+  
 
 -- | Convert an ANF statement to a procedure.
 --
+-- The first parameter sets up the procedure's parameters, return value, and
+-- context.  If the 
 -- The procedure takes either the unit value or a state object as a 
 -- parameter.  It returns either a return value or a state object.  Pure
 -- variable inputs are referenced directly.
-anfStmtToProc :: (forall a. ([RBinder ()] -> Maybe RType -> ToAnf a) -> ToAnf a)
+anfStmtToProc :: (forall a. ([RBinder ()] -> StmtReturn -> ToAnf a) -> ToAnf a)
               -> Stmt
-              -> ToAnf (Anf.Proc Rec)
+              -> ToAnf (StmtReturn, Anf.Proc Rec)
 anfStmtToProc initialize_params stm =
-  -- Set up the context for a new procedure; set up the return state
-  anfGetStmtReturnParameter stm $ \return_state ->
-  -- Set up any other context we need
-  initialize_params $ \ext_params ext_return_type ->
-  -- Create the procedure
-  make_proc return_state ext_params ext_return_type
+  -- State variables outside the procedure are not accessible
+  hideState $
+  -- Set up any context we need, then create the procedure
+  initialize_params make_proc
   where
     -- Create a procedure that returns by value
-    make_proc Nothing ext_params ext_return_type = do
-      -- Create a dummy parameter variable
-      v_id <- fresh
-      let param_var = Gluon.mkAnonymousVariable v_id ObjectLevel
-          dummy_param = Binder param_var unit_type ()
-
+    make_proc ext_params ext_return_spec = do
       -- Get effect type
       effect_type <- anfEffectType $ fexpEffect stm
-      
-      -- Return the unit type.  If a return type is given, return it instead
-      let return_type = case ext_return_type
-                        of Nothing -> unit_type
-                           Just ty -> ty
-      
+
       -- Create body
       body <- anfStmt stm
       
-      -- Return the new procedure
-      return $! Anf.Proc { Anf.procInfo = Gluon.mkSynInfo pos ObjectLevel
-                         , Anf.procParams = ext_params ++ [dummy_param]
-                         , Anf.procReturnType = return_type
-                         , Anf.procEffectType = effect_type
-                         , Anf.procBody = body
-                         }
+      -- Construct the return expression
+      (return_type, body') <-
+        buildStmtReturnValue ext_return_spec (fexpReturn stm) body
 
-    -- Create a procedure that returns by reference 
-    make_proc (Just (_, param, rt)) ext_params ext_return_type = do
-      -- Get effect type
-      effect_type <- anfEffectType $ fexpEffect stm
-      
-      -- Return the state.  If other return types are given, return them also
-      let return_type = case ext_return_type
-                        of Nothing -> rt
-                           Just ty -> pair_type ty rt
-      -- Create body
-      body <- anfStmt stm
-  
       -- Return the new procedure
-      return $! Anf.Proc { Anf.procInfo = Gluon.mkSynInfo pos ObjectLevel
-                         , Anf.procParams = ext_params ++ [param]
-                         , Anf.procReturnType = return_type
-                         , Anf.procEffectType = effect_type
-                         , Anf.procBody = body
-                         }
+      let proc = Anf.Proc { Anf.procInfo = Gluon.mkSynInfo pos ObjectLevel
+                          , Anf.procParams = ext_params
+                          , Anf.procReturnType = return_type
+                          , Anf.procEffectType = effect_type
+                          , Anf.procBody = body'
+                          }
+      return (ext_return_spec, proc)
 
     pos = fexpSourcePos stm
     
-    unit_type = Gluon.TupTyE (Gluon.mkSynInfo pos TypeLevel) Gluon.Unit
     pair_type t1 t2 =
       Gluon.TupTyE (Gluon.mkSynInfo pos TypeLevel) $
       Binder' Nothing t1 () Gluon.:*: Binder' Nothing t2 () Gluon.:*: Gluon.Unit
@@ -2275,7 +2339,7 @@ anfCaseRef pos scrutinee_var scrutinee_type alts = do
 -- are the parameters to the alternative.
 anfRefAlternative :: SourcePos -> FlatRefAlt -> ToAnf (Con, Anf.Proc Rec)
 anfRefAlternative pos (FlatRefAlt con _ params eff ret ret_ty body) = do
-  proc <- anfStmtToProc alternative_parameters body
+  (return_spec, proc) <- anfStmtToProc alternative_parameters body
   return (con, proc)
   where
     return_value_type =
@@ -2285,20 +2349,23 @@ anfRefAlternative pos (FlatRefAlt con _ params eff ret ret_ty body) = do
          VariableReturn _ _ -> Nothing
 
     alternative_parameters k =
-      -- Make each object field be a function parameter.
-      anfBindParameters Nothing params $ \anf_params ->
-        -- If returning by value, then indicate so
-        k anf_params return_value_type
-  {-do
-  let function = FlatFun { ffunInfo = Gluon.mkSynInfo pos ObjectLevel
-                         , ffunParams = params
-                         , ffunReturn = ret
-                         , ffunEffect = eff
-                         , ffunReturnType = ret_ty
-                         , ffunBody = body
-                         }
-  proc <- anfProc function
-  return (con, proc) -}
+      -- Pass state in and out if required 
+      anfGetStmtReturnParameter body $ \stmt_params stmt_ret ->
+      -- Make each object field be a function parameter
+      anfBindParameters Nothing params $ \anf_params -> do
+        -- Always have one state parameter
+        stmt_params' <-
+          case stmt_params
+          of [param] -> return stmt_params
+             [] -> do -- Create a dummy parameter
+                      v_id <- fresh
+                      let dummy_v = Gluon.mkAnonymousVariable v_id ObjectLevel 
+                      return [Binder dummy_v unitType ()]
+             _ -> internalError "anfRetAlternative"
+             
+        -- The alternative body gets the object fields as parameters 
+        -- plus one extra parameter for input state
+        k (anf_params ++ stmt_params') stmt_ret
 
 anfStoreValue :: SourcePos -> RType -> Var -> Value -> ToAnf Anf.RStm
 anfStoreValue pos ty dst val = do
