@@ -272,7 +272,17 @@ getEffectType' v = do
               Just (ValueVar {}) -> internalError "getEffectType: Not a reference"
               Nothing -> internalError "getEffectType: No information"
 
--- | Get the object type of the data referenced by a state variable.  The
+-- | Get the value type of the data referenced by a variable.
+getValueType :: Var -> ToAnf RType
+getValueType v = ToAnf $ asksStrict (lookup_type . anfVariableMap)
+  where
+    lookup_type env =
+      case Map.lookup (varID v) env
+           of Just (ValueVar {valueType = t}) -> t
+              Just (ReferenceVar {}) -> internalError "getValueType: Not a value"
+              Nothing -> internalError "getValueType: No information"
+
+-- | Get the object type of the data referenced by a variable.  The
 -- type does not include modifiers indicating whether the variable is defined.
 getObjectType :: Var -> ToAnf RType
 getObjectType v = ToAnf $ asksStrict (lookup_object_type . anfVariableMap)
@@ -429,15 +439,20 @@ withStateVariable v (ToAnf m) = ToAnf $ do
 
 -------------------------------------------------------------------------------
 
+-- | Produce the value corresponding to this expression.
+-- Only pass-by-value terms can be converted to a value.
 anfValue :: SourcePos -> Value -> ToAnf Anf.RVal
 anfValue pos value =
   case value
-  of VarV v component -> do
-       real_v <- get_var_component v component
-       return $ Anf.mkVarV pos real_v
-     ConV c Value -> return $ Anf.mkConV pos c
-     ConV c FunRef -> return $ Anf.mkConV pos c
-     ConV c _ -> internalError "anfValue"
+  of VarV v mode 
+       | mode == IOVal || mode == IOClo -> do
+           real_v <- getValueVariable v
+           return $ Anf.mkVarV pos real_v
+       | otherwise -> internalError "anfValue"
+     ConV c mode 
+       | mode == IOVal || mode == IOClo -> do
+           return $ Anf.mkConV pos c
+       | otherwise -> internalError "anfValue"
      LitV (IntL n) -> return $ Anf.mkLitV pos (Gluon.IntL n)
      TypeV ty -> return $ Anf.mkExpV ty
      FunV f -> do f' <- anfProc f
@@ -445,16 +460,74 @@ anfValue pos value =
      AppV op args -> do op' <- anfValue pos op
                         args' <- mapM (anfValue pos) args 
                         return $ Anf.mkAppV pos op' args'
+
+-- | Produce a parameter list corresponding to these expressions.  The
+-- parameter list will be passed to a function call.
+anfParameters :: SourcePos -> [Value] -> ToAnf [Anf.RVal]
+anfParameters pos values = do
+  addr_values <- mapMaybeM convert_address values
+  val_values <- mapM convert_value values
+  st_values <- mapMaybeM convert_state values
+  return $ addr_values ++ val_values ++ st_values
   where
-    get_var_component v component =
-      case component
-      of Value -> getValueVariable v
-         FunRef -> getValueVariable v
-         Address -> getAddrVariable v
-         Pointer -> getPointerVariable v
-         State -> getStateVariableX "anfValue" v
+    convert_address value = 
+      case value
+      of VarV v mode ->
+           case mode
+           of IOVal -> return Nothing
+              IOClo -> return Nothing
+              InRef -> addr_param v
+              OutRef -> addr_param v
+         ConV c mode ->
+           case mode
+           of IOVal -> return Nothing
+              IOClo -> return Nothing
+              InRef -> can't_convert value
+              OutRef -> can't_convert value
+         LitV _ -> return Nothing
+         TypeV _ -> return Nothing
+         FunV _ -> return Nothing
+         AppV _ _ -> return Nothing
+
+    -- For pass-by-reference data, pass a pointer 
+    -- For other data, pass the value
+    convert_value value =
+      case value
+      of VarV v InRef  -> pointer_param v
+         VarV v OutRef -> pointer_param v
+         _             -> anfValue pos value
+         
+    convert_state value = 
+      case value
+      of VarV v mode ->
+           case mode
+           of IOVal -> return Nothing
+              IOClo -> return Nothing
+              InRef -> return Nothing
+              OutRef -> state_param v
+         _ -> return Nothing    -- State parameters are only for return values
+
+    addr_param v = do
+      real_v <- getAddrVariable v
+      return $ Just $ Anf.mkVarV pos v
+
+    value_param v = do
+      real_v <- getValueVariable v
+      return $ Just $ Anf.mkVarV pos v
+
+    pointer_param v = do
+      real_v <- getPointerVariable v
+      return $ Anf.mkVarV pos v
+
+    state_param v = do
+      real_v <- getStateVariable v
+      return $ Just $ Anf.mkVarV pos v
+    
+    can't_convert value =
+      internalError "anfParameters: Can't convert value"
 
 -- | Get the ANF type of a function
+-- FIXME: This doesn't generate the right ANF type
 anfFunctionType :: FlatFun -> ToAnf RType
 anfFunctionType ffun =
   add_parameters (ffunParams ffun) $
@@ -469,16 +542,15 @@ anfFunctionType ffun =
     -- Only type and address parameters are used dependently; we can use
     -- the given variables as dependent type/address variables without
     -- renaming them.
-    add_parameter :: RBinder Component -> ToAnf RType -> ToAnf RType
-    add_parameter (Binder v ty component) k =
-      case component
-      of Value
+    add_parameter :: RBinder DataMode -> ToAnf RType -> ToAnf RType
+    add_parameter (Binder v ty data_mode) k =
+      case data_mode
+      of IOVal
            | getLevel ty == KindLevel -> dependent
            | otherwise -> non_dependent
-         FunRef -> dependent
-         Address -> dependent
-         Pointer -> non_dependent
-         State -> non_dependent
+         IOClo -> non_dependent
+         InRef -> dependent
+         OutRef -> non_dependent
       where
         dependent = do
           rng <- k
@@ -493,7 +565,7 @@ anfFunctionType ffun =
 anfProc :: FlatFun -> ToAnf (Anf.Proc Rec)
 anfProc ffun = hideState $
   -- Convert function parameters and make a local parameter mapping
-  anfBindParameters return_variable (ffunParams ffun) $ \params -> do
+  anfBindParameters (ffunParams ffun) $ \params -> do
     -- Convert return and effect types
     rt <- convert_return_type (ffunReturn ffun) (ffunReturnType ffun)
     et <- anfEffectType (ffunEffect ffun)
@@ -515,63 +587,85 @@ anfProc ffun = hideState $
       of Just (Binder v _ _) -> Just v
          Nothing -> Nothing
       where
-        is_return_parameter (Binder _ _ State) = True
+        is_return_parameter (Binder _ _ OutRef) = True
         is_return_parameter _ = False
 
     -- Not implemented: Convert return type
     convert_return_type _ rt = return rt
 
-anfCreateParameterMaps :: Maybe Var -> [RBinder Component] -> ToAnf a -> ToAnf a
-anfCreateParameterMaps return_var params k =
-  foldr ($) k $ map (anfCreateParameterMap return_var) params
+anfCreateParameterMaps :: [RBinder DataMode] -> ToAnf a -> ToAnf a
+anfCreateParameterMaps params k =
+  foldr ($) k $ map anfCreateParameterMap params
                
 -- | Create variable elaboration information for a parameter.
 -- Skip pointer and state parameters; handle them when the address 
 -- parameter is encountered.
-anfCreateParameterMap :: Maybe Var -> RBinder Component -> ToAnf a -> ToAnf a
-anfCreateParameterMap return_var (Binder v ty component) k =
-      case component
-      of Value -> withValueVariable v ty k
-         FunRef -> withValueVariable v ty k
-         Address 
-           | Just v == return_var ->
-               withReferenceVariable v ty $ withStateVariable v k
-           | otherwise ->
-               withReferenceVariable v ty k
-         Pointer -> k
-         State -> k
+anfCreateParameterMap :: RBinder DataMode -> ToAnf a -> ToAnf a
+anfCreateParameterMap (Binder v ty data_mode) k =
+      case data_mode
+      of IOVal -> withValueVariable v ty k
+         IOClo -> withValueVariable v ty k
+         InRef -> withReferenceVariable v ty k
+         OutRef -> withReferenceVariable v ty $ withStateVariable v k
 
-anfBindParameters :: Maybe Var
-                  -> [RBinder Component]
+mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
+mapMaybeM f (x:xs) = f x >>= continue
+  where
+    continue Nothing  = mapMaybeM f xs
+    continue (Just y) = do ys <- mapMaybeM f xs
+                           return (y : ys)
+
+mapMaybeM _ [] = return []
+
+anfBindParameters :: [RBinder DataMode]
                   -> ([RBinder ()] -> ToAnf a)
                   -> ToAnf a
-anfBindParameters return_var params k =
-  anfCreateParameterMaps return_var params $ do
-    k =<< mapM convert_parameter params
+anfBindParameters params k =
+  anfCreateParameterMaps params $ do
+    addr_params <- mapMaybeM convert_address params
+    val_params <- mapMaybeM convert_value params
+    st_params <- mapMaybeM convert_state params
+    k $ addr_params ++ val_params ++ st_params
   where
-    -- Convert a parameter binder to the ANF equivalent binder.
-    -- Use the 'component' field of the binder to select the 
-    -- actual variable and type.
-    convert_parameter (Binder v ty component) =
-      case component
-      of Value -> do
-           real_v <- getValueVariable v
-           return $ Binder real_v ty ()
-         FunRef -> do
-           real_v <- getValueVariable v
-           return $ Binder real_v ty ()
-         Address -> do
-           real_v <- getAddrVariable v
-           return $ Binder real_v addressType ()
-         Pointer -> do
-           real_v <- getPointerVariable v
-           real_ty <- getPointerType v
-           return $ Binder real_v real_ty ()
-         State -> do
-           -- State parameters start out undefined
-           real_v <- getStateVariableX "anfBindParameters" v
-           real_ty <- getUndefStateType v
-           return $ Binder real_v real_ty ()
+    convert_address (Binder v ty d_mode) =
+      case d_mode
+      of IOVal -> return Nothing
+         IOClo -> return Nothing
+         InRef -> address_parameter v
+         OutRef -> address_parameter v
+    
+    convert_value (Binder v ty d_mode) =
+      case d_mode
+      of IOVal -> value_parameter v
+         IOClo -> value_parameter v
+         InRef -> pointer_parameter v
+         OutRef -> pointer_parameter v
+
+    convert_state (Binder v ty d_mode) =
+      case d_mode
+      of IOVal -> return Nothing
+         IOClo -> return Nothing
+         InRef -> return Nothing
+         OutRef -> state_parameter v
+
+    address_parameter v = do
+      real_v <- getAddrVariable v
+      return $ Just $ Binder real_v addressType ()
+      
+    value_parameter v = do
+      real_v <- getValueVariable v
+      real_t <- getValueType v
+      return $ Just $ Binder real_v real_t ()
+
+    pointer_parameter v = do
+      real_v <- getPointerVariable v
+      real_t <- getPointerType v
+      return $ Just $ Binder real_v real_t ()
+
+    state_parameter v = do
+      real_v <- getStateVariable v
+      real_t <- getUndefStateType v
+      return $ Just $ Binder real_v real_t ()
 
 -- | Compute the effect type corresponding to this effect.    
 anfEffectType :: Effect -> ToAnf RType
@@ -616,7 +710,7 @@ anfStmt statement =
        return $ Anf.ReturnS anf_info val'
      CallS {fexpOper = op, fexpArgs = args} -> do
        op' <- anfValue pos op
-       args' <- mapM (anfValue pos) args
+       args' <- anfParameters pos args
        return $ Anf.CallS anf_info $ Anf.AppV anf_info op' args'
      LetS {fexpBinder = Binder v ty _, fexpRhs = rhs, fexpBody = body} -> do
        rhs' <- anfStmt rhs
@@ -967,7 +1061,7 @@ anfStmtToProc initialize_params stm =
 
 anfAlternative :: FlatValAlt -> ToAnf (Anf.Alt Rec)
 anfAlternative (FlatValAlt con ty_args params body) = do
-  anfBindParameters Nothing params $ \params' -> do
+  anfBindParameters params $ \params' -> do
     body' <- anfStmt body
     return $ Anf.Alt con params' body'
 
@@ -1055,7 +1149,7 @@ anfRefAlternative pos (FlatRefAlt con _ params eff ret ret_ty body) = do
       -- Pass state in and out if required 
       anfGetStmtReturnParameter body $ \stmt_params stmt_ret ->
       -- Make each object field be a function parameter
-      anfBindParameters Nothing params $ \anf_params -> do
+      anfBindParameters params $ \anf_params -> do
         -- Always have one state parameter
         stmt_params' <-
           case stmt_params

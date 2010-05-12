@@ -75,6 +75,10 @@ fromTypedFun (TypedSFFun (TypeAnn _ (Fun info ty_params params return_type body)
 fromTypedType :: TType -> RType
 fromTypedType (TypedSFType t) = t
 
+patternBinder :: RPat -> RBinder ()
+patternBinder (VarP v ty) = Binder v ty ()
+patternBinder _ = internalError "Expecting a variable parameter"
+
 expectClosureArgument :: FlatArgument -> (Value, FunctionEffect)
 expectClosureArgument (ClosureArgument v e) = (v, e)
 expectClosureArgument _ = internalError "Expecting closure argument"
@@ -138,7 +142,7 @@ locallyRead pos var ty stmt =
   in ReadingS info var ty stmt
 
 -- | Assign a value to a local variable over the scope of a statement
-assignTemporaryValue :: SourcePos -> Var -> RType -> Component -> Stmt
+assignTemporaryValue :: SourcePos -> Var -> RType -> DataMode -> Stmt
                      -> StmtContext
 assignTemporaryValue pos v ty mode stmt body =
   let effect1 = fexpEffect stmt
@@ -207,7 +211,7 @@ findVarPassConv :: Var -> F Value
 findVarPassConv v = do
   result <- findM matchType =<< getPureTypes
   case result of
-    Just (dict_var, _) -> return $ VarV dict_var Value
+    Just (dict_var, _) -> return $ VarV dict_var IOVal
     Nothing -> internalError "findVarPassConv: Can't find dictionary"
   where
     -- Return True if ty == PassConv v, False otherwise
@@ -239,35 +243,35 @@ getPassConv ty = do
       | con == getPyonTupleType' 2 -> do
           pc1 <- getPassConv t1
           pc2 <- getPassConv t2
-          return $ AppV (ConV (getPyonTuplePassConv' 2) Value)
+          return $ AppV (ConV (getPyonTuplePassConv' 2) IOVal)
             [TypeV (substFully t1), TypeV (substFully t2), pc1, pc2]
     Nothing ->
       case fromWhnf ty' of
-        Gluon.VarE {Gluon.expVar = v} ->
-          findVarPassConv v
-    _ -> internalError "lookupPassConv"
+        Gluon.VarE {Gluon.expVar = v} -> findVarPassConv v
+        _ -> internalError "getPassConv"
+    _ -> internalError "getPassConv"
   where
     primitive pc =
       let con = pyonBuiltin pc
-      in return $ ConV con Value
+      in return $ ConV con IOVal
 
 -- | Choose a parameter-passing mode for a data type.
 -- Dictionary types inserted by type inference are passed by value.
 -- Functions are passed as closures.
 -- Other types are passed by reference.
-chooseMode :: RType -> F Mode
+chooseMode :: RType -> F TypeMode
 chooseMode t
   | getLevel t == ObjectLevel = internalError "chooseMode"
-  | getLevel t /= TypeLevel = return ByVal
+  | getLevel t /= TypeLevel = return PassByVal
   | otherwise = do
       t' <- evalHead' t
       return $! case Gluon.unpackRenamedWhnfAppE t'
                 of Just (con, _)
-                     | isDictionaryTypeConstructor con -> ByVal
-                     | otherwise -> ByRef
+                     | isDictionaryTypeConstructor con -> PassByVal
+                     | otherwise -> PassByRef
                    Nothing -> case substFullyUnder $ fromWhnf t'
-                              of Gluon.FunE {} -> ByClo
-                                 _ -> ByRef
+                              of Gluon.FunE {} -> PassByClo
+                                 _ -> PassByRef
 
 -- | True if this is a type constructor for a constraint type.
 -- Data of these types are always passed by value. 
@@ -279,111 +283,60 @@ isDictionaryTypeConstructor con =
 -- | Build the argument list for a function call
 buildCallArguments :: [FlatArgument] -> FlatReturn -> [Value]
 buildCallArguments args ret =
-  mapMaybe addr_parameter args ++
-  maybeToList return_addr_parameter ++
-  mapMaybe value_parameter args ++
-  maybeToList return_ptr_parameter ++
-  maybeToList return_state_parameter
+  map inp_parameter args ++ maybeToList (out_parameter ret)
   where
-    addr_parameter (ValueArgument _) = Nothing
-    addr_parameter (ClosureArgument _ _) = Nothing
-    addr_parameter (VariableArgument v) = Just (VarV v Address)
+    inp_parameter (ValueArgument val) = val
+    inp_parameter (ClosureArgument val _) = val
+    inp_parameter (VariableArgument v) = VarV v InRef
     
-    value_parameter (ValueArgument fv) = Just fv
-    value_parameter (ClosureArgument v _) = Just v
-    value_parameter (VariableArgument v) = Just (VarV v Pointer)
-    
-    (return_addr_parameter, return_ptr_parameter, return_state_parameter) =
-      case ret
-      of ValueReturn _ -> (Nothing, Nothing, Nothing)
-         ClosureReturn _ _ -> (Nothing, Nothing, Nothing)
-         VariableReturn _ v ->
-           (Just (VarV v Address),
-            Just (VarV v Pointer),
-            Just (VarV v State))
+    out_parameter (ValueReturn _) = Nothing
+    out_parameter (ClosureReturn _ _) = Nothing
+    out_parameter (VariableReturn _ v) = Just (VarV v OutRef)
 
-addressParameter, valueParameter, valueOnlyParameter, stateParameter
-  :: RPat -> Mode -> Maybe (RBinder Component)
+-- | Set the parameter binder's mode based on its type
+setParameterMode :: RBinder () -> F (RBinder DataMode)
+setParameterMode (Binder v ty ()) = do
+  mode <- chooseMode ty
+  return $! Binder v ty $! parameterInMode mode
 
-addressParameter (VarP v ty) mode =
-  case mode
-  of ByVal -> Nothing
-     ByClo -> Nothing
-     ByRef -> Just $ Binder v ty Address
-
-addressParameter _ _ = internalError "Expecting a variable parameter"
-
-valueParameter (VarP v ty) mode =
-  case mode
-  of ByVal -> Just $ Binder v ty Value
-     ByClo -> Just $ Binder v ty FunRef
-     ByRef -> Just $ Binder v ty Pointer
-
-valueParameter _ _ = internalError "Expecting a variable parameter"
-
-valueOnlyParameter (VarP v ty) mode =
-  case mode
-  of ByVal -> Just $ Binder v ty Value
-     ByClo -> Just $ Binder v ty FunRef
-     ByRef -> internalError "Unexpected pass-by-reference parameter"
-
-valueOnlyParameter _ _ = internalError "Expecting a variable parameter"
-
-stateParameter (VarP v ty) mode =
-  case mode
-  of ByVal -> Nothing
-     ByClo -> Nothing
-     ByRef -> Just $ Binder v ty State
-
-stateParameter _ _ = internalError "Expecting a variable parameter"
+createReturnBinder :: RType
+                   -> F (Maybe (RBinder DataMode), TypeMode, FlatReturn)
+createReturnBinder return_type = do
+  return_mode <- chooseMode return_type
+  case return_mode of
+    PassByVal -> do
+      return (Nothing, PassByVal, ValueReturn return_type)
+    PassByClo -> do
+      return_effect <- functionTypeEffect return_type
+      return (Nothing, PassByClo, ClosureReturn return_type return_effect)
+    PassByRef -> do
+      rv <- newAnonymousVariable
+      return (Just (Binder rv return_type OutRef),
+              PassByRef,
+              VariableReturn return_type rv)
 
 -- | Build the parameter list for a function
 buildFunctionParameters :: [TyPat (Typed Rec)]
                         -> [Pat (Typed Rec)]
                         -> RType
-                        -> F ([RBinder Component], Effect, Mode, FlatReturn)
+                        -> F ([RBinder DataMode], Effect, FlatReturn)
 buildFunctionParameters ty_params params return_type = do
   -- Determine parameter passing modes
-  param_modes <- mapM choose_param_mode params
-  return_mode <- chooseMode return_type
+  params' <- mapM (setParameterMode . patternBinder . fromTypedPat) params
+
+  -- Determine return mode
+  (return_binder, _, return_spec) <- createReturnBinder return_type
   
-  -- Create a new variable for the return value
-  (return_var, return_address, return_pointer, return_state) <-
-    case return_mode
-    of ByVal -> return (ValueReturn return_type, Nothing, Nothing, Nothing)
-       ByRef -> do rv <- newAnonymousVariable
-                   return (VariableReturn return_type rv,
-                           Just (Binder rv return_type Address),
-                           Just (Binder rv return_type Pointer),
-                           Just (Binder rv return_type State))
-       ByClo -> do return_effect <- functionTypeEffect return_type
-                   return (ClosureReturn return_type return_effect,
-                           Nothing, Nothing, Nothing)
+  -- Determine effect
+  let effect = parameterEffects params'
 
-  -- Construct parameter list and side effects
-  let params' = zip (map fromTypedPat params) param_modes
-      flat_params =
-        map convert_ty_param ty_params ++
-        mapMaybe (uncurry addressParameter) params' ++
-        maybeToList return_address ++
-        mapMaybe (uncurry valueParameter) params' ++
-        maybeToList return_pointer ++
-        maybeToList return_state
-      effect = patternEffects params'
-
-  return (flat_params, effect, return_mode, return_var)
-  where
-    convert_ty_param (TyPat v ty) = Binder v (fromTypedType ty) Value
-    
-    choose_param_mode (VarP v ty) = chooseMode (fromTypedType ty)
-    choose_param_mode _ = internalError "not a variable parameter"
+  return (params' ++ maybeToList return_binder, effect, return_spec)
 
 -- | Get the parameter and result types of a case alternative
-getAltParameterTypes :: Alt (Typed Rec) -> F ([Gluon.WRExp], Gluon.WRExp)
+getAltParameterTypes :: Alt (Typed Rec) -> PureTC ([Gluon.WRExp], Gluon.WRExp)
 getAltParameterTypes (Alt { altConstructor = con
                           , altTyArgs = ty_args
-                          , altParams = param_vars
-                          }) = liftPure $ do
+                          }) = do
   con_type <- getConstructorType con
   compute_fotype con_type ty_args
   where
@@ -419,66 +372,41 @@ getAltParameterTypes (Alt { altConstructor = con
           return ([], substFullyUnderWhnf ty')
 
 -- | Build the parameter list for a case alternative
-buildValueCaseParameters :: RType    -- ^ Scrutinee type
-                         -> Alt (Typed Rec)
-                         -> F (Con, [Value], [RBinder Component])
-buildValueCaseParameters scrutinee_type alt = do
+buildCaseParameters :: RType    -- ^ Scrutinee type
+                    -> Alt (Typed Rec)
+                    -> F (Con, [Value], [RBinder DataMode], Effect)
+buildCaseParameters scrutinee_type alt = do
   -- Get types of the value parameters and scrutinee
-  (param_types, inferred_scrutinee_type) <- getAltParameterTypes alt
-  
+  (param_types, inferred_scrutinee_type) <- liftPure $ getAltParameterTypes alt
+
   -- Scrutinee type should match.
   -- We assume the expression is well-typed, so skip the test.
   when False $ tcAssertEqual noSourcePos (verbatim scrutinee_type)
                                          (verbatim $ fromWhnf inferred_scrutinee_type)
 
-  -- Determine parameter-passing modes
-  param_modes <- mapM (chooseMode . fromWhnf) param_types
-  
-  -- Construct parameter binders
-  let param_patterns = map fromBinder $ altParams alt
-        where fromBinder (Binder v ty ()) = VarP v (fromTypedType ty)
-      parameters =
-        catMaybes $ zipWith valueOnlyParameter param_patterns param_modes
-      ty_args = map (TypeV . fromTypedType) $ altTyArgs alt
-  return (altConstructor alt, ty_args, parameters)
+  -- Set the alternative's parameter types to the inferred types.
+  -- Then find the appropriate parameter passing modes.
+  params' <-
+    let set_param_type (Binder v _ ()) ty = Binder v (fromWhnf ty) ()
+    in mapM setParameterMode $
+       zipWith set_param_type (altParams alt) param_types
 
--- | Build the parameter list for a case alternative
-buildRefCaseParameters :: RType    -- ^ Scrutinee type
-                       -> Alt (Typed Rec)
-                       -> F (Con, [Value], [RBinder Component], Effect)
-buildRefCaseParameters scrutinee_type alt = do
-  -- Get types of the value parameters and scrutinee
-  (param_types, inferred_scrutinee_type) <- getAltParameterTypes alt
-    
-  -- Scrutinee type should match.
-  -- We assume the expression is well-typed, so skip the test.
-  when False $ tcAssertEqual noSourcePos (verbatim scrutinee_type)
-                                         (verbatim $ fromWhnf inferred_scrutinee_type)
-
-  -- Determine parameter-passing modes
-  param_modes <- mapM (chooseMode . fromWhnf) param_types
-  
-  -- Construct parameter binders
-  let param_patterns = zip (map fromBinder $ altParams alt) param_modes
-        where fromBinder (Binder v ty ()) = VarP v (fromTypedType ty)
-      addr_parameters = mapMaybe (uncurry addressParameter) param_patterns
-      value_parameters = mapMaybe (uncurry valueParameter) param_patterns
-      parameters = addr_parameters ++ value_parameters
-      
   -- Compute side effect
-  let effect = patternEffects param_patterns
-  
-  -- Create type parameters to the pattern 
-  let ty_args = map (TypeV . fromTypedType) $ altTyArgs alt
-  return (altConstructor alt, ty_args, parameters, effect)
+  let effect = parameterEffects params'
 
-patternEffects :: [(RPat, Mode)] -> Effect
-patternEffects patterns = effectUnions $ map effect patterns
-  where
-    effect (VarP v _, ByRef) = varEffect v
-    effect (VarP v _, ByVal) = noEffect
-    effect (VarP v _, ByClo) = noEffect
-    effect _ = internalError "patternEffects"
+  let ty_args = map (TypeV . fromTypedType) $ altTyArgs alt
+
+  return (altConstructor alt, ty_args, params', effect)
+
+parameterEffects :: [RBinder DataMode] -> Effect
+parameterEffects patterns = effectUnions $ map parameterEffect patterns
+
+parameterEffect (Binder v _ mode) =
+  case mode
+  of IOVal -> noEffect
+     IOClo -> noEffect
+     InRef -> varEffect v
+     OutRef -> internalError "parameterEffect"
 
 functionTypeEffect :: RType -> F FunctionEffect
 functionTypeEffect ty = do
@@ -505,9 +433,9 @@ functionTypeEffect ty = do
            | getLevel ty == KindLevel -> ignore_continue rng 
            | getLevel ty == TypeLevel && isNothing mv -> do
                mode <- chooseMode ty
-               case mode of ByVal -> ignore_continue rng
-                            ByRef -> add_effect_continue rng
-                            ByClo -> ignore_continue rng
+               case mode of PassByVal -> ignore_continue rng
+                            PassByRef -> add_effect_continue rng
+                            PassByClo -> ignore_continue rng
            | otherwise -> internalError "functionTypeEffect"
          _ -> end
       where
@@ -554,16 +482,16 @@ withFlattenedExp :: StmtExtensible a =>
 withFlattenedExp typed_expression@(unpackTypedExp -> (ty, _)) k = do
   mode <- chooseMode ty
   case mode of
-    ByVal -> do
+    PassByVal -> do
       (ctx, val) <- flattenExpValue (ValueReturn ty) typed_expression
       result <- k $ ValueArgument val
       return $ addContext ctx result
-    ByClo -> do
+    PassByClo -> do
       parameterized_eff <- functionTypeEffect ty
       (ctx, val) <- flattenExpValue (ClosureReturn ty parameterized_eff) typed_expression
       result <- k $ ClosureArgument val parameterized_eff
       return $ addContext ctx result
-    ByRef -> do 
+    PassByRef -> do 
       (ctx, var) <- flattenExpReference typed_expression
       result <- k $ VariableArgument var
       return $ addContext ctx result
@@ -613,13 +541,13 @@ flattenLet inf (VarP v (fromTypedType -> ty)) rhs body = do
   -- Assign the variable in the body's context
   assignment <-
     case mode
-    of ByVal -> flattenExpWriteValue inf (ValueReturn ty) v rhs
-       ByClo -> do eff <- functionTypeEffect ty
-                   flattenExpWriteValue inf (ClosureReturn ty eff) v rhs
-       ByRef -> do stmt <- flattenExpWriteReference v rhs
-                   return $
-                     allocateLocalMemory (getSourcePos inf) v ty .
-                     eval (getSourcePos inf) stmt
+    of PassByVal -> flattenExpWriteValue inf (ValueReturn ty) v rhs
+       PassByClo -> do eff <- functionTypeEffect ty
+                       flattenExpWriteValue inf (ClosureReturn ty eff) v rhs
+       PassByRef -> do stmt <- flattenExpWriteReference v rhs
+                       return $
+                         allocateLocalMemory (getSourcePos inf) v ty .
+                         eval (getSourcePos inf) stmt
                 
   
   return $ addContext assignment body
@@ -683,7 +611,10 @@ flattenCase flattenBranch inf return_mode return_type scrutinee alts =
     -- Flatten a value-case alternative
     flattenValAlt flattenBranch scrutinee_type alt = do
       -- Get the parameters to the pattern match  
-      (con, ty_args, params) <- buildValueCaseParameters scrutinee_type alt
+      (con, ty_args, params, eff) <- buildCaseParameters scrutinee_type alt
+      
+      -- No side effects allowed in the pattern match
+      unless (isNoEffect eff) $ internalError "flattenCase"
 
       -- Flatten the body
       body <- flattenBranch (altBody alt)
@@ -692,7 +623,7 @@ flattenCase flattenBranch inf return_mode return_type scrutinee alts =
     -- Flatten a reference-case alternative
     flattenRefAlt flattenBranch scrutinee_type alt = do
       -- Get the parameters to the pattern match  
-      (con, ty_args, params, eff) <- buildRefCaseParameters scrutinee_type alt
+      (con, ty_args, params, eff) <- buildCaseParameters scrutinee_type alt
 
       -- Flatten the body
       body <- flattenBranch (altBody alt)
@@ -745,17 +676,13 @@ flattenExpWriteValue inf return_mode dest
       case return_mode
       of ValueReturn ty ->
            let value = ValueS (mkValueReturnInfo pos ty) val
-           in return $ assignTemporaryValue pos dest ty Value value
+           in return $ assignTemporaryValue pos dest ty IOVal value
          ClosureReturn ty eff ->
            let value = ValueS (mkClosureReturnInfo pos ty eff) val
-           in return $ assignTemporaryValue pos dest ty FunRef value
+           in return $ assignTemporaryValue pos dest ty IOClo value
          _ -> internalError "flattenExpWriteValue"
 
-    return_component =
-      case return_mode
-      of ValueReturn _ -> Value
-         ClosureReturn _ _ -> FunRef
-         VariableReturn _ _ -> internalError "flattenExpWriteValue"
+    return_component = returnMode return_mode
 
 flattenExpValue :: FlatReturn -> TExp -> F (StmtContext, Value)
 flattenExpValue (VariableReturn _ _) _ = internalError "flattenExpValue"
@@ -812,13 +739,7 @@ flattenExpValue return_mode
        return (context, VarV tmp_var return_component)
   where
     pos = getSourcePos expression
-
-    return_component =
-      case return_mode
-      of ValueReturn _ -> Value
-         ClosureReturn _ _ -> FunRef
-         VariableReturn _ _ -> internalError "flattenExpValue"
-    
+    return_component = returnMode return_mode
     returnValue v = return (idContext, v)
 
 -- | Flatten an expression whose value will be read by reference.
@@ -880,7 +801,7 @@ flattenExpWriteReference return_var texp@(unpackTypedExp -> (ty, expression)) =
        let new_info = mkFlatInfo pos return_mode (varEffect v)
        return $ CopyS new_info v
      ConE {expCon = c} ->
-       returnValue $ ConV c Value
+       returnValue $ ConV c IOVal
      LitE {expLit = l} ->
        returnValue $ LitV l
      FunE {} -> internalError "flattenExpWriteReference: unexpected function"
@@ -916,7 +837,7 @@ functionEffect (TypedSFFun (TypeAnn _ function)) =
 functionEffect' :: [TyPat (Typed Rec)] -> [Pat (Typed Rec)] -> RType
                 -> F ([FlatArgument] -> Effect)
 functionEffect' ty_params params return_type = do
-  (_, eff, _, _) <- buildFunctionParameters ty_params params return_type
+  (_, eff, _) <- buildFunctionParameters ty_params params return_type
   return $ makeEffect params eff
   where
     makeEffect fun_params eff args =
@@ -945,32 +866,30 @@ functionEffect' ty_params params return_type = do
 flattenFun :: Fun (Typed Rec) -> F FlatFun
 flattenFun (TypedSFFun (TypeAnn _ function)) = do
   let return_type = fromTypedType $ funReturnType function
-  (params, eff, mode, ret) <-
+  (params, eff, ret) <-
     buildFunctionParameters (funTyParams function) (funParams function) return_type
   
   -- Convert function body
   body <-
     assumeValueParameters params $
-    case mode
-    of ByVal -> do
+    case ret
+    of ValueReturn _ -> do
          -- Flatten the expression and return its result value
          (ctx, val) <- flattenExpValue (ValueReturn return_type) (funBody function)
          let return_value =
                ValueS (mkValueReturnInfo body_pos return_type) val
          return $ ctx return_value
-       ByRef ->
-         case ret
-         of VariableReturn _ v ->
-              -- Flatten the expression,
-              -- which writes the result as a side effect
-              flattenExpWriteReference v (funBody function)
-            _ -> internalError "flattenFun"
-       ByClo -> do
+         
+       VariableReturn _ v ->
+         -- Flatten the expression,
+         -- which writes the result as a side effect
+         flattenExpWriteReference v (funBody function)
+         
+       ClosureReturn _ eff -> do
          -- Flatten the expression and return its result value
-         parameterized_effect <- functionTypeEffect return_type
-         (ctx, val) <- flattenExpValue (ClosureReturn return_type parameterized_effect) (funBody function)
+         (ctx, val) <- flattenExpValue (ClosureReturn return_type eff) (funBody function)
          let return_value =
-               ValueS (mkClosureReturnInfo body_pos return_type parameterized_effect) val
+               ValueS (mkClosureReturnInfo body_pos return_type eff) val
          return $ ctx return_value
 
   return $ FlatFun { ffunInfo = funInfo function
@@ -986,7 +905,7 @@ flattenFun (TypedSFFun (TypeAnn _ function)) = do
     -- Assume variables bound by one of the binders
     assumeValueParameters params m = foldr assumeValueParameter m params
 
-    assumeValueParameter (Binder v ty Value) m = assumePure v ty m
+    assumeValueParameter (Binder v ty IOVal) m = assumePure v ty m
     assumeValueParameter (Binder _ _ _)      m = m
 
 flattenDef :: Def (Typed Rec) -> F FlatDef

@@ -37,11 +37,28 @@ pointerType referent =
 
 -- | A parameter-passing mode.  Modes control how a System F value is
 -- elaborated into an ANF value.
-data Mode = ByVal | ByRef | ByClo
+data TypeMode = PassByVal | PassByClo | PassByRef
+              deriving(Eq)
 
--- | A component of a System F value.  Some System F values are represented
--- by multiple ANF values.  The component indicates which value is represented.
-data Component = Value | FunRef | Address | Pointer | State
+-- | A parameter-passing mode for a binder.  This mode distinguishes
+-- pass-by-reference and return-by-reference binders.
+data DataMode = IOVal | IOClo | InRef | OutRef
+              deriving(Eq)
+
+-- | How to pass a parameter for a given mode
+parameterInMode :: TypeMode -> DataMode
+parameterInMode PassByVal = IOVal
+parameterInMode PassByClo = IOClo
+parameterInMode PassByRef = InRef
+
+-- | How to pass a parameter for a return value of a given mode.
+-- A 'Nothing' value means that no parameter is necessary.
+-- For by-reference values, the data is written into storage that is passed in
+-- by parameter.
+parameterOutMode :: TypeMode -> Maybe DataMode
+parameterOutMode PassByVal = Nothing
+parameterOutMode PassByClo = Nothing
+parameterOutMode PassByRef = Just OutRef
 
 -- | We keep track of the set of variables that an expression or function 
 -- reads.  This set is used to compute the side effect.
@@ -99,6 +116,11 @@ data FlatArgument =
     -- the parameter data.
   | VariableArgument !Var
 
+argumentMode :: FlatArgument -> DataMode
+argumentMode (ValueArgument {}) = IOVal
+argumentMode (ClosureArgument {}) = IOClo
+argumentMode (VariableArgument {}) = InRef
+
 -- | Side effect information for a function call.  The effect is computed
 -- from the function's arguments.
 type FunctionEffect = [FlatArgument] -> Effect
@@ -114,10 +136,10 @@ data FlatReturn =
     -- | Return by writing into a variable
   | VariableReturn !RType !Var
 
-returnComponent :: FlatReturn -> Component
-returnComponent (ValueReturn _) = Value
-returnComponent (ClosureReturn _ _) = FunRef
-returnComponent (VariableReturn _ _) = internalError "returnComponent"
+returnMode :: FlatReturn -> DataMode
+returnMode (ValueReturn {}) = IOVal
+returnMode (ClosureReturn {}) = IOClo
+returnMode (VariableReturn {}) = OutRef
 
 returnType :: FlatReturn -> RType
 returnType (ValueReturn ty) = ty
@@ -128,11 +150,15 @@ isValueReturn (ValueReturn _) = True
 isValueReturn _ = False
 
 data Value =
-    VarV Var !Component
-  | ConV Con !Component
+    VarV Var !DataMode
+  | ConV Con !DataMode
+    -- | Literals are passed as values.
   | LitV Lit
+    -- | Types are passed as values.
   | TypeV RType
+    -- | Functions are always pass-by-closure values.
   | FunV FlatFun
+    -- | Applications are always values.
   | AppV Value [Value]
 
 data FlatInfo =
@@ -196,7 +222,7 @@ data Stmt =
     -- to a local variable, and perform another action.
   | LetS
     { fexpInfo :: {-# UNPACK #-} !FlatInfo
-    , fexpBinder :: RBinder Component
+    , fexpBinder :: RBinder DataMode
     , fexpRhs :: Stmt
     , fexpBody :: Stmt
     }
@@ -248,7 +274,7 @@ data Stmt =
     }
 
 data FlatValAlt =
-  FlatValAlt Con [Value] [RBinder Component] Stmt
+  FlatValAlt Con [Value] [RBinder DataMode] Stmt
 
 valAltBody (FlatValAlt _ _ _ body) = body
 
@@ -257,7 +283,7 @@ valAltBody (FlatValAlt _ _ _ body) = body
 -- binds parameters, and then executes a body.  The body's effect and return
 -- type are recorded.
 data FlatRefAlt =
-  FlatRefAlt Con [Value] [RBinder Component] Effect FlatReturn RType Stmt
+  FlatRefAlt Con [Value] [RBinder DataMode] Effect FlatReturn RType Stmt
 
 refAltBody (FlatRefAlt _ _ _ _ _ _ body) = body
 
@@ -266,7 +292,7 @@ refAltReturnType (FlatRefAlt _ _ _ _ _ rt _) = rt
 data FlatFun =
   FlatFun
   { ffunInfo :: ExpInfo
-  , ffunParams :: [RBinder Component]
+  , ffunParams :: [RBinder DataMode]
   , ffunReturn :: FlatReturn
   , ffunReturnType :: RType
   , ffunEffect :: Effect
@@ -278,17 +304,16 @@ data FlatDef = FlatDef Var FlatFun
 -------------------------------------------------------------------------------
 -- Pretty-printing of temporary flattening data structures
 
-pprComponent :: Component -> Doc
+pprComponent :: DataMode -> Doc
 pprComponent component =
   let name = case component
-             of Value -> "val"
-                FunRef -> "fun"
-                Address -> "addr"
-                Pointer -> "ptr"
-                State -> "st"
+             of IOVal -> "val"
+                IOClo -> "fun"
+                InRef -> "read"
+                OutRef -> "write"
   in text name
 
-pprDotted :: Doc -> Component -> Doc
+pprDotted :: Doc -> DataMode -> Doc
 doc `pprDotted` c = doc <> text "." <> pprComponent c
 
 pprBlock :: [Doc] -> Doc
@@ -400,7 +425,7 @@ pprFlatFun function =
               ClosureReturn ty _ ->
                 parens $ Gluon.pprExp ty
               VariableReturn _ v ->
-                parens $ pprVar v `pprDotted` State <+> text ":" <+> Gluon.pprExp (ffunReturnType function)
+                parens $ pprVar v `pprDotted` OutRef <+> text ":" <+> Gluon.pprExp (ffunReturnType function)
       header = text "lambda" <+> cat (params ++ [nest (-3) $ text "->" <+> rv])
   in header <> text "." $$ nest 2 (pprStmt (ffunBody function))
     
