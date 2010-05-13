@@ -6,6 +6,7 @@ module Pyon.Anf.Builtins
         loadAnfBuiltins,
         the_Ptr,
         the_Undef,
+        the_Action,
         the_copy,
         the_reading,
         the_local,

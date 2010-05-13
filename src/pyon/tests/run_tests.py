@@ -46,6 +46,7 @@ def tryCompile(fname, show_traceback = False):
 	print "Flattened to ANF"
 	untyped.printModule(flat_sf)
 
+        untyped.typeCheckAnfModule(flat_sf)
 	# test_sf = system_f.optimizeModule(test_sf)
         # test_flat = system_f.flattenModule(test_sf)
 

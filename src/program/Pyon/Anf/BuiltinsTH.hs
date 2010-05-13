@@ -13,6 +13,7 @@ anfBuiltinModuleName = moduleName anfBuiltinModuleNameString
 builtinTypeNames =
   [ "Ptr"
   , "Undef"
+  , "Action"
   ]
 
 builtinFunctionNames =

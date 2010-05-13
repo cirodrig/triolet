@@ -60,6 +60,9 @@ fromTypedExp e = mapSFExp fromTypedExp fromTypedFun fromTypedType $
 unpackTypedExp :: TExp -> (RType, SFExpOf Rec (Typed Rec))
 unpackTypedExp (TypedSFExp (TypeAnn ty e)) = (fromWhnf ty, e)
 
+fromTypedTyPat :: TyPat (Typed Rec) -> TyPat Rec
+fromTypedTyPat (TyPat v ty) = TyPat v (fromTypedType ty)
+
 fromTypedPat :: Pat (Typed Rec) -> RPat
 fromTypedPat (VarP v ty) = VarP v (fromTypedType ty)
 fromTypedPat _ = internalError "fromTypedPat: Expecting a variable parameter"
@@ -74,6 +77,9 @@ fromTypedFun (TypedSFFun (TypeAnn _ (Fun info ty_params params return_type body)
 
 fromTypedType :: TType -> RType
 fromTypedType (TypedSFType t) = t
+
+typePatternBinder :: TyPat Rec -> RBinder ()
+typePatternBinder (TyPat v ty) = Binder v ty ()
 
 patternBinder :: RPat -> RBinder ()
 patternBinder (VarP v ty) = Binder v ty ()
@@ -322,6 +328,8 @@ buildFunctionParameters :: [TyPat (Typed Rec)]
                         -> F ([RBinder DataMode], Effect, FlatReturn)
 buildFunctionParameters ty_params params return_type = do
   -- Determine parameter passing modes
+  ty_params' <-
+    mapM (setParameterMode . typePatternBinder . fromTypedTyPat) ty_params
   params' <- mapM (setParameterMode . patternBinder . fromTypedPat) params
 
   -- Determine return mode
@@ -330,7 +338,7 @@ buildFunctionParameters ty_params params return_type = do
   -- Determine effect
   let effect = parameterEffects params'
 
-  return (params' ++ maybeToList return_binder, effect, return_spec)
+  return (ty_params' ++ params' ++ maybeToList return_binder, effect, return_spec)
 
 -- | Get the parameter and result types of a case alternative
 getAltParameterTypes :: Alt (Typed Rec) -> PureTC ([Gluon.WRExp], Gluon.WRExp)

@@ -401,6 +401,9 @@ static PyMethodDef untyped_methods[] = {
   {"typeCheckModule", pyon_typeCheckSystemFModule, METH_O,
    "Perform type checking on a System F module.  If checking fails, an\n"
    "exception will be raised."},
+  {"typeCheckAnfModule", pyon_typeCheckAnfModule, METH_O,
+   "Perform type checking on an Anf module.  If checking fails, an\n"
+   "exception will be raised."},
   {NULL, NULL, 0, NULL}
 };
 

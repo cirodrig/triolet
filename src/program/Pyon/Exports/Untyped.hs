@@ -28,6 +28,7 @@ import qualified Pyon.SystemF.PartialEval as SystemF
 import qualified Pyon.SystemF.DeadCode as SystemF
 import Pyon.SystemF.Flatten.ToAnf as SystemF
 import qualified Pyon.Anf.Print as Anf
+import qualified Pyon.Anf.Typecheck as Anf
 
 -- Imported for compilation dependences only
 import Pyon.NewCore.Optimizations()
@@ -349,6 +350,14 @@ pyon_typeCheckSystemFModule _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
   m <- fromHsObject' mod
   SystemF.typeCheckModulePython m
+  pyNone
+
+foreign export ccall pyon_typeCheckAnfModule :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_typeCheckAnfModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  Anf.typeCheckModule m
   pyNone
 
 {-
