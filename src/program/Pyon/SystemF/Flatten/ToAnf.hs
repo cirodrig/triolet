@@ -461,10 +461,10 @@ anfValue pos value =
                         args' <- mapM (anfValue pos) args 
                         return $ Anf.mkAppV pos op' args'
 
--- | Produce a parameter list corresponding to these expressions.  The
--- parameter list will be passed to a function call.
-anfParameters :: SourcePos -> [Value] -> ToAnf [Anf.RVal]
-anfParameters pos values = do
+-- | Produce an argument list corresponding to these expressions.  The
+-- argument list will be passed to a function call.
+anfArguments :: SourcePos -> [Value] -> ToAnf [Anf.RVal]
+anfArguments pos values = do
   addr_values <- mapMaybeM convert_address values
   val_values <- mapM convert_value values
   st_values <- mapMaybeM convert_state values
@@ -509,22 +509,22 @@ anfParameters pos values = do
 
     addr_param v = do
       real_v <- getAddrVariable v
-      return $ Just $ Anf.mkVarV pos v
+      return $ Just $ Anf.mkVarV pos real_v
 
     value_param v = do
       real_v <- getValueVariable v
-      return $ Just $ Anf.mkVarV pos v
+      return $ Just $ Anf.mkVarV pos real_v
 
     pointer_param v = do
       real_v <- getPointerVariable v
-      return $ Anf.mkVarV pos v
+      return $ Anf.mkVarV pos real_v
 
     state_param v = do
       real_v <- getStateVariable v
-      return $ Just $ Anf.mkVarV pos v
+      return $ Just $ Anf.mkVarV pos real_v
     
     can't_convert value =
-      internalError "anfParameters: Can't convert value"
+      internalError "anfArguments: Can't convert value"
 
 -- | Get the ANF type of a function
 -- FIXME: This doesn't generate the right ANF type
@@ -710,7 +710,7 @@ anfStmt statement =
        return $ Anf.ReturnS anf_info val'
      CallS {fexpOper = op, fexpArgs = args} -> do
        op' <- anfValue pos op
-       args' <- anfParameters pos args
+       args' <- anfArguments pos args
        return $ Anf.CallS anf_info $ Anf.AppV anf_info op' args'
      LetS {fexpBinder = Binder v ty _, fexpRhs = rhs, fexpBody = body} -> do
        rhs' <- anfStmt rhs
