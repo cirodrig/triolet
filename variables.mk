@@ -61,6 +61,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/Flatten/FlatData.hs \
 	Pyon/SystemF/Flatten/Flatten.hs \
 	Pyon/SystemF/Flatten/ToAnf.hs \
+	Pyon/SystemF/Flatten/BuiltinsMap.hs \
 	Pyon/Anf/Syntax.hs \
 	Pyon/Anf/Print.hs \
 	Pyon/Anf/Rename.hs \

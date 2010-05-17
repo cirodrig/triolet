@@ -40,8 +40,18 @@ import Pyon.SystemF.Print
 import qualified Pyon.Anf.Syntax as Anf
 import qualified Pyon.Anf.Builtins as Anf
 
+import Pyon.SystemF.Flatten.BuiltinsMap
 import Pyon.SystemF.Flatten.FlatData
 import Pyon.SystemF.Flatten.Flatten
+
+mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
+mapMaybeM f (x:xs) = f x >>= continue
+  where
+    continue Nothing  = mapMaybeM f xs
+    continue (Just y) = do ys <- mapMaybeM f xs
+                           return (y : ys)
+
+mapMaybeM _ [] = return []
 
 flatten :: RModule -> IO Anf.RModule
 flatten mod = do
@@ -63,13 +73,35 @@ flatten mod = do
 
 -------------------------------------------------------------------------------
 
+-- | Types that have been converted from System F to ANF.
+newtype AnfType = AnfType {fromAnfType :: RType}
+
+anfBinder' :: Maybe Var -> AnfType -> RBinder' ()
+anfBinder' mv (AnfType t) = Binder' mv t ()
+
+actionType :: AnfType -> AnfType -> AnfType
+actionType (AnfType eff) (AnfType ret) =
+  let action = Anf.anfBuiltin Anf.the_Action
+  in AnfType $ Gluon.mkInternalConAppE action [eff, ret]
+     
+emptyEffect :: AnfType
+emptyEffect = AnfType Gluon.Core.Builtins.Effect.empty
+
+addrEffect :: Var -> AnfType -> AnfType
+addrEffect v (AnfType obj_ty) =
+  AnfType $ Gluon.mkInternalConAppE (Gluon.builtin Gluon.the_AtE) [obj_ty, Gluon.mkInternalVarE v]
+
+anfEffectUnion :: [AnfType] -> AnfType
+anfEffectUnion xs = AnfType $ foldr Gluon.Core.Builtins.Effect.sconj Gluon.Core.Builtins.Effect.empty $ map fromAnfType xs
+
 -- | Pure variable information.
 data VarElaboration =
-    ValueVar { valueType :: !RType
+    ValueVar { valueVar :: !Var
+             , valueType :: !AnfType
              }
   | ReferenceVar { addressVar :: !Var
                  , pointerVar :: !Var
-                 , objectType :: !RType
+                 , objectType :: !AnfType
                  }
 
 -- | State variable information.
@@ -223,7 +255,7 @@ getValueVariable v =
   where
     lookup_value_variable env =
       case Map.lookup (varID v) env
-      of Just (ValueVar {}) -> v
+      of Just (ValueVar {valueVar = v'}) -> v'
          Just (ReferenceVar {}) -> internalError "getValueVariable: Not a value"
          Nothing -> internalError $ "getValueVariable: No information"
 
@@ -251,20 +283,19 @@ getReadReferenceVariables v = do
   p <- getPointerVariable v
   return (a, p)
 
-getPointerType :: Var -> ToAnf RType
+getPointerType :: Var -> ToAnf AnfType
 getPointerType v = do
   addr <- getAddrVariable v
-  return $ Gluon.mkInternalConAppE (Anf.anfBuiltin Anf.the_Ptr)
-           [Gluon.mkInternalVarE addr]
+  return $ AnfType $ pointerType (Gluon.mkInternalVarE addr)
 
-getEffectType :: Var -> ToAnf RType
+getEffectType :: Var -> ToAnf AnfType
 getEffectType v = getEffectType' (varID v)
 
-getEffectType' :: VarID -> ToAnf RType
+getEffectType' :: VarID -> ToAnf AnfType
 getEffectType' v = do
   addr <- getAddrVariable' v
-  eff_type <- ToAnf $ asksStrict (lookup_object_type . anfVariableMap)
-  return $ Gluon.mkInternalConAppE (Gluon.builtin Gluon.the_AtE) [eff_type, Gluon.mkInternalVarE addr]
+  AnfType obj_type <- ToAnf $ asksStrict (lookup_object_type . anfVariableMap)
+  return $ AnfType $ effectType obj_type (Gluon.mkInternalVarE addr)
   where
     lookup_object_type env =
       case Map.lookup v env
@@ -273,7 +304,7 @@ getEffectType' v = do
               Nothing -> internalError "getEffectType: No information"
 
 -- | Get the value type of the data referenced by a variable.
-getValueType :: Var -> ToAnf RType
+getValueType :: Var -> ToAnf AnfType
 getValueType v = ToAnf $ asksStrict (lookup_type . anfVariableMap)
   where
     lookup_type env =
@@ -284,7 +315,7 @@ getValueType v = ToAnf $ asksStrict (lookup_type . anfVariableMap)
 
 -- | Get the object type of the data referenced by a variable.  The
 -- type does not include modifiers indicating whether the variable is defined.
-getObjectType :: Var -> ToAnf RType
+getObjectType :: Var -> ToAnf AnfType
 getObjectType v = ToAnf $ asksStrict (lookup_object_type . anfVariableMap)
   where
     lookup_object_type env =
@@ -293,20 +324,17 @@ getObjectType v = ToAnf $ asksStrict (lookup_object_type . anfVariableMap)
               Just (ValueVar {}) -> internalError "getStateType: Not a reference"
               Nothing -> internalError "getStateType: No information"
 
-getStateType :: Var -> ToAnf RType
+getStateType :: Var -> ToAnf AnfType
 getStateType v = do
   addr <- getAddrVariable v
-  obj_type <- getObjectType v
-  let at = Gluon.builtin Gluon.the_AtS
-  return $ Gluon.mkInternalConAppE at [obj_type, Gluon.mkInternalVarE addr]
+  AnfType obj_type <- getObjectType v
+  return $ AnfType $ stateType obj_type (Gluon.mkInternalVarE addr)
 
-getUndefStateType :: Var -> ToAnf RType
+getUndefStateType :: Var -> ToAnf AnfType
 getUndefStateType v = do
   addr <- getAddrVariable v
-  obj_type <- getObjectType v
-  let at = Gluon.builtin Gluon.the_AtS
-      undef = Anf.anfBuiltin Anf.the_Undef
-  return $ Gluon.mkInternalConAppE at [Gluon.mkInternalConAppE undef [obj_type], Gluon.mkInternalVarE addr]
+  AnfType obj_type <- getObjectType v
+  return $ AnfType $ undefStateType obj_type (Gluon.mkInternalVarE addr)
 
 -- | Record that a state variable has been used and had its contents defined
 defineStateVariable :: Var -> ToAnf ()
@@ -329,7 +357,8 @@ consumeStateVariable v = ToAnf $ modify (delete v)
   where
     delete v s = s {anfStateMap = Map.delete (varID v) $ anfStateMap s}
 
--- | Get the parameter-passing convention for this type.
+-- | Get the parameter-passing convention for this type.  The type parameter
+-- is a System F type, not an ANF type.
 getAnfPassConv :: RType -> ToAnf Anf.RVal
 getAnfPassConv passed_type = do
   passed_type' <- evalHead' passed_type 
@@ -374,6 +403,8 @@ getAnfPassConv passed_type = do
           testEquality passed_type_v arg
         _ -> return False
 
+-- | Extend the environment with a specificaiton of how to translate a 
+-- variable from System F to ANF.
 withVariableElaboration :: Var -> VarElaboration -> ToAnf a -> ToAnf a
 withVariableElaboration v elaboration (ToAnf m) =
   ToAnf $ local add_elaboration m
@@ -384,29 +415,38 @@ withVariableElaboration v elaboration (ToAnf m) =
 
 -- | Define the variable as a value variable
 withValueVariable :: Var -> RType -> ToAnf a -> ToAnf a
-withValueVariable v ty k =
-  withVariableElaboration v (ValueVar {valueType = ty}) $
-  assumePure v ty $
-  k
+withValueVariable v ty k = do
+  v' <- Gluon.duplicateVar v
+  ty'@(AnfType anf_type) <- convertType ty
+  withVariableElaboration v (ValueVar {valueVar = v', valueType = ty'}) $
+    assumePure v' anf_type k
+
+-- | Define the variable as a closure variable.  Use the given type, which 
+-- is an ANF type.
+withClosureVariableAnf :: Var -> AnfType -> ToAnf a -> ToAnf a
+withClosureVariableAnf v (AnfType anf_type) k = do
+  v' <- Gluon.duplicateVar v
+  withVariableElaboration v (ValueVar {valueVar = v', valueType = AnfType anf_type}) $
+    assumePure v' anf_type k
 
 withClosureVariable :: Var -> RType -> ToAnf a -> ToAnf a
-withClosureVariable v ty k =
-  withVariableElaboration v (ValueVar {valueType = ty}) $
-  assumePure v ty $
-  k
+withClosureVariable v ty k = do
+  ty' <- convertType ty
+  withClosureVariableAnf v ty' k
 
 -- | The variable is pass-by-reference.  Define address and pointer variables
 -- for it.
 withReferenceVariable :: Var -> RType -> ToAnf a -> ToAnf a
 withReferenceVariable v ty k = do
   -- Create new variables for the address and pointer
-  address_var_id <- fresh
-  pointer_var_id <- fresh
-  let address_var = Gluon.mkVar address_var_id (varName v) ObjectLevel
-      pointer_var = Gluon.mkVar pointer_var_id (varName v) ObjectLevel
+  address_var <- Gluon.newVar (varName v) ObjectLevel
+  pointer_var <- Gluon.newVar (varName v) ObjectLevel
     
+  -- Convert the object type
+  ty' <- convertType ty  
+
   -- Put into environment
-  withVariableElaboration v (ReferenceVar address_var pointer_var ty) $
+  withVariableElaboration v (ReferenceVar address_var pointer_var ty') $
     assumePure address_var addressType $
     assumePure pointer_var (pointerType (Gluon.mkInternalVarE address_var)) $
     k
@@ -414,8 +454,7 @@ withReferenceVariable v ty k = do
 withStateVariable :: Var -> ToAnf a -> ToAnf a
 withStateVariable v (ToAnf m) = ToAnf $ do
   -- Create a new state variable
-  new_v_id <- lift fresh
-  let new_v = Gluon.mkVar new_v_id (varName v) ObjectLevel
+  new_v <- lift $ Gluon.newVar (varName v) ObjectLevel
 
   -- Run the computation with the modified state.
   -- Ensure that the state has been consumed.
@@ -437,6 +476,195 @@ withStateVariable v (ToAnf m) = ToAnf $ do
       let elaboration = VarStateElaboration False new_v
       in Map.insert (varID v) elaboration m
 
+-- | Convert a System F type to an ANF type.
+convertType :: RType -> ToAnf AnfType
+convertType ty = do
+  mode <- chooseMode ty
+  case mode of
+    PassByClo -> convertClosureType ty
+    PassByVal -> convertValType ty
+    PassByRef -> convertValType ty
+
+convertValType :: RType -> ToAnf AnfType
+convertValType expression =
+  case expression
+  of Gluon.VarE {Gluon.expVar = v} -> do
+       -- Types follow the pass-by-value convention
+       v' <- getValueVariable v
+       return $ AnfType $ Gluon.mkVarE pos v'
+     Gluon.ConE {Gluon.expCon = c} ->
+       return $ AnfType $ Gluon.mkConE pos $ sfToAnfCon c
+     Gluon.LitE {Gluon.expLit = literal} ->
+       case literal
+       of Gluon.KindL Gluon.PureKind ->
+            return $ AnfType $ Gluon.mkInternalConE $ Gluon.builtin Gluon.the_Object
+     Gluon.AppE {Gluon.expOper = op, Gluon.expArgs = args} -> do
+       AnfType op' <- convertType op
+       args' <- mapM convertType args
+       return $ AnfType $ Gluon.mkAppE pos op' (map fromAnfType args')
+     Gluon.FunE { Gluon.expMParam = Binder' Nothing dom ()
+                , Gluon.expRange = rng} -> do
+       AnfType dom' <- convertType dom
+       AnfType rng' <- convertType rng
+       return $ AnfType $ Gluon.mkArrowE pos False dom' rng'
+     Gluon.FunE { Gluon.expMParam = Binder' (Just v) dom ()
+                , Gluon.expRange = rng} -> do
+       -- Dependent parameters are always passed by value
+       withValueVariable v dom $ do
+         real_v <- getValueVariable v
+         AnfType real_t <- getValueType v
+         AnfType rng' <- convertType rng
+         return $ AnfType $ Gluon.mkFunE pos False real_v real_t rng'
+     _ -> internalError "convertType"
+  where
+    pos = getSourcePos expression
+
+-- | Convert a SystemF function type to an ANF procedure type.
+convertClosureType :: RType -> ToAnf AnfType
+convertClosureType expression = convertPolyClosureType False expression
+
+-- | Convert a SystemF polymorphic function type to an ANF procedure type.
+--
+-- The boolean parameter keeps track of whether any parameters corresponding 
+-- to HM polymorphism have been seen.  If none are seen, then this function
+-- is treated just like a monomorphic function.
+convertPolyClosureType :: Bool -> RType -> ToAnf AnfType
+convertPolyClosureType have_poly_parameters expression =
+  case expression
+  of Gluon.FunE {Gluon.expMParam = Binder' mv dom (), Gluon.expRange = rng} 
+       | isPolyParameterType dom ->
+         case mv
+         of Nothing -> do
+              AnfType dom' <- convertType dom
+              AnfType rng' <- convertPolyClosureType True rng
+              return $ AnfType $ Gluon.mkArrowE pos False dom' rng'
+            Just v -> withValueVariable v dom $ do
+              -- Dependent parameters are always passed by value
+              real_v <- getValueVariable v
+              AnfType real_t <- getValueType v
+              AnfType rng' <- convertPolyClosureType True rng
+              return $ AnfType $ Gluon.mkFunE pos False real_v real_t rng'
+       | otherwise -> do
+           anf_type <- convertMonoClosureType expression
+           
+           -- Create an 'Action' constructor if appropriate
+           if have_poly_parameters
+             then return $ pure_action_type anf_type 
+             else return anf_type
+     _ -> convertMonoClosureType expression
+  where
+    pos = getSourcePos expression
+
+    pure_action_type return_type =
+      actionType (AnfType Gluon.Core.Builtins.Effect.empty) return_type
+
+convertMonoClosureType expression = do
+  -- Get domain and return types
+  let (dom_types, ret_type) = deconstruct_function_type id expression
+
+  -- Determine parameter passing modes
+  param_modes <- mapM chooseMode dom_types
+  
+  -- Create variables for new dependent parameters
+  withMany with_param_var (zip dom_types param_modes) $ \param_binders -> 
+    convertClosureReturn ret_type $ \return_binders ->
+    let (addr_binders, value_binders, effects) = unzip3 param_binders
+        (raddr_binder, rvalue_binder, rstate_binder, anf_ret_ty) =
+          return_binders
+        binders = catMaybes $ addr_binders ++ [raddr_binder] ++
+                  value_binders ++ [rvalue_binder] ++
+                  [rstate_binder]
+    in do
+      -- Create the effect type
+      let eff = anfEffectUnion effects
+       
+      -- Build the function type
+      let AnfType range = actionType eff anf_ret_ty
+      return $ AnfType $ foldr mk_fun range binders
+  where
+    pos = getSourcePos expression
+
+    mk_fun param range =
+      Gluon.FunE { Gluon.expInfo = Gluon.internalSynInfo (getLevel range)
+                 , Gluon.expIsLinear = False
+                 , Gluon.expMParam = param
+                 , Gluon.expRange = range
+                 }
+
+    with_param_var (param_type, mode) k = 
+      case mode
+      of PassByVal -> do
+           ty' <- convertType param_type
+           k (Nothing, Just (anfBinder' Nothing ty'), emptyEffect)
+         PassByClo -> do
+           ty' <- convertType param_type
+           k (Nothing, Just (anfBinder' Nothing ty'), emptyEffect)
+         PassByRef -> do
+           -- Create a new variable for the address
+           address_var <- Gluon.newAnonymousVariable ObjectLevel
+    
+           -- Convert the object type
+           obj_ty <- convertType param_type
+      
+           let pointer_type = AnfType $ pointerType (Gluon.mkInternalVarE address_var)
+           assumePure address_var addressType $
+             k (Just (anfBinder' (Just address_var) (AnfType addressType)), 
+                Just (anfBinder' Nothing pointer_type),
+                addrEffect address_var obj_ty)
+
+    -- Deconstruct a function type into a parameter list and return type
+    deconstruct_function_type hd function_type =
+      case function_type
+      of Gluon.FunE { Gluon.expMParam = Binder' Nothing dom ()
+                    , Gluon.expRange = rng} ->
+           deconstruct_function_type ((dom :) . hd) rng
+         Gluon.FunE {Gluon.expMParam = Binder' (Just _) _ ()} ->
+           traceShow (Gluon.pprExp function_type) $ internalError "convertMonoClosureType: Unexpected dependent type"
+         _ -> (hd [], function_type)
+
+-- | Convert a function return type and pass it to the continuation.
+convertClosureReturn :: RType 
+                     -> ((Maybe (RBinder' ()), Maybe (RBinder' ()), Maybe (RBinder' ()), AnfType) -> ToAnf a)
+                     -> ToAnf a
+convertClosureReturn ret_type k = do
+  mode <- chooseMode ret_type
+  case mode of
+    PassByVal -> convert_return_type ret_type
+    PassByClo -> convert_return_type ret_type
+    PassByRef -> do
+      -- Create a new variable for the address
+      address_var <- Gluon.newAnonymousVariable ObjectLevel
+    
+      -- Convert the object type
+      AnfType ty' <- convertType ret_type
+      
+      let addr_expr    = Gluon.mkInternalVarE address_var
+          pointer_type = AnfType $ pointerType addr_expr
+          state_type   = AnfType $ undefStateType ty' addr_expr
+          return_type  = AnfType $ stateType ty' addr_expr
+      assumePure address_var addressType $
+        k (Just (anfBinder' (Just address_var) (AnfType addressType)),
+           Just (anfBinder' Nothing pointer_type),
+           Just (anfBinder' Nothing state_type),
+           return_type)    
+  where
+    -- Return a value or closure
+    convert_return_type expression = do
+      return_type <- convertType expression
+      k (Nothing, Nothing, Nothing, return_type)
+
+isPolyParameterType :: RType -> Bool
+isPolyParameterType ty
+  | getLevel ty == ObjectLevel = internalError "isPolyParameterType"
+  | getLevel ty /= TypeLevel = True 
+  | otherwise =
+      case ty
+      of Gluon.ConE {Gluon.expCon = c} ->
+           isDictionaryTypeConstructor c
+         Gluon.AppE {Gluon.expOper = Gluon.ConE {Gluon.expCon = c}} ->
+           isDictionaryTypeConstructor c
+         _ -> False
+
 -------------------------------------------------------------------------------
 
 -- | Produce the value corresponding to this expression.
@@ -451,10 +679,11 @@ anfValue pos value =
        | otherwise -> internalError "anfValue"
      ConV c mode 
        | mode == IOVal || mode == IOClo -> do
-           return $ Anf.mkConV pos c
+           return $ Anf.mkConV pos (sfToAnfCon c)
        | otherwise -> internalError "anfValue"
      LitV (IntL n) -> return $ Anf.mkLitV pos (Gluon.IntL n)
-     TypeV ty -> return $ Anf.mkExpV ty
+     TypeV ty -> do AnfType ty' <- convertType ty
+                    return $ Anf.mkExpV ty'
      FunV f -> do f' <- anfProc f
                   return $ Anf.mkLamV f'
      AppV op args -> do op' <- anfValue pos op
@@ -526,49 +755,99 @@ anfArguments pos values = do
     can't_convert value =
       internalError "anfArguments: Can't convert value"
 
--- | Get the ANF type of a function
--- FIXME: This doesn't generate the right ANF type
-anfFunctionType :: FlatFun -> ToAnf RType
-anfFunctionType ffun =
-  add_parameters (ffunParams ffun) $
-  convert_return_type (ffunReturnType ffun)
+-- | Get the ANF type of a function.
+--
+-- The translation from binders to arrow types in this function matches
+-- the translation from binders to binders in 'anfBindParameters'.
+anfFunctionType :: FlatFun -> ToAnf AnfType
+anfFunctionType ffun = anfCreateParameterMaps (ffunParams ffun) $ do
+  addr_domain <- mapMaybeM convert_address (ffunParams ffun)
+  val_domain <- mapM convert_value (ffunParams ffun)
+  st_domain <- mapMaybeM convert_state (ffunParams ffun)
+  effect <- liftM anfEffectUnion $ mapM get_effect (ffunParams ffun)
+  (addr_range, val_range, st_range, ret_range) <-
+    convert_return (ffunReturnType ffun)
+  let AnfType anf_ret_ty = actionType effect ret_range
+  return $ AnfType $ foldr ($) anf_ret_ty (addr_domain ++ maybeToList addr_range ++ val_domain ++ maybeToList val_range ++ st_domain ++ maybeToList st_range)
   where
     pos = getSourcePos (ffunInfo ffun)
     
-    add_parameters params k = foldr add_parameter k params
-    
-    -- Create a function type by adding the parameter's type to the type
-    -- produced by the continuation 'k'.
-    -- Only type and address parameters are used dependently; we can use
-    -- the given variables as dependent type/address variables without
-    -- renaming them.
-    add_parameter :: RBinder DataMode -> ToAnf RType -> ToAnf RType
-    add_parameter (Binder v ty data_mode) k =
-      case data_mode
-      of IOVal
-           | getLevel ty == KindLevel -> dependent
-           | otherwise -> non_dependent
-         IOClo -> non_dependent
-         InRef -> dependent
-         OutRef -> non_dependent
-      where
-        dependent = do
-          rng <- k
-          return (Gluon.mkFunE pos False v ty rng)
-        
-        non_dependent = do
-          rng <- k
-          return (Gluon.mkArrowE pos False ty rng)
+    get_effect (Binder v ty d_mode) =
+      case d_mode
+      of IOVal -> return emptyEffect
+         IOVal -> return emptyEffect
+         InRef -> getEffectType v
+         OutRef -> return emptyEffect
 
-    convert_return_type ty = return ty
+    convert_address (Binder v ty d_mode) =
+      case d_mode
+      of IOVal -> return Nothing
+         IOClo -> return Nothing
+         InRef -> address_parameter v
+         OutRef -> address_parameter v
+      
+    convert_value (Binder v ty d_mode) =
+      case d_mode
+      of IOVal -> value_parameter v
+         IOClo -> value_parameter v
+         InRef -> pointer_parameter v
+         OutRef -> pointer_parameter v
+
+    convert_state (Binder v ty d_mode) =
+      case d_mode
+      of IOVal -> return Nothing
+         IOClo -> return Nothing
+         InRef -> return Nothing
+         OutRef -> state_parameter v
+
+    convert_return rt = do
+      (anf_addr, anf_val, anf_st, anf_rt) <- convertClosureReturn rt return
+      let make_function_type param rng = 
+            Gluon.FunE (Gluon.mkSynInfo pos ObjectLevel) False param rng
+      return (fmap make_function_type anf_addr,
+              fmap make_function_type anf_val,
+              fmap make_function_type anf_st,
+              anf_rt)
+
+    -- Address parameters are always used dependently
+    address_parameter v = do
+      real_v <- getValueVariable v
+      AnfType real_t <- getValueType v
+      return $ Just $ \rng -> Gluon.mkFunE pos False real_v real_t rng
+
+    -- Value parameters may or may not be used dependently
+    value_parameter v = do
+      real_v <- getValueVariable v
+      AnfType real_t <- getValueType v
+      return $ \rng -> if rng `Gluon.mentions` real_v
+                       then Gluon.mkFunE pos False real_v real_t rng
+                       else Gluon.mkArrowE pos False real_t rng
+    
+    -- Pointer parameters are never used dependently
+    pointer_parameter v = do
+      AnfType real_t <- getPointerType v
+      return $ \rng -> Gluon.mkArrowE pos False real_t rng
+      
+    -- State parameters are never used dependently
+    state_parameter v = do
+      AnfType real_t <- getUndefStateType v
+      return $ Just $ \rng -> Gluon.mkArrowE pos False real_t rng
 
 anfProc :: FlatFun -> ToAnf (Anf.Proc Rec)
 anfProc ffun = hideState $
   -- Convert function parameters and make a local parameter mapping
   anfBindParameters (ffunParams ffun) $ \params -> do
-    -- Convert return and effect types
-    rt <- convert_return_type (ffunReturn ffun) (ffunReturnType ffun)
-    et <- anfEffectType (ffunEffect ffun)
+    -- Convert effect type
+    AnfType et <- anfEffectType (ffunEffect ffun)
+    
+    -- Get return type
+    AnfType rt <-
+      case returnMode $ ffunReturn ffun
+      of IOVal -> convertType $ returnType $ ffunReturn ffun
+         IOClo -> convertType $ returnType $ ffunReturn ffun
+         OutRef -> case return_variable
+                   of Just v -> getStateType v
+                      Nothing -> internalError "anfProc"
 
     -- Convert body
     body <- anfStmt $ ffunBody ffun
@@ -590,8 +869,7 @@ anfProc ffun = hideState $
         is_return_parameter (Binder _ _ OutRef) = True
         is_return_parameter _ = False
 
-    -- Not implemented: Convert return type
-    convert_return_type _ rt = return rt
+    pos = getSourcePos (ffunInfo ffun)
 
 anfCreateParameterMaps :: [RBinder DataMode] -> ToAnf a -> ToAnf a
 anfCreateParameterMaps params k =
@@ -608,15 +886,11 @@ anfCreateParameterMap (Binder v ty data_mode) k =
          InRef -> withReferenceVariable v ty k
          OutRef -> withReferenceVariable v ty $ withStateVariable v k
 
-mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
-mapMaybeM f (x:xs) = f x >>= continue
-  where
-    continue Nothing  = mapMaybeM f xs
-    continue (Just y) = do ys <- mapMaybeM f xs
-                           return (y : ys)
-
-mapMaybeM _ [] = return []
-
+-- | Convert System F parameters (such as function parameters) to ANF
+-- parmeters.
+--
+-- The parameter conversion must match how function types are converted
+-- in 'anfFunctionType'.
 anfBindParameters :: [RBinder DataMode]
                   -> ([RBinder ()] -> ToAnf a)
                   -> ToAnf a
@@ -625,8 +899,10 @@ anfBindParameters params k =
     addr_params <- mapMaybeM convert_address params
     val_params <- mapMaybeM convert_value params
     st_params <- mapMaybeM convert_state params
-    k $ addr_params ++ val_params ++ st_params
+    let all_params = addr_params ++ val_params ++ st_params
+    k all_params
   where
+
     convert_address (Binder v ty d_mode) =
       case d_mode
       of IOVal -> return Nothing
@@ -654,27 +930,27 @@ anfBindParameters params k =
       
     value_parameter v = do
       real_v <- getValueVariable v
-      real_t <- getValueType v
+      AnfType real_t <- getValueType v
       return $ Just $ Binder real_v real_t ()
 
     pointer_parameter v = do
       real_v <- getPointerVariable v
-      real_t <- getPointerType v
+      AnfType real_t <- getPointerType v
       return $ Just $ Binder real_v real_t ()
 
     state_parameter v = do
       real_v <- getStateVariable v
-      real_t <- getUndefStateType v
+      AnfType real_t <- getUndefStateType v
       return $ Just $ Binder real_v real_t ()
 
 -- | Compute the effect type corresponding to this effect.    
-anfEffectType :: Effect -> ToAnf RType
+anfEffectType :: Effect -> ToAnf AnfType
 anfEffectType eff = do
   types <- mapM getEffectType' $ effectVars eff
-  return $ foldr
+  return $ AnfType $ foldr
     Gluon.Core.Builtins.Effect.sconj
     Gluon.Core.Builtins.Effect.empty
-    types
+    (map fromAnfType types)
 
 anfDef :: FlatDef -> ToAnf (Anf.ProcDef Rec)
 anfDef (FlatDef v f) = do
@@ -694,7 +970,7 @@ anfDefGroup dg m =
       ty <- anfFunctionType fun
       
       -- Put it in the environment
-      withClosureVariable v ty k
+      withClosureVariableAnf v ty k
 
 -- | Generate ANF code for a statement.
 --
@@ -714,14 +990,19 @@ anfStmt statement =
        return $ Anf.CallS anf_info $ Anf.AppV anf_info op' args'
      LetS {fexpBinder = Binder v ty _, fexpRhs = rhs, fexpBody = body} -> do
        rhs' <- anfStmt rhs
-       body' <- withValueVariable v ty $ anfStmt body
-       return $ Anf.LetS anf_info (Binder v ty ()) rhs' body'
+       (anf_v, anf_ty, body') <- withValueVariable v ty $ do 
+         anf_v <- getValueVariable v
+         AnfType anf_ty <- getValueType v
+         body' <- anfStmt body
+         return (anf_v, anf_ty, body')
+       
+       return $ Anf.LetS anf_info (Binder anf_v anf_ty ()) rhs' body'
      EvalS {fexpRhs = rhs, fexpBody = body} ->
        case fexpReturn rhs
-       of VariableReturn ty v -> do
+       of VariableReturn _ v -> do
             rhs' <- anfStmt rhs
             state_v <- getStateVariableX "evalS" v
-            state_ty <- getStateType v
+            AnfType state_ty <- getStateType v
             body' <- anfStmt body
             return $ Anf.LetS anf_info (Binder state_v state_ty ()) rhs' body'
           _ -> internalError "anfStmt"
@@ -761,7 +1042,7 @@ anfStmt statement =
 
 anfReading :: SourcePos -> RType -> FlatReturn -> Var -> Stmt
            -> ToAnf Anf.RStm 
-anfReading pos ty return_info var body = do
+anfReading pos _ return_info var body = do
   -- Get the type of the variable to be read
   -- (should be a defined state variable)
   obj_type <- getObjectType var
@@ -787,7 +1068,7 @@ anfReading pos ty return_info var body = do
   let reading = Anf.mkConV pos $ Anf.anfBuiltin Anf.the_reading 
       stmt = Anf.mkCallAppS pos reading [ Anf.mkExpV effect_type
                                         , Anf.mkExpV return_type
-                                        , Anf.mkExpV obj_type
+                                        , Anf.mkExpV (fromAnfType obj_type)
                                         , Anf.mkVarV pos addr_var
                                         , Anf.mkLamV body_fn
                                         , body_param
@@ -850,8 +1131,8 @@ anfReading pos ty return_info var body = do
 anfLocal :: SourcePos -> RType -> FlatReturn -> Var -> Stmt
          -> ToAnf Anf.RStm 
 anfLocal pos ty return_info var body = do
-  -- The given type is the type of the local object
-  let obj_type = ty
+  -- Convert the local object's type to its ANF equivalent
+  obj_type <- convertType ty
 
   -- Turn the body into a lambda function
   (body_return_spec, body_fn) <- anfStmtToProc add_local_object body
@@ -870,7 +1151,7 @@ anfLocal pos ty return_info var body = do
   let local = Anf.mkConV pos $ Anf.anfBuiltin Anf.the_local
       stmt = Anf.mkCallAppS pos local [ Anf.mkExpV effect_type
                                       , Anf.mkExpV return_type
-                                      , Anf.mkExpV obj_type
+                                      , Anf.mkExpV (fromAnfType obj_type)
                                       , Anf.mkLamV body_fn
                                       ]
     
@@ -891,7 +1172,7 @@ anfLocal pos ty return_info var body = do
         input_st_type <- getUndefStateType var
         let params = [ Binder local_addr addressType ()
                      , Binder local_ptr (pointerType $ Gluon.mkInternalVarE local_addr) ()
-                     , Binder local_st input_st_type ()
+                     , Binder local_st (fromAnfType input_st_type) ()
                      ]
 
         -- Create the return specification
@@ -914,27 +1195,29 @@ anfGetStmtReturnParameter stm k =
      ClosureReturn ty _ -> value_return ty
      VariableReturn ty v -> variable_return ty v
   where 
-    value_return ty = k [] (StmtValueReturn ty)
+    value_return sf_ty = do 
+      anf_ty <- convertType sf_ty
+      k [] (StmtValueReturn anf_ty)
     
     -- If returning a state variable, then set up the environment,
     -- create a parameter, and indicate that it shall be returned.
-    variable_return ty v = withStateVariable v $ do
-       -- Create binder and return type of this variable
-       param_type <- getUndefStateType v
-       input_state_var <- getStateVariableX "anfGetStmtReturnParameter" v
-       let binder = Binder input_state_var param_type ()
+    variable_return _ v = withStateVariable v $ do
+      -- Create binder and return type of this variable
+      AnfType param_type <- getUndefStateType v
+      input_state_var <- getStateVariableX "anfGetStmtReturnParameter" v
+      let binder = Binder input_state_var param_type ()
        
-       return_type <- getStateType v
+      return_type <- getStateType v
 
-       -- Run the main computation
-       k [binder] (StmtStateReturn return_type v)
+      -- Run the main computation
+      k [binder] (StmtStateReturn return_type v)
 
 -- | The return specification for a procedure created by 'anfStmtToProc'.
--- This specifies what data type to return and what data it contains.
+-- This specifies what ANF data type to return and what data it contains.
 data StmtReturn =
-    StmtValueReturn RType       -- ^ The return value of the statement
-  | StmtStateReturn RType !Var  -- ^ A state variable
-  | StmtTupleReturn [StmtReturn] -- ^ A tuple of things
+    StmtValueReturn AnfType       -- ^ The return value of the statement
+  | StmtStateReturn AnfType !Var  -- ^ A state variable
+  | StmtTupleReturn [StmtReturn]  -- ^ A tuple of things
 
 pprStmtReturn :: StmtReturn -> Doc
 pprStmtReturn (StmtValueReturn _) = text "Value"
@@ -948,7 +1231,7 @@ pprStmtReturn (StmtTupleReturn xs) =
 buildStmtReturnValue :: StmtReturn -- ^ What to return
                      -> FlatReturn -- ^ Given statement's return value
                      -> Anf.RStm   -- ^ Given statement
-                     -> ToAnf (RType, Anf.RStm)
+                     -> ToAnf (AnfType, Anf.RStm)
 
 -- First, handle cases where the statement's return value is already right
 buildStmtReturnValue (StmtValueReturn ty) (ValueReturn _) stm =
@@ -966,9 +1249,9 @@ buildStmtReturnValue (StmtStateReturn ty v) (VariableReturn _ v') stm
 -- Now handle other cases
 buildStmtReturnValue return_spec ret stm = do
   -- Bind the statement's result to a temporary variable
-  stmt_result_id <- fresh
-  let stmt_result_var = Gluon.mkAnonymousVariable stmt_result_id ObjectLevel
-      result_binder = Binder stmt_result_var (returnType ret) ()
+  stmt_result_var <- Gluon.newAnonymousVariable ObjectLevel
+  AnfType anf_return_type <- convertType $ returnType ret
+  let result_binder = Binder stmt_result_var anf_return_type ()
    
   -- Construct the return value
   (return_exp, return_type) <- make_return_value stmt_result_var return_spec
@@ -983,18 +1266,20 @@ buildStmtReturnValue return_spec ret stm = do
     stmt_pos = getSourcePos stm
 
     -- | Construct a return value expression and its type
-    make_return_value stmt_result_var return_spec = mrv return_spec
+    make_return_value stmt_result_var return_spec = do
+      (val, ty) <- mrv return_spec
+      return (val, AnfType ty)
       where
         -- Return the statement's result
         mrv (StmtValueReturn ty) =
-          return (Gluon.mkVarE stmt_pos stmt_result_var, ty)
+          return (Gluon.mkVarE stmt_pos stmt_result_var, fromAnfType ty)
         
         -- Consume and return a state variable
         mrv (StmtStateReturn _ state_v) = do
           v <- getStateVariableX "buildStmtReturnValue" state_v
           ty <- getStateType state_v
           consumeStateVariable state_v
-          return (Gluon.mkVarE stmt_pos v, ty)
+          return (Gluon.mkVarE stmt_pos v, fromAnfType ty)
         
         -- Construct a tuple
         mrv (StmtTupleReturn xs) = do
@@ -1013,8 +1298,6 @@ buildStmtReturnValue return_spec ret stm = do
           
           return (Gluon.mkTupE stmt_pos tuple,
                   Gluon.mkTupTyE stmt_pos tuple_type)
-
-  
 
 -- | Convert an ANF statement to a procedure.
 --
@@ -1035,13 +1318,13 @@ anfStmtToProc initialize_params stm =
     -- Create a procedure that returns by value
     make_proc ext_params ext_return_spec = do
       -- Get effect type
-      effect_type <- anfEffectType $ fexpEffect stm
+      AnfType effect_type <- anfEffectType $ fexpEffect stm
 
       -- Create body
       body <- anfStmt stm
       
       -- Construct the return expression
-      (return_type, body') <-
+      (AnfType return_type, body') <-
         buildStmtReturnValue ext_return_spec (fexpReturn stm) body
 
       -- Return the new procedure
@@ -1061,9 +1344,10 @@ anfStmtToProc initialize_params stm =
 
 anfAlternative :: FlatValAlt -> ToAnf (Anf.Alt Rec)
 anfAlternative (FlatValAlt con ty_args params body) = do
+  -- Use 'Int -> Int' as a dummy return type here
   anfBindParameters params $ \params' -> do
     body' <- anfStmt body
-    return $ Anf.Alt con params' body'
+    return $ Anf.Alt (sfToAnfCon con) params' body'
 
 -- | Convert a pass-by-reference case statement to ANF.
 -- It is converted to a call to an elimination function.
@@ -1137,14 +1421,8 @@ anfCaseRef pos scrutinee_var scrutinee_type alts = do
 anfRefAlternative :: SourcePos -> FlatRefAlt -> ToAnf (Con, Anf.Proc Rec)
 anfRefAlternative pos (FlatRefAlt con _ params eff ret ret_ty body) = do
   (return_spec, proc) <- anfStmtToProc alternative_parameters body
-  return (con, proc)
+  return (sfToAnfCon con, proc)
   where
-    return_value_type =
-      case ret
-      of ValueReturn ty -> Just ty
-         ClosureReturn ty _ -> Just ty
-         VariableReturn _ _ -> Nothing
-
     alternative_parameters k =
       -- Pass state in and out if required 
       anfGetStmtReturnParameter body $ \stmt_params stmt_ret ->
@@ -1197,15 +1475,15 @@ anfStoreValue pos ty dst val = do
                of LitV (BoolL b) ->
                     let literal =
                           Gluon.mkConE pos $ if b
-                                             then pyonBuiltin the_True
-                                             else pyonBuiltin the_False
+                                             then Anf.anfBuiltin Anf.the_TrueV
+                                             else Anf.anfBuiltin Anf.the_FalseV
                         oper = Anf.anfBuiltin Anf.the_store_bool
                     in store_literal oper literal
            | c `isPyonBuiltin` the_NoneType ->
                  case val
                  of LitV NoneL ->
                       let literal =
-                            Gluon.mkConE pos $ pyonBuiltin the_None
+                            Gluon.mkConE pos $ Anf.anfBuiltin Anf.the_NoneV
                           oper = Anf.anfBuiltin Anf.the_store_NoneType
                       in store_literal oper literal
          _ -> internalError "Cannot store literal value"

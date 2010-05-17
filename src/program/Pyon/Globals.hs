@@ -70,7 +70,7 @@ loadBuiltins = do
       case result of
         Just bi -> do putMVar the_builtinModule bi
                       Just pbi <- loadPyonBuiltins varIDs conIDs bi
-                      _ <- loadAnfBuiltins varIDs conIDs bi pbi
+                      _ <- loadAnfBuiltins varIDs conIDs bi
                       -- _ <- Pyon.SystemF.SpclBuiltins.loadPyonBuiltins varIDs conIDs bi
                       return ()
         Nothing -> fail "Could not load builtins"

@@ -8,6 +8,7 @@ import Data.List
 import Data.Monoid
 
 import Gluon.Common.Error
+import Gluon.Common.Label
 import Gluon.Common.SourcePos
 import Gluon.Core
 import Gluon.Core.RenameBase
@@ -293,7 +294,7 @@ tcScanCall inf v = do
               substFullyUnderWhnf eff',
               CallS inf val')
     
-    Nothing -> throwError $ OtherErr "Not an action"
+    _ -> throwError $ OtherErr "Not an action"
 
 tcScanLet :: SynInfo -> Binder SubstRec () -> SRStm -> SRStm
           -> LinTC (WRExp, WRExp, StmOf Rec (Typed Rec))
@@ -417,7 +418,7 @@ matchPattern scr_type con p_params continuation = do
     Just (scr_con, s_args)
       | con `isDataConstructorOf` scr_con ->
           match_con_args mempty s_args c_params p_params
-    _ -> throwError $ OtherErr" Pattern match failure"
+    _ -> throwError $ OtherErr "Pattern match failure"
 
   where
     -- Match the pattern, one constructor argument at a time

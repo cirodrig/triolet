@@ -15,22 +15,28 @@ operator 5 :|: = reversed_WhereE;
 let reversed_WhereS (a : State) (p : Prop) -> State = WhereS p a;
 let reversed_WhereE (a : Effect) (p : Prop) -> Effect = WhereE p a;
 
-constant PassConv : Pure -> Pure;
+
+let binary (a : Object) -> Pure =
+    (la : Addr) -> (lb : Addr) -> (lr : Addr)
+ -> Ptr la -> Ptr lb -> Ptr lr
+ -> Undef a @ lr
+ -> Action (a :@: la :**: a :@: lb) (a @ lr);
+
+-------------------------------------------------------------------------------
+
+constant PassConv : Object -> Pure;
 
 constant PassConv_int : PassConv Int;
 constant PassConv_float : PassConv Float;
 constant PassConv_PyonTuple2 :
     (a : Pure) -> (b : Pure)
  -> PassConv a -> PassConv b
- -> PassConv (PyonTuple2 a b);
+ -> PassConv (PyonTuple2O a b);
 
 constant Action : Effect -> Pure -> Pure;
 
 -- Pointer type
 constant Ptr : Addr -> Pure;
-
--- Undefined object state
-constant Undef : Pure -> Pure;
 
 -- | Copy data from source to destination
 constant copy :
@@ -59,6 +65,44 @@ constant local :
  -> PassConv a			-- Parameter passing information
  -> ((l : Addr) -> Ptr l -> Undef a @ l -> Action eff (| a @ l, rt |))
  -> Action eff rt;
+
+-------------------------------------------------------------------------------
+-- Pyon value data types
+
+data NoneTypeV : Pure where
+  NoneV : NoneTypeV;
+
+data boolV : Pure where
+  TrueV : boolV | FalseV : boolV;
+
+-------------------------------------------------------------------------------
+-- Pyon data types as object types
+
+-- An undefined object
+constant Undef : Object -> Object;
+
+constant NoneTypeO : Object;
+constant AnyO : Object;
+constant boolO : Object;
+constant listO : Object -> Object;
+constant StreamO : Object -> Object;
+
+constant PyonTuple2O : Object -> Object -> Object;
+
+-------------------------------------------------------------------------------
+-- Pyon dictionary types
+
+data AdditiveDict : Object -> Pure where
+  additiveDict :
+      (a : Object)
+   -> (   (l : Addr) -> (rl : Addr)
+       -> Ptr l -> Ptr rl -> Undef a @ rl
+       -> Action (NoneTypeO :@: l) (a @ rl))
+   -> binary a
+   -> binary a
+   -> AdditiveDict a;
+
+-------------------------------------------------------------------------------
 
 constant map :
     (eff : Effect)
@@ -91,16 +135,16 @@ constant store_float :
 constant store_bool :
     (a : Addr)
  -> Ptr a
- -> bool
- -> Undef bool @ a
- -> Action EmpE (bool @ a);
+ -> boolV
+ -> Undef boolO @ a
+ -> Action EmpE (boolO @ a);
 
 constant store_NoneType :
     (a : Addr)
  -> Ptr a
- -> NoneType
- -> Undef NoneType @ a
- -> Action EmpE (NoneType @ a);
+ -> NoneTypeV
+ -> Undef NoneTypeO @ a
+ -> Action EmpE (NoneTypeO @ a);
 
 constant elim_bool :
     (eff : Effect)

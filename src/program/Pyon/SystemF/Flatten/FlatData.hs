@@ -22,6 +22,12 @@ import Pyon.SystemF.Print
 import qualified Pyon.Anf.Syntax as Anf
 import qualified Pyon.Anf.Builtins as Anf
 
+withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
+withMany f xs k = go xs k
+  where
+    go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
+    go []     k = k []
+
 -- | The unit type
 unitType :: RType
 unitType = Gluon.TupTyE (Gluon.mkSynInfo noSourcePos TypeLevel) Gluon.Unit
@@ -34,6 +40,25 @@ addressType = Gluon.mkInternalConE $ Gluon.builtin Gluon.the_Addr
 pointerType :: RType -> RType 
 pointerType referent =
   Gluon.mkInternalConAppE (Anf.anfBuiltin Anf.the_Ptr) [referent]
+
+-- | The type of an object at an address
+stateType :: RType -> RType -> RType
+stateType obj_type addr_type =
+  let at = Gluon.builtin Gluon.the_AtS
+  in Gluon.mkInternalConAppE at [obj_type, addr_type]
+
+-- | The type of an undefined object at an address
+undefStateType :: RType -> RType -> RType
+undefStateType obj_type addr_type =
+  let at = Gluon.builtin Gluon.the_AtS
+      undef = Anf.anfBuiltin Anf.the_Undef
+  in Gluon.mkInternalConAppE at [ Gluon.mkInternalConAppE undef [obj_type]
+                                , addr_type]
+
+effectType :: RType -> RType -> RType
+effectType obj_type addr_type =
+  let at = Gluon.builtin Gluon.the_AtE
+  in Gluon.mkInternalConAppE at [obj_type, addr_type]
 
 -- | A parameter-passing mode.  Modes control how a System F value is
 -- elaborated into an ANF value.

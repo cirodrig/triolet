@@ -1,6 +1,10 @@
 {-# LANGUAGE ViewPatterns, FlexibleContexts, FlexibleInstances,
              RelaxedPolyRec, GeneralizedNewtypeDeriving, Rank2Types #-}
-module Pyon.SystemF.Flatten.Flatten(flattenModule)
+module Pyon.SystemF.Flatten.Flatten
+       (flattenModule,
+        chooseMode,
+        isDictionaryTypeConstructor
+       )
 where
 
 import Control.Monad
@@ -40,12 +44,6 @@ import qualified Pyon.Anf.Syntax as Anf
 import qualified Pyon.Anf.Builtins as Anf
 
 import Pyon.SystemF.Flatten.FlatData
-
-withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
-withMany f xs k = go xs k
-  where
-    go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
-    go []     k = k []
 
 type TExp = SFRecExp (Typed Rec)
 type TType = RecType (Typed Rec)
@@ -265,7 +263,7 @@ getPassConv ty = do
 -- Dictionary types inserted by type inference are passed by value.
 -- Functions are passed as closures.
 -- Other types are passed by reference.
-chooseMode :: RType -> F TypeMode
+chooseMode :: EvalMonad m => RType -> m TypeMode
 chooseMode t
   | getLevel t == ObjectLevel = internalError "chooseMode"
   | getLevel t /= TypeLevel = return PassByVal

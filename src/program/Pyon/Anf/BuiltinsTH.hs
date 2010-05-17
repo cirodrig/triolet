@@ -12,8 +12,24 @@ anfBuiltinModuleName = moduleName anfBuiltinModuleNameString
 
 builtinTypeNames =
   [ "Ptr"
-  , "Undef"
   , "Action"
+    -- Dictionary types
+  , "AdditiveDict"
+  , "PassConv"
+    -- Object types
+  , "NoneTypeO"
+  , "AnyO"
+  , "boolO"
+  , "listO"
+  , "StreamO"
+  , "Undef"
+  ]
+
+builtinDataConNames =
+  [ "TrueV"
+  , "FalseV"
+  , "NoneV"
+  , "additiveDict"
   ]
 
 builtinFunctionNames =
@@ -35,7 +51,8 @@ builtinFunctionNames =
   , "store_NoneType"
   ]
 
-anfBuiltinConstructors = builtinTypeNames ++ builtinFunctionNames
+anfBuiltinConstructors =
+  builtinTypeNames ++ builtinDataConNames ++ builtinFunctionNames
 
 anfBuiltinConstructorNames = map ('_':) anfBuiltinConstructors
 

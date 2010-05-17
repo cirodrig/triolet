@@ -1,7 +1,7 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 module Pyon.Anf.Builtins
-       (AnfBuiltins,
+       {-(AnfBuiltins,
         anfBuiltin, isAnfBuiltin,
         loadAnfBuiltins,
         the_Ptr,
@@ -19,7 +19,7 @@ module Pyon.Anf.Builtins
         the_store_float,
         the_store_bool,
         the_store_NoneType
-       )
+       ) -}
 where
 
 import Control.Concurrent.MVar
@@ -96,10 +96,9 @@ areAnfBuiltinsInitialized =
 loadAnfBuiltins :: IdentSupply Var
                 -> IdentSupply Con
                 -> Module ()
-                -> Module ()
                 -> IO (Maybe (Module ()))
-loadAnfBuiltins varIDs conIDs builtins pyonBuiltins = do
-  let setup = contextParserSetup varIDs conIDs [builtins, pyonBuiltins]
+loadAnfBuiltins varIDs conIDs builtins = do
+  let setup = contextParserSetup varIDs conIDs [builtins]
   fileName <- getDataFileName ("library"</>"AnfBuiltin.glu")
   m <- loadSourceFile setup fileName
   case m of
