@@ -14,21 +14,30 @@ builtinTypeNames =
   [ "Ptr"
   , "Action"
     -- Dictionary types
+  , "EqDict"
+  , "OrdDict"
   , "AdditiveDict"
   , "PassConv"
     -- Object types
   , "NoneTypeO"
   , "AnyO"
   , "boolO"
+  , "intO"
+  , "floatO"
   , "listO"
   , "StreamO"
   , "Undef"
+  , "PyonTuple0O"
+  , "PyonTuple1O"
+  , "PyonTuple2O"
   ]
 
 builtinDataConNames =
   [ "TrueV"
   , "FalseV"
   , "NoneV"
+  , "eqDict"
+  , "ordDict"
   , "additiveDict"
   ]
 
@@ -37,18 +46,49 @@ builtinFunctionNames =
     "copy"
   , "reading"
   , "local"
-    -- Elimination functions
-  , "elim_bool"
-  , "elim_PyonTuple2"
-    -- Parameter passing
-  , "PassConv_int"
-  , "PassConv_float"
-  , "PassConv_PyonTuple2"
     -- Literal store functions
   , "store_int"
   , "store_float"
   , "store_bool"
   , "store_NoneType"
+    -- Introduction functions
+  , "intro_PyonTuple2"
+    -- Elimination functions
+  , "elim_bool"
+  , "elim_PyonTuple2"
+    -- Parameter passing
+  , "passConv_int"
+  , "passConv_float"
+  , "passConv_bool"
+  , "passConv_PyonTuple2"
+    -- Dictionary functions
+  , "Eq_EQ_int"
+  , "Eq_NE_int"
+  , "Eq_EQ_float"
+  , "Eq_NE_float"
+  , "Ord_GT_int"
+  , "Ord_LT_int"
+  , "Ord_GE_int"
+  , "Ord_LE_int"
+  , "Ord_GT_float"
+  , "Ord_LT_float"
+  , "Ord_GE_float"
+  , "Ord_LE_float"
+  , "Additive_ZERO_int"
+  , "Additive_ADD_int"    
+  , "Additive_SUB_int"
+  , "Additive_ZERO_float"
+  , "Additive_ADD_float"
+  , "Additive_SUB_float"
+    -- Global functions
+  , "oper_DIV"
+  , "oper_MOD"
+  , "oper_FLOORDIV"
+  , "oper_POWER"
+  , "oper_NEGATE"
+  , "oper_BITWISEAND"
+  , "oper_BITWISEOR"
+  , "oper_BITWISEXOR"
   ]
 
 anfBuiltinConstructors =

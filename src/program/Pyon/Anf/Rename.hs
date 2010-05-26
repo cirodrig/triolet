@@ -96,13 +96,20 @@ mapSubstitutableProcDef f (ProcDef v p) = ProcDef v (f p)
 mapSubstitutableAlt :: (Structure a, Structure b) =>
                        (forall u. (Substitutable u) => u a a -> u b b)
                     -> Alt a -> Alt b
-mapSubstitutableAlt f (Alt { altConstructor = con
-                           , altParams = bs
-                           , altBody = body}) =
-  Alt { altConstructor = con
-      , altParams = map (mapBinder id f) bs
-      , altBody = f body
-      }
+mapSubstitutableAlt f alt = 
+  case alt
+  of ConAlt { altConstructor = con
+            , altParams = bs
+            , altBody = body} ->
+       ConAlt { altConstructor = con
+              , altParams = map (mapBinder id f) bs
+              , altBody = f body
+              }
+     TupleAlt { altParams = bs
+              , altBody = body} ->
+       TupleAlt { altParams = map (mapBinder id f) bs
+                , altBody = f body
+                }
 
 -------------------------------------------------------------------------------
 -- Renaming
@@ -175,10 +182,14 @@ instance Renameable StmOf where
         x <- k
         return ([], x)
              
-      freshen_alt (Alt con params body) = do
+      freshen_alt (ConAlt con params body) = do
         (params', body') <- freshenBinders params $ joinSubstitution body
-        return $ Alt con params' body'
+        return $ ConAlt con params' body'
   
+      freshen_alt (TupleAlt params body) = do
+        (params', body') <- freshenBinders params $ joinSubstitution body
+        return $ TupleAlt params' body'
+
   freshenFully x =
     freshenHead x >>=
     traverseStm freshenFully freshenFully freshenFully freshenFully

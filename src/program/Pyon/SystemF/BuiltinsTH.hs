@@ -45,6 +45,8 @@ pyonBuiltinModuleName = moduleName pyonBuiltinModuleNameString
 pyonBuiltinTypeConstructors =
   [ "Stream"
   , "bool"
+  , "int"
+  , "float"
   , "list"
   , "NoneType"
   , "Any"
@@ -68,8 +70,8 @@ pyonBuiltinDataConstructors =
   ]
 
 pyonBuiltinPassConvConstructors =
-  [ "passConv_Int"
-  , "passConv_Float"
+  [ "passConv_int"
+  , "passConv_float"
   , "passConv_bool"
   , "passConv_NoneType"
   , "passConv_iter"
@@ -116,15 +118,15 @@ pyonBuiltinsSpecification =
     others = [ ("_tuples", NotStrict, [t| [Con] |])
              , ("_tupleConstructors", NotStrict, [t| [Con] |])
              , ("_tuplePassConvConstructors", NotStrict, [t| [Con] |])
-             , ("_EqDict_Int", IsStrict, [t| EqDictMembers |])
-             , ("_OrdDict_Int", IsStrict, [t| OrdDictMembers |])
-             , ("_EqDict_Float", IsStrict, [t| EqDictMembers |])
-             , ("_OrdDict_Float", IsStrict, [t| OrdDictMembers |])
+             , ("_EqDict_int", IsStrict, [t| EqDictMembers |])
+             , ("_OrdDict_int", IsStrict, [t| OrdDictMembers |])
+             , ("_EqDict_float", IsStrict, [t| EqDictMembers |])
+             , ("_OrdDict_float", IsStrict, [t| OrdDictMembers |])
              , ("_EqDict_Tuple2", IsStrict, [t| EqDictMembers |])
              , ("_OrdDict_Tuple2", IsStrict, [t| OrdDictMembers |])
              , ("_TraversableDict_Stream", IsStrict, [t| TraversableDictMembers |])
              , ("_TraversableDict_list", IsStrict, [t| TraversableDictMembers |])
-             , ("_AdditiveDict_Int", IsStrict, [t| AdditiveDictMembers |])
-             , ("_AdditiveDict_Float", IsStrict, [t| AdditiveDictMembers |])
+             , ("_AdditiveDict_int", IsStrict, [t| AdditiveDictMembers |])
+             , ("_AdditiveDict_float", IsStrict, [t| AdditiveDictMembers |])
              ]
                

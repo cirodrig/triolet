@@ -97,10 +97,19 @@ pprMultilineStatement statement =
      _ -> [prec_OUTER ## pprStmPrec statement]
 
 pprAltPattern :: RAlt -> Doc
-pprAltPattern alt =
-  let con_doc = text $ showLabel $ conName $ altConstructor alt
-      params_doc = sep $ map parens $ map pprBinder $ altParams alt
+pprAltPattern (ConAlt {altConstructor = con, altParams = params}) =
+  let con_doc = text $ showLabel $ conName con
+      params_doc = sep $ map parens $ map pprBinder params
   in con_doc <+> params_doc
+
+pprAltPattern (TupleAlt {altParams = []}) = parens empty
+
+pprAltPattern (TupleAlt {altParams = [param]}) =
+  parens (pprBinder param <> text ",")
+
+pprAltPattern (TupleAlt {altParams = params}) =
+  let params_doc = sep $ punctuate (text ",") $ map parens $ map pprBinder params
+  in parens params_doc
 
 pprAlt :: RAlt -> Doc
 pprAlt alt =

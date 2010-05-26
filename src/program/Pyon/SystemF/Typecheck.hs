@@ -210,8 +210,8 @@ isValidLiteralType ty lit =
        -- Based on the literal, check whether the type constructor is 
        -- acceptable
        case lit
-       of IntL _ -> con `Gluon.isBuiltin` Gluon.the_Int
-          FloatL _ -> con `Gluon.isBuiltin` Gluon.the_Float
+       of IntL _ -> con `isPyonBuiltin` the_int
+          FloatL _ -> con `isPyonBuiltin` the_float
           BoolL _ -> con `isPyonBuiltin` the_bool
           NoneL -> con `isPyonBuiltin` the_NoneType
      Nothing ->

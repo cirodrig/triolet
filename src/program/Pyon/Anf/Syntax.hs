@@ -104,11 +104,15 @@ data ProcDef s = ProcDef Var (RecProc s)
 type ProcDefGroup s = [ProcDef s]
 
 data Alt s =
-  Alt
-  { altConstructor :: !Con
-  , altParams :: [Binder s ()]  
-  , altBody :: RecStm s
-  }
+    ConAlt
+    { altConstructor :: !Con
+    , altParams :: [Binder s ()]  
+    , altBody :: RecStm s
+    }
+  | TupleAlt
+    { altParams :: [Binder s ()]
+    , altBody :: RecStm s
+    }
 
 data Module s =
   Module [ProcDefGroup s]
@@ -159,6 +163,11 @@ mkCallAppS pos oper args =
   let info = mkSynInfo pos ObjectLevel
   in CallS info $ AppV info oper args
 
+mkLetS :: RBinder () -> RStm -> RStm -> RStm
+mkLetS binder rhs body =
+  let info = mkSynInfo (getSourcePos rhs) ObjectLevel
+  in LetS info binder rhs body
+
 -------------------------------------------------------------------------------
 
 mapVal :: (Structure a, Structure b) =>
@@ -190,8 +199,10 @@ mapStm exp val stm proc statement =
        CaseS info (val scr) (map map_alt alts)
   where
     map_def (ProcDef v p) = ProcDef v (proc p)
-    map_alt (Alt con params body) =
-      Alt con (map (mapBinder id exp) params) (stm body)
+    map_alt (ConAlt con params body) =
+      ConAlt con (map (mapBinder id exp) params) (stm body)
+    map_alt (TupleAlt params body) =
+      TupleAlt (map (mapBinder id exp) params) (stm body)
 
 mapProc :: (Structure a, Structure b) =>
            (RecExp a -> RecExp b)
@@ -230,8 +241,10 @@ traverseStm exp val stm proc statement =
        CaseS info `liftM` val scr `ap` mapM map_alt alts
   where
     map_def (ProcDef v p) = ProcDef v `liftM` proc p
-    map_alt (Alt con params body) =
-      Alt con `liftM` mapM (traverseBinder return exp) params `ap` stm body
+    map_alt (ConAlt con params body) =
+      ConAlt con `liftM` mapM (traverseBinder return exp) params `ap` stm body
+    map_alt (TupleAlt params body) =
+      TupleAlt `liftM` mapM (traverseBinder return exp) params `ap` stm body
 
 traverseProc :: (Monad m, Structure a, Structure b) =>
                 (RecExp a -> m (RecExp b))

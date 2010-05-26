@@ -485,7 +485,7 @@ instanceExpression pos ty_params constraint exp = do
   let applyTypeParam exp tp = mkTyAppE pos exp (convertHMType tp)
   let value_exp = foldl applyTypeParam exp ty_params
   
-  if null constraint then return ([], value_exp) else do
+  if null constraint && null ty_params then return ([], value_exp) else do
     -- Create a call expression with placeholder arguments
     placeholders <- mapM (mkDictPlaceholder pos) constraint
     return (placeholders, mkCallE pos value_exp placeholders)
@@ -506,7 +506,7 @@ instanceExpressionWithProofs env pos ty_params constraint exp = do
   let applyTypeParam exp tp = mkTyAppE pos exp (convertHMType tp)
   let value_exp = foldl applyTypeParam exp ty_params
   
-  if null constraint then return value_exp else do
+  if null constraint && null ty_params then return value_exp else do
     -- Create a call expression with class dictionary arguments
     dictionaries <- mapM getProof constraint
     return $ mkCallE pos value_exp dictionaries

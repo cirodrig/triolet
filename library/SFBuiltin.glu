@@ -4,6 +4,7 @@
 -- therefore have no side effects.
 -}
 
+{-
 -- Integer arithmetic
 
 operator left 45 * = timesZ;
@@ -33,9 +34,15 @@ let lessThanZ       (x : Int) (y : Int) -> Prop = isNnegZ (y - x + -1);
 operator right 10 || = or;
 operator right 15 && = and;
 
+-}
+
+
+
 -- Pyon types
 data NoneType : Pure where None : NoneType;
 constant Any : Pure;
+data int : Pure;
+data float : Pure;
 data bool : Pure where True : bool | False : bool;
 constant list : Pure -> Pure;
 constant Stream : Pure -> Pure;
@@ -59,13 +66,13 @@ data PyonTuple5 : Pure -> Pure -> Pure -> Pure -> Pure -> Pure where
 
 let comparison (a : Pure) -> Pure = a -> a -> bool;
 let binary (a : Pure) -> Pure = a -> a -> a;
-let binary_any -> Pure = (a : Pure) -> binary a;
+let binary_any -> Pure = (a : Pure) -> PassConv a -> binary a;
 
 -- Parameter-passing conventions.
 data PassConv : Pure -> Pure;
 
-constant passConv_Int : PassConv Int;
-constant passConv_Float : PassConv Float;
+constant passConv_int : PassConv int;
+constant passConv_float : PassConv float;
 constant passConv_bool : PassConv bool;
 constant passConv_NoneType : PassConv NoneType;
 constant passConv_iter : (t : Pure) -> PassConv t -> PassConv (Stream t);
@@ -117,25 +124,25 @@ data AdditiveDict : Pure -> Pure where
 data VectorDict : Pure -> Pure where
   vectorDict : (a : Pure)
             -> AdditiveDict a
-            -> (a -> Float -> a)
-            -> (a -> Float)
+            -> (a -> float -> a)
+            -> (a -> float)
             -> VectorDict a;
 
 -- Class dictionary members for predefined instances.
 
-constant Eq_EQ_Int : comparison Int;
-constant Eq_NE_Int : comparison Int;
-constant Ord_GT_Int : comparison Int;
-constant Ord_GE_Int : comparison Int;
-constant Ord_LT_Int : comparison Int;
-constant Ord_LE_Int : comparison Int;
+constant Eq_EQ_int : comparison int;
+constant Eq_NE_int : comparison int;
+constant Ord_GT_int : comparison int;
+constant Ord_GE_int : comparison int;
+constant Ord_LT_int : comparison int;
+constant Ord_LE_int : comparison int;
 
-constant Eq_EQ_Float : comparison Float;
-constant Eq_NE_Float : comparison Float;
-constant Ord_GT_Float : comparison Float;
-constant Ord_GE_Float : comparison Float;
-constant Ord_LT_Float : comparison Float;
-constant Ord_LE_Float : comparison Float;
+constant Eq_EQ_float : comparison float;
+constant Eq_NE_float : comparison float;
+constant Ord_GT_float : comparison float;
+constant Ord_GE_float : comparison float;
+constant Ord_LT_float : comparison float;
+constant Ord_LE_float : comparison float;
 
 constant Eq_EQ_Tuple2 : (a : Pure) -> (b : Pure)
                      -> EqDict a -> EqDict b
@@ -168,24 +175,24 @@ constant Traversable_TRAVERSE_list
  -> list a
  -> Stream a;
 
-constant Additive_ZERO_Int : NoneType -> Int;
-constant Additive_ADD_Int : binary Int;
-constant Additive_SUB_Int : binary Int;
+constant Additive_ZERO_int : NoneType -> int;
+constant Additive_ADD_int : binary int;
+constant Additive_SUB_int : binary int;
 
-constant Additive_ZERO_Float : NoneType -> Float;
-constant Additive_ADD_Float : binary Float;
-constant Additive_SUB_Float : binary Float;
+constant Additive_ZERO_float : NoneType -> float;
+constant Additive_ADD_float : binary float;
+constant Additive_SUB_float : binary float;
 
 -- Builtin functions
 constant oper_MUL : binary_any;
 constant oper_DIV : binary_any;
-constant oper_MOD : binary Int;
+constant oper_MOD : binary int;
 constant oper_POWER : binary_any;
 constant oper_FLOORDIV : binary_any;
-constant oper_BITWISEAND : binary Int;
-constant oper_BITWISEOR : binary Int;
-constant oper_BITWISEXOR : binary Int;
-constant oper_NEGATE : (a : Pure) -> a -> a;
+constant oper_BITWISEAND : binary int;
+constant oper_BITWISEOR : binary int;
+constant oper_BITWISEXOR : binary int;
+constant oper_NEGATE : (a : Pure) -> PassConv a -> (a -> a);
 
 constant oper_CAT_MAP : (a : Pure)
                      -> (b : Pure)
@@ -222,7 +229,7 @@ constant fun_zip : (s : Pure -> Pure)
                 -> TraversableDict t
                 -> (s a -> t b -> Stream (PyonTuple2 a b));
 
-constant fun_iota : NoneType -> Stream Int;
+constant fun_iota : NoneType -> Stream int;
 
 constant fun_undefined : (a : Pure) -> a;
 

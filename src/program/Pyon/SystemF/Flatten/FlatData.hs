@@ -1,9 +1,12 @@
 
 module Pyon.SystemF.Flatten.FlatData where
 
-import qualified Data.Map as Map
+import Prelude hiding(reads)
+
+import qualified Data.IntSet as IntSet
 import Text.PrettyPrint.HughesPJ
 
+import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Common.Error
 import Gluon.Common.SourcePos
@@ -19,6 +22,7 @@ import qualified Gluon.Core as Gluon
 
 import Pyon.SystemF.Syntax
 import Pyon.SystemF.Print
+import qualified Pyon.SystemF.Builtins as SF
 import qualified Pyon.Anf.Syntax as Anf
 import qualified Pyon.Anf.Builtins as Anf
 
@@ -30,7 +34,7 @@ withMany f xs k = go xs k
 
 -- | The unit type
 unitType :: RType
-unitType = Gluon.TupTyE (Gluon.mkSynInfo noSourcePos TypeLevel) Gluon.Unit
+unitType = Gluon.mkTupTyE noSourcePos Gluon.Unit
 
 -- | The type of an address
 addressType :: RType
@@ -65,11 +69,45 @@ effectType obj_type addr_type =
 data TypeMode = PassByVal | PassByClo | PassByRef
               deriving(Eq)
 
--- | A parameter-passing mode for a binder.  This mode distinguishes
--- pass-by-reference and return-by-reference binders.
-data DataMode = IOVal | IOClo | InRef | OutRef
+-- | A parameter-passing mode for a binder.  Modes are used to compute
+-- side effects and translate parameters to the form used by ANF.
+-- We distinguish pass-by-value, pass-by-reference, and return-by-reference
+-- binders.  We also distinguish parameters that are the result of HM type 
+-- inference.
+--
+-- Dictionary parameters are only labeled as such when they are passed
+-- to ordinary functions.  Functions that construct dictionaries, for example,
+-- don't take dictionary parameters.
+data DataMode = InHM            -- ^ A type or dictionary parameter
+              | IOVal           -- ^ A pass-by-value parameter or return
+              | IOClo           -- ^ A closure parameter or return
+              | InRef           -- ^ A pass-by-reference parameter
+              | OutRef          -- ^ A pass-by-reference return
               deriving(Eq)
 
+-- | Return True if the given System F type is passed as Hindley-Milner type
+-- or dictionary value.  Dictionary types can always be identified by looking 
+-- at their head.
+typeOfHMType :: RType -> Bool
+typeOfHMType ty
+  | getLevel ty == KindLevel = True
+  | getLevel ty /= TypeLevel = internalError "typeOfHMType"
+  | otherwise =
+      case ty
+      of Gluon.AppE {Gluon.expOper = Gluon.ConE {Gluon.expCon = c}} ->
+           isDictionaryTypeConstructor c
+         Gluon.ConE {Gluon.expCon = c} ->
+           isDictionaryTypeConstructor c
+         _ -> False
+
+-- | True if this is a type constructor for a constraint type.
+-- Data of these types are always passed by value. 
+isDictionaryTypeConstructor con =
+  any (con `SF.isPyonBuiltin`) [SF.the_PassConv, SF.the_EqDict, SF.the_OrdDict,
+                                SF.the_TraversableDict, SF.the_AdditiveDict,
+                                SF.the_VectorDict]
+
+{-
 -- | How to pass a parameter for a given mode
 parameterInMode :: TypeMode -> DataMode
 parameterInMode PassByVal = IOVal
@@ -83,52 +121,79 @@ parameterInMode PassByRef = InRef
 parameterOutMode :: TypeMode -> Maybe DataMode
 parameterOutMode PassByVal = Nothing
 parameterOutMode PassByClo = Nothing
-parameterOutMode PassByRef = Just OutRef
+parameterOutMode PassByRef = Just OutRef -}
 
 -- | We keep track of the set of variables that an expression or function 
--- reads.  This set is used to compute the side effect.
-newtype Effect = Effect {effectMap :: Map.Map VarID AtomicEffect}
-type AtomicEffect = ()
+-- reads and writes.  This is the statement's side effect.
+--
+-- A variable is in at most one of the read and write sets.
+data Effect =
+  Effect
+  { -- | Read variable IDs
+    readEffect :: IntSet.IntSet
+    -- | Written variable IDs
+  , writeEffect :: IntSet.IntSet
+  }
 
 isNoEffect, isSomeEffect :: Effect -> Bool
-isNoEffect (Effect m) = Map.null m
-isSomeEffect (Effect m) = not (Map.null m)
+isNoEffect (Effect r w) = IntSet.null r && IntSet.null w
+isSomeEffect e = not $ isNoEffect e
 
 -- | The empty effect 
 noEffect :: Effect
-noEffect = Effect Map.empty
+noEffect = Effect IntSet.empty IntSet.empty
 
--- | A side effect on a single variable
-varEffect :: Var -> Effect
-varEffect v = Effect $ Map.singleton (varID v) ()
+-- | A side effect that reads a single variable
+readVar :: Var -> Effect
+readVar v = Effect (IntSet.singleton (fromIdent $ varID v)) IntSet.empty
+
+-- | A side effect that reads a single variable
+writeVar :: Var -> Effect
+writeVar v = Effect IntSet.empty (IntSet.singleton (fromIdent $ varID v))
 
 -- | Remove a variable from an effect (if it is present)
 maskEffect :: Var -> Effect -> Effect
-maskEffect v (Effect m) = Effect $ Map.delete (varID v) m
+maskEffect v (Effect r w) = Effect (mask r) (mask w)
+  where
+    mask s = IntSet.delete (fromIdent $ varID v) s
 
--- | Determine whether a variable is part of a side effect
-affects :: Effect -> Var -> Bool
-Effect m `affects` v = varID v `Map.member` m
+-- | Determine whether a variable is read
+reads, writes, affects :: Effect -> Var -> Bool
+Effect r _ `reads` v = fromIdent (varID v) `IntSet.member` r
+Effect _ w `writes` v = fromIdent (varID v) `IntSet.member` w
+e `affects` v = e `reads` v || e `writes` v
 
 -- | Take the union of two effects
 effectUnion :: Effect -> Effect -> Effect
-effectUnion (Effect m1) (Effect m2) = Effect (Map.union m1 m2)
+effectUnion (Effect r1 w1) (Effect r2 w2) =
+  let w = IntSet.union w1 w2
+  in Effect (IntSet.union r1 r2 IntSet.\\ w) (IntSet.union w1 w2)
 
 -- | Take the union of a list of effects
 effectUnions :: [Effect] -> Effect
-effectUnions xs = Effect $ Map.unions $ map effectMap xs
+effectUnions xs = foldr effectUnion noEffect xs
 
--- | Take the difference of two effects
+-- | Take the difference of two effects.
+--
+-- The difference is undefined when the read and write effects overlap.
 effectDiff :: Effect -> Effect -> Effect
-Effect m1 `effectDiff` Effect m2 = Effect (m1 Map.\\ m2)
+Effect r1 w1 `effectDiff` Effect r2 w2
+  | not $ IntSet.null (IntSet.intersection w1 r2) &&
+    IntSet.null (IntSet.intersection w2 r1) =
+      internalError "effectDiff"
+  | otherwise = Effect (r1 IntSet.\\ r2) (w1 IntSet.\\ w2)
 
 -- | Rename the variables in a side effect
 renameEffect :: (VarID -> VarID) -> Effect -> Effect
-renameEffect f (Effect m) = Effect $ Map.mapKeys f m
+renameEffect f (Effect r w) =
+  let f' x = fromIdent (f (toIdent x))
+  in Effect (IntSet.map f' r) (IntSet.map f' w)
 
 -- | Get a list of variable IDs affected by a side effect
-effectVars :: Effect -> [VarID]
-effectVars (Effect m) = Map.keys m
+effectReadVars, effectWriteVars, effectVars :: Effect -> [VarID]
+effectReadVars (Effect r _) = map toIdent $ IntSet.elems r
+effectWriteVars (Effect _ w) = map toIdent $ IntSet.elems w
+effectVars (Effect r w) = map toIdent $ IntSet.elems $ IntSet.union r w
 
 -- | An argument to be passed to a flattened operator.
 data FlatArgument =
@@ -141,13 +206,15 @@ data FlatArgument =
     -- the parameter data.
   | VariableArgument !Var
 
+{-
 argumentMode :: FlatArgument -> DataMode
-argumentMode (ValueArgument {}) = IOVal
+argumentMode (ValueArgument {}) = undefined
 argumentMode (ClosureArgument {}) = IOClo
-argumentMode (VariableArgument {}) = InRef
+argumentMode (VariableArgument {}) = InRef -}
 
 -- | Side effect information for a function call.  The effect is computed
--- from the function's arguments.
+-- from the function's arguments.  The function's return is not included
+-- in the side effect.
 type FunctionEffect = [FlatArgument] -> Effect
 
 -- | Data are either returned as values or by writing to a variable.
@@ -162,7 +229,9 @@ data FlatReturn =
   | VariableReturn !RType !Var
 
 returnMode :: FlatReturn -> DataMode
-returnMode (ValueReturn {}) = IOVal
+returnMode (ValueReturn ty) 
+  | typeOfHMType ty = InHM
+  | otherwise       = IOVal
 returnMode (ClosureReturn {}) = IOClo
 returnMode (VariableReturn {}) = OutRef
 
@@ -170,6 +239,11 @@ returnType :: FlatReturn -> RType
 returnType (ValueReturn ty) = ty
 returnType (ClosureReturn ty _) = ty
 returnType (VariableReturn ty _) = ty
+
+returnEffect :: FlatReturn -> Effect
+returnEffect (ValueReturn _) = noEffect
+returnEffect (ClosureReturn _ _) = noEffect
+returnEffect (VariableReturn _ v) = writeVar v
 
 isValueReturn (ValueReturn _) = True
 isValueReturn _ = False
@@ -205,7 +279,7 @@ mkClosureReturnInfo pos ty eff = mkFlatInfo pos (ClosureReturn ty eff) noEffect
 
 mkVariableReturnInfo :: SourcePos -> Var -> RType -> FlatInfo
 mkVariableReturnInfo pos v ty =
-  mkFlatInfo pos (VariableReturn ty v) noEffect
+  mkFlatInfo pos (VariableReturn ty v) (writeVar v)
 
 fexpEffect :: Stmt -> Effect
 fexpEffect e = fexpInfoEffect (fexpInfo e)
@@ -298,6 +372,20 @@ data Stmt =
     , fexpSrc :: Var
     }
 
+-- | Get a string describing the statement constructor
+stmtString :: Stmt -> String
+stmtString (ValueS {}) = "ValueS"
+stmtString (CopyValueS {}) = "CopyValueS"
+stmtString (CallS {}) = "CallS"
+stmtString (LetS {}) = "LetS"
+stmtString (EvalS {}) = "EvalS"
+stmtString (LetrecS {}) = "LetrecS"
+stmtString (CaseValS {}) = "CaseValS"
+stmtString (CaseRefS {}) = "CaseRefS"
+stmtString (ReadingS {}) = "ReadingS"
+stmtString (LocalS {}) = "LocalS"
+stmtString (CopyS {}) = "CopyS"
+
 data FlatValAlt =
   FlatValAlt Con [Value] [RBinder DataMode] Stmt
 
@@ -332,7 +420,8 @@ data FlatDef = FlatDef Var FlatFun
 pprComponent :: DataMode -> Doc
 pprComponent component =
   let name = case component
-             of IOVal -> "val"
+             of InHM  -> "typeish"
+                IOVal -> "val"
                 IOClo -> "fun"
                 InRef -> "read"
                 OutRef -> "write"
@@ -363,7 +452,7 @@ pprStmt statement =
   case fexpInfo statement
   of FlatInfo _ ret eff ->
        let eff_doc = text "<" <>
-                     cat (punctuate (text ",") (map (text . show) $ effectVars eff)) <>
+                     cat (punctuate (text ",") (map (text . show) (effectReadVars eff) ++ map ((text "!" <>) . text . show) (effectWriteVars eff))) <>
                      text ">"
            stmt_doc = pprStmt' statement
            lhs_doc rhs = case ret

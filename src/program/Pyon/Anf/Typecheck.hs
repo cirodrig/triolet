@@ -6,7 +6,10 @@ where
 import Control.Monad
 import Data.List
 import Data.Monoid
+import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
+import Gluon.Common.MonadLogic
 import Gluon.Common.Error
 import Gluon.Common.Label
 import Gluon.Common.SourcePos
@@ -19,9 +22,13 @@ import Gluon.Eval.Equality
 import Gluon.Eval.Environment
 import Gluon.Eval.Typecheck
 import Pyon.Globals
+import Pyon.Anf.Print
 import Pyon.Anf.Syntax
 import Pyon.Anf.Rename
 import Pyon.Anf.Builtins
+
+printTypeCheckSteps = False
+quitOnFirstError = True
 
 withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
 withMany f xs k = go xs k
@@ -145,8 +152,7 @@ procType proc =
     -- Add a function parameter to the function.  Make it dependent if the 
     -- parameter is intuitionistic and mentioned in the range.
     add_param pos (Binder v ty ()) mk_rng = do 
-      is_linear <- isLinearType' ty 
-      if is_linear then not_dependent else dependent
+      ifM (isIntuitionisticType' ty) dependent not_dependent
       where
         r_ty = substFully ty
 
@@ -162,13 +168,27 @@ procType proc =
 
 -------------------------------------------------------------------------------
 
+-- | If the flag is set, then stop executing once an error is observed
+quitOnError m 
+  | quitOnFirstError = do
+      (errs, x) <- tellErrors m
+      if null errs
+        then return x
+        else internalError (concatMap showTypeCheckError errs)
+  | otherwise = m
+
 tcScanExp :: PureTypeErrorMonad m => SRExp -> m TRExp
-tcScanExp e = do
+tcScanExp e = quitOnError $ debug $ do
   (_, e') <- tcScan gluonWorker e
   return e'
+  where
+    debug k
+      | printTypeCheckSteps =
+          traceShow (text "tcScanExp" <+> pprExp (substFully e)) k
+      | otherwise = k
 
 tcScanVal :: PureTypeErrorMonad m => SRVal -> m TRVal
-tcScanVal value = do
+tcScanVal value = quitOnError $ debug $ do
   r_value <- freshenHead value
   (ty, value') <-
     case r_value
@@ -179,6 +199,11 @@ tcScanVal value = do
        LamV {valInfo = inf, valProc = proc} ->
          tcScanLamV inf proc
   return $ TVal (TypeAnn ty value')
+  where
+    debug k
+      | printTypeCheckSteps =
+          traceShow (text "tcScanVal" <+> pprVal (substFully value)) k
+      | otherwise = k
 
 tcScanGluonV inf e = do
   (ty, e') <- tcScan gluonWorker e
@@ -217,7 +242,7 @@ valueToExpression (TVal (typeAnnValue -> value)) =
 -- operands with types @arg_tys@ and values @args@.
 computeAppliedType :: SourcePos -> SRExp -> [(WRExp, Maybe RExp)]
                    -> PureTC WRExp
-computeAppliedType pos op_ty args = apply op_ty args
+computeAppliedType pos op_ty args = trace_message $ apply op_ty args
   where
     apply op_ty ((arg_ty, arg_val):args) = do
       op_ty' <- evalHead op_ty
@@ -245,13 +270,26 @@ computeAppliedType pos op_ty args = apply op_ty args
     -- as an Exp, and the type must be intuitionistic.
     assign_argument (Binder' (Just v) ty ()) (Just val) rng = do
       -- Ensure type is not linear
-      is_linear <- isLinearType' ty
-      when is_linear $ throwError $ OtherErr "Linear type used dependently"
+      intu <- isIntuitionisticType' ty
+      unless intu $ throwError $ OtherErr "Linear type used dependently"
       
       return $ assign v val rng
     
     assign_argument (Binder' (Just v) _ ()) Nothing _ =
       throwError $ OtherErr "computeAppliedType: Impure dependently typed parameter value"
+      
+    -- Print the function type and arguments that will be applied
+    trace_message =
+      let op_doc   = pprExp (substFully op_ty)
+          args_doc = vcat $
+                     punctuate (text ";")
+                     [case val
+                           of Nothing -> pprExp (fromWhnf ty)
+                              Just v -> pprExp v <+> colon <+> pprExp (fromWhnf ty)
+                          | (ty, val) <- args]
+      in traceEnvironment $ show (text "computeAppliedType" $$
+                    nest 4 (text "op_ty" <+> op_doc $$
+                            text "args" <+> args_doc))
 
 tcScanLamV inf proc = do 
   proc' <- liftPure $ tcScanProc proc
@@ -260,7 +298,7 @@ tcScanLamV inf proc = do
 -- | Scan a statement.  Compute the statement's return type, effect, and
 -- simplified form.
 tcScanStm :: SRStm -> LinTC TRStm
-tcScanStm statement = do
+tcScanStm statement = quitOnError $ debug $ do
   statement' <- freshenHead statement
   (ret_ty, eff_ty, statement'') <-
     case statement'
@@ -275,7 +313,12 @@ tcScanStm statement = do
        CaseS {stmInfo = inf, stmScrutinee = scr, stmAlts = alts} ->
          tcScanCase inf scr alts
   return $ TStm $ EffectAnn ret_ty eff_ty statement''
-
+  where
+    debug k
+      | printTypeCheckSteps =
+          traceShow (text "tcScanStm" <+> pprStm (substFully statement)) k
+      | otherwise = k
+    
 tcScanReturn :: SynInfo -> SRVal -> LinTC (WRExp, WRExp, StmOf Rec (Typed Rec))
 tcScanReturn inf v = do
   val' <- tcScanVal v
@@ -294,7 +337,10 @@ tcScanCall inf v = do
               substFullyUnderWhnf eff',
               CallS inf val')
     
-    _ -> throwError $ OtherErr "Not an action"
+    _ -> case fromWhnf $ getTypeAnn val'
+         of FunE {} ->
+              throwError $ OtherErr "Not an action: probably too few arguments"
+            _ -> throwError $ OtherErr "Not an action"
 
 tcScanLet :: SynInfo -> Binder SubstRec () -> SRStm -> SRStm
           -> LinTC (WRExp, WRExp, StmOf Rec (Typed Rec))
@@ -374,7 +420,7 @@ tcScanCase info scrutinee alts = do
   
   -- Return types must match
   let s_alt_types = map (verbatim . fromWhnf) alt_types
-  zipWithM (tcAssertEqual pos) s_alt_types (tail s_alt_types)
+  trace "tcScanCase" $ zipWithM (tcAssertEqual pos) s_alt_types (tail s_alt_types)
   
   -- Take union of effect types
   eff <- combineEffectList alt_effs
@@ -384,25 +430,51 @@ tcScanCase info scrutinee alts = do
                                      , stmAlts = alts'})
 
 tcScanAlt :: WRExp -> Alt SubstRec -> LinTC (WRExp, WRExp, Alt (Typed Rec))
-tcScanAlt scrutinee_type (Alt { altConstructor = con
-                              , altParams = params
-                              , altBody = body}) =
-  matchPattern scrutinee_type con params $ do
-    params' <- liftPure $ mapM eval_param params
-    body' <- tcScanStm body
-    
-    let bound_vars = [v | Binder v _ () <- params]
-    
-    -- Ensure that bound variables don't escape
-    let rt = getTypeAnn body'
-    tcAssertUnmentionedList bound_vars $ fromWhnf rt
-    
-    let et = getEffectAnn body'
-    tcAssertUnmentionedList bound_vars $ fromWhnf et
-        
-    return (rt, et,
-            Alt {altConstructor = con, altParams = params', altBody = body'})
+tcScanAlt scrutinee_type alternative = 
+  case alternative
+  of ConAlt {altConstructor = con, altParams = params, altBody = body} ->
+       scanConAlt con params body
+     TupleAlt {altParams = params, altBody = body} ->
+       scanTupleAlt params body
   where
+    scanConAlt con params body =
+      matchPattern scrutinee_type con params $ do
+        params' <- liftPure $ mapM eval_param params
+        let bound_vars = [v | Binder v _ () <- params]
+
+        (rt, et, body') <- scanAltBody bound_vars body
+        
+        return (rt, et,
+                ConAlt { altConstructor = con
+                       , altParams = params'
+                       , altBody = body'})
+
+    scanTupleAlt params body = 
+      matchTuplePattern scrutinee_type params $ do
+        params' <- liftPure $ mapM eval_param params
+        let bound_vars = [v | Binder v _ () <- params]
+        
+        (rt, et, body') <- scanAltBody bound_vars body
+        
+        return (rt, et,
+                TupleAlt { altParams = params'
+                         , altBody = body'})
+
+    -- Typecheck the body and return a new body statement.
+    -- Ensure that pattern-bound variables don't escape in the body's type
+    -- or effect type.
+    scanAltBody bound_vars body = do
+      body' <- tcScanStm body
+    
+      -- Ensure that bound variables don't escape
+      let rt = getTypeAnn body'
+          et = getEffectAnn body'
+      tcAssertUnmentionedList bound_vars $ fromWhnf rt
+      tcAssertUnmentionedList bound_vars $ fromWhnf et
+      
+      -- Return the return type, effect type, and body statement
+      return (rt, et, body')
+
     eval_param (Binder v ty ()) = do
       ty' <- tcScanExp ty
       return $ Binder v ty' ()
@@ -458,7 +530,7 @@ matchPattern scr_type con p_params continuation = do
       let param_type = joinSubst s_sub c_ty
       
       -- Verify that the types match
-      tcAssertEqual noSourcePos param_type p_ty
+      trace "match_flexible" $ tcAssertEqual noSourcePos p_ty param_type
       
       -- Rename the constructor's bound variable to the pattern variable
       let s_sub' = case c_mv
@@ -468,6 +540,37 @@ matchPattern scr_type con p_params continuation = do
       -- Assume the bound variable and continue
       assume p_var (substFully param_type) $ k s_sub'
 
+matchTuplePattern :: WRExp -> [Binder SubstRec ()] -> LinTC a -> LinTC a
+matchTuplePattern scr_type p_params continuation = do
+  -- Scrutinee type must be a tuple type.
+  case fromWhnf scr_type of
+    TupTyE {expTyFields = s_fields} ->
+      match_fields (verbatim s_fields) p_params
+    _ -> throwError $ OtherErr "Pattern match failure"
+  
+  where
+    -- Match the pattern, one field at a time
+    match_fields (substHead -> (Binder' s_mvar s_ty () :*: s_params))
+                 (Binder p_var p_ty () : p_params) = do
+      -- Scrutinee and pattern types must match 
+      tcAssertEqual noSourcePos p_ty s_ty
+
+      -- Rename the scrutinee variable to the pattern variable
+      let s_params' = case s_mvar
+                      of Nothing -> s_params
+                         Just s_var -> rename s_var p_var s_params
+      
+      -- Add the pattern-bound variable to the environment; continue
+      assume p_var (substFully p_ty) $ match_fields s_params' p_params 
+
+    match_fields (substHead -> Unit) [] = continuation
+    
+    match_fields (substHead -> Unit) _ =
+      internalError "Too many tuple fields in case alternative"
+
+    match_fields _ [] =
+      internalError "Too few tuple fields in case alternative"
+
 -- | Run type inference on a procedure definition.
 -- Return the procedure's type as it exists in the type environment.
 tcScanDef (ProcDef v proc) = do
@@ -475,7 +578,7 @@ tcScanDef (ProcDef v proc) = do
   return $ ProcDef v proc'
 
 tcScanProc :: SRProc -> PureTC TRProc
-tcScanProc proc = do
+tcScanProc proc = quitOnError $ do
   -- Compute the procedure's type
   ty <- procType proc
   whnf_ty <- liftM substFullyUnderWhnf $ evalHead' ty
@@ -497,13 +600,13 @@ tcScanProcNoType proc = scan_proc =<< freshenHead proc
       
         -- Verify that inferred return type matches the annotated type
         rt <- tcScanExp $ procReturnType proc
-        tcAssertEqual pos
+        trace "tcScanProc" $ tcAssertEqual pos
           (verbatim $ fromTypedExp rt)
           (verbatim $ fromWhnf $ getTypeAnn body)
 
-        -- Verify that inferred effect type matches the annotated type
+        -- Verify that inferred effect type is smaller than the annotated type
         et <- tcScanExp $ procEffectType proc
-        tcAssertSubtype pos
+        trace "tcScanProc" $ tcAssertSubtype pos
           (verbatim $ fromTypedExp et)
           (verbatim $ fromWhnf $ getEffectAnn body)
 

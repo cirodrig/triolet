@@ -72,6 +72,15 @@ findConByName mod name =
   where
     getConstructors mod = concat [c : conCtors c | c <- moduleConstructors mod]
 
+-- | Get the n-ary tuple object type constructor
+tupleObjectCon :: Int -> Con
+tupleObjectCon n = 
+  case n
+  of 0 -> anfBuiltin the_PyonTuple0O
+     1 -> anfBuiltin the_PyonTuple1O
+     2 -> anfBuiltin the_PyonTuple2O
+     _ -> internalError $ "tupleObjectCon: no constructor for tuples of size " ++ show n
+
 initializeAnfBuiltins :: Module () -> IO ()
 initializeAnfBuiltins mod = do
   -- Must not have been initialized yet

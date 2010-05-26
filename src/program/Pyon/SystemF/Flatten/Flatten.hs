@@ -2,11 +2,11 @@
              RelaxedPolyRec, GeneralizedNewtypeDeriving, Rank2Types #-}
 module Pyon.SystemF.Flatten.Flatten
        (flattenModule,
-        chooseMode,
-        isDictionaryTypeConstructor
+        chooseMode
        )
 where
 
+import Prelude hiding(reads)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.Trans
@@ -112,12 +112,12 @@ instance StmtExtensible a => StmtExtensible (a, b) where
 idContext :: StmtContext
 idContext = id
 
--- | Allocate local storage for some statement
+-- | Allocate local storage over the scope of some statement
 allocateLocalMemory :: SourcePos -> Var -> RType -> StmtContext
 allocateLocalMemory pos v ty stmt =
-  if fexpEffect stmt `affects` v
+  if fexpEffect stmt `reads` v
   then internalError "Side effect to local variable escapes"
-  else LocalS (extendStmtInfo pos id stmt) v ty stmt
+  else LocalS (extendStmtInfo pos (maskEffect v) stmt) v ty stmt
 
 -- | Perform two actions in sequence.  If the first action writes a variable
 -- that's read by the second action, put a 'ReadingS' statment around the
@@ -129,7 +129,7 @@ eval pos s1 s2 =
         -- then we need to insert a read operation around s2
         case fexpReturn s1 
         of VariableReturn write_ty write_var
-             | fexpEffect s2 `affects` write_var ->
+             | fexpEffect s2 `reads` write_var ->
                  locallyRead pos write_var write_ty s2
            _ -> s2
       effect1 = fexpEffect s1
@@ -138,11 +138,13 @@ eval pos s1 s2 =
   in EvalS info s1 s2'
 
 -- | Change a writeable variable to a readable one over the scope of a
--- statement
+-- statement.
 locallyRead :: SourcePos -> Var -> RType -> StmtContext
 locallyRead pos var ty stmt =
-  let -- Do not propagate effects on this variable
-      info = extendStmtInfo pos (maskEffect var) stmt
+  let change_effect eff =
+        -- Remove the read effect and add a write effect
+        writeVar var `effectUnion` maskEffect var eff
+      info = extendStmtInfo pos change_effect stmt
   in ReadingS info var ty stmt
 
 -- | Assign a value to a local variable over the scope of a statement
@@ -208,7 +210,7 @@ newAnonymousVariable :: F Var
 newAnonymousVariable = Gluon.newAnonymousVariable ObjectLevel
 
 -------------------------------------------------------------------------------
-
+{-
 -- | Find a parameter-passing convention dictionary for this type variable
 -- in the environment.  Throw an error if it can't be found. 
 findVarPassConv :: Var -> F Value
@@ -231,7 +233,8 @@ findVarPassConv v = do
 
 -- | Get an expression that computes this type's parameter-passing convention
 getPassConv' :: RType -> F Value
-getPassConv' ty = getPassConv $ verbatim ty
+getPassConv' ty = do pass_conv <- getPassConv $ verbatim ty
+                     case pass_conv of
 
 -- | Get this type's parameter-passing convention
 getPassConv :: Gluon.SRExp -> F Value
@@ -239,8 +242,8 @@ getPassConv ty = do
   ty' <- evalHead ty
   case Gluon.unpackRenamedWhnfAppE ty' of
     Just (con, [])
-      | con `Gluon.isBuiltin` Gluon.the_Int -> primitive the_passConv_Int
-      | con `Gluon.isBuiltin` Gluon.the_Float -> primitive the_passConv_Float
+      | con `isPyonBuiltin` the_int -> primitive the_passConv_int
+      | con `isPyonBuiltin` the_float -> primitive the_passConv_float
       | con `isPyonBuiltin` the_bool -> primitive the_passConv_bool
       | con `isPyonBuiltin` the_Any -> primitive the_passConv_Any
     Just (con, [t1, t2])
@@ -257,7 +260,7 @@ getPassConv ty = do
   where
     primitive pc =
       let con = pyonBuiltin pc
-      in return $ ConV con IOVal
+      in return $ ConV con IOVal -}
 
 -- | Choose a parameter-passing mode for a data type.
 -- Dictionary types inserted by type inference are passed by value.
@@ -267,22 +270,16 @@ chooseMode :: EvalMonad m => RType -> m TypeMode
 chooseMode t
   | getLevel t == ObjectLevel = internalError "chooseMode"
   | getLevel t /= TypeLevel = return PassByVal
-  | otherwise = do
-      t' <- evalHead' t
-      return $! case Gluon.unpackRenamedWhnfAppE t'
-                of Just (con, _)
-                     | isDictionaryTypeConstructor con -> PassByVal
-                     | otherwise -> PassByRef
-                   Nothing -> case substFullyUnder $ fromWhnf t'
-                              of Gluon.FunE {} -> PassByClo
-                                 _ -> PassByRef
+  | typeOfHMType t = return PassByVal
+  | otherwise = case t
+                of Gluon.FunE {} -> return PassByClo
+                   _ -> return PassByRef
 
--- | True if this is a type constructor for a constraint type.
--- Data of these types are always passed by value. 
-isDictionaryTypeConstructor con =
-  any (con `isPyonBuiltin`) [the_PassConv, the_EqDict, the_OrdDict,
-                             the_TraversableDict, the_AdditiveDict,
-                             the_VectorDict]
+hasDictionaryTypeConstructor t = do
+  t' <- evalHead' t
+  return $! case Gluon.unpackRenamedWhnfAppE t'
+            of Just (con, _) -> isDictionaryTypeConstructor con
+               Nothing -> False
 
 -- | Build the argument list for a function call
 buildCallArguments :: [FlatArgument] -> FlatReturn -> [Value]
@@ -301,7 +298,18 @@ buildCallArguments args ret =
 setParameterMode :: RBinder () -> F (RBinder DataMode)
 setParameterMode (Binder v ty ()) = do
   mode <- chooseMode ty
-  return $! Binder v ty $! parameterInMode mode
+  
+  -- If it's pass-by-value, determine whether this parameter represents
+  -- some type-level computation.  Type parameters and dictionaries count
+  -- as type-level computation.
+  let datamode =
+        case mode
+        of PassByVal | typeOfHMType ty -> InHM
+                     | otherwise       -> IOVal
+           PassByClo -> IOClo
+           PassByRef -> InRef
+         
+  return $! Binder v ty $! datamode
 
 createReturnBinder :: RType
                    -> F (Maybe (RBinder DataMode), TypeMode, FlatReturn)
@@ -409,9 +417,10 @@ parameterEffects patterns = effectUnions $ map parameterEffect patterns
 
 parameterEffect (Binder v _ mode) =
   case mode
-  of IOVal -> noEffect
+  of InHM  -> noEffect
+     IOVal -> noEffect
      IOClo -> noEffect
-     InRef -> varEffect v
+     InRef -> readVar v
      OutRef -> internalError "parameterEffect"
 
 functionTypeEffect :: RType -> F FunctionEffect
@@ -429,6 +438,25 @@ functionTypeEffect ty = do
       in if length args < length effs && isSomeEffect effect
          then internalError "functionTypeEffect: partial application with effect"
          else effect
+
+    -- For debugging.  Follow the same steps as 'parameter_effects' and return
+    -- strings.
+    parameter_effects_debug ty =
+      case ty
+      of Gluon.FunE { Gluon.expMParam = Binder' mv ty ()
+                    , Gluon.expRange = rng}
+           | getLevel ty == KindLevel -> liftM ("ignore" :) $
+                                         parameter_effects_debug rng 
+           | getLevel ty == TypeLevel && isNothing mv -> do
+               mode <- chooseMode ty
+               case mode of PassByVal -> liftM ("ignore" :) $
+                                         parameter_effects_debug rng 
+                            PassByRef -> liftM ("add effect" :) $
+                                         parameter_effects_debug rng 
+                            PassByClo -> liftM ("ignore" :) $ 
+                                         parameter_effects_debug rng
+           | otherwise -> internalError "functionTypeEffect"
+         _ -> return []
 
     -- For each parameter, compute its contribution to the overall
     -- function effect
@@ -455,7 +483,7 @@ functionTypeEffect ty = do
         
         ignore _ effect = effect
         
-        add_effect (VariableArgument v) effect = effectUnion (varEffect v) effect
+        add_effect (VariableArgument v) effect = effectUnion (readVar v) effect
         add_effect _ effect = internalError "functionTypeEffect"
         
 -- | Calculate the effect of a function based on its type
@@ -507,25 +535,36 @@ withFlattenedExps :: StmtExtensible a =>
                      [TExp] -> ([FlatArgument] -> F a) -> F a
 withFlattenedExps = withMany withFlattenedExp
 
--- | Flatten a function call expression.
+-- | Flatten a function call expression into one or two function calls.
+--
+-- We separate type and dictionary parameters from other parameters and
+-- pass them in separate calls.
 flattenCall :: ExpInfo -> FlatReturn -> TExp -> Maybe [TExp] -> F Stmt
 flattenCall inf ret mono_op margs =
   -- Generate code for the function call parameters
   withFlattenedExp poly_op $ \real_op_argument ->
   withFlattenedExps (fromMaybe [] margs) $ \object_args -> do
-    -- Get the function call parameters
+    -- If there are type or dictionary parameters, then create a call for those
+    -- If there are value parameters, then create a call for those
     let arguments = map (ValueArgument . TypeV . fromTypedType) ty_args ++
-                    object_args
-        params = buildCallArguments arguments ret
+                         object_args
+        values = buildCallArguments arguments ret
         (op, parameterized_effect) = expectClosureArgument real_op_argument
     
     -- Compute the function's effect
-    let effect = parameterized_effect arguments
+    let effect = parameterized_effect arguments `effectUnion` returnEffect ret
 
     -- Create the function call statement
-    return $ CallS (mkFlatInfo pos ret effect) op params
+    return $ CallS (mkFlatInfo pos ret effect) op values
   where
     pos = getSourcePos inf
+
+    -- An argument is a dictionary value iff its head is a known dictionary 
+    -- constructor type
+    is_dict_arg (TypeAnn ty _) =
+      case Gluon.unpackWhnfAppE ty
+      of Just (c, _) -> isDictionaryTypeConstructor c
+         _ -> False
 
     -- Get the real operator and its type arguments 
     (poly_op, ty_args) = extract_type_parameters mono_op
@@ -606,7 +645,7 @@ flattenCase flattenBranch inf return_mode return_type scrutinee alts =
       let alternatives_effect =
             effectUnions [ fexpEffect stmt `effectDiff` local_eff
                        | FlatRefAlt _ _ _ local_eff _ _ stmt <- flat_alts]
-          effect = alternatives_effect `effectUnion` varEffect scrutinee_var
+          effect = alternatives_effect `effectUnion` readVar scrutinee_var
       
       let new_info = mkFlatInfo (getSourcePos inf) ret effect
       return $ CaseRefS new_info scrutinee_var scrutinee_type flat_alts
@@ -679,14 +718,9 @@ flattenExpWriteValue inf return_mode dest
     recursive = flattenExpWriteValue inf return_mode dest
     
     returnValue val =
-      case return_mode
-      of ValueReturn ty ->
-           let value = ValueS (mkValueReturnInfo pos ty) val
-           in return $ assignTemporaryValue pos dest ty IOVal value
-         ClosureReturn ty eff ->
-           let value = ValueS (mkClosureReturnInfo pos ty eff) val
-           in return $ assignTemporaryValue pos dest ty IOClo value
-         _ -> internalError "flattenExpWriteValue"
+      let value = ValueS (mkFlatInfo pos return_mode noEffect) val
+          rt = returnType return_mode
+      in return $ assignTemporaryValue pos dest rt return_component value
 
     return_component = returnMode return_mode
 
@@ -784,7 +818,7 @@ flattenExpReference texp@(unpackTypedExp -> (ty, expression)) =
      CallE {expInfo = inf, expOper = op, expArgs = args} -> do
        -- Create a temporary variable to hold the result
        tmp_var <- newAnonymousVariable
-            
+
        -- Create a function call
        stmt <- flattenCall inf (VariableReturn ty tmp_var) op (Just args)
 
@@ -798,13 +832,14 @@ flattenExpReference texp@(unpackTypedExp -> (ty, expression)) =
 
 -- | Flatten an expression whose value will be written to the specified
 -- variable.
+-- The output always has mode 'OutRef'.
 flattenExpWriteReference :: Var -> TExp -> F Stmt
 flattenExpWriteReference return_var texp@(unpackTypedExp -> (ty, expression)) =
   case expression
   of VarE {expInfo = inf, expVar = v} -> do
        -- Copy this variable to the destination
-       pc <- getPassConv' ty
-       let new_info = mkFlatInfo pos return_mode (varEffect v)
+       let effect = readVar v `effectUnion` writeVar return_var
+       let new_info = mkFlatInfo pos return_mode effect
        return $ CopyS new_info v
      ConE {expCon = c} ->
        returnValue $ ConV c IOVal
@@ -836,12 +871,12 @@ flattenExpWriteReference return_var texp@(unpackTypedExp -> (ty, expression)) =
 
 -- | Compute a function's side effect.  Return the side effect as a function
 -- of the arguments.
-functionEffect :: Fun (Typed Rec) -> F ([FlatArgument] -> Effect)
+functionEffect :: Fun (Typed Rec) -> F FunctionEffect
 functionEffect (TypedSFFun (TypeAnn _ function)) =
   functionEffect' (funTyParams function) (funParams function) (fromTypedType $ funReturnType function)
 
 functionEffect' :: [TyPat (Typed Rec)] -> [Pat (Typed Rec)] -> RType
-                -> F ([FlatArgument] -> Effect)
+                -> F FunctionEffect
 functionEffect' ty_params params return_type = do
   (_, eff, _) <- buildFunctionParameters ty_params params return_type
   return $ makeEffect params eff
@@ -868,7 +903,7 @@ functionEffect' ty_params params return_type = do
       Nothing
 
     associate_param _ _ = internalError "functionEffect"
-         
+
 flattenFun :: Fun (Typed Rec) -> F FlatFun
 flattenFun (TypedSFFun (TypeAnn _ function)) = do
   let return_type = fromTypedType $ funReturnType function
@@ -911,6 +946,7 @@ flattenFun (TypedSFFun (TypeAnn _ function)) = do
     -- Assume variables bound by one of the binders
     assumeValueParameters params m = foldr assumeValueParameter m params
 
+    assumeValueParameter (Binder v ty InHM) m  = assumePure v ty m
     assumeValueParameter (Binder v ty IOVal) m = assumePure v ty m
     assumeValueParameter (Binder _ _ _)      m = m
 

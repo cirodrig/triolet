@@ -6,13 +6,15 @@ module Pyon.SystemF.Builtins
         loadPyonBuiltins, arePyonBuiltinsInitialized,
         pyonBuiltin, isPyonBuiltin,
         the_Stream,
-        the_bool, 
+        the_bool,
+        the_int,
+        the_float,
         the_list,
         the_NoneType, 
         the_Any, 
         the_PassConv,
-        the_passConv_Int,
-        the_passConv_Float,
+        the_passConv_int,
+        the_passConv_float,
         the_passConv_bool,
         the_passConv_NoneType,
         the_passConv_iter,
@@ -20,11 +22,11 @@ module Pyon.SystemF.Builtins
         the_passConv_Any,
         the_EqDict, the_OrdDict, the_TraversableDict,
         the_AdditiveDict, the_VectorDict,
-        the_EqDict_Int, the_OrdDict_Int,
-        the_EqDict_Float, the_OrdDict_Float,
+        the_EqDict_int, the_OrdDict_int,
+        the_EqDict_float, the_OrdDict_float,
         the_EqDict_Tuple2, the_OrdDict_Tuple2,
         the_TraversableDict_Stream, the_TraversableDict_list,
-        the_AdditiveDict_Int, the_AdditiveDict_Float,
+        the_AdditiveDict_int, the_AdditiveDict_float,
         the_None, the_True, the_False,
         the_eqDict, the_ordDict, the_traversableDict,
         the_additiveDict, the_vectorDict,
@@ -252,16 +254,16 @@ initializePyonBuiltins mod = do
           [ ("_tuples", [| readTupleTypes mod |])
           , ("_tupleConstructors", [| readTuples mod |])
           , ("_tuplePassConvConstructors", [| readTuplePassConvs mod |])
-          , eq_dict "Int"
-          , eq_dict "Float"
+          , eq_dict "int"
+          , eq_dict "float"
           , eq_dict "Tuple2"
-          , ord_dict "Int"
-          , ord_dict "Float"
+          , ord_dict "int"
+          , ord_dict "float"
           , ord_dict "Tuple2"
           , traversable_dict "Stream"
           , traversable_dict "list"
-          , additive_dict "Int"
-          , additive_dict "Float"
+          , additive_dict "int"
+          , additive_dict "float"
           ]
       in initializeRecordM pyonBuiltinsSpecification initializers)
 

@@ -96,11 +96,11 @@ mkEqClass = mdo
   let int_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
-        (fromEqDict SystemF.the_EqDict_Int)
+        (fromEqDict SystemF.the_EqDict_int)
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
-        (fromEqDict SystemF.the_EqDict_Float)
+        (fromEqDict SystemF.the_EqDict_float)
   tuple2_instance <- do
     a <- newTyVar Star Nothing
     b <- newTyVar Star Nothing
@@ -143,11 +143,11 @@ mkOrdClass = mdo
   let int_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
-        (fromOrdDict SystemF.the_OrdDict_Int)
+        (fromOrdDict SystemF.the_OrdDict_int)
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
-        (fromOrdDict SystemF.the_OrdDict_Float)
+        (fromOrdDict SystemF.the_OrdDict_float)
 
   tuple2_instance <- do
     a <- newTyVar Star Nothing
@@ -227,11 +227,11 @@ mkAdditiveClass = mdo
   let int_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
-        (fromAdditiveDict SystemF.the_AdditiveDict_Int)
+        (fromAdditiveDict SystemF.the_AdditiveDict_int)
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
-        (fromAdditiveDict SystemF.the_AdditiveDict_Float)
+        (fromAdditiveDict SystemF.the_AdditiveDict_float)
   
   return cls
   where
@@ -336,11 +336,11 @@ mkIterBindType =
 
 mkNegateType =
   forallType [Star] $ \[a] ->
-  ([], functionType [ConTy a] (ConTy a))
+  ([passable (ConTy a)], functionType [ConTy a] (ConTy a))
 
 mkBinaryOpType =
   forallType [Star] $ \[a] ->
-  ([], functionType [ConTy a, ConTy a] (ConTy a))
+  ([passable (ConTy a)], functionType [ConTy a, ConTy a] (ConTy a))
 
 mkBinaryIntType =
   let int = ConTy (tiBuiltin the_con_int)
@@ -378,13 +378,13 @@ initializeTIBuiltins = do
             -- 5. parameter-passing constructor Gluon name
             -- 6. parameter-passing constructor arguments needed
             -- 6. execution mode
-            [ ("int", Star, [| Gluon.builtin Gluon.the_Int |],
+            [ ("int", Star, [| pyonBuiltin SystemF.the_int |],
                [| PassConvVal ByRef |],
-               "passConv_Int", [],
+               "passConv_int", [],
                [| AsAction |])
-            , ("float", Star, [| Gluon.builtin Gluon.the_Float |],
+            , ("float", Star, [| pyonBuiltin SystemF.the_float |],
                [| PassConvVal ByRef |],
-               "passConv_Float", [],
+               "passConv_float", [],
                [| AsAction |])
             , ("bool", Star, [| pyonBuiltin SystemF.the_bool |], 
                [| PassConvVal ByRef |],
