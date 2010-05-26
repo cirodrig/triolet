@@ -314,7 +314,7 @@ getStateVariable v =
                     "getStateVariable: No information for " ++ show v
 
 -- | For debugging; calls 'getStateVariable'
-getStateVariableX s v = trace s $ getStateVariable v
+getStateVariableX s v = getStateVariable v
   -- trace s $ getStateVariable v
 
 -- | Get the address, pointer, and state variables for a reference variable
@@ -532,7 +532,7 @@ consumeStateVariable v = ToAnf $ modify (delete v)
     delete v s = s {anfStateMap = Map.delete (varID v) $ anfStateMap s}
 
 withStateVariable :: Var -> ToAnf a -> ToAnf a
-withStateVariable v (ToAnf m) = ToAnf $ trace ("withStateVariable " ++ show v) $ do
+withStateVariable v (ToAnf m) = ToAnf $ do
   -- Create a new state variable
   defineStateVariableRWST v
   x <- m
@@ -847,7 +847,7 @@ anfArguments pos values = do
 
     state_param v = do
       real_v <- getStateVariableX "anfArguments" v
-      trace ("anfArguments: consume " ++ show v) $ consumeStateVariable v
+      consumeStateVariable v
       return $ Just $ Anf.mkVarV pos real_v
     
     is_hm_type (VarV _ mode) = mode == InHM
@@ -1065,7 +1065,7 @@ evalAnfStmt statement = do
 -- After generating the statement, apply the transformation to it to package 
 -- its return value.
 anfStmt :: StmtReturn -> Stmt -> ToAnf Anf.RStm
-anfStmt statement_return statement = trace (stmtString statement) $ stop_on_error $
+anfStmt statement_return statement =
   case statement
   of -- These cases have a corresponding ANF expression
      ValueS {fexpValue = val} -> do
@@ -1563,7 +1563,7 @@ buildStmtReturnValue return_spec ret stm = do
          rt <- convertType ty
          return (v, Just (Gluon.mkVarE stmt_pos v), rt)
        VariableReturn _ v -> do
-         trace "buildStmtReturnValue: define state variable" $ defineStateVariable v
+         defineStateVariable v
          sv <- getStateVariableX "buildStmtReturnValue" v
          rt <- getStateType v
          return (sv, Nothing, rt)
@@ -1664,7 +1664,7 @@ adaptStmtReturn given_spec target_spec statement
   | sameStmtReturn given_spec target_spec =
       -- The statement already returns the right thing
       return statement
-  | otherwise = traceShow (text "adaptStmtReturn " <+> pprStmtReturn given_spec <+> text "to" <+> pprStmtReturn target_spec) $
+  | otherwise =
       unpack_stmt given_spec Nothing statement $ build_return_statement
     where
       -- Unpack 'stmt' according to the specification.  Generate a 'case' or
