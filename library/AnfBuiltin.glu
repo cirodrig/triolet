@@ -32,6 +32,13 @@ let noneFunction (a : Object) -> Pure =
  -> Ptr l -> Ptr rl -> Undef a @ rl
  -> Action (NoneTypeO :@: l) (a @ rl);
 
+let traversalFunction (t : Object -> Object) -> Pure =
+    (a : Object) -> PassConv a
+ -> Action EmpE (   (la : Addr) -> (lo : Addr)
+                 -> Ptr la -> Ptr lo
+                 -> Undef (StreamO a) @ lo
+                 -> Action (t a :@: la) (StreamO a @ lo));
+
 -------------------------------------------------------------------------------
 
 constant PassConv : Object -> Pure;
@@ -39,6 +46,9 @@ constant PassConv : Object -> Pure;
 constant passConv_int : PassConv intO;
 constant passConv_float : PassConv floatO;
 constant passConv_bool : PassConv boolO;
+constant passConv_list : (a : Object) -> PassConv a -> PassConv (listO a);
+constant passConv_Stream : (a : Object) -> PassConv a -> PassConv (StreamO a);
+
 constant passConv_PyonTuple2 :
     (a : Object) -> (b : Object)
  -> PassConv a -> PassConv b
@@ -119,6 +129,11 @@ data OrdDict : Object -> Pure where
          -> comparison a -> comparison a -> comparison a -> comparison a
          -> OrdDict a;
 
+data TraversableDict : (Object -> Object) -> Pure where
+  traversableDict : (t : Object -> Object)
+                 -> traversalFunction t
+                 -> TraversableDict t;
+
 data AdditiveDict : Object -> Pure where
   additiveDict :
       (a : Object)
@@ -129,19 +144,29 @@ data AdditiveDict : Object -> Pure where
 
 -------------------------------------------------------------------------------
 
-constant map :
-    (eff : Effect)
- -> (a : Pure)
- -> (b : Pure)
- -> (t : Pure -> Pure)
- -> (ita : Addr)
- -> (ota : Addr)
- -> Ptr ita
- -> Ptr ota
- -> ((ia : Addr) -> (oa : Addr) -> Ptr ia -> Ptr oa -> Undef b @ oa ->
-     Action (eff :**: a :@: ia) (b @ oa))
- -> Undef (t b) @ ota
- -> Action eff (t b @ ota);
+constant oper_DO :
+    (a : Object) -> PassConv a -> Action EmpE ((la : Addr) -> (lo : Addr) -> Ptr la -> Ptr lo -> Undef (StreamO a) @ lo -> Action (a :@: la) (StreamO a @ lo));
+
+constant oper_CAT_MAP :
+    (a : Object)
+ -> (b : Object)
+ -> PassConv a
+ -> PassConv b
+ -> Action EmpE (   (li : Addr)
+                 -> (lo : Addr)
+                 -> Ptr li
+                 -> ((lj : Addr) -> (lo : Addr) -> Ptr lj -> Ptr lo -> Undef (StreamO b) @ lo -> Action (a :@: lj) (StreamO b @ lo))
+                 -> Ptr lo
+                 -> Undef (StreamO b) @ lo
+                 -> Action (StreamO a :@: li) (StreamO b @ lo));
+
+constant makelist :
+    (a : Object)
+ -> PassConv a
+ -> Action EmpE (   (li : Addr) -> (lo : Addr)
+                 -> Ptr li -> Ptr lo
+                 -> Undef (listO a) @ lo
+                 -> Action (StreamO a :@: li) (listO a @ lo));
 
 constant store_int :
     (a : Addr)
@@ -226,8 +251,11 @@ constant Additive_ZERO_float : noneFunction floatO;
 constant Additive_ADD_float : binary floatO;
 constant Additive_SUB_float : binary floatO;
 
+constant Traversable_TRAVERSE_Stream : traversalFunction StreamO;
+constant Traversable_TRAVERSE_list : traversalFunction listO;
+
 constant oper_DIV : (a : Object) -> PassConv a -> Action EmpE (binary a);
-constant oper_MOD : (a : Object) -> PassConv a -> Action EmpE (binary a);
+constant oper_MOD : binary intO;
 constant oper_FLOORDIV : (a : Object) -> PassConv a -> Action EmpE (binary a);
 constant oper_POWER : (a : Object) -> PassConv a -> Action EmpE (binary a);
 constant oper_NEGATE :

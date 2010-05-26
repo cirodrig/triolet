@@ -16,6 +16,7 @@ builtinTypeNames =
     -- Dictionary types
   , "EqDict"
   , "OrdDict"
+  , "TraversableDict"
   , "AdditiveDict"
   , "PassConv"
     -- Object types
@@ -38,6 +39,7 @@ builtinDataConNames =
   , "NoneV"
   , "eqDict"
   , "ordDict"
+  , "traversableDict"
   , "additiveDict"
   ]
 
@@ -60,6 +62,8 @@ builtinFunctionNames =
   , "passConv_int"
   , "passConv_float"
   , "passConv_bool"
+  , "passConv_list"
+  , "passConv_Stream"
   , "passConv_PyonTuple2"
     -- Dictionary functions
   , "Eq_EQ_int"
@@ -74,6 +78,8 @@ builtinFunctionNames =
   , "Ord_LT_float"
   , "Ord_GE_float"
   , "Ord_LE_float"
+  , "Traversable_TRAVERSE_Stream"
+  , "Traversable_TRAVERSE_list"
   , "Additive_ZERO_int"
   , "Additive_ADD_int"    
   , "Additive_SUB_int"
@@ -89,6 +95,9 @@ builtinFunctionNames =
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"
   , "oper_BITWISEXOR"
+  , "oper_DO"
+  , "oper_CAT_MAP"
+  , "makelist"
   ]
 
 anfBuiltinConstructors =

@@ -311,12 +311,14 @@ mkUndefinedType =
 
 mkMakelistType =
   forallType [Star] $ \[a] ->
-  ([], functionType [ConTy (tiBuiltin the_con_iter) @@ ConTy a]
-       (ConTy (tiBuiltin the_con_list) @@ ConTy a))
+  let aT = ConTy a
+      sT = ConTy (tiBuiltin the_con_iter) @@ aT
+      lT = ConTy (tiBuiltin the_con_list) @@ aT
+  in ([passable aT], functionType [sT] lT)
 
 mkDoType =
   forallType [Star] $ \[a] ->
-  ([], functionType [ConTy a] (ConTy (tiBuiltin the_con_iter) @@ ConTy a))
+  ([passable (ConTy a)], functionType [ConTy a] (ConTy (tiBuiltin the_con_iter) @@ ConTy a))
 
 mkGuardType =
   forallType [Star] $ \[a] ->

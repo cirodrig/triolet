@@ -202,9 +202,10 @@ constant oper_CAT_MAP : (a : Pure)
 
 constant oper_GUARD : (a : Pure) -> bool -> Stream a -> Stream a;
 
-constant oper_DO : (a : Pure) -> a -> Stream a;
+constant oper_DO : (a : Pure) -> PassConv a -> (a -> Stream a);
 
 constant fun_makelist : (a : Pure)
+                     -> PassConv a
                      -> (Stream a -> list a);
 
 constant fun_map : (t : Pure -> Pure) -> (a : Pure) -> (b : Pure)

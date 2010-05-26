@@ -49,6 +49,7 @@ anfConTable = IntMap.fromList [(fromIdent $ conID $ SF.pyonBuiltin sf_c,
       , (\_ -> SF.getPyonTupleType' 2, Anf.the_PyonTuple2O)
       , (SF.the_EqDict, Anf.the_EqDict)
       , (SF.the_OrdDict, Anf.the_OrdDict)
+      , (SF.the_TraversableDict, Anf.the_TraversableDict)
       , (SF.the_AdditiveDict, Anf.the_AdditiveDict)
       , (SF.the_PassConv, Anf.the_PassConv)
         
@@ -57,14 +58,19 @@ anfConTable = IntMap.fromList [(fromIdent $ conID $ SF.pyonBuiltin sf_c,
       , (SF.the_False, Anf.the_FalseV)
       , (SF.the_eqDict, Anf.the_eqDict)
       , (SF.the_ordDict, Anf.the_ordDict)
+      , (SF.the_traversableDict, Anf.the_traversableDict)
       , (SF.the_additiveDict, Anf.the_additiveDict)
         
         -- Introduction functions
       , (\_ -> SF.getPyonTupleCon' 2, Anf.the_intro_PyonTuple2)
         
-        -- Constants
+        -- Parameter passing conventions
       , (SF.the_passConv_float, Anf.the_passConv_float)
       , (SF.the_passConv_int, Anf.the_passConv_int)
+      , (SF.the_passConv_bool, Anf.the_passConv_bool)
+      , (SF.the_passConv_list, Anf.the_passConv_list)
+      , (SF.the_passConv_iter, Anf.the_passConv_Stream)
+      , (\_ -> SF.getPyonTuplePassConv' 2, Anf.the_passConv_PyonTuple2)
         
         -- Functions
       , (SF.eqMember . SF.the_EqDict_int, Anf.the_Eq_EQ_int)
@@ -79,6 +85,8 @@ anfConTable = IntMap.fromList [(fromIdent $ conID $ SF.pyonBuiltin sf_c,
       , (SF.geMember . SF.the_OrdDict_float, Anf.the_Ord_GE_float)
       , (SF.ltMember . SF.the_OrdDict_float, Anf.the_Ord_LT_float)
       , (SF.leMember . SF.the_OrdDict_float, Anf.the_Ord_LE_float)
+      , (SF.traverseMember . SF.the_TraversableDict_list, Anf.the_Traversable_TRAVERSE_list)
+      , (SF.traverseMember . SF.the_TraversableDict_Stream, Anf.the_Traversable_TRAVERSE_Stream)
       , (SF.zeroMember . SF.the_AdditiveDict_int, Anf.the_Additive_ZERO_int)
       , (SF.addMember . SF.the_AdditiveDict_int, Anf.the_Additive_ADD_int)
       , (SF.subMember . SF.the_AdditiveDict_int, Anf.the_Additive_SUB_int)
@@ -94,4 +102,7 @@ anfConTable = IntMap.fromList [(fromIdent $ conID $ SF.pyonBuiltin sf_c,
       , (SF.the_oper_BITWISEAND, Anf.the_oper_BITWISEAND)
       , (SF.the_oper_BITWISEOR, Anf.the_oper_BITWISEOR)
       , (SF.the_oper_BITWISEXOR, Anf.the_oper_BITWISEXOR)
+      , (SF.the_oper_CAT_MAP, Anf.the_oper_CAT_MAP)
+      , (SF.the_oper_DO, Anf.the_oper_DO)
+      , (SF.the_fun_makelist, Anf.the_makelist)
       ]

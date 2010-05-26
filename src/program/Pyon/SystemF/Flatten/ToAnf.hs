@@ -395,6 +395,12 @@ getAnfPassConv passed_type = do
           return $ Anf.mkConV pos $ Anf.anfBuiltin Anf.the_passConv_float
       | con `isPyonBuiltin` the_bool ->
           return $ Anf.mkConV pos $ Anf.anfBuiltin Anf.the_passConv_bool
+    Just (con, [arg])
+      | con `isPyonBuiltin` the_list ->
+          unary_pass_conv arg Anf.the_passConv_list
+      | con `isPyonBuiltin` the_Stream ->
+          unary_pass_conv arg Anf.the_passConv_Stream
+          
     Just (con, args) 
       | Just size <- whichPyonTupleTypeCon con -> do
           let pass_conv_con =
@@ -428,6 +434,16 @@ getAnfPassConv passed_type = do
     pos = getSourcePos passed_type
 
     passed_type_v = verbatim passed_type
+
+    unary_pass_conv arg con_field = do
+      -- Get the argument's type and passing convention
+      arg_ty <- convertType $ substFully arg
+      arg_pass_conv <- getAnfPassConv $ substFully arg
+      
+      -- Build a parameter passing convention expression
+      let con = Anf.mkConV pos $ Anf.anfBuiltin con_field
+      return $ Anf.mkAppV pos con [ Anf.mkExpV $ fromAnfType arg_ty
+                                  , arg_pass_conv]
 
     -- Return True if ty == PassConv anf_e, False otherwise
     matchType anf_e (_, ty) = do
@@ -882,7 +898,9 @@ isPureOperator :: Value -> Bool
 isPureOperator (ConV c _) =
   c `elem` [pyonBuiltin the_eqDict, pyonBuiltin the_ordDict,
             pyonBuiltin the_traversableDict, pyonBuiltin the_additiveDict,
-            pyonBuiltin the_vectorDict]
+            pyonBuiltin the_vectorDict,
+            getPyonTuplePassConv' 0, getPyonTuplePassConv' 1,
+            getPyonTuplePassConv' 2]
 
 isPureOperator _ = False
 
