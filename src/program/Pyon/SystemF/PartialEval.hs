@@ -47,6 +47,33 @@ deconstructTupleExp expression =
        | Just con == getPyonTupleCon (length args) -> Just args
      _ -> Nothing
 
+-- | Unpack a polymorphic call, possibly surrounded by let-expressions.
+-- Return the unpacked call and bindings.
+unpackPolymorphicCallAndBindings :: RExp
+                                 -> Maybe ([(ExpInfo, RPat, RExp)],
+                                           RExp,
+                                           [RType],
+                                           [RExp])
+unpackPolymorphicCallAndBindings expression =
+  case expression
+  of LetE { expInfo = inf
+          , expBinder = pat
+          , expValue = val
+          , expBody = body} ->
+       case unpackPolymorphicCallAndBindings body
+       of Just (bindings, op, ty_args, args) ->
+            Just ((inf, pat, val) : bindings, op, ty_args, args)
+          Nothing -> Nothing
+     _ -> case unpackPolymorphicCall expression
+          of Just (op, ty_args, args) -> Just ([], op, ty_args, args)
+             Nothing -> Nothing
+
+applyBindings :: [(ExpInfo, RPat, RExp)] -> RExp -> RExp
+applyBindings bs e = foldr make_let e bs
+  where
+    make_let (info, pat, rhs) body =
+      LetE {expInfo = info, expBinder = pat, expValue = rhs, expBody = body}
+
 -- | Return True if the expression is \"simple\" and thus worthy of
 -- inlining.  We don't want to increase the amount of work performed by
 -- by evaluating the same expression repeatedly, unless it is a known-cheap
@@ -183,15 +210,18 @@ pevalExp expression =
 eliminateCase :: SourcePos -> RExp -> [Alt Rec] -> Maybe RExp
 eliminateCase pos scrutinee alternatives =
   -- Is the scrutinee a constructor application?
-  case unpackPolymorphicCall scrutinee
-  of Just (ConE {expCon = scrutinee_con}, ty_args, args) ->
+  case unpackPolymorphicCallAndBindings scrutinee
+  of Just (bindings, ConE {expCon = scrutinee_con}, ty_args, args) ->
        -- Find a matching alternative
        case find ((scrutinee_con ==) . altConstructor) alternatives
        of Just alt ->
             -- Assume that type arguments match, because the code passed 
             -- type checking.
             -- Bind parameters to the constructor's fields.
-            Just $ foldr make_let (altBody alt) $ zip args (altParams alt)
+            Just $
+            applyBindings bindings $
+            foldr make_let (altBody alt) $
+            zip args (altParams alt)
           Nothing -> Nothing    -- No matching alternative
      _ -> Nothing               -- Cannot determine constructor of scrutinee
   where
