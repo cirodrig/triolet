@@ -47,13 +47,38 @@ deconstructTupleExp expression =
        | Just con == getPyonTupleCon (length args) -> Just args
      _ -> Nothing
 
+-- | Return True if the expression is \"simple\" and thus worthy of
+-- inlining.  We don't want to increase the amount of work performed by
+-- by evaluating the same expression repeatedly, unless it is a known-cheap
+-- expression.
+isSimpleExp :: RExp -> Bool
+isSimpleExp expression = 
+  case expression
+  of VarE {} -> True
+     ConE {} -> True
+     LitE {} -> True
+     TyAppE {expOper = e} -> isSimpleExp e
+     CallE {expOper = op} -> is_dictionary_operator op
+     FunE {} -> False
+     LetE {} -> False
+     LetrecE {} -> False
+     CaseE {} -> False
+  where
+    -- Dictionary constructor expressions are inlined to enable later 
+    -- optimizations
+    is_dictionary_operator (ConE {expCon = c}) = isDictionaryCon c
+    is_dictionary_operator (TyAppE {expOper = e}) = is_dictionary_operator e
+    is_dictionary_operator (LetE {expBody = b}) = is_dictionary_operator b
+    is_dictionary_operator _ = False
+
 -- | Given a value and the pattern it is bound to, add the bound value(s)
 -- to the environment.  The caller should verify that the value has no
 -- side effects.  Any values that cannot be added to the environment will be
 -- ignored.
 bindValue :: RPat -> RExp -> PE a -> PE a
 bindValue (WildP _)   _ m = m
-bindValue (VarP v t)  e m = local (Map.insert v e) m
+bindValue (VarP v t)  e m | isSimpleExp e = local (Map.insert v e) m
+                          | otherwise     = m
 bindValue (TupleP ps) e m = 
   case deconstructTupleExp e
   of Nothing -> m               -- Cannot bind this value 

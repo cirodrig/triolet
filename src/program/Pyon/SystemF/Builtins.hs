@@ -52,7 +52,8 @@ module Pyon.SystemF.Builtins
         getPyonTupleType, getPyonTupleType',
         getPyonTupleCon, getPyonTupleCon',
         getPyonTuplePassConv, getPyonTuplePassConv',
-        whichPyonTupleCon, whichPyonTupleTypeCon
+        whichPyonTupleCon, whichPyonTupleTypeCon,
+        isDictionaryCon
        )
 where
 
@@ -60,6 +61,7 @@ import Control.Exception
 import Control.Monad
 import Control.Concurrent.MVar
 import Data.List
+import qualified Data.IntSet as IntSet
 import Language.Haskell.TH(stringE)
 import System.FilePath
 import System.IO.Unsafe
@@ -173,6 +175,23 @@ whichPyonTupleTypeCon c = unsafePerformIO $ do
   
   bi <- readMVar the_PyonBuiltins
   return $ findIndex (c ==) $ the_tuples bi
+
+-- | Determine whether the given constructor builds a dictionary object
+-- or passing convention object.
+isDictionaryCon :: Con -> Bool
+isDictionaryCon c =
+  fromIdent (conID c) `IntSet.member` dictionary_constructor_ids
+  where
+    dictionary_constructor_ids =
+      IntSet.fromList $
+      map (fromIdent . conID . pyonBuiltin) dictionary_constructors
+
+    dictionary_constructors =
+      [the_eqDict, the_ordDict, the_traversableDict, the_additiveDict,
+       the_vectorDict,
+       the_passConv_int, the_passConv_float, the_passConv_bool,
+       the_passConv_NoneType, the_passConv_iter, the_passConv_list,
+       the_passConv_Any]
 
 findConByName mod name =
   let label = pgmLabel pyonBuiltinModuleName name
