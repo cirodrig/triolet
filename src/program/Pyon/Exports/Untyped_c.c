@@ -63,6 +63,18 @@ tupleType(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+functionType(PyObject *self, PyObject *args)
+{
+  PyObject *params;
+  PyObject *ret;
+
+  if (!PyArg_ParseTuple(args, "OO!", &params, &HsObject_type, &ret))
+    return NULL;
+
+  return pyon_functionType(params, ret);
+}
+
+static PyObject *
 Variable(PyObject *self, PyObject *args)
 {
   PyObject *var;
@@ -341,6 +353,8 @@ static PyMethodDef untyped_methods[] = {
    "Construct a rigid type variable"},
   {"tupleType", tupleType, METH_VARARGS,
    "Construct a tuple type"},
+  {"functionType", functionType, METH_VARARGS,
+   "Construct a function type"},
   {"Variable", Variable, METH_VARARGS,
    "Construct an untyped variable"},
   {"WildP", WildP, METH_VARARGS,

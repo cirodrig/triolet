@@ -147,6 +147,13 @@ pyon_tupleType py_fields = rethrowExceptionsInPython $ do
   fields <- fromTypeOrConList py_fields
   newHsObject $ tupleType fields
 
+foreign export ccall pyon_functionType :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_functionType py_params py_ret = rethrowExceptionsInPython $ do
+  params <- fromTypeOrConList py_params
+  ret <- fromTypeOrCon py_ret
+  newHsObject $ functionType params ret
+
 foreign export ccall pyon_Variable :: PyPtr -> IO PyPtr
 
 pyon_Variable ptr = rethrowExceptionsInPython $ do
