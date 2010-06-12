@@ -330,7 +330,7 @@ mkIterBindType =
   forallType [Star, Star] $ \[a, b] ->
   let aT = ConTy a
       bT = ConTy b
-  in ([passable aT, passable bT],
+  in ([passable aT],
    functionType [ ConTy (tiBuiltin the_con_iter) @@ aT
                 , functionType [aT] (ConTy (tiBuiltin the_con_iter) @@ bT)
                 ]
