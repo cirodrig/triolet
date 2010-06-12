@@ -26,7 +26,7 @@ import qualified Pyon.SystemF.Print as SystemF
 import qualified Pyon.SystemF.ElimPatternMatching as SystemF
 import qualified Pyon.SystemF.PartialEval as SystemF
 import qualified Pyon.SystemF.DeadCode as SystemF
-import Pyon.SystemF.Flatten.ToAnf as SystemF
+import qualified Pyon.SystemF.NewFlatten.SetupEffect as SystemF
 import qualified Pyon.Anf.Print as Anf
 import qualified Pyon.Anf.Typecheck as Anf
 
@@ -390,6 +390,18 @@ pyon_eliminateDeadCode _self mod = rethrowExceptionsInPython $ do
   m <- fromHsObject' mod
   newHsObject $ SystemF.eliminateDeadCode m
 
+foreign export ccall pyon_inferEffects :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_inferEffects _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  
+  -- Get types
+  tc_mod <- SystemF.typeCheckModulePython m
+      
+  -- Now infer effects
+  SystemF.runEffectInference tc_mod
+  pyNone
 
 foreign export ccall pyon_partialEvaluateModule :: PyPtr -> PyPtr -> IO PyPtr
 
@@ -400,10 +412,8 @@ pyon_partialEvaluateModule _self mod = rethrowExceptionsInPython $ do
 
 foreign export ccall pyon_flattenModule :: PyPtr -> PyPtr -> IO PyPtr
 
-pyon_flattenModule _self mod = rethrowExceptionsInPython $ do
-  expectHsObject mod
-  m <- fromHsObject' mod
-  newHsObject =<< SystemF.flatten m
+pyon_flattenModule _self mod =
+  raisePythonExc pyRuntimeError "Not implemented: Flattening"  
 
 foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 

@@ -70,7 +70,10 @@ elimPMExp expression =
                      , expValue = rhs'
                      , expBody = transformer body'
                      }
-     _ -> traverseSFExp elimPMExp elimPMFun return expression 
+     _ -> traverseSFExp elimPMExp elimPMAlt elimPMFun return expression 
+
+elimPMAlt :: RAlt -> PM RAlt
+elimPMAlt x = traverseAlt elimPMExp return x
 
 -- | Eliminate a pattern match.  Return a 'VarP' pattern and a transformation
 -- on the code that uses the pattern-bound variables.

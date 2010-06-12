@@ -1,10 +1,12 @@
 
-{-# LANGUAGE ScopedTypeVariables, TypeFamilies, EmptyDataDecls #-}
+{-# LANGUAGE ScopedTypeVariables, TypeFamilies, EmptyDataDecls,
+             FlexibleInstances, DeriveDataTypeable #-}
 module Pyon.SystemF.Typecheck
-       (Worker(..), Typed, TypeAnn(..),
-        SFExpOf(..), Gluon.ExpOf(TypedSFType), FunOf(..),
+       (Typed, TypedRec, TypeAnn(..),
+        SFExpOf(TypedSFExp), Gluon.ExpOf(TypedSFType), FunOf(TypedSFFun),
+        AltOf(TypedSFAlt),
+        TRType, TRExp, TRAlt, TRFun,
         mapTypeAnn, traverseTypeAnn,
-        noWork, annotateTypes,
         functionType,
         typeCheckModule, typeCheckModulePython)
 where
@@ -12,6 +14,7 @@ where
 import Control.Applicative(Const(..))
 import Control.Exception
 import Control.Monad
+import Data.Typeable(Typeable)
 import Data.Maybe
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
@@ -53,6 +56,8 @@ assertEqualTypes pos expected actual = debug (do
                         text "Actual:  " <+> Gluon.pprExp (substFully actual)
           in traceShow message x
       | otherwise = x
+                    
+{-
 data Worker a =
   Worker
   { doType :: !(WRExp -> PureTC (TypeOf a a))
@@ -68,6 +73,7 @@ noWork = Worker { doType = \_ -> return Gluon.TrivialExp
                 , doExp = \_ _ -> return TrivialSFExp
                 , doFun = \_ _ _ _ _ _ -> return TrivialFun
                 }
+-}
 
 data TypeAnn t a =
   TypeAnn { typeAnnotation :: WRExp
@@ -83,14 +89,34 @@ traverseTypeAnn f (TypeAnn t x) = do
   y <- f x
   return $ TypeAnn t y
 
-data Typed a
+class HasType a where
+  getTypeAnn :: a -> WRExp
+
+data Typed a deriving(Typeable)
 
 instance Gluon.Structure a => Gluon.Structure (Typed a)
 
 newtype instance Gluon.ExpOf (Typed s) (Typed s) = TypedSFType (TypeOf s s)
 newtype instance SFExpOf (Typed s) s' = TypedSFExp (TypeAnn (SFExpOf s) s')
+newtype instance AltOf (Typed s) s' = TypedSFAlt (TypeAnn (AltOf s) s')
 newtype instance FunOf (Typed s) s' = TypedSFFun (TypeAnn (FunOf s) s')
 
+type TypedRec = Typed Rec
+type TRType = RecType TypedRec
+type TRExp = SFRecExp TypedRec
+type TRAlt = RecAlt TypedRec
+type TRFun = Fun TypedRec
+
+instance HasType (SFExpOf TypedRec TypedRec) where
+  getTypeAnn (TypedSFExp x) = typeAnnotation x
+
+instance HasType (AltOf TypedRec TypedRec) where
+  getTypeAnn (TypedSFAlt x) = typeAnnotation x
+
+instance HasType (FunOf TypedRec TypedRec) where
+  getTypeAnn (TypedSFFun x) = typeAnnotation x
+
+{-
 annotateTypes :: Worker (Typed Rec)
 annotateTypes =
   Worker { doType = \t -> return (TypedSFType $ fromWhnf t)
@@ -98,6 +124,7 @@ annotateTypes =
          , doFun = \pos ty_params params rt body ty -> 
             return (TypedSFFun $ TypeAnn ty $ Fun (Gluon.mkSynInfo pos ObjectLevel) ty_params params rt body)
          }
+-}
 
 -- Endomorphism concatenation
 catEndo xs k = foldr ($) k xs
@@ -140,68 +167,72 @@ functionType (Fun { funTyParams = ty_params
     makeParamArrow p t = Gluon.mkInternalArrowE False (patType p) t
     makeTyFun (TyPat v t) t2 = Gluon.mkInternalFunE False v t t2
       
-assumePat :: Worker a -> RPat -> (Pat a -> PureTC b) -> PureTC b
-assumePat worker p k = 
+assumePat :: RPat -> (Pat TypedRec -> PureTC b) -> PureTC b
+assumePat p k = 
   case p
-  of WildP p_ty -> do ty' <- doType worker =<< Gluon.evalFully' p_ty
+  of WildP p_ty -> do ty' <- evalType p_ty
                       k (WildP ty')
-     VarP v p_ty -> do ty' <- doType worker =<< Gluon.evalFully' p_ty
+     VarP v p_ty -> do ty' <- evalType p_ty
                        assumePure v p_ty $ k (VarP v ty')
-     TupleP pats -> withMany (assumePat worker) pats $ \pats' -> k (TupleP pats')
+     TupleP pats -> withMany assumePat pats $ \pats' -> k (TupleP pats')
      
-assumeTyPat :: Worker a -> RTyPat -> (TyPat a -> PureTC b) -> PureTC b
-assumeTyPat worker (TyPat v t) k = do 
-  ty' <- doType worker =<< Gluon.evalFully' t
+assumeTyPat :: RTyPat -> (TyPat TypedRec -> PureTC b) -> PureTC b
+assumeTyPat (TyPat v t) k = do 
+  ty' <- evalType t
   assumePure v t $ k (TyPat v ty')
 
 -- Assume a function definition.  Do not check the function definition's body.
 assumeDef :: RDef -> PureTC a -> PureTC a
 assumeDef (Def v fun) = assumePure v (functionType fun)
 
-typeInferExp :: Worker a -> RExp -> PureTC (WRExp, SFRecExp a)
-typeInferExp worker expression = do
-  (e_type, new_exp) <-
+-- | Convert a type to a System F type
+evalType :: RType -> PureTC TRType
+evalType t = liftEvaluation $ do
+  t' <- Gluon.evalFully' t
+  return $ TypedSFType $ fromWhnf t'
+
+typeInferExp :: RExp -> PureTC TRExp
+typeInferExp expression =
     case expression
     of VarE {expInfo = inf, expVar = v} ->
          typeInferVarE inf v
        ConE {expInfo = inf, expCon = c} -> do
          ty <- Gluon.evalFully =<< Gluon.getConstructorType c
-         return (ty, ConE inf c)
+         return $ TypedSFExp $ TypeAnn ty (ConE inf c)
        LitE {expInfo = inf, expLit = l, expType = t} ->
-         checkLiteralType worker inf l t
+         checkLiteralType inf l t
        TyAppE {expInfo = inf, expOper = op, expTyArg = arg} ->
-         typeInferTyAppE worker inf op arg
+         typeInferTyAppE inf op arg
        CallE {expInfo = inf, expOper = op, expArgs = args} ->
-         typeInferCallE worker inf op args
+         typeInferCallE inf op args
        FunE {expInfo = inf, expFun = f} -> do
-         (fun_type, fun_val) <- typeInferFun worker f
-         return (fun_type, FunE inf fun_val)
+         ti_fun <- typeInferFun f
+         return $ TypedSFExp $ TypeAnn (getTypeAnn ti_fun) (FunE inf ti_fun)
        LetE {expInfo = inf, expBinder = pat, expValue = e, expBody = body} ->
-         typeInferLetE worker inf pat e body
+         typeInferLetE inf pat e body
        LetrecE {expInfo = inf, expDefs = defs, expBody = body} ->
-         typeInferLetrecE worker inf defs body
+         typeInferLetrecE inf defs body
        CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
-         typeInferCaseE worker inf scr alts
-  new_val <- doExp worker new_exp e_type
-  return (e_type, new_val)
+         typeInferCaseE inf scr alts
          
 -- To infer a variable's type, just look it up in the environment
-typeInferVarE :: ExpInfo -> Var -> PureTC (WRExp, SFExp a)
+typeInferVarE :: ExpInfo -> Var -> PureTC TRExp
 typeInferVarE inf var = do
   lookup_type <- getType' noSourcePos var
   ty <- liftEvaluation $ Gluon.evalFully' lookup_type
-  return (ty, VarE inf var)
+  return $ TypedSFExp $ TypeAnn ty (VarE inf var)
 
 -- Use the type that was attached to the literal value, but also verify that
 -- it's a valid type
-checkLiteralType :: Worker a -> ExpInfo -> Lit -> RType 
-                 -> PureTC (WRExp, SFExp a)
-checkLiteralType worker inf l t = do
-  t' <- liftEvaluation $ Gluon.evalFully' t
-  t_val <- doType worker t'
+checkLiteralType :: ExpInfo -> Lit -> RType
+                 -> PureTC TRExp
+checkLiteralType inf l t = do
+  t' <- Gluon.evalFully' t
+  let t'' = TypedSFType $ fromWhnf t'
+  
   if isValidLiteralType t' l
-    then return (t', LitE inf l t_val)
-    else throwError $ OtherErr $ "Not a valid literal type " ++ show (Gluon.pprExp (fromWhnf t')) ++ "; " ++ show (pprLit l)
+    then return $ TypedSFExp $ TypeAnn t' (LitE inf l t'')
+    else throwError $ OtherErr "Not a valid literal type"
 
 isValidLiteralType ty lit =
   -- Get the type constructor
@@ -218,42 +249,40 @@ isValidLiteralType ty lit =
        -- Literals cannot have other types 
        False
                                      
-typeInferTyAppE :: Worker a -> ExpInfo -> RExp -> RType
-                -> PureTC (WRExp, SFExp a)
-typeInferTyAppE worker inf op arg = do
-  (op_type, op_val) <- typeInferExp worker op
+typeInferTyAppE :: ExpInfo -> RExp -> RType -> PureTC TRExp
+typeInferTyAppE inf op arg = do
+  ti_op <- typeInferExp op
   arg_type <- Gluon.typeInferExp arg
-  arg_val <- doType worker =<< Gluon.evalFully' arg
+  arg_val <- evalType arg
 
   -- Apply operator to argument
-  case fromWhnf op_type of
+  case fromWhnf $ getTypeAnn ti_op of
     Gluon.FunE {Gluon.expMParam = param, Gluon.expRange = range} -> do
       -- Operand type must match
       assertEqualTypesV (getSourcePos inf)
          (Gluon.binder'Type param) 
          (fromWhnf arg_type)
-      
+
       -- Result type is the range, after substituting operand in argument
       result <- liftEvaluation $
                 Gluon.evalFully $
                 assignBinder' param arg $
                 verbatim range
-      return (result, TyAppE inf op_val arg_val)
+      return $ TypedSFExp $ TypeAnn result (TyAppE inf ti_op arg_val)
       
-    _ -> throwError $ Gluon.NonFunctionApplicationErr (getSourcePos inf) (fromWhnf op_type)
+    _ -> throwError $ Gluon.NonFunctionApplicationErr (getSourcePos inf) (fromWhnf $ getTypeAnn ti_op)
 
-typeInferCallE :: Worker a -> ExpInfo -> RExp -> [RExp] 
-               -> PureTC (WRExp, SFExp a)
-typeInferCallE worker inf op args = do
+typeInferCallE :: ExpInfo -> RExp -> [RExp] -> PureTC TRExp
+typeInferCallE inf op args = do
   -- Infer types of parameters
-  (op_type, op_val) <- typeInferExp worker op
-  (arg_types, arg_vals) <- mapAndUnzipM (typeInferExp worker) args
+  ti_op <- typeInferExp op
+  ti_args <- mapM typeInferExp args
 
   -- Compute result type
   result_type <- computeAppliedType 
                  (getSourcePos inf)
-                 (verbatim $ fromWhnf op_type) 
-                 (map fromWhnf arg_types)
+                 (verbatim $ fromWhnf $ getTypeAnn ti_op) 
+                 (map (fromWhnf . getTypeAnn) ti_args)
   
   -- The result type must be in the 'Action' or 'Stream' monads.
   -- If 'Action', strip off the constructor.
@@ -268,8 +297,8 @@ typeInferCallE worker inf op args = do
            _ -> throwError $ OtherErr "Incorrect function return type, \
                                       \or wrong number of arguments"
   -}
-  
-  return (result_type, CallE inf op_val arg_vals)
+  let new_exp = CallE inf ti_op ti_args
+  return $ TypedSFExp $ TypeAnn result_type new_exp
 
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
@@ -293,83 +322,85 @@ computeAppliedType pos op_type arg_types = apply op_type arg_types
         
         Gluon.FunE {} -> throwError $ OtherErr "Unexpected dependent type"
           
-        _ -> do op_type' <- Gluon.evalFully op_type
-                throwError $ Gluon.NonFunctionApplicationErr pos (fromWhnf op_type')
+        _ -> throwError $ Gluon.NonFunctionApplicationErr pos (Gluon.substFully op_type)
 
     apply op_type [] = Gluon.evalFully op_type
 
-typeInferFun :: Worker a -> RFun -> PureTC (WRExp, Fun a)
-typeInferFun worker fun@(Fun { funInfo = info
-                             , funTyParams = ty_params
-                             , funParams = params
-                             , funReturnType = return_type
-                             , funBody = body}) =
+typeInferFun :: RFun -> PureTC TRFun
+typeInferFun fun@(Fun { funInfo = info
+                      , funTyParams = ty_params
+                      , funParams = params
+                      , funReturnType = return_type
+                      , funBody = body}) =
   assumeTyParams $ \new_ty_params -> assumeParams $ \new_params -> do
-    (body_type, body_val) <- typeInferExp worker body
-    return_type_val <- doType worker =<< Gluon.evalFully' return_type
+    ti_body <- typeInferExp body
+    return_type_val <- evalType return_type
     
     -- Return type must match inferred type
-    assertEqualTypesV noSourcePos (fromWhnf body_type) return_type
+    assertEqualTypesV noSourcePos (fromWhnf $ getTypeAnn ti_body) return_type
     
     -- Create the function's type
     ty <- Gluon.evalFully' $ functionType fun
     
-    new_fun <-
-      doFun worker (getSourcePos info) new_ty_params new_params return_type_val body_val ty
-    return (ty, new_fun)
+    let new_fun =
+          Fun { funInfo = info
+              , funTyParams = new_ty_params
+              , funParams = new_params
+              , funReturnType = return_type_val
+              , funBody = ti_body
+              }
+    return $ TypedSFFun $ TypeAnn ty new_fun
   where
-    assumeTyParams = withMany (assumeTyPat worker) ty_params
-    assumeParams = withMany (assumePat worker) params
+    assumeTyParams = withMany assumeTyPat ty_params
+    assumeParams = withMany assumePat params
 
-typeInferLetE :: Worker a -> ExpInfo -> RPat -> RExp -> RExp
-              -> PureTC (WRExp, SFExp a)
-typeInferLetE worker inf pat expression body = do
-  (e_type, e_val) <- typeInferExp worker expression
+typeInferLetE :: ExpInfo -> RPat -> RExp -> RExp -> PureTC TRExp
+typeInferLetE inf pat expression body = do
+  ti_exp <- typeInferExp expression
   
   -- Expression type must match pattern type
-  assertEqualTypesV noSourcePos (fromWhnf e_type) (patType pat)
+  assertEqualTypesV noSourcePos (fromWhnf $ getTypeAnn ti_exp) (patType pat)
 
   -- Assume the pattern while inferring the body; result is the body's type
-  assumePat worker pat $ \pat' -> do
-    (body_type, body_val) <- typeInferExp worker body
-    return (body_type, LetE inf pat' e_val body_val)
+  assumePat pat $ \pat' -> do
+    ti_body <- typeInferExp body
+    return $ TypedSFExp $ TypeAnn (getTypeAnn ti_body) (LetE inf pat' ti_exp ti_body)
 
-typeInferLetrecE :: Worker a -> ExpInfo -> [RDef] -> RExp
-                 -> PureTC (WRExp, SFExp a)
-typeInferLetrecE worker inf defs body =
-  typeCheckDefGroup worker defs $ \defs' -> do
-    (body_type, body_val) <- typeInferExp worker body
-    return (body_type, LetrecE inf defs' body_val)
+typeInferLetrecE :: ExpInfo -> [RDef] -> RExp -> PureTC TRExp
+typeInferLetrecE inf defs body =
+  typeCheckDefGroup defs $ \defs' -> do
+    ti_body <- typeInferExp body
+    return $ TypedSFExp $ TypeAnn (getTypeAnn ti_body) (LetrecE inf defs' ti_body)
 
-typeInferCaseE :: Worker a -> ExpInfo -> RExp -> [Alt Rec]
-               -> PureTC (WRExp, SFExp a)
-typeInferCaseE worker inf scr alts = do
+typeInferCaseE :: ExpInfo -> RExp -> [Alt Rec] -> PureTC TRExp
+typeInferCaseE inf scr alts = do
   let pos = getSourcePos inf
 
   -- Get the scrutinee's type
-  (scr_type, scr_val) <- typeInferExp worker scr
+  ti_scr <- typeInferExp scr
+  let scr_type = fromWhnf $ getTypeAnn ti_scr
   
   when (null alts) $
     throwError $ OtherErr "Empty case statement"
 
   -- Match against each alternative
-  (alt_types, alt_vals) <-
-    mapAndUnzipM (typeCheckAlternative worker pos (fromWhnf scr_type)) alts
+  ti_alts <- mapM (typeCheckAlternative pos scr_type) alts
     
   -- All alternatives must match
-  let alt_subst_types = map (verbatim . fromWhnf) alt_types
+  let alt_subst_types = map (verbatim . fromWhnf . getTypeAnn) ti_alts
   zipWithM (assertEqualTypes pos) alt_subst_types (tail alt_subst_types)
 
-  return (head alt_types, CaseE inf scr_val alt_vals)
+  -- The expression's type is the type of an alternative
+  let result_type = getTypeAnn $ head ti_alts
+  return $! TypedSFExp $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
 
-typeCheckAlternative :: Worker a -> SourcePos -> Gluon.RExp -> Alt Rec
-                     -> PureTC (WRExp, Alt a)
-typeCheckAlternative worker pos scr_type (Alt { altConstructor = con
-                                              , altTyArgs = types
-                                              , altParams = fields
-                                              , altBody = body}) = do
+typeCheckAlternative :: SourcePos -> Gluon.RExp -> Alt Rec -> PureTC TRAlt
+typeCheckAlternative pos scr_type (Alt { altConstructor = con
+                                       , altTyArgs = types
+                                       , altParams = fields
+                                       , altBody = body}) = do
   -- Process arguments
-  arg_vals <- mapM (doType worker <=< Gluon.evalFully') types
+  arg_vals <- mapM evalType types
   
   -- Apply constructor to type arguments
   con_ty <- Gluon.getConstructorType con
@@ -377,16 +408,14 @@ typeCheckAlternative worker pos scr_type (Alt { altConstructor = con
   
   -- Match the resulting type against the function type
   -- field1 -> field2 -> ... -> scr_type
-  (body_ty, body_val) <-
-    bindParamTypes (fromWhnf fo_type) fields $
-    typeInferExp worker body
+  ti_body <- bindParamTypes (fromWhnf fo_type) fields $ typeInferExp body
 
   -- Construct new field expresions
   fields' <- forM fields $ \(Gluon.Binder v ty ()) -> do
-    ty' <- doType worker =<< Gluon.evalFully' ty
+    ty' <- evalType ty
     return $ Gluon.Binder v ty' ()
 
-  return (body_ty, Alt con arg_vals fields' body_val)
+  return $ TypedSFAlt $ TypeAnn (getTypeAnn ti_body) $ Alt con arg_vals fields' ti_body
   where
     -- Bind parameter variables to the constructor's parameter types
     bindParamTypes con_type fields k = go con_type fields
@@ -439,9 +468,8 @@ computeTypeApplicationType pos op_type args = apply op_type args
         
     apply op_type [] = Gluon.evalFully op_type
 
-typeCheckDefGroup :: Worker a -> [RDef] -> ([Def a] -> PureTC b)
-                  -> PureTC b
-typeCheckDefGroup worker defs k =
+typeCheckDefGroup :: [RDef] -> ([Def TypedRec] -> PureTC b) -> PureTC b
+typeCheckDefGroup defs k =
   -- Assume all defined function types
   catEndo (map assumeDef defs) $ do
     -- Check all defined function bodies
@@ -452,24 +480,24 @@ typeCheckDefGroup worker defs k =
   where
     -- To typecheck a definition, check the function it contains
     typeCheckDef (Def v fun) = do
-      (_, fun_val) <- typeInferFun worker fun
+      fun_val <- typeInferFun fun
       return $ Def v fun_val
 
-typeCheckModule worker (Module defs exports) =
+typeCheckModule (Module defs exports) =
   withTheVarIdentSupply $ \varIDs ->
     runPureTCIO varIDs $ do
       defs' <- typeCheckDefGroups defs
       return $ Module defs' exports
   where
     typeCheckDefGroups (defs:defss) = 
-      typeCheckDefGroup worker defs $ \defs' -> 
+      typeCheckDefGroup defs $ \defs' -> 
       liftM (defs':) $ typeCheckDefGroups defss
       
     typeCheckDefGroups [] = return []
     
 typeCheckModulePython mod = do
-  result <- typeCheckModule noWork mod
+  result <- typeCheckModule mod
   case result of
     Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
                     throwPythonExc pyRuntimeError "Type checking failed"
-    Right _ -> return ()
+    Right m -> return m

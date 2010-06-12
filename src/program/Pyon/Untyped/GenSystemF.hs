@@ -286,14 +286,16 @@ mkUndefinedE pos ty =
 
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
-  let true_alt =
-        SystemF.Alt { SystemF.altConstructor = SystemF.pyonBuiltin SystemF.the_True
+  let true_alt = TIAlt $
+        SystemF.Alt { SystemF.altConstructor =
+                         SystemF.pyonBuiltin SystemF.the_True
                     , SystemF.altTyArgs = []
                     , SystemF.altParams = []
                     , SystemF.altBody = tr
                     }
-      false_alt =
-        SystemF.Alt { SystemF.altConstructor = SystemF.pyonBuiltin SystemF.the_False
+      false_alt = TIAlt $
+        SystemF.Alt { SystemF.altConstructor =
+                         SystemF.pyonBuiltin SystemF.the_False
                     , SystemF.altTyArgs = []
                     , SystemF.altParams = []
                     , SystemF.altBody = fa
@@ -354,7 +356,8 @@ mkMethodSelectE pos cls inst_type index dict = do
   -- Create a case expression that matches against the class dictionary
   -- and then selects one of its fields
   let alt_body = mkVarE pos $ parameter_vars !! (num_superclasses + index)
-      alt = SystemF.Alt (clsDictCon cls) [convertHMType inst_type] parameters alt_body
+      alt = TIAlt $
+            SystemF.Alt (clsDictCon cls) [convertHMType inst_type] parameters alt_body
             
   return $ TIExp $ SystemF.CaseE (synInfo pos) dict [alt]
 

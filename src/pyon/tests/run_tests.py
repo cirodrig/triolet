@@ -37,16 +37,17 @@ def tryCompile(fname, show_traceback = False):
 	print
 	print "System F"
         untyped.printModule(test_inf)
+        untyped.typeCheckModule(test_inf)
+        untyped.inferEffects(test_inf)
 
         # test_sf = type_inference.inferTypes(test_anf)
 
-        # untyped.typeCheckModule(test_inf)
-        flat_sf = untyped.flattenModule(test_inf)
-	print
-	print "Flattened to ANF"
-	untyped.printModule(flat_sf)
+        #flat_sf = untyped.flattenModule(test_inf)
+	#print
+	#print "Flattened to ANF"
+	#untyped.printModule(flat_sf)
 
-        untyped.typeCheckAnfModule(flat_sf)
+        #untyped.typeCheckAnfModule(flat_sf)
 	# test_sf = system_f.optimizeModule(test_sf)
         # test_flat = system_f.flattenModule(test_sf)
 

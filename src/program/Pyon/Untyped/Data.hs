@@ -331,6 +331,7 @@ data instance SystemF.SFExpOf TI TI =
     -- This kind of expression only comes from built-in terms.
   | TIRecExp SystemF.RExp
 
+newtype instance SystemF.AltOf TI TI = TIAlt (SystemF.AltOf Rec TI)
 newtype instance SystemF.FunOf TI TI = TIFun (SystemF.FunOf Rec TI)
 
 -- | A type inference System F expression

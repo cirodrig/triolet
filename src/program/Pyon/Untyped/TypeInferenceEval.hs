@@ -62,7 +62,7 @@ evExp expression =
                                             return $ MethodSelectE inf cls t' i e' -}
      Untyped.TIRecExp e -> return e
 
-evAlt (Alt c ty_params params body) = do
+evAlt (Untyped.TIAlt (Alt c ty_params params body)) = do
   ty_params' <- mapM evType ty_params
   body' <- evExp body
   params' <- mapM evBinder params

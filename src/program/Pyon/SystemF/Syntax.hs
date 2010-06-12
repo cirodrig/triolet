@@ -9,8 +9,9 @@
 module Pyon.SystemF.Syntax
     (Rec,
      SFExpOf(..), TypeOf,
-     SFRecExp, RecType,
-     RExp, RType, RPat, RTyPat, RFun, RDef, RModule,
+     SFRecExp, RecType, RecAlt,
+     RExp, RAlt, RType, RPat, RTyPat, RFun, RDef, RModule,
+     Alt,
      Var,
      Lit(..),
      Pat(..),
@@ -18,7 +19,7 @@ module Pyon.SystemF.Syntax
      Binder(..),
      ExpInfo, defaultExpInfo,
      SFExp,
-     Alt(..),
+     AltOf(..),
      FunOf(..), Fun,
      Def(..), DefGroup,
      Export(..),
@@ -26,8 +27,8 @@ module Pyon.SystemF.Syntax
      isValueExp,
      unpackTypeApplication, unpackPolymorphicCall,
      
-     mapSFExp, mapPat,
-     traverseSFExp, traversePat
+     mapSFExp, mapAlt, mapPat,
+     traverseSFExp, traverseAlt, traversePat
     )
 where
 
@@ -42,16 +43,21 @@ import Gluon.Core(Structure, Rec, Var, Binder(..))
 import Pyon.SystemF.Builtins
 
 data family SFExpOf a :: * -> *
+data family AltOf a :: * -> *
 data family FunOf a :: * -> *
 
 type TypeOf = Gluon.ExpOf
 
 type SFRecExp s = SFExpOf s s
+type RecAlt s = AltOf s s
 type Fun s = FunOf s s
 type RecType s = TypeOf s s
 
+type Alt s = AltOf Rec s
+
 type SFExp = SFExpOf Rec
 type RExp = SFRecExp Rec
+type RAlt = AltOf Rec Rec
 type RType = RecType Rec
 type RPat = Pat Rec
 type RTyPat = TyPat Rec
@@ -140,10 +146,10 @@ data instance SFExpOf Rec s =
   | CaseE
     { expInfo :: ExpInfo
     , expScrutinee :: SFRecExp s
-    , expAlternatives :: [Alt s]
+    , expAlternatives :: [RecAlt s]
     }
 
-data Alt s =
+data instance AltOf Rec s =
   Alt { altConstructor :: !Gluon.Con
       , altTyArgs :: [RecType s]
       , altParams :: [Binder s ()]
@@ -193,10 +199,11 @@ data Module s = Module [DefGroup s] [Export]
 -- | Map a function over an expression.
 mapSFExp :: (Structure a, Structure b)
          => (SFRecExp a -> SFRecExp b)
+         -> (RecAlt a -> RecAlt b)
          -> (FunOf a a -> FunOf b b)
          -> (RecType a -> RecType b)
          -> SFExpOf Rec a -> SFExpOf Rec b
-mapSFExp e f t expression =
+mapSFExp e a f t expression =
   case expression
   of VarE info v -> VarE info v
      ConE info c -> ConE info c
@@ -206,19 +213,25 @@ mapSFExp e f t expression =
      FunE info fun -> FunE info (f fun)
      LetE info p e1 e2 -> LetE info (mapPat t p) (e e1) (e e2)
      LetrecE info defs body -> LetrecE info (map mapDef defs) (e body)
-     CaseE info scr alts -> CaseE info (e scr) (map mapAlt alts)
+     CaseE info scr alts -> CaseE info (e scr) (map a alts)
   where
     mapDef (Def v fun) = Def v (f fun)
-    mapAlt (Alt con ty_args params body) =
-      Alt con (map t ty_args) (map (Gluon.mapBinder id t) params) (e body)
+
+mapAlt :: (Structure a, Structure b)
+       => (SFRecExp a -> SFRecExp b)
+       -> (RecType a -> RecType b)
+       -> Alt a -> Alt b
+mapAlt e t (Alt con ty_args params body) =
+  Alt con (map t ty_args) (map (Gluon.mapBinder id t) params) (e body)
 
 -- | Map a monadic function over an expression.
 traverseSFExp :: (Monad m, Structure a, Structure b)
               => (SFRecExp a -> m (SFRecExp b))
+              -> (RecAlt a -> m (RecAlt b))
               -> (FunOf a a -> m (FunOf b b))
               -> (RecType a -> m (RecType b))
               -> SFExpOf Rec a -> m (SFExpOf Rec b)
-traverseSFExp e f t expression =
+traverseSFExp e a f t expression =
   case expression
   of VarE info v -> return $ VarE info v
      ConE info c -> return $ ConE info c
@@ -231,11 +244,16 @@ traverseSFExp e f t expression =
      LetrecE info defs body ->
        LetrecE info `liftM` mapM traverseDef defs `ap` e body
      CaseE info scr alts ->
-       CaseE info `liftM` e scr `ap` mapM traverseAlt alts
+       CaseE info `liftM` e scr `ap` mapM a alts
   where
     traverseDef (Def v fun) = Def v `liftM` f fun
-    traverseAlt (Alt con ty_args params body) =
-      Alt con `liftM` mapM t ty_args `ap` mapM (Gluon.traverseBinder return t) params `ap` e body
+    
+traverseAlt :: (Monad m, Structure a, Structure b)
+            => (SFRecExp a -> m (SFRecExp b))
+            -> (RecType a -> m (RecType b))
+            -> Alt a -> m (Alt b)
+traverseAlt e t (Alt con ty_args params body) =
+  Alt con `liftM` mapM t ty_args `ap` mapM (Gluon.traverseBinder return t) params `ap` e body
 
 mapPat :: (Structure a, Structure b)
        => (RecType a -> RecType b)
