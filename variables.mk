@@ -56,6 +56,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/ElimPatternMatching.hs \
 	Pyon/SystemF/PartialEval.hs \
 	Pyon/SystemF/Print.hs \
+	Pyon/SystemF/StreamSpecialize.hs \
 	Pyon/SystemF/Syntax.hs \
 	Pyon/SystemF/Typecheck.hs \
 	Pyon/SystemF/NewFlatten/PassConv.hs \

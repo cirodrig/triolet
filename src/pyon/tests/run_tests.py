@@ -38,7 +38,11 @@ def tryCompile(fname, show_traceback = False):
 	print "System F"
         untyped.printModule(test_inf)
         untyped.typeCheckModule(test_inf)
-        untyped.inferEffects(test_inf)
+        test_inf = untyped.specialize(test_inf)
+	print
+	print "Specialized"
+        untyped.printModule(test_inf)
+        # untyped.inferEffects(test_inf)
 
         # test_sf = type_inference.inferTypes(test_anf)
 

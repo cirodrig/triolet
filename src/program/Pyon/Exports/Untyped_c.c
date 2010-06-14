@@ -403,6 +403,8 @@ static PyMethodDef untyped_methods[] = {
    "Eliminate pattern-matching constructs in a System F module"},
   {"eliminateDeadCode", pyon_eliminateDeadCode, METH_O,
    "Eliminate dead code in a System F module"},
+  {"specialize", pyon_specialize, METH_O,
+   "Specialize stream functions"},
   {"inferEffects", pyon_inferEffects, METH_O,
    "Perform effect inference on a System F module"},
   {"partialEvaluateModule", pyon_partialEvaluateModule, METH_O,
