@@ -96,10 +96,8 @@ methodAssignment cls index scm =
               placeholder <- mkDictPlaceholder pos cls_predicate
       
               -- Create a method selector expression
-              selector_expr <-
-                mkMethodSelectE pos cls cls_type index placeholder
               (placeholders, expr) <-
-                instanceExpression pos (map ConTy ty_vars') constraint' selector_expr
+                mkMethodInstanceE pos cls cls_type index (map ConTy ty_vars') constraint' placeholder
               
               return ( placeholder : placeholders 
                      , free_vars

@@ -331,6 +331,7 @@ mkDictE pos cls inst_type scs methods =
       -- Then apply to all arguments
   in mkCallE pos dict1 (scs ++ methods)
 
+{-  Replaced by mkMethodInstanceE
 mkMethodSelectE :: SourcePos -> Class -> HMType -> Int -> TIExp -> IO TIExp
 mkMethodSelectE pos cls inst_type index dict = do
   -- The class dictionary has superclass and method fields. 
@@ -348,7 +349,7 @@ mkMethodSelectE pos cls inst_type index dict = do
   parameter_vars <- replicateM (num_superclasses + num_methods) $ do
     var_id <- getNextVarIdent
     return $ Gluon.mkAnonymousVariable var_id ObjectLevel
-  
+
   -- Create binders for the parameters
   let mkParameter var ty = Gluon.Binder var ty ()
       parameters = zipWith mkParameter parameter_vars (sc_types ++ m_types)
@@ -358,8 +359,52 @@ mkMethodSelectE pos cls inst_type index dict = do
   let alt_body = mkVarE pos $ parameter_vars !! (num_superclasses + index)
       alt = TIAlt $
             SystemF.Alt (clsDictCon cls) [convertHMType inst_type] parameters alt_body
-            
+
   return $ TIExp $ SystemF.CaseE (synInfo pos) dict [alt]
+-}
+
+-- | Create an expression that selects and instantiates a class method.
+-- Return the expression and the placeholders produced by instantiation.
+mkMethodInstanceE :: SourcePos
+                  -> Class      -- ^ Class whose method is being accessed
+                  -> HMType     -- ^ The class instance's type
+                  -> Int        -- ^ Index of the method to retrieve
+                  -> [HMType]   -- ^ Instantiated type parameters
+                  -> Constraint -- ^ Instantiated constraint
+                  -> TIExp      -- ^ Dictionary expression to select from
+                  -> IO (Placeholders, TIExp)
+mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
+  -- The class dictionary has superclass and method fields. 
+  let num_superclasses = length $ clsConstraint cls
+      num_methods = length $ clsMethods cls
+      
+  -- Get the type of each field.  Rename the class variable to match
+  -- this instance.
+  let instantiation = substitutionFromList [(clsParam cls, inst_type)]
+  sc_types <- mapM (return . convertPredicate <=< rename instantiation) $
+              clsConstraint cls
+  m_types <- mapM (return . convertTyScheme <=< renameTyScheme instantiation . clmSignature) $ clsMethods cls
+
+  -- Create anonymous parameter variables
+  parameter_vars <- replicateM (num_superclasses + num_methods) $ do
+    var_id <- getNextVarIdent
+    return $ Gluon.mkAnonymousVariable var_id ObjectLevel
+
+  -- Create binders for the parameters
+  let mkParameter var ty = Gluon.Binder var ty ()
+      parameters = zipWith mkParameter parameter_vars (sc_types ++ m_types)
+
+  -- Create a case expression that matches against the class dictionary,
+  -- selects one of its fields, and instantiates the field to a monomorphic
+  -- type
+  let method_var = mkVarE pos $ parameter_vars !! (num_superclasses + index)
+  (placeholders, alt_body) <-
+    instanceExpression pos ty_params constraint method_var
+      
+  let alt = TIAlt $
+            SystemF.Alt (clsDictCon cls) [convertHMType inst_type] parameters alt_body
+
+  return (placeholders, TIExp $ SystemF.CaseE (synInfo pos) dict [alt])
 
 -- | Create a placeholder for a recursive variable.  The variable is assumed
 -- to have a monomorphic type, which is later generalized.
