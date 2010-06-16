@@ -282,13 +282,15 @@ mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
 mkReduceType = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
-  in ([tT `IsInst` tiBuiltin the_Traversable],
+  in ([tT `IsInst` tiBuiltin the_Traversable,
+       passable aT, passable (tT @@ aT)],
       functionType [aT, functionType [aT, aT] aT, tT @@ aT] aT)
 
 mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
-  in ([tT `IsInst` tiBuiltin the_Traversable],
+  in ([tT `IsInst` tiBuiltin the_Traversable,
+       passable aT, passable (tT @@ aT)],
       functionType [functionType [aT, aT] aT, tT @@ aT] aT)
 
 mkZipType =

@@ -11,7 +11,7 @@ module Pyon.SystemF.NewFlatten.PassConv
         newRegionVar, newEffectVar,
         
         Effect,
-        emptyEffect, varEffect, varsEffect, maybeVarEffect,
+        emptyEffect, isEmptyEffect, varEffect, varsEffect, maybeVarEffect,
         effectUnion, effectUnions,
         deleteRegionFromEffect,
         deleteRegionsFromEffect,
@@ -22,6 +22,7 @@ module Pyon.SystemF.NewFlatten.PassConv
         PassType(..),
         PolyPassType(..),
         PassTypeAssignment(..),
+        fromMonoAss,
         typePassConv,
         
         -- * Pretty-printing
@@ -44,7 +45,8 @@ module Pyon.SystemF.NewFlatten.PassConv
         addConstraint, getConstraint,
         
         -- * Constructing values in the 'RegionM' monad
-        atomT, funTDep, funTRgn, funT, retT, appT, streamT, varT, constT,
+        atomT, funTDep, funTRgn, funT, retT,
+        appT, streamT, varT, constT, typeT,
         polyPassType, monoPassType,
         
         -- * Constraints and evaluation
@@ -52,6 +54,7 @@ module Pyon.SystemF.NewFlatten.PassConv
         solveGlobalConstraint,
         
         Parametric(..),
+        expandAndRenameE,
         Subtype(..),
         
         -- * Effect polymorphism
@@ -85,6 +88,14 @@ import Gluon.Common.Supply
 import Gluon.Core
 import Gluon.Eval.Environment
   
+-- | Set this to True to print a message every time a variable is assigned
+debugAssignments :: Bool
+debugAssignments = False
+
+-- | Set this to True to print messages related to constraint solving
+debugConstraints :: Bool
+debugConstraints = False
+
 whenM :: Monad m => m Bool -> m () -> m ()
 whenM test m = do
   b <- test
@@ -171,18 +182,23 @@ canonicalizeEffectVar ev
 -- have been assigned already.  The effect variable must not be mentioned
 -- in the given effect.
 assignEffectVar :: EffectVar -> Effect -> IO ()
-assignEffectVar ev e = trace "assignEffectVar" $ assertEVar ev $ do
+assignEffectVar ev e = assertEVar ev $ do
   e' <- canonicalizeEffect e
   when (e' `effectMentions` ev) $
     internalError "assignEffectVar: Occurs check failed"
 
   -- DEBUG
-  print $ pprEffectVar ev <+> text ":=" <+> pprEffect e
+  when debugAssignments $
+    print $ pprEffectVar ev <+> text ":=" <+> pprEffect e
 
   rep <- readIORef (evarRep ev)
   case rep of
     EVNoRep -> writeIORef (evarRep ev) (EVValueRep e')
     _ -> internalError "assignEffectVar: Already assigned"
+
+assignEffectVarD msg ev e 
+  | debugAssignments = trace msg $ assignEffectVar ev e
+  | otherwise = assignEffectVar ev e
 
 makeNewEffectVar :: (Monad m, MonadIO m, Supplies m (Ident EffectVar))
                  => EffectVarKind -> Maybe Label -> m EffectVar
@@ -204,6 +220,9 @@ newtype Effect = Effect {effectVars :: Set.Set EffectVar}
 
 emptyEffect :: Effect
 emptyEffect = Effect Set.empty
+
+isEmptyEffect :: Effect -> Bool
+isEmptyEffect (Effect s) = Set.null s
 
 effectContainsEffectVariables :: Effect -> Bool
 effectContainsEffectVariables (Effect e) =
@@ -248,6 +267,7 @@ splitVariable v = assertEVar v $ do
   v1 <- newEffectVar (evarName v)
   v2 <- splitVariableOnSubset v1 v
   v_effect <- liftIO $ canonicalizeEffectVar v
+  -- DEBUG
   liftIO $ print (pprEffectVar v <+> text "-->" <+> pprEffect v_effect)
   return (v1, v2)
 
@@ -264,7 +284,7 @@ splitVariableOnSubset subset_var v = assertEVar v $ do
   v' <- newEffectVar (evarName v)
 
   -- State the relationship between the new and old variables
-  liftIO $ assignEffectVar v $ varsEffect [v', subset_var]
+  liftIO $ assignEffectVarD "splitVariable" v $ varsEffect [v', subset_var]
       
   return v'
 
@@ -301,6 +321,7 @@ data EType =
   | StreamT !Effect EType
   | VarT Var                    -- ^ A type variable
   | ConstT RExp                 -- ^ A type that doesn't contain variables
+  | TypeT                       -- ^ Any kind
 
 -- | An effect-polymorphic type scheme.
 data PolyPassType = PolyPassType [EVar] PassType
@@ -316,6 +337,11 @@ data PassTypeAssignment =
     -- The function is assigned a monotype.  Effect inference will eventually
     -- assign a polymorphic type.
   | RecAss !Var PassType
+
+fromMonoAss :: PassTypeAssignment -> PassType
+fromMonoAss (MonoAss ty) = ty
+fromMonoAss _ =
+  internalError "fromMonoAss: Expecting a monomorphic effect type assignment"
 
 typePassConv :: PassType -> PassConv
 typePassConv (AtomT pc _) = pc
@@ -397,7 +423,7 @@ simplifyPredicate predicate@(SubEffect lhs_var rhs) = do
 
          | Set.null (effectVars rhs) -> do
              -- If the RHS is empty, the LHS must be the empty set
-             liftIO $ assignEffectVar lhs_var emptyEffect
+             liftIO $ assignEffectVarD "simplifyPredicate" lhs_var emptyEffect
              return ([], True)
 
          | otherwise -> return ([predicate], False)
@@ -430,9 +456,15 @@ simplifyConstraint cst = simplify [] cst
 -- | Simplify a constraint as much as possible.  The result is in head
 -- normal form.
 reduceConstraint :: Constraint -> RegionM Constraint
-reduceConstraint cst = do
+reduceConstraint cst = debug $ do
   -- TODO: after simplifying, detect and eliminate cycles
   simplifyConstraint cst
+  where
+    debug x
+      | debugConstraints =
+          traceShow (hang (text "reducing constraints (not yet expanded):") 4 $
+                     pprConstraint cst) x
+      | otherwise = x
 
 -- | Solve a constraint where every LHS is a flexible variable.
 -- The constraint is in this form at global scope (where no effect or
@@ -440,17 +472,20 @@ reduceConstraint cst = do
 --
 -- The constraint is solved by making all flexible effect variables empty.
 solveGlobalConstraint :: Constraint -> RegionM ()
-solveGlobalConstraint cst = withRigidEffectVars $ \ctx -> do
-  -- Get the LHS variables.  Remove duplicates.
-  let lhs_vars =
-        Set.toList $ Set.fromList [lhs_var | SubEffect lhs_var _ <- cst]
-  
-  -- Verify that every LHS is a flexible variable
-  when (or [v `Set.member` ctx || isRVar v | v <- lhs_vars]) $
-    internalError "solveGlobalConstraint: Found rigid variables in LHS"
-  
-  -- Clear all flexible variables
-  forM_ lhs_vars $ \v -> assignEffectVar v emptyEffect
+solveGlobalConstraint cst =
+  withRigidEffectVars . solve =<< reduceConstraint cst
+  where
+    solve cst ctx = do
+      -- Get the LHS variables.  Remove duplicates.
+      let lhs_vars =
+            Set.toList $ Set.fromList [lhs_var | SubEffect lhs_var _ <- cst]
+      
+      -- Verify that every LHS is a flexible variable
+      when (or [v `Set.member` ctx || isRVar v | v <- lhs_vars]) $
+        internalError "solveGlobalConstraint: Found rigid variables in LHS"
+      
+      -- Clear all flexible variables
+      forM_ lhs_vars $ \v -> assignEffectVarD "solveGlobal" v emptyEffect
 
 -- | Eliminate a rigid region or effect variable from all constraints by 
 -- splitting flexible variables.  The constraint must be in head normal form.
@@ -519,9 +554,7 @@ eliminatePredicate (SubEffect v vs) = do
 
   -- Assign the lower-bound variable
   let v_effect = varsEffect $ dependent_flexible_vs ++ Set.toList rigid_vs
-  liftIO $ assignEffectVar v v_effect
-  
-  liftIO $ print (pprEffectVar v <+> text ":=" <+> pprEffect v_effect)
+  liftIO $ assignEffectVarD "eliminatePredicate" v v_effect
   
   return (dependent_flexible_vs ++ independent_flexible_vs)
 
@@ -612,6 +645,7 @@ pprEType pt =
                                              , pprEType ty]
      VarT v         -> pprVar v
      ConstT e       -> parens $ pprExp e
+     TypeT          -> text "any_type"
 
 pprPassConv :: PassConv -> Doc
 pprPassConv ByValue  = text "val"
@@ -710,7 +744,7 @@ assumeEffectVariableRegionM ev = localRegionEnv add_to_env
 
 instance RegionMonad RegionM where
   assumeRegion v m = assertRVar v $ assumeEffectVariableRegionM v m
-  assumeEffect v m = trace "assumeEffect" $ assertEVar v $ assumeEffectVariableRegionM v m
+  assumeEffect v m = assertEVar v $ assumeEffectVariableRegionM v m
   
   getRigidEffectVars = RegionM (\env -> return (reRegionEnv env))
 
@@ -820,7 +854,12 @@ lookupPassType v = EffInf $ \env -> effInfReturn $! lookup_var v (efEnv env)
          Just x  -> x
 
 addConstraint :: Constraint -> EffInf ()
-addConstraint cst = traceShow (text "addConstraint" <+> pprConstraint cst) $ EffInf (\env -> return ((), (cst ++)))
+addConstraint cst = debug $ EffInf (\env -> return ((), (cst ++)))
+  where
+    debug x
+      | debugConstraints =
+          traceShow (text "addConstraint" <+> pprConstraint cst) x
+      | otherwise = x
 
 getConstraint :: EffInf a -> EffInf (a, Constraint)
 getConstraint m = EffInf $ \env -> do
@@ -868,6 +907,9 @@ varT v = return $ VarT v
 constT :: RExp -> RegionM EType
 constT e = return $ ConstT e
 
+typeT :: RegionM EType
+typeT = return TypeT
+
 polyPassType :: Int -> ([EVar] -> RegionM PassType) -> RegionM PolyPassType
 polyPassType n mk_ty = do
   vars <- replicateM n $ newEffectVar Nothing
@@ -894,15 +936,24 @@ et `eTypeMentionsTypeVar` v =
      StreamT _ ty -> ty `eTypeMentionsTypeVar` v
      VarT ty_var  -> ty_var == v
      ConstT _     -> False
+     TypeT        -> False
 
 class Parametric exp where
-  -- | Get the set of free effect variables mentioned in a value.  
-  freeEffectVars :: exp -> IO (Set.Set EffectVar)
+  -- | Get the set of free effect variables mentioned in positive and negative
+  -- positions, respectively.  A variable amy appear in both positions.
+  freeEffectVars :: exp -> IO (Set.Set EffectVar, Set.Set EffectVar)
   
   -- | Expand variables that have been assigned a value
   expand :: exp -> IO exp
   
   renameT :: TVar -> TVar -> exp -> exp
+  
+  -- | Rename an effect variable.  The old and new variables must not have
+  -- been assigned values.  The argument should be expanded before renaming.
+  --
+  -- Note that the caller of 'renameE' should expand its expression argument.  
+  -- When renameE calls itself recursively, it's not necessary to expand the
+  -- argument again.
   renameE :: EffectVar -> EffectVar -> exp -> exp
   assignT :: TVar -> EType -> exp -> exp
   assignE :: EffectVar -> Effect -> exp -> exp
@@ -915,8 +966,28 @@ class Parametric exp where
   -- variable assignments are expanded first
   mentionsAnyE :: exp -> Set.Set EffectVar -> IO Bool
 
+expandAndRenameE :: Parametric exp => EffectVar -> EffectVar -> exp -> IO exp
+expandAndRenameE old_v new_v e = liftM (renameE old_v new_v) $ expand e
+
+emptyFreeVars :: (Set.Set EffectVar, Set.Set EffectVar)
+emptyFreeVars = (Set.empty, Set.empty)
+
+contravariant, invariant :: (Set.Set EffectVar, Set.Set EffectVar)
+                         -> (Set.Set EffectVar, Set.Set EffectVar)
+contravariant (a, b) = (b, a)
+invariant (a, b) = let u = Set.union a b in (u, u)
+
+pairUnion :: (Set.Set EffectVar, Set.Set EffectVar)
+          -> (Set.Set EffectVar, Set.Set EffectVar)
+          -> (Set.Set EffectVar, Set.Set EffectVar)
+pairUnion (a, b) (c, d) = (Set.union a c, Set.union b d)
+
+pairUnions :: [(Set.Set EffectVar, Set.Set EffectVar)]
+           -> (Set.Set EffectVar, Set.Set EffectVar)
+pairUnions = foldr pairUnion emptyFreeVars
+
 instance Parametric () where
-  freeEffectVars () = return Set.empty
+  freeEffectVars () = return emptyFreeVars
   expand () = return ()
   renameT _ _ () = ()
   renameE _ _ () = ()
@@ -931,8 +1002,10 @@ mapParametricPair :: (Parametric a, Parametric b) =>
 mapParametricPair f (x, y) = (f x, f y)
 
 instance (Parametric a, Parametric b) => Parametric (a, b) where
-  freeEffectVars (x, y) =
-    liftM2 Set.union (freeEffectVars x) (freeEffectVars y)
+  freeEffectVars (x, y) = do
+    (x1, x2) <- freeEffectVars x
+    (y1, y2) <- freeEffectVars y
+    return (x1 `Set.union` x2, y1 `Set.union` y2)
   expand (x, y) = liftM2 (,) (expand x) (expand y)
   renameT old_v new_v = mapParametricPair (renameT old_v new_v)
   renameE old_v new_v = mapParametricPair (renameE old_v new_v)
@@ -958,13 +1031,13 @@ withSameRegionParam (mv1, e1) (mv2, e2) k = do
   -- Create a new local region name
   rv <- newRegionVar ((evarName =<< mv1) `mplus` (evarName =<< mv2))
   
-  let rename Nothing e      = e
-      rename (Just old_v) e = renameE old_v rv e
-      e1' = rename mv1 e1
-      e2' = rename mv2 e2
+  let rename Nothing e      = return e
+      rename (Just old_v) e = expandAndRenameE old_v rv e
+  e1' <- liftIO $ rename mv1 e1
+  e2' <- liftIO $ rename mv2 e2
 
   -- Add the local region to the environment
-  traceShow (text "withSameRegionparam" <+> maybe empty pprEffectVar mv1 <+> maybe empty pprEffectVar mv2 <+> text "->" <+> pprEffectVar rv) $ assumeRegion rv $ do
+  assumeRegion rv $ do
     -- Run the computation; eliminate constraints that mention the local region
     k (Just rv) e1' e2'
 
@@ -978,8 +1051,9 @@ withSameEffectParam :: Parametric exp =>
 withSameEffectParam (v1, e1) (v2, e2) k = assertEVar v1 $ assertEVar v2 $ do
   -- Create a new variable name
   v <- newEffectVar (evarName v1 `mplus` evarName v2)
-  
-  assumeEffect v $ k v (renameE v1 v e1) (renameE v2 v e2)
+  e1' <- liftIO $ expandAndRenameE v1 v e1
+  e2' <- liftIO $ expandAndRenameE v1 v e2
+  assumeEffect v $ k v e1' e2'
 
 -- | Rename two type variables to have the same name.
 withSameTypeParam :: Parametric exp =>
@@ -1019,17 +1093,20 @@ mapParametricEType f expression =
      StreamT eff ty -> StreamT (f eff) (f ty)
      VarT v         -> expression
      ConstT c       -> expression
+     TypeT          -> TypeT
 
 instance Parametric EType where
   freeEffectVars ty =
     case ty
-    of AppT op args -> liftM Set.unions $ mapM freeEffectVars (op : args)
+    of AppT op args ->
+         liftM (invariant . pairUnions) $ mapM freeEffectVars (op : args)
        StreamT eff ty2 -> do
          eff_vars <- freeEffectVars eff
          ty2_vars <- freeEffectVars ty2
-         return $ Set.union eff_vars ty2_vars
-       VarT _ -> return Set.empty
-       ConstT _ -> return Set.empty
+         return $ pairUnion eff_vars ty2_vars
+       VarT _ -> return emptyFreeVars
+       ConstT _ -> return emptyFreeVars
+       TypeT -> return emptyFreeVars
 
   expand expression = 
     case expression
@@ -1037,6 +1114,7 @@ instance Parametric EType where
        StreamT eff ty -> StreamT `liftM` expand eff `ap` expand ty
        VarT v         -> return expression
        ConstT c       -> return expression
+       TypeT          -> return expression
 
   renameT old_v new_v expression =
     case expression
@@ -1060,6 +1138,7 @@ instance Parametric EType where
        StreamT eff ty -> eff `mentionsE` v >||> ty `mentionsE` v
        VarT v         -> return False
        ConstT c       -> return False
+       TypeT          -> return False
 
   expression `mentionsAnyE` vs =
     case expression
@@ -1067,6 +1146,7 @@ instance Parametric EType where
        StreamT eff ty -> eff `mentionsAnyE` vs >||> ty `mentionsAnyE` vs
        VarT v         -> return False
        ConstT c       -> return False
+       TypeT          -> return False
 
 mapParametricPassType :: (forall a. Parametric a => a -> a)
                       -> PassType -> PassType
@@ -1084,14 +1164,16 @@ instance Parametric PassType where
        FunT param rng -> do
          fv_range <- freeEffectVars rng
          fv_dom <- freeEffectVars (paramType param)
-         let fv_range_minus_param = case paramRegion param
-                                    of Nothing -> fv_range
-                                       Just rv -> Set.delete rv fv_range
-         return $ Set.union fv_dom fv_range_minus_param
+         let fv_range_minus_param =
+               case paramRegion param
+               of Nothing -> fv_range
+                  Just rv -> (Set.delete rv $ fst fv_range,
+                              Set.delete rv $ snd fv_range)
+         return $ pairUnion (contravariant fv_dom) fv_range_minus_param
        RetT eff ty -> do
          eff_vars <- freeEffectVars eff 
          ty_vars <- freeEffectVars ty
-         return $ Set.union eff_vars ty_vars
+         return $ pairUnion eff_vars ty_vars
 
   expand expression = 
     case expression
@@ -1124,7 +1206,9 @@ instance Parametric PassType where
        RetT eff ty    -> eff `mentionsAnyE` vs >||> ty `mentionsAnyE` vs
 
 instance Parametric Effect where
-  freeEffectVars effect = liftM effectVars $ canonicalizeEffect effect
+  freeEffectVars effect = do
+    eff' <- canonicalizeEffect effect
+    return (effectVars eff', Set.empty)
 
   expand = canonicalizeEffect
 
@@ -1207,6 +1291,7 @@ instance Subtype EType where
          -- has already verified this so we don't need to check it.
          return ()
 
+       (TypeT, TypeT) -> return ()
        (_, _) -> subtypeCheckFailed
 
   assertEqual t1 t2 =
@@ -1228,6 +1313,7 @@ instance Subtype EType where
          -- has already verified this so we don't need to check it.
          return ()
 
+       (TypeT, TypeT) -> return ()
        (_, _) -> subtypeCheckFailed
 
   joinType t1 t2 =
@@ -1252,6 +1338,7 @@ instance Subtype EType where
          -- has already verified this so we don't need to check it.
          return t1
 
+       (TypeT, TypeT) -> return t1
        (_, _) -> subtypeCheckFailed
          
   meetType t1 t2 =
@@ -1276,6 +1363,7 @@ instance Subtype EType where
          -- has already verified this so we don't need to check it.
          return t1
 
+       (TypeT, TypeT) -> return t1
        (_, _) -> subtypeCheckFailed
 
 instance Subtype PassType where  
@@ -1364,7 +1452,38 @@ instance Subtype PassType where
 
 instance Subtype Effect where
   assertSubtype e1 e2 = addConstraint (subEffect e1 e2)
-  assertEqual e1 e2 = addConstraint (subEffect e1 e2 ++ subEffect e2 e1)
+  assertEqual e1 e2 = do 
+    -- Simplify the constraint to make solving easier    
+    ctx <- getRigidEffectVars
+    e1_s <- liftIO $ canonicalizeEffect e1
+    e2_s <- liftIO $ canonicalizeEffect e2
+    
+    -- Remove rigid variables found in both e1 and e2 
+    let rigid_common =
+          ctx `Set.intersection` effectVars e1_s `Set.intersection`
+          effectVars e2_s
+        e1_s' = Effect $ effectVars e1_s Set.\\ rigid_common
+        e2_s' = Effect $ effectVars e2_s Set.\\ rigid_common
+
+    -- In the common case, e1 or e2 is a single variable.
+    -- Assign the variable's value now.  If assignment fails, then
+    -- the constraints are unsatisfiable.
+    case from_singleton e1_s' of
+      Just v ->
+        case from_singleton e2_s'
+        of Just v' | v == v' -> return ()
+           _ -> liftIO $ assignEffectVarD "assertEqual" v e2_s'
+      Nothing ->
+        case from_singleton e2_s'
+        of Just v -> liftIO $ assignEffectVarD "assertEqual" v e1_s'
+           Nothing -> do
+             -- Otherwise, create a pair of constraints
+             addConstraint (subEffect e1 e2 ++ subEffect e2 e1)
+    where
+      from_singleton (Effect s) =
+        case Set.toList s
+        of [v] -> Just v
+           _ -> Nothing
   
   -- Create a new effect variable that's greater than both effects
   joinType e1 e2 = do
@@ -1384,7 +1503,8 @@ instance Subtype Effect where
 -- Instantiation
 
 instantiatePassType :: PolyPassType -> RegionM ([EVar], PassType)
-instantiatePassType (PolyPassType evars pass_type) = ins evars pass_type
+instantiatePassType (PolyPassType evars pass_type) =
+  ins evars =<< liftIO (expand pass_type)
   where
     ins (v:vs) pass_type = do
       -- Rename v to a fresh variable name
@@ -1398,9 +1518,10 @@ instantiatePassType (PolyPassType evars pass_type) = ins evars pass_type
 -- | Set all flexible effect variables in the expression to the empty effect
 clearFlexibleEffectVariables :: Parametric exp => exp -> RegionM ()
 clearFlexibleEffectVariables e = withRigidEffectVars $ \ctx -> do
-  fvs <- freeEffectVars e
+  (fvs_pos, fvs_neg) <- freeEffectVars e
+  let fvs = Set.union fvs_pos fvs_neg
   forM_ (Set.toList fvs) $ \v -> do
-    unless (v `Set.member` ctx) $ assignEffectVar v emptyEffect
+    unless (v `Set.member` ctx) $ assignEffectVarD "clearFlexible" v emptyEffect
 
 -- | Transform the constraint set into an equivalent one where all
 -- flexible, free variables mentioned by the expression are independent.
@@ -1410,7 +1531,7 @@ makeFlexibleVariablesIndependent mk_exp = EffInf $ \env -> do
   ((exp, x), cst) <- doEffInf mk_exp env
   cst' <- doRegionM (makeFlexibleVariablesIndependentWithConstraint exp (cst [])) (efRegionEnv env)
   return ((exp, x), (cst' ++))
-  
+
 makeFlexibleVariablesIndependent' :: Parametric exp => EffInf exp -> EffInf exp
 makeFlexibleVariablesIndependent' m = do
   (x, ()) <- makeFlexibleVariablesIndependent $ do x <- m
@@ -1421,19 +1542,54 @@ makeFlexibleVariablesIndependent' m = do
 -- flexible variables mentioned by the expression are independent.
 makeFlexibleVariablesIndependentWithConstraint ::
   Parametric exp => exp -> Constraint -> RegionM Constraint
-makeFlexibleVariablesIndependentWithConstraint exp cst = trace "MFVI" $ do
+makeFlexibleVariablesIndependentWithConstraint exp cst = do
   -- simplify the constraint
   cst1 <- reduceConstraint cst
 
-  -- Eliminate any constraints that involve a flexible variable on the RHS
-  fvs <- get_flexible_vars
-  cst2 <- eliminate_flexible_rhs_constraints [] cst1 fvs
-  
+  -- Eliminate any constraints that involve a flexible variable on the RHS.
+  -- Variables tha appear in positive instances only are replaced by their
+  -- lower bounds.
+  (fvs_pos, fvs_neg) <- get_flexible_vars
+  cst2 <- eliminate_positive_variables cst1 $ Set.toList (fvs_pos Set.\\ fvs_neg)
+
+  -- Constraints on other variables are eliminated by splitting them.
+  (fvs_pos, fvs_neg) <- get_flexible_vars
+  cst3 <- eliminate_flexible_rhs_constraints [] cst2 (fvs_pos `Set.union` fvs_neg)
+
   return cst2
   where
+    -- Find a positive variable that never appears as part of a union on the
+    -- RHS of a constraint
+    eliminate_positive_variables cst (v:vs)
+      | all (alone_on_rhs v) cst = do
+          -- Get the lower bound of v
+          let lb_constraint = filter (mentions_on_rhs v) cst
+              lb = effectUnions [varEffect lhs
+                                | SubEffect lhs _ <- lb_constraint]
+          liftIO $ assignEffectVarD "MFVI" v lb
+          
+          -- Recompute the constraint
+          (fvs_pos, fvs_neg) <- get_flexible_vars
+          cst' <- reduceConstraint cst
+          
+          -- Continue
+          eliminate_positive_variables cst' $ Set.toList (fvs_pos Set.\\ fvs_neg)
+      | otherwise =
+          eliminate_positive_variables cst vs
+
+    eliminate_positive_variables cst [] = return cst
+      
+    -- True if 'v' is not mentioned in 'rhs', or if 'rhs' contains only one
+    -- variable
+    alone_on_rhs v (SubEffect _ rhs)
+      | Set.size (effectVars rhs) <= 1 = True
+      | otherwise = not $ v `Set.member` effectVars rhs
+                    
+    mentions_on_rhs v (SubEffect _ rhs) = v `Set.member` effectVars rhs
+
     get_flexible_vars = withRigidEffectVars $ \ctx -> do
-      fvs <- freeEffectVars exp
-      return $ fvs Set.\\ ctx
+      (fvs_pos, fvs_neg) <- freeEffectVars exp
+      return $ (fvs_pos Set.\\ ctx, fvs_neg Set.\\ ctx)
 
     -- Simplify a predicate, then do elimination
     eliminate_flexible_rhs_constraints scanned_cst (prd:cst) fvs = do
@@ -1453,7 +1609,8 @@ makeFlexibleVariablesIndependentWithConstraint exp cst = trace "MFVI" $ do
           eliminatePredicate prd
           
           -- Recompute the flexible variable set
-          fvs' <- get_flexible_vars
+          (fvs_pos', fvs_neg') <- get_flexible_vars
+          let fvs' = Set.union fvs_pos' fvs_neg'
 
           -- Restart, because unification occurred
           cst' <- reduceConstraint $ scanned_cst ++ prd_cst ++ cst

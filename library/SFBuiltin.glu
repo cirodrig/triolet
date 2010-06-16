@@ -169,6 +169,7 @@ let Traversable_TRAVERSE_Stream
     (s : Stream a)
  -> Stream a
   = s;
+
 constant Traversable_TRAVERSE_list
   : (a : Pure)
  -> PassConv a
@@ -213,13 +214,27 @@ constant fun_map : (t : Pure -> Pure) -> (a : Pure) -> (b : Pure)
                 -> PassConv (t b)
                 -> ((a -> b) -> t a -> t b);
 
+constant fun_map_Stream : (a : Pure) -> (b : Pure)
+                -> PassConv (Stream a)
+                -> PassConv (Stream b)
+                -> ((a -> b) -> Stream a -> Stream b);
+
 constant fun_reduce : (t : Pure -> Pure) -> (a : Pure)
                    -> TraversableDict t
+                   -> PassConv a
+                   -> PassConv (t a)
                    -> ((a -> a -> a) -> a -> t a -> a);
 
 constant fun_reduce1 : (t : Pure -> Pure) -> (a : Pure)
                     -> TraversableDict t
+                    -> PassConv a
+                    -> PassConv (t a)
                     -> ((a -> a -> a) -> t a -> a);
+
+constant fun_reduce1_Stream : (a : Pure)
+                           -> PassConv a
+			   -> PassConv (Stream a)
+                           -> ((a -> a -> a) -> Stream a -> a);
 
 constant fun_zip : (s : Pure -> Pure)
                 -> (t : Pure -> Pure)
@@ -228,6 +243,23 @@ constant fun_zip : (s : Pure -> Pure)
                 -> TraversableDict s
                 -> TraversableDict t
                 -> (s a -> t b -> Stream (PyonTuple2 a b));
+
+constant fun_zip_NS : (s : Pure -> Pure)
+                -> (a : Pure)
+                -> (b : Pure)
+                -> TraversableDict s
+                -> (s a -> Stream b -> Stream (PyonTuple2 a b));
+
+constant fun_zip_SN : (t : Pure -> Pure)
+                -> (a : Pure)
+                -> (b : Pure)
+                -> TraversableDict t
+                -> (Stream a -> t b -> Stream (PyonTuple2 a b));
+
+constant fun_zip_SS :
+                   (a : Pure)
+                -> (b : Pure)
+                -> (Stream a -> Stream b -> Stream (PyonTuple2 a b));
 
 constant fun_iota : NoneType -> Stream int;
 
