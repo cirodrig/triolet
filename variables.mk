@@ -61,6 +61,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/Typecheck.hs \
 	Pyon/SystemF/NewFlatten/PassConv.hs \
 	Pyon/SystemF/NewFlatten/SetupEffect.hs \
+	Pyon/SystemF/NewFlatten/Flatten.hs \
 	Pyon/Anf/Syntax.hs \
 	Pyon/Anf/Print.hs \
 	Pyon/Anf/Rename.hs \

@@ -3,7 +3,19 @@
              FlexibleContexts, ViewPatterns, ScopedTypeVariables,
              Rank2Types #-}
 module Pyon.SystemF.NewFlatten.SetupEffect
-       (runEffectInference)
+       (EI, EIExp,
+        eiPassType,
+        pprExp,
+        EIBinder,
+        ExpOf(EIType, fromEIType),
+        SFExpOf(EIExp, eiType, eiEffect, eiRegion, eiReturnType, eiExp),
+        EIExp'(..),
+        AltOf(Alt, eialtConstructor, eialtTyArgs, eialtParams, eialtBody),
+        FunOf(EIFun, funInfo, funEffectParams, funParams, funReturnType,
+              funReturnPassType, funEffect, funBody),
+        Def(Def),
+        expReturnsNewValue,
+        runEffectInference)
 where
 
 import Codec.Binary.UTF8.String
@@ -41,7 +53,7 @@ import Pyon.Globals
 import qualified Pyon.SystemF.Builtins as SystemF
 import qualified Pyon.SystemF.Syntax as SystemF
 import qualified Pyon.SystemF.Print as SystemF
-import Pyon.SystemF.Syntax(ExpInfo, SFExpOf, SFRecExp, RExp, RType, RecType,
+import Pyon.SystemF.Syntax(ExpInfo, SFRecExp, RExp, RType, RecType,
                            FunOf, Fun, AltOf, RecAlt, Lit(..), Def(..))
 import Pyon.SystemF.Typecheck
 
@@ -114,18 +126,27 @@ data instance SFExpOf EI EI =
     , eiEffect   :: Effect   -- ^ Effect of executing this expression.  Does
                              --   not include the effect of using the
                              --   expression's return value.
-    , eiRegion :: !(Maybe RVar) -- ^ Result's region (if any). 
+    , eiRegion :: !(Maybe RVar) -- ^ Result's region (if any).  Later steps
+                                --   of compilation may involve coercing the
+                                --   result from a representation that doesn't
+                                --   have a region to one that does, or vice
+                                --   versa; this is the result region before
+                                --   coercion.
       -- | Result's parameter-passing convention
     , eiReturnType :: !PassTypeAssignment
     , eiExp    :: EIExp'
     }
 type EIExp = SFExpOf EI EI
 
+instance HasSourcePos (SFExpOf EI EI) where
+  getSourcePos e = getSourcePos (eiExp e)
+  setSourcePos e p = e {eiExp = setSourcePos (eiExp e) p}
+
 eiPassType :: EIExp -> PassType
 eiPassType e =
   case eiReturnType e
   of MonoAss pt -> pt
-     _ -> internalError "eiPassType: Expression is polymorphic"
+     _ -> traceShow (pprExp e) $ internalError "eiPassType: Expression is polymorphic"
 
 -- | Return the expression's return region, if it is not seen outside the
 -- immediately consuming expression.
@@ -190,6 +211,7 @@ data EIExp' =
     -- | Stream-building expression
   | DoE
     { expInfo :: ExpInfo
+    , expTyArg :: RecType EI
     , expPassConv :: EIExp
     , expBody :: EIExp
     }
@@ -212,6 +234,30 @@ data EIExp' =
     , expScrutinee :: EIExp
     , expAlternatives :: [RecAlt EI]
     }
+
+instance HasSourcePos EIExp' where
+  getSourcePos e = getSourcePos (expInfo e)
+  setSourcePos e p = e {expInfo = setSourcePos (expInfo e) p}
+
+-- | True if the expression (not a subexpression) creates a new value.
+expCreatesNewValue :: EIExp -> Bool
+expCreatesNewValue e = exp'CreatesNewValue (eiExp e)
+
+exp'CreatesNewValue :: EIExp' -> Bool
+exp'CreatesNewValue e =
+  case e
+  of VarE {} -> False
+     ConE {} -> True
+     LitE {} -> True
+     TypeE {} -> True
+     InstanceE {} -> True
+     RecPlaceholderE {} -> False
+     CallE {} -> True
+     DoE {} -> True
+     FunE {} -> True
+     LetE {expBody = b} -> False
+     LetrecE {expBody = b} -> False
+     CaseE {} -> True
 
 -- | True if the expression will be flattened into something that creates or
 -- initializes a new value.  False otherwise.
@@ -240,10 +286,10 @@ exp'ReturnsNewValue e =
      CaseE {} -> True
 
 data instance AltOf EI EI =
-  Alt { altConstructor :: !Gluon.Con
-      , altTyArgs :: [RecType EI]
-      , altParams :: [EIBinder]
-      , altBody :: EIExp
+  Alt { eialtConstructor :: !Gluon.Con
+      , eialtTyArgs :: [RecType EI]
+      , eialtParams :: [EIBinder]
+      , eialtBody :: EIExp
       }
 
 data instance FunOf EI s =
@@ -322,20 +368,20 @@ pprSequence expression = pprBlock $ lines expression
            let scr_doc = pprExp scr
                alt_doc = pprAltPattern alt
                line = hang (scr_doc <+> text "<-") 4 alt_doc
-           in line : lines (eiExp $ altBody alt)
+           in line : lines (eiExp $ eialtBody alt)
          _ -> [pprExp' expression]
 
 pprAltPattern :: RecAlt EI -> Doc
 pprAltPattern alt =
-  let con = text $ showLabel $ conName $ altConstructor alt
-      ty_args = map (parens . Gluon.pprExp . fromEIType) $ altTyArgs alt
-      params = map (parens . pprBinder) $ altParams alt
+  let con = text $ showLabel $ conName $ eialtConstructor alt
+      ty_args = map (parens . Gluon.pprExp . fromEIType) $ eialtTyArgs alt
+      params = map (parens . pprBinder) $ eialtParams alt
   in con <+> cat (ty_args ++ params)
 
 pprAlt :: RecAlt EI -> Doc
 pprAlt alt =
   let sig = pprAltPattern alt <> text "."
-      body = pprExp $ altBody alt
+      body = pprExp $ eialtBody alt
   in hang sig 4 body
 
 pprFun :: Fun EI -> Doc
@@ -1234,7 +1280,7 @@ effectInferCase inf scr alts = do
   (alts', alt_effects) <- mapAndUnzipM effectInferAlt alts
 
   -- Compute a common parameter passing convention
-  let pc:pcs = map (eiPassType . altBody) alts'
+  let pc:pcs = map (eiPassType . eialtBody) alts'
   pass_conv <- foldM joinType pc pcs
   
   let new_expr = CaseE { expInfo = inf
@@ -1250,6 +1296,10 @@ effectInferAlt (TypedSFAlt (TypeAnn _ alt)) = do
   let ty_args = map toEIType $ SystemF.altTyArgs alt
   patterns <- mapM initializeBinder $ SystemF.altParams alt
   
+  -- Free variables aren't permitted in patterns
+  liftRegionM $
+    mapM_ (clearFlexibleEffectVariables . eiBinderPassType) patterns
+  
   withBinders patterns $ do
     body <- effectInferExp $ SystemF.altBody alt
     
@@ -1257,12 +1307,12 @@ effectInferAlt (TypedSFAlt (TypeAnn _ alt)) = do
     let local_regions = mapMaybe eiBinderRegion patterns
         exposed_effect = deleteRegionsFromEffect local_regions $ eiEffect body
     
-    let new_alt = Alt { altConstructor = SystemF.altConstructor alt
-                      , altTyArgs = ty_args
-                      , altParams = patterns
-                      , altBody = body
+    let new_alt = Alt { eialtConstructor = SystemF.altConstructor alt
+                      , eialtTyArgs = ty_args
+                      , eialtParams = patterns
+                      , eialtBody = body
                       }
-    let return_type = eiPassType $ altBody new_alt
+    let return_type = eiPassType $ eialtBody new_alt
     return (return_type, (new_alt, exposed_effect))
 
 
@@ -1278,6 +1328,7 @@ effectInferDo info result_type [Left ty_arg, Right pc_arg, Right val_arg] = do
                  _ -> fail "effect inference failed in an iterator expression body"
 
   let new_expr = DoE { expInfo = info
+                     , expTyArg = toEIType ty_arg
                      , expPassConv = pc_arg'
                      , expBody = val_arg'
                      }
@@ -1450,7 +1501,7 @@ effectInferTopLevel (dg:dgs) = do
 
 effectInferTopLevel [] = return []
 
-effectInferModule :: SystemF.Module TypedRec -> EffInf ()
+effectInferModule :: SystemF.Module TypedRec -> EffInf [[Def EI]]
 effectInferModule (SystemF.Module defss _) = do
   (defss', cst) <- getConstraint $ effectInferTopLevel defss
   
@@ -1459,9 +1510,9 @@ effectInferModule (SystemF.Module defss _) = do
 
   -- DEBUG: print the module
   liftIO $ print $ vcat $ map pprDefGroup defss'
-  return ()
+  return defss'
   
-runEffectInference :: SystemF.Module TypedRec -> IO ()
+runEffectInference :: SystemF.Module TypedRec -> IO [[Def EI]]
 runEffectInference mod = do
   -- Create effect variable IDs
   evar_ids <- newIdentSupply

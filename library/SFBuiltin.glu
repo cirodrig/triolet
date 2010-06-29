@@ -47,6 +47,9 @@ data bool : Pure where True : bool | False : bool;
 constant list : Pure -> Pure;
 constant Stream : Pure -> Pure;
 
+-- Stream type after effect inference
+constant LazyStream : Effect -> Pure -> Pure;
+
 data PyonTuple0 : Pure where
   pyonTuple0 : PyonTuple0;
 data PyonTuple1 : Pure -> Pure where

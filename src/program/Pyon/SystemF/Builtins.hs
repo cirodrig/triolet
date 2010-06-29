@@ -6,6 +6,7 @@ module Pyon.SystemF.Builtins
         loadPyonBuiltins, arePyonBuiltinsInitialized,
         pyonBuiltin, isPyonBuiltin,
         the_Stream,
+        the_LazyStream,
         the_bool,
         the_int,
         the_float,

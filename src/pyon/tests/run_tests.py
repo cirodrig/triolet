@@ -43,7 +43,7 @@ def tryCompile(fname, show_traceback = False):
 	print "Specialized"
         untyped.printModule(test_inf)
         untyped.typeCheckModule(test_inf)
-        untyped.inferEffects(test_inf)
+        untyped.flattenModule(test_inf)
 
 
         # test_sf = type_inference.inferTypes(test_anf)

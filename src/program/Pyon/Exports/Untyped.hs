@@ -28,6 +28,7 @@ import qualified Pyon.SystemF.PartialEval as SystemF
 import qualified Pyon.SystemF.DeadCode as SystemF
 import qualified Pyon.SystemF.StreamSpecialize as SystemF
 import qualified Pyon.SystemF.NewFlatten.SetupEffect as SystemF
+import qualified Pyon.SystemF.NewFlatten.Flatten as SystemF
 import qualified Pyon.Anf.Print as Anf
 import qualified Pyon.Anf.Typecheck as Anf
 
@@ -420,8 +421,13 @@ pyon_partialEvaluateModule _self mod = rethrowExceptionsInPython $ do
 
 foreign export ccall pyon_flattenModule :: PyPtr -> PyPtr -> IO PyPtr
 
-pyon_flattenModule _self mod =
-  raisePythonExc pyRuntimeError "Not implemented: Flattening"  
+pyon_flattenModule _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  -- Get types
+  tc_mod <- SystemF.typeCheckModulePython m
+  
+  newHsObject =<< SystemF.flatten tc_mod
 
 foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 

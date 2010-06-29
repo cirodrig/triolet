@@ -8,9 +8,13 @@ When complete, this module will replace the old 'EffectType' module.
     GeneralizedNewtypeDeriving #-}
 module Pyon.SystemF.NewFlatten.PassConv
        (EffectVar(evarID), EVar, RVar,
+        assertEVar, assertRVar,
+        isEVar, isRVar,
         newRegionVar, newEffectVar,
+        effectVarName,
         
         Effect,
+        fromEffect,
         emptyEffect, isEmptyEffect, varEffect, varsEffect, maybeVarEffect,
         effectUnion, effectUnions,
         deleteRegionFromEffect,
@@ -123,6 +127,8 @@ data EffectVar =
   , evarKind :: !EffectVarKind
   , evarRep :: {-# UNPACK #-}!(IORef EffectVarRep)
   }
+  
+effectVarName v = evarName v
 
 -- | An effect variable
 type EVar = EffectVar
@@ -257,6 +263,11 @@ maybeDeleteRegionFromEffect (Just v) e = deleteRegionFromEffect v e
 canonicalizeEffect :: Effect -> IO Effect
 canonicalizeEffect (Effect es) =
   liftM effectUnions $ mapM canonicalizeEffectVar $ Set.toList es
+
+fromEffect :: Effect -> IO [EffectVar]
+fromEffect e = do
+  e' <- canonicalizeEffect e
+  return $ Set.toList $ effectVars e'
 
 effectMentions :: Effect -> EffectVar -> Bool 
 Effect vs `effectMentions` v = v `Set.member` vs

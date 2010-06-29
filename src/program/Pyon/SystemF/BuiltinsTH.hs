@@ -44,6 +44,7 @@ pyonBuiltinModuleName = moduleName pyonBuiltinModuleNameString
 
 pyonBuiltinTypeConstructors =
   [ "Stream"
+  , "LazyStream" -- Streams with side effects produced by effect inference
   , "bool"
   , "int"
   , "float"
