@@ -367,7 +367,7 @@ pprSequence expression = pprBlock $ lines expression
          CaseE {expScrutinee = scr, expAlternatives = [alt]} ->
            let scr_doc = pprExp scr
                alt_doc = pprAltPattern alt
-               line = hang (scr_doc <+> text "<-") 4 alt_doc
+               line = hang (alt_doc <+> text "<-") 4 scr_doc
            in line : lines (eiExp $ eialtBody alt)
          _ -> [pprExp' expression]
 
