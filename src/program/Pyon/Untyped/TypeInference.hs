@@ -366,10 +366,21 @@ makePolymorphicFunction :: ProofBinding -- ^ Names of proof objects
 makePolymorphicFunction proofs pos (TyScheme qvars cst fot) (TIFun fo_function)
   | not $ null $ SystemF.funTyParams fo_function =
       internalError "makePolymorphicFunction"
+  | otherwise = do
+      -- Convert type parameters
+      ty_params <- mapM convertTyParam qvars
+      -- Convert dictionary parameters
+      prd_params <- mapM getProofParam cst
+      
+      let params = prd_params ++ SystemF.funParams fo_function
+      return $ TIFun $ fo_function { SystemF.funTyParams = ty_params
+                                   , SystemF.funParams = params}
+      {- This is the old code, which produced nested functions.
+      -- Instead, we add parameters to the first-order function.
   | null cst = 
       -- If there are only type parameters, add them to the function 
       addTypeParameters fo_function
-  | otherwise = do      
+  | otherwise = do
       -- Convert type parameters
       ty_params <- mapM convertTyParam qvars
       -- Convert dictionary parameters
@@ -379,7 +390,7 @@ makePolymorphicFunction proofs pos (TyScheme qvars cst fot) (TIFun fo_function)
       let fun_body = mkFunE pos (TIFun fo_function)
           return_type = convertHMType fot
           info = SystemF.funInfo fo_function
-      return $ TIFun $ SystemF.Fun info ty_params prd_params return_type fun_body
+      return $ TIFun $ SystemF.Fun info ty_params prd_params return_type fun_body-}
   where
     addTypeParameters f = do
       ty_params <- mapM convertTyParam qvars
