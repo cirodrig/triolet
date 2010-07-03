@@ -53,6 +53,7 @@ module Pyon.SystemF.Builtins
         the_fun_zip_SS, the_fun_zip_NS, the_fun_zip_SN,
         the_fun_iota,
         the_fun_undefined,
+        the_fun_copy,
         getPyonTupleType, getPyonTupleType',
         getPyonTupleCon, getPyonTupleCon',
         getPyonTuplePassConv, getPyonTuplePassConv',

@@ -1407,7 +1407,7 @@ effectInferFun is_lambda (TypedSFFun (TypeAnn _ f)) = do
 
   -- Eliminate constraints on flexible variables if this function is going 
   -- to be generalized.  Otherwise, don't because it creates more variables.
-  let simplify = if is_lambda then id else \x -> makeFlexibleVariablesIndependent $ do {(pt, e) <- x; traceShow (text "simplify" <+> pprPassType pt) $ return (pt, e)}
+  let simplify = if is_lambda then id else makeFlexibleVariablesIndependent
 
   -- Convert body.  Parameter effects are permitted to escape.
   body <- withBinders params $ do

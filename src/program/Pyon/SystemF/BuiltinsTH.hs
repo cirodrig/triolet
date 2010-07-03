@@ -105,6 +105,7 @@ pyonBuiltinFunctions =
   , "fun_zip_SN"
   , "fun_iota"
   , "fun_undefined"
+  , "fun_copy"
   ]
 
 pyonBuiltinConstructors =

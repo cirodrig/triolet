@@ -268,3 +268,5 @@ constant fun_iota : NoneType -> Stream int;
 
 constant fun_undefined : (a : Pure) -> a;
 
+-- Inserted during flattening
+constant fun_copy : (a : Pure) -> PassConv a -> a -> a;
