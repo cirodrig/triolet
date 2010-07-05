@@ -146,7 +146,7 @@ eiPassType :: EIExp -> PassType
 eiPassType e =
   case eiReturnType e
   of MonoAss pt -> pt
-     _ -> traceShow (pprExp e) $ internalError "eiPassType: Expression is polymorphic"
+     _ -> internalError "eiPassType: Expression is polymorphic"
 
 -- | Return the expression's return region, if it is not seen outside the
 -- immediately consuming expression.
@@ -529,7 +529,7 @@ typeConstructorPassConv con =
       , (SystemF.the_float, borrowed)
       , (SystemF.the_bool, borrowed)
       , (SystemF.the_list, borrowed)
-      , (SystemF.the_Stream, borrowed)
+      , (SystemF.the_Stream, Owned)
       , (\_ -> SystemF.getPyonTupleType' 0, borrowed)
       , (\_ -> SystemF.getPyonTupleType' 1, borrowed)
       , (\_ -> SystemF.getPyonTupleType' 2, borrowed)
@@ -655,12 +655,14 @@ passconvType ty = appT (constT passconv) [ty]
   where
     passconv = Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_PassConv
 
+streamPassType eff ty = atomT Owned $ streamT eff ty
+
 -- | The type of a function that traverses an object of type @t@.
 traverseFunctionType t = 
   funTDep (atomT ByValue $ typeT) $ \a ->
   funT (atomT ByValue (passconvType (varT a))) $
   funTRgn (atomT Borrowed (object_type a)) $ \rgn ->
-  retT emptyEffect (atomT Borrowed $ streamT (varEffect rgn) (varT a))
+  retT emptyEffect (streamPassType (varEffect rgn) (varT a))
   where
     object_type a = appT t [varT a]
 
@@ -669,8 +671,8 @@ traverseFunctionType t =
 traverseStreamType eff = 
   funTDep (atomT ByValue $ typeT) $ \a ->
   funT (atomT ByValue (passconvType (varT a))) $
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT a)) $ \rgn -> 
-  retT (varEffect rgn) (atomT Borrowed $ streamT (varEffect eff) (varT a))
+  funT (streamPassType (varEffect eff) (varT a)) $
+  retT emptyEffect (streamPassType (varEffect eff) (varT a))
 
 traversableDictConstructorType =
   funTDep (atomT ByValue dataConKind) $ \t ->
@@ -682,20 +684,20 @@ catMapType =
   funTDep (atomT ByValue typeT) $ \a ->
   funTDep (atomT ByValue typeT) $ \b ->
   funT (atomT ByValue $ passconvType (varT a)) $
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT a)) $ \rgn ->
+  funT (streamPassType (varEffect eff) (varT a)) $
   funT (consumer_type eff a b) $
-  retT (varEffect rgn) $ atomT Borrowed $ streamT (varEffect eff) (varT b)
+  retT emptyEffect $ streamPassType (varEffect eff) (varT b)
   where
     consumer_type eff a b =
       funTRgn (atomT Borrowed (varT a)) $ \rgn ->
-      retT (varEffect rgn) $ atomT Borrowed $ streamT (varsEffect [rgn, eff]) (varT b)
+      retT (varEffect rgn) $ streamPassType (varsEffect [rgn, eff]) (varT b)
 
 makelistType =
   polyPassType 1 $ \[eff] ->
   funTDep (atomT ByValue typeT) $ \a ->
   funT (atomT ByValue $ passconvType (varT a)) $
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT a)) $ \rgn ->
-  retT (varsEffect [rgn, eff]) $ atomT Borrowed $ list_type a
+  funT (streamPassType (varEffect eff) (varT a)) $
+  retT (varEffect eff) $ atomT Borrowed $ list_type a
   where
     list_constructor =
       Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_list
@@ -722,8 +724,8 @@ reduce1StreamType =
   funT (atomT ByValue $ passconvType (varT a)) $
   funT (atomT ByValue $ passconvType (streamT (varEffect eff) (varT a))) $
   funT (reduce_fun_type a eff) $
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT a)) $ \rgn ->
-  retT (varsEffect [rgn, eff]) $ atomT Borrowed (varT a)
+  funT (streamPassType (varEffect eff) (varT a)) $
+  retT (varEffect eff) $ atomT Borrowed (varT a)
   where
     reduce_fun_type a eff =
       funTRgn (atomT Borrowed $ varT a) $ \r1 ->
@@ -740,7 +742,7 @@ zipType =
   funT (atomT ByValue $ traversableType (varT t)) $
   funTRgn (atomT Borrowed $ appT (varT s) [varT a]) $ \r1 ->
   funTRgn (atomT Borrowed $ appT (varT t) [varT b]) $ \r2 ->
-  retT emptyEffect $ atomT Borrowed $ streamT (varsEffect [r1, r2, eff]) $ tuple_type a b
+  retT emptyEffect $ streamPassType (varsEffect [r1, r2, eff]) $ tuple_type a b
   where
     tuple_type a b =
       appT (constT $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
@@ -752,8 +754,8 @@ zipNSType =
   funTDep (atomT ByValue typeT) $ \b ->
   funT (atomT ByValue $ traversableType (varT s)) $
   funTRgn (atomT Borrowed $ appT (varT s) [varT a]) $ \r1 ->
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT b)) $ \r2 ->
-  retT (varEffect r2) $ atomT Borrowed $ streamT (varsEffect [r1, eff]) $ tuple_type a b
+  funT (streamPassType (varEffect eff) (varT b)) $
+  retT emptyEffect $ streamPassType (varsEffect [r1, eff]) $ tuple_type a b
   where
     tuple_type a b =
       appT (constT $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
@@ -764,9 +766,9 @@ zipSNType =
   funTDep (atomT ByValue typeT) $ \a ->
   funTDep (atomT ByValue typeT) $ \b ->
   funT (atomT ByValue $ traversableType (varT t)) $
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT a)) $ \r1 ->
+  funT (streamPassType (varEffect eff) (varT a)) $
   funTRgn (atomT Borrowed $ appT (varT t) [varT b]) $ \r2 ->
-  retT (varEffect r1) $ atomT Borrowed $ streamT (varsEffect [r2, eff]) $ tuple_type a b
+  retT emptyEffect $ streamPassType (varsEffect [r2, eff]) $ tuple_type a b
   where
     tuple_type a b =
       appT (constT $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
@@ -775,9 +777,9 @@ zipSSType =
   polyPassType 1 $ \[eff] ->
   funTDep (atomT ByValue typeT) $ \a ->
   funTDep (atomT ByValue typeT) $ \b ->
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT a)) $ \r1 ->
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT b)) $ \r2 ->
-  retT (varsEffect [r1, r2]) $ atomT Borrowed $ streamT (varEffect eff) $ tuple_type a b
+  funT (streamPassType (varEffect eff) (varT a)) $
+  funT (streamPassType (varEffect eff) (varT b)) $
+  retT emptyEffect $ streamPassType (varEffect eff) $ tuple_type a b
   where
     tuple_type a b =
       appT (constT $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
@@ -785,7 +787,7 @@ zipSSType =
 iotaType =
   monoPassType $
   funTRgn (atomT Borrowed $ constT none_type) $ \rgn ->
-  retT emptyEffect $ atomT Borrowed $ streamT emptyEffect $ constT int_type
+  retT emptyEffect $ streamPassType emptyEffect $ constT int_type
   where
     none_type = Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_NoneType
     int_type = Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_int
@@ -813,8 +815,8 @@ mapStreamType =
   funT (atomT ByValue $ passconvType (streamT (varEffect eff) (varT a))) $
   funT (atomT ByValue $ passconvType (streamT (varEffect eff) (varT b))) $
   funT (transformer_type eff a b) $
-  funTRgn (atomT Borrowed $ streamT (varEffect eff) (varT a)) $ \rgn ->
-  retT (varEffect rgn) (atomT Borrowed $ streamT (varEffect eff) (varT b))
+  funT (streamPassType (varEffect eff) (varT a)) $
+  retT emptyEffect (streamPassType (varEffect eff) (varT b))
   where
     transformer_type eff a b =
       funTRgn (atomT Borrowed $ varT a) $ \rgn ->
@@ -1332,9 +1334,9 @@ effectInferDo info result_type [Left ty_arg, Right pc_arg, Right val_arg] = do
                      , expPassConv = pc_arg'
                      , expBody = val_arg'
                      }
-      pass_type = StreamT (eiEffect val_arg') ret_type
+      pass_type = AtomT Owned $ StreamT (eiEffect val_arg') ret_type
 
-  return (new_expr, MonoAss $ AtomT Borrowed pass_type, eiEffect pc_arg')
+  return (new_expr, MonoAss pass_type, eiEffect pc_arg')
 
 effectInferFlattenedCall :: ExpInfo -> TRExp -> [Either TRType TRExp]
                             -> EffInf (EIExp', PassTypeAssignment, Effect)

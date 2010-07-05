@@ -615,7 +615,8 @@ pprBinder (BorB rgn v ty) =
 pprAReturn' :: AReturn' Rec -> Doc
 pprAReturn' (ValR' ty) = text "val" <+> pprType ty
 pprAReturn' (OwnR' ty) = text "own" <+> pprType ty
-pprAReturn' (RefR' v ty) = text "bor" <> parens (pprVar v) <+> pprType ty
+pprAReturn' (RefR' v ty) = text "ref" <> parens (pprVar v) <+> pprType ty
+pprAReturn' (BorR' a ty) = text "bor" <> parens (pprExp a) <+> pprType ty
 
 pprAReturn :: AReturn Rec -> Doc
 pprAReturn (ValR ty) = text "val" <+> pprType ty
@@ -1010,22 +1011,6 @@ flattenedConv x = areturn'PassConv $ flattenedReturn x
 
 type ContextVal = (StmContext, FlattenedVal)
 type ContextStm = (StmContext, FlattenedStm)
-
--- | The return parameter generated when flattening an expression.
---
--- If the expression's return convention is ByValue or Owned, the return
--- parameter is Nothing.
---
--- If the expression writes into a borrowed return area that is not fixed,
--- then the return
--- parameter holds the (address, pointer) variable pair that the expression
--- will return its results into.  The caller should either use these variables
--- or rename them in the expression.
---
--- If the expression writes into a borrowed return area that is fixed, then
--- the return parameter is Nothing.  Examples of such expressions are
--- temporary variables bound by a 'let' and references to function parameters.
-type ReturnParam = Maybe (Var, Var)
 
 genDoStatement :: FlattenedVal -> FlattenedStm
 genDoStatement val =
@@ -1739,11 +1724,9 @@ flattenDo expression ty pc body = do
   (conv, ty) <-
     convertPassType (Effect.eiReturnType expression) (Effect.eiType expression)
     
-  -- Return a borrowed stream value
-  ret_addr <- newAnonymousVariable ObjectLevel
-  ret_ptr <- newAnonymousVariable ObjectLevel
-  let rparam = RefR' ret_addr ty
-  return (pc_context `mappend` body_context, flattened "flattenDo" val rparam (Just ret_ptr))
+  -- Return an owned stream value
+  let rparam = OwnR' ty
+  return (pc_context `mappend` body_context, flattened "flattenDo" val rparam Nothing)
 
 flattenLet expression binder rhs body = do
   (rhs_context, rhs') <- flattenExpAsStm rhs
