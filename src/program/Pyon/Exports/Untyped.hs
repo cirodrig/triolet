@@ -29,6 +29,7 @@ import qualified Pyon.SystemF.DeadCode as SystemF
 import qualified Pyon.SystemF.StreamSpecialize as SystemF
 import qualified Pyon.SystemF.NewFlatten.SetupEffect as SystemF
 import qualified Pyon.SystemF.NewFlatten.Flatten as SystemF
+import qualified Pyon.SystemF.NewFlatten.GenCore
 import qualified Pyon.Anf.Print as Anf
 import qualified Pyon.Anf.Typecheck as Anf
 
@@ -427,7 +428,7 @@ pyon_flattenModule _self mod = rethrowExceptionsInPython $ do
   -- Get types
   tc_mod <- SystemF.typeCheckModulePython m
   
-  newHsObject =<< SystemF.flatten tc_mod
+  newHsObject =<< Pyon.SystemF.NewFlatten.GenCore.flatten tc_mod
 
 foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 

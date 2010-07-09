@@ -91,6 +91,8 @@ import Gluon.Common.MonadLogic
 import Gluon.Common.Supply
 import Gluon.Core
 import Gluon.Eval.Environment
+
+import Pyon.Core.Syntax(PassConv(..))
   
 -- | Set this to True to print a message every time a variable is assigned
 debugAssignments :: Bool
@@ -309,9 +311,6 @@ splitVariablesOnSubset subset_var vs = do
 type TVar = Var
 
 -------------------------------------------------------------------------------
-
-data PassConv = ByValue | Owned | Borrowed
-              deriving(Eq)
 
 data FunParam =
   FunParam

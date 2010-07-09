@@ -29,6 +29,7 @@ import Gluon.Common.Label
 import Gluon.Common.Supply
 import Gluon.Common.Identifier
 import Gluon.Common.SourcePos
+import Gluon.Common.MonadLogic
 import Gluon.Core
 import Gluon.Core.RenameBase
 import Pyon.Globals
@@ -42,12 +43,6 @@ import qualified Pyon.SystemF.NewFlatten.SetupEffect as Effect
 -- | Set to true to print types in output
 showTypes :: Bool
 showTypes = False
-
-withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
-withMany f xs k = go xs k
-  where
-    go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
-    go []     k = k []
 
 data family ATypeOf s :: * -> *
 data family ValOf s :: * -> *
@@ -1184,7 +1179,7 @@ coerceStm :: AReturn Rec       -- ^ Target type and passing convention
           -> EffEnv ContextStm
 coerceStm expect_return stm = do
   coercion <-
-    coerceStmPassType expect_return (flattenedType stm) (flattenedConv stm) (flattenedReturnPtr stm)
+    traceShow (text "coerceStm" <+> pprAReturn' (flattenedReturn stm)) $ coerceStmPassType expect_return (flattenedType stm) (flattenedConv stm) (flattenedReturnPtr stm)
   case coercion of
     Nothing -> return (idContext, stm)
     Just f  -> f stm
