@@ -406,7 +406,7 @@ specializeMaybe expression =
            alts' <- mapM specializeAlt alts
            return $ Just $ CaseE { expInfo = inf
                                  , expScrutinee = scr
-                                 , expAlternatives = alts}
+                                 , expAlternatives = alts'}
          Nothing ->
            -- Deconstructing a traversable object dictionary.  Replace the
            -- pattern variables with stream-specific members.
