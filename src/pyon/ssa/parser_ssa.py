@@ -175,6 +175,17 @@ def _makeSSA(paramorfunc):
 
         _updatePathDef(var, var._ssaver, oldssaver)
 
+def _killSSA(paramorfunc):
+    """Kills variables that were defined using makeSSA.  The variables may
+    not be referenced again.  This is used to record that a variable
+    has gone out of scope, so that phi nodes are not generated for it."""
+    if isinstance(paramorfunc, ast.TupleParam):
+        for param in paramorfunc.fields: _killSSA(param)
+    else:
+        var = paramorfunc.name
+        pathdefs = _joinNodeStack[-1]._pathDefs
+        del pathdefs[var]
+
 
 def _initPath(join):
     """Setup internal structures for entering a new control-flow path.
@@ -248,6 +259,7 @@ def _doIter(iter):
         _doExpr(iter.argument)
         _makeSSA(iter.parameter)
         _doIter(iter.body)
+        _killSSA(iter.parameter)
     elif isinstance(iter, ast.IfIter):
         _doExpr(iter.guard)
         _doIter(iter.body)

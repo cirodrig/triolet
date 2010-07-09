@@ -19,18 +19,17 @@ def tryCompile(fname, show_traceback = False):
         # Run everything up to and including ANF conversion
         test_ast = pyon.parser.parse(fname)
         ssa.convertSSA(test_ast)
-        # test_anf = anf_conversion.convertModule(test_ast)
-	# del test_ast
 
         # Export the module
         test_untyped = functional_conversion.convertModule(test_ast)
         del test_ast
-        # test_untyped = pyon.ast.export_ast.exportModule(test_anf)
 
         # Type inference
-        untyped.printModule(test_untyped)
+        untyped.printModule(test_untyped) 
         test_inf = untyped.typeInferModule(test_untyped)
         del test_untyped
+
+        # System F optimizations
         test_inf = untyped.partialEvaluateModule(test_inf)
         test_inf = untyped.eliminateDeadCode(test_inf)
         test_inf = untyped.eliminatePatternMatching(test_inf)
