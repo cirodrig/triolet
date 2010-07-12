@@ -188,6 +188,8 @@ data PassConv =
 -- Functions execute as 'Action' or 'Stream' functions, based on their
 -- return type.  If the return type is not known, then 'PickExecMode' is
 -- used to delay the decision.
+--
+-- /TODO/: Eliminate ExecMode, it serves no purpose.
 data ExecMode =
   AsAction | AsStream | PickExecMode HMType
 

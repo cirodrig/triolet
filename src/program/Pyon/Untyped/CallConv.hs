@@ -369,9 +369,17 @@ matchCCSubst subst t1 t2 =
 -------------------------------------------------------------------------------
 -- Unification on execution modes
 
+-- TODO: Eliminate ExecMode, it serves no purpose.
 instance Unifiable ExecMode where
   uShow = internalError "Not implemented: uShow"
   
+  unify pos m1 m2 =
+    case (m1, m2)
+    of (AsStream, AsStream) -> return []
+       (AsAction, AsAction) -> return []
+       (PickExecMode t1, PickExecMode t2) -> unify pos t1 t2
+       _ -> fail "ExecMode.unify: Incompatible modes"
+
   rename substitution mode =
     case mode
     of AsAction -> return AsAction

@@ -39,12 +39,6 @@ import Pyon.Globals
 pprList :: [Doc] -> Doc
 pprList xs = brackets $ sep $ punctuate (text ",") xs
 
-withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
-withMany f xs k = go xs k
-  where
-    go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
-    go []     k = k []
-
 doAny :: Monad m => [MaybeT m a] -> MaybeT m a
 doAny xs = MaybeT $ case xs of 
   m:ms -> do
