@@ -110,6 +110,7 @@ globalConTable =
       , unchanged 1 the_eqDict
       , unchanged 1 the_ordDict
       , unchanged 1 the_traversableDict
+      , unchanged 1 the_additiveDict
       , unchanged 0 (eqMember . the_EqDict_int)
       , unchanged 0 (neMember . the_EqDict_int)
       , unchanged 0 (eqMember . the_EqDict_float)
