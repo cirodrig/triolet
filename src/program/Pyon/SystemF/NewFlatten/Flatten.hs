@@ -836,7 +836,22 @@ convertPassType (PolyAss (PolyPassType eff_vars pt)) sf_type = do
 convertMonoPassType :: PassType -> RExp -> EffEnv (PassConvType Rec)
 convertMonoPassType pass_type sf_type =
   case pass_type
-  of AtomT pc ty -> liftM (passConvType pc) $ convertEType ty sf_type
+  of AppT pc op args ->
+       case sf_type
+       of AppE {expOper = sf_op, expArgs = sf_args}
+            | length args /= length sf_args -> mismatch
+            | otherwise -> do
+                -- The type operator remains unchanged
+                let flat_op = sf_op
+
+                -- Convert type arguments
+                flat_args <- zipWithM convertMonoPassType args sf_args
+
+                -- Type arguments are not mangled
+                return (pc, AAppT { atypeInfo = expInfo sf_type
+                                  , atypeOper = flat_op
+                                  , atypeArgs = flat_args
+                                  })
      FunT param pass_rng ->
        case sf_type
        of FunE {expMParam = binder, expRange = sf_rng} -> do
@@ -861,6 +876,46 @@ convertMonoPassType pass_type sf_type =
                                , atypeEffect = anf_eff
                                , atypeReturn = anf_ret
                                })
+     StreamT eff pass_rng ->
+       case sf_type
+       of AppE { expInfo = app_info
+               , expOper = ConE {expInfo = stream_info, expCon = stream_con}
+               , expArgs = args}
+            | stream_con `isPyonBuiltin` the_Stream -> do
+                -- This constructor takes one argument
+                let arg = case args
+                          of [arg] -> arg
+                             _ -> mismatch
+
+                -- Convert it to an effect-decorated stream type
+                anf_eff <- convertEffect eff
+                anf_rng <- convertMonoPassType pass_rng arg
+                return (Borrowed,
+                        stream_type app_info stream_info anf_eff anf_rng)
+            
+          _ -> mismatch
+     
+     VarT pc v ->
+       case sf_type
+       of VarE {} -> return_sf_type pc
+          _ -> mismatch
+     ConstT pc e -> return_sf_type pc
+     TypeT -> return_sf_type ByValue
+  where
+    -- Inconsistency found between effect inference and System F types 
+    mismatch = internalError "convertEType"
+    
+    -- Return the System F type unchanged
+    return_sf_type pc =
+      return (pc, AExpT { atypeInfo = expInfo sf_type
+                        , atypeValue = sf_type
+                        })
+
+    -- Build a stream type
+    stream_type app_info op_info eff rng =
+      let con = pyonBuiltin the_LazyStream
+          op = mkConE (getSourcePos op_info) con
+      in AAppT app_info op [passConvType ByValue eff, rng]
 
 convertPassTypeParam param (Binder' mv dom ()) k = do
   (dom_pc, dom_ty) <- convertMonoPassType (paramType param) dom
@@ -875,6 +930,7 @@ convertPassTypeParam param (Binder' mv dom ()) k = do
            k $ RefB' rv' dom_ty
          Nothing -> internalError "convertPassTypeParam"
 
+{-
 convertEType :: EType -> RExp -> EffEnv RAType
 convertEType etype sf_type =
   case etype
@@ -933,7 +989,7 @@ convertEType etype sf_type =
     stream_type app_info op_info eff rng =
       let con = pyonBuiltin the_LazyStream
           op = mkConE (getSourcePos op_info) con
-      in AAppT app_info op [passConvType ByValue eff, rng]
+      in AAppT app_info op [passConvType ByValue eff, rng]-}
 
 convertType :: Effect.ExpOf Effect.EI Effect.EI -> RAType
 convertType ty =
@@ -1499,7 +1555,7 @@ flattenExpAsVal expression =
      Effect.LitE {Effect.expLit = l} -> do
        -- Literals are always by-value, regardless of what effect inference
        -- says
-       let pass_type = alter_literal_type $ Effect.eiReturnType expression
+       let pass_type = Effect.eiReturnType expression
        (conv, ty) <- convertPassType pass_type (Effect.eiType expression)
        let rt = case conv
                 of ByValue -> ValR' ty
@@ -1533,8 +1589,8 @@ flattenExpAsVal expression =
              (ctx', val) <- genLetStatement stm
              return (ctx `mappend` ctx', val)
   where
-    alter_literal_type (MonoAss (AtomT pc ty)) = MonoAss (AtomT ByValue ty)
-    alter_literal_type _ = internalError "flattenExpAsVal"
+    -- alter_literal_type (MonoAss (AtomT pc ty)) = MonoAss (AtomT ByValue ty)
+    -- alter_literal_type _ = internalError "flattenExpAsVal"
     return_value val rt =
       return (idContext, flattened "flattenExpAsVal" val rt Nothing)
 

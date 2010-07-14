@@ -22,7 +22,6 @@ module Pyon.SystemF.NewFlatten.PassConv
         maybeDeleteRegionFromEffect,
         PassConv(..),
         FunParam(..),
-        EType(..),
         PassType(..),
         PolyPassType(..),
         PassTypeAssignment(..),
@@ -35,7 +34,6 @@ module Pyon.SystemF.NewFlatten.PassConv
         pprFunParam,
         pprPassType,
         pprPolyPassType,
-        pprEType,
         pprPassConv,
         pprPredicate,
         pprConstraint,
@@ -49,12 +47,12 @@ module Pyon.SystemF.NewFlatten.PassConv
         addConstraint, getConstraint,
         
         -- * Constructing values in the 'RegionM' monad
-        atomT, funTDep, funTRgn, funT, retT,
+        funTDep, funTRgn, funT, retT,
         appT, streamT, varT, constT, typeT,
         polyPassType, monoPassType,
         
         -- * Constraints and evaluation
-        passTypeMentionsTypeVar, eTypeMentionsTypeVar,
+        passTypeMentionsTypeVar,
         solveGlobalConstraint,
         
         Parametric(..),
@@ -321,10 +319,25 @@ data FunParam =
 
 -- | A type with parameter-passing convention information.
 data PassType =
-    AtomT !PassConv EType
+    -- | An application of a type constructor to operands.
+    -- The return type's passing convention is given.
+    AppT !PassConv PassType [PassType]
+    -- | A function type.
   | FunT {-# UNPACK #-}!FunParam PassType
+    -- | A function return type.  Return types can only appear in the
+    -- range of a function type.
   | RetT !Effect PassType
+    -- | A lazy stream type
+  | StreamT !Effect PassType
+    -- | A type variable
+  | VarT !PassConv !Var
+    -- | A type that doesn't contain variables
+  | ConstT !PassConv RExp
+    -- | A kind.  Kinds are ignored by effect inference.  It only needs to
+    -- keep track of where kinds are used as parameters.
+  | TypeT
 
+{-
 -- | A type extended with effect information.
 data EType =
     AppT EType [EType]
@@ -332,6 +345,7 @@ data EType =
   | VarT Var                    -- ^ A type variable
   | ConstT RExp                 -- ^ A type that doesn't contain variables
   | TypeT                       -- ^ Any kind
+-}
 
 -- | An effect-polymorphic type scheme.
 data PolyPassType = PolyPassType [EVar] PassType
@@ -354,9 +368,13 @@ fromMonoAss _ =
   internalError "fromMonoAss: Expecting a monomorphic effect type assignment"
 
 typePassConv :: PassType -> PassConv
-typePassConv (AtomT pc _) = pc
+typePassConv (AppT pc _ _) = pc
 typePassConv (FunT _ _) = Owned
 typePassConv (RetT e t) = typePassConv t
+typePassConv (StreamT _ _) = Owned
+typePassConv (VarT pc _) = pc
+typePassConv (ConstT pc _) = pc
+typePassConv TypeT = ByValue
 
 -------------------------------------------------------------------------------
 -- Constraints
@@ -629,7 +647,7 @@ pprFunParam (FunParam rgn ty dom) =
      else lvar_doc <+> text ":" <+> dom_doc
 
 pprPassTypeInParens :: PassType -> Doc
-pprPassTypeInParens pt@(AtomT _ _) = pprPassType pt
+pprPassTypeInParens pt@(VarT _ _) = pprPassType pt
 pprPassTypeInParens pt = parens $ pprPassType pt
 
 pprPassType :: PassType -> Doc
@@ -638,16 +656,23 @@ pprPassType pt =
       arrow_clauses = [c <+> text "->" | c <- init clauses] ++ [last clauses]
   in sep arrow_clauses
   where
-    ppr (AtomT pc ty)   = [pprPassConv pc <+> pprEType ty]
+    ppr (AppT pc ty tys) = [pprPassConv pc <+>
+                            pprPassType ty <+>
+                            sep (map pprPassType tys)]
     ppr (FunT param ty) = pprFunParam param : ppr ty
     ppr (RetT eff ty)   = [angles (pprEffect eff) <+> pprPassType ty]
+    ppr (StreamT eff t) = [text "stream" <+> sep [ parens (pprEffect eff)
+                                                 , pprPassType t]]
+    ppr (VarT pc v)     = [pprPassConv pc <+> pprVar v]
+    ppr (ConstT pc t)   = [pprPassConv pc <+> parens (pprExp t)]
+    ppr TypeT           = [text "any_type"]
 
 pprPolyPassType :: PolyPassType -> Doc
 pprPolyPassType (PolyPassType evars pt) =
   hang (text "forall" <+> sep (map pprEffectVar evars) <> text ".") 4 $
   pprPassType pt
 
-pprEType :: EType -> Doc
+{-pprEType :: EType -> Doc
 pprEType pt =
   case pt
   of AppT op args   -> pprEType op <+> sep (map pprEType args)
@@ -655,7 +680,7 @@ pprEType pt =
                                              , pprEType ty]
      VarT v         -> pprVar v
      ConstT e       -> parens $ pprExp e
-     TypeT          -> text "any_type"
+     TypeT          -> text "any_type"-}
 
 pprPassConv :: PassConv -> Doc
 pprPassConv ByValue  = text "val"
@@ -876,8 +901,8 @@ getConstraint m = EffInf $ \env -> do
   (x, cst) <- doEffInf m env
   effInfReturn (x, cst [])
 
-atomT :: PassConv -> RegionM EType -> RegionM PassType
-atomT pc mk_ty = AtomT pc `liftM` mk_ty
+{-atomT :: PassConv -> RegionM EType -> RegionM PassType
+atomT pc mk_ty = AtomT pc `liftM` mk_ty-}
 
 -- | Create a function type that takes a type parameter
 funTDep :: RegionM PassType -> (TVar -> RegionM PassType) -> RegionM PassType
@@ -905,19 +930,21 @@ funT mk_dom mk_rng = do
 retT :: Effect -> RegionM PassType -> RegionM PassType
 retT eff mk_ty = liftM (RetT eff) mk_ty
 
-appT :: RegionM EType -> [RegionM EType] -> RegionM EType
-appT mk_op mk_args = liftM2 AppT mk_op (sequence mk_args)
+appT :: PassConv -> RegionM PassType -> [RegionM PassType] -> RegionM PassType
+appT pc mk_op mk_args = liftM2 (AppT pc) mk_op (sequence mk_args)
 
-streamT :: Effect -> RegionM EType -> RegionM EType
+streamT :: Effect -> RegionM PassType -> RegionM PassType
 streamT eff mk_ty = liftM (StreamT eff) mk_ty
 
-varT :: Var -> RegionM EType
-varT v = return $ VarT v
+-- | Create an effect inference type corresponding to a type variable.
+-- All such types are passed using the 'Borrowed' convention.
+varT :: Var -> RegionM PassType
+varT v = return $ VarT Borrowed v
 
-constT :: RExp -> RegionM EType
-constT e = return $ ConstT e
+constT :: PassConv -> RExp -> RegionM PassType
+constT pc e = return $ ConstT pc e
 
-typeT :: RegionM EType
+typeT :: RegionM PassType
 typeT = return TypeT
 
 polyPassType :: Int -> ([EVar] -> RegionM PassType) -> RegionM PolyPassType
@@ -934,11 +961,17 @@ monoPassType = liftM (PolyPassType [])
 passTypeMentionsTypeVar :: PassType -> Var -> Bool
 pt `passTypeMentionsTypeVar` v =
   case pt
-  of AtomT _ ty       -> ty `eTypeMentionsTypeVar` v
+  of AppT _ op args   -> op `passTypeMentionsTypeVar` v ||
+                         any (`passTypeMentionsTypeVar` v) args
      FunT param range -> paramType param `passTypeMentionsTypeVar` v ||
                          range  `passTypeMentionsTypeVar` v
      RetT _ pt        -> pt `passTypeMentionsTypeVar` v
+     StreamT _ ty     -> ty `passTypeMentionsTypeVar` v
+     VarT _ tyvar     -> tyvar == v
+     ConstT _ _       -> False
+     TypeT            -> False
 
+{-
 eTypeMentionsTypeVar :: EType -> Var -> Bool
 et `eTypeMentionsTypeVar` v =
   case et
@@ -946,7 +979,7 @@ et `eTypeMentionsTypeVar` v =
      StreamT _ ty -> ty `eTypeMentionsTypeVar` v
      VarT ty_var  -> ty_var == v
      ConstT _     -> False
-     TypeT        -> False
+     TypeT        -> False-}
 
 class Parametric exp where
   -- | Get the set of free effect variables mentioned in positive and negative
@@ -965,7 +998,7 @@ class Parametric exp where
   -- When renameE calls itself recursively, it's not necessary to expand the
   -- argument again.
   renameE :: EffectVar -> EffectVar -> exp -> exp
-  assignT :: TVar -> EType -> exp -> exp
+  assignT :: TVar -> PassType -> exp -> exp
   assignE :: EffectVar -> Effect -> exp -> exp
   
   -- | True if the value mentions the given effect variable;
@@ -1096,6 +1129,7 @@ withSameFunParam (p1, t1) (p2, t2) k =
   let p' = FunParam r t (paramType p2)
   in k p' t1'' t2''
 
+{-
 mapParametricEType :: (forall a. Parametric a => a -> a) -> EType -> EType
 mapParametricEType f expression =
   case expression
@@ -1157,20 +1191,26 @@ instance Parametric EType where
        VarT v         -> return False
        ConstT c       -> return False
        TypeT          -> return False
+-}
 
 mapParametricPassType :: (forall a. Parametric a => a -> a)
                       -> PassType -> PassType
 mapParametricPassType f expression =
   case expression
-  of AtomT pc ty    -> AtomT pc (f ty)
-     FunT param ty  -> let param' = param {paramType = f $ paramType param}
-                       in FunT param' (f ty)
-     RetT eff ty    -> RetT (f eff) (f ty)
+  of AppT pc ty args -> AppT pc (f ty) (map f args)
+     FunT param ty   -> let param' = param {paramType = f $ paramType param}
+                        in FunT param' (f ty)
+     RetT eff ty     -> RetT (f eff) (f ty)
+     StreamT eff ty  -> StreamT (f eff) (f ty)
+     VarT _ _        -> expression
+     ConstT _ _      -> expression
+     TypeT           -> expression
 
 instance Parametric PassType where
   freeEffectVars expression =
     case expression
-    of AtomT _ ty -> freeEffectVars ty
+    of AppT _ op args ->
+         liftM (invariant . pairUnions) $ mapM freeEffectVars (op : args)
        FunT param rng -> do
          fv_range <- freeEffectVars rng
          fv_dom <- freeEffectVars (paramType param)
@@ -1184,36 +1224,62 @@ instance Parametric PassType where
          eff_vars <- freeEffectVars eff 
          ty_vars <- freeEffectVars ty
          return $ pairUnion eff_vars ty_vars
+       StreamT eff ty2 -> do
+         eff_vars <- freeEffectVars eff
+         ty2_vars <- freeEffectVars ty2
+         return $ pairUnion eff_vars ty2_vars
+       VarT _ _ -> return emptyFreeVars
+       ConstT _ _ -> return emptyFreeVars
+       TypeT -> return emptyFreeVars
 
   expand expression = 
     case expression
-    of AtomT pc ty -> AtomT pc `liftM` expand ty
+    of AppT pc op args -> AppT pc `liftM` expand op `ap` mapM expand args
        FunT param rng -> do param_type <- expand (paramType param)
                             let param' = param {paramType = param_type}
                             rng' <- expand rng
                             return $ FunT param' rng'
        RetT eff ty -> RetT `liftM` expand eff `ap` expand ty
+       StreamT eff ty -> StreamT `liftM` expand eff `ap` expand ty
+       VarT _ _ -> return expression
+       ConstT _ _ -> return expression
+       TypeT -> return expression
 
   renameT old_v new_v expression =
-    mapParametricPassType (renameT old_v new_v) expression
+    case expression
+    of VarT pc v | v == old_v -> VarT pc new_v
+       _ -> mapParametricPassType (renameT old_v new_v) expression
+
   assignT old_v val expression =
-    mapParametricPassType (assignT old_v val) expression
+    case expression
+    of VarT pc v | v == old_v -> val
+       _ -> mapParametricPassType (assignT old_v val) expression
+
   renameE old_v new_v expression =
     mapParametricPassType (renameE old_v new_v) expression
+
   assignE old_v val expression =
     mapParametricPassType (assignE old_v val) expression
 
   expression `mentionsE` v =
     case expression
-    of AtomT _ ty     -> ty `mentionsE` v
+    of AppT _ op args -> op `mentionsE` v >||> anyM (`mentionsE` v) args
        FunT param rng -> paramType param `mentionsE` v >||> rng `mentionsE` v
        RetT eff ty    -> eff `mentionsE` v >||> ty `mentionsE` v
+       StreamT eff ty -> eff `mentionsE` v >||> ty `mentionsE` v
+       VarT _ _       -> return False
+       ConstT _ _     -> return False
+       TypeT          -> return False
 
   expression `mentionsAnyE` vs =
     case expression
-    of AtomT _ ty     -> ty `mentionsAnyE` vs
+    of AppT _ op args -> op `mentionsAnyE` vs >||> anyM (`mentionsAnyE` vs) args
        FunT param rng -> paramType param `mentionsAnyE` vs >||> rng `mentionsAnyE` vs
        RetT eff ty    -> eff `mentionsAnyE` vs >||> ty `mentionsAnyE` vs
+       StreamT eff ty -> eff `mentionsAnyE` vs >||> ty `mentionsAnyE` vs
+       VarT _ _       -> return False
+       ConstT _ _     -> return False
+       TypeT          -> return False
 
 instance Parametric Effect where
   freeEffectVars effect = do
@@ -1278,6 +1344,7 @@ instance Subtype PassConv where
     | pc1 == pc2 = return pc1
     | otherwise = subtypeCheckFailed
 
+{-
 instance Subtype EType where
   assertSubtype t1 t2 =
     case (t1, t2)
@@ -1374,14 +1441,17 @@ instance Subtype EType where
          return t1
 
        (TypeT, TypeT) -> return t1
-       (_, _) -> subtypeCheckFailed
+       (_, _) -> subtypeCheckFailed-}
 
 instance Subtype PassType where  
   assertSubtype t1 t2 =
     case (t1, t2)
-    of (AtomT pc1 t1, AtomT pc2 t2) -> do
-         assertEqual pc1 pc2
-         assertSubtype t1 t2
+    of (AppT pc1 op1 args1, AppT pc2 op2 args2) -> do
+         -- Just test for equality.
+         -- We don't consider subtyping of data types.
+         unless (pc1 == pc2) subtypeCheckFailed
+         assertEqual op1 op2
+         zipWithM_ assertEqual args1 args2
 
        (FunT param1 rng1, FunT param2 rng2) -> do
          -- Parameters are contravariant
@@ -1395,13 +1465,30 @@ instance Subtype PassType where
          assertSubtype e1 e2
          assertSubtype pc1 pc2
          
+       (StreamT eff1 ret1, StreamT eff2 ret2) -> do
+         -- Streams are covariant
+         assertSubtype eff1 eff2
+         assertSubtype ret1 ret2
+
+       (VarT pc1 v, VarT pc2 v')
+         | pc1 == pc2 && v == v' -> return ()
+         | otherwise -> subtypeCheckFailed
+                        
+       (ConstT _ _, ConstT _ _) -> do
+         -- The types should be equal.  We assume that type checking
+         -- has already verified this so we don't need to check it.
+         return ()
+
+       (TypeT, TypeT) -> return ()
+
        (_, _) -> subtypeCheckFailed
 
   assertEqual t1 t2 =
     case (t1, t2)
-    of (AtomT pc1 t1, AtomT pc2 t2) -> do
-         assertEqual pc1 pc2
-         assertEqual t1 t2
+    of (AppT pc1 op1 args1, AppT pc2 op2 args2) -> do
+         unless (pc1 == pc2) subtypeCheckFailed
+         assertEqual op1 op2
+         zipWithM_ assertEqual args1 args2
 
        (FunT param1 rng1, FunT param2 rng2) -> do
          assertEqual (paramType param2) (paramType param1)
@@ -1412,14 +1499,30 @@ instance Subtype PassType where
          assertEqual e1 e2
          assertEqual pc1 pc2
 
+       (StreamT eff1 ret1, StreamT eff2 ret2) -> do
+         assertEqual eff1 eff2
+         assertEqual ret1 ret2
+
+       (VarT pc1 v, VarT pc2 v')
+         | pc1 == pc2 && v == v' -> return ()
+         | otherwise -> subtypeCheckFailed
+                        
+       (ConstT _ _, ConstT _ _) -> do
+         -- The types should be equal.  We assume that type checking
+         -- has already verified this so we don't need to check it.
+         return ()
+
+       (TypeT, TypeT) -> return ()
+
        (_, _) -> subtypeCheckFailed
 
   joinType t1 t2 =
     case (t1, t2)
-    of (AtomT pc1 t1, AtomT pc2 t2) -> do
-         assertEqual pc1 pc2
-         t <- joinType t1 t2
-         return $ AtomT pc1 t
+    of (AppT pc1 op1 args1, AppT pc2 op2 args2) -> do
+         unless (pc1 == pc2) subtypeCheckFailed
+         assertEqual op1 op2
+         zipWithM_ assertEqual args1 args2
+         return $ AppT pc1 op1 args1
 
        (FunT param1 rng1, FunT param2 rng2) -> do
          -- Parameters are contravariant
@@ -1437,12 +1540,32 @@ instance Subtype PassType where
          pc <- joinType pc1 pc2
          return $ RetT e pc
 
+       (StreamT eff1 ret1, StreamT eff2 ret2) -> do
+         -- Streams are covariant
+         eff <- joinType eff1 eff2
+         ret <- joinType ret1 ret2
+         return $ StreamT eff ret
+
+       (VarT pc1 v, VarT pc2 v')
+         | pc1 == pc2 && v == v' -> return t1
+         | otherwise -> subtypeCheckFailed
+                        
+       (ConstT _ _, ConstT _ _) -> do
+         -- The types should be equal.  We assume that type checking
+         -- has already verified this so we don't need to check it.
+         return t1
+
+       (TypeT, TypeT) -> return t1
+       
+       (_, _) -> subtypeCheckFailed
+
   meetType t1 t2 =
     case (t1, t2)
-    of (AtomT pc1 t1, AtomT pc2 t2) -> do
-         assertEqual pc1 pc2
-         t <- meetType t1 t2
-         return $ AtomT pc1 t
+    of (AppT pc1 op1 args1, AppT pc2 op2 args2) -> do
+         unless (pc1 == pc2) subtypeCheckFailed
+         assertEqual op1 op2
+         zipWithM_ assertEqual args1 args2
+         return $ AppT pc1 op1 args1
 
        (FunT param1 rng1, FunT param2 rng2) -> do
          -- Parameters are contravariant
@@ -1459,6 +1582,25 @@ instance Subtype PassType where
          e <- meetType e1 e2
          pc <- meetType pc1 pc2
          return $ RetT e pc
+
+       (StreamT eff1 ret1, StreamT eff2 ret2) -> do
+         -- Streams are covariant
+         eff <- meetType eff1 eff2
+         ret <- meetType ret1 ret2
+         return $ StreamT eff ret
+
+       (VarT pc1 v, VarT pc2 v')
+         | pc1 == pc2 && v == v' -> return t1
+         | otherwise -> subtypeCheckFailed
+                        
+       (ConstT _ _, ConstT _ _) -> do
+         -- The types should be equal.  We assume that type checking
+         -- has already verified this so we don't need to check it.
+         return t1
+
+       (TypeT, TypeT) -> return t1
+
+       (_, _) -> subtypeCheckFailed
 
 instance Subtype Effect where
   assertSubtype e1 e2 = addConstraint (subEffect e1 e2)

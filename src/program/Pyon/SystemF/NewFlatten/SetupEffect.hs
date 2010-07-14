@@ -450,20 +450,9 @@ typeToPassType expression =
   case getLevel $ Gluon.fromWhnf expression
   of TypeLevel ->
        case Gluon.fromWhnf expression
-       of Gluon.FunE {} ->
-            funTypeToPassType expression
-          _ -> do
-            t' <- typeToEType expression
-            let pass_type = typePassConv expression
-            return $ AtomT pass_type t'
-     KindLevel ->
-       return $ AtomT ByValue TypeT
-  where
-    typePassConv expression =
-      case Gluon.unpackRenamedWhnfAppE expression
-      of Just (con, _) -> typeConstructorPassConv con
-         _ | getLevel (Gluon.fromWhnf $ Gluon.substFullyUnderWhnf expression) == KindLevel -> ByValue
-           | otherwise -> Borrowed
+       of Gluon.FunE {} -> funTypeToPassType expression
+          _             -> typeToEType expression
+     KindLevel -> return TypeT
 
 typeToFunParam :: Maybe Var -> Gluon.WSRExp -> RegionM FunParam
 typeToFunParam dependent_var ty = do
@@ -471,7 +460,8 @@ typeToFunParam dependent_var ty = do
   rgn <- newRegionVarIfBorrowed (varName =<< dependent_var) pass_type
   return $ FunParam rgn dependent_var pass_type
 
-typeToEType :: Gluon.WSRExp -> RegionM EType
+-- | Called by 'typeToPassType' to handle some cases.
+typeToEType :: Gluon.WSRExp -> RegionM PassType
 typeToEType expression =
   case Gluon.fromWhnf expression
   of Gluon.AppE { Gluon.expOper = op@(Gluon.substHead ->
@@ -479,7 +469,7 @@ typeToEType expression =
                 , Gluon.expArgs = args}
        | con `SystemF.isPyonBuiltin` SystemF.the_Stream -> do
           let ![arg] = args
-          output <- typeToEType =<< evalHead arg
+          output <- typeToPassType =<< evalHead arg
           
           -- Create an effect variable for the stream
           evar <- newEffectVar Nothing
@@ -487,26 +477,36 @@ typeToEType expression =
           
        | isDictionaryTypeCon con -> do
            -- Dictionary types always involve empty effect types
-           op' <- typeToEType =<< evalHead op
-           args' <- mapM (typeToEType <=< evalHead) args
+           op' <- typeToPassType =<< evalHead op
+           args' <- mapM (typeToPassType <=< evalHead) args
            
            -- Clear any effect type variables that were created
            clearFlexibleEffectVariables op'
            mapM_ clearFlexibleEffectVariables args'
 
-           return $ AppT op' args'
+           let pass_type = typePassConv expression
+           return $ AppT pass_type op' args'
 
      Gluon.AppE {Gluon.expOper = op, Gluon.expArgs = args} -> do
-       op' <- typeToEType =<< evalHead op
-       args' <- mapM (typeToEType <=< evalHead) args
-       return $ AppT op' args'
+       op' <- typeToPassType =<< evalHead op
+       args' <- mapM (typeToPassType <=< evalHead) args
+       let pass_type = typePassConv expression
+       return $ AppT pass_type op' args'
 
      Gluon.VarE {Gluon.expVar = v} ->
-       return $ VarT v
+       return $ VarT Borrowed v
        
-     Gluon.ConE {} -> return $ ConstT (Gluon.substFullyUnder $ Gluon.fromWhnf expression)
-     Gluon.LitE {} -> return $ ConstT (Gluon.substFullyUnder $ Gluon.fromWhnf expression)
-     _ -> internalError "typeToEType"
+     Gluon.ConE {} ->
+       return $ ConstT Borrowed (Gluon.substFullyUnder $ Gluon.fromWhnf expression)
+     Gluon.LitE {} ->
+       return $ ConstT Borrowed (Gluon.substFullyUnder $ Gluon.fromWhnf expression)
+     _ -> traceShow (Gluon.pprExp $ Gluon.fromWhnf $ Gluon.substFullyUnderWhnf expression) $ internalError "typeToEType"
+  where
+    typePassConv expression =
+      case Gluon.unpackRenamedWhnfAppE expression
+      of Just (con, _) -> typeConstructorPassConv con
+         _ | getLevel (Gluon.fromWhnf $ Gluon.substFullyUnderWhnf expression) == KindLevel -> ByValue
+           | otherwise -> Borrowed
 
 -- | Get the parameter-passing convention of values of the given type.  The
 -- result describes values of the fully-applied type constructor.
@@ -627,7 +627,7 @@ dataConstructorPassType con =
       [ (SystemF.the_traversableDict,
          monoPassType traversableDictConstructorType)
       , (SystemF.traverseMember . SystemF.the_TraversableDict_list,
-         monoPassType $ traverseFunctionType (constT $ Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_list))
+         monoPassType $ traverseFunctionType (constT Borrowed $ Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_list))
       , (SystemF.traverseMember . SystemF.the_TraversableDict_Stream,
          polyPassType 1 $ \[eff] -> traverseStreamType eff)
       , (SystemF.the_oper_CAT_MAP, catMapType)
@@ -646,181 +646,177 @@ dataConstructorPassType con =
 -- The kind * -> *
 dataConKind = typeT
 
-traversableType ty = appT (constT traversable) [ty]
+traversableType ty = appT ByValue (constT Borrowed traversable) [ty]
   where
     traversable =
       Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_TraversableDict
 
-passconvType ty = appT (constT passconv) [ty]
+passconvType ty = appT ByValue (constT Borrowed passconv) [ty]
   where
     passconv = Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_PassConv
 
-streamPassType eff ty = atomT Owned $ streamT eff ty
+streamPassType eff ty = streamT eff ty
 
 -- | The type of a function that traverses an object of type @t@.
 traverseFunctionType t = 
-  funTDep (atomT ByValue $ typeT) $ \a ->
-  funT (atomT ByValue (passconvType (varT a))) $
-  funTRgn (atomT Borrowed (object_type a)) $ \rgn ->
+  funTDep typeT $ \a ->
+  funT (passconvType $ varT a) $
+  funTRgn (object_type a) $ \rgn ->
   retT emptyEffect (streamPassType (varEffect rgn) (varT a))
   where
-    object_type a = appT t [varT a]
+    object_type a = appT Borrowed t [varT a]
 
 -- | The type of the stream-traverse function.  Basically, take a stream
 -- parameter and return the exact same thing.
 traverseStreamType eff = 
-  funTDep (atomT ByValue $ typeT) $ \a ->
-  funT (atomT ByValue (passconvType (varT a))) $
+  funTDep typeT $ \a ->
+  funT (passconvType $ varT a) $
   funT (streamPassType (varEffect eff) (varT a)) $
   retT emptyEffect (streamPassType (varEffect eff) (varT a))
 
 traversableDictConstructorType =
-  funTDep (atomT ByValue dataConKind) $ \t ->
+  funTDep dataConKind $ \t ->
   funT (traverseFunctionType (varT t)) $
-  retT emptyEffect (atomT ByValue $ traversableType (varT t))
+  retT emptyEffect (traversableType (varT t))
 
 catMapType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funTDep (atomT ByValue typeT) $ \b ->
-  funT (atomT ByValue $ passconvType (varT a)) $
+  funTDep typeT $ \a ->
+  funTDep typeT $ \b ->
+  funT (passconvType (varT a)) $
   funT (streamPassType (varEffect eff) (varT a)) $
   funT (consumer_type eff a b) $
   retT emptyEffect $ streamPassType (varEffect eff) (varT b)
   where
     consumer_type eff a b =
-      funTRgn (atomT Borrowed (varT a)) $ \rgn ->
-      retT (varEffect rgn) $ streamPassType (varsEffect [rgn, eff]) (varT b)
+      funTRgn (varT a) $ \rgn ->
+      retT (varEffect rgn) $
+      streamPassType (varsEffect [rgn, eff]) (varT b)
 
 makelistType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funT (atomT ByValue $ passconvType (varT a)) $
+  funTDep typeT $ \a ->
+  funT (passconvType (varT a)) $
   funT (streamPassType (varEffect eff) (varT a)) $
-  retT (varEffect eff) $ atomT Borrowed $ list_type a
+  retT (varEffect eff) $ list_type a
   where
     list_constructor =
       Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_list
-    list_type a = appT (constT list_constructor) [varT a]
+    list_type a = appT Borrowed (constT Borrowed list_constructor) [varT a]
+
+reducerFunctionType a eff =
+  funTRgn (varT a) $ \r1 ->
+  funTRgn (varT a) $ \r2 ->
+  retT (varsEffect [r1, r2, eff]) (varT a)
 
 reduce1Type =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue typeT) $ \t ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funT (atomT ByValue $ passconvType (varT a)) $
-  funT (atomT ByValue $ passconvType (appT (varT t) [varT a])) $
-  funT (reduce_fun_type a eff) $
-  funTRgn (atomT Borrowed $ appT (varT t) [varT a]) $ \rgn ->
-  retT (varsEffect [rgn, eff]) $ atomT Borrowed (varT a)
-  where
-    reduce_fun_type a eff =
-      funTRgn (atomT Borrowed $ varT a) $ \r1 ->
-      funTRgn (atomT Borrowed $ varT a) $ \r2 ->
-      retT (varsEffect [r1, r2, eff]) $ atomT Borrowed (varT a)
+  funTDep typeT $ \t ->
+  funTDep typeT $ \a ->
+  funT (passconvType (varT a)) $
+  funT (passconvType (appT Borrowed (varT t) [varT a])) $
+  funT (reducerFunctionType a eff) $
+  funTRgn (appT Borrowed (varT t) [varT a]) $ \rgn ->
+  retT (varsEffect [rgn, eff]) (varT a)
 
 reduce1StreamType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funT (atomT ByValue $ passconvType (varT a)) $
-  funT (atomT ByValue $ passconvType (streamT (varEffect eff) (varT a))) $
-  funT (reduce_fun_type a eff) $
+  funTDep typeT $ \a ->
+  funT (passconvType (varT a)) $
+  funT (passconvType (streamT (varEffect eff) (varT a))) $
+  funT (reducerFunctionType a eff) $
   funT (streamPassType (varEffect eff) (varT a)) $
-  retT (varEffect eff) $ atomT Borrowed (varT a)
-  where
-    reduce_fun_type a eff =
-      funTRgn (atomT Borrowed $ varT a) $ \r1 ->
-      funTRgn (atomT Borrowed $ varT a) $ \r2 ->
-      retT (varsEffect [r1, r2, eff]) $ atomT Borrowed (varT a)
+  retT (varEffect eff) (varT a)
 
 zipType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue dataConKind) $ \s ->
-  funTDep (atomT ByValue dataConKind) $ \t ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funTDep (atomT ByValue typeT) $ \b ->
-  funT (atomT ByValue $ traversableType (varT s)) $
-  funT (atomT ByValue $ traversableType (varT t)) $
-  funTRgn (atomT Borrowed $ appT (varT s) [varT a]) $ \r1 ->
-  funTRgn (atomT Borrowed $ appT (varT t) [varT b]) $ \r2 ->
+  funTDep dataConKind $ \s ->
+  funTDep dataConKind $ \t ->
+  funTDep typeT $ \a ->
+  funTDep typeT $ \b ->
+  funT (traversableType (varT s)) $
+  funT (traversableType (varT t)) $
+  funTRgn (appT Borrowed (varT s) [varT a]) $ \r1 ->
+  funTRgn (appT Borrowed (varT t) [varT b]) $ \r2 ->
   retT emptyEffect $ streamPassType (varsEffect [r1, r2, eff]) $ tuple_type a b
   where
     tuple_type a b =
-      appT (constT $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
+      appT Borrowed (constT Borrowed $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
 
 zipNSType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue dataConKind) $ \s ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funTDep (atomT ByValue typeT) $ \b ->
-  funT (atomT ByValue $ traversableType (varT s)) $
-  funTRgn (atomT Borrowed $ appT (varT s) [varT a]) $ \r1 ->
+  funTDep dataConKind $ \s ->
+  funTDep typeT $ \a ->
+  funTDep typeT $ \b ->
+  funT (traversableType (varT s)) $
+  funTRgn (appT Borrowed (varT s) [varT a]) $ \r1 ->
   funT (streamPassType (varEffect eff) (varT b)) $
   retT emptyEffect $ streamPassType (varsEffect [r1, eff]) $ tuple_type a b
   where
     tuple_type a b =
-      appT (constT $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
+      appT Borrowed (constT Borrowed $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
 
 zipSNType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue dataConKind) $ \t ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funTDep (atomT ByValue typeT) $ \b ->
-  funT (atomT ByValue $ traversableType (varT t)) $
+  funTDep dataConKind $ \t ->
+  funTDep typeT $ \a ->
+  funTDep typeT $ \b ->
+  funT (traversableType (varT t)) $
   funT (streamPassType (varEffect eff) (varT a)) $
-  funTRgn (atomT Borrowed $ appT (varT t) [varT b]) $ \r2 ->
+  funTRgn (appT Borrowed (varT t) [varT b]) $ \r2 ->
   retT emptyEffect $ streamPassType (varsEffect [r2, eff]) $ tuple_type a b
   where
     tuple_type a b =
-      appT (constT $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
+      appT Borrowed (constT Borrowed $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
 
 zipSSType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funTDep (atomT ByValue typeT) $ \b ->
+  funTDep typeT $ \a ->
+  funTDep typeT $ \b ->
   funT (streamPassType (varEffect eff) (varT a)) $
   funT (streamPassType (varEffect eff) (varT b)) $
   retT emptyEffect $ streamPassType (varEffect eff) $ tuple_type a b
   where
     tuple_type a b =
-      appT (constT $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
+      appT Borrowed (constT Borrowed $ Gluon.mkInternalConE (SystemF.getPyonTupleCon' 2)) [varT a, varT b]
 
 iotaType =
   monoPassType $
-  funTRgn (atomT Borrowed $ constT none_type) $ \rgn ->
-  retT emptyEffect $ streamPassType emptyEffect $ constT int_type
+  funTRgn (constT Borrowed none_type) $ \rgn ->
+  retT emptyEffect $ streamPassType emptyEffect $ constT Borrowed int_type
   where
     none_type = Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_NoneType
     int_type = Gluon.mkInternalConE $ SystemF.pyonBuiltin SystemF.the_int
 
 mapType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue dataConKind) $ \t ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funTDep (atomT ByValue typeT) $ \b ->
-  funT (atomT ByValue $ traversableType (varT t)) $
-  funT (atomT ByValue $ passconvType (appT (varT t) [varT a])) $
-  funT (atomT ByValue $ passconvType (appT (varT t) [varT b])) $
+  funTDep dataConKind $ \t ->
+  funTDep typeT $ \a ->
+  funTDep typeT $ \b ->
+  funT (traversableType (varT t)) $
+  funT (passconvType (appT Borrowed (varT t) [varT a])) $
+  funT (passconvType (appT Borrowed (varT t) [varT b])) $
   funT (transformer_type eff a b) $
-  funTRgn (atomT Borrowed $ appT (varT t) [varT a]) $ \rgn ->
-  retT (varsEffect [rgn, eff]) (atomT Borrowed $ appT (varT t) [varT b])
+  funTRgn (appT Borrowed (varT t) [varT a]) $ \rgn ->
+  retT (varsEffect [rgn, eff]) (appT Borrowed (varT t) [varT b])
   where
     transformer_type eff a b =
-      funTRgn (atomT Borrowed $ varT a) $ \rgn ->
-      retT (varsEffect [rgn, eff]) $ atomT Borrowed $ varT b
+      funTRgn (varT a) $ \rgn ->
+      retT (varsEffect [rgn, eff]) $ varT b
   
 mapStreamType =
   polyPassType 1 $ \[eff] ->
-  funTDep (atomT ByValue typeT) $ \a ->
-  funTDep (atomT ByValue typeT) $ \b ->
-  funT (atomT ByValue $ passconvType (streamT (varEffect eff) (varT a))) $
-  funT (atomT ByValue $ passconvType (streamT (varEffect eff) (varT b))) $
+  funTDep typeT $ \a ->
+  funTDep typeT $ \b ->
+  funT (passconvType (streamT (varEffect eff) (varT a))) $
+  funT (passconvType (streamT (varEffect eff) (varT b))) $
   funT (transformer_type eff a b) $
   funT (streamPassType (varEffect eff) (varT a)) $
   retT emptyEffect (streamPassType (varEffect eff) (varT b))
   where
     transformer_type eff a b =
-      funTRgn (atomT Borrowed $ varT a) $ \rgn ->
-      retT (varsEffect [rgn, eff]) $ atomT Borrowed $ varT b
+      funTRgn (varT a) $ \rgn ->
+      retT (varsEffect [rgn, eff]) $ varT b
 
 
 -- | Apply a calling convention to some parameters.  Return the return value's
@@ -830,7 +826,7 @@ applyCallConv :: SourcePos
               -> PassType
                  -- | Argument regions, parameter-passing conventions, and
                  --   values
-              -> [(Maybe RVar, PassType, Maybe EType)]
+              -> [(Maybe RVar, PassType, Maybe PassType)]
               -> EffInf (PassType, Effect)
 applyCallConv pos pass_type args
   | debugApply = traceShow message $ applyCallConv_worker pos pass_type args
@@ -841,7 +837,7 @@ applyCallConv pos pass_type args
     arg_docs = map arg_doc args
     arg_doc (rgn, ty, val) = 
       let val_doc = case val
-                    of Just v -> pprEType v <+> text "="
+                    of Just v -> pprPassType v <+> text "="
                        Nothing -> empty
           rgn_doc = case rgn
                     of Just v -> text "@" <+> pprEffectVar v
@@ -882,7 +878,7 @@ applyCallConv_worker pos pass_type args =
               applyCallConv_worker pos return_type args
             return (final_return_type, effectUnion eff final_eff)
      
-     AtomT _ _ ->
+     _ ->
        case args
        of [] -> return (pass_type, emptyEffect)
           _ ->
@@ -918,21 +914,17 @@ assertParameterSubtype arg_type param_type
   where
     clear_stream_effects pt =
       case pt
-      of AtomT pc ety -> AtomT pc $ clear_stream_effects_etype ety
+      of AppT pc op args -> AppT pc (clear_stream_effects op) (map clear_stream_effects args)
          FunT param rng -> FunT (param {paramType = clear_stream_effects $ paramType param}) (clear_stream_effects rng)
-         RetT _ pt -> RetT emptyEffect $ clear_stream_effects pt 
-
-    clear_stream_effects_etype ety =
-      case ety
-      of AppT op args -> AppT (clear_stream_effects_etype op) (map clear_stream_effects_etype args)
-         StreamT _ ety -> StreamT emptyEffect $ clear_stream_effects_etype ety
-         VarT _ -> ety
-         ConstT _ -> ety
-         TypeT -> ety
+         RetT _ pt -> RetT emptyEffect $ clear_stream_effects pt
+         StreamT _ pt -> StreamT emptyEffect $ clear_stream_effects pt
+         VarT _ _ -> pt
+         ConstT _ _ -> pt
+         TypeT -> pt
 
     param_is_dictionary_type =
       case param_type
-      of AtomT _ (AppT (ConstT oper_ty) _) ->
+      of AppT _ (ConstT _ oper_ty) _ ->
            case oper_ty
            of Gluon.ConE {Gluon.expCon = c} -> isDictionaryTypeCon c
               _ -> False
@@ -1242,8 +1234,8 @@ effectInferCon inf c = do
 effectInferLit :: ExpInfo -> Lit -> RType -> EffInf (EIExp', PassTypeAssignment, Effect)
 effectInferLit inf lit ty = do
   let new_exp = LitE inf lit (EIType ty)
-  ty' <- liftRegionM $ typeToEType =<< evalHead' ty
-  return (new_exp, MonoAss $ AtomT Borrowed ty', emptyEffect)
+  ty' <- liftRegionM $ typeToPassType =<< evalHead' ty
+  return (new_exp, MonoAss ty', emptyEffect)
 
 effectInferLet name inf pat rhs body = do
   pat' <- patAsBinder pat
@@ -1325,8 +1317,8 @@ effectInferDo info result_type [Left ty_arg, Right pc_arg, Right val_arg] = do
   val_arg' <- effectInferExp val_arg
   
   -- The body of the 'do' expression must return a borrowed value
-  ret_type <- case eiPassType val_arg'
-              of AtomT Borrowed rt -> return rt
+  ret_type <- case typePassConv $ eiPassType val_arg'
+              of Borrowed -> return $ eiPassType val_arg'
                  _ -> fail "effect inference failed in an iterator expression body"
 
   let new_expr = DoE { expInfo = info
@@ -1334,7 +1326,7 @@ effectInferDo info result_type [Left ty_arg, Right pc_arg, Right val_arg] = do
                      , expPassConv = pc_arg'
                      , expBody = val_arg'
                      }
-      pass_type = AtomT Owned $ StreamT (eiEffect val_arg') ret_type
+      pass_type = StreamT (eiEffect val_arg') ret_type
 
   return (new_expr, MonoAss pass_type, eiEffect pc_arg')
 
@@ -1366,13 +1358,13 @@ effectInferFlattenedCall inf op args = do
 
 -- | Perform effect inference on a function argument.  If the argument is a
 -- type, the corresponding parameter-passing type is returned.
-effectInferArgument :: Either TRType TRExp -> EffInf (EIExp, Maybe EType)
+effectInferArgument :: Either TRType TRExp -> EffInf (EIExp, Maybe PassType)
 effectInferArgument (Left ty_arg) = do
   let gluon_type = fromTypedType ty_arg
       info = Gluon.mkSynInfo (getSourcePos gluon_type) TypeLevel
       exp  = TypeE info (toEIType ty_arg)
-      pass_type = AtomT ByValue TypeT
-  type_as_value <- liftRegionM $ typeToEType =<< evalHead' gluon_type
+      pass_type = TypeT
+  type_as_value <- liftRegionM $ typeToPassType =<< evalHead' gluon_type
 
   let new_exp = EIExp { eiType = Gluon.pureKindE
                       , eiDocument = Gluon.pprExp gluon_type

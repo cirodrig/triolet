@@ -110,11 +110,11 @@ withParameterVariable v ty m =
   of AppCT {ctOper = ConE {expCon = con}, ctArgs = args}
        | con `isPyonBuiltin` the_PassConv ->
            case args
-           of [(ByValue, t)] ->
+           of [(_, t)] ->
                 let insert_var env =
                       env {passConvEnv = (t, v) : passConvEnv env}
                 in EffEnv $ local insert_var $ runEffEnv m
-              _ -> internalError "withParameterVariable"
+              _ -> traceShow (pprType ty) $ internalError "withParameterVariable"
      _ -> m
 
 -- | Print the known environment of passing convention values.  For debugging.
@@ -190,9 +190,59 @@ asFunctionType pc ty = retCT emptyEffectType $! case pc
 convertMonoPassType :: PassType -> RExp -> EffEnv (PassConv, RCType)
 convertMonoPassType pass_type sf_type =
   case pass_type
-  of AtomT pc ty -> liftM ((,) pc) $ convertEType ty sf_type
+  of AppT pc op args ->
+       case sf_type
+       of AppE {expOper = sf_op, expArgs = sf_args}
+            | length args /= length sf_args -> mismatch
+            | otherwise -> do
+                -- The type operator remains unchanged
+                let core_op = sf_op
+
+                -- Convert type arguments
+                core_args <- zipWithM convertMonoPassType args sf_args
+
+                -- Type arguments are not mangled
+                return (pc, appCT core_op core_args)
      FunT {} -> liftM ((,) Owned . FunCT) $ convertFunctionType pass_type sf_type 
      RetT {} -> internalError "convertMonoPassType: Can't handle nullary functions"
+
+     StreamT eff pass_rng ->
+       case sf_type
+       of AppE { expInfo = app_info
+               , expOper = ConE {expInfo = stream_info, expCon = stream_con}
+               , expArgs = args}
+            | stream_con `isPyonBuiltin` the_Stream -> do
+                -- This constructor takes one argument
+                let arg = case args
+                          of [arg] -> arg
+                             _ -> mismatch
+
+                -- Convert it to an effect-decorated stream type
+                core_eff <- convertEffect eff
+                core_rng <- convertMonoPassType pass_rng arg
+                return (Owned,
+                        stream_type app_info stream_info core_eff core_rng)
+            
+          _ -> mismatch
+
+     VarT pc v ->
+       case sf_type
+       of VarE {} -> return_sf_type pc
+          _ -> mismatch
+     ConstT pc e -> return_sf_type pc
+     TypeT -> return_sf_type ByValue
+  where
+    -- Inconsistency found between effect inference and System F types 
+    mismatch = internalError "convertMonoPassType"
+    
+    -- Return the System F type unchanged
+    return_sf_type pc = return (pc, expCT sf_type)
+                     
+    -- Build a stream type
+    stream_type app_info op_info eff rng =
+      let con = pyonBuiltin the_LazyStream
+          op = mkConE (getSourcePos op_info) con
+      in appCT op [(ByValue, eff), rng]
 
 convertFunctionType :: PassType -> RExp -> EffEnv RCFunType
 convertFunctionType pass_type sf_type =
@@ -208,9 +258,9 @@ convertFunctionType pass_type sf_type =
        core_eff <- convertEffect eff
        core_rng <- convertMonoPassType pass_rng sf_type
        return $ make_function core_eff core_rng
-     AtomT pc ty -> do
-       core_rng <- convertEType ty sf_type
-       return $ make_function emptyEffectType (pc, core_rng)
+     _ -> do
+       core_rng <- convertMonoPassType pass_type sf_type
+       return $ make_function emptyEffectType core_rng
   where
     make_function eff (pc, ty) =
       let return_type = case pc
@@ -237,7 +287,7 @@ convertPassTypeParam param (Binder' mv dom ()) k = do
   where
     no_ptr = internalError "convertPassTypeParam: No pointer variable"
 
-convertEType :: EType -> RExp -> EffEnv RCType
+{-convertEType :: EType -> RExp -> EffEnv RCType
 convertEType etype sf_type =
   case etype
   of AppT op args ->
@@ -289,7 +339,7 @@ convertEType etype sf_type =
     stream_type app_info op_info eff rng =
       let con = pyonBuiltin the_LazyStream
           op = mkConE (getSourcePos op_info) con
-      in appCT op [(ByValue, eff), (Borrowed, rng)]
+      in appCT op [(ByValue, eff), (Borrowed, rng)]-}
 
 convertType :: Effect.ExpOf Effect.EI Effect.EI -> RCType
 convertType ty = expCT $ Effect.fromEIType ty
@@ -499,7 +549,7 @@ convertParameter (Binder v ty (rgn, pass_type)) k = do
       case rgn
       of Just rv -> withNewRegionVariable rv v ty' $ \rv' ->
                     k $! ReadP rv' v ::: ty'
-         Nothing -> internalError "convertParameter"
+         Nothing -> traceShow (pprType ty') $ internalError "convertParameter"
 
 convertLetBinder :: Effect.EIBinder 
                  -> (CBind LetBinder Rec -> EffEnv a)
