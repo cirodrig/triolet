@@ -45,6 +45,11 @@ pyonBuiltinModuleName = moduleName pyonBuiltinModuleNameString
 pyonBuiltinTypeConstructors =
   [ "Stream"
   , "LazyStream" -- Streams with side effects produced by effect inference
+  , "Ptr"                       -- Pointers produced by flattening
+  , "Own"                       -- Produced by flattening
+  , "Def"                       -- Produced by flattening
+  , "Undef"                       -- Produced by flattening
+  , "Action"                    -- Produced by flattening
   , "bool"
   , "int"
   , "float"
@@ -106,6 +111,10 @@ pyonBuiltinFunctions =
   , "fun_iota"
   , "fun_undefined"
   , "fun_copy"
+  , "fun_store_int"
+  , "fun_store_float"
+  , "fun_load_int"
+  , "fun_load_float"
   ]
 
 pyonBuiltinConstructors =

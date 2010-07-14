@@ -30,12 +30,6 @@ import Pyon.Anf.Builtins
 printTypeCheckSteps = False
 quitOnFirstError = True
 
-withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
-withMany f xs k = go xs k
-  where
-    go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
-    go []     k = k []
-
 emptyEffect = asWhnf Gluon.Core.Builtins.Effect.empty
 
 data Typed a

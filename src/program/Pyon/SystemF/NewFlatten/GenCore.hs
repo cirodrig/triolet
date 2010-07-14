@@ -1,5 +1,6 @@
 
-{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, ViewPatterns #-}
+{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, ViewPatterns,
+    ScopedTypeVariables #-}
 module Pyon.SystemF.NewFlatten.GenCore(flatten)
 where
 
@@ -20,8 +21,13 @@ import Gluon.Common.SourcePos
 import Gluon.Common.Supply
 import Gluon.Common.MonadLogic
 import Gluon.Core
+import Gluon.Core.RenameBase
 import Gluon.Core.Builtins
 import qualified Gluon.Core.Builtins.Effect
+import Gluon.Core.Variance
+import Gluon.Eval.Environment
+import Gluon.Eval.Eval
+import Gluon.Eval.Equality
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.SystemF.Builtins
 import qualified Pyon.SystemF.Typecheck as SystemF
@@ -31,7 +37,19 @@ import qualified Pyon.SystemF.NewFlatten.SetupEffect as Effect
 
 import Pyon.Core.Syntax
 import Pyon.Core.Print
+import Pyon.Core.Gluon
 import Pyon.Globals
+
+-- | Set to 'True' to print each time a value is coerced.
+-- All coercions of borrowed values are printed (including no-op coercions). 
+-- Coercions of by-value or owned values are only printed if coercion is
+-- necessary.
+printCoercions :: Bool
+printCoercions = False
+
+-- | Set to 'True' to print which function calls are flattened.
+printCalls :: Bool
+printCalls = False
 
 type EffectType = RecCType Rec
 
@@ -41,16 +59,19 @@ emptyEffectType = expCT Gluon.Core.Builtins.Effect.empty
 readEffectType :: RExp -> RCType -> EffectType
 readEffectType addr ty =
   let at = mkInternalConE $ builtin the_AtE
-  in appByValue at [expCT addr, ty]
+  in appExpCT at [ty, expCT addr]
 
 unionEffect :: EffectType -> EffectType -> EffectType
 unionEffect t1 t2 =
   let sconj = mkInternalConE $ builtin the_SconjE 
-  in appCT sconj [(ByValue, t1), (ByValue, t2)]
+  in appExpCT sconj [t1, t2]
 
 unionEffects :: [EffectType] -> EffectType
 unionEffects [] = emptyEffectType
 unionEffects es = foldr1 unionEffect es
+
+addressType :: RExp
+addressType = mkInternalConE $ builtin the_Addr
 
 -------------------------------------------------------------------------------
 -- Monad for translating result of effect inference
@@ -65,13 +86,57 @@ data Env = Env { -- | Each region variable is mapped to an address variable,
                , effectEnv :: Map.Map EVar Var
                  -- | Parameter-passing convention dictionaries
                , passConvEnv :: [(RCType, Var)]
+                 -- | Gluon types of in-scope variables.  This is used for
+                 -- comparing types and looking up parameter-passing
+                 -- convention variables.  Other variables are unimportant,
+                 -- so they may be absent.
+               , gluonTypeEnv :: [(Var, RExp)]
                , varSupply :: {-# UNPACK #-}!(IdentSupply Var)
                }
+
+cleanEnv var_supply = Env Map.empty Map.empty [] [] var_supply
 
 instance Supplies EffEnv (Ident Var) where
   fresh = EffEnv $ ReaderT $ \env -> supplyValue $ varSupply env
   supplyToST f = EffEnv $ ReaderT $ \env ->
     stToIO (f (unsafeIOToST $ supplyValue $ varSupply env))
+
+instance EvalMonad EffEnv where
+  liftEvaluation m = EffEnv $ ReaderT $ \env -> do
+    mx <- runEvalIO (varSupply env) m
+    case mx of
+      Just x -> return x
+      Nothing -> internalError "EffEnv: evaluation failed"
+
+instance PureTypeMonad EffEnv where
+  assumePure v t m = EffEnv $ local insert_type $ runEffEnv m
+    where
+      insert_type env = env {gluonTypeEnv = (v, t) : gluonTypeEnv env}
+
+  getType v = EffEnv $ asks lookup_type
+    where
+      lookup_type env = lookup v $ gluonTypeEnv env
+
+  peekType = getType
+             
+  getPureTypes = EffEnv $ asks gluonTypeEnv
+  
+  liftPure = runPureInEffEnv
+  
+  formatEnvironment f = EffEnv $ ReaderT $ \env ->
+    runReaderT (runEffEnv (f (doc env))) env
+    where
+      doc env = vcat [pprVar v <+> text ":" <+> pprExp t
+                     | (v, t) <- gluonTypeEnv env]
+
+runPureInEffEnv :: PureTC a -> EffEnv a
+runPureInEffEnv m = EffEnv $ ReaderT $ \env -> do
+  x <- runPureTCIO (varSupply env) $
+    -- Transfer the type environment
+    foldr (uncurry assumePure) m $ reverse $ gluonTypeEnv env
+  case x of
+    Left errs -> internalError "runPureInEffEnv: Computation failed"
+    Right y   -> return y
 
 -- | Translate a region variable to a Gluon variable.
 withNewRegionVariable :: RVar   -- ^ Region variable
@@ -86,36 +151,43 @@ withNewRegionVariable region_var ptr_var region_ty f = assertRVar region_var $ d
       insert_var env =
         env {regionEnv = Map.insert region_var val $ regionEnv env}
 
-  val `seq` EffEnv $ local insert_var $ runEffEnv (f addr_var)
+  val `seq` assumePure addr_var addressType $
+    EffEnv $ local insert_var $ runEffEnv (f addr_var)
 
 -- | Translate an effect variable to a Gluon variable.
 withNewEffectVariable :: EVar -> (Var -> EffEnv a) -> EffEnv a
 withNewEffectVariable effect_var f = assertEVar effect_var $ do
-  var <- newVar (effectVarName effect_var) ObjectLevel
+  var <- newVar (effectVarName effect_var) TypeLevel
   
   let insert_var env =
         env {effectEnv = Map.insert effect_var var $ effectEnv env}
 
-  EffEnv $ local insert_var $ runEffEnv (f var)
+  assumePure var effectKindE $ EffEnv $ local insert_var $ runEffEnv (f var)
 
--- | If the given type is a @PassConv@ object, add it to the local environment.
+-- | Add the given type to the local environment.  If the type is a
+-- @PassConv@ object, add it to the PassConv list as well.
 -- This function is called by 'convertParameter' to keep track of dictionaries
 -- that may be needed during flattening.
+-- This should only be called on pass-by-value variables.
 withParameterVariable :: Var    -- ^ Parameter variable
                        -> RCType -- ^ Parameter's type
                        -> EffEnv a
                        -> EffEnv a
-withParameterVariable v ty m =
-  case ty
-  of AppCT {ctOper = ConE {expCon = con}, ctArgs = args}
-       | con `isPyonBuiltin` the_PassConv ->
-           case args
-           of [(_, t)] ->
-                let insert_var env =
-                      env {passConvEnv = (t, v) : passConvEnv env}
-                in EffEnv $ local insert_var $ runEffEnv m
-              _ -> traceShow (pprType ty) $ internalError "withParameterVariable"
-     _ -> m
+withParameterVariable v ty m = do
+  gluon_type <- coreToGluonTypeWithoutEffects $ verbatim ty
+  assumePure v gluon_type $ assume_passconv_type m
+  where
+    assume_passconv_type m =
+      case unpackConAppCT ty
+      of Just (con, args)
+           | con `isPyonBuiltin` the_PassConv ->
+               case args
+               of [t] ->
+                    let insert_var env =
+                          env {passConvEnv = (t, v) : passConvEnv env}
+                    in EffEnv $ local insert_var $ runEffEnv m
+                  _ -> internalError "withParameterVariable"
+         _ -> m
 
 -- | Print the known environment of passing convention values.  For debugging.
 tracePassConvEnv :: EffEnv a -> EffEnv a
@@ -180,31 +252,33 @@ convertPassType (PolyAss (PolyPassType eff_vars pt)) sf_type = do
 
 asFunctionType :: PassConv -> RCType -> RCFunType
 asFunctionType Owned (FunCT t) = t
-asFunctionType pc ty = retCT emptyEffectType $! case pc
-                                                of ByValue -> ValRT ::: ty
-                                                   Owned -> OwnRT ::: ty
-                                                   Borrowed -> WriteRT ::: ty
+asFunctionType pc ty = retCT $! case pc
+                                of ByValue -> ValRT ::: ty
+                                   Owned -> OwnRT ::: ty
+                                   Borrowed -> WriteRT ::: ty
 
 -- | Given a type produced by effect inference and the corresponding
 -- original System F type, construct an ANF type.
 convertMonoPassType :: PassType -> RExp -> EffEnv (PassConv, RCType)
 convertMonoPassType pass_type sf_type =
   case pass_type
-  of AppT pc op args ->
+  of AppT op args ->
        case sf_type
        of AppE {expOper = sf_op, expArgs = sf_args}
             | length args /= length sf_args -> mismatch
             | otherwise -> do
                 -- The type operator remains unchanged
-                let core_op = sf_op
+                (_, core_op) <- convertMonoPassType op sf_op
 
                 -- Convert type arguments
                 core_args <- zipWithM convertMonoPassType args sf_args
 
                 -- Type arguments are not mangled
-                return (pc, appCT core_op core_args)
-     FunT {} -> liftM ((,) Owned . FunCT) $ convertFunctionType pass_type sf_type 
-     RetT {} -> internalError "convertMonoPassType: Can't handle nullary functions"
+                pass_conv <- liftM Effect.typePassConv $ evalHead' sf_type
+                return (pass_conv, appCT core_op $ map snd core_args)
+     FunT ft -> do
+       t <- convertFunctionType ft sf_type
+       return (Owned, FunCT t)
 
      StreamT eff pass_rng ->
        case sf_type
@@ -219,55 +293,56 @@ convertMonoPassType pass_type sf_type =
 
                 -- Convert it to an effect-decorated stream type
                 core_eff <- convertEffect eff
-                core_rng <- convertMonoPassType pass_rng arg
+                (_, core_rng) <- convertMonoPassType pass_rng arg
                 return (Owned,
                         stream_type app_info stream_info core_eff core_rng)
             
           _ -> mismatch
 
-     VarT pc v ->
+     VarT v ->
        case sf_type
-       of VarE {} -> return_sf_type pc
+       of VarE {} -> return_sf_type
           _ -> mismatch
-     ConstT pc e -> return_sf_type pc
-     TypeT -> return_sf_type ByValue
+     ConstT e -> return_sf_type
+     TypeT -> return_sf_type
   where
     -- Inconsistency found between effect inference and System F types 
     mismatch = internalError "convertMonoPassType"
     
     -- Return the System F type unchanged
-    return_sf_type pc = return (pc, expCT sf_type)
+    return_sf_type = do 
+      pass_conv <- liftM Effect.typePassConv $ evalHead' sf_type
+      return (pass_conv, expCT sf_type)
                      
     -- Build a stream type
     stream_type app_info op_info eff rng =
       let con = pyonBuiltin the_LazyStream
           op = mkConE (getSourcePos op_info) con
-      in appCT op [(ByValue, eff), rng]
+      in appExpCT op [eff, rng]
 
-convertFunctionType :: PassType -> RExp -> EffEnv RCFunType
+convertFunctionType :: FunPassType -> RExp -> EffEnv RCFunType
 convertFunctionType pass_type sf_type =
   case pass_type
-  of FunT param pass_rng ->
+  of FunFT param pass_rng ->
        case sf_type
-       of FunE {expMParam = binder, expRange = sf_rng} -> do
-            convertPassTypeParam param binder $ \core_binder ->
-              liftM (pureArrCT core_binder) $
-              convertFunctionType pass_rng sf_rng
+       of FunE {expMParam = binder, expRange = sf_rng} ->
+            convertPassTypeParam param binder $ \core_binder -> do
+              eff <- range_effect pass_rng
+              liftM (arrCT core_binder eff) $
+                convertFunctionType pass_rng sf_rng
           _ -> internalError "convertFunctionType"
-     RetT eff pass_rng -> do
-       core_eff <- convertEffect eff
+     RetFT _ pass_rng -> do
        core_rng <- convertMonoPassType pass_rng sf_type
-       return $ make_function core_eff core_rng
-     _ -> do
-       core_rng <- convertMonoPassType pass_type sf_type
-       return $ make_function emptyEffectType core_rng
+       return $ retCT $ make_return core_rng
   where
-    make_function eff (pc, ty) =
-      let return_type = case pc
-                        of ByValue  -> ValRT ::: ty
-                           Owned    -> OwnRT ::: ty
-                           Borrowed -> WriteRT ::: ty
-      in retCT eff return_type
+    range_effect (FunFT _ _) = return emptyEffectType
+    range_effect (RetFT eff _) = convertEffect eff
+
+    make_return (pc, ty) =
+      case pc
+      of ByValue  -> ValRT ::: ty
+         Owned    -> OwnRT ::: ty
+         Borrowed -> WriteRT ::: ty
 
 convertPassTypeParam :: FunParam -> RBinder' () -> (CBind CParamT Rec -> EffEnv a) -> EffEnv a
 convertPassTypeParam param (Binder' mv dom ()) k = do
@@ -343,6 +418,25 @@ convertEType etype sf_type =
 
 convertType :: Effect.ExpOf Effect.EI Effect.EI -> RCType
 convertType ty = expCT $ Effect.fromEIType ty
+
+-- | Create the type of a 'store' function.  The types follow the schema
+-- @val t -> bor t@
+-- for some type @t@.
+storeFunctionType :: RCType -> RCType
+storeFunctionType value_type =
+  funCT $
+  pureArrCT (ValPT Nothing ::: value_type) $
+  retCT (WriteRT ::: value_type)
+
+-- | Create the type of a 'load' function.  The types follow the schema
+-- @read t@a -> val t@
+-- for some type @t@.
+loadFunctionType :: RCType -> EffEnv RCType
+loadFunctionType value_type = do
+  addr <- newAnonymousVariable ObjectLevel
+  let eff = readEffectType (mkInternalVarE addr) value_type
+  return $ funCT $ arrCT (ReadPT addr ::: value_type) eff $
+    retCT (ValRT ::: value_type)
 
 -------------------------------------------------------------------------------
 -- Expression conversion
@@ -430,7 +524,20 @@ genLet fexp = do
 genStore :: AddrVar -> PtrVar -> FlatExp -> FlatExp
 genStore dst_addr dst_ptr fexp =
   case flattenedReturn fexp
-  of WriteRT ::: _ ->
+  of ValRT ::: ty ->
+       -- Call a store function based on the given type
+       let pos = getSourcePos $ flattenedExp fexp
+           fn = genStoreFunction pos ty
+           return_arg = ValCE { cexpInfo = mkSynInfo pos ObjectLevel
+                              , cexpVal = WriteVarV (mkInternalVarE dst_addr) dst_ptr
+                              }
+           exp = AppCE { cexpInfo = mkSynInfo pos ObjectLevel
+                       , cexpOper = flattenedExp fn
+                       , cexpArgs = [flattenedExp fexp]
+                       , cexpReturnArg = Just return_arg
+                       }
+       in FlatExp exp (WriteRT ::: ty) (Just (dst_addr, dst_ptr))
+     WriteRT ::: _ ->
        case flattenedDst fexp
        of Just (a, p) ->
             -- Rename the expression to write to the given destination
@@ -449,6 +556,54 @@ genStore dst_addr dst_ptr fexp =
                                              
     pos = getSourcePos $ flattenedExp fexp
 
+-- | Store the expression's result into a new location.  The destination
+-- address and pointer are put into the returned 'flattenedDst' field.
+genNewStore :: FlatExp -> EffEnv FlatExp
+genNewStore e = do
+  addr_var <- newAnonymousVariable ObjectLevel
+  ptr_var <- newAnonymousVariable ObjectLevel
+  return $ genStore addr_var ptr_var e
+
+-- | Load the result of another expression.  The given expression must return
+-- by reference.
+genLoad :: FlatExp -> EffEnv FlatExp
+genLoad fexp = do
+  -- Save the expression's result in a temporary variable, unless 
+  -- it's a plain value
+  (ctx, fexp') <-
+    if is_plain_value fexp
+    then return (idContext, fexp)
+    else genLet fexp
+  
+  let (addr, ptr) = case flattenedExp fexp'
+                    of ValCE {cexpVal = ReadVarV addr ptr} -> (addr, ptr)
+                       _ -> internalError "genLoadResult"
+      addr_var = case addr
+                 of VarE {expVar = v} -> v
+                    _ -> internalError "genLoadResult"
+      pos = getSourcePos $ flattenedExp fexp'
+      ty = cbindType $ flattenedReturn fexp'
+
+  -- Now load the value
+  load_fun <- genLoadFunction pos addr_var ptr ty
+
+  let load_exp = AppCE { cexpInfo = mkSynInfo pos ObjectLevel
+                       , cexpOper = flattenedExp load_fun
+                       , cexpArgs = [flattenedExp fexp']
+                       , cexpReturnArg = Nothing
+                       }
+      load_fexp = FlatExp load_exp (ValRT ::: ty) Nothing
+
+  return $ applyContextFlat ctx load_fexp
+  where
+    is_plain_value fexp =
+      case flattenedExp fexp 
+      of ValCE {cexpVal = ReadVarV addr _} ->
+           case addr
+           of VarE {} -> True
+              _ -> False
+         _ -> False
+
 -- | Generate a statement that copies the expression's result into the given
 -- destination.  The expression should return a borrowed reference to an
 -- existing variable.
@@ -459,66 +614,415 @@ genCopy src dst_addr dst_ptr =
   in trace "FIXME: genCopy " $
      FlatExp (flattenedExp src) rt (Just (dst_addr, dst_ptr))
 
+-- | Create the value of the 'store' function of the given type.
+genStoreFunction :: SourcePos -> RCType -> FlatExp
+genStoreFunction pos ty =
+  let exp = ValCE { cexpInfo = mkSynInfo pos ObjectLevel
+                  , cexpVal = OwnedConV store_function
+                  }
+  in FlatExp exp (OwnRT ::: store_type) Nothing
+  where
+    -- Pick a function to use to store 'ty'.
+    store_function =
+      case ty
+      of ExpCT {ctValue = ConE {expCon = c}}
+           | c `isPyonBuiltin` the_int -> pyonBuiltin the_fun_store_int
+           | c `isPyonBuiltin` the_float -> pyonBuiltin the_fun_store_float
+         _ -> internalError "genStore: Don't know how to store value"
+
+    store_type = storeFunctionType ty
+
+-- | Create the value of the 'load' function of the given type.
+genLoadFunction :: SourcePos -> AddrVar -> PtrVar -> RCType -> EffEnv FlatExp
+genLoadFunction pos src_addr src_ptr ty = do
+  load_type <- loadFunctionType ty
+  let exp = ValCE { cexpInfo = mkSynInfo pos ObjectLevel
+                  , cexpVal = OwnedConV load_function
+                  }
+  return $ FlatExp exp (ValRT ::: load_type) Nothing
+  where
+    load_function =
+      case ty
+      of ExpCT {ctValue = ConE {expCon = c}}
+           | c `isPyonBuiltin` the_int -> pyonBuiltin the_fun_load_int
+           | c `isPyonBuiltin` the_float -> pyonBuiltin the_fun_load_float
+         _ -> internalError "genLoad: Don't know how to load value"
+
+-- | Create a return parameter and address information for a function call,
+-- depending on the function's return type.
+makeReturnArgument :: CBind CReturnT Rec
+                   -> EffEnv (Maybe RCExp, Maybe (AddrVar, PtrVar))
+makeReturnArgument (rt ::: ty) =
+  case rt
+  of ValRT -> return (Nothing, Nothing)
+     OwnRT -> return (Nothing, Nothing)
+     WriteRT -> do
+       addr <- newAnonymousVariable ObjectLevel
+       ptr <- newAnonymousVariable ObjectLevel
+       return (Just $ writePointerRV noSourcePos (mkInternalVarE addr) ptr,
+               Just (addr, ptr))
+
 -------------------------------------------------------------------------------
 
 type ContextExp = (Context, FlatExp)
 
--- | FIXME: compare types; coerce functions
-coerce :: CBind CReturn Rec     -- ^ Target type and passing convention
+-- | Determine whether the expected and actual types are compatible.  Ignore side effects when
+-- comparing types.
+--
+-- If the given variance is 'Covariant', the actual type must be no greater
+-- than the expected type.
+-- If 'Invariant', it must be equal.
+-- If 'Contravariant', it must be no smaller.
+checkCompatibility :: Variance        -- ^ Comparison direction
+                   -> RCType          -- ^ Expected type
+                   -> RCType          -- ^ Actual type
+                   -> EffEnv Bool
+checkCompatibility variance t1 t2 = do
+  t1' <- coreToGluonTypeWithoutEffects $ verbatim t1
+  t2' <- coreToGluonTypeWithoutEffects $ verbatim t2
+
+  runPureInEffEnv $
+    case variance
+    of Covariant -> testSubtyping (verbatim t2') (verbatim t1') 
+       Invariant -> testEquality (verbatim t1') (verbatim t2')
+       Contravariant -> testEquality (verbatim t1') (verbatim t2')
+
+requireCompatibility variance expected actual =
+  checkCompatibility variance expected actual >>= check
+  where
+    check True  = return ()
+    check False = internalError "Unexpected type mismatch during GenCore phase"
+
+coerce :: Variance
+       -> CBind CReturn Rec     -- ^ Target type and passing convention
        -> FlatExp               -- ^ Expression to coerce
        -> EffEnv FlatExp        -- ^ Returns a coerced expression
-coerce (expect_return ::: expect_type) val =
+coerce variance (expect_return ::: expect_type) val =
   case expect_return
-  of ValR ->
-       case flattenedReturn val
-       of ValRT ::: given_type -> no_change
-          _ -> not_implemented
+  of ValR -> do
+       -- We can't coerce value types; they need to match exactly
+       requireCompatibility variance expect_type (cbindType $ flattenedReturn val)
+       case fromCBind $ flattenedReturn val of
+         ValRT -> no_change
+         ReadRT _ -> debug $ genLoad val
+         WriteRT -> debug $ genLoad val
+         _ -> not_implemented
      OwnR ->
        case flattenedReturn val
-       of OwnRT ::: given_type -> no_change
+       of OwnRT ::: given_type ->
+            coerceOwnedValue variance expect_type given_type val
           _ -> not_implemented
-     WriteR expect_addr expect_ptr ->
+     WriteR expect_addr expect_ptr -> debug $ do
        -- Ensure that the expression writes into the given destination
-       case flattenedReturn val
-       of WriteRT ::: given_type -> gen_store expect_addr expect_ptr
-          ReadRT _ ::: given_type -> gen_store expect_addr expect_ptr
-          _ -> traceShow (pprReturn (expect_return ::: expect_type) $$ pprReturnT (flattenedReturn val)) not_implemented
+       let given_type = cbindType $ flattenedReturn val
+       requireCompatibility variance expect_type given_type
+       return $ genStore expect_addr expect_ptr val
   where
     no_change = return val
     not_implemented = internalError "coerce: not implemented"
     
-    gen_store expect_addr expect_ptr =
-      case flattenedDst val
-      of Just (given_addr, given_ptr) ->
-           return $ genStore expect_addr expect_ptr val
-         _ -> internalError "coerce"
+    debug x
+      | printCoercions =
+          let return_doc = pprReturn (expect_return ::: expect_type) 
+              given_doc  = pprReturnT (flattenedReturn val)
+              msg = text "coerce value" $$
+                    (text "from" <+> given_doc $$ text "  to" <+> return_doc)
+          in traceShow msg x 
+      | otherwise = x
 
--- | Coerce a value that will be passed as a parameter to a function call
+-- | Coerce a value that will be passed as a parameter to a function call.
+--
+-- If passing by reference, the generated expression will pass a convenient
+-- pointer and address (not necessarily the expected address).  The caller
+-- should accept whatever pointer and address are given.
+--
+-- Variables bound by the expected parameter are ignored.
 coerceParameter :: CBind CParamT Rec
                 -> FlatExp
                 -> EffEnv ContextExp
 coerceParameter (expect_param ::: expect_type) val =
   case expect_param
-  of ValPT _ ->
-       case flattenedReturn val
-       of ValRT ::: _ -> no_change
-          _ -> not_implemented
+  of ValPT _ -> do
+       -- We can't coerce value types; they need to match exactly
+       requireCompatibility Covariant expect_type (cbindType $ flattenedReturn val)
+       case fromCBind $ flattenedReturn val of
+         ValRT -> no_change
+         ReadRT _ -> debug $ do cexp <- genLoad val
+                                return (idContext, cexp)
+         WriteRT -> debug $ do cexp <- genLoad val
+                               return (idContext, cexp)
      OwnPT ->
        case flattenedReturn val
-       of OwnRT ::: _ -> no_change
+       of OwnRT ::: given_type -> do
+            val' <- coerceOwnedValue Covariant expect_type given_type val
+            return (idContext, val')
           _ -> not_implemented
-     ReadPT _ ->
+     ReadPT _ -> debug $
        case flattenedReturn val
-       of WriteRT ::: _ -> do
+       of ValRT ::: given_type -> do
+            requireCompatibility Covariant expect_type given_type
+            coerceValueToBorrowed val expect_type
+          WriteRT ::: given_type -> do
+            requireCompatibility Covariant expect_type given_type
             -- Write into a temporary variable and return the variable
             genLet val
-          ReadRT _ ::: _ -> do
+          ReadRT _ ::: given_type -> do
+            requireCompatibility Covariant expect_type given_type
             -- Pass this borrowed reference
             return (idContext, val)
           _ -> not_implemented
   where
     no_change = return (idContext, val)
-    not_implemented = internalError "coerceParameter: not implemented"       
+    not_implemented = internalError "coerceParameter: not implemented"
+    
+    debug x
+      | printCoercions =
+          let return_doc = pprParamT (expect_param ::: expect_type) 
+              given_doc  = pprReturnT (flattenedReturn val)
+              msg = text "coerce parameter" $$
+                    (text "from" <+> given_doc $$ text "  to" <+> return_doc)
+          in traceShow msg x 
+      | otherwise = x
+
+
+-- | Make a value variable available as a borrowed variable.
+-- This generates a @let@ expression that stores the value into a locally
+-- allocated variable.
+coerceValueToBorrowed val ty = do
+  -- Store the value into a new location 
+  store_val <- genNewStore val
+  let Just (addr_var, ptr_var) = flattenedDst store_val
+  
+  -- Build a let-expression
+  let let_binder = LocalB addr_var ptr_var
+      let_stm body =
+        LetCE { cexpInfo = mkSynInfo (getSourcePos $ cexpInfo body) ObjectLevel
+              , cexpBinder = let_binder ::: ty
+              , cexpRhs = flattenedExp store_val
+              , cexpBody = body
+              }
+        
+  -- Build the borrowed value
+  let inf = mkSynInfo (getSourcePos $ cexpInfo $ flattenedExp val) ObjectLevel
+      local_value = ValCE { cexpInfo = inf
+                          , cexpVal = letBinderValue let_binder
+                          }
+      local_exp =
+        FlatExp local_value (ReadRT (mkInternalVarE addr_var) ::: ty) Nothing
+  return (context let_stm, local_exp)
+
+-- | Coerce an owned value to an owned value of another type.
+coerceOwnedValue variance expect_type given_type val = do
+  -- Check whether types are already compatible
+  compatible <- checkCompatibility variance expect_type given_type
+  if compatible
+    then return val             -- No change
+    else case (expect_type, given_type)
+         of (FunCT expect_ft, FunCT given_ft) ->
+              let val_exp = flattenedExp val
+              in coerceFunction expect_ft given_ft val_exp
+            (_, _) -> internalError "coerceOwnedValue: not implemented"
+
+-- | Coerce a function from one type to another by wrapping it with a lambda
+-- function.
+-- 
+-- The parameter must be an owned function.
+coerceFunction :: RCFunType     -- ^ Expected function type
+               -> RCFunType     -- ^ Given function type
+               -> RCExp         -- ^ Given function
+               -> EffEnv FlatExp -- ^ Returns a function matching expected type
+coerceFunction expected_ft given_ft given_function = debug $ do
+  lam_exp <- coerceFunctionParameters (verbatim expected_ft) (verbatim given_ft) (verbatim emptyEffectType) $
+    createFunctionCoercion given_function
+  return $ FlatExp lam_exp (OwnRT ::: FunCT expected_ft) Nothing
+  where
+    debug x
+      | printCoercions =
+          let return_doc = pprType (FunCT expected_ft)
+              given_doc  = pprType (FunCT given_ft)
+              msg = text "coerce function" $$
+                    (text "from" <+> given_doc $$ text "  to" <+> return_doc)
+          in traceShow msg x 
+      | otherwise = x
+
+-- | Coerces function parameters for 'coerceFunction'.
+--
+-- Each recursive call coerces one function parameter.  When all parameters 
+-- are coerced, the continuation is called to process the return value and
+-- do other required actions.
+--
+-- The @expected_effect@ parameter is ignored and should be the empty effect,
+-- except when processing the return type.  An effect should only occur when
+-- the last function parameter is passed.
+coerceFunctionParameters :: forall a.
+                            RecCFunType SubstRec
+                         -> RecCFunType SubstRec
+                         -> RecCType SubstRec
+                         -> ([CBind CParam Rec] -> [ContextExp] -> RCType ->
+                             CBind CReturnT Rec -> CBind CReturnT Rec ->
+                             EffEnv a)
+                         -> EffEnv a
+coerceFunctionParameters expected_ft given_ft expected_effect finish = do
+  expected_ft' <- freshenHead expected_ft
+  given_ft' <- freshenHead given_ft
+  case (expected_ft', given_ft') of
+    (ArrCT {ctParam = e_param, ctEffect = e_effect, ctRange = e_range},
+     ArrCT {ctParam = g_param, ctRange = g_range}) ->
+      -- Unify bound variables and create a function parameter.  Add dependent
+      -- variables to environment.
+      unify_parameters e_param g_param $ \src_param e_renaming g_renaming ->
+        -- Rename the rest of the expression
+        let e_range' = joinSubst e_renaming e_range
+            g_range' = joinSubst g_renaming g_range
+            
+            g_param' = substituteCBind substituteCParamT substFully g_param
+
+           -- Coerce from expected to given type, and continue
+        in coerce_and_continue g_param' src_param e_effect e_range' g_range'
+
+    (RetCT e_ret, RetCT g_ret) ->
+      let eff    = substFully expected_effect
+          e_ret' = substituteCBind substituteCReturnT substFully e_ret
+          g_ret' = substituteCBind substituteCReturnT substFully g_ret
+      in finish [] [] eff e_ret' g_ret'
+  where
+    -- Rename dependent parameter variables so that they have the same name.
+    -- Given the expected and given type parameters, create substitutions for 
+    -- the expected and given range types, respectively.
+    -- 
+    -- Also, a function parameter is created to hold the expected value.
+    unify_parameters :: CBind CParamT SubstRec
+                     -> CBind CParamT SubstRec
+                     -> (CBind CParam Rec -> Substitution ->
+                         Substitution -> EffEnv b)
+                     -> EffEnv b
+  
+    -- Unify dependent parameter variables
+    unify_parameters (ValPT e_mv ::: e_type) (ValPT g_mv ::: _) k = do
+      -- Create a parameter variable
+      let name = (varName =<< e_mv) `mplus` (varName =<< g_mv)
+          level = pred $ getLevel $ substFully e_type
+      param_var <- newVar name level
+
+      -- Rename the types so that they use the same variable
+      let make_subst Nothing  = mempty
+          make_subst (Just v) = renaming v param_var
+
+      -- Create a source parameter
+      let src_param = ValP param_var ::: substFully e_type
+          
+      -- Add the parameter variable to the environment and continue
+      gluon_param_type <- coreToGluonTypeWithoutEffects e_type
+      assumePure param_var gluon_param_type $
+        k src_param (make_subst e_mv) (make_subst g_mv)
+      
+    -- Unify parameter addresses
+    unify_parameters (ReadPT e_addr ::: e_type) (ReadPT g_addr ::: _) k = do
+      -- Create a parameter variable
+      let name = varName e_addr `mplus` varName g_addr
+      addr_var <- newVar name ObjectLevel
+      ptr_var <- newVar name ObjectLevel
+      
+      -- Create a source parameter
+      let src_param = ReadP addr_var ptr_var ::: substFully e_type
+          
+      -- Add the address variable to the environment
+      assumePure addr_var addressType $
+        k src_param (renaming e_addr addr_var) (renaming g_addr addr_var)
+      
+    -- The remaining cases do not involve unification
+    unify_parameters (expected_bind ::: expected_type) given_param k =
+      case expected_bind
+      of ValPT mv -> do
+           v <- case mv
+                of Just v -> return v
+                   Nothing -> newAnonymousVariable level
+           gluon_param_type <- coreToGluonTypeWithoutEffects expected_type
+           assumePure v gluon_param_type $ continue (ValP v)
+         OwnPT -> do
+           v <- newAnonymousVariable level
+           continue (OwnP v)
+         ReadPT addr -> do
+           ptr <- newAnonymousVariable ObjectLevel
+           assumePure addr addressType $ continue (ReadP addr ptr)
+      where
+        -- Parameter's level
+        level = pred $ getLevel $ substFully expected_type
+
+        -- Run continuation after constructing the function parameter and
+        -- adding parameter variables to the environment
+        continue binder = k (binder ::: substFully expected_type) mempty mempty
+    
+    coerce_and_continue :: CBind CParamT Rec
+                        -> CBind CParam Rec
+                        -> RecCType SubstRec
+                        -> RecCFunType SubstRec
+                        -> RecCFunType SubstRec
+                        -> EffEnv a
+    coerce_and_continue g_param src_param e_effect e_range g_range = do
+      -- Coerce from expected to given parameter
+      let src_bind ::: src_type = src_param
+          param_level = pred $ getLevel src_type
+          param_value = paramValue src_bind
+          param_exp = ValCE (internalSynInfo param_level) param_value
+          param_fexp = FlatExp { flattenedExp = param_exp 
+                               , flattenedReturn = paramReturnType src_bind ::: src_type 
+                               , flattenedDst = Nothing
+                               }
+      param_coercion <- coerceParameter g_param param_fexp
+      
+      -- Process remaining parameters
+      coerceFunctionParameters e_range g_range e_effect $
+        \params coercions e_eff e_ret g_ret ->
+        finish (src_param : params) (param_coercion : coercions) e_eff e_ret g_ret
+
+createFunctionCoercion :: RCExp              -- ^ Function to coerce
+                       -> [CBind CParam Rec] -- ^ Parameter value binders
+                       -> [ContextExp]       -- ^ Parameter coercions
+                       -> RCType             -- ^ Expected effect type
+                       -> CBind CReturnT Rec -- ^ Expected return type
+                       -> CBind CReturnT Rec -- ^ Given return type
+                       -> EffEnv RCExp       -- ^ Return a lambda expression
+createFunctionCoercion original_function param_binders coercions expect_eff
+                       expect_rt given_rt = do
+  -- Call the original function with the converted parameters
+  (return_arg, return_dst) <- makeReturnArgument given_rt
+  let call_exp =
+        AppCE { cexpInfo = internalSynInfo ObjectLevel
+              , cexpOper = original_function
+              , cexpArgs = map (flattenedExp . snd) coercions
+              , cexpReturnArg = return_arg
+              }
+      call_fexp = FlatExp call_exp given_rt return_dst
+  
+  -- Coerce the return value to match the expected return
+  return_binder <- make_return_binder expect_rt
+  call_fexp' <- coerce Covariant return_binder call_fexp
+  
+  -- Wrap expression with context required for parameters
+  let call_fexp'' = applyContextFlat (mconcat $ map fst coercions) call_fexp'
+  
+  -- Create a lambda function
+  let wrapper_fun = CFun { cfunInfo = internalSynInfo ObjectLevel
+                         , cfunParams = param_binders
+                         , cfunReturn = return_binder
+                         , cfunEffect = expect_eff
+                         , cfunBody = flattenedExp call_fexp'' 
+                         }
+      lam_exp = LamCE (internalSynInfo ObjectLevel) wrapper_fun
+  return lam_exp
+  where
+    -- From the expected the return type, create a return binder.
+    -- It's not permitted to return a reference to an existing variable.
+    make_return_binder (rbind ::: rtype) =
+      case rbind
+      of ValRT -> return (ValR ::: rtype)
+         OwnRT -> return (OwnR ::: rtype)
+         WriteRT -> do
+           addr <- newAnonymousVariable ObjectLevel
+           ptr <- newAnonymousVariable ObjectLevel
+           return $ WriteR addr ptr ::: rtype
+         ReadRT _ -> internalError "createFunctionCoercion"
 
 -- | Coerce an expression to a callable expression.
 -- The expression must have function type.  The function type is also returned.
@@ -531,7 +1035,7 @@ coerceToCallable expr =
         of _ ::: FunCT t -> t
            _ -> internalError "coerceToCallable: not a function type"
 
-  in do fexp <- coerce callable_type expr
+  in do fexp <- coerce Covariant callable_type expr
         return (fexp, function_type)
 
 -- | Convert a parameter binder
@@ -749,54 +1253,64 @@ applyCall pos op_type op args = do
     -- Create a function call expression.  Insert the return parameter if one
     -- is called for.
     make_call_expression context ret_type op arg_exps = do
-      (return_arg, dst) <- make_return_type ret_type
+      (return_arg, dst) <- makeReturnArgument ret_type
       let inf = mkSynInfo pos ObjectLevel
           exp = applyContext context $ AppCE inf op arg_exps return_arg
       return $ FlatExp exp ret_type dst
 
-    make_return_type :: CBind CReturnT Rec
-                     -> EffEnv (Maybe RCExp, Maybe (AddrVar, PtrVar))
-    make_return_type (rt ::: ty) =
-      case rt
-      of ValRT -> return (Nothing, Nothing)
-         OwnRT -> return (Nothing, Nothing)
-         WriteRT -> do
-           addr <- newAnonymousVariable ObjectLevel
-           ptr <- newAnonymousVariable ObjectLevel
-           return (Just $ writePointerRV noSourcePos (mkInternalVarE addr) ptr,
-                   Just (addr, ptr))
-
+-- | Apply a function to some arguments.  Translate the arguments,
+-- compute the return type, and return any un-processed arguments.
 applyCallOperands :: RecCFunType SubstRec
                   -> [Effect.EIExp]
                   -> EffEnv (CBind CReturnT SubstRec, [(Context, RCExp)], [Effect.EIExp])
-applyCallOperands op_type oprds = do
+applyCallOperands op_type oprds = debug $ do
   op_type' <- freshenHead op_type
   go op_type' oprds id 
   where
     go (ArrCT {ctParam = param, ctRange = rng}) (oprd:oprds) hd = do
-      (oprd', oprd_type) <- applyCallOperand param oprd
+      (oprd', oprd_addr, oprd_type) <- applyCallOperand param oprd
       
-      -- If this is a dependent type, then substitute the operand's type
+      -- If the function is dependently typed, substitute the operand's type.
+      -- If the function takes a pass-by-reference parameter, substitute the
+      -- actual address that will be passed.
       rng' <- freshenHead $
-              case param
-              of ValPT (Just param_var) ::: _ ->
-                   -- Dependent type; operand must be a type
-                   case snd oprd' of
-                     ValCE {cexpVal = TypeV ty} ->
-                       verbatim $ assignTypeFun param_var ty rng
-                     _ -> internalError "applyCallOperands"
-                 _ -> rng
+              substitute_range (fromCBind param) (snd oprd') oprd_addr rng
       go rng' oprds (hd . (oprd':))
 
     go t@(ArrCT {}) [] hd = return (OwnRT ::: verbatim (funCT (substFullyUnder t)), hd [], [])
 
-    go (RetCT _ rt) oprds hd = return (rt, hd [], oprds)
+    go (RetCT rt) oprds hd = return (rt, hd [], oprds)
+    
+    substitute_range param oprd_exp oprd_addr rng =
+      case param
+      of ValPT (Just param_var) -> 
+           -- Dependent type; operand must be a type
+           case oprd_exp
+           of ValCE {cexpVal = TypeV ty} ->
+                verbatim $ assignTypeFun param_var ty rng
+              _ -> internalError "applyCallOperands"
+
+         ValPT Nothing -> rng   -- Non-dependent type
+         OwnPT -> rng           -- Non-dependent
+         ReadPT addr_var ->
+           -- Borrowed parameter
+           case oprd_addr
+           of Just a_exp ->
+                verbatim $ assignTypeFun addr_var (expCT a_exp) rng
+
+    debug x
+      | printCalls =
+          let msg = text "applyCallOperands" $$
+                    nest 4 (pprType $ FunCT $ substFully op_type) $$
+                    nest 4 (vcat $ map Effect.pprExp oprds)
+          in traceShow msg x
+      | otherwise = x
 
 -- | Flatten an operand of a function call and compute the call's side effect
 -- and result type.
 applyCallOperand :: CBind CParamT SubstRec
                  -> Effect.EIExp 
-                 -> EffEnv ((Context, RCExp), RCType)
+                 -> EffEnv ((Context, RCExp), Maybe (AddrExp Rec), RCType)
 applyCallOperand param_type operand = do
   -- Flatten and coerce the operand
   arg_val <- flattenExp operand
@@ -804,7 +1318,10 @@ applyCallOperand param_type operand = do
     coerceParameter (substituteCBind substituteCParamT substFully param_type) arg_val
     
   let arg_type = cbindType $ flattenedReturn arg_val2
-  return ((arg_context, flattenedExp arg_val2), arg_type)
+      arg_addr = case fromCBind $ flattenedReturn arg_val2 
+                 of ReadRT e -> Just e
+                    _ -> Nothing
+  return ((arg_context, flattenedExp arg_val2), arg_addr, arg_type)
 
 flattenDo expression ty pc body = trace "FIXME: flattenDo" $ do
   body' <- flattenExp body
@@ -816,7 +1333,7 @@ flattenDo expression ty pc body = trace "FIXME: flattenDo" $ do
 flattenLet expression b rhs body = do
   rhs' <- flattenExp rhs
   convertLetBinder b $ \b' -> do
-    rhs'' <- coerce (letBinderReturn b') rhs'
+    rhs'' <- coerce Covariant (letBinderReturn b') rhs'
     body' <- flattenExp body
     let inf = mkSynInfo (getSourcePos expression) ObjectLevel
         new_exp = LetCE inf b' (flattenedExp rhs'') (flattenedExp body')
@@ -863,7 +1380,7 @@ flattenCase expression scr alts = do
         is_own _ = False
 
         coerce_alternatives return_binder = do
-          alt_bodies' <- mapM (coerce return_binder) alt_bodies
+          alt_bodies' <- mapM (coerce Contravariant return_binder) alt_bodies
           let new_alts = zipWith rebuild_alt alt_binder_data alt_bodies'
               return_type = case return_binder
                             of r ::: t -> returnType r ::: t
@@ -907,7 +1424,7 @@ flattenFun fun =
     
     -- Flatten the function body
     body_exp <- flattenExp $ Effect.funBody fun
-    body_exp' <- coerce ret_binder body_exp
+    body_exp' <- coerce Contravariant ret_binder body_exp
     effect <- convertEffect $ Effect.funEffect fun
 
     let effect_params = [ValP v ::: effect_type | v <- effect_vars]
@@ -953,7 +1470,7 @@ flatten mod = do
   -- Run flattening
   flattened <-
     withTheVarIdentSupply $ \var_supply ->
-    let env = Env Map.empty Map.empty [] var_supply
+    let env = cleanEnv var_supply
     in runReaderT (runEffEnv $ flattenModule effect_defss) env
 
   -- DEBUG: print flattened code

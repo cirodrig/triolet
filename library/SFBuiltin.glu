@@ -47,9 +47,6 @@ data bool : Pure where True : bool | False : bool;
 constant list : Pure -> Pure;
 constant Stream : Pure -> Pure;
 
--- Stream type after effect inference
-constant LazyStream : Effect -> Pure -> Pure;
-
 data PyonTuple0 : Pure where
   pyonTuple0 : PyonTuple0;
 data PyonTuple1 : Pure -> Pure where
@@ -268,5 +265,33 @@ constant fun_iota : NoneType -> Stream int;
 
 constant fun_undefined : (a : Pure) -> a;
 
--- Inserted during flattening
+{- Constructors inserted after effect inference.  These constructors deal
+-- with data at a low level, where the representation becomes visible.
+-}
+
+-- Pointer-to-address type
+constant Ptr : Addr -> Pure;
+
+-- Owned reference type
+constant Own : Pure -> Pure;
+
+-- Undefined/defined state type
+constant Def : Pure -> State;
+constant Undef : Pure -> State;
+
+-- Stream type after effect inference
+constant LazyStream : Effect is(covar) -> Pure is(covar) -> Pure;
+
+-- Effect monad type
+constant Action : Effect is(covar) -> Pure is(covar) -> Pure;
+
 constant fun_copy : (a : Pure) -> PassConv a -> a -> a;
+
+constant fun_store_int : int -> int;
+constant fun_store_float : float -> float;
+constant fun_store_NoneType : NoneType -> NoneType;
+
+-- Inserted during flattening.  The types are not correct.
+constant fun_load_int : int -> int;
+constant fun_load_float : float -> float;
+constant fun_load_NoneType : NoneType -> NoneType;

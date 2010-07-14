@@ -1,5 +1,5 @@
 
-{-# LANGUAGE TypeFamilies, TypeSynonymInstances, RankNTypes, DeriveDataTypeable #-}
+{-# LANGUAGE TypeFamilies, TypeSynonymInstances, RankNTypes, DeriveDataTypeable, FlexibleInstances #-}
 module Pyon.Core.Syntax where
 
 import Control.Monad
@@ -38,6 +38,12 @@ type RCFunType = RecCFunType Rec
 type RCExp = RecCExp Rec
 type RCAlt = RecCAlt Rec
 type RCFun = RecCFun Rec
+
+type SRCType = RecCType SubstRec
+type SRCFunType = RecCFunType SubstRec
+type SRCExp = RecCExp SubstRec
+type SRCAlt = RecCAlt SubstRec
+type SRCFun = RecCFun SubstRec
 
 -- TODO: Combine this with the identical definition in PassConv.hs
 data PassConv = ByValue | Owned | Borrowed
@@ -138,6 +144,16 @@ data Value s =
   | LitV !SystemF.Lit
   | TypeV (RecCType s)
 
+paramValue :: CParam Rec -> Value Rec
+paramValue (ValP v) = ValueVarV v
+paramValue (OwnP v) = OwnedVarV v
+paramValue (ReadP a p) = ReadVarV (mkInternalVarE a) p
+
+paramReturnType :: CParam Rec -> CReturnT Rec
+paramReturnType (ValP _) = ValRT
+paramReturnType (OwnP _) = OwnRT
+paramReturnType (ReadP a p) = ReadRT (mkInternalVarE a)
+
 letBinderValue :: LetBinder Rec -> Value Rec
 letBinderValue (ValB v) = ValueVarV v
 letBinderValue (OwnB v) = OwnedVarV v
@@ -173,13 +189,18 @@ data instance CTypeOf Rec s =
     }
     -- | A System F data type.
   | AppCT
-    { ctOper :: RecExp s
-    , ctArgs :: [(PassConv, RecCType s)]
+    { ctOper :: RecCType s
+    , ctArgs :: [RecCType s]
     }
     -- | A function type.
   | FunCT
     { ctFunType :: RecCFunType s
     }
+    
+instance HasLevel RCType where
+  getLevel (ExpCT val) = getLevel val
+  getLevel (AppCT op _) = getLevel op
+  getLevel (FunCT _) = TypeLevel
 
 data instance CFunTypeOf Rec s =
     ArrCT
@@ -188,18 +209,24 @@ data instance CFunTypeOf Rec s =
     , ctRange :: RecCFunType s
     }
   | RetCT
-    { ctEffect :: RecCType s
-    , ctReturn :: !(CBind CReturnT s)
+    { ctReturn :: !(CBind CReturnT s)
     }
 
 expCT :: RecExp s -> CType s
 expCT e = ExpCT e
 
-appCT :: RecExp s -> [(PassConv, RecCType s)] -> CType s
-appCT op args = AppCT op args
+appExpCT :: RExp -> [RCType] -> RCType
+appExpCT op args = AppCT (expCT op) args
 
-appByValue :: RecExp s -> [RecCType s] -> CType s
-appByValue op args = AppCT op [(ByValue, t) | t <- args]
+appCT :: RCType -> [RCType] -> RCType
+appCT op args = 
+  case op
+  of AppCT op' args' -> AppCT op' (args' ++ args)
+     _               -> AppCT op args
+
+unpackConAppCT :: RCType -> Maybe (Con, [RCType])
+unpackConAppCT (AppCT (ExpCT (ConE {expCon = c})) args) = Just (c, args)
+unpackConAppCT _ = Nothing
 
 funCT :: RecCFunType s -> CType s
 funCT = FunCT
@@ -212,11 +239,14 @@ pureArrCT param range = arrCT param empty_effect range
   where
     empty_effect = expCT Gluon.Core.Builtins.Effect.empty
 
-retCT :: RecCType s -> CBind CReturnT s -> CFunType s
-retCT eff ret = RetCT eff ret
+retCT :: CBind CReturnT s -> CFunType s
+retCT ret = RetCT ret
 
 functionCT :: [CBind CParamT Rec] -> RCType -> CBind CReturnT Rec -> RCFunType
-functionCT params eff ret = foldr pureArrCT (retCT eff ret) params
+functionCT (param : params) eff ret = fun param params 
+  where
+    fun p (p':ps) = pureArrCT p $ fun p' ps
+    fun p [] = arrCT p eff (retCT ret)
 
 data instance CExpOf Rec s =
     ValCE
@@ -420,7 +450,7 @@ instance Substitutable CTypeOf where
   mapSubstitutable f expression =
     case expression
     of ExpCT val -> ExpCT (f val)
-       AppCT op args -> AppCT (f op) [(pc, f arg) | (pc, arg) <- args]
+       AppCT op args -> AppCT (f op) (map f args)
        FunCT t -> FunCT (f t)
   
   applySubstitution subst = mapSubstitutable (joinSubst subst)
@@ -433,12 +463,8 @@ instance Renameable CTypeOf where
         of ExpCT val -> ExpCT `liftM` joinSubstitution val
            AppCT op args -> AppCT `liftM`
                             joinSubstitution op `ap`
-                            mapM joinPassType args 
+                            mapM joinSubstitution args 
            FunCT t -> FunCT `liftM` joinSubstitution t
-
-      joinPassType (pc, t) = do
-        t' <- joinSubstitution t
-        return (pc, t')
 
   freshenFully x = do 
     x' <- freshenHead x
@@ -446,12 +472,8 @@ instance Renameable CTypeOf where
       ExpCT val -> ExpCT `liftM` freshenFully val
       AppCT op args -> AppCT `liftM`
                        freshenFully op `ap`
-                       mapM freshen args 
+                       mapM freshenFully args 
       FunCT t -> FunCT `liftM` freshenFully t
-    where
-      freshen (pc, t) = do
-        t' <- freshenFully t
-        return (pc, t')
 
 instance Substitutable CFunTypeOf where
   asSubst = SubstCFT
@@ -460,8 +482,8 @@ instance Substitutable CFunTypeOf where
     case expression
     of ArrCT param eff rng ->
          ArrCT (substituteCBind substituteCParamT f param) (f eff) (f rng)
-       RetCT eff ret ->
-         RetCT (f eff) (substituteCBind substituteCReturnT f ret)
+       RetCT ret ->
+         RetCT (substituteCBind substituteCReturnT f ret)
   
   applySubstitution subst = mapSubstitutable (joinSubst subst)
 
@@ -477,9 +499,8 @@ instance Renameable CFunTypeOf where
                  range' <- joinSubstitution range
                  return (eff', range')
              return $ ArrCT param' eff' range'
-           RetCT eff ret ->
+           RetCT ret ->
              RetCT `liftM`
-             joinSubstitution eff `ap`
              freshenCBind' freshenCReturnT ret
 
   freshenFully x = withSubstitutable x freshen
@@ -493,9 +514,8 @@ instance Renameable CFunTypeOf where
                  range' <- freshenFully range
                  return (eff', range')
              return $ ArrCT param' eff' range'
-           RetCT eff ret ->
+           RetCT ret ->
              RetCT `liftM`
-             freshenFully eff `ap`
              freshenFullyCBind' freshenFullyCReturnT ret
 
 
@@ -585,11 +605,8 @@ assignType v ty assigned_type = assign_in assigned_type
                 internalError "assignType"
                  | otherwise -> ExpCT $ substFullyUnder e'
 
-         AppCT op args
-           | substFully op `mentions` v ->
-                internalError "assignType"
-           | otherwise ->
-             AppCT (substFully op) [(pc, assign_in arg) | (pc, arg) <- args]
+         AppCT op args ->
+           AppCT (assign_in op) (map assign_in args)
 
          FunCT t -> FunCT (assign_fun t)
 
@@ -604,8 +621,8 @@ assignTypeFun v ty assigned_type = assign_fun assigned_type
       case substHead t
       of ArrCT param eff rng ->
            ArrCT (assign_param param) (assign_in eff) (assign_fun rng)
-         RetCT eff ret ->
-           RetCT (assign_in eff) (assign_ret ret)
+         RetCT ret ->
+           RetCT (assign_ret ret)
         
     assign_param (p ::: ty) =
       let p' = case p
@@ -620,6 +637,7 @@ assignTypeFun v ty assigned_type = assign_fun assigned_type
                   OwnRT -> OwnRT
                   WriteRT -> WriteRT
                   ReadRT e 
-                    | substFully e `mentions` v -> internalError "assignType"
+                    | substFully e `mentions` v ->
+                      internalError "assignTypeFun"
                     | otherwise -> ReadRT (substFully e)
       in r' ::: assign_in ty

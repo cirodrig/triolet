@@ -7,6 +7,7 @@ import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Label
 import Gluon.Core
 import Pyon.Core.Syntax
+import qualified Pyon.SystemF.Syntax as SystemF
 
 pprPassConv :: PassConv -> Doc
 pprPassConv ByValue = text "val"
@@ -66,30 +67,28 @@ pprType ty =
   case ty
   of ExpCT t -> pprExp t
      AppCT op args ->
-       sep $ pprExp op : [nest 2 $ parens $ pprPassConv pc <+> pprType t
-                         | (pc, t) <- args]
+       sep $ parens (pprType op) : map (nest 2 . parens . pprType) args
      FunCT f -> pprFunType f
 
 pprFunType :: RCFunType -> Doc
 pprFunType ty =
-  let clauses = pprArrowType ty
-  in sep (map ppr_param (init clauses) ++ [ppr_return $ last clauses])
+  let (params, ret) = arrowClauses ty
+  in sep (map ppr_param params ++ [ret])
   where
     ppr_param (param_doc, eff_doc) = param_doc <+> text "->" <+> eff_doc
-    ppr_return (return_doc, eff_doc) = eff_doc <+> return_doc
 
-pprArrowType :: RCFunType -> [(Doc, Doc)]
-pprArrowType ty =
+arrowClauses :: RCFunType -> ([(Doc, Doc)], Doc)
+arrowClauses ty =
   case ty
   of ArrCT param eff rng ->
        let param_doc = pprParamT param
-           rng_doc = pprArrowType rng
            eff_doc = ppr_effect eff
-       in (param_doc, eff_doc) : rng_doc
-     RetCT eff ret ->
-       let eff_doc = ppr_effect eff
-           ret_doc = pprReturnT ret
-       in [(ret_doc, eff_doc)]
+       in case arrowClauses rng
+          of (params_doc, rng_doc) ->
+               ((param_doc, eff_doc) : params_doc, rng_doc)
+     RetCT ret ->
+       let ret_doc = pprReturnT ret
+       in ([], ret_doc)
   where
     ppr_effect eff 
       | is_empty_effect eff = empty
@@ -109,7 +108,11 @@ pprValue val =
      WriteVarV a p -> parens $ text "write" <+> pprVar p <> text "@" <> pprExp a
      ValueConV c -> text $ showLabel $ conName c
      OwnedConV c -> text $ showLabel $ conName c
-     LitV l -> text "literal"
+     LitV l -> case l
+               of SystemF.IntL n -> text $ show n
+                  SystemF.FloatL d -> text $ show d
+                  SystemF.BoolL b -> text $ show b
+                  SystemF.NoneL -> text "None"
      TypeV ty -> parens $ pprType ty
 
 pprCExp :: RCExp -> Doc
@@ -121,7 +124,7 @@ pprCExp exp =
             pprCExp op : map (nest 2) (map pprCExp args ++ [maybe empty pprCExp ra])
           LamCE {cexpFun = f} -> parens $ pprCFun f
           LetCE {cexpBinder = b, cexpRhs = rhs, cexpBody = body} ->
-            let let_doc = hang (text "let" <+> pprLetBinder b <+> text "=") 4 $
+            let let_doc = hang (text "let" <+> pprLetBinder b <+> text "=") 6 $
                           pprCExp rhs
             in let_doc $$ pprCExp body
           LetrecCE {cexpDefs = defs, cexpBody = body} ->
@@ -154,5 +157,5 @@ pprCFun fun =
 
 pprCDef :: CDef Rec -> Doc
 pprCDef (CDef v f) =
-  pprVar v <+> text "=" <+> pprCFun f
+  hang (pprVar v <+> text "=") 4 (pprCFun f)
   

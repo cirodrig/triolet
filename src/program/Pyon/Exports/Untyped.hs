@@ -28,7 +28,6 @@ import qualified Pyon.SystemF.PartialEval as SystemF
 import qualified Pyon.SystemF.DeadCode as SystemF
 import qualified Pyon.SystemF.StreamSpecialize as SystemF
 import qualified Pyon.SystemF.NewFlatten.SetupEffect as SystemF
-import qualified Pyon.SystemF.NewFlatten.Flatten as SystemF
 import qualified Pyon.SystemF.NewFlatten.GenCore
 import qualified Pyon.Anf.Print as Anf
 import qualified Pyon.Anf.Typecheck as Anf

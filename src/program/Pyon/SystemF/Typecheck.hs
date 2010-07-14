@@ -96,7 +96,8 @@ data Typed a deriving(Typeable)
 
 instance Gluon.Structure a => Gluon.Structure (Typed a)
 
-newtype instance Gluon.ExpOf (Typed s) (Typed s) = TypedSFType (TypeOf s s)
+newtype instance Gluon.ExpOf (Typed s) (Typed s') =
+  TypedSFType (TypeAnn (TypeOf s) s')
 newtype instance SFExpOf (Typed s) s' = TypedSFExp (TypeAnn (SFExpOf s) s')
 newtype instance AltOf (Typed s) s' = TypedSFAlt (TypeAnn (AltOf s) s')
 newtype instance FunOf (Typed s) s' = TypedSFFun (TypeAnn (FunOf s) s')
@@ -185,11 +186,12 @@ assumeTyPat (TyPat v t) k = do
 assumeDef :: RDef -> PureTC a -> PureTC a
 assumeDef (Def v fun) = assumePure v (functionType fun)
 
--- | Convert a type to a System F type
+-- | Infer a type's kind
 evalType :: RType -> PureTC TRType
-evalType t = liftEvaluation $ do
+evalType t = do
+  k <- Gluon.typeInferExp t
   t' <- Gluon.evalFully' t
-  return $ TypedSFType $ fromWhnf t'
+  return $ TypedSFType $ TypeAnn k (fromWhnf t')
 
 typeInferExp :: RExp -> PureTC TRExp
 typeInferExp expression =
@@ -228,7 +230,8 @@ checkLiteralType :: ExpInfo -> Lit -> RType
                  -> PureTC TRExp
 checkLiteralType inf l t = do
   t' <- Gluon.evalFully' t
-  let t'' = TypedSFType $ fromWhnf t'
+  k <- Gluon.typeInferExp t
+  let t'' = TypedSFType $ TypeAnn k (fromWhnf t')
   
   if isValidLiteralType t' l
     then return $ TypedSFExp $ TypeAnn t' (LitE inf l t'')
