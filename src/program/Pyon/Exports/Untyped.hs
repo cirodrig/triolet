@@ -29,11 +29,8 @@ import qualified Pyon.SystemF.DeadCode as SystemF
 import qualified Pyon.SystemF.StreamSpecialize as SystemF
 import qualified Pyon.SystemF.NewFlatten.SetupEffect as SystemF
 import qualified Pyon.SystemF.NewFlatten.GenCore
-import qualified Pyon.Anf.Print as Anf
-import qualified Pyon.Anf.Typecheck as Anf
-
--- Imported for compilation dependences only
-import Pyon.NewCore.Optimizations()
+import qualified Pyon.Core.Lowering as Lowering
+import qualified Pyon.LowLevel.Print as LowLevel
 
 dummyAnn :: Ann
 dummyAnn = Ann noSourcePos
@@ -361,15 +358,15 @@ pyon_typeCheckSystemFModule _self mod = rethrowExceptionsInPython $ do
   SystemF.typeCheckModulePython m
   pyNone
 
+{-
 foreign export ccall pyon_typeCheckAnfModule :: PyPtr -> PyPtr -> IO PyPtr
 
-pyon_typeCheckAnfModule _self mod = rethrowExceptionsInPython $ do
+pyon_typeCheckAnfModule _self mod = rethrowExceptionsInPython 
   expectHsObject mod
   m <- fromHsObject' mod
   Anf.typeCheckModule m
   pyNone
 
-{-
 foreign export ccall pyon_specializeSystemFModule :: PyPtr -> PyPtr -> IO PyPtr
 
 pyon_specializeSystemFModule _self mod = rethrowExceptionsInPython $ do
@@ -429,11 +426,18 @@ pyon_flattenModule _self mod = rethrowExceptionsInPython $ do
   
   newHsObject =<< Pyon.SystemF.NewFlatten.GenCore.flatten tc_mod
 
+foreign export ccall pyon_lower :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_lower _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  newHsObject =<< Lowering.lower m
+
 foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 
 pyon_printModule _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
-  doAny [print_untyped mod, print_systemF mod, print_anf mod, print_fail]
+  doAny [print_untyped mod, print_systemF mod, print_lowLevel mod, print_fail]
   pyNone
   where
     doAny (m:ms) = do
@@ -454,12 +458,12 @@ pyon_printModule _self mod = rethrowExceptionsInPython $ do
         Nothing -> return False
         Just mod -> do print $ SystemF.pprModule mod
                        return True
-    
-    print_anf mod = do
+
+    print_lowLevel mod = do
       m <- fromHsObject mod
       case m of
         Nothing -> return False
-        Just mod -> do print $ Anf.pprModule mod
+        Just mod -> do print $ LowLevel.pprModule mod
                        return True
 
     print_fail =

@@ -13,17 +13,19 @@ import Gluon.Core.Module
 import Gluon.Parser.Driver
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.SystemF.Builtins
-import Pyon.Anf.Builtins
--- import qualified Pyon.SystemF.SpclBuiltins
-
--- Not used, but included for debugging to make sure it's compiled
-import Pyon.NewCore.Syntax()
+import qualified Pyon.LowLevel.Syntax as LowLevel
 
 the_varIdentSupply :: MVar (Supply (Ident Var))
+{-# NOINLINE the_varIdentSupply #-}
 the_varIdentSupply = unsafePerformIO $ newMVar =<< newIdentSupply
 
 the_conIdentSupply :: MVar (Supply (Ident Con))
+{-# NOINLINE the_conIdentSupply #-}
 the_conIdentSupply = unsafePerformIO $ newMVar =<< newIdentSupply
+
+the_llVarIdentSupply :: MVar (Supply (Ident LowLevel.Var))
+{-# NOINLINE the_llVarIdentSupply #-}
+the_llVarIdentSupply = unsafePerformIO $ newMVar =<< newIdentSupply
 
 -- | The Gluon builtin module.  This starts out empty, and is written
 -- when the module is loaded.
@@ -35,6 +37,9 @@ withTheVarIdentSupply f = withMVar the_varIdentSupply f
 
 withTheConIdentSupply :: (Supply (Ident Con) -> IO a) -> IO a
 withTheConIdentSupply f = withMVar the_conIdentSupply f
+
+withTheLLVarIdentSupply :: (Supply (Ident LowLevel.Var) -> IO a) -> IO a
+withTheLLVarIdentSupply f = withMVar the_llVarIdentSupply f
 
 getNextVarIdent :: IO (Ident Var)
 getNextVarIdent = supplyValue =<< readMVar the_varIdentSupply
@@ -70,7 +75,6 @@ loadBuiltins = do
       case result of
         Just bi -> do putMVar the_builtinModule bi
                       Just pbi <- loadPyonBuiltins varIDs conIDs bi
-                      _ <- loadAnfBuiltins varIDs conIDs bi
                       -- _ <- Pyon.SystemF.SpclBuiltins.loadPyonBuiltins varIDs conIDs bi
                       return ()
         Nothing -> fail "Could not load builtins"

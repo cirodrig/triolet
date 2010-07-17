@@ -42,8 +42,11 @@ def tryCompile(fname, show_traceback = False):
 	print "Specialized"
         untyped.printModule(test_inf)
         untyped.typeCheckModule(test_inf)
-        untyped.flattenModule(test_inf)
+        flat = untyped.flattenModule(test_inf)
 
+	low_level = untyped.lower(flat)
+	print "Low-level"
+	untyped.printModule(low_level)
 
         # test_sf = type_inference.inferTypes(test_anf)
 

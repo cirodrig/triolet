@@ -139,7 +139,7 @@ pprCExp exp =
 pprCAlt :: RCAlt -> Doc
 pprCAlt alt =
   let con_doc = text $ showLabel $ conName $ caltConstructor alt
-      ty_args = map pprCExp $ caltTyArgs alt
+      ty_args = map pprType $ caltTyArgs alt
       params  = map pprParam $ caltParams alt
       body    = pprCExp $ caltBody alt
   in hang (con_doc <+> fsep (ty_args ++ params) <> text ".") 4 body

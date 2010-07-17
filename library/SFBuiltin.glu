@@ -295,3 +295,10 @@ constant fun_store_NoneType : NoneType -> NoneType;
 constant fun_load_int : int -> int;
 constant fun_load_float : float -> float;
 constant fun_load_NoneType : NoneType -> NoneType;
+
+
+{- Constructors inserted during lowering.  They do not have types.
+-}
+
+constant prim_copy_int : int;
+constant prim_free : int;

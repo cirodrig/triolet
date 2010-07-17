@@ -63,6 +63,8 @@ module Pyon.SystemF.Builtins
         the_fun_store_float,
         the_fun_load_int,
         the_fun_load_float,
+        the_prim_copy_int,
+        the_prim_free,
         getPyonTupleType, getPyonTupleType',
         getPyonTupleCon, getPyonTupleCon',
         getPyonTuplePassConv, getPyonTuplePassConv',

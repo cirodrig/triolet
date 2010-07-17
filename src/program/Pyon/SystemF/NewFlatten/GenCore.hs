@@ -1395,13 +1395,11 @@ flattenCase expression scr alts = do
           CAlt alt_info con ty_args params (flattenedExp body)
 
 flattenAlt :: SourcePos -> Effect.AltOf Effect.EI Effect.EI
-           -> EffEnv ((Con, [RCExp], [CBind CParam Rec]), FlatExp)
+           -> EffEnv ((Con, [RCType], [CBind CParam Rec]), FlatExp)
 flattenAlt pos alt = do
   -- Convert type arguments
   let ty_arg_info = mkSynInfo pos TypeLevel
-  let ty_args = map (ValCE ty_arg_info . TypeV) $
-                map convertType $
-                Effect.eialtTyArgs alt
+  let ty_args = map convertType $ Effect.eialtTyArgs alt
 
   -- Convert parameters and body
   withMany convertParameter (Effect.eialtParams alt) $ \params -> do

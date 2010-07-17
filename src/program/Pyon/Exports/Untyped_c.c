@@ -416,11 +416,10 @@ static PyMethodDef untyped_methods[] = {
   {"typeInferModule", pyon_typeInferModule, METH_O,
    "Perform type inference on an untyped module, generating a System F\n"
    " module."},
+  {"lower", pyon_lower, METH_O,
+   "Lower a module to a load-store program representation"},
   {"typeCheckModule", pyon_typeCheckSystemFModule, METH_O,
    "Perform type checking on a System F module.  If checking fails, an\n"
-   "exception will be raised."},
-  {"typeCheckAnfModule", pyon_typeCheckAnfModule, METH_O,
-   "Perform type checking on an Anf module.  If checking fails, an\n"
    "exception will be raised."},
   {NULL, NULL, 0, NULL}
 };

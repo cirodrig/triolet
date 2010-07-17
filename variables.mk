@@ -62,26 +62,23 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/SystemF/NewFlatten/PassConv.hs \
 	Pyon/SystemF/NewFlatten/SetupEffect.hs \
 	Pyon/SystemF/NewFlatten/GenCore.hs \
-	Pyon/Anf/Syntax.hs \
-	Pyon/Anf/Print.hs \
-	Pyon/Anf/Rename.hs \
-	Pyon/Anf/Typecheck.hs \
 	Pyon/Core/Syntax.hs \
 	Pyon/Core/Print.hs \
 	Pyon/Core/Gluon.hs \
-	Pyon/NewCore/Optimizations.hs \
-	Pyon/NewCore/Print.hs \
-	Pyon/NewCore/Rename.hs \
-	Pyon/NewCore/Syntax.hs
+	Pyon/Core/Lowering.hs \
+	Pyon/LowLevel/Build.hs \
+	Pyon/LowLevel/Syntax.hs \
+	Pyon/LowLevel/Print.hs \
+	Pyon/LowLevel/Record.hs \
+	Pyon/LowLevel/Types.hs
 PYON_TH_HS_SRCS=Pyon/SystemF/Builtins.hs \
 	Pyon/SystemF/BuiltinsTH.hs \
 	Pyon/Exports/Untyped.hs \
 	Pyon/Untyped/Builtins.hs \
 	Pyon/Untyped/BuiltinsTH.hs \
-	Pyon/Untyped/InitializeBuiltins.hs \
-	Pyon/Anf/BuiltinsTH.hs \
-	Pyon/Anf/Builtins.hs
-PYON_HS_BOOT_SRCS=Pyon/Untyped/Syntax.hs-boot
+	Pyon/Untyped/InitializeBuiltins.hs
+PYON_HS_BOOT_SRCS=Pyon/Untyped/Syntax.hs-boot \
+	Pyon/LowLevel/Syntax.hs-boot
 
 PYON_HS_GENERATED_SRCS=Paths_pyon.hs \
 	PythonInterface/Python.hs \

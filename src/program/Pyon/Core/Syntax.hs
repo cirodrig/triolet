@@ -67,6 +67,9 @@ data CBind t s = !(t s) ::: RecCType s
 fromCBind :: CBind t s -> t s
 fromCBind (x ::: _) = x
 
+mapCBind :: (t s -> t' s) -> CBind t s -> CBind t' s
+mapCBind f (x ::: t) = f x ::: t
+
 cbindType :: CBind t s -> RecCType s
 cbindType (_ ::: t) = t
 
@@ -212,6 +215,9 @@ data instance CFunTypeOf Rec s =
     { ctReturn :: !(CBind CReturnT s)
     }
 
+varCT :: Var -> RCType
+varCT v = ExpCT (mkInternalVarE v)
+
 expCT :: RecExp s -> CType s
 expCT e = ExpCT e
 
@@ -226,6 +232,7 @@ appCT op args =
 
 unpackConAppCT :: RCType -> Maybe (Con, [RCType])
 unpackConAppCT (AppCT (ExpCT (ConE {expCon = c})) args) = Just (c, args)
+unpackConAppCT (ExpCT (ConE {expCon = c})) = Just (c, [])
 unpackConAppCT _ = Nothing
 
 funCT :: RecCFunType s -> CType s
@@ -286,7 +293,7 @@ data instance CAltOf Rec s =
   CAlt
   { caltInfo :: !SynInfo
   , caltConstructor :: !Con
-  , caltTyArgs :: [RecCExp s]
+  , caltTyArgs :: [RecCType s]
   , caltParams :: [CBind CParam s]
   , caltBody :: RecCExp s
   }
@@ -306,6 +313,60 @@ data CDef s = CDef !Var !(RecCFun s)
 instance HasSourcePos (CExp s) where
   getSourcePos e = getSourcePos $ cexpInfo e
   setSourcePos e p = e {cexpInfo = setSourcePos (cexpInfo e) p}
+
+-------------------------------------------------------------------------------
+
+cTypeMentions :: RCType -> Var -> Bool
+cTypeMentions ty v =
+  case ty
+  of ExpCT val -> val `mentions` v
+     AppCT op args -> op `cTypeMentions` v || any (`cTypeMentions` v) args
+     FunCT ft -> ft `cFunTypeMentions` v
+
+cFunTypeMentions :: RCFunType -> Var -> Bool
+cFunTypeMentions ty v =
+  case ty
+  of ArrCT param eff rng ->
+       cbindType param `cTypeMentions` v ||
+       eff `cTypeMentions` v ||
+       rng `cFunTypeMentions` v
+     RetCT (ReadRT addr ::: ret_type) ->
+       addr `mentions` v || ret_type `cTypeMentions` v
+     RetCT (_ ::: ret_type) ->
+       ret_type `cTypeMentions` v
+
+cFunType :: RCFun -> RCFunType
+cFunType fun = build_type (cfunParams fun) (cfunEffect fun) (cfunReturn fun)
+  where
+    build_type ((param ::: ptype) : params) eff ret =
+      ArrCT (param_type ::: ptype) effect_type ret_type
+      where
+        param_type =
+          case param
+          of ValP v
+               -- If this parameter is used as a dependent type then make 
+               -- a dependent type
+               | range_mentions v params eff ret -> ValPT (Just v)
+               | otherwise -> ValPT Nothing
+             OwnP _ -> OwnPT
+             ReadP a _ -> ReadPT a
+
+        effect_type = if null params then eff else empty_effect
+        ret_type = if null params
+                   then RetCT $ mapCBind returnType $ cfunReturn fun
+                   else build_type params eff ret
+
+    range_mentions v params eff ret =
+      any (param_mentions v) params ||
+      eff `cTypeMentions` v ||
+      ret_mentions v ret
+      
+    param_mentions v (_ ::: param_type) = param_type `cTypeMentions` v
+    ret_mentions v (ReadR addr _ ::: ret_type) =
+      addr `mentions` v || ret_type `cTypeMentions` v
+    ret_mentions v (_ ::: ret_type) = ret_type `cTypeMentions` v
+
+    empty_effect = expCT Gluon.Core.Builtins.Effect.empty
 
 -------------------------------------------------------------------------------
 -- Renaming

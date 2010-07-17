@@ -110,11 +110,17 @@ pyonBuiltinFunctions =
   , "fun_zip_SN"
   , "fun_iota"
   , "fun_undefined"
+
+    -- Functions inserted by effect inference
   , "fun_copy"
   , "fun_store_int"
   , "fun_store_float"
   , "fun_load_int"
   , "fun_load_float"
+
+    -- Primitive functions inserted during lowering
+  , "prim_copy_int"
+  , "prim_free"
   ]
 
 pyonBuiltinConstructors =
