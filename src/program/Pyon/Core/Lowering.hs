@@ -500,8 +500,8 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
     
     -- Create a local memory area
     alloc p = do
-      -- Compute the size of local data
-      size <- withSizeOf bind_type
+      -- Get the local data's parameter passing convention
+      pass_conv <- getPassConv bind_type
       
       -- The expression will bind a pointer
       convertVar p (Right var_type) $ \p' -> do
@@ -512,12 +512,12 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
         -- initialize the memory, and runs the body to use it.  The RHS
         -- doesn't return a value.
         let make_expression = do
-              size_value <- size
+              pass_conv_value <- pass_conv
               ContT $ \k -> do
                 -- Generate code.
                 -- The RHS stores into memory; it returns nothing.
                 e <- runContT (bindAtom0 =<< asAtom rhs') $ \_ -> toExp body'
-                k $ LL.AllocA p' size_value e
+                k $ LL.AllocA p' pass_conv_value e
               
 
         return $ atom (expType body') make_expression

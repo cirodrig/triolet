@@ -67,8 +67,8 @@ data Atom =
   | PackA !StaticRecord [Val]
     -- | Unpack a statically typed record value.
   | UnpackA !StaticRecord Val
-    -- | Allocate some bytes of local storage.  The value, which must be
-    -- a native unsigned integer, is the number of bytes to allocate.
+    -- | Allocate some bytes of local storage.  The given value is the
+    -- parameter-passing convention of the object to allocate.
     -- The storage is live for the duration of the expression.
   | AllocA !ParamVar Val Exp
     -- | Branch based on a Boolean or integer value
