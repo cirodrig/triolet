@@ -1,4 +1,6 @@
-{-| This pass eliminates record value types from functions.
+{-| This pass eliminates record value types from functions, by converting
+--  record types to multiple-value-passing.
+--
 -- Record-typed variables are converted to multiple variables.
 -- Record types in parameters or returns are unpacked to multiple parameters 
 -- or return values.
@@ -23,19 +25,31 @@ import Pyon.Globals
 
 -- | During flattening, each variable is associated with its equivalent
 -- flattened list of variables.
-type Expansion = IntMap.IntMap [Var]
+type Expansion = IntMap.IntMap [Val]
 
--- | Expand a use of variable into a list of its fields.
-expand :: Expansion -> Var -> [Var]
-expand m v = exp v
+-- | Expand a use of variable into a list of values.
+expand :: Expansion -> Var -> [Val]
+expand m v = expand_var v
   where
-    -- | Expand a variable.  If the expansion is not the variable itself,
-    -- then expand recursively.
-    exp v =
+    -- Expand a variable, recursively.
+    expand_var v =
       case IntMap.lookup (fromIdent $ varID v) m
-      of Just vs | vs /= [v] -> concatMap exp vs
-                 | otherwise -> vs
+      of Just vs -> concatMap (expand_value_from v) vs
          Nothing -> internalError "expand: No information for variable"
+        
+    -- Expand a value that was created from 'v'.  If the variable doesn't 
+    -- expand to itself, then expand recursively.  (It's necessary to check 
+    -- for expanding-to-itself to avoid an infinite loop.)
+    expand_value_from v value =
+      case value
+      of VarV v' | v /= v' -> expand_var v'
+
+         -- A variable never expands to a record type or lambda function
+         LamV {} -> internalError "expand: Unexpected lambda function"
+         RecV {} -> internalError "expand: Unexpected record type"
+         
+         -- Other values require no further expansion
+         _ -> [value]
 
 -------------------------------------------------------------------------------
          
@@ -48,14 +62,14 @@ data RFEnv = RFEnv { rfVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
 instance Supplies RF (Ident Var) where
   fresh = RF $ ReaderT $ \env -> supplyValue $ rfVarSupply env
 
-assign :: Var -> [Var] -> RF a -> RF a
+assign :: Var -> [Val] -> RF a -> RF a
 assign v expansion m = RF $ local (insert_assignment v expansion) $ runRF m
   where
     insert_assignment v expansion env =
       env {rfExpansions = IntMap.insert (fromIdent $ varID v) expansion $
                           rfExpansions env}
 
-expandVar :: Var -> RF [Var]
+expandVar :: Var -> RF [Val]
 expandVar v = RF $ asks get_expansion
   where
     get_expansion env =
@@ -70,13 +84,17 @@ defineParam v k = do
   expanded_var <-
     case varType v
     of PrimType UnitType -> return []
-       PrimType t        -> return [v]        -- No change
+       PrimType t        -> return [v] -- No change
        RecordType rec    -> defineRecord rec
-  assign v expanded_var $ k expanded_var
+  assign v (map VarV expanded_var) $ k expanded_var
        
 -- | Define a list of parameter variables
 defineParams :: [ParamVar] -> ([ParamVar] -> RF a) -> RF a
 defineParams vs k = withMany defineParam vs $ k . concat
+
+-- | Count the number of expanded values a record field constitutes
+expandedFieldSize :: StaticField -> Int
+expandedFieldSize f = length $ flattenFieldType $ fieldType f
 
 -- | Create a new parameter variable for each expanded record field
 defineRecord :: StaticRecord -> RF [ParamVar]
@@ -96,14 +114,11 @@ flattenType (RecordType rt) = flattenRecordType rt
 
 flattenRecordType :: StaticRecord -> [PrimType]
 flattenRecordType rt =
-  concatMap flattenField $ map fieldType $ recordFields rt
-  where
-    flattenField (PrimField UnitType) = []
+  concatMap flattenFieldType $ map fieldType $ recordFields rt
     
-    flattenField (PrimField pt) = [pt]
-
-    flattenField (RecordField _ record_type) =
-      flattenRecordType record_type
+flattenFieldType (PrimField UnitType) = []
+flattenFieldType (PrimField pt) = [pt]
+flattenFieldType (RecordField _ record_type) = flattenRecordType record_type
 
 flattenValList :: [Val] -> RF [Val]
 flattenValList vs = liftM concat $ mapM flattenVal vs
@@ -111,7 +126,7 @@ flattenValList vs = liftM concat $ mapM flattenVal vs
 flattenVal :: Val -> RF [Val]
 flattenVal value =
   case value
-  of VarV v -> liftM (map VarV) $ expandVar v
+  of VarV v -> expandVar v
      RecV _ vals -> liftM concat $ mapM flattenVal vals
      ConV _ -> return [value]
      LitV UnitL -> return []
@@ -151,25 +166,73 @@ flattenAtom atom =
       block' <- flattenBlock block
       return (lit, block')
 
-flattenStm :: Stm -> (Stm -> RF a) -> RF a
+-- | Convert a flattened value list to one that doesn't contain any lambda 
+--   functions, by assigning lambda functions to temporary variables.  The
+--   returned list contains variables in place of lambda functions.
+bindLambdas :: [Val] -> RF ([Stm], [Val])
+bindLambdas values = do
+  (bindings, new_values) <- mapAndUnzipM bind_lambda values
+  return (concat bindings, new_values)
+  where
+    bind_lambda value =
+      case value
+      of VarV _ -> no_change
+         RecV _ _ ->
+           -- We were given a value that wasn't flattened
+           internalError "bindLambdas"
+         ConV _ -> no_change
+         LitV _ -> no_change
+         LamV f -> do
+           -- Assign the lambda function to a variable
+           fun_var <- newAnonymousVar (PrimType OwnedType)
+           return ([LetE [fun_var] $ ValA [value]], VarV fun_var)
+      where
+        no_change = return ([], value)
+
+flattenStm :: Stm -> ([Stm] -> RF a) -> RF a
 flattenStm statement k =
   case statement
-  of LetE vs atom -> do
+  of LetE [v] (PackA _ vals) -> do
+       -- Copy-propagate the values by assigning them directly to 'v'
+       -- in the expansion mapping
+       vals' <- flattenValList vals
+       (lambda_bindings, vals'') <- bindLambdas vals'
+       assign v vals'' $ k lambda_bindings
+     LetE vs (UnpackA record val) -> do
+       -- Copy-propagate the values by assigning them directly to each of 'vs'
+       -- in the expansion mapping
+       let expanded_vs_sizes = map expandedFieldSize $ recordFields record
+       vals <- flattenVal val
+       assign_variables vs expanded_vs_sizes vals
+     LetE vs atom -> do
        atom' <- flattenAtom atom
-       defineParams vs $ \vs' -> k $ LetE vs' atom'
+       defineParams vs $ \vs' -> k [LetE vs' atom']
      LetrecE defs ->
        defineParams [v | FunDef v _ <- defs] $ \_ -> do
-         k . LetrecE =<< mapM flatten_def defs
+         defs' <- mapM flatten_def defs
+         k [LetrecE defs']
   where
     flatten_def (FunDef v f) = do
       f' <- flattenFun f
       return $ FunDef v f'
 
+    assign_variables (v:vs) (size:sizes) values = do
+      -- Take the values that will be assigned to 'v'
+      let (v_values, values') = splitAt size values
+      unless (length v_values == size) unpack_size_mismatch
+      assign v v_values $ assign_variables vs sizes values'
+    
+    assign_variables [] [] [] = k []
+    assign_variables [] [] _ = unpack_size_mismatch
+
+    unpack_size_mismatch =
+      internalError "flattenStm: Record size mismatch when unpacking parameters"
+
 flattenBlock :: Block -> RF Block
 flattenBlock (Block stms atom) =
   withMany flattenStm stms $ \stms' -> do
     atom' <- flattenAtom atom
-    return $ Block stms' atom'
+    return $ Block (concat stms') atom'
 
 flattenFun :: Fun -> RF Fun
 flattenFun (Fun params returns body) =
