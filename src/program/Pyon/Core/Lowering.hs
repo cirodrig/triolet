@@ -4,7 +4,7 @@ module Pyon.Core.Lowering(lower)
 where
 
 import Control.Monad
-import Control.Monad.Cont
+import Control.Monad.Writer
 import Control.Monad.Reader
 import Control.Monad.ST
 import qualified Data.IntMap as IntMap
@@ -43,9 +43,9 @@ runFreshVarM (FreshVarM f) = Cvt $ ReaderT $ \env ->
 -- for the data type.  It's not necessary to apply dependent type
 -- parameters to compute the right type; consequently, variables
 -- in the type expression are simply ignored.
-data CvExp = Cv !CvType !CvExp'
+data CvExp = Cv ![CvType] !CvExp'
 
-expType :: CvExp -> CvType
+expType :: CvExp -> [CvType]
 expType (Cv t _) = t
 
 -- | A converted type is either a value or the core type.  Functions always
@@ -80,7 +80,7 @@ data CvExp' =
     -- | An expression.
     -- The expression is represented differently depending on
     -- whether it's in tail position.
-  | CvExp !(BuildExp LL.Atom)
+  | CvExp !(BuildBlock LL.Atom)
 
 type Tail = LL.Atom -> MakeExp
 type Head = Tail -> MakeExp
@@ -182,45 +182,34 @@ getPassConvEnvironment = do
 type MkExp = Cvt CvExp
 
 value :: CvType -> LL.Val -> CvExp
-value ty v = Cv ty $ CvVal v
+value ty v = Cv [ty] $ CvVal v
 
-atom :: CvType -> BuildExp LL.Atom -> CvExp
+atom :: [CvType] -> BuildBlock LL.Atom -> CvExp
 atom ty hd = Cv ty $ CvExp hd
 
-asVal :: CvExp -> BuildExp LL.Val
+asVal :: CvExp -> BuildBlock LL.Val
 asVal (Cv ty x) =
   case x
   of CvVal val  -> return val
      CvExp hd -> asLet ty hd
 
-toExp :: CvExp -> FreshVarM LL.Exp
-toExp (Cv _ x) =
-  case x
-  of CvVal val -> return $ LL.ReturnE (LL.ValA val)
-     CvExp hd -> runContT hd (return . LL.ReturnE)
+toBlock :: CvExp -> FreshVarM LL.Block
+toBlock e = execBuild $ asAtom e
 
-asAtom :: CvExp -> BuildExp LL.Atom
+asAtom :: CvExp -> BuildBlock LL.Atom
 asAtom (Cv _ x) =
   case x
-  of CvVal val -> return $ LL.ValA val
+  of CvVal val -> return $ LL.ValA [val]
      CvExp hd -> hd
 
 -- | Bind the single result of a piece of code to a variable.
-asLet :: CvType                 -- ^ Type of result
-      -> BuildExp LL.Atom       -- ^ Code whose result should be bound
-      -> BuildExp LL.Val        -- ^ Code with result bound to a variable
-asLet ty hd = ContT $ \k -> do
-       -- Assign the result to a temporary variable
-       tmpvar <- LL.newAnonymousVar (valueType ty)
-       
-       -- Generate the consumer expression
-       expr <- k (LL.VarV tmpvar)
-       
-       -- Prepend a producer expression
-       runContT hd $ \atom -> return $ LL.LetE [tmpvar] atom expr
+asLet :: [CvType]                 -- ^ Type of result
+      -> BuildBlock LL.Atom       -- ^ Code whose result should be bound
+      -> BuildBlock LL.Val        -- ^ Code with result bound to a variable
+asLet [ty] hd = hd >>= emitAtom1 (valueType ty)
   
 -- | Generate code to compute the size of a data type
-withSizeOf :: RCType -> Cvt (BuildExp LL.Val)
+withSizeOf :: RCType -> Cvt (BuildBlock LL.Val)
 withSizeOf ty = liftM get_size $ getPassConv ty
   where
     get_size pass_conv = do
@@ -231,7 +220,7 @@ withSizeOf ty = liftM get_size $ getPassConv ty
       liftM LL.VarV $ selectField passConvRecord 0 pc_var
 
 -- | Generate code to compute the field information of a data type
-fieldOf :: RCType -> Cvt (BuildExp DynamicFieldType)
+fieldOf :: RCType -> Cvt (BuildBlock DynamicFieldType)
 fieldOf ty = 
   case unpackConAppCT ty
   of Just (con, args)
@@ -248,7 +237,7 @@ fieldOf ty =
 
 -- | Generate code to compute the record layout of a data constructor with
 --   the given type arguments.
-recordLayoutOf :: Con -> [RCType] -> Cvt (BuildExp DynamicRecord)
+recordLayoutOf :: Con -> [RCType] -> Cvt (BuildBlock DynamicRecord)
 recordLayoutOf datacon type_args
   | datacon == getPyonTupleCon' 2 =
       liftM tupleRecordLayout $ mapM fieldOf type_args
@@ -282,7 +271,7 @@ lookupPassConv ty = do
     find_type _ [] = return Nothing
 
 -- | Compute and return a parameter-passing convention variable
-getPassConv :: RCType -> Cvt (BuildExp LL.Val)
+getPassConv :: RCType -> Cvt (BuildBlock LL.Val)
 getPassConv ty = do
   -- See if one is already available
   mpcvar <- lookupPassConv ty 
@@ -373,6 +362,18 @@ lookupConstructorType c =
 
 -------------------------------------------------------------------------------
 
+loweredReturnType' (param ::: return_type) =
+  loweredReturnType (returnType param ::: return_type)
+
+-- Lower a return type.
+-- Write-return functions don't return anything (they take an extra parameter
+-- that they write into).
+-- Other functions return a value.
+loweredReturnType rbinder@(param ::: return_type) =
+  case param
+  of WriteRT -> []
+     _ -> [Right rbinder]
+
 convertExp :: RCExp -> Cvt CvExp
 convertExp expression =
   case expression
@@ -418,7 +419,9 @@ convertExp expression =
 convertApp op args rarg = do
   -- Convert operator
   op' <- convertExp op
-  let op_type = expType op'
+  let op_type = case expType op'
+                of [t] -> t
+                   _ -> internalError "convertApp"
       
   -- Convert operands
   args' <- mapM convertExp args
@@ -439,7 +442,7 @@ convertApp op args rarg = do
 
 -- | Compute the return type after applying a function to some number of 
 -- parameters.
-applyFunctionType :: CvType -> [RCExp] -> Cvt CvType
+applyFunctionType :: CvType -> [RCExp] -> Cvt [CvType]
 applyFunctionType _ [] = internalError "applyFunctionType"
 applyFunctionType (Left _) _ = internalError "applyFunctionType"
 applyFunctionType (Right (_ ::: op_type)) args =
@@ -472,10 +475,11 @@ applyFunctionType (Right (_ ::: op_type)) args =
                   , ctEffect = substFully eff
                   , ctRange = substFully rng
                   }
-      in return $ Right (OwnRT ::: FunCT subst_type)
+      in return [Right (OwnRT ::: FunCT subst_type)]
 
     go (RetCT {ctReturn = ret}) [] =
-      return $ Right (substituteCBind substituteCReturnT substFully ret)
+      return $ loweredReturnType $
+      substituteCBind substituteCReturnT substFully ret
     
     -- Excess arguments: this function should return a function.  Call the
     -- returned function with the remaining arguments.
@@ -513,12 +517,12 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
         -- doesn't return a value.
         let make_expression = do
               pass_conv_value <- pass_conv
-              ContT $ \k -> do
+              let body_type = map valueType $ expType body'
+              allocateLocalObject p' pass_conv_value body_type $ do
                 -- Generate code.
                 -- The RHS stores into memory; it returns nothing.
-                e <- runContT (bindAtom0 =<< asAtom rhs') $ \_ -> toExp body'
-                k $ LL.AllocA p' pass_conv_value e
-              
+                asAtom rhs' >>= bindAtom0
+                asAtom body'
 
         return $ atom (expType body') make_expression
 
@@ -528,11 +532,9 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
       convertVar v (Right var_type) $ \v' -> add_to_env $ do
         body' <- convertExp body
         
-        let make_expression = ContT $ \k -> do
-              body_exp <- runContT (asAtom body') k
-              runContT (asAtom rhs') $ \atom -> 
-                return . LL.LetE [v'] atom =<< runContT (asAtom body') k
-                -- withContT (return . LL.LetE [v'] atom)
+        let make_expression = do
+              asAtom rhs' >>= bindAtom1 v'
+              asAtom body'
               
         return $ atom (expType body') make_expression
       where
@@ -543,25 +545,26 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
 
 convertLetrec defs body =
   convertDefGroup defs $ \defs' -> do
-    -- Convert body expression
     body' <- convertExp body
     
     -- Insert a 'letrec' before the body
-    let insert_letrec = mapContT (fmap $ LL.LetrecE defs') $ asAtom body'
+    let insert_letrec = do
+          tell [LL.LetrecE defs']
+          asAtom body'
     return $ atom (expType body') insert_letrec
 
 -- TODO: generalize this to arbitrary data types
 convertCase scrutinee alternatives = do
   scr' <- convertExp scrutinee
   case expType scr' of
-    Right (ValRT ::: ty) ->
+    [Right (ValRT ::: ty)] ->
       case unpackConAppCT ty
       of Just (con, args)
            | con `isPyonBuiltin` the_bool ->
                convertBoolCase scr' alternatives
            | otherwise -> unknown_constructor con
          _ -> invalid_type
-    Right (ReadRT _ ::: ty) ->
+    [Right (ReadRT _ ::: ty)] ->
       case unpackConAppCT ty
       of Just (con, args)
            | con == getPyonTupleType' 2 ->
@@ -580,10 +583,9 @@ convertBoolCase scr alternatives = do
   
   let make_expr = do
         scr_val <- asVal scr
-        ContT $ \k -> do
-          tr <- toExp true_alt
-          fa <- toExp false_alt
-          k $ LL.SwitchA scr_val [(LL.BoolL True, tr), (LL.BoolL False, fa)]
+        tr <- getBlock $ asAtom true_alt
+        fa <- getBlock $ asAtom false_alt
+        return (LL.SwitchA scr_val [(LL.BoolL True, tr), (LL.BoolL False, fa)])
   return $ atom (expType true_alt) make_expr
   where
     (true_alternative, false_alternative) =
@@ -609,7 +611,7 @@ convertTuple2Case scr alternatives = do
 -- | Convert a case alternative, for a case statement that involves
 -- a pass-by-reference data type.
 convertRefAlternative :: RCAlt
-                      -> Cvt (LL.Lit, CvType, LL.Val -> BuildExp LL.Atom)
+                      -> Cvt (LL.Lit, [CvType], LL.Val -> BuildBlock LL.Atom)
 convertRefAlternative alt = do
   -- Get the alternative's data layout
   layout <- recordLayoutOf (caltConstructor alt) (caltTyArgs alt)
@@ -630,19 +632,18 @@ convertFun fun =
   withMany convertParameter (cfunParams fun) $ \params ->
   convert_return (cfunReturn fun) $ \ret_param -> do
     let param_list = params ++ maybeToList ret_param
-    let return_type = valueType $ Right $ mapCBind returnType $ cfunReturn fun
+    let return_type = map valueType $ loweredReturnType' $ cfunReturn fun
     body' <- convertExp $ cfunBody fun
-    body_exp <- runFreshVarM $ toExp body'
+    body_exp <- runFreshVarM $ toBlock body'
     return $ LL.Fun param_list return_type body_exp
   where
-    -- Convert a write-return parameter to an actual pointer parameter.  The
-    -- pointer parameter does not have a core type.
+    -- Convert a write-return parameter to an actual pointer parameter
     convert_return (param ::: return_type) k =
       case param
       of ValR -> k Nothing
          OwnR -> k Nothing
          WriteR _ p -> convertVar p (Left $ LL.PrimType PointerType) $ k . Just
-         ReadR _ p -> k Nothing
+         ReadR _ _ -> k Nothing
 
 convertParameter (param ::: param_type) k =
   case param
@@ -654,7 +655,7 @@ convertParameter (param ::: param_type) k =
        let return_type = ReadRT (mkInternalVarE a) ::: param_type
        in assumePure a addressType $ convertVar p (Right return_type) k
 
-convertDefGroup :: [CDef Rec] -> ([LL.Def] -> Cvt a) -> Cvt a
+convertDefGroup :: [CDef Rec] -> ([LL.FunDef] -> Cvt a) -> Cvt a
 convertDefGroup defgroup k = 
   -- First rename all functions
   withMany convert_function_name defgroup $ \fvars -> do
@@ -662,13 +663,17 @@ convertDefGroup defgroup k =
     funs <- mapM convertFun [f | CDef _ f <- defgroup]
     
     -- Run continuation
-    let defs = zip fvars funs
+    let defs = zipWith LL.FunDef fvars funs
     k defs
   where
     convert_function_name (CDef v f) k =
       convertVar v (Right $ OwnRT ::: FunCT (cFunType f)) k
 
-convertModule defss = convertDefGroup (concat defss) (return . LL.Module)
+convertModule defss = do 
+  convertDefGroup (concat defss) $ \defs ->
+    return $ LL.Module { LL.moduleFunctions = defs
+                       , LL.moduleData = []
+                       }
 
 lower :: [[CDef Rec]] -> IO LL.Module
 lower defss =

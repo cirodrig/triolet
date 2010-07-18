@@ -121,6 +121,7 @@ pyonBuiltinFunctions =
     -- Primitive functions inserted during lowering
   , "prim_copy_int"
   , "prim_free"
+  , "prim_alloc"
   ]
 
 pyonBuiltinConstructors =

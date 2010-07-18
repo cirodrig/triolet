@@ -302,3 +302,4 @@ constant fun_load_NoneType : NoneType -> NoneType;
 
 constant prim_copy_int : int;
 constant prim_free : int;
+constant prim_alloc : int;

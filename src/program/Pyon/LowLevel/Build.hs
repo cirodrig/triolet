@@ -3,7 +3,7 @@
 module Pyon.LowLevel.Build where
 
 import Control.Monad
-import Control.Monad.Cont
+import Control.Monad.Writer
 import Control.Monad.ST
 
 import Gluon.Common.Error
@@ -17,8 +17,18 @@ import Pyon.LowLevel.Record
 
 newtype FreshVarM a = FreshVarM (forall st. IdentSupply Var -> ST st a)
 
-type MakeExp = FreshVarM Exp
-type BuildExp a = ContT Exp FreshVarM a
+type MakeExp = FreshVarM Stm
+type BuildBlock a = WriterT [Stm] FreshVarM a
+
+execBuild :: BuildBlock Atom -> FreshVarM Block
+execBuild m = do (atom, stms) <- runWriterT m
+                 return $ Block stms atom
+
+-- | Build a block for use in a larger expression
+getBlock :: BuildBlock Atom -> BuildBlock Block
+getBlock m = WriterT $ do
+  block <- execBuild m
+  return (block, [])
 
 instance Functor FreshVarM where
   fmap f (FreshVarM g) = FreshVarM (\supply -> fmap f (g supply))
@@ -38,21 +48,20 @@ instance Supplies FreshVarM (Ident Var) where
 -- Generating primops
 
 -- | Generate an instruction that has no result value
-emitAtom0 :: Atom -> BuildExp ()
-emitAtom0 atom = do
-  mapContT (fmap $ LetE [] atom) $ return ()
+emitAtom0 :: Atom -> BuildBlock ()
+emitAtom0 atom = tell [LetE [] atom]
 
-emitAtom1 :: ValueType -> Atom -> BuildExp Val
+emitAtom1 :: ValueType -> Atom -> BuildBlock Val
 emitAtom1 ty atom = do
   tmpvar <- lift $ newAnonymousVar ty
-  mapContT (fmap $ LetE [tmpvar] atom) $ return (VarV tmpvar)
+  tell [LetE [tmpvar] atom]
+  return $ VarV tmpvar
 
-bindAtom0 :: Atom -> BuildExp ()
+bindAtom0 :: Atom -> BuildBlock ()
 bindAtom0 = emitAtom0
 
-bindAtom1 :: Var -> Atom -> BuildExp ()
-bindAtom1 var atom = do
-  mapContT (fmap $ LetE [var] atom) $ return ()
+bindAtom1 :: Var -> Atom -> BuildBlock ()
+bindAtom1 var atom = tell [LetE [var] atom]
 
 -- | Generate a binary primitive integer operation
 intBinaryPrimOp :: (Integer -> Integer -> Integer) -- ^ Unlifted operation
@@ -62,7 +71,7 @@ intBinaryPrimOp :: (Integer -> Integer -> Integer) -- ^ Unlifted operation
                 -> ValueType                       -- ^ Type to generate
                 -> Val                             -- ^ Left argument
                 -> Val                             -- ^ Right argument
-                -> BuildExp Val                    -- ^ Result value
+                -> BuildBlock Val                    -- ^ Result value
 intBinaryPrimOp imm_op l_id r_id delayed_op prim_type m n =
   case prim_type
   of PrimType (IntType sign size) ->
@@ -95,6 +104,11 @@ primLoadOff ty ptr off dst = do
   ptr' <- primAddP ptr off 
   primLoad ty ptr' dst
 
+primStore ty ptr val = emitAtom0 $ PrimA (PrimStore ty) [ptr, val]
+primStoreOff ty ptr off val = do
+  ptr' <- primAddP ptr off
+  primStore ty ptr' val
+
 nativeAddUZ = primAddZ (PrimType nativeWordType)
 nativeSubUZ = primSubZ (PrimType nativeWordType)
 nativeModUZ = primModZ (PrimType nativeWordType)
@@ -104,18 +118,21 @@ nativeNegateUZ = primNegateZ (PrimType nativeWordType)
 nativeWordL :: Integral a => a -> Lit
 nativeWordL n = IntL Unsigned nativeIntSize (fromIntegral n)
 
+nativeWordV :: Integral a => a -> Val
+nativeWordV n = LitV $ nativeWordL n
+
 -------------------------------------------------------------------------------
 -- Record operations
 
 -- | Unpack a pass-by-value record
-unpackRecord :: StaticRecord -> Val -> BuildExp [Var]
-unpackRecord rtype val = ContT $ \k -> do
+unpackRecord :: StaticRecord -> Val -> BuildBlock [Var]
+unpackRecord rtype val = do
   -- Create a variable to hold each field value
-  vars <- mapM newFieldVar $ recordFields rtype
+  vars <- lift $ mapM newFieldVar $ recordFields rtype
   
   -- Create an 'unpack' expression
-  exp <- k vars
-  return $ LetE vars (UnpackA rtype val) exp
+  tell [LetE vars $ UnpackA rtype val]
+  return vars
   where
     newFieldVar sfield = 
       case fieldType sfield
@@ -123,7 +140,7 @@ unpackRecord rtype val = ContT $ \k -> do
          BytesField {} -> internalError "unpackRecord"
 
 -- | Select one field of a pass-by-value record
-selectField :: StaticRecord -> Int -> Val -> BuildExp Var
+selectField :: StaticRecord -> Int -> Val -> BuildBlock Var
 selectField ty index val = do
   fields <- unpackRecord ty val
   return $ fields !! index
@@ -131,19 +148,19 @@ selectField ty index val = do
 toDynamicRecord :: StaticRecord -> DynamicRecord
 toDynamicRecord rec = let
   fs = map toDynamicField $ recordFields rec
-  size = LitV $ nativeWordL $ recordSize rec
-  alignment = LitV $ nativeWordL $ recordAlignment rec
+  size = nativeWordV $ recordSize rec
+  alignment = nativeWordV $ recordAlignment rec
   in record fs size alignment
 
 toDynamicField :: StaticField -> DynamicField
 toDynamicField (Field off ty) =
-  Field (LitV $ nativeWordL off) (toDynamicFieldType ty)
+  Field (nativeWordV off) (toDynamicFieldType ty)
 
 toDynamicFieldType :: StaticFieldType -> DynamicFieldType
 toDynamicFieldType (PrimField t) = PrimField t
 toDynamicFieldType (RecordField p rec) = RecordField p $ toDynamicRecord rec
 toDynamicFieldType (BytesField s a) =
-      BytesField (LitV $ nativeWordL s) (LitV $ nativeWordL a)
+      BytesField (nativeWordV s) (nativeWordV a)
 
 dynamicFieldSize :: DynamicField -> Val
 dynamicFieldSize f = dynamicFieldTypeSize $ fieldType f
@@ -154,21 +171,21 @@ dynamicFieldAlignment f = dynamicFieldTypeAlignment $ fieldType f
 dynamicFieldTypeSize :: DynamicFieldType -> Val
 dynamicFieldTypeSize ft =
   case ft
-  of PrimField vt   -> LitV $ nativeWordL $ sizeOf vt
+  of PrimField vt   -> nativeWordV $ sizeOf vt
      RecordField _ r -> recordSize r
      BytesField s _  -> s
 
 dynamicFieldTypeAlignment :: DynamicFieldType -> Val
 dynamicFieldTypeAlignment ft = 
   case ft
-  of PrimField vt   -> LitV $ nativeWordL $ alignOf vt
+  of PrimField vt   -> nativeWordV $ alignOf vt
      RecordField _ r -> recordAlignment r
      BytesField _ a  -> a
 
 -- | Create a dynamic record.  Given the record field types, the offsets of
 -- all fields are computed and returned.  Code is emitted to compute the
 -- offsets.
-createDynamicRecord :: [DynamicFieldType] -> BuildExp DynamicRecord
+createDynamicRecord :: [DynamicFieldType] -> BuildBlock DynamicRecord
 createDynamicRecord field_types = do
   -- Compute record size and field offsets
   (offsets, size, alignment) <- compute_offsets [] zero one field_types
@@ -177,8 +194,8 @@ createDynamicRecord field_types = do
   let fields = zipWith Field offsets field_types
   return $ record fields size alignment
   where
-    zero = LitV $ nativeWordL 0
-    one = LitV $ nativeWordL 1
+    zero = nativeWordV 0
+    one = nativeWordV 1
 
     -- Compute offsets of one structure field.  First,
     -- add padding bytes to reach a suitable alignment; this is the field's
@@ -186,7 +203,7 @@ createDynamicRecord field_types = do
     -- The alignment is the maximum alignment of all fields (must be a power
     -- of 2).
     compute_offsets :: [Val] -> Val -> Val -> [DynamicFieldType]
-                    -> BuildExp ([Val], Val, Val)
+                    -> BuildBlock ([Val], Val, Val)
     compute_offsets offsets cur_offset cur_align (field:fields) = do
       start_offset <- addRecordPadding cur_offset $
                       dynamicFieldTypeAlignment field
@@ -200,14 +217,14 @@ createDynamicRecord field_types = do
       return (reverse offsets, end_offset, cur_align)
 
 -- | Compute the necessary record padding for a given offset
-addRecordPadding :: Val -> Val -> BuildExp Val
+addRecordPadding :: Val -> Val -> BuildBlock Val
 addRecordPadding off alignment = do
   neg_off <- nativeNegateUZ off 
   disp <- neg_off `nativeModUZ` alignment
   off `nativeAddUZ` disp
 
 -- | Load one field of a record into a local variable
-loadFieldAs :: DynamicRecord -> Val -> Int -> Var -> BuildExp ()
+loadFieldAs :: DynamicRecord -> Val -> Int -> Var -> BuildBlock ()
 loadFieldAs rtype ptr index dst =
   let field = recordFields rtype !! index 
       off = fieldOffset field
@@ -217,14 +234,50 @@ loadFieldAs rtype ptr index dst =
   in primLoadOff ty ptr off dst
 
 -------------------------------------------------------------------------------
+-- Other operations
+
+-- | Allocate temporary local memory over the scope of some computation.
+--   The allocated memory is not initialized, and must be initialized by 
+--   the given code generator.
+allocateLocalObject :: Var      -- ^ Pointer that will reference the object
+                    -> Val      -- ^ Passing convention of object
+                    -> [ValueType] -- ^ Return type(s) of the generated code
+                    -> BuildBlock Atom -- ^ Code generator
+                    -> BuildBlock Atom
+allocateLocalObject ptr_var pass_conv rtypes mk_block = do
+  -- Allocate the object
+  size <- selectPassConvSize pass_conv
+  bindAtom1 ptr_var $ PrimCallA (ConV (pyonBuiltin the_prim_alloc)) [VarV size]
+  
+  -- Generate code and bind its results to temporary variables
+  rvars <- lift $ mapM newAnonymousVar rtypes
+  ret_atom <- mk_block
+  tell [LetE rvars ret_atom]
+  
+  -- Free the object
+  free <- selectPassConvFree pass_conv
+  bindAtom0 $ PrimCallA (ConV (pyonBuiltin the_prim_free)) [VarV free]
+  
+  -- Return the temporary values
+  return $ ValA $ map VarV rvars
+
+-------------------------------------------------------------------------------
+
 -- | A parameter passing convention consists of size, alignment, copy,
 -- and free functions
 passConvRecord :: StaticRecord
-passConvRecord = staticRecord [ PrimField $ IntType Unsigned S32
-                              , PrimField $ IntType Unsigned S32
+passConvRecord = staticRecord [ PrimField nativeWordType
+                              , PrimField nativeWordType
                               , PrimField OwnedType
                               , PrimField OwnedType
                               ]
+
+selectPassConvSize, selectPassConvAlignment,
+  selectPassConvCopy, selectPassConvFree :: Val -> BuildBlock Var
+selectPassConvSize = selectField passConvRecord 0
+selectPassConvAlignment = selectField passConvRecord 1
+selectPassConvCopy = selectField passConvRecord 2
+selectPassConvFree = selectField passConvRecord 3
 
 passConvValue :: Int -> Int -> Con -> Con -> Val
 passConvValue size align copy free =

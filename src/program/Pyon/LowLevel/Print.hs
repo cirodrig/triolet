@@ -10,8 +10,8 @@ import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
 import Pyon.LowLevel.Syntax
 
-fillParenList :: [Doc] -> Doc
-fillParenList xs = parens $ fsep $ punctuate (text ",") xs
+fillBracketList :: [Doc] -> Doc
+fillBracketList xs = brackets $ fsep $ punctuate (text ",") xs
 
 pprVarLong :: Var -> Doc
 pprVarLong v =
@@ -54,15 +54,15 @@ pprFieldType (PrimField pt) = pprPrimType pt
 pprFieldType (RecordField _ rt) = pprRecordType rt
 pprFieldType (BytesField _ _) = text "BYTES"
 
-pprDef :: Def -> Doc
-pprDef (v, f) = hang (pprVar v <+> text "=") 4 $ pprFun f
+pprDef :: FunDef -> Doc
+pprDef (FunDef v f) = hang (pprVar v <+> text "=") 4 $ pprFun f
 
 pprFun :: Fun -> Doc
 pprFun (Fun params rt body) =
-  let param_doc = parens $ sep $ punctuate (text ",")  $ map pprVarLong params
-      ret_doc = pprValueType rt
+  let param_doc = brackets $ sep $ punctuate (text ",")  $ map pprVarLong params
+      ret_doc = fillBracketList $ map pprValueType rt
   in text "lambda" <+> (hang param_doc (-3) (text "->" <+> ret_doc)) $$
-     nest 4 (pprExp body)
+     nest 4 (pprBlock body)
 
 pprPrim prim = text "PRIM"
 
@@ -78,43 +78,42 @@ pprLit literal =
 pprVal value =
   case value
   of VarV v -> pprVar v
-     RecV _ vs -> fillParenList $ map pprVal vs
+     RecV _ vs -> fillBracketList $ map pprVal vs
      ConV c -> text $ showLabel $ Gluon.conName c 
      LitV l -> pprLit l
      LamV f -> parens $ pprFun f
 
 pprAtom atom =
   case atom
-  of ValA v -> pprVal v
-     CallA v vs -> pprVal v <> arg_list vs
+  of ValA vs -> arg_list vs
+     CallA v vs -> text "call" <+> pprVal v <> arg_list vs
+     PrimCallA v vs -> text "primcall" <+> pprVal v <> arg_list vs
      PrimA p vs -> pprPrim p <> arg_list vs
      PackA rt vs -> hang (text "pack" <> arg_list vs) 8 $
                     text "as" <+> pprRecordType rt
      UnpackA rt v -> text "unpack" <+> pprVal v <+> text "as" <+> pprRecordType rt
-     AllocA p size exp -> text "alloc" <+> pprVarLong p <+> parens (pprVal size) $$
-                          pprExp exp
      SwitchA val alts -> text "switch" <> parens (pprVal val) $$
                          nest 2 (vcat $ map print_alt alts)
   where
-    arg_list vs = fillParenList $ map pprVal vs
-    print_alt (lit, body) = hang (pprLit lit <> text ":") 6 (pprExp body)
+    arg_list vs = fillBracketList $ map pprVal vs
+    print_alt (lit, body) = hang (pprLit lit <> text ":") 6 (pprBlock body)
 
-pprExp :: Exp -> Doc
-pprExp expression = 
-  case expression
-  of ReturnE atom -> pprAtom atom
-     LetE [] atom cont -> pprAtom atom $$ pprExp cont
-     LetE vars atom cont ->
+pprStm :: Stm -> Doc
+pprStm stmt = 
+  case stmt
+  of LetE [] atom -> text "[] <-" <+> pprAtom atom
+     LetE vars atom ->
        let binder = sep $ punctuate (text ",") $ map pprVarLong vars
            rhs = pprAtom atom
-       in hang (binder <+> text "<-") 8 rhs $$ pprExp cont
-     LetrecE defs cont ->
+       in hang (binder <+> text "<-") 8 rhs
+     LetrecE defs ->
        text "letrec" $$
-       nest 8 (pprDefs defs) $$
-       pprExp cont
+       nest 8 (pprDefs defs)
 
-pprDefs :: [Def] -> Doc
+pprBlock (Block xs atom) = vcat (map pprStm xs) $$ text "return" <+> pprAtom atom
+
+pprDefs :: [FunDef] -> Doc
 pprDefs defs = vcat $ map pprDef defs
 
 pprModule :: Module -> Doc
-pprModule (Module defs) = pprDefs defs
+pprModule (Module defs _) = pprDefs defs

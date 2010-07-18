@@ -27,6 +27,9 @@ data Prim =
                                 --   pointer.
   | PrimStore !ValueType        -- ^ Store a value to an (owned or non-owned) 
                                 --   pointer.
+  | PrimCastToOwned             -- ^ Cast a non-owned pointer to an owned
+                                --   pointer.  The reference count is not
+                                --   adjusted.
 
 data Lit =
     UnitL                       -- ^ The unit value
@@ -56,10 +59,18 @@ data Val =
 -- This is modeled after ANF, but isn't truly ANF since expressions can be 
 -- recursive.
 data Atom =
-    -- | Return a value
-    ValA Val
-    -- | Call a function (possibly with the wrong number of arguments)
+    -- | Return some values
+    ValA [Val]
+    -- | Call a closure-based function 
+    -- (possibly with the wrong number of arguments).
+    -- The function must be an owned pointer.
   | CallA Val [Val]
+    -- | Call a primitive function, using the C calling convention extended
+    -- with support for multiple return values.
+    -- Unlike closure-based calls, this call must have exactly the right
+    -- number of arguments.
+    -- The function must be a non-owned pointer.
+  | PrimCallA Val [Val]
     -- | Perform a primitive operation (such as 'add' or 'load').
     --   Must have exactly the right number of arguments.
   | PrimA !Prim [Val]
@@ -67,29 +78,37 @@ data Atom =
   | PackA !StaticRecord [Val]
     -- | Unpack a statically typed record value.
   | UnpackA !StaticRecord Val
-    -- | Allocate some bytes of local storage.  The given value is the
-    -- parameter-passing convention of the object to allocate.
-    -- The storage is live for the duration of the expression.
-  | AllocA !ParamVar Val Exp
     -- | Branch based on a Boolean or integer value
   | SwitchA Val [Alt]
 
--- | An expression
-data Exp =
-    -- | Evaluate and return the return value of an atom
-    ReturnE Atom
+-- | A block of computation, consisting of some statements followed by an
+-- atom.  The block's return value is the atom's return value.
+data Block = Block [Stm] !Atom
+
+-- | A statement.  Statements are executed for their effect and have no
+-- return value.
+data Stm =
     -- | Bind an atom's result to temporary variables
-  | LetE [ParamVar] Atom Exp
+    LetE [ParamVar] Atom
     -- | Define local functions
-  | LetrecE [Def] Exp
+  | LetrecE [FunDef]
 
-data Fun = Fun [ParamVar] ValueType Exp
+data Fun = Fun [ParamVar] [ValueType] Block
 
-type Alt = (Lit, Exp)
-type Def = (ParamVar, Fun)
+type Alt = (Lit, Block)
 
-data Module = Module [Def]
-            deriving(Typeable)
+-- | A function definition
+data FunDef = FunDef !ParamVar Fun
+
+-- | A static data definition
+data DataDef = DataDef !ParamVar !StaticRecord ![Val]
+
+data Module =
+  Module 
+  { moduleFunctions :: [FunDef]
+  , moduleData :: [DataDef]
+  }
+  deriving(Typeable)
 
 newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var
 newVar name ty = do
