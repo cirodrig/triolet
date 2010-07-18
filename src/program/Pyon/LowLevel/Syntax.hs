@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts, DeriveDataTypeable #-}
 module Pyon.LowLevel.Syntax where
 
+import Data.Function
 import Data.Typeable
 
 import Gluon.Common.Identifier
@@ -44,6 +45,12 @@ data Var =
   , varName :: !(Maybe Label)
   , varType :: !ValueType
   }
+
+instance Eq Var where
+  (==) = (==) `on` varID
+
+instance Ord Var where
+  compare = compare `on` varID
 
 type ParamVar = Var
 

@@ -31,6 +31,7 @@ import qualified Pyon.SystemF.NewFlatten.SetupEffect as SystemF
 import qualified Pyon.SystemF.NewFlatten.GenCore
 import qualified Pyon.Core.Lowering as Lowering
 import qualified Pyon.LowLevel.Print as LowLevel
+import qualified Pyon.LowLevel.RecordFlattening as LowLevel
 
 dummyAnn :: Ann
 dummyAnn = Ann noSourcePos
@@ -432,6 +433,13 @@ pyon_lower _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
   m <- fromHsObject' mod
   newHsObject =<< Lowering.lower m
+
+foreign export ccall pyon_flattenRecordTypes :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_flattenRecordTypes _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  newHsObject =<< LowLevel.flattenRecordTypes m
 
 foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 

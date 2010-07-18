@@ -45,6 +45,7 @@ def tryCompile(fname, show_traceback = False):
         flat = untyped.flattenModule(test_inf)
 
 	low_level = untyped.lower(flat)
+	low_level = untyped.flattenRecordTypes(low_level)
 	print "Low-level"
 	untyped.printModule(low_level)
 
