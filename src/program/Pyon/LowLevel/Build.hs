@@ -256,7 +256,7 @@ allocateLocalObject ptr_var pass_conv rtypes mk_block = do
   
   -- Free the object
   free <- selectPassConvFree pass_conv
-  bindAtom0 $ PrimCallA (ConV (pyonBuiltin the_prim_free)) [VarV free]
+  bindAtom0 $ PrimCallA (VarV free) [VarV ptr_var]
   
   -- Return the temporary values
   return $ ValA $ map VarV rvars
