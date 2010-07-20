@@ -303,3 +303,15 @@ constant fun_load_NoneType : NoneType -> NoneType;
 constant prim_copy_int : int;
 constant prim_free : int;
 constant prim_alloc : int;
+constant prim_apply_pap : int;
+
+-- The deallocator for a partial application object.
+constant prim_free_pap : int;
+
+-- The deallocator for a lambda closure.  This function will free the closure.
+constant prim_free_lambda_closure : int;
+
+-- The deallocator for a letrec closure.  This function will not free the
+-- closure.  Instead, the captured variable record's deallocator will free
+-- the closure. 
+constant prim_free_letrec_closure : int;

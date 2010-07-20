@@ -122,6 +122,10 @@ pyonBuiltinFunctions =
   , "prim_copy_int"
   , "prim_free"
   , "prim_alloc"
+  , "prim_apply_pap"
+  , "prim_free_pap"
+  , "prim_free_lambda_closure"
+  , "prim_free_letrec_closure"
   ]
 
 pyonBuiltinConstructors =

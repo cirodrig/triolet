@@ -1,5 +1,5 @@
 
-{-# LANGUAGE ViewPatterns, Rank2Types, FlexibleInstances #-}
+{-# LANGUAGE ViewPatterns, Rank2Types, FlexibleInstances, FlexibleContexts, NoMonomorphismRestriction, ScopedTypeVariables #-}
 module Pyon.LowLevel.Build where
 
 import Control.Monad
@@ -17,15 +17,14 @@ import Pyon.LowLevel.Record
 
 newtype FreshVarM a = FreshVarM (forall st. IdentSupply Var -> ST st a)
 
-type MakeExp = FreshVarM Stm
-type BuildBlock a = WriterT [Stm] FreshVarM a
+type Gen m a = WriterT [Stm] m a
 
-execBuild :: BuildBlock Atom -> FreshVarM Block
+execBuild :: Monad m => Gen m Atom -> m Block
 execBuild m = do (atom, stms) <- runWriterT m
                  return $ Block stms atom
 
 -- | Build a block for use in a larger expression
-getBlock :: BuildBlock Atom -> BuildBlock Block
+getBlock :: Monad m => Gen m Atom -> Gen m Block
 getBlock m = WriterT $ do
   block <- execBuild m
   return (block, [])
@@ -48,30 +47,52 @@ instance Supplies FreshVarM (Ident Var) where
 -- Generating primops
 
 -- | Generate an instruction that has no result value
-emitAtom0 :: Atom -> BuildBlock ()
+emitAtom0 :: Monad m => Atom -> Gen m ()
 emitAtom0 atom = tell [LetE [] atom]
 
-emitAtom1 :: ValueType -> Atom -> BuildBlock Val
+emitAtom1 :: (Monad m, Supplies m (Ident Var)) =>
+             ValueType -> Atom -> Gen m Val
 emitAtom1 ty atom = do
   tmpvar <- lift $ newAnonymousVar ty
   tell [LetE [tmpvar] atom]
   return $ VarV tmpvar
 
-bindAtom0 :: Atom -> BuildBlock ()
+emitAtom :: (Monad m, Supplies m (Ident Var)) =>
+            [ValueType] -> Atom -> Gen m [Val]
+emitAtom tys atom = do
+  tmpvars <- lift $ mapM newAnonymousVar tys
+  tell [LetE tmpvars atom]
+  return $ map VarV tmpvars
+
+bindAtom0 :: Monad m => Atom -> Gen m ()
 bindAtom0 = emitAtom0
 
-bindAtom1 :: Var -> Atom -> BuildBlock ()
+bindAtom1 :: Monad m => Var -> Atom -> Gen m ()
 bindAtom1 var atom = tell [LetE [var] atom]
 
+bindAtom :: Monad m => [Var] -> Atom -> Gen m ()
+bindAtom vars atom = tell [LetE vars atom]
+
+genIf :: Monad m => Val -> Gen m Atom -> Gen m Atom -> Gen m Atom
+genIf bool if_true if_false = do
+  true_block <- getBlock if_true
+  false_block <- getBlock if_false
+  return $ SwitchA bool [ (BoolL True, true_block)
+                        , (BoolL False, false_block)]
+
+genFun :: Monad m => [ParamVar] -> [ValueType] -> Gen m Atom -> Gen m Fun
+genFun params returns body = liftM (Fun params returns) $ getBlock body
+
 -- | Generate a binary primitive integer operation
-intBinaryPrimOp :: (Integer -> Integer -> Integer) -- ^ Unlifted operation
+intBinaryPrimOp :: (Monad m, Supplies m (Ident Var)) =>
+                   (Integer -> Integer -> Integer) -- ^ Unlifted operation
                 -> Maybe Integer                   -- ^ Left identity value
                 -> Maybe Integer                   -- ^ Right identity value
                 -> (Signedness -> Size -> Prim)    -- ^ Primitive operation
                 -> ValueType                       -- ^ Type to generate
                 -> Val                             -- ^ Left argument
                 -> Val                             -- ^ Right argument
-                -> BuildBlock Val                    -- ^ Result value
+                -> Gen m Val                       -- ^ Result value
 intBinaryPrimOp imm_op l_id r_id delayed_op prim_type m n =
   case prim_type
   of PrimType (IntType sign size) ->
@@ -98,7 +119,12 @@ primMaxZ = intBinaryPrimOp max Nothing Nothing PrimMaxZ
 primNegateZ prim_type@(PrimType (IntType sign size)) n =
   primSubZ prim_type (LitV $ IntL sign size 0) n
 
-primAddP ptr off = emitAtom1 (PrimType PointerType) $ PrimA PrimAddP [ptr, off]
+primCmpZ prim_type@(PrimType (IntType sign size)) comparison x y =
+  emitAtom1 prim_type $ PrimA (PrimCmpZ sign size comparison) [x, y]
+
+primAddP ptr off =
+  emitAtom1 (PrimType PointerType) $ PrimA PrimAddP [ptr, off]
+
 primLoad ty ptr dst = bindAtom1 dst $ PrimA (PrimLoad ty) [ptr]
 primLoadOff ty ptr off dst = do
   ptr' <- primAddP ptr off 
@@ -108,6 +134,9 @@ primStore ty ptr val = emitAtom0 $ PrimA (PrimStore ty) [ptr, val]
 primStoreOff ty ptr off val = do
   ptr' <- primAddP ptr off
   primStore ty ptr' val
+
+primAAddZ prim_type@(PrimType (IntType sign size)) ptr n =
+  emitAtom1 prim_type $ PrimA (PrimAAddZ sign size) [ptr, n]
 
 nativeAddUZ = primAddZ (PrimType nativeWordType)
 nativeSubUZ = primSubZ (PrimType nativeWordType)
@@ -125,7 +154,8 @@ nativeWordV n = LitV $ nativeWordL n
 -- Record operations
 
 -- | Unpack a pass-by-value record
-unpackRecord :: StaticRecord -> Val -> BuildBlock [Var]
+unpackRecord :: (Monad m, Supplies m (Ident Var)) =>
+                StaticRecord -> Val -> Gen m [Var]
 unpackRecord rtype val = do
   -- Create a variable to hold each field value
   vars <- lift $ mapM newFieldVar $ recordFields rtype
@@ -140,10 +170,11 @@ unpackRecord rtype val = do
          BytesField {} -> internalError "unpackRecord"
 
 -- | Select one field of a pass-by-value record
-selectField :: StaticRecord -> Int -> Val -> BuildBlock Var
+selectField :: (Monad m, Supplies m (Ident Var)) =>
+               StaticRecord -> Int -> Val -> Gen m Val
 selectField ty index val = do
   fields <- unpackRecord ty val
-  return $ fields !! index
+  return $ VarV $ fields !! index
 
 toDynamicRecord :: StaticRecord -> DynamicRecord
 toDynamicRecord rec = let
@@ -185,7 +216,8 @@ dynamicFieldTypeAlignment ft =
 -- | Create a dynamic record.  Given the record field types, the offsets of
 -- all fields are computed and returned.  Code is emitted to compute the
 -- offsets.
-createDynamicRecord :: [DynamicFieldType] -> BuildBlock DynamicRecord
+createDynamicRecord :: forall m. (Monad m, Supplies m (Ident Var)) =>
+                       [DynamicFieldType] -> Gen m DynamicRecord
 createDynamicRecord field_types = do
   -- Compute record size and field offsets
   (offsets, size, alignment) <- compute_offsets [] zero one field_types
@@ -203,7 +235,7 @@ createDynamicRecord field_types = do
     -- The alignment is the maximum alignment of all fields (must be a power
     -- of 2).
     compute_offsets :: [Val] -> Val -> Val -> [DynamicFieldType]
-                    -> BuildBlock ([Val], Val, Val)
+                    -> Gen m ([Val], Val, Val)
     compute_offsets offsets cur_offset cur_align (field:fields) = do
       start_offset <- addRecordPadding cur_offset $
                       dynamicFieldTypeAlignment field
@@ -217,21 +249,42 @@ createDynamicRecord field_types = do
       return (reverse offsets, end_offset, cur_align)
 
 -- | Compute the necessary record padding for a given offset
-addRecordPadding :: Val -> Val -> BuildBlock Val
+addRecordPadding :: (Monad m, Supplies m (Ident Var)) =>
+                    Val -> Val -> Gen m Val
 addRecordPadding off alignment = do
   neg_off <- nativeNegateUZ off 
   disp <- neg_off `nativeModUZ` alignment
   off `nativeAddUZ` disp
 
+fromPrimType :: DynamicFieldType -> ValueType
+fromPrimType (PrimField ty) = PrimType ty
+fromPrimType _ = internalError "Expecting a primitive field type"
+
+-- | Load one field of a record into a variable
+loadField :: (Monad m, Supplies m (Ident Var)) =>
+             DynamicField -> Val -> Gen m Val
+loadField field ptr = do
+  let off = fieldOffset field
+      ty = fromPrimType $ fieldType field
+  v <- lift $ newAnonymousVar ty
+  primLoadOff ty ptr off v
+  return (VarV v)
+
 -- | Load one field of a record into a local variable
-loadFieldAs :: DynamicRecord -> Val -> Int -> Var -> BuildBlock ()
-loadFieldAs rtype ptr index dst =
-  let field = recordFields rtype !! index 
-      off = fieldOffset field
-      ty = case fieldType field
-           of PrimField ty -> PrimType ty
-              _ -> internalError "loadField: Only implemented for primitive types"
+loadFieldAs :: (Monad m, Supplies m (Ident Var)) =>
+               DynamicField -> Val -> Var -> Gen m ()
+loadFieldAs field ptr dst =
+  let off = fieldOffset field
+      ty = fromPrimType $ fieldType field
   in primLoadOff ty ptr off dst
+
+-- | Store into one field of a record
+storeField :: (Monad m, Supplies m (Ident Var)) =>
+              DynamicField -> Val -> Val -> Gen m ()
+storeField field ptr value =
+  let off = fieldOffset field
+      ty = fromPrimType $ fieldType field
+  in primStoreOff ty ptr off value
 
 -------------------------------------------------------------------------------
 -- Other operations
@@ -239,15 +292,16 @@ loadFieldAs rtype ptr index dst =
 -- | Allocate temporary local memory over the scope of some computation.
 --   The allocated memory is not initialized, and must be initialized by 
 --   the given code generator.
-allocateLocalObject :: Var      -- ^ Pointer that will reference the object
+allocateLocalObject :: (Monad m, Supplies m (Ident Var)) =>
+                       Var      -- ^ Pointer that will reference the object
                     -> Val      -- ^ Passing convention of object
                     -> [ValueType] -- ^ Return type(s) of the generated code
-                    -> BuildBlock Atom -- ^ Code generator
-                    -> BuildBlock Atom
+                    -> Gen m Atom -- ^ Code generator
+                    -> Gen m Atom
 allocateLocalObject ptr_var pass_conv rtypes mk_block = do
   -- Allocate the object
   size <- selectPassConvSize pass_conv
-  bindAtom1 ptr_var $ PrimCallA (ConV (pyonBuiltin the_prim_alloc)) [VarV size]
+  allocateHeapObjectAs size ptr_var
   
   -- Generate code and bind its results to temporary variables
   rvars <- lift $ mapM newAnonymousVar rtypes
@@ -256,12 +310,78 @@ allocateLocalObject ptr_var pass_conv rtypes mk_block = do
   
   -- Free the object
   free <- selectPassConvFree pass_conv
-  bindAtom0 $ PrimCallA (VarV free) [VarV ptr_var]
+  bindAtom0 $ PrimCallA free [VarV ptr_var]
   
   -- Return the temporary values
   return $ ValA $ map VarV rvars
 
+-- | Allocate the given number of bytes on the heap.
+allocateHeapObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
+allocateHeapObject size =
+  emitAtom1 (PrimType PointerType) $
+  PrimCallA (ConV (pyonBuiltin the_prim_alloc)) [size]
+
+allocateHeapObjectAs :: (Monad m, Supplies m (Ident Var)) =>
+                        Val -> Var -> Gen m ()
+allocateHeapObjectAs size dst =
+  bindAtom1 dst $ PrimCallA (ConV (pyonBuiltin the_prim_alloc)) [size]
+
+deallocateHeapObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
+deallocateHeapObject ptr =
+  emitAtom0 $ PrimCallA (ConV (pyonBuiltin the_prim_free)) [ptr]
+
 -------------------------------------------------------------------------------
+
+-- | The object header common to all reference-counted objects.
+--
+-- The header consists of a reference count and a pointer to a 'free' function.
+objectHeader :: [StaticFieldType]
+objectHeader = [ PrimField nativeWordType
+               , PrimField PointerType               
+               ]
+
+objectHeaderRecord :: StaticRecord
+objectHeaderRecord = staticRecord objectHeader
+
+objectHeaderRecord' :: DynamicRecord
+objectHeaderRecord' = toDynamicRecord objectHeaderRecord
+
+-- | Generate code that initializes an object header.
+-- The reference count is initialized to 1.
+initializeHeader :: (Monad m, Supplies m (Ident Var)) =>
+                    Val         -- ^ Object-freeing function
+                 -> Val         -- ^ Pointer to object
+                 -> Gen m ()
+initializeHeader free_function ptr = do
+  storeField (objectHeaderRecord' !!: 0) ptr (nativeWordV 1)
+  storeField (objectHeaderRecord' !!: 1) ptr free_function
+
+-- | Generate code to increment an object header's reference count.
+increfHeader :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
+increfHeader ptr = do
+  let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
+  field_ptr <- primAddP ptr off
+  _ <- primAAddZ (PrimType nativeWordType) field_ptr (nativeWordV 1)
+  return ()
+
+-- | Generate code to decrease an object's reference count, and free it
+-- if the reference count is zero.  The parameter variable is an owned
+-- reference.
+decrefHeader :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
+decrefHeader ptr = do
+  let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
+  field_ptr <- primAddP ptr off
+  
+  -- Decrement the value, get the old reference count
+  old_rc <- primAAddZ (PrimType nativeWordType) field_ptr (nativeWordV (-1))
+  
+  -- If old reference count was 1, free the pointer
+  rc_test <- primCmpZ (PrimType nativeWordType) CmpEQ old_rc (nativeWordV 1)
+  if_atom <- genIf rc_test
+             (do free_func <- loadField (objectHeaderRecord' !!: 1) ptr
+                 return $ PrimCallA free_func [ptr])
+             (do return $ ValA [])
+  emitAtom0 if_atom
 
 -- | A parameter passing convention consists of size, alignment, copy,
 -- and free functions
@@ -273,7 +393,8 @@ passConvRecord = staticRecord [ PrimField nativeWordType
                               ]
 
 selectPassConvSize, selectPassConvAlignment,
-  selectPassConvCopy, selectPassConvFree :: Val -> BuildBlock Var
+  selectPassConvCopy,
+  selectPassConvFree :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
 selectPassConvSize = selectField passConvRecord 0
 selectPassConvAlignment = selectField passConvRecord 1
 selectPassConvCopy = selectField passConvRecord 2

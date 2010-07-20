@@ -1,4 +1,5 @@
 
+{-# LANGUAGE PatternGuards #-}
 module Pyon.LowLevel.Print where
 
 import Text.PrettyPrint.HughesPJ
@@ -33,7 +34,7 @@ pprPrimType UnitType = text "unit"
 pprPrimType BoolType = text "bool"
 pprPrimType (IntType sign size) =
   let sgn = case sign
-            of Signed   -> 's'
+            of Signed   -> 'i'
                Unsigned -> 'u'
       sz  = case size
             of S8 -> "8"
@@ -41,10 +42,10 @@ pprPrimType (IntType sign size) =
                S32 -> "32"
                S64 -> "64"
   in text (sgn : sz)
-pprPrimType (FloatType S32) = text "float"
-pprPrimType (FloatType S64) = text "double"
+pprPrimType (FloatType S32) = text "f32"
+pprPrimType (FloatType S64) = text "f64"
 pprPrimType PointerType = text "ptr"
-pprPrimType OwnedType = text "owned"
+pprPrimType OwnedType = text "own"
 
 pprRecordType rt =
   brackets $ fsep $ punctuate (text ",") $
@@ -64,7 +65,48 @@ pprFun (Fun params rt body) =
   in text "lambda" <+> (hang param_doc (-3) (text "->" <+> ret_doc)) $$
      nest 4 (pprBlock body)
 
-pprPrim prim = text "PRIM"
+pprInfixPrim :: Prim -> Maybe Doc
+pprInfixPrim prim =
+  case prim
+  of PrimAddZ _ _ -> Just $ text "+"
+     PrimSubZ _ _ -> Just $ text "-"
+     PrimModZ _ _ -> Just $ text "%"
+     PrimCmpZ _ _ c -> case c
+                       of CmpEQ -> Just $ text "=="
+                          CmpNE -> Just $ text "/="
+                          CmpLT -> Just $ text "<"
+                          CmpLE -> Just $ text "<="
+                          CmpGT -> Just $ text ">"
+                          CmpGE -> Just $ text ">="
+     PrimAddP -> Just $ text "^+"
+     _ -> Nothing
+
+pprPrim prim =
+  let name =
+        case prim
+        of PrimAddZ _ _ -> "add"
+           PrimSubZ _ _ -> "sub"
+           PrimModZ _ _ -> "mod"
+           PrimMaxZ _ _ -> "max"
+           PrimCmpZ _ _ c -> case c
+                             of CmpEQ -> "cmp_eq"
+                                CmpNE -> "cmp_ne"
+                                CmpLT -> "cmp_lt"
+                                CmpLE -> "cmp_le"
+                                CmpGT -> "cmp_gt"
+                                CmpGE -> "cmp_ge"
+           PrimAddP   -> "ptradd"
+           PrimLoad _ -> "load"
+           PrimStore _ -> "store"
+           PrimAAddZ _ _ -> "atomic_add"
+           PrimCastToOwned -> "cast_ptr_own"
+           PrimCastFromOwned -> "cast_own_ptr"
+      ty =
+        case prim
+        of PrimLoad t -> pprValueType t
+           PrimStore t -> pprValueType t
+           _ -> empty
+  in text name <+> ty
 
 pprLit literal =
   case literal
@@ -88,6 +130,9 @@ pprAtom atom =
   of ValA vs -> arg_list vs
      CallA v vs -> text "call" <+> pprVal v <> arg_list vs
      PrimCallA v vs -> text "primcall" <+> pprVal v <> arg_list vs
+     PrimA p [v1, v2] 
+       | Just infix_op <- pprInfixPrim p ->
+           pprVal v1 <+> infix_op <+> pprVal v2
      PrimA p vs -> pprPrim p <> arg_list vs
      PackA rt vs -> hang (text "pack" <> arg_list vs) 8 $
                     text "as" <+> pprRecordType rt

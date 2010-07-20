@@ -45,8 +45,13 @@ def tryCompile(fname, show_traceback = False):
         flat = untyped.flattenModule(test_inf)
 
 	low_level = untyped.lower(flat)
+	del flat
 	low_level = untyped.flattenRecordTypes(low_level)
 	print "Low-level"
+	untyped.printModule(low_level)
+
+	low_level = untyped.closureConvert(low_level)
+	print "Closures"
 	untyped.printModule(low_level)
 
         # test_sf = type_inference.inferTypes(test_anf)

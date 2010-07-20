@@ -31,6 +31,7 @@ import Pyon.LowLevel.Record
 import Pyon.LowLevel.Build
 import Pyon.Globals
 
+type BuildBlock a = Gen FreshVarM a
 
 addressType = mkInternalConE (builtin the_Addr)
 
@@ -81,9 +82,6 @@ data CvExp' =
     -- The expression is represented differently depending on
     -- whether it's in tail position.
   | CvExp !(BuildBlock LL.Atom)
-
-type Tail = LL.Atom -> MakeExp
-type Head = Tail -> MakeExp
 
 -------------------------------------------------------------------------------
 -- Monad for type conversion
@@ -217,7 +215,7 @@ withSizeOf ty = liftM get_size $ getPassConv ty
       pc_var <- pass_conv
 
       -- Get its 'size' field
-      liftM LL.VarV $ selectField passConvRecord 0 pc_var
+      selectField passConvRecord 0 pc_var
 
 -- | Generate code to compute the field information of a data type
 fieldOf :: RCType -> Cvt (BuildBlock DynamicFieldType)
@@ -624,9 +622,12 @@ convertRefAlternative alt = do
     -- In the case body, explicitly load the data structure fields 
     let alternative_exp scrutinee = do
           layout_data <- layout
-          zipWithM_ (loadFieldAs layout_data scrutinee) [0..] params
+          zipWithM_ (load_field scrutinee) (recordFields layout_data) params
           asAtom body
     return (LL.UnitL, expType body, alternative_exp)
+  where
+    load_field scrutinee fld param =
+      loadFieldAs fld scrutinee param
 
 convertFun fun =
   withMany convertParameter (cfunParams fun) $ \params ->

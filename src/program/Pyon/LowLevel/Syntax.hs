@@ -16,11 +16,15 @@ import Pyon.LowLevel.Record
 data ValueType = PrimType !PrimType
                | RecordType !StaticRecord
 
+-- | A comparison operation
+data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE
+
 data Prim =
     PrimAddZ !Signedness !Size  -- ^ Add two integers
   | PrimSubZ !Signedness !Size  -- ^ Subtract Y from X
   | PrimModZ !Signedness !Size  -- ^ Remainder (floor) of X modulo Y
   | PrimMaxZ !Signedness !Size  -- ^ Compute maximum
+  | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
   | PrimAddP                    -- ^ Add a native unsigned integer to a
                                 --   (owned or non-owned) pointer.  The result
                                 --   is a non-owned pointer.
@@ -28,7 +32,13 @@ data Prim =
                                 --   pointer.
   | PrimStore !ValueType        -- ^ Store a value to an (owned or non-owned) 
                                 --   pointer.
+  | PrimAAddZ !Signedness !Size -- ^ Atomically add the target of a pointer to
+                                --   an integer.  Return the original value at
+                                --   that address.
   | PrimCastToOwned             -- ^ Cast a non-owned pointer to an owned
+                                --   pointer.  The reference count is not
+                                --   adjusted.
+  | PrimCastFromOwned           -- ^ Cast an owned pointer to a non-owned
                                 --   pointer.  The reference count is not
                                 --   adjusted.
 
@@ -125,3 +135,9 @@ newVar name ty = do
 newAnonymousVar :: Supplies m (Ident Var) => ValueType -> m Var
 newAnonymousVar ty = newVar Nothing ty
 
+litType :: Lit -> PrimType
+litType UnitL = UnitType
+litType NullL = PointerType
+litType (BoolL _) = BoolType
+litType (IntL sgn sz _) = IntType sgn sz
+litType (FloatL sz _) = FloatType sz

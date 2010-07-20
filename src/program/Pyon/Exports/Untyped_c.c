@@ -420,6 +420,8 @@ static PyMethodDef untyped_methods[] = {
    "Lower a module to a load-store program representation"},
   {"flattenRecordTypes", pyon_flattenRecordTypes, METH_O,
    "Eliminate record variables from a program"},
+  {"closureConvert", pyon_closureConvert, METH_O,
+   "Convert a program to one that explicitly manipulates function closures"},
   {"typeCheckModule", pyon_typeCheckSystemFModule, METH_O,
    "Perform type checking on a System F module.  If checking fails, an\n"
    "exception will be raised."},

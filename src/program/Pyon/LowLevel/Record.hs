@@ -41,6 +41,14 @@ record = Rec
 recordFields :: Record t -> [Field t]
 recordFields = recordFields_
 
+-- | Select a record field
+(!!:) :: Record t -> Int -> Field t
+r !!: i = pick i $ recordFields r
+  where
+    pick 0 (f:_)  = f
+    pick n (_:fs) = pick (n-1) fs
+    pick _ []     = internalError "(!!:): Record field index out of range"
+
 recordSize :: Record t -> t
 recordSize = recordSize_
 
@@ -82,7 +90,9 @@ staticRecord :: [StaticFieldType] -> StaticRecord
 staticRecord fs = let
   field_offsets = compute_offsets 0 fs
   alignment     = foldr lcm 1 $ map alignOf fs
-  size          = pad (last field_offsets + sizeOf (last fs)) alignment
+  size          = if null fs
+                  then 0
+                  else pad (last field_offsets + sizeOf (last fs)) alignment
   in record (zipWith Field field_offsets fs) size alignment
   where
     -- Each field starts at the offset of the previous field, plus the
