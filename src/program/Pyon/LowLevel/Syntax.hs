@@ -3,6 +3,7 @@
 module Pyon.LowLevel.Syntax where
 
 import Data.Function
+import Data.Maybe
 import Data.Typeable
 
 import Gluon.Common.Identifier
@@ -55,6 +56,11 @@ data Var =
   , varName :: !(Maybe Label)
   , varType :: !ValueType
   }
+
+instance Show Var where
+  show v =
+    let name = maybe "_" showLabel $ varName v
+    in name ++ "'" ++ show (fromIdent $ varID v)
 
 instance Eq Var where
   (==) = (==) `on` varID

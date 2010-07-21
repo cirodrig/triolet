@@ -54,6 +54,9 @@ def tryCompile(fname, show_traceback = False):
 	print "Closures"
 	untyped.printModule(low_level)
 
+	low_level = untyped.insertReferenceCounting(low_level)
+	print "Reference counting"
+	untyped.printModule(low_level)
         # test_sf = type_inference.inferTypes(test_anf)
 
         #flat_sf = untyped.flattenModule(test_inf)

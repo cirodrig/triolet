@@ -35,8 +35,8 @@ type BuildBlock a = Gen FreshVarM a
 
 addressType = mkInternalConE (builtin the_Addr)
 
-runFreshVarM :: FreshVarM a -> Cvt a
-runFreshVarM (FreshVarM f) = Cvt $ ReaderT $ \env ->
+runFreshVar :: FreshVarM a -> Cvt a
+runFreshVar (FreshVarM f) = Cvt $ ReaderT $ \env ->
   stToIO (f (llVarSupply env))
 
 -- | A converted expression, together with its core type.
@@ -635,7 +635,7 @@ convertFun fun =
     let param_list = params ++ maybeToList ret_param
     let return_type = map valueType $ loweredReturnType' $ cfunReturn fun
     body' <- convertExp $ cfunBody fun
-    body_exp <- runFreshVarM $ toBlock body'
+    body_exp <- runFreshVar $ toBlock body'
     return $ LL.Fun param_list return_type body_exp
   where
     -- Convert a write-return parameter to an actual pointer parameter

@@ -29,6 +29,9 @@ getBlock m = WriterT $ do
   block <- execBuild m
   return (block, [])
 
+putBlock :: Monad m => Block -> Gen m Atom
+putBlock (Block stms atom) = WriterT $ return (atom, stms)
+
 instance Functor FreshVarM where
   fmap f (FreshVarM g) = FreshVarM (\supply -> fmap f (g supply))
 
@@ -42,6 +45,8 @@ instance Supplies FreshVarM (Ident Var) where
   fresh = FreshVarM (\x -> unsafeIOToST (supplyValue x))
   supplyToST f = FreshVarM (\x -> let get_fresh = unsafeIOToST (supplyValue x)
                                   in f get_fresh)
+
+runFreshVarM id_supply (FreshVarM f) = stToIO (f id_supply)
 
 -------------------------------------------------------------------------------
 -- Generating primops
@@ -310,7 +315,7 @@ allocateLocalObject ptr_var pass_conv rtypes mk_block = do
   
   -- Free the object
   free <- selectPassConvFree pass_conv
-  bindAtom0 $ PrimCallA free [VarV ptr_var]
+  bindAtom0 $ CallA free [VarV ptr_var]
   
   -- Return the temporary values
   return $ ValA $ map VarV rvars
@@ -328,7 +333,7 @@ allocateHeapObjectAs size dst =
 
 deallocateHeapObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
 deallocateHeapObject ptr =
-  emitAtom0 $ PrimCallA (ConV (pyonBuiltin the_prim_free)) [ptr]
+  emitAtom0 $ PrimCallA (ConV (pyonBuiltin the_prim_dealloc)) [ptr]
 
 -------------------------------------------------------------------------------
 
@@ -358,11 +363,19 @@ initializeHeader free_function ptr = do
 
 -- | Generate code to increment an object header's reference count.
 increfHeader :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
-increfHeader ptr = do
-  let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
-  field_ptr <- primAddP ptr off
-  _ <- primAAddZ (PrimType nativeWordType) field_ptr (nativeWordV 1)
-  return ()
+increfHeader ptr = increfHeaderBy 1 ptr
+
+-- | Generate code to increment an object header's reference count by some
+-- non-negative amount.
+increfHeaderBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
+increfHeaderBy n ptr
+  | n < 0 = internalError "increfHeaderBy: Negative increment"
+  | n == 0 = return ()
+  | otherwise = do
+      let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
+      field_ptr <- primAddP ptr off
+      _ <- primAAddZ (PrimType nativeWordType) field_ptr (nativeWordV n)
+      return ()
 
 -- | Generate code to decrease an object's reference count, and free it
 -- if the reference count is zero.  The parameter variable is an owned
@@ -382,6 +395,30 @@ decrefHeader ptr = do
                  return $ PrimCallA free_func [ptr])
              (do return $ ValA [])
   emitAtom0 if_atom
+
+-- | Generate code to decrease an object's reference count, and free it
+-- if the reference count is zero.  The parameter variable is an owned
+-- reference.
+decrefHeaderBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
+decrefHeaderBy n ptr
+  | n < 0 = internalError "decrefHeaderBy"
+  | n == 0 = return ()
+  | otherwise = do
+      let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
+      field_ptr <- primAddP ptr off
+  
+      -- Subtract the value, get the old reference count
+      old_rc <- primAAddZ (PrimType nativeWordType) field_ptr $
+                nativeWordV (negate n)
+  
+      -- If old reference count was less than or equal to n, free the pointer
+      rc_test <- primCmpZ (PrimType nativeWordType) CmpLE old_rc $
+                 nativeWordV n
+      if_atom <- genIf rc_test
+                 (do free_func <- loadField (objectHeaderRecord' !!: 1) ptr
+                     return $ PrimCallA free_func [ptr])
+                 (do return $ ValA [])
+      emitAtom0 if_atom
 
 -- | A parameter passing convention consists of size, alignment, copy,
 -- and free functions
@@ -411,5 +448,5 @@ passConvValue size align copy free =
 
 intPassConvValue :: Val
 intPassConvValue =
-  passConvValue 4 4 (pyonBuiltin the_prim_copy_int) (pyonBuiltin the_prim_free)
+  passConvValue 4 4 (pyonBuiltin the_prim_cfun_copy4) (pyonBuiltin the_prim_cfun_free)
 

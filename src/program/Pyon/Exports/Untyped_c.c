@@ -422,6 +422,8 @@ static PyMethodDef untyped_methods[] = {
    "Eliminate record variables from a program"},
   {"closureConvert", pyon_closureConvert, METH_O,
    "Convert a program to one that explicitly manipulates function closures"},
+  {"insertReferenceCounting", pyon_insertReferenceCounting, METH_O,
+   "Insert explicit management of reference counts around owned objects"},
   {"typeCheckModule", pyon_typeCheckSystemFModule, METH_O,
    "Perform type checking on a System F module.  If checking fails, an\n"
    "exception will be raised."},

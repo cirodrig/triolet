@@ -780,13 +780,20 @@ genIndirectCall return_types mk_op mk_args = return $ do
     load_ret_values ret_ptr record = forM (recordFields record) $ \fld ->
       loadField (toDynamicField fld) ret_ptr
 
--- | Create a PAP record type based on the given argument types
+-- | Create a PAP record type based on the given argument types.
+--
+-- Layout of a PAP record:
+-- * Object refcount and free function
+-- * Indirect entry point (function pointer)
+-- * Number of fields (native word)
+-- * Field types (one byte per field)
+-- * Fields
 papRecord :: [PrimType] -> StaticRecord
 papRecord types = staticRecord fields
   where
     layout_fields = PrimField nativeWordType :
                     replicate (length types) (PrimField $ IntType Unsigned S8)
-    fields = objectHeader ++ [PrimField OwnedType] ++
+    fields = objectHeader ++ [PrimField PointerType] ++
              layout_fields ++ map PrimField types
 
 -- | Create a partial application object containing the given function and

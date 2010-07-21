@@ -72,6 +72,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/LowLevel/Print.hs \
 	Pyon/LowLevel/Record.hs \
 	Pyon/LowLevel/RecordFlattening.hs \
+	Pyon/LowLevel/ReferenceCounting.hs \
 	Pyon/LowLevel/Types.hs
 PYON_TH_HS_SRCS=Pyon/SystemF/Builtins.hs \
 	Pyon/SystemF/BuiltinsTH.hs \

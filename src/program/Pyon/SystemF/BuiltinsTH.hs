@@ -118,10 +118,13 @@ pyonBuiltinFunctions =
   , "fun_load_int"
   , "fun_load_float"
 
-    -- Primitive functions inserted during lowering
-  , "prim_copy_int"
-  , "prim_free"
+    -- Primitive closure-call functions inserted during lowering
+  , "prim_cfun_copy4"
+  , "prim_cfun_free"
+  
+    -- Primitive prim-call functions inserted during lowering
   , "prim_alloc"
+  , "prim_dealloc"
   , "prim_apply_pap"
   , "prim_free_pap"
   , "prim_free_lambda_closure"

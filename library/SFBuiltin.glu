@@ -300,9 +300,10 @@ constant fun_load_NoneType : NoneType -> NoneType;
 {- Constructors inserted during lowering.  They do not have types.
 -}
 
-constant prim_copy_int : int;
-constant prim_free : int;
+constant prim_cfun_copy4 : int;
+constant prim_cfun_free : int;
 constant prim_alloc : int;
+constant prim_dealloc : int;
 constant prim_apply_pap : int;
 
 -- The deallocator for a partial application object.
