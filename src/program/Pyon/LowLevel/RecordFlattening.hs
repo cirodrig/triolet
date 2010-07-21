@@ -1,5 +1,6 @@
-{-| This pass eliminates record value types from functions, by converting
---  record types to multiple-value-passing.
+{-| This pass eliminates record value types from the IR by converting
+--  record types to multiple-value-passing.  Also, record-valued constants
+--  are inlined.
 --
 -- Record-typed variables are converted to multiple variables.
 -- Record types in parameters or returns are unpacked to multiple parameters 
@@ -13,14 +14,18 @@ where
 import Control.Monad
 import Control.Monad.Reader
 import qualified Data.IntMap as IntMap
+import Data.Maybe
 
 import Gluon.Common.Error
 import Gluon.Common.MonadLogic
 import Gluon.Common.Supply
 import Gluon.Common.Identifier
+import Gluon.Core(Con(..))
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
 import Pyon.LowLevel.Syntax
+import Pyon.LowLevel.Build
+import Pyon.SystemF.Builtins
 import Pyon.Globals
 
 -- | During flattening, each variable is associated with its equivalent
@@ -50,6 +55,19 @@ expand m v = expand_var v
          
          -- Other values require no further expansion
          _ -> [value]
+
+-- | Get the flattened value of a constant.  If a constant isn't in this  
+-- table, it doesn't need to be flattened.
+getRecordConstant :: Con -> Maybe Val
+getRecordConstant c =
+  IntMap.lookup (fromIdent $ conID c) recordConstantTable
+
+recordConstantTable :: IntMap.IntMap Val
+recordConstantTable =
+  IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
+  where
+    tbl = [(pyonBuiltin the_passConv_int, intPassConvValue)
+          ]
 
 -------------------------------------------------------------------------------
          
@@ -128,7 +146,9 @@ flattenVal value =
   case value
   of VarV v -> expandVar v
      RecV _ vals -> liftM concat $ mapM flattenVal vals
-     ConV _ -> return [value]
+     ConV c 
+       | Just c_val <- getRecordConstant c -> flattenVal c_val  
+       | otherwise -> return [value]
      LitV UnitL -> return []
      LitV _ -> return [value]
      LamV f -> do f' <- flattenFun f
