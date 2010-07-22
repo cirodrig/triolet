@@ -127,7 +127,6 @@ pprVal value =
   case value
   of VarV v -> pprVar v
      RecV _ vs -> fillBracketList $ map pprVal vs
-     ConV c -> text $ showLabel $ Gluon.conName c 
      LitV l -> pprLit l
      LamV f -> parens $ pprFun f
 

@@ -14,7 +14,6 @@ import Language.C.Syntax.Constants
 import Gluon.Common.Error
 import Gluon.Common.Identifier(fromIdent)
 import Gluon.Common.Label
-import Gluon.Core(Con(..))
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
 import Pyon.LowLevel.Syntax
@@ -53,9 +52,6 @@ varIdent v =
                          x -> traceShow x $ internalError "varIdent: Unexpected type"
       name = leader ++ show (fromIdent $ varID v)
   in internalIdent name
-
-conIdent :: Con -> Ident
-conIdent c = internalIdent $ showLabel $ conName c
 
 -- | Get the type specificer for a non-pointer primitive type
 typeSpec :: PrimType -> CTypeSpec
@@ -164,13 +160,11 @@ genLit (FloatL S32 n) =
 
 genVal :: Val -> CExpr
 genVal (VarV v) = CVar (varIdent v) internalNode
-genVal (ConV c) = CVar (conIdent c) internalNode
 genVal (LitV l) = genLit l
 genVal _ = internalError "genVal: Unexpected value"
 
 valType :: Val -> PrimType
 valType (VarV v) = varPrimType v
-valType (ConV c) = trace "Assuming constructor is a function" PointerType
 valType (LitV l) = litType l
 valType _ = internalError "valType: Unexpected value"
 

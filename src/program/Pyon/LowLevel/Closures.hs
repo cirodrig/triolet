@@ -24,7 +24,7 @@ import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Common.MonadLogic
 import Gluon.Common.Supply
-import Pyon.SystemF.Builtins
+import Pyon.LowLevel.Builtins
 import Pyon.LowLevel.Syntax
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
@@ -254,7 +254,6 @@ varPrimType v = case varType v
 valType :: Val -> PrimType
 valType (VarV v) = varPrimType v
 valType (RecV {}) = internalError "valType"
-valType (ConV c) = trace "valType: Assuming constructor is a function" $ OwnedType
 valType (LitV l) = litType l
 valType (LamV f) = OwnedType
 
@@ -515,7 +514,7 @@ constructClosure info_ptr capt_ptr = do
   closure_ptr <- allocateHeapObject $ nativeWordV $ recordSize closureRecord
     
   -- Initialize fields
-  initializeHeader (ConV $ pyonBuiltin the_prim_free_lambda_closure)
+  initializeHeader (builtinVar the_prim_free_lambda_closure)
     closure_ptr
   storeField (toDynamicField $ closureRecord !!: 2) closure_ptr info_ptr
   storeField (toDynamicField $ closureRecord !!: 3) closure_ptr capt_ptr
@@ -746,7 +745,7 @@ genIndirectCall return_types mk_op mk_args = return $ do
       pap_ptr <- createPAP fn args
       
       -- Apply
-      bindAtom0 $ PrimCallA (ConV $ pyonBuiltin the_prim_apply_pap)
+      bindAtom0 $ PrimCallA (builtinVar the_prim_apply_pap)
         [pap_ptr, ret_ptr]
         
       -- Extract return values
@@ -785,7 +784,7 @@ createPAP fun vals = do
   rec_ptr <- allocateHeapObject $ nativeWordV $ recordSize record
   
   -- Initialize fields
-  initializeHeader (ConV $ pyonBuiltin the_prim_free_pap) rec_ptr
+  initializeHeader (builtinVar the_prim_free_pap) rec_ptr
   storeField (record' !!: 2) rec_ptr fun
   storeField (record' !!: 3) rec_ptr $ nativeWordV num_args
   store_field_types rec_ptr

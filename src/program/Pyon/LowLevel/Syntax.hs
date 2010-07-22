@@ -11,7 +11,6 @@ import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Supply
 import Gluon.Common.Label
-import Gluon.Core(Con)
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
 
@@ -61,6 +60,9 @@ data Lit =
 data Var =
   Var
   { varID :: {-# UNPACK #-} !(Ident Var)
+    -- | True if this is a built-in variable, i.e. one that is implicitly
+    -- defined at global scope.
+  , varIsBuiltin :: {-# UNPACK #-} !Bool
   , varName :: !(Maybe Label)
   , varType :: !ValueType
   }
@@ -82,7 +84,6 @@ type ParamVar = Var
 data Val =
     VarV Var
   | RecV !StaticRecord [Val]
-  | ConV !Con
   | LitV !Lit
   | LamV Fun
 
@@ -233,11 +234,25 @@ mkEntryPoints ftype label
 newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var
 newVar name ty = do
   ident <- fresh
-  return $ Var ident name ty
+  return $ Var { varID = ident 
+               , varIsBuiltin = False 
+               , varName = name 
+               , varType = ty
+               }
 
 -- | Create a new variable with no name
 newAnonymousVar :: Supplies m (Ident Var) => ValueType -> m Var
 newAnonymousVar ty = newVar Nothing ty
+
+-- | Create a new builtin variable
+newBuiltinVar :: Supplies m (Ident Var) => Label -> ValueType -> m Var
+newBuiltinVar name ty = do
+  ident <- fresh
+  return $ Var { varID = ident
+               , varIsBuiltin = True
+               , varName = Just name
+               , varType = ty
+               }
 
 -- | Get the type of a literal
 litType :: Lit -> PrimType

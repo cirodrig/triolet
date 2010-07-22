@@ -51,6 +51,7 @@ import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.MonadLogic
 import Gluon.Common.Supply
+import Pyon.LowLevel.FreshVar
 import Pyon.LowLevel.Syntax
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
@@ -79,7 +80,9 @@ data Ownership =
 type HeldReferences = Map.Map Var Ownership
 
 getOwnership :: Var -> HeldReferences -> Ownership
-getOwnership v m = case Map.lookup v m
+getOwnership v m 
+  | varIsBuiltin v = Borrowed   -- Builtins are always borrowed references
+  | otherwise = case Map.lookup v m
                    of Just o -> o
                       Nothing -> internalError "isOwned"
 
@@ -159,6 +162,25 @@ withVariable is_owned v m
   
       -- Return the new code.  Stop tracking this variable's deficit.
       return (blk', deficit')
+
+-- | Generate reference count increments to balance out the reference deficits
+-- of all global variables.
+-- The code generated is the same as for a borrowed variable.
+adjustBuiltinVarRefCounts :: RC (GenM a) -> RC (GenM a)
+adjustBuiltinVarRefCounts m = RC $ \ownership src -> do
+  -- Process the rest of the block
+  (blk, deficit) <- runRC m ownership src
+  
+  -- Correct for each builtin variable's reference count
+  let (bi_deficit, other_deficit) =
+        Map.partitionWithKey (\k _ -> varIsBuiltin k) deficit
+      bi_deficits = Map.toList bi_deficit
+      blk' = foldr adjust_references blk bi_deficits
+
+  return (blk', other_deficit)
+  where
+    adjust_references (v, deficit) blk =
+      increfHeaderBy deficit (VarV $ toPointerVar v) >> blk
 
 -- | Consume a reference to a variable.  If it's an owned variable or
 -- derived from an owned variable, the variable's reference deficit goes
@@ -283,7 +305,6 @@ toPointerData :: Val -> Val
 toPointerData value =
   case value
   of VarV v -> VarV (toPointerVar v)
-     ConV _ -> value
      LitV _ -> value
      _ -> internalError "toPointerData"
 
@@ -292,6 +313,7 @@ rcFun :: [Var] -> Fun -> FreshVarM Fun
 rcFun globals fun = do
   unless (isPrimFun fun) $ internalError "rcFun"
   body' <- runBalancedRC $
+           adjustBuiltinVarRefCounts $
            withBorrowedVariables globals $
            withBorrowedVariables (funParams fun) $
            rcBlock (funReturnTypes fun) (funBody fun)
@@ -422,9 +444,6 @@ adjustReferencesForPrim (PrimStore (PrimType OwnedType)) [_, value_arg] =
   case value_arg
   of VarV v -> do consumeReference v
                   return (return ())
-     ConV c -> -- We don't globally track reference counts on this object.
-               -- Instead, increment the reference count right now.
-               return $ increfHeader (ConV c)
      _ -> internalError "adjustReferenceForPrim: Unexpected argument to store"
     
 -- Casting from an owned reference consumes a reference
@@ -461,9 +480,6 @@ rcVal is_borrowed value =
        -- Consume this reference if it's not being borrowed
        unless is_borrowed $ consumeReference v
        return $ return $ VarV $ toPointerVar v
-     ConV c ->
-       trace "rcVal: Assuming constructor is not owned" $
-       return $ return value
      LitV l ->
        return $ return value
      _ -> internalError "rcVal"

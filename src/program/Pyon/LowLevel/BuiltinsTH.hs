@@ -51,38 +51,42 @@ instance Lift FunctionType where
 
 -- | Predefined primitive functions
 builtinPrimitives =
-  [ ("prim_alloc",
+  [ ("alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
-  , ("prim_dealloc",
+  , ("dealloc",
      primFunctionType [PrimType PointerType] [])
-  , ("prim_apply_pap",
+  , ("apply_pap",
      primFunctionType [PrimType OwnedType, PrimType PointerType] [])
-  , ("prim_free_pap",
+  , ("free_pap",
      primFunctionType [PrimType PointerType] [])
-  , ("prim_free_lambda_closure",
+  , ("free_lambda_closure",
      primFunctionType [PrimType PointerType] [])
-  , ("prim_free_letrec_closure",
+  , ("free_letrec_closure",
      primFunctionType [PrimType PointerType] [])
   ]
 
 -- | Predefined closure functions
 builtinFunctions =
-  [ ("fun_dealloc",
+  [ ("add_int",
+     closureFunctionType [PrimType pyonIntType, PrimType pyonIntType] [PrimType pyonIntType]),
+    ("sub_int",
+     closureFunctionType [PrimType pyonIntType, PrimType pyonIntType] [PrimType pyonIntType]),
+    ("dealloc",
      closureFunctionType [PrimType PointerType] [])
-  , ("fun_copy4",
+  , ("copy4",
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
-  , ("fun_load_int",
+  , ("load_int",
      closureFunctionType [PrimType OwnedType] [PrimType pyonIntType])
-  , ("fun_load_float",
+  , ("load_float",
      closureFunctionType [PrimType OwnedType] [PrimType pyonFloatType])
-  , ("fun_load_NoneType",
+  , ("load_NoneType",
      closureFunctionType [PrimType OwnedType] [PrimType pyonNoneType])
-  , ("fun_store_int",
-     closureFunctionType [PrimType pyonIntType] [PrimType OwnedType])
-  , ("fun_store_float",
-     closureFunctionType [PrimType pyonFloatType] [PrimType OwnedType])
-  , ("fun_store_NoneType",
-     closureFunctionType [PrimType pyonNoneType] [PrimType OwnedType])
+  , ("store_int",
+     closureFunctionType [PrimType pyonIntType, PrimType PointerType] [])
+  , ("store_float",
+     closureFunctionType [PrimType pyonFloatType, PrimType PointerType] [])
+  , ("store_NoneType",
+     closureFunctionType [PrimType pyonNoneType, PrimType PointerType] [])
   ]
 
 -- | Predefined global data
@@ -91,9 +95,9 @@ builtinGlobals =
 
 lowLevelBuiltinsRecord = recordDef "LowLevelBuiltins" fields
   where
-    prim_field (nm, _) = ("the_" ++ nm, IsStrict, [t| (Var, FunctionType) |])
-    clo_field (nm, _) = ("the_" ++ nm, IsStrict, [t| (Var, EntryPoints) |])
-    var_field (nm, _) = ("the_" ++ nm, IsStrict, [t| Var |])
+    prim_field (nm, _) = ("the_biprim_" ++ nm, IsStrict, [t| (Var, FunctionType) |])
+    clo_field (nm, _) = ("the_bifun_" ++ nm, IsStrict, [t| (Var, EntryPoints) |])
+    var_field (nm, _) = ("the_bivar_" ++ nm, IsStrict, [t| Var |])
     fields = map prim_field builtinPrimitives ++
              map clo_field builtinFunctions ++
              map var_field builtinGlobals

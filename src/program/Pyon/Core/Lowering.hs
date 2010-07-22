@@ -26,18 +26,41 @@ import Pyon.Core.Print
 import Pyon.SystemF.Builtins
 import qualified Pyon.SystemF.Syntax as SystemF
 import qualified Pyon.LowLevel.Syntax as LL
+import Pyon.LowLevel.FreshVar
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
 import Pyon.LowLevel.Build
+import Pyon.LowLevel.Builtins
 import Pyon.Globals
+
+-- | Convert a constructor to the corresponding value in the low-level IR.
+--   Most constructors are translated to a global variable.  Pass-by-value 
+--   constructors that take no parameters are translated to a value.
+convertCon :: Con -> LL.Val
+convertCon c =
+  case IntMap.lookup (fromIdent $ conID c) convertConTable
+  of Just v -> v
+     Nothing -> internalError $
+                "convertCon: No translation for constructor " ++
+                showLabel (conName c)
+
+convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
+  where
+    tbl = [ (pyonBuiltin the_passConv_int, intPassConvValue)
+          , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_int,
+             LL.VarV $ llBuiltin Pyon.LowLevel.Builtins.the_fun_store_int)
+          , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_int,
+             LL.VarV $ llBuiltin Pyon.LowLevel.Builtins.the_fun_load_int)
+          , (pyonBuiltin (addMember . the_AdditiveDict_int),
+             LL.VarV $ llBuiltin the_fun_add_int)
+          ]
 
 type BuildBlock a = Gen FreshVarM a
 
 addressType = mkInternalConE (builtin the_Addr)
 
 runFreshVar :: FreshVarM a -> Cvt a
-runFreshVar (FreshVarM f) = Cvt $ ReaderT $ \env ->
-  stToIO (f (llVarSupply env))
+runFreshVar m = Cvt $ ReaderT $ \env -> runFreshVarM (llVarSupply env) m
 
 -- | A converted expression, together with its core type.
 -- The core type determines what low-level representation to use 
@@ -345,10 +368,13 @@ constructorTable =
   where
     table = [ (pyonBuiltin (addMember . the_AdditiveDict_int),
                Right binaryIntOpType)
-            , (pyonBuiltin the_passConv_int, Left $ LL.RecordType passConvRecord)
+            , (pyonBuiltin the_passConv_int,
+               Left $ LL.RecordType passConvRecord)
             , (getPyonTupleCon' 2, Right tuple2ConType)
-            , (pyonBuiltin the_fun_store_int, Right storeIntType)
-            , (pyonBuiltin the_fun_load_int, Right loadIntType)
+            , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_int,
+               Right storeIntType)
+            , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_int,
+               Right loadIntType)
             ]
 
 lookupConstructorType :: Con -> CvType
@@ -412,7 +438,7 @@ convertExp expression =
     
     lookup_con c =
       let ty = lookupConstructorType c
-      in return $ value ty $ LL.ConV c
+      in return $ value ty $ convertCon c
 
 convertApp op args rarg = do
   -- Convert operator

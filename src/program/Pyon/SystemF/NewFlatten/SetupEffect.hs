@@ -63,11 +63,6 @@ import Pyon.SystemF.NewFlatten.PassConv
 -- | Set this to 'True' to debug the effect subtyping tests
 debugApply = False
 
-whenM :: Monad m => m Bool -> m () -> m ()
-whenM test m = do
-  b <- test
-  if b then m else return ()
-
 withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
 withMany f xs k = go xs k
   where

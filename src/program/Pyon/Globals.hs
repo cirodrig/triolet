@@ -14,6 +14,7 @@ import Gluon.Parser.Driver
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.SystemF.Builtins
 import qualified Pyon.LowLevel.Syntax as LowLevel
+import Pyon.LowLevel.Builtins
 
 the_varIdentSupply :: MVar (Supply (Ident Var))
 {-# NOINLINE the_varIdentSupply #-}
@@ -75,6 +76,7 @@ loadBuiltins = do
       case result of
         Just bi -> do putMVar the_builtinModule bi
                       Just pbi <- loadPyonBuiltins varIDs conIDs bi
+                      withTheLLVarIdentSupply initializeLowLevelBuiltins
                       -- _ <- Pyon.SystemF.SpclBuiltins.loadPyonBuiltins varIDs conIDs bi
                       return ()
         Nothing -> fail "Could not load builtins"

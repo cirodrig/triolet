@@ -1,21 +1,19 @@
 
-{-# LANGUAGE ViewPatterns, Rank2Types, FlexibleInstances, FlexibleContexts, NoMonomorphismRestriction, ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns, FlexibleInstances, FlexibleContexts, NoMonomorphismRestriction, ScopedTypeVariables #-}
 module Pyon.LowLevel.Build where
 
 import Control.Monad
 import Control.Monad.Writer
-import Control.Monad.ST
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Supply
 import Gluon.Core(Con(..))
-import Pyon.SystemF.Builtins
+import Pyon.LowLevel.Builtins
+import Pyon.LowLevel.FreshVar
 import Pyon.LowLevel.Syntax
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
-
-newtype FreshVarM a = FreshVarM (forall st. IdentSupply Var -> ST st a)
 
 type Gen m a = WriterT [Stm] m a
 
@@ -31,22 +29,6 @@ getBlock m = WriterT $ do
 
 putBlock :: Monad m => Block -> Gen m Atom
 putBlock (Block stms atom) = WriterT $ return (atom, stms)
-
-instance Functor FreshVarM where
-  fmap f (FreshVarM g) = FreshVarM (\supply -> fmap f (g supply))
-
-instance Monad FreshVarM where
-  return x = FreshVarM (\_ -> return x)
-  FreshVarM f >>= k = FreshVarM (\supply -> do
-                                    x <- f supply
-                                    case k x of FreshVarM g -> g supply)
-
-instance Supplies FreshVarM (Ident Var) where
-  fresh = FreshVarM (\x -> unsafeIOToST (supplyValue x))
-  supplyToST f = FreshVarM (\x -> let get_fresh = unsafeIOToST (supplyValue x)
-                                  in f get_fresh)
-
-runFreshVarM id_supply (FreshVarM f) = stToIO (f id_supply)
 
 -------------------------------------------------------------------------------
 -- Generating primops
@@ -84,6 +66,9 @@ genIf bool if_true if_false = do
   false_block <- getBlock if_false
   return $ SwitchA bool [ (BoolL True, true_block)
                         , (BoolL False, false_block)]
+
+builtinVar :: (LowLevelBuiltins -> Var) -> Val
+builtinVar v = VarV $ llBuiltin v
 
 genPrimFun :: Monad m => [ParamVar] -> [ValueType] -> Gen m Atom -> Gen m Fun
 genPrimFun params returns body =
@@ -336,16 +321,16 @@ allocateLocalObject ptr_var pass_conv rtypes mk_block = do
 allocateHeapObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
 allocateHeapObject size =
   emitAtom1 (PrimType PointerType) $
-  PrimCallA (ConV (pyonBuiltin the_prim_alloc)) [size]
+  PrimCallA (builtinVar the_prim_alloc) [size]
 
 allocateHeapObjectAs :: (Monad m, Supplies m (Ident Var)) =>
                         Val -> Var -> Gen m ()
 allocateHeapObjectAs size dst =
-  bindAtom1 dst $ PrimCallA (ConV (pyonBuiltin the_prim_alloc)) [size]
+  bindAtom1 dst $ PrimCallA (builtinVar the_prim_alloc) [size]
 
 deallocateHeapObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
 deallocateHeapObject ptr =
-  emitAtom0 $ PrimCallA (ConV (pyonBuiltin the_prim_dealloc)) [ptr]
+  emitAtom0 $ PrimCallA (builtinVar the_prim_dealloc) [ptr]
 
 -------------------------------------------------------------------------------
 
@@ -449,16 +434,16 @@ selectPassConvAlignment = selectField passConvRecord 1
 selectPassConvCopy = selectField passConvRecord 2
 selectPassConvFree = selectField passConvRecord 3
 
-passConvValue :: Int -> Int -> Con -> Con -> Val
+passConvValue :: Int -> Int -> Var -> Var -> Val
 passConvValue size align copy free =
   RecV passConvRecord
   [ LitV $ IntL Unsigned S32 (fromIntegral size)
   , LitV $ IntL Unsigned S32 (fromIntegral align)
-  , ConV copy
-  , ConV free
+  , VarV copy
+  , VarV free
   ]
 
 intPassConvValue :: Val
 intPassConvValue =
-  passConvValue 4 4 (pyonBuiltin the_prim_cfun_copy4) (pyonBuiltin the_prim_cfun_free)
+  passConvValue 4 4 (llBuiltin the_fun_copy4) (llBuiltin the_fun_dealloc)
 
