@@ -76,11 +76,11 @@ builtinFunctions =
   , ("copy4",
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
   , ("load_int",
-     closureFunctionType [PrimType OwnedType] [PrimType pyonIntType])
+     closureFunctionType [PrimType PointerType] [PrimType pyonIntType])
   , ("load_float",
-     closureFunctionType [PrimType OwnedType] [PrimType pyonFloatType])
+     closureFunctionType [PrimType PointerType] [PrimType pyonFloatType])
   , ("load_NoneType",
-     closureFunctionType [PrimType OwnedType] [PrimType pyonNoneType])
+     closureFunctionType [PrimType PointerType] [PrimType pyonNoneType])
   , ("store_int",
      closureFunctionType [PrimType pyonIntType, PrimType PointerType] [])
   , ("store_float",
