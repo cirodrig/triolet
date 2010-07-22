@@ -255,11 +255,15 @@ flattenBlock (Block stms atom) =
     return $ Block (concat stms') atom'
 
 flattenFun :: Fun -> RF Fun
-flattenFun (Fun params returns body) =
-  defineParams params $ \params' -> do
-    let returns' = flattenValueTypeList returns
-    body' <- flattenBlock body
-    return $ Fun params' returns' body'
+flattenFun fun =
+  defineParams (funParams fun) $ \params -> do
+    let returns = flattenValueTypeList $ funReturnTypes fun
+    body <- flattenBlock $ funBody fun
+    return $! if isPrimFun fun 
+              then primFun params returns body
+              else if isClosureFun fun
+                   then closureFun params returns body
+                   else internalError "flattenFun"
 
 flattenTopLevel :: [FunDef] -> [DataDef] -> RF ([FunDef], [DataDef])
 flattenTopLevel fun_defs data_defs =

@@ -85,8 +85,14 @@ genIf bool if_true if_false = do
   return $ SwitchA bool [ (BoolL True, true_block)
                         , (BoolL False, false_block)]
 
-genFun :: Monad m => [ParamVar] -> [ValueType] -> Gen m Atom -> Gen m Fun
-genFun params returns body = liftM (Fun params returns) $ getBlock body
+genPrimFun :: Monad m => [ParamVar] -> [ValueType] -> Gen m Atom -> Gen m Fun
+genPrimFun params returns body =
+  liftM (Fun True params returns) $ getBlock body
+
+genClosureFun :: Monad m =>
+                 [ParamVar] -> [ValueType] -> Gen m Atom -> Gen m Fun
+genClosureFun params returns body =
+  liftM (Fun False params returns) $ getBlock body
 
 -- | Generate a binary primitive integer operation
 intBinaryPrimOp :: (Monad m, Supplies m (Ident Var)) =>

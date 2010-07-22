@@ -36,10 +36,7 @@ returnTypes (AssignValues vs) = map varPrimType vs
 returnTypes (DefineValues vs) = map varPrimType vs
 returnTypes (ReturnValues ps) = ps
 
-varPrimType v =
-  case varType v
-  of PrimType pt -> pt
-     RecordType _ -> internalError "varPrimType: Unexpected record type"
+varPrimType v = valueToPrimType $ varType v
 
 -- | Generate the C name for a variable
 varIdent :: Var -> Ident
@@ -344,16 +341,16 @@ genIf returns scrutinee if_true if_false =
 
 -- | Generate a forward declaration and definition of a function
 genFun :: FunDef -> (CDecl, CFunDef)
-genFun (FunDef v (Fun params returns body)) =
+genFun (FunDef v fun) =
   let -- Function return type
       (return_type_specs, return_derived_declr) =
-        case returns
+        case funReturnTypes fun
         of [] -> ([CTypeSpec (CVoidType internalNode)], []) 
            [PrimType t] -> declspecs t
            [_] -> internalError "genFun: Unexpected return type"
            _ -> internalError "genFun: Cannot generate multiple return values"
       -- Function parameter declarations
-      param_decls = [declareVariable v Nothing | v <- params]
+      param_decls = [declareVariable v Nothing | v <- funParams fun]
       -- Function declaration
       fun_declr =
         CFunDeclr (Right (param_decls, False)) [] internalNode
@@ -363,14 +360,16 @@ genFun (FunDef v (Fun params returns body)) =
         CDeclr (Just (varIdent v)) derived_declr Nothing [] internalNode
         
       -- Create the function body
-      return_values = ReturnValues [t | PrimType t <- returns]
-      body_stmt = genBlock return_values body
+      return_values = ReturnValues $ map valueToPrimType $ funReturnTypes fun
+      body_stmt = genBlock return_values $ funBody fun
       
       forward_declaration =
         CDecl return_type_specs [(Just fun_decl, Nothing, Nothing)] internalNode
       definition =
         CFunDef return_type_specs fun_decl [] body_stmt internalNode
-  in (forward_declaration, definition)
+  in if isPrimFun fun 
+     then (forward_declaration, definition)
+     else internalError "genFun: Can only generate primitive-call functions"
 
 -- | Create a global static data definition and initialization code.
 genData :: DataDef -> (CExtDecl, CStat)

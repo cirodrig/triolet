@@ -80,7 +80,9 @@ PYON_TH_HS_SRCS=Pyon/SystemF/Builtins.hs \
 	Pyon/Exports/Untyped.hs \
 	Pyon/Untyped/Builtins.hs \
 	Pyon/Untyped/BuiltinsTH.hs \
-	Pyon/Untyped/InitializeBuiltins.hs
+	Pyon/Untyped/InitializeBuiltins.hs \
+	Pyon/LowLevel/BuiltinsTH.hs \
+	Pyon/LowLevel/Builtins.hs
 PYON_HS_BOOT_SRCS=Pyon/Untyped/Syntax.hs-boot \
 	Pyon/LowLevel/Syntax.hs-boot
 

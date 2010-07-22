@@ -289,13 +289,16 @@ toPointerData value =
 
 -- | Perform reference count adjustment on a function.
 rcFun :: [Var] -> Fun -> FreshVarM Fun
-rcFun globals (Fun params returns body) = do
+rcFun globals fun = do
+  unless (isPrimFun fun) $ internalError "rcFun"
   body' <- runBalancedRC $
            withBorrowedVariables globals $
-           withBorrowedVariables params $
-           rcBlock returns body
+           withBorrowedVariables (funParams fun) $
+           rcBlock (funReturnTypes fun) (funBody fun)
   body'' <- execBuild body'
-  return $ Fun (map toPointerVar params) (map toPointerType returns) body''
+  let params  = map toPointerVar $ funParams fun
+      returns = map toPointerType $ funReturnTypes fun
+  return $ primFun params returns body''
 
 rcBlock :: [ValueType] -> Block -> RC (GenM Atom)
 rcBlock return_types (Block stms atom) = foldr rcStm gen_atom stms

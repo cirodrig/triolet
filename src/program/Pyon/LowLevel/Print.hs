@@ -59,11 +59,17 @@ pprDef :: FunDef -> Doc
 pprDef (FunDef v f) = hang (pprVar v <+> text "=") 4 $ pprFun f
 
 pprFun :: Fun -> Doc
-pprFun (Fun params rt body) =
-  let param_doc = brackets $ sep $ punctuate (text ",")  $ map pprVarLong params
-      ret_doc = fillBracketList $ map pprValueType rt
-  in text "lambda" <+> (hang param_doc (-3) (text "->" <+> ret_doc)) $$
-     nest 4 (pprBlock body)
+pprFun fun =
+  let param_doc = brackets $ sep $ punctuate (text ",") $ map pprVarLong $
+                  funParams fun
+      ret_doc = fillBracketList $ map pprValueType $ funReturnTypes fun
+      fun_call = if isPrimFun fun
+                 then "lambda_p"
+                 else if isClosureFun fun
+                      then "lambda_c"
+                      else "lambda????"
+  in text fun_call <+> (hang param_doc (-3) (text "->" <+> ret_doc)) $$
+     nest 4 (pprBlock $ funBody fun)
 
 pprInfixPrim :: Prim -> Maybe Doc
 pprInfixPrim prim =

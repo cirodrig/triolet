@@ -285,13 +285,13 @@ constant LazyStream : Effect is(covar) -> Pure is(covar) -> Pure;
 -- Effect monad type
 constant Action : Effect is(covar) -> Pure is(covar) -> Pure;
 
+-- Inserted during flattening.  The types are not correct.
 constant fun_copy : (a : Pure) -> PassConv a -> a -> a;
 
 constant fun_store_int : int -> int;
 constant fun_store_float : float -> float;
 constant fun_store_NoneType : NoneType -> NoneType;
 
--- Inserted during flattening.  The types are not correct.
 constant fun_load_int : int -> int;
 constant fun_load_float : float -> float;
 constant fun_load_NoneType : NoneType -> NoneType;

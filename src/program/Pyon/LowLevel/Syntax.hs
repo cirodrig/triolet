@@ -2,10 +2,12 @@
 {-# LANGUAGE FlexibleContexts, DeriveDataTypeable #-}
 module Pyon.LowLevel.Syntax where
 
+import Control.Monad
 import Data.Function
 import Data.Maybe
 import Data.Typeable
 
+import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Supply
 import Gluon.Common.Label
@@ -16,6 +18,11 @@ import Pyon.LowLevel.Record
 -- | A type that may be put into a variable
 data ValueType = PrimType !PrimType
                | RecordType !StaticRecord
+
+valueToPrimType :: ValueType -> PrimType
+valueToPrimType (PrimType pt) = pt
+valueToPrimType _ =
+  internalError "Expecting a primitive type, got a record type"
 
 -- | A comparison operation
 data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE
@@ -117,7 +124,23 @@ data Stm =
     -- | Define local functions
   | LetrecE [FunDef]
 
-data Fun = Fun [ParamVar] [ValueType] Block
+data Fun =
+  Fun 
+  { funIsPrim :: !Bool 
+  , funParams :: [ParamVar] 
+  , funReturnTypes :: [ValueType] 
+  , funBody :: Block
+  }
+
+isPrimFun, isClosureFun :: Fun -> Bool
+isPrimFun = funIsPrim
+isClosureFun f = not (isPrimFun f)
+
+closureFun :: [ParamVar] -> [ValueType] -> Block -> Fun
+closureFun = Fun False
+
+primFun :: [ParamVar] -> [ValueType] -> Block -> Fun
+primFun = Fun True
 
 type Alt = (Lit, Block)
 
@@ -134,17 +157,97 @@ data Module =
   }
   deriving(Typeable)
 
+-------------------------------------------------------------------------------
+
+-- | A primitive or closure function type.
+data FunctionType =
+  FunctionType {-# UNPACK #-}!Bool ![ValueType] ![ValueType]
+
+primFunctionType :: [ValueType] -> [ValueType] -> FunctionType
+primFunctionType params returns = FunctionType True params returns
+
+closureFunctionType :: [ValueType] -> [ValueType] -> FunctionType
+closureFunctionType params returns = FunctionType False params returns
+
+ftIsPrim, ftIsClosure :: FunctionType -> Bool
+ftIsPrim (FunctionType b _ _) = b
+ftIsClosure t = not (ftIsPrim t)
+
+ftParamTypes :: FunctionType -> [ValueType]
+ftParamTypes (FunctionType _ ps _) = ps
+
+ftReturnTypes :: FunctionType -> [ValueType]
+ftReturnTypes (FunctionType _ _ rs) = rs
+
+-- | The global objects that make up a Pyon function.  Objects that can be
+--   dynamically allocated (specifically, closure and captured variable
+--   records) are not included here.
+data EntryPoints =
+  EntryPoints
+  { _epType         :: {-# UNPACK #-} !FunctionType
+  , _epArity        :: {-# UNPACK #-} !Int
+  , _epDirectEntry  :: !Var
+  , _epExactEntry   :: !Var
+  , _epInexactEntry :: !Var
+  , _epInfoTable    :: !Var
+  }
+
+-- | Get the type of a function
+entryPointsType :: EntryPoints -> FunctionType
+entryPointsType = _epType
+
+-- | Get the arity of a function.  This is the number of parameters that 
+--   direct and exact calls must pass.
+functionArity :: EntryPoints -> Int
+functionArity = _epArity
+
+-- | Get the direct entry point of a function
+directEntry :: EntryPoints -> Var
+directEntry = _epDirectEntry
+
+-- | Get the exact entry point of a function
+exactEntry :: EntryPoints -> Var
+exactEntry = _epExactEntry
+
+-- | Get the inexact entry point of a function
+inexactEntry :: EntryPoints -> Var
+inexactEntry = _epInexactEntry
+
+-- | Get  the info table of a function
+infoTableEntry :: EntryPoints -> Var
+infoTableEntry = _epInfoTable
+
+-- | Create an 'EntryPoints' data structure and populate it with new variables.
+mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
+                 FunctionType   -- ^ Function type
+              -> Maybe Label    -- ^ Function name
+              -> m EntryPoints  -- ^ Creates an EntryPoints structure
+mkEntryPoints ftype label 
+  | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
+  | otherwise = do
+      [v1, v2, v3, v4] <- replicateM 4 $ newVar label (PrimType PointerType)
+      let arity = length $ ftParamTypes ftype
+      return $! EntryPoints ftype arity v1 v2 v3 v4 
+
+-- | Create a new variable
 newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var
 newVar name ty = do
   ident <- fresh
   return $ Var ident name ty
 
+-- | Create a new variable with no name
 newAnonymousVar :: Supplies m (Ident Var) => ValueType -> m Var
 newAnonymousVar ty = newVar Nothing ty
 
+-- | Get the type of a literal
 litType :: Lit -> PrimType
 litType UnitL = UnitType
 litType NullL = PointerType
 litType (BoolL _) = BoolType
 litType (IntL sgn sz _) = IntType sgn sz
 litType (FloatL sz _) = FloatType sz
+
+funType :: Fun -> FunctionType
+funType f =
+  FunctionType (funIsPrim f) (map varType $ funParams f) (funReturnTypes f)
+  

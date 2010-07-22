@@ -33,28 +33,6 @@ import Pyon.Globals
 
 type BuildBlock a = Gen CC a
 
--- | The entry points of a closure-converted function.
-data EntryPoints =
-  EntryPoints
-  { -- | The function's arity.  Direct and exact calls must pass
-    -- exactly this many arguments.
-    functionArity :: !Int
-    -- | The entry point for fully saturated, direct calls.
-  , directEntry :: !Var
-    -- | The entry point for fully saturated, indirect calls.
-  , exactEntry :: !Var
-    -- | The entry point for calls with a number of parameters not matching
-    --   the function arity.
-  , inexactEntry :: !Var
-    -- | The function's info table.
-  , infoTableEntry :: !Var 
-  }
-
-mkEntryPoints :: Int -> Maybe Label -> CC EntryPoints
-mkEntryPoints arity label = do
-  [v1, v2, v3, v4] <- replicateM 4 $ newVar label (PrimType PointerType)
-  return $ EntryPoints arity v1 v2 v3 v4 
-
 -- | During closure conversion, keep track of the set of free variables
 type FreeVars = Set.Set Var
 
@@ -153,8 +131,8 @@ withParameters vs (CC m) = CC $ fmap remove_var . m
 withFunctions :: [FunDef] -> CC a -> CC a
 withFunctions defs m = foldr with_function m defs
   where
-    with_function (FunDef v (Fun params _ _)) m = do
-      entry_points <- mkEntryPoints (length params) (varName v)
+    with_function (FunDef v fun) m = do
+      entry_points <- mkEntryPoints (funType fun) (varName v)
       insert_entry_points (fromIdent $ varID v) entry_points m
 
     insert_entry_points key entry_points (CC f) = CC $ \env ->
@@ -344,28 +322,30 @@ withDefGroup defs k =
       entry_points <- lookupEntryPoints' v
       constructEntryPoints capvars captured_vars entry_points direct_fun
 
--- | Perform closure conversion on a function.
+-- | Perform closure conversion on a function.  The closure-converted
+-- function is returned, along with a list of the captured variables.
 --
 -- First, closure conversion is performed on the function body.
 -- Then the function is converted to one with no free variables that takes
 -- an extra argument for each free variable in the original function.
--- The converted function
--- is returned as a variable along with the list of free variables.
 scanFun :: Fun -> CC (Fun, [Var])
-scanFun (Fun params returns body) = do
-  -- Do closure conversion in the function body, and get the set of 
+scanFun fun = do
+  unless (isClosureFun fun) $
+    internalError "scanFun: Given function has wrong calling convention"
+
+  -- Do closure conversion in the function body, and get the set of variables
   -- mentioned in the function body
-  let return_prim_types = map from_prim_type returns
-        where
-          from_prim_type (PrimType pt) = pt
-          from_prim_type _ = internalError "scanFun"
+  let return_prim_types = map valueToPrimType $ funReturnTypes fun
         
   (body', free_vars) <-
-    listenFreeVars $ withParameters params $ scanBlock body return_prim_types
+    listenFreeVars $
+    withParameters (funParams fun) $
+    scanBlock (funBody fun) return_prim_types
 
   -- Add the free variables as extra parameters
   let free_var_list = Set.toList free_vars
-      new_fun = Fun (free_var_list ++ params) returns body'
+      new_params = free_var_list ++ funParams fun
+      new_fun = primFun new_params (funReturnTypes fun) body'
   return (new_fun, free_var_list)
 
 -- | Perform closure conversion on a data definition.
@@ -446,8 +426,8 @@ constructLambdaFunction lambda_fun = do
   
   -- Generate other global data
   let capvars = capturedVarsRecord captured_vars []
-      arity = case direct_fun of Fun params _ _ -> length params
-  entry_points <- mkEntryPoints arity Nothing
+      arity = length $ funParams direct_fun
+  entry_points <- mkEntryPoints (funType lambda_fun) Nothing
   constructEntryPoints capvars captured_vars entry_points direct_fun
   
   capvars_free_fun <- capturedVarsFreeFunction capvars
@@ -475,7 +455,8 @@ constructInfoTable entry_points =
   ]
 
 constructEntryPoints capvars captured_vars entry_points direct_fun = do
-  let Fun direct_params direct_returns _ = direct_fun
+  let direct_params = funParams direct_fun 
+      direct_returns = funReturnTypes direct_fun
 
   ex_fun <- exactEntryFunction capvars captured_vars direct_params
             direct_returns (directEntry entry_points)
@@ -623,7 +604,7 @@ capturedVarsFreeFunction capvars = do
       capturedClosureFields capvars
     return $ ValA []
     
-  return $ Fun [object_ptr] [] fun_body
+  return $ primFun [object_ptr] [] fun_body
   where
     decref_field object_ptr fld =
       case fieldType fld
@@ -688,7 +669,7 @@ exactEntryFunction capvars need_vs param_vs return_types direct_entry = do
     -- Load each variable needed by the function
     mapM_ (load_var (VarV closure_ptr)) need_vs
     return $ PrimCallA (VarV direct_entry) (map VarV $ need_vs ++ param_vs)
-  return $ Fun (closure_ptr : param_vs) return_types fun_body
+  return $ primFun (closure_ptr : param_vs) return_types fun_body
   where
     load_var closure_ptr v =
       case findCapturedField v capvars
@@ -720,7 +701,7 @@ inexactEntryFunction capvars param_vs return_types exact_entry = do
     -- Store each return value
     zipWithM_ (store_field return_ptr) return_vs $ recordFields ret_record
     return $ ValA []
-  return $ Fun [closure_var, args_var, return_var] [] fun_body
+  return $ primFun [closure_var, args_var, return_var] [] fun_body
   where
     type_field (PrimType pt) = PrimField pt
     type_field _ = internalError "inexactEntryFunction"

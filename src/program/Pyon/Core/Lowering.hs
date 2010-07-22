@@ -636,7 +636,7 @@ convertFun fun =
     let return_type = map valueType $ loweredReturnType' $ cfunReturn fun
     body' <- convertExp $ cfunBody fun
     body_exp <- runFreshVar $ toBlock body'
-    return $ LL.Fun param_list return_type body_exp
+    return $ LL.closureFun param_list return_type body_exp
   where
     -- Convert a write-return parameter to an actual pointer parameter
     convert_return (param ::: return_type) k =
