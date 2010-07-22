@@ -34,6 +34,7 @@ import qualified Pyon.LowLevel.Print as LowLevel
 import qualified Pyon.LowLevel.RecordFlattening as LowLevel
 import qualified Pyon.LowLevel.Closures as LowLevel
 import qualified Pyon.LowLevel.ReferenceCounting as LowLevel
+import qualified Pyon.LowLevel.GenerateC as LowLevel
 
 dummyAnn :: Ann
 dummyAnn = Ann noSourcePos
@@ -456,6 +457,13 @@ pyon_insertReferenceCounting _self mod = rethrowExceptionsInPython $ do
   expectHsObject mod
   m <- fromHsObject' mod
   newHsObject =<< LowLevel.insertReferenceCounting m
+
+foreign export ccall pyon_generateC :: PyPtr -> PyPtr -> IO PyPtr
+
+pyon_generateC _self mod = rethrowExceptionsInPython $ do
+  expectHsObject mod
+  m <- fromHsObject' mod
+  stringToPython $ LowLevel.generateCFile m
 
 foreign export ccall pyon_printModule :: PyPtr -> PyPtr -> IO PyPtr
 

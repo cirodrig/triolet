@@ -57,6 +57,9 @@ def tryCompile(fname, show_traceback = False):
 	low_level = untyped.insertReferenceCounting(low_level)
 	print "Reference counting"
 	untyped.printModule(low_level)
+
+	c_module = untyped.generateC(low_level)
+	print c_module
         # test_sf = type_inference.inferTypes(test_anf)
 
         #flat_sf = untyped.flattenModule(test_inf)

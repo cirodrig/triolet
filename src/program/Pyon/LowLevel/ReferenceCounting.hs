@@ -234,12 +234,20 @@ runBalancedRC m = do
 
 -------------------------------------------------------------------------------
 
+toPointerPrimType :: PrimType -> PrimType
+toPointerPrimType OwnedType = PointerType
+toPointerPrimType t = t
+
+toPointerType :: ValueType -> ValueType
+toPointerType (PrimType pt) = PrimType $ toPointerPrimType pt
+toPointerType t = t
+
 -- | Convert all owned pointers to non-owned pointers in the record type
 toPointerRecordType :: StaticRecord -> StaticRecord
 toPointerRecordType rec =
   staticRecord $ map change_field $ map fieldType $ recordFields rec
   where
-    change_field (PrimField OwnedType) = PrimField PointerType
+    change_field (PrimField t) = PrimField $ toPointerPrimType t
     change_field f = f
 
 isOwnedVar :: Var -> Bool
@@ -253,8 +261,7 @@ isOwnedVar v =
 toPointerVar :: Var -> Var
 toPointerVar v =
   case varType v
-  of PrimType OwnedType -> v {varType = PrimType PointerType}
-     PrimType _ -> v
+  of PrimType t -> v {varType = PrimType $ toPointerPrimType t}
      _ -> internalError "toPointerVar"
 
 -- | Convert a primitive operating on owned pointer variables to the equivalent
@@ -269,6 +276,17 @@ toPointerPrim prim =
      PrimCastFromOwned -> internalError "toPointerPrim"
      _ -> prim
 
+-- | Convert global data from owned to non-owned pointers.
+-- Because global data can't contain lambda expressions and can't
+-- release their references, only types have to change.
+toPointerData :: Val -> Val
+toPointerData value =
+  case value
+  of VarV v -> VarV (toPointerVar v)
+     ConV _ -> value
+     LitV _ -> value
+     _ -> internalError "toPointerData"
+
 -- | Perform reference count adjustment on a function.
 rcFun :: [Var] -> Fun -> FreshVarM Fun
 rcFun globals (Fun params returns body) = do
@@ -277,7 +295,7 @@ rcFun globals (Fun params returns body) = do
            withBorrowedVariables params $
            rcBlock returns body
   body'' <- execBuild body'
-  return $ Fun (map toPointerVar params) returns body''
+  return $ Fun (map toPointerVar params) (map toPointerType returns) body''
 
 rcBlock :: [ValueType] -> Block -> RC (GenM Atom)
 rcBlock return_types (Block stms atom) = foldr rcStm gen_atom stms
@@ -292,7 +310,7 @@ rcBlock return_types (Block stms atom) = foldr rcStm gen_atom stms
            -- Create a place to adjust reference counts after the last atom.
            -- Assign the last atom's result to temporary variables, then 
            -- return them.
-           retvars <- mapM newAnonymousVar return_types
+           retvars <- mapM newAnonymousVar (map toPointerType return_types)
            rcAtom return_types (bindAtom retvars) atom $
              return $ return $ ValA $ map (VarV . toPointerVar) retvars
 
@@ -466,4 +484,4 @@ insertReferenceCounting (Module funs datas) = do
       return $ FunDef v f'
 
     rc_data (DataDef v record_type x) =
-      DataDef v (toPointerRecordType record_type) x
+      DataDef (toPointerVar v) (toPointerRecordType record_type) (map toPointerData x)

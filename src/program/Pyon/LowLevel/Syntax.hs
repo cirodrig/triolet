@@ -45,10 +45,11 @@ data Prim =
 
 data Lit =
     UnitL                       -- ^ The unit value
-  | NullL                       -- ^ The NULL pointer
+  | NullL                       -- ^ The NULL non-owned pointer
   | BoolL !Bool                 -- ^ A boolean
   | IntL !Signedness !Size !Integer -- ^ An integer
   | FloatL !Size !Double        -- ^ A floating-point number
+    deriving(Eq)
 
 data Var =
   Var

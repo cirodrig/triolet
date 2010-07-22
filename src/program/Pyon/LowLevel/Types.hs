@@ -23,7 +23,7 @@ data PrimType =
   | PointerType                 -- ^ A pointer
   | OwnedType                   -- ^ An owned reference requiring reference
                                 --   count updates when copied or discarded
-    deriving (Eq)
+    deriving (Eq, Show)
 
 -- | /FIXME/: This is architecture-dependent.
 nativeIntSize :: Size

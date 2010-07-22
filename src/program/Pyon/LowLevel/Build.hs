@@ -155,6 +155,12 @@ nativeWordL n = IntL Unsigned nativeIntSize (fromIntegral n)
 nativeWordV :: Integral a => a -> Val
 nativeWordV n = LitV $ nativeWordL n
 
+nativeIntL :: Integral a => a -> Lit
+nativeIntL n = IntL Signed nativeIntSize (fromIntegral n)
+
+nativeIntV :: Integral a => a -> Val
+nativeIntV n = LitV $ nativeIntL n
+
 -------------------------------------------------------------------------------
 -- Record operations
 
@@ -374,7 +380,7 @@ increfHeaderBy n ptr
   | otherwise = do
       let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
       field_ptr <- primAddP ptr off
-      _ <- primAAddZ (PrimType nativeWordType) field_ptr (nativeWordV n)
+      _ <- primAAddZ (PrimType nativeIntType) field_ptr (nativeIntV n)
       return ()
 
 -- | Generate code to decrease an object's reference count, and free it
@@ -386,10 +392,10 @@ decrefHeader ptr = do
   field_ptr <- primAddP ptr off
   
   -- Decrement the value, get the old reference count
-  old_rc <- primAAddZ (PrimType nativeWordType) field_ptr (nativeWordV (-1))
+  old_rc <- primAAddZ (PrimType nativeIntType) field_ptr (nativeIntV (-1))
   
   -- If old reference count was 1, free the pointer
-  rc_test <- primCmpZ (PrimType nativeWordType) CmpEQ old_rc (nativeWordV 1)
+  rc_test <- primCmpZ (PrimType nativeIntType) CmpEQ old_rc (nativeIntV 1)
   if_atom <- genIf rc_test
              (do free_func <- loadField (objectHeaderRecord' !!: 1) ptr
                  return $ PrimCallA free_func [ptr])
@@ -408,12 +414,12 @@ decrefHeaderBy n ptr
       field_ptr <- primAddP ptr off
   
       -- Subtract the value, get the old reference count
-      old_rc <- primAAddZ (PrimType nativeWordType) field_ptr $
-                nativeWordV (negate n)
+      old_rc <- primAAddZ (PrimType nativeIntType) field_ptr $
+                nativeIntV (negate n)
   
       -- If old reference count was less than or equal to n, free the pointer
-      rc_test <- primCmpZ (PrimType nativeWordType) CmpLE old_rc $
-                 nativeWordV n
+      rc_test <- primCmpZ (PrimType nativeIntType) CmpLE old_rc $
+                 nativeIntV n
       if_atom <- genIf rc_test
                  (do free_func <- loadField (objectHeaderRecord' !!: 1) ptr
                      return $ PrimCallA free_func [ptr])

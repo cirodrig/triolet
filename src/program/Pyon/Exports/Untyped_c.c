@@ -424,6 +424,8 @@ static PyMethodDef untyped_methods[] = {
    "Convert a program to one that explicitly manipulates function closures"},
   {"insertReferenceCounting", pyon_insertReferenceCounting, METH_O,
    "Insert explicit management of reference counts around owned objects"},
+  {"generateC", pyon_generateC, METH_O,
+   "Generate C code from a Python module.  The code is returned as a string."},
   {"typeCheckModule", pyon_typeCheckSystemFModule, METH_O,
    "Perform type checking on a System F module.  If checking fails, an\n"
    "exception will be raised."},
