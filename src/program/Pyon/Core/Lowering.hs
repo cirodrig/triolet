@@ -63,6 +63,8 @@ convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
     tbl = [ (pyonBuiltin the_passConv_int,
              Right (LLType $ LL.RecordType passConvRecord, intPassConvValue))
+          , (pyonBuiltin the_passConv_float,
+             Right (LLType $ LL.RecordType passConvRecord, floatPassConvValue))
           ]
 
 type BuildBlock a = Gen FreshVarM a

@@ -12,6 +12,7 @@ import Control.Monad
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 
+import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Pyon.LowLevel.Build
 import Pyon.LowLevel.Builtins
@@ -28,13 +29,35 @@ makeBuiltinPrimOps (Module funs datas) =
 
 type GenM a = Gen FreshVarM a
 
+-- | Perform inlining on a value.  If it's a lambda expression, perform
+-- inlining inside the lambda expression.
+inlValue :: Val -> GenM Val
+inlValue v = lift $ inlValue' v
+
+inlValues :: [Val] -> GenM [Val]
+inlValues vs = lift $ mapM inlValue' vs
+
+inlValue' :: Val -> FreshVarM Val
+inlValue' (LamV f) = LamV `liftM` inlFun f
+inlValue' val = return val
+
 -- | Perform inlining on an atom.  If the atom is a call to a function that
 -- can be inlined, try to inline it.
 inlAtom :: Atom -> GenM Atom
 inlAtom atom =
   case atom
-  of CallA (VarV op) args -> inlCall op args
-     _ -> return atom
+  of ValA vs -> ValA `liftM` inlValues vs
+     CallA (VarV op) args -> inlCall op =<< inlValues args
+     CallA op args -> CallA `liftM` inlValue op `ap` inlValues args
+     PrimCallA op args -> PrimCallA `liftM` inlValue op `ap` inlValues args
+     PrimA prim args -> PrimA prim `liftM` inlValues args
+     PackA rec args -> PackA rec `liftM` inlValues args
+     UnpackA rec arg -> UnpackA rec `liftM` inlValue arg
+     SwitchA val alts -> SwitchA `liftM` inlValue val `ap` mapM inlAlt alts
+  where
+    inlAlt (lit, block) = do
+      block' <- getBlock $ inlBlock block
+      return (lit, block')
 
 inlStm :: Stm -> GenM ()
 inlStm stm =
@@ -84,13 +107,42 @@ binaryPrimOp prim op args =
        -- Undersaturated application.  Don't replace it.
        return $ CallA op args
 
+-- Load and store functions are inserted by the compiler, and will always have
+-- the right number of arguments.
+loadOp ty _ args =
+  case args
+  of [addr] -> return $ PrimA (PrimLoad ty) [addr]
+     [] -> internalError "loadOp: Expecting exactly one argument"
+
+storeOp ty _ args =
+  case args
+  of [addr, val] -> return $ PrimA (PrimStore ty) [addr, val]
+     [] -> internalError "storeOp: Expecting exactly two arguments"
+
+-- Loading and storing "None" is actually a no-op. 
+loadNone _ args =
+  case args
+  of [addr] -> return $ ValA [LitV UnitL]
+     [] -> internalError "loadNone: Expecting exactly one argument"
+
+storeNone _ args =
+  case args
+  of [addr, val] -> return $ ValA []
+     [] -> internalError "storeNone: Expecting exactly two arguments"
+
 inliningRules :: IntMap.IntMap ([Val] -> GenM Atom)
 inliningRules =
   IntMap.fromList [ (fromIdent $ varID $ llBuiltin v, f (VarV $ llBuiltin v))
                   | (v, f) <- tbl]
   where
     tbl =
-      [ (the_fun_add_int,
+      [ (the_fun_load_int, loadOp (PrimType pyonIntType))
+      , (the_fun_store_int, storeOp (PrimType pyonIntType))
+      , (the_fun_load_float, loadOp (PrimType pyonFloatType))
+      , (the_fun_store_float, storeOp (PrimType pyonFloatType))
+      , (the_fun_load_NoneType, loadNone)
+      , (the_fun_store_NoneType, storeNone)
+      , (the_fun_add_int,
          binaryPrimOp $ PrimAddZ Signed pyonIntSize)
       , (the_fun_sub_int,
          binaryPrimOp $ PrimSubZ Signed pyonIntSize)
