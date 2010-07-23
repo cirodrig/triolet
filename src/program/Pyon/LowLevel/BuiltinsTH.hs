@@ -65,13 +65,19 @@ builtinPrimitives =
      primFunctionType [PrimType PointerType] [])
   ]
 
+closureBinaryFunctionType t = closureFunctionType [t, t] [t]
+
 -- | Predefined closure functions
 builtinFunctions =
   [ ("add_int",
-     closureFunctionType [PrimType pyonIntType, PrimType pyonIntType] [PrimType pyonIntType]),
-    ("sub_int",
-     closureFunctionType [PrimType pyonIntType, PrimType pyonIntType] [PrimType pyonIntType]),
-    ("dealloc",
+     closureBinaryFunctionType $ PrimType pyonIntType)
+  , ("sub_int",
+     closureBinaryFunctionType $ PrimType pyonIntType)
+  , ("add_float",
+     closureBinaryFunctionType $ PrimType pyonFloatType)
+  , ("sub_float",
+     closureBinaryFunctionType $ PrimType pyonFloatType)
+  , ("dealloc",
      closureFunctionType [PrimType PointerType] [])
   , ("copy4",
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])

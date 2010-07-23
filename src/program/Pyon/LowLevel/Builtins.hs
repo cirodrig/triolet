@@ -14,6 +14,8 @@ module Pyon.LowLevel.Builtins
         the_prim_free_letrec_closure,
         the_fun_add_int,
         the_fun_sub_int,
+        the_fun_add_float,
+        the_fun_sub_float,
         the_fun_dealloc,
         the_fun_copy4,
         the_fun_load_int,

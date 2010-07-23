@@ -58,8 +58,16 @@ convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
              Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_store_int)
           , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_int,
              Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_load_int)
+          , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_float,
+             Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_store_float)
+          , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_float,
+             Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_load_float)
           , (pyonBuiltin (addMember . the_AdditiveDict_int),
              Left $ llBuiltin the_fun_add_int)
+          , (pyonBuiltin (addMember . the_AdditiveDict_float),
+             Left $ llBuiltin the_fun_add_float)
+          , (pyonBuiltin (subMember . the_AdditiveDict_float),
+             Left $ llBuiltin the_fun_add_float)
           ]
 
 type BuildBlock a = Gen FreshVarM a
@@ -316,6 +324,7 @@ getPassConv ty = do
       case unpackConAppCT ty
       of Just (con, args)
            | con `isPyonBuiltin` the_int -> return (return intPassConvValue)
+           | con `isPyonBuiltin` the_float -> return (return floatPassConvValue)
            | con `isPyonBuiltin` the_list -> undefined
          _ -> internalError $ "getPassConv: Unexpected type " ++ show (pprType ty)
 

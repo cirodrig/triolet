@@ -447,3 +447,7 @@ intPassConvValue :: Val
 intPassConvValue =
   passConvValue 4 4 (llBuiltin the_fun_copy4) (llBuiltin the_fun_dealloc)
 
+floatPassConvValue :: Val
+floatPassConvValue =
+  passConvValue 4 4 (llBuiltin the_fun_copy4) (llBuiltin the_fun_dealloc)
+

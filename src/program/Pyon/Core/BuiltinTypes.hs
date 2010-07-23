@@ -54,6 +54,7 @@ mkBinaryOpType ty =
   in OwnRT ::: constructor_type
 
 binaryIntOpType = mkBinaryOpType $ mkInternalConE $ pyonBuiltin the_int
+binaryFloatOpType = mkBinaryOpType $ mkInternalConE $ pyonBuiltin the_int
 
 tuple2ConType :: CBind CReturnT Rec
 tuple2ConType = mkConType $ do
@@ -73,34 +74,45 @@ tuple2ConType = mkConType $ do
         retCT (WriteRT ::: tuple_type)
   return (OwnRT ::: constructor_type)
 
-loadIntType = mkConType $ do
+loadType t = mkConType $ do
   a <- newAnonymousVariable ObjectLevel
-  let int_type = expCT (mkInternalConE $ pyonBuiltin the_int)
-      constructor_type =
+  let constructor_type =
         funCT $
-        pureArrCT (ReadPT a ::: int_type) $
-        retCT (ValRT ::: int_type)
+        pureArrCT (ReadPT a ::: t) $
+        retCT (ValRT ::: t)
   return (OwnRT ::: constructor_type)
 
-storeIntType = mkConType $ do
-  let int_type = expCT (mkInternalConE $ pyonBuiltin the_int)
-      constructor_type =
+storeType t = mkConType $ do
+  let constructor_type =
         funCT $
-        pureArrCT (ValPT Nothing ::: int_type) $
-        retCT (WriteRT ::: int_type)
+        pureArrCT (ValPT Nothing ::: t) $
+        retCT (WriteRT ::: t)
   return (OwnRT ::: constructor_type)
 
+loadIntType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_int)
+storeIntType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_int)
+loadFloatType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_float)
+storeFloatType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_float)
+      
 constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
   where
     table = [ (pyonBuiltin the_passConv_int,
                ValRT ::: conCT (pyonBuiltin the_PassConv))
-            , (pyonBuiltin (addMember . the_AdditiveDict_int),
-               binaryIntOpType)
-            , (getPyonTupleCon' 2,
-               tuple2ConType)
             , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_int,
                storeIntType)
             , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_int,
                loadIntType)
+            , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_float,
+               storeFloatType)
+            , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_float,
+               loadFloatType)
+            , (pyonBuiltin (addMember . the_AdditiveDict_int),
+               binaryIntOpType)
+            , (pyonBuiltin (addMember . the_AdditiveDict_float),
+               binaryFloatOpType)
+            , (pyonBuiltin (subMember . the_AdditiveDict_float),
+               binaryFloatOpType)
+            , (getPyonTupleCon' 2,
+               tuple2ConType)
             ]
