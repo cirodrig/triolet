@@ -477,8 +477,8 @@ constructGlobalFunction global_capture_var v f = do
   let closure_def =
         DataDef v closureRecord [ nativeWordV 1
                                 , LitV NullL
-                                , VarV global_capture_var
                                 , VarV $ infoTableEntry entry_points
+                                , VarV global_capture_var
                                 ]
   writeDefs [] [closure_def]
   where
