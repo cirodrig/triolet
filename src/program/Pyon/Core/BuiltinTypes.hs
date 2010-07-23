@@ -24,7 +24,7 @@ conCoreReturnType c =
   case IntMap.lookup (fromIdent $ conID c) constructorTable
   of Just ty -> ty
      Nothing ->
-       internalError $ "lookupConstructorType: No information for constructor " ++ showLabel (conName c)
+       internalError $ "conCoreReturnType: No information for constructor " ++ showLabel (conName c)
 
 -- | Get the core type of a constructor.
 conCoreType :: Con -> RCType
@@ -93,6 +93,8 @@ loadIntType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_int)
 storeIntType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_int)
 loadFloatType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_float)
 storeFloatType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_float)
+loadNoneTypeType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_NoneType)
+storeNoneTypeType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_NoneType)
       
 constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
@@ -107,7 +109,13 @@ constructorTable =
                storeFloatType)
             , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_float,
                loadFloatType)
+            , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_NoneType,
+               storeNoneTypeType)
+            , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_NoneType,
+               loadNoneTypeType)
             , (pyonBuiltin (addMember . the_AdditiveDict_int),
+               binaryIntOpType)
+            , (pyonBuiltin (subMember . the_AdditiveDict_int),
                binaryIntOpType)
             , (pyonBuiltin (addMember . the_AdditiveDict_float),
                binaryFloatOpType)

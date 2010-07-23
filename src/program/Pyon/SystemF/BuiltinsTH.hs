@@ -115,8 +115,10 @@ pyonBuiltinFunctions =
   , "fun_copy"
   , "fun_store_int"
   , "fun_store_float"
+  , "fun_store_NoneType"
   , "fun_load_int"
   , "fun_load_float"
+  , "fun_load_NoneType"
 
     -- Primitive closure-call functions inserted during lowering
   , "prim_cfun_copy4"

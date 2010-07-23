@@ -17,6 +17,7 @@ import Gluon.Common.Error
 import Gluon.Core
 import Pyon.SystemF.Builtins
 import Pyon.Core.Syntax
+import Pyon.Core.BuiltinTypes
 import Pyon.LowLevel.Syntax as LL
 import Pyon.LowLevel.Types as LL
 import Pyon.LowLevel.Record as LL
@@ -92,3 +93,9 @@ lowerFunctionType ft = lower_ft id ft
         -- its return value
         return_in_param =
           LL.closureFunctionType (params_hd [LL.PrimType LL.PointerType]) []
+
+conLoweredFunctionType :: Con -> LL.FunctionType
+conLoweredFunctionType c =
+  case conCoreType c
+  of FunCT ft -> lowerFunctionType ft 
+     _ -> internalError "conLoweredFunctionType: Not a function type"

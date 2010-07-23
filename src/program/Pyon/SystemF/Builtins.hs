@@ -61,8 +61,10 @@ module Pyon.SystemF.Builtins
         {-the_fun_copy,-}
         the_fun_store_int,
         the_fun_store_float,
+        the_fun_store_NoneType,
         the_fun_load_int,
         the_fun_load_float,
+        the_fun_load_NoneType,
         {-the_prim_cfun_copy4,
         the_prim_cfun_free,
         the_prim_alloc,

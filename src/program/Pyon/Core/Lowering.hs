@@ -42,36 +42,27 @@ import Pyon.Globals
 --   constructors that take no parameters are translated to a value.
 convertCon :: Con -> (LoweringType, LL.Val)
 convertCon c =
-  case IntMap.lookup (fromIdent $ conID c) convertConTable
-  of Just (Left var) ->
-       -- Translated to a core variable.  Return the variable and the
-       -- constructor's type.
-       (CoreType $ conCoreReturnType c, LL.VarV var)
-     Just (Right retval) ->
-       -- Replaced by a hard-coded expression and type.
-       retval
-     Nothing -> internalError $
-                "convertCon: No translation for constructor " ++
-                showLabel (conName c)
+  case lowerBuiltinCoreFunction c
+  of Just var -> (CoreType $ conCoreReturnType c, LL.VarV var)
+     Nothing ->
+       case IntMap.lookup (fromIdent $ conID c) convertConTable
+       of Just (Left var) ->
+            -- Translated to a core variable.  Return the variable and the
+            -- constructor's type.
+            (CoreType $ conCoreReturnType c, LL.VarV var)
+          Just (Right retval) ->
+            -- Replaced by a hard-coded expression and type.
+            retval
+          Nothing -> internalError $
+                     "convertCon: No translation for constructor " ++
+                     showLabel (conName c)
 
+-- | Conversions for constructors that translate to an expression rather than
+-- a global variable in low-level code.
 convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
     tbl = [ (pyonBuiltin the_passConv_int,
              Right (LLType $ LL.RecordType passConvRecord, intPassConvValue))
-          , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_int,
-             Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_store_int)
-          , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_int,
-             Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_load_int)
-          , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_float,
-             Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_store_float)
-          , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_float,
-             Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_load_float)
-          , (pyonBuiltin (addMember . the_AdditiveDict_int),
-             Left $ llBuiltin the_fun_add_int)
-          , (pyonBuiltin (addMember . the_AdditiveDict_float),
-             Left $ llBuiltin the_fun_add_float)
-          , (pyonBuiltin (subMember . the_AdditiveDict_float),
-             Left $ llBuiltin the_fun_add_float)
           ]
 
 type BuildBlock a = Gen FreshVarM a

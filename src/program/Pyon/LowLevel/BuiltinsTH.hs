@@ -7,6 +7,8 @@ import Language.Haskell.TH(Strict(..))
 import Language.Haskell.TH.Syntax(Lift(..))
 
 import Gluon.Common.THRecord
+import qualified Pyon.SystemF.Builtins as SystemF
+import Pyon.SystemF.Builtins(pyonBuiltin)
 import Pyon.LowLevel.Syntax
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
@@ -67,32 +69,36 @@ builtinPrimitives =
 
 closureBinaryFunctionType t = closureFunctionType [t, t] [t]
 
--- | Predefined closure functions
+-- | Predefined closure functions and the core constructor they're derived
+-- from.
 builtinFunctions =
-  [ ("add_int",
-     closureBinaryFunctionType $ PrimType pyonIntType)
-  , ("sub_int",
-     closureBinaryFunctionType $ PrimType pyonIntType)
-  , ("add_float",
-     closureBinaryFunctionType $ PrimType pyonFloatType)
-  , ("sub_float",
-     closureBinaryFunctionType $ PrimType pyonFloatType)
-  , ("dealloc",
-     closureFunctionType [PrimType PointerType] [])
+  [ -- Functions that do not exist in Core
+    ("dealloc",
+     Left $ closureFunctionType [PrimType PointerType] [])
   , ("copy4",
+     Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
+    -- Functions translated from Core
+  , ("add_int",
+     Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_int) |])
+  , ("sub_int", 
+     Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_int) |])
+  , ("add_float",
+     Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_float) |])
+  , ("sub_float",
+     Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_float) |])
   , ("load_int",
-     closureFunctionType [PrimType PointerType] [PrimType pyonIntType])
+     Right [| pyonBuiltin (SystemF.the_fun_load_int) |])
   , ("load_float",
-     closureFunctionType [PrimType PointerType] [PrimType pyonFloatType])
+     Right [| pyonBuiltin (SystemF.the_fun_load_float) |])
   , ("load_NoneType",
-     closureFunctionType [PrimType PointerType] [PrimType pyonNoneType])
+     Right [| pyonBuiltin (SystemF.the_fun_load_NoneType) |])
   , ("store_int",
-     closureFunctionType [PrimType pyonIntType, PrimType PointerType] [])
+     Right [| pyonBuiltin (SystemF.the_fun_store_int) |])
   , ("store_float",
-     closureFunctionType [PrimType pyonFloatType, PrimType PointerType] [])
+     Right [| pyonBuiltin (SystemF.the_fun_store_float) |])
   , ("store_NoneType",
-     closureFunctionType [PrimType pyonNoneType, PrimType PointerType] [])
+     Right [| pyonBuiltin (SystemF.the_fun_store_NoneType) |])
   ]
 
 -- | Predefined global data
@@ -101,9 +107,12 @@ builtinGlobals =
 
 lowLevelBuiltinsRecord = recordDef "LowLevelBuiltins" fields
   where
-    prim_field (nm, _) = ("the_biprim_" ++ nm, IsStrict, [t| (Var, FunctionType) |])
-    clo_field (nm, _) = ("the_bifun_" ++ nm, IsStrict, [t| (Var, EntryPoints) |])
-    var_field (nm, _) = ("the_bivar_" ++ nm, IsStrict, [t| Var |])
+    prim_field (nm, _) =
+      ("the_biprim_" ++ nm, IsStrict, [t| (Var, FunctionType) |])
+    clo_field (nm, _) =
+      ("the_bifun_" ++ nm, IsStrict, [t| (Var, EntryPoints) |])
+    var_field (nm, _) =
+      ("the_bivar_" ++ nm, IsStrict, [t| Var |])
     fields = map prim_field builtinPrimitives ++
              map clo_field builtinFunctions ++
              map var_field builtinGlobals

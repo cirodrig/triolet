@@ -5,9 +5,11 @@
 module Pyon.LowLevel.Builtins
        (-- * Record types
         passConvRecord,
+
         -- * Built-in variables
-        LowLevelBuiltins,
-        initializeLowLevelBuiltins,
+        LowLevelBuiltins(..),
+        lowLevelBuiltins_var,
+        lowerBuiltinCoreFunction,
         llBuiltin,
         the_prim_alloc,
         the_prim_dealloc,
@@ -26,8 +28,7 @@ module Pyon.LowLevel.Builtins
         the_fun_load_NoneType,
         the_fun_store_int,
         the_fun_store_float,
-        the_fun_store_NoneType,
-        builtinType)
+        the_fun_store_NoneType)
 where
 
 import Control.Concurrent.MVar
@@ -48,7 +49,6 @@ import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
 import Pyon.LowLevel.BuiltinsTH
 import Pyon.LowLevel.FreshVar
-import qualified Pyon.SystemF.Builtins as SystemF
 
 -------------------------------------------------------------------------------
 -- Record types
@@ -84,36 +84,18 @@ $(forM builtinPrimitives $ \(fname, _) ->
 llBuiltin :: (LowLevelBuiltins -> a) -> a
 llBuiltin f = f lowLevelBuiltins
 
--- | Get the low-level type of a constructor
-builtinType :: Con -> Maybe PrimType
-builtinType c = IntMap.lookup (fromIdent $ conID c) builtinTypesTable
+-- | All built-in functions that are produced by translating a constructor
+builtinConTable =
+  $(TH.listE [ TH.tupE [mk_con, TH.varE $ TH.mkName $ "the_fun_" ++ fname]
+             | (fname, Right mk_con) <- builtinFunctions])
 
-builtinTypesTable =
-  IntMap.fromList [(fromIdent $ conID c, t) | (c, t) <- tbl]
+-- | Get the low-level variable corresponding to a builtin function
+-- constructor from core
+lowerBuiltinCoreFunction :: Con -> Maybe Var
+lowerBuiltinCoreFunction c = IntMap.lookup (fromIdent $ conID c) tbl
   where
-    tbl = []
-
-initializePrimField :: IdentSupply Var -> String -> FunctionType 
-                    -> IO (Var, FunctionType)
-initializePrimField supply nm fty =
-  runFreshVarM supply $ do
-    let lab = builtinLabel nm
-    v <- newBuiltinVar lab (PrimType PointerType)
-    return (v, fty)
-
-initializeClosureField :: IdentSupply Var -> String -> FunctionType
-                       -> IO (Var, EntryPoints)
-initializeClosureField supply nm fty =
-  runFreshVarM supply $ do
-    let lab = builtinLabel nm
-    v <- newBuiltinVar lab (PrimType OwnedType)
-    ep <- mkEntryPoints fty (Just lab)
-    return (v, ep)
-
-initializeVarField :: IdentSupply Var -> String -> ValueType -> IO Var
-initializeVarField supply nm ty =
-  runFreshVarM supply $ do
-    newBuiltinVar (builtinLabel nm) ty
+    tbl = IntMap.fromList [ (fromIdent $ conID c, v lowLevelBuiltins)
+                          | (c, v) <- builtinConTable]
 
 -- | The low-level built-in global variables
 lowLevelBuiltins :: LowLevelBuiltins
@@ -127,21 +109,3 @@ lowLevelBuiltins_var :: MVar LowLevelBuiltins
 {-# NOINLINE lowLevelBuiltins_var #-}
 lowLevelBuiltins_var = unsafePerformIO newEmptyMVar
 
-initializeLowLevelBuiltins :: IdentSupply Var -> IO ()
-initializeLowLevelBuiltins v_ids = do
-  bi <- $(
-    let init_primitives =
-          [("the_biprim_" ++ nm, [| initializePrimField v_ids nm ty |]) 
-          | (nm, ty) <- builtinPrimitives]
-        init_functions =
-          [("the_bifun_" ++ nm, [| initializeClosureField v_ids nm ty |])
-          | (nm, ty) <- builtinFunctions]
-        init_globals =
-          [("the_bivar_" ++ nm, [| initializeVarField v_ids nm ty |]) 
-          | (nm, ty) <- builtinGlobals]
-        inits = init_primitives ++ init_functions ++ init_globals
-    in initializeRecordM lowLevelBuiltinsRecord inits)
-        
-  ok <- tryPutMVar lowLevelBuiltins_var bi
-  if ok then return ()
-    else fail "initializeLowLevelBuiltins: Already initialized"

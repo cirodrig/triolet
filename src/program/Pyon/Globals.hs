@@ -14,7 +14,7 @@ import Gluon.Parser.Driver
 import qualified Pyon.SystemF.Syntax as SystemF
 import Pyon.SystemF.Builtins
 import qualified Pyon.LowLevel.Syntax as LowLevel
-import Pyon.LowLevel.Builtins
+import Pyon.LowLevel.InitializeBuiltins
 
 the_varIdentSupply :: MVar (Supply (Ident Var))
 {-# NOINLINE the_varIdentSupply #-}
