@@ -3,6 +3,7 @@ module Pyon.LowLevel.GenerateC(generateCFile)
 where
 
 import Control.Monad.Writer
+import qualified Data.Set as Set
 import Debug.Trace
 
 import Language.C.Data.Ident
@@ -14,12 +15,18 @@ import Language.C.Syntax.Constants
 import Gluon.Common.Error
 import Gluon.Common.Identifier(fromIdent)
 import Gluon.Common.Label
+import Pyon.LowLevel.Builtins
 import Pyon.LowLevel.Types
 import Pyon.LowLevel.Record
 import Pyon.LowLevel.Syntax
 import Pyon.LowLevel.Print
 
 type CBlockItems = [CBlockItem]
+
+-- | The set of global variables.  Global variables are bound by a 'FunDef' or
+-- 'DataDef' or defined in another compilation unit.  When referencing a
+-- global variable, we need to take its address.
+type GlobalVars = Set.Set Var
 
 -- | How an atom's results should be dispatched.
 data ReturnValues =
@@ -117,6 +124,12 @@ abstractPtrDeclr ty =
       declr = CDeclr Nothing (derived_declr ++ [CPtrDeclr [] internalNode]) Nothing [] internalNode
   in CDecl type_specs [(Just declr, Nothing, Nothing)] internalNode
 
+charPointerType :: CDecl
+charPointerType =
+  let type_specs = [CTypeSpec (CCharType internalNode)]
+      declr = CDeclr Nothing [CPtrDeclr [] internalNode] Nothing [] internalNode
+  in CDecl type_specs [(Just declr, Nothing, Nothing)] internalNode
+
 -- | Generate a constant integer expression
 genIntConst :: Integral a => Signedness -> Size -> a -> CExpr
 genIntConst sgn sz n =
@@ -158,10 +171,18 @@ genLit (FloatL S32 n) =
      then literal
      else CUnary CMinOp literal internalNode
 
-genVal :: Val -> CExpr
-genVal (VarV v) = CVar (varIdent v) internalNode
-genVal (LitV l) = genLit l
-genVal _ = internalError "genVal: Unexpected value"
+genVal :: GlobalVars -> Val -> CExpr
+genVal gvars (VarV v)
+  | v `Set.member` gvars =
+      -- Take address of global variable; cast to character pointer
+      CCast charPointerType (CUnary CAdrOp var_exp internalNode) internalNode
+  | otherwise = var_exp
+  where
+  var_exp = CVar (varIdent v) internalNode
+      
+genVal _ (LitV l) = genLit l
+
+genVal _ _ = internalError "genVal: Unexpected value"
 
 valType :: Val -> PrimType
 valType (VarV v) = varPrimType v
@@ -206,26 +227,26 @@ genOneResult rtn expr =
 
 -- | Generate a statement from an atom.  The function parameter uses
 -- the translated expression to make a statement.
-genAtom :: ReturnValues -> Atom -> CBlockItems
-genAtom returns atom =
+genAtom :: GlobalVars -> ReturnValues -> Atom -> CBlockItems
+genAtom gvars returns atom =
   case atom
-  of ValA vals -> genManyResults returns $ map genVal vals
+  of ValA vals -> genManyResults returns $ map (genVal gvars) vals
      PrimCallA op args ->
-       genOneResult returns $ genCall (returnTypes returns) op args
+       genOneResult returns $ genCall gvars (returnTypes returns) op args
      PrimA op args ->
-       genOneResult returns $ genPrimCall op $ map genVal args
+       genOneResult returns $ genPrimCall op $ map (genVal gvars) args
      SwitchA val [(c1, block1), (c2, block2)]
        | c1 == BoolL True && c2 == BoolL False ->
-           genIf returns val block1 block2
+           genIf gvars returns val block1 block2
        | c1 == BoolL False && c2 == BoolL True ->
-           genIf returns val block2 block1
+           genIf gvars returns val block2 block1
        | otherwise ->
            internalError "genStatement: Unexpected branching control flow"
      _ -> traceShow (pprAtom atom) $ internalError "genStatement: Unexpected atom"
 
-genCall return_types op args =
-  let op' = genVal op
-      args' = map genVal args
+genCall gvars return_types op args =
+  let op' = genVal gvars op
+      args' = map (genVal gvars) args
       
       -- Create the actual function type
       (return_specs, return_derived_declr) =
@@ -309,35 +330,37 @@ genPrimCall prim args =
     binary op [x, y] = binary' op x y
     binary op _ = internalError "genPrimCall: Wrong number of arguments"
 
-genStatement :: Stm -> CBlockItems
-genStatement (LetE params atom) = genAtom (DefineValues params) atom
-genStatement (LetrecE {}) = internalError "genStatement: Unexpected letrec"
+genStatement :: GlobalVars -> Stm -> CBlockItems
+genStatement gvars (LetE params atom) =
+  genAtom gvars (DefineValues params) atom
+genStatement _ (LetrecE {}) = internalError "genStatement: Unexpected letrec"
 
-genBlock :: ReturnValues -> Block -> CStat
-genBlock returns (Block stms atom) =
-  let stmts = concat $ map genStatement stms ++ [genAtom returns atom]
+genBlock :: GlobalVars -> ReturnValues -> Block -> CStat
+genBlock gvars returns (Block stms atom) =
+  let stmts = concat $ map (genStatement gvars) stms ++
+              [genAtom gvars returns atom]
   in CCompound [] stmts internalNode
 
 -- | Generate an @if@ statement.
 -- The output variables are declared before the statement, then assigned 
 -- inside the statement.
-genIf :: ReturnValues -> Val -> Block -> Block -> CBlockItems
-genIf returns scrutinee if_true if_false =
+genIf :: GlobalVars -> ReturnValues -> Val -> Block -> Block -> CBlockItems
+genIf gvars returns scrutinee if_true if_false =
   let (returns', return_var_decls) =
         case returns
         of AssignValues vs -> (returns, [])
            DefineValues vs ->
              (AssignValues vs, map (CBlockDecl . declareUndefVariable) vs)
            ReturnValues vs -> (returns, [])
-      true_path = genBlock returns' if_true
-      false_path = genBlock returns' if_false
+      true_path = genBlock gvars returns' if_true
+      false_path = genBlock gvars returns' if_false
   in return_var_decls ++
      [CBlockStmt $
-      CIf (genVal scrutinee) true_path (Just false_path) internalNode]
+      CIf (genVal gvars scrutinee) true_path (Just false_path) internalNode]
 
 -- | Generate a forward declaration and definition of a function
-genFun :: FunDef -> (CDecl, CFunDef)
-genFun (FunDef v fun) =
+genFun :: GlobalVars -> FunDef -> (CDecl, CFunDef)
+genFun gvars (FunDef v fun) =
   let -- Function return type
       (return_type_specs, return_derived_declr) =
         case funReturnTypes fun
@@ -357,7 +380,7 @@ genFun (FunDef v fun) =
         
       -- Create the function body
       return_values = ReturnValues $ map valueToPrimType $ funReturnTypes fun
-      body_stmt = genBlock return_values $ funBody fun
+      body_stmt = genBlock gvars return_values $ funBody fun
       
       forward_declaration =
         CDecl return_type_specs [(Just fun_decl, Nothing, Nothing)] internalNode
@@ -368,30 +391,31 @@ genFun (FunDef v fun) =
      else internalError "genFun: Can only generate primitive-call functions"
 
 -- | Create a global static data definition and initialization code.
-genData :: DataDef -> (CExtDecl, CStat)
-genData (DataDef v record_type values) =
+genData :: GlobalVars -> DataDef -> (CExtDecl, CStat)
+genData gvars (DataDef v record_type values) =
   (CDeclExt $
    declareBytes v (recordSize record_type) (recordAlignment record_type),
-   initializeBytes v record_type values)
+   initializeBytes gvars v record_type values)
 
-initializeBytes v record_type values =
+initializeBytes gvars v record_type values =
   let stmts =
         map mk_stmt $
-        zipWith (initializeField v) (recordFields record_type) values
+        zipWith (initializeField gvars v) (recordFields record_type) values
   in CCompound [] stmts internalNode
   where
     mk_stmt e = CBlockStmt $ CExpr (Just e) internalNode
 
-initializeField v fld val =
+initializeField gvars v fld val =
   -- Generate the assignment *(TYPE *)(v + fld) = val
   let field_offset = genSmallIntConst (fieldOffset fld)
-      base_ptr = CVar (varIdent v) internalNode
+      base_ptr = genCast PointerType $
+                 CUnary CAdrOp (CVar (varIdent v) internalNode) internalNode
       field_ptr = CBinary CAddOp base_ptr field_offset internalNode
       field_cast_ptr = case fieldType fld
                        of PrimField t -> genCast t field_ptr
                           _ -> internalError "initializeField"
       lhs = CUnary CIndOp field_cast_ptr internalNode
-      rhs = genVal val
+      rhs = genVal gvars val
   in CAssign CAssignOp lhs rhs internalNode
 
 -- | Create the module initialization function, which initializes the
@@ -408,9 +432,14 @@ initializationFunction stmts =
 
 generateCFile :: Module -> String
 generateCFile (Module funs datas) =
-  let (data_defs, data_inits) = unzip $ map genData datas
+  let global_vars =
+        Set.fromList $ [f | FunDef f _ <- funs] ++
+                       [v | DataDef v _ _ <- datas] ++
+                       allBuiltins
+      
+      (data_defs, data_inits) = unzip $ map (genData global_vars) datas
       init_fun = initializationFunction data_inits
-      (fun_decls, fun_defs) = unzip $ map genFun funs
+      (fun_decls, fun_defs) = unzip $ map (genFun global_vars) funs
       top_level = map CDeclExt fun_decls ++
                   data_defs ++
                   CFDefExt init_fun :

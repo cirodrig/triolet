@@ -10,6 +10,7 @@ module Pyon.LowLevel.Builtins
         LowLevelBuiltins(..),
         lowLevelBuiltins_var,
         lowerBuiltinCoreFunction,
+        allBuiltins,
         llBuiltin,
         the_prim_alloc,
         the_prim_dealloc,
@@ -81,6 +82,17 @@ $(forM builtinPrimitives $ \(fname, _) ->
        read_from_field = TH.normalB [| fst ($(fld) $(bi)) |]
    in [TH.clause [TH.varP $ TH.mkName "builtins"] read_from_field []])
 
+-- | A list of all builtins
+allBuiltins :: [Var]
+allBuiltins =
+  $(TH.listE $ [ [| fst $ $(TH.varE $ TH.mkName $ "the_biprim_" ++ fname) lowLevelBuiltins |]
+               | (fname, _) <- builtinPrimitives] ++
+               [ [| fst $ $(TH.varE $ TH.mkName $ "the_bifun_" ++ fname) lowLevelBuiltins |]
+               | (fname, _) <- builtinFunctions] ++
+               [ [| $(TH.varE $ TH.mkName $ "the_bivar_" ++ fname) lowLevelBuiltins |]
+               | (fname, _) <- builtinGlobals])
+
+-- | Get a builtin by name
 llBuiltin :: (LowLevelBuiltins -> a) -> a
 llBuiltin f = f lowLevelBuiltins
 
