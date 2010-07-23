@@ -69,6 +69,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/Core/TypeLowering.hs \
 	Pyon/Core/BuiltinTypes.hs \
 	Pyon/LowLevel/Build.hs \
+	Pyon/LowLevel/BuiltinCalls.hs \
 	Pyon/LowLevel/Closures.hs \
 	Pyon/LowLevel/FreshVar.hs \
 	Pyon/LowLevel/GenerateC.hs \

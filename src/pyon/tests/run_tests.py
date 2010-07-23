@@ -46,6 +46,7 @@ def tryCompile(fname, show_traceback = False):
 
 	low_level = untyped.lower(flat)
 	del flat
+	low_level = untyped.makeBuiltinPrimOps(low_level)
 	low_level = untyped.flattenRecordTypes(low_level)
 	print "Low-level"
 	untyped.printModule(low_level)

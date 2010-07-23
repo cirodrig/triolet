@@ -60,6 +60,9 @@ bindAtom1 var atom = tell [LetE [var] atom]
 bindAtom :: Monad m => [Var] -> Atom -> Gen m ()
 bindAtom vars atom = tell [LetE vars atom]
 
+emitLetrec :: Monad m => [FunDef] -> Gen m ()
+emitLetrec defs = tell [LetrecE defs]
+
 genIf :: Monad m => Val -> Gen m Atom -> Gen m Atom -> Gen m Atom
 genIf bool if_true if_false = do
   true_block <- getBlock if_true

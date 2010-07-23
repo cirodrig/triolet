@@ -299,6 +299,8 @@ genPrimCall prim args =
                                  Unsigned -> internalIdent "pyon_atomic_add_u"
                     cast_ptr = genCast (IntType sgn sz) ptr
                 in CCall (CVar add_fun internalNode) [cast_ptr, val] internalNode
+     PrimAddF _ -> binary CAddOp args
+     PrimSubF _ -> binary CSubOp args
   where
     zero = genSmallIntConst 0
     geZero x = binary' CGeqOp x zero

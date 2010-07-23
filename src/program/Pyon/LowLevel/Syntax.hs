@@ -48,6 +48,8 @@ data Prim =
   | PrimCastFromOwned           -- ^ Cast an owned pointer to a non-owned
                                 --   pointer.  The reference count is not
                                 --   adjusted.
+  | PrimAddF !Size              -- ^ Floating-point addition
+  | PrimSubF !Size              -- ^ Floating-point subtraction
 
 data Lit =
     UnitL                       -- ^ The unit value

@@ -107,6 +107,8 @@ pprPrim prim =
            PrimAAddZ _ _ -> "atomic_add"
            PrimCastToOwned -> "cast_ptr_own"
            PrimCastFromOwned -> "cast_own_ptr"
+           PrimAddF _ -> "fadd"
+           PrimSubF _ -> "fsub"
       ty =
         case prim
         of PrimLoad t -> pprValueType t

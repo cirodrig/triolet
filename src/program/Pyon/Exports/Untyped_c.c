@@ -418,6 +418,8 @@ static PyMethodDef untyped_methods[] = {
    " module."},
   {"lower", pyon_lower, METH_O,
    "Lower a module to a load-store program representation"},
+  {"makeBuiltinPrimOps", pyon_makeBuiltinPrimOps, METH_O,
+   "Convert builtin function calls to primitive operations"},
   {"flattenRecordTypes", pyon_flattenRecordTypes, METH_O,
    "Eliminate record variables from a program"},
   {"closureConvert", pyon_closureConvert, METH_O,
