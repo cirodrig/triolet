@@ -101,16 +101,6 @@ debugAssignments = False
 debugConstraints :: Bool
 debugConstraints = False
 
-whenM :: Monad m => m Bool -> m () -> m ()
-whenM test m = do
-  b <- test
-  if b then m else return ()
-
-unlessM :: Monad m => m Bool -> m () -> m ()
-unlessM test m = do
-  b <- test
-  if b then return () else m
-
 -- | Effect variables may stand for either a single region or an arbitrary
 -- set of regions.
 data EffectVarKind = RegionEffectVar | EffectEffectVar

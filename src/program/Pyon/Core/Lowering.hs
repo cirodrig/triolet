@@ -1,4 +1,3 @@
-
 {-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
 module Pyon.Core.Lowering(lower)
 where
@@ -23,6 +22,7 @@ import Gluon.Eval.Equality
 import Pyon.Core.Syntax
 import Pyon.Core.Gluon
 import Pyon.Core.Print
+import Pyon.Core.BuiltinTypes
 import Pyon.SystemF.Builtins
 import qualified Pyon.SystemF.Syntax as SystemF
 import qualified Pyon.LowLevel.Syntax as LL
@@ -36,23 +36,30 @@ import Pyon.Globals
 -- | Convert a constructor to the corresponding value in the low-level IR.
 --   Most constructors are translated to a global variable.  Pass-by-value 
 --   constructors that take no parameters are translated to a value.
-convertCon :: Con -> LL.Val
+convertCon :: Con -> (CvType, LL.Val)
 convertCon c =
   case IntMap.lookup (fromIdent $ conID c) convertConTable
-  of Just v -> v
+  of Just (Left var) ->
+       -- Translated to a core variable.  Return the variable and the
+       -- constructor's type.
+       (Right $ conCoreReturnType c, LL.VarV var)
+     Just (Right retval) ->
+       -- Replaced by a hard-coded expression and type.
+       retval
      Nothing -> internalError $
                 "convertCon: No translation for constructor " ++
                 showLabel (conName c)
 
 convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
-    tbl = [ (pyonBuiltin the_passConv_int, intPassConvValue)
+    tbl = [ (pyonBuiltin the_passConv_int,
+             Right (Left $ LL.RecordType passConvRecord, intPassConvValue))
           , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_int,
-             LL.VarV $ llBuiltin Pyon.LowLevel.Builtins.the_fun_store_int)
+             Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_store_int)
           , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_int,
-             LL.VarV $ llBuiltin Pyon.LowLevel.Builtins.the_fun_load_int)
+             Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_load_int)
           , (pyonBuiltin (addMember . the_AdditiveDict_int),
-             LL.VarV $ llBuiltin the_fun_add_int)
+             Left $ llBuiltin the_fun_add_int)
           ]
 
 type BuildBlock a = Gen FreshVarM a
@@ -72,8 +79,14 @@ data CvExp = Cv ![CvType] !CvExp'
 expType :: CvExp -> [CvType]
 expType (Cv t _) = t
 
--- | A converted type is either a value or the core type.  Functions always
--- retain their core type.
+-- | A converted type is either a value type or the un-converted core type.
+--
+-- At function calls, the core types of the function and any dependent
+-- parameters are needed in order to compute the function's return type.
+--
+-- When a value is known not to be used dependently, or is inserted by the
+-- translation, we can safely use the value type.  In general, we use the 
+-- core type unless the value doesn't have a core type.
 type CvType = Either LL.ValueType (CBind CReturnT Rec)
 
 valueType :: CvType -> LL.ValueType
@@ -307,84 +320,6 @@ getPassConv ty = do
          _ -> internalError $ "getPassConv: Unexpected type " ++ show (pprType ty)
 
 -------------------------------------------------------------------------------
--- Data constructors
-
--- | Run the computation to construct a function type.
-mkConType :: Eval (CBind CReturnT Rec) -> CBind CReturnT Rec
-mkConType m = unsafePerformIO $ do
-  val_supply <- newIdentSupply
-  result <- runEvalIO val_supply m
-  case result of Just x -> return x
-                 Nothing -> internalError "mkConType"
-
-mkBinaryOpType :: RExp -> CBind CReturnT Rec
-mkBinaryOpType ty =
-  let constructor_type =
-        funCT $
-        pureArrCT (ValPT Nothing ::: expCT ty) $
-        pureArrCT (ValPT Nothing ::: expCT ty) $
-        retCT (ValRT ::: expCT ty)
-  in OwnRT ::: constructor_type
-
-binaryIntOpType = mkBinaryOpType $ mkInternalConE $ pyonBuiltin the_int
-
-tuple2ConType :: CBind CReturnT Rec
-tuple2ConType = mkConType $ do
-  a <- newAnonymousVariable TypeLevel
-  b <- newAnonymousVariable TypeLevel
-  addr1 <- newAnonymousVariable ObjectLevel
-  addr2 <- newAnonymousVariable ObjectLevel
-  
-  let tuple_type =
-        appExpCT (mkInternalConE $ getPyonTupleType' 2) [varCT a, varCT b]
-      constructor_type =
-        funCT $
-        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
-        pureArrCT (ValPT (Just b) ::: expCT pureKindE) $
-        pureArrCT (ReadPT addr1 ::: varCT a) $
-        pureArrCT (ReadPT addr2 ::: varCT b) $
-        retCT (WriteRT ::: tuple_type)
-  return (OwnRT ::: constructor_type)
-
-loadIntType = mkConType $ do
-  a <- newAnonymousVariable ObjectLevel
-  let int_type = expCT (mkInternalConE $ pyonBuiltin the_int)
-      constructor_type =
-        funCT $
-        pureArrCT (ReadPT a ::: int_type) $
-        retCT (ValRT ::: int_type)
-  return (OwnRT ::: constructor_type)
-
-storeIntType = mkConType $ do
-  let int_type = expCT (mkInternalConE $ pyonBuiltin the_int)
-      constructor_type =
-        funCT $
-        pureArrCT (ValPT Nothing ::: int_type) $
-        retCT (WriteRT ::: int_type)
-  return (OwnRT ::: constructor_type)
-
-constructorTable =
-  IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
-  where
-    table = [ (pyonBuiltin (addMember . the_AdditiveDict_int),
-               Right binaryIntOpType)
-            , (pyonBuiltin the_passConv_int,
-               Left $ LL.RecordType passConvRecord)
-            , (getPyonTupleCon' 2, Right tuple2ConType)
-            , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_int,
-               Right storeIntType)
-            , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_int,
-               Right loadIntType)
-            ]
-
-lookupConstructorType :: Con -> CvType
-lookupConstructorType c =
-  case IntMap.lookup (fromIdent $ conID c) constructorTable
-  of Just ty -> ty
-     Nothing ->
-       internalError $ "lookupConstructorType: No information for constructor " ++ showLabel (conName c)
-
--------------------------------------------------------------------------------
 
 loweredReturnType' (param ::: return_type) =
   loweredReturnType (returnType param ::: return_type)
@@ -437,8 +372,7 @@ convertExp expression =
       return $ value ty $ LL.VarV v'
     
     lookup_con c =
-      let ty = lookupConstructorType c
-      in return $ value ty $ convertCon c
+      case convertCon c of (ty, val) -> return $ value ty val
 
 convertApp op args rarg = do
   -- Convert operator

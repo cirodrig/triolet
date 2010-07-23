@@ -218,6 +218,9 @@ data instance CFunTypeOf Rec s =
 varCT :: Var -> RCType
 varCT v = ExpCT (mkInternalVarE v)
 
+conCT :: Con -> RCType
+conCT c = ExpCT (mkInternalConE c)
+
 expCT :: RecExp s -> CType s
 expCT e = ExpCT e
 
