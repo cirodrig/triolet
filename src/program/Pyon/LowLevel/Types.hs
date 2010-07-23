@@ -33,9 +33,15 @@ nativeIntType, nativeWordType :: PrimType
 nativeIntType = IntType Signed S32
 nativeWordType = IntType Unsigned S32
 
+pyonIntSize :: Size
+pyonIntSize = S32
+
+pyonFloatSize :: Size
+pyonFloatSize = S32
+
 pyonIntType, pyonFloatType, pyonBoolType, pyonNoneType :: PrimType
-pyonIntType = IntType Signed S32
-pyonFloatType = FloatType S32
+pyonIntType = IntType Signed pyonIntSize
+pyonFloatType = FloatType pyonIntSize
 pyonBoolType = BoolType
 pyonNoneType = UnitType
 

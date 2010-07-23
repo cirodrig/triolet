@@ -66,6 +66,7 @@ PYON_HS_SRCS=Main.hs \
 	Pyon/Core/Print.hs \
 	Pyon/Core/Gluon.hs \
 	Pyon/Core/Lowering.hs \
+	Pyon/Core/TypeLowering.hs \
 	Pyon/Core/BuiltinTypes.hs \
 	Pyon/LowLevel/Build.hs \
 	Pyon/LowLevel/Closures.hs \

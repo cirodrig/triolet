@@ -1,3 +1,6 @@
+{-| Lowering from core representation to low-level representation.
+-}
+
 {-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
 module Pyon.Core.Lowering(lower)
 where
@@ -23,6 +26,7 @@ import Pyon.Core.Syntax
 import Pyon.Core.Gluon
 import Pyon.Core.Print
 import Pyon.Core.BuiltinTypes
+import Pyon.Core.TypeLowering
 import Pyon.SystemF.Builtins
 import qualified Pyon.SystemF.Syntax as SystemF
 import qualified Pyon.LowLevel.Syntax as LL
@@ -36,13 +40,13 @@ import Pyon.Globals
 -- | Convert a constructor to the corresponding value in the low-level IR.
 --   Most constructors are translated to a global variable.  Pass-by-value 
 --   constructors that take no parameters are translated to a value.
-convertCon :: Con -> (CvType, LL.Val)
+convertCon :: Con -> (LoweringType, LL.Val)
 convertCon c =
   case IntMap.lookup (fromIdent $ conID c) convertConTable
   of Just (Left var) ->
        -- Translated to a core variable.  Return the variable and the
        -- constructor's type.
-       (Right $ conCoreReturnType c, LL.VarV var)
+       (CoreType $ conCoreReturnType c, LL.VarV var)
      Just (Right retval) ->
        -- Replaced by a hard-coded expression and type.
        retval
@@ -53,7 +57,7 @@ convertCon c =
 convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
     tbl = [ (pyonBuiltin the_passConv_int,
-             Right (Left $ LL.RecordType passConvRecord, intPassConvValue))
+             Right (LLType $ LL.RecordType passConvRecord, intPassConvValue))
           , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_store_int,
              Left $ llBuiltin Pyon.LowLevel.Builtins.the_fun_store_int)
           , (pyonBuiltin Pyon.SystemF.Builtins.the_fun_load_int,
@@ -82,41 +86,10 @@ runFreshVar m = Cvt $ ReaderT $ \env -> runFreshVarM (llVarSupply env) m
 -- for the data type.  It's not necessary to apply dependent type
 -- parameters to compute the right type; consequently, variables
 -- in the type expression are simply ignored.
-data CvExp = Cv ![CvType] !CvExp'
+data CvExp = Cv ![LoweringType] !CvExp'
 
-expType :: CvExp -> [CvType]
+expType :: CvExp -> [LoweringType]
 expType (Cv t _) = t
-
--- | A converted type is either a value type or the un-converted core type.
---
--- At function calls, the core types of the function and any dependent
--- parameters are needed in order to compute the function's return type.
---
--- When a value is known not to be used dependently, or is inserted by the
--- translation, we can safely use the value type.  In general, we use the 
--- core type unless the value doesn't have a core type.
-type CvType = Either LL.ValueType (CBind CReturnT Rec)
-
-valueType :: CvType -> LL.ValueType
-valueType (Left vt) = vt
-valueType (Right (core_binder ::: core_type)) =
-  case core_binder
-  of ValRT ->
-       case unpackConAppCT core_type
-       of Just (con, args)
-            | con `isPyonBuiltin` the_int -> LL.PrimType $ IntType Signed S32
-            | con `isPyonBuiltin` the_float -> LL.PrimType $ FloatType S32
-            | con `isPyonBuiltin` the_bool -> LL.PrimType BoolType
-            | con `isPyonBuiltin` the_NoneType -> LL.PrimType UnitType
-            | con `isPyonBuiltin` the_PassConv -> LL.RecordType passConvRecord
-                 
-          _ -> case core_type
-               of ExpCT (LitE {expLit = KindL _}) -> LL.PrimType UnitType
-                  _ ->internalError $ "valueType: Unexpected type " ++ show (pprType core_type)
-     OwnRT -> LL.PrimType OwnedType
-     WriteRT -> LL.PrimType PointerType
-     ReadRT _ -> LL.PrimType PointerType
-                   
 
 data CvExp' =
     -- | A value
@@ -135,7 +108,7 @@ newtype Cvt a = Cvt {runCvt :: ReaderT CvtEnv IO a} deriving(Monad, MonadIO)
 data CvtEnv = CvtEnv { varSupply :: {-# UNPACK #-}!(IdentSupply Var)
                      , llVarSupply :: {-# UNPACK #-}!(IdentSupply LL.Var)
                      , typeEnvironment :: [(Var, RExp)]
-                     , varAssignment :: IntMap.IntMap (CvType, LL.Var)
+                     , varAssignment :: IntMap.IntMap (LoweringType, LL.Var)
                      }
 
 instance Supplies Cvt (Ident Var) where
@@ -180,15 +153,15 @@ doCvt var_supply anf_var_supply m = do
   let env = CvtEnv var_supply anf_var_supply [] IntMap.empty
   runReaderT (runCvt m) env
       
-lookupVar :: Var -> Cvt (CvType, LL.Var)
+lookupVar :: Var -> Cvt (LoweringType, LL.Var)
 lookupVar v = Cvt $ asks $ \env ->
   case IntMap.lookup (fromIdent $ varID v) (varAssignment env)
   of Just x  -> x
      Nothing -> internalError "lookupVar: No assignment for variable"
 
-convertVar :: Var -> CvType -> (LL.Var -> Cvt a) -> Cvt a
+convertVar :: Var -> LoweringType -> (LL.Var -> Cvt a) -> Cvt a
 convertVar v ty k = do
-  v' <- LL.newVar (varName v) (valueType ty)
+  v' <- LL.newVar (varName v) (lowered ty)
   Cvt $ local (insert_binding v ty v') $ runCvt (k v')
   where
     -- Insert a mapping from core to ANF variable.
@@ -223,10 +196,10 @@ getPassConvEnvironment = do
 
 type MkExp = Cvt CvExp
 
-value :: CvType -> LL.Val -> CvExp
+value :: LoweringType -> LL.Val -> CvExp
 value ty v = Cv [ty] $ CvVal v
 
-atom :: [CvType] -> BuildBlock LL.Atom -> CvExp
+atom :: [LoweringType] -> BuildBlock LL.Atom -> CvExp
 atom ty hd = Cv ty $ CvExp hd
 
 asVal :: CvExp -> BuildBlock LL.Val
@@ -245,10 +218,10 @@ asAtom (Cv _ x) =
      CvExp hd -> hd
 
 -- | Bind the single result of a piece of code to a variable.
-asLet :: [CvType]                 -- ^ Type of result
+asLet :: [LoweringType]                 -- ^ Type of result
       -> BuildBlock LL.Atom       -- ^ Code whose result should be bound
       -> BuildBlock LL.Val        -- ^ Code with result bound to a variable
-asLet [ty] hd = hd >>= emitAtom1 (valueType ty)
+asLet [ty] hd = hd >>= emitAtom1 (lowered ty)
   
 -- | Generate code to compute the size of a data type
 withSizeOf :: RCType -> Cvt (BuildBlock LL.Val)
@@ -340,7 +313,7 @@ loweredReturnType' (param ::: return_type) =
 loweredReturnType rbinder@(param ::: return_type) =
   case param
   of WriteRT -> []
-     _ -> [Right rbinder]
+     _ -> [CoreType rbinder]
 
 convertExp :: RCExp -> Cvt CvExp
 convertExp expression =
@@ -355,18 +328,18 @@ convertExp expression =
           OwnedConV c   -> lookup_con c
           LitV lit      ->
             case lit
-            of SystemF.IntL n   -> literal (Left (LL.PrimType $ IntType Signed S32)) $ 
-                                   LL.IntL Signed S32 n
-               SystemF.FloatL d -> literal (Left (LL.PrimType $ FloatType S32)) $
-                                   LL.FloatL S32 d
-               SystemF.BoolL b  -> literal (Left $ LL.PrimType BoolType) $ LL.BoolL b
-               SystemF.NoneL    -> literal (Left $ LL.PrimType UnitType) LL.UnitL
-          TypeV _       -> literal (Left $ LL.PrimType UnitType) LL.UnitL
+            of SystemF.IntL n   -> literal (LL.PrimType pyonIntType) $ 
+                                   LL.IntL Signed pyonIntSize n
+               SystemF.FloatL d -> literal (LL.PrimType pyonFloatType) $
+                                   LL.FloatL pyonFloatSize d
+               SystemF.BoolL b  -> literal (LL.PrimType pyonBoolType) $ LL.BoolL b
+               SystemF.NoneL    -> literal (LL.PrimType pyonNoneType) LL.UnitL
+          TypeV _       -> literal (LL.PrimType UnitType) LL.UnitL
      AppCE {cexpOper = op, cexpArgs = args, cexpReturnArg = rarg} ->
        convertApp op args rarg
      LamCE {cexpFun = f} -> do
        f' <- convertFun f
-       return $ value (Right $ OwnRT ::: FunCT (cFunType f)) (LL.LamV f')
+       return $ value (CoreType $ OwnRT ::: FunCT (cFunType f)) (LL.LamV f')
      LetCE {cexpBinder = binder, cexpRhs = rhs, cexpBody = body} ->
        convertLet binder rhs body
      LetrecCE {cexpDefs = defs, cexpBody = body} ->
@@ -374,7 +347,7 @@ convertExp expression =
      CaseCE {cexpScrutinee = scr, cexpAlternatives = alts} ->
        convertCase scr alts
   where
-    literal ty lit = return $ value ty $ LL.LitV lit
+    literal ty lit = return $ value (LLType ty) $ LL.LitV lit
 
     lookup_var v = do
       (ty, v') <- lookupVar v
@@ -409,10 +382,10 @@ convertApp op args rarg = do
 
 -- | Compute the return type after applying a function to some number of 
 -- parameters.
-applyFunctionType :: CvType -> [RCExp] -> Cvt [CvType]
+applyFunctionType :: LoweringType -> [RCExp] -> Cvt [LoweringType]
 applyFunctionType _ [] = internalError "applyFunctionType"
-applyFunctionType (Left _) _ = internalError "applyFunctionType"
-applyFunctionType (Right (_ ::: op_type)) args =
+applyFunctionType (LLType _) _ = internalError "applyFunctionType"
+applyFunctionType (CoreType (OwnRT ::: op_type)) args =
   case op_type
   of FunCT ftype -> go_fresh (verbatim ftype) args
   where
@@ -442,7 +415,7 @@ applyFunctionType (Right (_ ::: op_type)) args =
                   , ctEffect = substFully eff
                   , ctRange = substFully rng
                   }
-      in return [Right (OwnRT ::: FunCT subst_type)]
+      in return [CoreType (OwnRT ::: FunCT subst_type)]
 
     go (RetCT {ctReturn = ret}) [] =
       return $ loweredReturnType $
@@ -475,7 +448,7 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
       pass_conv <- getPassConv bind_type
       
       -- The expression will bind a pointer
-      convertVar p (Right var_type) $ \p' -> do
+      convertVar p (CoreType var_type) $ \p' -> do
         rhs' <- convertExp rhs
         body' <- convertExp body
 
@@ -484,7 +457,7 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
         -- doesn't return a value.
         let make_expression = do
               pass_conv_value <- pass_conv
-              let body_type = map valueType $ expType body'
+              let body_type = map lowered $ expType body'
               allocateLocalObject p' pass_conv_value body_type $ do
                 -- Generate code.
                 -- The RHS stores into memory; it returns nothing.
@@ -496,7 +469,7 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
     -- Bind to a temporary variable
     bind add_to_environment v = do
       rhs' <- convertExp rhs
-      convertVar v (Right var_type) $ \v' -> add_to_env $ do
+      convertVar v (CoreType var_type) $ \v' -> add_to_env $ do
         body' <- convertExp body
         
         let make_expression = do
@@ -524,14 +497,14 @@ convertLetrec defs body =
 convertCase scrutinee alternatives = do
   scr' <- convertExp scrutinee
   case expType scr' of
-    [Right (ValRT ::: ty)] ->
+    [CoreType (ValRT ::: ty)] ->
       case unpackConAppCT ty
       of Just (con, args)
            | con `isPyonBuiltin` the_bool ->
                convertBoolCase scr' alternatives
            | otherwise -> unknown_constructor con
          _ -> invalid_type
-    [Right (ReadRT _ ::: ty)] ->
+    [CoreType (ReadRT _ ::: ty)] ->
       case unpackConAppCT ty
       of Just (con, args)
            | con == getPyonTupleType' 2 ->
@@ -578,7 +551,7 @@ convertTuple2Case scr alternatives = do
 -- | Convert a case alternative, for a case statement that involves
 -- a pass-by-reference data type.
 convertRefAlternative :: RCAlt
-                      -> Cvt (LL.Lit, [CvType], LL.Val -> BuildBlock LL.Atom)
+                      -> Cvt (LL.Lit, [LoweringType], LL.Val -> BuildBlock LL.Atom)
 convertRefAlternative alt = do
   -- Get the alternative's data layout
   layout <- recordLayoutOf (caltConstructor alt) (caltTyArgs alt)
@@ -602,7 +575,7 @@ convertFun fun =
   withMany convertParameter (cfunParams fun) $ \params ->
   convert_return (cfunReturn fun) $ \ret_param -> do
     let param_list = params ++ maybeToList ret_param
-    let return_type = map valueType $ loweredReturnType' $ cfunReturn fun
+    let return_type = map lowered $ loweredReturnType' $ cfunReturn fun
     body' <- convertExp $ cfunBody fun
     body_exp <- runFreshVar $ toBlock body'
     return $ LL.closureFun param_list return_type body_exp
@@ -612,18 +585,18 @@ convertFun fun =
       case param
       of ValR -> k Nothing
          OwnR -> k Nothing
-         WriteR _ p -> convertVar p (Left $ LL.PrimType PointerType) $ k . Just
+         WriteR _ p -> convertVar p (LLType $ LL.PrimType PointerType) $ k . Just
          ReadR _ _ -> k Nothing
 
 convertParameter (param ::: param_type) k =
   case param
   of ValP v ->
-       convertVar v (Right $ ValRT ::: param_type) $ \v' ->
+       convertVar v (CoreType $ ValRT ::: param_type) $ \v' ->
        assumeCoreVar v param_type (k v')
-     OwnP v -> convertVar v (Right $ OwnRT ::: param_type) k
+     OwnP v -> convertVar v (CoreType $ OwnRT ::: param_type) k
      ReadP a p ->
        let return_type = ReadRT (mkInternalVarE a) ::: param_type
-       in assumePure a addressType $ convertVar p (Right return_type) k
+       in assumePure a addressType $ convertVar p (CoreType return_type) k
 
 convertDefGroup :: [CDef Rec] -> ([LL.FunDef] -> Cvt a) -> Cvt a
 convertDefGroup defgroup k = 
@@ -637,7 +610,7 @@ convertDefGroup defgroup k =
     k defs
   where
     convert_function_name (CDef v f) k =
-      convertVar v (Right $ OwnRT ::: FunCT (cFunType f)) k
+      convertVar v (CoreType $ OwnRT ::: FunCT (cFunType f)) k
 
 convertModule defss = do 
   convertDefGroup (concat defss) $ \defs ->

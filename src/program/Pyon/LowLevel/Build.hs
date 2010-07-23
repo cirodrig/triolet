@@ -417,15 +417,6 @@ decrefHeaderBy n ptr
                  (do return $ ValA [])
       emitAtom0 if_atom
 
--- | A parameter passing convention consists of size, alignment, copy,
--- and free functions
-passConvRecord :: StaticRecord
-passConvRecord = staticRecord [ PrimField nativeWordType
-                              , PrimField nativeWordType
-                              , PrimField OwnedType
-                              , PrimField OwnedType
-                              ]
-
 selectPassConvSize, selectPassConvAlignment,
   selectPassConvCopy,
   selectPassConvFree :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val

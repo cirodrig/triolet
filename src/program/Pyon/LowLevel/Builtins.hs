@@ -3,7 +3,10 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 module Pyon.LowLevel.Builtins
-       (LowLevelBuiltins,
+       (-- * Record types
+        passConvRecord,
+        -- * Built-in variables
+        LowLevelBuiltins,
         initializeLowLevelBuiltins,
         llBuiltin,
         the_prim_alloc,
@@ -42,9 +45,24 @@ import Gluon.Common.THRecord
 import Gluon.Core(Con(..))
 import Pyon.LowLevel.Syntax
 import Pyon.LowLevel.Types
+import Pyon.LowLevel.Record
 import Pyon.LowLevel.BuiltinsTH
 import Pyon.LowLevel.FreshVar
 import qualified Pyon.SystemF.Builtins as SystemF
+
+-------------------------------------------------------------------------------
+-- Record types
+
+-- | A parameter passing convention consists of size, alignment, copy,
+-- and free functions
+passConvRecord :: StaticRecord
+passConvRecord = staticRecord [ PrimField nativeWordType
+                              , PrimField nativeWordType
+                              , PrimField OwnedType
+                              , PrimField OwnedType
+                              ]
+
+-------------------------------------------------------------------------------
 
 $(sequence [declareRecord lowLevelBuiltinsRecord])
 
