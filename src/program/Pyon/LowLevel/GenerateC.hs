@@ -51,7 +51,7 @@ varIdent v =
         case varName v
         of Just nm ->  '_' : (showLabel nm ++ "_")
            Nothing -> case varPrimType v
-                      of PointerType -> "p_"
+                      of PointerType -> "v_"
                          BoolType -> "b_"
                          IntType Signed _ -> "i_"
                          IntType Unsigned _ -> "u_"
