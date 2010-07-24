@@ -206,7 +206,7 @@ genManyResults rtn exprs =
        return_stm $ CReturn (Just expr) internalNode
   where
     expr = case exprs of [e] -> e
-    return_nothing = return_stm $ CExpr Nothing internalNode
+    return_nothing = []
     return_stm stm = [CBlockStmt stm]
     return_expr e = return_stm $ CExpr (Just e) internalNode
 
@@ -331,6 +331,10 @@ genPrimCall prim args =
     binary op _ = internalError "genPrimCall: Wrong number of arguments"
 
 genStatement :: GlobalVars -> Stm -> CBlockItems
+
+-- Don't generate this useless statemnt if it appears
+genStatement gvars (LetE [] (ValA [])) = []
+
 genStatement gvars (LetE params atom) =
   genAtom gvars (DefineValues params) atom
 genStatement _ (LetrecE {}) = internalError "genStatement: Unexpected letrec"
@@ -340,6 +344,9 @@ genBlock gvars returns (Block stms atom) =
   let stmts = concat $ map (genStatement gvars) stms ++
               [genAtom gvars returns atom]
   in CCompound [] stmts internalNode
+
+isEmptyBlock (CCompound [] [] _) = True
+isEmptyBlock _ = False
 
 -- | Generate an @if@ statement.
 -- The output variables are declared before the statement, then assigned 
@@ -354,9 +361,12 @@ genIf gvars returns scrutinee if_true if_false =
            ReturnValues vs -> (returns, [])
       true_path = genBlock gvars returns' if_true
       false_path = genBlock gvars returns' if_false
+      false_branch = if isEmptyBlock false_path
+                     then Nothing
+                     else Just false_path
   in return_var_decls ++
      [CBlockStmt $
-      CIf (genVal gvars scrutinee) true_path (Just false_path) internalNode]
+      CIf (genVal gvars scrutinee) true_path false_branch internalNode]
 
 -- | Generate a forward declaration and definition of a function
 genFun :: GlobalVars -> FunDef -> (CDecl, CFunDef)
