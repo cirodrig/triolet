@@ -2,6 +2,8 @@
 import os
 import os.path
 import sys
+import tempfile
+import subprocess
 import traceback
 
 import pyon.parser
@@ -60,23 +62,23 @@ def tryCompile(fname, show_traceback = False):
 	untyped.printModule(low_level)
 
 	c_module = untyped.generateC(low_level)
-	print c_module
-        # test_sf = type_inference.inferTypes(test_anf)
 
-        #flat_sf = untyped.flattenModule(test_inf)
-	#print
-	#print "Flattened to ANF"
-	#untyped.printModule(flat_sf)
-
-        #untyped.typeCheckAnfModule(flat_sf)
-	# test_sf = system_f.optimizeModule(test_sf)
-        # test_flat = system_f.flattenModule(test_sf)
-
-        # (DEBUG) print the output
-        # system_f.printCoreModule(test_flat)
-	# system_f.typeCheckCoreModule(test_flat)
-        # test_flat = system_f.effectInferCoreModule(test_flat)
-	#system_f.printCoreModule(test_flat)
+        # Write the C module to a temporary file
+        c_file_fd, c_file_path = tempfile.mkstemp(suffix = 'c')
+        c_file = os.fdopen(c_file_fd, 'w')
+        print "Writing to temporary file ", c_file_path
+        c_file.write(c_module)
+        c_file.close()
+        del c_file
+        try:
+            # Compile the C module
+            base_path, _ = os.path.splitext(fname)
+            o_file_path = base_path + ".o"
+            subprocess.check_call(["gcc",
+                                   "-I" + DATA_DIR,
+                                   "-c", c_file_path,
+                                   "-o", o_file_path])
+        finally: os.remove(c_file_path)
 
     except Exception, e:
         print e

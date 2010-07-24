@@ -59,7 +59,9 @@ data Lit =
 
 data Var =
   Var
-  { varID :: {-# UNPACK #-} !(Ident Var)
+  { -- | An ID uniquely identifying this variable.  If two variables have
+    -- the same ID, all their other fields should be the same also.
+    varID :: {-# UNPACK #-} !(Ident Var)
     -- | True if this is a built-in variable, i.e. one that is implicitly
     -- defined at global scope.
   , varIsBuiltin :: {-# UNPACK #-} !Bool

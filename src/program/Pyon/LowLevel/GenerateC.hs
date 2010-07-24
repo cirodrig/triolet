@@ -44,21 +44,32 @@ returnTypes (ReturnValues ps) = ps
 
 varPrimType v = valueToPrimType $ varType v
 
--- | Generate the C name for a variable
+-- | Generate the C name for a variable.
+-- If it's a builtin variable, or if it's an exported
+-- variable, then use the name alone.  Otherwise, generate a unique name
+-- using the variable's name and ID.
 varIdent :: Var -> Ident
-varIdent v =
-  let leader =
-        case varName v
-        of Just nm ->  '_' : (showLabel nm ++ "_")
-           Nothing -> case varPrimType v
-                      of PointerType -> "v_"
-                         BoolType -> "b_"
-                         IntType Signed _ -> "i_"
-                         IntType Unsigned _ -> "u_"
-                         FloatType _ -> "f_"
-                         x -> traceShow x $ internalError "varIdent: Unexpected type"
-      name = leader ++ show (fromIdent $ varID v)
-  in internalIdent name
+varIdent v 
+  -- If it's a builtin variable, use the label
+  | Just var_name <- varName v,
+    moduleOf var_name == builtinModuleName =
+      internalIdent $ showLabel var_name
+  -- Otherwise, generate a unique naem
+  | otherwise =
+      let leader =
+            case varName v
+            of Just nm ->  '_' : (showLabel nm ++ "_")
+               Nothing -> type_leader $ varPrimType v
+          name = leader ++ show (fromIdent $ varID v)
+      in internalIdent name
+  where
+    type_leader PointerType = "v_"
+    type_leader BoolType = "b_"
+    type_leader (IntType Signed _) = "i_"
+    type_leader (IntType Unsigned _) = "u_"
+    type_leader (FloatType _) = "f_"
+    type_leader _ = internalError "varIdent: Unexpected type"
+
 
 -- | Get the type specificer for a non-pointer primitive type
 typeSpec :: PrimType -> CTypeSpec
@@ -460,4 +471,5 @@ generateCFile (Module funs datas) =
   in cModuleHeader ++ module_body_text
   
 cModuleHeader =
-  "#include <inttypes.h>\n"
+  "#include <inttypes.h>\n\
+  \#include <pyon.h>\n"

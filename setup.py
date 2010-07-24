@@ -15,7 +15,8 @@ setup(name = 'Pyon',
       description = 'Pyon compiler',
       packages = ['pyon', 'pyon.ast', 'pyon.tests', 'pyon.ssa'],
       data_files =
-	[("share/pyon/library", ["library/SFBuiltin.glu", "library/AnfBuiltin.glu"])] +
+	[("share/pyon/library",
+         ["library/SFBuiltin.glu", "library/pyon.h"])] +
 	[("share/pyon/testcases", testcases)],
       package_dir = {'': 'src'},
       ext_modules = [operators_ext])
