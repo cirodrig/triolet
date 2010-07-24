@@ -275,6 +275,22 @@ loadField field ptr = do
   primLoadOff ty ptr off v
   return (VarV v)
 
+-- | Load an owned field as a non-owned pointer.  Reference counts will not 
+-- be tracked or adjusted.
+loadFieldWithoutOwnership :: (Monad m, Supplies m (Ident Var)) =>
+                             DynamicField -> Val -> Gen m Val
+loadFieldWithoutOwnership field ptr = do
+  let off = fieldOffset field
+
+  -- Must be an owned field
+  case fieldType field of
+    PrimField OwnedType -> return ()
+    _ -> internalError "loadFieldWithoutOwnership: Wrong type"
+
+  v <- lift $ newAnonymousVar (PrimType PointerType)
+  primLoadOff (PrimType PointerType) ptr off v
+  return (VarV v)
+
 -- | Load one field of a record into a local variable
 loadFieldAs :: (Monad m, Supplies m (Ident Var)) =>
                DynamicField -> Val -> Var -> Gen m ()
@@ -379,7 +395,7 @@ increfHeaderBy n ptr
 
 -- | Generate code to decrease an object's reference count, and free it
 -- if the reference count is zero.  The parameter variable is an owned
--- reference.
+-- reference or a non-owned pointer.
 decrefHeader :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
 decrefHeader ptr = do
   let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
@@ -419,6 +435,15 @@ decrefHeaderBy n ptr
                      return $ PrimCallA free_func [ptr])
                  (do return $ ValA [])
       emitAtom0 if_atom
+
+-- | Add the given number (which may be negative) to an object's reference  
+-- count.  If positive, 'increfHeaderBy' is called; if negative,
+-- 'decrefHeaderBy' is called.
+adjustHeaderBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
+adjustHeaderBy n ptr
+  | n > 0     = increfHeaderBy n ptr
+  | n < 0     = decrefHeaderBy (negate n) ptr
+  | otherwise = return ()
 
 selectPassConvSize, selectPassConvAlignment,
   selectPassConvCopy,

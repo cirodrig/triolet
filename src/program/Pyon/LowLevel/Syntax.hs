@@ -43,11 +43,9 @@ data Prim =
                                 --   an integer.  Return the original value at
                                 --   that address.
   | PrimCastToOwned             -- ^ Cast a non-owned pointer to an owned
-                                --   pointer.  The reference count is not
-                                --   adjusted.
+                                --   pointer.  A new reference is returned.
   | PrimCastFromOwned           -- ^ Cast an owned pointer to a non-owned
-                                --   pointer.  The reference count is not
-                                --   adjusted.
+                                --   pointer.  Borrows a reference.
   | PrimAddF !Size              -- ^ Floating-point addition
   | PrimSubF !Size              -- ^ Floating-point subtraction
 

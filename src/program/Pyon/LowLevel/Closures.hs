@@ -1,7 +1,8 @@
 {-| Closure conversion.
 
 This pass converts all functions into primitive (non-closure-based)
-functions.  Lambda values and letrec expressions are eliminated.
+functions.  Lambda values and letrec expressions are eliminated.  This pass
+runs before reference counting is inserted.
 
 Data structures should be flattened before running closure conversion.
 'RecV' values are not allowed.  'PackA' and 'UnpackA' atoms are not allowed.
@@ -507,9 +508,6 @@ loadClosureInfoTable = loadField (toDynamicField $ closureRecord !!: 2)
 -- captured variables pointer
 constructClosure :: Val -> Val -> BuildBlock Val
 constructClosure info_ptr capt_ptr = do
-  -- Adjust the captured variables reference count
-  increfHeader capt_ptr
-
   -- Allocate
   closure_ptr <- allocateHeapObject $ nativeWordV $ recordSize closureRecord
     
@@ -586,21 +584,28 @@ capturedVarsRecord vars fn_closures =
     fromPrimType (RecordType _) =
       internalError "referenceCountedClosureRecord: Unexpected record type"
       
--- | Construct a function to free a collection of captured variables
+-- | Construct a function to free a collection of captured variables.
+--
+-- Reference counting is generated explicitly in this function.
+-- To ensure that no reference counting is automatically inserted, the
+-- generated function manipulates non-owned pointer types.
 capturedVarsFreeFunction :: CapturedVars -> CC Fun
 capturedVarsFreeFunction capvars = do
-  object_ptr <- newAnonymousVar (PrimType OwnedType)
+  object_ptr <- newAnonymousVar (PrimType PointerType)
 
   fun_body <- execBuild $ do
     let object = VarV object_ptr
 
-    -- Decref each captured variable that is owned
+    -- Decref each captured variable that is owned.
     mapM_ (decref_field object) $ map toDynamicField $
       capturedVariableFields capvars
   
     -- Deallocate each closure
     mapM_ (dealloc_field object) $ map toDynamicField $
       capturedClosureFields capvars
+      
+    -- Finally, deallocate the object
+    deallocateHeapObject object
     return $ ValA []
     
   return $ primFun [object_ptr] [] fun_body
@@ -609,7 +614,7 @@ capturedVarsFreeFunction capvars = do
       case fieldType fld
       of PrimField OwnedType -> do
            -- Decrement this field's reference count
-           decrefHeader =<< loadField fld object_ptr
+           decrefHeader =<< loadFieldWithoutOwnership fld object_ptr
          PrimField _ -> do
            -- Nothing to do for other fields
            return ()
@@ -643,9 +648,6 @@ finishCapturedVars :: CapturedVars -> Val -> [Val] -> BuildBlock ()
 finishCapturedVars capvars cap_ptr closures = do
   -- Initialize remaining fields
   zipWithM_ initialize_fld closures (capturedClosureFields capvars)
-
-  -- Decrement reference count
-  decrefHeader cap_ptr
   where
     initialize_fld closure fld = do
       -- Store a non-owned pointer

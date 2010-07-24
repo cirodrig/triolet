@@ -108,6 +108,20 @@ maxDeficit = Map.unionWith max
 minusDeficit :: Deficit -> Deficit -> Deficit
 x `minusDeficit` y = addDeficit x $ fmap negate y
 
+-- | When control flow from different paths merges, decide what shared deficit
+-- will flow out of the paths.  We pick the smallest deficit that appears on
+-- any path, that is guaranteed to retain a reference.
+preferredSharedDeficit :: Ownership -> [Int] -> Int
+
+-- If the object is borrowed, we don't need to retain any references
+preferredSharedDeficit Borrowed deficits = minimum deficits
+
+-- Otherwise, if there is a nonzero deficit on any path, we must retain at
+-- least one reference
+preferredSharedDeficit _ deficits 
+  | all (0 ==) deficits = 0
+  | otherwise           = minimum $ filter (0 /=) deficits
+
 isBalanced :: Deficit -> Bool
 isBalanced deficit = all (0 ==) $ Map.elems deficit
 
@@ -158,7 +172,7 @@ withVariable is_owned v m
                   of Owned -> this_deficit - 1 -- One reference is provided
                      Borrowed -> this_deficit
                      Loaded -> this_deficit
-          blk' = increfHeaderBy delta (VarV $ toPointerVar v) >> blk
+          blk' = adjustHeaderBy delta (VarV $ toPointerVar v) >> blk
   
       -- Return the new code.  Stop tracking this variable's deficit.
       return (blk', deficit')
@@ -218,20 +232,40 @@ borrowReferences vs borrower rest = RC $ \ownership src -> do
 
 -- | Ensure that the pieces of code have the same reference deficits at the end
 -- by adjusting reference counts in each piece of code.
-parallelReferences :: [RC (GenM a)] -> RC [GenM a]
+parallelReferences :: [RC (GenM Atom)] -> RC [GenM Atom]
 parallelReferences xs = RC $ \ownership src -> do
   -- Run each path
   ys <- sequence [runRC x ownership src | x <- xs]
   
-  -- Get the maximum reference deficit for each variable
-  let shared_deficit = foldr maxDeficit Map.empty $ map snd ys
+  -- Get the preferred input reference deficit for each variable
+  let deficits = map snd ys
+      shared_deficit = Map.intersectionWith preferredSharedDeficit ownership $
+                       collect deficits
   return (map (reconcile_deficit shared_deficit) ys, shared_deficit)
   where
+    -- Get a map of the deficits for all variables.  At each variable, the 
+    -- map has a list of the deficits found on all paths.  (Zero deficits may
+    -- be missing from the list; we insert a zero to compensate.)
+    collect :: [Deficit] -> Map.Map Var [Int]
+    collect deficits = Map.map add_zero $ 
+                       Map.unionsWith (.) $ 
+                       map (Map.map (:)) deficits
+      where
+        n = length deficits
+        
+        -- If some elements were missing from the list, then they had a zero 
+        -- deficit.  Insert a zero into the list before computing the shared
+        -- deficit.
+        add_zero mklist = let xs = mklist [] 
+                          in if length xs == n then xs else 0 : xs
+        
+
     reconcile_deficit shared_deficit (gen_code, local_deficit) = do
-      let extra_deficit = shared_deficit `minusDeficit` local_deficit
+      let adjustment = local_deficit `minusDeficit` shared_deficit
           
       -- Modify reference counts
-      forM (Map.assocs extra_deficit) $ \(v, n) -> decrefHeaderBy n (VarV $ toPointerVar v)
+      forM (Map.assocs adjustment) $ \(v, n) ->
+        adjustHeaderBy n (VarV $ toPointerVar v)
       
       -- Generate the rest of the code
       gen_code
@@ -415,13 +449,18 @@ rcAtom return_types emit_atom atom k =
      SwitchA val cases -> do
        -- Scrutinee can never be a borrowed value
        val' <- rcVal False val 
-       cases' <- parallelReferences $ map rc_alt cases
-       return_atom $ SwitchA `liftM` val' `ap` sequence cases'
+       
+       -- Scan each alternative and reconcile their reference counts
+       let (case_tags, case_bodies) = unzip cases
+       case_bodies' <-
+         parallelReferences $ map (rcBlock return_types) case_bodies
+       
+       return_atom $ SwitchA `liftM` val' `ap`
+         zipWithM rebuild_alt case_tags case_bodies'
   where
-    rc_alt (lit, block) = do
-      block' <- rcBlock return_types block
-      return $ do block'' <- getBlock block'
-                  return (lit, block'')
+    rebuild_alt tag body = do
+      block' <- getBlock body
+      return (tag, block')
 
     borrow :: [Val] -> RC (GenM Atom) -> RC (GenM a)
     borrow vals m =
