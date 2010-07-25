@@ -75,6 +75,7 @@ def tryCompile(fname, show_traceback = False):
             base_path, _ = os.path.splitext(fname)
             o_file_path = base_path + ".o"
             subprocess.check_call(["gcc",
+                                   "-m32",
                                    "-I" + DATA_DIR,
                                    "-c", c_file_path,
                                    "-o", o_file_path])

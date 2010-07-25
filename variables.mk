@@ -19,6 +19,13 @@ HS_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR) \
 HS_TH_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR) \
 	-XMultiParamTypeClasses $(HS_INCLUDEDIR_FLAGS) $(TH_PACKAGE_FLAGS)
 C_C_OPTS=$(CCFLAGS) $(C_INCLUDEDIR_FLAGS)
+
+# Compile the RTS for dynamic linking.  RTS files will include the same header
+# that compiled Pyon files will include; this file is found in the 'library'
+# directory.
+RTS_C_OPTS=-Ilibrary $(CCFLAGS) -dynamic
+
+# Linker options used for the Pyon binary
 L_OPTS=$(LFLAGS) $(PACKAGE_FLAGS) $(LIDIR_FLAGS) $(LIB_FLAGS)
 
 ## File lists
@@ -96,20 +103,26 @@ PYON_HS_GENERATED_SRCS=Paths_pyon.hs \
 	PythonInterface/Python.hs \
 	PythonInterface/HsObject.hs
 
+RTS_SRCS=pyon_rts.c
+
 PYON_HS_OBJECTS=$(patsubst %.hs, %.o, $(PYON_HS_SRCS) $(PYON_TH_HS_SRCS) $(PYON_HS_GENERATED_SRCS))
 PYON_C_OBJECTS=$(patsubst %.c, %.o, $(PYON_C_SRCS) $(PYON_C_GENERATED_SRCS))
 PYON_OBJECTS=$(PYON_HS_OBJECTS) $(PYON_C_OBJECTS)
+
+RTS_OBJECTS=$(patsubst %.c, %.o, $(RTS_SRCS))
 
 PYON_SCRIPTS=pyon_testsuite pyon_compile
 PYON_GENERATED_SCRIPTS=$(foreach sc, $(PYON_SCRIPTS), build/scripts/$(sc))
 
 PYON_TARGET=build/pyon
+PYON_LIBRARY=build/rts/pyonrts.so
 
 # Generated HS files with full path
 PYON_HS_GENERATED_FILES=$(foreach src, $(PYON_HS_GENERATED_SRCS), $(BUILDDIR)/$(src))
 
 # Object files with full path
 PYON_OBJECT_FILES=$(foreach obj, $(PYON_OBJECTS), $(BUILDDIR)/$(obj))
+RTS_OBJECT_FILES=$(foreach obj, $(RTS_OBJECTS), build/rts/$(obj))
 
 # All source files with full path
 PYON_HS_SOURCE_FILES=$(foreach src, $(PYON_HS_BOOT_SRCS), $(SRCDIR)/$(src)) \

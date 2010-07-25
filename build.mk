@@ -28,8 +28,8 @@ dist/doc/html/pyon/index.html : $(PYON_HS_SOURCE_FILES)
 	@echo "Building documentation..."
 	@env ESED="$(ESED)" HADDOCK_HC_OPTS="$(HADDOCK_HC_OPTS)" PYON_HS_SOURCE_FILES="$(PYON_HS_SOURCE_FILES)" PACKAGES="$(PACKAGES)" sh makedoc.sh
 
-# Create executable and scripts; then run Python's setup script 
-build : $(PYON_TARGET) $(PYON_GENERATED_SCRIPTS) src/pyon/data_dir.py
+# Create executable, library, and scripts; then run Python's setup script 
+build : $(PYON_TARGET) $(PYON_LIBRARY) $(PYON_GENERATED_SCRIPTS) src/pyon/data_dir.py
 	python setup.py build
 
 # Install Python library and files, pyon executable, and scripts
@@ -103,6 +103,15 @@ $(BUILDDIR)/$(1:.c=.o) : $(BUILDDIR)/$(1)
 
 endef
 
+
+# Compile a source file that goes into the RTS
+define COMPILE_RTS_SOURCE
+build/rts/$(1:.c=.o) : src/rts/$1
+	mkdir -p build/rts
+	$(CC) -c $$< -o $$@ $(RTS_C_OPTS)
+
+endef
+
 # Compile all Haskell files
 $(foreach hssrc, $(PYON_HS_BOOT_SRCS),$(eval $(call COMPILE_HS_BOOT_SOURCE,$(hssrc))))
 $(foreach hssrc, $(PYON_HS_SRCS) $(PYON_HS_GENERATED_SRCS),$(eval $(call COMPILE_HS_SOURCE,$(hssrc),$(HS_C_OPTS))))
@@ -115,6 +124,13 @@ $(foreach csrc, $(PYON_C_GENERATED_SRCS),$(eval $(call COMPILE_C_STUB,$(csrc))))
 # Link all object files
 $(PYON_TARGET) : $(PYON_OBJECT_FILES)
 	$(HC) $(PYON_OBJECT_FILES) -o $@ $(L_OPTS)
+
+# Compile all RTS files
+$(foreach csrc, $(RTS_SRCS), $(eval $(call COMPILE_RTS_SOURCE,$(csrc))))
+
+# Link RTS files into a dynamic library
+$(PYON_LIBRARY) : $(RTS_OBJECT_FILES)
+	$(LINKSHARED) $(RTS_OBJECT_FILES) -o $(PYON_LIBRARY) -lc $(LINKFLAGS)
 
 ###############################################################################
 # Generic rules

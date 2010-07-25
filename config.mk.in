@@ -13,6 +13,7 @@ CC=@CC@
 HC=ghc
 HSC2HS=hsc2hs
 ESED=@cir_esed@
+LINKSHARED=libtool -dynamic
 
 ## System-dependent flags
 
@@ -22,6 +23,7 @@ ifeq (@BUILD_32BIT@, yes)
 HSC2HS_32BIT_FLAG=--cflag=-m32 --lflag=-m32
 CC_32BIT_FLAG=-m32
 L_32BIT_FLAG=-optl-m32
+LINKSHARED_32BIT_FLAG=
 
 endif
 
@@ -29,6 +31,7 @@ HSC2HSFLAGS=$(HSC2HS_32BIT_FLAG)
 HCFLAGS=
 CCFLAGS=$(CC_32BIT_FLAG)
 LFLAGS=$(L_32BIT_FLAG)
+LINKFLAGS=$(LINKSHARED_32BIT_FLAG)
 
 # Include directories
 INCLUDEDIRS=@cir_hs_libdir@/include \

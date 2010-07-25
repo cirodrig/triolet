@@ -16,7 +16,8 @@ setup(name = 'Pyon',
       packages = ['pyon', 'pyon.ast', 'pyon.tests', 'pyon.ssa'],
       data_files =
 	[("share/pyon/library",
-         ["library/SFBuiltin.glu", "library/pyon.h"])] +
-	[("share/pyon/testcases", testcases)],
+         ["library/SFBuiltin.glu", "library/pyon.h"]),
+	 ("share/pyon/rts", ["build/rts/pyonrts.so"]),
+	 ("share/pyon/testcases", testcases)],
       package_dir = {'': 'src'},
       ext_modules = [operators_ext])
