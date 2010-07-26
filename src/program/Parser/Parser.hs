@@ -120,6 +120,26 @@ emptyScope = []
 -- A set of variable names
 type NameSet = Set.Set String
 
+-- | A Python variable with scope information.
+--
+-- If a variable is a parameter, it cannot have a nonlocal definition.
+--
+-- Since we do not keep track of global uses and defs, global variables
+-- are always marked as having nonlocal uses and defs.
+data ScopeVar =
+    ScopeVar
+    { scopeVar       :: {-# UNPACK #-} !Var
+    , isParameter    :: !Bool   -- ^ True if this is a function parameter
+    , hasNonlocalUse :: !Bool   -- ^ True if the variable is used outside
+                                -- of its scope; implied by hasNonlocalDef
+    , hasNonlocalDef :: !Bool   -- ^ True if the variable is assigned outside
+                                -- of its scope
+    }
+
+-- A list of the variables local to a scope, generated after a scope is
+-- fully processed.
+newtype Locals = Locals [ScopeVar]
+
 -- Some errors are generated lazily
 type Err = String
 type Errors = [Err] -> [Err]
@@ -184,29 +204,18 @@ instance Applicative Cvt where
 -- Run a computation in a nested scope.  This adds a scope to the stack at
 -- the beginning of the computation and removes it at the end.
 --
--- The 'Locals' parameter is the set of local variables for this scope.
--- It must not be used strictly.
---
 -- We do things slightly differently at global scope, since there's no next
 -- scope to propagate to.
-enter_ :: Bool -> (Locals -> Cvt a) -> Cvt a
-enter_ isGlobalScope f = Cvt $ \initialState ->
+enter_ :: Bool -> Cvt a -> Cvt a
+enter_ isGlobalScope m = Cvt $ \initialState ->
     let -- Run the local computation in a modified environment
         (final, localUses, localDefs, result) =
-            case run (f locals) $ addNewScope final initialState
+            case run m $ addNewScope final initialState
             of OK finalState localUses localDefs x ->
                    let (final, finalState') = removeNewScope finalState
                    in (final, localUses, localDefs, Right (finalState', x))
                Fail str ->
                    (Map.empty, Set.empty, Set.empty, Left str)
-
-        -- The local variables are the 'Local' and 'Param' bindings from the
-        -- scope
-        convertToScopeVar =
-            if isGlobalScope
-            then toGlobalScopeVar
-            else toScopeVar localUses localDefs
-        locals = Locals $ mapMaybe convertToScopeVar $ Map.elems final
 
         -- Nonlocal variables, plus uses that are not satisfied locally,
         -- propagate upward
@@ -453,16 +462,14 @@ expression expr =
        Py.UnaryOp {Py.operator = op, Py.op_arg = arg} -> 
          Unary source_pos op <$> expression arg
        Py.Lambda {Py.lambda_args = args, Py.lambda_body = body} -> 
-         enter $ \_ -> Lambda source_pos <$> traverse parameter args 
-                                         <*> expression body
+         enter $ Lambda source_pos <$> traverse parameter args 
+                                   <*> expression body
 
        -- Generators and list comprehensions have a separate scope
        Py.Generator {Py.gen_comprehension = comp} -> 
-         enter $ \locals -> Generator source_pos locals <$> 
-                            comprehension expression comp
+         enter $ Generator source_pos <$> comprehension expression comp
        Py.ListComp {Py.list_comprehension = comp} -> 
-         enter $ \locals -> ListComp source_pos <$>
-                            comprehension expression comp
+         enter $ ListComp source_pos <$> comprehension expression comp
                             
        Py.Paren {Py.paren_expr = e} -> expression e
        _ -> fail $ "Cannot translate expression:\n" ++ Py.prettyText expr
@@ -648,7 +655,7 @@ funDefinition' decorators (Py.Fun { Py.fun_name = name
   Decorators forall_decorator <- extractDecorators decorators
   nameVar <- definition name
   let pos = toSourcePos annotation
-  enter $ \_ -> do
+  enter $ do
     qvars <- traverse (mapM qvarDefinition) forall_decorator
     params' <- parameters params
     result' <- traverse expression result
@@ -755,7 +762,7 @@ instance MentionsVars Expr where
            Unary _ _ e -> mentionedVars e
            Binary _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
            ListComp _ it -> mentionedVars it
-           Generator _ _ it -> mentionedVars it
+           Generator _ it -> mentionedVars it
            Call _ e es -> mentionedVars (e:es)
            Cond _ e1 e2 e3 -> mentionedVars [e1, e2, e3]
            Lambda _ _ e -> mentionedVars e
@@ -795,8 +802,8 @@ convertModule globals mod names =
     let computation =
             case mod
             of Py.Module statements -> 
-                 enterGlobal $ \_ -> do defineGlobals globals
-                                        topLevel statements
+                 enterGlobal $ do defineGlobals globals
+                                  topLevel statements
     in case runAndGetErrors computation names
        of (ns, Left errs)    -> Left errs
           (ns, Right result) -> Right (ns, result)

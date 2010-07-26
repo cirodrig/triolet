@@ -492,15 +492,6 @@ instance Exportable Parameter where
     toPythonEx (Parameter v ann) = call2Ex (readEnv py_VariableParam) v ann
     toPythonEx (TupleParam es)   = call1Ex (readEnv py_TupleParam) es
 
--- Convert locals to a map from variable to (bool, bool, bool)
-instance Exportable Locals where
-    toPythonEx (Locals vars) = toPythonDictEx (map asAssoc vars)
-        where
-          asAssoc v =
-              ( scopeVar v
-              , Inherit (isParameter v, hasNonlocalUse v, hasNonlocalDef v)
-              )
-
 instance Exportable Stmt where
     toPythonEx (ExprStmt pos e) = call2Ex (readEnv py_ExprStmt) pos e
     toPythonEx (Assign pos lhs e) = call3Ex (readEnv py_AssignStmt) pos lhs e
@@ -521,8 +512,8 @@ instance Exportable Expr where
       call4Ex (readEnv py_BinaryExpr) pos op e f
     toPythonEx (ListComp pos it) = 
       call2Ex (readEnv py_ListCompExpr) pos it
-    toPythonEx (Generator pos l f) = 
-      call3Ex (readEnv py_GeneratorExpr) pos f l
+    toPythonEx (Generator pos f) = 
+      call2Ex (readEnv py_GeneratorExpr) pos f
     toPythonEx (Call pos f xs) = 
       call3Ex (readEnv py_CallExpr) pos f xs
     toPythonEx (Cond pos c tr fa) = 
