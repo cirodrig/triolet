@@ -170,7 +170,6 @@ def _makeSSA(paramorfunc):
     # it from a common inheritence heirarchy
         var = paramorfunc.name
         oldssaver = _nextVarSSA(var)
-        pathdefs = _joinNodeStack[-1]._pathDefs
         paramorfunc.ssaver = var._ssaver
 
         _updatePathDef(var, var._ssaver, oldssaver)
@@ -228,7 +227,6 @@ def _finishPath(fallthrough, alternate_fallthroughs = []):
     for every already-explored path.  
     """
     joinNode = _joinNodeStack[-1]
-    pathdefs = joinNode._pathDefs
     _recordPhis(fallthrough, alternate_fallthroughs)
     _terminatePath()
     #A phi node generates a new SSA assignment, which should be 
