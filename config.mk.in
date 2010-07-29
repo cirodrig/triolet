@@ -1,7 +1,7 @@
 
 # Directories
-BUILDDIR=build/program
-SRCDIR=@srcdir@/src/program
+BUILDDIR=dist/build
+SRCDIR=@srcdir@/src
 
 prefix=@prefix@
 exec_prefix=@exec_prefix@

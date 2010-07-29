@@ -3,64 +3,55 @@
 -- Python object.
 
 {-# LANGUAGE ForeignFunctionInterface #-}
-module Parser.Driver() where
+module Parser.Driver(parserGlobals, parseFile) where
 
-import Prelude hiding(catch)
-import Control.Exception
 import Control.Monad
-import Foreign.C.Types
-import Foreign.C.String
-import System.Environment
 import System.IO
-import System.IO.Error hiding(catch)
-import PythonInterface.Python
 import Parser.Parser
-import Parser.Output
+import Parser.ParserSyntax
+import Parser.SSA
+import Parser.GenUntyped
+import Untyped.Syntax
+import Untyped.Data(ParserVarBinding)
+import Globals
+import GlobalVar
 
-foreign export ccall parsePyonFile :: CString
-                                   -> PyPtr
-                                   -> CInt
-                                   -> IO PyPtr
+-- | The Pyon global variables recognized by the parser.
+parserGlobals :: InitGlobalVar [(Var Int, ParserVarBinding)]
+{-# NOINLINE parserGlobals #-}
+parserGlobals = defineInitGlobalVar ()
 
-readGlobalsList :: PyPtr -> IO [(String, Int, PyPtr)]
-readGlobalsList globals = do
-  is_list <- isList globals
-  unless is_list $ throwPythonExc pyTypeError "Expecting a list" 
-  sz <- getListSize globals
-  
-  mapM fromListItem [0 .. sz - 1]
-  where
-    -- Exceptions may occur in this code, so take care not to adjust
-    -- Python reference counts
-    fromListItem index = do
-      item <- getListItem globals index
-      is_tuple <- isTuple item
-      unless is_tuple $ throwPythonExc pyTypeError "Expecting a list of tuples"
-      
-      s <- fromPythonString =<< getTupleItem item 0
-      n <- fromPythonInt =<< getTupleItem item 1
-      v <- getTupleItem item 2
-      return (s, n, v)
+ssaGlobals :: [(SSAVar, ParserVarBinding)]
+ssaGlobals =
+  [(predefinedSSAVar v, b) | (v, b) <- readInitGlobalVar parserGlobals]
 
--- Read and parse a Pyon file.  On success, a pointer to a Python
--- object is returned.
-parsePyonFile filename_ptr globals_ptr next_id = 
-  rethrowExceptionsInPython $ do
-    -- Marshal filename
-    filename <- peekCString filename_ptr
+-- | Parse a file.  Generates an untyped module.
+parseFile :: FilePath -> IO Untyped.Syntax.Module
+parseFile file_path = do
+  -- Read the file
+  text <- readFile file_path
 
-    -- Marshal global names
-    globals <- readGlobalsList globals_ptr
+  -- Parse and generate an AST
+  pglobals <- readInitGlobalVarIO parserGlobals
+  (nextStm, parse_mod) <-
+    modifyStaticGlobalVar the_nextParserVarID $ \nextID -> do
+      mast <- parseModule text file_path (map fst pglobals) nextID
+      case mast of
+        Left errs -> do
+          mapM_ putStrLn errs  
+          fail "Parsing failed" 
+        Right (nextStm, nextID', mod) ->
+          return (nextID', (nextStm, mod))
 
-    -- Marshal next ID
-    let next_id' = fromIntegral next_id
-    parseFile filename globals next_id'
+  -- Generate SSA form
+  ssa_mod <-
+    modifyStaticGlobalVar the_nextSSAVarID $ \nextSSAID -> do
+      modifyStaticGlobalVar the_nextParserVarID $ \nextID -> do
+        (nextStm', nextID', nextSSAID', ssa_mod) <-
+          computeSSA nextStm nextID nextSSAID pglobals parse_mod
+        return (nextID', (nextSSAID', ssa_mod))
 
--- Parse a Pyon file.  On parser error, raise an exception.
-parseFile inPath globals nextID = do
-  text <- readFile inPath
-  case parseModule text inPath globals nextID of
-    Left errs  -> raisePythonExc pyRuntimeError (head errs)
-    Right defs -> case defs
-                  of (n, mod) -> runExport $ toPythonEx (Inherit n, mod)
+  -- Convert to untyped functional form
+  untyped_mod <- convertToUntyped ssaGlobals ssa_mod
 
+  return untyped_mod

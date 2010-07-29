@@ -8,12 +8,22 @@
 {-# LANGUAGE ExistentialQuantification #-}
 module Parser.ParserSyntax where
 
+import Data.IORef
 import Foreign.Ptr
-import PythonInterface.Python(PyPtr)
+import {-# SOURCE #-} Parser.SSA
 
 import qualified Language.Python.Common.AST as Python
-import Language.Python.Common.AST(Ident, AssignOp, Op)
 import Gluon.Common.SourcePos(SourcePos)
+import Untyped.Data(ParserVarBinding)
+import Untyped.Builtins
+
+type PVar = Var Int
+type PParameter = Parameter Int
+type PExpr = Expr Int
+type PIterFor t = IterFor Int t
+type PIterIf t = IterIf Int t
+type PComprehension t = Comprehension Int t
+type PStmt = Stmt Int
 
 -- | A Python variable.
 -- Different variables have different IDs, though they can have
@@ -23,19 +33,23 @@ import Gluon.Common.SourcePos(SourcePos)
 -- 'varPythonPtr' is NULL.  Otherwise, it holds a borrowed reference
 -- to the corresponding object.
 -- already have that existed 
-data Var =
+data Var id =
     Var
     { varName           :: String
-    , varID             :: {-# UNPACK #-} !Int
-    , varPythonPtr      :: {-# UNPACK #-} !PyPtr
+    , varID             :: !id
+    , varPythonPtr      :: {-# UNPACK #-} !(Ptr ())
     }
     deriving(Eq, Ord, Show)
-            
-makeVar :: String -> Int -> Var
+
+makeVar :: String -> Int -> PVar
 makeVar name id = Var name id nullPtr            
 
-makePredefinedVar :: String -> Int -> PyPtr -> Var
-makePredefinedVar = Var
+-- | Create global variables recognized by the parser.  The variables are 
+-- assigned consecutive IDs starting at the given ID.
+createParserGlobals :: Int -> [(Var Int, ParserVarBinding)]
+createParserGlobals n = zipWith predefined_var [n..] predefinedBindings
+  where
+    predefined_var n (name, binding) = (Var name n nullPtr, binding)
 
 data Literal =
     IntLit !Integer
@@ -43,50 +57,85 @@ data Literal =
   | BoolLit !Bool
   | NoneLit
 
-data Expr =
+data Expr id =
     -- Terminals
-    Variable SourcePos Var
+    Variable SourcePos (Var id)
   | Literal SourcePos Literal
     -- Python expressions
-  | Tuple SourcePos [Expr]
-  | Unary SourcePos !Python.OpSpan Expr
-  | Binary SourcePos !Python.OpSpan Expr Expr
-  | ListComp SourcePos (IterFor Expr)
-  | Generator SourcePos (IterFor Expr)
-  | Call SourcePos Expr [Expr]
-  | Cond SourcePos Expr Expr Expr -- condition, true, false
-  | Lambda SourcePos [Parameter] Expr
+  | Tuple SourcePos [Expr id]
+  | Unary SourcePos !Python.OpSpan (Expr id)
+  | Binary SourcePos !Python.OpSpan (Expr id) (Expr id)
+  | ListComp SourcePos (IterFor id Expr)
+  | Generator SourcePos (IterFor id Expr)
+  | Call SourcePos (Expr id) [(Expr id)]
+  | Cond SourcePos (Expr id) (Expr id) (Expr id) -- condition, true, false
+  | Lambda SourcePos [Parameter id] (Expr id)
 
-type Annotation = Maybe Expr
+type Annotation id = Maybe (Expr id)
 
-data IterFor a =
-    IterFor SourcePos [Parameter] Expr (Comprehension a)
+data IterFor id a =
+    IterFor SourcePos [Parameter id] (Expr id) (Comprehension id a)
 
-data IterIf a =
-    IterIf SourcePos Expr (Comprehension a)
+data IterIf id a =
+    IterIf SourcePos (Expr id) (Comprehension id a)
 
-data Comprehension a =
-    CompFor (IterFor a)
-  | CompIf (IterIf a)
-  | CompBody a
+data Comprehension id a =
+    CompFor (IterFor id a)
+  | CompIf (IterIf id a)
+  | CompBody (a id)
 
-data Stmt =
-    ExprStmt SourcePos Expr
-  | Assign SourcePos Parameter Expr
-  | Return SourcePos Expr
-  | If SourcePos Expr Suite Suite
-  | DefGroup SourcePos [Func]
+data Stmt id =
+    ExprStmt
+    { stmtPos :: !SourcePos 
+    , stmtExpr :: Expr id
+    }
+  | Assign 
+    { stmtPos :: !SourcePos 
+    , stmtLhs :: Parameter id
+    , stmtRhs :: Expr id
+    }
+  | If 
+    { stmtPos :: SourcePos 
+    , stmtCond :: Expr id
+    , stmtTruePath :: Suite id
+    , stmtFalsePath :: Suite id
+    , stmtJoinPoint :: !(Maybe JoinNode)
+    }
+  | DefGroup 
+    { stmtPos :: SourcePos
+    , stmtDefs :: [Func id]
+    }
+  | FallThrough 
+    { stmtPos :: SourcePos
+    , stmtID :: !Int
+    , stmtSuccessor :: {-# UNPACK #-} !(IORef (Maybe JoinNode))
+    }
+  | Return 
+    { stmtPos :: SourcePos 
+    , stmtID :: !Int
+    , stmtSuccessor :: {-# UNPACK #-} !(IORef (Maybe JoinNode))
+    , stmtRhs :: Expr id
+    }
 
-type Suite = [Stmt]
+type Suite id = [Stmt id]
 
-data Parameter =
-    Parameter Var Annotation
-  | TupleParam [Parameter]
+data Parameter id =
+    Parameter (Var id) (Annotation id)
+  | TupleParam [Parameter id]
 
-type ForallAnnotation = [(Var, Maybe Expr)] 
+type ForallAnnotation id = [(Var id, Maybe (Expr id))] 
 
-data Func = Func SourcePos Var (Maybe ForallAnnotation) [Parameter] Annotation Suite
+data Func id =
+  Func 
+  { funcPos :: !SourcePos 
+  , funcName :: Var id 
+  , funcAnnotation :: Maybe (ForallAnnotation id) 
+  , funcParams :: [Parameter id] 
+  , funcReturnAnnotation :: Annotation id
+  , funcBody :: Suite id
+  , funcJoinPoint :: !(Maybe JoinNode)
+  }
 
-data ExportItem = ExportItem SourcePos Var
+data ExportItem id = ExportItem SourcePos (Var id)
 
-data Module = Module [[Func]] [ExportItem]
+data Module id = Module [[Func id]] [ExportItem id]

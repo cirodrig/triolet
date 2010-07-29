@@ -1,0 +1,76 @@
+Name:		pyon
+Version:	0.1
+Cabal-Version:	>= 1.8 && < 1.9
+Synopsis:	Compiler for the data-parallel Pyon language
+License:	OtherLicense
+License-File:	LICENSE
+Stability:	experimental
+Author:		Christopher Rodrigues
+Build-Type:	Custom
+
+Data-Files:
+  symbols/SFBuiltin.glu
+  symbols/pyon.h
+  testcases/*.py
+
+Executable pyon
+  Hs-Source-Dirs: src/program
+  Main-Is:	Main.hs
+  Other-Modules:
+    Paths_pyon
+    Parser.Driver
+    Parser.Parser
+    Parser.ParserSyntax
+    Parser.SSA
+    Parser.GenUntyped
+    Globals
+    GlobalVar
+    InitializeGlobals
+    Untyped.Builtins
+    Untyped.BuiltinsTH
+    Untyped.InitializeBuiltins
+    Untyped.Classes
+    Untyped.Data
+    Untyped.GenSystemF
+    Untyped.HMType
+    Untyped.Kind
+    Untyped.CallConv
+    Untyped.Print
+    Untyped.Syntax
+    Untyped.TypeAssignment
+    Untyped.TypeInference
+    Untyped.TypeInferenceEval
+    Untyped.Unification
+    SystemF.Builtins
+    SystemF.BuiltinsTH
+    SystemF.DeadCode
+    SystemF.ElimPatternMatching
+    SystemF.PartialEval
+    SystemF.Print
+    SystemF.StreamSpecialize
+    SystemF.Syntax
+    SystemF.Typecheck
+    SystemF.NewFlatten.PassConv
+    SystemF.NewFlatten.SetupEffect
+    SystemF.NewFlatten.GenCore
+    Core.Syntax
+    Core.Print
+    Core.Gluon
+    Core.Lowering
+    Core.TypeLowering
+    Core.BuiltinTypes
+    LowLevel.Builtins
+    LowLevel.BuiltinsTH
+    LowLevel.InitializeBuiltins
+    LowLevel.Build
+    LowLevel.BuiltinCalls
+    LowLevel.Closures
+    LowLevel.FreshVar
+    LowLevel.GenerateC
+    LowLevel.Syntax
+    LowLevel.Print
+    LowLevel.Record
+    LowLevel.RecordFlattening
+    LowLevel.ReferenceCounting
+    LowLevel.Types
+    
