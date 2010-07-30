@@ -8,9 +8,10 @@ Stability:	experimental
 Author:		Christopher Rodrigues
 Build-Type:	Custom
 
+Data-Dir:	data
 Data-Files:
   symbols/SFBuiltin.glu
-  symbols/pyon.h
+  include/pyon.h
   testcases/*.py
 
 Executable pyon
@@ -70,6 +71,7 @@ Executable pyon
     LowLevel.Syntax
     LowLevel.Print
     LowLevel.Record
+    LowLevel.Records
     LowLevel.RecordFlattening
     LowLevel.ReferenceCounting
     LowLevel.Types

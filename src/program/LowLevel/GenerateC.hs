@@ -86,14 +86,13 @@ typeSpec pt =
      IntType Unsigned S64 -> type_def "uint64_t"
      FloatType S32 -> CFloatType internalNode
      FloatType S64 -> CDoubleType internalNode
+     PointerType -> CTypeDef (internalIdent "PyonPtr") internalNode
   where
     type_def name = CTypeDef (internalIdent name) internalNode
 
 -- | Get the declaration components to use to declare a variable or a
 -- function return type
 declspecs :: PrimType -> ([CDeclSpec], [CDerivedDeclr])
-declspecs PointerType =
-  ([CTypeSpec (CCharType internalNode)], [CPtrDeclr [] internalNode])
 declspecs t =
   ([CTypeSpec $ typeSpec t], [])
 
@@ -135,10 +134,10 @@ abstractPtrDeclr ty =
       declr = CDeclr Nothing (derived_declr ++ [CPtrDeclr [] internalNode]) Nothing [] internalNode
   in CDecl type_specs [(Just declr, Nothing, Nothing)] internalNode
 
-charPointerType :: CDecl
-charPointerType =
-  let type_specs = [CTypeSpec (CCharType internalNode)]
-      declr = CDeclr Nothing [CPtrDeclr [] internalNode] Nothing [] internalNode
+pyonPointerType :: CDecl
+pyonPointerType =
+  let type_specs = [CTypeSpec (CTypeDef (internalIdent "PyonPtr") internalNode)]
+      declr = CDeclr Nothing [] Nothing [] internalNode
   in CDecl type_specs [(Just declr, Nothing, Nothing)] internalNode
 
 -- | Generate a constant integer expression
@@ -185,8 +184,8 @@ genLit (FloatL S32 n) =
 genVal :: GlobalVars -> Val -> CExpr
 genVal gvars (VarV v)
   | v `Set.member` gvars =
-      -- Take address of global variable; cast to character pointer
-      CCast charPointerType (CUnary CAdrOp var_exp internalNode) internalNode
+      -- Take address of global variable; cast to pointer
+      CCast pyonPointerType (CUnary CAdrOp var_exp internalNode) internalNode
   | otherwise = var_exp
   where
   var_exp = CVar (varIdent v) internalNode
@@ -306,9 +305,8 @@ genPrimCall prim args =
      PrimCmpZ _ _ CmpGT -> binary CGrOp args
      PrimCmpZ _ _ CmpGE -> binary CGeqOp args
      PrimAddP ->
-       -- The argument is already a (char *)
-       -- Add the desired byte offset
-       binary CAddOp args
+       -- Call PYON_OFF (actually a macro) with the pointer and offset
+       CCall (CVar (internalIdent "PYON_OFF") internalNode) args internalNode
      PrimLoad (PrimType ty) ->
        -- Cast the pointer to the desired pointer type, then dereference
        case args
@@ -419,19 +417,18 @@ genData gvars (DataDef v record_type values) =
    initializeBytes gvars v record_type values)
 
 initializeBytes gvars v record_type values =
-  let stmts =
+  let base = CVar (varIdent v) internalNode 
+      stmts =
         map mk_stmt $
-        zipWith (initializeField gvars v) (recordFields record_type) values
+        zipWith (initializeField gvars base) (recordFields record_type) values
   in CCompound [] stmts internalNode
   where
     mk_stmt e = CBlockStmt $ CExpr (Just e) internalNode
 
-initializeField gvars v fld val =
-  -- Generate the assignment *(TYPE *)(v + fld) = val
+initializeField gvars base fld val =
+  -- Generate the assignment *(TYPE *)(PYON_OFF(base, fld)) = val
   let field_offset = genSmallIntConst (fieldOffset fld)
-      base_ptr = genCast PointerType $
-                 CUnary CAdrOp (CVar (varIdent v) internalNode) internalNode
-      field_ptr = CBinary CAddOp base_ptr field_offset internalNode
+      field_ptr = CCall (CVar (internalIdent "PYON_OFF") internalNode) [base, field_offset] internalNode
       field_cast_ptr = case fieldType fld
                        of PrimField t -> genCast t field_ptr
                           _ -> internalError "initializeField"

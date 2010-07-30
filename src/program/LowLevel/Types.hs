@@ -26,6 +26,10 @@ data PrimType =
     deriving (Eq, Show)
 
 -- | /FIXME/: This is architecture-dependent.
+pointerSize :: Size
+pointerSize = S32
+
+-- | /FIXME/: This is architecture-dependent.
 nativeIntSize :: Size
 nativeIntSize = S32
 
@@ -64,7 +68,7 @@ instance HasSize PrimType where
   sizeOf BoolType       = 1
   sizeOf (IntType _ sz) = sizeOf sz
   sizeOf (FloatType sz) = sizeOf sz
-  sizeOf PointerType    = 8     -- FIXME: this is architecture-dependent
-  sizeOf OwnedType      = 8     -- FIXME: this is architecture-dependent
+  sizeOf PointerType    = sizeOf pointerSize
+  sizeOf OwnedType      = sizeOf pointerSize
   alignOf UnitType = 1
   alignOf x = sizeOf x

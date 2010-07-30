@@ -14,6 +14,7 @@ import LowLevel.FreshVar
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record
+import LowLevel.Records
 
 type Gen m a = WriterT [Stm] m a
 
@@ -62,6 +63,10 @@ bindAtom vars atom = tell [LetE vars atom]
 
 emitLetrec :: Monad m => [FunDef] -> Gen m ()
 emitLetrec defs = tell [LetrecE defs]
+
+-- | Generate a no-op
+gen0 :: Monad m => Gen m Atom
+gen0 = return $ ValA [] 
 
 genIf :: Monad m => Val -> Gen m Atom -> Gen m Atom -> Gen m Atom
 genIf bool if_true if_false = do
@@ -154,6 +159,12 @@ nativeIntL n = IntL Signed nativeIntSize (fromIntegral n)
 
 nativeIntV :: Integral a => a -> Val
 nativeIntV n = LitV $ nativeIntL n
+
+uint8V :: Integral a => a -> Val
+uint8V n = LitV $ IntL Unsigned S8 $ fromIntegral n
+
+uint16V :: Integral a => a -> Val
+uint16V n = LitV $ IntL Unsigned S16 $ fromIntegral n
 
 -------------------------------------------------------------------------------
 -- Record operations
@@ -313,16 +324,16 @@ storeField field ptr value =
 -- | Allocate temporary local memory over the scope of some computation.
 --   The allocated memory is not initialized, and must be initialized by 
 --   the given code generator.
-allocateLocalObject :: (Monad m, Supplies m (Ident Var)) =>
-                       Var      -- ^ Pointer that will reference the object
-                    -> Val      -- ^ Passing convention of object
-                    -> [ValueType] -- ^ Return type(s) of the generated code
-                    -> Gen m Atom -- ^ Code generator
-                    -> Gen m Atom
-allocateLocalObject ptr_var pass_conv rtypes mk_block = do
+allocateLocalMem :: (Monad m, Supplies m (Ident Var)) =>
+                    Var      -- ^ Pointer that will reference the object
+                 -> Val      -- ^ Passing convention of object
+                 -> [ValueType] -- ^ Return type(s) of the generated code
+                 -> Gen m Atom -- ^ Code generator
+                 -> Gen m Atom
+allocateLocalMem ptr_var pass_conv rtypes mk_block = do
   -- Allocate the object
   size <- selectPassConvSize pass_conv
-  allocateHeapObjectAs size ptr_var
+  allocateHeapMemAs size ptr_var
   
   -- Generate code and bind its results to temporary variables
   rvars <- lift $ mapM newAnonymousVar rtypes
@@ -337,54 +348,58 @@ allocateLocalObject ptr_var pass_conv rtypes mk_block = do
   return $ ValA $ map VarV rvars
 
 -- | Allocate the given number of bytes on the heap.
-allocateHeapObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
-allocateHeapObject size =
+allocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
+allocateHeapMem size =
   emitAtom1 (PrimType PointerType) $
   PrimCallA (builtinVar the_prim_alloc) [size]
 
-allocateHeapObjectAs :: (Monad m, Supplies m (Ident Var)) =>
-                        Val -> Var -> Gen m ()
-allocateHeapObjectAs size dst =
+allocateHeapMemAs :: (Monad m, Supplies m (Ident Var)) =>
+                     Val -> Var -> Gen m ()
+allocateHeapMemAs size dst =
   bindAtom1 dst $ PrimCallA (builtinVar the_prim_alloc) [size]
 
-deallocateHeapObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
-deallocateHeapObject ptr =
+deallocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
+deallocateHeapMem ptr =
   emitAtom0 $ PrimCallA (builtinVar the_prim_dealloc) [ptr]
 
 -------------------------------------------------------------------------------
 
--- | The object header common to all reference-counted objects.
---
--- The header consists of a reference count and a pointer to a 'free' function.
-objectHeader :: [StaticFieldType]
-objectHeader = [ PrimField nativeWordType
-               , PrimField PointerType               
-               ]
-
-objectHeaderRecord :: StaticRecord
-objectHeaderRecord = staticRecord objectHeader
-
 objectHeaderRecord' :: DynamicRecord
 objectHeaderRecord' = toDynamicRecord objectHeaderRecord
 
+objectHeaderData :: Val -> [Val]
+objectHeaderData info_ptr = [nativeWordV 1, info_ptr]
+
+infoTableHeaderRecord' :: DynamicRecord
+infoTableHeaderRecord' = toDynamicRecord infoTableHeaderRecord
+
 -- | Generate code that initializes an object header.
 -- The reference count is initialized to 1.
-initializeHeader :: (Monad m, Supplies m (Ident Var)) =>
-                    Val         -- ^ Object-freeing function
-                 -> Val         -- ^ Pointer to object
+initializeObject :: (Monad m, Supplies m (Ident Var)) =>
+                    Val         -- ^ Pointer to object
+                 -> Val         -- ^ Info table pointer
                  -> Gen m ()
-initializeHeader free_function ptr = do
+initializeObject ptr info_ptr = do
   storeField (objectHeaderRecord' !!: 0) ptr (nativeWordV 1)
-  storeField (objectHeaderRecord' !!: 1) ptr free_function
+  storeField (objectHeaderRecord' !!: 1) ptr info_ptr
+
+-- | Generate code that frees an object.
+freeObject :: (Monad m, Supplies m (Ident Var)) =>
+              Val               -- ^ Pointer to object
+           -> Gen m ()
+freeObject ptr = do
+  info_ptr <- loadField (objectHeaderRecord' !!: 1) ptr
+  free_func <- loadField (infoTableHeaderRecord' !!: 0) info_ptr
+  emitAtom0 $ PrimCallA free_func [ptr]  
 
 -- | Generate code to increment an object header's reference count.
-increfHeader :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
-increfHeader ptr = increfHeaderBy 1 ptr
+increfObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
+increfObject ptr = increfObjectBy 1 ptr
 
 -- | Generate code to increment an object header's reference count by some
 -- non-negative amount.
-increfHeaderBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
-increfHeaderBy n ptr
+increfObjectBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
+increfObjectBy n ptr
   | n < 0 = internalError "increfHeaderBy: Negative increment"
   | n == 0 = return ()
   | otherwise = do
@@ -396,8 +411,8 @@ increfHeaderBy n ptr
 -- | Generate code to decrease an object's reference count, and free it
 -- if the reference count is zero.  The parameter variable is an owned
 -- reference or a non-owned pointer.
-decrefHeader :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
-decrefHeader ptr = do
+decrefObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
+decrefObject ptr = do
   let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
   field_ptr <- primAddP ptr off
   
@@ -406,17 +421,14 @@ decrefHeader ptr = do
   
   -- If old reference count was 1, free the pointer
   rc_test <- primCmpZ (PrimType nativeIntType) CmpEQ old_rc (nativeIntV 1)
-  if_atom <- genIf rc_test
-             (do free_func <- loadField (objectHeaderRecord' !!: 1) ptr
-                 return $ PrimCallA free_func [ptr])
-             (do return $ ValA [])
+  if_atom <- genIf rc_test (freeObject ptr >> gen0) gen0
   emitAtom0 if_atom
 
 -- | Generate code to decrease an object's reference count, and free it
 -- if the reference count is zero.  The parameter variable is an owned
 -- reference.
-decrefHeaderBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
-decrefHeaderBy n ptr
+decrefObjectBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
+decrefObjectBy n ptr
   | n < 0 = internalError "decrefHeaderBy"
   | n == 0 = return ()
   | otherwise = do
@@ -430,19 +442,16 @@ decrefHeaderBy n ptr
       -- If old reference count was less than or equal to n, free the pointer
       rc_test <- primCmpZ (PrimType nativeIntType) CmpLE old_rc $
                  nativeIntV n
-      if_atom <- genIf rc_test
-                 (do free_func <- loadField (objectHeaderRecord' !!: 1) ptr
-                     return $ PrimCallA free_func [ptr])
-                 (do return $ ValA [])
+      if_atom <- genIf rc_test (freeObject ptr >> gen0) gen0
       emitAtom0 if_atom
 
 -- | Add the given number (which may be negative) to an object's reference  
--- count.  If positive, 'increfHeaderBy' is called; if negative,
--- 'decrefHeaderBy' is called.
-adjustHeaderBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
-adjustHeaderBy n ptr
-  | n > 0     = increfHeaderBy n ptr
-  | n < 0     = decrefHeaderBy (negate n) ptr
+-- count.  If positive, 'increfObjectBy' is called; if negative,
+-- 'decrefObjectBy' is called.
+adjustObjectBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
+adjustObjectBy n ptr
+  | n > 0     = increfObjectBy n ptr
+  | n < 0     = decrefObjectBy (negate n) ptr
   | otherwise = return ()
 
 selectPassConvSize, selectPassConvAlignment,

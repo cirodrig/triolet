@@ -15,6 +15,7 @@ import System.Posix.Temp
 import Gluon.Eval.Error
 import InitializeGlobals
 import Parser.Driver
+import Paths_pyon
 import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
 import qualified Untyped.TypeInference as Untyped
@@ -94,6 +95,7 @@ compileFile fname = do
   -- Write to a temporary file
   withTempFile "pyon.XXXXXX" $ \(c_fname, hdl) -> do
     hPutStr hdl c_mod
+    hClose hdl
     
     -- Compile the file
     compileCFile c_fname o_fname
@@ -102,11 +104,13 @@ compileFile fname = do
 
 -- | Compile a C file to produce an object file.
 compileCFile c_fname o_fname = do
+  include_path <- Paths_pyon.getDataFileName "include"
   let compiler_opts =
         [ "-c"                  -- Compile
         , "-x", "c"             -- Source is a C file
         , c_fname               -- Input filename
         , "-o", o_fname         -- Output filename
+        , "-I" ++ include_path  -- Include directory
         ]
   rc <- rawSystem "gcc" compiler_opts
   unless (rc == ExitSuccess) $ do

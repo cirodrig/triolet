@@ -317,7 +317,7 @@ loadPyonBuiltins :: IdentSupply Var
                  -> IO (Maybe (Module ()))
 loadPyonBuiltins varIDs conIDs builtins = do
   let setup = contextParserSetup varIDs conIDs [builtins]
-  fileName <- getDataFileName ("library"</>"SFBuiltin.glu")
+  fileName <- getDataFileName ("symbols"</>"SFBuiltin.glu")
   m <- loadSourceFile setup fileName
   case m of
     Just cu -> do initializePyonBuiltins cu

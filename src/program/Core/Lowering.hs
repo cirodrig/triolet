@@ -454,7 +454,7 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
         let make_expression = do
               pass_conv_value <- pass_conv
               let body_type = map lowered $ expType body'
-              allocateLocalObject p' pass_conv_value body_type $ do
+              allocateLocalMem p' pass_conv_value body_type $ do
                 -- Generate code.
                 -- The RHS stores into memory; it returns nothing.
                 asAtom rhs' >>= bindAtom0

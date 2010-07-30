@@ -172,7 +172,7 @@ withVariable is_owned v m
                   of Owned -> this_deficit - 1 -- One reference is provided
                      Borrowed -> this_deficit
                      Loaded -> this_deficit
-          blk' = adjustHeaderBy delta (VarV $ toPointerVar v) >> blk
+          blk' = adjustObjectBy delta (VarV $ toPointerVar v) >> blk
   
       -- Return the new code.  Stop tracking this variable's deficit.
       return (blk', deficit')
@@ -194,7 +194,7 @@ adjustBuiltinVarRefCounts m = RC $ \ownership src -> do
   return (blk', other_deficit)
   where
     adjust_references (v, deficit) blk =
-      increfHeaderBy deficit (VarV $ toPointerVar v) >> blk
+      increfObjectBy deficit (VarV $ toPointerVar v) >> blk
 
 -- | Consume a reference to a variable.  If it's an owned variable or
 -- derived from an owned variable, the variable's reference deficit goes
@@ -225,7 +225,7 @@ borrowReferences vs borrower rest = RC $ \ownership src -> do
     -- is held, by inserting a "decref" if necessary.
     fix_reference_counts ownership d1 v (k, d2)
       | getOwnership v ownership /= Borrowed && getDeficit v d2 == 0 =
-          (decrefHeader (VarV $ toPointerVar v) >> k,
+          (decrefObject (VarV $ toPointerVar v) >> k,
            d2 `addDeficit` Map.singleton v 1)
       | otherwise =
           (k, d2)
@@ -265,7 +265,7 @@ parallelReferences xs = RC $ \ownership src -> do
           
       -- Modify reference counts
       forM (Map.assocs adjustment) $ \(v, n) ->
-        adjustHeaderBy n (VarV $ toPointerVar v)
+        adjustObjectBy n (VarV $ toPointerVar v)
       
       -- Generate the rest of the code
       gen_code

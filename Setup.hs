@@ -19,6 +19,8 @@ import Distribution.Verbosity
 makeProgram = simpleProgram "make"
 cabalMakeFile = "cabal.mk"
 
+rtsSourceFiles = ["rts.c"]
+
 -- | The directories where source files belonging to the \"pyon\" program are
 pyonSearchPaths :: LocalBuildInfo -> Executable -> [FilePath]
 pyonSearchPaths lbi exe = autogenModulesDir lbi : hsSourceDirs (buildInfo exe)
@@ -26,6 +28,11 @@ pyonSearchPaths lbi exe = autogenModulesDir lbi : hsSourceDirs (buildInfo exe)
 -- | The directory where object files belonging to the \"pyon\" program go
 pyonBuildDir :: LocalBuildInfo -> FilePath
 pyonBuildDir lbi = buildDir lbi </> "pyon"
+
+rtsBuildDir :: LocalBuildInfo -> FilePath
+rtsBuildDir lbi = buildDir lbi </> "rts"
+
+rtsSourceDir = "src/rts"
 
 -- | A Makefile rule.
 --
@@ -54,7 +61,7 @@ formatMakeRule rule =
 --
 -- > D/A/B.o : E/A/B.hs
 -- > 	mkdir -p D
--- > 	$(HC) -c $< $(HS_C_OPTS)
+-- > 	$(HC) -c $< $(PYON_HS_C_OPTS)
 -- > 	touch D/A/B.hi
 compileHsFile :: FilePath       -- ^ Build path
               -> ModuleName     -- ^ Module to compile
@@ -66,14 +73,14 @@ compileHsFile build_path mod src =
       hi_file = build_path </> toFilePath mod `addExtension` ".hi"
   in MakeRule o_file [src] $
      "mkdir -p " ++ o_path ++ "\n\
-     \$(HC) -c $< $(HS_C_OPTS)\n\
+     \$(HC) -c $< $(PYON_HS_C_OPTS)\n\
      \touch " ++ hi_file
 
 -- | Generate a rule to compile a .hs-boot file
 --
 -- > D/A/B.o-boot : E/A/B.hs-boot
 -- > 	mkdir -p D
--- > 	$(HC) -c $< $(HS_C_OPTS)
+-- > 	$(HC) -c $< $(PYON_HS_C_OPTS)
 compileHsBootFile :: FilePath       -- ^ Build directory
                   -> ModuleName     -- ^ Module to compile
                   -> FilePath       -- ^ Source file
@@ -83,7 +90,18 @@ compileHsBootFile build_path mod src =
       o_path = takeDirectory o_file
   in MakeRule o_file [src] $
      "mkdir -p " ++ o_path ++ "\n\
-     \$(HC) -c $< $(HS_C_OPTS)"
+     \$(HC) -c $< $(PYON_HS_C_OPTS)"
+
+compileRtsFile :: FilePath
+               -> FilePath
+               -> FilePath
+               -> MakeRule
+compileRtsFile build_path source_path src =
+  let o_file = build_path </> src `replaceExtension` ".o"
+      i_file = source_path </> src
+  in MakeRule o_file [i_file] $
+     "mkdir -p " ++ takeDirectory o_file ++ "\n\
+     \$(CC) -c $< -o $@ $(RTS_C_C_OPTS)"
 
 -- Remove a file, but recover on error
 lenientRemoveFile verb f = removeFile f `catch` check_err 
@@ -119,6 +137,7 @@ writePathsModule verb pkg_desc lbi = do
   rewriteFile (autogen_dir </> autogen_filename) paths_module
 
 -- | Find module sources, including boot files.
+-- Return also the Haskell source files.
 generateRules :: Verbosity
               -> LocalBuildInfo
               -> Executable
@@ -127,10 +146,14 @@ generateRules verb lbi exe = do
   info verb "Locating Haskell source files"
   hs_files <- mapM find_hs_file all_modules
   boot_files <- mapM find_boot_file all_modules
+  rts_files <- mapM compile_rts_file rtsSourceFiles
   
-  let rules = hs_files ++ catMaybes boot_files
-      -- The prerequisites are the source files
+  let haskell_rules = hs_files ++ catMaybes boot_files
+
+      -- The prerequisites are the Haskell source files
       source_files = concatMap makePrerequisites rules
+      
+      rules = haskell_rules ++ rts_files
       
   return (rules, source_files)
   where
@@ -138,6 +161,9 @@ generateRules verb lbi exe = do
     source_paths = pyonSearchPaths lbi exe
     build_dir = pyonBuildDir lbi
     
+    compile_rts_file file =
+      return $ compileRtsFile (rtsBuildDir lbi) rtsSourceDir file
+
     find_hs_file mod = do
       f <- find_file $ toFilePath mod `addExtension` ".hs"
       case f of
@@ -184,22 +210,35 @@ doBuild pkg_desc lbi hooks flags = do
       let object_files =
             [pyonBuildDir lbi </> toFilePath mod `addExtension` ".o"
             | mod <- fromString "Main" : exeModules exe]
+          rts_source_files = map (rtsSourceDir </>) rtsSourceFiles
+          rts_object_files =
+            [rtsBuildDir lbi </> file `replaceExtension` ".o"
+            | file <- rtsSourceFiles]
       let variables =
             [ ("PYON_SOURCE_FILES", concat $ intersperse " " files)
-            , ("PYON_OBJECT_FILES", concat $ intersperse " " object_files)]
+            , ("PYON_OBJECT_FILES", concat $ intersperse " " object_files)
+            , ("RTS_SOURCE_FILES", concat $ intersperse " " rts_source_files)
+            , ("RTS_OBJECT_FILES", concat $ intersperse " " rts_object_files)
+            ]
       writeCabalMakefile variables rules
       
       -- Generate dependences
       main_path <- findFile (pyonSearchPaths lbi exe) (modulePath exe)
       let include_args =    
             ["-i" ++ path | path <- pyonSearchPaths lbi exe]
-          dep_args =
+          hsdep_args =
             ["-M", "-dep-makefile", "depend_hs.mk",
              "-odir", pyonBuildDir lbi,
              "-hidir", pyonBuildDir lbi] ++ include_args ++
             [main_path]
       
-      rawSystemExit verb "ghc" dep_args
+      rawSystemExit verb "ghc" hsdep_args
+
+      let cdep_args =
+            ["-fdepend.mk", "-p" ++ rtsBuildDir lbi,
+             "-I" ++ rtsSourceDir,
+             "-I" ++ rtsBuildDir lbi] ++ rts_source_files
+      rawSystemExit verb "makedepend" cdep_args
 
       runMake lbi flags ["build"]
 

@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 module LowLevel.Record where
 
+import Data.Bits
 import Gluon.Common.Error
 import LowLevel.Types
 import {-# SOURCE #-} LowLevel.Syntax
@@ -110,4 +111,7 @@ type Offset = Int
 pad :: Offset -> Int -> Offset
 pad off alignment = off + (negate off `mod` alignment)
 
-
+-- | Compute the base-2 logarithm of a power of 2
+log2 :: Int -> Int
+log2 1 = 0
+log2 n = 1 + log2 (n `shiftR` 1)

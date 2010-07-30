@@ -192,6 +192,7 @@ data EntryPoints =
   , _epDirectEntry  :: !Var
   , _epExactEntry   :: !Var
   , _epInexactEntry :: !Var
+  , _epDeallocEntry :: !Var
   , _epInfoTable    :: !Var
   }
 
@@ -216,6 +217,10 @@ exactEntry = _epExactEntry
 inexactEntry :: EntryPoints -> Var
 inexactEntry = _epInexactEntry
 
+-- | Get the deallocation entry point of a function
+deallocEntry :: EntryPoints -> Var
+deallocEntry = _epDeallocEntry
+
 -- | Get  the info table of a function
 infoTableEntry :: EntryPoints -> Var
 infoTableEntry = _epInfoTable
@@ -228,9 +233,10 @@ mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
 mkEntryPoints ftype label 
   | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
   | otherwise = do
-      [v1, v2, v3, v4] <- replicateM 4 $ newVar label (PrimType PointerType)
+      [v1, v2, v3, v4, v5] <-
+        replicateM 5 $ newVar label (PrimType PointerType)
       let arity = length $ ftParamTypes ftype
-      return $! EntryPoints ftype arity v1 v2 v3 v4 
+      return $! EntryPoints ftype arity v1 v2 v3 v4 v5
 
 -- | Create a new variable
 newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var

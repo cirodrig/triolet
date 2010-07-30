@@ -9,24 +9,30 @@ include cabal.mk
 
 ## Convert parameters into command line option strings
 
-PACKAGE_FLAGS=$(foreach pkg, $(PACKAGES), -package $(pkg))
-TH_PACKAGE_FLAGS=$(foreach pkg, $(TH_PACKAGES), -package $(pkg))
+C_PACKAGE_FLAGS=$(foreach pkg, $(C_PACKAGES), -package $(pkg))
+L_PACKAGE_FLAGS=$(foreach pkg, $(L_PACKAGES), -package $(pkg))
 LIB_FLAGS=$(foreach lib, $(LIBS), -l$(lib))
 
 PYON_HS_INCLUDEDIR_FLAGS=\
   -isrc/program -i$(BUILDDIR)/pyon $(foreach dir, $(INCLUDEDIRS), -I$(dir))
 
+CLAY_HS_INCLUDEDIR_FLAGS=\
+  -isrc/program -isrc/rts \
+  -i$(BUILDDIR)/pyon -i$(BUILDDIR)/rts \
+  $(foreach dir, $(INCLUDEDIRS), -I$(dir))
+
 C_INCLUDEDIR_FLAGS=\
-  -Isrc/program -I$(BUILDDIR) $(foreach dir, $(INCLUDEDIRS), -I$(dir))
+  -Isrc/rts -I$(BUILDDIR)/rts $(foreach dir, $(INCLUDEDIRS), -I$(dir))
 
 LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
 
-HS_HSC2HS_OPTS=$(HSC2HSFLAGS) $(C_INCLUDEDIR_FLAGS)
-HS_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR)/pyon \
-	-XMultiParamTypeClasses $(PYON_HS_INCLUDEDIR_FLAGS) $(TH_PACKAGE_FLAGS)
-HS_TH_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR)/pyon \
-	-XMultiParamTypeClasses $(PYON_HS_INCLUDEDIR_FLAGS) $(TH_PACKAGE_FLAGS)
-C_C_OPTS=$(CCFLAGS) $(C_INCLUDEDIR_FLAGS)
+## Aggregate parameters for specific commands
+# TARGET_LANGUAGE_ACTION_OPTS
+
+PYON_HS_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR)/pyon \
+  -XMultiParamTypeClasses $(PYON_HS_INCLUDEDIR_FLAGS) $(C_PACKAGE_FLAGS)
+
+RTS_C_C_OPTS=$(CCFLAGS) $(C_INCLUDEDIR_FLAGS)
 
 # Compile the RTS for dynamic linking.  RTS files will include the same header
 # that compiled Pyon files will include; this file is found in the 'library'
@@ -34,24 +40,20 @@ C_C_OPTS=$(CCFLAGS) $(C_INCLUDEDIR_FLAGS)
 RTS_C_OPTS=-Ilibrary $(CCFLAGS) -dynamic
 
 # Linker options used for the Pyon binary
-L_OPTS=$(LFLAGS) $(PACKAGE_FLAGS) $(LIDIR_FLAGS) $(LIB_FLAGS)
+PYON_L_OPTS=$(LFLAGS) $(L_PACKAGE_FLAGS) $(LIBDIR_FLAGS) $(LIB_FLAGS)
+
+CLAY_L_OPTS=$(HCFLGS) $(LFLAGS) -outputdir $(BUILDDIR)/computelayout \
+  $(CLAY_HS_INCLUDEDIR_FLAGS) $(L_PACKAGE_FLAGS) $(LIBDIR_FLAGS) $(LIB_FLAGS)
 
 ## File lists
 
-RTS_SRCS=pyon_rts.c
+CLAY_SRCS=ComputeLayout.hs
 
-PYON_HS_OBJECTS=$(patsubst %.hs, %.o, $(PYON_HS_SRCS) $(PYON_TH_HS_SRCS) $(PYON_HS_GENERATED_SRCS))
-PYON_C_OBJECTS=$(patsubst %.c, %.o, $(PYON_C_SRCS) $(PYON_C_GENERATED_SRCS))
-PYON_OBJECTS=$(PYON_HS_OBJECTS) $(PYON_C_OBJECTS)
-
-RTS_OBJECTS=$(patsubst %.c, %.o, $(RTS_SRCS))
+CLAY_SOURCE_FILES=$(foreach src, $(CLAY_SRCS), $(SRCDIR)/rts/$(src))
 
 PYON_SCRIPTS=pyon_testsuite pyon_compile
-PYON_GENERATED_SCRIPTS=$(foreach sc, $(PYON_SCRIPTS), build/scripts/$(sc))
+PYON_GENERATED_SCRIPTS=$(foreach src, $(PYON_SCRIPTS), build/scripts/$(src))
 
 PYON_TARGET=$(BUILDDIR)/pyon/pyon
+CLAY_TARGET=$(BUILDDIR)/computelayout/computelayout
 RTS_TARGET=$(BUILDDIR)/rts/pyonrts.so
-
-# Object files with full path
-RTS_OBJECT_FILES=$(foreach obj, $(RTS_OBJECTS), build/rts/$(obj))
-

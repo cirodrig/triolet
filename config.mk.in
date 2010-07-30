@@ -1,6 +1,7 @@
 
 # Directories
 BUILDDIR=dist/build
+DATADIR=data
 SRCDIR=@srcdir@/src
 
 prefix=@prefix@
@@ -29,7 +30,9 @@ endif
 
 HSC2HSFLAGS=$(HSC2HS_32BIT_FLAG)
 HCFLAGS=
-CCFLAGS=$(CC_32BIT_FLAG)
+CCFLAGS=$(CC_32BIT_FLAG) -Werror \
+  -Wimplicit-function-declaration -Wimplicit-int
+
 LFLAGS=$(L_32BIT_FLAG)
 LINKFLAGS=$(LINKSHARED_32BIT_FLAG)
 
@@ -40,8 +43,9 @@ INCLUDEDIRS=@cir_hs_libdir@/include \
 # Library directories
 LIBDIRS=
 
-# Haskell package names
-PACKAGES=base containers mtl utf8-string fgl MaybeT language-python-pyon language-c gluon gluon-eval
+# Haskell package names, except for gluon-eval
+C_PACKAGES=base containers mtl utf8-string fgl MaybeT language-python-pyon language-c gluon
+L_PACKAGES=base containers mtl utf8-string fgl MaybeT language-python-pyon language-c gluon gluon-eval
 
 # Library names
 LIBS=python@cir_python_version@
