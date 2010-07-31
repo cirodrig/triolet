@@ -45,6 +45,7 @@ module SystemF.NewFlatten.PassConv
         EffInf, runEffInf, liftRegionM,
         assumePassType, lookupPassType,
         addConstraint, getConstraint,
+        addFlexibleVariable,
         
         -- * Constructing values in the 'RegionM' monad
         funTDep, funTRgn, funFT, funT, retT,
@@ -174,6 +175,13 @@ canonicalizeEffectVar ev
       case rep of EVNoRep      -> return $ varEffect ev
                   EVVarRep v   -> return $ varEffect v
                   EVValueRep e -> canonicalizeEffect e
+
+-- | Canonicalize the given effect variables and return the set of 
+-- canonical effect variables produced, discarding region variables
+getFlexibleEffectVars :: [EffectVar] -> IO (Set.Set EffectVar)
+getFlexibleEffectVars evs = do
+  effects <- mapM canonicalizeEffectVar evs
+  return $ Set.unions $ map (Set.filter isEVar . effectVars) effects
 
 -- | Assign an effect variable's representative.  The variable should not
 -- have been assigned already.  The effect variable must not be mentioned
@@ -789,9 +797,11 @@ instance RegionMonad RegionM where
       Right x -> return x
 
 -- | The monad used for effect inference.  This monad extends RegionM with 
--- constraints and an effect type environment.
+-- constraints, a list of new variables, and an effect type environment.
 newtype EffInf a =
-  EffInf {doEffInf :: EffectEnv -> IO (a, Constraint -> Constraint)}
+  EffInf {doEffInf :: EffectEnv -> IO (a,
+                                       Constraint -> Constraint,
+                                       [EffectVar] -> [EffectVar])}
 
 data EffectEnv =
   EffectEnv
@@ -805,11 +815,13 @@ data EffectEnv =
 runEffInf :: IdentSupply EffectVar -> IdentSupply Var -> EffInf a -> IO a
 runEffInf evar_ids var_ids m = do
   let env = EffectEnv (RegionEnv evar_ids var_ids Set.empty) IntMap.empty
-  (x, _) <- doEffInf m env
+  (x, _, _) <- doEffInf m env
   return x
 
-effInfReturn :: a -> IO (a, Constraint -> Constraint)
-effInfReturn x = return (x, id)
+effInfReturn :: a -> IO (a,
+                         Constraint -> Constraint,
+                         [EffectVar] -> [EffectVar])
+effInfReturn x = return (x, id, id)
 
 liftRegionM :: RegionM a -> EffInf a
 liftRegionM m = EffInf $ \env -> do x <- doRegionM m (efRegionEnv env)
@@ -818,9 +830,9 @@ liftRegionM m = EffInf $ \env -> do x <- doRegionM m (efRegionEnv env)
 instance Monad EffInf where
   return x = EffInf (\_ -> effInfReturn x) 
   m >>= k = EffInf $ \env -> do
-    (x, c1) <- doEffInf m env
-    (y, c2) <- doEffInf (k x) env
-    return (y, c1 . c2)
+    (x, c1, e1) <- doEffInf m env
+    (y, c2, e2) <- doEffInf (k x) env
+    return (y, c1 . c2, e1 . e2)
 
 instance MonadIO EffInf where
   liftIO m = EffInf (\_ -> m >>= effInfReturn)
@@ -849,9 +861,9 @@ localEffInf f m = EffInf (\env -> doEffInf m (f env))
 transformConstraint :: (Constraint -> RegionM Constraint)
                     -> EffInf a -> EffInf a
 transformConstraint f m = EffInf $ \env -> do
-  (x, cst) <- doEffInf m env
+  (x, cst, vs) <- doEffInf m env
   cst' <- doRegionM (f (cst [])) (efRegionEnv env)
-  return (x, (cst' ++))
+  return (x, (cst' ++), vs)
 
 assumeEffectVariableEffInf :: EffectVar -> EffInf a -> EffInf a
 assumeEffectVariableEffInf ev = localEffInf add_to_env
@@ -897,17 +909,39 @@ lookupPassType v = EffInf $ \env -> effInfReturn $! lookup_var v (efEnv env)
          Just x  -> x
 
 addConstraint :: Constraint -> EffInf ()
-addConstraint cst = debug $ EffInf (\env -> return ((), (cst ++)))
+addConstraint cst = debug $ EffInf (\env -> return ((), (cst ++), id))
   where
     debug x
       | debugConstraints =
           traceShow (text "addConstraint" <+> pprConstraint cst) x
       | otherwise = x
 
+-- | Get the constraint produced by the computation.  An empty constraint is
+-- produced as a side effect.
 getConstraint :: EffInf a -> EffInf (a, Constraint)
 getConstraint m = EffInf $ \env -> do
-  (x, cst) <- doEffInf m env
-  effInfReturn (x, cst [])
+  (x, cst, vs) <- doEffInf m env
+  return ((x, cst []), id, vs)
+
+-- | Add a newly created flexible variable to the environment.  Flexible
+-- variables are created by instantiating an effect-polymorphic type.
+addFlexibleVariable :: EffectVar -> EffInf ()
+addFlexibleVariable v = EffInf $ \env -> return ((), id, (v:))
+
+-- | Remove some variables from the flexible variables set
+maskFlexibleVariables :: [EffectVar] -> EffInf a -> EffInf a
+maskFlexibleVariables mask_vs m = EffInf $ \env -> do
+  (x, cst, vs) <- doEffInf m env
+  vs' <- getFlexibleEffectVars (vs [])
+  let masked_vs = Set.toList (vs' Set.\\ Set.fromList mask_vs)
+  return (x, cst, (masked_vs ++))
+
+-- | Get the flexible variables produced by the computation.  The flexible
+-- variables are also included in the side effect output.
+getFlexibleVariables :: EffInf a -> EffInf (a, [EffectVar])
+getFlexibleVariables m = EffInf $ \env -> do
+  (x, cst, vs) <- doEffInf m env
+  return ((x, vs []), cst, vs)
 
 {-atomT :: PassConv -> RegionM EType -> RegionM PassType
 atomT pc mk_ty = AtomT pc `liftM` mk_ty-}
@@ -1098,8 +1132,9 @@ withSameRegionParam (mv1, e1) (mv2, e2) k = do
   e2' <- liftIO $ rename mv2 e2
 
   -- Add the local region to the environment
-  assumeRegion rv $ do
+  assumeRegion rv $
     -- Run the computation; eliminate constraints that mention the local region
+    transformConstraint (reduceAndEliminateRigidVariable rv) $
     k (Just rv) e1' e2'
 
 -- | Rename two effect variables to have the same name and add the variable to
@@ -1619,12 +1654,11 @@ instance Subtype PassType where
 
 -- | Functions don't have to agree on parameter passing conventions.
 instance Subtype FunPassType where
-  assertSubtype t1 t2 =
-    case (t1, t2)
+  assertSubtype t1 t2 = assertFunSubtype Set.empty t1 t2
+    {-case (t1, t2)
     of (FunFT param1 rng1, FunFT param2 rng2) -> do
          -- Parameters are contravariant
          assertSubtype (paramType param2) (paramType param1)
-         -- Allow any passing convention
          
          -- Range is covariant
          withSameFunParam (param1, rng1) (param2, rng2) $
@@ -1634,13 +1668,16 @@ instance Subtype FunPassType where
          assertSubtype e1 e2
          assertSubtype pt1 pt2
 
-       (_, _) -> subtypeCheckFailed
+       (_, _) -> subtypeCheckFailed-}
 
   assertEqual t1 t2 =
     case (t1, t2)
     of (FunFT param1 rng1, FunFT param2 rng2) -> do
          assertEqual (paramType param2) (paramType param1)
-         -- Allow any passing convention
+         -- Parameters must both have a region or not
+         when (isJust (paramRegion param1) /= isJust (paramRegion param2)) $
+           subtypeCheckFailed
+
          withSameFunParam (param1, rng1) (param2, rng2) $
            \_ rng1' rng2' -> assertEqual rng1' rng2'
 
@@ -1656,6 +1693,7 @@ instance Subtype FunPassType where
          -- Parameters are contravariant
          param_ty <- meetType (paramType param1) (paramType param2)
          
+         -- Result parameter has a region if either input has a region
          withSameFunParam (param1, rng1) (param2, rng2) $
            \p rng1' rng2' -> do
              let param' = FunParam (paramRegion p) (paramTyVar p) param_ty
@@ -1676,6 +1714,7 @@ instance Subtype FunPassType where
          -- Parameters are contravariant
          param_ty <- joinType (paramType param1) (paramType param2)
          
+         -- Result parameter has a region if either input has a region
          withSameFunParam (param1, rng1) (param2, rng2) $
            \p rng1' rng2' -> do
              let param' = FunParam (paramRegion p) (paramTyVar p) param_ty
@@ -1689,6 +1728,47 @@ instance Subtype FunPassType where
          return $ RetFT e pt
 
        (_, _) -> subtypeCheckFailed
+
+-- | Assert that @t1@ is a subtype of @t2@.
+--
+-- Some rigid effect variables, which result from passing-convention
+-- casting, are handled specially.  These effects are always assumed to
+-- occur as part of the the function's effect.  These effects must
+-- not appear in the function's return type.
+assertFunSubtype :: Set.Set RVar -> FunPassType -> FunPassType -> EffInf ()
+assertFunSubtype cast_regions t1 t2 =
+  case (t1, t2)
+  of (FunFT param1 rng1, FunFT param2 rng2) -> do
+       -- Parameters are contravariant
+       assertSubtype (paramType param2) (paramType param1)
+
+       -- Compensate for passing-convention casting, if one
+       -- parameter has a region and the other does not
+       let compensate =
+             isJust (paramRegion param1) /= isJust (paramRegion param2)
+       continue_fun compensate param1 rng1 param2 rng2
+
+     (RetFT e1 pt1, RetFT e2 pt2) -> do
+       -- Assume that all regions are affected by both e1 and e2
+       let e1' = effectUnion e1 (Effect cast_regions)
+       let e2' = effectUnion e2 (Effect cast_regions)
+       assertSubtype e1' e2'
+       
+       assertSubtype pt1 pt2
+
+       -- The return type must not mention any cast regions
+       whenM (liftIO $ pt1 `mentionsAnyE` cast_regions) subtypeCheckFailed
+       whenM (liftIO $ pt2 `mentionsAnyE` cast_regions) subtypeCheckFailed
+     (_, _) -> subtypeCheckFailed
+  where
+    continue_fun compensate param1 rng1 param2 rng2 = do
+      -- Range is covariant
+      withSameFunParam (param1, rng1) (param2, rng2) $ \param' rng1' rng2' ->
+        let cast_regions' =
+              if compensate
+              then Set.insert (fromJust $ paramRegion param') cast_regions
+              else cast_regions
+        in assertFunSubtype cast_regions' rng1' rng2'
 
 instance Subtype Effect where
   assertSubtype e1 e2 = addConstraint (subEffect e1 e2)
@@ -1765,12 +1845,42 @@ clearFlexibleEffectVariables e = withRigidEffectVars $ \ctx -> do
 
 -- | Transform the constraint set into an equivalent one where all
 -- flexible, free variables mentioned by the expression are independent.
+--
+-- After transformation, any flexible effect variables that were created by the
+-- computation but are not free are forced to be the empty effect.
 makeFlexibleVariablesIndependent :: Parametric exp =>
                                     EffInf (exp, a) -> EffInf (exp, a)
 makeFlexibleVariablesIndependent mk_exp = EffInf $ \env -> do
-  ((exp, x), cst) <- doEffInf mk_exp env
-  cst' <- doRegionM (makeFlexibleVariablesIndependentWithConstraint exp (cst [])) (efRegionEnv env)
-  return ((exp, x), (cst' ++))
+  ((exp, x), cst, vs) <- doEffInf mk_exp env
+  
+  -- Eliminate flexible variables from the constraints
+  cst' <- let run_it =
+                makeFlexibleVariablesIndependentWithConstraint exp (cst []) 
+          in doRegionM run_it (efRegionEnv env)
+
+  doRegionM (clear_flexible_vars exp (vs [])) (efRegionEnv env)
+  
+  -- No non-free-variables are left
+  return ((exp, x), (cst' ++), id)
+  where
+    -- If a variable is flexible but not free, then set it to the empty effect.
+    -- We do this after making flexible variables independent, so it's always
+    -- safe.
+    clear_flexible_vars exp vs = withRigidEffectVars $ \ctx -> do
+      -- Get the set of free variables
+      (pos, neg) <- freeEffectVars exp
+      let free_vars = Set.union pos neg Set.\\ ctx
+  
+      -- Get the set of flexible variables that aren't free
+      vs' <- getFlexibleEffectVars vs
+      let non_free_vars = vs' Set.\\ free_vars
+
+      -- Clear these variables
+      forM_ (Set.toList non_free_vars) $ \v -> do
+        -- DEBUG
+        when debugConstraints $ putStrLn $ "clearing hidden flexible effect variable " ++ show (pprEffectVar v)
+        assignEffectVar v emptyEffect
+    
 
 makeFlexibleVariablesIndependent' :: Parametric exp => EffInf exp -> EffInf exp
 makeFlexibleVariablesIndependent' m = do

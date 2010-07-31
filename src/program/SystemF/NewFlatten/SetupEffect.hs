@@ -1010,16 +1010,26 @@ applyCallConv_worker pos pass_type args local_rgns =
             return (local_rgns', final_return_type, effectUnion eff final_eff)
 
   where
+    -- Unify function and argument regions.
     instantiate_region (Just param_rgn) (Just arg_rgn) range = do
       range' <- liftIO $ expandAndRenameE param_rgn arg_rgn range
       return (range', Nothing)
+
+    -- If the function expects its argument to have a region but the
+    -- argument doesn't have one, then a temporary region is created for it.
+    -- The temporary region must not escape.
     instantiate_region (Just param_rgn) Nothing range = do
-      -- If the function expects its argument to have a region but the
-      -- argument doesn't have one, then a temporary region is created for it.
-      -- The temporary region must not escape.
       local_rgn <- newRegionVar (effectVarName param_rgn)
       range' <- liftIO $ expandAndRenameE param_rgn local_rgn range
       return (range', Just local_rgn)
+
+    -- If the function doesn't expect a region but the argument has one,
+    -- then use the argument region.  The temporary region does not escape
+    -- (because the argument was cast to something that doesn't have a 
+    -- region), which we indicate by explicitly masking out the effect.
+    instantiate_region Nothing (Just arg_rgn) range = do
+        return (range, Just arg_rgn)
+
     instantiate_region Nothing _ range = return (range, Nothing)
     
     instantiate_type (Just param_tyvar) (Just arg_type) range =
@@ -1221,7 +1231,9 @@ createInstanceExpression oper (PolyPassType [] mono_type) =
   return $ oper {eiReturnType = MonoAss mono_type}
 
 createInstanceExpression oper poly_type = do
+  -- Instantiate the type.  Add the newly created variables to the environment.
   (effect_args, mono_type) <- liftRegionM $ instantiatePassType poly_type
+  mapM_ addFlexibleVariable effect_args
 
   let inst_exp1 = InstanceE { expInfo = expInfo $ eiExp oper
                             , expOper = oper
@@ -1446,13 +1458,12 @@ effectInferAlt (TypedSFAlt (TypeAnn _ alt)) = do
     let return_type = eiPassType $ eialtBody new_alt
     return (return_type, (new_alt, exposed_effect))
 
-
 effectInferDo :: ExpInfo -> RType -> [Either TRType TRExp]
               -> EffInf (EIExp', PassTypeAssignment, Effect)
 effectInferDo info result_type [Left ty_arg, Right pc_arg, Right val_arg] = do
   pc_arg' <- effectInferExp pc_arg
   val_arg' <- effectInferExp val_arg
-  
+
   let new_expr = DoE { expInfo = info
                      , expTyArg = toEIType ty_arg
                      , expPassConv = pc_arg'
