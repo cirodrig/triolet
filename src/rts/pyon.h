@@ -36,13 +36,28 @@ static inline int32_t pyon_atomic_add_s(int32_t *p, int delta)
 PyonPtr alloc(uint32_t);
 void dealloc(PyonPtr);
 
-/* Deallocation functions */
+/* How to copy small values */
+void copy4(PyonPtr src, PyonPtr dst);
+
+/* Object deallocation functions */
 void free_pap(PyonPtr);
 
+/* Entry points to Pyon functions */
+void dealloc_exact_entry(PyonPtr closure, PyonPtr arg);
+void dealloc_inexact_entry(PyonPtr closure, PyonPtr args, PyonPtr ret);
+void copy4_exact_entry(PyonPtr closure, PyonPtr src, PyonPtr dst);
+void copy4_inexact_entry(PyonPtr closure, PyonPtr args, PyonPtr ret);
+
+/* Apply functions */
 PyonPtr
 apply_i32_f(PyonPtr obj, uint32_t arg);
 void
 apply_i32(PyonPtr obj, uint32_t arg, PyonPtr return_struct);
+
+PyonPtr
+apply_f32_f(PyonPtr obj, float arg);
+void
+apply_f32(PyonPtr obj, float arg, PyonPtr return_struct);
 
 /*****************************************************************************/
 /* Opaque data */
@@ -50,4 +65,5 @@ apply_i32(PyonPtr obj, uint32_t arg, PyonPtr return_struct);
 extern struct {} pap_info;
 extern struct {} global_closure_info;
 
-
+extern struct {} dealloc_closure;
+extern struct {} copy4_closure;

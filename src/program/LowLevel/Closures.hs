@@ -1068,10 +1068,12 @@ pickApplyFun tags =
 
 -- | The available 'apply' functions
 applyFunctions :: ApplyTrie
-applyFunctions = [(Int32Tag, i_node)]
+applyFunctions = [(Int32Tag, i_node), (Float32Tag, f_node)]
   where
     i_node = ApplyTrieNode (llBuiltin the_prim_apply_i32_f) (llBuiltin the_prim_apply_i32)[]
+    f_node = ApplyTrieNode (llBuiltin the_prim_apply_f32_f) (llBuiltin the_prim_apply_f32)[]
 
+{-
 -- | Create a PAP record type based on the given argument types.
 --
 -- Layout of a PAP record:
@@ -1112,7 +1114,7 @@ createPAP clo_ptr arguments = do
   emitAtom1 (PrimType OwnedType) $ PrimA PrimCastToOwned [rec_ptr]
   where
     store_argument rec_ptr fld arg = storeField fld rec_ptr arg
-    
+-}    
 {-
 -- | Get the run-time flag used to indicate a primitive type.
 --

@@ -476,13 +476,28 @@ passConvValue size align copy free =
 
 intPassConvValue :: Val
 intPassConvValue =
-  passConvValue 4 4 (llBuiltin the_fun_copy4) (llBuiltin the_fun_dealloc)
+  let size = sizeOf pyonIntType
+      align = alignOf pyonIntType
+      copy = case size
+             of 4 -> llBuiltin the_fun_copy4_closure
+                _ -> internalError "intPassConvValue"
+  in passConvValue size align copy (llBuiltin the_fun_dealloc_closure)
 
 floatPassConvValue :: Val
 floatPassConvValue =
-  passConvValue 4 4 (llBuiltin the_fun_copy4) (llBuiltin the_fun_dealloc)
+  let size = sizeOf pyonFloatType
+      align = alignOf pyonFloatType
+      copy = case size
+             of 4 -> llBuiltin the_fun_copy4_closure
+                _ -> internalError "intPassConvValue"
+  in passConvValue size align copy (llBuiltin the_fun_dealloc_closure)
 
 boolPassConvValue :: Val
 boolPassConvValue =
-  passConvValue 4 4 (llBuiltin the_fun_copy1) (llBuiltin the_fun_dealloc)
+  let size = sizeOf pyonBoolType
+      align = alignOf pyonBoolType
+      copy = case size
+             of 4 -> llBuiltin the_fun_copy4_closure
+                _ -> internalError "intPassConvValue"
+  in passConvValue size align copy (llBuiltin the_fun_dealloc_closure)
 

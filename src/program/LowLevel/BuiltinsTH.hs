@@ -57,13 +57,19 @@ builtinPrimitives =
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
   , ("dealloc",
      primFunctionType [PrimType PointerType] [])
-    -- Apply a 32-bit int and return an owned pointer
   , ("apply_i32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (IntType Unsigned S32)] [PrimType OwnedType])
   , ("apply_i32",
      primFunctionType [PrimType OwnedType
                       , PrimType (IntType Unsigned S32)
+                      , PrimType PointerType] [])
+  , ("apply_f32_f",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType (FloatType S32)] [PrimType OwnedType])
+  , ("apply_f32",
+     primFunctionType [PrimType OwnedType
+                      , PrimType (FloatType S32)
                       , PrimType PointerType] [])
   , ("free_pap",
      primFunctionType [PrimType PointerType] [])
@@ -75,12 +81,12 @@ closureBinaryFunctionType t = closureFunctionType [t, t] [t]
 -- from.
 builtinFunctions =
   [ -- Functions that do not exist in Core
-    ("dealloc",
+    ("dealloc_closure",
      Left $ closureFunctionType [PrimType PointerType] [])
-  , ("copy4",
+  , ("copy4_closure",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
-  , ("copy1",
+  , ("copy1_closure",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
     -- Functions translated from Core
