@@ -109,6 +109,9 @@ binaryPrimOp prim op args =
 
 -- Load and store functions are inserted by the compiler, and will always have
 -- the right number of arguments.
+--
+-- Note that the arguments to stores are swapped: In Core, the address is last,
+-- but here, the address is first.
 loadOp ty _ args =
   case args
   of [addr] -> return $ PrimA (PrimLoad ty) [addr]
@@ -116,7 +119,7 @@ loadOp ty _ args =
 
 storeOp ty _ args =
   case args
-  of [addr, val] -> return $ PrimA (PrimStore ty) [addr, val]
+  of [val, addr] -> return $ PrimA (PrimStore ty) [addr, val]
      [] -> internalError "storeOp: Expecting exactly two arguments"
 
 -- Loading and storing "None" is actually a no-op. 
@@ -127,7 +130,7 @@ loadNone _ args =
 
 storeNone _ args =
   case args
-  of [addr, val] -> return $ ValA []
+  of [val, addr] -> return $ ValA []
      [] -> internalError "storeNone: Expecting exactly two arguments"
 
 inliningRules :: IntMap.IntMap ([Val] -> GenM Atom)
