@@ -57,13 +57,15 @@ builtinPrimitives =
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
   , ("dealloc",
      primFunctionType [PrimType PointerType] [])
-  , ("apply_pap",
-     primFunctionType [PrimType OwnedType, PrimType PointerType] [])
+    -- Apply a 32-bit int and return an owned pointer
+  , ("apply_i32_f",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType (IntType Unsigned S32)] [PrimType OwnedType])
+  , ("apply_i32",
+     primFunctionType [PrimType OwnedType
+                      , PrimType (IntType Unsigned S32)
+                      , PrimType PointerType] [])
   , ("free_pap",
-     primFunctionType [PrimType PointerType] [])
-  , ("free_lambda_closure",
-     primFunctionType [PrimType PointerType] [])
-  , ("free_letrec_closure",
      primFunctionType [PrimType PointerType] [])
   ]
 
@@ -118,7 +120,9 @@ builtinFunctions =
 
 -- | Predefined global data
 builtinGlobals =
-  []
+  [ ("pap_info", PrimType PointerType)
+  , ("global_closure_info", PrimType PointerType)
+  ]
 
 lowLevelBuiltinsRecord = recordDef "LowLevelBuiltins" fields
   where

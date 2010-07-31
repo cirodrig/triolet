@@ -25,10 +25,29 @@ typedef void *PyonPtr;
 /* An object's 'free' method */
 typedef void (*PyonFreeFunc)(PyonPtr);
 
+static inline int32_t pyon_atomic_add_s(int32_t *p, int delta)
+{
+  int32_t old = *p;
+  *p += delta;
+  return old;
+}
+
 /* The general-purpose memory allocator interface */
 PyonPtr alloc(uint32_t);
 void dealloc(PyonPtr);
 
 /* Deallocation functions */
-void free_lambda_closure(PyonPtr);
 void free_pap(PyonPtr);
+
+PyonPtr
+apply_i32_f(PyonPtr obj, uint32_t arg);
+void
+apply_i32(PyonPtr obj, uint32_t arg, PyonPtr return_struct);
+
+/*****************************************************************************/
+/* Opaque data */
+
+extern struct {} pap_info;
+extern struct {} global_closure_info;
+
+

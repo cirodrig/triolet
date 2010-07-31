@@ -32,7 +32,7 @@ LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
 PYON_HS_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR)/pyon \
   -XMultiParamTypeClasses $(PYON_HS_INCLUDEDIR_FLAGS) $(C_PACKAGE_FLAGS)
 
-RTS_C_C_OPTS=$(CCFLAGS) $(C_INCLUDEDIR_FLAGS)
+RTS_C_C_OPTS=$(CCFLAGS) -g $(C_INCLUDEDIR_FLAGS)
 
 # Compile the RTS for dynamic linking.  RTS files will include the same header
 # that compiled Pyon files will include; this file is found in the 'library'
@@ -56,4 +56,4 @@ PYON_GENERATED_SCRIPTS=$(foreach src, $(PYON_SCRIPTS), build/scripts/$(src))
 
 PYON_TARGET=$(BUILDDIR)/pyon/pyon
 CLAY_TARGET=$(BUILDDIR)/computelayout/computelayout
-RTS_TARGET=$(BUILDDIR)/rts/pyonrts.so
+RTS_TARGET=$(BUILDDIR)/rts/libpyonrts.so

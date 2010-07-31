@@ -131,13 +131,16 @@ primAddP ptr off =
 
 primLoad ty ptr dst = bindAtom1 dst $ PrimA (PrimLoad ty) [ptr]
 primLoadOff ty ptr off dst = do
-  ptr' <- primAddP ptr off 
+  ptr' <- if isZeroLit off then return ptr else primAddP ptr off
   primLoad ty ptr' dst
 
 primStore ty ptr val = emitAtom0 $ PrimA (PrimStore ty) [ptr, val]
 primStoreOff ty ptr off val = do
-  ptr' <- primAddP ptr off
+  ptr' <- if isZeroLit off then return ptr else primAddP ptr off
   primStore ty ptr' val
+
+isZeroLit (LitV (IntL _ _ 0)) = True
+isZeroLit _ = False
 
 primAAddZ prim_type@(PrimType (IntType sign size)) ptr n =
   emitAtom1 prim_type $ PrimA (PrimAAddZ sign size) [ptr, n]

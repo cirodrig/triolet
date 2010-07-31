@@ -69,6 +69,10 @@ defineTypeTag :: String -> TypeTag -> ShowS
 defineTypeTag name tag =
   defineMacro (showString name) (shows $ fromEnum tag)
 
+defineInfoTag :: String -> InfoTag -> ShowS
+defineInfoTag name tag =
+  defineMacro (showString name) (shows $ fromEnum tag)
+
 defineAll = vcat
   [ defineRecordOffsets infoTableHeaderRecord "INFO"
     ["FREE", "TAG"]
@@ -85,6 +89,8 @@ defineAll = vcat
   , defineTypeTag "FLOAT32_TAG" Float32Tag
   , defineTypeTag "FLOAT64_TAG" Float64Tag
   , defineTypeTag "OWNEDREF_TAG" OwnedRefTag
+  , defineInfoTag "FUN_TAG" FunTag
+  , defineInfoTag "PAP_TAG" PAPTag
   , defineMacro (showString "SIZEOF_PYONPTR") (shows $ sizeOf PointerType)
   , defineMacro (showString "ALIGNOF_PYONPTR") (shows $ alignOf PointerType)
   ]

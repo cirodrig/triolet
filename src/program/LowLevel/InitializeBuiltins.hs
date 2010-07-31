@@ -5,6 +5,7 @@ where
   
 import qualified Language.Haskell.TH as TH
 
+import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Common.THRecord
@@ -41,6 +42,20 @@ initializeVarField :: IdentSupply Var -> String -> ValueType -> IO Var
 initializeVarField supply nm ty =
   runFreshVarM supply $ do
     newBuiltinVar (builtinLabel nm) ty
+
+initializeGlobalField :: IdentSupply Var -> String -> ValueType -> IO Var
+initializeGlobalField supply nm ty
+  | typeOk ty =
+      runFreshVarM supply $ do
+        newBuiltinVar (builtinLabel nm) ty
+  | otherwise =
+      internalError "initializeGlobalField: unexpected type"
+  where
+    -- Global variables are used by reference, so they must have pointer type 
+    -- or owned type
+    typeOk (PrimType PointerType) = True
+    typeOk (PrimType OwnedType) = True
+    typeOk _ = False
 
 initializeLowLevelBuiltins :: IdentSupply Var -> IO ()
 initializeLowLevelBuiltins v_ids =

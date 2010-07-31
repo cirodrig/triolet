@@ -31,7 +31,7 @@ dist/doc/html/pyon/index.html : $(PYON_HS_SOURCE_FILES)
 	@env ESED="$(ESED)" HADDOCK_HC_OPTS="$(HADDOCK_HC_OPTS)" PYON_HS_SOURCE_FILES="$(PYON_HS_SOURCE_FILES)" PACKAGES="$(PACKAGES)" sh makedoc.sh
 
 # Create executable, library, and scripts; then run Python's setup script 
-build : $(PYON_TARGET) $(RTS_TARGET) $(DATADIR)/include/pyon.h
+build : $(PYON_TARGET) $(RTS_TARGET) $(DATADIR)/include/pyon.h $(DATADIR)/libpyonrts.so
 
 # Install Python library and files, pyon executable, and scripts
 install : build
@@ -66,10 +66,19 @@ $(DATADIR)/include/pyon.h : $(SRCDIR)/rts/pyon.h
 	mkdir -p $(DATADIR)/include
 	cp $< $@
 
+# Assemble global objects
+$(BUILDDIR)/rts/rts_objects.o : $(SRCDIR)/rts/rts_objects.s
+	mkdir -p $(BUILDDIR)/rts
+	gcc -m32 -c -o $@ $< 
+
 # Link RTS files into a dynamic library
-$(RTS_TARGET) : $(BUILDDIR)/rts/layout.h $(CLAY_TARGET) $(RTS_OBJECT_FILES)
+$(RTS_TARGET) : $(BUILDDIR)/rts/layout.h $(CLAY_TARGET) $(RTS_OBJECT_FILES) $(BUILDDIR)/rts/rts_objects.o
 	mkdir -p $(dir $(RTS_TARGET))
-	$(LINKSHARED) $(RTS_OBJECT_FILES) -o $(RTS_TARGET) -lc $(LINKFLAGS)
+	$(LINKSHARED) -g -install_name libpyonrts.so $(RTS_OBJECT_FILES) $(BUILDDIR)/rts/rts_objects.o -o $(RTS_TARGET) -lc $(LINKFLAGS)
+
+# Move the library into the data directory
+$(DATADIR)/libpyonrts.so : $(RTS_TARGET)
+	cp $< $@
 
 ###############################################################################
 # Generic rules

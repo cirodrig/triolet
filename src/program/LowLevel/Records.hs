@@ -2,6 +2,7 @@
 module LowLevel.Records where
 
 import Data.Word
+import Gluon.Common.Error
 import LowLevel.Types
 import LowLevel.Record
 
@@ -18,7 +19,7 @@ data TypeTag =
     Int8Tag | Int16Tag | Int32Tag | Int64Tag 
   | Float32Tag | Float64Tag 
   | OwnedRefTag
-  deriving(Eq, Ord, Enum)
+  deriving(Eq, Ord, Enum, Show)
 
 intSizeTypeTag S8 = Int8Tag
 intSizeTypeTag S16 = Int16Tag
@@ -27,7 +28,7 @@ intSizeTypeTag S64 = Int64Tag
 
 -- | An info table tag, which indicates an info table's type
 data InfoTag = FunTag | PAPTag
-  deriving(Eq, Ord, Enum)
+  deriving(Eq, Ord, Enum, Show)
 
 -- | Get the type tag of a primitive type
 toTypeTag :: PrimType -> TypeTag
@@ -37,6 +38,27 @@ toTypeTag (FloatType S32) = Float32Tag
 toTypeTag (FloatType S64) = Float64Tag
 toTypeTag PointerType     = intSizeTypeTag pointerSize
 toTypeTag OwnedType       = OwnedRefTag
+
+-- | Get the type tag of a primitive type as used in function application.
+-- Only the integer/floating distinction is made (because we care about what
+-- register it's passed in), and values smaller than a native word are 
+-- promoted to native words.
+promotedTypeTag :: PrimType -> TypeTag
+promotedTypeTag ty =
+  case ty
+  of BoolType -> toTypeTag nativeWordType
+     IntType _ sz
+       | sz <= nativeIntSize -> toTypeTag $ IntType Unsigned nativeIntSize
+       | otherwise           -> toTypeTag $ IntType Unsigned sz
+     t@(FloatType _) -> toTypeTag t
+     PointerType -> pointerTypeTag
+     OwnedType -> pointerTypeTag
+
+pointerTypeTag =
+  if pointerSize < nativeIntSize
+  then internalError "pointerTypeTag"
+  else toTypeTag nativeWordType
+
 
 -- | An info table is a piece of statically defined global data.  Every 
 -- reference-counted, dynamically allocated object contains a pointer to an 

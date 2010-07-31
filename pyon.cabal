@@ -13,6 +13,7 @@ Data-Files:
   symbols/SFBuiltin.glu
   include/pyon.h
   testcases/*.py
+  libpyonrts.so
 
 Executable pyon
   Hs-Source-Dirs: src/program

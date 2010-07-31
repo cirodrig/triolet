@@ -27,6 +27,7 @@ import Gluon.Common.Label
 import Gluon.Common.MonadLogic
 import Gluon.Common.Supply
 import LowLevel.Builtins
+import LowLevel.Print
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record
@@ -441,7 +442,9 @@ closure var entry captured recursive =
   where
     -- Closure contains captured variables 
     record = staticRecord $
-             closureHeader ++ map (PrimField . varPrimType) captured
+             closureHeader ++
+             map (PrimField . varPrimType) captured ++
+             replicate (maybe 0 length recursive) (PrimField PointerType)
     
     -- see 'funInfoHeader'
     info = [ VarV $ deallocEntry entry
@@ -468,20 +471,27 @@ closureGroup xs = group
     group = [closure v e cap (Just group) | (v, e, cap) <- xs] 
 
 -- | Allocate, but do not initialize, a closure.
--- Allocation assigns the variable given in the 'cloVariable' field.
-allocateClosure :: Closure -> BuildBlock ()
+-- The created closure is returned.
+allocateClosure :: Closure -> BuildBlock Val
 allocateClosure clo =
-  let size = recordSize $ cloRecord clo
-  in allocateHeapMemAs (nativeWordV size) (cloVariable clo)
+  allocateHeapMem $ nativeWordV $ recordSize $ cloRecord clo
 
 -- | Initialize a closure.
-initializeClosure :: Closure -> BuildBlock ()
-initializeClosure clo = do
-  initializeObject (VarV $ deallocEntry $ cloEntryPoints clo) clo_ptr
+--
+-- The first argument is a list of un-owned pointers to other closures in
+-- the recursive group.  This list is ignored for non-recursive function 
+-- definitions.
+--
+-- The initialized closure is assigned to the variable given in
+-- the 'cloVariable' field.
+initializeClosure group_ptrs clo clo_ptr = do
+  initializeObject clo_ptr (VarV $ infoTableEntry $ cloEntryPoints clo)
   zipWithM_ init_captured captured_fields (map VarV $ cloCaptured clo)
-  maybe (return ()) (zipWithM_ init_rec group_fields) (cloGroup clo)
+  when (cloIsRecursive clo) $ zipWithM_ init_rec group_fields group_ptrs
+  -- Cast to an owned pointer
+  bindAtom1 (cloVariable clo) $ PrimA PrimCastToOwned [clo_ptr]
+
   where
-    clo_ptr = VarV $ cloVariable clo
     captured_fields = map toDynamicField $ cloCapturedFields clo
     group_fields = map toDynamicField $ cloRecursiveFields clo
     
@@ -489,11 +499,8 @@ initializeClosure clo = do
     init_captured fld val = storeField fld clo_ptr val
     
     -- Write a pointer to another closure in the group.  The pointer is
-    -- written without adjusting its reference count.
-    init_rec fld other_clo = do
-      ptr <- emitAtom1 (PrimType PointerType) $
-             PrimA PrimCastFromOwned [VarV $ cloVariable other_clo]
-      storeField fld clo_ptr ptr
+    -- not owned.
+    init_rec fld other_clo = storeField fld clo_ptr other_clo
 
 -- | Create a statically defined closure object for a global function.
 generateGlobalClosure :: Closure -> CC ()
@@ -515,14 +522,16 @@ generateClosure clo
   | cloIsRecursive clo =
       internalError "generateClosure: Closure is part of a recursive group"
   | otherwise = do
-      allocateClosure clo
-      initializeClosure clo
+      ptr <- allocateClosure clo
+      (initializeClosure invalid) clo ptr
+  where
+    invalid = internalError "generateClosure: Not recursive"
                             
 -- | Create a group of closures.
 generateClosures :: ClosureGroup -> BuildBlock () 
 generateClosures clos = do
-  mapM_ allocateClosure clos
-  mapM_ initializeClosure clos
+  ptrs <- mapM allocateClosure clos
+  zipWithM_ (initializeClosure ptrs) clos ptrs
 
 -- | Construct a function to free a non-recursive closure.
 --
@@ -951,6 +960,12 @@ genIndirectCall :: [PrimType]
                 -> BuildBlock Val
                 -> [BuildBlock Val]
                 -> CC (BuildBlock Atom)
+                
+-- No arguments: Don't call
+genIndirectCall return_types mk_op [] = return $ do
+  op <- mk_op
+  return $ ValA [op]
+
 genIndirectCall return_types mk_op mk_args = return $ do
   op <- mk_op
   args <- sequence mk_args
@@ -978,24 +993,84 @@ genIndirectCall return_types mk_op mk_args = return $ do
       let ret_record = staticRecord $ map PrimField return_types
       ret_ptr <- allocateHeapMem $ nativeWordV $ recordSize ret_record
       
-      -- Create a partial application
-      pap_ptr <- createPAP clo_ptr args
-      
-      -- Apply
-      bindAtom0 $ PrimCallA (builtinVar the_prim_apply_pap)
-        [pap_ptr, ret_ptr]
+      -- Apply the function
+      genApply clo_ptr args ret_ptr
         
-      -- Extract return values
-      ret_vals <- load_ret_values ret_ptr ret_record
+      -- Extract return values, stealing references
+      ret_vals <- mapM (load_ret_value ret_ptr) $
+                  map toDynamicField $ recordFields ret_record
       
       -- Free temporary storage
-      -- FIXME: reference counts
       deallocateHeapMem ret_ptr
       return $ ValA ret_vals
     
-    -- Load each return value out of the heap record
-    load_ret_values ret_ptr record = forM (recordFields record) $ \fld ->
-      loadField (toDynamicField fld) ret_ptr
+    -- Load each return value out of the heap record.  Don't increment the
+    -- reference count, since the record will be deallocated.
+    load_ret_value ptr fld =
+      case fieldType fld
+      of PrimField OwnedType -> do
+           val <- loadFieldWithoutOwnership fld ptr
+           emitAtom1 (PrimType OwnedType) $ PrimA PrimCastToOwned [val]
+         _ -> loadField fld ptr
+
+-- | Create a dynamic function application
+genApply :: Val -> [Val] -> Val -> BuildBlock ()
+genApply _ [] _ = internalError "genApply: No arguments"
+genApply closure args ret_ptr =
+  gen_apply closure args (map (promotedTypeTag . valType) args)
+  where
+    gen_apply closure args arg_types =
+      -- If all arguments are consumed, then call apply_mem
+      -- Otherwise, call apply_ret
+      if null args'
+      then do finish_apply (VarV apply_mem) closure app_args
+      else do closure' <- partial_apply (VarV apply_ret) closure app_args
+              gen_apply closure' args' arg_types'
+      where
+        (n, apply_ret, apply_mem) = pickApplyFun arg_types
+        (app_args, args') = splitAt n args
+        arg_types' = drop n arg_types
+
+    -- Apply some arguments
+    partial_apply f clo args =
+      emitAtom1 (PrimType OwnedType) $ PrimCallA f (clo : args)
+
+    -- Apply arguments and write result in to the return struct
+    finish_apply f clo args =
+      emitAtom0 $ PrimCallA f (clo : args ++ [ret_ptr])
+
+-- | An apply trie node contains the apply functions for parameter sequences
+-- with a common prefix of types.
+--
+-- The two variables at a node both are used for applying a parameter sequence
+-- having these types.  They differ in how they return: the first returns an 
+-- owned pointer, while the second writes its return values into memory.
+data ApplyTrieNode = ApplyTrieNode !Var !Var !ApplyTrie 
+type ApplyTrie = [(TypeTag, ApplyTrieNode)]
+
+-- | Pick a function that can apply as many arguments as possible, given 
+-- the argument types in the list.
+pickApplyFun :: [TypeTag] -> (Int, Var, Var)
+pickApplyFun tags =
+  pick 0 err err tags applyFunctions
+  where
+    err = internalError "pickApplyFun: Cannot apply"
+
+    pick n f g (tag:tags) trie =
+      case lookup tag trie
+      of Just (ApplyTrieNode f' g' trie') -> pick (n+1) f' g' tags trie'
+         Nothing 
+           | n == 0 -> err 
+                       | otherwise -> (n, f, g)
+
+    pick 0 f g [] _ = err
+    pick n f g [] _ = (n, f, g)
+
+-- | The available 'apply' functions
+applyFunctions :: ApplyTrie
+applyFunctions = [(Int32Tag, i_node)]
+  where
+    i_node = ApplyTrieNode (llBuiltin the_prim_apply_i32_f) (llBuiltin the_prim_apply_i32)[]
 
 -- | Create a PAP record type based on the given argument types.
 --
@@ -1028,7 +1103,7 @@ createPAP clo_ptr arguments = do
   rec_ptr <- allocateHeapMem $ nativeWordV $ recordSize pap_record
   
   -- Initialize fields
-  initializeObject (builtinVar the_prim_free_pap) rec_ptr
+  initializeObject rec_ptr (builtinVar the_bivar_pap_info)
   storeField (record' !!: 2) rec_ptr clo_ptr
   storeField (record' !!: 3) rec_ptr $ nativeWordV $ length arguments
   zipWithM_ (store_argument rec_ptr) (drop 4 $ recordFields record') arguments

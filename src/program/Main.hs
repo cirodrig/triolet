@@ -79,13 +79,18 @@ compileFile fname = do
 
   -- Convert to low-level form
   ll_mod <- Core.lower flat_mod
-  putStrLn ""
-  putStrLn "Lowered"
-  print $ LowLevel.pprModule ll_mod
   
   -- Low-level transformations
   ll_mod <- LowLevel.flattenRecordTypes =<< LowLevel.makeBuiltinPrimOps ll_mod
+  putStrLn ""
+  putStrLn "Lowered and flattened"
+  print $ LowLevel.pprModule ll_mod
+  
   ll_mod <- LowLevel.closureConvert ll_mod
+  putStrLn ""
+  putStrLn "Closure converted"
+  print $ LowLevel.pprModule ll_mod  
+
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
   
   -- Generate and compile a C file
@@ -107,6 +112,8 @@ compileCFile c_fname o_fname = do
   include_path <- Paths_pyon.getDataFileName "include"
   let compiler_opts =
         [ "-c"                  -- Compile
+        , "-g"                  -- Emit debug information
+        , "-m32"                -- 32-bit mode
         , "-x", "c"             -- Source is a C file
         , c_fname               -- Input filename
         , "-o", o_fname         -- Output filename
