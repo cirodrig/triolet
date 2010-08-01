@@ -21,6 +21,7 @@ import Core.BuiltinTypes
 import LowLevel.Syntax as LL
 import LowLevel.Types as LL
 import LowLevel.Record as LL
+import LowLevel.Records as LL
 import LowLevel.Builtins as LL
 
 -- | During lowering, expressions are annotated with either a core type
@@ -52,6 +53,7 @@ valueType core_type =
        | con `isPyonBuiltin` the_bool -> LL.PrimType BoolType
        | con `isPyonBuiltin` the_NoneType -> LL.PrimType UnitType
        | con `isPyonBuiltin` the_PassConv -> LL.RecordType LL.passConvRecord
+       | con `isPyonBuiltin` the_AdditiveDict -> LL.RecordType LL.additiveDictRecord
      _ -> case core_type
           of ExpCT (LitE {expLit = KindL _}) -> LL.PrimType UnitType
              _ -> internalError $ "valueType: Unexpected type"

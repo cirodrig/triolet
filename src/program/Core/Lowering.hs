@@ -33,6 +33,7 @@ import qualified LowLevel.Syntax as LL
 import LowLevel.FreshVar
 import LowLevel.Types
 import LowLevel.Record
+import LowLevel.Records
 import LowLevel.Build
 import LowLevel.Builtins
 import Globals
@@ -40,17 +41,13 @@ import Globals
 -- | Convert a constructor to the corresponding value in the low-level IR.
 --   Most constructors are translated to a global variable.  Pass-by-value 
 --   constructors that take no parameters are translated to a value.
-convertCon :: Con -> (LoweringType, LL.Val)
+convertCon :: Con -> CvExp
 convertCon c =
   case lowerBuiltinCoreFunction c
-  of Just var -> (CoreType $ conCoreReturnType c, LL.VarV var)
+  of Just var -> value (CoreType $ conCoreReturnType c) (LL.VarV var)
      Nothing ->
        case IntMap.lookup (fromIdent $ conID c) convertConTable
-       of Just (Left var) ->
-            -- Translated to a core variable.  Return the variable and the
-            -- constructor's type.
-            (CoreType $ conCoreReturnType c, LL.VarV var)
-          Just (Right retval) ->
+       of Just retval ->
             -- Replaced by a hard-coded expression and type.
             retval
           Nothing -> internalError $
@@ -62,11 +59,14 @@ convertCon c =
 convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
     tbl = [ (pyonBuiltin the_passConv_int,
-             Right (LLType $ LL.RecordType passConvRecord, intPassConvValue))
+             value (LLType $ LL.RecordType passConvRecord) intPassConvValue)
           , (pyonBuiltin the_passConv_float,
-             Right (LLType $ LL.RecordType passConvRecord, floatPassConvValue))
+             value (LLType $ LL.RecordType passConvRecord) floatPassConvValue)
           , (pyonBuiltin the_passConv_bool,
-             Right (LLType $ LL.RecordType passConvRecord, boolPassConvValue))
+             value (LLType $ LL.RecordType passConvRecord) boolPassConvValue)
+          , (pyonBuiltin the_additiveDict,
+             atom [CoreType $ conCoreReturnType $ pyonBuiltin the_additiveDict]
+             genAdditiveDictFun)
           ]
 
 type BuildBlock a = Gen FreshVarM a
@@ -349,8 +349,7 @@ convertExp expression =
       (ty, v') <- lookupVar v
       return $ value ty $ LL.VarV v'
     
-    lookup_con c =
-      case convertCon c of (ty, val) -> return $ value ty val
+    lookup_con c = return $ convertCon c
 
 convertApp op args rarg = do
   -- Convert operator
@@ -498,6 +497,8 @@ convertCase scrutinee alternatives = do
       of Just (con, args)
            | con `isPyonBuiltin` the_bool ->
                convertBoolCase scr' alternatives
+           | con `isPyonBuiltin` the_AdditiveDict ->
+               convertAdditiveDictCase scr' alternatives
            | otherwise -> unknown_constructor con
          _ -> invalid_type
     [CoreType (ReadRT _ ::: ty)] ->
@@ -534,6 +535,22 @@ convertBoolCase scr alternatives = do
              caltConstructor alt1 == pyonBuiltin the_False ->
                (alt2, alt1)
          _ -> internalError "convertBoolCase"
+
+convertAdditiveDictCase scr alternatives = do
+  withMany convertParameter (caltParams alt) $ \params -> do
+    ty_params <- replicateM (length $ caltTyArgs alt) $
+                 LL.newAnonymousVar (LL.PrimType UnitType)
+    body <- convertExp $ caltBody alt
+
+    -- Unpack the scrutinee, then run the body
+    let make_expr = do
+          scr_val <- asVal scr
+          bindAtom (ty_params ++ params) $ LL.UnpackA additiveDictRecord scr_val
+          asAtom body
+
+    return $ atom (expType body) make_expr
+  where
+    [alt] = alternatives
 
 convertTuple2Case scr alternatives = do
   -- There's only one alternative, so we have no control flow to deal with

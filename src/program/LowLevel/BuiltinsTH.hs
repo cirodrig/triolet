@@ -98,10 +98,14 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_float) |])
   , ("ne_float",
      Right [| pyonBuiltin (SystemF.neMember . SystemF.the_EqDict_float) |])
+  , ("zero_int",
+     Right [| pyonBuiltin (SystemF.zeroMember . SystemF.the_AdditiveDict_int) |])
   , ("add_int",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_int) |])
   , ("sub_int", 
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_int) |])
+  , ("zero_float",
+     Right [| pyonBuiltin (SystemF.zeroMember . SystemF.the_AdditiveDict_float) |])
   , ("add_float",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_float) |])
   , ("sub_float",

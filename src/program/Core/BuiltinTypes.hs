@@ -56,6 +56,16 @@ mkBinaryOpType ty =
 binaryIntOpType = mkBinaryOpType $ mkInternalConE $ pyonBuiltin the_int
 binaryFloatOpType = mkBinaryOpType $ mkInternalConE $ pyonBuiltin the_float
 
+mkZeroOpType ty =
+  let constructor_type =
+        funCT $
+        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_NoneType)) $
+        retCT (ValRT ::: expCT ty)
+  in OwnRT ::: constructor_type
+
+zeroIntOpType = mkZeroOpType $ mkInternalConE $ pyonBuiltin the_int
+zeroFloatOpType = mkZeroOpType $ mkInternalConE $ pyonBuiltin the_float
+
 mkCompareOpType :: RExp -> CBind CReturnT Rec
 mkCompareOpType ty =
   let con_type =
@@ -110,6 +120,19 @@ storeBoolType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_bool)
 loadNoneTypeType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_NoneType)
 storeNoneTypeType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_NoneType)
       
+additiveDictType = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  let binary_type = OwnPT ::: cbindType (mkBinaryOpType (mkInternalVarE a))
+      zero_type = OwnPT ::: cbindType (mkZeroOpType (mkInternalVarE a))
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT zero_type $
+        pureArrCT binary_type $
+        pureArrCT binary_type $
+        retCT (ValRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
+  return (OwnRT ::: constructor_type)
+
 constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
   where
@@ -139,14 +162,20 @@ constructorTable =
                compareFloatOpType)
             , (pyonBuiltin (neMember . the_EqDict_float),
                compareFloatOpType)
+            , (pyonBuiltin (zeroMember . the_AdditiveDict_int),
+               zeroIntOpType)
             , (pyonBuiltin (addMember . the_AdditiveDict_int),
                binaryIntOpType)
             , (pyonBuiltin (subMember . the_AdditiveDict_int),
                binaryIntOpType)
+            , (pyonBuiltin (zeroMember . the_AdditiveDict_float),
+               zeroFloatOpType)
             , (pyonBuiltin (addMember . the_AdditiveDict_float),
                binaryFloatOpType)
             , (pyonBuiltin (subMember . the_AdditiveDict_float),
                binaryFloatOpType)
+            , (pyonBuiltin the_additiveDict,
+               additiveDictType)
             , (getPyonTupleCon' 2,
                tuple2ConType)
             ]

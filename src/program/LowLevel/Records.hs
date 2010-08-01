@@ -59,6 +59,13 @@ pointerTypeTag =
   then internalError "pointerTypeTag"
   else toTypeTag nativeWordType
 
+-- | The record type of an additive class dictionary
+additiveDictRecord :: StaticRecord
+additiveDictRecord =
+  staticRecord [ PrimField UnitType
+               , PrimField OwnedType
+               , PrimField OwnedType
+               , PrimField OwnedType]
 
 -- | An info table is a piece of statically defined global data.  Every 
 -- reference-counted, dynamically allocated object contains a pointer to an 

@@ -501,3 +501,13 @@ boolPassConvValue =
                 _ -> internalError "intPassConvValue"
   in passConvValue size align copy (llBuiltin the_fun_dealloc_closure)
 
+-- | Create a lambda function that constructs an additive dictionary
+genAdditiveDictFun :: (Monad m, Supplies m (Ident Var)) => Gen m Atom
+genAdditiveDictFun = do
+  type_param <- lift $ newAnonymousVar (PrimType UnitType)
+  zero_param <- lift $ newAnonymousVar (PrimType OwnedType)
+  add_param <- lift $ newAnonymousVar (PrimType OwnedType)
+  sub_param <- lift $ newAnonymousVar (PrimType OwnedType)
+  let params = [type_param, zero_param, add_param, sub_param]
+  fun_body <- getBlock $ return $ PackA additiveDictRecord (map VarV params)
+  return $ ValA [LamV $ closureFun params [RecordType additiveDictRecord] fun_body]

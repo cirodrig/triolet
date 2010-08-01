@@ -71,7 +71,9 @@ withMany f xs k = go xs k
 
 -- True if the constructor 'c' is the type constructor of a dictionary type
 isDictionaryTypeCon c =
-  c `elem` [SystemF.pyonBuiltin SystemF.the_PassConv]
+  c `elem` [ SystemF.pyonBuiltin SystemF.the_PassConv
+           , SystemF.pyonBuiltin SystemF.the_AdditiveDict
+           ]
 
 -------------------------------------------------------------------------------
 

@@ -226,7 +226,8 @@ flattenStm statement k =
       assign v v_values $ assign_variables vs sizes values'
     
     assign_variables [] [] [] = k []
-    assign_variables [] [] _ = unpack_size_mismatch
+    assign_variables [] [] _  = unpack_size_mismatch
+    assign_variables _  _  [] = unpack_size_mismatch
 
     unpack_size_mismatch =
       internalError "flattenStm: Record size mismatch when unpacking parameters"

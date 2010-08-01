@@ -161,10 +161,12 @@ mentions :: [Var] -> CC ()
 mentions vs = CC $ \_ ->
   return ((), Set.fromList vs, noDefs)
 
+-- | Get the set of free variables that were used in the computation.  Don't
+-- propagate the variables.
 listenFreeVars :: CC a -> CC (a, FreeVars)
 listenFreeVars (CC m) = CC $ \env -> do
   (x, free_vars, defs) <- m env
-  return ((x, free_vars), free_vars, defs)
+  return ((x, free_vars), Set.empty, defs)
 
 -- | Look up a variable used as the operator of a function call.
 -- If the variable is a known function and its arity matches the given arity,
@@ -214,9 +216,10 @@ scanAtom atom returns =
          Right v' ->
            -- Found direct call entry point
            return $ PrimCallA (VarV v') `liftM` sequence vs'
-         Left v' ->
+         Left v' -> do
            -- Generate indirect call
-           genIndirectCall returns (return $ VarV v') vs'
+           op <- scanValue (VarV v') -- Observe this use of the variable
+           genIndirectCall returns op vs'
 
      -- General case, indirect call
      CallA v vs -> do
@@ -246,7 +249,9 @@ scanAtom atom returns =
 scanValue :: Val -> CC (BuildBlock Val)
 scanValue value =
   case value
-  of LamV f  -> scanLambdaFunction f
+  of VarV v  -> do mention v
+                   return (return value)
+     LamV f  -> scanLambdaFunction f
      RecV {} -> internalError "scanValue"
      _       -> return (return value)
   
@@ -366,14 +371,14 @@ scanTopLevel fun_defs data_defs =
     data_defs' <- mapM scanDataDef data_defs
     writeDefs [] data_defs
   where
-    fun_variables = [v | FunDef v _ <- fun_defs]
+    fun_variables = [f | FunDef f _ <- fun_defs]
     data_variables = [v | DataDef v _ _ <- data_defs]
 
     -- If something other than a top-level variable is captured, it means
     -- there's a compiler bug
-    check_captured_vars captured_vars =
-      let valid_vars = Set.fromList $ fun_variables ++ data_variables
-      in if all (`Set.member` valid_vars) $ concat captured_vars
+    check_captured_vars captured_vars = do
+      let valid_vars = Set.fromList $ fun_variables ++ data_variables ++ allBuiltins
+      if all (`Set.member` valid_vars) $ concat captured_vars
          then return ()
          else internalError "scanTopLevel: Impossible variable capture"
 
