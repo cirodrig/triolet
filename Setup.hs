@@ -1,4 +1,5 @@
 
+import Control.Monad
 import Data.List
 import Data.Maybe
 import System.FilePath
@@ -238,6 +239,8 @@ doBuild pkg_desc lbi hooks flags = do
             ["-fdepend.mk", "-p" ++ rtsBuildDir lbi,
              "-I" ++ rtsSourceDir,
              "-I" ++ rtsBuildDir lbi] ++ rts_source_files
+      depfile_exists <- doesFileExist "depend.mk"
+      unless depfile_exists $ writeFile "depend.mk" ""
       rawSystemExit verb "makedepend" cdep_args
 
       runMake lbi flags ["build"]
