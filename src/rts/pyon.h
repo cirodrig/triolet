@@ -36,6 +36,9 @@ static inline int32_t pyon_atomic_add_s(int32_t *p, int delta)
 PyonPtr alloc(uint32_t);
 void dealloc(PyonPtr);
 
+/* How to deallocate a global closure */
+void dealloc_global(PyonPtr);
+
 /* How to copy small values */
 void copy4(PyonPtr src, PyonPtr dst);
 

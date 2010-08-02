@@ -132,11 +132,14 @@ withParameters vs (CC m) = CC $ fmap remove_var . m
 -- | Scan some code over which some functions are defined.  New variables will 
 -- be created for the functions' entry points and info tables.  This function 
 -- does not create definitions of these variables.
-withFunctions :: [FunDef] -> CC a -> CC a
-withFunctions defs m = foldr with_function m defs
+--
+-- The flag to use the default deallocation function should be true for
+-- global functions and false otherwise.
+withFunctions :: WantClosureDeallocator -> [FunDef] -> CC a -> CC a
+withFunctions want_dealloc defs m = foldr with_function m defs
   where
     with_function (FunDef v fun) m = do
-      entry_points <- mkEntryPoints (funType fun) (varName v)
+      entry_points <- mkEntryPoints want_dealloc (funType fun) (varName v)
       insert_entry_points (fromIdent $ varID v) entry_points m
 
     insert_entry_points key entry_points (CC f) = CC $ \env ->
@@ -280,7 +283,7 @@ scanDataValue value =
 withDefGroup :: [FunDef] -> (BuildBlock () -> CC a) -> CC a
 withDefGroup defs k =
   -- Add functions to environment
-  withFunctions defs $ do
+  withFunctions CustomDeallocator defs $ do
     -- Closure-convert all function bodies
     fun_descrs <- forM defs $ \(FunDef v fun) -> do
       (cc_fun, captured) <- scanFun fun
@@ -300,10 +303,14 @@ scanLambdaFunction :: Fun -> CC (BuildBlock Val)
 scanLambdaFunction lambda_fun = do
   -- Closure-convert the function
   (direct_fun, captured_vars) <- scanFun lambda_fun
+  let want_dealloc = if null captured_vars
+                     then DefaultDeallocator
+                     else CustomDeallocator
   
   -- Generate global data
+  -- Use the default deallocation function if there are no captured variables
   fun_var <- newAnonymousVar (PrimType OwnedType)
-  entry_points <- mkEntryPoints (funType lambda_fun) Nothing
+  entry_points <- mkEntryPoints want_dealloc (funType lambda_fun) Nothing
   generate_closure <-
     constructNonrecClosure fun_var entry_points captured_vars direct_fun
   
@@ -355,7 +362,7 @@ scanDataDef (DataDef v record vals) = do
 -- can ignore them.
 scanTopLevel :: [FunDef] -> [DataDef] -> CC ()
 scanTopLevel fun_defs data_defs =
-  withFunctions fun_defs $
+  withFunctions CannotDeallocate fun_defs $
   withParameters data_variables $ do
     -- Closure-convert all function bodies.  Only top-level functions should 
     -- appear as free variables.
@@ -452,7 +459,7 @@ closure var entry captured recursive =
              replicate (maybe 0 length recursive) (PrimField PointerType)
     
     -- see 'funInfoHeader'
-    info = [ VarV $ deallocEntry entry
+    info = [ maybe (LitV NullL) VarV $ deallocEntry entry
            , uint8V $ fromEnum FunTag
            , uint16V $ functionArity entry
            , uint16V $ length captured
@@ -547,12 +554,19 @@ generateClosureFree :: Closure -> CC ()
 generateClosureFree clo 
   | cloIsRecursive clo =
       internalError "generateClosureFree: Closure is part of a recursive group"
-  | otherwise = do
+      
+  | Just dealloc_entry <- deallocEntry $ cloEntryPoints clo,
+    dealloc_entry /= llBuiltin the_prim_dealloc_global = do
+      -- Generate a custom deallocation function
       clo_ptr <- newAnonymousVar (PrimType PointerType) 
       fun_body <- execBuild $ do generateClosureFreeBody clo (VarV clo_ptr)
                                  gen0
       let fun = primFun [clo_ptr] [] fun_body
-      writeFun $ FunDef (deallocEntry $ cloEntryPoints clo) fun
+      writeFun $ FunDef dealloc_entry fun
+
+  | otherwise =
+      -- Using the default or no deallocation function
+      return ()
       
 -- | Construct functions to free a group of mutually recursive closures.
 -- These consist of entry points that find all recursive functions in the
@@ -580,7 +594,15 @@ generateClosureGroupFree group = do
         -- Call the common function
         return $ PrimCallA (VarV shared_free_fun) closures
       let fun = primFun [param] [] fun_body
-      return $ FunDef (deallocEntry $ cloEntryPoints clo) fun
+          
+      -- Must be using a custom deallocation function
+      let dealloc_entry =
+            case deallocEntry (cloEntryPoints clo)
+            of Just v | v /= llBuiltin the_prim_dealloc_global -> v 
+               _ -> internalError "generateClosureGroupFree: \
+                                  \Default deallocation function is disallowed"
+
+      return $ FunDef dealloc_entry fun
 
     -- Define the shared function.  This function takes all closures as
     -- parameters, and frees each.
@@ -683,9 +705,11 @@ constructGlobalClosure f entry_points direct = do
   writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
   generateExactEntry clo
   generateInexactEntry clo
-  generateClosureFree clo
-  generateGlobalClosure clo
   
+  -- Global closures must not use a deallocation function
+  when (isJust $ deallocEntry (cloEntryPoints clo)) $
+    internalError "constructGlobalClosure: Must use default deallocator"
+  generateGlobalClosure clo
 
 -- | Construct global functions and data for a group of recursive functions
 -- (except the direct entry points).

@@ -57,6 +57,8 @@ builtinPrimitives =
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
   , ("dealloc",
      primFunctionType [PrimType PointerType] [])
+  , ("dealloc_global",          -- Deallocate a global closure
+     primFunctionType [PrimType PointerType] [])
   , ("apply_i32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (IntType Unsigned S32)] [PrimType OwnedType])

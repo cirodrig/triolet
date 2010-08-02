@@ -14,6 +14,7 @@ module LowLevel.Builtins
         llBuiltin,
         the_prim_alloc,
         the_prim_dealloc,
+        the_prim_dealloc_global,
         the_prim_apply_i32_f,
         the_prim_apply_i32,
         the_prim_apply_f32_f,

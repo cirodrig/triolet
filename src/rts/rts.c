@@ -223,6 +223,13 @@ dealloc(PyonPtr p)
   free(p);
 }
 
+/* Deallocate a global closure */
+void
+dealloc_global(PyonPtr p)
+{
+  dealloc(p);
+}
+
 /* Copy a 4-byte value */
 void
 copy4(PyonPtr src, PyonPtr dst)

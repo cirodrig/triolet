@@ -7,6 +7,7 @@ import Control.Monad.Writer
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
+import Gluon.Common.Label
 import Gluon.Common.Supply
 import Gluon.Core(Con(..))
 import LowLevel.Builtins
@@ -366,6 +367,7 @@ deallocateHeapMem ptr =
   emitAtom0 $ PrimCallA (builtinVar the_prim_dealloc) [ptr]
 
 -------------------------------------------------------------------------------
+-- Manipulating objects
 
 objectHeaderRecord' :: DynamicRecord
 objectHeaderRecord' = toDynamicRecord objectHeaderRecord
@@ -464,6 +466,39 @@ selectPassConvSize = selectField passConvRecord 0
 selectPassConvAlignment = selectField passConvRecord 1
 selectPassConvCopy = selectField passConvRecord 2
 selectPassConvFree = selectField passConvRecord 3
+
+-------------------------------------------------------------------------------
+-- Values
+
+data WantClosureDeallocator =
+    CannotDeallocate            -- ^ The closure is never deallocated
+  | DefaultDeallocator          -- ^ The closure has no captured variables and
+                                --   is not recursive; use the default
+                                --   deallocation function
+  | CustomDeallocator           -- ^ Generate a specialized deallocator
+
+-- | Create an 'EntryPoints' data structure and populate it with new variables.
+-- 
+-- The deallocation function can either be a new variable or the default 
+-- deallocation function.
+mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
+                 WantClosureDeallocator
+              -> FunctionType   -- ^ Function type
+              -> Maybe Label    -- ^ Function name
+              -> m EntryPoints  -- ^ Creates an EntryPoints structure
+mkEntryPoints want_dealloc ftype label 
+  | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
+  | otherwise = do
+      [inf, dir, exa, ine] <-
+        replicateM 4 $ newVar label (PrimType PointerType)
+      dea <- case want_dealloc
+             of CannotDeallocate -> return Nothing
+                DefaultDeallocator ->
+                  return $ Just $ llBuiltin the_prim_dealloc_global
+                CustomDeallocator ->
+                  liftM Just $ newVar label (PrimType PointerType)
+      let arity = length $ ftParamTypes ftype
+      return $! EntryPoints ftype arity dir exa ine dea inf
 
 passConvValue :: Int -> Int -> Var -> Var -> Val
 passConvValue size align copy free =

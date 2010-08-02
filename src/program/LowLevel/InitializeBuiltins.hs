@@ -14,6 +14,7 @@ import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.BuiltinsTH
 import LowLevel.Builtins
+import LowLevel.Build
 import LowLevel.FreshVar
 
 -- This core module provides the low-level equivalent of core function types
@@ -35,7 +36,9 @@ initializeClosureField supply nm fty =
   runFreshVarM supply $ do
     let lab = builtinLabel nm
     v <- newBuiltinVar lab (PrimType OwnedType)
-    ep <- mkEntryPoints fty (Just lab)
+
+    -- All builtin closures use the default closure deallocator
+    ep <- mkEntryPoints CannotDeallocate fty (Just lab)
     return (v, ep)
 
 initializeVarField :: IdentSupply Var -> String -> ValueType -> IO Var
