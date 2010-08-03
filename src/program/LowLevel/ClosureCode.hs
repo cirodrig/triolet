@@ -1,28 +1,30 @@
 {-| Generation of code and data structures for closure conversion.
 -}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, RecursiveDo, ViewPatterns #-}
 module LowLevel.ClosureCode
        (varPrimType, valType,
         GenM, CC,
         runCC,
-        withEntryPoints, lookupEntryPoints',
+        lookupEntryPoints',
         lookupCallVar,
-        withParameter, withParameters, withFunctions,
+        withParameter, withParameters,
+        withLocalFunctions,
+        withGlobalFunctions,
         writeFun, writeData,
         mention, mentions,
         listenFreeVars,
         
         -- * Code generation
-        genDirectCall,
+        genVarCall,
         genIndirectCall,
-        constructRecClosures,
-        constructNonrecClosure,
-        constructGlobalClosure,
+        emitLambdaClosure
        )
 where
 
 import Control.Monad
+import Control.Monad.Fix
 import qualified Data.IntMap as IntMap
+import qualified Data.IntSet as IntSet
 import Data.List
 import Data.Maybe
 import qualified Data.Set as Set
@@ -72,23 +74,37 @@ noDefs = []
 concatDefs :: Defs -> Defs -> Defs
 concatDefs = (++)
 
--- | The monad used by closure conversion.
+-- | The monad used by closure conversion while scanning a program.
 --
--- Closure conversion keeps track of the free variables in a scanned statement
--- and the global defintions that were created from it.
+-- When scanning part of a program, closure conversion keeps track of the 
+-- set of free variables referenced in that part of the program.  (Globals
+-- are not included in the set since they cannot be captured.)
+--
+-- During scanning, new global definitions are generated.  These definitions
+-- comprise the translated module.
 newtype CC a = CC (CCEnv -> IO (a, FreeVars, Defs))
 
 data CCEnv =
   CCEnv
   { envVarIDSupply :: {-# UNPACK #-}!(IdentSupply Var)
-  , envEntryPoints :: !(IntMap.IntMap EntryPoints)
+    -- | IDs of global variables.  Global variables are never captured.
+  , envGlobals :: !IntSet.IntSet
+    -- | Information about how to construct closures for functions that are
+    -- in scope.
+  , envEntryPoints :: !(IntMap.IntMap Closure)
   }
 
-emptyCCEnv var_ids = CCEnv var_ids IntMap.empty
+emptyCCEnv var_ids globals =
+  let globals_set = IntSet.fromList $ map (fromIdent . varID) globals
+  in CCEnv var_ids globals_set IntMap.empty
 
-runCC :: IdentSupply Var -> CC () -> IO ([FunDef], [DataDef])
-runCC var_ids (CC f) = do
-  ((), _, defs) <- f $ emptyCCEnv var_ids
+runCC :: IdentSupply Var        -- ^ Variable ID supply
+      -> [Var]                  -- ^ Global variables
+      -> CC ()                  -- ^ Computation to run
+      -> IO ([FunDef], [DataDef]) -- ^ Compute new global definitions 
+runCC var_ids globals (CC f) = do
+  let env = emptyCCEnv var_ids globals
+  ((), _, defs) <- f env
   return $ accumulate id id defs
   where
     accumulate funs datas ((funs', datas'):defs) =
@@ -107,9 +123,13 @@ instance Monad CC where
         (y, fv2, defs2) <- g env
         return (y, Set.union fv1 fv2, concatDefs defs1 defs2)
 
+instance MonadFix CC where
+  mfix f = CC $ \env -> mfix $ \ ~(x, _, _) -> case (f x) of CC f' -> f' env
+
 instance Supplies CC (Ident Var) where
   fresh = CC $ \env -> returnCC =<< supplyValue (envVarIDSupply env)
 
+{-
 -- | Add a function's entry points to the environment
 withEntryPoints :: Var -> EntryPoints -> CC a -> CC a
 withEntryPoints fname entry_points (CC m) = CC $ m . insert_entry
@@ -118,10 +138,15 @@ withEntryPoints fname entry_points (CC m) = CC $ m . insert_entry
       let key = fromIdent $ varID fname
       in env { envEntryPoints = IntMap.insert key entry_points $
                envEntryPoints env}
+-}
+
+lookupClosure :: Var -> CC (Maybe Closure)
+lookupClosure v = CC $ \env ->
+  returnCC $ IntMap.lookup (fromIdent $ varID v) $ envEntryPoints env
 
 lookupEntryPoints :: Var -> CC (Maybe EntryPoints)
 lookupEntryPoints v = CC $ \env ->
-  returnCC $ IntMap.lookup (fromIdent $ varID v) $ envEntryPoints env
+  returnCC $ fmap cloEntryPoints $ IntMap.lookup (fromIdent $ varID v) $ envEntryPoints env
 
 lookupEntryPoints' :: Var -> CC EntryPoints
 lookupEntryPoints' v = lookupEntryPoints v >>= check
@@ -148,14 +173,17 @@ withParameters vs (CC m) = CC $ fmap remove_var . m
     deleteList xs s = foldr Set.delete s xs
 
 
-
+{-
 -- | Scan some code over which some functions are defined.  New variables will 
 -- be created for the functions' entry points and info tables.  This function 
 -- does not create definitions of these variables.
 --
 -- The flag to use the default deallocation function should be true for
 -- global functions and false otherwise.
-withFunctions :: WantClosureDeallocator -> [FunDef] -> CC a -> CC a
+withFunctions :: WantClosureDeallocator
+              -> [FunDef]
+              -> CC ([Closure], a)
+              -> CC a
 withFunctions want_dealloc defs m = foldr with_function m defs
   where
     with_function (FunDef v fun) m = do
@@ -165,6 +193,62 @@ withFunctions want_dealloc defs m = foldr with_function m defs
     insert_entry_points key entry_points (CC f) = CC $ \env ->
       f $ env { envEntryPoints = IntMap.insert key entry_points $
                                  envEntryPoints env}
+-}
+
+localClosures xs m = foldr localClosure m xs
+
+localClosure :: Closure -> CC a -> CC a
+localClosure clo (CC f) = CC $ \env -> f (insert_closure env)
+  where
+    insert_closure env =
+      let k = fromIdent $ varID $ cloVariable clo
+      in env {envEntryPoints = IntMap.insert k clo $ envEntryPoints env}
+
+withGlobalFunctions :: [FunDef] -> CC [Fun] -> CC () -> CC ()
+withGlobalFunctions defs scan gen = do
+  clos <- mapM mkGlobalClosure defs
+  funs <- localClosures clos scan
+  zipWithM emitGlobalClosure clos funs
+  gen
+
+-- | Create a closure description.  No code is generated.
+mkGlobalClosure (FunDef v fun) = do
+  entry_points <- mkEntryPoints CannotDeallocate (funType fun) (varName v)
+  return $ nonrecClosure v entry_points []
+
+withLocalFunctions :: [FunDef]          -- ^ Function definitions
+                   -> CC [(Fun, [Var])] -- ^ Generate a direct entry
+                                        -- and list of captured
+                                        -- variables for each function
+                   -> (GenM () -> CC a) -- ^ Incorporate the closure code
+                                        -- generator into the program
+                   -> CC a
+withLocalFunctions defs scan gen = mdo
+  -- Create recursive function closures
+  clos <- mkRecClosures defs captureds
+  
+  -- Scan functions
+  (unzip -> ~(funs, captureds)) <- localClosures clos scan
+
+  -- Generate closure code
+  gen_code <- emitRecClosures clos funs
+  
+  -- Generate remaining code
+  localClosures clos $ gen gen_code
+
+-- | Create closure descriptions for a set of recursive functions.
+-- No code is generated.
+mkRecClosures defs captureds = do
+  -- Create entry points structure
+  entry_points <- forM defs $ \(FunDef v f) ->
+    mkEntryPoints CustomDeallocator (funType f) (varName v)
+ 
+  return $ closureGroup $
+    lazyZip3 (map funDefiniendum defs) entry_points captureds
+  where
+    -- The captured variables are generated lazily; must not be strict
+    lazyZip3 (x:xs) (y:ys) ~(z:zs) = (x,y,z):lazyZip3 xs ys zs
+    lazyZip3 []     _      _       = []
 
 -- | Write some global object definitions
 writeDefs :: [FunDef] -> [DataDef] -> CC ()
@@ -174,15 +258,21 @@ writeDefs fun_defs data_defs = CC $ \_ ->
 writeFun f = writeDefs [f] []
 writeData d = writeDefs [] [d]
 
--- | Record that a variable has been used
+-- | Record that a variable has been used.  Global variables are ignored.
 mention :: Var -> CC ()
-mention v = CC $ \_ ->
-  return ((), Set.singleton v, noDefs)
+mention v = CC $ \env ->
+  let free_vars = if fromIdent (varID v) `IntSet.member` envGlobals env
+                  then Set.empty
+                  else Set.singleton v
+  in free_vars `seq` return ((), free_vars, noDefs)
 
--- | Record that some variables have been used
+-- | Record that some variables have been used.  Global variables are ignored.
 mentions :: [Var] -> CC ()
-mentions vs = CC $ \_ ->
-  return ((), Set.fromList vs, noDefs)
+mentions vs = CC $ \env ->
+  let globals = envGlobals env
+      free_vars = Set.fromList $
+                  filter (not . (`IntSet.member` globals) . fromIdent . varID) vs
+  in free_vars `seq` return ((), free_vars, noDefs)
 
 -- | Get the set of free variables that were used in the computation.  Don't
 -- propagate the variables.
@@ -218,21 +308,21 @@ funInfoHeaderRecord' = toDynamicRecord funInfoHeaderRecord
 valuesRecord :: [Val] -> StaticRecord
 valuesRecord vals = staticRecord $ map (PrimField . valType) vals
 
--- | A description of a function closure.  This description is used to create
--- all the code and static data for the function other than the direct entry
--- point.
+-- | A description of a function closure.  The description is used to create
+--   all the code and static data for the function other than the direct entry
+--   point.
 data Closure =
   Closure
   { -- | The variable that will point to this closure
     cloVariable :: !Var
     -- | The entry points for the function that this closure defines
-  , cloEntryPoints :: !EntryPoints
+  , cloEntryPoints :: EntryPoints
     -- | Variables captured by the closure
-  , cloCaptured :: ![Var]
+  , cloCaptured :: [Var]
     -- | The closure's record type
   , cloRecord :: StaticRecord
     -- | The contents of the closure's info table
-  , cloInfoTable :: ![Val]
+  , cloInfoTable :: [Val]
     -- | If the closure is part of a recursively defined group,
     --   these are the closures in the group.  All closures in the group  
     --   have the same group.  A closure is part of its own group.
@@ -495,25 +585,9 @@ generateInfoTable clo =
       info_table = infoTableEntry $ cloEntryPoints clo
   in writeData $ DataDef info_table record $ cloInfoTable clo
 
--- | Construct global functions and data for a non-recursive function
--- (except the direct entry point).  Return a code generator that creates
--- a closure.
---
--- If the function doesn't capture any variables, hoist it to global scope.
-constructNonrecClosure :: Var -> EntryPoints -> [Var] -> Fun
-                       -> CC (GenM ())
-constructNonrecClosure f entry_points captured direct = do
-  let clo = nonrecClosure f entry_points captured
-  generateInfoTable clo
-  writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
-  generateExactEntry clo
-  generateInexactEntry clo
-  generateClosureFree clo
-  return $ generateClosure clo
-
-constructGlobalClosure :: Var -> EntryPoints -> Fun -> CC ()
-constructGlobalClosure f entry_points direct = do
-  let clo = nonrecClosure f entry_points []
+-- | Generate the code and data of a global function
+emitGlobalClosure :: Closure -> Fun -> CC ()
+emitGlobalClosure clo direct = do
   generateInfoTable clo
   writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
   generateExactEntry clo
@@ -524,12 +598,9 @@ constructGlobalClosure f entry_points direct = do
     internalError "constructGlobalClosure: Must use default deallocator"
   generateGlobalClosure clo
 
--- | Construct global functions and data for a group of recursive functions
--- (except the direct entry points).
-constructRecClosures :: [(Var, EntryPoints, [Var], Fun)] -> CC (GenM ())
-constructRecClosures fs = do
-  let grp = closureGroup [(f, entry, cap) | (f, entry, cap, _) <- fs]
-      directs = [direct_fun | (_, _, _, direct_fun) <- fs]
+-- | Generate the code and data of a group of recursive closures
+emitRecClosures :: ClosureGroup -> [Fun] -> CC (GenM ())
+emitRecClosures grp directs = do
   forM_ (zip grp directs) $ \(clo, direct) -> do 
     generateInfoTable clo
     writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
@@ -538,14 +609,70 @@ constructRecClosures fs = do
   generateClosureGroupFree grp
   return $ generateClosures grp
 
+-- | Generate the code and data of a lambda function
+emitLambdaClosure :: FunctionType -> Fun -> [Var] -> CC (GenM Val)
+emitLambdaClosure lambda_type direct captured_vars = do
+  fun_var <- newAnonymousVar (PrimType OwnedType)  
+  
+  -- Use the default deallocation function if there are no captured variables
+  let want_dealloc = if null captured_vars
+                     then DefaultDeallocator
+                     else CustomDeallocator
+  entry_points <- mkEntryPoints want_dealloc lambda_type Nothing
+  let clo = nonrecClosure fun_var entry_points captured_vars
+      
+  -- Generate code
+  generateInfoTable clo
+  writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
+  generateExactEntry clo
+  generateInexactEntry clo
+  generateClosureFree clo
+  
+  -- Create the function variable, then pass it as a parameter to something 
+  return $ do generateClosure clo
+              return $ VarV fun_var
+
 -------------------------------------------------------------------------------
 
+-- | Generate a call to a variable.  If the variable has a known direct entry
+-- point and is applied to enough arguments, a direct call is generated.
+-- Otherwise, an indirect call is generated.
+genVarCall :: [PrimType]        -- ^ Return types
+           -> Var               -- ^ Function that is called
+           -> [GenM Val]        -- ^ Argument generators
+           -> CC (GenM Atom)
+genVarCall return_types fun args = lookupClosure fun >>= select
+  where
+    use_fun = mention fun >> return (return (VarV fun))
+    select Nothing = do
+      op <- use_fun
+      genIndirectCall return_types op args -- Unknown function
+    
+    select (Just ep) =
+      case length args `compare` arity
+      of LT -> do               -- Undersaturated
+           op <- use_fun
+           genIndirectCall return_types op args
+         EQ -> do               -- Saturated
+           return $ directCall captured_vars entry args
+         GT -> do
+           -- Oversaturated; generate a direct call followed by an
+           -- indirect call
+           let (direct_args, indir_args) = splitAt arity args
+           let direct_call = directCall captured_vars entry direct_args
+           let direct_val = emitAtom1 (PrimType OwnedType) =<< direct_call
+           genIndirectCall return_types direct_val indir_args
+      where
+        arity = functionArity $ cloEntryPoints ep
+        entry = directEntry $ cloEntryPoints ep
+        captured_vars = cloCaptured ep
+
 -- | Produce a direct call to the given primitive function.
---
--- FIXME: Pass captured variables
-genDirectCall :: Var -> [GenM Val] -> CC (GenM Atom)
-genDirectCall v args =
-  return $ PrimCallA (VarV v) `liftM` sequence args
+directCall :: [Var] -> Var -> [GenM Val] -> GenM Atom
+directCall captured_vars v args = do
+  args' <- sequence args
+  let captured_args = map VarV captured_vars
+  return $ PrimCallA (VarV v) (captured_args ++ args')
 
 -- | Produce an indirect call of the given operator
 genIndirectCall :: [PrimType]

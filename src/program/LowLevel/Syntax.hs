@@ -45,7 +45,7 @@ data Prim =
   | PrimCastToOwned             -- ^ Cast a non-owned pointer to an owned
                                 --   pointer.  A new reference is returned.
   | PrimCastFromOwned           -- ^ Cast an owned pointer to a non-owned
-                                --   pointer.  Borrows a reference.
+                                --   pointer.  Consumes a reference.
   | PrimAddF !Size              -- ^ Floating-point addition
   | PrimSubF !Size              -- ^ Floating-point subtraction
 
@@ -150,8 +150,17 @@ type Alt = (Lit, Block)
 -- | A function definition
 data FunDef = FunDef !ParamVar Fun
 
+funDefiniendum :: FunDef -> Var
+funDefiniendum (FunDef v _) = v
+
+funDefiniens :: FunDef -> Fun
+funDefiniens (FunDef _ f) = f
+
 -- | A static data definition
 data DataDef = DataDef !ParamVar !StaticRecord ![Val]
+
+dataDefiniendum :: DataDef -> Var
+dataDefiniendum (DataDef v _ _) = v
 
 data Module =
   Module 

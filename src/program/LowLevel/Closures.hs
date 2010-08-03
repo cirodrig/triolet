@@ -16,6 +16,7 @@ import Control.Monad
 import Data.List
 import Data.Maybe
 import qualified Data.Set as Set
+import Debug.Trace
 
 import Gluon.Common.Error
 import Gluon.Common.MonadLogic
@@ -51,17 +52,7 @@ scanAtom atom returns =
        return $ ValA `liftM` sequence vs'
 
      -- Generate a direct call if possible
-     CallA (VarV v) vs -> do
-       call_var <- lookupCallVar v (length vs)
-       vs' <- mapM scanValue vs
-       case call_var of
-         Right v' ->
-           -- Found direct call entry point
-           genDirectCall v' vs'
-         Left v' -> do
-           -- Generate indirect call
-           op <- scanValue (VarV v') -- Observe this use of the variable
-           genIndirectCall returns op vs'
+     CallA (VarV v) vs -> genVarCall returns v =<< mapM scanValue vs
 
      -- General case, indirect call
      CallA v vs -> do
@@ -107,19 +98,10 @@ scanDataValue value =
 
 withDefGroup :: [FunDef] -> (GenM () -> CC a) -> CC a
 withDefGroup defs k =
-  -- Add functions to environment
-  withFunctions CustomDeallocator defs $ do
-    -- Closure-convert all function bodies
-    fun_descrs <- forM defs $ \(FunDef v fun) -> do
-      (cc_fun, captured) <- scanFun fun
-      entry <- lookupEntryPoints' v
-      return (v, entry, captured, cc_fun)
-    
-    -- Generate global data
-    generate_closures <- constructRecClosures fun_descrs
-    
-    -- Pass the closure generating code to the continuation
-    k generate_closures
+  -- Functions are bound here
+  withParameters (map funDefiniendum defs) $
+  -- Scan functions and add them to environment
+  withLocalFunctions defs (mapM (scanFun . funDefiniens) defs) k
 
 -- | Perform closure conversion on a lambda function; generate entry 
 --   points and data structures for it.  As a side effect, global objects
@@ -128,19 +110,7 @@ scanLambdaFunction :: Fun -> CC (GenM Val)
 scanLambdaFunction lambda_fun = do
   -- Closure-convert the function
   (direct_fun, captured_vars) <- scanFun lambda_fun
-  let want_dealloc = if null captured_vars
-                     then DefaultDeallocator
-                     else CustomDeallocator
-  
-  -- Generate global data
-  -- Use the default deallocation function if there are no captured variables
-  fun_var <- newAnonymousVar (PrimType OwnedType)
-  entry_points <- mkEntryPoints want_dealloc (funType lambda_fun) Nothing
-  generate_closure <-
-    constructNonrecClosure fun_var entry_points captured_vars direct_fun
-  
-  return $ do generate_closure
-              return $ VarV fun_var
+  emitLambdaClosure (funType lambda_fun) direct_fun captured_vars
 
 -- | Perform closure conversion on a function.  The closure-converted
 -- function is returned, along with a list of the captured variables.
@@ -186,35 +156,37 @@ convertDataDef (DataDef v record vals) = do
 -- can ignore them.
 scanTopLevel :: [FunDef] -> [DataDef] -> CC ()
 scanTopLevel fun_defs data_defs =
-  withFunctions CannotDeallocate fun_defs $
-  withParameters data_variables $ do
-    -- Closure-convert all function bodies.  Only top-level functions should 
-    -- appear as free variables.
-    (funs, captured_vars) <- mapAndUnzipM scanFun [f | FunDef _ f <- fun_defs]
-    check_captured_vars captured_vars
-    
-    -- Create closures
-    forM (zip fun_defs funs) $ \(FunDef v _, fun) -> do 
-      entry_points <- lookupEntryPoints' v
-      constructGlobalClosure v entry_points fun
-
-    -- Convert function references appearing in data definitions
-    mapM_ convertDataDef data_defs
+  withGlobalFunctions fun_defs
+  (mapM scan_fun fun_defs)
+  (mapM_ convertDataDef data_defs)
   where
-    fun_variables = [f | FunDef f _ <- fun_defs]
-    data_variables = [v | DataDef v _ _ <- data_defs]
+    fun_variables = map funDefiniendum fun_defs
+    data_variables = map dataDefiniendum data_defs
+
+    -- Scan a function and create the direct entry point.  There must be no
+    -- captured variables.
+    scan_fun fdef = do
+      (f, captured) <- scanFun $ funDefiniens fdef
+      check_captured_vars captured
+      return f
 
     -- If something other than a top-level variable is captured, it means
     -- there's a compiler bug
-    check_captured_vars captured_vars = do
-      let valid_vars = Set.fromList $ fun_variables ++ data_variables ++ allBuiltins
-      if all (`Set.member` valid_vars) $ concat captured_vars
-         then return ()
-         else internalError "scanTopLevel: Impossible variable capture"
+    check_captured_vars captured_vars =
+      unless (all (`Set.member` valid_vars) captured_vars) $
+      traceShow (Set.fromList captured_vars Set.\\ valid_vars) $ 
+      internalError "scanTopLevel: Impossible variable capture"
+
+    valid_vars = Set.fromList $ fun_variables ++ data_variables ++ allBuiltins
 
 closureConvert :: Module -> IO Module
 closureConvert (Module fun_defs data_defs) =
   withTheLLVarIdentSupply $ \var_ids -> do
-    (fun_defs', data_defs') <- runCC var_ids $ scanTopLevel fun_defs data_defs
+    let global_vars = map funDefiniendum fun_defs ++
+                      map dataDefiniendum data_defs ++
+                      allBuiltins
+    (fun_defs', data_defs') <- runCC var_ids global_vars $
+                               scanTopLevel fun_defs data_defs
     return $ Module fun_defs' data_defs'
+  
 
