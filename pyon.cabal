@@ -67,6 +67,7 @@ Executable pyon
     LowLevel.Build
     LowLevel.BuiltinCalls
     LowLevel.Closures
+    LowLevel.ClosureCode
     LowLevel.FreshVar
     LowLevel.GenerateC
     LowLevel.Syntax
