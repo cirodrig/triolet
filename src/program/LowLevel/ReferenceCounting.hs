@@ -46,6 +46,7 @@ import Control.Monad
 import qualified Data.Map as Map
 import Data.Maybe
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
@@ -59,6 +60,9 @@ import LowLevel.Build
 import LowLevel.Print
 import Globals
 
+-- | Print the reference deficits accumulated at the head of each block.
+debugDeficits = False
+
 type GenM a = Gen FreshVarM a
 
 -- | The ownership of a variable at the time it was introduced.
@@ -70,6 +74,10 @@ type GenM a = Gen FreshVarM a
 -- current function body.
 -- A 'Loaded' reference starts out as a non-owned reference.  It must have
 -- its reference count incremented immediately.
+--
+-- If a variable is derived from another, dominating variable by pointer 
+-- arithmetic or assignment, its ownership will not be recorded; the
+-- dominator's ownership should be used.
 data Ownership =
     Owned                       -- ^ Introduced as an owned reference
   | Borrowed                    -- ^ Introduced as a borrowed reference
@@ -84,9 +92,9 @@ getOwnership v m
   | varIsBuiltin v = Borrowed   -- Builtins are always borrowed references
   | otherwise = case Map.lookup v m
                    of Just o -> o
-                      Nothing -> internalError "isOwned"
+                      Nothing -> internalError "getOwnership"
 
--- | Reference deficits of \"owned\" variables.  Deficits are computed while
+-- | Reference deficits of owned variables.  Deficits are computed while
 -- traversing code in the backwards direction.  A variable's reference count
 -- will be increased to make up the deficit where the variable is bound.
 type Deficit = Map.Map Var Int
@@ -132,6 +140,10 @@ type SourcePointer = Map.Map Var Var
 newtype RC a =
   RC {runRC :: HeldReferences -> SourcePointer -> FreshVarM (a, Deficit)}
 
+instance Functor RC where
+  fmap f (RC g) = RC $ \ownership src -> do (x, df) <- g ownership src
+                                            return (f x, df)
+
 instance Monad RC where
   return x = RC $ \_ _ -> return (x, Map.empty)
   m >>= k = RC $ \ownership sources -> do
@@ -160,6 +172,9 @@ withBorrowedVariables vs m = foldr withBorrowedVariable m vs
 withLoadedVariable :: ParamVar -> RC (GenM a) -> RC (GenM a)
 withLoadedVariable = withVariable Loaded
 
+-- | Track reference counts for an introduced variable over the scope of 'm'.
+-- This function is not called for variables that were derived from another
+-- variable.
 withVariable is_owned v m
   | not (isOwnedVar v) = m -- This variable is not reference counted
   | otherwise = RC $ \ownership src -> do
@@ -176,6 +191,33 @@ withVariable is_owned v m
   
       -- Return the new code.  Stop tracking this variable's deficit.
       return (blk', deficit')
+
+askOwnership :: Var -> RC Ownership
+askOwnership v = RC $ \ownership _ ->
+  return (get_ownership ownership, Map.empty)
+  where
+    get_ownership m =
+      case Map.lookup v m
+      of Just x -> x
+         Nothing -> internalError "askOwnership: No information for variable"
+
+askOwnerships :: RC HeldReferences
+askOwnerships = RC $ \ownership _ -> return (ownership, Map.empty)
+
+askSources :: RC SourcePointer
+askSources = RC $ \_ src -> return (src, Map.empty)
+
+{-
+-- | Get the source from which a variable was derived (possibly the variable
+-- itself).
+getSourceVariable :: Var -> RC Var
+getSourceVariable v = lookupSourceVar v >>= maybe (return v) getSourceVariable
+-}
+
+listenDeficit :: RC a -> RC (a, Deficit)
+listenDeficit m = RC $ \ownership src -> do
+  (x, deficit) <- runRC m ownership src
+  return ((x, deficit), deficit)
 
 -- | Generate reference count increments to balance out the reference deficits
 -- of all global variables.
@@ -200,10 +242,9 @@ adjustBuiltinVarRefCounts m = RC $ \ownership src -> do
 -- derived from an owned variable, the variable's reference deficit goes
 -- up by 1.  Otherwise, nothing happens.
 consumeReference :: Var -> RC ()
-consumeReference v
-  | isOwnedVar v = RC $ \_ _ -> return ((), Map.singleton v 1)
-  | otherwise = do v' <- lookupSourceVar v
-                   maybe (return ()) consumeReference v'
+consumeReference v = do
+  v' <- lookupSourceVar v
+  when (isOwnedVar v') $ RC $ \_ _ -> return ((), Map.singleton v 1)
 
 -- | Borrow a reference to a variable while generating some code.  Ensure
 -- that a reference is held, possibly by inserting a 'decref' to ensure 
@@ -270,21 +311,29 @@ parallelReferences xs = RC $ \ownership src -> do
       -- Generate the rest of the code
       gen_code
 
--- | Find the owned variable corresponding to a variable (if there is one).
-lookupSourceVar :: Var -> RC (Maybe Var)
-lookupSourceVar v = RC $ \_ src -> return (Map.lookup v src, Map.empty)
+-- | Find the owned variable from which a variable was derived.  If it wasn't
+-- derived from another variable, return the original.
+lookupSourceVar :: Var -> RC Var
+lookupSourceVar v = RC $ \_ src ->
+  return (fromMaybe v $ Map.lookup v src, Map.empty)
 
+-- | Record that @derived_var@ was derived from the same variable that
+-- @src_var@ was derived from, if @src_var@ holds a reference.  If
+-- @src_var@ doesn't hold a reference, do nothing (the value 
+-- doesn't matter for reference counting).
 withDerivedVar :: Var -> Var -> RC a -> RC a 
 withDerivedVar derived_var src_var (RC m) =
   RC $ \ownership src ->
-  let src' = Map.insert derived_var src_var src
+  let src_var' = fromMaybe src_var $ Map.lookup src_var src
+      src' = if isOwnedVar src_var'
+             then Map.insert derived_var src_var' src
+             else src
   in m ownership src'
 
 runBalancedRC :: RC a -> FreshVarM a
 runBalancedRC m = do
   (x, deficit) <- runRC m Map.empty Map.empty
   unless (isBalanced deficit) $
-    traceShow deficit $
     internalError "runBalancedRC: Found unbalanced reference counts"
   return x
 
@@ -357,7 +406,8 @@ rcFun globals fun = do
   return $ primFun params returns body''
 
 rcBlock :: [ValueType] -> Block -> RC (GenM Atom)
-rcBlock return_types (Block stms atom) = foldr rcStm gen_atom stms
+rcBlock return_types blk@(Block stms atom) =
+  debug $ foldr rcStm gen_atom stms
   where
     gen_atom =
       case atom
@@ -372,6 +422,32 @@ rcBlock return_types (Block stms atom) = foldr rcStm gen_atom stms
            retvars <- mapM newAnonymousVar (map toPointerType return_types)
            rcAtom return_types (bindAtom retvars) atom $
              return $ return $ ValA $ map (VarV . toPointerVar) retvars
+             
+    -- Print out what references are consumed in this piece of code
+    debug m 
+      | not debugDeficits = m
+      | otherwise = do
+          ownership <- askOwnerships
+          src <- askSources
+          (x, df) <- listenDeficit m
+          
+          let deficits = format_deficits ownership src df
+          let message = text "Deficits: " <+> deficits $$
+                        nest 2 (text "in" <+> pprBlock blk)
+          traceShow message $ return x
+    
+    format_deficits ownership src df =
+      vcat $ map format_deficit $ Map.toList df 
+      where
+        format_deficit (v, n) =
+          let get_src x = maybe x get_src $ Map.lookup x src 
+              o =
+                case Map.lookup (get_src v) ownership
+                of Just Owned -> "(owned)"
+                   Just Borrowed -> "(Borrowed)"
+                   Just Loaded -> "(loaded)"
+                   Nothing -> "(MISSING)"
+          in hang (text $ show n) 5 $ pprVar v <+> text o
 
 rcStm :: Stm -> RC (GenM a) -> RC (GenM a)
 rcStm statement k =
@@ -386,17 +462,36 @@ rcStm statement k =
      -- Pointer arithmetic creates a derived pointer, in addition to behaving
      -- like a normal arithmetic instruction.
      LetE params@[param] atom@(PrimA PrimAddP [VarV base, offset]) ->
-       if isOwnedVar base
-       then refcount_let params atom $ withDerivedVar param base k
-       else do msrc <- lookupSourceVar base
-               case msrc of
-                 Nothing -> refcount_let params atom k
-                 Just v  -> refcount_let params atom $ withDerivedVar param v k
+       refcount_let params atom $ withDerivedVar param base k
          
+     -- When a variable is moved, the destination becomes a derived variable.
+     -- It does not change reference counts.
+     LetE params atom@(ValA vals) -> do
+       vals' <- mapM (rcVal True) vals
+       let add_let m = do
+             vals'' <- sequence vals'
+             bindAtom (map toPointerVar params) $ ValA vals''
+             m
+             
+       -- Update the reference information for derived variables.  Add this
+       -- statement to the generated code.
+       fmap add_let $ foldr refcount_value k $ zip params vals
+
      LetE params atom -> refcount_let params atom k
 
      LetrecE {} -> internalError "rcStm"
    where
+     -- When moving a variable, produce a derived variable
+     refcount_value (dst, VarV src) k = refcount_move dst src k
+
+     -- Otherwise, it's not an owned value
+     refcount_value (dst, _) k
+       | isOwnedVar dst = internalError "rcStm"
+       | otherwise = k
+
+     -- Give 'dst' the same reference properties as 'src'
+     refcount_move dst src k = withDerivedVar dst src k
+
      refcount_let params atom k =
        rcAtom (map varType params) (bindAtom $ map toPointerVar params) atom $
        withOwnedVariables params k
@@ -406,7 +501,6 @@ rcStm statement k =
        return $ do arg'' <- arg'
                    bindAtom1 (toPointerVar param) $
                      PrimA (PrimLoad (PrimType PointerType)) [arg'']
-
 
 -- | Insert reference counting in an atom and emit a statement.
 -- Use the continuation to decide whether to adjust reference counts.
@@ -468,10 +562,9 @@ rcAtom return_types emit_atom atom k =
                   return (x >>= emit_atom)
       in borrowValues vals m' k
     
+    -- Prepend the atom onto the code generated by @k@
     return_atom :: GenM Atom -> RC (GenM a)
-    return_atom mk_atom = do
-      x <- k
-      return ((mk_atom >>= emit_atom) >> x)
+    return_atom mk_atom = fmap (mk_atom >>= emit_atom >>) k
 
 -- | Generate code to adjust reference counts to reflect what a primitive
 --   operation does to its arguments.  The code is emitted immediately after
@@ -502,15 +595,16 @@ adjustReferencesForPrim _ _ = return $ return ()
 -- | Borrow references to any variables mentioned in the list
 borrowValues :: [Val] -> RC (GenM ()) -> RC (GenM b) -> RC (GenM b)
 borrowValues vals m k = do
-  owned_vars <- mapM get_owned_var vals
+  owned_vars <- mapM get_source vals
   borrowReferences (catMaybes owned_vars) m k
   where
     -- If the value is an owned variable, return it
     -- If the value is derived from an owned variable, return the source var
-    get_owned_var (VarV v)
-      | isOwnedVar v = return $ Just v
-      | otherwise = lookupSourceVar v
-    get_owned_var _ = return Nothing
+    get_source (VarV v) = do v' <- lookupSourceVar v
+                             return $! if isOwnedVar v'
+                                       then Just v'
+                                       else Nothing
+    get_source _ = return Nothing
 
 rcVal :: Bool -> Val -> RC (GenM Val)
 rcVal is_borrowed value =
