@@ -130,15 +130,13 @@ primCmpZ prim_type@(PrimType (IntType sign size)) comparison x y =
 primAddP ptr off =
   emitAtom1 (PrimType PointerType) $ PrimA PrimAddP [ptr, off]
 
-primLoad ty ptr dst = bindAtom1 dst $ PrimA (PrimLoad ty) [ptr]
-primLoadOff ty ptr off dst = do
-  ptr' <- if isZeroLit off then return ptr else primAddP ptr off
-  primLoad ty ptr' dst
+primLoad ty ptr dst = primLoadOff ty ptr (nativeIntV 0)
+primLoadOff ty ptr off dst = 
+  bindAtom1 dst $ PrimA (PrimLoad ty) [ptr, off]
 
-primStore ty ptr val = emitAtom0 $ PrimA (PrimStore ty) [ptr, val]
-primStoreOff ty ptr off val = do
-  ptr' <- if isZeroLit off then return ptr else primAddP ptr off
-  primStore ty ptr' val
+primStore ty ptr val = primStoreOff ty ptr (nativeIntV 0) val
+primStoreOff ty ptr off val =
+  emitAtom0 $ PrimA (PrimStore ty) [ptr, off, val]
 
 isZeroLit (LitV (IntL _ _ 0)) = True
 isZeroLit _ = False

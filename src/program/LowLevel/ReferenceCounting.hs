@@ -455,8 +455,8 @@ rcStm statement k =
   of -- A load must be followed by an incref to ensure that the object is not
      -- subsequently freed.  Identifying the variable as 'Loaded' ensures this 
      -- will happen.
-     LetE [param] (PrimA (PrimLoad (PrimType OwnedType)) [arg]) ->
-       borrowValues [arg] (generate_load param arg) $
+     LetE [param] (PrimA (PrimLoad (PrimType OwnedType)) [ptr, off]) ->
+       borrowValues [ptr, off] (generate_load param ptr off) $
        withLoadedVariable param k
 
      -- Pointer arithmetic creates a derived pointer, in addition to behaving
@@ -496,11 +496,13 @@ rcStm statement k =
        rcAtom (map varType params) (bindAtom $ map toPointerVar params) atom $
        withOwnedVariables params k
      
-     generate_load param arg = do
-       arg' <- rcVal True arg
-       return $ do arg'' <- arg'
+     generate_load param ptr off = do
+       ptr' <- rcVal True ptr
+       off' <- rcVal True off
+       return $ do ptr'' <- ptr'
+                   off'' <- off'
                    bindAtom1 (toPointerVar param) $
-                     PrimA (PrimLoad (PrimType PointerType)) [arg'']
+                     PrimA (PrimLoad (PrimType PointerType)) [ptr'', off'']
 
 -- | Insert reference counting in an atom and emit a statement.
 -- Use the continuation to decide whether to adjust reference counts.
@@ -572,7 +574,7 @@ rcAtom return_types emit_atom atom k =
 adjustReferencesForPrim :: Prim -> [Val] -> RC (GenM ())
 
 -- Storing a value consumes a reference
-adjustReferencesForPrim (PrimStore (PrimType OwnedType)) [_, value_arg] =
+adjustReferencesForPrim (PrimStore (PrimType OwnedType)) [_, _, value_arg] =
   case value_arg
   of VarV v -> do consumeReference v
                   return (return ())

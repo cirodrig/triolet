@@ -114,12 +114,12 @@ binaryPrimOp prim op args =
 -- but here, the address is first.
 loadOp ty _ args =
   case args
-  of [addr] -> return $ PrimA (PrimLoad ty) [addr]
+  of [addr] -> return $ PrimA (PrimLoad ty) [addr, nativeIntV 0]
      [] -> internalError "loadOp: Expecting exactly one argument"
 
 storeOp ty _ args =
   case args
-  of [val, addr] -> return $ PrimA (PrimStore ty) [addr, val]
+  of [val, addr] -> return $ PrimA (PrimStore ty) [addr, nativeIntV 0, val]
      [] -> internalError "storeOp: Expecting exactly two arguments"
 
 -- Loading and storing "None" is actually a no-op. 

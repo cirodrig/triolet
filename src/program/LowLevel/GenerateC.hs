@@ -169,6 +169,22 @@ genCast :: PrimType -> CExpr -> CExpr
 genCast to_type expr =
   CCast (abstractPtrDeclr to_type) expr internalNode
 
+-- | Generate a pointer offset expression
+-- The generated expression is a call to PYON_OFF (actually a macro) 
+-- with the pointer and offset
+genOffset :: CExpr -> CExpr -> CExpr
+genOffset base off 
+  | isZeroCExpr off = base
+  | otherwise =
+      CCall (CVar (internalIdent "PYON_OFF") internalNode) [base, off]
+      internalNode
+
+isZeroCExpr :: CExpr -> Bool
+isZeroCExpr e =
+  case e
+  of CConst (CIntConst n _) -> getCInteger n == 0
+     _ -> False
+
 genLit :: Lit -> CExpr
 genLit NullL = genSmallIntConst 0
 genLit (BoolL True) = genSmallIntConst 1
@@ -305,19 +321,20 @@ genPrimCall prim args =
      PrimCmpZ _ _ CmpGT -> binary CGrOp args
      PrimCmpZ _ _ CmpGE -> binary CGeqOp args
      PrimAddP ->
-       -- Call PYON_OFF (actually a macro) with the pointer and offset
-       CCall (CVar (internalIdent "PYON_OFF") internalNode) args internalNode
+       case args of [ptr, off] -> genOffset ptr off
      PrimLoad (PrimType ty) ->
        -- Cast the pointer to the desired pointer type, then dereference
        case args
-       of [ptr] ->
-            let cast_ptr = genCast ty ptr
+       of [ptr, off] ->
+            let offptr = genOffset ptr off
+                cast_ptr = genCast ty offptr
             in CUnary CIndOp cast_ptr internalNode
      PrimStore (PrimType ty) ->
        -- Cast the pointer to the desired type, then assign to it
        case args
-       of [ptr, val] ->
-            let cast_ptr = genCast ty ptr
+       of [ptr, off, val] ->
+            let offptr = genOffset ptr off
+                cast_ptr = genCast ty offptr
                 lhs = CUnary CIndOp cast_ptr internalNode
             in CAssign CAssignOp lhs val internalNode
      PrimAAddZ sgn sz 
@@ -428,7 +445,7 @@ initializeBytes gvars v record_type values =
 initializeField gvars base fld val =
   -- Generate the assignment *(TYPE *)(PYON_OFF(base, fld)) = val
   let field_offset = genSmallIntConst (fieldOffset fld)
-      field_ptr = CCall (CVar (internalIdent "PYON_OFF") internalNode) [base, field_offset] internalNode
+      field_ptr = genOffset base field_offset
       field_cast_ptr = case fieldType fld
                        of PrimField t -> genCast t field_ptr
                           _ -> internalError "initializeField"
