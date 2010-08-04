@@ -92,6 +92,14 @@ builtinFunctions =
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
     -- Functions translated from Core
+  , ("list_build",
+     Right [| pyonBuiltin (SystemF.the_fun_makelist) |])
+  , ("list_traverse",
+     Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_list) |])
+  , ("stream_bind",
+     Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
+  , ("stream_return",
+     Right [| pyonBuiltin (SystemF.the_fun_return) |])
   , ("eq_int",
      Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_int) |])
   , ("ne_int",

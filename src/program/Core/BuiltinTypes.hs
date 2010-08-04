@@ -10,6 +10,7 @@ import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Core
+import qualified Gluon.Core.Builtins.Effect
 import Gluon.Eval.Environment
 import Gluon.Eval.Eval
 import SystemF.Builtins
@@ -31,6 +32,27 @@ conCoreType :: Con -> RCType
 conCoreType c = cbindType $ conCoreReturnType c
 
 -------------------------------------------------------------------------------
+
+emptyEffectType :: RCType
+emptyEffectType = expCT Gluon.Core.Builtins.Effect.empty
+
+-- | Create the effect of reading the given address and type.
+readEffectType :: RExp -> RCType -> RCType
+readEffectType addr ty =
+  let at = mkInternalConE $ builtin the_AtE
+  in appExpCT at [ty, expCT addr]
+
+unionEffect :: RCType -> RCType -> RCType
+unionEffect t1 t2 =
+  let sconj = mkInternalConE $ builtin the_SconjE 
+  in appExpCT sconj [t1, t2]
+
+unionEffects :: [RCType] -> RCType
+unionEffects [] = emptyEffectType
+unionEffects es = foldr1 unionEffect es
+
+addressType :: RExp
+addressType = mkInternalConE $ builtin the_Addr
 
 -- | Run the computation to construct a function type.
 --
@@ -133,6 +155,85 @@ additiveDictType = mkConType $ do
         retCT (ValRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
   return (OwnRT ::: constructor_type)
 
+makelistType = mkConType $ do
+  e <- newAnonymousVariable TypeLevel
+  a <- newAnonymousVariable TypeLevel
+  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+      stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [varCT e, varCT a]
+      list_type = appCT (conCT $ pyonBuiltin the_list) [varCT a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just e) ::: expCT effectKindE) $ 
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ValPT Nothing ::: pc_type) $
+        arrCT (OwnPT ::: stream_type) (varCT e) $
+        retCT (WriteRT ::: list_type)
+  return (OwnRT ::: constructor_type)
+
+streamBindType = mkConType $ do
+  e <- newAnonymousVariable TypeLevel
+  a <- newAnonymousVariable TypeLevel
+  b <- newAnonymousVariable TypeLevel
+  addr <- newAnonymousVariable ObjectLevel
+  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+      producer_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [varCT e, varCT a]
+      result_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [varCT e, varCT b]
+      consumer_stream_type =
+        appCT (conCT $ pyonBuiltin the_LazyStream)
+        [ readEffectType (mkInternalVarE addr) (varCT a) `unionEffect` varCT e
+        , varCT b]
+      consumer_type = 
+        funCT $
+        arrCT (ReadPT addr ::: varCT a) (varCT e) $
+        retCT (OwnRT ::: consumer_stream_type)
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ValPT (Just b) ::: expCT pureKindE) $
+        pureArrCT (ValPT Nothing ::: pc_type) $
+        pureArrCT (OwnPT ::: producer_type) $
+        pureArrCT (OwnPT ::: consumer_type) $
+        retCT (OwnRT ::: result_type)
+  return (OwnRT ::: constructor_type)
+
+listTraverseType = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  addr <- newAnonymousVariable ObjectLevel
+  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+      list_type = appCT (conCT $ pyonBuiltin the_list) [varCT a]
+      stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [readEffectType (mkInternalVarE addr) list_type, varCT a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ValPT Nothing ::: pc_type) $
+        pureArrCT (ReadPT addr ::: list_type) $
+        retCT (OwnRT ::: stream_type)
+  return (OwnRT ::: constructor_type)
+
+streamReturnType = mkConType $ do
+  e <- newAnonymousVariable TypeLevel
+  a <- newAnonymousVariable TypeLevel
+  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+      producer_type =
+        funCT $
+        arrCT (ValPT Nothing ::: conCT (pyonBuiltin the_NoneType)) (varCT e) $
+        retCT (WriteRT ::: varCT a)
+      result_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [varCT e, varCT a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ValPT Nothing ::: pc_type) $
+        pureArrCT (OwnPT ::: producer_type) $
+        retCT (OwnRT ::: result_type)
+  return (OwnRT ::: constructor_type)
+
 constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
   where
@@ -174,8 +275,16 @@ constructorTable =
                binaryFloatOpType)
             , (pyonBuiltin (subMember . the_AdditiveDict_float),
                binaryFloatOpType)
+            , (pyonBuiltin (traverseMember . the_TraversableDict_list),
+               listTraverseType)
             , (pyonBuiltin the_additiveDict,
                additiveDictType)
             , (getPyonTupleCon' 2,
                tuple2ConType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_makelist,
+               makelistType)
+            , (pyonBuiltin SystemF.Builtins.the_oper_CAT_MAP,
+               streamBindType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_return,
+               streamReturnType)
             ]

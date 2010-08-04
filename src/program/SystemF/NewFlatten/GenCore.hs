@@ -1384,9 +1384,13 @@ flattenDoBody body = do
   body_exp <- flattenExp body 
   body_exp' <- coerce Contravariant rbinder body_exp
   
+  -- Create an unused parameter so that the function has one
+  param_var <- newAnonymousVariable ObjectLevel
+  let param_binder = ValP param_var ::: conCT (pyonBuiltin the_NoneType)
+  
   -- Create the lambda function
   let new_fun = CFun { cfunInfo = mkSynInfo (getSourcePos body) ObjectLevel
-                     , cfunParams = []
+                     , cfunParams = [param_binder]
                      , cfunReturn = rbinder
                      , cfunEffect = fun_effect
                      , cfunBody = flattenedExp body_exp'
