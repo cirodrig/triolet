@@ -59,6 +59,7 @@ module SystemF.Builtins
         the_fun_iota,
         the_fun_undefined,
         {-the_fun_copy,-}
+        the_fun_return,
         the_fun_store_int,
         the_fun_store_float,
         the_fun_store_bool,

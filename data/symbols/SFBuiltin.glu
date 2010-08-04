@@ -286,6 +286,15 @@ constant LazyStream : Effect is(covar) -> Pure is(covar) -> Pure;
 constant Action : Effect is(covar) -> Pure is(covar) -> Pure;
 
 -- Inserted during flattening.  The types are not correct.
+
+-- Stream constructor
+constant fun_return :
+    (e : Effect is(covar))
+ -> (a : Pure is(covar))
+ -> PassConv a
+ -> (NoneType -> a)
+ -> LazyStream e a;
+
 constant fun_copy : (a : Pure) -> PassConv a -> a -> a;
 
 constant fun_store_int : int -> int;

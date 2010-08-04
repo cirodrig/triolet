@@ -438,6 +438,18 @@ loadFunctionType value_type = do
   return $ funCT $ arrCT (ReadPT addr ::: value_type) eff $
     retCT (ValRT ::: value_type)
 
+-- | Create a return binder for the given type and passing convention
+createReturnBinder :: PassConv -> RCType -> EffEnv (CBind CReturn Rec)
+createReturnBinder pc ty =
+  case pc
+  of ByValue  -> return $ ValR ::: ty
+     Owned    -> return $ OwnR ::: ty
+     Borrowed -> do
+       -- Create parameters for the return pointer
+       ret_addr <- newAnonymousVariable ObjectLevel
+       ret_ptr <- newAnonymousVariable ObjectLevel
+       return $ WriteR ret_addr ret_ptr ::: ty
+
 -------------------------------------------------------------------------------
 -- Expression conversion
 
@@ -1325,12 +1337,61 @@ applyCallOperand param_type operand = do
                     _ -> Nothing
   return ((arg_context, flattenedExp arg_val2), arg_addr, arg_type)
 
-flattenDo expression ty pc body = trace "FIXME: flattenDo" $ do
-  body' <- flattenExp body
+flattenDo expression ty pc body = do
+  -- Create the type and passing convention arguments
+  let type_value = ValCE type_info $ TypeV $ convertType ty
+  pc_value <- flattenExp pc
+
+  -- Flatten the body
+  body_fun <- flattenDoBody body
+  let body_exp = LamCE value_info body_fun
   
-  -- FIXME: build a stream object
-  return (body' {flattenedReturn = OwnRT ::: cbindType (flattenedReturn body'),
-                 flattenedDst = Nothing})
+  -- Create a function call that builds a stream object
+  let effect_value = ValCE type_info $ TypeV (cfunEffect body_fun)
+      
+  let oper = ValCE value_info $ OwnedConV $ pyonBuiltin the_fun_return
+
+  let exp = AppCE { cexpInfo = value_info
+                  , cexpOper = oper
+                  , cexpArgs = [effect_value, type_value,
+                                flattenedExp pc_value, body_exp]
+                  , cexpReturnArg = Nothing
+                  }
+      
+  -- The result has type (stream effect ty) 
+  let stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [cfunEffect body_fun, convertType ty]
+  let flat_exp = FlatExp exp (OwnRT ::: stream_type) Nothing
+  
+  return flat_exp
+  where
+    type_info = mkSynInfo (getSourcePos expression) TypeLevel
+    value_info = mkSynInfo (getSourcePos expression) ObjectLevel
+
+-- | Flatten the body of a 'do' expression.  Creates a lambda function that
+-- takes no regular parameters and has one return parameter.
+flattenDoBody body = do
+  -- Get the expression's return and effect types
+  (return_conv, return_type) <-
+    convertPassType (Effect.eiReturnType body) (Effect.eiType body)
+  fun_effect <- convertEffect $ Effect.eiEffect body
+  
+  -- Create a binder for the return value.  Return values are always
+  -- passed using the 'borrowed' convention.
+  rbinder <- createReturnBinder Borrowed return_type
+  
+  -- Flatten the expression and coerce its result to 'borrowed'
+  body_exp <- flattenExp body 
+  body_exp' <- coerce Contravariant rbinder body_exp
+  
+  -- Create the lambda function
+  let new_fun = CFun { cfunInfo = mkSynInfo (getSourcePos body) ObjectLevel
+                     , cfunParams = []
+                     , cfunReturn = rbinder
+                     , cfunEffect = fun_effect
+                     , cfunBody = flattenedExp body_exp'
+                     }
+  return new_fun
 
 flattenLet expression b rhs body = do
   rhs' <- flattenExp rhs
@@ -1417,10 +1478,14 @@ flattenFun fun =
   assume_effects (Effect.funEffectParams fun) $ \effect_vars ->
 
   -- Convert binders and add parameter regions to environment
-  withMany convertParameter (Effect.funParams fun) $ \binders ->
+  withMany convertParameter (Effect.funParams fun) $ \binders -> do
   
   -- Convert the return type and create a return binder
-  convert_return_type $ \ret_binder -> do
+    (return_conv, return_type) <-
+      convertMonoPassType
+      (Effect.funReturnPassType fun)
+      (Effect.fromEIType $ Effect.funReturnType fun)
+    ret_binder <- createReturnBinder return_conv return_type
     
     -- Flatten the function body
     body_exp <- flattenExp $ Effect.funBody fun
@@ -1439,21 +1504,6 @@ flattenFun fun =
     return new_fun
   where
     assume_effects = withMany withNewEffectVariable
-    
-    convert_return_type k = do
-      (return_conv, return_type) <-
-        convertMonoPassType
-        (Effect.funReturnPassType fun)
-        (Effect.fromEIType $ Effect.funReturnType fun)
-
-      case return_conv of
-        ByValue  -> k $ ValR ::: return_type
-        Owned    -> k $ OwnR ::: return_type
-        Borrowed -> do
-          -- Create parameters for the return pointer
-          ret_addr <- newAnonymousVariable ObjectLevel
-          ret_ptr <- newAnonymousVariable ObjectLevel
-          k $ WriteR ret_addr ret_ptr ::: return_type
 
 flattenDef (Effect.Def v fun) = do
   fun' <- flattenFun fun

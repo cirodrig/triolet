@@ -112,6 +112,7 @@ pyonBuiltinFunctions =
   , "fun_undefined"
 
     -- Functions inserted by effect inference
+  , "fun_return"
   , "fun_copy"
   , "fun_store_int"
   , "fun_store_float"
