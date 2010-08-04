@@ -1756,9 +1756,9 @@ assertFunSubtype cast_regions t1 t2 =
        
        assertSubtype pt1 pt2
 
-       -- The return type must not mention any cast regions
+       -- Regions inserted for casting must not escape.  The subtype's
+       -- return value must not mention any of the cast regions.
        whenM (liftIO $ pt1 `mentionsAnyE` cast_regions) subtypeCheckFailed
-       whenM (liftIO $ pt2 `mentionsAnyE` cast_regions) subtypeCheckFailed
      (_, _) -> subtypeCheckFailed
   where
     continue_fun compensate param1 rng1 param2 rng2 = do
