@@ -57,15 +57,18 @@ defineOffset struct_name field_name field =
              parens (showString "(char *)(ptr) + " . shows offset)
   in defineMacro (macro_name . showString "(ptr)") cast
 
-defineRecordOffsets :: StaticRecord -> String -> [String] -> ShowS
-defineRecordOffsets rec rec_name field_names
+defineRecord :: StaticRecord -> String -> [String] -> ShowS
+defineRecord rec rec_name field_names
   | length field_names /= length (recordFields $ flattenStaticRecord rec) =
-      error $ "Numbers of fields and field names do not match in record " ++ rec_name
+      error $
+      "Numbers of fields and field names do not match in record " ++ rec_name
   | otherwise =
       let field_strings = map showString field_names
           define_offset = defineOffset (showString rec_name)
           flat_fields = recordFields $ flattenStaticRecord rec
-      in vcat $ zipWith define_offset field_strings flat_fields
+          record_size = defineMacro (showString ("SIZEOF_" ++ rec_name)) $
+                        shows (sizeOf rec)
+      in vcat $ record_size : zipWith define_offset field_strings flat_fields
 
 defineTypeTag :: String -> TypeTag -> ShowS
 defineTypeTag name tag =
@@ -76,24 +79,21 @@ defineInfoTag name tag =
   defineMacro (showString name) (shows $ fromEnum tag)
 
 defineAll = vcat
-  [ defineRecordOffsets infoTableHeaderRecord "INFO"
+  [ defineRecord infoTableHeaderRecord "INFO"
     ["FREE", "TAG"]
-  , defineRecordOffsets funInfoHeaderRecord "FUNINFO"
+  , defineRecord funInfoHeaderRecord "FUNINFO"
     ["FREE", "TAG", "ARITY", "NCAPTURED", "NRECURSIVE", "EXACT", "INEXACT"]
-  , defineRecordOffsets objectHeaderRecord "OBJECT"
+  , defineRecord objectHeaderRecord "OBJECT"
     ["REFCT", "INFO"]
-  , defineRecordOffsets papHeaderRecord "PAP"
+  , defineRecord papHeaderRecord "PAP"
     ["REFCT", "INFO", "FUN", "NARGUMENTS"]
-  , defineRecordOffsets streamRecord "STREAM"
+  , defineRecord streamRecord "STREAM"
     ["REFCT", "INFO", "FUN", "INIT", "PASSCONV_SIZE", "PASSCONV_ALIGN",
-     "PASSCONV_COPY", "PASSCONV_FREE"]
-  , defineRecordOffsets passConvRecord "PASSCONV"
-    ["SIZE", "ALIGN", "COPY", "FREE"]
-  , defineRecordOffsets listRecord "LIST"
+     "PASSCONV_COPY", "PASSCONV_FINI"]
+  , defineRecord passConvRecord "PASSCONV"
+    ["SIZE", "ALIGN", "COPY", "FINI"]
+  , defineRecord listRecord "LIST"
     ["SIZE", "DATA"]
-  , defineRecordOffsets streamReturnClosureRecord "STREAM_RETURN"
-    ["REFCT", "INFO", "FUN", "PASSCONV_SIZE", "PASSCONV_ALIGN",
-     "PASSCONV_COPY", "PASSCONV_FREE"]
   , defineTypeTag "INT8_TAG" Int8Tag
   , defineTypeTag "INT16_TAG" Int16Tag
   , defineTypeTag "INT32_TAG" Int32Tag

@@ -25,6 +25,7 @@ module LowLevel.Builtins
         the_fun_add_float,
         the_fun_sub_float,
         the_fun_dealloc_closure,
+        the_fun_dummy_finalize,
         the_fun_copy4_closure,
         the_fun_copy1_closure,
         the_fun_load_int,

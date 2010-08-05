@@ -342,9 +342,10 @@ allocateLocalMem ptr_var pass_conv rtypes mk_block = do
   ret_atom <- mk_block
   tell [LetE rvars ret_atom]
   
-  -- Free the object
-  free <- selectPassConvFree pass_conv
-  bindAtom0 $ CallA free [VarV ptr_var]
+  -- Finalize and free the object
+  fini <- selectPassConvFinalize pass_conv
+  bindAtom0 $ CallA fini [VarV ptr_var]
+  bindAtom0 $ PrimCallA (builtinVar the_prim_pyon_dealloc) [VarV ptr_var]
   
   -- Return the temporary values
   return $ ValA $ map VarV rvars
@@ -459,11 +460,12 @@ adjustObjectBy n ptr
 
 selectPassConvSize, selectPassConvAlignment,
   selectPassConvCopy,
-  selectPassConvFree :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
+  selectPassConvFinalize :: (Monad m, Supplies m (Ident Var)) =>
+                            Val -> Gen m Val
 selectPassConvSize = selectField passConvRecord 0
 selectPassConvAlignment = selectField passConvRecord 1
 selectPassConvCopy = selectField passConvRecord 2
-selectPassConvFree = selectField passConvRecord 3
+selectPassConvFinalize = selectField passConvRecord 3
 
 -------------------------------------------------------------------------------
 -- Values
@@ -499,12 +501,12 @@ mkEntryPoints want_dealloc ftype label
       return $! EntryPoints ftype arity dir exa ine dea inf
 
 passConvValue :: Int -> Int -> Var -> Var -> Val
-passConvValue size align copy free =
+passConvValue size align copy finalize =
   RecV passConvRecord
   [ LitV $ IntL Unsigned S32 (fromIntegral size)
   , LitV $ IntL Unsigned S32 (fromIntegral align)
   , VarV copy
-  , VarV free
+  , VarV finalize
   ]
 
 intPassConvValue :: Val
@@ -514,7 +516,7 @@ intPassConvValue =
       copy = case size
              of 4 -> llBuiltin the_fun_copy4_closure
                 _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dealloc_closure)
+  in passConvValue size align copy (llBuiltin the_fun_dummy_finalize)
 
 floatPassConvValue :: Val
 floatPassConvValue =
@@ -523,7 +525,7 @@ floatPassConvValue =
       copy = case size
              of 4 -> llBuiltin the_fun_copy4_closure
                 _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dealloc_closure)
+  in passConvValue size align copy (llBuiltin the_fun_dummy_finalize)
 
 boolPassConvValue :: Val
 boolPassConvValue =
@@ -532,7 +534,7 @@ boolPassConvValue =
       copy = case size
              of 4 -> llBuiltin the_fun_copy4_closure
                 _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dealloc_closure)
+  in passConvValue size align copy (llBuiltin the_fun_dummy_finalize)
 
 -- | Create a lambda function that constructs an additive dictionary
 genAdditiveDictFun :: (Monad m, Supplies m (Ident Var)) => Gen m Atom

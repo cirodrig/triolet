@@ -86,6 +86,8 @@ builtinFunctions =
   [ -- Functions that do not exist in Core
     ("dealloc_closure",
      Left $ closureFunctionType [PrimType PointerType] [])
+  , ("dummy_finalize",
+     Left $ closureFunctionType [PrimType PointerType] [])
   , ("copy4_closure",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])

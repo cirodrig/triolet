@@ -63,7 +63,7 @@ pointerTypeTag =
 -- Record types
 
 -- | A parameter passing convention consists of size, alignment, copy,
--- and free functions
+-- and finalize functions
 passConvRecord :: StaticRecord
 passConvRecord = staticRecord [ PrimField nativeWordType
                               , PrimField nativeWordType
@@ -205,12 +205,15 @@ listRecord = staticRecord
              [ PrimField nativeWordType -- Size
              , PrimField PointerType    -- Pointer to contents
              ]
-             
--- | Closure for the stream return's producer function
-streamReturnClosureRecord :: StaticRecord
-streamReturnClosureRecord =
+
+{-
+-- The stream return creator and stream return initializer have nothing
+-- in their closures
+
+streamReturnNextClosureRecord :: StaticRecord
+streamReturnNextClosureRecord =
   staticRecord $
-  closureHeader ++ 
+  closureHeader ++
   [ PrimField OwnedType -- Actual producer function
   , RecordField passConvRecord -- Return data properties
   ]
@@ -225,3 +228,4 @@ streamBindClosureRecord =
   , RecordField passConvRecord -- Return data properties
   ]
 
+-}
