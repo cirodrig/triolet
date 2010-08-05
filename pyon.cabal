@@ -12,6 +12,11 @@ Data-Dir:	data
 Data-Files:
   symbols/SFBuiltin.glu
   include/pyon.h
+  include/pyon_internal.h
+  include/apply.h
+  include/layout.h
+  include/memory.h
+  include/struct.h
   testcases/*.py
   libpyonrts.so
 

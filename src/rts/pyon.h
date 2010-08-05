@@ -25,42 +25,16 @@ typedef void *PyonPtr;
 /* An object's 'free' method */
 typedef void (*PyonFreeFunc)(PyonPtr);
 
+/* A boolean value passed to or returned from a function */
+typedef int PyonBool;
+
+/* Atomic add operation.  This should really be an instruction. */
 static inline int32_t pyon_atomic_add_s(int32_t *p, int delta)
 {
   int32_t old = *p;
   *p += delta;
   return old;
 }
-
-/* The general-purpose memory allocator interface */
-PyonPtr alloc(uint32_t);
-void dealloc(PyonPtr);
-
-/* How to deallocate a global closure */
-void dealloc_global(PyonPtr);
-
-/* How to copy small values */
-void copy4(PyonPtr src, PyonPtr dst);
-
-/* Object deallocation functions */
-void free_pap(PyonPtr);
-
-/* Entry points to Pyon functions */
-void dealloc_exact_entry(PyonPtr closure, PyonPtr arg);
-void dealloc_inexact_entry(PyonPtr closure, PyonPtr args, PyonPtr ret);
-void copy4_exact_entry(PyonPtr closure, PyonPtr src, PyonPtr dst);
-void copy4_inexact_entry(PyonPtr closure, PyonPtr args, PyonPtr ret);
-
-/* Apply functions */
-PyonPtr
-apply_i32_f(PyonPtr obj, uint32_t arg);
-void
-apply_i32(PyonPtr obj, uint32_t arg, PyonPtr return_struct);
-
-PyonPtr
-apply_f32_f(PyonPtr obj, float arg);
-void
-apply_f32(PyonPtr obj, float arg, PyonPtr return_struct);
 
 /*****************************************************************************/
 /* Opaque data */

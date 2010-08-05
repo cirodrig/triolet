@@ -3,37 +3,10 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "pyon.h"
-#include "layout.h"
+#include "pyon_internal.h"
 
 /* Print a message every time memory is allocated or deallocated. */
 #undef CHATTY_ALLOC
-
-/* Get the alignment of a data type */
-#define ALIGNOF(type) __alignof__(type)
-
-/* Get the starting offset of a structure field with the given type,
- * located at the first suitable offset not less than 'offset'. */ 
-#define FIELD_START_OFF(offset, type) \
-  (align((offset), ALIGNOF(type)))
-
-/* Get the ending offset of a structure field with the given type,
- * located at the first suitable offset not less than 'offset'.
- * This offset is exactly (start + size).
- */
-#define FIELD_END_OFF(offset, type) \
-  (FIELD_START_OFF((offset), (type)) + sizeof(type))
-
-/* Get the size of a data type represented by the tag */
-#define TAG_SIZE(t) ((int)(tag_size_array[(int)(t)]))
-
-/* Get the alignment of a data type represented by the tag */
-#define TAG_ALIGN(t) ((int)(tag_alignment_array[(int)(t)]))
-
-/* ENTER_INEXACT(info)(fun, args, ret)
- * Call the inexact entry point of a function */
-#define ENTER_INEXACT(fun) \
-  ((void (*)(PyonPtr, PyonPtr, PyonPtr))&FUNINFO_INEXACT(fun))
 
 /* Loop over each argument tag and argument in an argument block,
  * for arguments 0 to (n_args - 1).
@@ -73,15 +46,6 @@
 
 /*****************************************************************************/
 
-static inline void
-decref(PyonPtr p);
-
-static inline void
-incref(PyonPtr p);
-
-static inline int
-align(int offset, int alignment);
-
 static inline int
 funinfo_firstargument_offset(void);
 
@@ -99,55 +63,6 @@ new_pap_bytes(PyonPtr fun, int n_arguments, void *p_arguments, void *arg_bytes);
 
 static void
 call_pap(PyonPtr pap, PyonPtr return_struct);
-
-static const char tag_size_array[] =
-  { 1,				/* Int8Tag */
-    2,				/* Int16Tag */
-    4,				/* Int32Tag */
-    8,				/* Int64Tag */
-    4,				/* Float32Tag */
-    8,				/* Float64Tag */
-    SIZEOF_PYONPTR		/* OwnedRefTag */
-  };
-
-static const char tag_alignment_array[] =
-  { 1,				/* Int8Tag */
-    2,				/* Int16Tag */
-    4,				/* Int32Tag */
-    8,				/* Int64Tag */
-    4,				/* Float32Tag */
-    8,				/* Float64Tag */
-    ALIGNOF_PYONPTR		/* OwnedRefTag */
-  };
-
-/* Decrement an object's reference count, and free it if the reference count
- * falls to zero. */
-static inline void
-decref(PyonPtr p)
-{
-  /* FIXME: thread safety */
-  uint32_t rc = OBJECT_REFCT(p)--;
-  if (rc == 0) {
-    PyonFreeFunc free_func = INFO_FREE(OBJECT_INFO(p));
-    free_func(p);
-  }
-}
-
-/* Increment an object's reference count. */
-static inline void
-incref(PyonPtr p)
-{
-  /* FIXME: thread safety */
-  OBJECT_REFCT(p)++;
-}
-
-/* Add the minimum amount to 'offset' necessary to get a value divisible by
- * 'alignment'.  The offset and alignment must be positive. */
-static inline int
-align(int offset, int alignment)
-{
-  return offset + (offset - alignment) % offset;
-}
 
 /* Get the offset of the first argument type tag in a function info table */
 static inline int
@@ -202,41 +117,6 @@ new_pap_f32(PyonPtr fun, int n_arguments, void *p_arguments, float arg)
 /*****************************************************************************/
 /* Exported functions */
 
-/* Allocate some heap data */
-PyonPtr
-alloc(uint32_t size)
-{
-  PyonPtr ptr = malloc(size);
-#ifdef CHATTY_ALLOC
-  fprintf(stderr, "Allocating   %p (%d bytes)\n", ptr, (int)size);
-#endif
-  return ptr;
-}
-
-/* Deallocate some heap data */
-void
-dealloc(PyonPtr p)
-{
-#ifdef CHATTY_ALLOC
-  fprintf(stderr, "Deallocating %p\n", p);
-#endif
-  free(p);
-}
-
-/* Deallocate a global closure */
-void
-dealloc_global(PyonPtr p)
-{
-  dealloc(p);
-}
-
-/* Copy a 4-byte value */
-void
-copy4(PyonPtr src, PyonPtr dst)
-{
-  *(uint32_t*)dst = *(uint32_t*)src;
-}
-
 /* The deallocation function for a partial application.  Inspect the record
  * to determine how to deallocate it.
  *
@@ -259,41 +139,7 @@ void free_pap(PyonPtr p)
   } END_FOREACH_ARGUMENT(tag, arg);
 
   /* Deallocate the PAP */
-  free(p);
-}
-
-/* Entry point to 'dealloc' */
-void
-dealloc_exact_entry(PyonPtr closure, PyonPtr arg)
-{
-  dealloc(arg);
-}
-
-/* Entry point to 'dealloc' */
-void
-dealloc_inexact_entry(PyonPtr closure, PyonPtr args, PyonPtr ret)
-{
-  PyonPtr arg = *(PyonPtr *)args;
-  dealloc(arg);
-}
-
-/* Entry point to 'copy4' */
-void
-copy4_exact_entry(PyonPtr closure, PyonPtr src, PyonPtr dst)
-{
-  copy4(src, dst);
-}
-
-/* Entry point to 'copy4' */
-void
-copy4_inexact_entry(PyonPtr closure, PyonPtr args, PyonPtr ret)
-{
-  int src_offset = 0;
-  int dst_offset = src_offset + sizeof(PyonPtr);
-  PyonPtr src = *PYON_OFF_PTR(args, src_offset);
-  PyonPtr dst = *PYON_OFF_PTR(args, dst_offset);
-
-  copy4(src, dst);
+  pyon_dealloc(p);
 }
 
 /* Apply an object to a 32-bit integer (or pointer) value */
@@ -458,7 +304,7 @@ new_pap_bytes(PyonPtr fun, int n_arguments, void *p_arguments, void *arg_bytes)
   } END_FOREACH_ARGUMENT(tag, arg_ptr);
 
   /* Allocate memory */
-  PyonPtr new_pap = alloc(arguments_start + arguments_size);
+  PyonPtr new_pap = pyon_alloc(arguments_start + arguments_size);
 
   /* Initialize the PAP */
   PAP_REFCT(new_pap) = 1;

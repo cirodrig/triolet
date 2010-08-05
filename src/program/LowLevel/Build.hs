@@ -207,7 +207,7 @@ toDynamicField (Field off ty) =
 
 toDynamicFieldType :: StaticFieldType -> DynamicFieldType
 toDynamicFieldType (PrimField t) = PrimField t
-toDynamicFieldType (RecordField p rec) = RecordField p $ toDynamicRecord rec
+toDynamicFieldType (RecordField rec) = RecordField $ toDynamicRecord rec
 toDynamicFieldType (BytesField s a) =
       BytesField (nativeWordV s) (nativeWordV a)
 
@@ -221,14 +221,14 @@ dynamicFieldTypeSize :: DynamicFieldType -> Val
 dynamicFieldTypeSize ft =
   case ft
   of PrimField vt   -> nativeWordV $ sizeOf vt
-     RecordField _ r -> recordSize r
+     RecordField r -> recordSize r
      BytesField s _  -> s
 
 dynamicFieldTypeAlignment :: DynamicFieldType -> Val
 dynamicFieldTypeAlignment ft = 
   case ft
   of PrimField vt   -> nativeWordV $ alignOf vt
-     RecordField _ r -> recordAlignment r
+     RecordField r -> recordAlignment r
      BytesField _ a  -> a
 
 -- | Create a dynamic record.  Given the record field types, the offsets of
@@ -353,16 +353,16 @@ allocateLocalMem ptr_var pass_conv rtypes mk_block = do
 allocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
 allocateHeapMem size =
   emitAtom1 (PrimType PointerType) $
-  PrimCallA (builtinVar the_prim_alloc) [size]
+  PrimCallA (builtinVar the_prim_pyon_alloc) [size]
 
 allocateHeapMemAs :: (Monad m, Supplies m (Ident Var)) =>
                      Val -> Var -> Gen m ()
 allocateHeapMemAs size dst =
-  bindAtom1 dst $ PrimCallA (builtinVar the_prim_alloc) [size]
+  bindAtom1 dst $ PrimCallA (builtinVar the_prim_pyon_alloc) [size]
 
 deallocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
 deallocateHeapMem ptr =
-  emitAtom0 $ PrimCallA (builtinVar the_prim_dealloc) [ptr]
+  emitAtom0 $ PrimCallA (builtinVar the_prim_pyon_dealloc) [ptr]
 
 -------------------------------------------------------------------------------
 -- Manipulating objects
@@ -492,7 +492,7 @@ mkEntryPoints want_dealloc ftype label
       dea <- case want_dealloc
              of CannotDeallocate -> return Nothing
                 DefaultDeallocator ->
-                  return $ Just $ llBuiltin the_prim_dealloc_global
+                  return $ Just $ llBuiltin the_prim_dealloc_global_closure
                 CustomDeallocator ->
                   liftM Just $ newVar label (PrimType PointerType)
       let arity = length $ ftParamTypes ftype

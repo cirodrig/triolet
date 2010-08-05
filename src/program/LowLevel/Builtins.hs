@@ -12,9 +12,9 @@ module LowLevel.Builtins
         lowerBuiltinCoreFunction,
         allBuiltins,
         llBuiltin,
-        the_prim_alloc,
-        the_prim_dealloc,
-        the_prim_dealloc_global,
+        the_prim_pyon_alloc,
+        the_prim_pyon_dealloc,
+        the_prim_dealloc_global_closure,
         the_prim_apply_i32_f,
         the_prim_apply_i32,
         the_prim_apply_f32_f,
@@ -46,21 +46,8 @@ import GlobalVar
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record
+import LowLevel.Records
 import LowLevel.BuiltinsTH
-
--------------------------------------------------------------------------------
--- Record types
-
--- | A parameter passing convention consists of size, alignment, copy,
--- and free functions
-passConvRecord :: StaticRecord
-passConvRecord = staticRecord [ PrimField nativeWordType
-                              , PrimField nativeWordType
-                              , PrimField OwnedType
-                              , PrimField OwnedType
-                              ]
-
--------------------------------------------------------------------------------
 
 $(sequence [declareRecord lowLevelBuiltinsRecord])
 

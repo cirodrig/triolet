@@ -486,4 +486,4 @@ generateCFile (Module funs datas) =
   
 cModuleHeader =
   "#include <inttypes.h>\n\
-  \#include <pyon.h>\n"
+  \#include <pyon_internal.h>\n"

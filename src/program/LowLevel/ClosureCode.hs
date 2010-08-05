@@ -459,7 +459,7 @@ generateClosureFree clo
       internalError "generateClosureFree: Closure is part of a recursive group"
       
   | Just dealloc_entry <- deallocEntry $ cloEntryPoints clo,
-    dealloc_entry /= llBuiltin the_prim_dealloc_global = do
+    dealloc_entry /= llBuiltin the_prim_dealloc_global_closure = do
       -- Generate a custom deallocation function
       clo_ptr <- newAnonymousVar (PrimType PointerType) 
       fun_body <- execBuild $ do generateClosureFreeBody clo (VarV clo_ptr)
@@ -501,7 +501,7 @@ generateClosureGroupFree group = do
       -- Must be using a custom deallocation function
       let dealloc_entry =
             case deallocEntry (cloEntryPoints clo)
-            of Just v | v /= llBuiltin the_prim_dealloc_global -> v 
+            of Just v | v /= llBuiltin the_prim_dealloc_global_closure -> v 
                _ -> internalError "generateClosureGroupFree: \
                                   \Default deallocation function is disallowed"
 

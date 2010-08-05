@@ -52,7 +52,7 @@ pprRecordType rt =
   map (pprFieldType . fieldType) $ recordFields rt
 
 pprFieldType (PrimField pt) = pprPrimType pt 
-pprFieldType (RecordField _ rt) = pprRecordType rt
+pprFieldType (RecordField rt) = pprRecordType rt
 pprFieldType (BytesField _ _) = text "BYTES"
 
 pprDef :: FunDef -> Doc

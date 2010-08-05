@@ -123,7 +123,7 @@ flattenRecordType rt =
     
 flattenFieldType (PrimField UnitType) = []
 flattenFieldType (PrimField pt) = [pt]
-flattenFieldType (RecordField _ record_type) = flattenRecordType record_type
+flattenFieldType (RecordField record_type) = flattenRecordType record_type
 
 flattenValList :: [Val] -> RF [Val]
 flattenValList vs = liftM concat $ mapM flattenVal vs

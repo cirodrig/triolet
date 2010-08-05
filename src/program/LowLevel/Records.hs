@@ -59,6 +59,18 @@ pointerTypeTag =
   then internalError "pointerTypeTag"
   else toTypeTag nativeWordType
 
+-------------------------------------------------------------------------------
+-- Record types
+
+-- | A parameter passing convention consists of size, alignment, copy,
+-- and free functions
+passConvRecord :: StaticRecord
+passConvRecord = staticRecord [ PrimField nativeWordType
+                              , PrimField nativeWordType
+                              , PrimField OwnedType
+                              , PrimField OwnedType
+                              ]
+
 -- | The record type of an additive class dictionary
 additiveDictRecord :: StaticRecord
 additiveDictRecord =
@@ -158,4 +170,58 @@ papHeader = objectHeader ++
 
 papHeaderRecord :: StaticRecord
 papHeaderRecord = staticRecord papHeader
+
+-- | A stream object.
+--
+-- There are several kinds of stream objects.  All stream objects have a
+-- common header format consisting of the following fields:
+--
+-- 1. Reference count
+--
+-- 2. Info table pointer
+--
+-- 3. Sequential producer function.  Produces one value and updates state.
+--    Parameters: (pointer to state, consumer function, consumer state)
+--    Returns: bool
+--    The return value is False if the stream is exhausted, in which case
+--    the consumer was not invoked.
+--
+-- 4. Parameter-passing convention of stream state
+--
+-- 5. Initialization function for stream state
+--    Parameters: (pointer to state)
+--    Returns: void
+streamRecord :: StaticRecord
+streamRecord = staticRecord $
+               objectHeader ++
+               [ PrimField OwnedType -- Function (closure)
+               , PrimField OwnedType -- Initializer (closure)
+               , RecordField passConvRecord -- Stream data properties
+               ]
+
+-- | A Pyon list.
+listRecord :: StaticRecord
+listRecord = staticRecord
+             [ PrimField nativeWordType -- Size
+             , PrimField PointerType    -- Pointer to contents
+             ]
+             
+-- | Closure for the stream return's producer function
+streamReturnClosureRecord :: StaticRecord
+streamReturnClosureRecord =
+  staticRecord $
+  closureHeader ++ 
+  [ PrimField OwnedType -- Actual producer function
+  , RecordField passConvRecord -- Return data properties
+  ]
+
+-- | Closure for the stream bind's producer function
+streamBindClosureRecord :: StaticRecord
+streamBindClosureRecord =
+  staticRecord $
+  closureHeader ++ 
+  [ PrimField OwnedType -- Producer stream
+  , PrimField OwnedType -- Consumer/producer function
+  , RecordField passConvRecord -- Return data properties
+  ]
 

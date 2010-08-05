@@ -32,8 +32,9 @@ instance Lift (Field Int) where
 
 instance Lift (FieldType Int) where
   lift (PrimField pt) = [| PrimField pt |]
-  lift (RecordField b rt) = [| RecordField b rt |]
+  lift (RecordField rt) = [| RecordField rt |]
   lift (BytesField s a) = [| BytesField s a |]
+  lift (AlignField n) = [| AlignField n |]
 
 instance Lift (Record Int) where
   lift rec = let fields = map fieldType $ recordFields rec
@@ -53,11 +54,11 @@ instance Lift FunctionType where
 
 -- | Predefined primitive functions
 builtinPrimitives =
-  [ ("alloc",
+  [ ("pyon_alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
-  , ("dealloc",
+  , ("pyon_dealloc",
      primFunctionType [PrimType PointerType] [])
-  , ("dealloc_global",          -- Deallocate a global closure
+  , ("dealloc_global_closure",
      primFunctionType [PrimType PointerType] [])
   , ("apply_i32_f",
      primFunctionType [ PrimType OwnedType

@@ -20,7 +20,7 @@ import Distribution.Verbosity
 makeProgram = simpleProgram "make"
 cabalMakeFile = "cabal.mk"
 
-rtsSourceFiles = ["rts.c"]
+rtsSourceFiles = ["struct.c", "memory.c", "apply.c"]
 
 -- | The directories where source files belonging to the \"pyon\" program are
 pyonSearchPaths :: LocalBuildInfo -> Executable -> [FilePath]

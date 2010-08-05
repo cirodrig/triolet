@@ -22,7 +22,8 @@ vcat = cat . intersperse (showChar '\n')
 
 -- | Create a C name representing a type
 typeName :: StaticFieldType -> ShowS
-typeName (RecordField _ _) = showString "PyonPtr"
+typeName (RecordField _) = error "Unflattened record"
+typeName (AlignField _)  = error "Unexpected alignment field"
 typeName (PrimField ty) = showString $
   case ty
   of BoolType             -> "uint8_t"
@@ -58,12 +59,13 @@ defineOffset struct_name field_name field =
 
 defineRecordOffsets :: StaticRecord -> String -> [String] -> ShowS
 defineRecordOffsets rec rec_name field_names
-  | length field_names /= length (recordFields rec) =
-      error "Numbers of fields and field names do not match"
+  | length field_names /= length (recordFields $ flattenStaticRecord rec) =
+      error $ "Numbers of fields and field names do not match in record " ++ rec_name
   | otherwise =
       let field_strings = map showString field_names
           define_offset = defineOffset (showString rec_name)
-      in vcat $ zipWith define_offset field_strings (recordFields rec) 
+          flat_fields = recordFields $ flattenStaticRecord rec
+      in vcat $ zipWith define_offset field_strings flat_fields
 
 defineTypeTag :: String -> TypeTag -> ShowS
 defineTypeTag name tag =
@@ -82,6 +84,16 @@ defineAll = vcat
     ["REFCT", "INFO"]
   , defineRecordOffsets papHeaderRecord "PAP"
     ["REFCT", "INFO", "FUN", "NARGUMENTS"]
+  , defineRecordOffsets streamRecord "STREAM"
+    ["REFCT", "INFO", "FUN", "INIT", "PASSCONV_SIZE", "PASSCONV_ALIGN",
+     "PASSCONV_COPY", "PASSCONV_FREE"]
+  , defineRecordOffsets passConvRecord "PASSCONV"
+    ["SIZE", "ALIGN", "COPY", "FREE"]
+  , defineRecordOffsets listRecord "LIST"
+    ["SIZE", "DATA"]
+  , defineRecordOffsets streamReturnClosureRecord "STREAM_RETURN"
+    ["REFCT", "INFO", "FUN", "PASSCONV_SIZE", "PASSCONV_ALIGN",
+     "PASSCONV_COPY", "PASSCONV_FREE"]
   , defineTypeTag "INT8_TAG" Int8Tag
   , defineTypeTag "INT16_TAG" Int16Tag
   , defineTypeTag "INT32_TAG" Int32Tag
