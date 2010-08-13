@@ -10,12 +10,14 @@ import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
-import System.Posix.Temp
+import Text.PrettyPrint.HughesPJ
 
 import Gluon.Eval.Error
 import InitializeGlobals
-import Parser.Driver
+import CommandLine
+import Job
 import Paths_pyon
+import Parser.Driver
 import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
 import qualified Untyped.TypeInference as Untyped
@@ -27,6 +29,8 @@ import qualified SystemF.Typecheck as SystemF
 import qualified SystemF.NewFlatten.GenCore as SystemF
 import qualified SystemF.Print as SystemF
 import qualified Core.Lowering as Core
+import qualified Core.Print as Core
+import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
 import qualified LowLevel.BuiltinCalls as LowLevel
@@ -39,23 +43,64 @@ main = do
   loadBuiltins
   initializeTIBuiltins
   
-  args <- getArgs
-  processCommandLine args 
+  -- Parse arguments
+  job <- parseCommandLineArguments
   
-processCommandLine args =
-  case args
-  of [filename] -> compileFile filename
-     _ -> putStrLn "Expecting a filename as the only command-line parameter"
+  -- Do work
+  runJob runTask job
+  
+-- | Run a task.  This is the entry point for each stage of the
+-- compiler.
+runTask :: Task a -> IO a
+runTask (ReadInputFile path) = do
+  return $ diskFile path
 
--- | Compile a pyon file.
--- 
--- This function consists chiefly of a long sequence of  compiler stages.
-compileFile :: FilePath -> IO ()
-compileFile fname = do
-  unless (takeExtension fname == ".py") $ fail "Expecting a .py file"
+runTask (PreprocessCPP file) = do
+  output_file <- newTemporaryFile ".out"
+  input_path <- getFilePath file
+  output_path <- getFilePath output_file
+  invokeCPP input_path output_path
+  return output_file
 
+runTask (ParsePyonAsm file) = do
+  print "Not implemented: Parsing Pyon ASM"
+  return undefined
+
+runTask (CompilePyonToPyonAsm file) = do
+  input_text <- readDataFileString file
+  input_path <- getFilePath file
+  compilePyonToPyonAsm input_path input_text
+
+runTask (CompilePyonAsmToObject ll_mod) = do
+  output_file <- newTemporaryFile ".o"
+  compilePyonAsmToObject ll_mod output_file
+  return output_file
+
+runTask (RenameToPath path file) = do
+  input_path <- getFilePath file
+  renameFile input_path path
+
+-- | Invoke the C preprocessor
+invokeCPP :: FilePath -> FilePath -> IO ()
+invokeCPP inpath outpath = do
+  rc <- rawSystem "gcc" cpp_opts
+  unless (rc == ExitSuccess) $ do
+    putStrLn "Compilation failed: Error in C preprocessor" 
+    exitFailure  
+  where
+    cpp_opts =
+      [ "-E"                    -- preprocess only
+      , "-xc"                   -- preprocess in C mode
+      , "-nostdinc"             -- do not search standard include paths
+      , inpath                  -- input path
+      , "-o", outpath           -- output path
+      ]
+
+-- | Compile a pyon file from source code to low-level code.
+compilePyonToPyonAsm :: FilePath -> String -> IO LowLevel.Module
+compilePyonToPyonAsm path text = do
   -- Parse and generate untyped code
-  untyped_mod <- parseFile fname
+  untyped_mod <- parseFile path text
   putStrLn "Untyped"
   print $ Untyped.pprModule untyped_mod
   
@@ -77,9 +122,20 @@ compileFile fname = do
                       fail "Type checking failed in core"
       Right m -> SystemF.flatten m
 
+  putStrLn ""
+  putStrLn "Core"
+  print $ vcat $ map (vcat . map Core.pprCDef) flat_mod
+
   -- Convert to low-level form
   ll_mod <- Core.lower flat_mod
+  putStrLn ""
+  putStrLn "Lowered"
+  print $ LowLevel.pprModule ll_mod
   
+  return ll_mod
+
+-- | Compile an input low-level module to object code
+compilePyonAsmToObject ll_mod output_file = do
   -- Low-level transformations
   ll_mod <- LowLevel.flattenRecordTypes =<< LowLevel.makeBuiltinPrimOps ll_mod
   putStrLn ""
@@ -95,26 +151,25 @@ compileFile fname = do
   
   -- Generate and compile a C file
   let c_mod = LowLevel.generateCFile ll_mod
-      o_fname = replaceExtension fname ".o"
-
-  -- Write to a temporary file
-  withTempFile "pyon.XXXXXX" $ \(c_fname, hdl) -> do
-    hPutStr hdl c_mod
-    hClose hdl
+      
+  c_file <- newTemporaryFile ".c"
+  writeDataFileString c_file c_mod
     
-    -- Compile the file
-    compileCFile c_fname o_fname
+  -- Compile the file
+  compileCFile c_file output_file
   
   return ()
 
 -- | Compile a C file to produce an object file.
-compileCFile c_fname o_fname = do
+compileCFile c_file o_file = do
+  c_fname <- getFilePath c_file
+  o_fname <- getFilePath o_file
   include_path <- Paths_pyon.getDataFileName "include"
   let compiler_opts =
         [ "-c"                  -- Compile
         , "-g"                  -- Emit debug information
         , "-m32"                -- 32-bit mode
-        , "-x", "c"             -- Source is a C file
+        , "-xc"                 -- Source is a C file
         , c_fname               -- Input filename
         , "-o", o_fname         -- Output filename
         , "-I" ++ include_path  -- Include directory
@@ -123,9 +178,3 @@ compileCFile c_fname o_fname = do
   unless (rc == ExitSuccess) $ do
     putStrLn "Compilation failed: Error in C backend phase" 
     exitFailure
-
-withTempFile template m = bracket (mkstemp template) close_file m
-  where
-    close_file (path, hdl) = do
-      hClose hdl
-      removeFile path

@@ -26,11 +26,8 @@ ssaGlobals =
   [(predefinedSSAVar v, b) | (v, b) <- readInitGlobalVar parserGlobals]
 
 -- | Parse a file.  Generates an untyped module.
-parseFile :: FilePath -> IO Untyped.Syntax.Module
-parseFile file_path = do
-  -- Read the file
-  text <- readFile file_path
-
+parseFile :: FilePath -> String -> IO Untyped.Syntax.Module
+parseFile file_path text = do
   -- Parse and generate an AST
   pglobals <- readInitGlobalVarIO parserGlobals
   (nextStm, parse_mod) <-

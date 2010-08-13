@@ -25,14 +25,16 @@ Executable pyon
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon
+    Globals
+    GlobalVar
+    InitializeGlobals
+    Job
+    CommandLine
     Parser.Driver
     Parser.Parser
     Parser.ParserSyntax
     Parser.SSA
     Parser.GenUntyped
-    Globals
-    GlobalVar
-    InitializeGlobals
     Untyped.Builtins
     Untyped.BuiltinsTH
     Untyped.InitializeBuiltins
