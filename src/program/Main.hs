@@ -37,6 +37,7 @@ import qualified LowLevel.BuiltinCalls as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
+import qualified LLParser.Parser as LLParser
 
 main = do
   -- Initialiation
@@ -63,8 +64,9 @@ runTask (PreprocessCPP file) = do
   return output_file
 
 runTask (ParsePyonAsm file) = do
-  print "Not implemented: Parsing Pyon ASM"
-  return undefined
+  input_text <- readDataFileString file
+  input_path <- getFilePath file
+  parsePyonAsm input_path input_text
 
 runTask (CompilePyonToPyonAsm file) = do
   input_text <- readDataFileString file
@@ -133,6 +135,11 @@ compilePyonToPyonAsm path text = do
   print $ LowLevel.pprModule ll_mod
   
   return ll_mod
+
+parsePyonAsm input_path input_text = do
+  LLParser.parseFile input_path input_text
+  print "Not implemented: Parsing Pyon ASM"
+  return undefined
 
 -- | Compile an input low-level module to object code
 compilePyonAsmToObject ll_mod output_file = do

@@ -321,4 +321,10 @@ testParse text parser =
   in case runParser parser () "<test>" tokens
      of Left err -> error (show err)
         Right x -> x
-  
+
+parseFile :: FilePath -> String -> IO [Def Parsed]
+parseFile path text =
+  let tokens = lexFile path text
+  in case runParser topLevelDefs () path tokens
+     of Left err -> fail (show err)
+        Right x -> return x
