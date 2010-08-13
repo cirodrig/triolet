@@ -66,6 +66,10 @@ Executable pyon
     Core.Lowering
     Core.TypeLowering
     Core.BuiltinTypes
+    LLParser.AST
+    LLParser.LexCode
+    LLParser.Lexer
+    LLParser.Parser
     LowLevel.Builtins
     LowLevel.BuiltinsTH
     LowLevel.InitializeBuiltins

@@ -12,6 +12,7 @@ import Distribution.Simple
 import Distribution.Simple.Build.PathsModule
 import Distribution.Simple.BuildPaths
 import Distribution.Simple.LocalBuildInfo
+import Distribution.Simple.PreProcess
 import Distribution.Simple.Program
 import Distribution.Simple.Setup
 import Distribution.Simple.Utils
@@ -195,10 +196,30 @@ runMake lbi flags args =
 -------------------------------------------------------------------------------
 -- Hooks
 
+-- Pre-build hook: Run 'alex'
+preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
+  lex_alexpath <-
+    findFile (pyonSearchPaths lbi exe) $ lex_module `addExtension` ".x"
+  
+  -- Create output directory
+  createDirectoryIfMissingVerbose verb True (dropFileName lex_hspath)
+
+  -- Run lexer
+  let alex = ppAlex (buildInfo exe) lbi
+  runSimplePreProcessor alex lex_alexpath lex_hspath verb
+
+  where
+    verb = fromFlag $ buildVerbosity flags
+    autogen_dir = autogenModulesDir lbi
+    lex_module = "LLParser" </> "Lexer"
+    lex_hspath = autogen_dir </> lex_module `addExtension` ".hs"
+  
+
 -- Build hook: run make
 doBuild pkg_desc lbi hooks flags = do
   -- Generate modules if they don't alredy exist
   writePathsModule verb pkg_desc lbi
+  preProcess pkg_desc lbi hooks flags
   
   -- Build the executable
   withExe pkg_desc build_exe
@@ -246,8 +267,6 @@ doBuild pkg_desc lbi hooks flags = do
       runMake lbi flags ["build"]
 
 -- Post-configure hook:
--- Generate the auto-generated "paths" module
--- Put makefile variables in "cabal.mk"
 doPostConf orig_post_conf args flags pkg_desc lbi = do
   let verb = fromFlag $ configVerbosity flags
   
