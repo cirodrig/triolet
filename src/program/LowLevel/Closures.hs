@@ -115,14 +115,14 @@ scanLambdaFunction lambda_fun = do
 -- | Perform closure conversion on a function.  The closure-converted
 -- function is returned, along with a list of the captured variables.
 --
+-- If the function is a primitive call function, it must not have free
+-- variables.
+--
 -- First, closure conversion is performed on the function body.
 -- Then the function is converted to one with no free variables that takes
 -- an extra argument for each free variable in the original function.
 scanFun :: Fun -> CC (Fun, [Var])
 scanFun fun = do
-  unless (isClosureFun fun) $
-    internalError "scanFun: Given function has wrong calling convention"
-
   -- Do closure conversion in the function body, and get the set of variables
   -- mentioned in the function body
   let return_prim_types = map valueToPrimType $ funReturnTypes fun
@@ -136,6 +136,13 @@ scanFun fun = do
   let free_var_list = Set.toList free_vars
       new_params = free_var_list ++ funParams fun
       new_fun = primFun new_params (funReturnTypes fun) body'
+      
+  -- If the input function was a primitive-call function, then there is no
+  -- way to deal with free variables
+  when (isPrimFun fun && not (null free_var_list)) $
+    error "Procedure has free variables"
+
+
   return (new_fun, free_var_list)
 
 -- | Perform closure conversion on a data definition.

@@ -204,17 +204,25 @@ localClosure clo (CC f) = CC $ \env -> f (insert_closure env)
       let k = fromIdent $ varID $ cloVariable clo
       in env {envEntryPoints = IntMap.insert k clo $ envEntryPoints env}
 
-withGlobalFunctions :: [FunDef] -> CC [Fun] -> CC () -> CC ()
+-- | Generate global functions and data from a set of global functions.
+withGlobalFunctions :: [FunDef] -- ^ Functions to process 
+                    -> CC [Fun] -- ^ Scanner that creates direct functions
+                    -> CC ()    -- ^ Code that may access functions
+                    -> CC ()
 withGlobalFunctions defs scan gen = do
   clos <- mapM mkGlobalClosure defs
-  funs <- localClosures clos scan
-  zipWithM emitGlobalClosure clos funs
+  funs <- localClosures (catMaybes clos) scan
+  forM (zip3 (map funDefiniendum defs) clos funs) $ \(d, c, f) ->
+    emitGlobalClosure d c f
   gen
 
--- | Create a closure description.  No code is generated.
-mkGlobalClosure (FunDef v fun) = do
-  entry_points <- mkEntryPoints CannotDeallocate (funType fun) (varName v)
-  return $ nonrecClosure v entry_points []
+-- | Create a closure description if the function is a closure function.  
+-- Otherwise return Nothing.  No code is generated.
+mkGlobalClosure (FunDef v fun) 
+  | isClosureFun fun = do
+      entry_points <- mkEntryPoints CannotDeallocate (funType fun) (varName v)
+      return $ Just $ nonrecClosure v entry_points []
+  | otherwise = return Nothing
 
 withLocalFunctions :: [FunDef]          -- ^ Function definitions
                    -> CC [(Fun, [Var])] -- ^ Generate a direct entry
@@ -223,7 +231,7 @@ withLocalFunctions :: [FunDef]          -- ^ Function definitions
                    -> (GenM () -> CC a) -- ^ Incorporate the closure code
                                         -- generator into the program
                    -> CC a
-withLocalFunctions defs scan gen = mdo
+withLocalFunctions defs scan gen = check_functions $ mdo
   -- Create recursive function closures
   clos <- mkRecClosures defs captureds
   
@@ -235,6 +243,14 @@ withLocalFunctions defs scan gen = mdo
   
   -- Generate remaining code
   localClosures clos $ gen gen_code
+  where
+    check_functions k = foldr check_function k defs
+
+    -- Verify that the argument is a closure function, not a prim function.
+    check_function def k =
+      if isClosureFun $ funDefiniens def
+      then k
+      else internalError "withLocalFunctions: Function does not require closure conversion"
 
 -- | Create closure descriptions for a set of recursive functions.
 -- No code is generated.
@@ -585,9 +601,13 @@ generateInfoTable clo =
       info_table = infoTableEntry $ cloEntryPoints clo
   in writeData $ DataDef info_table record $ cloInfoTable clo
 
--- | Generate the code and data of a global function
-emitGlobalClosure :: Closure -> Fun -> CC ()
-emitGlobalClosure clo direct = do
+-- | Generate the code and data of a global function.  For closure functions,
+-- an info table, a global closure, and entry points are generated.  For
+-- primitive functions, only the global function is generated.
+emitGlobalClosure :: Var -> Maybe Closure -> Fun -> CC ()
+
+-- Emit a closure function
+emitGlobalClosure direct_entry (Just clo) direct = do
   generateInfoTable clo
   writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
   generateExactEntry clo
@@ -597,6 +617,10 @@ emitGlobalClosure clo direct = do
   when (isJust $ deallocEntry (cloEntryPoints clo)) $
     internalError "constructGlobalClosure: Must use default deallocator"
   generateGlobalClosure clo
+
+-- Emit a primitive function
+emitGlobalClosure direct_entry Nothing direct = do
+  writeFun $ FunDef direct_entry direct
 
 -- | Generate the code and data of a group of recursive closures
 emitRecClosures :: ClosureGroup -> [Fun] -> CC (GenM ())
