@@ -38,6 +38,7 @@ import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LLParser.Parser as LLParser
+import qualified LLParser.GenLowLevel as LLParser
 
 main = do
   -- Initialiation
@@ -137,9 +138,8 @@ compilePyonToPyonAsm path text = do
   return ll_mod
 
 parsePyonAsm input_path input_text = do
-  LLParser.parseFile input_path input_text
-  print "Not implemented: Parsing Pyon ASM"
-  return undefined
+  ast <- LLParser.parseFile input_path input_text
+  LLParser.generateLowLevelModule input_path ast
 
 -- | Compile an input low-level module to object code
 compilePyonAsmToObject ll_mod output_file = do

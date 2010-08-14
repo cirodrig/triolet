@@ -210,10 +210,10 @@ genVal _ (LitV l) = genLit l
 
 genVal _ _ = internalError "genVal: Unexpected value"
 
-valType :: Val -> PrimType
-valType (VarV v) = varPrimType v
-valType (LitV l) = litType l
-valType _ = internalError "valType: Unexpected value"
+valPrimType v =
+  case valType v
+  of PrimType pt -> pt
+     _ -> internalError "valPrimType"
 
 genAssignVar :: Var -> CExpr -> CExpr
 genAssignVar v e =
@@ -281,7 +281,7 @@ genCall gvars return_types op args =
            [t] -> declspecs t 
            _ -> internalError "genCall: Cannot generate multiple return values"
       
-      param_types = map abstractDeclr $ map valType args
+      param_types = map abstractDeclr $ map valPrimType args
       fn_derived_declrs =
         CPtrDeclr [] internalNode :
         CFunDeclr (Right (param_types, False)) [] internalNode :

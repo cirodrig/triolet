@@ -23,11 +23,21 @@ execBuild :: Monad m => Gen m Atom -> m Block
 execBuild m = do (atom, stms) <- runWriterT m
                  return $ Block stms atom
 
+execBuild' :: Monad m => Gen m (Atom, a) -> m (Block, a)
+execBuild' m = do ((atom, a), stms) <- runWriterT m
+                  return (Block stms atom, a)
+
 -- | Build a block for use in a larger expression
 getBlock :: Monad m => Gen m Atom -> Gen m Block
 getBlock m = WriterT $ do
   block <- execBuild m
   return (block, [])
+
+-- | Produce a block and return some other value as well
+getBlock' :: Monad m => Gen m (Atom, a) -> Gen m (Block, a)
+getBlock' m = WriterT $ do
+  ((atom, x), stms) <- runWriterT m
+  return ((Block stms atom, x), [])
 
 putBlock :: Monad m => Block -> Gen m Atom
 putBlock (Block stms atom) = WriterT $ return (atom, stms)

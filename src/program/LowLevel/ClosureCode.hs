@@ -2,7 +2,7 @@
 -}
 {-# LANGUAGE FlexibleInstances, RecursiveDo, ViewPatterns #-}
 module LowLevel.ClosureCode
-       (varPrimType, valType,
+       (varPrimType,
         GenM, CC,
         runCC,
         lookupEntryPoints',
@@ -55,11 +55,11 @@ varPrimType v = case varType v
                      
 -- | Get the type of a value.  Since record flattening has been performed, 
 -- the type must be a primitive type.
-valType :: Val -> PrimType
-valType (VarV v) = varPrimType v
-valType (RecV {}) = internalError "valType"
-valType (LitV l) = litType l
-valType (LamV f) = OwnedType
+valPrimType :: Val -> PrimType
+valPrimType val =
+  case valType val 
+  of PrimType pt -> pt
+     RecordType _ -> internalError "valPrimType"
 
 -------------------------------------------------------------------------------
 
@@ -306,7 +306,7 @@ funInfoHeaderRecord' = toDynamicRecord funInfoHeaderRecord
 
 -- | Create a record whoe fields have the same type as the given values.
 valuesRecord :: [Val] -> StaticRecord
-valuesRecord vals = staticRecord $ map (PrimField . valType) vals
+valuesRecord vals = staticRecord $ map (PrimField . valPrimType) vals
 
 -- | A description of a function closure.  The description is used to create
 --   all the code and static data for the function other than the direct entry
@@ -736,7 +736,7 @@ genIndirectCall return_types mk_op mk_args = return $ do
 genApply :: Val -> [Val] -> Val -> GenM ()
 genApply _ [] _ = internalError "genApply: No arguments"
 genApply closure args ret_ptr =
-  gen_apply closure args (map (promotedTypeTag . valType) args)
+  gen_apply closure args (map (promotedTypeTag . valPrimType) args)
   where
     gen_apply closure args arg_types =
       -- If all arguments are consumed, then call apply_mem
