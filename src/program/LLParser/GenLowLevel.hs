@@ -392,6 +392,19 @@ resolveExpr expr =
        f' <- resolveExprValue f
        args' <- mapM resolveExprValue args
        return (LL.CallA f' args', rtypes')
+     CastE e ty -> do
+       (input_val, input_type) <- atomValue =<< resolveExpr1 e
+       cast_type <- resolveValueType ty
+       let (cast_expr, err) = mkCast input_type cast_type input_val
+       lift $ throwErrorMaybe err
+       return (cast_expr, [cast_type])
+     SizeofE ty -> do
+       ty' <- resolveValueType ty
+       return (LL.ValA [nativeWordV (sizeOf ty')], [LL.PrimType nativeWordType])
+     AlignofE ty -> do
+       ty' <- resolveValueType ty
+       return (LL.ValA [nativeWordV (alignOf ty')], [LL.PrimType nativeWordType])
+       
 
 resolveExpr1 :: Expr Parsed -> GenNR (LL.Atom, LL.ValueType)
 resolveExpr1 e = do
@@ -624,3 +637,30 @@ mkFloatLit ty n =
 fromIntExpr :: Expr Resolved -> Int
 fromIntExpr (IntLitE _ n) = fromIntegral n
 fromIntExpr _ = error "Expecting literal value"
+
+-- | Create a cast expression.  If there's no way to cast from the given input 
+-- to the given output type, then produce an error
+mkCast :: LL.ValueType          -- ^ Input type
+       -> LL.ValueType          -- ^ Output type
+       -> LL.Val                -- ^ Value to cast
+       -> (LL.Atom, Maybe String) -- ^ Cast value and error message
+mkCast (LL.PrimType input_type) (LL.PrimType output_type) input_val =
+  case (input_type, output_type)
+  of (OwnedType, OwnedType) -> success_id
+     (OwnedType, PointerType) ->
+       success $ LL.PrimA LL.PrimCastFromOwned [input_val]
+     (PointerType, OwnedType) ->
+       success $ LL.PrimA LL.PrimCastToOwned [input_val]
+     (PointerType, PointerType) -> success_id
+     _ -> cannot
+  where
+    success_id = success $ LL.ValA [input_val]
+    success atom = (atom, Nothing)
+    cannot = (internalError "mkCast", Just "Cannot generate type cast")
+
+-- Cannot cast other types
+mkCast (LL.RecordType _) _ _ =
+  (internalError "mkCast", Just "Cannot cast from record type")
+
+mkCast _ (LL.RecordType _) _ =
+  (internalError "mkCast", Just "Cannot cast to record type")

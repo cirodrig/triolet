@@ -18,6 +18,12 @@ import LowLevel.Record
 data ValueType = PrimType !PrimType
                | RecordType !StaticRecord
 
+instance HasSize ValueType where
+  sizeOf (PrimType pt) = sizeOf pt
+  sizeOf (RecordType rt) = sizeOf rt
+  alignOf (PrimType pt) = alignOf pt
+  alignOf (RecordType rt) = alignOf rt
+
 valueToPrimType :: ValueType -> PrimType
 valueToPrimType (PrimType pt) = pt
 valueToPrimType _ =
