@@ -24,7 +24,6 @@ where
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Writer
-import Data.Either
 import Data.List
 import qualified Data.Map as Map
 import System.FilePath
@@ -36,7 +35,7 @@ import Gluon.Common.Supply
 import LLParser.AST
 import LowLevel.Types
 import LowLevel.Build
-import LowLevel.Record hiding(Field)
+import LowLevel.Record hiding(Field, recordFields)
 import qualified LowLevel.Syntax as LL
 import Globals
 
@@ -44,6 +43,23 @@ data Resolved
 
 type instance VarName Resolved = LL.Var
 type instance RecordName Resolved = ResolvedRecord
+
+-- | A resolved function, data, or top-level definition
+data ResolvedDef =
+    ResolvedFunctionDef LL.FunDef
+  | ResolvedDataDef LL.DataDef
+  | ResolvedRecordDef -- ^ Record definitions are erased after translation
+
+partitionResolvedDefinitions :: [ResolvedDef] -> ([LL.FunDef], [LL.DataDef])
+partitionResolvedDefinitions defs = part defs id id
+  where
+    part (def:defs) fun dat =
+      case def
+      of ResolvedFunctionDef f -> part defs (fun . (f:)) dat
+         ResolvedDataDef d     -> part defs fun (dat . (d:))
+         ResolvedRecordDef     -> part defs fun dat
+
+    part [] fun dat = (fun [], dat [])
 
 newtype RecordIdent = RecordIdent String
 data ResolvedRecord =
@@ -222,6 +238,14 @@ lookupRecord name = do
     else Nothing
   return $ case entry of ~(RecordEntry record) -> record
 
+-- | Define a new record type
+defineRecord :: RecordName Parsed -> [StaticFieldType] -> [FieldDef Resolved]
+             -> NR ()
+defineRecord name field_types fields =
+  let record =
+        ResolvedRecord (RecordIdent name) fields (staticRecord field_types)
+  in defineEntity name (RecordEntry record)
+
 -------------------------------------------------------------------------------
 
 type GenNR a = Gen NR a
@@ -265,15 +289,20 @@ convertToValueType :: Type Resolved -> LL.ValueType
 convertToValueType ty =
   case ty
   of PrimT pt -> LL.PrimType pt
-     RecordT record ->
-       case record
-       of ResolvedRecord _ _ record_type -> LL.RecordType record_type
+     RecordT record -> LL.RecordType $ resolvedRecordType record
      _ -> error "Expecting a value type"
 
-resolveFieldDef :: FieldDef Parsed -> GenNR (FieldDef Resolved)
+convertToFieldType :: Type Resolved -> StaticFieldType
+convertToFieldType ty =
+  case ty
+  of PrimT pt -> PrimField pt
+     RecordT r -> RecordField $ resolvedRecordType r
+     BytesT size align -> BytesField (fromIntExpr size) (fromIntExpr align)
+
+resolveFieldDef :: FieldDef Parsed -> NR (StaticFieldType, FieldDef Resolved)
 resolveFieldDef (FieldDef ty nm) = do
-  ty' <- resolveType ty
-  return $ FieldDef ty' nm
+  ty' <- resolvePureType ty
+  return (convertToFieldType ty', FieldDef ty' nm)
 
 -- | From a record field specifier, get the field's offset and data type.
 resolveField :: Field Parsed -> GenNR (LL.Val, LL.ValueType)
@@ -503,14 +532,26 @@ resolveFunctionDef fdef = do
   -- Return the function definition
   return $ LL.FunDef fvar fun
 
-resolveDef :: Def Parsed -> NR (Either LL.FunDef LL.DataDef)
+resolveRecordDef rdef = do
+  unless (null $ recordParams rdef) $
+    internalError "Not implemented: parameterized records"
+  
+  (unzip -> (field_types, fs)) <- mapM resolveFieldDef $ recordFields rdef
+  defineRecord (recordName rdef) field_types fs
+
+resolveDef :: Def Parsed -> NR ResolvedDef
 resolveDef (FunctionDefEnt fdef) =
-  fmap Left $ resolveFunctionDef fdef
+  fmap ResolvedFunctionDef $ resolveFunctionDef fdef
+
+resolveDef (RecordDefEnt rdef) = do
+  resolveRecordDef rdef
+  return ResolvedRecordDef
 
 -- | Resolve a set of top-level definitions
 resolveTopLevelDefs :: [Def Parsed] -> NR LL.Module
 resolveTopLevelDefs defs = enterRec $ do
-  (partitionEithers -> (fun_defs, data_defs)) <- mapM resolveDef defs
+  rdefs <- mapM resolveDef defs
+  let (fun_defs, data_defs) = partitionResolvedDefinitions rdefs
   return $ LL.Module fun_defs data_defs
 
 generateLowLevelModule :: FilePath -> [Def Parsed] -> IO LL.Module
@@ -539,3 +580,7 @@ mkFloatLit ty n =
   case ty
   of LL.PrimType (FloatType sz) -> LL.FloatL sz n
      _ -> error "Invalid floating-point type"
+
+fromIntExpr :: Expr Resolved -> Int
+fromIntExpr (IntLitE _ n) = fromIntegral n
+fromIntExpr _ = error "Expecting literal value"
