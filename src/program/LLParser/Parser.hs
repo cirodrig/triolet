@@ -296,10 +296,18 @@ fieldDef = liftM2 FieldDef parseType identifier
 dataDef :: P (DataDef Parsed)
 dataDef = do
   match DataTok
+  
+  -- Read a type, which must be 'owned' or 'pointer'
+  data_type <- parseType
+  ty <- case data_type of 
+    PrimT OwnedType -> return OwnedType
+    PrimT PointerType -> return PointerType
+    _ -> fail "type must be 'owned' or 'pointer'"
+
   name <- identifier
   match AssignTok
   value <- expr
-  return $ DataDef name value
+  return $ DataDef name ty value
 
 -- | Parse a function or procedure definition
 functionDef :: P (FunctionDef Parsed)

@@ -42,7 +42,8 @@ data FieldDef a = FieldDef (Type a) FieldName
 
 data DataDef a =
   DataDef
-  { dataName :: VarName a 
+  { dataName :: VarName a
+  , dataType :: !PrimType
   , dataValue :: Expr a
   }
 

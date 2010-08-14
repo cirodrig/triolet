@@ -592,9 +592,9 @@ resolveDataDef ddef = do
   -- Initializer must be a record
   throwErrorMaybe $ must_be_record value
 
-  -- Figure out its type and extract its fields (lazily)
+  -- Extract its fields (lazily)
   let LL.RecV record_type fields = value
-  v <- createAndDefineVar (dataName ddef) (LL.RecordType record_type)
+  v <- createAndDefineVar (dataName ddef) (LL.PrimType $ dataType ddef)
   return $ LL.DataDef v record_type fields
   where
     must_be_record (LL.RecV {}) = Nothing
