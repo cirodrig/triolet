@@ -358,94 +358,102 @@ resolvePureExpr expr =
 
 -- | Perform name resolution on expressions.  To create variables, we have to
 -- get expressions' types at the same time.
-resolveExpr :: Expr Parsed -> GenNR (LL.Atom, [LL.ValueType])
+--
+-- The expression is returned as a value.  If possible, the expression is
+-- also returned as a value.  
+resolveExpr :: Expr Parsed -> GenNR (Maybe LL.Val, LL.Atom, [LL.ValueType])
 resolveExpr expr =
   case expr
   of VarE vname -> lift $ do
        v <- lookupVar vname
-       return (LL.ValA [LL.VarV v], [LL.varType v])
+       return_value (LL.VarV v) (LL.varType v)
      IntLitE ty n -> do
        ty' <- resolveValueType ty
-       return (LL.ValA [LL.LitV $ mkIntLit ty' n], [ty'])
+       return_value (LL.LitV $ mkIntLit ty' n) ty'
      FloatLitE ty n -> do
        ty' <- resolveValueType ty
-       return (LL.ValA [LL.LitV $ mkFloatLit ty' n], [ty'])
+       return_value (LL.LitV $ mkFloatLit ty' n) ty'
      RecordE nm fields -> do
        record <- lift $ lookupRecord nm
        let record_type = resolvedRecordType record
-       fields' <- mapM resolveExprValue fields
-       return (LL.PackA record_type fields', [LL.RecordType record_type])
+       (map fst -> fields') <- mapM resolveExprValue fields
+       return_atom (LL.PackA record_type fields') [LL.RecordType record_type]
      FieldE base fld -> do
        (fld_offset, _) <- resolveField fld
-       base' <- resolveExprValue base
-       return (LL.PrimA LL.PrimAddP [base', fld_offset], [LL.PrimType PointerType])
+       (base', _) <- resolveExprValue base
+       return_atom (LL.PrimA LL.PrimAddP [base', fld_offset]) [LL.PrimType PointerType]
      LoadFieldE base fld -> do
        (fld_offset, fld_ty) <- resolveField fld
-       base' <- resolveExprValue base
-       return (LL.PrimA (LL.PrimLoad fld_ty) [base', fld_offset], [fld_ty])
+       (base', _) <- resolveExprValue base
+       return_atom (LL.PrimA (LL.PrimLoad fld_ty) [base', fld_offset]) [fld_ty]
      CallE rtypes f args -> do
        rtypes' <- mapM resolveValueType rtypes
-       f' <- resolveExprValue f
-       args' <- mapM resolveExprValue args
-       return (LL.CallA f' args', rtypes')
+       (f', _) <- resolveExprValue f
+       (map fst -> args') <- mapM resolveExprValue args
+       return_atom (LL.CallA f' args') rtypes'
      PrimCallE rtypes f args -> do
        rtypes' <- mapM resolveValueType rtypes
-       f' <- resolveExprValue f
-       args' <- mapM resolveExprValue args
-       return (LL.CallA f' args', rtypes')
+       (f', _) <- resolveExprValue f
+       (map fst -> args') <- mapM resolveExprValue args
+       return_atom (LL.PrimCallA f' args') rtypes'
+     BinaryE op l r -> do
+       (l', ltype) <- resolveExprValue l
+       (r', rtype) <- resolveExprValue r
+       let (bin_expr, bin_type, err) = mkBinary op l' ltype r' rtype
+       lift $ throwErrorMaybe err
+       return_atom bin_expr [bin_type]
      CastE e ty -> do
-       (input_val, input_type) <- atomValue =<< resolveExpr1 e
+       (input_val, input_type) <- resolveExprValue e
        cast_type <- resolveValueType ty
        let (cast_expr, err) = mkCast input_type cast_type input_val
        lift $ throwErrorMaybe err
-       return (cast_expr, [cast_type])
+       return_atom cast_expr [cast_type]
      SizeofE ty -> do
        ty' <- resolveValueType ty
-       return (LL.ValA [nativeWordV (sizeOf ty')], [LL.PrimType nativeWordType])
+       return_value (nativeWordV $ sizeOf ty') (LL.PrimType nativeWordType)
      AlignofE ty -> do
        ty' <- resolveValueType ty
-       return (LL.ValA [nativeWordV (alignOf ty')], [LL.PrimType nativeWordType])
-       
+       return_value (nativeWordV (alignOf ty')) (LL.PrimType nativeWordType)
+  where
+    return_value val ty = return (Just val, LL.ValA [val], [ty])
+    return_atom atom tys = return (Nothing, atom, tys)
 
-resolveExpr1 :: Expr Parsed -> GenNR (LL.Atom, LL.ValueType)
-resolveExpr1 e = do
-  (atom, types) <- resolveExpr e
+resolveExprAtom :: Expr Parsed -> GenNR (LL.Atom, LL.ValueType)
+resolveExprAtom e = do
+  (_, atom, types) <- resolveExpr e
   case types of
     [ty] -> return (atom, ty)
     _ -> internalError "Expecting a single-valued expression"
 
-atomValue :: (LL.Atom, LL.ValueType) -> GenNR (LL.Val, LL.ValueType)
-atomValue (atom, ty) =
-  case atom
-  of LL.ValA [val] -> return (val, ty)
-     _ -> do
-       val <- emitAtom1 ty atom
-       return (val, ty)
-
-resolveExprValues :: Expr Parsed -> GenNR [LL.Val]
+-- | Resolve an expression and produce the results as values, along with the
+-- type of each result value.
+resolveExprValues :: Expr Parsed -> GenNR ([LL.Val], [LL.ValueType])
 resolveExprValues e = do
-  (atom, types) <- resolveExpr e
-  case atom of
-    LL.ValA values -> return values
-    _ -> emitAtom types atom
-       
-resolveExprValue :: Expr Parsed -> GenNR LL.Val
+  (mval, atom, types) <- resolveExpr e
+  case mval of
+    Just value -> return ([value], types)
+    _ -> do values <- emitAtom types atom
+            return (values, types)
+
+-- | Resolve an expression and produce its result as a value.  It's an error 
+-- for the expression to have zero or many results.
+resolveExprValue :: Expr Parsed -> GenNR (LL.Val, LL.ValueType)
 resolveExprValue e = do
-  vals <- resolveExprValues e
-  case vals of
-    [val] -> return val
-    _ -> error "Expecting one return value from expression"
+  (mval, atom, types) <- resolveExpr e
+  typ <- case types
+         of [typ] -> return typ
+            _ -> error "Expecting one return value from expression"
+  case mval of
+    Just value -> return (value, typ)
+    Nothing -> do value <- emitAtom1 typ atom
+                  return (value, typ)
 
 resolveExprVar :: Expr Parsed -> GenNR LL.Var
 resolveExprVar e = do
-  value <- resolveExprValue e
-  case value of
-    LL.VarV v -> return v
-    _ -> do
-      let ty = LL.valType value
-      tmpvar <- lift $ LL.newAnonymousVar ty
-      bindAtom1 tmpvar (LL.ValA [value])
-      return tmpvar
+  (value, ty) <- resolveExprValue e
+  tmpvar <- lift $ LL.newAnonymousVar ty
+  bindAtom1 tmpvar (LL.ValA [value])
+  return tmpvar
 
 -- | Perform name resolution on an expression used to initialize static data.
 -- Only literals, variables, and record constructions are allowed.
@@ -468,17 +476,19 @@ resolveStaticExpr expr =
        return $ LL.RecV record_type fields'
 
 resolveAtom :: Atom Parsed -> GenNR (LL.Atom, [LL.ValueType])
-resolveAtom (ValA [expr]) = resolveExpr expr
+resolveAtom (ValA [expr]) = do
+  (_, atom, types) <- resolveExpr expr
+  return (atom, types)
 
 -- To resolve an expression list, generate values for the individual
 -- expressions and then return a group of values
 resolveAtom (ValA exprs) = do
-  (unzip -> (vals, types)) <- mapM (atomValue <=< resolveExpr1) exprs
+  (unzip -> (vals, types)) <- mapM resolveExprValue exprs
   return (LL.ValA vals, types)
 
 resolveAtom (IfA cond true false) = do
   -- Evaluate the condition
-  cond_val <- resolveExprValue cond 
+  (cond_val, _) <- resolveExprValue cond 
   (true_block, true_types) <- getBlock' $ resolveBlock true
   (false_block, false_types) <- getBlock' $ resolveBlock false
 
@@ -526,7 +536,7 @@ resolveLValue lval ty =
   where
     store_value v base fld = do
       -- Compute the base and offset
-      base' <- resolveExprValue base
+      (base', _) <- resolveExprValue base
       (offset, _) <- resolveField fld
       
       -- Generate a store
@@ -671,3 +681,56 @@ mkCast (LL.RecordType _) _ _ =
 
 mkCast _ (LL.RecordType _) _ =
   (internalError "mkCast", Just "Cannot cast to record type")
+
+-- | Create a binary expression.  If the expression is not well-typed, then
+-- produce an error.
+mkBinary :: BinOp -> LL.Val -> LL.ValueType -> LL.Val -> LL.ValueType
+         -> (LL.Atom, LL.ValueType, Maybe String)
+mkBinary op l_val l_type r_val r_type =
+  case op
+  of CmpEQOp -> comparison LL.CmpEQ
+     AtomicAddOp -> atomic_int LL.PrimAAddZ
+     _ -> internalError "mkBinary: Unhandled binary operator"
+  where
+    l_primtype = case l_type of ~(LL.PrimType pt) -> pt
+    l_primtype_check =
+      case l_type
+      of LL.PrimType _ -> Nothing
+         LL.RecordType _ -> Just "Operand may not have record type"
+    r_primtype = case r_type of ~(LL.PrimType pt) -> pt
+    r_primtype_check =
+      case r_type
+      of LL.PrimType _ -> Nothing
+         LL.RecordType _ -> Just "Operand may not have record type"
+         
+    types_match_check =
+      if l_primtype == r_primtype
+      then Nothing
+      else Just "Operands must have the same type"
+
+    l_pointer_type_check = l_primtype_check `mappend`
+      case l_primtype
+      of PointerType -> Nothing
+         _ -> Just "Operand must have pointer type"
+
+    r_integral_type_check = r_primtype_check `mappend`
+      case r_primtype
+      of IntType {} -> Nothing
+         _ -> Just "Operand must have integral type"
+
+    comparison cmp_op =
+      let operator =
+            case l_primtype
+            of IntType sgn sz -> LL.PrimCmpZ sgn sz cmp_op
+               _ -> internalError "Binary comparison not implemented for this type"
+          atom = LL.PrimA operator [l_val, r_val]
+          checks = mconcat [l_primtype_check, r_primtype_check, types_match_check]
+      in (atom, l_type, checks)
+         
+    atomic_int op =
+      let operator =
+            case r_primtype
+            of IntType sgn sz -> op sgn sz
+          atom = LL.PrimA operator [l_val, r_val]
+          checks = mconcat [l_pointer_type_check, r_integral_type_check]
+      in (atom, r_type, checks)

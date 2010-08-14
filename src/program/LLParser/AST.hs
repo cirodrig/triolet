@@ -13,7 +13,9 @@ type instance RecordName Parsed = String
 type instance VarName Parsed = String
 
 data BinOp =
-  AddOp
+    AddOp
+  | AtomicAddOp
+  | CmpEQOp
   deriving(Show)
 
 -- | A data type, represented by a primitive type, a record type, or bytes.

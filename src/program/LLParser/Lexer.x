@@ -68,6 +68,7 @@ rules :-
 "."			{ tok DotTok }
 "@!" / @notsym		{ tok FieldTok }
 "@" / @notsym		{ tok AtTok }
+"!+" / @notsym		{ tok DerefPlusTok }
 "*"			{ tok StarTok }
 
 -- Other symbols

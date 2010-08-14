@@ -37,6 +37,7 @@ data Token =
   | FieldTok
   | AtTok
   | StarTok
+  | DerefPlusTok
   | AlignofTok
   | AsTok
   | BytesTok
@@ -79,6 +80,7 @@ showToken DotTok = "dot"
 showToken FieldTok = "field operator"
 showToken AtTok = "at operator"
 showToken StarTok = "asterisk"
+showToken DerefPlusTok = "'!+'"
 showToken AlignofTok = "'alignof'"
 showToken AsTok = "'as'"
 showToken BytesTok = "'bytes'"

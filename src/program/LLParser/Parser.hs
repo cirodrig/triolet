@@ -130,21 +130,31 @@ field = do
     cast = optionMaybe (match AsTok >> parseType)
 
 -- | Operators recognized by the parser
-operators = []
-
-expr :: P (Expr Parsed)
-expr = do
-  e <- castExpr
-  choice [ match AtTok >> offset_expr e
-         , match FieldTok >> deref_expr e
-         , return e
-         ]
+operators =
+  [ [ Infix (binaryOp DerefPlusTok AtomicAddOp) AssocNone]
+  , [ Infix (binaryOp EqualTok CmpEQOp) AssocNone]
+  ]
   where
+    binaryOp tok op = match tok >> return (\x y -> BinaryE op x y)
+
+expr = buildExpressionParser operators fieldExpr
+
+fieldExpr :: P (Expr Parsed)
+fieldExpr = do
+  e <- castExpr
+  postfixes e
+  where
+    postfixes e =
+      (match AtTok >> offset_expr e >>= postfixes) <|>
+      (match FieldTok >> deref_expr e >>= postfixes) <|>
+      return e
+
     -- Parse the rest of an offset expression "e @ field"
     offset_expr e = do
       f <- field
       return $ FieldE e f
     
+    -- Parse the rest of a dereference expression "e @! field"
     deref_expr e = do
       f <- field
       return $ LoadFieldE e f
