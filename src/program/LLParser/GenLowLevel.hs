@@ -33,6 +33,7 @@ import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Common.Supply 
 import LLParser.AST
+import LowLevel.Builtins
 import LowLevel.Types
 import LowLevel.Build
 import LowLevel.Record hiding(Field, recordFields)
@@ -603,7 +604,13 @@ resolveDef (DataDefEnt ddef) =
 -- | Resolve a set of top-level definitions
 resolveTopLevelDefs :: [Def Parsed] -> NR LL.Module
 resolveTopLevelDefs defs = enterRec $ do
+  -- Add built-in variables to environment
+  mapM_ defineVar allBuiltins
+  
+  -- Resolve global definitions
   rdefs <- mapM resolveDef defs
+  
+  -- Construct a module
   let (fun_defs, data_defs) = partitionResolvedDefinitions rdefs
   return $ LL.Module fun_defs data_defs
 
