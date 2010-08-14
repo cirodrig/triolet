@@ -127,6 +127,8 @@ addError err errs = (err :) . errs
 addErrorMaybe :: Maybe String -> Errors -> Errors
 addErrorMaybe err errs = maybe id (:) err . errs
 
+-- | If the argument is a 'Just' value, report the string as an error.
+-- The argument is used lazily.
 throwErrorMaybe :: Maybe String -> NR ()
 throwErrorMaybe err = NR $ \_ env errs -> 
   return ((), env, addErrorMaybe err errs)
@@ -431,6 +433,26 @@ resolveExprVar e = do
       bindAtom1 tmpvar (LL.ValA [value])
       return tmpvar
 
+-- | Perform name resolution on an expression used to initialize static data.
+-- Only literals, variables, and record constructions are allowed.
+resolveStaticExpr :: Expr Parsed -> NR LL.Val
+resolveStaticExpr expr =
+  case expr
+  of VarE vname -> do
+       v <- lookupVar vname
+       return $ LL.VarV v
+     IntLitE ty n -> do
+       ty' <- resolvePureValueType ty
+       return $ LL.LitV $ mkIntLit ty' n
+     FloatLitE ty n -> do
+       ty' <- resolvePureValueType ty
+       return $ LL.LitV $ mkFloatLit ty' n
+     RecordE nm fields -> do
+       record <- lookupRecord nm
+       let record_type = resolvedRecordType record
+       fields' <- mapM resolveStaticExpr fields
+       return $ LL.RecV record_type fields'
+
 resolveAtom :: Atom Parsed -> GenNR (LL.Atom, [LL.ValueType])
 resolveAtom (ValA [expr]) = resolveExpr expr
 
@@ -539,6 +561,21 @@ resolveRecordDef rdef = do
   (unzip -> (field_types, fs)) <- mapM resolveFieldDef $ recordFields rdef
   defineRecord (recordName rdef) field_types fs
 
+resolveDataDef ddef = do
+  -- Get the defining expression
+  value <- resolveStaticExpr $ dataValue ddef
+  
+  -- Initializer must be a record
+  throwErrorMaybe $ must_be_record value
+
+  -- Figure out its type and extract its fields (lazily)
+  let LL.RecV record_type fields = value
+  v <- createAndDefineVar (dataName ddef) (LL.RecordType record_type)
+  return $ LL.DataDef v record_type fields
+  where
+    must_be_record (LL.RecV {}) = Nothing
+    must_be_record _ = Just "Initializer must be a record value"
+
 resolveDef :: Def Parsed -> NR ResolvedDef
 resolveDef (FunctionDefEnt fdef) =
   fmap ResolvedFunctionDef $ resolveFunctionDef fdef
@@ -546,6 +583,9 @@ resolveDef (FunctionDefEnt fdef) =
 resolveDef (RecordDefEnt rdef) = do
   resolveRecordDef rdef
   return ResolvedRecordDef
+
+resolveDef (DataDefEnt ddef) =
+  fmap ResolvedDataDef $ resolveDataDef ddef
 
 -- | Resolve a set of top-level definitions
 resolveTopLevelDefs :: [Def Parsed] -> NR LL.Module
