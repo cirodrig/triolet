@@ -244,7 +244,7 @@ adjustBuiltinVarRefCounts m = RC $ \ownership src -> do
 consumeReference :: Var -> RC ()
 consumeReference v = do
   v' <- lookupSourceVar v
-  when (isOwnedVar v') $ RC $ \_ _ -> return ((), Map.singleton v 1)
+  when (isOwnedVar v') $ RC $ \_ _ -> return ((), Map.singleton v' 1)
 
 -- | Borrow a reference to a variable while generating some code.  Ensure
 -- that a reference is held, possibly by inserting a 'decref' to ensure 
