@@ -1,5 +1,5 @@
 
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, StandaloneDeriving, TypeSynonymInstances #-}
 module LowLevel.Record where
 
 import Data.Bits
@@ -66,6 +66,10 @@ recordAlignment = recordAlignment_
 type StaticRecord = Record Int
 type StaticField = Field Int
 type StaticFieldType = FieldType Int
+
+deriving instance Eq StaticRecord
+deriving instance Eq StaticFieldType
+deriving instance Eq StaticField
 
 -- | In a record with dynamic layout, sizes and offsets are computed run-time
 -- values

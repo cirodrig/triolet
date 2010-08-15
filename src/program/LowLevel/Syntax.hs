@@ -17,6 +17,7 @@ import LowLevel.Record
 -- | A type that may be put into a variable
 data ValueType = PrimType !PrimType
                | RecordType !StaticRecord
+                 deriving(Eq)
 
 instance HasSize ValueType where
   sizeOf (PrimType pt) = sizeOf pt
