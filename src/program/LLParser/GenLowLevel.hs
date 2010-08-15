@@ -386,6 +386,11 @@ resolveExpr expr =
        (fld_offset, fld_ty) <- resolveField fld
        (base', _) <- resolveExprValue base
        return_atom (LL.PrimA (LL.PrimLoad fld_ty) [base', fld_offset]) [fld_ty]
+     DerefE {} -> error "Store expression not valid here"
+     LoadE ty base -> do
+       ty' <- resolveValueType ty
+       (base', _) <- resolveExprValue base
+       return_atom (LL.PrimA (LL.PrimLoad ty') [base', nativeIntV 0]) [ty']
      CallE rtypes f args -> do
        rtypes' <- mapM resolveValueType rtypes
        (f', _) <- resolveExprValue f
@@ -474,6 +479,13 @@ resolveStaticExpr expr =
        let record_type = resolvedRecordType record
        fields' <- mapM resolveStaticExpr fields
        return $ LL.RecV record_type fields'
+     SizeofE ty -> do
+       ty' <- resolvePureValueType ty
+       return $ LL.LitV $ mkIntLit (LL.PrimType nativeWordType) (fromIntegral $ sizeOf ty')
+     AlignofE ty -> do
+       ty' <- resolvePureValueType ty
+       return $ LL.LitV $ mkIntLit (LL.PrimType nativeWordType) (fromIntegral $ alignOf ty')
+     _ -> error "Expression not permitted in initializer"
 
 resolveAtom :: Atom Parsed -> GenNR (LL.Atom, [LL.ValueType])
 resolveAtom (ValA [expr]) = do
@@ -529,12 +541,20 @@ resolveLValue lval ty =
   of VarL var_name -> do
        v <- createVar var_name ty
        return (v, return (), defineVar v)
+       
+     StoreL base -> do
+       v <- LL.newAnonymousVar ty
+       return (v, store_value v base, return ())
 
      StoreFieldL base fld -> do
        v <- LL.newAnonymousVar ty
-       return (v, store_value v base fld, return ())
+       return (v, store_field v base fld, return ())
   where
-    store_value v base fld = do
+    store_value v base = do
+      (base', _) <- resolveExprValue base
+      primStore ty base' (LL.VarV v)
+
+    store_field v base fld = do
       -- Compute the base and offset
       (base', _) <- resolveExprValue base
       (offset, _) <- resolveField fld

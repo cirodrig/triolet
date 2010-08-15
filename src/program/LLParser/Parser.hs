@@ -177,7 +177,7 @@ basicExpr =
   (identifier >>= basicExprWithIdentifier) <|>
   (parseType >>= basicExprWithType) <|>
   try (parenList parseType >>= basicExprWithTypes) <|>
-  atomicExpr
+  derefExpr
   where
     sizeof_expr = do
       match SizeofTok 
@@ -196,11 +196,17 @@ basicExprWithIdentifier id =
     varE = return $ VarE id
 
 -- | Parse an expression that began with a type.
-basicExprWithType ty = intLitE <|> floatLitE <|> basicExprWithTypes [ty]
+basicExprWithType ty =
+  intLitE <|> floatLitE <|> loadE <|> basicExprWithTypes [ty]
   where
     intLitE = fmap (IntLitE ty) integer
     
     floatLitE = fmap (FloatLitE ty) floating
+
+    loadE = do
+      match LoadTok
+      addr <- derefExpr
+      return $ LoadE ty addr
 
 -- | Parse an expression that begain with a type list.
 basicExprWithTypes tys = callE
@@ -208,9 +214,16 @@ basicExprWithTypes tys = callE
     callToken = (match CallTok >> return (CallE tys)) <|>
                 (match PrimCallTok >> return (PrimCallE tys))
 
-    callE = callToken `ap` atomicExpr `ap` atomicExprList
+    callE = callToken `ap` derefExpr `ap` derefExprList
 
-atomicExprList = parenList expr <|> fmap (:[]) atomicExpr
+derefExprList = parenList expr <|> fmap (:[]) derefExpr
+
+derefExpr = deref <|> atomicExpr
+  where
+    deref = do
+      match DerefTok
+      e <- atomicExpr
+      return $ DerefE e
 
 -- | An atomic expression.  Expressions are atomic if they are not made of 
 -- parts separated by spaces.
@@ -221,6 +234,7 @@ atomicExpr = fmap VarE identifier <|> parens expr
 -- This consumes no input, but may cause a parse error.
 exprToLValue :: Expr Parsed -> P (LValue Parsed)
 exprToLValue (VarE v) = return $ VarL v
+exprToLValue (DerefE e) = return $ StoreL e
 exprToLValue (LoadFieldE base off) = return $ StoreFieldL base off
 exprToLValue _ = fail "LHS of assignment is not an lvalue"
 

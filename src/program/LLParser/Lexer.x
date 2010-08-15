@@ -40,6 +40,7 @@ rules :-
 "int16" / @notid	{ tok Int16Tok }
 "int32" / @notid	{ tok Int32Tok }
 "int64" / @notid	{ tok Int64Tok }
+"load" / @notid		{ tok LoadTok }
 "null" / @notid		{ tok NullTok }
 "owned" / @notid	{ tok OwnedTok }
 "pointer" / @notid	{ tok PointerTok }
@@ -68,6 +69,7 @@ rules :-
 "."			{ tok DotTok }
 "@!" / @notsym		{ tok FieldTok }
 "@" / @notsym		{ tok AtTok }
+"!" / @notsym		{ tok DerefTok }
 "!+" / @notsym		{ tok DerefPlusTok }
 "*"			{ tok StarTok }
 

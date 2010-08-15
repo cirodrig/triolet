@@ -77,6 +77,10 @@ data Expr a =
   | FieldE (Expr a) (Field a)
     -- | Load a field
   | LoadFieldE (Expr a) (Field a)
+    -- | Dereference a pointer (only valid in LValue expressions)
+  | DerefE (Expr a)
+    -- | Load from a pointer
+  | LoadE (Type a) (Expr a)
     -- | Call a function
   | CallE [Type a] (Expr a) [Expr a]
     -- | Call a procedure
@@ -93,7 +97,9 @@ data Expr a =
 data LValue a =
     -- | Assign a variable
     VarL (VarName a)
-    -- | Store into memory
+    -- | Store into a pointer
+  | StoreL (Expr a)
+    -- | Store into a field of an object
   | StoreFieldL (Expr a) (Field a)
 
 data Atom a =

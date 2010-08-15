@@ -36,6 +36,7 @@ data Token =
   | DotTok
   | FieldTok
   | AtTok
+  | DerefTok
   | StarTok
   | DerefPlusTok
   | AlignofTok
@@ -50,6 +51,7 @@ data Token =
   | Int16Tok
   | Int32Tok
   | Int64Tok
+  | LoadTok
   | NullTok
   | OwnedTok
   | PointerTok
@@ -79,6 +81,7 @@ showToken EqualTok = "equal operator"
 showToken DotTok = "dot"
 showToken FieldTok = "field operator"
 showToken AtTok = "at operator"
+showToken DerefTok = "exclamation mark"
 showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
 showToken AlignofTok = "'alignof'"
@@ -93,6 +96,7 @@ showToken Int8Tok = "'int8'"
 showToken Int16Tok = "'int16'"
 showToken Int32Tok = "'int32'"
 showToken Int64Tok = "'int64'"
+showToken LoadTok = "'load'"
 showToken NullTok = "'null'"
 showToken OwnedTok = "'owned'"
 showToken PointerTok = "'pointer'"
