@@ -30,10 +30,12 @@ rules :-
 -- Keywords
 "alignof" / @notid	{ tok AlignofTok }
 "as" / @notid		{ tok AsTok }
+"bool" / @notid		{ tok BoolTok }
 "bytes" / @notid	{ tok BytesTok }
 "call" / @notid		{ tok CallTok }
 "data" / @notid		{ tok DataTok }
 "else" / @notid		{ tok ElseTok }
+"false" / @notid	{ tok FalseTok }
 "function" / @notid	{ tok FunctionTok }
 "if" / @notid		{ tok IfTok }
 "int8" / @notid		{ tok Int8Tok }
@@ -48,6 +50,7 @@ rules :-
 "procedure" / @notid	{ tok ProcedureTok }
 "record" / @notid	{ tok RecordTok }
 "sizeof" / @notid	{ tok SizeofTok }
+"true" / @notid		{ tok TrueTok }
 "uint8" / @notid	{ tok UInt8Tok }
 "uint16" / @notid	{ tok UInt16Tok }
 "uint32" / @notid	{ tok UInt32Tok }

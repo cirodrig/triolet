@@ -41,10 +41,12 @@ data Token =
   | DerefPlusTok
   | AlignofTok
   | AsTok
+  | BoolTok
   | BytesTok
   | CallTok
   | DataTok
   | ElseTok
+  | FalseTok
   | FunctionTok
   | IfTok
   | Int8Tok
@@ -59,6 +61,7 @@ data Token =
   | ProcedureTok
   | RecordTok
   | SizeofTok
+  | TrueTok
   | UInt8Tok
   | UInt16Tok
   | UInt32Tok
@@ -86,10 +89,12 @@ showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
 showToken AlignofTok = "'alignof'"
 showToken AsTok = "'as'"
+showToken BoolTok = "'bool'"
 showToken BytesTok = "'bytes'"
 showToken CallTok = "'call'"
 showToken DataTok = "'data'"
 showToken ElseTok = "'else'"
+showToken FalseTok = "'false'"
 showToken FunctionTok = "'function'"
 showToken IfTok = "'if'"
 showToken Int8Tok = "'int8'"
@@ -104,6 +109,7 @@ showToken PrimCallTok = "'primcall'"
 showToken ProcedureTok = "'procedure'"
 showToken RecordTok = "'record'"
 showToken SizeofTok = "'sizeof'"
+showToken TrueTok = "'true'"
 showToken UInt8Tok = "'uint8'"
 showToken UInt16Tok = "'uint16'"
 showToken UInt32Tok = "'uint32'"

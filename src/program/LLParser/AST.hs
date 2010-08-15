@@ -71,6 +71,8 @@ data Expr a =
   | IntLitE (Type a) !Integer
     -- | A floating-point literal
   | FloatLitE (Type a) !Double
+    -- | A boolean literal
+  | BoolLitE !Bool
     -- | Construct a record value
   | RecordE (RecordName a) [Expr a]
     -- | Get a reference to a field of an expression

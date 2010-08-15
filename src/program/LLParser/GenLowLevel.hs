@@ -354,7 +354,8 @@ resolvePureExpr expr =
        ty' <- resolvePureType ty
        let llty = convertToValueType ty'
        return (FloatLitE ty' n, LL.LitV $ mkFloatLit llty n, llty)
-     
+     BoolLitE b ->
+       return (BoolLitE b, LL.LitV $ LL.BoolL b, LL.PrimType BoolType)
 
 -- | Perform name resolution on expressions.  To create variables, we have to
 -- get expressions' types at the same time.
@@ -373,6 +374,8 @@ resolveExpr expr =
      FloatLitE ty n -> do
        ty' <- resolveValueType ty
        return_value (LL.LitV $ mkFloatLit ty' n) ty'
+     BoolLitE b ->
+       return_value (LL.LitV $ LL.BoolL b) (LL.PrimType BoolType)
      RecordE nm fields -> do
        record <- lift $ lookupRecord nm
        let record_type = resolvedRecordType record

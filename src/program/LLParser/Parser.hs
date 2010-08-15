@@ -107,7 +107,8 @@ parseType = prim_type <|> record_type <|> bytes_type <?> "type"
   where
     prim_type = choice [match tok >> return (PrimT typ)
                        | (tok, typ) <- primtypes]
-    primtypes = [ (Int8Tok, IntType Signed S8)
+    primtypes = [ (BoolTok, BoolType)
+                , (Int8Tok, IntType Signed S8)
                 , (Int16Tok, IntType Signed S16)
                 , (Int32Tok, IntType Signed S32)
                 , (Int64Tok, IntType Signed S64)
@@ -227,7 +228,10 @@ derefExpr = deref <|> atomicExpr
 
 -- | An atomic expression.  Expressions are atomic if they are not made of 
 -- parts separated by spaces.
-atomicExpr = fmap VarE identifier <|> parens expr
+atomicExpr = fmap VarE identifier <|> true_lit <|> false_lit <|> parens expr
+  where
+    true_lit = match TrueTok >> return (BoolLitE True)
+    false_lit = match FalseTok >> return (BoolLitE False)
 
 -- | An lvalue is parsed as an expression, then converted to an lvalue if
 -- it appears in lvalue context.
