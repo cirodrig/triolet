@@ -362,7 +362,7 @@ cloRecursiveFields clo =
 type ClosureGroup = [Closure]
 
 closure :: Var -> EntryPoints -> [Var] -> Maybe ClosureGroup -> Closure
-closure var entry captured recursive =
+closure var entry captured recursive = check_variables $
   Closure { cloVariable    = var
           , cloEntryPoints = entry
           , cloCaptured    = captured
@@ -371,6 +371,11 @@ closure var entry captured recursive =
           , cloGroup       = recursive
           }
   where
+    check_variables k
+      | varType var /= PrimType OwnedType =
+          internalError "closure: Wrong variable type"
+      | otherwise = k
+
     -- Closure contains captured variables 
     record = staticRecord $
              closureHeader ++
@@ -477,7 +482,7 @@ generateClosureFree clo
   | Just dealloc_entry <- deallocEntry $ cloEntryPoints clo,
     dealloc_entry /= llBuiltin the_prim_dealloc_global_closure = do
       -- Generate a custom deallocation function
-      clo_ptr <- newAnonymousVar (PrimType PointerType) 
+      clo_ptr <- newAnonymousVar (PrimType PointerType)
       fun_body <- execBuild $ do generateClosureFreeBody clo (VarV clo_ptr)
                                  gen0
       let fun = primFun [clo_ptr] [] fun_body
