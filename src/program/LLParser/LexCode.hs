@@ -39,6 +39,7 @@ data Token =
   | DerefTok
   | StarTok
   | DerefPlusTok
+  | WildTok
   | AlignofTok
   | AsTok
   | BoolTok
@@ -87,6 +88,7 @@ showToken AtTok = "at operator"
 showToken DerefTok = "exclamation mark"
 showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
+showToken WildTok = "wildcard"
 showToken AlignofTok = "'alignof'"
 showToken AsTok = "'as'"
 showToken BoolTok = "'bool'"

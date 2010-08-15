@@ -360,8 +360,8 @@ resolvePureExpr expr =
 -- | Perform name resolution on expressions.  To create variables, we have to
 -- get expressions' types at the same time.
 --
--- The expression is returned as a value.  If possible, the expression is
--- also returned as a value.  
+-- The expression is returned as an atom.  If possible, the expression is
+-- also returned as a value.
 resolveExpr :: Expr Parsed -> GenNR (Maybe LL.Val, LL.Atom, [LL.ValueType])
 resolveExpr expr =
   case expr
@@ -534,7 +534,9 @@ resolveStmt (LetS lvals atom) = do
   -- Add bindings to the environment
   lift $ sequence_ bindings
 
--- | Do name resolution on an lvalue.
+-- | Do name resolution on an lvalue.  The return value is a triple of the
+-- variable that the rvalue gets bound to, generators for code that should
+-- be executed after the binding, and bindings to add to the environment.
 --
 -- If the lvalue is a simple variable, then just translate and assign
 -- the variable.  If it's a store expression, then assign to a temporary
@@ -552,7 +554,43 @@ resolveLValue lval ty =
      StoreFieldL base fld -> do
        v <- LL.newAnonymousVar ty
        return (v, store_field v base fld, return ())
+     
+     UnpackL rec lvals -> do
+       v <- LL.newAnonymousVar ty
+       
+       -- Get the record field types
+       record <- lookupRecord rec
+       let record_type = resolvedRecordType record
+       
+       -- Type must match
+       throwErrorMaybe $
+         if ty == LL.RecordType record_type
+         then Nothing
+         else Just "Record unpack expression doesn't match type"
+
+       -- Number of fields must match
+       throwErrorMaybe $
+         if length lvals == length (resolvedRecordFields record)
+         then Nothing
+         else Just "Record unpack expression has wrong number of fields"
+       
+       -- Bind each lvalue
+       let lval_types = [ty | FieldDef ty _ <- resolvedRecordFields record]
+       (unzip3 -> (lval_vars, lval_codes, lval_defs)) <-
+         zipWithM_lazy resolveLValue lvals (map convertToValueType lval_types)
+       
+       -- Generate an 'unpack' atom
+       let gen_code = bindAtom lval_vars (LL.UnpackA record_type (LL.VarV v))
+       return (v, gen_code >> sequence_ lval_codes, sequence_ lval_defs)
+
+     WildL -> do
+       v <- LL.newAnonymousVar ty
+       return (v, return (), return ())
   where
+    -- Like zipWithM, but lazy in second list
+    zipWithM_lazy f (x:xs) ~(y:ys) = liftM2 (:) (f x y) (zipWithM_lazy f xs ys)
+    zipWithM_lazy f [] ~[] = return []
+
     store_value v base = do
       (base', _) <- resolveExprValue base
       primStore ty base' (LL.VarV v)

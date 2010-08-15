@@ -159,7 +159,7 @@ fieldExpr = do
     deref_expr e = do
       f <- field
       return $ LoadFieldE e f
-
+      
 castExpr :: P (Expr Parsed)
 castExpr = do
   e <- basicExpr
@@ -228,10 +228,12 @@ derefExpr = deref <|> atomicExpr
 
 -- | An atomic expression.  Expressions are atomic if they are not made of 
 -- parts separated by spaces.
-atomicExpr = fmap VarE identifier <|> true_lit <|> false_lit <|> parens expr
+atomicExpr = fmap VarE identifier <|> true_lit <|> false_lit <|>
+             wild <|> parens expr
   where
     true_lit = match TrueTok >> return (BoolLitE True)
     false_lit = match FalseTok >> return (BoolLitE False)
+    wild = match WildTok >> return WildE
 
 -- | An lvalue is parsed as an expression, then converted to an lvalue if
 -- it appears in lvalue context.
@@ -240,6 +242,9 @@ exprToLValue :: Expr Parsed -> P (LValue Parsed)
 exprToLValue (VarE v) = return $ VarL v
 exprToLValue (DerefE e) = return $ StoreL e
 exprToLValue (LoadFieldE base off) = return $ StoreFieldL base off
+exprToLValue (RecordE rec fields) =
+  fmap (UnpackL rec) $ mapM exprToLValue fields
+exprToLValue WildE = return $ WildL
 exprToLValue _ = fail "LHS of assignment is not an lvalue"
 
 -- | An expression list found in a statement.

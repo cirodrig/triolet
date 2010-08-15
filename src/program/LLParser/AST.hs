@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies, EmptyDataDecls, StandaloneDeriving, FlexibleInstances #-}
 module LLParser.AST where
 
+import Data.List
 import LowLevel.Types
 
 data Parsed
@@ -37,6 +38,11 @@ data RecordDef a =
   , recordParams :: Parameters a
   , recordFields :: [FieldDef a]
   }
+
+findFieldIndex :: FieldName -> RecordDef a -> Maybe Int
+findFieldIndex fname r = findIndex match_name $ recordFields r
+  where
+    match_name (FieldDef _ nm) = nm == fname
 
 data FieldDef a = FieldDef (Type a) FieldName
 
@@ -75,7 +81,7 @@ data Expr a =
   | BoolLitE !Bool
     -- | Construct a record value
   | RecordE (RecordName a) [Expr a]
-    -- | Get a reference to a field of an expression
+    -- | Get a reference to an object field from a pointer expression
   | FieldE (Expr a) (Field a)
     -- | Load a field
   | LoadFieldE (Expr a) (Field a)
@@ -95,6 +101,8 @@ data Expr a =
   | SizeofE (Type a)
     -- | Alignment of a data type
   | AlignofE (Type a)
+    -- | Wildcard (only valid in LValue expressions)
+  | WildE
 
 data LValue a =
     -- | Assign a variable
@@ -103,6 +111,10 @@ data LValue a =
   | StoreL (Expr a)
     -- | Store into a field of an object
   | StoreFieldL (Expr a) (Field a)
+    -- | Unpack a record into its fields
+  | UnpackL (RecordName a) [LValue a]
+    -- | Wildcard; match and ignore a value
+  | WildL
 
 data Atom a =
     ValA [Expr a]
