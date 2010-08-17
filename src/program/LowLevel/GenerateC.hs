@@ -5,6 +5,7 @@ where
 import Control.Monad.Writer
 import qualified Data.Set as Set
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Language.C.Data.Ident
 import Language.C.Data.Node
@@ -205,13 +206,19 @@ genManyResults rtn exprs =
   case rtn
   of AssignValues [] -> return_nothing
      AssignValues [v] -> return_expr $ genAssignVar v expr
+     AssignValues xs -> too_many xs
      DefineValues [] -> return_nothing
      DefineValues [v] ->
        [CBlockDecl $ declareVariable v $ Just expr]
+     DefineValues xs -> too_many xs
      ReturnValues [] -> return_nothing
      ReturnValues [t] ->
        return_stm $ CReturn (Just expr) internalNode
+     ReturnValues xs -> too_many xs
   where
+    too_many xs =
+      internalError $ "genManyResults: Cannot generate statement with " ++
+      show (length xs) ++ " result values"
     expr = case exprs of [e] -> e
     return_nothing = []
     return_stm stm = [CBlockStmt stm]

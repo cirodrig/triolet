@@ -1,0 +1,93 @@
+
+module pyon.internal.stream;
+
+#include "pyasm.h"
+#include "memory_py.h"
+#include "stream.h"
+#include "apply_py.h"
+
+#include "pyasm_records.h"
+
+// The info table of a stream
+data pointer Stream_info = InfoTableHeader {
+  Stream_dealloc,
+  TAG_CON
+};
+
+// Deallocate a Stream
+procedure Stream_dealloc (pointer self) -> () {
+  DECREF(self @! Stream.next as pointer)
+  DECREF(self @! Stream.initialize as pointer)
+  DECREF(self @! Stream.state_finalize as pointer)
+  () primcall pyon_dealloc (self);
+};
+
+/*****************************************************************************/
+/* return */
+
+// Create a stream that produces a single value
+function Stream_return (PassConv return_type, owned produce_value) -> owned {
+  ALLOC_OBJECT(s, Stream, Stream_info)
+  s @! Stream.next = owned call Stream_return_next(return_type, produce_value);
+  s @! Stream.initialize = Stream_return_initialize;
+  s @! Stream.state_size = sizeof bool;
+  s @! Stream.state_align = alignof bool;
+  s @! Stream.state_finalize = dummy_finalizer;
+  x = pointer primcall pyon_alloc (word 270);
+  s;
+};
+
+function Stream_return_next (PassConv return_type,
+                             owned produce_value,
+                             pointer state,
+                             owned consumer) -> bool {
+  b = bool load state;
+  if (b) {
+    // Stream is exhausted
+    false;
+  } else {
+    // Stream has data
+    !state = true;
+    PassConv {return_size, _, _, return_finalize} = return_type;
+    producer_data = pointer primcall pyon_alloc (return_size);
+
+    // Produce the value
+    () = () call produce_value (producer_data);
+
+    // Consume the value
+    b = bool call consumer (producer_data);
+
+    // Cleanup
+    () = () call return_finalize (producer_data);
+    () = () primcall pyon_dealloc (producer_data);
+    b;
+  };
+};
+
+function Stream_return_initialize(pointer state) -> () {
+  !state = false;
+  ();
+};
+
+/*****************************************************************************/
+/* bind */
+
+// The state of a chained stream consists of:
+// The producer's state
+// Pointer to the consumer's state if consumer is active, NULL otherwise
+// The current output value if consumer is active, uninitialized otherwise
+
+// Chain streams together.
+function Stream_bind (PassConv produced_type,
+                      PassConv transformed_type,
+                      owned producer,
+                      owned transformer) -> owned {
+  ALLOC_OBJECT(s, Stream, Stream_info);
+  s @! Stream.next =
+      Stream_bind_next(produced_type, transformed_type, producer, transformer);
+  s @! Stream.initialize =
+      Stream_bind_initialize(produced_type, transformed_type,
+                             producer, transformer);
+
+#error "Not implemented"
+};

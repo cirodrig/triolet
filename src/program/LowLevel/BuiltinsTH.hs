@@ -6,6 +6,7 @@ where
 import Language.Haskell.TH(Strict(..))
 import Language.Haskell.TH.Syntax(Lift(..))
 
+import Gluon.Common.Label
 import Gluon.Common.THRecord
 import qualified SystemF.Builtins as SystemF
 import SystemF.Builtins(pyonBuiltin)
@@ -52,114 +53,118 @@ instance Lift FunctionType where
       params = ftParamTypes ft
       returns = ftReturnTypes ft
 
+
 -- | Predefined primitive functions
 builtinPrimitives =
   [ -- memory.c
-    ("pyon_alloc",
+    (builtinModuleName, "pyon_alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
-  , ("pyon_dealloc",
+  , (builtinModuleName, "pyon_dealloc",
      primFunctionType [PrimType PointerType] [])
     -- apply.c
-  , ("apply_i32_f",
+  , (builtinModuleName, "apply_i32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (IntType Unsigned S32)] [PrimType OwnedType])
-  , ("apply_i32",
+  , (builtinModuleName, "apply_i32",
      primFunctionType [PrimType OwnedType
                       , PrimType (IntType Unsigned S32)
                       , PrimType PointerType] [])
-  , ("apply_f32_f",
+  , (builtinModuleName, "apply_f32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (FloatType S32)] [PrimType OwnedType])
-  , ("apply_f32",
+  , (builtinModuleName, "apply_f32",
      primFunctionType [PrimType OwnedType
                       , PrimType (FloatType S32)
                       , PrimType PointerType] [])
-  , ("free_pap",
+  , (builtinModuleName, "free_pap",
      primFunctionType [PrimType PointerType] [])
   ]
 
 closureBinaryFunctionType t = closureFunctionType [t, t] [t]
+
+module_memory_py = moduleName "pyon.internal.memory_py"
+module_stream = moduleName "pyon.internal.stream"
 
 -- | Predefined closure functions and the core constructor they're derived
 -- from.
 builtinFunctions =
   [ -- Functions that do not exist in Core
     -- memory_py.pyasm
-    ("deallocF",
+    (module_memory_py, "deallocF",
      Left $ closureFunctionType [PrimType PointerType] [])
-  , ("dummy_finalizer",
+  , (module_memory_py, "dummy_finalizer",
      Left $ closureFunctionType [PrimType PointerType] [])
-  , ("copy1F",
+  , (module_memory_py, "copy1F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
-  , ("copy2F",
+  , (module_memory_py, "copy2F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
-  , ("copy4F",
+  , (module_memory_py, "copy4F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
     -- Functions translated from Core
-  , ("list_build",
+  , (module_stream, "list_build",
      Right [| pyonBuiltin (SystemF.the_fun_makelist) |])
-  , ("list_traverse",
+  , (module_stream, "list_traverse",
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_list) |])
-  , ("stream_bind",
+  , (module_stream, "stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
-  , ("stream_return",
+  , (module_stream, "stream_return",
      Right [| pyonBuiltin (SystemF.the_fun_return) |])
     
     -- Functions that are replaced by primitive operations
-  , ("eq_int",
+  , (builtinModuleName, "eq_int",
      Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_int) |])
-  , ("ne_int",
+  , (builtinModuleName, "ne_int",
      Right [| pyonBuiltin (SystemF.neMember . SystemF.the_EqDict_int) |])
-  , ("eq_float",
+  , (builtinModuleName, "eq_float",
      Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_float) |])
-  , ("ne_float",
+  , (builtinModuleName, "ne_float",
      Right [| pyonBuiltin (SystemF.neMember . SystemF.the_EqDict_float) |])
-  , ("zero_int",
+  , (builtinModuleName, "zero_int",
      Right [| pyonBuiltin (SystemF.zeroMember . SystemF.the_AdditiveDict_int) |])
-  , ("add_int",
+  , (builtinModuleName, "add_int",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_int) |])
-  , ("sub_int", 
+  , (builtinModuleName, "sub_int", 
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_int) |])
-  , ("zero_float",
+  , (builtinModuleName, "zero_float",
      Right [| pyonBuiltin (SystemF.zeroMember . SystemF.the_AdditiveDict_float) |])
-  , ("add_float",
+  , (builtinModuleName, "add_float",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_float) |])
-  , ("sub_float",
+  , (builtinModuleName, "sub_float",
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_float) |])
-  , ("load_int",
+  , (builtinModuleName, "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])
-  , ("load_float",
+  , (builtinModuleName, "load_float",
      Right [| pyonBuiltin (SystemF.the_fun_load_float) |])
-  , ("load_bool",
+  , (builtinModuleName, "load_bool",
      Right [| pyonBuiltin (SystemF.the_fun_load_bool) |])
-  , ("load_NoneType",
+  , (builtinModuleName, "load_NoneType",
      Right [| pyonBuiltin (SystemF.the_fun_load_NoneType) |])
-  , ("store_int",
+  , (builtinModuleName, "store_int",
      Right [| pyonBuiltin (SystemF.the_fun_store_int) |])
-  , ("store_float",
+  , (builtinModuleName, "store_float",
      Right [| pyonBuiltin (SystemF.the_fun_store_float) |])
-  , ("store_bool",
+  , (builtinModuleName, "store_bool",
      Right [| pyonBuiltin (SystemF.the_fun_store_bool) |])
-  , ("store_NoneType",
+  , (builtinModuleName, "store_NoneType",
      Right [| pyonBuiltin (SystemF.the_fun_store_NoneType) |])
   ]
 
 -- | Predefined global data
 builtinGlobals =
-  [ ("pap_info", PrimType PointerType)
-  , ("global_closure_info", PrimType PointerType)
+  [ (builtinModuleName, "pap_info", PrimType PointerType)
+  , (builtinModuleName, "global_closure_info", PrimType PointerType)
   ]
 
 lowLevelBuiltinsRecord = recordDef "LowLevelBuiltins" fields
   where
-    prim_field (nm, _) =
+    prim_field (_, nm, _) =
       ("the_biprim_" ++ nm, IsStrict, [t| (Var, FunctionType) |])
-    clo_field (nm, _) =
+    clo_field (_, nm, _) =
       ("the_bifun_" ++ nm, IsStrict, [t| (Var, EntryPoints) |])
-    var_field (nm, _) =
+    var_field (_, nm, _) =
       ("the_bivar_" ++ nm, IsStrict, [t| Var |])
     fields = map prim_field builtinPrimitives ++
              map clo_field builtinFunctions ++

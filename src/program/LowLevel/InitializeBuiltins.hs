@@ -20,31 +20,40 @@ import LowLevel.FreshVar
 -- This core module provides the low-level equivalent of core function types
 import {-# SOURCE #-} Core.TypeLowering
 
-initializePrimField :: IdentSupply Var -> String -> FunctionType 
+initializePrimField :: IdentSupply Var -> ModuleName -> String -> FunctionType 
                     -> IO (Var, FunctionType)
-initializePrimField supply nm fty =
+initializePrimField supply mod nm fty =
   runFreshVarM supply $ do
-    let lab = builtinLabel nm
-    v <- newBuiltinVar lab nm (PrimType PointerType)
+    let lab = pgmLabel mod nm
+        ext_name = if mod == builtinModuleName then Just nm else Nothing
+    v <- newExternalVar lab ext_name (PrimType PointerType)
     return (v, fty)
 
 initializeClosureField :: IdentSupply Var 
+                       -> ModuleName
                        -> String
                        -> FunctionType
                        -> IO (Var, EntryPoints)
-initializeClosureField supply nm fty =
+initializeClosureField supply mod nm fty =
   runFreshVarM supply $ do
-    let lab = builtinLabel nm
-    v <- newBuiltinVar lab nm (PrimType OwnedType)
+    let lab = pgmLabel mod nm
+        ext_name = if mod == builtinModuleName then Just nm else Nothing
+    v <- newExternalVar lab ext_name (PrimType OwnedType)
 
     -- All builtin closures use the default closure deallocator
     ep <- mkEntryPoints CannotDeallocate fty (Just lab)
     return (v, ep)
 
-initializeVarField :: IdentSupply Var -> String -> ValueType -> IO Var
-initializeVarField supply nm ty =
+initializeVarField :: IdentSupply Var 
+                   -> ModuleName
+                   -> String 
+                   -> ValueType 
+                   -> IO Var
+initializeVarField supply mod nm ty =
   runFreshVarM supply $ do
-    newBuiltinVar (builtinLabel nm) nm ty
+    let lab = pgmLabel mod nm
+        ext_name = if mod == builtinModuleName then Just nm else Nothing
+    newExternalVar lab ext_name ty
 
 {-
 initializeGlobalField :: IdentSupply Var -> String -> ValueType -> IO Var
@@ -69,15 +78,15 @@ initializeLowLevelBuiltins v_ids =
           closure_type (Left t) = [| t |]
           closure_type (Right conQ) = [| conLoweredFunctionType $conQ |]
           init_primitives =
-            [("the_biprim_" ++ nm, [| initializePrimField v_ids nm ty |]) 
-            | (nm, ty) <- builtinPrimitives]
+            [("the_biprim_" ++ nm, [| initializePrimField v_ids mod nm ty |]) 
+            | (mod, nm, ty) <- builtinPrimitives]
           init_functions =
             [("the_bifun_" ++ nm,
               let fty = closure_type ty
-              in [| initializeClosureField v_ids nm $fty |])
-            | (nm, ty) <- builtinFunctions]
+              in [| initializeClosureField v_ids mod nm $fty |])
+            | (mod, nm, ty) <- builtinFunctions]
           init_globals =
-            [("the_bivar_" ++ nm, [| initializeVarField v_ids nm ty |]) 
-            | (nm, ty) <- builtinGlobals]
+            [("the_bivar_" ++ nm, [| initializeVarField v_ids mod nm ty |]) 
+            | (mod, nm, ty) <- builtinGlobals]
           inits = init_primitives ++ init_functions ++ init_globals
       in initializeRecordM lowLevelBuiltinsRecord inits)

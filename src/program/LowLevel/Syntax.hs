@@ -277,14 +277,14 @@ newAnonymousVar :: Supplies m (Ident Var) => ValueType -> m Var
 newAnonymousVar ty = newVar Nothing Nothing ty
 
 -- | Create a new externally defined variable
-newBuiltinVar :: Supplies m (Ident Var) =>
-                 Label -> String -> ValueType -> m Var
-newBuiltinVar name ext_name ty = do
+newExternalVar :: Supplies m (Ident Var) =>
+                  Label -> Maybe String -> ValueType -> m Var
+newExternalVar name ext_name ty = do
   ident <- fresh
   return $ Var { varID = ident
                , varIsExternal = True
                , varName = Just name
-               , varExternalName = Just ext_name
+               , varExternalName = ext_name
                , varType = ty
                }
 

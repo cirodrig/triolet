@@ -12,7 +12,7 @@ module LowLevel.Builtins
         lowerBuiltinCoreFunction,
         allBuiltins,
         llBuiltin,
-        getBuiltinByName,
+        getBuiltinByLabel,
         the_prim_pyon_alloc,
         the_prim_pyon_dealloc,
         the_prim_apply_i32_f,
@@ -56,14 +56,14 @@ import LowLevel.BuiltinsTH
 $(sequence [declareRecord lowLevelBuiltinsRecord])
 
 -- Define field accessors
-$(forM builtinFunctions $ \(fname, _) ->
+$(forM builtinFunctions $ \(_, fname, _) ->
    TH.funD (TH.mkName $ "the_fun_" ++ fname) $
    let bi = return $ TH.VarE $ TH.mkName "builtins"
        fld = return $ TH.VarE $ TH.mkName $ "the_bifun_" ++ fname
        read_from_field = TH.normalB [| fst ($(fld) $(bi)) |]
    in [TH.clause [TH.varP $ TH.mkName "builtins"] read_from_field []])
 
-$(forM builtinPrimitives $ \(fname, _) ->
+$(forM builtinPrimitives $ \(_, fname, _) ->
    TH.funD (TH.mkName $ "the_prim_" ++ fname) $
    let bi = return $ TH.VarE $ TH.mkName "builtins"
        fld = return $ TH.VarE $ TH.mkName $ "the_biprim_" ++ fname
@@ -74,31 +74,31 @@ $(forM builtinPrimitives $ \(fname, _) ->
 allBuiltins :: [Var]
 allBuiltins =
   $(TH.listE $ [ [| fst $ $(TH.varE $ TH.mkName $ "the_biprim_" ++ fname) lowLevelBuiltins |]
-               | (fname, _) <- builtinPrimitives] ++
+               | (_, fname, _) <- builtinPrimitives] ++
                [ [| fst $ $(TH.varE $ TH.mkName $ "the_bifun_" ++ fname) lowLevelBuiltins |]
-               | (fname, _) <- builtinFunctions] ++
+               | (_, fname, _) <- builtinFunctions] ++
                [ [| $(TH.varE $ TH.mkName $ "the_bivar_" ++ fname) lowLevelBuiltins |]
-               | (fname, _) <- builtinGlobals])
+               | (_, fname, _) <- builtinGlobals])
 
 -- | Get a builtin by field name
 llBuiltin :: (LowLevelBuiltins -> a) -> a
 llBuiltin f = f lowLevelBuiltins
 
--- | Get a builtin by its program name
-getBuiltinByName :: String -> Maybe Var
-getBuiltinByName s = Map.lookup s builtinNameTable
+-- | Get a builtin by its label
+getBuiltinByLabel :: Label -> Maybe Var
+getBuiltinByLabel s = Map.lookup s builtinNameTable
 
 builtinNameTable = Map.fromList [(builtin_name b, b) | b <- allBuiltins]
   where
     builtin_name v =
       case varName v
-      of Just nm -> labelUnqualifiedName nm
+      of Just nm -> nm
          Nothing -> internalError "builtinNameTable: Builtin variable has no name"
 
 -- | All built-in functions that are produced by translating a constructor
 builtinConTable =
   $(TH.listE [ TH.tupE [mk_con, TH.varE $ TH.mkName $ "the_fun_" ++ fname]
-             | (fname, Right mk_con) <- builtinFunctions])
+             | (_, fname, Right mk_con) <- builtinFunctions])
 
 -- | Get the low-level variable corresponding to a builtin function
 -- constructor from core

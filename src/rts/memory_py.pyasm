@@ -1,6 +1,7 @@
 
-module pyon.internal.memory;
+module pyon.internal.memory_py;
 
+#include "pyasm.h"
 #include "memory_py.h"
 
 // Deallocate an object.  Calls 'pyon_dealloc'.

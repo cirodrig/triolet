@@ -34,6 +34,7 @@ import Control.Monad.Trans
 import Control.Monad.Writer
 import Data.List
 import qualified Data.Map as Map
+import Data.Maybe
 import System.FilePath
 
 import Gluon.Common.Error
@@ -230,11 +231,11 @@ createVar mmodule_name name ext_name ty = do
   LL.newVar (Just label) ext_name ty
 
 -- | Create an externally defined variable.
-createBuiltinVar :: String -> String -> LL.ValueType -> NR LL.Var
-createBuiltinVar name ext_name ty = do
-  let label = pgmLabel builtinModuleName name
-  LL.newBuiltinVar label ext_name ty
-
+createExternalVar :: ModuleName -> String -> Maybe String -> LL.ValueType
+                  -> NR LL.Var
+createExternalVar module_name name ext_name ty = do
+  let label = pgmLabel module_name name
+  LL.newExternalVar label ext_name ty
 
 -- | Create a global variable in the current module.  If the variable has
 -- already been declared, return the declared variable instead of creating
@@ -249,7 +250,8 @@ createGlobalVar name ty = do
          createVar Nothing name Nothing ty
        Just evar 
          | ty /= LL.varType evar ->
-             error "Type of external declaration does not match type of variable definition"
+             error $ "Type of external declaration does not match " ++
+                     "type of variable definition"
          | otherwise -> return evar -- Return the already created variable
   where
     -- Check if variable's unqualified name matches given name
@@ -674,6 +676,7 @@ resolveFunctionDef fdef = do
                       then LL.PrimType PointerType
                       else LL.PrimType OwnedType
   fvar <- createGlobalVar (functionName fdef) function_type
+  defineVar fvar
 
   -- Create the function
   fun <- enterNonRec $ do
@@ -710,6 +713,7 @@ resolveDataDef ddef = do
   -- Extract its fields (lazily)
   let LL.RecV record_type fields = value
   v <- createGlobalVar (dataName ddef) (LL.PrimType $ dataType ddef)
+  defineVar v
   return $ LL.DataDef v record_type fields
   where
     must_be_record (LL.RecV {}) = Nothing
@@ -746,38 +750,49 @@ withExternalVariables edefs m = do
       let nrenv' = nrenv {externalVariables = evars ++ externalVariables nrenv}
       in runNR m nrenv' env errs
 
--- | Define an external variable
-defineExternalVar (ExternDecl primtype lab mforeign_name) = do
-  let name = labelUnqualifiedName lab
-      mod = moduleOf lab
-      ty = LL.PrimType primtype
-  
-  v <- createVar (Just mod) name mforeign_name ty
-  
+-- | Define an external variable.
+--
+-- If the variable name and module matches a built-in variable, then use that
+-- variable; otherwise, create a new variable.
+--    
+-- If the variable belongs outside the current module, then define it here.
+-- Otherwise, the variable must be defined later in the module.
+defineExternalVar decl = do
+  v <- lookupOrCreateExternalVar decl
   -- If the variable is not in the current module, then define it.
   -- Otherwise, it will be defined later.
   current_module <- getSourceModuleName
+  let mod = case LL.varName v 
+            of Just n -> moduleOf n
+               Nothing -> internalError "defineExternalVar"
   when (mod /= current_module) $ defineVar v
-
   return v
 
-defineExternalVar (ImportDecl primtype local_name foreign_name) 
-  | Just builtin_var <- getBuiltinByName foreign_name =
-      -- Verify that the given name and type match
-      if local_name /= foreign_name ||
-         LL.varExternalName builtin_var /= Just foreign_name ||
-         LL.varType builtin_var /= LL.PrimType primtype
-      then error $ "Incompatible definition of built-in variable '" ++ local_name ++ "'"
-      else do defineVar builtin_var
-              return builtin_var
-  | otherwise = do
-      -- Create a variable imported from another language.  The variable
-      -- resides in the 'builtin' module and has a foreign name.
-      let ty = LL.PrimType primtype
-      v <- createBuiltinVar local_name foreign_name ty
-      defineVar v
-      return v
-
+-- Get or create an external variable definition
+lookupOrCreateExternalVar decl = 
+  let (primtype, label, external_name) =
+        case decl
+        of ExternDecl pt lab ename ->
+             (pt, lab, ename)
+           ImportDecl pt local_name ename ->
+             (pt, builtinLabel local_name, Just ename)
+  in case getBuiltinByLabel label
+     of Just bivar
+          | LL.varType bivar == LL.PrimType primtype &&
+            LL.varExternalName bivar == external_name ->
+              -- Return an existing built-in variable
+              return bivar
+          | otherwise ->
+              -- Same name as a built-in variable, but different fields
+              error $ "Incompatible definition of built-in variable '" ++
+              showLabel label ++ "'"
+        Nothing ->
+          -- Create a new variable
+          let name = labelUnqualifiedName label
+              mod = moduleOf label
+              ty = LL.PrimType primtype
+          in createVar (Just mod) name external_name ty
+ 
 generateLowLevelModule :: FilePath
                        -> ModuleName
                        -> [ExternDecl Parsed]

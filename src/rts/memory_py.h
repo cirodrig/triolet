@@ -1,8 +1,9 @@
 
+import pointer pyon_alloc;
 import pointer pyon_dealloc;
 
-import owned deallocF;
-import owned dummy_finalizer;
-import owned copy1F;
-import owned copy2F;
-import owned copy4F;
+extern owned pyon.internal.memory_py.deallocF;
+extern owned pyon.internal.memory_py.dummy_finalizer;
+extern owned pyon.internal.memory_py.copy1F;
+extern owned pyon.internal.memory_py.copy2F;
+extern owned pyon.internal.memory_py.copy4F;
