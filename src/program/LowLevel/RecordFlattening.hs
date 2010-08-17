@@ -209,7 +209,7 @@ flattenStm statement k =
        assign_variables vs expanded_vs_sizes vals
      LetE vs atom -> do
        atom' <- flattenAtom atom
-       defineParams vs $ \vs' -> k [LetE vs' atom']
+       defineParams vs $ \vs' -> k $ assignment vs' atom'
      LetrecE defs ->
        defineParams [v | FunDef v _ <- defs] $ \_ -> do
          defs' <- mapM flatten_def defs
@@ -219,6 +219,21 @@ flattenStm statement k =
       f' <- flattenFun f
       return $ FunDef v f'
 
+    -- Create a sequence of \'Let\' statements from the given LHS and RHS.
+    -- The parts of the statement have been flattened.
+    -- If the statement is a simple multiple assignment statement, then
+    -- split it into multiple statements.
+    assignment vs (ValA vals)
+      | length vs /= length vals = internalError "flattenStm"
+      | otherwise =
+          -- Split into a sequence of statements
+          zipWith (\v x -> LetE [v] (ValA [x])) vs vals
+
+    assignment vs atom = [LetE vs atom]
+
+    -- Process a record unpacking statement.  Substitute each record field
+    -- (which will be a variable or literal) in place of the variable from
+    -- the unpacking statement.
     assign_variables (v:vs) (size:sizes) values = do
       -- Take the values that will be assigned to 'v'
       let (v_values, values') = splitAt size values
