@@ -1,3 +1,8 @@
+/* C functions and data structure layout information used within Pyon code.
+ *
+ * This header file is automatically included when compiling pyon files via
+ * the C backend.
+ */
 
 #include <inttypes.h>
 
@@ -43,4 +48,5 @@ extern struct {} pap_info;
 extern struct {} global_closure_info;
 
 extern struct {} dealloc_closure;
+extern struct {} dummy_finalize_closure;
 extern struct {} copy4_closure;

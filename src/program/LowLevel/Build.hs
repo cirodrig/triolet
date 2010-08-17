@@ -504,7 +504,8 @@ mkEntryPoints want_dealloc ftype label
       dea <- case want_dealloc
              of CannotDeallocate -> return Nothing
                 DefaultDeallocator ->
-                  return $ Just $ llBuiltin the_prim_dealloc_global_closure
+                  -- The default deallocator simply calls pyon_dealloc 
+                  return $ Just $ llBuiltin the_prim_pyon_dealloc
                 CustomDeallocator ->
                   liftM Just $ newVar label (PrimType PointerType)
       let arity = length $ ftParamTypes ftype
@@ -524,27 +525,27 @@ intPassConvValue =
   let size = sizeOf pyonIntType
       align = alignOf pyonIntType
       copy = case size
-             of 4 -> llBuiltin the_fun_copy4_closure
+             of 4 -> llBuiltin the_fun_copy4F
                 _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dummy_finalize)
+  in passConvValue size align copy (llBuiltin the_fun_dummy_finalizer)
 
 floatPassConvValue :: Val
 floatPassConvValue =
   let size = sizeOf pyonFloatType
       align = alignOf pyonFloatType
       copy = case size
-             of 4 -> llBuiltin the_fun_copy4_closure
+             of 4 -> llBuiltin the_fun_copy4F
                 _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dummy_finalize)
+  in passConvValue size align copy (llBuiltin the_fun_dummy_finalizer)
 
 boolPassConvValue :: Val
 boolPassConvValue =
   let size = sizeOf pyonBoolType
       align = alignOf pyonBoolType
       copy = case size
-             of 4 -> llBuiltin the_fun_copy4_closure
+             of 4 -> llBuiltin the_fun_copy4F
                 _ -> internalError "intPassConvValue"
-  in passConvValue size align copy (llBuiltin the_fun_dummy_finalize)
+  in passConvValue size align copy (llBuiltin the_fun_dummy_finalizer)
 
 -- | Create a lambda function that constructs an additive dictionary
 genAdditiveDictFun :: (Monad m, Supplies m (Ident Var)) => Gen m Atom

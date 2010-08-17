@@ -20,6 +20,7 @@ import System.Environment
 import System.FilePath
 import System.IO
 
+import Paths
 import Job
 
 -- | An action to be taken 
@@ -65,7 +66,8 @@ optionDescrs =
 -- the job.
 parseCommandLineArguments :: IO (Job ())
 parseCommandLineArguments = do
-  args <- getArgs
+  raw_args <- getArgs
+  let args = snd $ splitDataFilePath raw_args
   let (options, _, errors) =
         getOpt (ReturnInOrder PositionalOpt) optionDescrs args
 

@@ -49,7 +49,7 @@
 # gentoo tools
 \.revdep-rebuild.*
 # generated dependencies
-^\.depend$
+^\.depend[^/]*
 
 ### version control systems
 # cvs

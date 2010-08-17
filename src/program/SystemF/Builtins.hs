@@ -93,7 +93,7 @@ import Gluon.Core
 import Gluon.Core.Module
 import Gluon.Parser.Setup
 import Gluon.Parser.Driver
-import Paths_pyon
+import Paths
 
 import SystemF.BuiltinsTH
 

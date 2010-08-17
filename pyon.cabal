@@ -8,15 +8,10 @@ Stability:	experimental
 Author:		Christopher Rodrigues
 Build-Type:	Custom
 
-Data-Dir:	data
+Data-Dir:	dist/build/data
 Data-Files:
   symbols/SFBuiltin.glu
   include/pyon.h
-  include/pyon_internal.h
-  include/apply.h
-  include/layout.h
-  include/memory.h
-  include/struct.h
   testcases/*.py
   libpyonrts.so
 
@@ -25,6 +20,7 @@ Executable pyon
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon
+    Paths
     Globals
     GlobalVar
     InitializeGlobals

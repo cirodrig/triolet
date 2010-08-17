@@ -1,0 +1,35 @@
+
+module pyon.internal.memory;
+
+#include "memory_py.h"
+
+// Deallocate an object.  Calls 'pyon_dealloc'.
+function deallocF (pointer p) -> () {
+  () = () primcall pyon_dealloc(p);
+  ();
+};
+
+// A dummy finalizer function that does nothing.  This finalizer is useful
+// for objects that don't contain pointers.
+function dummy_finalizer (pointer p) -> () {
+  // Do nothing
+  ();
+};
+
+// Copy 1 byte
+function copy1F (pointer src, pointer dst) -> () {
+  !dst = uint8 load src;
+  ();
+};
+
+// Copy 2 bytes
+function copy2F (pointer src, pointer dst) -> () {
+  !dst = uint16 load src;
+  ();
+};
+
+// Copy 4 bytes
+function copy4F (pointer src, pointer dst) -> () {
+  !dst = uint32 load src;
+  ();
+};

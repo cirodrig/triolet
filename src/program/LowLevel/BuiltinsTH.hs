@@ -54,12 +54,12 @@ instance Lift FunctionType where
 
 -- | Predefined primitive functions
 builtinPrimitives =
-  [ ("pyon_alloc",
+  [ -- memory.c
+    ("pyon_alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
   , ("pyon_dealloc",
      primFunctionType [PrimType PointerType] [])
-  , ("dealloc_global_closure",
-     primFunctionType [PrimType PointerType] [])
+    -- apply.c
   , ("apply_i32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (IntType Unsigned S32)] [PrimType OwnedType])
@@ -84,14 +84,18 @@ closureBinaryFunctionType t = closureFunctionType [t, t] [t]
 -- from.
 builtinFunctions =
   [ -- Functions that do not exist in Core
-    ("dealloc_closure",
+    -- memory_py.pyasm
+    ("deallocF",
      Left $ closureFunctionType [PrimType PointerType] [])
-  , ("dummy_finalize",
+  , ("dummy_finalizer",
      Left $ closureFunctionType [PrimType PointerType] [])
-  , ("copy4_closure",
+  , ("copy1F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
-  , ("copy1_closure",
+  , ("copy2F",
+     Left $
+     closureFunctionType [PrimType PointerType, PrimType PointerType] [])
+  , ("copy4F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
     -- Functions translated from Core
@@ -103,6 +107,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
   , ("stream_return",
      Right [| pyonBuiltin (SystemF.the_fun_return) |])
+    
+    -- Functions that are replaced by primitive operations
   , ("eq_int",
      Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_int) |])
   , ("ne_int",

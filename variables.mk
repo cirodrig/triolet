@@ -21,8 +21,7 @@ CLAY_HS_INCLUDEDIR_FLAGS=\
   -i$(BUILDDIR)/pyon -i$(BUILDDIR)/rts \
   $(foreach dir, $(INCLUDEDIRS), -I$(dir))
 
-C_INCLUDEDIR_FLAGS=\
-  -Isrc/rts -I$(BUILDDIR)/rts $(foreach dir, $(INCLUDEDIRS), -I$(dir))
+C_INCLUDEDIR_FLAGS= $(foreach dir, $(INCLUDEDIRS), -I$(dir))
 
 LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
 
@@ -32,7 +31,9 @@ LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
 PYON_HS_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR)/pyon \
   -XMultiParamTypeClasses $(PYON_HS_INCLUDEDIR_FLAGS) $(C_PACKAGE_FLAGS)
 
-RTS_C_C_OPTS=$(CCFLAGS) -g $(C_INCLUDEDIR_FLAGS)
+RTS_C_C_OPTS=$(CCFLAGS) -g \
+ -Isrc/rts -I$(RTS_BUILD_DIR) -I$(DATA_BUILD_DIR)/include \
+ $(C_INCLUDEDIR_FLAGS)
 
 # Compile the RTS for dynamic linking.  RTS files will include the same header
 # that compiled Pyon files will include; this file is found in the 'library'

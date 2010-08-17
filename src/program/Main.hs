@@ -16,7 +16,7 @@ import Gluon.Eval.Error
 import InitializeGlobals
 import CommandLine
 import Job
-import Paths_pyon
+import Paths
 import Parser.Driver
 import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
@@ -171,7 +171,7 @@ compilePyonAsmToObject ll_mod output_file = do
 compileCFile c_file o_file = do
   c_fname <- getFilePath c_file
   o_fname <- getFilePath o_file
-  include_path <- Paths_pyon.getDataFileName "include"
+  include_path <- Paths.getDataFileName "include"
   let compiler_opts =
         [ "-c"                  -- Compile
         , "-g"                  -- Emit debug information
