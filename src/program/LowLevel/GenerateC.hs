@@ -454,12 +454,14 @@ initializeField gvars base fld val =
 initializationFunction :: [CStat] -> CFunDef
 initializationFunction stmts =
   let return_type = CTypeSpec (CVoidType internalNode)
+      static = CStorageSpec (CStatic internalNode)
+      constructor_attr = CAttr (internalIdent "constructor") [] internalNode
       fun_declr =
-        CFunDeclr (Right ([], False)) [] internalNode
+        CFunDeclr (Right ([], False)) [constructor_attr] internalNode
       fun_decl = CDeclr (Just (internalIdent "initialize_module"))
                  [fun_declr] Nothing [] internalNode
       body = CCompound [] (map CBlockStmt stmts) internalNode
-  in CFunDef [return_type] fun_decl [] body internalNode
+  in CFunDef [static, return_type] fun_decl [] body internalNode
 
 generateCFile :: Module -> String
 generateCFile (Module imports funs datas) =

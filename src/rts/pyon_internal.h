@@ -24,4 +24,14 @@
 #define CALL_EXACT(fun, return_type, type_list, argument_list) \
   ENTER_EXACT(OBJECT_INFOTABLE(fun),fun, return_type, type_list, argument_list)
 
+/*****************************************************************************/
+/* Opaque data */
+
+extern struct {} pap_info;
+extern struct {} global_closure_info;
+
+extern struct {} dealloc_closure;
+extern struct {} dummy_finalize_closure;
+extern struct {} copy4_closure;
+
 #endif

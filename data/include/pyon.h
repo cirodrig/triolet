@@ -40,13 +40,3 @@ static inline int32_t pyon_atomic_add_s(int32_t *p, int delta)
   *p += delta;
   return old;
 }
-
-/*****************************************************************************/
-/* Opaque data */
-
-extern struct {} pap_info;
-extern struct {} global_closure_info;
-
-extern struct {} dealloc_closure;
-extern struct {} dummy_finalize_closure;
-extern struct {} copy4_closure;
