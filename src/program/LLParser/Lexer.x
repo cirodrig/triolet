@@ -10,19 +10,21 @@ $digit = [0-9]
 $alpha = [a-zA-Z_]
 $ident = [a-zA-Z_0-9]
 $space = [\ \n\t]
-$symbol = [=\~!@\#\$\%\^&\*\-\+\?\\\|\/]
+$symbol = [=\~!@\#\$\%\^&\*\-\+\?\\\|\/] -- Valid operator character
+$string = [^\"\\\n]			 -- Valid character in string
 
 @space = $space+
 @uint = $digit+
 @int = \-? @uint
 @float = $digit+(\.$digit+)?
 @word = $alpha $ident*
+@string = $string*
 @notid = [.\n] # $ident
 @notsym = [.\n] # $symbol
 
 rules :-
 
-@space		;
+@space			;
 
 -- C preprocessor line directives
 ^\# $space+ @uint $space+ .* $ { lineDirective }
@@ -35,14 +37,17 @@ rules :-
 "call" / @notid		{ tok CallTok }
 "data" / @notid		{ tok DataTok }
 "else" / @notid		{ tok ElseTok }
+"extern" / @notid	{ tok ExternTok }
 "false" / @notid	{ tok FalseTok }
 "function" / @notid	{ tok FunctionTok }
 "if" / @notid		{ tok IfTok }
+"import" / @notid	{ tok ImportTok }
 "int8" / @notid		{ tok Int8Tok }
 "int16" / @notid	{ tok Int16Tok }
 "int32" / @notid	{ tok Int32Tok }
 "int64" / @notid	{ tok Int64Tok }
 "load" / @notid		{ tok LoadTok }
+"module" / @notid	{ tok ModuleTok }
 "null" / @notid		{ tok NullTok }
 "owned" / @notid	{ tok OwnedTok }
 "pointer" / @notid	{ tok PointerTok }
@@ -58,7 +63,6 @@ rules :-
 "_" / @notid @		{ tok WildTok }
 
 -- Punctuation
-
 "{"			{ tok LBraceTok }
 "}"			{ tok RBraceTok }
 "("			{ tok LParenTok }
@@ -78,6 +82,7 @@ rules :-
 "*"			{ tok StarTok }
 
 -- Other symbols
+\" @string \"		{ stringTok }
 @word			{ idTok }
 @int			{ intTok }
 

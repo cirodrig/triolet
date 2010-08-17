@@ -12,6 +12,7 @@ module LowLevel.Builtins
         lowerBuiltinCoreFunction,
         allBuiltins,
         llBuiltin,
+        getBuiltinByName,
         the_prim_pyon_alloc,
         the_prim_pyon_dealloc,
         the_prim_apply_i32_f,
@@ -37,9 +38,12 @@ where
 
 import Control.Monad
 import qualified Data.IntMap as IntMap
+import qualified Data.Map as Map
 import qualified Language.Haskell.TH as TH
 
+import Gluon.Common.Error
 import Gluon.Common.Identifier
+import Gluon.Common.Label
 import Gluon.Common.THRecord
 import Gluon.Core(Con(..))
 import GlobalVar
@@ -76,9 +80,20 @@ allBuiltins =
                [ [| $(TH.varE $ TH.mkName $ "the_bivar_" ++ fname) lowLevelBuiltins |]
                | (fname, _) <- builtinGlobals])
 
--- | Get a builtin by name
+-- | Get a builtin by field name
 llBuiltin :: (LowLevelBuiltins -> a) -> a
 llBuiltin f = f lowLevelBuiltins
+
+-- | Get a builtin by its program name
+getBuiltinByName :: String -> Maybe Var
+getBuiltinByName s = Map.lookup s builtinNameTable
+
+builtinNameTable = Map.fromList [(builtin_name b, b) | b <- allBuiltins]
+  where
+    builtin_name v =
+      case varName v
+      of Just nm -> labelUnqualifiedName nm
+         Nothing -> internalError "builtinNameTable: Builtin variable has no name"
 
 -- | All built-in functions that are produced by translating a constructor
 builtinConTable =

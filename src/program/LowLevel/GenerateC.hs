@@ -16,6 +16,7 @@ import Gluon.Common.Error
 import Gluon.Common.Identifier(fromIdent)
 import Gluon.Common.Label
 import LowLevel.Builtins
+import LowLevel.Label
 import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Syntax
@@ -49,27 +50,7 @@ varPrimType v = valueToPrimType $ varType v
 -- variable, then use the name alone.  Otherwise, generate a unique name
 -- using the variable's name and ID.
 varIdent :: Var -> Ident
-varIdent v 
-  -- If it's a builtin variable, use the label
-  | Just var_name <- varName v,
-    moduleOf var_name == builtinModuleName =
-      internalIdent $ showLabel var_name
-  -- Otherwise, generate a unique naem
-  | otherwise =
-      let leader =
-            case varName v
-            of Just nm ->  '_' : (showLabel nm ++ "_")
-               Nothing -> type_leader $ varPrimType v
-          name = leader ++ show (fromIdent $ varID v)
-      in internalIdent name
-  where
-    type_leader PointerType = "v_"
-    type_leader BoolType = "b_"
-    type_leader (IntType Signed _) = "i_"
-    type_leader (IntType Unsigned _) = "u_"
-    type_leader (FloatType _) = "f_"
-    type_leader _ = internalError "varIdent: Unexpected type"
-
+varIdent v = internalIdent $ mangledVarName v
 
 -- | Get the type specificer for a non-pointer primitive type
 typeSpec :: PrimType -> CTypeSpec
@@ -433,6 +414,21 @@ genData gvars (DataDef v record_type values) =
    declareBytes v (recordSize record_type) (recordAlignment record_type),
    initializeBytes gvars v record_type values)
 
+-- | Declare an external variable.  Its actual type is unimportant, since it
+-- is cast to the appropriate type every time it is used.  Use an array type
+-- so that (by C's semantics) references to the variable get its /address/ 
+-- instead of its contents.
+genImport :: ImportVar -> CDecl
+genImport v =
+  let return_type_specs =
+        [CStorageSpec (CExtern internalNode),
+         CTypeSpec $ CVoidType internalNode]
+      pointer_decl =
+        [CArrDeclr [] (CNoArrSize False) internalNode,
+         CPtrDeclr [] internalNode]
+      fun_decl = CDeclr (Just $ varIdent v) pointer_decl Nothing [] internalNode
+  in CDecl return_type_specs [(Just fun_decl, Nothing, Nothing)] internalNode
+
 initializeBytes gvars v record_type values =
   let base = CVar (varIdent v) internalNode 
       stmts =
@@ -466,16 +462,21 @@ initializationFunction stmts =
   in CFunDef [return_type] fun_decl [] body internalNode
 
 generateCFile :: Module -> String
-generateCFile (Module funs datas) =
-  let global_vars =
+generateCFile (Module imports funs datas) =
+  let defined_vars =
         Set.fromList $ [f | FunDef f _ <- funs] ++
-                       [v | DataDef v _ _ <- datas] ++
-                       allBuiltins
+                       [v | DataDef v _ _ <- datas]
+      global_vars = defined_vars `Set.union` Set.fromList imports
+      
+      -- Create an import declaration for symbols that are not defined in
+      -- this module
+      import_decls = map genImport $ filter (not . (`Set.member` defined_vars)) imports
       
       (data_defs, data_inits) = unzip $ map (genData global_vars) datas
       init_fun = initializationFunction data_inits
       (fun_decls, fun_defs) = unzip $ map (genFun global_vars) funs
-      top_level = map CDeclExt fun_decls ++
+      top_level = map CDeclExt import_decls ++
+                  map CDeclExt fun_decls ++
                   data_defs ++
                   CFDefExt init_fun :
                   map CFDefExt fun_defs
@@ -486,4 +487,4 @@ generateCFile (Module funs datas) =
   
 cModuleHeader =
   "#include <inttypes.h>\n\
-  \#include <pyon_internal.h>\n"
+  \#include <pyon.h>\n"

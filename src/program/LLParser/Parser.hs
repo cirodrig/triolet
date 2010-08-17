@@ -1,11 +1,14 @@
 
-module LLParser.Parser where
+module LLParser.Parser(parseFile)
+where
 
 import Control.Monad
-import Text.ParserCombinators.Parsec
+import Data.List
+import Text.ParserCombinators.Parsec hiding(string)
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 import Text.ParserCombinators.Parsec.Expr
 
+import Gluon.Common.Label
 import qualified Gluon.Common.SourcePos
 import LowLevel.Types
 import LLParser.Lexer
@@ -33,13 +36,6 @@ tToken (T _ t) = t
 nextParsecPos _ _ (t:_) = toParsecPos $ tPos t
 nextParsecPos _ t []    = toParsecPos $ tPos t
 
-{-followedByOneOf :: P a -> [Token] -> P a
-p `followedByOneOf` toks = do
-  x <- p
-  case getInput
-    of t:_ | any (tToken t ==) toks -> return x
-       _ -> pzero-}
-
 matchAny :: [Token] -> P ()
 matchAny ts = tokenPrim showT nextParsecPos match_any
   where
@@ -58,6 +54,25 @@ identifier = tokenPrim showT nextParsecPos get_identifier
     get_identifier t = case tToken t
                        of IdTok s -> Just s
                           _ -> Nothing
+
+string :: P String
+string = tokenPrim showT nextParsecPos get_string
+  where
+    get_string t = case tToken t
+                        of StringTok s -> Just s
+                           _ -> Nothing
+
+parseModuleName :: P ModuleName
+parseModuleName = do
+  components <- identifier `sepBy1` match DotTok
+  return $ moduleName $ intercalate "." components
+
+fullyQualifiedName :: P Label
+fullyQualifiedName = do
+  components <- identifier `sepBy1` match DotTok
+  unless (length components >= 2) $ fail "must provide a fully-qualified name"
+  let mod = moduleName (intercalate "." $ init components)
+  return $ pgmLabel mod (last components)
 
 integer :: P Integer
 integer = tokenPrim showT nextParsecPos get_int
@@ -122,6 +137,14 @@ parseType = prim_type <|> record_type <|> bytes_type <?> "type"
     record_type = fmap RecordT identifier
 
     bytes_type = match BytesTok >> parens (liftM2 BytesT expr expr)
+
+-- | Parse a type of a global object.  The only valid types
+-- are \'owned\' or \'pointer\'.
+parseGlobalType :: P PrimType
+parseGlobalType = owned_type <|> pointer_type <?> "'owned' or 'pointer' type"
+  where
+    owned_type = match OwnedTok >> return OwnedType
+    pointer_type = match PointerTok >> return PointerType
 
 field :: P (Field Parsed)
 field = do
@@ -321,16 +344,12 @@ dataDef = do
   match DataTok
   
   -- Read a type, which must be 'owned' or 'pointer'
-  data_type <- parseType
-  ty <- case data_type of 
-    PrimT OwnedType -> return OwnedType
-    PrimT PointerType -> return PointerType
-    _ -> fail "type must be 'owned' or 'pointer'"
+  data_type <- parseGlobalType
 
   name <- identifier
   match AssignTok
   value <- expr
-  return $ DataDef name ty value
+  return $ DataDef name data_type value
 
 -- | Parse a function or procedure definition
 functionDef :: P (FunctionDef Parsed)
@@ -354,6 +373,41 @@ topLevelDefs = do defs <- def `sepEndBy` match SemiTok
                  , fmap RecordDefEnt recordDef]
 
 -------------------------------------------------------------------------------
+-- Module parsing
+
+externDecl :: P (ExternDecl Parsed)
+externDecl = extern_decl <|> import_decl
+  where
+    extern_decl = do
+      match ExternTok
+      extern_type <- parseGlobalType
+      label <- fullyQualifiedName
+      c_name <- optionMaybe string
+      return $ ExternDecl extern_type label c_name
+
+    import_decl = do
+      match ImportTok
+      extern_type <- parseGlobalType
+      local_name <- identifier
+      c_name <- option local_name string
+      return $ ImportDecl extern_type c_name local_name
+
+parseModule :: P (ModuleName, [ExternDecl Parsed], [Def Parsed])
+parseModule = do
+  -- Parse the module name declaration
+  match ModuleTok
+  mn <- parseModuleName
+  match SemiTok
+  
+  -- Parse 'extern' declarations
+  exts <- externDecl `sepEndBy` match SemiTok
+  
+  -- Parse definitions
+  defs <- topLevelDefs
+  
+  return (mn, exts, defs)
+
+-------------------------------------------------------------------------------
 
 -- | Test the parser on a string.  For debugging.
 testParse :: String -> P a -> a
@@ -363,9 +417,10 @@ testParse text parser =
      of Left err -> error (show err)
         Right x -> x
 
-parseFile :: FilePath -> String -> IO [Def Parsed]
+parseFile :: FilePath -> String
+          -> IO (ModuleName, [ExternDecl Parsed], [Def Parsed])
 parseFile path text =
   let tokens = lexFile path text
-  in case runParser topLevelDefs () path tokens
+  in case runParser parseModule () path tokens
      of Left err -> fail (show err)
         Right x -> return x

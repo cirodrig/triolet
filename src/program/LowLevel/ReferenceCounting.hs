@@ -89,7 +89,7 @@ type HeldReferences = Map.Map Var Ownership
 
 getOwnership :: Var -> HeldReferences -> Ownership
 getOwnership v m 
-  | varIsBuiltin v = Borrowed   -- Builtins are always borrowed references
+  | varIsExternal v = Borrowed   -- External variables are always borrowed
   | otherwise = case Map.lookup v m
                    of Just o -> o
                       Nothing -> internalError "getOwnership"
@@ -227,9 +227,9 @@ adjustBuiltinVarRefCounts m = RC $ \ownership src -> do
   -- Process the rest of the block
   (blk, deficit) <- runRC m ownership src
   
-  -- Correct for each builtin variable's reference count
+  -- Correct for each external variable's reference count
   let (bi_deficit, other_deficit) =
-        Map.partitionWithKey (\k _ -> varIsBuiltin k) deficit
+        Map.partitionWithKey (\k _ -> varIsExternal k) deficit
       bi_deficits = Map.toList bi_deficit
       blk' = foldr adjust_references blk bi_deficits
 
@@ -622,19 +622,20 @@ rcVal is_borrowed value =
 -- | Insert explicit reference counting in a module.  All owned references
 --   are converted to ordinary pointers with reference counting.
 insertReferenceCounting :: Module -> IO Module
-insertReferenceCounting (Module funs datas) = do
+insertReferenceCounting (Module imports funs datas) = do
   withTheLLVarIdentSupply $ \id_supply ->
     runFreshVarM id_supply $ do
       -- Insert reference counting into functions
       funs' <- mapM rc_fun funs
       -- Convert owned pointers to ordinary pointers in static data 
       let datas' = map rc_data datas
-      return $ Module funs' datas'
+          imports' = map toPointerVar imports
+      return $ Module imports' funs' datas'
   where
     global_vars = [v | FunDef v _ <- funs] ++ [v | DataDef v _ _ <- datas]
 
     rc_fun (FunDef v f) = do
-      f' <- rcFun global_vars f
+      f' <- rcFun imports f
       return $ FunDef v f'
 
     rc_data (DataDef v record_type x) =

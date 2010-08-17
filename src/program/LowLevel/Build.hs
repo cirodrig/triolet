@@ -500,14 +500,14 @@ mkEntryPoints want_dealloc ftype label
   | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
   | otherwise = do
       [inf, dir, exa, ine] <-
-        replicateM 4 $ newVar label (PrimType PointerType)
+        replicateM 4 $ newVar label Nothing (PrimType PointerType)
       dea <- case want_dealloc
              of CannotDeallocate -> return Nothing
                 DefaultDeallocator ->
                   -- The default deallocator simply calls pyon_dealloc 
                   return $ Just $ llBuiltin the_prim_pyon_dealloc
                 CustomDeallocator ->
-                  liftM Just $ newVar label (PrimType PointerType)
+                  liftM Just $ newVar label Nothing (PrimType PointerType)
       let arity = length $ ftParamTypes ftype
       return $! EntryPoints ftype arity dir exa ine dea inf
 

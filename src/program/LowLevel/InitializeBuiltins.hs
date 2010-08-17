@@ -25,7 +25,7 @@ initializePrimField :: IdentSupply Var -> String -> FunctionType
 initializePrimField supply nm fty =
   runFreshVarM supply $ do
     let lab = builtinLabel nm
-    v <- newBuiltinVar lab (PrimType PointerType)
+    v <- newBuiltinVar lab nm (PrimType PointerType)
     return (v, fty)
 
 initializeClosureField :: IdentSupply Var 
@@ -35,7 +35,7 @@ initializeClosureField :: IdentSupply Var
 initializeClosureField supply nm fty =
   runFreshVarM supply $ do
     let lab = builtinLabel nm
-    v <- newBuiltinVar lab (PrimType OwnedType)
+    v <- newBuiltinVar lab nm (PrimType OwnedType)
 
     -- All builtin closures use the default closure deallocator
     ep <- mkEntryPoints CannotDeallocate fty (Just lab)
@@ -44,13 +44,14 @@ initializeClosureField supply nm fty =
 initializeVarField :: IdentSupply Var -> String -> ValueType -> IO Var
 initializeVarField supply nm ty =
   runFreshVarM supply $ do
-    newBuiltinVar (builtinLabel nm) ty
+    newBuiltinVar (builtinLabel nm) nm ty
 
+{-
 initializeGlobalField :: IdentSupply Var -> String -> ValueType -> IO Var
 initializeGlobalField supply nm ty
   | typeOk ty =
       runFreshVarM supply $ do
-        newBuiltinVar (builtinLabel nm) ty
+        newBuiltinVar (builtinLabel nm) nm ty
   | otherwise =
       internalError "initializeGlobalField: unexpected type"
   where
@@ -58,7 +59,7 @@ initializeGlobalField supply nm ty
     -- or owned type
     typeOk (PrimType PointerType) = True
     typeOk (PrimType OwnedType) = True
-    typeOk _ = False
+    typeOk _ = False-}
 
 initializeLowLevelBuiltins :: IdentSupply Var -> IO ()
 initializeLowLevelBuiltins v_ids =

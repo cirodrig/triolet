@@ -187,13 +187,13 @@ scanTopLevel fun_defs data_defs =
     valid_vars = Set.fromList $ fun_variables ++ data_variables ++ allBuiltins
 
 closureConvert :: Module -> IO Module
-closureConvert (Module fun_defs data_defs) =
+closureConvert (Module imports fun_defs data_defs) =
   withTheLLVarIdentSupply $ \var_ids -> do
     let global_vars = map funDefiniendum fun_defs ++
                       map dataDefiniendum data_defs ++
-                      allBuiltins
+                      imports
     (fun_defs', data_defs') <- runCC var_ids global_vars $
                                scanTopLevel fun_defs data_defs
-    return $ Module fun_defs' data_defs'
+    return $ Module imports fun_defs' data_defs'
   
 

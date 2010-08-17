@@ -156,7 +156,7 @@ lookupVar v = Cvt $ asks $ \env ->
 
 convertVar :: Var -> LoweringType -> (LL.Var -> Cvt a) -> Cvt a
 convertVar v ty k = do
-  v' <- LL.newVar (varName v) (lowered ty)
+  v' <- LL.newVar (varName v) Nothing (lowered ty)
   Cvt $ local (insert_binding v ty v') $ runCvt (k v')
   where
     -- Insert a mapping from core to ANF variable.
@@ -627,7 +627,8 @@ convertDefGroup defgroup k =
 
 convertModule defss = do 
   convertDefGroup (concat defss) $ \defs ->
-    return $ LL.Module { LL.moduleFunctions = defs
+    return $ LL.Module { LL.moduleImports = allBuiltins
+                       , LL.moduleFunctions = defs
                        , LL.moduleData = []
                        }
 

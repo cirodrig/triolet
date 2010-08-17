@@ -1,8 +1,11 @@
 
-{-# LANGUAGE TypeFamilies, EmptyDataDecls, StandaloneDeriving, FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies, EmptyDataDecls, StandaloneDeriving,
+    FlexibleInstances #-}
 module LLParser.AST where
 
 import Data.List
+
+import Gluon.Common.Label
 import LowLevel.Types
 
 data Parsed
@@ -25,6 +28,17 @@ data Type a = PrimT !PrimType
             | BytesT (Expr a) (Expr a)
 
 type FieldName = String
+
+-- | An external symbol declaration, giving the Pyon name and/or externally 
+-- visible name of a symbol.
+--
+-- External symbols can have pointer or owned type.
+data ExternDecl a =
+    -- | An externally visible Pyon symbol, defined in this file or in another
+    -- file.
+    ExternDecl !PrimType Label (Maybe String)
+    -- | An imported symbol, assigned a local name
+  | ImportDecl !PrimType (VarName a) String
 
 -- | A definition
 data Def a =

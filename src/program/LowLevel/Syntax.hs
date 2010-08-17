@@ -67,12 +67,20 @@ data Lit =
 data Var =
   Var
   { -- | An ID uniquely identifying this variable.  If two variables have
-    -- the same ID, all their other fields should be the same also.
+    -- the same ID, all their other fields should be equal also.
     varID :: {-# UNPACK #-} !(Ident Var)
-    -- | True if this is a built-in variable, i.e. one that is implicitly
-    -- defined at global scope.
-  , varIsBuiltin :: {-# UNPACK #-} !Bool
+    -- | True if this is an externally defined variable.
+    -- A variable has a definition iff it is /not/ externally defined.
+  , varIsExternal :: {-# UNPACK #-} !Bool
   , varName :: !(Maybe Label)
+    -- | The variable's externally visible name, as it appears in object code.
+    -- This is used to override the default name mangling, for example, when
+    -- referencing a function that was defined in C.  If the value is Nothing,
+    -- then the variable's name is used to generate an externally visible name.
+    --
+    -- In variables that are not externally visible, this field must be
+    -- Nothing.
+  , varExternalName :: !(Maybe String)
   , varType :: ValueType
   }
 
@@ -88,6 +96,7 @@ instance Ord Var where
   compare = compare `on` varID
 
 type ParamVar = Var
+type ImportVar = Var
 
 -- | A value
 data Val =
@@ -177,8 +186,9 @@ dataDefiniendum (DataDef v _ _) = v
 
 data Module =
   Module 
-  { moduleFunctions :: [FunDef]
-  , moduleData :: [DataDef]
+  { moduleImports :: [ImportVar] -- ^ Imported, externally defined variables
+  , moduleFunctions :: [FunDef] -- ^ Function definitions
+  , moduleData :: [DataDef]     -- ^ Global data definitions
   }
   deriving(Typeable)
 
@@ -250,27 +260,31 @@ deallocEntry = _epDeallocEntry
 infoTableEntry :: EntryPoints -> Var
 infoTableEntry = _epInfoTable
 
--- | Create a new variable
-newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var
-newVar name ty = do
+-- | Create a new internal variable
+newVar :: Supplies m (Ident Var) =>
+          Maybe Label -> Maybe String -> ValueType -> m Var
+newVar name ext_name ty = do
   ident <- fresh
-  return $ Var { varID = ident 
-               , varIsBuiltin = False 
-               , varName = name 
+  return $ Var { varID = ident
+               , varIsExternal = False
+               , varName = name
+               , varExternalName = ext_name
                , varType = ty
                }
 
 -- | Create a new variable with no name
 newAnonymousVar :: Supplies m (Ident Var) => ValueType -> m Var
-newAnonymousVar ty = newVar Nothing ty
+newAnonymousVar ty = newVar Nothing Nothing ty
 
--- | Create a new builtin variable
-newBuiltinVar :: Supplies m (Ident Var) => Label -> ValueType -> m Var
-newBuiltinVar name ty = do
+-- | Create a new externally defined variable
+newBuiltinVar :: Supplies m (Ident Var) =>
+                 Label -> String -> ValueType -> m Var
+newBuiltinVar name ext_name ty = do
   ident <- fresh
   return $ Var { varID = ident
-               , varIsBuiltin = True
+               , varIsExternal = True
                , varName = Just name
+               , varExternalName = Just ext_name
                , varType = ty
                }
 

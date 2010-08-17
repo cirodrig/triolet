@@ -74,7 +74,7 @@ assign v expansion m = RF $ local (insert_assignment v expansion) $ runRF m
 
 expandVar :: Var -> RF [Val]
 expandVar v 
-  | varIsBuiltin v = return [VarV v] -- Builtin variables aren't record values
+  | varIsExternal v = return [VarV v] -- External variables aren't records
   | otherwise = RF $ asks get_expansion
   where
     get_expansion env =
@@ -271,13 +271,12 @@ flattenDataDef (DataDef v record vals) = do
   return $ DataDef v record' val'
 
 flattenRecordTypes :: Module -> IO Module
-flattenRecordTypes mod =
+flattenRecordTypes (Module imports fun_defs data_defs) =
   withTheLLVarIdentSupply $ \var_supply -> do
     let env = RFEnv var_supply IntMap.empty
     runReaderT (runRF flatten_module) env
   where
     flatten_module = do
-      (fun_defs, data_defs) <-
-        flattenTopLevel (moduleFunctions mod) (moduleData mod)
-      return $ Module fun_defs data_defs
+      (fun_defs', data_defs') <- flattenTopLevel fun_defs data_defs
+      return $ Module imports fun_defs' data_defs'
   

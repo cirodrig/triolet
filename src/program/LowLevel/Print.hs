@@ -168,4 +168,4 @@ pprDefs :: [FunDef] -> Doc
 pprDefs defs = vcat $ map pprDef defs
 
 pprModule :: Module -> Doc
-pprModule (Module defs _) = pprDefs defs
+pprModule (Module _ defs _) = pprDefs defs

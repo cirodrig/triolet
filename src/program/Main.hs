@@ -138,8 +138,8 @@ compilePyonToPyonAsm path text = do
   return ll_mod
 
 parsePyonAsm input_path input_text = do
-  ast <- LLParser.parseFile input_path input_text
-  LLParser.generateLowLevelModule input_path ast
+  (mod_name, externs, ast) <- LLParser.parseFile input_path input_text
+  LLParser.generateLowLevelModule input_path mod_name externs ast
 
 -- | Compile an input low-level module to object code
 compilePyonAsmToObject ll_mod output_file = do

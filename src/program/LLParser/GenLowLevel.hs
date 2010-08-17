@@ -6,6 +6,14 @@ offsets.  There are two kinds of names: variable names and type names.
 The currently visible names are stored in an 'Env' value and found by
 'lookupEntity'.  The environment also stores type information.
 
+Inter-module name resolution is accomplished with the help of explicit
+importing and exporting of external symbols.  As in C, declarations of 
+external symbols are assumed to be correct without verifying that the
+external definition matches the local declaration.   Definitions of externally
+visible symbols whose names match the builtins in "LowLevel.Builtins" are
+changed to reference the corresponding built-in variable.  Only externally
+visible symbols are changed to reference builtins.
+
 The type of any expression can be inferred from its fields and the
 environment.  When an expression (or another AST component that returns
 a value) is processed, its type is returned along with its LowLevel
@@ -98,6 +106,8 @@ newtype NR a =
 data NREnv =
   NREnv
   { varIDSupply :: {-# UNPACK #-}!(Supply (Ident LL.Var))
+    -- | Externally defined or externally visible global variables
+  , externalVariables :: ![LL.Var]
   , sourceModuleName  :: !ModuleName
   }
 
@@ -121,6 +131,14 @@ instance Supplies NR (Ident LL.Var) where
   fresh = NR $ \ctx env errs -> do
     x <- supplyValue (varIDSupply ctx)
     return (x, env, errs)
+
+getSourceModuleName :: NR ModuleName 
+getSourceModuleName = NR $ \env ctx errs ->
+  return (sourceModuleName env, ctx, errs)
+
+getExternalVars :: NR [LL.Var]
+getExternalVars = NR $ \env ctx errs ->
+  return (externalVariables env, ctx, errs)
 
 addError :: String -> Errors -> Errors
 addError err errs = (err :) . errs
@@ -198,11 +216,47 @@ lookupEntity name = NR $ \_ env errs ->
                       Just $ "Undefined name: '" ++ name ++ "'")
 
 -- | Create a new variable.  The definition is not added to the environment.
-createVar :: String -> LL.ValueType -> NR LL.Var
-createVar name ty = do
-  module_name <- NR $ \env ctx errs -> return (sourceModuleName env, ctx, errs)
+--
+-- A module name may optionally be specified; if not given, it defaults to the
+-- current input file's module.
+createVar :: Maybe ModuleName -> String -> Maybe String -> LL.ValueType
+          -> NR LL.Var
+createVar mmodule_name name ext_name ty = do
+  module_name <- 
+    case mmodule_name
+    of Nothing -> getSourceModuleName
+       Just n -> return n
   let label = pgmLabel module_name name
-  LL.newVar (Just label) ty
+  LL.newVar (Just label) ext_name ty
+
+-- | Create an externally defined variable.
+createBuiltinVar :: String -> String -> LL.ValueType -> NR LL.Var
+createBuiltinVar name ext_name ty = do
+  let label = pgmLabel builtinModuleName name
+  LL.newBuiltinVar label ext_name ty
+
+
+-- | Create a global variable in the current module.  If the variable has
+-- already been declared, return the declared variable instead of creating
+-- something.
+createGlobalVar :: VarName Parsed -> LL.ValueType -> NR LL.Var
+createGlobalVar name ty = do
+  -- Was this variable name declared to be external?
+  external_vars <- getExternalVars
+  case find is_name external_vars
+    of Nothing ->
+         -- Not external; create a new variable
+         createVar Nothing name Nothing ty
+       Just evar 
+         | ty /= LL.varType evar ->
+             error "Type of external declaration does not match type of variable definition"
+         | otherwise -> return evar -- Return the already created variable
+  where
+    -- Check if variable's unqualified name matches given name
+    is_name v =
+      case LL.varName v
+      of Just nm -> name == labelUnqualifiedName nm
+         Nothing -> False
 
 -- | Add a variable definition to the environment
 defineVar :: LL.Var -> NR ()
@@ -213,9 +267,9 @@ defineVar v =
   in defineEntity name (VarEntry v)
 
 -- | Process a definition of a name, creating a new variable.
-createAndDefineVar :: String -> LL.ValueType -> NR LL.Var
-createAndDefineVar name ty = do
-  v <- createVar name ty
+createAndDefineVar :: String -> Maybe String -> LL.ValueType -> NR LL.Var
+createAndDefineVar name ext_name ty = do
+  v <- createVar Nothing name ext_name ty
   defineVar v
   return v
 
@@ -544,7 +598,7 @@ resolveStmt (LetS lvals atom) = do
 resolveLValue lval ty =
   case lval
   of VarL var_name -> do
-       v <- createVar var_name ty
+       v <- createVar Nothing var_name Nothing ty
        return (v, return (), defineVar v)
        
      StoreL base -> do
@@ -611,7 +665,7 @@ resolveBlock (Block stmts atom) = transformGenNR enterNonRec $ do
 defineParameter :: Parameter Parsed -> NR LL.Var
 defineParameter (Parameter ty nm) = do
   ty' <- resolvePureValueType ty
-  createAndDefineVar nm ty'
+  createAndDefineVar nm Nothing ty'
 
 resolveFunctionDef :: FunctionDef Parsed -> NR LL.FunDef
 resolveFunctionDef fdef = do
@@ -619,7 +673,7 @@ resolveFunctionDef fdef = do
   let function_type = if functionIsProcedure fdef
                       then LL.PrimType PointerType
                       else LL.PrimType OwnedType
-  fvar <- createAndDefineVar (functionName fdef) function_type
+  fvar <- createGlobalVar (functionName fdef) function_type
 
   -- Create the function
   fun <- enterNonRec $ do
@@ -655,7 +709,7 @@ resolveDataDef ddef = do
 
   -- Extract its fields (lazily)
   let LL.RecV record_type fields = value
-  v <- createAndDefineVar (dataName ddef) (LL.PrimType $ dataType ddef)
+  v <- createGlobalVar (dataName ddef) (LL.PrimType $ dataType ddef)
   return $ LL.DataDef v record_type fields
   where
     must_be_record (LL.RecV {}) = Nothing
@@ -673,24 +727,76 @@ resolveDef (DataDefEnt ddef) =
   fmap ResolvedDataDef $ resolveDataDef ddef
 
 -- | Resolve a set of top-level definitions
-resolveTopLevelDefs :: [Def Parsed] -> NR LL.Module
-resolveTopLevelDefs defs = enterRec $ do
-  -- Add built-in variables to environment
-  mapM_ defineVar allBuiltins
-  
+resolveTopLevelDefs :: [Def Parsed] -> NR ([LL.FunDef], [LL.DataDef])
+resolveTopLevelDefs defs = do
   -- Resolve global definitions
   rdefs <- mapM resolveDef defs
-  
-  -- Construct a module
-  let (fun_defs, data_defs) = partitionResolvedDefinitions rdefs
-  return $ LL.Module fun_defs data_defs
+  return $ partitionResolvedDefinitions rdefs
 
-generateLowLevelModule :: FilePath -> [Def Parsed] -> IO LL.Module
-generateLowLevelModule module_name defs =
+-- | Resolve a set of external variable declarations.  The variables are 
+-- added to the current scope.
+withExternalVariables :: [ExternDecl Parsed] -> NR a -> NR ([LL.Var], a)
+withExternalVariables edefs m = do
+  evars <- mapM defineExternalVar edefs
+  x <- with_evars evars m
+  return (evars, x)
+  where
+    -- Save the external variables in the environment for later lookup
+    with_evars evars m = NR $ \nrenv env errs ->
+      let nrenv' = nrenv {externalVariables = evars ++ externalVariables nrenv}
+      in runNR m nrenv' env errs
+
+-- | Define an external variable
+defineExternalVar (ExternDecl primtype lab mforeign_name) = do
+  let name = labelUnqualifiedName lab
+      mod = moduleOf lab
+      ty = LL.PrimType primtype
+  
+  v <- createVar (Just mod) name mforeign_name ty
+  
+  -- If the variable is not in the current module, then define it.
+  -- Otherwise, it will be defined later.
+  current_module <- getSourceModuleName
+  when (mod /= current_module) $ defineVar v
+
+  return v
+
+defineExternalVar (ImportDecl primtype local_name foreign_name) 
+  | Just builtin_var <- getBuiltinByName foreign_name =
+      -- Verify that the given name and type match
+      if local_name /= foreign_name ||
+         LL.varExternalName builtin_var /= Just foreign_name ||
+         LL.varType builtin_var /= LL.PrimType primtype
+      then error $ "Incompatible definition of built-in variable '" ++ local_name ++ "'"
+      else do defineVar builtin_var
+              return builtin_var
+  | otherwise = do
+      -- Create a variable imported from another language.  The variable
+      -- resides in the 'builtin' module and has a foreign name.
+      let ty = LL.PrimType primtype
+      v <- createBuiltinVar local_name foreign_name ty
+      defineVar v
+      return v
+
+generateLowLevelModule :: FilePath
+                       -> ModuleName
+                       -> [ExternDecl Parsed]
+                       -> [Def Parsed]
+                       -> IO LL.Module
+generateLowLevelModule module_path module_name externs defs =
   withTheLLVarIdentSupply $ \var_ids -> do
-    let ctx = NREnv var_ids (moduleName $ takeFileName module_name)
+    let ctx = NREnv var_ids [] module_name
         global_scope = []
-    (mod, _, errs) <- runNR (resolveTopLevelDefs defs) ctx global_scope id
+        
+        -- Start out in the global scope.
+        -- Create the external variables, then process each top-level
+        -- definition.
+        generate_module = do
+          (import_vars, (fun_defs, data_defs)) <-
+            enterRec $ withExternalVariables externs $ resolveTopLevelDefs defs
+          return $ LL.Module import_vars fun_defs data_defs
+
+    (mod, _, errs) <- runNR generate_module ctx global_scope id
 
     case errs [] of
       [] -> return mod
