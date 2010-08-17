@@ -88,7 +88,7 @@ data Ownership =
 type HeldReferences = Map.Map Var Ownership
 
 getOwnership :: Var -> HeldReferences -> Ownership
-getOwnership v m 
+getOwnership v m
   | varIsExternal v = Borrowed   -- External variables are always borrowed
   | otherwise = case Map.lookup v m
                    of Just o -> o
@@ -635,7 +635,7 @@ insertReferenceCounting (Module imports funs datas) = do
     global_vars = [v | FunDef v _ <- funs] ++ [v | DataDef v _ _ <- datas]
 
     rc_fun (FunDef v f) = do
-      f' <- rcFun imports f
+      f' <- rcFun (imports ++ global_vars) f
       return $ FunDef v f'
 
     rc_data (DataDef v record_type x) =
