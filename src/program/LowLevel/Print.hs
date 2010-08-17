@@ -55,8 +55,20 @@ pprFieldType (PrimField pt) = pprPrimType pt
 pprFieldType (RecordField rt) = pprRecordType rt
 pprFieldType (BytesField _ _) = text "BYTES"
 
-pprDef :: FunDef -> Doc
-pprDef (FunDef v f) = hang (pprVar v <+> text "=") 4 $ pprFun f
+pprDataDef :: DataDef -> Doc
+pprDataDef (DataDef v _ values) =
+  let initializer = fillBracketList $ map pprVal values
+  in hang (text "data" <+> pprVar v <+> text "=") 4 initializer
+
+pprFunDef :: FunDef -> Doc
+pprFunDef (FunDef v f) =
+  let intro = if isPrimFun f then text "procedure" else text "function"
+      param_doc = brackets $ sep $ punctuate (text ",") $ map pprVarLong $
+                  funParams f
+      ret_doc = fillBracketList $ map pprValueType $ funReturnTypes f
+      leader = pprVar v <> hang param_doc (-3) (text "->" <+> ret_doc)
+  in intro <+> leader <+> text "=" $$
+     nest 4 (pprBlock (funBody f))
 
 pprFun :: Fun -> Doc
 pprFun fun =
@@ -160,12 +172,24 @@ pprStm stmt =
        in hang (binder <+> text "<-") 8 rhs
      LetrecE defs ->
        text "letrec" $$
-       nest 8 (pprDefs defs)
+       nest 8 (pprFunDefs defs)
 
 pprBlock (Block xs atom) = vcat (map pprStm xs) $$ text "return" <+> pprAtom atom
 
-pprDefs :: [FunDef] -> Doc
-pprDefs defs = vcat $ map pprDef defs
+pprImport :: ImportVar -> Doc
+pprImport v = text "extern" <+> pprVar v
+
+pprDataDefs :: [DataDef] -> Doc
+pprDataDefs defs = vcat $ map pprDataDef defs
+
+pprFunDefs :: [FunDef] -> Doc
+pprFunDefs defs = vcat $ map pprFunDef defs
+
+pprImports :: [ImportVar] -> Doc
+pprImports imports = vcat $ map pprImport imports
 
 pprModule :: Module -> Doc
-pprModule (Module _ defs _) = pprDefs defs
+pprModule (Module imports fun_defs data_defs) =
+  pprImports imports $$
+  pprDataDefs data_defs $$
+  pprFunDefs fun_defs
