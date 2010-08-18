@@ -1,0 +1,6 @@
+
+LLParser:
+  Do something about the incomplete support for parametric record types.
+  Either remove parametric records, or fully support them.  Fully supporting
+  parametric records entails generating instructions to compute size,
+  alignment, and offsets at runtime.
