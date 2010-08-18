@@ -20,14 +20,23 @@ record PassConv {
   owned finalize;               // Finalize a value
 };
 
+/* Arrays (called "lists")
+ *
+ * A list consists of a size and a pointer to an array of list elements.
+ * The list elements are arranged consecutively.
+ * The list elements have a type and size; this is not stored in the
+ * list, but rather passed to functions that operate on the list.
+ */
+record PyonList {
+  word nelems;			// Number of elements
+  pointer contents;		// Pointer to list contents
+};
 
 /* A stream of values.  Stream elements are computed on demand.
  *
- * next : (pointer to state, (owned to output -> bool)) -> bool
- *   Get the next stream element and pass it to the consumer function.
- *   Keep passing values to the consumer function until it returns True
- *   or the stream is depleted.  Return True if the consumer returns True,
- *   False otherwise.
+ * next : (pointer to state, pointer to output) -> bool
+ *   Get the next stream element.
+ *   Return True if an element is available, False otherwise.
  *
  * initialize : pointer to state -> ()
  *   Initialize the stream state.

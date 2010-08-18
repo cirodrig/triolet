@@ -35,10 +35,10 @@ cabalMakeFile :: FilePath
 cabalMakeFile = "cabal.mk"
 
 -- | C Source files used in RTS
-rtsCSourceFiles = ["struct.c", "memory.c", "apply.c"]
+rtsCSourceFiles = ["struct.c", "memory.c", "apply.c", "debug.c"]
 
 -- | Pyon-asm files used in RTS
-rtsPyAsmFiles = ["memory_py.pyasm", "stream.pyasm"]
+rtsPyAsmFiles = ["memory_py.pyasm", "list.pyasm", "stream.pyasm"]
 
 -- | Data files that are not programmatically generated
 prebuiltDataFiles = ["include/pyon.h", "symbols/SFBuiltin.glu"]

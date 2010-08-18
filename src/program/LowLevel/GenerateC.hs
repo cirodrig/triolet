@@ -168,7 +168,18 @@ isZeroCExpr e =
      _ -> False
 
 genLit :: Lit -> CExpr
-genLit NullL = genSmallIntConst 0
+
+-- Null literal = (void *)0
+genLit NullL =
+  let zero = genSmallIntConst 0
+      pointer_deriv = CPtrDeclr [] internalNode
+      pointer_declr =
+        CDeclr Nothing [pointer_deriv] Nothing [] internalNode
+      void_ptr_type = CDecl
+                      [CTypeSpec (CVoidType internalNode)]
+                      [(Just pointer_declr, Nothing, Nothing)]
+                      internalNode
+  in CCast void_ptr_type zero internalNode
 genLit (BoolL True) = genSmallIntConst 1
 genLit (BoolL False) = genSmallIntConst 0
 genLit (IntL sgn sz n) = genIntConst sgn sz n
@@ -284,8 +295,14 @@ genCall gvars return_types op args =
 genPrimCall :: Prim -> [CExpr] -> CExpr
 genPrimCall prim args =
   case prim
-  of PrimAddZ _ _ -> binary CAddOp args
+  of PrimCastZ from_sgn to_sgn sz ->
+       let to_type = CTypeSpec $ typeSpec $ IntType to_sgn sz
+           to_decl = CDecl [to_type] [(Nothing, Nothing, Nothing)] internalNode
+       in case args
+          of [arg] -> CCast to_decl arg internalNode
+     PrimAddZ _ _ -> binary CAddOp args
      PrimSubZ _ _ -> binary CSubOp args
+     PrimMulZ _ _ -> binary CMulOp args
      PrimModZ Unsigned _ -> binary CRmdOp args -- Unsigned modulus operation
      PrimModZ Signed _ ->
        -- Emit a (floor) modulus operation using
@@ -308,6 +325,12 @@ genPrimCall prim args =
      PrimCmpZ _ _ CmpLE -> binary CLeqOp args
      PrimCmpZ _ _ CmpGT -> binary CGrOp args
      PrimCmpZ _ _ CmpGE -> binary CGeqOp args
+     PrimCmpP CmpEQ -> binary CEqOp args
+     PrimCmpP CmpNE -> binary CEqOp args
+     PrimCmpP CmpLT -> binary CLeOp args
+     PrimCmpP CmpLE -> binary CLeqOp args
+     PrimCmpP CmpGT -> binary CGrOp args
+     PrimCmpP CmpGE -> binary CGeqOp args
      PrimAddP ->
        case args of [ptr, off] -> genOffset ptr off
      PrimLoad (PrimType ty) ->
@@ -336,6 +359,8 @@ genPrimCall prim args =
                 in CCall (CVar add_fun internalNode) [cast_ptr, val] internalNode
      PrimAddF _ -> binary CAddOp args
      PrimSubF _ -> binary CSubOp args
+     PrimMulF _ -> binary CMulOp args
+     PrimModF _ -> internalError "Not implemented: floating-point modulus"
   where
     zero = genSmallIntConst 0
     geZero x = binary' CGeqOp x zero

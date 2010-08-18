@@ -11,21 +11,36 @@ import LowLevel.Types
 data Parsed
 
 type family RecordName a :: *
+type family TypeName a :: *
 type family VarName a :: *
      
 type instance RecordName Parsed = String
+type instance TypeName Parsed = String
 type instance VarName Parsed = String
 
 data BinOp =
-    AddOp
-  | AtomicAddOp
-  | CmpEQOp
+    MulOp                       -- ^ '*'
+  | ModOp                       -- ^ '%'
+  | AddOp                       -- ^ '+'
+  | SubOp                       -- ^ '-'
+  | PointerAddOp                -- ^ '^+'
+  | AtomicAddOp                 -- ^ '!+'
+  | CmpEQOp                     -- ^ '=='
+  | CmpNEOp                     -- ^ '!='
   deriving(Show)
 
+data UnaryOp = NegateOp deriving(Show)
+
 -- | A data type, represented by a primitive type, a record type, or bytes.
-data Type a = PrimT !PrimType
-            | RecordT (RecordName a)
-            | BytesT (Expr a) (Expr a)
+data Type a =
+    -- | A primitive type
+    PrimT !PrimType
+    -- | A named type; could be a record type or a type parameter.
+  | RecordT (RecordName a)
+    -- | Featureless bytes, with given size and alignment.
+  | BytesT (Expr a) (Expr a)
+    -- | A type application of a named type to arguments.
+  | AppT (Type a) [Type a]
 
 type FieldName = String
 
@@ -49,7 +64,7 @@ data Def a =
 data RecordDef a =
   RecordDef
   { recordName :: RecordName a
-  , recordParams :: Parameters a
+  , recordParams :: [TypeName a]
   , recordFields :: [FieldDef a]
   }
 
@@ -93,6 +108,8 @@ data Expr a =
   | FloatLitE (Type a) !Double
     -- | A boolean literal
   | BoolLitE !Bool
+    -- | The NULL value
+  | NullLitE
     -- | Construct a record value
   | RecordE (RecordName a) [Expr a]
     -- | Get a reference to an object field from a pointer expression
@@ -107,8 +124,10 @@ data Expr a =
   | CallE [Type a] (Expr a) [Expr a]
     -- | Call a procedure
   | PrimCallE [Type a] (Expr a) [Expr a]
+    -- | Unary operator
+  | UnaryE !UnaryOp (Expr a)
     -- | Binary operator
-  | BinaryE BinOp (Expr a) (Expr a)
+  | BinaryE !BinOp (Expr a) (Expr a)
     -- | Type cast an expression
   | CastE (Expr a) (Type a)
     -- | Size of a data type

@@ -1,6 +1,10 @@
 
 #include <stdlib.h>
+#include <stdio.h>
 #include "pyon_internal.h"
+
+/* When defined, print a message on every allocation and deallocation. */
+#define CHATTY_ALLOC
 
 /* Allocate some heap data */
 PyonPtr

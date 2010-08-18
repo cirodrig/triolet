@@ -74,12 +74,17 @@ rules :-
 
 -- Operators
 "==" / @notsym		{ tok EqualTok }
+"!=" / @notsym		{ tok NotEqualTok }
 "."			{ tok DotTok }
 "@!" / @notsym		{ tok FieldTok }
 "@" / @notsym		{ tok AtTok }
 "!" / @notsym		{ tok DerefTok }
-"!+" / @notsym		{ tok DerefPlusTok }
+"+" / @notsym		{ tok PlusTok }
+"-" / @notsym		{ tok MinusTok }
+"^+" / @notsym		{ tok PointerPlusTok }
+"%" / @notsym		{ tok PercentTok }
 "*"			{ tok StarTok }
+"!+" / @notsym		{ tok DerefPlusTok }
 
 -- Other symbols
 \" @string \"		{ stringTok }

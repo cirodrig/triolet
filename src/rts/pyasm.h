@@ -31,4 +31,4 @@
 // Get the smallest value greater than or equal to 'off' that is a multiple
 // of 'align'.  'off' is nonnegative, and 'align' is positive.  This macro
 // is used for computing structure field offsets and sizes.
-#define PAD(off, align) ((off) + ((-off) % align))
+#define PAD(off, align) ((off) + ((-(off)) % (align)))

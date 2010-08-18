@@ -33,34 +33,25 @@ function Stream_return (PassConv return_type, owned produce_value) -> owned {
   s @! Stream.state_size = sizeof bool;
   s @! Stream.state_align = alignof bool;
   s @! Stream.state_finalize = dummy_finalizer;
-  x = pointer primcall pyon_alloc (word 270);
   s;
 };
 
 function Stream_return_next (PassConv return_type,
                              owned produce_value,
                              pointer state,
-                             owned consumer) -> bool {
+                             pointer ret) -> bool {
   b = bool load state;
   if (b) {
     // Stream is exhausted
     false;
   } else {
     // Stream has data
-    !state = true;
-    PassConv {return_size, _, _, return_finalize} = return_type;
-    producer_data = pointer primcall pyon_alloc (return_size);
+    !state = true;      // Remember that value was produced
 
     // Produce the value
-    () = () call produce_value (producer_data);
+    () = () call produce_value (ret);
 
-    // Consume the value
-    b = bool call consumer (producer_data);
-
-    // Cleanup
-    () = () call return_finalize (producer_data);
-    () = () primcall pyon_dealloc (producer_data);
-    b;
+    true;
   };
 };
 
@@ -72,22 +63,143 @@ function Stream_return_initialize(pointer state) -> () {
 /*****************************************************************************/
 /* bind */
 
-// The state of a chained stream consists of:
-// The producer's state
-// Pointer to the consumer's state if consumer is active, NULL otherwise
-// The current output value if consumer is active, uninitialized otherwise
+/* The state of a chained stream consists of:
+ *  1. Pointer to the transformer stream
+ *  2. The producer's state
+ *  3. The producer's current output, which the consumer may read
+ * FIXME: use different data layout
+ */
+record Stream_bind_state {
+  pointer transformer;          // Transformer stream (owned or NULL)
+  pointer transformer_state;    // Transformer stream's state, or NULL
+  pointer producer_state;       // Producer's state
+  pointer temporary_state;        // Producer's current output value
+};
 
 // Chain streams together.
 function Stream_bind (PassConv produced_type,
                       PassConv transformed_type,
                       owned producer,
                       owned transformer) -> owned {
-  ALLOC_OBJECT(s, Stream, Stream_info);
+  ALLOC_OBJECT(s, Stream, Stream_info)
   s @! Stream.next =
-      Stream_bind_next(produced_type, transformed_type, producer, transformer);
+      owned call Stream_bind_next(produced_type, transformed_type,
+                                  producer, transformer);
   s @! Stream.initialize =
-      Stream_bind_initialize(produced_type, transformed_type,
-                             producer, transformer);
+      owned call Stream_bind_initialize(produced_type, transformed_type,
+                                        producer);
+  s @! Stream.state_size = sizeof Stream_bind_state;
+  s @! Stream.state_align = alignof Stream_bind_state;
+  s @! Stream.state_finalize =
+      owned call Stream_bind_finalize(produced_type,
+                                      producer @! Stream.state_finalize);
+  s;
+};
 
-#error "Not implemented"
+function Stream_bind_initialize (PassConv produced_type,
+                                 PassConv transformed_type,
+                                 owned producer,
+                                 pointer state) -> () {
+  // Initialize the transformer pointer
+  state @! Stream_bind_state.transformer = null;
+  state @! Stream_bind_state.transformer_state = null;
+
+  // Initialize the producer state
+  pstate =
+      pointer primcall pyon_alloc(producer @! Stream.state_size);
+  () = () call (producer @! Stream.initialize) (pstate);
+  state @! Stream_bind_state.producer_state = pstate;
+
+  // Allocate the temporary storage
+  PassConv {produced_size, _, _, _} = produced_type;
+  state @! Stream_bind_state.temporary_state =
+      pointer primcall pyon_alloc (produced_size);
+
+  ();
+};
+
+function Stream_bind_next(PassConv produced_type,
+                          PassConv transformed_type,
+                          owned producer,
+                          owned transformer,
+                          pointer state,
+                          pointer ret) -> bool {
+  // Is transformer active?
+  transformer = state @! Stream_bind_state.transformer;
+  if (transformer != null) {
+    // Call the transformer stream
+    transformer = state @! Stream_bind_state.transformer as owned;
+    transformer_state = state @! Stream_bind_state.transformer_state;
+    b = bool call (transformer @! Stream.next) (transformer_state, ret);
+
+    // Was a value produced?
+    if (b) {
+      // Done
+      true;
+    } else {
+      // Transformer is exhausted; release transformer and temporary state
+      () = () call (transformer @! Stream.state_finalize) (transformer_state);
+      () = () primcall pyon_dealloc(transformer_state);
+      DECREF(transformer as pointer)
+      state @! Stream_bind_state.transformer = null;
+      PassConv {_, _, _, produced_type_finalize} = produced_type;
+      () = () call produced_type_finalize
+          (state @! Stream_bind_state.temporary_state);
+
+      // Retry
+      bool call Stream_bind_next(produced_type, transformed_type, producer,
+                                 transformer, state, ret);
+    };
+  } else {
+    // Produce a new value
+    value_produced = bool call (producer @! Stream.next)
+        (state @! Stream_bind_state.producer_state,
+         state @! Stream_bind_state.temporary_state);
+    
+    if (value_produced) {
+      // Run the transformer to create an output stream
+      transformer_stream =
+          owned call transformer (state @! Stream_bind_state.temporary_state);
+
+      // Begin producing from the output stream
+      transformer_state =
+        pointer primcall pyon_alloc (transformer_stream @! Stream.state_size);
+      () = () call (transformer_stream @! Stream.initialize) (transformer_state);
+      state @! Stream_bind_state.transformer_state = transformer_state;
+      
+      // Retry
+      bool call Stream_bind_next(produced_type, transformed_type, producer,
+                                 transformer, state, ret);
+    } else {
+      // Stream is exhausted
+      false;
+    };
+  };
+};
+
+function Stream_bind_finalize (PassConv produced_type,
+                               owned finalize_producer,
+                               pointer state) -> () {
+  // Release the transformer
+  transformer = state @! Stream_bind_state.transformer;
+  () = if (transformer != null) {
+    transformer = state @! Stream_bind_state.transformer as owned;
+    transformer_state = state @! Stream_bind_state.transformer_state;
+    () = () call (transformer @! Stream.state_finalize) (transformer_state);
+    () = () primcall pyon_dealloc (transformer_state);
+    DECREF(transformer as pointer)
+
+    // Finalize the temporary state
+    PassConv {_, _, _, finalize_temporary} = produced_type;
+    () call finalize_temporary (state @! Stream_bind_state.temporary_state);
+  } else {
+    ();
+  };
+  // Free the temporary state
+  () = () primcall pyon_dealloc (state @! Stream_bind_state.temporary_state);
+
+  // Release the producer's state
+  producer_state = state @! Stream_bind_state.producer_state;
+  () = () call finalize_producer (producer_state);
+  () primcall pyon_dealloc (producer_state);
 };

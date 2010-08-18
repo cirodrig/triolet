@@ -1,0 +1,155 @@
+
+module pyon.internal.list;
+
+#include "pyasm.h"
+#include "debug.h"
+#include "memory_py.h"
+#include "apply_py.h"
+#include "list.h"
+
+#include "pyasm_records.h"
+
+// Create the parameter passing convention of a list
+#if 0
+procedure PassConv_list (PassConv elem) -> PassConv {
+  PassConv {sizeof PyonList,
+            alignof PyonList,
+            owned call list_copy(elem),
+            owned call list_finalize(elem)};
+};
+#endif
+
+// Duplicate a list
+function list_copy(PassConv elem, pointer src, pointer dst) -> () {
+  PassConv {elem_size, elem_align, elem_copy, _} = elem;
+  num_elems = src @! PyonList.nelems;
+
+  // Allocate a multiple of the list element's alignment to each element
+  // so that all elements will be aligned
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  // Duplicate contents
+  contents = pointer primcall pyon_alloc (pad_elem_size * num_elems);
+  () = () primcall list_copy_elems
+      (elem_copy, pad_elem_size, num_elems, src @! PyonList.contents, contents);
+
+  dst @! PyonList.nelems = src @! PyonList.nelems;
+  dst @! PyonList.contents = contents;
+  ();
+};
+
+// Copy all list elements
+procedure list_copy_elems (owned elem_copy,
+                           word pad_elem_size,
+                           word num_elems,
+                           pointer src,
+                           pointer dst) -> () {
+  if (num_elems == word 0) {
+    ();
+  } else {
+    () = () call elem_copy(src, dst);
+    () primcall list_copy_elems(elem_copy,
+                                pad_elem_size,
+                                num_elems - word 1,
+                                src ^+ pad_elem_size as int,
+                                dst ^+ pad_elem_size as int);
+  };
+};
+
+// Finalize a list
+function list_finalize (PassConv elem, pointer list) -> () {
+  PassConv {elem_size, elem_align, _, elem_finalize} = elem;
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  num_elems = list @! PyonList.nelems;
+  contents = list @! PyonList.contents;
+
+  // Finalize list contents
+  () = () primcall list_finalize_elems
+      (elem_finalize, elem_size, num_elems, contents);
+
+  // Free the array
+  () primcall pyon_dealloc (contents);
+};
+
+procedure list_finalize_elems (owned elem_finalize,
+                               word elem_size,
+                               word nelems,
+                               pointer contents) -> () {
+  if (nelems == word 0) {
+    ();
+  } else {
+    () = () call elem_finalize(contents);
+    () primcall list_finalize_elems (elem_finalize,
+                                     elem_size,
+                                     nelems - word 1,
+                                     contents ^+ elem_size as int);
+  };
+};
+
+// Create a list, leaving its elements uninitialized
+procedure list_create_uninitialized (PassConv elem,
+                                     word size,
+                                     pointer list) -> () {
+  PassConv {elem_size, elem_align, _, _} = elem;
+  pad_elem_size = PAD(elem_size, elem_align);
+  contents = pointer primcall pyon_alloc (pad_elem_size * size);
+  
+  list @! PyonList.nelems = size;
+  list @! PyonList.contents = contents;
+  ();
+};
+
+// Write one element of a list.  The element should start out uninitialized.
+procedure list_poke (PassConv elem,
+                     pointer list,
+                     word index,
+                     pointer value) -> () {
+  PassConv {elem_size, elem_align, elem_copy, _} = elem;
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  elem_ptr = (list @! PyonList.contents) ^+ (pad_elem_size * index) as int;
+  () call elem_copy(value, elem_ptr);
+};
+
+// Read one element of a list.
+procedure list_peek (PassConv elem,
+                     pointer list,
+                     word index,
+                     pointer value) -> () {
+  PassConv {elem_size, elem_align, elem_copy, _} = elem;
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  elem_ptr = (list @! PyonList.contents) ^+ (pad_elem_size * index) as int;
+  () call elem_copy(elem_ptr, value);  
+};
+
+// A routine to test several of the above routines
+procedure list_test () -> () {
+  int_pc = PassConv { sizeof int, alignof int, copy4F, dummy_finalizer };
+  my_list = pointer primcall pyon_alloc (sizeof PyonList);
+  my_int = pointer primcall pyon_alloc (sizeof int);
+
+  // Create list
+  () = () primcall list_create_uninitialized (int_pc, word 3, my_list);
+  !my_int = int 333;
+  () = () primcall list_poke(int_pc, my_list, word 0, my_int);
+  !my_int = int 444;
+  () = () primcall list_poke(int_pc, my_list, word 1, my_int);
+  !my_int = int 555;
+  () = () primcall list_poke(int_pc, my_list, word 2, my_int);
+
+  // Read list
+  () = () primcall list_peek(int_pc, my_list, word 0, my_int);
+  () = () primcall pyon_db_int(int load my_int);
+  () = () primcall list_peek(int_pc, my_list, word 1, my_int);
+  () = () primcall pyon_db_int(int load my_int);
+  () = () primcall list_peek(int_pc, my_list, word 2, my_int);
+  () = () primcall pyon_db_int(int load my_int);
+
+  // Free stuff
+  () = () call list_finalize(int_pc, my_list);
+  () = () primcall pyon_dealloc(my_list);
+  () = () primcall pyon_dealloc(my_int);
+  ();
+};

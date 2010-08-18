@@ -56,8 +56,15 @@ instance Lift FunctionType where
 
 -- | Predefined primitive functions
 builtinPrimitives =
-  [ -- memory.c
-    (builtinModuleName, "pyon_alloc",
+  [ -- debug.c
+    (builtinModuleName, "pyon_db_int",
+     primFunctionType [PrimType nativeIntType] [])
+  , (builtinModuleName, "pyon_db_word",
+     primFunctionType [PrimType nativeWordType] [])
+  , (builtinModuleName, "pyon_db_pointer",
+     primFunctionType [PrimType PointerType] [])
+    -- memory.c
+  , (builtinModuleName, "pyon_alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
   , (builtinModuleName, "pyon_dealloc",
      primFunctionType [PrimType PointerType] [])

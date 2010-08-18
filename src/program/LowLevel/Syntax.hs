@@ -34,11 +34,17 @@ valueToPrimType _ =
 data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE
 
 data Prim =
-    PrimAddZ !Signedness !Size  -- ^ Add two integers
+    -- | @PrimCastZ from-sign to-sign size@
+    -- 
+    -- Change the sign of an integral value without changing its content
+    PrimCastZ !Signedness !Signedness !Size
+  | PrimAddZ !Signedness !Size  -- ^ Add two integers
   | PrimSubZ !Signedness !Size  -- ^ Subtract Y from X
+  | PrimMulZ !Signedness !Size  -- ^ Multiply X by Y
   | PrimModZ !Signedness !Size  -- ^ Remainder (floor) of X modulo Y
   | PrimMaxZ !Signedness !Size  -- ^ Compute maximum
   | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
+  | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers
   | PrimAddP                    -- ^ Add a native unsigned integer to a
                                 --   (owned or non-owned) pointer.  The result
                                 --   is a non-owned pointer.
@@ -55,6 +61,8 @@ data Prim =
                                 --   pointer.  Consumes a reference.
   | PrimAddF !Size              -- ^ Floating-point addition
   | PrimSubF !Size              -- ^ Floating-point subtraction
+  | PrimMulF !Size              -- ^ Floating-point multiplication
+  | PrimModF !Size              -- ^ Floating-point modulus
 
 data Lit =
     UnitL                       -- ^ The unit value

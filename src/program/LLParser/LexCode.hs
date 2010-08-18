@@ -34,10 +34,15 @@ data Token =
   | SemiTok
   | CommaTok
   | EqualTok
+  | NotEqualTok
   | DotTok
   | FieldTok
   | AtTok
   | DerefTok
+  | PlusTok
+  | MinusTok
+  | PointerPlusTok
+  | PercentTok
   | StarTok
   | DerefPlusTok
   | WildTok
@@ -87,10 +92,15 @@ showToken ArrowTok = "arrow"
 showToken SemiTok = "semicolon"
 showToken CommaTok = "comma"
 showToken EqualTok = "equal operator"
+showToken NotEqualTok = "not-equal operator"
 showToken DotTok = "dot"
 showToken FieldTok = "field operator"
 showToken AtTok = "at operator"
 showToken DerefTok = "exclamation mark"
+showToken PlusTok = "plus"
+showToken MinusTok = "minus"
+showToken PointerPlusTok = "'^+'"
+showToken PercentTok = "percent sign"
 showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
 showToken WildTok = "wildcard"

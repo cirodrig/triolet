@@ -134,9 +134,21 @@ parseType = prim_type <|> record_type <|> bytes_type <?> "type"
                 , (OwnedTok, OwnedType)
                 , (PointerTok, PointerType)]
 
-    record_type = fmap RecordT identifier
+    record_type = do
+      rt <- fmap RecordT identifier
+      try (type_app rt) <|> return rt
+      where
+        type_app rt = do
+          args <- parenList parseType
+          return $ AppT rt args
 
-    bytes_type = match BytesTok >> parens (liftM2 BytesT expr expr)
+    bytes_type = do
+      match BytesTok 
+      parens $ do 
+        sz <- expr
+        match CommaTok
+        al <- expr
+        return $ BytesT sz al
 
 -- | Parse a type of a global object.  The only valid types
 -- are \'owned\' or \'pointer\'.
@@ -155,11 +167,19 @@ field = do
 
 -- | Operators recognized by the parser
 operators =
-  [ [ Infix (binaryOp DerefPlusTok AtomicAddOp) AssocNone]
-  , [ Infix (binaryOp EqualTok CmpEQOp) AssocNone]
+  [ [ Infix (binaryOp StarTok MulOp) AssocLeft
+    , Infix (binaryOp PercentTok ModOp) AssocNone]
+  , [ Prefix (unaryOp MinusTok NegateOp)]
+  , [ Infix (binaryOp DerefPlusTok AtomicAddOp) AssocNone
+    , Infix (binaryOp PointerPlusTok PointerAddOp) AssocLeft
+    , Infix (binaryOp PlusTok AddOp) AssocLeft
+    , Infix (binaryOp MinusTok SubOp) AssocLeft]
+  , [ Infix (binaryOp EqualTok CmpEQOp) AssocNone
+    , Infix (binaryOp NotEqualTok CmpNEOp) AssocNone]
   ]
   where
     binaryOp tok op = match tok >> return (\x y -> BinaryE op x y)
+    unaryOp tok op = match tok >> return (\x -> UnaryE op x)
 
 expr = buildExpressionParser operators fieldExpr
 
@@ -251,11 +271,12 @@ derefExpr = deref <|> atomicExpr
 
 -- | An atomic expression.  Expressions are atomic if they are not made of 
 -- parts separated by spaces.
-atomicExpr = fmap VarE identifier <|> true_lit <|> false_lit <|>
+atomicExpr = fmap VarE identifier <|> true_lit <|> false_lit <|> null_lit <|>
              wild <|> parens expr
   where
     true_lit = match TrueTok >> return (BoolLitE True)
     false_lit = match FalseTok >> return (BoolLitE False)
+    null_lit = match NullTok >> return NullLitE
     wild = match WildTok >> return WildE
 
 -- | An lvalue is parsed as an expression, then converted to an lvalue if
@@ -328,11 +349,15 @@ parameter = liftM2 Parameter parseType identifier
 parameters :: P (Parameters Parsed)
 parameters = parenList parameter
 
+-- | Parse a list of type parameters
+recordParameters :: P [String]
+recordParameters = parenList identifier
+
 recordDef :: P (RecordDef Parsed)
 recordDef = do
   match RecordTok
   name <- identifier
-  params <- option [] parameters
+  params <- option [] recordParameters
   fields <- braces $ fieldDef `sepEndBy` match SemiTok
   return $ RecordDef name params fields
 

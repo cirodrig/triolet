@@ -88,31 +88,34 @@ pprInfixPrim prim =
   case prim
   of PrimAddZ _ _ -> Just $ text "+"
      PrimSubZ _ _ -> Just $ text "-"
+     PrimMulZ _ _ -> Just $ text "*"
      PrimModZ _ _ -> Just $ text "%"
-     PrimCmpZ _ _ c -> case c
-                       of CmpEQ -> Just $ text "=="
-                          CmpNE -> Just $ text "/="
-                          CmpLT -> Just $ text "<"
-                          CmpLE -> Just $ text "<="
-                          CmpGT -> Just $ text ">"
-                          CmpGE -> Just $ text ">="
+     PrimCmpZ _ _ c -> Just $ comparison c
+     PrimCmpP c -> Just $ comparison c
      PrimAddP -> Just $ text "^+"
      _ -> Nothing
+  where
+    comparison c =
+      case c
+      of CmpEQ -> text "=="
+         CmpNE -> text "/="
+         CmpLT -> text "<"
+         CmpLE -> text "<="
+         CmpGT -> text ">"
+         CmpGE -> text ">="
 
 pprPrim prim =
   let name =
         case prim
-        of PrimAddZ _ _ -> "add"
+        of PrimCastZ in_sgn out_sgn sz ->
+             "cast_" ++ sign in_sgn ++ "_" ++ sign out_sgn
+           PrimAddZ _ _ -> "add"
            PrimSubZ _ _ -> "sub"
+           PrimMulZ _ _ -> "mul"
            PrimModZ _ _ -> "mod"
            PrimMaxZ _ _ -> "max"
-           PrimCmpZ _ _ c -> case c
-                             of CmpEQ -> "cmp_eq"
-                                CmpNE -> "cmp_ne"
-                                CmpLT -> "cmp_lt"
-                                CmpLE -> "cmp_le"
-                                CmpGT -> "cmp_gt"
-                                CmpGE -> "cmp_ge"
+           PrimCmpZ _ _ c -> comparison c
+           PrimCmpP c -> comparison c
            PrimAddP   -> "ptradd"
            PrimLoad _ -> "load"
            PrimStore _ -> "store"
@@ -127,6 +130,17 @@ pprPrim prim =
            PrimStore t -> pprValueType t
            _ -> empty
   in text name <+> ty
+  where
+    comparison c =
+      case c
+      of CmpEQ -> "cmp_eq"
+         CmpNE -> "cmp_ne"
+         CmpLT -> "cmp_lt"
+         CmpLE -> "cmp_le"
+         CmpGT -> "cmp_gt"
+         CmpGE -> "cmp_ge"      
+    sign Signed = "i"
+    sign Unsigned = "u"
 
 pprLit literal =
   case literal

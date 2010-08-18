@@ -29,12 +29,16 @@ variables whenever necessary.
 module LLParser.GenLowLevel(generateLowLevelModule)
 where
 
-import Control.Monad
+import Prelude hiding (mapM)
+
+import Control.Applicative
+import Control.Monad hiding(mapM)
 import Control.Monad.Trans
-import Control.Monad.Writer
+import Control.Monad.Writer hiding(mapM)
 import Data.List
 import qualified Data.Map as Map
 import Data.Maybe
+import Data.Traversable
 import System.FilePath
 
 import Gluon.Common.Error
@@ -53,6 +57,33 @@ data Resolved
 
 type instance VarName Resolved = LL.Var
 type instance RecordName Resolved = ResolvedRecord
+
+-- | An applicative interpretation of manyary functions.  We use this to
+-- implement parameterized record types.
+data Parameterized dom rng =
+  Parameterized 
+  { apply :: [dom] -> rng
+  }
+
+fromParameterized :: Parameterized dom a -> a
+fromParameterized x = apply x []
+
+newtype TypeParameter = TypeParameter Int
+
+type TypeParametric a = Parameterized (Type Resolved) a
+type ParametricType = TypeParametric (Type Resolved)
+
+pVar (TypeParameter i) = Parameterized (\xs -> xs !! i)
+
+instance Functor (Parameterized dom) where
+  fmap f (Parameterized app) = Parameterized (\dom -> f (app dom))
+
+instance Applicative (Parameterized dom) where
+  pure x = Parameterized (\_ -> x)
+  f <*> x = Parameterized $ \env ->
+    let f' = apply f env
+        x' = apply x env
+    in f' x'
 
 -- | A resolved function, data, or top-level definition
 data ResolvedDef =
@@ -75,8 +106,10 @@ newtype RecordIdent = RecordIdent String
 data ResolvedRecord =
   ResolvedRecord 
   { resolvedRecordName :: !RecordIdent 
-  , resolvedRecordFields :: [FieldDef Resolved] 
-  , resolvedRecordType :: StaticRecord
+  , resolvedRecordArity :: !Int
+  , resolvedRecordFields :: TypeParametric [FieldDef Resolved] 
+  , resolvedRecordSType :: TypeParametric StaticRecord
+  , resolvedRecordDType :: TypeParametric (GenNR DynamicRecord)
   }
 
 data DictEntry =
@@ -109,6 +142,8 @@ data NREnv =
   { varIDSupply :: {-# UNPACK #-}!(Supply (Ident LL.Var))
     -- | Externally defined or externally visible global variables
   , externalVariables :: ![LL.Var]
+    -- | Type parameters
+  , typeParameters :: [TypeName Parsed]
   , sourceModuleName  :: !ModuleName
   }
 
@@ -140,6 +175,21 @@ getSourceModuleName = NR $ \env ctx errs ->
 getExternalVars :: NR [LL.Var]
 getExternalVars = NR $ \env ctx errs ->
   return (externalVariables env, ctx, errs)
+
+withTypeParameters :: [TypeName Parsed] -> NR a -> NR a
+withTypeParameters params m = NR $ \env ctx errs ->
+  let env' = env {typeParameters = params ++ typeParameters env}
+  in runNR m env' ctx errs
+
+getNumParameters :: NR Int
+getNumParameters = NR $ \env ctx errs ->
+  let n_params = length $ typeParameters env
+  in return (n_params, ctx, errs)
+
+findParameter :: TypeName Parsed -> NR (Maybe TypeParameter)
+findParameter name = NR $ \env ctx errs ->
+  let mindex = findIndex (name ==) $ typeParameters env
+  in return (fmap TypeParameter mindex, ctx, errs)
 
 addError :: String -> Errors -> Errors
 addError err errs = (err :) . errs
@@ -212,7 +262,7 @@ lookupEntity name = NR $ \_ env errs ->
             Nothing -> lookup_name scopes
     
     -- If the entire environment has been searched, then fail
-    lookup_name [] = (internalError "lookupEntity",
+    lookup_name [] = (internalError ("lookupEntity: not found: " ++ name),
                       False,
                       Just $ "Undefined name: '" ++ name ++ "'")
 
@@ -298,11 +348,24 @@ lookupRecord name = do
   return $ case entry of ~(RecordEntry record) -> record
 
 -- | Define a new record type
-defineRecord :: RecordName Parsed -> [StaticFieldType] -> [FieldDef Resolved]
+defineRecord :: RecordName Parsed
+             -> Int
+             -> [TypeParametric (FieldDef Resolved)]
              -> NR ()
-defineRecord name field_types fields =
-  let record =
-        ResolvedRecord (RecordIdent name) fields (staticRecord field_types)
+defineRecord name nparams mk_fields =
+  let fields = sequenceA mk_fields
+      static_type :: TypeParametric StaticRecord
+      static_type = fmap mk_static_type fields
+      mk_static_type xs =
+        staticRecord [convertToSFieldType ty | FieldDef ty _ <- xs]
+            
+      dynamic_type :: TypeParametric (GenNR DynamicRecord)
+      dynamic_type = fmap mk_dynamic_type fields
+      mk_dynamic_type xs = internalError "defineRecord: Dynamic records not implemented"
+
+      record =
+        ResolvedRecord (RecordIdent name) nparams
+        fields static_type dynamic_type
   in defineEntity name (RecordEntry record)
 
 -------------------------------------------------------------------------------
@@ -312,30 +375,77 @@ type GenNR a = Gen NR a
 transformGenNR :: (forall a. NR a -> NR a) -> GenNR a -> GenNR a
 transformGenNR f m = WriterT $ f $ runWriterT m
 
+resolveRecordType :: RecordName Parsed -> NR ParametricType
+resolveRecordType nm = do
+  -- Is this a type parameter?
+  mparam <- findParameter nm
+  case mparam of
+    Just p -> return $ pVar p
+    Nothing -> do
+      -- Otherwise, it is a record
+      record <- lookupRecord nm
+      return $ pure $ RecordT record
+
+applyRecordType :: Type Resolved -> [Type Resolved] -> Type Resolved
+applyRecordType oper types =
+  case oper
+  of RecordT rec
+       | length types /= resolvedRecordArity rec ->
+           error "applyRecordType: Wrong number of parameters to record type"
+       | otherwise ->
+           -- Apply record to parameters, producing a nullary record
+           RecordT $ rec { resolvedRecordArity = 0
+                         , resolvedRecordFields =
+                           pure $ resolvedRecordFields rec `apply` types
+                         , resolvedRecordSType =
+                           pure $ resolvedRecordSType rec `apply` types
+                         , resolvedRecordDType =
+                           pure $ resolvedRecordDType rec `apply` types
+                         }
+     _ -> error "applyRecordType: Operator is not a record type"
+
 resolveType :: Type Parsed -> GenNR (Type Resolved)
-resolveType ty =
+resolveType t = do
+  x <- resolveType' t
+  return $ apply x []
+
+resolveType' :: Type Parsed -> GenNR ParametricType
+resolveType' ty =
   case ty
-  of PrimT pt   -> return $ PrimT pt
-     RecordT nm -> lift $ do
-       record <- lookupRecord nm
-       return $ RecordT record
+  of PrimT pt   -> return $ pure $ PrimT pt
+     RecordT nm -> lift $ resolveRecordType nm
      BytesT size align -> do
        size' <- resolveExprVar size
        align' <- resolveExprVar align
-       return $ BytesT (VarE size') (VarE align')
+       return $ pure $ BytesT (VarE size') (VarE align')
+     AppT t args -> do
+       t' <- resolveType' t
+       args' <- mapM resolveType' args
+
+       -- Attempt to apply t' to args'
+       return $ applyRecordType <$> t' <*> sequenceA args'
 
 -- | Resolve a type without generating any code
-resolvePureType :: Type Parsed -> NR (Type Resolved)
-resolvePureType ty =
+resolvePureType  :: Type Parsed -> NR (Type Resolved)
+resolvePureType t = do
+  x <- resolvePureType' t
+  return $ apply x []
+
+resolvePureType' :: Type Parsed -> NR ParametricType
+resolvePureType' ty =
   case ty
-  of PrimT pt   -> return $ PrimT pt
-     RecordT nm -> do
-       record <- lookupRecord nm
-       return $ RecordT record
+  of PrimT pt   -> return $ pure $ PrimT pt
+     RecordT nm -> resolveRecordType nm
      BytesT size align -> do
        (size', _, _) <- resolvePureExpr size
        (align', _, _) <- resolvePureExpr align
-       return $ BytesT size' align'
+       return $ pure $ BytesT size' align'
+     AppT t args -> do
+       t' <- resolvePureType' t
+       args' <- mapM resolvePureType' args
+       
+       -- Attempt to apply t' to args'
+       return $ applyRecordType <$> t' <*> sequenceA args'
 
 resolveValueType :: Type Parsed -> GenNR LL.ValueType
 resolveValueType ty = fmap convertToValueType $ resolveType ty
@@ -348,26 +458,45 @@ convertToValueType :: Type Resolved -> LL.ValueType
 convertToValueType ty =
   case ty
   of PrimT pt -> LL.PrimType pt
-     RecordT record -> LL.RecordType $ resolvedRecordType record
+     RecordT record -> LL.RecordType $ resolvedRecordSType record `apply` []
      _ -> error "Expecting a value type"
 
-convertToFieldType :: Type Resolved -> StaticFieldType
-convertToFieldType ty =
+convertToSFieldType :: Type Resolved -> StaticFieldType
+convertToSFieldType ty =
   case ty
   of PrimT pt -> PrimField pt
-     RecordT r -> RecordField $ resolvedRecordType r
+     RecordT r -> RecordField $ resolvedRecordSType r `apply` []
      BytesT size align -> BytesField (fromIntExpr size) (fromIntExpr align)
 
-resolveFieldDef :: FieldDef Parsed -> NR (StaticFieldType, FieldDef Resolved)
+convertToDFieldType :: Type Resolved -> GenNR DynamicFieldType
+convertToDFieldType ty =
+  case ty
+  of PrimT pt -> return $ PrimField pt
+     RecordT r -> do ty <- resolvedRecordDType r `apply` []
+                     return $ RecordField ty
+     BytesT size align -> error "Bytes not permitted in dynamic type"
+
+resolveFieldDef :: FieldDef Parsed
+                -> NR (TypeParametric (FieldDef Resolved))
 resolveFieldDef (FieldDef ty nm) = do
-  ty' <- resolvePureType ty
-  return (convertToFieldType ty', FieldDef ty' nm)
+  ty' <- resolvePureType' ty
+  return $ fmap mk_field_def ty'
+  where
+    mk_field_def t = FieldDef t nm
 
 -- | From a record field specifier, get the field's offset and data type.
 resolveField :: Field Parsed -> GenNR (LL.Val, LL.ValueType)
 resolveField (Field record field_names mcast) = do
-  -- Get field offset and type
+  -- Get record type
   record_type <- lift $ lookupRecord record
+  
+  -- Record must have base kind 
+  lift $ throwErrorMaybe $
+    if resolvedRecordArity record_type /= 0
+    then Just "resolveField: Parametric record must be applied"
+    else Nothing
+
+  -- Get field offset and type
   let ~(offset, field_type) =
         foldl go_to_field (0, RecordT record_type) field_names
   
@@ -383,10 +512,12 @@ resolveField (Field record field_names mcast) = do
     go_to_field (offset, RecordT record_type) field_name =
       -- Find the field with this name
       case findIndex (\(FieldDef _ nm) -> nm == field_name) $
-           resolvedRecordFields record_type
+           resolvedRecordFields record_type `apply` []
       of Just ix ->
-           let offset' = offset + fieldOffset (resolvedRecordType record_type !!: ix)
-               FieldDef field_type _ = resolvedRecordFields record_type !! ix
+           let instance_type = resolvedRecordSType record_type `apply` []
+               offset' = offset + fieldOffset (instance_type !!: ix)
+               instance_fields = resolvedRecordFields record_type `apply` []
+               FieldDef field_type _ = instance_fields !! ix
            in (offset', field_type)
          _ ->
            error "Record type does not have field"
@@ -412,6 +543,8 @@ resolvePureExpr expr =
        return (FloatLitE ty' n, LL.LitV $ mkFloatLit llty n, llty)
      BoolLitE b ->
        return (BoolLitE b, LL.LitV $ LL.BoolL b, LL.PrimType BoolType)
+     NullLitE ->
+       return (NullLitE, LL.LitV $ LL.NullL, LL.PrimType PointerType)
 
 -- | Perform name resolution on expressions.  To create variables, we have to
 -- get expressions' types at the same time.
@@ -432,9 +565,11 @@ resolveExpr expr =
        return_value (LL.LitV $ mkFloatLit ty' n) ty'
      BoolLitE b ->
        return_value (LL.LitV $ LL.BoolL b) (LL.PrimType BoolType)
+     NullLitE ->
+       return_value (LL.LitV LL.NullL) (LL.PrimType PointerType)
      RecordE nm fields -> do
        record <- lift $ lookupRecord nm
-       let record_type = resolvedRecordType record
+       let record_type = resolvedRecordSType record `apply` []
        (map fst -> fields') <- mapM resolveExprValue fields
        return_atom (LL.PackA record_type fields') [LL.RecordType record_type]
      FieldE base fld -> do
@@ -466,6 +601,10 @@ resolveExpr expr =
        let (bin_expr, bin_type, err) = mkBinary op l' ltype r' rtype
        lift $ throwErrorMaybe err
        return_atom bin_expr [bin_type]
+     UnaryE op e -> do
+       (e', etype) <- resolveExprValue e
+       let (uexpr, utype, err) = mkUnary op e' etype
+       return_atom uexpr [utype]
      CastE e ty -> do
        (input_val, input_type) <- resolveExprValue e
        cast_type <- resolveValueType ty
@@ -473,11 +612,19 @@ resolveExpr expr =
        lift $ throwErrorMaybe err
        return_atom cast_expr [cast_type]
      SizeofE ty -> do
-       ty' <- resolveValueType ty
-       return_value (nativeWordV $ sizeOf ty') (LL.PrimType nativeWordType)
+       ty' <- resolveType ty
+       size <- case ty'
+               of BytesT size _ ->
+                    mkWordVal size
+                  _ -> return $ nativeWordV $ sizeOf $ convertToValueType ty'
+       return_value size (LL.PrimType nativeWordType)
      AlignofE ty -> do
-       ty' <- resolveValueType ty
-       return_value (nativeWordV (alignOf ty')) (LL.PrimType nativeWordType)
+       ty' <- resolveType ty
+       align <- case ty'
+                of BytesT _ align ->
+                     mkWordVal align
+                   _ -> return $ nativeWordV $ alignOf $ convertToValueType ty'
+       return_value align (LL.PrimType nativeWordType)
   where
     return_value val ty = return (Just val, LL.ValA [val], [ty])
     return_atom atom tys = return (Nothing, atom, tys)
@@ -535,7 +682,7 @@ resolveStaticExpr expr =
        return $ LL.LitV $ mkFloatLit ty' n
      RecordE nm fields -> do
        record <- lookupRecord nm
-       let record_type = resolvedRecordType record
+       let record_type = resolvedRecordSType record `apply` []
        fields' <- mapM resolveStaticExpr fields
        return $ LL.RecV record_type fields'
      SizeofE ty -> do
@@ -616,7 +763,7 @@ resolveLValue lval ty =
        
        -- Get the record field types
        record <- lookupRecord rec
-       let record_type = resolvedRecordType record
+       let record_type = resolvedRecordSType record `apply` []
        
        -- Type must match
        throwErrorMaybe $
@@ -626,12 +773,12 @@ resolveLValue lval ty =
 
        -- Number of fields must match
        throwErrorMaybe $
-         if length lvals == length (resolvedRecordFields record)
+         if length lvals == length (resolvedRecordFields record `apply` [])
          then Nothing
          else Just "Record unpack expression has wrong number of fields"
        
        -- Bind each lvalue
-       let lval_types = [ty | FieldDef ty _ <- resolvedRecordFields record]
+       let lval_types = [ty | FieldDef ty _ <- resolvedRecordFields record `apply` []]
        (unzip3 -> (lval_vars, lval_codes, lval_defs)) <-
          zipWithM_lazy resolveLValue lvals (map convertToValueType lval_types)
        
@@ -697,11 +844,9 @@ resolveFunctionDef fdef = do
   return $ LL.FunDef fvar fun
 
 resolveRecordDef rdef = do
-  unless (null $ recordParams rdef) $
-    internalError "Not implemented: parameterized records"
-  
-  (unzip -> (field_types, fs)) <- mapM resolveFieldDef $ recordFields rdef
-  defineRecord (recordName rdef) field_types fs
+  fs <- withTypeParameters (recordParams rdef) $
+        mapM resolveFieldDef $ recordFields rdef
+  defineRecord (recordName rdef) (length $ recordParams rdef) fs
 
 resolveDataDef ddef = do
   -- Get the defining expression
@@ -800,7 +945,7 @@ generateLowLevelModule :: FilePath
                        -> IO LL.Module
 generateLowLevelModule module_path module_name externs defs =
   withTheLLVarIdentSupply $ \var_ids -> do
-    let ctx = NREnv var_ids [] module_name
+    let ctx = NREnv var_ids [] [] module_name
         global_scope = []
         
         -- Start out in the global scope.
@@ -837,6 +982,10 @@ fromIntExpr :: Expr Resolved -> Int
 fromIntExpr (IntLitE _ n) = fromIntegral n
 fromIntExpr _ = error "Expecting literal value"
 
+mkWordVal :: Expr Resolved -> GenNR LL.Val
+mkWordVal (IntLitE _ n) = return $ nativeWordV n
+mkWordVal (VarE v) = return $ LL.VarV v
+
 -- | Create a cast expression.  If there's no way to cast from the given input 
 -- to the given output type, then produce an error
 mkCast :: LL.ValueType          -- ^ Input type
@@ -851,6 +1000,9 @@ mkCast (LL.PrimType input_type) (LL.PrimType output_type) input_val =
      (PointerType, OwnedType) ->
        success $ LL.PrimA LL.PrimCastToOwned [input_val]
      (PointerType, PointerType) -> success_id
+     (IntType in_sgn in_sz, IntType out_sgn out_sz)
+       | in_sz == out_sz ->
+         success $ LL.PrimA (LL.PrimCastZ in_sgn out_sgn in_sz) [input_val]
      _ -> cannot
   where
     success_id = success $ LL.ValA [input_val]
@@ -864,6 +1016,28 @@ mkCast (LL.RecordType _) _ _ =
 mkCast _ (LL.RecordType _) _ =
   (internalError "mkCast", Just "Cannot cast to record type")
 
+-- | Create a unary expression.  If the expression is not well-typed, then
+-- produce an error.
+mkUnary :: UnaryOp -> LL.Val -> LL.ValueType
+        -> (LL.Atom, LL.ValueType, Maybe String)
+mkUnary op x_val x_type =
+  case op
+  of NegateOp -> negation
+  where
+    x_primtype = case x_type of ~(LL.PrimType pt) -> pt
+    x_primtype_check =
+      case x_type
+      of LL.PrimType _ -> Nothing
+         LL.RecordType _ -> Just "Operand may not have record type"
+
+    negation = 
+      case x_primtype
+      of IntType sgn sz ->
+           let operand = LL.LitV $ LL.IntL sgn sz 0
+               op = LL.PrimSubZ sgn sz
+           in (LL.PrimA op [operand, x_val], x_type, x_primtype_check)
+         _ -> internalError "Negation is not implemented for this type"
+
 -- | Create a binary expression.  If the expression is not well-typed, then
 -- produce an error.
 mkBinary :: BinOp -> LL.Val -> LL.ValueType -> LL.Val -> LL.ValueType
@@ -871,7 +1045,13 @@ mkBinary :: BinOp -> LL.Val -> LL.ValueType -> LL.Val -> LL.ValueType
 mkBinary op l_val l_type r_val r_type =
   case op
   of CmpEQOp -> comparison LL.CmpEQ
+     CmpNEOp -> comparison LL.CmpNE
      AtomicAddOp -> atomic_int LL.PrimAAddZ
+     PointerAddOp -> pointer_add
+     AddOp -> arithmetic LL.PrimAddZ LL.PrimAddF
+     SubOp -> arithmetic LL.PrimSubZ LL.PrimSubF
+     MulOp -> arithmetic LL.PrimMulZ LL.PrimMulF
+     ModOp -> arithmetic LL.PrimModZ LL.PrimModF
      _ -> internalError "mkBinary: Unhandled binary operator"
   where
     l_primtype = case l_type of ~(LL.PrimType pt) -> pt
@@ -895,20 +1075,47 @@ mkBinary op l_val l_type r_val r_type =
       of PointerType -> Nothing
          _ -> Just "Operand must have pointer type"
 
+    l_arithmetic_type_check = l_primtype_check `mappend`
+      case l_primtype
+      of IntType {} -> Nothing
+         FloatType {} -> Nothing
+         _ -> Just "Operand must have integral or floating-point type"
+
     r_integral_type_check = r_primtype_check `mappend`
       case r_primtype
       of IntType {} -> Nothing
          _ -> Just "Operand must have integral type"
+         
+    r_int_type_check = r_primtype_check `mappend`
+      if r_primtype /= nativeIntType
+      then Just "Operand must have int type"
+      else Nothing
 
     comparison cmp_op =
       let operator =
             case l_primtype
             of IntType sgn sz -> LL.PrimCmpZ sgn sz cmp_op
+               PointerType -> LL.PrimCmpP cmp_op
                _ -> internalError "Binary comparison not implemented for this type"
           atom = LL.PrimA operator [l_val, r_val]
           checks = mconcat [l_primtype_check, r_primtype_check, types_match_check]
+      in (atom, LL.PrimType BoolType, checks)
+    
+    arithmetic int_op float_op =
+      let atom = case l_primtype
+                 of IntType sgn sz ->
+                      LL.PrimA (int_op sgn sz) [l_val, r_val]
+                    FloatType sz ->
+                      LL.PrimA (float_op sz) [l_val, r_val]
+                    _ -> internalError "Arithmetic operator not implemented for this type"
+          checks = mconcat [l_arithmetic_type_check, types_match_check]
+      in (atom, LL.PrimType l_primtype, checks)
+
+    pointer_add =
+      let atom = LL.PrimA LL.PrimAddP [l_val, r_val]
+          checks = mconcat [l_pointer_type_check, r_int_type_check]
       in (atom, l_type, checks)
-         
+
     atomic_int op =
       let operator =
             case r_primtype
