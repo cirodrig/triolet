@@ -69,7 +69,7 @@ static inline int
 funinfo_firstargument_offset(void)
 {
   /* Get offset of the last fixed field */
-  int offset = (char *)FUNINFO_INEXACT(NULL) - (char *)NULL;
+  int offset = (char *)&FUNINFO_INEXACT(NULL) - (char *)NULL;
 
   /* Get offset of the first argument tag */
   return FIELD_START_OFF(offset + sizeof(FUNINFO_INEXACT(NULL)), uint8_t);
@@ -81,7 +81,7 @@ static inline int
 pap_firstargument_pre_offset(void)
 {
   /* Get offset of the last fixed field */
-  int offset = (char *)PAP_NARGUMENTS(NULL) - (char *)NULL;
+  int offset = (char *)&PAP_NARGUMENTS(NULL) - (char *)NULL;
 
   /* Add size of field */
   return offset + sizeof(PAP_NARGUMENTS(NULL));
@@ -269,7 +269,7 @@ call_pap(PyonPtr pap, PyonPtr return_struct)
 }
 
 /* Create a new PAP consisting of the function applied to the given argument
- * block, plus an additional argument bytes.
+ * block, plus some additional argument bytes.
  */
 static PyonPtr
 new_pap_bytes(PyonPtr fun, int n_arguments, void *p_arguments, void *arg_bytes)

@@ -28,7 +28,10 @@
 static inline int
 align(int offset, int alignment)
 {
-  return offset + (offset - alignment) % offset;
+  // compute offset % alignment using round-to-minus-infinity
+  int adjustment = offset % alignment +
+    ((offset >= 0) == (alignment >= 0) ? 0 : alignment);
+  return offset + adjustment;
 }
 
 /* A lookup table of the sizes and alignments of primitive types */
