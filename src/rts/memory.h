@@ -27,8 +27,7 @@ void copy4_inexact_entry(PyonPtr closure, PyonPtr args, PyonPtr ret);
 static inline void
 decref(PyonPtr p)
 {
-  /* FIXME: thread safety */
-  uint32_t rc = OBJECT_REFCT(p)--;
+  uint32_t rc = __sync_fetch_and_add(&OBJECT_REFCT(p), -1);
   if (rc == 1) {
     PyonFreeFunc free_func = INFO_FREE(OBJECT_INFO(p));
     free_func(p);
@@ -36,10 +35,9 @@ decref(PyonPtr p)
 }
 
 /* Increment an object's reference count. */
-static inline void
+static inline void __attribute__((always_inline))
 incref(PyonPtr p)
 {
-  /* FIXME: thread safety */
-  OBJECT_REFCT(p)++;
+  __sync_fetch_and_add(&OBJECT_REFCT(p), 1);
 }
 

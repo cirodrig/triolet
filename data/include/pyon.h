@@ -33,10 +33,3 @@ typedef void (*PyonFreeFunc)(PyonPtr);
 /* A boolean value passed to or returned from a function */
 typedef int PyonBool;
 
-/* Atomic add operation.  This should really be an instruction. */
-static inline int32_t pyon_atomic_add_s(int32_t *p, int delta)
-{
-  int32_t old = *p;
-  *p += delta;
-  return old;
-}

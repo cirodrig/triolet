@@ -352,9 +352,7 @@ genPrimCall prim args =
        | sz == nativeIntSize ->
            case args
            of [ptr, val] ->
-                let add_fun = case sgn
-                              of Signed   -> internalIdent "pyon_atomic_add_s"
-                                 Unsigned -> internalIdent "pyon_atomic_add_u"
+                let add_fun = internalIdent "__sync_fetch_and_add"
                     cast_ptr = genCast (IntType sgn sz) ptr
                 in CCall (CVar add_fun internalNode) [cast_ptr, val] internalNode
      PrimAddF _ -> binary CAddOp args
