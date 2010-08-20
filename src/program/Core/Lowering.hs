@@ -241,9 +241,9 @@ fieldOf ty =
                 of FunCT {} -> return owned_field
                    _ -> internalError "fieldOf: Unexpected type"
   where
-    int_field = return $ toDynamicFieldType $ PrimField pyonIntType
-    float_field = return $ toDynamicFieldType $ PrimField pyonFloatType
-    owned_field = return $ toDynamicFieldType $ PrimField OwnedType
+    int_field = return $ PrimField pyonIntType
+    float_field = return $ PrimField pyonFloatType
+    owned_field = return $ PrimField OwnedType
 
 -- | Generate code to compute the record layout of a data constructor with
 --   the given type arguments.

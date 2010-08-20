@@ -360,9 +360,6 @@ lookupCallVar v arity = lookupEntryPoints v >>= select
 -------------------------------------------------------------------------------
 -- Closure and record type definitions
 
-closureHeaderRecord' = toDynamicRecord papHeaderRecord
-funInfoHeaderRecord' = toDynamicRecord funInfoHeaderRecord
-
 -- | Create a record whose fields have the same type as the given values.
 valuesRecord :: [Val] -> StaticRecord
 valuesRecord vals = staticRecord $ map (PrimField . valPrimType) vals
@@ -571,8 +568,7 @@ initializeCapturedVariables captured_ptr clo =
   zipWithM_ init_var (recordFields $ closureCapturedRecord clo)
   (closureCapturedVariables clo)
   where
-    init_var field var =
-      storeField (toDynamicField field) captured_ptr (VarV var)
+    init_var field var = storeField field captured_ptr (VarV var)
 
 -- | Finalize a captured variables record by explicitly decrementing
 -- members' reference counts.
@@ -582,8 +578,7 @@ finalizeCapturedVariables captured_ptr clo =
   where
     finalize_field field 
       | fieldType field == PrimField OwnedType = do
-          f <- loadFieldWithoutOwnership (toDynamicField field) captured_ptr
-          decrefObject f
+          decrefObject =<< loadFieldWithoutOwnership field captured_ptr
       | PrimField _ <- fieldType field = return ()
       | otherwise = internalError "finalizeCapturedVariables"
 
@@ -609,14 +604,14 @@ initializeClosure group_record clo clo_ptr = do
     initialize_specialized_fields
       -- Recursive closure contains a pointer to the shared record
       | closureIsRecursive clo = do
-          storeField (toDynamicField $ closureRecord clo !!: 1) clo_ptr group_record
+          storeField (closureRecord clo !!: 1) clo_ptr group_record
 
       -- Global closure only contains object fields
       | closureIsGlobal clo = return ()
   
       -- Non-global closure contains captured variables
       | otherwise = do
-          captured_ptr <- referenceField (toDynamicField $ closureRecord clo !!: 1) clo_ptr
+          captured_ptr <- referenceField (closureRecord clo !!: 1) clo_ptr
           initializeCapturedVariables captured_ptr clo
 
 -- | Generate a free function for a non-recursive, non-top-level closure.
@@ -633,7 +628,7 @@ generateClosureFree clo = do
   param <- newAnonymousVar (PrimType PointerType)
   fun_body <- execBuild $ do
     -- Free the captured variables
-    captured_vars <- referenceField (toDynamicField $ closureRecord clo !!: 1) (VarV param)
+    captured_vars <- referenceField (closureRecord clo !!: 1) (VarV param)
     finalizeCapturedVariables captured_vars clo
     
     -- Deallocate the closure
@@ -652,9 +647,9 @@ generateSharedClosureRecord clos ptrs = do
   shared_ptr <- allocateHeapMem $ nativeWordV $ sizeOf record
 
   -- Initialize its fields
-  captured_vars_ptr <- referenceField (toDynamicField $ record !!: 0) shared_ptr
+  captured_vars_ptr <- referenceField (record !!: 0) shared_ptr
   initializeCapturedVariables captured_vars_ptr a_closure
-  group_record_ptr <- referenceField (toDynamicField $ record !!: 1) shared_ptr
+  group_record_ptr <- referenceField (record !!: 1) shared_ptr
   initialize_group_pointers group_record_ptr ptrs
   
   -- Return the record and free function
@@ -667,7 +662,7 @@ generateSharedClosureRecord clos ptrs = do
     initialize_group_pointers record_ptr ptrs =
       zipWithM_ init_ptr (recordFields group_record) ptrs
       where
-        init_ptr field ptr = storeField (toDynamicField field) record_ptr ptr
+        init_ptr field ptr = storeField field record_ptr ptr
 
 -- | Generate the free function for a shared closure record.
 --
@@ -682,7 +677,7 @@ emitSharedClosureRecordFree fun_var clos = do
   fun_body <- execBuild $ do
     -- Get the shared record
     shared_rec <-
-      loadField (toDynamicField $ recursiveClosureRecord !!: 1) (VarV param)
+      loadField (recursiveClosureRecord !!: 1) (VarV param)
 
     -- Check whether all reference counts are 0
     all_reference_counts_zero <-
@@ -698,7 +693,7 @@ emitSharedClosureRecordFree fun_var clos = do
     -- Check whether reference count is zero and update accumulator.
     -- acc = acc && (closure_ptr->refct == 0)
     check_reference_count acc _ closure_ptr = do
-      refct <- loadField (toDynamicField $ objectHeaderRecord !!: 0) closure_ptr
+      refct <- loadField (objectHeaderRecord !!: 0) closure_ptr
       refct_zero <- primCmpZ (PrimType nativeIntType) CmpEQ refct (nativeIntV 0)
       primAnd acc refct_zero
 
@@ -708,7 +703,7 @@ emitSharedClosureRecordFree fun_var clos = do
       
       -- Release all captured variables
       captured_vars_ptr <-
-        referenceField (toDynamicField $ closureSharedRecord a_closure !!: 0) shared_ptr
+        referenceField (closureSharedRecord a_closure !!: 0) shared_ptr
       finalizeCapturedVariables captured_vars_ptr a_closure
 
       -- Deallocate the shared record
@@ -728,11 +723,11 @@ foldOverGroup :: (a -> Closure -> Val -> GenM a)
 foldOverGroup f init group shared_ptr = do
   let shared_record = closureSharedRecord $ head group
   let group_record = closureGroupRecord $ head group
-  group_ptr <- referenceField (toDynamicField $ shared_record !!: 1) shared_ptr
+  group_ptr <- referenceField (shared_record !!: 1) shared_ptr
   
   -- Worker routine passes 'f' an un-owned pointer to the closure record
   let worker acc (clo, i) = do
-        x <- loadField (toDynamicField $ group_record !!: i) group_ptr
+        x <- loadField (group_record !!: i) group_ptr
         f acc clo x
         
   foldM worker init $ zip group [0..]
@@ -875,14 +870,14 @@ emitExactEntry clo = do
     load_captured_vars clo_ptr
       | closureIsRecursive clo = do
           -- Captured variables are in the shared record
-          shared_record <- loadField (toDynamicField $ recursiveClosureRecord !!: 1) clo_ptr
+          shared_record <- loadField (recursiveClosureRecord !!: 1) clo_ptr
           captured_vars <-
-            referenceField (toDynamicField $ closureSharedRecord clo !!: 0) clo_ptr
+            referenceField (closureSharedRecord clo !!: 0) clo_ptr
           load_captured_vars' captured_vars
       | closureIsLocal clo = do
           -- Captured variables are in the closure
           let field = localClosureRecord (closureCapturedRecord clo) !!: 1
-          captured_vars <- referenceField (toDynamicField field) clo_ptr
+          captured_vars <- referenceField field clo_ptr
           load_captured_vars' captured_vars
       | closureIsGlobal clo =
           -- Global closures don't capture variables
@@ -890,7 +885,7 @@ emitExactEntry clo = do
 
     -- Load all captured variables out of the record
     load_captured_vars' captured_ptr =
-      sequence [loadField (toDynamicField fld) captured_ptr
+      sequence [loadField fld captured_ptr
                | fld <- recordFields $ closureCapturedRecord clo]
 
 
@@ -919,11 +914,11 @@ emitInexactEntry clo = do
   writeFun $ FunDef (closureInexactEntry clo) fun
   where
     load_parameters params_ptr =
-      sequence [loadField (toDynamicField fld) params_ptr
+      sequence [loadField fld params_ptr
                | fld <- recordFields param_record]    
 
     store_parameters returns_ptr return_vals =
-      sequence [storeField (toDynamicField fld) returns_ptr val
+      sequence [storeField fld returns_ptr val
                | (fld, val) <- zip (recordFields return_record) return_vals]
 
     store_field ptr fld return_val = storeField fld ptr return_val
@@ -1097,15 +1092,15 @@ genIndirectCall return_types mk_op mk_args = return $ do
   args <- sequence mk_args
 
   -- Get the function info table and captured variables
-  inf_ptr <- loadField (toDynamicField $ objectHeaderRecord !!: 1) op
+  inf_ptr <- loadField (objectHeaderRecord !!: 1) op
 
   -- Can make an exact call if the callee is a function and
   -- the number of arguments matches the function's arity
-  inf_tag <- loadField (toDynamicField $ infoTableHeaderRecord !!: 1) inf_ptr
+  inf_tag <- loadField (infoTableHeaderRecord !!: 1) inf_ptr
   inf_tag_test <- primCmpZ (PrimType (IntType Unsigned S8)) CmpEQ inf_tag $
                   uint8V $ fromEnum FunTag
   let check_arity = do
-        arity <- loadField (funInfoHeaderRecord' !!: 1) inf_ptr
+        arity <- loadField (funInfoHeaderRecord !!: 1) inf_ptr
         eq <- primCmpZ (PrimType nativeWordType) CmpEQ arity $
           nativeWordV $ length args
         return $ ValA [eq]
@@ -1119,7 +1114,7 @@ genIndirectCall return_types mk_op mk_args = return $ do
   where
     exact_call clo_ptr inf_ptr args = do
       -- Get the exact entry point
-      fn <- loadField (funInfoHeaderRecord' !!: 3) inf_ptr
+      fn <- loadField (funInfoHeaderRecord !!: 3) inf_ptr
 
       -- Get the function's captured variables, then call the function
       return $ PrimCallA fn (clo_ptr : args)
@@ -1133,8 +1128,7 @@ genIndirectCall return_types mk_op mk_args = return $ do
       genApply clo_ptr args ret_ptr
 
       -- Extract return values, stealing references
-      ret_vals <- mapM (load_ret_value ret_ptr) $
-                  map toDynamicField $ recordFields ret_record
+      ret_vals <- mapM (load_ret_value ret_ptr) $ recordFields ret_record
 
       -- Free temporary storage
       deallocateHeapMem ret_ptr

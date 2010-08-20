@@ -190,6 +190,35 @@ uint16V n = LitV $ IntL Unsigned S16 $ fromIntegral n
 -------------------------------------------------------------------------------
 -- Record operations
 
+-- | A convenience class for interpreting records as dynamic records.
+--
+-- Static records are interpreted as dynamic records by converting all
+-- 'Int' fields to constant integer values.
+class ToDynamicRecordData a where
+  toDynamicRecord :: Record a -> Record Val
+  toDynamicField :: Field a -> Field Val
+  toDynamicFieldType :: FieldType a -> FieldType Val
+
+instance ToDynamicRecordData Val where
+  toDynamicRecord x = x
+  toDynamicField x = x
+  toDynamicFieldType x = x
+
+instance ToDynamicRecordData Int where
+  toDynamicRecord rec = let
+    fs = map toDynamicField $ recordFields rec
+    size = nativeWordV $ recordSize rec
+    alignment = nativeWordV $ recordAlignment rec
+    in record fs size alignment
+
+  toDynamicField (Field off ty) =
+    Field (nativeWordV off) (toDynamicFieldType ty)
+
+  toDynamicFieldType (PrimField t) = PrimField t
+  toDynamicFieldType (RecordField rec) = RecordField $ toDynamicRecord rec
+  toDynamicFieldType (BytesField s a) =
+        BytesField (nativeWordV s) (nativeWordV a)
+
 -- | Unpack a pass-by-value record
 unpackRecord :: (Monad m, Supplies m (Ident Var)) =>
                 StaticRecord -> Val -> Gen m [Var]
@@ -213,38 +242,21 @@ selectField ty index val = do
   fields <- unpackRecord ty val
   return $ VarV $ fields !! index
 
-toDynamicRecord :: StaticRecord -> DynamicRecord
-toDynamicRecord rec = let
-  fs = map toDynamicField $ recordFields rec
-  size = nativeWordV $ recordSize rec
-  alignment = nativeWordV $ recordAlignment rec
-  in record fs size alignment
-
-toDynamicField :: StaticField -> DynamicField
-toDynamicField (Field off ty) =
-  Field (nativeWordV off) (toDynamicFieldType ty)
-
-toDynamicFieldType :: StaticFieldType -> DynamicFieldType
-toDynamicFieldType (PrimField t) = PrimField t
-toDynamicFieldType (RecordField rec) = RecordField $ toDynamicRecord rec
-toDynamicFieldType (BytesField s a) =
-      BytesField (nativeWordV s) (nativeWordV a)
-
-dynamicFieldSize :: DynamicField -> Val
+dynamicFieldSize :: (ToDynamicRecordData a) => Field a -> Val
 dynamicFieldSize f = dynamicFieldTypeSize $ fieldType f
 
-dynamicFieldAlignment :: DynamicField -> Val
+dynamicFieldAlignment :: (ToDynamicRecordData a) => Field a -> Val
 dynamicFieldAlignment f = dynamicFieldTypeAlignment $ fieldType f
 
-dynamicFieldTypeSize :: DynamicFieldType -> Val
-dynamicFieldTypeSize ft =
+dynamicFieldTypeSize :: (ToDynamicRecordData a) => FieldType a -> Val
+dynamicFieldTypeSize (toDynamicFieldType -> ft) =
   case ft
   of PrimField vt   -> nativeWordV $ sizeOf vt
      RecordField r -> recordSize r
      BytesField s _  -> s
 
-dynamicFieldTypeAlignment :: DynamicFieldType -> Val
-dynamicFieldTypeAlignment ft = 
+dynamicFieldTypeAlignment :: (ToDynamicRecordData a) => FieldType a -> Val
+dynamicFieldTypeAlignment (toDynamicFieldType -> ft) =
   case ft
   of PrimField vt   -> nativeWordV $ alignOf vt
      RecordField r -> recordAlignment r
@@ -298,9 +310,9 @@ fromPrimType (PrimField ty) = PrimType ty
 fromPrimType _ = internalError "Expecting a primitive field type"
 
 -- | Load one field of a record into a variable
-loadField :: (Monad m, Supplies m (Ident Var)) =>
-             DynamicField -> Val -> Gen m Val
-loadField field ptr = do
+loadField :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>
+             Field a -> Val -> Gen m Val
+loadField (toDynamicField -> field) ptr = do
   let off = fieldOffset field
       ty = fromPrimType $ fieldType field
   v <- lift $ newAnonymousVar ty
@@ -309,9 +321,10 @@ loadField field ptr = do
 
 -- | Load an owned field as a non-owned pointer.  Reference counts will not 
 -- be tracked or adjusted.
-loadFieldWithoutOwnership :: (Monad m, Supplies m (Ident Var)) =>
-                             DynamicField -> Val -> Gen m Val
-loadFieldWithoutOwnership field ptr = do
+loadFieldWithoutOwnership :: (Monad m, Supplies m (Ident Var),
+                              ToDynamicRecordData a) =>
+                             Field a -> Val -> Gen m Val
+loadFieldWithoutOwnership (toDynamicField -> field) ptr = do
   let off = fieldOffset field
 
   -- Must be an owned field
@@ -324,25 +337,25 @@ loadFieldWithoutOwnership field ptr = do
   return (VarV v)
 
 -- | Load one field of a record into a local variable
-loadFieldAs :: (Monad m, Supplies m (Ident Var)) =>
-               DynamicField -> Val -> Var -> Gen m ()
-loadFieldAs field ptr dst =
+loadFieldAs :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>
+               Field a -> Val -> Var -> Gen m ()
+loadFieldAs (toDynamicField -> field) ptr dst =
   let off = fieldOffset field
       ty = fromPrimType $ fieldType field
   in primLoadOff ty ptr off dst
 
 -- | Store into one field of a record
-storeField :: (Monad m, Supplies m (Ident Var)) =>
-              DynamicField -> Val -> Val -> Gen m ()
-storeField field ptr value =
+storeField :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>
+              Field a -> Val -> Val -> Gen m ()
+storeField (toDynamicField -> field) ptr value =
   let off = fieldOffset field
       ty = fromPrimType $ fieldType field
   in primStoreOff ty ptr off value
 
 -- | Get a pointer to a field of a record, given the base pointer.
-referenceField :: (Monad m, Supplies m (Ident Var)) =>
-                  DynamicField -> Val -> Gen m Val
-referenceField field ptr = primAddP ptr $ fieldOffset field
+referenceField :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>
+                  Field a -> Val -> Gen m Val
+referenceField (toDynamicField -> field) ptr = primAddP ptr $ fieldOffset field
 
 -------------------------------------------------------------------------------
 -- Other operations
