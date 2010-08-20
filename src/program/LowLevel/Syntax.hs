@@ -45,6 +45,9 @@ data Prim =
   | PrimMaxZ !Signedness !Size  -- ^ Compute maximum
   | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
   | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers
+  | PrimAnd                           -- ^ Boolean and
+  | PrimOr                            -- ^ Boolean or
+  | PrimNot                           -- ^ Boolean negation
   | PrimAddP                    -- ^ Add a native unsigned integer to a
                                 --   (owned or non-owned) pointer.  The result
                                 --   is a non-owned pointer.

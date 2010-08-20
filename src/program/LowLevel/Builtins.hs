@@ -19,6 +19,8 @@ module LowLevel.Builtins
         the_prim_apply_i32,
         the_prim_apply_f32_f,
         the_prim_apply_f32,
+        the_prim_apply_o_f,
+        the_prim_apply_o,
         the_prim_free_pap,
         the_fun_add_int,
         the_fun_sub_int,

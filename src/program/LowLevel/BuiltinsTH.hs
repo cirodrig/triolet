@@ -6,6 +6,7 @@ where
 import Language.Haskell.TH(Strict(..))
 import Language.Haskell.TH.Syntax(Lift(..))
 
+import Gluon.Common.Error
 import Gluon.Common.Label
 import Gluon.Common.THRecord
 import qualified SystemF.Builtins as SystemF
@@ -49,6 +50,7 @@ instance Lift FunctionType where
   lift ft
     | ftIsPrim ft    = [| primFunctionType params returns |]
     | ftIsClosure ft = [| closureFunctionType params returns |]
+    | otherwise      = internalError "FunctionType.lift"
     where
       params = ftParamTypes ft
       returns = ftReturnTypes ft
@@ -82,6 +84,13 @@ builtinPrimitives =
   , (builtinModuleName, "apply_f32",
      primFunctionType [PrimType OwnedType
                       , PrimType (FloatType S32)
+                      , PrimType PointerType] [])
+  , (builtinModuleName, "apply_o_f",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType OwnedType] [PrimType OwnedType])
+  , (builtinModuleName, "apply_o",
+     primFunctionType [PrimType OwnedType
+                      , PrimType OwnedType
                       , PrimType PointerType] [])
   , (builtinModuleName, "free_pap",
      primFunctionType [PrimType PointerType] [])

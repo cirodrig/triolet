@@ -16,8 +16,8 @@ import LowLevel.Record
 -- distinction between pointer and integer is not retained, and neither is
 -- the distinction between signed and unsigned.
 data TypeTag =
-    Int8Tag | Int16Tag | Int32Tag | Int64Tag 
-  | Float32Tag | Float64Tag 
+    Int8Tag | Int16Tag | Int32Tag | Int64Tag
+  | Float32Tag | Float64Tag
   | OwnedRefTag
   deriving(Eq, Ord, Enum, Show)
 
@@ -27,7 +27,7 @@ intSizeTypeTag S32 = Int32Tag
 intSizeTypeTag S64 = Int64Tag
 
 -- | An info table tag, which indicates an info table's type
-data InfoTag = FunTag | PAPTag
+data InfoTag = FunTag | PAPTag | ConTag
   deriving(Eq, Ord, Enum, Show)
 
 -- | Get the type tag of a primitive type
@@ -44,15 +44,7 @@ toTypeTag OwnedType       = OwnedRefTag
 -- register it's passed in), and values smaller than a native word are 
 -- promoted to native words.
 promotedTypeTag :: PrimType -> TypeTag
-promotedTypeTag ty =
-  case ty
-  of BoolType -> toTypeTag nativeWordType
-     IntType _ sz
-       | sz <= nativeIntSize -> toTypeTag $ IntType Unsigned nativeIntSize
-       | otherwise           -> toTypeTag $ IntType Unsigned sz
-     t@(FloatType _) -> toTypeTag t
-     PointerType -> pointerTypeTag
-     OwnedType -> pointerTypeTag
+promotedTypeTag ty = toTypeTag $ promoteType ty
 
 pointerTypeTag =
   if pointerSize < nativeIntSize
@@ -102,32 +94,21 @@ infoTableHeaderRecord = staticRecord infoTableHeader
 --
 --  1. Info table type tag
 --
---  2. Arity (number of arguments)
+--  2. Arity (number of arguments; excludes closure)
 --
---  3. Number of captured variables
+--  3. Exact entry point
 --
---  4. Number of mutually recursive functions
+--  4. Inexact entry point
 --
---  5. Exact entry point
---
---  6. Inexact entry point
---
---  These are followed by a list of argument types (length is arity)
---  and a list of captured variable types (length is number of captured vars).
+--  These are followed by a list of argument type tags (length is arity).
 funInfoHeader :: [StaticFieldType]
-funInfoHeader = infoTableHeader ++
-                [ PrimField (IntType Unsigned S16)
-                , PrimField (IntType Unsigned S16)
+funInfoHeader = [ RecordField infoTableHeaderRecord
                 , PrimField (IntType Unsigned S16)
                 , PrimField PointerType
                 , PrimField PointerType]
 
 funInfoHeaderRecord :: StaticRecord
 funInfoHeaderRecord = staticRecord funInfoHeader
-
--- | A PAP info table contains only the minimum information. 
-papInfoRecord :: StaticRecord
-papInfoRecord = infoTableHeaderRecord
 
 -- | All reference-counted objects have a common header format.
 --
@@ -141,36 +122,35 @@ objectHeader = [ PrimField nativeWordType
 objectHeaderRecord :: StaticRecord
 objectHeaderRecord = staticRecord objectHeader
 
--- | A function closure is an object containing a function's captured
--- variables, including pointers to mutually recursive functions.
---
--- The fields that follow the header are function-specific.
-closureHeader :: [StaticFieldType]
-closureHeader = objectHeader
+-- | A global closure consists of only an object header
+globalClosureRecord :: StaticRecord
+globalClosureRecord = staticRecord [RecordField objectHeaderRecord]
 
-closureHeaderRecord :: StaticRecord
-closureHeaderRecord = objectHeaderRecord
+-- | A recursive closure consists of an object header and a pointer
+recursiveClosureRecord :: StaticRecord
+recursiveClosureRecord = staticRecord [ RecordField objectHeaderRecord
+                                      , PrimField PointerType]
 
--- | A partial application structure contains a closure and some
--- function arguments.
--- 
--- The fields are:
---
---  0. Reference count
---
---  1. Info table pointer
---
---  2. The function that is applied
---
---  3. Number of function arguments
+-- | A non-global, non-recursive closure contains captured variables 
+localClosureRecord :: StaticRecord -> StaticRecord
+localClosureRecord captured_vars =
+  staticRecord [RecordField objectHeaderRecord, RecordField captured_vars]
+
+-- | A function or partial application is an object containing a
+-- function's captured variables, including pointers to mutually recursive
+-- functions.  The info table together with the 'nargs' field determines the
+-- layout of the remaining fields.
 papHeader :: [StaticFieldType]
-papHeader = objectHeader ++
-            [ PrimField OwnedType   -- Function
-            , PrimField nativeWordType] -- Number of arguments
+papHeader = [ RecordField objectHeaderRecord
+            , PrimField OwnedType
+            , PrimField (IntType Unsigned S16)
+            ]
 
 papHeaderRecord :: StaticRecord
 papHeaderRecord = staticRecord papHeader
 
+
+{-
 -- | A stream object.
 --
 -- There are several kinds of stream objects.  All stream objects have a
@@ -205,6 +185,7 @@ listRecord = staticRecord
              [ PrimField nativeWordType -- Size
              , PrimField PointerType    -- Pointer to contents
              ]
+-}
 
 {-
 -- The stream return creator and stream return initializer have nothing

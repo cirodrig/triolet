@@ -82,18 +82,13 @@ defineAll = vcat
   [ defineRecord infoTableHeaderRecord "INFO"
     ["FREE", "TAG"]
   , defineRecord funInfoHeaderRecord "FUNINFO"
-    ["FREE", "TAG", "ARITY", "NCAPTURED", "NRECURSIVE", "EXACT", "INEXACT"]
+    ["FREE", "TAG", "ARITY", "EXACT", "INEXACT"]
   , defineRecord objectHeaderRecord "OBJECT"
     ["REFCT", "INFO"]
   , defineRecord papHeaderRecord "PAP"
     ["REFCT", "INFO", "FUN", "NARGUMENTS"]
-  , defineRecord streamRecord "STREAM"
-    ["REFCT", "INFO", "FUN", "INIT", "PASSCONV_SIZE", "PASSCONV_ALIGN",
-     "PASSCONV_COPY", "PASSCONV_FINI"]
   , defineRecord passConvRecord "PASSCONV"
     ["SIZE", "ALIGN", "COPY", "FINI"]
-  , defineRecord listRecord "LIST"
-    ["SIZE", "DATA"]
   , defineTypeTag "INT8_TAG" Int8Tag
   , defineTypeTag "INT16_TAG" Int16Tag
   , defineTypeTag "INT32_TAG" Int32Tag

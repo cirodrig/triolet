@@ -41,7 +41,7 @@ initializeClosureField supply mod nm fty =
     v <- newExternalVar lab ext_name (PrimType OwnedType)
 
     -- All builtin closures use the default closure deallocator
-    ep <- mkEntryPoints CannotDeallocate fty (Just lab)
+    ep <- mkEntryPoints NeverDeallocate fty (Just lab)
     return (v, ep)
 
 initializeVarField :: IdentSupply Var 

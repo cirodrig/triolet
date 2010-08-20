@@ -1,5 +1,42 @@
 {-| Generation of code and data structures for closure conversion.
+
+* Function closures
+
+A function /closure/ is an object containing a function and its captured
+variables.  Closures are implemented one of three different ways:
+
+ * A top-level function closure is implemented as a global, statically
+   allocated object.  Top-level functions never capture variables.
+
+ * A nonrecursive function closure is a dynamically allocated object
+   containing a reference to the function info table and the captured
+   variables.
+
+ * A recursive function closure is a dynamically allocated object containing  
+   a reference to the function info table and a group closure.  The group
+   closure is a shared record holding all captured variables and referencing
+   all functions in the group.
+
+** Memory management
+
+Closures are reference-counted objects.  Global closures have their reference
+count initialized to 1 so that they are never deallocated.  Recursive closures
+are handled specially because they have cyclic references.
+
+When a recursive closure's reference count falls to zero, the other functions
+in the group are inspected.  If all reference counts are zero, then all
+members of the group are deallocated along with the shared record.  Otherwise,
+the closure is still live and is not finalized or deallocated.
+
+* Partial applications
+
+A /partial application/ structure is a record consisting of a function and
+some function arguments.  The number of arguments is stored as a field of 
+the PAP.  The arguments stored in a PAP are /promoted/ up to native
+register sizes; so, for example, a bool is stored as a native integer.
+
 -}
+
 {-# LANGUAGE FlexibleInstances, RecursiveDo, ViewPatterns #-}
 module LowLevel.ClosureCode
        (varPrimType,
@@ -39,6 +76,7 @@ import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Records
+import LowLevel.RecordFlattening
 import LowLevel.Build
 import Globals
 
@@ -149,7 +187,8 @@ lookupClosure v = CC $ \env ->
 
 lookupEntryPoints :: Var -> CC (Maybe EntryPoints)
 lookupEntryPoints v = CC $ \env ->
-  returnCC $ fmap cloEntryPoints $ IntMap.lookup (fromIdent $ varID v) $ envEntryPoints env
+  returnCC $ fmap closureEntryPoints $ IntMap.lookup (fromIdent $ varID v) $
+  envEntryPoints env
 
 lookupEntryPoints' :: Var -> CC EntryPoints
 lookupEntryPoints' v = lookupEntryPoints v >>= check
@@ -204,7 +243,7 @@ localClosure :: Closure -> CC a -> CC a
 localClosure clo (CC f) = CC $ \env -> f (insert_closure env)
   where
     insert_closure env =
-      let k = fromIdent $ varID $ cloVariable clo
+      let k = fromIdent $ varID $ closureVar clo
       in env {envEntryPoints = IntMap.insert k clo $ envEntryPoints env}
 
 -- | Generate global functions and data from a set of global functions.
@@ -223,8 +262,8 @@ withGlobalFunctions defs scan gen = do
 -- Otherwise return Nothing.  No code is generated.
 mkGlobalClosure (FunDef v fun) 
   | isClosureFun fun = do
-      entry_points <- mkEntryPoints CannotDeallocate (funType fun) (varName v)
-      return $ Just $ nonrecClosure v entry_points []
+      entry_points <- mkEntryPoints NeverDeallocate (funType fun) (varName v)
+      return $ Just $ globalClosure v entry_points
   | otherwise = return Nothing
 
 withLocalFunctions :: [FunDef]          -- ^ Function definitions
@@ -259,8 +298,9 @@ withLocalFunctions defs scan gen = check_functions $ mdo
 -- No code is generated.
 mkRecClosures defs captureds = do
   -- Create entry points structure
+  deallocator_fn <- newAnonymousVar (PrimType PointerType)
   entry_points <- forM defs $ \(FunDef v f) ->
-    mkEntryPoints CustomDeallocator (funType f) (varName v)
+    mkEntryPoints (CustomDeallocator deallocator_fn) (funType f) (varName v)
  
   return $ closureGroup $
     lazyZip3 (map funDefiniendum defs) entry_points captureds
@@ -318,14 +358,27 @@ lookupCallVar v arity = lookupEntryPoints v >>= select
           return $ Left v
 
 -------------------------------------------------------------------------------
+-- Closure and record type definitions
 
-objectHeaderLength = length objectHeader
-closureHeaderRecord' = toDynamicRecord closureHeaderRecord
+closureHeaderRecord' = toDynamicRecord papHeaderRecord
 funInfoHeaderRecord' = toDynamicRecord funInfoHeaderRecord
 
--- | Create a record whoe fields have the same type as the given values.
+-- | Create a record whose fields have the same type as the given values.
 valuesRecord :: [Val] -> StaticRecord
 valuesRecord vals = staticRecord $ map (PrimField . valPrimType) vals
+
+primTypesRecord :: [PrimType] -> StaticRecord
+primTypesRecord tys = staticRecord $ map PrimField tys
+
+promotedPrimTypesRecord :: [PrimType] -> StaticRecord
+promotedPrimTypesRecord tys =
+  staticRecord $ map (PrimField . promoteType) tys
+
+-- | A recursive group's shared closure record.  The record contains captured
+-- variables and pointers to functions in the group.
+groupSharedRecord :: StaticRecord -> StaticRecord -> StaticRecord
+groupSharedRecord captured_record group_record =
+  staticRecord [RecordField captured_record, RecordField group_record]
 
 -- | A description of a function closure.  The description is used to create
 --   all the code and static data for the function other than the direct entry
@@ -333,145 +386,389 @@ valuesRecord vals = staticRecord $ map (PrimField . valPrimType) vals
 data Closure =
   Closure
   { -- | The variable that will point to this closure
-    cloVariable :: !Var
+    _cVariable :: !Var
+    -- | True if the closure is for a global function.  If True, the closure
+    -- is not recursive, has no captured variables, and will be generated as 
+    -- a statically allocated, global object.
+  , _cIsGlobal :: {-# UNPACK #-} !Bool
     -- | The entry points for the function that this closure defines
-  , cloEntryPoints :: EntryPoints
-    -- | Variables captured by the closure
-  , cloCaptured :: [Var]
-    -- | The closure's record type
-  , cloRecord :: StaticRecord
-    -- | The contents of the closure's info table
-  , cloInfoTable :: [Val]
+  , _cEntryPoints :: EntryPoints
+    -- | Variables captured by the closure.  In a closure group, the captured
+    -- variables are shared by all group members.
+  , _cCaptured :: [Var]
     -- | If the closure is part of a recursively defined group,
     --   these are the closures in the group.  All closures in the group  
     --   have the same group.  A closure is part of its own group.
-  , cloGroup    :: Maybe ClosureGroup
+  , _cGroup    :: !(Maybe ClosureGroup)
+    -- | The closure's record type
+  , _cRecord :: StaticRecord
+    -- | The type of a record holding the closure's captured variables
+  , _cCapturedRecord :: StaticRecord
+    -- | If the closure is part of a recursively defined group,
+    -- this is the shared record type.
+  , _cSharedRecord :: !(Maybe StaticRecord)
   }
 
-cloType c = entryPointsType $ cloEntryPoints c
+closureType c = entryPointsType $ _cEntryPoints c
 
-cloIsRecursive c = isJust (cloGroup c)
+closureIsGlobal c = _cIsGlobal c
+closureIsRecursive c = isJust (_cGroup c)
+closureIsLocal c = not $ closureIsGlobal c || closureIsRecursive c
 
-cloCapturedFields :: Closure -> [StaticField]
-cloCapturedFields clo =
-  take (length $ cloCaptured clo) $ drop objectHeaderLength $
-  recordFields $ cloRecord clo
-  
+-- | Get the variable that holds a closure value
+closureVar c = _cVariable c
+
+closureEntryPoints c = _cEntryPoints c
+
+closureArity c = functionArity $ _cEntryPoints c
+
+-- | Get the direct entry point of a closure
+closureDirectEntry c = directEntry $ _cEntryPoints c
+ 
+-- | Get the exact entry point of a closure
+closureExactEntry c = exactEntry $ _cEntryPoints c
+
+-- | Get the ineexact entry point of a closure
+closureInexactEntry c = inexactEntry $ _cEntryPoints c
+
+-- | Get the info table variable of a closure
+closureInfoTableEntry c = infoTableEntry $ _cEntryPoints c
+
+-- | Get the deallocation entry point of a closure
+closureDeallocEntry c = deallocEntry $ _cEntryPoints c
+
+closureCapturedVariables :: Closure -> [Var]
+closureCapturedVariables c = _cCaptured c
+
+-- | Get the record type of the closure
+closureRecord :: Closure -> StaticRecord
+closureRecord clo = _cRecord clo
+
+-- | Get the record type of the closure's captured variables.  Each field of
+-- the record holds the corresponding captured variable from the captured
+-- variable list.
+closureCapturedRecord :: Closure -> StaticRecord
+closureCapturedRecord clo = _cCapturedRecord clo
+
+-- | Get the record type of the closure's recursive group pointers.  Only
+-- recursive closures have this record.
+closureGroupRecord :: Closure -> StaticRecord
+closureGroupRecord clo =
+  case fieldType $ recordFields (closureSharedRecord clo) !! 1
+  of RecordField t -> t
+     _ -> internalError "closureGroupRecord"
+
+-- | Get the record type of the closure's group-shared data.  Only recursive 
+-- closures have a shared record.
+closureSharedRecord :: Closure -> StaticRecord
+closureSharedRecord clo =
+  case _cSharedRecord clo
+  of Just r  -> r
+     Nothing -> internalError "closureSharedRecord: Not a recursive closure"
+
+{- Obsolete code
+
+-- | Get the field that holds a reference to the recursive group's shared data.
+-- This field is only present in a recursive closure.
+cloRecursiveField :: Closure -> Maybe StaticField
+cloRecursiveField clo
+  | cloIsRecursive clo = Just $ recordFields (cloRecord clo) !! 1
+  | otherwise = Nothing
+
 cloRecursiveFields :: Closure -> [StaticField]
 cloRecursiveFields clo =
-  drop (length (cloCaptured clo) + objectHeaderLength) $
-  recordFields $ cloRecord clo
+  case cloGroup clo
+  of Just (_, record) -> take (length (cloCaptured clo)) $
+                         drop 1 $ recordFields record
+     Nothing -> []
+
+cloRecursiveFunctions :: Closure -> [StaticField]
+cloRecursiveFunctions clo =
+  case cloGroup clo
+  of Just (grp, record) -> take (length grp) $
+                           drop (1 + length (cloCaptured clo)) $
+                           recordFields record
+-}
 
 type ClosureGroup = [Closure]
 
-closure :: Var -> EntryPoints -> [Var] -> Maybe ClosureGroup -> Closure
-closure var entry captured recursive = check_variables $
-  Closure { cloVariable    = var
-          , cloEntryPoints = entry
-          , cloCaptured    = captured
-          , cloRecord      = record
-          , cloInfoTable   = info
-          , cloGroup       = recursive
+-- | Construct a closure.  The closure's record types and info table 
+-- contents are constructed.
+--
+-- This function is only called from the higher-level closure constructor 
+-- functions.  Argument checking is performed there.
+closure :: Var                  -- ^ Closure variable name
+        -> Bool                 -- ^ True if closure is for a global function
+        -> EntryPoints          -- ^ Function entry points
+        -> [Var]                -- ^ Captured variables
+        -> Maybe ClosureGroup   -- ^ Recursive group
+        -> Closure
+closure var is_global entry captured recursive = checks $
+  Closure { _cVariable       = var
+          , _cIsGlobal       = is_global
+          , _cEntryPoints    = entry
+          , _cCaptured       = captured
+          , _cGroup          = recursive
+          , _cRecord         = closure_record
+          , _cCapturedRecord = captured_record
+          , _cSharedRecord   = shared_record
           }
   where
-    check_variables k
+    checks k
+      -- Closure variable must be owned
       | varType var /= PrimType OwnedType =
           internalError "closure: Wrong variable type"
+      -- If global, captured variables must be empty
+      | is_global && not (null captured) =
+          internalError "closure: Top-level function cannot capture variables"
+      -- If global, must not be recursive
+      | is_global && is_recursive_group =
+          internalError ("closure: Top-level function cannot be part of " ++
+                         "a recursive definition")
       | otherwise = k
 
-    -- Closure contains captured variables 
-    record = staticRecord $
-             closureHeader ++
-             map (PrimField . varPrimType) captured ++
-             replicate (maybe 0 length recursive) (PrimField PointerType)
-    
-    -- see 'funInfoHeader'
-    info = [ maybe (LitV NullL) VarV $ deallocEntry entry
-           , uint8V $ fromEnum FunTag
-           , uint16V $ functionArity entry
-           , uint16V $ length captured
-           , uint16V $ maybe 0 length recursive
-           , VarV $ exactEntry entry
-           , VarV $ inexactEntry entry] ++
-           arg_type_tags ++ cap_type_tags
+    -- True if this closure is part of a recursive closure group
+    is_recursive_group = isJust recursive
 
-    arg_types = map valueToPrimType $ ftParamTypes $ entryPointsType entry
-    arg_type_tags = map (uint8V . fromEnum . toTypeTag) arg_types
+    -- Captured variables
+    captured_record = staticRecord $ map (PrimField . varPrimType) captured
     
-    cap_types = map varPrimType captured
-    cap_type_tags = map (uint8V . fromEnum . toTypeTag) cap_types
+    -- If this function is part of a recursive group, the closure contains 
+    -- only a reference to the shared record.  If global, it contains only  
+    -- the header.  Otherwise, it contains the captured variables.
+    closure_record
+      | is_global = globalClosureRecord
+      | is_recursive_group = recursiveClosureRecord
+      | otherwise = localClosureRecord captured_record
+
+    -- The shared record contains the captured variables and the 
+    -- functions in the group.
+    shared_record =
+      case recursive
+      of Just closures ->
+           let group_record =
+                 staticRecord $
+                 replicate (length closures) (PrimField PointerType)
+           in Just $ groupSharedRecord captured_record group_record
+         Nothing -> Nothing
 
 nonrecClosure :: Var -> EntryPoints -> [Var] -> Closure
-nonrecClosure v e cap = closure v e cap Nothing
+nonrecClosure v e cap = closure v False e cap Nothing
+
+globalClosure :: Var -> EntryPoints -> Closure
+globalClosure v e = closure v True e [] Nothing
 
 closureGroup :: [(Var, EntryPoints, [Var])] -> ClosureGroup
 closureGroup xs = group
   where
-    group = [closure v e cap (Just group) | (v, e, cap) <- xs] 
+    group = [closure v False e cap (Just group) | (v, e, cap) <- xs]
+  
+-------------------------------------------------------------------------------
+
+-- | Initialize a captured variables record
+initializeCapturedVariables :: Val -> Closure -> GenM ()
+initializeCapturedVariables captured_ptr clo =
+  zipWithM_ init_var (recordFields $ closureCapturedRecord clo)
+  (closureCapturedVariables clo)
+  where
+    init_var field var =
+      storeField (toDynamicField field) captured_ptr (VarV var)
+
+-- | Finalize a captured variables record by explicitly decrementing
+-- members' reference counts.
+finalizeCapturedVariables :: Val -> Closure -> GenM ()
+finalizeCapturedVariables captured_ptr clo =
+  mapM_ finalize_field (recordFields $ closureCapturedRecord clo)
+  where
+    finalize_field field 
+      | fieldType field == PrimField OwnedType = do
+          f <- loadFieldWithoutOwnership (toDynamicField field) captured_ptr
+          decrefObject f
+      | PrimField _ <- fieldType field = return ()
+      | otherwise = internalError "finalizeCapturedVariables"
 
 -- | Allocate, but do not initialize, a closure.
 -- The created closure is returned.
 allocateClosure :: Closure -> GenM Val
 allocateClosure clo =
-  allocateHeapMem $ nativeWordV $ recordSize $ cloRecord clo
+  allocateHeapMem $ nativeWordV $ recordSize $ closureRecord clo
 
 -- | Initialize a closure.
 --
--- The first argument is a list of un-owned pointers to other closures in
--- the recursive group.  This list is ignored for non-recursive function 
--- definitions.
+-- The first argument is a pointer to the shared closure record, only used 
+-- in recursive groups.
 --
 -- The initialized closure is assigned to the variable given in
 -- the 'cloVariable' field.
-initializeClosure group_ptrs clo clo_ptr = do
-  initializeObject clo_ptr (VarV $ infoTableEntry $ cloEntryPoints clo)
-  zipWithM_ init_captured captured_fields (map VarV $ cloCaptured clo)
-  when (cloIsRecursive clo) $ zipWithM_ init_rec group_fields group_ptrs
-  -- Cast to an owned pointer
-  bindAtom1 (cloVariable clo) $ PrimA PrimCastToOwned [clo_ptr]
-
+initializeClosure :: Val -> Closure -> Val -> GenM ()
+initializeClosure group_record clo clo_ptr = do
+  initializeObject clo_ptr (VarV $ closureInfoTableEntry clo)
+  initialize_specialized_fields
+  bindAtom1 (closureVar clo) $ PrimA PrimCastToOwned [clo_ptr]
   where
-    captured_fields = map toDynamicField $ cloCapturedFields clo
-    group_fields = map toDynamicField $ cloRecursiveFields clo
-    
-    -- Write a captured variable
-    init_captured fld val = storeField fld clo_ptr val
-    
-    -- Write a pointer to another closure in the group.  The pointer is
-    -- not owned.
-    init_rec fld other_clo = storeField fld clo_ptr other_clo
+    initialize_specialized_fields
+      -- Recursive closure contains a pointer to the shared record
+      | closureIsRecursive clo = do
+          storeField (toDynamicField $ closureRecord clo !!: 1) clo_ptr group_record
 
--- | Create a statically defined closure object for a global function.
-generateGlobalClosure :: Closure -> CC ()
+      -- Global closure only contains object fields
+      | closureIsGlobal clo = return ()
+  
+      -- Non-global closure contains captured variables
+      | otherwise = do
+          captured_ptr <- referenceField (toDynamicField $ closureRecord clo !!: 1) clo_ptr
+          initializeCapturedVariables captured_ptr clo
+
+-- | Generate a free function for a non-recursive, non-top-level closure.
+-- The free function is added to the set of top-level definitions.
+generateClosureFree :: Closure -> CC ()
+generateClosureFree clo = do
+  when (closureIsRecursive clo || closureIsGlobal clo) $
+    internalError "generateClosureFree: Not a local closure"
+
+  let dealloc_fun = case closureDeallocEntry clo
+                    of Just x -> x
+                       Nothing -> internalError "generateClosureFree"
+
+  param <- newAnonymousVar (PrimType PointerType)
+  fun_body <- execBuild $ do
+    -- Free the captured variables
+    captured_vars <- referenceField (toDynamicField $ closureRecord clo !!: 1) (VarV param)
+    finalizeCapturedVariables captured_vars clo
+    
+    -- Deallocate the closure
+    deallocateHeapMem (VarV param)
+    gen0
+  
+  -- Write this to the closure's deallocation function entry
+  let fun = primFun [param] [] fun_body
+  writeFun $ FunDef dealloc_fun fun
+
+-- | Generate a shared closure record value and a function that frees the
+-- entire recursive function group.
+generateSharedClosureRecord :: ClosureGroup -> [Val] -> GenM Val
+generateSharedClosureRecord clos ptrs = do
+  -- Create a new record
+  shared_ptr <- allocateHeapMem $ nativeWordV $ sizeOf record
+
+  -- Initialize its fields
+  captured_vars_ptr <- referenceField (toDynamicField $ record !!: 0) shared_ptr
+  initializeCapturedVariables captured_vars_ptr a_closure
+  group_record_ptr <- referenceField (toDynamicField $ record !!: 1) shared_ptr
+  initialize_group_pointers group_record_ptr ptrs
+  
+  -- Return the record and free function
+  return shared_ptr
+  where
+    a_closure = head clos
+    record = closureSharedRecord a_closure
+    group_record = closureGroupRecord a_closure
+
+    initialize_group_pointers record_ptr ptrs =
+      zipWithM_ init_ptr (recordFields group_record) ptrs
+      where
+        init_ptr field ptr = storeField (toDynamicField field) record_ptr ptr
+
+-- | Generate the free function for a shared closure record.
+--
+-- The free function takes a closure record as a parameter (all recursive
+-- closures have a pointer to teh shared record in the same place).
+-- It first checks whether all records in the group have a
+-- reference count of zero.  If so, then each record is deallocated and the
+-- shared closure as a whole is deallocated.
+emitSharedClosureRecordFree :: Var -> ClosureGroup -> CC ()
+emitSharedClosureRecordFree fun_var clos = do
+  param <- newAnonymousVar (PrimType PointerType)
+  fun_body <- execBuild $ do
+    -- Get the shared record
+    shared_rec <-
+      loadField (toDynamicField $ recursiveClosureRecord !!: 1) (VarV param)
+
+    -- Check whether all reference counts are 0
+    all_reference_counts_zero <-
+      foldOverGroup check_reference_count (LitV $ BoolL True) clos shared_rec
+
+    -- If so, then free everything.  Otherwise, do nothing.
+    genIf all_reference_counts_zero (free_everything shared_rec) gen0
+  
+  -- Write the global function
+  let fun = primFun [param] [] fun_body
+  writeFun $ FunDef fun_var fun
+  where
+    -- Check whether reference count is zero and update accumulator.
+    -- acc = acc && (closure_ptr->refct == 0)
+    check_reference_count acc _ closure_ptr = do
+      refct <- loadField (toDynamicField $ objectHeaderRecord !!: 0) closure_ptr
+      refct_zero <- primCmpZ (PrimType nativeIntType) CmpEQ refct (nativeIntV 0)
+      primAnd acc refct_zero
+
+    free_everything shared_ptr = do
+      -- Deallocate each closure.  The closures do not need finalization.
+      () <- foldOverGroup deallocate_closure () clos shared_ptr
+      
+      -- Release all captured variables
+      captured_vars_ptr <-
+        referenceField (toDynamicField $ closureSharedRecord a_closure !!: 0) shared_ptr
+      finalizeCapturedVariables captured_vars_ptr a_closure
+
+      -- Deallocate the shared record
+      deallocateHeapMem shared_ptr
+      gen0
+
+    deallocate_closure () _ closure_ptr = deallocateHeapMem closure_ptr
+
+    a_closure = head clos
+
+-- | Generate code that processes each member of a closure group.
+foldOverGroup :: (a -> Closure -> Val -> GenM a)
+              -> a
+              -> ClosureGroup
+              -> Val            -- ^ Pointer to shared closure record
+              -> GenM a
+foldOverGroup f init group shared_ptr = do
+  let shared_record = closureSharedRecord $ head group
+  let group_record = closureGroupRecord $ head group
+  group_ptr <- referenceField (toDynamicField $ shared_record !!: 1) shared_ptr
+  
+  -- Worker routine passes 'f' an un-owned pointer to the closure record
+  let worker acc (clo, i) = do
+        x <- loadField (toDynamicField $ group_record !!: i) group_ptr
+        f acc clo x
+        
+  foldM worker init $ zip group [0..]
+
+-- | Generate a statically defined closure object for a global function.
+generateGlobalClosure :: Closure -> CC DataDef
 generateGlobalClosure clo
-  | not $ null $ cloCaptured clo =
-      internalError "generateGlobalClosure: Global function captures variables"
-  | cloIsRecursive clo =
-      -- Global functions can refer directly to their global names
-      internalError "generateGlobalClosure: Global function is recursively defined"
+  | not $ closureIsGlobal clo =
+      internalError "emitGlobalClosure: Wrong closure type"
   | otherwise =
       let closure_values =
-            objectHeaderData $ VarV $ infoTableEntry $ cloEntryPoints clo
-      in writeData $
-         DataDef (cloVariable clo) closureHeaderRecord closure_values
+            [ RecV objectHeaderRecord $
+              objectHeaderData $ VarV $ closureInfoTableEntry clo]
+      in return $
+         DataDef (closureVar clo) (flattenStaticRecord globalClosureRecord)
+         (flattenGlobalValues closure_values)
 
--- | Create a single closure.
-generateClosure :: Closure -> GenM () 
-generateClosure clo
-  | cloIsRecursive clo =
-      internalError "generateClosure: Closure is part of a recursive group"
+-- | Generate code to construct a single closure.
+generateLocalClosure :: Closure -> GenM () 
+generateLocalClosure clo
+  | closureIsRecursive clo || closureIsGlobal clo =
+      internalError "emitLocalClosure: Not a local closure"
   | otherwise = do
       ptr <- allocateClosure clo
-      (initializeClosure invalid) clo ptr
+      initializeClosure invalid clo ptr
   where
-    invalid = internalError "generateClosure: Not recursive"
+    invalid = internalError "emitLocalClosure: Not recursive"
                             
--- | Create a group of closures.
-generateClosures :: ClosureGroup -> GenM () 
-generateClosures clos = do
+-- | Generate code to construct a group of closures.
+generateRecursiveClosures :: ClosureGroup -> GenM () 
+generateRecursiveClosures clos = do
   ptrs <- mapM allocateClosure clos
-  zipWithM_ (initializeClosure ptrs) clos ptrs
+  shared_data <- generateSharedClosureRecord clos ptrs
+  zipWithM_ (initializeClosure shared_data) clos ptrs
 
+{- Obsolete code
 -- | Construct a function to free a non-recursive closure.
 --
 -- Reference counting is generated explicitly in this function.
@@ -555,59 +852,123 @@ generateClosureFreeBody clo object = do
 
   -- Deallocate
   deallocateHeapMem object
+-}
 
-generateExactEntry :: Closure -> CC ()
-generateExactEntry clo = do
-  -- The entry point takes the closure + direct parameters
+-- | Emit the exact entry point of a function.
+--
+-- The entry point takes a closure pointer and the function's direct 
+-- parameters.
+emitExactEntry :: Closure -> CC ()
+emitExactEntry clo = do
   clo_ptr <- newAnonymousVar (PrimType OwnedType)
-  params <- mapM newAnonymousVar $ ftParamTypes $ cloType clo
+  params <- mapM newAnonymousVar $ ftParamTypes $ closureType clo
   fun_body <- execBuild $ do
     -- Load each captured variable
-    cap_vars <- sequence [loadField fld (VarV clo_ptr)
-                         | fld <- map toDynamicField $ cloCapturedFields clo]
+    cap_vars <- load_captured_vars (VarV clo_ptr)
     -- Call the direct entry point
-    let direct_entry = VarV $ directEntry $ cloEntryPoints clo
+    let direct_entry = VarV $ closureDirectEntry clo
     return $ PrimCallA direct_entry (cap_vars ++ map VarV params)
-  let fun = primFun (clo_ptr : params) (ftReturnTypes $ cloType clo) fun_body
-  writeFun $ FunDef (exactEntry $ cloEntryPoints clo) fun
 
-generateInexactEntry :: Closure -> CC ()
-generateInexactEntry clo = do                        
-  -- The entry point takes the closure + parameters record + returns record
+  let fun = primFun (clo_ptr : params) (ftReturnTypes $ closureType clo) fun_body
+  writeFun $ FunDef (closureExactEntry clo) fun
+  where
+    load_captured_vars clo_ptr
+      | closureIsRecursive clo = do
+          -- Captured variables are in the shared record
+          shared_record <- loadField (toDynamicField $ recursiveClosureRecord !!: 1) clo_ptr
+          captured_vars <-
+            referenceField (toDynamicField $ closureSharedRecord clo !!: 0) clo_ptr
+          load_captured_vars' captured_vars
+      | closureIsLocal clo = do
+          -- Captured variables are in the closure
+          let field = localClosureRecord (closureCapturedRecord clo) !!: 1
+          captured_vars <- referenceField (toDynamicField field) clo_ptr
+          load_captured_vars' captured_vars
+      | closureIsGlobal clo =
+          -- Global closures don't capture variables
+          return []
+
+    -- Load all captured variables out of the record
+    load_captured_vars' captured_ptr =
+      sequence [loadField (toDynamicField fld) captured_ptr
+               | fld <- recordFields $ closureCapturedRecord clo]
+
+
+-- | Emit the inexact entry point of a function.
+--
+-- The inexact entry point takes the closure, a record holding function
+-- parameters, and an unitialized record to hold function return values.
+emitInexactEntry :: Closure -> CC ()
+emitInexactEntry clo = do
   clo_ptr <- newAnonymousVar (PrimType OwnedType)
   params_ptr <- newAnonymousVar (PrimType PointerType)
   returns_ptr <- newAnonymousVar (PrimType PointerType)
   fun_body <- execBuild $ do
-    -- Load each parameter value
-    param_vals <- sequence [loadField fld (VarV params_ptr)
-                           | fld <- map toDynamicField $ recordFields param_record]
+    -- Load each parameter value from the parameters record
+    param_vals <- load_parameters (VarV params_ptr)
+
     -- Call the exact entry
-    let exact_entry = VarV $ exactEntry $ cloEntryPoints clo
-    return_vals <- emitAtom (ftReturnTypes $ cloType clo) $
+    let exact_entry = VarV $ closureExactEntry clo
+    return_vals <- emitAtom (ftReturnTypes $ closureType clo) $
                    PrimCallA exact_entry (VarV clo_ptr : param_vals)
 
     -- Store each return value
-    zipWithM_ (store_field (VarV returns_ptr))
-      (map toDynamicField $ recordFields return_record)
-      return_vals
+    store_parameters (VarV returns_ptr) return_vals
     gen0
   let fun = primFun [clo_ptr, params_ptr, returns_ptr] [] fun_body
-  writeFun $ FunDef (inexactEntry $ cloEntryPoints clo) fun
+  writeFun $ FunDef (closureInexactEntry clo) fun
   where
+    load_parameters params_ptr =
+      sequence [loadField (toDynamicField fld) params_ptr
+               | fld <- recordFields param_record]    
+
+    store_parameters returns_ptr return_vals =
+      sequence [storeField (toDynamicField fld) returns_ptr val
+               | (fld, val) <- zip (recordFields return_record) return_vals]
+
     store_field ptr fld return_val = storeField fld ptr return_val
+
     -- Record type of parameters
-    param_record = staticRecord $ map (PrimField . valueToPrimType) $
-                   ftParamTypes $ cloType clo
+    param_record = promotedPrimTypesRecord $
+                   map valueToPrimType $
+                   ftParamTypes $ closureType clo
   
     -- Record type of returns
-    return_record = staticRecord $ map (PrimField . valueToPrimType) $
-                    ftReturnTypes $ cloType clo
+    return_record = promotedPrimTypesRecord $
+                    map valueToPrimType $
+                    ftReturnTypes $ closureType clo
 
-generateInfoTable :: Closure -> CC ()
-generateInfoTable clo =
-  let record = valuesRecord $ cloInfoTable clo
-      info_table = infoTableEntry $ cloEntryPoints clo
-  in writeData $ DataDef info_table record $ cloInfoTable clo
+-- | Generate the info table entry for a closure
+emitInfoTable :: Closure -> CC ()
+emitInfoTable clo =
+  let arg_type_fields = replicate (length arg_type_tags) $
+                        PrimField (IntType Unsigned S8)
+      record_type =
+        staticRecord (RecordField funInfoHeaderRecord : arg_type_fields)
+      info_table = closureInfoTableEntry clo
+  in writeData $
+     DataDef info_table (flattenStaticRecord record_type) (flattenGlobalValues fun_info)
+  where
+    -- see 'funInfoHeader'
+    info_header =
+      [ maybe (LitV NullL) VarV $ closureDeallocEntry clo -- free object
+      , uint8V $ fromEnum FunTag                     -- object type tag
+      ]
+    fun_info_header =
+      [ RecV infoTableHeaderRecord info_header
+      , uint16V $ closureArity clo
+      , VarV $ closureExactEntry clo
+      , VarV $ closureInexactEntry clo]
+    fun_info =
+      RecV funInfoHeaderRecord fun_info_header : arg_type_tags
+
+    arg_type_tags =
+      map (uint8V . fromEnum . toTypeTag . promoteType . fromPrimType) $
+      ftParamTypes $ closureType clo
+      where
+        fromPrimType (PrimType t) = t
+        fromPrimType _ = internalError "emitInfoTable: Unexpected record type"
+    
 
 -- | Generate the code and data of a global function.  For closure functions,
 -- an info table, a global closure, and entry points are generated.  For
@@ -616,52 +977,66 @@ emitGlobalClosure :: Var -> Maybe Closure -> Fun -> CC ()
 
 -- Emit a closure function
 emitGlobalClosure direct_entry (Just clo) direct = do
-  generateInfoTable clo
-  writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
-  generateExactEntry clo
-  generateInexactEntry clo
+  emitInfoTable clo
+  writeFun $ FunDef (closureDirectEntry clo) direct
+  emitExactEntry clo
+  emitInexactEntry clo
   
   -- Global closures must not use a deallocation function
-  when (isJust $ deallocEntry (cloEntryPoints clo)) $
-    internalError "constructGlobalClosure: Must use default deallocator"
-  generateGlobalClosure clo
+  when (isJust $ closureDeallocEntry clo) $
+    internalError "emitGlobalClosure: Must not have deallocator"
+  writeData =<< generateGlobalClosure clo
 
 -- Emit a primitive function
 emitGlobalClosure direct_entry Nothing direct = do
   writeFun $ FunDef direct_entry direct
 
--- | Generate the code and data of a group of recursive closures
+-- | Generate the code and data of a group of recursive closures.
+-- An info table and entry points are generated.  The code for dynamically
+-- allocating closures is returned.
 emitRecClosures :: ClosureGroup -> [Fun] -> CC (GenM ())
 emitRecClosures grp directs = do
+  -- Emit info table and entry points of each function 
   forM_ (zip grp directs) $ \(clo, direct) -> do 
-    generateInfoTable clo
-    writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
-    generateExactEntry clo
-    generateInexactEntry clo
-  generateClosureGroupFree grp
-  return $ generateClosures grp
+    emitInfoTable clo
+    writeFun $ FunDef (closureDirectEntry clo) direct
+    emitExactEntry clo
+    emitInexactEntry clo
+    
+  -- Emit the deallocation function.  
+  -- All members of the group use the same one.
+  let free_var = case closureDeallocEntry $ head grp
+                 of Just v -> v
+                    Nothing -> internalError "emitRecClosures"
+  emitSharedClosureRecordFree free_var grp
+  
+  -- Return code for generating closures
+  return $ generateRecursiveClosures grp
 
 -- | Generate the code and data of a lambda function
 emitLambdaClosure :: FunctionType -> Fun -> [Var] -> CC (GenM Val)
 emitLambdaClosure lambda_type direct captured_vars = do
   fun_var <- newAnonymousVar (PrimType OwnedType)  
-  
+
   -- Use the default deallocation function if there are no captured variables
-  let want_dealloc = if null captured_vars
-                     then DefaultDeallocator
-                     else CustomDeallocator
+  want_dealloc <-
+    if null captured_vars
+    then return DefaultDeallocator
+    else do v <- newAnonymousVar (PrimType PointerType)
+            return $ CustomDeallocator v
+
   entry_points <- mkEntryPoints want_dealloc lambda_type Nothing
   let clo = nonrecClosure fun_var entry_points captured_vars
       
   -- Generate code
-  generateInfoTable clo
-  writeFun $ FunDef (directEntry $ cloEntryPoints clo) direct
-  generateExactEntry clo
-  generateInexactEntry clo
+  emitInfoTable clo
+  writeFun $ FunDef (closureDirectEntry clo) direct
+  emitExactEntry clo
+  emitInexactEntry clo
   generateClosureFree clo
   
   -- Create the function variable, then pass it as a parameter to something 
-  return $ do generateClosure clo
+  return $ do generateLocalClosure clo
               return $ VarV fun_var
 
 -------------------------------------------------------------------------------
@@ -695,9 +1070,9 @@ genVarCall return_types fun args = lookupClosure fun >>= select
            let direct_val = emitAtom1 (PrimType OwnedType) =<< direct_call
            genIndirectCall return_types direct_val indir_args
       where
-        arity = functionArity $ cloEntryPoints ep
-        entry = directEntry $ cloEntryPoints ep
-        captured_vars = cloCaptured ep
+        arity = closureArity ep
+        entry = closureDirectEntry ep
+        captured_vars = closureCapturedVariables ep
 
 -- | Produce a direct call to the given primitive function.
 directCall :: [Var] -> Var -> [GenM Val] -> GenM Atom
@@ -711,7 +1086,7 @@ genIndirectCall :: [PrimType]
                 -> GenM Val
                 -> [GenM Val]
                 -> CC (GenM Atom)
-                
+
 -- No arguments: Don't call
 genIndirectCall return_types mk_op [] = return $ do
   op <- mk_op
@@ -722,20 +1097,30 @@ genIndirectCall return_types mk_op mk_args = return $ do
   args <- sequence mk_args
 
   -- Get the function info table and captured variables
-  inf_ptr <- loadField (closureHeaderRecord' !!: 1) op
+  inf_ptr <- loadField (toDynamicField $ objectHeaderRecord !!: 1) op
 
-  -- Check if the number of arguments matches the function's arity
-  arity <- loadField (funInfoHeaderRecord' !!: 2) inf_ptr
-  arity_test <- primCmpZ (PrimType nativeWordType) CmpEQ arity $ nativeWordV $ length args
-  
+  -- Can make an exact call if the callee is a function and
+  -- the number of arguments matches the function's arity
+  inf_tag <- loadField (toDynamicField $ infoTableHeaderRecord !!: 1) inf_ptr
+  inf_tag_test <- primCmpZ (PrimType (IntType Unsigned S8)) CmpEQ inf_tag $
+                  uint8V $ fromEnum FunTag
+  let check_arity = do
+        arity <- loadField (funInfoHeaderRecord' !!: 1) inf_ptr
+        eq <- primCmpZ (PrimType nativeWordType) CmpEQ arity $
+          nativeWordV $ length args
+        return $ ValA [eq]
+  use_exact_call <-
+    emitAtom1 (PrimType BoolType) =<<
+    genIf inf_tag_test check_arity (return $ ValA [LitV $ BoolL False])
+
   -- If the arity matches, then perform an exact call.  Otherwise,
   -- perform an inexact call.
-  genIf arity_test (exact_call op inf_ptr args) (inexact_call op args)
+  genIf use_exact_call (exact_call op inf_ptr args) (inexact_call op args)
   where
     exact_call clo_ptr inf_ptr args = do
-      -- Get the direct entry point
-      fn <- loadField (funInfoHeaderRecord' !!: 5) inf_ptr
-        
+      -- Get the exact entry point
+      fn <- loadField (funInfoHeaderRecord' !!: 3) inf_ptr
+
       -- Get the function's captured variables, then call the function
       return $ PrimCallA fn (clo_ptr : args)
 
@@ -743,18 +1128,18 @@ genIndirectCall return_types mk_op mk_args = return $ do
       -- Create temporary storage for return values
       let ret_record = staticRecord $ map PrimField return_types
       ret_ptr <- allocateHeapMem $ nativeWordV $ recordSize ret_record
-      
+
       -- Apply the function
       genApply clo_ptr args ret_ptr
-        
+
       -- Extract return values, stealing references
       ret_vals <- mapM (load_ret_value ret_ptr) $
                   map toDynamicField $ recordFields ret_record
-      
+
       -- Free temporary storage
       deallocateHeapMem ret_ptr
       return $ ValA ret_vals
-    
+
     -- Load each return value out of the heap record.  Don't increment the
     -- reference count, since the record will be deallocated.
     load_ret_value ptr fld =
@@ -767,15 +1152,15 @@ genIndirectCall return_types mk_op mk_args = return $ do
 -- | Create a dynamic function application
 genApply :: Val -> [Val] -> Val -> GenM ()
 genApply _ [] _ = internalError "genApply: No arguments"
-genApply closure args ret_ptr =
-  gen_apply closure args (map (promotedTypeTag . valPrimType) args)
+genApply fun args ret_ptr =
+  gen_apply fun args (map (promotedTypeTag . valPrimType) args)
   where
-    gen_apply closure args arg_types =
+    gen_apply fun args arg_types =
       -- If all arguments are consumed, then call apply_mem
       -- Otherwise, call apply_ret
       if null args'
-      then do finish_apply (VarV apply_mem) closure app_args
-      else do closure' <- partial_apply (VarV apply_ret) closure app_args
+      then do finish_apply (VarV apply_mem) fun app_args
+      else do closure' <- partial_apply (VarV apply_ret) fun app_args
               gen_apply closure' args' arg_types'
       where
         (n, apply_ret, apply_mem) = pickApplyFun arg_types
@@ -819,7 +1204,19 @@ pickApplyFun tags =
 
 -- | The available 'apply' functions
 applyFunctions :: ApplyTrie
-applyFunctions = [(Int32Tag, i_node), (Float32Tag, f_node)]
+applyFunctions = [ (Int32Tag, i_node)
+                 , (Float32Tag, f_node)
+                 , (OwnedRefTag, o_node)]
   where
-    i_node = ApplyTrieNode (llBuiltin the_prim_apply_i32_f) (llBuiltin the_prim_apply_i32)[]
-    f_node = ApplyTrieNode (llBuiltin the_prim_apply_f32_f) (llBuiltin the_prim_apply_f32)[]
+    i_node = ApplyTrieNode 
+             (llBuiltin the_prim_apply_i32_f) 
+             (llBuiltin the_prim_apply_i32)
+             []
+    f_node = ApplyTrieNode
+             (llBuiltin the_prim_apply_f32_f)
+             (llBuiltin the_prim_apply_f32)
+             []
+    o_node = ApplyTrieNode
+             (llBuiltin the_prim_apply_o_f)
+             (llBuiltin the_prim_apply_o)
+             []

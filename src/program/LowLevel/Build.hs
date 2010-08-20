@@ -137,6 +137,9 @@ primNegateZ prim_type@(PrimType (IntType sign size)) n =
 primCmpZ prim_type@(PrimType (IntType sign size)) comparison x y =
   emitAtom1 prim_type $ PrimA (PrimCmpZ sign size comparison) [x, y]
 
+primAnd x y =
+  emitAtom1 (PrimType BoolType) $ PrimA PrimAnd [x, y]
+
 primAddP ptr off =
   emitAtom1 (PrimType PointerType) $ PrimA PrimAddP [ptr, off]
 
@@ -147,6 +150,12 @@ primLoadOff ty ptr off dst =
 primStore ty ptr val = primStoreOff ty ptr (nativeIntV 0) val
 primStoreOff ty ptr off val =
   emitAtom0 $ PrimA (PrimStore ty) [ptr, off, val]
+
+primCastToOwned ptr =
+  emitAtom1 (PrimType OwnedType) $ PrimA PrimCastToOwned [ptr]
+
+primCastFromOwned ptr =
+  emitAtom1 (PrimType OwnedType) $ PrimA PrimCastFromOwned [ptr]
 
 isZeroLit (LitV (IntL _ _ 0)) = True
 isZeroLit _ = False
@@ -330,6 +339,11 @@ storeField field ptr value =
       ty = fromPrimType $ fieldType field
   in primStoreOff ty ptr off value
 
+-- | Get a pointer to a field of a record, given the base pointer.
+referenceField :: (Monad m, Supplies m (Ident Var)) =>
+                  DynamicField -> Val -> Gen m Val
+referenceField field ptr = primAddP ptr $ fieldOffset field
+
 -------------------------------------------------------------------------------
 -- Other operations
 
@@ -481,11 +495,11 @@ selectPassConvFinalize = selectField passConvRecord 3
 -- Values
 
 data WantClosureDeallocator =
-    CannotDeallocate            -- ^ The closure is never deallocated
+    NeverDeallocate             -- ^ The closure is never deallocated
   | DefaultDeallocator          -- ^ The closure has no captured variables and
                                 --   is not recursive; use the default
                                 --   deallocation function
-  | CustomDeallocator           -- ^ Generate a specialized deallocator
+  | CustomDeallocator !Var      -- ^ Use the given deallocation function
 
 -- | Create an 'EntryPoints' data structure and populate it with new variables.
 -- 
@@ -502,12 +516,12 @@ mkEntryPoints want_dealloc ftype label
       [inf, dir, exa, ine] <-
         replicateM 4 $ newVar label Nothing (PrimType PointerType)
       dea <- case want_dealloc
-             of CannotDeallocate -> return Nothing
+             of NeverDeallocate -> return Nothing
                 DefaultDeallocator ->
                   -- The default deallocator simply calls pyon_dealloc 
                   return $ Just $ llBuiltin the_prim_pyon_dealloc
-                CustomDeallocator ->
-                  liftM Just $ newVar label Nothing (PrimType PointerType)
+                CustomDeallocator f ->
+                  return $ Just f
       let arity = length $ ftParamTypes ftype
       return $! EntryPoints ftype arity dir exa ine dea inf
 

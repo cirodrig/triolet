@@ -33,9 +33,19 @@ pointerSize = S32
 nativeIntSize :: Size
 nativeIntSize = S32
 
-nativeIntType, nativeWordType :: PrimType
-nativeIntType = IntType Signed S32
-nativeWordType = IntType Unsigned S32
+-- | /FIXME/: This is architecture-dependent.
+nativeFloatSize :: Size
+nativeFloatSize = S32
+
+-- | The maximum alignment of any scalar value, in bytes.
+-- /FIXME/: This is architecture-dependent.
+maxScalarAlignment :: Int
+maxScalarAlignment = 4
+
+nativeIntType, nativeWordType, nativeFloatType :: PrimType
+nativeIntType = IntType Signed nativeIntSize
+nativeWordType = IntType Unsigned nativeIntSize
+nativeFloatType = FloatType nativeFloatSize
 
 pyonIntSize :: Size
 pyonIntSize = S32
@@ -72,3 +82,15 @@ instance HasSize PrimType where
   sizeOf OwnedType      = sizeOf pointerSize
   alignOf UnitType = 1
   alignOf x = sizeOf x
+
+-- | Promote a type to at least the size of a machine word.  Promoted types
+-- are used in function calls, return values, and partial applications.
+promoteType :: PrimType -> PrimType
+promoteType pt =
+  case pt
+  of UnitType -> UnitType
+     BoolType -> nativeIntType
+     IntType sgn sz -> IntType sgn (max sz nativeIntSize)
+     FloatType sz -> FloatType (max sz nativeFloatSize)
+     PointerType -> PointerType
+     OwnedType -> OwnedType

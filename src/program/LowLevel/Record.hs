@@ -103,7 +103,7 @@ staticRecord fs = let
   alignment     = foldr lcm 1 $ map alignOf real_fields
   size          = if null real_fields
                   then 0
-                  else pad (last field_offsets + sizeOf (last real_fields)) alignment
+                  else last field_offsets + sizeOf (last real_fields)
   in record (zipWith Field field_offsets real_fields) size alignment
   where
     -- Each field starts at the offset of the previous field, plus the

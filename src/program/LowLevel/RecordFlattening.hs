@@ -7,7 +7,8 @@
 -}
 
 {-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
-module LowLevel.RecordFlattening(flattenRecordTypes)
+module LowLevel.RecordFlattening
+       (flattenGlobalValue, flattenGlobalValues, flattenRecordTypes)
 where
 
 import Control.Monad
@@ -294,4 +295,21 @@ flattenRecordTypes (Module imports fun_defs data_defs) =
     flatten_module = do
       (fun_defs', data_defs') <- flattenTopLevel fun_defs data_defs
       return $ Module imports fun_defs' data_defs'
-  
+
+-------------------------------------------------------------------------------
+
+
+flattenGlobalValues :: [Val] -> [Val]
+flattenGlobalValues vs = concatMap flattenGlobalValue vs
+
+-- | An exported record flattening function for flattening global values.
+-- Global variables never expand to records, and may not contain lambda
+-- expressions.
+flattenGlobalValue :: Val -> [Val]
+flattenGlobalValue value =
+  case value
+  of VarV v -> [value]
+     RecV _ vals -> flattenGlobalValues vals
+     LitV UnitL -> []
+     LitV _ -> [value]
+     LamV f -> internalError "flattenGlobalValue: Unexpected lambda function"

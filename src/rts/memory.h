@@ -29,7 +29,7 @@ decref(PyonPtr p)
 {
   /* FIXME: thread safety */
   uint32_t rc = OBJECT_REFCT(p)--;
-  if (rc == 0) {
+  if (rc == 1) {
     PyonFreeFunc free_func = INFO_FREE(OBJECT_INFO(p));
     free_func(p);
   }

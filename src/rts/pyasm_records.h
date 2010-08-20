@@ -20,6 +20,24 @@ record PassConv {
   owned finalize;               // Finalize a value
 };
 
+// Function info table
+record FunInfoHeader {
+  InfoTableHeader header;
+  uint8 has_shared_closure;     // True iff instances of the function share
+                                // their closure with other functions.  Closure
+                                // sharing is the result of recursive function
+                                // definitions.
+  uint16 arity;                 // Number of arguments the function accepts
+  pointer exact;                // Exact entry point
+  pointer inexact;              // Inexact entry point
+};
+
+// PAP/function instance header
+record PAPHeader {
+  ObjectHeader header;		// Object header
+  uint16 nargs;                 // Number of arguments that have been applied
+};
+
 /* Arrays (called "lists")
  *
  * A list consists of a size and a pointer to an array of list elements.
