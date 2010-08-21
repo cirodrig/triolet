@@ -7,7 +7,7 @@ data Signedness = Signed | Unsigned
                 deriving(Eq, Ord, Show, Enum)
 
 data Size = S8 | S16 | S32 | S64
-          deriving(Eq, Ord, Show, Enum)
+          deriving(Eq, Ord, Show, Enum, Bounded)
 
 -- | A type that can be held in an ANF variable.
 data PrimType =
@@ -38,9 +38,25 @@ nativeFloatSize :: Size
 nativeFloatSize = S32
 
 -- | The maximum alignment of any scalar value, in bytes.
+--
 -- /FIXME/: This is architecture-dependent.
 maxScalarAlignment :: Int
-maxScalarAlignment = 4
+maxScalarAlignment = 8
+
+-- | The alignment of scalar values in dynamically constructed data structures,
+-- such as stacks and partial application records.
+--
+-- All promoted types must have a size that is a multiple of this size.
+--
+-- If unaligned loads are not permissible, this must be equal to
+-- 'maxScalarAlignment'.  On architectures supporting unaligned loads, or if
+-- unaligned loads are emulated in software, smaller alignments are
+-- permissible.  Smaller alignments have the advantage of wasting less space, 
+-- but may carry a speed penalty for values with larger natural alignment.
+-- 
+-- /FIXME/: This is architecture-dependent.
+dynamicScalarAlignment :: Int
+dynamicScalarAlignment = 4
 
 nativeIntType, nativeWordType, nativeFloatType :: PrimType
 nativeIntType = IntType Signed nativeIntSize

@@ -848,7 +848,7 @@ emitInfoTable clo =
       RecV funInfoHeaderRecord fun_info_header : arg_type_tags
 
     arg_type_tags =
-      map (uint8V . fromEnum . toTypeTag . promoteType . fromPrimType) $
+      map (uint8V . fromEnum . toBitsTag . promoteType . fromPrimType) $
       ftParamTypes $ closureType clo
       where
         fromPrimType (PrimType t) = t

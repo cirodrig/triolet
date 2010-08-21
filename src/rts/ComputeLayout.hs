@@ -74,6 +74,10 @@ defineTypeTag :: String -> TypeTag -> ShowS
 defineTypeTag name tag =
   defineMacro (showString name) (shows $ fromEnum tag)
 
+defineBitsTag :: String -> BitsTag -> ShowS
+defineBitsTag name tag =
+  defineMacro (showString name) (shows $ fromEnum tag)
+
 defineInfoTag :: String -> InfoTag -> ShowS
 defineInfoTag name tag =
   defineMacro (showString name) (shows $ fromEnum tag)
@@ -96,11 +100,16 @@ defineAll = vcat
   , defineTypeTag "FLOAT32_TAG" Float32Tag
   , defineTypeTag "FLOAT64_TAG" Float64Tag
   , defineTypeTag "OWNEDREF_TAG" OwnedRefTag
+  , defineBitsTag "BITS_32_TAG" Bits32Tag
+  , defineBitsTag "BITS_64_TAG" Bits64Tag
+  , defineBitsTag "OWNED_REF_BITS_TAG" OwnedRefBitsTag
   , defineInfoTag "FUN_TAG" FunTag
   , defineInfoTag "PAP_TAG" PAPTag
   , defineMacro (showString "SIZEOF_PYONPTR") (shows $ sizeOf PointerType)
   , defineMacro (showString "ALIGNOF_PYONPTR") (shows $ alignOf PointerType)
-  ]
+  , defineMacro (showString "MAX_SCALAR_ALIGNMENT") (shows maxScalarAlignment) 
+  , defineMacro (showString "DYN_SCALAR_ALIGNMENT") (shows dynamicScalarAlignment)
+ ]
 
 main = do
   putStrLn "#ifndef _LAYOUT_H"

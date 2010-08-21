@@ -5,52 +5,11 @@
 
 #include "pyon_internal.h"
 
-/* Print a message every time memory is allocated or deallocated. */
-#undef CHATTY_ALLOC
-
-/* Loop over each argument tag and argument in an argument block,
- * for arguments 0 to (n_args - 1).
- *
- * Syntax of usage:
- *
- * BEGIN_FOREACH_ARGUMENT(variable, variable, variable, variable, x, y) {
- *   function body(x, y);
- * } END_FOREACH_ARGUMENT(x, y);
- */
-
-#define BEGIN_FOREACH_ARGUMENT(fun_info, args, start_offset, n_args, tag_var, arg_var) \
-  {									\
-    PyonPtr foreach_argument_args = (args);				\
-    int foreach_argument_count;						\
-    uint8_t *foreach_argument_tag_ptr =					\
-      PYON_OFF_U8((fun_info), funinfo_firstargument_offset());		\
-    int foreach_argument_offset = (start_offset);			\
-    for (foreach_argument_count = (n_args);				\
-	 foreach_argument_count;					\
-	 foreach_argument_count--) {					\
-      uint8_t foreach_argument_tag = *foreach_argument_tag_ptr++;	\
-      foreach_argument_offset =						\
-	align(foreach_argument_offset, TAG_ALIGN(foreach_argument_tag)); \
-      uint8_t tag_var = foreach_argument_tag;				\
-      void *arg_var = PYON_OFF_PTR(foreach_argument_tag_ptr, foreach_argument_offset);
-
-#define END_FOREACH_ARGUMENT(tag_var, arg_var)				\
-      foreach_argument_offset += TAG_SIZE(foreach_argument_tag);	\
-    }									\
-  }
-
-#define BEGIN_FOREACH_PAP_ARGUMENT(fun_info, pap, tag_var, arg_var) \
-  BEGIN_FOREACH_ARGUMENT(fun_info, pap, pap_firstargument_pre_offset(), \
-			 PAP_NARGUMENTS(pap), tag_var, arg_var)
-
-
-/*****************************************************************************/
-
 static inline int
 funinfo_firstargument_offset(void);
 
 static inline int
-pap_firstargument_offset(PyonPtr fun_info);
+pap_firstargument_offset(void);
 
 static inline PyonPtr
 new_pap_u32(PyonPtr, int, void *, uint32_t);
@@ -63,7 +22,6 @@ new_pap_bytes(PyonPtr fun,
 	      int n_arguments,
 	      void *p_arguments,
 	      int new_arg_size,
-	      int new_arg_align,
 	      void *new_arg_bytes);
 
 static void
@@ -80,46 +38,19 @@ funinfo_firstargument_offset(void)
   return FIELD_START_OFF(offset + sizeof(FUNINFO_INEXACT(NULL)), uint8_t);
 }
 
-/* Get the offset of the first argument in a PAP, _before_ padding for
- * alignment.  The actual offset may be greater due to padding. */
+/* Get the offset of the first argument in a PAP. */
 static inline int __attribute__((always_inline))
-pap_firstargument_pre_offset(void)
+pap_firstargument_offset(void)
 {
   /* Get offset of the last fixed field */
   int offset = (char *)&PAP_NARGUMENTS(NULL) - (char *)NULL;
 
   /* Add size of field */
-  return offset + sizeof(PAP_NARGUMENTS(NULL));
+  offset += sizeof(PAP_NARGUMENTS(NULL));
+  
+  /* Add padding */
+  return align(offset, DYN_SCALAR_ALIGNMENT);
 }
-
-/* Get the offset of the first argument in a PAP, using the function info
- * table to figure out its alignment.
- */
-static inline int
-pap_firstargument_offset(PyonPtr fun_info)
-{
-  /* Get the argument's tag */
-  uint8_t tag = *PYON_OFF_U8(fun_info, funinfo_firstargument_offset());
-
-  /* Return the aligned offset */
-  return align(pap_firstargument_pre_offset(), TAG_ALIGN(tag));
-}
-
-#if 0
-/* Create a new PAP containing the given arguments plus a uint32 */
-static inline PyonPtr
-new_pap_u32(PyonPtr fun, int n_arguments, void *p_arguments, uint32_t arg)
-{
-  return new_pap_bytes(fun, n_arguments, p_arguments, &arg);
-}
-
-/* Create a new PAP containing the given arguments plus a float */
-static inline PyonPtr
-new_pap_f32(PyonPtr fun, int n_arguments, void *p_arguments, float arg)
-{
-  return new_pap_bytes(fun, n_arguments, p_arguments, &arg);
-}
-#endif
 
 /*****************************************************************************/
 /* Exported functions */
@@ -146,22 +77,21 @@ void free_pap(PyonPtr pap)
     int nargs;
     uint8_t *current_tag_ptr =
       PYON_OFF_U8(fun_info, funinfo_firstargument_offset());
-    int current_arg_off = pap_firstargument_pre_offset();
+    int current_arg_off = pap_firstargument_offset();
 
     for (nargs = PAP_NARGUMENTS(pap); nargs; nargs--) {
-      /* Get tag and argument */
+      /* Get tag of current argument */
       uint8_t current_tag = *current_tag_ptr;
-      current_arg_off = align(current_arg_off, TAG_ALIGN(current_tag));
 
       /* Release owned references */
-      if(current_tag == OWNEDREF_TAG) {
+      if(current_tag == OWNED_REF_BITS_TAG) {
 	PyonPtr arg = *PYON_OFF_PTR(pap, current_arg_off);
 	decref(arg);
       }
 
       /* Go to next position */
       current_tag_ptr++;
-      current_arg_off += TAG_SIZE(current_tag);
+      current_arg_off += BITS_TAG_SIZE(current_tag);
     }
   }
 
@@ -217,7 +147,6 @@ apply_i32(PyonPtr obj, uint32_t arg, PyonPtr return_struct)
 	/* Create and return a PAP */
 	*(PyonPtr *)return_struct = new_pap_bytes(obj, 0, NULL,
 						  sizeof(arg),
-						  ALIGNOF(arg),
 						  &arg);
 	break;
       }
@@ -233,12 +162,10 @@ apply_i32(PyonPtr obj, uint32_t arg, PyonPtr return_struct)
 
       /* Create a new PAP that combines all arguments */
       {
-	int firstarg_offset = pap_firstargument_pre_offset();
+	int firstarg_offset = pap_firstargument_offset();
 	void *firstarg_ptr = PYON_OFF_PTR(obj, firstarg_offset);
 	new_pap = new_pap_bytes(fun, n_pap_arguments, firstarg_ptr,
-				sizeof(arg),
-				ALIGNOF(arg),
-				&arg);
+				sizeof(arg), &arg);
       }
 
       /* If the function is fully applied, then call it.  Otherwise,
@@ -288,9 +215,7 @@ apply_f32(PyonPtr obj, float arg, PyonPtr return_struct)
       default:
 	/* Create and return a PAP */
 	*(PyonPtr *)return_struct = new_pap_bytes(obj, 0, NULL,
-						  sizeof(arg),
-						  ALIGNOF(arg),
-						  &arg);
+						  sizeof(arg), &arg);
 	break;
       }
     }
@@ -305,14 +230,12 @@ apply_f32(PyonPtr obj, float arg, PyonPtr return_struct)
 
       /* Create a new PAP that combines all arguments */
       {
-	int firstarg_offset = pap_firstargument_pre_offset();
+	int firstarg_offset = pap_firstargument_offset();
 	void *firstarg_ptr = PYON_OFF_PTR(obj, firstarg_offset);
 	new_pap = new_pap_bytes(fun, n_pap_arguments, firstarg_ptr,
-				sizeof(arg),
-				ALIGNOF(arg),
-				&arg);
+				sizeof(arg), &arg);
       }
-      
+
       /* If the function is fully applied, then call it.  Otherwise,
        * return the PAP. */
       if (n_pap_arguments + 1 == arity) {
@@ -337,7 +260,7 @@ call_pap(PyonPtr pap, PyonPtr return_struct)
   PyonPtr fun = PAP_FUN(pap);
   PyonPtr fun_info = OBJECT_INFO(fun);
 
-  int firstarg_offset = pap_firstargument_offset(fun_info);
+  int firstarg_offset = pap_firstargument_offset();
   void *firstarg_ptr = PYON_OFF_PTR(pap, firstarg_offset);
 
   /* Call the entry point with the function closure and arguments */
@@ -353,7 +276,6 @@ new_pap_bytes(PyonPtr fun,
 	      int n_arguments,
 	      void *p_arguments,
 	      int new_arg_size,
-	      int new_arg_align,
 	      void *new_arg_bytes)
 {
   PyonPtr fun_info = OBJECT_INFO(fun);
@@ -371,35 +293,32 @@ new_pap_bytes(PyonPtr fun,
     int nargs;
     uint8_t *current_tag_ptr =
       PYON_OFF_U8(fun_info, funinfo_firstargument_offset());
-    int current_arg_off = pap_firstargument_pre_offset();
+    int current_arg_off = pap_firstargument_offset();
 
     for (nargs = n_arguments; nargs; nargs--) {
       /* Get tag and argument */
       uint8_t current_tag = *current_tag_ptr;
-      current_arg_off = align(current_arg_off, TAG_ALIGN(current_tag));
 
       /* Acquire owned references */
-      if(current_tag == OWNEDREF_TAG) {
+      if(current_tag == OWNED_REF_BITS_TAG) {
 	PyonPtr arg = *PYON_OFF_PTR(p_arguments,
-				    current_arg_off - pap_firstargument_pre_offset());
+				    current_arg_off - pap_firstargument_offset());
 	incref(arg);
       }
 
       /* Go to next position */
       current_tag_ptr++;
-      current_arg_off += TAG_SIZE(current_tag);
+      current_arg_off += BITS_TAG_SIZE(current_tag);
     }
-    arguments_size = current_arg_off - pap_firstargument_pre_offset();
-
-    current_arg_off = align(current_arg_off, new_arg_align);
+    arguments_size = current_arg_off - pap_firstargument_offset();
     new_arg_offset = current_arg_off;
     current_arg_off += new_arg_size;
-    combined_arguments_size = current_arg_off = pap_firstargument_pre_offset();
+    combined_arguments_size = current_arg_off - pap_firstargument_offset();
   }
 
   /* Allocate memory */
   PyonPtr new_pap =
-    pyon_alloc(pap_firstargument_pre_offset() + combined_arguments_size);
+    pyon_alloc(pap_firstargument_offset() + combined_arguments_size);
 
   /* Initialize the PAP */
   PAP_REFCT(new_pap) = 1;
@@ -409,7 +328,7 @@ new_pap_bytes(PyonPtr fun,
   PAP_NARGUMENTS(new_pap) = n_arguments + 1;
   
   /* Copy arguments to the new PAP */
-  memcpy(PYON_OFF_PTR(new_pap, pap_firstargument_pre_offset()),
+  memcpy(PYON_OFF_PTR(new_pap, pap_firstargument_offset()),
 	 p_arguments, arguments_size);
   memcpy(PYON_OFF_PTR(new_pap, new_arg_offset), new_arg_bytes, new_arg_size);
   return new_pap;

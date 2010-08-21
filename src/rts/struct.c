@@ -11,3 +11,8 @@ const struct tag_sizealign_t tag_sizealign_array[] =
     {SIZEOF_PYONPTR, ALIGNOF_PYONPTR}	/* OwnedRefTag */
   };
 
+const char bits_tag_size_array [] =
+  { 4,				/* Bits32Tag */
+    8,				/* Bits64Tag */
+    4				/* OwnedRefBitsTag */
+  };

@@ -2,6 +2,7 @@
 module LowLevel.Records where
 
 import Data.Word
+
 import Gluon.Common.Error
 import LowLevel.Types
 import LowLevel.Record
@@ -25,6 +26,25 @@ intSizeTypeTag S8 = Int8Tag
 intSizeTypeTag S16 = Int16Tag
 intSizeTypeTag S32 = Int32Tag
 intSizeTypeTag S64 = Int64Tag
+
+-- | A bits tag, representing the physical representation of a value in memory.
+-- Bits-tagged data are always promoted to a value at least as big as the 
+-- 'dynamicScalarAlignment'.
+--
+-- /FIXME/: The fields of this type are platform-dependnet
+data BitsTag = Bits32Tag | Bits64Tag | OwnedRefBitsTag
+             deriving(Eq, Ord, Enum, Show)
+
+-- | Get the bits tag of a primitive type.  The primitive type must be a
+-- suitable size, perhaps by being promoted.
+toBitsTag :: PrimType -> BitsTag
+toBitsTag ty =
+  case ty
+  of OwnedType -> OwnedRefBitsTag
+     _ | sizeOf ty == 4 -> Bits32Tag
+       | sizeOf ty == 8 -> Bits64Tag
+       | otherwise ->
+         internalError "toBitsTag: Cannot generate tag for this data size"
 
 -- | An info table tag, which indicates an info table's type
 data InfoTag = FunTag | PAPTag | ConTag

@@ -17,11 +17,13 @@
 #define FIELD_END_OFF(offset, type) \
   (FIELD_START_OFF((offset), (type)) + sizeof(type))
 
-/* Get the size of a data type represented by the tag */
-#define TAG_SIZE(t) ((int)tag_sizealign_array[(int)(t)].size)
+/* Get the size of a data type represented by the bits tag */
+#define TYPE_TAG_SIZE(t) ((int)type_tag_sizealign_array[(int)(t)].size)
 
-/* Get the alignment of a data type represented by the tag */
-#define TAG_ALIGN(t) ((int)tag_sizealign_array[(int)(t)].align)
+/* Get the alignment of a data type represented by the bits tag */
+#define TYPE_TAG_ALIGN(t) ((int)type_tag_sizealign_array[(int)(t)].align)
+
+#define BITS_TAG_SIZE(t) ((int)bits_tag_size_array[(int)(t)])
 
 /* Add the minimum amount to 'offset' necessary to get a value divisible by
  * 'alignment'.  The offset and alignment must be positive. */
@@ -41,5 +43,6 @@ struct tag_sizealign_t
   char align;
 };
 
-extern const struct tag_sizealign_t tag_sizealign_array[];
+extern const struct tag_sizealign_t type_tag_sizealign_array[];
+extern const char bits_tag_size_array[];
 
