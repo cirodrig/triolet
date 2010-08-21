@@ -11,7 +11,7 @@ module LLParser.LexCode
         AlexInput,
         alexGetChar,
         alexInputPrevChar,
-        idTok, intTok, stringTok, tok,
+        idTok, intTok, floatTok, stringTok, tok,
         lineDirective
        )
 where
@@ -23,7 +23,7 @@ import Gluon.Common.SourcePos
 data Token =
     IdTok !String
   | IntTok !Integer
-  | FloatTok !Double
+  | FltTok !Double
   | StringTok !String
   | LBraceTok
   | RBraceTok
@@ -52,9 +52,11 @@ data Token =
   | BytesTok
   | CallTok
   | DataTok
+  | DoubleTok
   | ElseTok
   | ExternTok
   | FalseTok
+  | FloatTok
   | FunctionTok
   | IfTok
   | ImportTok
@@ -81,7 +83,7 @@ data Token =
 showToken :: Token -> String
 showToken (IdTok s) = show s
 showToken (IntTok n) = show n
-showToken (FloatTok d) = show d
+showToken (FltTok d) = show d
 showToken (StringTok s) = show s
 showToken LBraceTok = "left brace"
 showToken RBraceTok = "right brace"
@@ -110,9 +112,11 @@ showToken BoolTok = "'bool'"
 showToken BytesTok = "'bytes'"
 showToken CallTok = "'call'"
 showToken DataTok = "'data'"
+showToken DoubleTok = "'double'"
 showToken ElseTok = "'else'"
 showToken ExternTok = "'extern'"
 showToken FalseTok = "'false'"
+showToken FloatTok = "'float'"
 showToken FunctionTok = "'function'"
 showToken IfTok = "'if'"
 showToken ImportTok = "'import'"
@@ -205,6 +209,9 @@ idTok = token $ \text n -> IdTok (take n text)
 
 intTok :: Action
 intTok = token $ \text n -> IntTok (read $ take n text)
+
+floatTok :: Action
+floatTok = token $ \text n -> FltTok (read $ take n text)
 
 stringTok :: Action
 stringTok = token $ \text n -> StringTok (read $ take n text)

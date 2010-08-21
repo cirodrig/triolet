@@ -85,7 +85,7 @@ floating :: P Double
 floating = tokenPrim showT nextParsecPos get_int
   where
     get_int t = case tToken t
-                of FloatTok n -> Just n
+                of FltTok n -> Just n
                    _ -> Nothing
 
 parens :: P a -> P a
@@ -131,6 +131,8 @@ parseType = prim_type <|> record_type <|> bytes_type <?> "type"
                 , (UInt16Tok, IntType Unsigned S16)
                 , (UInt32Tok, IntType Unsigned S32)
                 , (UInt64Tok, IntType Unsigned S64)
+                , (FloatTok, FloatType S32)
+                , (DoubleTok, FloatType S64)
                 , (OwnedTok, OwnedType)
                 , (PointerTok, PointerType)]
 

@@ -93,6 +93,9 @@ pprInfixPrim prim =
      PrimCmpZ _ _ c -> Just $ comparison c
      PrimCmpP c -> Just $ comparison c
      PrimAddP -> Just $ text "^+"
+     PrimAddF _ -> Just $ text "+"
+     PrimSubF _ -> Just $ text "-"
+     PrimMulF _ -> Just $ text "*"
      _ -> Nothing
   where
     comparison c =
@@ -124,6 +127,7 @@ pprPrim prim =
            PrimCastFromOwned -> "cast_own_ptr"
            PrimAddF _ -> "fadd"
            PrimSubF _ -> "fsub"
+           PrimMulF _ -> "fmul"
       ty =
         case prim
         of PrimLoad t -> pprValueType t

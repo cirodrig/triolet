@@ -16,7 +16,7 @@ $string = [^\"\\\n]			 -- Valid character in string
 @space = $space+
 @uint = $digit+
 @int = \-? @uint
-@float = $digit+(\.$digit+)?
+@float = $digit+\.$digit+
 @word = $alpha $ident*
 @string = $string*
 @notid = [.\n] # $ident
@@ -36,9 +36,11 @@ rules :-
 "bytes" / @notid	{ tok BytesTok }
 "call" / @notid		{ tok CallTok }
 "data" / @notid		{ tok DataTok }
+"double" / @notid	{ tok DoubleTok }
 "else" / @notid		{ tok ElseTok }
 "extern" / @notid	{ tok ExternTok }
 "false" / @notid	{ tok FalseTok }
+"float" / @notid	{ tok FloatTok }
 "function" / @notid	{ tok FunctionTok }
 "if" / @notid		{ tok IfTok }
 "import" / @notid	{ tok ImportTok }
@@ -89,6 +91,7 @@ rules :-
 -- Other symbols
 \" @string \"		{ stringTok }
 @word			{ idTok }
+@float			{ floatTok }
 @int			{ intTok }
 
 {
