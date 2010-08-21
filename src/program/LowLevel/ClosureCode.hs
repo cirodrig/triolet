@@ -1004,7 +1004,7 @@ genIndirectCall return_types mk_op mk_args = return $ do
   where
     exact_call clo_ptr inf_ptr args = do
       -- Get the exact entry point
-      fn <- loadField (funInfoHeaderRecord !!: 3) inf_ptr
+      fn <- loadField (funInfoHeaderRecord !!: 2) inf_ptr
 
       -- Get the function's captured variables, then call the function
       return $ PrimCallA fn (clo_ptr : args)
