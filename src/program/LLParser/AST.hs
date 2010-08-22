@@ -27,6 +27,10 @@ data BinOp =
   | AtomicAddOp                 -- ^ '!+'
   | CmpEQOp                     -- ^ '=='
   | CmpNEOp                     -- ^ '!='
+  | CmpLTOp                     -- ^ '<'
+  | CmpLEOp                     -- ^ '<='
+  | CmpGTOp                     -- ^ '>'
+  | CmpGEOp                     -- ^ '>='
   deriving(Show)
 
 data UnaryOp = NegateOp deriving(Show)

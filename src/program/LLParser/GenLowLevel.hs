@@ -1077,6 +1077,10 @@ mkBinary op l_val l_type r_val r_type =
   case op
   of CmpEQOp -> comparison LL.CmpEQ
      CmpNEOp -> comparison LL.CmpNE
+     CmpLTOp -> comparison LL.CmpLT
+     CmpLEOp -> comparison LL.CmpLE
+     CmpGTOp -> comparison LL.CmpGT
+     CmpGEOp -> comparison LL.CmpGE
      AtomicAddOp -> atomic_int LL.PrimAAddZ
      PointerAddOp -> pointer_add
      AddOp -> arithmetic LL.PrimAddZ LL.PrimAddF

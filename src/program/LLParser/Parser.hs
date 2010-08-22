@@ -177,7 +177,11 @@ operators =
     , Infix (binaryOp PlusTok AddOp) AssocLeft
     , Infix (binaryOp MinusTok SubOp) AssocLeft]
   , [ Infix (binaryOp EqualTok CmpEQOp) AssocNone
-    , Infix (binaryOp NotEqualTok CmpNEOp) AssocNone]
+    , Infix (binaryOp NotEqualTok CmpNEOp) AssocNone
+    , Infix (binaryOp LessThanTok CmpLTOp) AssocNone
+    , Infix (binaryOp LessEqualTok CmpLEOp) AssocNone
+    , Infix (binaryOp GreaterThanTok CmpGTOp) AssocNone
+    , Infix (binaryOp GreaterEqualTok CmpGEOp) AssocNone]
   ]
   where
     binaryOp tok op = match tok >> return (\x y -> BinaryE op x y)

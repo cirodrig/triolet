@@ -35,6 +35,10 @@ data Token =
   | CommaTok
   | EqualTok
   | NotEqualTok
+  | LessThanTok
+  | LessEqualTok
+  | GreaterThanTok
+  | GreaterEqualTok
   | DotTok
   | FieldTok
   | AtTok
@@ -93,8 +97,12 @@ showToken AssignTok = "equal sign"
 showToken ArrowTok = "arrow"
 showToken SemiTok = "semicolon"
 showToken CommaTok = "comma"
-showToken EqualTok = "equal operator"
-showToken NotEqualTok = "not-equal operator"
+showToken EqualTok = "equality operator"
+showToken NotEqualTok = "disequality operator"
+showToken LessThanTok = "less-than operator"
+showToken LessEqualTok = "'<=' operator"
+showToken GreaterThanTok = "greater-than operator"
+showToken GreaterEqualTok = "'>=' operator"
 showToken DotTok = "dot"
 showToken FieldTok = "field operator"
 showToken AtTok = "at operator"

@@ -77,6 +77,10 @@ rules :-
 -- Operators
 "==" / @notsym		{ tok EqualTok }
 "!=" / @notsym		{ tok NotEqualTok }
+"<" / @notsym		{ tok LessThanTok }
+"<=" / @notsym		{ tok LessEqualTok }
+">" / @notsym		{ tok GreaterThanTok }
+">=" / @notsym		{ tok GreaterEqualTok }
 "."			{ tok DotTok }
 "@!" / @notsym		{ tok FieldTok }
 "@" / @notsym		{ tok AtTok }
