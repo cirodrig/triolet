@@ -100,6 +100,7 @@ closureBinaryFunctionType t = closureFunctionType [t, t] [t]
 
 module_memory_py = moduleName "pyon.internal.memory_py"
 module_stream = moduleName "pyon.internal.stream"
+module_list = moduleName "pyon.internal.list"
 
 -- | Predefined closure functions and the core constructor they're derived
 -- from.
@@ -120,9 +121,9 @@ builtinFunctions =
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
     -- Functions translated from Core
-  , (module_stream, "list_build",
+  , (module_list, "list_build",
      Right [| pyonBuiltin (SystemF.the_fun_makelist) |])
-  , (module_stream, "list_traverse",
+  , (module_list, "list_traverse",
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_list) |])
   , (module_stream, "stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])

@@ -5,19 +5,10 @@ module pyon.internal.list;
 #include "debug.h"
 #include "memory_py.h"
 #include "apply_py.h"
+#include "stream.h"
 #include "list.h"
 
 #include "pyasm_records.h"
-
-// Create the parameter passing convention of a list
-#if 0
-procedure PassConv_list (PassConv elem) -> PassConv {
-  PassConv {sizeof PyonList,
-            alignof PyonList,
-            owned call list_copy(elem),
-            owned call list_finalize(elem)};
-};
-#endif
 
 // Duplicate a list
 function list_copy(PassConv elem, pointer src, pointer dst) -> () {
@@ -100,6 +91,139 @@ procedure list_create_uninitialized (PassConv elem,
   ();
 };
 
+// Increase the size of a list.  The list's 'contents' field may be modified.
+//
+// The new size parameter is the number of elements the new list should
+// contain.  This must be no less than the current number of elements,
+// and may be larger than the final list.  The old list contents are
+// copied to the new list; the new contents are uninitialized.
+procedure list_grow (PassConv elem, pointer list, word new_size) -> () {
+  PassConv {elem_size, elem_align, _, _} = elem;
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  new_size_bytes = pad_elem_size * new_size;
+  old_size_bytes = pad_elem_size * list @! PyonList.nelems;
+  old_contents = list @! PyonList.contents;
+
+  // Allocate new list contents
+  new_contents = pointer primcall pyon_alloc (new_size_bytes);
+
+  // Copy old contents to new list
+  _ = pointer primcall memcpy (new_contents,
+                               old_contents,
+                               old_size_bytes);
+
+  // Free old contents
+  () = () primcall pyon_dealloc(old_contents);
+
+  // Save new list contents.
+  // Don't save the new size anywhere; caller is responsible for keeping
+  // track.
+  list @! PyonList.contents = new_contents;
+  ();
+};
+
+// Create a list from a stream of unknown size
+function list_build (PassConv elem, owned stream, pointer list) -> () {
+  PassConv {elem_size, elem_align, _, _} = elem;
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  // Initialize list with 4 elements
+  list_size = word 4;
+  () = () primcall list_create_uninitialized (elem, list_size, list);
+
+  // Set up stream
+  stream_state = pointer primcall pyon_alloc (stream @! Stream.state_size);
+  () = () call  (stream @! Stream.initialize) (stream_state);
+
+  // Populate the list contents
+  n_elems = word primcall list_build_pull (elem, list, pad_elem_size,
+                                           stream @! Stream.next,
+                                           stream_state, word 0, list_size);
+  list @! PyonList.nelems = n_elems;
+
+  // Finalize the stream
+  () = () call (stream @! Stream.state_finalize) (stream_state);
+  () = () primcall pyon_dealloc (stream_state);
+
+  ();   
+};
+
+// Pull elements from the stream until it is exhausted.  Write into the list.
+procedure list_build_pull (PassConv elem,
+                           pointer list,
+                           word pad_elem_size,
+                           owned stream_next,
+                           pointer stream_state,
+                           word n_elems,
+                           word list_size) -> word {
+  // Make sure list can hold another element
+  b_full = n_elems == list_size;
+  new_list_size = if (b_full) {
+    new_list_size = list_size * word 2;
+    () = () primcall list_grow (elem, list, new_list_size);
+    new_list_size;
+  } else {
+    list_size;
+  };
+
+  // Pull from the straem
+  current_elem = (list @! PyonList.contents) ^+ (n_elems * pad_elem_size) as int;
+  b = bool call stream_next (stream_state, current_elem);
+  if (b) {
+    // Continue pulling
+    word primcall list_build_pull (elem, list, pad_elem_size, stream_next,
+                                   stream_state, n_elems + word 1,
+                                   new_list_size);
+  } else {
+    // Stream is depleted
+    n_elems;
+  };
+};
+
+// Create a stream that traverses the list
+function list_traverse (PassConv elem, pointer list) -> owned {
+  ALLOC_OBJECT(s, Stream, Stream_info)
+  s @! Stream.next = owned call list_traverse_next (elem, list);
+  s @! Stream.initialize = list_traverse_initialize;
+  s @! Stream.state_size = sizeof word;
+  s @! Stream.state_align = alignof word;
+  s @! Stream.state_finalize = dummy_finalizer;
+  s;
+};
+
+// Return the current list element, go to next
+function list_traverse_next (PassConv elem,
+                             pointer list,
+                             pointer state,
+                             pointer ret) -> bool {
+  index = word load state;
+  if (index < list @! PyonList.nelems) {
+
+    // Go to next index
+    !state = index + word 1;
+
+    // Put output
+    PassConv {elem_size, elem_align, copy, _} = elem;
+    pad_elem_size = PAD(elem_size, elem_align);
+    () = () call copy ((list @! PyonList.contents) ^+ ((pad_elem_size * index) as int), ret);
+    true;
+  } else {
+    // List is depleted
+    false;
+  };
+};
+
+// Initialize the stream state.  The state is the current list index, and
+// it should be initialized to the first list index, zero.
+function list_traverse_initialize(pointer state) -> () {
+  !state = word 0;
+  ();
+};
+
+/*****************************************************************************/
+/* Testing */
+
 // Write one element of a list.  The element should start out uninitialized.
 procedure list_poke (PassConv elem,
                      pointer list,
@@ -131,25 +255,39 @@ procedure list_test () -> () {
   my_int = pointer primcall pyon_alloc (sizeof int);
 
   // Create list
-  () = () primcall list_create_uninitialized (int_pc, word 3, my_list);
+  () = () primcall list_create_uninitialized (int_pc, word 5, my_list);
   !my_int = int 333;
   () = () primcall list_poke(int_pc, my_list, word 0, my_int);
   !my_int = int 444;
   () = () primcall list_poke(int_pc, my_list, word 1, my_int);
   !my_int = int 555;
   () = () primcall list_poke(int_pc, my_list, word 2, my_int);
+  !my_int = int 666;
+  () = () primcall list_poke(int_pc, my_list, word 3, my_int);
+  !my_int = int 777;
+  () = () primcall list_poke(int_pc, my_list, word 4, my_int);
+
+  // Duplicate list
+  my_list2 = pointer primcall pyon_alloc (sizeof PyonList);
+  () = () call list_build (int_pc, owned call list_traverse(int_pc, my_list), my_list2);
 
   // Read list
-  () = () primcall list_peek(int_pc, my_list, word 0, my_int);
+  () = () primcall list_peek(int_pc, my_list2, word 0, my_int);
   () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(int_pc, my_list, word 1, my_int);
+  () = () primcall list_peek(int_pc, my_list2, word 1, my_int);
   () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(int_pc, my_list, word 2, my_int);
+  () = () primcall list_peek(int_pc, my_list2, word 2, my_int);
+  () = () primcall pyon_db_int(int load my_int);
+  () = () primcall list_peek(int_pc, my_list2, word 3, my_int);
+  () = () primcall pyon_db_int(int load my_int);
+  () = () primcall list_peek(int_pc, my_list2, word 4, my_int);
   () = () primcall pyon_db_int(int load my_int);
 
   // Free stuff
   () = () call list_finalize(int_pc, my_list);
+  () = () call list_finalize(int_pc, my_list2);
   () = () primcall pyon_dealloc(my_list);
+  () = () primcall pyon_dealloc(my_list2);
   () = () primcall pyon_dealloc(my_int);
   ();
 };

@@ -46,7 +46,8 @@ record PAPHeader {
  * list, but rather passed to functions that operate on the list.
  */
 record PyonList {
-  word nelems;			// Number of elements
+  word nelems;			// Number of elements in the list.
+                                // Actual allocated size may be larger.
   pointer contents;		// Pointer to list contents
 };
 

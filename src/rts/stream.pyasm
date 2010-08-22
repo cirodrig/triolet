@@ -25,6 +25,9 @@ procedure Stream_dealloc (pointer self) -> () {
 /*****************************************************************************/
 /* return */
 
+// A "return" stream produces one value, then quits.  The value is produced
+// by calling a function.
+
 // Create a stream that produces a single value
 function Stream_return (PassConv return_type, owned produce_value) -> owned {
   ALLOC_OBJECT(s, Stream, Stream_info)
@@ -42,7 +45,7 @@ function Stream_return_next (PassConv return_type,
                              pointer ret) -> bool {
   b = bool load state;
   if (b) {
-    // Stream is exhausted
+    // Stream is depleted
     false;
   } else {
     // Stream has data
@@ -64,16 +67,20 @@ function Stream_return_initialize(pointer state) -> () {
 /* bind */
 
 /* The state of a chained stream consists of:
- *  1. Pointer to the transformer stream
- *  2. The producer's state
- *  3. The producer's current output, which the consumer may read
- * FIXME: use different data layout
+ *  1. The transformer stream (or NULL)
+ *  2. The transformer stream's state (if transformer stream is not NULL)
+ *  3. The producer stream's state
+ *  4. The producer's current output value
+ *
+ * The current output value has to be stored because the transformer stream
+ * may reference it.
  */
 record Stream_bind_state {
   pointer transformer;          // Transformer stream (owned or NULL)
   pointer transformer_state;    // Transformer stream's state, or NULL
   pointer producer_state;       // Producer's state
-  pointer temporary_state;        // Producer's current output value
+  pointer temporary_state;      // Producer's current output value
+                                // (if transformer stream is not NULL)
 };
 
 // Chain streams together.
@@ -96,6 +103,7 @@ function Stream_bind (PassConv produced_type,
   s;
 };
 
+// Initialize a bound stream.
 function Stream_bind_initialize (PassConv produced_type,
                                  PassConv transformed_type,
                                  owned producer,
@@ -118,6 +126,11 @@ function Stream_bind_initialize (PassConv produced_type,
   ();
 };
 
+// Get the next value from the stream.
+// First, try to pull from the transformer.
+// If that is not successful, try to pull a new value from the producer, then
+// create a transformer and try to pull a value from it again.
+// If the transformer and producer are both depleted, the stream is depleted.
 function Stream_bind_next(PassConv produced_type,
                           PassConv transformed_type,
                           owned producer,
@@ -137,11 +150,13 @@ function Stream_bind_next(PassConv produced_type,
       // Done
       true;
     } else {
-      // Transformer is exhausted; release transformer and temporary state
+      // Transformer is depleted; release transformer
       () = () call (transformer @! Stream.state_finalize) (transformer_state);
       () = () primcall pyon_dealloc(transformer_state);
       DECREF(transformer as pointer)
       state @! Stream_bind_state.transformer = null;
+
+      // Free temporary state
       PassConv {_, _, _, produced_type_finalize} = produced_type;
       () = () call produced_type_finalize
           (state @! Stream_bind_state.temporary_state);
@@ -166,12 +181,12 @@ function Stream_bind_next(PassConv produced_type,
         pointer primcall pyon_alloc (transformer_stream @! Stream.state_size);
       () = () call (transformer_stream @! Stream.initialize) (transformer_state);
       state @! Stream_bind_state.transformer_state = transformer_state;
-      
+
       // Retry
       bool call Stream_bind_next(produced_type, transformed_type, producer,
                                  transformer, state, ret);
     } else {
-      // Stream is exhausted
+      // Stream is depleted
       false;
     };
   };

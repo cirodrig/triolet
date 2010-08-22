@@ -230,7 +230,9 @@ genManyResults rtn exprs =
     too_many xs =
       internalError $ "genManyResults: Cannot generate statement with " ++
       show (length xs) ++ " result values"
-    expr = case exprs of [e] -> e
+    expr = case exprs
+           of [e] -> e
+              _ -> internalError "genManyResults"
     return_nothing = []
     return_stm stm = [CBlockStmt stm]
     return_expr e = return_stm $ CExpr (Just e) internalNode
