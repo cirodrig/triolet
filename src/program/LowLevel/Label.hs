@@ -37,10 +37,16 @@ mangleLabel name =
 -- symbols that are not visible outside the current file.
 mangledVarName :: Var -> String
 mangledVarName v
-  | Just s <- varExternalName v = s -- Use external name if givne
-  | Just lab <- varName v = mangleLabel lab ++ "_" ++ mangled_id
-  | otherwise = type_leader (varType v) ++ mangled_id
-         
+  | Just s <- varExternalName v = s -- Use external name if given
+  | varIsExternal v =
+      case varName v
+      of Just lab -> mangleLabel lab -- Mangle name, but don't add ID
+         Nothing -> internalError $ "mangledVarName: External variables " ++
+                                    "must have a label"
+  | otherwise =
+        case varName v
+        of Just lab -> mangleLabel lab ++ "_" ++ mangled_id
+           Nothing  -> type_leader (varType v) ++ mangled_id
   where
     mangled_id = show $ fromIdent $ varID v
 

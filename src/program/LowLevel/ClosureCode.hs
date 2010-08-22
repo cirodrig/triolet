@@ -593,14 +593,19 @@ initializeClosure group_record clo clo_ptr = do
 -- | Generate a free function for a non-recursive, non-top-level closure.
 -- The free function is added to the set of top-level definitions.
 generateClosureFree :: Closure -> CC ()
-generateClosureFree clo = do
-  when (closureIsRecursive clo || closureIsGlobal clo) $
-    internalError "generateClosureFree: Not a local closure"
+generateClosureFree clo 
+  | not $ closureIsLocal clo =
+      internalError "generateClosureFree: Not a local closure"
+  | Just dealloc_fun <- closureDeallocEntry clo,
+    isDefaultDeallocator dealloc_fun =
+      -- Using the default deallocator.  Don't define anything.
+      return ()
+  | Nothing <- closureDeallocEntry clo =
+      -- Local closures must have a dealloc entry
+      internalError "generateClosureFree"
 
-  let dealloc_fun = case closureDeallocEntry clo
-                    of Just x -> x
-                       Nothing -> internalError "generateClosureFree"
 
+  | Just dealloc_fun <- closureDeallocEntry clo = do
   param <- newAnonymousVar (PrimType PointerType)
   fun_body <- execBuild $ do
     -- Free the captured variables

@@ -280,7 +280,8 @@ createVar mmodule_name name ext_name ty = do
   let label = pgmLabel module_name name
   LL.newVar (Just label) ext_name ty
 
--- | Create an externally defined variable.
+-- | Create an externally visible variable.  The definition is not added to
+-- the environment.
 createExternalVar :: ModuleName -> String -> Maybe String -> LL.ValueType
                   -> NR LL.Var
 createExternalVar module_name name ext_name ty = do
@@ -964,10 +965,7 @@ lookupOrCreateExternalVar decl =
           let name = labelUnqualifiedName label
               mod = moduleOf label
               ty = LL.PrimType primtype
-          in do current_module <- getSourceModuleName
-                if mod == current_module
-                  then createVar (Just mod) name external_name ty
-                  else createExternalVar mod name external_name ty
+          in createExternalVar mod name external_name ty
  
 generateLowLevelModule :: FilePath
                        -> ModuleName
