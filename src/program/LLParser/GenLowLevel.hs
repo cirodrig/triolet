@@ -375,6 +375,25 @@ type GenNR a = Gen NR a
 transformGenNR :: (forall a. NR a -> NR a) -> GenNR a -> GenNR a
 transformGenNR f m = WriterT $ f $ runWriterT m
 
+-- | Report an error if the expected type does not match the given type. 
+expectType :: LL.ValueType      -- ^ Expected type
+           -> String            -- ^ Error message
+           -> LL.ValueType      -- ^ Given type
+           -> NR ()
+expectType expected message actual = throwErrorMaybe $
+  if expected == actual
+  then Nothing
+  else Just message
+
+-- | Report an error if the given type is not a \'pointer\' or \'owned\' type.
+expectReferenceType :: String            -- ^ Error message
+                    -> LL.ValueType      -- ^ Given type
+                    -> NR ()
+expectReferenceType message actual = throwErrorMaybe $
+  if actual == LL.PrimType PointerType || actual == LL.PrimType OwnedType
+  then Nothing
+  else Just message
+
 resolveRecordType :: RecordName Parsed -> NR ParametricType
 resolveRecordType nm = do
   -- Is this a type parameter?
@@ -574,25 +593,34 @@ resolveExpr expr =
        return_atom (LL.PackA record_type fields') [LL.RecordType record_type]
      FieldE base fld -> do
        (fld_offset, _) <- resolveField fld
-       (base', _) <- resolveExprValue base
+       (base', base_type) <- resolveExprValue base
+       lift $ expectReferenceType "Base of field expression must have 'pointer' or 'owned' type" base_type
        return_atom (LL.PrimA LL.PrimAddP [base', fld_offset]) [LL.PrimType PointerType]
      LoadFieldE base fld -> do
        (fld_offset, fld_ty) <- resolveField fld
-       (base', _) <- resolveExprValue base
+       (base', base_type) <- resolveExprValue base
+       lift $ expectReferenceType "Base of field load expression must have 'pointer' or 'owned' type" base_type
        return_atom (LL.PrimA (LL.PrimLoad fld_ty) [base', fld_offset]) [fld_ty]
      DerefE {} -> error "Store expression not valid here"
      LoadE ty base -> do
        ty' <- resolveValueType ty
-       (base', _) <- resolveExprValue base
+       (base', base_type) <- resolveExprValue base
+       lift $ expectReferenceType "Base of load expression must have 'pointer' or 'owned' type" base_type
        return_atom (LL.PrimA (LL.PrimLoad ty') [base', nativeIntV 0]) [ty']
      CallE rtypes f args -> do
        rtypes' <- mapM resolveValueType rtypes
-       (f', _) <- resolveExprValue f
+       (f', f_type) <- resolveExprValue f
+       lift $ expectType (LL.PrimType OwnedType)
+         "Called function must have 'owned' type"
+         f_type
        (map fst -> args') <- mapM resolveExprValue args
        return_atom (LL.CallA f' args') rtypes'
      PrimCallE rtypes f args -> do
        rtypes' <- mapM resolveValueType rtypes
-       (f', _) <- resolveExprValue f
+       (f', f_type) <- resolveExprValue f
+       lift $ expectType (LL.PrimType PointerType)
+         "Called function must have 'pointer' type"
+         f_type
        (map fst -> args') <- mapM resolveExprValue args
        return_atom (LL.PrimCallA f' args') rtypes'
      BinaryE op l r -> do

@@ -121,7 +121,7 @@ function Stream_bind_initialize (PassConv produced_type,
 function Stream_bind_next(PassConv produced_type,
                           PassConv transformed_type,
                           owned producer,
-                          owned transformer,
+                          owned mk_transformer,
                           pointer state,
                           pointer ret) -> bool {
   // Is transformer active?
@@ -159,7 +159,7 @@ function Stream_bind_next(PassConv produced_type,
     if (value_produced) {
       // Run the transformer to create an output stream
       transformer_stream =
-          owned call transformer (state @! Stream_bind_state.temporary_state);
+          owned call mk_transformer (state @! Stream_bind_state.temporary_state);
 
       // Begin producing from the output stream
       transformer_state =
