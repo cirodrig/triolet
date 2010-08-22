@@ -964,7 +964,10 @@ lookupOrCreateExternalVar decl =
           let name = labelUnqualifiedName label
               mod = moduleOf label
               ty = LL.PrimType primtype
-          in createVar (Just mod) name external_name ty
+          in do current_module <- getSourceModuleName
+                if mod == current_module
+                  then createVar (Just mod) name external_name ty
+                  else createExternalVar mod name external_name ty
  
 generateLowLevelModule :: FilePath
                        -> ModuleName
