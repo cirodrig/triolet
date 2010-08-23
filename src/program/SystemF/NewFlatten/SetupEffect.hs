@@ -777,6 +777,7 @@ catMapType =
   funTDep typeT $ \a ->
   funTDep typeT $ \b ->
   funFT (passconvType (varT a)) $
+  funFT (passconvType (varT b)) $
   funFT (streamPassType (varEffect eff) (varT a)) $
   funFT (consumer_type eff a b) $
   retT emptyEffect $ streamPassType (varEffect eff) (varT b)

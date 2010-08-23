@@ -1,4 +1,8 @@
 
+// Debugging memory allocation.  Print a message at each call to pyon_alloc
+// or pyon_dealloc so that we know what was allocated/deallocated.
+#undef DEBUG_ALLOC_CALLS
+
 // Type synonyms
 #define word uint32
 #define int int32
@@ -7,6 +11,22 @@
 #define TAG_FUN (uint8 0)
 #define TAG_PAP (uint8 1)
 #define TAG_CON (uint8 2)
+
+// Print a message to stderr if DEBUG_ALLOC_CALLS is defined
+#ifdef DEBUG_ALLOC_CALLS
+# define PYON_DB_ALLOC(n) \
+  () = () primcall pyon_db_word (n);
+#else
+# define PYON_DB_ALLOC(n)
+#endif
+
+// Print a message to stderr if DEBUG_ALLOC_CALLS is defined
+#ifdef DEBUG_ALLOC_CALLS
+# define PYON_DB_DEALLOC(n) \
+  () = () primcall pyon_db_word (n);
+#else
+# define PYON_DB_DEALLOC(n)
+#endif
 
 // Decrement an owned pointer's reference count.  If it falls to zero,
 // free it.  This should be used in explicit reference counting code only.

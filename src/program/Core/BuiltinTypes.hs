@@ -176,7 +176,8 @@ streamBindType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   b <- newAnonymousVariable TypeLevel
   addr <- newAnonymousVariable ObjectLevel
-  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+  let pc_a_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+      pc_b_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT b]
       producer_type = appCT (conCT $ pyonBuiltin the_LazyStream)
                     [varCT e, varCT a]
       result_type = appCT (conCT $ pyonBuiltin the_LazyStream)
@@ -194,7 +195,8 @@ streamBindType = mkConType $ do
         pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
         pureArrCT (ValPT (Just b) ::: expCT pureKindE) $
-        pureArrCT (ValPT Nothing ::: pc_type) $
+        pureArrCT (ValPT Nothing ::: pc_a_type) $
+        pureArrCT (ValPT Nothing ::: pc_b_type) $
         pureArrCT (OwnPT ::: producer_type) $
         pureArrCT (OwnPT ::: consumer_type) $
         retCT (OwnRT ::: result_type)

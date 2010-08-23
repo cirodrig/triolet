@@ -328,7 +328,7 @@ genPrimCall prim args =
      PrimCmpZ _ _ CmpGT -> binary CGrOp args
      PrimCmpZ _ _ CmpGE -> binary CGeqOp args
      PrimCmpP CmpEQ -> binary CEqOp args
-     PrimCmpP CmpNE -> binary CEqOp args
+     PrimCmpP CmpNE -> binary CNeqOp args
      PrimCmpP CmpLT -> binary CLeOp args
      PrimCmpP CmpLE -> binary CLeqOp args
      PrimCmpP CmpGT -> binary CGrOp args
@@ -426,11 +426,11 @@ genFun gvars (FunDef v fun) =
         fun_declr : return_derived_declr
       fun_decl =
         CDeclr (Just (varIdent v)) derived_declr Nothing [] internalNode
-        
+
       -- Create the function body
       return_values = ReturnValues $ map valueToPrimType $ funReturnTypes fun
       body_stmt = genBlock gvars return_values $ funBody fun
-      
+
       forward_declaration =
         CDecl return_type_specs [(Just fun_decl, Nothing, Nothing)] internalNode
       definition =

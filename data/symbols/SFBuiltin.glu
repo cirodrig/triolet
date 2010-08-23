@@ -198,6 +198,7 @@ constant oper_NEGATE : (a : Pure) -> PassConv a -> (a -> a);
 constant oper_CAT_MAP : (a : Pure)
                      -> (b : Pure)
                      -> PassConv a
+                     -> PassConv b
                      -> (Stream a -> (a -> Stream b) -> Stream b);
 
 constant oper_GUARD : (a : Pure) -> bool -> Stream a -> Stream a;

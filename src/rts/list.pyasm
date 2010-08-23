@@ -20,6 +20,7 @@ function list_copy(PassConv elem, pointer src, pointer dst) -> () {
   pad_elem_size = PAD(elem_size, elem_align);
 
   // Duplicate contents
+  PYON_DB_ALLOC(word 1001)
   contents = pointer primcall pyon_alloc (pad_elem_size * num_elems);
   () = () primcall list_copy_elems
       (elem_copy, pad_elem_size, num_elems, src @! PyonList.contents, contents);
@@ -60,6 +61,7 @@ function list_finalize (PassConv elem, pointer list) -> () {
       (elem_finalize, elem_size, num_elems, contents);
 
   // Free the array
+  PYON_DB_DEALLOC(word 1501)
   () primcall pyon_dealloc (contents);
 };
 
@@ -84,6 +86,7 @@ procedure list_create_uninitialized (PassConv elem,
                                      pointer list) -> () {
   PassConv {elem_size, elem_align, _, _} = elem;
   pad_elem_size = PAD(elem_size, elem_align);
+  PYON_DB_ALLOC(word 1002)
   contents = pointer primcall pyon_alloc (pad_elem_size * size);
   
   list @! PyonList.nelems = size;
@@ -106,6 +109,7 @@ procedure list_grow (PassConv elem, pointer list, word new_size) -> () {
   old_contents = list @! PyonList.contents;
 
   // Allocate new list contents
+  PYON_DB_ALLOC(word 1003)
   new_contents = pointer primcall pyon_alloc (new_size_bytes);
 
   // Copy old contents to new list
@@ -114,6 +118,7 @@ procedure list_grow (PassConv elem, pointer list, word new_size) -> () {
                                old_size_bytes);
 
   // Free old contents
+  PYON_DB_DEALLOC(word 1502)
   () = () primcall pyon_dealloc(old_contents);
 
   // Save new list contents.
@@ -133,6 +138,7 @@ function list_build (PassConv elem, owned stream, pointer list) -> () {
   () = () primcall list_create_uninitialized (elem, list_size, list);
 
   // Set up stream
+  PYON_DB_ALLOC(word 1004)
   stream_state = pointer primcall pyon_alloc (stream @! Stream.state_size);
   () = () call  (stream @! Stream.initialize) (stream_state);
 
@@ -144,6 +150,7 @@ function list_build (PassConv elem, owned stream, pointer list) -> () {
 
   // Finalize the stream
   () = () call (stream @! Stream.state_finalize) (stream_state);
+  PYON_DB_DEALLOC(word 1503)
   () = () primcall pyon_dealloc (stream_state);
 
   ();   
@@ -248,10 +255,35 @@ procedure list_peek (PassConv elem,
   () call elem_copy(elem_ptr, value);  
 };
 
+// Initialize a predefined six-element list of integers.
+// Contents are from Sloane's A002485.
+function list_db (pointer list) -> () {
+  int_pc = PassConv { sizeof int, alignof int, copy4F, dummy_finalizer };
+  PYON_DB_ALLOC(word 1005)
+  my_int = pointer primcall pyon_alloc (sizeof int);
+  () = () primcall list_create_uninitialized (int_pc, word 6, list);
+  !my_int = int 1;
+  () = () primcall list_poke(int_pc, list, word 0, my_int);
+  !my_int = int 3;
+  () = () primcall list_poke(int_pc, list, word 1, my_int);
+  !my_int = int 22;
+  () = () primcall list_poke(int_pc, list, word 2, my_int);
+  !my_int = int 333;
+  () = () primcall list_poke(int_pc, list, word 3, my_int);
+  !my_int = int 355;
+  () = () primcall list_poke(int_pc, list, word 4, my_int);
+  !my_int = int 103993;
+  () = () primcall list_poke(int_pc, list, word 5, my_int);
+  PYON_DB_DEALLOC(word 1504)
+  () primcall pyon_dealloc (my_int);
+};
+
 // A routine to test several of the above routines
 procedure list_test () -> () {
   int_pc = PassConv { sizeof int, alignof int, copy4F, dummy_finalizer };
+  PYON_DB_ALLOC(word 1006)
   my_list = pointer primcall pyon_alloc (sizeof PyonList);
+  PYON_DB_ALLOC(word 1007)
   my_int = pointer primcall pyon_alloc (sizeof int);
 
   // Create list
@@ -268,6 +300,7 @@ procedure list_test () -> () {
   () = () primcall list_poke(int_pc, my_list, word 4, my_int);
 
   // Duplicate list
+  PYON_DB_ALLOC(word 1008)
   my_list2 = pointer primcall pyon_alloc (sizeof PyonList);
   () = () call list_build (int_pc, owned call list_traverse(int_pc, my_list), my_list2);
 
@@ -286,8 +319,11 @@ procedure list_test () -> () {
   // Free stuff
   () = () call list_finalize(int_pc, my_list);
   () = () call list_finalize(int_pc, my_list2);
+  PYON_DB_DEALLOC(word 1505)
   () = () primcall pyon_dealloc(my_list);
+  PYON_DB_DEALLOC(word 1506)
   () = () primcall pyon_dealloc(my_list2);
+  PYON_DB_DEALLOC(word 1507)
   () = () primcall pyon_dealloc(my_int);
   ();
 };

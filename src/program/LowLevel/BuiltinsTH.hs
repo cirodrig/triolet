@@ -125,9 +125,9 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_fun_makelist) |])
   , (module_list, "list_traverse",
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_list) |])
-  , (module_stream, "stream_bind",
+  , (module_stream, "Stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
-  , (module_stream, "stream_return",
+  , (module_stream, "Stream_return",
      Right [| pyonBuiltin (SystemF.the_fun_return) |])
     
     -- Functions that are replaced by primitive operations
