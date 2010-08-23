@@ -144,7 +144,12 @@ parsePyonAsm input_path input_text = do
 -- | Compile an input low-level module to object code
 compilePyonAsmToObject ll_mod output_file = do
   -- Low-level transformations
-  ll_mod <- LowLevel.flattenRecordTypes =<< LowLevel.makeBuiltinPrimOps ll_mod
+  ll_mod <- LowLevel.makeBuiltinPrimOps ll_mod
+  putStrLn ""
+  putStrLn "Replaced primitive ops"
+  print $ LowLevel.pprModule ll_mod
+
+  ll_mod <- LowLevel.flattenRecordTypes ll_mod
   putStrLn ""
   putStrLn "Lowered and flattened"
   print $ LowLevel.pprModule ll_mod
@@ -155,6 +160,9 @@ compilePyonAsmToObject ll_mod output_file = do
   print $ LowLevel.pprModule ll_mod  
 
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
+  putStrLn ""
+  putStrLn "Reference counting"
+  print $ LowLevel.pprModule ll_mod  
   
   -- Generate and compile a C file
   let c_mod = LowLevel.generateCFile ll_mod
