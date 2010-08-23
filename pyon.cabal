@@ -17,6 +17,18 @@ Data-Files:
 
 Executable pyon
   Hs-Source-Dirs: src/program
+  Build-Depends:
+    base >= 4 && < 5,
+    containers,
+    mtl,
+    MaybeT,
+    fgl,
+    language-python-pyon == 0.2,
+    language-c,
+    gluon,
+    gluon-eval
+  Extensions:
+    MultiParamTypeClasses, PatternGuards
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon

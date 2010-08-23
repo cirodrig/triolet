@@ -26,54 +26,6 @@ import SetupMake
 
 makeProgram = simpleProgram "make"
 
-{-
--- | Generate a rule to compile a .hs file
---
--- > D/A/B.o : E/A/B.hs
--- > 	mkdir -p D
--- > 	$(HC) -c $< $(PYON_HS_C_OPTS)
--- > 	touch D/A/B.hi
-compileHsFile :: FilePath       -- ^ Build path
-              -> ModuleName     -- ^ Module to compile
-              -> FilePath       -- ^ Source file
-              -> MakeRule
-compileHsFile build_path mod src =
-  let o_file = build_path </> toFilePath mod `addExtension` ".o"
-      o_path = takeDirectory o_file
-      hi_file = build_path </> toFilePath mod `addExtension` ".hi"
-  in MakeRule o_file [src] $
-     "mkdir -p " ++ o_path ++ "\n\
-     \$(HC) -c $< $(PYON_HS_C_OPTS)\n\
-     \touch " ++ hi_file
-
--- | Generate a rule to compile a .hs-boot file
---
--- > D/A/B.o-boot : E/A/B.hs-boot
--- > 	mkdir -p D
--- > 	$(HC) -c $< $(PYON_HS_C_OPTS)
-compileHsBootFile :: FilePath       -- ^ Build directory
-                  -> ModuleName     -- ^ Module to compile
-                  -> FilePath       -- ^ Source file
-                  -> MakeRule
-compileHsBootFile build_path mod src =
-  let o_file = build_path </> toFilePath mod `addExtension` ".o-boot"
-      o_path = takeDirectory o_file
-  in MakeRule o_file [src] $
-     "mkdir -p " ++ o_path ++ "\n\
-     \$(HC) -c $< $(PYON_HS_C_OPTS)"
-
-compileRtsFile :: FilePath
-               -> FilePath
-               -> FilePath
-               -> MakeRule
-compileRtsFile build_path source_path src =
-  let o_file = build_path </> src `replaceExtension` ".o"
-      i_file = source_path </> src
-  in MakeRule o_file [i_file] $
-     "mkdir -p " ++ takeDirectory o_file ++ "\n\
-     \$(CC) -c $< -o $@ $(RTS_C_C_OPTS)"
--}
-
 -- Remove a file, but recover on error
 lenientRemoveFile verb f = removeFile f `catch` check_err 
   where
@@ -100,10 +52,41 @@ runMake lbi flags args =
   let verb = fromFlag $ buildVerbosity flags  
   in runDbProgram verb makeProgram (withPrograms lbi) args
 
+-- | Get flags to use for package dependences.  We exclude the 'gluon-eval'
+-- package from this list, and allow GHC to infer it, due to errors when the
+-- interpreter (invoked to compile Template Haskell) tries to load C++ object
+-- code.
+packageFlags exe lbi =
+  concat [["-package", package_name]
+         | (InstalledPackageId package_name, package_id) <-
+             componentPackageDeps config,
+           pkgName package_id /= PackageName "gluon-eval"]
+  where
+    config =
+      case find ((exeName exe ==) . fst) $ executableConfigs lbi
+      of Just x  -> snd x
+         Nothing -> error "Configuration error: Missing list of package dependences"
+
+pyonExtensionFlags exe =
+  ["-X" ++ show ext | ext <- extensions $ buildInfo exe]
+
+pyonGhcPathFlags exe lbi = o_flags ++ i_flags
+  where
+    o_flags = ["-outputdir", pyonBuildDir lbi]
+    i_flags = ["-i" ++ path | path <- pyonSearchPaths lbi exe]
+
+-- | Get the options to pass to GHC.
+pyonGhcOpts exe lbi =
+  pyonGhcPathFlags exe lbi ++ packageFlags exe lbi ++ pyonExtensionFlags exe
+
 -------------------------------------------------------------------------------
 -- Hooks
 
--- Pre-build hook: Run 'alex'
+doConfigure autoconf_configure (pkg_desc, build_info) flags = do
+  confHook simpleUserHooks (pkg_desc, build_info) flags
+  autoconf_configure (pkg_desc, build_info) flags
+
+-- Preprocessing before build
 preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
   lex_alexpath <-
     findFile (pyonSearchPaths lbi exe) $ lex_module `addExtension` ".x"
@@ -137,17 +120,15 @@ doBuild pkg_desc lbi hooks flags = do
     verb = fromFlag $ buildVerbosity flags
 
     build_exe exe = do
+      print $ packageFlags exe lbi
       -- Generate make rules and variables
       generateCabalMakefile verb exe lbi
 
       -- Generate Haskell dependences
       main_path <- findFile (pyonSearchPaths lbi exe) (modulePath exe)
-      let include_args =    
-            ["-i" ++ path | path <- pyonSearchPaths lbi exe]
-          hsdep_args =
-            ["-M", "-dep-makefile", ".depend_hs.mk",
-             "-odir", pyonBuildDir lbi,
-             "-hidir", pyonBuildDir lbi] ++ include_args ++
+      let hsdep_args =
+            ["-M", "-dep-makefile", ".depend_hs.mk"] ++
+            pyonGhcPathFlags exe lbi ++
             [main_path]
       
       rawSystemExit verb "ghc" hsdep_args
@@ -166,6 +147,31 @@ doBuild pkg_desc lbi hooks flags = do
       -- Run 'make'
       runMake lbi flags ["build"]
 
+-- | Compile documentation of the compiler's source code
+doHaddock pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
+  -- Create output directory
+  createDirectoryIfMissingVerbose verb True haddock_dir
+  
+  -- Invoke haddock
+  sources <- forM (exeModules exe) $ \mod -> do 
+    let filename = toFilePath mod `addExtension` ".hs"
+    path <- findFilePath' (pyonSearchPaths lbi exe) filename
+    return $ path </> filename
+
+  let haddock_args =
+        ["-o", haddock_dir, "-h"] ++
+        pass_to_ghc (pyonGhcOpts exe lbi) ++
+        sources
+  rawSystemExit verb "haddock" haddock_args
+  where
+    verb = fromFlag $ haddockVerbosity flags
+    
+    -- The directory to hold haddock output
+    haddock_dir = haddockPref defaultDistPref pkg_desc
+
+    -- Quote an argument so that it is passed to GHC
+    pass_to_ghc opts = ["--optghc=" ++ opt | opt <- opts]
+    
 doClean orig_clean pkg_desc _lbi hooks flags = do
   let verb = fromFlag $ cleanVerbosity flags
   lenientRemoveFile verb cabalMakeFile
@@ -174,8 +180,10 @@ doClean orig_clean pkg_desc _lbi hooks flags = do
 
 hooks = autoconfUserHooks
   { hookedPrograms = makeProgram : hookedPrograms autoconfUserHooks
+  , confHook = doConfigure (confHook autoconfUserHooks)
   , cleanHook = doClean (cleanHook autoconfUserHooks)
   , buildHook = doBuild
+  , haddockHook = doHaddock
   }
 
 main = defaultMainWithHooks hooks
