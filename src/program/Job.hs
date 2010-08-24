@@ -1,136 +1,312 @@
 {-| Specifications of work to be performed by an invocation of the compiler.
+
+The command line interpreter constructs a 'Job' that indicates everything
+the compiler will do.  The job is then interpreted with 'runJob'.
+
+Some tasks in a Job get their input or write their output to files.  We can't
+abstract files as Handles, because we don't want to keep them open all the
+time, nor as FilePaths, because some files exist at randomly generated paths
+created on the fly.  Files
+are represented by the types 'ReadFile' (for input), 'WriteFile' (for output), 
+and 'TempFile' (for output followed by input).  File contents may be
+accessed directly, or their
+path may be retrieved for ordinary file I/O.
 -}
 
-{-# LANGUAGE GADTs, Rank2Types #-}
+{-# LANGUAGE GADTs, Rank2Types, ForeignFunctionInterface #-}
 module Job
        (-- * Intermediate files
-        File,
-        -- ** Creating files
-        diskFile,
-        newTemporaryFile,
+        ReadFile, readFileFromPath, readTempFile,
+        WriteFile, writeFileFromPath, writeTempFile,
+        TempFile, tempFileFromPath,
+
         -- ** Reading and writing files
-        getFilePath,        
-        readDataFile,
-        readDataFileString,
-        writeDataFile,
-        writeDataFileString,
+        readFileAsString,
+        readFileAsByteString,
+        readFilePath,
+        writeFileAsString,
+        writeFileAsByteString,
+        writeFilePath,
         
         -- * Jobs
         Task(..),
         Job,
         taskJob,
         pass,
+        withAnonymousFile,
         runJob
         )
 where
 
+import Prelude hiding(catch)
+
+import Control.Exception
 import Control.Monad
 import Data.ByteString(ByteString)
 import qualified Data.ByteString as ByteString
 import Data.IORef
+import Foreign.C
+import Foreign.Ptr
 import System.Directory
+import System.FilePath
 import System.Random
 
 import Gluon.Common.Error
 import qualified LowLevel.Syntax as LowLevel
 
 -- | Make a temporary file name.  Race conditions are possible.
-tmpnam :: String -> IO FilePath
-tmpnam suffix = do
-  random_chars <- replicateM 4 $ fmap (tmpnamTable !!) $ randomRIO (0, 61)
-  let fname = "/tmp/pyon" ++ random_chars ++ suffix
-  exists <- doesFileExist fname
-  if exists then tmpnam suffix else return fname
+tmpnam :: FilePath -> String -> IO FilePath
+tmpnam dir suffix = do
+  dir_exists <- doesDirectoryExist dir
+  unless dir_exists $ fail $ "Directory does not exist: " ++ dir
+  generate_tmpnam
+  where
+    -- Generate filenames until one is found
+    generate_tmpnam = do
+      random_chars <- replicateM 4 $ fmap (tmpnamTable !!) $ randomRIO (0, 63)
+      let fname = dir </> "pyon" ++ random_chars ++ suffix
+      exists <- doesFileExist fname
+      if exists then generate_tmpnam else return fname
 
-tmpnamTable = ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9']
+tmpnamTable = '_' : '-' : ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9']
 
--- | A reference to a file that is read or written by a 'Job'.
--- Files are not open unless they're being read or written.
-data File =
-    -- | A file on disk
-    DiskFile FilePath
-    -- | A temporary anonymous file on disk.  A name is created when
-    -- the file is written.  The given suffix, which usually should start with 
-    -- a dot, is combined with random text to create the file name.
-  | TemporaryFile String !(IORef (Maybe FilePath))
+foreign import ccall "unistd.h mkdtemp" mkdtemp :: Ptr CChar -> IO (Ptr CChar)
 
-diskFile :: FilePath -> File
-diskFile = DiskFile
+-- | Create a temporary directory.  The directory name is returned.
+tmpdir :: IO FilePath
+tmpdir = withCString "/tmp/pyon.XXXXX" $ \template -> do
+  dirname <- mkdtemp template
+  if dirname == nullPtr
+    then throwErrno "Creating directory for temporary files"
+    else peekCString dirname
 
-newTemporaryFile :: String -> IO File
-newTemporaryFile suffix = do
-  pathref <- newIORef Nothing
-  return $ TemporaryFile suffix pathref
+-- | A file that is read by a 'Job'.
+data ReadFile =
+    -- | An input file on disk
+    DiskReadFile !FilePath
+    -- | A temporary input ifle
+  | TempReadFile !TempFile
 
-readDataFileAs :: (FilePath -> IO a) -> File -> IO a
-readDataFileAs reader file = 
-  case file
-  of DiskFile path -> reader path
-     TemporaryFile _ pathref -> do
-       path <- readIORef pathref
-       case path of
-         Just p  -> reader p
-         Nothing ->
-           internalError "Attempted to read temporary file before creating it"
+-- | A file that is written by a 'Job'.
+data WriteFile =
+    -- | A file on disk.  If the file exists, it will be overwritten.
+    DiskWriteFile !FilePath
+    -- | A temporary output file
+  | TempWriteFile !TempFile
 
-readDataFile :: File -> IO ByteString
-readDataFile = readDataFileAs ByteString.readFile
+-- | An intermediate file that is the output of one 'Job' and the input of
+-- others.  The intermediate file may either be deleted, or persist after
+-- all jobs complete. 
+--
+-- Temporary files must be written before being read.
+data TempFile =
+    -- | An anonymous temporary file on disk.  A name is created when the file
+    --   is opened.
+    DiskTempFile {-#UNPACK#-} !(IORef DiskTempFile)
 
-readDataFileString :: File -> IO String
-readDataFileString = readDataFileAs readFile
+-- | The state of a temporary file on disk.  The file state is held in an
+-- 'IORef' and is updated as the situation changes.
+data DiskTempFile =
+    -- | An anonymous temporary file that has not been created yet.
+    -- The given directory path and suffix will be combined with a random
+    -- filename.
+    PendingAnonDF 
+    { tempFileParentDirectory :: !FilePath 
+    , tempFileSuffix :: !String
+    }
 
-writeDataFileAs :: (FilePath -> a -> IO ()) -> File -> a -> IO ()
-writeDataFileAs writer file contents = 
-  case file
-  of DiskFile path -> writer path contents
-     TemporaryFile suffix pathref -> do
-       path <- getFilePath file
-       writer path contents
+    -- | A named temporary file that has not been created yet.  If the flag
+    -- is true, the existing file will be overwritten (if present).
+  | PendingNamedDF 
+    { tempFileMayOverwrite :: !Bool 
+    , tempFilePath :: !FilePath
+    }
 
-writeDataFile :: File -> ByteString -> IO ()
-writeDataFile = writeDataFileAs ByteString.writeFile
+    -- | A temporary file that has been written.
+  | WrittenDF 
+    { tempFileShouldBeDeleted :: !Bool 
+    , tempFilePath :: !FilePath
+    }
 
-writeDataFileString :: File -> String -> IO ()
-writeDataFileString = writeDataFileAs writeFile
+-- | Reference an input file that exists in the filesystem
+readFileFromPath :: FilePath -> ReadFile
+readFileFromPath path = DiskReadFile path
+
+-- | Reference an intermediate file for reading
+readTempFile :: TempFile -> ReadFile 
+readTempFile tf = TempReadFile tf
+
+-- | Reference an output file.  If the file exists, it will be overwritten.
+writeFileFromPath :: FilePath -> WriteFile
+writeFileFromPath path = DiskWriteFile path
+
+-- | Reference an intermediate file for writing
+writeTempFile :: TempFile -> WriteFile
+writeTempFile tf = TempWriteFile tf
+
+-- | Reference a named intermediate file
+tempFileFromPath :: Bool        -- ^ Overwrite?
+                 -> FilePath    -- ^ File path
+                 -> IO TempFile
+tempFileFromPath overwrite path =
+  liftM DiskTempFile $ newIORef $ PendingNamedDF overwrite path
+
+-- | Read a file's contents using the given reader function
+readFileHelper :: (FilePath -> IO a) -> ReadFile -> IO a
+readFileHelper read_file in_file =
+  case in_file
+  of DiskReadFile path -> read_file path
+     TempReadFile (DiskTempFile flref) -> readIORef flref >>= input_temp_file
+  where
+    input_temp_file (PendingAnonDF {}) = read_before_write
+    input_temp_file (PendingNamedDF {}) = read_before_write
+    input_temp_file (WrittenDF {tempFilePath = path}) = read_file path
   
--- | Get the path to an intermediate file.  If it's a random temporary file,
--- a randomized path will be created.
-getFilePath :: File -> IO FilePath
-getFilePath (DiskFile path) = return path
-getFilePath (TemporaryFile suffix pathref) = do
-  path <- readIORef pathref
-  case path of
-    Just p -> return p
-    Nothing -> do p <- tmpnam suffix
-                  writeIORef pathref (Just p)
-                  return p
+    read_before_write =
+      fail "Attempted to read temporary file before writing"
+
+-- | Read a file's contents as a string
+readFileAsString :: ReadFile -> IO String
+readFileAsString = readFileHelper readFile
+
+-- | Read a file's contents as a string
+readFileAsByteString :: ReadFile -> IO ByteString
+readFileAsByteString = readFileHelper ByteString.readFile
+
+-- | Get the input file path.  The file's contents will be read.
+readFilePath :: ReadFile -> IO FilePath
+readFilePath = readFileHelper return
+
+writeFileHelper :: (FilePath -> a -> IO b) -> WriteFile -> a -> IO b
+writeFileHelper write_file out_file contents =
+  case out_file
+  of DiskWriteFile path -> write_file path contents
+     TempWriteFile (DiskTempFile flref) ->
+       readIORef flref >>= output_temp_file flref
+  where
+    output_temp_file flref (PendingAnonDF { tempFileParentDirectory = dir
+                                          , tempFileSuffix = suffix}) = do
+      -- Create a temporary file name.  The file does not exist.
+      fname <- tmpnam dir suffix
+      
+      -- Write the file
+      ret <- write_file fname contents
+      
+      -- Update the temporary file status
+      writeIORef flref $
+        WrittenDF { tempFileShouldBeDeleted = True
+                  , tempFilePath = fname
+                  }
+
+      return ret
+
+    output_temp_file flref (PendingNamedDF { tempFileMayOverwrite = overwrite
+                                           , tempFilePath = path}) = do
+      -- Check if the given path is a valid file path.  Write permissions are 
+      -- not checked here; rather, we check for exceptions when trying to write
+      path_exists <- doesDirectoryExist $ takeDirectory path
+      unless path_exists $ cannot_write path "parent directory does not exist"
+
+      dir_exists <- doesDirectoryExist path
+      when dir_exists $ cannot_write path "file is a directory"
+
+      -- If file exists and overwriting is disallowed, throw an exception
+      when (not overwrite) $ do
+        exists <- doesFileExist path
+        when exists $ cannot_write path "file exists"
+
+      -- Write the file
+      ret <- write_file path contents
+      
+      -- Update the temporary file status
+      writeIORef flref $
+        WrittenDF { tempFileShouldBeDeleted = False
+                  , tempFilePath = path
+                  }
+
+      return ret
+    
+    output_temp_file _ (WrittenDF {}) = already_written
+
+    cannot_write path reason =
+      fail $ "Cannot write output file '" ++ path ++ "': " ++ reason
+    
+    already_written =
+      internalError "Attempted to overwrite an intermediate file"
+
+-- | Write the file's contents
+writeFileAsString :: WriteFile -> String -> IO ()
+writeFileAsString = writeFileHelper writeFile
+
+-- | Write the file's contents
+writeFileAsByteString :: WriteFile -> ByteString -> IO ()
+writeFileAsByteString = writeFileHelper ByteString.writeFile
+
+-- | Write the file's contents
+writeFilePath :: WriteFile -> IO FilePath
+writeFilePath file = writeFileHelper (\path () -> return path) file ()
+
+-------------------------------------------------------------------------------
+-- Tasks
 
 -- | A single step within a job.  The implementation of each task is provided 
 -- elsewhere.
 data Task a where
-  -- | Fetch data from a file
-  ReadInputFile          :: FilePath -> Task File
   -- | Run CPP on a file
-  PreprocessCPP          :: File -> Task File
+  PreprocessCPP          
+    { cppInput :: ReadFile
+    , cppOutput :: WriteFile
+    } :: Task ()
   -- | Parse a PyonAsm file
-  ParsePyonAsm           :: File -> Task LowLevel.Module
+  ParsePyonAsm
+    { parseAsmInput :: ReadFile
+    } :: Task LowLevel.Module
   -- | Compile a Pyon file
-  CompilePyonToPyonAsm   :: File -> Task LowLevel.Module
+  CompilePyonToPyonAsm
+    { compilePyonInput :: ReadFile
+    } :: Task LowLevel.Module
   -- | Compile a PyonAsm file
-  CompilePyonAsmToObject :: LowLevel.Module -> Task File
-  -- | Move output to a specific path.  If possible, move the input file.
-  -- The input file should no longer be available after the move.
-  RenameToPath           :: FilePath -> File -> Task ()
+  CompilePyonAsmToGenC
+    { compileAsmInput :: LowLevel.Module 
+    , compileAsmOutput :: WriteFile
+    } :: Task ()
+  -- | Compile a generated C file to object code
+  CompileGenCToObject
+    { compileGenCInput :: ReadFile
+    , compileGenCOutput :: WriteFile
+    } :: Task ()
 
 -- | Work for the compiler to do.
 data Job a where
-  Task   :: Task a -> Job a
-  Bind   :: Job a -> (a -> Job b) -> Job b
-  Return :: a -> Job a
+  Task      :: Task a -> Job a
+  Bind      :: Job a -> (a -> Job b) -> Job b
+  Return    :: a -> Job a
+  Bracket   :: IO a -> (a -> IO b) -> (a -> Job c) -> Job c
+  GetTmpDir :: Job FilePath
 
 -- | Create a job consisting of one task.
 taskJob :: Task a -> Job a
 taskJob = Task
+
+-- | Run a job that uses a temporary file.  The file will be created in
+-- a temporary directory, and deleted after compilation is done.
+withAnonymousFile :: String -> (TempFile -> Job b) -> Job b
+withAnonymousFile suffix job = do
+  tmp_dir <- GetTmpDir
+  Bracket (new_anon tmp_dir) delete_anon job
+  where
+    new_anon dir = liftM DiskTempFile $ newIORef $ PendingAnonDF dir suffix
+    delete_anon (DiskTempFile tf) = readIORef tf >>= del
+      where
+        del (PendingAnonDF {}) = return () -- File was not created
+
+        del (PendingNamedDF {}) =
+          internalError "Anonymous file became named"
+
+        del (WrittenDF { tempFileShouldBeDeleted = should_delete
+                       , tempFilePath = path})
+          | should_delete = removeFile path
+          | otherwise = internalError "Anonymous file not marked for deletion"
 
 pass :: Job ()
 pass = return ()
@@ -140,10 +316,29 @@ instance Monad Job where
   (>>=) = Bind
 
 -- | Run a job, given a task interpreter.
+--
+-- A temporary data directory will be created
 runJob :: (forall a. Task a -> IO a) -> Job a -> IO a
-runJob runTask job = run job
+runJob run_task job = do
+  -- Create a directory for temporary files
+  tmp_dir <- tmpdir
+  
+  -- Run the job
+  x <- interpretJob run_task tmp_dir job
+  
+  -- Delete the directory (should be empty)
+  removeDirectory tmp_dir `catch` \e -> do
+    print ("Couldn't remove directory with temporary files: " ++
+           show (e :: IOException))
+
+  return x
+
+interpretJob :: (forall a. Task a -> IO a) -> FilePath -> Job a -> IO a
+interpretJob interpret_task tmp_dir job = run job
   where
     run :: forall a. Job a -> IO a
-    run (Task t) = runTask t
+    run (Task t) = interpret_task t
     run (Bind t k) = do run . k =<< run t
     run (Return x) = return x
+    run (Bracket begin end m) = bracket begin end $ \x -> run (m x)
+    run GetTmpDir = return tmp_dir

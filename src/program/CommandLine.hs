@@ -13,8 +13,8 @@ module CommandLine(parseCommandLineArguments)
 where
 
 import Control.Monad
-import Control.Monad.State
 import Data.Maybe
+import Data.Monoid
 import System.Console.GetOpt
 import System.Environment
 import System.FilePath
@@ -45,20 +45,22 @@ data Language =
   | PyonLanguage                -- ^ Pyon code
   | PyonAsmLanguage             -- ^ Low-level Pyon code
 
--- | A command-line option
-data Opt =
-    ActionOpt !Action           -- ^ Action to perform
-  | LanguageOpt !String         -- ^ Language to use
-  | OutputOpt !String           -- ^ Output file
-  | PositionalOpt !String       -- ^ Input file (positional argument)
+-- | A command-line option modifies the option interpreter state
+newtype Opt = Opt (InterpretOptsState -> InterpretOptsState)
+
+instance Monoid Opt where
+  mempty = Opt id
+  Opt f `mappend` Opt g = Opt (g . f)
 
 optionDescrs =
-  [ Option "h" ["help"] (NoArg (ActionOpt GetHelp))
+  [ Option "h" ["help"] (NoArg (Opt $ setAction GetHelp))
     "display usage information"
-  , Option "x" [] (ReqArg LanguageOpt "LANG")
+  , Option "" ["keep-c-files"] (NoArg (Opt setKeepCFiles)) 
+    "save generated C files in output directory"
+  , Option "x" [] (ReqArg (\lang -> Opt $ setLanguage lang) "LANG")
     ("specify input language\n" ++
      "(options are 'none', 'pyon', 'pyonasm')")
-  , Option "o" [] (ReqArg OutputOpt "FILE")
+  , Option "o" [] (ReqArg (\file -> Opt $ setOutput file) "FILE")
     "specify output file"
   ]
 
@@ -69,7 +71,7 @@ parseCommandLineArguments = do
   raw_args <- getArgs
   let args = snd $ splitDataFilePath raw_args
   let (options, _, errors) =
-        getOpt (ReturnInOrder PositionalOpt) optionDescrs args
+        getOpt (ReturnInOrder (\file -> Opt $ addFile file)) optionDescrs args
 
   -- Print errors or create a job
   if not $ null errors
@@ -87,7 +89,7 @@ usageHeader = do
 
 interpretOptions :: [Opt] -> IO (Job ())
 interpretOptions opts =
-  let commands = execState (mapM_ interpret opts) initialState
+  let commands = case mconcat opts of Opt f -> f initialState
   in case reverse $ interpreterErrors commands
      of xs@(_:_) -> do mapM_ (hPutStrLn stderr) xs
                        return pass
@@ -107,22 +109,19 @@ interpretOptions opts =
              CompileObject ->
                let inputs = reverse $ inputFiles commands
                    output = outputFile commands
-               in compileObjectsJob inputs output
+               in compileObjectsJob commands inputs output
              ConflictingAction -> do
                hPutStrLn stderr "Conflicting commands given on command line"
                hPutStrLn stderr "For usage information, invoke with --help"
                return pass
-  where
-    interpret (ActionOpt act)      = setAction act
-    interpret (LanguageOpt lang)   = setLanguage lang
-    interpret (OutputOpt file)     = setOutput file
-    interpret (PositionalOpt file) = addFile file
 
 data InterpretOptsState =
   InterpretOptsState
   { currentAction :: !Action 
   , currentLanguage :: !Language
   , outputFile :: Maybe String
+    -- | Do we save temporary C files?
+  , keepCFiles :: {-# UNPACK #-} !Bool
     -- | List of input files and languages, in /reverse/ order
   , inputFiles :: [(String, Language)]
     -- | List of error messages, in /reverse/ order
@@ -132,26 +131,29 @@ data InterpretOptsState =
 initialState = InterpretOptsState { currentAction = CompileObject
                                   , currentLanguage = NoneLanguage
                                   , outputFile = Nothing
+                                  , keepCFiles = False
                                   , inputFiles = []
                                   , interpreterErrors = []
                                   }
 
-putError e = modify $ \s -> s {interpreterErrors = e : interpreterErrors s}
+putError st e = st {interpreterErrors = e : interpreterErrors st}
 
-setAction new = do
-  old <- gets currentAction
-  case actionPriority old `compare` actionPriority new of
-    GT -> update_action old
-    LT -> update_action new
-    EQ | old == new -> update_action new
-       | otherwise  -> update_action ConflictingAction
+setKeepCFiles st = st {keepCFiles = True}
+
+setAction new st =
+  case actionPriority old `compare` actionPriority new
+  of GT -> update_action old
+     LT -> update_action new
+     EQ | old == new -> update_action new
+        | otherwise  -> update_action ConflictingAction
   where
-    update_action a = modify $ \s -> s {currentAction = a}
+    old = currentAction st
+    update_action a = st {currentAction = a}
 
-setLanguage lang_string =
+setLanguage lang_string st =
   case language
-  of Just l  -> modify $ \s -> s {currentLanguage = l}
-     Nothing -> putError $ "Unrecognized language: " ++ lang_string
+  of Just l  -> st {currentLanguage = l}
+     Nothing -> putError st $ "Unrecognized language: " ++ lang_string
   where
     language = lookup lang_string
                [ ("none", NoneLanguage)
@@ -159,32 +161,56 @@ setLanguage lang_string =
                , ("pyonasm", PyonAsmLanguage)
                ]
 
-setOutput file = do
-  old_file <- gets outputFile
-  case old_file of
-    Nothing -> modify $ \s -> s {outputFile = Just file}
-    Just _  -> putError $ "Only one output file may be given"
+setOutput file st =
+  case outputFile st of
+    Nothing -> st {outputFile = Just file}
+    Just _  -> putError st $ "Only one output file may be given"
 
-addFile file = do
-  lang <- gets currentLanguage
-  modify $ \s -> s {inputFiles = (file, lang) : inputFiles s}
+addFile file st =
+  let lang = currentLanguage st
+  in st {inputFiles = (file, lang) : inputFiles st}
 
 -------------------------------------------------------------------------------
 -- Job creation
 
+-- | Compile one or many object files
+compileObjectsJob config [] output = do
+  hPutStrLn stderr "No input files"
+  return pass
+
+compileObjectsJob config [input] output =
+  -- Allow overriding the output file name when one input file is given
+  compileObjectJob config input output
+
+compileObjectsJob config inputs output
+  | isJust output = do
+      hPutStrLn stderr "Cannot specify output file with multiple input files"
+      return pass
+  | otherwise = do
+      -- Compile all input files independently
+      jobs <- forM inputs $ \input -> compileObjectJob config input Nothing
+      return $ sequence_ jobs
+
 -- | Create a job to compile one input file to object code
-compileObjectJob (file_path, language) moutput_path = do
+compileObjectJob config (file_path, language) moutput_path = do
   input_language <-
     case language
     of NoneLanguage -> from_suffix file_path
        _ -> return language
 
-  -- Read and compile the file
+  -- Read and compile the file.  Decide where to put the temporary C file.
   case input_language of
-    PyonLanguage -> return $ pyonCompilation file_path >>=
-                             fileOutput output_path
-    PyonAsmLanguage -> return $ pyonAsmCompilation file_path >>=
-                                fileOutput output_path
+    PyonLanguage ->
+      let infile = readFileFromPath file_path
+          outfile = writeFileFromPath output_path
+      in compileWithCFile config output_path $
+         return $ \cfile -> pyonCompilation infile cfile outfile
+
+    PyonAsmLanguage -> 
+      let infile = readFileFromPath file_path
+          outfile = writeFileFromPath output_path
+      in compileWithCFile config output_path $
+         return $ \cfile -> pyonAsmCompilation infile cfile outfile
   where
     from_suffix path
       | takeExtension path == ".pyon" = return PyonLanguage
@@ -196,35 +222,30 @@ compileObjectJob (file_path, language) moutput_path = do
       case moutput_path
       of Just p -> p
          Nothing -> replaceExtension file_path ".o"
-
--- | Compile one or many object files
-compileObjectsJob [] output = do
-  hPutStrLn stderr "No input files" 
-  return pass
-
-compileObjectsJob [input] output =
-  -- Allow overriding the output file name when one input file is given
-  compileObjectJob input output
-
-compileObjectsJob inputs output
-  | isJust output = do
-      hPutStrLn stderr "Cannot specify output file with multiple input files"
-      return pass
+   
+-- | Compile and generate an intermediate C file.
+-- If C files are kept, put the C file in the same location as the output, with
+-- a different extension.  Otherwise, make an anonymous file.
+compileWithCFile config output_path mk_do_work
+  | keepCFiles config = do
+      temp_file <- tempFileFromPath True (output_path `replaceExtension` ".c")
+      do_work <- mk_do_work
+      return $ do_work temp_file
   | otherwise = do
-      -- Compile all input files independently
-      jobs <- forM inputs $ \input -> compileObjectJob input Nothing
-      return $ sequence_ jobs
+      do_work <- mk_do_work
+      return $ withAnonymousFile ".c" $ do_work
 
+pyonCompilation :: ReadFile -> TempFile -> WriteFile -> Job ()
+pyonCompilation infile cfile outfile = do
+  asm <- taskJob $ CompilePyonToPyonAsm infile
+  taskJob $ CompilePyonAsmToGenC asm (writeTempFile cfile)
+  taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 
-pyonCompilation in_path = do
-  input <- taskJob $ ReadInputFile in_path
-  asm <- taskJob $ CompilePyonToPyonAsm input
-  taskJob $ CompilePyonAsmToObject asm
+pyonAsmCompilation :: ReadFile -> TempFile -> WriteFile -> Job ()
+pyonAsmCompilation infile cfile outfile = do
+  asm <- withAnonymousFile ".pyasm" $ \ppfile -> do
+    taskJob $ PreprocessCPP infile (writeTempFile ppfile)
+    taskJob $ ParsePyonAsm (readTempFile ppfile)
+  taskJob $ CompilePyonAsmToGenC asm (writeTempFile cfile)
+  taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 
-pyonAsmCompilation in_path = do
-  input <- taskJob $ ReadInputFile in_path
-  ppinput <- taskJob $ PreprocessCPP input
-  asm <- taskJob $ ParsePyonAsm ppinput
-  taskJob $ CompilePyonAsmToObject asm
-
-fileOutput out_path file = taskJob $ RenameToPath out_path file

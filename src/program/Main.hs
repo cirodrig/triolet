@@ -54,34 +54,31 @@ main = do
 -- | Run a task.  This is the entry point for each stage of the
 -- compiler.
 runTask :: Task a -> IO a
-runTask (ReadInputFile path) = do
-  return $ diskFile path
+runTask (PreprocessCPP { cppInput = in_file
+                       , cppOutput = cpp_file}) = do
+  in_path <- readFilePath in_file
+  out_path <- writeFilePath cpp_file
+  invokeCPP in_path out_path
 
-runTask (PreprocessCPP file) = do
-  output_file <- newTemporaryFile ".out"
-  input_path <- getFilePath file
-  output_path <- getFilePath output_file
-  invokeCPP input_path output_path
-  return output_file
-
-runTask (ParsePyonAsm file) = do
-  input_text <- readDataFileString file
-  input_path <- getFilePath file
+runTask (ParsePyonAsm {parseAsmInput = file}) = do
+  input_text <- readFileAsString file
+  input_path <- readFilePath file
   parsePyonAsm input_path input_text
 
-runTask (CompilePyonToPyonAsm file) = do
-  input_text <- readDataFileString file
-  input_path <- getFilePath file
+runTask (CompilePyonToPyonAsm {compilePyonInput = file}) = do
+  input_text <- readFileAsString file
+  input_path <- readFilePath file
   compilePyonToPyonAsm input_path input_text
 
-runTask (CompilePyonAsmToObject ll_mod) = do
-  output_file <- newTemporaryFile ".o"
-  compilePyonAsmToObject ll_mod output_file
-  return output_file
+runTask (CompilePyonAsmToGenC { compileAsmInput = ll_mod
+                              , compileAsmOutput = c_file}) = do
+  compilePyonAsmToGenC ll_mod c_file
 
-runTask (RenameToPath path file) = do
-  input_path <- getFilePath file
-  renameFile input_path path
+runTask (CompileGenCToObject { compileGenCInput = c_file
+                             , compileGenCOutput = o_file}) = do
+  c_path <- readFilePath c_file 
+  o_path <- writeFilePath o_file
+  compileCFile c_path o_path
 
 -- | Invoke the C preprocessor
 invokeCPP :: FilePath -> FilePath -> IO ()
@@ -141,8 +138,8 @@ parsePyonAsm input_path input_text = do
   (mod_name, externs, ast) <- LLParser.parseFile input_path input_text
   LLParser.generateLowLevelModule input_path mod_name externs ast
 
--- | Compile an input low-level module to object code
-compilePyonAsmToObject ll_mod output_file = do
+-- | Compile an input low-level module to C code
+compilePyonAsmToGenC ll_mod c_file = do
   -- Low-level transformations
   ll_mod <- LowLevel.makeBuiltinPrimOps ll_mod
   putStrLn ""
@@ -167,18 +164,10 @@ compilePyonAsmToObject ll_mod output_file = do
   -- Generate and compile a C file
   let c_mod = LowLevel.generateCFile ll_mod
       
-  c_file <- newTemporaryFile ".c"
-  writeDataFileString c_file c_mod
-    
-  -- Compile the file
-  compileCFile c_file output_file
-  
-  return ()
+  writeFileAsString c_file c_mod
 
 -- | Compile a C file to produce an object file.
-compileCFile c_file o_file = do
-  c_fname <- getFilePath c_file
-  o_fname <- getFilePath o_file
+compileCFile c_fname o_fname = do
   include_path <- Paths.getDataFileName "include"
   let compiler_opts =
         [ "-c"                  -- Compile
