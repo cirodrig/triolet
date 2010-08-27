@@ -16,6 +16,7 @@ import Prelude hiding(mapM, sequence)
 
 import Control.Applicative
 import Control.Monad hiding(mapM, sequence)
+import Data.Char
 import Data.Function
 import Data.IORef
 import qualified Data.Graph.Inductive as Graph
@@ -33,6 +34,7 @@ import qualified Language.Python.Common.AST as Py
 import qualified Language.Python.Common.Pretty as Py
 import qualified Language.Python.Common.SrcLocation as Py
 import Language.Python.Common.PrettyAST()
+import Export
 import Parser.ParserSyntax
 import {-# SOURCE #-} Parser.SSA
 
@@ -625,8 +627,7 @@ isExportStatement _ = False
 topLevel :: [PyStmt] -> Cvt ([Func Int], [ExportItem Int])
 topLevel xs = do
   items <- traverse topLevelFunction xs
-  let (functions, exports) = partitionEither items
-  return (functions, concat exports)
+  return $ partitionEither items
   where
     partitionEither xs = part xs id id
       where
@@ -637,21 +638,44 @@ topLevel xs = do
     topLevelFunction stmt
       | isDefStatement stmt = do x <- funDefinition stmt
                                  return (Left x)
-      | isExportStatement stmt = do xs <- exportStatement stmt
-                                    return (Right xs)
+      | isExportStatement stmt = do x <- exportStatement stmt
+                                    return (Right x)
       | otherwise =
           fail "Only functions and exports permitted at global scpoe"
 
 -- Process an export statement
-exportStatement :: PyStmt -> Cvt [ExportItem Int]
-exportStatement stmt@(Py.Export {Py.export_items = items,
-                                 Py.stmt_annot = ann}) =
-  -- Export each item
-  mapM export_item items 
+exportStatement :: PyStmt -> Cvt (ExportItem Int)
+exportStatement stmt@(Py.Export {Py.export_lang = lang,
+                                 Py.export_name = name,
+                                 Py.export_item = item,
+                                 Py.export_type = ty,
+                                 Py.stmt_annot = ann}) = do
+  language <-
+    case identName lang
+    of "ccall" -> return CCall
+       _ -> error $ "Unsupported language '" ++ identName lang ++ "'"
+  var <- use item
+  ty' <- expression ty
+  
+  -- Determine the exported name.
+  -- Remove quote characters from the given string.
+  export_name <-
+    case name
+    of Nothing -> return $ identName item
+       Just nm -> check_valid_identifier language $ init $ tail nm
+
+  return $
+    ExportItem (toSourcePos ann) (ExportSpec language export_name) var ty'
   where
-    export_item item = do
-      var <- use item
-      return $ ExportItem (toSourcePos ann) var
+    check_valid_identifier _ "" = fail "Exported name is empty string"
+
+    -- Valid C identifier: alpha (alnum*)
+    check_valid_identifier CCall name@(c:cs)
+      | is_c_alpha c && all is_c_alnum cs = return name
+      | otherwise = fail "Exported name is not a valid C identifier"
+    
+    is_c_alpha c = isAlpha c || c == '_'
+    is_c_alnum c = isAlphaNum c || c == '_'
 
 -- Unpack a function definition into decorator and real definition
 funDefinition :: PyStmt -> Cvt (Func Int)
@@ -839,4 +863,4 @@ parseModule stream path globals nextID =
          return $! case x of Left err -> Left err
                              Right (m, n, (defs, exps)) ->
                                let groups = definitionGroups defs
-                               in Right (m, n, Module groups exps)
+                               in Right (m, n, Module path groups exps)

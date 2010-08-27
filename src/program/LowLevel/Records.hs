@@ -170,7 +170,6 @@ papHeaderRecord :: StaticRecord
 papHeaderRecord = staticRecord papHeader
 
 
-{-
 -- | A stream object.
 --
 -- There are several kinds of stream objects.  All stream objects have a
@@ -205,7 +204,6 @@ listRecord = staticRecord
              [ PrimField nativeWordType -- Size
              , PrimField PointerType    -- Pointer to contents
              ]
--}
 
 {-
 -- The stream return creator and stream return initializer have nothing

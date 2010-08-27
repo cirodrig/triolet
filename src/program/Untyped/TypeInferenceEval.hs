@@ -90,7 +90,11 @@ evFun (Untyped.TIFun f) = do
 evDef :: Def Untyped.TI -> IO RDef
 evDef (Def v f) = Def v `liftM` evFun f
 
+evExport :: Export Untyped.TI -> IO (Export Rec)
+evExport (Export pos spec f) = Export pos spec `liftM` evFun f
+
 evalTypeInferenceResult :: Module Untyped.TI -> IO RModule
-evalTypeInferenceResult (Module defs exports) = do
+evalTypeInferenceResult (Module module_name defs exports) = do
   defs' <- mapM (mapM evDef) defs
-  return $ Module defs' exports
+  exports' <- mapM evExport exports
+  return $ Module module_name defs' exports'

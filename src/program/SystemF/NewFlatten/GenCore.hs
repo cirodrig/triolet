@@ -1513,22 +1513,29 @@ flattenDef (Effect.Def v fun) = do
   fun' <- flattenFun fun
   return $ CDef v fun'
 
-flattenModule defss =
-  mapM (mapM flattenDef) defss
+flattenExport (Effect.Export pos spec f) = do
+  f' <- flattenFun f
+  return $ CExport (mkSynInfo pos ObjectLevel) spec f'
 
-flatten :: SystemF.Module SystemF.TypedRec -> IO [[CDef Rec]]
+flattenModule defss exports = do
+  defss' <- mapM (mapM flattenDef) defss
+  exports' <- mapM flattenExport exports
+  return (defss', exports')
+
+flatten :: SystemF.Module SystemF.TypedRec -> IO (CModule Rec)
 flatten mod = do
   -- Run effect inference
-  effect_defss <- Effect.runEffectInference mod
+  (mname, effect_defss, effect_exports) <- Effect.runEffectInference mod
   
   -- Run flattening
-  flattened <-
+  (flattened_defs, flattened_exports) <-
     withTheVarIdentSupply $ \var_supply ->
     let env = cleanEnv var_supply
-    in runReaderT (runEffEnv $ flattenModule effect_defss) env
+    in runReaderT (runEffEnv $ flattenModule effect_defss effect_exports) env
+  let flattened_module = CModule mname flattened_defs flattened_exports
 
   -- DEBUG: print flattened code
   putStrLn "Flattened"
-  print $ vcat $ concat $ map (map pprCDef) flattened
+  print $ pprCModule flattened_module
   
-  return flattened
+  return flattened_module

@@ -12,6 +12,7 @@ import Gluon.Common.Identifier
 import Gluon.Common.Label
 import qualified Gluon.Core as Gluon
 import qualified Gluon.Core.Print as Gluon
+import Export
 import SystemF.Builtins
 import SystemF.Syntax
 
@@ -30,11 +31,13 @@ pprFun = pprFunFlags defaultPrintFlags
 pprDef :: RDef -> Doc
 pprDef = pprDefFlags defaultPrintFlags
 
-pprExport :: Export -> Doc
-pprExport (Export _ v) = text "export" <+> pprVar v
+pprExport :: Export Rec -> Doc
+pprExport (Export pos spec f) =
+  text "export" <+> pprExportSpec spec $$ nest 2 (pprFun f)
 
 pprModule :: RModule -> Doc
-pprModule (Module defs exports) =
+pprModule (Module module_name defs exports) =
+  text "module" <+> text (showModuleName module_name) $$
   vcat (map (braces . vcat . map pprDef) defs) $$
   vcat (map pprExport exports)
 
@@ -51,6 +54,10 @@ defaultPrintFlags =
 -- Helper function for printing tuple syntax
 tuple :: [Doc] -> Doc
 tuple xs = parens $ sep $ punctuate comma xs
+
+pprExportSpec :: ExportSpec -> Doc
+pprExportSpec (ExportSpec lang name) =
+  text (foreignLanguageName lang) <+> text (show name)
 
 pprVarFlags :: PrintFlags -> Var -> Doc
 pprVarFlags flags v =

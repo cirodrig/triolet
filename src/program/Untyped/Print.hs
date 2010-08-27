@@ -95,10 +95,11 @@ pprFunction fname (Function { funQVars = qvars
     in forall_doc $$ intro $$ nest 2 (pprExpression body)
 
 pprExport :: Export -> Doc
-pprExport (Export _ v) =
-  text "export" <+> pprVariable v
+pprExport (Export _ spec v ty) =
+  text "export" <+> pprVariable v <+> text ":" <+> text "..."
   
 pprModule :: Module -> Doc
-pprModule (Module defss exps) =
+pprModule (Module module_name defss exps) =
+  text "module" <+> text (showModuleName module_name) $$
   vcat (map (showBlock . map pprDefinition) defss) $$
   vcat (map pprExport exps)

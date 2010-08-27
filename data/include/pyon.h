@@ -5,6 +5,8 @@
  */
 
 #include <inttypes.h>
+#include "pyon_types.h"
+#include "pyon_list.h"
 
 /* Very low-level pointer manipulation.
  * Add a byte offset to a pointer. */
@@ -24,12 +26,7 @@
 #define PYON_OFF_F64(base, offset) PYON_OFF_TYPE(base, offset, double)
 #define PYON_OFF_PTR(base, offset) PYON_OFF_TYPE(base, offset, PyonPtr)
 
-/* A pointer to a Pyon objects */
-typedef void *PyonPtr;
-
 /* An object's 'free' method */
 typedef void (*PyonFreeFunc)(PyonPtr);
 
-/* A boolean value passed to or returned from a function */
-typedef int PyonBool;
 

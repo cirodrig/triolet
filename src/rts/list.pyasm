@@ -228,6 +228,55 @@ function list_traverse_initialize(pointer state) -> () {
   ();
 };
 
+// Allocate and construct a list, given a suitably initialized data array.
+// The data array is stolen by the list.
+// A pointer to the new list is returned.
+procedure pyon_list_from_array (word n_elems,
+                                pointer array) -> pointer {
+  l = pointer primcall pyon_alloc (sizeof PyonList);
+  l @! PyonList.nelems = n_elems;
+  l @! PyonList.contents = array;
+  l;
+};
+
+// Copy the contents of a plain-old-data list into an array.
+// The list is not modified.
+procedure pyon_list_to_array_POD (PassConv elem,
+                                  pointer list,
+                                  pointer array) -> () {
+  PassConv {elem_size, elem_align, _, _} = elem;
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  () = () primcall memcpy (array, list @! PyonList.contents,
+                           pad_elem_size * list @! PyonList.nelems);
+  ();
+};
+
+procedure pyon_list_length (pointer list) -> word {
+  list @! PyonList.nelems;
+};
+
+// Allocate and return a copy of the POD list.
+procedure pyon_list_copy_POD (PassConv elem, pointer in_list) -> pointer {
+  PassConv {elem_size, elem_align, _, _} = elem;
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  new_list = pointer primcall pyon_alloc(sizeof PyonList);
+  nelems = in_list @! PyonList.nelems;
+  new_list @! PyonList.nelems = nelems;
+
+  data_size = pad_elem_size * nelems;
+  contents = pointer primcall pyon_alloc(data_size);
+  () = () primcall memcpy(contents, new_list @! PyonList.contents, data_size);
+  new_list;
+};
+
+// Free the POD list.
+procedure pyon_list_free_POD (pointer list) -> () {
+  () = () primcall pyon_dealloc(list @! PyonList.contents);
+  () primcall pyon_dealloc(list);
+};
+
 /*****************************************************************************/
 /* Testing */
 

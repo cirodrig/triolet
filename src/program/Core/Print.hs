@@ -6,6 +6,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Label
 import Gluon.Core
+import Export
 import Core.Syntax
 import qualified SystemF.Syntax as SystemF
 
@@ -158,4 +159,16 @@ pprCFun fun =
 pprCDef :: CDef Rec -> Doc
 pprCDef (CDef v f) =
   hang (pprVar v <+> text "=") 4 (pprCFun f)
-  
+
+pprCExport :: CExport Rec -> Doc
+pprCExport (CExport _ (ExportSpec lang name) f) = 
+  let export_language = case lang
+                        of CCall -> text "ccall"
+      export_name = text $ show name
+  in text "export" <+> export_language <+> export_name <+> text "=" $$
+     pprCFun f
+
+pprCModule :: CModule Rec -> Doc
+pprCModule (CModule module_name defss exports) =
+  text "module" <+> text (showModuleName module_name) $$
+  vcat (map (vcat . map pprCDef) defss) $$ vcat (map pprCExport exports)

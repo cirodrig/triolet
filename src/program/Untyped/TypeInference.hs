@@ -1,4 +1,5 @@
 
+{-# LANGUAGE TypeSynonymInstances #-}
 module Untyped.TypeInference
        (typeInferModule)
 where
@@ -47,7 +48,8 @@ mapAndUnzip3M f xs = do
 -- The type inference monad
 
 newtype Inf a =
-  Inf {runInf :: Environment -> IO (Constraint, TyVarSet, Placeholders, a)}
+  Inf {runInf :: Environment
+              -> IO (Constraint, TyVarSet, Placeholders, a)}
 
 infReturn :: a -> IO (Constraint, TyVarSet, Placeholders, a)
 infReturn x = return ([], Set.empty, [], x)
@@ -71,10 +73,11 @@ getEnvironment :: Inf Environment
 getEnvironment = Inf $ \env -> infReturn env
 
 withEnvironment :: (Environment -> IO a) -> Inf a
-withEnvironment f = Inf $ infReturn <=< f
+withEnvironment f = Inf $ \env -> infReturn =<< f env
 
 assume :: Variable -> TypeAssignment -> Inf a -> Inf a
-assume v assignment (Inf f) = Inf $ f . Map.insert v assignment
+assume v assignment (Inf f) = Inf $ \env ->
+  f (Map.insert v assignment env)
 
 -- | Unify in the Inf monad.  Generated constraints are added to the context.
 unifyInf :: Unifiable a => SourcePos -> a -> a -> Inf ()
@@ -94,6 +97,20 @@ requirePassable ty = do
 -- | Add a constraint to the context
 require :: Constraint -> Inf ()
 require c = Inf $ \_ -> return (c, Set.empty, [], ())
+
+-- | Fail if the given type contains type variables.  Unified variables will
+-- not be expanded before checking.
+failIfPolymorphic pos ty = go ty
+  where
+    go ty =
+      case ty
+      of ConTy c | isTyVar c -> fail "Type may not contain type variables"
+                 | otherwise -> pass
+         FunTy _ -> pass
+         TupleTy _ -> pass
+         AppTy t1 t2 -> go t1 >> go t2
+
+    pass = return ()
 
 -------------------------------------------------------------------------------
 -- Environments
@@ -608,25 +625,68 @@ addParameterToEnvironment pattern k =
              tuple_pc = TuplePassConv field_pcs
          k (mkTupleP fields') tuple_type tuple_pc
 
-inferExportType :: Export -> SystemF.Export
-inferExportType (Export ann var) =
-  case varSystemFVariable var
-  of Nothing -> internalError "Cannot export variable"
-     Just v  -> let pos = case ann
-                          of Ann pos -> pos
-                in SystemF.Export pos v
+-- | Infer the type of an export statement.  Generate a function that wraps
+-- the variable.
+inferExportType :: Export -> Inf (SystemF.Export TI)
+inferExportType (Export { exportAnnotation = ann
+                        , exportSpec = espec
+                        , exportVariable = var
+                        , exportType = ty}) = do
+  -- Type must be a monomorphic function type
+  failIfPolymorphic pos ty
+  (dom, rng) <- do
+    ty' <- liftIO $ uncurryTypeApplication ty
+    case ty' of
+      (FunTy _, args) -> return (init args, last args)
+      _ -> fail "Exported variable is not a function"
+
+  inst_exp <- instantiate_export_var pos var ty
+  
+  -- Create a variable for each parameter
+  param_var_ids <- liftIO $ replicateM (length dom) getNextVarIdent
+  let param_vars = [Gluon.Core.mkAnonymousVariable n Gluon.Core.ObjectLevel
+                   | n <- param_var_ids]
+
+  -- Create a new function that calls the exported variable
+  let call_args = map (mkVarE pos) param_vars
+      call_exp = mkCallE pos inst_exp call_args
+      params = zipWith mkVarP param_vars (map convertHMType dom)
+  wrapper_fun <- liftIO $ mkFunction pos [] params (convertHMType rng) call_exp
+  
+  return $ mkExport pos espec wrapper_fun
+  where
+    pos = case ann of Ann pos -> pos
+                      
+    -- Instantiate an exported variable
+    instantiate_export_var pos var ty = Inf $ \env -> do
+      (cst, tyvars, placeholders, x) <- runInf instantiate_and_unify env
+      
+      -- Discard constraints, because the type is monomorphic
+      
+      -- Resolve placeholders.  All placeholders should be resolved.
+      unresolved_placeholders <- resolvePlaceholders [] env placeholders
+      unless (null unresolved_placeholders) $
+        internalError "Unresolved placeholders in export expression"
+      
+      return ([], tyvars, [], x)
+      where 
+        instantiate_and_unify = do
+          (inst_exp, var_type, pass_conv) <- instantiateVariable pos var
+          unifyInf pos var_type ty
+          return inst_exp
 
 inferModuleTypes :: Module -> Inf (SystemF.Module TI)
-inferModuleTypes (Module defss exports) = do
-  defss' <- inferDefGroups defss
-  let exports' = map inferExportType exports
-  return $ SystemF.Module defss' exports'
+inferModuleTypes (Module module_name defss exports) = do
+  (defss', exports') <- inferDefGroups defss
+  return $ SystemF.Module module_name defss' exports'
   where
     inferDefGroups (defs:defss) =
       inferDefGroup True defs $ \defs' -> do
-        defss' <- inferDefGroups defss
-        return (defs':defss')
-    inferDefGroups [] = return []
+        (defss', exports') <- inferDefGroups defss
+        return (defs':defss', exports')
+    inferDefGroups [] = do 
+      exports' <- mapM inferExportType exports
+      return ([], exports')
 
 -- | The type environment for all global variables
 buildGlobalEnvironment :: IO Environment

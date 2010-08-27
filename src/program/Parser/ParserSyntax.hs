@@ -14,6 +14,7 @@ import {-# SOURCE #-} Parser.SSA
 
 import qualified Language.Python.Common.AST as Python
 import Gluon.Common.SourcePos(SourcePos)
+import Export
 import Untyped.Data(ParserVarBinding)
 import Untyped.Builtins
 
@@ -136,6 +137,12 @@ data Func id =
   , funcJoinPoint :: !(Maybe JoinNode)
   }
 
-data ExportItem id = ExportItem SourcePos (Var id)
+data ExportItem id =
+  ExportItem 
+  { exportPos :: !SourcePos 
+  , exportSpec :: !ExportSpec
+  , exportVar :: Var id
+  , exportType :: Expr id
+  }
 
-data Module id = Module [[Func id]] [ExportItem id]
+data Module id = Module String [[Func id]] [ExportItem id]

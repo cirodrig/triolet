@@ -154,7 +154,7 @@ compileCRtsFile :: MakeRuleTemplate
 compileCRtsFile build_path source_path src =
   let o_file = build_path </> src `replaceExtension` ".o"
       i_file = source_path </> src `replaceExtension` ".c"
-  in MakeRule o_file [i_file] $
+  in MakeRule o_file [i_file, "bootstrap_data"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(CC) $(RTS_C_C_OPTS) -c $< -o $@"
 

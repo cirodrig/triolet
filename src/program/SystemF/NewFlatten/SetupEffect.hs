@@ -15,6 +15,7 @@ module SystemF.NewFlatten.SetupEffect
         FunOf(EIFun, funInfo, funEffectParams, funParams, funReturnType,
               funReturnPassType, funEffect, funBody),
         Def(Def),
+        Export(Export),
         expReturnsNewValue,
         runEffectInference)
 where
@@ -55,7 +56,8 @@ import qualified SystemF.Builtins as SystemF
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.Print as SystemF
 import SystemF.Syntax(ExpInfo, SFRecExp, RExp, RType, RecType,
-                           FunOf, Fun, AltOf, RecAlt, Lit(..), Def(..))
+                           FunOf, Fun, AltOf, RecAlt, Lit(..), Def(..),
+                           Export(..))
 import SystemF.Typecheck
 
 import SystemF.NewFlatten.PassConv
@@ -418,6 +420,9 @@ pprBinder (Binder v _ (rgn, pt)) =
 forceEffects :: [[Def EI]] -> IO [[Def EI]]
 forceEffects defss = mapM (mapM forceDef) defss
 
+forceExportEffects :: Export EI -> IO (Export EI)
+forceExportEffects (Export pos spec f) = Export pos spec `liftM` forceFun f
+  
 forceDef (Def v f) = Def v `liftM` forceFun f
 
 forceFun f = do
@@ -1636,30 +1641,42 @@ effectInferDefGroup defs m = do
       f' <- effectInferFun False f
       return (funMonoPassType (funParams f') (funReturnPassType f') (funEffect f'), Def v f')
 
+effectInferExport (Export pos spec f) = do
+  f' <- effectInferFun False f
+  return $ Export pos spec f' 
+
 effectInferTopLevel :: [SystemF.DefGroup TypedRec]
-                    -> EffInf [SystemF.DefGroup EI]
-effectInferTopLevel (dg:dgs) = do
-  (dg', dgs') <- effectInferDefGroup dg $ effectInferTopLevel dgs
-  return (dg' : dgs')
+                    -> [SystemF.Export TypedRec]
+                    -> EffInf ([SystemF.DefGroup EI], [SystemF.Export EI])
+effectInferTopLevel (dg:dgs) exports = do
+  (dg', (dgs', exports')) <-
+    effectInferDefGroup dg $ effectInferTopLevel dgs exports
+  return (dg' : dgs', exports')
 
-effectInferTopLevel [] = return []
+effectInferTopLevel [] exports = do
+  exports' <- mapM effectInferExport exports
+  return ([], exports')
 
-effectInferModule :: SystemF.Module TypedRec -> EffInf [[Def EI]]
-effectInferModule (SystemF.Module defss _) = do
-  (defss', cst) <- getConstraint $ effectInferTopLevel defss
+effectInferModule :: SystemF.Module TypedRec
+                  -> EffInf (ModuleName, [[Def EI]], [SystemF.Export EI])
+effectInferModule (SystemF.Module module_name defss exports) = do
+  ((defss', exports'), cst) <-
+    getConstraint $ effectInferTopLevel defss exports
   
   -- No constraints should remain
   liftRegionM $ solveGlobalConstraint cst
 
   -- DEBUG: force effects
   defss'' <- liftIO $ forceEffects defss'
+  exports'' <- liftIO $ mapM forceExportEffects exports'
 
   -- DEBUG: print the module
   liftIO $ putStrLn "Effect inference"
   liftIO $ print $ vcat $ map pprDefGroup defss''
-  return defss'
+  return (module_name, defss'', exports'')
   
-runEffectInference :: SystemF.Module TypedRec -> IO [[Def EI]]
+runEffectInference :: SystemF.Module TypedRec
+                   -> IO (ModuleName, [[Def EI]], [Export EI])
 runEffectInference mod = do
   -- Create effect variable IDs
   evar_ids <- newIdentSupply

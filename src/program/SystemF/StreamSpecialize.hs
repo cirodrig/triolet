@@ -672,19 +672,27 @@ specializeDefs dg m = do
     add_table_to_environment (table, Def v _) m =
       assumeVarSpclTable v table m
 
-specializeTopLevelDefs :: [DefGroup Rec] -> Spcl [DefGroup Rec]
-specializeTopLevelDefs (dg:dgs) = do
-  (dg', dgs') <- specializeDefs dg $ specializeTopLevelDefs dgs
-  return $ dg' : dgs'
+specializeExport :: Export Rec -> Spcl (Export Rec)
+specializeExport (Export pos spec f) = do
+  f' <- specializeFun f
+  return (Export pos spec f')
 
-specializeTopLevelDefs [] = return []
+specializeTopLevelDefs :: [DefGroup Rec] 
+                       -> [Export Rec]
+                       -> Spcl ([DefGroup Rec], [Export Rec])
+specializeTopLevelDefs (dg:dgs) exports = do
+  (dg', (dgs', exports')) <-
+    specializeDefs dg $ specializeTopLevelDefs dgs exports
+  return (dg' : dgs', exports')
+
+specializeTopLevelDefs [] exports = do
+  exports' <- mapM specializeExport exports
+  return ([], exports')
 
 specializeModule :: RModule -> Spcl RModule
-specializeModule (Module defs exports) = do
-  defs' <- specializeTopLevelDefs defs
-  
-  -- FIXME: specialization on exported functions
-  return $ Module defs' exports
+specializeModule (Module module_name defs exports) = do
+  (defs', exports') <- specializeTopLevelDefs defs exports
+  return $ Module module_name defs' exports'
 
 doSpecialization :: RModule -> IO RModule
 doSpecialization mod =

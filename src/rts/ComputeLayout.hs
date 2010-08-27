@@ -3,6 +3,7 @@
 -}
 
 import Data.List
+import System.Environment
 
 import LowLevel.Types
 import LowLevel.Record
@@ -82,6 +83,13 @@ defineInfoTag :: String -> InfoTag -> ShowS
 defineInfoTag name tag =
   defineMacro (showString name) (shows $ fromEnum tag)
 
+defineSizeAlign :: HasSize a => String -> a -> ShowS
+defineSizeAlign name x =
+  let sizeof_name = showString ("SIZEOF_" ++ name)
+      alignof_name = showString ("ALIGNOF_" ++ name)
+  in defineMacro sizeof_name (shows $ sizeOf x) . showChar '\n' .
+     defineMacro alignof_name (shows $ alignOf x)
+
 defineAll = vcat
   [ defineRecord infoTableHeaderRecord "INFO"
     ["FREE", "TAG"]
@@ -105,14 +113,50 @@ defineAll = vcat
   , defineBitsTag "OWNED_REF_BITS_TAG" OwnedRefBitsTag
   , defineInfoTag "FUN_TAG" FunTag
   , defineInfoTag "PAP_TAG" PAPTag
-  , defineMacro (showString "SIZEOF_PYONPTR") (shows $ sizeOf PointerType)
-  , defineMacro (showString "ALIGNOF_PYONPTR") (shows $ alignOf PointerType)
+  , defineSizeAlign "PYON_PTR" PointerType
+  , defineSizeAlign "PYON_INT" pyonIntType
+  , defineSizeAlign "PYON_FLOAT" pyonFloatType
   , defineMacro (showString "MAX_SCALAR_ALIGNMENT") (shows maxScalarAlignment) 
   , defineMacro (showString "DYN_SCALAR_ALIGNMENT") (shows dynamicScalarAlignment)
  ]
 
+writeLayoutFile layout_filename =
+  let layout_contents =
+        showString "#ifndef _LAYOUT_H\n" .
+        showString "#define _LAYOUT_H\n" .
+        defineAll .
+        showString "\n#endif\n"
+  in writeFile layout_filename $ layout_contents ""
+
+writeTypesFile types_filename =
+  let (word_type, int_type) =
+        case pyonIntSize 
+        of S32 -> ("uint32_t", "int32_t")
+           S64 -> ("uint64_t", "int64_t")
+      float_type =
+        case pyonFloatSize
+        of S32 -> "float"
+           S64 -> "double"
+      bool_type =
+        case nativeIntSize
+        of S32 -> "int32_t"
+           S64 -> "int64_t"
+
+      types_contents =
+        "#ifndef _PYON_TYPES_H\n" ++
+        "#define _PYON_TYPES_H\n" ++
+        "#include <inttypes.h>\n" ++
+        "typedef void *PyonPtr;\n" ++
+        "typedef " ++ int_type ++ " PyonInt;\n" ++
+        "typedef " ++ word_type ++ " PyonWord;\n" ++
+        "typedef " ++ float_type ++ " PyonFloat;\n" ++
+        "typedef " ++ bool_type ++ " PyonBool;\n" ++
+        "#endif"
+  in writeFile types_filename types_contents
+
 main = do
-  putStrLn "#ifndef _LAYOUT_H"
-  putStrLn "#define _LAYOUT_H"
-  putStrLn (defineAll "")
-  putStrLn "#endif"
+  [layout_filename, types_filename] <- getArgs
+  
+  writeLayoutFile layout_filename
+  writeTypesFile types_filename
+  

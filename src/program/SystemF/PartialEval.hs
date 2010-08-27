@@ -114,9 +114,9 @@ bindValue (TupleP ps) e m =
 -------------------------------------------------------------------------------
 
 partialEvaluateModule :: RModule -> RModule
-partialEvaluateModule (Module defss exports) =
+partialEvaluateModule (Module module_name defss exports) =
   let defss' = runPE (pevalDefGroups defss)
-  in Module defss' exports
+  in Module module_name defss' exports
 
 pevalDefGroups :: [DefGroup Rec] -> PE [DefGroup Rec]
 pevalDefGroups (defs:defss) =

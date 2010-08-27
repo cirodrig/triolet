@@ -486,14 +486,22 @@ typeCheckDefGroup defs k =
       fun_val <- typeInferFun fun
       return $ Def v fun_val
 
-typeCheckModule (Module defs exports) =
+typeCheckExport :: Export Rec -> PureTC (Export TypedRec) 
+typeCheckExport (Export pos spec f) = do
+  f' <- typeInferFun f
+  return $ Export pos spec f'
+
+typeCheckModule (Module module_name defs exports) =
   withTheVarIdentSupply $ \varIDs ->
     runPureTCIO varIDs $ do
-      defs' <- typeCheckDefGroups defs
-      return $ Module defs' exports
+      (defs', exports') <- typeCheckDefGroups defs exports
+      return $ Module module_name defs' exports'
   where
-    typeCheckDefGroups (defs:defss) = 
-      typeCheckDefGroup defs $ \defs' -> 
-      liftM (defs':) $ typeCheckDefGroups defss
+    typeCheckDefGroups (defs:defss) exports = 
+      typeCheckDefGroup defs $ \defs' -> do
+        (defss', exports') <- typeCheckDefGroups defss exports
+        return (defs' : defss', exports')
       
-    typeCheckDefGroups [] = return []
+    typeCheckDefGroups [] exports = do 
+      exports' <- mapM typeCheckExport exports
+      return ([], exports')

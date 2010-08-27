@@ -24,6 +24,7 @@ import qualified Untyped.HMType as U
 import qualified Untyped.Kind as U
 import Untyped.Builtins
 import Globals
+import qualified Export
 
 -- | During conversion, we keep an assignment from
 -- parser variables to type variables
@@ -350,12 +351,18 @@ doIf pos c t f join_point rest
     return $ U.LetrecE (U.Ann pos) [U.FunctionDef cont_var cont_fun] if_expr
 
 doExport :: ExportItem SSAID -> Cvt U.Export
-doExport (ExportItem pos v) = do
+doExport (ExportItem { exportPos = pos 
+                     , exportSpec = spec
+                     , exportVar = v
+                     , exportType = ty}) = do
+  -- Variable must actually be a variable
   vexp <- doVar pos v
-  case vexp of
-    U.VariableE {U.expVar = v'} ->
-      return $ U.Export (U.Ann pos) v'
-    _ -> internalError "doExport"
+  let v' = case vexp
+           of U.VariableE {U.expVar = v'} -> v'
+              _ -> internalError "doExport"
+  
+  uty <- doType ty
+  return $ U.Export (U.Ann pos) spec v' uty
 
 -- | Generate a list of parameter expressions corresponding to the set of 
 -- live-in variables at a control flow join point.
@@ -429,10 +436,10 @@ convertBinaryOperator op =
      _ -> internalError "convertBinaryOperator: Unrecognized operator"
 
 convertModule :: Module SSAID -> Cvt U.Module
-convertModule (Module defss exports) =
+convertModule (Module module_name defss exports) =
   withMany convertDefGroup defss $ \defss' -> do
     exports' <- mapM doExport exports
-    return $ U.Module defss' exports'
+    return $ U.Module (moduleName module_name) defss' exports'
 
 convertToUntyped :: [(SSAVar, U.ParserVarBinding)]
                  -> Module SSAID 

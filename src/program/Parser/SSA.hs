@@ -417,13 +417,19 @@ ssaDefGroup defs = do
       return (v', ty')
 
 ssaExport :: ExportItem Int -> SSA (ExportItem SSAID)
-ssaExport (ExportItem pos v) = ExportItem pos <$> useV v
+ssaExport (ExportItem { exportPos = pos 
+                      , exportSpec = spec
+                      , exportVar = v
+                      , exportType = ty}) = do
+  v' <- useV v
+  ty' <- ssaExpr ty
+  return $ ExportItem pos spec v' ty'
 
 ssaModule :: Module Int -> SSA (Module SSAID)
-ssaModule (Module defss exports) = do
+ssaModule (Module module_name defss exports) = do
   defss' <- mapM ssaDefGroup defss
   exports' <- mapM ssaExport exports
-  return $ Module defss' exports'
+  return $ Module module_name defss' exports'
 
 computeSSA :: Int               -- ^ First statement ID to use
            -> Int               -- ^ First variable ID to use

@@ -17,17 +17,19 @@ import SystemF.Syntax
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
 eliminateDeadCode :: RModule -> RModule
-eliminateDeadCode (Module defss exports) =
-  let defss' = evalEDC edcTopLevelGroup defss
-  in Module defss' exports
+eliminateDeadCode (Module module_name defss exports) =
+  let (defss', exports') = evalEDC edcTopLevelGroup defss
+  in Module module_name defss' exports'
   where
     edcTopLevelGroup (ds:dss) =
       masks (Set.fromList [varID v | Def v _ <- ds]) $ do
         ds' <- mapM edcDef ds
-        dss' <- edcTopLevelGroup dss 
-        return (ds' : dss')
+        (dss', exports') <- edcTopLevelGroup dss
+        return (ds' : dss', exports')
     
-    edcTopLevelGroup [] = return []
+    edcTopLevelGroup [] = do
+      exports' <- mapM edcExport exports
+      return ([], exports')
 
 -- | If the expression is a tuple expression, then return the expression's
 -- field values.
@@ -58,7 +60,7 @@ onUnion f (Union s) = Union (f s)
 type EDC a = a -> GetMentionsSet a
 type GetMentionsSet a = Writer (Union VarID) a
 
-evalEDC :: EDC a -> a -> a
+evalEDC :: (a -> GetMentionsSet b) -> a -> b
 evalEDC f x = case runWriter $ f x of (x', _) -> x'
 
 -- | Mention a variable.  This prevents the assignment of this variable from
@@ -132,9 +134,11 @@ edcScanType t = scanType t >> return ()
            maybe id mask v $ scanProd b
          Gluon.Unit -> return Gluon.TrivialSum
 
--- | Scan an export declaration to find mentioned variables
-edcScanExport :: Export -> GetMentionsSet ()
-edcScanExport export = mention $ exportVariable export
+-- | Find mentioned variables in an export declaration
+edcExport :: Export Rec -> GetMentionsSet (Export Rec)
+edcExport export = do
+  fun <- edcFun $ exportFunction export
+  return $ export {exportFunction = fun}
 
 -- | Run the computation in a scope where the pattern is bound.
 -- Return a new pattern and the result of the computation.

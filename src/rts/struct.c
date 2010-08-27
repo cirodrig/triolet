@@ -8,7 +8,7 @@ const struct tag_sizealign_t tag_sizealign_array[] =
     {8, 8},				/* Int64Tag */
     {4, 4},				/* Float32Tag */
     {8, 8},				/* Float64Tag */
-    {SIZEOF_PYONPTR, ALIGNOF_PYONPTR}	/* OwnedRefTag */
+    {SIZEOF_PYON_PTR, ALIGNOF_PYON_PTR}	/* OwnedRefTag */
   };
 
 const char bits_tag_size_array [] =

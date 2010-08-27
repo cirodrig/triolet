@@ -6,6 +6,7 @@ import Control.Monad
 import Data.Typeable
 
 import Gluon.Common.Error
+import Gluon.Common.Label
 import Gluon.Common.SourcePos
 import Gluon.Core.Level
 import Gluon.Core.Syntax
@@ -13,6 +14,7 @@ import Gluon.Core.RenameBase
 import Gluon.Core.Rename
 import qualified Gluon.Core.Builtins.Effect
 
+import Export
 import qualified SystemF.Syntax as SystemF
 
 data family CTypeOf s :: * -> *
@@ -313,9 +315,23 @@ data instance CFunOf Rec s =
 data CDef s = CDef !Var !(RecCFun s)
             deriving(Typeable)
 
+data CExport s =
+  CExport 
+  { cexportInfo :: !SynInfo 
+  , cexportSpec :: !ExportSpec
+  , cexportFun :: RecCFun s
+  }
+
 instance HasSourcePos (CExp s) where
   getSourcePos e = getSourcePos $ cexpInfo e
   setSourcePos e p = e {cexpInfo = setSourcePos (cexpInfo e) p}
+
+data CModule s =
+  CModule
+  { cmodName :: !ModuleName
+  , cmodDefs :: [[CDef Rec]]
+  , cmodExports :: [CExport Rec]
+  }
 
 -------------------------------------------------------------------------------
 

@@ -35,6 +35,7 @@ import Gluon.Core(SynInfo, mkSynInfo, internalSynInfo,
                   Structure, Rec, ExpOf(..))
 import qualified Gluon.Core as Gluon
 import Globals
+import Export
 import Untyped.CallConv
 import Untyped.HMType
 import Untyped.Kind
@@ -436,6 +437,9 @@ mkFunction pos ty_params params ret_type body = do
       v <- tyVarToSystemF ty_param
       let k = convertKind $ tyConKind ty_param
       return $ SystemF.TyPat v k
+
+mkExport :: SourcePos -> ExportSpec -> SystemF.Fun TI -> SystemF.Export TI
+mkExport pos spec f = SystemF.Export pos spec f
 
 -------------------------------------------------------------------------------
 -- Conversion to System F

@@ -1,7 +1,7 @@
 {-| Lowering from core representation to low-level representation.
 -}
 
-{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, ViewPatterns #-}
 module Core.Lowering(lower)
 where
 
@@ -37,6 +37,7 @@ import LowLevel.Records
 import LowLevel.Build
 import LowLevel.Builtins
 import Globals
+import Export
 
 -- | Convert a constructor to the corresponding value in the low-level IR.
 --   Most constructors are translated to a global variable.  Pass-by-value 
@@ -584,14 +585,17 @@ convertRefAlternative alt = do
     load_field scrutinee fld param =
       loadFieldAs fld scrutinee param
 
-convertFun fun =
+convertFun = convertFunOrPrim LL.closureFun
+convertPrim = convertFunOrPrim LL.primFun
+
+convertFunOrPrim make_function fun =
   withMany convertParameter (cfunParams fun) $ \params ->
   convert_return (cfunReturn fun) $ \ret_param -> do
     let param_list = params ++ maybeToList ret_param
     let return_type = map lowered $ loweredReturnType' $ cfunReturn fun
     body' <- convertExp $ cfunBody fun
     body_exp <- runFreshVar $ toBlock body'
-    return $ LL.closureFun param_list return_type body_exp
+    return $ make_function param_list return_type body_exp
   where
     -- Convert a write-return parameter to an actual pointer parameter
     convert_return (param ::: return_type) k =
@@ -625,15 +629,107 @@ convertDefGroup defgroup k =
     convert_function_name (CDef v f) k =
       convertVar v (CoreType $ OwnRT ::: FunCT (cFunType f)) k
 
-convertModule defss = do 
-  convertDefGroup (concat defss) $ \defs ->
+-- | Wrap the lowered function 'f' in marshaling code for C.  Produce a
+-- primitive function.
+createCMarshallingFunction :: ExportSig -> LL.Fun -> Cvt LL.Fun
+createCMarshallingFunction (ExportSig dom rng) f = do
+  -- Generate marshaling code
+  (unzip3 -> (concat -> dom_params, sequence_ -> marshal_params, dom_vals)) <-
+    mapM marshalCParameter dom
+  (rng_params, compute_rng, rng_vals, ret_vars) <- marshalCReturn rng
+
+  -- Create the function
+  fun_body <- runFreshVar $ execBuild $ do
+    marshal_params
+    compute_rng (return $ LL.CallA (LL.LamV f) (dom_vals ++ rng_vals))
+    return $ LL.ValA $ map LL.VarV ret_vars
+
+  return $ LL.primFun dom_params (map LL.varType ret_vars) fun_body
+
+marshalCParameter :: ExportDataType
+                  -> Cvt ([LL.Var], BuildBlock (), LL.Val)
+marshalCParameter ty =
+  case ty
+  of ListET _ -> pass_by_reference
+     PyonIntET -> marshal_prim_type pyonIntType
+     PyonFloatET -> marshal_prim_type pyonFloatType
+     PyonBoolET -> marshal_prim_type pyonBoolType
+  where
+    -- Pass an object reference
+    pass_by_reference = do
+      v <- LL.newAnonymousVar (LL.PrimType PointerType)
+      return ([v], return (), LL.VarV v)
+
+    -- Pass a primitive type by value
+    marshal_prim_type t = do
+      v <- LL.newAnonymousVar (LL.PrimType t)
+      return ([v], return (), LL.VarV v)
+
+-- | Marshal a return value to C code.
+--
+-- Returns a list of parameters to the exported function,
+-- a code generator that wraps the real function call,
+-- a list of argument values to pass to the Pyon function, 
+-- and a list of return variables to return from the wrapper function.
+marshalCReturn :: ExportDataType
+               -> Cvt ([LL.Var],
+                       BuildBlock LL.Atom -> BuildBlock (),
+                       [LL.Val],
+                       [LL.Var])
+marshalCReturn ty =
+  case ty
+  of ListET _ -> return_new_reference (LL.RecordType listRecord)
+     PyonIntET -> marshal_prim_type pyonIntType
+     PyonFloatET -> marshal_prim_type pyonFloatType
+     PyonBoolET -> marshal_prim_type pyonBoolType     
+  where
+    -- Allocate and return a new object.  The allocated object is passed
+    -- as a parameter to the function.
+    return_new_reference t = do
+      v <- LL.newAnonymousVar (LL.PrimType PointerType)
+      
+      let setup mk_real_call = do
+            -- Allocate the return value
+            allocateHeapMemAs (nativeWordV $ sizeOf t) v
+            
+            -- Call the function, which returns nothing
+            emitAtom0 =<< mk_real_call
+
+      return ([], setup, [LL.VarV v], [v])
+
+    -- Just return a primitive value
+    marshal_prim_type pt = do
+      v <- LL.newAnonymousVar (LL.PrimType pt)
+      
+      let setup mk_real_call = emitAtom0 =<< mk_real_call
+          
+      return ([], setup, [LL.VarV v], [v])
+      
+convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
+  f' <- convertFun f
+  case lang of CCall -> define_c_fun f'
+  where
+    export_sig = exportedFunctionSig $ cFunType f
+
+    define_c_fun fun = do
+      -- Generate marshalling code
+      wrapped_fun <- createCMarshallingFunction export_sig fun
+
+      -- Create function name
+      let label = pgmLabel module_name exported_name
+      v <- LL.newExternalVar label (Just exported_name) (LL.PrimType OwnedType)
+      return $ LL.FunDef v wrapped_fun
+
+convertModule (CModule module_name defss exports) = do 
+  convertDefGroup (concat defss) $ \defs -> do
+    exports <- mapM (convertExport module_name) exports
     return $ LL.Module { LL.moduleImports = allBuiltins
-                       , LL.moduleFunctions = defs
+                       , LL.moduleFunctions = defs ++ exports
                        , LL.moduleData = []
                        }
 
-lower :: [[CDef Rec]] -> IO LL.Module
-lower defss =
+lower :: CModule Rec -> IO LL.Module
+lower mod =
   withTheVarIdentSupply $ \var_supply ->
   withTheLLVarIdentSupply $ \anf_var_supply ->
-  doCvt var_supply anf_var_supply $ convertModule defss
+  doCvt var_supply anf_var_supply $ convertModule mod

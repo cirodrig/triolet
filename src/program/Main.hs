@@ -124,7 +124,7 @@ compilePyonToPyonAsm path text = do
 
   putStrLn ""
   putStrLn "Core"
-  print $ vcat $ map (vcat . map Core.pprCDef) flat_mod
+  print $ Core.pprCModule flat_mod
 
   -- Convert to low-level form
   ll_mod <- Core.lower flat_mod

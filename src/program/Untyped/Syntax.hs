@@ -11,6 +11,7 @@ import Gluon.Common.SourcePos
 import Gluon.Common.Supply
 import Gluon.Common.Identifier
 import Gluon.Common.Label
+import Export
 import qualified SystemF.Syntax as SystemF
 import SystemF.Syntax(Lit(..))
 import Untyped.HMType
@@ -138,13 +139,16 @@ data FunctionDef = FunctionDef !Variable Function
 
 type DefGroup = [FunctionDef]
 
-data Export = Export
-              { exportAnnotation :: Ann 
-              , exportVariable :: Variable
-              }
-              deriving(Typeable)
+data Export =
+  Export
+  { exportAnnotation :: Ann 
+  , exportSpec :: {-# UNPACK #-}!ExportSpec
+  , exportVariable :: Variable
+  , exportType :: HMType
+  }
+  deriving(Typeable)
 
-data Module = Module [DefGroup] [Export]
+data Module = Module !ModuleName [DefGroup] [Export]
             deriving(Typeable)
 
 instance HasSourcePos Expression where

@@ -151,7 +151,7 @@ doBuild pkg_desc lbi hooks flags = do
 doHaddock pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
   -- Create output directory
   createDirectoryIfMissingVerbose verb True haddock_dir
-  
+
   -- Invoke haddock
   sources <- forM (exeModules exe) $ \mod -> do 
     let filename = toFilePath mod `addExtension` ".hs"

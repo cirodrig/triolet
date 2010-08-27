@@ -6,6 +6,24 @@
 PyonPtr pyon_alloc(uint32_t);
 void pyon_dealloc(PyonPtr);
 
+/* Opaque pyon functions.  These may be passed to pyon code. */
+extern struct {} copy1F;
+extern struct {} copy2F;
+extern struct {} copy4F;
+extern struct {} dummy_finalizer;
+
+#if SIZEOF_PYON_INT == 4
+# define pyon_copy_PyonInt copy4F
+#else
+# error "Cannot determine how to copy PyonInt"
+#endif
+
+#if SIZEOF_PYON_FLOAT == 4
+# define pyon_copy_PyonFloat copy4F
+#else
+# error "Cannot determine how to copy PyonFloat"
+#endif
+
 #if 0
 /* How to copy small values */
 void pyon_copy4(PyonPtr src, PyonPtr dst);

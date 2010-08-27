@@ -20,24 +20,27 @@ import LowLevel.FreshVar
 -- This core module provides the low-level equivalent of core function types
 import {-# SOURCE #-} Core.TypeLowering
 
-initializePrimField :: IdentSupply Var -> ModuleName -> String -> FunctionType 
+fromBuiltinVarName :: BuiltinVarName -> (ModuleName, String, Maybe String)
+fromBuiltinVarName (CName mod nm) = (mod, nm, Just nm)
+fromBuiltinVarName (PyonName mod nm) = (mod, nm, Nothing)
+
+initializePrimField :: IdentSupply Var -> BuiltinVarName -> FunctionType 
                     -> IO (Var, FunctionType)
-initializePrimField supply mod nm fty =
+initializePrimField supply name fty =
   runFreshVarM supply $ do
-    let lab = pgmLabel mod nm
-        ext_name = if mod == builtinModuleName then Just nm else Nothing
+    let (mod, nm, ext_name) = fromBuiltinVarName name
+        lab = pgmLabel mod nm
     v <- newExternalVar lab ext_name (PrimType PointerType)
     return (v, fty)
 
 initializeClosureField :: IdentSupply Var 
-                       -> ModuleName
-                       -> String
+                       -> BuiltinVarName 
                        -> FunctionType
                        -> IO (Var, EntryPoints)
-initializeClosureField supply mod nm fty =
+initializeClosureField supply name fty =
   runFreshVarM supply $ do
-    let lab = pgmLabel mod nm
-        ext_name = if mod == builtinModuleName then Just nm else Nothing
+    let (mod, nm, ext_name) = fromBuiltinVarName name
+        lab = pgmLabel mod nm
     v <- newExternalVar lab ext_name (PrimType OwnedType)
 
     -- All builtin closures use the default closure deallocator
@@ -45,14 +48,13 @@ initializeClosureField supply mod nm fty =
     return (v, ep)
 
 initializeVarField :: IdentSupply Var 
-                   -> ModuleName
-                   -> String 
+                   -> BuiltinVarName
                    -> ValueType 
                    -> IO Var
-initializeVarField supply mod nm ty =
+initializeVarField supply name ty =
   runFreshVarM supply $ do
-    let lab = pgmLabel mod nm
-        ext_name = if mod == builtinModuleName then Just nm else Nothing
+    let (mod, nm, ext_name) = fromBuiltinVarName name
+        lab = pgmLabel mod nm
     newExternalVar lab ext_name ty
 
 {-
@@ -78,15 +80,17 @@ initializeLowLevelBuiltins v_ids =
           closure_type (Left t) = [| t |]
           closure_type (Right conQ) = [| conLoweredFunctionType $conQ |]
           init_primitives =
-            [("the_biprim_" ++ nm, [| initializePrimField v_ids mod nm ty |]) 
-            | (mod, nm, ty) <- builtinPrimitives]
+            [("the_biprim_" ++ builtinVarUnqualifiedName nm,
+              [| initializePrimField v_ids nm ty |]) 
+            | (nm, ty) <- builtinPrimitives]
           init_functions =
-            [("the_bifun_" ++ nm,
+            [("the_bifun_" ++ builtinVarUnqualifiedName nm,
               let fty = closure_type ty
-              in [| initializeClosureField v_ids mod nm $fty |])
-            | (mod, nm, ty) <- builtinFunctions]
+              in [| initializeClosureField v_ids nm $fty |])
+            | (nm, ty) <- builtinFunctions]
           init_globals =
-            [("the_bivar_" ++ nm, [| initializeVarField v_ids mod nm ty |]) 
-            | (mod, nm, ty) <- builtinGlobals]
+            [("the_bivar_" ++ builtinVarUnqualifiedName nm,
+              [| initializeVarField v_ids nm ty |]) 
+            | (nm, ty) <- builtinGlobals]
           inits = init_primitives ++ init_functions ++ init_globals
       in initializeRecordM lowLevelBuiltinsRecord inits)

@@ -55,44 +55,60 @@ instance Lift FunctionType where
       params = ftParamTypes ft
       returns = ftReturnTypes ft
 
+-- | A 'BuiltinVarName' controls what name is assigned to a built-in variable. 
+data BuiltinVarName =
+    -- | Use the string as the external name
+    CName { builtinVarModuleName :: ModuleName 
+          , builtinVarUnqualifiedName :: String
+          }
+    -- | No external name
+  | PyonName { builtinVarModuleName :: ModuleName 
+             , builtinVarUnqualifiedName :: String
+             }
+
+instance Lift BuiltinVarName where
+  lift (CName nm s) = [| CName nm s |]
+  lift (PyonName nm s) = [| PyonName nm s |]
+
+biName = CName builtinModuleName
 
 -- | Predefined primitive functions
 builtinPrimitives =
   [ -- debug.c
-    (builtinModuleName, "pyon_db_int",
+    (biName "pyon_db_int",
      primFunctionType [PrimType nativeIntType] [])
-  , (builtinModuleName, "pyon_db_word",
+  , (biName "pyon_db_word",
      primFunctionType [PrimType nativeWordType] [])
-  , (builtinModuleName, "pyon_db_pointer",
+  , (biName "pyon_db_pointer",
      primFunctionType [PrimType PointerType] [])
     -- memory.c
-  , (builtinModuleName, "pyon_alloc",
+  , (biName "pyon_alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
-  , (builtinModuleName, "pyon_dealloc",
+  , (biName "pyon_dealloc",
      primFunctionType [PrimType PointerType] [])
     -- apply.c
-  , (builtinModuleName, "apply_i32_f",
+  , (biName "apply_i32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (IntType Unsigned S32)] [PrimType OwnedType])
-  , (builtinModuleName, "apply_i32",
+  , (biName "apply_i32",
      primFunctionType [PrimType OwnedType
                       , PrimType (IntType Unsigned S32)
                       , PrimType PointerType] [])
-  , (builtinModuleName, "apply_f32_f",
+  , (biName "apply_f32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (FloatType S32)] [PrimType OwnedType])
-  , (builtinModuleName, "apply_f32",
+  , (biName "apply_f32",
      primFunctionType [PrimType OwnedType
                       , PrimType (FloatType S32)
                       , PrimType PointerType] [])
-  , (builtinModuleName, "apply_o_f",
+  , (biName "apply_o_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType OwnedType] [PrimType OwnedType])
-  , (builtinModuleName, "apply_o",
+  , (biName "apply_o",
      primFunctionType [PrimType OwnedType
                       , PrimType OwnedType
                       , PrimType PointerType] [])
-  , (builtinModuleName, "free_pap",
+  , (biName "free_pap",
      primFunctionType [PrimType PointerType] [])
   ]
 
@@ -107,82 +123,84 @@ module_list = moduleName "pyon.internal.list"
 builtinFunctions =
   [ -- Functions that do not exist in Core
     -- memory_py.pyasm
-    (module_memory_py, "deallocF",
+    (PyonName module_memory_py "deallocF",
      Left $ closureFunctionType [PrimType PointerType] [])
-  , (module_memory_py, "dummy_finalizer",
+  , (CName module_memory_py "dummy_finalizer",
      Left $ closureFunctionType [PrimType PointerType] [])
-  , (module_memory_py, "copy1F",
+  , (CName module_memory_py "copy1F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
-  , (module_memory_py, "copy2F",
+  , (CName module_memory_py "copy2F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
-  , (module_memory_py, "copy4F",
+  , (CName module_memory_py "copy4F",
      Left $
      closureFunctionType [PrimType PointerType, PrimType PointerType] [])
     -- Functions translated from Core
-  , (module_list, "list_build",
+  , (PyonName module_list "list_build",
      Right [| pyonBuiltin (SystemF.the_fun_makelist) |])
-  , (module_list, "list_traverse",
+  , (PyonName module_list "list_traverse",
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_list) |])
-  , (module_stream, "Stream_bind",
+  , (PyonName module_stream "Stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
-  , (module_stream, "Stream_return",
+  , (PyonName module_stream "Stream_return",
      Right [| pyonBuiltin (SystemF.the_fun_return) |])
     
     -- Functions that are replaced by primitive operations
-  , (builtinModuleName, "eq_int",
+  , (PyonName builtinModuleName "eq_int",
      Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_int) |])
-  , (builtinModuleName, "ne_int",
+  , (PyonName builtinModuleName "ne_int",
      Right [| pyonBuiltin (SystemF.neMember . SystemF.the_EqDict_int) |])
-  , (builtinModuleName, "eq_float",
+  , (PyonName builtinModuleName "eq_float",
      Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_float) |])
-  , (builtinModuleName, "ne_float",
+  , (PyonName builtinModuleName "ne_float",
      Right [| pyonBuiltin (SystemF.neMember . SystemF.the_EqDict_float) |])
-  , (builtinModuleName, "zero_int",
+  , (PyonName builtinModuleName "zero_int",
      Right [| pyonBuiltin (SystemF.zeroMember . SystemF.the_AdditiveDict_int) |])
-  , (builtinModuleName, "add_int",
+  , (PyonName builtinModuleName "add_int",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_int) |])
-  , (builtinModuleName, "sub_int", 
+  , (PyonName builtinModuleName "sub_int", 
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_int) |])
-  , (builtinModuleName, "zero_float",
+  , (PyonName builtinModuleName "zero_float",
      Right [| pyonBuiltin (SystemF.zeroMember . SystemF.the_AdditiveDict_float) |])
-  , (builtinModuleName, "add_float",
+  , (PyonName builtinModuleName "add_float",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_float) |])
-  , (builtinModuleName, "sub_float",
+  , (PyonName builtinModuleName "sub_float",
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_float) |])
-  , (builtinModuleName, "load_int",
+  , (PyonName builtinModuleName "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])
-  , (builtinModuleName, "load_float",
+  , (PyonName builtinModuleName "load_float",
      Right [| pyonBuiltin (SystemF.the_fun_load_float) |])
-  , (builtinModuleName, "load_bool",
+  , (PyonName builtinModuleName "load_bool",
      Right [| pyonBuiltin (SystemF.the_fun_load_bool) |])
-  , (builtinModuleName, "load_NoneType",
+  , (PyonName builtinModuleName "load_NoneType",
      Right [| pyonBuiltin (SystemF.the_fun_load_NoneType) |])
-  , (builtinModuleName, "store_int",
+  , (PyonName builtinModuleName "store_int",
      Right [| pyonBuiltin (SystemF.the_fun_store_int) |])
-  , (builtinModuleName, "store_float",
+  , (PyonName builtinModuleName "store_float",
      Right [| pyonBuiltin (SystemF.the_fun_store_float) |])
-  , (builtinModuleName, "store_bool",
+  , (PyonName builtinModuleName "store_bool",
      Right [| pyonBuiltin (SystemF.the_fun_store_bool) |])
-  , (builtinModuleName, "store_NoneType",
+  , (PyonName builtinModuleName "store_NoneType",
      Right [| pyonBuiltin (SystemF.the_fun_store_NoneType) |])
   ]
 
 -- | Predefined global data
 builtinGlobals =
-  [ (builtinModuleName, "pap_info", PrimType PointerType)
-  , (builtinModuleName, "global_closure_info", PrimType PointerType)
+  [ (biName "pap_info", PrimType PointerType)
+  , (biName "global_closure_info", PrimType PointerType)
   ]
 
 lowLevelBuiltinsRecord = recordDef "LowLevelBuiltins" fields
   where
-    prim_field (_, nm, _) =
-      ("the_biprim_" ++ nm, IsStrict, [t| (Var, FunctionType) |])
-    clo_field (_, nm, _) =
-      ("the_bifun_" ++ nm, IsStrict, [t| (Var, EntryPoints) |])
-    var_field (_, nm, _) =
-      ("the_bivar_" ++ nm, IsStrict, [t| Var |])
+    prim_field (nm, _) =
+      ("the_biprim_" ++ builtinVarUnqualifiedName nm, IsStrict,
+       [t| (Var, FunctionType) |])
+    clo_field (nm, _) =
+      ("the_bifun_" ++ builtinVarUnqualifiedName nm, IsStrict,
+       [t| (Var, EntryPoints) |])
+    var_field (nm, _) =
+      ("the_bivar_" ++ builtinVarUnqualifiedName nm, IsStrict, [t| Var |])
     fields = map prim_field builtinPrimitives ++
              map clo_field builtinFunctions ++
              map var_field builtinGlobals

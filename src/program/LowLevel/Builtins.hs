@@ -58,29 +58,29 @@ import LowLevel.BuiltinsTH
 $(sequence [declareRecord lowLevelBuiltinsRecord])
 
 -- Define field accessors
-$(forM builtinFunctions $ \(_, fname, _) ->
-   TH.funD (TH.mkName $ "the_fun_" ++ fname) $
+$(forM builtinFunctions $ \(fname, _) ->
+   TH.funD (TH.mkName $ "the_fun_" ++ builtinVarUnqualifiedName fname) $
    let bi = return $ TH.VarE $ TH.mkName "builtins"
-       fld = return $ TH.VarE $ TH.mkName $ "the_bifun_" ++ fname
+       fld = return $ TH.VarE $ TH.mkName $ "the_bifun_" ++ builtinVarUnqualifiedName fname
        read_from_field = TH.normalB [| fst ($(fld) $(bi)) |]
    in [TH.clause [TH.varP $ TH.mkName "builtins"] read_from_field []])
 
-$(forM builtinPrimitives $ \(_, fname, _) ->
-   TH.funD (TH.mkName $ "the_prim_" ++ fname) $
+$(forM builtinPrimitives $ \(fname, _) ->
+   TH.funD (TH.mkName $ "the_prim_" ++ builtinVarUnqualifiedName fname) $
    let bi = return $ TH.VarE $ TH.mkName "builtins"
-       fld = return $ TH.VarE $ TH.mkName $ "the_biprim_" ++ fname
+       fld = return $ TH.VarE $ TH.mkName $ "the_biprim_" ++ builtinVarUnqualifiedName fname
        read_from_field = TH.normalB [| fst ($(fld) $(bi)) |]
    in [TH.clause [TH.varP $ TH.mkName "builtins"] read_from_field []])
 
 -- | A list of all builtins
 allBuiltins :: [Var]
 allBuiltins =
-  $(TH.listE $ [ [| fst $ $(TH.varE $ TH.mkName $ "the_biprim_" ++ fname) lowLevelBuiltins |]
-               | (_, fname, _) <- builtinPrimitives] ++
-               [ [| fst $ $(TH.varE $ TH.mkName $ "the_bifun_" ++ fname) lowLevelBuiltins |]
-               | (_, fname, _) <- builtinFunctions] ++
-               [ [| $(TH.varE $ TH.mkName $ "the_bivar_" ++ fname) lowLevelBuiltins |]
-               | (_, fname, _) <- builtinGlobals])
+  $(TH.listE $ [ [| fst $ $(TH.varE $ TH.mkName $ "the_biprim_" ++ builtinVarUnqualifiedName fname) lowLevelBuiltins |]
+               | (fname, _) <- builtinPrimitives] ++
+               [ [| fst $ $(TH.varE $ TH.mkName $ "the_bifun_" ++ builtinVarUnqualifiedName fname) lowLevelBuiltins |]
+               | (fname, _) <- builtinFunctions] ++
+               [ [| $(TH.varE $ TH.mkName $ "the_bivar_" ++ builtinVarUnqualifiedName fname) lowLevelBuiltins |]
+               | (fname, _) <- builtinGlobals])
 
 -- | Get a builtin by field name
 llBuiltin :: (LowLevelBuiltins -> a) -> a
@@ -99,8 +99,8 @@ builtinNameTable = Map.fromList [(builtin_name b, b) | b <- allBuiltins]
 
 -- | All built-in functions that are produced by translating a constructor
 builtinConTable =
-  $(TH.listE [ TH.tupE [mk_con, TH.varE $ TH.mkName $ "the_fun_" ++ fname]
-             | (_, fname, Right mk_con) <- builtinFunctions])
+  $(TH.listE [ TH.tupE [mk_con, TH.varE $ TH.mkName $ "the_fun_" ++ builtinVarUnqualifiedName fname]
+             | (fname, Right mk_con) <- builtinFunctions])
 
 -- | Get the low-level variable corresponding to a builtin function
 -- constructor from core

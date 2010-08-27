@@ -15,6 +15,7 @@ where
 
 import Gluon.Common.Error
 import Gluon.Core
+import Export
 import SystemF.Builtins
 import Core.Syntax
 import Core.BuiltinTypes
@@ -101,3 +102,26 @@ conLoweredFunctionType c =
   case conCoreType c
   of FunCT ft -> lowerFunctionType ft 
      _ -> internalError "conLoweredFunctionType: Not a function type"
+
+-- | Get the type signature of an exported function.
+exportedFunctionSig :: RCFunType -> ExportSig
+exportedFunctionSig ft = export id ft
+  where
+    export hd ft =
+      case ft
+      of ArrCT {ctParam = param_binder ::: param_type, ctRange = rng} ->
+           export (hd . (exportedTypeSig param_type:)) rng
+         RetCT {ctReturn = ret_binder ::: ret_type} ->
+           ExportSig (hd []) (exportedTypeSig ret_type)
+
+exportedTypeSig :: RCType -> ExportDataType
+exportedTypeSig ty =
+  case unpackConAppCT ty
+  of Just (con, args)
+       | con `isPyonBuiltin` the_int -> PyonIntET
+       | con `isPyonBuiltin` the_float -> PyonFloatET
+       | con `isPyonBuiltin` the_bool -> PyonBoolET
+       | con `isPyonBuiltin` the_list ->
+           case args
+           of [arg] -> ListET $! exportedTypeSig arg  
+

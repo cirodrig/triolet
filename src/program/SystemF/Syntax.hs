@@ -36,9 +36,11 @@ import Control.Monad
 import Data.Typeable
 
 import Gluon.Common.Error
+import Gluon.Common.Label
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
 import Gluon.Core(Structure, Rec, Var, Binder(..))
+import Export
 
 data family SFExpOf a :: * -> *
 data family AltOf a :: * -> *
@@ -185,13 +187,14 @@ data Def s = Def Var (Fun s)
 type DefGroup s = [Def s]
 
 -- | An exported variable declaration
-data Export =
+data Export s =
   Export
   { exportSourcePos :: SourcePos
-  , exportVariable :: Var
+  , exportSpec :: {-# UNPACK #-}!ExportSpec
+  , exportFunction :: Fun s
   }
 
-data Module s = Module [DefGroup s] [Export]
+data Module s = Module !ModuleName [DefGroup s] [Export s]
             deriving(Typeable)
 
 -- | Map a function over an expression.
