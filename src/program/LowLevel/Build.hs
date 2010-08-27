@@ -135,7 +135,7 @@ primNegateZ prim_type@(PrimType (IntType sign size)) n =
   primSubZ prim_type (LitV $ IntL sign size 0) n
 
 primCmpZ prim_type@(PrimType (IntType sign size)) comparison x y =
-  emitAtom1 prim_type $ PrimA (PrimCmpZ sign size comparison) [x, y]
+  emitAtom1 (PrimType BoolType) $ PrimA (PrimCmpZ sign size comparison) [x, y]
 
 primAnd x y =
   emitAtom1 (PrimType BoolType) $ PrimA PrimAnd [x, y]
