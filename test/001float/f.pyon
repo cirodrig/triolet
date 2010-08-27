@@ -1,0 +1,11 @@
+# Test ability to compile floating-point math operators
+
+export ccall "float_math" float_math : float * float * float * float -> float;
+
+def float_math(a,b,c,d):
+        e = a + b + 1e-2
+        f = c - d
+        g = f / e
+        h = -g ** 2.5
+        return h
+

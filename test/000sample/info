@@ -1,0 +1,7 @@
+RegressionTest
+{ testDir = "000sample"
+, testResult = ShouldRun
+, testPyonSources = []
+, testPyasmSources = []
+, testCSources = ["main.c"]
+}

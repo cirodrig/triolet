@@ -1,0 +1,7 @@
+RegressionTest
+{ testDir = "001float"
+, testResult = ShouldRun
+, testPyonSources = ["f.pyon"]
+, testPyasmSources = []
+, testCSources = ["main.c"]
+}

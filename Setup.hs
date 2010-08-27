@@ -23,6 +23,7 @@ import Distribution.Verbosity
 
 import SetupPaths
 import SetupMake
+import SetupTest
 
 makeProgram = simpleProgram "make"
 
@@ -178,8 +179,11 @@ doClean orig_clean pkg_desc _lbi hooks flags = do
   
   orig_clean pkg_desc _lbi hooks flags
 
+doTest args _ pkg_desc lbi = runRegressionTests
+
 hooks = autoconfUserHooks
   { hookedPrograms = makeProgram : hookedPrograms autoconfUserHooks
+  , runTests = doTest
   , confHook = doConfigure (confHook autoconfUserHooks)
   , cleanHook = doClean (cleanHook autoconfUserHooks)
   , buildHook = doBuild
