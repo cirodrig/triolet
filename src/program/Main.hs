@@ -37,6 +37,7 @@ import qualified LowLevel.BuiltinCalls as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
+import qualified LowLevel.GenerateCHeader as LowLevel
 import qualified LLParser.Parser as LLParser
 import qualified LLParser.GenLowLevel as LLParser
 
@@ -71,8 +72,9 @@ runTask (CompilePyonToPyonAsm {compilePyonInput = file}) = do
   compilePyonToPyonAsm input_path input_text
 
 runTask (CompilePyonAsmToGenC { compileAsmInput = ll_mod
-                              , compileAsmOutput = c_file}) = do
-  compilePyonAsmToGenC ll_mod c_file
+                              , compileAsmOutput = c_file
+                              , compileAsmHeader = h_file}) = do
+  compilePyonAsmToGenC ll_mod c_file h_file
 
 runTask (CompileGenCToObject { compileGenCInput = c_file
                              , compileGenCOutput = o_file}) = do
@@ -138,8 +140,9 @@ parsePyonAsm input_path input_text = do
   (mod_name, externs, ast) <- LLParser.parseFile input_path input_text
   LLParser.generateLowLevelModule input_path mod_name externs ast
 
--- | Compile an input low-level module to C code
-compilePyonAsmToGenC ll_mod c_file = do
+-- | Compile an input low-level module to C code.  Generate a header file
+-- if there are exported routines.
+compilePyonAsmToGenC ll_mod c_file h_file = do
   -- Low-level transformations
   ll_mod <- LowLevel.makeBuiltinPrimOps ll_mod
   putStrLn ""
@@ -165,6 +168,10 @@ compilePyonAsmToGenC ll_mod c_file = do
   let c_mod = LowLevel.generateCFile ll_mod
       
   writeFileAsString c_file c_mod
+  
+  when (LowLevel.moduleHasExports ll_mod) $
+    let h_mod = LowLevel.generateCHeader ll_mod
+    in writeFileAsString h_file h_mod
 
 -- | Compile a C file to produce an object file.
 compileCFile c_fname o_fname = do

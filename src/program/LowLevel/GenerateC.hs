@@ -22,6 +22,7 @@ import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Syntax
 import LowLevel.Print
+import LowLevel.GenerateCUtils
 
 type CBlockItems = [CBlockItem]
 
@@ -44,40 +45,6 @@ returnTypes (AssignValues vs) = map varPrimType vs
 returnTypes (DefineValues vs) = map varPrimType vs
 returnTypes (ReturnValues ps) = ps
 
-varPrimType v = valueToPrimType $ varType v
-
--- | Generate the C name for a variable.
--- If it's a builtin variable, or if it's an exported
--- variable, then use the name alone.  Otherwise, generate a unique name
--- using the variable's name and ID.
-varIdent :: Var -> Ident
-varIdent v = internalIdent $ mangledVarName v
-
--- | Get the type specificer for a non-pointer primitive type
-typeSpec :: PrimType -> CTypeSpec
-typeSpec pt = 
-  case pt
-  of BoolType -> CIntType internalNode
-     IntType Signed S8 -> type_def "int8_t"
-     IntType Signed S16 -> type_def "int16_t"
-     IntType Signed S32 -> type_def "int32_t"
-     IntType Signed S64 -> type_def "int64_t"
-     IntType Unsigned S8 -> type_def "uint8_t"
-     IntType Unsigned S16 -> type_def "uint16_t"
-     IntType Unsigned S32 -> type_def "uint32_t"
-     IntType Unsigned S64 -> type_def "uint64_t"
-     FloatType S32 -> CFloatType internalNode
-     FloatType S64 -> CDoubleType internalNode
-     PointerType -> CTypeDef (internalIdent "PyonPtr") internalNode
-  where
-    type_def name = CTypeDef (internalIdent name) internalNode
-
--- | Get the declaration components to use to declare a variable or a
--- function return type
-declspecs :: PrimType -> ([CDeclSpec], [CDerivedDeclr])
-declspecs t =
-  ([CTypeSpec $ typeSpec t], [])
-
 -- | Define an unitialized piece of data.
 declareBytes :: Var -> Int -> Int -> CDecl
 declareBytes v size align =
@@ -91,7 +58,7 @@ declareBytes v size align =
 -- | Declare or define a value variable
 declareVariable :: Var -> Maybe CExpr -> CDecl
 declareVariable v initializer =
-  let (type_specs, derived_declr) = declspecs $ varPrimType v
+  let (type_specs, derived_declr) = primTypeDeclSpecs $ varPrimType v
       declr = CDeclr (Just $ varIdent v) derived_declr Nothing [] internalNode
       init = case initializer
              of Nothing -> Nothing
@@ -101,20 +68,19 @@ declareVariable v initializer =
 declareUndefVariable :: Var -> CDecl
 declareUndefVariable v = declareVariable v Nothing
 
+{-
 -- | Generate an abstract declarator, used in type casting 
 abstractDeclr :: PrimType -> CDecl
 abstractDeclr ty =
-  let (type_specs, derived_declr) = declspecs ty
+  let (type_specs, derived_declr) = primTypeDeclSpecs ty
       declr = CDeclr Nothing derived_declr Nothing [] internalNode
   in CDecl type_specs [(Just declr, Nothing, Nothing)] internalNode
 
 -- | Generate an abstract declarator for a pointer to the specified type,
 -- used in type casting 
 abstractPtrDeclr :: PrimType -> CDecl
-abstractPtrDeclr ty =
-  let (type_specs, derived_declr) = declspecs ty
-      declr = CDeclr Nothing (derived_declr ++ [CPtrDeclr [] internalNode]) Nothing [] internalNode
-  in CDecl type_specs [(Just declr, Nothing, Nothing)] internalNode
+abstractPtrDeclr ty = anonymousDecl $ ptrDeclSpecs ty
+-}
 
 pyonPointerType :: CDecl
 pyonPointerType =
@@ -149,7 +115,8 @@ genSmallIntConst n = genIntConst Signed nativeIntSize n
 -- | Cast an expression to the C equivalent of the given type
 genCast :: PrimType -> CExpr -> CExpr
 genCast to_type expr =
-  CCast (abstractPtrDeclr to_type) expr internalNode
+  let decl = anonymousDecl $ ptrDeclSpecs $ primTypeDeclSpecs to_type
+  in CCast decl expr internalNode
 
 -- | Generate a pointer offset expression
 -- The generated expression is a call to PYON_OFF (actually a macro) 
@@ -278,11 +245,11 @@ genCall gvars return_types op args =
       -- Create the actual function type
       (return_specs, return_derived_declr) =
         case return_types
-        of [] -> ([CTypeSpec (CVoidType internalNode)], [])
-           [t] -> declspecs t 
+        of [] -> voidDeclSpecs
+           [t] -> primTypeDeclSpecs t
            _ -> internalError "genCall: Cannot generate multiple return values"
       
-      param_types = map abstractDeclr $ map valPrimType args
+      param_types = map (anonymousDecl . primTypeDeclSpecs . valPrimType) args
       fn_derived_declrs =
         CPtrDeclr [] internalNode :
         CFunDeclr (Right (param_types, False)) [] internalNode :
@@ -298,10 +265,9 @@ genPrimCall :: Prim -> [CExpr] -> CExpr
 genPrimCall prim args =
   case prim
   of PrimCastZ from_sgn to_sgn sz ->
-       let to_type = CTypeSpec $ typeSpec $ IntType to_sgn sz
-           to_decl = CDecl [to_type] [(Nothing, Nothing, Nothing)] internalNode
+       let to_type = anonymousDecl $ primTypeDeclSpecs $ IntType to_sgn sz
        in case args
-          of [arg] -> CCast to_decl arg internalNode
+          of [arg] -> CCast to_type arg internalNode
      PrimAddZ _ _ -> binary CAddOp args
      PrimSubZ _ _ -> binary CSubOp args
      PrimMulZ _ _ -> binary CMulOp args
@@ -413,8 +379,8 @@ genFun gvars (FunDef v fun) =
   let -- Function return type
       (return_type_specs, return_derived_declr) =
         case funReturnTypes fun
-        of [] -> ([CTypeSpec (CVoidType internalNode)], []) 
-           [PrimType t] -> declspecs t
+        of [] -> voidDeclSpecs
+           [PrimType t] -> primTypeDeclSpecs t
            [_] -> internalError "genFun: Unexpected return type"
            _ -> internalError "genFun: Cannot generate multiple return values"
       -- Function parameter declarations
@@ -496,7 +462,7 @@ initializationFunction stmts =
   in CFunDef [static, return_type] fun_decl [] body internalNode
 
 generateCFile :: Module -> String
-generateCFile (Module imports funs datas) =
+generateCFile (Module imports funs datas _) =
   let defined_vars =
         Set.fromList $ [f | FunDef f _ <- funs] ++
                        [v | DataDef v _ _ <- datas]

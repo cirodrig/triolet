@@ -4,6 +4,9 @@
  * the C backend.
  */
 
+#ifndef PYON_H
+#define PYON_H
+
 #include <inttypes.h>
 #include "pyon_types.h"
 #include "pyon_list.h"
@@ -29,4 +32,4 @@
 /* An object's 'free' method */
 typedef void (*PyonFreeFunc)(PyonPtr);
 
-
+#endif

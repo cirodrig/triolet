@@ -11,6 +11,7 @@ import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Supply
 import Gluon.Common.Label
+import Export
 import LowLevel.Types
 import LowLevel.Record
 
@@ -198,10 +199,16 @@ dataDefiniendum (DataDef v _ _) = v
 data Module =
   Module 
   { moduleImports :: [ImportVar] -- ^ Imported, externally defined variables
-  , moduleFunctions :: [FunDef] -- ^ Function definitions
-  , moduleData :: [DataDef]     -- ^ Global data definitions
+  , moduleFunctions :: [FunDef]  -- ^ Function definitions
+  , moduleData :: [DataDef]      -- ^ Global data definitions
+  , moduleExports :: [(Var, ExportSig)] -- ^ Exported functions and their
+                                        --   externally visible types
   }
   deriving(Typeable)
+
+-- | True if the module exports something out of the Pyon language
+moduleHasExports :: Module -> Bool
+moduleHasExports m = not $ null $ moduleExports m
 
 -------------------------------------------------------------------------------
 

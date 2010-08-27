@@ -622,7 +622,7 @@ rcVal is_borrowed value =
 -- | Insert explicit reference counting in a module.  All owned references
 --   are converted to ordinary pointers with reference counting.
 insertReferenceCounting :: Module -> IO Module
-insertReferenceCounting (Module imports funs datas) = do
+insertReferenceCounting (Module imports funs datas exports) = do
   withTheLLVarIdentSupply $ \id_supply ->
     runFreshVarM id_supply $ do
       -- Insert reference counting into functions
@@ -630,7 +630,7 @@ insertReferenceCounting (Module imports funs datas) = do
       -- Convert owned pointers to ordinary pointers in static data 
       let datas' = map rc_data datas
           imports' = map toPointerVar imports
-      return $ Module imports' funs' datas'
+      return $ Module imports' funs' datas' exports
   where
     global_vars = [v | FunDef v _ <- funs] ++ [v | DataDef v _ _ <- datas]
 

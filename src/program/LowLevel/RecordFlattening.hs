@@ -287,14 +287,15 @@ flattenDataDef (DataDef v record vals) = do
   return $ DataDef v record' val'
 
 flattenRecordTypes :: Module -> IO Module
-flattenRecordTypes (Module imports fun_defs data_defs) =
+flattenRecordTypes mod =
   withTheLLVarIdentSupply $ \var_supply -> do
     let env = RFEnv var_supply IntMap.empty
     runReaderT (runRF flatten_module) env
   where
     flatten_module = do
-      (fun_defs', data_defs') <- flattenTopLevel fun_defs data_defs
-      return $ Module imports fun_defs' data_defs'
+      (fun_defs', data_defs') <-
+        flattenTopLevel (moduleFunctions mod) (moduleData mod)
+      return $ mod {moduleFunctions = fun_defs', moduleData = data_defs'}
 
 -------------------------------------------------------------------------------
 

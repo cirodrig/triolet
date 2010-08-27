@@ -7,6 +7,7 @@ import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Label
 import Gluon.Common.Identifier
 import qualified Gluon.Core as Gluon
+import Export
 import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Syntax
@@ -206,8 +207,12 @@ pprFunDefs defs = vcat $ map pprFunDef defs
 pprImports :: [ImportVar] -> Doc
 pprImports imports = vcat $ map pprImport imports
 
+pprExports :: [(Var, ExportSig)] -> Doc
+pprExports exports = vcat [text "export" <+> pprVar v | (v, _) <- exports]
+
 pprModule :: Module -> Doc
-pprModule (Module imports fun_defs data_defs) =
+pprModule (Module imports fun_defs data_defs exports) =
   pprImports imports $$
   pprDataDefs data_defs $$
-  pprFunDefs fun_defs
+  pprFunDefs fun_defs $$
+  pprExports exports

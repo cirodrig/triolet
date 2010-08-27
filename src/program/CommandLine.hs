@@ -202,9 +202,10 @@ compileObjectJob config (file_path, language) moutput_path = do
   case input_language of
     PyonLanguage ->
       let infile = readFileFromPath file_path
+          hfile = writeFileFromPath header_path
           outfile = writeFileFromPath output_path
       in compileWithCFile config output_path $
-         return $ \cfile -> pyonCompilation infile cfile outfile
+         return $ \cfile -> pyonCompilation infile cfile hfile outfile
 
     PyonAsmLanguage -> 
       let infile = readFileFromPath file_path
@@ -217,6 +218,9 @@ compileObjectJob config (file_path, language) moutput_path = do
       | takeExtension path == ".pyasm" = return PyonAsmLanguage
       | otherwise = let msg = "Cannot determine language of '" ++ path ++ "'"
                     in fail msg
+    
+    -- Exported C function declarations go here
+    header_path = dropExtension output_path ++ "_interface.h"
     
     output_path =
       case moutput_path
@@ -235,10 +239,10 @@ compileWithCFile config output_path mk_do_work
       do_work <- mk_do_work
       return $ withAnonymousFile ".c" $ do_work
 
-pyonCompilation :: ReadFile -> TempFile -> WriteFile -> Job ()
-pyonCompilation infile cfile outfile = do
+pyonCompilation :: ReadFile -> TempFile -> WriteFile -> WriteFile -> Job ()
+pyonCompilation infile cfile hfile outfile = do
   asm <- taskJob $ CompilePyonToPyonAsm infile
-  taskJob $ CompilePyonAsmToGenC asm (writeTempFile cfile)
+  taskJob $ CompilePyonAsmToGenC asm (writeTempFile cfile) hfile
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 
 pyonAsmCompilation :: ReadFile -> TempFile -> WriteFile -> Job ()
@@ -246,6 +250,6 @@ pyonAsmCompilation infile cfile outfile = do
   asm <- withAnonymousFile ".pyasm" $ \ppfile -> do
     taskJob $ PreprocessCPP infile (writeTempFile ppfile)
     taskJob $ ParsePyonAsm (readTempFile ppfile)
-  taskJob $ CompilePyonAsmToGenC asm (writeTempFile cfile)
+  taskJob $ CompilePyonAsmToGenC asm (writeTempFile cfile) writeNothing
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 

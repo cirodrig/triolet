@@ -22,10 +22,10 @@ import LowLevel.Types
 import Globals
 
 makeBuiltinPrimOps :: Module -> IO Module
-makeBuiltinPrimOps (Module imports funs datas) =
+makeBuiltinPrimOps mod =
   withTheLLVarIdentSupply $ \var_supply -> runFreshVarM var_supply $ do
-    funs' <- mapM inlFunDef funs
-    return $ Module imports funs' datas
+    funs' <- mapM inlFunDef $ moduleFunctions mod
+    return $ mod {moduleFunctions = funs'}
 
 type GenM a = Gen FreshVarM a
 

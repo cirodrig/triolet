@@ -983,7 +983,7 @@ generateLowLevelModule module_path module_name externs defs =
         generate_module = do
           (import_vars, (fun_defs, data_defs)) <-
             enterRec $ withExternalVariables externs $ resolveTopLevelDefs defs
-          return $ LL.Module import_vars fun_defs data_defs
+          return $ LL.Module import_vars fun_defs data_defs []
 
     (mod, _, errs) <- runNR generate_module ctx global_scope id
 

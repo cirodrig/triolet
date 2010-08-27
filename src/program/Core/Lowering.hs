@@ -707,7 +707,8 @@ marshalCReturn ty =
       
 convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
   f' <- convertFun f
-  case lang of CCall -> define_c_fun f'
+  fun_def <- case lang of CCall -> define_c_fun f'
+  return (fun_def, (LL.funDefiniendum fun_def, export_sig))
   where
     export_sig = exportedFunctionSig $ cFunType f
 
@@ -722,10 +723,12 @@ convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
 
 convertModule (CModule module_name defss exports) = do 
   convertDefGroup (concat defss) $ \defs -> do
-    exports <- mapM (convertExport module_name) exports
+    (unzip -> (export_defs, exports_sigs)) <-
+      mapM (convertExport module_name) exports
     return $ LL.Module { LL.moduleImports = allBuiltins
-                       , LL.moduleFunctions = defs ++ exports
+                       , LL.moduleFunctions = defs ++ export_defs
                        , LL.moduleData = []
+                       , LL.moduleExports = exports_sigs
                        }
 
 lower :: CModule Rec -> IO LL.Module

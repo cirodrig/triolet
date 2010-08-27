@@ -17,7 +17,7 @@ path may be retrieved for ordinary file I/O.
 module Job
        (-- * Intermediate files
         ReadFile, readFileFromPath, readTempFile,
-        WriteFile, writeFileFromPath, writeTempFile,
+        WriteFile, writeFileFromPath, writeTempFile, writeNothing,
         TempFile, tempFileFromPath,
 
         -- ** Reading and writing files
@@ -93,6 +93,8 @@ data WriteFile =
     DiskWriteFile !FilePath
     -- | A temporary output file
   | TempWriteFile !TempFile
+    -- | Discard output
+  | NullWriteFile
 
 -- | An intermediate file that is the output of one 'Job' and the input of
 -- others.  The intermediate file may either be deleted, or persist after
@@ -144,6 +146,10 @@ writeFileFromPath path = DiskWriteFile path
 writeTempFile :: TempFile -> WriteFile
 writeTempFile tf = TempWriteFile tf
 
+-- | Discard output
+writeNothing :: WriteFile
+writeNothing = NullWriteFile
+
 -- | Reference a named intermediate file
 tempFileFromPath :: Bool        -- ^ Overwrite?
                  -> FilePath    -- ^ File path
@@ -183,6 +189,7 @@ writeFileHelper write_file out_file contents =
   of DiskWriteFile path -> write_file path contents
      TempWriteFile (DiskTempFile flref) ->
        readIORef flref >>= output_temp_file flref
+     NullWriteFile -> write_file "/dev/null" contents
   where
     output_temp_file flref (PendingAnonDF { tempFileParentDirectory = dir
                                           , tempFileSuffix = suffix}) = do
@@ -236,11 +243,13 @@ writeFileHelper write_file out_file contents =
 
 -- | Write the file's contents
 writeFileAsString :: WriteFile -> String -> IO ()
-writeFileAsString = writeFileHelper writeFile
+writeFileAsString NullWriteFile _ = return ()
+writeFileAsString fl str = writeFileHelper writeFile fl str
 
 -- | Write the file's contents
 writeFileAsByteString :: WriteFile -> ByteString -> IO ()
-writeFileAsByteString = writeFileHelper ByteString.writeFile
+writeFileAsByteString NullWriteFile _ = return () 
+writeFileAsByteSTring fl str = writeFileHelper ByteString.writeFile
 
 -- | Write the file's contents
 writeFilePath :: WriteFile -> IO FilePath
@@ -268,7 +277,8 @@ data Task a where
   -- | Compile a PyonAsm file
   CompilePyonAsmToGenC
     { compileAsmInput :: LowLevel.Module 
-    , compileAsmOutput :: WriteFile
+    , compileAsmOutput :: WriteFile -- ^ Output C file
+    , compileAsmHeader :: WriteFile -- ^ Header for exported C functions
     } :: Task ()
   -- | Compile a generated C file to object code
   CompileGenCToObject
