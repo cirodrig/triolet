@@ -61,7 +61,7 @@ pyonOtherGlobals =
 -- | All predefined class names
 pyonClasses :: [String]
 pyonClasses =
-  [ "Eq", "Ord", "Traversable", "Additive", "Vector"]
+  ["Passable", "Eq", "Ord", "Traversable", "Additive", "Vector"]
 
 -- Global variable fields are not strict because some of them are built 
 -- using fields of the builtins table.  Class fields are strict, but most 
@@ -77,3 +77,4 @@ tiBuiltinSpecification =
              | name <- pyonSourceGlobals ++ pyonOtherGlobals] ++
              [('_':name, IsStrict, [t| Class |])
              | name <- pyonClasses]
+

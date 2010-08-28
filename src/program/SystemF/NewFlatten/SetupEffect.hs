@@ -671,6 +671,7 @@ dataConstructorPassType con =
       , SystemF.the_passConv_list
       , SystemF.the_passConv_iter
       , SystemF.the_passConv_NoneType
+      , SystemF.the_passConv_owned
       , (\_ -> SystemF.getPyonTupleCon' 0)
       , (\_ -> SystemF.getPyonTupleCon' 1)
       , (\_ -> SystemF.getPyonTupleCon' 2)

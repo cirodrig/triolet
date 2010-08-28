@@ -26,6 +26,7 @@ module SystemF.Builtins
         the_passConv_iter,
         the_passConv_list,
         the_passConv_Any,
+        the_passConv_owned,
         the_EqDict, the_OrdDict, the_TraversableDict,
         the_AdditiveDict, the_VectorDict,
         the_EqDict_int, the_OrdDict_int,

@@ -226,6 +226,9 @@ data TyScheme = TyScheme TyVars Constraint HMType
 --
 -- The class's method and instance lists must be non-strict.  Methods and 
 -- instances contain references back to the parent class.
+--
+-- As a special case, the \'Passable\' class has no dictionary constructor.
+-- Members of this class are only deconstructed in the backend.
 data Class =
   Class
   { clsParam :: TyCon
@@ -234,7 +237,7 @@ data Class =
   , clsName :: String
   , clsInstances :: [Instance]
   , clsTypeCon :: !Gluon.Con    -- ^ Class dictionary type constructor
-  , clsDictCon :: !Gluon.Con    -- ^ Class dictionary constructor
+  , clsDictCon :: Gluon.Con     -- ^ Class dictionary constructor
   }
 
 -- | A class method interface declaration.  Information used for class
@@ -258,6 +261,9 @@ data Instance =
   , insConstraint :: Constraint
   , insClass :: Class
   , insType :: HMType
+    -- | If given, this global constructor is the instance's predefined value.
+    -- The constructor is parameterized over the qvars and constraint.
+  , insCon :: !(Maybe Gluon.Con)
   , insMethods :: [InstanceMethod]
   }
 

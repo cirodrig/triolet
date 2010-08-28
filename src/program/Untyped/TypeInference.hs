@@ -92,7 +92,7 @@ requirePredicate p = require [p]
 -- | Require the given type to have a parameter-passing convention
 requirePassable :: HMType -> Inf ()
 requirePassable ty = do 
-  require [ty `HasPassConv` TypePassConv ty]
+  require [ty `IsInst` tiBuiltin the_Passable]
 
 -- | Add a constraint to the context
 require :: Constraint -> Inf ()
@@ -134,7 +134,7 @@ instantiateVariable pos v = Inf $ \env ->
          instantiateTypeAssignment pos ass
          
        -- There must be a parameter passing convention for this type
-       let cst = ty `HasPassConv` TypePassConv ty
+       let cst = ty `IsInst` tiBuiltin the_Passable
 
        return (cst:constraint, vars, placeholders, (val, ty, TypePassConv ty))
 
@@ -168,6 +168,9 @@ generalize env constraint inferred_types = do
   -- Determine which constraints to generalize over
   (retained, deferred, defaulted) <-
     splitConstraint constraint ftv_gamma local_tyvars
+  
+  when (any (\x -> case x of {IsInst {} -> False; _ -> True}) retained) $
+    internalError "generalize: Unexpected constraints"
     
   -- Defaulting
   mapM_ defaultConstraint defaulted

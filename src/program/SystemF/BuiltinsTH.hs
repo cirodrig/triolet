@@ -83,6 +83,7 @@ pyonBuiltinPassConvConstructors =
   , "passConv_iter"
   , "passConv_list"
   , "passConv_Any"
+  , "passConv_owned"
   ]
 
 pyonBuiltinFunctions =

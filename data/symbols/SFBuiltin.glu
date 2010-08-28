@@ -79,6 +79,9 @@ constant passConv_iter : (t : Pure) -> PassConv t -> PassConv (Stream t);
 constant passConv_list : (t : Pure) -> PassConv (list t);
 constant passConv_Any : PassConv Any;
 
+-- The parameter-passing convention for any owned reference
+constant passConv_owned : (t : Pure) -> PassConv t;
+
 constant passConv_pyonTuple0 : PassConv PyonTuple0;
 constant passConv_pyonTuple1 :
     (t : Pure) -> PassConv t -> PassConv (PyonTuple1 t);

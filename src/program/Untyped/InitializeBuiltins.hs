@@ -66,11 +66,12 @@ classMethodType cls_field index =
   let cls = tiBuiltin cls_field
   in mkMethodType cls (clmSignature $ clsMethods cls !! index)
 
-monomorphicInstance cls ty methods =
+monomorphicInstance cls ty mcon methods =
   Instance { insQVars = []
            , insConstraint = []
            , insClass = cls
            , insType = ty
+           , insCon = mcon
            , insMethods = methods
            }
 
@@ -94,10 +95,12 @@ mkEqClass = mdo
   let int_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
+        Nothing
         (fromEqDict SystemF.the_EqDict_int)
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
+        Nothing
         (fromEqDict SystemF.the_EqDict_float)
   tuple2_instance <- do
     a <- newTyVar Star Nothing
@@ -108,6 +111,7 @@ mkEqClass = mdo
                                         ]
                       , insClass = cls
                       , insType = TupleTy 2 @@ ConTy a @@ ConTy b
+                      , insCon = Nothing
                       , insMethods = fromEqDict SystemF.the_EqDict_Tuple2
                       }
   return cls
@@ -141,10 +145,12 @@ mkOrdClass = mdo
   let int_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
+        Nothing
         (fromOrdDict SystemF.the_OrdDict_int)
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
+        Nothing
         (fromOrdDict SystemF.the_OrdDict_float)
 
   tuple2_instance <- do
@@ -156,6 +162,7 @@ mkOrdClass = mdo
                                         ]
                       , insClass = cls
                       , insType = TupleTy 2 @@ ConTy a @@ ConTy b
+                      , insCon = Nothing
                       , insMethods = fromOrdDict SystemF.the_OrdDict_Tuple2
                       }
   return cls
@@ -192,10 +199,12 @@ mkTraversableClass = mdo
   let list_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_list)
+        Nothing
         (fromTraversableDict SystemF.the_TraversableDict_list)
       iter_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_iter)
+        Nothing
         (fromTraversableDict SystemF.the_TraversableDict_Stream)
 
   return cls
@@ -225,10 +234,12 @@ mkAdditiveClass = mdo
   let int_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
+        Nothing
         (fromAdditiveDict SystemF.the_AdditiveDict_int)
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
+        Nothing
         (fromAdditiveDict SystemF.the_AdditiveDict_float)
   
   return cls
@@ -262,10 +273,75 @@ mkVectorClass = mdo
 
   return cls
 
+mkPassableClass = mdo
+  a <- newTyVar Star Nothing
+  let cls = Class { clsParam = a
+                  , clsConstraint = []
+                  , clsMethods = []
+                  , clsName = "Passable"
+                  , clsInstances = [int_instance, float_instance,
+                                    bool_instance, none_instance,
+                                    any_instance,
+                                    list_instance, iter_instance,
+                                    tuple2_instance]
+                  , clsTypeCon = pyonBuiltin SystemF.the_PassConv
+                  , clsDictCon =
+                    internalError "Class 'Passable' has no dictionary constructor"
+                  }
+  
+  let int_instance =
+        monomorphicInstance cls (ConTy $ tiBuiltin the_con_int)
+        (Just $ pyonBuiltin SystemF.the_passConv_int) []
+  let float_instance =
+        monomorphicInstance cls (ConTy $ tiBuiltin the_con_float)
+        (Just $ pyonBuiltin SystemF.the_passConv_float) []
+  let bool_instance =
+        monomorphicInstance cls (ConTy $ tiBuiltin the_con_bool)
+        (Just $ pyonBuiltin SystemF.the_passConv_bool) []
+  let none_instance =
+        monomorphicInstance cls (ConTy $ tiBuiltin the_con_NoneType)
+        (Just $ pyonBuiltin SystemF.the_passConv_NoneType) []
+  let any_instance =
+        monomorphicInstance cls (ConTy $ tiBuiltin the_con_Any)
+        (Just $ pyonBuiltin SystemF.the_passConv_Any) []
+        
+  b <- newTyVar Star Nothing
+  let list_instance =
+        Instance
+        { insQVars = [b]
+        , insConstraint = [passable $ ConTy b]
+        , insClass = cls
+        , insType = ConTy (tiBuiltin the_con_list) @@ ConTy b
+        , insCon = Just $ pyonBuiltin SystemF.the_passConv_list
+        , insMethods = []
+        }
+  let iter_instance =
+        Instance
+        { insQVars = [b]
+        , insConstraint = [passable $ ConTy b]
+        , insClass = cls
+        , insType = ConTy (tiBuiltin the_con_iter) @@ ConTy b
+        , insCon = Just $ pyonBuiltin SystemF.the_passConv_iter
+        , insMethods = []
+        }
+  
+  c <- newTyVar Star Nothing
+  let tuple2_instance =
+        Instance
+        { insQVars = [b, c]
+        , insConstraint = [passable $ ConTy b, passable $ ConTy c]
+        , insClass = cls
+        , insType = TupleTy 2 @@ ConTy b @@ ConTy c
+        , insCon = Just $ SystemF.getPyonTuplePassConv' 2
+        , insMethods = []
+        }
+  
+  return cls
+
 -------------------------------------------------------------------------------
 -- Global function initialization
 
-passable t = t `HasPassConv` TypePassConv t
+passable t = t `IsInst` tiBuiltin the_Passable
 
 mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
   let tT = ConTy t
@@ -417,6 +493,7 @@ initializeTIBuiltins = do
             , ("Traversable", [| mkTraversableClass |])
             , ("Additive", [| mkAdditiveClass |])
             , ("Vector", [| mkVectorClass |])
+            , ("Passable", [| mkPassableClass |])
             ]
 
           globals =

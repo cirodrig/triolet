@@ -61,6 +61,10 @@ isEqualityPredicate (EqPassConv _ _) = True
 isEqualityPredicate (EqExecMode _ _) = True
 isEqualityPredicate _ = False
 
+-- | Somewhat of a hack.  Decide whether this is the distinguished type class
+-- for object layout information. 
+isPassableClass cls = clsName cls == "Passable"
+
 -------------------------------------------------------------------------------
 -- Context reduction
 
@@ -175,13 +179,14 @@ instanceReduction :: SourcePos -> Predicate -> IO (Derivation, Constraint)
 instanceReduction pos pred = do
     ip <- instancePredicates pred
     case ip of
-      Nothing -> do
+      NotReduced -> do
         -- Can't derive a class dictionary for this type
         prdDoc <- runPpr $ uShow pred
         let msg = text (show pos) <> text ":" <+>
                   text "No instance for" <+> prdDoc
         fail (show msg)
-      Just (cls_cst, inst, inst_cst) -> do
+
+      InstanceReduced cls_cst inst inst_cst -> do
         -- Reduce all superclasses to HNF
         cls_hnf <- mapM (toHnf pos) cls_cst
         let cls_superclasses = map fst cls_hnf
@@ -199,6 +204,10 @@ instanceReduction pos pred = do
                          , instancePremises = inst_superclasses
                          }
         return (derivation, cls_hnf_cst ++ inst_hnf_cst)
+
+      FunctionPassableReduced ty ->
+        let derivation = FunPassConvDerivation { conclusion = pred }
+        in return (derivation, [])
 
 hasPassConvPredicate :: HMType -> Predicate
 hasPassConvPredicate ty = ty `HasPassConv` TypePassConv ty
@@ -442,30 +451,41 @@ addToContextHNF ctx pred
       b <- entailsEqualityPredicate ctx pred
       if b then return ctx else return (pred:ctx)
 
+data InstanceReductionStep =
+    NotReduced
+  | InstanceReduced Constraint Instance Constraint
+  | FunctionPassableReduced HMType
+
 -- | Try to satisfy a predicate with one of the known class instances.
 -- If a match is found, return a list of subgoals generated for the class,
 -- the matching instance, and a list of subgoals generated for the instance.
-instancePredicates :: Predicate 
-                   -> IO (Maybe (Constraint, Instance, Constraint))
+instancePredicates :: Predicate -> IO InstanceReductionStep
 instancePredicates (IsInst t cls) = do
-  t' <- canonicalizeHead t
-  
-  runMaybeT $ do
-    -- Common case shortcut: if the head is a type variable, we won't find
-    -- any instances
-    case t' of
-      ConTy con | isTyVar con -> fail "No instances"
-      _ -> return ()
+  (head, _) <- uncurryTypeApplication t
+  case head of
+    ConTy con | isTyVar con -> 
+      -- If the head is a type variable, we won't find any instances
+      return NotReduced
+
+    FunTy _ ->
+      -- Function instances are handled specially
+      if isPassableClass cls
+      then return $ FunctionPassableReduced t
+      else return NotReduced
+
+    _ -> fmap to_reduction_step $ runMaybeT $ do
+      -- Match against all instances until one succeeds 
+      (inst, inst_cst) <- doAny $ map (instancePredicate t) $ clsInstances cls
     
-    -- Match against all instances until one succeeds 
-    (inst, inst_cst) <- doAny $ map (instancePredicate t) $ clsInstances cls
-  
-    -- Get the class constraints
-    -- If an instance matched, then the class must match also
-    cls_cst <- lift $ mapM (instantiatePredicate t) $ clsConstraint cls
-    
-    return (cls_cst, inst, inst_cst)
+      -- Get the class constraints
+      -- If an instance matched, then the class must match also
+      cls_cst <- lift $ mapM (instantiatePredicate t) $ clsConstraint cls
+      
+      return (cls_cst, inst, inst_cst)
   where
+    to_reduction_step Nothing = NotReduced
+    to_reduction_step (Just (x, y, z)) = InstanceReduced x y z
+
     instancePredicate inst_type inst = do
       -- Try to match this type against the instance's type
       subst <- MaybeT $ match (insType inst) inst_type
@@ -598,16 +618,24 @@ toProof pos env derivation =
        (proof, placeholders) <-
          toLocalProofs c_premises env $ \c_env c_vars ->
          toLocalProofs i_premises c_env $ \i_env i_vars -> do
+           dict <-
+             createClassInstance pos cls inst inst_type c_vars i_env i_vars
+           {-
            -- Create instance methods
            inst_methods <- instantiateClassMethods pos inst inst_type i_env
            
            -- Create dictionary expression
            let hmtype = convertHMType inst_type
                superclasses = map (mkVarE pos) c_vars
-               dict = mkDictE pos cls hmtype superclasses inst_methods
+               dict = mkDictE pos cls hmtype superclasses inst_methods-}
            return (dict, [])
 
        return (True, placeholders, proof)
+     FunPassConvDerivation { conclusion = prd@(IsInst ty _)
+                           } -> do
+       let con = SystemF.pyonBuiltin SystemF.the_passConv_owned
+           prf = mkTyAppE pos (mkConE pos con) (convertHMType ty)
+       return (True, [], prf)
      PassConvDerivation { conclusion = prd@(HasPassConv ty pc)
                         , derivedConstructor = con
                         , passConvTypes = types
@@ -699,6 +727,26 @@ withLocalAssignments :: SourcePos
                      -> ([Var] -> IO (TIExp, a)) 
                      -> IO (TIExp, a)
 withLocalAssignments pos = withMany (uncurry (withLocalAssignment pos))
+
+createClassInstance pos cls inst inst_type c_vars i_env i_vars = 
+  case insCon inst
+  of Nothing -> do
+       -- Create instance methods
+       inst_methods <- instantiateClassMethods pos inst inst_type i_env
+
+       -- Create dictionary expression
+       return $ mkDictE pos cls hmtype superclasses inst_methods
+     Just con -> do
+       -- Get premise types
+       (_, premise_types) <- uncurryTypeApplication inst_type
+       
+       -- Apply the constructor to premise types and premises
+       let premise_ts = map convertHMType premise_types
+           premise_vs = map (mkVarE pos) i_vars
+       return $ mkPolyCallE pos (mkConE pos con) premise_ts premise_vs
+  where
+    hmtype = convertHMType inst_type
+    superclasses = map (mkVarE pos) c_vars
 
 -- | Create class method expressions for the given class instance, 
 -- instantiated at the given type.  This is used in constructing a class

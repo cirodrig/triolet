@@ -84,7 +84,8 @@ traversableDictTypeParameter _ = internalError "traversableDictTypeParameter"
 -- | Information about how to specialize built-in functions and constructors.
 globalConTable :: IntMap.IntMap (SpclTable Con)
 globalConTable =
-  IntMap.fromList [(fromIdent $ conID $ pyonBuiltin c, tbl) | (c, tbl) <- assocs]
+  IntMap.fromList [(fromIdent $ conID $ pyonBuiltin c, tbl)
+                  | (c, tbl) <- assocs]
   where
     -- Create an entry that is not specialized.  The 'arity' is the number of 
     -- type parameters the entry takes.
@@ -101,6 +102,7 @@ globalConTable =
       , unchanged 1 the_passConv_iter
       , unchanged 1 the_passConv_list
       , unchanged 0 the_passConv_Any
+      , unchanged 1 the_passConv_owned
       , unchanged 0 (\_ -> getPyonTuplePassConv' 0)
       , unchanged 1 (\_ -> getPyonTuplePassConv' 1)
       , unchanged 2 (\_ -> getPyonTuplePassConv' 2)
