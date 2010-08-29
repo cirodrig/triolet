@@ -23,7 +23,6 @@ import Untyped.Builtins
 import Untyped.Data
 import Untyped.Syntax
 import Untyped.HMType
-import Untyped.CallConv
 import Untyped.Kind
 import Untyped.GenSystemF
 import Untyped.Unification
@@ -124,7 +123,7 @@ ftvEnvironment env =
   liftM Set.unions $ mapM assignedFreeVariables $ Map.elems env
 
 -- | Instantiate a variable
-instantiateVariable :: SourcePos -> Variable -> Inf (TIExp, HMType, PassConv)
+instantiateVariable :: SourcePos -> Variable -> Inf (TIExp, HMType)
 instantiateVariable pos v = Inf $ \env ->
   case Map.lookup v env
   of Nothing  -> internalError $
@@ -136,7 +135,7 @@ instantiateVariable pos v = Inf $ \env ->
        -- There must be a parameter passing convention for this type
        let cst = ty `IsInst` tiBuiltin the_Passable
 
-       return (cst:constraint, vars, placeholders, (val, ty, TypePassConv ty))
+       return (cst:constraint, vars, placeholders, (val, ty))
 
 lookupTyScheme :: Variable -> Inf TyScheme
 lookupTyScheme v = withEnvironment $ \env ->
@@ -235,7 +234,7 @@ lookupProofParam _ [] = return Nothing
 generalizeDefGroup :: Bool
                    -> SourcePos
                    -> [Variable]
-                   -> Inf [(SourcePos, Maybe [TyCon], SystemF.Fun TI, HMType, CallConv)]
+                   -> Inf [(SourcePos, Maybe [TyCon], SystemF.Fun TI, HMType)]
                    -> ([SystemF.Fun TI] -> Inf a) -> Inf a
 generalizeDefGroup is_top_level
                    source_pos
@@ -247,11 +246,11 @@ generalizeDefGroup is_top_level
     runInf (addRecVarsToEnvironment defgroup_vars scan_defgroup) env
 
   -- Unify the assumed type of each function with its inferred type
-  let inferred_fotypes = [ty | (_, _, _, ty, _) <- inferred_functions]
+  let inferred_fotypes = [ty | (_, _, _, ty) <- inferred_functions]
   constraint_1 <- unify_inferred_types inferred_fotypes new_tyvars
   
   -- Generalize these types
-  let inferred_types = [(qvars, ty) | (_, qvars, _, ty, _) <- inferred_functions]
+  let inferred_types = [(qvars, ty) | (_, qvars, _, ty) <- inferred_functions]
   (deferred, bound_vars, retained, schemes) <- 
     generalize env (constraint_1 ++ constraint) inferred_types
 
@@ -264,8 +263,8 @@ generalizeDefGroup is_top_level
   (proof_env, proof_params) <- constraintToProofEnvironment retained
   
   -- Create generalized functions
-  let fo_functions = [f | (_, _, f, _, _) <- inferred_functions]
-      positions = [p | (p, _, _, _, _) <- inferred_functions]
+  let fo_functions = [f | (_, _, f, _) <- inferred_functions]
+      positions = [p | (p, _, _, _) <- inferred_functions]
   functions <-
     zipWithM3 (makePolymorphicFunction proof_params) positions schemes fo_functions
   
@@ -454,9 +453,9 @@ inferDefGroup is_top_level defs k =
                                               , funParameters = params
                                               , funBody = body
                                               , funReturnType = rt})) = do
-      (fun, ty, cc) <-
+      (fun, ty) <-
         inferFunctionFirstOrderType (getSourcePos f) params body rt
-      return (getSourcePos f, qvars, fun, ty, cc)
+      return (getSourcePos f, qvars, fun, ty)
 
     infer_body functions = do
       sfdefs <- zipWithM convert_def defs functions
@@ -469,7 +468,7 @@ inferDefGroup is_top_level defs k =
       return $ SystemF.Def sfvar function
 
 -- | Infer an expression's type and parameter-passing convention
-inferExpressionType :: Expression -> Inf (TIExp, HMType, PassConv)
+inferExpressionType :: Expression -> Inf (TIExp, HMType)
 inferExpressionType expression =
   case expression
   of VariableE {expVar = v} ->
@@ -480,24 +479,22 @@ inferExpressionType expression =
                    SystemF.FloatL _ -> ConTy $ tiBuiltin the_con_float
                    SystemF.BoolL _ -> ConTy $ tiBuiltin the_con_bool
                    SystemF.NoneL -> ConTy $ tiBuiltin the_con_NoneType
-       in return (mkLitE pos l (convertHMType ty), ty, ByRef)
+       in return (mkLitE pos l (convertHMType ty), ty)
      UndefinedE {} -> do
        tyvar <- liftIO $ newTyVar Star Nothing
        let ty = ConTy tyvar
        requirePassable ty
-       return (mkUndefinedE pos (convertHMType ty), ty, TypePassConv ty)
+       return (mkUndefinedE pos (convertHMType ty), ty)
      TupleE {expFields = fs} -> do
-       (f_exps, f_tys, f_pcs) <- inferExpressionTypes fs
-       let pc = TuplePassConv f_pcs
-           
-           -- Create the tuple expression
+       (f_exps, f_tys) <- inferExpressionTypes fs
+       let -- Create the tuple expression
            tuple_con = SystemF.getPyonTupleCon' $ length f_tys
            f_tys' = map convertHMType f_tys
            tuple_expr = mkPolyCallE pos (mkConE pos tuple_con) f_tys' f_exps
-       return (tuple_expr, tupleType f_tys, pc)
+       return (tuple_expr, tupleType f_tys)
      CallE {expOperator = op, expOperands = args} -> do
-       (op_exp, op_ty, op_conv) <- inferExpressionType op
-       (arg_exps, arg_tys, arg_convs) <- inferExpressionTypes args
+       (op_exp, op_ty) <- inferExpressionType op
+       (arg_exps, arg_tys) <- inferExpressionTypes args
        
        -- Create the expected function type based on the inferred argument 
        -- types
@@ -509,52 +506,43 @@ inferExpressionType expression =
        -- Unify expected function type with actual function type
        unifyInf pos function_type op_ty
        
-       -- Unify the parameter-passing conventions
-       let result_pc = TypePassConv result_type
-       let fun_return_conv = Return (PickExecMode result_type) result_pc
-           fun_conv = ByClosure $ foldr (:+>) fun_return_conv arg_convs
-
-       unifyInf pos op_conv fun_conv
-
-       return (mkCallE pos op_exp arg_exps, result_type, result_pc)
+       return (mkCallE pos op_exp arg_exps, result_type)
      IfE {expCondition = cond, expIfTrue = tr, expIfFalse = fa} -> do
-       (cond_exp, cond_ty, cond_pc) <- inferExpressionType cond
+       (cond_exp, cond_ty) <- inferExpressionType cond
        
        -- Check that condition has type 'bool'       
-       -- Once this is checked, we know that cond_pc will be ByVal
        unifyInf pos (ConTy $ tiBuiltin the_con_bool) cond_ty
               
-       (tr_exp, tr_ty, tr_pc) <- inferExpressionType tr
-       (fa_exp, fa_ty, fa_pc) <- inferExpressionType fa
+       (tr_exp, tr_ty) <- inferExpressionType tr
+       (fa_exp, fa_ty) <- inferExpressionType fa
        
        -- True and false paths must have same type and passing convention
        unifyInf pos tr_ty fa_ty
-       unifyInf pos tr_pc fa_pc
-       return (mkIfE pos cond_exp tr_exp fa_exp, tr_ty, tr_pc)
+       return (mkIfE pos cond_exp tr_exp fa_exp, tr_ty)
      FunE {expFunction = f} -> do
-       (fun_exp, fun_ty, fun_cc) <- inferLambdaType f
-       return (mkFunE pos fun_exp, fun_ty, ByClosure fun_cc)
+       (fun_exp, fun_ty) <- inferLambdaType f
+       return (mkFunE pos fun_exp, fun_ty)
      LetE {expPattern = p, expArgument = rhs, expBody = body} -> do
-       (rhs_exp, rhs_ty, rhs_pc) <- inferExpressionType rhs
-       addParameterToEnvironment p $ \pat param_ty param_pc -> do
+       (rhs_exp, rhs_ty) <- inferExpressionType rhs
+       addParameterToEnvironment p $ \pat param_ty -> do
          -- Unify parameter type with RHS type
          unifyInf pos param_ty rhs_ty
-         unifyInf pos param_pc rhs_pc
+
          -- Scan body
-         (body_exp, body_ty, body_pc) <- inferExpressionType body
-         return (mkLetE pos pat rhs_exp body_exp, body_ty, body_pc)
+         (body_exp, body_ty) <- inferExpressionType body
+         return (mkLetE pos pat rhs_exp body_exp, body_ty)
      LetrecE {expDefinitions = defs, expBody = body} ->
        inferDefGroup False defs $ \defs' -> do
-         (body_exp, body_ty, body_pc) <- inferExpressionType body
-         return (mkLetrecE pos defs' body_exp, body_ty, body_pc)
+         (body_exp, body_ty) <- inferExpressionType body
+         return (mkLetrecE pos defs' body_exp, body_ty)
   where
     pos = getSourcePos expression
 
-inferExpressionTypes :: [Expression] -> Inf ([TIExp], [HMType], [PassConv])
-inferExpressionTypes = mapAndUnzip3M inferExpressionType
+inferExpressionTypes :: [Expression] -> Inf ([TIExp], [HMType])
+inferExpressionTypes = mapAndUnzipM inferExpressionType
 
 -- | Infer the type of a lambda function.  The function has no type variables.
-inferLambdaType :: Function -> Inf (SystemF.Fun TI, HMType, CallConv)
+inferLambdaType :: Function -> Inf (SystemF.Fun TI, HMType)
 inferLambdaType f@(Function { funQVars = qvars
                             , funParameters = params
                             , funReturnType = rt
@@ -567,39 +555,35 @@ inferFunctionFirstOrderType :: SourcePos
                             -> [Pattern]
                             -> Expression
                             -> Maybe HMType
-                            -> Inf (SystemF.Fun TI, HMType, CallConv)
+                            -> Inf (SystemF.Fun TI, HMType)
 inferFunctionFirstOrderType pos params body annotated_return_type =
-  addParametersToEnvironment params $ \sf_params param_types param_pcs -> do
-    (body, body_type, body_pc) <- inferExpressionType body
+  addParametersToEnvironment params $ \sf_params param_types -> do
+    (body, body_type) <- inferExpressionType body
     
     -- If a return type was annotated, check against the return type
     case annotated_return_type of
       Nothing -> return ()
       Just t  -> unifyInf pos body_type t
       
-    -- Compute the function's calling convention
-    let return_cc = Return (PickExecMode body_type) body_pc
-        f_cc = foldr (:+>) return_cc param_pcs
-
     let f_type = functionType param_types body_type
     f <- liftIO $ mkFunction pos [] sf_params (convertHMType body_type) body
-    return (f, f_type, f_cc)
+    return (f, f_type)
 
 -- | Bind a list of parameters with first-order types over a local scope.
 -- The System F parameters and their types are passed to the local scope.
 addParametersToEnvironment
   :: [Pattern]
-  -> ([SystemF.Pat TI] -> [HMType] -> [PassConv] -> Inf a)
+  -> ([SystemF.Pat TI] -> [HMType] -> Inf a)
   -> Inf a
 addParametersToEnvironment (p:ps) k =
-  addParameterToEnvironment p $ \pat ty pc ->
-  addParametersToEnvironment ps $ \pats tys pcs ->
-  k (pat:pats) (ty:tys) (pc:pcs)
+  addParameterToEnvironment p $ \pat ty ->
+  addParametersToEnvironment ps $ \pats tys ->
+  k (pat:pats) (ty:tys)
 
-addParametersToEnvironment [] k = k [] [] []
+addParametersToEnvironment [] k = k [] []
 
 addParameterToEnvironment :: Pattern 
-                          -> (SystemF.Pat TI -> HMType -> PassConv -> Inf a) 
+                          -> (SystemF.Pat TI -> HMType -> Inf a) 
                           -> Inf a
 addParameterToEnvironment pattern k =
   case pattern
@@ -607,7 +591,7 @@ addParameterToEnvironment pattern k =
        -- Create a new type for this parameter
        ty <- liftIO $ liftM ConTy $ newTyVar Star Nothing
        requirePassable ty
-       k (mkWildP (convertHMType ty)) ty (TypePassConv ty)
+       k (mkWildP (convertHMType ty)) ty
      VariableP _ v mty -> do
        -- Get or create this parameter's type
        ty <- case mty
@@ -619,14 +603,13 @@ addParameterToEnvironment pattern k =
                    Nothing    -> internalError "Pattern variable has no translation"
        let ty_assignment = firstOrderAssignment ty (\pos -> mkVarE pos sfvar)
        assume v ty_assignment $
-         k (mkVarP sfvar (convertHMType ty)) ty (TypePassConv ty)
+         k (mkVarP sfvar (convertHMType ty)) ty
      TupleP _ fields -> do
        -- Bind variables in each field
-       addParametersToEnvironment fields $ \fields' field_types field_pcs -> do
+       addParametersToEnvironment fields $ \fields' field_types -> do
          -- Construct the tuple type
          let tuple_type = tupleType field_types
-             tuple_pc = TuplePassConv field_pcs
-         k (mkTupleP fields') tuple_type tuple_pc
+         k (mkTupleP fields') tuple_type
 
 -- | Infer the type of an export statement.  Generate a function that wraps
 -- the variable.
@@ -674,7 +657,7 @@ inferExportType (Export { exportAnnotation = ann
       return ([], tyvars, [], x)
       where 
         instantiate_and_unify = do
-          (inst_exp, var_type, pass_conv) <- instantiateVariable pos var
+          (inst_exp, var_type) <- instantiateVariable pos var
           unifyInf pos var_type ty
           return inst_exp
 

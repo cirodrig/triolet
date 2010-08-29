@@ -54,7 +54,6 @@ Executable pyon
     Untyped.GenSystemF
     Untyped.HMType
     Untyped.Kind
-    Untyped.CallConv
     Untyped.Print
     Untyped.Syntax
     Untyped.TypeAssignment

@@ -1,9 +1,9 @@
 
 module Untyped.Unification
-       (Substitution, substTc, substCc,
+       (Substitution, substTc,
         emptySubstitution, substitutionFromList, substitution,
-        updateTc, updateCc,
-        Ppr, runPpr, pprGetTyConName, pprGetPassConvVarName,
+        updateTc,
+        Ppr, runPpr, pprGetTyConName,
         Predicate(..),
         Constraint,
         Unifiable(..),
@@ -23,26 +23,19 @@ import Gluon.Common.SourcePos
 import Untyped.Data
 
 substTc = _substTc
-substCc = _substCc
 
 emptySubstitution :: Substitution
-emptySubstitution = Substitution Map.empty Map.empty
+emptySubstitution = Substitution Map.empty
 
 substitutionFromList :: [(TyCon, HMType)] -> Substitution
-substitutionFromList xs = Substitution (Map.fromList xs) Map.empty
+substitutionFromList xs = Substitution (Map.fromList xs)
 
-substitution :: Map.Map TyCon HMType 
-             -> Map.Map PassConvVar PassConv 
-             -> Substitution
+substitution :: Map.Map TyCon HMType -> Substitution
 substitution = Substitution
 
 updateTc :: (Map.Map TyCon HMType -> Map.Map TyCon HMType) 
          -> Substitution -> Substitution
 updateTc f s = s {_substTc = f $ substTc s}
-
-updateCc :: (Map.Map PassConvVar PassConv -> Map.Map PassConvVar PassConv)
-         -> Substitution -> Substitution
-updateCc f s = s {_substCc = f $ substCc s}
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -57,9 +50,8 @@ runPpr m = do
 
   -- Empty environment
   tenv <- newIORef Map.empty
-  penv <- newIORef Map.empty
   
-  doPpr m (PprContext names tenv penv)
+  doPpr m (PprContext names tenv)
 
 -- | Get a new variable name.
 pprGetFreshName :: Ppr String
@@ -80,22 +72,6 @@ pprGetTyConName ident = Ppr $ \env -> do
       
       -- Save name in environment
       writeIORef (typeNames env) $ Map.insert ident doc nenv
-      
-      return doc
-
--- | Get the name of a parameter passing convention variable; assign a
--- new name if needed.
-pprGetPassConvVarName :: Ident PassConvVar -> Ppr Doc
-pprGetPassConvVarName ident = Ppr $ \env -> do
-  nenv <- readIORef $ passNames env
-  case Map.lookup ident nenv of
-    Just doc -> return doc
-    Nothing -> do
-      nm <- doPpr pprGetFreshName env
-      let doc = text nm
-      
-      -- Save name in environment
-      writeIORef (passNames env) $ Map.insert ident doc nenv
       
       return doc
 

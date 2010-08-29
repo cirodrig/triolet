@@ -36,7 +36,6 @@ import Gluon.Core(SynInfo, mkSynInfo, internalSynInfo,
 import qualified Gluon.Core as Gluon
 import Globals
 import Export
-import Untyped.CallConv
 import Untyped.HMType
 import Untyped.Kind
 import Untyped.Unification
@@ -111,12 +110,6 @@ insScheme i = TyScheme (insQVars i) (insConstraint i) (insType i)
 
 instance Type Predicate where
   freeTypeVariables (IsInst t _) = freeTypeVariables t
-  freeTypeVariables (HasPassConv t c) =
-    Set.union `liftM` freeTypeVariables t `ap` freeTypeVariables c
-  freeTypeVariables (EqPassConv x y) =
-    Set.union `liftM` freeTypeVariables x `ap` freeTypeVariables y
-  freeTypeVariables (EqExecMode x y) =
-    Set.union `liftM` freeTypeVariables x `ap` freeTypeVariables y
 
 instance Type [Predicate] where
   freeTypeVariables xs = liftM Set.unions $ mapM freeTypeVariables xs
@@ -129,47 +122,14 @@ instance Unifiable Predicate where
     where
       display doc = text (clsName c) <+> parens doc
 
-  uShow (t `HasPassConv` c) = display <$> uShow t <*> uShow c
-    where
-      display x y = x <+> text "HasPassConv" <+> y
-
-  uShow (EqPassConv c1 c2) = display <$> uShow c1 <*> uShow c2
-    where
-      display x y = x <+> text "~" <+> y
-
-  uShow (EqExecMode m1 m2) = display <$> uShow m1 <*> uShow m2
-    where
-      display x y = x <+> text "~" <+> y
-
   rename s (IsInst t c) = do 
     t' <- rename s t
     return $ IsInst t' c
-    
-  rename s (HasPassConv t pc) = do
-    t' <- rename s t
-    pc' <- rename s pc
-    return $ HasPassConv t' pc'
-  
-  rename s (EqPassConv pc1 pc2) = do
-    pc1' <- rename s pc1
-    pc2' <- rename s pc2
-    return $ EqPassConv pc1' pc2'
-  
-  rename s (EqExecMode m1 m2) = do
-    m1' <- rename s m1
-    m2' <- rename s m2
-    return $ EqExecMode m1' m2'
 
   unify pos p1 p2 =
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> unify pos t1 t2
-       (HasPassConv t1 pc1, HasPassConv t2 pc2) ->
-         (++) `liftM` unify pos t1 t2 `ap` unify pos pc1 pc2
-       (EqPassConv pc1 pc2, EqPassConv pc3 pc4) ->
-         (++) `liftM` unify pos pc1 pc3 `ap` unify pos pc2 pc4
-       (EqExecMode m1 m2, EqExecMode m3 m4) ->
-         (++) `liftM` unify pos m1 m3 `ap` unify pos m2 m4
   
        _ -> fail "Cannot unify predicates"
   
@@ -177,21 +137,6 @@ instance Unifiable Predicate where
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> match t1 t2
-       (HasPassConv t1 pc1, HasPassConv t2 pc2) -> do
-         s1 <- match t1 t2
-         s2 <- match pc1 pc2
-         fromMaybe (return Nothing) $
-           mergeSubstitutions `liftM` s1 `ap` s2
-       (EqPassConv pc1 pc2, EqPassConv pc3 pc4) -> do
-         s1 <- match pc1 pc3
-         s2 <- match pc2 pc4
-         fromMaybe (return Nothing) $
-           mergeSubstitutions `liftM` s1 `ap` s2
-       (EqExecMode m1 m2, EqExecMode m3 m4) -> do
-         s1 <- match m1 m3
-         s2 <- match m2 m4
-         fromMaybe (return Nothing) $
-           mergeSubstitutions `liftM` s1 `ap` s2
        
        _ -> return Nothing
   
@@ -199,12 +144,6 @@ instance Unifiable Predicate where
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> uEqual t1 t2
-       (HasPassConv t1 pc1, HasPassConv t2 pc2) ->
-         uEqual t1 t2 >&&> uEqual pc1 pc2
-       (EqPassConv pc1 pc2, EqPassConv pc3 pc4) ->
-         uEqual pc1 pc3 >&&> uEqual pc2 pc4
-       (EqExecMode m1 m2, EqExecMode m3 m4) ->
-         uEqual m1 m3 >&&> uEqual m2 m4
        _ -> return False
 
 isIdDerivation :: Derivation -> Bool
@@ -331,38 +270,6 @@ mkDictE pos cls inst_type scs methods =
       dict1 = mkTyAppE pos (mkConE pos $ clsDictCon cls) inst_type
       -- Then apply to all arguments
   in mkCallE pos dict1 (scs ++ methods)
-
-{-  Replaced by mkMethodInstanceE
-mkMethodSelectE :: SourcePos -> Class -> HMType -> Int -> TIExp -> IO TIExp
-mkMethodSelectE pos cls inst_type index dict = do
-  -- The class dictionary has superclass and method fields. 
-  let num_superclasses = length $ clsConstraint cls
-      num_methods = length $ clsMethods cls
-      
-  -- Get the type of each field.  Rename the class variable to match
-  -- this instance.
-  let instantiation = substitutionFromList [(clsParam cls, inst_type)]
-  sc_types <- mapM (return . convertPredicate <=< rename instantiation) $
-              clsConstraint cls
-  m_types <- mapM (return . convertTyScheme <=< renameTyScheme instantiation . clmSignature) $ clsMethods cls
-
-  -- Create anonymous parameter variables
-  parameter_vars <- replicateM (num_superclasses + num_methods) $ do
-    var_id <- getNextVarIdent
-    return $ Gluon.mkAnonymousVariable var_id ObjectLevel
-
-  -- Create binders for the parameters
-  let mkParameter var ty = Gluon.Binder var ty ()
-      parameters = zipWith mkParameter parameter_vars (sc_types ++ m_types)
-
-  -- Create a case expression that matches against the class dictionary
-  -- and then selects one of its fields
-  let alt_body = mkVarE pos $ parameter_vars !! (num_superclasses + index)
-      alt = TIAlt $
-            SystemF.Alt (clsDictCon cls) [convertHMType inst_type] parameters alt_body
-
-  return $ TIExp $ SystemF.CaseE (synInfo pos) dict [alt]
--}
 
 -- | Create an expression that selects and instantiates a class method.
 -- Return the expression and the placeholders produced by instantiation.
@@ -505,10 +412,6 @@ convertPredicate prd = DelayedType $ convertPredicate' prd
 convertPredicate' (IsInst ty cls) = do
   ty' <- convertHMType' ty
   return $ Gluon.mkConAppE noSourcePos (clsTypeCon cls) [ty']
-
-convertPredicate' (HasPassConv ty conv) = do
-  ty' <- convertHMType' ty
-  return $ Gluon.mkConAppE noSourcePos (SystemF.pyonBuiltin SystemF.the_PassConv) [ty']
 
 -- | Convert a type scheme to a function type.  Each quantified variable
 -- becomes a parameter in the function type.

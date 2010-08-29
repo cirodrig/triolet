@@ -21,7 +21,6 @@ import Untyped.Data
 import Untyped.Kind
 import Untyped.Syntax
 import Untyped.HMType
-import Untyped.CallConv
 import Untyped.TypeAssignment
 import Untyped.GenSystemF
 import Untyped.Unification
@@ -34,9 +33,9 @@ f @@ g = appTy f g
 
 -- | Create an 'untyped' type constructor that corresponds to the given
 -- System F type constructor
-builtinTyCon name kind sf_con pass_conv pass_conv_con pass_conv_args exec_mode =
+builtinTyCon name kind sf_con =
   let y = Gluon.mkInternalConE sf_con
-  in mkTyCon (builtinLabel name) kind y pass_conv pass_conv_con pass_conv_args exec_mode
+  in mkTyCon (builtinLabel name) kind y
 
 -------------------------------------------------------------------------------
 -- Class initialization
@@ -452,39 +451,13 @@ initializeTIBuiltins = do
             -- 1. Gluon name
             -- 2. kind
             -- 3. system F constructor
-            -- 4. parameter-passing convention
-            -- 5. parameter-passing constructor Gluon name
-            -- 6. parameter-passing constructor arguments needed
-            -- 6. execution mode
-            [ ("int", Star, [| pyonBuiltin SystemF.the_int |],
-               [| PassConvVal ByRef |],
-               "passConv_int", [],
-               [| AsAction |])
-            , ("float", Star, [| pyonBuiltin SystemF.the_float |],
-               [| PassConvVal ByRef |],
-               "passConv_float", [],
-               [| AsAction |])
-            , ("bool", Star, [| pyonBuiltin SystemF.the_bool |], 
-               [| PassConvVal ByRef |],
-               "passConv_bool", [],
-               [| AsAction |])
-            , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |],
-               [| PassConvVal ByRef |],
-               "passConv_NoneType", [],
-               [| AsAction |])
-            , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |],
-               [| PassConvFun $ \t ->
-                  PassConvVal $ ByClosure (Return AsStream (TypePassConv t)) |],
-               "passConv_iter", [True],
-               [| AsStream |])
-            , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |],
-               [| PassConvFun $ \_ -> PassConvVal ByRef |],
-               "passConv_list", [False],
-               [| AsAction |])
-            , ("Any", Star, [| pyonBuiltin SystemF.the_Any |],
-               [| PassConvVal ByRef |],
-               "passConv_Any", [],
-               [| AsAction |])
+            [ ("int", Star, [| pyonBuiltin SystemF.the_int |])
+            , ("float", Star, [| pyonBuiltin SystemF.the_float |])
+            , ("bool", Star, [| pyonBuiltin SystemF.the_bool |])
+            , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |])
+            , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |])
+            , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |])
+            , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
             ]
             
           classes =
@@ -566,14 +539,10 @@ initializeTIBuiltins = do
             ]
 
           -- Construct initializers
-          typ_initializer (name, _, con, _, _, _, _) =
+          typ_initializer (name, _, con) =
             ('_':name, [| return $(con) |])
-          tycon_initializer (name, kind, con, pass_conv, pass_conv_name,
-                             pass_conv_args, mode) =
-            let pass_conv_field =
-                  TH.varE $ TH.mkName ("SystemF.the_" ++ pass_conv_name)
-            in ("_con_" ++ name,
-                [| builtinTyCon name kind $(con) $(pass_conv) (pyonBuiltin $(pass_conv_field)) pass_conv_args $(mode) |])
+          tycon_initializer (name, kind, con) =
+            ("_con_" ++ name, [| builtinTyCon name kind $(con) |])
           cls_initializer (name, mk) =
             ('_':name, mk)
           global_initializer (name, typ, con) =

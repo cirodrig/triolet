@@ -1,10 +1,11 @@
 
 {-# LANGUAGE TypeFamilies, DeriveDataTypeable #-}
 module Untyped.HMType
-       (Substitution, substitutionFromList,
+       (Substitution,
+        mergeSubstitutions,
+        substitutionFromList,
         TyVars, TyVarSet, TyCon,
-        tyConKind, tyConPassConv, tyConPassConvCtor, tyConPassConvArgs, 
-        tyConExecMode,
+        tyConKind,
         isTyVar, isRigidTyVar, isFlexibleTyVar,
         isCanonicalTyVar,
         newTyVar, newRigidTyVar, mkTyCon, duplicateTyVar,
@@ -57,6 +58,39 @@ tyConIDSupply :: Supply (Ident TyCon)
 {-# NOINLINE tyConIDSupply #-}
 tyConIDSupply = unsafePerformIO newIdentSupply
 
+-- | Merge two substitutions, if the substitutions agree on their
+-- common elements; return Nothing otherwise.
+mergeSubstitutions :: Substitution -> Substitution -> IO (Maybe Substitution)
+mergeSubstitutions s1 s2 = do
+  mtc' <- merge (substTc s1) (substTc s2)
+  case mtc' of
+    Nothing  -> return Nothing
+    Just tc' -> return $ Just $ substitution tc'
+  where
+    merge m1 m2 = mergeElements (Map.toAscList m1) (Map.toAscList m2) id
+
+    prepend x tl = (x:) . tl
+
+    -- Merge two ascending association lists.  The lists must agree on their
+    -- common elements.  The 
+    mergeElements (x1@(k1, v1):xs1) (x2@(k2, v2):xs2) tl =
+      case compare k1 k2
+      of LT -> mergeElements xs1 (x2:xs2) (prepend x1 tl)
+         EQ -> do eq <- uEqual v1 v2
+                  if eq
+                    then mergeElements xs1 xs2 (prepend x1 tl)
+                    else return Nothing
+         GT -> mergeElements (x1:xs1) xs2 (prepend x2 tl)
+
+    mergeElements xs1 [] tl =
+      mergeElements [] [] ((xs1 ++) . tl)
+
+    mergeElements [] xs2 tl =
+      mergeElements [] [] ((xs2 ++) . tl)
+
+    mergeElements [] [] merged_list =
+      return $ Just $ Map.fromAscList $ merged_list []
+
 newTyConID :: IO (Ident TyCon)
 newTyConID = supplyValue tyConIDSupply
 
@@ -71,23 +105,6 @@ isRigidTyVar c = isTyVar c && isNothing (tcRep c)
 
 isFlexibleTyVar :: TyCon -> Bool
 isFlexibleTyVar c = isTyVar c && isJust (tcRep c)
-
--- | Get the parameter-passing convention of a type constructor
-tyConPassConv :: TyCon -> PassConvCtor
-tyConPassConv = tcPassConv . tcConInfo
-
--- | Get the proof constructor for a type constructor's parameter-passing
--- convention
-tyConPassConvCtor :: TyCon -> Con
-tyConPassConvCtor = tcPassConvProof . tcConInfo
-
--- | Get the parameter-passing convention proof arguments
-tyConPassConvArgs :: TyCon -> [Bool]
-tyConPassConvArgs = tcPassConvArgs . tcConInfo
-
--- | Get the execution mode of a type constructor
-tyConExecMode :: TyCon -> ExecMode
-tyConExecMode = tcExecMode . tcConInfo
 
 -- | Create a new flexible type variable
 newTyVar :: Kind -> Maybe Label -> IO TyCon
@@ -109,18 +126,12 @@ newRigidTyVar k lab = do
   return $! TyCon id lab k True Nothing sfvar con_descr
 
 -- | Create a type constructor
-mkTyCon :: Label -> Kind -> SystemF.RType -> PassConvCtor -> Con -> [Bool]
-        -> ExecMode
-        -> IO TyCon
-mkTyCon name kind value pass_conv pass_conv_proof pass_conv_args em = do
+mkTyCon :: Label -> Kind -> SystemF.RType -> IO TyCon
+mkTyCon name kind value = do
   id <- newTyConID
   let var = error "Type constructor is not a variable"
       con_descr = TyConDescr
                   { tcSystemFValue = value
-                  , tcPassConv = pass_conv
-                  , tcPassConvProof = pass_conv_proof
-                  , tcPassConvArgs = pass_conv_args
-                  , tcExecMode = em
                   }
   return $! TyCon id (Just name) kind False Nothing var con_descr
 

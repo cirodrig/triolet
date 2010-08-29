@@ -37,7 +37,6 @@ data ParserVarBinding =
 data Substitution =
   Substitution
   { _substTc :: Map.Map TyCon HMType
-  , _substCc :: Map.Map PassConvVar PassConv
   }
 
 -- | A pretty-printing applicative construct for giving names to
@@ -48,21 +47,12 @@ data PprContext =
   PprContext
   { freshNames :: {-# UNPACK #-} !(IORef [String])
   , typeNames :: {-# UNPACK #-} !(IORef (Map.Map (Ident TyCon) Doc))
-  , passNames :: {-# UNPACK #-} !(IORef (Map.Map (Ident PassConvVar) Doc))
   }
 
  -- | A predicate to be solved by type inference
 data Predicate =
     -- | Class membership.  This predicate translates to a class dictionary.
     IsInst HMType !Class
-    -- | Parameter-passing constraint.  This predicate translates to
-    -- parameter-passing information, such as how to load, store, or
-    -- duplicate a value.
-  | HasPassConv HMType PassConv
-    -- | Equality constraint on parameter-passing conventions
-  | EqPassConv PassConv PassConv
-    -- | Equality constraint on execution modes
-  | EqExecMode ExecMode ExecMode
 
 type Constraint = [Predicate]
 
@@ -107,16 +97,6 @@ data TyConDescr =
   TyConDescr
   { -- | The System F constructor
     tcSystemFValue :: SystemF.RType
-    -- | Parameter-passing convention for values of this type constructor
-  , tcPassConv :: PassConvCtor
-    -- | A proof or proof constructor for the parameter-passing convention.
-    -- The proof constructor's type must match the constructor's kind.
-  , tcPassConvProof :: Gluon.Con
-    -- | Which arguments need to be passed to the proof constructor.  There
-    -- is one list element per type parameter.
-  , tcPassConvArgs :: [Bool]
-    -- | Execution mode for functions returning this type constructor
-  , tcExecMode :: ExecMode
   }
 
 -- | An atomic type-level entity, such as a type variable or constructor
@@ -161,61 +141,6 @@ data HMType =
     -- | A type application
   | AppTy HMType HMType
     deriving(Typeable)
-
--- | A parameter-passing convention variable.
--- These variables represent unknowns that are resolved through unification. 
--- Unlike type variables, they are monomorphic.
-data PassConvVar =
-  PassConvVar
-  { pcID :: {-# UNPACK #-} !(Ident PassConvVar)
-  , pcRep :: {-# UNPACK #-} !(IORef PassConvVarRep)
-  }
-
-instance Eq PassConvVar where
-  (==) = (==) `on` pcID
-  (/=) = (/=) `on` pcID
-
-instance Ord PassConvVar where
-  compare = compare `on` pcID
-
--- | The parameter-passing convention for a @PassConvVar@ as identified by
--- unification
-data PassConvVarRep = NoPCRep | PCVarRep !PassConvVar | PCRep !PassConv
-
--- | A parameter-passing convention.
--- The actual conventions are 'ByVal', 'ByRef', and 'ByClosure'.
--- The convention 'TuplePassConv' represents a function that evaluates to
--- one of the above.
--- The constructor 'By' represents a variable.
-data PassConv =
-    ByRef                       -- ^ Pass by reference
-  | ByClosure CallConv          -- ^ Pass a function
-  | TuplePassConv [PassConv]    -- ^ Parameter-passing convention for a tuple
-  | TypePassConv HMType         -- ^ The parameter-passing convention of a
-                                -- (possibly unknown) type 
-  | By {-# UNPACK #-} !PassConvVar -- ^ Unknown parameter-passing convention
-
--- | A function execution mode.
--- Functions execute as 'Action' or 'Stream' functions, based on their
--- return type.  If the return type is not known, then 'PickExecMode' is
--- used to delay the decision.
---
--- /TODO/: Eliminate ExecMode, it serves no purpose.
-data ExecMode =
-  AsAction | AsStream | PickExecMode HMType
-
--- | A function calling convention.
-data CallConv =
-    -- | Require another parameter
-    PassConv :+> CallConv
-    -- | Execute and return a value
-  | Return !ExecMode PassConv
-
-infixr 4 :+>
-
--- | Constructors for parameter-passing conventions
-data PassConvCtor =
-  PassConvFun (HMType -> PassConvCtor) | PassConvVal PassConv
 
 -- | A type scheme
 data TyScheme = TyScheme TyVars Constraint HMType
@@ -284,13 +209,6 @@ data Derivation =
     , instancePremises :: [Derivation] 
     , classPremises :: [Derivation]
     }
-  | -- | Parameter-passing convention derivation for data
-    PassConvDerivation
-    { conclusion :: Predicate
-    , derivedConstructor :: Gluon.Con
-    , passConvTypes :: [HMType]
-    , passConvPremises :: [Derivation]
-    }
   | -- | Parameter-passing convention derivation for functions
     FunPassConvDerivation
     { conclusion :: Predicate
@@ -299,16 +217,6 @@ data Derivation =
   | MagicDerivation
     { conclusion :: Predicate
     }
-
--- | A derivation of calling convention equality.  Unlike 'Derivation' values,
--- there is no predicate corresponding to the result of these derivations. 
--- These derivations are intermediate steps in other derivations.
---
--- The actual derivation is not implemented; this is a \"magic\" derivation.
-data EqCallConvDerivation =
-  EqCallConvDerivation
-  { callConvConclusion :: (CallConv, CallConv)
-  }
 
 -- | A variable's type assignment, containing information about how to create 
 -- its corresponding expression in System F

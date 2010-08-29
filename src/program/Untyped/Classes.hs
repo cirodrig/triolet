@@ -27,7 +27,6 @@ import Gluon.Core(Level(..), Var(..))
 import qualified Gluon.Core as Gluon
 import Untyped.Data
 import Untyped.HMType
-import Untyped.CallConv
 import Untyped.Kind
 import Untyped.GenSystemF
 import Untyped.Builtins
@@ -53,13 +52,6 @@ mapAndUnzip3M f xs = liftM unzip3 $ mapM f xs
 
 isInstancePredicate (IsInst _ _) = True
 isInstancePredicate _ = False
-
-isPassConvPredicate (HasPassConv _ _) = True
-isPassConvPredicate _ = False
-
-isEqualityPredicate (EqPassConv _ _) = True
-isEqualityPredicate (EqExecMode _ _) = True
-isEqualityPredicate _ = False
 
 -- | Somewhat of a hack.  Decide whether this is the distinguished type class
 -- for object layout information. 
@@ -92,44 +84,9 @@ ps `entailsInstancePredicate` p@(IsInst _ _) =
 -- equality predicate.
 entailsEqualityPredicate :: Constraint -> Predicate -> IO Bool
 ps `entailsEqualityPredicate` p =
-  -- True if the predicate or its reflection is in the context
-  let p' = reflection p
-      context = filter isEqualityPredicate ps
-  in anyM (\q -> p `uEqual` q >||> p' `uEqual` q) context
-  where
-    reflection (EqPassConv x y) = EqPassConv y x
-    reflection (EqExecMode x y) = EqExecMode y x
-    reflection (IsInst _ _) =
-      internalError "reflection: not an equality predicate"
-
--- | Add to the context any part of the predicate that is not already
--- entailed by the context.  Unification may be performed during entailment 
--- checking.  All inputs must be in head-normal form.
-addPassConvToContext :: Constraint -> Predicate -> IO Constraint
-addPassConvToContext context pred@(HasPassConv p_ty p_pc) =
-  -- A 'HasPassConv' predicate is uniquely determined by its type.
-  -- If another such predicate is in the context, then unify their
-  -- parmeter-passing conventions and then return True.
-  find_or_insert context
-  where
-    find_or_insert (HasPassConv c_ty c_pc : ps) = do
-      -- Do the types match?
-      match <- uEqual p_ty c_ty
-      if not match then find_or_insert ps else unify_and_insert c_pc
- 
-    -- Ignore other constraints 
-    find_or_insert (_ : ps) = find_or_insert ps
-
-    -- No match found: add to context
-    find_or_insert [] = return (pred:context)
-    
-    -- Found a match; unify with the new predicate
-    unify_and_insert c_pc = do
-      -- Unify the passing conventions.
-      new_cst <- unify noSourcePos c_pc p_pc
-      
-      -- Insert the new constraints
-      foldM addToContext context new_cst
+  -- True if the predicate is in the context
+  let context = ps
+  in anyM (p `uEqual`) context
 
 -- | Determine whether a class instance predicate is in head-normal form.
 --
@@ -163,9 +120,6 @@ toHnf pos pred =
        if is_hnf then return (IdDerivation pred, [pred]) else do
          -- Otherwise, perform reduction based on class instances
          instanceReduction pos pred
-     HasPassConv _ _ -> reduceHasPassConv pos pred
-     EqPassConv _ _ -> reduceEquality pos pred
-     EqExecMode _ _ -> reduceEquality pos pred
 
 -- | Convert a constraint to HNF and ignore how it was derived
 toHnfConstraint :: Predicate -> IO Constraint
@@ -209,219 +163,6 @@ instanceReduction pos pred = do
         let derivation = FunPassConvDerivation { conclusion = pred }
         in return (derivation, [])
 
-hasPassConvPredicate :: HMType -> Predicate
-hasPassConvPredicate ty = ty `HasPassConv` TypePassConv ty
-
-reduceHasPassConv :: SourcePos -> Predicate -> IO (Derivation, Constraint)
-reduceHasPassConv pos pred@(HasPassConv ty pc) = do
-  (deriv, pc', types) <- pickPassConv pos ty
-  return (deriv, map hasPassConvPredicate types)
-
--- | Reduce an equality predicate to a simplified form.
-reduceEquality :: SourcePos -> Predicate -> IO (Derivation, Constraint)
-reduceEquality pos pred =
-  case pred
-  of IsInst _ _ -> no_change pred
-     EqPassConv c1 c2 -> structurallyP c1 c2
-     EqExecMode c1 c2 -> structurallyM c1 c2
-  where
-    structurallyC c1 c2 =
-      case (c1, c2)
-      of (pc1 :+> cc1, pc2 :+> cc2) -> do
-           (d1, new_csts1) <- structurallyP pc1 pc2
-           (d2, new_csts2) <- structurallyC cc1 cc2
-           return (EqCallConvDerivation (c1, c2), new_csts1 ++ new_csts2)
-         (Return m1 pc1, Return m2 pc2) -> do
-           (d1, new_csts1) <- structurallyM m1 m2
-           (d2, new_csts2) <- structurallyP pc1 pc2
-           return (EqCallConvDerivation (c1, c2), new_csts1 ++ new_csts2)
-    
-         -- Other constraints are inconsistent
-         _ -> fail "Inconsistent constraint"
-
-    structurallyP c1 c2 = do
-      -- Reduce the head of each term as much as possible
-      (c1', _) <- reducePassConv c1
-      (c2', _) <- reducePassConv c2
-      let pred' = EqPassConv c1' c2'
-
-      -- Case analysis
-      case (c1', c2') of
-        -- Injective terms
-        (ByRef, ByRef) -> tauto pred'
-        (ByClosure x1, ByClosure x2) -> do
-          (d, new_csts) <- structurallyC x1 x2
-          return (MagicDerivation pred', new_csts)
-
-        (TuplePassConv t1, TuplePassConv t2) -> do
-          results <- zipWithM structurallyP t1 t2
-          let derivs = map fst results
-              new_csts = concatMap snd results
-          return (MagicDerivation pred', new_csts)
-        
-        -- Unifiable terms
-        (By v1, By v2) -> do unifyPCVars v1 v2
-                             tauto pred'
-        (By v1, _) -> do unifyPCVar v1 c2'
-                         tauto pred'
-        (_, By v2) -> do unifyPCVar v2 c1'
-                         tauto pred'
-
-        -- Functions
-        (TypePassConv t1, TypePassConv t2) -> do
-          eq <- uEqual t1 t2
-          if eq then tauto pred' else no_change pred'
-        (TypePassConv _, _) -> no_change pred'
-        (_, TypePassConv _) -> no_change pred'
-        
-        -- Other constraints are inconsistent
-        _ -> fail "Inconsistent constraint"
-
-    structurallyM m1 m2 = do
-      m1' <- reduceExecMode m1
-      m2' <- reduceExecMode m2
-      let pred' = EqExecMode m1' m2'
-      case (m1', m2') of
-        -- Injective terms
-        (AsAction, AsAction) -> tauto pred'
-        (AsStream, AsStream) -> tauto pred'
-            
-        -- Functions
-        (PickExecMode t1, PickExecMode t2) -> do
-          -- If types are equal, eliminate this constraint
-          eq <- uEqual t1 t2
-          if eq then tauto pred' else no_change pred'
-        (_, PickExecMode _) -> no_change pred'
-        (PickExecMode _, _) -> no_change pred'
-                        
-        -- Other possibilities are inconsistent
-        _ -> fail "inconsistent constraint"
-
-    -- Equation can't be simplified further
-    no_change pred' = return (IdDerivation pred', [pred'])
-
-    -- Equation is a tautology
-    tauto pred' = return (MagicDerivation pred', [])
-    
-    -- Derive an equality constraint, then swap LHS and RHS
-    symmetryM pred' derive = do (d, new_cst) <- derive
-                                return (MagicDerivation pred', new_cst)
-
--- | Simplify an execution mode as much as possible
-reduceExecMode :: ExecMode -> IO ExecMode
-reduceExecMode mode =
-  case mode
-  of AsAction -> return mode
-     AsStream -> return mode
-     PickExecMode ty -> do 
-       mode' <- pickExecMode ty
-       return $ fromMaybe mode mode'
-
--- | Determine the execution mode implied by a type, based on the
--- type constructor and arguments.  If the type is not known enough, return
--- a @PickExecMode@ value.
-pickExecMode' :: HMType -> IO ExecMode
-pickExecMode' ty = pickExecMode ty >>= ret
-  where
-    ret Nothing  = return $ PickExecMode ty
-    ret (Just m) = return m
-
--- | Try to determine the execution mode implied by a type, based on the
--- type constructor and arguments.  If the type is not known enough, return
--- Nothing.  A @PickExecMode@ value will never be returned.
-pickExecMode :: HMType -> IO (Maybe ExecMode)
-pickExecMode ty = do
-  (oper, args) <- inspectTypeApplication ty
-  case oper of
-    ConTy c
-      | isTyVar c -> return Nothing
-      | otherwise -> return $ Just $ tyConExecMode c
-    FunTy _   -> return (Just AsAction)
-    TupleTy _ -> return (Just AsAction)
-    AppTy _ _ -> internalError "pickExecMode"
-
--- | Simplify a parameter-passing convention as much as possible.
--- Return the simplified convention and any unresolved type variables.
-reducePassConv :: PassConv -> IO (PassConv, [HMType])
-reducePassConv conv = canonicalizePassConv conv >>= reduce
-  where
-    -- Evaluate functions terms here
-    reduce conv = 
-      case conv
-      of TuplePassConv xs -> do
-           -- Reduce all subterms
-           (xs', variables) <- mapAndUnzipM reducePassConv xs
-
-           -- Try to simplify this term
-           let conv' =
-                 case () of
-                   _ | all isByRef xs' -> ByRef
-                     | otherwise -> TuplePassConv xs'
-
-           return (conv', concat variables)
-         
-         TypePassConv ty -> do
-           (_, pc, types) <- pickPassConv noSourcePos ty
-           return (pc, types)
-         
-         -- Other terms can't be evaluated further
-         _ -> return (conv, [])
-    
-    isByRef ByRef = True
-    isByRef _     = False
-
--- | Try to determine a type's parameter-passing convention.
--- Return the convention and a constraint for the parameter-passing 
--- convention of for unknown types.
-pickPassConv :: SourcePos -> HMType -> IO (Derivation, PassConv, [HMType])
-pickPassConv pos ty = do
-  (oper, args) <- inspectTypeApplication ty
-  case oper of
-    ConTy c
-      | isTyVar c ->
-          return (IdDerivation (ty `HasPassConv` TypePassConv ty),
-                  TypePassConv ty, [ty])
-      | otherwise -> do
-          (derivs, _, _) <- mapAndUnzip3M (pickPassConv pos) args
-          let conv = applyPassConvCtor (tyConPassConv c) args
-              deriv = PassConvDerivation
-                      { conclusion = ty `HasPassConv` conv
-                      , derivedConstructor = tyConPassConvCtor c
-                      , passConvTypes = args
-                      , passConvPremises = map snd $ filter fst $
-                                           zip (tyConPassConvArgs c) derivs
-                      }
-          return (deriv, conv, [])
-    FunTy _ -> do
-      (cc, cst) <- pickCallConv pos (init args) (last args)
-      let deriv = FunPassConvDerivation
-                  { conclusion = ty `HasPassConv` ByClosure cc
-                  }
-      return (deriv, ByClosure cc, cst)
-    TupleTy tuple_size -> do
-      (derivs, fields, new_csts) <- mapAndUnzip3M (pickPassConv pos) args
-      let new_cst = concat new_csts
-      (cc, new_cst') <- reducePassConv (TuplePassConv fields)
-      let deriv = PassConvDerivation
-                  { conclusion = ty `HasPassConv` cc
-                  , derivedConstructor = SystemF.getPyonTuplePassConv' tuple_size
-                  , passConvTypes = args
-                  , passConvPremises = derivs
-                  }
-      return (deriv, cc, new_cst ++ new_cst')
-      
-    AppTy _ _ -> internalError "pickPassConv"
-
-pickCallConv :: SourcePos -> [HMType] -> HMType -> IO (CallConv, [HMType])
-pickCallConv pos domain range = do
-  mode <- pickExecMode' range
-  (_, conv, variables) <- pickPassConv pos range
-  foldM addParameter (Return mode conv, variables) $ reverse domain
-  where
-    addParameter (call_conv, variables) param_type = do
-      (_, param_conv, new_variables) <- pickPassConv pos param_type
-      return (param_conv :+> call_conv, new_variables ++ variables)
-
 -------------------------------------------------------------------------------
 -- Context reduction
 
@@ -443,13 +184,10 @@ addToContext ctx pred = foldM addToContextHNF ctx =<< toHnfConstraint pred
 -- context and predicate must be in head-normal form.
 addToContextHNF :: Constraint -> Predicate -> IO Constraint
 addToContextHNF ctx pred 
-  | isPassConvPredicate pred = addPassConvToContext ctx pred
   | isInstancePredicate pred = do
       b <- entailsInstancePredicate ctx pred
       if b then return ctx else return (pred:ctx)
-  | isEqualityPredicate pred = do
-      b <- entailsEqualityPredicate ctx pred
-      if b then return ctx else return (pred:ctx)
+  | otherwise = internalError "addToContextHNF"
 
 data InstanceReductionStep =
     NotReduced
@@ -539,21 +277,7 @@ splitConstraint cst fvars qvars = do
               ifM (isDefaultablePassConv prd) (return Default) $
               fail "Ambiguous constraint"
     
-    -- A predicate of the form (a HasPassConv (Type a)) is defaultable 
-    isDefaultablePassConv (HasPassConv ty conv) = do
-      -- Check type
-      ty' <- canonicalizeHead ty
-      case ty' of
-        ConTy c | isTyVar c -> do
-          -- Check passing convention
-          conv' <- canonicalizePassConv conv 
-          case conv' of
-            TypePassConv ty'' -> do
-              -- Check that argument matches
-              uEqual ty' ty''
-            _ -> return False
-        _ -> return False
-
+    -- Check if the dependent variable can be fixed using defaulting rules
     isDefaultablePassConv _ = return False
 
     partitionM f xs = go xs [] [] []
@@ -572,12 +296,7 @@ splitConstraint cst fvars qvars = do
 -- selected for defaulting by 'splitConstraint'.
 defaultConstraint cst =
   case cst
-  of HasPassConv ty conv -> do
-       -- Default this type to 'Any'
-       new_csts <- unify noSourcePos ty (ConTy $ tiBuiltin the_con_Any)
-       unless (null new_csts) $
-         internalError "Unexpected constraint produced by defualting"
-     _ -> internalError "Cannot default constraint"
+  of _ -> internalError "Cannot default constraint"
        
 
 -------------------------------------------------------------------------------
@@ -620,40 +339,17 @@ toProof pos env derivation =
          toLocalProofs i_premises c_env $ \i_env i_vars -> do
            dict <-
              createClassInstance pos cls inst inst_type c_vars i_env i_vars
-           {-
-           -- Create instance methods
-           inst_methods <- instantiateClassMethods pos inst inst_type i_env
-           
-           -- Create dictionary expression
-           let hmtype = convertHMType inst_type
-               superclasses = map (mkVarE pos) c_vars
-               dict = mkDictE pos cls hmtype superclasses inst_methods-}
            return (dict, [])
 
        return (True, placeholders, proof)
+
      FunPassConvDerivation { conclusion = prd@(IsInst ty _)
                            } -> do
        let con = SystemF.pyonBuiltin SystemF.the_passConv_owned
            prf = mkTyAppE pos (mkConE pos con) (convertHMType ty)
        return (True, [], prf)
-     PassConvDerivation { conclusion = prd@(HasPassConv ty pc)
-                        , derivedConstructor = con
-                        , passConvTypes = types
-                        , passConvPremises = premises
-                        } -> do
-       -- Prove premises
-       (proof, placeholders) <-
-         toLocalProofs premises env $ \c_env c_vars -> do
-           -- Apply the constructor to premise types and premises
-           let premise_ts = map convertHMType types
-               premise_vs = map (mkVarE pos) c_vars
-               prf = mkPolyCallE pos (mkConE pos con) premise_ts premise_vs
-           return (prf, [])
-       when (not $ null placeholders) $
-         print =<< runPpr (mapM uShow $ map phExpPredicate placeholders)
-       return (True, placeholders, proof)
        
-     _ -> do
+     MagicDerivation {} -> do
        -- Create a magic proof value
        return (True, [], mkTyAppE pos (mkConE noSourcePos $ SystemF.pyonBuiltin SystemF.the_fun_undefined) (convertPredicate $ conclusion derivation))
   where
