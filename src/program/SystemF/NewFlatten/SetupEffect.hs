@@ -1586,7 +1586,7 @@ effectInferFun is_lambda (TypedSFFun (TypeAnn _ f)) = do
   liftIO $ print $ pprPassType mono_type
   liftIO $ print . pprPassType =<< expand mono_type
   free_vars <- liftIO $ freeEffectVars mono_type
-  liftIO $ print $ text "Free vars" <+> sep (map pprEffectVar $ Set.toList free_vars)-}
+  liftIO $ print $ text "Free vars" <+> sep (map pprEffectVar $ Set.toList $ Set.union (fst free_vars) (snd free_vars)) -}
   
   return new_fun
 
@@ -1615,10 +1615,12 @@ generalizeTypes typed_defs = do
     -- Get all effect variables mentioned in the monotype
     (ftvs_pos, ftvs_neg) <- liftIO $ freeEffectVars ty
 
-    -- These are the function paramters
+    -- The non-rigid effect variables are the function paramters.
+    -- Rigid effect variables are bound at an outer scope.
     let ftvs = Set.union ftvs_pos ftvs_neg
         effect_params = Set.toList ftvs
-    return $ Def v (f {funEffectParams = effect_params})
+    flexible_effect_params <- filterM isFlexible effect_params
+    return $ Def v (f {funEffectParams = flexible_effect_params})
 
 -- | Infer types in a definition group.
 effectInferDefGroup :: SystemF.DefGroup TypedRec

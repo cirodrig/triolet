@@ -12,6 +12,7 @@ module SystemF.NewFlatten.PassConv
         isEVar, isRVar,
         newRegionVar, newEffectVar,
         effectVarName,
+        isRigid, isFlexible,
         
         Effect,
         fromEffect,
@@ -730,6 +731,9 @@ withRigidEffectVars f = do
 isRigid :: RegionMonad m => EffectVar -> m Bool
 isRigid v = liftM (v `Set.member`) $ getRigidEffectVars
 
+isFlexible :: RegionMonad m => EffectVar -> m Bool
+isFlexible v = liftM (not . (v `Set.member`)) $ getRigidEffectVars
+                   
 -- | Computations performed in a region environment.
 --
 -- The monad can supply region and variable IDs.  It keeps track of which
