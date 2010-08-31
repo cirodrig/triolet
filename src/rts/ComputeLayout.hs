@@ -151,7 +151,7 @@ writeTypesFile types_filename =
         "typedef " ++ word_type ++ " PyonWord;\n" ++
         "typedef " ++ float_type ++ " PyonFloat;\n" ++
         "typedef " ++ bool_type ++ " PyonBool;\n" ++
-        "#endif"
+        "#endif\n"
   in writeFile types_filename types_contents
 
 main = do

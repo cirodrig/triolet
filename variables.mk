@@ -28,8 +28,8 @@ LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
 ## Aggregate parameters for specific commands
 # TARGET_LANGUAGE_ACTION_OPTS
 
-PYON_HS_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR)/pyon \
-  -XMultiParamTypeClasses $(PYON_HS_INCLUDEDIR_FLAGS) $(C_PACKAGE_FLAGS)
+#PYON_HS_C_OPTS=$(HCFLAGS) -outputdir $(BUILDDIR)/pyon \
+#  -XMultiParamTypeClasses -XGADTs $(PYON_HS_INCLUDEDIR_FLAGS) $(C_PACKAGE_FLAGS)
 
 RTS_C_C_OPTS=$(CCFLAGS) -g \
  -Isrc/rts -I$(RTS_BUILD_DIR) -I$(DATA_BUILD_DIR)/include \
@@ -41,10 +41,10 @@ RTS_C_C_OPTS=$(CCFLAGS) -g \
 RTS_C_OPTS=-Ilibrary $(CCFLAGS) -dynamic
 
 # Linker options used for the Pyon binary
-PYON_L_OPTS=$(LFLAGS) $(L_PACKAGE_FLAGS) $(LIBDIR_FLAGS) $(LIB_FLAGS)
+# PYON_L_OPTS=$(LFLAGS) $(L_PACKAGE_FLAGS) $(LIBDIR_FLAGS) $(LIB_FLAGS)
 
-CLAY_L_OPTS=$(HCFLGS) $(LFLAGS) -outputdir $(BUILDDIR)/computelayout \
-  $(CLAY_HS_INCLUDEDIR_FLAGS) $(L_PACKAGE_FLAGS) $(LIBDIR_FLAGS) $(LIB_FLAGS)
+# CLAY_L_OPTS=$(HCFLGS) $(LFLAGS) -outputdir $(BUILDDIR)/computelayout \
+#  $(CLAY_HS_INCLUDEDIR_FLAGS) $(L_PACKAGE_FLAGS) $(LIBDIR_FLAGS) $(LIB_FLAGS)
 
 ## File lists
 

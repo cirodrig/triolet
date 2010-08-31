@@ -7,16 +7,18 @@ import Prelude hiding(catch)
 
 import Control.Exception
 import Control.Monad
-import Data.List
+import Data.List hiding(intercalate)
 import Data.Maybe
 import System.FilePath
 import System.Directory
 import System.IO.Error hiding(catch)
 
 import Distribution.ModuleName hiding(main)
+import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.Utils
+import Distribution.Text
 import Distribution.Verbosity
 
 import SetupPaths
@@ -181,6 +183,57 @@ copyDataFile build_path source_path src =
      \cp $< $@"
       
 -------------------------------------------------------------------------------
+-- Command-line options used in makefiles
+
+data CompileMode = CompileMode | LinkMode
+
+-- | Get flags to use for package dependences.  We exclude the 'gluon-eval'
+-- package when compiling, and allow GHC to infer it, due to errors when the
+-- interpreter (invoked to compile Template Haskell) tries to load C++ object
+-- code.
+packageFlags mode exe lbi =
+  concat [["-package", show $ disp package_id]
+         | (_, package_id) <-
+             componentPackageDeps config,
+           case mode
+           of CompileMode -> pkgName package_id /= PackageName "gluon-eval"
+              LinkMode -> True]
+  where
+    config =
+      case find ((exeName exe ==) . fst) $ executableConfigs lbi
+      of Just x  -> snd x
+         Nothing -> error "Configuration error: Missing list of package dependences"
+
+pyonExtensionFlags exe =
+  ["-X" ++ show ext | ext <- extensions $ buildInfo exe]
+
+pyonGhcPathFlags exe lbi = o_flags ++ i_flags
+  where
+    o_flags = ["-outputdir", pyonBuildDir lbi]
+    i_flags = ["-i" ++ path | path <- pyonBuildDir lbi : pyonSearchPaths lbi exe]
+
+layoutGhcPathFlags exe lbi = o_flags ++ i_flags
+  where
+    o_flags = ["-outputdir", layoutBuildDir lbi]
+    i_flags = ["-i" ++ path | path <- layoutBuildDir lbi : pyonSearchPaths lbi exe]
+
+-- | Get the options to pass to GHC for compiling a HS file.
+pyonGhcOpts exe lbi =
+  pyonGhcPathFlags exe lbi ++
+  packageFlags CompileMode exe lbi ++
+  pyonExtensionFlags exe
+
+-- | Get the options for linking the \'pyon\' binary.
+pyonLinkOpts exe lbi =
+  packageFlags LinkMode exe lbi
+
+-- | Get the options for compiling the \'ComputeLayout\' binary.  The binary
+-- is compiled and linked in one step.  It's compiled with @--make@, so
+-- packages are not needed.
+layoutCompileOpts exe lbi =
+  layoutGhcPathFlags exe lbi ++ pyonExtensionFlags exe
+
+-------------------------------------------------------------------------------
 -- Rules to generate a makefile
 
 generateCabalMakefile verbosity exe lbi = do
@@ -205,6 +258,9 @@ generateVariables exe lbi pyon_rules rts_rules data_rules = do
       prebuilt_data_files = map makeTarget data_rules
   return [ ("PYON_SOURCE_FILES", makefileList pyon_source_files)
          , ("PYON_OBJECT_FILES", makefileList pyon_object_files)
+         , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts exe lbi)
+         , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts exe lbi)
+         , ("LAYOUT_CL_OPTS", intercalate " " $ layoutCompileOpts exe lbi)
          , ("RTS_SOURCE_FILES", makefileList rts_source_files)
          , ("RTS_OBJECT_FILES", makefileList rts_object_files)
          , ("BOOT_DATA_FILES", makefileList prebuilt_data_files)
@@ -214,7 +270,9 @@ generateVariables exe lbi pyon_rules rts_rules data_rules = do
          ]
   where
     makefileList ss = concat $ intersperse " " ss
-    getSources rules = concatMap makePrerequisites rules
+    getSources rules = filter is_source $ concatMap makePrerequisites rules
+      where
+        is_source f = takeExtension f `elem` [".hs", ".c", ".pyasm"]
     getObjectTargets rules = 
         filter ((".o" ==) . takeExtension) $ map makeTarget rules
 

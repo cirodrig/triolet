@@ -27,10 +27,12 @@ Executable pyon
     fgl,
     language-python-pyon == 0.2.1,
     language-c,
+    parsec == 3.*,
+    utf8-string,
     gluon,
     gluon-eval
   Extensions:
-    MultiParamTypeClasses, PatternGuards
+    MultiParamTypeClasses, PatternGuards, GADTs
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon

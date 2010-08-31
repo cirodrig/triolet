@@ -36,8 +36,6 @@ lenientRemoveFile verb f = removeFile f `catch` check_err
         let msg = "Could not remove file '" ++ f ++ "':" ++ show e
         in warn verb msg
 
-
-
 -- Write the auto-generated 'paths' module
 writePathsModule verb pkg_desc lbi = do
   let paths_module =
@@ -52,33 +50,6 @@ writePathsModule verb pkg_desc lbi = do
 runMake lbi flags args =
   let verb = fromFlag $ buildVerbosity flags  
   in runDbProgram verb makeProgram (withPrograms lbi) args
-
--- | Get flags to use for package dependences.  We exclude the 'gluon-eval'
--- package from this list, and allow GHC to infer it, due to errors when the
--- interpreter (invoked to compile Template Haskell) tries to load C++ object
--- code.
-packageFlags exe lbi =
-  concat [["-package", package_name]
-         | (InstalledPackageId package_name, package_id) <-
-             componentPackageDeps config,
-           pkgName package_id /= PackageName "gluon-eval"]
-  where
-    config =
-      case find ((exeName exe ==) . fst) $ executableConfigs lbi
-      of Just x  -> snd x
-         Nothing -> error "Configuration error: Missing list of package dependences"
-
-pyonExtensionFlags exe =
-  ["-X" ++ show ext | ext <- extensions $ buildInfo exe]
-
-pyonGhcPathFlags exe lbi = o_flags ++ i_flags
-  where
-    o_flags = ["-outputdir", pyonBuildDir lbi]
-    i_flags = ["-i" ++ path | path <- pyonSearchPaths lbi exe]
-
--- | Get the options to pass to GHC.
-pyonGhcOpts exe lbi =
-  pyonGhcPathFlags exe lbi ++ packageFlags exe lbi ++ pyonExtensionFlags exe
 
 -------------------------------------------------------------------------------
 -- Hooks
@@ -121,7 +92,7 @@ doBuild pkg_desc lbi hooks flags = do
     verb = fromFlag $ buildVerbosity flags
 
     build_exe exe = do
-      print $ packageFlags exe lbi
+      print $ pyonGhcOpts exe lbi
       -- Generate make rules and variables
       generateCabalMakefile verb exe lbi
 
