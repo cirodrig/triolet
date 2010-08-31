@@ -1859,7 +1859,7 @@ makeFlexibleVariablesIndependent mk_exp = EffInf $ \env -> do
   
   -- Eliminate flexible variables from the constraints
   cst' <- let run_it =
-                makeFlexibleVariablesIndependentWithConstraint exp (cst []) 
+                makeFlexibleVariablesIndependentWithConstraint (freeEffectVars exp) (cst []) 
           in doRegionM run_it (efRegionEnv env)
 
   doRegionM (clear_flexible_vars exp (vs [])) (efRegionEnv env)
@@ -1895,8 +1895,8 @@ makeFlexibleVariablesIndependent' m = do
 -- | Transform the constraint set into an equivalent one where all
 -- flexible variables mentioned by the expression are independent.
 makeFlexibleVariablesIndependentWithConstraint ::
-  Parametric exp => exp -> Constraint -> RegionM Constraint
-makeFlexibleVariablesIndependentWithConstraint exp cst = do
+  IO (Set.Set EffectVar, Set.Set EffectVar) -> Constraint -> RegionM Constraint
+makeFlexibleVariablesIndependentWithConstraint get_free_vars cst = do
   -- simplify the constraint
   cst1 <- reduceConstraint cst
 
@@ -1942,7 +1942,7 @@ makeFlexibleVariablesIndependentWithConstraint exp cst = do
     mentions_on_rhs v (SubEffect _ rhs) = v `Set.member` effectVars rhs
 
     get_flexible_vars = withRigidEffectVars $ \ctx -> do
-      (fvs_pos, fvs_neg) <- freeEffectVars exp
+      (fvs_pos, fvs_neg) <- get_free_vars
       return $ (fvs_pos Set.\\ ctx, fvs_neg Set.\\ ctx)
 
     -- Simplify a predicate, then do elimination
