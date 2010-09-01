@@ -199,13 +199,12 @@ type Scanner = Input -> Int -> [T]
 -- and size of consumed input, and returns a list of tokens.  If an action 
 -- does not consume the entire input, it will call the scanner to consume the
 -- rest of the input.
+--
+-- The parameters to @runAction@ are the scanner's continuation, the old
+-- input, the new input, the current startcode, and the size of the token to
+-- process.
 newtype Action =
-  Action {runAction :: Scanner  -- ^ Continuation
-                    -> Input    -- ^ Old input
-                    -> Input    -- ^ New input
-                    -> Int      -- ^ Startcode
-                    -> Int      -- ^ Input size
-                    -> [T]}
+  Action {runAction :: Scanner -> Input -> Input -> Int -> Int -> [T]}
 
 -- | Output one token
 {-# INLINE token #-}

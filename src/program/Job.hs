@@ -261,26 +261,26 @@ writeFilePath file = writeFileHelper (\path () -> return path) file ()
 -- | A single step within a job.  The implementation of each task is provided 
 -- elsewhere.
 data Task a where
-  -- | Run CPP on a file
+  -- Run CPP on a file
   PreprocessCPP          
     { cppInput :: ReadFile
     , cppOutput :: WriteFile
     } :: Task ()
-  -- | Parse a PyonAsm file
+  -- Parse a PyonAsm file
   ParsePyonAsm
     { parseAsmInput :: ReadFile
     } :: Task LowLevel.Module
-  -- | Compile a Pyon file
+  -- Compile a Pyon file
   CompilePyonToPyonAsm
     { compilePyonInput :: ReadFile
     } :: Task LowLevel.Module
-  -- | Compile a PyonAsm file
+  -- Compile a PyonAsm file
   CompilePyonAsmToGenC
     { compileAsmInput :: LowLevel.Module 
     , compileAsmOutput :: WriteFile -- ^ Output C file
     , compileAsmHeader :: WriteFile -- ^ Header for exported C functions
     } :: Task ()
-  -- | Compile a generated C file to object code
+  -- Compile a generated C file to object code
   CompileGenCToObject
     { compileGenCInput :: ReadFile
     , compileGenCOutput :: WriteFile

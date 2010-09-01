@@ -429,7 +429,7 @@ storeFunctionType value_type =
   retCT (WriteRT ::: value_type)
 
 -- | Create the type of a 'load' function.  The types follow the schema
--- @read t@a -> val t@
+-- @read t\@a -> val t@
 -- for some type @t@.
 loadFunctionType :: RCType -> EffEnv RCType
 loadFunctionType value_type = do

@@ -13,10 +13,12 @@ import System.FilePath
 import System.Directory
 import System.IO.Error hiding(catch)
 
+import Distribution.InstalledPackageInfo
 import Distribution.ModuleName hiding(main)
 import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.Simple.LocalBuildInfo
+import Distribution.Simple.PackageIndex
 import Distribution.Simple.Utils
 import Distribution.Text
 import Distribution.Verbosity
@@ -187,6 +189,11 @@ copyDataFile build_path source_path src =
 
 data CompileMode = CompileMode | LinkMode
 
+findExeConfig exe lbi =
+  case find ((exeName exe ==) . fst) $ executableConfigs lbi
+  of Just x  -> snd x
+     Nothing -> error "Configuration error: Missing list of package dependences"
+
 -- | Get flags to use for package dependences.  We exclude the 'gluon-eval'
 -- package when compiling, and allow GHC to infer it, due to errors when the
 -- interpreter (invoked to compile Template Haskell) tries to load C++ object
@@ -194,15 +201,36 @@ data CompileMode = CompileMode | LinkMode
 packageFlags mode exe lbi =
   concat [["-package", show $ disp package_id]
          | (_, package_id) <-
-             componentPackageDeps config,
+             componentPackageDeps $ findExeConfig exe lbi,
            case mode
            of CompileMode -> pkgName package_id /= PackageName "gluon-eval"
               LinkMode -> True]
+
+-- | Get flags for installed package documentation.  These are used to create
+-- links when building the documentation.
+--
+-- Find Haddock interface file locations for each package.  Verify that each
+-- interface file exists, then add the path as a command line parameter.
+packageDocFlags exe lbi = do
+  interfaces <- filterM interface_exists haddock_interfaces
+  return ["--read-interface=" ++ dir ++ "," ++ path
+         | (path, dir) <- interfaces]
   where
-    config =
-      case find ((exeName exe ==) . fst) $ executableConfigs lbi
-      of Just x  -> snd x
-         Nothing -> error "Configuration error: Missing list of package dependences"
+    pkg_index = installedPkgs lbi
+
+    interface_exists (iface_path, html_path) = do
+      iface_exists <- doesFileExist iface_path
+      html_exists <- doesDirectoryExist html_path
+      return $ iface_exists && html_exists
+    
+    -- Haddock interface paths and HTML directory paths of all dependences
+    haddock_interfaces =
+      [ (iface_path, html_path)
+      | (ipid, _)  <- componentPackageDeps $ findExeConfig exe lbi
+      , pkg_info   <- maybeToList $ lookupInstalledPackageId pkg_index ipid
+      , iface_path <- haddockInterfaces pkg_info
+      , html_path  <- haddockHTMLs pkg_info]
+    
 
 pyonExtensionFlags exe =
   ["-X" ++ show ext | ext <- extensions $ buildInfo exe]

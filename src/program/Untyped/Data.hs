@@ -49,7 +49,7 @@ data PprContext =
   , typeNames :: {-# UNPACK #-} !(IORef (Map.Map (Ident TyCon) Doc))
   }
 
- -- | A predicate to be solved by type inference
+-- | A predicate to be solved by type inference
 data Predicate =
     -- | Class membership.  This predicate translates to a class dictionary.
     IsInst HMType !Class

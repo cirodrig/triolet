@@ -936,11 +936,11 @@ mapStreamType =
 -- | Apply a calling convention to some parameters.  Return the return value's
 -- passing convention and the effect of executing the function.
 applyCallConv :: SourcePos
-                 -- | Operator parameter-passing convention
               -> FunPassType
-                 -- | Argument regions, parameter-passing conventions, and
-                 --   values
+                 -- ^ Operator parameter-passing convention
               -> [(Maybe RVar, PassType, Maybe PassType)]
+                 -- ^ Argument regions, parameter-passing conventions, and
+                 --   values
               -> EffInf (PassType, Effect)
 applyCallConv pos pass_type args = debug $ do
   (local_regions, ret_type, eff) <- applyCallConv_worker pos pass_type args []
@@ -972,13 +972,13 @@ applyCallConv pos pass_type args = debug $ do
       in val_doc <+> pprPassType ty <+> rgn_doc
   
 applyCallConv_worker :: SourcePos
-                        -- | Function type
                      -> FunPassType
-                        -- | Argument regions, parameter-passing conventions,
-                        -- and values
+                        -- ^ Function type
                      -> [(Maybe RVar, PassType, Maybe PassType)]
-                        -- | Temporary, local created regions
+                        -- ^ Argument regions, parameter-passing conventions,
+                        -- and values
                      -> [RVar]
+                        -- ^ Temporary, local created regions
                      -> EffInf ([RVar], PassType, Effect)
 applyCallConv_worker pos pass_type args local_rgns =
   case pass_type

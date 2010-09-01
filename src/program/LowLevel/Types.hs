@@ -13,11 +13,15 @@ data Size = S8 | S16 | S32 | S64
 data PrimType =
     UnitType                    -- ^ A value represented as nothing
   | BoolType                    -- ^ The boolean type
-  | IntType                     -- ^ An integral type
+
+    -- | An integral type
+  | IntType
     { intSign :: !Signedness
     , intSize :: !Size
     }
-  | FloatType                   -- ^ A floating-point type
+
+    -- | A floating-point type
+  | FloatType
     { floatSize :: !Size
     }
   | PointerType                 -- ^ A pointer

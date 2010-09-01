@@ -130,10 +130,11 @@ doHaddock pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
     path <- findFilePath' (pyonSearchPaths lbi exe) filename
     return $ path </> filename
 
+  doc_flags <- packageDocFlags exe lbi -- Find installed package documentation
   let haddock_args =
         ["-o", haddock_dir, "-h"] ++
         pass_to_ghc (pyonGhcOpts exe lbi) ++
-        sources
+        doc_flags ++ sources
   rawSystemExit verb "haddock" haddock_args
   where
     verb = fromFlag $ haddockVerbosity flags
