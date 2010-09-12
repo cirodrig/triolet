@@ -240,7 +240,7 @@ constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
   where
     table = [ (pyonBuiltin the_passConv_int,
-               ValRT ::: conCT (pyonBuiltin the_PassConv))
+               ValRT ::: appCT (conCT $ pyonBuiltin the_PassConv) [conCT $ pyonBuiltin the_int])
             , (pyonBuiltin SystemF.Builtins.the_fun_store_int,
                storeIntType)
             , (pyonBuiltin SystemF.Builtins.the_fun_load_int,
