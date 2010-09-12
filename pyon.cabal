@@ -72,7 +72,9 @@ Executable pyon
     SystemF.Syntax
     SystemF.Typecheck
     SystemF.Flatten.Effect
+    SystemF.Flatten.EffectExp
     SystemF.Flatten.EffectType
+    SystemF.Flatten.EffectInference
     SystemF.Flatten.Constraint
     SystemF.NewFlatten.PassConv
     SystemF.NewFlatten.SetupEffect

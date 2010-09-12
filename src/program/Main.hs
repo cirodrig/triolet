@@ -27,6 +27,7 @@ import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.Typecheck as SystemF
 import qualified SystemF.NewFlatten.GenCore as SystemF
+import qualified SystemF.Flatten.EffectInference as SystemF
 import qualified SystemF.Print as SystemF
 import qualified Core.Lowering as Core
 import qualified Core.Print as Core
@@ -122,7 +123,8 @@ compilePyonToPyonAsm path text = do
     case tc_mod of
       Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
                       fail "Type checking failed in core"
-      Right m -> SystemF.flatten m
+      Right m -> do SystemF.inferSideEffects m
+                    SystemF.flatten m
 
   putStrLn ""
   putStrLn "Core"

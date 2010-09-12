@@ -23,11 +23,14 @@ module SystemF.Flatten.Constraint
         constraintMentions,
         evalConstraint,
         simplifyConstraint,
+        mkEqualityConstraint,
         
         -- ** Constraint solving
         solveGlobalConstraint,
         eliminateRigidVariable,
         eliminatePredicate,
+        makeFlexibleVariablesIndependentWithConstraint,
+        clearFlexibleEffectVariables
        )
 where
 
@@ -87,7 +90,7 @@ evalConstraint cst = liftM concat $ mapM evalPredicate cst
 splitVariableOnSubset :: EffectVar -- ^ Subset to separate out
                       -> EVar      -- ^ Flexible variable to split
                       -> RegionM EffectVar
-splitVariableOnSubset subset_var v = assertEVar v $ do
+splitVariableOnSubset subset_var v = trace "splitVariableOnSubset" $ assertEVar v $ do
   whenM (isRigid v) $ fail "splitVariableOnSubset: Variable is rigid"
     
   -- Create a new variable
@@ -223,6 +226,44 @@ doEliminateRigidVariable v cst = do
     remove v (SubEffect lhs rhs) =
       SubEffect lhs (deleteFromEffect v rhs)
 
+-- | Create and simplify constraints representing the fact that the given
+-- effects are equal.  Unification may be performed.
+mkEqualityConstraint :: Effect -> Effect -> RegionM Constraint
+mkEqualityConstraint e1 e2 = do
+  -- Simplify the constraint to make solving easier    
+  ctx <- getRigidEffectVars
+  e1_s <- liftIO $ evalEffect e1
+  e2_s <- liftIO $ evalEffect e2
+  
+  -- Remove rigid variables found in both e1 and e2 
+  let rigid_common =
+        ctx `Set.intersection` fromEffectSet e1_s `Set.intersection`
+        fromEffectSet e2_s
+      e1_s' = deleteListFromEffect (Set.toList rigid_common) e1_s
+      e2_s' = deleteListFromEffect (Set.toList rigid_common) e2_s
+
+  -- In the common case, e1 or e2 is a single variable.
+  -- Assign the variable's value now.  If assignment fails, then
+  -- the constraints are unsatisfiable.
+  case from_singleton e1_s' of
+    Just v ->
+      case from_singleton e2_s'
+      of Just v' | v == v' -> return []
+         _ -> do liftIO $ assignEffectVarD "assertEqual" v e2_s'
+                 return []
+    Nothing ->
+      case from_singleton e2_s'
+      of Just v -> do liftIO $ assignEffectVarD "assertEqual" v e1_s'
+                      return []
+         Nothing -> do
+           -- Otherwise, create a pair of constraints
+           return (subEffect e1 e2 ++ subEffect e2 e1)
+  where
+    from_singleton eff =
+      case fromEffect eff
+      of [v] -> Just v
+         _ -> Nothing
+
 -- | Eliminate a rigid region or effect variable from all constraints.
 -- The constraint must be in head normal form, so that the rigid variable only
 -- appears in upper bounds.  If this condition holds, it is safe to delete the
@@ -276,11 +317,33 @@ eliminatePredicate (SubEffect v vs) = do
   
   return (dependent_flexible_vs ++ independent_flexible_vs)
 
+-- | Set all variables that are flexible but not free to the empty effect. 
+-- The provided function returns the set of free variables.
+clearFlexibleEffectVariables :: IO (Set.Set EffectVar, Set.Set EffectVar)
+                             -> [EVar] -> RegionM ()
+clearFlexibleEffectVariables get_free_vars vs = withRigidEffectVars $ \ctx -> do
+  -- Get the set of free variables
+  (pos, neg) <- get_free_vars
+  let free_vars = Set.union pos neg Set.\\ ctx
+  
+  -- Get the set of flexible variables that aren't free
+  vs' <- get_effect_vars vs
+  let non_free_vars = vs' Set.\\ free_vars
+      
+  -- Clear these variables
+  forM_ (Set.toList non_free_vars) $ \v -> assignEffectVar v emptyEffect
+  where
+    get_effect_vars vs = fmap make_effect_vars $ mapM evalEffectVar vs
+      where
+        make_effect_vars xs =
+          Set.fromList $ filter isEVar $ concatMap fromEffect xs
+
 -- | Transform the constraint set into an equivalent one where all
 -- flexible variables mentioned by the expression are independent.
 makeFlexibleVariablesIndependentWithConstraint ::
   IO (Set.Set EffectVar, Set.Set EffectVar) -> Constraint -> RegionM Constraint
 makeFlexibleVariablesIndependentWithConstraint get_free_vars cst = do
+  liftIO $ print $ text "MFVI" <+> pprConstraint cst -- DEBUG
   -- simplify the constraint
   cst1 <- reduceConstraint cst
 
@@ -316,7 +379,7 @@ makeFlexibleVariablesIndependentWithConstraint get_free_vars cst = do
           eliminate_positive_variables cst vs
 
     eliminate_positive_variables cst [] = return cst
-      
+
     -- True if 'v' is not mentioned in 'rhs', or if 'rhs' contains only one
     -- variable
     alone_on_rhs v (SubEffect _ rhs)

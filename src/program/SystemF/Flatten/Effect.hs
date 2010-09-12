@@ -14,12 +14,14 @@ module SystemF.Flatten.Effect
 
         -- ** Unification
         assignEffectVar, assignEffectVarD,
+        unifyRegionVars,
+        evalRVar,
         evalEffectVar,
         splitEffectVar,
         
         -- * Effects
         Effect,
-        pprEffect,
+        pprEffect, evalAndPprEffect,
         evalEffect,
         
         -- ** Construction
@@ -41,12 +43,13 @@ module SystemF.Flatten.Effect
         effectMembers,
         
         -- * Monad types for manipulating regions
-        RegionM, runRegionM,
+        RegionM(doRegionM), runRegionM,
+        RegionEnv(..),
         
         RegionMonad(..),
         assumeMaybeRegion,
         withRigidEffectVars,
-        isRigid, isFlexible
+        isRigid, isFlexible, isFlexible'
        )
 where
 
@@ -70,7 +73,7 @@ import Gluon.Eval.Environment
 
 -- | Set this to True to print a message every time a variable is assigned
 debugAssignments :: Bool
-debugAssignments = False
+debugAssignments = True
 
 -------------------------------------------------------------------------------
 -- Effect variables
@@ -79,16 +82,22 @@ debugAssignments = False
 --
 -- A region variable represents a memory location, distinct from all other
 -- memory locations.  An effect variables represent a set of regions.  Effect
--- variables may be assigned via unification and generalized over.  Region
--- variables represent exactly one region, and region variables are never
--- unified.  (Other parts of the
--- program \"unify\" region variables by substituting them, but that is
--- extraneous to how they are implemented here).
+-- variables may be assigned effect values via unification and may be
+-- generalized over.  Region variables represent exactly one region, and may  
+-- be unified with other regions.
+--
+-- Variables have a flag indicating whether the variable is /flexible/.  A 
+-- flexible variable may be unified, while a non-flexible or /rigid/ variable
+-- cannot.  (A flexible variable may be unified with a rigid variable; the
+-- rigid variable remains unchanged and the flexible variable becomes equal
+-- to the rigid variable).  Flexible variables are created by type 
+-- instantiation.
 
 data EffectVar =
   EffectVar
   { _evarID :: {-# UNPACK #-} !(Ident EffectVar)
   , _evarKind :: !EffectVarKind
+  , _evarIsFlexible :: {-# UNPACK #-}!Bool
   , _evarRep :: {-# UNPACK #-}!(IORef EffectVarRep)
   }
   
@@ -126,22 +135,27 @@ assertEVar v x
   | isEVar v = x
   | otherwise = internalError "assertEVar: not an effect variable"
 
+assertFlexible :: EffectVar -> a -> a
+assertFlexible v x
+  | isFlexible' v = x
+  | otherwise = internalError "assertFlexible: variable is rigid"
+
 -- | Create a new region variable
 newRegionVar :: (Monad m, MonadIO m, Supplies m (Ident EffectVar))
-             => m EffectVar
-newRegionVar = makeNewEffectVar RegionEffectVar
+             => Bool -> m EffectVar
+newRegionVar is_flexible = makeNewEffectVar RegionEffectVar is_flexible
 
 -- | Create a new effect variable
 newEffectVar :: (Monad m, MonadIO m, Supplies m (Ident EffectVar))
              => m EffectVar
-newEffectVar = makeNewEffectVar EffectEffectVar
+newEffectVar = makeNewEffectVar EffectEffectVar True
 
 makeNewEffectVar :: (Monad m, MonadIO m, Supplies m (Ident EffectVar))
-                 => EffectVarKind -> m EffectVar
-makeNewEffectVar k = do
+                 => EffectVarKind -> Bool -> m EffectVar
+makeNewEffectVar k is_flexible = do
   id <- fresh
   rep <- liftIO $ newIORef EVNoRep
-  return $ EffectVar id k rep
+  return $ EffectVar id k is_flexible rep
 
 -------------------------------------------------------------------------------
 -- Effects
@@ -232,7 +246,7 @@ data EffectVarRep = EVNoRep | EVVarRep !EffectVar | EVValueRep !Effect
 -- have been assigned already.  The effect variable must not be mentioned
 -- in the given effect.
 assignEffectVar :: EffectVar -> Effect -> IO ()
-assignEffectVar ev e = assertEVar ev $ do
+assignEffectVar ev e = traceShow (text "assignEffectVar" <+> pprEffectVar ev) $ assertEVar ev $ assertFlexible ev $ do
   e' <- evalEffect e
   when (e' `effectMentions` ev) $
     internalError "assignEffectVar: Occurs check failed"
@@ -251,6 +265,23 @@ assignEffectVarD msg ev e
   | debugAssignments = trace msg $ assignEffectVar ev e
   | otherwise = assignEffectVar ev e
 
+-- | Unify two region variables.  Return the representative.  One of the region
+-- variables must be flexible.
+unifyRegionVars :: RVar -> RVar -> IO RVar
+unifyRegionVars v1 v2 = assertRVar v1 $ assertRVar v2 $ do
+  v1' <- evalRVar v1
+  v2' <- evalRVar v2
+  if isFlexible' v1'
+    then do writeIORef (_evarRep v1') (EVVarRep v2')
+            return v2'
+    else if isFlexible' v2'
+         then do writeIORef (_evarRep v2') (EVVarRep v1')
+                 return v1'
+         else -- XXX: Is this only caused by compiler bugs, or can some inputs
+              -- cause this error?
+           internalError "unifyRegionVars: attempted to unify rigid variables"
+    
+
 -- | Remove indirections from an effect variable representative
 evalEffectVarRep :: IORef EffectVarRep -> IO EffectVarRep
 evalEffectVarRep ref = do
@@ -264,22 +295,31 @@ evalEffectVarRep ref = do
     update_self _       new_rep = do writeIORef ref new_rep
                                      return new_rep
 
--- | Get the value of an effect variable.  If no value has been assigned by
--- unification, the return value is equal to the original effect variable.
+-- | Get the representative of a region variable.
+evalRVar :: RVar -> IO RVar
+evalRVar rv
+  | not $ isRVar rv = internalError "evalRVar: not a region variable"
+  | otherwise = do
+      rep <- evalEffectVarRep (_evarRep rv)
+      case rep of EVNoRep      -> return rv
+                  EVVarRep v'  -> return v'
+                  EVValueRep _ -> internalError "evalRVar: Region was unified with an effect"
+
+-- | Get the value of an effect or region variable.  If no value has been
+-- assigned by unification, the return value is equal to the original effect
+-- variable.
 evalEffectVar :: EffectVar -> IO Effect
-evalEffectVar ev
-  | isRVar ev = return $ varEffect ev
-  | otherwise = do 
-      rep <- evalEffectVarRep (_evarRep ev)
-      case rep of EVNoRep      -> return $ varEffect ev
-                  EVVarRep v   -> return $ varEffect v
-                  EVValueRep e -> evalEffect e
+evalEffectVar ev = do
+  rep <- evalEffectVarRep (_evarRep ev)
+  case rep of EVNoRep      -> return $ varEffect ev
+              EVVarRep v   -> return $ varEffect v
+              EVValueRep e -> evalEffect e
 
 -- | Decompose an effect variable into two parts.  The effect variable must
 -- not be rigid and must not have been unified with anything.
 splitEffectVar :: (Monad m, MonadIO m, Supplies m (Ident EffectVar)) =>
                   EffectVar -> m (EffectVar, EffectVar)
-splitEffectVar v = assertEVar v $ do
+splitEffectVar v = trace "splitEffectVar" $ assertEVar v $ do
   v1 <- newEffectVar
   v2 <- newEffectVar
   liftIO $ assignEffectVarD "splitEffectVar" v $ varsEffect [v1, v2]
@@ -323,6 +363,11 @@ pprEffect eff =
      else fsep $ intersperse unionDoc $
           maybeToList region_doc ++ map pprEffectVar evars
 
+evalAndPprEffect :: Effect -> IO Doc
+evalAndPprEffect eff = do 
+  eff' <- evalEffect eff
+  return $ pprEffect eff'
+
 -------------------------------------------------------------------------------
 -- Monad definitions
 
@@ -350,12 +395,18 @@ withRigidEffectVars f = do
   liftIO $ f ctx
 
 -- | Determine whether a variable is rigid in the current context.
+--
+-- TODO: Use a flag in the variable to determine its rigidity, instead of the
+-- context
 isRigid :: RegionMonad m => EffectVar -> m Bool
 isRigid v = liftM (v `Set.member`) $ getRigidEffectVars
 
 isFlexible :: RegionMonad m => EffectVar -> m Bool
 isFlexible v = liftM (not . (v `Set.member`)) $ getRigidEffectVars
-                   
+
+isFlexible' :: EffectVar -> Bool
+isFlexible' v = _evarIsFlexible v
+                             
 -- | Computations performed in a region environment.
 --
 -- The monad can supply region and variable IDs.  It keeps track of which
@@ -412,7 +463,7 @@ assumeEffectVariableRegionM ev = localRegionEnv add_to_env
 
 instance RegionMonad RegionM where
   assumeRegion v m = assertRVar v $ assumeEffectVariableRegionM v m
-  assumeEffect v m = assertEVar v $ assumeEffectVariableRegionM v m
+  assumeEffect v m = trace "assumeEffect" $ assertEVar v $ assumeEffectVariableRegionM v m
   
   getRigidEffectVars = RegionM (\env -> return (reRegionEnv env))
 
