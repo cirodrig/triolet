@@ -1,5 +1,5 @@
 -- | Partial evaluation.
--- This module collects several ways of simplifying Pyon code through a 
+-- This module collects several ways of simplifying Pyon code through a
 -- sort of compile-time execution.  Copy propagation, constant propagation,
 -- constant folding, un-currying, and case elimination are performed this way.
 -- Partial evaluation maintains an \"execution environment\" of local variable
@@ -99,7 +99,7 @@ applyBindings bs e = foldr make_let e bs
 -- by evaluating the same expression repeatedly, unless it is a known-cheap
 -- expression.
 isSimpleExp :: RExp -> Bool
-isSimpleExp expression = 
+isSimpleExp expression =
   case expression
   of VarE {} -> True
      ConE {} -> True
@@ -111,7 +111,7 @@ isSimpleExp expression =
      LetrecE {} -> False
      CaseE {} -> False
   where
-    -- Dictionary constructor expressions are inlined to enable later 
+    -- Dictionary constructor expressions are inlined to enable later
     -- optimizations
     is_dictionary_operator (ConE {expCon = c}) = isDictionaryCon c
     is_dictionary_operator (TyAppE {expOper = e}) = is_dictionary_operator e
@@ -126,9 +126,9 @@ bindValue :: RPat -> RExp -> PE a -> PE a
 bindValue (WildP _)   _ m = m
 bindValue (VarP v t)  e m | isSimpleExp e = local (Map.insert v e) m
                           | otherwise     = m
-bindValue (TupleP ps) e m = 
+bindValue (TupleP ps) e m =
   case deconstructTupleExp e
-  of Nothing -> m               -- Cannot bind this value 
+  of Nothing -> m               -- Cannot bind this value
      Just es -> catEndo (zipWith bindValue ps es) m
 
 -------------------------------------------------------------------------------
@@ -168,18 +168,18 @@ pevalExp expression@(uncurryUnpackPolymorphicCall -> Just (op, ty_args, args)) =
   -- Evaluate subexpressions
   args' <- mapM pevalExp args
   op' <- pevalExp op
-  
+
   -- TODO: Try to statically evaluate this function
   return $ build_call op' ty_args args'
   where
     inf = expInfo expression
-    
+
     build_call op (t:ts) args =
       let op' = TyAppE inf op t
       in build_call op' ts args
-    
+
     build_call op [] args = CallE inf op args
-  
+
 pevalExp expression =
   case expression
   of VarE {expVar = v} -> lookupVarDefault expression v
@@ -192,7 +192,7 @@ pevalExp expression =
      FunE {expFun = f} -> do
        f' <- pevalFun f
        return $ expression {expFun = f'}
-     
+
      -- This expression is generated sometimes by SSA.
      -- Replace "let x = FOO in x" with FOO.  Continue simplifying FOO.
      LetE { expBinder = VarP v _
@@ -203,20 +203,20 @@ pevalExp expression =
      LetE {expBinder = pat, expValue = rhs, expBody = body} -> do
        -- Simplify RHS
        rhs' <- pevalExp rhs
-       
+
        -- Bind pattern and evaluate body
        body' <- bindValue pat rhs' $ pevalExp body
-       
+
        return $ expression {expValue = rhs', expBody = body'}
-       
+
      LetrecE {expDefs = defs, expBody = body} -> do
        (defs', body') <- pevalDefGroup defs $ pevalExp body
-       
+
        return $ expression {expDefs = defs', expBody = body'}
-     
+
      CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} -> do
        scr' <- pevalExp scr
-       
+
        -- If possible, eliminate this case statement
        case eliminateCase (getSourcePos inf) scr' alts of
          Just e -> pevalExp e
@@ -225,7 +225,7 @@ pevalExp expression =
            return $ expression {expScrutinee = scr', expAlternatives = alts'}
 
 -- | Attempt to eliminate a case statement.  If the scrutinee is a constructor
--- application and it matches an alternative, replace the case statement 
+-- application and it matches an alternative, replace the case statement
 -- with the alternative.
 eliminateCase :: SourcePos -> RExp -> [Alt Rec] -> Maybe RExp
 eliminateCase pos scrutinee alternatives =
@@ -235,7 +235,7 @@ eliminateCase pos scrutinee alternatives =
        -- Find a matching alternative
        case find ((scrutinee_con ==) . altConstructor) alternatives
        of Just alt ->
-            -- Assume that type arguments match, because the code passed 
+            -- Assume that type arguments match, because the code passed
             -- type checking.
             -- Bind parameters to the constructor's fields.
             Just $
@@ -256,4 +256,3 @@ pevalAlt :: Alt Rec -> PE (Alt Rec)
 pevalAlt alt = do
   body' <- pevalExp $ altBody alt
   return $ alt {altBody = body'}
-  
