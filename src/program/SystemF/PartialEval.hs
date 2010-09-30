@@ -1,8 +1,8 @@
 -- | Partial evaluation.
 -- This module collects several ways of simplifying Pyon code through a 
 -- sort of compile-time execution.  Copy propagation, constant propagation,
--- constant folding, and case elimination are performed this way.  Partial
--- evaluation maintains an \"execution environment\" of local variable
+-- constant folding, un-currying, and case elimination are performed this way.
+-- Partial evaluation maintains an \"execution environment\" of local variable
 -- assignments.
 
 {-# LANGUAGE ViewPatterns #-}
@@ -12,6 +12,7 @@ where
 import Control.Monad.Reader
 import Data.List
 import qualified Data.Map as Map
+import Data.Maybe
 
 import Gluon.Common.SourcePos
 import Gluon.Common.Error
@@ -42,10 +43,29 @@ deconstructTupleExp :: RExp -> Maybe [RExp]
 deconstructTupleExp expression =
   -- If the operator is a tuple value constructor, then return the arguments
   -- otherwise, return nothing
-  case unpackPolymorphicCall expression
+  case uncurryUnpackPolymorphicCall expression
   of Just (ConE {expCon = con}, ty_args, args)
        | Just con == getPyonTupleCon (length args) -> Just args
      _ -> Nothing
+
+-- | Uncurry a function call.
+--
+-- Transform nested calls of the form @((f x y) z w)@ into flat calls
+-- of the form @(f x y z w)@.
+uncurryCall :: RExp -> RExp
+uncurryCall op = fromMaybe op $ uncurryCall' op
+
+-- | Uncurry a function call.  Return 'Nothing' if nothing changes.
+uncurryCall' (CallE {expInfo = inf, expOper = op, expArgs = args}) =
+  case uncurryCall op
+  of CallE {expOper = op', expArgs = args'} ->
+       Just $ CallE {expInfo = inf, expOper = op', expArgs = args' ++ args}
+     _ -> Nothing
+
+uncurryCall' _ = Nothing
+
+-- | Uncurry and unpack a polymorphic function call.
+uncurryUnpackPolymorphicCall e = unpackPolymorphicCall (uncurryCall e)
 
 -- | Unpack a polymorphic call, possibly surrounded by let-expressions.
 -- Return the unpacked call and bindings.
@@ -64,7 +84,7 @@ unpackPolymorphicCallAndBindings expression =
        of Just (bindings, op, ty_args, args) ->
             Just ((inf, pat, val) : bindings, op, ty_args, args)
           Nothing -> Nothing
-     _ -> case unpackPolymorphicCall expression
+     _ -> case uncurryUnpackPolymorphicCall expression
           of Just (op, ty_args, args) -> Just ([], op, ty_args, args)
              Nothing -> Nothing
 
@@ -144,7 +164,7 @@ pevalFun f = do
 pevalExp :: RExp -> PE RExp
 
 -- Function call evaluation
-pevalExp expression@(unpackPolymorphicCall -> Just (op, ty_args, args)) = do
+pevalExp expression@(uncurryUnpackPolymorphicCall -> Just (op, ty_args, args)) = do
   -- Evaluate subexpressions
   args' <- mapM pevalExp args
   op' <- pevalExp op
