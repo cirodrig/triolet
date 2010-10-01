@@ -10,10 +10,10 @@ import Export
 import Core.Syntax
 import qualified SystemF.Syntax as SystemF
 
-pprPassConv :: PassConv -> Doc
-pprPassConv ByValue = text "val"
-pprPassConv Owned = text "own"
-pprPassConv Borrowed = text "bor"
+pprPassConv :: Representation -> Doc
+pprPassConv Value = text "val"
+pprPassConv Boxed = text "box"
+pprPassConv Referenced = text "ref"
 
 pprParamT :: CBind CParamT Rec -> Doc
 pprParamT (param ::: ty) =

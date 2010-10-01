@@ -116,37 +116,31 @@ splitVariablesOnSubset subset_var vs = do
 -- After simplification, predicates will always have a flexible variable on
 -- the LHS and at least one variable on the RHS.
 simplifyPredicate :: Predicate -> RegionM (Constraint, Bool)
-simplifyPredicate predicate@(SubEffect lhs_var rhs) = do
-  ctx <- getRigidEffectVars
-  
-  case ()
-    of _ | rhs `effectMentions` lhs_var ->
-             -- This equation is a tautology
-             return ([], False)
+simplifyPredicate predicate@(SubEffect lhs_var rhs)
+  | rhs `effectMentions` lhs_var =
+      -- This equation is a tautology
+      return ([], False)
 
-         | lhs_var `Set.member` ctx -> do
-             -- The LHS is rigid.  Rigid variables are disjoint from one
-             -- another, so they can be eliminated from the RHS by splitting
-             -- all flexible variables in the RHS.
-             let flexible_rhs_vars =
-                   [v | v <- fromEffect rhs
-                      , isEVar v
-                      , not $ v `Set.member` ctx]
+  | not $ isSplittable lhs_var = do
+      -- The LHS is not splittable.  Non-splittable variables are
+      -- disjoint from one another, so they can be eliminated from the
+      -- RHS by splitting all flexible variables in the RHS.
+      let splittable_rhs_vars = filter isSplittable $ fromEffect rhs
 
-             -- Split flexible variables
-             _ <- splitVariablesOnSubset lhs_var flexible_rhs_vars
-             return ([], True)
+      -- Split flexible variables
+      _ <- splitVariablesOnSubset lhs_var splittable_rhs_vars
+      return ([], True)
 
-         | isRVar lhs_var ->
-             -- Region variables must be part of the context
-             internalError "simplifyPredicate"
+  | isRVar lhs_var =
+      -- Region variables must be not-splittable
+      internalError "simplifyPredicate"
 
-         | null (fromEffect rhs) -> do
-             -- If the RHS is empty, the LHS must be the empty set
-             liftIO $ assignEffectVarD "simplifyPredicate" lhs_var emptyEffect
-             return ([], True)
+  | null (fromEffect rhs) = do
+      -- If the RHS is empty, the LHS must be the empty set
+      liftIO $ assignEffectVarD "simplifyPredicate" lhs_var emptyEffect
+      return ([], True)
 
-         | otherwise -> return ([predicate], False)
+  | otherwise = return ([predicate], False)
 
 -- | Attempt to simplify the constraint, considering only one predicate at
 -- a time.  Throw an exception if any single predicate is unsatisfiable for
@@ -186,7 +180,7 @@ reduceConstraint cst = debug $ do
                      pprConstraint cst) x
       | otherwise = x
 
--- | Solve a constraint where every LHS is a flexible variable.
+-- | Solve a constraint where every LHS is a splittable variable.
 -- The constraint is in this form at global scope (where no effect or
 -- region variables are in scope), after simplifying the constraint.
 --
@@ -199,11 +193,11 @@ solveGlobalConstraint cst =
       -- Get the LHS variables.  Remove duplicates.
       let lhs_vars =
             Set.toList $ Set.fromList [lhs_var | SubEffect lhs_var _ <- cst]
-      
+
       -- Verify that every LHS is a flexible variable
-      when (or [v `Set.member` ctx || isRVar v | v <- lhs_vars]) $
+      unless (all isSplittable lhs_vars) $
         internalError "solveGlobalConstraint: Found rigid variables in LHS"
-      
+
       -- Clear all flexible variables
       forM_ lhs_vars $ \v -> assignEffectVarD "solveGlobal" v emptyEffect
 
@@ -231,14 +225,13 @@ doEliminateRigidVariable v cst = do
 mkEqualityConstraint :: Effect -> Effect -> RegionM Constraint
 mkEqualityConstraint e1 e2 = do
   -- Simplify the constraint to make solving easier    
-  ctx <- getRigidEffectVars
   e1_s <- liftIO $ evalEffect e1
   e2_s <- liftIO $ evalEffect e2
   
   -- Remove rigid variables found in both e1 and e2 
   let rigid_common =
-        ctx `Set.intersection` fromEffectSet e1_s `Set.intersection`
-        fromEffectSet e2_s
+        Set.filter isRigid' $
+        fromEffectSet e1_s `Set.intersection` fromEffectSet e2_s
       e1_s' = deleteListFromEffect (Set.toList rigid_common) e1_s
       e2_s' = deleteListFromEffect (Set.toList rigid_common) e2_s
 
@@ -283,7 +276,7 @@ eliminateRigidVariable v cst =
 -- The predicate must be in head normal form.  The variables created during
 -- elimination are returned.
 --
--- Each flexible variable on the RHS of the constraint is split into two
+-- Each splittable variable on the RHS of the constraint is split into two
 -- parts, one which is part of the constraint and one which is independent.
 -- Unification is performed in the process.
 --
@@ -299,13 +292,15 @@ eliminateRigidVariable v cst =
 eliminatePredicate :: Predicate -> RegionM [EffectVar]
 eliminatePredicate (SubEffect v vs) = do
   ctx <- getRigidEffectVars
+  -- DEBUG
+  liftIO $ print $ Set.map (show . pprEffectVar) ctx
   
-  when (v `Set.member` ctx) $ internalError "eliminatePredicate: LHS is rigid"
+  when (isRigid' v) $ internalError "eliminatePredicate: LHS is rigid"
+  --when (v `Set.member` ctx) $ internalError "eliminatePredicate: LHS is rigid"
   when (isRVar v) $ internalError "eliminatePredicate: LHS is a region variable"
-  
+
   -- Find the flexible variables on the RHS
-  let (rigid_vs, flexible_vs) =
-        Set.partition (`Set.member` ctx) $ fromEffectSet vs
+  let (flexible_vs, rigid_vs) = Set.partition isSplittable $ fromEffectSet vs
 
   -- Split the flexible variables into two parts
   (dependent_flexible_vs, independent_flexible_vs) <-
@@ -324,7 +319,8 @@ clearFlexibleEffectVariables :: IO (Set.Set EffectVar, Set.Set EffectVar)
 clearFlexibleEffectVariables get_free_vars vs = withRigidEffectVars $ \ctx -> do
   -- Get the set of free variables
   (pos, neg) <- get_free_vars
-  let free_vars = Set.union pos neg Set.\\ ctx
+  let free_vars = Set.filter isFlexible' $ Set.union pos neg
+  -- let free_vars = Set.union pos neg Set.\\ ctx
   
   -- Get the set of flexible variables that aren't free
   vs' <- get_effect_vars vs
@@ -346,6 +342,7 @@ makeFlexibleVariablesIndependentWithConstraint get_free_vars cst = do
   liftIO $ print $ text "MFVI" <+> pprConstraint cst -- DEBUG
   -- simplify the constraint
   cst1 <- reduceConstraint cst
+  liftIO $ print $ text "MFVI" <+> pprConstraint cst1 -- DEBUG
 
   -- Eliminate any constraints that involve a flexible variable on the RHS.
   -- Variables tha appear in positive instances only are replaced by their

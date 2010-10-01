@@ -21,7 +21,7 @@ module SystemF.NewFlatten.PassConv
         deleteRegionFromEffect,
         deleteRegionsFromEffect,
         maybeDeleteRegionFromEffect,
-        PassConv(..),
+        Representation(..),
         FunParam(..),
         PassType(..),
         FunPassType(..),
@@ -93,7 +93,7 @@ import Gluon.Common.Supply
 import Gluon.Core
 import Gluon.Eval.Environment
 
-import Core.Syntax(PassConv(..))
+import Core.Syntax(Representation(..))
   
 -- | Set this to True to print a message every time a variable is assigned
 debugAssignments :: Bool
@@ -373,13 +373,13 @@ fromMonoAss _ =
 
 -- | Get the parameter-passing convention to use for this type
 -- FIXME: use head of AppT/ConstT to determine convention
-typePassConv :: PassType -> PassConv
-typePassConv (AppT _ _) = Borrowed
-typePassConv (FunT _) = Owned
-typePassConv (StreamT _ _) = Owned
-typePassConv (VarT _) = Borrowed
-typePassConv (ConstT _) = Borrowed
-typePassConv TypeT = ByValue
+typePassConv :: PassType -> Representation
+typePassConv (AppT _ _) = Referenced
+typePassConv (FunT _) = Boxed
+typePassConv (StreamT _ _) = Boxed
+typePassConv (VarT _) = Referenced
+typePassConv (ConstT _) = Referenced
+typePassConv TypeT = Value
 -}
 
 -------------------------------------------------------------------------------
@@ -690,10 +690,10 @@ pprEType pt =
      ConstT e       -> parens $ pprExp e
      TypeT          -> text "any_type"-}
 
-pprPassConv :: PassConv -> Doc
-pprPassConv ByValue  = text "val"
-pprPassConv Owned    = text "own"
-pprPassConv Borrowed = text "bor"
+pprPassConv :: Representation -> Doc
+pprPassConv Value  = text "val"
+pprPassConv Boxed    = text "own"
+pprPassConv Referenced = text "bor"
 
 pprPredicate :: Predicate -> Doc
 pprPredicate (SubEffect v e) = pprEffectVar v <+> text "<:" <+> pprEffect e 
@@ -947,7 +947,7 @@ getFlexibleVariables m = EffInf $ \env -> do
   (x, cst, vs) <- doEffInf m env
   return ((x, vs []), cst, vs)
 
-{-atomT :: PassConv -> RegionM EType -> RegionM PassType
+{-atomT :: Representation -> RegionM EType -> RegionM PassType
 atomT pc mk_ty = AtomT pc `liftM` mk_ty-}
 
 -- | Create a function type that takes a type parameter
@@ -990,7 +990,7 @@ streamT :: Effect -> RegionM PassType -> RegionM PassType
 streamT eff mk_ty = liftM (StreamT eff) mk_ty
 
 -- | Create an effect inference type corresponding to a type variable.
--- All such types are passed using the 'Borrowed' convention.
+-- All such types are passed using the 'Referenced' convention.
 varT :: Var -> RegionM PassType
 varT v = return $ VarT v
 
@@ -1421,12 +1421,12 @@ class Subtype exp where
 subtypeCheckFailed :: EffInf a
 subtypeCheckFailed = fail "Subtype check failed in effect inference"
 
--- | 'Borrowed' is the top of the PassConv lattice, because any value can 
+-- | 'Referenced' is the top of the Representation lattice, because any value can 
 -- be represented that way.
-instance Subtype PassConv where
+instance Subtype Representation where
   assertSubtype pc1 pc2
     | pc1 == pc2 = return ()
-    | pc2 == Borrowed = return ()
+    | pc2 == Referenced = return ()
     | otherwise = subtypeCheckFailed
 
   assertEqual pc1 pc2
@@ -1435,12 +1435,12 @@ instance Subtype PassConv where
 
   joinType pc1 pc2
     | pc1 == pc2 = return pc1
-    | otherwise = return Borrowed
+    | otherwise = return Referenced
 
   meetType pc1 pc2
     | pc1 == pc2 = return pc1
-    | pc2 == Borrowed = return pc1
-    | pc1 == Borrowed = return pc2
+    | pc2 == Referenced = return pc1
+    | pc1 == Referenced = return pc2
     | otherwise = subtypeCheckFailed
 
 {-

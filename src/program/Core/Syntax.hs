@@ -47,9 +47,12 @@ type SRCExp = RecCExp SubstRec
 type SRCAlt = RecCAlt SubstRec
 type SRCFun = RecCFun SubstRec
 
--- TODO: Combine this with the identical definition in PassConv.hs
-data PassConv = ByValue | Owned | Borrowed
-              deriving(Eq)
+-- | The representation of a value.
+data Representation =
+    Value                       -- ^ Represented as a value
+  | Boxed                       -- ^ Represented as a memory-managed reference
+  | Referenced                  -- ^ Represented as a raw pointer
+  deriving(Eq)
 
 -- | An address variable appearing in a binder
 type AddrVar = Var
@@ -216,6 +219,9 @@ data instance CFunTypeOf Rec s =
   | RetCT
     { ctReturn :: !(CBind CReturnT s)
     }
+
+instance HasLevel RCFunType where
+  getLevel _ = TypeLevel
 
 varCT :: Var -> RCType
 varCT v = ExpCT (mkInternalVarE v)

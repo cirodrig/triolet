@@ -31,7 +31,6 @@ import Gluon.Eval.Equality
 import qualified SystemF.Syntax as SystemF
 import SystemF.Builtins
 import qualified SystemF.Typecheck as SystemF
-import qualified SystemF.NewFlatten.PassConv
 import SystemF.NewFlatten.PassConv
 import qualified SystemF.NewFlatten.SetupEffect as Effect
 
@@ -165,7 +164,7 @@ withNewEffectVariable effect_var f = assertEVar effect_var $ do
   assumePure var effectKindE $ EffEnv $ local insert_var $ runEffEnv (f var)
 
 -- | Add the given type to the local environment.  If the type is a
--- @PassConv@ object, add it to the PassConv list as well.
+-- @Representation@ object, add it to the Representation list as well.
 -- This function is called by 'convertParameter' to keep track of dictionaries
 -- that may be needed during flattening.
 -- This should only be called on pass-by-value variables.
@@ -196,7 +195,7 @@ tracePassConvEnv m = EffEnv $ do
   traceShow (print_env env) $ runEffEnv m
   where
     print_env env =
-      hang (text "PassConv variables") 8 $ vcat $ map print_pc env
+      hang (text "Representation variables") 8 $ vcat $ map print_pc env
     
     print_pc (t, v) =
       hang (pprVar v) 6 $ pprType t
@@ -234,7 +233,7 @@ convertEffect eff = do
     cannot_find_variable _ =
       internalError "convertEffect: Cannot find region or effect variable"
       
-convertPassType :: PassTypeAssignment -> RExp -> EffEnv (PassConv, RCType)
+convertPassType :: PassTypeAssignment -> RExp -> EffEnv (Representation, RCType)
 convertPassType (MonoAss pt) sf_type = convertMonoPassType pt sf_type
 
 convertPassType (PolyAss (PolyPassType [] pt)) sf_type =
@@ -245,21 +244,21 @@ convertPassType (PolyAss (PolyPassType eff_vars pt)) sf_type = do
     (pc, mono_type) <- convertMonoPassType pt sf_type
     let mono_fun_type = asFunctionType pc mono_type
         poly_type = foldr pureArrCT mono_fun_type $ map mk_param eff_vars'
-    return (Owned, funCT poly_type)
+    return (Boxed, funCT poly_type)
   where
     mk_param ev = ValPT (Just ev) ::: effect_type
     effect_type = expCT effectKindE
 
-asFunctionType :: PassConv -> RCType -> RCFunType
-asFunctionType Owned (FunCT t) = t
+asFunctionType :: Representation -> RCType -> RCFunType
+asFunctionType Boxed (FunCT t) = t
 asFunctionType pc ty = retCT $! case pc
-                                of ByValue -> ValRT ::: ty
-                                   Owned -> OwnRT ::: ty
-                                   Borrowed -> WriteRT ::: ty
+                                of Value -> ValRT ::: ty
+                                   Boxed -> OwnRT ::: ty
+                                   Referenced -> WriteRT ::: ty
 
 -- | Given a type produced by effect inference and the corresponding
 -- original System F type, construct an ANF type.
-convertMonoPassType :: PassType -> RExp -> EffEnv (PassConv, RCType)
+convertMonoPassType :: PassType -> RExp -> EffEnv (Representation, RCType)
 convertMonoPassType pass_type sf_type =
   case pass_type
   of AppT op args ->
@@ -278,7 +277,7 @@ convertMonoPassType pass_type sf_type =
                 return (pass_conv, appCT core_op $ map snd core_args)
      FunT ft -> do
        t <- convertFunctionType ft sf_type
-       return (Owned, FunCT t)
+       return (Boxed, FunCT t)
 
      StreamT eff pass_rng ->
        case sf_type
@@ -294,7 +293,7 @@ convertMonoPassType pass_type sf_type =
                 -- Convert it to an effect-decorated stream type
                 core_eff <- convertEffect eff
                 (_, core_rng) <- convertMonoPassType pass_rng arg
-                return (Owned,
+                return (Boxed,
                         stream_type app_info stream_info core_eff core_rng)
             
           _ -> mismatch
@@ -340,18 +339,18 @@ convertFunctionType pass_type sf_type =
 
     make_return (pc, ty) =
       case pc
-      of ByValue  -> ValRT ::: ty
-         Owned    -> OwnRT ::: ty
-         Borrowed -> WriteRT ::: ty
+      of Value  -> ValRT ::: ty
+         Boxed    -> OwnRT ::: ty
+         Referenced -> WriteRT ::: ty
 
 convertPassTypeParam :: FunParam -> RBinder' () -> (CBind CParamT Rec -> EffEnv a) -> EffEnv a
 convertPassTypeParam param (Binder' mv dom ()) k = do
   (dom_pc, dom_ty) <- convertMonoPassType (paramType param) dom
 
   case dom_pc of
-    ByValue -> k $ ValPT mv ::: dom_ty
-    Owned -> k $ OwnPT ::: dom_ty
-    Borrowed ->
+    Value -> k $ ValPT mv ::: dom_ty
+    Boxed -> k $ OwnPT ::: dom_ty
+    Referenced ->
       -- Create a new region variable for the parameter's region.
       -- Because this variable only appears in types, its corresponding  
       -- pointer variable is not used
@@ -414,7 +413,7 @@ convertEType etype sf_type =
     stream_type app_info op_info eff rng =
       let con = pyonBuiltin the_LazyStream
           op = mkConE (getSourcePos op_info) con
-      in appCT op [(ByValue, eff), (Borrowed, rng)]-}
+      in appCT op [(Value, eff), (Referenced, rng)]-}
 
 convertType :: Effect.ExpOf Effect.EI Effect.EI -> RCType
 convertType ty = expCT $ Effect.fromEIType ty
@@ -439,12 +438,12 @@ loadFunctionType value_type = do
     retCT (ValRT ::: value_type)
 
 -- | Create a return binder for the given type and passing convention
-createReturnBinder :: PassConv -> RCType -> EffEnv (CBind CReturn Rec)
+createReturnBinder :: Representation -> RCType -> EffEnv (CBind CReturn Rec)
 createReturnBinder pc ty =
   case pc
-  of ByValue  -> return $ ValR ::: ty
-     Owned    -> return $ OwnR ::: ty
-     Borrowed -> do
+  of Value  -> return $ ValR ::: ty
+     Boxed    -> return $ OwnR ::: ty
+     Referenced -> do
        -- Create parameters for the return pointer
        ret_addr <- newAnonymousVariable ObjectLevel
        ret_ptr <- newAnonymousVariable ObjectLevel
@@ -1059,11 +1058,11 @@ convertParameter :: Effect.EIBinder
 convertParameter (Binder v ty (rgn, pass_type)) k = do
   (conv, ty') <- convertMonoPassType pass_type (Effect.fromEIType ty)
   case conv of
-    ByValue  ->
+    Value  ->
       -- Also add the parameter to the environment if we need to
       withParameterVariable v ty' $ k $ ValP v ::: ty'
-    Owned    -> k $ OwnP v ::: ty'
-    Borrowed ->
+    Boxed    -> k $ OwnP v ::: ty'
+    Referenced ->
       case rgn
       of Just rv -> withNewRegionVariable rv v ty' $ \rv' ->
                     k $! ReadP rv' v ::: ty'
@@ -1075,9 +1074,9 @@ convertLetBinder :: Effect.EIBinder
 convertLetBinder (Binder v ty (rgn, pass_type)) k = do
   (conv, ty') <- convertMonoPassType pass_type (Effect.fromEIType ty)
   case conv of
-    ByValue  -> k $ ValB v ::: ty'
-    Owned    -> k $ OwnB v ::: ty'
-    Borrowed ->
+    Value  -> k $ ValB v ::: ty'
+    Boxed    -> k $ OwnB v ::: ty'
+    Referenced ->
       case rgn
       of Just rv -> withNewRegionVariable rv v ty' $ \rv' ->
                     k $! LocalB rv' v ::: ty'
@@ -1091,9 +1090,9 @@ effectReturnType expr = do
   (new_conv, new_type) <-
     convertPassType (Effect.eiReturnType expr) (Effect.eiType expr)
   let rt = case new_conv
-           of ByValue -> ValRT
-              Owned -> OwnRT
-              Borrowed -> WriteRT
+           of Value -> ValRT
+              Boxed -> OwnRT
+              Referenced -> WriteRT
   return $ rt ::: new_type
 
 -- | Convert an effect to the corresponding type
@@ -1151,11 +1150,11 @@ flattenVarExp expression v = do
   let inf = mkSynInfo (getSourcePos expression) (getLevel v)
   new_expr <-
     case conv
-    of ByValue ->
+    of Value ->
          return $ FlatExp (ValCE inf (ValueVarV v)) (ValRT ::: ty) Nothing
-       Owned ->
+       Boxed ->
          return $ FlatExp (ValCE inf (OwnedVarV v)) (OwnRT ::: ty) Nothing 
-       Borrowed ->
+       Referenced ->
          -- Get the variable's regin
          case Effect.eiRegion expression
          of Just rv -> do
@@ -1307,7 +1306,7 @@ applyCallOperands op_type oprds = debug $ do
          ValPT Nothing -> rng   -- Non-dependent type
          OwnPT -> rng           -- Non-dependent
          ReadPT addr_var ->
-           -- Borrowed parameter
+           -- Referenced parameter
            case oprd_addr
            of Just a_exp ->
                 verbatim $ assignTypeFun addr_var (expCT a_exp) rng
@@ -1378,7 +1377,7 @@ flattenDoBody body = do
   
   -- Create a binder for the return value.  Return values are always
   -- passed using the 'borrowed' convention.
-  rbinder <- createReturnBinder Borrowed return_type
+  rbinder <- createReturnBinder Referenced return_type
   
   -- Flatten the expression and coerce its result to 'borrowed'
   body_exp <- flattenExp body 

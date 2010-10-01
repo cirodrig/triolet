@@ -49,7 +49,7 @@ module SystemF.Flatten.Effect
         RegionMonad(..),
         assumeMaybeRegion,
         withRigidEffectVars,
-        isRigid, isFlexible, isFlexible'
+        isRigid, isRigid', isFlexible, isFlexible', isSplittable
        )
 where
 
@@ -273,14 +273,20 @@ unifyRegionVars v1 v2 = assertRVar v1 $ assertRVar v2 $ do
   v2' <- evalRVar v2
   if isFlexible' v1'
     then do writeIORef (_evarRep v1') (EVVarRep v2')
-            return v2'
+            trace_assignment v1' v2' $ return v2'
     else if isFlexible' v2'
          then do writeIORef (_evarRep v2') (EVVarRep v1')
-                 return v1'
+                 trace_assignment v2' v1' $ return v1'
          else -- XXX: Is this only caused by compiler bugs, or can some inputs
               -- cause this error?
            internalError "unifyRegionVars: attempted to unify rigid variables"
-    
+  where
+    trace_assignment assignee value k
+      | debugAssignments =
+          traceShow (text "Assigning " <+>
+                     pprEffectVar assignee <+> text ":=" <+>
+                     pprEffectVar value) k
+      | otherwise = k
 
 -- | Remove indirections from an effect variable representative
 evalEffectVarRep :: IORef EffectVarRep -> IO EffectVarRep
@@ -319,7 +325,7 @@ evalEffectVar ev = do
 -- not be rigid and must not have been unified with anything.
 splitEffectVar :: (Monad m, MonadIO m, Supplies m (Ident EffectVar)) =>
                   EffectVar -> m (EffectVar, EffectVar)
-splitEffectVar v = trace "splitEffectVar" $ assertEVar v $ do
+splitEffectVar v = trace ("splitEffectVar " ++ show (pprEffectVar v)) $ assertEVar v $ do
   v1 <- newEffectVar
   v2 <- newEffectVar
   liftIO $ assignEffectVarD "splitEffectVar" v $ varsEffect [v1, v2]
@@ -399,14 +405,25 @@ withRigidEffectVars f = do
 -- TODO: Use a flag in the variable to determine its rigidity, instead of the
 -- context
 isRigid :: RegionMonad m => EffectVar -> m Bool
-isRigid v = liftM (v `Set.member`) $ getRigidEffectVars
+isRigid v = return $ not $ _evarIsFlexible v -- liftM (v `Set.member`) $ getRigidEffectVars
 
 isFlexible :: RegionMonad m => EffectVar -> m Bool
-isFlexible v = liftM (not . (v `Set.member`)) $ getRigidEffectVars
+isFlexible v = return $ _evarIsFlexible v -- liftM (not . (v `Set.member`)) $ getRigidEffectVars
+
+isRigid' = not . isFlexible'
 
 isFlexible' :: EffectVar -> Bool
 isFlexible' v = _evarIsFlexible v
                              
+-- | Determine whether a variable can be subdivided into two effect variables.
+--
+-- Flexible effect variables are splittable.  Rigid variables are not
+-- splittable.  Region variables are not splittable.
+--
+-- Distinct non-splittable variables represent disjoint memory areas.
+isSplittable :: EffectVar -> Bool
+isSplittable v = isEVar v && isFlexible' v
+
 -- | Computations performed in a region environment.
 --
 -- The monad can supply region and variable IDs.  It keeps track of which

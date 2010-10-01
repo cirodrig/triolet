@@ -30,33 +30,36 @@ import Gluon.Common.MonadLogic
 import Gluon.Common.SourcePos
 import qualified Gluon.Core as Gluon
 import Gluon.Core(Con, Var, Binder(..), Binder'(..), Level(..), HasLevel(..))
+import Gluon.Core.Variance
 import Gluon.Eval.Eval
 import qualified SystemF.Builtins as SF
 import qualified SystemF.Syntax as SF
 import qualified Core.Syntax as Core
-import Core.Syntax(PassConv(..))
+import qualified Core.Print as Core
+import Core.Syntax(Representation(..))
 import SystemF.Flatten.Effect
 
 -------------------------------------------------------------------------------
 -- Effect types
 
 -- | A function parameter type.  Function parameter types have several parts. 
---   In all cases, one of several possible parameter-passing conventions is 
---   used, and the data that is actually passed has its own type.  Some
---   passing conventions have additional properties.  When a parameter is
+--   In all cases, the parameter's representation and data type are encoded
+--   here.  Some passing conventions have additional properties.
+--   When a parameter is
 --   passed by borrowed reference, it's labeled with a region.
 data EParamType =
-    -- | A pass-by-value parameter.  The @Maybe Var@ term is the bound
+    -- | A value parameter.  The @Maybe Var@ term is the bound
     --   variable of a dependently typed function, or Nothing if this
     --   parameter is not used dependently.
     ValPT (Maybe Var) EType
 
-    -- | A pass-by-owned-reference parameter.
+    -- | A boxed parameter.
   | OwnPT EType
 
-    -- | A pass-by-read-reference parameter.  The parameter's region is
-    -- given.
+    -- | A reference parameter.  The parameter's region is given.
   | ReadPT RVar EType
+
+instance HasLevel EParamType where getLevel t = getLevel $ paramTypeType t
 
 paramTypeType :: EParamType -> EType
 paramTypeType (ValPT _ t) = t
@@ -71,16 +74,18 @@ data EReturnType =
     -- | Return by value
     ValRT EType
 
-    -- | Return an owned reference
+    -- | Return a boxed object
   | OwnRT EType
 
     -- | Return a borrowed reference to data that already exists.  Variable
     --   references use this convention.
   | ReadRT RVar EType
 
-    -- | Return by writing into a borrowed reference.  The return region
+    -- | Return by writing into a reference.  The return region
     -- doesn't reference another region, but rather defines a local region.
   | WriteRT RVar EType
+
+instance HasLevel EReturnType where getLevel t = getLevel $ returnTypeType t
 
 returnTypeType :: EReturnType -> EType
 returnTypeType (ValRT t) = t
@@ -88,90 +93,172 @@ returnTypeType (OwnRT t) = t
 returnTypeType (ReadRT _ t) = t
 returnTypeType (WriteRT _ t) = t
 
+-- | Convert a parameter type to a return type.  Given a parameter variable
+-- bound at parameter type @p@, its uses will have return type
+-- @paramTypeToReturnType p@.
+paramTypeToReturnType :: EParamType -> EReturnType
+paramTypeToReturnType (ValPT _ t) = ValRT t
+paramTypeToReturnType (OwnPT t) = OwnRT t
+paramTypeToReturnType (ReadPT rv t) = ReadRT rv t
+
+-- | A type elaborated with representation and side effect information.
+--
+-- Since representations pertain to values, they are only meaningful on types
+-- of kind @*@, that is, types that can be ascribed to values.
+-- The representation attached to a type function @T : * -> ... -> *@ is the
+-- representation of the corresponding, fully applied type @T a b : *@.
+data ERepType = ERepType Representation EType
+
+instance HasLevel ERepType where getLevel (ERepType _ t) = getLevel t
+
+getTypeRepr :: ERepType -> Representation
+getTypeRepr (ERepType r _) = r
+
+discardTypeRepr :: ERepType -> EType
+discardTypeRepr (ERepType _ t) = t
+
 -- | A type elaborated with side effect information.
 data EType =
     -- | A type application
-    AppT EType [EType]
+    AppT
+    { etypeOper :: EType 
+    , etypeArgs :: [EType]
+    }
 
     -- | An application of an effect-polymorphic variable or type constructor
     -- to effect operands.  If the operand list is empty, the variable or
     -- constructor may be either polymorphic (with zero parameters) or
     -- monomorphic.
-  | InstT !(Either Var Con) [Effect]
+  | InstT 
+    { etypeVarCon :: !(Either Var Con) 
+    , etypeEffects :: [Effect]
+    }
     
     -- | A function type
-  | FunT EParamType Effect EReturnType
+  | FunT 
+    { etypeParam :: EParamType 
+    , etypeEffect :: Effect 
+    , etypeReturn :: EReturnType
+    }
 
     -- | An effect-monomorphic type variable
-  | VarT !Var
+  | VarT 
+    { etypeVar :: !Var
+    }
     
     -- | An effect-monomorphic type constructor
-  | ConT !Con
+  | ConT 
+    { etypeCon :: !Con
+    }
   
     -- | A literal or kind
-  | LitT !Gluon.Lit
+  | LitT 
+    { etypeLit :: !Gluon.Lit
+    }
 
+-- | Construct a type from a variable.
+-- Inhabitants of variable types are always passed by reference.
+varT v
+  | getLevel v /= TypeLevel = traceShow v $ internalError "varT: Not a type variable" 
+  | otherwise = ERepType Referenced (VarT v)
+
+-- | Construct a type from a constructor.
+conT c = ERepType (conRepr c) (ConT c)
+
+-- | Construct a type from a literal.
+litT l = ERepType repr (LitT l)
+  where
+    repr = case l
+           of Gluon.KindL {} -> Value
+              _ -> internalError "litT: Unexpected literal"
+
+appT :: ERepType -> [ERepType] -> ERepType
 appT op [] = op
-appT op args = AppT op args
+appT op args = ERepType (getTypeRepr op) $
+               AppT (discardTypeRepr op) (map discardTypeRepr args)
 
-instT (Left v) [] = VarT v
-instT (Right c) [] = ConT c
-instT op args = InstT op args
+instT (Left v) [] = varT v
+instT (Right c) [] = conT c
+instT op args = ERepType repr $ InstT op args
+  where
+    repr = case op
+           of Left _  -> Referenced
+              Right c -> conRepr c
+
+funT param eff ret = 
+  let repr = case getLevel ret
+             of TypeLevel -> Boxed
+                KindLevel -> Value
+  in ERepType repr (FunT param eff ret)
+
+conRepr :: Con -> Representation
+conRepr = dataTypePassConv
 
 instance HasLevel EType where
-  getLevel (AppT op _) = getLevel op
-  getLevel (InstT op _) = either getLevel getLevel op
-  getLevel (FunT _ _ rt) = getLevel $ returnTypeType rt
-  getLevel (VarT v) = getLevel v
-  getLevel (ConT c) = getLevel c
-  getLevel (LitT l) = Gluon.litLevel l
+  getLevel (AppT {etypeOper = op}) = getLevel op
+  getLevel (InstT {etypeVarCon = Left v}) = getLevel v
+  getLevel (InstT {etypeVarCon = Right c}) = getLevel c
+  getLevel (FunT {etypeReturn = rt}) = getLevel $ returnTypeType rt
+  getLevel (VarT {etypeVar = v}) = getLevel v
+  getLevel (ConT {etypeCon = c}) = getLevel c
+  getLevel (LitT {etypeLit = l}) = Gluon.litLevel l
 
 -- | Get the parameter-passing convention of a value whose type is a
 -- fully applied instance of the given data type constructor.  For example,
 -- when called with the \'list\' type constructor, the parameter-passing
 -- convention for lists is returned.
-dataTypePassConv :: Con -> PassConv
-dataTypePassConv c 
-  | getLevel c /= TypeLevel = internalError "dataTypePassConv: Not a type"
+dataTypePassConv :: Con -> Representation
+dataTypePassConv c =
+  case lookupDataTypeTable c
+  of (pc, _, _, _) -> pc
+
+conEffectParamVariance c =
+  case lookupDataTypeTable c
+  of (_, _, variance, _) -> variance
+
+conOrdinaryParamVariance c =
+  case lookupDataTypeTable c
+  of (_, _, _, variance) -> variance
+
+lookupDataTypeTable c
+  | getLevel c /= TypeLevel = internalError "lookupDataTypeTable: Not a type"
+  | c `SF.isPyonBuiltin` SF.the_Stream =
+      -- All 'Stream' instances should have been converted to 'LazyStream'
+      internalError "lookupDataTypeTable: Unexpected 'Stream' type"
   | otherwise =
       case IntMap.lookup (fromIdent $ Gluon.conID c) dataTypeTable
-      of Just (pc, _) -> pc
-         Nothing -> internalError $ "dataTypePassConv: No information " ++
+      of Just x -> x
+         Nothing -> internalError $ "lookupDataTypeTable: No information " ++
                     "for constructor " ++ showLabel (Gluon.conName c)
-
+    
 -- | A table of information about data types, indexed by the type constructor.
 dataTypeTable =
-  IntMap.fromList [(fromIdent $ Gluon.conID c, (pc, arity)) 
-                  | (c, pc, arity) <- assocs]
-  where  
+  IntMap.fromList [(fromIdent $ Gluon.conID c,
+                    (pc, length eff_variance, eff_variance, param_variance)) 
+                  | (c, pc, eff_variance, param_variance) <- assocs]
+  where
+    -- Fields of table:
+    --  1. Type constructor
+    --  2. Representation
+    --  3. Variances of effect parameters
+    --  4. Variances of type parameters
     assocs =
-      [ (SF.pyonBuiltin SF.the_PassConv, Borrowed, 0)
-      , (SF.pyonBuiltin SF.the_int, ByValue, 0)
-      , (SF.pyonBuiltin SF.the_float, ByValue, 0)
-      , (SF.pyonBuiltin SF.the_bool, ByValue, 0)
-      , (SF.pyonBuiltin SF.the_NoneType, ByValue, 0)
-      , (SF.pyonBuiltin SF.the_Any, ByValue, 0)
-      , (SF.pyonBuiltin SF.the_list, Borrowed, 0)
-      , (SF.pyonBuiltin SF.the_Stream, Owned, 1)
+      [ (SF.pyonBuiltin SF.the_PassConv, Referenced, [], [Invariant])
+      , (SF.pyonBuiltin SF.the_AdditiveDict, Referenced, [], [Invariant])
+      , (SF.pyonBuiltin SF.the_int, Value, [], [])
+      , (SF.pyonBuiltin SF.the_float, Value, [], [])
+      , (SF.pyonBuiltin SF.the_bool, Value, [], [])
+      , (SF.pyonBuiltin SF.the_NoneType, Value, [], [])
+      , (SF.pyonBuiltin SF.the_Any, Value, [], [])
+      , (SF.pyonBuiltin SF.the_list, Referenced, [], [Invariant])
+      , (SF.pyonBuiltin SF.the_LazyStream, Boxed, [Covariant], [Covariant])
       ]
-
--- | A table of information about functions and data constructors.
-dataConTable =
-  IntMap.fromList [(fromIdent $ Gluon.conID c, arity)
-                  | (c, arity) <- assocs]
-  where  
-    assocs =
-      []
 
 -- | Get the number of effect arguments a type constructor takes.
 dataTypeEffectArity :: Con -> Int
-dataTypeEffectArity c
-  | getLevel c /= TypeLevel = internalError "dataTypeEffectArity: Not a type"
-  | otherwise =
-      case IntMap.lookup (fromIdent $ Gluon.conID c) dataTypeTable
-      of Just (_, arity) -> arity
-         Nothing -> internalError $ "dataTypeEffectArity: No information " ++
-                    "for constructor " ++ showLabel (Gluon.conName c)
+dataTypeEffectArity c =
+  case lookupDataTypeTable c
+  of (_, arity, _, _) -> arity
 
 -- | Get the number of effect arguments a data constructor or function takes.
 dataConEffectArity :: Con -> Int
@@ -184,40 +271,62 @@ dataConEffectArity c
          Nothing -> internalError $ "dataConEffectArity: No information " ++
                     "for constructor " ++ showLabel (Gluon.conName c)
 
--- | Get the parameter-passing convention to use for an effect type.  The type
--- must be fully applied (this condition is not checked).
---
--- The parameter-passing convention can always be determined from the head
--- term of a type application, so other terms are ignored.
-etypePassConv :: EType -> PassConv
-etypePassConv ty = head_pass_conv ty
+-- | A table of information about functions and data constructors.
+dataConTable =
+  IntMap.fromList [(fromIdent $ Gluon.conID c, arity)
+                  | (c, arity) <- assocs]
+  where  
+    assocs =
+      []
+
+-- | Get a type's variance with respect to each of its effect parameters.
+etypeEffectParamVariance ty =
+  case ty
+  of ConT c -> conEffectParamVariance c
+     VarT _ -> repeat Invariant
+     _ -> internalError "etypeEffectParamVariance"
+
+etypeOrdinaryParamVariance ty =
+  case ty
+  of ConT c -> conOrdinaryParamVariance c
+     InstT (Right c) _ -> conOrdinaryParamVariance c
+     _ -> repeat Invariant
+
+-- | Get the standard representation to use for a type.  The representation
+-- is chosen based on the type's head term.  The type must have kind @*@
+-- (this condition is not checked).
+etypeStandardRepr :: EType -> Representation
+etypeStandardRepr ty = head_repr ty
   where
     -- Inspect the head to choose the parameter-passing convention
-    head_pass_conv ty =
+    head_repr ty =
       case ty
-      of AppT op _ -> head_pass_conv op
-         InstT (Left v) _ -> Borrowed -- Unknown types are passed 'borrowed'
-         InstT (Right c) _ -> dataTypePassConv c
-         FunT _ _ _ 
-           | getLevel ty == TypeLevel -> Owned -- Functions are passed 'owned'
-           | getLevel ty == KindLevel -> ByValue -- Types are passed by value
-           | otherwise -> internalError "etypePassConv"
-         VarT _ -> Borrowed
-         ConT c -> dataTypePassConv c
-         LitT (Gluon.KindL _) -> ByValue -- Types are passed by value
-         LitT _ -> internalError "etypePassConv: Unexpected literal"
+      of AppT op _ -> head_repr op
+         InstT (Left v) _ -> Referenced
+         InstT (Right c) _ -> conRepr c
+         FunT _ _ _
+           | getLevel ty == TypeLevel -> Boxed -- Functions are passed 'owned'
+           | getLevel ty == KindLevel -> Value -- Types are passed by value
+           | otherwise -> internalError "etypeStandardRepr"
+         VarT _ -> Referenced
+         ConT c -> conRepr c
+         LitT (Gluon.KindL _) -> Value -- Types are passed by value
+         LitT _ -> internalError "etypeStandardRepr: Unexpected literal"
+
+etypeWithStandardRepr :: EType -> ERepType
+etypeWithStandardRepr t = ERepType (etypeStandardRepr t) t
 
 -- | Convert an effect type to a parameter type.  If a parameter variable is
 -- given, then the parameter will be used dependently.  An error will be raised
 -- if a variable is given and the type is not passed by value.
-etypeToParamType :: EType -> Maybe Var -> RegionM EParamType
-etypeToParamType ty param_var =
-  case etypePassConv ty
-  of ByValue -> return $ ValPT param_var ty
-     Owned
+etypeToParamType :: ERepType -> Maybe Var -> RegionM EParamType
+etypeToParamType (ERepType repr ty) param_var =
+  case repr
+  of Value -> return $ ValPT param_var ty
+     Boxed
        | isNothing param_var -> return $ OwnPT ty
        | otherwise -> no_dependent_type
-     Borrowed 
+     Referenced 
        | isNothing param_var -> do
            rgn <- newRegionVar False
            return $ ReadPT rgn ty
@@ -227,17 +336,25 @@ etypeToParamType ty param_var =
       internalError "etypeToParamType: Parameter cannot be used dependently"
 
 -- | Convert an effect type to a return type
-etypeToReturnType :: EType -> RegionM EReturnType
-etypeToReturnType ty =
-  case etypePassConv ty
-  of ByValue  -> return $ ValRT ty
-     Owned    -> return $ OwnRT ty
-     Borrowed -> do
+etypeToReturnType :: ERepType -> RegionM EReturnType
+etypeToReturnType (ERepType repr ty) =
+  case repr
+  of Value      -> return $ ValRT ty
+     Boxed      -> return $ OwnRT ty
+     Referenced -> do
        rgn <- newRegionVar False
        return $ WriteRT rgn ty
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
+
+pprRepr :: Representation -> Doc
+pprRepr Value = text "val"
+pprRepr Boxed = text "box"
+pprRepr Referenced = text "ref"
+
+pprERepType :: ERepType -> Doc
+pprERepType (ERepType repr ty) = pprRepr repr <+> pprEType ty
 
 pprEType :: EType -> Doc
 pprEType ty =
@@ -268,7 +385,7 @@ pprArrowType ty =
      _ -> (pprEType ty, [])
 
 pprArrowReturnType :: EReturnType -> (Doc, [Doc])
-pprArrowReturnType (OwnRT fun_type@(FunT _ _ _)) = pprArrowType fun_type
+pprArrowReturnType (OwnRT fun_type@(FunT {})) = pprArrowType fun_type
 pprArrowReturnType ty = (pprEReturnType ty, [])
 
 pprEParamType param_type = 
@@ -357,7 +474,8 @@ class Parametric e where
   -- | Replace variables that have been unified with their canonical value
   evaluate :: e -> IO e
 
-  -- | Rename a type variable
+  -- | Rename a type variable.  Renaming does not change the variable's
+  -- representation.
   renameT :: Var -> Var -> e -> e
 
   -- | Rename an effect variable.  The old and new variables must not have
@@ -368,7 +486,8 @@ class Parametric e where
   -- argument again.
   renameE :: EffectVar -> EffectVar -> e -> e
   
-  -- | Assign a type variable
+  -- | Assign a type variable.  Assignment does not alter the variable's
+  -- representation.
   assignT :: Var -> EType -> e -> e
   
   -- | Assign an effect variable
@@ -390,12 +509,12 @@ evalAndRenameE old_v new_v e = liftM (renameE old_v new_v) $ evaluate e
 mapParametricEType :: (forall a. Parametric a => a -> a) -> EType -> EType
 mapParametricEType f expression =
   case expression
-  of AppT ty args   -> appT (f ty) (map f args)
+  of AppT ty args   -> AppT (f ty) (map f args)
      InstT op args  -> InstT op (map f args)
      FunT pt eff rt -> FunT (f pt) (f eff) (f rt)
-     VarT _         -> expression
-     ConT _         -> expression
-     LitT _         -> expression
+     VarT {}        -> expression
+     ConT {}        -> expression
+     LitT {}        -> expression
 
 mapParametricEParamType :: (forall a. Parametric a => a -> a)
                         -> EParamType -> EParamType
@@ -441,6 +560,17 @@ instance (Parametric a, Parametric b) => Parametric (a, b) where
   (x, y) `mentionsAnyE` vs = x `mentionsAnyE` vs >||> y `mentionsAnyE` vs
   (x, y) `mentionsT` v = x `mentionsT` v || y `mentionsT` v
 
+instance Parametric ERepType where
+  freeEffectVars t = freeEffectVars (discardTypeRepr t)
+  evaluate (ERepType r t) = fmap (ERepType r) $ evaluate t
+  renameT old_v new_v (ERepType r t) = ERepType r (renameT old_v new_v t)
+  renameE old_v new_v (ERepType r t) = ERepType r (renameE old_v new_v t)
+  assignT old_v new_e (ERepType r t) = ERepType r (assignT old_v new_e t)
+  assignE old_v new_e (ERepType r t) = ERepType r (assignE old_v new_e t)
+  ERepType _ t `mentionsE` v = t `mentionsE` v
+  ERepType _ t `mentionsAnyE` vs = t `mentionsAnyE` vs
+  ERepType _ t `mentionsT` v = t `mentionsT` v
+
 instance Parametric EType where
   freeEffectVars expression =
     case expression
@@ -464,19 +594,21 @@ instance Parametric EType where
 
          return $ unionFV (contravariant fv_param) fv_range_minus_param
 
-       VarT _ -> return emptyFV
-       ConT _ -> return emptyFV
-       LitT _ -> return emptyFV
+       VarT {} -> return emptyFV
+       ConT {} -> return emptyFV
+       LitT {} -> return emptyFV
 
   evaluate expression = 
     case expression
-    of AppT op args -> AppT `liftM` evaluate op `ap` mapM evaluate args
-       InstT op args -> InstT op `liftM` mapM evaluate args
-       FunT pt eff rt -> FunT `liftM` evaluate pt `ap` evaluate eff `ap`
-                         evaluate rt
-       VarT _ -> return expression
-       ConT _ -> return expression
-       LitT _ -> return expression
+    of AppT op args ->
+         AppT `liftM` evaluate op `ap` mapM evaluate args
+       InstT op args ->
+         InstT op `liftM` mapM evaluate args
+       FunT pt eff rt ->
+         FunT `liftM` evaluate pt `ap` evaluate eff `ap` evaluate rt
+       VarT {} -> return expression
+       ConT {} -> return expression
+       LitT {} -> return expression
 
   renameT old_v new_v expression =
     case expression
@@ -503,20 +635,21 @@ instance Parametric EType where
        FunT pt eff rt -> pt `mentionsE` v >||>
                          eff `mentionsE` v >||>
                          rt `mentionsE` v
-       VarT _         -> return False
-       ConT _         -> return False
-       LitT _         -> return False
+       VarT {}        -> return False
+       ConT {}        -> return False
+       LitT {}        -> return False
 
   expression `mentionsAnyE` vs =
     case expression
-    of AppT op args -> op `mentionsAnyE` vs >||> anyM (`mentionsAnyE` vs) args
+    of AppT op args ->
+         op `mentionsAnyE` vs >||> anyM (`mentionsAnyE` vs) args
        InstT _ args   -> anyM (`mentionsAnyE` vs) args
        FunT pt eff rt -> pt `mentionsAnyE` vs >||>
                          eff `mentionsAnyE` vs >||>
                          rt `mentionsAnyE` vs
-       VarT _        -> return False
-       ConT _        -> return False
-       LitT _        -> return False
+       VarT {}        -> return False
+       ConT {}        -> return False
+       LitT {}        -> return False
   
   expression `mentionsT` v =
     case expression
@@ -526,8 +659,8 @@ instance Parametric EType where
                          eff `mentionsT` v ||
                          rt `mentionsT` v
        VarT v'        -> v == v'
-       ConT _         -> False
-       LitT _         -> False
+       ConT {}        -> False
+       LitT {}        -> False
 
 instance Parametric EParamType where
   freeEffectVars (ValPT _ ty) = freeEffectVars ty
@@ -671,7 +804,7 @@ isDictionaryTypeCon c =
 
 -- | Instantiate a type constructor by inserting new type parameters.  The
 -- parameters will acquire values by unification.
-instantiateTypeCon :: Bool -> Con -> RegionM EType
+instantiateTypeCon :: Bool -> Con -> RegionM ERepType
 instantiateTypeCon no_effects c
   | no_effects = return $ mkPureInstT (Right c) arity
   | otherwise  = mkInstT (Right c) arity
@@ -679,13 +812,13 @@ instantiateTypeCon no_effects c
     arity = dataTypeEffectArity c
 
 -- | Create an instance expression where all effect parameters are empty.
-mkPureInstT :: Either Var Con -> Int -> EType
+mkPureInstT :: Either Var Con -> Int -> ERepType
 mkPureInstT op arity = instT op (replicate arity emptyEffect)
 
 -- | Create an instance expression from a variable or constructor.
 mkInstT :: Either Var Con       -- ^ Variable or constructor to instantiate
         -> Int                  -- ^ Arity (number of effect parameters)
-        -> RegionM EType
+        -> RegionM ERepType
 mkInstT op arity = do
   args <- replicateM arity newEffectVar
   return $ instT op $ map varEffect args
@@ -694,18 +827,18 @@ mkInstT op arity = do
 -- | Convert a System F type to the corresponding effect type.  New effect
 -- variables are created to stand for each side effect.  Function types are
 -- conservatively assumed to access all their parameters.
-toEffectType :: Gluon.WSRExp -> RegionM EType
+toEffectType :: Gluon.WSRExp -> RegionM ERepType
 toEffectType = makeEffectType False
 
 -- | Convert a System F type to the corresponding effect type, with all side
 --   effect parameters set to the empty effect.  This conversion is used in
 --   type parameters of type classes.
-toPureEffectType :: Gluon.WSRExp -> RegionM EType
+toPureEffectType :: Gluon.WSRExp -> RegionM ERepType
 toPureEffectType = makeEffectType True
 
--- | This function does the real work of 'initEffectType' and
--- 'initPureEffectType'.
-makeEffectType :: Bool -> Gluon.WSRExp -> RegionM EType
+-- | This function does the real work of 'toEffectType' and
+-- 'toPureEffectType'.
+makeEffectType :: Bool -> Gluon.WSRExp -> RegionM ERepType
 makeEffectType no_effects expr =
   case getLevel $ Gluon.fromWhnf $ Gluon.substFullyUnderWhnf expr
   of KindLevel -> makeEffectKind expr
@@ -719,8 +852,8 @@ makeEffectType no_effects expr =
                  op' <- makeEffectType no_effects =<< evalHead op
                  args' <- mapM (makeEffectType no_effects <=< evalHead) args
                  return $ appT op' args'
-               Gluon.VarE {Gluon.expVar = v} -> return $ VarT v
-               Gluon.LitE {Gluon.expLit = l} -> return $ LitT l
+               Gluon.VarE {Gluon.expVar = v} -> return $ varT v
+               Gluon.LitE {Gluon.expLit = l} -> return $ litT l
                _ -> internalError "makeEffectType"
      _ -> internalError "makeEffectType"
 
@@ -729,22 +862,28 @@ makeEffectType no_effects expr =
 -- No effect types are inserted here.
 makeEffectKind expr =
   case Gluon.fromWhnf expr
-  of Gluon.LitE {Gluon.expLit = lit} -> return $ LitT lit
+  of Gluon.LitE {Gluon.expLit = lit} -> return $ litT lit
      Gluon.FunE { Gluon.expMParam = Binder' Nothing dom ()
                 , Gluon.expRange = rng} -> do
        dom' <- makeEffectKind =<< evalHead dom
        param <- etypeToParamType dom' Nothing
        rng' <- etypeToReturnType =<< makeEffectKind =<< evalHead rng
-       return $ FunT param emptyEffect rng'
+       return $ funT param emptyEffect rng'
      _ -> internalError "makeEffectKind"
 
-makeConstructorApplication no_effects con args = do
-  con_inst <- instantiateTypeCon no_local_effects con
+-- | Create an application of a type constructor.  System F types are
+-- translated to core types here.
+makeConstructorApplication no_effects sf_con args = do
+  con_inst <- instantiateTypeCon no_local_effects core_con
   args' <- mapM (makeEffectType no_local_effects <=< evalHead) args
   return $ appT con_inst args'
   where
     -- Don't let side effects appear in parameters to dictionary types 
-    no_local_effects = no_effects || isDictionaryTypeCon con
+    no_local_effects = no_effects || isDictionaryTypeCon sf_con
+    
+    core_con
+      | sf_con `SF.isPyonBuiltin` SF.the_Stream = SF.pyonBuiltin SF.the_LazyStream
+      | otherwise = sf_con
 
 -- | Create a function type from the expression.  In the type, assume that 
 -- all parameters are read.  Side effects from parameters will be placed on 
@@ -760,10 +899,18 @@ makeFunctionType no_effects expr =
        (rng', here_effect) <- make_range_type param_effects =<< evalHead rng
        return_type <- etypeToReturnType rng'
 
-       return (FunT param here_effect return_type)
+       return $ ERepType representation (FunT param here_effect return_type)
 
      _ -> internalError "makeFunctionType: Not a function type"
   where
+    -- The function's representation.  If it's a function type, the
+    -- representation is 'Boxed'.  If it's a function kind, the representation
+    -- is 'Value'.
+    representation =
+      case getLevel $ Gluon.fromWhnf expr
+      of TypeLevel -> Boxed
+         KindLevel -> Value
+    
     -- Convert everything on the right hand side of an (->)
     make_range_type param_effects expr =
       case Gluon.fromWhnf expr
@@ -776,7 +923,7 @@ makeFunctionType no_effects expr =
              make_range_type param_effects' =<< evalHead rng
            return_type <- etypeToReturnType rng'
 
-           return (FunT param here_effect return_type, emptyEffect)
+           return (ERepType representation $ FunT param here_effect return_type, emptyEffect)
          
          _ | getLevel (Gluon.fromWhnf expr) /= TypeLevel ->
                internalError "funTypeToPassType: Expecting a type"
@@ -815,9 +962,13 @@ type CoreEnv = Map.Map Var EffectVar
 -- region and effect variables are created for each type.
 type CoreTrans a = ReaderT CoreEnv RegionM a
 
+-- Translated variables are unifiable.  To avoid unexpected
+-- unification-related side effects, a translated type should either be
+-- used immediately at a monomorphic type, or turned into a type scheme that's
+-- instantiated each time its used.
 withCoreRegionVar :: Var -> (RVar -> CoreTrans a) -> CoreTrans a
 withCoreRegionVar v k = do
-  v' <- lift (newRegionVar False)
+  v' <- lift (newRegionVar True)
   local (Map.insert v v') (k v')
 
 withCoreEffectVar :: Var -> (EVar -> CoreTrans a) -> CoreTrans a
@@ -831,6 +982,12 @@ lookupCoreVar v = asks $ \env ->
   of Just v' -> v'
      Nothing -> internalError "lookupCoreVar"
 
+isCoreEffectVar :: Var -> CoreTrans Bool
+isCoreEffectVar v = asks $ \env ->
+  case Map.lookup v env
+  of Just v' | isEVar v' -> True
+     _ -> False
+
 -- | Convert a Core type to the corresponding effect inference type.
 -- This is used to get the effect types of predefined functions and
 -- data types.
@@ -841,14 +998,14 @@ lookupCoreVar v = asks $ \env ->
 --
 -- FIXME: Don't know how to determine whether a core type is an effect 
 -- or something else.
-coreToEffectType :: Core.RCType -> RegionM ([EVar], EType)
+coreToEffectType :: Core.RCType -> RegionM ([EVar], ERepType)
 coreToEffectType ty = runReaderT (cTypeToPolyEffectType ty) Map.empty
 
 -- | Convert a core type to a polymorphic effect type.
 
 -- Extract all effect parameters, then pass the remaining expression
 -- to 'cTypeToEffectType'.
-cTypeToPolyEffectType :: Core.RCType -> CoreTrans ([EVar], EType)
+cTypeToPolyEffectType :: Core.RCType -> CoreTrans ([EVar], ERepType)
 cTypeToPolyEffectType ty = 
   case ty
   of Core.FunCT ft -> from_poly_type ft
@@ -866,69 +1023,131 @@ cTypeToPolyEffectType ty =
 
     -- Functions must have a non-effect parameter
     from_poly_type (Core.RetCT _) = internalError "cTypeToPolyEffectType"
-    
+
     is_effect_type (Core.ExpCT (Gluon.LitE {Gluon.expLit = Gluon.KindL Gluon.EffectKind})) = True
     is_effect_type _ = False
 
-cTypeToEffectType :: Core.RCType -> CoreTrans EType
+cTypeToEffectType :: Core.RCType -> CoreTrans ERepType
 cTypeToEffectType ty =
   case ty
   of Core.ExpCT e -> gluonTypeToEffectType e
-     Core.AppCT op args ->
-       liftM2 appT (cTypeToEffectType op) (mapM cTypeToEffectType args)
+     Core.AppCT op args -> do
+       cop <- cTypeToEffectType op
+       (eff_args, other_args) <- cTypeArgumentsToEffectTypes args
+       
+       -- If there are effect arguments, create an instance expression
+       let varcon = case discardTypeRepr cop
+                    of VarT v -> Left v
+                       ConT c -> Right c
+                       _ -> internalError "cTypeToEffectType"
+           inst_op =
+             if null eff_args then cop else instT varcon eff_args
+
+       return $ appT inst_op other_args
      Core.FunCT ft -> cFunTypeToEffectType ft
      
-cFunTypeToEffectType :: Core.RCFunType -> CoreTrans EType
+-- | Convert a list of Core type arguments to effect-annotated types.
+-- A prefix of the arguments consists of effects; the rest are types.
+cTypeArgumentsToEffectTypes :: [Core.RCType]
+                            -> CoreTrans ([Effect], [ERepType])
+cTypeArgumentsToEffectTypes types = cvt_eff id types
+  where
+    -- Convert effect types, then convert other types
+    cvt_eff hd (t:ts) = do is_eff <- isCoreEffectType t 
+                           if is_eff
+                             then do eff <- cTypeToEffect t
+                                     cvt_eff (hd . (eff:)) ts
+                             else do types <- mapM cTypeToEffectType (t:ts)
+                                     return (hd [], types)
+    cvt_eff hd []     = return (hd [], [])
+
+-- | Decide whether a core expression is an effect type.  This function only
+-- works for the subset of core expressions that can be translated to effect
+-- inference.
+--
+-- Effect-typed core arguments are inspected by inspecting their head.  The
+-- constructors @SconjE@, @EmpE@, and @AtE@ indicate that it's effect typed.
+-- Also, effect variables indicate that it's effect typed.
+isCoreEffectType :: Core.RCType -> CoreTrans Bool
+isCoreEffectType ty =
+  case ty
+  of Core.ExpCT e ->
+       case e
+       of Gluon.VarE {Gluon.expVar = v} -> isCoreEffectVar v
+          Gluon.ConE {Gluon.expCon = c} -> return $ check_con c
+          Gluon.AppE {Gluon.expOper = Gluon.ConE {Gluon.expCon = c}} ->
+            return $ check_con c
+          _ -> return False
+     Core.AppCT op _ ->
+       case op
+       of Core.ExpCT (Gluon.ConE {Gluon.expCon = c}) -> return $ check_con c
+          _ -> return False
+     Core.FunCT {} -> return False
+  where
+    check_con c = c `elem` [ Gluon.builtin Gluon.the_EmpE
+                           , Gluon.builtin Gluon.the_SconjE
+                           , Gluon.builtin Gluon.the_AtE
+                           ]
+
+-- | Convert a Core function type to an effect-annotated type.
+
+-- The conversion process is recursive on the function range.  Initially, the
+-- entire type is treated like a function range, then it is converted from a
+-- return type to a regular type.
+cFunTypeToEffectType :: Core.RCFunType -> CoreTrans ERepType
 cFunTypeToEffectType ft = do
   rt <- to_return_type ft
-  case rt of OwnRT t -> return t
+  case rt of OwnRT t -> return (etypeWithStandardRepr t)
              _ -> internalError "cFunTypeToEffectType"
   where
     to_return_type (Core.ArrCT param_binder eff rng) =
       assume_parameter param_binder $ \param' -> do
         eff' <- cTypeToEffect eff
         rng' <- to_return_type rng
-        return $ OwnRT $ FunT param' eff' rng'
+        lift $ etypeToReturnType $ funT param' eff' rng'
+
     to_return_type (Core.RetCT (binder Core.::: rng)) = do
       rng' <- cTypeToEffectType rng
       case binder of 
-        Core.ValRT -> return $ ValRT rng'
-        Core.OwnRT -> return $ OwnRT rng'
+        Core.ValRT -> return $ ValRT $ discardTypeRepr rng'
+        Core.OwnRT -> return $ OwnRT $ discardTypeRepr rng'
         
         -- Only support reading from a variable address.  Addresses derived
         -- by pointer manipulation cannot be expressed.
         Core.ReadRT (Gluon.VarE {Gluon.expVar = v}) -> do
           rgn <- lookupCoreVar v
-          return $ ReadRT rgn rng'
+          return $ ReadRT rgn $ discardTypeRepr rng'
         Core.ReadRT _ -> internalError "cFunTypeToEffectType"
 
         Core.WriteRT -> do rgn <- lift (newRegionVar False)
-                           return $ WriteRT rgn rng'
+                           return $ WriteRT rgn $ discardTypeRepr rng'
 
     assume_parameter (param Core.::: dom) k = do
       dom' <- cTypeToEffectType dom
+      let dom_t = discardTypeRepr dom'
       case param of
-        Core.ValPT mv -> k $ ValPT mv dom'
-        Core.OwnPT    -> k $ OwnPT dom'
-        Core.ReadPT v -> withCoreRegionVar v $ \v' -> k $ ReadPT v' dom'
+        Core.ValPT mv -> k $ ValPT mv dom_t
+        Core.OwnPT    -> k $ OwnPT dom_t
+        Core.ReadPT v -> withCoreRegionVar v $ \v' -> k $ ReadPT v' dom_t
 
 -- | Convert a Gluon type to an effect type.
 -- The type may only consist of variables, constructors, and applications.
 --
 -- /FIXME/: Convert effect types using cTypeToEffect.  Use Core type inference
 -- to identify effect types.
-gluonTypeToEffectType :: Gluon.RExp -> CoreTrans EType
+gluonTypeToEffectType :: Gluon.RExp -> CoreTrans ERepType
 gluonTypeToEffectType expr =
   case expr
-  of Gluon.VarE {Gluon.expVar = v} -> return $ VarT v
-     Gluon.ConE {Gluon.expCon = c} -> return $ ConT c
+  of Gluon.VarE {Gluon.expVar = v} -> return $ varT v
+     Gluon.ConE {Gluon.expCon = c} -> return $ conT c
+     Gluon.LitE {Gluon.expLit = l} -> return $ litT l
      Gluon.AppE {Gluon.expOper = op, Gluon.expArgs = args} -> do
        op' <- gluonTypeToEffectType op
        args' <- mapM gluonTypeToEffectType args
        return $ appT op' args'
-     _ -> internalError "gluonTypeToEffectType: Unexpected type"
+     _ -> traceShow (Gluon.pprExp expr) $ internalError "gluonTypeToEffectType: Unexpected type"
 
--- | Convert a Gluon type to the corresponding effect.
+-- | Convert a core type to the corresponding effect.
 -- The type must consist of only the empty type @EmpE@, conjunctions
 -- @SconjE@, effect variables, and atomic @AtE@ effects where the address 
 -- is a region.

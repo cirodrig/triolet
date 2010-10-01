@@ -93,6 +93,8 @@ pprInfixPrim prim =
      PrimModZ _ _ -> Just $ text "%"
      PrimCmpZ _ _ c -> Just $ comparison c
      PrimCmpP c -> Just $ comparison c
+     PrimAnd -> Just $ text "&&"
+     PrimOr -> Just $ text "||"
      PrimAddP -> Just $ text "^+"
      PrimAddF _ -> Just $ text "+"
      PrimSubF _ -> Just $ text "-"
@@ -120,6 +122,9 @@ pprPrim prim =
            PrimMaxZ _ _ -> "max"
            PrimCmpZ _ _ c -> comparison c
            PrimCmpP c -> comparison c
+           PrimAnd -> "and"
+           PrimOr -> "or"
+           PrimNot -> "not"
            PrimAddP   -> "ptradd"
            PrimLoad _ -> "load"
            PrimStore _ -> "store"
@@ -129,6 +134,7 @@ pprPrim prim =
            PrimAddF _ -> "fadd"
            PrimSubF _ -> "fsub"
            PrimMulF _ -> "fmul"
+           PrimModF _ -> "fmod"
       ty =
         case prim
         of PrimLoad t -> pprValueType t

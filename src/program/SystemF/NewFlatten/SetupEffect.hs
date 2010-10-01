@@ -135,7 +135,7 @@ data instance SFExpOf EI EI =
                                 --   coercion.
       -- | Result's parameter-passing convention
     , eiReturnType :: !PassTypeAssignment
-    , eiReturnConv :: !PassConv
+    , eiReturnConv :: !Representation
     , eiExp    :: EIExp'
     }
 type EIExp = SFExpOf EI EI
@@ -488,22 +488,22 @@ forceAlt a = do
 
 -- | Determine what parameter-passing convention to use for values of the 
 -- given type.
-typePassConv :: Gluon.WSRExp -> PassConv
+typePassConv :: Gluon.WSRExp -> Representation
 typePassConv expression
   | getLevel (Gluon.fromWhnf $ Gluon.substFullyUnderWhnf expression) == KindLevel =
       -- Types are always passed by value
-      ByValue
+      Value
   | otherwise =
       case Gluon.unpackRenamedWhnfAppE expression
       of Just (con, _) -> typeConstructorPassConv con
          _ -> case Gluon.fromWhnf expression
-              of Gluon.FunE {} -> Owned
-                 _ -> Borrowed
+              of Gluon.FunE {} -> Boxed
+                 _ -> Referenced
 
-funTypeToPassType :: Gluon.WSRExp -> RegionM (PassConv, PassType)
+funTypeToPassType :: Gluon.WSRExp -> RegionM (Representation, PassType)
 funTypeToPassType expression =
   do t <- make_cc emptyEffect expression
-     return (Owned, FunT t)
+     return (Boxed, FunT t)
   where
     -- Create the calling convention.  Accumulate function parameters into
     -- the function's side effect.
@@ -533,23 +533,23 @@ funTypeToPassType expression =
              return $ RetFT effect' pt
 
 -- | Convert a type expression to a parameter passing type
-typeToPassType :: Gluon.WSRExp -> RegionM (PassConv, PassType)
+typeToPassType :: Gluon.WSRExp -> RegionM (Representation, PassType)
 typeToPassType expression =
   case getLevel $ Gluon.fromWhnf expression
   of TypeLevel ->
        case Gluon.fromWhnf expression
        of Gluon.FunE {} -> funTypeToPassType expression
           _             -> typeToEType expression
-     KindLevel -> return (ByValue, TypeT)
+     KindLevel -> return (Value, TypeT)
 
 -- | Convert a type expression to a function parameter for effect inference. 
 -- Also determine its parameter passing convention.
 --
--- If it's passed 'Borrowed', then the parameter is given a region and will
+-- If it's passed 'Referenced', then the parameter is given a region and will
 -- be part of the function's side effect.
 typeToFunParam :: Maybe Var
                -> Gluon.WSRExp 
-               -> RegionM (PassConv, FunParam)
+               -> RegionM (Representation, FunParam)
 typeToFunParam dependent_var ty = do
   (_, pass_type) <- typeToPassType ty
   let pass_conv = typePassConv ty
@@ -557,7 +557,7 @@ typeToFunParam dependent_var ty = do
   return (pass_conv, FunParam rgn dependent_var pass_type)
 
 -- | Called by 'typeToPassType' to handle some cases.
-typeToEType :: Gluon.WSRExp -> RegionM (PassConv, PassType)
+typeToEType :: Gluon.WSRExp -> RegionM (Representation, PassType)
 typeToEType expression =
   case Gluon.fromWhnf expression
   of Gluon.AppE { Gluon.expOper = op@(Gluon.substHead ->
@@ -569,7 +569,7 @@ typeToEType expression =
 
           -- Create an effect variable for the stream
           evar <- newEffectVar Nothing
-          return (Owned, StreamT (varEffect evar) output)
+          return (Boxed, StreamT (varEffect evar) output)
 
        | isDictionaryTypeCon con -> do
            -- Dictionary types always involve empty effect types
@@ -580,7 +580,7 @@ typeToEType expression =
            clearFlexibleEffectVariables op'
            mapM_ clearFlexibleEffectVariables args'
 
-           return (ByValue, AppT op' args')
+           return (Value, AppT op' args')
 
      Gluon.AppE {Gluon.expOper = op, Gluon.expArgs = args} -> do
        op' <- subexpr_pass_type op
@@ -604,7 +604,7 @@ typeToEType expression =
 
 -- | Get the parameter-passing convention of values of the given type.  The
 -- result describes values of the fully-applied type constructor.
-typeConstructorPassConv :: Con -> PassConv
+typeConstructorPassConv :: Con -> Representation
 typeConstructorPassConv con =
   case IntMap.lookup (fromIdent $ conID con) table
   of Just x -> x
@@ -623,7 +623,7 @@ typeConstructorPassConv con =
       , (SystemF.the_float, value)
       , (SystemF.the_bool, value)
       , (SystemF.the_list, borrowed)
-      , (SystemF.the_Stream, Owned)
+      , (SystemF.the_Stream, Boxed)
       , (\_ -> SystemF.getPyonTupleType' 0, borrowed)
       , (\_ -> SystemF.getPyonTupleType' 1, borrowed)
       , (\_ -> SystemF.getPyonTupleType' 2, borrowed)
@@ -635,8 +635,8 @@ typeConstructorPassConv con =
       , (SystemF.the_VectorDict, value)
       ]
       
-    borrowed = Borrowed
-    value = ByValue
+    borrowed = Referenced
+    value = Value
 
 dataConstructorPassType :: Con -> RegionM PolyPassType
 dataConstructorPassType con =
@@ -1145,11 +1145,11 @@ systemFFunPassType (TypedSFFun (TypeAnn ty _)) =
       
   return $ funMonoPassType (ty_params ++ params) return_type effect-}
   
--- | Create a new region variable if the parameter uses the 'Borrowed'
+-- | Create a new region variable if the parameter uses the 'Referenced'
 -- passing convention.
 newRegionVarIfBorrowed :: RegionMonad m =>
-                          Maybe Label -> PassConv -> m (Maybe RVar) 
-newRegionVarIfBorrowed lab Borrowed = liftM Just $ newRegionVar lab
+                          Maybe Label -> Representation -> m (Maybe RVar) 
+newRegionVarIfBorrowed lab Referenced = liftM Just $ newRegionVar lab
 newRegionVarIfBorrowed lab _        = return Nothing
 
 -- | Convert a type pattern to a binder.  Type patterns never have
@@ -1204,11 +1204,11 @@ withDef (Def v f) m =
       in assumePassType v assignment Nothing m
 
 -- | Create or look up the region holding the expression's return value.
--- 'Nothing' is returned if the expression returns using the 'ByValue' or 
--- 'Owned' conventions.  A region is returned if the expression returns 
--- using the 'Borrowed' convention.
+-- 'Nothing' is returned if the expression returns using the 'Value' or 
+-- 'Boxed' conventions.  A region is returned if the expression returns 
+-- using the 'Referenced' convention.
 createReturnRegion :: EIExp'    -- ^ Expression whose region is returned
-                   -> PassConv  -- ^ Return passing convention
+                   -> Representation  -- ^ Return passing convention
                    -> Maybe Label
                    -> EffInf (Maybe RVar)
 createReturnRegion exp return_conv lab =
@@ -1525,7 +1525,7 @@ effectInferArgument (Left ty_arg) = do
                       , eiEffect = emptyEffect
                       , eiRegion = Nothing
                       , eiReturnType = MonoAss pass_type
-                      , eiReturnConv = ByValue
+                      , eiReturnConv = Value
                       , eiExp = exp
                       }
   return (new_exp, Just type_as_value)

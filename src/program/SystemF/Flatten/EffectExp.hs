@@ -29,6 +29,7 @@ import qualified SystemF.Syntax as SF
 import qualified SystemF.Print as SF
 import qualified SystemF.Typecheck as SF
 import qualified Core.Syntax as Core
+import Core.Syntax(Representation(..))
 import qualified Core.BuiltinTypes as Core
 import SystemF.Flatten.Constraint
 import SystemF.Flatten.Effect
@@ -138,7 +139,7 @@ data EExp' =
     { expFun :: EFun
     }
   | DoE
-    { expTyArg :: EType
+    { expTyArg :: EExp
     , expPassConv :: EExp
     , expBody :: EExp
     }
@@ -198,7 +199,7 @@ data EFun =
 
 -- | Get the type of an effect-inferred function, without universal
 -- quantifiers.
-efunMonoType :: EFun -> EType
+efunMonoType :: EFun -> ERepType
 efunMonoType fun
   | null $ funParams fun = internalError "efunMonoType: Nullary function"
   | otherwise =
@@ -210,18 +211,19 @@ efunMonoType fun
             funEffect fun `mentionsT` paramVar last_param
 
           last_param_type = paramParamType last_param last_param_mentioned
-          fun_type_1 = FunT last_param_type (funEffect fun) (funReturnType fun)
+          fun_type_1 =
+            funT last_param_type (funEffect fun) (funReturnType fun)
       
       in foldl add_parameter fun_type_1 params
   where
     add_parameter range param =
       let param_mentioned = range `mentionsT` paramVar param
           param_type = paramParamType param param_mentioned
-      in FunT param_type emptyEffect (OwnRT range)
+      in funT param_type emptyEffect (OwnRT $ discardTypeRepr range)
 
 efunPolyType :: EFun -> EffectAssignment
 efunPolyType f =
-  let mono_type = OwnRT $ efunMonoType f
+  let mono_type = OwnRT $ discardTypeRepr $ efunMonoType f
   in if null $ funEffectParams f
      then MonoEffect mono_type
      else PolyEffect (funEffectParams f) mono_type
@@ -246,7 +248,7 @@ data EffectAssignment =
 
 -- | Create a monomorphic efect type for a function with the given parameters,
 -- side effect, and return type.
-funMonoEType :: [EParam] -> Effect -> EReturnType -> EType
+funMonoEType :: [EParam] -> Effect -> EReturnType -> ERepType
 funMonoEType params eff ret =
   case reverse params
   of [] -> internalError "funMonoEType: Nullary function"
@@ -254,14 +256,14 @@ funMonoEType params eff ret =
        foldr add_param (make_function last_param) params'
   where
     make_function last_param =
-      FunT (paramParamType last_param is_mentioned) eff ret
+      funT (paramParamType last_param is_mentioned) eff ret
       where
         is_mentioned =
           ret `mentionsT` paramVar last_param ||
           ret `mentionsT` paramVar last_param
 
     add_param param rng =
-      FunT (paramParamType param is_mentioned) emptyEffect (OwnRT rng)
+      funT (paramParamType param is_mentioned) emptyEffect (OwnRT $ discardTypeRepr rng)
       where
         is_mentioned = rng `mentionsT` paramVar param
 
@@ -345,10 +347,12 @@ genTempStoreOwned rgn = coercionExp coerce_return GenTempStoreOwned
 forceEType :: EType -> IO EType
 forceEType ty =
   case ty
-  of AppT op args -> AppT `liftM` forceEType op `ap` mapM forceEType args
+  of AppT op args ->
+       AppT `liftM` forceEType op `ap` mapM forceEType args
      InstT varcon effs -> InstT varcon `liftM` mapM evalEffect effs
-     FunT pt eff rt -> FunT `liftM` forceEParamType pt `ap` evalEffect eff `ap`
-                       forceEReturnType rt
+     FunT pt eff rt ->
+       FunT `liftM` forceEParamType pt `ap` evalEffect eff `ap`
+       forceEReturnType rt
      VarT {} -> return ty
      ConT {} -> return ty
      LitT {} -> return ty
@@ -397,13 +401,21 @@ forceEExp e = do
          InstE op args -> InstE op `liftM` mapM evalEffect args
          CallE op args -> CallE `liftM` forceEExp op `ap` mapM forceEExp args
          FunE f -> FunE `liftM` forceEFun f
-         DoE ty pc body -> DoE `liftM` forceEType ty `ap` forceEExp pc `ap`
+         DoE ty pc body -> DoE `liftM` forceEExp ty `ap` forceEExp pc `ap`
                            forceEExp body
          LetE lhs ty rhs body -> LetE lhs `liftM` forceEReturnType ty `ap`
                                  forceEExp rhs `ap` forceEExp body
          LetrecE defs body -> LetrecE `liftM` mapM forceEDef defs `ap`
                               forceEExp body
          CaseE scr alts -> CaseE `liftM` forceEExp scr `ap` mapM forceEAlt alts
+         GenLoadValue e -> GenLoadValue `liftM` forceEExp e
+         GenTempLoadValue e -> GenTempLoadValue `liftM` forceEExp e
+         GenLoadOwned e -> GenLoadOwned `liftM` forceEExp e
+         GenTempLoadOwned e -> GenTempLoadOwned `liftM` forceEExp e
+         GenStoreValue e -> GenStoreValue `liftM` forceEExp e
+         GenTempStoreValue e -> GenTempStoreValue `liftM` forceEExp e
+         GenStoreOwned e -> GenStoreOwned `liftM` forceEExp e
+         GenTempStoreOwned e -> GenTempStoreOwned `liftM` forceEExp e
 
 forceEAlt (EAlt con ty_args params body) =
   EAlt con `liftM` mapM forceEType ty_args `ap` mapM forceEParam params `ap`
@@ -420,7 +432,21 @@ forceEFun fun = do
                , funBody = body
                }
 
+-- | Force evaluation of unified expressions in the fields of a function 
+-- that contribute to its type.  Evaluation is forced after generalization
+-- so that instantiation works properly.
+forceEFunTypeFields fun = do
+  params <- mapM forceEParam $ funParams fun
+  rt <- forceEReturnType $ funReturnType fun
+  eff <- evalEffect $ funEffect fun
+  return $ fun { funParams = params
+               , funReturnType = rt
+               , funEffect = eff
+               }
+
 forceEDef (EDef v f) = EDef v `liftM` forceEFun f
+
+forceEDefTypeFields (EDef v f) = EDef v `liftM` forceEFunTypeFields f
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -455,6 +481,22 @@ pprEExp' expression =
      CaseE scr alts ->
        text "case" <+> pprEExp scr $$
        text "of" <+> vcat (map pprEAlt alts)
+     GenLoadValue e ->
+       text "LOAD_VALUE" <+> pprEExp e
+     GenTempLoadValue e ->
+       text "LOAD_TEMP_VALUE" <+> pprEExp e
+     GenLoadOwned e ->
+       text "LOAD_BOXED" <+> pprEExp e
+     GenTempLoadOwned e ->
+       text "LOAD_TEMP_BOXED" <+> pprEExp e
+     GenStoreValue e ->
+       text "STORE_VALUE" <+> pprEExp e
+     GenTempStoreValue e ->
+       text "STORE_TEMP_VALUE" <+> pprEExp e
+     GenStoreOwned e ->
+       text "STORE_BOXED" <+> pprEExp e
+     GenTempStoreOwned e ->
+       text "STORE_TEMP_BOXED" <+> pprEExp e
 
 pprEParam :: EParam -> Doc
 pprEParam param = parens $
