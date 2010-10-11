@@ -46,7 +46,7 @@ main = do
   -- Initialiation
   loadBuiltins
   initializeTIBuiltins
-  
+
   -- Parse arguments
   job <- parseCommandLineArguments
   

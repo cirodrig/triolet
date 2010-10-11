@@ -15,7 +15,7 @@ module SystemF.Flatten.Effect
         -- ** Unification
         assignEffectVar, assignEffectVarD,
         unifyRegionVars,
-        evalRVar,
+        evalRVar, evalEVar,
         evalEffectVar,
         splitEffectVar,
         
@@ -310,6 +310,18 @@ evalRVar rv
       case rep of EVNoRep      -> return rv
                   EVVarRep v'  -> return v'
                   EVValueRep _ -> internalError "evalRVar: Region was unified with an effect"
+
+-- | Get the representative of an effect variable.  This call will fail if the
+-- effect variable has been unified with an effect.
+evalEVar :: EVar -> IO EVar
+evalEVar ev
+  | not $ isEVar ev = internalError "evalEVar: not an effect variable"
+  | otherwise = do
+      rep <- evalEffectVarRep (_evarRep ev)
+      case rep of
+        EVNoRep      -> return ev
+        EVVarRep ev' -> return ev'
+        EVValueRep _ -> internalError "evalEVar: Got an effect, not an effect variable"
 
 -- | Get the value of an effect or region variable.  If no value has been
 -- assigned by unification, the return value is equal to the original effect

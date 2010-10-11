@@ -128,6 +128,12 @@ returnType OwnR = OwnRT
 returnType (WriteR a p) = WriteRT
 returnType (ReadR a p) = ReadRT a
 
+returnRepr :: CReturn s -> Representation
+returnRepr (ValR {}) = Value
+returnRepr (OwnR {}) = Boxed
+returnRepr (WriteR {}) = Referenced
+returnRepr (ReadR {}) = Referenced
+
 -- | A @let@ binder.
 data LetBinder s =
     -- | Bind a value
@@ -228,6 +234,9 @@ varCT v = ExpCT (mkInternalVarE v)
 
 conCT :: Con -> RCType
 conCT c = ExpCT (mkInternalConE c)
+
+litCT :: Lit -> RCType
+litCT l = ExpCT (LitE (mkSynInfo noSourcePos (litLevel l)) l)
 
 expCT :: RecExp s -> CType s
 expCT e = ExpCT e

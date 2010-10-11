@@ -1,9 +1,10 @@
 {-| Definitions of Core types of builtin constructors.
 -}
-module Core.BuiltinTypes(conCoreType, conCoreReturnType)
+module Core.BuiltinTypes(dumpCoreTypes, conCoreType, conCoreReturnType)
 where
 
 import qualified Data.IntMap as IntMap
+import Text.PrettyPrint.HughesPJ
 import System.IO.Unsafe
 
 import Gluon.Common.Error
@@ -17,6 +18,14 @@ import SystemF.Builtins
 import Core.Syntax
 import Core.Gluon
 import Core.Print
+
+-- | Format the table of types as a string for human reading.
+dumpCoreTypes :: () -> String
+dumpCoreTypes () =
+  show $ vcat $ map dump_type_sig $ IntMap.toList constructorTable
+  where
+    dump_type_sig (id, val) =
+      text ("#" ++ show id) $$ nest 4 (pprReturnT val)
 
 -- | Get the core return type of a constructor.  This is the type returned by
 -- a 'ValueConV' or 'OwnedConV' expression.

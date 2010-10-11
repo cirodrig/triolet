@@ -61,6 +61,11 @@ data EParamType =
 
 instance HasLevel EParamType where getLevel t = getLevel $ paramTypeType t
 
+paramTypeRepr :: EParamType -> Representation
+paramTypeRepr (ValPT {}) = Value
+paramTypeRepr (OwnPT {}) = Boxed
+paramTypeRepr (ReadPT {}) = Referenced
+
 paramTypeType :: EParamType -> EType
 paramTypeType (ValPT _ t) = t
 paramTypeType (OwnPT t) = t
@@ -86,6 +91,12 @@ data EReturnType =
   | WriteRT RVar EType
 
 instance HasLevel EReturnType where getLevel t = getLevel $ returnTypeType t
+
+returnTypeRepr :: EReturnType -> Representation
+returnTypeRepr (ValRT {}) = Value
+returnTypeRepr (OwnRT {}) = Boxed
+returnTypeRepr (ReadRT {}) = Referenced
+returnTypeRepr (WriteRT {}) = Referenced
 
 returnTypeType :: EReturnType -> EType
 returnTypeType (ValRT t) = t

@@ -59,7 +59,7 @@ module SystemF.Builtins
         the_fun_zip_SS, the_fun_zip_NS, the_fun_zip_SN,
         the_fun_iota,
         the_fun_undefined,
-        {-the_fun_copy,-}
+        the_fun_copy,
         the_fun_return,
         the_fun_store_int,
         the_fun_store_float,

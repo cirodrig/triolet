@@ -28,6 +28,7 @@ module SystemF.Flatten.Constraint
         -- ** Constraint solving
         solveGlobalConstraint,
         eliminateRigidVariable,
+        eliminateRigidVariables,
         eliminatePredicate,
         makeFlexibleVariablesIndependentWithConstraint,
         clearFlexibleEffectVariables
@@ -207,7 +208,9 @@ doEliminateRigidVariable :: EffectVar -- ^ Variable to eliminate
                        -> Constraint
                        -> RegionM Constraint
 doEliminateRigidVariable v cst = do
-  unlessM (isRigid v) $ internalError "eliminateRigidVariable"
+  -- This is actually valid in some cases for flexible variables, as long as we
+  -- know that no further unification will occur.  So this check is disabled.
+  -- unlessM (isRigid v) $ internalError "eliminateRigidVariable"
 
   -- Verify that the variable only appears on the RHS of constraints.
   -- This should always be true if 'reduceConstraint' is called first.
@@ -271,6 +274,12 @@ mkEqualityConstraint e1 e2 = do
 eliminateRigidVariable :: EffectVar -> Constraint -> RegionM Constraint
 eliminateRigidVariable v cst =
   doEliminateRigidVariable v =<< reduceConstraint cst
+
+eliminateRigidVariables :: [EffectVar] -> Constraint -> RegionM Constraint
+eliminateRigidVariables (v:vs) cst = do
+  eliminateRigidVariables vs =<< eliminateRigidVariable v cst
+
+eliminateRigidVariables [] cst = return cst
 
 -- | Eliminate a predicate where the lower bound is a flexible variable.
 -- The predicate must be in head normal form.  The variables created during
@@ -339,7 +348,6 @@ clearFlexibleEffectVariables get_free_vars vs = withRigidEffectVars $ \ctx -> do
 makeFlexibleVariablesIndependentWithConstraint ::
   IO (Set.Set EffectVar, Set.Set EffectVar) -> Constraint -> RegionM Constraint
 makeFlexibleVariablesIndependentWithConstraint get_free_vars cst = do
-  liftIO $ print $ text "MFVI" <+> pprConstraint cst -- DEBUG
   -- simplify the constraint
   cst1 <- reduceConstraint cst
   liftIO $ print $ text "MFVI" <+> pprConstraint cst1 -- DEBUG
