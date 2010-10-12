@@ -30,12 +30,19 @@ module LowLevel.Builtins
         the_fun_copy1F,
         the_fun_copy2F,
         the_fun_copy4F,
+        the_fun_copy,
         the_fun_load_int,
         the_fun_load_float,
         the_fun_load_NoneType,
         the_fun_store_int,
         the_fun_store_float,
-        the_fun_store_NoneType)
+        the_fun_store_NoneType,
+        the_fun_additiveDict,
+        the_bivar_int_pass_conv,
+        the_bivar_float_pass_conv,
+        the_bivar_bool_pass_conv,
+        the_bivar_AdditiveDict_pass_conv,
+        the_bivar_PassConv_pass_conv)
 where
 
 import Control.Monad

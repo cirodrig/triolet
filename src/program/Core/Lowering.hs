@@ -59,7 +59,7 @@ convertCon c =
 -- a global variable in low-level code.
 convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
-    tbl = [ (pyonBuiltin the_passConv_int,
+    tbl = [] {- (pyonBuiltin the_passConv_int,
              value (LLType $ LL.RecordType passConvRecord) intPassConvValue)
           , (pyonBuiltin the_passConv_float,
              value (LLType $ LL.RecordType passConvRecord) floatPassConvValue)
@@ -68,7 +68,19 @@ convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
           , (pyonBuiltin the_additiveDict,
              atom [CoreType $ conCoreReturnType $ pyonBuiltin the_additiveDict]
              genAdditiveDictFun)
+          ]-}
+
+globalVarAssignment =
+  IntMap.fromList [(fromIdent $ varID c, v) | (c, v) <- tbl]
+  where
+    tbl = [ (pyonBuiltin the_passConv_int_ptr,
+             (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_int_pass_conv))
           ]
+
+isSingletonDataType c
+  | c `elem` [pyonBuiltin the_AdditiveDict] = True
+  | c `elem` [] = False
+  | otherwise = internalError "isSingletonDataType: Not implemented for this type"
 
 type BuildBlock a = Gen FreshVarM a
 
@@ -103,7 +115,14 @@ newtype Cvt a = Cvt {runCvt :: ReaderT CvtEnv IO a} deriving(Monad, MonadIO)
 
 data CvtEnv = CvtEnv { varSupply :: {-# UNPACK #-}!(IdentSupply Var)
                      , llVarSupply :: {-# UNPACK #-}!(IdentSupply LL.Var)
+                       -- | Gluon type environment.  Only holds pure variables
+                       --   that may appear in types.
                      , typeEnvironment :: [(Var, RExp)]
+                       -- | Passing convention environment.  Only holds
+                       --   parameter passing conventions and their types.
+                     , passConvEnvironment :: [(AddrVar, PtrVar, RExp)]
+                       -- | Variable assignments.  Holds the lowered equivalent
+                       --   of all Core variables.
                      , varAssignment :: IntMap.IntMap (LoweringType, LL.Var)
                      }
 
@@ -146,7 +165,7 @@ instance PureTypeMonad Cvt where
 
 doCvt :: IdentSupply Var -> IdentSupply LL.Var -> Cvt a -> IO a
 doCvt var_supply anf_var_supply m = do
-  let env = CvtEnv var_supply anf_var_supply [] IntMap.empty
+  let env = CvtEnv var_supply anf_var_supply [] [] globalVarAssignment
   runReaderT (runCvt m) env
       
 lookupVar :: Var -> Cvt (LoweringType, LL.Var)
@@ -155,6 +174,7 @@ lookupVar v = Cvt $ asks $ \env ->
   of Just x  -> x
      Nothing -> internalError "lookupVar: No assignment for variable"
 
+-- | Record how to translate a variable to low-level code. 
 convertVar :: Var -> LoweringType -> (LL.Var -> Cvt a) -> Cvt a
 convertVar v ty k = do
   v' <- LL.newVar (varName v) Nothing (lowered ty)
@@ -171,11 +191,22 @@ assumeCoreVar v core_type m = do
   gluon_type <- coreToGluonType (verbatim core_type)
   assumePure v gluon_type m
 
+-- | Add a parameter-passing convention dictionary to the environment.
+-- The given type should be the dictionary's type parameter.
+assumePassConvVar :: AddrVar -> PtrVar -> RCType -> Cvt a -> Cvt a
+assumePassConvVar a p param_type m = do
+  gluon_type <- coreToGluonType (verbatim param_type)
+  Cvt $ local (insert_binding a p gluon_type) $ runCvt m
+  where 
+    insert_binding a p gluon_type env =
+      env { passConvEnvironment = (a, p, gluon_type) : passConvEnvironment env}
+
 -- | Get the parameter passing convention environment.
 -- For each variable @v@of type @(PassConv t)@, include the pair @(v, t)@
 -- in the returned list.
-getPassConvEnvironment :: Cvt [(Var, RExp)]
-getPassConvEnvironment = do
+getPassConvEnvironment :: Cvt [(AddrVar, PtrVar, RExp)]
+getPassConvEnvironment = Cvt $ asks passConvEnvironment
+  {- traceEnvironment "getPassConvEnvironment" $ do
   types <- getPureTypes
   return $ mapMaybe pass_conv_types types
   where
@@ -186,7 +217,7 @@ getPassConvEnvironment = do
                case args
                of [arg] -> Just (v, arg) 
                   _ -> internalError "getPassConvEnvironment"
-         _ -> Nothing
+         _ -> Nothing-}
 
 -------------------------------------------------------------------------------
 
@@ -214,11 +245,12 @@ asAtom (Cv _ x) =
      CvExp hd -> hd
 
 -- | Bind the single result of a piece of code to a variable.
-asLet :: [LoweringType]                 -- ^ Type of result
+asLet :: [LoweringType]           -- ^ Type of result
       -> BuildBlock LL.Atom       -- ^ Code whose result should be bound
       -> BuildBlock LL.Val        -- ^ Code with result bound to a variable
 asLet [ty] hd = hd >>= emitAtom1 (lowered ty)
-  
+
+{-
 -- | Generate code to compute the size of a data type
 withSizeOf :: RCType -> Cvt (BuildBlock LL.Val)
 withSizeOf ty = liftM get_size $ getPassConv ty
@@ -228,34 +260,36 @@ withSizeOf ty = liftM get_size $ getPassConv ty
       pc_var <- pass_conv
 
       -- Get its 'size' field
-      selectField passConvRecord 0 pc_var
+      selectField passConvRecord 0 pc_var -}
 
--- | Generate code to compute the field information of a data type
-fieldOf :: RCType -> Cvt (BuildBlock DynamicFieldType)
-fieldOf ty = 
+-- | Return a description of a data type.  It may involve generating 
+-- code to compute the data type description.
+lowerToFieldType :: RCType -> Cvt (BuildBlock (), DynamicFieldType)
+lowerToFieldType ty = 
   case unpackConAppCT ty
   of Just (con, args)
        | con `isPyonBuiltin` the_int -> return int_field
        | con `isPyonBuiltin` the_float -> return float_field
-       | otherwise -> internalError "fieldOf: No information for type"
+       | otherwise -> internalError "lowerToFieldType: No information for type"
      Nothing -> case ty
                 of FunCT {} -> return owned_field
-                   _ -> internalError "fieldOf: Unexpected type"
+                   _ -> internalError "lowerToFieldType: Unexpected type"
   where
-    int_field = return $ PrimField pyonIntType
-    float_field = return $ PrimField pyonFloatType
-    owned_field = return $ PrimField OwnedType
+    int_field = (return (), PrimField pyonIntType)
+    float_field = (return (), PrimField pyonFloatType)
+    owned_field = (return (), PrimField OwnedType)
 
+{-
 -- | Generate code to compute the record layout of a data constructor with
 --   the given type arguments.
 recordLayoutOf :: Con -> [RCType] -> Cvt (BuildBlock DynamicRecord)
 recordLayoutOf datacon type_args
   | datacon == getPyonTupleCon' 2 =
-      liftM tupleRecordLayout $ mapM fieldOf type_args
+      liftM tupleRecordLayout $ mapM lowerToFieldType type_args
 
 tupleRecordLayout size_and_alignments = do
   createDynamicRecord =<< sequence size_and_alignments 
-  
+  -}
 -------------------------------------------------------------------------------
 -- Parameter-passing conventions
 
@@ -272,12 +306,14 @@ lookupPassConv ty = do
   -- Get corresponding ANF variable
   case mcore_var of
     Nothing -> return Nothing
-    Just v  -> do (_, v') <- lookupVar v
-                  return $ Just v'
+    Just (addr_var, ptr_var) -> do (_, v') <- lookupVar ptr_var
+                                   return $ Just v'
   where
-    find_type want_type ((var, pc_type) : assocs) = do
+    find_type want_type ((addr_var, value_var, pc_type) : assocs) = do
       eq <- testEquality want_type (verbatim pc_type) 
-      if eq then return (Just var) else find_type want_type assocs
+      if eq
+        then return (Just (addr_var, value_var))
+        else find_type want_type assocs
 
     find_type _ [] = return Nothing
 
@@ -292,13 +328,169 @@ getPassConv ty = do
       -- Try to construct a passing convention
       case unpackConAppCT ty
       of Just (con, args)
-           | con `isPyonBuiltin` the_int -> return (return intPassConvValue)
-           | con `isPyonBuiltin` the_float -> return (return floatPassConvValue)
-           | con `isPyonBuiltin` the_bool -> return (return boolPassConvValue)
+           | con `isPyonBuiltin` the_int ->
+               return (return $ builtinVar the_bivar_int_pass_conv)
+           | con `isPyonBuiltin` the_float ->
+               return (return $ builtinVar the_bivar_float_pass_conv)
+           | con `isPyonBuiltin` the_bool ->
+               return (return $ builtinVar the_bivar_bool_pass_conv)
+           | con `isPyonBuiltin` the_PassConv ->
+               return (return $ builtinVar the_bivar_PassConv_pass_conv)
+           | con `isPyonBuiltin` the_AdditiveDict ->
+               return (return $ builtinVar the_bivar_AdditiveDict_pass_conv)
            | con `isPyonBuiltin` the_list -> undefined
          _ -> internalError $ "getPassConv: Unexpected type " ++ show (pprType ty)
 
 -------------------------------------------------------------------------------
+-- Data structure lowering
+
+-- | Load a field of a data structure.
+--         
+-- The returned function takes a pointer to the data structure as a
+-- parameter, and returns a code generator that produces the loading code.
+loadStructureField :: DynamicField       -- ^ Field to load
+                   -> CBind CParam Rec   -- ^ Parameter that binds the field
+                   -> (LL.Var -> Cvt a)  -- ^ User of the parameter
+                   -> Cvt (LL.Val -> BuildBlock (), a)
+loadStructureField field (param ::: param_type) consumer =
+  convertParameter (param ::: param_type) $ \llparam -> do
+    consumer_rtn <- consumer llparam
+    return (fetch_field llparam, consumer_rtn)
+  where
+    -- Fetch a field into a variable.  If it's a reference field, just fetch
+    -- its offset.
+    fetch_field llparam scrutinee_ptr =
+      case param
+      of ValP {} -> loadFieldAs field scrutinee_ptr llparam
+         OwnP {} -> loadFieldAs field scrutinee_ptr llparam
+         ReadP {} -> primAddPAs scrutinee_ptr (fieldOffset field) llparam
+
+-- | Load multiple fields of a data structure.
+--         
+-- Each (field, parameter) pair loads the given field into the parameter
+-- variable.  The field definition must agree with the parameter type.
+loadStructureFields :: [(DynamicField, CBind CParam Rec)]
+                    -> ([LL.Var] -> Cvt a)
+                    -> Cvt (LL.Val -> BuildBlock (), a)
+loadStructureFields field_load_specs consumer = do
+  (fetch_fields, x) <- lfs [] field_load_specs
+
+  -- Combine all field-fetching code generators into one 
+  let fetch_all_fields scrutinee_ptr = mapM_ ($ scrutinee_ptr) fetch_fields
+  return (fetch_all_fields, x)
+  where
+    lfs loaded_values ((field, param) : fs) = do
+      (fetch_field, (fetch_fields, x)) <-
+        loadStructureField field param $ \llparam ->
+        lfs (llparam : loaded_values) fs
+      return (fetch_field : fetch_fields, x)
+    
+    lfs loaded_values [] = do
+      x <- consumer (reverse loaded_values)
+      return ([], x)
+
+-- | Fetch the fields of a value, using the natural data representation of
+-- the given data constructor instance.
+unpackDataConstructorFields :: Con -- ^ Data constructor
+                            -> [RCType] -- ^ Type parameters
+                            -> [CBind CParam Rec] -- ^ Fields
+                            -> ([LL.Var] -> Cvt a) -- ^ Code using the fields
+                            -> Cvt (LL.Lit, LL.Val -> BuildBlock (), a)
+unpackDataConstructorFields datacon ty_args params consumer = do
+  -- Get layout information
+  (tag, compute_record, constructor_layout) <-
+    dataConstructorFieldLayout datacon ty_args
+  unless (dataConLayoutNumFields constructor_layout == length params) $
+    internalError "unpackDataConstructorFields: Wrong number of fields"
+    
+  -- Read fields and use the result
+  (load_stuff, x) <-
+    case constructor_layout
+    of ReferenceLayout offset record_fields -> do
+         (fetch_fields, x) <-
+           loadStructureFields (zip record_fields params) consumer
+  
+         -- Combine layout computation with field reading
+         let load_stuff scrutinee_ptr = do
+               compute_record
+               fetch_fields =<< primAddP scrutinee_ptr offset
+
+         return (load_stuff, x)
+
+       EnumValueLayout -> do x <- consumer []
+                             return (\_ -> return (), x)
+
+  return (tag, load_stuff, x)
+
+-- | Data layout of a data constructor.
+data DataConLayout =
+    -- | This constructor is stored in memory, at some offset from the
+    --   base pointer.  The offset and fields are given.
+    ReferenceLayout !LL.Val ![DynamicField]
+    -- | This constructor is passed by value and has no fields.
+  | EnumValueLayout
+
+dataConLayoutNumFields :: DataConLayout -> Int
+dataConLayoutNumFields (ReferenceLayout _ fs) = length fs
+dataConLayoutNumFields EnumValueLayout = 0
+
+-- | Get the layout of a data constructor field.
+--
+-- Returns the field tag, a code generator to compute the layout, and the
+-- layout.
+dataConstructorFieldLayout :: Con -> [RCType]
+                           -> Cvt (LL.Lit, BuildBlock (), DataConLayout)
+dataConstructorFieldLayout datacon ty_args
+  | datacon `isPyonBuiltin` the_True = enum_value (LL.BoolL True)
+  | datacon `isPyonBuiltin` the_False = enum_value (LL.BoolL False)
+  | datacon == getPyonTupleCon' 2 = do
+      (unzip -> (sequence_ -> computation1, field_layouts)) <-
+        mapM lowerToFieldType ty_args
+      
+      (computation2, record_layout) <-
+        suspendGen $ createDynamicRecord field_layouts
+      
+      return (LL.UnitL,
+              computation1 >> computation2,
+              ReferenceLayout (nativeIntV 0) (recordFields record_layout))
+
+  | datacon `isPyonBuiltin` the_additiveDict = do
+      -- This dictionary contains three functinos
+      return (LL.UnitL,
+              return (),
+              ReferenceLayout (nativeIntV 0)
+                              (recordFields $ toDynamicRecord additiveDictRecord))
+  | otherwise = internalError $ "dataConstructorFieldLayout: Not implemented for " ++ showLabel (conName datacon)
+  where
+    enum_value tag = return (tag, return (), EnumValueLayout)
+
+-------------------------------------------------------------------------------
+
+-- | Add components of a value variable binding to the type environment.
+--
+--   Does not create a mapping to low-level variables.
+bindValueVariable var core_type m = assumeCoreVar var core_type m
+
+-- | Add components of a boxed variable binding to the environment.
+--
+--   Does not create a mapping to low-level variables.
+--   Nothing is added to the environment.
+bindBoxedVariable var core_type m = m
+
+-- | Add components of a read reference variable binding to the environment.
+--
+--   Does not create a mapping to low-level variables.
+bindReadVariable addr ptr core_type m =
+  -- Add address variable to the environment.
+  -- If this is a parameter-passing convention, record that.
+  assumePure addr addressType $ assume_pass_conv m
+  where
+    assume_pass_conv m =
+      case unpackConAppCT core_type
+      of Just (con, args)
+           | con `isPyonBuiltin` the_PassConv ->
+             case args of [arg] -> assumePassConvVar addr ptr arg m
+         _ -> m
 
 loweredReturnType' (param ::: return_type) =
   loweredReturnType (returnType param ::: return_type)
@@ -431,10 +623,10 @@ applyFunctionType (CoreType (OwnRT ::: op_type)) args =
 
 convertLet binder@(bind_value ::: bind_type) rhs body =
   case bind_value
-  of ValB v -> bind True v
-     OwnB v -> bind False v
-     LocalB a p -> assumePure a addressType $ alloc p
-     RefB _ v -> bind False v
+  of ValB v -> bind (bindValueVariable v bind_type) v
+     OwnB v -> bind (bindBoxedVariable v bind_type) v
+     LocalB a p -> bindReadVariable a p bind_type $ alloc p
+     RefB _ v -> bind id v      -- Don't add anything to the environment
   where
     var_type = letBinderType binder
     
@@ -465,7 +657,7 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
     -- Bind to a temporary variable
     bind add_to_environment v = do
       rhs' <- convertExp rhs
-      convertVar v (CoreType var_type) $ \v' -> add_to_env $ do
+      convertVar v (CoreType var_type) $ \v' -> add_to_environment $ do
         body' <- convertExp body
         
         let make_expression = do
@@ -473,11 +665,6 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
               asAtom body'
               
         return $ atom (expType body') make_expression
-      where
-        -- Add the variable to the type environment
-        add_to_env
-          | add_to_environment = assumeCoreVar v bind_type
-          | otherwise = id
 
 convertLetrec defs body =
   convertDefGroup defs $ \defs' -> do
@@ -498,17 +685,9 @@ convertCase scrutinee alternatives = do
       of Just (con, args)
            | con `isPyonBuiltin` the_bool ->
                convertBoolCase scr' alternatives
-           | con `isPyonBuiltin` the_AdditiveDict ->
-               convertAdditiveDictCase scr' alternatives
            | otherwise -> unknown_constructor con
          _ -> invalid_type
-    [CoreType (ReadRT _ ::: ty)] ->
-      case unpackConAppCT ty
-      of Just (con, args)
-           | con == getPyonTupleType' 2 ->
-               convertTuple2Case scr' alternatives
-           | otherwise -> unknown_constructor con
-         _ -> invalid_type
+    [CoreType (ReadRT _ ::: ty)] -> convertReferenceCase ty scr' alternatives
     _ -> invalid_type
     where
       invalid_type = internalError "convertCase: invalid scrutinee type"
@@ -516,74 +695,68 @@ convertCase scrutinee alternatives = do
         internalError $ "convertCase: Don't know how to convert type: " ++ showLabel (conName con)
         
 convertBoolCase scr alternatives = do
-  true_alt <- convertExp $ caltBody true_alternative
-  false_alt <- convertExp $ caltBody false_alternative
+  (return_types, alts) <- convertAlternatives alternatives
   
   let make_expr = do
         scr_val <- asVal scr
-        tr <- getBlock $ asAtom true_alt
-        fa <- getBlock $ asAtom false_alt
-        return (LL.SwitchA scr_val [(LL.BoolL True, tr), (LL.BoolL False, fa)])
-  return $ atom (expType true_alt) make_expr
-  where
-    (true_alternative, false_alternative) =
-      case alternatives
-      of [alt1, alt2]
-           | caltConstructor alt1 == pyonBuiltin the_True &&
-             caltConstructor alt2 == pyonBuiltin the_False ->
-               (alt1, alt2)
-           | caltConstructor alt2 == pyonBuiltin the_True &&
-             caltConstructor alt1 == pyonBuiltin the_False ->
-               (alt2, alt1)
-         _ -> internalError "convertBoolCase"
+        makeAlternativeBranch scr_val scr_val alts
+  return $ atom return_types make_expr
 
-convertAdditiveDictCase scr alternatives = do
-  withMany convertParameter (caltParams alt) $ \params -> do
-    ty_params <- replicateM (length $ caltTyArgs alt) $
-                 LL.newAnonymousVar (LL.PrimType UnitType)
-    body <- convertExp $ caltBody alt
+convertReferenceCase :: RCType -> CvExp -> [RCAlt] -> Cvt CvExp
+convertReferenceCase ty scr alternatives =
+  case unpackConAppCT ty
+  of Just (con, args)
+       | isSingletonDataType con ->
+           case alternatives
+           of [alt] -> do
+                (_, alt_type, alt_exp) <- convertAlternative alt
+                return $ atom alt_type (asVal scr >>= alt_exp)
+       | otherwise -> do
+           internalError "convertReferenceCase: Not implemented for this type"
+     Nothing -> internalError "convertReferenceCase: Invalid type"
 
-    -- Unpack the scrutinee, then run the body
-    let make_expr = do
-          scr_val <- asVal scr
-          bindAtom (ty_params ++ params) $ LL.UnpackA additiveDictRecord scr_val
-          asAtom body
-
-    return $ atom (expType body) make_expr
-  where
-    [alt] = alternatives
-
-convertTuple2Case scr alternatives = do
-  -- There's only one alternative, so we have no control flow to deal with
-  (_, alt_type, alt_exp) <- convertRefAlternative alt
-  let make_expr = asVal scr >>= alt_exp
-  return $ atom alt_type make_expr
-  where
-    alt = case alternatives of [alt] -> alt
-                               _ -> internalError "convertTuple2Case"
-
--- | Convert a case alternative, for a case statement that involves
--- a pass-by-reference data type.
-convertRefAlternative :: RCAlt
-                      -> Cvt (LL.Lit, [LoweringType], LL.Val -> BuildBlock LL.Atom)
-convertRefAlternative alt = do
-  -- Get the alternative's data layout
-  layout <- recordLayoutOf (caltConstructor alt) (caltTyArgs alt)
+-- | Convert a case alternative.
+--
+--   Returns a code generator that builds the alternative, given the scrutinee.
+--   The scrutinee is in the natural representation for its type: either a
+--   value or a reference.
+convertAlternative :: RCAlt
+                   -> Cvt (LL.Lit,
+                           [LoweringType],
+                           LL.Val -> BuildBlock LL.Atom)
+convertAlternative alt = do
+  -- Add the parameter variables to the environment and determine how to get
+  -- the constructor's fields
+  let con = caltConstructor alt
+  (tag, load_fields, body) <-
+    unpackDataConstructorFields con (caltTyArgs alt) (caltParams alt) $ \_ ->
+    convertExp $ caltBody alt
   
-  -- Add parameter variables to the environment
-  withMany convertParameter (caltParams alt) $ \params -> do
-    -- Convert the case body
-    body <- convertExp $ caltBody alt
-    
-    -- In the case body, explicitly load the data structure fields 
-    let alternative_exp scrutinee = do
-          layout_data <- layout
-          zipWithM_ (load_field scrutinee) (recordFields layout_data) params
-          asAtom body
-    return (LL.UnitL, expType body, alternative_exp)
+  -- In the case body, explicitly load the data structure fields 
+  let alternative_exp scrutinee = load_fields scrutinee >> asAtom body
+
+  return (tag, expType body, alternative_exp)
+
+-- | Convert one or more case alternatives from the same case statement.  The
+-- alternatives must have the same return type, which will be true if the input
+-- was well-typed.
+convertAlternatives alts = do
+  xs <- mapM convertAlternative alts
+  let return_type = case xs of (_, t, _):_ -> t
+  return (return_type, [(tag, mk) | (tag, _, mk) <- xs])
+
+-- | Assemble case alternatives into a @switch@ statement.
+makeAlternativeBranch :: LL.Val
+                      -> LL.Val
+                      -> [(LL.Lit, LL.Val -> BuildBlock LL.Atom)]
+                      -> BuildBlock LL.Atom
+makeAlternativeBranch scrutinee tag alts = do
+  branches <- mapM make_branch alts
+  return (LL.SwitchA tag branches)
   where
-    load_field scrutinee fld param =
-      loadFieldAs fld scrutinee param
+    make_branch (tag, make_alternative) = do
+      alternative <- getBlock $ make_alternative scrutinee
+      return (tag, alternative)
 
 convertFun = convertFunOrPrim LL.closureFun
 convertPrim = convertFunOrPrim LL.primFun
@@ -608,12 +781,15 @@ convertFunOrPrim make_function fun =
 convertParameter (param ::: param_type) k =
   case param
   of ValP v ->
-       convertVar v (CoreType $ ValRT ::: param_type) $ \v' ->
-       assumeCoreVar v param_type (k v')
-     OwnP v -> convertVar v (CoreType $ OwnRT ::: param_type) k
+       bindValueVariable v param_type $
+       convertVar v (CoreType $ ValRT ::: param_type) k
+     OwnP v ->
+       bindBoxedVariable v param_type $
+       convertVar v (CoreType $ OwnRT ::: param_type) k
      ReadP a p ->
        let return_type = ReadRT (mkInternalVarE a) ::: param_type
-       in assumePure a addressType $ convertVar p (CoreType return_type) k
+       in bindReadVariable a p param_type $
+          convertVar p (CoreType return_type) k
 
 convertDefGroup :: [CDef Rec] -> ([LL.FunDef] -> Cvt a) -> Cvt a
 convertDefGroup defgroup k = 
@@ -701,9 +877,9 @@ marshalCReturn ty =
     marshal_prim_type pt = do
       v <- LL.newAnonymousVar (LL.PrimType pt)
       
-      let setup mk_real_call = emitAtom0 =<< mk_real_call
+      let setup mk_real_call = bindAtom1 v =<< mk_real_call
           
-      return ([], setup, [LL.VarV v], [v])
+      return ([], setup, [], [v])
       
 convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
   f' <- convertFun f

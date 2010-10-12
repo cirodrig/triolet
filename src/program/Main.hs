@@ -128,7 +128,7 @@ compilePyonToPyonAsm path text = do
       Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
                       fail "Type checking failed in core"
       Right m -> do SystemF.inferSideEffects m
-                    SystemF.flatten m
+                    -- SystemF.flatten m
 
   putStrLn ""
   putStrLn "Core"

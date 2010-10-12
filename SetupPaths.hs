@@ -49,7 +49,8 @@ cabalMakeFile = "cabal.mk"
 rtsCSourceFiles = ["struct.c", "memory.c", "apply.c", "debug.c", "list_c.c"]
 
 -- | Pyon-asm files used in RTS
-rtsPyAsmFiles = ["memory_py.pyasm", "list.pyasm", "stream.pyasm"]
+rtsPyAsmFiles = ["memory_py.pyasm", "prim.pyasm", "structures.pyasm",
+		 "list.pyasm", "stream.pyasm"]
 
 -- | Data files that are not programmatically generated
 prebuiltDataFiles = ["include/pyon.h", "include/pyon_list.h",

@@ -1,6 +1,6 @@
 
 {-# LANGUAGE FlexibleInstances, TypeSynonymInstances, ViewPatterns #-}
-module SystemF.Flatten.GenCore(generateCore)
+module SystemF.Flatten.GenCore(mkGlobalRegions, generateCore)
 where
 
 import Control.Monad
@@ -8,6 +8,7 @@ import Control.Monad.Reader
 import Control.Monad.ST
 import Control.Monad.Trans
 
+import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
 import Data.Maybe
 import Debug.Trace
@@ -20,7 +21,7 @@ import Gluon.Common.MonadLogic
 import Gluon.Common.SourcePos
 import Gluon.Common.Supply
 import Gluon.Core.Level
-import Gluon.Core(SynInfo, Var, Con, Rec)
+import Gluon.Core(SynInfo, Var, Con, conID, Rec)
 import qualified Gluon.Core.Builtins as Gluon
 import qualified Gluon.Core as Gluon
 import qualified Gluon.Eval.Environment as Gluon
@@ -70,9 +71,32 @@ data GenCoreEnv =
   , envTypeList  :: [(Var, Core.RCType)]
   }
 
-setupGenCoreEnv :: IdentSupply Var -> IO GenCoreEnv
-setupGenCoreEnv var_supply = do
-  return (GenCoreEnv var_supply Map.empty Map.empty Map.empty [])
+-- | Regions for global variables.  Global variables are constructors in
+-- System F and they become variables in Core.
+--
+-- Returns the region variable map (used in GenCore) and the region inhabited
+-- by each constructor (used in EffectInference).
+--
+-- This function is kind of a hack because we don't have proper support for
+-- global variables.
+mkGlobalRegions :: RegionMonad m => m (RegionVarMap, IntMap.IntMap RVar)
+mkGlobalRegions = do 
+  (r_assocs, c_assocs) <- mapAndUnzipM mk_entry globals
+  return (Map.fromList r_assocs, IntMap.fromList c_assocs)
+  where
+    mk_entry (con, addr_var, ptr_var) = do
+      rvar <- newRegionVar False
+      traceShow (text "mkGlobalRegions" <+> pprEffectVar rvar) $ return ((rvar, RVB addr_var ptr_var (Core.conCoreType con)),
+              (fromIdent $ conID con, rvar))
+    
+    globals = [ (SF.pyonBuiltin SF.the_passConv_int,
+                 SF.pyonBuiltin SF.the_passConv_int_addr,
+                 SF.pyonBuiltin SF.the_passConv_int_ptr)
+              ]
+
+setupGenCoreEnv :: IdentSupply Var -> RegionVarMap -> IO GenCoreEnv
+setupGenCoreEnv var_supply rvmap = do
+  return (GenCoreEnv var_supply Map.empty rvmap Map.empty [])
 
 data VarBinding = ValVB !Core.RCType 
                 | OwnVB !Core.RCType 
@@ -498,6 +522,18 @@ toCoreCoExp rb expression k =
      GenTempLoadOwned body -> generate_load_from_temporary body
      GenTempStoreValue body -> generate_store_to_temporary body
      GenTempStoreOwned body -> generate_store_to_temporary body
+     _ | WriteRB a p t <- rb -> do
+       core_expr <- toCoreExp rb expression
+
+       -- Create a let expression for storing the intermediate result
+       -- Make a load expression to read the temporary variable
+       let use_value = Core.ValCE (expInfo expression) $
+                       Core.ReadVarV (Gluon.mkInternalVarE a) p
+       user <- k use_value
+       
+       let binder = Core.LocalB a p ::: t
+       return $ Core.LetCE (Core.cexpInfo user) binder core_expr user
+
      _ -> k =<< toCoreExp rb expression -- Not a coercion
   where
     -- Create an expression:
@@ -576,6 +612,7 @@ genLoad ty expr_rb expr =
            | c `SF.isPyonBuiltin` SF.the_int -> SF.pyonBuiltin SF.the_fun_load_int
            | c `SF.isPyonBuiltin` SF.the_float -> SF.pyonBuiltin SF.the_fun_load_float
            | c `SF.isPyonBuiltin` SF.the_bool -> SF.pyonBuiltin SF.the_fun_load_bool
+           | c `SF.isPyonBuiltin` SF.the_NoneType -> SF.pyonBuiltin SF.the_fun_load_NoneType
          _ -> internalError "genLoad: Cannot load values of this type"
 
 genStore :: RetBinding -> EType -> Core.RCExp -> GenCore Core.RCExp 
@@ -595,7 +632,8 @@ genStore rb ty expr =
            | c `SF.isPyonBuiltin` SF.the_int -> SF.pyonBuiltin SF.the_fun_store_int
            | c `SF.isPyonBuiltin` SF.the_float -> SF.pyonBuiltin SF.the_fun_store_float
            | c `SF.isPyonBuiltin` SF.the_bool -> SF.pyonBuiltin SF.the_fun_store_bool
-         _ -> traceShow (text "genStork" <+> pprEType ty) $ internalError "genStore: Cannot store values of this type"
+           | c `SF.isPyonBuiltin` SF.the_NoneType -> SF.pyonBuiltin SF.the_fun_store_NoneType
+         _ -> internalError "genStore: Cannot store values of this type"
 
 -- | Copy data from one place to another.  The source must be a read reference
 -- and the destination must be a write reference.
@@ -638,6 +676,10 @@ convertConE rb inf c = do
   let value = case Core.fromCBind rt
               of Core.ValRT -> Core.ValueConV c
                  Core.OwnRT -> Core.OwnedConV c
+                 Core.ReadRT {}
+                   | c `SF.isPyonBuiltin` SF.the_passConv_int ->
+                       Core.ReadVarV (Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_passConv_int_addr)) (SF.pyonBuiltin SF.the_passConv_int_ptr)
+
                  _ -> internalError "convertConE"
   return (Core.ValCE inf value)
 
@@ -673,34 +715,6 @@ convertCall rb inf op effs args = do
     make_effect_param effect = do
       effect_type <- effectToCoreEffect effect
       return $ Core.ValCE inf (Core.TypeV effect_type)
-{-
-toCoreExp :: EExp -> GenCore Core.RCExp
-toCoreExp expression = do
-  rb <- lookupReturnBinding $ expReturn expression
-  case expExp expression of
-    VarE v -> convertVarE rb inf v
-    ConE c -> convertConE rb inf c
-    LitE l t -> convertLitE rb inf l t
-    TypeE ty -> convertTypeE rb inf ty
-    InstE op args -> do
-      (op', args') <- convertInstance rb inf op args
-      return $ Core.AppCE { Core.cexpInfo = inf
-                          , Core.cexpOper = op'
-                          , Core.cexpArgs = args'
-                          , Core.cexpReturnArg = undefined
-                          }
-    RecPlaceholderE {} -> undefined
-    CallE op args -> convertCallE rb inf op args
-    FunE f -> do
-      f' <- toCoreFun f
-      return $ Core.LamCE inf f'
-    DoE ty_arg pass_conv body -> convertDoE rb inf ty_arg pass_conv body
-    LetE lhs lhs_type rhs body -> convertLetE rb inf lhs lhs_type rhs body
-    LetrecE grp body -> convertLetrecE rb inf grp body
-    CaseE scr alts -> convertCaseE rb inf scr alts
-  where
-    inf = expInfo expression
--}
 
 convertDoE rb inf ty_arg pass_conv body = do
   ty_arg' <- toNonReferenceCoreExp ty_arg
@@ -835,23 +849,33 @@ assumeDefs defs m = foldr assumeDef m defs
 convertDefGroup :: EDefGroup -> ([Core.CDef Rec] -> GenCore a) -> GenCore a
 convertDefGroup group k = assumeDefs group $ k =<< mapM toCoreDef group
 
-convertTopLevel :: [EDefGroup] -> GenCore [[Core.CDef Rec]]
-convertTopLevel groups = go groups 
+convertExport :: EExport -> GenCore (Core.CExport Rec)
+convertExport (EExport inf spec f) = do
+  f' <- toCoreFun f
+  return $ Core.CExport inf spec f'
+
+convertTopLevel :: [EDefGroup] -> [EExport]
+                -> GenCore ([[Core.CDef Rec]], [Core.CExport Rec])
+convertTopLevel groups exports = go groups
   where
     go (group:groups) = convertDefGroup group $ \group' -> do
-      groups' <- go groups
-      return (group' : groups')
+      (groups', exports') <- go groups
+      return (group' : groups', exports')
     
-    go [] = return []
+    go [] = do
+      exports' <- mapM convertExport exports
+      return ([], exports')
 
-convertModule :: ModuleName -> [EDefGroup] -> () -> GenCore (Core.CModule Rec)
-convertModule mod_name groups () = do
-  core_groups <- convertTopLevel groups
-  return $ Core.CModule mod_name core_groups []
+convertModule :: ModuleName -> [EDefGroup] -> [EExport]
+              -> GenCore (Core.CModule Rec)
+convertModule mod_name groups exports = do
+  (core_groups, core_exports) <- convertTopLevel groups exports
+  return $ Core.CModule mod_name core_groups core_exports
 
-generateCore :: ModuleName -> [EDefGroup] -> () -> IO (Core.CModule Rec)
-generateCore mod_name groups () =
+generateCore :: RegionVarMap -> ModuleName -> [EDefGroup] -> [EExport]
+             -> IO (Core.CModule Rec)
+generateCore rvmap mod_name groups exports =
   withTheVarIdentSupply $ \var_supply -> do
-    env <- setupGenCoreEnv var_supply
-    doGenCore env $ convertModule mod_name groups ()
+    env <- setupGenCoreEnv var_supply rvmap
+    doGenCore env $ convertModule mod_name groups exports
  

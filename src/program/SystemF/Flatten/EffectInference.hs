@@ -61,6 +61,9 @@ data EffectEnv =
   { -- | Environment used by 'RegionM'
     efRegionEnv :: {-# UNPACK #-}!RegionEnv
     
+    -- | Regions assigned to constructors
+  , efConRegions :: !(IntMap.IntMap RVar)
+    
     -- | Effect types assigned to variables in the environment
   , efEnv :: !(IntMap.IntMap EffectAssignment)
   }
@@ -88,7 +91,7 @@ instance RegionMonad EI where
         env' = env {efRegionEnv = region_env'}
     in runEI m env'
 
-  assumeEffect v m = trace "assumeEffect" $ assertEVar v $ EI $ \env ->
+  assumeEffect v m = assertEVar v $ EI $ \env ->
     let region_env' =
           (efRegionEnv env) {reRegionEnv =
                                 Set.insert v $ reRegionEnv $ efRegionEnv env}
@@ -97,9 +100,9 @@ instance RegionMonad EI where
 
   getRigidEffectVars = EI $ \env -> returnEI $ reRegionEnv $ efRegionEnv env
 
-runEffectInference evar_ids var_ids m = do
+runEffectInference evar_ids var_ids con_map m = do
   let renv = RegionEnv evar_ids var_ids Set.empty
-      env = EffectEnv renv (IntMap.empty)
+      env = EffectEnv renv con_map IntMap.empty
   (x, _, _) <- runEI m env
   return x
 
@@ -168,6 +171,14 @@ lookupVarType v = EI $ \env ->
   case IntMap.lookup (fromIdent $ varID v) $ efEnv env
   of Just rt -> returnEI rt
      Nothing -> internalError "lookupVarType: No information for variable"
+
+-- | Look up the region inhabited by a constructor that uses 'Reference' 
+-- representation.  Constructors with other representations aren't in the map.
+lookupConRegion :: Con -> EI RVar
+lookupConRegion c = EI $ \env ->
+  case IntMap.lookup (fromIdent $ conID c) $ efConRegions env
+  of Just rgn -> returnEI rgn
+     Nothing -> internalError "lookupConRegion: No information for constructor"
 
 -- | Record that a new effect variable was created
 tellNewEffectVar :: EffectVar -> EI ()
@@ -295,15 +306,23 @@ inferConE inf c = do
   (eff_qvars, eff_type) <- liftRegionM $ coreToEffectType $ Core.conCoreType c
   mapM_ tellNewEffectVar eff_qvars
   
-  -- DEBUG
-  liftIO $ print (text "inferConE" <+> (text $ showLabel $ Gluon.conName c) <+> (Core.pprType (Core.conCoreType c) $$ pprERepType eff_type))
-  
-  -- Create an expression
+-- Create an expression
   let exp1 = if null eff_qvars
              then ConE c
              else InstE (Right c) (map varEffect eff_qvars)
-  rt <- trace "inferConE2" $ liftRegionM $ etypeToReturnType eff_type
-  trace "inferConE1" $ return (EExp inf rt exp1, emptyEffect)
+                  
+  -- Create a return type.  If the constructor is a reference to a global
+  -- variable, look up the region.
+  rt <- case eff_type
+        of ERepType Value t      -> return $ ValRT t
+           ERepType Boxed t      -> return $ OwnRT t
+           ERepType Referenced t -> do rgn <- lookupConRegion c
+                                       return $ ReadRT rgn t
+  
+  -- DEBUG
+  liftIO $ print (text "inferConE" <+> (text $ showLabel $ Gluon.conName c) <+> (Core.pprType (Core.conCoreType c) $$ pprEReturnType rt))
+  
+  return (EExp inf rt exp1, emptyEffect)
 
 inferLitE ty inf lit = liftRegionM $ do
   ty' <- toEffectType =<< evalHead' (Gluon.fromWhnf ty)
@@ -730,6 +749,12 @@ inferAlt mreturn_type (SF.TypedSFAlt (SF.TypeAnn _ alt)) = do
 inferTypeExp :: SF.RecType SF.TypedRec -> RegionM ERepType
 inferTypeExp (SF.TypedSFType (SF.TypeAnn k t)) =
   toEffectType =<< evalHead' t
+
+inferExport :: SF.Export SF.TypedRec -> EI EExport
+inferExport export = do
+  (_, fun) <- inferFun False $ SF.exportFunction export
+  let inf = mkSynInfo (SF.exportSourcePos export) ObjectLevel
+  return $ EExport inf (SF.exportSpec export) fun
 
 -- | Instantiate a possibly polymorphic variable or constructor.
 -- Get the effect type.
@@ -1163,16 +1188,17 @@ requireEqual = compareTypes UnDir Invariant
 
 inferTopLevel :: [SF.DefGroup SF.TypedRec]
               -> [SF.Export SF.TypedRec]
-              -> EI ([EDefGroup], ())
+              -> EI ([EDefGroup], [EExport])
 inferTopLevel (dg:dgs) exports = do
   (dg', (dgs', exports')) <- inferDefGroupOver dg $ inferTopLevel dgs exports
   return (dg' : dgs', exports')
 
 inferTopLevel [] exports = do
-  return ([], ())
+  exports' <- mapM inferExport exports
+  return ([], exports')
 
 inferModule :: SF.Module SF.TypedRec
-            -> EI (ModuleName, [EDefGroup], ())
+            -> EI (ModuleName, [EDefGroup], [EExport])
 inferModule (SF.Module module_name defss exports) = do
   ((defss', exports'), cst) <- extractConstraint $ inferTopLevel defss exports
 
@@ -1186,23 +1212,33 @@ inferModule (SF.Module module_name defss exports) = do
   -- DEBUG: print the module
   -- liftIO $ putStrLn "Effect inference"
   -- liftIO $ print $ vcat $ map pprDefGroup defss''
-  return (module_name, defss', ())
+  return (module_name, defss', exports')
 
-inferSideEffects :: SF.Module SF.TypedRec
-                 -> IO (ModuleName, [EDefGroup], ())
+inferSideEffects :: SF.Module SF.TypedRec -> IO (Core.CModule Rec)
 inferSideEffects mod = do
   evar_ids <- newIdentSupply
   
-  (module_name, defss, ()) <- withTheVarIdentSupply $ \var_ids ->
-    runEffectInference evar_ids var_ids $ inferModule mod
+  (region_var_map, module_name, defss, exports) <-
+    withTheVarIdentSupply $ \var_ids -> do
+      -- Initialize some global data that is used during effect inference
+      (region_var_map, con_region_map) <-
+        runRegionM evar_ids var_ids mkGlobalRegions
+
+      -- Run effect inference
+      (module_name, defss, exports) <-
+        runEffectInference evar_ids var_ids con_region_map $ inferModule mod
+
+      return (region_var_map, module_name, defss, exports)
     
   -- DEBUG: print definitions
   forced_defss <- mapM (mapM forceEDef) defss
   print $ vcat $ map pprEDefs forced_defss
+  print $ vcat $ map pprEExport exports
   
   -- Generate a core module
-  core_module <- generateCore module_name defss ()
+  core_module <- generateCore region_var_map module_name defss exports
   
+  -- DEBUG
   print $ Core.pprCModule core_module
   
-  return (module_name, defss, ())
+  return core_module

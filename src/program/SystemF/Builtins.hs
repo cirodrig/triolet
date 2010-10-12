@@ -20,6 +20,8 @@ module SystemF.Builtins
         the_Any, 
         the_PassConv,
         the_passConv_int,
+        the_passConv_int_addr,
+        the_passConv_int_ptr,
         the_passConv_float,
         the_passConv_bool,
         the_passConv_NoneType,
@@ -90,6 +92,7 @@ import Gluon.Common.THRecord
 import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Label
+import Gluon.Common.Supply
 import Gluon.Core
 import Gluon.Core.Module
 import Gluon.Parser.Setup
@@ -244,8 +247,8 @@ readTuplePassConvs mod =
   in force $ return cons
 
 -- Load symbols from the module and use them to initialize the builtins
-initializePyonBuiltins :: Module () -> IO ()
-initializePyonBuiltins mod = do
+initializePyonBuiltins :: IdentSupply Var -> Module () -> IO ()
+initializePyonBuiltins varIDs mod = do
   -- Must not have been initialized yet
   is_empty <- isEmptyMVar the_PyonBuiltins
   unless is_empty $ fail "Cannot re-initialize pyon builtins"
@@ -257,6 +260,12 @@ initializePyonBuiltins mod = do
           (fname, [| evaluate $ findConByName mod name |])
         constructors = zipWith assign_ctor_field
                        pyonBuiltinConstructorNames pyonBuiltinConstructors
+
+        assign_var_field fname name =
+          (fname, [| do v_id <- supplyValue varIDs
+                        return $ mkVariable v_id (builtinLabel name) ObjectLevel |])
+
+        variables = zipWith assign_var_field pyonBuiltinVariableNames pyonBuiltinVariables
         
         -- Initialize class dictionaries
         findNameWithPrefix name pfx =
@@ -290,6 +299,7 @@ initializePyonBuiltins mod = do
         -- All field initializers
         initializers =
           constructors ++
+          variables ++
           [ ("_tuples", [| readTupleTypes mod |])
           , ("_tupleConstructors", [| readTuples mod |])
           , ("_tuplePassConvConstructors", [| readTuplePassConvs mod |])
@@ -322,6 +332,6 @@ loadPyonBuiltins varIDs conIDs builtins = do
   fileName <- getDataFileName ("symbols"</>"SFBuiltin.glu")
   m <- loadSourceFile setup fileName
   case m of
-    Just cu -> do initializePyonBuiltins cu
+    Just cu -> do initializePyonBuiltins varIDs cu
                   return $ Just cu
     Nothing -> return Nothing

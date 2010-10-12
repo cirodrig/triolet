@@ -1,0 +1,20 @@
+
+module pyon.internal.prim;
+
+#include "pyasm.h"
+#include "memory_py.h"
+#include "apply_py.h"
+#include "prim.h"
+#include "pyasm_records.h"
+
+function zero_int () -> int {
+  int 0;
+};
+
+function add_int (int x, int y) -> int {
+  x + y;
+};
+
+function sub_int (int x, int y) -> int {
+  x - y;
+}

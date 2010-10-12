@@ -38,6 +38,13 @@ record PAPHeader {
   uint16 nargs;                 // Number of arguments that have been applied
 };
 
+// Additive dictionary
+record AdditiveDict {
+  owned zero;
+  owned add;
+  owned subtract;
+};
+
 /* Arrays (called "lists")
  *
  * A list consists of a size and a pointer to an array of list elements.

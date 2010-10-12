@@ -86,6 +86,24 @@ pyonBuiltinPassConvConstructors =
   , "passConv_owned"
   ]
 
+pyonBuiltinPassConvAddresses =
+  [ "passConv_int_addr"
+  , "passConv_float_addr"
+  , "passConv_bool_addr"
+  , "passConv_NoneType_addr"
+  , "passConv_Any_addr"
+  , "passConv_owned_addr"
+  ]
+
+pyonBuiltinPassConvPointers =
+  [ "passConv_int_ptr"
+  , "passConv_float_ptr"
+  , "passConv_bool_ptr"
+  , "passConv_NoneType_ptr"
+  , "passConv_Any_ptr"
+  , "passConv_owned_ptr"
+  ]
+
 pyonBuiltinFunctions =
   [ "oper_MUL"
   , "oper_DIV"
@@ -133,11 +151,19 @@ pyonBuiltinConstructors =
 
 pyonBuiltinConstructorNames = map ('_':) pyonBuiltinConstructors
 
+pyonBuiltinVariables =
+  pyonBuiltinPassConvAddresses ++ pyonBuiltinPassConvPointers
+
+pyonBuiltinVariableNames = map ('_':) pyonBuiltinVariables
+
 pyonBuiltinsSpecification =
-  recordDef "PyonBuiltins" (constructors ++ others)
+  recordDef "PyonBuiltins" (constructors ++ variables ++ others)
   where
     constructors =
-      map (\n -> (n, IsStrict, [t| Con |]))pyonBuiltinConstructorNames
+      map (\n -> (n, IsStrict, [t| Con |])) pyonBuiltinConstructorNames
+
+    variables =
+      map (\n -> (n, IsStrict, [t| Var |])) pyonBuiltinVariableNames
 
     others = [ ("_tuples", NotStrict, [t| [Con] |])
              , ("_tupleConstructors", NotStrict, [t| [Con] |])

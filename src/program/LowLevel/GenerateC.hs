@@ -299,6 +299,9 @@ genPrimCall prim args =
      PrimCmpP CmpLE -> binary CLeqOp args
      PrimCmpP CmpGT -> binary CGrOp args
      PrimCmpP CmpGE -> binary CGeqOp args
+     PrimAnd -> binary CAndOp args
+     PrimOr -> binary COrOp args
+     PrimNot -> case args of [arg] -> CUnary CNegOp arg internalNode
      PrimAddP ->
        case args of [ptr, off] -> genOffset ptr off
      PrimLoad (PrimType ty) ->
@@ -327,6 +330,9 @@ genPrimCall prim args =
      PrimSubF _ -> binary CSubOp args
      PrimMulF _ -> binary CMulOp args
      PrimModF _ -> internalError "Not implemented: floating-point modulus"
+     _ -> internalError $ 
+          "Cannot generate C code for primitive operation: " ++
+          show (pprPrim prim)
   where
     zero = genSmallIntConst 0
     geZero x = binary' CGeqOp x zero

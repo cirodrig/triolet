@@ -1,0 +1,46 @@
+
+module pyon.internal.structures;
+
+#include "pyasm.h"
+#include "memory_py.h"
+#include "apply_py.h"
+#include "structures.h"
+#include "pyasm_records.h"
+
+// Construct an Additive dictionary
+function additiveDict (owned zero, owned add, owned sub, pointer ret) -> () {
+  ret @! AdditiveDict.add = add;
+  ret @! AdditiveDict.subtract = sub;
+  ret @! AdditiveDict.zero = zero;
+  ();
+};
+
+// Parameter-passing convention dictionary of ints
+data pointer int_pass_conv = PassConv {
+  sizeof int32,
+  alignof int32,
+  copy4F,
+  dummy_finalizer
+};
+
+// Parameter-passing convention dictionary of ints
+data pointer AdditiveDict_pass_conv = PassConv {
+  sizeof AdditiveDict,
+  alignof AdditiveDict,
+  copy_AdditiveDict,
+  finalize_AdditiveDict
+};
+
+function copy_AdditiveDict (pointer src, pointer dst) -> () {
+  dst @! AdditiveDict.zero = src @! AdditiveDict.zero;
+  dst @! AdditiveDict.add = src @! AdditiveDict.add;
+  dst @! AdditiveDict.subtract = src @! AdditiveDict.subtract;
+  ();
+};
+
+function finalize_AdditiveDict (pointer p) -> () {
+  DECREF(p @! AdditiveDict.zero as pointer)
+  DECREF(p @! AdditiveDict.add as pointer)
+  DECREF(p @! AdditiveDict.subtract as pointer)
+  ();
+};

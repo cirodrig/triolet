@@ -86,8 +86,7 @@ passConvRecord = staticRecord [ PrimField nativeWordType
 -- | The record type of an additive class dictionary
 additiveDictRecord :: StaticRecord
 additiveDictRecord =
-  staticRecord [ PrimField UnitType
-               , PrimField OwnedType
+  staticRecord [ PrimField OwnedType
                , PrimField OwnedType
                , PrimField OwnedType]
 

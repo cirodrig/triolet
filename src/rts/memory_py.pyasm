@@ -3,6 +3,8 @@ module pyon.internal.memory_py;
 
 #include "pyasm.h"
 #include "memory_py.h"
+#include "apply_py.h"
+#include "pyasm_records.h"
 
 // Deallocate an object.  Calls 'pyon_dealloc'.
 function deallocF (pointer p) -> () {
@@ -33,4 +35,9 @@ function copy2F (pointer src, pointer dst) -> () {
 function copy4F (pointer src, pointer dst) -> () {
   !dst = uint32 load src;
   ();
+};
+
+// Copy some bytes according to a PassConv object
+function copy (pointer passconv, pointer src, pointer dst) -> () {
+  () call (passconv @! PassConv.copy) (src, dst);
 };

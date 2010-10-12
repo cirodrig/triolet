@@ -346,7 +346,8 @@ etypeToParamType (ERepType repr ty) param_var =
     no_dependent_type =
       internalError "etypeToParamType: Parameter cannot be used dependently"
 
--- | Convert an effect type to a return type
+-- | Convert an effect type to a return type for an expression that computes
+-- a new result.
 etypeToReturnType :: ERepType -> RegionM EReturnType
 etypeToReturnType (ERepType repr ty) =
   case repr

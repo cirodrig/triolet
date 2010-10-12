@@ -42,6 +42,15 @@ getBlock' m = WriterT $ do
 putBlock :: Monad m => Block -> Gen m Atom
 putBlock (Block stms atom) = WriterT $ return (atom, stms)
 
+-- | Run a code generator, but don't produce output here.  Instead, a code
+--   generator is returned that produces its output.
+suspendGen :: (Monad m, Supplies m (Ident Var),
+               Monad m', Supplies m' (Ident Var)) =>
+              Gen m a -> m (Gen m' (), a)
+suspendGen m = do
+  (x, stms) <- runWriterT m
+  return (tell stms, x)
+
 -------------------------------------------------------------------------------
 -- Generating primops
 
@@ -142,6 +151,9 @@ primAnd x y =
 
 primAddP ptr off =
   emitAtom1 (PrimType PointerType) $ PrimA PrimAddP [ptr, off]
+
+primAddPAs ptr off ptr' =
+  bindAtom1 ptr' $ PrimA PrimAddP [ptr, off]
 
 primLoad ty ptr dst = primLoadOff ty ptr (nativeIntV 0)
 primLoadOff ty ptr off dst = 
@@ -414,6 +426,9 @@ objectHeaderData info_ptr = [nativeWordV 1, info_ptr]
 infoTableHeaderRecord' :: DynamicRecord
 infoTableHeaderRecord' = toDynamicRecord infoTableHeaderRecord
 
+passConvRecord' :: DynamicRecord
+passConvRecord' = toDynamicRecord passConvRecord
+
 -- | Generate code that initializes an object header.
 -- The reference count is initialized to 1.
 initializeObject :: (Monad m, Supplies m (Ident Var)) =>
@@ -499,10 +514,10 @@ selectPassConvSize, selectPassConvAlignment,
   selectPassConvCopy,
   selectPassConvFinalize :: (Monad m, Supplies m (Ident Var)) =>
                             Val -> Gen m Val
-selectPassConvSize = selectField passConvRecord 0
-selectPassConvAlignment = selectField passConvRecord 1
-selectPassConvCopy = selectField passConvRecord 2
-selectPassConvFinalize = selectField passConvRecord 3
+selectPassConvSize = loadField (passConvRecord' !!: 0)
+selectPassConvAlignment = loadField (passConvRecord' !!: 1)
+selectPassConvCopy = loadField (passConvRecord' !!: 2)
+selectPassConvFinalize = loadField (passConvRecord' !!: 3)
 
 -------------------------------------------------------------------------------
 -- Values
@@ -538,6 +553,7 @@ mkEntryPoints want_dealloc ftype label
       let arity = length $ ftParamTypes ftype
       return $! EntryPoints ftype arity dir exa ine dea inf
 
+{-
 passConvValue :: Int -> Int -> Var -> Var -> Val
 passConvValue size align copy finalize =
   RecV passConvRecord
@@ -584,3 +600,4 @@ genAdditiveDictFun = do
   let params = [type_param, zero_param, add_param, sub_param]
   fun_body <- getBlock $ return $ PackA additiveDictRecord (map VarV params)
   return $ ValA [LamV $ closureFun params [RecordType additiveDictRecord] fun_body]
+-}

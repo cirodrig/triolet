@@ -34,6 +34,7 @@ import qualified Core.BuiltinTypes as Core
 import SystemF.Flatten.Constraint
 import SystemF.Flatten.Effect
 import SystemF.Flatten.EffectType
+import Export
 import Globals
 
 -- | A placeholder reference to an expression.  The placeholder is created to
@@ -232,6 +233,13 @@ efunPolyType f =
 data EDef = EDef Var EFun
 
 type EDefGroup = [EDef]
+
+data EExport =
+  EExport
+  { eexportInfo :: !SynInfo
+  , eexporSpec :: !ExportSpec
+  , eexportFun :: EFun
+  }
 
 -- | An effect type that is assigned to a variable or constructor in the
 -- environment
@@ -529,3 +537,7 @@ pprEDef (EDef v f) =
   Gluon.pprVar v <+> text "=" <+> pprEFun f
 
 pprEDefs defs = vcat $ map pprEDef defs
+
+pprEExport (EExport inf spec f) =
+  text "export" <+> text (show spec) $$
+  nest 4 (pprEFun f)

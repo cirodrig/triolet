@@ -75,8 +75,8 @@ mkConType m = unsafePerformIO $ do
   case result of Just x -> return x
                  Nothing -> internalError "mkConType"
 
-mkBinaryOpType :: RExp -> CBind CReturnT Rec
-mkBinaryOpType ty =
+mkValBinaryOpType :: RExp -> CBind CReturnT Rec
+mkValBinaryOpType ty =
   let constructor_type =
         funCT $
         pureArrCT (ValPT Nothing ::: expCT ty) $
@@ -84,18 +84,37 @@ mkBinaryOpType ty =
         retCT (ValRT ::: expCT ty)
   in OwnRT ::: constructor_type
 
-binaryIntOpType = mkBinaryOpType $ mkInternalConE $ pyonBuiltin the_int
-binaryFloatOpType = mkBinaryOpType $ mkInternalConE $ pyonBuiltin the_float
+mkRefBinaryOpType :: RExp -> Eval (CBind CReturnT Rec)
+mkRefBinaryOpType ty = do
+  addr1 <- newAnonymousVariable ObjectLevel
+  addr2 <- newAnonymousVariable ObjectLevel
+  let constructor_type =
+        funCT $
+        pureArrCT (ReadPT addr1 ::: expCT ty) $
+        pureArrCT (ReadPT addr2 ::: expCT ty) $
+        retCT (WriteRT ::: expCT ty)
+  return $ OwnRT ::: constructor_type
 
-mkZeroOpType ty =
+binaryIntOpType = mkValBinaryOpType $ mkInternalConE $ pyonBuiltin the_int
+binaryFloatOpType = mkValBinaryOpType $ mkInternalConE $ pyonBuiltin the_float
+
+mkValZeroOpType ty =
   let constructor_type =
         funCT $
         pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_NoneType)) $
         retCT (ValRT ::: expCT ty)
   in OwnRT ::: constructor_type
 
-zeroIntOpType = mkZeroOpType $ mkInternalConE $ pyonBuiltin the_int
-zeroFloatOpType = mkZeroOpType $ mkInternalConE $ pyonBuiltin the_float
+mkRefZeroOpType ty = do
+  addr <- newAnonymousVariable ObjectLevel
+  let constructor_type =
+        funCT $
+        pureArrCT (ReadPT addr ::: conCT (pyonBuiltin the_NoneType)) $
+        retCT (WriteRT ::: expCT ty)
+  return $ OwnRT ::: constructor_type
+
+zeroIntOpType = mkValZeroOpType $ mkInternalConE $ pyonBuiltin the_int
+zeroFloatOpType = mkValZeroOpType $ mkInternalConE $ pyonBuiltin the_float
 
 mkCompareOpType :: RExp -> CBind CReturnT Rec
 mkCompareOpType ty =
@@ -153,20 +172,34 @@ storeNoneTypeType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_NoneType
       
 additiveDictType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
-  let binary_type = OwnPT ::: cbindType (mkBinaryOpType (mkInternalVarE a))
-      zero_type = OwnPT ::: cbindType (mkZeroOpType (mkInternalVarE a))
+  binary_type <- mkRefBinaryOpType (mkInternalVarE a)
+  zero_type <- mkRefZeroOpType (mkInternalVarE a)
+  let constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (OwnPT ::: cbindType zero_type) $
+        pureArrCT (OwnPT ::: cbindType binary_type) $
+        pureArrCT (OwnPT ::: cbindType binary_type) $
+        retCT (WriteRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
+  return (OwnRT ::: constructor_type)
+
+copyType = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  addr1 <- newAnonymousVariable ObjectLevel
+  addr2 <- newAnonymousVariable ObjectLevel
+  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a] 
       constructor_type =
         funCT $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
-        pureArrCT zero_type $
-        pureArrCT binary_type $
-        pureArrCT binary_type $
-        retCT (ValRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
+        pureArrCT (ReadPT addr1 ::: pc_type) $
+        pureArrCT (ReadPT addr2 ::: varCT a) $
+        retCT (WriteRT ::: varCT a)
   return (OwnRT ::: constructor_type)
 
 makelistType = mkConType $ do
   e <- newAnonymousVariable TypeLevel
   a <- newAnonymousVariable TypeLevel
+  addr <- newAnonymousVariable ObjectLevel
   let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
       stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
                     [varCT e, varCT a]
@@ -175,7 +208,7 @@ makelistType = mkConType $ do
         funCT $
         pureArrCT (ValPT (Just e) ::: expCT effectKindE) $ 
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
-        pureArrCT (ValPT Nothing ::: pc_type) $
+        pureArrCT (ReadPT addr ::: pc_type) $
         arrCT (OwnPT ::: stream_type) (varCT e) $
         retCT (WriteRT ::: list_type)
   return (OwnRT ::: constructor_type)
@@ -185,6 +218,8 @@ streamBindType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   b <- newAnonymousVariable TypeLevel
   addr <- newAnonymousVariable ObjectLevel
+  addr_pc_a <- newAnonymousVariable ObjectLevel
+  addr_pc_b <- newAnonymousVariable ObjectLevel
   let pc_a_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
       pc_b_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT b]
       producer_type = appCT (conCT $ pyonBuiltin the_LazyStream)
@@ -204,8 +239,8 @@ streamBindType = mkConType $ do
         pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
         pureArrCT (ValPT (Just b) ::: expCT pureKindE) $
-        pureArrCT (ValPT Nothing ::: pc_a_type) $
-        pureArrCT (ValPT Nothing ::: pc_b_type) $
+        pureArrCT (ReadPT addr_pc_a ::: pc_a_type) $
+        pureArrCT (ReadPT addr_pc_b ::: pc_b_type) $
         pureArrCT (OwnPT ::: producer_type) $
         pureArrCT (OwnPT ::: consumer_type) $
         retCT (OwnRT ::: result_type)
@@ -214,6 +249,7 @@ streamBindType = mkConType $ do
 listTraverseType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   addr <- newAnonymousVariable ObjectLevel
+  addr_pc <- newAnonymousVariable ObjectLevel
   let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
       list_type = appCT (conCT $ pyonBuiltin the_list) [varCT a]
       stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
@@ -221,7 +257,7 @@ listTraverseType = mkConType $ do
       constructor_type =
         funCT $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
-        pureArrCT (ValPT Nothing ::: pc_type) $
+        pureArrCT (ReadPT addr_pc ::: pc_type) $
         pureArrCT (ReadPT addr ::: list_type) $
         retCT (OwnRT ::: stream_type)
   return (OwnRT ::: constructor_type)
@@ -229,6 +265,7 @@ listTraverseType = mkConType $ do
 streamReturnType = mkConType $ do
   e <- newAnonymousVariable TypeLevel
   a <- newAnonymousVariable TypeLevel
+  addr_pc <- newAnonymousVariable ObjectLevel
   let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
       producer_type =
         funCT $
@@ -240,16 +277,28 @@ streamReturnType = mkConType $ do
         funCT $
         pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
-        pureArrCT (ValPT Nothing ::: pc_type) $
+        pureArrCT (ReadPT addr_pc ::: pc_type) $
         pureArrCT (OwnPT ::: producer_type) $
         retCT (OwnRT ::: result_type)
+  return (OwnRT ::: constructor_type)
+
+passConvOwnedType = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  let result_type =
+        appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        retCT (WriteRT ::: result_type)
   return (OwnRT ::: constructor_type)
 
 constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
   where
     table = [ (pyonBuiltin the_passConv_int,
-               ValRT ::: appCT (conCT $ pyonBuiltin the_PassConv) [conCT $ pyonBuiltin the_int])
+               ReadRT (mkInternalVarE $ pyonBuiltin the_passConv_int_addr) ::: appCT (conCT $ pyonBuiltin the_PassConv) [conCT $ pyonBuiltin the_int])
+            , (pyonBuiltin the_passConv_owned,
+               passConvOwnedType)
             , (pyonBuiltin SystemF.Builtins.the_fun_store_int,
                storeIntType)
             , (pyonBuiltin SystemF.Builtins.the_fun_load_int,
@@ -292,6 +341,8 @@ constructorTable =
                additiveDictType)
             , (getPyonTupleCon' 2,
                tuple2ConType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_copy,
+               copyType)
             , (pyonBuiltin SystemF.Builtins.the_fun_makelist,
                makelistType)
             , (pyonBuiltin SystemF.Builtins.the_oper_CAT_MAP,
