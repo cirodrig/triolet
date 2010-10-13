@@ -129,6 +129,12 @@ data RetBinding = ValRB Core.RCType
                 | ReadRB !Core.AddrVar !Core.PtrVar Core.RCType
                 | WriteRB !Core.AddrVar !Core.PtrVar Core.RCType
 
+retBindingType :: RetBinding -> Core.RCType
+retBindingType (ValRB t) = t
+retBindingType (OwnRB t) = t
+retBindingType (ReadRB _ _ t) = t
+retBindingType (WriteRB _ _ t) = t
+
 retBindingVarBinding :: RetBinding -> VarBinding
 retBindingVarBinding (ValRB t) = ValVB t
 retBindingVarBinding (OwnRB t) = OwnVB t
@@ -279,12 +285,12 @@ etypeToCoreType :: EType -> GenCore Core.RCType
 etypeToCoreType ty =  traceShow (text "etypeToCoreType" <+> pprEType ty) $
   case ty
   of AppT op args ->
-       liftM2 Core.AppCT (etypeToCoreType op) (mapM etypeToCoreType args)
+       liftM2 Core.appCT (etypeToCoreType op) (mapM etypeToCoreType args)
      InstT varcon effs ->
        let op = case varcon
                 of Left v -> Core.ExpCT (Gluon.mkInternalVarE v)
                    Right c -> Core.ExpCT (Gluon.mkInternalConE c)
-       in liftM (Core.AppCT op) (mapM effectToCoreEffect effs)
+       in liftM (Core.appCT op) (mapM effectToCoreEffect effs)
      FunT {} -> fmap Core.funCT $ etypeToCoreFunType ty
      VarT v -> return (Core.varCT v)
      ConT c -> return (Core.conCT c)
@@ -463,7 +469,7 @@ toCoreExp rb expression = debug $
       convertCall rb inf (Left op) effs args
     CallE op args ->
       convertCall rb inf (Right op) [] args
-    FunE f -> trace "toCoreExp FunE" $ do
+    FunE f -> do
       f' <- toCoreFun f
       return $ Core.LamCE inf f'
     DoE ty pc body ->
@@ -504,7 +510,6 @@ toFreeCoreCoExp :: EExp  -- ^ Expression possibly involving a coercion
                 -> (Core.RCExp -> GenCore Core.RCExp) -- ^ User of the coerced value
                 -> GenCore Core.RCExp           -- ^ Code generator
 toFreeCoreCoExp e k =
-  traceShow (text "toFreeCoreCoExp" <+> (pprEExp e $$ pprEReturnType (expReturn e))) $
   withReturnType (expReturn e) $ \rb -> toCoreCoExp rb e k
 
 -- | Generate code for any expression.  This may result in inserting code  
@@ -696,57 +701,58 @@ convertCall :: RetBinding                   -- ^ Return binding
             -> [Effect]                     -- ^ Effect arguments
             -> [EExp]                       -- ^ Other arguments
             -> GenCore Core.RCExp
-convertCall rb inf op effs args = do
-  -- Convert subexpressions
-  op' <- case op
-         of Left (Left v)  -> convertVarE (OwnRB undefined) inf v
-            Left (Right c) -> convertConE (OwnRB undefined) inf c
-            Right op_exp   -> toNonReferenceCoreExp op_exp
-
-  effs' <- mapM make_effect_param effs
-  withMany toFreeCoreCoExp args $ \args' ->
-    let expr = Core.AppCE { Core.cexpInfo = inf
-                          , Core.cexpOper = op'
-                          , Core.cexpArgs = effs' ++ args'
-                          , Core.cexpReturnArg = retBindingArgument rb
-                          }
-    in return expr
+convertCall rb inf op effs args =
+  with_operator $ \op' -> do
+    effs' <- mapM make_effect_param effs
+    withMany toFreeCoreCoExp args $ \args' ->
+      let expr = Core.AppCE { Core.cexpInfo = inf
+                            , Core.cexpOper = op'
+                            , Core.cexpArgs = effs' ++ args'
+                            , Core.cexpReturnArg = retBindingArgument rb
+                            }
+      in return expr
   where
+    with_operator k =
+       case op
+       of Left (Left v)  -> k =<< convertVarE (OwnRB undefined) inf v
+          Left (Right c) -> k =<< convertConE (OwnRB undefined) inf c
+          Right op_exp   -> toFreeCoreCoExp op_exp k
+
     make_effect_param effect = do
       effect_type <- effectToCoreEffect effect
       return $ Core.ValCE inf (Core.TypeV effect_type)
 
-convertDoE rb inf ty_arg pass_conv body = do
-  ty_arg' <- toNonReferenceCoreExp ty_arg
-  pass_conv' <- toNonReferenceCoreExp pass_conv
+convertDoE rb inf ty_arg pass_conv body =
+  toFreeCoreCoExp pass_conv $ \pass_conv' -> do
+    ty_arg' <- toNonReferenceCoreExp ty_arg
 
-  -- Look up the effect type from the returned stream's type
-  let eff =
-        case rb
-        of OwnRB (Core.unpackConAppCT -> Just (con, eff : _))
-             | con `SF.isPyonBuiltin` SF.the_LazyStream -> eff
-           _ -> internalError "convertDoE: Unexpected return type"
-  
-  -- Create a lambda function for the body
-  body_exp <- withReturnType (expReturn body) $ \body_rb -> do
-    body' <- toCoreExp body_rb body
-    return_binder <- lookupReturnType $ expReturn body
+    -- Look up the effect type from the returned stream's type
+    let eff =
+          case rb
+          of OwnRB (Core.unpackConAppCT -> Just (con, eff : _))
+               | con `SF.isPyonBuiltin` SF.the_LazyStream -> eff
+             _ -> internalError "convertDoE: Unexpected return type"
     
-    let fun = Core.CFun { Core.cfunInfo = expInfo body
-                        , Core.cfunParams = []
-                        , Core.cfunEffect = eff
-                        , Core.cfunReturn = return_binder
-                        , Core.cfunBody = body'
-                        }
-        lam = Core.LamCE (expInfo body) fun
-    return lam
+    -- Create a lambda function for the body
+    body_exp <- withReturnType (expReturn body) $ \body_rb -> do
+      body' <- toCoreExp body_rb body
+      return_binder <- lookupReturnType $ expReturn body
+      
+      let fun = Core.CFun { Core.cfunInfo = expInfo body
+                          , Core.cfunParams = []
+                          , Core.cfunEffect = eff
+                          , Core.cfunReturn = return_binder
+                          , Core.cfunBody = body'
+                          }
+          lam = Core.LamCE (expInfo body) fun
+      return lam
 
-  -- Construct the stream expression
-  let stream_exp = Core.AppCE (expInfo body) stream_op
-                   [Core.ValCE inf (Core.TypeV eff), ty_arg', pass_conv',
-                    body_exp]
-                   Nothing
-  return stream_exp
+    -- Construct the stream expression
+    let stream_exp = Core.AppCE (expInfo body) stream_op
+                     [Core.ValCE inf (Core.TypeV eff), ty_arg', pass_conv',
+                      body_exp]
+                     Nothing
+    return stream_exp
   where
     stream_op = Core.ValCE inf (Core.OwnedConV (SF.pyonBuiltin SF.the_fun_return))
 

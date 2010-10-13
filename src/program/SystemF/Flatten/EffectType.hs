@@ -11,7 +11,7 @@ Core allows a complex view of memory, but we make no attempt to infer
 effects in core.
 -}
 
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE Rank2Types, ViewPatterns #-}
 module SystemF.Flatten.EffectType where
 
 import Control.Monad
@@ -354,7 +354,8 @@ etypeToReturnType (ERepType repr ty) =
   of Value      -> return $ ValRT ty
      Boxed      -> return $ OwnRT ty
      Referenced -> do
-       rgn <- newRegionVar False
+       -- This region may get its actual value by unification 
+       rgn <- newRegionVar True
        return $ WriteRT rgn ty
 
 -------------------------------------------------------------------------------
@@ -815,10 +816,12 @@ isDictionaryTypeCon c =
            ]
 
 -- | Instantiate a type constructor by inserting new type parameters.  The
--- parameters will acquire values by unification.
-instantiateTypeCon :: Bool -> Con -> RegionM ERepType
+--   parameters will acquire values by unification.
+--
+--   The newly created, unifiable effect variables are returned in a list.
+instantiateTypeCon :: Bool -> Con -> RegionM (ERepType, [EVar])
 instantiateTypeCon no_effects c
-  | no_effects = return $ mkPureInstT (Right c) arity
+  | no_effects = return (mkPureInstT (Right c) arity, [])
   | otherwise  = mkInstT (Right c) arity
   where
     arity = dataTypeEffectArity c
@@ -830,30 +833,31 @@ mkPureInstT op arity = instT op (replicate arity emptyEffect)
 -- | Create an instance expression from a variable or constructor.
 mkInstT :: Either Var Con       -- ^ Variable or constructor to instantiate
         -> Int                  -- ^ Arity (number of effect parameters)
-        -> RegionM ERepType
+        -> RegionM (ERepType, [EVar])
 mkInstT op arity = do
   args <- replicateM arity newEffectVar
-  return $ instT op $ map varEffect args
+  return (instT op $ map varEffect args, args)
 
 
 -- | Convert a System F type to the corresponding effect type.  New effect
 -- variables are created to stand for each side effect.  Function types are
 -- conservatively assumed to access all their parameters.
-toEffectType :: Gluon.WSRExp -> RegionM ERepType
+toEffectType :: Gluon.WSRExp -> RegionM (ERepType, [EVar])
 toEffectType = makeEffectType False
 
 -- | Convert a System F type to the corresponding effect type, with all side
 --   effect parameters set to the empty effect.  This conversion is used in
 --   type parameters of type classes.
 toPureEffectType :: Gluon.WSRExp -> RegionM ERepType
-toPureEffectType = makeEffectType True
+toPureEffectType t = fmap fst $ makeEffectType True t
 
 -- | This function does the real work of 'toEffectType' and
 -- 'toPureEffectType'.
-makeEffectType :: Bool -> Gluon.WSRExp -> RegionM ERepType
+makeEffectType :: Bool -> Gluon.WSRExp -> RegionM (ERepType, [EVar])
 makeEffectType no_effects expr =
   case getLevel $ Gluon.fromWhnf $ Gluon.substFullyUnderWhnf expr
-  of KindLevel -> makeEffectKind expr
+  of KindLevel -> do k <- makeEffectKind expr
+                     return (k, [])
      TypeLevel ->
        case Gluon.unpackRenamedWhnfAppE expr
        of Just (con, args) -> makeConstructorApplication no_effects con args
@@ -861,17 +865,19 @@ makeEffectType no_effects expr =
             case Gluon.fromWhnf expr
             of Gluon.FunE {} -> makeFunctionType no_effects expr
                Gluon.AppE {Gluon.expOper = op, Gluon.expArgs = args} -> do 
-                 op' <- makeEffectType no_effects =<< evalHead op
-                 args' <- mapM (makeEffectType no_effects <=< evalHead) args
-                 return $ appT op' args'
-               Gluon.VarE {Gluon.expVar = v} -> return $ varT v
-               Gluon.LitE {Gluon.expLit = l} -> return $ litT l
+                 (op', op_evars) <- makeEffectType no_effects =<< evalHead op
+                 (unzip -> (args', concat -> args_evars)) <-
+                   mapM (makeEffectType no_effects <=< evalHead) args
+                 return (appT op' args', op_evars ++ args_evars)
+               Gluon.VarE {Gluon.expVar = v} -> return (varT v, [])
+               Gluon.LitE {Gluon.expLit = l} -> return (litT l, [])
                _ -> internalError "makeEffectType"
      _ -> internalError "makeEffectType"
 
 -- | Convert a kind expression to the representation used in effect types.
 -- Kind expressions only contain literals and non-dependnet function types.
 -- No effect types are inserted here.
+makeEffectKind :: Gluon.WSRExp -> RegionM ERepType
 makeEffectKind expr =
   case Gluon.fromWhnf expr
   of Gluon.LitE {Gluon.expLit = lit} -> return $ litT lit
@@ -886,9 +892,10 @@ makeEffectKind expr =
 -- | Create an application of a type constructor.  System F types are
 -- translated to core types here.
 makeConstructorApplication no_effects sf_con args = do
-  con_inst <- instantiateTypeCon no_local_effects core_con
-  args' <- mapM (makeEffectType no_local_effects <=< evalHead) args
-  return $ appT con_inst args'
+  (con_inst, con_evars) <- instantiateTypeCon no_local_effects core_con
+  (unzip -> (args', concat -> arg_evars)) <-
+    mapM (makeEffectType no_local_effects <=< evalHead) args
+  return (appT con_inst args', con_evars ++ arg_evars)
   where
     -- Don't let side effects appear in parameters to dictionary types 
     no_local_effects = no_effects || isDictionaryTypeCon sf_con
@@ -901,17 +908,21 @@ makeConstructorApplication no_effects sf_con args = do
 -- all parameters are read.  Side effects from parameters will be placed on 
 -- the last arrow.  In other words, the function only produces side effects
 -- after all parameters are applied.
+makeFunctionType :: Bool -> Gluon.WSRExp -> RegionM (ERepType, [EVar])
 makeFunctionType no_effects expr =
   case Gluon.fromWhnf expr
   of Gluon.FunE {Gluon.expMParam = param, Gluon.expRange = rng} -> do
        -- Convert the domain type
-       (param, param_effects) <- make_domain_type emptyEffect param
+       (param, param_effects, dom_evars) <- make_domain_type emptyEffect param
 
        -- Continue with the range
-       (rng', here_effect) <- make_range_type param_effects =<< evalHead rng
+       (rng', here_effect, rng_evars) <-
+         make_range_type param_effects =<< evalHead rng
        return_type <- etypeToReturnType rng'
 
-       return $ ERepType representation (FunT param here_effect return_type)
+       let fun_type = ERepType representation $
+                      FunT param here_effect return_type
+       return (fun_type, dom_evars ++ rng_evars)
 
      _ -> internalError "makeFunctionType: Not a function type"
   where
@@ -928,41 +939,45 @@ makeFunctionType no_effects expr =
       case Gluon.fromWhnf expr
       of Gluon.FunE {Gluon.expMParam = param, Gluon.expRange = rng} -> do
            -- Convert the next parameter
-           (param, param_effects') <- make_domain_type param_effects param
+           (param, param_effects', dom_evars) <-
+             make_domain_type param_effects param
 
            -- Continue with the range
-           (rng', here_effect) <-
+           (rng', here_effect, rng_evars) <-
              make_range_type param_effects' =<< evalHead rng
            return_type <- etypeToReturnType rng'
 
-           return (ERepType representation $ FunT param here_effect return_type, emptyEffect)
+           let fun_type = ERepType representation $
+                          FunT param here_effect return_type
+           return (fun_type, emptyEffect, dom_evars ++ rng_evars)
          
          _ | getLevel (Gluon.fromWhnf expr) /= TypeLevel ->
                internalError "funTypeToPassType: Expecting a type"
            | otherwise -> do
                -- The function produces a side effect and returns its result
-               rng' <- makeEffectType no_effects expr
+               (rng', rng_evars) <- makeEffectType no_effects expr
 
                -- If side effect variables are allowed here,
                -- create a variable to stand for this expression's free effect
-               param_effects' <-
+               (param_effects', extra_evar) <-
                  if no_effects
-                 then return emptyEffect
+                 then return (emptyEffect, [])
                  else do
                    effect_var <- newEffectVar
-                   return $ param_effects `effectUnion` varEffect effect_var
+                   return (param_effects `effectUnion` varEffect effect_var,
+                           [effect_var])
 
-               return (rng', param_effects')
+               return (rng', param_effects', extra_evar ++ rng_evars)
 
     -- Convert the parameter on the left side of an (->)
     make_domain_type param_effects (Binder' mv dom ()) = do
-      dom' <- makeEffectType no_effects =<< evalHead dom
+      (dom', dom_evars) <- makeEffectType no_effects =<< evalHead dom
       param <- etypeToParamType dom' mv
            
       -- Include this parameter in the function's side effect
       let param_effects' =
             param_effects `effectUnion` maybeVarEffect (paramTypeRegion param)
-      return (param, param_effects')
+      return (param, param_effects', dom_evars)
 
 -------------------------------------------------------------------------------
 -- Conversion from core to effect types

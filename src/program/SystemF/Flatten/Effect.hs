@@ -455,6 +455,9 @@ data RegionEnv =
   , reRegionEnv :: Set.Set EffectVar
   }
 
+instance Functor RegionM where
+  fmap f m = return . f =<< m
+
 instance Monad RegionM where
   return x = RegionM (\_ -> return x)
   m >>= k = RegionM (\env -> do x <- doRegionM m env

@@ -36,6 +36,7 @@ import LowLevel.Record
 import LowLevel.Records
 import LowLevel.Build
 import LowLevel.Builtins
+import qualified LowLevel.Print as LL
 import Globals
 import Export
 
@@ -206,18 +207,6 @@ assumePassConvVar a p param_type m = do
 -- in the returned list.
 getPassConvEnvironment :: Cvt [(AddrVar, PtrVar, RExp)]
 getPassConvEnvironment = Cvt $ asks passConvEnvironment
-  {- traceEnvironment "getPassConvEnvironment" $ do
-  types <- getPureTypes
-  return $ mapMaybe pass_conv_types types
-  where
-    pass_conv_types (v, ty) =
-      case ty
-      of AppE {expOper = ConE {expCon = con}, expArgs = args}
-           | con `isPyonBuiltin` the_PassConv ->
-               case args
-               of [arg] -> Just (v, arg) 
-                  _ -> internalError "getPassConvEnvironment"
-         _ -> Nothing-}
 
 -------------------------------------------------------------------------------
 
@@ -564,7 +553,10 @@ convertApp op args rarg = do
   -- Create application
   return_type <- applyFunctionType op_type args
   
-  let atom_exp = liftM2 LL.CallA (asVal op') (mapM asVal args'')
+  let atom_exp = do
+        op'' <- asVal op' 
+        args''' <- mapM asVal args''
+        return $ LL.CallA op'' args'''
   
   return $ atom return_type atom_exp
 

@@ -184,6 +184,9 @@ lookupConRegion c = EI $ \env ->
 tellNewEffectVar :: EffectVar -> EI ()
 tellNewEffectVar v = EI $ \env -> return ((), mempty, Endo (v:))
 
+tellNewEffectVars :: [EffectVar] -> EI ()
+tellNewEffectVars vs = EI $ \env -> return ((), mempty, Endo (vs ++))
+
 -- | Create a new effect variable that does not have a binding.  The variable 
 -- will either be unified with something else or assigned a binding during
 -- generalization.
@@ -191,6 +194,18 @@ newFlexibleEffectVar :: EI EffectVar
 newFlexibleEffectVar = do v <- newEffectVar
                           tellNewEffectVar v
                           return v
+
+
+
+toReturnType :: Gluon.RExp -> EI EReturnType
+toReturnType ty = do
+  (ty', evars) <- liftRegionM $ toEffectType =<< evalHead' ty
+  tellNewEffectVars evars
+  liftRegionM $ etypeToReturnType ty'
+
+toPureReturnType :: Gluon.RExp -> EI EReturnType
+toPureReturnType ty = liftRegionM $ do
+  etypeToReturnType =<< toPureEffectType =<< evalHead' ty
 
 -------------------------------------------------------------------------------
 -- Effect inference
@@ -266,10 +281,9 @@ inferExp typed_expression@(SF.TypedSFExp (SF.TypeAnn ty expression)) =
 -- | Convert a type from System F's type inference pass
 fromInferredType :: SF.TRType -> EI EExp
 fromInferredType (SF.TypedSFType (SF.TypeAnn k t)) = do
-  t' <- liftRegionM $ toEffectType =<< evalHead' t
-  kind <- liftRegionM $ toEffectType =<< evalHead' (Gluon.fromWhnf k)
+  (t', []) <- liftRegionM $ toEffectType =<< evalHead' t
   let info = Gluon.internalSynInfo (getLevel t')
-  return_type <- liftRegionM $ etypeToReturnType kind
+  return_type <- toReturnType (Gluon.fromWhnf k)
   return $ EExp info return_type $ TypeE (discardTypeRepr t')
 
 data UnpackedOper = OrdinaryOper !(EExp, Effect)
@@ -324,11 +338,10 @@ inferConE inf c = do
   
   return (EExp inf rt exp1, emptyEffect)
 
-inferLitE ty inf lit = liftRegionM $ do
-  ty' <- toEffectType =<< evalHead' (Gluon.fromWhnf ty)
-  return_ty <- etypeToReturnType ty'
+inferLitE ty inf lit = do
+  return_ty <- toReturnType (Gluon.fromWhnf ty)
   -- Literal value has no side effect and returns by value
-  return (EExp inf return_ty (LitE lit (discardTypeRepr ty')), emptyEffect)
+  return (EExp inf return_ty (LitE lit (returnTypeType return_ty)), emptyEffect)
 
 -- | Effect inference on a stream constructor (\"do\").  Since streams are
 -- lazy, always return the empty effect.  The body's side effect appears in
@@ -518,24 +531,27 @@ inferCase case_type inf scr alts = do
     -- based on the expression's type.  Coerce all alternatives' returns
     -- to that return type.
     infer_alternatives alts = do
-      return_type <- liftRegionM $
-                     etypeToReturnType =<< toEffectType =<< evalHead' (Gluon.fromWhnf case_type)
+      return_type <- toReturnType  (Gluon.fromWhnf case_type)
       (alts, effs) <- mapAndUnzipM (inferAlt (Just return_type)) alts
       return (alts, effs, return_type)
 
 tyPatAsBinder :: SF.TyPat SF.TypedRec -> EI EParam
 tyPatAsBinder (SF.TyPat v (SF.TypedSFType (SF.TypeAnn _ ty))) = do
-  param_type <- liftRegionM $ toEffectType =<< evalHead' ty
+  param_type <- liftRegionM $ toPureEffectType =<< evalHead' ty
   return $ ValP v $ discardTypeRepr param_type
 
 patternAsBinder :: Bool -> SF.Pat SF.TypedRec -> EI EParam
 patternAsBinder no_effects (SF.VarP v (SF.TypedSFType (SF.TypeAnn _ ty))) = do
-  param_type <- liftRegionM $ do
+  (param_type, effs) <- liftRegionM $ do
     ty' <- evalHead' ty
-    etype <- if no_effects
-             then toPureEffectType ty'
-             else toEffectType ty'
-    etypeToParamType etype Nothing -- Value parameters aren't used dependently
+    (etype, effs) <- if no_effects
+                     then do etype <- toPureEffectType ty'
+                             return (etype, [])
+                     else toEffectType ty'
+    -- Value parameters aren't used dependently                          
+    param_type <- etypeToParamType etype Nothing
+    return (param_type, effs)
+  tellNewEffectVars effs
   return $! case param_type
             of ValPT _ ty -> ValP v ty
                OwnPT ty -> OwnP v ty
@@ -571,12 +587,10 @@ inferFunMonoType (SF.TypedSFFun (SF.TypeAnn _ f)) = do
   let params = ty_params ++ val_params
   
   -- Convert return type
-  return_type <-
-    liftRegionM $
-    etypeToReturnType =<< toEffectType =<< evalHead' (fromTRType $ SF.funReturnType f)
+  return_type <- toReturnType (fromTRType $ SF.funReturnType f)
     
   -- Create a new variable for the effect type
-  effect_type <- newEffectVar
+  effect_type <- newFlexibleEffectVar
   
   -- Return this type
   liftRegionM $ etypeToReturnType $
@@ -619,10 +633,7 @@ inferFun is_lambda (SF.TypedSFFun (SF.TypeAnn _ f)) = do
   let params = ty_params ++ val_params
 
   (fun_type, body, body_eff, return_type) <- withBinders params $ do
-    return_type <- liftRegionM $ do
-      etypeToReturnType =<<
-        toEffectType =<<
-        evalHead' (fromTRType $ SF.funReturnType f)
+    return_type <- toReturnType (fromTRType $ SF.funReturnType f)
 
     (fun_type, body, body_eff) <-
       -- Eliminate constraints on flexible variables if this function is going 
@@ -747,8 +758,9 @@ inferAlt mreturn_type (SF.TypedSFAlt (SF.TypeAnn _ alt)) = do
       return $ applyCoercion coercion e
 
 inferTypeExp :: SF.RecType SF.TypedRec -> RegionM ERepType
-inferTypeExp (SF.TypedSFType (SF.TypeAnn k t)) =
-  toEffectType =<< evalHead' t
+inferTypeExp (SF.TypedSFType (SF.TypeAnn k t)) = do
+  (t', []) <- toEffectType =<< evalHead' t
+  return t'
 
 inferExport :: SF.Export SF.TypedRec -> EI EExport
 inferExport export = do
@@ -1119,9 +1131,10 @@ coerceParameter variance p_passtype r_passtype =
          OwnRT {} ->
            coercion (genTempStoreOwned pv `mappend` astype) [pv]
          ReadRT rv r_type -> do
-           liftIO $ print (text "Read/Read: " <+> pprEffectVar pv <+> pprEffectVar rv)
-           liftIO $ unifyRegionVars pv rv
-           id_coercion astype [rv]
+           -- Rename the given parameter to match the expected parameter
+           let renaming = \_ -> Renaming (renameE pv rv)
+           liftIO $ print (text "Renaming" <+> pprEffectVar rv <+> pprEffectVar pv)
+           return (astype, renaming, [rv], [], [])
          WriteRT rv r_type -> do
            liftIO $ unifyRegionVars pv rv
            coercion astype [rv]
