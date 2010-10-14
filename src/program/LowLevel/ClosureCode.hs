@@ -118,11 +118,15 @@ concatDefs = (++)
 -- | The monad used by closure conversion while scanning a program.
 --
 -- When scanning part of a program, closure conversion keeps track of the 
--- set of free variables referenced in that part of the program.  (Globals
--- are not included in the set since they cannot be captured.)
+-- set of free variables referenced in that part of the program.
+-- The set of free variables when scanning a function--that is,
+-- the variables that are used by the function, but not a parameter of 
+-- the function--are the captured variables.  Globals
+-- are not included in the free variables set because they cannot be captured.
 --
--- During scanning, new global definitions are generated.  These definitions
--- comprise the translated module.
+-- During scanning, all functions (including local and global functions) 
+-- are written out as global definitions.  These definitions are assembled
+-- into the body of the closure-converted module.
 newtype CC a = CC (CCEnv -> IO (a, FreeVars, Defs))
 
 data CCEnv =
