@@ -26,7 +26,6 @@ import qualified SystemF.DeadCode as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.Typecheck as SystemF
-import qualified SystemF.NewFlatten.GenCore as SystemF
 import qualified SystemF.Flatten.EffectInference as SystemF
 import qualified SystemF.Print as SystemF
 import qualified Core.Lowering as Core

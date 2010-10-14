@@ -77,9 +77,6 @@ Executable pyon
     SystemF.Flatten.EffectInference
     SystemF.Flatten.Constraint
     SystemF.Flatten.GenCore
-    SystemF.NewFlatten.PassConv
-    SystemF.NewFlatten.SetupEffect
-    SystemF.NewFlatten.GenCore
     Core.Syntax
     Core.Print
     Core.Gluon
