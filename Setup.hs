@@ -54,10 +54,6 @@ runMake lbi flags args =
 -------------------------------------------------------------------------------
 -- Hooks
 
-doConfigure autoconf_configure (pkg_desc, build_info) flags = do
-  confHook simpleUserHooks (pkg_desc, build_info) flags
-  autoconf_configure (pkg_desc, build_info) flags
-
 -- Preprocessing before build
 preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
   lex_alexpath <-
@@ -153,11 +149,10 @@ doClean orig_clean pkg_desc _lbi hooks flags = do
 
 doTest args _ pkg_desc lbi = runRegressionTests
 
-hooks = autoconfUserHooks
-  { hookedPrograms = makeProgram : hookedPrograms autoconfUserHooks
+hooks = simpleUserHooks
+  { hookedPrograms = makeProgram : hookedPrograms simpleUserHooks
   , runTests = doTest
-  , confHook = doConfigure (confHook autoconfUserHooks)
-  , cleanHook = doClean (cleanHook autoconfUserHooks)
+  , cleanHook = doClean (cleanHook simpleUserHooks)
   , buildHook = doBuild
   , haddockHook = doHaddock
   }

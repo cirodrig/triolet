@@ -11,6 +11,7 @@ import Data.List hiding(intercalate)
 import Data.Maybe
 import System.FilePath
 import System.Directory
+import qualified System.Info
 import System.IO.Error hiding(catch)
 
 import Distribution.InstalledPackageInfo
@@ -19,6 +20,7 @@ import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.PackageIndex
+import Distribution.Simple.Program
 import Distribution.Simple.Utils
 import Distribution.Text
 import Distribution.Verbosity
@@ -279,12 +281,50 @@ generateVariables :: Executable
                   -> [MakeRule]
                   -> IO [(String, String)]
 generateVariables exe lbi pyon_rules rts_rules data_rules = do
+  -- Get paths
+  cc_path <-
+    case lookupProgram gccProgram $ withPrograms lbi
+    of Just pgm -> return $ programPath pgm
+       Nothing -> die "Cannot find 'gcc'"
+  hc_path <- 
+    case lookupProgram ghcProgram $ withPrograms lbi
+    of Just pgm -> return $ programPath pgm
+       Nothing -> die "Cannot find 'ghc'"
+  
+  -- Force 32-bit compilation?
+  (cc_32b_flag, l_32b_flag, linkshared_32b_flag) <-
+    let y = (["-m32"], ["-optl-m32"], [])
+        n = ([], [], [])
+    in case System.Info.arch
+       of "i386" -> return y
+          "x86_64" -> return y
+          _ -> die "Unrecognized host architecture"
+
+  -- Compute file lists
   let pyon_source_files = getSources pyon_rules
       pyon_object_files = getObjectTargets pyon_rules
       rts_source_files = getSources rts_rules
       rts_object_files = getObjectTargets rts_rules
       prebuilt_data_files = map makeTarget data_rules
-  return [ ("PYON_SOURCE_FILES", makefileList pyon_source_files)
+
+  return [ -- paths within the project directory
+           ("BUILDDIR", buildDir lbi)
+         , ("DATADIR", "data")
+         , ("SRCDIR", "src")
+           -- executables
+         , ("CC", cc_path)
+         , ("HC", hc_path)
+         , ("LINKSHARED", "libtool -dynamic")
+           -- flags
+         , ("CCFLAGS", intercalate " " (cc_32b_flag ++ cc_warning_flags))
+         , ("LFLAGS", intercalate " " l_32b_flag)
+         , ("LINKFLAGS", intercalate " " linkshared_32b_flag)
+           -- paths outside the project directory
+         , ("INCLUDEDIRS", "")
+         , ("LIBDIRS", "")
+         , ("LIBS", "")
+           -- files in the project directory
+         , ("PYON_SOURCE_FILES", makefileList pyon_source_files)
          , ("PYON_OBJECT_FILES", makefileList pyon_object_files)
          , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts exe lbi)
          , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts exe lbi)
@@ -303,6 +343,9 @@ generateVariables exe lbi pyon_rules rts_rules data_rules = do
         is_source f = takeExtension f `elem` [".hs", ".c", ".pyasm"]
     getObjectTargets rules = 
         filter ((".o" ==) . takeExtension) $ map makeTarget rules
+
+    cc_warning_flags = ["-Werror", "-Wimplicit-function-declaration",
+                        "-Wimplicit-int"]
 
 -- | Create Makefile rules to create all object files used in building the
 -- 'pyon' executable.

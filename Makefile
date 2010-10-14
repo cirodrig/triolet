@@ -10,25 +10,10 @@ default :
 
 include variables.mk
 
-# GHC options passed to haddock.
-HADDOCK_HC_OPTS=$(foreach opt, $(HS_C_OPTS), "--optghc=$(opt)")
-
-# For each package, get the location of its haddock interface file
-# using ghc-pkg
-HADDOCK_INTERFACE_FILES=$(foreach pkg, $(PACKAGES), $(shell ghc-pkg describe $(pkg) --simple-output | $(ESED) -n "s/^haddock-interfaces: (.*)/\1/p"))
-HADDOCK_INTERFACE_OPTS=$(foreach ifile, $(HADDOCK_INTERFACE_FILES), -i $(ifile))
-
 ###############################################################################
 # Targets
 
-.PHONY : default doc build bootstrap_data data testcases
-
-doc : dist/doc/html/pyon/index.html
-
-# Delegate documentation to a script
-dist/doc/html/pyon/index.html : $(PYON_HS_SOURCE_FILES)
-	@echo "Building documentation..."
-	@env ESED="$(ESED)" HADDOCK_HC_OPTS="$(HADDOCK_HC_OPTS)" PYON_HS_SOURCE_FILES="$(PYON_HS_SOURCE_FILES)" PACKAGES="$(PACKAGES)" sh makedoc.sh
+.PHONY : default build bootstrap_data data testcases
 
 # Create executable, library, and scripts; then run Python's setup script 
 build : $(PYON_TARGET) $(RTS_TARGET) data
