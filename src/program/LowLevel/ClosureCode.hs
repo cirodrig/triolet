@@ -333,12 +333,11 @@ mentions vs = CC $ \env ->
                   filter (not . (`IntSet.member` globals) . fromIdent . varID) vs
   in free_vars `seq` return ((), free_vars, noDefs)
 
--- | Get the set of free variables that were used in the computation.  Don't
--- propagate the variables.
+-- | Get the set of free variables that were used in the computation.
 listenFreeVars :: CC a -> CC (a, FreeVars)
 listenFreeVars (CC m) = CC $ \env -> do
   (x, free_vars, defs) <- m env
-  return ((x, free_vars), Set.empty, defs)
+  return ((x, free_vars), free_vars, defs)
 
 -- | Look up a variable used as the operator of a function call.
 -- If the variable is a known function and its arity matches the given arity,
@@ -767,7 +766,7 @@ emitExactEntry clo = do
           -- Captured variables are in the shared record
           shared_record <- loadField (recursiveClosureRecord !!: 1) clo_ptr
           captured_vars <-
-            referenceField (closureSharedRecord clo !!: 0) clo_ptr
+            referenceField (closureSharedRecord clo !!: 0) shared_record
           load_captured_vars' captured_vars
       | closureIsLocal clo = do
           -- Captured variables are in the closure
