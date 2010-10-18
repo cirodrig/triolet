@@ -93,7 +93,7 @@ data FunctionDef a =
   , functionIsProcedure :: !Bool
   , functionParams :: Parameters a
   , functionReturns :: [Type a]
-  , functionBody :: Block a
+  , functionBody :: Stmt a
   }
 
 data Parameter a = Parameter (Type a) (VarName a)
@@ -155,12 +155,11 @@ data LValue a =
 
 data Atom a =
     ValA [Expr a]
-  | IfA (Expr a) (Block a) (Block a)
 
 data Stmt a =
-  LetS [LValue a] (Atom a)
-
-data Block a = Block [Stmt a] (Atom a)
+    LetS [LValue a] (Atom a) (Stmt a)
+  | IfS (Expr a) (Stmt a) (Stmt a) (Maybe ([LValue a], Stmt a))
+  | ReturnS (Atom a)
 
 deriving instance Show (Type Parsed)
 deriving instance Show (Def Parsed)
@@ -174,4 +173,3 @@ deriving instance Show (Expr Parsed)
 deriving instance Show (Atom Parsed)
 deriving instance Show (LValue Parsed)
 deriving instance Show (Stmt Parsed)
-deriving instance Show (Block Parsed)

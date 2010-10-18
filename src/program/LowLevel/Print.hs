@@ -181,25 +181,28 @@ pprAtom atom =
      PackA rt vs -> hang (text "pack" <> arg_list vs) 8 $
                     text "as" <+> pprRecordType rt
      UnpackA rt v -> text "unpack" <+> pprVal v <+> text "as" <+> pprRecordType rt
-     SwitchA val alts -> text "switch" <> parens (pprVal val) $$
-                         nest 2 (vcat $ map print_alt alts)
   where
     arg_list vs = fillBracketList $ map pprVal vs
-    print_alt (lit, body) = hang (pprLit lit <> text ":") 6 (pprBlock body)
 
 pprStm :: Stm -> Doc
 pprStm stmt = 
   case stmt
-  of LetE [] atom -> text "[] <-" <+> pprAtom atom
-     LetE vars atom ->
+  of LetE [] atom body -> text "[] <-" <+> pprAtom atom $$ pprStm body
+     LetE vars atom body ->
        let binder = sep $ punctuate (text ",") $ map pprVarLong vars
            rhs = pprAtom atom
-       in hang (binder <+> text "<-") 8 rhs
-     LetrecE defs ->
+       in hang (binder <+> text "<-") 8 rhs $$ pprStm body
+     LetrecE defs body ->
        text "letrec" $$
-       nest 8 (pprFunDefs defs)
+       nest 4 (pprFunDefs defs) $$
+       pprStm body
+     SwitchE val alts -> text "switch" <> parens (pprVal val) $$
+                         nest 2 (vcat $ map print_alt alts)
+     ReturnE atom -> pprAtom atom
+  where
+    print_alt (lit, body) = hang (pprLit lit <> text ":") 6 (pprBlock body)
 
-pprBlock (Block xs atom) = vcat (map pprStm xs) $$ text "return" <+> pprAtom atom
+pprBlock stmt = pprStm stmt
 
 pprImport :: ImportVar -> Doc
 pprImport v = text "extern" <+> pprVar v

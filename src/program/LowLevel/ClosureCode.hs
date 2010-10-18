@@ -42,6 +42,7 @@ module LowLevel.ClosureCode
        (varPrimType,
         GenM, CC,
         runCC,
+        isHoisted,
         lookupEntryPoints',
         lookupCallVar,
         withParameter, withParameters,
@@ -60,6 +61,7 @@ where
 
 import Control.Monad
 import Control.Monad.Fix
+import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List
@@ -132,6 +134,8 @@ newtype CC a = CC (CCEnv -> IO (a, FreeVars, Defs))
 data CCEnv =
   CCEnv
   { envVarIDSupply :: {-# UNPACK #-}!(IdentSupply Var)
+    -- | IDs of letrec-bound functions that should be hoisted to global scope.
+  , envHoist :: !IntSet.IntSet
     -- | IDs of global variables.  Global variables are never captured.
   , envGlobals :: !IntSet.IntSet
     -- | Information about how to construct closures for functions that are
@@ -139,16 +143,18 @@ data CCEnv =
   , envEntryPoints :: !(IntMap.IntMap Closure)
   }
 
-emptyCCEnv var_ids globals =
+emptyCCEnv var_ids hoisted globals =
   let globals_set = IntSet.fromList $ map (fromIdent . varID) globals
-  in CCEnv var_ids globals_set IntMap.empty
+      hoisted_set = IntSet.fromList $ map (fromIdent . varID) hoisted
+  in CCEnv var_ids hoisted_set globals_set IntMap.empty
 
 runCC :: IdentSupply Var        -- ^ Variable ID supply
+      -> [Var]                  -- ^ Hoisted local variables
       -> [Var]                  -- ^ Global variables
       -> CC ()                  -- ^ Computation to run
       -> IO ([FunDef], [DataDef]) -- ^ Compute new global definitions 
-runCC var_ids globals (CC f) = do
-  let env = emptyCCEnv var_ids globals
+runCC var_ids hoisted globals (CC f) = do
+  let env = emptyCCEnv var_ids hoisted globals
   ((), _, defs) <- f env
   return $ accumulate id id defs
   where
@@ -158,6 +164,10 @@ runCC var_ids globals (CC f) = do
 
 returnCC :: a -> IO (a, FreeVars, Defs)
 returnCC x = return (x, Set.empty, noDefs)
+
+instance Functor CC where
+  fmap f (CC x) = CC $ \env -> do (y, a, b) <- x env
+                                  return (f y, a, b)
 
 instance Monad CC where
   return x = CC $ \_ -> returnCC x
@@ -184,6 +194,10 @@ withEntryPoints fname entry_points (CC m) = CC $ m . insert_entry
       in env { envEntryPoints = IntMap.insert key entry_points $
                envEntryPoints env}
 -}
+
+isHoisted :: Var -> CC Bool
+isHoisted v = CC $ \env ->
+  returnCC $ fromIdent (varID v) `IntSet.member` envHoist env
 
 lookupClosure :: Var -> CC (Maybe Closure)
 lookupClosure v = CC $ \env ->
@@ -385,7 +399,9 @@ groupSharedRecord captured_record group_record =
 --   point.
 data Closure =
   Closure
-  { -- | The variable that will point to this closure
+  { -- | The variable that will point to this closure.  If the function 
+    --   originally was bound to a variable, this is the same variable.
+    --   If it was a lambda function, this is a new anonymous variable.
     _cVariable :: !Var
     -- | True if the closure is for a global function.  If True, the closure
     -- is not recursive, has no captured variables, and will be generated as 
@@ -557,7 +573,7 @@ finalizeCapturedVariables captured_ptr clo =
   where
     finalize_field field 
       | fieldType field == PrimField OwnedType = do
-          decrefObject =<< loadFieldWithoutOwnership field captured_ptr
+          decrefObject True =<< loadFieldWithoutOwnership field captured_ptr
       | PrimField _ <- fieldType field = return ()
       | otherwise = internalError "finalizeCapturedVariables"
 
@@ -610,7 +626,7 @@ generateClosureFree clo
 
   | Just dealloc_fun <- closureDeallocEntry clo = do
   param <- newAnonymousVar (PrimType PointerType)
-  fun_body <- execBuild $ do
+  fun_body <- execBuild [] $ do
     -- Free the captured variables
     captured_vars <- referenceField (closureRecord clo !!: 1) (VarV param)
     finalizeCapturedVariables captured_vars clo
@@ -658,7 +674,7 @@ generateSharedClosureRecord clos ptrs = do
 emitSharedClosureRecordFree :: Var -> ClosureGroup -> CC ()
 emitSharedClosureRecordFree fun_var clos = do
   param <- newAnonymousVar (PrimType PointerType)
-  fun_body <- execBuild $ do
+  fun_body <- execBuild [] $ do
     -- Get the shared record
     shared_rec <-
       loadField (recursiveClosureRecord !!: 1) (VarV param)
@@ -755,14 +771,15 @@ emitExactEntry :: Closure -> CC ()
 emitExactEntry clo = do
   clo_ptr <- newAnonymousVar (PrimType OwnedType)
   params <- mapM newAnonymousVar $ ftParamTypes $ closureType clo
-  fun_body <- execBuild $ do
+  let return_types = ftReturnTypes $ closureType clo
+  fun_body <- execBuild return_types $ do
     -- Load each captured variable
     cap_vars <- load_captured_vars (VarV clo_ptr)
     -- Call the direct entry point
     let direct_entry = VarV $ closureDirectEntry clo
-    return $ PrimCallA direct_entry (cap_vars ++ map VarV params)
+    return $ ReturnE $ PrimCallA direct_entry (cap_vars ++ map VarV params)
 
-  let fun = primFun (clo_ptr : params) (ftReturnTypes $ closureType clo) fun_body
+  let fun = primFun (clo_ptr : params) return_types fun_body
   writeFun $ FunDef (closureExactEntry clo) fun
   where
     load_captured_vars clo_ptr
@@ -796,7 +813,7 @@ emitInexactEntry clo = do
   clo_ptr <- newAnonymousVar (PrimType OwnedType)
   params_ptr <- newAnonymousVar (PrimType PointerType)
   returns_ptr <- newAnonymousVar (PrimType PointerType)
-  fun_body <- execBuild $ do
+  fun_body <- execBuild [] $ do
     -- Load each parameter value from the parameters record
     param_vals <- load_parameters (VarV params_ptr)
 
@@ -944,6 +961,7 @@ genVarCall :: [PrimType]        -- ^ Return types
 genVarCall return_types fun args = lookupClosure fun >>= select
   where
     use_fun = mention fun >> return (return (VarV fun))
+
     select Nothing = do
       op <- use_fun
       genIndirectCall return_types op args -- Unknown function
@@ -975,12 +993,12 @@ directCall captured_vars v args = do
   return $ PrimCallA (VarV v) (captured_args ++ args')
 
 -- | Produce an indirect call of the given operator
-genIndirectCall :: [PrimType]
-                -> GenM Val
-                -> [GenM Val]
+genIndirectCall :: [PrimType]   -- ^ Return types
+                -> GenM Val     -- ^ Called function
+                -> [GenM Val]   -- ^ Arguments
                 -> CC (GenM Atom)
 
--- No arguments: Don't call
+-- No arguments to closure function: Don't call
 genIndirectCall return_types mk_op [] = return $ do
   op <- mk_op
   return $ ValA [op]
@@ -997,27 +1015,46 @@ genIndirectCall return_types mk_op mk_args = return $ do
   inf_tag <- loadField (infoTableHeaderRecord !!: 1) inf_ptr
   inf_tag_test <- primCmpZ (PrimType (IntType Unsigned S8)) CmpEQ inf_tag $
                   uint8V $ fromEnum FunTag
-  let check_arity = do
-        arity <- loadField (funInfoHeaderRecord !!: 1) inf_ptr
-        eq <- primCmpZ (PrimType nativeWordType) CmpEQ arity $
-          nativeWordV $ length args
-        return $ ValA [eq]
-  use_exact_call <-
-    emitAtom1 (PrimType BoolType) =<<
-    genIf inf_tag_test check_arity (return $ ValA [LitV $ BoolL False])
 
-  -- If the arity matches, then perform an exact call.  Otherwise,
-  -- perform an inexact call.
-  genIf use_exact_call (exact_call op inf_ptr args) (inexact_call op args)
+  -- Branch to the code for an exact or an inexact call
+  ret_vars <- lift $ mapM newAnonymousVar return_types'
+  getContinuation True ret_vars $ \cont -> do
+    exact_call <- lift $
+                  execBuild return_types' $
+                  make_exact_call ret_vars op inf_ptr args cont
+
+    inexact_call_var <- lift $ newAnonymousVar (PrimType PointerType)
+    inexact_call <- lift $ fmap (primFun [] return_types') $
+                    execBuild return_types' $
+                    make_inexact_call ret_vars op args cont
+    emitLetrec [FunDef inexact_call_var inexact_call]
+    
+    check_arity <-
+      lift $ execBuild return_types' $ do
+        -- Compare function arity to number of given arguments
+        arity <- loadField (funInfoHeaderRecord !!: 1) inf_ptr
+        arity_eq <- primCmpZ (PrimType nativeWordType) CmpEQ arity $
+                    nativeWordV $ length args
+        return $ SwitchE arity_eq [(BoolL True, exact_call),
+                                   (BoolL False, ReturnE $ PrimCallA (VarV inexact_call_var) [])]
+
+    -- Check function tag.  If it's a function tag, then check its arity.
+    -- If arity matches, do a direct call.
+    return $ SwitchE inf_tag_test [(BoolL True, check_arity),
+                                   (BoolL False, ReturnE $ PrimCallA (VarV inexact_call_var) [])]
+  return $ ValA (map VarV ret_vars)
   where
-    exact_call clo_ptr inf_ptr args = do
+    return_types' = map PrimType return_types
+
+    make_exact_call ret_vars clo_ptr inf_ptr args cont = do
       -- Get the exact entry point
       fn <- loadField (funInfoHeaderRecord !!: 2) inf_ptr
 
       -- Get the function's captured variables, then call the function
-      return $ PrimCallA fn (clo_ptr : args)
+      bindAtom ret_vars $ PrimCallA fn (clo_ptr : args)
+      return cont
 
-    inexact_call clo_ptr args = do
+    make_inexact_call ret_vars clo_ptr args cont = do
       -- Create temporary storage for return values
       let ret_record = staticRecord $ map PrimField return_types
       ret_ptr <- allocateHeapMem $ nativeWordV $ recordSize ret_record
@@ -1030,7 +1067,8 @@ genIndirectCall return_types mk_op mk_args = return $ do
 
       -- Free temporary storage
       deallocateHeapMem ret_ptr
-      return $ ValA ret_vals
+      bindAtom ret_vars $ ValA ret_vals
+      return cont
 
     -- Load each return value out of the heap record.  Don't increment the
     -- reference count, since the record will be deallocated.

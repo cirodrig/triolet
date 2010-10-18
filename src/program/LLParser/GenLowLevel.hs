@@ -163,6 +163,10 @@ instance Monad NR where
     (x, env', errs') <- runNR m ctx env errs
     runNR (k x) ctx env' errs'
 
+instance MonadFix NR where
+  mfix f = NR (\ctx env errs -> mdo rv@(x, env', errs') <- runNR (f x) ctx env errs
+                                    return rv)
+
 instance Supplies NR (Ident LL.Var) where
   fresh = NR $ \ctx env errs -> do
     x <- supplyValue (varIDSupply ctx)
@@ -374,7 +378,7 @@ defineRecord name nparams mk_fields =
 type GenNR a = Gen NR a
 
 transformGenNR :: (forall a. NR a -> NR a) -> GenNR a -> GenNR a
-transformGenNR f m = WriterT $ f $ runWriterT m
+transformGenNR f m = Gen $ \rt -> f $ runGen m rt
 
 -- | Report an error if the expected type does not match the given type. 
 expectType :: LL.ValueType      -- ^ Expected type
@@ -733,25 +737,20 @@ resolveAtom (ValA exprs) = do
   (unzip -> (vals, types)) <- mapM resolveExprValue exprs
   return (LL.ValA vals, types)
 
-resolveAtom (IfA cond true false) = do
-  -- Evaluate the condition
-  (cond_val, _) <- resolveExprValue cond 
-  (true_block, true_types) <- getBlock' $ resolveBlock true
-  (false_block, false_types) <- getBlock' $ resolveBlock false
-
-  -- True and false types should match
-  let atom = LL.SwitchA cond_val [ (LL.BoolL True, true_block)
-                                 , (LL.BoolL False, false_block)]
-  return (atom, true_types)
-
-resolveStmt :: Stmt Parsed -> GenNR ()
-resolveStmt (LetS lvals atom) = do
+-- | Resolve a statement.  The statement may end by either falling through,
+-- or branching to a predetermined control flow successor.  The 'cont'
+-- parameter takes care of passing the live-out variables to the right place.
+resolveStmt :: [LL.ValueType]   -- ^ Statement's return types
+            -> (LL.Atom -> [LL.ValueType] -> GenNR (LL.Stm, a))
+            -> Stmt Parsed
+            -> GenNR (LL.Stm, a)
+resolveStmt return_types cont (LetS lvals atom body) = do
   -- Convert the RHS of the assignment; find out how many return values
   -- there are
   (atom', types) <- resolveAtom atom
   unless (length types == length lvals) $
     error "resolveStmt: Wrong number of binders"
-    
+
   -- Choose variables for each return value; determine what additional
   -- code to generate if any
   (unzip3 -> (dsts, deferred_stores, bindings)) <-
@@ -765,6 +764,78 @@ resolveStmt (LetS lvals atom) = do
   
   -- Add bindings to the environment
   lift $ sequence_ bindings
+  
+  -- Resolve the body of the statement
+  resolveStmt return_types cont body
+
+resolveStmt return_types cont (IfS cond true false Nothing) = do
+  -- Evaluate the condition
+  (cond_val, _) <- resolveExprValue cond
+  (stm, x, _) <-
+    genIf' cond_val (resolveBlock return_types cont true) (resolveBlock return_types cont false)
+
+  -- True and false types should match
+  return (stm, x)
+
+resolveStmt tail_return_types cont (IfS cond true false (Just (lvalues, tail))) = do
+  -- Evaluate the condition
+  (cond_val, _) <- resolveExprValue cond
+
+  -- Create a variable for the tail call
+  tail_fun_var <- lift $ LL.newAnonymousVar (LL.PrimType PointerType)
+  
+  -- Generate the if-else statement, find the return types
+  -- The branches of the 'if' end by calling the tail
+  let create_tail_call return_types atom =
+        case atom
+        of LL.ValA values ->
+             return $ LL.ReturnE $ LL.PrimCallA (LL.VarV tail_fun_var) values
+           _ -> do
+             -- Assign to temporary variables
+             values <- emitAtom return_types atom
+             return $ LL.ReturnE $ LL.PrimCallA (LL.VarV tail_fun_var) values
+
+      if_cont_true atom return_types = do
+        -- Create tail call
+        tc <- create_tail_call return_types atom
+        return (tc, return_types)
+
+      if_cont_false atom return_types = do
+        tc <- create_tail_call return_types atom
+        return (tc, ())
+
+  -- FIXME: This use of fixpoint is a major hack.  It should be fixed by 
+  -- computing statements' return types for an entire top-level function 
+  -- in a separate step before generating code.
+  (stm, return_types) <- mdo
+    (stm, return_types, ()) <- genIf' cond_val (resolveBlock return_types if_cont_true true) (resolveBlock return_types if_cont_false false)
+    return (stm, return_types)
+      
+
+  -- Resolve the values that are passed to the tail code
+  (unzip3 -> (dsts, deferred_stores, bindings)) <-
+    lift $ zipWithM resolveLValue lvalues return_types
+
+  -- Create tail code.  Tail code has no live-out variables.
+  (tail_body, x) <- lift $ execBuild' tail_return_types $ transformGenNR enterNonRec $ do
+    -- Generate code to store values
+    sequence_ deferred_stores
+  
+    -- Add bindings to the environment
+    lift $ sequence_ bindings
+    
+    -- Translate the tail code
+    resolveStmt tail_return_types cont tail
+
+  -- The tail code has no live-out variables
+  let tail_fun = LL.primFun dsts tail_return_types tail_body
+  emitLetrec [LL.FunDef tail_fun_var tail_fun]
+  
+  return (stm, x)
+
+resolveStmt return_types cont (ReturnS atom) = do
+  (atom', types) <- resolveAtom atom
+  cont atom' types
 
 -- | Do name resolution on an lvalue.  The return value is a triple of the
 -- variable that the rvalue gets bound to, generators for code that should
@@ -835,10 +906,11 @@ resolveLValue lval ty =
       -- Generate a store
       primStoreOff ty base' offset (LL.VarV v)
 
-resolveBlock :: Block Parsed -> GenNR (LL.Atom, [LL.ValueType])
-resolveBlock (Block stmts atom) = transformGenNR enterNonRec $ do
-  mapM_ resolveStmt stmts
-  resolveAtom atom
+resolveBlock :: [LL.ValueType]
+             -> (LL.Atom -> [LL.ValueType] -> GenNR (LL.Stm, a))
+             -> Stmt Parsed -> GenNR (LL.Stm, a)
+resolveBlock return_types cont stmt =
+  transformGenNR enterNonRec $ resolveStmt return_types cont stmt
 
 defineParameter :: Parameter Parsed -> NR LL.Var
 defineParameter (Parameter ty nm) = do
@@ -859,11 +931,13 @@ resolveFunctionDef fdef = do
     -- Bind function parameters
     params <- mapM defineParameter $ functionParams fdef
     
-    -- Generate the function body
-    (body, body_return_types) <- execBuild' $ resolveBlock $ functionBody fdef
-    
     -- Translate the return types (should match body's return types)
     return_types <- mapM resolvePureValueType $ functionReturns fdef
+    
+    -- Generate the function body
+    (body, ()) <- execBuild' return_types $
+            resolveBlock return_types (\x _ -> return (LL.ReturnE x, ())) $
+            functionBody fdef
     
     return $! if functionIsProcedure fdef
               then LL.primFun params return_types body

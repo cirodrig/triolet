@@ -170,7 +170,7 @@ compilePyonAsmToGenC ll_mod c_file h_file = do
   print $ LowLevel.pprModule ll_mod  
   
   -- Generate and compile a C file
-  let c_mod = LowLevel.generateCFile ll_mod
+  c_mod <- LowLevel.generateCFile ll_mod
       
   writeFileAsString c_file c_mod
   

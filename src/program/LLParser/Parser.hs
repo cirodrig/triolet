@@ -303,48 +303,52 @@ exprToLValue _ = fail "LHS of assignment is not an lvalue"
 stmtExprList = try (fmap (:[]) expr) <|> parenList expr
 
 atom :: P (Atom Parsed)
-atom = otherAtom <|> fmap ValA stmtExprList
+atom = fmap ValA stmtExprList
 
-otherAtom = if_atom
+-- | Parse a block of statements
+block :: P (Stmt Parsed)
+block = braces statements
   where
-    if_atom = do
+    statements = if_stmt <|> let_or_atom
+
+    -- An 'if' statement
+    if_stmt = do
       match IfTok
       cond <- parens expr
       if_true <- block
       match ElseTok
       if_false <- block
-      return $ IfA cond if_true if_false
-
--- | Parse a block of statements
-block :: P (Block Parsed)
-block = braces statements
-  where
-    statements = other_atom <|> let_or_atom
-
-    -- An atom that doesn't appear on the RHS of an assignment ends the
-    -- statement
-    other_atom = do
-      a <- otherAtom
       match SemiTok
-      return $ Block [] a
+      return $ IfS cond if_true if_false Nothing
 
     -- A statement starting with an expression list: either assignment or
     -- the end of the block
     let_or_atom = do
       es <- stmtExprList
-      (match AssignTok >> assign_lvalues es) <|> end_block es
+      assignment es <|> end_block es
+
+    -- An assignment statement (LHS = RHS; ...)
+    assignment lhs_expressions = do
+      match AssignTok
+      lvalues <- mapM exprToLValue lhs_expressions
+      assign_if lvalues <|> assign_atom lvalues
     
+    -- An if assignment (LHS = if () {...} else {...}; ...)
+    assign_if lvalues = do
+      (IfS cond if_true if_false Nothing) <- if_stmt
+      tail <- statements
+      return $ IfS cond if_true if_false (Just (lvalues, tail))
+
     -- Create an assignment statement (LHS = RHS; ...)
-    assign_lvalues es = do
-      lvalues <- mapM exprToLValue es
+    assign_atom lvalues = do
       rhs <- atom
       match SemiTok
-      Block stmts val <- statements
-      return $ Block (LetS lvalues rhs : stmts) val
+      tail <- statements
+      return $ LetS lvalues rhs tail
     
     end_block es = do
       match SemiTok
-      return $ Block [] (ValA es)
+      return $ ReturnS (ValA es)
 
 -------------------------------------------------------------------------------
 -- Definitions

@@ -13,21 +13,231 @@ module LowLevel.Closures(closureConvert)
 where
 
 import Control.Monad
+import Control.Monad.Trans
 import Data.List
 import Data.Maybe
+import Data.Monoid
 import qualified Data.Set as Set
 import Debug.Trace
 
 import Gluon.Common.Error
 import Gluon.Common.MonadLogic
+import Gluon.Common.Identifier
 import LowLevel.Builtins
 import LowLevel.Print
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Build
+import LowLevel.ClosureSelect
 import LowLevel.ClosureCode
 import Globals
 
+-------------------------------------------------------------------------------
+-- Closure conversion and hoisting
+
+-- | Perform closure conversion on a value.
+-- 
+ccValue :: Val -> CC (GenM Val)
+ccValue value =
+  case value
+  of VarV v  -> do mention v
+                   return (return value)
+     LamV f  -> ccLambdaFunction f
+     RecV {} -> internalError "ccValue"
+     _       -> return (return value)
+
+ccValues xs = mapM ccValue xs
+
+-- | Perform closure conversion on an atom.
+ccAtom :: [PrimType]         -- ^ atom's return types
+          -> Atom               -- ^ atom to convert
+          -> CC (GenM Atom)
+ccAtom returns atom =
+  case atom
+  of ValA vs -> do
+       vs' <- ccValues vs
+       return $ ValA `liftM` sequence vs'
+
+     -- Generate a direct call if possible
+     CallA (VarV v) vs -> 
+       genVarCall returns v =<< ccValues vs
+
+     -- General case, indirect call
+     CallA v vs -> do
+       v' <- ccValue v
+       vs' <- ccValues vs
+       genIndirectCall returns v' vs'
+     
+     -- Primitive calls are always direct
+     PrimCallA v vs -> do
+       v' <- ccValue v
+       vs' <- ccValues vs
+       return (liftM2 PrimCallA v' (sequence vs'))
+
+     PrimA prim vs -> do
+       vs' <- ccValues vs
+       return $ PrimA prim `liftM` sequence vs'
+
+     PackA {} -> internalError "ccAtom: unexpected 'pack'"
+     UnpackA {} -> internalError "ccAtom: unexpected 'unpack'"
+
+ccStm :: [PrimType] -> Stm -> CC (GenM Stm)
+ccStm returns stm =
+  case stm
+  of LetE params rhs body -> do
+       mk_rhs <- ccAtom (map varPrimType params) rhs
+       mk_body <- withParameters params $ ccStm returns body
+       return $ do rhs <- mk_rhs
+                   bindAtom params rhs 
+                   mk_body
+     LetrecE defs body ->
+       ccLocalGroup defs $ \mk_defs -> do
+         body' <- ccStm returns body
+         return (mk_defs >> body')
+     SwitchE val alts -> do
+       val' <- ccValue val
+       alts' <- mapM cc_alt alts
+       return (rebuild_switch val' alts')
+     ReturnE atom -> do
+       mk_atom <- ccAtom returns atom
+       return (fmap ReturnE mk_atom)
+  where
+    cc_alt (lit, stm) = do
+      stm' <- ccStm returns stm
+      return (lit, stm')
+
+    rebuild_switch mk_val mk_alts = do
+      val' <- mk_val
+      alts' <- forM mk_alts $ \(lit, mk_stm) -> do
+        stm <- lift (execBuild (map PrimType returns) mk_stm)
+        return (lit, stm)
+      return (SwitchE val' alts')
+
+-- | Perform closure conversion on a lambda function.  Return the
+-- closure-converted function.  New top-level functions and data are produced
+-- as a side effect.
+ccLambdaFunction :: Fun -> CC (GenM Val)
+ccLambdaFunction fun = do
+  (direct_fun, captured_vars) <- ccHoistedFun fun
+  emitLambdaClosure (funType fun) direct_fun captured_vars
+
+-- | Perform closure conversion on the body of a function.
+ccFunBody :: Fun -> CC (GenM Stm)
+ccFunBody fun =
+  withParameters (funParams fun) $ ccStm return_prim_types (funBody fun)
+  where
+    return_prim_types = map valueToPrimType $ funReturnTypes fun
+
+-- | Perform closure conversion on the body of a function and return the
+--   closure-converted function.  Only the direct entry is constructed; if
+--   a function closure is desired, the other parts must be built elsewhere.
+--
+--   The direct entry point function and a list of captured variables
+--   are returned.
+ccHoistedFun :: Fun -> CC (Fun, [Var])
+ccHoistedFun fun = do
+  -- Do closure conversion in the function body, and get the set of variables
+  -- mentioned in the function body
+  (mk_body, free_vars) <- listenFreeVars $ ccFunBody fun
+  body <- execBuild (funReturnTypes fun) mk_body
+
+  -- Add the free variables as extra parameters
+  let free_var_list = Set.toList free_vars
+      new_params = free_var_list ++ funParams fun
+      new_fun = primFun new_params (funReturnTypes fun) body
+      
+  -- If the input function was a primitive-call function, then there is no
+  -- way to deal with free variables
+  when (isPrimFun fun && not (null free_var_list)) $
+    error "Procedure has free variables"
+
+  return (new_fun, free_var_list)
+
+-- | Perform closure conversion on a function that won't be hoisted.
+--   The function body is closure-converted.  A primitive-call function 
+--   is returned.
+ccUnhoistedFun :: Fun -> CC Fun
+ccUnhoistedFun fun = do
+  body <- execBuild (funReturnTypes fun) =<< ccFunBody fun
+  return $ primFun (funParams fun) (funReturnTypes fun) body
+
+-- | Perform closure conversion on a letrec-bound function group.
+--
+--   Functions in the group that are hoisted become closures.
+--   Functions in the group that are un-hoisted become a new 'letrec'.
+--
+--   Because of the way functions are selected for hoisting, hoisted functions 
+--   never reference un-hoisted functions in the same group.  Therefore
+--   hoisted function definitions appear first in the transformed code,
+--   followed by un-hoisted functions.
+ccLocalGroup :: [FunDef] -> (GenM () -> CC (GenM a)) -> CC (GenM a) 
+ccLocalGroup defs do_body = withParameters (map funDefiniendum defs) $ do
+  -- Determine which functions are hoisted
+  hoisted <- sequence [isHoisted v | FunDef v _ <- defs]
+  let (h_defs, l_defs) = partition_by hoisted defs
+
+  generate_hoisted_functions h_defs $ \hoisted_code -> do
+    unhoisted_code <- generate_unhoisted l_defs
+    do_body (hoisted_code >> emitLetrec unhoisted_code)
+  where
+    generate_hoisted_functions :: [FunDef]
+                               -> (GenM () -> CC a)
+                               -> CC a
+    generate_hoisted_functions [] k = k (return ())
+    generate_hoisted_functions h_defs k =
+      withLocalFunctions h_defs (mapM (ccHoistedFun . funDefiniens) h_defs) k
+
+    generate_unhoisted l_defs = mapM gen l_defs
+      where
+        gen (FunDef v f) = do
+          f' <- ccUnhoistedFun f
+          return $ FunDef v f'
+
+    -- Partition list 2 by the boolean value in list 1
+    partition_by flags values = par id id flags values
+      where
+        par hd_l hd_r (True:flags)  (x:xs) = par (hd_l . (x:)) hd_r flags xs
+        par hd_l hd_r (False:flags) (x:xs) = par hd_l (hd_r . (x:)) flags xs
+        par hd_l hd_r []            _      = (hd_l [], hd_r [])
+
+closureConvertTopLevelFunction :: IdentSupply Var
+                               -> [Var]
+                               -> FunDef
+                               -> IO ([FunDef], [DataDef])
+closureConvertTopLevelFunction var_ids globals def@(FunDef v f) = do
+  let hoist_vars = Set.toList $ findFunctionsToHoist def
+  runCC var_ids hoist_vars globals $ do 
+    (f', captured) <- ccHoistedFun f
+    unless (null captured) $ error "Global procedure captures variables"
+    writeFun (FunDef v f')
+
+closureConvertTopLevelFunctions :: IdentSupply Var
+                                -> [Var]
+                                -> [FunDef]
+                                -> IO ([FunDef], [DataDef])
+closureConvertTopLevelFunctions var_ids globals defs =
+  fmap mconcat $ mapM (closureConvertTopLevelFunction var_ids globals) defs
+
+-- | Perform closure conversion on a data value.
+scanDataValue :: Val -> Val
+scanDataValue value = 
+  case value
+  of LamV {} -> internalError "scanDataValue"
+     RecV {} -> internalError "scanDataValue"
+     _       -> value
+
+-- | Perform closure conversion on a data definition.
+--
+-- Currently we don't allow lambda functions inside static data structures,
+-- so this is just a validity check.
+convertDataDef :: DataDef -> DataDef
+convertDataDef (DataDef v record vals) =
+  let vals' = map scanDataValue vals
+  in DataDef v record vals'
+
+convertDataDefs = map convertDataDef
+
+{-
 -------------------------------------------------------------------------------
 
 scanBlock :: Block -> [PrimType] -> CC Block
@@ -88,14 +298,6 @@ scanValue value =
      RecV {} -> internalError "scanValue"
      _       -> return (return value)
 
--- | Perform closure conversion on a data value.
-scanDataValue :: Val -> CC Val
-scanDataValue value = 
-  case value
-  of LamV {} -> internalError "scanDataValue"
-     RecV {} -> internalError "scanDataValue"
-     _       -> return value
-
 withDefGroup :: [FunDef] -> (GenM () -> CC a) -> CC a
 withDefGroup defs k =
   -- Functions are bound here
@@ -145,6 +347,14 @@ scanFun fun = do
 
   return (new_fun, free_var_list)
 
+-- | Perform closure conversion on a data value.
+scanDataValue :: Val -> CC Val
+scanDataValue value = 
+  case value
+  of LamV {} -> internalError "scanDataValue"
+     RecV {} -> internalError "scanDataValue"
+     _       -> return value
+
 -- | Perform closure conversion on a data definition.
 --
 -- Currently we don't allow lambda functions inside static data structures,
@@ -185,7 +395,11 @@ scanTopLevel fun_defs data_defs =
       internalError "scanTopLevel: Impossible variable capture"
 
     valid_vars = Set.fromList $ fun_variables ++ data_variables ++ allBuiltins
+-}
 
+-- | Perform closure conversion.
+--
+-- FIXME: We must globally rename variables to avoid name collisions!
 closureConvert :: Module -> IO Module
 closureConvert mod =
   withTheLLVarIdentSupply $ \var_ids -> do
@@ -194,8 +408,10 @@ closureConvert mod =
         global_vars = map funDefiniendum fun_defs ++
                       map dataDefiniendum data_defs ++
                       moduleImports mod
-    (fun_defs', data_defs') <- runCC var_ids global_vars $
-                               scanTopLevel fun_defs data_defs
-    return $ mod {moduleFunctions = fun_defs', moduleData = data_defs'}
+    (fun_defs', fun_data_defs') <-
+      closureConvertTopLevelFunctions var_ids global_vars fun_defs
+    let data_defs' = convertDataDefs data_defs
+    return $ mod { moduleFunctions = fun_defs'
+                 , moduleData = data_defs' ++ fun_data_defs'}
   
 

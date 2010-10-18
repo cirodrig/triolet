@@ -146,40 +146,37 @@ data Atom =
   | PackA !StaticRecord [Val]
     -- | Unpack a statically typed record value.
   | UnpackA !StaticRecord Val
-    -- | Branch based on a Boolean or integer value
-  | SwitchA Val [Alt]
 
--- | A block of computation, consisting of some statements followed by an
--- atom.  The block's return value is the atom's return value.
-data Block = Block [Stm] !Atom
-
--- | A statement.  Statements are executed for their effect and have no
--- return value.
+-- | A statement.  Statements may have side effects.
 data Stm =
     -- | Bind an atom's result to temporary variables
-    LetE [ParamVar] Atom
+    LetE [ParamVar] Atom Stm
     -- | Define local functions
-  | LetrecE [FunDef]
+  | LetrecE [FunDef] Stm
+    -- | Conditional branch.  Inspect the value, then execute an alternative.
+  | SwitchE Val [Alt]
+    -- | Produce a value
+  | ReturnE Atom
 
 data Fun =
   Fun 
   { funIsPrim :: !Bool 
   , funParams :: [ParamVar] 
   , funReturnTypes :: [ValueType] 
-  , funBody :: Block
+  , funBody :: Stm
   }
 
 isPrimFun, isClosureFun :: Fun -> Bool
 isPrimFun = funIsPrim
 isClosureFun f = not (isPrimFun f)
 
-closureFun :: [ParamVar] -> [ValueType] -> Block -> Fun
+closureFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
 closureFun = Fun False
 
-primFun :: [ParamVar] -> [ValueType] -> Block -> Fun
+primFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
 primFun = Fun True
 
-type Alt = (Lit, Block)
+type Alt = (Lit, Stm)
 
 -- | A function definition
 data FunDef = FunDef !ParamVar Fun

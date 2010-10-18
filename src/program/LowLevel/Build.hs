@@ -1,9 +1,11 @@
 
-{-# LANGUAGE ViewPatterns, FlexibleInstances, FlexibleContexts, NoMonomorphismRestriction, ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns, FlexibleInstances, FlexibleContexts, NoMonomorphismRestriction, ScopedTypeVariables, RecursiveDo #-}
 module LowLevel.Build where
 
 import Control.Monad
 import Control.Monad.Writer
+import qualified Data.Set as Set
+import Data.Set(Set)
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
@@ -17,16 +19,54 @@ import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Records
 
-type Gen m a = WriterT [Stm] m a
+newtype MkStm = MkStm (Stm -> Stm)
 
-execBuild :: Monad m => Gen m Atom -> m Block
-execBuild m = do (atom, stms) <- runWriterT m
-                 return $ Block stms atom
+instance Monoid MkStm where
+  mempty = MkStm id
+  MkStm f `mappend` MkStm g = MkStm (f . g)
 
-execBuild' :: Monad m => Gen m (Atom, a) -> m (Block, a)
-execBuild' m = do ((atom, a), stms) <- runWriterT m
-                  return (Block stms atom, a)
+-- | A code generator.
+--
+-- It knows the return type of the code it will generate, and builds a
+-- statement as a side effect.
+newtype Gen m a = Gen {runGen :: [ValueType] -> m (a, MkStm)}
 
+instance Monad m => Functor (Gen m) where
+  fmap f (Gen m) = Gen (\rt -> do (x, stms) <- m rt
+                                  return (f x, stms))
+
+instance Monad m => Monad (Gen m) where
+  return x = Gen (\_ -> return (x, mempty))
+  Gen m >>= k = Gen (\rt -> do (x, mk1) <- m rt
+                               (y, mk2) <- runGen (k x) rt
+                               return (y, mk1 `mappend` mk2))
+
+instance MonadFix m => MonadFix (Gen m) where
+  mfix f = Gen (\rt -> mdo rv@(x, stms) <- case f x of Gen m -> m rt
+                           return rv)
+
+instance MonadTrans Gen where
+  lift m = Gen (\_ -> do x <- m
+                         return (x, mempty))
+
+instance Monad m => MonadWriter MkStm (Gen m) where
+  tell w = Gen (\_ -> return ((), w))
+  listen (Gen m) = Gen (\rt -> do x@(_, w) <- m rt
+                                  return (x, w))
+  pass (Gen m) = Gen (\rt -> do ((x, f), w) <- m rt
+                                return (x, f w))
+
+execBuild :: Monad m => [ValueType] -> Gen m Stm -> m Stm
+execBuild return_type m = do
+  (stm, MkStm mk_stm) <- runGen m return_type
+  return $ mk_stm stm
+
+execBuild' :: Monad m => [ValueType] -> Gen m (Stm, a) -> m (Stm, a)
+execBuild' return_type m = do
+  ((stm, a), MkStm mk_stm) <- runGen m return_type
+  return (mk_stm stm, a)
+
+{-
 -- | Build a block for use in a larger expression
 getBlock :: Monad m => Gen m Atom -> Gen m Block
 getBlock m = WriterT $ do
@@ -41,71 +81,152 @@ getBlock' m = WriterT $ do
 
 putBlock :: Monad m => Block -> Gen m Atom
 putBlock (Block stms atom) = WriterT $ return (atom, stms)
+-}
 
 -- | Run a code generator, but don't produce output here.  Instead, a code
 --   generator is returned that produces its output.
 suspendGen :: (Monad m, Supplies m (Ident Var),
                Monad m', Supplies m' (Ident Var)) =>
-              Gen m a -> m (Gen m' (), a)
-suspendGen m = do
-  (x, stms) <- runWriterT m
+              [ValueType] -> Gen m a -> m (Gen m' (), a)
+suspendGen return_type m = do
+  (x, stms) <- runGen m return_type
   return (tell stms, x)
+
+emit :: Monad m => (Stm -> Stm) -> Gen m ()
+emit f = tell (MkStm f)
+
+-- | Wrap the continuation into a function.  The locally live-out variables
+-- become the function parameters.
+getContinuation :: (Monad m, Supplies m (Ident Var)) =>
+                   Bool         -- ^ Create a primitive call?
+                -> [ParamVar]   -- ^ Live-out variables
+                -> (Stm -> Gen m Stm) -- ^ Code using the continuation
+                -> Gen m ()
+getContinuation primcall live_outs f = Gen $ \return_type -> do
+  -- Create a call to the continuation
+  cont_var <- newAnonymousVar (PrimType PointerType)
+  let cont_call =
+        if primcall
+        then ReturnE $ PrimCallA (VarV cont_var) (map VarV live_outs)
+        else ReturnE $ CallA (VarV cont_var) (map VarV live_outs)
+      
+  -- Construct a statement that calls the continuation
+  (stm, MkStm stms) <- runGen (f cont_call) return_type
+  
+  -- Put the continuation into a 'letrec' statement
+  let stms' cont_stm = LetrecE [FunDef cont_var cont_fun] (stms stm)
+        where
+          cont_fun =
+            if primcall
+            then primFun live_outs return_type cont_stm
+            else closureFun live_outs return_type cont_stm
+  
+  return ((), MkStm stms')
+
+valFreeVars :: Val -> Set Var
+valFreeVars val = 
+  case val
+  of VarV v    -> Set.singleton v
+     RecV _ vs -> valsFreeVars vs
+     LitV _    -> Set.empty
+     LamV f    -> funFreeVars f
+
+valsFreeVars :: [Val] -> Set Var
+valsFreeVars vs = Set.unions (map valFreeVars vs)
+
+atomFreeVars :: Atom -> Set Var
+atomFreeVars atom =
+  case atom
+  of ValA vs        -> valsFreeVars vs
+     CallA v vs     -> valsFreeVars (v:vs)
+     PrimCallA v vs -> valsFreeVars (v:vs)
+     PrimA _ vs     -> valsFreeVars vs
+     PackA _ vs     -> valsFreeVars vs
+     UnpackA _ v    -> valFreeVars v
+
+stmFreeVars :: Stm -> Set Var
+stmFreeVars stm =
+  case stm
+  of LetE params rhs body ->
+       let body_fv = foldr Set.delete (stmFreeVars body) params
+       in Set.union body_fv $ atomFreeVars rhs
+     LetrecE defs body ->
+       let fun_vars = [v | FunDef v _ <- defs]
+           body_fv = stmFreeVars body
+           funs_fvs = [funFreeVars d | FunDef _ d <- defs]
+       in foldr Set.delete (Set.unions (body_fv : funs_fvs)) fun_vars
+     SwitchE v alts ->
+       Set.unions (valFreeVars v : [stmFreeVars s | (_, s) <- alts])
+     ReturnE atom ->
+       atomFreeVars atom
+
+funFreeVars :: Fun -> Set Var
+funFreeVars f = foldr Set.delete (stmFreeVars (funBody f)) (funParams f)
 
 -------------------------------------------------------------------------------
 -- Generating primops
 
 -- | Generate an instruction that has no result value
 emitAtom0 :: Monad m => Atom -> Gen m ()
-emitAtom0 atom = tell [LetE [] atom]
+emitAtom0 atom = emit $ LetE [] atom
 
 emitAtom1 :: (Monad m, Supplies m (Ident Var)) =>
              ValueType -> Atom -> Gen m Val
 emitAtom1 ty atom = do
   tmpvar <- lift $ newAnonymousVar ty
-  tell [LetE [tmpvar] atom]
+  emit $ LetE [tmpvar] atom
   return $ VarV tmpvar
 
 emitAtom :: (Monad m, Supplies m (Ident Var)) =>
             [ValueType] -> Atom -> Gen m [Val]
 emitAtom tys atom = do
   tmpvars <- lift $ mapM newAnonymousVar tys
-  tell [LetE tmpvars atom]
+  emit $ LetE tmpvars atom
   return $ map VarV tmpvars
 
 bindAtom0 :: Monad m => Atom -> Gen m ()
 bindAtom0 = emitAtom0
 
 bindAtom1 :: Monad m => Var -> Atom -> Gen m ()
-bindAtom1 var atom = tell [LetE [var] atom]
+bindAtom1 var atom = emit $ LetE [var] atom
 
 bindAtom :: Monad m => [Var] -> Atom -> Gen m ()
-bindAtom vars atom = tell [LetE vars atom]
+bindAtom vars atom = emit $ LetE vars atom
 
 emitLetrec :: Monad m => [FunDef] -> Gen m ()
-emitLetrec defs = tell [LetrecE defs]
+emitLetrec defs = emit $ LetrecE defs
 
 -- | Generate a no-op
-gen0 :: Monad m => Gen m Atom
-gen0 = return $ ValA [] 
+gen0 :: Monad m => Gen m Stm
+gen0 = return $ ReturnE (ValA [])
 
-genIf :: Monad m => Val -> Gen m Atom -> Gen m Atom -> Gen m Atom
-genIf bool if_true if_false = do
-  true_block <- getBlock if_true
-  false_block <- getBlock if_false
-  return $ SwitchA bool [ (BoolL True, true_block)
-                        , (BoolL False, false_block)]
+genIf :: Monad m => Val -> Gen m Stm -> Gen m Stm -> Gen m Stm
+genIf bool if_true if_false = Gen $ \rt -> do
+  true_block <- execBuild rt if_true
+  false_block <- execBuild rt if_false
+  return (SwitchE bool [ (BoolL True, true_block)
+                       , (BoolL False, false_block)], mempty)
+
+genIf' :: Monad m =>
+          Val -> Gen m (Stm, a) -> Gen m (Stm, b) -> Gen m (Stm, a, b)
+genIf' bool if_true if_false = Gen $ \rt -> do
+  (true_block, x) <- execBuild' rt if_true
+  (false_block, y) <- execBuild' rt if_false
+  let if_exp = SwitchE bool [ (BoolL True, true_block)
+                            , (BoolL False, false_block)]
+  return ((if_exp, x, y), mempty)
 
 builtinVar :: (LowLevelBuiltins -> Var) -> Val
 builtinVar v = VarV $ llBuiltin v
 
-genPrimFun :: Monad m => [ParamVar] -> [ValueType] -> Gen m Atom -> Gen m Fun
+genPrimFun :: Monad m => [ParamVar] -> [ValueType] -> Gen m Stm -> m Fun
 genPrimFun params returns body =
-  liftM (Fun True params returns) $ getBlock body
+  liftM (Fun True params returns) $ execBuild returns body
 
 genClosureFun :: Monad m =>
-                 [ParamVar] -> [ValueType] -> Gen m Atom -> Gen m Fun
+                 [ParamVar] -> [ValueType] -> Gen m Stm -> m Fun
 genClosureFun params returns body =
-  liftM (Fun False params returns) $ getBlock body
+  liftM (Fun False params returns) $ execBuild returns body
 
 -- | Generate a binary primitive integer operation
 intBinaryPrimOp :: (Monad m, Supplies m (Ident Var)) =>
@@ -239,7 +360,7 @@ unpackRecord rtype val = do
   vars <- lift $ mapM newFieldVar $ recordFields rtype
   
   -- Create an 'unpack' expression
-  tell [LetE vars $ UnpackA rtype val]
+  emit $ LetE vars (UnpackA rtype val)
   return vars
   where
     newFieldVar sfield = 
@@ -389,7 +510,7 @@ allocateLocalMem ptr_var pass_conv rtypes mk_block = do
   -- Generate code and bind its results to temporary variables
   rvars <- lift $ mapM newAnonymousVar rtypes
   ret_atom <- mk_block
-  tell [LetE rvars ret_atom]
+  emit (LetE rvars ret_atom)
   
   -- Finalize and free the object
   fini <- selectPassConvFinalize pass_conv
@@ -467,8 +588,8 @@ increfObjectBy n ptr
 -- | Generate code to decrease an object's reference count, and free it
 -- if the reference count is zero.  The parameter variable is an owned
 -- reference or a non-owned pointer.
-decrefObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
-decrefObject ptr = do
+decrefObject :: (Monad m, Supplies m (Ident Var)) => Bool -> Val -> Gen m ()
+decrefObject make_primcall ptr = getContinuation make_primcall [] $ \cont -> do
   let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
   field_ptr <- primAddP ptr off
   
@@ -477,17 +598,17 @@ decrefObject ptr = do
   
   -- If old reference count was 1, free the pointer
   rc_test <- primCmpZ (PrimType nativeIntType) CmpEQ old_rc (nativeIntV 1)
-  if_atom <- genIf rc_test (freeObject ptr >> gen0) gen0
-  emitAtom0 if_atom
+  genIf rc_test (freeObject ptr >> return cont) (return cont)
 
 -- | Generate code to decrease an object's reference count, and free it
 -- if the reference count is zero.  The parameter variable is an owned
 -- reference.
-decrefObjectBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
-decrefObjectBy n ptr
+decrefObjectBy :: (Monad m, Supplies m (Ident Var)) =>
+                  Bool -> Int -> Val -> Gen m ()
+decrefObjectBy make_primcall n ptr
   | n < 0 = internalError "decrefHeaderBy"
   | n == 0 = return ()
-  | otherwise = do
+  | otherwise = getContinuation make_primcall [] $ \cont -> do
       let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
       field_ptr <- primAddP ptr off
   
@@ -498,16 +619,16 @@ decrefObjectBy n ptr
       -- If old reference count was less than or equal to n, free the pointer
       rc_test <- primCmpZ (PrimType nativeIntType) CmpLE old_rc $
                  nativeIntV n
-      if_atom <- genIf rc_test (freeObject ptr >> gen0) gen0
-      emitAtom0 if_atom
+      genIf rc_test (freeObject ptr >> return cont) (return cont)
 
 -- | Add the given number (which may be negative) to an object's reference  
 -- count.  If positive, 'increfObjectBy' is called; if negative,
 -- 'decrefObjectBy' is called.
-adjustObjectBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
-adjustObjectBy n ptr
+adjustObjectBy :: (Monad m, Supplies m (Ident Var)) =>
+                  Bool -> Int -> Val -> Gen m ()
+adjustObjectBy make_primcall n ptr
   | n > 0     = increfObjectBy n ptr
-  | n < 0     = decrefObjectBy (negate n) ptr
+  | n < 0     = decrefObjectBy make_primcall (negate n) ptr
   | otherwise = return ()
 
 selectPassConvSize, selectPassConvAlignment,

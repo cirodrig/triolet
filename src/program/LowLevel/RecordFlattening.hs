@@ -57,7 +57,7 @@ expand m v = expand_var v
 
 -------------------------------------------------------------------------------
          
-newtype RF a = RF {runRF :: ReaderT RFEnv IO a} deriving(Monad)
+newtype RF a = RF {runRF :: ReaderT RFEnv IO a} deriving(Monad, Functor)
 
 data RFEnv = RFEnv { rfVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
                    , rfExpansions :: !Expansion
@@ -164,20 +164,14 @@ flattenAtom atom =
      UnpackA _ v ->
        -- The argument expands to a tuple of values.  Return the tuple.
        ValA `liftM` flattenVal v
-     SwitchA v alts ->
-       SwitchA `liftM` flattenSingleVal v `ap` mapM flattenAlt alts
-  where
-    flattenAlt (lit, block) = do
-      block' <- flattenBlock block
-      return (lit, block')
 
 -- | Convert a flattened value list to one that doesn't contain any lambda 
 --   functions, by assigning lambda functions to temporary variables.  The
 --   returned list contains variables in place of lambda functions.
-bindLambdas :: [Val] -> RF ([Stm], [Val])
+bindLambdas :: [Val] -> RF (Stm -> Stm, [Val])
 bindLambdas values = do
   (bindings, new_values) <- mapAndUnzipM bind_lambda values
-  return (concat bindings, new_values)
+  return (foldr (.) id bindings, new_values)
   where
     bind_lambda value =
       case value
@@ -189,36 +183,47 @@ bindLambdas values = do
          LamV f -> do
            -- Assign the lambda function to a variable
            fun_var <- newAnonymousVar (PrimType OwnedType)
-           return ([LetE [fun_var] $ ValA [value]], VarV fun_var)
+           return (LetE [fun_var] $ ValA [value], VarV fun_var)
       where
-        no_change = return ([], value)
+        no_change = return (id, value)
 
-flattenStm :: Stm -> ([Stm] -> RF a) -> RF a
-flattenStm statement k =
+flattenStm :: Stm -> RF Stm
+flattenStm statement =
   case statement
-  of LetE [v] (PackA _ vals) -> do
+  of LetE [v] (PackA _ vals) next_statement -> do
        -- Copy-propagate the values by assigning them directly to 'v'
        -- in the expansion mapping
        vals' <- flattenValList vals
        (lambda_bindings, vals'') <- bindLambdas vals'
-       assign v vals'' $ k lambda_bindings
-     LetE vs (UnpackA record val) -> do
+       assign v vals'' $ fmap lambda_bindings $ flattenStm next_statement
+     LetE vs (UnpackA record val) next_statement -> do
        -- Copy-propagate the values by assigning them directly to each of 'vs'
        -- in the expansion mapping
        let expanded_vs_sizes = map expandedFieldSize $ recordFields record
        vals <- flattenVal val
-       assign_variables vs expanded_vs_sizes vals
-     LetE vs atom -> do
+       assign_variables vs expanded_vs_sizes vals next_statement
+     LetE vs atom next_statement -> do
        atom' <- flattenAtom atom
-       defineParams vs $ \vs' -> k $ assignment vs' atom'
-     LetrecE defs ->
+       defineParams vs $ \vs' ->
+         fmap (assignment vs' atom') $ flattenStm next_statement
+     LetrecE defs next_statement ->
        defineParams [v | FunDef v _ <- defs] $ \_ -> do
          defs' <- mapM flatten_def defs
-         k [LetrecE defs']
+         fmap (LetrecE defs') $ flattenStm next_statement
+     SwitchE val alts -> do
+       val' <- flattenSingleVal val
+       alts' <- mapM flatten_alt alts
+       return $ SwitchE val' alts' 
+     ReturnE atom ->
+       fmap ReturnE $ flattenAtom atom
   where
     flatten_def (FunDef v f) = do
       f' <- flattenFun f
       return $ FunDef v f'
+
+    flatten_alt (lit, stm) = do
+      stm' <- flattenStm stm
+      return (lit, stm')
 
     -- Create a sequence of \'Let\' statements from the given LHS and RHS.
     -- The parts of the statement have been flattened.
@@ -228,37 +233,31 @@ flattenStm statement k =
       | length vs /= length vals = internalError "flattenStm"
       | otherwise =
           -- Split into a sequence of statements
-          zipWith (\v x -> LetE [v] (ValA [x])) vs vals
+          \stm -> foldr (\(v, x) s -> LetE [v] (ValA [x]) s) stm $ zip vs vals
 
-    assignment vs atom = [LetE vs atom]
+    assignment vs atom = LetE vs atom
 
     -- Process a record unpacking statement.  Substitute each record field
     -- (which will be a variable or literal) in place of the variable from
     -- the unpacking statement.
-    assign_variables (v:vs) (size:sizes) values = do
+    assign_variables (v:vs) (size:sizes) values stm = do
       -- Take the values that will be assigned to 'v'
       let (v_values, values') = splitAt size values
       unless (length v_values == size) unpack_size_mismatch
-      assign v v_values $ assign_variables vs sizes values'
+      assign v v_values $ assign_variables vs sizes values' stm
     
-    assign_variables [] [] [] = k []
-    assign_variables [] [] _  = unpack_size_mismatch
-    assign_variables _  _  [] = unpack_size_mismatch
+    assign_variables [] [] [] stm = flattenStm stm
+    assign_variables [] [] _  _   = unpack_size_mismatch
+    assign_variables _  _  [] _   = unpack_size_mismatch
 
     unpack_size_mismatch =
       internalError "flattenStm: Record size mismatch when unpacking parameters"
-
-flattenBlock :: Block -> RF Block
-flattenBlock (Block stms atom) =
-  withMany flattenStm stms $ \stms' -> do
-    atom' <- flattenAtom atom
-    return $ Block (concat stms') atom'
 
 flattenFun :: Fun -> RF Fun
 flattenFun fun =
   defineParams (funParams fun) $ \params -> do
     let returns = flattenValueTypeList $ funReturnTypes fun
-    body <- flattenBlock $ funBody fun
+    body <- flattenStm $ funBody fun
     return $! if isPrimFun fun 
               then primFun params returns body
               else if isClosureFun fun

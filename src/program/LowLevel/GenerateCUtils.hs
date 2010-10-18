@@ -58,6 +58,7 @@ primTypeDeclSpecs pt =
      FloatType S32 -> typeDeclSpecs (CFloatType internalNode)
      FloatType S64 -> typeDeclSpecs (CDoubleType internalNode)
      PointerType -> nameDeclSpecs "PyonPtr"
+     OwnedType -> internalError "primTypeDeclSpecs: Unexpected type"
 
 
 varPrimType v = valueToPrimType $ varType v

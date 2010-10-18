@@ -224,8 +224,10 @@ asVal (Cv ty x) =
   of CvVal val  -> return val
      CvExp hd -> asLet ty hd
 
-toBlock :: CvExp -> FreshVarM LL.Block
-toBlock e = execBuild $ asAtom e
+toBlock :: [LoweringType] -> CvExp -> FreshVarM LL.Stm
+toBlock return_types e =
+  execBuild (map lowered return_types) $ do atom <- asAtom e
+                                            return (LL.ReturnE atom)
 
 asAtom :: CvExp -> BuildBlock LL.Atom
 asAtom (Cv _ x) =
@@ -437,7 +439,7 @@ dataConstructorFieldLayout datacon ty_args
         mapM lowerToFieldType ty_args
       
       (computation2, record_layout) <-
-        suspendGen $ createDynamicRecord field_layouts
+        suspendGen [] $ createDynamicRecord field_layouts
       
       return (LL.UnitL,
               computation1 >> computation2,
@@ -664,7 +666,7 @@ convertLetrec defs body =
     
     -- Insert a 'letrec' before the body
     let insert_letrec = do
-          tell [LL.LetrecE defs']
+          emitLetrec defs'
           asAtom body'
     return $ atom (expType body') insert_letrec
 
@@ -691,7 +693,7 @@ convertBoolCase scr alternatives = do
   
   let make_expr = do
         scr_val <- asVal scr
-        makeAlternativeBranch scr_val scr_val alts
+        makeAlternativeBranch return_types scr_val scr_val alts
   return $ atom return_types make_expr
 
 convertReferenceCase :: RCType -> CvExp -> [RCAlt] -> Cvt CvExp
@@ -738,16 +740,30 @@ convertAlternatives alts = do
   return (return_type, [(tag, mk) | (tag, _, mk) <- xs])
 
 -- | Assemble case alternatives into a @switch@ statement.
-makeAlternativeBranch :: LL.Val
+makeAlternativeBranch :: [LoweringType]
+                      -> LL.Val
                       -> LL.Val
                       -> [(LL.Lit, LL.Val -> BuildBlock LL.Atom)]
                       -> BuildBlock LL.Atom
-makeAlternativeBranch scrutinee tag alts = do
-  branches <- mapM make_branch alts
-  return (LL.SwitchA tag branches)
+makeAlternativeBranch return_types scrutinee tag alts = do
+  -- Create variables for each return value
+  result_vars <- lift $ mapM LL.newAnonymousVar ll_return_types
+  
+  -- Create the case statement
+  getContinuation False result_vars $ \cont -> do
+    branches <- mapM (make_branch cont) alts
+    return $ LL.SwitchE tag branches
+  
+  -- Return the return values
+  return (LL.ValA $ map LL.VarV result_vars)
   where
-    make_branch (tag, make_alternative) = do
-      alternative <- getBlock $ make_alternative scrutinee
+    ll_return_types = map lowered return_types
+    
+    make_branch :: LL.Stm -> (LL.Lit, LL.Val -> BuildBlock LL.Atom) -> BuildBlock (LL.Lit, LL.Stm)
+    make_branch cont (tag, make_alternative) = do
+      alternative <- lift $ execBuild ll_return_types $ do
+        emitAtom0 =<< make_alternative scrutinee
+        return cont
       return (tag, alternative)
 
 convertFun = convertFunOrPrim LL.closureFun
@@ -757,10 +773,11 @@ convertFunOrPrim make_function fun =
   withMany convertParameter (cfunParams fun) $ \params ->
   convert_return (cfunReturn fun) $ \ret_param -> do
     let param_list = params ++ maybeToList ret_param
-    let return_type = map lowered $ loweredReturnType' $ cfunReturn fun
+    let return_type = loweredReturnType' $ cfunReturn fun
+    let ll_return_type = map lowered return_type
     body' <- convertExp $ cfunBody fun
-    body_exp <- runFreshVar $ toBlock body'
-    return $ make_function param_list return_type body_exp
+    body_exp <- runFreshVar $ toBlock return_type body'
+    return $ make_function param_list ll_return_type body_exp
   where
     -- Convert a write-return parameter to an actual pointer parameter
     convert_return (param ::: return_type) k =
@@ -807,10 +824,10 @@ createCMarshallingFunction (ExportSig dom rng) f = do
   (rng_params, compute_rng, rng_vals, ret_vars) <- marshalCReturn rng
 
   -- Create the function
-  fun_body <- runFreshVar $ execBuild $ do
+  fun_body <- runFreshVar $ execBuild (map LL.varType ret_vars) $ do
     marshal_params
     compute_rng (return $ LL.CallA (LL.LamV f) (dom_vals ++ rng_vals))
-    return $ LL.ValA $ map LL.VarV ret_vars
+    return $ LL.ReturnE $ LL.ValA $ map LL.VarV ret_vars
 
   return $ LL.primFun dom_params (map LL.varType ret_vars) fun_body
 
