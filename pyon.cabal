@@ -107,5 +107,6 @@ Executable pyon
     LowLevel.Records
     LowLevel.RecordFlattening
     LowLevel.ReferenceCounting
+    LowLevel.Rename
     LowLevel.Types
     
