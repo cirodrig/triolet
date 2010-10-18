@@ -97,6 +97,12 @@ emit f = tell (MkStm f)
 
 -- | Wrap the continuation into a function.  The locally live-out variables
 -- become the function parameters.
+--
+-- Each of the locally live-out variables may become multiple variables with 
+-- the same name and ID.  The variables will have disjoint lifetimes.  One 
+-- instance of the variables becomes the continuation's parameters.  The other
+-- instances become temporary variables that are passed as arguments when
+-- calling the continuation.
 getContinuation :: (Monad m, Supplies m (Ident Var)) =>
                    Bool         -- ^ Create a primitive call?
                 -> [ParamVar]   -- ^ Live-out variables

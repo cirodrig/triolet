@@ -24,7 +24,9 @@ import Gluon.Common.Error
 import Gluon.Common.MonadLogic
 import Gluon.Common.Identifier
 import LowLevel.Builtins
+import LowLevel.FreshVar
 import LowLevel.Print
+import LowLevel.Rename
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Build
@@ -200,23 +202,21 @@ ccLocalGroup defs do_body = withParameters (map funDefiniendum defs) $ do
         par hd_l hd_r (False:flags) (x:xs) = par hd_l (hd_r . (x:)) flags xs
         par hd_l hd_r []            _      = (hd_l [], hd_r [])
 
-closureConvertTopLevelFunction :: IdentSupply Var
-                               -> [Var]
-                               -> FunDef
-                               -> IO ([FunDef], [DataDef])
-closureConvertTopLevelFunction var_ids globals def@(FunDef v f) = do
-  let hoist_vars = Set.toList $ findFunctionsToHoist def
-  runCC var_ids hoist_vars globals $ do 
+closureConvertTopLevelFunction :: FunDef -> CC Fun
+closureConvertTopLevelFunction def@(FunDef v f) =
+  let hoist_vars = findFunctionsToHoist def
+  in withHoistedVariables hoist_vars $ do
     (f', captured) <- ccHoistedFun f
     unless (null captured) $ error "Global procedure captures variables"
-    writeFun (FunDef v f')
+    return f'
 
 closureConvertTopLevelFunctions :: IdentSupply Var
                                 -> [Var]
                                 -> [FunDef]
                                 -> IO ([FunDef], [DataDef])
 closureConvertTopLevelFunctions var_ids globals defs =
-  fmap mconcat $ mapM (closureConvertTopLevelFunction var_ids globals) defs
+  runCC var_ids globals $ do
+    withGlobalFunctions defs (mapM closureConvertTopLevelFunction defs) (return ())
 
 -- | Perform closure conversion on a data value.
 scanDataValue :: Val -> Val
@@ -399,10 +399,13 @@ scanTopLevel fun_defs data_defs =
 
 -- | Perform closure conversion.
 --
--- FIXME: We must globally rename variables to avoid name collisions!
+-- FIXME: We must globally rename variables before closure conversion
+-- to avoid name collisions!
 closureConvert :: Module -> IO Module
 closureConvert mod =
   withTheLLVarIdentSupply $ \var_ids -> do
+
+    -- Perform closure conversion
     let fun_defs = moduleFunctions mod
         data_defs = moduleData mod
         global_vars = map funDefiniendum fun_defs ++
@@ -411,7 +414,12 @@ closureConvert mod =
     (fun_defs', fun_data_defs') <-
       closureConvertTopLevelFunctions var_ids global_vars fun_defs
     let data_defs' = convertDataDefs data_defs
-    return $ mod { moduleFunctions = fun_defs'
-                 , moduleData = data_defs' ++ fun_data_defs'}
-  
+        
+    -- Rename variables so that variable names are unique
+    -- within a top-level function
+    renamed_fun_defs <-
+      runFreshVarM var_ids $ mapM (renameInFunDef RenameParameters) fun_defs'
+    
+    return $ mod { moduleFunctions = renamed_fun_defs
+                     , moduleData = data_defs' ++ fun_data_defs'}
 

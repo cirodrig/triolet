@@ -172,5 +172,8 @@ scanTopLevelDef def = scanDef def Map.empty
 -- function definition.
 findFunctionsToHoist :: FunDef -> Set.Set Var
 findFunctionsToHoist def =
-  solveImplications $ scanTopLevelDef def
+  let scan_implications = scanTopLevelDef def
+      -- Top-level functions always become closures
+      implications = Implied (funDefiniendum def) : scan_implications
+  in solveImplications implications
        
