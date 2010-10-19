@@ -152,6 +152,7 @@ pyonBuiltinConstructors =
 pyonBuiltinConstructorNames = map ('_':) pyonBuiltinConstructors
 
 pyonBuiltinVariables =
+  [ "dummy_addr" ] ++
   pyonBuiltinPassConvAddresses ++ pyonBuiltinPassConvPointers
 
 pyonBuiltinVariableNames = map ('_':) pyonBuiltinVariables

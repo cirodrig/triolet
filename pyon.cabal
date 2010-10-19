@@ -80,6 +80,7 @@ Executable pyon
     Core.Syntax
     Core.Print
     Core.Gluon
+    Core.PartialEval
     Core.Lowering
     Core.TypeLowering
     Core.BuiltinTypes

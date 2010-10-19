@@ -71,6 +71,7 @@ module SystemF.Builtins
         the_fun_load_float,
         the_fun_load_bool,
         the_fun_load_NoneType,
+        the_dummy_addr,
         getPyonTupleType, getPyonTupleType',
         getPyonTupleCon, getPyonTupleCon',
         getPyonTuplePassConv, getPyonTuplePassConv',
