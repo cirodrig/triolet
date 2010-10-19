@@ -51,7 +51,6 @@ module SystemF.Builtins
         the_oper_CAT_MAP,
         the_oper_GUARD,
         the_oper_DO,
-        the_fun_makelist,
         the_fun_map,
         the_fun_map_Stream,
         the_fun_reduce,
@@ -287,8 +286,9 @@ initializePyonBuiltins varIDs mod = do
 
         traversable_dict name =
           ("_TraversableDict_" ++ name,
-           [| let c = $(findNameWithPrefix name "Traversable_TRAVERSE_")
-              in evaluate $ TraversableDictMembers c |])
+           [| let c1 = $(findNameWithPrefix name "Traversable_TRAVERSE_")
+                  c2 = $(findNameWithPrefix name "Traversable_BUILD_")
+              in evaluate $ TraversableDictMembers c1 c2 |])
 
         additive_dict name =
           ("_AdditiveDict_" ++ name,

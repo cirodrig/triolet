@@ -184,9 +184,16 @@ mkTraversableClass = mdo
     in ( [passable aT]
        , functionType [tT @@ aT] (ConTy (tiBuiltin the_con_iter) @@ aT))
 
+  build_scheme <-
+    forallType [Star] $ \[a] ->
+    let aT = ConTy a
+        tT = ConTy t
+    in ( [passable aT]
+       , functionType [ConTy (tiBuiltin the_con_iter) @@ aT] (tT @@ aT))
+
   let cls = Class { clsParam = t
                   , clsConstraint = []
-                  , clsMethods = [iter]
+                  , clsMethods = [iter, build]
                   , clsName = "Traversable"
                   , clsInstances = [list_instance, iter_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_TraversableDict
@@ -194,6 +201,7 @@ mkTraversableClass = mdo
                   }
 
   iter <- mkClassMethod cls 0 "__iter__" iter_scheme
+  build <- mkClassMethod cls 0 "__build__" iter_scheme
   
   let list_instance =
         monomorphicInstance cls
@@ -210,7 +218,8 @@ mkTraversableClass = mdo
   where
     fromTraversableDict field_name =
       case pyonBuiltin field_name
-      of SystemF.TraversableDictMembers iter -> [InstanceMethod iter]
+      of SystemF.TraversableDictMembers iter build -> [ InstanceMethod iter
+                                                      , InstanceMethod build]
 
 mkAdditiveClass = mdo
   a <- newTyVar Star Nothing
@@ -490,9 +499,6 @@ initializeTIBuiltins = do
               ("__undefined__", [| mkUndefinedType |]
               , [| pyonBuiltin SystemF.the_fun_undefined |]
               ),
-              ("makelist", [| mkMakelistType |]
-              , [| pyonBuiltin SystemF.the_fun_makelist |]
-              ),
               ("do", [| mkDoType |]
               , [| pyonBuiltin SystemF.the_oper_DO |]
               ),
@@ -533,7 +539,7 @@ initializeTIBuiltins = do
           cls_members =
             [ ([| the_Eq |], ["__eq__", "__ne__"])
             , ([| the_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
-            , ([| the_Traversable |], ["__iter__"])
+            , ([| the_Traversable |], ["__iter__", "__build__"])
             , ([| the_Additive |], ["zero", "__add__", "__sub__"])
             , ([| the_Vector |], ["scale", "norm"])
             ]

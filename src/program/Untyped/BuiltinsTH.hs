@@ -45,6 +45,7 @@ pyonSourceGlobals =
   , "__gt__"
   , "__ge__"
   , "__iter__"
+  , "__build__"
   , "zero"
   , "__add__"
   , "__sub__"
@@ -55,7 +56,7 @@ pyonSourceGlobals =
 -- | Global variables that can't be referred to by name 
 pyonOtherGlobals :: [String]
 pyonOtherGlobals =
-  [ "makelist", "do", "guard", "iterBind"
+  [ "do", "guard", "iterBind"
   ]
 
 -- | All predefined class names

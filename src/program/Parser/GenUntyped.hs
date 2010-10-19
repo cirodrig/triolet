@@ -213,7 +213,7 @@ doExpr expr =
        return $ callVariable pos (convertBinaryOperator op) [l', r']
      ListComp pos iter -> do
        iter' <- doIterator iter
-       return $ callVariable pos (tiBuiltin the_makelist) [iter']
+       return $ callVariable pos (tiBuiltin the___build__) [iter']
      Generator pos iter -> do
        doIterator iter
      Call pos op args -> do

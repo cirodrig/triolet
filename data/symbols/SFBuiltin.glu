@@ -118,6 +118,7 @@ data OrdDict : Pure -> Pure where
 data TraversableDict : (Pure -> Pure) -> Pure where
   traversableDict : (t : Pure -> Pure)
                  -> ((a : Pure) -> PassConv a -> (t a -> Stream a))
+                 -> ((a : Pure) -> PassConv a -> (Stream a -> t a))
                  -> TraversableDict t;
 
 data AdditiveDict : Pure -> Pure where
@@ -173,11 +174,24 @@ let Traversable_TRAVERSE_Stream
  -> Stream a
   = s;
 
+let Traversable_BUILD_Stream
+    (a : Pure)
+    (pc : PassConv a)
+    (s : Stream a)
+ -> Stream a
+  = s;
+
 constant Traversable_TRAVERSE_list
   : (a : Pure)
  -> PassConv a
  -> list a
  -> Stream a;
+
+constant Traversable_BUILD_list
+  : (a : Pure)
+ -> PassConv a
+ -> Stream a
+ -> list a;
 
 constant Additive_ZERO_int : NoneType -> int;
 constant Additive_ADD_int : binary int;
@@ -207,10 +221,6 @@ constant oper_CAT_MAP : (a : Pure)
 constant oper_GUARD : (a : Pure) -> bool -> Stream a -> Stream a;
 
 constant oper_DO : (a : Pure) -> PassConv a -> (a -> Stream a);
-
-constant fun_makelist : (a : Pure)
-                     -> PassConv a
-                     -> (Stream a -> list a);
 
 constant fun_map : (t : Pure -> Pure) -> (a : Pure) -> (b : Pure)
                 -> TraversableDict t

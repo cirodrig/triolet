@@ -143,7 +143,7 @@ builtinFunctions =
   , (PyonName module_memory_py "copy",
      Right [| pyonBuiltin (SystemF.the_fun_copy) |])
   , (PyonName module_list "list_build",
-     Right [| pyonBuiltin (SystemF.the_fun_makelist) |])
+     Right [| pyonBuiltin (SystemF.buildMember . SystemF.the_TraversableDict_list) |])
   , (PyonName module_list "list_traverse",
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_list) |])
   , (PyonName module_stream "Stream_bind",

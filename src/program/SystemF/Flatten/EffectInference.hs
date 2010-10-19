@@ -286,7 +286,8 @@ inferExp typed_expression@(SF.TypedSFExp (SF.TypeAnn ty expression)) =
 -- | Convert a type from System F's type inference pass
 fromInferredType :: SF.TRType -> EI EExp
 fromInferredType (SF.TypedSFType (SF.TypeAnn k t)) = do
-  (t', []) <- liftRegionM $ toEffectType =<< evalHead' t
+  (t', effs) <- liftRegionM $ toEffectType =<< evalHead' t
+  tellNewEffectVars effs
   let info = Gluon.internalSynInfo (getLevel t')
   return_type <- toReturnType (Gluon.fromWhnf k)
   return $ EExp info return_type $ TypeE (discardTypeRepr t')

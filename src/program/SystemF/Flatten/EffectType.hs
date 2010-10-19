@@ -256,6 +256,7 @@ dataTypeTable =
     assocs =
       [ (SF.pyonBuiltin SF.the_PassConv, Referenced, [], [Invariant])
       , (SF.pyonBuiltin SF.the_AdditiveDict, Referenced, [], [Invariant])
+      , (SF.pyonBuiltin SF.the_TraversableDict, Referenced, [], [Invariant])
       , (SF.pyonBuiltin SF.the_int, Value, [], [])
       , (SF.pyonBuiltin SF.the_float, Value, [], [])
       , (SF.pyonBuiltin SF.the_bool, Value, [], [])

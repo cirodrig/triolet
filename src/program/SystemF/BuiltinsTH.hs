@@ -24,6 +24,7 @@ data OrdDictMembers =
 data TraversableDictMembers =
   TraversableDictMembers
   { traverseMember :: !Con
+  , buildMember    :: !Con
   }
 
 data AdditiveDictMembers =
@@ -117,7 +118,6 @@ pyonBuiltinFunctions =
   , "oper_CAT_MAP"
   , "oper_GUARD"
   , "oper_DO"
-  , "fun_makelist"
   , "fun_map"
   , "fun_map_Stream"
   , "fun_reduce"

@@ -138,7 +138,9 @@ globalConTable =
       , unchanged 0 (addMember . the_AdditiveDict_float)
       , unchanged 0 (subMember . the_AdditiveDict_float)
       , unchanged 1 (traverseMember . the_TraversableDict_Stream)
+      , unchanged 1 (buildMember . the_TraversableDict_Stream)
       , unchanged 1 (traverseMember . the_TraversableDict_list)
+      , unchanged 1 (buildMember . the_TraversableDict_list)
       , unchanged 1 the_oper_MUL
       , unchanged 1 the_oper_DIV
       , unchanged 0 the_oper_MOD
@@ -150,7 +152,6 @@ globalConTable =
       , unchanged 1 the_oper_NEGATE
       , unchanged 2 the_oper_CAT_MAP
       , unchanged 1 the_oper_DO
-      , unchanged 1 the_fun_makelist
       , unchanged 1 the_fun_undefined
       , unchanged 0 the_fun_iota
       , (the_fun_map,
@@ -444,19 +445,24 @@ isStreamTraversableDictCall expression =
 
 
 specializeDictionaryAlternative (Alt { altTyArgs = [_]
-                                     , altParams = [Binder traverse_var _ ()]
+                                     , altParams = [Binder traverse_var _ (),
+                                                    Binder build_var _ ()]
                                      , altBody = body
                                      }) =
-  let body' = substituteTraversableMethods traverse_var body
+  let body' = substituteTraversableMethods traverse_var build_var body
   in specializeMaybe body'
 
--- | Replace any occurences of 'v' with the Gluon constructor
--- @Traversable_TRAVERSE_Stream@.
-substituteTraversableMethods method_var expr = doexpr expr
+-- | Replace any occurences of dictionary methods with the Gluon constructors
+-- for stream build and traverse methods.
+substituteTraversableMethods method_var build_var expr = doexpr expr
   where
-    doexpr (VarE {expInfo = inf, expVar = v}) | v == method_var =
-      ConE { expInfo = inf
-           , expCon = traverseMember $ pyonBuiltin the_TraversableDict_Stream}
+    doexpr (VarE {expInfo = inf, expVar = v})
+      | v == method_var =
+        ConE { expInfo = inf
+             , expCon = traverseMember $ pyonBuiltin the_TraversableDict_Stream}
+      | v == build_var =
+        ConE { expInfo = inf
+             , expCon = buildMember $ pyonBuiltin the_TraversableDict_Stream}
       
     doexpr e = mapSFExp doexpr doalt dofun id e
     doalt = mapAlt doexpr id
