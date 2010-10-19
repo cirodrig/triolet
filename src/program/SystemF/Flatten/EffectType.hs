@@ -170,7 +170,7 @@ data EType =
 -- | Construct a type from a variable.
 -- Inhabitants of variable types are always passed by reference.
 varT v
-  | getLevel v /= TypeLevel = traceShow v $ internalError "varT: Not a type variable" 
+  | getLevel v /= TypeLevel = internalError "varT: Not a type variable" 
   | otherwise = ERepType Referenced (VarT v)
 
 -- | Construct a type from a constructor.
@@ -1172,7 +1172,7 @@ gluonTypeToEffectType expr =
        op' <- gluonTypeToEffectType op
        args' <- mapM gluonTypeToEffectType args
        return $ appT op' args'
-     _ -> traceShow (Gluon.pprExp expr) $ internalError "gluonTypeToEffectType: Unexpected type"
+     _ -> internalError "gluonTypeToEffectType: Unexpected type"
 
 -- | Convert a core type to the corresponding effect.
 -- The type must consist of only the empty type @EmpE@, conjunctions

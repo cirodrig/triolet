@@ -150,10 +150,6 @@ parsePyonAsm input_path input_text = do
 compilePyonAsmToGenC ll_mod c_file h_file = do
   -- Low-level transformations
   ll_mod <- LowLevel.makeBuiltinPrimOps ll_mod
-  putStrLn ""
-  putStrLn "Replaced primitive ops"
-  print $ LowLevel.pprModule ll_mod
-
   ll_mod <- LowLevel.flattenRecordTypes ll_mod
   putStrLn ""
   putStrLn "Lowered and flattened"

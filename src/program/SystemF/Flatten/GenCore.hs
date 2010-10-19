@@ -86,7 +86,7 @@ mkGlobalRegions = do
   where
     mk_entry (con, addr_var, ptr_var) = do
       rvar <- newRegionVar False
-      traceShow (text "mkGlobalRegions" <+> pprEffectVar rvar) $ return ((rvar, RVB addr_var ptr_var (Core.conCoreType con)),
+      return ((rvar, RVB addr_var ptr_var (Core.conCoreType con)),
               (fromIdent $ conID con, rvar))
     
     globals = [ (SF.pyonBuiltin SF.the_passConv_int,
@@ -282,7 +282,7 @@ dumpEnvironment = GenCore $ ReaderT $ \env -> do
 -- Conversion from effect types to core types
 
 etypeToCoreType :: EType -> GenCore Core.RCType
-etypeToCoreType ty =  traceShow (text "etypeToCoreType" <+> pprEType ty) $
+etypeToCoreType ty =
   case ty
   of AppT op args ->
        liftM2 Core.appCT (etypeToCoreType op) (mapM etypeToCoreType args)
@@ -315,7 +315,7 @@ etypeToCoreFunType ty =
 eParamTypeToCoreType :: EParamType
                      -> (Core.CBind Core.CParamT Rec -> GenCore a)
                      -> GenCore a
-eParamTypeToCoreType pt k = trace "eParamTypeToCoreType" $ do
+eParamTypeToCoreType pt k = do
   t' <- etypeToCoreType $ paramTypeType pt
   case pt of
     ValPT mv _ -> k (Core.ValPT mv ::: t')
@@ -326,7 +326,7 @@ eParamTypeToCoreType pt k = trace "eParamTypeToCoreType" $ do
 withReturnType :: EReturnType
                -> (RetBinding -> GenCore a)
                -> GenCore a
-withReturnType rt k = trace "withReturnType" $ do
+withReturnType rt k = do
   t <- etypeToCoreType $ returnTypeType rt
   case rt of
     ValRT _       -> k (ValRB t)
@@ -423,7 +423,7 @@ withEffectParameters = withMany withEffectParameter
 
 withParameter :: EParam -> (Core.CBind Core.CParam Rec -> GenCore a)
               -> GenCore a
-withParameter param f = traceShow (text "withParameter" <+> pprEParam param) $ do
+withParameter param f = do
   t <- etypeToCoreType $ paramType param
   case param of
     ValP v _    -> withType v (ValVB t) $ f (Core.ValP v ::: t)
@@ -791,7 +791,7 @@ convertAlt rb inf alt = do
                        }
 
 toCoreFun :: EFun -> GenCore Core.RCFun
-toCoreFun efun = trace "toCoreFun" $
+toCoreFun efun =
   withEffectParameters (funEffectParams efun) $ \e_params ->
   withParameters (funParams efun) $ \params ->
   withReturnType (funReturnType efun) $ \rb -> do
@@ -807,7 +807,7 @@ toCoreFun efun = trace "toCoreFun" $
                        }
 
 getCoreFunType :: EFun -> GenCore Core.RCFunType
-getCoreFunType efun = trace "getCoreFunType" $ 
+getCoreFunType efun =
   withEffectParameters (funEffectParams efun) $ \e_params ->
   withParameters (funParams efun) $ \params -> do
     rt <- eReturnTypeToCoreType $ funReturnType efun

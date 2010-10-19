@@ -237,7 +237,7 @@ eraseTypeAnnotations (SF.TypedSFExp (SF.TypeAnn _ e)) =
 -- side effect.
 inferExp :: SF.TRExp -> EI (EExp, Effect)
 inferExp typed_expression@(SF.TypedSFExp (SF.TypeAnn ty expression)) =
-  traceShow (text "inferExp" <+> SF.pprExp (eraseTypeAnnotations typed_expression)) $ do
+ debug $ do
   (effect_exp, effect) <-
     case expression
     of SF.VarE {SF.expInfo = inf, SF.expVar = v} ->
@@ -277,6 +277,11 @@ inferExp typed_expression@(SF.TypedSFExp (SF.TypeAnn ty expression)) =
                 , SF.expAlternatives = alts} ->
          inferCase ty inf scr alts
   return (effect_exp, effect)
+  where
+    debug x =
+      let message = text "inferExp" <+>
+                    SF.pprExp (eraseTypeAnnotations typed_expression)
+      in traceShow message x
 
 -- | Convert a type from System F's type inference pass
 fromInferredType :: SF.TRType -> EI EExp
@@ -790,7 +795,7 @@ instantiateEffectAssignment info poly_op assignment =
        let new_rt = foldr (uncurry renameE) rt (zip qvars new_vars)
            exp1 = InstE poly_op (map varEffect new_vars)
        rt' <- inst_return new_rt
-       traceShow (text "IEA" <+> hcat (map pprEffectVar new_vars)) $ return $ EExp info rt' exp1
+       return $ EExp info rt' exp1
      RecEffect placeholder rt -> do
        let var = case poly_op 
                  of Left v -> v
@@ -920,7 +925,7 @@ compareTypes direction variance expected given =
        | otherwise -> type_mismatch
   where
     no_change = return mempty
-    type_mismatch = traceShow (pprEType expected $$ pprEType given) $ fail "Type mismatch"
+    type_mismatch = fail "Type mismatch"
 
 compareTypeLists direction variances es gs = go variances es gs 
   where
@@ -1011,11 +1016,7 @@ compareFunctionTypes variance expected given =
       -- from the expected effect before creating this constraint, and 
       -- coercion-created local regions are removed from the given effect.
       
-      traceShow (text "given: " <+> pprEffect g_eff $$
-                 text "expected: " <+> pprEffect e_eff $$
-                 text "exposed: " <+> hsep (map pprEffectVar exposed_regions) $$
-                text "local: " <+> hsep (map pprEffectVar local_regions)) $
-        assertSubeffect (deleteListFromEffect local_regions g_eff) (deleteListFromEffect exposed_regions e_eff)
+      assertSubeffect (deleteListFromEffect local_regions g_eff) (deleteListFromEffect exposed_regions e_eff)
 
       -- Coerce from given return type to expected return type
       (ret_co, ret_regions) <- coerceReturn Covariant e_return g_return
@@ -1089,9 +1090,7 @@ coerceParameter :: Variance
                 -> EParamType
                 -> EReturnType
                 -> EI (Coercion, DepRenaming, [RVar], [RVar], LocalRegions)
-coerceParameter variance p_passtype r_passtype =
-  traceShow (text "coerceParameter" <+> (pprEParamType p_passtype $$
-                                         pprEReturnType r_passtype)) $ do
+coerceParameter variance p_passtype r_passtype = do
   -- Coerce the value if its type has changed
   astype <- compareTypes InDir variance (paramTypeType p_passtype) (returnTypeType r_passtype)
 
