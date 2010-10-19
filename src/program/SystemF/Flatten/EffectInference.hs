@@ -356,9 +356,15 @@ inferDo inf [return_type] [(repr_exp, repr_eff), (body_exp, body_eff)] = do
   -- Type class expressions should never have a side effect
   assertEmptyEffect repr_eff
   
+  -- The body must return a reference
+  return_rv <- newRegionVar False
+  let co_type = WriteRT return_rv (returnTypeType $ expReturn body_exp)
+  (body_co, _) <- coerceReturn Covariant co_type (expReturn body_exp)
+  let body_co_exp = applyCoercion body_co body_exp
+
   let expr = DoE { expTyArg = return_type
                  , expPassConv = repr_exp
-                 , expBody = body_exp
+                 , expBody = body_co_exp
                  }
   let stream_type = AppT (InstT stream_con [body_eff]) [returnTypeType $ expReturn body_exp]
   stream_return_type <-
