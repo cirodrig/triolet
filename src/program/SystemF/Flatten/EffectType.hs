@@ -12,7 +12,42 @@ effects in core.
 -}
 
 {-# LANGUAGE Rank2Types, ViewPatterns #-}
-module SystemF.Flatten.EffectType where
+module SystemF.Flatten.EffectType
+       (-- * Effect inference types
+        EType(..),
+        funT,
+        conEffectParamVariance,
+        etypeOrdinaryParamVariance,
+        ERepType(..),
+        etypeWithStandardRepr,
+        discardTypeRepr,
+        EParamType(..),
+        paramTypeRepr,
+        paramTypeType,
+        paramTypeToReturnType,
+        freshenParamTypeTypeParam,
+        EReturnType(..),
+        returnTypeRepr,
+        returnTypeType,
+        
+        -- * Renaming
+        Renaming(..),
+        idRenaming,
+        evalAndApplyRenaming,
+        Parametric(..),
+        FreeEffectVars(..),
+        
+        -- * Converting to effect types
+        toEffectType,
+        toPureEffectType,
+        etypeToParamType,
+        etypeToReturnType,
+        coreToEffectType,
+        
+        -- * Pretty-printing
+        pprEType, pprEReturnType, pprEParamType
+       )
+where
 
 import Control.Monad
 import Control.Monad.Reader
