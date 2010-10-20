@@ -623,12 +623,26 @@ instance Parametric ERepType where
 instance Parametric EType where
   freeEffectVars expression =
     case expression
-    of AppT op args ->
-         liftM (invariant . unionsFV) $ mapM freeEffectVars (op : args)
-       InstT op args ->
-         -- FIXME: Covariant effect types!
-         trace "FIXME: covariant effect types" $
-         liftM (invariant . unionsFV) $ mapM freeEffectVars args
+    of AppT op args -> do
+         op_e <- freeEffectVars op
+         args_e <- mapM freeEffectVars args
+         return $ unionsFV (covariant op_e : map invariant args_e)
+
+       InstT op args -> do
+         -- Get free effect variables from parameters
+         free_vars <- mapM freeEffectVars args
+
+         -- Figure out the variance of each effect parameter
+         let tovar Invariant = invariant
+             tovar Covariant = covariant
+             tovar Contravariant = contravariant
+         let variances =
+               case op
+               of Left _  -> replicate (length args) invariant
+                  Right c -> map tovar $ conEffectParamVariance c
+         
+         -- Apply variances and combine results
+         return $ unionsFV $ zipWith ($) variances free_vars
        FunT pt eff rt -> do
          fv_param <- freeEffectVars pt
          fv_eff <- freeEffectVars eff
