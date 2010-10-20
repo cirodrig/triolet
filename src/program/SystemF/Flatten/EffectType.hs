@@ -1186,15 +1186,24 @@ cFunTypeToEffectType ft = do
                            return $ WriteRT rgn $ discardTypeRepr rng'
 
     assume_parameter (param Core.::: dom) k = do
+      -- Cannot convert parameters whose type is "Effect" because it requires
+      -- support for higher-rank types
+      when (is_effect_kind dom) $
+        internalError "cFunTypeToEffectType: Unsupported higher-rank effect type"
+
       dom' <- cTypeToEffectType dom
       let dom_t = discardTypeRepr dom'
       case param of
         Core.ValPT mv -> k $ ValPT mv dom_t
         Core.OwnPT    -> k $ OwnPT dom_t
         Core.ReadPT v -> withCoreRegionVar v $ \v' -> k $ ReadPT v' dom_t
+    
+    is_effect_kind (Core.ExpCT (Gluon.LitE {Gluon.expLit = Gluon.KindL Gluon.EffectKind})) = True
+    is_effect_kind _ = False
 
 -- | Convert a Gluon type to an effect type.
--- The type may only consist of variables, constructors, and applications.
+-- Type-level types may only consist of variables, constructors, and 
+-- applications.  Kind-level types may have arrows.
 --
 -- /FIXME/: Convert effect types using cTypeToEffect.  Use Core type inference
 -- to identify effect types.
@@ -1208,6 +1217,16 @@ gluonTypeToEffectType expr =
        op' <- gluonTypeToEffectType op
        args' <- mapM gluonTypeToEffectType args
        return $ appT op' args'
+     Gluon.FunE { Gluon.expMParam = Gluon.Binder' Nothing dom ()
+                , Gluon.expRange = rng}
+       | getLevel expr /= KindLevel -> 
+           internalError "gluonTypeToEffectType: Unexpected function type"
+       | otherwise -> do
+           dom' <- gluonTypeToEffectType dom
+           param <- lift $ etypeToParamType dom' Nothing
+           rng' <- gluonTypeToEffectType rng
+           ret <- lift $ etypeToReturnType rng'
+           return $ funT param emptyEffect ret
      _ -> internalError "gluonTypeToEffectType: Unexpected type"
 
 -- | Convert a core type to the corresponding effect.

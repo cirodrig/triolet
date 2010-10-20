@@ -454,10 +454,10 @@ specializeDictionaryAlternative (Alt { altTyArgs = [_]
 
 -- | Replace any occurences of dictionary methods with the Gluon constructors
 -- for stream build and traverse methods.
-substituteTraversableMethods method_var build_var expr = doexpr expr
+substituteTraversableMethods traverse_var build_var expr = doexpr expr
   where
     doexpr (VarE {expInfo = inf, expVar = v})
-      | v == method_var =
+      | v == traverse_var =
         ConE { expInfo = inf
              , expCon = traverseMember $ pyonBuiltin the_TraversableDict_Stream}
       | v == build_var =

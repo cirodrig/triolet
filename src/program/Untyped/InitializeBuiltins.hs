@@ -201,7 +201,7 @@ mkTraversableClass = mdo
                   }
 
   iter <- mkClassMethod cls 0 "__iter__" iter_scheme
-  build <- mkClassMethod cls 0 "__build__" iter_scheme
+  build <- mkClassMethod cls 1 "__build__" build_scheme
   
   let list_instance =
         monomorphicInstance cls

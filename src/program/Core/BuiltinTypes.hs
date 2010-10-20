@@ -183,6 +183,20 @@ additiveDictType = mkConType $ do
         retCT (WriteRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
   return (OwnRT ::: constructor_type)
 
+traversableDictType = mkConType $ do
+  t <- newAnonymousVariable TypeLevel
+  traverse_type <- mkTraverseType (varCT t)
+  build_type <- mkBuildType (varCT t)
+  let dict_type =
+        appExpCT (mkInternalConE $ pyonBuiltin the_TraversableDict) [varCT t]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just t) ::: expCT (mkInternalArrowE False pureKindE pureKindE)) $
+        pureArrCT (OwnPT ::: cbindType traverse_type) $
+        pureArrCT (OwnPT ::: cbindType build_type) $
+        retCT (WriteRT ::: dict_type)
+  return (OwnRT ::: constructor_type)
+
 copyType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   addr1 <- newAnonymousVariable ObjectLevel
@@ -196,14 +210,14 @@ copyType = mkConType $ do
         retCT (WriteRT ::: varCT a)
   return (OwnRT ::: constructor_type)
 
-makelistType = mkConType $ do
+mkBuildType t = do
   e <- newAnonymousVariable TypeLevel
   a <- newAnonymousVariable TypeLevel
   addr <- newAnonymousVariable ObjectLevel
   let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
       stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
                     [varCT e, varCT a]
-      list_type = appCT (conCT $ pyonBuiltin the_list) [varCT a]
+      list_type = appCT t [varCT a]
       constructor_type =
         funCT $
         pureArrCT (ValPT (Just e) ::: expCT effectKindE) $ 
@@ -246,12 +260,12 @@ streamBindType = mkConType $ do
         retCT (OwnRT ::: result_type)
   return (OwnRT ::: constructor_type)
 
-listTraverseType = mkConType $ do
+mkTraverseType t = do
   a <- newAnonymousVariable TypeLevel
   addr <- newAnonymousVariable ObjectLevel
   addr_pc <- newAnonymousVariable ObjectLevel
   let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
-      list_type = appCT (conCT $ pyonBuiltin the_list) [varCT a]
+      list_type = appCT t [varCT a]
       stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
                     [readEffectType (mkInternalVarE addr) list_type, varCT a]
       constructor_type =
@@ -327,6 +341,22 @@ passConvIterType = mkConType $ do
         retCT (WriteRT ::: result_type)
   return (OwnRT ::: constructor_type)
 
+passConvListType = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  addr1 <- newAnonymousVariable ObjectLevel
+  let list_type =
+        appCT (conCT $ pyonBuiltin the_list) [varCT a]
+      element_passconv_type =
+        appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+      result_type =
+        appCT (conCT $ pyonBuiltin the_PassConv) [list_type]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ReadPT addr1 ::: element_passconv_type) $
+        retCT (WriteRT ::: result_type)
+  return (OwnRT ::: constructor_type)
+
 constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
   where
@@ -336,6 +366,8 @@ constructorTable =
                passConvOwnedType)
             , (pyonBuiltin the_passConv_iter,
                passConvIterType)
+            , (pyonBuiltin the_passConv_list,
+               passConvListType)
             , (pyonBuiltin SystemF.Builtins.the_fun_store_int,
                storeIntType)
             , (pyonBuiltin SystemF.Builtins.the_fun_load_int,
@@ -373,15 +405,17 @@ constructorTable =
             , (pyonBuiltin (subMember . the_AdditiveDict_float),
                binaryFloatOpType)
             , (pyonBuiltin (traverseMember . the_TraversableDict_list),
-               listTraverseType)
+               mkConType $ mkTraverseType (conCT $ pyonBuiltin the_list))
             , (pyonBuiltin (buildMember . the_TraversableDict_list),
-               makelistType)
+               mkConType $ mkBuildType (conCT $ pyonBuiltin the_list))
             , (pyonBuiltin (traverseMember . the_TraversableDict_Stream),
                streamIdType)
             , (pyonBuiltin (buildMember . the_TraversableDict_Stream),
                streamIdType)
             , (pyonBuiltin the_additiveDict,
                additiveDictType)
+            , (pyonBuiltin the_traversableDict,
+               traversableDictType)
             , (getPyonTupleCon' 2,
                tuple2ConType)
             , (pyonBuiltin SystemF.Builtins.the_fun_copy,

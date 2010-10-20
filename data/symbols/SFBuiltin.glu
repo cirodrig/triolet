@@ -76,7 +76,7 @@ constant passConv_float : PassConv float;
 constant passConv_bool : PassConv bool;
 constant passConv_NoneType : PassConv NoneType;
 constant passConv_iter : (t : Pure) -> PassConv t -> PassConv (Stream t);
-constant passConv_list : (t : Pure) -> PassConv (list t);
+constant passConv_list : (t : Pure) -> PassConv t -> PassConv (list t);
 constant passConv_Any : PassConv Any;
 
 -- The parameter-passing convention for any owned reference
