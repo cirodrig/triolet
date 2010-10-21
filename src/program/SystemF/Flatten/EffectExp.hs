@@ -482,7 +482,7 @@ pprEExp' expression =
      DoE _ _ body ->
        text "do" <+> braces (pprEExp body)
      LetE lhs ty rhs body ->
-       text "let" <+> (hang (Gluon.pprVar lhs <+> text ":" <+> pprEReturnType ty) 4 (pprEExp rhs)) $$
+       text "let" <+> (hang (Gluon.pprVar lhs <+> text ":" <+> pprEReturnType ty <+> text "=") 4 (pprEExp rhs)) $$
        pprEExp body
      LetrecE defs body ->
        text "letrec" $$ nest 4 (pprEDefs defs) $$ pprEExp body
