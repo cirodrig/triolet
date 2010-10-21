@@ -92,6 +92,9 @@ mkGlobalRegions = do
     globals = [ (SF.pyonBuiltin SF.the_passConv_int,
                  SF.pyonBuiltin SF.the_passConv_int_addr,
                  SF.pyonBuiltin SF.the_passConv_int_ptr)
+              , (SF.pyonBuiltin SF.the_OpaqueTraversableDict_list,
+                 SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_addr,
+                 SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_ptr)
               ]
 
 setupGenCoreEnv :: IdentSupply Var -> RegionVarMap -> IO GenCoreEnv
@@ -135,16 +138,20 @@ retBindingType (OwnRB t) = t
 retBindingType (ReadRB _ _ t) = t
 retBindingType (WriteRB _ _ t) = t
 
-retBindingVarBinding :: RetBinding -> VarBinding
-retBindingVarBinding (ValRB t) = ValVB t
-retBindingVarBinding (OwnRB t) = OwnVB t
-retBindingVarBinding (ReadRB a p t) = ReadVB (Gluon.mkInternalVarE a) p t 
-retBindingVarBinding (WriteRB a p t) = ReadVB (Gluon.mkInternalVarE a) p t
+retBindingVarBinding :: Var -> RetBinding -> VarBinding
+retBindingVarBinding _ (ValRB t) = ValVB t
+retBindingVarBinding _ (OwnRB t) = OwnVB t
+
+-- Bind to the given pointer variable
+retBindingVarBinding v (ReadRB a _ t) = ReadVB (Gluon.mkInternalVarE a) v t
+
+-- A "write" binding cannot be bound to an arbitrary variable
+retBindingVarBinding _ (WriteRB _ _ _) = internalError "retBindingVarBinding"
 
 retBindingLetBinder :: Var -> RetBinding -> Core.CBind Core.LetBinder Rec
 retBindingLetBinder v (ValRB t) = Core.ValB v ::: t
 retBindingLetBinder v (OwnRB t) = Core.OwnB v ::: t
-retBindingLetBinder _ (ReadRB a p t) = Core.RefB (Gluon.mkInternalVarE a) p ::: t
+retBindingLetBinder v (ReadRB a _ t) = Core.RefB (Gluon.mkInternalVarE a) v ::: t
 retBindingLetBinder _ (WriteRB a p t) = Core.LocalB a p ::: t
 
 -- | Create the function argument corresponding to this return binding
@@ -291,10 +298,28 @@ etypeToCoreType ty =
                 of Left v -> Core.ExpCT (Gluon.mkInternalVarE v)
                    Right c -> Core.ExpCT (Gluon.mkInternalConE c)
        in liftM (Core.appCT op) (mapM effectToCoreEffect effs)
-     FunT {} -> fmap Core.funCT $ etypeToCoreFunType ty
+     FunT {} ->
+       case getLevel ty
+       of TypeLevel -> fmap Core.funCT $ etypeToCoreFunType ty
+          KindLevel -> return $ Core.ExpCT (etypeToKind ty)
+          _ -> internalError "etypeToCoreType"
      VarT v -> return (Core.varCT v)
      ConT c -> return (Core.conCT c)
-     LitT l -> return (Core.litCT l)
+     LitT l -> 
+       case getLevel ty
+       of TypeLevel -> return (Core.litCT l)
+          KindLevel -> return $ Core.ExpCT (etypeToKind ty)
+          _ -> internalError "etypeToCoreType"
+
+etypeToKind :: EType -> Gluon.RExp
+etypeToKind ty = 
+  case ty
+  of FunT {etypeParam = ValPT Nothing dom, etypeReturn = ValRT rng} ->
+       Gluon.mkInternalArrowE False (etypeToKind dom) (etypeToKind rng)
+     LitT l ->
+       Gluon.mkLitE noSourcePos l
+     _ -> internalError "etypeToKind"
+       
 
 etypeToCoreFunType ty =
   case ty
@@ -681,9 +706,15 @@ convertConE rb inf c = do
   let value = case Core.fromCBind rt
               of Core.ValRT -> Core.ValueConV c
                  Core.OwnRT -> Core.OwnedConV c
+                 
+                 -- Special case handling for constructors that translate
+                 -- to global variables in Core
                  Core.ReadRT {}
                    | c `SF.isPyonBuiltin` SF.the_passConv_int ->
                        Core.ReadVarV (Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_passConv_int_addr)) (SF.pyonBuiltin SF.the_passConv_int_ptr)
+
+                     | c `SF.isPyonBuiltin` SF.the_OpaqueTraversableDict_list ->
+                       Core.ReadVarV (Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_addr)) (SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_ptr)
 
                  _ -> internalError "convertConE"
   return (Core.ValCE inf value)
@@ -759,7 +790,7 @@ convertDoE rb inf ty_arg pass_conv body =
 convertLetE body_rb inf lhs lhs_type rhs body =
   withReturnType (expReturn rhs) $ \rhs_rb -> do
     rhs' <- toCoreExp rhs_rb rhs
-    withType lhs (retBindingVarBinding rhs_rb) $ do
+    withType lhs (retBindingVarBinding lhs rhs_rb) $ do
       body' <- toCoreExp body_rb body
       return $ Core.LetCE inf (retBindingLetBinder lhs rhs_rb) rhs' body'
 

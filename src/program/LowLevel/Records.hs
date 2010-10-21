@@ -90,6 +90,12 @@ additiveDictRecord =
                , PrimField OwnedType
                , PrimField OwnedType]
 
+-- | The record type of a traversable class dictionary
+traversableDictRecord :: StaticRecord
+traversableDictRecord =
+  staticRecord [ PrimField OwnedType
+               , PrimField OwnedType]
+
 -- | An info table is a piece of statically defined global data.  Every 
 -- reference-counted, dynamically allocated object contains a pointer to an 
 -- info table.  The info table describes the object's data representation.

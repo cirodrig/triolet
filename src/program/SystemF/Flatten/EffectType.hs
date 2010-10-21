@@ -45,7 +45,7 @@ module SystemF.Flatten.EffectType
         coreToEffectType,
         
         -- * Pretty-printing
-        pprEType, pprEReturnType, pprEParamType
+        pprEType, pprERepType, pprEReturnType, pprEParamType
        )
 where
 

@@ -18,6 +18,7 @@ import Gluon.Core
 import Export
 import SystemF.Builtins
 import Core.Syntax
+import Core.Print
 import Core.BuiltinTypes
 import LowLevel.Syntax as LL
 import LowLevel.Types as LL
@@ -55,9 +56,10 @@ valueType core_type =
        | con `isPyonBuiltin` the_NoneType -> LL.PrimType UnitType
        | con `isPyonBuiltin` the_PassConv -> LL.RecordType LL.passConvRecord
        | con `isPyonBuiltin` the_AdditiveDict -> LL.RecordType LL.additiveDictRecord
+       | con `isPyonBuiltin` the_TraversableDict -> LL.RecordType LL.traversableDictRecord
      _ -> case core_type
-          of ExpCT (LitE {expLit = KindL _}) -> LL.PrimType UnitType
-             _ -> internalError $ "valueType: Unexpected type"
+          of ExpCT t | getLevel t == KindLevel -> LL.PrimType UnitType
+             _ -> internalError "valueType: Unexpected type"
 
 -- | Get the value type that will be used to pass the given core type.
 lowerExpressionType :: CBind CReturnT Rec -> LL.ValueType

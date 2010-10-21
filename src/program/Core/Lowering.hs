@@ -76,12 +76,16 @@ globalVarAssignment =
   where
     tbl = [ (pyonBuiltin the_passConv_int_ptr,
              (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_int_pass_conv))
+          , (pyonBuiltin the_OpaqueTraversableDict_list_ptr,
+             (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_OpaqueTraversableDict_list))
           ]
 
 isSingletonDataType c
-  | c `elem` [pyonBuiltin the_AdditiveDict] = True
+  | c `elem` [pyonBuiltin the_AdditiveDict, pyonBuiltin the_TraversableDict] = True
   | c `elem` [] = False
-  | otherwise = internalError "isSingletonDataType: Not implemented for this type"
+  | otherwise =
+      internalError $ 
+      "isSingletonDataType: Not implemented for type: " ++ showLabel (conName c)
 
 type BuildBlock a = Gen FreshVarM a
 
@@ -329,6 +333,8 @@ getPassConv ty = do
                return (return $ builtinVar the_bivar_PassConv_pass_conv)
            | con `isPyonBuiltin` the_AdditiveDict ->
                return (return $ builtinVar the_bivar_AdditiveDict_pass_conv)
+           | con `isPyonBuiltin` the_TraversableDict ->
+               return (return $ builtinVar the_bivar_TraversableDict_pass_conv)
            | con `isPyonBuiltin` the_list -> undefined
          _ -> internalError $ "getPassConv: Unexpected type " ++ show (pprType ty)
 
@@ -446,11 +452,18 @@ dataConstructorFieldLayout datacon ty_args
               ReferenceLayout (nativeIntV 0) (recordFields record_layout))
 
   | datacon `isPyonBuiltin` the_additiveDict = do
-      -- This dictionary contains three functinos
+      -- This dictionary contains three functions
       return (LL.UnitL,
               return (),
               ReferenceLayout (nativeIntV 0)
                               (recordFields $ toDynamicRecord additiveDictRecord))
+  
+  | datacon `isPyonBuiltin` the_traversableDict = do
+      -- This dictionary contains two functions
+      return (LL.UnitL,
+              return (),
+              ReferenceLayout (nativeIntV 0)
+                              (recordFields $ toDynamicRecord traversableDictRecord))
   | otherwise = internalError $ "dataConstructorFieldLayout: Not implemented for " ++ showLabel (conName datacon)
   where
     enum_value tag = return (tag, return (), EnumValueLayout)

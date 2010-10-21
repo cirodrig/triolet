@@ -362,6 +362,8 @@ constructorTable =
   where
     table = [ (pyonBuiltin the_passConv_int,
                ReadRT (mkInternalVarE $ pyonBuiltin the_passConv_int_addr) ::: appCT (conCT $ pyonBuiltin the_PassConv) [conCT $ pyonBuiltin the_int])
+            , (pyonBuiltin the_OpaqueTraversableDict_list,
+               ReadRT (mkInternalVarE $ pyonBuiltin the_OpaqueTraversableDict_list_addr) ::: appCT (conCT $ pyonBuiltin the_TraversableDict) [conCT $ pyonBuiltin the_list])
             , (pyonBuiltin the_passConv_owned,
                passConvOwnedType)
             , (pyonBuiltin the_passConv_iter,

@@ -146,10 +146,16 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.buildMember . SystemF.the_TraversableDict_list) |])
   , (PyonName module_list "list_traverse",
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_list) |])
+  , (PyonName module_list "passConv_list",
+     Right [| pyonBuiltin (SystemF.the_passConv_list) |])
   , (PyonName module_stream "Stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
   , (PyonName module_stream "Stream_return",
      Right [| pyonBuiltin (SystemF.the_fun_return) |])
+  , (PyonName module_stream "Stream_build",
+     Right [| pyonBuiltin (SystemF.buildMember . SystemF.the_TraversableDict_Stream) |])
+  , (PyonName module_stream "Stream_traverse",
+     Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_Stream) |])
   , (PyonName module_structures "additiveDict",
      Right [| pyonBuiltin (SystemF.the_additiveDict) |])
     
@@ -197,11 +203,14 @@ builtinGlobals =
   [ -- Info tables
     (biName "pap_info", PrimType PointerType)
   , (biName "global_closure_info", PrimType PointerType)
+    -- Dictionaries
+  , (PyonName module_structures "OpaqueTraversableDict_list", PrimType PointerType)
     -- Physical representations of data types
   , (PyonName module_structures "int_pass_conv", PrimType PointerType)
   , (biName "float_pass_conv", PrimType PointerType)
   , (biName "bool_pass_conv", PrimType PointerType)
   , (PyonName module_structures "AdditiveDict_pass_conv", PrimType PointerType)
+  , (PyonName module_structures "TraversableDict_pass_conv", PrimType PointerType)
   , (biName "PassConv_pass_conv", PrimType PointerType)
   ]
 

@@ -74,6 +74,7 @@ pyonBuiltinDataConstructors =
   , "traversableDict"
   , "additiveDict"
   , "vectorDict"
+  , "OpaqueTraversableDict_list"
   ]
 
 pyonBuiltinPassConvConstructors =
@@ -94,6 +95,7 @@ pyonBuiltinPassConvAddresses =
   , "passConv_NoneType_addr"
   , "passConv_Any_addr"
   , "passConv_owned_addr"
+  , "OpaqueTraversableDict_list_addr"
   ]
 
 pyonBuiltinPassConvPointers =
@@ -103,6 +105,7 @@ pyonBuiltinPassConvPointers =
   , "passConv_NoneType_ptr"
   , "passConv_Any_ptr"
   , "passConv_owned_ptr"
+  , "OpaqueTraversableDict_list_ptr"
   ]
 
 pyonBuiltinFunctions =

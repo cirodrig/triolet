@@ -186,7 +186,7 @@ unchangedType ty x = add_don't_cares ty (End x)
 
 -------------------------------------------------------------------------------
 
-newtype Spcl a = Spcl (ReaderT SpclEnv IO a) deriving(Monad)
+newtype Spcl a = Spcl (ReaderT SpclEnv IO a) deriving(Monad, Functor)
 
 runSpcl :: IdentSupply Var -> Spcl a -> IO a
 runSpcl supply (Spcl m) =
@@ -273,6 +273,10 @@ specializeType ty =
     do_tuple = Gluon.traverseTuple specializeType do_tuple
     do_sum = Gluon.traverseSum specializeType do_sum
 
+-- | Use the given type to select one entry from a specialization table.    
+--   The table determines what decision has to be made.  If a specialization 
+--   decision is to be made, then decide whether the given type is a 'Stream'
+--   type.
 pickSpecialization :: SpclTable a -> RType -> Spcl (Bool, SpclTable a)
 pickSpecialization tbl ty =
   case tbl
@@ -367,6 +371,7 @@ assumeBinder (Binder v ty ()) m = assumeVarSpclTable v (unchangedType ty v) m
 assumeBinders :: [Binder Rec ()] -> Spcl a -> Spcl a
 assumeBinders bs m = foldr assumeBinder m bs
 
+-- | Specialize an expression.
 specialize :: RExp -> Spcl RExp
 specialize expression = do
   e' <- specializeMaybe expression
@@ -377,12 +382,12 @@ specialize expression = do
 specializeMaybe :: RExp -> Spcl (Maybe RExp)
 specializeMaybe expression =
   case expression
-  of VarE {} -> specializeTyAppExp expression
-     ConE {} -> specializeTyAppExp expression
+  of VarE {} -> specializeTyAppExpNonCall expression
+     ConE {} -> specializeTyAppExpNonCall expression
      LitE {expType = ty} -> do
        ty' <- specializeType ty
        return $ Just $ expression {expType = ty'}
-     TyAppE {} -> specializeTyAppExp expression
+     TyAppE {} -> specializeTyAppExpNonCall expression
      CallE {expInfo = inf, expOper = op, expArgs = args} -> 
        specializeCall inf op args
      FunE {expInfo = inf, expFun = f} -> do
@@ -417,32 +422,23 @@ specializeMaybe expression =
            case alts
            of [alt] -> specializeDictionaryAlternative alt
               
--- | Return True if the expression constructs a new Traversable dictionary
--- for type 'Stream'.
+-- | If the expression constructs a new Traversable dictionary, return the
+-- dictionary type parameter.
 -- 
 -- Match the expression against the pattern
--- @TyAppE {expOper = "traversableDict", expArgs = ["Stream"]}@
-isStreamTraversableDictCall expression =
+-- @TyAppE {expOper = "traversableDict", expArgs = [t]}@
+matchTraversableDictCall :: RExp -> Spcl (Maybe RType)
+matchTraversableDictCall expression =
   case expression
   of TyAppE {expOper = op, expTyArg = arg_ty} 
-       | is_the_constructor op -> do
-           arg_ty' <- specializeType arg_ty
-           return $ is_stream_type arg_ty'
-     _ -> return False
+       | is_the_constructor op -> fmap Just $ specializeType arg_ty
+     _ -> return Nothing
   where
     is_the_constructor op =
       case op
       of ConE {expCon = c} ->
            c `isPyonBuiltin` the_traversableDict
          _ -> False
-         
-    -- True if the argument is the type 'Stream' with no parameters.
-    is_stream_type ty =
-      case ty
-      of Gluon.ConE {Gluon.expCon = c} ->
-           c `isPyonBuiltin` the_Stream
-         _ -> False
-
 
 specializeDictionaryAlternative (Alt { altTyArgs = [_]
                                      , altParams = [Binder traverse_var _ (),
@@ -468,30 +464,73 @@ substituteTraversableMethods traverse_var build_var expr = doexpr expr
     doalt = mapAlt doexpr id
     dofun f = f {funBody = doexpr $ funBody f}
 
-specializeCall inf op args = specializeMaybe op >>= specialize_args
+specializeCall inf op args = 
+  case op
+  of VarE {} -> specializeTyAppExp op >>= specialize_args
+     ConE {} -> specializeTyAppExp op >>= specialize_args
+     TyAppE {} -> specializeTyAppExp op >>= specialize_args
+     _ -> specializeMaybe op >>= specialize_args . spclTyAppFromMaybe
   where
-    specialize_args Nothing = return Nothing
-    specialize_args (Just op') = do
+    specialize_args ErasedTyApp = return Nothing
+    specialize_args (SpclDictExp e) = return (Just e)
+    specialize_args (SpclTyApp op') = do
       -- Specialize arguments and rebuild the call expression
       args' <- mapM specializeMaybe args
       return $ Just $ CallE { expInfo = inf
                             , expOper = op'
                             , expArgs = catMaybes args'}
 
+-- | The result of specializing a type application
+data SpclTyApp =
+    ErasedTyApp                 -- ^ This term was erased
+  | SpclTyApp !RExp             -- ^ The specialized expression
+  | SpclDictExp !RExp           -- ^ A dictionary constructor expression 
+                                --   that was replaced by a global value.
+                                --   The original constructor arguments
+                                --   should be erased.
+
+-- | Translate the result of a specialization to the result of a type
+--   application specialization.  The result is an erased or a specialized
+--   term; it can't be a specialized dictionary constructor.
+spclTyAppFromMaybe :: Maybe RExp -> SpclTyApp
+spclTyAppFromMaybe Nothing  = ErasedTyApp
+spclTyAppFromMaybe (Just e) = SpclTyApp e
+
+-- | Specialize an expression consisting of a series of type applications,
+--   in a non-function-call context.
+specializeTyAppExpNonCall expression =
+  specializeTyAppExp expression >>= make_expression
+  where
+    make_expression ErasedTyApp     = return Nothing
+    make_expression (SpclTyApp e)   = return (Just e)
+    make_expression (SpclDictExp e) =
+      internalError "specialize: Dictionary constructor lacks parameters"
+
 -- | Specialize an expression consisting of a series of type applications.
 --
 -- If this expression is a @TraversableDict Stream@, then remove it.
 specializeTyAppExp expression = do
-  is_stream_traversable <- isStreamTraversableDictCall expression 
-  if is_stream_traversable then return Nothing else do
-    -- Specialize the operator based on type arguments
-    operator <- specializeOperator expression
+  traversable_dict_param <- matchTraversableDictCall expression
+  case traversable_dict_param of
+    Just (Gluon.ConE {Gluon.expCon = c})
+      | c `isPyonBuiltin` the_Stream ->
+          -- Remove Stream dictionaries
+          return ErasedTyApp
+      | c `isPyonBuiltin` the_list ->
+          -- Replace with a list dictionary
+          let dict_expr = ConE defaultExpInfo $
+                          pyonBuiltin the_OpaqueTraversableDict_list
+          in return $ SpclDictExp dict_expr
+      | otherwise -> internalError "Cannot specialize Traversable dictionary"
+    Nothing -> do
+      -- Specialize the operator based on type arguments
+      operator <- specializeOperator expression
   
-    -- Revisit the expression and specialize or discard the arguments
-    case operator of
-      Nothing -> return Nothing
-      Just (op, arg_poss) ->
-        liftM Just $ specialize_args op arg_poss expression
+      -- Revisit the expression and specialize or discard the arguments
+      case operator of
+        Nothing -> return ErasedTyApp
+        Just (op, arg_poss) ->
+          fmap SpclTyApp $ specialize_args op arg_poss expression
   where
     specialize_args operator (arg_pos:arg_poss') e =
       case e

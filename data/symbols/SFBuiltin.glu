@@ -121,6 +121,10 @@ data TraversableDict : (Pure -> Pure) -> Pure where
                  -> ((a : Pure) -> PassConv a -> (Stream a -> t a))
                  -> TraversableDict t;
 
+-- Opaque traversable dictionary objects.  We need these for effect inference
+-- because effect inference can't handle the general case.
+constant OpaqueTraversableDict_list : TraversableDict list;
+
 data AdditiveDict : Pure -> Pure where
   additiveDict : (a : Pure) -> (NoneType -> a) -> binary a -> binary a
               -> AdditiveDict a;

@@ -339,9 +339,6 @@ inferConE inf c = do
            ERepType Referenced t -> do rgn <- lookupConRegion c
                                        return $ ReadRT rgn t
   
-  -- DEBUG
-  liftIO $ print (text "inferConE" <+> (text $ showLabel $ Gluon.conName c) <+> (Core.pprType (Core.conCoreType c) $$ pprEReturnType rt))
-  
   return (EExp inf rt exp1, emptyEffect)
 
 inferLitE ty inf lit = do
@@ -645,16 +642,17 @@ inferFun is_lambda (SF.TypedSFFun (SF.TypeAnn _ f)) = do
   let params = ty_params ++ val_params
 
   (fun_type, body, body_eff, return_type) <- withBinders params $ do
+    -- Use the declared return type as the function's return type.  This is
+    -- so that we have the correct representation in the type.  The type
+    -- inferred from the function body may have a different representation.
     return_type <- toReturnType (fromTRType $ SF.funReturnType f)
 
-    (fun_type, body, body_eff) <-
-      -- Eliminate constraints on flexible variables if this function is going 
-      -- to be generalized.  Otherwise, don't because it creates more
-      -- variables.
-      if is_lambda
+    -- Eliminate constraints on flexible variables if this function is going 
+    -- to be generalized.  Otherwise, don't because it creates more
+    -- variables.
+    if is_lambda
       then infer_function_body return_type params
       else prepare_for_generalization (infer_function_body return_type params)
-    return (fun_type, body, body_eff, return_type)
   
   let new_fun = EFun { funInfo = SF.funInfo f
                      , funEffectParams = []
@@ -675,8 +673,8 @@ inferFun is_lambda (SF.TypedSFFun (SF.TypeAnn _ f)) = do
 
       -- Create and return the function's type.  It will be used for
       -- generalization.
-      let fun_type = funMonoEType params body_eff (expReturn body')
-      return (fun_type, body', body_eff)
+      let fun_type = funMonoEType params body_eff return_type
+      return (fun_type, body', body_eff, return_type)
   
     -- Make all flexible variables in the function body independent of one
     -- another.  Clear all flexible variables that don't escape in the return 
@@ -684,8 +682,9 @@ inferFun is_lambda (SF.TypedSFFun (SF.TypeAnn _ f)) = do
     prepare_for_generalization infer_body = 
       transformConstraint mfvi infer_body
       where
-        mfvi return_value@(fun_type, body, body_eff) cst vs = do
+        mfvi return_value@(fun_type, body, body_eff, _) cst vs = do
           let get_free_vars = do
+                -- Make sure to get the actu
                 fvs <- freeEffectVars fun_type
                 return (freePositiveVars fvs, freeNegativeVars fvs)
           cst' <-
@@ -845,8 +844,6 @@ instantiateEffectAssignment info poly_op assignment =
         -- Do not rename a 'read' region.  The read region must be equal to   
         -- the region where this value was assigned.
         ReadRT r _ -> do
-          -- DEBUG print region
-          liftIO $ print $ text "Instantiating return region" <+> pprEffectVar r <+> text (show $ isFlexible' r)
           return $ ReadRT r ret_type
 
         -- A 'write' region creates fresh data, so rename it.
@@ -1139,7 +1136,6 @@ coerceParameter variance p_passtype r_passtype = do
          ReadRT rv r_type -> do
            -- Rename the given parameter to match the expected parameter
            let renaming = \_ -> Renaming (renameE pv rv)
-           liftIO $ print (text "Renaming" <+> pprEffectVar rv <+> pprEffectVar pv)
            return (astype, renaming, [rv], [], [])
          WriteRT rv r_type -> do
            liftIO $ unifyRegionVars pv rv
@@ -1199,8 +1195,6 @@ coerceReturn variance expect_type given_type = do
 compareEffects Covariant e_eff g_eff = assertSubeffect g_eff e_eff
 compareEffects Invariant e_eff g_eff = assertEqualEffect g_eff e_eff
 compareEffects Contravariant e_eff g_eff = assertSubeffect e_eff g_eff
-
-requireEqual = compareTypes UnDir Invariant
 
 -------------------------------------------------------------------------------
 -- Top-level effect inference routines
