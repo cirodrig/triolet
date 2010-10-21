@@ -75,6 +75,9 @@ mkConType m = unsafePerformIO $ do
   case result of Just x -> return x
                  Nothing -> internalError "mkConType"
 
+passConvOf :: RCType -> RCType
+passConvOf a = appCT (conCT $ pyonBuiltin the_PassConv) [a]
+
 mkValBinaryOpType :: RExp -> CBind CReturnT Rec
 mkValBinaryOpType ty =
   let constructor_type =
@@ -127,24 +130,6 @@ mkCompareOpType ty =
 
 compareIntOpType = mkCompareOpType $ mkInternalConE $ pyonBuiltin the_int
 compareFloatOpType = mkCompareOpType $ mkInternalConE $ pyonBuiltin the_float
-
-tuple2ConType :: CBind CReturnT Rec
-tuple2ConType = mkConType $ do
-  a <- newAnonymousVariable TypeLevel
-  b <- newAnonymousVariable TypeLevel
-  addr1 <- newAnonymousVariable ObjectLevel
-  addr2 <- newAnonymousVariable ObjectLevel
-  
-  let tuple_type =
-        appExpCT (mkInternalConE $ getPyonTupleType' 2) [varCT a, varCT b]
-      constructor_type =
-        funCT $
-        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
-        pureArrCT (ValPT (Just b) ::: expCT pureKindE) $
-        pureArrCT (ReadPT addr1 ::: varCT a) $
-        pureArrCT (ReadPT addr2 ::: varCT b) $
-        retCT (WriteRT ::: tuple_type)
-  return (OwnRT ::: constructor_type)
 
 loadType t = mkConType $ do
   a <- newAnonymousVariable ObjectLevel
@@ -201,7 +186,7 @@ copyType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   addr1 <- newAnonymousVariable ObjectLevel
   addr2 <- newAnonymousVariable ObjectLevel
-  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a] 
+  let pc_type = passConvOf (varCT a)
       constructor_type =
         funCT $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
@@ -214,7 +199,7 @@ mkBuildType t = do
   e <- newAnonymousVariable TypeLevel
   a <- newAnonymousVariable TypeLevel
   addr <- newAnonymousVariable ObjectLevel
-  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+  let pc_type = passConvOf (varCT a)
       stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
                     [varCT e, varCT a]
       list_type = appCT t [varCT a]
@@ -234,8 +219,8 @@ streamBindType = mkConType $ do
   addr <- newAnonymousVariable ObjectLevel
   addr_pc_a <- newAnonymousVariable ObjectLevel
   addr_pc_b <- newAnonymousVariable ObjectLevel
-  let pc_a_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
-      pc_b_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT b]
+  let pc_a_type = passConvOf (varCT a)
+      pc_b_type = passConvOf (varCT b)
       producer_type = appCT (conCT $ pyonBuiltin the_LazyStream)
                     [varCT e, varCT a]
       result_type = appCT (conCT $ pyonBuiltin the_LazyStream)
@@ -264,7 +249,7 @@ mkTraverseType t = do
   a <- newAnonymousVariable TypeLevel
   addr <- newAnonymousVariable ObjectLevel
   addr_pc <- newAnonymousVariable ObjectLevel
-  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+  let pc_type = passConvOf (varCT a)
       list_type = appCT t [varCT a]
       stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
                     [readEffectType (mkInternalVarE addr) list_type, varCT a]
@@ -280,7 +265,7 @@ streamIdType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   e <- newAnonymousVariable TypeLevel
   addr_pc <- newAnonymousVariable ObjectLevel
-  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+  let pc_type = passConvOf (varCT a)
       stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
                     [varCT e, varCT a]
       constructor_type =
@@ -297,7 +282,7 @@ streamReturnType = mkConType $ do
   e <- newAnonymousVariable TypeLevel
   a <- newAnonymousVariable TypeLevel
   addr_pc <- newAnonymousVariable ObjectLevel
-  let pc_type = appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+  let pc_type = passConvOf (varCT a)
       producer_type =
         funCT $
         arrCT (ValPT Nothing ::: conCT (pyonBuiltin the_NoneType)) (varCT e) $
@@ -315,8 +300,7 @@ streamReturnType = mkConType $ do
 
 passConvOwnedType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
-  let result_type =
-        appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
+  let result_type = passConvOf (varCT a)
       constructor_type =
         funCT $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
@@ -330,10 +314,8 @@ passConvIterType = mkConType $ do
       stream_type =
         appCT (conCT $ pyonBuiltin the_LazyStream)
         [emptyEffectType, varCT a]
-      element_passconv_type =
-        appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
-      result_type =
-        appCT (conCT $ pyonBuiltin the_PassConv) [stream_type]
+      element_passconv_type = passConvOf (varCT a)
+      result_type = passConvOf stream_type
       constructor_type =
         funCT $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
@@ -346,10 +328,8 @@ passConvListType = mkConType $ do
   addr1 <- newAnonymousVariable ObjectLevel
   let list_type =
         appCT (conCT $ pyonBuiltin the_list) [varCT a]
-      element_passconv_type =
-        appCT (conCT $ pyonBuiltin the_PassConv) [varCT a]
-      result_type =
-        appCT (conCT $ pyonBuiltin the_PassConv) [list_type]
+      element_passconv_type = passConvOf (varCT a)
+      result_type = passConvOf list_type
       constructor_type =
         funCT $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
@@ -357,11 +337,47 @@ passConvListType = mkConType $ do
         retCT (WriteRT ::: result_type)
   return (OwnRT ::: constructor_type)
 
+tuplePassConvType 2 = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  pc_addr_a <- newAnonymousVariable ObjectLevel
+  b <- newAnonymousVariable TypeLevel
+  pc_addr_b <- newAnonymousVariable ObjectLevel
+  let tuple_con = getPyonTupleType' 2
+      tuple_type = appCT (conCT tuple_con) [varCT a, varCT b]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ValPT (Just b) ::: expCT pureKindE) $
+        pureArrCT (ReadPT pc_addr_a ::: passConvOf (varCT a)) $
+        pureArrCT (ReadPT pc_addr_b ::: passConvOf (varCT b)) $
+        retCT (WriteRT ::: passConvOf tuple_type)
+  return (OwnRT ::: constructor_type)
+
+tupleConType 2 = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  pc_addr_a <- newAnonymousVariable ObjectLevel
+  addra <- newAnonymousVariable ObjectLevel
+  b <- newAnonymousVariable TypeLevel
+  pc_addr_b <- newAnonymousVariable ObjectLevel
+  addrb <- newAnonymousVariable ObjectLevel
+  let tuple_con = getPyonTupleType' 2
+      tuple_type = appCT (conCT tuple_con) [varCT a, varCT b]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ValPT (Just b) ::: expCT pureKindE) $
+        pureArrCT (ReadPT pc_addr_a ::: passConvOf (varCT a)) $
+        pureArrCT (ReadPT pc_addr_b ::: passConvOf (varCT b)) $
+        pureArrCT (ReadPT a ::: varCT a) $
+        pureArrCT (ReadPT b ::: varCT b) $
+        retCT (WriteRT ::: tuple_type)
+  return (OwnRT ::: constructor_type)
+
 constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
   where
     table = [ (pyonBuiltin the_passConv_int,
-               ReadRT (mkInternalVarE $ pyonBuiltin the_passConv_int_addr) ::: appCT (conCT $ pyonBuiltin the_PassConv) [conCT $ pyonBuiltin the_int])
+               ReadRT (mkInternalVarE $ pyonBuiltin the_passConv_int_addr) ::: passConvOf (conCT $ pyonBuiltin the_int))
             , (pyonBuiltin the_OpaqueTraversableDict_list,
                ReadRT (mkInternalVarE $ pyonBuiltin the_OpaqueTraversableDict_list_addr) ::: appCT (conCT $ pyonBuiltin the_TraversableDict) [conCT $ pyonBuiltin the_list])
             , (pyonBuiltin the_passConv_owned,
@@ -370,6 +386,8 @@ constructorTable =
                passConvIterType)
             , (pyonBuiltin the_passConv_list,
                passConvListType)
+            , (getPyonTuplePassConv' 2,
+               tuplePassConvType 2)
             , (pyonBuiltin SystemF.Builtins.the_fun_store_int,
                storeIntType)
             , (pyonBuiltin SystemF.Builtins.the_fun_load_int,
@@ -419,7 +437,7 @@ constructorTable =
             , (pyonBuiltin the_traversableDict,
                traversableDictType)
             , (getPyonTupleCon' 2,
-               tuple2ConType)
+               tupleConType 2)
             , (pyonBuiltin SystemF.Builtins.the_fun_copy,
                copyType)
             , (pyonBuiltin SystemF.Builtins.the_oper_CAT_MAP,

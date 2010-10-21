@@ -299,6 +299,7 @@ dataTypeTable =
       , (SF.pyonBuiltin SF.the_Any, Value, [], [])
       , (SF.pyonBuiltin SF.the_list, Referenced, [], [Invariant])
       , (SF.pyonBuiltin SF.the_LazyStream, Boxed, [Covariant], [Covariant])
+      , (SF.getPyonTupleType' 2, Referenced, [], [Invariant, Invariant])
       ]
 
 -- | Get the number of effect arguments a type constructor takes.
