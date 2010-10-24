@@ -764,7 +764,7 @@ makeAlternativeBranch return_types scrutinee tag alts = do
   
   -- Create the case statement
   getContinuation False result_vars $ \cont -> do
-    branches <- mapM (make_branch cont) alts
+    branches <- mapM (make_branch result_vars cont) alts
     return $ LL.SwitchE tag branches
   
   -- Return the return values
@@ -772,10 +772,10 @@ makeAlternativeBranch return_types scrutinee tag alts = do
   where
     ll_return_types = map lowered return_types
     
-    make_branch :: LL.Stm -> (LL.Lit, LL.Val -> BuildBlock LL.Atom) -> BuildBlock (LL.Lit, LL.Stm)
-    make_branch cont (tag, make_alternative) = do
+    make_branch :: [LL.Var] -> LL.Stm -> (LL.Lit, LL.Val -> BuildBlock LL.Atom) -> BuildBlock (LL.Lit, LL.Stm)
+    make_branch result_vars cont (tag, make_alternative) = do
       alternative <- lift $ execBuild ll_return_types $ do
-        emitAtom0 =<< make_alternative scrutinee
+        bindAtom result_vars =<< make_alternative scrutinee
         return cont
       return (tag, alternative)
 
