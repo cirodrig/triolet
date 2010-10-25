@@ -382,16 +382,9 @@ inferApp :: Gluon.WRExp
          -> (EExp, Effect)
          -> [(EExp, Effect)]
          -> EI (EExp, Effect)
-inferApp result_type info (op, op_effect) (unzip -> (args, arg_effects)) = 
- traceShow (text "inferApp" <+> vcat (map pprEExp (op : args))) $ do
-  let variances = expVariance op
+inferApp result_type info op args =
   -- Compute side effects of function application and coerce arguments
-  (args', call_effect, return_type) <- applyArguments (expReturn op) args
-
-  -- Add effects of operands
-  let effect = effectUnions $ call_effect : op_effect : arg_effects
-  let exp = EExp info return_type $ CallE op args'
-  return (exp, effect)
+  applyArguments info op args
 
 -- | Get the variance of an expression's parameters.  Unknowns are treated
 -- as 'Invariant'.  Functions are covariant in all parameters.
@@ -408,41 +401,66 @@ expVariance exp =
 -- | Compute the effect of applying an operator to its arguments.
 -- Argument coercions are inserted, side effects are computed, and the 
 -- return type is computed.
-applyArguments :: EReturnType -> [EExp]
-               -> EI ([EExp], Effect, EReturnType)
-applyArguments oper_type args = traceShow (text "applyArguments" <+> (pprEReturnType oper_type $$ vcat (map pprEExp args))) $ do
-  ((), (eff, oper_type', crs), args') <- go oper_type init_acc args
+applyArguments :: SynInfo
+               -> (EExp, Effect)
+               -> [(EExp, Effect)]
+               -> EI (EExp, Effect)
+applyArguments info (op, op_eff) args =
+  traceShow (text "applyArguments" <+> (pprEReturnType (expReturn op) $$ vcat (map (pprEExp . fst) args))) $ do
+    ((), (eff, oper_type', crs), (op', args')) <-
+      go (expReturn op) op [] op_eff args
   
-  -- Remove from the effect regions that are local to the function call
-  let eff' = foldr deleteFromEffect eff crs
-  return (args', eff', oper_type')
+    let exp  = make_call_expr op' args' oper_type'
+
+    -- Remove from the effect regions that are local to the function call
+    let eff' = foldr deleteFromEffect eff crs
+
+    return (exp, eff')
   where
-    go (OwnRT fun_type) acc (arg : args) = do
-      (call_regions, (), (eff, op_type, crs), args') <-
-        applyType fun_type arg $
-        \arg' eff return_type scoped_regions local_regions -> do
-          retval@((), (eff, oper_type, _), args') <-
-            go return_type (add_acc acc arg' eff) args
-          
+    go :: EReturnType           -- ^ Operator's type
+       -> EExp                  -- ^ Operator expression
+       -> [EExp]                -- ^ Reversed arguments that have been applied
+       -> Effect                -- ^ Side effect of evaluating the operator,
+                                --   arguments that were applied so far, and
+                                --   function call so far
+       -> [(EExp, Effect)]      -- ^ Argument expressions and effects
+       -> EI ((), (Effect, EReturnType, [RVar]), (EExp, [EExp]))
+          -- ^ Returns a side effect, return type, set of callsite-local
+          --   regions, and coerced operator and operand expressions
+    
+    -- When all arguments have been processed, create a call expression
+    go op_type op rargs call_eff [] =
+      return ((), (call_eff, op_type, []), (op, reverse rargs))
+
+    -- If applying a function to arguments, apply the next argument 
+    go (OwnRT fun_type) op rargs call_eff ((next_arg, next_eff) : args) = do
+      (call_regions, (), (eff, op_type, crs), code) <-
+        applyType fun_type next_arg $
+        \arg' eff return_type _ _ -> do
+          retval@((), (db_eff, _, _), _) <-
+            go return_type op (arg':rargs)
+            (next_eff `effectUnion` call_eff `effectUnion` eff)
+            args
+
           -- DEBUG: print effect
           liftIO $ putStrLn $ "applyArguments " ++ show (pprEffect eff)
           return retval
-      return ((), (eff, op_type, call_regions ++ crs), args')
+      return ((), (eff, op_type, call_regions ++ crs), code)
     
-    -- If applying an argument, the function type must be owned
-    go _ _ (_:_) = internalError "applyArguments: Expecting owned type"
-    
-    go oper_type (args, eff) [] = do
-      -- DEBUG: print effect
-      liftIO $ putStrLn $ "applyArguments " ++ show (pprEffect eff)
-      return ((), (eff, oper_type, []), reverse args)
+    -- If operator is not in the right representation, coerce it first
+    go op_type op rargs call_eff args = do
+      -- Construct a function call expression
+      let call_expr = make_call_expr op (reverse rargs) op_type
+          
+      -- Coerce its result
+      let expected_type = OwnRT (returnTypeType op_type)
+      (_, _, fun_co, fun_eff) <- coerceReturn expected_type op_type
+      let co_call_expr = applyCoercion fun_co call_expr
+      
+      -- Continue processing remaining arguments
+      go expected_type co_call_expr [] call_eff args
 
-    -- Accumulate the result of applying one argument.
-    add_acc (args, eff) new_arg new_eff =
-      (new_arg : args, eff `effectUnion` new_eff)
-
-    -- Initially, there is no side effect.
-    init_acc = ([], emptyEffect)
+    make_call_expr op args return_type = EExp info return_type (CallE op args)
 
 -- | Compute the result of a function application.
 --

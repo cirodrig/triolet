@@ -140,10 +140,12 @@ pyonBuiltinFunctions =
   , "fun_store_float"
   , "fun_store_bool"
   , "fun_store_NoneType"
+  , "fun_store_boxed"
   , "fun_load_int"
   , "fun_load_float"
   , "fun_load_bool"
   , "fun_load_NoneType"
+  , "fun_load_boxed"
   ]
 
 pyonBuiltinConstructors =

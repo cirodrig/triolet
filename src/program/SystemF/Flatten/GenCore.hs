@@ -629,47 +629,78 @@ toCoreCoExp rb expression k =
 -- | Generate code to load the expression's return value.  The return value
 -- must be a 'ReadRT' value.
 genLoad :: EType -> RetBinding -> Core.RCExp -> GenCore Core.RCExp
-genLoad ty expr_rb expr =
+genLoad ty expr_rb expr = do
+  type_args <-
+    if need_type_arg
+    then do core_ty <- etypeToCoreType ty
+            return [Core.ValCE type_inf (Core.TypeV core_ty)]
+    else return []
+    
   let oper = Core.ValCE { Core.cexpInfo = inf
                         , Core.cexpVal = Core.OwnedConV load_function
                         }
-      load_expr = Core.AppCE { Core.cexpInfo = inf
+  let load_expr = Core.AppCE { Core.cexpInfo = inf
                              , Core.cexpOper = oper
-                             , Core.cexpArgs = [expr]
+                             , Core.cexpArgs = type_args ++ [expr]
                              , Core.cexpReturnArg = retBindingArgument expr_rb
                              }
-  in return load_expr
+  return load_expr
   where
+    type_inf = Gluon.mkSynInfo pos TypeLevel
     inf = Gluon.mkSynInfo pos ObjectLevel
     pos = getSourcePos expr
     
-    load_function =
+    (load_function, need_type_arg) =
       case ty
       of ConT c
-           | c `SF.isPyonBuiltin` SF.the_int -> SF.pyonBuiltin SF.the_fun_load_int
-           | c `SF.isPyonBuiltin` SF.the_float -> SF.pyonBuiltin SF.the_fun_load_float
-           | c `SF.isPyonBuiltin` SF.the_bool -> SF.pyonBuiltin SF.the_fun_load_bool
-           | c `SF.isPyonBuiltin` SF.the_NoneType -> SF.pyonBuiltin SF.the_fun_load_NoneType
+           | c `SF.isPyonBuiltin` SF.the_int ->
+             (SF.pyonBuiltin SF.the_fun_load_int, False)
+           | c `SF.isPyonBuiltin` SF.the_float ->
+             (SF.pyonBuiltin SF.the_fun_load_float, False)
+           | c `SF.isPyonBuiltin` SF.the_bool ->
+             (SF.pyonBuiltin SF.the_fun_load_bool, False)
+           | c `SF.isPyonBuiltin` SF.the_NoneType ->
+             (SF.pyonBuiltin SF.the_fun_load_NoneType, False)
+         FunT {} ->
+           -- Load an owned type
+           (SF.pyonBuiltin SF.the_fun_load_boxed, True)
          _ -> internalError "genLoad: Cannot load values of this type"
 
 genStore :: RetBinding -> EType -> Core.RCExp -> GenCore Core.RCExp 
-genStore rb ty expr =
+genStore rb ty expr = do
+  type_args <-
+    if need_type_arg
+    then do core_ty <- etypeToCoreType ty
+            return [Core.ValCE type_inf (Core.TypeV core_ty)]
+    else return []
+
   let oper = Core.ValCE { Core.cexpInfo = inf
                         , Core.cexpVal = Core.OwnedConV store_function
                         }
-      store_expr = Core.AppCE inf oper [expr] (retBindingArgument rb)
-  in return store_expr
+  let store_expr = Core.AppCE { Core.cexpInfo = inf 
+                              , Core.cexpOper = oper 
+                              , Core.cexpArgs = type_args ++ [expr] 
+                              , Core.cexpReturnArg = retBindingArgument rb
+                              }
+  return store_expr
   where
+    type_inf = Gluon.mkSynInfo pos TypeLevel
     inf = Gluon.mkSynInfo pos ObjectLevel
     pos = getSourcePos expr
     
-    store_function =
+    (store_function, need_type_arg) =
       case ty
       of ConT c
-           | c `SF.isPyonBuiltin` SF.the_int -> SF.pyonBuiltin SF.the_fun_store_int
-           | c `SF.isPyonBuiltin` SF.the_float -> SF.pyonBuiltin SF.the_fun_store_float
-           | c `SF.isPyonBuiltin` SF.the_bool -> SF.pyonBuiltin SF.the_fun_store_bool
-           | c `SF.isPyonBuiltin` SF.the_NoneType -> SF.pyonBuiltin SF.the_fun_store_NoneType
+           | c `SF.isPyonBuiltin` SF.the_int ->
+             (SF.pyonBuiltin SF.the_fun_store_int, False)
+           | c `SF.isPyonBuiltin` SF.the_float ->
+             (SF.pyonBuiltin SF.the_fun_store_float, False)
+           | c `SF.isPyonBuiltin` SF.the_bool ->
+             (SF.pyonBuiltin SF.the_fun_store_bool, False)
+           | c `SF.isPyonBuiltin` SF.the_NoneType ->
+             (SF.pyonBuiltin SF.the_fun_store_NoneType, False)
+         FunT {} ->
+           (SF.pyonBuiltin SF.the_fun_store_boxed, True)
          _ -> internalError "genStore: Cannot store values of this type"
 
 -- | Copy data from one place to another.  The source must be a read reference

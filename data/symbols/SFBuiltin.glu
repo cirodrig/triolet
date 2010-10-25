@@ -319,8 +319,10 @@ constant fun_store_int : int -> int;
 constant fun_store_float : float -> float;
 constant fun_store_bool : bool -> bool;
 constant fun_store_NoneType : NoneType -> NoneType;
+constant fun_store_boxed : (a : Pure) -> a -> a;
 
 constant fun_load_int : int -> int;
 constant fun_load_float : float -> float;
 constant fun_load_bool : bool -> bool;
 constant fun_load_NoneType : NoneType -> NoneType;
+constant fun_load_boxed : (a : Pure) -> a -> a;
