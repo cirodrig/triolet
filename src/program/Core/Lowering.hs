@@ -81,7 +81,9 @@ globalVarAssignment =
           ]
 
 isSingletonDataType c
-  | c `elem` [pyonBuiltin the_AdditiveDict, pyonBuiltin the_TraversableDict] = True
+  | c `elem` [pyonBuiltin the_AdditiveDict,
+              pyonBuiltin the_TraversableDict,
+              getPyonTupleType' 2] = True
   | c `elem` [] = False
   | otherwise =
       internalError $ 

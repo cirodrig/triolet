@@ -158,6 +158,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_Stream) |])
   , (PyonName module_structures "additiveDict",
      Right [| pyonBuiltin (SystemF.the_additiveDict) |])
+  , (PyonName module_structures "passConv_pyonTuple2",
+     Right [| SystemF.getPyonTuplePassConv' 2 |])
     
     -- Functions that are replaced by primitive operations
   , (PyonName builtinModuleName "eq_int",
