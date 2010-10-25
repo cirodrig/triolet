@@ -412,6 +412,22 @@ constructorTable =
                compareFloatOpType)
             , (pyonBuiltin (neMember . the_EqDict_float),
                compareFloatOpType)
+            , (pyonBuiltin (ltMember . the_OrdDict_int),
+               compareIntOpType)
+            , (pyonBuiltin (gtMember . the_OrdDict_int),
+               compareIntOpType)
+            , (pyonBuiltin (leMember . the_OrdDict_int),
+               compareIntOpType)
+            , (pyonBuiltin (geMember . the_OrdDict_int),
+               compareIntOpType)
+            , (pyonBuiltin (ltMember . the_OrdDict_float),
+               compareFloatOpType)
+            , (pyonBuiltin (gtMember . the_OrdDict_float),
+               compareFloatOpType)
+            , (pyonBuiltin (leMember . the_OrdDict_float),
+               compareFloatOpType)
+            , (pyonBuiltin (geMember . the_OrdDict_float),
+               compareFloatOpType)
             , (pyonBuiltin (zeroMember . the_AdditiveDict_int),
                zeroIntOpType)
             , (pyonBuiltin (addMember . the_AdditiveDict_int),
