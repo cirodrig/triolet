@@ -560,7 +560,7 @@ patternAsBinder no_effects (SF.VarP v (SF.TypedSFType (SF.TypeAnn _ ty))) = do
   (param_type, effs) <- liftRegionM $ do
     ty' <- evalHead' ty
     (etype, effs) <- if no_effects
-                     then do etype <- toPureEffectType ty'
+                     then do etype <- toRestrictedEffectType ty'
                              return (etype, [])
                      else toEffectType ty'
     -- Value parameters aren't used dependently                          
