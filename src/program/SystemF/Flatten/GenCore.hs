@@ -44,9 +44,16 @@ mkReadEffect ty addr =
 
 mkEmptyEffect = Core.conCT (Gluon.builtin Gluon.the_EmpE)
 
+isCoreEmptyEffect (Core.ExpCT (Gluon.ConE {Gluon.expCon = c})) =
+  c `Gluon.isBuiltin` Gluon.the_EmpE
+isCoreEmptyEffect _ = False
+
 mkPairEffect :: Core.RCType -> Core.RCType -> Core.RCType
-mkPairEffect x y =
-  Core.appCT (Core.conCT $ Gluon.builtin Gluon.the_SconjE) [x, y]
+mkPairEffect x y 
+  | isCoreEmptyEffect x = y
+  | isCoreEmptyEffect y = x
+  | otherwise =
+    Core.appCT (Core.conCT $ Gluon.builtin Gluon.the_SconjE) [x, y]
 
 -- | Each effect variable that is bound as a parameter somewhere 
 -- is mapped to a corresponding Core variable.
@@ -497,8 +504,8 @@ toCoreExp rb expression = debug $
     FunE f -> do
       f' <- toCoreFun f
       return $ Core.LamCE inf f'
-    DoE ty pc body ->
-      convertDoE rb inf ty pc body
+    DoE ty pc eff body ->
+      convertDoE rb inf ty pc eff body
     LetE lhs lhs_ty rhs body ->
       convertLetE rb inf lhs lhs_ty rhs body
     LetrecE defs body ->
@@ -753,21 +760,28 @@ convertCall rb inf op effs args =
       effect_type <- effectToCoreEffect effect
       return $ Core.ValCE inf (Core.TypeV effect_type)
 
-convertDoE rb inf ty_arg pass_conv body =
+convertDoE rb inf ty_arg pass_conv body_effect body =
   toFreeCoreCoExp pass_conv $ \pass_conv' -> do
     ty_arg' <- toNonReferenceCoreExp ty_arg
 
     -- Look up the effect type from the returned stream's type
+    {-
     let eff =
           case rb
           of OwnRB (Core.unpackConAppCT -> Just (con, eff : _))
                | con `SF.isPyonBuiltin` SF.the_LazyStream -> eff
-             _ -> internalError "convertDoE: Unexpected return type"
+             _ -> internalError "convertDoE: Unexpected return type"-}
+    eff <- effectToCoreEffect body_effect
     
-    -- Create a lambda function for the body
-    body_exp <- withReturnType (expReturn body) $ \body_rb -> do
+    -- Create a lambda function for the body.  The function returns
+    -- by writing into a new reference.
+    let body_rt = case expReturn body
+                  of ReadRT rgn t -> WriteRT rgn t
+                     x@(WriteRT _ _) -> x
+                     _ -> internalError "convertDoE"
+    body_exp <- withReturnType body_rt $ \body_rb -> do
       body' <- toCoreExp body_rb body
-      return_binder <- lookupReturnType $ expReturn body
+      return_binder <- lookupReturnType body_rt
       
       let fun = Core.CFun { Core.cfunInfo = expInfo body
                           , Core.cfunParams = []

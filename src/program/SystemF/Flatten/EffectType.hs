@@ -610,6 +610,65 @@ instance (Parametric a, Parametric b) => Parametric (a, b) where
   (x, y) `mentionsAnyE` vs = x `mentionsAnyE` vs >||> y `mentionsAnyE` vs
   (x, y) `mentionsT` v = x `mentionsT` v || y `mentionsT` v
 
+mapParametricTriple :: (Parametric a, Parametric b, Parametric c) =>
+                       (forall d. Parametric d => d -> d)
+                    -> (a, b, c) -> (a, b, c)
+mapParametricTriple f (x, y, z) = (f x, f y, f z)
+
+instance (Parametric a, Parametric b, Parametric c) =>
+         Parametric (a, b, c) where
+  freeEffectVars (x, y, z) = do
+    xfv <- freeEffectVars x
+    yfv <- freeEffectVars y
+    zfv <- freeEffectVars z
+    return (xfv `unionFV` yfv `unionFV` zfv)
+  evaluate (x, y, z) = liftM3 (,,) (evaluate x) (evaluate y) (evaluate z)
+  renameT old_v new_v = mapParametricTriple (renameT old_v new_v)
+  renameE old_v new_v = mapParametricTriple (renameE old_v new_v)
+  assignT old_v new_e = mapParametricTriple (assignT old_v new_e)
+  assignE old_v new_e = mapParametricTriple (assignE old_v new_e)
+  (x, y, z) `mentionsE` v = x `mentionsE` v >||>
+                            y `mentionsE` v >||>
+                            z `mentionsE` v
+  (x, y, z) `mentionsAnyE` vs = x `mentionsAnyE` vs >||>
+                                y `mentionsAnyE` vs >||>
+                                z `mentionsAnyE` vs
+  (x, y, z) `mentionsT` v = x `mentionsT` v ||
+                            y `mentionsT` v ||
+                            z `mentionsT` v
+
+instance Parametric a => Parametric [a] where
+  freeEffectVars xs = liftM unionsFV $ mapM freeEffectVars xs
+  evaluate xs = mapM evaluate xs
+  renameT old_v new_v xs = map (renameT old_v new_v) xs
+  renameE old_v new_v xs = map (renameE old_v new_v) xs
+  assignT old_v new_e xs = map (assignT old_v new_e) xs
+  assignE old_v new_e xs = map (assignE old_v new_e) xs
+  xs `mentionsE` v = anyM (`mentionsE` v) xs
+  xs `mentionsAnyE` vs = anyM (`mentionsAnyE` vs) xs
+  xs `mentionsT` v = any (`mentionsT` v) xs
+
+-- | Not a complete instance.  Only variables that are not unified with an 
+--   effect behave like a 'Parametric' instance. 
+instance Parametric EffectVar where
+  freeEffectVars v = do mb <- evalEffectVar v
+                        return (FreeEffectVars (fromEffectSet mb) Set.empty)
+  evaluate v = do mb <- evalEffectVar v
+                  case fromEffect mb of
+                    [v'] -> return v'
+                    _ -> internalError "EffectVar.evaluate: Cannot evaluate"
+  renameT _ _ v = v
+  renameE old_v new_v v
+    | v == old_v = new_v
+    | otherwise  = v
+  assignT _ _ v = v
+  assignE old_v new_e v
+    | v == old_v = internalError "EffectVar.assign: Cannot assign"
+    | otherwise = v
+  v `mentionsE` test_v = fmap (test_v ==) $ evaluate v
+  v `mentionsAnyE` test_vs = fmap (`Set.member` test_vs) $ evaluate v
+  v `mentionsT` _ = False
+
 instance Parametric ERepType where
   freeEffectVars t = freeEffectVars (discardTypeRepr t)
   evaluate (ERepType r t) = fmap (ERepType r) $ evaluate t

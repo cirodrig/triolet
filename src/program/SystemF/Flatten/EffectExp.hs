@@ -142,6 +142,7 @@ data EExp' =
   | DoE
     { expTyArg :: EExp
     , expPassConv :: EExp
+    , expEffect :: Effect       -- ^ Side effect of stream body
     , expBody :: EExp
     }
   | LetE
@@ -409,8 +410,8 @@ forceEExp e = do
          InstE op args -> InstE op `liftM` mapM evalEffect args
          CallE op args -> CallE `liftM` forceEExp op `ap` mapM forceEExp args
          FunE f -> FunE `liftM` forceEFun f
-         DoE ty pc body -> DoE `liftM` forceEExp ty `ap` forceEExp pc `ap`
-                           forceEExp body
+         DoE ty pc eff body -> DoE `liftM` forceEExp ty `ap` forceEExp pc `ap`
+                               evaluate eff `ap` forceEExp body
          LetE lhs ty rhs body -> LetE lhs `liftM` forceEReturnType ty `ap`
                                  forceEExp rhs `ap` forceEExp body
          LetrecE defs body -> LetrecE `liftM` mapM forceEDef defs `ap`
@@ -479,8 +480,9 @@ pprEExp' expression =
      CallE op args ->
        parens $ sep $ map pprEExp (op : args)
      FunE f -> pprEFun f
-     DoE _ _ body ->
-       text "do" <+> braces (pprEExp body)
+     DoE _ _ eff body ->
+       let eff_doc = text "<<" <> pprEffect eff <> text ">>"
+       in text "do" <+> eff_doc <+> braces (pprEExp body)
      LetE lhs ty rhs body ->
        text "let" <+> (hang (Gluon.pprVar lhs <+> text ":" <+> pprEReturnType ty <+> text "=") 4 (pprEExp rhs)) $$
        pprEExp body

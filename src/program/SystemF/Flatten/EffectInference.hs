@@ -1,5 +1,5 @@
 
-{-# LANGUAGE FlexibleInstances, ViewPatterns, Rank2Types #-}
+{-# LANGUAGE FlexibleInstances, ViewPatterns, Rank2Types, ScopedTypeVariables #-}
 module SystemF.Flatten.EffectInference(inferSideEffects)
 where
 
@@ -357,11 +357,13 @@ inferDo inf [return_type] [(repr_exp, repr_eff), (body_exp, body_eff)] = do
   -- The body must return a reference
   return_rv <- newRegionVar False
   let co_type = WriteRT return_rv (returnTypeType $ expReturn body_exp)
-  (body_co, _) <- coerceReturn Covariant co_type (expReturn body_exp)
+  (_, _, body_co, co_eff) <- coerceReturn co_type (expReturn body_exp)
   let body_co_exp = applyCoercion body_co body_exp
+  let body_co_eff = body_eff `effectUnion` varsEffect co_eff
 
   let expr = DoE { expTyArg = return_type
                  , expPassConv = repr_exp
+                 , expEffect = body_co_eff
                  , expBody = body_co_exp
                  }
   let stream_type = AppT (InstT stream_con [body_eff]) [returnTypeType $ expReturn body_exp]
@@ -375,41 +377,21 @@ inferDo inf [return_type] [(repr_exp, repr_eff), (body_exp, body_eff)] = do
 inferDo _ _ _ =
   internalError "inferDo: Invalid stream constructor found in effect inference"
 
--- | During function application, keep track of local regions created due to
--- parameter passing coercions.  The lifetime of a local region is limited to
--- the function call that uses the region; effects on the region are not
--- visible outside that region.
-type LocalRegions = [RVar]
-
 inferApp :: Gluon.WRExp
          -> SynInfo 
          -> (EExp, Effect)
          -> [(EExp, Effect)]
          -> EI (EExp, Effect)
 inferApp result_type info (op, op_effect) (unzip -> (args, arg_effects)) = 
- traceShow (text "inferApp" <+> vcat (map pprEExp (op : args))) $ 
- eliminate_local_regions $ do
+ traceShow (text "inferApp" <+> vcat (map pprEExp (op : args))) $ do
   let variances = expVariance op
   -- Compute side effects of function application and coerce arguments
-  (args', app_effect, scoped_regions, local_regions, return_type) <-
-    applyArguments (expReturn op) args
+  (args', call_effect, return_type) <- applyArguments (expReturn op) args
 
-  -- Delete local regions from the side effect
-  let app_effect' = deleteListFromEffect local_regions app_effect
-  
   -- Add effects of operands
-  let effect = effectUnions $ app_effect' : op_effect : arg_effects
-  
+  let effect = effectUnions $ call_effect : op_effect : arg_effects
   let exp = EExp info return_type $ CallE op args'
-  return (scoped_regions, exp, effect)
-  where
-    eliminate_local_regions m = do
-      (_, e, eff) <- transformConstraint elr m 
-      return (e, eff)
-      where
-        elr (sr, e, eff) cst free_vars = do
-          cst' <- eliminateRigidVariables sr cst
-          return (cst', free_vars)
+  return (exp, effect)
 
 -- | Get the variance of an expression's parameters.  Unknowns are treated
 -- as 'Invariant'.  Functions are covariant in all parameters.
@@ -427,26 +409,40 @@ expVariance exp =
 -- Argument coercions are inserted, side effects are computed, and the 
 -- return type is computed.
 applyArguments :: EReturnType -> [EExp]
-               -> EI ([EExp], Effect, [RVar], LocalRegions, EReturnType)
-applyArguments oper_type args = go oper_type init_acc args
+               -> EI ([EExp], Effect, EReturnType)
+applyArguments oper_type args = traceShow (text "applyArguments" <+> (pprEReturnType oper_type $$ vcat (map pprEExp args))) $ do
+  ((), (eff, oper_type', crs), args') <- go oper_type init_acc args
+  
+  -- Remove from the effect regions that are local to the function call
+  let eff' = foldr deleteFromEffect eff crs
+  return (args', eff', oper_type')
   where
     go (OwnRT fun_type) acc (arg : args) = do
-      (arg', eff, return_type, scoped_regions, local_regions) <-
-        applyType fun_type arg
-      go return_type (add_acc acc arg' eff scoped_regions local_regions) args
+      (call_regions, (), (eff, op_type, crs), args') <-
+        applyType fun_type arg $
+        \arg' eff return_type scoped_regions local_regions -> do
+          retval@((), (eff, oper_type, _), args') <-
+            go return_type (add_acc acc arg' eff) args
+          
+          -- DEBUG: print effect
+          liftIO $ putStrLn $ "applyArguments " ++ show (pprEffect eff)
+          return retval
+      return ((), (eff, op_type, call_regions ++ crs), args')
     
     -- If applying an argument, the function type must be owned
     go _ _ (_:_) = internalError "applyArguments: Expecting owned type"
     
-    go oper_type (args, eff, scoped_regions, local_regions) [] =
-      return (reverse args, eff, scoped_regions, local_regions, oper_type)
+    go oper_type (args, eff) [] = do
+      -- DEBUG: print effect
+      liftIO $ putStrLn $ "applyArguments " ++ show (pprEffect eff)
+      return ((), (eff, oper_type, []), reverse args)
 
     -- Accumulate the result of applying one argument.
-    add_acc (args, eff, srgns, rgns) new_arg new_eff new_srgns new_rgns =
-      (new_arg : args, eff `effectUnion` new_eff, srgns ++ new_srgns, rgns ++ new_rgns)
-      
+    add_acc (args, eff) new_arg new_eff =
+      (new_arg : args, eff `effectUnion` new_eff)
+
     -- Initially, there is no side effect.
-    init_acc = ([], emptyEffect, [], [])
+    init_acc = ([], emptyEffect)
 
 -- | Compute the result of a function application.
 --
@@ -455,38 +451,30 @@ applyArguments oper_type args = go oper_type init_acc args
 -- masks out effects on any locally created memory.
 applyType :: EType              -- ^ Operator type
           -> EExp               -- ^ Argument
-          -> EI (EExp, Effect, EReturnType, [RVar], LocalRegions)
-applyType op_type arg = debug $
+          -> (EExp -> Effect -> EReturnType -> [RVar] -> [RVar]
+              -> EI ((), (Effect, EReturnType, [RVar]), a))
+          -> EI ([RVar], (), (Effect, EReturnType, [RVar]), a)
+applyType op_type arg k =
   case op_type
   of FunT param_type eff return_type -> do
-       (coercion, subst, scoped_regions, exposed_regions, local_regions) <-
-         coerceParameter Covariant param_type arg_type
-       let arg' = applyCoercion coercion arg
+       (_, _, call_regions, (a, b, c)) <- coerceParameter param_type arg_type $
+         \coercion _ dep_renaming local_regions exposed_regions -> do
+           -- Apply coercion to argument
+           let arg' = applyCoercion coercion arg
 
-       -- Rename return type based on dependent parameters
-       return_type' <- liftIO $ evalAndApplyRenaming (subst arg) return_type
+           -- Rename return and effect types to the given parameter value
+           -- if it was dependent
+           rrtype <- liftIO $ evalAndApplyRenaming (dep_renaming arg) return_type
+           reff <- liftIO $ evalAndApplyRenaming (dep_renaming arg) eff
 
-       -- Rename effect type, and add the coercion's effect
-       eff' <- liftIO $ evalAndApplyRenaming (subst arg) eff
-       let eff'' = eff' `effectUnion` varsEffect exposed_regions
-       return (arg', eff'', return_type', scoped_regions, local_regions)
-     FunT _ _ _ -> internalError "applyType: Unexpected function representation"
+           -- Continue
+           let eff' = reff `effectUnion` varsEffect exposed_regions
+           x@(_, (eff, rt, _), _) <- k arg' eff' rrtype local_regions exposed_regions
+           traceShow (text "applyType" <+> pprEffect eff) $ return x
+       return (call_regions, a, b, c)
      _ -> internalError "applyType: Not a function type"
   where
     arg_type = expReturn arg
-
-    debug m = do 
-      op_type_f <- liftIO $ forceEType op_type
-      arg_f <- liftIO $ forceEExp arg
-      ret@(_, eff, rt, _, _) <- m
-      eff_f <- liftIO $ evalEffect eff
-      rt_f <- liftIO $ forceEReturnType rt
-      liftIO $ print $
-        text "applyType" <+> (braces (pprEType op_type_f) $$
-                              braces (pprEExp arg_f) $$
-                              pprEffect eff_f $$
-                              pprEReturnType rt_f)
-      return ret
 
 inferLet :: Gluon.WRExp -> SynInfo -> SF.Pat SF.TypedRec
          -> SF.TRExp -> SF.TRExp -> EI (EExp, Effect)
@@ -668,13 +656,14 @@ inferFun is_lambda (SF.TypedSFFun (SF.TypeAnn _ f)) = do
       (body, body_eff) <- inferExp $ SF.funBody f
 
       -- Coerce the return value to the right representation
-      (coercion, _) <- coerceReturn Covariant return_type (expReturn body)
+      (return_type', _, coercion, _) <-
+        coerceReturn return_type (expReturn body)
       let body' = applyCoercion coercion body
 
       -- Create and return the function's type.  It will be used for
       -- generalization.
-      let fun_type = funMonoEType params body_eff return_type
-      return (fun_type, body', body_eff, return_type)
+      let fun_type = funMonoEType params body_eff return_type'
+      return (fun_type, body', body_eff, return_type')
   
     -- Make all flexible variables in the function body independent of one
     -- another.  Clear all flexible variables that don't escape in the return 
@@ -750,23 +739,24 @@ inferAlt mreturn_type (SF.TypedSFAlt (SF.TypeAnn _ alt)) = do
     (body_exp, body_eff) <- inferExp $ SF.altBody alt
   
     -- Coerce return value
-    body_exp' <- coerce_return mreturn_type body_exp
+    (body_exp', co_eff) <- coerce_return mreturn_type body_exp
+    let alt_eff = body_eff `effectUnion` varsEffect co_eff
 
     -- Pattern-bound variable effects must not escape
     whenM (liftIO $ expReturn body_exp' `mentionsAnyE` Set.fromList local_regions) $
       fail "inferAlt: Local region escapes"
 
     -- Hide effects on pattern-bound variables
-    let eff = deleteListFromEffect local_regions body_eff
+    let eff = deleteListFromEffect local_regions alt_eff
     return (body_exp', eff)
 
   let con = SF.altConstructor alt
   return (EAlt con (map discardTypeRepr ty_args) params body_exp, body_eff)
   where
-    coerce_return Nothing e = return e
+    coerce_return Nothing e = return (e, [])
     coerce_return (Just rt) e = do
-      (coercion, local_regions) <- coerceReturn Covariant rt (expReturn e)
-      return $ applyCoercion coercion e
+      (_, _, coercion, exposed_reads) <- coerceReturn rt (expReturn e)
+      return (applyCoercion coercion e, exposed_reads)
 
 inferTypeExp :: SF.RecType SF.TypedRec -> RegionM ERepType
 inferTypeExp (SF.TypedSFType (SF.TypeAnn k t)) = do
@@ -801,7 +791,7 @@ instantiateEffectAssignment info poly_op assignment =
        let new_rt = foldr (uncurry renameE) rt (zip qvars new_vars)
            exp1 = InstE poly_op (map varEffect new_vars)
        rt' <- inst_return new_rt
-       return $ EExp info rt' exp1
+       traceShow (text "instantiated" <+> hsep (map pprEffectVar new_vars)) $ return $ EExp info rt' exp1
      RecEffect placeholder rt -> do
        let var = case poly_op 
                  of Left v -> v
@@ -857,14 +847,263 @@ instantiateEffectAssignment info poly_op assignment =
 -- | A renaming of a dependently typed expression
 type DepRenaming = EExp -> Renaming
 
-noRenaming _ = Renaming id
+-- | Perform some computation where a parameter region is in scope.
+--   Eliminate the region from generated constraints.
+withParamRegion :: RVar -> EI a -> EI a
+withParamRegion rv m = transformConstraint eliminate_rv m
+  where
+    eliminate_rv _ cst free_evars = do
+      cst' <- eliminateRigidVariable rv cst
+      return (cst', free_evars)
 
--- | Rename a dependent variable to the given type
-renameToType :: Var -> DepRenaming
-renameToType v e =
-  case expExp e
-  of TypeE ty -> Renaming (assignT v ty)
-     _ -> internalError "renameToType: Not a type"
+-- | Perform some computation where a parameter region is in scope.
+--   Eliminate the region from generated constraints.
+withRenamedParamRegion :: Parametric a =>
+                          RVar 
+                       -> (RVar -> EI (a, b)) 
+                       -> EI (a, b)
+withRenamedParamRegion rv f = do
+  rv' <- newRegionVar False
+  unrename rv' =<< transformConstraint (eliminate rv') (f rv')
+  where
+    eliminate rv' _ cst free_evars = do
+      cst' <- eliminateRigidVariable rv' cst
+      return (cst', free_evars)
+    
+    unrename rv' (thing, x) =
+      return (renameE rv' rv thing, x)
+
+-- | Unify two regions and perform some computation where the region is in
+--   scope.  A fresh region variable will be created.  The worker function
+--   should rename its inputs to this fresh region name.
+--   After the computation finishes, the region will be eliminated 
+--   from constraints and renamed back to its original names.  All return
+--   values that should be renamed to the expected region should be returned
+--   as the first tuple element.  All return values that should be renamed
+--   to the given region should be returned as the second tuple element.
+withUnifiedParamRegions :: (Parametric a, Parametric b) =>
+                           RVar -- ^ Expected parameter region
+                        -> RVar -- ^ Given parameter region
+                        -> (RVar -> EI (a, b, c))
+                           -- ^ Computation with unified regions
+                        -> EI (a, b, c) -- ^ Computation
+withUnifiedParamRegions e_rv g_rv f = do
+  u_rv <- newRegionVar False
+  traceShow (text "withUnifiedParamRegions" <+> pprEffectVar e_rv <+> pprEffectVar g_rv <+> pprEffectVar u_rv) $ unrename u_rv =<< transformConstraint (eliminate u_rv) (f u_rv)
+  where
+    eliminate u_rv _ cst free_evars = do
+      cst' <- eliminateRigidVariable u_rv cst
+      return (cst', free_evars)
+
+    unrename u_rv (e_thing, g_thing, x) =
+      return (renameE u_rv e_rv e_thing, renameE u_rv g_rv g_thing, x)
+
+withUnifiedParamVariables :: (Parametric a, Parametric b) =>
+                             Maybe Var -- ^ Expected parameter variable
+                          -> Maybe Var -- ^ Given parameter variable
+                          -> (Maybe Var -> EI (a, b, c))
+                             -- ^ Computation with unified variables
+                          -> EI (a, b, c) -- ^ Computation
+withUnifiedParamVariables Nothing Nothing f = f Nothing
+withUnifiedParamVariables (Just e_v) Nothing f = f (Just e_v)
+withUnifiedParamVariables Nothing (Just g_v) f = f (Just g_v)
+withUnifiedParamVariables (Just e_v) (Just g_v) f = do
+  u_v <- Gluon.newVar (Gluon.varName e_v) (getLevel e_v)
+  (x, y, z) <- f (Just u_v)
+  return (renameT u_v e_v x, renameT u_v g_v y, z)
+
+{- Parameter coercions
+
+The job of parameter coercion is to convert the return value and
+representation of some expression, GIVEN, to the expected value and
+representation of some expression USE.
+
+* Read -> Val or Read -> Owned
+USE (coerce_value (loadValue GIVEN))
+
+Has an extra, exposed given load
+
+* Write -> Val or Write -> Owned
+USE (coerce_value (loadTemporaryValue GIVEN))
+becomes
+let tmp = GIVEN
+in USE (coerce_value (loadValue tmp))
+
+Has an extra, callsite-local given load
+
+* Read -> Read
+USE (coerce_value GIVEN)
+
+* Write -> Read
+let tmp = GIVEN
+in USE (coerce_value tmp)
+
+Has a callsite-local load
+
+-}
+
+
+-- | Coerce a function argument.
+--
+--   The worker function takes a coercion (in terms of the renamed variable),
+--   a renaming to apply to the given type, a renaming to apply to the
+--   parameter type,
+--   the set of regions read by the /expected/ type that were satisfied by 
+--   coercions, and the set of regions read by the /given/ type that
+--   were satisfied by coercions.
+--
+--   Returns the new parameter and return types, and the set of
+--   callsite-local side effects.
+coerceParameter :: (Parametric a, Parametric b) =>
+                   EParamType   -- ^ Parameter type (expected)
+                -> EReturnType  -- ^ Argument type (given)
+                -> (Coercion
+                 -> Renaming
+                 -> DepRenaming
+                 -> [RVar]
+                 -> [RVar]
+                 -> EI (a, b, c))
+                -> EI (EParamType, EReturnType, [RVar], (a, b, c))
+coerceParameter expected given f = do
+  -- Coerce the parameter value
+  (coerce_value, expected', given') <- coerceParameterType expected given
+
+  -- Coerce the representation
+  case expected' of
+    ValPT mv _ ->
+      -- Renaming of dependent variables
+      let dep_renaming :: DepRenaming =
+            case mv
+            of Nothing -> const idRenaming
+               Just v  -> \e ->
+                 case expExp e
+                 of TypeE ty -> Renaming (assignT v ty)
+                    _ -> internalError "coerceParameter: Not a type"
+      in case given'
+         of ValRT _ -> do
+              retval <- f coerce_value idRenaming dep_renaming [] []
+              return (expected', given', [], retval)
+            OwnRT _ -> no_coercion
+            ReadRT rv _ -> do
+              let co = coerce_value `mappend` genLoadValue
+              retval <- f co idRenaming dep_renaming [] [rv]
+              return (expected', given', [], retval)
+            WriteRT rv _ -> do
+              let co = coerce_value `mappend` genTempLoadValue
+              retval <- f co idRenaming dep_renaming [] [rv]
+              return (expected', given', [rv], retval)
+    OwnPT _ ->
+      case given'
+      of ValRT _ -> no_coercion
+         OwnRT _ -> do
+           retval <- f coerce_value idRenaming (const idRenaming) [] []
+           return (expected', given', [], retval)
+         ReadRT rv _ -> do
+           let co = coerce_value `mappend` genLoadOwned
+           retval <- f co idRenaming (const idRenaming) [] [rv]
+           return (expected', given', [], retval)
+         WriteRT rv _ -> do
+           let co = coerce_value `mappend` genTempLoadOwned
+           retval <- f co idRenaming (const idRenaming) [] [rv]
+           return (expected', given', [rv], retval)
+    ReadPT pv _ ->
+      case given'
+      of ValRT _ -> do
+           let co = genTempStoreValue pv `mappend` coerce_value
+           retval <- f co idRenaming (const idRenaming) [pv] []
+           return (expected', given', [pv], retval)
+         OwnRT _ -> do
+           let co = genTempStoreOwned pv `mappend` coerce_value
+           retval <- f co idRenaming (const idRenaming) [pv] []
+           return (expected', given', [pv], retval)
+         ReadRT rv _ -> do
+           retval <- withUnifiedParamRegions pv rv $ \pv' ->
+             f coerce_value (Renaming $ renameE rv pv') (const $ Renaming $ renameE pv pv') [] []
+           return (expected', given', [], retval)
+         WriteRT rv _ -> do
+           retval <- withUnifiedParamRegions pv rv $ \pv' ->
+             f coerce_value (Renaming $ renameE rv pv') (const $ Renaming $ renameE pv pv') [] []
+           return (expected', given', [pv], retval)
+   where
+    no_coercion = internalError "coerceParameter: Cannot coerce"
+  
+-- | Helper function for coerceParameter
+coerceParameterType expected given = do
+  (etype, gtype, coerce_value) <-
+    compareTypes InDir Covariant (paramTypeType expected) (returnTypeType given)
+
+  let expected' = case expected
+                  of ValPT mv _  -> ValPT mv etype
+                     OwnPT _     -> OwnPT etype
+                     ReadPT rv _ -> ReadPT rv etype
+      given' = case given
+               of ValRT _      -> ValRT gtype
+                  OwnRT _      -> OwnRT gtype
+                  ReadRT rv _  -> ReadRT rv gtype
+                  WriteRT rv _ -> WriteRT rv gtype
+
+  return (coerce_value, expected', given')
+
+-- | Coerce a return type.
+--
+-- Returns the coercion and the set of regions that are read by the coercion,
+-- and not local to the coercion expression.
+coerceReturn :: EReturnType
+             -> EReturnType
+             -> EI (EReturnType, EReturnType, Coercion, [RVar])
+coerceReturn expected given = traceShow (text "coerceReturn" <+> (pprEReturnType expected $$ pprEReturnType given)) $ do
+  -- Coerce the value
+  (coerce_value, expected', given') <- coerceReturnTypes expected given
+  
+  -- Coerce the representation
+  case expected' of
+    ValRT _ ->
+      case given'
+      of ValRT _ -> return (expected', given', coerce_value, [])
+         OwnRT _ -> no_coercion
+         ReadRT rv _ ->
+           let co = coerce_value `mappend` genLoadValue
+           in return (expected', given', co, [rv])
+         WriteRT rv _ ->
+           let co = coerce_value `mappend` genTempLoadValue
+           in return (expected', given', co, [])
+    OwnRT _ ->
+      case given'
+      of ValRT _ -> no_coercion
+         OwnRT _ -> return (expected', given', coerce_value, [])
+         ReadRT rv _ ->
+           let co = coerce_value `mappend` genLoadOwned
+           in return (expected', given', co, [rv])
+         WriteRT rv _ ->
+           let co = coerce_value `mappend` genTempLoadOwned
+           in return (expected', given', co, [])
+    ReadRT _ _ ->
+      internalError "coerceReturn: Cannot coerce to a borrowed read return value"
+    WriteRT rv _ ->
+      case given'
+      of ValRT _ ->
+           let co = genStoreValue rv `mappend` coerce_value
+           in return (expected', given', co, [])
+         OwnRT _ ->
+           let co = genStoreOwned rv `mappend` coerce_value
+           in return (expected', given', co, [])
+         ReadRT gv _ -> do
+           return (expected', given', coerce_value, [gv])
+         WriteRT gv _ -> do
+           return (expected', given', coerce_value, [])
+   where
+    no_coercion = internalError "coerceReturn: Cannot coerce"
+ 
+coerceReturnTypes expected given = do
+  (etype, gtype, co) <-
+    compareTypes OutDir Covariant (returnTypeType expected) (returnTypeType given)
+  
+  return (co, rebuild expected etype, rebuild given gtype)
+  where
+    rebuild (ValRT _) rt = ValRT rt
+    rebuild (OwnRT _) rt = OwnRT rt
+    rebuild (ReadRT v _) rt = ReadRT v rt
+    rebuild (WriteRT v _) rt = WriteRT v rt
 
 -- | Compare two types.  If the types are not compatible, an error is thrown.
 -- Otherwise, a coercion and a set of temporary regions is returned.
@@ -883,19 +1122,23 @@ compareTypes :: Direction       -- ^ Direction of data flow
              -> Variance        -- ^ Subtyping relationship
              -> EType           -- ^ Expected type
              -> EType           -- ^ Given type
-             -> EI Coercion
+             -> EI (EType, EType, Coercion)
 compareTypes direction variance expected given =
   case (expected, given)
   of (AppT e_op e_args, AppT g_op g_args) -> do
-       _ <- compareTypes UnDir variance e_op g_op
-       
-       -- If operators are equal, they take the same number of arguments
+       (e_op', g_op', _) <- compareTypes UnDir variance e_op g_op
+
+       -- If operators match, they take the same number of arguments
        unless (length e_args == length g_args) $
-         internalError "compareStandardTypes"
+         internalError "compareTypes"
 
        let variances = etypeOrdinaryParamVariance g_op
-       compareTypeLists UnDir variances e_args g_args
-       return mempty
+       (e_args', g_args', arg_cos) <- compareTypeLists variances e_args g_args
+       
+       -- Cannot construct a coercion for this type
+       unless (all isIdCoercion arg_cos) $
+         internalError "compareTypes: Cannot construct coercion for data type"
+       return (AppT e_op' e_args', AppT g_op' g_args', mempty)
 
      (InstT e_op e_effs, InstT g_op g_effs) -> do
        when (e_op /= g_op) type_mismatch
@@ -905,16 +1148,16 @@ compareTypes direction variance expected given =
        
        unless (length e_effs == length g_effs &&
                length e_effs == length variances) $
-         internalError "compareStandardTypes"
+         internalError "compareTypes"
          
        compareEffectLists variances e_effs g_effs
-       return mempty
+       return (InstT e_op e_effs, InstT g_op g_effs, mempty)
 
      (FunT {}, FunT {}) -> do
-       co <- compareFunctionTypes variance expected given
+       (co, e_type, g_type) <- compareFunctionTypes expected given
        when (direction == UnDir && not (isIdCoercion co)) $
-         internalError "compareStandardTypes: Unhandled coercion"
-       return co
+         internalError "compareTypes: Unhandled coercion"
+       return (e_type, g_type, co)
 
      (VarT e_v, VarT g_v)
        | e_v == g_v -> no_change
@@ -927,74 +1170,98 @@ compareTypes direction variance expected given =
      (LitT e_l, LitT g_l)
        | e_l == g_l -> no_change
        | otherwise -> type_mismatch
+     _ ->
+       traceShow (pprEType expected $$ pprEType given) $ internalError "compareTypes"
   where
-    no_change = return mempty
+    no_change = return (expected, given, mempty)
     type_mismatch = fail "Type mismatch"
 
-compareTypeLists direction variances es gs = go variances es gs 
+compareTypeLists variances es gs = go variances es gs 
   where
     go (v:vs) (e:es) (g:gs) = do
-      compareTypes direction v e g
-      go vs es gs
+      (e', g', co) <- compareTypes UnDir v e g
+      (es', gs', cos) <- go vs es gs
+      return (e':es', g':gs', co:cos)
     
-    go _ [] [] = return ()
-    go [] _ _ = internalError "compareEffectLists: Variance not given"
-    go _ _ _ = internalError "compareEffectLists: List length mismatch"
-
-compareEffectLists variances es gs = go variances es gs 
-  where
-    go (v:vs) (e:es) (g:gs) = do
-      compareEffects v e g
-      go vs es gs
-    
-    go _ [] [] = return ()
+    go _ [] [] = return ([], [], [])
     go [] _ _ = internalError "compareTypeLists: Variance not given"
     go _ _ _ = internalError "compareTypeLists: List length mismatch"
 
--- | Handle the function case for 'compareTypes'.
---
--- If a coercion is generated, it will be a lambda function that calls the
--- original expression.  In the lambda function body, the function arguments 
--- are coerced from expected to given type, then the original function is
--- called, then the result is coerced from given to expected type.
-compareFunctionTypes variance expected given =
-  eliminate_scoped_variables $ coerce_parameters [] [] [] [] expected given
+compareFunctionTypes :: EType   -- ^ Expected type
+                     -> EType   -- ^ Given type
+                     -> EI (Coercion, EType, EType)
+compareFunctionTypes expected given = 
+  cftCoerceParameters [] [] [] expected given
   where
-    -- Coerce function parameters.  Accumulate a list of coercions and a list
-    -- of local regions.
-    coerce_parameters rev_cos scoped_regions exposed_regions local_regions
-      (FunT e_param e_eff e_return)
-      (FunT g_param g_eff g_return) = do
-        -- Coerce this parameter
-        (co, mk_renaming, param_scoped_regions, param_exposed_regions, param_local_regions) <-
-          coerceParameter Covariant g_param (paramTypeToReturnType e_param)
 
-        -- Rename the dependent parameter variable in the expected type
-        (e_type_param', e_renaming) <-
-          liftRegionM $ freshenParamTypeTypeParam e_param
-        e_eff' <- liftIO $ evalAndApplyRenaming e_renaming e_eff
-        e_return' <- liftIO $ evalAndApplyRenaming e_renaming e_return
-        
-        -- Create function parameter
-        e_param <- liftRegionM $ mkParamFromTypeParam e_type_param'
-        let param_exp = paramVarExp e_param
-            
-        -- Rename the dependent parameter variable in the given type
-        let g_renaming = mk_renaming param_exp
-        g_return' <- liftIO $ evalAndApplyRenaming g_renaming g_return
-        g_eff' <- liftIO $ evalAndApplyRenaming g_renaming g_eff
-
-        -- Continue with remaining parameters
-        coerce_next_parameter ((e_param, co) : rev_cos)
-          (param_scoped_regions ++ scoped_regions)
-          (param_exposed_regions ++ exposed_regions)
-          (param_local_regions ++ local_regions)
-          e_eff' e_return' g_eff' g_return'
-
-    coerce_parameters _ _ _ _ _ _ = internalError "compareFunctionTypes"
+cftCoerceParameters :: [(EParamType, Coercion)]
+                    -> [RVar]
+                    -> [RVar]
+                    -> EType
+                    -> EType
+                    -> EI (Coercion, EType, EType)
+cftCoerceParameters rev_cos e_xrs g_xrs expected given =
+  case (expected, given)
+  of (FunT e_param e_eff e_return, FunT g_param g_eff g_return) -> do
+       let epv = paramTypeVariable e_param
+           gpv = paramTypeVariable g_param
     
-    coerce_next_parameter rev_cos scoped_regions exposed_regions local_regions 
-                          e_eff e_return g_eff g_return =
+       -- First unify parameter variables
+       ((g_eff', g_ret'), (e_eff', e_ret'), (e_param_ret, g_param2, co)) <-
+         withUnifiedParamVariables epv gpv $ \mpv -> do
+           let e_param1 = rebuild_param mpv e_param
+               e_eff1   = renameT_maybe epv mpv e_eff
+               e_ret1   = renameT_maybe epv mpv e_return
+               g_param1 = rebuild_param mpv g_param
+               g_eff1   = renameT_maybe gpv mpv g_eff
+               g_ret1   = renameT_maybe gpv mpv g_return
+
+           -- Compute new effect and range types
+           coerce_this_parameter e_param1 e_eff1 e_ret1 g_param1 g_eff1 g_ret1
+
+       -- Rebuild the function type
+       let e_param' = rebuild_expected_param e_param e_param_ret
+           g_param' = rebuild_param gpv g_param2
+       return (co, FunT e_param' e_eff' e_ret', FunT g_param' g_eff' g_ret')
+  where
+    -- Modify the parameter variable
+    rebuild_param (Just v) (ValPT (Just _) t) = ValPT (Just v) t
+    rebuild_param (Just v) (ValPT Nothing  t) = ValPT Nothing t
+    rebuild_param Nothing  p                  = p
+    rebuild_param _ _ = internalError "cftCoerceParameters"
+    
+    -- Rebuild the expected paramter, with the type taken from the return type
+    rebuild_expected_param (ValPT mpv _) rt = ValPT mpv (returnTypeType rt)
+    rebuild_expected_param (OwnPT _)     rt = OwnPT (returnTypeType rt)
+    rebuild_expected_param (ReadPT rv _) rt = ReadPT rv (returnTypeType rt)
+
+    -- Coerce the parameter.  Parameter variables have been renamed so the
+    -- bound variable is now the same.
+    -- Parameter regions have not been renamed.
+    coerce_this_parameter e_param e_eff e_ret g_param g_eff g_ret = do
+      -- Construct the coercion from this parameter.  Coerce the value
+      -- obtained via the expected parameter to the given parameter.   
+      -- Note that the direction of coercion changed
+      -- (parameters are contravariant).
+      (g_param', e_param_ret, _, (g_range', e_range', co)) <-
+        coerceParameter g_param (paramTypeToReturnType e_param) $
+        \co e_rn g_dep_rn e_xeff g_xeff ->
+        -- Rename the effects and return values
+        let e_eff1 = applyRenaming e_rn e_eff
+            e_ret1 = applyRenaming e_rn e_ret
+            g_eff1 = applyRenaming (g_dep_rn undefined) g_eff
+            g_ret1 = applyRenaming (g_dep_rn undefined) g_ret
+        in coerce_next_parameter
+           ((e_param, co) : rev_cos)
+           (e_xeff ++ e_xrs)
+           (g_xeff ++ g_xrs)
+           e_eff1 e_ret1 g_eff1 g_ret1
+
+      -- Swap order of return values to go back to the original coercion
+      -- direction.  Needed for renaming of return values.
+      return (g_range', e_range', (e_param_ret, g_param', co))
+
+    coerce_next_parameter rev_cos e_xeff g_xeff e_eff e_return g_eff g_return =
       case (e_return, g_return)
       of (OwnRT e_ftype@(FunT {}), OwnRT g_ftype@(FunT {}))
            -- FIXME: Use evaluate-me tags to determine where to end the
@@ -1005,192 +1272,87 @@ compareFunctionTypes variance expected given =
            -- parameters
            | isEmptyEffect g_eff -> do
                assertEmptyEffect e_eff
-               coerce_parameters rev_cos scoped_regions exposed_regions local_regions e_ftype g_ftype
+               (co, e_ftype', g_ftype') <-
+                 cftCoerceParameters rev_cos e_xeff g_xeff e_ftype g_ftype
+               return ((emptyEffect, OwnRT e_ftype'),
+                       (emptyEffect, OwnRT g_ftype'),
+                       co)
          _ ->
-           coerce_returns rev_cos scoped_regions exposed_regions local_regions e_eff e_return g_eff g_return
+           cftCoerceReturn rev_cos e_xeff g_xeff e_eff e_return g_eff g_return
 
-    coerce_returns rev_cos scoped_regions exposed_regions local_regions e_eff e_return g_eff g_return = do
-      -- The actual effect consists of the given effect and effects produced  
-      -- by coercion
-      let co_g_eff = effectUnion g_eff (varsEffect exposed_regions)
+cftCoerceReturn rev_cos e_xeff g_xeff e_eff e_return g_eff g_return = do
+  -- The actual effect consists of the given effect and effects produced
+  -- by coercion
+  let co_g_eff = effectUnion g_eff (varsEffect g_xeff)
 
-      -- Create a relationship between the given and expected effects. 
-      -- In the absence of coercions, the given expect must be a
-      -- subeffect of the expected effect.  Coercion-induced reads are removed
-      -- from the expected effect before creating this constraint, and 
-      -- coercion-created local regions are removed from the given effect.
-      
-      assertSubeffect (deleteListFromEffect local_regions g_eff) (deleteListFromEffect exposed_regions e_eff)
+  -- Create a relationship between the given and expected effects. 
+  -- In the absence of coercions, the given expect must be a
+  -- subeffect of the expected effect.
+  -- We can exclude coercion-induced reads from the expected effect
+  -- and coercion-created local regions from the given effect.
+  assertSubeffect
+    (deleteListFromEffect e_xeff g_eff)
+    (deleteListFromEffect g_xeff e_eff)
 
-      -- Coerce from given return type to expected return type
-      (ret_co, ret_regions) <- coerceReturn Covariant e_return g_return
+  -- Coerce from given return type to expected return type
+  (e_return', g_return', ret_co, ret_eff) <- coerceReturn e_return g_return
+  
+  -- If all coercions are identities, then return the identity coercion
+  coercion <-
+    if all isIdCoercion [c | (_, c) <- rev_cos] && isIdCoercion ret_co
+    then return mempty
+    else cftFunctionCoercion (reverse rev_cos) ret_co e_return g_eff g_return
 
-      -- If all coercions are identities, then return the identity coercion
-      if all isIdCoercion [c | (_, c) <- rev_cos] && isIdCoercion ret_co
-        then if null ret_regions
-             then return ([], mempty)
-             else internalError "compareFunctionTypes"
-        else do
-          -- Remove local regions from the side effect
-          let all_local_regions = ret_regions ++ local_regions
-              exposed_effect = deleteListFromEffect all_local_regions co_g_eff
+  return ((g_eff, g_return), (e_eff, e_return), coercion)
 
-          -- Local regions must not be mentioned in the return type
-          liftIO $ whenM (e_return `mentionsAnyE` Set.fromList all_local_regions) $
-            fail "Effect produced on a variable outside its scope"
-          
-          let final_coercion = 
-                coercion $
-                coerce_expr (reverse rev_cos) ret_co g_return exposed_effect e_return
-          return (scoped_regions, final_coercion)
+paramTypeVariable (ValPT (Just v) _) = Just v
+paramTypeVariable _ = Nothing
 
-    -- Eliminate variables that have a local scope from constraints
-    eliminate_scoped_variables m = do
-      (_, x) <- transformConstraint esv m
-      return x
-      where
-        esv (scoped_variables, _) cst free_vars = do
-          cst' <- eliminateRigidVariables scoped_variables cst
-          return (cst', free_vars)
+renameT_maybe Nothing   Nothing   x = x
+renameT_maybe (Just v1) (Just v2) x = renameT v1 v2 x
 
-    -- Construct the actual function coercion.  The coercion wraps a function 
-    -- in a lambda function that coerces the argument and return values
-    coerce_expr params ret_co original_ret_type eff_type ret_type original_expr =
+cftFunctionCoercion param_coercions return_coercion e_return g_eff g_return = do
+  -- Create function parameters
+  params <- liftRegionM $ forM param_coercions $ \(param_type, co) -> do 
+    param <- mkParamFromTypeParam param_type
+    return (param, co)
+
+  return (coercion $ mk_coercion params)
+  where
+    mk_coercion params g_expr =
+      -- Create a call to the given expression
       let param_arguments =
             [applyCoercion c $ paramVarExp p | (p, c) <- params]
-          info = mkSynInfo (getSourcePos $ expInfo original_expr) ObjectLevel
+          info = mkSynInfo (getSourcePos $ expInfo g_expr) ObjectLevel
           call = EExp { expInfo = info
-                      , expReturn = original_ret_type
-                      , expExp = CallE original_expr param_arguments
+                      , expReturn = g_return
+                      , expExp = CallE g_expr param_arguments
                       }
-          ret_expr = applyCoercion ret_co call
+
+          -- Coerce the call's return value
+          ret_expr = applyCoercion return_coercion call
+          
           function = EFun { funInfo = info
                           , funEffectParams = []
                           , funParams = [p | (p, _) <- params]
-                          , funReturnType = ret_type
-                          , funEffect = eff_type 
+                          , funReturnType = e_return
+                          , funEffect = g_eff
                           , funBody = ret_expr
                           }
           function_type =
             OwnRT
-            (discardTypeRepr $ funMonoEType [p | (p, _) <- params] eff_type ret_type)
+            (discardTypeRepr $ funMonoEType (map fst params) g_eff e_return)
       in EExp info function_type (FunE function)
 
--- | Determine how to coerce an expression that is used as a parameter to 
--- a function call.
---
--- Based on the parameter passing conventions involved, we may insert
--- parameter-passing convention coercions.  Functions may get wrapped in
--- a lambda term.  If the parameter inhabits a region, the region will be
--- unified with something.
---
--- The coercion may induce extra side effects on regions or prevent side
--- effects from escaping.  Regions with induced side effects are returned
--- followed by regions whose side effects are masked.
---
--- Returns (coercion, renaming, regions bound by the parameter,
---          extra side effect regions, non-escaping side effect regions)
-coerceParameter :: Variance
-                -> EParamType
-                -> EReturnType
-                -> EI (Coercion, DepRenaming, [RVar], [RVar], LocalRegions)
-coerceParameter variance p_passtype r_passtype = do
-  -- Coerce the value if its type has changed
-  astype <- compareTypes InDir variance (paramTypeType p_passtype) (returnTypeType r_passtype)
-
-  -- Combine the type coercion with a parameter-passing coercion
-  case p_passtype of
-    ValPT mv p_type ->
-      -- Coerce from something to a value.  Possibly rename a bound parameter.
-      -- If the given value is a "read" value, read it as a side effect.
-      let renaming = case mv
-                     of Nothing -> noRenaming
-                        Just depvar -> renameToType depvar
-
-          val_coercion c r read_r local_r =
-            return (c, renaming, r, read_r, local_r)
-      in case r_passtype
-         of ValRT {} -> val_coercion astype [] [] []
-            OwnRT {} -> no_coercion
-            ReadRT rv r_type ->
-              val_coercion (astype `mappend` genLoadValue) [rv] [rv] []
-            WriteRT rv r_type ->
-              val_coercion (astype `mappend` genTempLoadValue) [rv] [] [rv]
-    OwnPT p_type ->
-      -- Coerce from something to a boxed object.  Possibly rename a bound
-      -- parameter.
-      -- If the given value is a "read" value, read it as a side effect.
-      case r_passtype
-      of ValRT {} -> no_coercion
-         OwnRT {} -> id_coercion astype []
-         ReadRT rv r_type ->
-           read_coercion (astype `mappend` genLoadOwned) rv []
-         WriteRT rv r_type ->
-           coercion (astype `mappend` genTempLoadOwned) [rv]
-    ReadPT pv p_type ->
-      case r_passtype
-      of ValRT {} ->
-           coercion (genTempStoreValue pv `mappend` astype) [pv]
-         OwnRT {} ->
-           coercion (genTempStoreOwned pv `mappend` astype) [pv]
-         ReadRT rv r_type -> do
-           -- Rename the given parameter to match the expected parameter
-           let renaming = \_ -> Renaming (renameE pv rv)
-           return (astype, renaming, [rv], [], [])
-         WriteRT rv r_type -> do
-           liftIO $ unifyRegionVars pv rv
-           coercion astype [rv]
+compareEffectLists variances es gs = go variances es gs 
   where
-    -- Coerce from 'read' to a non-reference
-    read_coercion f e params = return (f, noRenaming, (e : params), [e], params)
+    go (v:vs) (e:es) (g:gs) = do
+      compareEffects v e g
+      go vs es gs
     
-    coercion f params = return (f, noRenaming, params, [], params)
-    
-    -- Use 'f' to coerce this value.  No further steps are necessary.
-    id_coercion f r = return (f, noRenaming, r, [], [])
-    
-    no_coercion = internalError "coerceParameter: Cannot coerce"
-
--- | Determine how to coerce an expression that is returned from a statement
--- or function call.
-coerceReturn :: Variance -> EReturnType -> EReturnType -> EI (Coercion, LocalRegions)
-coerceReturn variance expect_type given_type = do
-  -- Coerce the value if its effect type has changed
-  astype <- compareTypes OutDir variance (returnTypeType expect_type) (returnTypeType given_type)
-
-  -- Combine the type coercion with a parameter-passing coercion
-  case expect_type of
-    ValRT e_type ->
-      case given_type
-      of ValRT g_type -> coercion astype []
-         OwnRT _ -> no_coercion
-         ReadRT rv r_type ->
-           coercion (astype `mappend` genLoadValue) []
-         WriteRT rv r_type ->
-           coercion (astype `mappend` genTempLoadValue) [rv]
-    OwnRT e_type ->
-      case given_type
-      of ValRT _ -> no_coercion
-         OwnRT _ -> coercion astype []
-         ReadRT rv r_type ->
-           coercion (astype `mappend` genLoadOwned) []
-         WriteRT rv r_type ->
-           coercion (astype `mappend` genTempLoadOwned) [rv]
-    ReadRT {} ->
-      internalError "coerceReturn: Cannot coerce to a borrowed read return value"
-    WriteRT rv e_type ->
-      case given_type
-      of ValRT g_type -> coercion (genStoreValue rv `mappend` astype) []
-         OwnRT g_type -> coercion (genStoreOwned rv `mappend` astype) []
-         ReadRT gv g_type -> do
-           liftIO $ unifyRegionVars rv gv
-           coercion astype []
-         WriteRT gv g_type -> do
-           liftIO $ unifyRegionVars rv gv
-           coercion astype []
-  where
-    coercion c rgns = return (c, rgns)
-    no_coercion = internalError "coerceReturn: Cannot coerce"
+    go _ [] [] = return ()
+    go [] _ _ = internalError "compareEffectLists: Variance not given"
+    go _ _ _ = internalError "compareEffectLists: List length mismatch"
 
 compareEffects Covariant e_eff g_eff = assertSubeffect g_eff e_eff
 compareEffects Invariant e_eff g_eff = assertEqualEffect g_eff e_eff
