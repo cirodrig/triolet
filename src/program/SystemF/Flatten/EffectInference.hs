@@ -143,6 +143,13 @@ transformConstraint t m = EI $ \env -> do
     doRegionM (t x (appEndo cst []) (appEndo vars [])) (efRegionEnv env)
   return (x, Endo (cst' ++), Endo (vars' ++))
 
+eliminateFromConstraint :: EffectVar -> EI a -> EI a
+eliminateFromConstraint rv m = transformConstraint eliminate_rv m
+  where
+    eliminate_rv _ cst free_evars = do
+      cst' <- eliminateRigidVariable rv cst
+      return (cst', free_evars)
+
 assertDoesn'tMention :: EffectVar -> EReturnType -> EI ()
 assertDoesn'tMention v rt =
   whenM (liftIO $ rt `mentionsE` v) $ fail "Region variable escapes"
@@ -406,7 +413,7 @@ applyArguments :: SynInfo
                -> [(EExp, Effect)]
                -> EI (EExp, Effect)
 applyArguments info (op, op_eff) args =
-  traceShow (text "applyArguments" <+> (pprEReturnType (expReturn op) $$ vcat (map (pprEExp . fst) args))) $ do
+  traceShow (text "applyArguments" <+> (pprEReturnType (expReturn op) $$ vcat [pprEExp e <+> text ":" <+> pprEReturnType (expReturn e) | (e, _) <- args])) $ do
     ((), (eff, oper_type', crs), (op', args')) <-
       go (expReturn op) op [] op_eff args
   
@@ -497,26 +504,35 @@ applyType op_type arg k =
 inferLet :: Gluon.WRExp -> SynInfo -> SF.Pat SF.TypedRec
          -> SF.TRExp -> SF.TRExp -> EI (EExp, Effect)
 inferLet _ inf lhs rhs body = do 
+  -- Process the RHS, which produces a value
   (rhs_exp, rhs_eff) <- inferExp rhs
   (lhs_var, lhs_ty) <- patternAsLetBinder lhs (expReturn rhs_exp)
-  (body_exp, body_eff) <- assumeType lhs_var lhs_ty $ do
-    (body_exp, body_eff) <- inferExp body
-    mask_local_region lhs_ty body_exp body_eff
-  
+
+  -- Get the type at which the value will be used 
+  let use_type = case lhs_ty
+                 of WriteRT rgn ty -> ReadRT rgn ty
+                    _ -> lhs_ty
+
+  (body_exp, body_eff) <-
+    mask_local_region lhs_ty $ assumeType lhs_var use_type $ inferExp body
+
   -- Create a let expression
   let let_exp = LetE lhs_var lhs_ty rhs_exp body_exp
       eff = rhs_eff `effectUnion` body_eff
   return (EExp inf (expReturn body_exp) let_exp, eff)
   where
-    mask_local_region (WriteRT rgn _) body_exp body_eff = do
-      -- If a local region was created, the return value must not mention it
-      -- and the effect should not be visible outside
+    -- If a local region was created, the return value must not mention it
+    -- and the effect should not be visible outside
+    mask_local_region (WriteRT rgn _) m = do
+      (body_exp, body_eff) <- eliminateFromConstraint rgn m
+      liftIO $ print (text "inferLet body" <+> (pprEExp body_exp $$ pprEReturnType (expReturn body_exp))) -- DEBUG
       assertDoesn'tMention rgn $ expReturn body_exp
-      let body_eff' = deleteFromEffect rgn body_eff
+      
+      ev_body_eff <- liftIO $ evaluate body_eff
+      let body_eff' = deleteFromEffect rgn ev_body_eff
       return (body_exp, body_eff')
     
-    mask_local_region _ body_exp body_eff = return (body_exp, body_eff)
-    
+    mask_local_region _ m = m
 
 inferLetrec :: Gluon.WRExp -> SynInfo -> [SF.Def SF.TypedRec] -> SF.TRExp
             -> EI (EExp, Effect)
@@ -868,11 +884,7 @@ type DepRenaming = EExp -> Renaming
 -- | Perform some computation where a parameter region is in scope.
 --   Eliminate the region from generated constraints.
 withParamRegion :: RVar -> EI a -> EI a
-withParamRegion rv m = transformConstraint eliminate_rv m
-  where
-    eliminate_rv _ cst free_evars = do
-      cst' <- eliminateRigidVariable rv cst
-      return (cst', free_evars)
+withParamRegion rv m = eliminateFromConstraint rv m
 
 -- | Perform some computation where a parameter region is in scope.
 --   Eliminate the region from generated constraints.
@@ -882,12 +894,8 @@ withRenamedParamRegion :: Parametric a =>
                        -> EI (a, b)
 withRenamedParamRegion rv f = do
   rv' <- newRegionVar False
-  unrename rv' =<< transformConstraint (eliminate rv') (f rv')
+  unrename rv' =<< eliminateFromConstraint rv' (f rv')
   where
-    eliminate rv' _ cst free_evars = do
-      cst' <- eliminateRigidVariable rv' cst
-      return (cst', free_evars)
-    
     unrename rv' (thing, x) =
       return (renameE rv' rv thing, x)
 
@@ -907,12 +915,8 @@ withUnifiedParamRegions :: (Parametric a, Parametric b) =>
                         -> EI (a, b, c) -- ^ Computation
 withUnifiedParamRegions e_rv g_rv f = do
   u_rv <- newRegionVar False
-  traceShow (text "withUnifiedParamRegions" <+> pprEffectVar e_rv <+> pprEffectVar g_rv <+> pprEffectVar u_rv) $ unrename u_rv =<< transformConstraint (eliminate u_rv) (f u_rv)
+  traceShow (text "withUnifiedParamRegions" <+> pprEffectVar e_rv <+> pprEffectVar g_rv <+> pprEffectVar u_rv) $ unrename u_rv =<< eliminateFromConstraint u_rv (f u_rv)
   where
-    eliminate u_rv _ cst free_evars = do
-      cst' <- eliminateRigidVariable u_rv cst
-      return (cst', free_evars)
-
     unrename u_rv (e_thing, g_thing, x) =
       return (renameE u_rv e_rv e_thing, renameE u_rv g_rv g_thing, x)
 
@@ -1267,8 +1271,10 @@ cftCoerceParameters rev_cos e_xrs g_xrs expected given =
         -- Rename the effects and return values
         let e_eff1 = applyRenaming e_rn e_eff
             e_ret1 = applyRenaming e_rn e_ret
-            g_eff1 = applyRenaming (g_dep_rn undefined) g_eff
-            g_ret1 = applyRenaming (g_dep_rn undefined) g_ret
+            param_var =
+              internalError "cftCoerceParameters: Unexpected use of parameter variable"
+            g_eff1 = applyRenaming (g_dep_rn param_var) g_eff
+            g_ret1 = applyRenaming (g_dep_rn param_var) g_ret
         in coerce_next_parameter
            ((e_param, co) : rev_cos)
            (e_xeff ++ e_xrs)
