@@ -315,30 +315,58 @@ lookupPassConv ty = do
     find_type _ [] = return Nothing
 
 -- | Compute and return a parameter-passing convention variable
-getPassConv :: RCType -> Cvt (BuildBlock LL.Val)
-getPassConv ty = do
+getPassConv :: RCType -> (LL.Val -> Cvt CvExp) -> Cvt CvExp
+getPassConv ty k = do
   -- See if one is already available
   mpcvar <- lookupPassConv ty 
   case mpcvar of
-    Just v  -> return (return $ LL.VarV v)
+    Just v  -> k (LL.VarV v)
     Nothing ->
       -- Try to construct a passing convention
       case unpackConAppCT ty
       of Just (con, args)
            | con `isPyonBuiltin` the_int ->
-               return (return $ builtinVar the_bivar_int_pass_conv)
+               k (builtinVar the_bivar_int_pass_conv)
            | con `isPyonBuiltin` the_float ->
-               return (return $ builtinVar the_bivar_float_pass_conv)
+               k (builtinVar the_bivar_float_pass_conv)
            | con `isPyonBuiltin` the_bool ->
-               return (return $ builtinVar the_bivar_bool_pass_conv)
+               k (builtinVar the_bivar_bool_pass_conv)
            | con `isPyonBuiltin` the_PassConv ->
-               return (return $ builtinVar the_bivar_PassConv_pass_conv)
+               k (builtinVar the_bivar_PassConv_pass_conv)
            | con `isPyonBuiltin` the_AdditiveDict ->
-               return (return $ builtinVar the_bivar_AdditiveDict_pass_conv)
+               k (builtinVar the_bivar_AdditiveDict_pass_conv)
            | con `isPyonBuiltin` the_TraversableDict ->
-               return (return $ builtinVar the_bivar_TraversableDict_pass_conv)
-           | con `isPyonBuiltin` the_list -> undefined
+               k (builtinVar the_bivar_TraversableDict_pass_conv)
+           | con `isPyonBuiltin` the_list ->
+               case args
+               of [arg] ->
+                    getPassConv arg $ \arg_pc ->
+                      build_unary_passconv
+                      (llBuiltin the_fun_passConv_list)
+                      arg_pc
          _ -> internalError $ "getPassConv: Unexpected type " ++ show (pprType ty)
+  where
+    build_unary_passconv pc_ctor arg_pc = do
+      -- Create a variable that will point to the new term
+      list_pc_ptr <- LL.newAnonymousVar (LL.PrimType PointerType)
+      
+      -- Create code using it
+      code <- k (LL.VarV list_pc_ptr)
+      
+      -- Allocate local memory to hold the passconv variable
+      let passconv_size = nativeWordV $ sizeOf passConvRecord
+          code_type = map lowered $ expType code
+          code' =
+            allocateLocalMem list_pc_ptr passconv_size code_type $ do
+              -- To create the passconv value, call the constructor function
+              -- with type, passconv, and return pointer arguments
+              emitAtom0 $ LL.CallA (LL.VarV pc_ctor) [ LL.LitV LL.UnitL
+                                                     , arg_pc
+                                                     , LL.VarV list_pc_ptr]
+              
+              -- Use it
+              asAtom code
+      return (Cv (expType code) (CvExp code'))
 
 -------------------------------------------------------------------------------
 -- Data structure lowering
@@ -640,9 +668,9 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
     var_type = letBinderType binder
     
     -- Create a local memory area
-    alloc p = do
+    alloc p =
       -- Get the local data's parameter passing convention
-      pass_conv <- getPassConv bind_type
+      getPassConv bind_type $ \pass_conv_value ->
       
       -- The expression will bind a pointer
       convertVar p (CoreType var_type) $ \p' -> do
@@ -652,9 +680,8 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
         -- The converted expression allocates memory, runs the RHS to 
         -- initialize the memory, and runs the body to use it.  The RHS
         -- doesn't return a value.
-        let make_expression = do
-              pass_conv_value <- pass_conv
-              let body_type = map lowered $ expType body'
+        let body_type = map lowered $ expType body'
+        let make_expression =
               allocateLocalMem p' pass_conv_value body_type $ do
                 -- Generate code.
                 -- The RHS stores into memory; it returns nothing.
