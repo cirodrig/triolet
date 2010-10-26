@@ -165,14 +165,11 @@ generalize env constraint inferred_types = do
   let local_tyvars = ftv_types Set.\\ ftv_gamma
   
   -- Determine which constraints to generalize over
-  (retained, deferred, defaulted) <-
+  (retained, deferred) <-
     splitConstraint constraint ftv_gamma local_tyvars
   
   when (any (\x -> case x of {IsInst {} -> False; _ -> True}) retained) $
     internalError "generalize: Unexpected constraints"
-    
-  -- Defaulting
-  mapM_ defaultConstraint defaulted
   
   -- Create type schemes
   schemes <- mapM (generalizeType local_tyvars retained) inferred_types

@@ -244,7 +244,7 @@ instancePredicates (IsInst t cls) = do
 instancePredicates _ = internalError "Not an instance predicate"
 
 -- | An action taken by splitConstraint
-data SplitAction = Retain | Defer | Default
+data SplitAction = Retain | Defer | Default | Ambiguous
 
 -- | Partition a set of constraints into a retained set and a deferred set.
 -- A constraint is retained if it mentions any variable in the given set of
@@ -254,13 +254,22 @@ data SplitAction = Retain | Defer | Default
 splitConstraint :: Constraint   -- ^ Constraint to partition
                 -> TyVarSet     -- ^ Free variables
                 -> TyVarSet     -- ^ Bound variables
-                -> IO (Constraint, Constraint, Constraint) 
+                -> IO (Constraint, Constraint)
                    -- ^ Returns (retained constraints,
-                   -- deferred constraints,
-                   -- defaulted constraints)
+                   -- deferred constraints)
 splitConstraint cst fvars qvars = do
   cst' <- reduceContext cst
-  partitionM isRetained cst'
+  (retained, deferred, defaulted, ambiguous) <- partitionM isRetained cst'
+  
+  -- Need to default some constraints?
+  if null defaulted
+    then if null ambiguous 
+         then return (retained, deferred)
+         else fail "Ambiguous constraint"
+    else do
+    -- Apply defaulting rules, then retry
+    new_csts <- mapM defaultConstraint defaulted
+    splitConstraint (concat new_csts ++ cst') fvars qvars
   where
     isRetained prd = do
       fv <- freeTypeVariables prd
@@ -273,30 +282,48 @@ splitConstraint cst fvars qvars = do
       case () of
         _ | fv `Set.isSubsetOf` fvars -> return Defer
           | fv `Set.isSubsetOf` Set.union fvars qvars -> return Retain
-          | otherwise ->
-              ifM (isDefaultablePassConv prd) (return Default) $
-              fail "Ambiguous constraint"
+          | isDefaultable prd -> return Default
+          | otherwise -> return Ambiguous
     
     -- Check if the dependent variable can be fixed using defaulting rules
-    isDefaultablePassConv _ = return False
+    isDefaultable (IsInst head cls) =
+      cls == tiBuiltin the_Traversable
 
-    partitionM f xs = go xs [] [] []
+    partitionM f xs = go xs [] [] [] []
       where
-        go (x:xs) lefts rights defaults = do
+        go (x:xs) lefts rights defaults ambigs = do
           b <- f x
           case b of
-            Retain  -> go xs (x:lefts) rights defaults
-            Defer   -> go xs lefts (x:rights) defaults
-            Default -> go xs lefts rights (x:defaults)
+            Retain    -> go xs (x:lefts) rights defaults ambigs
+            Defer     -> go xs lefts (x:rights) defaults ambigs
+            Default   -> go xs lefts rights (x:defaults) ambigs
+            Ambiguous -> go xs lefts rights defaults (x:ambigs)
 
-        go [] lefts rights defaults =
-          return (reverse lefts, reverse rights, reverse defaults)
+        go [] lefts rights defaults ambigs =
+          return (reverse lefts, reverse rights, reverse defaults,
+                  reverse ambigs)
 
--- | Perform defaulting on a constraint.  The constraint must have been
--- selected for defaulting by 'splitConstraint'.
+-- | Perform defaulting on a constraint, unifying the variable mentioned in
+-- the type head with some predetermined type.  The constraint must have been
+-- selected for defaulting by 'splitConstraint'.  Defaulting first checks if
+-- the given type was already unified (by an earlier defaulting step) and skips
+-- if that is the case.
+--    
+-- Defaulting rules are as follows:
+--
+-- * @Traversable@ defaults to @list@
 defaultConstraint cst =
   case cst
-  of _ -> internalError "Cannot default constraint"
+  of IsInst head cls
+       | cls == tiBuiltin the_Traversable -> do
+           can_head <- canonicalizeHead head
+           case can_head of
+             ConTy c
+               | isFlexibleTyVar c ->
+                   unify noSourcePos (ConTy c) (ConTy $ tiBuiltin the_con_list)
+               | isTyVar c -> internalError "defaultConstraint: Unexpected rigid variable"
+             _ -> return []
+     _ -> internalError "Cannot default constraint"
        
 
 -------------------------------------------------------------------------------
