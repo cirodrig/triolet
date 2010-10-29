@@ -1,5 +1,5 @@
 
-{-# LANGUAGE TypeFamilies, EmptyDataDecls, StandaloneDeriving,
+{-# LANGUAGE TypeFamilies, Rank2Types, EmptyDataDecls, StandaloneDeriving,
     FlexibleInstances #-}
 module LLParser.AST where
 
@@ -7,13 +7,16 @@ import Data.List
 
 import Gluon.Common.Label
 import LowLevel.Types
+import qualified LowLevel.Syntax as LL
 
 data Parsed
 
+type family Expr a :: *
 type family RecordName a :: *
 type family TypeName a :: *
 type family VarName a :: *
-     
+
+type instance Expr Parsed = BaseExpr Parsed
 type instance RecordName Parsed = String
 type instance TypeName Parsed = String
 type instance VarName Parsed = String
@@ -103,7 +106,7 @@ type Parameters a = [Parameter a]
 -- field names, and possibly a type cast.
 data Field a = Field (RecordName a) [FieldName] (Maybe (Type a))
 
-data Expr a =
+data BaseExpr a =
     -- | A variable
     VarE (VarName a)
     -- | An integer literal
@@ -169,7 +172,8 @@ deriving instance Show (DataDef Parsed)
 deriving instance Show (FunctionDef Parsed)
 deriving instance Show (Parameter Parsed)
 deriving instance Show (Field Parsed)
-deriving instance Show (Expr Parsed)
+deriving instance Show (BaseExpr Parsed)
 deriving instance Show (Atom Parsed)
 deriving instance Show (LValue Parsed)
 deriving instance Show (Stmt Parsed)
+

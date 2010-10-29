@@ -55,6 +55,7 @@ import Globals
 
 data Resolved
 
+type instance Expr Resolved = BaseExpr Resolved
 type instance VarName Resolved = LL.Var
 type instance RecordName Resolved = ResolvedRecord
 

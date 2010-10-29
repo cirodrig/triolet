@@ -40,7 +40,8 @@ import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
 import qualified LLParser.Parser as LLParser
-import qualified LLParser.GenLowLevel as LLParser
+import qualified LLParser.TypeInference as LLParser
+import qualified LLParser.GenLowLevel2 as LLParser
 
 main = do
   -- Initialiation
@@ -151,7 +152,9 @@ compilePyonToPyonAsm path text = do
 
 parsePyonAsm input_path input_text = do
   (mod_name, externs, ast) <- LLParser.parseFile input_path input_text
-  LLParser.generateLowLevelModule input_path mod_name externs ast
+  (t_externs, t_defs) <-
+    LLParser.typeInferModule input_path mod_name externs ast
+  LLParser.generateLowLevelModule t_externs t_defs
 
 -- | Compile an input low-level module to C code.  Generate a header file
 -- if there are exported routines.
