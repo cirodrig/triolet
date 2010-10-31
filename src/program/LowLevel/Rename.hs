@@ -41,10 +41,9 @@ setRenaming :: Renaming -> Rn -> Rn
 setRenaming rn (p, _) = (p, rn)
 
 -- | Assign a fresh ID to this variable, and insert the assignment into the
---   renaming.  The variable must not be externally defined.
+--   renaming.
 renameVariable :: Renaming -> Var -> FreshVarM (Renaming, Var)
 renameVariable rn v
-  | varIsExternal v = internalError "renameVariable: Variable is external"
   | otherwise = do
       v' <- newVar (varName v) (varExternalName v) (varType v)
       let rn' = IntMap.insert (fromIdent $ varID v) v' rn

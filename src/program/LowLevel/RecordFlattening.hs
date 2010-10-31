@@ -27,18 +27,23 @@ import LowLevel.Build
 import SystemF.Builtins
 import Globals
 
+-- | An expansion of a variable.  A variable's expansion may be unknown if
+--   it was imported.
+data Expansion = Expansion [Val] | UnknownExpansion
+
 -- | During flattening, each variable is associated with its equivalent
 -- flattened list of variables.
-type Expansion = IntMap.IntMap [Val]
+type Expansions = IntMap.IntMap Expansion
 
 -- | Expand a use of variable into a list of values.
-expand :: Expansion -> Var -> [Val]
+expand :: Expansions -> Var -> [Val]
 expand m v = expand_var v
   where
     -- Expand a variable, recursively.
     expand_var v =
       case IntMap.lookup (fromIdent $ varID v) m
-      of Just vs -> concatMap (expand_value_from v) vs
+      of Just (Expansion vs) -> concatMap (expand_value_from v) vs
+         Just UnknownExpansion -> [VarV v]
          Nothing -> internalError "expand: No information for variable"
         
     -- Expand a value that was created from 'v'.  If the variable doesn't 
@@ -60,7 +65,7 @@ expand m v = expand_var v
 newtype RF a = RF {runRF :: ReaderT RFEnv IO a} deriving(Monad, Functor)
 
 data RFEnv = RFEnv { rfVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
-                   , rfExpansions :: !Expansion
+                   , rfExpansions :: !Expansions
                    }
 
 instance Supplies RF (Ident Var) where
@@ -70,29 +75,26 @@ assign :: Var -> [Val] -> RF a -> RF a
 assign v expansion m = RF $ local (insert_assignment v expansion) $ runRF m
   where
     insert_assignment v expansion env =
-      env {rfExpansions = IntMap.insert (fromIdent $ varID v) expansion $
-                          rfExpansions env}
+      env {rfExpansions =
+              IntMap.insert (fromIdent $ varID v) (Expansion expansion) $
+              rfExpansions env}
 
 expandVar :: Var -> RF [Val]
-expandVar v 
-  | varIsExternal v = return [VarV v] -- External variables aren't records
-  | otherwise = RF $ asks get_expansion
+expandVar v = RF $ asks get_expansion
   where
-    get_expansion env =
-      case IntMap.lookup (fromIdent $ varID v) $ rfExpansions env
-      of Nothing -> internalError "expandVar: No expansion for variable"
-         Just vs -> vs
+    get_expansion env = expand (rfExpansions env) v
 
 -- | If a parameter variable is a record, rename it to some new parameter
 -- variables
 defineParam :: ParamVar -> ([ParamVar] -> RF a) -> RF a
-defineParam v k = do
-  expanded_var <-
-    case varType v
-    of PrimType UnitType -> return []
-       PrimType t        -> return [v] -- No change
-       RecordType rec    -> defineRecord rec
-  assign v (map VarV expanded_var) $ k expanded_var
+defineParam v k =
+  case varType v
+  of PrimType UnitType -> assign_to []
+     PrimType t        -> assign_to [v] -- No change
+     RecordType rec    -> defineRecord rec assign_to
+  where
+    assign_to expanded_list =
+      assign v (map VarV expanded_list) $ k expanded_list
        
 -- | Define a list of parameter variables
 defineParams :: [ParamVar] -> ([ParamVar] -> RF a) -> RF a
@@ -103,9 +105,13 @@ expandedFieldSize :: StaticField -> Int
 expandedFieldSize f = length $ flattenFieldType $ fieldType f
 
 -- | Create a new parameter variable for each expanded record field
-defineRecord :: StaticRecord -> RF [ParamVar]
-defineRecord record =
-  mapM (newAnonymousVar . PrimType) $ flattenRecordType record
+defineRecord :: StaticRecord -> ([ParamVar] -> RF a) -> RF a
+defineRecord record k = do
+  expanded_vars <- mapM (newAnonymousVar . PrimType) $ flattenRecordType record
+  foldr assign_expanded_var (k expanded_vars) expanded_vars
+  where
+    -- The parameter variables expand to themselves
+    assign_expanded_var v k = assign v [VarV v] k
 
 flattenTypeList :: [ValueType] -> [PrimType]
 flattenTypeList xs = concatMap flattenType xs
@@ -288,13 +294,17 @@ flattenDataDef (DataDef v record vals) = do
 flattenRecordTypes :: Module -> IO Module
 flattenRecordTypes mod =
   withTheLLVarIdentSupply $ \var_supply -> do
-    let env = RFEnv var_supply IntMap.empty
+    let imports = makeImportMap (moduleImports mod)
+        env = RFEnv var_supply imports
     runReaderT (runRF flatten_module) env
   where
     flatten_module = do
       (fun_defs', data_defs') <-
         flattenTopLevel (moduleFunctions mod) (moduleData mod)
       return $ mod {moduleFunctions = fun_defs', moduleData = data_defs'}
+
+makeImportMap imports =
+  IntMap.fromList [(fromIdent $ varID v, UnknownExpansion) | v <- imports]
 
 -------------------------------------------------------------------------------
 

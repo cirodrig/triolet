@@ -28,13 +28,15 @@ mangleLabel name =
 
 -- | Get a variable's mangled name.
 --
--- If the variable has an exported name, then that variable is returned without
--- mangling.  If the variable has a label, then the variable's label and 
--- ID are used.
+-- If the variable has an exported name, then that name is returned without
+-- mangling.  If the variable is externally visible, then a name is generated 
+-- from its label.  (It's not allowed to have two externally visible variables
+-- with the same label.)  If not externally visible, then the variable's
+-- label and ID are used.
 --
 -- Otherwise, a single letter and the variable's ID are used.  This fallback
--- situation is susceptible to name conflicts, and should only be used for 
--- symbols that are not visible outside the current file.
+-- situation is susceptible to cross-module name conflicts, and should only
+-- be used for symbols that are not visible outside the current module.
 mangledVarName :: Var -> String
 mangledVarName v
   | Just s <- varExternalName v = s -- Use external name if given

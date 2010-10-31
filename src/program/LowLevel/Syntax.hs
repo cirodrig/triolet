@@ -81,8 +81,8 @@ data Var =
   { -- | An ID uniquely identifying this variable.  If two variables have
     -- the same ID, all their other fields should be equal also.
     varID :: {-# UNPACK #-} !(Ident Var)
-    -- | True if this is an externally defined variable.
-    -- A variable has a definition iff it is /not/ externally defined.
+    -- | True if this variable is visible outside the module where it is
+    --   defined.  Exported variables always have a label and are global.
   , varIsExternal :: {-# UNPACK #-} !Bool
   , varName :: !(Maybe Label)
     -- | The variable's externally visible name, as it appears in object code.
