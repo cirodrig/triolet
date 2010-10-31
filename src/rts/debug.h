@@ -1,4 +1,4 @@
 
-import pointer pyon_db_word;
-import pointer pyon_db_int;
-import pointer pyon_db_pointer;
+import procedure pyon_db_word (uint32) -> ();
+import procedure pyon_db_int (int32) -> ();
+import procedure pyon_db_pointer (pointer) -> ();

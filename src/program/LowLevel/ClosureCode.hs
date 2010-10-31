@@ -283,7 +283,7 @@ withGlobalFunctions :: [FunDef] -- ^ Functions to process
                     -> CC ()
 withGlobalFunctions defs scan gen = do
   -- Create closures and add them to the environment
-  clos <- runFreshVarCC $ mapM mkGlobalClosure defs
+  clos <- runFreshVarCC $ mapM createGlobalClosure defs
   funs <- localClosures (catMaybes clos) scan
   
   -- Generate code of closures
@@ -297,11 +297,12 @@ withGlobalFunctions defs scan gen = do
 
 -- | Create a closure description if the function is a closure function.  
 -- Otherwise return Nothing.  No code is generated.
-mkGlobalClosure :: FunDef -> FreshVarM (Maybe Closure)
-mkGlobalClosure (FunDef v fun)
+createGlobalClosure :: FunDef -> FreshVarM (Maybe Closure)
+createGlobalClosure (FunDef v fun)
   | isClosureFun fun = do
-      entry_points <- mkEntryPoints NeverDeallocate (funType fun) (varName v)
-      return $ Just $ globalClosure v entry_points
+      entry_points <-
+        mkEntryPoints NeverDeallocate (funType fun) (varName v) (Just v)
+      return $ Just $ mkGlobalClosure v entry_points
   | otherwise = return Nothing
 
 withLocalFunctions :: [FunDef]          -- ^ Function definitions
@@ -339,7 +340,7 @@ mkRecClosures defs captureds = do
   -- Create entry points structure
   deallocator_fn <- newAnonymousVar (PrimType PointerType)
   entry_points <- forM defs $ \(FunDef v f) ->
-    mkEntryPoints (CustomDeallocator deallocator_fn) (funType f) (varName v)
+    mkEntryPoints (CustomDeallocator deallocator_fn) (funType f) (varName v) (Just v)
  
   return $ closureGroup $
     lazyZip3 (map funDefiniendum defs) entry_points captureds
@@ -565,11 +566,11 @@ closure var is_global entry captured recursive = checks $
            in Just $ groupSharedRecord captured_record group_record
          Nothing -> Nothing
 
-nonrecClosure :: Var -> EntryPoints -> [Var] -> Closure
-nonrecClosure v e cap = closure v False e cap Nothing
+mkNonrecClosure :: Var -> EntryPoints -> [Var] -> Closure
+mkNonrecClosure v e cap = closure v False e cap Nothing
 
-globalClosure :: Var -> EntryPoints -> Closure
-globalClosure v e = closure v True e [] Nothing
+mkGlobalClosure :: Var -> EntryPoints -> Closure
+mkGlobalClosure v e = closure v True e [] Nothing
 
 closureGroup :: [(Var, EntryPoints, [Var])] -> ClosureGroup
 closureGroup xs = group
@@ -970,8 +971,8 @@ emitLambdaClosure1 lambda_type direct captured_vars = do
     else do v <- newAnonymousVar (PrimType PointerType)
             return $ CustomDeallocator v
 
-  entry_points <- mkEntryPoints want_dealloc lambda_type Nothing
-  let clo = nonrecClosure fun_var entry_points captured_vars
+  entry_points <- mkEntryPoints want_dealloc lambda_type Nothing Nothing
+  let clo = mkNonrecClosure fun_var entry_points captured_vars
       
   -- Generate code
   info_def <- emitInfoTable clo

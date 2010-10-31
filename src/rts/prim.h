@@ -1,4 +1,4 @@
 
-extern owned pyon.internal.prim.zero_int;
-extern owned pyon.internal.prim.add_int;
-extern owned pyon.internal.prim.sub_int;
+extern function pyon.internal.prim.zero_int () -> int;
+extern function pyon.internal.prim.add_int (int, int) -> int;
+extern function pyon.internal.prim.sub_int (int, int) -> int;

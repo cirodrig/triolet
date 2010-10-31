@@ -1,4 +1,5 @@
 
-extern owned pyon.internal.structures.additiveDict;
-extern pointer pyon.internal.structures.int_pass_conv;
-extern pointer pyon.internal.structures.AdditiveDict_pass_conv;
+extern function pyon.internal.structures.additiveDict
+  (owned, owned, owned, pointer) -> ();
+extern data pointer pyon.internal.structures.int_pass_conv;
+extern data pointer pyon.internal.structures.AdditiveDict_pass_conv;

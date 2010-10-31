@@ -410,22 +410,52 @@ topLevelDefs = do defs <- def `sepEndBy` match SemiTok
 -------------------------------------------------------------------------------
 -- Module parsing
 
+-- | Parse an external declaration
+--    
+-- @(extern | import)
+--    (data type | function | procedure)
+--    (fqn [string] | identifier [string])
+--    (parameter_type_list -> return_type_list)?@
 externDecl :: P (ExternDecl Parsed)
 externDecl = extern_decl <|> import_decl
   where
-    extern_decl = do
-      match ExternTok
-      extern_type <- parseGlobalType
-      label <- fullyQualifiedName
-      c_name <- optionMaybe string
-      return $ ExternDecl extern_type label c_name
+    extern_decl = match ExternTok >> parse_decl make_extern_decl
+      where    
+        make_extern_decl = do
+          label <- fullyQualifiedName
+          c_name <- optionMaybe string
+          return $ \t -> ExternDecl t label c_name
+    
+    import_decl = match ImportTok >> parse_decl make_import_decl
+      where
+        make_import_decl = do
+          local_name <- identifier
+          c_name <- option local_name string
+          return $ \t -> ImportDecl t local_name c_name
 
-    import_decl = do
-      match ImportTok
-      extern_type <- parseGlobalType
-      local_name <- identifier
-      c_name <- option local_name string
-      return $ ImportDecl extern_type c_name local_name
+    parse_decl :: P (ExternType Parsed -> ExternDecl Parsed)
+               -> P (ExternDecl Parsed)
+    parse_decl parse_name = parse_data <|> parse_function
+      where
+        parse_data = do
+          match DataTok
+          extern_type <- parseGlobalType
+          mk <- parse_name
+          return $ mk (ExternData extern_type)
+        
+        parse_function = do
+          is_procedure <- choice [ match FunctionTok >> return False 
+                                 , match ProcedureTok >> return True]
+          mk <- parse_name
+          params <- type_list
+          match ArrowTok
+          returns <- type_list
+          return $ mk $ if is_procedure
+                        then ExternProcedure params returns
+                        else ExternFunction params returns
+
+        type_list =
+          fmap (:[]) parseType <|> parenList parseType
 
 parseModule :: P (ModuleName, [ExternDecl Parsed], [Def Parsed])
 parseModule = do

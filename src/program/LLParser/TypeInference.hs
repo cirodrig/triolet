@@ -930,6 +930,7 @@ withExternalVariables edefs m = do
 --    
 -- If the variable belongs outside the current module, then define it here.
 -- Otherwise, the variable must be defined later in the module.
+defineExternalVar :: ExternDecl Parsed -> NR (LL.Var)
 defineExternalVar decl = do
   (v, t) <- lookupOrCreateExternalVar decl
   -- If the variable is not in the current module, then define it.
@@ -938,35 +939,40 @@ defineExternalVar decl = do
   let mod = case LL.varName v 
             of Just n -> moduleOf n
                Nothing -> internalError "defineExternalVar"
-  when (mod /= current_module) $ defineVar v t
+  when (mod /= current_module) $ defineVar v (PrimT t)
   return v
 
 -- Get or create an external variable definition
-lookupOrCreateExternalVar :: ExternDecl Parsed -> NR (LL.Var, Type Typed)
-lookupOrCreateExternalVar decl = 
-  let (primtype, label, external_name) =
+lookupOrCreateExternalVar :: ExternDecl Parsed -> NR (LL.Var, PrimType)
+lookupOrCreateExternalVar decl = do
+  let (label, external_name) =
         case decl
-        of ExternDecl pt lab ename ->
-             (pt, lab, ename)
-           ImportDecl pt local_name ename ->
-             (pt, builtinLabel local_name, Just ename)
-  in case getBuiltinByLabel label
-     of Just bivar
-          | LL.varType bivar == LL.PrimType primtype &&
-            LL.varExternalName bivar == external_name ->
-              -- Return an existing built-in variable
-              return (bivar, PrimT primtype)
-          | otherwise ->
-              -- Same name as a built-in variable, but different fields
-              error $ "Incompatible definition of built-in variable '" ++
-              showLabel label ++ "'"
-        Nothing -> do
-          -- Create a new variable
-          let name = labelUnqualifiedName label
-              mod = moduleOf label
-              ty = LL.PrimType primtype
-          v <- createExternalVar mod name external_name ty
-          return (v, PrimT primtype)
+        of ExternDecl _ lab ename ->
+             (lab, ename)
+           ImportDecl _ local_name ename ->
+             (builtinLabel local_name, Just ename)
+      primtype = externTypePrimType (externType decl)
+  
+  -- Get the variable
+  bivar <- case getBuiltinByLabel label of
+    Just bivar
+      | LL.varType bivar == LL.PrimType primtype &&
+        LL.varExternalName bivar == external_name ->
+          -- Return an existing built-in variable
+          return bivar
+      | otherwise ->
+          -- Same name as a built-in variable, but different fields
+          error $ "Incompatible definition of built-in variable '" ++
+          showLabel label ++ "'"
+    Nothing -> do
+      -- Create a new variable
+      let name = labelUnqualifiedName label
+          mod = moduleOf label
+          ty = LL.PrimType primtype
+      createExternalVar mod name external_name ty
+
+  -- Determine the type
+  return (bivar, primtype)
 
 -------------------------------------------------------------------------------
 -- Entry point

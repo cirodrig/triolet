@@ -1,8 +1,8 @@
 
-import pointer free_pap;
-import pointer apply_o_f;
-import pointer apply_o;
-import pointer apply_i32_f;
-import pointer apply_i32;
-import pointer apply_f32_f;
-import pointer apply_f32;
+import procedure free_pap (pointer) -> ();
+import procedure apply_o_f (pointer, pointer) -> pointer;
+import procedure apply_o (pointer, pointer, pointer) -> ();
+import procedure apply_i32_f (pointer, uint32) -> pointer;
+import procedure apply_i32 (pointer, uint32, pointer) -> ();
+import procedure apply_f32_f (pointer, float32) -> pointer;
+import procedure apply_f32 (pointer, float32, pointer) -> ();

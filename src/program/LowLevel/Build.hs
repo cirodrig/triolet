@@ -664,8 +664,9 @@ mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
                  WantClosureDeallocator
               -> FunctionType   -- ^ Function type
               -> Maybe Label    -- ^ Function name
+              -> Maybe Var      -- ^ Global closure variable
               -> m EntryPoints  -- ^ Creates an EntryPoints structure
-mkEntryPoints want_dealloc ftype label 
+mkEntryPoints want_dealloc ftype label global_closure
   | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
   | otherwise = do
       [inf, dir, exa, ine] <-
@@ -678,7 +679,7 @@ mkEntryPoints want_dealloc ftype label
                 CustomDeallocator f ->
                   return $ Just f
       let arity = length $ ftParamTypes ftype
-      return $! EntryPoints ftype arity dir exa ine dea inf
+      return $! EntryPoints ftype arity dir exa ine dea inf global_closure
 
 {-
 passConvValue :: Int -> Int -> Var -> Var -> Val

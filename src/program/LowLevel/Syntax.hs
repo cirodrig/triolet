@@ -234,13 +234,14 @@ ftReturnTypes (FunctionType _ _ rs) = rs
 --   records) are not included here.
 data EntryPoints =
   EntryPoints
-  { _epType         :: {-# UNPACK #-} !FunctionType
-  , _epArity        :: {-# UNPACK #-} !Int
-  , _epDirectEntry  :: !Var
-  , _epExactEntry   :: !Var
-  , _epInexactEntry :: !Var
-  , _epDeallocEntry :: !(Maybe Var)      -- Nothing if never deallocated
-  , _epInfoTable    :: !Var
+  { _epType          :: {-# UNPACK #-} !FunctionType
+  , _epArity         :: {-# UNPACK #-} !Int
+  , _epDirectEntry   :: !Var
+  , _epExactEntry    :: !Var
+  , _epInexactEntry  :: !Var
+  , _epDeallocEntry  :: !(Maybe Var)      -- Nothing if never deallocated
+  , _epInfoTable     :: !Var
+  , _epGlobalClosure :: !(Maybe Var) -- Only for global functions
   }
 
 -- | Get the type of a function
@@ -271,9 +272,14 @@ inexactEntry = _epInexactEntry
 deallocEntry :: EntryPoints -> Maybe Var
 deallocEntry = _epDeallocEntry
 
--- | Get  the info table of a function
+-- | Get the info table of a function
 infoTableEntry :: EntryPoints -> Var
 infoTableEntry = _epInfoTable
+
+-- | Get the global closure of a function.
+-- Only global functions have a global closure.
+globalClosure :: EntryPoints -> Maybe Var
+globalClosure = _epGlobalClosure
 
 -- | Create a new internal variable
 newVar :: Supplies m (Ident Var) =>

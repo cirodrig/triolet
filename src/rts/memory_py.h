@@ -1,11 +1,16 @@
 
-import pointer pyon_alloc;
-import pointer pyon_dealloc;
-import pointer memcpy;
+import procedure pyon_alloc (word) -> pointer;
+import procedure pyon_dealloc (pointer) -> ();
+import procedure memcpy (pointer, pointer, word) -> ();
 
-extern owned pyon.internal.memory_py.deallocF;
-extern owned pyon.internal.memory_py.dummy_finalizer "dummy_finalizer";
-extern owned pyon.internal.memory_py.copy1F "copy1F";
-extern owned pyon.internal.memory_py.copy2F "copy2F";
-extern owned pyon.internal.memory_py.copy4F "copy4F";
-extern owned pyon.internal.memory_py.copy;
+extern function pyon.internal.memory_py.deallocF (pointer) -> ();
+extern function pyon.internal.memory_py.dummy_finalizer "dummy_finalizer"
+  (pointer) -> ();
+extern function pyon.internal.memory_py.copy1F "copy1F"
+  (pointer, pointer) -> ();
+extern function pyon.internal.memory_py.copy2F "copy2F"
+  (pointer, pointer) -> ();
+extern function pyon.internal.memory_py.copy4F "copy4F"
+  (pointer, pointer) -> ();
+extern function pyon.internal.memory_py.copy
+  (pointer, pointer, pointer) -> ();

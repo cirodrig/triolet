@@ -51,16 +51,43 @@ data Type a =
 
 type FieldName = String
 
+-- | What kind of external data a thing is and what type it has.
+data ExternType a =
+    -- | A procedure with parameter and return types
+    ExternProcedure [Type a] [Type a]
+    -- | A function with parameter and return types
+  | ExternFunction [Type a] [Type a]
+    -- | A global variable, either Pointer or Owned type
+  | ExternData PrimType
+
+externTypePrimType :: ExternType a -> PrimType
+externTypePrimType (ExternProcedure _ _) = PointerType
+externTypePrimType (ExternFunction _ _)  = OwnedType
+externTypePrimType (ExternData pt)       = pt
+
 -- | An external symbol declaration, giving the Pyon name and/or externally 
 -- visible name of a symbol.
 --
--- External symbols can have pointer or owned type.
 data ExternDecl a =
     -- | An externally visible Pyon symbol, defined in this file or in another
     -- file.
-    ExternDecl !PrimType Label (Maybe String)
-    -- | An imported symbol, assigned a local name
-  | ImportDecl !PrimType (VarName a) String
+    ExternDecl 
+    { -- | Type of the external symbol
+      externType :: !(ExternType a)
+      -- | Symbol name
+    , externLabel :: Label
+      -- | Optional name visible outside Pyon
+    , externExportedName :: Maybe String
+    }
+    -- | An imported symbol that was not created by the Pyon compiler.
+  | ImportDecl 
+    { -- | Type of the external symbol.  Must be procedure or data.
+      externType :: !(ExternType a)
+      -- | The variable representing this symbol
+    , externName :: VarName a
+      -- | The name visible outside Pyon
+    , externImportedName :: String
+    }
 
 -- | A definition
 data Def a =
