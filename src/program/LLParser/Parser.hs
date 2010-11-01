@@ -131,6 +131,7 @@ parseType = prim_type <|> record_type <|> bytes_type <?> "type"
                 , (UInt16Tok, IntType Unsigned S16)
                 , (UInt32Tok, IntType Unsigned S32)
                 , (UInt64Tok, IntType Unsigned S64)
+                , (UnitTok, UnitType)
                 , (FloatTok, FloatType S32)
                 , (DoubleTok, FloatType S64)
                 , (OwnedTok, OwnedType)
@@ -277,11 +278,12 @@ derefExpr = deref <|> atomicExpr
 
 -- | An atomic expression.  Expressions are atomic if they are not made of 
 -- parts separated by spaces.
-atomicExpr = fmap VarE identifier <|> true_lit <|> false_lit <|> null_lit <|>
-             wild <|> parens expr
+atomicExpr = fmap VarE identifier <|> true_lit <|> false_lit <|>
+             nil_lit <|> null_lit <|> wild <|> parens expr
   where
     true_lit = match TrueTok >> return (BoolLitE True)
     false_lit = match FalseTok >> return (BoolLitE False)
+    nil_lit = match NilTok >> return NilLitE
     null_lit = match NullTok >> return NullLitE
     wild = match WildTok >> return WildE
 

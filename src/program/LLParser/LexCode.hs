@@ -70,6 +70,7 @@ data Token =
   | Int64Tok
   | LoadTok
   | ModuleTok
+  | NilTok
   | NullTok
   | OwnedTok
   | PointerTok
@@ -82,6 +83,7 @@ data Token =
   | UInt16Tok
   | UInt32Tok
   | UInt64Tok
+  | UnitTok
     deriving(Eq)
 
 showToken :: Token -> String
@@ -134,6 +136,7 @@ showToken Int32Tok = "'int32'"
 showToken Int64Tok = "'int64'"
 showToken LoadTok = "'load'"
 showToken ModuleTok = "'module'"
+showToken NilTok = "'nil'"
 showToken NullTok = "'null'"
 showToken OwnedTok = "'owned'"
 showToken PointerTok = "'pointer'"
@@ -146,6 +149,7 @@ showToken UInt8Tok = "'uint8'"
 showToken UInt16Tok = "'uint16'"
 showToken UInt32Tok = "'uint32'"
 showToken UInt64Tok = "'uint64'"
+showToken UnitTok = "'unit'"
 
 -- | A token labeled with a source position
 data T = T !SourcePos !Token

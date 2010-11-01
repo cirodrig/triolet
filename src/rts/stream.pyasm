@@ -31,17 +31,24 @@ procedure Stream_dealloc (pointer self) -> () {
 // by calling a function.
 
 // Create a stream that produces a single value
-function Stream_return (PassConv return_type, owned produce_value) -> owned {
+function Stream_return (unit _, unit _,
+                        pointer return_type_repr,
+                        owned produce_value) -> owned {
   ALLOC_OBJECT(s, Stream, Stream_info)
-  s @! Stream.next = owned call Stream_return_next(return_type, produce_value);
+  s @! Stream.next = owned call Stream_return_next(s @ Stream.return_repr,
+                                                   produce_value);
   s @! Stream.initialize = Stream_return_initialize;
+  s @! Stream.return_repr.size = return_type_repr @! PassConv.size;
+  s @! Stream.return_repr.align = return_type_repr @! PassConv.align;
+  s @! Stream.return_repr.copy = return_type_repr @! PassConv.copy;
+  s @! Stream.return_repr.finalize = return_type_repr @! PassConv.finalize;
   s @! Stream.state_size = sizeof bool;
   s @! Stream.state_align = alignof bool;
   s @! Stream.state_finalize = dummy_finalizer;
   s;
 };
 
-function Stream_return_next (PassConv return_type,
+function Stream_return_next (pointer return_type_repr,
                              owned produce_value,
                              pointer state,
                              pointer ret) -> bool {
@@ -83,31 +90,36 @@ record Stream_bind_state {
   pointer producer_state;       // Producer's state
   pointer temporary_state;      // Producer's current output value
                                 // (if transformer stream is not NULL)
+  PassConv produced_repr;
 };
 
 // Chain streams together.
-function Stream_bind (PassConv produced_type,
-                      PassConv transformed_type,
+function Stream_bind (unit _, unit _, unit _,
+                      pointer produced_type_repr,
+                      pointer transformed_type_repr,
                       owned producer,
                       owned transformer) -> owned {
   ALLOC_OBJECT(s, Stream, Stream_info)
+  produced_type_size = produced_type_repr @! PassConv.size;
+  produced_type_fini = produced_type_repr @! PassConv.finalize;
   s @! Stream.next =
-      owned call Stream_bind_next(produced_type, transformed_type,
-                                  producer, transformer);
+      owned call Stream_bind_next(produced_type_fini, producer, transformer);
   s @! Stream.initialize =
-      owned call Stream_bind_initialize(produced_type, transformed_type,
-                                        producer);
+      owned call Stream_bind_initialize(produced_type_size, producer);
+  s @! Stream.return_repr.size = transformed_type_repr @! PassConv.size;
+  s @! Stream.return_repr.align = transformed_type_repr @! PassConv.align;
+  s @! Stream.return_repr.copy = transformed_type_repr @! PassConv.copy;
+  s @! Stream.return_repr.finalize = transformed_type_repr @! PassConv.finalize;
   s @! Stream.state_size = sizeof Stream_bind_state;
   s @! Stream.state_align = alignof Stream_bind_state;
   s @! Stream.state_finalize =
-      owned call Stream_bind_finalize(produced_type,
+      owned call Stream_bind_finalize(produced_type_fini,
                                       producer @! Stream.state_finalize);
   s;
 };
 
 // Initialize a bound stream.
-function Stream_bind_initialize (PassConv produced_type,
-                                 PassConv transformed_type,
+function Stream_bind_initialize (word produced_type_size,
                                  owned producer,
                                  pointer state) -> () {
   // Initialize the transformer pointer
@@ -122,10 +134,9 @@ function Stream_bind_initialize (PassConv produced_type,
   state @! Stream_bind_state.producer_state = pstate;
 
   // Allocate the temporary storage
-  PassConv {produced_size, _, _, _} = produced_type;
   PYON_DB_ALLOC(word 2002)
   state @! Stream_bind_state.temporary_state =
-      pointer primcall pyon_alloc (produced_size);
+      pointer primcall pyon_alloc (produced_type_size);
 
   ();
 };
@@ -135,8 +146,7 @@ function Stream_bind_initialize (PassConv produced_type,
 // If that is not successful, try to pull a new value from the producer, then
 // create a transformer and try to pull a value from it again.
 // If the transformer and producer are both depleted, the stream is depleted.
-function Stream_bind_next(PassConv produced_type,
-                          PassConv transformed_type,
+function Stream_bind_next(owned produced_type_fini,
                           owned producer,
                           owned mk_transformer,
                           pointer state,
@@ -162,12 +172,11 @@ function Stream_bind_next(PassConv produced_type,
       state @! Stream_bind_state.transformer = null;
 
       // Free temporary state
-      PassConv {_, _, _, produced_type_finalize} = produced_type;
-      () = () call produced_type_finalize
+      () = () call produced_type_fini
           (state @! Stream_bind_state.temporary_state);
 
       // Retry
-      bool call Stream_bind_next(produced_type, transformed_type, producer,
+      bool call Stream_bind_next(produced_type_fini, producer,
                                  mk_transformer, state, ret);
     };
   } else {
@@ -190,7 +199,7 @@ function Stream_bind_next(PassConv produced_type,
       // Retry, with the new transformer stream
       state @! Stream_bind_state.transformer = transformer_stream;
       state @! Stream_bind_state.transformer_state = transformer_state;
-      bool call Stream_bind_next(produced_type, transformed_type, producer,
+      bool call Stream_bind_next(produced_type_fini, producer,
                                  mk_transformer, state, ret);
     } else {
       // Stream is depleted
@@ -199,7 +208,7 @@ function Stream_bind_next(PassConv produced_type,
   };
 };
 
-function Stream_bind_finalize (PassConv produced_type,
+function Stream_bind_finalize (owned produced_type_fini,
                                owned finalize_producer,
                                pointer state) -> () {
   // Release the transformer
@@ -213,8 +222,7 @@ function Stream_bind_finalize (PassConv produced_type,
     DECREF(transformer_ptr)
 
     // Finalize the temporary state
-    PassConv {_, _, _, finalize_temporary} = produced_type;
-    () call finalize_temporary (state @! Stream_bind_state.temporary_state);
+    () call produced_type_fini (state @! Stream_bind_state.temporary_state);
   } else {
     ();
   };

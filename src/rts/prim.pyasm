@@ -7,7 +7,7 @@ module pyon.internal.prim;
 #include "prim.h"
 #include "pyasm_records.h"
 
-function zero_int () -> int {
+function zero_int (unit _) -> int {
   int 0;
 };
 

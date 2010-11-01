@@ -13,4 +13,4 @@ extern function pyon.internal.memory_py.copy2F "copy2F"
 extern function pyon.internal.memory_py.copy4F "copy4F"
   (pointer, pointer) -> ();
 extern function pyon.internal.memory_py.copy
-  (pointer, pointer, pointer) -> ();
+  (unit, pointer, pointer, pointer) -> ();

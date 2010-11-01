@@ -8,7 +8,7 @@ module pyon.internal.structures;
 #include "pyasm_records.h"
 
 // Construct an Additive dictionary
-function additiveDict (owned zero, owned add, owned sub, pointer ret) -> () {
+function additiveDict (unit _, owned zero, owned add, owned sub, pointer ret) -> () {
   ret @! AdditiveDict.add = add;
   ret @! AdditiveDict.subtract = sub;
   ret @! AdditiveDict.zero = zero;

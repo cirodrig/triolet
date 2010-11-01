@@ -193,6 +193,32 @@ data DataDef = DataDef !ParamVar !StaticRecord ![Val]
 dataDefiniendum :: DataDef -> Var
 dataDefiniendum (DataDef v _ _) = v
 
+-- | An imported symbol
+data Import =
+    -- | A global function
+    ImportClosureFun
+    { importEntryPoints :: EntryPoints
+    }
+    -- | A global procedure
+  | ImportPrimFun
+    { _importVar :: !ParamVar
+    , importFunType :: !FunctionType
+    }
+    -- | A global constant
+  | ImportData
+    { _importVar :: !ParamVar
+      -- | The imported value's fields, if known
+    , importValue :: !(Maybe [Val])
+    }
+
+importVar :: Import -> Var
+importVar (ImportClosureFun entry_points) =
+  case globalClosure entry_points
+  of Just v -> v
+     Nothing -> internalError "importVar"
+importVar (ImportPrimFun v _) = v
+importVar (ImportData v _) = v
+
 data Module =
   Module 
   { moduleImports :: [ImportVar] -- ^ Imported, externally defined variables
@@ -212,6 +238,7 @@ moduleHasExports m = not $ null $ moduleExports m
 -- | A primitive or closure function type.
 data FunctionType =
   FunctionType {-# UNPACK #-}!Bool ![ValueType] ![ValueType]
+  deriving(Eq)
 
 primFunctionType :: [ValueType] -> [ValueType] -> FunctionType
 primFunctionType params returns = FunctionType True params returns

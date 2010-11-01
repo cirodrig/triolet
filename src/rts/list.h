@@ -17,8 +17,9 @@ extern procedure pyon.internal.list.pyon_list_free_POD "pyon_list_free_POD"
 extern function pyon.internal.list.list_db (pointer) -> ();
 extern function pyon.internal.list.list_copy (pointer, pointer, pointer) -> ();
 extern function pyon.internal.list.list_finalize (pointer, pointer) -> ();
-extern function pyon.internal.list.list_build (pointer, owned, pointer) -> ();
-extern function pyon.internal.list.list_traverse (pointer, pointer) -> owned;
+extern function pyon.internal.list.list_build (unit, unit, pointer, owned, pointer) -> ();
+extern function pyon.internal.list.list_traverse
+  (unit, pointer, pointer) -> owned;
 
 extern procedure pyon.internal.list.list_peek
   (pointer, pointer, word, pointer) -> ();

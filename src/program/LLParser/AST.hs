@@ -144,6 +144,8 @@ data BaseExpr a =
   | BoolLitE !Bool
     -- | The NULL value
   | NullLitE
+    -- | The unit value
+  | NilLitE
     -- | Construct a record value
   | RecordE (RecordName a) [Expr a]
     -- | Get a reference to an object field from a pointer expression

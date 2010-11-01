@@ -216,16 +216,20 @@ builtinGlobals =
   , (biName "PassConv_pass_conv", PrimType PointerType)
   ]
 
+builtinVarPrimName nm = "the_biprim_" ++ builtinVarUnqualifiedName nm
+builtinVarFunName nm = "the_bifun_" ++ builtinVarUnqualifiedName nm
+builtinVarVarName nm = "the_bivar_" ++ builtinVarUnqualifiedName nm
+
 lowLevelBuiltinsRecord = recordDef "LowLevelBuiltins" fields
   where
     prim_field (nm, _) =
-      ("the_biprim_" ++ builtinVarUnqualifiedName nm, IsStrict,
+      (builtinVarPrimName nm, IsStrict,
        [t| (Var, FunctionType) |])
     clo_field (nm, _) =
-      ("the_bifun_" ++ builtinVarUnqualifiedName nm, IsStrict,
+      (builtinVarFunName nm, IsStrict,
        [t| (Var, EntryPoints) |])
     var_field (nm, _) =
-      ("the_bivar_" ++ builtinVarUnqualifiedName nm, IsStrict, [t| Var |])
+      (builtinVarVarName nm, IsStrict, [t| Var |])
     fields = map prim_field builtinPrimitives ++
              map clo_field builtinFunctions ++
              map var_field builtinGlobals

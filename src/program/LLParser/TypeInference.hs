@@ -637,6 +637,8 @@ resolveExpr expr =
        return1 ty' (FloatLitE ty' n)
      BoolLitE b ->
        return1 (PrimT BoolType) (BoolLitE b)
+     NilLitE ->
+       return1 (PrimT UnitType) NilLitE
      NullLitE ->
        return1 (PrimT PointerType) NullLitE
      RecordE nm fields -> do
@@ -906,22 +908,183 @@ resolveDef def =
 resolveTopLevelDefs :: [Def Parsed] -> NR [Def Typed]
 resolveTopLevelDefs defs = fmap catMaybes $ mapM resolveDef defs
 
+resolveExternType :: ExternType Parsed -> NR (ExternType Typed)
+resolveExternType (ExternProcedure domain range) = do
+  domain' <- mapM resolveType0 domain
+  range' <- mapM resolveType0 range
+  return $ ExternProcedure domain' range'
+
+resolveExternType (ExternFunction domain range) = do
+  domain' <- mapM resolveType0 domain
+  range' <- mapM resolveType0 range
+  return $ ExternFunction domain' range'
+
+resolveExternType (ExternData pt) = return (ExternData pt)
+
 -------------------------------------------------------------------------------
 -- External variables
 
 -- | Resolve a set of external variable declarations.  The variables are 
 -- added to the current scope.
-withExternalVariables :: [ExternDecl Parsed] -> NR a
-                      -> NR (a, [LL.Var])
+withExternalVariables :: [ExternDecl Parsed] -> NR [Def Typed]
+                      -> NR ([Def Typed], [LL.Var])
 withExternalVariables edefs m = do 
-  evars <- mapM defineExternalVar edefs
-  x <- with_evars evars m
-  return (x, evars)
+  external_defs <- mapM defineExternalVar edefs
+  let evars = [LL.importVar i | (_, _, i) <- external_defs]
+
+  -- Process all definitions
+  processed_defs <- with_evars evars m
+  
+  -- Check that all definitions of exported variable are consistent
+  let defs_map = Map.fromList [(def_var d, d) | d <- processed_defs]
+        where
+          def_var (DataDefEnt d) = dataName d
+          def_var (FunctionDefEnt d) = functionName d
+
+  mapM_ (checkExternalVar defs_map) external_defs
+  return (processed_defs, evars)
   where
     -- Save the external variables in the environment for later lookup
     with_evars evars m = NR $ \nrenv env errs ->
       let nrenv' = nrenv {externalVariables = evars ++ externalVariables nrenv}
       in runNR m nrenv' env errs
+
+-- | Verify that the external variable declaration is consistent with the
+--   imported variable declaration and the actual definition.
+--
+--   Check the types of the declarations. 
+checkExternalVar :: Map.Map LL.Var (Def Typed) 
+                 -> (ExternDecl Typed, Bool, LL.Import)
+                 -> NR ()
+checkExternalVar defs_map (edef, is_builtin, impent) = do
+  -- If it's a builtin variable, compare the definition to the import entity.
+  -- Otherwie, 'impent' and 'edef' were created from the same declaration so
+  -- they will be consistent.
+  when is_builtin compare_to_import
+  
+  -- If it was defined in this module, compare the definition.
+  case Map.lookup (LL.importVar impent) defs_map of
+    Just def -> compare_to_def def
+    Nothing -> return ()
+  where
+    compare_to_import =
+      case (externType edef, impent)
+      of (ExternProcedure domain range, LL.ImportPrimFun _ imptype) ->
+           let domain' = map convertToValueType domain
+               range' = map convertToValueType range
+               exttype = LL.primFunctionType domain' range'
+           in throwErrorMaybe $
+              if imptype == exttype then Nothing else incompatible_builtin
+         (ExternFunction domain range, LL.ImportClosureFun ep) ->
+           let domain' = map convertToValueType domain
+               range' = map convertToValueType range
+               exttype = LL.closureFunctionType domain' range'
+           in throwErrorMaybe $
+              if LL.entryPointsType ep == exttype
+              then Nothing
+              else incompatible_builtin
+         (ExternData etype, LL.ImportData v _) ->
+           throwErrorMaybe $
+           if LL.PrimType etype == LL.varType v
+           then Nothing
+           else incompatible_builtin
+         _ -> throwErrorMaybe incompatible_builtin
+
+    compare_to_def (FunctionDefEnt d)
+      | functionIsProcedure d, 
+        ExternProcedure e_domain e_range <- externType edef =
+          compare_function_type e_domain e_range
+      | not (functionIsProcedure d),
+        ExternFunction e_domain e_range <- externType edef =
+          compare_function_type e_domain e_range
+      | otherwise =
+          throwErrorMaybe incompatible_definition
+      where
+        compare_function_type e_domain e_range =
+          let d_domain = [convertToValueType t
+                         | Parameter t _ <- functionParams d]
+              d_range = map convertToValueType $ functionReturns d
+              e_domain' = map convertToValueType e_domain
+              e_range' = map convertToValueType e_range
+          in throwErrorMaybe $
+             if d_domain == e_domain' && d_range == e_range'
+             then Nothing
+             else incompatible_definition
+
+    compare_to_def (DataDefEnt d)
+      | ExternData e_type <- externType edef =
+        throwErrorMaybe $
+        if dataType d == e_type
+        then Nothing
+        else incompatible_definition
+
+    incompatible_definition =
+      Just $ "Incompatible definition of exported variable '" ++
+      showLabel (fromJust $ LL.varName $ LL.importVar impent) ++ "'"
+      
+    incompatible_builtin =
+      Just $ "Incompatible definition of built-in variable '" ++
+      showLabel (fromJust $ LL.varName $ LL.importVar impent) ++ "'"
+
+-- | Resolve an external variable declaration.
+--   No variables are defined.
+--
+--   Returns the resolved declaration and an imported variable object.
+--   Also returns a boolean that's @True@ if a builtin variable was used.
+resolveExternDecl :: ExternDecl Parsed
+                  -> NR (ExternDecl Typed, Bool, LL.Import)
+resolveExternDecl decl = do
+  let (label, external_name) =
+        case decl
+        of ExternDecl _ lab ename ->
+             (lab, ename)
+           ImportDecl _ local_name ename ->
+             (builtinLabel local_name, Just ename)
+  let primtype = externTypePrimType (externType decl)
+  
+  -- Resolve the type
+  new_type <- resolveExternType (externType decl)
+  
+  -- If it's a builtin variable, get the imported variable.
+  -- Otherwise, create an Import structure.
+  (is_builtin, impent) <-
+    case getBuiltinImportByLabel label
+    of Just builtin_impent -> do
+         check_external_name label external_name builtin_impent
+         return (True, builtin_impent)
+       Nothing -> do
+         impent <- createImport label external_name new_type
+         return (False, impent)
+
+  return (decl {externType = new_type}, is_builtin, impent)
+  where
+    -- Verify that the given external name matches the imported external name
+    check_external_name label external_name impent =
+      if LL.varExternalName (LL.importVar impent) /= external_name
+      then error $ "Incompatible definition of variable '" ++ showLabel label
+           ++ "'"
+      else return ()
+
+createImport label external_name new_type =
+  case new_type
+  of ExternProcedure domain range -> do
+       let ty = LL.PrimType (externTypePrimType new_type)
+           function_type = LL.primFunctionType
+                           (map convertToValueType domain)
+                           (map convertToValueType range)
+       v <- LL.newExternalVar label external_name ty
+       return $ LL.ImportPrimFun v function_type
+     ExternFunction domain range -> do
+       let ty = LL.PrimType (externTypePrimType new_type)
+           function_type = LL.closureFunctionType
+                           (map convertToValueType domain)
+                           (map convertToValueType range)
+       v <- LL.newExternalVar label external_name ty
+       ep <- mkEntryPoints NeverDeallocate function_type (Just label) (Just v)
+       return $ LL.ImportClosureFun ep
+     ExternData primtype -> do
+       v <- LL.newExternalVar label external_name (LL.PrimType primtype)
+       return $ LL.ImportData v Nothing
 
 -- | Define an external variable.
 --
@@ -930,7 +1093,22 @@ withExternalVariables edefs m = do
 --    
 -- If the variable belongs outside the current module, then define it here.
 -- Otherwise, the variable must be defined later in the module.
-defineExternalVar :: ExternDecl Parsed -> NR (LL.Var)
+defineExternalVar :: ExternDecl Parsed
+                  -> NR (ExternDecl Typed, Bool, LL.Import)
+defineExternalVar decl = do
+  (resolved_decl, is_builtin, impent) <- resolveExternDecl decl
+  let var = LL.importVar impent
+      ty  = externTypePrimType $ externType decl
+  -- If the variable is not in the current module, then define it.
+  -- Otherwise, it will be defined later.
+  current_module <- getSourceModuleName
+  let mod = case LL.varName var
+            of Just n -> moduleOf n
+               Nothing -> internalError "defineExternalVar"
+  when (mod /= current_module) $ defineVar var (PrimT ty)
+  return (resolved_decl, is_builtin, impent)
+
+{-defineExternalVar :: ExternDecl Parsed -> NR (LL.Var)
 defineExternalVar decl = do
   (v, t) <- lookupOrCreateExternalVar decl
   -- If the variable is not in the current module, then define it.
@@ -940,7 +1118,7 @@ defineExternalVar decl = do
             of Just n -> moduleOf n
                Nothing -> internalError "defineExternalVar"
   when (mod /= current_module) $ defineVar v (PrimT t)
-  return v
+  return v-}
 
 -- Get or create an external variable definition
 lookupOrCreateExternalVar :: ExternDecl Parsed -> NR (LL.Var, PrimType)

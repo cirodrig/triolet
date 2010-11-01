@@ -50,6 +50,7 @@ rules :-
 "int64" / @notid	{ tok Int64Tok }
 "load" / @notid		{ tok LoadTok }
 "module" / @notid	{ tok ModuleTok }
+"nil" / @notid		{ tok NilTok }
 "null" / @notid		{ tok NullTok }
 "owned" / @notid	{ tok OwnedTok }
 "pointer" / @notid	{ tok PointerTok }
@@ -62,6 +63,7 @@ rules :-
 "uint16" / @notid	{ tok UInt16Tok }
 "uint32" / @notid	{ tok UInt32Tok }
 "uint64" / @notid	{ tok UInt64Tok }
+"unit" / @notid		{ tok UnitTok }
 "_" / @notid @		{ tok WildTok }
 
 -- Punctuation

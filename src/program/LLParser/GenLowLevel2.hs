@@ -59,6 +59,8 @@ genDataExpr expr =
            internalError "genExpr: Float literal has non-floating type"
      BoolLitE b ->
        return $ LL.LitV (LL.BoolL b)
+     NilLitE ->
+       return $ LL.LitV LL.UnitL
      NullLitE ->
        return $ LL.LitV LL.NullL
      RecordE rec fields -> do
@@ -132,6 +134,7 @@ genExpr expr =
      IntLitE {} -> data_expr
      FloatLitE {} -> data_expr
      BoolLitE {} -> data_expr
+     NilLitE {} -> data_expr
      NullLitE {} -> data_expr
      RecordE record fs -> do
        fs' <- mapM (asVal <=< genExpr) fs

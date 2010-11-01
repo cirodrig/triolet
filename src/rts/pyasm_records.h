@@ -71,6 +71,7 @@ record Stream {
   ObjectHeader header;
   owned next;                   // How to get the next stream element
   owned initialize;             // How to initialize the stream state
+  PassConv return_repr;		// Representation of return value
   word state_size;              // Size of stream state
   word state_align;             // Alignment of stream state
   owned state_finalize;         // Finalizer for stream state

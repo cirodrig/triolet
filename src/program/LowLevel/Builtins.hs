@@ -13,6 +13,7 @@ module LowLevel.Builtins
         allBuiltins,
         llBuiltin,
         getBuiltinByLabel,
+        getBuiltinImportByLabel,
         the_prim_pyon_alloc,
         the_prim_pyon_dealloc,
         the_prim_apply_i32_f,
@@ -85,12 +86,13 @@ $(forM builtinPrimitives $ \(fname, _) ->
 -- | A list of all builtins
 allBuiltins :: [Var]
 allBuiltins =
-  $(TH.listE $ [ [| fst $ $(TH.varE $ TH.mkName $ "the_biprim_" ++ builtinVarUnqualifiedName fname) lowLevelBuiltins |]
-               | (fname, _) <- builtinPrimitives] ++
-               [ [| fst $ $(TH.varE $ TH.mkName $ "the_bifun_" ++ builtinVarUnqualifiedName fname) lowLevelBuiltins |]
-               | (fname, _) <- builtinFunctions] ++
-               [ [| $(TH.varE $ TH.mkName $ "the_bivar_" ++ builtinVarUnqualifiedName fname) lowLevelBuiltins |]
-               | (fname, _) <- builtinGlobals])
+  $(TH.listE $
+    [ [| fst $ $(TH.varE $ TH.mkName $ builtinVarPrimName fname) lowLevelBuiltins |]
+    | (fname, _) <- builtinPrimitives] ++
+    [ [| fst $ $(TH.varE $ TH.mkName $ builtinVarFunName fname) lowLevelBuiltins |]
+    | (fname, _) <- builtinFunctions] ++
+    [ [| $(TH.varE $ TH.mkName $ builtinVarVarName fname) lowLevelBuiltins |]
+    | (fname, _) <- builtinGlobals])
 
 -- | Get a builtin by field name
 llBuiltin :: (LowLevelBuiltins -> a) -> a
@@ -98,9 +100,34 @@ llBuiltin f = f lowLevelBuiltins
 
 -- | Get a builtin by its label
 getBuiltinByLabel :: Label -> Maybe Var
-getBuiltinByLabel s = Map.lookup s builtinNameTable
+getBuiltinByLabel s =
+  case Map.lookup s builtinNameTable
+  of Nothing -> Nothing
+     Just (ImportClosureFun ep) ->
+       case globalClosure ep of Just v -> Just v
+                                _ -> internalError "getBuiltinByLabel"
+     Just (ImportPrimFun v _) -> Just v
+     Just (ImportData v _) -> Just v
 
-builtinNameTable = Map.fromList [(builtin_name b, b) | b <- allBuiltins]
+-- | Get a builtin imported vaiable by its label
+getBuiltinImportByLabel :: Label -> Maybe Import
+getBuiltinImportByLabel s = Map.lookup s builtinNameTable
+
+builtinNameTable :: Map.Map Label Import
+builtinNameTable =
+  Map.fromList
+  $(TH.listE $
+    [ [| let (v, t) = $(TH.varE $ TH.mkName $ builtinVarPrimName fname) lowLevelBuiltins 
+         in (builtin_name v, ImportPrimFun v t) |]
+    | (fname, _) <- builtinPrimitives] ++
+    [ [| let (v, ep) = $(TH.varE $ TH.mkName $ builtinVarFunName fname) lowLevelBuiltins
+         in (builtin_name v, ImportClosureFun ep) |]
+    | (fname, _) <- builtinFunctions] ++
+    [ [| let v = $(TH.varE $ TH.mkName $ builtinVarVarName fname) lowLevelBuiltins
+         in (builtin_name v, ImportData v Nothing)
+       |]
+    | (fname, _) <- builtinGlobals]
+   )
   where
     builtin_name v =
       case varName v

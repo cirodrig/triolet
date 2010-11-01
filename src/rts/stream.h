@@ -4,6 +4,6 @@ extern data pointer pyon.internal.stream.Stream_info;
 
 // Stream constructors
 extern function pyon.internal.stream.Stream_return
-  (pointer, owned) -> owned;
+  (unit, unit, pointer, owned) -> owned;
 extern function pyon.internal.stream.Stream_bind
-  (pointer, pointer, owned, owned) -> owned;
+  (unit, unit, unit, pointer, pointer, owned, owned) -> owned;
