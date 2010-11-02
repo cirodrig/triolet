@@ -114,28 +114,31 @@ withLocalFunctions local_fs (GenC m) = GenC $ local insert m
 -------------------------------------------------------------------------------
 -- Declarations, literals, and values
 
--- | Define an unitialized piece of data.
+-- | Define an unitialized piece of global data.
 declareBytes :: Var -> Int -> Int -> CDecl
 declareBytes v size align =
   let array = CArrDeclr [] (CArrSize False $ genSmallIntConst size) internalNode
       align_expr = genSmallIntConst align
       align_attr = CAttr (builtinIdent "aligned") [align_expr] internalNode
-      declr = CDeclr (Just $ varIdent v) [array] Nothing [align_attr] internalNode
+      ident = varIdent v
+      declr = CDeclr (Just ident) [array] Nothing [align_attr] internalNode
       type_spec = CTypeSpec (CCharType internalNode)
   in CDecl [type_spec] [(Just declr, Nothing, Nothing)] internalNode
 
--- | Declare or define a value variable
-declareVariable :: Var -> Maybe CExpr -> CDecl
-declareVariable v initializer =
+-- | Declare or define a variable.  The variable is not global and
+--   is not accessed by reference.
+declareLocalVariable :: Var -> Maybe CExpr -> CDecl
+declareLocalVariable v initializer =
   let (type_specs, derived_declr) = primTypeDeclSpecs $ varPrimType v
-      declr = CDeclr (Just $ varIdent v) derived_declr Nothing [] internalNode
+      ident = localVarIdent v
+      declr = CDeclr (Just ident) derived_declr Nothing [] internalNode
       init = case initializer
              of Nothing -> Nothing
                 Just e  -> Just $ CInitExpr e internalNode
   in CDecl type_specs [(Just declr, init, Nothing)] internalNode
 
-declareUndefVariable :: Var -> CDecl
-declareUndefVariable v = declareVariable v Nothing
+declareUndefLocalVariable :: Var -> CDecl
+declareUndefLocalVariable v = declareLocalVariable v Nothing
 
 {-
 -- | Generate an abstract declarator, used in type casting 
@@ -233,7 +236,7 @@ genVal gvars (VarV v)
       CCast pyonPointerType (CUnary CAdrOp var_exp internalNode) internalNode
   | otherwise = var_exp
   where
-  var_exp = CVar (varIdent v) internalNode
+  var_exp = CVar (varIdentScoped gvars v) internalNode
       
 genVal _ (LitV l) = genLit l
 
@@ -246,7 +249,7 @@ valPrimType v =
 
 genAssignVar :: Var -> CExpr -> CExpr
 genAssignVar v e =
-  CAssign CAssignOp (CVar (varIdent v) internalNode) e internalNode
+  CAssign CAssignOp (CVar (localVarIdent v) internalNode) e internalNode
 
 -------------------------------------------------------------------------------
 -- Atoms and statements
@@ -273,7 +276,7 @@ genManyResults rtn exprs =
      AssignValues xs -> too_many xs
      DefineValues [] -> return_nothing
      DefineValues [v] ->
-       [CBlockDecl $ declareVariable v $ Just expr]
+       [CBlockDecl $ declareLocalVariable v $ Just expr]
      DefineValues xs -> too_many xs
      ReturnValues [] -> return_nothing
      ReturnValues [t] ->
@@ -297,7 +300,7 @@ genOneResult rtn expr =
      AssignValues [v] -> return_expr $ genAssignVar v expr
      DefineValues [] -> return_expr expr
      DefineValues [v] ->
-       [CBlockDecl $ declareVariable v $ Just expr]
+       [CBlockDecl $ declareLocalVariable v $ Just expr]
      ReturnValues [] -> return_expr expr
      ReturnValues [t] -> 
        return_stm $ CReturn (Just expr) internalNode
@@ -516,7 +519,7 @@ genIf returns scrutinee if_true if_false = do
         case returns
         of AssignValues vs -> (returns, [])
            DefineValues vs ->
-             (AssignValues vs, map (CBlockDecl . declareUndefVariable) vs)
+             (AssignValues vs, map (CBlockDecl . declareUndefLocalVariable) vs)
            ReturnValues vs -> (returns, [])
 
   (true_path, true_fallthrough) <- makeBlock =<< genStatement returns' if_true
@@ -559,11 +562,11 @@ genLocalFunction returns (FunDef v f)
   | not (isPrimFun f) =
       internalError "genLocalFunction: Not a primitive-call function"
   | otherwise = do
-      let fun_name = varIdent v
-      let param_decls = map declareUndefVariable $ funParams f
+      let fun_name = localVarIdent v
+      let param_decls = map declareUndefLocalVariable $ funParams f
       (body, ft) <- genStatement returns (funBody f)
       return $ LocalFunction { lfunLabel = fun_name
-                             , lfunParamVars = map varIdent $ funParams f
+                             , lfunParamVars = map localVarIdent $ funParams f
                              , lfunParameters = param_decls
                              , lfunBody = body
                              , lfunFallsThrough = ft
@@ -641,7 +644,7 @@ genFun (FunDef v fun)
            [_] -> internalError "genFun: Unexpected return type"
            _ -> internalError "genFun: Cannot generate multiple return values"
       -- Function parameter declarations
-      param_decls = [declareVariable v Nothing | v <- funParams fun]
+      param_decls = [declareLocalVariable v Nothing | v <- funParams fun]
       -- Function declaration
       fun_declr =
         CFunDeclr (Right (param_decls, False)) [] internalNode

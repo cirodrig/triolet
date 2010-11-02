@@ -10,7 +10,8 @@ module LowLevel.Label
         Label(..),
         pyonLabel,
         externPyonLabel,
-        mangleLabel
+        mangleLabel,
+        mangleModuleScopeLabel
        )
 where
 
@@ -90,3 +91,12 @@ mangleLabel name
       encodeNameString (showModuleName $ labelModule name) ++ "_" ++
       encodeNameString (labelLocalName name) ++
       encodeLabelTag (labelTag name)
+
+-- | Mangle a label without the module name.  The label should only be used
+-- at module scope, since it may conflict with different names in other
+-- modules.
+mangleModuleScopeLabel :: Label -> String
+mangleModuleScopeLabel name =
+  "_pi__" ++
+  encodeNameString (labelLocalName name) ++
+  encodeLabelTag (labelTag name)

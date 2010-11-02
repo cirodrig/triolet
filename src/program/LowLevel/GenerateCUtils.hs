@@ -3,6 +3,8 @@
 
 module LowLevel.GenerateCUtils where
 
+import qualified Data.Set as Set
+
 import Language.C.Data.Ident
 import Language.C.Data.Node
 import Language.C.Pretty
@@ -63,10 +65,17 @@ primTypeDeclSpecs pt =
 
 varPrimType v = valueToPrimType $ varType v
 
--- | Generate the C name for a variable.
--- If it's a builtin variable, or if it's an exported
--- variable, then use the name alone.  Otherwise, generate a unique name
--- using the variable's name and ID.
+-- | Generate the C name for an externally visible variable.
 varIdent :: Var -> Ident
-varIdent v = internalIdent $ mangledVarName v
+varIdent v = internalIdent $ mangledVarName False v
 
+-- | Generate the C name for a local variable.
+localVarIdent :: Var -> Ident
+localVarIdent v = internalIdent $ mangledVarName True v
+
+-- | Generate the long name if this variable is in the set, or the short
+-- name otherwise.  The given set should be the set of global variables.
+varIdentScoped :: Set.Set Var -> Var -> Ident
+varIdentScoped gvars v
+  | v `Set.member` gvars = varIdent v
+  | otherwise            = localVarIdent v

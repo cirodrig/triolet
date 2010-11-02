@@ -100,8 +100,8 @@ data Var =
 -- Internal variables' mangled names consist of the variable's label and ID.
 -- If the variable doesn't have a label, it consists of a single letter and
 -- the variable's ID.
-mangledVarName :: Var -> String
-mangledVarName v
+mangledVarName :: Bool -> Var -> String
+mangledVarName is_local v
   | varIsExternal v =
       case varName v
       of Just lab -> mangleLabel lab -- Mangle name, but don't add ID
@@ -109,7 +109,9 @@ mangledVarName v
                                     "must have a label"
   | otherwise =
         case varName v
-        of Just lab -> mangleLabel lab ++ "_" ++ mangled_id
+        of Just lab 
+             | is_local  -> mangleModuleScopeLabel lab ++ "_" ++ mangled_id
+             | otherwise -> mangleLabel lab ++ "_" ++ mangled_id
            Nothing  -> type_leader (varType v) ++ mangled_id
   where
     mangled_id = show $ fromIdent $ varID v
