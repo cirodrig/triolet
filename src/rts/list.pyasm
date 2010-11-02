@@ -25,30 +25,19 @@ function list_copy(pointer elem_repr, pointer src, pointer dst) -> () {
   // Duplicate contents
   PYON_DB_ALLOC(word 1001)
   contents = pointer primcall pyon_alloc (pad_elem_size * num_elems);
-  () = () primcall list_copy_elems
-      (elem_copy, pad_elem_size, num_elems, src @! PyonList.contents, contents);
+  (_, _, _) = while (word count       = num_elems,
+                     pointer src_elem = src @! PyonList.contents,
+                     pointer dst_elem = contents)
+                    (count != word 0) {
+    () = () call elem_copy(src, dst);
+    (num_elems - word 1,
+     src ^+ pad_elem_size as int,
+     dst ^+ pad_elem_size as int);
+  };
 
   dst @! PyonList.nelems = src @! PyonList.nelems;
   dst @! PyonList.contents = contents;
   ();
-};
-
-// Copy all list elements
-procedure list_copy_elems (owned elem_copy,
-                           word pad_elem_size,
-                           word num_elems,
-                           pointer src,
-                           pointer dst) -> () {
-  if (num_elems == word 0) {
-    ();
-  } else {
-    () = () call elem_copy(src, dst);
-    () primcall list_copy_elems(elem_copy,
-                                pad_elem_size,
-                                num_elems - word 1,
-                                src ^+ pad_elem_size as int,
-                                dst ^+ pad_elem_size as int);
-  };
 };
 
 // Finalize a list
@@ -62,27 +51,15 @@ function list_finalize (pointer elem_repr, pointer list) -> () {
   contents = list @! PyonList.contents;
 
   // Finalize list contents
-  () = () primcall list_finalize_elems
-      (elem_fini, elem_size, num_elems, contents);
+  (_, _) = while (word nelems = num_elems, pointer contents = contents)
+                 (nelems != word 0) {
+    () = () call elem_fini(contents);
+    (nelems - word 1, contents ^+ pad_elem_size as int);
+  };
 
   // Free the array
   PYON_DB_DEALLOC(word 1501)
   () primcall pyon_dealloc (contents);
-};
-
-procedure list_finalize_elems (owned elem_finalize,
-                               word elem_size,
-                               word nelems,
-                               pointer contents) -> () {
-  if (nelems == word 0) {
-    ();
-  } else {
-    () = () call elem_finalize(contents);
-    () primcall list_finalize_elems (elem_finalize,
-                                     elem_size,
-                                     nelems - word 1,
-                                     contents ^+ elem_size as int);
-  };
 };
 
 // Create a list, leaving its elements uninitialized
@@ -147,60 +124,59 @@ function list_build (unit _, unit _, pointer elem_repr, owned stream, pointer li
 
   // Set up stream
   PYON_DB_ALLOC(word 1004)
+  stream_next = stream @! Stream.next;
   stream_state = pointer primcall pyon_alloc (stream @! Stream.state_size);
-  () = () call  (stream @! Stream.initialize) (stream_state);
+  () = () call (stream @! Stream.initialize) (stream_state);
 
-  // Populate the list contents
-  n_elems = word primcall list_build_pull (elem_repr, list, pad_elem_size,
-                                           stream @! Stream.next,
-                                           stream_state, word 0, list_size);
-  list @! PyonList.nelems = n_elems;
+  // Populate the list contents (pull_values); then finish building the list.
+  letrec {
+    procedure pull_values (word n_elems, word list_size) -> () {
+      // Make sure list can hold another element
+      new_list_size = if (n_elems == list_size) {
+        new_list_size = list_size * word 2;
+        () = () primcall list_grow (elem_repr, list, new_list_size);
+        new_list_size;
+      } else {
+        list_size;
+      };
+      
+      // Pull from the straem
+      current_elem = (list @! PyonList.contents) ^+
+                     (n_elems * pad_elem_size) as int;
+      b = bool call stream_next (stream_state, current_elem);
+      if (b) {
+        // Continue pulling
+        () primcall pull_values (n_elems + word 1, new_list_size);
+      } else {
+        // Stream is depleted.  Finish constructing list.
+        () primcall finish (n_elems);
+      };
+    };
 
-  // Finalize the stream
-  () = () call (stream @! Stream.state_finalize) (stream_state);
-  PYON_DB_DEALLOC(word 1503)
-  () = () primcall pyon_dealloc (stream_state);
+    procedure finish (word n_elems) -> () {
+      // Save the number of list elements that was created
+      list @! PyonList.nelems = n_elems;
 
-  ();   
-};
-
-// Pull elements from the stream until it is exhausted.  Write into the list.
-procedure list_build_pull (pointer elem_repr,
-                           pointer list,
-                           word pad_elem_size,
-                           owned stream_next,
-                           pointer stream_state,
-                           word n_elems,
-                           word list_size) -> word {
-  // Make sure list can hold another element
-  b_full = n_elems == list_size;
-  new_list_size = if (b_full) {
-    new_list_size = list_size * word 2;
-    () = () primcall list_grow (elem_repr, list, new_list_size);
-    new_list_size;
-  } else {
-    list_size;
+      // Finalize the stream
+      () = () call (stream @! Stream.state_finalize) (stream_state);
+      PYON_DB_DEALLOC(word 1503)
+      () = () primcall pyon_dealloc (stream_state);
+      ();   
+    }
   };
-
-  // Pull from the straem
-  current_elem = (list @! PyonList.contents) ^+ (n_elems * pad_elem_size) as int;
-  b = bool call stream_next (stream_state, current_elem);
-  if (b) {
-    // Continue pulling
-    word primcall list_build_pull (elem_repr, list, pad_elem_size, stream_next,
-                                   stream_state, n_elems + word 1,
-                                   new_list_size);
-  } else {
-    // Stream is depleted
-    n_elems;
-  };
+  () primcall pull_values (word 0, list_size);
 };
 
 // Create a stream that traverses the list
 function list_traverse (unit _, pointer elem_repr, pointer list) -> owned {
   ALLOC_OBJECT(s, Stream, Stream_info)
-  s @! Stream.next = owned call list_traverse_next (elem_repr, list);
+  s @! Stream.next = owned call list_traverse_next (s @ Stream.return_repr,
+                                                    list);
   s @! Stream.initialize = list_traverse_initialize;
+  s @! Stream.return_repr.size = elem_repr @! PassConv.size;
+  s @! Stream.return_repr.align = elem_repr @! PassConv.align;
+  s @! Stream.return_repr.copy = elem_repr @! PassConv.copy;
+  s @! Stream.return_repr.finalize = elem_repr @! PassConv.finalize;
   s @! Stream.state_size = sizeof word;
   s @! Stream.state_align = alignof word;
   s @! Stream.state_finalize = dummy_finalizer;
@@ -223,7 +199,7 @@ function list_traverse_next (pointer elem_repr,
     elem_align = elem_repr @! PassConv.align;
     elem_copy = elem_repr @! PassConv.copy;
     pad_elem_size = PAD(elem_size, elem_align);
-    () = () call copy ((list @! PyonList.contents) ^+ ((pad_elem_size * index) as int), ret);
+    () = () call elem_copy ((list @! PyonList.contents) ^+ ((pad_elem_size * index) as int), ret);
     true;
   } else {
     // List is depleted
@@ -272,14 +248,17 @@ procedure pyon_list_copy_POD (pointer elem_repr, pointer in_list) -> pointer {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   pad_elem_size = PAD(elem_size, elem_align);
-
-  new_list = pointer primcall pyon_alloc(sizeof PyonList);
   nelems = in_list @! PyonList.nelems;
-  new_list @! PyonList.nelems = nelems;
 
+  // Create a copy of the data array
   data_size = pad_elem_size * nelems;
   contents = pointer primcall pyon_alloc(data_size);
-  () = () primcall memcpy(contents, new_list @! PyonList.contents, data_size);
+  () = () primcall memcpy(contents, in_list @! PyonList.contents, data_size);
+
+  // Create and return a new list object
+  new_list = pointer primcall pyon_alloc(sizeof PyonList);
+  new_list @! PyonList.nelems = nelems;
+  new_list @! PyonList.contents = contents;
   new_list;
 };
 

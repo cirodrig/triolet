@@ -151,61 +151,64 @@ function Stream_bind_next(owned produced_type_fini,
                           owned mk_transformer,
                           pointer state,
                           pointer ret) -> bool {
-  // Is transformer active?
-  transformer = state @! Stream_bind_state.transformer;
-  if (transformer != null) {
-    // Call the transformer stream
-    transformer = state @! Stream_bind_state.transformer as owned;
-    transformer_state = state @! Stream_bind_state.transformer_state;
-    b = bool call (transformer @! Stream.next) (transformer_state, ret);
+  letrec {
+    function loop (int _) -> bool {
+      // Is transformer active?
+      transformer = state @! Stream_bind_state.transformer;
+      if (transformer != null) {
+        // Call the transformer stream
+        transformer = state @! Stream_bind_state.transformer as owned;
+        transformer_state = state @! Stream_bind_state.transformer_state;
+        b = bool call (transformer @! Stream.next) (transformer_state, ret);
 
-    // Was a value produced?
-    if (b) {
-      // Done
-      true;
-    } else {
-      // Transformer is depleted; release transformer
-      () = () call (transformer @! Stream.state_finalize) (transformer_state);
-      PYON_DB_DEALLOC(word 2502)
-      () = () primcall pyon_dealloc(transformer_state);
-      DECREF(transformer as pointer)
-      state @! Stream_bind_state.transformer = null;
+        // Was a value produced?
+        if (b) {
+          // Done
+          true;
+        } else {
+          // Transformer is depleted; release transformer
+          () = () call (transformer @! Stream.state_finalize) (transformer_state);
+          PYON_DB_DEALLOC(word 2502)
+          () = () primcall pyon_dealloc(transformer_state);
+          // DECREF(transformer as pointer)
+          state @! Stream_bind_state.transformer = null;
 
-      // Free temporary state
-      () = () call produced_type_fini
-          (state @! Stream_bind_state.temporary_state);
+          // Free temporary state
+          () = () call produced_type_fini
+              (state @! Stream_bind_state.temporary_state);
 
-      // Retry
-      bool call Stream_bind_next(produced_type_fini, producer,
-                                 mk_transformer, state, ret);
-    };
-  } else {
-    // Produce a new value
-    value_produced = bool call (producer @! Stream.next)
-        (state @! Stream_bind_state.producer_state,
-         state @! Stream_bind_state.temporary_state);
-    
-    if (value_produced) {
-      // Run the transformer to create an output stream
-      transformer_stream =
-          owned call mk_transformer (state @! Stream_bind_state.temporary_state);
+          // Retry
+          bool call loop (int 0);
+        };
+      } else {
+        // Produce a new value
+        value_produced = bool call (producer @! Stream.next)
+            (state @! Stream_bind_state.producer_state,
+             state @! Stream_bind_state.temporary_state);
+        
+        if (value_produced) {
+          // Run the transformer to create an output stream
+          transformer_stream =
+              owned call mk_transformer (state @! Stream_bind_state.temporary_state);
 
-      // Begin producing from the output stream
-      PYON_DB_ALLOC(word 2003)
-      transformer_state =
-        pointer primcall pyon_alloc (transformer_stream @! Stream.state_size);
-      () = () call (transformer_stream @! Stream.initialize) (transformer_state);
+          // Begin producing from the output stream
+          PYON_DB_ALLOC(word 2003)
+          transformer_state =
+            pointer primcall pyon_alloc (transformer_stream @! Stream.state_size);
+          () = () call (transformer_stream @! Stream.initialize) (transformer_state);
 
-      // Retry, with the new transformer stream
-      state @! Stream_bind_state.transformer = transformer_stream;
-      state @! Stream_bind_state.transformer_state = transformer_state;
-      bool call Stream_bind_next(produced_type_fini, producer,
-                                 mk_transformer, state, ret);
-    } else {
-      // Stream is depleted
-      false;
-    };
+          // Retry, with the new transformer stream
+          state @! Stream_bind_state.transformer = transformer_stream;
+          state @! Stream_bind_state.transformer_state = transformer_state;
+          bool call loop (int 0);
+        } else {
+          // Stream is depleted
+          false;
+        };
+      };
+    }
   };
+  bool call loop (int 0);
 };
 
 function Stream_bind_finalize (owned produced_type_fini,
@@ -219,7 +222,7 @@ function Stream_bind_finalize (owned produced_type_fini,
     () = () call (transformer @! Stream.state_finalize) (transformer_state);
     PYON_DB_DEALLOC(word 2503)
     () = () primcall pyon_dealloc (transformer_state);
-    DECREF(transformer_ptr)
+    // DECREF(transformer_ptr)
 
     // Finalize the temporary state
     () call produced_type_fini (state @! Stream_bind_state.temporary_state);

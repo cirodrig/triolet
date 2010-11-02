@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pyon_internal.h"
+#include "structures_c.h"
 
 /*****************************************************************************/
 /* defined in list.pyasm */
@@ -10,17 +11,13 @@ extern PyonList *
 pyon_list_from_array(PyonWord n_elems, void *array);
 
 extern void
-pyon_list_to_array_POD(PyonWord elem_size, PyonWord elem_align,
-		       PyonPtr copy, PyonPtr free,
-		       PyonList *list, void *array);
+pyon_list_to_array_POD(PyonPtr elem_repr, PyonList *list, void *array);
 
 extern PyonWord
 pyon_list_length(PyonList *list);
 
 extern PyonList *
-pyon_list_copy_POD(PyonWord elem_size, PyonWord elem_align,
-		   PyonPtr copy, PyonPtr free,
-		   PyonList *list);
+pyon_list_copy_POD(PyonPtr elem_repr, PyonList *list);
 
 extern void
 pyon_list_free_POD(PyonList *list);
@@ -39,9 +36,7 @@ pyon_List_PyonInt_FromArray (int length, PyonInt *data) {
 
 void
 pyon_List_PyonInt_ToArray (PyonList *list, PyonInt *data) {
-  pyon_list_to_array_POD (SIZEOF_PYON_INT, ALIGNOF_PYON_INT,
-		          &pyon_copy_PyonInt, &dummy_finalizer,
-			  list, data);
+  pyon_list_to_array_POD (&int_pass_conv, list, data);
 }
 
 int
@@ -51,9 +46,7 @@ pyon_List_PyonInt_Length (PyonList *list) {
 
 PyonList *
 pyon_List_PyonInt_Copy(PyonList *list) {
-  return pyon_list_copy_POD(SIZEOF_PYON_INT, ALIGNOF_PYON_INT,
-			    &pyon_copy_PyonInt, &dummy_finalizer,
-			    list);
+  return pyon_list_copy_POD(&int_pass_conv, list);
 };
 
 void
