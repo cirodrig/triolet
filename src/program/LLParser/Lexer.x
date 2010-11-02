@@ -65,6 +65,7 @@ rules :-
 "uint32" / @notid	{ tok UInt32Tok }
 "uint64" / @notid	{ tok UInt64Tok }
 "unit" / @notid		{ tok UnitTok }
+"while" / @notid	{ tok WhileTok }
 "_" / @notid @		{ tok WildTok }
 
 -- Punctuation

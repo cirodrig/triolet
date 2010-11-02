@@ -598,6 +598,8 @@ stmtType (LetS _ _ s) = stmtType s
 stmtType (LetrecS _ s) = stmtType s
 stmtType (IfS _ _ s Nothing) = stmtType s
 stmtType (IfS _ _ _ (Just (_, s))) = stmtType s
+stmtType (WhileS inits _ _ Nothing) = [t | (Parameter t _, _) <- inits]
+stmtType (WhileS _ _ _ (Just (_, s))) = stmtType s
 stmtType (ReturnS atom) = atomType atom
 
 -------------------------------------------------------------------------------
@@ -698,48 +700,85 @@ resolveStmt stmt =
        return $ LetrecS fdefs' body'
      IfS cond if_true if_false mcont -> do
        cond' <- resolveExpr cond
+       expectBooleanType "condition of 'if' statement" (exprType cond')
+
        if_true' <- enterNonRec $ resolveStmt if_true
        if_false' <- enterNonRec $ resolveStmt if_false
 
        -- The true and false branches must have the same return type
        let if_true_type = stmtType if_true'
            if_false_type = stmtType if_false'
-       check_branch_types if_true_type if_false_type
+       throwErrorMaybe $
+         checkTypeLists "branches of 'if' statement" if_true_type if_false_type
        
-       mcont' <- traverse (resolve_if_cont if_false_type) mcont
+       mcont' <- traverse (resolve_cont if_false_type) mcont
        return $ IfS cond' if_true' if_false' mcont'
+     WhileS inits cond body mcont -> do
+       (init_types, inits', cond', body') <- enterNonRec $ do
+         -- Process the initializers.  The initial values are processed before
+         -- the accumulator variables, then the accumulator variables are
+         -- defined.
+         init_values <- mapM (resolveExpr . snd) inits
+         init_params <- mapM (resolveParameter . fst) inits 
+         let init_types = [t | Parameter t _ <- init_params]
+         
+         -- Accumulators and initializers must have matching types
+         sequence_
+           [throwErrorMaybe $
+            checkTypeLists "initializer of 'while' statement" (exprType e) [t]
+           | (e, t) <- zip init_values init_types]
+
+         -- Process the condition; must have boolean type
+         cond' <- resolveExpr cond
+         expectBooleanType "condition of 'while' statement" (exprType cond')
+
+         -- Process the body; must have same type as initializers
+         body' <- resolveStmt body
+         let body_type = stmtType body'
+         throwErrorMaybe $
+           checkTypeLists "body of 'while' statement" init_types body_type
+
+         return (init_types, zip init_params init_values,cond', body')
+
+       mcont' <- traverse (resolve_cont init_types) mcont
+       return $ WhileS inits' cond' body' mcont'
      ReturnS atom -> do
        atom' <- resolveAtom atom
        return $ ReturnS atom'
   where
-    check_branch_types true_br false_br =
-      throwErrorMaybe $ check true_br false_br 
-      where
-        check (tty:ttys) (fty:ftys) =
-          case (tty, fty)
-          of (PrimT t1, PrimT t2)
-               | t1 == t2 -> Nothing
-               | otherwise -> mismatch
-             (RecordT r1, RecordT r2)
-               | typedRecordName r1 == typedRecordName r2 -> Nothing
-               | otherwise -> mismatch
-             (BytesT {}, _) -> unexpected
-             (AppT {}, _) -> unexpected
-             (_, BytesT {}) -> unexpected
-             (_, AppT {}) -> unexpected
-             _ -> mismatch
-
-        check [] [] = Nothing
-        
-        check _ _ = mismatch    -- Different numbers of return values
-
-        unexpected = internalError "resolveStmt: Unexpected type"
-        mismatch = error "Branches of 'if' statement return different types"
-
-    resolve_if_cont if_return_type (lhs, stmt) = do
+    resolve_cont if_return_type (lhs, stmt) = do
       lhs' <- resolveLValues lhs if_return_type
       stmt' <- resolveStmt stmt
       return (lhs', stmt')
+
+expectBooleanType message tys = throwErrorMaybe $
+  case tys
+  of [PrimT BoolType] -> Nothing
+     _ -> Just $ "Expecting boolean type in " ++ message
+
+checkTypeLists message tys1 tys2 = 
+  case (tys1, tys2)
+  of (ty1:tys1', ty2:tys2') ->
+       case (ty1, ty2)
+       of (PrimT t1, PrimT t2)
+            | t1 == t2 -> Nothing
+            | otherwise -> mismatch
+          (RecordT r1, RecordT r2)
+            | typedRecordName r1 == typedRecordName r2 -> Nothing
+            | otherwise -> mismatch
+          (BytesT {}, _) -> unexpected
+          (AppT {}, _) -> unexpected
+          (_, BytesT {}) -> unexpected
+          (_, AppT {}) -> unexpected
+          _ -> mismatch
+
+     ([], []) -> Nothing
+        
+     (_, _) -> mismatch    -- Different numbers of return values
+
+  where
+    unexpected = internalError "checkTypeLists: Unexpected type"
+    mismatch = Just $ "Type mismatch in " ++ message
 
 resolveLValues :: [LValue Parsed] -> [Type Typed] -> NR [LValue Typed]
 resolveLValues lvals tys = do

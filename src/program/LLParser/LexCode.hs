@@ -85,6 +85,7 @@ data Token =
   | UInt32Tok
   | UInt64Tok
   | UnitTok
+  | WhileTok
     deriving(Eq)
 
 showToken :: Token -> String
@@ -152,6 +153,7 @@ showToken UInt16Tok = "'uint16'"
 showToken UInt32Tok = "'uint32'"
 showToken UInt64Tok = "'uint64'"
 showToken UnitTok = "'unit'"
+showToken WhileTok = "'while'"
 
 -- | A token labeled with a source position
 data T = T !SourcePos !Token

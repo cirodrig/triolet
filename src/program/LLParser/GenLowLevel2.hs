@@ -327,6 +327,10 @@ genStmt stmt =
        genTailIf cond if_true if_false
      IfS cond if_true if_false (Just (lhs, continuation)) ->
        genMedialIf cond if_true if_false lhs (genStmt continuation)
+     WhileS inits cond body Nothing ->
+       genTailWhile inits cond body
+     WhileS inits cond body (Just (lhs, continuation)) -> 
+       genMedialWhile inits cond body lhs (genStmt continuation)
      ReturnS atom -> do 
        atom' <- genAtom atom
        return (LL.ReturnE atom')
@@ -350,6 +354,20 @@ genStmtAtom stmt =
        genMedialIf cond if_true if_false lvals (return return_atom)
      IfS cond if_true if_false (Just (lhs, continuation)) ->
        genMedialIf cond if_true if_false lhs (genStmtAtom continuation)
+
+     WhileS inits cond body Nothing -> do
+       -- Generate a while statement, then group its result values into an atom
+       let return_types =
+             map convertToValueType [t | (Parameter t _, _) <- inits]
+       return_vars <- lift $ mapM LL.newAnonymousVar return_types
+       
+       let lvals = map VarL return_vars
+           return_atom = LL.ValA $ map LL.VarV return_vars
+       genMedialWhile inits cond body lvals (return return_atom)
+
+     WhileS inits cond body (Just (lhs, continuation)) ->
+       genMedialWhile inits cond body lhs (genStmtAtom continuation)
+
      ReturnS atom -> do 
        genAtom atom
 
@@ -358,6 +376,72 @@ genLetAssignment :: [LValue Typed] -> Atom Typed -> G ()
 genLetAssignment lvals atom = do
   rhs <- genAtom atom
   genLValues lvals rhs (map convertToValueType $ atomType atom)
+
+-- | Generate a while expression in tail poisition
+genTailWhile :: [(Parameter Typed, Expr Typed)] -> Expr Typed -> Stmt Typed
+             -> G LL.Stm
+genTailWhile inits cond body = do
+  while_var <- lift $ LL.newAnonymousVar (LL.PrimType PointerType)
+  
+  -- When done, return the loop-carried variables
+  let cont = return $ LL.ReturnE $ LL.ValA [LL.VarV v | (Parameter _ v, _) <- inits]
+  genWhileFunction while_var inits cond body cont
+  initializers <- mapM (asVal <=< genExpr) (map snd inits)
+  return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) initializers
+
+genMedialWhile inits cond body lhs mk_cont = do
+  let param_vars = [v | (Parameter _ v, _) <- inits]
+      param_types = map LL.varType param_vars
+  while_var <- lift $ LL.newAnonymousVar (LL.PrimType PointerType)
+  
+  -- Turn the continuation into a function so we can call it.
+  getContinuation True param_vars $ \cont -> do
+    -- Generate the while function
+    genWhileFunction while_var inits cond body (return cont)
+    
+    -- Call the while function
+    initializers <- mapM (asVal <=< genExpr) (map snd inits)
+    return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) initializers 
+
+  -- Generate the continuation
+  genLValues lhs (LL.ValA $ map LL.VarV param_vars) param_types
+  mk_cont
+
+-- | Generate a function for a while statment.
+--
+-- > letrec f (p1 ... pN) -> (t1 ... tN) {
+-- >   if (cond) {
+-- >     tmp1 ... tmpN = body;
+-- >     f (tmp1 ... tmpN);
+-- >   } else {
+-- >     cont (tmp1 ... tmpN);
+-- >   };
+genWhileFunction :: LL.Var -> [(Parameter Typed, Expr Typed)] -> Expr Typed
+                 -> Stmt Typed -> G LL.Stm -> G ()
+genWhileFunction while_var params cond body cont = do
+  let param_vars = [v | (Parameter _ v, _) <- params]
+      return_types = [convertToValueType t | (Parameter t _, _) <- params]
+
+  function_body <- lift $ execBuild return_types $ do
+    -- When condition fails, run the continuation
+    let false_path = cont
+    
+    -- When it succeeds, run the body and loop
+    let true_path = do
+          -- Create new temporary variables to hold live-out values
+          return_vars <- lift $ mapM LL.newAnonymousVar return_types
+          
+          -- Generate body and bind its result
+          bindAtom return_vars =<< genStmtAtom body
+          
+          -- Loop
+          return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) (map LL.VarV return_vars)
+          
+    cond' <- asVal =<< genExpr cond
+    genIf cond' true_path false_path
+  
+  emitLetrec [LL.FunDef while_var $
+              LL.primFun param_vars return_types function_body]
 
 -- | Generate an if-else expression in tail position
 genTailIf :: Expr Typed -> Stmt Typed -> Stmt Typed -> G LL.Stm

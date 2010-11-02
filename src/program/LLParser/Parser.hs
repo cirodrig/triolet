@@ -323,6 +323,18 @@ block = braces statements
       match SemiTok
       return $ IfS cond if_true if_false Nothing
     
+    -- A 'while' statement
+    while_stmt = do
+      match WhileTok
+      inits <- parenList $ do param <- parameter
+                              match AssignTok
+                              val <- expr
+                              return (param, val)
+      cond <- parens expr
+      body <- block
+      match SemiTok
+      return $ WhileS inits cond body Nothing
+
     -- A 'letrec' statement
     letrec_stmt = do
       match LetrecTok
@@ -341,13 +353,19 @@ block = braces statements
     assignment lhs_expressions = do
       match AssignTok
       lvalues <- mapM exprToLValue lhs_expressions
-      assign_if lvalues <|> assign_atom lvalues
+      assign_if lvalues <|> assign_while lvalues <|> assign_atom lvalues
     
     -- An if assignment (LHS = if () {...} else {...}; ...)
     assign_if lvalues = do
       (IfS cond if_true if_false Nothing) <- if_stmt
       tail <- statements
       return $ IfS cond if_true if_false (Just (lvalues, tail))
+
+    -- A while assignment (LHS = while (inits) (cond) {...}; ...)
+    assign_while lvalues = do
+      (WhileS inits cond body Nothing) <- while_stmt
+      tail <- statements
+      return $ WhileS inits cond body (Just (lvalues, tail))
 
     -- Create an assignment statement (LHS = RHS; ...)
     assign_atom lvalues = do

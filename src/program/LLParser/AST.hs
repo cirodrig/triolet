@@ -186,10 +186,17 @@ data LValue a =
 data Atom a =
     ValA [Expr a]
 
+-- | A statement.
 data Stmt a =
+    -- | An assignment statement
     LetS [LValue a] (Atom a) (Stmt a)
+    -- | Local function definitions
   | LetrecS [FunctionDef a] (Stmt a)
+    -- | An if statement.  The statement may be followed by a continuation.
   | IfS (Expr a) (Stmt a) (Stmt a) (Maybe ([LValue a], Stmt a))
+    -- | A while statement.  The loop-carried variables and their initial   
+    -- values are given.  The statement may be followed by a continuation.
+  | WhileS [(Parameter a, Expr a)] (Expr a) (Stmt a) (Maybe ([LValue a], Stmt a))
   | ReturnS (Atom a)
 
 deriving instance Show (Type Parsed)
