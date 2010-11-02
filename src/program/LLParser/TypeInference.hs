@@ -927,7 +927,7 @@ resolveExternType (ExternData pt) = return (ExternData pt)
 -- | Resolve a set of external variable declarations.  The variables are 
 -- added to the current scope.
 withExternalVariables :: [ExternDecl Parsed] -> NR [Def Typed]
-                      -> NR ([Def Typed], [LL.Var])
+                      -> NR ([LL.Import], [Def Typed])
 withExternalVariables edefs m = do 
   external_defs <- mapM defineExternalVar edefs
   let evars = [LL.importVar i | (_, _, i) <- external_defs]
@@ -942,7 +942,7 @@ withExternalVariables edefs m = do
           def_var (FunctionDefEnt d) = functionName d
 
   mapM_ (checkExternalVar defs_map) external_defs
-  return (processed_defs, evars)
+  return ([i | (_, _, i) <- external_defs], processed_defs)
   where
     -- Save the external variables in the environment for later lookup
     with_evars evars m = NR $ \nrenv env errs ->
@@ -1159,7 +1159,7 @@ typeInferModule :: FilePath
                 -> ModuleName
                 -> [ExternDecl Parsed]
                 -> [Def Parsed]
-                -> IO ([LL.Var], [Def Typed])
+                -> IO ([LL.Import], [Def Typed])
 typeInferModule module_path module_name externs defs =                
   withTheLLVarIdentSupply $ \var_ids -> do
     let ctx = NREnv var_ids [] module_name
@@ -1171,9 +1171,9 @@ typeInferModule module_path module_name externs defs =
         generate_module =
           enterRec $ withExternalVariables externs $ resolveTopLevelDefs defs
 
-    ((defs', externs'), _, errs) <- runNR generate_module ctx global_scope id
+    (return_data, _, errs) <- runNR generate_module ctx global_scope id
 
     case errs [] of
-      [] -> return (externs', defs')
+      [] -> return return_data
       xs -> do mapM_ putStrLn xs
                fail "Errors detected while parsing input"

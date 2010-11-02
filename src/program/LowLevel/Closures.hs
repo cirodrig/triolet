@@ -212,11 +212,12 @@ closureConvertTopLevelFunction def@(FunDef v f) =
 
 closureConvertTopLevelFunctions :: IdentSupply Var
                                 -> [Var]
+                                -> [Import]
                                 -> [FunDef]
                                 -> IO ([FunDef], [DataDef])
-closureConvertTopLevelFunctions var_ids globals defs =
+closureConvertTopLevelFunctions var_ids globals imports defs =
   runCC var_ids globals $ do
-    withGlobalFunctions defs (mapM closureConvertTopLevelFunction defs) (return ())
+    withGlobalFunctions imports defs (mapM closureConvertTopLevelFunction defs) (return ())
 
 -- | Perform closure conversion on a data value.
 scanDataValue :: Val -> Val
@@ -408,11 +409,12 @@ closureConvert mod =
     -- Perform closure conversion
     let fun_defs = moduleFunctions mod
         data_defs = moduleData mod
+        imports = moduleImports mod
         global_vars = map funDefiniendum fun_defs ++
                       map dataDefiniendum data_defs ++
-                      moduleImports mod
+                      map importVar imports
     (fun_defs', fun_data_defs') <-
-      closureConvertTopLevelFunctions var_ids global_vars fun_defs
+      closureConvertTopLevelFunctions var_ids global_vars imports fun_defs
     let data_defs' = convertDataDefs data_defs
         
     -- Rename variables so that variable names are unique

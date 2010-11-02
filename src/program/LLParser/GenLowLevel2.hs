@@ -474,7 +474,7 @@ genDefs defs = do
   defs' <- mapM genDef defs
   return $ partitionEithers defs'
 
-generateLowLevelModule :: [LL.Var]
+generateLowLevelModule :: [LL.Import]
                        -> [Def Typed]
                        -> IO LL.Module
 generateLowLevelModule externs defs =

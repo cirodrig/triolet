@@ -119,6 +119,12 @@ flattenTypeList xs = concatMap flattenType xs
 flattenValueTypeList :: [ValueType] -> [ValueType]
 flattenValueTypeList xs = map PrimType $ flattenTypeList xs
 
+flattenFunctionType :: FunctionType -> FunctionType
+flattenFunctionType ft =
+  mkFunctionType (ftIsPrim ft)
+  (flattenValueTypeList $ ftParamTypes ft)
+  (flattenValueTypeList $ ftReturnTypes ft)
+
 flattenType :: ValueType -> [PrimType]
 flattenType (PrimType UnitType) = []
 flattenType (PrimType pt) = [pt]
@@ -291,20 +297,43 @@ flattenDataDef (DataDef v record vals) = do
   let record' = staticRecord $ map PrimField $ flattenRecordType record
   return $ DataDef v record' val'
 
+flattenImport :: Import -> RF Import
+flattenImport (ImportClosureFun ep) =
+  let ep' =
+        case ep
+        of EntryPoints ty arity dir exa ine dea inf glo ->
+             let ty'    = flattenFunctionType ty
+                 arity' = length $ ftParamTypes ty'
+             in EntryPoints ty' arity' dir exa ine dea inf glo
+  in return $ ImportClosureFun ep'
+
+flattenImport (ImportPrimFun v t) =
+  return $ ImportPrimFun v (flattenFunctionType t)
+
+flattenImport (ImportData v initializer) = do
+  initializer' <- case initializer 
+                  of Nothing -> return Nothing
+                     Just vs -> fmap Just $ flattenValList vs
+  return $ ImportData v initializer'
+
 flattenRecordTypes :: Module -> IO Module
 flattenRecordTypes mod =
   withTheLLVarIdentSupply $ \var_supply -> do
-    let imports = makeImportMap (moduleImports mod)
-        env = RFEnv var_supply imports
+    let import_map = makeImportMap (moduleImports mod)
+        env = RFEnv var_supply import_map
     runReaderT (runRF flatten_module) env
   where
     flatten_module = do
+      imports' <- mapM flattenImport (moduleImports mod)
       (fun_defs', data_defs') <-
         flattenTopLevel (moduleFunctions mod) (moduleData mod)
-      return $ mod {moduleFunctions = fun_defs', moduleData = data_defs'}
+      return $ mod { moduleImports = imports'
+                   , moduleFunctions = fun_defs'
+                   , moduleData = data_defs'}
 
 makeImportMap imports =
-  IntMap.fromList [(fromIdent $ varID v, UnknownExpansion) | v <- imports]
+  IntMap.fromList [(fromIdent $ varID $ importVar v, UnknownExpansion)
+                  | v <- imports]
 
 -------------------------------------------------------------------------------
 

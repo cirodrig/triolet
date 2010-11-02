@@ -217,8 +217,9 @@ lookupClosure v = CC $ \env ->
 
 lookupEntryPoints :: Var -> CC (Maybe EntryPoints)
 lookupEntryPoints v = CC $ \env ->
-  returnCC $ fmap closureEntryPoints $ IntMap.lookup (fromIdent $ varID v) $
-  envEntryPoints env
+  returnCC $ case IntMap.lookup (fromIdent $ varID v) $ envEntryPoints env
+             of Just closure -> Just (closureEntryPoints closure)
+                Nothing -> Nothing
 
 lookupEntryPoints' :: Var -> CC EntryPoints
 lookupEntryPoints' v = lookupEntryPoints v >>= check
@@ -277,23 +278,31 @@ localClosure clo (CC f) = CC $ \env -> f (insert_closure env)
       in env {envEntryPoints = IntMap.insert k clo $ envEntryPoints env}
 
 -- | Generate global functions and data from a set of global functions.
-withGlobalFunctions :: [FunDef] -- ^ Functions to process 
+withGlobalFunctions :: [Import] -- ^ Imported functions
+                    -> [FunDef] -- ^ Functions to process 
                     -> CC [Fun] -- ^ Scanner that creates direct functions
                     -> CC ()    -- ^ Code that may access functions
                     -> CC ()
-withGlobalFunctions defs scan gen = do
-  -- Create closures and add them to the environment
-  clos <- runFreshVarCC $ mapM createGlobalClosure defs
-  funs <- localClosures (catMaybes clos) scan
+withGlobalFunctions imports defs scan gen = do
+  -- Create closures for imported functions
+  let import_closures = [mkGlobalClosure v ep
+                        | ImportClosureFun ep <- imports
+                        , let Just v = globalClosure ep]
+
+  -- Create closures for global functions.  Procedures don't get closures.
+  global_closures <- runFreshVarCC $ mapM createGlobalClosure defs
+  
+  let closures = import_closures ++ catMaybes global_closures
+  funs <- localClosures closures scan
   
   -- Generate code of closures
   defs' <- runFreshVarCC $
-           forM (zip3 (map funDefiniendum defs) clos funs) $ \(d, c, f) ->
+           forM (zip3 (map funDefiniendum defs) global_closures funs) $ \(d, c, f) ->
            emitGlobalClosure d c f
   writeDefs (concat defs')
     
   -- Run other code
-  gen
+  localClosures closures gen
 
 -- | Create a closure description if the function is a closure function.  
 -- Otherwise return Nothing.  No code is generated.

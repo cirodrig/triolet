@@ -11,6 +11,7 @@ module LowLevel.Builtins
         the_lowLevelBuiltins,
         lowerBuiltinCoreFunction,
         allBuiltins,
+        allBuiltinImports,
         llBuiltin,
         getBuiltinByLabel,
         getBuiltinImportByLabel,
@@ -94,6 +95,22 @@ allBuiltins =
     [ [| $(TH.varE $ TH.mkName $ builtinVarVarName fname) lowLevelBuiltins |]
     | (fname, _) <- builtinGlobals])
 
+-- | A list of all builtin imports
+allBuiltinImports :: [Import]
+allBuiltinImports =
+  $(TH.listE $
+    [ [| let (v, t) = $(TH.varE $ TH.mkName $ builtinVarPrimName fname) lowLevelBuiltins 
+         in ImportPrimFun v t |]
+    | (fname, _) <- builtinPrimitives] ++
+    [ [| let (v, ep) = $(TH.varE $ TH.mkName $ builtinVarFunName fname) lowLevelBuiltins
+         in ImportClosureFun ep |]
+    | (fname, _) <- builtinFunctions] ++
+    [ [| let v = $(TH.varE $ TH.mkName $ builtinVarVarName fname) lowLevelBuiltins
+         in ImportData v Nothing
+       |]
+    | (fname, _) <- builtinGlobals]
+   )
+
 -- | Get a builtin by field name
 llBuiltin :: (LowLevelBuiltins -> a) -> a
 llBuiltin f = f lowLevelBuiltins
@@ -115,19 +132,7 @@ getBuiltinImportByLabel s = Map.lookup s builtinNameTable
 
 builtinNameTable :: Map.Map Label Import
 builtinNameTable =
-  Map.fromList
-  $(TH.listE $
-    [ [| let (v, t) = $(TH.varE $ TH.mkName $ builtinVarPrimName fname) lowLevelBuiltins 
-         in (builtin_name v, ImportPrimFun v t) |]
-    | (fname, _) <- builtinPrimitives] ++
-    [ [| let (v, ep) = $(TH.varE $ TH.mkName $ builtinVarFunName fname) lowLevelBuiltins
-         in (builtin_name v, ImportClosureFun ep) |]
-    | (fname, _) <- builtinFunctions] ++
-    [ [| let v = $(TH.varE $ TH.mkName $ builtinVarVarName fname) lowLevelBuiltins
-         in (builtin_name v, ImportData v Nothing)
-       |]
-    | (fname, _) <- builtinGlobals]
-   )
+  Map.fromList [(builtin_name $ importVar i, i) | i <- allBuiltinImports]
   where
     builtin_name v =
       case varName v

@@ -221,7 +221,7 @@ importVar (ImportData v _) = v
 
 data Module =
   Module 
-  { moduleImports :: [ImportVar] -- ^ Imported, externally defined variables
+  { moduleImports :: [Import]    -- ^ Imported, externally defined variables
   , moduleFunctions :: [FunDef]  -- ^ Function definitions
   , moduleData :: [DataDef]      -- ^ Global data definitions
   , moduleExports :: [(Var, ExportSig)] -- ^ Exported functions and their
@@ -245,6 +245,9 @@ primFunctionType params returns = FunctionType True params returns
 
 closureFunctionType :: [ValueType] -> [ValueType] -> FunctionType
 closureFunctionType params returns = FunctionType False params returns
+
+mkFunctionType :: Bool -> [ValueType] -> [ValueType] -> FunctionType
+mkFunctionType = FunctionType
 
 ftIsPrim, ftIsClosure :: FunctionType -> Bool
 ftIsPrim (FunctionType b _ _) = b

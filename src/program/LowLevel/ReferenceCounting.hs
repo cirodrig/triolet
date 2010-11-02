@@ -117,11 +117,36 @@ toPointerFun f =
     , funBody        = toPointerStm $ funBody f
     }
 
+toPointerFunctionType ftype =
+  let domain = map toPointerType $ ftParamTypes ftype
+      range = map toPointerType $ ftReturnTypes ftype
+  in  mkFunctionType (ftIsPrim ftype) domain range
+
 toPointerDef (FunDef v f) =
   FunDef (toPointerVar v) (toPointerFun f)
 
 toPointerDataDef (DataDef v record_type x) =
   DataDef (toPointerVar v) (toPointerRecordType record_type) (map toPointerData x)
+
+toPointerImport :: Import -> Import
+toPointerImport (ImportClosureFun ep) =
+  let ep' =
+        EntryPoints
+        (toPointerFunctionType $ entryPointsType ep)
+        (functionArity ep)
+        (toPointerVar $ directEntry ep)
+        (toPointerVar $ exactEntry ep)
+        (toPointerVar $ inexactEntry ep)
+        (fmap toPointerVar $ deallocEntry ep)
+        (toPointerVar $ infoTableEntry ep)
+        (fmap toPointerVar $ globalClosure ep)
+  in ImportClosureFun ep'
+
+toPointerImport (ImportPrimFun v ft) =
+  ImportPrimFun (toPointerVar v) (toPointerFunctionType ft)
+
+toPointerImport (ImportData v data_value) =
+  ImportData (toPointerVar v) (fmap toPointerDataList data_value)
 
 toPointerExport :: (Var, ExportSig) -> (Var, ExportSig)
 toPointerExport (v, sig) = (toPointerVar v, sig)
@@ -134,6 +159,6 @@ insertReferenceCounting :: Module -> IO Module
 insertReferenceCounting (Module imports funs datas exports) =
   let funs' = map toPointerDef funs
       datas' = map toPointerDataDef datas
-      imports' = map toPointerVar imports
+      imports' = map toPointerImport imports
       exports' = map toPointerExport exports
   in return $ Module imports' funs' datas' exports'

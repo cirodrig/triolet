@@ -88,7 +88,6 @@ Executable pyon
     LLParser.LexCode
     LLParser.Lexer
     LLParser.Parser
-    LLParser.GenLowLevel
     LLParser.GenLowLevel2
     LLParser.TypeInference
     LowLevel.Builtins

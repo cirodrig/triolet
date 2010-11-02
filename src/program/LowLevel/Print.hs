@@ -15,6 +15,9 @@ import LowLevel.Syntax
 fillBracketList :: [Doc] -> Doc
 fillBracketList xs = brackets $ fsep $ punctuate (text ",") xs
 
+sepBracketList :: [Doc] -> Doc
+sepBracketList xs = brackets $ sep $ punctuate (text ",") xs
+
 pprVarLong :: Var -> Doc
 pprVarLong v =
   let name_doc = text $ maybe "_" showLabel $ varName v
@@ -61,13 +64,16 @@ pprDataDef (DataDef v _ values) =
   let initializer = fillBracketList $ map pprVal values
   in hang (text "data" <+> pprVar v <+> text "=") 4 initializer
 
+pprFunSignature :: [Doc] -> [Doc] -> Doc
+pprFunSignature domain range =
+  hang (sepBracketList domain) (-3) (text "->" <+> sepBracketList range)
+
 pprFunDef :: FunDef -> Doc
 pprFunDef (FunDef v f) =
   let intro = if isPrimFun f then text "procedure" else text "function"
-      param_doc = brackets $ sep $ punctuate (text ",") $ map pprVarLong $
-                  funParams f
-      ret_doc = fillBracketList $ map pprValueType $ funReturnTypes f
-      leader = pprVar v <> hang param_doc (-3) (text "->" <+> ret_doc)
+      param_doc = map pprVarLong $ funParams f
+      ret_doc = map pprValueType $ funReturnTypes f
+      leader = pprVar v <> pprFunSignature param_doc ret_doc
   in intro <+> leader <+> text "=" $$
      nest 4 (pprBlock (funBody f))
 
@@ -204,8 +210,31 @@ pprStm stmt =
 
 pprBlock stmt = pprStm stmt
 
-pprImport :: ImportVar -> Doc
-pprImport v = text "extern" <+> pprVar v
+pprImport :: Import -> Doc
+pprImport impent = text "extern" <+>
+  case impent
+  of ImportClosureFun entry_points ->
+       let ftype = entryPointsType entry_points
+           signature =
+             pprFunSignature
+             (map pprValueType $ ftParamTypes ftype)
+             (map pprValueType $ ftReturnTypes ftype)
+           impvar = case globalClosure entry_points
+                    of Just v  -> pprVar v
+                       Nothing -> text "<ERROR>"
+       in text "function" <+> impvar <+> signature
+     ImportPrimFun v ftype ->
+       let signature =
+             pprFunSignature
+             (map pprValueType $ ftParamTypes ftype)
+             (map pprValueType $ ftReturnTypes ftype)
+       in text "procedure" <+> pprVar v <+> signature
+     ImportData v value ->
+       let value_doc =
+             case value
+             of Nothing -> empty
+                Just vs -> text "=" <+> fillBracketList (map pprVal vs)
+       in text "data" <+> pprVar v <+> value_doc
 
 pprDataDefs :: [DataDef] -> Doc
 pprDataDefs defs = vcat $ map pprDataDef defs
@@ -213,7 +242,7 @@ pprDataDefs defs = vcat $ map pprDataDef defs
 pprFunDefs :: [FunDef] -> Doc
 pprFunDefs defs = vcat $ map pprFunDef defs
 
-pprImports :: [ImportVar] -> Doc
+pprImports :: [Import] -> Doc
 pprImports imports = vcat $ map pprImport imports
 
 pprExports :: [(Var, ExportSig)] -> Doc

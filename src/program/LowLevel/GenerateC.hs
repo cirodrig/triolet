@@ -723,7 +723,10 @@ generateCFile (Module imports funs datas _) = do
       
   -- Create an import declaration for symbols that are not defined in
   -- this module
-  let import_decls = map genImport $ filter (not . (`Set.member` defined_vars)) imports
+  let import_decls =
+        map genImport $
+        filter (not . (`Set.member` defined_vars)) $ 
+        map importVar imports
       
   let (data_defs, data_inits) = unzip $ map (genData global_vars) datas
   let init_fun = initializationFunction data_inits
@@ -741,7 +744,7 @@ generateCFile (Module imports funs datas _) = do
     defined_vars =
         Set.fromList $ [f | FunDef f _ <- funs] ++
                        [v | DataDef v _ _ <- datas]
-    global_vars = defined_vars `Set.union` Set.fromList imports
+    global_vars = defined_vars `Set.union` Set.fromList (map importVar imports)
       
 makeCFileText top_level =
   let transl_module = CTranslUnit top_level internalNode
