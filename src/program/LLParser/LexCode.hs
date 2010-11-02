@@ -68,6 +68,7 @@ data Token =
   | Int16Tok
   | Int32Tok
   | Int64Tok
+  | LetrecTok
   | LoadTok
   | ModuleTok
   | NilTok
@@ -134,6 +135,7 @@ showToken Int8Tok = "'int8'"
 showToken Int16Tok = "'int16'"
 showToken Int32Tok = "'int32'"
 showToken Int64Tok = "'int64'"
+showToken LetrecTok = "'letrec'"
 showToken LoadTok = "'load'"
 showToken ModuleTok = "'module'"
 showToken NilTok = "'nil'"

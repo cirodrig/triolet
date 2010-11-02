@@ -43,9 +43,8 @@ module LowLevel.ClosureCode
         GenM, CC,
         runCC,
         withHoistedVariables,
+        withUnhoistedVariables,
         isHoisted,
-        lookupEntryPoints',
-        lookupCallVar,
         withParameter, withParameters,
         withLocalFunctions,
         withGlobalFunctions,
@@ -140,9 +139,10 @@ data CCEnv =
   , envHoist :: !IntSet.IntSet
     -- | IDs of global variables.  Global variables are never captured.
   , envGlobals :: !IntSet.IntSet
-    -- | Information about how to construct closures for functions that are
-    -- in scope.
-  , envEntryPoints :: !(IntMap.IntMap Closure)
+    -- | Information about how to call functions that are in scope.  If a
+    --   function is being transformed into a procedure, then only the direct 
+    --   entry is provided.  Otherwise all the closure information is provided.
+  , envEntryPoints :: !(IntMap.IntMap (Either Var Closure))
   }
 
 emptyCCEnv var_ids globals =
@@ -190,43 +190,20 @@ instance Supplies CC (Ident Var) where
 runFreshVarCC m = CC $ \env ->
   returnCC =<< runFreshVarM (envVarIDSupply env) m
 
-{-
--- | Add a function's entry points to the environment
-withEntryPoints :: Var -> EntryPoints -> CC a -> CC a
-withEntryPoints fname entry_points (CC m) = CC $ m . insert_entry
-  where
-    insert_entry env =
-      let key = fromIdent $ varID fname
-      in env { envEntryPoints = IntMap.insert key entry_points $
-               envEntryPoints env}
--}
-
 -- | Set the set of hoisted variables.  This replaces whatever was there  
 -- before.  This is meant to be set for each top-level function.  
 withHoistedVariables :: Set.Set Var -> CC a -> CC a
 withHoistedVariables hvars (CC f) = CC $ \env ->
-  f (env {envHoist = IntSet.fromList $ map (fromIdent . varID) $ Set.toList hvars}) 
+  f (env {envHoist = IntSet.fromList $ map (fromIdent . varID) $
+                     Set.toList hvars}) 
 
 isHoisted :: Var -> CC Bool
 isHoisted v = CC $ \env ->
   returnCC $ fromIdent (varID v) `IntSet.member` envHoist env
 
-lookupClosure :: Var -> CC (Maybe Closure)
+lookupClosure :: Var -> CC (Maybe (Either Var Closure))
 lookupClosure v = CC $ \env ->
   returnCC $ IntMap.lookup (fromIdent $ varID v) $ envEntryPoints env
-
-lookupEntryPoints :: Var -> CC (Maybe EntryPoints)
-lookupEntryPoints v = CC $ \env ->
-  returnCC $ case IntMap.lookup (fromIdent $ varID v) $ envEntryPoints env
-             of Just closure -> Just (closureEntryPoints closure)
-                Nothing -> Nothing
-
-lookupEntryPoints' :: Var -> CC EntryPoints
-lookupEntryPoints' v = lookupEntryPoints v >>= check
-  where
-    check (Just x) = return x
-    check Nothing  =
-      internalError "lookupEntryPoints': No information for variable"
 
 -- | Scan some code over which a variable is locally bound.  The variable
 -- will be removed from the free variable set.
@@ -245,37 +222,25 @@ withParameters vs (CC m) = CC $ fmap remove_var . m
     
     deleteList xs s = foldr Set.delete s xs
 
-
-{-
--- | Scan some code over which some functions are defined.  New variables will 
--- be created for the functions' entry points and info tables.  This function 
--- does not create definitions of these variables.
---
--- The flag to use the default deallocation function should be true for
--- global functions and false otherwise.
-withFunctions :: WantClosureDeallocator
-              -> [FunDef]
-              -> CC ([Closure], a)
-              -> CC a
-withFunctions want_dealloc defs m = foldr with_function m defs
-  where
-    with_function (FunDef v fun) m = do
-      entry_points <- mkEntryPoints want_dealloc (funType fun) (varName v)
-      insert_entry_points (fromIdent $ varID v) entry_points m
-
-    insert_entry_points key entry_points (CC f) = CC $ \env ->
-      f $ env { envEntryPoints = IntMap.insert key entry_points $
-                                 envEntryPoints env}
--}
-
 localClosures xs m = foldr localClosure m xs
 
+-- | Add information about a function's closure-converted form to the
+-- environment.
 localClosure :: Closure -> CC a -> CC a
 localClosure clo (CC f) = CC $ \env -> f (insert_closure env)
   where
     insert_closure env =
       let k = fromIdent $ varID $ closureVar clo
-      in env {envEntryPoints = IntMap.insert k clo $ envEntryPoints env}
+      in env {envEntryPoints = IntMap.insert k (Right clo) $ envEntryPoints env}
+
+-- | Add information about some unhoisted functions to the environment.
+--   Any calls to these functions will be translated to procedure calls.
+withUnhoistedVariables :: [Var] -> CC a -> CC a
+withUnhoistedVariables xs (CC f) = CC $ \env -> f (insert_closures env)
+  where
+    insert_closures env =
+      env {envEntryPoints = foldr (uncurry IntMap.insert) (envEntryPoints env)
+                            [(fromIdent $ varID v, Left v) | v <- xs]}
 
 -- | Generate global functions and data from a set of global functions.
 withGlobalFunctions :: [Import] -- ^ Imported functions
@@ -389,23 +354,6 @@ listenFreeVars :: CC a -> CC (a, FreeVars)
 listenFreeVars (CC m) = CC $ \env -> do
   (x, free_vars, defs) <- m env
   return ((x, free_vars), free_vars, defs)
-
--- | Look up a variable used as the operator of a function call.
--- If the variable is a known function and its arity matches the given arity,
--- return a 'Right' value with the direct entry point.  Otherwise, return a
--- 'Left' value with the variable.
-lookupCallVar :: Var -> Int -> CC (Either Var Var)
-lookupCallVar v arity = lookupEntryPoints v >>= select
-  where
-    select Nothing = return $ Left v -- Unknown function
-    
-    select (Just ep)
-      | arity == functionArity ep =
-          -- Right number of arguments: return the direct call
-          return $ Right $ directEntry ep
-      | otherwise =
-          -- Wrong number of arguments
-          return $ Left v
 
 -------------------------------------------------------------------------------
 -- Closure and record type definitions
@@ -1012,11 +960,20 @@ genVarCall return_types fun args = lookupClosure fun >>= select
   where
     use_fun = mention fun >> return (return (VarV fun))
 
+    -- Unknown function
     select Nothing = do
       op <- use_fun
-      genIndirectCall return_types op args -- Unknown function
+      genIndirectCall return_types op args
     
-    select (Just ep) =
+    -- Function converted to local procedure.
+    -- All calls are direct primitive calls and no variables are captured.
+    select (Just (Left v)) =
+      return $ do args' <- sequence args
+                  return $ PrimCallA (VarV v) args'
+
+    -- Function converted to closure-based function.  Check the arity to
+    -- decide what kind of call to generate.
+    select (Just (Right ep)) =
       case length args `compare` arity
       of LT -> do               -- Undersaturated
            op <- use_fun

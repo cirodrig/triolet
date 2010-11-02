@@ -178,9 +178,10 @@ ccLocalGroup defs do_body = withParameters (map funDefiniendum defs) $ do
   hoisted <- sequence [isHoisted v | FunDef v _ <- defs]
   let (h_defs, l_defs) = partition_by hoisted defs
 
-  generate_hoisted_functions h_defs $ \hoisted_code -> do
-    unhoisted_code <- generate_unhoisted l_defs
-    do_body (hoisted_code >> emitLetrec unhoisted_code)
+  generate_hoisted_functions h_defs $ \hoisted_code -> 
+    withUnhoistedVariables (map funDefiniendum l_defs) $ do
+      unhoisted_code <- generate_unhoisted l_defs
+      do_body (hoisted_code >> emitLetrec unhoisted_code)
   where
     generate_hoisted_functions :: [FunDef]
                                -> (GenM () -> CC a)

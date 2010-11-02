@@ -48,6 +48,7 @@ rules :-
 "int16" / @notid	{ tok Int16Tok }
 "int32" / @notid	{ tok Int32Tok }
 "int64" / @notid	{ tok Int64Tok }
+"letrec" / @notid	{ tok LetrecTok }
 "load" / @notid		{ tok LoadTok }
 "module" / @notid	{ tok ModuleTok }
 "nil" / @notid		{ tok NilTok }

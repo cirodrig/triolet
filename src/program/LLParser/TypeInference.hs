@@ -595,6 +595,7 @@ atomType (ValA exprs) = concatMap expType exprs
 
 stmtType :: Stmt Typed -> [Type Typed]
 stmtType (LetS _ _ s) = stmtType s
+stmtType (LetrecS _ s) = stmtType s
 stmtType (IfS _ _ s Nothing) = stmtType s
 stmtType (IfS _ _ _ (Just (_, s))) = stmtType s
 stmtType (ReturnS atom) = atomType atom
@@ -691,6 +692,10 @@ resolveStmt stmt =
        lhs' <- resolveLValues lhs (atomType rhs')
        body' <- resolveStmt body
        return $ LetS lhs' rhs' body'
+     LetrecS fdefs body -> enterRec $ do
+       fdefs' <- mapM (resolveFunctionDef False) fdefs
+       body' <- enterNonRec $ resolveStmt body
+       return $ LetrecS fdefs' body'
      IfS cond if_true if_false mcont -> do
        cond' <- resolveExpr cond
        if_true' <- enterNonRec $ resolveStmt if_true

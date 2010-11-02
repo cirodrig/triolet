@@ -188,6 +188,7 @@ data Atom a =
 
 data Stmt a =
     LetS [LValue a] (Atom a) (Stmt a)
+  | LetrecS [FunctionDef a] (Stmt a)
   | IfS (Expr a) (Stmt a) (Stmt a) (Maybe ([LValue a], Stmt a))
   | ReturnS (Atom a)
 

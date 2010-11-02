@@ -320,6 +320,9 @@ genStmt stmt =
   of LetS lvals atom body -> do
        genLetAssignment lvals atom
        genStmt body
+     LetrecS fdefs body -> do
+       emitLetrec =<< lift (mapM genFunctionDef fdefs)
+       genStmt body
      IfS cond if_true if_false Nothing ->
        genTailIf cond if_true if_false
      IfS cond if_true if_false (Just (lhs, continuation)) ->
@@ -333,6 +336,9 @@ genStmtAtom stmt =
   case stmt
   of LetS lvals atom body -> do
        genLetAssignment lvals atom
+       genStmtAtom body
+     LetrecS fdefs body -> do
+       emitLetrec =<< lift (mapM genFunctionDef fdefs)
        genStmtAtom body
      IfS cond if_true if_false Nothing -> do
        -- Generate an if statement, then group its result values into an atom

@@ -311,7 +311,7 @@ atom = fmap ValA stmtExprList
 block :: P (Stmt Parsed)
 block = braces statements
   where
-    statements = if_stmt <|> let_or_atom
+    statements = if_stmt <|> letrec_stmt <|> let_or_atom
 
     -- An 'if' statement
     if_stmt = do
@@ -322,6 +322,14 @@ block = braces statements
       if_false <- block
       match SemiTok
       return $ IfS cond if_true if_false Nothing
+    
+    -- A 'letrec' statement
+    letrec_stmt = do
+      match LetrecTok
+      fdefs <- braces $ functionDef `sepBy` match SemiTok
+      match SemiTok
+      body <- statements
+      return $ LetrecS fdefs body
 
     -- A statement starting with an expression list: either assignment or
     -- the end of the block
