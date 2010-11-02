@@ -31,6 +31,7 @@ import SystemF.Builtins
 import qualified SystemF.Syntax as SystemF
 import qualified LowLevel.Syntax as LL
 import LowLevel.FreshVar
+import qualified LowLevel.Label as LL
 import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Records
@@ -184,7 +185,12 @@ lookupVar v = Cvt $ asks $ \env ->
 -- | Record how to translate a variable to low-level code. 
 convertVar :: Var -> LoweringType -> (LL.Var -> Cvt a) -> Cvt a
 convertVar v ty k = do
-  v' <- LL.newVar (varName v) Nothing (lowered ty)
+  let label =
+        case varName v
+        of Just lab ->
+             Just $ LL.pyonLabel (moduleOf lab) (labelUnqualifiedName lab)
+           Nothing -> Nothing
+  v' <- LL.newVar label (lowered ty)
   Cvt $ local (insert_binding v ty v') $ runCvt (k v')
   where
     -- Insert a mapping from core to ANF variable.
@@ -943,9 +949,9 @@ convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
       -- Generate marshalling code
       wrapped_fun <- createCMarshallingFunction export_sig fun
 
-      -- Create function name
-      let label = pgmLabel module_name exported_name
-      v <- LL.newExternalVar label (Just exported_name) (LL.PrimType OwnedType)
+      -- Create function name.  Function is exported with the given name.
+      let label = LL.externPyonLabel module_name exported_name (Just exported_name)
+      v <- LL.newExternalVar label (LL.PrimType OwnedType)
       return $ LL.FunDef v wrapped_fun
 
 convertModule (CModule module_name defss exports) = do 

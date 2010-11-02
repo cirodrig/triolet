@@ -310,7 +310,9 @@ createGlobalClosure :: FunDef -> FreshVarM (Maybe Closure)
 createGlobalClosure (FunDef v fun)
   | isClosureFun fun = do
       entry_points <-
-        mkEntryPoints NeverDeallocate (funType fun) (varName v) (Just v)
+        case varName v
+        of Just name -> mkGlobalEntryPoints (funType fun) name v
+           Nothing -> mkEntryPoints NeverDeallocate (funType fun) Nothing
       return $ Just $ mkGlobalClosure v entry_points
   | otherwise = return Nothing
 
@@ -349,7 +351,7 @@ mkRecClosures defs captureds = do
   -- Create entry points structure
   deallocator_fn <- newAnonymousVar (PrimType PointerType)
   entry_points <- forM defs $ \(FunDef v f) ->
-    mkEntryPoints (CustomDeallocator deallocator_fn) (funType f) (varName v) (Just v)
+    mkEntryPoints (CustomDeallocator deallocator_fn) (funType f) (varName v)
  
   return $ closureGroup $
     lazyZip3 (map funDefiniendum defs) entry_points captureds
@@ -980,7 +982,7 @@ emitLambdaClosure1 lambda_type direct captured_vars = do
     else do v <- newAnonymousVar (PrimType PointerType)
             return $ CustomDeallocator v
 
-  entry_points <- mkEntryPoints want_dealloc lambda_type Nothing Nothing
+  entry_points <- mkEntryPoints want_dealloc lambda_type Nothing
   let clo = mkNonrecClosure fun_var entry_points captured_vars
       
   -- Generate code

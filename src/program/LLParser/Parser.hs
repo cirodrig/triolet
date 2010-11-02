@@ -8,8 +8,8 @@ import Text.ParserCombinators.Parsec hiding(string)
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 import Text.ParserCombinators.Parsec.Expr
 
-import Gluon.Common.Label
 import qualified Gluon.Common.SourcePos
+import LowLevel.Label
 import LowLevel.Types
 import LLParser.Lexer
 import LLParser.AST
@@ -67,12 +67,12 @@ parseModuleName = do
   components <- identifier `sepBy1` match DotTok
   return $ moduleName $ intercalate "." components
 
-fullyQualifiedName :: P Label
+fullyQualifiedName :: P (ModuleName, String)
 fullyQualifiedName = do
   components <- identifier `sepBy1` match DotTok
   unless (length components >= 2) $ fail "must provide a fully-qualified name"
   let mod = moduleName (intercalate "." $ init components)
-  return $ pgmLabel mod (last components)
+  return (mod, last components)
 
 integer :: P Integer
 integer = tokenPrim showT nextParsecPos get_int
@@ -424,16 +424,18 @@ externDecl = extern_decl <|> import_decl
     extern_decl = match ExternTok >> parse_decl make_extern_decl
       where    
         make_extern_decl = do
-          label <- fullyQualifiedName
+          (mod, name) <- fullyQualifiedName
           c_name <- optionMaybe string
-          return $ \t -> ExternDecl t label c_name
+          let label_ext = externPyonLabel mod name c_name
+          return $ \t -> ExternDecl t label_ext
     
     import_decl = match ImportTok >> parse_decl make_import_decl
       where
         make_import_decl = do
           local_name <- identifier
           c_name <- option local_name string
-          return $ \t -> ImportDecl t local_name c_name
+          let label = externPyonLabel builtinModuleName local_name (Just c_name)
+          return $ \t -> ImportDecl t label local_name
 
     parse_decl :: P (ExternType Parsed -> ExternDecl Parsed)
                -> P (ExternDecl Parsed)

@@ -4,13 +4,13 @@ module LowLevel.Print where
 
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Label
 import Gluon.Common.Identifier
 import qualified Gluon.Core as Gluon
 import Export
 import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Syntax
+import LowLevel.Label
 
 fillBracketList :: [Doc] -> Doc
 fillBracketList xs = brackets $ fsep $ punctuate (text ",") xs
@@ -20,13 +20,13 @@ sepBracketList xs = brackets $ sep $ punctuate (text ",") xs
 
 pprVarLong :: Var -> Doc
 pprVarLong v =
-  let name_doc = text $ maybe "_" showLabel $ varName v
+  let name_doc = text $ maybe "_" labelLocalName $ varName v
       id_doc = text $ show $ fromIdent $ varID v
   in pprValueType (varType v) <+> name_doc <> text "'" <> id_doc
 
 pprVar :: Var -> Doc
 pprVar v =
-  let name_doc = text $ maybe "_" showLabel $ varName v
+  let name_doc = text $ maybe "_" labelLocalName $ varName v
       id_doc = text $ show $ fromIdent $ varID v
   in name_doc <> text "'" <> id_doc
 

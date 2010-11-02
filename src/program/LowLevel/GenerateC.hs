@@ -672,8 +672,25 @@ genData gvars (DataDef v record_type values) =
 -- is cast to the appropriate type every time it is used.  Use an array type
 -- so that (by C's semantics) references to the variable get its /address/ 
 -- instead of its contents.
-genImport :: ImportVar -> CDecl
-genImport v =
+genImport :: Import -> [CDecl]
+genImport impent =
+  case impent
+  of ImportClosureFun entry_points ->
+       let clo =
+             case globalClosure entry_points
+             of Just x -> x
+                Nothing -> internalError "genImport: Missing global closure"
+       in map genImportVar [ directEntry entry_points
+                           , exactEntry entry_points
+                           , inexactEntry entry_points
+                           , clo]
+     ImportPrimFun v _ ->
+       [genImportVar v]
+     ImportData v _ ->
+       [genImportVar v]
+
+genImportVar :: Var -> CDecl
+genImportVar v =
   let return_type_specs =
         [CStorageSpec (CExtern internalNode),
          CTypeSpec $ CVoidType internalNode]
@@ -724,9 +741,8 @@ generateCFile (Module imports funs datas _) = do
   -- Create an import declaration for symbols that are not defined in
   -- this module
   let import_decls =
-        map genImport $
-        filter (not . (`Set.member` defined_vars)) $ 
-        map importVar imports
+        concatMap genImport $
+        filter (not . (`Set.member` defined_vars) . importVar) imports
       
   let (data_defs, data_inits) = unzip $ map (genData global_vars) datas
   let init_fun = initializationFunction data_inits

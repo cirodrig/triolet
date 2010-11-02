@@ -43,11 +43,10 @@ setRenaming rn (p, _) = (p, rn)
 -- | Assign a fresh ID to this variable, and insert the assignment into the
 --   renaming.
 renameVariable :: Renaming -> Var -> FreshVarM (Renaming, Var)
-renameVariable rn v
-  | otherwise = do
-      v' <- newVar (varName v) (varExternalName v) (varType v)
-      let rn' = IntMap.insert (fromIdent $ varID v) v' rn
-      return (rn', v')
+renameVariable rn v = do
+  v' <- newVar (varName v) (varType v)
+  let rn' = IntMap.insert (fromIdent $ varID v) v' rn
+  return (rn', v')
 
 renameVariables :: Renaming -> [Var] -> FreshVarM (Renaming, [Var])
 renameVariables rn vs = go rn [] vs

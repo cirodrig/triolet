@@ -57,10 +57,10 @@ import qualified Language.Haskell.TH as TH
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
-import Gluon.Common.Label
 import Gluon.Common.THRecord
 import Gluon.Core(Con(..))
 import GlobalVar
+import LowLevel.Label
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record
@@ -115,28 +115,24 @@ allBuiltinImports =
 llBuiltin :: (LowLevelBuiltins -> a) -> a
 llBuiltin f = f lowLevelBuiltins
 
--- | Get a builtin by its label
+-- | Get a builtin by its module and local name.
 getBuiltinByLabel :: Label -> Maybe Var
 getBuiltinByLabel s =
-  case Map.lookup s builtinNameTable
-  of Nothing -> Nothing
-     Just (ImportClosureFun ep) ->
-       case globalClosure ep of Just v -> Just v
-                                _ -> internalError "getBuiltinByLabel"
-     Just (ImportPrimFun v _) -> Just v
-     Just (ImportData v _) -> Just v
+  fmap importVar $
+  Map.lookup (labelModule s, labelLocalName s) builtinNameTable
 
 -- | Get a builtin imported vaiable by its label
 getBuiltinImportByLabel :: Label -> Maybe Import
-getBuiltinImportByLabel s = Map.lookup s builtinNameTable
+getBuiltinImportByLabel s =
+  Map.lookup (labelModule s, labelLocalName s) builtinNameTable
 
-builtinNameTable :: Map.Map Label Import
+builtinNameTable :: Map.Map (ModuleName, String) Import
 builtinNameTable =
   Map.fromList [(builtin_name $ importVar i, i) | i <- allBuiltinImports]
   where
     builtin_name v =
       case varName v
-      of Just nm -> nm
+      of Just nm -> (labelModule nm, labelLocalName nm)
          Nothing -> internalError "builtinNameTable: Builtin variable has no name"
 
 -- | All built-in functions that are produced by translating a constructor

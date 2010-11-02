@@ -1,13 +1,67 @@
 {-| External representation of variable names.  Variable names have to be
 -- mangled to avoid cross-file name clashes.
 -}
-module LowLevel.Label where
+module LowLevel.Label
+       (ModuleName,
+        moduleName,
+        builtinModuleName,
+        showModuleName,
+        LabelTag(..),
+        Label(..),
+        pyonLabel,
+        externPyonLabel,
+        mangleLabel
+       )
+where
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
-import Gluon.Common.Label
+import Gluon.Common.Label(ModuleName, builtinModuleName, moduleName, showModuleName)
 import LowLevel.Types
-import LowLevel.Syntax
+
+-- | A label tag, used to distinguish multiple variables that were created
+-- from the same original variable.
+data LabelTag =
+    -- | A normal variable.  This tag is used on procedures, global data, and
+    --   global function closures.
+    NormalLabel
+    -- | A global function direct entry point.
+  | DirectEntryLabel
+    -- | A global function exact entry point.
+  | ExactEntryLabel
+    -- | A global function inexact entry point.
+  | InexactEntryLabel
+    deriving(Eq, Ord)
+
+-- | A label of low-level code.  Labels encode everything about a variable
+--   name (except for the variable ID).  Variables do not in general have
+--   unique labels, but externally visible variables have unique labels.
+data Label =
+  Label 
+  { -- | The module where a variable was defined
+    labelModule       :: !ModuleName
+
+    -- | The variable name
+  , labelLocalName    :: !String
+
+    -- | Tags to disambiguate multiple variables with the same name
+  , labelTag          :: !LabelTag
+    
+    -- | If present, this is the variable's name, overriding the normal 
+    --   name mangling process.  External names can be referenced from
+    --   non-Pyon code.  Only externally visible variables may have an
+    --   external name.
+  , labelExternalName :: !(Maybe String)
+  }
+  deriving(Eq)
+
+-- | A label of a regular Pyon variable
+pyonLabel :: ModuleName -> String -> Label
+pyonLabel mod name = Label mod name NormalLabel Nothing
+
+-- | A label of a Pyon variable with an external name
+externPyonLabel :: ModuleName -> String -> Maybe String -> Label
+externPyonLabel mod name ext_name = Label mod name NormalLabel ext_name
 
 -- | Encode a string appearing in a name.  Characters used by mangling are
 -- replaced by a two-character string beginning with \'q\'.
@@ -19,47 +73,20 @@ encodeNameString s = concatMap encodeLetter s
     encodeLetter 'q' = "qq"
     encodeLetter c   = [c]
 
+-- | Encode a label tag as a string.  Normally this appears as a component of 
+-- a mangled label.
+encodeLabelTag :: LabelTag -> String
+encodeLabelTag NormalLabel       = ""
+encodeLabelTag DirectEntryLabel  = "qD"
+encodeLabelTag ExactEntryLabel   = "qE"
+encodeLabelTag InexactEntryLabel = "qF"
+
 -- | Mangle a label.
 mangleLabel :: Label -> String
-mangleLabel name =
-  "_pi_" ++
-  encodeNameString (showModuleName $ moduleOf name) ++ "_" ++
-  encodeNameString (labelUnqualifiedName name)
-
--- | Get a variable's mangled name.
---
--- If the variable has an exported name, then that name is returned without
--- mangling.  If the variable is externally visible, then a name is generated 
--- from its label.  (It's not allowed to have two externally visible variables
--- with the same label.)  If not externally visible, then the variable's
--- label and ID are used.
---
--- Otherwise, a single letter and the variable's ID are used.  This fallback
--- situation is susceptible to cross-module name conflicts, and should only
--- be used for symbols that are not visible outside the current module.
-mangledVarName :: Var -> String
-mangledVarName v
-  | Just s <- varExternalName v = s -- Use external name if given
-  | varIsExternal v =
-      case varName v
-      of Just lab -> mangleLabel lab -- Mangle name, but don't add ID
-         Nothing -> internalError $ "mangledVarName: External variables " ++
-                                    "must have a label"
+mangleLabel name
+  | Just xname <- labelExternalName name = xname
   | otherwise =
-        case varName v
-        of Just lab -> mangleLabel lab ++ "_" ++ mangled_id
-           Nothing  -> type_leader (varType v) ++ mangled_id
-  where
-    mangled_id = show $ fromIdent $ varID v
-
-    type_leader (PrimType t) =
-      case t
-      of PointerType -> "v_"
-         OwnedType -> "v_"
-         BoolType -> "b_"
-         IntType Signed _ -> "i_"
-         IntType Unsigned _ -> "u_"
-         FloatType _ -> "f_"
-
-    type_leader (RecordType _) = "r_"
-
+      "_pi_" ++
+      encodeNameString (showModuleName $ labelModule name) ++ "_" ++
+      encodeNameString (labelLocalName name) ++
+      encodeLabelTag (labelTag name)

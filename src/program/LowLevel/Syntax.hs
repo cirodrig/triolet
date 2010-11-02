@@ -10,10 +10,10 @@ import Data.Typeable
 import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Supply
-import Gluon.Common.Label
 import Export
 import LowLevel.Types
 import LowLevel.Record
+import LowLevel.Label
 
 -- | A type that may be put into a variable
 data ValueType = PrimType !PrimType
@@ -82,23 +82,52 @@ data Var =
     -- the same ID, all their other fields should be equal also.
     varID :: {-# UNPACK #-} !(Ident Var)
     -- | True if this variable is visible outside the module where it is
-    --   defined.  Exported variables always have a label and are global.
+    --   defined.  Exported variables are global.
   , varIsExternal :: {-# UNPACK #-} !Bool
+    -- | The variable's name.  If the variable is externally visible, it must
+    --   have a name.
   , varName :: !(Maybe Label)
-    -- | The variable's externally visible name, as it appears in object code.
-    -- This is used to override the default name mangling, for example, when
-    -- referencing a function that was defined in C.  If the value is Nothing,
-    -- then the variable's name is used to generate an externally visible name.
-    --
-    -- In variables that are not externally visible, this field must be
-    -- Nothing.
-  , varExternalName :: !(Maybe String)
+    -- | The variable's type.
   , varType :: ValueType
   }
 
+-- | Get a variable's mangled name.
+--
+-- An externally visible variable's mangled name consists of just its label.
+-- Its ID is not part of its name, since IDs are not preserved across
+-- modules.
+--
+-- Internal variables' mangled names consist of the variable's label and ID.
+-- If the variable doesn't have a label, it consists of a single letter and
+-- the variable's ID.
+mangledVarName :: Var -> String
+mangledVarName v
+  | varIsExternal v =
+      case varName v
+      of Just lab -> mangleLabel lab -- Mangle name, but don't add ID
+         Nothing -> internalError $ "mangledVarName: External variables " ++
+                                    "must have a label"
+  | otherwise =
+        case varName v
+        of Just lab -> mangleLabel lab ++ "_" ++ mangled_id
+           Nothing  -> type_leader (varType v) ++ mangled_id
+  where
+    mangled_id = show $ fromIdent $ varID v
+
+    type_leader (PrimType t) =
+      case t
+      of PointerType -> "v_"
+         OwnedType -> "v_"
+         BoolType -> "b_"
+         IntType Signed _ -> "i_"
+         IntType Unsigned _ -> "u_"
+         FloatType _ -> "f_"
+
+    type_leader (RecordType _) = "r_"
+
 instance Show Var where
   show v =
-    let name = maybe "_" showLabel $ varName v
+    let name = maybe "_" labelLocalName $ varName v
     in name ++ "'" ++ show (fromIdent $ varID v)
 
 instance Eq Var where
@@ -312,30 +341,27 @@ globalClosure :: EntryPoints -> Maybe Var
 globalClosure = _epGlobalClosure
 
 -- | Create a new internal variable
-newVar :: Supplies m (Ident Var) =>
-          Maybe Label -> Maybe String -> ValueType -> m Var
-newVar name ext_name ty = do
+newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var
+newVar name ty = do
   ident <- fresh
   return $ Var { varID = ident
                , varIsExternal = False
                , varName = name
-               , varExternalName = ext_name
                , varType = ty
                }
 
 -- | Create a new variable with no name
 newAnonymousVar :: Supplies m (Ident Var) => ValueType -> m Var
-newAnonymousVar ty = newVar Nothing Nothing ty
+newAnonymousVar ty = newVar Nothing ty
 
 -- | Create a new externally defined variable
 newExternalVar :: Supplies m (Ident Var) =>
-                  Label -> Maybe String -> ValueType -> m Var
-newExternalVar name ext_name ty = do
+                  Label -> ValueType -> m Var
+newExternalVar name ty = do
   ident <- fresh
   return $ Var { varID = ident
                , varIsExternal = True
                , varName = Just name
-               , varExternalName = ext_name
                , varType = ty
                }
 

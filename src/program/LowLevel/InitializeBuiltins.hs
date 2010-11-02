@@ -7,9 +7,9 @@ import qualified Language.Haskell.TH as TH
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
-import Gluon.Common.Label
 import Gluon.Common.THRecord
 import GlobalVar
+import LowLevel.Label
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.BuiltinsTH
@@ -29,8 +29,8 @@ initializePrimField :: IdentSupply Var -> BuiltinVarName -> FunctionType
 initializePrimField supply name fty =
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = pgmLabel mod nm
-    v <- newExternalVar lab ext_name (PrimType PointerType)
+        lab = externPyonLabel mod nm ext_name
+    v <- newExternalVar lab (PrimType PointerType)
     return (v, fty)
 
 initializeClosureField :: IdentSupply Var 
@@ -40,11 +40,9 @@ initializeClosureField :: IdentSupply Var
 initializeClosureField supply name fty =
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = pgmLabel mod nm
-    v <- newExternalVar lab ext_name (PrimType OwnedType)
-
-    -- All builtin closures use the default closure deallocator
-    ep <- mkEntryPoints NeverDeallocate fty (Just lab) (Just v)
+        lab = externPyonLabel mod nm ext_name
+    v <- newExternalVar lab (PrimType OwnedType)
+    ep <- mkGlobalEntryPoints fty lab v
     return (v, ep)
 
 initializeVarField :: IdentSupply Var 
@@ -54,8 +52,8 @@ initializeVarField :: IdentSupply Var
 initializeVarField supply name ty =
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
-        lab = pgmLabel mod nm
-    newExternalVar lab ext_name ty
+        lab = externPyonLabel mod nm ext_name
+    newExternalVar lab ty
 
 {-
 initializeGlobalField :: IdentSupply Var -> String -> ValueType -> IO Var

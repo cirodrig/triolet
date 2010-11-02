@@ -5,8 +5,8 @@ module LLParser.AST where
 
 import Data.List
 
-import Gluon.Common.Label
 import LowLevel.Types
+import LowLevel.Label
 import qualified LowLevel.Syntax as LL
 
 data Parsed
@@ -76,17 +76,15 @@ data ExternDecl a =
       externType :: !(ExternType a)
       -- | Symbol name
     , externLabel :: Label
-      -- | Optional name visible outside Pyon
-    , externExportedName :: Maybe String
     }
     -- | An imported symbol that was not created by the Pyon compiler.
   | ImportDecl 
     { -- | Type of the external symbol.  Must be procedure or data.
       externType :: !(ExternType a)
+      -- | Symbol name
+    , externLabel :: Label
       -- | The variable representing this symbol
-    , externName :: VarName a
-      -- | The name visible outside Pyon
-    , externImportedName :: String
+    , externVar :: VarName a
     }
 
 -- | A definition

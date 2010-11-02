@@ -9,11 +9,11 @@ import Data.Set(Set)
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
-import Gluon.Common.Label
 import Gluon.Common.Supply
 import Gluon.Core(Con(..))
 import LowLevel.Builtins
 import LowLevel.FreshVar
+import LowLevel.Label
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record
@@ -656,21 +656,36 @@ data WantClosureDeallocator =
                                 --   deallocation function
   | CustomDeallocator !Var      -- ^ Use the given deallocation function
 
--- | Create an 'EntryPoints' data structure and populate it with new variables.
--- 
--- The deallocation function can either be a new variable or the default 
--- deallocation function.
+-- | Create an 'EntryPoints' data structure for an externally visible
+-- global function and populate it with new variables.
+mkGlobalEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
+                       FunctionType   -- ^ Function type
+                    -> Label          -- ^ Function name
+                    -> Var            -- ^ Global closure variable
+                    -> m EntryPoints  -- ^ Creates an EntryPoints structure
+mkGlobalEntryPoints ftype label global_closure
+  | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
+  | otherwise = do
+      inf <- newVar (Just label) (PrimType PointerType)
+      dir <- make_entry_point DirectEntryLabel
+      exa <- make_entry_point ExactEntryLabel
+      ine <- make_entry_point InexactEntryLabel
+      let arity = length $ ftParamTypes ftype
+      return $! EntryPoints ftype arity dir exa ine Nothing inf (Just global_closure)
+  where
+    make_entry_point tag =
+      newExternalVar (label {labelTag = tag, labelExternalName = Nothing}) (PrimType PointerType)
+
 mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
                  WantClosureDeallocator
               -> FunctionType   -- ^ Function type
               -> Maybe Label    -- ^ Function name
-              -> Maybe Var      -- ^ Global closure variable
               -> m EntryPoints  -- ^ Creates an EntryPoints structure
-mkEntryPoints want_dealloc ftype label global_closure
+mkEntryPoints want_dealloc ftype label
   | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
   | otherwise = do
       [inf, dir, exa, ine] <-
-        replicateM 4 $ newVar label Nothing (PrimType PointerType)
+        replicateM 4 $ newVar label (PrimType PointerType)
       dea <- case want_dealloc
              of NeverDeallocate -> return Nothing
                 DefaultDeallocator ->
@@ -679,8 +694,7 @@ mkEntryPoints want_dealloc ftype label global_closure
                 CustomDeallocator f ->
                   return $ Just f
       let arity = length $ ftParamTypes ftype
-      return $! EntryPoints ftype arity dir exa ine dea inf global_closure
-
+      return $! EntryPoints ftype arity dir exa ine dea inf Nothing
 {-
 passConvValue :: Int -> Int -> Var -> Var -> Val
 passConvValue size align copy finalize =
