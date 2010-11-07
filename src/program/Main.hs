@@ -31,6 +31,7 @@ import qualified SystemF.Print as SystemF
 import qualified Core.Lowering as Core
 import qualified Core.Print as Core
 import qualified Core.PartialEval as Core
+import qualified Core.Unpacking as Core
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
@@ -137,6 +138,7 @@ compilePyonToPyonAsm path text = do
 
   -- Simplify core
   flat_mod <- return $ Core.partialEvaluate flat_mod
+  flat_mod <- Core.unpackDataStructures flat_mod
 
   putStrLn ""
   putStrLn "Simplified core"

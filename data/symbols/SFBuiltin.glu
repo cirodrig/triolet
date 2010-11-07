@@ -44,7 +44,11 @@ constant Any : Pure;
 data int : Pure;
 data float : Pure;
 data bool : Pure where True : bool | False : bool;
-constant list : Pure -> Pure;
+
+-- While 'list' is used in System F, 'makeList' is only used after generating
+-- Core.  The type of 'makeList' can't be represented in System F.
+data list : Pure -> Pure where
+  makeList : (a : Pure) -> int -> a -> list a;
 constant Stream : Pure -> Pure;
 
 data PyonTuple0 : Pure where
@@ -326,3 +330,8 @@ constant fun_load_float : float -> float;
 constant fun_load_bool : bool -> bool;
 constant fun_load_NoneType : NoneType -> NoneType;
 constant fun_load_boxed : (a : Pure) -> a -> a;
+
+-- Inserted during core.  The types are not correct.
+
+constant fun_subscript : (a : Pure) -> PassConv a -> a -> a;
+constant fun_generate : (a : Pure) -> PassConv a -> int -> (int -> a) -> Stream a;

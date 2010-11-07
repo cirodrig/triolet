@@ -69,6 +69,7 @@ pyonBuiltinDataConstructors =
   [ "None"
   , "True"
   , "False"
+  , "makeList"
   , "eqDict"
   , "ordDict"
   , "traversableDict"
@@ -146,6 +147,10 @@ pyonBuiltinFunctions =
   , "fun_load_bool"
   , "fun_load_NoneType"
   , "fun_load_boxed"
+    
+    -- Functions inserted in Core
+  , "fun_subscript"
+  , "fun_generate"
   ]
 
 pyonBuiltinConstructors =
