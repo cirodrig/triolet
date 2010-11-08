@@ -155,6 +155,19 @@ storeBoolType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_bool)
 loadNoneTypeType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_NoneType)
 storeNoneTypeType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_NoneType)
       
+subscriptType = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  pc_addr <- newAnonymousVariable ObjectLevel
+  base_addr <- newAnonymousVariable ObjectLevel
+  let constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ReadPT pc_addr ::: passConvOf (varCT a)) $
+        pureArrCT (ReadPT base_addr ::: varCT a) $
+        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_int)) $
+        retCT (ReadRT (mkInternalVarE $ pyonBuiltin the_dummy_addr) ::: varCT a)
+  return (OwnRT ::: constructor_type)
+
 additiveDictType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   binary_type <- mkRefBinaryOpType (mkInternalVarE a)
@@ -277,7 +290,6 @@ streamIdType = mkConType $ do
         retCT (OwnRT ::: stream_type)
   return (OwnRT ::: constructor_type)
         
-
 streamReturnType = mkConType $ do
   e <- newAnonymousVariable TypeLevel
   a <- newAnonymousVariable TypeLevel
@@ -294,6 +306,27 @@ streamReturnType = mkConType $ do
         pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
         pureArrCT (ReadPT addr_pc ::: pc_type) $
+        pureArrCT (OwnPT ::: producer_type) $
+        retCT (OwnRT ::: result_type)
+  return (OwnRT ::: constructor_type)
+
+streamGenerateType = mkConType $ do
+  e <- newAnonymousVariable TypeLevel
+  a <- newAnonymousVariable TypeLevel
+  addr_pc <- newAnonymousVariable ObjectLevel
+  let pc_type = passConvOf (varCT a)
+      producer_type =
+        funCT $
+        arrCT (ValPT Nothing ::: conCT (pyonBuiltin the_int)) (varCT e) $
+        retCT (WriteRT ::: varCT a)
+      result_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [varCT e, varCT a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ReadPT addr_pc ::: pc_type) $
+        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_int)) $
         pureArrCT (OwnPT ::: producer_type) $
         retCT (OwnRT ::: result_type)
   return (OwnRT ::: constructor_type)
@@ -440,6 +473,8 @@ constructorTable =
                binaryFloatOpType)
             , (pyonBuiltin (subMember . the_AdditiveDict_float),
                binaryFloatOpType)
+            , (pyonBuiltin the_fun_subscript,
+               subscriptType)
             , (pyonBuiltin (traverseMember . the_TraversableDict_list),
                mkConType $ mkTraverseType (conCT $ pyonBuiltin the_list))
             , (pyonBuiltin (buildMember . the_TraversableDict_list),
@@ -460,4 +495,6 @@ constructorTable =
                streamBindType)
             , (pyonBuiltin SystemF.Builtins.the_fun_return,
                streamReturnType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_generate,
+               streamGenerateType)
             ]

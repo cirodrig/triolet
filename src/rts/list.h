@@ -21,6 +21,9 @@ extern function pyon.internal.list.list_build (unit, unit, pointer, owned, point
 extern function pyon.internal.list.list_traverse
   (unit, pointer, pointer) -> owned;
 
+extern function pyon.internal.list.subscript
+  (unit, pointer, pointer, int) -> pointer;
+
 extern procedure pyon.internal.list.list_peek
   (pointer, pointer, word, pointer) -> ();
 // Create the parameter passing convention of a list

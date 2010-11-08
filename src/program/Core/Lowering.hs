@@ -84,6 +84,7 @@ globalVarAssignment =
 isSingletonDataType c
   | c `elem` [pyonBuiltin the_AdditiveDict,
               pyonBuiltin the_TraversableDict,
+              pyonBuiltin the_list,
               getPyonTupleType' 2] = True
   | c `elem` [] = False
   | otherwise =
@@ -381,7 +382,7 @@ getPassConv ty k = do
 --         
 -- The returned function takes a pointer to the data structure as a
 -- parameter, and returns a code generator that produces the loading code.
-loadStructureField :: DynamicField       -- ^ Field to load
+loadStructureField :: DataConField       -- ^ Field to load
                    -> CBind CParam Rec   -- ^ Parameter that binds the field
                    -> (LL.Var -> Cvt a)  -- ^ User of the parameter
                    -> Cvt (LL.Val -> BuildBlock (), a)
@@ -390,19 +391,26 @@ loadStructureField field (param ::: param_type) consumer =
     consumer_rtn <- consumer llparam
     return (fetch_field llparam, consumer_rtn)
   where
-    -- Fetch a field into a variable.  If it's a reference field, just fetch
-    -- its offset.
+    record_field = dataField field
+    -- Fetch a field into a variable.  If it's a reference field,
+    -- we may need to fetch a pointer or just get the offset.
     fetch_field llparam scrutinee_ptr =
       case param
-      of ValP {} -> loadFieldAs field scrutinee_ptr llparam
-         OwnP {} -> loadFieldAs field scrutinee_ptr llparam
-         ReadP {} -> primAddPAs scrutinee_ptr (fieldOffset field) llparam
+      of ValP {} -> loadFieldAs record_field scrutinee_ptr llparam
+         OwnP {} -> loadFieldAs record_field scrutinee_ptr llparam
+         ReadP {} 
+           | dataFieldIsReference field ->
+               -- Load field, which contains pointer to the actual data
+               loadFieldAs record_field scrutinee_ptr llparam
+           | otherwise ->
+               -- Get address of the field, which contains the actual data
+               primAddPAs scrutinee_ptr (fieldOffset record_field) llparam
 
 -- | Load multiple fields of a data structure.
 --         
 -- Each (field, parameter) pair loads the given field into the parameter
 -- variable.  The field definition must agree with the parameter type.
-loadStructureFields :: [(DynamicField, CBind CParam Rec)]
+loadStructureFields :: [(DataConField, CBind CParam Rec)]
                     -> ([LL.Var] -> Cvt a)
                     -> Cvt (LL.Val -> BuildBlock (), a)
 loadStructureFields field_load_specs consumer = do
@@ -459,9 +467,27 @@ unpackDataConstructorFields datacon ty_args params consumer = do
 data DataConLayout =
     -- | This constructor is stored in memory, at some offset from the
     --   base pointer.  The offset and fields are given.
-    ReferenceLayout !LL.Val ![DynamicField]
+    ReferenceLayout !LL.Val ![DataConField]
     -- | This constructor is passed by value and has no fields.
   | EnumValueLayout
+
+-- | How a field is stored in an object.
+data DataConField =
+  DataConField 
+  { -- | The data representation in the object itself.  If the data is
+    --   stored directly in the object, the field includes the entire
+    --   data structure.  If it's a pointer to the data, this field is just
+    --   a pointer.
+    dataField :: !DynamicField
+    -- | For pass-by-reference fields, this field is True if the field is
+    --   a pointer to the real data, and false if the field is the real
+    --   data.  For other represntations, this field is always false.
+  , dataFieldIsReference :: !Bool
+  }
+
+inPlaceField, outOfPlaceField :: DynamicField -> DataConField
+inPlaceField f = DataConField f False
+outOfPlaceField f = DataConField f True
 
 dataConLayoutNumFields :: DataConLayout -> Int
 dataConLayoutNumFields (ReferenceLayout _ fs) = length fs
@@ -483,23 +509,35 @@ dataConstructorFieldLayout datacon ty_args
       (computation2, record_layout) <-
         suspendGen [] $ createDynamicRecord field_layouts
       
+      let fields = map inPlaceField $ recordFields record_layout
       return (LL.UnitL,
               computation1 >> computation2,
-              ReferenceLayout (nativeIntV 0) (recordFields record_layout))
+              ReferenceLayout (nativeIntV 0) fields)
 
-  | datacon `isPyonBuiltin` the_additiveDict = do
+  | datacon `isPyonBuiltin` the_makeList =
+      let fields =
+            case recordFields $ toDynamicRecord listRecord
+            of [size_fld, data_fld] ->
+                 [inPlaceField size_fld, outOfPlaceField data_fld]
+      in return (LL.UnitL,
+                 return (),
+                 ReferenceLayout (nativeIntV 0) fields)
+  | datacon `isPyonBuiltin` the_additiveDict =
       -- This dictionary contains three functions
-      return (LL.UnitL,
-              return (),
-              ReferenceLayout (nativeIntV 0)
-                              (recordFields $ toDynamicRecord additiveDictRecord))
+      let fields = map inPlaceField $ recordFields $
+                   toDynamicRecord additiveDictRecord
+      in return (LL.UnitL,
+                 return (),
+                 ReferenceLayout (nativeIntV 0) fields)
   
-  | datacon `isPyonBuiltin` the_traversableDict = do
+  | datacon `isPyonBuiltin` the_traversableDict =
       -- This dictionary contains two functions
-      return (LL.UnitL,
-              return (),
-              ReferenceLayout (nativeIntV 0)
-                              (recordFields $ toDynamicRecord traversableDictRecord))
+      let fields = map inPlaceField $ recordFields $
+                   toDynamicRecord traversableDictRecord
+      in return (LL.UnitL,
+                 return (),
+                 ReferenceLayout (nativeIntV 0) fields)
+
   | otherwise = internalError $ "dataConstructorFieldLayout: Not implemented for " ++ showLabel (conName datacon)
   where
     enum_value tag = return (tag, return (), EnumValueLayout)

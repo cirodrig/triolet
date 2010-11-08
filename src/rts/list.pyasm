@@ -214,6 +214,17 @@ function list_traverse_initialize(pointer state) -> () {
   ();
 };
 
+// Get a pointer to an array element.
+// elem_repr : PassConv is the element's representation.
+// base is the base pointer
+// index is the index of the element to select
+function subscript(unit _, pointer elem_repr, pointer base, int index) -> pointer {
+  elem_size = elem_repr @! PassConv.size;
+  elem_align = elem_repr @! PassConv.align;
+  pad_elem_size = PAD(elem_size, elem_align);
+  base ^+ (pad_elem_size as int * index);
+};
+
 // Allocate and construct a list, given a suitably initialized data array.
 // The data array is stolen by the list.
 // A pointer to the new list is returned.

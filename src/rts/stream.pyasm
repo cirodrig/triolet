@@ -239,3 +239,45 @@ function Stream_bind_finalize (owned produced_type_fini,
   PYON_DB_DEALLOC(word 2505)
   () primcall pyon_dealloc (producer_state);
 };
+
+/*****************************************************************************/
+/* generate */
+
+// A stream consisting of the sequence f(0), f(1), ... f(limit-1).
+// The stream state holds the next value to generate.
+function Stream_generate
+  (unit _, unit _, pointer return_conv, int limit, owned f) -> owned {
+  ALLOC_OBJECT(s, Stream, Stream_info)
+
+  s @! Stream.next = owned call Stream_generate_next(limit, f);
+  s @! Stream.initialize = Stream_generate_initialize;
+  s @! Stream.return_repr.size = return_conv @! PassConv.size;
+  s @! Stream.return_repr.align = return_conv @! PassConv.align;
+  s @! Stream.return_repr.copy = return_conv @! PassConv.copy;
+  s @! Stream.return_repr.finalize = return_conv @! PassConv.finalize;
+  s @! Stream.state_size = sizeof int;
+  s @! Stream.state_align = alignof int;
+  s @! Stream.state_finalize = dummy_finalizer;
+  s;
+};
+
+function Stream_generate_next
+  (int limit, owned f, pointer state, pointer ret) -> bool {
+  // Get the current counter value
+  n = int load state;
+  if (n >= limit) {
+    // Stream is depleted
+    false;
+  } else {
+    // Update the counter
+    !state = n + int 1;
+    // Produce a value
+    () = () call f (n, ret);
+    true;
+  };
+};
+
+function Stream_generate_initialize (pointer state) -> () {
+  !state = int 0;
+  ();
+};

@@ -419,7 +419,8 @@ genListTraverse pos addr ulist type_arg repr_arg = do
       function = CFun inf fun_params fun_return unknown_effect copy_exp 
   
   -- Create call to "generate"
-  let generate_args = [ type_arg
+  let generate_args = [ ValCE (Gluon.mkSynInfo noSourcePos TypeLevel) (TypeV unknown_effect)
+                      , type_arg
                       , repr_arg
                       , list_size_exp
                       , LamCE inf function]
