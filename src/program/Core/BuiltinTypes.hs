@@ -290,6 +290,33 @@ streamIdType = mkConType $ do
         retCT (OwnRT ::: stream_type)
   return (OwnRT ::: constructor_type)
         
+streamMapType = mkConType $ do
+  e <- newAnonymousVariable TypeLevel
+  a <- newAnonymousVariable TypeLevel
+  b <- newAnonymousVariable TypeLevel
+  addr_pc_a <- newAnonymousVariable ObjectLevel
+  addr_pc_b <- newAnonymousVariable ObjectLevel
+  addr_arg <- newAnonymousVariable ObjectLevel
+  let stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [varCT e, varCT a]
+      result_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [varCT e, varCT b]
+      transformer_type = 
+        funCT $
+        arrCT (ReadPT addr_arg ::: varCT a) (varCT e) $ 
+        retCT (WriteRT ::: varCT b)
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ValPT (Just b) ::: expCT pureKindE) $
+        pureArrCT (ReadPT addr_pc_a ::: passConvOf (varCT a)) $
+        pureArrCT (ReadPT addr_pc_b ::: passConvOf (varCT b)) $
+        pureArrCT (OwnPT ::: transformer_type) $
+        pureArrCT (OwnPT ::: stream_type) $
+        retCT (OwnRT ::: result_type)
+  return (OwnRT ::: constructor_type)
+
 streamReturnType = mkConType $ do
   e <- newAnonymousVariable TypeLevel
   a <- newAnonymousVariable TypeLevel
@@ -493,6 +520,8 @@ constructorTable =
                copyType)
             , (pyonBuiltin SystemF.Builtins.the_oper_CAT_MAP,
                streamBindType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_map_Stream,
+               streamMapType)
             , (pyonBuiltin SystemF.Builtins.the_fun_return,
                streamReturnType)
             , (pyonBuiltin SystemF.Builtins.the_fun_generate,

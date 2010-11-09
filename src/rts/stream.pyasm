@@ -281,3 +281,68 @@ function Stream_generate_initialize (pointer state) -> () {
   !state = int 0;
   ();
 };
+
+/*****************************************************************************/
+/* map */
+
+// State of Stream_map.
+// The state consists of the produced value's representation and temporary
+// storage for the produced value.
+record Stream_map_state {
+  pointer producer_state;           // State of producer stream
+  pointer temporary_state;          // Holds output of producer
+};
+
+function Stream_map
+  (unit _, unit _, unit _,
+   pointer produced_repr, pointer transformed_repr,
+   owned transformer, owned producer) -> owned {
+  ALLOC_OBJECT(s, Stream, Stream_info)
+
+  s @! Stream.next = owned call Stream_map_next
+    (transformer, producer, produced_repr @! PassConv.finalize);
+  s @! Stream.initialize = owned call Stream_map_initialize
+    (transformed_repr @! PassConv.size,
+     transformed_repr @! PassConv.align,
+     producer);
+  s @! Stream.return_repr.size = transformed_repr @! PassConv.size;
+  s @! Stream.return_repr.align = transformed_repr @! PassConv.align;
+  s @! Stream.return_repr.copy = transformed_repr @! PassConv.copy;
+  s @! Stream.return_repr.finalize = transformed_repr @! PassConv.finalize;
+  s @! Stream.state_size = sizeof Stream_map_state;
+  s @! Stream.state_align = alignof Stream_map_state;
+  s @! Stream.state_finalize = dummy_finalizer;
+  s;
+};
+        
+function Stream_map_next
+  (owned transformer, owned producer, owned finalize_produced_state,
+   pointer state, pointer ret) -> bool {
+  temporary_state = state @! Stream_map_state.temporary_state;
+  // Run the producer
+  b = bool call (producer @! Stream.next)
+    (state @! Stream_map_state.producer_state, temporary_state);
+
+  if (b) {
+    // Transform its result
+    () = () call transformer (temporary_state, ret);
+
+    // Finalize the temporary data
+    () = () call finalize_produced_state (temporary_state);
+    true;
+  } else {
+    false;
+  };
+};
+
+function Stream_map_initialize
+  (word produced_size, word produced_align, owned producer, pointer state) -> () {
+  producer_state = pointer primcall pyon_alloc (producer @! Stream.state_size);
+  () = () call (producer @! Stream.initialize) (producer_state);
+
+  state @! Stream_map_state.producer_state = producer_state;
+  state @! Stream_map_state.temporary_state =
+    pointer primcall pyon_alloc (produced_size);
+  ();
+};
+

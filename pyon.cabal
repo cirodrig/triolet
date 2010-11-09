@@ -84,6 +84,7 @@ Executable pyon
     Core.Lowering
     Core.TypeLowering
     Core.BuiltinTypes
+    Core.Rewriting
     Core.Unpacking
     LLParser.AST
     LLParser.LexCode

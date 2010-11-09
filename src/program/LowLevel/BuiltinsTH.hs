@@ -156,6 +156,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_fun_return) |])
   , (PyonName module_stream "Stream_generate",
      Right [| pyonBuiltin (SystemF.the_fun_generate) |])
+  , (PyonName module_stream "Stream_map",
+     Right [| pyonBuiltin (SystemF.the_fun_map_Stream) |])
   , (PyonName module_stream "Stream_build",
      Right [| pyonBuiltin (SystemF.buildMember . SystemF.the_TraversableDict_Stream) |])
   , (PyonName module_stream "Stream_traverse",
