@@ -141,6 +141,7 @@ compilePyonToPyonAsm path text = do
   flat_mod <- return $ Core.partialEvaluate flat_mod
   flat_mod <- Core.unpackDataStructures flat_mod
   flat_mod <- Core.rewrite flat_mod
+  flat_mod <- return $ Core.partialEvaluate flat_mod
 
   putStrLn ""
   putStrLn "Simplified core"

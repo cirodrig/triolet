@@ -6,6 +6,7 @@ where
 import Prelude hiding(mapM)
 
 import Control.Monad hiding(mapM)
+import Data.IORef
 import Data.Traversable
 
 import Gluon.Common.Error
@@ -13,7 +14,7 @@ import Gluon.Common.Identifier
 import Gluon.Common.SourcePos
 import Gluon.Common.Supply
 import Gluon.Core.Level
-import Gluon.Core(Rec, Var, SynInfo, mkSynInfo, newAnonymousVariable)
+import Gluon.Core(Rec, Var, Con, SynInfo, mkSynInfo, newAnonymousVariable)
 import qualified Gluon.Core as Gluon
 import qualified SystemF.Syntax as SF
 import qualified SystemF.Builtins as SF
@@ -28,10 +29,21 @@ unknown_effect = conCT (Gluon.builtin Gluon.the_EmpE)
 -------------------------------------------------------------------------------
 -- The rewriting monad
 
-newtype RW a = RW {unRW :: IdentSupply Var -> IO a}
+data RWEnv =
+  RWEnv { varIDSupply :: {-# UNPACK #-}!(IdentSupply Var)
+        , somethingChangedFlag :: {-# UNPACK #-}!(IORef Bool)
+        }
 
-runRW :: IdentSupply Var -> RW a -> IO a
-runRW var_supply m = unRW m var_supply
+newtype RW a = RW {unRW :: RWEnv -> IO a}
+
+-- | Run a rewriting.  Return a boolean to indicate whether anything was
+--   rewritten.
+runRW :: IdentSupply Var -> RW a -> IO (a, Bool)
+runRW var_supply m = do
+  change_flag <- newIORef False
+  x <- unRW m (RWEnv var_supply change_flag)
+  changed <- readIORef change_flag
+  return (x, changed)
 
 instance Functor RW where
   fmap f (RW g) = RW $ \env -> fmap f (g env)
@@ -42,7 +54,12 @@ instance Monad RW where
                                 unRW (k x) var_ids
 
 instance Supplies RW (Ident Var) where
-  fresh = RW supplyValue
+  fresh = RW $ \env -> supplyValue (varIDSupply env)
+
+-- | Set a global flag indicating that something has been changed by a rewrite
+--   rule.
+somethingChanged :: RW ()
+somethingChanged = RW $ \env -> writeIORef (somethingChangedFlag env) True
 
 type Rewrite a = a -> RW a
 
@@ -104,20 +121,149 @@ rewriteApp inf op args mrarg = do
                    ValCE {cexpVal = TypeV p_type},
                    ValCE {cexpVal = TypeV t_type},
                    producer_repr, transformer_repr,
-                   producer, transformer] -> do
-                    result <- rebuildMapStream inf effect p_type t_type
-                              producer_repr transformer_repr
-                              producer transformer
-                    case result of
-                      Nothing -> default_rewrite
-                      Just e  -> return e
+                   producer, transformer] ->
+                    try_rewrite $
+                    rebuildMapStream inf effect p_type t_type
+                    producer_repr transformer_repr
+                    producer transformer
                   _ -> default_rewrite
+           | con `SF.isPyonBuiltin` SF.the_fun_map_Stream ->
+               -- Rewrites for "mapStream"
+               case args'
+               of [ValCE {cexpVal = TypeV effect},
+                   ValCE {cexpVal = TypeV p_type},
+                   ValCE {cexpVal = TypeV t_type},
+                   producer_repr, transformer_repr,
+                   transformer, producer] ->
+                    try_rewrite $
+                    rewriteMapStreamApp inf effect p_type t_type
+                    producer_repr transformer_repr
+                    transformer producer
+                  _ -> default_rewrite
+           | con `SF.isPyonBuiltin` SF.buildMember . SF.the_TraversableDict_list ->
+               -- Rewrites for "buildList"
+               case args'
+               of [ValCE {cexpVal = TypeV effect},
+                   ValCE {cexpVal = TypeV val_type},
+                   val_repr, producer] ->
+                    case mrarg
+                    of Just rarg ->
+                         try_rewrite $
+                         rewriteBuildListApp inf effect val_type val_repr
+                         producer rarg
+                       _ -> unexpected_return_type
+                  _ -> default_rewrite
+                     
          _ -> default_rewrite
       where
+        unexpected_return_type =
+          internalError "rewriteApp: Unexpected return representation"
+
+        -- Attempt to apply a rewrite rule.  If it succeeds, record that a
+        -- rewrite happened and return its result.  Otherwise, rebuild the 
+        -- expression.
+        try_rewrite m = m >>= check 
+          where 
+            check Nothing = default_rewrite
+            check (Just x) = do somethingChanged
+                                return x
+
         default_rewrite = do
           -- Default: just rewrite subexpressions
           op' <- rewriteExp op
           return $ AppCE inf op' args' mrarg'
+
+-- | Deconstruct a constructor application term
+unpackConAppE :: RCExp -> Maybe (Con, [RCExp], Maybe RCExp)
+unpackConAppE expression =
+  case expression
+  of AppCE { cexpOper = ValCE {cexpVal = OwnedConV con}
+           , cexpArgs = args
+           , cexpReturnArg = mrarg} -> Just (con, args, mrarg)
+     _ -> Nothing
+
+-- Rewrite applications of 'buildList'
+rewriteBuildListApp inf effect val_type val_repr producer rarg =
+  case unpackConAppE producer
+  of Just (con, args, mrarg)
+       | con `SF.isPyonBuiltin` SF.the_fun_generate ->
+           case args
+           of [_, _, _, generate_count, generate_producer] ->
+                return $ Just $
+                rebuild_generate_list generate_count generate_producer
+     _ -> return Nothing
+  where
+    pos = getSourcePos inf
+    type_inf = mkSynInfo pos TypeLevel
+    
+    generate_list_op = ValCE inf $ OwnedConV $
+                       SF.pyonBuiltin SF.the_fun_generateList
+
+    rebuild_generate_list generate_count generate_producer =
+      AppCE { cexpInfo = inf
+            , cexpOper = generate_list_op
+            , cexpArgs = [ValCE type_inf $ TypeV effect,
+                          ValCE type_inf $ TypeV val_type,
+                          val_repr, generate_count, generate_producer]
+            , cexpReturnArg = Just rarg}
+
+-- Rewrite applications of 'mapStream'
+rewriteMapStreamApp inf effect p_type t_type p_repr t_repr transformer producer =
+  case unpackConAppE producer
+  of Just (con, args, mrarg)
+       | con `SF.isPyonBuiltin` SF.the_fun_generate ->
+           case args
+           of [ValCE {cexpVal = TypeV generate_effect}, _, _,
+               generate_count, generate_producer] -> do
+                fmap Just $
+                  rebuild_generate
+                  generate_effect generate_count generate_producer
+     _ -> return Nothing
+  where
+    pos = getSourcePos inf
+    type_inf = Gluon.mkSynInfo pos TypeLevel
+    generate_op = ValCE (mkSynInfo noSourcePos ObjectLevel) $
+                  OwnedConV (SF.pyonBuiltin SF.the_fun_generate)
+
+    -- Create a generate expression
+    -- generate count (\i r. let tmp = f i tmp in g tmp r)
+    rebuild_generate generate_effect generate_count generate_producer = do
+      -- Variables for function arguments, temporary value, and return value
+      index_var <- newAnonymousVariable ObjectLevel
+      ret_addr <- newAnonymousVariable ObjectLevel
+      ret_ptr <- newAnonymousVariable ObjectLevel
+      tmp_addr <- newAnonymousVariable ObjectLevel
+      tmp_ptr <- newAnonymousVariable ObjectLevel
+      let produce_binder = LocalB tmp_addr tmp_ptr ::: p_type
+          produce_exp =
+            AppCE { cexpInfo = inf
+                  , cexpOper = generate_producer
+                  , cexpArgs = [ValCE inf (ValueVarV index_var)]
+                  , cexpReturnArg = Just $ writePointerRV pos (Gluon.mkInternalVarE tmp_addr) tmp_ptr}
+          transform_exp =
+            AppCE { cexpInfo = inf
+                  , cexpOper = transformer
+                  , cexpArgs = [ValCE inf $ ReadVarV (Gluon.mkInternalVarE tmp_addr) tmp_ptr]
+                  , cexpReturnArg = Just $ writePointerRV pos (Gluon.mkInternalVarE ret_addr) ret_ptr}
+          new_generate_body = LetCE { cexpInfo = inf
+                                    , cexpBinder = produce_binder
+                                    , cexpRhs = produce_exp
+                                    , cexpBody = transform_exp
+                                    }
+          generate_fun =
+            CFun { cfunInfo = inf
+                 , cfunParams = [ValP index_var ::: conCT (SF.pyonBuiltin SF.the_int)]
+                 , cfunReturn = WriteR ret_addr ret_ptr ::: t_type
+                 , cfunEffect = unknown_effect
+                 , cfunBody = new_generate_body}
+          generate_call =
+            AppCE { cexpInfo = inf
+                  , cexpOper = generate_op
+                  , cexpArgs = [ValCE type_inf (TypeV effect),
+                                ValCE type_inf (TypeV t_type),
+                                t_repr, generate_count, LamCE inf generate_fun]
+                  , cexpReturnArg = Nothing}
+      return generate_call
 
 -- Construct the expression
 --
@@ -212,8 +358,22 @@ removeReturn expression =
       body' <- removeReturn $ caltBody alt
       return $ alt {caltBody = body'}
 
+-------------------------------------------------------------------------------
+-- Entry point
+
+-- | Apply rewriting rules in a single pass through the module.
+rewriteOnce :: CModule Rec -> RW (CModule Rec)
+rewriteOnce mod = do
+  defss' <- mapM (mapM rewriteDef) $ cmodDefs mod
+  return $ mod {cmodDefs = defss'}
+
+-- | Apply rewriting rules to a module as much as possible.
+--
+-- TODO: iterate per-function rather than globally
 rewrite :: CModule Rec -> IO (CModule Rec)
 rewrite mod = withTheVarIdentSupply $ \var_supply ->
-  runRW var_supply $ do
-    defss' <- mapM (mapM rewriteDef) $ cmodDefs mod
-    return $ mod {cmodDefs = defss'}
+  -- Keep rewriting until there are no more rewrite opportunitites
+  let run_until_convergence x = do
+        (x', changed) <- runRW var_supply $ rewriteOnce x
+        if changed then run_until_convergence x' else return x'
+  in run_until_convergence mod

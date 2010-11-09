@@ -214,6 +214,24 @@ function list_traverse_initialize(pointer state) -> () {
   ();
 };
 
+function list_generate
+  (unit _, unit _, pointer repr, int count, owned f, pointer ret) -> () {
+  elem_size = repr @! PassConv.size;
+  elem_align = repr @! PassConv.align;
+  pad_elem_size = PAD(elem_size, elem_align);
+
+  // Create list
+  () = () primcall list_create_uninitialized (repr, count as word, ret);
+
+  // Write list contents
+  (_, _) = while (int index = int 0,
+                  pointer elem = ret @! PyonList.contents) (index != count) {
+    () = () call f (index, elem);
+    (index + int 1, elem ^+ pad_elem_size as int);
+  };
+  ();
+};
+
 // Get a pointer to an array element.
 // elem_repr : PassConv is the element's representation.
 // base is the base pointer

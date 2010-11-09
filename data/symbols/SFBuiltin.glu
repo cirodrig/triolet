@@ -335,3 +335,4 @@ constant fun_load_boxed : (a : Pure) -> a -> a;
 
 constant fun_subscript : (a : Pure) -> PassConv a -> a -> a;
 constant fun_generate : (a : Pure) -> PassConv a -> int -> (int -> a) -> Stream a;
+constant fun_generateList : (a : Pure) -> PassConv a -> int -> (int -> a) -> list a;

@@ -358,6 +358,26 @@ streamGenerateType = mkConType $ do
         retCT (OwnRT ::: result_type)
   return (OwnRT ::: constructor_type)
 
+listGenerateType = mkConType $ do
+  e <- newAnonymousVariable TypeLevel
+  a <- newAnonymousVariable TypeLevel
+  addr_pc <- newAnonymousVariable ObjectLevel
+  let pc_type = passConvOf (varCT a)
+      producer_type =
+        funCT $
+        arrCT (ValPT Nothing ::: conCT (pyonBuiltin the_int)) (varCT e) $
+        retCT (WriteRT ::: varCT a)
+      result_type = appCT (conCT $ pyonBuiltin the_list) [varCT a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ReadPT addr_pc ::: pc_type) $
+        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_int)) $
+        arrCT (OwnPT ::: producer_type) (varCT e) $
+        retCT (WriteRT ::: result_type)
+  return (OwnRT ::: constructor_type)
+
 passConvOwnedType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   let result_type = passConvOf (varCT a)
@@ -526,4 +546,6 @@ constructorTable =
                streamReturnType)
             , (pyonBuiltin SystemF.Builtins.the_fun_generate,
                streamGenerateType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_generateList,
+               listGenerateType)
             ]

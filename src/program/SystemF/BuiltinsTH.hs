@@ -151,6 +151,7 @@ pyonBuiltinFunctions =
     -- Functions inserted in Core
   , "fun_subscript"
   , "fun_generate"
+  , "fun_generateList"
   ]
 
 pyonBuiltinConstructors =
