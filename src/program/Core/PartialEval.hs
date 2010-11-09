@@ -136,6 +136,9 @@ pevalDef (CDef v f) = CDef v (pevalFun f)
 
 pevalAlt alt = alt {caltBody = pevalExp (caltBody alt)}
 
+pevalExport export = export {cexportFun = pevalFun (cexportFun export)}
+
 partialEvaluate :: CModule Rec -> CModule Rec
 partialEvaluate mod =
-  mod {cmodDefs = map (map pevalDef) $ cmodDefs mod}
+  mod { cmodDefs = map (map pevalDef) $ cmodDefs mod
+      , cmodExports = map pevalExport $ cmodExports mod}

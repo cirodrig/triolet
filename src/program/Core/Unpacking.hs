@@ -352,6 +352,11 @@ unpackDef (CDef v f) = do
   f' <- unpackFun f
   return (CDef v f')
 
+unpackExport :: CExport Rec -> U (CExport Rec)
+unpackExport export = do
+  f <- unpackFun (cexportFun export)
+  return $ export {cexportFun = f}
+
 -- | Perform the unpacking transformation on all functions defined in a module.
 --
 -- Traversals of data structures are rewritten to traverse and index into the
@@ -360,10 +365,14 @@ unpackDataStructures :: CModule Rec -> IO (CModule Rec)
 unpackDataStructures mod = do
   withTheVarIdentSupply $ \var_supply -> do
     let st = Map.empty
-    (_, _, new_module_defs) <- runU unpack_module_defs var_supply st
-    return (mod {cmodDefs = new_module_defs})
+    (_, _, (new_defs, new_exports)) <-
+      runU unpack_module_contents var_supply st
+    return (mod {cmodDefs = new_defs, cmodExports = new_exports})
   where
-    unpack_module_defs = mapM (mapM unpackDef) (cmodDefs mod)    
+    unpack_module_contents = do 
+      defs <- mapM (mapM unpackDef) $ cmodDefs mod
+      exports <- mapM unpackExport $ cmodExports mod
+      return (defs, exports)
 
 -------------------------------------------------------------------------------
 -- Code generation
