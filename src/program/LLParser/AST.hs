@@ -42,7 +42,7 @@ data UnaryOp = NegateOp deriving(Show)
 data Type a =
     -- | A primitive type
     PrimT !PrimType
-    -- | A named type; could be a record type or a type parameter.
+    -- | A named type; could be a record type, typedef, or type parameter.
   | RecordT (RecordName a)
     -- | Featureless bytes, with given size and alignment.
   | BytesT (Expr a) (Expr a)
@@ -193,6 +193,10 @@ data Stmt a =
     LetS [LValue a] (Atom a) (Stmt a)
     -- | Local function definitions
   | LetrecS [FunctionDef a] (Stmt a)
+    -- | Local type synonym definition.
+    --   Code to compute the data type's layout 
+    --   will be inserted in place of this statement.
+  | TypedefS (RecordName a) (Type a) (Stmt a)
     -- | An if statement.  The statement may be followed by a continuation.
   | IfS (Expr a) (Stmt a) (Stmt a) (Maybe ([LValue a], Stmt a))
     -- | A while statement.  The loop-carried variables and their initial   

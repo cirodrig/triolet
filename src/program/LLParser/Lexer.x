@@ -60,6 +60,7 @@ rules :-
 "record" / @notid	{ tok RecordTok }
 "sizeof" / @notid	{ tok SizeofTok }
 "true" / @notid		{ tok TrueTok }
+"typedef" / @notid	{ tok TypedefTok }
 "uint8" / @notid	{ tok UInt8Tok }
 "uint16" / @notid	{ tok UInt16Tok }
 "uint32" / @notid	{ tok UInt32Tok }

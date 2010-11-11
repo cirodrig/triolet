@@ -7,6 +7,7 @@ module LLParser.GenLowLevel2 where
 import Control.Monad
 import Control.Monad.Trans
 import Data.Either
+import qualified Data.IntMap as IntMap
 import Data.List
 
 import Gluon.Common.Error
@@ -40,34 +41,83 @@ returnType :: GenExpr -> [LL.ValueType]
 returnType (GenVal val)  = [LL.valType val]
 returnType (GenAtom t _) = t
 
+data DynamicType =
+  DynamicType
+  { dynamicTypeSize :: LL.Val
+  , dynamicTypeAlign :: LL.Val
+  , dynamicTypeRecord :: Maybe DynamicRecord
+  }
+
+-- | Environment holding type synonyms
+type TypeEnv = IntMap.IntMap DynamicType
+
+emptyTypeEnv = IntMap.empty
+
+insertTypeSynonym syn_id record m = IntMap.insert (fromIdent syn_id) record m
+
+lookupTypeSynonym syn_id m =
+  case IntMap.lookup (fromIdent syn_id) m
+  of Just t -> t
+     Nothing -> internalError "lookupTypeSynonym"
+
 -------------------------------------------------------------------------------
 
 type G a = Gen FreshVarM a
 
 -- | Generate code for a type whose size and alignemnt are dynamically
 --   computed
-convertToDynamicFieldType :: Type Typed -> G DynamicFieldType
-convertToDynamicFieldType ty = 
+convertToDynamicFieldType :: TypeEnv -> Type Typed -> G DynamicFieldType
+convertToDynamicFieldType tenv ty = 
   case ty
   of PrimT pt -> return $ PrimField pt
+     RecordT (TypeSynonym type_id _) ->
+       let ty' = lookupTypeSynonym type_id tenv
+       in case dynamicTypeRecord ty'
+          of Just dyn_record ->
+               return $ RecordField dyn_record
+             Nothing ->
+               return $ BytesField (dynamicTypeSize ty') (dynamicTypeAlign ty')
      RecordT record -> do
-       dyn_record <- convertToDynamicRecord record
+       dyn_record <- convertToDynamicRecord tenv record
        return $ RecordField dyn_record
      BytesT size align -> do
-       size_val <- asVal =<< genExpr size
-       align_val <- asVal =<< genExpr align
+       size_val <- asVal =<< genExpr tenv size
+       align_val <- asVal =<< genExpr tenv align
        return $ BytesField size_val align_val
      AppT ty args ->
        -- Apply, then convert
-       convertToDynamicFieldType $ applyRecordType ty args
+       convertToDynamicFieldType tenv $ applyRecordType ty args
 
-convertToDynamicRecord :: TypedRecord -> G DynamicRecord
-convertToDynamicRecord rec = do
-  field_types <-
-    sequence [convertToDynamicFieldType t
-             | FieldDef t _ <- typedRecordFields0 rec]
-  createDynamicRecord field_types
+convertToDynamicRecord :: TypeEnv -> TypedRecord -> G DynamicRecord
+convertToDynamicRecord tenv rec = 
+  case rec
+  of TypeSynonym type_id _ ->
+       case dynamicTypeRecord $ lookupTypeSynonym type_id tenv
+       of Just record -> return record
+          Nothing     -> error "Expecting a record type"
+     _ -> do
+       field_types <- sequence [convertToDynamicFieldType tenv t
+                               | FieldDef t _ <- typedRecordFields0 rec]
+       createDynamicRecord field_types
 
+genDynamicType :: TypeEnv -> Type Typed -> G DynamicType
+genDynamicType tenv ty =
+  case ty
+  of PrimT pt ->
+       let size = nativeWordV $ sizeOf pt
+           align = nativeWordV $ alignOf pt
+       in return $ DynamicType size align Nothing
+     RecordT (TypeSynonym type_id _) -> do
+       return $ lookupTypeSynonym type_id tenv
+     RecordT rec -> do
+       dynamic_rec <- convertToDynamicRecord tenv rec
+       return $ DynamicType (recordSize dynamic_rec) (recordAlignment dynamic_rec) (Just dynamic_rec)
+     BytesT size align -> do
+       size_val <- asVal =<< genExpr tenv size
+       align_val <- asVal =<< genExpr tenv size
+       return $ DynamicType size_val align_val Nothing
+     AppT ty args ->
+       genDynamicType tenv $ applyRecordType ty args
 
 -- | Generate code of an expression used to initialize global data.
 genDataExpr :: Expr Typed -> FreshVarM LL.Val
@@ -123,25 +173,38 @@ mkWordVal expr =
 
 -- | Generate code to load or store a record field.  Return the field offset
 --   and the type at which the field should be accessed.
-genField :: Field Typed -> G (LL.Val, LL.ValueType)
-genField (Field base_type fnames cast_type) =
-  get_field_offset (nativeWordV 0) rec fnames
+genField :: TypeEnv -> Field Typed -> G (LL.Val, LL.ValueType)
+genField tenv (Field base_type fnames cast_type) =
+  get_field_offset (nativeWordV 0) base_type fnames
   where
-    get_field_offset base_offset rec (fname:fnames) =
-      case findIndex (match_name fname) $ typedRecordFields0 rec
-      of Just ix -> do
-           dyn_record <- convertToDynamicRecord rec
-           let rfield = typedRecordFields0 rec !! ix
-               dfield = dyn_record !!: ix
-           offset <- primAddZ (LL.PrimType nativeWordType) base_offset (fieldOffset dfield)
-           case fnames of
-             [] -> return_field_offset offset dfield
-             _  -> case rfield
-                   of FieldDef (RecordT next_rec) _ ->
-                        get_field_offset offset next_rec fnames
-                      _ -> internalError "genField"
-         Nothing ->
-           internalError "genField"
+    get_field_offset base_offset base_type (fname:fnames) =
+      case base_type
+      of RecordT (TypeSynonym type_id typed_type) ->
+           case dynamicTypeRecord $ lookupTypeSynonym type_id tenv
+           of Just dyn_rec -> 
+                case typed_type
+                of RecordT static_rec ->
+                     get_dynamic_type_offset dyn_rec static_rec
+              Nothing -> internalError "genField: Base type is not a record"
+         RecordT rec -> do
+           dyn_rec <- convertToDynamicRecord tenv rec
+           get_dynamic_type_offset dyn_rec rec
+         _ -> internalError "genField: Base type is not a record"
+      where
+        get_dynamic_type_offset dyn_rec rec =
+          case findIndex (match_name fname) $ typedRecordFields0 rec
+          of Just ix -> do
+               let rfield = typedRecordFields0 rec !! ix
+                   dfield = dyn_rec !!: ix
+               offset <- primAddZ (LL.PrimType nativeWordType) base_offset (fieldOffset dfield)
+               case fnames of
+                 [] -> return_field_offset offset dfield
+                 _  -> case rfield
+                       of FieldDef next_rec _ ->
+                            get_field_offset offset next_rec fnames
+                          _ -> internalError "genField"
+             Nothing ->
+               internalError "genField"
 
     return_field_offset offset field =
       let ty = case cast_type
@@ -154,10 +217,6 @@ genField (Field base_type fnames cast_type) =
       in return (offset, ty)
 
     match_name want_name (FieldDef _ name) = name == want_name
-    
-    rec = case base_type
-          of RecordT rec -> rec
-             _ -> internalError "genField: Base type is not a record"
 
 -- | Convert to a static record type.  The type must not contain non-constant
 --   expressions.  Throw an error if it doesn't satisfy these conditions.
@@ -165,8 +224,8 @@ dynamicToStaticRecordType :: DynamicRecord -> StaticRecord
 dynamicToStaticRecordType = internalError "dynamicToStaticRecordType: not implemented"
 
 -- | Generate code of an expression
-genExpr :: Expr Typed -> G GenExpr
-genExpr expr =
+genExpr :: TypeEnv -> Expr Typed -> G GenExpr
+genExpr tenv expr =
   case expExp expr
   of VarE {} -> data_expr
      IntLitE {} -> data_expr
@@ -175,60 +234,65 @@ genExpr expr =
      NilLitE {} -> data_expr
      NullLitE {} -> data_expr
      RecordE record fs -> do
-       fs' <- mapM (asVal <=< genExpr) fs
+       fs' <- mapM (asVal <=< subexpr) fs
        let record_type = convertToStaticRecord record
            atom = LL.PackA record_type fs'
        return $ GenAtom [LL.RecordType record_type] atom
      FieldE base fld -> do
-       addr <- asVal =<< genExpr base
-       (offset, _) <- genField fld
+       addr <- asVal =<< subexpr base
+       (offset, _) <- genField tenv fld
        let atom = LL.PrimA LL.PrimAddP [addr, offset]
        return $ GenAtom [LL.PrimType PointerType] atom
      LoadFieldE base fld -> do
-       addr <- asVal =<< genExpr base
-       (offset, ty) <- genField fld
+       addr <- asVal =<< subexpr base
+       (offset, ty) <- genField tenv fld
        let atom = LL.PrimA (LL.PrimLoad ty) [addr, offset]
        return $ GenAtom [ty] atom
      LoadE ty base -> do
-       addr <- asVal =<< genExpr base
+       addr <- asVal =<< subexpr base
        let llty = convertToValueType ty
        let atom = LL.PrimA (LL.PrimLoad llty) [addr, nativeIntV 0]
        return $ GenAtom [llty] atom
      CallE returns op args -> do
-       op' <- asVal =<< genExpr op
-       args' <- mapM (asVal <=< genExpr) args
+       op' <- asVal =<< subexpr op
+       args' <- mapM (asVal <=< subexpr) args
        let atom = LL.CallA op' args'
            return_types = map convertToValueType returns
        return $ GenAtom return_types atom
      PrimCallE returns op args -> do
-       op' <- asVal =<< genExpr op
-       args' <- mapM (asVal <=< genExpr) args
+       op' <- asVal =<< subexpr op
+       args' <- mapM (asVal <=< subexpr) args
        let atom = LL.PrimCallA op' args'
            return_types = map convertToValueType returns
        return $ GenAtom return_types atom
      UnaryE op arg -> do
-       arg' <- genExpr arg
+       arg' <- subexpr arg
        genUnaryOp op arg'
      BinaryE op l r -> do
-       l' <- genExpr l
-       r' <- genExpr r
+       l' <- subexpr l
+       r' <- subexpr r
        genBinaryOp op l' r'
      CastE e ty -> do
-       e' <- genExpr e
+       e' <- subexpr e
        genCast (convertToValueType ty) e'
      SizeofE ty -> do
        let size =
              case ty
              of BytesT size _ -> mkWordVal size
+                RecordT (TypeSynonym tid _) ->
+                  dynamicTypeSize $ lookupTypeSynonym tid tenv
                 _ -> nativeWordV $ sizeOf $ convertToValueType ty
        return $ GenVal size
      AlignofE ty -> do
        let align =
              case ty
              of BytesT _ align -> mkWordVal align
+                RecordT (TypeSynonym tid _) ->
+                  dynamicTypeAlign $ lookupTypeSynonym tid tenv
                 _ -> nativeWordV $ alignOf $ convertToValueType ty
        return $ GenVal align
   where
+    subexpr e = genExpr tenv e
     data_expr = lift $ fmap GenVal $ genDataExpr expr
 
 genUnaryOp :: UnaryOp -> GenExpr -> G GenExpr
@@ -333,55 +397,59 @@ genCast ty e =
     
     cannot = internalError "genCast: Unexpected type cast"
 
-genAtom :: Atom Typed -> G LL.Atom
+genAtom :: TypeEnv -> Atom Typed -> G LL.Atom
 -- If there's only one expression, make an atom
-genAtom (ValA [expr]) = asAtom =<< genExpr expr
+genAtom tenv (ValA [expr]) = asAtom =<< genExpr tenv expr
 
-genAtom (ValA exprs)
+genAtom tenv (ValA exprs)
   | all ((1 ==) . length . exprType) exprs = do
       -- If there are many single-valued expressions,
       -- bind each to one value
-      values <- mapM (asVal <=< genExpr) exprs 
+      values <- mapM (asVal <=< genExpr tenv) exprs 
       return (LL.ValA values)
   | otherwise = do
       -- Create values for each expression, then
       -- concatenate them into an atom
       values <- forM exprs $ \expr -> do
-        expr' <- genExpr expr
+        expr' <- genExpr tenv expr
         emitAtom (returnType expr') =<< asAtom expr'
       return (LL.ValA $ concat values)
 
 -- | Generate code of a statement
-genStmt :: Stmt Typed -> G LL.Stm
-genStmt stmt =
+genStmt :: TypeEnv -> Stmt Typed -> G LL.Stm
+genStmt tenv stmt =
   case stmt
   of LetS lvals atom body -> do
-       genLetAssignment lvals atom
-       genStmt body
+       genLetAssignment tenv lvals atom
+       genStmt tenv body
      LetrecS fdefs body -> do
-       emitLetrec =<< lift (mapM genFunctionDef fdefs)
-       genStmt body
+       emitLetrec =<< lift (mapM (genFunctionDef tenv) fdefs)
+       genStmt tenv body
+     TypedefS (TypeSynonym type_id _) ty stmt -> do
+       -- Compute specification of this type
+       ty' <- genDynamicType tenv ty
+       genStmt (insertTypeSynonym type_id ty' tenv) stmt
      IfS cond if_true if_false Nothing ->
-       genTailIf cond if_true if_false
+       genTailIf tenv cond if_true if_false
      IfS cond if_true if_false (Just (lhs, continuation)) ->
-       genMedialIf cond if_true if_false lhs (genStmt continuation)
+       genMedialIf tenv cond if_true if_false lhs (genStmt tenv continuation)
      WhileS inits cond body Nothing ->
-       genTailWhile inits cond body
+       genTailWhile tenv inits cond body
      WhileS inits cond body (Just (lhs, continuation)) -> 
-       genMedialWhile inits cond body lhs (genStmt continuation)
-     ReturnS atom -> do 
-       atom' <- genAtom atom
+       genMedialWhile tenv inits cond body lhs (genStmt tenv continuation)
+     ReturnS atom -> do
+       atom' <- genAtom tenv atom
        return (LL.ReturnE atom')
 
-genStmtAtom :: Stmt Typed -> G LL.Atom
-genStmtAtom stmt =
+genStmtAtom :: TypeEnv -> Stmt Typed -> G LL.Atom
+genStmtAtom tenv stmt =
   case stmt
   of LetS lvals atom body -> do
-       genLetAssignment lvals atom
-       genStmtAtom body
+       genLetAssignment tenv lvals atom
+       genStmtAtom tenv body
      LetrecS fdefs body -> do
-       emitLetrec =<< lift (mapM genFunctionDef fdefs)
-       genStmtAtom body
+       emitLetrec =<< lift (mapM (genFunctionDef tenv) fdefs)
+       genStmtAtom tenv body
      IfS cond if_true if_false Nothing -> do
        -- Generate an if statement, then group its result values into an atom
        let return_types = map convertToValueType $ stmtType if_true
@@ -389,9 +457,9 @@ genStmtAtom stmt =
 
        let lvals = map VarL return_vars
            return_atom = LL.ValA $ map LL.VarV return_vars
-       genMedialIf cond if_true if_false lvals (return return_atom)
+       genMedialIf tenv cond if_true if_false lvals (return return_atom)
      IfS cond if_true if_false (Just (lhs, continuation)) ->
-       genMedialIf cond if_true if_false lhs (genStmtAtom continuation)
+       genMedialIf tenv cond if_true if_false lhs (genStmtAtom tenv continuation)
 
      WhileS inits cond body Nothing -> do
        -- Generate a while statement, then group its result values into an atom
@@ -401,33 +469,36 @@ genStmtAtom stmt =
        
        let lvals = map VarL return_vars
            return_atom = LL.ValA $ map LL.VarV return_vars
-       genMedialWhile inits cond body lvals (return return_atom)
+       genMedialWhile tenv inits cond body lvals (return return_atom)
 
      WhileS inits cond body (Just (lhs, continuation)) ->
-       genMedialWhile inits cond body lhs (genStmtAtom continuation)
+       genMedialWhile tenv inits cond body lhs (genStmtAtom tenv continuation)
 
-     ReturnS atom -> do 
-       genAtom atom
+     ReturnS atom -> do
+       genAtom tenv atom
 
 -- | Create code of an assignment 
-genLetAssignment :: [LValue Typed] -> Atom Typed -> G ()
-genLetAssignment lvals atom = do
-  rhs <- genAtom atom
-  genLValues lvals rhs (map convertToValueType $ atomType atom)
+genLetAssignment :: TypeEnv -> [LValue Typed] -> Atom Typed -> G ()
+genLetAssignment tenv lvals atom = do
+  rhs <- genAtom tenv atom
+  genLValues tenv lvals rhs (map convertToValueType $ atomType atom)
 
 -- | Generate a while expression in tail poisition
-genTailWhile :: [(Parameter Typed, Expr Typed)] -> Expr Typed -> Stmt Typed
+genTailWhile :: TypeEnv -> [(Parameter Typed, Expr Typed)] -> Expr Typed
+             -> Stmt Typed
              -> G LL.Stm
-genTailWhile inits cond body = do
+genTailWhile tenv inits cond body = do
   while_var <- lift $ LL.newAnonymousVar (LL.PrimType PointerType)
   
   -- When done, return the loop-carried variables
   let cont = return $ LL.ReturnE $ LL.ValA [LL.VarV v | (Parameter _ v, _) <- inits]
-  genWhileFunction while_var inits cond body cont
-  initializers <- mapM (asVal <=< genExpr) (map snd inits)
+  genWhileFunction tenv while_var inits cond body cont
+  initializers <- mapM (asVal <=< genExpr tenv) (map snd inits)
   return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) initializers
 
-genMedialWhile inits cond body lhs mk_cont = do
+genMedialWhile :: TypeEnv -> [(Parameter Typed, Expr Typed)] -> Expr Typed
+               -> Stmt Typed -> [LValue Typed] -> G a -> G a
+genMedialWhile tenv inits cond body lhs mk_cont = do
   let param_vars = [v | (Parameter _ v, _) <- inits]
       param_types = map LL.varType param_vars
   while_var <- lift $ LL.newAnonymousVar (LL.PrimType PointerType)
@@ -435,14 +506,14 @@ genMedialWhile inits cond body lhs mk_cont = do
   -- Turn the continuation into a function so we can call it.
   getContinuation True param_vars $ \cont -> do
     -- Generate the while function
-    genWhileFunction while_var inits cond body (return cont)
+    genWhileFunction tenv while_var inits cond body (return cont)
     
     -- Call the while function
-    initializers <- mapM (asVal <=< genExpr) (map snd inits)
+    initializers <- mapM (asVal <=< genExpr tenv) (map snd inits)
     return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) initializers 
 
   -- Generate the continuation
-  genLValues lhs (LL.ValA $ map LL.VarV param_vars) param_types
+  genLValues tenv lhs (LL.ValA $ map LL.VarV param_vars) param_types
   mk_cont
 
 -- | Generate a function for a while statment.
@@ -454,9 +525,10 @@ genMedialWhile inits cond body lhs mk_cont = do
 -- >   } else {
 -- >     cont (tmp1 ... tmpN);
 -- >   };
-genWhileFunction :: LL.Var -> [(Parameter Typed, Expr Typed)] -> Expr Typed
+genWhileFunction :: TypeEnv
+                 -> LL.Var -> [(Parameter Typed, Expr Typed)] -> Expr Typed
                  -> Stmt Typed -> G LL.Stm -> G ()
-genWhileFunction while_var params cond body cont = do
+genWhileFunction tenv while_var params cond body cont = do
   let param_vars = [v | (Parameter _ v, _) <- params]
       return_types = [convertToValueType t | (Parameter t _, _) <- params]
 
@@ -470,27 +542,28 @@ genWhileFunction while_var params cond body cont = do
           return_vars <- lift $ mapM LL.newAnonymousVar return_types
           
           -- Generate body and bind its result
-          bindAtom return_vars =<< genStmtAtom body
+          bindAtom return_vars =<< genStmtAtom tenv body
           
           -- Loop
           return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) (map LL.VarV return_vars)
           
-    cond' <- asVal =<< genExpr cond
+    cond' <- asVal =<< genExpr tenv cond
     genIf cond' true_path false_path
   
   emitLetrec [LL.FunDef while_var $
               LL.primFun param_vars return_types function_body]
 
 -- | Generate an if-else expression in tail position
-genTailIf :: Expr Typed -> Stmt Typed -> Stmt Typed -> G LL.Stm
-genTailIf cond if_true if_false = do
-  cond' <- asVal =<< genExpr cond
-  genIf cond' (genStmt if_true) (genStmt if_false)
+genTailIf :: TypeEnv -> Expr Typed -> Stmt Typed -> Stmt Typed -> G LL.Stm
+genTailIf tenv cond if_true if_false = do
+  cond' <- asVal =<< genExpr tenv cond
+  genIf cond' (genStmt tenv if_true) (genStmt tenv if_false)
 
-genMedialIf :: Expr Typed -> Stmt Typed -> Stmt Typed -> [LValue Typed]
+genMedialIf :: TypeEnv -> Expr Typed -> Stmt Typed -> Stmt Typed
+            -> [LValue Typed]
             -> G a -> G a
-genMedialIf cond if_true if_false lhs continuation = do
-  cond' <- asVal =<< genExpr cond
+genMedialIf tenv cond if_true if_false lhs continuation = do
+  cond' <- asVal =<< genExpr tenv cond
   
   -- Create new temporary variables to hold live-out values
   let return_types = map convertToValueType $ stmtType if_true
@@ -501,18 +574,18 @@ genMedialIf cond if_true if_false lhs continuation = do
     let gen_branch br = do
           -- Generate a branch of the 'if' statement that ends by
           -- passing its live-out values to the continuation
-          bindAtom return_vars =<< genStmtAtom br
+          bindAtom return_vars =<< genStmtAtom tenv br
           return cont
     in genIf cond' (gen_branch if_true) (gen_branch if_false)
   
   -- Generate the continuation
-  genLValues lhs (LL.ValA $ map LL.VarV return_vars) return_types
+  genLValues tenv lhs (LL.ValA $ map LL.VarV return_vars) return_types
   continuation
 
 -- | Generate code to assign to some LValues
-genLValues :: [LValue Typed] -> LL.Atom -> [LL.ValueType] -> G ()
-genLValues lvals atom atom_types = do
-  (unzip -> (binders, code)) <- zipWithM genLValue lvals atom_types
+genLValues :: TypeEnv -> [LValue Typed] -> LL.Atom -> [LL.ValueType] -> G ()
+genLValues tenv lvals atom atom_types = do
+  (unzip -> (binders, code)) <- zipWithM (genLValue tenv) lvals atom_types
   bindAtom binders atom
   sequence_ code
 
@@ -521,8 +594,8 @@ genLValues lvals atom atom_types = do
 --   This generates variables that should be bound and code to
 --   do any necessary evaluation for the LValue.  Any values not
 --   bound by the LValue is returned.
-genLValue :: LValue Typed -> LL.ValueType -> G (LL.Var, G ())
-genLValue lvalue ty =
+genLValue :: TypeEnv -> LValue Typed -> LL.ValueType -> G (LL.Var, G ())
+genLValue tenv lvalue ty =
   case lvalue
   of VarL v ->
        return (v, return ())
@@ -532,7 +605,7 @@ genLValue lvalue ty =
        tmpvar <- lift $ LL.newAnonymousVar ty
 
        -- Evaluate the destination address
-       dst_val <- asVal =<< genExpr dst
+       dst_val <- asVal =<< genExpr tenv dst
        let write_dst = primStore ty dst_val (LL.VarV tmpvar)
 
        return (tmpvar, write_dst)
@@ -542,8 +615,8 @@ genLValue lvalue ty =
        tmpvar <- lift $ LL.newAnonymousVar ty
 
        -- Compute the destination address
-       base_val <- asVal =<< genExpr base
-       (offset, _) <- genField fld
+       base_val <- asVal =<< genExpr tenv base
+       (offset, _) <- genField tenv fld
        let write_dst = primStoreOff ty base_val offset (LL.VarV tmpvar)
        
        return (tmpvar, write_dst)
@@ -561,18 +634,18 @@ genLValue lvalue ty =
                 _ -> internalError "genLValue: Can't put this record field in a variable"
            field_types = map field_type fields
            atom = LL.UnpackA record (LL.VarV tmpvar)
-       let unpack_it = genLValues field_binders atom field_types
+       let unpack_it = genLValues tenv field_binders atom field_types
        return (tmpvar, unpack_it)
 
      WildL -> do
        tmpvar <- lift $ LL.newAnonymousVar ty
        return (tmpvar, return ())
 
-genFunctionDef :: FunctionDef Typed -> FreshVarM LL.FunDef
-genFunctionDef fdef = do
+genFunctionDef :: TypeEnv -> FunctionDef Typed -> FreshVarM LL.FunDef
+genFunctionDef tenv fdef = do
   let params = [v | Parameter _ v <- functionParams fdef]
       returns = map convertToValueType $ functionReturns fdef
-  body <- execBuild returns $ genStmt $ functionBody fdef
+  body <- execBuild returns $ genStmt tenv $ functionBody fdef
   
   let function =
         if functionIsProcedure fdef
@@ -594,7 +667,7 @@ genDataDef ddef = do
 
 genDef :: Def Typed -> FreshVarM (Either LL.FunDef LL.DataDef)
 genDef (DataDefEnt d) = fmap Right $ genDataDef d
-genDef (FunctionDefEnt d) = fmap Left $ genFunctionDef d
+genDef (FunctionDefEnt d) = fmap Left $ genFunctionDef emptyTypeEnv d
 genDef (RecordDefEnt _) = internalError "genDef: Unexpected record definition"
 
 genDefs :: [Def Typed] -> FreshVarM ([LL.FunDef], [LL.DataDef])

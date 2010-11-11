@@ -80,6 +80,7 @@ data Token =
   | RecordTok
   | SizeofTok
   | TrueTok
+  | TypedefTok
   | UInt8Tok
   | UInt16Tok
   | UInt32Tok
@@ -148,6 +149,7 @@ showToken ProcedureTok = "'procedure'"
 showToken RecordTok = "'record'"
 showToken SizeofTok = "'sizeof'"
 showToken TrueTok = "'true'"
+showToken TypedefTok = "'typedef'"
 showToken UInt8Tok = "'uint8'"
 showToken UInt16Tok = "'uint16'"
 showToken UInt32Tok = "'uint32'"

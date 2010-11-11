@@ -103,23 +103,34 @@ instance Monoid a => Monoid (Parameterized dom a) where
 
 -------------------------------------------------------------------------------
 
--- | A record type
+-- | A record type.
+--
+--   TODO: Split TypeSynonym off as a separate type.
 data TypedRecord =
-  TypedRecord
-  { -- | The record name given in source code.  This is only used for
-    --   error messages.
-    typedRecordName :: String
-    -- | The number of type parameters the record takes.
-  , typedRecordArity :: {-# UNPACK #-}!Int
-    -- | The record's fields.  If the record is parametric, the fields will 
-    --   require type parameters to compute.  The fields take the 
-    --   parameters of the record.
-  , typedRecordFields :: [TypeParametric (FieldDef Typed)]
-  }
+    TypedRecord
+    { -- | The record name given in source code.  This is only used for
+      --   error messages.
+      typedRecordName :: String
+      -- | The number of type parameters the record takes.
+    , typedRecordArity :: {-# UNPACK #-}!Int
+      -- | The record's fields.  If the record is parametric, the fields will 
+      --   require type parameters to compute.  The fields take the 
+      --   parameters of the record.
+    , typedRecordFields :: [TypeParametric (FieldDef Typed)]
+    }
+  | TypeSynonym
+    { typeSynonymID :: !(Ident TypedRecord)
+    , typeSynonymValue :: Type Typed
+    }
+
+isTypeSynonym (TypeSynonym {}) = True
+isTypeSynonym _ = False
 
 -- | Get the fields of a non-parametric record
 typedRecordFields0 :: TypedRecord -> [FieldDef Typed]
 typedRecordFields0 record
+  | isTypeSynonym record =
+      internalError "typedRecordFields0: Not a record"
   | typedRecordArity record /= 0 =
       internalError "typedRecordFields0: Record is parametric"
   | otherwise =
@@ -127,6 +138,8 @@ typedRecordFields0 record
 
 applyRecordType :: Type Typed -> [Type Typed] -> Type Typed
 applyRecordType (RecordT rec) args
+  | isTypeSynonym rec =
+      internalError "applyRecordType: Not a record"
   | typedRecordArity rec /= length args =
       internalError "applyRecordType: Wrong number of type arguments"
   | otherwise =
@@ -143,6 +156,8 @@ data DictEntry =
     -- | A record definition.  The record's name and fields are included for
     --   lookup.
   | RecordEntry {-# UNPACK #-}!TypedRecord
+    -- | A type synonym.  The type synonym ID and its value are given.
+  | TypedefEntry (Ident TypedRecord) (Type Typed)
     -- | A type parameter.
   | TypeParameterEntry TypeParameter
 
@@ -168,6 +183,8 @@ data NREnv =
   NREnv
   { -- | Variable IDs
     varIDSupply :: {-# UNPACK #-}!(Supply (Ident LL.Var))
+    -- | Type synonym IDs
+  , synonymIDSupply :: {-# UNPACK #-}!(Supply (Ident TypedRecord))
     -- | Externally defined or externally visible global variables
   , externalVariables :: ![LL.Var]
     -- | Name of the source module.  Used to create variable names.
@@ -207,6 +224,11 @@ instance MonadFix NR where
 instance Supplies NR (Ident LL.Var) where
   fresh = NR $ \ctx env errs -> do
     x <- supplyValue (varIDSupply ctx)
+    return (x, env, errs)
+
+instance Supplies NR (Ident TypedRecord) where
+  fresh = NR $ \ctx env errs -> do
+    x <- supplyValue (synonymIDSupply ctx)
     return (x, env, errs)
 
 getSourceModuleName :: NR ModuleName 
@@ -295,6 +317,13 @@ lookupEntity name = NR $ \_ env errs ->
     lookup_name [] = (internalError ("lookupEntity: not found: " ++ name),
                       False,
                       Just $ "Undefined name: '" ++ name ++ "'")
+
+-- | Create a new type synonym and add it to the environment.
+createTypeSynonym :: TypeName Parsed -> Type Typed -> NR (RecordName Typed)
+createTypeSynonym name value = do
+  type_id <- fresh
+  defineEntity name (TypedefEntry type_id value)
+  return (TypeSynonym type_id value)
 
 defineTypeParam :: TypeName Parsed -> NR ()
 defineTypeParam name = NR $ \ctx env errs ->
@@ -458,10 +487,12 @@ resolveTypeName nm = do
     then case entry
          of VarEntry {} -> Just $ "Not a type: '" ++ nm ++ "'"
             RecordEntry {} -> Nothing
+            TypedefEntry {} -> Nothing
             TypeParameterEntry {} -> Nothing
     else Just $ "Not defined: '" ++ nm ++ "'"
   return $ case entry
            of RecordEntry rec -> pure $ RecordT rec
+              TypedefEntry type_id val -> pure $ RecordT (TypeSynonym type_id val)
               TypeParameterEntry tp -> pVar tp
 
 resolveTypeName0 :: RecordName Parsed -> NR (Type Typed)
@@ -639,7 +670,9 @@ resolveExpr expr =
        let ty = case fld'
                 of Field record fnames Nothing ->
                      case record
-                     of RecordT recname ->
+                     of RecordT (TypeSynonym _ (RecordT recname)) ->
+                          typedRecordFieldType recname fnames
+                        RecordT recname ->
                           typedRecordFieldType recname fnames
                         _ ->
                           error "Base of field expression must be a record type"
@@ -700,6 +733,11 @@ resolveStmt stmt =
        fdefs' <- mapM (resolveFunctionDef False) fdefs
        body' <- enterNonRec $ resolveStmt body
        return $ LetrecS fdefs' body'
+     TypedefS tname ty body -> do
+       ty' <- resolveType0 ty
+       tname' <- createTypeSynonym tname ty'
+       body' <- resolveStmt body
+       return $ TypedefS tname' ty' body'
      IfS cond if_true if_false mcont -> do
        cond' <- resolveExpr cond
        expectBooleanType "condition of 'if' statement" (exprType cond')
@@ -1139,9 +1177,10 @@ typeInferModule :: FilePath
                 -> [ExternDecl Parsed]
                 -> [Def Parsed]
                 -> IO ([LL.Import], [Def Typed])
-typeInferModule module_path module_name externs defs =                
+typeInferModule module_path module_name externs defs = do
+  type_synonym_ids <- newIdentSupply
   withTheLLVarIdentSupply $ \var_ids -> do
-    let ctx = NREnv var_ids [] module_name
+    let ctx = NREnv var_ids type_synonym_ids [] module_name
         global_scope = Env 0 []
     
         -- Start out in the global scope.

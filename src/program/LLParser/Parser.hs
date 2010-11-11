@@ -311,7 +311,7 @@ atom = fmap ValA stmtExprList
 block :: P (Stmt Parsed)
 block = braces statements
   where
-    statements = if_stmt <|> letrec_stmt <|> let_or_atom
+    statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> let_or_atom
 
     -- An 'if' statement
     if_stmt = do
@@ -342,6 +342,16 @@ block = braces statements
       match SemiTok
       body <- statements
       return $ LetrecS fdefs body
+
+    -- A 'typedef' statement
+    typedef_stmt = do
+      match TypedefTok
+      typename <- identifier
+      match AssignTok
+      ty <- parseType
+      match SemiTok
+      body <- statements
+      return $ TypedefS typename ty body
 
     -- A statement starting with an expression list: either assignment or
     -- the end of the block
