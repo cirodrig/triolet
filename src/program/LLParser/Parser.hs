@@ -163,7 +163,7 @@ parseGlobalType = owned_type <|> pointer_type <?> "'owned' or 'pointer' type"
 
 field :: P (Field Parsed)
 field = do
-  liftM3 Field identifier fields cast <?> "field offset specifier"
+  liftM3 Field parseType fields cast <?> "field offset specifier"
   where
     fields = many1 (match DotTok >> identifier) <?> "field specifiers"
     cast = optionMaybe (match AsTok >> parseType)

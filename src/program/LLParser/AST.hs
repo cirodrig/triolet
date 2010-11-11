@@ -127,9 +127,10 @@ data FunctionDef a =
 data Parameter a = Parameter (Type a) (VarName a)
 type Parameters a = [Parameter a]
 
--- | A record field.  The field is a record name followed by a sequence of
--- field names, and possibly a type cast.
-data Field a = Field (RecordName a) [FieldName] (Maybe (Type a))
+-- | A referene to a record field.  The field is a type followed by
+-- a sequence of field names, and possibly a type cast.  The type must be
+-- a 'RecordT' or an application of a 'RecordT'.
+data Field a = Field (Type a) [FieldName] (Maybe (Type a))
 
 data BaseExpr a =
     -- | A variable

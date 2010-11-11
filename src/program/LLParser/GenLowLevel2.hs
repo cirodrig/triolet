@@ -40,7 +40,34 @@ returnType :: GenExpr -> [LL.ValueType]
 returnType (GenVal val)  = [LL.valType val]
 returnType (GenAtom t _) = t
 
+-------------------------------------------------------------------------------
+
 type G a = Gen FreshVarM a
+
+-- | Generate code for a type whose size and alignemnt are dynamically
+--   computed
+convertToDynamicFieldType :: Type Typed -> G DynamicFieldType
+convertToDynamicFieldType ty = 
+  case ty
+  of PrimT pt -> return $ PrimField pt
+     RecordT record -> do
+       dyn_record <- convertToDynamicRecord record
+       return $ RecordField dyn_record
+     BytesT size align -> do
+       size_val <- asVal =<< genExpr size
+       align_val <- asVal =<< genExpr align
+       return $ BytesField size_val align_val
+     AppT ty args ->
+       -- Apply, then convert
+       convertToDynamicFieldType $ applyRecordType ty args
+
+convertToDynamicRecord :: TypedRecord -> G DynamicRecord
+convertToDynamicRecord rec = do
+  field_types <-
+    sequence [convertToDynamicFieldType t
+             | FieldDef t _ <- typedRecordFields0 rec]
+  createDynamicRecord field_types
+
 
 -- | Generate code of an expression used to initialize global data.
 genDataExpr :: Expr Typed -> FreshVarM LL.Val
@@ -97,21 +124,22 @@ mkWordVal expr =
 -- | Generate code to load or store a record field.  Return the field offset
 --   and the type at which the field should be accessed.
 genField :: Field Typed -> G (LL.Val, LL.ValueType)
-genField (Field rec fnames cast_type) =
-  get_field_offset 0 rec fnames
+genField (Field base_type fnames cast_type) =
+  get_field_offset (nativeWordV 0) rec fnames
   where
     get_field_offset base_offset rec (fname:fnames) =
       case findIndex (match_name fname) $ typedRecordFields0 rec
-      of Just ix ->
+      of Just ix -> do
+           dyn_record <- convertToDynamicRecord rec
            let rfield = typedRecordFields0 rec !! ix
-               sfield = convertToStaticRecord rec !!: ix
-               offset = base_offset + fieldOffset sfield
-           in case fnames
-              of [] -> return_field_offset offset sfield
-                 _  -> case rfield
-                       of FieldDef (RecordT next_rec) _ ->
-                            get_field_offset offset next_rec fnames
-                          _ -> internalError "genField"
+               dfield = dyn_record !!: ix
+           offset <- primAddZ (LL.PrimType nativeWordType) base_offset (fieldOffset dfield)
+           case fnames of
+             [] -> return_field_offset offset dfield
+             _  -> case rfield
+                   of FieldDef (RecordT next_rec) _ ->
+                        get_field_offset offset next_rec fnames
+                      _ -> internalError "genField"
          Nothing ->
            internalError "genField"
 
@@ -120,11 +148,21 @@ genField (Field rec fnames cast_type) =
                of Just t -> convertToValueType t
                   Nothing -> case fieldType field
                              of PrimField pt -> LL.PrimType pt
-                                RecordField r -> LL.RecordType r
+                                RecordField r -> 
+                                  LL.RecordType $ dynamicToStaticRecordType r
                                 _ -> internalError "genField"
-      in return (nativeIntV offset, ty)
+      in return (offset, ty)
 
     match_name want_name (FieldDef _ name) = name == want_name
+    
+    rec = case base_type
+          of RecordT rec -> rec
+             _ -> internalError "genField: Base type is not a record"
+
+-- | Convert to a static record type.  The type must not contain non-constant
+--   expressions.  Throw an error if it doesn't satisfy these conditions.
+dynamicToStaticRecordType :: DynamicRecord -> StaticRecord
+dynamicToStaticRecordType = internalError "dynamicToStaticRecordType: not implemented"
 
 -- | Generate code of an expression
 genExpr :: Expr Typed -> G GenExpr

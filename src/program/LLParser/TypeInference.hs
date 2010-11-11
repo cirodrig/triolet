@@ -22,7 +22,8 @@ inferred given the expression itself and the type environment.
 {-# LANGUAGE TypeFamilies, FlexibleInstances, ScopedTypeVariables,
   RecursiveDo, Rank2Types, EmptyDataDecls #-}
 module LLParser.TypeInference
-       (Typed, TExp(..), TypedRecord, typedRecordFields0,
+       (Typed, TExp(..), TypedRecord(..), typedRecordFields0,
+        applyRecordType,
         exprType, atomType, stmtType,
         convertToValueType,
         convertToStaticRecord,
@@ -431,10 +432,7 @@ convertToStaticFieldType :: Type Typed -> StaticFieldType
 convertToStaticFieldType ty = 
   case ty
   of PrimT pt -> PrimField pt
-     RecordT record -> 
-       let field_types = [convertToStaticFieldType t
-                         | FieldDef t _ <- typedRecordFields0 record]
-       in RecordField $ staticRecord field_types
+     RecordT record -> RecordField $ convertToStaticRecord record
      BytesT size align ->
        let size' = convertToIntConstant size
            align' = convertToIntConstant align
@@ -482,11 +480,11 @@ resolveType ty =
        return (pure $ BytesT size_expr align_expr)
      AppT t args -> do
        -- Resolve t and args
-       param_t <- resolveType t
+       param_t <- resolveType0 t
        arg_ts <- mapM resolveType0 args
        
-       -- Apply to args
-       return (pure $ apply param_t arg_ts)
+       -- Apply record type
+       return (pure $ applyRecordType param_t arg_ts)
 
 resolveType0 :: Type Parsed -> NR (Type Typed)
 resolveType0 t = fmap (applyTo []) $ resolveType t
@@ -640,7 +638,11 @@ resolveExpr expr =
        -- Determine the type of the loaded field
        let ty = case fld'
                 of Field record fnames Nothing ->
-                     typedRecordFieldType record fnames
+                     case record
+                     of RecordT recname ->
+                          typedRecordFieldType recname fnames
+                        _ ->
+                          error "Base of field expression must be a record type"
                    Field _ _ (Just cast_ty) -> cast_ty
        return1 ty (LoadFieldE base' fld')
      DerefE {} -> error "Store expression not valid here"
@@ -839,7 +841,7 @@ resolveLValue lvalue ty =
 
 resolveField :: Field Parsed -> NR (TypeParametric (Field Typed))
 resolveField (Field rec fname mtype) = do 
-  record' <- lookupRecord rec
+  record' <- resolveType0 rec
   mtype' <- traverse resolveType mtype
   return $ Field record' fname <$> sequenceA mtype'
 
