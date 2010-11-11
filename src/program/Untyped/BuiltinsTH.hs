@@ -36,7 +36,6 @@ pyonSourceGlobals =
   , "__and__"
   , "__or__"
   , "__xor__"
-  , "__negate__"
     -- Class methods
   , "__eq__"
   , "__ne__"
@@ -46,9 +45,10 @@ pyonSourceGlobals =
   , "__ge__"
   , "__iter__"
   , "__build__"
-  , "zero"
   , "__add__"
   , "__sub__"
+  , "__negate__"
+  , "zero"
   , "scale"
   , "norm"
   ]

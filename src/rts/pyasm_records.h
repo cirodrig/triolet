@@ -39,10 +39,11 @@ record PAPHeader {
 };
 
 // Additive dictionary
-record AdditiveDict {
-  owned zero;
+record AdditiveDict(a) {
   owned add;
   owned subtract;
+  owned negate;
+  a zero;
 };
 
 /* Arrays (called "lists")

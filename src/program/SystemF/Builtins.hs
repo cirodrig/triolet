@@ -301,10 +301,11 @@ initializePyonBuiltins varIDs mod = do
 
         additive_dict name =
           ("_AdditiveDict_" ++ name,
-           [| let c_zero = $(findNameWithPrefix name "Additive_ZERO_")
-                  c_add = $(findNameWithPrefix name "Additive_ADD_")
+           [| let c_add = $(findNameWithPrefix name "Additive_ADD_")
                   c_sub = $(findNameWithPrefix name "Additive_SUB_")
-              in evaluate $ AdditiveDictMembers c_zero c_add c_sub |])
+                  c_negate = $(findNameWithPrefix name "Additive_NEGATE_")
+                  c_zero = $(findNameWithPrefix name "Additive_ZERO_")
+              in evaluate $ AdditiveDictMembers c_add c_sub c_negate c_zero |])
 
         -- All field initializers
         initializers =

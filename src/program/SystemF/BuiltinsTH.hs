@@ -29,9 +29,10 @@ data TraversableDictMembers =
 
 data AdditiveDictMembers =
   AdditiveDictMembers
-  { zeroMember :: !Con
-  , addMember :: !Con
+  { addMember :: !Con
   , subMember :: !Con
+  , negateMember :: !Con
+  , zeroMember :: !Con
   }
 
 data VectorDictMembers =

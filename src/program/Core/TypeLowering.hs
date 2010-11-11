@@ -55,7 +55,6 @@ valueType core_type =
        | con `isPyonBuiltin` the_bool -> LL.PrimType BoolType
        | con `isPyonBuiltin` the_NoneType -> LL.PrimType UnitType
        | con `isPyonBuiltin` the_PassConv -> LL.RecordType LL.passConvRecord
-       | con `isPyonBuiltin` the_AdditiveDict -> LL.RecordType LL.additiveDictRecord
        | con `isPyonBuiltin` the_TraversableDict -> LL.RecordType LL.traversableDictRecord
      _ -> case core_type
           of ExpCT t | getLevel t == KindLevel -> LL.PrimType UnitType

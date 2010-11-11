@@ -254,18 +254,6 @@ asLet :: [LoweringType]           -- ^ Type of result
       -> BuildBlock LL.Val        -- ^ Code with result bound to a variable
 asLet [ty] hd = hd >>= emitAtom1 (lowered ty)
 
-{-
--- | Generate code to compute the size of a data type
-withSizeOf :: RCType -> Cvt (BuildBlock LL.Val)
-withSizeOf ty = liftM get_size $ getPassConv ty
-  where
-    get_size pass_conv = do
-      -- Get the passing convention
-      pc_var <- pass_conv
-
-      -- Get its 'size' field
-      selectField passConvRecord 0 pc_var -}
-
 -- | Return a description of a data type.  It may involve generating 
 -- code to compute the data type description.
 lowerToFieldType :: RCType -> Cvt (BuildBlock (), DynamicFieldType)
@@ -275,25 +263,33 @@ lowerToFieldType ty =
        | con `isPyonBuiltin` the_int -> return int_field
        | con `isPyonBuiltin` the_float -> return float_field
        | otherwise -> internalError "lowerToFieldType: No information for type"
-     Nothing -> case ty
-                of FunCT {} -> return owned_field
-                   _ -> internalError "lowerToFieldType: Unexpected type"
+     Nothing ->
+       case ty
+       of FunCT {} -> return owned_field
+          _ -> do
+            -- Use the run-time representation to create a 'bytes' field type
+            size_var <- LL.newAnonymousVar (LL.PrimType nativeWordType)
+            align_var <- LL.newAnonymousVar (LL.PrimType nativeWordType)
+            code <- compute_field_spec ty size_var align_var
+            return (code,
+                    BytesField (LL.VarV size_var) (LL.VarV align_var))
   where
     int_field = (return (), PrimField pyonIntType)
     float_field = (return (), PrimField pyonFloatType)
     owned_field = (return (), PrimField OwnedType)
+    
+    compute_field_spec ty size_var align_var = do 
+      (wrapper, passconv) <- getPassConv ty
+      -- Will compute field size and alignment
+      let return_type = [ LLType $ LL.PrimType nativeWordType
+                        , LLType $ LL.PrimType nativeWordType]
+      return $ do
+        values <- wrapper return_type $ do
+          size <- selectPassConvSize passconv
+          align <- selectPassConvAlignment passconv
+          return $ LL.ValA [size, align]
+        bindAtom [size_var, align_var] values
 
-{-
--- | Generate code to compute the record layout of a data constructor with
---   the given type arguments.
-recordLayoutOf :: Con -> [RCType] -> Cvt (BuildBlock DynamicRecord)
-recordLayoutOf datacon type_args
-  | datacon == getPyonTupleCon' 2 =
-      liftM tupleRecordLayout $ mapM lowerToFieldType type_args
-
-tupleRecordLayout size_and_alignments = do
-  createDynamicRecord =<< sequence size_and_alignments 
-  -}
 -------------------------------------------------------------------------------
 -- Parameter-passing conventions
 
@@ -321,59 +317,66 @@ lookupPassConv ty = do
 
     find_type _ [] = return Nothing
 
--- | Compute and return a parameter-passing convention variable
-getPassConv :: RCType -> (LL.Val -> Cvt CvExp) -> Cvt CvExp
-getPassConv ty k = do
+-- | Compute and return a parameter-passing convention variable. 
+--   The variable may have to be created as a temporary data structure; 
+--   The returned 'CvExp' transformation allocates and initializes the data 
+--   structure.  The object is only valid within the code that is passed to
+--   that transformation.
+getPassConv :: RCType
+            -> Cvt ([LoweringType] -> BuildBlock LL.Atom -> BuildBlock LL.Atom,  LL.Val)
+getPassConv ty = do
   -- See if one is already available
   mpcvar <- lookupPassConv ty 
   case mpcvar of
-    Just v  -> k (LL.VarV v)
+    Just v  -> return_value (LL.VarV v)
     Nothing ->
       -- Try to construct a passing convention
       case unpackConAppCT ty
       of Just (con, args)
            | con `isPyonBuiltin` the_int ->
-               k (builtinVar the_bivar_int_pass_conv)
+               return_value (builtinVar the_bivar_int_pass_conv)
            | con `isPyonBuiltin` the_float ->
-               k (builtinVar the_bivar_float_pass_conv)
+               return_value (builtinVar the_bivar_float_pass_conv)
            | con `isPyonBuiltin` the_bool ->
-               k (builtinVar the_bivar_bool_pass_conv)
+               return_value (builtinVar the_bivar_bool_pass_conv)
            | con `isPyonBuiltin` the_PassConv ->
-               k (builtinVar the_bivar_PassConv_pass_conv)
+               return_value (builtinVar the_bivar_PassConv_pass_conv)
            | con `isPyonBuiltin` the_AdditiveDict ->
-               k (builtinVar the_bivar_AdditiveDict_pass_conv)
+               return_value (builtinVar the_bivar_AdditiveDict_pass_conv)
            | con `isPyonBuiltin` the_TraversableDict ->
-               k (builtinVar the_bivar_TraversableDict_pass_conv)
+               return_value (builtinVar the_bivar_TraversableDict_pass_conv)
            | con `isPyonBuiltin` the_list ->
                case args
-               of [arg] ->
-                    getPassConv arg $ \arg_pc ->
+               of [arg] -> do
+                    (mk_arg_pc, arg_pc) <- getPassConv arg
+                    (mk_pc, var) <-
                       build_unary_passconv
                       (llBuiltin the_fun_passConv_list)
                       arg_pc
+                    let mk_code return_type mk =
+                          mk_arg_pc return_type $ mk_pc return_type mk
+                    return (mk_code, LL.VarV var)
          _ -> internalError $ "getPassConv: Unexpected type " ++ show (pprType ty)
   where
+    return_value val = return (\_ -> id, val)
+
     build_unary_passconv pc_ctor arg_pc = do
       -- Create a variable that will point to the new term
-      list_pc_ptr <- LL.newAnonymousVar (LL.PrimType PointerType)
-      
-      -- Create code using it
-      code <- k (LL.VarV list_pc_ptr)
-      
-      -- Allocate local memory to hold the passconv variable
-      let passconv_size = nativeWordV $ sizeOf passConvRecord
-          code_type = map lowered $ expType code
-          code' =
-            allocateLocalMem list_pc_ptr passconv_size code_type $ do
-              -- To create the passconv value, call the constructor function
-              -- with type, passconv, and return pointer arguments
-              emitAtom0 $ LL.CallA (LL.VarV pc_ctor) [ LL.LitV LL.UnitL
-                                                     , arg_pc
-                                                     , LL.VarV list_pc_ptr]
-              
-              -- Use it
-              asAtom code
-      return (Cv (expType code) (CvExp code'))
+      list_pc_ptr <- runFreshVar $ LL.newAnonymousVar (LL.PrimType PointerType)
+      return (wrap_exp list_pc_ptr, list_pc_ptr)
+      where
+        -- Allocate local memory and initialize the variable
+        wrap_exp list_pc_ptr body_return_type body = do
+          allocateLocalMem list_pc_ptr passconv_size (map lowered body_return_type) $ do
+            initialize list_pc_ptr
+            body
+
+        initialize list_pc_ptr =
+          emitAtom0 $ LL.CallA (LL.VarV pc_ctor) [ LL.LitV LL.UnitL
+                                                 , arg_pc
+                                                 , LL.VarV list_pc_ptr]
+
+        passconv_size = nativeWordV $ sizeOf passConvRecord
 
 -------------------------------------------------------------------------------
 -- Data structure lowering
@@ -507,7 +510,7 @@ dataConstructorFieldLayout datacon ty_args
         mapM lowerToFieldType ty_args
       
       (computation2, record_layout) <-
-        suspendGen [] $ createDynamicRecord field_layouts
+        suspendedCreateDynamicRecord field_layouts
       
       let fields = map inPlaceField $ recordFields record_layout
       return (LL.UnitL,
@@ -523,12 +526,17 @@ dataConstructorFieldLayout datacon ty_args
                  return (),
                  ReferenceLayout (nativeIntV 0) fields)
   | datacon `isPyonBuiltin` the_additiveDict =
-      -- This dictionary contains three functions
-      let fields = map inPlaceField $ recordFields $
-                   toDynamicRecord additiveDictRecord
-      in return (LL.UnitL,
-                 return (),
-                 ReferenceLayout (nativeIntV 0) fields)
+      case ty_args
+      of [arg] -> do
+           (code1, zero_field) <- lowerToFieldType arg
+           (code2, record_type) <-
+             -- Support for getting the continuation isn't implemented
+             suspendedAdditiveDictRecord zero_field
+           
+           let fields = map inPlaceField $ recordFields record_type
+           return (LL.UnitL,
+                   code1 >> code2,
+                   ReferenceLayout (nativeIntV 0) fields)
   
   | datacon `isPyonBuiltin` the_traversableDict =
       -- This dictionary contains two functions
@@ -712,9 +720,9 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
     var_type = letBinderType binder
     
     -- Create a local memory area
-    alloc p =
+    alloc p = do
       -- Get the local data's parameter passing convention
-      getPassConv bind_type $ \pass_conv_value ->
+      (wrap_with_passconv, pass_conv_value) <- getPassConv bind_type
       
       -- The expression will bind a pointer
       convertVar p (CoreType var_type) $ \p' -> do
@@ -726,6 +734,7 @@ convertLet binder@(bind_value ::: bind_type) rhs body =
         -- doesn't return a value.
         let body_type = map lowered $ expType body'
         let make_expression =
+              wrap_with_passconv (expType body') $
               allocateLocalMem p' pass_conv_value body_type $ do
                 -- Generate code.
                 -- The RHS stores into memory; it returns nothing.

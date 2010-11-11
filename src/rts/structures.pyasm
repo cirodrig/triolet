@@ -7,14 +7,6 @@ module pyon.internal.structures;
 #include "structures.h"
 #include "pyasm_records.h"
 
-// Construct an Additive dictionary
-function additiveDict (unit _, owned zero, owned add, owned sub, pointer ret) -> () {
-  ret @! AdditiveDict.add = add;
-  ret @! AdditiveDict.subtract = sub;
-  ret @! AdditiveDict.zero = zero;
-  ();
-};
-
 // Parameter-passing convention dictionary of ints
 data pointer int_pass_conv = PassConv {
   sizeof int32,
@@ -23,24 +15,37 @@ data pointer int_pass_conv = PassConv {
   dummy_finalizer
 };
 
-// Parameter-passing convention dictionary of ints
-data pointer AdditiveDict_pass_conv = PassConv {
-  sizeof AdditiveDict,
-  alignof AdditiveDict,
-  copy_AdditiveDict,
-  finalize_AdditiveDict
+// Construct an Additive dictionary
+function additiveDict
+  (unit _, pointer repr,
+   owned add, owned sub, owned negate, pointer zero, pointer ret) -> () {
+  size = repr @! PassConv.size;
+  align = repr @! PassConv.align;
+  typedef dictionary = AdditiveDict(bytes(size, align));
+
+  ret @! dictionary.add = add;
+  ret @! dictionary.subtract = sub;
+  ret @! dictionary.negate = negate;
+  () call (repr @! PassConv.copy) (zero, ret @ dictionary.zero);
 };
 
-function copy_AdditiveDict (pointer src, pointer dst) -> () {
-  dst @! AdditiveDict.zero = src @! AdditiveDict.zero;
-  dst @! AdditiveDict.add = src @! AdditiveDict.add;
-  dst @! AdditiveDict.subtract = src @! AdditiveDict.subtract;
-  ();
+function copy_AdditiveDict (pointer repr, pointer src, pointer dst) -> () {
+  size = repr @! PassConv.size;
+  align = repr @! PassConv.align;
+  typedef dictionary = AdditiveDict(bytes(size, align));
+
+  dst @! dictionary.add = src @! dictionary.add;
+  dst @! dictionary.subtract = src @! dictionary.subtract;
+  dst @! dictionary.negate = src @! dictionary.negate;
+  () call (repr @! PassConv.copy)
+    (src @ dictionary.zero, dst @ dictionary.zero);
 };
 
+#if 0
 function finalize_AdditiveDict (pointer p) -> () {
   DECREF(p @! AdditiveDict.zero as pointer)
   DECREF(p @! AdditiveDict.add as pointer)
   DECREF(p @! AdditiveDict.subtract as pointer)
   ();
 };
+#endif

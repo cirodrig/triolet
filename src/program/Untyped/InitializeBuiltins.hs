@@ -224,20 +224,21 @@ mkTraversableClass = mdo
 mkAdditiveClass = mdo
   a <- newTyVar Star Nothing
   let binScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy a)
+      negScheme = monomorphic $ functionType [ConTy a] (ConTy a)
 
   let cls = Class { clsParam = a
                   , clsConstraint = []
-                  , clsMethods = [zero, add, sub]
+                  , clsMethods = [add, sub, negate, zero]
                   , clsName = "Additive"
                   , clsInstances = [int_instance, float_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_AdditiveDict
                   , clsDictCon = pyonBuiltin SystemF.the_additiveDict
                   }
 
-  zero <- mkClassMethod cls 0 "zero" $ monomorphic $
-          functionType [ConTy $ tiBuiltin the_con_NoneType] (ConTy a)
-  add <- mkClassMethod cls 1 "__add__" binScheme
-  sub <- mkClassMethod cls 2 "__sub__" binScheme
+  add <- mkClassMethod cls 0 "__add__" binScheme
+  sub <- mkClassMethod cls 1 "__sub__" binScheme
+  negate <- mkClassMethod cls 2 "__negate__" negScheme
+  zero <- mkClassMethod cls 3 "zero" $ monomorphic $ ConTy a
 
   let int_instance =
         monomorphicInstance cls
@@ -254,10 +255,11 @@ mkAdditiveClass = mdo
   where
     fromAdditiveDict field_name =
       case pyonBuiltin field_name
-      of SystemF.AdditiveDictMembers zero add sub ->
-           [ InstanceMethod zero
-           , InstanceMethod add
+      of SystemF.AdditiveDictMembers add sub neg zero ->
+           [ InstanceMethod add
            , InstanceMethod sub
+           , InstanceMethod neg
+           , InstanceMethod zero
            ]
 
 mkVectorClass = mdo
@@ -420,10 +422,6 @@ mkIterBindType =
                 ]
    (ConTy (tiBuiltin the_con_iter) @@ ConTy b))
 
-mkNegateType =
-  forallType [Star] $ \[a] ->
-  ([passable (ConTy a)], functionType [ConTy a] (ConTy a))
-
 mkBinaryOpType =
   forallType [Star] $ \[a] ->
   ([passable (ConTy a)], functionType [ConTy a, ConTy a] (ConTy a))
@@ -531,16 +529,13 @@ initializeTIBuiltins = do
               ),
               ("__xor__", [| mkBinaryIntType |]
               , [| pyonBuiltin SystemF.the_oper_BITWISEXOR |]
-              ),
-              ("__negate__", [| mkNegateType |]
-              , [| pyonBuiltin SystemF.the_oper_NEGATE |]
               )
             ]
           cls_members =
             [ ([| the_Eq |], ["__eq__", "__ne__"])
             , ([| the_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
             , ([| the_Traversable |], ["__iter__", "__build__"])
-            , ([| the_Additive |], ["zero", "__add__", "__sub__"])
+            , ([| the_Additive |], ["__add__", "__sub__", "__negate__", "zero"])
             , ([| the_Vector |], ["scale", "norm"])
             ]
 

@@ -98,6 +98,15 @@ mkRefBinaryOpType ty = do
         retCT (WriteRT ::: expCT ty)
   return $ OwnRT ::: constructor_type
 
+mkRefUnaryOpType :: RExp -> Eval (CBind CReturnT Rec)
+mkRefUnaryOpType ty = do
+  addr1 <- newAnonymousVariable ObjectLevel
+  let constructor_type =
+        funCT $
+        pureArrCT (ReadPT addr1 ::: expCT ty) $
+        retCT (WriteRT ::: expCT ty)
+  return $ OwnRT ::: constructor_type
+
 binaryIntOpType = mkValBinaryOpType $ mkInternalConE $ pyonBuiltin the_int
 binaryFloatOpType = mkValBinaryOpType $ mkInternalConE $ pyonBuiltin the_float
 
@@ -170,14 +179,19 @@ subscriptType = mkConType $ do
 
 additiveDictType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
+  pc_addr <- newAnonymousVariable ObjectLevel
   binary_type <- mkRefBinaryOpType (mkInternalVarE a)
+  unary_type <- mkRefUnaryOpType (mkInternalVarE a)
   zero_type <- mkRefZeroOpType (mkInternalVarE a)
+  zero_addr <- newAnonymousVariable ObjectLevel
   let constructor_type =
         funCT $
         pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
-        pureArrCT (OwnPT ::: cbindType zero_type) $
+        pureArrCT (ReadPT pc_addr ::: passConvOf (varCT a)) $
         pureArrCT (OwnPT ::: cbindType binary_type) $
         pureArrCT (OwnPT ::: cbindType binary_type) $
+        pureArrCT (OwnPT ::: cbindType unary_type) $
+        pureArrCT (ReadPT zero_addr ::: cbindType zero_type) $
         retCT (WriteRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
   return (OwnRT ::: constructor_type)
 

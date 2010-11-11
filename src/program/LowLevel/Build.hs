@@ -436,6 +436,35 @@ createDynamicRecord field_types = do
       end_offset <- addRecordPadding cur_offset cur_align
       return (reverse offsets, end_offset, cur_align)
 
+-- | Create a dynamic record, but don't generate the code for it now.
+--   Returns a dynamic record, and a code generator that computes values used
+--   in the record.  The code generator calls 'createDynamicRecord'.
+suspendedCreateDynamicRecord :: forall m m'.
+                                (Monad m, Supplies m (Ident Var),
+                                 Monad m', Supplies m' (Ident Var)) =>
+                                [DynamicFieldType]
+                             -> m (Gen m' (), DynamicRecord)
+suspendedCreateDynamicRecord field_types = do
+  -- Create variables to stand for size, alignment, and field offsets
+  -- that will be computed later
+  size_v <- newAnonymousVar (PrimType nativeWordType)
+  align_v <- newAnonymousVar (PrimType nativeWordType)
+  offsets <- replicateM (length field_types) $
+             newAnonymousVar (PrimType nativeWordType)
+  let fields = zipWith Field (map VarV offsets) field_types
+      code = compute_record_layout size_v align_v offsets
+  return (code, record fields (VarV size_v) (VarV align_v))
+  where
+    -- Compute the actual data
+    compute_record_layout size_v align_v offset_vs = do
+      record <- createDynamicRecord field_types
+      
+      -- Assign values
+      bindAtom1 size_v $ ValA [recordSize record]
+      bindAtom1 align_v $ ValA [recordAlignment record]
+      forM_ (zip offset_vs $ recordFields record) $ \(offset_v, fld) -> 
+        bindAtom1 offset_v $ ValA [fieldOffset fld]
+
 -- | Compute the necessary record padding for a given offset
 addRecordPadding :: (Monad m, Supplies m (Ident Var)) =>
                     Val -> Val -> Gen m Val
@@ -645,6 +674,24 @@ selectPassConvSize = loadField (passConvRecord' !!: 0)
 selectPassConvAlignment = loadField (passConvRecord' !!: 1)
 selectPassConvCopy = loadField (passConvRecord' !!: 2)
 selectPassConvFinalize = loadField (passConvRecord' !!: 3)
+
+-------------------------------------------------------------------------------
+-- Dictionaries
+
+-- | The record type of an additive class dictionary
+additiveDictRecord :: (Monad m, Supplies m (Ident Var)) =>
+                      DynamicFieldType -> Gen m DynamicRecord
+additiveDictRecord ftype =
+  createDynamicRecord [ PrimField OwnedType
+                      , PrimField OwnedType
+                      , PrimField OwnedType
+                      , ftype]
+
+suspendedAdditiveDictRecord ftype =
+  suspendedCreateDynamicRecord [ PrimField OwnedType
+                               , PrimField OwnedType
+                               , PrimField OwnedType
+                               , ftype]
 
 -------------------------------------------------------------------------------
 -- Values

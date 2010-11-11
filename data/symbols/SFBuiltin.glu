@@ -70,6 +70,7 @@ data PyonTuple5 : Pure -> Pure -> Pure -> Pure -> Pure -> Pure where
 
 let comparison (a : Pure) -> Pure = a -> a -> bool;
 let binary (a : Pure) -> Pure = a -> a -> a;
+let unary (a : Pure) -> Pure = a -> a;
 let binary_any -> Pure = (a : Pure) -> PassConv a -> binary a;
 
 -- Parameter-passing conventions.
@@ -130,7 +131,7 @@ data TraversableDict : (Pure -> Pure) -> Pure where
 constant OpaqueTraversableDict_list : TraversableDict list;
 
 data AdditiveDict : Pure -> Pure where
-  additiveDict : (a : Pure) -> (NoneType -> a) -> binary a -> binary a
+  additiveDict : (a : Pure) -> binary a -> binary a -> unary a -> a
               -> AdditiveDict a;
 
 data VectorDict : Pure -> Pure where
@@ -201,13 +202,15 @@ constant Traversable_BUILD_list
  -> Stream a
  -> list a;
 
-constant Additive_ZERO_int : NoneType -> int;
 constant Additive_ADD_int : binary int;
 constant Additive_SUB_int : binary int;
+constant Additive_NEGATE_int : unary int;
+constant Additive_ZERO_int : int;
 
-constant Additive_ZERO_float : NoneType -> float;
 constant Additive_ADD_float : binary float;
 constant Additive_SUB_float : binary float;
+constant Additive_NEGATE_float : unary float;
+constant Additive_ZERO_float : float;
 
 -- Builtin functions
 constant oper_MUL : binary_any;
