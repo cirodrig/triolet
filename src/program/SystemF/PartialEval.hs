@@ -135,14 +135,24 @@ bindValue (TupleP ps) e m =
 
 partialEvaluateModule :: RModule -> RModule
 partialEvaluateModule (Module module_name defss exports) =
-  let defss' = runPE (pevalDefGroups defss)
-  in Module module_name defss' exports
+  let (defss', exports') = runPE (pevalDefGroups defss exports)
+  in Module module_name defss' exports'
 
-pevalDefGroups :: [DefGroup Rec] -> PE [DefGroup Rec]
-pevalDefGroups (defs:defss) =
-  liftM (uncurry (:)) $ pevalDefGroup defs $ pevalDefGroups defss
+pevalDefGroups :: [DefGroup Rec] -> [Export Rec]
+               -> PE ([DefGroup Rec], [Export Rec])
+pevalDefGroups (defs:defss) exports = do
+  (defs', (defss', exports')) <-
+    pevalDefGroup defs $ pevalDefGroups defss exports
+  return (defs' : defss', exports')
 
-pevalDefGroups [] = return []
+pevalDefGroups [] exports = do 
+  exports' <- mapM pevalExport exports 
+  return ([], exports')
+
+pevalExport :: Export Rec -> PE (Export Rec)
+pevalExport export = do
+  fun <- pevalFun (exportFunction export)
+  return $ export {exportFunction = fun}
 
 pevalDefGroup :: DefGroup Rec -> PE a -> PE (DefGroup Rec, a)
 pevalDefGroup dg m = do
