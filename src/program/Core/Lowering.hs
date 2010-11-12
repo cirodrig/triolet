@@ -83,7 +83,7 @@ globalVarAssignment =
              (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_OpaqueTraversableDict_list))
           ]
 
-isSingletonDataType c
+isProductType c
   | c `elem` [pyonBuiltin the_AdditiveDict,
               pyonBuiltin the_TraversableDict,
               pyonBuiltin the_list,
@@ -91,7 +91,7 @@ isSingletonDataType c
   | c `elem` [] = False
   | otherwise =
       internalError $ 
-      "isSingletonDataType: Not implemented for type: " ++ showLabel (conName c)
+      "isProductType: Not implemented for type: " ++ showLabel (conName c)
 
 type BuildBlock a = Gen FreshVarM a
 
@@ -797,7 +797,7 @@ convertReferenceCase :: RCType -> CvExp -> [RCAlt] -> Cvt CvExp
 convertReferenceCase ty scr alternatives =
   case unpackConAppCT ty
   of Just (con, args)
-       | isSingletonDataType con ->
+       | isProductType con ->
            case alternatives
            of [alt] -> do
                 (_, alt_type, alt_exp) <- convertAlternative alt
