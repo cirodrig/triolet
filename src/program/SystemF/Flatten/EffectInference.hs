@@ -389,9 +389,20 @@ inferApp :: Gluon.WRExp
          -> (EExp, Effect)
          -> [(EExp, Effect)]
          -> EI (EExp, Effect)
-inferApp result_type info op args =
+inferApp result_type info op args = do
   -- Compute side effects of function application and coerce arguments
-  applyArguments info op args
+  return_value@(result_exp, result_eff) <- applyArguments info op args
+  
+  -- Verify that local objects don't escape
+  let local_regions =
+        Set.fromList [rgn | (arg, _) <- args
+                          , WriteRT rgn _ <- return (expReturn arg)]
+  
+  whenM (liftIO $ expReturn result_exp `mentionsAnyE` local_regions) $ do
+    fail "inferApp: Local regions escape"
+  
+  return return_value
+                       
 
 -- | Get the variance of an expression's parameters.  Unknowns are treated
 -- as 'Invariant'.  Functions are covariant in all parameters.
