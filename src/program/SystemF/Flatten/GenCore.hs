@@ -99,6 +99,9 @@ mkGlobalRegions = do
     globals = [ (SF.pyonBuiltin SF.the_passConv_int,
                  SF.pyonBuiltin SF.the_passConv_int_addr,
                  SF.pyonBuiltin SF.the_passConv_int_ptr)
+              , (SF.pyonBuiltin SF.the_passConv_float,
+                 SF.pyonBuiltin SF.the_passConv_float_addr,
+                 SF.pyonBuiltin SF.the_passConv_float_ptr)
               , (SF.pyonBuiltin SF.the_OpaqueTraversableDict_list,
                  SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_addr,
                  SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_ptr)
@@ -741,20 +744,22 @@ convertVarE rb inf v =
 
 convertConE rb inf c = do
   let rt = Core.conCoreReturnType c
-  let value = case Core.fromCBind rt
-              of Core.ValRT -> Core.ValueConV c
-                 Core.OwnRT -> Core.OwnedConV c
+  let value =
+        case Core.fromCBind rt
+        of Core.ValRT -> Core.ValueConV c
+           Core.OwnRT -> Core.OwnedConV c
                  
-                 -- Special case handling for constructors that translate
-                 -- to global variables in Core
-                 Core.ReadRT {}
-                   | c `SF.isPyonBuiltin` SF.the_passConv_int ->
-                       Core.ReadVarV (Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_passConv_int_addr)) (SF.pyonBuiltin SF.the_passConv_int_ptr)
+           -- Special case handling for constructors that translate
+           -- to global variables in Core
+           Core.ReadRT {}
+             | c `SF.isPyonBuiltin` SF.the_passConv_int ->
+                 Core.ReadVarV (Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_passConv_int_addr)) (SF.pyonBuiltin SF.the_passConv_int_ptr)
+             | c `SF.isPyonBuiltin` SF.the_passConv_float ->
+                 Core.ReadVarV (Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_passConv_float_addr)) (SF.pyonBuiltin SF.the_passConv_float_ptr)
+             | c `SF.isPyonBuiltin` SF.the_OpaqueTraversableDict_list ->
+                 Core.ReadVarV (Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_addr)) (SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_ptr)
 
-                     | c `SF.isPyonBuiltin` SF.the_OpaqueTraversableDict_list ->
-                       Core.ReadVarV (Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_addr)) (SF.pyonBuiltin SF.the_OpaqueTraversableDict_list_ptr)
-
-                 _ -> internalError "convertConE"
+           _ -> internalError "convertConE"
   return (Core.ValCE inf value)
 
 convertLitE rb inf l t = 

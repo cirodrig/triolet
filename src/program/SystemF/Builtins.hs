@@ -24,6 +24,8 @@ module SystemF.Builtins
         the_passConv_int_addr,
         the_passConv_int_ptr,
         the_passConv_float,
+        the_passConv_float_addr,
+        the_passConv_float_ptr,
         the_passConv_bool,
         the_passConv_NoneType,
         the_passConv_iter,

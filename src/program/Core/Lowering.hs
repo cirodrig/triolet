@@ -83,6 +83,8 @@ globalVarAssignment =
   where
     tbl = [ (pyonBuiltin the_passConv_int_ptr,
              (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_int_pass_conv))
+          , (pyonBuiltin the_passConv_float_ptr,
+             (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_float_pass_conv))
           , (pyonBuiltin the_OpaqueTraversableDict_list_ptr,
              (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_OpaqueTraversableDict_list))
           ]

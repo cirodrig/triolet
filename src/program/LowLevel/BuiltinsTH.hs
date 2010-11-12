@@ -241,7 +241,7 @@ builtinGlobals =
   , (PyonName module_structures "OpaqueTraversableDict_list", PrimType PointerType)
     -- Physical representations of data types
   , (CName module_structures "int_pass_conv", PrimType PointerType)
-  , (biName "float_pass_conv", PrimType PointerType)
+  , (CName module_structures "float_pass_conv", PrimType PointerType)
   , (biName "bool_pass_conv", PrimType PointerType)
   , (PyonName module_structures "TraversableDict_pass_conv", PrimType PointerType)
   , (biName "PassConv_pass_conv", PrimType PointerType)

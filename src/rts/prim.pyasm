@@ -18,3 +18,15 @@ function sub_int (int x, int y) -> int {
 function negate_int (int x) -> int {
   int 0 - x;
 };
+
+function add_float (float x, float y) -> float {
+  x + y;
+};
+
+function sub_float (float x, float y) -> float {
+  x - y;
+};
+
+function negate_float (float x) -> float {
+  float 0.0 - x;
+};

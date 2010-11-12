@@ -15,6 +15,15 @@ data pointer int_pass_conv = PassConv {
   dummy_finalizer
 };
 
+// Parameter-passing convention dictionary of floats
+data pointer float_pass_conv = PassConv {
+  sizeof float,
+  alignof float,
+  copy4F,
+  dummy_finalizer
+};
+
+// Parameter-passing convention dictionary of itself
 data pointer PassConv_pass_conv = PassConv {
   sizeof PassConv,
   alignof PassConv,
