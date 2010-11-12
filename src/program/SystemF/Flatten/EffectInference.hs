@@ -551,19 +551,26 @@ inferCase case_type inf scr alts = do
   let new_expr = CaseE { expScrutinee = scr'
                        , expAlts = alts'
                        }
-  let eff = effectUnions (scr_eff : alt_effects)
+      
+  let -- The effect of actually inspecting the scrutinee
+      case_effect = case expReturn scr'
+                    of ValRT {} -> emptyEffect
+                       OwnRT {} -> emptyEffect
+                       ReadRT rgn _ -> varEffect rgn
+                       WriteRT {} -> emptyEffect
+      eff = effectUnions (scr_eff : case_effect : alt_effects)
   return (EExp inf return_type new_expr, eff)
   where
     infer_alternatives [alt] = do
-      (alt', alt_eff) <- inferAlt Nothing alt
-      return ([alt'], [alt_eff], expReturn $ ealtBody alt')
+      (alt', alt_return, alt_eff) <- inferAlt Nothing alt
+      return ([alt'], [alt_eff], alt_return)
   
     -- If there are multiple alternatives, then determine the return type 
     -- based on the expression's type.  Coerce all alternatives' returns
     -- to that return type.
     infer_alternatives alts = do
       return_type <- toReturnType  (Gluon.fromWhnf case_type)
-      (alts, effs) <- mapAndUnzipM (inferAlt (Just return_type)) alts
+      (unzip3 -> (alts, _, effs)) <- mapM (inferAlt (Just return_type)) alts
       return (alts, effs, return_type)
 
 tyPatAsBinder :: SF.TyPat SF.TypedRec -> EI EParam
@@ -759,8 +766,14 @@ inferDefGroup defs = do
       return $ EDef v (f {funEffectParams = flexible_effect_params})
 
 -- | Infer effects in a case alternative.  If a return type is given,
--- coerce the return value to that return type.
-inferAlt :: Maybe EReturnType -> SF.RecAlt SF.TypedRec -> EI (EAlt, Effect)
+--   coerce the return value to that return type.  Otherwise, choose a
+--   return type.
+--
+--   Never return a read reference.  A common use case is to select and 
+--   return an object field; if a read reference is returned, it will be 
+--   an error.
+inferAlt :: Maybe EReturnType -> SF.RecAlt SF.TypedRec
+         -> EI (EAlt, EReturnType, Effect)
 inferAlt mreturn_type (SF.TypedSFAlt (SF.TypeAnn _ alt)) = do
   ty_args <- liftRegionM $ mapM inferTypeExp $ SF.altTyArgs alt
   
@@ -769,28 +782,42 @@ inferAlt mreturn_type (SF.TypedSFAlt (SF.TypeAnn _ alt)) = do
                      | SF.Binder v ty () <- SF.altParams alt]
   let local_regions = mapMaybe paramRegion params
 
-  (body_exp, body_eff) <- withBinders params $ do
+  (body_exp, body_return, body_eff) <- withBinders params $ do
     (body_exp, body_eff) <- inferExp $ SF.altBody alt
   
     -- Coerce return value
-    (body_exp', co_eff) <- coerce_return mreturn_type body_exp
+    (body_exp', body_return', co_eff) <- coerce_return mreturn_type body_exp
     let alt_eff = body_eff `effectUnion` varsEffect co_eff
 
     -- Pattern-bound variable effects must not escape
-    whenM (liftIO $ expReturn body_exp' `mentionsAnyE` Set.fromList local_regions) $
+    whenM (liftIO $ body_return' `mentionsAnyE` Set.fromList local_regions) $
       fail "inferAlt: Local region escapes"
 
     -- Hide effects on pattern-bound variables
     let eff = deleteListFromEffect local_regions alt_eff
-    return (body_exp', eff)
+    return (body_exp', body_return', eff)
 
   let con = SF.altConstructor alt
-  return (EAlt con (map discardTypeRepr ty_args) params body_exp, body_eff)
+      new_alt = EAlt con (map discardTypeRepr ty_args) params body_exp
+  return (new_alt, body_return, body_eff)
   where
-    coerce_return Nothing e = return (e, [])
+    -- Coerce the case alternative's return type.
+    -- If a return type is specified, coerce to that.
     coerce_return (Just rt) e = do
       (_, _, coercion, exposed_reads) <- coerceReturn rt (expReturn e)
-      return (applyCoercion coercion e, exposed_reads)
+      return (applyCoercion coercion e, rt, exposed_reads)
+
+    -- If no return type was specified and the body returns a read reference,
+    -- coerce to a write reference.  Otherwise, don't coerce.
+    coerce_return Nothing e =
+      case expReturn e
+      of return_type@(ReadRT _ ty) -> do
+           rgn <- newRegionVar True
+           let new_return_type = WriteRT rgn ty
+           (_, _, coercion, exposed_reads) <-
+             coerceReturn new_return_type return_type
+           return (applyCoercion coercion e, new_return_type, exposed_reads)
+         _ -> return (e, expReturn e, [])
 
 inferTypeExp :: SF.RecType SF.TypedRec -> RegionM ERepType
 inferTypeExp (SF.TypedSFType (SF.TypeAnn k t)) = do
@@ -1045,7 +1072,7 @@ coerceParameter expected given f = do
          WriteRT rv _ -> do
            retval <- withUnifiedParamRegions pv rv $ \pv' ->
              f coerce_value (Renaming $ renameE rv pv') (const $ Renaming $ renameE pv pv') [] []
-           return (expected', given', [pv], retval)
+           return (expected', given', [rv], retval)
    where
     no_coercion = internalError "coerceParameter: Cannot coerce"
   
