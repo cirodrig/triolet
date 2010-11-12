@@ -61,16 +61,10 @@ convertCon c =
 -- a global variable in low-level code.
 convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
-    tbl = [] {- (pyonBuiltin the_passConv_int,
-             value (LLType $ LL.RecordType passConvRecord) intPassConvValue)
-          , (pyonBuiltin the_passConv_float,
-             value (LLType $ LL.RecordType passConvRecord) floatPassConvValue)
-          , (pyonBuiltin the_passConv_bool,
-             value (LLType $ LL.RecordType passConvRecord) boolPassConvValue)
-          , (pyonBuiltin the_additiveDict,
-             atom [CoreType $ conCoreReturnType $ pyonBuiltin the_additiveDict]
-             genAdditiveDictFun)
-          ]-}
+    tbl = [ (zeroMember $ pyonBuiltin the_AdditiveDict_int,
+             value (LLType $ LL.PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 0))
+          , (zeroMember $ pyonBuiltin the_AdditiveDict_float,
+             value (LLType $ LL.PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 0))]
 
 globalVarAssignment =
   IntMap.fromList [(fromIdent $ varID c, v) | (c, v) <- tbl]
@@ -342,41 +336,41 @@ getPassConv ty = do
            | con `isPyonBuiltin` the_PassConv ->
                return_value (builtinVar the_bivar_PassConv_pass_conv)
            | con `isPyonBuiltin` the_AdditiveDict ->
-               return_value (builtinVar the_bivar_AdditiveDict_pass_conv)
+               case args
+               of [arg] ->
+                    build_unary_passconv
+                    (llBuiltin the_fun_AdditiveDict_pass_conv) arg
            | con `isPyonBuiltin` the_TraversableDict ->
                return_value (builtinVar the_bivar_TraversableDict_pass_conv)
            | con `isPyonBuiltin` the_list ->
                case args
-               of [arg] -> do
-                    (mk_arg_pc, arg_pc) <- getPassConv arg
-                    (mk_pc, var) <-
-                      build_unary_passconv
-                      (llBuiltin the_fun_passConv_list)
-                      arg_pc
-                    let mk_code return_type mk =
-                          mk_arg_pc return_type $ mk_pc return_type mk
-                    return (mk_code, LL.VarV var)
+               of [arg] ->
+                    build_unary_passconv (llBuiltin the_fun_passConv_list) arg
          _ -> internalError $ "getPassConv: Unexpected type " ++ show (pprType ty)
   where
     return_value val = return (\_ -> id, val)
 
-    build_unary_passconv pc_ctor arg_pc = do
-      -- Create a variable that will point to the new term
-      list_pc_ptr <- runFreshVar $ LL.newAnonymousVar (LL.PrimType PointerType)
-      return (wrap_exp list_pc_ptr, list_pc_ptr)
+    build_unary_passconv pc_ctor arg_type = do
+      pc_var <- runFreshVar $ LL.newAnonymousVar (LL.PrimType PointerType)
+      (mk_arg_pc, arg_pc) <- getPassConv arg_type
+
+      -- Create code generator for this data
+      let mk_code return_type mk =
+            mk_arg_pc return_type $ wrap_exp arg_pc pc_var return_type mk
+      
+      return (mk_code, LL.VarV pc_var)
       where
         -- Allocate local memory and initialize the variable
-        wrap_exp list_pc_ptr body_return_type body = do
-          allocateLocalMem list_pc_ptr passconv_size (map lowered body_return_type) $ do
-            initialize list_pc_ptr
+        wrap_exp arg_pc list_pc_ptr body_return_type body = do
+          let passconv_passconv = LL.VarV $ llBuiltin the_bivar_PassConv_pass_conv
+          allocateLocalMem list_pc_ptr passconv_passconv (map lowered body_return_type) $ do
+            initialize arg_pc list_pc_ptr
             body
 
-        initialize list_pc_ptr =
+        initialize arg_pc list_pc_ptr =
           emitAtom0 $ LL.CallA (LL.VarV pc_ctor) [ LL.LitV LL.UnitL
                                                  , arg_pc
                                                  , LL.VarV list_pc_ptr]
-
-        passconv_size = nativeWordV $ sizeOf passConvRecord
 
 -------------------------------------------------------------------------------
 -- Data structure lowering

@@ -59,6 +59,12 @@ pprFieldType (PrimField pt) = pprPrimType pt
 pprFieldType (RecordField rt) = pprRecordType rt
 pprFieldType (BytesField _ _) = text "BYTES"
 
+pprFunctionType :: FunctionType -> Doc
+pprFunctionType ftype =
+  pprFunSignature
+  (map pprValueType $ ftParamTypes ftype)
+  (map pprValueType $ ftReturnTypes ftype)
+
 pprDataDef :: DataDef -> Doc
 pprDataDef (DataDef v _ values) =
   let initializer = fillBracketList $ map pprVal values

@@ -87,6 +87,14 @@ mkValBinaryOpType ty =
         retCT (ValRT ::: expCT ty)
   in OwnRT ::: constructor_type
 
+mkValUnaryOpType :: RExp -> CBind CReturnT Rec
+mkValUnaryOpType ty =
+  let constructor_type =
+        funCT $
+        pureArrCT (ValPT Nothing ::: expCT ty) $
+        retCT (ValRT ::: expCT ty)
+  in OwnRT ::: constructor_type
+
 mkRefBinaryOpType :: RExp -> Eval (CBind CReturnT Rec)
 mkRefBinaryOpType ty = do
   addr1 <- newAnonymousVariable ObjectLevel
@@ -110,12 +118,10 @@ mkRefUnaryOpType ty = do
 binaryIntOpType = mkValBinaryOpType $ mkInternalConE $ pyonBuiltin the_int
 binaryFloatOpType = mkValBinaryOpType $ mkInternalConE $ pyonBuiltin the_float
 
-mkValZeroOpType ty =
-  let constructor_type =
-        funCT $
-        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_NoneType)) $
-        retCT (ValRT ::: expCT ty)
-  in OwnRT ::: constructor_type
+unaryIntOpType = mkValUnaryOpType $ mkInternalConE $ pyonBuiltin the_int
+unaryFloatOpType = mkValUnaryOpType $ mkInternalConE $ pyonBuiltin the_float
+
+mkValZeroOpType ty = ValRT ::: expCT ty
 
 mkRefZeroOpType ty = do
   addr <- newAnonymousVariable ObjectLevel
@@ -182,7 +188,6 @@ additiveDictType = mkConType $ do
   pc_addr <- newAnonymousVariable ObjectLevel
   binary_type <- mkRefBinaryOpType (mkInternalVarE a)
   unary_type <- mkRefUnaryOpType (mkInternalVarE a)
-  zero_type <- mkRefZeroOpType (mkInternalVarE a)
   zero_addr <- newAnonymousVariable ObjectLevel
   let constructor_type =
         funCT $
@@ -191,7 +196,7 @@ additiveDictType = mkConType $ do
         pureArrCT (OwnPT ::: cbindType binary_type) $
         pureArrCT (OwnPT ::: cbindType binary_type) $
         pureArrCT (OwnPT ::: cbindType unary_type) $
-        pureArrCT (ReadPT zero_addr ::: cbindType zero_type) $
+        pureArrCT (ReadPT zero_addr ::: varCT a) $
         retCT (WriteRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
   return (OwnRT ::: constructor_type)
 
@@ -522,18 +527,22 @@ constructorTable =
                compareFloatOpType)
             , (pyonBuiltin (geMember . the_OrdDict_float),
                compareFloatOpType)
-            , (pyonBuiltin (zeroMember . the_AdditiveDict_int),
-               zeroIntOpType)
             , (pyonBuiltin (addMember . the_AdditiveDict_int),
                binaryIntOpType)
             , (pyonBuiltin (subMember . the_AdditiveDict_int),
                binaryIntOpType)
-            , (pyonBuiltin (zeroMember . the_AdditiveDict_float),
-               zeroFloatOpType)
+            , (pyonBuiltin (negateMember . the_AdditiveDict_int),
+               unaryIntOpType)
+            , (pyonBuiltin (zeroMember . the_AdditiveDict_int),
+               zeroIntOpType)
             , (pyonBuiltin (addMember . the_AdditiveDict_float),
                binaryFloatOpType)
             , (pyonBuiltin (subMember . the_AdditiveDict_float),
                binaryFloatOpType)
+            , (pyonBuiltin (negateMember . the_AdditiveDict_float),
+               unaryFloatOpType)
+            , (pyonBuiltin (zeroMember . the_AdditiveDict_float),
+               zeroFloatOpType)
             , (pyonBuiltin the_fun_subscript,
                subscriptType)
             , (pyonBuiltin (traverseMember . the_TraversableDict_list),

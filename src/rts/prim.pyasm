@@ -7,14 +7,14 @@ module pyon.internal.prim;
 #include "prim.h"
 #include "pyasm_records.h"
 
-function zero_int (unit _) -> int {
-  int 0;
-};
-
 function add_int (int x, int y) -> int {
   x + y;
 };
 
 function sub_int (int x, int y) -> int {
   x - y;
-}
+};
+
+function negate_int (int x) -> int {
+  int 0 - x;
+};

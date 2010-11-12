@@ -41,11 +41,11 @@ module LowLevel.Builtins
         the_fun_store_NoneType,
         the_fun_additiveDict,
         the_fun_passConv_list,
+        the_fun_AdditiveDict_pass_conv,
         the_bivar_OpaqueTraversableDict_list,
         the_bivar_int_pass_conv,
         the_bivar_float_pass_conv,
         the_bivar_bool_pass_conv,
-        the_bivar_AdditiveDict_pass_conv,
         the_bivar_TraversableDict_pass_conv,
         the_bivar_PassConv_pass_conv)
 where

@@ -227,7 +227,7 @@ mkAdditiveClass = mdo
       negScheme = monomorphic $ functionType [ConTy a] (ConTy a)
 
   let cls = Class { clsParam = a
-                  , clsConstraint = []
+                  , clsConstraint = [passable (ConTy a)]
                   , clsMethods = [add, sub, negate, zero]
                   , clsName = "Additive"
                   , clsInstances = [int_instance, float_instance]

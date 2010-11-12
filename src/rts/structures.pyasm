@@ -15,6 +15,50 @@ data pointer int_pass_conv = PassConv {
   dummy_finalizer
 };
 
+data pointer PassConv_pass_conv = PassConv {
+  sizeof PassConv,
+  alignof PassConv,
+  copy_PassConv,
+  dummy_finalizer
+};
+
+function copy_PassConv (unit _, pointer src, pointer dst) -> () {
+  dst @! PassConv.size = src @! PassConv.size;
+  dst @! PassConv.align = src @! PassConv.align;
+  dst @! PassConv.copy = src @! PassConv.copy;
+  dst @! PassConv.finalize = src @! PassConv.finalize;
+  ();
+};
+
+function AdditiveDict_pass_conv (unit _, pointer repr, pointer ret) -> () {
+  size = repr @! PassConv.size;
+  align = repr @! PassConv.align;
+  copy = repr @! PassConv.copy;
+  finalize = repr @! PassConv.finalize;
+  typedef dictionary = AdditiveDict(bytes(size, align));
+
+  ret @! PassConv.size = sizeof dictionary;
+  ret @! PassConv.align = alignof dictionary;
+  ret @! PassConv.copy = owned call AdditiveDict_copy (size, align, copy);
+  ret @! PassConv.finalize = dummy_finalizer;
+  ();
+};
+
+function AdditiveDict_copy
+  (word size, word align, owned copy_zero, pointer src, pointer dst) -> () {
+  typedef dictionary = AdditiveDict(bytes(size, align));
+
+  dst @! dictionary.repr.size = src @! dictionary.repr.size;
+  dst @! dictionary.repr.align = src @! dictionary.repr.align;
+  dst @! dictionary.repr.copy = src @! dictionary.repr.copy;
+  dst @! dictionary.repr.finalize = src @! dictionary.repr.finalize;
+  dst @! dictionary.add = src @! dictionary.add;
+  dst @! dictionary.subtract = src @! dictionary.subtract;
+  dst @! dictionary.negate = src @! dictionary.negate;
+  () call (copy_zero) (src @ dictionary.zero, dst @ dictionary.zero);  
+};
+
+
 // Construct an Additive dictionary
 function additiveDict
   (unit _, pointer repr,
@@ -23,22 +67,14 @@ function additiveDict
   align = repr @! PassConv.align;
   typedef dictionary = AdditiveDict(bytes(size, align));
 
+  ret @! dictionary.repr.size = repr @! PassConv.size;
+  ret @! dictionary.repr.align = repr @! PassConv.align;
+  ret @! dictionary.repr.copy = repr @! PassConv.copy;
+  ret @! dictionary.repr.finalize = repr @! PassConv.finalize;
   ret @! dictionary.add = add;
   ret @! dictionary.subtract = sub;
   ret @! dictionary.negate = negate;
   () call (repr @! PassConv.copy) (zero, ret @ dictionary.zero);
-};
-
-function copy_AdditiveDict (pointer repr, pointer src, pointer dst) -> () {
-  size = repr @! PassConv.size;
-  align = repr @! PassConv.align;
-  typedef dictionary = AdditiveDict(bytes(size, align));
-
-  dst @! dictionary.add = src @! dictionary.add;
-  dst @! dictionary.subtract = src @! dictionary.subtract;
-  dst @! dictionary.negate = src @! dictionary.negate;
-  () call (repr @! PassConv.copy)
-    (src @ dictionary.zero, dst @ dictionary.zero);
 };
 
 #if 0

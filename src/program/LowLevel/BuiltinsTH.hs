@@ -166,6 +166,11 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_Stream) |])
   , (PyonName module_structures "additiveDict",
      Right [| pyonBuiltin (SystemF.the_additiveDict) |])
+  , (PyonName module_structures "AdditiveDict_pass_conv",
+     Left $
+     closureFunctionType [PrimType UnitType,
+                          PrimType PointerType,
+                          PrimType PointerType] [])
   , (PyonName module_structures "passConv_pyonTuple2",
      Right [| SystemF.getPyonTuplePassConv' 2 |])
     
@@ -178,18 +183,18 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_float) |])
   , (PyonName builtinModuleName "ne_float",
      Right [| pyonBuiltin (SystemF.neMember . SystemF.the_EqDict_float) |])
-  , (PyonName module_prim "zero_int",
-     Right [| pyonBuiltin (SystemF.zeroMember . SystemF.the_AdditiveDict_int) |])
   , (PyonName module_prim "add_int",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_int) |])
   , (PyonName module_prim "sub_int", 
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_int) |])
-  , (PyonName builtinModuleName "zero_float",
-     Right [| pyonBuiltin (SystemF.zeroMember . SystemF.the_AdditiveDict_float) |])
+  , (PyonName module_prim "negate_int",
+     Right [| pyonBuiltin (SystemF.negateMember . SystemF.the_AdditiveDict_int) |])
   , (PyonName builtinModuleName "add_float",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_float) |])
   , (PyonName builtinModuleName "sub_float",
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_float) |])
+  , (PyonName module_prim "negate_float",
+     Right [| pyonBuiltin (SystemF.negateMember . SystemF.the_AdditiveDict_float) |])
   , (PyonName builtinModuleName "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])
   , (PyonName builtinModuleName "load_float",
@@ -219,7 +224,6 @@ builtinGlobals =
   , (CName module_structures "int_pass_conv", PrimType PointerType)
   , (biName "float_pass_conv", PrimType PointerType)
   , (biName "bool_pass_conv", PrimType PointerType)
-  , (CName module_structures "AdditiveDict_pass_conv", PrimType PointerType)
   , (PyonName module_structures "TraversableDict_pass_conv", PrimType PointerType)
   , (biName "PassConv_pass_conv", PrimType PointerType)
   ]

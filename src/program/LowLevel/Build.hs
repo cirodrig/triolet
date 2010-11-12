@@ -682,13 +682,15 @@ selectPassConvFinalize = loadField (passConvRecord' !!: 3)
 additiveDictRecord :: (Monad m, Supplies m (Ident Var)) =>
                       DynamicFieldType -> Gen m DynamicRecord
 additiveDictRecord ftype =
-  createDynamicRecord [ PrimField OwnedType
+  createDynamicRecord [ RecordField passConvRecord'
+                      , PrimField OwnedType
                       , PrimField OwnedType
                       , PrimField OwnedType
                       , ftype]
 
 suspendedAdditiveDictRecord ftype =
-  suspendedCreateDynamicRecord [ PrimField OwnedType
+  suspendedCreateDynamicRecord [ RecordField passConvRecord'
+                               , PrimField OwnedType
                                , PrimField OwnedType
                                , PrimField OwnedType
                                , ftype]

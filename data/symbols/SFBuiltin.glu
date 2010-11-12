@@ -131,7 +131,7 @@ data TraversableDict : (Pure -> Pure) -> Pure where
 constant OpaqueTraversableDict_list : TraversableDict list;
 
 data AdditiveDict : Pure -> Pure where
-  additiveDict : (a : Pure) -> binary a -> binary a -> unary a -> a
+  additiveDict : (a : Pure) -> PassConv a -> binary a -> binary a -> unary a -> a
               -> AdditiveDict a;
 
 data VectorDict : Pure -> Pure where

@@ -40,10 +40,11 @@ record PAPHeader {
 
 // Additive dictionary
 record AdditiveDict(a) {
-  owned add;
-  owned subtract;
-  owned negate;
-  a zero;
+  PassConv repr;		// Represesntation of the data type
+  owned add;			// Add two values
+  owned subtract;		// A value minus another
+  owned negate;			// Negate a value
+  a zero;			// The zero value
 };
 
 /* Arrays (called "lists")
