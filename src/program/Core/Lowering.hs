@@ -11,6 +11,7 @@ import Control.Monad.Reader
 import Control.Monad.ST
 import qualified Data.IntMap as IntMap
 import Data.Maybe
+import Debug.Trace
 import System.IO.Unsafe
 import Text.PrettyPrint.HughesPJ
 
@@ -40,6 +41,13 @@ import LowLevel.Builtins
 import qualified LowLevel.Print as LL
 import Globals
 import Export
+
+-- | When the given code generator is run, also print the generated code.
+-- For debugging.
+debugShowAtom :: Doc -> BuildBlock LL.Atom -> BuildBlock LL.Atom
+debugShowAtom message m = do
+  (x, MkStm mkstm) <- listen m
+  traceShow (hang message 4 $ LL.pprStm (mkstm $ LL.ReturnE x)) $ return x
 
 -- | Convert a constructor to the corresponding value in the low-level IR.
 --   Most constructors are translated to a global variable.  Pass-by-value 

@@ -118,8 +118,8 @@ data EReturnType =
     -- | Return a boxed object
   | OwnRT EType
 
-    -- | Return a borrowed reference to data that already exists.  Variable
-    --   references use this convention.
+    -- | Return a borrowed reference to data that already exists.
+    --   Variable references are the only thing that uses this convention.
   | ReadRT RVar EType
 
     -- | Return by writing into a reference.  The return region

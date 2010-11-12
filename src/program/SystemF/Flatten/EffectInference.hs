@@ -392,12 +392,12 @@ inferApp :: Gluon.WRExp
 inferApp result_type info op args = do
   -- Compute side effects of function application and coerce arguments
   return_value@(result_exp, result_eff) <- applyArguments info op args
-  
+
   -- Verify that local objects don't escape
   let local_regions =
         Set.fromList [rgn | (arg, _) <- args
                           , WriteRT rgn _ <- return (expReturn arg)]
-  
+
   whenM (liftIO $ expReturn result_exp `mentionsAnyE` local_regions) $ do
     fail "inferApp: Local regions escape"
   
@@ -506,7 +506,7 @@ applyType op_type arg k =
            -- Continue
            let eff' = reff `effectUnion` varsEffect exposed_regions
            x@(_, (eff, rt, _), _) <- k arg' eff' rrtype local_regions exposed_regions
-           traceShow (text "applyType" <+> pprEffect eff) $ return x
+           return x
        return (call_regions, a, b, c)
      _ -> internalError "applyType: Not a function type"
   where
