@@ -35,6 +35,13 @@ data AdditiveDictMembers =
   , zeroMember :: !Con
   }
 
+data MultiplicativeDictMembers =
+  MultiplicativeDictMembers
+  { mulMember :: !Con
+  , fromIntMember :: !Con
+  , oneMember :: !Con
+  }
+
 data VectorDictMembers =
   VectorDictMembers
   { scaleMember :: !Con
@@ -62,6 +69,7 @@ pyonBuiltinTypeConstructors =
   , "OrdDict"
   , "TraversableDict"
   , "AdditiveDict"
+  , "MultiplicativeDict"
   , "VectorDict"
   , "PassConv"
   ]
@@ -75,6 +83,7 @@ pyonBuiltinDataConstructors =
   , "ordDict"
   , "traversableDict"
   , "additiveDict"
+  , "multiplicativeDict"
   , "vectorDict"
   , "OpaqueTraversableDict_list"
   ]
@@ -111,8 +120,7 @@ pyonBuiltinPassConvPointers =
   ]
 
 pyonBuiltinFunctions =
-  [ "oper_MUL"
-  , "oper_DIV"
+  [ "oper_DIV"
   , "oper_FLOORDIV"
   , "oper_MOD"
   , "oper_POWER"
@@ -191,5 +199,7 @@ pyonBuiltinsSpecification =
              , ("_TraversableDict_list", IsStrict, [t| TraversableDictMembers |])
              , ("_AdditiveDict_int", IsStrict, [t| AdditiveDictMembers |])
              , ("_AdditiveDict_float", IsStrict, [t| AdditiveDictMembers |])
+             , ("_MultiplicativeDict_int", IsStrict, [t| MultiplicativeDictMembers |])
+             , ("_MultiplicativeDict_float", IsStrict, [t| MultiplicativeDictMembers |])
              ]
                

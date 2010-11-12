@@ -2,7 +2,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 module SystemF.Builtins
        (EqDictMembers(..), OrdDictMembers(..), TraversableDictMembers(..),
-        AdditiveDictMembers(..), VectorDictMembers(..),
+        AdditiveDictMembers(..), MultiplicativeDictMembers(..),
+        VectorDictMembers(..),
         loadPyonBuiltins, arePyonBuiltinsInitialized,
         pyonBuiltin, isPyonBuiltin,
         the_Stream,
@@ -30,20 +31,20 @@ module SystemF.Builtins
         the_passConv_Any,
         the_passConv_owned,
         the_EqDict, the_OrdDict, the_TraversableDict,
-        the_AdditiveDict, the_VectorDict,
+        the_AdditiveDict, the_MultiplicativeDict, the_VectorDict,
         the_EqDict_int, the_OrdDict_int,
         the_EqDict_float, the_OrdDict_float,
         the_EqDict_Tuple2, the_OrdDict_Tuple2,
         the_TraversableDict_Stream, the_TraversableDict_list,
         the_AdditiveDict_int, the_AdditiveDict_float,
+        the_MultiplicativeDict_int, the_MultiplicativeDict_float,        
         the_None, the_True, the_False,
         the_makeList,
         the_eqDict, the_ordDict, the_traversableDict,
-        the_additiveDict, the_vectorDict,
+        the_additiveDict, the_multiplicativeDict, the_vectorDict,
         the_OpaqueTraversableDict_list,
         the_OpaqueTraversableDict_list_addr,
         the_OpaqueTraversableDict_list_ptr,
-        the_oper_MUL,
         the_oper_DIV,
         the_oper_MOD,
         the_oper_POWER,
@@ -306,6 +307,13 @@ initializePyonBuiltins varIDs mod = do
                   c_negate = $(findNameWithPrefix name "Additive_NEGATE_")
                   c_zero = $(findNameWithPrefix name "Additive_ZERO_")
               in evaluate $ AdditiveDictMembers c_add c_sub c_negate c_zero |])
+        
+        multiplicative_dict name =
+          ("_MultiplicativeDict_" ++ name,
+           [| let c_mul = $(findNameWithPrefix name "Multiplicative_MUL_")
+                  c_fromint = $(findNameWithPrefix name "Multiplicative_FROMINT_")
+                  c_one = $(findNameWithPrefix name "Multiplicative_ONE_")
+              in evaluate $ MultiplicativeDictMembers c_mul c_fromint c_one |])
 
         -- All field initializers
         initializers =
@@ -324,6 +332,8 @@ initializePyonBuiltins varIDs mod = do
           , traversable_dict "list"
           , additive_dict "int"
           , additive_dict "float"
+          , multiplicative_dict "int"
+          , multiplicative_dict "float"
           ]
       in initializeRecordM pyonBuiltinsSpecification initializers)
 

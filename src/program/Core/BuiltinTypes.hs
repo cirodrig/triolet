@@ -131,8 +131,15 @@ mkRefZeroOpType ty = do
         retCT (WriteRT ::: expCT ty)
   return $ OwnRT ::: constructor_type
 
-zeroIntOpType = mkValZeroOpType $ mkInternalConE $ pyonBuiltin the_int
-zeroFloatOpType = mkValZeroOpType $ mkInternalConE $ pyonBuiltin the_float
+valueIntOpType = mkValZeroOpType $ mkInternalConE $ pyonBuiltin the_int
+valueFloatOpType = mkValZeroOpType $ mkInternalConE $ pyonBuiltin the_float
+
+fromIntType ty =
+  let constructor_type =
+        funCT $
+        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_int)) $
+        retCT (WriteRT ::: ty)
+  in OwnRT ::: constructor_type
 
 mkCompareOpType :: RExp -> CBind CReturnT Rec
 mkCompareOpType ty =
@@ -198,6 +205,25 @@ additiveDictType = mkConType $ do
         pureArrCT (OwnPT ::: cbindType unary_type) $
         pureArrCT (ReadPT zero_addr ::: varCT a) $
         retCT (WriteRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
+  return (OwnRT ::: constructor_type)
+
+multiplicativeDictType = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  additive_addr <- newAnonymousVariable ObjectLevel
+  binary_type <- mkRefBinaryOpType (mkInternalVarE a)
+  one_addr <- newAnonymousVariable ObjectLevel
+  let from_int_type =
+        funCT $
+        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_int)) $
+        retCT (WriteRT ::: varCT a)
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ReadPT additive_addr ::: appCT (conCT $ pyonBuiltin the_AdditiveDict) [varCT a]) $
+        pureArrCT (OwnPT ::: cbindType binary_type) $
+        pureArrCT (OwnPT ::: from_int_type) $
+        pureArrCT (ReadPT one_addr ::: varCT a) $
+        retCT (WriteRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_MultiplicativeDict) [varCT a])
   return (OwnRT ::: constructor_type)
 
 traversableDictType = mkConType $ do
@@ -534,7 +560,7 @@ constructorTable =
             , (pyonBuiltin (negateMember . the_AdditiveDict_int),
                unaryIntOpType)
             , (pyonBuiltin (zeroMember . the_AdditiveDict_int),
-               zeroIntOpType)
+               valueIntOpType)
             , (pyonBuiltin (addMember . the_AdditiveDict_float),
                binaryFloatOpType)
             , (pyonBuiltin (subMember . the_AdditiveDict_float),
@@ -542,7 +568,19 @@ constructorTable =
             , (pyonBuiltin (negateMember . the_AdditiveDict_float),
                unaryFloatOpType)
             , (pyonBuiltin (zeroMember . the_AdditiveDict_float),
-               zeroFloatOpType)
+               valueFloatOpType)
+            , (pyonBuiltin (mulMember . the_MultiplicativeDict_int),
+               binaryIntOpType)
+            , (pyonBuiltin (fromIntMember . the_MultiplicativeDict_int),
+               fromIntType (conCT $ pyonBuiltin the_int))
+            , (pyonBuiltin (oneMember . the_MultiplicativeDict_int),
+               valueIntOpType)
+            , (pyonBuiltin (mulMember . the_MultiplicativeDict_float),
+               binaryFloatOpType)
+            , (pyonBuiltin (fromIntMember . the_MultiplicativeDict_float),
+               fromIntType (conCT $ pyonBuiltin the_float))
+            , (pyonBuiltin (oneMember . the_MultiplicativeDict_float),
+               valueFloatOpType)
             , (pyonBuiltin the_fun_subscript,
                subscriptType)
             , (pyonBuiltin (traverseMember . the_TraversableDict_list),
@@ -555,6 +593,8 @@ constructorTable =
                streamIdType)
             , (pyonBuiltin the_additiveDict,
                additiveDictType)
+            , (pyonBuiltin the_multiplicativeDict,
+               multiplicativeDictType)
             , (pyonBuiltin the_traversableDict,
                traversableDictType)
             , (getPyonTupleCon' 2,

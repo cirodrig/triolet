@@ -695,6 +695,15 @@ suspendedAdditiveDictRecord ftype =
                                , PrimField OwnedType
                                , ftype]
 
+suspendedMultiplicativeDictRecord ftype = do
+  (additive_code, additive_record) <- suspendedAdditiveDictRecord ftype
+  (multiplicative_code, multiplicative_record) <-
+    suspendedCreateDynamicRecord [ RecordField additive_record
+                                 , PrimField OwnedType
+                                 , PrimField OwnedType
+                                 , ftype]
+  return (additive_code >> multiplicative_code, multiplicative_record)
+
 -------------------------------------------------------------------------------
 -- Values
 

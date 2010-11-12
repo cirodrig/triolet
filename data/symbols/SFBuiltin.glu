@@ -134,6 +134,14 @@ data AdditiveDict : Pure -> Pure where
   additiveDict : (a : Pure) -> PassConv a -> binary a -> binary a -> unary a -> a
               -> AdditiveDict a;
 
+data MultiplicativeDict : Pure -> Pure where
+  multiplicativeDict : (a : Pure)
+                   -> AdditiveDict a
+                   -> (a -> a -> a)
+                   -> (int -> a)
+                   -> a
+                   -> MultiplicativeDict a;
+
 data VectorDict : Pure -> Pure where
   vectorDict : (a : Pure)
             -> AdditiveDict a
@@ -212,8 +220,15 @@ constant Additive_SUB_float : binary float;
 constant Additive_NEGATE_float : unary float;
 constant Additive_ZERO_float : float;
 
+constant Multiplicative_MUL_int : binary int;
+constant Multiplicative_FROMINT_int : int -> int;
+constant Multiplicative_ONE_int : int;
+
+constant Multiplicative_MUL_float : binary float;
+constant Multiplicative_FROMINT_float : int -> float;
+constant Multiplicative_ONE_float : float;
+
 -- Builtin functions
-constant oper_MUL : binary_any;
 constant oper_DIV : binary_any;
 constant oper_MOD : binary int;
 constant oper_POWER : binary_any;

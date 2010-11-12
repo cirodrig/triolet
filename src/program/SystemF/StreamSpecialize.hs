@@ -113,6 +113,7 @@ globalConTable =
       , unchanged 1 the_ordDict
       , unchanged 1 the_traversableDict
       , unchanged 1 the_additiveDict
+      , unchanged 1 the_multiplicativeDict
       , unchanged 0 (eqMember . the_EqDict_int)
       , unchanged 0 (neMember . the_EqDict_int)
       , unchanged 0 (eqMember . the_EqDict_float)
@@ -139,11 +140,16 @@ globalConTable =
       , unchanged 0 (subMember . the_AdditiveDict_float)
       , unchanged 0 (negateMember . the_AdditiveDict_float)
       , unchanged 0 (zeroMember . the_AdditiveDict_float)
+      , unchanged 0 (mulMember . the_MultiplicativeDict_int)
+      , unchanged 0 (fromIntMember . the_MultiplicativeDict_int)
+      , unchanged 0 (oneMember . the_MultiplicativeDict_int)
+      , unchanged 0 (mulMember . the_MultiplicativeDict_float)
+      , unchanged 0 (fromIntMember . the_MultiplicativeDict_float)
+      , unchanged 0 (oneMember . the_MultiplicativeDict_float)
       , unchanged 1 (traverseMember . the_TraversableDict_Stream)
       , unchanged 1 (buildMember . the_TraversableDict_Stream)
       , unchanged 1 (traverseMember . the_TraversableDict_list)
       , unchanged 1 (buildMember . the_TraversableDict_list)
-      , unchanged 1 the_oper_MUL
       , unchanged 1 the_oper_DIV
       , unchanged 0 the_oper_MOD
       , unchanged 1 the_oper_POWER

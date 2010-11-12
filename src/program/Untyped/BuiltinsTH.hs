@@ -28,7 +28,6 @@ pyonSourceGlobals =
   , "zip"
   , "iota"
   , "__undefined__"
-  , "__mul__"
   , "__div__"
   , "__mod__"
   , "__floordiv__"
@@ -49,6 +48,9 @@ pyonSourceGlobals =
   , "__sub__"
   , "__negate__"
   , "zero"
+  , "__mul__"
+  , "__fromint__"
+  , "one"
   , "scale"
   , "norm"
   ]
@@ -62,7 +64,10 @@ pyonOtherGlobals =
 -- | All predefined class names
 pyonClasses :: [String]
 pyonClasses =
-  ["Passable", "Eq", "Ord", "Traversable", "Additive", "Vector"]
+  ["Passable", "Traversable",
+   "Eq", "Ord",
+   "Additive", "Multiplicative",
+   "Vector"]
 
 -- Global variable fields are not strict because some of them are built 
 -- using fields of the builtins table.  Class fields are strict, but most 

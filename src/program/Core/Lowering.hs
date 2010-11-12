@@ -72,7 +72,11 @@ convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
     tbl = [ (zeroMember $ pyonBuiltin the_AdditiveDict_int,
              value (LLType $ LL.PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 0))
           , (zeroMember $ pyonBuiltin the_AdditiveDict_float,
-             value (LLType $ LL.PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 0))]
+             value (LLType $ LL.PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 0))
+          , (oneMember $ pyonBuiltin the_MultiplicativeDict_int,
+             value (LLType $ LL.PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 1))
+          , (oneMember $ pyonBuiltin the_MultiplicativeDict_float,
+             value (LLType $ LL.PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 1))]
 
 globalVarAssignment =
   IntMap.fromList [(fromIdent $ varID c, v) | (c, v) <- tbl]
@@ -85,6 +89,7 @@ globalVarAssignment =
 
 isProductType c
   | c `elem` [pyonBuiltin the_AdditiveDict,
+              pyonBuiltin the_MultiplicativeDict,
               pyonBuiltin the_TraversableDict,
               pyonBuiltin the_list,
               getPyonTupleType' 2] = True
@@ -348,6 +353,11 @@ getPassConv ty = do
                of [arg] ->
                     build_unary_passconv
                     (llBuiltin the_fun_AdditiveDict_pass_conv) arg
+           | con `isPyonBuiltin` the_MultiplicativeDict ->
+               case args
+               of [arg] ->
+                    build_unary_passconv
+                    (llBuiltin the_fun_MultiplicativeDict_pass_conv) arg
            | con `isPyonBuiltin` the_TraversableDict ->
                return_value (builtinVar the_bivar_TraversableDict_pass_conv)
            | con `isPyonBuiltin` the_list ->
@@ -532,7 +542,6 @@ dataConstructorFieldLayout datacon ty_args
       of [arg] -> do
            (code1, zero_field) <- lowerToFieldType arg
            (code2, record_type) <-
-             -- Support for getting the continuation isn't implemented
              suspendedAdditiveDictRecord zero_field
            
            let fields = map inPlaceField $ recordFields record_type
@@ -540,6 +549,18 @@ dataConstructorFieldLayout datacon ty_args
                    code1 >> code2,
                    ReferenceLayout (nativeIntV 0) fields)
   
+  | datacon `isPyonBuiltin` the_multiplicativeDict =
+      case ty_args
+      of [arg] -> do
+           (code1, one_field) <- lowerToFieldType arg
+           (code2, record_type) <-
+             suspendedMultiplicativeDictRecord one_field
+
+           let fields = map inPlaceField $ recordFields record_type
+           return (LL.UnitL,
+                   code1 >> code2,
+                   ReferenceLayout (nativeIntV 0) fields)
+
   | datacon `isPyonBuiltin` the_traversableDict =
       -- This dictionary contains two functions
       let fields = map inPlaceField $ recordFields $

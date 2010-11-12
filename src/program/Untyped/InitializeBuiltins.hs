@@ -262,6 +262,42 @@ mkAdditiveClass = mdo
            , InstanceMethod zero
            ]
 
+mkMultiplicativeClass = mdo
+  a <- newTyVar Star Nothing
+  let binScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy a)
+      fromIntScheme = monomorphic $
+                      functionType [ConTy (tiBuiltin the_con_int)] (ConTy a)
+  let cls = Class { clsParam = a
+                  , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Additive]
+                  , clsMethods = [times, fromInt, one]
+                  , clsName = "Multiplicative"
+                  , clsInstances = [int_instance, float_instance]
+                  , clsTypeCon = pyonBuiltin SystemF.the_MultiplicativeDict
+                  , clsDictCon = pyonBuiltin SystemF.the_multiplicativeDict
+                  }
+
+  times <- mkClassMethod cls 0 "__mul__" binScheme
+  fromInt <- mkClassMethod cls 1 "__fromint__" fromIntScheme
+  one <- mkClassMethod cls 2 "one" (monomorphic (ConTy a))
+  
+  let int_instance =
+        monomorphicInstance cls
+        (ConTy $ tiBuiltin the_con_int)
+        Nothing
+        (fromMultiplicativeDict SystemF.the_MultiplicativeDict_int)
+      float_instance =
+        monomorphicInstance cls
+        (ConTy $ tiBuiltin the_con_float)
+        Nothing
+        (fromMultiplicativeDict SystemF.the_MultiplicativeDict_float)
+  
+  return cls
+  where
+    fromMultiplicativeDict field_name =
+      case pyonBuiltin field_name
+      of SystemF.MultiplicativeDictMembers mul fromInt one ->
+           [InstanceMethod mul, InstanceMethod fromInt, InstanceMethod one]
+  
 mkVectorClass = mdo
   a <- newTyVar Star Nothing
   let normScheme = monomorphic $
@@ -472,6 +508,7 @@ initializeTIBuiltins = do
             , ("Ord", [| mkOrdClass |])
             , ("Traversable", [| mkTraversableClass |])
             , ("Additive", [| mkAdditiveClass |])
+            , ("Multiplicative", [| mkMultiplicativeClass |])
             , ("Vector", [| mkVectorClass |])
             , ("Passable", [| mkPassableClass |])
             ]
@@ -506,9 +543,6 @@ initializeTIBuiltins = do
               ("iterBind", [| mkIterBindType |]
               , [| pyonBuiltin SystemF.the_oper_CAT_MAP |]
               ),
-              ("__mul__", [| mkBinaryOpType |]
-              , [| pyonBuiltin SystemF.the_oper_MUL |]
-              ),
               ("__div__", [| mkBinaryOpType |]
               , [| pyonBuiltin SystemF.the_oper_DIV |]
               ),
@@ -536,6 +570,7 @@ initializeTIBuiltins = do
             , ([| the_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
             , ([| the_Traversable |], ["__iter__", "__build__"])
             , ([| the_Additive |], ["__add__", "__sub__", "__negate__", "zero"])
+            , ([| the_Multiplicative |], ["__mul__", "__fromint__", "one"])
             , ([| the_Vector |], ["scale", "norm"])
             ]
 

@@ -166,7 +166,14 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_Stream) |])
   , (PyonName module_structures "additiveDict",
      Right [| pyonBuiltin (SystemF.the_additiveDict) |])
+  , (PyonName module_structures "multiplicativeDict",
+     Right [| pyonBuiltin (SystemF.the_multiplicativeDict) |])
   , (PyonName module_structures "AdditiveDict_pass_conv",
+     Left $
+     closureFunctionType [PrimType UnitType,
+                          PrimType PointerType,
+                          PrimType PointerType] [])
+  , (PyonName module_structures "MultiplicativeDict_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,
                           PrimType PointerType,
@@ -189,12 +196,24 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_int) |])
   , (PyonName module_prim "negate_int",
      Right [| pyonBuiltin (SystemF.negateMember . SystemF.the_AdditiveDict_int) |])
+    -- zero_int was replaced by a literal value
   , (PyonName builtinModuleName "add_float",
      Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_float) |])
   , (PyonName builtinModuleName "sub_float",
      Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_float) |])
   , (PyonName module_prim "negate_float",
      Right [| pyonBuiltin (SystemF.negateMember . SystemF.the_AdditiveDict_float) |])
+    -- zero_float was replaced by a literal value
+  , (PyonName module_prim "mul_int",
+     Right [| pyonBuiltin (SystemF.mulMember . SystemF.the_MultiplicativeDict_int) |])
+  , (PyonName module_prim "fromint_int",
+     Right [| pyonBuiltin (SystemF.fromIntMember . SystemF.the_MultiplicativeDict_int) |])
+    -- one_int was replaced by a literal value
+  , (PyonName module_prim "mul_float",
+     Right [| pyonBuiltin (SystemF.mulMember . SystemF.the_MultiplicativeDict_float) |])
+  , (PyonName module_prim "fromint_float",
+     Right [| pyonBuiltin (SystemF.fromIntMember . SystemF.the_MultiplicativeDict_float) |])
+    -- one_float was replaced by a literal value
   , (PyonName builtinModuleName "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])
   , (PyonName builtinModuleName "load_float",
