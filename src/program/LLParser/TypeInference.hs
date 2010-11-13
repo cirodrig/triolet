@@ -261,14 +261,18 @@ enterRec m = NR $ \ctx env errs -> mdo
                  }
       init_env = env {currentScope = init_local_scope : currentScope env}
   (x, env', errs') <- runNR m ctx init_env errs
-  return (x, env' {currentScope = tail $ currentScope env'}, errs')
+  let env'' = Env { nextTypeParameter = nextTypeParameter env
+                  , currentScope = tail $ currentScope env'}
+  return (x, env'', errs')
 
 -- | Enter a nonrecursvie scope.
 enterNonRec :: NR a -> NR a
 enterNonRec m = NR $ \ctx env errs -> do
   let local_env = env {currentScope = NonRecScope emptyDict : currentScope env}
   (x, env', errs') <- runNR m ctx local_env errs
-  return (x, env' {currentScope = tail $ currentScope env'}, errs')
+  let env'' = Env { nextTypeParameter = nextTypeParameter env
+                  , currentScope = tail $ currentScope env'}
+  return (x, env'', errs')
 
 -- | Add a definition to the current scope.  If the definition conflicts
 -- with an existing definition, an error is reported.
@@ -511,11 +515,11 @@ resolveType ty =
        return (pure $ BytesT size_expr align_expr)
      AppT t args -> do
        -- Resolve t and args
-       param_t <- resolveType0 t
-       arg_ts <- mapM resolveType0 args
-       
-       -- Apply record type
-       return (pure $ applyRecordType param_t arg_ts)
+       param_t <- resolveType t
+       arg_ts <- mapM resolveType args
+
+       -- Apply resolved parameter to resolved arguments
+       return (applyRecordType <$> param_t <*> sequenceA arg_ts)
 
 resolveType0 :: Type Parsed -> NR (Type Typed)
 resolveType0 t = fmap (applyTo []) $ resolveType t
