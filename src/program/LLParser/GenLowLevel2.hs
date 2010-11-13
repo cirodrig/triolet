@@ -379,6 +379,12 @@ genCast ty e =
        | e_sz == g_sz -> do
          val <- asVal e
          success $ LL.PrimA (LL.PrimCastZ g_sgn e_sgn g_sz) [val]
+     (IntType Signed e_sz, FloatType g_sz) -> do
+       val <- asVal e
+       success $ LL.PrimA (LL.PrimCastFToZ g_sz e_sz) [val]
+     (FloatType e_sz, IntType Signed g_sz) -> do
+       val <- asVal e
+       success $ LL.PrimA (LL.PrimCastZToF g_sz e_sz) [val]
      _ -> cannot
   where
     given_type =

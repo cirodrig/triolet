@@ -184,7 +184,7 @@ genIntConst sgn sz n =
 genSmallIntConst :: Int -> CExpr
 genSmallIntConst n = genIntConst Signed nativeIntSize n
 
--- | Cast an expression to the C equivalent of the given type
+-- | Cast an expression to the C equivalent of a pointer to the given type
 genCast :: PrimType -> CExpr -> CExpr
 genCast to_type expr =
   let decl = anonymousDecl $ ptrDeclSpecs $ primTypeDeclSpecs to_type
@@ -451,6 +451,16 @@ genPrimCall prim args =
                 let add_fun = internalIdent "__sync_fetch_and_add"
                     cast_ptr = genCast (IntType sgn sz) ptr
                 in CCall (CVar add_fun internalNode) [cast_ptr, val] internalNode
+     PrimCastZToF from_size to_size ->
+       case args
+       of [val] ->
+            let decl = anonymousDecl $ primTypeDeclSpecs (FloatType to_size) 
+            in CCast decl val internalNode
+     PrimCastFToZ from_size to_size ->
+       case args
+       of [val] ->
+            let decl = anonymousDecl $ primTypeDeclSpecs (IntType Signed to_size) 
+            in CCast decl val internalNode
      PrimAddF _ -> binary CAddOp args
      PrimSubF _ -> binary CSubOp args
      PrimMulF _ -> binary CMulOp args

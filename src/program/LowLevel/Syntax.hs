@@ -63,6 +63,13 @@ data Prim =
                                 --   pointer.  A new reference is returned.
   | PrimCastFromOwned           -- ^ Cast an owned pointer to a non-owned
                                 --   pointer.  Consumes a reference.
+    -- | @PrimCastZToF from-size to-size@
+    -- Cast a signed integral value to a floating-point value
+  | PrimCastZToF !Size !Size
+    -- | @PrimCastFToZ from-size to-size@
+    -- Cast a floating-point value to a signed integral value
+  | PrimCastFToZ !Size !Size
+  | PrimCastToFloat             -- ^ Cast to a floating-point value
   | PrimAddF !Size              -- ^ Floating-point addition
   | PrimSubF !Size              -- ^ Floating-point subtraction
   | PrimMulF !Size              -- ^ Floating-point multiplication

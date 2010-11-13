@@ -143,6 +143,8 @@ pprPrim prim =
            PrimAAddZ _ _ -> "atomic_add"
            PrimCastToOwned -> "cast_ptr_own"
            PrimCastFromOwned -> "cast_own_ptr"
+           PrimCastFToZ _ _ -> "cast_float_int"
+           PrimCastZToF _ _ -> "cast_int_float"
            PrimAddF _ -> "fadd"
            PrimSubF _ -> "fsub"
            PrimMulF _ -> "fmul"
