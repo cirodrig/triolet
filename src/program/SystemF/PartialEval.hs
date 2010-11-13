@@ -16,7 +16,7 @@ import Data.Maybe
 
 import Gluon.Common.SourcePos
 import Gluon.Common.Error
-import Gluon.Core(mkSynInfo, Level(..))
+import Gluon.Core(mkSynInfo, mkInternalConE, Level(..))
 import SystemF.Builtins
 import SystemF.Syntax
 
@@ -180,15 +180,7 @@ pevalExp expression@(uncurryUnpackPolymorphicCall -> Just (op, ty_args, args)) =
   op' <- pevalExp op
 
   -- TODO: Try to statically evaluate this function
-  return $ build_call op' ty_args args'
-  where
-    inf = expInfo expression
-
-    build_call op (t:ts) args =
-      let op' = TyAppE inf op t
-      in build_call op' ts args
-
-    build_call op [] args = CallE inf op args
+  return $ pevalApp (expInfo expression) op' ty_args args'
 
 pevalExp expression =
   case expression
@@ -233,6 +225,42 @@ pevalExp expression =
          Nothing -> do
            alts' <- mapM pevalAlt alts
            return $ expression {expScrutinee = scr', expAlternatives = alts'}
+
+-- | Attempt to statically evalaute a known function.  The operands have
+--   already been evaluated.
+pevalApp inf op tys args =
+  case known_oper
+  of Just con
+       | con `isPyonBuiltin` fromIntMember . the_MultiplicativeDict_int ->
+           -- fromInt (n :: Int) = n
+           case args of [arg] -> arg
+       | con `isPyonBuiltin` fromIntMember . the_MultiplicativeDict_float ->
+           -- fromInt (n :: Float) = n as a float
+           case args
+           of [LitE {expLit = IntL n}] ->
+                LitE { expInfo = inf
+                     , expLit = FloatL (fromIntegral n)
+                     , expType = mkInternalConE (pyonBuiltin the_float)}
+              _ -> internalError "pevalApp"
+     _ ->
+       -- Can't evaluate; rebuild the call expression
+       rebuild_call op tys args
+  where
+    -- Find the operator, if it is a constructor variable.
+    -- Previous partial evaluation may have left useless 'let' expressions 
+    -- around the operator.  Look through those.
+    known_oper = find_known_oper op
+      where
+        find_known_oper (ConE {expCon = c}) = Just c
+        find_known_oper (LetE {expBody = body}) = find_known_oper body
+        find_known_oper (LetrecE {expBody = body}) = find_known_oper body
+        find_known_oper _ = Nothing
+                      
+    rebuild_call op (t:ts) args =
+      let op' = TyAppE inf op t
+      in rebuild_call op' ts args
+
+    rebuild_call op [] args = CallE inf op args
 
 -- | Attempt to eliminate a case statement.  If the scrutinee is a constructor
 -- application and it matches an alternative, replace the case statement
