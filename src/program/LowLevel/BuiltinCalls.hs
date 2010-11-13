@@ -117,6 +117,17 @@ binaryPrimOp prim op args k =
        -- Undersaturated application.  Don't replace it.
        return $ k $ CallA op args
 
+-- | Generate a negation operation by generating a subtract primitive.
+negateOp :: Lit -> Prim -> Val -> [Val] -> (Atom -> Stm) -> GenM Stm
+negateOp zero prim op args k =
+  case args
+  of [arg] ->
+       -- Saturated application
+       return $ k $ PrimA prim [LitV zero, arg]
+     args -> do
+       -- Wrong number of operands
+       return $ k $ CallA op args
+
 -- Load and store functions are inserted by the compiler, and will always have
 -- the right number of arguments.
 --
@@ -159,8 +170,16 @@ inliningRules =
          binaryPrimOp $ PrimAddZ Signed pyonIntSize)
       , (the_fun_sub_int,
          binaryPrimOp $ PrimSubZ Signed pyonIntSize)
+      , (the_fun_negate_int,
+         negateOp (IntL Signed pyonIntSize 0) (PrimSubZ Signed pyonIntSize))
       , (the_fun_add_float,
          binaryPrimOp $ PrimAddF pyonFloatSize)
       , (the_fun_sub_float,
          binaryPrimOp $ PrimSubF pyonFloatSize)
+      , (the_fun_negate_float,
+         negateOp (FloatL pyonFloatSize 0) (PrimSubF pyonFloatSize))
+      , (the_fun_mul_int,
+         binaryPrimOp $ PrimMulZ Signed pyonIntSize)
+      , (the_fun_mul_float,
+         binaryPrimOp $ PrimMulF pyonFloatSize)
       ]
