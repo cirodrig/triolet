@@ -134,11 +134,11 @@ mkRefZeroOpType ty = do
 valueIntOpType = mkValZeroOpType $ mkInternalConE $ pyonBuiltin the_int
 valueFloatOpType = mkValZeroOpType $ mkInternalConE $ pyonBuiltin the_float
 
-fromIntType ty =
+valFromIntType ty =
   let constructor_type =
         funCT $
         pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_int)) $
-        retCT (WriteRT ::: ty)
+        retCT ty
   in OwnRT ::: constructor_type
 
 mkCompareOpType :: RExp -> CBind CReturnT Rec
@@ -574,13 +574,13 @@ constructorTable =
             , (pyonBuiltin (mulMember . the_MultiplicativeDict_int),
                binaryIntOpType)
             , (pyonBuiltin (fromIntMember . the_MultiplicativeDict_int),
-               fromIntType (conCT $ pyonBuiltin the_int))
+               valFromIntType (ValRT ::: conCT (pyonBuiltin the_int)))
             , (pyonBuiltin (oneMember . the_MultiplicativeDict_int),
                valueIntOpType)
             , (pyonBuiltin (mulMember . the_MultiplicativeDict_float),
                binaryFloatOpType)
             , (pyonBuiltin (fromIntMember . the_MultiplicativeDict_float),
-               fromIntType (conCT $ pyonBuiltin the_float))
+               valFromIntType (ValRT ::: conCT (pyonBuiltin the_float)))
             , (pyonBuiltin (oneMember . the_MultiplicativeDict_float),
                valueFloatOpType)
             , (pyonBuiltin the_fun_subscript,
