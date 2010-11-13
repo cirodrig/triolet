@@ -20,7 +20,7 @@ inferred given the expression itself and the type environment.
 -}
 
 {-# LANGUAGE TypeFamilies, FlexibleInstances, ScopedTypeVariables,
-  RecursiveDo, Rank2Types, EmptyDataDecls #-}
+  RecursiveDo, Rank2Types, EmptyDataDecls, StandaloneDeriving #-}
 module LLParser.TypeInference
        (Typed, TExp(..), TypedRecord(..), typedRecordFields0,
         applyRecordType,
@@ -63,6 +63,26 @@ type instance RecordName Typed = TypedRecord
 -- | A type-annotated expression
 data TExp = TExp {expType :: [Type Typed], expExp :: !(BaseExpr Typed)}
 
+
+-- Show instances, for debugging.
+
+deriving instance Show (Type Typed)
+deriving instance Show (FieldDef Typed)
+
+instance Show TExp where
+  show _ = "TExp"
+
+-- | Record fields are not shown.  Fields tend to cause non-terminating
+--   evaluation if we try to show them during type inference, because of
+--   how they interace with name lookup.
+instance Show TypedRecord where
+  show rec = 
+    case rec
+    of TypedRecord nm 0 _ -> nm
+       TypedRecord nm n _ ->
+         nm ++ "(" ++ intercalate "," (replicate n "_") ++ ")"
+       TypeSynonym _ _ -> "(TypeSynonym _ _)"
+
 -------------------------------------------------------------------------------
 -- Type-parameterized things
 
@@ -70,14 +90,23 @@ data TExp = TExp {expType :: [Type Typed], expExp :: !(BaseExpr Typed)}
 -- implement parameterized record types.
 data Parameterized dom rng =
   Parameterized 
-  { apply :: [dom] -> rng
+  { arity :: !(Maybe Int)
+  , apply :: [dom] -> rng
   }
 
 applyTo :: [dom] -> Parameterized dom rng -> rng
-applyTo dom x = apply x dom
+applyTo dom x =
+  case arity x
+  of Just n | n /= length dom -> internalError "applyTo"
+     _ -> apply x dom
 
-fromParameterized :: Parameterized dom a -> a
-fromParameterized x = apply x []
+-- | Ignore arity and apply to some dummy arguments.
+--   Use this to view the contents of
+--   the Parameterized object for debugging.
+applyToNonces x =
+  let dummy_args =
+        [RecordT $ TypedRecord ("arg" ++ show n) 0 [] | n <- [1..]]
+  in apply x dummy_args
 
 -- | Parameters are de Bruijn indices
 newtype TypeParameter = TypeParameter Int
@@ -85,21 +114,26 @@ newtype TypeParameter = TypeParameter Int
 type TypeParametric a = Parameterized (Type Typed) a
 type ParametricType = TypeParametric (Type Typed)
 
-pVar (TypeParameter i) = Parameterized (\xs -> xs !! i)
+pVar n (TypeParameter i) = Parameterized (Just n) (\xs -> xs !! i)
 
 instance Functor (Parameterized dom) where
-  fmap f (Parameterized app) = Parameterized (\dom -> f (app dom))
+  fmap f (Parameterized n app) =
+    Parameterized n (\dom -> f (app dom))
 
 instance Applicative (Parameterized dom) where
-  pure x = Parameterized (\_ -> x)
-  f <*> x = Parameterized $ \env ->
+  pure x = Parameterized Nothing (\_ -> x)
+  f <*> x = Parameterized n $ \env ->
     let f' = apply f env
         x' = apply x env
     in f' x'
-
-instance Monoid a => Monoid (Parameterized dom a) where
-  mempty = pure mempty
-  x `mappend` y = Parameterized $ \env -> apply x env `mappend` apply y env 
+    where
+      n = case arity f
+          of Nothing -> arity x
+             Just n1 ->
+               case arity x
+               of Nothing -> Just n1
+                  Just n2 | n1 == n2 -> Just n2
+                          | otherwise -> internalError "Parameterized.(<*>)"
 
 -------------------------------------------------------------------------------
 
@@ -337,6 +371,13 @@ defineTypeParam name = NR $ \ctx env errs ->
         defineEntity name (TypeParameterEntry (TypeParameter index))
   in runNR define_type_param ctx env' errs
 
+-- | Get the number of type parameters that are free at the current
+--   point.
+getCurrentTypeArity :: NR Int
+getCurrentTypeArity = NR $ \ctx env errs ->
+  let arity = nextTypeParameter env
+  in return (arity, env, errs)
+
 -- | Create a new variable.  The definition is not added to the environment.
 --
 -- A module name may optionally be specified; if not given, it defaults to the
@@ -486,7 +527,8 @@ convertToIntConstant expr =
 resolveTypeName :: RecordName Parsed -> NR ParametricType
 resolveTypeName nm = do 
   (entry, is_defined) <- lookupEntity nm
-  throwErrorMaybe $                         
+  type_arity <- getCurrentTypeArity
+  throwErrorMaybe $
     if is_defined
     then case entry
          of VarEntry {} -> Just $ "Not a type: '" ++ nm ++ "'"
@@ -497,7 +539,7 @@ resolveTypeName nm = do
   return $ case entry
            of RecordEntry rec -> pure $ RecordT rec
               TypedefEntry type_id val -> pure $ RecordT (TypeSynonym type_id val)
-              TypeParameterEntry tp -> pVar tp
+              TypeParameterEntry tp -> pVar type_arity tp
 
 resolveTypeName0 :: RecordName Parsed -> NR (Type Typed)
 resolveTypeName0 nm = fmap (applyTo []) $ resolveTypeName nm
@@ -511,7 +553,7 @@ resolveType ty =
        size_expr <- resolveExpr size
        align_expr <- resolveExpr align
        expectType nativeWordType "Size of type must be a native word" (expType size_expr)
-       expectType nativeWordType "Size of type must be a native word" (expType align_expr)
+       expectType nativeWordType "Alignment of type must be a native word" (expType align_expr)
        return (pure $ BytesT size_expr align_expr)
      AppT t args -> do
        -- Resolve t and args
