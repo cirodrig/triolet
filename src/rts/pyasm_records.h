@@ -47,6 +47,14 @@ record AdditiveDict(a) {
   a zero;			// The zero value
 };
 
+// Multiplicative dictionary
+record MultiplicativeDict(a) {
+  AdditiveDict(a) additive;     // Additive dictionary
+  owned mul;			// Multiply two values
+  owned fromInt;		// Create from an integer
+  a one;			// The one value
+};
+
 /* Arrays (called "lists")
  *
  * A list consists of a size and a pointer to an array of list elements.

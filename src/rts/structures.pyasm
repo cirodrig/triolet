@@ -43,7 +43,6 @@ function AdditiveDict_pass_conv (unit _, pointer repr, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
   copy = repr @! PassConv.copy;
-  finalize = repr @! PassConv.finalize;
   typedef dictionary = AdditiveDict(bytes(size, align));
 
   ret @! PassConv.size = sizeof dictionary;
@@ -57,16 +56,39 @@ function AdditiveDict_copy
   (word size, word align, owned copy_zero, pointer src, pointer dst) -> () {
   typedef dictionary = AdditiveDict(bytes(size, align));
 
-  dst @! dictionary.repr.size = src @! dictionary.repr.size;
-  dst @! dictionary.repr.align = src @! dictionary.repr.align;
-  dst @! dictionary.repr.copy = src @! dictionary.repr.copy;
-  dst @! dictionary.repr.finalize = src @! dictionary.repr.finalize;
+  () = () call copy_PassConv(nil, src @ dictionary.repr, dst @ dictionary.repr);
   dst @! dictionary.add = src @! dictionary.add;
   dst @! dictionary.subtract = src @! dictionary.subtract;
   dst @! dictionary.negate = src @! dictionary.negate;
   () call (copy_zero) (src @ dictionary.zero, dst @ dictionary.zero);  
 };
 
+function MultiplicativeDict_pass_conv
+  (unit _, pointer additive_dict, pointer ret) -> () {
+  repr = additive_dict @ AdditiveDict(unit).repr;
+  size = repr @! PassConv.size;
+  align = repr @! PassConv.align;
+  copy = repr @! PassConv.copy;
+  typedef dictionary = MultiplicativeDict(bytes(size, align));
+
+  ret @! PassConv.size = sizeof dictionary;
+  ret @! PassConv.align = alignof dictionary;
+  ret @! PassConv.copy = owned call MultiplicativeDict_copy (size, align, copy);
+  ret @! PassConv.finalize = dummy_finalizer;
+  ();
+};
+
+function MultiplicativeDict_copy
+  (word size, word align, owned copy_one, pointer src, pointer dst) -> () {
+  typedef dictionary = MultiplicativeDict(bytes(size, align));
+
+  () = () call AdditiveDict_copy(size, align, copy_one,
+                                 src @ dictionary.additive,
+                                 dst @ dictionary.additive);
+  dst @! dictionary.mul = src @! dictionary.mul;
+  dst @! dictionary.fromInt = src @! dictionary.fromInt;
+  () call (copy_one) (src @ dictionary.one, dst @ dictionary.one);
+};
 
 // Construct an Additive dictionary
 function additiveDict
@@ -76,21 +98,25 @@ function additiveDict
   align = repr @! PassConv.align;
   typedef dictionary = AdditiveDict(bytes(size, align));
 
-  ret @! dictionary.repr.size = repr @! PassConv.size;
-  ret @! dictionary.repr.align = repr @! PassConv.align;
-  ret @! dictionary.repr.copy = repr @! PassConv.copy;
-  ret @! dictionary.repr.finalize = repr @! PassConv.finalize;
+  () = () call copy_PassConv (nil, repr, ret @ dictionary.repr);
   ret @! dictionary.add = add;
   ret @! dictionary.subtract = sub;
   ret @! dictionary.negate = negate;
   () call (repr @! PassConv.copy) (zero, ret @ dictionary.zero);
 };
 
-#if 0
-function finalize_AdditiveDict (pointer p) -> () {
-  DECREF(p @! AdditiveDict.zero as pointer)
-  DECREF(p @! AdditiveDict.add as pointer)
-  DECREF(p @! AdditiveDict.subtract as pointer)
-  ();
+function multiplicativeDict
+  (unit _, pointer additive,
+   owned mul, owned from_int, pointer one, pointer ret) -> () {
+  repr = additive @ AdditiveDict(unit).repr;
+  size = repr @! PassConv.size;
+  align = repr @! PassConv.align;
+  copy = repr @! PassConv.copy;
+  typedef dictionary = MultiplicativeDict(bytes(size, align));
+
+  () = () call AdditiveDict_copy (size, align, copy,
+                                  additive, ret @ dictionary.additive);
+  ret @! dictionary.mul = mul;
+  ret @! dictionary.fromInt = from_int;
+  () call copy (one, ret @ dictionary.one);
 };
-#endif

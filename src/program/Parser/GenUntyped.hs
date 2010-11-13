@@ -195,12 +195,16 @@ doExpr expr =
   case expr
   of Variable pos v -> doVar pos v
      Literal pos l ->
-       let l' = case l
-                of IntLit n -> SF.IntL n
-                   FloatLit f -> SF.FloatL f
-                   BoolLit b -> SF.BoolL b
-                   NoneLit -> SF.NoneL
-       in return $ U.LiteralE (U.Ann pos) l'
+       let make_literal lit = U.LiteralE (U.Ann pos) lit
+           l' = case l
+                of IntLit n ->
+                     -- Generate a call to 'fromInt' to cast to any valid value
+                     let oper = tiBuiltin the___fromint__
+                     in callVariable pos oper [make_literal (SF.IntL n)]
+                   FloatLit f -> make_literal $ SF.FloatL f
+                   BoolLit b -> make_literal $ SF.BoolL b
+                   NoneLit -> make_literal $ SF.NoneL
+       in return l'
      Tuple pos es -> do
        es' <- mapM doExpr es
        return $ U.TupleE (U.Ann pos) es'
