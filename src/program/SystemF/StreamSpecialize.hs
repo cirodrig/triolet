@@ -103,6 +103,7 @@ globalConTable =
       , unchanged 1 the_passConv_list
       , unchanged 0 the_passConv_Any
       , unchanged 1 the_passConv_owned
+      , unchanged 0 the_makeComplex
       , unchanged 0 (\_ -> getPyonTuplePassConv' 0)
       , unchanged 1 (\_ -> getPyonTuplePassConv' 1)
       , unchanged 2 (\_ -> getPyonTuplePassConv' 2)
@@ -162,6 +163,11 @@ globalConTable =
       , unchanged 1 the_oper_DO
       , unchanged 1 the_fun_undefined
       , unchanged 0 the_fun_iota
+      , unchanged 1 the_additiveDict_complex
+      , unchanged 1 the_add_complex
+      , unchanged 1 the_sub_complex
+      , unchanged 1 the_negate_complex
+      , unchanged 1 the_zero_complex
       , (the_fun_map,
          Specialize
          (Don'tCare $ Don'tCare $ End $ pyonBuiltin the_fun_map_Stream)

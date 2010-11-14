@@ -43,6 +43,8 @@ data NoneType : Pure where None : NoneType;
 constant Any : Pure;
 data int : Pure;
 data float : Pure;
+data complex : Pure -> Pure where
+  makeComplex : float -> float -> complex float;
 data bool : Pure where True : bool | False : bool;
 
 -- While 'list' is used in System F, 'makeList' is only used after generating
@@ -80,6 +82,7 @@ constant passConv_int : PassConv int;
 constant passConv_float : PassConv float;
 constant passConv_bool : PassConv bool;
 constant passConv_NoneType : PassConv NoneType;
+constant passConv_complex : (t : Pure) -> PassConv t -> PassConv (complex t);
 constant passConv_iter : (t : Pure) -> PassConv t -> PassConv (Stream t);
 constant passConv_list : (t : Pure) -> PassConv t -> PassConv (list t);
 constant passConv_Any : PassConv Any;
@@ -219,6 +222,24 @@ constant Additive_ADD_float : binary float;
 constant Additive_SUB_float : binary float;
 constant Additive_NEGATE_float : unary float;
 constant Additive_ZERO_float : float;
+
+constant additiveDict_complex
+  : (a : Pure)
+ -> AdditiveDict a
+ -> AdditiveDict (complex a);
+
+constant add_complex : (a : Pure)
+                    -> AdditiveDict a
+                    -> binary (complex a);
+constant sub_complex : (a : Pure)
+                    -> AdditiveDict a
+                    -> binary (complex a);
+constant negate_complex : (a : Pure)
+                       -> AdditiveDict a
+                       -> unary (complex a);
+constant zero_complex : (a : Pure)
+                     -> AdditiveDict a
+                     -> complex a;
 
 constant Multiplicative_MUL_int : binary int;
 constant Multiplicative_FROMINT_int : int -> int;

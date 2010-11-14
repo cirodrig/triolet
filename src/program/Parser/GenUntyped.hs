@@ -202,6 +202,12 @@ doExpr expr =
                      let oper = tiBuiltin the___fromint__
                      in callVariable pos oper [make_literal (SF.IntL n)]
                    FloatLit f -> make_literal $ SF.FloatL f
+                   ImaginaryLit d ->
+                     -- Generate a call to 'makeComplex'
+                     let oper = tiBuiltin the_makeComplex
+                         real = make_literal (SF.FloatL 0)
+                         imag = make_literal (SF.FloatL d)
+                     in callVariable pos oper [real, imag]
                    BoolLit b -> make_literal $ SF.BoolL b
                    NoneLit -> make_literal $ SF.NoneL
        in return l'

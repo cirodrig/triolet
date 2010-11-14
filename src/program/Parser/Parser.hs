@@ -459,6 +459,8 @@ expression expr =
          pure (Literal source_pos (IntLit n))
        Py.Float {Py.float_value = d} ->
          pure (Literal source_pos (FloatLit d))
+       Py.Imaginary {Py.imaginary_value = d} ->
+         pure (Literal source_pos (ImaginaryLit d))
        Py.Bool {Py.bool_value = b} ->
          pure (Literal source_pos (BoolLit b))
        Py.None {} -> 

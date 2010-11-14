@@ -62,6 +62,7 @@ pyonBuiltinTypeConstructors =
   , "bool"
   , "int"
   , "float"
+  , "complex"
   , "list"
   , "NoneType"
   , "Any"
@@ -75,7 +76,8 @@ pyonBuiltinTypeConstructors =
   ]
 
 pyonBuiltinDataConstructors =
-  [ "None"
+  [ "makeComplex"
+  , "None"
   , "True"
   , "False"
   , "makeList"
@@ -93,6 +95,7 @@ pyonBuiltinPassConvConstructors =
   , "passConv_float"
   , "passConv_bool"
   , "passConv_NoneType"
+  , "passConv_complex"
   , "passConv_iter"
   , "passConv_list"
   , "passConv_Any"
@@ -142,6 +145,11 @@ pyonBuiltinFunctions =
   , "fun_zip_SN"
   , "fun_iota"
   , "fun_undefined"
+  , "additiveDict_complex"
+  , "add_complex"
+  , "sub_complex"
+  , "negate_complex"
+  , "zero_complex"
 
     -- Functions inserted by effect inference
   , "fun_return"

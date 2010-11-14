@@ -296,6 +296,7 @@ dataTypeTable =
       , (SF.pyonBuiltin SF.the_TraversableDict, Referenced, [], [Invariant])
       , (SF.pyonBuiltin SF.the_int, Value, [], [])
       , (SF.pyonBuiltin SF.the_float, Value, [], [])
+      , (SF.pyonBuiltin SF.the_complex, Referenced, [], [Invariant])        
       , (SF.pyonBuiltin SF.the_bool, Value, [], [])
       , (SF.pyonBuiltin SF.the_NoneType, Value, [], [])
       , (SF.pyonBuiltin SF.the_Any, Value, [], [])

@@ -55,6 +55,7 @@ createParserGlobals n = zipWith predefined_var [n..] predefinedBindings
 data Literal =
     IntLit !Integer
   | FloatLit !Double
+  | ImaginaryLit !Double
   | BoolLit !Bool
   | NoneLit
 

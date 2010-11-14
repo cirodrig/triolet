@@ -230,7 +230,8 @@ mkAdditiveClass = mdo
                   , clsConstraint = [passable (ConTy a)]
                   , clsMethods = [add, sub, negate, zero]
                   , clsName = "Additive"
-                  , clsInstances = [int_instance, float_instance]
+                  , clsInstances = [int_instance, float_instance,
+                                    complex_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_AdditiveDict
                   , clsDictCon = pyonBuiltin SystemF.the_additiveDict
                   }
@@ -251,6 +252,19 @@ mkAdditiveClass = mdo
         Nothing
         (fromAdditiveDict SystemF.the_AdditiveDict_float)
   
+  b <- newTyVar Star Nothing
+  let complex_instance =
+        Instance { insQVars = [b]
+                 , insConstraint = [ConTy b `IsInst` cls]
+                 , insClass = cls
+                 , insType = ConTy (tiBuiltin the_con_complex) @@ ConTy b
+                 , insCon = Just $ pyonBuiltin SystemF.the_additiveDict_complex
+                 , insMethods =
+                   [ InstanceMethod (pyonBuiltin SystemF.the_add_complex)
+                   , InstanceMethod (pyonBuiltin SystemF.the_sub_complex)
+                   , InstanceMethod (pyonBuiltin SystemF.the_negate_complex)
+                   , InstanceMethod (pyonBuiltin SystemF.the_zero_complex)]
+                 }
   return cls
   where
     fromAdditiveDict field_name =
@@ -327,6 +341,7 @@ mkPassableClass = mdo
                   , clsName = "Passable"
                   , clsInstances = [int_instance, float_instance,
                                     bool_instance, none_instance,
+                                    complex_instance,
                                     any_instance,
                                     list_instance, iter_instance,
                                     tuple2_instance]
@@ -368,6 +383,15 @@ mkPassableClass = mdo
         , insClass = cls
         , insType = ConTy (tiBuiltin the_con_iter) @@ ConTy b
         , insCon = Just $ pyonBuiltin SystemF.the_passConv_iter
+        , insMethods = []
+        }
+  let complex_instance =
+        Instance
+        { insQVars = [b]
+        , insConstraint = [passable $ ConTy b]
+        , insClass = cls
+        , insType = ConTy (tiBuiltin the_con_complex) @@ ConTy b
+        , insCon = Just $ pyonBuiltin SystemF.the_passConv_complex
         , insMethods = []
         }
   
@@ -458,6 +482,12 @@ mkIterBindType =
                 ]
    (ConTy (tiBuiltin the_con_iter) @@ ConTy b))
 
+mkMakeComplexType =
+  return $ monomorphic $
+  functionType [ ConTy (tiBuiltin the_con_float)
+               , ConTy (tiBuiltin the_con_float)]
+  (ConTy (tiBuiltin the_con_complex) @@ ConTy (tiBuiltin the_con_float))
+
 mkBinaryOpType =
   forallType [Star] $ \[a] ->
   ([passable (ConTy a)], functionType [ConTy a, ConTy a] (ConTy a))
@@ -496,6 +526,7 @@ initializeTIBuiltins = do
             -- 3. system F constructor
             [ ("int", Star, [| pyonBuiltin SystemF.the_int |])
             , ("float", Star, [| pyonBuiltin SystemF.the_float |])
+            , ("complex", Star :-> Star, [| pyonBuiltin SystemF.the_complex |])
             , ("bool", Star, [| pyonBuiltin SystemF.the_bool |])
             , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |])
             , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |])
@@ -542,6 +573,9 @@ initializeTIBuiltins = do
               ),
               ("iterBind", [| mkIterBindType |]
               , [| pyonBuiltin SystemF.the_oper_CAT_MAP |]
+              ),
+              ("makeComplex", [| mkMakeComplexType |]
+              , [| pyonBuiltin SystemF.the_makeComplex |]
               ),
               ("__div__", [| mkBinaryOpType |]
               , [| pyonBuiltin SystemF.the_oper_DIV |]

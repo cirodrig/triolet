@@ -207,6 +207,19 @@ additiveDictType = mkConType $ do
         retCT (WriteRT ::: appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [varCT a])
   return (OwnRT ::: constructor_type)
 
+-- | Additive dictionary constructor for type 'complex'
+additiveDictComplexType = mkConType $ do
+  a <- newAnonymousVariable TypeLevel
+  dict_addr <- newAnonymousVariable ObjectLevel
+  let additive_dict a =
+        appExpCT (mkInternalConE $ pyonBuiltin the_AdditiveDict) [a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ReadPT (dict_addr) ::: additive_dict (varCT a)) $
+        retCT (WriteRT ::: additive_dict (appExpCT (mkInternalConE $ pyonBuiltin the_complex) [varCT a]))
+  return (OwnRT ::: constructor_type)
+
 multiplicativeDictType = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   additive_addr <- newAnonymousVariable ObjectLevel
@@ -462,6 +475,16 @@ passConvListType = mkConType $ do
         retCT (WriteRT ::: result_type)
   return (OwnRT ::: constructor_type)
 
+makeComplexType = mkConType $ do
+  let result_type =
+        appCT (conCT $ pyonBuiltin the_complex) [conCT $ pyonBuiltin the_float]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_float)) $
+        pureArrCT (ValPT Nothing ::: conCT (pyonBuiltin the_float)) $
+        retCT (WriteRT ::: result_type)
+  return (OwnRT ::: constructor_type)
+
 tuplePassConvType 2 = mkConType $ do
   a <- newAnonymousVariable TypeLevel
   pc_addr_a <- newAnonymousVariable ObjectLevel
@@ -515,6 +538,8 @@ constructorTable =
                passConvListType)
             , (getPyonTuplePassConv' 2,
                tuplePassConvType 2)
+            , (pyonBuiltin the_makeComplex,
+               makeComplexType)
             , (pyonBuiltin SystemF.Builtins.the_fun_store_int,
                storeIntType)
             , (pyonBuiltin SystemF.Builtins.the_fun_load_int,
@@ -601,6 +626,8 @@ constructorTable =
                traversableDictType)
             , (getPyonTupleCon' 2,
                tupleConType 2)
+            , (pyonBuiltin the_additiveDict_complex,
+               additiveDictComplexType)
             , (pyonBuiltin SystemF.Builtins.the_fun_copy,
                copyType)
             , (pyonBuiltin SystemF.Builtins.the_oper_CAT_MAP,
