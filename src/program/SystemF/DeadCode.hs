@@ -270,10 +270,17 @@ edcLetE info lhs rhs body =
       -- pattern-bound variables using knowledge of what variables are
       -- referenced in the expression body.
       (lhs', body') <- edcMaskPat lhs $ edcExp body
-      rhs' <- edcExp rhs
 
       -- Decompose/eliminate bindings.
-      return $ reconstruct_let body' $ eliminate_bindings lhs' rhs'
+      let bindings = eliminate_bindings lhs' rhs
+
+      -- Recurse in RHS.
+      bindings' <- forM bindings $ \(sub_lhs, sub_rhs) -> do
+        sub_rhs' <- edcExp sub_rhs
+        return (sub_lhs, sub_rhs')
+
+      -- Reconstruct the let expression
+      return $ reconstruct_let body' bindings'
 
     -- Given a list of bindings, create some let expressions
     reconstruct_let body bindings = foldr make_let body bindings
