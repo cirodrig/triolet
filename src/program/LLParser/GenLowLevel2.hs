@@ -204,7 +204,7 @@ genField tenv (Field base_type fnames cast_type) =
                             get_field_offset offset next_rec fnames
                           _ -> internalError "genField"
              Nothing ->
-               internalError "genField"
+               internalError $ "genField: No field named '" ++ fname ++ "'"
 
     return_field_offset offset field =
       let ty = case cast_type
