@@ -489,6 +489,11 @@ expectReferenceType message actual = throwErrorMaybe $
      [PrimT OwnedType]   -> Nothing
      _ -> Just message
 
+expectRecordType message ty = throwErrorMaybe $
+  case ty
+  of RecordT (TypedRecord {}) -> Nothing
+     _ -> Just message
+
 convertToStaticRecord :: TypedRecord -> StaticRecord
 convertToStaticRecord rec =
   let field_types = [convertToStaticFieldType t
@@ -698,10 +703,11 @@ resolveExpr expr =
        return1 (PrimT UnitType) NilLitE
      NullLitE ->
        return1 (PrimT PointerType) NullLitE
-     RecordE nm fields -> do
-       record <- lookupRecord nm
+     RecordE ty fields -> do
+       ty' <- resolveType0 ty
+       expectRecordType "Record expression must have record type" ty'
        fields' <- mapM resolveExpr fields
-       return1 (RecordT record) (RecordE record fields')
+       return1 ty' (RecordE ty' fields')
      FieldE base fld -> do
        base' <- resolveExpr base
        expectReferenceType "Base address must have 'pointer' or 'owned' type" (expType base')
@@ -905,8 +911,12 @@ resolveLValue lvalue ty =
        dest' <- resolveExpr dest
        field' <- resolveField0 field
        return (pass, StoreFieldL dest' field')
-     UnpackL recname fields -> do
-       record <- lookupRecord recname
+     UnpackL rectype fields -> do
+       rectype' <- resolveType0 rectype
+       expectRecordType "Record LValue must have record type" rectype'
+       let record = case rectype'
+                    of RecordT record -> record
+                       _ -> internalError "resolveLValue"
        
        -- Unpack individual fields.  This is lazy in the record type.
        let field_types = [t | FieldDef t _ <- typedRecordFields0 record]
@@ -918,7 +928,7 @@ resolveLValue lvalue ty =
            unpack_fields [] _ = return (pass, [])
        (binders, fields') <- unpack_fields fields field_types
        
-       return (binders, UnpackL record fields')
+       return (binders, UnpackL rectype' fields')
      WildL -> return (pass, WildL)
   where
     pass = return ()

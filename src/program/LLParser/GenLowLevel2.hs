@@ -140,8 +140,10 @@ genDataExpr expr =
        return $ LL.LitV LL.UnitL
      NullLitE ->
        return $ LL.LitV LL.NullL
-     RecordE rec fields -> do
-       let record = convertToStaticRecord rec
+     RecordE rec_type fields -> do
+       let record = case rec_type 
+                    of RecordT rec -> convertToStaticRecord rec
+                       _ -> internalError "genExpr: Expecting record type"
        fields' <- mapM genDataExpr fields
        return $ LL.RecV record fields'
      SizeofE ty ->
@@ -235,7 +237,9 @@ genExpr tenv expr =
      NullLitE {} -> data_expr
      RecordE record fs -> do
        fs' <- mapM (asVal <=< subexpr) fs
-       let record_type = convertToStaticRecord record
+       let record_type = case record
+                         of RecordT rec -> convertToStaticRecord rec
+                            _ -> internalError "genExpr: Expecting record type"
            atom = LL.PackA record_type fs'
        return $ GenAtom [LL.RecordType record_type] atom
      FieldE base fld -> do
@@ -631,7 +635,9 @@ genLValue tenv lvalue ty =
        -- Create a temporary variable to hold the stored value
        tmpvar <- lift $ LL.newAnonymousVar ty
        
-       let record = convertToStaticRecord rec
+       let record = case rec
+                    of RecordT r -> convertToStaticRecord r
+                       _ -> internalError "genLValue"
            fields = LowLevel.Record.recordFields record
            field_type fld =
              case fieldType fld

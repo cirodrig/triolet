@@ -238,11 +238,25 @@ basicExpr =
       fmap SizeofE parseType
 
 -- Parse an expression that began with an identifier 
+basicExprWithIdentifier :: String -> P (Expr Parsed)
 basicExprWithIdentifier id =
-  recordE <|> try (basicExprWithType (RecordT id)) <|> varE
+  try basicExprWithRecordType <|> varE
   where
-    recordE = try $ do
-      RecordE id `liftM` braces (expr `sepBy` match CommaTok)
+    -- Parse an expression that begins with a record type
+    -- Either a record construction, or some expression that has that
+    -- return type 
+    basicExprWithRecordType = do
+      args <- optionMaybe (parenList parseType)
+      let base_record_type = RecordT id
+          record_type =
+            case args
+            of Nothing -> base_record_type
+               Just ts -> AppT base_record_type ts
+      recordE record_type <|> basicExprWithType record_type
+      
+    -- A record construction
+    recordE record_type =
+      RecordE record_type `liftM` braces (expr `sepBy` match CommaTok)
     
     varE = return $ VarE id
 

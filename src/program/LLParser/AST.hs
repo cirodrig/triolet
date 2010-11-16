@@ -146,7 +146,7 @@ data BaseExpr a =
     -- | The unit value
   | NilLitE
     -- | Construct a record value
-  | RecordE (RecordName a) [Expr a]
+  | RecordE (Type a) [Expr a]
     -- | Get a reference to an object field from a pointer expression
   | FieldE (Expr a) (Field a)
     -- | Load a field
@@ -180,7 +180,7 @@ data LValue a =
     -- | Store into a field of an object
   | StoreFieldL (Expr a) (Field a)
     -- | Unpack a record into its fields
-  | UnpackL (RecordName a) [LValue a]
+  | UnpackL (Type a) [LValue a]
     -- | Wildcard; match and ignore a value
   | WildL
 
