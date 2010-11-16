@@ -167,6 +167,9 @@ papHeader = [ RecordField objectHeaderRecord
 papHeaderRecord :: StaticRecord
 papHeaderRecord = staticRecord papHeader
 
+-- | A complex value.  It consists of a real and an imaginary part.
+complexRecord :: StaticFieldType -> StaticRecord
+complexRecord ftype = staticRecord [ftype, ftype]
 
 -- | A stream object.
 --

@@ -28,6 +28,7 @@ exportParamDeclSpecs export_type =
             internalError "exportParamDeclSpecs"
      PyonIntET -> [nameDeclSpecs "PyonInt"]
      PyonFloatET -> [nameDeclSpecs "PyonFloat"]
+     PyonComplexFloatET -> [nameDeclSpecs "PyonComplexFloat"]
      PyonBoolET -> [nameDeclSpecs "PyonBool"]
 
 -- | Get the declaration components to use to declare a function return type.
@@ -45,6 +46,7 @@ exportReturnDeclSpecs export_type =
             internalError "exportReturnDeclSpecs"
      PyonIntET -> ([], nameDeclSpecs "PyonInt")
      PyonFloatET -> ([], nameDeclSpecs "PyonFloat")
+     PyonComplexFloatET -> ([], nameDeclSpecs "PyonComplexFloat")
      PyonBoolET -> ([], nameDeclSpecs "PyonBool")
 
 -- | Get the declaration components to use to declare an exported function

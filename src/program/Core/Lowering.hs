@@ -271,6 +271,12 @@ lowerToFieldType ty =
   of Just (con, args)
        | con `isPyonBuiltin` the_int -> return int_field
        | con `isPyonBuiltin` the_float -> return float_field
+       | con `isPyonBuiltin` the_complex ->
+           case args
+           of [arg] -> do
+                (arg_code, arg_field_type) <- lowerToFieldType arg
+                (code, field_type) <- suspendedComplexRecord' arg_field_type
+                return (arg_code >> code, RecordField field_type)
        | otherwise -> internalError "lowerToFieldType: No information for type"
      Nothing ->
        case ty
@@ -346,6 +352,11 @@ getPassConv ty = do
                return_value (builtinVar the_bivar_int_pass_conv)
            | con `isPyonBuiltin` the_float ->
                return_value (builtinVar the_bivar_float_pass_conv)
+           | con `isPyonBuiltin` the_complex ->
+               case args
+               of [arg] ->
+                    build_unary_passconv
+                    (llBuiltin the_fun_complex_pass_conv) arg
            | con `isPyonBuiltin` the_bool ->
                return_value (builtinVar the_bivar_bool_pass_conv)
            | con `isPyonBuiltin` the_PassConv ->
@@ -956,18 +967,21 @@ marshalCParameter :: ExportDataType
 marshalCParameter ty =
   case ty
   of ListET _ -> pass_by_reference
-     PyonIntET -> marshal_prim_type pyonIntType
-     PyonFloatET -> marshal_prim_type pyonFloatType
-     PyonBoolET -> marshal_prim_type pyonBoolType
+     PyonIntET -> marshal_value (LL.PrimType pyonIntType)
+     PyonFloatET -> marshal_value (LL.PrimType pyonFloatType)
+     PyonComplexFloatET -> marshal_value (LL.RecordType complex_float_type)
+     PyonBoolET -> marshal_value (LL.PrimType pyonBoolType)
   where
+    complex_float_type = complexRecord (PrimField pyonFloatType)
+
     -- Pass an object reference
     pass_by_reference = do
       v <- LL.newAnonymousVar (LL.PrimType PointerType)
       return ([v], return (), LL.VarV v)
 
     -- Pass a primitive type by value
-    marshal_prim_type t = do
-      v <- LL.newAnonymousVar (LL.PrimType t)
+    marshal_value t = do
+      v <- LL.newAnonymousVar t
       return ([v], return (), LL.VarV v)
 
 -- | Marshal a return value to C code.
@@ -984,10 +998,13 @@ marshalCReturn :: ExportDataType
 marshalCReturn ty =
   case ty
   of ListET _ -> return_new_reference (LL.RecordType listRecord)
-     PyonIntET -> marshal_prim_type pyonIntType
-     PyonFloatET -> marshal_prim_type pyonFloatType
-     PyonBoolET -> marshal_prim_type pyonBoolType     
+     PyonIntET -> marshal_value (LL.PrimType pyonIntType)
+     PyonFloatET -> marshal_value (LL.PrimType pyonFloatType)
+     PyonComplexFloatET -> marshal_value (LL.RecordType complex_float_type)
+     PyonBoolET -> marshal_value (LL.PrimType pyonBoolType)
   where
+    complex_float_type = complexRecord (PrimField pyonFloatType)
+
     -- Allocate and return a new object.  The allocated object is passed
     -- as a parameter to the function.
     return_new_reference t = do
@@ -1003,8 +1020,8 @@ marshalCReturn ty =
       return ([], setup, [LL.VarV v], [v])
 
     -- Just return a primitive value
-    marshal_prim_type pt = do
-      v <- LL.newAnonymousVar (LL.PrimType pt)
+    marshal_value pt = do
+      v <- LL.newAnonymousVar pt
       
       let setup mk_real_call = bindAtom1 v =<< mk_real_call
           

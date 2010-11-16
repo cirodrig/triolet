@@ -283,7 +283,7 @@ primAddPAs ptr off ptr' =
   bindAtom1 ptr' $ PrimA PrimAddP [ptr, off]
 
 primLoad ty ptr dst = primLoadOff ty ptr (nativeIntV 0)
-primLoadOff ty ptr off dst = 
+primLoadOff ty ptr off dst =
   bindAtom1 dst $ PrimA (PrimLoad ty) [ptr, off]
 
 primStore ty ptr val = primStoreOff ty ptr (nativeIntV 0) val
@@ -475,6 +475,11 @@ addRecordPadding off alignment = do
 
 fromPrimType :: DynamicFieldType -> ValueType
 fromPrimType (PrimField ty) = PrimType ty
+fromPrimType (RecordField rec) =
+  RecordType $ staticRecord $ map (as_value_type . fromPrimType . fieldType) $ recordFields rec
+  where
+    as_value_type (PrimType ty) = PrimField ty
+    as_value_type (RecordType rec) = RecordField rec
 fromPrimType _ = internalError "Expecting a primitive field type"
 
 -- | Load one field of a record into a variable
@@ -703,6 +708,10 @@ suspendedMultiplicativeDictRecord ftype = do
                                  , PrimField OwnedType
                                  , ftype]
   return (additive_code >> multiplicative_code, multiplicative_record)
+
+complexRecord' eltype = createDynamicRecord [eltype, eltype]
+
+suspendedComplexRecord' eltype = suspendedCreateDynamicRecord [eltype, eltype]
 
 -------------------------------------------------------------------------------
 -- Values

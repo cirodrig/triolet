@@ -14,6 +14,7 @@ import SystemF.Builtins(pyonBuiltin)
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record
+import LowLevel.Records
 
 instance Lift Signedness where
   lift x = let n = fromEnum x in [| toEnum n |]
@@ -142,6 +143,8 @@ builtinFunctions =
     -- Functions translated from Core
   , (PyonName module_memory_py "copy",
      Right [| pyonBuiltin (SystemF.the_fun_copy) |])
+  , (PyonName module_structures "makeComplex",
+     Right [| pyonBuiltin (SystemF.the_makeComplex) |])
   , (PyonName module_list "list_build",
      Right [| pyonBuiltin (SystemF.buildMember . SystemF.the_TraversableDict_list) |])
   , (PyonName module_list "list_traverse",
@@ -168,6 +171,13 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_additiveDict) |])
   , (PyonName module_structures "multiplicativeDict",
      Right [| pyonBuiltin (SystemF.the_multiplicativeDict) |])
+  , (PyonName module_structures "additiveDict_complex",
+     Right [| pyonBuiltin (SystemF.the_additiveDict_complex) |])
+  , (PyonName module_structures "complex_pass_conv",
+     Left $
+     closureFunctionType [PrimType UnitType,
+                          PrimType PointerType,
+                          PrimType PointerType] [])
   , (PyonName module_structures "AdditiveDict_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,
@@ -218,6 +228,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])
   , (PyonName builtinModuleName "load_float",
      Right [| pyonBuiltin (SystemF.the_fun_load_float) |])
+  , (PyonName module_prim "load_complexFloat",
+     Right [| pyonBuiltin SystemF.the_fun_load_complexFloat |])
   , (PyonName builtinModuleName "load_bool",
      Right [| pyonBuiltin (SystemF.the_fun_load_bool) |])
   , (PyonName builtinModuleName "load_NoneType",
@@ -226,6 +238,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_fun_store_int) |])
   , (PyonName builtinModuleName "store_float",
      Right [| pyonBuiltin (SystemF.the_fun_store_float) |])
+  , (PyonName module_prim "store_complexFloat",
+     Right [| pyonBuiltin SystemF.the_fun_store_complexFloat |])
   , (PyonName builtinModuleName "store_bool",
      Right [| pyonBuiltin (SystemF.the_fun_store_bool) |])
   , (PyonName builtinModuleName "store_NoneType",

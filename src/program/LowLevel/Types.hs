@@ -27,7 +27,7 @@ data PrimType =
   | PointerType                 -- ^ A pointer
   | OwnedType                   -- ^ An owned reference requiring reference
                                 --   count updates when copied or discarded
-    deriving (Eq, Show)
+    deriving (Eq, Ord, Show)
 
 -- | /FIXME/: This is architecture-dependent.
 pointerSize :: Size
@@ -75,7 +75,7 @@ pyonFloatSize = S32
 
 pyonIntType, pyonFloatType, pyonBoolType, pyonNoneType :: PrimType
 pyonIntType = IntType Signed pyonIntSize
-pyonFloatType = FloatType pyonIntSize
+pyonFloatType = FloatType pyonFloatSize
 pyonBoolType = BoolType
 pyonNoneType = UnitType
 

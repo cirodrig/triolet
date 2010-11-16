@@ -33,17 +33,21 @@ declareBytes v size align =
       type_spec = CTypeSpec (CCharType internalNode)
   in CDecl [type_spec] [(Just declr, Nothing, Nothing)] internalNode
 
--- | Declare or define a variable.  The variable is not global and
---   is not accessed by reference.
-declareLocalVariable :: Var -> Maybe CExpr -> CDecl
-declareLocalVariable v initializer =
-  let (type_specs, derived_declr) = primTypeDeclSpecs $ varPrimType v
-      ident = localVarIdent v
-      declr = CDeclr (Just ident) derived_declr Nothing [] internalNode
+declareVariable :: Ident -> DeclSpecs -> Maybe CExpr -> CDecl
+declareVariable name (type_specs, derived_declr) initializer =
+  let declr = CDeclr (Just name) derived_declr Nothing [] internalNode
       init = case initializer
              of Nothing -> Nothing
                 Just e  -> Just $ CInitExpr e internalNode
   in CDecl type_specs [(Just declr, init, Nothing)] internalNode
+
+-- | Declare or define a variable.  The variable is not global and
+--   is not accessed by reference.  It must not have record type.
+declareLocalVariable :: Var -> Maybe CExpr -> CDecl
+declareLocalVariable v initializer =
+  let declspecs = primTypeDeclSpecs $ varPrimType v
+      ident = localVarIdent v
+  in declareVariable ident declspecs initializer
 
 -- | Declare a local variable with no initial value.
 declareUndefLocalVariable :: Var -> CDecl
@@ -116,6 +120,12 @@ isZeroCExpr e =
   of CConst (CIntConst n _) -> getCInteger n == 0
      _ -> False
 
+cInitExpr :: CExpr -> CInit
+cInitExpr e = CInitExpr e internalNode
+
+cInitExprs :: [CExpr] -> CInitList
+cInitExprs es = [([], cInitExpr e) | e <- es]
+
 cVar var_ident = CVar var_ident internalNode
 
 cUnary :: CUnaryOp -> CExpr -> CExpr
@@ -133,6 +143,9 @@ cAssign lhs rhs = CAssign CAssignOp lhs rhs internalNode
 cCall :: CExpr -> [CExpr] -> CExpr
 cCall op args = CCall op args internalNode
 
+cCompoundLit :: CDecl -> CInitList -> CExpr
+cCompoundLit decl inits = CCompoundLit decl inits internalNode
+
 cEmptyStat :: CStat
 cEmptyStat = CExpr Nothing internalNode
 
@@ -141,3 +154,6 @@ cExprStat e = CExpr (Just e) internalNode
 
 cGoto :: Ident -> CStat
 cGoto lab = CGoto lab internalNode
+
+cReturn :: Maybe CExpr -> CStat
+cReturn me = CReturn me internalNode

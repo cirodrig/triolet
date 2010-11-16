@@ -172,6 +172,8 @@ loadIntType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_int)
 storeIntType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_int)
 loadFloatType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_float)
 storeFloatType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_float)
+loadComplexFloatType = loadType $ appCT (conCT $ pyonBuiltin the_complex) [conCT $ pyonBuiltin the_float]
+storeComplexFloatType = storeType $ appCT (conCT $ pyonBuiltin the_complex) [conCT $ pyonBuiltin the_float]
 loadBoolType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_bool)
 storeBoolType = storeType $ expCT (mkInternalConE $ pyonBuiltin the_bool)
 loadNoneTypeType = loadType $ expCT (mkInternalConE $ pyonBuiltin the_NoneType)
@@ -548,6 +550,10 @@ constructorTable =
                storeFloatType)
             , (pyonBuiltin SystemF.Builtins.the_fun_load_float,
                loadFloatType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_store_complexFloat,
+               storeComplexFloatType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_load_complexFloat,
+               loadComplexFloatType)
             , (pyonBuiltin SystemF.Builtins.the_fun_store_bool,
                storeBoolType)
             , (pyonBuiltin SystemF.Builtins.the_fun_load_bool,

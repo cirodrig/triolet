@@ -27,10 +27,19 @@ anonymousDecl (specs, deriv) =
   let declr = CDeclr Nothing deriv Nothing [] internalNode
   in CDecl specs [(Just declr, Nothing, Nothing)] internalNode
 
+namedDecl :: DeclSpecs -> Ident -> CDecl
+namedDecl (specs, deriv) name =
+  let declr = CDeclr (Just name) deriv Nothing [] internalNode
+  in CDecl specs [(Just declr, Nothing, Nothing)] internalNode
+
 funDeclSpecs :: [CDecl] -> DeclSpecs -> DeclSpecs
 funDeclSpecs param_types (return_specs, return_derived_declr) =
   let fn_derived_declr = CFunDeclr (Right (param_types, False)) [] internalNode
   in (return_specs, fn_derived_declr : return_derived_declr)
+
+typedefDeclSpecs :: DeclSpecs -> DeclSpecs
+typedefDeclSpecs (specs, deriv) =
+  (CStorageSpec (CTypedef internalNode) : specs, deriv)
 
 nameDeclSpecs :: String -> DeclSpecs
 nameDeclSpecs name = identDeclSpecs (internalIdent name)
@@ -48,6 +57,18 @@ ptrDeclSpecs :: DeclSpecs -> DeclSpecs
 ptrDeclSpecs (specs, deriv) = (specs, ptr : deriv)
   where
     ptr = CPtrDeclr [] internalNode
+
+-- | Create a structure type with the given field types.
+--   The fields are named \'a\', \'b\', ....  The structure type has no name.
+structDeclSpecs :: [DeclSpecs] -> DeclSpecs
+structDeclSpecs field_types =
+  let fields = zipWith namedDecl field_types field_names
+      struct_type = CStruct CStructTag Nothing (Just fields) [] internalNode
+      type_spec = CTypeSpec $ CSUType struct_type internalNode
+  in ([type_spec], [])
+  where
+    field_names = map (internalIdent . return) ['a' .. 'z'] ++ too_many_fields
+    too_many_fields = [internalError "structDeclSpecs: Too many fields"]
 
 -- | Get the type specificer for a non-pointer primitive type
 primTypeDeclSpecs :: PrimType -> DeclSpecs
@@ -67,8 +88,10 @@ primTypeDeclSpecs pt =
      PointerType -> nameDeclSpecs "PyonPtr"
      OwnedType -> internalError "primTypeDeclSpecs: Unexpected type"
 
-
-varPrimType v = valueToPrimType $ varType v
+varPrimType v = 
+  case varType v
+  of PrimType pt -> pt
+     RecordType rec -> internalError "varPrimType: Unexpected record type"
 
 -- | Generate the C name for an externally visible variable.
 varIdent :: Var -> Ident

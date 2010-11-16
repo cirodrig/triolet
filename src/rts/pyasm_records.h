@@ -55,6 +55,12 @@ record MultiplicativeDict(a) {
   a one;			// The one value
 };
 
+// Complex numbers
+record complex(a) {
+  a real;
+  a imag;
+};
+
 /* Arrays (called "lists")
  *
  * A list consists of a size and a pointer to an array of list elements.

@@ -52,6 +52,13 @@ valueType core_type =
   of Just (con, args)
        | con `isPyonBuiltin` the_int -> LL.PrimType $ IntType Signed S32
        | con `isPyonBuiltin` the_float -> LL.PrimType $ FloatType S32
+       | con `isPyonBuiltin` the_complex ->
+           case args
+           of [arg] ->
+                let field_type = case valueType arg
+                                 of LL.PrimType pt -> PrimField pt
+                                    LL.RecordType r -> RecordField r
+                in LL.RecordType (complexRecord field_type)
        | con `isPyonBuiltin` the_bool -> LL.PrimType BoolType
        | con `isPyonBuiltin` the_NoneType -> LL.PrimType UnitType
        | con `isPyonBuiltin` the_PassConv -> LL.RecordType LL.passConvRecord
@@ -122,7 +129,17 @@ exportedTypeSig ty =
        | con `isPyonBuiltin` the_int -> PyonIntET
        | con `isPyonBuiltin` the_float -> PyonFloatET
        | con `isPyonBuiltin` the_bool -> PyonBoolET
+       | con `isPyonBuiltin` the_complex ->
+           case args
+           of [arg] ->
+                case unpackConAppCT arg
+                of Just (con, _)
+                     | con `isPyonBuiltin` the_float -> PyonComplexFloatET
+                   _ -> unsupported
        | con `isPyonBuiltin` the_list ->
            case args
-           of [arg] -> ListET $! exportedTypeSig arg  
+           of [arg] -> ListET $! exportedTypeSig arg
+     _ -> unsupported
+  where
+    unsupported = internalError "Unsupported exported type"
 

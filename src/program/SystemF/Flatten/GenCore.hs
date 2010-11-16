@@ -667,7 +667,15 @@ genLoad ty expr_rb expr = do
          FunT {} ->
            -- Load an owned type
            (SF.pyonBuiltin SF.the_fun_load_boxed, True)
-         _ -> internalError "genLoad: Cannot load values of this type"
+         AppT (ConT op) args
+           | op `SF.isPyonBuiltin` SF.the_complex ->
+               case args
+               of [ConT arg_c]
+                    | arg_c `SF.isPyonBuiltin` SF.the_float ->
+                      (SF.pyonBuiltin SF.the_fun_load_complexFloat, False)
+                  _ -> cannot
+         _ -> cannot
+    cannot = internalError "genLoad: Cannot load values of this type"
 
 genStore :: RetBinding -> EType -> Core.RCExp -> GenCore Core.RCExp 
 genStore rb ty expr = do
@@ -704,7 +712,15 @@ genStore rb ty expr = do
              (SF.pyonBuiltin SF.the_fun_store_NoneType, False)
          FunT {} ->
            (SF.pyonBuiltin SF.the_fun_store_boxed, True)
-         _ -> internalError "genStore: Cannot store values of this type"
+         AppT (ConT op) args
+           | op `SF.isPyonBuiltin` SF.the_complex ->
+               case args
+               of [ConT arg_c]
+                    | arg_c `SF.isPyonBuiltin` SF.the_float ->
+                      (SF.pyonBuiltin SF.the_fun_store_complexFloat, False)
+                  _ -> cannot
+         _ -> cannot
+    cannot = internalError "genStore: Cannot store values of this type"
 
 -- | Copy data from one place to another.  The source must be a read reference
 -- and the destination must be a write reference.

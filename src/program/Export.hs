@@ -32,7 +32,8 @@ data ExportDataType =
     -- Plain old data types
   | PyonIntET                   -- ^ Pyon int type
   | PyonFloatET                 -- ^ Pyon float type
-  | PyonBoolET                  -- ^ Pyon boolean type 
+  | PyonBoolET                  -- ^ Pyon boolean type
+  | PyonComplexFloatET          -- ^ Pyon complex float type
   | CIntET                      -- ^ C int type
   | CFloatET                    -- ^ C float type
 

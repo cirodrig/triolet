@@ -1,5 +1,5 @@
 
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, FlexibleInstances #-}
 module LowLevel.GenerateC(generateCFile)
 where
 
@@ -17,7 +17,8 @@ import Language.C.Syntax.AST
 import Language.C.Syntax.Constants
 
 import Gluon.Common.Error
-import Gluon.Common.Identifier(fromIdent)
+import qualified Gluon.Common.Identifier
+import Gluon.Common.Identifier(fromIdent, IdentSupply)
 import Gluon.Common.Label
 import Gluon.Common.Supply
 import LowLevel.Builtins
@@ -28,6 +29,7 @@ import LowLevel.Syntax
 import LowLevel.Print
 import LowLevel.GenerateCUtils
 import LowLevel.GenerateCCode
+import Globals
 
 data CodeItem =
     CCode [CBlockItem]
@@ -74,43 +76,78 @@ type LocalFunctionMap = Map.Map Var LocalFunction
 newNameSupply :: IO (Supply Int)
 newNameSupply = newSupply 1 (1+)
 
+-- | Structure names, used for functions with multiple return values.
+type Structs = Map.Map [PrimType] Ident
+
 data Env = Env
            { globalVars :: GlobalVars 
            , localFunctions :: LocalFunctionMap 
-           , nameSupply :: !(Supply Int)
+           , nameSupply :: {-# UNPACK #-}!(Supply Int)
+           , varIDSupply :: {-# UNPACK #-}!(IdentSupply Var)
            }
 
-newtype GenC a = GenC (Reader Env a)
-
-runGenC (GenC m) env = runReader m env
+newtype GenC a = GenC {runGenC :: Env -> Structs -> IO (a, Structs)}
 
 instance Functor GenC where
-  fmap f (GenC m) = GenC (fmap f m)
+  fmap f m = GenC $ \env st -> do (x, st') <- runGenC m env st
+                                  return (f x, st')
 
 instance Monad GenC where
-  return x = GenC (return x)
-  GenC m >>= k = GenC (m >>= \x -> case k x of GenC m' -> m')
+  return x = GenC $ \_ st -> return (x, st)
+  m >>= k = GenC $ \env st -> do (x, st') <- runGenC m env st
+                                 runGenC (k x) env st'
 
 instance MonadFix GenC where
-  mfix f = GenC (mfix $ \x -> case f x of GenC m -> m)
+  mfix f = GenC $ \env st -> mfix $ \ ~(x, st') -> runGenC (f x) env st 
 
-newAnonymousLabel :: (Ident -> GenC a) -> GenC a
-newAnonymousLabel f = GenC $ Reader $ \env -> do
-  forceSupplyValue (nameSupply env) $ \n ->
-    case f (make_label n) of GenC m -> runReader m env
-  where
-    make_label n = internalIdent $ "c_" ++ show n
+instance Supplies GenC (Gluon.Common.Identifier.Ident Var) where
+  fresh = GenC $ \env st -> do n <- supplyValue (varIDSupply env)
+                               return (n, st)
 
+newName :: (Int -> String) -> GenC Ident
+newName to_string = GenC $ \env st -> do
+  n <- supplyValue (nameSupply env)
+  return (internalIdent $ to_string n, st)
+
+newAnonymousLabel :: GenC Ident
+newAnonymousLabel = newName (\n -> "c_" ++ show n)
+
+newAnonymousStructName :: GenC Ident
+newAnonymousStructName = newName (\n -> "struct_" ++ show n)
 
 getGlobalVars :: GenC GlobalVars
-getGlobalVars = GenC $ asks globalVars
+getGlobalVars = GenC $ \env st -> return (globalVars env, st)
 
 withLocalFunctions :: [(Var, LocalFunction)] -> GenC a -> GenC a
-withLocalFunctions local_fs (GenC m) = GenC $ local insert m
-  where
-    insert env =
-      env {localFunctions = 
-              foldr (uncurry Map.insert) (localFunctions env) local_fs}
+withLocalFunctions local_fs m = GenC $ \env st ->
+  let env' = env {localFunctions = 
+                     foldr (uncurry Map.insert) (localFunctions env) local_fs}
+  in runGenC m env' st      
+
+lookupLocalFunction :: Var -> GenC (Maybe LocalFunction)
+lookupLocalFunction v = GenC $ \env st ->
+  return (Map.lookup v (localFunctions env), st)
+
+-- | Get the name of the structure type used to encode the given sequence 
+--   of values.  An existing structure is returned if found, otherwise a
+--   new one is created.
+getStructName :: [PrimType] -> GenC Ident
+getStructName types = GenC $ \env st ->
+  case Map.lookup types st
+  of Just idt -> return (idt, st)
+     Nothing  -> do (idt, st') <- runGenC newAnonymousStructName env st
+                    return (idt, Map.insert types idt st') 
+
+-------------------------------------------------------------------------------
+-- Structure type declarations
+
+-- | Declare a structure type with the given name and field types.
+--   The structure is declared as a typedef, so it can be referred to by the
+--   name.
+declareStruct :: Ident -> [DeclSpecs] -> CDecl
+declareStruct name fields =
+  let type_specs = typedefDeclSpecs $ structDeclSpecs fields
+  in namedDecl type_specs name
 
 -------------------------------------------------------------------------------
 -- Non-recursive expressions
@@ -122,8 +159,16 @@ genLit (BoolL False)   = smallIntConst 0
 genLit (IntL sgn sz n) = intConst sgn sz n
 genLit (FloatL S32 n)  = floatConst S32 n
 
-genVal :: GlobalVars -> Val -> CExpr
-genVal gvars (VarV v)
+genVal :: Val -> GenC CExpr
+genVal val = do gvars <- getGlobalVars
+                return $ genValWorker gvars val
+
+genVals :: [Val] -> GenC [CExpr]
+genVals vals = do gvars <- getGlobalVars
+                  return $ map (genValWorker gvars) vals
+
+genValWorker :: GlobalVars -> Val -> CExpr
+genValWorker gvars (VarV v)
   | v `Set.member` gvars =
       -- Take address of global variable, and cast to pointer
       cPtrCast $ cUnary CAdrOp var_exp
@@ -131,9 +176,9 @@ genVal gvars (VarV v)
   where
   var_exp = cVar $ varIdentScoped gvars v
       
-genVal _ (LitV l) = genLit l
+genValWorker _ (LitV l) = genLit l
 
-genVal _ _ = internalError "genVal: Unexpected value"
+genValWorker _ _ = internalError "genVal: Unexpected value"
 
 valPrimType v =
   case valType v
@@ -142,6 +187,12 @@ valPrimType v =
 
 genAssignVar :: Var -> CExpr -> CExpr
 genAssignVar v e = cAssign (CVar (localVarIdent v) internalNode) e
+
+-- | Get the C type used for this return type.
+returnTypeDecl :: [PrimType] -> GenC DeclSpecs
+returnTypeDecl []  = return voidDeclSpecs
+returnTypeDecl [t] = return $ primTypeDeclSpecs t
+returnTypeDecl ts  = fmap identDeclSpecs $ getStructName ts
 
 -------------------------------------------------------------------------------
 -- Atoms and statements
@@ -160,45 +211,86 @@ returnTypes (AssignValues vs) = map varPrimType vs
 returnTypes (DefineValues vs) = map varPrimType vs
 returnTypes (ReturnValues ps) = ps
 
-genManyResults :: ReturnValues -> [CExpr] -> [CBlockItem]
+genManyResults :: ReturnValues -> [CExpr] -> GenC [CBlockItem]
 genManyResults rtn exprs =
   case rtn
-  of AssignValues [] -> return_nothing
-     AssignValues [v] -> return_expr $ genAssignVar v expr
-     AssignValues xs -> too_many xs
-     DefineValues [] -> return_nothing
-     DefineValues [v] ->
-       [CBlockDecl $ declareLocalVariable v $ Just expr]
-     DefineValues xs -> too_many xs
-     ReturnValues [] -> return_nothing
-     ReturnValues [t] ->
-       return_stm $ CReturn (Just expr) internalNode
-     ReturnValues xs -> too_many xs
+  of AssignValues xs  -> return_exprs $ zipWith genAssignVar xs exprs
+     DefineValues xs  -> return $ zipWith declare_variable xs exprs
+     ReturnValues []  -> return_nothing
+     ReturnValues [t] -> return_stm $ cReturn (Just expr)
+     ReturnValues xs  -> do
+       struct_name <- getStructName xs
+       let struct_decl = anonymousDecl $ identDeclSpecs struct_name
+           compound_expr = cCompoundLit struct_decl $ cInitExprs exprs
+       return_stm $ cReturn (Just compound_expr)
   where
-    too_many xs =
-      internalError $ "genManyResults: Cannot generate statement with " ++
-      show (length xs) ++ " result values"
     expr = case exprs
            of [e] -> e
               _ -> internalError "genManyResults"
-    return_nothing = []
-    return_stm stm = [CBlockStmt stm]
-    return_expr e = return_stm $ CExpr (Just e) internalNode
+    return_nothing = return []
+    return_stm stm = return [CBlockStmt stm]
+    return_expr e = return_stm $ cExprStat e
+    return_exprs es = return $ map (CBlockStmt . cExprStat) es
+    declare_variable v e = CBlockDecl $ declareLocalVariable v $ Just e
 
-genOneResult :: ReturnValues -> CExpr -> [CBlockItem]
+-- | Put an expression's results in the appropriate place.  The expression   
+--   returns a single value, or void.  If there's more than one result, it's
+--   returned as a structure.
+genOneResult :: ReturnValues -> CExpr -> GenC [CBlockItem]
 genOneResult rtn expr =
   case rtn
   of AssignValues [] -> return_expr expr
      AssignValues [v] -> return_expr $ genAssignVar v expr
+     AssignValues vs -> do
+       (tmp_assignment, tmpvar) <- assign_temporary vs
+       let assignments = unpack_and_assign tmpvar vs
+       return (tmp_assignment : assignments)
      DefineValues [] -> return_expr expr
      DefineValues [v] ->
-       [CBlockDecl $ declareLocalVariable v $ Just expr]
+       return [CBlockDecl $ declareLocalVariable v $ Just expr]
+     DefineValues vs -> do
+       (tmp_assignment, tmpvar) <- assign_temporary vs
+       let assignments = unpack_and_define tmpvar vs
+       return (tmp_assignment : assignments)
      ReturnValues [] -> return_expr expr
-     ReturnValues [t] -> 
+     ReturnValues _ ->
+       -- Return the expression's result. 
+       -- If there are many values packed in a struct, they stay that way.
        return_stm $ CReturn (Just expr) internalNode
   where
-    return_stm stm = [CBlockStmt stm]
+    return_stm stm = return [CBlockStmt stm]
     return_expr e = return_stm $ CExpr (Just e) internalNode
+    
+    -- Assign the expression's result to a temporary structure.
+    -- Use 'vs' to determine the structure's C type.
+    assign_temporary vs = do
+      let prim_types = map varPrimType vs
+          var_type = RecordType $ staticRecord (map PrimField prim_types)
+      v <- newAnonymousVar var_type
+      typespecs <- fmap identDeclSpecs $ getStructName prim_types
+      let tmp_assignment =
+            declareVariable (localVarIdent v) typespecs $ Just expr
+      return (CBlockDecl tmp_assignment, v)
+
+    -- Unpack the fields of the source variable and define the destination
+    -- variables
+    unpack_and_define source_var vs =
+      zipWith define_value vs (map (internalIdent . return) ['a' .. 'z'])
+      where
+        source_expr = cVar (localVarIdent source_var)
+        define_value v field_name =
+          let field_expr = CMember source_expr field_name False internalNode
+          in CBlockDecl $ declareLocalVariable v (Just field_expr)
+
+    -- Unpack the fields of the source variable and assign the destinations
+    unpack_and_assign source_var vs =
+      zipWith assign_value vs (map (internalIdent . return) ['a' .. 'z'])
+      where
+        source_expr = cVar (localVarIdent source_var)
+        assign_value v field_name =
+          let field_expr = CMember source_expr field_name False internalNode
+              dst_expr = cVar (localVarIdent v)
+          in CBlockStmt $ cExprStat $ cAssign dst_expr field_expr
 
 -- | Generate a statement from an atom.  It must not be a call to a local
 -- function.
@@ -213,64 +305,69 @@ genNonTailAtom returns atom = do
 -- the translated expression to make a statement.
 -- Also return True if the atom is not a call to a local function.
 genAtom :: ReturnValues -> Atom -> GenC ([CBlockItem], Bool)
-genAtom returns atom = GenC $ Reader $ \env ->
-  let gvars = globalVars env
-      local_functions = localFunctions env
-  in case atom
-     of ValA vals ->
-          (genManyResults returns $ map (genVal gvars) vals, True)
-        PrimCallA op args ->
-          case genCall gvars local_functions (returnTypes returns) op args
-          of Left items -> (items, False)
-             Right call -> (genOneResult returns call, True)
-        PrimA op args ->
-          (genOneResult returns $ genPrimCall op $ map (genVal gvars) args,
-           True)
-        _ -> internalError "genAtom: Unexpected atom"
+genAtom returns atom =
+  case atom
+  of ValA vals -> do
+       vals' <- genVals vals
+       code <- genManyResults returns vals'
+       return (code, True)
+     PrimCallA op args -> do
+       call <- genCall (returnTypes returns) op args
+       case call of
+         Left items -> return (items, False)
+         Right call -> do result <- genOneResult returns call
+                          return (result, True)
+     PrimA op args -> do
+       args' <- genVals args
+       result <- genOneResult returns $ genPrimCall op args'
+       return (result, True)
+     _ -> internalError "genAtom: Unexpected atom"
 
 -- | Create a function call expression.  The call is either generated as a
 -- sequence of assignments followed by a @goto@ or a C function call.
-genCall :: GlobalVars 
-        -> LocalFunctionMap 
-        -> [PrimType] 
+genCall :: [PrimType] 
         -> Val 
         -> [Val] 
-        -> Either [CBlockItem] CExpr
-genCall gvars local_functions return_types op args
-  | VarV v <- op,
-    Just lfun <- Map.lookup v local_functions =
+        -> GenC (Either [CBlockItem] CExpr)
+genCall return_types op args =
+  -- If calling a local function, generate a goto call
+  case op
+  of VarV v -> do
+       lfun <- lookupLocalFunction v
+       case lfun of
+         Nothing -> fmap Right gen_c_call
+         Just f  -> fmap Left $ gen_goto_call f
+     _ -> fmap Right gen_c_call
+  where
+    gen_goto_call lfun = do
       -- Generate a local function "call".  Jump to the function. 
       -- Assign parameter variables
-      let assignments = zipWith make_assignment (lfunParamVars lfun) $
-                        map (genVal gvars) args
+      args' <- genVals args
+      let assignments = zipWith make_assignment (lfunParamVars lfun) args'
             where
               make_assignment ident expr =
                 cExprStat $ cAssign (cVar ident) expr
 
           statements = map CBlockStmt $
                        assignments ++ [cGoto $ lfunLabel lfun]
-      in Left statements
+      return statements
 
-  | otherwise =
+    gen_c_call = do
       -- Generate an ordinary function call.
-      let op' = genVal gvars op
-          args' = map (genVal gvars) args
+      op' <- genVal op
+      args' <- genVals args
       
-          -- Create the actual function type
-          return_type =
-            case return_types
-            of [] -> voidDeclSpecs
-               [t] -> primTypeDeclSpecs t
-               _ -> internalError "genCall: Cannot generate multiple return values"
+      -- Create the actual function type
+      return_type <- returnTypeDecl return_types
 
-          param_types =
+      let param_types =
             map (anonymousDecl . primTypeDeclSpecs . valPrimType) args
           fn_type =
             ptrDeclSpecs $ funDeclSpecs param_types return_type
 
           -- Cast operator to function pointer type
           cast = CCast (anonymousDecl fn_type) op' internalNode
-      in Right (cCall cast args')
+      return $ cCall cast args'
 
 genPrimCall :: Prim -> [CExpr] -> CExpr
 genPrimCall prim args =
@@ -373,8 +470,8 @@ genStatement returns stm =
        (code, fallthrough) <- genStatement returns stm'
        return (CCode block_items : code, fallthrough)
      LetrecE funs stm' ->
-       newAnonymousLabel $ \label ->
        genLocalFunctions returns funs $ \localfs -> do
+         label <- newAnonymousLabel
          (code, fallthrough) <- genStatement returns stm'
          return ([Group $ LocalFunctionGroup label code localfs fallthrough],
                  fallthrough)
@@ -420,8 +517,7 @@ genIf returns scrutinee if_true if_false = do
                      then Nothing
                      else Just false_path
 
-  gvars <- getGlobalVars
-  let cond_expr = genVal gvars scrutinee
+  cond_expr <- genVal scrutinee
   let if_stmt = CCode $
                 return_var_decls ++
                 [CBlockStmt $ CIf cond_expr true_path false_branch internalNode]
@@ -491,9 +587,9 @@ codeItemStatements (Group lfg)   = fmap return $ makeFunctionGroupCode lfg
 -- The fallthrough statement is where control flow goes from any path that
 -- doesn't end in a tail call.
 makeFunctionGroupCode :: LocalFunctionGroup -> GenC CBlockItem
-makeFunctionGroupCode lfg = newAnonymousLabel $ \fallthrough -> do
-  let fallthrough_stmt =
-        CLabel fallthrough (CExpr Nothing internalNode) [] internalNode
+makeFunctionGroupCode lfg = do
+  fallthrough <- newAnonymousLabel
+  let fallthrough_stmt = CLabel fallthrough cEmptyStat [] internalNode
         
   -- Convert entry code
   (concat -> entry_statements) <- mapM codeItemStatements $ lfgEntry lfg
@@ -528,18 +624,13 @@ genFun (FunDef v fun)
   | not (isPrimFun fun) = 
       internalError "genFun: Can only generate primitive-call functions"
   | otherwise = do
-    let -- Function return type
-      return_type =
-        case funReturnTypes fun
-        of [] -> voidDeclSpecs
-           [PrimType t] -> primTypeDeclSpecs t
-           [_] -> internalError "genFun: Unexpected return type"
-           _ -> internalError "genFun: Cannot generate multiple return values"
-      -- Function parameter declarations
-      param_decls = [declareLocalVariable v Nothing | v <- funParams fun]
-      -- Function declaration
-      (return_type_specs, fun_declr) = funDeclSpecs param_decls return_type
-      fun_decl = CDeclr (Just (varIdent v)) fun_declr Nothing [] internalNode
+    return_type <- returnTypeDecl (map from_prim_type $ funReturnTypes fun)
+
+    let -- Function parameter declarations
+        param_decls = [declareLocalVariable v Nothing | v <- funParams fun]
+        -- Function declaration
+        (return_type_specs, fun_declr) = funDeclSpecs param_decls return_type
+        fun_decl = CDeclr (Just (varIdent v)) fun_declr Nothing [] internalNode
 
     -- Create the function body
     let return_values = ReturnValues $ map valueToPrimType $ funReturnTypes fun
@@ -550,6 +641,9 @@ genFun (FunDef v fun)
         definition =
           CFunDef return_type_specs fun_decl [] body_stmt internalNode
     return (forward_declaration, definition)
+  where
+    from_prim_type (PrimType t) = t
+    from_prim_type _ = internalError "genFun: Unexpected record type"
 
 
 -- | Create a global static data definition and initialization code.
@@ -588,8 +682,7 @@ genImportVar v =
       pointer_decl =
         [CArrDeclr [] (CNoArrSize False) internalNode,
          CPtrDeclr [] internalNode]
-      fun_decl = CDeclr (Just $ varIdent v) pointer_decl Nothing [] internalNode
-  in CDecl return_type_specs [(Just fun_decl, Nothing, Nothing)] internalNode
+  in declareVariable (varIdent v) (return_type_specs, pointer_decl) Nothing
 
 initializeBytes gvars v record_type values =
   let base = cVar (varIdent v)
@@ -608,7 +701,7 @@ initializeField gvars base fld val =
                        of PrimField t -> cCast t field_ptr
                           _ -> internalError "initializeField"
       lhs = CUnary CIndOp field_cast_ptr internalNode
-      rhs = genVal gvars val
+      rhs = genValWorker gvars val
   in CAssign CAssignOp lhs rhs internalNode
 
 -- | Create the module initialization function, which initializes the
@@ -638,10 +731,17 @@ generateCFile (Module imports funs datas _) = do
   let (data_defs, data_inits) = unzip $ map (genData global_vars) datas
   let init_fun = initializationFunction data_inits
   
-  let gen_c_env = Env global_vars Map.empty ident_supply
-  let (fun_decls, fun_defs) = runGenC (mapAndUnzipM genFun funs) gen_c_env
+  ((fun_decls, fun_defs), structs) <-  
+    withTheLLVarIdentSupply $ \var_supply ->
+    let gen_c_env = Env global_vars Map.empty ident_supply var_supply
+    in runGenC (mapAndUnzipM genFun funs) gen_c_env Map.empty
+       
+  let struct_decls =
+        [declareStruct name (map primTypeDeclSpecs fields)
+        | (fields, name) <- Map.toList structs]
   
-  let top_level = map CDeclExt import_decls ++
+  let top_level = map CDeclExt struct_decls ++
+                  map CDeclExt import_decls ++
                   map CDeclExt fun_decls ++
                   data_defs ++
                   CFDefExt init_fun :
