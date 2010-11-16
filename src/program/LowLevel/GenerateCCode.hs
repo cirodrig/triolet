@@ -41,18 +41,6 @@ declareVariable name (type_specs, derived_declr) initializer =
                 Just e  -> Just $ CInitExpr e internalNode
   in CDecl type_specs [(Just declr, init, Nothing)] internalNode
 
--- | Declare or define a variable.  The variable is not global and
---   is not accessed by reference.  It must not have record type.
-declareLocalVariable :: Var -> Maybe CExpr -> CDecl
-declareLocalVariable v initializer =
-  let declspecs = primTypeDeclSpecs $ varPrimType v
-      ident = localVarIdent v
-  in declareVariable ident declspecs initializer
-
--- | Declare a local variable with no initial value.
-declareUndefLocalVariable :: Var -> CDecl
-declareUndefLocalVariable v = declareLocalVariable v Nothing
-
 -- | The type of a @PyonPtr@, used in type casts.
 pyonPointerType :: CDecl
 pyonPointerType = anonymousDecl (nameDeclSpecs "PyonPtr")

@@ -482,14 +482,21 @@ applyArguments info (op, op_eff) args =
 
 -- | Compute the result of a function application.
 --
--- Returns the coerced argument, the application's result type, 
--- the side effect of the application, and an effect transformation that
--- masks out effects on any locally created memory.
-applyType :: EType              -- ^ Operator type
+-- The argument function is run in an environment where the application has
+-- occurred, and the type's dependent parameter variable is unified with the  
+-- argument.
+-- It receives as parameters the coerced argument, the effect
+-- of the application, the operator's return type,
+-- the set of local regions, and the set of exposed regions.
+--
+-- Returns the set of locally created regions along with what the argument
+-- function returns.
+applyType :: (Parametric a, Parametric b) =>
+             EType              -- ^ Operator type
           -> EExp               -- ^ Argument
           -> (EExp -> Effect -> EReturnType -> [RVar] -> [RVar]
-              -> EI ((), (Effect, EReturnType, [RVar]), a))
-          -> EI ([RVar], (), (Effect, EReturnType, [RVar]), a)
+              -> EI (a, b, c))
+          -> EI ([RVar], a, b, c)
 applyType op_type arg k =
   case op_type
   of FunT param_type eff return_type -> do
@@ -503,10 +510,9 @@ applyType op_type arg k =
            rrtype <- liftIO $ evalAndApplyRenaming (dep_renaming arg) return_type
            reff <- liftIO $ evalAndApplyRenaming (dep_renaming arg) eff
 
-           -- Continue
+           -- Add the coercion's effect to the side effect of this application
            let eff' = reff `effectUnion` varsEffect exposed_regions
-           x@(_, (eff, rt, _), _) <- k arg' eff' rrtype local_regions exposed_regions
-           return x
+           k arg' eff' rrtype local_regions exposed_regions
        return (call_regions, a, b, c)
      _ -> internalError "applyType: Not a function type"
   where
@@ -786,11 +792,20 @@ inferDefGroup defs = do
 inferAlt :: Maybe EReturnType -> SF.RecAlt SF.TypedRec
          -> EI (EAlt, EReturnType, Effect)
 inferAlt mreturn_type (SF.TypedSFAlt (SF.TypeAnn _ alt)) = do
+  -- Check the type parameters
   ty_args <- liftRegionM $ mapM inferTypeExp $ SF.altTyArgs alt
+  ty_arg_kinds <-
+    liftRegionM $
+    sequence [toPureEffectType =<< evalHead' (Gluon.fromWhnf k)
+             | SF.TypedSFType (SF.TypeAnn k _) <- SF.altTyArgs alt]
   
-  -- Do not allow extra side effects in alternatives 
-  params <- sequence [patternAsBinder True (SF.VarP v ty)
-                     | SF.Binder v ty () <- SF.altParams alt]
+  -- Get the types of the constructor arguments
+  let ty_args' = [(discardTypeRepr t, discardTypeRepr k)
+                 | (t, k) <- zip ty_args ty_arg_kinds]
+  param_types <- getConstructorParamTypes (SF.altConstructor alt) ty_args'
+  
+  -- Create parameters for bound variables
+  let params = zipWith make_parameter (SF.altParams alt) param_types
   let local_regions = mapMaybe paramRegion params
 
   (body_exp, body_return, body_eff) <- withBinders params $ do
@@ -812,6 +827,12 @@ inferAlt mreturn_type (SF.TypedSFAlt (SF.TypeAnn _ alt)) = do
       new_alt = EAlt con (map discardTypeRepr ty_args) params body_exp
   return (new_alt, body_return, body_eff)
   where
+    make_parameter (SF.Binder v _ _) ty =
+      case ty
+      of ValPT Nothing t -> ValP v t
+         OwnPT t         -> OwnP v t
+         ReadPT rgn t    -> ReadP v rgn t
+
     -- Coerce the case alternative's return type.
     -- If a return type is specified, coerce to that.
     coerce_return (Just rt) e = do
@@ -829,6 +850,59 @@ inferAlt mreturn_type (SF.TypedSFAlt (SF.TypeAnn _ alt)) = do
              coerceReturn new_return_type return_type
            return (applyCoercion coercion e, new_return_type, exposed_reads)
          _ -> return (e, expReturn e, [])
+
+-- | Given a constructor, get the effect types of its value parameters.
+--   If the constructor has effect parameters, they are instantiated to
+--   the empty effect.
+--
+--   Currently, the function cannot handle value parameters that are used
+--   dependently; they have to be renamed to the variables that are actually
+--   in the program.
+getConstructorParamTypes :: Con -> [(EType, EType)] -> EI [EParamType]
+getConstructorParamTypes con ty_args = do
+  -- Must be an object-level constructor
+  unless (getLevel con == ObjectLevel) $
+    internalError "getPureConstructorParamTypes" 
+
+  -- Translate the constructor's type back from Core 
+  (qvars, eff_type) <- liftRegionM $ coreToEffectType $ Core.conCoreType con
+  liftIO $ sequence_ [assignEffectVar v emptyEffect | v <- qvars]
+
+  -- If constructor isn't function-typed, it has no parameters
+  case eff_type of
+    ERepType Boxed eff_type2 -> do
+      -- Apply the constructor type to the type arguments
+      inst_eff_type <- instantiateWithTypeArgs eff_type2 ty_args
+      
+      -- Extract and return parameter types
+      case inst_eff_type of
+        FunT {} ->
+          let (param_types, _, _) = unpackFunctionType (OwnRT inst_eff_type)
+          in if any is_dependent_parameter param_types
+             then internalError "getPureConstructorParamTypes: Cannot handle dependent parameters"
+             else return param_types
+        _ -> return []
+    _ -> return []
+  where
+    is_dependent_parameter (ValPT (Just _) _) = True
+    is_dependent_parameter _ = False
+
+-- | Apply an operator of the given type to the given type arguments
+instantiateWithTypeArgs :: EType      -- ^ Operator type
+                        -> [(EType, EType)] -- ^ Type arguments and their kinds
+                        -> EI EType   -- ^ Computes the applied operator type
+instantiateWithTypeArgs op_type args = do
+  let arg_exprs = [EExp (internalSynInfo TypeLevel) (ValRT k) $ TypeE t
+                  | (t, k) <- args]
+  (_, (), op_type', ()) <- apply op_type arg_exprs
+  return op_type'
+  where
+    apply op_type (arg:args) =
+      applyType op_type arg $ \_ _ op_type' _ _ -> do
+        (_, (), op_type'', ()) <- apply (returnTypeType op_type') args
+        return ((), op_type'', ())
+    
+    apply op_type [] = return ([], (), op_type, ())
 
 inferTypeExp :: SF.RecType SF.TypedRec -> RegionM ERepType
 inferTypeExp (SF.TypedSFType (SF.TypeAnn k t)) = do

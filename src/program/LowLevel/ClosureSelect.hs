@@ -139,6 +139,7 @@ scanAtom is_tail atom =
      CallA op args     -> scan_call op args
      PrimCallA op args -> scan_call op args
      PrimA _ args      -> scanValues args
+     UnpackA r arg     -> scanValue arg
      _                 -> internalError "scanAtom"
   where
     scan_call op args =

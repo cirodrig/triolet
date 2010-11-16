@@ -10,3 +10,9 @@ extern function pyon.internal.prim.sub_float (float, float) -> float;
 extern function pyon.internal.prim.negate_float (float) -> float;
 extern function pyon.internal.prim.mul_float (float, float) -> float;
 extern function pyon.internal.prim.fromint_float (int) -> float;
+
+extern function pyon.internal.prim.load_complexFloat
+  (pointer) -> (complex(float));
+extern function pyon.internal.prim.store_complexFloat
+  (complex(float), pointer) -> ();
+

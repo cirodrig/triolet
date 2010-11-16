@@ -16,6 +16,11 @@ extern function pyon.internal.structures.MultiplicativeDict_pass_conv
 extern function pyon.internal.structures.additiveDict_complex
   (unit, pointer, pointer) -> ();
 
+extern function pyon.internal.structures.makeComplex
+  (float, float, pointer) -> ();
+
+extern function pyon.internal.structures.load_complexFloat
+  (pointer) -> (float, float);
 
 extern data pointer pyon.internal.structures.int_pass_conv "int_pass_conv";
 extern data pointer pyon.internal.structures.float_pass_conv "float_pass_conv";

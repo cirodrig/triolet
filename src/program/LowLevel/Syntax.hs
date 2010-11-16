@@ -183,8 +183,13 @@ data Atom =
     --   Must have exactly the right number of arguments.
   | PrimA !Prim [Val]
     -- | Pack a statically typed record value.
+    --
+    -- This atom should only appear before record flattening.
   | PackA !StaticRecord [Val]
     -- | Unpack a statically typed record value.
+    --
+    -- After record flattening, this atom should only appear with a variable
+    -- as its RHS.
   | UnpackA !StaticRecord Val
 
 -- | A statement.  Statements may have side effects.

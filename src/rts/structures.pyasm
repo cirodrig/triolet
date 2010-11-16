@@ -180,6 +180,13 @@ function additiveDict_complex
   ();
 };
 
+function makeComplex(float re, float im, pointer ret) -> () {
+  typedef cfloat = complex(float);
+  ret @! cfloat.real = re;
+  ret @! cfloat.imag = im;
+  ();
+};
+
 function complex_add(word size, word align, owned member_add,
                      pointer x, pointer y, pointer ret) -> () {
   typedef cpx = complex(bytes(size, align));

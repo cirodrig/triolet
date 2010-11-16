@@ -80,6 +80,10 @@ ccAtom returns atom =
        vs' <- ccValues vs
        return $ PrimA prim `liftM` sequence vs'
 
+     UnpackA record (VarV v) -> do
+       mention v
+       return (return $ UnpackA record (VarV v))
+
      PackA {} -> internalError "ccAtom: unexpected 'pack'"
      UnpackA {} -> internalError "ccAtom: unexpected 'unpack'"
 

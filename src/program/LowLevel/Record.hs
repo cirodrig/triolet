@@ -47,6 +47,22 @@ record = Rec
 recordFields :: Record t -> [Field t]
 recordFields = recordFields_
 
+-- | Apply a transformation to all field types in a record.  If there are
+--   fields with record type, their fields aren't transformed.  The
+--   transformation must preserve sizes and alignments.
+mapRecordFieldTypes :: (StaticFieldType -> StaticFieldType)
+                    -> StaticRecord -> StaticRecord
+mapRecordFieldTypes f rec =
+  rec {recordFields_ = map apply_f $ recordFields_ rec}
+  where
+    apply_f fld =
+      let fld' = fld {fieldType = f (fieldType fld)}
+      in if sizeOf fld' /= sizeOf fld 
+         then internalError "mapRecordFieldTypes: Size wasn't preserved"
+         else if alignOf fld' /= alignOf fld
+              then internalError "mapRecordFieldTypes: Alignment wasn't preserved"
+              else fld'
+
 -- | Select a record field
 (!!:) :: Record t -> Int -> Field t
 r !!: i = pick i $ recordFields r

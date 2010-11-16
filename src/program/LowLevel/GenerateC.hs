@@ -139,7 +139,19 @@ getStructName types = GenC $ \env st ->
                     return (idt, Map.insert types idt st') 
 
 -------------------------------------------------------------------------------
--- Structure type declarations
+-- Declarations
+
+valueTypeDeclSpecs :: ValueType -> GenC DeclSpecs
+valueTypeDeclSpecs (PrimType pt) = return $ primTypeDeclSpecs pt
+valueTypeDeclSpecs (RecordType r) =
+  fmap identDeclSpecs $ getStructName field_types
+  where
+    field_types = map field_prim_type $ recordFields r
+                 
+    field_prim_type fld =
+      case fieldType fld
+      of PrimField pt -> pt
+         _ -> internalError "declareLocalVariable"
 
 -- | Declare a structure type with the given name and field types.
 --   The structure is declared as a typedef, so it can be referred to by the
@@ -148,6 +160,18 @@ declareStruct :: Ident -> [DeclSpecs] -> CDecl
 declareStruct name fields =
   let type_specs = typedefDeclSpecs $ structDeclSpecs fields
   in namedDecl type_specs name
+
+-- | Declare or define a variable.  The variable is not global and
+--   is not accessed by reference.  It must not have record type.
+declareLocalVariable :: Var -> Maybe CExpr -> GenC CDecl
+declareLocalVariable v initializer = do
+  declspecs <- valueTypeDeclSpecs (varType v)
+  return $ declareVariable (localVarIdent v) declspecs initializer
+
+-- | Declare a local variable with no initial value.
+declareUndefLocalVariable :: Var -> GenC CDecl
+declareUndefLocalVariable v = declareLocalVariable v Nothing
+
 
 -------------------------------------------------------------------------------
 -- Non-recursive expressions
@@ -204,22 +228,22 @@ data ReturnValues =
     -- | Define these variables and assign to them
   | DefineValues [ParamVar]
     -- | Return the results at the given types
-  | ReturnValues [PrimType]
+  | ReturnValues [ValueType]
 
-returnTypes :: ReturnValues -> [PrimType]
-returnTypes (AssignValues vs) = map varPrimType vs
-returnTypes (DefineValues vs) = map varPrimType vs
+returnTypes :: ReturnValues -> [ValueType]
+returnTypes (AssignValues vs) = map varType vs
+returnTypes (DefineValues vs) = map varType vs
 returnTypes (ReturnValues ps) = ps
 
 genManyResults :: ReturnValues -> [CExpr] -> GenC [CBlockItem]
 genManyResults rtn exprs =
   case rtn
   of AssignValues xs  -> return_exprs $ zipWith genAssignVar xs exprs
-     DefineValues xs  -> return $ zipWith declare_variable xs exprs
+     DefineValues xs  -> zipWithM declare_variable xs exprs
      ReturnValues []  -> return_nothing
      ReturnValues [t] -> return_stm $ cReturn (Just expr)
      ReturnValues xs  -> do
-       struct_name <- getStructName xs
+       struct_name <- getStructName $ map valueToPrimType xs
        let struct_decl = anonymousDecl $ identDeclSpecs struct_name
            compound_expr = cCompoundLit struct_decl $ cInitExprs exprs
        return_stm $ cReturn (Just compound_expr)
@@ -231,7 +255,9 @@ genManyResults rtn exprs =
     return_stm stm = return [CBlockStmt stm]
     return_expr e = return_stm $ cExprStat e
     return_exprs es = return $ map (CBlockStmt . cExprStat) es
-    declare_variable v e = CBlockDecl $ declareLocalVariable v $ Just e
+    declare_variable v e = do 
+      decl <- declareLocalVariable v $ Just e
+      return (CBlockDecl decl)
 
 -- | Put an expression's results in the appropriate place.  The expression   
 --   returns a single value, or void.  If there's more than one result, it's
@@ -246,11 +272,12 @@ genOneResult rtn expr =
        let assignments = unpack_and_assign tmpvar vs
        return (tmp_assignment : assignments)
      DefineValues [] -> return_expr expr
-     DefineValues [v] ->
-       return [CBlockDecl $ declareLocalVariable v $ Just expr]
+     DefineValues [v] -> do
+       decl <- declare_variable v expr
+       return [decl]
      DefineValues vs -> do
        (tmp_assignment, tmpvar) <- assign_temporary vs
-       let assignments = unpack_and_define tmpvar vs
+       assignments <- unpack_and_define tmpvar vs
        return (tmp_assignment : assignments)
      ReturnValues [] -> return_expr expr
      ReturnValues _ ->
@@ -261,6 +288,10 @@ genOneResult rtn expr =
     return_stm stm = return [CBlockStmt stm]
     return_expr e = return_stm $ CExpr (Just e) internalNode
     
+    declare_variable v e = do 
+      decl <- declareLocalVariable v $ Just e
+      return (CBlockDecl decl)
+
     -- Assign the expression's result to a temporary structure.
     -- Use 'vs' to determine the structure's C type.
     assign_temporary vs = do
@@ -275,12 +306,12 @@ genOneResult rtn expr =
     -- Unpack the fields of the source variable and define the destination
     -- variables
     unpack_and_define source_var vs =
-      zipWith define_value vs (map (internalIdent . return) ['a' .. 'z'])
+      zipWithM define_value vs (map (internalIdent . return) ['a' .. 'z'])
       where
         source_expr = cVar (localVarIdent source_var)
         define_value v field_name =
           let field_expr = CMember source_expr field_name False internalNode
-          in CBlockDecl $ declareLocalVariable v (Just field_expr)
+          in declare_variable v field_expr
 
     -- Unpack the fields of the source variable and assign the destinations
     unpack_and_assign source_var vs =
@@ -311,6 +342,7 @@ genAtom returns atom =
        vals' <- genVals vals
        code <- genManyResults returns vals'
        return (code, True)
+
      PrimCallA op args -> do
        call <- genCall (returnTypes returns) op args
        case call of
@@ -321,11 +353,15 @@ genAtom returns atom =
        args' <- genVals args
        result <- genOneResult returns $ genPrimCall op args'
        return (result, True)
+
+     UnpackA _ arg -> do
+       result <- genOneResult returns =<< genVal arg
+       return (result, True)
      _ -> internalError "genAtom: Unexpected atom"
 
 -- | Create a function call expression.  The call is either generated as a
 -- sequence of assignments followed by a @goto@ or a C function call.
-genCall :: [PrimType] 
+genCall :: [ValueType] 
         -> Val 
         -> [Val] 
         -> GenC (Either [CBlockItem] CExpr)
@@ -358,7 +394,7 @@ genCall return_types op args =
       args' <- genVals args
       
       -- Create the actual function type
-      return_type <- returnTypeDecl return_types
+      return_type <- returnTypeDecl $ map valueToPrimType return_types
 
       let param_types =
             map (anonymousDecl . primTypeDeclSpecs . valPrimType) args
@@ -504,12 +540,13 @@ isEmptyBlock _ = False
 -- inside the statement.
 genIf :: ReturnValues -> Val -> Stm -> Stm -> GenC (Code, Bool)
 genIf returns scrutinee if_true if_false = do
-  let (returns', return_var_decls) =
-        case returns
-        of AssignValues vs -> (returns, [])
-           DefineValues vs ->
-             (AssignValues vs, map (CBlockDecl . declareUndefLocalVariable) vs)
-           ReturnValues vs -> (returns, [])
+  (returns', return_var_decls) <-
+    case returns
+    of AssignValues vs -> return (returns, [])
+       DefineValues vs -> do
+         decls <- mapM declareUndefLocalVariable vs
+         return (AssignValues vs, map CBlockDecl decls)
+       ReturnValues vs -> return (returns, [])
 
   (true_path, true_fallthrough) <- makeBlock =<< genStatement returns' if_true
   (false_path, false_fallthrough) <- makeBlock =<< genStatement returns' if_false
@@ -551,7 +588,7 @@ genLocalFunction returns (FunDef v f)
       internalError "genLocalFunction: Not a primitive-call function"
   | otherwise = do
       let fun_name = localVarIdent v
-      let param_decls = map declareUndefLocalVariable $ funParams f
+      param_decls <- mapM declareUndefLocalVariable $ funParams f
       (body, ft) <- genStatement returns (funBody f)
       return $ LocalFunction { lfunLabel = fun_name
                              , lfunParamVars = map localVarIdent $ funParams f
@@ -626,14 +663,14 @@ genFun (FunDef v fun)
   | otherwise = do
     return_type <- returnTypeDecl (map from_prim_type $ funReturnTypes fun)
 
-    let -- Function parameter declarations
-        param_decls = [declareLocalVariable v Nothing | v <- funParams fun]
-        -- Function declaration
+    param_decls <- sequence [declareLocalVariable v Nothing
+                            | v <- funParams fun]
+    let -- Function declaration
         (return_type_specs, fun_declr) = funDeclSpecs param_decls return_type
         fun_decl = CDeclr (Just (varIdent v)) fun_declr Nothing [] internalNode
 
     -- Create the function body
-    let return_values = ReturnValues $ map valueToPrimType $ funReturnTypes fun
+    let return_values = ReturnValues $ funReturnTypes fun
     (body_stmt, _) <- makeBlock =<< genStatement return_values (funBody fun)
 
     let forward_declaration =

@@ -29,6 +29,7 @@ module SystemF.Flatten.EffectType
         EReturnType(..),
         returnTypeRepr,
         returnTypeType,
+        unpackFunctionType,
         
         -- * Renaming
         Renaming(..),
@@ -1135,6 +1136,17 @@ makeFunctionType effectfulness expr =
       let param_effects' =
             param_effects `effectUnion` maybeVarEffect (paramTypeRegion param)
       return (param, param_effects', dom_evars)
+
+-- | Given a function type, unpack it into parameters and arguments.
+--   Unpacking stops at the first effect type that is not literally the empty
+--   effect.
+unpackFunctionType :: EReturnType -> ([EParamType], Effect, EReturnType)
+unpackFunctionType rtype = unpack id rtype
+  where
+    unpack params_head (OwnRT (FunT param eff ret))
+      | isEmptyEffect eff = unpack (params_head . (param:)) ret
+      | otherwise = (params_head [param], eff, ret)
+    unpack params_head rt = (params_head [], emptyEffect, rt)
 
 -------------------------------------------------------------------------------
 -- Conversion from core to effect types

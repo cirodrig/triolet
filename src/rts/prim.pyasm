@@ -45,4 +45,16 @@ function mul_float(float x, float y) -> float {
 
 function fromint_float(int x) -> float {
   x as float;
-}
+};
+
+function load_complexFloat (pointer x) -> (complex(float)) {
+  typedef cfloat = complex(float);
+  complex(float) {x @! cfloat.real, x @! cfloat.imag};
+};
+
+function store_complexFloat (complex(float) x, pointer dst) -> () {
+  complex(float) {re, im} = x;
+  dst @! complex(float).real = re;
+  dst @! complex(float).imag = im;
+  ();
+};

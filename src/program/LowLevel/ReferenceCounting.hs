@@ -28,11 +28,10 @@ toPointerType t = t
 
 -- | Convert all owned pointers to non-owned pointers in the record type
 toPointerRecordType :: StaticRecord -> StaticRecord
-toPointerRecordType rec =
-  staticRecord $ map change_field $ map fieldType $ recordFields rec
+toPointerRecordType rec = mapRecordFieldTypes change_field rec
   where
     change_field (PrimField t) = PrimField $ toPointerPrimType t
-    change_field f = f
+    change_field _ = internalError "toPointerRecordType"
 
 isOwnedVar :: Var -> Bool
 isOwnedVar v =
@@ -49,7 +48,7 @@ toPointerVar :: Var -> Var
 toPointerVar v =
   case varType v
   of PrimType t -> v {varType = PrimType $ toPointerPrimType t}
-     _ -> internalError "toPointerVar"
+     RecordType r -> v {varType = RecordType $ toPointerRecordType r}
 
 toPointerVal :: Val -> Val
 toPointerVal value =
@@ -95,7 +94,8 @@ toPointerAtom atom =
      PrimA PrimCastToOwned [v] -> ValA [toPointerData v]
      PrimA PrimCastFromOwned [v] -> ValA [toPointerData v]
      PrimA prim vs -> PrimA (toPointerPrim prim) (toPointerDataList vs)
-     -- Pack and unpack atoms should have been eliminated
+     UnpackA rec v -> UnpackA (toPointerRecordType rec) (toPointerData v)
+     -- Pack atoms should have been eliminated
      _ -> internalError "toPointerAtom"
 
 toPointerStm :: Stm -> Stm

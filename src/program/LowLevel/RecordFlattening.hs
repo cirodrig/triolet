@@ -6,7 +6,7 @@
 -- or return values.
 -}
 
-{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, ViewPatterns #-}
 module LowLevel.RecordFlattening
        (flattenGlobalValue, flattenGlobalValues, flattenRecordTypes)
 where
@@ -22,10 +22,16 @@ import Gluon.Common.Supply
 import Gluon.Common.Identifier
 import LowLevel.Types
 import LowLevel.Record
+import LowLevel.Records
 import LowLevel.Syntax
 import LowLevel.Build
 import SystemF.Builtins
+import Export
 import Globals
+
+-- | The signatures of exported variables.  If a variable is exported,
+--   record flattening is performed differently. 
+type ExportMap = IntMap.IntMap ExportSig
 
 -- | An expansion of a variable.  A variable's expansion may be unknown if
 --   it was imported.
@@ -335,8 +341,74 @@ flattenFun fun =
                    then closureFun params returns body
                    else internalError "flattenFun"
 
-flattenTopLevel :: [FunDef] -> [DataDef] -> RF ([FunDef], [DataDef])
-flattenTopLevel fun_defs data_defs =
+-- | Flatten a function that will be exported.
+--   Some kinds of records will actually be passed as records (like C structs) 
+--   rather than flattened out into multiple parameters.
+flattenExportedFun :: ExportSig -> Fun -> RF Fun
+flattenExportedFun (ExportSig param_types return_type) fun 
+  | not $ isPrimFun fun =
+    internalError "flattenExportedFun: Cannot export this function"
+  | otherwise =
+    -- Call 'defineParams' to get the parameters seen by the function body
+    defineParams (funParams fun) $ \_ -> do
+      let returns = flattenValueTypeList $ funReturnTypes fun
+      body <- flattenStm $ funBody fun
+      
+      -- Gnerate parameter-manipulating code
+      (param_code, params) <- flattenExportedParams param_types (funParams fun)
+      let body2 = param_code body
+      return $! primFun params returns body2
+
+-- | Perform flattening on an exported parameter list.
+--   Generate the flattened, exported parameter list and the code that
+--   turns the exported parameters into fully flattened parameters.
+--
+--   The exported parameters must have been defined so that their fully
+--   flattened equivalents can be looked up.
+flattenExportedParams :: [ExportDataType] -> [ParamVar]
+                      -> RF (Stm -> Stm, [ParamVar])
+flattenExportedParams exported_types original_params = do
+  (unzip -> (codes, new_params)) <-
+    zipWithM flattenExportedParam exported_types original_params
+  return (foldr (.) id codes, concat new_params)
+
+flattenExportedParam :: ExportDataType -> ParamVar
+                     -> RF (Stm -> Stm, [ParamVar])
+flattenExportedParam etype original_param = do
+  -- Get the variables that this parameter was expanded to
+  expanded_values <- expandVar original_param
+  let xparams = map from_var expanded_values
+
+  let no_change' = no_change xparams
+  case etype of
+    ListET _ -> no_change'
+    PyonIntET -> no_change'
+    PyonFloatET -> no_change'
+    PyonComplexFloatET ->
+      unpack_record (complexRecord $ PrimField $ pyonFloatType) xparams
+    PyonBoolET -> no_change'
+  where
+    -- No flattening is performed for this parameter.
+    -- Verify that the parameter hasn't been expanded.
+    no_change xparams =
+      case xparams
+      of [xparam] | xparam == original_param -> return (id, [xparam])
+         _ -> internalError "flattenExportedParam"
+
+    -- This parameter is passed as a (flat) record, then unpacked before
+    -- executing the function body.
+    unpack_record record xparams = do
+      new_param <- newAnonymousVar (RecordType record)
+      let unpack_stm = LetE xparams $ UnpackA record (VarV new_param)
+      return (unpack_stm, [new_param])
+
+    -- Parameter variables always expand to a sequence of variables
+    from_var (VarV v) = v
+    from_var _ = internalError "flattenExportedParam: Unexpected value"
+
+flattenTopLevel :: ExportMap -> [FunDef] -> [DataDef]
+                -> RF ([FunDef], [DataDef])
+flattenTopLevel exports fun_defs data_defs =
   -- Ensure that all globals are defined
   defineParams [v | FunDef v _ <- fun_defs] $ \_ ->
   defineParams [v | DataDef v _ _ <- data_defs] $ \_ -> do
@@ -346,7 +418,9 @@ flattenTopLevel fun_defs data_defs =
     return (fun_defs', data_defs')
   where
     flatten_def (FunDef v f) = do
-      f' <- flattenFun f
+      f' <- case IntMap.lookup (fromIdent $ varID v) exports
+            of Nothing  -> flattenFun f
+               Just sig -> flattenExportedFun sig f
       return $ FunDef v f'
   
 -- | Change a data definition to a flat structure type
@@ -382,10 +456,12 @@ flattenRecordTypes mod =
         env = RFEnv var_supply import_map
     runReaderT (runRF flatten_module) env
   where
+    exports = IntMap.fromList [(fromIdent $ varID v, sig)
+                              | (v, sig) <- moduleExports mod]
     flatten_module = do
       imports' <- mapM flattenImport (moduleImports mod)
       (fun_defs', data_defs') <-
-        flattenTopLevel (moduleFunctions mod) (moduleData mod)
+        flattenTopLevel exports (moduleFunctions mod) (moduleData mod)
       return $ mod { moduleImports = imports'
                    , moduleFunctions = fun_defs'
                    , moduleData = data_defs'}
