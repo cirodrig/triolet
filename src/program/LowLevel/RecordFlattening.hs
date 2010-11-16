@@ -159,23 +159,80 @@ flattenSingleVal v = do
     [v'] -> return v'
     _ -> internalError "flattenSingleVal"
 
-flattenAtom :: Atom -> RF Atom
+-- | Flatten an atom.  Return the new atom.
+--
+--   Some atoms whose operands are records expand to multiple statements.
+--   The statements are returned, and should precede the atom in the new code.
+flattenAtom :: Atom -> RF (Stm -> Stm, Atom)
 flattenAtom atom =
   case atom
   of ValA vs ->
-       ValA `liftM` flattenValList vs
+       return_atom $ ValA `liftM` flattenValList vs
      CallA op vs ->
-       CallA `liftM` flattenSingleVal op `ap` flattenValList vs
+       return_atom $ CallA `liftM` flattenSingleVal op `ap` flattenValList vs
      PrimCallA op vs ->
-       PrimCallA `liftM` flattenSingleVal op `ap` flattenValList vs
+       return_atom $ PrimCallA `liftM` flattenSingleVal op `ap` flattenValList vs
+     -- If loading a record, load its parts individually
+     PrimA (PrimLoad (RecordType rec_type)) vs -> do
+       [ptr, off] <- flattenValList vs
+       flattenLoad rec_type ptr off
+     -- If storing a record, load its parts individually
+     PrimA (PrimStore (RecordType rec_type)) vs ->
+       flattenStore rec_type =<< flattenValList vs
      PrimA prim vs ->
-       PrimA prim `liftM` flattenValList vs
+       return_atom $ PrimA prim `liftM` flattenValList vs
      PackA _ vals ->
        -- Return a tuple of values
-       ValA `liftM` flattenValList vals
+       return_atom $ ValA `liftM` flattenValList vals
      UnpackA _ v ->
        -- The argument expands to a tuple of values.  Return the tuple.
-       ValA `liftM` flattenVal v
+       return_atom $ ValA `liftM` flattenVal v
+  where
+    return_atom m = do atom <- m
+                       return (id, atom)
+
+-- Flatten a load of a record by loading its fields individually
+flattenLoad :: StaticRecord -> Val -> Val -> RF (Stm -> Stm, Atom)
+flattenLoad record_type ptr off = do
+  -- Compute (ptr ^+ off)
+  (compute_base, base) <- pointerOffsetCode ptr off
+
+  -- Load each field into a new variable
+  let fields = recordFields $ flattenStaticRecord record_type
+  (codes, field_vars) <- mapAndUnzipM (load_field base) fields
+  return (compute_base . foldr (.) id codes, ValA $ map VarV field_vars)
+  where
+    load_field base fld =
+      case fieldType fld
+      of PrimField pt -> do
+           v <- newAnonymousVar (PrimType pt)
+           let atom = PrimA (PrimLoad (PrimType pt))
+                      [base, nativeIntV $ fieldOffset fld]
+           return (LetE [v] atom, v)
+         _ -> internalError "flattenLoad"
+  
+flattenStore record_type (ptr : off : values) = do 
+  -- Compute (ptr ^+ off)
+  (compute_base, base) <- pointerOffsetCode ptr off
+
+  -- Store each field
+  let store_field fld val =
+        let offset = nativeIntV $ fieldOffset fld
+            pt = case fieldType fld
+                 of PrimField t -> t
+                    _ -> internalError "flattenStore"
+        in LetE [] $ PrimA (PrimStore (PrimType pt)) [base, offset, val]
+
+      fields = recordFields $ flattenStaticRecord record_type      
+      code = foldr (.) id $ zipWith store_field fields values
+
+  return (compute_base . code, ValA [])
+
+pointerOffsetCode ptr off
+  | isZeroLit off = return (id, ptr)
+  | otherwise = do
+      ptr' <- newAnonymousVar (PrimType PointerType)
+      return (LetE [ptr'] $ PrimA PrimAddP [ptr, off], VarV ptr')
 
 -- | Convert a flattened value list to one that doesn't contain any lambda 
 --   functions, by assigning lambda functions to temporary variables.  The
@@ -215,9 +272,10 @@ flattenStm statement =
        vals <- flattenVal val
        assign_variables vs expanded_vs_sizes vals next_statement
      LetE vs atom next_statement -> do
-       atom' <- flattenAtom atom
-       defineParams vs $ \vs' ->
-         fmap (assignment vs' atom') $ flattenStm next_statement
+       (atom_statements, atom') <- flattenAtom atom
+       defineParams vs $ \vs' -> do
+         next_statement' <- flattenStm next_statement
+         return (atom_statements $ assignment vs' atom' next_statement')
      LetrecE defs next_statement ->
        defineParams [v | FunDef v _ <- defs] $ \_ -> do
          defs' <- mapM flatten_def defs
@@ -226,8 +284,9 @@ flattenStm statement =
        val' <- flattenSingleVal val
        alts' <- mapM flatten_alt alts
        return $ SwitchE val' alts' 
-     ReturnE atom ->
-       fmap ReturnE $ flattenAtom atom
+     ReturnE atom -> do
+       (atom_statements, atom') <- flattenAtom atom
+       return (atom_statements $ ReturnE atom')
   where
     flatten_def (FunDef v f) = do
       f' <- flattenFun f

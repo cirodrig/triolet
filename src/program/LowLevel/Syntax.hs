@@ -53,9 +53,11 @@ data Prim =
                                 --   (owned or non-owned) pointer.  The result
                                 --   is a non-owned pointer.
   | PrimLoad !ValueType         -- ^ Load a value from an (owned or non-owned) 
-                                --   pointer.
+                                --   pointer.  The value may be a static
+                                --   record, if records haven't been flattened.
   | PrimStore !ValueType        -- ^ Store a value to an (owned or non-owned) 
-                                --   pointer.
+                                --   pointer.  The value may be a static
+                                --   record, if records haven't been flattened.
   | PrimAAddZ !Signedness !Size -- ^ Atomically add the target of a pointer to
                                 --   an integer.  Return the original value at
                                 --   that address.
