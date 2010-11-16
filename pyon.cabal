@@ -102,6 +102,7 @@ Executable pyon
     LowLevel.ClosureCode
     LowLevel.FreshVar
     LowLevel.GenerateC
+    LowLevel.GenerateCCode
     LowLevel.GenerateCHeader
     LowLevel.GenerateCUtils
     LowLevel.Label

@@ -27,6 +27,7 @@ import LowLevel.Record
 import LowLevel.Syntax
 import LowLevel.Print
 import LowLevel.GenerateCUtils
+import LowLevel.GenerateCCode
 
 data CodeItem =
     CCode [CBlockItem]
@@ -112,131 +113,23 @@ withLocalFunctions local_fs (GenC m) = GenC $ local insert m
               foldr (uncurry Map.insert) (localFunctions env) local_fs}
 
 -------------------------------------------------------------------------------
--- Declarations, literals, and values
-
--- | Define an unitialized piece of global data.
-declareBytes :: Var -> Int -> Int -> CDecl
-declareBytes v size align =
-  let array = CArrDeclr [] (CArrSize False $ genSmallIntConst size) internalNode
-      align_expr = genSmallIntConst align
-      align_attr = CAttr (builtinIdent "aligned") [align_expr] internalNode
-      ident = varIdent v
-      declr = CDeclr (Just ident) [array] Nothing [align_attr] internalNode
-      type_spec = CTypeSpec (CCharType internalNode)
-  in CDecl [type_spec] [(Just declr, Nothing, Nothing)] internalNode
-
--- | Declare or define a variable.  The variable is not global and
---   is not accessed by reference.
-declareLocalVariable :: Var -> Maybe CExpr -> CDecl
-declareLocalVariable v initializer =
-  let (type_specs, derived_declr) = primTypeDeclSpecs $ varPrimType v
-      ident = localVarIdent v
-      declr = CDeclr (Just ident) derived_declr Nothing [] internalNode
-      init = case initializer
-             of Nothing -> Nothing
-                Just e  -> Just $ CInitExpr e internalNode
-  in CDecl type_specs [(Just declr, init, Nothing)] internalNode
-
-declareUndefLocalVariable :: Var -> CDecl
-declareUndefLocalVariable v = declareLocalVariable v Nothing
-
-{-
--- | Generate an abstract declarator, used in type casting 
-abstractDeclr :: PrimType -> CDecl
-abstractDeclr ty =
-  let (type_specs, derived_declr) = primTypeDeclSpecs ty
-      declr = CDeclr Nothing derived_declr Nothing [] internalNode
-  in CDecl type_specs [(Just declr, Nothing, Nothing)] internalNode
-
--- | Generate an abstract declarator for a pointer to the specified type,
--- used in type casting 
-abstractPtrDeclr :: PrimType -> CDecl
-abstractPtrDeclr ty = anonymousDecl $ ptrDeclSpecs ty
--}
-
-pyonPointerType :: CDecl
-pyonPointerType =
-  let type_specs = [CTypeSpec (CTypeDef (internalIdent "PyonPtr") internalNode)]
-      declr = CDeclr Nothing [] Nothing [] internalNode
-  in CDecl type_specs [(Just declr, Nothing, Nothing)] internalNode
-
--- | Generate a constant integer expression
-genIntConst :: Integral a => Signedness -> Size -> a -> CExpr
-genIntConst sgn sz n =
-  let sign_flag = case sgn
-                  of Signed -> ""
-                     Unsigned -> "U"     
-      size_flag = case sz
-                  of S64 -> "L"
-                     _ -> ""
-      read_int m =
-        case readCInteger DecRepr (show m ++ sign_flag ++ size_flag)
-        of Left _ -> internalError "genLit: Cannot generate integer literal"
-           Right x -> x
-      
-      -- If the literal is negative, then generate a positive literal and then
-      -- negate it
-      literal = CConst $ CIntConst (read_int $ abs n) internalNode
-  in if n >= 0
-     then literal
-     else CUnary CMinOp literal internalNode
-
-genSmallIntConst :: Int -> CExpr
-genSmallIntConst n = genIntConst Signed nativeIntSize n
-
--- | Cast an expression to the C equivalent of a pointer to the given type
-genCast :: PrimType -> CExpr -> CExpr
-genCast to_type expr =
-  let decl = anonymousDecl $ ptrDeclSpecs $ primTypeDeclSpecs to_type
-  in CCast decl expr internalNode
-
--- | Generate a pointer offset expression
--- The generated expression is a call to PYON_OFF (actually a macro) 
--- with the pointer and offset
-genOffset :: CExpr -> CExpr -> CExpr
-genOffset base off 
-  | isZeroCExpr off = base
-  | otherwise =
-      CCall (CVar (internalIdent "PYON_OFF") internalNode) [base, off]
-      internalNode
-
-isZeroCExpr :: CExpr -> Bool
-isZeroCExpr e =
-  case e
-  of CConst (CIntConst n _) -> getCInteger n == 0
-     _ -> False
+-- Non-recursive expressions
 
 genLit :: Lit -> CExpr
-
--- Null literal = (void *)0
-genLit NullL =
-  let zero = genSmallIntConst 0
-      pointer_deriv = CPtrDeclr [] internalNode
-      pointer_declr =
-        CDeclr Nothing [pointer_deriv] Nothing [] internalNode
-      void_ptr_type = CDecl
-                      [CTypeSpec (CVoidType internalNode)]
-                      [(Just pointer_declr, Nothing, Nothing)]
-                      internalNode
-  in CCast void_ptr_type zero internalNode
-genLit (BoolL True) = genSmallIntConst 1
-genLit (BoolL False) = genSmallIntConst 0
-genLit (IntL sgn sz n) = genIntConst sgn sz n
-
-genLit (FloatL S32 n) =
-  let literal = CConst $ CFloatConst (readCFloat (show $ abs n)) internalNode
-  in if n >= 0
-     then literal
-     else CUnary CMinOp literal internalNode
+genLit NullL           = nullPtr
+genLit (BoolL True)    = smallIntConst 1
+genLit (BoolL False)   = smallIntConst 0
+genLit (IntL sgn sz n) = intConst sgn sz n
+genLit (FloatL S32 n)  = floatConst S32 n
 
 genVal :: GlobalVars -> Val -> CExpr
 genVal gvars (VarV v)
   | v `Set.member` gvars =
-      -- Take address of global variable; cast to pointer
-      CCast pyonPointerType (CUnary CAdrOp var_exp internalNode) internalNode
+      -- Take address of global variable, and cast to pointer
+      cPtrCast $ cUnary CAdrOp var_exp
   | otherwise = var_exp
   where
-  var_exp = CVar (varIdentScoped gvars v) internalNode
+  var_exp = cVar $ varIdentScoped gvars v
       
 genVal _ (LitV l) = genLit l
 
@@ -248,8 +141,7 @@ valPrimType v =
      _ -> internalError "valPrimType"
 
 genAssignVar :: Var -> CExpr -> CExpr
-genAssignVar v e =
-  CAssign CAssignOp (CVar (localVarIdent v) internalNode) e internalNode
+genAssignVar v e = cAssign (CVar (localVarIdent v) internalNode) e
 
 -------------------------------------------------------------------------------
 -- Atoms and statements
@@ -353,13 +245,11 @@ genCall gvars local_functions return_types op args
                         map (genVal gvars) args
             where
               make_assignment ident expr =
-                let lhs = CVar ident internalNode
-                    assignment = CAssign CAssignOp lhs expr internalNode
-                in CExpr (Just assignment) internalNode
+                cExprStat $ cAssign (cVar ident) expr
 
-      -- Jump to the function's label
-          jump = CGoto (lfunLabel lfun) internalNode
-      in Left (map CBlockStmt $ assignments ++ [jump])
+          statements = map CBlockStmt $
+                       assignments ++ [cGoto $ lfunLabel lfun]
+      in Left statements
 
   | otherwise =
       -- Generate an ordinary function call.
@@ -367,32 +257,26 @@ genCall gvars local_functions return_types op args
           args' = map (genVal gvars) args
       
           -- Create the actual function type
-          (return_specs, return_derived_declr) =
+          return_type =
             case return_types
             of [] -> voidDeclSpecs
                [t] -> primTypeDeclSpecs t
                _ -> internalError "genCall: Cannot generate multiple return values"
-      
+
           param_types =
             map (anonymousDecl . primTypeDeclSpecs . valPrimType) args
-          fn_derived_declrs =
-            CPtrDeclr [] internalNode :
-            CFunDeclr (Right (param_types, False)) [] internalNode :
-            return_derived_declr
-          fn_declr = CDeclr Nothing fn_derived_declrs Nothing [] internalNode
-          fn_type = CDecl return_specs [(Just fn_declr, Nothing, Nothing)] internalNode
-      
+          fn_type =
+            ptrDeclSpecs $ funDeclSpecs param_types return_type
+
           -- Cast operator to function pointer type
-          cast = CCast fn_type op' internalNode
-      in Right (CCall cast args' internalNode)
+          cast = CCast (anonymousDecl fn_type) op' internalNode
+      in Right (cCall cast args')
 
 genPrimCall :: Prim -> [CExpr] -> CExpr
 genPrimCall prim args =
   case prim
   of PrimCastZ from_sgn to_sgn sz ->
-       let to_type = anonymousDecl $ primTypeDeclSpecs $ IntType to_sgn sz
-       in case args
-          of [arg] -> CCast to_type arg internalNode
+       case args of [arg] -> cCast (IntType to_sgn sz) arg
      PrimAddZ _ _ -> binary CAddOp args
      PrimSubZ _ _ -> binary CSubOp args
      PrimMulZ _ _ -> binary CMulOp args
@@ -405,13 +289,11 @@ genPrimCall prim args =
        of [x, y] ->
             let remainder = binary' CRmdOp x y
                 correction =
-                  CCond
-                  (geZero x `equals` geZero y)
-                  (Just zero) y internalNode
+                  cCond (geZero x `equals` geZero y) zero y
             in binary' CAddOp remainder correction
      PrimMaxZ _ _ ->
        case args
-       of [x, y] -> CCond (binary' CGeqOp x y) (Just x) y internalNode
+       of [x, y] -> cCond (binary' CGeqOp x y) x y
      PrimCmpZ _ _ CmpEQ -> binary CEqOp args
      PrimCmpZ _ _ CmpNE -> binary CNeqOp args
      PrimCmpZ _ _ CmpLT -> binary CLeOp args
@@ -428,20 +310,20 @@ genPrimCall prim args =
      PrimOr -> binary COrOp args
      PrimNot -> case args of [arg] -> CUnary CNegOp arg internalNode
      PrimAddP ->
-       case args of [ptr, off] -> genOffset ptr off
+       case args of [ptr, off] -> offset ptr off
      PrimLoad (PrimType ty) ->
        -- Cast the pointer to the desired pointer type, then dereference
        case args
        of [ptr, off] ->
-            let offptr = genOffset ptr off
-                cast_ptr = genCast ty offptr
+            let offptr = offset ptr off
+                cast_ptr = cCast ty offptr
             in CUnary CIndOp cast_ptr internalNode
      PrimStore (PrimType ty) ->
        -- Cast the pointer to the desired type, then assign to it
        case args
        of [ptr, off, val] ->
-            let offptr = genOffset ptr off
-                cast_ptr = genCast ty offptr
+            let offptr = offset ptr off
+                cast_ptr = cCast ty offptr
                 lhs = CUnary CIndOp cast_ptr internalNode
             in CAssign CAssignOp lhs val internalNode
      PrimAAddZ sgn sz 
@@ -449,7 +331,7 @@ genPrimCall prim args =
            case args
            of [ptr, val] ->
                 let add_fun = internalIdent "__sync_fetch_and_add"
-                    cast_ptr = genCast (IntType sgn sz) ptr
+                    cast_ptr = cCast (IntType sgn sz) ptr
                 in CCall (CVar add_fun internalNode) [cast_ptr, val] internalNode
      PrimCastZToF from_size to_size ->
        case args
@@ -469,10 +351,10 @@ genPrimCall prim args =
           "Cannot generate C code for primitive operation: " ++
           show (pprPrim prim)
   where
-    zero = genSmallIntConst 0
+    zero = smallIntConst 0
     geZero x = binary' CGeqOp x zero
     equals x y = binary' CEqOp x y
-    binary' op x y = CBinary op x y internalNode
+    binary' op x y = cBinary op x y
     binary op [x, y] = binary' op x y
     binary op _ = internalError "genPrimCall: Wrong number of arguments"
 
@@ -537,7 +419,7 @@ genIf returns scrutinee if_true if_false = do
   let false_branch = if isEmptyBlock false_path
                      then Nothing
                      else Just false_path
-  
+
   gvars <- getGlobalVars
   let cond_expr = genVal gvars scrutinee
   let if_stmt = CCode $
@@ -647,7 +529,7 @@ genFun (FunDef v fun)
       internalError "genFun: Can only generate primitive-call functions"
   | otherwise = do
     let -- Function return type
-      (return_type_specs, return_derived_declr) =
+      return_type =
         case funReturnTypes fun
         of [] -> voidDeclSpecs
            [PrimType t] -> primTypeDeclSpecs t
@@ -656,12 +538,8 @@ genFun (FunDef v fun)
       -- Function parameter declarations
       param_decls = [declareLocalVariable v Nothing | v <- funParams fun]
       -- Function declaration
-      fun_declr =
-        CFunDeclr (Right (param_decls, False)) [] internalNode
-      derived_declr =
-        fun_declr : return_derived_declr
-      fun_decl =
-        CDeclr (Just (varIdent v)) derived_declr Nothing [] internalNode
+      (return_type_specs, fun_declr) = funDeclSpecs param_decls return_type
+      fun_decl = CDeclr (Just (varIdent v)) fun_declr Nothing [] internalNode
 
     -- Create the function body
     let return_values = ReturnValues $ map valueToPrimType $ funReturnTypes fun
@@ -714,7 +592,7 @@ genImportVar v =
   in CDecl return_type_specs [(Just fun_decl, Nothing, Nothing)] internalNode
 
 initializeBytes gvars v record_type values =
-  let base = CVar (varIdent v) internalNode 
+  let base = cVar (varIdent v)
       stmts =
         map mk_stmt $
         zipWith (initializeField gvars base) (recordFields record_type) values
@@ -724,10 +602,10 @@ initializeBytes gvars v record_type values =
 
 initializeField gvars base fld val =
   -- Generate the assignment *(TYPE *)(PYON_OFF(base, fld)) = val
-  let field_offset = genSmallIntConst (fieldOffset fld)
-      field_ptr = genOffset base field_offset
+  let field_offset = smallIntConst (fieldOffset fld)
+      field_ptr = offset base field_offset
       field_cast_ptr = case fieldType fld
-                       of PrimField t -> genCast t field_ptr
+                       of PrimField t -> cCast t field_ptr
                           _ -> internalError "initializeField"
       lhs = CUnary CIndOp field_cast_ptr internalNode
       rhs = genVal gvars val

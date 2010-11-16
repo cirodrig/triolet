@@ -27,6 +27,11 @@ anonymousDecl (specs, deriv) =
   let declr = CDeclr Nothing deriv Nothing [] internalNode
   in CDecl specs [(Just declr, Nothing, Nothing)] internalNode
 
+funDeclSpecs :: [CDecl] -> DeclSpecs -> DeclSpecs
+funDeclSpecs param_types (return_specs, return_derived_declr) =
+  let fn_derived_declr = CFunDeclr (Right (param_types, False)) [] internalNode
+  in (return_specs, fn_derived_declr : return_derived_declr)
+
 nameDeclSpecs :: String -> DeclSpecs
 nameDeclSpecs name = identDeclSpecs (internalIdent name)
 
