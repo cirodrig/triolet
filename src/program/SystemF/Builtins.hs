@@ -69,6 +69,7 @@ module SystemF.Builtins
         the_fun_map,
         the_fun_map_Stream,
         the_fun_reduce,
+        the_fun_reduce_Stream,
         the_fun_reduce1,
         the_fun_reduce1_Stream,
         the_fun_zip,

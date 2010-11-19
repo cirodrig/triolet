@@ -682,7 +682,6 @@ genFun (FunDef v fun)
     from_prim_type (PrimType t) = t
     from_prim_type _ = internalError "genFun: Unexpected record type"
 
-
 -- | Create a global static data definition and initialization code.
 genData :: GlobalVars -> DataDef -> (CExtDecl, CStat)
 genData gvars (DataDef v record_type values) =

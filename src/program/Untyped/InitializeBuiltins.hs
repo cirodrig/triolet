@@ -428,7 +428,7 @@ mkReduceType = forallType [Star :-> Star, Star] $ \ [t, a] ->
       aT = ConTy a
   in ([tT `IsInst` tiBuiltin the_Traversable,
        passable aT, passable (tT @@ aT)],
-      functionType [aT, functionType [aT, aT] aT, tT @@ aT] aT)
+      functionType [functionType [aT, aT] aT, aT, tT @@ aT] aT)
 
 mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t

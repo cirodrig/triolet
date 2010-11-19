@@ -172,6 +172,10 @@ globalConTable =
          Specialize
          (Don'tCare $ Don'tCare $ End $ pyonBuiltin the_fun_map_Stream)
          (Don'tCare $ Don'tCare $ End $ pyonBuiltin the_fun_map))
+      , (the_fun_reduce,
+         Specialize
+         (Don'tCare $ End $ pyonBuiltin the_fun_reduce_Stream)
+         (Don'tCare $ End $ pyonBuiltin the_fun_reduce))
       , (the_fun_reduce1,
          Specialize
          (Don'tCare $ End $ pyonBuiltin the_fun_reduce1_Stream) 

@@ -286,6 +286,11 @@ constant fun_reduce : (t : Pure -> Pure) -> (a : Pure)
                    -> PassConv (t a)
                    -> ((a -> a -> a) -> a -> t a -> a);
 
+constant fun_reduce_Stream : (a : Pure)
+                   -> PassConv a
+                   -> PassConv (Stream a)
+                   -> ((a -> a -> a) -> a -> Stream a -> a);
+
 constant fun_reduce1 : (t : Pure -> Pure) -> (a : Pure)
                     -> TraversableDict t
                     -> PassConv a

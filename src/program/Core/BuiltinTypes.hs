@@ -377,6 +377,68 @@ streamMapType = mkConType $ do
         retCT (OwnRT ::: result_type)
   return (OwnRT ::: constructor_type)
 
+reduceType = mkConType $ do
+  e <- newAnonymousVariable TypeLevel
+  t <- newAnonymousVariable TypeLevel
+  a <- newAnonymousVariable TypeLevel
+  addr_arg1 <- newAnonymousVariable ObjectLevel
+  addr_arg2 <- newAnonymousVariable ObjectLevel
+  addr_container <- newAnonymousVariable ObjectLevel
+  addr_acc <- newAnonymousVariable ObjectLevel
+  addr_dict <- newAnonymousVariable ObjectLevel
+  addr_pc_a <- newAnonymousVariable ObjectLevel
+  addr_pc_sa <- newAnonymousVariable ObjectLevel
+  let reducer_type =
+        funCT $
+        pureArrCT (ReadPT addr_arg1 ::: varCT a) $
+        arrCT (ReadPT addr_arg2 ::: varCT a) (varCT e) $
+        retCT (WriteRT ::: varCT a)
+      dict_type =
+        appExpCT (mkInternalConE $ pyonBuiltin the_TraversableDict) [varCT t]
+      container_type = appCT (varCT t) [varCT a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
+        pureArrCT (ValPT (Just t) ::: expCT (mkInternalArrowE False pureKindE pureKindE)) $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ReadPT addr_dict ::: dict_type) $
+        pureArrCT (ReadPT addr_pc_a ::: passConvOf (varCT a)) $
+        pureArrCT (ReadPT addr_pc_sa ::: passConvOf container_type) $
+        pureArrCT (OwnPT ::: reducer_type) $
+        pureArrCT (ReadPT addr_acc ::: varCT a) $
+        arrCT (ReadPT addr_container ::: container_type) (varCT e) $
+        retCT (WriteRT ::: varCT a)
+  return (OwnRT ::: constructor_type)
+
+streamReduceType = mkConType $ do
+  e <- newAnonymousVariable TypeLevel
+  a <- newAnonymousVariable TypeLevel
+  addr_arg1 <- newAnonymousVariable ObjectLevel
+  addr_arg2 <- newAnonymousVariable ObjectLevel
+  addr_acc <- newAnonymousVariable ObjectLevel
+  addr_pc_a <- newAnonymousVariable ObjectLevel
+  addr_pc_sa <- newAnonymousVariable ObjectLevel
+  let reducer_type =
+        funCT $
+        pureArrCT (ReadPT addr_arg1 ::: varCT a) $
+        arrCT (ReadPT addr_arg2 ::: varCT a) (varCT e) $
+        retCT (WriteRT ::: varCT a)
+      pure_stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                         [emptyEffectType, varCT a]
+      stream_type = appCT (conCT $ pyonBuiltin the_LazyStream)
+                    [varCT e, varCT a]
+      constructor_type =
+        funCT $
+        pureArrCT (ValPT (Just e) ::: expCT effectKindE) $
+        pureArrCT (ValPT (Just a) ::: expCT pureKindE) $
+        pureArrCT (ReadPT addr_pc_a ::: passConvOf (varCT a)) $
+        pureArrCT (ReadPT addr_pc_sa ::: passConvOf pure_stream_type) $
+        pureArrCT (OwnPT ::: reducer_type) $
+        pureArrCT (ReadPT addr_acc ::: varCT a) $
+        arrCT (OwnPT ::: stream_type) (varCT e) $
+        retCT (WriteRT ::: varCT a)
+  return (OwnRT ::: constructor_type)
+
 streamReturnType = mkConType $ do
   e <- newAnonymousVariable TypeLevel
   a <- newAnonymousVariable TypeLevel
@@ -640,6 +702,10 @@ constructorTable =
                streamBindType)
             , (pyonBuiltin SystemF.Builtins.the_fun_map_Stream,
                streamMapType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_reduce,
+               reduceType)
+            , (pyonBuiltin SystemF.Builtins.the_fun_reduce_Stream,
+               streamReduceType)
             , (pyonBuiltin SystemF.Builtins.the_fun_return,
                streamReturnType)
             , (pyonBuiltin SystemF.Builtins.the_fun_generate,

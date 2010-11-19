@@ -137,6 +137,7 @@ pyonBuiltinFunctions =
   , "fun_map"
   , "fun_map_Stream"
   , "fun_reduce"
+  , "fun_reduce_Stream"
   , "fun_reduce1"
   , "fun_reduce1_Stream"
   , "fun_zip"
