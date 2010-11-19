@@ -55,6 +55,12 @@ record MultiplicativeDict(a) {
   a one;			// The one value
 };
 
+// Traversable dictionary
+record TraversableDict {
+  owned traverse;               // Traverse an object
+  owned build;                  // Build an object
+};
+
 // Complex numbers
 record complex(a) {
   a real;

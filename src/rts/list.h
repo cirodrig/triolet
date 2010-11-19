@@ -26,11 +26,9 @@ extern function pyon.internal.list.list_generate
 extern function pyon.internal.list.subscript
   (unit, pointer, pointer, int) -> pointer;
 
+extern function pyon.internal.list.passConv_list
+  (unit, pointer, pointer) -> ();
+
 extern procedure pyon.internal.list.list_peek
   (pointer, pointer, word, pointer) -> ();
-// Create the parameter passing convention of a list
-#define PASSCONV_LIST(elem)				\
-  (PassConv {sizeof PyonList,				\
-             alignof PyonList,				\
-             owned call list_copy(elem),		\
-             owned call list_finalize(elem)})
+

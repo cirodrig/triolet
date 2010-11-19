@@ -346,3 +346,77 @@ function Stream_map_initialize
   ();
 };
 
+/*****************************************************************************/
+/* reduce */
+
+function Stream_reduce
+  (unit _, unit _,
+   pointer passconv, pointer _,
+   owned reducer,
+   pointer init,
+   owned stream,
+   pointer ret) -> () {
+  elem_size = passconv @! PassConv.size;
+  elem_align = passconv @! PassConv.align;
+  elem_copy = passconv @! PassConv.copy;
+  elem_finalize = passconv @! PassConv.finalize;
+
+  // Setup
+  st = pointer primcall pyon_alloc (stream @! Stream.state_size);
+  () = () call (stream @! Stream.initialize) (st);
+
+  // Allocate two accumulators and swap between them.
+  // That way, the accumulator can be updated safely.
+  acc1 = pointer primcall pyon_alloc (elem_size);
+  acc2 = pointer primcall pyon_alloc (elem_size);
+  reduce_tmp = pointer primcall pyon_alloc (elem_size);
+  stream_next = stream @! Stream.next;
+  () = () call elem_copy (acc1, init);
+
+  // Main loop.
+  // At start, old_acc holds accumulator, new_acc is uninitialized,
+  // reduce_tmp is uninitialized.
+  // At termination, old_acc holds final accumulator, new_acc is uninitialized,
+  // reduce_tmp is uninitialized.
+  (acc1, acc2, _) = while (pointer old_acc = acc1,
+                           pointer new_acc = acc2,
+                           bool not_depleted = true)
+                          (not_depleted) {
+    not_depleted = bool call stream_next (st, reduce_tmp);
+    if (not_depleted) {
+      () = () call reducer (old_acc, reduce_tmp, new_acc);
+      () = () call elem_finalize (old_acc);
+      () = () call elem_finalize (reduce_tmp);
+      (new_acc, old_acc, true);
+    } else {
+      (old_acc, new_acc, false);
+    };
+  };
+
+  // Cleanup
+  () = () call (stream @! Stream.state_finalize) (st);
+  () = () call elem_copy (acc1, ret);
+  () = () call elem_finalize (acc1);
+  ();
+};
+
+
+function reduce
+  (unit _, unit _, unit _,
+   pointer traversable,
+   pointer elem_repr,
+   pointer container_repr,
+   owned reducer,
+   pointer initial_value,
+   pointer container,
+   pointer ret) -> () {
+  // Traverse the object and reduce the resulting stream
+  stream = owned call (traversable @! TraversableDict.traverse)
+                      (nil, elem_repr, container);
+
+  () = () call Stream_reduce (nil, nil, elem_repr, container_repr, reducer,
+                              initial_value, stream, ret);
+
+  // Clean up
+  ();
+};

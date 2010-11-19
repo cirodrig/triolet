@@ -12,10 +12,8 @@ module pyon.internal.list;
 #include "pyasm_records.h"
 
 // Duplicate a list
-function list_copy(pointer elem_repr, pointer src, pointer dst) -> () {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  elem_copy = elem_repr @! PassConv.copy;
+function list_copy_real(word elem_size, word elem_align, owned elem_copy,
+                        pointer src, pointer dst) -> () {
   num_elems = src @! PyonList.nelems;
 
   // Allocate a multiple of the list element's alignment to each element
@@ -40,11 +38,16 @@ function list_copy(pointer elem_repr, pointer src, pointer dst) -> () {
   ();
 };
 
-// Finalize a list
-function list_finalize (pointer elem_repr, pointer list) -> () {
+
+function list_copy(pointer elem_repr, pointer src, pointer dst) -> () {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  elem_fini = elem_repr @! PassConv.finalize;
+  elem_copy = elem_repr @! PassConv.copy;
+  () call list_copy_real(elem_size, elem_align, elem_copy, src, dst);
+};
+
+// Finalize a list
+function list_finalize_real (word elem_size, word elem_align, owned elem_fini, pointer list) -> () {
   pad_elem_size = PAD(elem_size, elem_align);
 
   num_elems = list @! PyonList.nelems;
@@ -60,6 +63,13 @@ function list_finalize (pointer elem_repr, pointer list) -> () {
   // Free the array
   PYON_DB_DEALLOC(word 1501)
   () primcall pyon_dealloc (contents);
+};
+
+function list_finalize (pointer elem_repr, pointer list) -> () {
+  elem_size = elem_repr @! PassConv.size;
+  elem_align = elem_repr @! PassConv.align;
+  elem_fini = elem_repr @! PassConv.finalize;
+  () call list_finalize_real (elem_size, elem_align, elem_fini, list);
 };
 
 // Create a list, leaving its elements uninitialized
@@ -241,6 +251,22 @@ function subscript(unit _, pointer elem_repr, pointer base, int index) -> pointe
   elem_align = elem_repr @! PassConv.align;
   pad_elem_size = PAD(elem_size, elem_align);
   base ^+ (pad_elem_size as int * index);
+};
+
+function passConv_list
+  (unit _, pointer elem_repr, pointer ret) -> ()
+{
+  ret @! PassConv.size = sizeof PyonList;
+  ret @! PassConv.align = alignof PyonList;
+  ret @! PassConv.copy =
+    owned call list_copy_real (elem_repr @! PassConv.size,
+                               elem_repr @! PassConv.align,
+                               elem_repr @! PassConv.copy);
+  ret @! PassConv.finalize =
+    owned call list_finalize_real (elem_repr @! PassConv.size,
+                                   elem_repr @! PassConv.align,
+                                   elem_repr @! PassConv.finalize);
+  ();
 };
 
 // Allocate and construct a list, given a suitably initialized data array.

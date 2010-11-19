@@ -5,6 +5,7 @@ module pyon.internal.structures;
 #include "memory_py.h"
 #include "apply_py.h"
 #include "structures.h"
+#include "list.h"
 #include "pyasm_records.h"
 
 // Parameter-passing convention dictionary of ints
@@ -37,6 +38,11 @@ function copy_PassConv (unit _, pointer src, pointer dst) -> () {
   dst @! PassConv.copy = src @! PassConv.copy;
   dst @! PassConv.finalize = src @! PassConv.finalize;
   ();
+};
+
+data pointer OpaqueTraversableDict_list = TraversableDict {
+  list_traverse,
+  list_build
 };
 
 function complex_pass_conv (unit _, pointer repr, pointer ret) -> () {

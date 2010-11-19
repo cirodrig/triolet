@@ -11,3 +11,8 @@ extern function pyon.internal.stream.Stream_generate
   (unit, unit, pointer, int, owned) -> owned;
 extern function pyon.internal.stream.Stream_map
   (unit, unit, unit, pointer, pointer, owned, owned) -> owned;
+extern function pyon.internal.stream.Stream_reduce
+  (unit, unit, pointer, pointer, owned, pointer, owned, pointer) -> ();
+
+extern function pyon.internal.stream.reduce
+  (unit, unit, unit, pointer, pointer, pointer, owned, pointer, pointer, pointer) -> ();
