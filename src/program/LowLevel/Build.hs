@@ -740,8 +740,13 @@ mkGlobalEntryPoints ftype label global_closure
       let arity = length $ ftParamTypes ftype
       return $! EntryPoints ftype arity dir exa ine Nothing inf (Just global_closure)
   where
+    -- If the global closure is externally visible, the other entry points
+    -- will also be externally visible
     make_entry_point tag =
-      newExternalVar (label {labelTag = tag, labelExternalName = Nothing}) (PrimType PointerType)
+      let new_label = label {labelTag = tag, labelExternalName = Nothing}
+      in if varIsExternal global_closure
+         then newExternalVar new_label (PrimType PointerType)
+         else newVar (Just new_label) (PrimType PointerType)
 
 mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
                  WantClosureDeallocator
