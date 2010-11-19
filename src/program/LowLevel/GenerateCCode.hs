@@ -82,15 +82,21 @@ nullPtr =
   let declr = anonymousDecl $ ptrDeclSpecs voidDeclSpecs
   in CCast declr (smallIntConst 0) internalNode
 
--- | Cast an expression to the C equivalent of a pointer to the given type
+-- | Cast an expression to the C equivalent of the given type
 cCast :: PrimType -> CExpr -> CExpr
 cCast to_type expr =
+  let decl = anonymousDecl $ primTypeDeclSpecs to_type
+  in CCast decl expr internalNode
+
+-- | Cast an expression to the C equivalent of a pointer to the given type
+cPtrCast :: PrimType -> CExpr -> CExpr
+cPtrCast to_type expr =
   let decl = anonymousDecl $ ptrDeclSpecs $ primTypeDeclSpecs to_type
   in CCast decl expr internalNode
 
 -- | Cast an expression to PyonPtr type
-cPtrCast :: CExpr -> CExpr
-cPtrCast expr = CCast pyonPointerType expr internalNode
+castToPyonPtr :: CExpr -> CExpr
+castToPyonPtr expr = CCast pyonPointerType expr internalNode
 
 -- | Generate a pointer offset expression.
 --   The generated expression is a call to PYON_OFF (actually a macro) 

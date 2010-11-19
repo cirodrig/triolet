@@ -195,7 +195,7 @@ genValWorker :: GlobalVars -> Val -> CExpr
 genValWorker gvars (VarV v)
   | v `Set.member` gvars =
       -- Take address of global variable, and cast to pointer
-      cPtrCast $ cUnary CAdrOp var_exp
+      castToPyonPtr $ cUnary CAdrOp var_exp
   | otherwise = var_exp
   where
   var_exp = cVar $ varIdentScoped gvars v
@@ -449,14 +449,14 @@ genPrimCall prim args =
        case args
        of [ptr, off] ->
             let offptr = offset ptr off
-                cast_ptr = cCast ty offptr
+                cast_ptr = cPtrCast ty offptr
             in CUnary CIndOp cast_ptr internalNode
      PrimStore (PrimType ty) ->
        -- Cast the pointer to the desired type, then assign to it
        case args
        of [ptr, off, val] ->
             let offptr = offset ptr off
-                cast_ptr = cCast ty offptr
+                cast_ptr = cPtrCast ty offptr
                 lhs = CUnary CIndOp cast_ptr internalNode
             in CAssign CAssignOp lhs val internalNode
      PrimAAddZ sgn sz 
@@ -464,7 +464,7 @@ genPrimCall prim args =
            case args
            of [ptr, val] ->
                 let add_fun = internalIdent "__sync_fetch_and_add"
-                    cast_ptr = cCast (IntType sgn sz) ptr
+                    cast_ptr = cPtrCast (IntType sgn sz) ptr
                 in CCall (CVar add_fun internalNode) [cast_ptr, val] internalNode
      PrimCastZToF from_size to_size ->
        case args
@@ -734,7 +734,7 @@ initializeField gvars base fld val =
   let field_offset = smallIntConst (fieldOffset fld)
       field_ptr = offset base field_offset
       field_cast_ptr = case fieldType fld
-                       of PrimField t -> cCast t field_ptr
+                       of PrimField t -> cPtrCast t field_ptr
                           _ -> internalError "initializeField"
       lhs = CUnary CIndOp field_cast_ptr internalNode
       rhs = genValWorker gvars val
