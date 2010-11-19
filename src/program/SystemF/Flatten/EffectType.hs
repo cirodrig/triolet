@@ -1158,6 +1158,49 @@ type CoreEnv = Map.Map Var EffectVar
 -- region and effect variables are created for each type.
 type CoreTrans a = ReaderT CoreEnv RegionM a
 
+-- | Type arguments to an operator that hasn't been converted tye
+data Args = NoArgs
+          | EffArgs [Effect]
+          | Args [Effect] [ERepType]
+
+nonemptyArgs NoArgs = False
+nonemptyArgs _ = True
+
+mkArgs :: [Effect] -> [ERepType] -> Args
+mkArgs [] [] = NoArgs
+mkArgs es [] = EffArgs es
+mkArgs es ts = Args es ts
+
+fromArgs :: Args -> ([Effect], [ERepType])
+fromArgs NoArgs       = ([], [])
+fromArgs (EffArgs es) = (es, [])
+fromArgs (Args es ts) = (es, ts)
+
+applyArgsVar :: Var -> Args -> ERepType
+applyArgsVar v args =
+  case fromArgs args
+  of ([], types) -> appT (varT v) types
+     (es, types) -> instT (Left v) es types
+
+applyArgsCon :: Con -> Args -> ERepType
+applyArgsCon c args =
+  case fromArgs args
+  of ([], types) -> conAppT c types
+     (es, types) -> instT (Right c) es types  
+
+-- | Apply a literal to type arguments.  The arguments should be empty.
+applyArgsLit :: Gluon.Lit -> Args -> ERepType
+applyArgsLit l NoArgs = litT l
+applyArgsLit _ _ = internalError "Unexpected type application of literal"
+
+concatArgs x NoArgs = x
+concatArgs NoArgs x = x
+concatArgs (EffArgs e1) (EffArgs e2) = EffArgs (e1 ++ e2)
+concatArgs (EffArgs e1) (Args e2 ts) = Args (e1 ++ e2) ts
+concatArgs (Args _ _) (EffArgs _)    = internalError "Unexpected effect argument"
+concatArgs (Args e1 t1) (Args [] t2) = Args e1 (t1 ++ t2)
+concatArgs (Args _ _) (Args (_:_) _) = internalError "Unexpected effect argument"
+
 -- Translated variables are unifiable.  To avoid unexpected
 -- unification-related side effects, a translated type should either be
 -- used immediately at a monomorphic type, or turned into a type scheme that's
@@ -1205,7 +1248,7 @@ cTypeToPolyEffectType :: Core.RCType -> CoreTrans ([EVar], ERepType)
 cTypeToPolyEffectType ty = 
   case ty
   of Core.FunCT ft -> from_poly_type ft
-     _ -> do t <- cTypeToEffectType ty []
+     _ -> do t <- cTypeToEffectType ty NoArgs
              return ([], t)
   where
     from_poly_type ft@(Core.ArrCT (Core.ValPT mv Core.::: param_ty) eff rng) 
@@ -1214,7 +1257,7 @@ cTypeToPolyEffectType ty =
             (qvars, ty) <- cTypeToPolyEffectType (Core.FunCT rng)
             return (evar : qvars, ty)
     
-      | otherwise = do t <- cTypeToEffectType (Core.FunCT ft) []
+      | otherwise = do t <- cTypeToEffectType (Core.FunCT ft) NoArgs
                        return ([], t)
 
     -- Functions must have a non-effect parameter
@@ -1223,33 +1266,25 @@ cTypeToPolyEffectType ty =
     is_effect_type (Core.ExpCT (Gluon.LitE {Gluon.expLit = Gluon.KindL Gluon.EffectKind})) = True
     is_effect_type _ = False
 
-cTypeToEffectType :: Core.RCType -> [ERepType] -> CoreTrans ERepType
+-- | Convert the given Core type to an effect type and apply it to the given
+--   type arguments.
+--
+--   This is done as one step because the given arguments may influence how
+--   the type is converted.
+cTypeToEffectType :: Core.RCType -> Args -> CoreTrans ERepType
 cTypeToEffectType ty ty_args =
   case ty
   of Core.ExpCT e -> gluonTypeToEffectType e ty_args
      Core.AppCT op args -> do
-       (eff_args, other_args) <- cTypeArgumentsToEffectTypes args
-       cop <- cTypeToEffectType op (other_args ++ ty_args)
-       
-       -- If there are effect arguments, create an instance expression
-       let varcon = case discardTypeRepr cop
-                    of VarT v -> Left v
-                       ConT c -> Right c
-                       _ -> internalError "cTypeToEffectType"
-           inst_op =
-             if null eff_args
-             then appT cop other_args
-             else instT varcon eff_args other_args
-
-       return inst_op
+       args' <- cTypeArgumentsToEffectTypes args
+       cTypeToEffectType op (concatArgs args' ty_args)
      Core.FunCT ft 
-       | not (null ty_args) -> internalError "cTypeToEffectType: Function type applied to arguments"
+       | nonemptyArgs ty_args -> internalError "cTypeToEffectType: Function type applied to arguments"
        | otherwise -> cFunTypeToEffectType ft
      
 -- | Convert a list of Core type arguments to effect-annotated types.
 -- A prefix of the arguments consists of effects; the rest are types.
-cTypeArgumentsToEffectTypes :: [Core.RCType]
-                            -> CoreTrans ([Effect], [ERepType])
+cTypeArgumentsToEffectTypes :: [Core.RCType] -> CoreTrans Args
 cTypeArgumentsToEffectTypes types = cvt_eff id types
   where
     -- Convert effect types, then convert other types
@@ -1261,9 +1296,9 @@ cTypeArgumentsToEffectTypes types = cvt_eff id types
           cvt_eff (hd . (eff:)) ts
         -- Convert remaining parameters (which are all type parameters)
         convert False = do
-          types <- forM (t:ts) $ \t -> cTypeToEffectType t []
-          return (hd [], types)
-    cvt_eff hd []     = return (hd [], [])
+          types <- forM (t:ts) $ \t -> cTypeToEffectType t NoArgs
+          return $ mkArgs (hd []) types
+    cvt_eff hd []     = return $ mkArgs (hd []) []
 
 -- | Decide whether a core expression is an effect type.  This function only
 -- works for the subset of core expressions that can be translated to effect
@@ -1311,7 +1346,7 @@ cFunTypeToEffectType ft = do
         lift $ etypeToReturnType $ funT param' eff' rng'
 
     to_return_type (Core.RetCT (binder Core.::: rng)) = do
-      rng' <- cTypeToEffectType rng []
+      rng' <- cTypeToEffectType rng NoArgs
       case binder of 
         Core.ValRT -> return $ ValRT $ discardTypeRepr rng'
         Core.OwnRT -> return $ OwnRT $ discardTypeRepr rng'
@@ -1332,7 +1367,7 @@ cFunTypeToEffectType ft = do
       when (is_effect_kind dom) $
         internalError "cFunTypeToEffectType: Unsupported higher-rank effect type"
 
-      dom' <- cTypeToEffectType dom []
+      dom' <- cTypeToEffectType dom NoArgs
       let dom_t = discardTypeRepr dom'
       case param of
         Core.ValPT mv -> k $ ValPT mv dom_t
@@ -1351,25 +1386,25 @@ cFunTypeToEffectType ft = do
 --
 -- /FIXME/: Convert effect types using cTypeToEffect.  Use Core type inference
 -- to identify effect types.
-gluonTypeToEffectType :: Gluon.RExp -> [ERepType] -> CoreTrans ERepType
+gluonTypeToEffectType :: Gluon.RExp -> Args -> CoreTrans ERepType
 gluonTypeToEffectType expr ty_args =
   case expr
-  of Gluon.VarE {Gluon.expVar = v} -> return $ appT (varT v) ty_args
-     Gluon.ConE {Gluon.expCon = c} -> return $ conAppT c []
-     Gluon.LitE {Gluon.expLit = l} -> return $ appT (litT l) ty_args
+  of Gluon.VarE {Gluon.expVar = v} -> return $ applyArgsVar v ty_args
+     Gluon.ConE {Gluon.expCon = c} -> return $ applyArgsCon c ty_args
+     Gluon.LitE {Gluon.expLit = l} -> return $ applyArgsLit l ty_args
      Gluon.AppE {Gluon.expOper = op, Gluon.expArgs = args} -> do
-       args' <- forM args $ \arg -> gluonTypeToEffectType arg []
-       gluonTypeToEffectType op (args' ++ ty_args)
+       args' <- forM args $ \arg -> gluonTypeToEffectType arg NoArgs
+       gluonTypeToEffectType op (concatArgs (mkArgs [] args') ty_args)
      Gluon.FunE { Gluon.expMParam = Gluon.Binder' Nothing dom ()
                 , Gluon.expRange = rng}
        | getLevel expr /= KindLevel -> 
            internalError "gluonTypeToEffectType: Unexpected function type"
-       | not (null ty_args) ->
+       | nonemptyArgs ty_args ->
            internalError "gluonTypeToEffectType: Function type was applied to parameters"
        | otherwise -> do
-           dom' <- gluonTypeToEffectType dom []
+           dom' <- gluonTypeToEffectType dom NoArgs
            param <- lift $ etypeToParamType dom' Nothing
-           rng' <- gluonTypeToEffectType rng []
+           rng' <- gluonTypeToEffectType rng NoArgs
            ret <- lift $ etypeToReturnType rng'
            return $ funT param emptyEffect ret
      _ -> internalError "gluonTypeToEffectType: Unexpected type"
