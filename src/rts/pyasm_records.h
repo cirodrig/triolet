@@ -67,6 +67,12 @@ record complex(a) {
   a imag;
 };
 
+// Pairs of objects; 2-tuples
+record Pair(a) {
+  a fst;
+  a snd;
+};
+
 /* Arrays (called "lists")
  *
  * A list consists of a size and a pointer to an array of list elements.

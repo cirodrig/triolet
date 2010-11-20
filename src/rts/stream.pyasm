@@ -360,6 +360,7 @@ function Stream_reduce
   elem_align = passconv @! PassConv.align;
   elem_copy = passconv @! PassConv.copy;
   elem_finalize = passconv @! PassConv.finalize;
+  typedef elem_type = bytes(elem_size, elem_align);
 
   // Setup
   st = pointer primcall pyon_alloc (stream @! Stream.state_size);
@@ -367,19 +368,18 @@ function Stream_reduce
 
   // Allocate two accumulators and swap between them.
   // That way, the accumulator can be updated safely.
-  acc1 = pointer primcall pyon_alloc (elem_size);
-  acc2 = pointer primcall pyon_alloc (elem_size);
+  accs = pointer primcall pyon_alloc (sizeof Pair(elem_type));
   reduce_tmp = pointer primcall pyon_alloc (elem_size);
   stream_next = stream @! Stream.next;
-  () = () call elem_copy (acc1, init);
+  () = () call elem_copy (accs @ Pair(elem_type).fst, init);
 
   // Main loop.
   // At start, old_acc holds accumulator, new_acc is uninitialized,
   // reduce_tmp is uninitialized.
   // At termination, old_acc holds final accumulator, new_acc is uninitialized,
   // reduce_tmp is uninitialized.
-  (acc1, acc2, _) = while (pointer old_acc = acc1,
-                           pointer new_acc = acc2,
+  (acc1, acc2, _) = while (pointer old_acc = accs @ Pair(elem_type).fst,
+                           pointer new_acc = accs @ Pair(elem_type).snd,
                            bool not_depleted = true)
                           (not_depleted) {
     not_depleted = bool call stream_next (st, reduce_tmp);
@@ -397,6 +397,8 @@ function Stream_reduce
   () = () call (stream @! Stream.state_finalize) (st);
   () = () call elem_copy (acc1, ret);
   () = () call elem_finalize (acc1);
+  () = () call elem_finalize (acc2);
+  () = () primcall pyon_dealloc(accs);
   ();
 };
 
