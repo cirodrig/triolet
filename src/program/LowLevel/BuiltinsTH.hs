@@ -47,12 +47,14 @@ instance Lift ValueType where
   lift (PrimType pt) = [| PrimType pt |]
   lift (RecordType rt) = [| RecordType rt |] 
 
+instance Lift CallConvention where
+  lift PrimCall = [| PrimCall |]
+  lift ClosureCall = [| ClosureCall |]
+
 instance Lift FunctionType where
-  lift ft
-    | ftIsPrim ft    = [| primFunctionType params returns |]
-    | ftIsClosure ft = [| closureFunctionType params returns |]
-    | otherwise      = internalError "FunctionType.lift"
+  lift ft = [| mkFunctionType conv params returns |]
     where
+      conv = ftConvention ft
       params = ftParamTypes ft
       returns = ftReturnTypes ft
 

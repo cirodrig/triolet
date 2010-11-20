@@ -120,7 +120,7 @@ toPointerFun f =
 toPointerFunctionType ftype =
   let domain = map toPointerType $ ftParamTypes ftype
       range = map toPointerType $ ftReturnTypes ftype
-  in  mkFunctionType (ftIsPrim ftype) domain range
+  in  mkFunctionType (ftConvention ftype) domain range
 
 toPointerDef (FunDef v f) =
   FunDef (toPointerVar v) (toPointerFun f)

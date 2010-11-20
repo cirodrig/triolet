@@ -123,9 +123,8 @@ getContinuation primcall live_outs f = Gen $ \return_type -> do
   let stms' cont_stm = LetrecE [FunDef cont_var cont_fun] (stms stm)
         where
           cont_fun =
-            if primcall
-            then primFun live_outs return_type cont_stm
-            else closureFun live_outs return_type cont_stm
+            let cc = if primcall then PrimCall else ClosureCall
+            in mkFun cc live_outs return_type cont_stm
   
   return ((), MkStm stms')
 
@@ -227,12 +226,12 @@ builtinVar v = VarV $ llBuiltin v
 
 genPrimFun :: Monad m => [ParamVar] -> [ValueType] -> Gen m Stm -> m Fun
 genPrimFun params returns body =
-  liftM (Fun True params returns) $ execBuild returns body
+  liftM (primFun params returns) $ execBuild returns body
 
 genClosureFun :: Monad m =>
                  [ParamVar] -> [ValueType] -> Gen m Stm -> m Fun
 genClosureFun params returns body =
-  liftM (Fun False params returns) $ execBuild returns body
+  liftM (closureFun params returns) $ execBuild returns body
 
 -- | Generate a binary primitive integer operation
 intBinaryPrimOp :: (Monad m, Supplies m (Ident Var)) =>

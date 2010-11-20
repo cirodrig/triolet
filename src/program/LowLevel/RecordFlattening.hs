@@ -127,7 +127,7 @@ flattenValueTypeList xs = map PrimType $ flattenTypeList xs
 
 flattenFunctionType :: FunctionType -> FunctionType
 flattenFunctionType ft =
-  mkFunctionType (ftIsPrim ft)
+  mkFunctionType (ftConvention ft)
   (flattenValueTypeList $ ftParamTypes ft)
   (flattenValueTypeList $ ftReturnTypes ft)
 

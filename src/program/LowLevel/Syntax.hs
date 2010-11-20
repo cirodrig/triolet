@@ -31,6 +31,27 @@ valueToPrimType (PrimType pt) = pt
 valueToPrimType _ =
   internalError "Expecting a primitive type, got a record type"
 
+-- | Attached to function definitions to indicate how many places in the 
+--   code contain a reference to the function.
+--
+--   'ManyUses' represents more than one use, or an unknown number of uses.
+data Uses = ZeroUses | OneUse | ManyUses
+
+-- | A measure of how much code a function contains.  Used to control 
+--   inlining.  An unknown code size is represented by -1.
+newtype CodeSize = CodeSize Int
+
+unknownCodeSize :: CodeSize
+unknownCodeSize = CodeSize (-1)
+
+codeSize :: Int -> CodeSize
+codeSize n | n < 0     = internalError "codeSize: Invalid size"
+           | otherwise = CodeSize n
+
+fromCodeSize :: CodeSize -> Maybe Int
+fromCodeSize (CodeSize n) | n < 0     = Nothing
+                          | otherwise = Just n
+
 -- | A comparison operation
 data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE
 
@@ -188,7 +209,7 @@ data Atom =
   | PackA !StaticRecord [Val]
     -- | Unpack a statically typed record value.
     --
-    -- After record flattening, this atom should only appear with a variable
+    -- After record flattening, this atom should only appear with a 'VarV'
     -- as its RHS.
   | UnpackA !StaticRecord Val
 
@@ -203,23 +224,49 @@ data Stm =
     -- | Produce a value
   | ReturnE Atom
 
+-- | The calling convention a function supports
+data CallConvention =
+    PrimCall                    -- ^ Primitive calling convention.
+                                --   Compiles to a machine function call.
+  | ClosureCall                 -- ^ Closure-based calling convention.
+                                --   Compiles to constructing and entering
+                                --   a closure.
+    deriving(Eq)
+
 data Fun =
   Fun 
-  { funIsPrim :: !Bool 
-  , funParams :: [ParamVar] 
+  { funConvention  :: !CallConvention
+  , funSize        :: {-# UNPACK #-}!CodeSize
+  , funUses        :: !Uses
+  , funParams      :: [ParamVar] 
   , funReturnTypes :: [ValueType] 
-  , funBody :: Stm
+  , funBody        :: Stm
   }
 
 isPrimFun, isClosureFun :: Fun -> Bool
-isPrimFun = funIsPrim
-isClosureFun f = not (isPrimFun f)
+isPrimFun f = funConvention f == PrimCall
+isClosureFun f = funConvention f == ClosureCall
+
+setFunSize :: CodeSize -> Fun -> Fun
+setFunSize sz f = f {funSize = sz}
+
+setFunUses :: Uses -> Fun -> Fun
+setFunUses u f = f {funUses = u}
+
+mkFun :: CallConvention -> [ParamVar] -> [ValueType] -> Stm -> Fun
+mkFun cc params returns body =
+  Fun { funConvention  = cc
+      , funSize        = unknownCodeSize
+      , funUses        = ManyUses
+      , funParams      = params
+      , funReturnTypes = returns
+      , funBody        = body}
 
 closureFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
-closureFun = Fun False
+closureFun params returns body = mkFun ClosureCall params returns body
 
 primFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
-primFun = Fun True
+primFun params returns body = mkFun PrimCall params returns body
 
 type Alt = (Lit, Stm)
 
@@ -282,21 +329,26 @@ moduleHasExports m = not $ null $ moduleExports m
 
 -- | A primitive or closure function type.
 data FunctionType =
-  FunctionType {-# UNPACK #-}!Bool ![ValueType] ![ValueType]
+  FunctionType !CallConvention ![ValueType] ![ValueType]
   deriving(Eq)
 
 primFunctionType :: [ValueType] -> [ValueType] -> FunctionType
-primFunctionType params returns = FunctionType True params returns
+primFunctionType params returns = FunctionType PrimCall params returns
 
 closureFunctionType :: [ValueType] -> [ValueType] -> FunctionType
-closureFunctionType params returns = FunctionType False params returns
+closureFunctionType params returns = FunctionType ClosureCall params returns
 
-mkFunctionType :: Bool -> [ValueType] -> [ValueType] -> FunctionType
+mkFunctionType :: CallConvention -> [ValueType] -> [ValueType] -> FunctionType
 mkFunctionType = FunctionType
 
 ftIsPrim, ftIsClosure :: FunctionType -> Bool
-ftIsPrim (FunctionType b _ _) = b
-ftIsClosure t = not (ftIsPrim t)
+ftIsPrim (FunctionType PrimCall _ _) = True
+ftIsPrim _ = False
+ftIsClosure (FunctionType ClosureCall _ _) = True
+ftIsClosure _ = False
+
+ftConvention :: FunctionType -> CallConvention
+ftConvention (FunctionType c _ _) = c
 
 ftParamTypes :: FunctionType -> [ValueType]
 ftParamTypes (FunctionType _ ps _) = ps
@@ -391,5 +443,5 @@ litType (FloatL sz _) = FloatType sz
 
 funType :: Fun -> FunctionType
 funType f =
-  FunctionType (funIsPrim f) (map varType $ funParams f) (funReturnTypes f)
+  FunctionType (funConvention f) (map varType $ funParams f) (funReturnTypes f)
   
