@@ -5,6 +5,7 @@ module LowLevel.Syntax where
 import Control.Monad
 import Data.Function
 import Data.Maybe
+import Data.Monoid
 import Data.Typeable
 
 import Gluon.Common.Error
@@ -36,6 +37,12 @@ valueToPrimType _ =
 --
 --   'ManyUses' represents more than one use, or an unknown number of uses.
 data Uses = ZeroUses | OneUse | ManyUses
+
+instance Monoid Uses where
+  mempty = ZeroUses
+  mappend ZeroUses x = x
+  mappend x ZeroUses = x
+  mappend _ _ = ManyUses
 
 -- | A measure of how much code a function contains.  Used to control 
 --   inlining.  An unknown code size is represented by -1.

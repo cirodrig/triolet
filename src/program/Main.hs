@@ -38,6 +38,7 @@ import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
 import qualified LowLevel.BuiltinCalls as LowLevel
 import qualified LowLevel.Closures as LowLevel
+import qualified LowLevel.DeadCode as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
@@ -110,8 +111,10 @@ compilePyonToPyonAsm path text = do
   putStrLn "Untyped"
   print $ Untyped.pprModule untyped_mod
   
-  -- System F transformations
+  -- Generate System F
   sf_mod <- Untyped.typeInferModule untyped_mod
+  
+  -- System F transformations
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
   sf_mod <- return $ SystemF.eliminateDeadCode sf_mod
   sf_mod <- SystemF.eliminatePatternMatching sf_mod
@@ -171,6 +174,7 @@ compilePyonAsmToGenC ll_mod c_file h_file = do
   putStrLn "Lowered and flattened"
   print $ LowLevel.pprModule ll_mod
   
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   ll_mod <- LowLevel.closureConvert ll_mod
   putStrLn ""
   putStrLn "Closure converted"

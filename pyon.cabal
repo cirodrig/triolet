@@ -100,6 +100,7 @@ Executable pyon
     LowLevel.ClosureSelect
     LowLevel.Closures
     LowLevel.ClosureCode
+    LowLevel.DeadCode
     LowLevel.FreshVar
     LowLevel.GenerateC
     LowLevel.GenerateCCode
