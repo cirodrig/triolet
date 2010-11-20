@@ -100,6 +100,12 @@ convertToDynamicRecord tenv rec =
                                | FieldDef t _ <- typedRecordFields0 rec]
        createDynamicRecord field_types
 
+convertTypeToDynamicRecord :: TypeEnv -> Type Typed -> G DynamicRecord
+convertTypeToDynamicRecord tenv ty =
+  case ty
+  of RecordT rec -> convertToDynamicRecord tenv rec
+     _ -> error "Expecting record type"
+
 genDynamicType :: TypeEnv -> Type Typed -> G DynamicType
 genDynamicType tenv ty =
   case ty
@@ -280,20 +286,26 @@ genExpr tenv expr =
        e' <- subexpr e
        genCast (convertToValueType ty) e'
      SizeofE ty -> do
-       let size =
-             case ty
-             of BytesT size _ -> mkWordVal size
-                RecordT (TypeSynonym tid _) ->
-                  dynamicTypeSize $ lookupTypeSynonym tid tenv
-                _ -> nativeWordV $ sizeOf $ convertToValueType ty
+       size <-
+         case ty
+         of BytesT size _ -> return $ mkWordVal size
+            RecordT (TypeSynonym tid _) -> 
+              return $ dynamicTypeSize $ lookupTypeSynonym tid tenv
+            RecordT rec -> do
+              dynamic_rec <- convertToDynamicRecord tenv rec
+              return $ recordSize dynamic_rec
+            _ -> return $ nativeWordV $ sizeOf $ convertToValueType ty
        return $ GenVal size
      AlignofE ty -> do
-       let align =
-             case ty
-             of BytesT _ align -> mkWordVal align
-                RecordT (TypeSynonym tid _) ->
-                  dynamicTypeAlign $ lookupTypeSynonym tid tenv
-                _ -> nativeWordV $ alignOf $ convertToValueType ty
+       align <-
+         case ty
+         of BytesT _ align -> return $ mkWordVal align
+            RecordT (TypeSynonym tid _) ->
+              return $ dynamicTypeAlign $ lookupTypeSynonym tid tenv
+            RecordT rec -> do
+              dynamic_rec <- convertToDynamicRecord tenv rec
+              return $ recordAlignment dynamic_rec
+            _ -> return $ nativeWordV $ alignOf $ convertToValueType ty
        return $ GenVal align
   where
     subexpr e = genExpr tenv e

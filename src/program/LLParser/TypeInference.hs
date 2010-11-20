@@ -504,6 +504,7 @@ convertToValueType :: Type Typed -> LL.ValueType
 convertToValueType ty = 
   case ty
   of PrimT pt -> LL.PrimType pt
+     RecordT (TypeSynonym _ t) -> convertToValueType t
      RecordT record -> LL.RecordType $ convertToStaticRecord record
      _ -> error "Expecting a value type"
 
@@ -511,6 +512,7 @@ convertToStaticFieldType :: Type Typed -> StaticFieldType
 convertToStaticFieldType ty = 
   case ty
   of PrimT pt -> PrimField pt
+     RecordT (TypeSynonym _ t) -> convertToStaticFieldType t
      RecordT record -> RecordField $ convertToStaticRecord record
      BytesT size align ->
        let size' = convertToIntConstant size
@@ -848,27 +850,30 @@ expectBooleanType message tys = throwErrorMaybe $
   of [PrimT BoolType] -> Nothing
      _ -> Just $ "Expecting boolean type in " ++ message
 
-checkTypeLists message tys1 tys2 = 
-  case (tys1, tys2)
-  of (ty1:tys1', ty2:tys2') ->
-       case (ty1, ty2)
-       of (PrimT t1, PrimT t2)
-            | t1 == t2 -> Nothing
-            | otherwise -> mismatch
-          (RecordT r1, RecordT r2)
-            | typedRecordName r1 == typedRecordName r2 -> Nothing
-            | otherwise -> mismatch
-          (BytesT {}, _) -> unexpected
-          (AppT {}, _) -> unexpected
-          (_, BytesT {}) -> unexpected
-          (_, AppT {}) -> unexpected
-          _ -> mismatch
-
-     ([], []) -> Nothing
-        
-     (_, _) -> mismatch    -- Different numbers of return values
-
+checkTypeLists message tys1 tys2 = check tys1 tys2
   where
+    check (ty1:tys1') (ty2:tys2') =
+      case (ty1, ty2)
+      of (PrimT t1, PrimT t2)
+           | t1 == t2 -> check tys1' tys2'
+           | otherwise -> mismatch
+         (RecordT (TypeSynonym _ ty1'), _) ->
+           check (ty1':tys1') (ty2:tys2')
+         (_, RecordT (TypeSynonym _ ty2')) ->
+           check (ty1:tys1') (ty2':tys2')
+         (RecordT r1, RecordT r2)
+           | typedRecordName r1 == typedRecordName r2 -> check tys1' tys2'
+           | otherwise -> mismatch
+         (BytesT {}, _) -> unexpected
+         (AppT {}, _) -> unexpected
+         (_, BytesT {}) -> unexpected
+         (_, AppT {}) -> unexpected
+         _ -> mismatch
+
+    check [] [] = Nothing
+        
+    check _ _ = mismatch    -- Different numbers of return values
+
     unexpected = internalError "checkTypeLists: Unexpected type"
     mismatch = Just $ "Type mismatch in " ++ message
 
