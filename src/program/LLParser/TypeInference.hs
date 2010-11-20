@@ -153,7 +153,10 @@ data TypedRecord =
     , typedRecordFields :: [TypeParametric (FieldDef Typed)]
     }
   | TypeSynonym
-    { typeSynonymID :: !(Ident TypedRecord)
+    { -- | The type synonym's ID.  Type synonyms with the same ID represent
+      --   the same type.  When creating LowLevel code, record layouts are 
+      --   computed, then looked up when the type synonym is used.
+      typeSynonymID :: !(Ident TypedRecord)
     , typeSynonymValue :: Type Typed
     }
 
