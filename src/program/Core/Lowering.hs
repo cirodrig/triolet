@@ -948,7 +948,7 @@ convertDefGroup defgroup k =
 -- | Wrap the lowered function 'f' in marshaling code for C.  Produce a
 -- primitive function.
 createCMarshallingFunction :: ExportSig -> LL.Fun -> Cvt LL.Fun
-createCMarshallingFunction (ExportSig dom rng) f = do
+createCMarshallingFunction (CExportSig dom rng) f = do
   -- Generate marshaling code
   (unzip3 -> (concat -> dom_params, sequence_ -> marshal_params, dom_vals)) <-
     mapM marshalCParameter dom
@@ -961,6 +961,9 @@ createCMarshallingFunction (ExportSig dom rng) f = do
     return $ LL.ReturnE $ LL.ValA $ map LL.VarV ret_vars
 
   return $ LL.primFun dom_params (map LL.varType ret_vars) fun_body
+
+createCMarshallingFunction _ _ =
+  internalError "createCMarshallingFunction: Not exported to C"
 
 marshalCParameter :: ExportDataType
                   -> Cvt ([LL.Var], BuildBlock (), LL.Val)
@@ -1032,7 +1035,7 @@ convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
   fun_def <- case lang of CCall -> define_c_fun f'
   return (fun_def, (LL.funDefiniendum fun_def, export_sig))
   where
-    export_sig = exportedFunctionSig $ cFunType f
+    export_sig = exportedFunctionCSig $ cFunType f
 
     define_c_fun fun = do
       -- Generate marshalling code

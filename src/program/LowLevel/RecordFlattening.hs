@@ -345,19 +345,26 @@ flattenFun fun =
 --   Some kinds of records will actually be passed as records (like C structs) 
 --   rather than flattened out into multiple parameters.
 flattenExportedFun :: ExportSig -> Fun -> RF Fun
-flattenExportedFun (ExportSig param_types return_type) fun 
-  | not $ isPrimFun fun =
-    internalError "flattenExportedFun: Cannot export this function"
-  | otherwise =
-    -- Call 'defineParams' to get the parameters seen by the function body
-    defineParams (funParams fun) $ \_ -> do
-      let returns = flattenValueTypeList $ funReturnTypes fun
-      body <- flattenStm $ funBody fun
+flattenExportedFun export_sig fun =
+  case export_sig
+  of CExportSig param_types return_type
+       | not $ isPrimFun fun ->
+         internalError "flattenExportedFun: Cannot export this function to C"
+       | otherwise ->
+         -- Call 'defineParams' to get the parameters seen by the function body
+         defineParams (funParams fun) $ \_ -> do
+           let returns = flattenValueTypeList $ funReturnTypes fun
+           body <- flattenStm $ funBody fun
       
-      -- Gnerate parameter-manipulating code
-      (param_code, params) <- flattenExportedParams param_types (funParams fun)
-      let body2 = param_code body
-      return $! primFun params returns body2
+           -- Generate parameter-manipulating code
+           (param_code, params) <-
+             flattenExportedParams param_types (funParams fun)
+           let body2 = param_code body
+           return $! primFun params returns body2
+
+     PyonExportSig ->
+       -- Flatten the same way as an ordinary function
+       flattenFun fun
 
 -- | Perform flattening on an exported parameter list.
 --   Generate the flattened, exported parameter list and the code that

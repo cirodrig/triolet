@@ -38,5 +38,10 @@ data ExportDataType =
   | CFloatET                    -- ^ C float type
 
 -- | An exported function signature
-data ExportSig = ExportSig [ExportDataType] ExportDataType
+data ExportSig =
+    -- | Exported to other Pyon code.  There's no additional information
+    --   because the function contains its Pyon type signature.
+    PyonExportSig
+    -- | Exported to C.  The C type signature is given here.
+  | CExportSig [ExportDataType] ExportDataType
     

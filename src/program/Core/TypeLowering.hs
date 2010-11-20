@@ -112,18 +112,18 @@ conLoweredFunctionType c =
      _ -> internalError "conLoweredFunctionType: Not a function type"
 
 -- | Get the type signature of an exported function.
-exportedFunctionSig :: RCFunType -> ExportSig
-exportedFunctionSig ft = export id ft
+exportedFunctionCSig :: RCFunType -> ExportSig
+exportedFunctionCSig ft = export id ft
   where
     export hd ft =
       case ft
       of ArrCT {ctParam = param_binder ::: param_type, ctRange = rng} ->
-           export (hd . (exportedTypeSig param_type:)) rng
+           export (hd . (exportedTypeCSig param_type:)) rng
          RetCT {ctReturn = ret_binder ::: ret_type} ->
-           ExportSig (hd []) (exportedTypeSig ret_type)
+           CExportSig (hd []) (exportedTypeCSig ret_type)
 
-exportedTypeSig :: RCType -> ExportDataType
-exportedTypeSig ty =
+exportedTypeCSig :: RCType -> ExportDataType
+exportedTypeCSig ty =
   case unpackConAppCT ty
   of Just (con, args)
        | con `isPyonBuiltin` the_int -> PyonIntET
@@ -138,7 +138,7 @@ exportedTypeSig ty =
                    _ -> unsupported
        | con `isPyonBuiltin` the_list ->
            case args
-           of [arg] -> ListET $! exportedTypeSig arg
+           of [arg] -> ListET $! exportedTypeCSig arg
      _ -> unsupported
   where
     unsupported = internalError "Unsupported exported type"

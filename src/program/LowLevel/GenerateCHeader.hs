@@ -3,6 +3,8 @@
 
 module LowLevel.GenerateCHeader(generateCHeader) where
 
+import Data.Maybe
+
 import Language.C.Data.Ident
 import Language.C.Data.Node
 import Language.C.Pretty
@@ -50,8 +52,8 @@ exportReturnDeclSpecs export_type =
      PyonBoolET -> ([], nameDeclSpecs "PyonBool")
 
 -- | Get the declaration components to use to declare an exported function
-exportSigDeclSpecs :: ExportSig -> DeclSpecs
-exportSigDeclSpecs (ExportSig dom rng) =
+exportSigDeclSpecs :: ExportSig -> Maybe DeclSpecs
+exportSigDeclSpecs (CExportSig dom rng) =
   let dom_specs = map exportParamDeclSpecs dom
       (rng_param_specs, rng_ret_specs) = exportReturnDeclSpecs rng
 
@@ -62,21 +64,27 @@ exportSigDeclSpecs (ExportSig dom rng) =
         CFunDeclr (Right (map anonymousDecl param_specs, False)) [] internalNode
 
   in case rng_ret_specs
-     of (rng_decl, rng_deriv) -> (rng_decl, fun_deriv : rng_deriv)
+     of (rng_decl, rng_deriv) -> Just (rng_decl, fun_deriv : rng_deriv)
 
--- | Create an external function declaration for the given variable, with the
+-- Functions exported to Pyon don't get a C signature
+exportSigDeclSpecs PyonExportSig = Nothing
+
+-- | Create a C external function declaration for the given variable, with the
 -- given function signature.
-generateExportDecl :: (Var, ExportSig) -> CDecl
+generateExportDecl :: (Var, ExportSig) -> Maybe CDecl
 generateExportDecl (v, sig) =
-  let (specs, derivs) = exportSigDeclSpecs sig
-      ident = varIdent v
-      export_specs = CStorageSpec (CExtern internalNode) : specs
-      declr = CDeclr (Just ident) derivs Nothing [] internalNode
-  in CDecl export_specs [(Just declr, Nothing, Nothing)] internalNode
+  case exportSigDeclSpecs sig
+  of Just (specs, derivs) ->
+       let ident = varIdent v
+           export_specs = CStorageSpec (CExtern internalNode) : specs
+           declr = CDeclr (Just ident) derivs Nothing [] internalNode
+       in Just $
+          CDecl export_specs [(Just declr, Nothing, Nothing)] internalNode
+     Nothing -> Nothing
 
 generateCHeader :: Module -> String
 generateCHeader mod =
-  let export_decls = map generateExportDecl $ moduleExports mod
+  let export_decls = mapMaybe generateExportDecl $ moduleExports mod
       decls = map CDeclExt export_decls
       transl_module = CTranslUnit decls internalNode 
       header_body_text = show $ pretty transl_module

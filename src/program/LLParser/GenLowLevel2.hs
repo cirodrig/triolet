@@ -9,6 +9,7 @@ import Control.Monad.Trans
 import Data.Either
 import qualified Data.IntMap as IntMap
 import Data.List
+import qualified Data.Set as Set
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
@@ -23,6 +24,7 @@ import LowLevel.Types
 import LowLevel.Record hiding(Field)
 import qualified LowLevel.Syntax as LL
 import Globals
+import Export
 
 data GenExpr = GenVal LL.Val
              | GenAtom [LL.ValueType] LL.Atom
@@ -705,4 +707,21 @@ generateLowLevelModule :: [LL.Import]
 generateLowLevelModule externs defs =
   withTheLLVarIdentSupply $ \var_ids -> runFreshVarM var_ids $ do
     (fun_defs, data_defs) <- genDefs defs
-    return $ LL.Module externs fun_defs data_defs []
+    
+    -- Identify the actual imports and exports of this module
+    let defined_here =
+          Set.fromList $
+          map LL.funDefiniendum fun_defs ++ map LL.dataDefiniendum data_defs
+        (exports, imports) = find_exports defined_here
+    return $ LL.Module externs fun_defs data_defs exports
+  where
+    -- If a variable is external and defined here, it's exported
+    find_exports defined_here = partitionEithers $ map pick_export externs
+      where
+        pick_export impent
+          | impent_var `Set.member` defined_here =
+              -- Assume it's exported to other Pyon code
+              Left (impent_var, PyonExportSig)
+          | otherwise = Right impent
+          where
+            impent_var = LL.importVar impent
