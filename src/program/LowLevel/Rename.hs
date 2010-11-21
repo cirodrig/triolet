@@ -4,6 +4,9 @@ Methods for renaming variables in a module.
 
 module LowLevel.Rename
        (RnPolicy(..),
+        Renaming,
+        mkRenaming,
+        renameStm,
         renameFun,
         renameInFunDef,
         renameModule
@@ -20,9 +23,13 @@ import LowLevel.FreshVar
 import LowLevel.Syntax
 import Export
 
-  
 -- | A variable renaming
 type Renaming = IntMap.IntMap Var
+
+-- | Create a renaming from an association list
+mkRenaming :: [(Var, Var)] -> Renaming
+mkRenaming assocs =
+  IntMap.fromList [(fromIdent $ varID from_v, to_v) | (from_v, to_v) <- assocs]
 
 data RnPolicy =
     RenameEverything  -- ^ Rename everything except imported variables
@@ -179,6 +186,10 @@ rnTopLevel rn fun_defs data_defs exports = do
         renameGlobalEntities rn1 $ map dataDefiniendum data_defs
       let rn2 = setRenaming renaming2 rn
       return (rn2, f_definienda, d_definienda)
+
+-- | Rename variables in a statement.  Start with the given renaming.
+renameStm :: RnPolicy -> Renaming -> Stm -> FreshVarM Stm
+renameStm policy rn stm = rnStm (policy, rn) stm
 
 -- | Rename variables in a function
 renameFun :: RnPolicy -> Fun -> FreshVarM Fun
