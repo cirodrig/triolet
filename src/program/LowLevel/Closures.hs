@@ -61,20 +61,17 @@ ccAtom returns atom =
        return $ ValA `liftM` sequence vs'
 
      -- Generate a direct call if possible
-     CallA (VarV v) vs -> 
+     CallA ClosureCall (VarV v) vs -> 
        genVarCall returns v =<< ccValues vs
 
-     -- General case, indirect call
-     CallA v vs -> do
+     -- General case
+     CallA conv v vs -> do
        v' <- ccValue v
        vs' <- ccValues vs
-       genIndirectCall returns v' vs'
-     
-     -- Primitive calls are always direct
-     PrimCallA v vs -> do
-       v' <- ccValue v
-       vs' <- ccValues vs
-       return (liftM2 PrimCallA v' (sequence vs'))
+       case conv of
+         ClosureCall -> genIndirectCall returns v' vs'
+         -- Primitive calls are always direct
+         PrimCall    -> return (liftM2 primCallA v' (sequence vs'))
 
      PrimA prim vs -> do
        vs' <- ccValues vs

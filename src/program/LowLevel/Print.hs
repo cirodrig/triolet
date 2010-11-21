@@ -186,8 +186,11 @@ pprVal value =
 pprAtom atom =
   case atom
   of ValA vs -> arg_list vs
-     CallA v vs -> text "call" <+> pprVal v <> arg_list vs
-     PrimCallA v vs -> text "primcall" <+> pprVal v <> arg_list vs
+     CallA conv v vs -> 
+       let conv_doc = case conv
+                      of ClosureCall -> text "call" 
+                         PrimCall -> text "primcall"
+       in conv_doc <+> pprVal v <> arg_list vs
      PrimA p [v1, v2] 
        | Just infix_op <- pprInfixPrim p ->
            pprVal v1 <+> infix_op <+> pprVal v2

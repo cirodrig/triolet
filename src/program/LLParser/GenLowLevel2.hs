@@ -268,13 +268,13 @@ genExpr tenv expr =
      CallE returns op args -> do
        op' <- asVal =<< subexpr op
        args' <- mapM (asVal <=< subexpr) args
-       let atom = LL.CallA op' args'
+       let atom = LL.closureCallA op' args'
            return_types = map convertToValueType returns
        return $ GenAtom return_types atom
      PrimCallE returns op args -> do
        op' <- asVal =<< subexpr op
        args' <- mapM (asVal <=< subexpr) args
-       let atom = LL.PrimCallA op' args'
+       let atom = LL.primCallA op' args'
            return_types = map convertToValueType returns
        return $ GenAtom return_types atom
      UnaryE op arg -> do
@@ -518,7 +518,7 @@ genTailWhile tenv inits cond body = do
   let cont = return $ LL.ReturnE $ LL.ValA [LL.VarV v | (Parameter _ v, _) <- inits]
   genWhileFunction tenv while_var inits cond body cont
   initializers <- mapM (asVal <=< genExpr tenv) (map snd inits)
-  return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) initializers
+  return $ LL.ReturnE $ LL.primCallA (LL.VarV while_var) initializers
 
 genMedialWhile :: TypeEnv -> [(Parameter Typed, Expr Typed)] -> Expr Typed
                -> Stmt Typed -> [LValue Typed] -> G a -> G a
@@ -534,7 +534,7 @@ genMedialWhile tenv inits cond body lhs mk_cont = do
     
     -- Call the while function
     initializers <- mapM (asVal <=< genExpr tenv) (map snd inits)
-    return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) initializers 
+    return $ LL.ReturnE $ LL.primCallA (LL.VarV while_var) initializers 
 
   -- Generate the continuation
   genLValues tenv lhs (LL.ValA $ map LL.VarV param_vars) param_types
@@ -569,7 +569,7 @@ genWhileFunction tenv while_var params cond body cont = do
           bindAtom return_vars =<< genStmtAtom tenv body
           
           -- Loop
-          return $ LL.ReturnE $ LL.PrimCallA (LL.VarV while_var) (map LL.VarV return_vars)
+          return $ LL.ReturnE $ LL.primCallA (LL.VarV while_var) (map LL.VarV return_vars)
           
     cond' <- asVal =<< genExpr tenv cond
     genIf cond' true_path false_path

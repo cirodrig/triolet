@@ -103,12 +103,11 @@ rnVals rn vs = mapM (rnVal rn) vs
 rnAtom :: Rn -> Atom -> FreshVarM Atom
 rnAtom rn atom =
   case atom
-  of ValA vs           -> ValA `liftM` rnVals rn vs
-     CallA op args     -> CallA `liftM` rnVal rn op `ap` rnVals rn args
-     PrimCallA op args -> PrimCallA `liftM` rnVal rn op `ap` rnVals rn args
-     PrimA prim args   -> PrimA prim `liftM` rnVals rn args
-     PackA sr vs       -> PackA sr `liftM` rnVals rn vs
-     UnpackA sr v      -> UnpackA sr `liftM` rnVal rn v
+  of ValA vs            -> ValA `liftM` rnVals rn vs
+     CallA conv op args -> CallA conv `liftM` rnVal rn op `ap` rnVals rn args
+     PrimA prim args    -> PrimA prim `liftM` rnVals rn args
+     PackA sr vs        -> PackA sr `liftM` rnVals rn vs
+     UnpackA sr v       -> UnpackA sr `liftM` rnVal rn v
 
 rnStm :: Rn -> Stm -> FreshVarM Stm
 rnStm rn statement =

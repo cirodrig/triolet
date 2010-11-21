@@ -399,9 +399,9 @@ getPassConv ty = do
             body
 
         initialize arg_pc list_pc_ptr =
-          emitAtom0 $ LL.CallA (LL.VarV pc_ctor) [ LL.LitV LL.UnitL
-                                                 , arg_pc
-                                                 , LL.VarV list_pc_ptr]
+          emitAtom0 $ LL.closureCallA (LL.VarV pc_ctor) [ LL.LitV LL.UnitL
+                                                        , arg_pc
+                                                        , LL.VarV list_pc_ptr]
 
 -------------------------------------------------------------------------------
 -- Data structure lowering
@@ -689,7 +689,7 @@ convertApp op args rarg = do
   let atom_exp = do
         op'' <- asVal op' 
         args''' <- mapM asVal args''
-        return $ LL.CallA op'' args'''
+        return $ LL.closureCallA op'' args'''
   
   return $ atom return_type atom_exp
 
@@ -957,7 +957,7 @@ createCMarshallingFunction (CExportSig dom rng) f = do
   -- Create the function
   fun_body <- runFreshVar $ execBuild (map LL.varType ret_vars) $ do
     marshal_params
-    compute_rng (return $ LL.CallA (LL.LamV f) (dom_vals ++ rng_vals))
+    compute_rng (return $ LL.closureCallA (LL.LamV f) (dom_vals ++ rng_vals))
     return $ LL.ReturnE $ LL.ValA $ map LL.VarV ret_vars
 
   return $ LL.primFun dom_params (map LL.varType ret_vars) fun_body

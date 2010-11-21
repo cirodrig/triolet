@@ -197,16 +197,16 @@ valType (LamV f) = PrimType OwnedType
 data Atom =
     -- | Return some values
     ValA [Val]
-    -- | Call a closure-based function 
-    -- (possibly with the wrong number of arguments).
-    -- The function must be an owned pointer.
-  | CallA Val [Val]
-    -- | Call a primitive function, using the C calling convention extended
-    -- with support for multiple return values.
-    -- Unlike closure-based calls, this call must have exactly the right
-    -- number of arguments.
-    -- The function must be a non-owned pointer.
-  | PrimCallA Val [Val]
+    -- | Call a function using the given calling convention. 
+    --
+    -- If 'ClosureCall', call a closure-based function.  The function must 
+    -- be an owned pointer.  The call may have a different number of arguments
+    -- than the callee actually takes.
+    --
+    -- If 'PrimCall', call a function directly.  The function must be a
+    -- non-owned pointer.  The number of arguments must match what the function
+    -- expects.
+  | CallA !CallConvention Val [Val]
     -- | Perform a primitive operation (such as 'add' or 'load').
     --   Must have exactly the right number of arguments.
   | PrimA !Prim [Val]
@@ -219,6 +219,9 @@ data Atom =
     -- After record flattening, this atom should only appear with a 'VarV'
     -- as its RHS.
   | UnpackA !StaticRecord Val
+
+closureCallA = CallA ClosureCall
+primCallA = CallA PrimCall
 
 -- | A statement.  Statements may have side effects.
 data Stm =

@@ -760,7 +760,7 @@ emitExactEntry clo = do
     cap_vars <- load_captured_vars (VarV clo_ptr)
     -- Call the direct entry point
     let direct_entry = VarV $ closureDirectEntry clo
-    return $ ReturnE $ PrimCallA direct_entry (cap_vars ++ map VarV params)
+    return $ ReturnE $ primCallA direct_entry (cap_vars ++ map VarV params)
 
   let fun = primFun (clo_ptr : params) return_types fun_body
   return $ FunDef (closureExactEntry clo) fun
@@ -803,7 +803,7 @@ emitInexactEntry clo = do
     -- Call the exact entry
     let exact_entry = VarV $ closureExactEntry clo
     return_vals <- emitAtom (ftReturnTypes $ closureType clo) $
-                   PrimCallA exact_entry (VarV clo_ptr : param_vals)
+                   primCallA exact_entry (VarV clo_ptr : param_vals)
 
     -- Store each return value
     store_parameters (VarV returns_ptr) return_vals
@@ -969,7 +969,7 @@ genVarCall return_types fun args = lookupClosure fun >>= select
     -- All calls are direct primitive calls and no variables are captured.
     select (Just (Left v)) =
       return $ do args' <- sequence args
-                  return $ PrimCallA (VarV v) args'
+                  return $ primCallA (VarV v) args'
 
     -- Function converted to closure-based function.  Check the arity to
     -- decide what kind of call to generate.
@@ -997,7 +997,7 @@ directCall :: [Var] -> Var -> [GenM Val] -> GenM Atom
 directCall captured_vars v args = do
   args' <- sequence args
   let captured_args = map VarV captured_vars
-  return $ PrimCallA (VarV v) (captured_args ++ args')
+  return $ primCallA (VarV v) (captured_args ++ args')
 
 -- | Produce an indirect call of the given operator
 genIndirectCall :: [PrimType]   -- ^ Return types
@@ -1043,12 +1043,12 @@ genIndirectCall return_types mk_op mk_args = return $ do
         arity_eq <- primCmpZ (PrimType nativeWordType) CmpEQ arity $
                     nativeWordV $ length args
         return $ SwitchE arity_eq [(BoolL True, exact_call),
-                                   (BoolL False, ReturnE $ PrimCallA (VarV inexact_call_var) [])]
+                                   (BoolL False, ReturnE $ primCallA (VarV inexact_call_var) [])]
 
     -- Check function tag.  If it's a function tag, then check its arity.
     -- If arity matches, do a direct call.
     return $ SwitchE inf_tag_test [(BoolL True, check_arity),
-                                   (BoolL False, ReturnE $ PrimCallA (VarV inexact_call_var) [])]
+                                   (BoolL False, ReturnE $ primCallA (VarV inexact_call_var) [])]
   return $ ValA (map VarV ret_vars)
   where
     return_types' = map PrimType return_types
@@ -1058,7 +1058,7 @@ genIndirectCall return_types mk_op mk_args = return $ do
       fn <- loadField (funInfoHeaderRecord !!: 2) inf_ptr
 
       -- Get the function's captured variables, then call the function
-      bindAtom ret_vars $ PrimCallA fn (clo_ptr : args)
+      bindAtom ret_vars $ primCallA fn (clo_ptr : args)
       return cont
 
     make_inexact_call ret_vars clo_ptr args cont = do
@@ -1106,11 +1106,11 @@ genApply fun args ret_ptr =
 
     -- Apply some arguments
     partial_apply f clo args =
-      emitAtom1 (PrimType OwnedType) $ PrimCallA f (clo : args)
+      emitAtom1 (PrimType OwnedType) $ primCallA f (clo : args)
 
     -- Apply arguments and write result in to the return struct
     finish_apply f clo args =
-      emitAtom0 $ PrimCallA f (clo : args ++ [ret_ptr])
+      emitAtom0 $ primCallA f (clo : args ++ [ret_ptr])
 
 -- | An apply trie node contains the apply functions for parameter sequences
 -- with a common prefix of types.

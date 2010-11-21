@@ -111,10 +111,9 @@ getContinuation :: (Monad m, Supplies m (Ident Var)) =>
 getContinuation primcall live_outs f = Gen $ \return_type -> do
   -- Create a call to the continuation
   cont_var <- newAnonymousVar (PrimType PointerType)
+  let convention = if primcall then PrimCall else ClosureCall
   let cont_call =
-        if primcall
-        then ReturnE $ PrimCallA (VarV cont_var) (map VarV live_outs)
-        else ReturnE $ CallA (VarV cont_var) (map VarV live_outs)
+        ReturnE $ CallA convention (VarV cont_var) (map VarV live_outs)
       
   -- Construct a statement that calls the continuation
   (stm, MkStm stms) <- runGen (f cont_call) return_type
@@ -122,9 +121,7 @@ getContinuation primcall live_outs f = Gen $ \return_type -> do
   -- Put the continuation into a 'letrec' statement
   let stms' cont_stm = LetrecE [FunDef cont_var cont_fun] (stms stm)
         where
-          cont_fun =
-            let cc = if primcall then PrimCall else ClosureCall
-            in mkFun cc live_outs return_type cont_stm
+          cont_fun = mkFun convention live_outs return_type cont_stm
   
   return ((), MkStm stms')
 
@@ -143,8 +140,7 @@ atomFreeVars :: Atom -> Set Var
 atomFreeVars atom =
   case atom
   of ValA vs        -> valsFreeVars vs
-     CallA v vs     -> valsFreeVars (v:vs)
-     PrimCallA v vs -> valsFreeVars (v:vs)
+     CallA _ v vs   -> valsFreeVars (v:vs)
      PrimA _ vs     -> valsFreeVars vs
      PackA _ vs     -> valsFreeVars vs
      UnpackA _ v    -> valFreeVars v
@@ -553,8 +549,8 @@ allocateLocalMem ptr_var pass_conv rtypes mk_block = do
   
   -- Finalize and free the object
   fini <- selectPassConvFinalize pass_conv
-  bindAtom0 $ CallA fini [VarV ptr_var]
-  bindAtom0 $ PrimCallA (builtinVar the_prim_pyon_dealloc) [VarV ptr_var]
+  bindAtom0 $ closureCallA fini [VarV ptr_var]
+  bindAtom0 $ primCallA (builtinVar the_prim_pyon_dealloc) [VarV ptr_var]
   
   -- Return the temporary values
   return $ ValA $ map VarV rvars
@@ -563,16 +559,16 @@ allocateLocalMem ptr_var pass_conv rtypes mk_block = do
 allocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
 allocateHeapMem size =
   emitAtom1 (PrimType PointerType) $
-  PrimCallA (builtinVar the_prim_pyon_alloc) [size]
+  primCallA (builtinVar the_prim_pyon_alloc) [size]
 
 allocateHeapMemAs :: (Monad m, Supplies m (Ident Var)) =>
                      Val -> Var -> Gen m ()
 allocateHeapMemAs size dst =
-  bindAtom1 dst $ PrimCallA (builtinVar the_prim_pyon_alloc) [size]
+  bindAtom1 dst $ primCallA (builtinVar the_prim_pyon_alloc) [size]
 
 deallocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
 deallocateHeapMem ptr =
-  emitAtom0 $ PrimCallA (builtinVar the_prim_pyon_dealloc) [ptr]
+  emitAtom0 $ primCallA (builtinVar the_prim_pyon_dealloc) [ptr]
 
 -------------------------------------------------------------------------------
 -- Manipulating objects
@@ -606,7 +602,7 @@ freeObject :: (Monad m, Supplies m (Ident Var)) =>
 freeObject ptr = do
   info_ptr <- loadField (objectHeaderRecord' !!: 1) ptr
   free_func <- loadField (infoTableHeaderRecord' !!: 0) info_ptr
-  emitAtom0 $ PrimCallA free_func [ptr]  
+  emitAtom0 $ primCallA free_func [ptr]  
 
 -- | Generate code to increment an object header's reference count.
 increfObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()

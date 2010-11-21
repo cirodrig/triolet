@@ -43,15 +43,14 @@ inlValues vs = mapM inlValue vs
 inlAtom :: Atom -> (Atom -> Stm) -> GenM Stm
 inlAtom atom k =
   case atom
-  of CallA (VarV op) args -> do args' <- inlValues args
-                                inlCall op args' k
+  of CallA ClosureCall (VarV op) args -> do args' <- inlValues args
+                                            inlCall op args' k
      _ -> inline_subexpressions >>= return . k
   where
     inline_subexpressions =
       case atom
       of ValA vs ->  ValA `liftM` inlValues vs
-         CallA op args -> CallA `liftM` inlValue op `ap` inlValues args
-         PrimCallA op args -> PrimCallA `liftM` inlValue op `ap` inlValues args
+         CallA conv op args -> CallA conv `liftM` inlValue op `ap` inlValues args
          PrimA prim args -> PrimA prim `liftM` inlValues args
          PackA rec args -> PackA rec `liftM` inlValues args
          UnpackA rec arg -> UnpackA rec `liftM` inlValue arg
@@ -94,7 +93,7 @@ inlCall :: Var -> [Val] -> (Atom -> Stm) -> GenM Stm
 inlCall op args k = 
   case IntMap.lookup (fromIdent $ varID op) inliningRules 
   of Just f -> f args k
-     Nothing -> return $ k $ CallA (VarV op) args
+     Nothing -> return $ k $ closureCallA (VarV op) args
 
 -- | Generate a primitive operation that takes two parameters and one return 
 -- value, all of the same type.
@@ -110,12 +109,12 @@ binaryPrimOp prim op args k =
        -- the remaining arguments.
        tmpvar <- newAnonymousVar $ PrimType OwnedType
        -- Pass the primop to the continuation
-       let use_result = k $ CallA (VarV tmpvar) args'
+       let use_result = k $ closureCallA (VarV tmpvar) args'
        -- Perform the primop before the continuation
        return $ LetE [tmpvar] (PrimA prim [arg1, arg2]) use_result
      _ -> do
        -- Undersaturated application.  Don't replace it.
-       return $ k $ CallA op args
+       return $ k $ closureCallA op args
 
 -- | Generate a negation operation by generating a subtract primitive.
 negateOp :: Lit -> Prim -> Val -> [Val] -> (Atom -> Stm) -> GenM Stm
@@ -126,7 +125,7 @@ negateOp zero prim op args k =
        return $ k $ PrimA prim [LitV zero, arg]
      args -> do
        -- Wrong number of operands
-       return $ k $ CallA op args
+       return $ k $ closureCallA op args
 
 -- Load and store functions are inserted by the compiler, and will always have
 -- the right number of arguments.

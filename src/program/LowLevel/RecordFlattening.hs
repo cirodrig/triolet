@@ -174,10 +174,9 @@ flattenAtom atom =
   case atom
   of ValA vs ->
        return_atom $ ValA `liftM` flattenValList vs
-     CallA op vs ->
-       return_atom $ CallA `liftM` flattenSingleVal op `ap` flattenValList vs
-     PrimCallA op vs ->
-       return_atom $ PrimCallA `liftM` flattenSingleVal op `ap` flattenValList vs
+     CallA conv op vs ->
+       return_atom $
+       CallA conv `liftM` flattenSingleVal op `ap` flattenValList vs
      -- If loading a record, load its parts individually
      PrimA (PrimLoad (RecordType rec_type)) vs -> do
        [ptr, off] <- flattenValList vs

@@ -98,7 +98,6 @@ atomHasSideEffect atom =
   case atom
   of ValA {} -> False
      CallA {} -> True
-     PrimCallA {} -> True
      PrimA prim _ -> primHasSideEffect prim
      PackA {} -> False
      UnpackA {} -> False
@@ -142,8 +141,7 @@ dceAtom :: DCE Atom
 dceAtom atom = nudge 1 $
   case atom
   of ValA vs -> ValA <$> dceVals vs
-     CallA v vs -> CallA <$> dceVal v <*> dceVals vs
-     PrimCallA v vs -> PrimCallA <$> dceVal v <*> dceVals vs
+     CallA conv v vs -> CallA conv <$> dceVal v <*> dceVals vs
      PrimA prim vs -> PrimA prim <$> dceVals vs 
      PackA rec vs -> PackA rec <$> dceVals vs
      UnpackA rec v -> UnpackA rec <$> dceVal v

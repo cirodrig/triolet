@@ -343,7 +343,7 @@ genAtom returns atom =
        code <- genManyResults returns vals'
        return (code, True)
 
-     PrimCallA op args -> do
+     CallA PrimCall op args -> do
        call <- genCall (returnTypes returns) op args
        case call of
          Left items -> return (items, False)

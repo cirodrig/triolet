@@ -136,8 +136,7 @@ scanAtom :: Bool -> Atom -> Scan
 scanAtom is_tail atom =
   case atom
   of ValA vs           -> scanValues vs
-     CallA op args     -> scan_call op args
-     PrimCallA op args -> scan_call op args
+     CallA _ op args   -> scan_call op args
      PrimA _ args      -> scanValues args
      UnpackA r arg     -> scanValue arg
      _                 -> internalError "scanAtom"

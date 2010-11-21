@@ -87,8 +87,7 @@ toPointerAtom :: Atom -> Atom
 toPointerAtom atom =
   case atom
   of ValA vs -> ValA $ toPointerDataList vs
-     CallA v vs -> CallA (toPointerData v) (toPointerDataList vs)
-     PrimCallA v vs -> PrimCallA (toPointerData v) (toPointerDataList vs)
+     CallA conv v vs -> CallA conv (toPointerData v) (toPointerDataList vs)
      
      -- Since owned types are being ignored, just convert these casts to moves
      PrimA PrimCastToOwned [v] -> ValA [toPointerData v]
