@@ -573,7 +573,7 @@ genLocalFunctions returns fs m = do
     add_to_env local_functions =
       withLocalFunctions (lazy_zip fun_names local_functions)
       
-    fun_names = [v | FunDef v _ <- fs]
+    fun_names = map definiendum fs
     
     -- Like 'zip', but lazy in the second parameter.
     lazy_zip (f:fs) ~(lf:lfs) = (f,lf) : lazy_zip fs lfs
@@ -583,7 +583,7 @@ genLocalFunctions returns fs m = do
 -- on the fall-through path are given as extra parameters.  They are only
 -- assigned if the function falls through.
 genLocalFunction :: ReturnValues -> FunDef -> GenC LocalFunction
-genLocalFunction returns (FunDef v f)
+genLocalFunction returns (Def v f)
   | not (isPrimFun f) =
       internalError "genLocalFunction: Not a primitive-call function"
   | otherwise = do
@@ -657,7 +657,7 @@ makeFunctionCode fallthrough local_function = do
 
 -- | Generate a forward declaration and definition of a function
 genFun :: FunDef -> GenC (CDecl, CFunDef)
-genFun (FunDef v fun) 
+genFun (Def v fun) 
   | not (isPrimFun fun) = 
       internalError "genFun: Can only generate primitive-call functions"
   | otherwise = do
@@ -684,7 +684,7 @@ genFun (FunDef v fun)
 
 -- | Create a global static data definition and initialization code.
 genData :: GlobalVars -> DataDef -> (CExtDecl, CStat)
-genData gvars (DataDef v record_type values) =
+genData gvars (Def v (StaticData record_type values)) =
   (CDeclExt $
    declareBytes v (recordSize record_type) (recordAlignment record_type),
    initializeBytes gvars v record_type values)
@@ -755,7 +755,7 @@ initializationFunction stmts =
   in CFunDef [static, return_type] fun_decl [] body internalNode
 
 generateCFile :: Module -> IO String
-generateCFile (Module imports funs datas _) = do
+generateCFile (Module imports defs _) = do
   ident_supply <- newNameSupply
       
   -- Create an import declaration for symbols that are not defined in
@@ -784,9 +784,8 @@ generateCFile (Module imports funs datas _) = do
                   map CFDefExt fun_defs
   return $ makeCFileText top_level
   where
-    defined_vars =
-        Set.fromList $ [f | FunDef f _ <- funs] ++
-                       [v | DataDef v _ _ <- datas]
+    (funs, datas) = partitionGlobalDefs defs
+    defined_vars = Set.fromList $ map globalDefiniendum defs
     global_vars = defined_vars `Set.union` Set.fromList (map importVar imports)
       
 makeCFileText top_level =

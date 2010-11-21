@@ -280,20 +280,30 @@ primFun params returns body = mkFun PrimCall params returns body
 
 type Alt = (Lit, Stm)
 
+-- | A piece of static data
+data StaticData = StaticData !StaticRecord ![Val]
+
+data Def a = Def {definiendum :: !ParamVar, definiens :: a}
+
 -- | A function definition
-data FunDef = FunDef !ParamVar Fun
-
-funDefiniendum :: FunDef -> Var
-funDefiniendum (FunDef v _) = v
-
-funDefiniens :: FunDef -> Fun
-funDefiniens (FunDef _ f) = f
+type FunDef = Def Fun
 
 -- | A static data definition
-data DataDef = DataDef !ParamVar !StaticRecord ![Val]
+type DataDef = Def StaticData
 
-dataDefiniendum :: DataDef -> Var
-dataDefiniendum (DataDef v _ _) = v
+data GlobalDef = GlobalFunDef FunDef
+               | GlobalDataDef DataDef
+
+globalDefiniendum :: GlobalDef -> Var
+globalDefiniendum (GlobalFunDef d) = definiendum d
+globalDefiniendum (GlobalDataDef d) = definiendum d
+
+partitionGlobalDefs :: [GlobalDef] -> ([FunDef], [DataDef])
+partitionGlobalDefs ds = part id id ds
+  where
+    part fhead dhead (GlobalFunDef fd:ds)  = part (fhead . (fd:)) dhead ds 
+    part fhead dhead (GlobalDataDef dd:ds) = part fhead (dhead . (dd:)) ds 
+    part fhead dhead []                    = (fhead [], dhead [])
 
 -- | An imported symbol
 data Import =
@@ -324,8 +334,7 @@ importVar (ImportData v _) = v
 data Module =
   Module 
   { moduleImports :: [Import]    -- ^ Imported, externally defined variables
-  , moduleFunctions :: [FunDef]  -- ^ Function definitions
-  , moduleData :: [DataDef]      -- ^ Global data definitions
+  , moduleGlobals :: [GlobalDef] -- ^ Global definitions
   , moduleExports :: [(Var, ExportSig)] -- ^ Exported functions and their
                                         --   externally visible types
   }

@@ -160,10 +160,10 @@ scanStm statement =
        scanValue cond `mappend` mconcat [scanStm s | (_, s) <- alts] 
      ReturnE atom -> scanAtom True atom
   where
-    get_arity (FunDef v f) = (v, length $ funParams f)
+    get_arity (Def v f) = (v, length $ funParams f)
     
 scanDef :: FunDef -> Scan
-scanDef (FunDef v f) = enterFun v $ scanStm $ funBody f
+scanDef (Def v f) = enterFun v $ scanStm $ funBody f
 
 scanTopLevelDef :: FunDef -> [Impl]
 scanTopLevelDef def = scanDef def Map.empty
@@ -174,6 +174,6 @@ findFunctionsToHoist :: FunDef -> Set.Set Var
 findFunctionsToHoist def =
   let scan_implications = scanTopLevelDef def
       -- Top-level functions always become closures
-      implications = Implied (funDefiniendum def) : scan_implications
+      implications = Implied (definiendum def) : scan_implications
   in solveImplications implications
        

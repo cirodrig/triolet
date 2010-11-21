@@ -119,7 +119,7 @@ getContinuation primcall live_outs f = Gen $ \return_type -> do
   (stm, MkStm stms) <- runGen (f cont_call) return_type
   
   -- Put the continuation into a 'letrec' statement
-  let stms' cont_stm = LetrecE [FunDef cont_var cont_fun] (stms stm)
+  let stms' cont_stm = LetrecE [Def cont_var cont_fun] (stms stm)
         where
           cont_fun = mkFun convention live_outs return_type cont_stm
   
@@ -152,9 +152,9 @@ stmFreeVars stm =
        let body_fv = foldr Set.delete (stmFreeVars body) params
        in Set.union body_fv $ atomFreeVars rhs
      LetrecE defs body ->
-       let fun_vars = [v | FunDef v _ <- defs]
+       let fun_vars = map definiendum defs
            body_fv = stmFreeVars body
-           funs_fvs = [funFreeVars d | FunDef _ d <- defs]
+           funs_fvs = map (funFreeVars . definiens) defs
        in foldr Set.delete (Set.unions (body_fv : funs_fvs)) fun_vars
      SwitchE v alts ->
        Set.unions (valFreeVars v : [stmFreeVars s | (_, s) <- alts])

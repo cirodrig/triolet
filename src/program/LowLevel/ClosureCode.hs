@@ -262,7 +262,7 @@ withGlobalFunctions imports defs scan gen = do
   
   -- Generate code of closures
   defs' <- runFreshVarCC $
-           forM (zip3 (map funDefiniendum defs) global_closures funs) $ \(d, c, f) ->
+           forM (zip3 (map definiendum defs) global_closures funs) $ \(d, c, f) ->
            emitGlobalClosure d c f
   writeDefs (concat defs')
     
@@ -272,7 +272,7 @@ withGlobalFunctions imports defs scan gen = do
 -- | Create a closure description if the function is a closure function.  
 -- Otherwise return Nothing.  No code is generated.
 createGlobalClosure :: FunDef -> FreshVarM (Maybe Closure)
-createGlobalClosure (FunDef v fun)
+createGlobalClosure (Def v fun)
   | isClosureFun fun = do
       entry_points <-
         case varName v
@@ -306,7 +306,7 @@ withLocalFunctions defs scan gen = check_functions $ mdo
 
     -- Verify that the argument is a closure function, not a prim function.
     check_function def k =
-      if isClosureFun $ funDefiniens def
+      if isClosureFun $ definiens def
       then k
       else internalError "withLocalFunctions: Function does not require closure conversion"
 
@@ -315,11 +315,11 @@ withLocalFunctions defs scan gen = check_functions $ mdo
 mkRecClosures defs captureds = do
   -- Create entry points structure
   deallocator_fn <- newAnonymousVar (PrimType PointerType)
-  entry_points <- forM defs $ \(FunDef v f) ->
+  entry_points <- forM defs $ \(Def v f) ->
     mkEntryPoints (CustomDeallocator deallocator_fn) (funType f) (varName v)
  
   return $ closureGroup $
-    lazyZip3 (map funDefiniendum defs) entry_points captureds
+    lazyZip3 (map definiendum defs) entry_points captureds
   where
     -- The captured variables are generated lazily; must not be strict
     lazyZip3 (x:xs) (y:ys) ~(z:zs) = (x,y,z):lazyZip3 xs ys zs
@@ -619,7 +619,7 @@ generateClosureFree clo
   
   -- Write this to the closure's deallocation function entry
   let fun = primFun [param] [] fun_body
-  return $ mkDefs [FunDef dealloc_fun fun] []
+  return $ mkDefs [Def dealloc_fun fun] []
 
 -- | Generate a shared closure record value and a function that frees the
 -- entire recursive function group.
@@ -670,7 +670,7 @@ emitSharedClosureRecordFree fun_var clos = do
   
   -- Write the global function
   let fun = primFun [param] [] fun_body
-  return $ FunDef fun_var fun
+  return $ Def fun_var fun
   where
     -- Check whether reference count is zero and update accumulator.
     -- acc = acc && (closure_ptr->refct == 0)
@@ -724,9 +724,9 @@ generateGlobalClosure clo
       let closure_values =
             [ RecV objectHeaderRecord $
               objectHeaderData $ VarV $ closureInfoTableEntry clo]
-      in return $
-         DataDef (closureVar clo) (flattenStaticRecord globalClosureRecord)
-         (flattenGlobalValues closure_values)
+          static_value = StaticData (flattenStaticRecord globalClosureRecord) (flattenGlobalValues closure_values)
+      in return $ Def (closureVar clo) static_value
+         
 
 -- | Generate code to construct a single closure.
 generateLocalClosure :: Closure -> GenM () 
@@ -763,7 +763,7 @@ emitExactEntry clo = do
     return $ ReturnE $ primCallA direct_entry (cap_vars ++ map VarV params)
 
   let fun = primFun (clo_ptr : params) return_types fun_body
-  return $ FunDef (closureExactEntry clo) fun
+  return $ Def (closureExactEntry clo) fun
   where
     load_captured_vars clo_ptr
       | closureIsRecursive clo = do
@@ -809,7 +809,7 @@ emitInexactEntry clo = do
     store_parameters (VarV returns_ptr) return_vals
     gen0
   let fun = primFun [clo_ptr, params_ptr, returns_ptr] [] fun_body
-  return $ FunDef (closureInexactEntry clo) fun
+  return $ Def (closureInexactEntry clo) fun
   where
     load_parameters params_ptr =
       sequence [loadField fld params_ptr
@@ -839,8 +839,8 @@ emitInfoTable clo =
       record_type =
         staticRecord (RecordField funInfoHeaderRecord : arg_type_fields)
       info_table = closureInfoTableEntry clo
-  in return $
-     DataDef info_table (flattenStaticRecord record_type) (flattenGlobalValues fun_info)
+      static_value = StaticData (flattenStaticRecord record_type) (flattenGlobalValues fun_info)
+  in return $ Def info_table static_value
   where
     -- see 'funInfoHeader'
     info_header =
@@ -871,7 +871,7 @@ emitGlobalClosure :: Var -> Maybe Closure -> Fun -> FreshVarM Defs
 -- Emit a closure function
 emitGlobalClosure direct_entry (Just clo) direct = do
   info_def <- emitInfoTable clo
-  let direct_def = FunDef (closureDirectEntry clo) direct
+  let direct_def = Def (closureDirectEntry clo) direct
   exact_def <- emitExactEntry clo
   inexact_def <- emitInexactEntry clo
   
@@ -884,7 +884,7 @@ emitGlobalClosure direct_entry (Just clo) direct = do
 
 -- Emit a primitive function
 emitGlobalClosure direct_entry Nothing direct = do
-  return $ mkDefs [FunDef direct_entry direct] []
+  return $ mkDefs [Def direct_entry direct] []
 
 -- | Generate the code and data of a group of recursive closures.
 -- An info table and entry points are generated.  The code for dynamically
@@ -894,7 +894,7 @@ emitRecClosures grp directs = do
   -- Emit info table and entry points of each function 
   member_defs <- forM (zip grp directs) $ \(clo, direct) -> do
     info_def <- emitInfoTable clo
-    let direct_def = FunDef (closureDirectEntry clo) direct
+    let direct_def = Def (closureDirectEntry clo) direct
     exact_def <- emitExactEntry clo
     inexact_def <- emitInexactEntry clo
     return ([direct_def, exact_def, inexact_def], [info_def])
@@ -935,7 +935,7 @@ emitLambdaClosure1 lambda_type direct captured_vars = do
       
   -- Generate code
   info_def <- emitInfoTable clo
-  let direct_def = FunDef (closureDirectEntry clo) direct
+  let direct_def = Def (closureDirectEntry clo) direct
   exact_def <- emitExactEntry clo
   inexact_def <- emitInexactEntry clo
   free_defs <- generateClosureFree clo
@@ -1034,7 +1034,7 @@ genIndirectCall return_types mk_op mk_args = return $ do
     inexact_call <- lift $ fmap (primFun [] return_types') $
                     execBuild return_types' $
                     make_inexact_call ret_vars op args cont
-    emitLetrec [FunDef inexact_call_var inexact_call]
+    emitLetrec [Def inexact_call_var inexact_call]
     
     check_arity <-
       lift $ execBuild return_types' $ do

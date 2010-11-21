@@ -121,11 +121,12 @@ toPointerFunctionType ftype =
       range = map toPointerType $ ftReturnTypes ftype
   in  mkFunctionType (ftConvention ftype) domain range
 
-toPointerDef (FunDef v f) =
-  FunDef (toPointerVar v) (toPointerFun f)
+toPointerDef (Def v f) =
+  Def (toPointerVar v) (toPointerFun f)
 
-toPointerDataDef (DataDef v record_type x) =
-  DataDef (toPointerVar v) (toPointerRecordType record_type) (map toPointerData x)
+toPointerDataDef (Def v (StaticData record x)) =
+  let dat = StaticData (toPointerRecordType record) (map toPointerData x)
+  in Def (toPointerVar v) dat
 
 toPointerImport :: Import -> Import
 toPointerImport (ImportClosureFun ep) =
@@ -150,14 +151,16 @@ toPointerImport (ImportData v data_value) =
 toPointerExport :: (Var, ExportSig) -> (Var, ExportSig)
 toPointerExport (v, sig) = (toPointerVar v, sig)
 
+toPointerGlobalDef (GlobalFunDef d) = GlobalFunDef $ toPointerDef d
+toPointerGlobalDef (GlobalDataDef d) = GlobalDataDef $ toPointerDataDef d
+
 -------------------------------------------------------------------------------
 
 -- | Insert explicit memory management into a module.  All memory-managed
 -- pointers become unmanaged pointers.
 insertReferenceCounting :: Module -> IO Module
-insertReferenceCounting (Module imports funs datas exports) =
-  let funs' = map toPointerDef funs
-      datas' = map toPointerDataDef datas
+insertReferenceCounting (Module imports defs exports) =
+  let defs' = map toPointerGlobalDef defs
       imports' = map toPointerImport imports
       exports' = map toPointerExport exports
-  in return $ Module imports' funs' datas' exports'
+  in return $ Module imports' defs' exports'

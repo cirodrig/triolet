@@ -174,13 +174,13 @@ ccUnhoistedFun fun = do
 --   hoisted function definitions appear first in the transformed code,
 --   followed by un-hoisted functions.
 ccLocalGroup :: [FunDef] -> (GenM () -> CC (GenM a)) -> CC (GenM a) 
-ccLocalGroup defs do_body = withParameters (map funDefiniendum defs) $ do
+ccLocalGroup defs do_body = withParameters (map definiendum defs) $ do
   -- Determine which functions are hoisted
-  hoisted <- sequence [isHoisted v | FunDef v _ <- defs]
+  hoisted <- mapM (isHoisted . definiendum) defs
   let (h_defs, l_defs) = partition_by hoisted defs
 
   generate_hoisted_functions h_defs $ \hoisted_code -> 
-    withUnhoistedVariables (map funDefiniendum l_defs) $ do
+    withUnhoistedVariables (map definiendum l_defs) $ do
       unhoisted_code <- generate_unhoisted l_defs
       do_body (hoisted_code >> emitLetrec unhoisted_code)
   where
@@ -189,13 +189,13 @@ ccLocalGroup defs do_body = withParameters (map funDefiniendum defs) $ do
                                -> CC a
     generate_hoisted_functions [] k = k (return ())
     generate_hoisted_functions h_defs k =
-      withLocalFunctions h_defs (mapM (ccHoistedFun . funDefiniens) h_defs) k
+      withLocalFunctions h_defs (mapM (ccHoistedFun . definiens) h_defs) k
 
     generate_unhoisted l_defs = mapM gen l_defs
       where
-        gen (FunDef v f) = do
+        gen (Def v f) = do
           f' <- ccUnhoistedFun f
-          return $ FunDef v f'
+          return $ Def v f'
 
     -- Partition list 2 by the boolean value in list 1
     partition_by flags values = par id id flags values
@@ -205,7 +205,7 @@ ccLocalGroup defs do_body = withParameters (map funDefiniendum defs) $ do
         par hd_l hd_r []            _      = (hd_l [], hd_r [])
 
 closureConvertTopLevelFunction :: FunDef -> CC Fun
-closureConvertTopLevelFunction def@(FunDef v f) =
+closureConvertTopLevelFunction def@(Def v f) =
   let hoist_vars = findFunctionsToHoist def
   in withHoistedVariables hoist_vars $ do
     (f', captured) <- ccHoistedFun f
@@ -234,9 +234,9 @@ scanDataValue value =
 -- Currently we don't allow lambda functions inside static data structures,
 -- so this is just a validity check.
 convertDataDef :: DataDef -> DataDef
-convertDataDef (DataDef v record vals) =
+convertDataDef (Def v (StaticData record vals)) =
   let vals' = map scanDataValue vals
-  in DataDef v record vals'
+  in Def v (StaticData record vals')
 
 convertDataDefs = map convertDataDef
 
@@ -409,11 +409,9 @@ closureConvert mod =
   withTheLLVarIdentSupply $ \var_ids -> do
 
     -- Perform closure conversion
-    let fun_defs = moduleFunctions mod
-        data_defs = moduleData mod
+    let (fun_defs, data_defs) = partitionGlobalDefs $ moduleGlobals mod
         imports = moduleImports mod
-        global_vars = map funDefiniendum fun_defs ++
-                      map dataDefiniendum data_defs ++
+        global_vars = map globalDefiniendum (moduleGlobals mod) ++
                       map importVar imports
     (fun_defs', fun_data_defs') <-
       closureConvertTopLevelFunctions var_ids global_vars imports fun_defs
@@ -424,6 +422,8 @@ closureConvert mod =
     renamed_fun_defs <-
       runFreshVarM var_ids $ mapM (renameInFunDef RenameParameters) fun_defs'
     
-    return $ mod { moduleFunctions = renamed_fun_defs
-                     , moduleData = data_defs' ++ fun_data_defs'}
+    let new_global_defs = map GlobalFunDef renamed_fun_defs ++
+                          map GlobalDataDef (data_defs' ++ fun_data_defs')
+    
+    return $ mod {moduleGlobals = new_global_defs}
 

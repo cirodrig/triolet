@@ -126,11 +126,11 @@ rnStm rn statement =
        return $ LetE params' rhs' stm'
      LetrecE defs stm -> do
        (renaming, definienda) <-
-         renameLetrecFunctions rn $ map funDefiniendum defs
+         renameLetrecFunctions rn $ map definiendum defs
        definientia <-
-         mapM (rnFun (setRenaming renaming rn) . funDefiniens) defs
+         mapM (rnFun (setRenaming renaming rn) . definiens) defs
        stm' <- rnStm (setRenaming renaming rn) stm
-       return $ LetrecE (zipWith FunDef definienda definientia) stm'
+       return $ LetrecE (zipWith Def definienda definientia) stm'
      SwitchE scr alts -> do
        scr' <- rnVal rn scr
        alts' <- mapM rename_alt alts
@@ -148,44 +148,38 @@ rnFun rn f = do
   body <- rnStm (setRenaming renaming rn) $ funBody f
   return $ f {funParams = params, funBody = body}
 
--- | Rename the contents of a data definition.  The data variable isn't
---   assigned a new name.
-rnDataDef :: Rn -> DataDef -> FreshVarM DataDef
-rnDataDef rn (DataDef v record values) = do
+-- | Rename the contents of a data definition.
+rnStaticData :: Rn -> StaticData -> FreshVarM StaticData
+rnStaticData rn (StaticData record values) = do
   values' <- rnVals rn values
-  return $ DataDef v record values'
+  return $ StaticData record values'
 
 rnExport :: Renaming -> (Var, ExportSig) -> (Var, ExportSig)
 rnExport rn (v, sig) = (rnVar rn v, sig)
 
-rnTopLevel :: Rn -> [FunDef] -> [DataDef] -> [(Var, ExportSig)]
-           -> FreshVarM (Renaming, [FunDef], [DataDef], [(Var, ExportSig)])
-rnTopLevel rn fun_defs data_defs exports = do
-  (rn', f_definienda, d_definienda) <- rename_globals
-
-  -- Rename contents of functions
-  f_definientia <- mapM (rnFun rn' . funDefiniens) fun_defs
-  let fun_defs' = zipWith FunDef f_definienda f_definientia
-
-  -- Rename contents of data definitions
-  data_defs1 <- mapM (rnDataDef rn') data_defs
-  let data_defs' = [DataDef v record values
-                   | (v, DataDef _ record values) <-
-                     zip d_definienda data_defs1]
-                   
+rnTopLevel :: Rn -> [GlobalDef] -> [(Var, ExportSig)]
+           -> FreshVarM (Renaming, [GlobalDef], [(Var, ExportSig)])
+rnTopLevel rn global_defs exports = do
+  (rn', definienda) <- rename_globals
+  global_defs' <- zipWithM (rename rn') definienda global_defs
   let exports' = map (rnExport (rnRenaming rn')) exports
-
-  return (rnRenaming rn', fun_defs', data_defs', exports')
+  return (rnRenaming rn', global_defs', exports')
   where
+    rename rn2 new_name global_def = 
+      case global_def
+      of GlobalFunDef (Def _ fun) -> do
+           fun' <- rnFun rn2 fun
+           return (GlobalFunDef (Def new_name fun'))
+         GlobalDataDef (Def _ dat) -> do
+           dat' <- rnStaticData rn2 dat
+           return (GlobalDataDef (Def new_name dat'))
+
     -- Rename names of global functions and data
     rename_globals = do
-      (renaming1, f_definienda) <-
-        renameGlobalEntities rn $ map funDefiniendum fun_defs
-      let rn1 = setRenaming renaming1 rn
-      (renaming2, d_definienda) <-
-        renameGlobalEntities rn1 $ map dataDefiniendum data_defs
-      let rn2 = setRenaming renaming2 rn
-      return (rn2, f_definienda, d_definienda)
+      (renaming, definienda) <-
+        renameGlobalEntities rn $ map globalDefiniendum global_defs
+      let rn1 = setRenaming renaming rn
+      return (rn1, definienda)
 
 -- | Rename variables in a statement.  Start with the given renaming.
 renameStm :: RnPolicy -> Renaming -> Stm -> FreshVarM Stm
@@ -199,16 +193,13 @@ renameFun policy fun = do
 -- | Rename variables in a function definition.  The variable that is defined
 -- by the definition isn't renamed.
 renameInFunDef :: RnPolicy -> FunDef -> FreshVarM FunDef
-renameInFunDef policy (FunDef v f) = do
+renameInFunDef policy (Def v f) = do
   f' <- renameFun policy f
-  return (FunDef v f')
+  return (Def v f')
 
 -- | Rename variables in a module
 renameModule :: RnPolicy -> Module -> FreshVarM Module
 renameModule policy mod = do
-  (_, fdefs, ddefs, exports) <-
-    rnTopLevel (policy, IntMap.empty)
-    (moduleFunctions mod) (moduleData mod) (moduleExports mod)
-  return $ mod { moduleFunctions = fdefs
-               , moduleData = ddefs
-               , moduleExports = exports}
+  (_, defs, exports) <-
+    rnTopLevel (policy, IntMap.empty) (moduleGlobals mod) (moduleExports mod)
+  return $ mod {moduleGlobals = defs, moduleExports = exports}

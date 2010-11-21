@@ -66,7 +66,7 @@ pprFunctionType ftype =
   (map pprValueType $ ftReturnTypes ftype)
 
 pprDataDef :: DataDef -> Doc
-pprDataDef (DataDef v _ values) =
+pprDataDef (Def v (StaticData _ values)) =
   let initializer = fillBracketList $ map pprVal values
   in hang (text "data" <+> pprVar v <+> text "=") 4 initializer
 
@@ -75,7 +75,7 @@ pprFunSignature domain range =
   hang (sepBracketList domain) (-3) (text "->" <+> sepBracketList range)
 
 pprFunDef :: FunDef -> Doc
-pprFunDef (FunDef v f) =
+pprFunDef (Def v f) =
   let intro = if isPrimFun f then text "procedure" else text "function"
       param_doc = map pprVarLong $ funParams f
       ret_doc = map pprValueType $ funReturnTypes f
@@ -259,9 +259,13 @@ pprImports imports = vcat $ map pprImport imports
 pprExports :: [(Var, ExportSig)] -> Doc
 pprExports exports = vcat [text "export" <+> pprVar v | (v, _) <- exports]
 
+pprGlobalDef (GlobalDataDef d) = pprDataDef d
+pprGlobalDef (GlobalFunDef d) = pprFunDef d
+
+pprGlobalDefs defs = vcat $ map pprGlobalDef defs
+
 pprModule :: Module -> Doc
-pprModule (Module imports fun_defs data_defs exports) =
+pprModule (Module imports defs exports) =
   pprImports imports $$
-  pprDataDefs data_defs $$
-  pprFunDefs fun_defs $$
+  pprGlobalDefs defs $$
   pprExports exports

@@ -282,7 +282,7 @@ flattenStm statement =
          next_statement' <- flattenStm next_statement
          return (atom_statements $ assignment vs' atom' next_statement')
      LetrecE defs next_statement ->
-       defineParams [v | FunDef v _ <- defs] $ \_ -> do
+       defineParams (map definiendum defs) $ \_ -> do
          defs' <- mapM flatten_def defs
          fmap (LetrecE defs') $ flattenStm next_statement
      SwitchE val alts -> do
@@ -293,9 +293,9 @@ flattenStm statement =
        (atom_statements, atom') <- flattenAtom atom
        return (atom_statements $ ReturnE atom')
   where
-    flatten_def (FunDef v f) = do
+    flatten_def (Def v f) = do
       f' <- flattenFun f
-      return $ FunDef v f'
+      return $ Def v f'
 
     flatten_alt (lit, stm) = do
       stm' <- flattenStm stm
@@ -412,29 +412,25 @@ flattenExportedParam etype original_param = do
     from_var (VarV v) = v
     from_var _ = internalError "flattenExportedParam: Unexpected value"
 
-flattenTopLevel :: ExportMap -> [FunDef] -> [DataDef]
-                -> RF ([FunDef], [DataDef])
-flattenTopLevel exports fun_defs data_defs =
+flattenTopLevel :: ExportMap -> [GlobalDef] -> RF [GlobalDef]
+flattenTopLevel exports defs =
   -- Ensure that all globals are defined
-  defineParams [v | FunDef v _ <- fun_defs] $ \_ ->
-  defineParams [v | DataDef v _ _ <- data_defs] $ \_ -> do
-    -- Flatten the globals
-    fun_defs' <- mapM flatten_def fun_defs
-    data_defs' <- mapM flattenDataDef data_defs
-    return (fun_defs', data_defs')
+  defineParams (map globalDefiniendum defs) $ \_ -> mapM flatten defs
   where
-    flatten_def (FunDef v f) = do
+    flatten (GlobalFunDef (Def v f)) = do
       f' <- case IntMap.lookup (fromIdent $ varID v) exports
             of Nothing  -> flattenFun f
                Just sig -> flattenExportedFun sig f
-      return $ FunDef v f'
+      return $ GlobalFunDef $ Def v f'
   
+    flatten (GlobalDataDef d) = fmap GlobalDataDef $ flattenDataDef d
+
 -- | Change a data definition to a flat structure type
 flattenDataDef :: DataDef -> RF DataDef
-flattenDataDef (DataDef v record vals) = do
+flattenDataDef (Def v (StaticData record vals)) = do
   val' <- flattenValList vals
   let record' = staticRecord $ map PrimField $ flattenRecordType record
-  return $ DataDef v record' val'
+  return $ Def v (StaticData record' val')
 
 flattenImport :: Import -> RF Import
 flattenImport (ImportClosureFun ep) =
@@ -465,12 +461,10 @@ flattenRecordTypes mod =
     exports = IntMap.fromList [(fromIdent $ varID v, sig)
                               | (v, sig) <- moduleExports mod]
     flatten_module = do
-      imports' <- mapM flattenImport (moduleImports mod)
-      (fun_defs', data_defs') <-
-        flattenTopLevel exports (moduleFunctions mod) (moduleData mod)
-      return $ mod { moduleImports = imports'
-                   , moduleFunctions = fun_defs'
-                   , moduleData = data_defs'}
+      imports <- mapM flattenImport (moduleImports mod)
+      defs <- flattenTopLevel exports (moduleGlobals mod)
+      return $ mod { moduleImports = imports
+                   , moduleGlobals = defs}
 
 makeImportMap imports =
   IntMap.fromList [(fromIdent $ varID $ importVar v, UnknownExpansion)

@@ -185,10 +185,10 @@ dceDefGroup defs body = do
                  | (def, result) <- annotated_defs]
 
   -- Expose all uses except the locally defined functions
-  putUses $ deleteUses (map funDefiniendum new_defs) filtered_uses
+  putUses $ deleteUses (map definiendum new_defs) filtered_uses
 
   -- Add code size for the function definitions
-  let def_code_size = sum $ map (funDefinitionSize . funDefiniens) new_defs
+  let def_code_size = sum $ map (funDefinitionSize . definiens) new_defs
   nudge def_code_size (return ())
         
   return (new_defs, new_body)
@@ -197,19 +197,19 @@ filterFunDefs :: UseMap         -- ^ Uses outside this definition group
               -> [FunDef]       -- ^ Original definitions
               -> DCEResult [(FunDef, Fun)]
 filterFunDefs ext_uses defs =
-  let dce_funs = map (dceFun . funDefiniens) defs 
+  let dce_funs = map (dceFun . definiens) defs 
       all_uses = useUnions (ext_uses : map uses dce_funs)
   in sequenceA [do {f <- dce_fun; return (def, f)}
                | (def, dce_fun) <- zip defs dce_funs
-               , funDefiniendum def `isUsedIn` all_uses]
+               , definiendum def `isUsedIn` all_uses]
 
 -- | Rebuild a function definition after DCE.
 rebuildFunDef :: UseMap -> FunDef -> Fun -> FunDef 
 rebuildFunDef use_map old_def new_fun =
-  let fname = funDefiniendum old_def
+  let fname = definiendum old_def
       fuses = lookupUses fname use_map
       annotated_fun = setFunUses fuses new_fun
-  in annotated_fun `seq` FunDef fname annotated_fun
+  in annotated_fun `seq` Def fname annotated_fun
 
 -- | Perform dead code elimination on a function.  Only the function body 
 --   contributes to the code size.
@@ -223,13 +223,13 @@ dceFun fun =
 -- | Perform dead code elimination on a data definition.  The data definition
 --   is scanned to find out what variables it references.
 dceDataDef :: DCE DataDef
-dceDataDef (DataDef v rec vals) = DataDef v rec <$> dceVals vals
+dceDataDef (Def v (StaticData rec vals)) =
+  (Def v . StaticData rec) <$> dceVals vals
 
-dceTopLevel :: [FunDef]         -- ^ Global functions
-            -> [DataDef]        -- ^ Global data
+dceTopLevel :: [GlobalDef]      -- ^ Global definitions
             -> [Var]            -- ^ Exported variables
-            -> DCEResult ([FunDef], [DataDef])
-dceTopLevel fun_defs data_defs exports = do
+            -> DCEResult [GlobalDef]
+dceTopLevel defs exports = do
   let other_uses = use_exports *> dce_data_defs
   
   -- First pass: perform DCE and find all uses
@@ -240,8 +240,10 @@ dceTopLevel fun_defs data_defs exports = do
                      | (def, result) <- annotated_fun_defs]
   
   -- Don't need to compute uses or code size
-  return (new_fun_defs, new_data_defs)
+  return (map GlobalFunDef new_fun_defs ++ map GlobalDataDef new_data_defs)
   where
+    (fun_defs, data_defs) = partitionGlobalDefs defs
+
     -- All exported variables are used an unknown number of times
     use_exports = 
       putUses $ IntMap.fromList [(fromIdent $ varID v, ManyUses)
@@ -253,8 +255,7 @@ dceTopLevel fun_defs data_defs exports = do
 --
 --   Also annotate functions with code size and number of uses.
 eliminateDeadCode :: Module -> Module
-eliminateDeadCode mod@(Module { moduleFunctions = fs
-                              , moduleData = ds
+eliminateDeadCode mod@(Module { moduleGlobals = gs
                               , moduleExports = es}) =
-  case dceResult $ dceTopLevel fs ds (map fst es)
-  of (fs', ds') -> mod {moduleFunctions = fs', moduleData = ds'}
+  let gs' = dceResult $ dceTopLevel gs (map fst es)
+  in mod {moduleGlobals = gs'}

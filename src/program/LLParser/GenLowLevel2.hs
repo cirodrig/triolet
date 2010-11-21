@@ -574,7 +574,7 @@ genWhileFunction tenv while_var params cond body cont = do
     cond' <- asVal =<< genExpr tenv cond
     genIf cond' true_path false_path
   
-  emitLetrec [LL.FunDef while_var $
+  emitLetrec [LL.Def while_var $
               LL.primFun param_vars return_types function_body]
 
 -- | Generate an if-else expression in tail position
@@ -677,7 +677,7 @@ genFunctionDef tenv fdef = do
         if functionIsProcedure fdef
         then LL.primFun params returns body
         else LL.closureFun params returns body
-  return (LL.FunDef (functionName fdef) function)
+  return (LL.Def (functionName fdef) function)
 
 genDataDef :: DataDef Typed -> FreshVarM LL.DataDef
 genDataDef ddef = do
@@ -689,31 +689,27 @@ genDataDef ddef = do
   -- Convert the initializer
   value <- genDataExpr (dataValue ddef)
   
-  return $ LL.DataDef (dataName ddef) record_type [value]
+  return $ LL.Def (dataName ddef) (LL.StaticData record_type [value])
 
-genDef :: Def Typed -> FreshVarM (Either LL.FunDef LL.DataDef)
-genDef (DataDefEnt d) = fmap Right $ genDataDef d
-genDef (FunctionDefEnt d) = fmap Left $ genFunctionDef emptyTypeEnv d
+genDef :: Def Typed -> FreshVarM  LL.GlobalDef
+genDef (DataDefEnt d) = fmap LL.GlobalDataDef $ genDataDef d
+genDef (FunctionDefEnt d) = fmap LL.GlobalFunDef $ genFunctionDef emptyTypeEnv d
 genDef (RecordDefEnt _) = internalError "genDef: Unexpected record definition"
 
-genDefs :: [Def Typed] -> FreshVarM ([LL.FunDef], [LL.DataDef])
-genDefs defs = do
-  defs' <- mapM genDef defs
-  return $ partitionEithers defs'
+genDefs :: [Def Typed] -> FreshVarM [LL.GlobalDef]
+genDefs defs = mapM genDef defs
 
 generateLowLevelModule :: [LL.Import]
                        -> [Def Typed]
                        -> IO LL.Module
 generateLowLevelModule externs defs =
   withTheLLVarIdentSupply $ \var_ids -> runFreshVarM var_ids $ do
-    (fun_defs, data_defs) <- genDefs defs
+    global_defs <- genDefs defs
     
     -- Identify the actual imports and exports of this module
-    let defined_here =
-          Set.fromList $
-          map LL.funDefiniendum fun_defs ++ map LL.dataDefiniendum data_defs
+    let defined_here = Set.fromList $ map LL.globalDefiniendum global_defs
         (exports, imports) = find_exports defined_here
-    return $ LL.Module externs fun_defs data_defs exports
+    return $ LL.Module externs global_defs exports
   where
     -- If a variable is external and defined here, it's exported
     find_exports defined_here = partitionEithers $ map pick_export externs

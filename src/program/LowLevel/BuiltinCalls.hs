@@ -24,8 +24,11 @@ import Globals
 makeBuiltinPrimOps :: Module -> IO Module
 makeBuiltinPrimOps mod =
   withTheLLVarIdentSupply $ \var_supply -> runFreshVarM var_supply $ do
-    funs' <- mapM inlFunDef $ moduleFunctions mod
-    return $ mod {moduleFunctions = funs'}
+    globals' <- mapM inline_global_def $ moduleGlobals mod
+    return $ mod {moduleGlobals = globals'}
+  where
+    inline_global_def (GlobalFunDef d) = fmap GlobalFunDef $ inlFunDef d
+    inline_global_def d@(GlobalDataDef _) = return d
 
 type GenM a = FreshVarM a
 
@@ -85,7 +88,7 @@ inlFun f = do
           return $ closureFun (funParams f) (funReturnTypes f) body-}
 
 inlFunDef :: FunDef -> FreshVarM FunDef
-inlFunDef (FunDef vs f) = FunDef vs `liftM` inlFun f
+inlFunDef (Def vs f) = Def vs `liftM` inlFun f
 
 
 -- | Attempt to inline a function call.

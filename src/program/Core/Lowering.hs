@@ -939,7 +939,7 @@ convertDefGroup defgroup k =
     funs <- mapM convertFun [f | CDef _ f <- defgroup]
     
     -- Run continuation
-    let defs = zipWith LL.FunDef fvars funs
+    let defs = zipWith LL.Def fvars funs
     k defs
   where
     convert_function_name (CDef v f) k =
@@ -1033,7 +1033,7 @@ marshalCReturn ty =
 convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
   f' <- convertFun f
   fun_def <- case lang of CCall -> define_c_fun f'
-  return (fun_def, (LL.funDefiniendum fun_def, export_sig))
+  return (fun_def, (LL.definiendum fun_def, export_sig))
   where
     export_sig = exportedFunctionCSig $ cFunType f
 
@@ -1044,15 +1044,14 @@ convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
       -- Create function name.  Function is exported with the given name.
       let label = LL.externPyonLabel module_name exported_name (Just exported_name)
       v <- LL.newExternalVar label (LL.PrimType OwnedType)
-      return $ LL.FunDef v wrapped_fun
+      return $ LL.Def v wrapped_fun
 
 convertModule (CModule module_name defss exports) = do 
   convertDefGroup (concat defss) $ \defs -> do
     (unzip -> (export_defs, exports_sigs)) <-
       mapM (convertExport module_name) exports
     return $ LL.Module { LL.moduleImports = allBuiltinImports
-                       , LL.moduleFunctions = defs ++ export_defs
-                       , LL.moduleData = []
+                       , LL.moduleGlobals = map LL.GlobalFunDef (defs ++ export_defs)
                        , LL.moduleExports = exports_sigs
                        }
 
