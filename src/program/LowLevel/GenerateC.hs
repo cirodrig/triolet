@@ -631,6 +631,9 @@ makeFunctionGroupCode lfg = do
   -- Convert entry code
   (concat -> entry_statements) <- mapM codeItemStatements $ lfgEntry lfg
   
+  -- At the end of the letrec's body, jump past local functions
+  let entry_ft = [CBlockStmt $ CGoto fallthrough internalNode]
+
   -- Convert local functions
   functions <- mapM (makeFunctionCode fallthrough) $ lfgGroup lfg
   let decls = concatMap lfunParameters $ lfgGroup lfg
@@ -638,6 +641,7 @@ makeFunctionGroupCode lfg = do
   -- Assemble a C block statement
   let block_items = map CBlockDecl decls ++
                     entry_statements ++
+                    entry_ft ++
                     functions ++
                     [CBlockStmt fallthrough_stmt]
       compound = CCompound [] block_items internalNode
