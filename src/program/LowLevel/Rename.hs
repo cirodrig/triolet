@@ -33,6 +33,7 @@ mkRenaming assocs =
 
 data RnPolicy =
     RenameEverything  -- ^ Rename everything except imported variables
+  | RenameLocals      -- ^ Rename everything except global variables
   | RenameParameters  -- ^ Rename function parameters and let-bound variables, 
                       --   but not letrec-bound variables
 
@@ -69,6 +70,7 @@ renameParameters :: Rn -> [ParamVar] -> FreshVarM (Renaming, [ParamVar])
 renameParameters rn param_vars =
   case rnPolicy rn
   of RenameEverything -> rename
+     RenameLocals     -> rename
      RenameParameters -> rename
   where
     rename = renameVariables (rnRenaming rn) param_vars
@@ -77,6 +79,7 @@ renameLetrecFunction :: Rn -> Var -> FreshVarM (Renaming, Var)
 renameLetrecFunction rn var =
   case rnPolicy rn
   of RenameEverything -> rename
+     RenameLocals     -> rename
      RenameParameters -> don't
   where
     don't = return (rnRenaming rn, var)
@@ -86,13 +89,20 @@ renameLetrecFunctions :: Rn -> [Var] -> FreshVarM (Renaming, [Var])
 renameLetrecFunctions rn vars =
   case rnPolicy rn
   of RenameEverything -> rename
+     RenameLocals     -> rename
      RenameParameters -> don't
   where
     don't = return (rnRenaming rn, vars)
     rename = renameVariables (rnRenaming rn) vars
   
--- Same renaming decision as for letrec
-renameGlobalEntities = renameLetrecFunctions
+renameGlobalEntities rn vars = 
+  case rnPolicy rn
+  of RenameEverything -> rename
+     RenameLocals     -> don't
+     RenameParameters -> don't
+  where
+    don't = return (rnRenaming rn, vars)
+    rename = renameVariables (rnRenaming rn) vars
 
 rnVar :: Renaming -> Var -> Var
 rnVar rn v = fromMaybe v $ IntMap.lookup (fromIdent $ varID v) rn

@@ -1,0 +1,473 @@
+
+{-# LANGUAGE ViewPatterns, FlexibleInstances, Rank2Types #-}
+module LowLevel.Inlining
+       (inlineModule)
+where
+
+import Prelude hiding(mapM)
+
+import Control.Applicative
+import Control.Monad hiding(mapM)
+import Control.Monad.Reader hiding(mapM)
+import Control.Monad.Trans
+import Data.Graph.Inductive(Gr)
+import Data.Graph.Inductive.Graph
+import Data.Graph.Inductive.Query.DFS
+import qualified Data.IntMap as IntMap
+import Data.List as List
+import qualified Data.Map as Map
+import qualified Data.Set as Set
+import Data.Monoid
+import Data.Traversable
+
+import Gluon.Common.Error
+import Gluon.Common.Identifier
+import LowLevel.FreshVar
+import LowLevel.Build
+import LowLevel.Syntax
+import LowLevel.Rename
+import Globals
+
+-------------------------------------------------------------------------------
+-- Finding function endpoints 
+
+{- $functionendpoints
+
+When inlining a function, the code that was after the function call gets moved
+to the end of the inlined function body.  To do that, the end(s) of the
+function body must be found.  In particular, code should not be inserted after
+a tail call if avoidable, because turning a tail call into a non-tail-call
+hurts performance.  Instead, code should go at the end of the callee.
+
+Functions are scanned before inlining to find their /endpoints/.  A
+function @g@ is an endpoint of @f@ if it can only be reached through tail
+calls from @f@ or from endpoints of @f@.  The code is scanned to build a
+/tail-calls/ graph in which an edge @f -> g@ means that @f@ tail-calls @g@
+and @g@ is not referenced in a way other than a tail call.  The roots of the
+graph, that is, functions that are used in some way other than a tail call,
+are also identified.  Reachability from roots is determined using depth-first
+search.  If any node is reachable from multiple roots, it is not an endpoint;
+the remaining reachable set are endpoints.
+
+A second scan is then performed to determine how many places a function's
+return code must be modified.  Inlining is performed differently depending
+on whether the answer is zero, one, or many.  If zero, the continuation
+code is discarded.  If one, the continuation code is put at the unique
+return site.  If many, a continuation function is created and a tail call
+to the continuation is inserted at each return site.
+-}
+
+-- | Information about observed tail calls observed in a function.
+--
+--   This keeps track of roots, functions that are defined in the scanned
+--   scope, and tail calls.
+data ObservedTailCalls = ObservedTailCalls [Var] [Var] [(Var, Var)]
+
+instance Monoid ObservedTailCalls where
+  mempty = ObservedTailCalls [] [] []
+  ObservedTailCalls x1 y1 z1 `mappend` ObservedTailCalls x2 y2 z2 =
+    ObservedTailCalls (x1 ++ x2) (y1 ++ y2) (z1 ++ z2)
+
+-- | A tail call scan.  The scan needs to know the function in which
+--   the current code is contained and the arity of all locally defined
+--   functions.  For lambda functions, 'Nothing' is used.
+type TailCallScan = Maybe Var -> IntMap.IntMap Int -> ObservedTailCalls
+
+setCallingContext :: Maybe Var -> TailCallScan -> TailCallScan
+setCallingContext mv f = \_ arities -> f mv arities
+
+-- | Scan code that may use a definition of a function.  The function's
+--   arity is given as a parameter.
+withDefinition :: Var -> Int -> TailCallScan -> TailCallScan
+withDefinition v arity f = \cc arities -> 
+  let arities' = IntMap.insert (fromIdent $ varID v) arity arities
+      ObservedTailCalls roots defs edges = f cc arities'
+  in ObservedTailCalls roots (v:defs) edges
+
+-- | Use a variable in a non-tail-call context
+use :: Var -> TailCallScan
+use v = scanner
+  where
+    scanner _ arities
+      | fromIdent (varID v) `IntMap.member` arities =
+          ObservedTailCalls [v] [] []
+      | otherwise = mempty
+
+-- | Use a variable in a tail call
+useTailCall :: Var -> Int -> TailCallScan
+useTailCall v num_args = scanner
+  where
+    scanner ctx arities =
+      case IntMap.lookup (fromIdent $ varID v) arities
+      of Nothing -> mempty      -- Variable is ignored 
+         Just arity | arity /= num_args -> non_tail_call
+                    | otherwise -> case ctx
+                                   of Nothing -> non_tail_call
+                                      Just caller -> tail_call caller v
+    non_tail_call = ObservedTailCalls [v] [] []
+    tail_call caller callee = ObservedTailCalls [] [] [(caller, callee)]
+
+tailCallScanVal :: Val -> TailCallScan
+tailCallScanVal value =
+  case value
+  of VarV v -> use v
+     RecV _ vs -> tailCallScanVals vs
+     LitV _ -> mempty
+     LamV f -> setCallingContext Nothing $ tailCallScanFun f
+     
+tailCallScanVals :: [Val] -> TailCallScan
+tailCallScanVals vs = mconcat $ map tailCallScanVal vs
+
+-- | Scan an atom that's not in tail position
+tailCallScanAtom :: Atom -> TailCallScan
+tailCallScanAtom (ValA vs) = tailCallScanVals vs
+tailCallScanAtom (CallA _ op args) = tailCallScanVals (op:args)
+tailCallScanAtom (PrimA _ vs) = tailCallScanVals vs
+tailCallScanAtom (PackA _ vs) = tailCallScanVals vs
+tailCallScanAtom (UnpackA _ v) = tailCallScanVal v
+
+tailCallScanStm :: Stm -> TailCallScan
+tailCallScanStm statement =
+  case statement
+  of LetE params rhs body ->
+       tailCallScanAtom rhs `mappend` tailCallScanStm body
+     LetrecE defs body ->
+       tailCallScanDefs defs $ tailCallScanStm body
+     SwitchE scrutinee alternatives ->
+       mconcat $
+       tailCallScanVal scrutinee : map (tailCallScanStm . snd) alternatives
+
+     -- Scan a tail call
+     ReturnE (CallA _ (VarV op) args) ->
+       useTailCall op (length args) `mappend` tailCallScanVals args
+     ReturnE atom ->
+       tailCallScanAtom atom
+
+tailCallScanFun :: Fun -> TailCallScan
+tailCallScanFun f = tailCallScanStm (funBody f)
+
+tailCallScanDefs defs scan = with_definitions (scan `mappend` scan_definitions)
+  where
+    with_definitions k = foldr with_definition k defs
+    with_definition def k =
+      withDefinition (definiendum def) (length $ funParams $ definiens def) k
+    
+    scan_definitions =
+      mconcat [setCallingContext (Just fname) $ tailCallScanFun fun
+              | Def fname fun <- defs]
+
+-- | Scan a top-level function.  Indicate that the function is used outside of
+--   the scanned code.
+tailCallScanTopLevelFunction :: FunDef -> TailCallScan
+tailCallScanTopLevelFunction def =
+  tailCallScanDefs [def] (use $ definiendum def)
+
+-- | Create the tail-call graph of a top-level function.
+-- Return the set of root nodes and the graph.
+mkTailCallGraph :: FunDef -> ([Node], Gr Var ())
+mkTailCallGraph fdef = 
+  let ObservedTailCalls roots defs edges =
+        tailCallScanTopLevelFunction fdef no_context IntMap.empty
+        where
+          no_context = internalError "mkTailCallGraph: No calling context"
+      
+      -- Get the set of roots and the set of all defined functions.
+      root_set = Set.fromList roots
+      all_nodes = Set.fromList defs -- Making a set removes duplicates
+      node_map :: Map.Map Var Node
+      node_map = Map.fromList $ zip (Set.toList all_nodes) [1..]
+      root_nodes = [node_map Map.! v | v <- Set.toList root_set]
+
+      graph_edges =
+        [(node_map Map.! s, node_map Map.! d, ())
+        | (s, d) <- edges, not $ d `Set.member` root_set]
+      graph_nodes = [(n, l) | (l, n) <- Map.assocs node_map]
+      graph = mkGraph graph_nodes graph_edges
+  in (root_nodes, graph)
+
+-- | For each root node of the tail-call graph, list its endpoints
+type Endpoints = [(Var, [Var])]
+
+getEndpoints :: FunDef -> Endpoints
+getEndpoints fdef =
+  let -- Get the tail call graph
+      (roots, gr) = mkTailCallGraph fdef
+
+      -- Start with the reachability graph
+      endpoints = [(root, reachable root gr) | root <- roots]
+
+      -- If a node is in multiple endpoints lists, remove it and make it its
+      -- own endpoint
+      multiple_endpoints = [n | n <- nodes gr, memberN 2 n (map snd endpoints)]
+      f_endpoints = [(n, [n]) | n <- multiple_endpoints] ++
+                    [(n, ns List.\\ multiple_endpoints) | (n, ns) <- endpoints]
+
+      getlab node = case lab gr node
+                    of Just l -> l
+                       Nothing -> internalError "getEndpoints"
+  in [(getlab n, map getlab e) | (n, e) <- f_endpoints]
+  where
+    -- memberN n x xss -> True if x appears in at least n members of xss 
+    memberN 0 _ _        = True
+    memberN _ _ []       = False
+    memberN n x (xs:xss) = let n' = if x `elem` xs then n - 1 else n
+                           in memberN n' x xss
+
+-------------------------------------------------------------------------------
+-- Prepare a function for inlining
+
+-- | A function that has been prepared for inlining.
+--   Given the inlined function's continuation, you can produce the
+--   inlined function as a statement.
+data Inlinable a = Inlinable !Uses (([Var], Stm) -> a)
+
+instance Functor Inlinable where
+  fmap f (Inlinable u g) = Inlinable u (f . g)
+
+instance Applicative Inlinable where
+  pure x  = Inlinable ZeroUses (const x)
+  Inlinable u1 f <*> Inlinable u2 x =
+    Inlinable (u1 `mappend` u2) (\k -> f k $ x k)
+
+-- | Prepare a function for inlining.  Called by makeInlinable.
+makeInlinableFunction :: Endpoints -> FunDef -> Inlinable Stm
+makeInlinableFunction endpoints (Def fun_name f) = inl_stm $ funBody f
+  where
+    inl_stm statement =
+      case statement
+      of LetE lhs rhs body -> LetE lhs rhs <$> inl_stm body
+         LetrecE defs body ->
+           LetrecE <$> traverse inl_def defs <*> inl_stm body
+         SwitchE scr alts -> SwitchE scr <$> traverse inl_alt alts
+         ReturnE (CallA _ (VarV op) _)
+           | is_endpoint op ->
+             -- The statement will be inlined into this local function
+             pure statement
+         ReturnE atom ->
+             -- Pass the atom's result to the continuation
+             Inlinable OneUse $ \(retvars, cont) -> LetE retvars atom cont
+
+    inl_alt (tag, stm) = fmap ((,) tag) $ inl_stm stm
+
+    inl_def (Def fname f)
+      | is_endpoint fname = mk_def <$> inl_stm (funBody f)
+      | otherwise = pure (Def fname f)
+      where
+        mk_def new_body =
+          Def fname $
+          mkFun (funConvention f) (funParams f) (funReturnTypes f) new_body
+
+    endpoints_of_f = case lookup fun_name endpoints
+                     of Nothing -> internalError "makeInlinableFunction"
+                        Just x  -> x
+    is_endpoint var = var `elem` endpoints_of_f
+
+-- | Specification of an inlinable function.
+--   Includes the function body (for inlining in tail position) and
+--   an inlinable function body (for non-tail position).
+data InlSpec =
+  InlSpec !CallConvention [Var] !Stm !(Inlinable Stm)
+
+makeInlinable :: FunDef -> FreshVarM InlSpec
+makeInlinable (Def v f) = do
+  -- Rename to avoid name conflicts
+  f' <- renameFun RenameEverything f
+  let endpoints = getEndpoints (Def v f')
+  let inlinable = makeInlinableFunction endpoints (Def v f')
+  return $ InlSpec (funConvention f') (funParams f') (funBody f') inlinable
+
+-------------------------------------------------------------------------------
+
+type GenM a = Gen FreshVarM a
+
+instance Applicative FreshVarM where
+  pure = return
+  (<*>) = ap
+
+instance (Monad m, Applicative m) => Applicative (Gen m) where
+  pure x = lift (pure x)
+  (<*>) = ap
+
+instance (Monad m, Applicative m) => Applicative (ReaderT a m) where
+  pure x = lift (pure x)
+  m1 <*> m2 = do f <- m1
+                 x <- m2
+                 return (f x)
+
+type Inl m a = ReaderT (IntMap.IntMap InlSpec) m a 
+               
+type InlG a = Inl (Gen FreshVarM) a
+type InlF a = Inl FreshVarM a
+
+embedInlF :: InlF a -> InlG a
+embedInlF (ReaderT f) =
+  ReaderT $ \env -> lift (f env)
+
+-- | Run an inlining computation and get the code it generates
+execInlG :: [ValueType] -> InlG Stm -> InlF Stm
+execInlG return_type (ReaderT f) =
+  ReaderT $ \env -> execBuild return_type (f env)
+
+-- | A map from variable ID to inlineable function.  The map only contains
+--   entries for functions that may be inlined.
+type InlineEnv = IntMap.IntMap Fun
+
+assignCallParameters params args = lift $ zipWithM_ bind_arg params args
+  where
+    bind_arg param arg = bindAtom1 param $ ValA [arg]
+
+tryInlineTailCall :: CallConvention
+                  -> Var            -- ^ The callee
+                  -> [Val]          -- ^ The operands of the call
+                  -> InlG Stm       -- ^ The continuation
+tryInlineTailCall cc op args = do
+  inline_specs <- ask
+  inline $ IntMap.lookup (fromIdent $ varID op) inline_specs
+  where
+    inline Nothing = return $ ReturnE $ CallA cc (VarV op) args
+    inline (Just (InlSpec _ params stm _)) = do
+      assignCallParameters params args
+      return stm
+
+tryInlineCall :: CallConvention
+              -> Var            -- ^ The callee
+              -> [Val]          -- ^ The operands of the call
+              -> [Var]          -- ^ The result variables
+              -> InlG Stm       -- ^ The continuation
+              -> InlG Stm       -- ^ The inlined call generator
+tryInlineCall cc op args retvars mk_cont = do
+  inline_specs <- ask
+  inline $ IntMap.lookup (fromIdent $ varID op) inline_specs
+  where
+    -- This function isn't inlinable
+    inline Nothing = no_inline
+      
+    inline (Just (InlSpec inl_cc params _ inl_stm))
+      | cc /= inl_cc = internalError "tryInlineCall: Calling convention mismatch"
+      | length args /= length params = no_inline
+      | otherwise = do
+        assignCallParameters params args
+        case inl_stm of
+          Inlinable ZeroUses inl ->
+            -- Ignore the continuation
+            let err = internalError "tryInlineCall"
+            in return $ inl (err, err)
+          Inlinable OneUse inl -> do
+            -- Inline the continuation
+            cont <- embedInlF $ execInlG (map varType retvars) mk_cont
+            return $ inl (retvars, cont)
+          Inlinable ManyUses inl -> do
+            -- Create a local function for the continuation
+            lift $ getContinuation True retvars $ \cont ->
+              return $ inl (retvars, cont)
+            mk_cont
+
+    no_inline = do lift $ bindAtom retvars $ CallA cc (VarV op) args
+                   mk_cont
+
+inlVal :: Val -> InlF Val
+inlVal value =
+  case value
+  of VarV {} -> return value
+     RecV rec vs -> RecV rec <$> inlValues vs
+     LitV {} -> return value
+     LamV f -> LamV <$> inlFun f
+
+inlValues :: [Val] -> InlF [Val]
+inlValues = mapM inlVal
+
+inlAtom :: Atom -> InlF Atom
+inlAtom atom =
+  case atom
+  of ValA vs -> ValA <$> inlValues vs
+     CallA cc op args -> CallA cc <$> inlVal op <*> inlValues args
+     PrimA op args -> PrimA op <$> inlValues args
+     PackA rec vals -> PackA rec <$> inlValues vals
+     UnpackA rec val -> UnpackA rec <$> inlVal val
+
+-- | Perform inlining in a statement.
+inlStatement :: [ValueType]     -- ^ Statement's return types
+             -> Stm             -- ^ Statement to process
+             -> InlG Stm        -- ^ Produce a statement with inlined calls
+inlStatement rt statement =
+  case statement
+  of LetE lhs atom body -> do 
+       atom' <- embedInlF $ inlAtom atom
+       case atom' of
+         CallA cc (VarV op_var) args ->
+           tryInlineCall cc op_var args lhs $ inlStatement rt body
+         _ -> do lift $ bindAtom lhs atom'
+                 inlStatement rt body
+     LetrecE defs body ->
+       inlDefGroupG defs $ inlStatement rt body
+     SwitchE scrutinee alternatives -> do
+       scrutinee' <- embedInlF $ inlVal scrutinee
+       alts' <- mapM inl_alt alternatives
+       return $ SwitchE scrutinee' alts'
+     ReturnE atom -> do
+       atom' <- embedInlF $ inlAtom atom
+       case atom' of 
+         CallA cc (VarV op_var) args -> tryInlineTailCall cc op_var args
+         _ -> return (ReturnE atom')
+  where
+    inl_alt (lit, stm) = do
+      stm' <- embedInlF $ execInlG rt $ inlStatement rt stm
+      return (lit, stm')
+
+-- | Perform inlining in a function
+inlFun :: Fun -> InlF Fun
+inlFun f = do
+  body <- execInlG rt $ inlStatement rt (funBody f)
+  return $ f {funBody = body}
+  where
+    rt = funReturnTypes f
+
+-- TODO: Inlining in definition groups; find SCCs and choose loop breakers
+inlDefGroupF defs m = do 
+  defs' <- mapM inlDef defs
+  x <- withDefsF defs' m
+  return (defs', x)
+
+inlDefGroupG defs m = do 
+  defs' <- embedInlF $ mapM inlDef defs
+  lift $ emitLetrec defs'
+  withDefsG defs' m
+
+inlDef (Def v f) = Def v <$> inlFun f
+
+withDefsG defs m = foldr withDefG m defs
+withDefsF defs m = foldr withDefF m defs
+
+withDefG :: FunDef -> InlG a -> InlG a
+withDefG = withDef lift
+
+withDefF :: FunDef -> InlF a -> InlF a
+withDefF = withDef id
+
+-- FIXME: only inline if function is small
+withDef :: Monad m =>
+           (forall a. FreshVarM a -> m a) -> FunDef -> Inl m a -> Inl m a
+withDef t def@(Def v f) m = do
+  new_inline_spec <- lift $ t $ makeInlinable def
+  local (add_inline_spec new_inline_spec) m
+  where
+    add_inline_spec new_inline_spec inline_specs =
+      IntMap.insert (fromIdent $ varID v) new_inline_spec inline_specs
+
+-------------------------------------------------------------------------------
+
+inlineModule :: Module -> IO Module
+inlineModule mod =
+  withTheLLVarIdentSupply $ \var_ids -> do
+    -- Inline functions
+    let (fdefs, ddefs) = partitionGlobalDefs $ moduleGlobals mod
+    (fdefs', ()) <- inline_defs var_ids fdefs
+    let gdefs' = map GlobalFunDef fdefs' ++ map GlobalDataDef ddefs
+        inlined_mod = mod {moduleGlobals = gdefs'}
+
+    -- Rename so that all inlined variables are unique
+    runFreshVarM var_ids $ renameModule RenameLocals inlined_mod
+  where
+    inline_defs var_ids fdefs =
+      runFreshVarM var_ids $
+      runReaderT (inlDefGroupF fdefs $ return ()) IntMap.empty

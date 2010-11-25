@@ -95,6 +95,7 @@ Executable pyon
     LowLevel.Builtins
     LowLevel.BuiltinsTH
     LowLevel.InitializeBuiltins
+    LowLevel.Inlining
     LowLevel.Build
     LowLevel.BuiltinCalls
     LowLevel.ClosureSelect

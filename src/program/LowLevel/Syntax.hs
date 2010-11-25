@@ -37,6 +37,7 @@ valueToPrimType _ =
 --
 --   'ManyUses' represents more than one use, or an unknown number of uses.
 data Uses = ZeroUses | OneUse | ManyUses
+          deriving(Eq)
 
 instance Monoid Uses where
   mempty = ZeroUses
