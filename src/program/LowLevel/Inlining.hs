@@ -28,6 +28,66 @@ import LowLevel.Syntax
 import LowLevel.Rename
 import Globals
 
+closureInlineCutoff = 20
+primInlineCutoff = 5
+
+-------------------------------------------------------------------------------
+-- Topological sorting
+
+-- | Topologically sort a group of function definitions.  If there are SCCs,
+--   pick an arbitrary order for the functions in the SCCs.
+--
+-- This way of ordering function definitions is probably more
+-- complicated than necessary.
+topSortDefGroup :: [FunDef] -> [FunDef]
+topSortDefGroup defs =
+  let nodes = map definiendum defs
+      node_map = Map.fromList $ zip nodes [0..]
+      edges = concatMap (findReferences (Set.fromList $ map definiendum defs)) defs
+      
+      gr = mkUGraph
+           [0 .. length nodes - 1]
+           [(node_map Map.! s, node_map Map.! d) | (s, d) <- edges]
+      gr' = breakReferenceLoops gr
+  in map (defs !!) $ concat $ reverse $ scc gr'
+
+breakReferenceLoops :: Gr () () -> Gr () ()
+breakReferenceLoops gr =
+  case find ((> 1) . length) $ scc gr
+  of Nothing -> gr
+     Just (n:_) ->
+       case match n gr
+       of (Just (_, n, (), out_edges), gr') ->
+            breakReferenceLoops (([], n, (), out_edges) & gr')
+
+findReferences :: Set.Set Var -> FunDef -> [(Var, Var)]
+findReferences referents (Def fname fun) = [(fname, v) | v <- find_fun fun]
+  where
+    find_fun f = find_stm $ funBody f
+    find_stm statement =
+      case statement
+      of LetE _ rhs body -> find_atom rhs ++ find_stm body
+         LetrecE defs body -> concatMap (find_fun . definiens) defs ++
+                              find_stm body
+         SwitchE s alts -> concatMap (find_stm . snd) alts ++ find_val s
+         ReturnE a -> find_atom a
+
+    find_atom atom =
+      case atom
+      of ValA vs -> concatMap find_val vs
+         CallA _ v vs -> concatMap find_val (v:vs)
+         PrimA _ vs -> concatMap find_val vs
+         PackA _ vs -> concatMap find_val vs
+         UnpackA _ v -> find_val v
+
+    find_val value =
+      case value
+      of VarV v | v `Set.member` referents -> [v]
+                | otherwise -> []
+         RecV _ vs -> concatMap find_val vs
+         LitV _ -> []
+         LamV f -> find_fun f
+
 -------------------------------------------------------------------------------
 -- Finding function endpoints 
 
@@ -266,15 +326,17 @@ makeInlinableFunction endpoints (Def fun_name f) = inl_stm $ funBody f
 --   Includes the function body (for inlining in tail position) and
 --   an inlinable function body (for non-tail position).
 data InlSpec =
-  InlSpec !CallConvention [Var] !Stm !(Inlinable Stm)
+  InlSpec !CallConvention !CodeSize !Uses [Var] !Stm !(Inlinable Stm)
 
 makeInlinable :: FunDef -> FreshVarM InlSpec
 makeInlinable (Def v f) = do
+  let code_size = funSize f
+      uses      = funUses f
   -- Rename to avoid name conflicts
   f' <- renameFun RenameEverything f
   let endpoints = getEndpoints (Def v f')
   let inlinable = makeInlinableFunction endpoints (Def v f')
-  return $ InlSpec (funConvention f') (funParams f') (funBody f') inlinable
+  return $ InlSpec (funConvention f') code_size uses (funParams f') (funBody f') inlinable
 
 -------------------------------------------------------------------------------
 
@@ -316,6 +378,14 @@ assignCallParameters params args = lift $ zipWithM_ bind_arg params args
   where
     bind_arg param arg = bindAtom1 param $ ValA [arg]
 
+worthInlining fcc fsize fuses
+  | fuses == OneUse = True
+  | fcc == ClosureCall,
+    Just sz <- fromCodeSize fsize = sz < closureInlineCutoff
+  | fcc == PrimCall,
+    Just sz <- fromCodeSize fsize = sz < primInlineCutoff
+  | otherwise = False
+
 tryInlineTailCall :: CallConvention
                   -> Var            -- ^ The callee
                   -> [Val]          -- ^ The operands of the call
@@ -324,10 +394,14 @@ tryInlineTailCall cc op args = do
   inline_specs <- ask
   inline $ IntMap.lookup (fromIdent $ varID op) inline_specs
   where
-    inline Nothing = return $ ReturnE $ CallA cc (VarV op) args
-    inline (Just (InlSpec _ params stm _)) = do
-      assignCallParameters params args
-      return stm
+    inline Nothing = no_inline
+    inline (Just (InlSpec fcc fsize fuses params stm _)) 
+      | worthInlining fcc fsize fuses = do
+        assignCallParameters params args
+        return stm
+      | otherwise = no_inline
+
+    no_inline = return $ ReturnE $ CallA cc (VarV op) args
 
 tryInlineCall :: CallConvention
               -> Var            -- ^ The callee
@@ -342,9 +416,10 @@ tryInlineCall cc op args retvars mk_cont = do
     -- This function isn't inlinable
     inline Nothing = no_inline
       
-    inline (Just (InlSpec inl_cc params _ inl_stm))
+    inline (Just (InlSpec inl_cc inl_size inl_uses params _ inl_stm))
       | cc /= inl_cc = internalError "tryInlineCall: Calling convention mismatch"
       | length args /= length params = no_inline
+      | not $ worthInlining inl_cc inl_size inl_uses = no_inline
       | otherwise = do
         assignCallParameters params args
         case inl_stm of
@@ -423,15 +498,23 @@ inlFun f = do
     rt = funReturnTypes f
 
 -- TODO: Inlining in definition groups; find SCCs and choose loop breakers
-inlDefGroupF defs m = do 
-  defs' <- mapM inlDef defs
-  x <- withDefsF defs' m
-  return (defs', x)
+inlDefGroupF defs m =
+  foldr inline_def (fmap ((,) []) m) $ topSortDefGroup defs 
+  where
+    inline_def def m = do
+      def' <- inlDef def
+      (defs', x) <- withDefF def' m
+      return (def' : defs', x)
 
-inlDefGroupG defs m = do 
-  defs' <- embedInlF $ mapM inlDef defs
-  lift $ emitLetrec defs'
-  withDefsG defs' m
+inlDefGroupG defs m = inline_defs id $ topSortDefGroup defs
+  where
+    inline_defs defs' (d:ds) = do
+      def' <- embedInlF $ inlDef d
+      withDefG def' $ inline_defs (defs' . (def':)) ds
+    
+    inline_defs defs' [] = do
+      lift $ emitLetrec (defs' [])
+      m
 
 inlDef (Def v f) = Def v <$> inlFun f
 
