@@ -2,8 +2,11 @@
 {-# LANGUAGE FlexibleInstances, StandaloneDeriving, TypeSynonymInstances #-}
 module LowLevel.Record where
 
+import Control.Applicative
+import Data.Binary
 import Data.Bits
 import Gluon.Common.Error
+import LowLevel.BinaryUtils
 import LowLevel.Types
 import {-# SOURCE #-} LowLevel.Syntax
 
@@ -170,3 +173,30 @@ pad off alignment = off + (negate off `mod` alignment)
 log2 :: Int -> Int
 log2 1 = 0
 log2 n = 1 + log2 (n `shiftR` 1)
+
+-------------------------------------------------------------------------------
+-- Binary instances
+
+instance Binary StaticField where
+  put (Field off ty) = put off >> put ty
+  get = Field <$> get <*> get
+
+instance Binary StaticFieldType where
+  put (PrimField pt) = putWord8 0 >> put pt
+  put (RecordField rt) = putWord8 1 >> put rt
+  put (BytesField sz al) = putWord8 2 >> put sz >> put al
+  put (AlignField al) = putWord8 3 >> put al
+  get = getWord8 >>= pick
+    where
+      pick 0 = PrimField <$> get
+      pick 1 = RecordField <$> get
+      pick 2 = BytesField <$> get <*> get
+      pick 3 = AlignField <$> get
+
+instance Binary StaticRecord where
+  put (Rec fs sz al) = put sz >> put al >> put fs
+  get = do sz <- get
+           al <- get
+           fs <- get
+           return (Rec fs sz al)
+

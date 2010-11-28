@@ -131,7 +131,6 @@ primHasSideEffect prim =
      PrimCastFromOwned {} -> False
      PrimCastZToF {}      -> False
      PrimCastFToZ {}      -> False
-     PrimCastToFloat {}   -> False
      PrimAddF {}          -> False
      PrimSubF {}          -> False
      PrimMulF {}          -> False

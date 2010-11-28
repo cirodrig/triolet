@@ -37,7 +37,7 @@ valueToPrimType _ =
 --
 --   'ManyUses' represents more than one use, or an unknown number of uses.
 data Uses = ZeroUses | OneUse | ManyUses
-          deriving(Eq)
+          deriving(Eq, Enum, Bounded)
 
 instance Monoid Uses where
   mempty = ZeroUses
@@ -62,6 +62,7 @@ fromCodeSize (CodeSize n) | n < 0     = Nothing
 
 -- | A comparison operation
 data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE
+           deriving(Eq, Bounded, Enum)
 
 data Prim =
     -- | @PrimCastZ from-sign to-sign size@
@@ -100,7 +101,7 @@ data Prim =
     -- | @PrimCastFToZ from-size to-size@
     -- Cast a floating-point value to a signed integral value
   | PrimCastFToZ !Size !Size
-  | PrimCastToFloat             -- ^ Cast to a floating-point value
+  -- - | PrimCastToFloat             -- ^ Cast to a floating-point value
   | PrimAddF !Size              -- ^ Floating-point addition
   | PrimSubF !Size              -- ^ Floating-point subtraction
   | PrimMulF !Size              -- ^ Floating-point multiplication
@@ -242,7 +243,7 @@ data CallConvention =
   | ClosureCall                 -- ^ Closure-based calling convention.
                                 --   Compiles to constructing and entering
                                 --   a closure.
-    deriving(Eq)
+    deriving(Eq, Enum, Bounded)
 
 data Fun =
   Fun 

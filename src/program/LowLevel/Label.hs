@@ -32,7 +32,7 @@ data LabelTag =
   | ExactEntryLabel
     -- | A global function inexact entry point.
   | InexactEntryLabel
-    deriving(Eq, Ord)
+    deriving(Eq, Ord, Enum, Bounded)
 
 -- | A label of low-level code.  Labels encode everything about a variable
 --   name (except for the variable ID).  Variables do not in general have

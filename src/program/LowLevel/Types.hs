@@ -3,6 +3,10 @@
 
 module LowLevel.Types where
 
+import Control.Applicative
+import Data.Binary
+import LowLevel.BinaryUtils
+
 data Signedness = Signed | Unsigned
                 deriving(Eq, Ord, Show, Enum)
 
@@ -114,3 +118,33 @@ promoteType pt =
      FloatType sz -> FloatType (max sz nativeFloatSize)
      PointerType -> PointerType
      OwnedType -> OwnedType
+
+-------------------------------------------------------------------------------
+-- Binary instances
+
+instance Binary Signedness where
+  put = putEnum
+  get = getEnum "Signedness.get"
+
+instance Binary Size where
+  put = putEnum
+  get = getEnum "Size.get"
+
+instance Binary PrimType where
+  put UnitType = putWord8 0
+  put BoolType = putWord8 1
+  put (IntType sgn sz) = putWord8 2 >> put sgn >> put sz 
+  put (FloatType sz) = putWord8 3 >> put sz
+  put PointerType = putWord8 4
+  put OwnedType = putWord8 5
+  
+  get = getWord8 >>= getPrimTypeWithTag
+      
+
+getPrimTypeWithTag 0 = return UnitType
+getPrimTypeWithTag 1 = return BoolType
+getPrimTypeWithTag 2 = IntType <$> get <*> get
+getPrimTypeWithTag 3 = FloatType <$> get
+getPrimTypeWithTag 4 = return PointerType
+getPrimTypeWithTag 5 = return OwnedType
+getPrimTypeWithTag _ = readError "PrimType.get"

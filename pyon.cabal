@@ -21,6 +21,7 @@ Executable pyon
   Hs-Source-Dirs: src/program
   Build-Depends:
     base >= 4 && < 5,
+    binary,
     containers,
     mtl,
     MaybeT,
@@ -92,6 +93,8 @@ Executable pyon
     LLParser.Parser
     LLParser.GenLowLevel2
     LLParser.TypeInference
+    LowLevel.Binary
+    LowLevel.BinaryUtils
     LowLevel.Builtins
     LowLevel.BuiltinsTH
     LowLevel.InitializeBuiltins
