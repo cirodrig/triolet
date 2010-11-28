@@ -108,10 +108,10 @@ allBuiltinImports :: [Import]
 allBuiltinImports =
   $(TH.listE $
     [ [| let (v, t) = $(TH.varE $ TH.mkName $ builtinVarPrimName fname) lowLevelBuiltins 
-         in ImportPrimFun v t |]
+         in ImportPrimFun v t Nothing |]
     | (fname, _) <- builtinPrimitives] ++
     [ [| let (v, ep) = $(TH.varE $ TH.mkName $ builtinVarFunName fname) lowLevelBuiltins
-         in ImportClosureFun ep |]
+         in ImportClosureFun ep Nothing |]
     | (fname, _) <- builtinFunctions] ++
     [ [| let v = $(TH.varE $ TH.mkName $ builtinVarVarName fname) lowLevelBuiltins
          in ImportData v Nothing

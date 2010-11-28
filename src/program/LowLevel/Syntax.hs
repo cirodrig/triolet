@@ -312,11 +312,13 @@ data Import =
     -- | A global function
     ImportClosureFun
     { importEntryPoints :: EntryPoints
+    , importFunction :: !(Maybe Fun)
     }
     -- | A global procedure
   | ImportPrimFun
     { _importVar :: !ParamVar
     , importFunType :: !FunctionType
+    , importFunction :: !(Maybe Fun)
     }
     -- | A global constant
   | ImportData
@@ -326,12 +328,14 @@ data Import =
     }
 
 importVar :: Import -> Var
-importVar (ImportClosureFun entry_points) =
-  case globalClosure entry_points
-  of Just v -> v
-     Nothing -> internalError "importVar"
-importVar (ImportPrimFun v _) = v
-importVar (ImportData v _) = v
+importVar impent =
+  case impent
+  of ImportClosureFun {importEntryPoints = entry_points} ->
+       case globalClosure entry_points
+       of Just v -> v
+          Nothing -> internalError "importVar"
+     ImportPrimFun {_importVar = v} -> v
+     ImportData {_importVar = v} -> v
 
 data Module =
   Module 

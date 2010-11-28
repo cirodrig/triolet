@@ -251,7 +251,7 @@ withGlobalFunctions :: [Import] -- ^ Imported functions
 withGlobalFunctions imports defs scan gen = do
   -- Create closures for imported functions
   let import_closures = [mkGlobalClosure v ep
-                        | ImportClosureFun ep <- imports
+                        | ImportClosureFun ep _ <- imports
                         , let Just v = globalClosure ep]
 
   -- Create closures for global functions.  Procedures don't get closures.

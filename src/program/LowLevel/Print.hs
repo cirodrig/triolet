@@ -224,7 +224,7 @@ pprBlock stmt = pprStm stmt
 pprImport :: Import -> Doc
 pprImport impent = text "extern" <+>
   case impent
-  of ImportClosureFun entry_points ->
+  of ImportClosureFun entry_points mfun ->
        let ftype = entryPointsType entry_points
            signature =
              pprFunSignature
@@ -233,13 +233,19 @@ pprImport impent = text "extern" <+>
            impvar = case globalClosure entry_points
                     of Just v  -> pprVar v
                        Nothing -> text "<ERROR>"
-       in text "function" <+> impvar <+> signature
-     ImportPrimFun v ftype ->
+           value = case mfun
+                   of Nothing -> empty
+                      Just f  -> pprFun f
+       in hang (text "function" <+> impvar <+> signature) 4 value
+     ImportPrimFun v ftype mfun ->
        let signature =
              pprFunSignature
              (map pprValueType $ ftParamTypes ftype)
              (map pprValueType $ ftReturnTypes ftype)
-       in text "procedure" <+> pprVar v <+> signature
+           value = case mfun
+                   of Nothing -> empty
+                      Just f  -> pprFun f
+       in hang (text "procedure" <+> pprVar v <+> signature) 4 value
      ImportData v value ->
        let value_doc =
              case value

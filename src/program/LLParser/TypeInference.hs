@@ -1096,13 +1096,13 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
   where
     compare_to_import =
       case (externType edef, impent)
-      of (ExternProcedure domain range, LL.ImportPrimFun _ imptype) ->
+      of (ExternProcedure domain range, LL.ImportPrimFun _ imptype _) ->
            let domain' = map convertToValueType domain
                range' = map convertToValueType range
                exttype = LL.primFunctionType domain' range'
            in throwErrorMaybe $
               if imptype == exttype then Nothing else incompatible_builtin
-         (ExternFunction domain range, LL.ImportClosureFun ep) ->
+         (ExternFunction domain range, LL.ImportClosureFun ep _) ->
            let domain' = map convertToValueType domain
                range' = map convertToValueType range
                exttype = LL.closureFunctionType domain' range'
@@ -1198,7 +1198,7 @@ createImport label new_type =
                            (map convertToValueType domain)
                            (map convertToValueType range)
        v <- LL.newExternalVar label ty
-       return $ LL.ImportPrimFun v function_type
+       return $ LL.ImportPrimFun v function_type Nothing
      ExternFunction domain range -> do
        let ty = LL.PrimType (externTypePrimType new_type)
            function_type = LL.closureFunctionType
@@ -1206,7 +1206,7 @@ createImport label new_type =
                            (map convertToValueType range)
        v <- LL.newExternalVar label ty
        ep <- mkGlobalEntryPoints function_type label v
-       return $ LL.ImportClosureFun ep
+       return $ LL.ImportClosureFun ep Nothing
      ExternData primtype -> do
        v <- LL.newExternalVar label (LL.PrimType primtype)
        return $ LL.ImportData v Nothing

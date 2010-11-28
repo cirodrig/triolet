@@ -11,10 +11,12 @@ module LowLevel.RecordFlattening
        (flattenGlobalValue, flattenGlobalValues, flattenRecordTypes)
 where
 
-import Control.Monad
-import Control.Monad.Reader
+import Prelude hiding(mapM)
+import Control.Monad hiding(mapM)
+import Control.Monad.Reader hiding(mapM)
 import qualified Data.IntMap as IntMap
 import Data.Maybe
+import Data.Traversable(mapM)
 
 import Gluon.Common.Error
 import Gluon.Common.MonadLogic
@@ -433,17 +435,19 @@ flattenDataDef (Def v (StaticData record vals)) = do
   return $ Def v (StaticData record' val')
 
 flattenImport :: Import -> RF Import
-flattenImport (ImportClosureFun ep) =
+flattenImport (ImportClosureFun ep mval) = do
   let ep' =
         case ep
         of EntryPoints ty arity dir exa ine dea inf glo ->
              let ty'    = flattenFunctionType ty
                  arity' = length $ ftParamTypes ty'
              in EntryPoints ty' arity' dir exa ine dea inf glo
-  in return $ ImportClosureFun ep'
+  mval' <- mapM flattenFun mval
+  return $ ImportClosureFun ep' mval'
 
-flattenImport (ImportPrimFun v t) =
-  return $ ImportPrimFun v (flattenFunctionType t)
+flattenImport (ImportPrimFun v t mval) = do
+  mval' <- mapM flattenFun mval
+  return $ ImportPrimFun v (flattenFunctionType t) mval'
 
 flattenImport (ImportData v initializer) = do
   initializer' <- case initializer 

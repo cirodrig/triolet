@@ -700,7 +700,7 @@ genData gvars (Def v (StaticData record_type values)) =
 genImport :: Import -> [CDecl]
 genImport impent =
   case impent
-  of ImportClosureFun entry_points ->
+  of ImportClosureFun entry_points _ ->
        let clo =
              case globalClosure entry_points
              of Just x -> x
@@ -709,7 +709,7 @@ genImport impent =
                            , exactEntry entry_points
                            , inexactEntry entry_points
                            , clo]
-     ImportPrimFun v _ ->
+     ImportPrimFun v _ _ ->
        [genImportVar v]
      ImportData v _ ->
        [genImportVar v]

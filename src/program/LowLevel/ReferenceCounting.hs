@@ -129,7 +129,7 @@ toPointerDataDef (Def v (StaticData record x)) =
   in Def (toPointerVar v) dat
 
 toPointerImport :: Import -> Import
-toPointerImport (ImportClosureFun ep) =
+toPointerImport (ImportClosureFun ep mvalue) =
   let ep' =
         EntryPoints
         (toPointerFunctionType $ entryPointsType ep)
@@ -140,10 +140,11 @@ toPointerImport (ImportClosureFun ep) =
         (fmap toPointerVar $ deallocEntry ep)
         (toPointerVar $ infoTableEntry ep)
         (fmap toPointerVar $ globalClosure ep)
-  in ImportClosureFun ep'
+      mvalue' = fmap toPointerFun mvalue
+  in ImportClosureFun ep' mvalue'
 
-toPointerImport (ImportPrimFun v ft) =
-  ImportPrimFun (toPointerVar v) (toPointerFunctionType ft)
+toPointerImport (ImportPrimFun v ft mvalue) =
+  ImportPrimFun (toPointerVar v) (toPointerFunctionType ft) (fmap toPointerFun mvalue)
 
 toPointerImport (ImportData v data_value) =
   ImportData (toPointerVar v) (fmap toPointerDataList data_value)
