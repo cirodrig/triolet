@@ -19,7 +19,7 @@ import LowLevel.Label
 -- | A type that may be put into a variable
 data ValueType = PrimType !PrimType
                | RecordType !StaticRecord
-                 deriving(Eq)
+                 deriving(Eq, Ord)
 
 instance HasSize ValueType where
   sizeOf (PrimType pt) = sizeOf pt
@@ -107,13 +107,16 @@ data Prim =
   | PrimMulF !Size              -- ^ Floating-point multiplication
   | PrimModF !Size              -- ^ Floating-point modulus
 
+primReturnType :: Prim -> [ValueType]
+primReturnType = undefined
+
 data Lit =
     UnitL                       -- ^ The unit value
   | NullL                       -- ^ The NULL non-owned pointer
   | BoolL !Bool                 -- ^ A boolean
   | IntL !Signedness !Size !Integer -- ^ An integer
   | FloatL !Size !Double        -- ^ A floating-point number
-    deriving(Eq)
+    deriving(Eq, Ord)
 
 data Var =
   Var

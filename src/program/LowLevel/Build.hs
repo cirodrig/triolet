@@ -66,6 +66,9 @@ execBuild' return_type m = do
   ((stm, a), MkStm mk_stm) <- runGen m return_type
   return (mk_stm stm, a)
 
+getReturnTypes :: Monad m => Gen m [ValueType]
+getReturnTypes = Gen (\rt -> return (rt, mempty))
+
 {-
 -- | Build a block for use in a larger expression
 getBlock :: Monad m => Gen m Atom -> Gen m Block

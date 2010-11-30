@@ -47,6 +47,8 @@ import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
 
+import LowLevel.Expr()
+
 main = do
   -- Initialiation
   loadBuiltins

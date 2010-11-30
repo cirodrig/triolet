@@ -90,6 +90,10 @@ deriving instance Eq StaticRecord
 deriving instance Eq StaticFieldType
 deriving instance Eq StaticField
 
+deriving instance Ord StaticRecord
+deriving instance Ord StaticFieldType
+deriving instance Ord StaticField
+
 -- | In a record with dynamic layout, sizes and offsets are computed run-time
 -- values
 type DynamicRecord = Record Val
