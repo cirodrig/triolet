@@ -7,8 +7,7 @@ import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Identifier
 import qualified Gluon.Core as Gluon
 import Export
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Label
 

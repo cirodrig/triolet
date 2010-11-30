@@ -23,8 +23,7 @@ import Gluon.Common.Label
 import Gluon.Common.Supply
 import LowLevel.Builtins
 import LowLevel.Label
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Print
 import LowLevel.GenerateCUtils

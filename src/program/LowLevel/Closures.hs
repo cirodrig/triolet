@@ -28,7 +28,7 @@ import LowLevel.FreshVar
 import LowLevel.Print
 import LowLevel.Rename
 import LowLevel.Syntax
-import LowLevel.Types
+import LowLevel.CodeTypes
 import LowLevel.Build
 import LowLevel.ClosureSelect
 import LowLevel.ClosureCode

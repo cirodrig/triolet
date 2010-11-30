@@ -49,8 +49,7 @@ import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.Label
-import LowLevel.Types
-import LowLevel.Record hiding(Field, recordFields)
+import LowLevel.CodeTypes hiding(Field, recordFields)
 import qualified LowLevel.Syntax as LL
 import Globals
 
@@ -385,7 +384,7 @@ getCurrentTypeArity = NR $ \ctx env errs ->
 --
 -- A module name may optionally be specified; if not given, it defaults to the
 -- current input file's module.
-createVar :: String -> LL.ValueType -> NR LL.Var
+createVar :: String -> ValueType -> NR LL.Var
 createVar name ty = do
   module_name <- getSourceModuleName
   let label = pyonLabel module_name name
@@ -394,7 +393,7 @@ createVar name ty = do
 {-
 -- | Create an externally visible variable.  The definition is not added to
 -- the environment.
-createExternalVar :: ModuleName -> String -> Maybe String -> LL.ValueType
+createExternalVar :: ModuleName -> String -> Maybe String -> ValueType
                   -> NR LL.Var
 createExternalVar module_name name ext_name ty = do
   let label = pyonLabel module_name name
@@ -403,7 +402,7 @@ createExternalVar module_name name ext_name ty = do
 -- | Create a global variable in the current module.  If the variable has
 -- already been declared, return the declared variable instead of creating
 -- something.
-createGlobalVar :: VarName Parsed -> LL.ValueType -> NR LL.Var
+createGlobalVar :: VarName Parsed -> ValueType -> NR LL.Var
 createGlobalVar name ty = do
   -- Was this variable name declared to be external?
   external_vars <- getExternalVars
@@ -503,12 +502,12 @@ convertToStaticRecord rec =
                     | FieldDef t _ <- typedRecordFields0 rec]
   in staticRecord field_types
 
-convertToValueType :: Type Typed -> LL.ValueType
+convertToValueType :: Type Typed -> ValueType
 convertToValueType ty = 
   case ty
-  of PrimT pt -> LL.PrimType pt
+  of PrimT pt -> PrimType pt
      RecordT (TypeSynonym _ t) -> convertToValueType t
-     RecordT record -> LL.RecordType $ convertToStaticRecord record
+     RecordT record -> RecordType $ convertToStaticRecord record
      _ -> error "Expecting a value type"
 
 convertToStaticFieldType :: Type Typed -> StaticFieldType
@@ -975,8 +974,8 @@ resolveFunctionDef is_global fdef = do
   let ftype = if functionIsProcedure fdef then PointerType else OwnedType
   fname <-
     if is_global
-    then createGlobalVar (functionName fdef) (LL.PrimType ftype)
-    else createVar (functionName fdef) (LL.PrimType ftype)
+    then createGlobalVar (functionName fdef) (PrimType ftype)
+    else createVar (functionName fdef) (PrimType ftype)
   defineVar fname (PrimT ftype)
   
   enterNonRec $ do
@@ -993,7 +992,7 @@ resolveFunctionDef is_global fdef = do
 resolveDataDef :: DataDef Parsed -> NR (DataDef Typed)
 resolveDataDef ddef = do
   -- Define the data
-  dname <- createGlobalVar (dataName ddef) (LL.PrimType $ dataType ddef)
+  dname <- createGlobalVar (dataName ddef) (PrimType $ dataType ddef)
   defineVar dname (PrimT $ dataType ddef)
   
   -- Translate the initializer expression
@@ -1099,20 +1098,20 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
       of (ExternProcedure domain range, LL.ImportPrimFun _ imptype _) ->
            let domain' = map convertToValueType domain
                range' = map convertToValueType range
-               exttype = LL.primFunctionType domain' range'
+               exttype = primFunctionType domain' range'
            in throwErrorMaybe $
               if imptype == exttype then Nothing else incompatible_builtin
          (ExternFunction domain range, LL.ImportClosureFun ep _) ->
            let domain' = map convertToValueType domain
                range' = map convertToValueType range
-               exttype = LL.closureFunctionType domain' range'
+               exttype = closureFunctionType domain' range'
            in throwErrorMaybe $
               if LL.entryPointsType ep == exttype
               then Nothing
               else incompatible_builtin
          (ExternData etype, LL.ImportData v _) ->
            throwErrorMaybe $
-           if LL.PrimType etype == LL.varType v
+           if PrimType etype == LL.varType v
            then Nothing
            else incompatible_builtin
          _ -> throwErrorMaybe incompatible_builtin
@@ -1193,22 +1192,22 @@ resolveExternDecl decl = do
 createImport label new_type =
   case new_type
   of ExternProcedure domain range -> do
-       let ty = LL.PrimType (externTypePrimType new_type)
-           function_type = LL.primFunctionType
+       let ty = PrimType (externTypePrimType new_type)
+           function_type = primFunctionType
                            (map convertToValueType domain)
                            (map convertToValueType range)
        v <- LL.newExternalVar label ty
        return $ LL.ImportPrimFun v function_type Nothing
      ExternFunction domain range -> do
-       let ty = LL.PrimType (externTypePrimType new_type)
-           function_type = LL.closureFunctionType
+       let ty = PrimType (externTypePrimType new_type)
+           function_type = closureFunctionType
                            (map convertToValueType domain)
                            (map convertToValueType range)
        v <- LL.newExternalVar label ty
        ep <- mkGlobalEntryPoints function_type label v
        return $ LL.ImportClosureFun ep Nothing
      ExternData primtype -> do
-       v <- LL.newExternalVar label (LL.PrimType primtype)
+       v <- LL.newExternalVar label (PrimType primtype)
        return $ LL.ImportData v Nothing
 
 -- | Define an external variable.

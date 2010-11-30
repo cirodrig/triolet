@@ -14,7 +14,7 @@ import Language.C.Syntax.Constants
 import Gluon.Common.Error
 import LowLevel.Label
 import LowLevel.Syntax
-import LowLevel.Types
+import LowLevel.CodeTypes
 
 -- | A C data type as encoded in an AST.  Types are divided into a specifier
 -- and a derivation.

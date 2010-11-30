@@ -76,8 +76,7 @@ import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.Print
 import LowLevel.Syntax
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 import LowLevel.Records
 import LowLevel.RecordFlattening
 import LowLevel.Build

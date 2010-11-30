@@ -11,7 +11,7 @@ import Gluon.Common.THRecord
 import GlobalVar
 import LowLevel.Label
 import LowLevel.Syntax
-import LowLevel.Types
+import LowLevel.CodeTypes
 import LowLevel.BuiltinsTH
 import LowLevel.Builtins
 import LowLevel.Build

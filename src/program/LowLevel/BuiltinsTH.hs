@@ -11,10 +11,11 @@ import Gluon.Common.Label
 import Gluon.Common.THRecord
 import qualified SystemF.Builtins as SystemF
 import SystemF.Builtins(pyonBuiltin)
-import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record
+import LowLevel.CodeTypes
 import LowLevel.Records
+import LowLevel.Syntax
 
 instance Lift Signedness where
   lift x = let n = fromEnum x in [| toEnum n |]

@@ -7,8 +7,7 @@ import Control.Monad.State
 
 import LowLevel.FreshVar
 import LowLevel.Build
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Expr
 import Globals

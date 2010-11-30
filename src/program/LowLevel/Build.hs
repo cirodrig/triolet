@@ -15,8 +15,7 @@ import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.Label
 import LowLevel.Syntax
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 import LowLevel.Records
 
 newtype MkStm = MkStm (Stm -> Stm)

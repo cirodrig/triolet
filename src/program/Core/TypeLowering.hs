@@ -21,8 +21,7 @@ import Core.Syntax
 import Core.Print
 import Core.BuiltinTypes
 import LowLevel.Syntax as LL
-import LowLevel.Types as LL
-import LowLevel.Record as LL
+import LowLevel.CodeTypes as LL
 import LowLevel.Records as LL
 import LowLevel.Builtins as LL
 

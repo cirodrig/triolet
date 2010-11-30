@@ -33,8 +33,7 @@ import qualified SystemF.Syntax as SystemF
 import qualified LowLevel.Syntax as LL
 import LowLevel.FreshVar
 import qualified LowLevel.Label as LL
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 import LowLevel.Records
 import LowLevel.Build
 import LowLevel.Builtins
@@ -70,23 +69,23 @@ convertCon c =
 convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
     tbl = [ (zeroMember $ pyonBuiltin the_AdditiveDict_int,
-             value (LLType $ LL.PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 0))
+             value (LLType $ PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 0))
           , (zeroMember $ pyonBuiltin the_AdditiveDict_float,
-             value (LLType $ LL.PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 0))
+             value (LLType $ PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 0))
           , (oneMember $ pyonBuiltin the_MultiplicativeDict_int,
-             value (LLType $ LL.PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 1))
+             value (LLType $ PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 1))
           , (oneMember $ pyonBuiltin the_MultiplicativeDict_float,
-             value (LLType $ LL.PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 1))]
+             value (LLType $ PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 1))]
 
 globalVarAssignment =
   IntMap.fromList [(fromIdent $ varID c, v) | (c, v) <- tbl]
   where
     tbl = [ (pyonBuiltin the_passConv_int_ptr,
-             (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_int_pass_conv))
+             (LLType $ PrimType PointerType, llBuiltin the_bivar_int_pass_conv))
           , (pyonBuiltin the_passConv_float_ptr,
-             (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_float_pass_conv))
+             (LLType $ PrimType PointerType, llBuiltin the_bivar_float_pass_conv))
           , (pyonBuiltin the_OpaqueTraversableDict_list_ptr,
-             (LLType $ LL.PrimType PointerType, llBuiltin the_bivar_OpaqueTraversableDict_list))
+             (LLType $ PrimType PointerType, llBuiltin the_bivar_OpaqueTraversableDict_list))
           ]
 
 isProductType c
@@ -283,8 +282,8 @@ lowerToFieldType ty =
        of FunCT {} -> return owned_field
           _ -> do
             -- Use the run-time representation to create a 'bytes' field type
-            size_var <- LL.newAnonymousVar (LL.PrimType nativeWordType)
-            align_var <- LL.newAnonymousVar (LL.PrimType nativeWordType)
+            size_var <- LL.newAnonymousVar (PrimType nativeWordType)
+            align_var <- LL.newAnonymousVar (PrimType nativeWordType)
             code <- compute_field_spec ty size_var align_var
             return (code,
                     BytesField (LL.VarV size_var) (LL.VarV align_var))
@@ -296,8 +295,8 @@ lowerToFieldType ty =
     compute_field_spec ty size_var align_var = do 
       (wrapper, passconv) <- getPassConv ty
       -- Will compute field size and alignment
-      let return_type = [ LLType $ LL.PrimType nativeWordType
-                        , LLType $ LL.PrimType nativeWordType]
+      let return_type = [ LLType $ PrimType nativeWordType
+                        , LLType $ PrimType nativeWordType]
       return $ do
         values <- wrapper return_type $ do
           size <- selectPassConvSize passconv
@@ -382,7 +381,7 @@ getPassConv ty = do
     return_value val = return (\_ -> id, val)
 
     build_unary_passconv pc_ctor arg_type = do
-      pc_var <- runFreshVar $ LL.newAnonymousVar (LL.PrimType PointerType)
+      pc_var <- runFreshVar $ LL.newAnonymousVar (PrimType PointerType)
       (mk_arg_pc, arg_pc) <- getPassConv arg_type
 
       -- Create code generator for this data
@@ -639,13 +638,13 @@ convertExp expression =
           OwnedConV c   -> lookup_con c
           LitV lit      ->
             case lit
-            of SystemF.IntL n   -> literal (LL.PrimType pyonIntType) $ 
+            of SystemF.IntL n   -> literal (PrimType pyonIntType) $ 
                                    LL.IntL Signed pyonIntSize n
-               SystemF.FloatL d -> literal (LL.PrimType pyonFloatType) $
+               SystemF.FloatL d -> literal (PrimType pyonFloatType) $
                                    LL.FloatL pyonFloatSize d
-               SystemF.BoolL b  -> literal (LL.PrimType pyonBoolType) $ LL.BoolL b
-               SystemF.NoneL    -> literal (LL.PrimType pyonNoneType) LL.UnitL
-          TypeV _       -> literal (LL.PrimType UnitType) LL.UnitL
+               SystemF.BoolL b  -> literal (PrimType pyonBoolType) $ LL.BoolL b
+               SystemF.NoneL    -> literal (PrimType pyonNoneType) LL.UnitL
+          TypeV _       -> literal (PrimType UnitType) LL.UnitL
      AppCE {cexpOper = op, cexpArgs = args, cexpReturnArg = rarg} ->
        convertApp op args rarg
      LamCE {cexpFun = f} -> do
@@ -915,7 +914,7 @@ convertFunOrPrim make_function fun =
       case param
       of ValR -> k Nothing
          OwnR -> k Nothing
-         WriteR _ p -> convertVar p (LLType $ LL.PrimType PointerType) $ k . Just
+         WriteR _ p -> convertVar p (LLType $ PrimType PointerType) $ k . Just
          ReadR _ _ -> k Nothing
 
 convertParameter (param ::: param_type) k =
@@ -970,16 +969,16 @@ marshalCParameter :: ExportDataType
 marshalCParameter ty =
   case ty
   of ListET _ -> pass_by_reference
-     PyonIntET -> marshal_value (LL.PrimType pyonIntType)
-     PyonFloatET -> marshal_value (LL.PrimType pyonFloatType)
-     PyonComplexFloatET -> marshal_value (LL.RecordType complex_float_type)
-     PyonBoolET -> marshal_value (LL.PrimType pyonBoolType)
+     PyonIntET -> marshal_value (PrimType pyonIntType)
+     PyonFloatET -> marshal_value (PrimType pyonFloatType)
+     PyonComplexFloatET -> marshal_value (RecordType complex_float_type)
+     PyonBoolET -> marshal_value (PrimType pyonBoolType)
   where
     complex_float_type = complexRecord (PrimField pyonFloatType)
 
     -- Pass an object reference
     pass_by_reference = do
-      v <- LL.newAnonymousVar (LL.PrimType PointerType)
+      v <- LL.newAnonymousVar (PrimType PointerType)
       return ([v], return (), LL.VarV v)
 
     -- Pass a primitive type by value
@@ -1000,18 +999,18 @@ marshalCReturn :: ExportDataType
                        [LL.Var])
 marshalCReturn ty =
   case ty
-  of ListET _ -> return_new_reference (LL.RecordType listRecord)
-     PyonIntET -> marshal_value (LL.PrimType pyonIntType)
-     PyonFloatET -> marshal_value (LL.PrimType pyonFloatType)
-     PyonComplexFloatET -> marshal_value (LL.RecordType complex_float_type)
-     PyonBoolET -> marshal_value (LL.PrimType pyonBoolType)
+  of ListET _ -> return_new_reference (RecordType listRecord)
+     PyonIntET -> marshal_value (PrimType pyonIntType)
+     PyonFloatET -> marshal_value (PrimType pyonFloatType)
+     PyonComplexFloatET -> marshal_value (RecordType complex_float_type)
+     PyonBoolET -> marshal_value (PrimType pyonBoolType)
   where
     complex_float_type = complexRecord (PrimField pyonFloatType)
 
     -- Allocate and return a new object.  The allocated object is passed
     -- as a parameter to the function.
     return_new_reference t = do
-      v <- LL.newAnonymousVar (LL.PrimType PointerType)
+      v <- LL.newAnonymousVar (PrimType PointerType)
       
       let setup mk_real_call = do
             -- Allocate the return value
@@ -1043,7 +1042,7 @@ convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
 
       -- Create function name.  Function is exported with the given name.
       let label = LL.externPyonLabel module_name exported_name (Just exported_name)
-      v <- LL.newExternalVar label (LL.PrimType OwnedType)
+      v <- LL.newExternalVar label (PrimType OwnedType)
       return $ LL.Def v wrapped_fun
 
 convertModule (CModule module_name defss exports) = do 

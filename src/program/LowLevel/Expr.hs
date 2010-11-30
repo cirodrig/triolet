@@ -25,8 +25,9 @@ import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.Supply
 import LowLevel.Build
-import LowLevel.Types
+import LowLevel.CodeTypes
 import LowLevel.Syntax
+import LowLevel.Print
 
 -- | A binary operator.
 data BinOp =

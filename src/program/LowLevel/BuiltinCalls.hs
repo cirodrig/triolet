@@ -18,7 +18,7 @@ import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.Syntax
-import LowLevel.Types
+import LowLevel.CodeTypes
 import Globals
 
 makeBuiltinPrimOps :: Module -> IO Module

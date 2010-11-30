@@ -8,9 +8,8 @@ import Gluon.Common.Error
 import Gluon.Common.Identifier
 import LowLevel.BinaryUtils
 import LowLevel.Label
-import LowLevel.Record
 import LowLevel.Syntax
-import LowLevel.Types
+import LowLevel.CodeTypes
 
 instance Binary ValueType where
   put (PrimType pt) = put pt

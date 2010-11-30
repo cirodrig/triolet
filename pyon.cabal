@@ -97,6 +97,7 @@ Executable pyon
     LowLevel.BinaryUtils
     LowLevel.Builtins
     LowLevel.BuiltinsTH
+    LowLevel.CodeTypes
     LowLevel.CSE
     LowLevel.InitializeBuiltins
     LowLevel.Inlining
@@ -121,4 +122,4 @@ Executable pyon
     LowLevel.ReferenceCounting
     LowLevel.Rename
     LowLevel.Types
-    
+

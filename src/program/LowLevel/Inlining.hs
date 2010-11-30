@@ -24,6 +24,7 @@ import Gluon.Common.Error
 import Gluon.Common.Identifier
 import LowLevel.FreshVar
 import LowLevel.Build
+import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Rename
 import Globals

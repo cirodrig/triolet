@@ -8,8 +8,7 @@ where
 
 import Gluon.Common.Error
 import LowLevel.Syntax
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 import Export
   
 -------------------------------------------------------------------------------

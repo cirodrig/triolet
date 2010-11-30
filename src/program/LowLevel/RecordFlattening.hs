@@ -22,8 +22,7 @@ import Gluon.Common.Error
 import Gluon.Common.MonadLogic
 import Gluon.Common.Supply
 import Gluon.Common.Identifier
-import LowLevel.Types
-import LowLevel.Record
+import LowLevel.CodeTypes
 import LowLevel.Records
 import LowLevel.Syntax
 import LowLevel.Build

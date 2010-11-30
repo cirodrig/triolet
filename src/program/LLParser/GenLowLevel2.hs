@@ -20,14 +20,13 @@ import LLParser.TypeInference
 import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
-import LowLevel.Types
-import LowLevel.Record hiding(Field)
+import LowLevel.CodeTypes hiding(Field)
 import qualified LowLevel.Syntax as LL
 import Globals
 import Export
 
 data GenExpr = GenVal LL.Val
-             | GenAtom [LL.ValueType] LL.Atom
+             | GenAtom [ValueType] LL.Atom
 
 asVal :: GenExpr -> G LL.Val
 asVal (GenVal v) = return v
@@ -39,7 +38,7 @@ asAtom :: GenExpr -> G LL.Atom
 asAtom (GenVal v) = return (LL.ValA [v])
 asAtom (GenAtom _ atom) = return atom
 
-returnType :: GenExpr -> [LL.ValueType]
+returnType :: GenExpr -> [ValueType]
 returnType (GenVal val)  = [LL.valType val]
 returnType (GenAtom t _) = t
 
@@ -156,23 +155,23 @@ genDataExpr expr =
        return $ LL.RecV record fields'
      SizeofE ty ->
        let ty' = convertToValueType ty
-           lit = mkIntLit (LL.PrimType nativeWordType) (fromIntegral $ sizeOf ty')
+           lit = mkIntLit (PrimType nativeWordType) (fromIntegral $ sizeOf ty')
        in return $ LL.LitV lit
      AlignofE ty ->
        let ty' = convertToValueType ty
-           lit = mkIntLit (LL.PrimType nativeWordType) (fromIntegral $ alignOf ty')
+           lit = mkIntLit (PrimType nativeWordType) (fromIntegral $ alignOf ty')
        in return $ LL.LitV lit
 
-mkIntLit :: LL.ValueType -> Integer -> LL.Lit
+mkIntLit :: ValueType -> Integer -> LL.Lit
 mkIntLit ty n =
   case ty
-  of LL.PrimType (IntType sgn sz) -> LL.IntL sgn sz n
+  of PrimType (IntType sgn sz) -> LL.IntL sgn sz n
      _ -> error "Invalid integer type"
 
-mkFloatLit :: LL.ValueType -> Double -> LL.Lit
+mkFloatLit :: ValueType -> Double -> LL.Lit
 mkFloatLit ty n =
   case ty
-  of LL.PrimType (FloatType sz) -> LL.FloatL sz n
+  of PrimType (FloatType sz) -> LL.FloatL sz n
      _ -> error "Invalid floating-point type"
 
 mkWordVal :: Expr Typed -> LL.Val
@@ -183,7 +182,7 @@ mkWordVal expr =
 
 -- | Generate code to load or store a record field.  Return the field offset
 --   and the type at which the field should be accessed.
-genField :: TypeEnv -> Field Typed -> G (LL.Val, LL.ValueType)
+genField :: TypeEnv -> Field Typed -> G (LL.Val, ValueType)
 genField tenv (Field base_type fnames cast_type) =
   get_field_offset (nativeWordV 0) base_type fnames
   where
@@ -206,7 +205,7 @@ genField tenv (Field base_type fnames cast_type) =
           of Just ix -> do
                let rfield = typedRecordFields0 rec !! ix
                    dfield = dyn_rec !!: ix
-               offset <- primAddZ (LL.PrimType nativeWordType) base_offset (fieldOffset dfield)
+               offset <- primAddZ (PrimType nativeWordType) base_offset (fieldOffset dfield)
                case fnames of
                  [] -> return_field_offset offset dfield
                  _  -> case rfield
@@ -220,9 +219,9 @@ genField tenv (Field base_type fnames cast_type) =
       let ty = case cast_type
                of Just t -> convertToValueType t
                   Nothing -> case fieldType field
-                             of PrimField pt -> LL.PrimType pt
+                             of PrimField pt -> PrimType pt
                                 RecordField r -> 
-                                  LL.RecordType $ dynamicToStaticRecordType r
+                                  RecordType $ dynamicToStaticRecordType r
                                 _ -> internalError "genField"
       in return (offset, ty)
 
@@ -249,12 +248,12 @@ genExpr tenv expr =
                          of RecordT rec -> convertToStaticRecord rec
                             _ -> internalError "genExpr: Expecting record type"
            atom = LL.PackA record_type fs'
-       return $ GenAtom [LL.RecordType record_type] atom
+       return $ GenAtom [RecordType record_type] atom
      FieldE base fld -> do
        addr <- asVal =<< subexpr base
        (offset, _) <- genField tenv fld
        let atom = LL.PrimA LL.PrimAddP [addr, offset]
-       return $ GenAtom [LL.PrimType PointerType] atom
+       return $ GenAtom [PrimType PointerType] atom
      LoadFieldE base fld -> do
        addr <- asVal =<< subexpr base
        (offset, ty) <- genField tenv fld
@@ -319,7 +318,7 @@ genUnaryOp op arg =
   of NegateOp ->
        -- Create the expression [| 0 - arg |]
        case returnType arg
-       of rt@[LL.PrimType (IntType sgn sz)] -> do
+       of rt@[PrimType (IntType sgn sz)] -> do
             arg_val <- asVal arg
             let operand = LL.LitV $ LL.IntL sgn sz 0
                 op = LL.PrimSubZ sgn sz
@@ -346,18 +345,18 @@ genBinaryOp op l_arg r_arg =
     comparison cmp_op = do
       let operator =
             case returnType l_arg
-            of [LL.PrimType (IntType sgn sz)] -> LL.PrimCmpZ sgn sz cmp_op
-               [LL.PrimType PointerType] -> LL.PrimCmpP cmp_op
+            of [PrimType (IntType sgn sz)] -> LL.PrimCmpZ sgn sz cmp_op
+               [PrimType PointerType] -> LL.PrimCmpP cmp_op
                _ -> internalError "Binary comparison not implemented for this type"
       l_val <- asVal l_arg
       r_val <- asVal r_arg
       let atom = LL.PrimA operator [l_val, r_val]
-      return $ GenAtom [LL.PrimType BoolType] atom
+      return $ GenAtom [PrimType BoolType] atom
     
     atomic_int atomic_op = do
       let operator =
             case returnType r_arg
-            of [LL.PrimType (IntType sgn sz)] -> atomic_op sgn sz
+            of [PrimType (IntType sgn sz)] -> atomic_op sgn sz
       l_val <- asVal l_arg
       r_val <- asVal r_arg
       let atom = LL.PrimA operator [l_val, r_val]
@@ -367,21 +366,21 @@ genBinaryOp op l_arg r_arg =
       l_val <- asVal l_arg
       r_val <- asVal r_arg
       let atom = LL.PrimA LL.PrimAddP [l_val, r_val]
-      return $ GenAtom [LL.PrimType PointerType] atom
+      return $ GenAtom [PrimType PointerType] atom
     
     arithmetic int_op float_op = do
       l_val <- asVal l_arg
       r_val <- asVal r_arg
       let atom =
             case returnType l_arg
-            of [LL.PrimType (IntType sgn sz)] ->
+            of [PrimType (IntType sgn sz)] ->
                  LL.PrimA (int_op sgn sz) [l_val, r_val]
-               [LL.PrimType (FloatType sz)] ->
+               [PrimType (FloatType sz)] ->
                  LL.PrimA (float_op sz) [l_val, r_val]
                _ -> internalError "Arithmetic operator not implemented for this type"
       return $ GenAtom (returnType l_arg) atom
     
-genCast :: LL.ValueType -> GenExpr -> G GenExpr
+genCast :: ValueType -> GenExpr -> G GenExpr
 genCast ty e =
   case (expected_type, given_type)
   of (OwnedType, OwnedType) -> success_id
@@ -407,12 +406,12 @@ genCast ty e =
   where
     given_type =
       case returnType e
-      of [LL.PrimType t] -> t
+      of [PrimType t] -> t
          _ -> internalError "genCast: Cannot cast from type"
     
     expected_type =
       case ty
-      of LL.PrimType t -> t
+      of PrimType t -> t
          _ -> internalError "genCast: Cannot cast to type"
 
     success_id = return e
@@ -512,7 +511,7 @@ genTailWhile :: TypeEnv -> [(Parameter Typed, Expr Typed)] -> Expr Typed
              -> Stmt Typed
              -> G LL.Stm
 genTailWhile tenv inits cond body = do
-  while_var <- lift $ LL.newAnonymousVar (LL.PrimType PointerType)
+  while_var <- lift $ LL.newAnonymousVar (PrimType PointerType)
   
   -- When done, return the loop-carried variables
   let cont = return $ LL.ReturnE $ LL.ValA [LL.VarV v | (Parameter _ v, _) <- inits]
@@ -525,7 +524,7 @@ genMedialWhile :: TypeEnv -> [(Parameter Typed, Expr Typed)] -> Expr Typed
 genMedialWhile tenv inits cond body lhs mk_cont = do
   let param_vars = [v | (Parameter _ v, _) <- inits]
       param_types = map LL.varType param_vars
-  while_var <- lift $ LL.newAnonymousVar (LL.PrimType PointerType)
+  while_var <- lift $ LL.newAnonymousVar (PrimType PointerType)
   
   -- Turn the continuation into a function so we can call it.
   getContinuation True param_vars $ \cont -> do
@@ -607,7 +606,7 @@ genMedialIf tenv cond if_true if_false lhs continuation = do
   continuation
 
 -- | Generate code to assign to some LValues
-genLValues :: TypeEnv -> [LValue Typed] -> LL.Atom -> [LL.ValueType] -> G ()
+genLValues :: TypeEnv -> [LValue Typed] -> LL.Atom -> [ValueType] -> G ()
 genLValues tenv lvals atom atom_types = do
   (unzip -> (binders, code)) <- zipWithM (genLValue tenv) lvals atom_types
   bindAtom binders atom
@@ -618,7 +617,7 @@ genLValues tenv lvals atom atom_types = do
 --   This generates variables that should be bound and code to
 --   do any necessary evaluation for the LValue.  Any values not
 --   bound by the LValue is returned.
-genLValue :: TypeEnv -> LValue Typed -> LL.ValueType -> G (LL.Var, G ())
+genLValue :: TypeEnv -> LValue Typed -> ValueType -> G (LL.Var, G ())
 genLValue tenv lvalue ty =
   case lvalue
   of VarL v ->
@@ -652,11 +651,11 @@ genLValue tenv lvalue ty =
        let record = case rec
                     of RecordT r -> convertToStaticRecord r
                        _ -> internalError "genLValue"
-           fields = LowLevel.Record.recordFields record
+           fields = LowLevel.CodeTypes.recordFields record
            field_type fld =
              case fieldType fld
-             of PrimField pt -> LL.PrimType pt
-                RecordField rec -> LL.RecordType rec
+             of PrimField pt -> PrimType pt
+                RecordField rec -> RecordType rec
                 _ -> internalError "genLValue: Can't put this record field in a variable"
            field_types = map field_type fields
            atom = LL.UnpackA record (LL.VarV tmpvar)
