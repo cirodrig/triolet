@@ -91,7 +91,36 @@ data Prim =
   | PrimModF !Size              -- ^ Floating-point modulus
 
 primReturnType :: Prim -> [ValueType]
-primReturnType = undefined
+primReturnType prim =
+  case prim
+  of PrimCastZ _ to_sgn to_sz -> int to_sgn to_sz
+     PrimAddZ sgn sz          -> int sgn sz
+     PrimSubZ sgn sz          -> int sgn sz
+     PrimMulZ sgn sz          -> int sgn sz
+     PrimModZ sgn sz          -> int sgn sz
+     PrimMaxZ sgn sz          -> int sgn sz
+     PrimCmpZ _ _ _           -> bool
+     PrimCmpP _               -> bool
+     PrimAnd                  -> bool
+     PrimOr                   -> bool
+     PrimNot                  -> bool
+     PrimAddP                 -> pointer
+     PrimLoad t               -> [t]
+     PrimStore _              -> []
+     PrimAAddZ sgn sz         -> int sgn sz
+     PrimCastToOwned          -> [PrimType OwnedType]
+     PrimCastFromOwned        -> pointer
+     PrimCastZToF _ sz        -> float sz
+     PrimCastFToZ _ sz        -> int Signed sz
+     PrimAddF sz              -> float sz
+     PrimSubF sz              -> float sz
+     PrimMulF sz              -> float sz
+     PrimModF sz              -> float sz
+  where
+    int sgn sz = [PrimType $ IntType sgn sz]
+    float sz = [PrimType $ FloatType sz]
+    bool = [PrimType BoolType]
+    pointer = [PrimType PointerType]
 
 data Lit =
     UnitL                       -- ^ The unit value

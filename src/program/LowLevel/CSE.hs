@@ -1,9 +1,14 @@
+{-| Dominator-based value numbering.
 
+
+-}
 module LowLevel.CSE(commonSubexpressionElimination)
 where
 
 import Control.Applicative
 import Control.Monad.State
+import Data.Maybe
+import Debug.Trace
 
 import LowLevel.FreshVar
 import LowLevel.Build
@@ -11,6 +16,10 @@ import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Expr
 import Globals
+
+updateCSEEnv' :: Var -> Maybe Expr -> CSEEnv -> CSEEnv
+updateCSEEnv' v Nothing  env = env
+updateCSEEnv' v (Just e) env = updateCSEEnv v e env
 
 type CSE a = StateT CSEEnv (Gen FreshVarM) a
 
@@ -25,69 +34,40 @@ evalCSE rt m = StateT $ \env -> do
 runCSEF :: CSEF a -> CSE a
 runCSEF m = StateT $ \env -> lift $ runStateT m env
 
-interpretationExpr :: Interpretation -> Maybe Expr
-interpretationExpr NoInterpretation = Nothing
-interpretationExpr (Translated i)   = Just i
-interpretationExpr (Simplified i)   = Just i
-
 cseVal :: Val -> CSE (Val, Maybe Expr)
-cseVal (LamV f) = do
-  f' <- runCSEF $ cseFun f
-  return (LamV f', Nothing)
-
-cseVal (RecV rec vs) = do
-  vs' <- mapM cseVal' vs
-  return (RecV rec vs', Nothing)
-
-cseVal val = StateT $ \env -> do
-  let interpretation = interpretVal env val
-      expr = interpretationExpr interpretation
-      env' = updateCSEEnv val interpretation env
-  val' <- case interpretation
-          of Simplified i -> generateExprCode i
-             _            -> return val
-  return ((val', expr), env')
+cseVal value = 
+  case value
+  of VarV v -> gets $ \env ->
+       let new_value = fromCSEVal $ cseFindVar v env
+       in (new_value, interpretVal env value)
+     LitV l -> return (value, Just $ litExpr l)
+     LamV f -> do
+       f' <- runCSEF $ cseFun f
+       return (LamV f', Nothing)
+     RecV rec vs -> do
+       vs' <- mapM cseVal' vs
+       return (RecV rec vs', Nothing)
 
 cseVal' :: Val -> CSE Val
-cseVal' val = fmap fst $ cseVal val
+cseVal' value = fmap fst $ cseVal value
 
--- | Convert a value to a CSE expression, if possible.
-partialCSEVal :: Val -> CSE (Either Val Expr)
-partialCSEVal val = StateT $ \env ->
-  let interpretation = interpretVal env val
-      env' = updateCSEEnv val interpretation env
-  in return $! case interpretation
-               of NoInterpretation -> (Left val, env')
-                  Translated i     -> (Right i, env')
-                  Simplified i     -> (Right i, env')
-
--- | Produce a value from a CSE expression produced by 'partialCSEVal'.
-generateCSEValues :: [Either Val Expr] -> CSE [Val]
-generateCSEValues vals = lift $ mapM generate_value vals
+csePrim :: Prim -> [(Val, Maybe Expr)] -> CSE (Atom, Maybe Expr)
+csePrim prim args =
+  case sequence $ map snd args
+  of Nothing -> return (rebuild_atom, Nothing)
+     Just exprs -> do
+       env <- get
+       case interpretPrim env prim exprs of
+         Nothing -> return (rebuild_atom, Nothing)
+         Just i -> 
+           let new_atom =
+                 case cseFindExpr i env
+                 of Just val -> ValA [fromCSEVal val]
+                    Nothing  -> rebuild_atom
+           in return (new_atom, Just i)
   where
-    generate_value (Left val) = return val
-    generate_value (Right expr) = generateExprCode expr
-
-csePrim :: Prim -> [Val] -> CSE (Atom, Maybe Expr)
-csePrim prim args = do 
-  args' <- mapM partialCSEVal args 
-  case sequence $ map (either (const Nothing) Just) args' of
-    Nothing -> do
-      args'' <- generateCSEValues args'
-      return (PrimA prim args'', Nothing)
-    Just exprs -> do
-      env <- get
-      let interpretation = interpretPrim env prim exprs
-          expr = case interpretation
-                 of NoInterpretation -> Nothing
-                    Translated i     -> Just i
-                    Simplified i     -> Just i
-      atom <- lift $
-              case interpretation
-              of Simplified i -> do val <- generateExprCode i
-                                    return (ValA [val])
-                 _ -> PrimA prim <$> mapM generateExprCode exprs
-      return (atom, expr)
+    arg_vals = map fst args
+    rebuild_atom = PrimA prim arg_vals
 
 cseAtom :: Atom -> CSE (Atom, Maybe [Maybe Expr])
 cseAtom atom =
@@ -100,7 +80,7 @@ cseAtom atom =
        args' <- mapM cseVal' args
        return (CallA cc op' args', Nothing)
      PrimA op args -> do
-       (atom, mexpr) <- csePrim op args
+       (atom, mexpr) <- csePrim op =<< mapM cseVal args
        return (atom, fmap (return . Just) mexpr)
      PackA rec vs -> do
        vs' <- mapM cseVal' vs
@@ -118,7 +98,7 @@ cseStm statement =
        case exprs of
          Nothing -> return ()
          Just es -> zipWithM_ assign_variable lhs es
-       lift $ bindAtom lhs rhs
+       lift $ bindAtom lhs rhs'
        cseStm stm
      LetrecE defs stm -> do
        lift . emitLetrec =<< runCSEF (mapM cseDef defs)
@@ -128,13 +108,16 @@ cseStm statement =
        rt <- lift getReturnTypes
        alts' <- mapM (cse_alt rt) alts
        return (SwitchE scr' alts')
+     ReturnE atom -> do
+       (atom', _) <- cseAtom atom
+       return (ReturnE atom')
   where
     cse_alt rt (lit, stm) = do
       stm' <- runCSEF $ evalCSE rt $ cseStm stm
       return (lit, stm')
       
     assign_variable v Nothing = return ()
-    assign_vaiable v (Just e) = modify $ updateCSEEnv (VarV v) (Translated e)
+    assign_variable v (Just e) = modify $ updateCSEEnv v e
 
 cseDef :: FunDef -> CSEF FunDef
 cseDef (Def v f) = Def v <$> cseFun f
