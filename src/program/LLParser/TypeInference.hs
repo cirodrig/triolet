@@ -498,8 +498,8 @@ expectRecordType message ty = throwErrorMaybe $
 
 convertToStaticRecord :: TypedRecord -> StaticRecord
 convertToStaticRecord rec =
-  let field_types = [convertToStaticFieldType t
-                    | FieldDef t _ <- typedRecordFields0 rec]
+  let field_types = [(m, convertToStaticFieldType t)
+                    | FieldDef m t _ <- typedRecordFields0 rec]
   in staticRecord field_types
 
 convertToValueType :: Type Typed -> ValueType
@@ -926,7 +926,7 @@ resolveLValue lvalue ty =
                        _ -> internalError "resolveLValue"
        
        -- Unpack individual fields.  This is lazy in the record type.
-       let field_types = [t | FieldDef t _ <- typedRecordFields0 record]
+       let field_types = [t | FieldDef _ t _ <- typedRecordFields0 record]
 
        let unpack_fields (fld:flds) ~(fty:ftys) = do
              (binder, fld') <- resolveLValue fld fty
@@ -953,13 +953,13 @@ typedRecordFieldType :: TypedRecord -> [FieldName] -> Type Typed
 typedRecordFieldType record (fld:flds) =
   case find match_field_name $ typedRecordFields0 record
   of Nothing -> error $ "Record does not have field '" ++ fld ++ "'"
-     Just (FieldDef ty _)
+     Just (FieldDef _ ty _)
        | null flds -> ty
        | RecordT record' <- ty -> typedRecordFieldType record' flds
        | otherwise ->
            error $ "Non-record type does not have field '" ++ fld ++ "'"
   where
-    match_field_name (FieldDef _ nm) = nm == fld
+    match_field_name (FieldDef _ _ nm) = nm == fld
 
 -- | Do type inference on a parameter and add the variable to the environment 
 resolveParameter :: Parameter Parsed -> NR (Parameter Typed)
@@ -1002,11 +1002,11 @@ resolveDataDef ddef = do
 
 resolveFieldDef :: FieldDef Parsed
                 -> NR (TypeParametric (FieldDef Typed))
-resolveFieldDef (FieldDef ty name) = do
+resolveFieldDef (FieldDef mutability ty name) = do
   ty' <- resolveType ty
   return (fmap rebuild_field ty')
   where
-    rebuild_field t = FieldDef t name
+    rebuild_field t = FieldDef mutability t name
 
 resolveRecordDef :: RecordDef Parsed -> NR ()
 resolveRecordDef record = do

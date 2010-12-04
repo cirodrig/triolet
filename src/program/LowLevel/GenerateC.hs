@@ -295,7 +295,7 @@ genOneResult rtn expr =
     -- Use 'vs' to determine the structure's C type.
     assign_temporary vs = do
       let prim_types = map varPrimType vs
-          var_type = RecordType $ staticRecord (map PrimField prim_types)
+          var_type = RecordType $ constStaticRecord (map PrimField prim_types)
       v <- newAnonymousVar var_type
       typespecs <- fmap identDeclSpecs $ getStructName prim_types
       let tmp_assignment =

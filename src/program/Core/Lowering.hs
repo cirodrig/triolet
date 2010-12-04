@@ -534,7 +534,7 @@ dataConstructorFieldLayout datacon ty_args
         mapM lowerToFieldType ty_args
       
       (computation2, record_layout) <-
-        suspendedCreateDynamicRecord field_layouts
+        suspendedCreateDynamicRecord [(Constant, t) | t <- field_layouts]
       
       let fields = map inPlaceField $ recordFields record_layout
       return (LL.UnitL,

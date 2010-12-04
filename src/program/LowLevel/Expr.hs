@@ -349,8 +349,7 @@ interpretPrim env op args = fmap (simplify env) $
     debug Nothing = Nothing
     debug (Just e) = traceShow msg $ Just e 
       where
-        msg = pprPrim op <+>
-              hsep (map (parens . pprExpr) args) $$ pprExpr e)
+        msg = pprPrim op <+> hsep (map (parens . pprExpr) args) $$ pprExpr e
 
     ca caop =
       case args

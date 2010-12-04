@@ -77,17 +77,17 @@ pointerTypeTag =
 -- | A parameter passing convention consists of size, alignment, copy,
 -- and finalize functions
 passConvRecord :: StaticRecord
-passConvRecord = staticRecord [ PrimField nativeWordType
-                              , PrimField nativeWordType
-                              , PrimField OwnedType
-                              , PrimField OwnedType
-                              ]
+passConvRecord = constStaticRecord [ PrimField nativeWordType
+                                   , PrimField nativeWordType
+                                   , PrimField OwnedType
+                                   , PrimField OwnedType
+                                   ]
 
 -- | The record type of a traversable class dictionary
 traversableDictRecord :: StaticRecord
 traversableDictRecord =
-  staticRecord [ PrimField OwnedType
-               , PrimField OwnedType]
+  constStaticRecord [ PrimField OwnedType
+                    , PrimField OwnedType]
 
 -- | An info table is a piece of statically defined global data.  Every 
 -- reference-counted, dynamically allocated object contains a pointer to an 
@@ -102,7 +102,7 @@ infoTableHeader = [ PrimField PointerType
                   ]
 
 infoTableHeaderRecord :: StaticRecord
-infoTableHeaderRecord = staticRecord infoTableHeader
+infoTableHeaderRecord = constStaticRecord infoTableHeader
 
 -- | A function info table describes a function. 
 -- 
@@ -126,15 +126,15 @@ funInfoHeader = [ RecordField infoTableHeaderRecord
                 , PrimField PointerType]
 
 funInfoHeaderRecord :: StaticRecord
-funInfoHeaderRecord = staticRecord funInfoHeader
+funInfoHeaderRecord = constStaticRecord funInfoHeader
 
 -- | All reference-counted objects have a common header format.
 --
 -- The header consists of a reference count and a pointer to the object's 
 -- info table.
-objectHeader :: [StaticFieldType]
-objectHeader = [ PrimField nativeWordType
-               , PrimField PointerType
+objectHeader :: [(Mutability, StaticFieldType)]
+objectHeader = [ (Mutable, PrimField nativeWordType)
+               , (Constant, PrimField PointerType)
                ]
 
 objectHeaderRecord :: StaticRecord
@@ -142,17 +142,19 @@ objectHeaderRecord = staticRecord objectHeader
 
 -- | A global closure consists of only an object header
 globalClosureRecord :: StaticRecord
-globalClosureRecord = staticRecord [RecordField objectHeaderRecord]
+globalClosureRecord = constStaticRecord [RecordField objectHeaderRecord]
 
 -- | A recursive closure consists of an object header and a pointer
 recursiveClosureRecord :: StaticRecord
-recursiveClosureRecord = staticRecord [ RecordField objectHeaderRecord
-                                      , PrimField PointerType]
+recursiveClosureRecord =
+  constStaticRecord [ RecordField objectHeaderRecord
+                       , PrimField PointerType]
 
 -- | A non-global, non-recursive closure contains captured variables 
 localClosureRecord :: StaticRecord -> StaticRecord
 localClosureRecord captured_vars =
-  staticRecord [RecordField objectHeaderRecord, RecordField captured_vars]
+  constStaticRecord [ RecordField objectHeaderRecord
+                       , RecordField captured_vars]
 
 -- | A function or partial application is an object containing a
 -- function's captured variables, including pointers to mutually recursive
@@ -165,11 +167,11 @@ papHeader = [ RecordField objectHeaderRecord
             ]
 
 papHeaderRecord :: StaticRecord
-papHeaderRecord = staticRecord papHeader
+papHeaderRecord = constStaticRecord papHeader
 
 -- | A complex value.  It consists of a real and an imaginary part.
 complexRecord :: StaticFieldType -> StaticRecord
-complexRecord ftype = staticRecord [ftype, ftype]
+complexRecord ftype = constStaticRecord [ftype, ftype]
 
 -- | A stream object.
 --
@@ -192,16 +194,17 @@ complexRecord ftype = staticRecord [ftype, ftype]
 --    Parameters: (pointer to state)
 --    Returns: void
 streamRecord :: StaticRecord
-streamRecord = staticRecord $
-               objectHeader ++
-               [ PrimField OwnedType -- Function (closure)
-               , PrimField OwnedType -- Initializer (closure)
-               , RecordField passConvRecord -- Stream data properties
-               ]
+streamRecord =
+  staticRecord $
+  objectHeader ++
+  [ (Constant, PrimField OwnedType) -- Function (closure)
+  , (Constant, PrimField OwnedType) -- Initializer (closure)
+  , (Constant, RecordField passConvRecord) -- Stream data properties
+  ]
 
 -- | A Pyon list.
 listRecord :: StaticRecord
-listRecord = staticRecord
+listRecord = constStaticRecord
              [ PrimField nativeWordType -- Size
              , PrimField PointerType    -- Pointer to contents
              ]

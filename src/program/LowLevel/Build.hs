@@ -357,8 +357,8 @@ instance ToDynamicRecordData Int where
     alignment = nativeWordV $ recordAlignment rec
     in record fs size alignment
 
-  toDynamicField (Field off ty) =
-    Field (nativeWordV off) (toDynamicFieldType ty)
+  toDynamicField (Field off m ty) =
+    Field (nativeWordV off) m (toDynamicFieldType ty)
 
   toDynamicFieldType (PrimField t) = PrimField t
   toDynamicFieldType (RecordField rec) = RecordField $ toDynamicRecord rec
@@ -408,17 +408,22 @@ dynamicFieldTypeAlignment (toDynamicFieldType -> ft) =
      RecordField r -> recordAlignment r
      BytesField _ a  -> a
 
+createConstDynamicRecord :: forall m. (Monad m, Supplies m (Ident Var)) =>
+                            [DynamicFieldType] -> Gen m DynamicRecord
+createConstDynamicRecord fs = createDynamicRecord [(Constant, f) | f <- fs]
+
 -- | Create a dynamic record.  Given the record field types, the offsets of
 -- all fields are computed and returned.  Code is emitted to compute the
 -- offsets.
 createDynamicRecord :: forall m. (Monad m, Supplies m (Ident Var)) =>
-                       [DynamicFieldType] -> Gen m DynamicRecord
+                       [(Mutability, DynamicFieldType)] -> Gen m DynamicRecord
 createDynamicRecord field_types = do
   -- Compute record size and field offsets
-  (offsets, size, alignment) <- compute_offsets [] zero one field_types
+  (offsets, size, alignment) <-
+    compute_offsets [] zero one (map snd field_types)
   
   -- Create the record
-  let fields = zipWith Field offsets field_types
+  let fields = [mkField o m t | (o, (m, t)) <- zip offsets field_types]
   return $ record fields size alignment
   where
     zero = nativeWordV 0
@@ -443,13 +448,21 @@ createDynamicRecord field_types = do
       end_offset <- addRecordPadding cur_offset cur_align
       return (reverse offsets, end_offset, cur_align)
 
+suspendedCreateConstDynamicRecord :: forall m m'.
+                                     (Monad m, Supplies m (Ident Var),
+                                      Monad m', Supplies m' (Ident Var)) =>
+                                     [DynamicFieldType]
+                                  -> m (Gen m' (), DynamicRecord)
+suspendedCreateConstDynamicRecord fs =
+  suspendedCreateDynamicRecord [(Constant, f) | f <- fs]
+
 -- | Create a dynamic record, but don't generate the code for it now.
 --   Returns a dynamic record, and a code generator that computes values used
 --   in the record.  The code generator calls 'createDynamicRecord'.
 suspendedCreateDynamicRecord :: forall m m'.
                                 (Monad m, Supplies m (Ident Var),
                                  Monad m', Supplies m' (Ident Var)) =>
-                                [DynamicFieldType]
+                                [(Mutability, DynamicFieldType)]
                              -> m (Gen m' (), DynamicRecord)
 suspendedCreateDynamicRecord field_types = do
   -- Create variables to stand for size, alignment, and field offsets
@@ -458,7 +471,8 @@ suspendedCreateDynamicRecord field_types = do
   align_v <- newAnonymousVar (PrimType nativeWordType)
   offsets <- replicateM (length field_types) $
              newAnonymousVar (PrimType nativeWordType)
-  let fields = zipWith Field (map VarV offsets) field_types
+  let fields = [ mkField (VarV off) m o
+               | (off, (m, o)) <- zip offsets field_types]
       code = compute_record_layout size_v align_v offsets
   return (code, record fields (VarV size_v) (VarV align_v))
   where
@@ -483,8 +497,17 @@ addRecordPadding off alignment = do
 fromPrimType :: DynamicFieldType -> ValueType
 fromPrimType (PrimField ty) = PrimType ty
 fromPrimType (RecordField rec) =
-  RecordType $ staticRecord $ map (as_value_type . fromPrimType . fieldType) $ recordFields rec
+  let sz = from_lit $ recordSize rec
+      al = from_lit $ recordAlignment rec
+      fs = map from_dynamic_field $ recordFields rec
+  in RecordType $ Rec fs sz al
   where
+    from_dynamic_field fld =
+      mkField (from_lit $ fieldOffset fld) (fieldMutable fld) (as_value_type $ fromPrimType $ fieldType fld)
+
+    from_lit (LitV (IntL _ _ n)) = fromIntegral n
+    from_lit _ = internalError "fromPrimType: Unexpected non-constant value"
+
     as_value_type (PrimType ty) = PrimField ty
     as_value_type (RecordType rec) = RecordField rec
 fromPrimType _ = internalError "Expecting a primitive field type"
@@ -698,31 +721,32 @@ selectPassConvFinalize = loadField (passConvRecord' !!: 3)
 additiveDictRecord :: (Monad m, Supplies m (Ident Var)) =>
                       DynamicFieldType -> Gen m DynamicRecord
 additiveDictRecord ftype =
-  createDynamicRecord [ RecordField passConvRecord'
-                      , PrimField OwnedType
-                      , PrimField OwnedType
-                      , PrimField OwnedType
-                      , ftype]
+  createConstDynamicRecord [ RecordField passConvRecord'
+                           , PrimField OwnedType
+                           , PrimField OwnedType
+                           , PrimField OwnedType
+                           , ftype]
 
 suspendedAdditiveDictRecord ftype =
-  suspendedCreateDynamicRecord [ RecordField passConvRecord'
-                               , PrimField OwnedType
-                               , PrimField OwnedType
-                               , PrimField OwnedType
-                               , ftype]
+  suspendedCreateConstDynamicRecord [ RecordField passConvRecord'
+                                    , PrimField OwnedType
+                                    , PrimField OwnedType
+                                    , PrimField OwnedType
+                                    , ftype]
 
 suspendedMultiplicativeDictRecord ftype = do
   (additive_code, additive_record) <- suspendedAdditiveDictRecord ftype
   (multiplicative_code, multiplicative_record) <-
-    suspendedCreateDynamicRecord [ RecordField additive_record
-                                 , PrimField OwnedType
-                                 , PrimField OwnedType
-                                 , ftype]
+    suspendedCreateConstDynamicRecord [ RecordField additive_record
+                                      , PrimField OwnedType
+                                      , PrimField OwnedType
+                                      , ftype]
   return (additive_code >> multiplicative_code, multiplicative_record)
 
-complexRecord' eltype = createDynamicRecord [eltype, eltype]
+complexRecord' eltype = createConstDynamicRecord [eltype, eltype]
 
-suspendedComplexRecord' eltype = suspendedCreateDynamicRecord [eltype, eltype]
+suspendedComplexRecord' eltype =
+  suspendedCreateConstDynamicRecord [eltype, eltype]
 
 -------------------------------------------------------------------------------
 -- Values

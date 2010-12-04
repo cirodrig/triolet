@@ -2,69 +2,69 @@
 
 // Header fields of an info table
 record InfoTableHeader {
-  pointer dealloc;              // How to deallocate an object
-  uint8 tag;                    // What kind of object this is
+  const pointer dealloc;              // How to deallocate an object
+  const uint8 tag;                    // What kind of object this is
 };
 
 // Header fields of an object
 record ObjectHeader {
   int refct;                    // Reference count
-  pointer info;                 // Info table
+  const pointer info;                 // Info table
 };
 
 // Objet layout information
 record PassConv {
-  word size;                    // Size in bytes
-  word align;                   // Alignment in bytes
-  owned copy;                   // Duplicate a value
-  owned finalize;               // Finalize a value
+  const word size;                    // Size in bytes
+  const word align;                   // Alignment in bytes
+  const owned copy;                   // Duplicate a value
+  const owned finalize;               // Finalize a value
 };
 
 // Function info table
 record FunInfoHeader {
-  InfoTableHeader header;
-  uint8 has_shared_closure;     // True iff instances of the function share
+  const InfoTableHeader header;
+  const uint8 has_shared_closure;     // True iff instances of the function share
                                 // their closure with other functions.  Closure
                                 // sharing is the result of recursive function
                                 // definitions.
-  uint16 arity;                 // Number of arguments the function accepts
-  pointer exact;                // Exact entry point
-  pointer inexact;              // Inexact entry point
+  const uint16 arity;                 // Number of arguments the function accepts
+  const pointer exact;                // Exact entry point
+  const pointer inexact;              // Inexact entry point
 };
 
 // PAP/function instance header
 record PAPHeader {
-  ObjectHeader header;		// Object header
-  uint16 nargs;                 // Number of arguments that have been applied
+  const ObjectHeader header;		// Object header
+  const uint16 nargs;                 // Number of arguments that have been applied
 };
 
 // Additive dictionary
 record AdditiveDict(a) {
-  PassConv repr;		// Represesntation of the data type
-  owned add;			// Add two values
-  owned subtract;		// A value minus another
-  owned negate;			// Negate a value
-  a zero;			// The zero value
+  const PassConv repr;		// Represesntation of the data type
+  const owned add;			// Add two values
+  const owned subtract;		// A value minus another
+  const owned negate;			// Negate a value
+  const a zero;			// The zero value
 };
 
 // Multiplicative dictionary
 record MultiplicativeDict(a) {
-  AdditiveDict(a) additive;     // Additive dictionary
-  owned mul;			// Multiply two values
-  owned fromInt;		// Create from an integer
-  a one;			// The one value
+  const AdditiveDict(a) additive;     // Additive dictionary
+  const owned mul;			// Multiply two values
+  const owned fromInt;		// Create from an integer
+  const a one;			// The one value
 };
 
 // Traversable dictionary
 record TraversableDict {
-  owned traverse;               // Traverse an object
-  owned build;                  // Build an object
+  const owned traverse;               // Traverse an object
+  const owned build;                  // Build an object
 };
 
 // Complex numbers
 record complex(a) {
-  a real;
-  a imag;
+  const a real;
+  const a imag;
 };
 
 // Pairs of objects; 2-tuples
@@ -81,9 +81,9 @@ record Pair(a) {
  * list, but rather passed to functions that operate on the list.
  */
 record PyonList {
-  word nelems;			// Number of elements in the list.
+  const word nelems;			// Number of elements in the list.
                                 // Actual allocated size may be larger.
-  pointer contents;		// Pointer to list contents
+  const pointer contents;		// Pointer to list contents
 };
 
 /* A stream of values.  Stream elements are computed on demand.
@@ -96,11 +96,11 @@ record PyonList {
  *   Initialize the stream state.
  */
 record Stream {
-  ObjectHeader header;
-  owned next;                   // How to get the next stream element
-  owned initialize;             // How to initialize the stream state
-  PassConv return_repr;		// Representation of return value
-  word state_size;              // Size of stream state
-  word state_align;             // Alignment of stream state
-  owned state_finalize;         // Finalizer for stream state
+  const ObjectHeader header;
+  const owned next;                   // How to get the next stream element
+  const owned initialize;             // How to initialize the stream state
+  const PassConv return_repr;		// Representation of return value
+  const word state_size;              // Size of stream state
+  const word state_align;             // Alignment of stream state
+  const owned state_finalize;         // Finalizer for stream state
 };

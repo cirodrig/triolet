@@ -11,6 +11,7 @@ import Text.ParserCombinators.Parsec.Expr
 import qualified Gluon.Common.SourcePos
 import LowLevel.Label
 import LowLevel.Types
+import LowLevel.Record(Mutability(..))
 import LLParser.Lexer
 import LLParser.AST
 
@@ -423,8 +424,11 @@ recordDef = do
   fields <- braces $ fieldDef `sepEndBy` match SemiTok
   return $ RecordDef name params fields
 
+mutability :: P Mutability
+mutability = (match ConstTok >> return Constant) <|> return Mutable
+
 fieldDef :: P (FieldDef Parsed)
-fieldDef = liftM2 FieldDef parseType identifier
+fieldDef = liftM3 FieldDef mutability parseType identifier
 
 dataDef :: P (DataDef Parsed)
 dataDef = do

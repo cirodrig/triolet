@@ -6,8 +6,8 @@ module LLParser.AST where
 import Data.List
 
 import LowLevel.Types
+import LowLevel.Record(Mutability(..))
 import LowLevel.Label
-import qualified LowLevel.Syntax as LL
 
 data Parsed
 
@@ -103,9 +103,9 @@ data RecordDef a =
 findFieldIndex :: FieldName -> RecordDef a -> Maybe Int
 findFieldIndex fname r = findIndex match_name $ recordFields r
   where
-    match_name (FieldDef _ nm) = nm == fname
+    match_name (FieldDef _ _ nm) = nm == fname
 
-data FieldDef a = FieldDef (Type a) FieldName
+data FieldDef a = FieldDef !Mutability (Type a) FieldName
 
 data DataDef a =
   DataDef

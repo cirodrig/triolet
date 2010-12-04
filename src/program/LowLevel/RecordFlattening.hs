@@ -114,7 +114,8 @@ expandedFieldSize f = length $ flattenFieldType $ fieldType f
 -- | Create a new parameter variable for each expanded record field
 defineRecord :: StaticRecord -> ([ParamVar] -> RF a) -> RF a
 defineRecord record k = do
-  expanded_vars <- mapM (newAnonymousVar . PrimType) $ flattenRecordType record
+  expanded_vars <- mapM (newAnonymousVar . PrimType) $
+                   flattenRecordType record
   foldr assign_expanded_var (k expanded_vars) expanded_vars
   where
     -- The parameter variables expand to themselves
@@ -140,7 +141,7 @@ flattenType (RecordType rt) = flattenRecordType rt
 flattenRecordType :: StaticRecord -> [PrimType]
 flattenRecordType rt =
   concatMap flattenFieldType $ map fieldType $ recordFields rt
-    
+
 flattenFieldType (PrimField UnitType) = []
 flattenFieldType (PrimField pt) = [pt]
 flattenFieldType (RecordField record_type) = flattenRecordType record_type
@@ -434,10 +435,17 @@ flattenTopLevel exports defs =
 
 -- | Change a data definition to a flat structure type
 flattenDataDef :: DataDef -> RF DataDef
-flattenDataDef (Def v (StaticData record vals)) = do
+flattenDataDef (Def v (StaticData rec vals)) = do
   val' <- flattenValList vals
-  let record' = staticRecord $ map PrimField $ flattenRecordType record
+  let record' = record (flatten_record_fields rec) (sizeOf rec) (alignOf rec)
   return $ Def v (StaticData record' val')
+  where
+    flatten_record_fields rec = concatMap flattened_fields $ recordFields rec
+
+    flattened_fields fld =
+      case fieldType fld
+      of RecordField rec -> flatten_record_fields rec
+         _ -> [fld]
 
 flattenImport :: Import -> RF Import
 flattenImport (ImportClosureFun ep mval) = do

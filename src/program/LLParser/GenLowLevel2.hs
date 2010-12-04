@@ -97,8 +97,9 @@ convertToDynamicRecord tenv rec =
        of Just record -> return record
           Nothing     -> error "Expecting a record type"
      _ -> do
-       field_types <- sequence [convertToDynamicFieldType tenv t
-                               | FieldDef t _ <- typedRecordFields0 rec]
+       field_types <- forM (typedRecordFields0 rec) $ \(FieldDef m t _) -> do 
+         t' <- convertToDynamicFieldType tenv t
+         return (m, t')
        createDynamicRecord field_types
 
 convertTypeToDynamicRecord :: TypeEnv -> Type Typed -> G DynamicRecord
@@ -210,7 +211,7 @@ genField tenv (Field base_type fnames cast_type) =
                case fnames of
                  [] -> return_field_offset offset dfield
                  _  -> case rfield
-                       of FieldDef next_rec _ ->
+                       of FieldDef _ next_rec _ ->
                             get_field_offset offset next_rec fnames
                           _ -> internalError "genField"
              Nothing ->
@@ -226,7 +227,7 @@ genField tenv (Field base_type fnames cast_type) =
                                 _ -> internalError "genField"
       in return (offset, fieldMutable field, ty)
 
-    match_name want_name (FieldDef _ name) = name == want_name
+    match_name want_name (FieldDef _ _ name) = name == want_name
 
 -- | Convert to a static record type.  The type must not contain non-constant
 --   expressions.  Throw an error if it doesn't satisfy these conditions.

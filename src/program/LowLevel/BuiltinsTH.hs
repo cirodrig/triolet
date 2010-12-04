@@ -23,6 +23,9 @@ instance Lift Signedness where
 instance Lift Size where
   lift x = let n = fromEnum x in [| toEnum n |]
 
+instance Lift Mutability where
+  lift x = let n = fromEnum x in [| toEnum n |]
+
 instance Lift PrimType where
   lift UnitType = [| UnitType |]
   lift BoolType = [| BoolType |]
@@ -32,7 +35,7 @@ instance Lift PrimType where
   lift OwnedType = [| OwnedType |]
 
 instance Lift (Field Int) where
-  lift (Field off t) = [| Field off t |]
+  lift (Field off m t) = [| Field off m t |]
 
 instance Lift (FieldType Int) where
   lift (PrimField pt) = [| PrimField pt |]
@@ -41,8 +44,11 @@ instance Lift (FieldType Int) where
   lift (AlignField n) = [| AlignField n |]
 
 instance Lift (Record Int) where
-  lift rec = let fields = map fieldType $ recordFields rec
-             in [| staticRecord fields |] 
+  lift rec = let fields = [(fieldOffset f, fieldMutable f , fieldType f) 
+                          | f <- recordFields rec]
+                 sz = sizeOf rec
+                 al = alignOf rec
+             in [| Rec [mkField o m t | (o, m, t) <- fields] sz al |]
 
 instance Lift ValueType where
   lift (PrimType pt) = [| PrimType pt |]

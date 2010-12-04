@@ -65,9 +65,14 @@ pprFunctionType ftype =
   (map pprValueType $ ftReturnTypes ftype)
 
 pprDataDef :: DataDef -> Doc
-pprDataDef (Def v (StaticData _ values)) =
-  let initializer = fillBracketList $ map pprVal values
+pprDataDef (Def v (StaticData rec values)) =
+  let initializer = fillBracketList 
+                    [ mutability m <+> pprVal v
+                    | (m, v) <- zip (map fieldMutable $ recordFields rec) values]
   in hang (text "data" <+> pprVar v <+> text "=") 4 initializer
+  where
+    mutability Constant = text "const"
+    mutability Mutable  = empty
 
 pprFunSignature :: [Doc] -> [Doc] -> Doc
 pprFunSignature domain range =

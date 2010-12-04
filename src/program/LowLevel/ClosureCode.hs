@@ -357,22 +357,26 @@ listenFreeVars (CC m) = CC $ \env -> do
 -------------------------------------------------------------------------------
 -- Closure and record type definitions
 
--- | Create a record whose fields have the same type as the given values.
+-- | Create an immutable record that can hold the given vector of values.
 valuesRecord :: [Val] -> StaticRecord
-valuesRecord vals = staticRecord $ map (PrimField . valPrimType) vals
+valuesRecord vals = constStaticRecord $ map (PrimField . valPrimType) vals
 
-primTypesRecord :: [PrimType] -> StaticRecord
-primTypesRecord tys = staticRecord $ map PrimField tys
+-- | Create an immutable record that can hold the given variables' values.
+variablesRecord :: [Var] -> StaticRecord
+variablesRecord vals = constStaticRecord $ map (PrimField . varPrimType) vals
 
-promotedPrimTypesRecord :: [PrimType] -> StaticRecord
-promotedPrimTypesRecord tys =
-  staticRecord $ map (PrimField . promoteType) tys
+primTypesRecord :: Mutability -> [PrimType] -> StaticRecord
+primTypesRecord mut tys = staticRecord [(mut, PrimField t) | t <- tys]
+
+promotedPrimTypesRecord :: Mutability -> [PrimType] -> StaticRecord
+promotedPrimTypesRecord mut tys =
+  staticRecord [(mut, PrimField $ promoteType t) | t <- tys]
 
 -- | A recursive group's shared closure record.  The record contains captured
 -- variables and pointers to functions in the group.
 groupSharedRecord :: StaticRecord -> StaticRecord -> StaticRecord
 groupSharedRecord captured_record group_record =
-  staticRecord [RecordField captured_record, RecordField group_record]
+  constStaticRecord [RecordField captured_record, RecordField group_record]
 
 -- | A description of a function closure.  The description is used to create
 --   all the code and static data for the function other than the direct entry
@@ -503,7 +507,7 @@ closure var is_global entry captured recursive = checks $
     is_recursive_group = isJust recursive
 
     -- Captured variables
-    captured_record = staticRecord $ map (PrimField . varPrimType) captured
+    captured_record = variablesRecord captured
     
     -- If this function is part of a recursive group, the closure contains 
     -- only a reference to the shared record.  If global, it contains only  
@@ -519,7 +523,7 @@ closure var is_global entry captured recursive = checks $
       case recursive
       of Just closures ->
            let group_record =
-                 staticRecord $
+                 constStaticRecord $
                  replicate (length closures) (PrimField PointerType)
            in Just $ groupSharedRecord captured_record group_record
          Nothing -> Nothing
@@ -821,12 +825,12 @@ emitInexactEntry clo = do
     store_field ptr fld return_val = storeField fld ptr return_val
 
     -- Record type of parameters
-    param_record = promotedPrimTypesRecord $
+    param_record = promotedPrimTypesRecord Constant $
                    map valueToPrimType $
                    ftParamTypes $ closureType clo
   
     -- Record type of returns
-    return_record = promotedPrimTypesRecord $
+    return_record = promotedPrimTypesRecord Constant $
                     map valueToPrimType $
                     ftReturnTypes $ closureType clo
 
@@ -836,7 +840,7 @@ emitInfoTable clo =
   let arg_type_fields = replicate (length arg_type_tags) $
                         PrimField (IntType Unsigned S8)
       record_type =
-        staticRecord (RecordField funInfoHeaderRecord : arg_type_fields)
+        constStaticRecord (RecordField funInfoHeaderRecord : arg_type_fields)
       info_table = closureInfoTableEntry clo
       static_value = StaticData (flattenStaticRecord record_type) (flattenGlobalValues fun_info)
   in return $ Def info_table static_value
@@ -1062,7 +1066,7 @@ genIndirectCall return_types mk_op mk_args = return $ do
 
     make_inexact_call ret_vars clo_ptr args cont = do
       -- Create temporary storage for return values
-      let ret_record = staticRecord $ map PrimField return_types
+      let ret_record = primTypesRecord Constant return_types
       ret_ptr <- allocateHeapMem $ nativeWordV $ recordSize ret_record
 
       -- Apply the function

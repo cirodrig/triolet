@@ -10,6 +10,10 @@ import LowLevel.BinaryUtils
 import LowLevel.Types
 import {-# SOURCE #-} LowLevel.Syntax
 
+-- | A mutability flag
+data Mutability = Mutable | Constant
+                deriving(Eq, Ord, Show, Enum, Bounded)
+
 -- | A record type, consisting of fields with known type and alignment.
 --
 -- Record types are used for computing the physical layout of data and
@@ -20,13 +24,32 @@ data Record t =
       , recordAlignment_ :: !t
       }
 
--- | A record field.
+-- | A record field.  A field contains information about its offset, whether
+--   its value is mutable, and what data type it contains.  Mutability only
+--   applies to records stored in memory.
+--
+--   Note that a 'Constant' field is not necessarily constant: it could be
+--   a record containing some mutable fields.  You can check for this with
+--   'isFullyConst'.
+--
+-- If a field is a mutable record, then all its sub-fields are mutable.
 --
 -- Record fields never have 'AlignField' type.
 data Field t =
   Field { fieldOffset :: !t
+        , fieldMutable :: !Mutability
         , fieldType  :: !(FieldType t)
         }
+
+-- | Create a record field specification
+mkField :: t -> Mutability -> FieldType t -> Field t
+mkField offset mutable field_type =
+  let ftype = case mutable
+              of Mutable  -> makeFieldTypeMutable field_type
+                 Constant -> field_type
+  in case field_type 
+     of AlignField _ -> internalError "mkField: Unexpected alignment field"
+        _ -> Field offset mutable ftype
 
 -- | A record field type
 data FieldType t =
@@ -49,6 +72,34 @@ record = Rec
 
 recordFields :: Record t -> [Field t]
 recordFields = recordFields_
+
+isMutableField :: Field t -> Bool
+isMutableField f = fieldMutable f == Mutable
+
+isConstField :: Field t -> Bool
+isConstField f = fieldMutable f == Constant
+
+isFullyConst :: Field t -> Bool
+isFullyConst f = isConstField f && all_const_fields (fieldType f)
+  where
+    all_const_fields (RecordField rec) = all isFullyConst $ recordFields rec
+    all_const_fields _ = True
+
+-- | Make all fields of a record mutable, recursively.
+makeRecordMutable :: Record t -> Record t
+makeRecordMutable rec =
+  rec {recordFields_ = map makeFieldMutable $ recordFields_ rec} 
+    
+makeFieldMutable :: Field t -> Field t
+makeFieldMutable fld =
+  case fieldMutable fld  
+  of Mutable  -> fld
+     Constant -> fld { fieldMutable = Mutable
+                     , fieldType = makeFieldTypeMutable $ fieldType fld}
+
+makeFieldTypeMutable :: FieldType t -> FieldType t
+makeFieldTypeMutable (RecordField rec) = RecordField (makeRecordMutable rec)
+makeFieldTypeMutable t = t
 
 -- | Apply a transformation to all field types in a record.  If there are
 --   fields with record type, their fields aren't transformed.  The
@@ -119,19 +170,24 @@ instance HasSize (Field Int) where
   sizeOf f = sizeOf (fieldType f)
   alignOf f = alignOf (fieldType f)
 
-staticRecord :: [StaticFieldType] -> StaticRecord
+constStaticRecord :: [StaticFieldType] -> StaticRecord
+constStaticRecord fs = staticRecord [(Constant, f) | f <- fs]
+
+staticRecord :: [(Mutability, StaticFieldType)] -> StaticRecord
 staticRecord fs = let
   field_offsets = compute_offsets 0 fs
-  real_fields   = filter (not . isAlignField) fs
-  alignment     = foldr lcm 1 $ map alignOf real_fields
+  real_fields   = filter (not . isAlignField . snd) fs
+  alignment     = foldr lcm 1 $ map (alignOf . snd) real_fields
   size          = if null real_fields
                   then 0
-                  else last field_offsets + sizeOf (last real_fields)
-  in record (zipWith Field field_offsets real_fields) size alignment
+                  else last field_offsets + sizeOf (snd $ last real_fields)
+  fields        = [ mkField o m t
+                  | (o, (m, t)) <- zip field_offsets real_fields]
+  in record fields size alignment
   where
     -- Each field starts at the offset of the previous field, plus the
     -- previous field's size, plus some padding bytes
-    compute_offsets offset (field : fields) = 
+    compute_offsets offset ((_, field) : fields) = 
       case field
       of PrimField vt ->
            let start_offset = pad offset $ alignOf vt
@@ -181,9 +237,13 @@ log2 n = 1 + log2 (n `shiftR` 1)
 -------------------------------------------------------------------------------
 -- Binary instances
 
+instance Binary Mutability where
+  put = putEnum
+  get = getEnum "Mutability.get"
+
 instance Binary StaticField where
-  put (Field off ty) = put off >> put ty
-  get = Field <$> get <*> get
+  put (Field off m ty) = put off >> put m >> put ty
+  get = Field <$> get <*> get <*> get
 
 instance Binary StaticFieldType where
   put (PrimField pt) = putWord8 0 >> put pt
