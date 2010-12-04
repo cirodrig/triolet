@@ -260,7 +260,7 @@ intBinaryPrimOp imm_op l_id r_id delayed_op prim_type m n =
     fromLit _ = Nothing
 
 primAddZ = intBinaryPrimOp (+) (Just 0) (Just 0) PrimAddZ
-primSubZ = intBinaryPrimOp (-) (Just 0) (Just 0) PrimSubZ
+primSubZ = intBinaryPrimOp (-) Nothing (Just 0) PrimSubZ
 primModZ = intBinaryPrimOp mod Nothing (Just 1) PrimModZ
 primMaxZ = intBinaryPrimOp max Nothing Nothing PrimMaxZ
 
@@ -490,7 +490,7 @@ suspendedCreateDynamicRecord field_types = do
 addRecordPadding :: (Monad m, Supplies m (Ident Var)) =>
                     Val -> Val -> Gen m Val
 addRecordPadding off alignment = do
-  neg_off <- nativeNegateUZ off 
+  neg_off <- nativeNegateUZ off
   disp <- neg_off `nativeModUZ` alignment
   off `nativeAddUZ` disp
 
