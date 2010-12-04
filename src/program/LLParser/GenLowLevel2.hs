@@ -122,7 +122,7 @@ genDynamicType tenv ty =
        return $ DynamicType (recordSize dynamic_rec) (recordAlignment dynamic_rec) (Just dynamic_rec)
      BytesT size align -> do
        size_val <- asVal =<< genExpr tenv size
-       align_val <- asVal =<< genExpr tenv size
+       align_val <- asVal =<< genExpr tenv align
        return $ DynamicType size_val align_val Nothing
      AppT ty args ->
        genDynamicType tenv $ applyRecordType ty args
