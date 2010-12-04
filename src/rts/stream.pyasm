@@ -397,7 +397,6 @@ function Stream_reduce
   () = () call (stream @! Stream.state_finalize) (st);
   () = () call elem_copy (acc1, ret);
   () = () call elem_finalize (acc1);
-  () = () call elem_finalize (acc2);
   () = () primcall pyon_dealloc(accs);
   ();
 };
