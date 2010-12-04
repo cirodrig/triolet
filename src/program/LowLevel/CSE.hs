@@ -9,7 +9,9 @@ import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
+import Gluon.Common.Error
 import LowLevel.FreshVar
 import LowLevel.Build
 import LowLevel.CodeTypes
@@ -58,7 +60,9 @@ csePrim prim args =
      Just exprs -> do
        env <- get
        case interpretPrim env prim exprs of
-         Nothing -> return (rebuild_atom, Nothing)
+         Nothing -> do
+           update_for_store env prim exprs
+           return (rebuild_atom, Nothing)
          Just i -> 
            let new_atom =
                  case cseFindExpr i env
@@ -68,6 +72,16 @@ csePrim prim args =
   where
     arg_vals = map fst args
     rebuild_atom = PrimA prim arg_vals
+
+    update_for_store env (PrimStore Constant ty) args = 
+      case args
+      of [base, off, val] ->
+           case interpretStore env ty base off val 
+           of Just env' -> put env'
+              Nothing -> return ()
+         _ -> internalError "csePrim"
+
+    update_for_store _ _ _ = return ()
 
 cseAtom :: Atom -> CSE (Atom, Maybe [Maybe Expr])
 cseAtom atom =
@@ -139,11 +153,22 @@ scanGlobalData defs = foldr scan_data emptyCSEEnv defs
   where
     scan_data (GlobalFunDef _) env = env
     scan_data (GlobalDataDef (Def base (StaticData rec fs))) env =
-      foldr add_field env $ zip (recordFields rec) fs
+      foldr (add_field (varExpr base)) env $ zip (recordFields rec) fs
     
-    add_field (fld, val) env =
-      -- TODO: add the field to the environment
-      env
+    add_field base (fld, val) env
+      | isConstField fld =
+          case interpretVal env val
+          of Just cse_val ->
+               fromMaybe env $
+               interpretStore env prim_type base offset cse_val
+             Nothing -> env
+      | otherwise = env
+      where
+        offset = litExpr $ nativeIntL $ fieldOffset fld
+        prim_type =
+          case fieldType fld
+          of PrimField pt -> PrimType pt
+             _ -> internalError "scanGlobalData: Unexpected record field"
 
 commonSubexpressionElimination :: Module -> IO Module
 commonSubexpressionElimination mod =

@@ -5,7 +5,9 @@ These expressions are used in common subexpression elimination.
 {-# LANGUAGE TypeFamilies, FlexibleContexts, Rank2Types, ScopedTypeVariables #-}
 module LowLevel.Expr
        (CSEVal, fromCSEVal,
-        Expr, litExpr,
+        Expr, varExpr, litExpr,
+        pprExpr,
+        exprToCSEVal,
         CSEEnv,
         pprCSEEnv,
         emptyCSEEnv,
@@ -14,6 +16,7 @@ module LowLevel.Expr
         cseFindExpr,
         interpretVal,
         interpretPrim,
+        interpretStore,
         isZeroAtomExpr,
         isOneAtomExpr,
         generateExprAtom
@@ -84,6 +87,9 @@ data Expr =
   | CAExpr !CAOp [Expr]
   | BinExpr !BinOp Expr Expr
   | UnExpr !UnOp Expr
+
+varExpr :: Var -> Expr
+varExpr = VarExpr
 
 litExpr :: Lit -> Expr
 litExpr = LitExpr
@@ -377,6 +383,18 @@ interpretPrim env op args = fmap (simplify env) $
       of [base, off] ->
            let pointer = simplify' $ BinExpr AddPOp base off
            in UnExpr (LoadOp ty) pointer
+
+-- | Update the environment to reflect the state of memory after a
+--   store of constant memory executes.
+interpretStore :: CSEEnv -> ValueType -> Expr -> Expr -> Expr -> Maybe CSEEnv
+interpretStore env ty base off val =
+  case cseFindExpr val env `mplus` exprToCSEVal val
+  of Just cse_val ->
+       let pointer = simplify env $ BinExpr AddPOp base off
+           load_op = UnExpr (LoadOp ty) pointer
+           env' = env {available = insert load_op cse_val $ available env}
+       in Just env'
+     Nothing -> Nothing
 
 -- | Return True if the expression can be converted to a value.
 --   The expression should be a simplified expression.
