@@ -31,7 +31,7 @@ pprVar v =
 
 pprValueType :: ValueType -> Doc
 pprValueType (PrimType pt) = pprPrimType pt
-pprValueType (RecordType rt) = pprRecordType rt
+pprValueType (RecordType rt) = pprStaticRecord rt
 
 pprPrimType UnitType = text "unit"
 pprPrimType BoolType = text "bool"
@@ -50,13 +50,32 @@ pprPrimType (FloatType S64) = text "f64"
 pprPrimType PointerType = text "ptr"
 pprPrimType OwnedType = text "own"
 
-pprRecordType rt =
-  brackets $ fsep $ punctuate (text ",") $
-  map (pprFieldType . fieldType) $ recordFields rt
+pprStaticRecord rt = pprRecordType (text . show) rt
+pprDynamicRecord rt = pprRecordType pprVal rt
 
-pprFieldType (PrimField pt) = pprPrimType pt 
-pprFieldType (RecordField rt) = pprRecordType rt
-pprFieldType (BytesField _ _) = text "BYTES"
+pprRecordType ppr_value rt =
+  let fields =
+        brackets $ fsep $ punctuate (text ",") $
+        map (pprField ppr_value) (recordFields rt)
+      sz = ppr_value $ recordSize rt
+      al = ppr_value $ recordAlignment rt
+  in hang (text "record" <+> sz <+> text "%" <+> al) 4 fields
+
+pprField ppr_value fld =
+  ppr_value (fieldOffset fld) <> text ":" <+> pprFieldType ppr_value (fieldType fld)
+
+pprStaticFieldType :: StaticFieldType -> Doc
+pprStaticFieldType = pprFieldType (text . show)
+
+pprDynamicFieldType :: DynamicFieldType -> Doc
+pprDynamicFieldType = pprFieldType pprVal
+
+pprFieldType ppr_val fld = 
+  case fld
+  of PrimField pt -> pprPrimType pt 
+     RecordField rt -> pprRecordType ppr_val rt
+     BytesField sz al ->
+       text "bytes" <+> ppr_val sz <+> text "%" <+> ppr_val al
 
 pprFunctionType :: FunctionType -> Doc
 pprFunctionType ftype =
@@ -202,8 +221,8 @@ pprAtom atom =
            pprVal v1 <+> infix_op <+> pprVal v2
      PrimA p vs -> pprPrim p <> arg_list vs
      PackA rt vs -> hang (text "pack" <> arg_list vs) 8 $
-                    text "as" <+> pprRecordType rt
-     UnpackA rt v -> text "unpack" <+> pprVal v <+> text "as" <+> pprRecordType rt
+                    text "as" <+> pprStaticRecord rt
+     UnpackA rt v -> text "unpack" <+> pprVal v <+> text "as" <+> pprStaticRecord rt
   where
     arg_list vs = fillBracketList $ map pprVal vs
 
