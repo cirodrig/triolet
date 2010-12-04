@@ -63,8 +63,8 @@ toPointerVal value =
 toPointerPrim :: Prim -> Prim
 toPointerPrim prim =
   case prim
-  of PrimLoad (PrimType OwnedType) -> PrimLoad (PrimType PointerType)
-     PrimStore (PrimType OwnedType) -> PrimStore (PrimType PointerType)
+  of PrimLoad m (PrimType OwnedType) -> PrimLoad m (PrimType PointerType)
+     PrimStore m (PrimType OwnedType) -> PrimStore m (PrimType PointerType)
      PrimCastToOwned -> internalError "toPointerPrim"
      PrimCastFromOwned -> internalError "toPointerPrim"
      _ -> prim

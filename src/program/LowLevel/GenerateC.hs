@@ -443,14 +443,14 @@ genPrimCall prim args =
      PrimNot -> case args of [arg] -> CUnary CNegOp arg internalNode
      PrimAddP ->
        case args of [ptr, off] -> offset ptr off
-     PrimLoad (PrimType ty) ->
+     PrimLoad _ (PrimType ty) ->
        -- Cast the pointer to the desired pointer type, then dereference
        case args
        of [ptr, off] ->
             let offptr = offset ptr off
                 cast_ptr = cPtrCast ty offptr
             in CUnary CIndOp cast_ptr internalNode
-     PrimStore (PrimType ty) ->
+     PrimStore _ (PrimType ty) ->
        -- Cast the pointer to the desired type, then assign to it
        case args
        of [ptr, off, val] ->

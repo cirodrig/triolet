@@ -341,7 +341,8 @@ interpretPrim env op args = fmap (simplify env) $
      PrimSubZ sgn sz -> Just $ subtract_op sgn sz
      PrimModZ sgn sz -> Just $ binary (ModZOp sgn sz)
      PrimAddP        -> Just $ binary AddPOp
-     PrimLoad ty     -> Just $ load_op ty
+     -- Only constant loads can become expressions
+     PrimLoad Constant ty -> Just $ load_op ty
      _               -> Nothing
   where
     -- Print a debug message

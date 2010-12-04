@@ -179,12 +179,12 @@ flattenAtom atom =
        return_atom $
        CallA conv `liftM` flattenSingleVal op `ap` flattenValList vs
      -- If loading a record, load its parts individually
-     PrimA (PrimLoad (RecordType rec_type)) vs -> do
+     PrimA (PrimLoad m (RecordType rec_type)) vs -> do
        [ptr, off] <- flattenValList vs
-       flattenLoad rec_type ptr off
+       flattenLoad m rec_type ptr off
      -- If storing a record, load its parts individually
-     PrimA (PrimStore (RecordType rec_type)) vs ->
-       flattenStore rec_type =<< flattenValList vs
+     PrimA (PrimStore m (RecordType rec_type)) vs ->
+       flattenStore m rec_type =<< flattenValList vs
      PrimA prim vs ->
        return_atom $ PrimA prim `liftM` flattenValList vs
      PackA _ vals ->
@@ -198,8 +198,8 @@ flattenAtom atom =
                        return (id, atom)
 
 -- Flatten a load of a record by loading its fields individually
-flattenLoad :: StaticRecord -> Val -> Val -> RF (Stm -> Stm, Atom)
-flattenLoad record_type ptr off = do
+flattenLoad :: Mutability -> StaticRecord -> Val -> Val -> RF (Stm -> Stm, Atom)
+flattenLoad op_mutable record_type ptr off = do
   -- Compute (ptr ^+ off)
   (compute_base, base) <- pointerOffsetCode ptr off
 
@@ -212,22 +212,28 @@ flattenLoad record_type ptr off = do
       case fieldType fld
       of PrimField pt -> do
            v <- newAnonymousVar (PrimType pt)
-           let atom = PrimA (PrimLoad (PrimType pt))
+           let mutable = case op_mutable
+                         of Mutable -> Mutable
+                            Constant -> fieldMutable fld
+               atom = PrimA (PrimLoad mutable (PrimType pt))
                       [base, nativeIntV $ fieldOffset fld]
            return (LetE [v] atom, v)
          _ -> internalError "flattenLoad"
   
-flattenStore record_type (ptr : off : values) = do 
+flattenStore op_mutable record_type (ptr : off : values) = do 
   -- Compute (ptr ^+ off)
   (compute_base, base) <- pointerOffsetCode ptr off
 
   -- Store each field
   let store_field fld val =
         let offset = nativeIntV $ fieldOffset fld
+            mutable = case op_mutable
+                      of Mutable -> Mutable
+                         Constant -> fieldMutable fld
             pt = case fieldType fld
                  of PrimField t -> t
                     _ -> internalError "flattenStore"
-        in LetE [] $ PrimA (PrimStore (PrimType pt)) [base, offset, val]
+        in LetE [] $ PrimA (PrimStore mutable (PrimType pt)) [base, offset, val]
 
       fields = recordFields $ flattenStaticRecord record_type      
       code = foldr (.) id $ zipWith store_field fields values

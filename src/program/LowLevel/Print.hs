@@ -137,8 +137,10 @@ pprPrim prim =
            PrimOr -> "or"
            PrimNot -> "not"
            PrimAddP   -> "ptradd"
-           PrimLoad _ -> "load"
-           PrimStore _ -> "store"
+           PrimLoad Mutable _ -> "load"
+           PrimLoad Constant _ -> "load const"
+           PrimStore Mutable _ -> "store"
+           PrimStore Constant _ -> "store const"
            PrimAAddZ _ _ -> "atomic_add"
            PrimCastToOwned -> "cast_ptr_own"
            PrimCastFromOwned -> "cast_own_ptr"
@@ -150,8 +152,8 @@ pprPrim prim =
            PrimModF _ -> "fmod"
       ty =
         case prim
-        of PrimLoad t -> pprValueType t
-           PrimStore t -> pprValueType t
+        of PrimLoad _ t -> pprValueType t
+           PrimStore _ t -> pprValueType t
            _ -> empty
   in text name <+> ty
   where

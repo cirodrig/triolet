@@ -279,13 +279,23 @@ primAddP ptr off =
 primAddPAs ptr off ptr' =
   bindAtom1 ptr' $ PrimA PrimAddP [ptr, off]
 
-primLoad ty ptr dst = primLoadOff ty ptr (nativeIntV 0)
-primLoadOff ty ptr off dst =
-  bindAtom1 dst $ PrimA (PrimLoad ty) [ptr, off]
+primLoad mut ty ptr dst = primLoadOff mut ty ptr (nativeIntV 0)
+primLoadOff mut ty ptr off dst =
+  bindAtom1 dst $ PrimA (PrimLoad mut ty) [ptr, off]
 
-primStore ty ptr val = primStoreOff ty ptr (nativeIntV 0) val
-primStoreOff ty ptr off val =
-  emitAtom0 $ PrimA (PrimStore ty) [ptr, off, val]
+primLoadMutable ty ptr dst = primLoad Mutable ty ptr dst
+primLoadOffMutable ty ptr off dst = primLoadOff Mutable ty ptr off dst
+primLoadConst ty ptr dst = primLoad Constant ty ptr dst
+primLoadOffConst ty ptr off dst = primLoadOff Constant ty ptr off dst
+
+primStore mut ty ptr val = primStoreOff mut ty ptr (nativeIntV 0) val
+primStoreOff mut ty ptr off val =
+  emitAtom0 $ PrimA (PrimStore mut ty) [ptr, off, val]
+
+primStoreMutable ty ptr val = primStore Mutable ty ptr val
+primStoreOffMutable ty ptr off val = primStoreOff Mutable ty ptr off val
+primStoreConst ty ptr val = primStore Constant ty ptr val
+primStoreOffConst ty ptr off val = primStoreOff Constant ty ptr off val
 
 primCastToOwned ptr =
   emitAtom1 (PrimType OwnedType) $ PrimA PrimCastToOwned [ptr]
@@ -484,9 +494,10 @@ loadField :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>
              Field a -> Val -> Gen m Val
 loadField (toDynamicField -> field) ptr = do
   let off = fieldOffset field
+      mut = fieldMutable field
       ty = fromPrimType $ fieldType field
   v <- lift $ newAnonymousVar ty
-  primLoadOff ty ptr off v
+  primLoadOff mut ty ptr off v
   return (VarV v)
 
 -- | Load an owned field as a non-owned pointer.  Reference counts will not 
@@ -496,6 +507,7 @@ loadFieldWithoutOwnership :: (Monad m, Supplies m (Ident Var),
                              Field a -> Val -> Gen m Val
 loadFieldWithoutOwnership (toDynamicField -> field) ptr = do
   let off = fieldOffset field
+      mut = fieldMutable field
 
   -- Must be an owned field
   case fieldType field of
@@ -503,7 +515,7 @@ loadFieldWithoutOwnership (toDynamicField -> field) ptr = do
     _ -> internalError "loadFieldWithoutOwnership: Wrong type"
 
   v <- lift $ newAnonymousVar (PrimType PointerType)
-  primLoadOff (PrimType PointerType) ptr off v
+  primLoadOff mut (PrimType PointerType) ptr off v
   return (VarV v)
 
 -- | Load one field of a record into a local variable
@@ -511,16 +523,18 @@ loadFieldAs :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>
                Field a -> Val -> Var -> Gen m ()
 loadFieldAs (toDynamicField -> field) ptr dst =
   let off = fieldOffset field
+      mut = fieldMutable field
       ty = fromPrimType $ fieldType field
-  in primLoadOff ty ptr off dst
+  in primLoadOff mut ty ptr off dst
 
 -- | Store into one field of a record
 storeField :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>
               Field a -> Val -> Val -> Gen m ()
 storeField (toDynamicField -> field) ptr value =
   let off = fieldOffset field
+      mut = fieldMutable field
       ty = fromPrimType $ fieldType field
-  in primStoreOff ty ptr off value
+  in primStoreOff mut ty ptr off value
 
 -- | Get a pointer to a field of a record, given the base pointer.
 referenceField :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>

@@ -135,14 +135,17 @@ negateOp zero prim op args k =
 --
 -- Note that the arguments to stores are swapped: In Core, the address is last,
 -- but here, the address is first.
+--
+-- We could be accessing mutable data supplied by non-core code, so be
+-- conservative and mark the operation mutable.
 loadOp ty _ args k =
   case args
-  of [addr] -> return $ k $ PrimA (PrimLoad ty) [addr, nativeIntV 0]
+  of [addr] -> return $ k $ PrimA (PrimLoad Mutable ty) [addr, nativeIntV 0]
      [] -> internalError "loadOp: Expecting exactly one argument"
 
 storeOp ty _ args k =
   case args
-  of [val, addr] -> return $ k $ PrimA (PrimStore ty) [addr, nativeIntV 0, val]
+  of [val, addr] -> return $ k $ PrimA (PrimStore Mutable ty) [addr, nativeIntV 0, val]
      [] -> internalError "storeOp: Expecting exactly two arguments"
 
 -- Loading and storing "None" is actually a no-op. 

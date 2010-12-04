@@ -65,12 +65,28 @@ data Prim =
   | PrimAddP                    -- ^ Add a native unsigned integer to a
                                 --   (owned or non-owned) pointer.  The result
                                 --   is a non-owned pointer.
-  | PrimLoad !ValueType         -- ^ Load a value from an (owned or non-owned) 
-                                --   pointer.  The value may be a static
-                                --   record, if records haven't been flattened.
-  | PrimStore !ValueType        -- ^ Store a value to an (owned or non-owned) 
-                                --   pointer.  The value may be a static
-                                --   record, if records haven't been flattened.
+    -- | @PrimLoad mutability type base offset@ 
+    -- 
+    -- Load a value from a (managed or unmanaged) pointer at some byte offset.
+    -- Before the record flattening pass, the loaded value may have record
+    -- type; afterward, it may only have primitive type.
+    --
+    -- The mutability flag may be 'Constant' if the loaded memory is known to
+    -- be constant (possibly initialized by a single store operation).
+    -- Otherwise, it should be 'Mutable'.  Incorrect use of 'Constant' may
+    -- cause incorrect optimizations.
+  | PrimLoad !Mutability !ValueType
+    -- | @PrimStore mutability type base offset value@
+    --
+    -- Store a value to a (managed or unmanaged) pointer at some byte offset.
+    -- Before the record flattening pass, the stored value may have record
+    -- type; afterward, it may only have primitive type.
+    --
+    -- The mutability flag may be 'Constant' if the stored memory is known to
+    -- be constant.  In that case, the memory must not be written by any other
+    -- instruction.  Otherwise, it should be 'Mutable'.
+    -- Incorrect use of 'Constant' may cause incorrect optimizations.
+  | PrimStore !Mutability !ValueType
   | PrimAAddZ !Signedness !Size -- ^ Atomically add the target of a pointer to
                                 --   an integer.  Return the original value at
                                 --   that address.
@@ -105,8 +121,8 @@ primReturnType prim =
      PrimOr                   -> bool
      PrimNot                  -> bool
      PrimAddP                 -> pointer
-     PrimLoad t               -> [t]
-     PrimStore _              -> []
+     PrimLoad _ t             -> [t]
+     PrimStore _ _            -> []
      PrimAAddZ sgn sz         -> int sgn sz
      PrimCastToOwned          -> [PrimType OwnedType]
      PrimCastFromOwned        -> pointer

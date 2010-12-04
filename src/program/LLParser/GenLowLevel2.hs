@@ -180,9 +180,10 @@ mkWordVal expr =
   of IntLitE _ n -> nativeWordV n
      VarE v -> LL.VarV v
 
--- | Generate code to load or store a record field.  Return the field offset
+-- | Generate code to load or store a record field.  Return the field offset,
+--   its mutability,
 --   and the type at which the field should be accessed.
-genField :: TypeEnv -> Field Typed -> G (LL.Val, ValueType)
+genField :: TypeEnv -> Field Typed -> G (LL.Val, Mutability, ValueType)
 genField tenv (Field base_type fnames cast_type) =
   get_field_offset (nativeWordV 0) base_type fnames
   where
@@ -223,7 +224,7 @@ genField tenv (Field base_type fnames cast_type) =
                                 RecordField r -> 
                                   RecordType $ dynamicToStaticRecordType r
                                 _ -> internalError "genField"
-      in return (offset, ty)
+      in return (offset, fieldMutable field, ty)
 
     match_name want_name (FieldDef _ name) = name == want_name
 
@@ -251,18 +252,18 @@ genExpr tenv expr =
        return $ GenAtom [RecordType record_type] atom
      FieldE base fld -> do
        addr <- asVal =<< subexpr base
-       (offset, _) <- genField tenv fld
+       (offset, _, _) <- genField tenv fld
        let atom = LL.PrimA LL.PrimAddP [addr, offset]
        return $ GenAtom [PrimType PointerType] atom
      LoadFieldE base fld -> do
        addr <- asVal =<< subexpr base
-       (offset, ty) <- genField tenv fld
-       let atom = LL.PrimA (LL.PrimLoad ty) [addr, offset]
+       (offset, mutable, ty) <- genField tenv fld
+       let atom = LL.PrimA (LL.PrimLoad mutable ty) [addr, offset]
        return $ GenAtom [ty] atom
      LoadE ty base -> do
        addr <- asVal =<< subexpr base
        let llty = convertToValueType ty
-       let atom = LL.PrimA (LL.PrimLoad llty) [addr, nativeIntV 0]
+       let atom = LL.PrimA (LL.PrimLoad Mutable llty) [addr, nativeIntV 0]
        return $ GenAtom [llty] atom
      CallE returns op args -> do
        op' <- asVal =<< subexpr op
@@ -629,7 +630,7 @@ genLValue tenv lvalue ty =
 
        -- Evaluate the destination address
        dst_val <- asVal =<< genExpr tenv dst
-       let write_dst = primStore ty dst_val (LL.VarV tmpvar)
+       let write_dst = primStore Mutable ty dst_val (LL.VarV tmpvar)
 
        return (tmpvar, write_dst)
 
@@ -639,8 +640,8 @@ genLValue tenv lvalue ty =
 
        -- Compute the destination address
        base_val <- asVal =<< genExpr tenv base
-       (offset, _) <- genField tenv fld
-       let write_dst = primStoreOff ty base_val offset (LL.VarV tmpvar)
+       (offset, mutable, _) <- genField tenv fld
+       let write_dst = primStoreOff mutable ty base_val offset (LL.VarV tmpvar)
        
        return (tmpvar, write_dst)
 
