@@ -47,8 +47,8 @@ instance Binary Prim where
        PrimOr            -> putWord8 009
        PrimNot           -> putWord8 010
        PrimAddP          -> putWord8 011
-       PrimLoad t        -> putWord8 012 >> put t
-       PrimStore t       -> putWord8 013 >> put t
+       PrimLoad m t      -> putWord8 012 >> put m >> put t
+       PrimStore m t     -> putWord8 013 >> put m >> put t
        PrimAAddZ x y     -> putWord8 014 >> put x >> put y
        PrimCastToOwned   -> putWord8 015
        PrimCastFromOwned -> putWord8 016
@@ -73,8 +73,8 @@ instance Binary Prim where
       pick 009 = pure PrimOr
       pick 010 = pure PrimNot
       pick 011 = pure PrimAddP
-      pick 012 = PrimLoad <$> get
-      pick 013 = PrimStore <$> get
+      pick 012 = PrimLoad <$> get <*> get
+      pick 013 = PrimStore <$> get <*> get
       pick 014 = PrimAAddZ <$> get <*> get
       pick 015 = pure PrimCastToOwned
       pick 016 = pure PrimCastFromOwned
