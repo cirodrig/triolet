@@ -198,3 +198,44 @@ instance Binary GlobalDef where
            case tag of
              0 -> GlobalFunDef <$> get
              1 -> GlobalDataDef <$> get
+
+instance Binary FunctionType where
+  put ft = put (ftConvention ft) >>
+           put (ftParamTypes ft) >>
+           put (ftReturnTypes ft)
+  get = mkFunctionType <$> get <*> get <*> get
+
+instance Binary EntryPoints where
+  put ep = put (entryPointsType ep) >>
+           -- Don't need to put arity
+           put (directEntry ep) >>
+           put (exactEntry ep) >>
+           put (inexactEntry ep) >>
+           put (deallocEntry ep) >>
+           put (infoTableEntry ep) >>
+           put (globalClosure ep)
+
+  get = do ftype <- get
+           let arity = length $ ftParamTypes ftype
+           dir <- get
+           exa <- get
+           ine <- get
+           dea <- get
+           inf <- get
+           glo <- get
+           return $ EntryPoints ftype arity dir exa ine dea inf glo
+
+instance Binary Import where
+  put (ImportClosureFun ep f) =
+    putWord8 0 >> put ep >> put f
+  put (ImportPrimFun v t f) =
+    putWord8 1 >> put v >> put t >> put f
+  put (ImportData v val) =
+    putWord8 2 >> put v >> put val
+  
+  get = getWord8 >>= pick
+    where
+      pick 0 = ImportClosureFun <$> get <*> get
+      pick 1 = ImportPrimFun <$> get <*> get <*> get
+      pick 2 = ImportData <$> get <*> get
+      pick _ = readError "Import.get"
