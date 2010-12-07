@@ -127,12 +127,12 @@ llBuiltin f = f lowLevelBuiltins
 getBuiltinByLabel :: Label -> Maybe Var
 getBuiltinByLabel s =
   fmap importVar $
-  Map.lookup (labelModule s, labelLocalName s) builtinNameTable
+  Map.lookup (labelModule s, labelLocalNameAsString s) builtinNameTable
 
 -- | Get a builtin imported vaiable by its label
 getBuiltinImportByLabel :: Label -> Maybe Import
 getBuiltinImportByLabel s =
-  Map.lookup (labelModule s, labelLocalName s) builtinNameTable
+  Map.lookup (labelModule s, labelLocalNameAsString s) builtinNameTable
 
 builtinNameTable :: Map.Map (ModuleName, String) Import
 builtinNameTable =
@@ -140,7 +140,7 @@ builtinNameTable =
   where
     builtin_name v =
       case varName v
-      of Just nm -> (labelModule nm, labelLocalName nm)
+      of Just nm -> (labelModule nm, labelLocalNameAsString nm)
          Nothing -> internalError "builtinNameTable: Builtin variable has no name"
 
 -- | All built-in functions that are produced by translating a constructor

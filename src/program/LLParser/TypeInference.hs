@@ -419,14 +419,14 @@ createGlobalVar name ty = do
     -- Check if variable's unqualified name matches given name
     is_name v =
       case LL.varName v
-      of Just nm -> name == labelLocalName nm
+      of Just nm -> name == labelLocalNameAsString nm
          Nothing -> False
 
 -- | Add a variable definition to the environment
 defineVar :: LL.Var -> Type Typed -> NR ()
 defineVar v t =
   let name = case LL.varName v
-             of Just lab -> labelLocalName lab 
+             of Just lab -> labelLocalNameAsString lab 
                 Nothing -> internalError "defineVar"
   in defineEntity name (VarEntry t v)
 
@@ -1146,11 +1146,11 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
 
     incompatible_definition =
       Just $ "Incompatible definition of exported variable '" ++
-      labelLocalName (fromJust $ LL.varName $ LL.importVar impent) ++ "'"
+      labelLocalNameAsString (fromJust $ LL.varName $ LL.importVar impent) ++ "'"
       
     incompatible_builtin =
       Just $ "Incompatible definition of built-in variable '" ++
-      labelLocalName (fromJust $ LL.varName $ LL.importVar impent) ++ "'"
+      labelLocalNameAsString (fromJust $ LL.varName $ LL.importVar impent) ++ "'"
 
 -- | Resolve an external variable declaration.
 --   No variables are defined.
@@ -1185,7 +1185,7 @@ resolveExternDecl decl = do
       of Just impname ->
            if impname /= label
            then error $ "Incompatible definition of variable '" ++
-                labelLocalName label ++ "'"
+                labelLocalNameAsString label ++ "'"
            else return ()
          Nothing -> internalError "resolveExternDecl: No label"
 

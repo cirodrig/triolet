@@ -21,6 +21,7 @@ import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.CodeTypes hiding(Field)
+import LowLevel.Label
 import qualified LowLevel.Syntax as LL
 import Globals
 import Export
@@ -703,14 +704,16 @@ genDefs defs = mapM genDef defs
 generateLowLevelModule :: [LL.Import]
                        -> [Def Typed]
                        -> IO LL.Module
-generateLowLevelModule externs defs =
+generateLowLevelModule externs defs = do
+  supply <- newLocalIDSupply
   withTheLLVarIdentSupply $ \var_ids -> runFreshVarM var_ids $ do
     global_defs <- genDefs defs
     
     -- Identify the actual imports and exports of this module
     let defined_here = Set.fromList $ map LL.globalDefiniendum global_defs
         (exports, imports) = find_exports defined_here
-    return $ LL.Module externs global_defs exports
+    
+    return $ LL.Module supply externs global_defs exports
   where
     -- If a variable is external and defined here, it's exported
     find_exports defined_here = partitionEithers $ map pick_export externs

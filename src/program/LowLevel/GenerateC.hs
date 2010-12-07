@@ -758,7 +758,7 @@ initializationFunction stmts =
   in CFunDef [static, return_type] fun_decl [] body internalNode
 
 generateCFile :: Module -> IO String
-generateCFile (Module imports defs _) = do
+generateCFile (Module {moduleImports = imports, moduleGlobals = defs}) = do
   ident_supply <- newNameSupply
       
   -- Create an import declaration for symbols that are not defined in

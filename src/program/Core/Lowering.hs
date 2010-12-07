@@ -1045,11 +1045,13 @@ convertExport module_name (CExport inf (ExportSpec lang exported_name) f) = do
       v <- LL.newExternalVar label (PrimType OwnedType)
       return $ LL.Def v wrapped_fun
 
-convertModule (CModule module_name defss exports) = do 
+convertModule (CModule module_name defss exports) = do
+  ll_name_supply <- liftIO $ LL.newLocalIDSupply
   convertDefGroup (concat defss) $ \defs -> do
     (unzip -> (export_defs, exports_sigs)) <-
       mapM (convertExport module_name) exports
-    return $ LL.Module { LL.moduleImports = allBuiltinImports
+    return $ LL.Module { LL.moduleNameSupply = ll_name_supply
+                       , LL.moduleImports = allBuiltinImports
                        , LL.moduleGlobals = map LL.GlobalFunDef (defs ++ export_defs)
                        , LL.moduleExports = exports_sigs
                        }

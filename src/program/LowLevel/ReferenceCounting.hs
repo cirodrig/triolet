@@ -159,8 +159,10 @@ toPointerGlobalDef (GlobalDataDef d) = GlobalDataDef $ toPointerDataDef d
 -- | Insert explicit memory management into a module.  All memory-managed
 -- pointers become unmanaged pointers.
 insertReferenceCounting :: Module -> IO Module
-insertReferenceCounting (Module imports defs exports) =
-  let defs' = map toPointerGlobalDef defs
-      imports' = map toPointerImport imports
-      exports' = map toPointerExport exports
-  in return $ Module imports' defs' exports'
+insertReferenceCounting mod =
+  let defs' = map toPointerGlobalDef $ moduleGlobals mod
+      imports' = map toPointerImport $ moduleImports mod
+      exports' = map toPointerExport $ moduleExports mod
+  in return $ mod { moduleImports = imports'
+                  , moduleGlobals = defs'
+                  , moduleExports = exports'}

@@ -19,13 +19,13 @@ sepBracketList xs = brackets $ sep $ punctuate (text ",") xs
 
 pprVarLong :: Var -> Doc
 pprVarLong v =
-  let name_doc = text $ maybe "_" labelLocalName $ varName v
+  let name_doc = text $ maybe "_" labelLocalNameAsString $ varName v
       id_doc = text $ show $ fromIdent $ varID v
   in pprValueType (varType v) <+> name_doc <> text "'" <> id_doc
 
 pprVar :: Var -> Doc
 pprVar v =
-  let name_doc = text $ maybe "_" labelLocalName $ varName v
+  let name_doc = text $ maybe "_" labelLocalNameAsString $ varName v
       id_doc = text $ show $ fromIdent $ varID v
   in name_doc <> text "'" <> id_doc
 
@@ -296,7 +296,7 @@ pprGlobalDef (GlobalFunDef d) = pprFunDef d
 pprGlobalDefs defs = vcat $ map pprGlobalDef defs
 
 pprModule :: Module -> Doc
-pprModule (Module imports defs exports) =
+pprModule (Module _ imports defs exports) =
   pprImports imports $$
   pprGlobalDefs defs $$
   pprExports exports

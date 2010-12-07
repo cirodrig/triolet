@@ -7,7 +7,11 @@ module LowLevel.Label
         builtinModuleName,
         showModuleName,
         LabelTag(..),
+        LocalID(..),
+        newLocalIDSupply,
+        showLocalID,
         Label(..),
+        labelLocalNameAsString,
         pyonLabel,
         externPyonLabel,
         mangleLabel,
@@ -17,6 +21,7 @@ where
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
+import Gluon.Common.Supply
 import Gluon.Common.Label(ModuleName, builtinModuleName, moduleName, showModuleName)
 import LowLevel.Types
 
@@ -34,6 +39,16 @@ data LabelTag =
   | InexactEntryLabel
     deriving(Eq, Ord, Enum, Bounded)
 
+-- | A local variable ID.  Local variable IDs are assigned to anonymous
+--   variables that will be exported from a module.
+newtype LocalID = LocalID Int deriving(Eq)
+
+newLocalIDSupply :: IO (Supply LocalID)
+newLocalIDSupply = newSupply (LocalID 0) (\(LocalID n) -> LocalID (1+n))
+
+showLocalID :: LocalID -> String
+showLocalID (LocalID n) = show n
+
 -- | A label of low-level code.  Labels encode everything about a variable
 --   name (except for the variable ID).  Variables do not in general have
 --   unique labels, but externally visible variables have unique labels.
@@ -42,8 +57,8 @@ data Label =
   { -- | The module where a variable was defined
     labelModule       :: !ModuleName
 
-    -- | The variable name
-  , labelLocalName    :: !String
+    -- | The variable name.
+  , labelLocalName    :: !(Either String LocalID)
 
     -- | Tags to disambiguate multiple variables with the same name
   , labelTag          :: !LabelTag
@@ -56,13 +71,25 @@ data Label =
   }
   deriving(Eq)
 
+labelLocalNameAsString :: Label -> String
+labelLocalNameAsString l =
+  case labelLocalName l
+  of Left s  -> s
+     Right _ -> internalError "labelLocalNameAsString: Name is not a string"
+
 -- | A label of a regular Pyon variable
 pyonLabel :: ModuleName -> String -> Label
-pyonLabel mod name = Label mod name NormalLabel Nothing
+pyonLabel mod name = Label mod (Left name) NormalLabel Nothing
 
 -- | A label of a Pyon variable with an external name
 externPyonLabel :: ModuleName -> String -> Maybe String -> Label
-externPyonLabel mod name ext_name = Label mod name NormalLabel ext_name
+externPyonLabel mod name ext_name =
+  Label mod (Left name) NormalLabel ext_name
+
+-- | A label of a Pyon variable with an external name
+anonymousPyonLabel :: ModuleName -> LocalID -> Maybe String -> Label
+anonymousPyonLabel mod id ext_name =
+  Label mod (Right id) NormalLabel ext_name
 
 -- | Encode a string appearing in a name.  Characters used by mangling are
 -- replaced by a two-character string beginning with \'q\'.
@@ -89,7 +116,7 @@ mangleLabel name
   | otherwise =
       "_pi_" ++
       encodeNameString (showModuleName $ labelModule name) ++ "_" ++
-      encodeNameString (labelLocalName name) ++
+      either encodeNameString showLocalID (labelLocalName name) ++
       encodeLabelTag (labelTag name)
 
 -- | Mangle a label without the module name.  The label should only be used
@@ -98,5 +125,5 @@ mangleLabel name
 mangleModuleScopeLabel :: Label -> String
 mangleModuleScopeLabel name =
   "_pi__" ++
-  encodeNameString (labelLocalName name) ++
+  either encodeNameString showLocalID (labelLocalName name) ++
   encodeLabelTag (labelTag name)

@@ -179,7 +179,7 @@ mangledVarName is_local v
                                     "must have a label"
   | otherwise =
         case varName v
-        of Just lab 
+        of Just lab
              | is_local  -> mangleModuleScopeLabel lab ++ "_" ++ mangled_id
              | otherwise -> mangleLabel lab ++ "_" ++ mangled_id
            Nothing  -> type_leader (varType v) ++ mangled_id
@@ -199,7 +199,7 @@ mangledVarName is_local v
 
 instance Show Var where
   show v =
-    let name = maybe "_" labelLocalName $ varName v
+    let name = maybe "_" (either id showLocalID . labelLocalName) $ varName v
     in name ++ "'" ++ show (fromIdent $ varID v)
 
 instance Eq Var where
@@ -361,7 +361,8 @@ importVar impent =
 
 data Module =
   Module 
-  { moduleImports :: [Import]    -- ^ Imported, externally defined variables
+  { moduleNameSupply :: !(Supply LocalID)
+  , moduleImports :: [Import]    -- ^ Imported, externally defined variables
   , moduleGlobals :: [GlobalDef] -- ^ Global definitions
   , moduleExports :: [(Var, ExportSig)] -- ^ Exported functions and their
                                         --   externally visible types
