@@ -361,7 +361,8 @@ importVar impent =
 
 data Module =
   Module 
-  { moduleNameSupply :: !(Supply LocalID)
+  { moduleModuleName :: !ModuleName
+  , moduleNameSupply :: !(Supply LocalID)
   , moduleImports :: [Import]    -- ^ Imported, externally defined variables
   , moduleGlobals :: [GlobalDef] -- ^ Global definitions
   , moduleExports :: [(Var, ExportSig)] -- ^ Exported functions and their

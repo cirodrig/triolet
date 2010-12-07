@@ -296,7 +296,8 @@ pprGlobalDef (GlobalFunDef d) = pprFunDef d
 pprGlobalDefs defs = vcat $ map pprGlobalDef defs
 
 pprModule :: Module -> Doc
-pprModule (Module _ imports defs exports) =
+pprModule (Module modname _ imports defs exports) =
+  text "module" <+> text (showModuleName modname) $$
   pprImports imports $$
   pprGlobalDefs defs $$
   pprExports exports

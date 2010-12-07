@@ -164,7 +164,7 @@ parsePyonAsm input_path input_text = do
   (mod_name, externs, ast) <- LLParser.parseFile input_path input_text
   (t_externs, t_defs) <-
     LLParser.typeInferModule input_path mod_name externs ast
-  LLParser.generateLowLevelModule t_externs t_defs
+  LLParser.generateLowLevelModule mod_name t_externs t_defs
 
 -- | Compile an input low-level module to C code.  Generate a header file
 -- if there are exported routines.

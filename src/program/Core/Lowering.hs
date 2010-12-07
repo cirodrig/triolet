@@ -1050,7 +1050,8 @@ convertModule (CModule module_name defss exports) = do
   convertDefGroup (concat defss) $ \defs -> do
     (unzip -> (export_defs, exports_sigs)) <-
       mapM (convertExport module_name) exports
-    return $ LL.Module { LL.moduleNameSupply = ll_name_supply
+    return $ LL.Module { LL.moduleModuleName = module_name
+                       , LL.moduleNameSupply = ll_name_supply
                        , LL.moduleImports = allBuiltinImports
                        , LL.moduleGlobals = map LL.GlobalFunDef (defs ++ export_defs)
                        , LL.moduleExports = exports_sigs
