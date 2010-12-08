@@ -249,7 +249,7 @@ writeFileAsString fl str = writeFileHelper writeFile fl str
 -- | Write the file's contents
 writeFileAsByteString :: WriteFile -> ByteString -> IO ()
 writeFileAsByteString NullWriteFile _ = return () 
-writeFileAsByteSTring fl str = writeFileHelper ByteString.writeFile
+writeFileAsByteString fl str = writeFileHelper ByteString.writeFile fl str
 
 -- | Write the file's contents
 writeFilePath :: WriteFile -> IO FilePath
