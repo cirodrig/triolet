@@ -111,6 +111,10 @@ instance Binary LabelTag where
   put = putEnum
   get = getEnum "LabelTag.get"
 
+instance Binary LocalID where
+  put (LocalID n) = put n
+  get = fmap LocalID get
+
 instance Binary Label where
   put (Label mod lnm tag xnm) = put mod >> put lnm >> put tag >> put xnm
   get = Label <$> get <*> get <*> get <*> get

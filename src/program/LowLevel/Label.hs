@@ -14,6 +14,7 @@ module LowLevel.Label
         labelLocalNameAsString,
         pyonLabel,
         externPyonLabel,
+        anonymousPyonLabel,
         mangleLabel,
         mangleModuleScopeLabel
        )
@@ -50,8 +51,10 @@ showLocalID :: LocalID -> String
 showLocalID (LocalID n) = show n
 
 -- | A label of low-level code.  Labels encode everything about a variable
---   name (except for the variable ID).  Variables do not in general have
---   unique labels, but externally visible variables have unique labels.
+--   name (except for the variable ID).
+--   A variable must have a unqiue label if it's visible outside its own 
+--   module.  In general, varaibles that are local to a module don't have 
+--   labels.
 data Label =
   Label 
   { -- | The module where a variable was defined
@@ -86,7 +89,7 @@ externPyonLabel :: ModuleName -> String -> Maybe String -> Label
 externPyonLabel mod name ext_name =
   Label mod (Left name) NormalLabel ext_name
 
--- | A label of a Pyon variable with an external name
+-- | A label of a Pyon variable with a local ID instead of a string name
 anonymousPyonLabel :: ModuleName -> LocalID -> Maybe String -> Label
 anonymousPyonLabel mod id ext_name =
   Label mod (Right id) NormalLabel ext_name

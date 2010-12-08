@@ -1,7 +1,7 @@
 
 {-# LANGUAGE ViewPatterns, FlexibleInstances, Rank2Types #-}
 module LowLevel.Inlining
-       (inlineModule)
+       (funSmallEnoughForInlining, inlineModule)
 where
 
 import Prelude hiding(mapM)
@@ -334,7 +334,7 @@ makeInlinable (Def v f) = do
   let code_size = funSize f
       uses      = funUses f
   -- Rename to avoid name conflicts
-  f' <- renameFun RenameEverything f
+  f' <- renameFun RenameEverything emptyRenaming f
   let endpoints = getEndpoints (Def v f')
   let inlinable = makeInlinableFunction endpoints (Def v f')
   return $ InlSpec (funConvention f') code_size uses (funParams f') (funBody f') inlinable
@@ -386,6 +386,11 @@ worthInlining fcc fsize fuses
   | fcc == PrimCall,
     Just sz <- fromCodeSize fsize = sz < primInlineCutoff
   | otherwise = False
+
+-- | Is this function small enough to inline?
+funSmallEnoughForInlining :: Fun -> Bool
+funSmallEnoughForInlining f =
+  worthInlining (funConvention f) (funSize f) (funUses f)
 
 tryInlineTailCall :: CallConvention
                   -> Var            -- ^ The callee
@@ -550,7 +555,7 @@ inlineModule mod =
         inlined_mod = mod {moduleGlobals = gdefs'}
 
     -- Rename so that all inlined variables are unique
-    runFreshVarM var_ids $ renameModule RenameLocals inlined_mod
+    runFreshVarM var_ids $ renameModule RenameLocals emptyRenaming inlined_mod
   where
     inline_defs var_ids fdefs =
       runFreshVarM var_ids $

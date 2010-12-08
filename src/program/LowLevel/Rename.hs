@@ -6,8 +6,10 @@ module LowLevel.Rename
        (RnPolicy(..),
         Renaming,
         mkRenaming,
+        emptyRenaming,
         renameStm,
         renameFun,
+        renameStaticData,
         renameInFunDef,
         renameModule
        )
@@ -31,11 +33,16 @@ mkRenaming :: [(Var, Var)] -> Renaming
 mkRenaming assocs =
   IntMap.fromList [(fromIdent $ varID from_v, to_v) | (from_v, to_v) <- assocs]
 
+-- | An empty renaming
+emptyRenaming :: Renaming
+emptyRenaming = IntMap.empty
+
 data RnPolicy =
     RenameEverything  -- ^ Rename everything except imported variables
   | RenameLocals      -- ^ Rename everything except global variables
   | RenameParameters  -- ^ Rename function parameters and let-bound variables, 
                       --   but not letrec-bound variables
+  | RenameNothing     -- ^ Don't rename anything; only apply the given renaming
 
 type Rn = (RnPolicy, Renaming)
 
@@ -72,8 +79,10 @@ renameParameters rn param_vars =
   of RenameEverything -> rename
      RenameLocals     -> rename
      RenameParameters -> rename
+     RenameNothing    -> don't
   where
     rename = renameVariables (rnRenaming rn) param_vars
+    don't = return (rnRenaming rn, param_vars)
 
 renameLetrecFunction :: Rn -> Var -> FreshVarM (Renaming, Var)
 renameLetrecFunction rn var =
@@ -81,6 +90,7 @@ renameLetrecFunction rn var =
   of RenameEverything -> rename
      RenameLocals     -> rename
      RenameParameters -> don't
+     RenameNothing    -> don't
   where
     don't = return (rnRenaming rn, var)
     rename = renameVariable (rnRenaming rn) var
@@ -91,6 +101,7 @@ renameLetrecFunctions rn vars =
   of RenameEverything -> rename
      RenameLocals     -> rename
      RenameParameters -> don't
+     RenameNothing    -> don't
   where
     don't = return (rnRenaming rn, vars)
     rename = renameVariables (rnRenaming rn) vars
@@ -100,6 +111,7 @@ renameGlobalEntities rn vars =
   of RenameEverything -> rename
      RenameLocals     -> don't
      RenameParameters -> don't
+     RenameNothing    -> don't
   where
     don't = return (rnRenaming rn, vars)
     rename = renameVariables (rnRenaming rn) vars
@@ -196,20 +208,23 @@ renameStm :: RnPolicy -> Renaming -> Stm -> FreshVarM Stm
 renameStm policy rn stm = rnStm (policy, rn) stm
 
 -- | Rename variables in a function
-renameFun :: RnPolicy -> Fun -> FreshVarM Fun
-renameFun policy fun = do
-  rnFun (policy, IntMap.empty) fun
-  
+renameFun :: RnPolicy -> Renaming -> Fun -> FreshVarM Fun
+renameFun policy rn fun = rnFun (policy, rn) fun
+
+-- | Rename variables in a static data value
+renameStaticData :: RnPolicy -> Renaming -> StaticData -> FreshVarM StaticData
+renameStaticData policy rn d = rnStaticData (policy, rn) d
+
 -- | Rename variables in a function definition.  The variable that is defined
 -- by the definition isn't renamed.
 renameInFunDef :: RnPolicy -> FunDef -> FreshVarM FunDef
 renameInFunDef policy (Def v f) = do
-  f' <- renameFun policy f
+  f' <- renameFun policy emptyRenaming f
   return (Def v f')
 
 -- | Rename variables in a module
-renameModule :: RnPolicy -> Module -> FreshVarM Module
-renameModule policy mod = do
+renameModule :: RnPolicy -> Renaming -> Module -> FreshVarM Module
+renameModule policy rn mod = do
   (_, defs, exports) <-
-    rnTopLevel (policy, IntMap.empty) (moduleGlobals mod) (moduleExports mod)
+    rnTopLevel (policy, rn) (moduleGlobals mod) (moduleExports mod)
   return $ mod {moduleGlobals = defs, moduleExports = exports}

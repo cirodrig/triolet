@@ -44,6 +44,7 @@ import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
 import qualified LowLevel.Inlining as LowLevel
+import qualified LowLevel.InterfaceFile as LowLevel
 import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
@@ -176,15 +177,20 @@ compilePyonAsmToGenC ll_mod c_file h_file = do
   putStrLn "Lowered and flattened"
   print $ LowLevel.pprModule ll_mod
   
-  putStrLn ""
-  putStrLn "Before CSE"
-  print $ LowLevel.pprModule ll_mod
+  -- First round of optimizations
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
-  putStrLn ""
-  putStrLn "After CSE"
-  print $ LowLevel.pprModule ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   ll_mod <- LowLevel.inlineModule ll_mod
+  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  putStrLn ""
+  putStrLn "Optimized"
+  print $ LowLevel.pprModule ll_mod  
+  
+  -- Generate interface file
+  (ll_mod, ll_interface) <- LowLevel.createModuleInterface ll_mod
+
+  -- Closure converion
   ll_mod <- LowLevel.closureConvert ll_mod
   putStrLn ""
   putStrLn "Closure converted"
