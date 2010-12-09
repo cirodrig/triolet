@@ -448,36 +448,36 @@ flattenDataDef (Def v sd) = do
   sd' <- flattenStaticData sd
   return $ Def v sd'
 
-flattenImport :: Import -> RF Import
-flattenImport (ImportClosureFun ep mval) = do
+flattenImport :: Import -> Import
+flattenImport (ImportClosureFun ep Nothing) =
   let ep' =
         case ep
         of EntryPoints ty arity dir exa ine dea inf glo ->
              let ty'    = flattenFunctionType ty
                  arity' = length $ ftParamTypes ty'
              in EntryPoints ty' arity' dir exa ine dea inf glo
-  mval' <- mapM flattenFun mval
-  return $ ImportClosureFun ep' mval'
+  in ImportClosureFun ep' Nothing
 
-flattenImport (ImportPrimFun v t mval) = do
-  mval' <- mapM flattenFun mval
-  return $ ImportPrimFun v (flattenFunctionType t) mval'
+flattenImport (ImportPrimFun v t Nothing) =
+  ImportPrimFun v (flattenFunctionType t) Nothing
 
-flattenImport (ImportData v initializer) = do
-  initializer' <- mapM flattenStaticData initializer
-  return $ ImportData v initializer'
+flattenImport (ImportData v Nothing) =
+  ImportData v Nothing
+
+-- Imported things should not have a function/data definition attached now
+flattenImport _ = internalError "flattenImport: Unexpected import definition"
 
 flattenRecordTypes :: Module -> IO Module
 flattenRecordTypes mod =
   withTheLLVarIdentSupply $ \var_supply -> do
-    let import_map = makeImportMap (moduleImports mod)
+    let import_map = makeImportMap $ moduleImports mod
         env = RFEnv var_supply import_map
     runReaderT (runRF flatten_module) env
   where
     exports = IntMap.fromList [(fromIdent $ varID v, sig)
                               | (v, sig) <- moduleExports mod]
     flatten_module = do
-      imports <- mapM flattenImport (moduleImports mod)
+      let imports = map flattenImport $ moduleImports mod
       defs <- flattenTopLevel exports (moduleGlobals mod)
       return $ mod { moduleImports = imports
                    , moduleGlobals = defs}

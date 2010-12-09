@@ -412,6 +412,15 @@ data Module =
 moduleHasExports :: Module -> Bool
 moduleHasExports m = not $ null $ moduleExports m
 
+-- | Remove definitions of imported functions
+clearImportedFunctionDefinitions :: Module -> Module
+clearImportedFunctionDefinitions mod =
+  mod {moduleImports = map clear_function_def $ moduleImports mod}
+  where
+    clear_function_def (ImportClosureFun ep _) = ImportClosureFun ep Nothing
+    clear_function_def (ImportPrimFun v ty _) = ImportPrimFun v ty Nothing
+    clear_function_def def@(ImportData _ _) = def
+
 -------------------------------------------------------------------------------
 
 -- | The global objects that make up a Pyon function.  Objects that can be
