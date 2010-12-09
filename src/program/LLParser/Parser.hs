@@ -447,12 +447,18 @@ functionDef :: P (FunctionDef Parsed)
 functionDef = do
   is_procedure <- choice [ match FunctionTok >> return False 
                          , match ProcedureTok >> return True]
+  should_inline <- (match InlineTok >> return True) <|> return False
   name <- identifier
   params <- parameters
   match ArrowTok
   returns <- fmap (:[]) parseType <|> parenList parseType
   body <- block
-  return $ FunctionDef name is_procedure params returns body
+  return $ FunctionDef { functionName = name 
+                       , functionIsProcedure = is_procedure 
+                       , functionInlineRequest = should_inline 
+                       , functionParams = params 
+                       , functionReturns = returns 
+                       , functionBody = body}
 
 topLevelDefs :: P [Def Parsed]
 topLevelDefs = do defs <- def `sepEndBy` match SemiTok

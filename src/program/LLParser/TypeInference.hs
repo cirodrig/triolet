@@ -985,6 +985,7 @@ resolveFunctionDef is_global fdef = do
     
     return $ FunctionDef { functionName = fname
                          , functionIsProcedure = functionIsProcedure fdef
+                         , functionInlineRequest = functionInlineRequest fdef
                          , functionParams = params
                          , functionReturns = returns
                          , functionBody = body}

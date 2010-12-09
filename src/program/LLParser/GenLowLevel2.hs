@@ -675,10 +675,8 @@ genFunctionDef tenv fdef = do
       returns = map convertToValueType $ functionReturns fdef
   body <- execBuild returns $ genStmt tenv $ functionBody fdef
   
-  let function =
-        if functionIsProcedure fdef
-        then LL.primFun params returns body
-        else LL.closureFun params returns body
+  let conv = if functionIsProcedure fdef then PrimCall else ClosureCall
+      function = LL.mkFun conv (functionInlineRequest fdef) params returns body
   return (LL.Def (functionName fdef) function)
 
 genDataDef :: DataDef Typed -> FreshVarM LL.DataDef

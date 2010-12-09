@@ -45,6 +45,7 @@ rules :-
 "function" / @notid	{ tok FunctionTok }
 "if" / @notid		{ tok IfTok }
 "import" / @notid	{ tok ImportTok }
+"inline" / @notid	{ tok InlineTok }
 "int8" / @notid		{ tok Int8Tok }
 "int16" / @notid	{ tok Int16Tok }
 "int32" / @notid	{ tok Int32Tok }

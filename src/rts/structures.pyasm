@@ -45,7 +45,7 @@ data pointer OpaqueTraversableDict_list = TraversableDict {
   list_build
 };
 
-function complex_pass_conv (unit _, pointer repr, pointer ret) -> () {
+function inline complex_pass_conv (unit _, pointer repr, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
   typedef cpx = complex(bytes(size, align));
@@ -59,7 +59,7 @@ function complex_pass_conv (unit _, pointer repr, pointer ret) -> () {
   ();
 };
 
-function copy_complex
+function inline copy_complex
   (word size, word align, owned copy_member, pointer src, pointer dst) -> () {
   typedef cpx = complex(bytes(size, align));
   () = () call copy_member (src @ cpx.real, dst @ cpx.real);
@@ -73,7 +73,7 @@ function finalize_complex
   ();
 };
 
-function AdditiveDict_pass_conv (unit _, pointer repr, pointer ret) -> () {
+function inline AdditiveDict_pass_conv (unit _, pointer repr, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
   copy = repr @! PassConv.copy;
@@ -97,7 +97,7 @@ function AdditiveDict_copy
   () call (copy_zero) (src @ dictionary.zero, dst @ dictionary.zero);  
 };
 
-function MultiplicativeDict_pass_conv
+function inline MultiplicativeDict_pass_conv
   (unit _, pointer additive_dict, pointer ret) -> () {
   repr = additive_dict @ AdditiveDict(unit).repr;
   size = repr @! PassConv.size;
@@ -125,7 +125,7 @@ function MultiplicativeDict_copy
 };
 
 // Construct an Additive dictionary
-function additiveDict
+function inline additiveDict
   (unit _, pointer repr,
    owned add, owned sub, owned negate, pointer zero, pointer ret) -> () {
   size = repr @! PassConv.size;
@@ -139,7 +139,7 @@ function additiveDict
   () call (repr @! PassConv.copy) (zero, ret @ dictionary.zero);
 };
 
-function multiplicativeDict
+function inline multiplicativeDict
   (unit _, pointer additive,
    owned mul, owned from_int, pointer one, pointer ret) -> () {
   repr = additive @ AdditiveDict(unit).repr;
@@ -155,7 +155,7 @@ function multiplicativeDict
   () call copy (one, ret @ dictionary.one);
 };
 
-function additiveDict_complex
+function inline additiveDict_complex
   (unit type, pointer member_additive, pointer ret) -> ()
 {
   member_size = member_additive @! AdditiveDict(unit).repr.size;
@@ -186,28 +186,28 @@ function additiveDict_complex
   ();
 };
 
-function makeComplex(float re, float im, pointer ret) -> () {
+function inline makeComplex(float re, float im, pointer ret) -> () {
   typedef cfloat = complex(float);
   ret @! cfloat.real = re;
   ret @! cfloat.imag = im;
   ();
 };
 
-function complex_add(word size, word align, owned member_add,
+function inline complex_add(word size, word align, owned member_add,
                      pointer x, pointer y, pointer ret) -> () {
   typedef cpx = complex(bytes(size, align));
   () = () call member_add (x @ cpx.real, y @ cpx.real, ret @ cpx.real);
   () call member_add (x @ cpx.imag, y @ cpx.imag, ret @ cpx.imag);
 };
 
-function complex_sub(word size, word align, owned member_sub,
+function inline complex_sub(word size, word align, owned member_sub,
                      pointer x, pointer y, pointer ret) -> () {
   typedef cpx = complex(bytes(size, align));
   () = () call member_sub (x @ cpx.real, y @ cpx.real, ret @ cpx.real);
   () call member_sub (x @ cpx.imag, y @ cpx.imag, ret @ cpx.imag);
 };
 
-function complex_negate(word size, word align, owned member_negate,
+function inline complex_negate(word size, word align, owned member_negate,
                         pointer x, pointer ret) -> () {
   typedef cpx = complex(bytes(size, align));
   () = () call member_negate (x @ cpx.real, ret @ cpx.real);

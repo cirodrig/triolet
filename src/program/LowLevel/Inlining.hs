@@ -15,6 +15,7 @@ import Data.Graph.Inductive.Graph
 import Data.Graph.Inductive.Query.DFS
 import qualified Data.IntMap as IntMap
 import Data.List as List
+import Data.Maybe
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Monoid
@@ -316,7 +317,7 @@ makeInlinableFunction endpoints (Def fun_name f) = inl_stm $ funBody f
       where
         mk_def new_body =
           Def fname $
-          mkFun (funConvention f) (funParams f) (funReturnTypes f) new_body
+          mkFun (funConvention f) (funInlineRequest f) (funParams f) (funReturnTypes f) new_body
 
     endpoints_of_f = case lookup fun_name endpoints
                      of Nothing -> internalError "makeInlinableFunction"
@@ -327,17 +328,38 @@ makeInlinableFunction endpoints (Def fun_name f) = inl_stm $ funBody f
 --   Includes the function body (for inlining in tail position) and
 --   an inlinable function body (for non-tail position).
 data InlSpec =
-  InlSpec !CallConvention !CodeSize !Uses [Var] !Stm !(Inlinable Stm)
+  InlSpec !Bool !CallConvention !CodeSize !Uses [Var] !Stm !(Inlinable Stm)
 
-makeInlinable :: FunDef -> FreshVarM InlSpec
-makeInlinable (Def v f) = do
-  let code_size = funSize f
+makeInlinable :: Var -> Fun -> FreshVarM InlSpec
+makeInlinable v f = do
+  let cc        = funConvention f
+      code_size = funSize f
       uses      = funUses f
+      inl_req   = funInlineRequest f
   -- Rename to avoid name conflicts
   f' <- renameFun RenameEverything emptyRenaming f
   let endpoints = getEndpoints (Def v f')
   let inlinable = makeInlinableFunction endpoints (Def v f')
-  return $ InlSpec (funConvention f') code_size uses (funParams f') (funBody f') inlinable
+  return $ InlSpec inl_req cc code_size uses (funParams f') (funBody f') inlinable
+
+makeDefInlinable :: FunDef -> FreshVarM InlSpec
+makeDefInlinable (Def v f) = makeInlinable v f
+
+-- | Make all imported functions that have function bodies inlinable
+makeImportsInlinable :: [Import] -> FreshVarM (IntMap.IntMap InlSpec)
+makeImportsInlinable imports = do
+  specs <- mapM make_import $ mapMaybe get_imported_function imports
+  return $ IntMap.fromList specs
+  where
+    make_import (v, f) = do
+      spec <- makeInlinable v f
+      return (fromIdent $ varID v, spec)
+
+    get_imported_function impent =
+      case impent
+      of ImportClosureFun _ (Just f) -> Just (importVar impent, f)
+         ImportPrimFun _ _ (Just f)  -> Just (importVar impent, f)
+         _ -> Nothing
 
 -------------------------------------------------------------------------------
 
@@ -379,7 +401,8 @@ assignCallParameters params args = lift $ zipWithM_ bind_arg params args
   where
     bind_arg param arg = bindAtom1 param $ ValA [arg]
 
-worthInlining fcc fsize fuses
+worthInlining inline_requested fcc fsize fuses
+  | inline_requested = True
   | fuses == OneUse = True
   | fcc == ClosureCall,
     Just sz <- fromCodeSize fsize = sz < closureInlineCutoff
@@ -390,7 +413,7 @@ worthInlining fcc fsize fuses
 -- | Is this function small enough to inline?
 funSmallEnoughForInlining :: Fun -> Bool
 funSmallEnoughForInlining f =
-  worthInlining (funConvention f) (funSize f) (funUses f)
+  worthInlining (funInlineRequest f) (funConvention f) (funSize f) (funUses f)
 
 tryInlineTailCall :: CallConvention
                   -> Var            -- ^ The callee
@@ -401,8 +424,8 @@ tryInlineTailCall cc op args = do
   inline $ IntMap.lookup (fromIdent $ varID op) inline_specs
   where
     inline Nothing = no_inline
-    inline (Just (InlSpec fcc fsize fuses params stm _)) 
-      | worthInlining fcc fsize fuses = do
+    inline (Just (InlSpec inl_req fcc fsize fuses params stm _)) 
+      | worthInlining inl_req fcc fsize fuses = do
         assignCallParameters params args
         return stm
       | otherwise = no_inline
@@ -422,10 +445,10 @@ tryInlineCall cc op args retvars mk_cont = do
     -- This function isn't inlinable
     inline Nothing = no_inline
       
-    inline (Just (InlSpec inl_cc inl_size inl_uses params _ inl_stm))
+    inline (Just (InlSpec inl_req inl_cc inl_size inl_uses params _ inl_stm))
       | cc /= inl_cc = internalError "tryInlineCall: Calling convention mismatch"
       | length args /= length params = no_inline
-      | not $ worthInlining inl_cc inl_size inl_uses = no_inline
+      | not $ worthInlining inl_req inl_cc inl_size inl_uses = no_inline
       | otherwise = do
         assignCallParameters params args
         case inl_stm of
@@ -537,7 +560,7 @@ withDefF = withDef id
 withDef :: Monad m =>
            (forall a. FreshVarM a -> m a) -> FunDef -> Inl m a -> Inl m a
 withDef t def@(Def v f) m = do
-  new_inline_spec <- lift $ t $ makeInlinable def
+  new_inline_spec <- lift $ t $ makeDefInlinable def
   local (add_inline_spec new_inline_spec) m
   where
     add_inline_spec new_inline_spec inline_specs =
@@ -558,5 +581,6 @@ inlineModule mod =
     runFreshVarM var_ids $ renameModule RenameLocals emptyRenaming inlined_mod
   where
     inline_defs var_ids fdefs =
-      runFreshVarM var_ids $
-      runReaderT (inlDefGroupF fdefs $ return ()) IntMap.empty
+      runFreshVarM var_ids $ do
+        import_map <- makeImportsInlinable (moduleImports mod)
+        runReaderT (inlDefGroupF fdefs $ return ()) import_map

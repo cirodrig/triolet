@@ -349,7 +349,7 @@ function Stream_map_initialize
 /*****************************************************************************/
 /* reduce */
 
-function Stream_reduce
+function inline Stream_reduce
   (unit _, unit _,
    pointer passconv, pointer _,
    owned reducer,
@@ -402,7 +402,7 @@ function Stream_reduce
 };
 
 
-function reduce
+function inline reduce
   (unit _, unit _, unit _,
    pointer traversable,
    pointer elem_repr,

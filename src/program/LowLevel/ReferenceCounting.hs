@@ -145,8 +145,13 @@ toPointerImport (ImportClosureFun ep mvalue) =
 toPointerImport (ImportPrimFun v ft mvalue) =
   ImportPrimFun (toPointerVar v) (toPointerFunctionType ft) (fmap toPointerFun mvalue)
 
-toPointerImport (ImportData v data_value) =
-  ImportData (toPointerVar v) (fmap toPointerDataList data_value)
+toPointerImport (ImportData v msdata) =
+  let msdata' = 
+        case msdata
+        of Just (StaticData r vs) ->
+             Just (StaticData (toPointerRecordType r) (map toPointerData vs))
+           Nothing -> Nothing
+  in ImportData (toPointerVar v) msdata'
 
 toPointerExport :: (Var, ExportSig) -> (Var, ExportSig)
 toPointerExport (v, sig) = (toPointerVar v, sig)

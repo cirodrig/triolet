@@ -83,6 +83,9 @@ pprFunctionType ftype =
   (map pprValueType $ ftParamTypes ftype)
   (map pprValueType $ ftReturnTypes ftype)
 
+pprStaticData (StaticData rec values) =
+  parens (pprStaticRecord rec) <+> (fillBracketList $ map pprVal values)
+
 pprDataDef :: DataDef -> Doc
 pprDataDef (Def v (StaticData rec values)) =
   let initializer = fillBracketList 
@@ -100,10 +103,11 @@ pprFunSignature domain range =
 pprFunDef :: FunDef -> Doc
 pprFunDef (Def v f) =
   let intro = if isPrimFun f then text "procedure" else text "function"
+      inl = if funInlineRequest f then text "INLINE" else empty
       param_doc = map pprVarLong $ funParams f
       ret_doc = map pprValueType $ funReturnTypes f
       leader = pprVar v <> pprFunSignature param_doc ret_doc
-  in intro <+> leader <+> text "=" $$
+  in intro <+> inl <+> leader <+> text "=" $$
      nest 4 (pprBlock (funBody f))
 
 pprFun :: Fun -> Doc
@@ -111,12 +115,13 @@ pprFun fun =
   let param_doc = brackets $ sep $ punctuate (text ",") $ map pprVarLong $
                   funParams fun
       ret_doc = fillBracketList $ map pprValueType $ funReturnTypes fun
-      fun_call = if isPrimFun fun
-                 then "lambda_p"
-                 else if isClosureFun fun
-                      then "lambda_c"
-                      else "lambda????"
-  in text fun_call <+> (hang param_doc (-3) (text "->" <+> ret_doc)) $$
+      inl_doc = if funInlineRequest fun
+                then text "INLINE"
+                else empty
+      fun_call = inl_doc <+> case funConvention fun
+                             of PrimCall -> text "lambda_p"
+                                ClosureCall -> text "lambda_c"
+  in fun_call <+> (hang param_doc (-3) (text "->" <+> ret_doc)) $$
      nest 4 (pprBlock $ funBody fun)
 
 pprInfixPrim :: Prim -> Maybe Doc
@@ -275,7 +280,7 @@ pprImport impent = text "extern" <+>
        let value_doc =
              case value
              of Nothing -> empty
-                Just vs -> text "=" <+> fillBracketList (map pprVal vs)
+                Just sd -> text "=" <+> pprStaticData sd
        in text "data" <+> pprVar v <+> value_doc
 
 pprDataDefs :: [DataDef] -> Doc

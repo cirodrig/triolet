@@ -269,9 +269,14 @@ data Stm =
 
 data Fun =
   Fun 
-  { funConvention  :: !CallConvention
+  { -- | The function's calling convention
+    funConvention  :: !CallConvention
+    -- | The function's code size, computed by DCE
   , funSize        :: {-# UNPACK #-}!CodeSize
+    -- | How many times this function is referenced, computed by DCE
   , funUses        :: !Uses
+    -- | Whether user requested to inline this function
+  , funInlineRequest :: {-# UNPACK #-}!Bool
   , funParams      :: [ParamVar] 
   , funReturnTypes :: [ValueType] 
   , funBody        :: Stm
@@ -287,20 +292,21 @@ setFunSize sz f = f {funSize = sz}
 setFunUses :: Uses -> Fun -> Fun
 setFunUses u f = f {funUses = u}
 
-mkFun :: CallConvention -> [ParamVar] -> [ValueType] -> Stm -> Fun
-mkFun cc params returns body =
+mkFun :: CallConvention -> Bool -> [ParamVar] -> [ValueType] -> Stm -> Fun
+mkFun cc inl_req params returns body =
   Fun { funConvention  = cc
       , funSize        = unknownCodeSize
       , funUses        = ManyUses
+      , funInlineRequest = inl_req
       , funParams      = params
       , funReturnTypes = returns
       , funBody        = body}
 
 closureFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
-closureFun params returns body = mkFun ClosureCall params returns body
+closureFun params returns body = mkFun ClosureCall False params returns body
 
 primFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
-primFun params returns body = mkFun PrimCall params returns body
+primFun params returns body = mkFun PrimCall False params returns body
 
 type Alt = (Lit, Stm)
 
@@ -334,19 +340,26 @@ data Import =
     -- | A global function
     ImportClosureFun
     { importEntryPoints :: EntryPoints
+      -- | The function's value.  The value is present if the function was
+      -- deemed suitable for inlining.  The value is from before closure
+      -- conversion.
     , importFunction :: !(Maybe Fun)
     }
     -- | A global procedure
   | ImportPrimFun
     { _importVar :: !ParamVar
     , importFunType :: !FunctionType
+      -- | The function's value.  The value is present if the function was
+      -- deemed suitable for inlining.  The value is from before closure
+      -- conversion.
     , importFunction :: !(Maybe Fun)
     }
     -- | A global constant
   | ImportData
     { _importVar :: !ParamVar
-      -- | The imported value's fields, if known
-    , importValue :: !(Maybe [Val])
+      -- | The imported value's fields.  A field is present if it's deemed
+      --   suitable for inlining.  The value is from before closure conversion.
+    , importValue :: !(Maybe StaticData)
     }
 
 -- | Get the variable defined by an import statement.

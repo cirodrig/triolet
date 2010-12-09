@@ -204,10 +204,10 @@ rnImport rn impent =
        let v' = rnVar (rnRenaming rn) v
        mf' <- mapM (rnFun rn) mf
        return $ ImportPrimFun v' ft mf'       
-     ImportData v mvals -> do
+     ImportData v msdata -> do
        let v' = rnVar (rnRenaming rn) v
-       mvals' <- mapM (rnVals rn) mvals
-       return $ ImportData v' mvals'
+       msdata' <- mapM (rnStaticData rn) msdata
+       return $ ImportData v' msdata'
 
 rnExport :: Renaming -> (Var, ExportSig) -> (Var, ExportSig)
 rnExport rn (v, sig) = (rnVar rn v, sig)

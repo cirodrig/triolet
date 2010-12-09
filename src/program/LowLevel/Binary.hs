@@ -170,6 +170,7 @@ instance Binary Fun where
     put $ funConvention f
     put $ funSize f
     put $ funUses f
+    put $ funInlineRequest f
     put $ funParams f
     put $ funReturnTypes f
     put $ funBody f
@@ -177,12 +178,14 @@ instance Binary Fun where
     cc <- get
     size <- get
     uses <- get
+    inl <- get
     params <- get
     return_types <- get
     body <- get
     return $ Fun { funConvention = cc
                  , funSize = size
                  , funUses = uses
+                 , funInlineRequest = inl
                  , funParams = params
                  , funReturnTypes = return_types
                  , funBody = body}

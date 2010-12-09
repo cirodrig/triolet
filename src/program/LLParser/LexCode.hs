@@ -65,6 +65,7 @@ data Token =
   | FunctionTok
   | IfTok
   | ImportTok
+  | InlineTok
   | Int8Tok
   | Int16Tok
   | Int32Tok
@@ -135,6 +136,7 @@ showToken FloatTok = "'float'"
 showToken FunctionTok = "'function'"
 showToken IfTok = "'if'"
 showToken ImportTok = "'import'"
+showToken InlineTok = "'inline'"
 showToken Int8Tok = "'int8'"
 showToken Int16Tok = "'int16'"
 showToken Int32Tok = "'int32'"

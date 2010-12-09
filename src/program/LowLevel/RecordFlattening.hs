@@ -342,11 +342,7 @@ flattenFun fun =
   defineParams (funParams fun) $ \params -> do
     let returns = flattenValueTypeList $ funReturnTypes fun
     body <- flattenStm $ funBody fun
-    return $! if isPrimFun fun 
-              then primFun params returns body
-              else if isClosureFun fun
-                   then closureFun params returns body
-                   else internalError "flattenFun"
+    return $! mkFun (funConvention fun) (funInlineRequest fun) params returns body
 
 -- | Flatten a function that will be exported.
 --   Some kinds of records will actually be passed as records (like C structs) 
@@ -433,12 +429,11 @@ flattenTopLevel exports defs =
   
     flatten (GlobalDataDef d) = fmap GlobalDataDef $ flattenDataDef d
 
--- | Change a data definition to a flat structure type
-flattenDataDef :: DataDef -> RF DataDef
-flattenDataDef (Def v (StaticData rec vals)) = do
-  val' <- flattenValList vals
+flattenStaticData :: StaticData -> RF StaticData
+flattenStaticData (StaticData rec vals) = do
+  vals' <- flattenValList vals
   let record' = record (flatten_record_fields rec) (sizeOf rec) (alignOf rec)
-  return $ Def v (StaticData record' val')
+  return $ StaticData record' vals'
   where
     flatten_record_fields rec = concatMap flattened_fields $ recordFields rec
 
@@ -446,6 +441,12 @@ flattenDataDef (Def v (StaticData rec vals)) = do
       case fieldType fld
       of RecordField rec -> flatten_record_fields rec
          _ -> [fld]
+
+-- | Change a data definition to a flat structure type
+flattenDataDef :: DataDef -> RF DataDef
+flattenDataDef (Def v sd) = do
+  sd' <- flattenStaticData sd
+  return $ Def v sd'
 
 flattenImport :: Import -> RF Import
 flattenImport (ImportClosureFun ep mval) = do
@@ -463,9 +464,7 @@ flattenImport (ImportPrimFun v t mval) = do
   return $ ImportPrimFun v (flattenFunctionType t) mval'
 
 flattenImport (ImportData v initializer) = do
-  initializer' <- case initializer 
-                  of Nothing -> return Nothing
-                     Just vs -> fmap Just $ flattenValList vs
+  initializer' <- mapM flattenStaticData initializer
   return $ ImportData v initializer'
 
 flattenRecordTypes :: Module -> IO Module

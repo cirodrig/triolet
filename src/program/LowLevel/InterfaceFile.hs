@@ -65,8 +65,8 @@ mkImport pre_import = label `seq` -- Verify that label is valid
        | ftIsClosure ft -> do
            ep <- mkGlobalEntryPoints ft label import_var
            return $ ImportClosureFun ep mfun
-     PreImportData (StaticData _ vals) ->
-       return $ ImportData import_var (Just vals)
+     PreImportData sdata ->
+       return $ ImportData import_var (Just sdata)
   where
     import_var = definiendum pre_import
 
@@ -301,7 +301,9 @@ renameInterface import_variables iface = do
             ImportPrimFun _ t mfun -> do
               mfun' <- mapM (renameFun RenameEverything renaming) mfun
               return $ ImportPrimFun renamed_var t mfun'
-            ImportData _ values -> do
-              values' <- mapM (mapM (renameVal RenameEverything renaming)) values
-              return $ ImportData renamed_var values'
+            ImportData _ Nothing ->
+              return $ ImportData renamed_var Nothing
+            ImportData _ (Just (StaticData rec values)) -> do
+              values' <- mapM (renameVal RenameEverything renaming) values
+              return $ ImportData renamed_var (Just (StaticData rec values'))
       

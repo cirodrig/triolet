@@ -119,6 +119,7 @@ data FunctionDef a =
   FunctionDef
   { functionName :: VarName a
   , functionIsProcedure :: !Bool
+  , functionInlineRequest :: !Bool
   , functionParams :: Parameters a
   , functionReturns :: [Type a]
   , functionBody :: Stmt a

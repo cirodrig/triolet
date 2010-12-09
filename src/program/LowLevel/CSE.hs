@@ -8,7 +8,6 @@ where
 import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
-import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Error
@@ -139,7 +138,7 @@ cseDef (Def v f) = Def v <$> cseFun f
 cseFun :: Fun -> CSEF Fun
 cseFun f = do
   body <- evalCSE (funReturnTypes f) $ cseStm $ funBody f
-  return $ mkFun (funConvention f) (funParams f) (funReturnTypes f) body
+  return $ mkFun (funConvention f) (funInlineRequest f) (funParams f) (funReturnTypes f) body
 
 cseGlobal :: CSEEnv -> GlobalDef -> FreshVarM GlobalDef
 cseGlobal env (GlobalFunDef fdef) =
@@ -148,21 +147,31 @@ cseGlobal env (GlobalFunDef fdef) =
 cseGlobal _   def@(GlobalDataDef _) = return def
 
 -- | Create the global CSE environment containing globally defined data.
-scanGlobalData :: [GlobalDef] -> CSEEnv
-scanGlobalData defs = foldr scan_data emptyCSEEnv defs
+scanGlobalData :: [Import] -> [GlobalDef] -> CSEEnv
+scanGlobalData impents defs =
+  let imported_constants = concatMap scan_import impents
+      global_constants = concatMap scan_data defs
+  in foldr ($) emptyCSEEnv (imported_constants ++ global_constants)
   where
-    scan_data (GlobalFunDef _) env = env
-    scan_data (GlobalDataDef (Def base (StaticData rec fs))) env =
-      foldr (add_field (varExpr base)) env $ zip (recordFields rec) fs
+    scan_import (ImportData base (Just initializer)) =
+      scan_static_data base initializer
+    scan_import _ = []
     
-    add_field base (fld, val) env
-      | isConstField fld =
+    scan_data (GlobalFunDef _) = []
+    scan_data (GlobalDataDef (Def base initializer)) =
+      scan_static_data base initializer
+    
+    scan_static_data base (StaticData rec fs) =
+      zipWith (add_field (varExpr base)) (recordFields rec) fs
+    
+    add_field base fld val
+      | isConstField fld = \env ->
           case interpretVal env val
           of Just cse_val ->
                fromMaybe env $
                interpretStore env prim_type base offset cse_val
              Nothing -> env
-      | otherwise = env
+      | otherwise = id
       where
         offset = litExpr $ nativeIntL $ fieldOffset fld
         prim_type =
@@ -177,4 +186,4 @@ commonSubexpressionElimination mod =
       globals' <- mapM (cseGlobal global_env) $ moduleGlobals mod
       return $ mod {moduleGlobals = globals'}
   where
-    global_env = scanGlobalData $ moduleGlobals mod
+    global_env = scanGlobalData (moduleImports mod) (moduleGlobals mod)
