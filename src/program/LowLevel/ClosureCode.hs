@@ -1043,8 +1043,8 @@ genIndirectCall return_types mk_op mk_args = return $ do
       lift $ execBuild return_types' $ do
         -- Compare function arity to number of given arguments
         arity <- loadField (funInfoHeaderRecord !!: 1) inf_ptr
-        arity_eq <- primCmpZ (PrimType nativeWordType) CmpEQ arity $
-                    nativeWordV $ length args
+        arity_eq <- primCmpZ (PrimType (IntType Unsigned S16)) CmpEQ arity $
+                    uint16V $ length args
         return $ SwitchE arity_eq [(BoolL True, exact_call),
                                    (BoolL False, ReturnE $ primCallA (VarV inexact_call_var) [])]
 
