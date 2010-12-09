@@ -172,7 +172,9 @@ dceLet params rhs body = do
 
 dceLetrec defs body = make_letrec <$> dceDefGroup defs (dceStm body)
   where
-    make_letrec (defs', body') = LetrecE defs' body'
+    make_letrec (defs', body') 
+      | null defs' = body'
+      | otherwise = LetrecE defs' body'
 
 dceDefGroup :: [FunDef] -> DCEResult a -> DCEResult ([FunDef], a)
 dceDefGroup defs body = do
