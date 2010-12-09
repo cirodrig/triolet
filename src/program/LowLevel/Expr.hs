@@ -557,17 +557,17 @@ partialEvalSum es = peval 0 id es
 zusSum op@(AddZOp sgn sz) values = 
   case values
   of (0, [e]) -> e
-     (n, [])  -> LitExpr (IntL sgn sz n)
+     (n, [])  -> LitExpr (intL sgn sz n)
      (0, es)  -> CAExpr op es
-     (n, es)  -> CAExpr op (LitExpr (IntL sgn sz n) : es)
+     (n, es)  -> CAExpr op (LitExpr (intL sgn sz n) : es)
 
 simplifyBinary op@(ModZOp sgn sz) larg rarg
   -- Evaluate if both operands are known, or if one operand is an identity
   | isIntLitExpr 0 larg = larg
-  | isIntLitExpr 1 rarg = LitExpr (IntL sgn sz 0)
+  | isIntLitExpr 1 rarg = LitExpr (intL sgn sz 0)
   | LitExpr (IntL _ _ lnum) <- larg,
     LitExpr (IntL _ _ rnum) <- rarg =
-      LitExpr (IntL sgn sz (lnum `mod` rnum))
+      LitExpr (intL sgn sz (lnum `mod` rnum))
   | otherwise = BinExpr op larg rarg
 
 simplifyBinary op@(MaxZOp sgn sz) larg rarg
@@ -579,7 +579,7 @@ simplifyBinary op@(MaxZOp sgn sz) larg rarg
   | isIntLitExpr largest rarg = rarg
   | LitExpr (IntL _ _ lnum) <- larg,
     LitExpr (IntL _ _ rnum) <- rarg =
-      LitExpr (IntL sgn sz (lnum `max` rnum))
+      LitExpr (intL sgn sz (lnum `max` rnum))
   | otherwise = BinExpr op larg rarg
   where
     smallest = smallestRepresentableInt sgn sz
@@ -598,20 +598,13 @@ simplifyUnary op arg =
   of NegateZOp sgn sz ->
        case arg
        of CAExpr sub_op@(AddZOp _ _) args -> CAExpr sub_op (map negateE args)
-          LitExpr (IntL _ _ n) -> LitExpr $ IntL sgn sz (negate n)
+          LitExpr (IntL _ _ n) ->
+            let n' = negate n
+            in LitExpr $ coercedIntL sgn sz n'
           _ -> UnExpr op arg
      CastZOp from_sgn to_sgn sz ->
        case arg
-       of LitExpr (IntL _ _ n)
-            | from_sgn == Signed && to_sgn == Unsigned ->
-                let n' = if n >= 0 then n else n + intCardinality sz 
-                in LitExpr $ IntL to_sgn sz n'
-            | from_sgn == Unsigned && to_sgn == Signed ->
-                let n' = if n > largestRepresentableInt Signed sz 
-                         then n - intCardinality sz
-                         else n
-                in LitExpr $ IntL to_sgn sz n'
-            | otherwise -> internalError "simplifyUnary"
+       of LitExpr (IntL _ _ n) -> LitExpr $ coercedIntL to_sgn sz n
           _ -> UnExpr op arg
      LoadOp ty ->
        UnExpr op arg

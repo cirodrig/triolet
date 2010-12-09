@@ -4,6 +4,7 @@
 module LowLevel.Types where
 
 import Control.Applicative
+import Data.Bits
 import Data.Binary
 import LowLevel.BinaryUtils
 
@@ -65,17 +66,29 @@ largestRepresentableInt Unsigned S8  = 0xff
 largestRepresentableInt Unsigned S16 = 0xffff
 largestRepresentableInt Unsigned S32 = 0xffffffff
 largestRepresentableInt Unsigned S64 = 0xffffffffffffffff
-largestRepresentableInt Signed   S8  = -0x7f
-largestRepresentableInt Signed   S16 = -0x7fff
-largestRepresentableInt Signed   S32 = -0x7fffffff
-largestRepresentableInt Signed   S64 = -0x7fffffffffffffff
+largestRepresentableInt Signed   S8  = 0x7f
+largestRepresentableInt Signed   S16 = 0x7fff
+largestRepresentableInt Signed   S32 = 0x7fffffff
+largestRepresentableInt Signed   S64 = 0x7fffffffffffffff
+
+isRepresentableInt :: Signedness -> Size -> Integer -> Bool
+isRepresentableInt sgn sz n =
+  n >= smallestRepresentableInt sgn sz && n <= largestRepresentableInt sgn sz
 
 -- | The number of distinct values an integer of this type has
 intCardinality :: Size -> Integer
-intCardinality S8  = 2^8
-intCardinality S16 = 2^16
-intCardinality S32 = 2^32
-intCardinality S64 = 2^64
+intCardinality S8  = 1 `shiftL` 8
+intCardinality S16 = 1 `shiftL` 16
+intCardinality S32 = 1 `shiftL` 32
+intCardinality S64 = 1 `shiftL` 64
+
+coerceToRepresentableInt :: Signedness -> Size -> Integer -> Integer
+coerceToRepresentableInt Unsigned sz n = n .&. (intCardinality sz - 1)
+coerceToRepresentableInt Signed sz n =
+  let n' = n .&. (intCardinality sz - 1)
+  in if n' > largestRepresentableInt Signed sz
+     then n' - intCardinality sz
+     else n'
 
 -- | The alignment of scalar values in dynamically constructed data structures,
 -- such as stacks and partial application records.

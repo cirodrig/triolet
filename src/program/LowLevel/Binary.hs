@@ -99,7 +99,7 @@ instance Binary Lit where
       pick 1 = pure NullL
       pick 2 = pure (BoolL True)
       pick 3 = pure (BoolL False)
-      pick 4 = IntL <$> get <*> get <*> get
+      pick 4 = intL <$> get <*> get <*> get
       pick 5 = FloatL <$> get <*> get
       pick _ = readError "Lit.get"
 

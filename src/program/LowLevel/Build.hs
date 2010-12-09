@@ -343,22 +343,34 @@ nativeMaxUZ = primMaxZ (PrimType nativeWordType)
 nativeNegateUZ = primNegateZ (PrimType nativeWordType)
 
 nativeWordL :: Integral a => a -> Lit
-nativeWordL n = IntL Unsigned nativeIntSize (fromIntegral n)
+nativeWordL n 
+  | not $ isRepresentableInt Unsigned nativeIntSize (fromIntegral n) =
+      internalError "nativeWordL: Integer out of range"
+  | otherwise = IntL Unsigned nativeIntSize (fromIntegral n)
 
 nativeWordV :: Integral a => a -> Val
 nativeWordV n = LitV $ nativeWordL n
 
 nativeIntL :: Integral a => a -> Lit
-nativeIntL n = IntL Signed nativeIntSize (fromIntegral n)
+nativeIntL n
+  | not $ isRepresentableInt Signed nativeIntSize (fromIntegral n) =
+      internalError "nativeIntL: Integer out of range"
+  | otherwise = IntL Signed nativeIntSize (fromIntegral n)
 
 nativeIntV :: Integral a => a -> Val
 nativeIntV n = LitV $ nativeIntL n
 
 uint8V :: Integral a => a -> Val
-uint8V n = LitV $ IntL Unsigned S8 $ fromIntegral n
+uint8V n
+  | not $ isRepresentableInt Unsigned S8 (fromIntegral n) =
+      internalError "uint8V: Integer out of range"
+  | otherwise = LitV $ IntL Unsigned S8 $ fromIntegral n
 
 uint16V :: Integral a => a -> Val
-uint16V n = LitV $ IntL Unsigned S16 $ fromIntegral n
+uint16V n
+  | not $ isRepresentableInt Unsigned S16 (fromIntegral n) =
+      internalError "uint16V: Integer out of range"
+  | otherwise = LitV $ IntL Unsigned S16 $ fromIntegral n
 
 -------------------------------------------------------------------------------
 -- Record operations

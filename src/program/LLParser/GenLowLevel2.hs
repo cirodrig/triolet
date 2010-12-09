@@ -135,7 +135,9 @@ genDataExpr expr =
   of VarE v -> return $ LL.VarV v
      IntLitE ty n
        | PrimT (IntType sgn sz) <- ty ->
-           return $ LL.LitV (LL.IntL sgn sz n)
+           if not $ isRepresentableInt sgn sz n
+           then internalError "genExpr: Integer literal out of range"
+           else return $ LL.LitV (LL.intL sgn sz n)
        | otherwise ->
            internalError "genExpr: Integer literal has non-integer type"
      FloatLitE ty n
@@ -167,7 +169,10 @@ genDataExpr expr =
 mkIntLit :: ValueType -> Integer -> LL.Lit
 mkIntLit ty n =
   case ty
-  of PrimType (IntType sgn sz) -> LL.IntL sgn sz n
+  of PrimType (IntType sgn sz) ->
+       if not $ isRepresentableInt sgn sz n 
+       then internalError "mkIntLit: Integer out of range"
+       else LL.intL sgn sz n
      _ -> error "Invalid integer type"
 
 mkFloatLit :: ValueType -> Double -> LL.Lit

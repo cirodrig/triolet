@@ -146,6 +146,27 @@ data Lit =
   | FloatL !Size !Double        -- ^ A floating-point number
     deriving(Eq, Ord)
 
+-- | Throw an error if the literal is invalid
+checkLit :: Lit -> ()
+checkLit (IntL sgn sz n)
+  | isRepresentableInt sgn sz n =
+      internalError "checkLit: Integer literal out of range"
+  | otherwise = ()
+checkLit _ = ()
+
+-- | Create an integer literal holding the given value
+intL :: Signedness -> Size -> Integer -> Lit
+intL sgn sz n
+  | not $ isRepresentableInt sgn sz n =
+      internalError "intL: Integer literal out of range"
+  | otherwise = IntL sgn sz n
+
+-- | Create an integer literal holding the given value modulo the
+--   integer's representable range.  In other words, truncate the bits
+--   that don't fit in the literal. 
+coercedIntL :: Signedness -> Size -> Integer -> Lit
+coercedIntL sgn sz n = IntL sgn sz (coerceToRepresentableInt sgn sz n)
+
 data Var =
   Var
   { -- | An ID uniquely identifying this variable.  If two variables have
