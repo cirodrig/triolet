@@ -51,6 +51,32 @@ nativeFloatSize = S32
 maxScalarAlignment :: Int
 maxScalarAlignment = 8
 
+-- | The smallest representable integer with the given size and alignment.
+smallestRepresentableInt :: Signedness -> Size -> Integer
+smallestRepresentableInt Unsigned _ = 0
+smallestRepresentableInt Signed S8  = -0x80
+smallestRepresentableInt Signed S16 = -0x8000
+smallestRepresentableInt Signed S32 = -0x80000000
+smallestRepresentableInt Signed S64 = -0x8000000000000000
+
+-- | The largest representable integer with the given size and alignment.
+largestRepresentableInt :: Signedness -> Size -> Integer
+largestRepresentableInt Unsigned S8  = 0xff
+largestRepresentableInt Unsigned S16 = 0xffff
+largestRepresentableInt Unsigned S32 = 0xffffffff
+largestRepresentableInt Unsigned S64 = 0xffffffffffffffff
+largestRepresentableInt Signed   S8  = -0x7f
+largestRepresentableInt Signed   S16 = -0x7fff
+largestRepresentableInt Signed   S32 = -0x7fffffff
+largestRepresentableInt Signed   S64 = -0x7fffffffffffffff
+
+-- | The number of distinct values an integer of this type has
+intCardinality :: Size -> Integer
+intCardinality S8  = 2^8
+intCardinality S16 = 2^16
+intCardinality S32 = 2^32
+intCardinality S64 = 2^64
+
 -- | The alignment of scalar values in dynamically constructed data structures,
 -- such as stacks and partial application records.
 --

@@ -71,12 +71,14 @@ data CAOp =
 -- | A binary operator.
 data BinOp =
     ModZOp !Signedness !Size
+  | MaxZOp !Signedness !Size
   | AddPOp
     deriving(Eq, Ord)
 
 -- | A unary operator.
 data UnOp =
     LoadOp !ValueType
+  | CastZOp !Signedness !Signedness !Size
   | NegateZOp !Signedness !Size
     deriving(Eq, Ord)
 
@@ -118,9 +120,11 @@ unpackLoadExpr _ = Nothing
 pprInfixCAOp (AddZOp _ _) = text "+"
 
 pprBinOp (ModZOp _ _) = text "mod"
+pprBinOp (MaxZOp _ _) = text "max"
 pprBinOp AddPOp = text "addp"
 
 pprUnOp (LoadOp _) = text "load"
+pprUnOp (CastZOp _ _ _) = text "cast"
 pprUnOp (NegateZOp _ _) = text "negate"
 
 pprExprParens (VarExpr v) = pprVar v
@@ -346,7 +350,9 @@ interpretPrim env op args = fmap (simplify env) $
   of PrimAddZ sgn sz -> Just $ ca (AddZOp sgn sz)
      PrimSubZ sgn sz -> Just $ subtract_op sgn sz
      PrimModZ sgn sz -> Just $ binary (ModZOp sgn sz)
+     PrimMaxZ sgn sz -> Just $ binary (MaxZOp sgn sz)
      PrimAddP        -> Just $ binary AddPOp
+     PrimCastZ ss ds sz -> Just $ unary (CastZOp ss ds sz)
      -- Only constant loads can become expressions
      PrimLoad Constant ty -> Just $ load_op ty
      _               -> Nothing
@@ -564,6 +570,21 @@ simplifyBinary op@(ModZOp sgn sz) larg rarg
       LitExpr (IntL sgn sz (lnum `mod` rnum))
   | otherwise = BinExpr op larg rarg
 
+simplifyBinary op@(MaxZOp sgn sz) larg rarg
+  -- Evaluate if both operands are known,
+  -- or if one operand is a zero or identity
+  | isIntLitExpr smallest larg = rarg
+  | isIntLitExpr smallest rarg = larg
+  | isIntLitExpr largest larg = larg
+  | isIntLitExpr largest rarg = rarg
+  | LitExpr (IntL _ _ lnum) <- larg,
+    LitExpr (IntL _ _ rnum) <- rarg =
+      LitExpr (IntL sgn sz (lnum `max` rnum))
+  | otherwise = BinExpr op larg rarg
+  where
+    smallest = smallestRepresentableInt sgn sz
+    largest = largestRepresentableInt sgn sz
+
 simplifyBinary AddPOp larg rarg
   | isIntLitExpr 0 rarg = larg
   | BinExpr AddPOp larg' larg2 <- larg =
@@ -578,6 +599,19 @@ simplifyUnary op arg =
        case arg
        of CAExpr sub_op@(AddZOp _ _) args -> CAExpr sub_op (map negateE args)
           LitExpr (IntL _ _ n) -> LitExpr $ IntL sgn sz (negate n)
+          _ -> UnExpr op arg
+     CastZOp from_sgn to_sgn sz ->
+       case arg
+       of LitExpr (IntL _ _ n)
+            | from_sgn == Signed && to_sgn == Unsigned ->
+                let n' = if n >= 0 then n else n + intCardinality sz 
+                in LitExpr $ IntL to_sgn sz n'
+            | from_sgn == Unsigned && to_sgn == Signed ->
+                let n' = if n > largestRepresentableInt Signed sz 
+                         then n - intCardinality sz
+                         else n
+                in LitExpr $ IntL to_sgn sz n'
+            | otherwise -> internalError "simplifyUnary"
           _ -> UnExpr op arg
      LoadOp ty ->
        UnExpr op arg
