@@ -301,8 +301,11 @@ primAddPAs ptr off ptr' =
   bindAtom1 ptr' $ PrimA PrimAddP [ptr, off]
 
 primLoad mut ty ptr dst = primLoadOff mut ty ptr (nativeIntV 0)
-primLoadOff mut ty ptr off dst =
-  bindAtom1 dst $ PrimA (PrimLoad mut ty) [ptr, off]
+primLoadOff mut ty ptr off dst
+  | valType off /= PrimType nativeIntType =
+      internalError "primLoadOff: Offset has wrong type"
+  | otherwise =
+      bindAtom1 dst $ PrimA (PrimLoad mut ty) [ptr, off]
 
 primLoadMutable ty ptr dst = primLoad Mutable ty ptr dst
 primLoadOffMutable ty ptr off dst = primLoadOff Mutable ty ptr off dst
@@ -397,7 +400,7 @@ instance ToDynamicRecordData Int where
     in record fs size alignment
 
   toDynamicField (Field off m ty) =
-    Field (nativeWordV off) m (toDynamicFieldType ty)
+    Field (nativeIntV off) m (toDynamicFieldType ty)
 
   toDynamicFieldType (PrimField t) = PrimField t
   toDynamicFieldType (RecordField rec) = RecordField $ toDynamicRecord rec
@@ -465,7 +468,7 @@ createDynamicRecord field_types = do
   let fields = [mkField o m t | (o, (m, t)) <- zip offsets field_types]
   return $ record fields size alignment
   where
-    zero = nativeWordV 0
+    zero = nativeIntV 0
     one = nativeWordV 1
 
     -- Compute offsets of one structure field.  First,
@@ -478,7 +481,8 @@ createDynamicRecord field_types = do
     compute_offsets offsets cur_offset cur_align (field:fields) = do
       start_offset <- addRecordPadding cur_offset $
                       dynamicFieldTypeAlignment field
-      end_offset <- nativeAddUZ start_offset $ dynamicFieldTypeSize field
+      i_size <- primCastZ (PrimType nativeIntType) $ dynamicFieldTypeSize field
+      end_offset <- nativeAddZ start_offset i_size
       next_align <- nativeMaxUZ cur_align $ dynamicFieldTypeAlignment field
       compute_offsets (start_offset : offsets) end_offset next_align fields
 
@@ -528,10 +532,14 @@ suspendedCreateDynamicRecord field_types = do
 -- | Compute the necessary record padding for a given offset
 addRecordPadding :: (Monad m, Supplies m (Ident Var)) =>
                     Val -> Val -> Gen m Val
-addRecordPadding off alignment = do
-  neg_off <- nativeNegateUZ off
-  disp <- neg_off `nativeModUZ` alignment
-  off `nativeAddUZ` disp
+addRecordPadding off alignment 
+  | valType off /= PrimType nativeIntType =
+      internalError "addRecordPadding: Offset has wrong type"
+  | otherwise = do
+      neg_off <- nativeNegateZ off
+      i_alignment <- primCastZ (PrimType nativeIntType) alignment
+      disp <- neg_off `nativeModZ` i_alignment
+      off `nativeAddZ` disp
 
 fromPrimType :: DynamicFieldType -> ValueType
 fromPrimType (PrimField ty) = PrimType ty

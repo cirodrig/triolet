@@ -146,7 +146,8 @@ deriving instance Ord StaticFieldType
 deriving instance Ord StaticField
 
 -- | In a record with dynamic layout, sizes and offsets are computed run-time
--- values
+-- values.  Offsets are signed native integers.  Size and alignment are
+-- unsigned native integers.
 type DynamicRecord = Record Val
 type DynamicField = Field Val
 type DynamicFieldType = FieldType Val

@@ -192,7 +192,7 @@ mkWordVal expr =
 --   and the type at which the field should be accessed.
 genField :: TypeEnv -> Field Typed -> G (LL.Val, Mutability, ValueType)
 genField tenv (Field base_type fnames cast_type) =
-  get_field_offset (nativeWordV 0) base_type fnames
+  get_field_offset (nativeIntV 0) base_type fnames
   where
     get_field_offset base_offset base_type (fname:fnames) =
       case base_type
@@ -213,7 +213,7 @@ genField tenv (Field base_type fnames cast_type) =
           of Just ix -> do
                let rfield = typedRecordFields0 rec !! ix
                    dfield = dyn_rec !!: ix
-               offset <- primAddZ (PrimType nativeWordType) base_offset (fieldOffset dfield)
+               offset <- nativeAddZ base_offset (fieldOffset dfield)
                case fnames of
                  [] -> return_field_offset offset dfield
                  _  -> case rfield
@@ -223,15 +223,18 @@ genField tenv (Field base_type fnames cast_type) =
              Nothing ->
                internalError $ "genField: No field named '" ++ fname ++ "'"
 
-    return_field_offset offset field =
-      let ty = case cast_type
-               of Just t -> convertToValueType t
-                  Nothing -> case fieldType field
-                             of PrimField pt -> PrimType pt
-                                RecordField r -> 
-                                  RecordType $ dynamicToStaticRecordType r
-                                _ -> internalError "genField"
-      in return (offset, fieldMutable field, ty)
+    return_field_offset offset field
+      | LL.valType offset /= PrimType nativeIntType =
+        internalError "genField: Offset has wrong type"
+      | otherwise =
+        let ty = case cast_type
+                 of Just t -> convertToValueType t
+                    Nothing -> case fieldType field
+                               of PrimField pt -> PrimType pt
+                                  RecordField r -> 
+                                    RecordType $ dynamicToStaticRecordType r
+                                  _ -> internalError "genField"
+        in return (offset, fieldMutable field, ty)
 
     match_name want_name (FieldDef _ _ name) = name == want_name
 
