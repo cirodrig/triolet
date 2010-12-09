@@ -259,6 +259,27 @@ intBinaryPrimOp imm_op l_id r_id delayed_op prim_type m n =
     fromLit (LitV (IntL _ _ n)) = Just n
     fromLit _ = Nothing
 
+primCastZ ty src
+  | dst_sz /= src_sz = internalError "primCastZ"
+  | dst_sgn == src_sgn = return src
+  | LitV (IntL _ _ n) <- src =
+      if n < smallestRepresentableInt src_sgn src_sz ||
+         n > largestRepresentableInt src_sgn src_sz
+      then internalError "primCastZ: Integer out of bounds"
+      else let n' = case dst_sgn 
+                    of Unsigned ->
+                         if n >= 0 then n else n + intCardinality dst_sz 
+                       Signed ->
+                         if n > largestRepresentableInt Signed dst_sz
+                         then n - intCardinality dst_sz
+                         else n
+           in return $! LitV $! IntL dst_sgn dst_sz n'
+  | otherwise =
+      emitAtom1 ty $ PrimA (PrimCastZ src_sgn dst_sgn dst_sz) [src]
+  where
+    PrimType (IntType dst_sgn dst_sz) = ty
+    PrimType (IntType src_sgn src_sz) = valType src
+
 primAddZ = intBinaryPrimOp (+) (Just 0) (Just 0) PrimAddZ
 primSubZ = intBinaryPrimOp (-) Nothing (Just 0) PrimSubZ
 primModZ = intBinaryPrimOp mod Nothing (Just 1) PrimModZ
@@ -308,6 +329,12 @@ isZeroLit _ = False
 
 primAAddZ prim_type@(PrimType (IntType sign size)) ptr n =
   emitAtom1 prim_type $ PrimA (PrimAAddZ sign size) [ptr, n]
+
+nativeAddZ = primAddZ (PrimType nativeIntType)
+nativeSubZ = primSubZ (PrimType nativeIntType)
+nativeModZ = primModZ (PrimType nativeIntType)
+nativeMaxZ = primMaxZ (PrimType nativeIntType)
+nativeNegateZ = primNegateZ (PrimType nativeIntType)
 
 nativeAddUZ = primAddZ (PrimType nativeWordType)
 nativeSubUZ = primSubZ (PrimType nativeWordType)
