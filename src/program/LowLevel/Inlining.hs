@@ -20,6 +20,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Monoid
 import Data.Traversable
+import Debug.Trace
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
@@ -28,10 +29,19 @@ import LowLevel.Build
 import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Rename
+import LowLevel.Print
 import Globals
 
 closureInlineCutoff = 20
 primInlineCutoff = 5
+
+debugInlining = False
+
+-- | For debugging, show what's inlined
+inlStatus message k = 
+  if debugInlining
+  then trace message k
+  else k
 
 -------------------------------------------------------------------------------
 -- Topological sorting
@@ -425,12 +435,14 @@ tryInlineTailCall cc op args = do
   where
     inline Nothing = no_inline
     inline (Just (InlSpec inl_req fcc fsize fuses params stm _)) 
-      | worthInlining inl_req fcc fsize fuses = do
-        assignCallParameters params args
-        return stm
+      | worthInlining inl_req fcc fsize fuses =
+          inlStatus ("Inlining: " ++ show (pprVar op)) $ do
+            assignCallParameters params args
+            return stm
       | otherwise = no_inline
 
-    no_inline = return $ ReturnE $ CallA cc (VarV op) args
+    no_inline = inlStatus ("Not inlining: " ++ show (pprVar op)) $ do
+      return $ ReturnE $ CallA cc (VarV op) args
 
 tryInlineCall :: CallConvention
               -> Var            -- ^ The callee
@@ -449,7 +461,7 @@ tryInlineCall cc op args retvars mk_cont = do
       | cc /= inl_cc = internalError "tryInlineCall: Calling convention mismatch"
       | length args /= length params = no_inline
       | not $ worthInlining inl_req inl_cc inl_size inl_uses = no_inline
-      | otherwise = do
+      | otherwise = inlStatus ("Inlining: " ++ show (pprVar op)) $ do
         assignCallParameters params args
         case inl_stm of
           Inlinable ZeroUses inl ->
@@ -466,8 +478,9 @@ tryInlineCall cc op args retvars mk_cont = do
               return $ inl (retvars, cont)
             mk_cont
 
-    no_inline = do lift $ bindAtom retvars $ CallA cc (VarV op) args
-                   mk_cont
+    no_inline = inlStatus ("Not inlining: " ++ show (pprVar op)) $ do
+      lift $ bindAtom retvars $ CallA cc (VarV op) args
+      mk_cont
 
 inlVal :: Val -> InlF Val
 inlVal value =
