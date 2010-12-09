@@ -16,6 +16,7 @@ import LowLevel.Build
 import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Expr
+import LowLevel.Print
 import Globals
 
 updateCSEEnv' :: Var -> Maybe Expr -> CSEEnv -> CSEEnv
@@ -81,6 +82,11 @@ csePrim prim args =
          _ -> internalError "csePrim"
 
     update_for_store _ _ _ = return ()
+    
+    -- For debugging
+    debug_replacement new_prim =
+      text "Value numbering replace" <+>
+      (pprAtom rebuild_atom $$ pprAtom new_prim)
 
 cseAtom :: Atom -> CSE (Atom, Maybe [Maybe Expr])
 cseAtom atom =

@@ -46,6 +46,10 @@ import LowLevel.Print
 -- | A value that CSE may substitute for some other expression.
 data CSEVal = CSEVar !Var | CSELit !Lit
 
+instance Show CSEVal where
+  show (CSEVar v) = show v
+  show (CSELit l) = show $ pprLit l
+
 -- | Convert a CSE value to a value.
 fromCSEVal :: CSEVal -> Val
 fromCSEVal (CSEVar v) = VarV v
@@ -123,7 +127,7 @@ pprBinOp (ModZOp _ _) = text "mod"
 pprBinOp (MaxZOp _ _) = text "max"
 pprBinOp AddPOp = text "addp"
 
-pprUnOp (LoadOp _) = text "load"
+pprUnOp (LoadOp t) = text "load" <+> pprValueType t
 pprUnOp (CastZOp _ _ _) = text "cast"
 pprUnOp (NegateZOp _ _) = text "negate"
 
@@ -280,10 +284,24 @@ updateTrieNode f k tr =
 -------------------------------------------------------------------------------
 
 -- | A CSE environment maps expressions to simpler expressions, usually values.
+--
+--   The environment contains mappings from program values to expressions and 
+--   vice versa.
+--   The 'available' values are the set of program values that can be
+--   substituted for a given, simplified expression.  A successful lookup in
+--   this map means CSE has done something useful.
+--   The 'valuation' of a program value is an expression equal to the value.
+--   This map allows CSE to find the actual value of an intermediate result,
+--   and thereby find the actual value of a sequence of primitive operations.
+--
+--   Expressions are only put into the valuation if they could combine
+--   with other expressions during simplification.  Variables and literals are
+--   always put into the valuation.  Other expressions will be put into
+--   the valuation depending on what the outermost operator is.
 data CSEEnv =
   CSEEnv { -- | Available variable values
            available :: TrieNode CSEVal
-           -- | Actual values of variables, indexed by variable ID
+           -- | Actual values of variables, indexed by variable ID.
          , valuation :: IntMap.IntMap Expr
          }
 
@@ -301,20 +319,52 @@ emptyCSEEnv = CSEEnv empty IntMap.empty
 -- | Given a variable and its value, add a mapping to the environment.
 updateCSEEnv :: Var -> Expr -> CSEEnv -> CSEEnv
 updateCSEEnv v expr env =
-  let avail =
+  let expr_reducible = isReducible expr
+      avail =
         case exprToCSEVal expr
         of Just v_val ->
              -- The variable is equivalent to another variable or constant.
              -- Replace the variable with its equivalent value.
              insert (VarExpr v) v_val $ available env
            Nothing ->
-             -- The more complicated expression is equivalent to the variable.
-             -- Replace equal values with the variable, unless there's already
-             -- a binding there.
+             -- The more complicated expression is equivalent to the
+             -- variable.  Replace equal values with the variable,
+             -- unless there's already a binding there.
              alter (Just . fromMaybe (CSEVar v)) expr $ available env
-  in env { available = avail
-         , valuation = IntMap.insert (fromIdent $ varID v) expr $ valuation env
-         }
+
+      -- If the expression could lead to further simplification,
+      -- then put it into the valuation
+      valua
+        | isReducible expr =
+            insert_value expr
+        | Just val <- lookup expr (available env) =
+            insert_value $ cseValToExpr val
+        | otherwise =
+            valuation env
+        where
+          insert_value val =
+            IntMap.insert (fromIdent $ varID v) val $ valuation env
+
+  in env {available = avail, valuation = valua}
+
+-- | Determine whether a simplified expression, after being put into the  
+--   operand of some other expression, could result in further simplification.
+--   The decision is made based on the expression's head term.
+isReducible :: Expr -> Bool
+isReducible expression =
+  case expression
+  of VarExpr {}     -> True
+     LitExpr {}     -> True
+     CAExpr op _    -> case op
+                       of AddZOp {} -> True
+     BinExpr op _ _ -> case op
+                       of ModZOp {} -> True
+                          MaxZOp {} -> True
+                          AddPOp {} -> True
+     UnExpr op _    -> case op
+                       of LoadOp {} -> False
+                          CastZOp {} -> False
+                          NegateZOp {} -> True
 
 -- | Find an available value that's equal to the given variable.  If no value
 -- is found, return the variable.
