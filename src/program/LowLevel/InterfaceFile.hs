@@ -78,13 +78,17 @@ mkImport pre_import = label `seq` -- Verify that label is valid
 
 data Interface =
   Interface
-  { ifaceImports :: [Import] -- ^ Variables that may be imported into other  
-                             --   modules
+  { -- | Symbols imported by the interface.  These variables
+    --   must not have a definition.
+    ifaceImports :: [Import] 
+    -- | Symbols exported by the interface.  These variables may have a
+    --   definition.
+  , ifaceExports :: [Import]
   }
 
 instance Binary Interface where
-  put (Interface imps) = put imps
-  get = Interface <$> get
+  put (Interface imps exps) = put imps >> put exps
+  get = Interface <$> get <*> get
 
 -------------------------------------------------------------------------------
 -- Creating an interface
@@ -110,8 +114,10 @@ createModuleInterface mod = do
     pre_imports' <- mapM (renamePreImport renaming) pre_imports
 
     -- Create the interface
-    imports <- mapM mkImport pre_imports'
-    let interface = Interface imports
+    exports <- mapM mkImport pre_imports'
+    let imports = map clearImportDefinition $ moduleImports mod
+    let interface = Interface { ifaceImports = imports
+                              , ifaceExports = exports}
         
     -- Extend the export list with the new exported variables
     let new_exports = [(v, PyonExportSig) | Def v _ <- pre_imports'
@@ -234,32 +240,46 @@ addInterfaceToModuleImports iface mod = do
         allBuiltins ++ map importVar (moduleImports mod)
   
   -- Rename variables in the interface
-  rn_iface <- 
+  (rn_imports, rn_exports) <- 
     withTheLLVarIdentSupply $ \id_supply -> runFreshVarM id_supply $ do
       renameInterface import_variables iface
   
   -- Insert imports into the module's imports, replacing the existing imports.
   -- Error out if a type mismatch is detected.
-  let imports = ifaceImports rn_iface ++
-                filter not_in_interface (moduleImports mod)
+  let imports = rn_imports ++ rn_exports ++
+                filter not_from_interface (moduleImports mod)
         where
-          not_in_interface impent =
+          not_from_interface impent =
             let v = importVar impent
-            in all ((v /=) . importVar) $ ifaceImports rn_iface
+            in all ((v /=) . importVar) $ rn_exports
       
   return $ mod {moduleImports = imports}
 
-renameInterface :: [Var] -> Interface -> FreshVarM Interface
+-- | Rename an interface's imported and exported symbols, given the set of
+--   variables that the interface's symbols should be renamed to.
+--
+--   Exported symbols are renamed to one of the given variables, if one has
+--   the same label, or else to a new variable name.
+--
+--   Imported symbols are discarded if one of the given variables has the
+--   same label, or else renamed to a new variable name.
+renameInterface :: [Var] -> Interface -> FreshVarM ([Import], [Import])
 renameInterface import_variables iface = do
-  let imports = ifaceImports iface
+  -- Create new variables
+  i_results <- mapM pick_renaming_or_discard $ ifaceImports iface
+  let (new_i_variables, orig_imports) = unzip $ catMaybes i_results
+  let orig_exports = ifaceExports iface
+  new_e_variables <- mapM pick_renamed_name $ map importVar orig_exports
 
-  -- Decide what to rename each imported variable to
-  new_variables <- mapM pick_renamed_name $ map importVar imports
-  let renaming = mkRenaming $ zip (map importVar imports) new_variables
+  -- Create renaming
+  let renaming = mkRenaming $
+                 zip (map importVar orig_exports) new_e_variables ++
+                 zip (map importVar orig_imports) new_i_variables
   
-  -- Rename
-  imports' <- mapM (rename_import renaming) imports
-  return $ Interface imports'
+  -- Apply renaming
+  new_imports <- mapM (rename_import renaming) orig_imports
+  new_exports <- mapM (rename_import renaming) orig_exports
+  return (new_imports, new_exports)
   where
     -- Map from variable name to variable
     import_variable_labels =
@@ -271,6 +291,22 @@ renameInterface import_variables iface = do
              Nothing  -> internalError $ "renameInterface: " ++
                          "Imported variable has no label"
 
+    -- Decide what to rename an exported variable to.  Discard if there's
+    -- a preexisting variable with the same name.
+    -- Otherwise create a new variable.
+    pick_renaming_or_discard impent
+      | Just global_var <- Map.lookup lab import_variable_labels =
+          return Nothing
+      | otherwise = do
+          -- Rename to a new variable with the same label
+          new_var <- newExternalVar lab (varType $ importVar impent)
+          return $ Just (new_var, impent)
+      where
+        lab = case varName $ importVar impent
+              of Just l  -> l
+                 Nothing -> internalError $ "renameInterface: " ++
+                            "Interface variable has no label"
+    
     -- Decide what to rename an exported variable to.  Rename to the
     -- preexisting variable with the same name, if one exists.
     -- Otherwise create a new variable.

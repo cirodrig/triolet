@@ -196,6 +196,10 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   ll_mod <- LowLevel.inlineModule ll_mod
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  ll_mod <- LowLevel.inlineModule ll_mod
+  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  ll_mod <- return $ LowLevel.clearImportedFunctionDefinitions ll_mod
   putStrLn ""
   putStrLn "Optimized"
   print $ LowLevel.pprModule ll_mod  

@@ -383,6 +383,11 @@ data Import =
     , importValue :: !(Maybe StaticData)
     }
 
+clearImportDefinition :: Import -> Import
+clearImportDefinition (ImportClosureFun ep _) = ImportClosureFun ep Nothing
+clearImportDefinition (ImportPrimFun v ty _) = ImportPrimFun v ty Nothing
+clearImportDefinition (ImportData v _) = ImportData v Nothing
+
 -- | Get the variable defined by an import statement.
 --   In the case of a closure function, which can define multiple variables,
 --   this returns the global closure.  The global closure is the only variable
@@ -420,6 +425,11 @@ clearImportedFunctionDefinitions mod =
     clear_function_def (ImportClosureFun ep _) = ImportClosureFun ep Nothing
     clear_function_def (ImportPrimFun v ty _) = ImportPrimFun v ty Nothing
     clear_function_def def@(ImportData _ _) = def
+
+-- | Remove definitions of all imported things
+clearImportedDefinitions :: Module -> Module
+clearImportedDefinitions mod =
+  mod {moduleImports = map clearImportDefinition $ moduleImports mod}
 
 -------------------------------------------------------------------------------
 
