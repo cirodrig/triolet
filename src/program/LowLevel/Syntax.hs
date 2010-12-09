@@ -45,7 +45,7 @@ fromCodeSize (CodeSize n) | n < 0     = Nothing
 
 -- | A comparison operation
 data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE
-           deriving(Eq, Bounded, Enum)
+           deriving(Eq, Ord, Bounded, Enum)
 
 data Prim =
     -- | @PrimCastZ from-sign to-sign size@

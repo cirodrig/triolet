@@ -76,6 +76,7 @@ data CAOp =
 data BinOp =
     ModZOp !Signedness !Size
   | MaxZOp !Signedness !Size
+  | CmpZOp !Signedness !Size !CmpOp
   | AddPOp
     deriving(Eq, Ord)
 
@@ -125,6 +126,14 @@ pprInfixCAOp (AddZOp _ _) = text "+"
 
 pprBinOp (ModZOp _ _) = text "mod"
 pprBinOp (MaxZOp _ _) = text "max"
+pprBinOp (CmpZOp _ _ cmp) =
+  text $ case cmp
+         of CmpEQ -> "cmp_eq"
+            CmpNE -> "cmp_ne"
+            CmpLT -> "cmp_lt"
+            CmpLE -> "cmp_le"
+            CmpGT -> "cmp_gt"
+            CmpGE -> "cmp_ge"
 pprBinOp AddPOp = text "addp"
 
 pprUnOp (LoadOp t) = text "load" <+> pprValueType t
@@ -360,6 +369,7 @@ isReducible expression =
      BinExpr op _ _ -> case op
                        of ModZOp {} -> True
                           MaxZOp {} -> True
+                          CmpZOp {} -> False
                           AddPOp {} -> True
      UnExpr op _    -> case op
                        of LoadOp {} -> False
@@ -401,6 +411,7 @@ interpretPrim env op args = fmap (simplify env) $
      PrimSubZ sgn sz -> Just $ subtract_op sgn sz
      PrimModZ sgn sz -> Just $ binary (ModZOp sgn sz)
      PrimMaxZ sgn sz -> Just $ binary (MaxZOp sgn sz)
+     PrimCmpZ sgn sz op -> Just $ binary (CmpZOp sgn sz op)
      PrimAddP        -> Just $ binary AddPOp
      PrimCastZ ss ds sz -> Just $ unary (CastZOp ss ds sz)
      -- Only constant loads can become expressions
@@ -634,6 +645,53 @@ simplifyBinary op@(MaxZOp sgn sz) larg rarg
   where
     smallest = smallestRepresentableInt sgn sz
     largest = largestRepresentableInt sgn sz
+
+-- Simplify an integer comparison operation.
+-- If an inequality cannot be determined, it is converted to a 
+-- less-than, less-or-equal, equality, or inequality test.
+simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
+  case comparison
+  of CmpEQ -> equality True larg rarg
+     CmpNE -> equality False larg rarg
+     CmpLT -> less_than larg rarg
+     CmpLE -> less_eq larg rarg
+     CmpGT -> less_than rarg larg
+     CmpGE -> less_eq rarg larg
+  where
+    -- Equality test.  'sense' is True for equal, False for not-equal
+    equality sense larg rarg
+      | LitExpr (IntL _ _ m) <- larg,
+        LitExpr (IntL _ _ n) <- rarg =
+          LitExpr (BoolL (sense == (m == n)))
+      | otherwise =
+          let op = if sense then CmpEQ else CmpNE
+          in BinExpr (CmpZOp sgn sz op) larg rarg
+    
+    less_than larg rarg
+      | LitExpr (IntL _ _ m) <- larg,
+        LitExpr (IntL _ _ n) <- rarg =
+          LitExpr (BoolL (m < n))
+      | LitExpr (IntL _ _ m) <- larg,
+        m == largestRepresentableInt sgn sz =
+          LitExpr (BoolL False)
+      | LitExpr (IntL _ _ n) <- rarg,
+        n == smallestRepresentableInt sgn sz =
+          LitExpr (BoolL False)
+      | otherwise =
+          BinExpr (CmpZOp sgn sz CmpLT) larg rarg
+    
+    less_eq larg rarg
+      | LitExpr (IntL _ _ m) <- larg,
+        LitExpr (IntL _ _ n) <- rarg =
+          LitExpr (BoolL (m <= n))
+      | LitExpr (IntL _ _ m) <- larg,
+        m == smallestRepresentableInt sgn sz =
+          LitExpr (BoolL True)
+      | LitExpr (IntL _ _ n) <- rarg,
+        n == largestRepresentableInt sgn sz =
+          LitExpr (BoolL True)
+      | otherwise =
+          BinExpr (CmpZOp sgn sz CmpLE) larg rarg
 
 simplifyBinary AddPOp larg rarg
   | isIntLitExpr 0 rarg = larg

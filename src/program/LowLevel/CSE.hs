@@ -122,18 +122,28 @@ cseStm statement =
      LetrecE defs stm -> do
        lift . emitLetrec =<< runCSEF (mapM cseDef defs)
        cseStm stm
-     SwitchE scr alts -> do
-       scr' <- cseVal' scr
-       rt <- lift getReturnTypes
-       alts' <- mapM (cse_alt rt) alts
-       return (SwitchE scr' alts')
+     SwitchE scr alts ->
+       cseVal' scr >>= evaluate_switch alts
      ReturnE atom -> do
        (atom', _) <- cseAtom atom
        return (ReturnE atom')
   where
-    cse_alt rt (lit, stm) = do
-      stm' <- runCSEF $ evalCSE rt $ cseStm stm
-      return (lit, stm')
+    -- Scrutinee of switch statement is statically known.
+    -- Replace the switch statement with the branch that will be executed.
+    evaluate_switch alts (LitV scrutinee) =
+      case lookup scrutinee alts
+      of Just taken_path -> cseStm taken_path
+         Nothing -> internalError "cseStm: Missing alternative"
+       
+    -- Otherwise, scrutinee is not statically known
+    evaluate_switch alts scrutinee_value = do
+      rt <- lift getReturnTypes
+      alts' <- mapM (cse_alt rt) alts
+      return (SwitchE scrutinee_value alts')
+      where
+        cse_alt rt (lit, stm) = do
+          stm' <- runCSEF $ evalCSE rt $ cseStm stm
+          return (lit, stm')
       
     assign_variable v Nothing = return ()
     assign_variable v (Just e) = modify $ updateCSEEnv v e
