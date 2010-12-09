@@ -7,17 +7,23 @@ module LowLevel.Rename
         Renaming,
         mkRenaming,
         emptyRenaming,
+        getRenamedVar,
+        renameVal,
         renameStm,
         renameFun,
         renameStaticData,
+        renameImport,
         renameInFunDef,
         renameModule
        )
 where
 
-import Control.Monad
+import Prelude hiding(mapM)
+
+import Control.Monad hiding(mapM)
 import qualified Data.IntMap as IntMap
 import Data.Maybe
+import Data.Traversable
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
@@ -36,6 +42,9 @@ mkRenaming assocs =
 -- | An empty renaming
 emptyRenaming :: Renaming
 emptyRenaming = IntMap.empty
+
+getRenamedVar :: Var -> Renaming -> Maybe Var
+getRenamedVar v m = IntMap.lookup (fromIdent $ varID v) m
 
 data RnPolicy =
     RenameEverything  -- ^ Rename everything except imported variables
@@ -176,6 +185,30 @@ rnStaticData rn (StaticData record values) = do
   values' <- rnVals rn values
   return $ StaticData record values'
 
+-- | Rename variables in an import specification.
+--
+--   If the imported variable has been assigned a new name, it will be
+--   updated to the new name.  It won't be assigned a new name here.
+rnImport :: Rn -> Import -> FreshVarM Import
+rnImport rn impent =
+  case impent
+  of ImportClosureFun ep mf -> do
+       let ep' = case globalClosure ep  
+                 of Just v ->
+                      case IntMap.lookup (fromIdent $ varID v) $ rnRenaming rn
+                      of Nothing -> ep
+                         Just v' -> setGlobalClosure v' ep
+       mf' <- mapM (rnFun rn) mf
+       return $ ImportClosureFun ep' mf'
+     ImportPrimFun v ft mf -> do
+       let v' = rnVar (rnRenaming rn) v
+       mf' <- mapM (rnFun rn) mf
+       return $ ImportPrimFun v' ft mf'       
+     ImportData v mvals -> do
+       let v' = rnVar (rnRenaming rn) v
+       mvals' <- mapM (rnVals rn) mvals
+       return $ ImportData v' mvals'
+
 rnExport :: Renaming -> (Var, ExportSig) -> (Var, ExportSig)
 rnExport rn (v, sig) = (rnVar rn v, sig)
 
@@ -203,6 +236,10 @@ rnTopLevel rn global_defs exports = do
       let rn1 = setRenaming renaming rn
       return (rn1, definienda)
 
+-- | Rename variables in a value.  Start with the given renaming.
+renameVal :: RnPolicy -> Renaming -> Val -> FreshVarM Val
+renameVal policy rn val = rnVal (policy, rn) val
+
 -- | Rename variables in a statement.  Start with the given renaming.
 renameStm :: RnPolicy -> Renaming -> Stm -> FreshVarM Stm
 renameStm policy rn stm = rnStm (policy, rn) stm
@@ -215,6 +252,9 @@ renameFun policy rn fun = rnFun (policy, rn) fun
 renameStaticData :: RnPolicy -> Renaming -> StaticData -> FreshVarM StaticData
 renameStaticData policy rn d = rnStaticData (policy, rn) d
 
+renameImport :: RnPolicy -> Renaming -> Import -> FreshVarM Import
+renameImport policy rn i = rnImport (policy, rn) i
+
 -- | Rename variables in a function definition.  The variable that is defined
 -- by the definition isn't renamed.
 renameInFunDef :: RnPolicy -> FunDef -> FreshVarM FunDef
@@ -225,6 +265,9 @@ renameInFunDef policy (Def v f) = do
 -- | Rename variables in a module
 renameModule :: RnPolicy -> Renaming -> Module -> FreshVarM Module
 renameModule policy rn mod = do
-  (_, defs, exports) <-
+  imports <- mapM (rnImport (policy, rn)) (moduleImports mod)
+  (_, defs, exports) <- do
     rnTopLevel (policy, rn) (moduleGlobals mod) (moduleExports mod)
-  return $ mod {moduleGlobals = defs, moduleExports = exports}
+  return $ mod { moduleImports = imports
+               , moduleGlobals = defs
+               , moduleExports = exports}

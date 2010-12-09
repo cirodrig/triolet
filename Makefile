@@ -26,7 +26,7 @@ bootstrap_data : $(BOOT_DATA_FILES) \
 	$(DATA_BUILD_DIR)/include/pyon_types.h
 
 # Install all data files into the local build directory
-data : bootstrap_data testcases $(DATA_BUILD_DIR)/include/pyon.h $(DATA_BUILD_DIR)/libpyonrts.so 
+data : bootstrap_data testcases $(DATA_BUILD_DIR)/include/pyon.h $(DATA_BUILD_DIR)/libpyonrts.so $(INTERFACE_DATA_FILES)
 
 ###############################################################################
 # Compilation

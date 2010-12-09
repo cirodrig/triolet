@@ -4,6 +4,7 @@ module Main(main) where
 
 import Control.Exception
 import Control.Monad
+import Data.Binary
 import System.Cmd
 import System.Directory
 import System.Environment
@@ -80,9 +81,14 @@ runTask (CompilePyonToPyonAsm {compilePyonInput = file}) = do
   compilePyonToPyonAsm input_path input_text
 
 runTask (CompilePyonAsmToGenC { compileAsmInput = ll_mod
+                              , compileAsmIfaces = ifaces
                               , compileAsmOutput = c_file
+                              , compileAsmInterface = i_file
                               , compileAsmHeader = h_file}) = do
-  compilePyonAsmToGenC ll_mod c_file h_file
+  compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file
+
+runTask (LoadIface {loadIfaceInput = iface_file}) = do
+  loadIface iface_file
 
 runTask (CompileGenCToObject { compileGenCInput = c_file
                              , compileGenCOutput = o_file}) = do
@@ -167,15 +173,22 @@ parsePyonAsm input_path input_text = do
     LLParser.typeInferModule input_path mod_name externs ast
   LLParser.generateLowLevelModule mod_name t_externs t_defs
 
--- | Compile an input low-level module to C code.  Generate a header file
--- if there are exported routines.
-compilePyonAsmToGenC ll_mod c_file h_file = do
+loadIface iface_file = do
+  bs <- readFileAsByteString iface_file
+  return $ decode bs
+
+-- | Compile an input low-level module to C code.  Generate an interface file.
+-- Generate a header file if there are exported routines.
+compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   -- Low-level transformations
   ll_mod <- LowLevel.makeBuiltinPrimOps ll_mod
   ll_mod <- LowLevel.flattenRecordTypes ll_mod
   putStrLn ""
   putStrLn "Lowered and flattened"
   print $ LowLevel.pprModule ll_mod
+  
+  -- Link to interfaces
+  ll_mod <- foldM (flip LowLevel.addInterfaceToModuleImports) ll_mod ifaces
   
   -- First round of optimizations
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
@@ -189,6 +202,7 @@ compilePyonAsmToGenC ll_mod c_file h_file = do
   
   -- Generate interface file
   (ll_mod, ll_interface) <- LowLevel.createModuleInterface ll_mod
+  writeFileAsByteString i_file $ encode ll_interface
 
   -- Closure converion
   ll_mod <- LowLevel.closureConvert ll_mod

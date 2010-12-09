@@ -42,7 +42,7 @@ data LabelTag =
 
 -- | A local variable ID.  Local variable IDs are assigned to anonymous
 --   variables that will be exported from a module.
-newtype LocalID = LocalID Int deriving(Eq)
+newtype LocalID = LocalID Int deriving(Eq, Ord)
 
 newLocalIDSupply :: IO (Supply LocalID)
 newLocalIDSupply = newSupply (LocalID 0) (\(LocalID n) -> LocalID (1+n))
@@ -72,7 +72,7 @@ data Label =
     --   external name.
   , labelExternalName :: !(Maybe String)
   }
-  deriving(Eq)
+  deriving(Eq, Ord)
 
 labelLocalNameAsString :: Label -> String
 labelLocalNameAsString l =

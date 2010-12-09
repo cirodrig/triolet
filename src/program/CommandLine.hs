@@ -200,18 +200,21 @@ compileObjectJob config (file_path, language) moutput_path = do
 
   -- Read and compile the file.  Decide where to put the temporary C file.
   case input_language of
-    PyonLanguage ->
+    PyonLanguage -> do
+      iface_files <- find_interface_files
       let infile = readFileFromPath file_path
           hfile = writeFileFromPath header_path
+          ifile = writeFileFromPath iface_path
           outfile = writeFileFromPath output_path
-      in compileWithCFile config output_path $
-         return $ \cfile -> pyonCompilation infile cfile hfile outfile
+      compileWithCFile config output_path $
+        return $ \cfile -> pyonCompilation infile iface_files cfile ifile hfile outfile
 
-    PyonAsmLanguage -> 
+    PyonAsmLanguage ->
       let infile = readFileFromPath file_path
+          ifile = writeFileFromPath iface_path
           outfile = writeFileFromPath output_path
       in compileWithCFile config output_path $
-         return $ \cfile -> pyonAsmCompilation infile cfile outfile
+         return $ \cfile -> pyonAsmCompilation infile cfile ifile outfile
   where
     from_suffix path
       | takeExtension path == ".pyon" = return PyonLanguage
@@ -222,10 +225,23 @@ compileObjectJob config (file_path, language) moutput_path = do
     -- Exported C function declarations go here
     header_path = dropExtension output_path ++ "_interface.h"
     
+    -- Exported Pyon interface goes here
+    iface_path = replaceExtension output_path ".pi"
+
     output_path =
       case moutput_path
       of Just p -> p
          Nothing -> replaceExtension file_path ".o"
+         
+    -- Get all interface files
+    find_interface_files = forM interface_files $ \fname -> do
+      path <- getDataFileName ("interfaces" </> fname)
+      return $ readFileFromPath path
+      where
+        -- These are the RTS interface files that were generated when
+        -- the compiler was built
+        interface_files =
+          ["memory_py.pi", "prim.pi", "structures.pi", "list.pi", "stream.pi"]
    
 -- | Compile and generate an intermediate C file.
 -- If C files are kept, put the C file in the same location as the output, with
@@ -239,17 +255,30 @@ compileWithCFile config output_path mk_do_work
       do_work <- mk_do_work
       return $ withAnonymousFile ".c" $ do_work
 
-pyonCompilation :: ReadFile -> TempFile -> WriteFile -> WriteFile -> Job ()
-pyonCompilation infile cfile hfile outfile = do
+pyonCompilation :: ReadFile     -- ^ Input pyon file
+                -> [ReadFile]   -- ^ Input interface files
+                -> TempFile     -- ^ Temporary C file
+                -> WriteFile    -- ^ Output interface file
+                -> WriteFile    -- ^ Output header file
+                -> WriteFile    -- ^ Output object file
+                -> Job ()
+pyonCompilation infile iface_files cfile ifile hfile outfile = do
   asm <- taskJob $ CompilePyonToPyonAsm infile
-  taskJob $ CompilePyonAsmToGenC asm (writeTempFile cfile) hfile
+  ifaces <- mapM (taskJob . LoadIface) iface_files
+  taskJob $ CompilePyonAsmToGenC asm ifaces (writeTempFile cfile) ifile hfile
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 
-pyonAsmCompilation :: ReadFile -> TempFile -> WriteFile -> Job ()
-pyonAsmCompilation infile cfile outfile = do
+pyonAsmCompilation :: ReadFile  -- ^ Input pyasm file
+                   -> TempFile  -- ^ Temporary C file
+                   -> WriteFile -- ^ Output interface file
+                   -> WriteFile -- ^ Output object file
+                   -> Job ()
+pyonAsmCompilation infile cfile ifile outfile = do
   asm <- withAnonymousFile ".pyasm" $ \ppfile -> do
     taskJob $ PreprocessCPP infile (writeTempFile ppfile)
     taskJob $ ParsePyonAsm (readTempFile ppfile)
-  taskJob $ CompilePyonAsmToGenC asm (writeTempFile cfile) writeNothing
+    
+  -- Don't link to any interfaces
+  taskJob $ CompilePyonAsmToGenC asm [] (writeTempFile cfile) ifile writeNothing
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 

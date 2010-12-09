@@ -42,8 +42,8 @@ import Prelude hiding(catch)
 
 import Control.Exception
 import Control.Monad
-import Data.ByteString(ByteString)
-import qualified Data.ByteString as ByteString
+import Data.ByteString.Lazy(ByteString)
+import qualified Data.ByteString.Lazy as ByteString
 import Data.IORef
 import Foreign.C
 import Foreign.Ptr
@@ -53,6 +53,7 @@ import System.Random
 
 import Gluon.Common.Error
 import qualified LowLevel.Syntax as LowLevel
+import qualified LowLevel.InterfaceFile as LowLevel
 
 -- | Make a temporary file name.  Race conditions are possible.
 tmpnam :: FilePath -> String -> IO FilePath
@@ -276,10 +277,16 @@ data Task a where
     } :: Task LowLevel.Module
   -- Compile a PyonAsm file
   CompilePyonAsmToGenC
-    { compileAsmInput :: LowLevel.Module 
+    { compileAsmInput :: LowLevel.Module
+    , compileAsmIfaces :: [LowLevel.Interface] -- ^ Interfaces to link with
     , compileAsmOutput :: WriteFile -- ^ Output C file
+    , compileAsmInterface :: WriteFile -- ^ Output Pyon interface file
     , compileAsmHeader :: WriteFile -- ^ Header for exported C functions
     } :: Task ()
+  -- Load an interface file
+  LoadIface
+    { loadIfaceInput :: ReadFile
+    } :: Task LowLevel.Interface
   -- Compile a generated C file to object code
   CompileGenCToObject
     { compileGenCInput :: ReadFile

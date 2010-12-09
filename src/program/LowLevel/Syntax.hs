@@ -349,6 +349,10 @@ data Import =
     , importValue :: !(Maybe [Val])
     }
 
+-- | Get the variable defined by an import statement.
+--   In the case of a closure function, which can define multiple variables,
+--   this returns the global closure.  The global closure is the only variable
+--   that can be referenced before closure conversion.
 importVar :: Import -> Var
 importVar impent =
   case impent
@@ -427,6 +431,24 @@ infoTableEntry = _epInfoTable
 -- Only global functions have a global closure.
 globalClosure :: EntryPoints -> Maybe Var
 globalClosure = _epGlobalClosure
+
+-- | Assign the global closure of a function.  This function is to assist in  
+--   renaming entry points.  There must already be a global closure.
+setGlobalClosure :: Var -> EntryPoints -> EntryPoints
+setGlobalClosure new_c ep
+  | isNothing (globalClosure ep) =
+      internalError "setGlobalClosure: No global closure"
+  | otherwise = ep {_epGlobalClosure = Just new_c}
+
+-- | All variables referenced by an 'EntryPoints'.
+entryPointsVars :: EntryPoints -> [Var]
+entryPointsVars ep =
+  _epDirectEntry ep :
+  _epExactEntry ep :
+  _epInexactEntry ep :
+  maybe id (:) (_epDeallocEntry ep) (
+  _epInfoTable ep :
+  maybeToList (_epGlobalClosure ep))
 
 -- | Create a new internal variable
 newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var

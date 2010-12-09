@@ -15,6 +15,11 @@ Data-Files:
   include/pyon_types.h
   include/pyon_list.h
   testcases/*.py
+  interfaces/memory_py.pi
+  interfaces/prim.pi
+  interfaces/structures.pi
+  interfaces/list.pi
+  interfaces/stream.pi
   libpyonrts.so
 
 Executable pyon

@@ -57,16 +57,20 @@ getModificationTimeIfExists path = do
 -- command.
 data MakeRule =
   MakeRule
-  { makeTarget :: String
+  { makeTargets :: [String]
   , makePrerequisites :: [String]
   , makeCommand :: String
   }
+
+makeTarget rule =
+  let [tgt] = makeTargets rule
+  in tgt
 
 -- | Emit a 'MakeRule' in Makefile format
 formatMakeRule :: MakeRule -> String
 formatMakeRule rule =
   let criterion =
-        makeTarget rule ++ " : " ++
+        concat (intersperse " " $ makeTargets rule) ++ " : " ++
         concat (intersperse " " $ makePrerequisites rule)
       command = unlines $ map ('\t':) $ lines $ makeCommand rule
   in criterion ++ '\n' : command ++ "\n\n"
@@ -135,7 +139,7 @@ pyonHsFileTemplate build_path src_path file =
   let src_file = src_path </> file `replaceExtension` ".hs"
       o_file = build_path </> file `replaceExtension` ".o"
       hi_file = build_path </> file `replaceExtension` ".hi"
-  in MakeRule o_file [src_file] $
+  in MakeRule [o_file] [src_file] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(HC) -c $< $(PYON_HS_C_OPTS)\n\
      \touch " ++ hi_file
@@ -150,7 +154,7 @@ compileHsBootFile build_path src_path file =
   let src_file = src_path </> file `replaceExtension` ".hs-boot"
       o_file = build_path </> file `replaceExtension` ".o-boot"
       hi_file = build_path </> file `replaceExtension` ".hi-boot"
-  in MakeRule o_file [src_file] $
+  in MakeRule [o_file] [src_file] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(HC) -c $< $(PYON_HS_C_OPTS)\n\
      \touch " ++ hi_file
@@ -160,7 +164,7 @@ compileCRtsFile :: MakeRuleTemplate
 compileCRtsFile build_path source_path src =
   let o_file = build_path </> src `replaceExtension` ".o"
       i_file = source_path </> src `replaceExtension` ".c"
-  in MakeRule o_file [i_file, "bootstrap_data"] $
+  in MakeRule [o_file] [i_file, "bootstrap_data"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(CC) $(RTS_C_C_OPTS) -c $< -o $@"
 
@@ -172,17 +176,18 @@ compileCRtsFile build_path source_path src =
 compilePyAsmRtsFile :: FilePath -> FilePath -> MakeRuleTemplate
 compilePyAsmRtsFile pyon_program data_path build_path source_path src =
   let o_file = build_path </> src `replaceExtension` ".o"
+      iface_file = build_path </> src `replaceExtension` ".pi"
       i_file = source_path </> src `replaceExtension` ".pyasm"
-  in MakeRule o_file [i_file, "bootstrap_data"] $
+  in MakeRule [o_file, iface_file] [i_file, "bootstrap_data"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n" ++
-     pyon_program ++ " -B " ++ data_path ++ " $< -o $@"
+     pyon_program ++ " -B " ++ data_path ++ " --keep-c-files $< -o " ++ o_file
 
 -- | Copy a file
 copyDataFile :: MakeRuleTemplate
 copyDataFile build_path source_path src =
   let o_file = build_path </> src
       i_file = source_path </> src
-  in MakeRule o_file [i_file] $
+  in MakeRule [o_file] [i_file] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \cp $< $@"
       
@@ -269,8 +274,9 @@ layoutCompileOpts exe lbi =
 generateCabalMakefile verbosity exe lbi = do
   (pyon_rules, pyon_files) <- generatePyonRules verbosity lbi exe
   (rts_rules, rts_files) <- generateRtsRules verbosity lbi
-  data_rules <- generateDataRules verbosity lbi
+  (data_rules, prebuilt_data_files) <- generateDataRules verbosity lbi
   variables <- generateVariables exe lbi pyon_rules rts_rules data_rules
+               prebuilt_data_files
   writeCabalMakefile variables (pyon_rules ++ rts_rules ++ data_rules)
 
 -- | Create variables for a makefile.
@@ -279,8 +285,9 @@ generateVariables :: Executable
                   -> [MakeRule]
                   -> [MakeRule]
                   -> [MakeRule]
+                  -> [FilePath]
                   -> IO [(String, String)]
-generateVariables exe lbi pyon_rules rts_rules data_rules = do
+generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = do
   -- Get paths
   cc_path <-
     case lookupProgram gccProgram $ withPrograms lbi
@@ -305,7 +312,10 @@ generateVariables exe lbi pyon_rules rts_rules data_rules = do
       pyon_object_files = getObjectTargets pyon_rules
       rts_source_files = getSources rts_rules
       rts_object_files = getObjectTargets rts_rules
-      prebuilt_data_files = map makeTarget data_rules
+      rts_interface_files = getInterfaceTargets rts_rules
+      interface_data_files =
+        [ dataBuildDir lbi </> "interfaces" </> fl `replaceExtension` ".pi"
+        | fl <- rtsPyAsmFiles]
 
   return [ -- paths within the project directory
            ("BUILDDIR", buildDir lbi)
@@ -331,7 +341,9 @@ generateVariables exe lbi pyon_rules rts_rules data_rules = do
          , ("LAYOUT_CL_OPTS", intercalate " " $ layoutCompileOpts exe lbi)
          , ("RTS_SOURCE_FILES", makefileList rts_source_files)
          , ("RTS_OBJECT_FILES", makefileList rts_object_files)
+         , ("RTS_INTERFACE_FILES", makefileList rts_interface_files)
          , ("BOOT_DATA_FILES", makefileList prebuilt_data_files)
+         , ("INTERFACE_DATA_FILES", makefileList interface_data_files)
          , ("PYON_BUILD_DIR", pyonBuildDir lbi)
          , ("RTS_BUILD_DIR", rtsBuildDir lbi)
          , ("DATA_BUILD_DIR", dataBuildDir lbi)
@@ -342,7 +354,9 @@ generateVariables exe lbi pyon_rules rts_rules data_rules = do
       where
         is_source f = takeExtension f `elem` [".hs", ".c", ".pyasm"]
     getObjectTargets rules = 
-        filter ((".o" ==) . takeExtension) $ map makeTarget rules
+        filter ((".o" ==) . takeExtension) $ concatMap makeTargets rules
+    getInterfaceTargets rules = 
+        filter ((".pi" ==) . takeExtension) $ concatMap makeTargets rules
 
     cc_warning_flags = ["-Werror", "-Wimplicit-function-declaration",
                         "-Wimplicit-int"]
@@ -385,8 +399,9 @@ generateRtsRules verb lbi = do
     rts_source_paths = rtsSearchPaths lbi
 
 -- | Create Makefile rules for data files that will be installed along with
--- the executable.
-generateDataRules :: Verbosity -> LocalBuildInfo -> IO [MakeRule]
+--   the executable.  Also, return the list of data files that are _not_
+--   generated by the build process.
+generateDataRules :: Verbosity -> LocalBuildInfo -> IO ([MakeRule], [FilePath])
 generateDataRules verb lbi = do
   info verb "Locating data files"
   
@@ -395,8 +410,18 @@ generateDataRules verb lbi = do
   let testcase_files = filter ((".py" ==) . takeExtension) pre_testcase_files
       testcase_rules =
         map (copyDataFile (dataBuildDir lbi </> "testcases") "data/testcases") testcase_files
+        
+  -- Find all RTS interfaces
+  let rts_interface_files = map (`replaceExtension` ".pi") rtsPyAsmFiles
+      build_dir = rtsBuildDir lbi
+      rts_interface_rules =
+        map (copyDataFile (dataBuildDir lbi </> "interfaces") build_dir) rts_interface_files
 
-  return $ testcase_rules ++ prebuilt_data_rules
+  let prebuilt_data_files =
+        map makeTarget $ testcase_rules ++ prebuilt_data_rules
+
+  return (testcase_rules ++ rts_interface_rules ++ prebuilt_data_rules,
+          prebuilt_data_files)
   where
     -- Copy prebuilt files from 'data' to 'dist/data'
     prebuilt_data_rules =

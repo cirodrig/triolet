@@ -6,21 +6,28 @@ users.
 -}
 
 module LowLevel.InterfaceFile
-       (createModuleInterface)
+       (Interface,
+        createModuleInterface,
+        addInterfaceToModuleImports)
 where
 
+import Prelude hiding(mapM)
+
 import Control.Applicative
-import Control.Monad
+import Control.Monad hiding(forM, mapM)
 import Data.Binary
 import Data.List
+import qualified Data.Map as Map
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as Set
+import Data.Traversable
 
 import Gluon.Common.Error
 import Gluon.Common.Supply
 import LowLevel.Binary
 import LowLevel.Build
+import LowLevel.Builtins
 import LowLevel.CodeTypes
 import LowLevel.FreshVar
 import LowLevel.Inlining
@@ -67,6 +74,8 @@ mkImport pre_import = label `seq` -- Verify that label is valid
             of Just n  -> n
                Nothing -> internalError "mkImport: No label"
 
+-------------------------------------------------------------------------------
+
 data Interface =
   Interface
   { ifaceImports :: [Import] -- ^ Variables that may be imported into other  
@@ -76,6 +85,9 @@ data Interface =
 instance Binary Interface where
   put (Interface imps) = put imps
   get = Interface <$> get
+
+-------------------------------------------------------------------------------
+-- Creating an interface
 
 -- | Given a module, create an interface containing the symbols it exports
 --   to Pyon code.  Include values of functions and data that are small
@@ -198,3 +210,98 @@ findRefsStm stm =
      ReturnE atom -> findRefsAtom atom
 
 findRefsFun f = findRefsStm $ funBody f
+
+-------------------------------------------------------------------------------
+-- Loading an interface
+
+-- | Add an interface to a module's import set.  Variables in the 
+--   interface will be renamed to be consistent with the database of
+--   builtin variables and with the module.  The interface will be added
+--   to the module's import list.
+--
+--   The module being updated should have gone through record flattening, 
+--   and should not have gone through closure conversion.
+addInterfaceToModuleImports :: Interface -> Module -> IO Module
+addInterfaceToModuleImports iface mod = do
+  let -- The set of all variables that the interface may share with
+      -- the builtins and/or the module.  Since closure conversion hasn't 
+      -- happened, we only care about a closure-based function's global
+      -- closure.
+      --
+      -- Using a set also eliminates duplicate list entries. 
+      import_variables =
+        Set.toList $ Set.fromList $
+        allBuiltins ++ map importVar (moduleImports mod)
+  
+  -- Rename variables in the interface
+  rn_iface <- 
+    withTheLLVarIdentSupply $ \id_supply -> runFreshVarM id_supply $ do
+      renameInterface import_variables iface
+  
+  -- Insert imports into the module's imports, replacing the existing imports.
+  -- Error out if a type mismatch is detected.
+  let imports = ifaceImports rn_iface ++
+                filter not_in_interface (moduleImports mod)
+        where
+          not_in_interface impent =
+            let v = importVar impent
+            in all ((v /=) . importVar) $ ifaceImports rn_iface
+      
+  return $ mod {moduleImports = imports}
+
+renameInterface :: [Var] -> Interface -> FreshVarM Interface
+renameInterface import_variables iface = do
+  let imports = ifaceImports iface
+
+  -- Decide what to rename each imported variable to
+  new_variables <- mapM pick_renamed_name $ map importVar imports
+  let renaming = mkRenaming $ zip (map importVar imports) new_variables
+  
+  -- Rename
+  imports' <- mapM (rename_import renaming) imports
+  return $ Interface imports'
+  where
+    -- Map from variable name to variable
+    import_variable_labels =
+      Map.fromList [(get_label v, v) | v <- import_variables]
+      where
+        get_label v =
+          case varName v
+          of Just lab -> lab
+             Nothing  -> internalError $ "renameInterface: " ++
+                         "Imported variable has no label"
+
+    -- Decide what to rename an exported variable to.  Rename to the
+    -- preexisting variable with the same name, if one exists.
+    -- Otherwise create a new variable.
+    pick_renamed_name interface_var
+      | Just global_var <- Map.lookup lab import_variable_labels =
+          -- Rename to the preexisting variable with the same label
+          return global_var
+      | otherwise =
+          -- Rename to a new variable with the same label
+          newExternalVar lab (varType interface_var)
+      where
+        lab = case varName interface_var
+              of Just l  -> l
+                 Nothing -> internalError $ "renameInterface: " ++
+                            "Interface variable has no label"
+
+    -- Rename within an imported module
+    rename_import renaming impent =
+      let renamed_var = case getRenamedVar (importVar impent) renaming
+                        of Just v -> v
+                           Nothing -> internalError "renameInterface"
+          Just lab = varName renamed_var
+      in case impent
+         of ImportClosureFun ep mfun -> do
+              ep' <- mkGlobalEntryPoints (entryPointsType ep) lab renamed_var
+              mfun' <- mapM (renameFun RenameEverything renaming) mfun
+              return $ ImportClosureFun ep' mfun'
+            ImportPrimFun _ t mfun -> do
+              mfun' <- mapM (renameFun RenameEverything renaming) mfun
+              return $ ImportPrimFun renamed_var t mfun'
+            ImportData _ values -> do
+              values' <- mapM (mapM (renameVal RenameEverything renaming)) values
+              return $ ImportData renamed_var values'
+      
