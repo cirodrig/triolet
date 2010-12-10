@@ -183,12 +183,12 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   -- Low-level transformations
   ll_mod <- LowLevel.makeBuiltinPrimOps ll_mod
   ll_mod <- LowLevel.flattenRecordTypes ll_mod
-  putStrLn ""
-  putStrLn "Lowered and flattened"
-  print $ LowLevel.pprModule ll_mod
   
   -- Link to interfaces
   ll_mod <- foldM (flip LowLevel.addInterfaceToModuleImports) ll_mod ifaces
+  putStrLn ""
+  putStrLn "Lowered and flattened"
+  print $ LowLevel.pprModule ll_mod
   
   -- First round of optimizations
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod

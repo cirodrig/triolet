@@ -5,7 +5,8 @@ These expressions are used in common subexpression elimination.
 {-# LANGUAGE TypeFamilies, FlexibleContexts, Rank2Types, ScopedTypeVariables #-}
 module LowLevel.Expr
        (CSEVal, fromCSEVal,
-        Expr, varExpr, litExpr,
+        Expr, varExpr, litExpr, appExpr,
+        fromAppExpr,
         pprExpr,
         exprToCSEVal,
         CSEEnv,
@@ -14,6 +15,7 @@ module LowLevel.Expr
         updateCSEEnv,
         cseFindVar,
         cseFindExpr,
+        cseGetExprValue,
         interpretVal,
         interpretPrim,
         interpretStore,
@@ -91,7 +93,9 @@ data UnOp =
 data Expr =
     VarExpr !Var
   | LitExpr !Lit
-  | AppExpr Expr [Expr]   -- ^ Partial application of a known function
+    -- | A closure function application.  The arity is saved as the
+    --   first parameter.
+  | AppExpr !Int Expr [Expr]
   | CAExpr !CAOp [Expr]
   | BinExpr !BinOp Expr Expr
   | UnExpr !UnOp Expr
@@ -101,6 +105,13 @@ varExpr = VarExpr
 
 litExpr :: Lit -> Expr
 litExpr = LitExpr
+
+appExpr :: Int -> Expr -> [Expr] -> Expr
+appExpr = AppExpr
+
+fromAppExpr :: Expr -> Maybe (Int, Expr, [Expr])
+fromAppExpr (AppExpr n op args) = Just (n, op, args)
+fromAppExpr _ = Nothing
 
 isIntLitExpr :: Integer -> Expr -> Bool
 isIntLitExpr n (LitExpr (IntL _ _ m)) = m == n
@@ -147,7 +158,9 @@ pprExprParens e = parens $ pprExpr e
 
 pprExpr (VarExpr v) = pprVar v
 pprExpr (LitExpr l) = pprLit l
-pprExpr (AppExpr op args) = parens $ sep $ map pprExprParens args
+pprExpr (AppExpr arity op args) = parens $
+                                  text "app" <> parens (text $ show arity) <+> 
+                                  sep (map pprExprParens (op:args))
 pprExpr (CAExpr op []) = parens $ text "unit" <+> pprInfixCAOp op
 pprExpr (CAExpr op args) = foldr1 (\x y -> x <+> pprInfixCAOp op <+> y) $
                            map pprExprParens args
@@ -162,7 +175,7 @@ data TrieNode v =
   TrieNode
   { tVar :: Map.Map Var v
   , tLit :: Map.Map Lit v
-  , tApp :: ListTrie TrieNode v
+  , tApp :: IntMap.IntMap (ListTrie TrieNode v)
   , tCA  :: Map.Map CAOp (ListTrie TrieNode v)
   , tBin :: Map.Map BinOp (TrieNode (TrieNode v))
   , tUn  :: Map.Map UnOp (TrieNode v)
@@ -208,6 +221,16 @@ instance Ord k => Trie (Map.Map k) where
   lookup = Map.lookup
   mapMaybeWithKey = Map.mapMaybeWithKey
   filterKeys f m = Map.filterWithKey (\k _ -> f k) m
+
+instance Trie IntMap.IntMap where
+  type Key IntMap.IntMap = Int
+  empty = IntMap.empty
+  toList = IntMap.toList
+  alter = IntMap.alter
+  insert = IntMap.insert
+  lookup = IntMap.lookup
+  mapMaybeWithKey = IntMap.mapMaybeWithKey
+  filterKeys f m = IntMap.filterWithKey (\k _ -> f k) m
 
 instance Trie t => Trie (ListTrie t) where
   type Key (ListTrie t) = [Key t]
@@ -255,7 +278,7 @@ instance Trie TrieNode where
   toList (TrieNode var_t lit_t app_t ca_t bin_t un_t) =
     [(VarExpr var, v)  | (var, v) <- toList var_t] ++
     [(LitExpr lit, v)  | (lit, v) <- toList lit_t] ++
-    [(AppExpr e es, v) | (e:es, v) <- toList app_t] ++
+    [(AppExpr n e es, v) | (n, m) <- toList app_t, (e:es, v) <- toList m] ++
     [(CAExpr op es, v) | (op, m) <- toList ca_t, (es, v) <- toList m] ++
     [(BinExpr op l r, v) | (op, m1) <- toList bin_t
                          , (l, m2) <- toList m1
@@ -268,7 +291,7 @@ instance Trie TrieNode where
     case k
     of VarExpr var -> lookup var $ tVar tr
        LitExpr lit -> lookup lit $ tLit tr
-       AppExpr op args -> lookup (op:args) $ tApp tr
+       AppExpr n op args -> lookup2 n (op:args) $ tApp tr
        CAExpr op es -> lookup2 op es $ tCA tr
        BinExpr op e1 e2 -> lookup3 op e1 e2 $ tBin tr
        UnExpr op e -> lookup2 op e $ tUn tr
@@ -279,7 +302,7 @@ instance Trie TrieNode where
   mapMaybeWithKey f tr =
     tr { tVar = mapMaybeWithKey (f . VarExpr) $ tVar tr
        , tLit = mapMaybeWithKey (f . LitExpr) $ tLit tr
-       , tApp = mapMaybeWithKey (\(op:args) -> f (AppExpr op args)) $ tApp tr
+       , tApp = mapMaybeSub f (\n (op:args) -> AppExpr n op args) $ tApp tr
        , tCA  = mapMaybeSub f CAExpr $ tCA tr
        , tBin = mapMaybeSub2 f BinExpr $ tBin tr
        , tUn  = mapMaybeSub f UnExpr $ tUn tr}
@@ -290,7 +313,7 @@ updateTrieNode f k tr =
   case k
   of VarExpr var -> tr {tVar = f var $ tVar tr}
      LitExpr lit -> tr {tLit = f lit $ tLit tr}
-     AppExpr op args -> tr {tApp = f (op:args) $ tApp tr}
+     AppExpr n op args -> tr {tApp = alterSub n (f (op:args)) $ tApp tr}
      CAExpr op es -> tr {tCA = alter2 op es $ tCA tr}
      BinExpr op e1 e2 -> tr {tBin = alter3 op e1 e2 $ tBin tr}
      UnExpr op e -> tr {tUn = alter2 op e $ tUn tr}
@@ -372,6 +395,7 @@ isReducible expression =
   case expression
   of VarExpr {}     -> True
      LitExpr {}     -> True
+     AppExpr {}     -> True
      CAExpr op _    -> case op
                        of AddZOp {} -> True
      BinExpr op _ _ -> case op
@@ -393,11 +417,15 @@ cseFindVar v env =
   -- or else the value itself,
   -- or else the variable.
   let expr = fromMaybe (VarExpr v) $ cseGetValue v env
-  in fromMaybe (CSEVar v) $ cseFindExpr expr env `mplus` exprToCSEVal expr
+  in fromMaybe (CSEVar v) $ cseGetExprValue expr env
 
 -- | Find an available value that's equal to the given expression.
 cseFindExpr :: Expr -> CSEEnv -> Maybe CSEVal
 cseFindExpr expr env = lookup expr $ available env
+
+-- | Convert the expression to a value, preferring available values.
+cseGetExprValue :: Expr -> CSEEnv -> Maybe CSEVal
+cseGetExprValue expr env = cseFindExpr expr env `mplus` exprToCSEVal expr
 
 -- | Find a CSE expression corresponding to the given variable's value.
 cseGetValue :: Var -> CSEEnv -> Maybe Expr
@@ -491,7 +519,6 @@ isOneAtomExpr expr =
      CAExpr _ [e1, e2] -> isZeroAtomExpr e1 && isZeroAtomExpr e2
      CAExpr _ _        -> False
      BinExpr _ e1 e2   -> isZeroAtomExpr e1 && isZeroAtomExpr e2
-     BinExpr _ _ _     -> False
      UnExpr (LoadOp _) _ ->
        case unpackLoadExpr expr
        of Just (_, base, offset) -> isZeroAtomExpr base
@@ -594,10 +621,16 @@ generateSum sgn sz es =
 --   a 'Simplified' term is returned.  Otherwise a 'Translated' term is
 --   returned.
 simplify :: CSEEnv -> Expr -> Expr
-simplify env expression = 
+simplify env expression =
   case expression
-  of VarExpr v        -> fromMaybe expression $ cseGetValue v env
-     _                -> simplify' expression
+  of VarExpr v -> fromMaybe expression $ cseGetValue v env
+     -- Load expressions cannot be simplified,
+     -- but they can have an available value
+     UnExpr (LoadOp {}) _ ->
+       case cseFindExpr expression env
+       of Nothing  -> expression
+          Just val -> simplify env $ cseValToExpr val
+     _  -> simplify' expression
 
 simplify' expression =
   case expression
