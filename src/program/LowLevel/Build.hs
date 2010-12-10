@@ -40,6 +40,10 @@ instance Monad m => Monad (Gen m) where
                                (y, mk2) <- runGen (k x) rt
                                return (y, mk1 `mappend` mk2))
 
+instance MonadIO m => MonadIO (Gen m) where
+  liftIO m = Gen (\_ -> do x <- liftIO m
+                           return (x, mempty))
+
 instance MonadFix m => MonadFix (Gen m) where
   mfix f = Gen (\rt -> mdo rv@(x, stms) <- case f x of Gen m -> m rt
                            return rv)
