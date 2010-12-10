@@ -23,18 +23,43 @@ updateCSEEnv' :: Var -> Maybe Expr -> CSEEnv -> CSEEnv
 updateCSEEnv' v Nothing  env = env
 updateCSEEnv' v (Just e) env = updateCSEEnv v e env
 
-type CSE a = StateT CSEEnv (Gen FreshVarM) a
+newtype CSET m a = CSET {runCSET :: CSEEnv -> m (CSEEnv, a)}
 
-type CSEF a = StateT CSEEnv FreshVarM a
+evalCSET :: Monad m => CSET m a -> CSEEnv -> m a
+evalCSET m env = do (_, x) <- runCSET m env
+                    return x
+
+instance (Monad m, Functor m) => Functor (CSET m) where
+  fmap f m = CSET $ \s -> do (s', x) <- runCSET m s
+                             return (s', f x)
+
+instance Monad m => Monad (CSET m) where
+  return x = CSET $ \s -> return (s, x)
+  m >>= k = CSET $ \s -> do (s', x) <- runCSET m s
+                            runCSET (k x) s'
+
+instance Monad m => MonadState CSEEnv (CSET m) where
+  get = CSET $ \s -> return (s, s)
+  put s = CSET $ \_ -> return (s, ())
+  
+instance MonadTrans CSET where
+  lift m = CSET $ \env -> do x <- m
+                             return (env, x)
+
+type CSE a = CSET (Gen FreshVarM) a
+
+type CSEF a = CSET FreshVarM a
 
 -- | Perform CSE on a statement and return the transformed statement.
 evalCSE :: [ValueType] -> CSE Stm -> CSEF Stm
-evalCSE rt m = StateT $ \env -> do
-  stm <- execBuild rt $ evalStateT m env
-  return (stm, env)
+evalCSE rt m = CSET $ \env -> do
+  stm <- execBuild rt $ evalCSET m env
+  return (env, stm)
 
+-- | Perform CSE.  Discard the environment.
 runCSEF :: CSEF a -> CSE a
-runCSEF m = StateT $ \env -> lift $ runStateT m env
+runCSEF m = CSET $ \env -> do x <- lift $ evalCSET m env
+                              return (env, x)
 
 cseVal :: Val -> CSE (Val, Maybe Expr)
 cseVal value = 
@@ -158,7 +183,7 @@ cseFun f = do
 
 cseGlobal :: CSEEnv -> GlobalDef -> FreshVarM GlobalDef
 cseGlobal env (GlobalFunDef fdef) =
-  GlobalFunDef <$> evalStateT (cseDef fdef) env
+  GlobalFunDef <$> evalCSET (cseDef fdef) env
 
 cseGlobal _   def@(GlobalDataDef _) = return def
 
