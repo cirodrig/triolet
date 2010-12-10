@@ -7,6 +7,7 @@ users.
 
 module LowLevel.InterfaceFile
        (Interface,
+        pprInterface,
         createModuleInterface,
         addInterfaceToModuleImports)
 where
@@ -22,6 +23,8 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as Set
 import Data.Traversable
+import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Error
 import Gluon.Common.Supply
@@ -33,6 +36,7 @@ import LowLevel.FreshVar
 import LowLevel.Inlining
 import LowLevel.Label
 import LowLevel.Rename
+import LowLevel.Print
 import LowLevel.Syntax
 import Export
 import Globals
@@ -46,15 +50,17 @@ data PreImportData =
   | PreImportData !StaticData
 
 renamePreImport :: Renaming -> PreImport -> FreshVarM PreImport
-renamePreImport rn (Def v pi) =
-  case pi
-  of PreImportFun ft Nothing -> return $ Def v pi
-     PreImportFun ft (Just f) -> do
-       f' <- renameFun RenameNothing rn f
-       return $ Def v $ PreImportFun ft (Just f')
-     PreImportData sd -> do
-       sd' <- renameStaticData RenameNothing rn sd
-       return $ Def v $ PreImportData sd'
+renamePreImport rn (Def v pi) = do
+  pi' <- case pi
+         of PreImportFun ft Nothing -> return pi
+            PreImportFun ft (Just f) -> do
+              f' <- renameFun RenameNothing rn f
+              return $ PreImportFun ft (Just f')
+            PreImportData sd -> do
+              sd' <- renameStaticData RenameNothing rn sd
+              return $ PreImportData sd'
+  let v' = fromMaybe v $ lookupRenamedVar rn v
+  return $ Def v' pi'
 
 mkImport :: PreImport -> FreshVarM Import
 mkImport pre_import = label `seq` -- Verify that label is valid
@@ -90,6 +96,11 @@ instance Binary Interface where
   put (Interface imps exps) = put imps >> put exps
   get = Interface <$> get <*> get
 
+pprInterface :: Interface -> Doc
+pprInterface iface =
+  text "Imports:" $$ vcat (map pprImport $ ifaceImports iface) $$
+  text "Exports:" $$ vcat (map pprImport $ ifaceExports iface) 
+
 -------------------------------------------------------------------------------
 -- Creating an interface
 
@@ -105,12 +116,15 @@ createModuleInterface mod = do
   let export_vars = Set.fromList [v | (v, PyonExportSig) <- moduleExports mod]
       (pre_imports, _) = slurpExports export_vars $ moduleGlobals mod
       
-  -- Rename all exported anonymous variables to new names
-  renaming <- createLocalNames (moduleModuleName mod) (moduleNameSupply mod) $
-              [v | Def v _ <- pre_imports, isNothing $ varName v]
+  -- Rename all exported variables to externally visible names
+  renaming <- createExternNames (moduleModuleName mod) (moduleNameSupply mod) $
+              [v | Def v _ <- pre_imports, not $ varIsExternal v]
 
   withTheLLVarIdentSupply $ \ll_supply -> runFreshVarM ll_supply $ do
-    mod' <- renameModule RenameNothing renaming mod
+    -- Rename all uses of the exported variables.
+    -- Also, rename definitions of the exported variables.
+    mod1 <- renameModule RenameNothing renaming mod
+    let mod2 = renameGlobalDefinitions renaming mod1
     pre_imports' <- mapM (renamePreImport renaming) pre_imports
 
     -- Create the interface
@@ -122,21 +136,41 @@ createModuleInterface mod = do
     -- Extend the export list with the new exported variables
     let new_exports = [(v, PyonExportSig) | Def v _ <- pre_imports'
                                           , not $ v `Set.member` export_vars]
-        mod'' = mod' {moduleExports = new_exports ++ moduleExports mod'}
+        mod3 = mod2 {moduleExports = new_exports ++ moduleExports mod2}
     
-    return (mod'', interface)
+    return (mod3, interface)
 
--- | Create a renaming that renames each member of the list to a
---   variable with a local ID.
-createLocalNames :: ModuleName -> Supply LocalID -> [Var] -> IO Renaming
-createLocalNames mod_name id_supply from_vars =
+-- | Rename each non-external variable in the list to a new,
+--   externally visible name.
+createExternNames :: ModuleName -> Supply LocalID -> [Var] -> IO Renaming
+createExternNames mod_name id_supply from_vars =
   withTheLLVarIdentSupply $ \ll_supply -> do
-    rename_assocs <- forM from_vars $ \v -> do
-      local_id <- supplyValue id_supply
-      let label = anonymousPyonLabel mod_name local_id Nothing
-      new_v <- runFreshVarM ll_supply $ newExternalVar label (varType v)
-      return (v, new_v)
-    return $ mkRenaming rename_assocs
+    fmap mkRenaming $ mapM (mk_rename_assoc ll_supply) from_vars
+    where
+      mk_rename_assoc ll_supply v = do
+        label <- case varName v
+                 of Just label -> return label
+                    Nothing -> do
+                      local_id <- supplyValue id_supply
+                      return $ anonymousPyonLabel mod_name local_id Nothing
+        new_v <- runFreshVarM ll_supply $ newExternalVar label (varType v)
+        return (v, new_v)
+
+-- | Replace the globally defined variables that are in the renaming.
+--   All other appearances of the variables have already been renamed.
+renameGlobalDefinitions renaming mod =
+  mod {moduleGlobals = map rename_global_def $ moduleGlobals mod}
+  where
+    rename_global_def (GlobalFunDef def)
+      | Just v <- lookupRenamedVar renaming $ definiendum def =
+          GlobalFunDef (def {definiendum = v})
+      | otherwise =
+          GlobalFunDef def
+    rename_global_def (GlobalDataDef def)
+      | Just v <- lookupRenamedVar renaming $ definiendum def =
+          GlobalDataDef (def {definiendum = v})
+      | otherwise =
+          GlobalDataDef def
 
 -- | Scan the given exports to select additional variables for export.
 slurpExports :: Set.Set Var -> [GlobalDef] -> ([PreImport], [GlobalDef])
@@ -148,7 +182,7 @@ slurpExports exported gdefs
         imports = map mkPreImport export_defs
         
         -- Find additional definitions mentioned by these
-        other_def_vars = Set.fromList $ map globalDefiniendum gdefs
+        other_def_vars = Set.fromList $ map globalDefiniendum other_defs
         additional_exported =
           (mconcat $ map findReferencedGlobals imports) other_def_vars
         

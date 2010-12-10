@@ -5,6 +5,7 @@ Methods for renaming variables in a module.
 module LowLevel.Rename
        (RnPolicy(..),
         Renaming,
+        lookupRenamedVar,
         mkRenaming,
         emptyRenaming,
         getRenamedVar,
@@ -33,6 +34,9 @@ import Export
 
 -- | A variable renaming
 type Renaming = IntMap.IntMap Var
+
+lookupRenamedVar :: Renaming -> Var -> Maybe Var
+lookupRenamedVar rn v = IntMap.lookup (fromIdent $ varID v) rn
 
 -- | Create a renaming from an association list
 mkRenaming :: [(Var, Var)] -> Renaming
