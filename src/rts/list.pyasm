@@ -178,7 +178,7 @@ function list_build (unit _, unit _, pointer elem_repr, owned stream, pointer li
 };
 
 // Create a stream that traverses the list
-function list_traverse (unit _, pointer elem_repr, pointer list) -> owned {
+function inline list_traverse (unit _, pointer elem_repr, pointer list) -> owned {
   ALLOC_OBJECT(s, Stream, Stream_info)
   s @! Stream.next = owned call list_traverse_next (s @ Stream.return_repr,
                                                     list);
@@ -194,7 +194,7 @@ function list_traverse (unit _, pointer elem_repr, pointer list) -> owned {
 };
 
 // Return the current list element, go to next
-function list_traverse_next (pointer elem_repr,
+function inline list_traverse_next (pointer elem_repr,
                              pointer list,
                              pointer state,
                              pointer ret) -> bool {
