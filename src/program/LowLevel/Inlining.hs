@@ -355,6 +355,15 @@ makeInlinable v f = do
 makeDefInlinable :: FunDef -> FreshVarM InlSpec
 makeDefInlinable (Def v f) = makeInlinable v f
 
+makeLambdaFunInlinable :: Fun -> FreshVarM InlSpec
+makeLambdaFunInlinable f = do
+  -- Create a dummy variable name for the lambda function
+  let ty = case funConvention f
+           of PrimCall -> PointerType
+              ClosureCall -> OwnedType
+  v <- newAnonymousVar (PrimType ty)
+  makeInlinable v f
+
 -- | Make all imported functions that have function bodies inlinable
 makeImportsInlinable :: [Import] -> FreshVarM (IntMap.IntMap InlSpec)
 makeImportsInlinable imports = do
@@ -467,6 +476,27 @@ tryInlineCall cc op args retvars mk_cont = do
       lift $ bindAtom retvars $ CallA cc (VarV op) args
       mk_cont
 
+inlineTailLambda cc fun args =
+  case length args `compare` length (funParams fun)
+  of LT ->
+       internalError "inlineTailLambda: not implemented for undersaturated calls"
+     EQ -> do
+      InlSpec _ _ _ _ params stm _ <- lift $ lift $ makeLambdaFunInlinable fun
+      inlineTailCall params args stm
+     GT ->
+       internalError "inlineTailLambda: not implemented for oversaturated calls"
+
+inlineLambda cc fun args retvars mk_cont =
+  case length args `compare` length (funParams fun)
+  of LT ->
+       internalError "inlineLambda: not implemented for undersaturated calls"
+     EQ -> do
+       InlSpec _ _ _ _ params _ inl_stm <-
+         lift $ lift $ makeLambdaFunInlinable fun
+       inlineCall params args retvars inl_stm mk_cont
+     GT ->
+       internalError "inlineLambda: not implemented for oversaturated calls"
+
 inlineTailCall params args stm = do
   assignCallParameters params args
   return stm
@@ -519,6 +549,8 @@ inlStatement rt statement =
        case atom' of
          CallA cc (VarV op_var) args ->
            tryInlineCall cc op_var args lhs $ inlStatement rt body
+         CallA cc (LamV op_fun) args ->
+           inlineLambda cc op_fun args lhs $ inlStatement rt body
          _ -> do lift $ bindAtom lhs atom'
                  inlStatement rt body
      LetrecE defs body ->
@@ -531,6 +563,7 @@ inlStatement rt statement =
        atom' <- embedInlF $ inlAtom atom
        case atom' of 
          CallA cc (VarV op_var) args -> tryInlineTailCall cc op_var args
+         CallA cc (LamV op_fun) args -> inlineTailLambda cc op_fun args
          _ -> return (ReturnE atom')
   where
     inl_alt (lit, stm) = do
