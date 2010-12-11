@@ -436,9 +436,8 @@ tryInlineTailCall cc op args = do
     inline Nothing = no_inline
     inline (Just (InlSpec inl_req fcc fsize fuses params stm _)) 
       | worthInlining inl_req fcc fsize fuses =
-          inlStatus ("Inlining: " ++ show (pprVar op)) $ do
-            assignCallParameters params args
-            return stm
+          inlStatus ("Inlining: " ++ show (pprVar op)) $ 
+          inlineTailCall params args stm
       | otherwise = no_inline
 
     no_inline = inlStatus ("Not inlining: " ++ show (pprVar op)) $ do
@@ -461,25 +460,32 @@ tryInlineCall cc op args retvars mk_cont = do
       | cc /= inl_cc = internalError "tryInlineCall: Calling convention mismatch"
       | length args /= length params = no_inline
       | not $ worthInlining inl_req inl_cc inl_size inl_uses = no_inline
-      | otherwise = inlStatus ("Inlining: " ++ show (pprVar op)) $ do
-        assignCallParameters params args
-        case inl_stm of
-          Inlinable ZeroUses inl ->
-            -- Ignore the continuation
-            let err = internalError "tryInlineCall"
-            in return $ inl (err, err)
-          Inlinable OneUse inl -> do
-            -- Inline the continuation
-            cont <- embedInlF $ execInlG (map varType retvars) mk_cont
-            return $ inl (retvars, cont)
-          Inlinable ManyUses inl -> do
-            -- Create a local function for the continuation
-            lift $ getContinuation True retvars $ \cont ->
-              return $ inl (retvars, cont)
-            mk_cont
+      | otherwise = inlStatus ("Inlining: " ++ show (pprVar op)) $ 
+                    inlineCall params args retvars inl_stm mk_cont
 
     no_inline = inlStatus ("Not inlining: " ++ show (pprVar op)) $ do
       lift $ bindAtom retvars $ CallA cc (VarV op) args
+      mk_cont
+
+inlineTailCall params args stm = do
+  assignCallParameters params args
+  return stm
+
+inlineCall params args retvars inl_stm mk_cont = do
+  assignCallParameters params args
+  case inl_stm of
+    Inlinable ZeroUses inl ->
+      -- Ignore the continuation
+      let err = internalError "tryInlineCall"
+      in return $ inl (err, err)
+    Inlinable OneUse inl -> do
+      -- Inline the continuation
+      cont <- embedInlF $ execInlG (map varType retvars) mk_cont
+      return $ inl (retvars, cont)
+    Inlinable ManyUses inl -> do
+      -- Create a local function for the continuation
+      lift $ getContinuation True retvars $ \cont ->
+        return $ inl (retvars, cont)
       mk_cont
 
 inlVal :: Val -> InlF Val
