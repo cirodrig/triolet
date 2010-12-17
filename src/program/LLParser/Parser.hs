@@ -139,7 +139,7 @@ parseType = prim_type <|> record_type <|> bytes_type <?> "type"
                 , (PointerTok, PointerType)]
 
     record_type = do
-      rt <- fmap RecordT identifier
+      rt <- fmap NamedT identifier
       try (type_app rt) <|> return rt
       where
         type_app rt = do
@@ -248,7 +248,7 @@ basicExprWithIdentifier id =
     -- return type 
     basicExprWithRecordType = do
       args <- optionMaybe (parenList parseType)
-      let base_record_type = RecordT id
+      let base_record_type = NamedT id
           record_type =
             case args
             of Nothing -> base_record_type

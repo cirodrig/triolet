@@ -43,7 +43,7 @@ data Type a =
     -- | A primitive type
     PrimT !PrimType
     -- | A named type; could be a record type, typedef, or type parameter.
-  | RecordT (RecordName a)
+  | NamedT (RecordName a)
     -- | Featureless bytes, with given size and alignment.
   | BytesT (Expr a) (Expr a)
     -- | A type application of a named type to arguments.
@@ -130,7 +130,7 @@ type Parameters a = [Parameter a]
 
 -- | A referene to a record field.  The field is a type followed by
 -- a sequence of field names, and possibly a type cast.  The type must be
--- a 'RecordT' or an application of a 'RecordT'.
+-- a 'NamedT' or an application of a 'NamedT'.
 data Field a = Field (Type a) [FieldName] (Maybe (Type a))
 
 data BaseExpr a =

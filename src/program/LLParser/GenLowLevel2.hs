@@ -57,8 +57,8 @@ emptyTypeEnv = IntMap.empty
 
 insertTypeSynonym syn_id record m = IntMap.insert (fromIdent syn_id) record m
 
-lookupTypeSynonym syn_id m =
-  case IntMap.lookup (fromIdent syn_id) m
+lookupTypeSynonym syn m =
+  case IntMap.lookup (fromIdent (typeSynonymID syn)) m
   of Just t -> t
      Nothing -> internalError "lookupTypeSynonym"
 
@@ -72,14 +72,14 @@ convertToDynamicFieldType :: TypeEnv -> Type Typed -> G DynamicFieldType
 convertToDynamicFieldType tenv ty = 
   case ty
   of PrimT pt -> return $ PrimField pt
-     RecordT (TypeSynonym type_id _) ->
-       let ty' = lookupTypeSynonym type_id tenv
+     NamedT (SynonymT syn) ->
+       let ty' = lookupTypeSynonym syn tenv
        in case dynamicTypeRecord ty'
           of Just dyn_record ->
                return $ RecordField dyn_record
              Nothing ->
                return $ BytesField (dynamicTypeSize ty') (dynamicTypeAlign ty')
-     RecordT record -> do
+     NamedT (RecordT record) -> do
        dyn_record <- convertToDynamicRecord tenv record
        return $ RecordField dyn_record
      BytesT size align -> do
@@ -91,22 +91,16 @@ convertToDynamicFieldType tenv ty =
        convertToDynamicFieldType tenv $ applyRecordType ty args
 
 convertToDynamicRecord :: TypeEnv -> TypedRecord -> G DynamicRecord
-convertToDynamicRecord tenv rec = 
-  case rec
-  of TypeSynonym type_id _ ->
-       case dynamicTypeRecord $ lookupTypeSynonym type_id tenv
-       of Just record -> return record
-          Nothing     -> error "Expecting a record type"
-     _ -> do
-       field_types <- forM (typedRecordFields0 rec) $ \(FieldDef m t _) -> do 
-         t' <- convertToDynamicFieldType tenv t
-         return (m, t')
-       createDynamicRecord field_types
+convertToDynamicRecord tenv rec = do
+  field_types <- forM (typedRecordFields0 rec) $ \(FieldDef m t _) -> do 
+    t' <- convertToDynamicFieldType tenv t
+    return (m, t')
+  createDynamicRecord field_types
 
 convertTypeToDynamicRecord :: TypeEnv -> Type Typed -> G DynamicRecord
 convertTypeToDynamicRecord tenv ty =
-  case ty
-  of RecordT rec -> convertToDynamicRecord tenv rec
+  case dereferenceTypeSynonym ty
+  of NamedT (RecordT rec) -> convertToDynamicRecord tenv rec
      _ -> error "Expecting record type"
 
 genDynamicType :: TypeEnv -> Type Typed -> G DynamicType
@@ -116,9 +110,9 @@ genDynamicType tenv ty =
        let size = nativeWordV $ sizeOf pt
            align = nativeWordV $ alignOf pt
        in return $ DynamicType size align Nothing
-     RecordT (TypeSynonym type_id _) -> do
-       return $ lookupTypeSynonym type_id tenv
-     RecordT rec -> do
+     NamedT (SynonymT syn) -> do
+       return $ lookupTypeSynonym syn tenv
+     NamedT (RecordT rec) -> do
        dynamic_rec <- convertToDynamicRecord tenv rec
        return $ DynamicType (recordSize dynamic_rec) (recordAlignment dynamic_rec) (Just dynamic_rec)
      BytesT size align -> do
@@ -152,11 +146,11 @@ genDataExpr expr =
      NullLitE ->
        return $ LL.LitV LL.NullL
      RecordE rec_type fields -> do
-       let record = case rec_type 
-                    of RecordT rec -> convertToStaticRecord rec
-                       _ -> internalError "genExpr: Expecting record type"
+       let srecord = case dereferenceTypeSynonym rec_type
+                     of NamedT (RecordT rec) -> convertToStaticRecord rec
+                        _ -> internalError "genExpr: Expecting record type"
        fields' <- mapM genDataExpr fields
-       return $ LL.RecV record fields'
+       return $ LL.RecV srecord fields'
      SizeofE ty ->
        let ty' = convertToValueType ty
            lit = mkIntLit (PrimType nativeWordType) (fromIntegral $ sizeOf ty')
@@ -196,14 +190,14 @@ genField tenv (Field base_type fnames cast_type) =
   where
     get_field_offset base_offset base_type (fname:fnames) =
       case base_type
-      of RecordT (TypeSynonym type_id typed_type) ->
-           case dynamicTypeRecord $ lookupTypeSynonym type_id tenv
+      of NamedT (SynonymT syn) ->
+           case dynamicTypeRecord $ lookupTypeSynonym syn tenv
            of Just dyn_rec -> 
-                case typed_type
-                of RecordT static_rec ->
+                case typeSynonymValue syn
+                of NamedT (RecordT static_rec) ->
                      get_dynamic_type_offset dyn_rec static_rec
               Nothing -> internalError "genField: Base type is not a record"
-         RecordT rec -> do
+         NamedT (RecordT rec) -> do
            dyn_rec <- convertToDynamicRecord tenv rec
            get_dynamic_type_offset dyn_rec rec
          _ -> internalError "genField: Base type is not a record"
@@ -256,7 +250,7 @@ genExpr tenv expr =
      RecordE record fs -> do
        fs' <- mapM (asVal <=< subexpr) fs
        let record_type = case record
-                         of RecordT rec -> convertToStaticRecord rec
+                         of NamedT (RecordT rec) -> convertToStaticRecord rec
                             _ -> internalError "genExpr: Expecting record type"
            atom = LL.PackA record_type fs'
        return $ GenAtom [RecordType record_type] atom
@@ -301,9 +295,9 @@ genExpr tenv expr =
        size <-
          case ty
          of BytesT size _ -> return $ mkWordVal size
-            RecordT (TypeSynonym tid _) -> 
-              return $ dynamicTypeSize $ lookupTypeSynonym tid tenv
-            RecordT rec -> do
+            NamedT (SynonymT syn) ->
+              return $ dynamicTypeSize $ lookupTypeSynonym syn tenv
+            NamedT (RecordT rec) -> do
               dynamic_rec <- convertToDynamicRecord tenv rec
               return $ recordSize dynamic_rec
             _ -> return $ nativeWordV $ sizeOf $ convertToValueType ty
@@ -312,9 +306,9 @@ genExpr tenv expr =
        align <-
          case ty
          of BytesT _ align -> return $ mkWordVal align
-            RecordT (TypeSynonym tid _) ->
-              return $ dynamicTypeAlign $ lookupTypeSynonym tid tenv
-            RecordT rec -> do
+            NamedT (SynonymT syn) ->
+              return $ dynamicTypeAlign $ lookupTypeSynonym syn tenv
+            NamedT (RecordT rec) -> do
               dynamic_rec <- convertToDynamicRecord tenv rec
               return $ recordAlignment dynamic_rec
             _ -> return $ nativeWordV $ alignOf $ convertToValueType ty
@@ -459,7 +453,7 @@ genStmt tenv stmt =
      LetrecS fdefs body -> do
        emitLetrec =<< lift (mapM (genFunctionDef tenv) fdefs)
        genStmt tenv body
-     TypedefS (TypeSynonym type_id _) ty stmt -> do
+     TypedefS (SynonymT (TypeSynonym type_id _)) ty stmt -> do
        -- Compute specification of this type
        ty' <- genDynamicType tenv ty
        genStmt (insertTypeSynonym type_id ty' tenv) stmt
@@ -659,9 +653,9 @@ genLValue tenv lvalue ty =
        -- Create a temporary variable to hold the stored value
        tmpvar <- lift $ LL.newAnonymousVar ty
        
-       let record = case rec
-                    of RecordT r -> convertToStaticRecord r
-                       _ -> internalError "genLValue"
+       let record = case dereferenceTypeSynonym rec
+                      of NamedT (RecordT r) -> convertToStaticRecord r
+                         _ -> internalError "genLValue"
            fields = LowLevel.CodeTypes.recordFields record
            field_type fld =
              case fieldType fld
@@ -691,7 +685,7 @@ genDataDef :: DataDef Typed -> FreshVarM LL.DataDef
 genDataDef ddef = do
   -- Get the data type
   let record_type = case exprType (dataValue ddef)
-                    of [RecordT rec] -> convertToStaticRecord rec
+                    of [NamedT (RecordT rec)] -> convertToStaticRecord rec
                        _ -> internalError "genDataDef"
 
   -- Convert the initializer
