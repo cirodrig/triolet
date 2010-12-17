@@ -344,8 +344,8 @@ instance HasSourcePos (CExp s) where
 data CModule s =
   CModule
   { cmodName :: !ModuleName
-  , cmodDefs :: [[CDef Rec]]
-  , cmodExports :: [CExport Rec]
+  , cmodDefs :: [[CDef s]]
+  , cmodExports :: [CExport s]
   }
 
 -------------------------------------------------------------------------------
@@ -401,6 +401,15 @@ cFunType fun = build_type (cfunParams fun) (cfunEffect fun) (cfunReturn fun)
     ret_mentions v (_ ::: ret_type) = ret_type `cTypeMentions` v
 
     empty_effect = expCT Gluon.Core.Builtins.Effect.empty
+
+-- | Deconstruct a constructor application term
+unpackConAppE :: RCExp -> Maybe (Con, [RCExp], Maybe RCExp)
+unpackConAppE expression =
+  case expression
+  of AppCE { cexpOper = ValCE {cexpVal = OwnedConV con}
+           , cexpArgs = args
+           , cexpReturnArg = mrarg} -> Just (con, args, mrarg)
+     _ -> Nothing
 
 -------------------------------------------------------------------------------
 -- Renaming
