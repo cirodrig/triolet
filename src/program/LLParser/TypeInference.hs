@@ -69,6 +69,7 @@ data TExp = TExp {expType :: [Type Typed], expExp :: !(BaseExpr Typed)}
 -- Show instances, for debugging.
 
 deriving instance Show (Type Typed)
+deriving instance Show (TypeArg Typed)
 deriving instance Show (FieldDef Typed)
 
 instance Show TExp where
@@ -116,7 +117,7 @@ applyToNonces x =
 -- | Parameters are de Bruijn indices
 newtype TypeParameter = TypeParameter Int
 
-type TypeParametric a = Parameterized (Type Typed) a
+type TypeParametric a = Parameterized (TypeArg Typed) a
 type ParametricType = TypeParametric (Type Typed)
 
 pVar n (TypeParameter i) = Parameterized (Just n) (\xs -> xs !! i)
@@ -141,6 +142,12 @@ instance Applicative (Parameterized dom) where
                           | otherwise -> internalError "Parameterized.(<*>)"
 
 -------------------------------------------------------------------------------
+
+fromTypeArg (TypeArg t) = t
+fromTypeArg (ExprArg _) = error "Type argument found where expression expected"
+
+fromExprArg (ExprArg t) = t
+fromExprArg (TypeArg _) = error "Expression argument found where type expected"
 
 data NamedType =
     RecordT !TypedRecord
@@ -179,7 +186,7 @@ data TypedRecord =
     , typedRecordFields :: [FieldDef Typed]
     }
 
-applyTemplate :: Type Typed -> [Type Typed] -> Type Typed
+applyTemplate :: Type Typed -> [TypeArg Typed] -> Type Typed
 applyTemplate (NamedT (TemplateT tmpl)) args = apply tmpl args
 
 -- | A named entity
@@ -537,7 +544,7 @@ resolveTypeName nm = do
     else Just $ "Not defined: '" ++ nm ++ "'"
   return $ case entry
            of TypeEntry t -> pure t
-              TypeParameterEntry tp -> pVar type_arity tp
+              TypeParameterEntry tp -> fmap fromTypeArg $ pVar type_arity tp
 
 resolveTypeName0 :: RecordName Parsed -> NR (Type Typed)
 resolveTypeName0 nm = fmap (applyTo []) $ resolveTypeName nm
@@ -561,10 +568,15 @@ resolveType ty =
      AppT t args -> do
        -- Resolve t and args
        param_t <- resolveType t
-       arg_ts <- mapM resolveType args
+       arg_ts <- mapM resolveTypeArg args
 
        -- Apply resolved parameter to resolved arguments
        return (applyTemplate <$> param_t <*> sequenceA arg_ts)
+
+resolveTypeArg (TypeArg t) = liftM (fmap TypeArg) $ resolveType t
+-- FIXME: Type parameters inside expressions
+resolveTypeArg (ExprArg e) = liftM (pure . ExprArg) $ resolveExpr e
+
 
 resolveType0 :: Type Parsed -> NR (Type Typed)
 resolveType0 t = fmap (applyTo []) $ resolveType t
@@ -1242,7 +1254,7 @@ typeInferModule module_path module_name externs defs = do
   type_synonym_ids <- newIdentSupply
   withTheLLVarIdentSupply $ \var_ids -> do
     let ctx = NREnv var_ids type_synonym_ids [] module_name
-        global_scope = Env 0 []
+        global_env = Env 0 [predefinedScope]
     
         -- Start out in the global scope.
         -- Create the external variables, then process each top-level
@@ -1250,9 +1262,21 @@ typeInferModule module_path module_name externs defs = do
         generate_module =
           enterRec $ withExternalVariables externs $ resolveTopLevelDefs defs
 
-    (return_data, _, errs) <- runNR generate_module ctx global_scope id
+    (return_data, _, errs) <- runNR generate_module ctx global_env id
 
     case errs [] of
       [] -> return return_data
       xs -> do mapM_ putStrLn xs
                fail "Errors detected while parsing input"
+
+predefinedScope = NonRecScope $
+                  Map.fromList [("array", template arraycon),
+                                ("const_array", template constarraycon)]
+  where
+    template = TypeEntry . NamedT . TemplateT
+    
+    arraycon = Parameterized (Just 2) $ \[size_arg, type_arg] ->
+      ArrayT Mutable (fromExprArg size_arg) (fromTypeArg type_arg)
+
+    constarraycon = Parameterized (Just 2) $ \[size_arg, type_arg] ->
+      ArrayT Constant (fromExprArg size_arg) (fromTypeArg type_arg)

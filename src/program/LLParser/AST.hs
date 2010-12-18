@@ -51,7 +51,10 @@ data Type a =
     --   all immutable.  Size is an unsigned word.
   | ArrayT !Mutability (Expr a) (Type a)
     -- | A type application of a named type to arguments.
-  | AppT (Type a) [Type a]
+  | AppT (Type a) [TypeArg a]
+
+-- | An argument of a parametric type is either a type or an expression.
+data TypeArg a = TypeArg (Type a) | ExprArg (Expr a)
 
 type FieldName = String
 
@@ -213,6 +216,7 @@ data Stmt a =
   | ReturnS (Atom a)
 
 deriving instance Show (Type Parsed)
+deriving instance Show (TypeArg Parsed)
 deriving instance Show (Def Parsed)
 deriving instance Show (RecordDef Parsed)
 deriving instance Show (FieldDef Parsed)

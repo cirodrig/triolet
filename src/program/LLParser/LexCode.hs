@@ -53,7 +53,6 @@ data Token =
   | DerefPlusTok
   | WildTok
   | AlignofTok
-  | ArrayTok
   | AsTok
   | BoolTok
   | BytesTok
@@ -91,6 +90,7 @@ data Token =
   | UInt32Tok
   | UInt64Tok
   | UnitTok
+  | ValueTok
   | WhileTok
     deriving(Eq)
 
@@ -127,7 +127,6 @@ showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
 showToken WildTok = "wildcard"
 showToken AlignofTok = "'alignof'"
-showToken ArrayTok = "'array'"
 showToken AsTok = "'as'"
 showToken BoolTok = "'bool'"
 showToken BytesTok = "'bytes'"
@@ -165,6 +164,7 @@ showToken UInt16Tok = "'uint16'"
 showToken UInt32Tok = "'uint32'"
 showToken UInt64Tok = "'uint64'"
 showToken UnitTok = "'unit'"
+showToken ValueTok = "'value'"
 showToken WhileTok = "'while'"
 
 -- | A token labeled with a source position

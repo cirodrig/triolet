@@ -119,7 +119,7 @@ endOfFile = notFollowedBy $ tokenPrim showT nextParsecPos anything
 -------------------------------------------------------------------------------
 
 parseType :: P (Type Parsed)
-parseType = prim_type <|> record_type <|> bytes_type <|> array_type <?> "type"
+parseType = prim_type <|> record_type <|> bytes_type <?> "type"
   where
     prim_type = choice [match tok >> return (PrimT typ)
                        | (tok, typ) <- primtypes]
@@ -143,7 +143,7 @@ parseType = prim_type <|> record_type <|> bytes_type <|> array_type <?> "type"
       try (type_app rt) <|> return rt
       where
         type_app rt = do
-          args <- parenList parseType
+          args <- parseTypeArgs
           return $ AppT rt args
 
     bytes_type = do
@@ -154,15 +154,6 @@ parseType = prim_type <|> record_type <|> bytes_type <|> array_type <?> "type"
         al <- expr
         return $ BytesT sz al
 
-    array_type = do
-      match ArrayTok
-      parens $ do
-        sz <- expr
-        match CommaTok
-        mut <- mutability
-        ty <- parseType
-        return $ ArrayT mut sz ty
-
 -- | Parse a type of a global object.  The only valid types
 -- are \'owned\' or \'pointer\'.
 parseGlobalType :: P PrimType
@@ -170,6 +161,12 @@ parseGlobalType = owned_type <|> pointer_type <?> "'owned' or 'pointer' type"
   where
     owned_type = match OwnedTok >> return OwnedType
     pointer_type = match PointerTok >> return PointerType
+
+-- | Parse a type argument list.
+parseTypeArgs :: P [TypeArg Parsed]
+parseTypeArgs = parenList type_arg
+  where
+    type_arg = (match ValueTok >> fmap ExprArg expr) <|> fmap TypeArg parseType
 
 field :: P (Field Parsed)
 field = do
@@ -269,7 +266,7 @@ basicExprWithIdentifier id =
     -- Either a record construction, or some expression that has that
     -- return type 
     basicExprWithRecordType = do
-      args <- optionMaybe (parenList parseType)
+      args <- optionMaybe parseTypeArgs
       let base_record_type = NamedT id
           record_type =
             case args

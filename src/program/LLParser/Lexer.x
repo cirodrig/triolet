@@ -31,7 +31,6 @@ rules :-
 
 -- Keywords
 "alignof" / @notid	{ tok AlignofTok }
-"array" / @notid	{ tok ArrayTok }
 "as" / @notid		{ tok AsTok }
 "bool" / @notid		{ tok BoolTok }
 "bytes" / @notid	{ tok BytesTok }
@@ -69,6 +68,7 @@ rules :-
 "uint32" / @notid	{ tok UInt32Tok }
 "uint64" / @notid	{ tok UInt64Tok }
 "unit" / @notid		{ tok UnitTok }
+"value" / @notid	{ tok ValueTok }
 "while" / @notid	{ tok WhileTok }
 "_" / @notid @		{ tok WildTok }
 
