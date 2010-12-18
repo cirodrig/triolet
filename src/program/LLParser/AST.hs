@@ -45,7 +45,11 @@ data Type a =
     -- | A named type; could be a record type, typedef, or type parameter.
   | NamedT (RecordName a)
     -- | Featureless bytes, with given size and alignment.
+    -- Size and alignment are unsigned words.
   | BytesT (Expr a) (Expr a)
+    -- | An array of values.  The array contents are either all mutable or
+    --   all immutable.  Size is an unsigned word.
+  | ArrayT !Mutability (Expr a) (Type a)
     -- | A type application of a named type to arguments.
   | AppT (Type a) [Type a]
 
@@ -131,7 +135,10 @@ type Parameters a = [Parameter a]
 -- | A referene to a record field.  The field is a type followed by
 -- a sequence of field names, and possibly a type cast.  The type must be
 -- a 'NamedT' or an application of a 'NamedT'.
-data Field a = Field (Type a) [FieldName] (Maybe (Type a))
+data Field a = Field (Type a) [FieldSpec a] (Maybe (Type a))
+
+data FieldSpec a = RecordFS !FieldName
+                 | ArrayFS (Expr a)
 
 data BaseExpr a =
     -- | A variable
@@ -213,6 +220,7 @@ deriving instance Show (DataDef Parsed)
 deriving instance Show (FunctionDef Parsed)
 deriving instance Show (Parameter Parsed)
 deriving instance Show (Field Parsed)
+deriving instance Show (FieldSpec Parsed)
 deriving instance Show (BaseExpr Parsed)
 deriving instance Show (Atom Parsed)
 deriving instance Show (LValue Parsed)

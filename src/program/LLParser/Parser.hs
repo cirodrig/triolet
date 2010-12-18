@@ -119,7 +119,7 @@ endOfFile = notFollowedBy $ tokenPrim showT nextParsecPos anything
 -------------------------------------------------------------------------------
 
 parseType :: P (Type Parsed)
-parseType = prim_type <|> record_type <|> bytes_type <?> "type"
+parseType = prim_type <|> record_type <|> bytes_type <|> array_type <?> "type"
   where
     prim_type = choice [match tok >> return (PrimT typ)
                        | (tok, typ) <- primtypes]
@@ -154,6 +154,15 @@ parseType = prim_type <|> record_type <|> bytes_type <?> "type"
         al <- expr
         return $ BytesT sz al
 
+    array_type = do
+      match ArrayTok
+      parens $ do
+        sz <- expr
+        match CommaTok
+        mut <- mutability
+        ty <- parseType
+        return $ ArrayT mut sz ty
+
 -- | Parse a type of a global object.  The only valid types
 -- are \'owned\' or \'pointer\'.
 parseGlobalType :: P PrimType
@@ -166,8 +175,21 @@ field :: P (Field Parsed)
 field = do
   liftM3 Field parseType fields cast <?> "field offset specifier"
   where
-    fields = many1 (match DotTok >> identifier) <?> "field specifiers"
+    fields = many1 fieldSpec
     cast = optionMaybe (match AsTok >> parseType)
+
+fieldSpec = record_field <|> array_index <?> "field specifier"
+  where
+    record_field = do
+      match DotTok
+      field_name <- identifier
+      return $ RecordFS field_name
+    
+    array_index = do
+      match LBracketTok
+      ix <- expr
+      match RBracketTok
+      return $ ArrayFS ix
 
 -- | Operators recognized by the parser
 operators =

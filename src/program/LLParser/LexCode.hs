@@ -27,6 +27,8 @@ data Token =
   | StringTok !String
   | LBraceTok
   | RBraceTok
+  | LBracketTok
+  | RBracketTok
   | LParenTok
   | RParenTok
   | AssignTok
@@ -51,6 +53,7 @@ data Token =
   | DerefPlusTok
   | WildTok
   | AlignofTok
+  | ArrayTok
   | AsTok
   | BoolTok
   | BytesTok
@@ -98,6 +101,8 @@ showToken (FltTok d) = show d
 showToken (StringTok s) = show s
 showToken LBraceTok = "left brace"
 showToken RBraceTok = "right brace"
+showToken LBracketTok = "left bracket"
+showToken RBracketTok = "right bracket"
 showToken LParenTok = "left parenthesis"
 showToken RParenTok = "right parenthesis"
 showToken AssignTok = "equal sign"
@@ -122,6 +127,7 @@ showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
 showToken WildTok = "wildcard"
 showToken AlignofTok = "'alignof'"
+showToken ArrayTok = "'array'"
 showToken AsTok = "'as'"
 showToken BoolTok = "'bool'"
 showToken BytesTok = "'bytes'"

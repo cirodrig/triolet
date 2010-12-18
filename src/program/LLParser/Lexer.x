@@ -31,6 +31,7 @@ rules :-
 
 -- Keywords
 "alignof" / @notid	{ tok AlignofTok }
+"array" / @notid	{ tok ArrayTok }
 "as" / @notid		{ tok AsTok }
 "bool" / @notid		{ tok BoolTok }
 "bytes" / @notid	{ tok BytesTok }
@@ -74,6 +75,8 @@ rules :-
 -- Punctuation
 "{"			{ tok LBraceTok }
 "}"			{ tok RBraceTok }
+"["			{ tok LBracketTok }
+"]"			{ tok RBracketTok }
 "("			{ tok LParenTok }
 ")"			{ tok RParenTok }
 "->" / @notsym		{ tok ArrowTok }

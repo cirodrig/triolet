@@ -51,7 +51,7 @@ import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.Label
-import LowLevel.CodeTypes hiding(Field, recordFields)
+import LowLevel.CodeTypes hiding(Field, fieldType, recordFields)
 import qualified LowLevel.Syntax as LL
 import Globals
 
@@ -528,6 +528,7 @@ convertToStaticFieldType ty =
        let size' = convertToIntConstant size
            align' = convertToIntConstant align
        in BytesField size' align'
+     ArrayT {} -> error "Record cannot contain an array"
      AppT ty args ->
        -- Apply, then convert
        convertToStaticFieldType $ applyRecordType ty args
@@ -572,6 +573,11 @@ resolveType ty =
        expectType nativeWordType "Size of type must be a native word" (expType size_expr)
        expectType nativeWordType "Alignment of type must be a native word" (expType align_expr)
        return (pure $ BytesT size_expr align_expr)
+     ArrayT mut size elt -> do
+       size_expr <- resolveExpr size
+       expectType nativeWordType "Size of array must be a native word" (expType size_expr)
+       elt_ty <- resolveType elt
+       return (ArrayT mut size_expr <$> elt_ty)
      AppT t args -> do
        -- Resolve t and args
        param_t <- resolveType t
@@ -732,11 +738,7 @@ resolveExpr expr =
        
        -- Determine the type of the loaded field
        let ty = case fld'
-                of Field record fnames Nothing ->
-                     case dereferenceTypeSynonym record 
-                     of NamedT (RecordT r) ->
-                          typedRecordFieldType r fnames
-                        _ -> error "Base of field expression must be a record type"
+                of Field base_type fnames Nothing -> fieldType base_type fnames
                    Field _ _ (Just cast_ty) -> cast_ty
        return1 ty (LoadFieldE base' fld')
      DerefE {} -> error "Store expression not valid here"
@@ -943,25 +945,39 @@ resolveLValue lvalue ty =
     pass = return ()
 
 resolveField :: Field Parsed -> NR (TypeParametric (Field Typed))
-resolveField (Field rec fname mtype) = do 
+resolveField (Field rec fnames mtype) = do 
   record' <- resolveType0 rec
   mtype' <- traverse resolveType mtype
-  return $ Field record' fname <$> sequenceA mtype'
+  fnames' <- mapM resolveFieldSpec fnames
+  return $ Field record' fnames' <$> sequenceA mtype'
+
+resolveFieldSpec :: FieldSpec Parsed -> NR (FieldSpec Typed)
+resolveFieldSpec (RecordFS fname) = return (RecordFS fname)
+resolveFieldSpec (ArrayFS e) = ArrayFS `liftM` resolveExpr e
 
 resolveField0 :: Field Parsed -> NR (Field Typed)
 resolveField0 f = fmap (applyTo []) $ resolveField f
 
-typedRecordFieldType :: TypedRecord -> [FieldName] -> Type Typed
-typedRecordFieldType record (fld:flds) =
-  case find match_field_name $ typedRecordFields0 record
-  of Nothing -> error $ "Record does not have field '" ++ fld ++ "'"
-     Just (FieldDef _ ty _)
-       | null flds -> ty
-       | NamedT (RecordT record') <- ty -> typedRecordFieldType record' flds
-       | otherwise ->
-           error $ "Non-record type does not have field '" ++ fld ++ "'"
+fieldType :: Type Typed -> [FieldSpec Typed] -> Type Typed
+fieldType ty flds =
+  let real_ty = dereferenceTypeSynonym ty 
+  in case flds
+     of RecordFS fname : flds ->
+          case real_ty
+          of NamedT (RecordT rec) ->
+               fieldType (record_field_type rec fname) flds
+             _ ->
+               error $ "Non-record type does not have field '" ++ fname ++ "'"
+        ArrayFS _ : flds ->
+          case real_ty
+          of ArrayT _ _ elt_ty -> fieldType elt_ty flds
+             _ -> error "Base of array index expression is not an array"
+        [] -> ty
   where
-    match_field_name (FieldDef _ _ nm) = nm == fld
+    record_field_type rec fname =
+      case find (\(FieldDef _ _ nm) -> nm == fname) $ typedRecordFields0 rec
+      of Just (FieldDef _ t _) -> t
+         Nothing -> error $ "Record type does not have field '" ++ fname ++ "'"
 
 -- | Do type inference on a parameter and add the variable to the environment 
 resolveParameter :: Parameter Parsed -> NR (Parameter Typed)

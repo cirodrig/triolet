@@ -82,6 +82,10 @@ convertToDynamicFieldType tenv ty =
      NamedT (RecordT record) -> do
        dyn_record <- convertToDynamicRecord tenv record
        return $ RecordField dyn_record
+     ArrayT mut size elt_type -> do
+       elt_type' <- genDynamicType tenv elt_type
+       padded_size <- genArrayElementSize elt_type'
+       return $ BytesField (padded_size) (dynamicTypeAlign elt_type')
      BytesT size align -> do
        size_val <- asVal =<< genExpr tenv size
        align_val <- asVal =<< genExpr tenv align
@@ -188,49 +192,83 @@ genField :: TypeEnv -> Field Typed -> G (LL.Val, Mutability, ValueType)
 genField tenv (Field base_type fnames cast_type) =
   get_field_offset (nativeIntV 0) base_type fnames
   where
-    get_field_offset base_offset base_type (fname:fnames) =
-      case base_type
-      of NamedT (SynonymT syn) ->
-           case dynamicTypeRecord $ lookupTypeSynonym syn tenv
-           of Just dyn_rec -> 
-                case typeSynonymValue syn
-                of NamedT (RecordT static_rec) ->
-                     get_dynamic_type_offset dyn_rec static_rec
-              Nothing -> internalError "genField: Base type is not a record"
-         NamedT (RecordT rec) -> do
-           dyn_rec <- convertToDynamicRecord tenv rec
-           get_dynamic_type_offset dyn_rec rec
-         _ -> internalError "genField: Base type is not a record"
-      where
-        get_dynamic_type_offset dyn_rec rec =
-          case findIndex (match_name fname) $ typedRecordFields0 rec
-          of Just ix -> do
-               let rfield = typedRecordFields0 rec !! ix
-                   dfield = dyn_rec !!: ix
-               offset <- nativeAddZ base_offset (fieldOffset dfield)
-               case fnames of
-                 [] -> return_field_offset offset dfield
-                 _  -> case rfield
-                       of FieldDef _ next_rec _ ->
-                            get_field_offset offset next_rec fnames
-                          _ -> internalError "genField"
-             Nothing ->
-               internalError $ "genField: No field named '" ++ fname ++ "'"
+    get_field_offset base_offset base_type (ArrayFS index:fnames) =
+      case dereferenceTypeSynonym base_type
+      of ArrayT mut array_size elt_type -> do
+           -- Get the size and alignment of an array element
+           dyn_elt_type <- genDynamicType tenv elt_type
+           
+           -- Compute the size of one array element
+           padded_size <- genArrayElementSize dyn_elt_type
+           
+           -- Compute the offset
+           index_val <- asVal =<< genExpr tenv index
+           offset <- nativeMulZ index_val padded_size
+           new_base_offset <- nativeAddZ base_offset offset
+           
+           case fnames of
+             [] -> let val_type = convertToValueType elt_type
+                   in return_field_offset new_base_offset mut val_type
+             _ -> get_field_offset new_base_offset elt_type fnames
+         _ -> internalError "genField: Base type is not an array"
 
-    return_field_offset offset field
+    get_field_offset base_offset base_type (RecordFS fname:fnames) = do
+      dyn_type <- genDynamicType tenv base_type
+      let dyn_rec =
+            case dynamicTypeRecord dyn_type
+            of Just dyn_rec -> dyn_rec
+               Nothing -> internalError "genField: Base type is not a record"
+          static_rec =
+            case dereferenceTypeSynonym base_type
+            of NamedT (RecordT rec) -> rec
+               _ -> internalError "genField: Base type is not a record"
+          field_index =
+            case findIndex (match_name fname) $ typedRecordFields0 static_rec
+            of Just ix -> ix
+               Nothing -> 
+                 internalError $ "genField: No field named '" ++ fname ++ "'"
+
+      let rfield = typedRecordFields0 static_rec !! field_index
+          dfield = dyn_rec !!: field_index
+
+      new_base_offset <- nativeAddZ base_offset (fieldOffset dfield)
+      case fnames of
+        [] -> let mutable = fieldMutable dfield
+                  field_type = dynamicToStaticFieldType $ fieldType dfield
+              in return_field_offset new_base_offset mutable field_type
+        _  -> case rfield
+              of FieldDef _ next_rec _ ->
+                   get_field_offset new_base_offset next_rec fnames
+                 _ -> internalError "genField"
+
+    return_field_offset offset mutable field_type
       | LL.valType offset /= PrimType nativeIntType =
         internalError "genField: Offset has wrong type"
       | otherwise =
         let ty = case cast_type
                  of Just t -> convertToValueType t
-                    Nothing -> case fieldType field
-                               of PrimField pt -> PrimType pt
-                                  RecordField r -> 
-                                    RecordType $ dynamicToStaticRecordType r
-                                  _ -> internalError "genField"
-        in return (offset, fieldMutable field, ty)
+                    Nothing -> field_type
+        in return (offset, mutable, ty)
 
     match_name want_name (FieldDef _ _ name) = name == want_name
+
+genArrayElementSize dyn_elt_type =
+  let elt_size = dynamicTypeSize dyn_elt_type
+      elt_align = dynamicTypeAlign dyn_elt_type
+  in genPaddedSize elt_size elt_align
+
+
+genPaddedSize sz al = do
+  native_sz <- primCastZ (PrimType nativeIntType) sz
+  neg_sz <- nativeNegateZ native_sz
+  native_al <- primCastZ (PrimType nativeIntType) al
+  padding <- neg_sz `nativeModZ` native_al
+  nativeAddZ native_sz padding
+
+dynamicToStaticFieldType :: DynamicFieldType -> ValueType
+dynamicToStaticFieldType (PrimField pt) = PrimType pt
+dynamicToStaticFieldType (RecordField r) =
+  RecordType $ dynamicToStaticRecordType r
 
 -- | Convert to a static record type.  The type must not contain non-constant
 --   expressions.  Throw an error if it doesn't satisfy these conditions.
