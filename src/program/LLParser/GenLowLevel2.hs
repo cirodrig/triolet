@@ -92,11 +92,11 @@ convertToDynamicFieldType tenv ty =
        return $ BytesField size_val align_val
      AppT ty args ->
        -- Apply, then convert
-       convertToDynamicFieldType tenv $ applyRecordType ty args
+       convertToDynamicFieldType tenv $ applyTemplate ty args
 
 convertToDynamicRecord :: TypeEnv -> TypedRecord -> G DynamicRecord
 convertToDynamicRecord tenv rec = do
-  field_types <- forM (typedRecordFields0 rec) $ \(FieldDef m t _) -> do 
+  field_types <- forM (typedRecordFields rec) $ \(FieldDef m t _) -> do 
     t' <- convertToDynamicFieldType tenv t
     return (m, t')
   createDynamicRecord field_types
@@ -124,7 +124,7 @@ genDynamicType tenv ty =
        align_val <- asVal =<< genExpr tenv align
        return $ DynamicType size_val align_val Nothing
      AppT ty args ->
-       genDynamicType tenv $ applyRecordType ty args
+       genDynamicType tenv $ applyTemplate ty args
 
 -- | Generate code of an expression used to initialize global data.
 genDataExpr :: Expr Typed -> FreshVarM LL.Val
@@ -223,12 +223,12 @@ genField tenv (Field base_type fnames cast_type) =
             of NamedT (RecordT rec) -> rec
                _ -> internalError "genField: Base type is not a record"
           field_index =
-            case findIndex (match_name fname) $ typedRecordFields0 static_rec
+            case findIndex (match_name fname) $ typedRecordFields static_rec
             of Just ix -> ix
                Nothing -> 
                  internalError $ "genField: No field named '" ++ fname ++ "'"
 
-      let rfield = typedRecordFields0 static_rec !! field_index
+      let rfield = typedRecordFields static_rec !! field_index
           dfield = dyn_rec !!: field_index
 
       new_base_offset <- nativeAddZ base_offset (fieldOffset dfield)

@@ -20,11 +20,12 @@ inferred given the expression itself and the type environment.
 -}
 
 {-# LANGUAGE TypeFamilies, FlexibleInstances, ScopedTypeVariables,
-  RecursiveDo, Rank2Types, EmptyDataDecls, StandaloneDeriving #-}
+  RecursiveDo, Rank2Types, EmptyDataDecls, StandaloneDeriving,
+  TypeSynonymInstances #-}
 module LLParser.TypeInference
        (Typed, TExp(..), NamedType(..), TypedRecord(..), TypeSynonym(..),
-        typedRecordFields0,
-        applyRecordType,
+        typedRecordFields,
+        applyTemplate,
         dereferenceTypeSynonym,
         exprType, atomType, stmtType,
         convertToValueType,
@@ -79,9 +80,13 @@ instance Show TExp where
 instance Show TypedRecord where
   show rec = 
     case rec
-    of TypedRecord nm 0 _ -> nm
-       TypedRecord nm n _ ->
-         nm ++ "(" ++ intercalate "," (replicate n "_") ++ ")"
+    of TypedRecord nm xs
+         | null xs -> nm
+         | otherwise -> 
+         nm ++ "(" ++ intercalate "," (replicate (length xs) "_") ++ ")"
+
+instance Show ParametricType where
+  show _ = "ParametricType"
 
 -------------------------------------------------------------------------------
 -- Type-parameterized things
@@ -105,7 +110,7 @@ applyTo dom x =
 --   the Parameterized object for debugging.
 applyToNonces x =
   let dummy_args =
-        [NamedT $ RecordT $ TypedRecord ("arg" ++ show n) 0 [] | n <- [1..]]
+        [NamedT $ RecordT $ TypedRecord ("arg" ++ show n) [] | n <- [1..]]
   in apply x dummy_args
 
 -- | Parameters are de Bruijn indices
@@ -139,11 +144,18 @@ instance Applicative (Parameterized dom) where
 
 data NamedType =
     RecordT !TypedRecord
+  | TemplateT ParametricType
   | SynonymT !TypeSynonym
     deriving(Show)
 
 isTypeSynonym (SynonymT {}) = True
 isTypeSynonym _ = False
+
+-- | If the given type is a type synonym, get its actual value.
+--   Otherwise, return the type.  The return value is never a type synonym.
+dereferenceTypeSynonym :: Type Typed -> Type Typed
+dereferenceTypeSynonym (NamedT (SynonymT syn)) = typeSynonymValue syn
+dereferenceTypeSynonym t = t
 
 data TypeSynonym =
     TypeSynonym
@@ -161,48 +173,21 @@ data TypedRecord =
     { -- | The record name given in source code.  This is only used for
       --   error messages.
       typedRecordName :: String
-      -- | The number of type parameters the record takes.
-    , typedRecordArity :: {-# UNPACK #-}!Int
       -- | The record's fields.  If the record is parametric, the fields will 
       --   require type parameters to compute.  The fields take the 
       --   parameters of the record.
-    , typedRecordFields :: [TypeParametric (FieldDef Typed)]
+    , typedRecordFields :: [FieldDef Typed]
     }
 
--- | Get the fields of a non-parametric record
-typedRecordFields0 :: TypedRecord -> [FieldDef Typed]
-typedRecordFields0 record
-  | typedRecordArity record /= 0 =
-      internalError "typedRecordFields0: Record is parametric"
-  | otherwise =
-      map (applyTo []) $ typedRecordFields record
-
-applyRecordType :: Type Typed -> [Type Typed] -> Type Typed
-applyRecordType (NamedT (RecordT rec)) args
-  | typedRecordArity rec /= length args =
-      internalError "applyRecordType: Wrong number of type arguments"
-  | otherwise =
-      let name = typedRecordName rec
-          fields = map pure $ map (applyTo args) $ typedRecordFields rec
-      in NamedT $ RecordT $ TypedRecord name 0 fields
-
-applyRecordType _ _ = internalError "applyRecordType: Not a record type"
-
--- | If the given type is a type synonym, get its actual value.
---   Otherwise, return the type.  The return value is never a type synonym.
-dereferenceTypeSynonym :: Type Typed -> Type Typed
-dereferenceTypeSynonym (NamedT (SynonymT syn)) = typeSynonymValue syn
-dereferenceTypeSynonym t = t
+applyTemplate :: Type Typed -> [Type Typed] -> Type Typed
+applyTemplate (NamedT (TemplateT tmpl)) args = apply tmpl args
 
 -- | A named entity
 data DictEntry =
     -- | A variable
     VarEntry (Type Typed) !LL.Var
-    -- | A record definition.  The record's name and fields are included for
-    --   lookup.
-  | RecordEntry {-# UNPACK #-}!TypedRecord
-    -- | A type synonym.  The type synonym ID and its value are given.
-  | TypedefEntry {-# UNPACK #-}!TypeSynonym
+    -- | A type definition
+  | TypeEntry (Type Typed)
     -- | A type parameter.
   | TypeParameterEntry TypeParameter
 
@@ -372,7 +357,7 @@ createTypeSynonym :: TypeName Parsed -> Type Typed -> NR (RecordName Typed)
 createTypeSynonym name value = do
   type_id <- fresh
   let synonym = TypeSynonym type_id value
-  defineEntity name (TypedefEntry synonym)
+  defineEntity name (TypeEntry $ NamedT $ SynonymT synonym)
   return $ SynonymT synonym
 
 defineTypeParam :: TypeName Parsed -> NR ()
@@ -458,26 +443,23 @@ lookupVar name = do
     else Just $ "Not defined: '" ++ name ++ "'"
   return $ case entry of ~(VarEntry t v) -> (v, t)
 
-lookupRecord :: String -> NR TypedRecord
-lookupRecord name = do
-  (entry, is_defined) <- lookupEntity name
-  throwErrorMaybe $
-    if is_defined
-    then case entry
-         of RecordEntry {} -> Nothing
-            _ -> Just $ "Not a record: '" ++ name ++ "'"
-    else Just $ "Not defined: '" ++ name ++ "'"
-  return $ case entry of ~(RecordEntry record) -> record
-
 -- | Define a new record type
 defineRecord :: RecordName Parsed
              -> Int
              -> [TypeParametric (FieldDef Typed)]
-             -> NR (RecordName Typed)
+             -> NR ()
 defineRecord name nparams mk_fields = do
-  let record = TypedRecord name nparams mk_fields
-  defineEntity name (RecordEntry record)
-  return (RecordT record)
+  defineEntity name (TypeEntry record)
+  where
+    record =
+      if nparams == 0
+      then instantiate_record []
+      else NamedT $ TemplateT create_parametric_record
+    
+    create_parametric_record = Parameterized (Just nparams) instantiate_record
+
+    instantiate_record tmpl_params =
+      NamedT $ RecordT $ TypedRecord name (map (applyTo tmpl_params) mk_fields)
 
 -------------------------------------------------------------------------------
 
@@ -509,7 +491,7 @@ expectRecordType message ty = throwErrorMaybe $
 convertToStaticRecord :: TypedRecord -> StaticRecord
 convertToStaticRecord rec =
   let field_types = [(m, convertToStaticFieldType t)
-                    | FieldDef m t _ <- typedRecordFields0 rec]
+                    | FieldDef m t _ <- typedRecordFields rec]
   in staticRecord field_types
 
 convertToValueType :: Type Typed -> ValueType
@@ -531,7 +513,7 @@ convertToStaticFieldType ty =
      ArrayT {} -> error "Record cannot contain an array"
      AppT ty args ->
        -- Apply, then convert
-       convertToStaticFieldType $ applyRecordType ty args
+       convertToStaticFieldType $ applyTemplate ty args
 
 convertToIntConstant :: Expr Typed -> Int
 convertToIntConstant expr =
@@ -550,13 +532,11 @@ resolveTypeName nm = do
     if is_defined
     then case entry
          of VarEntry {} -> Just $ "Not a type: '" ++ nm ++ "'"
-            RecordEntry {} -> Nothing
-            TypedefEntry {} -> Nothing
+            TypeEntry {} -> Nothing
             TypeParameterEntry {} -> Nothing
     else Just $ "Not defined: '" ++ nm ++ "'"
   return $ case entry
-           of RecordEntry rec -> pure $ NamedT (RecordT rec)
-              TypedefEntry syn -> pure $ NamedT (SynonymT syn)
+           of TypeEntry t -> pure t
               TypeParameterEntry tp -> pVar type_arity tp
 
 resolveTypeName0 :: RecordName Parsed -> NR (Type Typed)
@@ -584,7 +564,7 @@ resolveType ty =
        arg_ts <- mapM resolveType args
 
        -- Apply resolved parameter to resolved arguments
-       return (applyRecordType <$> param_t <*> sequenceA arg_ts)
+       return (applyTemplate <$> param_t <*> sequenceA arg_ts)
 
 resolveType0 :: Type Parsed -> NR (Type Typed)
 resolveType0 t = fmap (applyTo []) $ resolveType t
@@ -930,7 +910,7 @@ resolveLValue lvalue ty =
                        _ -> internalError "resolveLValue"
        
        -- Unpack individual fields.  This is lazy in the record type.
-       let field_types = [t | FieldDef _ t _ <- typedRecordFields0 record]
+       let field_types = [t | FieldDef _ t _ <- typedRecordFields record]
 
        let unpack_fields (fld:flds) ~(fty:ftys) = do
              (binder, fld') <- resolveLValue fld fty
@@ -975,7 +955,7 @@ fieldType ty flds =
         [] -> ty
   where
     record_field_type rec fname =
-      case find (\(FieldDef _ _ nm) -> nm == fname) $ typedRecordFields0 rec
+      case find (\(FieldDef _ _ nm) -> nm == fname) $ typedRecordFields rec
       of Just (FieldDef _ t _) -> t
          Nothing -> error $ "Record type does not have field '" ++ fname ++ "'"
 
@@ -1036,7 +1016,6 @@ resolveRecordDef record = do
     mapM resolveFieldDef $ recordFields record
     
   defineRecord (recordName record) num_params fields
-  return ()
 
 resolveDef :: Def Parsed -> NR (Maybe (Def Typed))
 resolveDef def = 
