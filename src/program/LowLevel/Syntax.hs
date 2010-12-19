@@ -94,6 +94,10 @@ data Prim =
                                 --   pointer.  A new reference is returned.
   | PrimCastFromOwned           -- ^ Cast an owned pointer to a non-owned
                                 --   pointer.  Consumes a reference.
+  | PrimGetFrameP               -- ^ Get the current function's frame pointer,
+                                --   pointing to the function's local data.
+                                --   Returns a pointer.  If there's no frame,
+                                --   NULL is returned.
     -- | @PrimCastZToF from-size to-size@
     -- Cast a signed integral value to a floating-point value
   | PrimCastZToF !Size !Size
@@ -298,6 +302,10 @@ data Fun =
   , funUses        :: !Uses
     -- | Whether user requested to inline this function
   , funInlineRequest :: {-# UNPACK #-}!Bool
+    -- | The number of bytes of stack data used for local data.
+    --   If zero, no bytes are reserved and the local data are can't be
+    --   accessed.  Only top-level functions may have a nonzero frame size.
+  , funFrameSize   :: {-# UNPACK #-}!Int
   , funParams      :: [ParamVar] 
   , funReturnTypes :: [ValueType] 
   , funBody        :: Stm
@@ -313,21 +321,25 @@ setFunSize sz f = f {funSize = sz}
 setFunUses :: Uses -> Fun -> Fun
 setFunUses u f = f {funUses = u}
 
-mkFun :: CallConvention -> Bool -> [ParamVar] -> [ValueType] -> Stm -> Fun
-mkFun cc inl_req params returns body =
+mkFun :: CallConvention -> Bool -> Int -> [ParamVar] -> [ValueType] -> Stm
+      -> Fun
+mkFun cc inl_req frame_size params returns body =
   Fun { funConvention  = cc
       , funSize        = unknownCodeSize
       , funUses        = ManyUses
       , funInlineRequest = inl_req
+      , funFrameSize   = frame_size
       , funParams      = params
       , funReturnTypes = returns
       , funBody        = body}
 
 closureFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
-closureFun params returns body = mkFun ClosureCall False params returns body
+closureFun params returns body =
+  mkFun ClosureCall False 0 params returns body
 
 primFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
-primFun params returns body = mkFun PrimCall False params returns body
+primFun params returns body =
+  mkFun PrimCall False 0 params returns body
 
 type Alt = (Lit, Stm)
 

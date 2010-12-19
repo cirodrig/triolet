@@ -127,7 +127,7 @@ getContinuation primcall live_outs f = Gen $ \return_type -> do
   -- Put the continuation into a 'letrec' statement
   let stms' cont_stm = LetrecE [Def cont_var cont_fun] (stms stm)
         where
-          cont_fun = mkFun convention False live_outs return_type cont_stm
+          cont_fun = mkFun convention False 0 live_outs return_type cont_stm
   
   return ((), MkStm stms')
 

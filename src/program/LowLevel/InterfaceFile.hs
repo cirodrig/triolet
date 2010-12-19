@@ -203,7 +203,9 @@ pickPyonExports mod = partition is_exported $ moduleGlobals mos
       
 mkPreImport :: GlobalDef -> PreImport
 mkPreImport (GlobalFunDef (Def v f)) =
-  let f_val = if funSmallEnoughForInlining f then Just f else Nothing
+  let f_val = if funIsInlinable f && funSmallEnoughForInlining f
+              then Just f
+              else Nothing
   in Def v (PreImportFun (funType f) f_val)
 
 mkPreImport (GlobalDataDef (Def v dat)) =

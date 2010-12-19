@@ -342,7 +342,7 @@ flattenFun fun =
   defineParams (funParams fun) $ \params -> do
     let returns = flattenValueTypeList $ funReturnTypes fun
     body <- flattenStm $ funBody fun
-    return $! mkFun (funConvention fun) (funInlineRequest fun) params returns body
+    return $! mkFun (funConvention fun) (funInlineRequest fun) (funFrameSize fun) params returns body
 
 -- | Flatten a function that will be exported.
 --   Some kinds of records will actually be passed as records (like C structs) 

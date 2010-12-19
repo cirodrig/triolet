@@ -129,6 +129,7 @@ primHasSideEffect prim =
      PrimAAddZ {}         -> True
      PrimCastToOwned {}   -> False
      PrimCastFromOwned {} -> False
+     PrimGetFrameP {}     -> False
      PrimCastZToF {}      -> False
      PrimCastFToZ {}      -> False
      PrimAddF {}          -> False
@@ -218,7 +219,7 @@ dceFun :: DCE Fun
 dceFun fun =
   let DCEResult size uses body = dceStm (funBody fun)
       fun' = setFunSize (codeSize size) $
-             mkFun (funConvention fun) (funInlineRequest fun) (funParams fun) (funReturnTypes fun) body
+             mkFun (funConvention fun) (funInlineRequest fun) (funFrameSize fun) (funParams fun) (funReturnTypes fun) body
   in DCEResult size uses fun'
 
 -- | Perform dead code elimination on a data definition.  The data definition

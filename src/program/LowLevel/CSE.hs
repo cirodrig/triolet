@@ -286,13 +286,23 @@ cseDef (Def v f) = Def v <$> cseFun f
 cseFun :: Fun -> CSEF Fun
 cseFun f = do
   body <- evalCSE (funReturnTypes f) $ cseStm $ funBody f
-  return $ mkFun (funConvention f) (funInlineRequest f) (funParams f) (funReturnTypes f) body
+  return $ mkFun (funConvention f) (funInlineRequest f) (funFrameSize f) (funParams f) (funReturnTypes f) body
 
 cseGlobal :: ArityMap -> CSEEnv -> GlobalDef -> FreshVarM GlobalDef
-cseGlobal arities env (GlobalFunDef fdef) =
-  GlobalFunDef <$> evalCSET (cseDef fdef) arities env
+cseGlobal arities env (GlobalFunDef fdef) = do
+  fdef' <- insertFrameAccess fdef
+  GlobalFunDef <$> evalCSET (cseDef fdef') arities env
 
 cseGlobal _       _   def@(GlobalDataDef _) = return def
+
+-- | Add a statement that fetches the function's stack frame pointer into a
+-- variable.  This statement will be removed by DCE if it's not needed.
+insertFrameAccess :: FunDef -> FreshVarM FunDef
+insertFrameAccess (Def v f) = do
+  frame_var <- newAnonymousVar (PrimType PointerType)
+  return $ Def v (f {funBody = insert_frame_access frame_var $ funBody f})
+  where
+    insert_frame_access v stm = LetE [v] (PrimA PrimGetFrameP []) stm
 
 -- | Create the global CSE environment containing globally defined data.
 scanGlobalData :: [Import] -> [GlobalDef] -> (ArityMap, CSEEnv)

@@ -107,7 +107,11 @@ pprFunDef (Def v f) =
       param_doc = map pprVarLong $ funParams f
       ret_doc = map pprValueType $ funReturnTypes f
       leader = pprVar v <> pprFunSignature param_doc ret_doc
+      local_doc = if funFrameSize f == 0
+                  then empty
+                  else text "frame size:" <+> text (show $ funFrameSize f)
   in intro <+> inl <+> leader <+> text "=" $$
+     nest 4 local_doc $$
      nest 4 (pprBlock (funBody f))
 
 pprFun :: Fun -> Doc
@@ -118,10 +122,14 @@ pprFun fun =
       inl_doc = if funInlineRequest fun
                 then text "INLINE"
                 else empty
+      local_doc = if funFrameSize fun == 0
+                  then empty
+                  else text "frame size:" <+> text (show $ funFrameSize fun)
       fun_call = inl_doc <+> case funConvention fun
                              of PrimCall -> text "lambda_p"
                                 ClosureCall -> text "lambda_c"
   in fun_call <+> (hang param_doc (-3) (text "->" <+> ret_doc)) $$
+     nest 4 local_doc $$
      nest 4 (pprBlock $ funBody fun)
 
 pprInfixPrim :: Prim -> Maybe Doc
@@ -173,6 +181,7 @@ pprPrim prim =
            PrimAAddZ _ _ -> "atomic_add"
            PrimCastToOwned -> "cast_ptr_own"
            PrimCastFromOwned -> "cast_own_ptr"
+           PrimGetFrameP -> "get_frame_ptr"
            PrimCastFToZ _ _ -> "cast_float_int"
            PrimCastZToF _ _ -> "cast_int_float"
            PrimAddF _ -> "fadd"

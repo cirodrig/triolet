@@ -1,7 +1,9 @@
+{-| Function inlining.
+-}
 
 {-# LANGUAGE ViewPatterns, FlexibleInstances, Rank2Types #-}
 module LowLevel.Inlining
-       (funSmallEnoughForInlining, inlineModule)
+       (funIsInlinable, funSmallEnoughForInlining, inlineModule)
 where
 
 import Prelude hiding(mapM)
@@ -302,8 +304,13 @@ instance Applicative Inlinable where
     Inlinable (u1 `mappend` u2) (\k -> f k $ x k)
 
 -- | Prepare a function for inlining.  Called by makeInlinable.
+--
+--   The function must not use a stack frame.
 makeInlinableFunction :: Endpoints -> FunDef -> Inlinable Stm
-makeInlinableFunction endpoints (Def fun_name f) = inl_stm $ funBody f
+makeInlinableFunction endpoints (Def fun_name f) 
+  | funFrameSize f /= 0 =
+      internalError "makeInlinableFunction: Function uses stack frame"
+  | otherwise = inl_stm $ funBody f
   where
     inl_stm statement =
       case statement
@@ -327,7 +334,7 @@ makeInlinableFunction endpoints (Def fun_name f) = inl_stm $ funBody f
       where
         mk_def new_body =
           Def fname $
-          mkFun (funConvention f) (funInlineRequest f) (funParams f) (funReturnTypes f) new_body
+          mkFun (funConvention f) (funInlineRequest f) 0 (funParams f) (funReturnTypes f) new_body
 
     endpoints_of_f = case lookup fun_name endpoints
                      of Nothing -> internalError "makeInlinableFunction"
@@ -420,6 +427,7 @@ assignCallParameters params args = lift $ zipWithM_ bind_arg params args
   where
     bind_arg param arg = bindAtom1 param $ ValA [arg]
 
+-- | Return True if the function is judged /profitable/ to inline.
 worthInlining inline_requested fcc fsize fuses
   | inline_requested = True
   | fuses == OneUse = True
@@ -429,7 +437,12 @@ worthInlining inline_requested fcc fsize fuses
     Just sz <- fromCodeSize fsize = sz < primInlineCutoff
   | otherwise = False
 
--- | Is this function small enough to inline?
+-- | Return True if it's possible to inline the function.
+funIsInlinable f =
+  -- Function must not use stack data
+  funFrameSize f == 0 
+
+-- | Is this function small enough to be worth inlining?
 funSmallEnoughForInlining :: Fun -> Bool
 funSmallEnoughForInlining f =
   worthInlining (funInlineRequest f) (funConvention f) (funSize f) (funUses f)
@@ -608,12 +621,17 @@ withDefG = withDef lift
 withDefF :: FunDef -> InlF a -> InlF a
 withDefF = withDef id
 
+-- | Consider a function definition for inlining.  If it is suitable, then
+--   add it to the local environment.
+--
 -- FIXME: only inline if function is small
 withDef :: Monad m =>
            (forall a. FreshVarM a -> m a) -> FunDef -> Inl m a -> Inl m a
-withDef t def@(Def v f) m = do
-  new_inline_spec <- lift $ t $ makeDefInlinable def
-  local (add_inline_spec new_inline_spec) m
+withDef t def@(Def v f) m 
+  | not $ funIsInlinable f = m 
+  | otherwise = do
+      new_inline_spec <- lift $ t $ makeDefInlinable def
+      local (add_inline_spec new_inline_spec) m
   where
     add_inline_spec new_inline_spec inline_specs =
       IntMap.insert (fromIdent $ varID v) new_inline_spec inline_specs

@@ -716,7 +716,8 @@ genFunctionDef tenv fdef = do
   body <- execBuild returns $ genStmt tenv $ functionBody fdef
   
   let conv = if functionIsProcedure fdef then PrimCall else ClosureCall
-      function = LL.mkFun conv (functionInlineRequest fdef) params returns body
+      function =
+        LL.mkFun conv (functionInlineRequest fdef) 0 params returns body
   return (LL.Def (functionName fdef) function)
 
 genDataDef :: DataDef Typed -> FreshVarM LL.DataDef

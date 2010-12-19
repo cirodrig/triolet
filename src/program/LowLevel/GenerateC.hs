@@ -675,15 +675,37 @@ genFun (Def v fun)
     -- Create the function body
     let return_values = ReturnValues $ funReturnTypes fun
     (body_stmt, _) <- makeBlock =<< genStatement return_values (funBody fun)
+    let body_stmt' = insert_stack_variable_def body_stmt
 
     let forward_declaration =
           CDecl return_type_specs [(Just fun_decl, Nothing, Nothing)] internalNode
         definition =
-          CFunDef return_type_specs fun_decl [] body_stmt internalNode
+          CFunDef return_type_specs fun_decl [] body_stmt' internalNode
     return (forward_declaration, definition)
   where
     from_prim_type (PrimType t) = t
     from_prim_type _ = internalError "genFun: Unexpected record type"
+
+    -- Insert local variables for the stack data pointer
+    insert_stack_variable_def (CCompound llabs block_items info) =
+      let data_name = internalIdent "frame_data"
+          ptr_name  = internalIdent "frame_ptr"
+          -- If stack space is used, declare a local variable
+          data_def =
+            case funFrameSize fun
+            of 0 -> []
+               sz -> let specs = arrayDeclSpecs (smallIntConst sz) $
+                                 primTypeDeclSpecs (IntType Signed S8)
+                     in [declareVariable data_name specs Nothing]
+          ptr_expr =
+            if funFrameSize fun == 0
+            then nullPtr
+            else cUnary CAdrOp $ cVar ptr_name
+          ptr_def =
+            let specs = primTypeDeclSpecs PointerType
+            in [declareVariable ptr_name specs (Just ptr_expr)]
+          defs = data_def ++ ptr_def
+      in CCompound llabs (map CBlockDecl defs ++ block_items) info
 
 -- | Create a global static data definition and initialization code.
 genData :: GlobalVars -> DataDef -> (CExtDecl, CStat)

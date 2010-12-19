@@ -171,6 +171,7 @@ instance Binary Fun where
     put $ funSize f
     put $ funUses f
     put $ funInlineRequest f
+    put $ funFrameSize f
     put $ funParams f
     put $ funReturnTypes f
     put $ funBody f
@@ -179,6 +180,7 @@ instance Binary Fun where
     size <- get
     uses <- get
     inl <- get
+    frame_size <- get
     params <- get
     return_types <- get
     body <- get
@@ -186,6 +188,7 @@ instance Binary Fun where
                  , funSize = size
                  , funUses = uses
                  , funInlineRequest = inl
+                 , funFrameSize = frame_size 
                  , funParams = params
                  , funReturnTypes = return_types
                  , funBody = body}

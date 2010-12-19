@@ -99,6 +99,9 @@ data Expr =
   | CAExpr !CAOp [Expr]
   | BinExpr !BinOp Expr Expr
   | UnExpr !UnOp Expr
+    -- | Get the current top-level function's frame pointer.  Within a given
+    --   top-level function, this will always return the same value.
+  | GetFramePExpr
 
 varExpr :: Var -> Expr
 varExpr = VarExpr
@@ -179,6 +182,7 @@ data TrieNode v =
   , tCA  :: Map.Map CAOp (ListTrie TrieNode v)
   , tBin :: Map.Map BinOp (TrieNode (TrieNode v))
   , tUn  :: Map.Map UnOp (TrieNode v)
+  , tGetFrameP :: Maybe v
   }
 
 data ListTrie t v = ListTrie !(Maybe v) (t (ListTrie t v))
@@ -211,6 +215,16 @@ mapMaybeSub2 :: (Trie t, Trie t', Trie t'') =>
             -> t'' (t' (t v)) -> t'' (t' (t v))
 mapMaybeSub2 f g =
   mapMaybeWithKey (\k'' -> Just . mapMaybeWithKey (\k' -> Just . mapMaybeWithKey (\k -> f (g k'' k' k))))
+
+instance Trie Maybe where
+  type Key Maybe = ()
+  empty = Nothing
+  toList Nothing = []
+  toList (Just x) = [((), x)]
+  alter f _ x = f x
+  insert () v _ = Just v
+  lookup () x = x
+  mapMaybeWithKey f x = f () =<< x
 
 instance Ord k => Trie (Map.Map k) where
   type Key (Map.Map k) = k
@@ -274,8 +288,9 @@ instance Trie TrieNode where
     , tCA = empty
     , tBin = empty
     , tUn = empty
+    , tGetFrameP = Nothing
     }
-  toList (TrieNode var_t lit_t app_t ca_t bin_t un_t) =
+  toList (TrieNode var_t lit_t app_t ca_t bin_t un_t get_frame_p_t) =
     [(VarExpr var, v)  | (var, v) <- toList var_t] ++
     [(LitExpr lit, v)  | (lit, v) <- toList lit_t] ++
     [(AppExpr n e es, v) | (n, m) <- toList app_t, (e:es, v) <- toList m] ++
@@ -284,7 +299,8 @@ instance Trie TrieNode where
                          , (l, m2) <- toList m1
                          , (r, v) <- toList m2] ++
     [(UnExpr op e, v) | (op, m) <- toList un_t
-                      , (e, v) <- toList m]
+                      , (e, v) <- toList m] ++
+    [(GetFramePExpr, v) | v <- maybeToList $ get_frame_p_t] 
   alter f k tr = updateTrieNode (alter f) k tr
   insert k v tr = updateTrieNode (\k -> insert k v) k tr
   lookup k tr =
@@ -295,6 +311,7 @@ instance Trie TrieNode where
        CAExpr op es -> lookup2 op es $ tCA tr
        BinExpr op e1 e2 -> lookup3 op e1 e2 $ tBin tr
        UnExpr op e -> lookup2 op e $ tUn tr
+       GetFramePExpr -> tGetFrameP tr
     where
       lookup2 k1 k2 = lookup k2 <=< lookup k1
       lookup3 k1 k2 k3 = lookup k3 <=< lookup k2 <=< lookup k1
@@ -305,7 +322,8 @@ instance Trie TrieNode where
        , tApp = mapMaybeSub f (\n (op:args) -> AppExpr n op args) $ tApp tr
        , tCA  = mapMaybeSub f CAExpr $ tCA tr
        , tBin = mapMaybeSub2 f BinExpr $ tBin tr
-       , tUn  = mapMaybeSub f UnExpr $ tUn tr}
+       , tUn  = mapMaybeSub f UnExpr $ tUn tr
+       , tGetFrameP = mapMaybeWithKey (f . const GetFramePExpr) $ tGetFrameP tr}
 
 updateTrieNode :: (forall t'. Trie t' => Key t' -> t' v -> t' v) -> Expr
                -> TrieNode v -> TrieNode v
@@ -317,6 +335,7 @@ updateTrieNode f k tr =
      CAExpr op es -> tr {tCA = alter2 op es $ tCA tr}
      BinExpr op e1 e2 -> tr {tBin = alter3 op e1 e2 $ tBin tr}
      UnExpr op e -> tr {tUn = alter2 op e $ tUn tr}
+     GetFramePExpr -> tr {tGetFrameP = f () $ tGetFrameP tr}
   where
     alter3 k1 k2 k3 = alterSub k1 $ alterSub k2 $ f k3
     alter2 k1 k2 = alterSub k1 $ f k2
@@ -407,6 +426,7 @@ isReducible expression =
                        of LoadOp {} -> False
                           CastZOp {} -> False
                           NegateZOp {} -> True
+     GetFramePExpr -> False
 
 -- | Find an available value that's equal to the given variable.  If no value
 -- is found, return the variable.
@@ -452,6 +472,7 @@ interpretPrim env op args = fmap (simplify env) $
      PrimCastZ ss ds sz -> Just $ unary (CastZOp ss ds sz)
      -- Only constant loads can become expressions
      PrimLoad Constant ty -> Just $ load_op ty
+     PrimGetFrameP -> Just GetFramePExpr
      _               -> Nothing
   where
     -- Print a debug message
@@ -639,6 +660,7 @@ simplify' expression =
      CAExpr op es     -> simplifyCA op es
      BinExpr op e1 e2 -> simplifyBinary op e1 e2
      UnExpr op e      -> simplifyUnary op e
+     GetFramePExpr    -> GetFramePExpr
 
 simplifyCA op es = zusSum op $ partialEvalSum $ flatten op es
 
