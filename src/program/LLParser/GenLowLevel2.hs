@@ -275,6 +275,29 @@ dynamicToStaticFieldType (RecordField r) =
 dynamicToStaticRecordType :: DynamicRecord -> StaticRecord
 dynamicToStaticRecordType = internalError "dynamicToStaticRecordType: not implemented"
 
+-- | Create a record type corresponding to a set of local variables.
+localsRecord :: Locals Typed -> StaticRecord
+localsRecord locals =
+  let field_types = [(Mutable, convertToStaticFieldType t)
+                    | Parameter t _ <- locals]
+  in staticRecord field_types
+
+-- | Define a pointer variable that points to each local variable.
+--   Also return the size of the local stack frame.
+genLocals :: Locals Typed -> G Int
+genLocals [] = return 0
+genLocals locals =
+  let rec = localsRecord locals
+      offsets = [nativeIntV $ fieldOffset f
+                | f <- LowLevel.CodeTypes.recordFields rec]
+      local_vars = [v | Parameter _ v <- locals]
+  in do locals_ptr <- emitAtom1 (PrimType PointerType) (LL.PrimA LL.PrimGetFrameP [])
+        zipWithM_ (primAddPAs locals_ptr) offsets local_vars
+        return $ recordSize rec
+  where
+    assign_local_var locals_ptr v offset =
+      primAddPAs locals_ptr (nativeIntV offset) v
+
 -- | Generate code of an expression
 genExpr :: TypeEnv -> Expr Typed -> G GenExpr
 genExpr tenv expr =
@@ -713,11 +736,15 @@ genFunctionDef :: TypeEnv -> FunctionDef Typed -> FreshVarM LL.FunDef
 genFunctionDef tenv fdef = do
   let params = [v | Parameter _ v <- functionParams fdef]
       returns = map convertToValueType $ functionReturns fdef
-  body <- execBuild returns $ genStmt tenv $ functionBody fdef
+  -- Generate function body
+  (body, locals_size) <- execBuild' returns $ do 
+    locals_size <- genLocals $ functionLocals fdef
+    body <- genStmt tenv $ functionBody fdef
+    return (body, locals_size)
   
   let conv = if functionIsProcedure fdef then PrimCall else ClosureCall
       function =
-        LL.mkFun conv (functionInlineRequest fdef) 0 params returns body
+        LL.mkFun conv (functionInlineRequest fdef) locals_size params returns body
   return (LL.Def (functionName fdef) function)
 
 genDataDef :: DataDef Typed -> FreshVarM LL.DataDef

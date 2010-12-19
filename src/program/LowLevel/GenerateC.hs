@@ -700,7 +700,7 @@ genFun (Def v fun)
           ptr_expr =
             if funFrameSize fun == 0
             then nullPtr
-            else cUnary CAdrOp $ cVar ptr_name
+            else cUnary CAdrOp $ cVar data_name
           ptr_def =
             let specs = primTypeDeclSpecs PointerType
             in [declareVariable ptr_name specs (Just ptr_expr)]

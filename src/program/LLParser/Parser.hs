@@ -336,9 +336,11 @@ atom = fmap ValA stmtExprList
 -- | Parse a block of statements
 block :: P (Stmt Parsed)
 block = braces statements
-  where
-    statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> let_or_atom
 
+-- | Parse a sequence of statements
+statements :: P (Stmt Parsed)
+statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> let_or_atom
+  where
     -- An 'if' statement
     if_stmt = do
       match IfTok
@@ -453,6 +455,19 @@ dataDef = do
   value <- expr
   return $ DataDef name data_type value
 
+-- | Parse a function body
+parseFunctionBody :: P ([Parameter Parsed], Stmt Parsed)
+parseFunctionBody = braces $ do
+  locals <- local_data `sepEndBy` match SemiTok
+  body <- statements
+  return (locals, body)
+  where
+    local_data = do
+      match DataTok
+      ty <- parseType
+      name <- identifier
+      return $ Parameter ty name
+
 -- | Parse a function or procedure definition
 functionDef :: P (FunctionDef Parsed)
 functionDef = do
@@ -463,10 +478,11 @@ functionDef = do
   params <- parameters
   match ArrowTok
   returns <- fmap (:[]) parseType <|> parenList parseType
-  body <- block
+  (locals, body) <- parseFunctionBody
   return $ FunctionDef { functionName = name 
                        , functionIsProcedure = is_procedure 
-                       , functionInlineRequest = should_inline 
+                       , functionInlineRequest = should_inline
+                       , functionLocals = locals
                        , functionParams = params 
                        , functionReturns = returns 
                        , functionBody = body}

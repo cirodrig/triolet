@@ -60,7 +60,7 @@ ptrDeclSpecs (specs, deriv) = (specs, ptr : deriv)
 
 arrayDeclSpecs :: CExpr -> DeclSpecs -> DeclSpecs
 arrayDeclSpecs size (base_type, base_deriv) =
-  (base_type, CArrDeclr [] (CArrSize True size) internalNode : base_deriv)
+  (base_type, CArrDeclr [] (CArrSize False size) internalNode : base_deriv)
 
 -- | Create a structure type with the given field types.
 --   The fields are named \'a\', \'b\', ....  The structure type has no name.

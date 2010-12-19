@@ -127,6 +127,7 @@ data FunctionDef a =
   { functionName :: VarName a
   , functionIsProcedure :: !Bool
   , functionInlineRequest :: !Bool
+  , functionLocals :: Locals a -- ^ Stack variables
   , functionParams :: Parameters a
   , functionReturns :: [Type a]
   , functionBody :: Stmt a
@@ -134,6 +135,7 @@ data FunctionDef a =
 
 data Parameter a = Parameter (Type a) (VarName a)
 type Parameters a = [Parameter a]
+type Locals a = [Parameter a]
 
 -- | A referene to a record field.  The field is a type followed by
 -- a sequence of field names, and possibly a type cast.  The type must be

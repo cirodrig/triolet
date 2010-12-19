@@ -29,6 +29,7 @@ module LLParser.TypeInference
         dereferenceTypeSynonym,
         exprType, atomType, stmtType,
         convertToValueType,
+        convertToStaticFieldType,
         convertToStaticRecord,
         typeInferModule)
 where
@@ -978,6 +979,14 @@ resolveParameter (Parameter ty nm) = do
   v <- createAndDefineVar nm ty'
   return (Parameter ty' v)
 
+-- | Do type inference on a local variable and add the variable to the
+--   environment.  The variable is always a pointer.
+resolveLocal :: Parameter Parsed -> NR (Parameter Typed)
+resolveLocal (Parameter ty nm) = do
+  ty' <- resolveType0 ty
+  v <- createAndDefineVar nm (PrimT PointerType)
+  return (Parameter ty' v)
+
 resolveFunctionDef :: Bool -> FunctionDef Parsed -> NR (FunctionDef Typed)
 resolveFunctionDef is_global fdef = do
   -- Define the function
@@ -990,12 +999,14 @@ resolveFunctionDef is_global fdef = do
   
   enterNonRec $ do
     params <- mapM resolveParameter $ functionParams fdef
+    locals <- mapM resolveLocal $ functionLocals fdef
     returns <- mapM resolveType0 $ functionReturns fdef
     body <- resolveStmt $ functionBody fdef
     
     return $ FunctionDef { functionName = fname
                          , functionIsProcedure = functionIsProcedure fdef
                          , functionInlineRequest = functionInlineRequest fdef
+                         , functionLocals = locals
                          , functionParams = params
                          , functionReturns = returns
                          , functionBody = body}

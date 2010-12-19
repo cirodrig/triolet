@@ -151,8 +151,7 @@ ccHoistedFun fun = do
   -- Add the free variables as extra parameters
   let free_var_list = Set.toList free_vars
       new_params = free_var_list ++ funParams fun
-      new_fun = (primFun new_params (funReturnTypes fun) body)
-                {funInlineRequest = funInlineRequest fun}
+      new_fun = mkFun PrimCall (funInlineRequest fun) (funFrameSize fun) new_params (funReturnTypes fun) body
       
   -- If the input function was a primitive-call function, then there is no
   -- way to deal with free variables
