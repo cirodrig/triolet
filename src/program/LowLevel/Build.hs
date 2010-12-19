@@ -286,6 +286,7 @@ primCastZ ty src
 
 primAddZ = intBinaryPrimOp (+) (Just 0) (Just 0) PrimAddZ
 primSubZ = intBinaryPrimOp (-) Nothing (Just 0) PrimSubZ
+primMulZ = intBinaryPrimOp (*) (Just 1) (Just 1) PrimMulZ
 primModZ = intBinaryPrimOp mod Nothing (Just 1) PrimModZ
 primMaxZ = intBinaryPrimOp max Nothing Nothing PrimMaxZ
 
@@ -339,12 +340,14 @@ primAAddZ prim_type@(PrimType (IntType sign size)) ptr n =
 
 nativeAddZ = primAddZ (PrimType nativeIntType)
 nativeSubZ = primSubZ (PrimType nativeIntType)
+nativeMulZ = primMulZ (PrimType nativeIntType)
 nativeModZ = primModZ (PrimType nativeIntType)
 nativeMaxZ = primMaxZ (PrimType nativeIntType)
 nativeNegateZ = primNegateZ (PrimType nativeIntType)
 
 nativeAddUZ = primAddZ (PrimType nativeWordType)
 nativeSubUZ = primSubZ (PrimType nativeWordType)
+nativeMulUZ = primMulZ (PrimType nativeWordType)
 nativeModUZ = primModZ (PrimType nativeWordType)
 nativeMaxUZ = primMaxZ (PrimType nativeWordType)
 nativeNegateUZ = primNegateZ (PrimType nativeWordType)
