@@ -360,7 +360,7 @@ function inline Stream_reduce
   elem_align = passconv @! PassConv.align;
   elem_copy = passconv @! PassConv.copy;
   elem_finalize = passconv @! PassConv.finalize;
-  typedef elem_type = bytes(elem_size, elem_align);
+  typedef elem_type = bytes(value elem_size, value elem_align);
 
   // Setup
   st = pointer primcall pyon_alloc (stream @! Stream.state_size);

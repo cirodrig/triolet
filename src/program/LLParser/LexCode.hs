@@ -55,7 +55,6 @@ data Token =
   | AlignofTok
   | AsTok
   | BoolTok
-  | BytesTok
   | CallTok
   | ConstTok
   | DataTok
@@ -129,7 +128,6 @@ showToken WildTok = "wildcard"
 showToken AlignofTok = "'alignof'"
 showToken AsTok = "'as'"
 showToken BoolTok = "'bool'"
-showToken BytesTok = "'bytes'"
 showToken CallTok = "'call'"
 showToken ConstTok = "'const'"
 showToken DataTok = "'data'"

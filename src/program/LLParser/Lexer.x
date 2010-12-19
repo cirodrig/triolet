@@ -33,7 +33,6 @@ rules :-
 "alignof" / @notid	{ tok AlignofTok }
 "as" / @notid		{ tok AsTok }
 "bool" / @notid		{ tok BoolTok }
-"bytes" / @notid	{ tok BytesTok }
 "call" / @notid		{ tok CallTok }
 "const" / @notid	{ tok ConstTok }
 "data" / @notid		{ tok DataTok }

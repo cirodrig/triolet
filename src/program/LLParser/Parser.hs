@@ -119,7 +119,7 @@ endOfFile = notFollowedBy $ tokenPrim showT nextParsecPos anything
 -------------------------------------------------------------------------------
 
 parseType :: P (Type Parsed)
-parseType = prim_type <|> record_type <|> bytes_type <?> "type"
+parseType = prim_type <|> record_type <?> "type"
   where
     prim_type = choice [match tok >> return (PrimT typ)
                        | (tok, typ) <- primtypes]
@@ -145,14 +145,6 @@ parseType = prim_type <|> record_type <|> bytes_type <?> "type"
         type_app rt = do
           args <- parseTypeArgs
           return $ AppT rt args
-
-    bytes_type = do
-      match BytesTok 
-      parens $ do 
-        sz <- expr
-        match CommaTok
-        al <- expr
-        return $ BytesT sz al
 
 -- | Parse a type of a global object.  The only valid types
 -- are \'owned\' or \'pointer\'.

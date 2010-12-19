@@ -1271,7 +1271,8 @@ typeInferModule module_path module_name externs defs = do
 
 predefinedScope = NonRecScope $
                   Map.fromList [("array", template arraycon),
-                                ("const_array", template constarraycon)]
+                                ("const_array", template constarraycon),
+                                ("bytes", template bytescon)]
   where
     template = TypeEntry . NamedT . TemplateT
     
@@ -1280,3 +1281,6 @@ predefinedScope = NonRecScope $
 
     constarraycon = Parameterized (Just 2) $ \[size_arg, type_arg] ->
       ArrayT Constant (fromExprArg size_arg) (fromTypeArg type_arg)
+    
+    bytescon = Parameterized (Just 2) $ \[size_arg, align_arg] ->
+      BytesT (fromExprArg size_arg) (fromExprArg align_arg)
