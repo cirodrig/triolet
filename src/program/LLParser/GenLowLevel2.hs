@@ -85,7 +85,9 @@ convertToDynamicFieldType tenv ty =
      ArrayT mut size elt_type -> do
        elt_type' <- genDynamicType tenv elt_type
        padded_size <- genArrayElementSize elt_type'
-       return $ BytesField (padded_size) (dynamicTypeAlign elt_type')
+       num_elts <- asVal =<< genExpr tenv size
+       array_size <- nativeMulUZ padded_size num_elts
+       return $ BytesField array_size (dynamicTypeAlign elt_type')
      BytesT size align -> do
        size_val <- asVal =<< genExpr tenv size
        align_val <- asVal =<< genExpr tenv align
@@ -123,6 +125,12 @@ genDynamicType tenv ty =
        size_val <- asVal =<< genExpr tenv size
        align_val <- asVal =<< genExpr tenv align
        return $ DynamicType size_val align_val Nothing
+     ArrayT mut size elt_type -> do
+       elt_type' <- genDynamicType tenv elt_type
+       padded_size <- genArrayElementSize elt_type'
+       num_elts <- asVal =<< genExpr tenv size
+       total_size <- nativeMulUZ padded_size num_elts
+       return $ DynamicType total_size (dynamicTypeAlign elt_type') Nothing
      AppT ty args ->
        genDynamicType tenv $ applyTemplate ty args
 
