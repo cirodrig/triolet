@@ -287,7 +287,7 @@ primCastZ ty src
 primAddZ = intBinaryPrimOp (+) (Just 0) (Just 0) PrimAddZ
 primSubZ = intBinaryPrimOp (-) Nothing (Just 0) PrimSubZ
 primMulZ = intBinaryPrimOp (*) (Just 1) (Just 1) PrimMulZ
-primModZ = intBinaryPrimOp mod Nothing (Just 1) PrimModZ
+primModZ = intBinaryPrimOp mod Nothing Nothing PrimModZ
 primMaxZ = intBinaryPrimOp max Nothing Nothing PrimMaxZ
 
 primNegateZ prim_type@(PrimType (IntType sign size)) n =
