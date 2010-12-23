@@ -409,6 +409,8 @@ genPrimCall prim args =
   case prim
   of PrimCastZ from_sgn to_sgn sz ->
        case args of [arg] -> cCast (IntType to_sgn sz) arg
+     PrimExtendZ sgn from_sz to_sz ->
+       case args of [arg] -> cCast (IntType sgn to_sz) arg       
      PrimAddZ _ _ -> binary CAddOp args
      PrimSubZ _ _ -> binary CSubOp args
      PrimMulZ _ _ -> binary CMulOp args

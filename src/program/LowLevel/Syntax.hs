@@ -52,6 +52,10 @@ data Prim =
     -- 
     -- Change the sign of an integral value without changing its content
     PrimCastZ !Signedness !Signedness !Size
+    -- | @PrimExtendZ sign from-size to-size@
+    --
+    -- Sign-extend, zero-extend, or truncate an integral value
+  | PrimExtendZ !Signedness !Size !Size
   | PrimAddZ !Signedness !Size  -- ^ Add two integers
   | PrimSubZ !Signedness !Size  -- ^ Subtract Y from X
   | PrimMulZ !Signedness !Size  -- ^ Multiply X by Y

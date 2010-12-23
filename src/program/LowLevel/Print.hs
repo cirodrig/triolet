@@ -163,6 +163,12 @@ pprPrim prim =
         case prim
         of PrimCastZ in_sgn out_sgn sz ->
              "cast_" ++ sign in_sgn ++ "_" ++ sign out_sgn
+           PrimExtendZ Signed in_sz out_sz
+             | in_sz < out_sz -> "sxt_" ++ size in_sz ++ "_" ++ size out_sz
+           PrimExtendZ Unsigned in_sz out_sz
+             | in_sz < out_sz -> "zxt_" ++ size in_sz ++ "_" ++ size out_sz
+           PrimExtendZ _ in_sz out_sz ->
+             "trunc_" ++ size in_sz ++ "_" ++ size out_sz
            PrimAddZ _ _ -> "add"
            PrimSubZ _ _ -> "sub"
            PrimMulZ _ _ -> "mul"
@@ -205,6 +211,10 @@ pprPrim prim =
          CmpGE -> "cmp_ge"      
     sign Signed = "i"
     sign Unsigned = "u"
+    size S8 = "8"
+    size S16 = "16"
+    size S32 = "32"
+    size S64 = "64"
 
 pprLit literal =
   case literal

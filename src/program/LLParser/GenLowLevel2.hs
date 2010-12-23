@@ -467,9 +467,25 @@ genCast ty e =
      (PointerType, PointerType) -> success_id
      (IntType e_sgn e_sz, IntType g_sgn g_sz)
        | e_sz == g_sz && e_sgn == g_sgn -> success_id
-       | e_sz == g_sz -> do
+       | otherwise -> do
          val <- asVal e
-         success $ LL.PrimA (LL.PrimCastZ g_sgn e_sgn g_sz) [val]
+         case () of
+           _ | e_sz == g_sz ->
+                 success $ LL.PrimA (LL.PrimCastZ g_sgn e_sgn g_sz) [val]
+             | e_sgn == g_sgn ->
+                 success $ LL.PrimA (LL.PrimExtendZ g_sgn g_sz e_sz) [val]
+             | e_sz > g_sz -> do
+                 -- Change size, then change sign
+                 val' <- emitAtom1 (PrimType (IntType g_sgn e_sz)) $
+                         LL.PrimA (LL.PrimExtendZ g_sgn g_sz e_sz) [val]
+                 success $ LL.PrimA (LL.PrimCastZ g_sgn e_sgn e_sz) [val']
+             | otherwise -> do
+                 val <- asVal e
+                 -- Change sign, then change size
+                 val' <- emitAtom1 (PrimType (IntType e_sgn g_sz)) $
+                         LL.PrimA (LL.PrimCastZ g_sgn e_sgn g_sz) [val]
+                 success $ LL.PrimA (LL.PrimExtendZ e_sgn g_sz e_sz) [val']
+         
      (IntType Signed e_sz, FloatType g_sz) -> do
        val <- asVal e
        success $ LL.PrimA (LL.PrimCastFToZ g_sz e_sz) [val]

@@ -113,6 +113,7 @@ primHasSideEffect :: Prim -> Bool
 primHasSideEffect prim =
   case prim
   of PrimCastZ {}         -> False
+     PrimExtendZ {}       -> False
      PrimAddZ {}          -> False
      PrimSubZ {}          -> False
      PrimMulZ {}          -> False
