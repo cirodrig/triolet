@@ -145,10 +145,10 @@ instance Applicative (Parameterized dom) where
 -------------------------------------------------------------------------------
 
 fromTypeArg (TypeArg t) = t
-fromTypeArg (ExprArg _) = error "Type argument found where expression expected"
+fromTypeArg (ExprArg _) = error "Expression argument found where type expected"
 
-fromExprArg (ExprArg t) = t
-fromExprArg (TypeArg _) = error "Expression argument found where type expected"
+fromExprArg (ExprArg e) = e
+fromExprArg (TypeArg _) = error "Type argument found where expression expected"
 
 data NamedType =
     RecordT !TypedRecord
@@ -440,16 +440,22 @@ createAndDefineVar name ty = do
   defineVar v ty
   return v
 
-lookupVar :: String -> NR (LL.Var, Type Typed)
+lookupVar :: String -> NR (TypeParametric (Expr Typed))
 lookupVar name = do
   (entry, is_defined) <- lookupEntity name
+  type_arity <- getCurrentTypeArity
   throwErrorMaybe $
     if is_defined
     then case entry
          of VarEntry _ _ -> Nothing
+            TypeParameterEntry _ -> Nothing
             _ -> Just $ "Not a variable: '" ++ name ++ "'"
     else Just $ "Not defined: '" ++ name ++ "'"
-  return $ case entry of ~(VarEntry t v) -> (v, t)
+  return (var_expr type_arity entry)
+  where
+    var_expr _          (VarEntry t v) = pure (TExp [t] (VarE v))
+    var_expr type_arity (TypeParameterEntry tp) =
+      fmap fromExprArg $ pVar type_arity tp
 
 -- | Define a new record type
 defineRecord :: RecordName Parsed
@@ -471,21 +477,27 @@ defineRecord name nparams mk_fields = do
 
 -------------------------------------------------------------------------------
 
+check :: Maybe String -> a -> a
+check Nothing x        = x
+check (Just message) _ = error message
+
 -- | Report an error if the expected type does not match the given type. 
 expectType :: PrimType          -- ^ Expected type
            -> String            -- ^ Error message
            -> [Type Typed]      -- ^ Given type
-           -> NR ()
-expectType expected message actual = throwErrorMaybe $
+           -> Maybe String
+expectType expected message actual =
   case actual
   of [PrimT pt] | expected == pt -> Nothing
      _ -> Just message
 
+expectNativeWord = expectType nativeWordType
+
 -- | Report an error if the given type is not a \'pointer\' or \'owned\' type.
 expectReferenceType :: String            -- ^ Error message
                     -> [Type Typed]      -- ^ Given type
-                    -> NR ()
-expectReferenceType message actual = throwErrorMaybe $
+                    -> Maybe String
+expectReferenceType message actual =
   case actual
   of [PrimT PointerType] -> Nothing
      [PrimT OwnedType]   -> Nothing
@@ -558,14 +570,18 @@ resolveType ty =
      BytesT size align -> do
        size_expr <- resolveExpr size
        align_expr <- resolveExpr align
-       expectType nativeWordType "Size of type must be a native word" (expType size_expr)
-       expectType nativeWordType "Alignment of type must be a native word" (expType align_expr)
-       return (pure $ BytesT size_expr align_expr)
+       let mktype sz al =
+             check (expectNativeWord "Size of type must be a native word" (expType sz)) $
+             check (expectNativeWord "Alignment of type must be a native word" (expType al)) $
+             BytesT sz al
+       return (liftA2 mktype size_expr align_expr)
      ArrayT mut size elt -> do
        size_expr <- resolveExpr size
-       expectType nativeWordType "Size of array must be a native word" (expType size_expr)
        elt_ty <- resolveType elt
-       return (ArrayT mut size_expr <$> elt_ty)
+       let mktype sz elt =
+             check (expectNativeWord "Size of array must be a native word" (expType sz)) $
+             ArrayT mut sz elt
+       return (liftA2 mktype size_expr elt_ty)
      AppT t args -> do
        -- Resolve t and args
        param_t <- resolveType t
@@ -575,8 +591,7 @@ resolveType ty =
        return (applyTemplate <$> param_t <*> sequenceA arg_ts)
 
 resolveTypeArg (TypeArg t) = liftM (fmap TypeArg) $ resolveType t
--- FIXME: Type parameters inside expressions
-resolveTypeArg (ExprArg e) = liftM (pure . ExprArg) $ resolveExpr e
+resolveTypeArg (ExprArg e) = liftM (fmap ExprArg) $ resolveExpr e
 
 
 resolveType0 :: Type Parsed -> NR (Type Typed)
@@ -584,99 +599,97 @@ resolveType0 t = fmap (applyTo []) $ resolveType t
 
 -- | Determine the type of a binary operation's result.  Throw errors if the
 -- operation is ill-typed.
-getBinaryType :: BinOp -> [Type Typed] -> [Type Typed] -> NR (Type Typed)
-getBinaryType op xtypes ytypes =
-  check_single_parameter >>
-  case op
-  of MulOp -> arithmetic
-     ModOp -> arithmetic
-     AddOp -> arithmetic
-     SubOp -> arithmetic
-     PointerAddOp -> pointer
-     AtomicAddOp -> atomic
-     CmpEQOp -> comparison
-     CmpNEOp -> comparison
-     CmpLTOp -> comparison
-     CmpLEOp -> comparison
-     CmpGTOp -> comparison
-     CmpGEOp -> comparison
+getBinaryType :: BinOp -> TypeParametric [Type Typed] -> TypeParametric [Type Typed]
+              -> ParametricType
+getBinaryType op xtypes ytypes = gbt <$> xtypes <*> ytypes
   where
-    [x] = xtypes
-    [y] = ytypes
-    
-    check_single_parameter =
-      throwErrorMaybe $
-      if length xtypes == 1 && length ytypes == 1
-      then Nothing
-      else Just "Operand has multiple return values" 
-      
-    primtype_check (PrimT _) = Nothing
-    primtype_check _ = Just "Expecting a primitive type"
-    
-    eq_primtype_check (PrimT x) (PrimT y)
-      | x == y = Nothing
-      | otherwise = Just "Binary operands not equal"
-    
-    number_check (PrimT (IntType {})) = Nothing
-    number_check (PrimT (FloatType {})) = Nothing
-    number_check _ = Just "Expecting integral or floating-point type"
+    gbt xs@(~[x]) ys@(~[y]) =
+      case op
+      of MulOp -> arithmetic
+         ModOp -> arithmetic
+         AddOp -> arithmetic
+         SubOp -> arithmetic
+         PointerAddOp -> pointer
+         AtomicAddOp -> atomic
+         CmpEQOp -> comparison
+         CmpNEOp -> comparison
+         CmpLTOp -> comparison
+         CmpLEOp -> comparison
+         CmpGTOp -> comparison
+         CmpGEOp -> comparison
+      where
+        single_parameter =
+          if length xs == 1 && length ys == 1
+          then Nothing
+          else Just "Operand has multiple return values" 
+          
+        primtype_check (PrimT _) = Nothing
+        primtype_check _ = Just "Expecting a primitive type"
+        
+        eq_primtype_check (PrimT x) (PrimT y)
+          | x == y = Nothing
+          | otherwise = Just "Binary operands not equal"
+        
+        number_check (PrimT (IntType {})) = Nothing
+        number_check (PrimT (FloatType {})) = Nothing
+        number_check _ = Just "Expecting integral or floating-point type"
 
-    pointer_check (PrimT PointerType) = Nothing 
-    pointer_check (PrimT OwnedType) = Nothing 
-    pointer_check _ = Just "Expecting 'pointer' or 'owned' type"
-    
-    pointer_only_check (PrimT PointerType) = Nothing 
-    pointer_only_check _ = Just "Expecting 'pointer' type"
+        pointer_check (PrimT PointerType) = Nothing 
+        pointer_check (PrimT OwnedType) = Nothing 
+        pointer_check _ = Just "Expecting 'pointer' or 'owned' type"
+        
+        pointer_only_check (PrimT PointerType) = Nothing 
+        pointer_only_check _ = Just "Expecting 'pointer' type"
 
-    native_int_check (PrimT t)
-      | t == nativeIntType = Nothing
-      | otherwise = Just "Expecting a native int type"
+        native_int_check (PrimT t)
+          | t == nativeIntType = Nothing
+          | otherwise = Just "Expecting a native int type"
 
-    retval `checking` checks =
-      throwErrorMaybe (msum checks) >> return retval
-    
-    arithmetic =
-      x `checking` [ number_check x 
-                   , number_check y
-                   , eq_primtype_check x y]
-    
-    pointer =
-      x `checking` [pointer_check x, native_int_check y]
+        retval `checking` checks = retval -- FIXME: check checks
+        
+        arithmetic =
+          x `checking` [ single_parameter
+                       , number_check x 
+                       , number_check y
+                       , eq_primtype_check x y]
+        
+        pointer =
+          x `checking` [single_parameter, pointer_check x, native_int_check y]
 
-    atomic =
-      y `checking` [pointer_only_check x, primtype_check y]
-    
-    comparison =
-      PrimT BoolType `checking` [ primtype_check x
-                                , primtype_check y
-                                , eq_primtype_check x y]
+        atomic =
+          y `checking` [single_parameter, pointer_only_check x, primtype_check y]
+        
+        comparison =
+          PrimT BoolType `checking` [ single_parameter
+                                    , primtype_check x
+                                    , primtype_check y
+                                    , eq_primtype_check x y]
 
 -- | Determine the type of a unary operation's result.  Throw errors if the
 -- operation is ill-typed.
-getUnaryType :: UnaryOp -> [Type Typed] -> NR (Type Typed)
-getUnaryType op types =
-  check_single_parameter >>
-  case op of NegateOp -> negate
+getUnaryType :: UnaryOp -> TypeParametric [Type Typed] -> ParametricType
+getUnaryType op types = gut <$> types
   where
-    [x] = types
- 
-    check_single_parameter =
-      throwErrorMaybe $
-      case types of [_] -> Nothing
-                    _ -> Just "Operand has multiple return values"
+    gut xs@(~[x]) =
+      case op of NegateOp -> negate
+      where
+        single_parameter =
+          case xs of [_] -> Nothing
+                     _ -> Just "Operand has multiple return values"
 
-    primtype_check (PrimT _) = Nothing
-    primtype_check _ = Just "Expecting a primitive type"
+        primtype_check (PrimT _) = Nothing
+        primtype_check _ = Just "Expecting a primitive type"
 
-    number_check (PrimT (IntType {})) = Nothing
-    number_check (PrimT (FloatType {})) = Nothing
-    number_check _ = Just "Expecting integral or floating-point type"
+        number_check (PrimT (IntType {})) = Nothing
+        number_check (PrimT (FloatType {})) = Nothing
+        number_check _ = Just "Expecting integral or floating-point type"
 
-    retval `checking` checks =
-      throwErrorMaybe (msum checks) >> return retval
-    
-    negate =
-      x `checking` [number_check x]
+        retval `checking` checks =
+          -- FIXME: check checks
+          retval
+        
+        negate =
+          x `checking` [single_parameter, number_check x]
 
 exprType :: Expr Typed -> [Type Typed]
 exprType = expType
@@ -696,86 +709,100 @@ stmtType (ReturnS atom) = atomType atom
 -------------------------------------------------------------------------------
 -- Name resolution and inference of record definitions
 
-resolveExpr :: Expr Parsed -> NR (Expr Typed)
+resolveExpr0 :: Expr Parsed -> NR (Expr Typed)
+resolveExpr0 expr = fmap (applyTo []) $ resolveExpr expr
+
+resolveExpr :: Expr Parsed -> NR (TypeParametric (Expr Typed))
 resolveExpr expr =
   case expr
-  of VarE vname -> do
-       (v, v_type) <- lookupVar vname
-       return1 v_type (VarE v)
+  of VarE vname -> lookupVar vname
      IntLitE ty n -> do
-       ty' <- resolveType0 ty
-       return1 ty' (IntLitE ty' n)
+       ty' <- resolveType ty
+       return1 ty' (IntLitE <$> ty' <*> pure n)
      FloatLitE ty n -> do
-       ty' <- resolveType0 ty
-       return1 ty' (FloatLitE ty' n)
+       ty' <- resolveType ty
+       return1 ty' (FloatLitE <$> ty' <*> pure n)
      BoolLitE b ->
-       return1 (PrimT BoolType) (BoolLitE b)
+       return1 (pure $ PrimT BoolType) (pure $ BoolLitE b)
      NilLitE ->
-       return1 (PrimT UnitType) NilLitE
+       return1 (pure $ PrimT UnitType) (pure NilLitE)
      NullLitE ->
-       return1 (PrimT PointerType) NullLitE
+       return1 (pure $ PrimT PointerType) (pure NullLitE)
      RecordE ty fields -> do
-       ty' <- resolveType0 ty
-       expectRecordType "Record expression must have record type" ty'
+       ty' <- resolveType ty
        fields' <- mapM resolveExpr fields
-       return1 ty' (RecordE ty' fields')
+       let mkexp t fs = TExp [t] (RecordE t fs)
+       return $ mkexp <$> ty' <*> sequenceA fields'
      FieldE base fld -> do
        base' <- resolveExpr base
-       expectReferenceType "Base address must have 'pointer' or 'owned' type" (expType base')
-       fld' <- resolveField0 fld
-       return1 (PrimT PointerType) (FieldE base' fld')
+       fld' <- resolveField fld
+       let mkexp b f =
+             check (expectReferenceType "Base address must have 'pointer' or 'owned' type" (expType b)) $
+             FieldE b f
+       return1 (pure $ PrimT PointerType) (mkexp <$> base' <*> fld')
      LoadFieldE base fld -> do
        base' <- resolveExpr base
-       expectReferenceType "Base address must have 'pointer' or 'owned' type" (expType base')
-       fld' <- resolveField0 fld
-       
+       fld' <- resolveField fld
+
        -- Determine the type of the loaded field
-       let ty = case fld'
-                of Field base_type fnames Nothing -> fieldType base_type fnames
-                   Field _ _ (Just cast_ty) -> cast_ty
-       return1 ty (LoadFieldE base' fld')
+       let mkexp b f =
+             check (expectReferenceType "Base address must have 'pointer' or 'owned' type" (expType b)) $
+             let ty = get_field_type f
+             in TExp [ty] (LoadFieldE b f)
+             where 
+               get_field_type (Field base_type fnames Nothing) = 
+                 fieldType base_type fnames
+               get_field_type (Field _ _ (Just cast_ty)) = cast_ty
+       return (mkexp <$> base' <*> fld')
      DerefE {} -> error "Store expression not valid here"
      LoadE ty base -> do
-       ty' <- resolveType0 ty
+       ty' <- resolveType ty
        base' <- resolveExpr base
-       expectReferenceType "Load expression must have 'pointer' or 'owned' type" (expType base')
-       return1 ty' (LoadE ty' base')
+       let mkexp t b =
+             check (expectReferenceType "Load expression must have 'pointer' or 'owned' type" (expType b)) $
+             TExp [t] (LoadE t b)
+       return (mkexp <$> ty' <*> base')
      CallE rtypes f args -> do
-       rtypes' <- mapM resolveType0 rtypes
+       rtypes' <- mapM resolveType rtypes
        f' <- resolveExpr f
-       expectType OwnedType "Called function must have 'owned' type" (expType f')
        args' <- mapM resolveExpr args
-       return (TExp rtypes' (CallE rtypes' f' args'))
+       let mkexp rts f xs =
+             check (expectType OwnedType "Called function must have 'owned' type" (expType f)) $
+             TExp rts (CallE rts f xs)
+       return (mkexp <$> sequenceA rtypes' <*> f' <*> sequenceA args')
      PrimCallE rtypes f args -> do
-       rtypes' <- mapM resolveType0 rtypes
+       rtypes' <- mapM resolveType rtypes
        f' <- resolveExpr f
-       expectType PointerType "Called procedure must have 'pointer' type" (expType f')
        args' <- mapM resolveExpr args
-       return (TExp rtypes' (PrimCallE rtypes' f' args'))
+       let mkexp rts f xs =
+             check (expectType PointerType "Called procedure must have 'pointer' type" (expType f)) $
+             TExp rts (PrimCallE rts f xs)
+       return (mkexp <$> sequenceA rtypes' <*> f' <*> sequenceA args')
      BinaryE op l r -> do
        l' <- resolveExpr l
        r' <- resolveExpr r
-       rtype <- getBinaryType op (expType l') (expType r')
-       return1 rtype (BinaryE op l' r')
+       let rtype = getBinaryType op (fmap expType l') (fmap expType r')
+       return1 rtype (BinaryE op <$> l' <*> r')
      UnaryE op e -> do
        e' <- resolveExpr e
-       rtype <- getUnaryType op (expType e')
-       return1 rtype (UnaryE op e')
+       let rtype = getUnaryType op (fmap expType e')
+       return1 rtype (UnaryE op <$> e')
      CastE e ty -> do
        e' <- resolveExpr e
-       ty' <- resolveType0 ty
-       return1 ty' (CastE e' ty')
+       ty' <- resolveType ty
+       return1 ty' (CastE <$> e' <*> ty')
      SizeofE ty -> do
-       ty' <- resolveType0 ty
-       return1 (PrimT nativeWordType) (SizeofE ty')
+       ty' <- resolveType ty
+       return1 (pure $ PrimT nativeWordType) (SizeofE <$> ty')
      AlignofE ty -> do
-       ty' <- resolveType0 ty
-       return1 (PrimT nativeWordType) (AlignofE ty')
+       ty' <- resolveType ty
+       return1 (pure $ PrimT nativeWordType) (AlignofE <$> ty')
   where
-    return1 t e = return (TExp [t] e)
+    return1 t e = return (mktexp <$> t <*> e)
+      where mktexp t e = TExp [t] e
 
 resolveAtom :: Atom Parsed -> NR (Atom Typed)
-resolveAtom (ValA exprs) = fmap ValA $ mapM resolveExpr exprs
+resolveAtom (ValA exprs) = fmap ValA $ mapM resolveExpr0 exprs
 
 resolveStmt :: Stmt Parsed -> NR (Stmt Typed)
 resolveStmt stmt =
@@ -795,7 +822,7 @@ resolveStmt stmt =
        body' <- resolveStmt body
        return $ TypedefS tname' ty' body'
      IfS cond if_true if_false mcont -> do
-       cond' <- resolveExpr cond
+       cond' <- resolveExpr0 cond
        expectBooleanType "condition of 'if' statement" (exprType cond')
 
        if_true' <- enterNonRec $ resolveStmt if_true
@@ -814,7 +841,7 @@ resolveStmt stmt =
          -- Process the initializers.  The initial values are processed before
          -- the accumulator variables, then the accumulator variables are
          -- defined.
-         init_values <- mapM (resolveExpr . snd) inits
+         init_values <- mapM (resolveExpr0 . snd) inits
          init_params <- mapM (resolveParameter . fst) inits 
          let init_types = [t | Parameter t _ <- init_params]
          
@@ -825,7 +852,7 @@ resolveStmt stmt =
            | (e, t) <- zip init_values init_types]
 
          -- Process the condition; must have boolean type
-         cond' <- resolveExpr cond
+         cond' <- resolveExpr0 cond
          expectBooleanType "condition of 'while' statement" (exprType cond')
 
          -- Process the body; must have same type as initializers
@@ -908,11 +935,11 @@ resolveLValue lvalue ty =
        v' <- createVar vname (convertToValueType ty)
        return (defineVar v' ty, VarL v')
      StoreL dest -> do
-       dest' <- resolveExpr dest
-       expectReferenceType "Store target must have 'owned' or 'pointer' type" (expType dest')
+       dest' <- resolveExpr0 dest
+       throwErrorMaybe $ expectReferenceType "Store target must have 'owned' or 'pointer' type" (expType dest')
        return (pass, StoreL dest')
      StoreFieldL dest field -> do
-       dest' <- resolveExpr dest
+       dest' <- resolveExpr0 dest
        field' <- resolveField0 field
        return (pass, StoreFieldL dest' field')
      UnpackL rectype fields -> do
@@ -946,7 +973,7 @@ resolveField (Field rec fnames mtype) = do
 
 resolveFieldSpec :: FieldSpec Parsed -> NR (FieldSpec Typed)
 resolveFieldSpec (RecordFS fname) = return (RecordFS fname)
-resolveFieldSpec (ArrayFS e) = ArrayFS `liftM` resolveExpr e
+resolveFieldSpec (ArrayFS e) = ArrayFS `liftM` resolveExpr0 e -- FIXME: allow parameters
 
 resolveField0 :: Field Parsed -> NR (Field Typed)
 resolveField0 f = fmap (applyTo []) $ resolveField f
@@ -1018,7 +1045,7 @@ resolveDataDef ddef = do
   defineVar dname (PrimT $ dataType ddef)
   
   -- Translate the initializer expression
-  dexp <- resolveExpr $ dataValue ddef
+  dexp <- resolveExpr0 $ dataValue ddef
   
   return $ DataDef dname (dataType ddef) dexp
 
