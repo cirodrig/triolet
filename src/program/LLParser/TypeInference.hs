@@ -599,71 +599,68 @@ resolveType0 t = fmap (applyTo []) $ resolveType t
 
 -- | Determine the type of a binary operation's result.  Throw errors if the
 -- operation is ill-typed.
-getBinaryType :: BinOp -> TypeParametric [Type Typed] -> TypeParametric [Type Typed]
-              -> ParametricType
-getBinaryType op xtypes ytypes = gbt <$> xtypes <*> ytypes
+getBinaryType :: BinOp -> [Type Typed] -> [Type Typed] -> Type Typed
+getBinaryType op xs@(~[x]) ys@(~[y]) =
+  case op
+  of MulOp -> arithmetic
+     ModOp -> arithmetic
+     AddOp -> arithmetic
+     SubOp -> arithmetic
+     PointerAddOp -> pointer
+     AtomicAddOp -> atomic
+     CmpEQOp -> comparison
+     CmpNEOp -> comparison
+     CmpLTOp -> comparison
+     CmpLEOp -> comparison
+     CmpGTOp -> comparison
+     CmpGEOp -> comparison
   where
-    gbt xs@(~[x]) ys@(~[y]) =
-      case op
-      of MulOp -> arithmetic
-         ModOp -> arithmetic
-         AddOp -> arithmetic
-         SubOp -> arithmetic
-         PointerAddOp -> pointer
-         AtomicAddOp -> atomic
-         CmpEQOp -> comparison
-         CmpNEOp -> comparison
-         CmpLTOp -> comparison
-         CmpLEOp -> comparison
-         CmpGTOp -> comparison
-         CmpGEOp -> comparison
-      where
-        single_parameter =
-          if length xs == 1 && length ys == 1
-          then Nothing
-          else Just "Operand has multiple return values" 
-          
-        primtype_check (PrimT _) = Nothing
-        primtype_check _ = Just "Expecting a primitive type"
-        
-        eq_primtype_check (PrimT x) (PrimT y)
-          | x == y = Nothing
-          | otherwise = Just "Binary operands not equal"
-        
-        number_check (PrimT (IntType {})) = Nothing
-        number_check (PrimT (FloatType {})) = Nothing
-        number_check _ = Just "Expecting integral or floating-point type"
+    single_parameter =
+      if length xs == 1 && length ys == 1
+      then Nothing
+      else Just "Operand has multiple return values" 
+      
+    primtype_check (PrimT _) = Nothing
+    primtype_check _ = Just "Expecting a primitive type"
+    
+    eq_primtype_check (PrimT x) (PrimT y)
+      | x == y = Nothing
+      | otherwise = Just "Binary operands not equal"
+    
+    number_check (PrimT (IntType {})) = Nothing
+    number_check (PrimT (FloatType {})) = Nothing
+    number_check _ = Just "Expecting integral or floating-point type"
 
-        pointer_check (PrimT PointerType) = Nothing 
-        pointer_check (PrimT OwnedType) = Nothing 
-        pointer_check _ = Just "Expecting 'pointer' or 'owned' type"
-        
-        pointer_only_check (PrimT PointerType) = Nothing 
-        pointer_only_check _ = Just "Expecting 'pointer' type"
+    pointer_check (PrimT PointerType) = Nothing 
+    pointer_check (PrimT OwnedType) = Nothing 
+    pointer_check _ = Just "Expecting 'pointer' or 'owned' type"
+    
+    pointer_only_check (PrimT PointerType) = Nothing 
+    pointer_only_check _ = Just "Expecting 'pointer' type"
 
-        native_int_check (PrimT t)
-          | t == nativeIntType = Nothing
-          | otherwise = Just "Expecting a native int type"
+    native_int_check (PrimT t)
+      | t == nativeIntType = Nothing
+      | otherwise = Just "Expecting a native int type"
 
-        retval `checking` checks = retval -- FIXME: check checks
-        
-        arithmetic =
-          x `checking` [ single_parameter
-                       , number_check x 
-                       , number_check y
-                       , eq_primtype_check x y]
-        
-        pointer =
-          x `checking` [single_parameter, pointer_check x, native_int_check y]
+    retval `checking` checks = foldr check retval checks
+    
+    arithmetic =
+      x `checking` [ single_parameter
+                   , number_check x 
+                   , number_check y
+                   , eq_primtype_check x y]
+    
+    pointer =
+      x `checking` [single_parameter, pointer_check x, native_int_check y]
 
-        atomic =
-          y `checking` [single_parameter, pointer_only_check x, primtype_check y]
-        
-        comparison =
-          PrimT BoolType `checking` [ single_parameter
-                                    , primtype_check x
-                                    , primtype_check y
-                                    , eq_primtype_check x y]
+    atomic =
+      y `checking` [single_parameter, pointer_only_check x, primtype_check y]
+    
+    comparison =
+      PrimT BoolType `checking` [ single_parameter
+                                , primtype_check x
+                                , primtype_check y
+                                , eq_primtype_check x y]
 
 -- | Determine the type of a unary operation's result.  Throw errors if the
 -- operation is ill-typed.
@@ -700,6 +697,7 @@ atomType (ValA exprs) = concatMap expType exprs
 stmtType :: Stmt Typed -> [Type Typed]
 stmtType (LetS _ _ s) = stmtType s
 stmtType (LetrecS _ s) = stmtType s
+stmtType (TypedefS _ _ s) = stmtType s
 stmtType (IfS _ _ s Nothing) = stmtType s
 stmtType (IfS _ _ _ (Just (_, s))) = stmtType s
 stmtType (WhileS inits _ _ Nothing) = [t | (Parameter t _, _) <- inits]
@@ -781,8 +779,10 @@ resolveExpr expr =
      BinaryE op l r -> do
        l' <- resolveExpr l
        r' <- resolveExpr r
-       let rtype = getBinaryType op (fmap expType l') (fmap expType r')
-       return1 rtype (BinaryE op <$> l' <*> r')
+       let mkexp l r =
+             let rtype = getBinaryType op (expType l) (expType r)
+             in TExp [rtype] (BinaryE op l r)
+       return (mkexp <$> l' <*> r')
      UnaryE op e -> do
        e' <- resolveExpr e
        let rtype = getUnaryType op (fmap expType e')
@@ -969,11 +969,11 @@ resolveField (Field rec fnames mtype) = do
   record' <- resolveType0 rec
   mtype' <- traverse resolveType mtype
   fnames' <- mapM resolveFieldSpec fnames
-  return $ Field record' fnames' <$> sequenceA mtype'
+  return $ Field record' <$> sequenceA fnames' <*> sequenceA mtype'
 
-resolveFieldSpec :: FieldSpec Parsed -> NR (FieldSpec Typed)
-resolveFieldSpec (RecordFS fname) = return (RecordFS fname)
-resolveFieldSpec (ArrayFS e) = ArrayFS `liftM` resolveExpr0 e -- FIXME: allow parameters
+resolveFieldSpec :: FieldSpec Parsed -> NR (TypeParametric (FieldSpec Typed))
+resolveFieldSpec (RecordFS fname) = return (pure $ RecordFS fname)
+resolveFieldSpec (ArrayFS e) = liftM (fmap ArrayFS) $ resolveExpr e
 
 resolveField0 :: Field Parsed -> NR (Field Typed)
 resolveField0 f = fmap (applyTo []) $ resolveField f
