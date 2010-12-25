@@ -477,6 +477,8 @@ genPrimCall prim args =
        of [val] ->
             let decl = anonymousDecl $ primTypeDeclSpecs (IntType Signed to_size) 
             in CCast decl val internalNode
+     PrimGetFrameP ->
+       CVar (internalIdent "frame_ptr") internalNode
      PrimAddF _ -> binary CAddOp args
      PrimSubF _ -> binary CSubOp args
      PrimMulF _ -> binary CMulOp args
