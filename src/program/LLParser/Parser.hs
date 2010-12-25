@@ -2,6 +2,7 @@
 module LLParser.Parser(parseFile)
 where
 
+import Control.Applicative hiding((<|>))
 import Control.Monad
 import Data.List
 import Text.ParserCombinators.Parsec hiding(string)
@@ -347,8 +348,7 @@ statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> let_or_atom
       cond <- parens expr
       if_true <- block
       match ElseTok
-      if_false <- if_stmt <|> block
-      match SemiTok
+      if_false <- if_stmt <|> (block <* match SemiTok)
       return $ IfS cond if_true if_false Nothing
     
     -- A 'while' statement
