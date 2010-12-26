@@ -419,8 +419,10 @@ statements = if_stmt <|> letrec_stmt <|> typedef_stmt <|> let_or_atom
 -------------------------------------------------------------------------------
 -- Definitions
 
+maybeIdentifier = fmap Just identifier <|> (match WildTok >> return Nothing)
+
 parameter :: P (Parameter Parsed)
-parameter = liftM2 Parameter parseType identifier
+parameter = liftM2 Parameter parseType maybeIdentifier
 
 parameters :: P (Parameters Parsed)
 parameters = parenList parameter
@@ -466,7 +468,7 @@ parseFunctionBody = braces $ do
       match DataTok
       ty <- parseType
       name <- identifier
-      return $ Parameter ty name
+      return $ Parameter ty (Just name)
 
 -- | Parse a function or procedure definition
 functionDef :: P (FunctionDef Parsed)

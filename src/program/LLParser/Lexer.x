@@ -69,7 +69,7 @@ rules :-
 "unit" / @notid		{ tok UnitTok }
 "value" / @notid	{ tok ValueTok }
 "while" / @notid	{ tok WhileTok }
-"_" / @notid @		{ tok WildTok }
+"_" / @notid		{ tok WildTok }
 
 -- Punctuation
 "{"			{ tok LBraceTok }

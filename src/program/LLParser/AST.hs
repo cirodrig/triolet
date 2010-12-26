@@ -133,7 +133,7 @@ data FunctionDef a =
   , functionBody :: Stmt a
   }
 
-data Parameter a = Parameter (Type a) (VarName a)
+data Parameter a = Parameter (Type a) (Maybe (VarName a))
 type Parameters a = [Parameter a]
 type Locals a = [Parameter a]
 

@@ -62,6 +62,9 @@ lookupTypeSynonym syn m =
   of Just t -> t
      Nothing -> internalError "lookupTypeSynonym"
 
+parameterVar (Parameter _ (Just v)) = v
+parameterVar (Parameter _ Nothing)  = internalError "parameterVar: No variable"
+
 -------------------------------------------------------------------------------
 
 type G a = Gen FreshVarM a
@@ -298,7 +301,7 @@ genLocals locals =
   let rec = localsRecord locals
       offsets = [nativeIntV $ fieldOffset f
                 | f <- LowLevel.CodeTypes.recordFields rec]
-      local_vars = [v | Parameter _ v <- locals]
+      local_vars = map parameterVar locals
   in do locals_ptr <- emitAtom1 (PrimType PointerType) (LL.PrimA LL.PrimGetFrameP [])
         zipWithM_ (primAddPAs locals_ptr) offsets local_vars
         return $ recordSize rec
@@ -604,7 +607,8 @@ genTailWhile tenv inits cond body = do
   while_var <- lift $ LL.newAnonymousVar (PrimType PointerType)
   
   -- When done, return the loop-carried variables
-  let cont = return $ LL.ReturnE $ LL.ValA [LL.VarV v | (Parameter _ v, _) <- inits]
+  let cont = return $ LL.ReturnE $ LL.ValA
+             [LL.VarV $ parameterVar p | (p, _) <- inits]
   genWhileFunction tenv while_var inits cond body cont
   initializers <- mapM (asVal <=< genExpr tenv) (map snd inits)
   return $ LL.ReturnE $ LL.primCallA (LL.VarV while_var) initializers
@@ -612,7 +616,7 @@ genTailWhile tenv inits cond body = do
 genMedialWhile :: TypeEnv -> [(Parameter Typed, Expr Typed)] -> Expr Typed
                -> Stmt Typed -> [LValue Typed] -> G a -> G a
 genMedialWhile tenv inits cond body lhs mk_cont = do
-  let param_vars = [v | (Parameter _ v, _) <- inits]
+  let param_vars = [parameterVar p | (p, _) <- inits]
       param_types = map LL.varType param_vars
   while_var <- lift $ LL.newAnonymousVar (PrimType PointerType)
   
@@ -642,7 +646,7 @@ genWhileFunction :: TypeEnv
                  -> LL.Var -> [(Parameter Typed, Expr Typed)] -> Expr Typed
                  -> Stmt Typed -> G LL.Stm -> G ()
 genWhileFunction tenv while_var params cond body cont = do
-  let param_vars = [v | (Parameter _ v, _) <- params]
+  let param_vars = [parameterVar p | (p, _) <- params]
       return_types = [convertToValueType t | (Parameter t _, _) <- params]
 
   function_body <- lift $ execBuild return_types $ do
@@ -758,7 +762,7 @@ genLValue tenv lvalue ty =
 
 genFunctionDef :: TypeEnv -> FunctionDef Typed -> FreshVarM LL.FunDef
 genFunctionDef tenv fdef = do
-  let params = [v | Parameter _ v <- functionParams fdef]
+  let params = map parameterVar $ functionParams fdef
       returns = map convertToValueType $ functionReturns fdef
   -- Generate function body
   (body, locals_size) <- execBuild' returns $ do 

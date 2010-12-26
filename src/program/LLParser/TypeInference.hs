@@ -1001,18 +1001,22 @@ fieldType ty flds =
 
 -- | Do type inference on a parameter and add the variable to the environment 
 resolveParameter :: Parameter Parsed -> NR (Parameter Typed)
-resolveParameter (Parameter ty nm) = do
+resolveParameter (Parameter ty mname) = do
   ty' <- resolveType0 ty 
-  v <- createAndDefineVar nm ty'
-  return (Parameter ty' v)
+  v <- case mname
+       of Just nm -> createAndDefineVar nm ty'
+          Nothing -> LL.newAnonymousVar (convertToValueType ty')
+  return (Parameter ty' (Just v))
 
 -- | Do type inference on a local variable and add the variable to the
 --   environment.  The variable is always a pointer.
 resolveLocal :: Parameter Parsed -> NR (Parameter Typed)
-resolveLocal (Parameter ty nm) = do
+resolveLocal (Parameter ty mname) = do
   ty' <- resolveType0 ty
-  v <- createAndDefineVar nm (PrimT PointerType)
-  return (Parameter ty' v)
+  v <- case mname
+       of Just nm -> createAndDefineVar nm (PrimT PointerType)
+          Nothing -> LL.newAnonymousVar (convertToValueType ty')
+  return (Parameter ty' (Just v))
 
 resolveFunctionDef :: Bool -> FunctionDef Parsed -> NR (FunctionDef Typed)
 resolveFunctionDef is_global fdef = do
