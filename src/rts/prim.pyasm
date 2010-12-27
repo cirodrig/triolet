@@ -1,7 +1,7 @@
 
 module pyon.internal.prim;
 
-#include "pyasm.h"
+#include "rts.h"
 #include "memory_py.h"
 #include "apply_py.h"
 #include "prim.h"
@@ -48,8 +48,8 @@ function fromint_float(int x) -> float {
 };
 
 function load_complexFloat (pointer x) -> (complex(float)) {
-  typedef cfloat = complex(float);
-  complex(float) {x @! cfloat.real, x @! cfloat.imag};
+  typedef cpxfloat = complex(float);
+  complex(float) {x @! cpxfloat.real, x @! cpxfloat.imag};
 };
 
 function store_complexFloat (complex(float) x, pointer dst) -> () {

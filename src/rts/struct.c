@@ -1,6 +1,7 @@
 
 #include "pyon_internal.h"
 
+#if 0
 const struct tag_sizealign_t tag_sizealign_array[] =
   { {1, 1},				/* Int8Tag */
     {2, 2},				/* Int16Tag */
@@ -16,3 +17,4 @@ const char bits_tag_size_array [] =
     8,				/* Bits64Tag */
     4				/* OwnedRefBitsTag */
   };
+#endif

@@ -156,14 +156,13 @@ localClosureRecord captured_vars =
   constStaticRecord [ RecordField objectHeaderRecord
                        , RecordField captured_vars]
 
--- | A function or partial application is an object containing a
--- function's captured variables, including pointers to mutually recursive
--- functions.  The info table together with the 'nargs' field determines the
--- layout of the remaining fields.
+-- | A partial application is an object containing a function and some of
+-- its arguments.  The header is followed by some arguments.
 papHeader :: [StaticFieldType]
 papHeader = [ RecordField objectHeaderRecord
-            , PrimField OwnedType
-            , PrimField (IntType Unsigned S16)
+            , PrimField OwnedType              -- The function
+            , PrimField (IntType Unsigned S16) -- Number of arguments
+            , PrimField (IntType Unsigned S16) -- Size of arguments in words
             ]
 
 papHeaderRecord :: StaticRecord

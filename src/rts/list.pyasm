@@ -1,7 +1,7 @@
 
 module pyon.internal.list;
 
-#include "pyasm.h"
+#include "rts.h"
 #include "debug.h"
 #include "memory_py.h"
 #include "apply_py.h"
@@ -21,7 +21,6 @@ function list_copy_real(word elem_size, word elem_align, owned elem_copy,
   pad_elem_size = PAD(elem_size, elem_align);
 
   // Duplicate contents
-  PYON_DB_ALLOC(word 1001)
   contents = pointer primcall pyon_alloc (pad_elem_size * num_elems);
   (_, _, _) = while (word count       = num_elems,
                      pointer src_elem = src @! PyonList.contents,
@@ -61,7 +60,6 @@ function list_finalize_real (word elem_size, word elem_align, owned elem_fini, p
   };
 
   // Free the array
-  PYON_DB_DEALLOC(word 1501)
   () primcall pyon_dealloc (contents);
 };
 
@@ -79,7 +77,6 @@ procedure list_create_uninitialized (pointer elem_repr,
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   pad_elem_size = PAD(elem_size, elem_align);
-  PYON_DB_ALLOC(word 1002)
   contents = pointer primcall pyon_alloc (pad_elem_size * size);
   
   list @! PyonList.nelems = size;
@@ -103,7 +100,6 @@ procedure list_grow (pointer elem_repr, pointer list, word new_size) -> () {
   old_contents = list @! PyonList.contents;
 
   // Allocate new list contents
-  PYON_DB_ALLOC(word 1003)
   new_contents = pointer primcall pyon_alloc (new_size_bytes);
 
   // Copy old contents to new list
@@ -112,7 +108,6 @@ procedure list_grow (pointer elem_repr, pointer list, word new_size) -> () {
                                old_size_bytes);
 
   // Free old contents
-  PYON_DB_DEALLOC(word 1502)
   () = () primcall pyon_dealloc(old_contents);
 
   // Save new list contents.
@@ -133,7 +128,6 @@ function list_build (unit _, unit _, pointer elem_repr, owned stream, pointer li
   () = () primcall list_create_uninitialized (elem_repr, list_size, list);
 
   // Set up stream
-  PYON_DB_ALLOC(word 1004)
   stream_next = stream @! Stream.next;
   stream_state = pointer primcall pyon_alloc (stream @! Stream.state_size);
   () = () call (stream @! Stream.initialize) (stream_state);
@@ -169,7 +163,6 @@ function list_build (unit _, unit _, pointer elem_repr, owned stream, pointer li
 
       // Finalize the stream
       () = () call (stream @! Stream.state_finalize) (stream_state);
-      PYON_DB_DEALLOC(word 1503)
       () = () primcall pyon_dealloc (stream_state);
       ();   
     }
@@ -357,7 +350,6 @@ procedure list_peek (pointer elem_repr,
 // Initialize a predefined six-element list of integers.
 // Contents are from Sloane's A002485.
 function list_db (pointer list) -> () {
-  PYON_DB_ALLOC(word 1005)
   my_int = pointer primcall pyon_alloc (sizeof int);
   () = () primcall list_create_uninitialized (int_pass_conv, word 6, list);
   !my_int = int 1;
@@ -372,15 +364,12 @@ function list_db (pointer list) -> () {
   () = () primcall list_poke(int_pass_conv, list, word 4, my_int);
   !my_int = int 103993;
   () = () primcall list_poke(int_pass_conv, list, word 5, my_int);
-  PYON_DB_DEALLOC(word 1504)
   () primcall pyon_dealloc (my_int);
 };
 
 // A routine to test several of the above routines
 procedure list_test () -> () {
-  PYON_DB_ALLOC(word 1006)
   my_list = pointer primcall pyon_alloc (sizeof PyonList);
-  PYON_DB_ALLOC(word 1007)
   my_int = pointer primcall pyon_alloc (sizeof int);
 
   // Create list
@@ -397,7 +386,6 @@ procedure list_test () -> () {
   () = () primcall list_poke(int_pass_conv, my_list, word 4, my_int);
 
   // Duplicate list
-  PYON_DB_ALLOC(word 1008)
   my_list2 = pointer primcall pyon_alloc (sizeof PyonList);
   () = () call list_build (nil, nil, int_pass_conv, owned call list_traverse(int_pass_conv, my_list), my_list2);
 
@@ -416,11 +404,34 @@ procedure list_test () -> () {
   // Free stuff
   () = () call list_finalize(int_pass_conv, my_list);
   () = () call list_finalize(int_pass_conv, my_list2);
-  PYON_DB_DEALLOC(word 1505)
   () = () primcall pyon_dealloc(my_list);
-  PYON_DB_DEALLOC(word 1506)
   () = () primcall pyon_dealloc(my_list2);
-  PYON_DB_DEALLOC(word 1507)
   () = () primcall pyon_dealloc(my_int);
   ();
+};
+
+// Exported to C: Create a list from an array of CInt.
+// The list holds a copy of the given array.
+procedure pyon_List_PyonInt_FromArray (cint n_elems, pointer arr) -> pointer {
+  new_arr = pointer primcall pyon_alloc (n_elems as word * sizeof pyint);
+  () = () primcall memcpy (new_arr, arr, n_elems as word * sizeof pyint);
+  pointer primcall pyon_list_from_array(n_elems as word, new_arr);
+};
+
+// Copy the contents of a list into an array
+procedure pyon_List_PyonInt_ToArray (pointer list, pointer dat) -> () {
+  () primcall pyon_list_to_array_POD (int_pass_conv, list, dat);
+};
+
+procedure pyon_List_PyonInt_Length (pointer list) -> cint {
+  l = word primcall pyon_list_length (list);
+  l as cint;
+};
+
+procedure pyon_List_PyonInt_Copy (pointer list) -> pointer {
+  pointer primcall pyon_list_copy_POD (int_pass_conv, list);
+};
+
+procedure pyon_List_PyonInt_Free (pointer list) -> () {
+  pointer primcall pyon_list_free_POD (list);
 };

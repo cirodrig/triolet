@@ -3,10 +3,10 @@
 #define _PYON_INTERNAL_H
 
 #include "pyon.h"
-#include "layout.h"
-#include "struct.h"
+//#include "layout.h"
+//#include "struct.h"
 #include "memory.h"
-#include "apply.h"
+//#include "apply.h"
 
 /* ENTER_INEXACT(info)(fun, args, ret)
  * Call the inexact entry point of a function given its info table */
@@ -27,11 +27,13 @@
 /*****************************************************************************/
 /* Opaque data */
 
+#if 0
 extern struct {} pap_info;
 extern struct {} global_closure_info;
 
 extern struct {} dealloc_closure;
 extern struct {} dummy_finalize_closure;
 extern struct {} copy4_closure;
+#endif
 
 #endif

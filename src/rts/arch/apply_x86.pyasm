@@ -1,0 +1,188 @@
+
+data pointer PAP_info = InfoTableHeader {dummy_finalizer, TAG_PAP};
+
+// Look up the size (in words) of one of a PAP's arguments.
+procedure pap_argument_size(int index, pointer type_tags) -> uint16 {
+  typedef type_arr = const_array(value int 0, uint8);
+  typedef size_arr = const_array(value int 0, uint8);
+  // Look up the type tag
+  type_tag = type_tags @! size_arr[index];
+  // Look up the size of this type tag
+  (pyon_type_tag_pap_size @! type_arr[type_tag as int]) as uint16;
+};
+
+// Compute the size of a PAP's argument block.
+// Add up the sizes of the first nargs arguments, using the type tags to
+// determine sizes.
+// The return value is a number of PAP_WORDSIZE words.
+procedure pap_arguments_size (int nargs, pointer type_tags) -> uint16 {
+  typedef size_arr = const_array(value int 0, uint8);
+  (_, _, size) = while (int count = nargs,
+      	       	        pointer type_tags = type_tags,
+			word size = word 0)
+		       (count != int 0) {
+    type_tag = uint8 load type_tags;
+    arg_size = pyon_type_tag_pap_size @! size_arr[type_tag as int];
+    (count - int 1,
+     type_tags ^+ sizeof uint8 as int,
+     size + arg_size as word);
+  };
+  size;
+};
+
+// Create a new PAP with the given number of arguments and argument size.
+// The argument size is a number of PAP_WORDSIZE words.
+// Return a pointer to the PAP itself.
+// Its argument block isn't initialized.
+procedure pap_new (owned fun, uint16 nargs, uint16 arg_size) -> owned {
+  typedef my_pap = PAP(value arg_size as word * PAP_WORDSIZE);
+  obj = pointer primcall pyon_alloc(sizeof my_pap);
+  obj @! my_pap.header.refct = word 1;
+  obj @! my_pap.header.info = PAP_info;
+  obj @! my_pap.fun = fun;
+  obj @! my_pap.nargs = nargs;
+  obj @! my_pap.arg_size = arg_size;
+  obj as owned;
+};
+// Create a new PAP, and initialize it from the contents of an existing PAP.
+// The new PAP will have more arguments than the old one.
+// The new arguments are uninitialized.
+// Returns the new PAP.
+procedure pap_grow(owned pap, uint16 n_new_args) -> owned {
+  typedef old_pap_t = PAP(value word 0);
+  fun = pap @! old_pap_t.fun;
+  fun_info = fun @! ObjectHeader.info;
+  n_old_args = pap @! old_pap_t.nargs;
+  old_arg_size = pap @! old_pap_t.arg_size;
+
+  // Compute size of new arguments
+  new_arities = fun_info @ FunInfo(value int 0).arg_types[n_old_args as int];
+  extra_arg_size = uint16 primcall pap_arguments_size (n_new_args, new_arities);
+  new_arg_size = old_arg_size + extra_arg_size;
+
+  // Allocate new PAP
+  new_pap = owned primcall pap_new
+    (fun, n_old_args + n_new_args, new_arg_size);
+
+  // Initialize arguments that were in the old PAP
+  () = () primcall memcpy (new_pap @ old_pap_t.args, pap @ old_pap_t.args,
+                           (old_arg_size * PAP_WORDSIZE) as int);
+  new_pap;
+};
+
+// Call a PAP.  The PAP must contain a number of arguments equal to the
+// function arity.
+// The function's indirect entry point is called.
+procedure pap_call(owned pap, pointer ret) -> () {
+  typedef my_pap = PAP(value word 0);
+  fun = pap @! my_pap.fun;
+  fun_info = fun @! ObjectHeader.info;
+  args = pap @ my_pap.args;
+  () primcall (fun_info @! FunInfo(value int 0).inexact) (fun, args, ret);
+};
+
+procedure inline fun_arity(owned f) -> uint16 {
+  info = f @! ObjectHeader.info;
+  info @! FunInfo(value int 0).arity;
+};
+
+procedure inline pap_arity(owned p) -> uint16 {
+  uint16 primcall fun_arity (p @! PAP(value int 0).fun);
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// Apply functions.
+//
+// All functions apply 'obj' to 'arg', and either return a new object or
+// write their return value to the given address.
+procedure apply_p_f (owned obj, pointer arg) -> owned {
+  data pointer ret;
+  data pointer arg_ref;
+  !arg_ref = arg;
+  () = () primcall apply_word(obj, arg_ref, ret);
+  owned load ret;
+};
+
+procedure apply_p (owned obj, pointer arg, pointer ret) -> () {
+  data pointer arg_ref;
+  !arg_ref = arg;
+  () primcall apply_word(obj, arg_ref, ret);
+};
+
+procedure apply_i32_f (owned obj, int32 arg) -> owned {
+  data pointer ret;
+  data pointer arg_ref;
+  !arg_ref = arg;     // Assume sizeof(int32) == sizeof(pointer)        
+  () = () primcall apply_word(obj, arg_ref, ret);
+  owned load ret;
+};
+
+procedure apply_i32 (owned obj, int arg, pointer ret) -> () {
+  data pointer arg_ref;
+  !arg_ref = arg;               // Assume sizeof(int32) == sizeof(pointer)
+  () primcall apply_word(obj, arg_ref, ret);
+};
+
+procedure apply_f32_f (owned obj, float arg) -> owned {
+  data pointer ret;
+  data pointer arg_ref;
+  !arg_ref = arg;               // Assume sizeof(float) == sizeof(pointer)
+  () = () primcall apply_word(obj, arg_ref, ret);
+  owned load ret;
+};
+
+procedure apply_f32 (owned obj, float arg, pointer ret) -> () {
+  data pointer arg_ref;
+  !arg_ref = arg;               // Assume sizeof(float) == sizeof(pointer)
+  () primcall apply_word(obj, arg_ref, ret);
+};
+
+procedure apply_word (owned obj, pointer arg_ref, pointer ret) -> () {
+  obj_info = obj @! ObjectHeader.info;
+  obj_tag = obj_info @! InfoTableHeader.tag;
+
+  if (obj_tag == TAG_FUN) {
+    arity = uint16 primcall fun_arity(obj);
+    if (arity == uint16 1) {
+      // Calling a function with one argument.  Call the function now.
+      () primcall (obj_info @! FunInfo(value int 0).inexact) (obj, arg_ref, ret);
+    }
+    else if (arity == uint16 0) {
+      // TODO: Handle nullary functions
+      () primcall exit (int -1);
+    }
+    else {
+      // Undersaturated application
+      // Create a PAP
+      typedef my_pap = PAP(value word 0);
+      new_pap = owned primcall pap_new (obj, uint16 1, POINTER_ARG_WORDSIZE as uint16);
+      POINTER_ARG_GET(arg, arg_ref);
+      POINTER_ARG_PUT(new_pap @ my_pap.args as pointer, arg);
+      !ret = new_pap;
+      ();
+    };
+  } else if (obj_tag == TAG_PAP) {
+    // Determine PAP's arity
+    arity = uint16 primcall pap_arity(obj);
+    typedef my_pap = PAP(value word 0);
+
+    // Add argument to PAP
+    new_pap = owned primcall pap_grow(obj, uint16 1);
+    arg_offset = (obj @! my_pap.arg_size) as word * PAP_WORDSIZE;
+    POINTER_ARG_GET(arg, arg_ref);
+    POINTER_ARG_PUT(new_pap @ my_pap.args ^+ arg_offset as int, arg);
+
+    if (new_pap @! my_pap.nargs == arity) {
+      // Function is fully applied
+      () primcall pap_call (new_pap, ret);
+    } else {
+      // Return the new PAP
+      !ret = new_pap;
+      ();
+    };
+  }
+  else {
+    // Invalid tag
+    () primcall exit (int -1);
+  };
+};

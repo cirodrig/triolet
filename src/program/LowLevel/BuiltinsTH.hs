@@ -82,6 +82,8 @@ instance Lift BuiltinVarName where
 
 biName = CName builtinModuleName
 
+applyName = PyonName (moduleName "pyon.internal.apply_new")
+
 -- | Predefined primitive functions
 builtinPrimitives =
   [ -- debug.c
@@ -97,29 +99,29 @@ builtinPrimitives =
   , (biName "pyon_dealloc",
      primFunctionType [PrimType PointerType] [])
     -- apply.c
-  , (biName "apply_i32_f",
+  , (applyName "apply_i32_f",
      primFunctionType [ PrimType OwnedType
-                      , PrimType (IntType Unsigned S32)] [PrimType OwnedType])
-  , (biName "apply_i32",
+                      , PrimType (IntType Signed S32)] [PrimType OwnedType])
+  , (applyName "apply_i32",
      primFunctionType [PrimType OwnedType
-                      , PrimType (IntType Unsigned S32)
+                      , PrimType (IntType Signed S32)
                       , PrimType PointerType] [])
-  , (biName "apply_f32_f",
+  , (applyName "apply_f32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (FloatType S32)] [PrimType OwnedType])
-  , (biName "apply_f32",
+  , (applyName "apply_f32",
      primFunctionType [PrimType OwnedType
                       , PrimType (FloatType S32)
                       , PrimType PointerType] [])
-  , (biName "apply_o_f",
+  , (applyName "apply_p_f",
      primFunctionType [ PrimType OwnedType
-                      , PrimType OwnedType] [PrimType OwnedType])
-  , (biName "apply_o",
+                      , PrimType PointerType] [PrimType OwnedType])
+  , (applyName "apply_p",
      primFunctionType [PrimType OwnedType
-                      , PrimType OwnedType
+                      , PrimType PointerType
                       , PrimType PointerType] [])
-  , (biName "free_pap",
-     primFunctionType [PrimType PointerType] [])
+{-  , (biName "free_pap",
+     primFunctionType [PrimType PointerType] [])-}
   ]
 
 closureBinaryFunctionType t = closureFunctionType [t, t] [t]

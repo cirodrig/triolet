@@ -2,18 +2,6 @@
 // For testing the low-level code directly
 extern procedure pyon.internal.list.list_test "list_test" () -> ();
 
-// Exported to C
-extern procedure pyon.internal.list.pyon_list_from_array "pyon_list_from_array"
-  (word, pointer) -> pointer;
-extern procedure pyon.internal.list.pyon_list_to_array_POD "pyon_list_to_array_POD"
-  (pointer, pointer, pointer) -> ();
-extern procedure pyon.internal.list.pyon_list_length "pyon_list_length"
-  (pointer) -> word;
-extern procedure pyon.internal.list.pyon_list_copy_POD "pyon_list_copy_POD"
-  (pointer, pointer) -> pointer;
-extern procedure pyon.internal.list.pyon_list_free_POD "pyon_list_free_POD"
-  (pointer) -> ();
-
 extern function pyon.internal.list.list_db (pointer) -> ();
 extern function pyon.internal.list.list_copy (pointer, pointer, pointer) -> ();
 extern function pyon.internal.list.list_finalize (pointer, pointer) -> ();
@@ -31,4 +19,17 @@ extern function pyon.internal.list.passConv_list
 
 extern procedure pyon.internal.list.list_peek
   (pointer, pointer, word, pointer) -> ();
+
+// Exported to C
+extern procedure pyon.internal.list.pyon_List_PyonInt_FromArray "pyon_List_PyonInt_FromArray"
+  (cint, pointer) -> pointer;
+
+extern procedure pyon.internal.list.pyon_List_PyonInt_ToArray "pyon_List_PyonInt_ToArray"
+  (pointer, pointer) -> ();
+extern procedure pyon.internal.list.pyon_List_PyonInt_Length "pyon_List_PyonInt_Length"
+  (pointer) -> cint;
+extern procedure pyon.internal.list.pyon_List_PyonInt_Copy "pyon_List_PyonInt_Copy"
+  (pointer) -> pointer;
+extern procedure pyon.internal.list.pyon_List_PyonInt_Free "pyon_List_PyonInt_Free"
+  (pointer) -> ();
 

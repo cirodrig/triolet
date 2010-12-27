@@ -1,4 +1,7 @@
 
+#include "arch/apply_data_x86.c"
+
+#if 0
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -333,3 +336,4 @@ new_pap_bytes(PyonPtr fun,
   memcpy(PYON_OFF_PTR(new_pap, new_arg_offset), new_arg_bytes, new_arg_size);
   return new_pap;
 }
+#endif

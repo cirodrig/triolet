@@ -22,6 +22,7 @@ pyon_list_copy_POD(PyonPtr elem_repr, PyonList *list);
 extern void
 pyon_list_free_POD(PyonList *list);
 
+#if 0
 /*****************************************************************************/
 
 PyonList *
@@ -54,3 +55,4 @@ pyon_List_PyonInt_Free(PyonList *list) {
   pyon_list_free_POD(list);
 };
 
+#endif

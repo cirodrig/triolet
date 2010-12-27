@@ -824,4 +824,5 @@ makeCFileText top_level =
   
 cModuleHeader =
   "#include <inttypes.h>\n\
-  \#include <pyon.h>\n"
+  \typedef void *PyonPtr;\n\
+  \#define PYON_OFF(base, offset) ((PyonPtr)((char *)(base) + (offset)))\n"

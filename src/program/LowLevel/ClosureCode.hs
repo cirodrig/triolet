@@ -1157,6 +1157,6 @@ applyFunctions = [ (Int32Tag, i_node)
              (llBuiltin the_prim_apply_f32)
              []
     o_node = ApplyTrieNode
-             (llBuiltin the_prim_apply_o_f)
-             (llBuiltin the_prim_apply_o)
+             (llBuiltin the_prim_apply_p_f)
+             (llBuiltin the_prim_apply_p)
              []

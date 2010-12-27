@@ -1,7 +1,7 @@
 
 module pyon.internal.structures;
 
-#include "pyasm.h"
+#include "rts.h"
 #include "memory_py.h"
 #include "apply_py.h"
 #include "structures.h"
@@ -187,9 +187,9 @@ function inline additiveDict_complex
 };
 
 function inline makeComplex(float re, float im, pointer ret) -> () {
-  typedef cfloat = complex(float);
-  ret @! cfloat.real = re;
-  ret @! cfloat.imag = im;
+  typedef cfloa = complex (float);
+  ret @! cfloa.real = re;
+  ret @! cfloa.imag = im;
   ();
 };
 

@@ -1,7 +1,7 @@
 
 module pyon.internal.memory_py;
 
-#include "pyasm.h"
+#include "rts.h"
 #include "memory_py.h"
 #include "apply_py.h"
 #include "pyasm_records.h"

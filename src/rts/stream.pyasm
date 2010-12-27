@@ -1,7 +1,7 @@
 
 module pyon.internal.stream;
 
-#include "pyasm.h"
+#include "rts.h"
 #include "debug.h"
 #include "memory_py.h"
 #include "stream.h"
@@ -17,11 +17,8 @@ data pointer Stream_info = InfoTableHeader {
 
 // Deallocate a Stream
 procedure Stream_dealloc (pointer self) -> () {
-  DECREF(self @! Stream.next as pointer)
-  DECREF(self @! Stream.initialize as pointer)
-  DECREF(self @! Stream.state_finalize as pointer)
-  PYON_DB_DEALLOC(word 2501)
-  () primcall pyon_dealloc (self);
+  // Not implemented
+  ();
 };
 
 /*****************************************************************************/
@@ -127,14 +124,12 @@ function Stream_bind_initialize (word produced_type_size,
   state @! Stream_bind_state.transformer_state = null;
 
   // Initialize the producer state
-  PYON_DB_ALLOC(word 2001)
   pstate =
       pointer primcall pyon_alloc(producer @! Stream.state_size);
   () = () call (producer @! Stream.initialize) (pstate);
   state @! Stream_bind_state.producer_state = pstate;
 
   // Allocate the temporary storage
-  PYON_DB_ALLOC(word 2002)
   state @! Stream_bind_state.temporary_state =
       pointer primcall pyon_alloc (produced_type_size);
 
@@ -168,7 +163,6 @@ function Stream_bind_next(owned produced_type_fini,
         } else {
           // Transformer is depleted; release transformer
           () = () call (transformer @! Stream.state_finalize) (transformer_state);
-          PYON_DB_DEALLOC(word 2502)
           () = () primcall pyon_dealloc(transformer_state);
           // DECREF(transformer as pointer)
           state @! Stream_bind_state.transformer = null;
@@ -192,7 +186,6 @@ function Stream_bind_next(owned produced_type_fini,
               owned call mk_transformer (state @! Stream_bind_state.temporary_state);
 
           // Begin producing from the output stream
-          PYON_DB_ALLOC(word 2003)
           transformer_state =
             pointer primcall pyon_alloc (transformer_stream @! Stream.state_size);
           () = () call (transformer_stream @! Stream.initialize) (transformer_state);
@@ -220,7 +213,6 @@ function Stream_bind_finalize (owned produced_type_fini,
     transformer = state @! Stream_bind_state.transformer as owned;
     transformer_state = state @! Stream_bind_state.transformer_state;
     () = () call (transformer @! Stream.state_finalize) (transformer_state);
-    PYON_DB_DEALLOC(word 2503)
     () = () primcall pyon_dealloc (transformer_state);
     // DECREF(transformer_ptr)
 
@@ -230,13 +222,11 @@ function Stream_bind_finalize (owned produced_type_fini,
     ();
   };
   // Free the temporary state
-  PYON_DB_DEALLOC(word 2504)
   () = () primcall pyon_dealloc (state @! Stream_bind_state.temporary_state);
 
   // Release the producer's state
   producer_state = state @! Stream_bind_state.producer_state;
   () = () call finalize_producer (producer_state);
-  PYON_DB_DEALLOC(word 2505)
   () primcall pyon_dealloc (producer_state);
 };
 
