@@ -46,7 +46,7 @@ cabalMakeFile :: FilePath
 cabalMakeFile = "cabal.mk"
 
 -- | C Source files used in RTS
-rtsCSourceFiles = ["struct.c", "memory.c", "apply.c", "debug.c", "list_c.c"]
+rtsCSourceFiles = ["apply_data.c", "memory.c", "debug.c"]
 
 -- | Pyon-asm files used in RTS
 rtsPyAsmFiles = ["apply_new.pyasm",

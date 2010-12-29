@@ -21,8 +21,7 @@ build : $(PYON_TARGET) $(RTS_TARGET) data
 # Install a minimal set of data files into the local build directory, so that
 # the compiler can be run out of the local directory.
 bootstrap_data : $(BOOT_DATA_FILES) \
-	$(DATA_BUILD_DIR)/include/pyon.h \
-	$(DATA_BUILD_DIR)/include/pyon_types.h
+	$(DATA_BUILD_DIR)/include/pyon.h
 
 # Install all data files into the local build directory
 data : bootstrap_data testcases $(DATA_BUILD_DIR)/include/pyon.h $(DATA_BUILD_DIR)/libpyonrts.so $(INTERFACE_DATA_FILES)
