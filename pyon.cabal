@@ -38,7 +38,7 @@ Executable pyon
     gluon,
     gluon-eval
   Extensions:
-    MultiParamTypeClasses, PatternGuards, GADTs
+    MultiParamTypeClasses, PatternGuards, GADTs, EmptyDataDecls
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon
@@ -92,6 +92,16 @@ Executable pyon
     Core.BuiltinTypes
     Core.Rewriting
     Core.Unpacking
+    CParser.AST
+    CParser.Driver
+    CParser.GenCore
+    CParser.LevelInference
+    CParser.LexData
+    CParser.Lexer
+    CParser.Parser
+    CParser.Pretty
+    CParser.PrettyAST
+    CParser.Resolve
     LLParser.AST
     LLParser.LexCode
     LLParser.Lexer

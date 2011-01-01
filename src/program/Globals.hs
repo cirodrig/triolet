@@ -6,6 +6,7 @@ import Gluon.Common.Identifier
 import Gluon.Core
 import Gluon.Core.Module
 import qualified SystemF.Syntax as SystemF
+import qualified CParser.Driver as CParser
 import qualified LowLevel.Syntax as LowLevel
 import GlobalVar
 
@@ -34,6 +35,11 @@ the_llVarIdentSupply = defineStaticGlobalVar newIdentSupply
 the_builtinModule :: InitGlobalVar (Module ())
 {-# NOINLINE the_builtinModule #-}
 the_builtinModule = defineInitGlobalVar ()
+
+-- | The types of Core terms.
+the_coreTypes :: InitGlobalVar (CParser.ConTable)
+{-# NOINLINE the_coreTypes #-}
+the_coreTypes = defineInitGlobalVar ()
 
 withTheVarIdentSupply :: (Supply (Ident Var) -> IO a) -> IO a
 withTheVarIdentSupply f = withStaticGlobalVar the_varIdentSupply f

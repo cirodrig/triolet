@@ -11,6 +11,7 @@ import Gluon.Parser.Driver
 import Parser.Driver
 import Parser.ParserSyntax(createParserGlobals)
 import SystemF.Builtins
+import CParser.Driver
 import LowLevel.InitializeBuiltins
 import Globals
 import GlobalVar
@@ -40,6 +41,9 @@ loadBuiltins =
       case result of
         Just _ -> return () 
         Nothing -> fail "Could not load Pyon builtins"
+        
+      -- Initialize the Core types
+      initializeGlobalVar the_coreTypes (parseCoreModule varIDs)
 
       -- Initialize the low-level builtins
       withTheLLVarIdentSupply initializeLowLevelBuiltins

@@ -56,25 +56,26 @@ runMake lbi flags args =
 
 -- Preprocessing before build
 preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
-  lex_alexpath <-
-    findFile (pyonSearchPaths lbi exe) $ lex_module `addExtension` ".x"
-  
-  -- Create output directory
-  createDirectoryIfMissingVerbose verb True (dropFileName lex_hspath)
-
-  -- Is target out of date?
-  out_of_date <- lex_hspath `olderThan` [lex_alexpath]
-  
-  -- Run lexer
-  let alex = ppAlex (buildInfo exe) lbi
-  when out_of_date $ runSimplePreProcessor alex lex_alexpath lex_hspath verb
-
+  ppRunAlex exe $ "LLParser" </> "Lexer"
+  ppRunAlex exe $ "CParser" </> "Lexer"
   where
     verb = fromFlag $ buildVerbosity flags
     autogen_dir = autogenModulesDir lbi
-    lex_module = "LLParser" </> "Lexer"
-    lex_hspath = autogen_dir </> lex_module `addExtension` ".hs"
+    
+    ppRunAlex exe path = do
+      -- Find paths to input and output files
+      let hspath = autogen_dir </> path `addExtension` ".hs"
+      alexpath <- findFile (pyonSearchPaths lbi exe) $ path `addExtension` ".x"
   
+      -- Create output directory
+      createDirectoryIfMissingVerbose verb True (dropFileName hspath)
+
+      -- Is target out of date?
+      out_of_date <- hspath `olderThan` [alexpath]
+  
+      -- Run lexer
+      let alex = ppAlex (buildInfo exe) lbi
+      when out_of_date $ runSimplePreProcessor alex alexpath hspath verb
 
 -- Build hook: run make
 doBuild pkg_desc lbi hooks flags = do
