@@ -44,6 +44,7 @@ import qualified Data.Map as Map
 import Data.Maybe
 import Data.Monoid
 import Data.Traversable
+import Debug.Trace
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
@@ -697,7 +698,10 @@ atomType (ValA exprs) = concatMap expType exprs
 stmtType :: Stmt Typed -> [Type Typed]
 stmtType (LetS _ _ s) = stmtType s
 stmtType (LetrecS _ s) = stmtType s
-stmtType (TypedefS _ _ s) = stmtType s
+stmtType (TypedefS _ _ s) =
+  -- FIXME: If the typedef'd name appears in the type, then substitute the
+  -- actual type for it.
+  trace "Warning: Unhandled case in stmtType" $ stmtType s
 stmtType (IfS _ _ s Nothing) = stmtType s
 stmtType (IfS _ _ _ (Just (_, s))) = stmtType s
 stmtType (WhileS inits _ _ Nothing) = [t | (Parameter t _, _) <- inits]
