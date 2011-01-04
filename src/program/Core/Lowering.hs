@@ -75,13 +75,15 @@ convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
           , (oneMember $ pyonBuiltin the_MultiplicativeDict_int,
              value (LLType $ PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 1))
           , (oneMember $ pyonBuiltin the_MultiplicativeDict_float,
-             value (LLType $ PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 1))]
+             value (LLType $ PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 1))
+          , (pyonBuiltin the_passConv_int,
+             value (LLType $ PrimType PointerType) (LL.VarV $ llBuiltin the_bivar_passConv_int))]
 
 globalVarAssignment =
   IntMap.fromList [(fromIdent $ varID c, v) | (c, v) <- tbl]
   where
     tbl = [ (pyonBuiltin the_passConv_int_ptr,
-             (LLType $ PrimType PointerType, llBuiltin the_bivar_int_pass_conv))
+             (LLType $ PrimType PointerType, llBuiltin the_bivar_passConv_int))
           , (pyonBuiltin the_passConv_float_ptr,
              (LLType $ PrimType PointerType, llBuiltin the_bivar_float_pass_conv))
           , (pyonBuiltin the_OpaqueTraversableDict_list_ptr,
@@ -348,7 +350,7 @@ getPassConv ty = do
       case unpackConAppCT ty
       of Just (con, args)
            | con `isPyonBuiltin` the_int ->
-               return_value (builtinVar the_bivar_int_pass_conv)
+               return_value (builtinVar the_bivar_passConv_int)
            | con `isPyonBuiltin` the_float ->
                return_value (builtinVar the_bivar_float_pass_conv)
            | con `isPyonBuiltin` the_complex ->
@@ -636,6 +638,7 @@ convertExp expression =
           WriteVarV _ v -> lookup_var v
           ValueConV c   -> lookup_con c
           OwnedConV c   -> lookup_con c
+          ReadConV _ c  -> lookup_con c
           LitV lit      ->
             case lit
             of SystemF.IntL n   -> literal (PrimType pyonIntType) $ 

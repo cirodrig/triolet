@@ -109,6 +109,7 @@ pprValue val =
      WriteVarV a p -> parens $ text "write" <+> pprVar p <> text "@" <> pprExp a
      ValueConV c -> text $ showLabel $ conName c
      OwnedConV c -> text $ showLabel $ conName c
+     ReadConV a p -> parens $ text "bor" <+> (text $ showLabel $ conName p) <> text "@" <> pprExp a
      LitV l -> case l
                of SystemF.IntL n -> text $ show n
                   SystemF.FloatL d -> text $ show d

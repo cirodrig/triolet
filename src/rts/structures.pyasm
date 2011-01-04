@@ -9,7 +9,7 @@ module pyon.internal.structures;
 #include "pyasm_records.h"
 
 // Parameter-passing convention dictionary of ints
-data pointer int_pass_conv = PassConv {
+data pointer passConv_int = PassConv {
   sizeof int32,
   alignof int32,
   copy4F,

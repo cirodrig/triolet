@@ -429,13 +429,21 @@ effectToCoreEffect effect = do
 -- once.
 
 -- | Find the parameter-passing convention of this type
-findPassConv :: Core.RCType -> GenCore (Maybe (Core.Value Rec))
+findPassConv :: Core.RCType
+             -> GenCore (Maybe (Core.Value Rec, Core.RCExp -> Core.RCExp))
 findPassConv ty = do 
   gl_ty <- Core.coreToGluonTypeWithoutEffects (Gluon.verbatim ty)
   match <- doPureTC . findM (match_type gl_ty) =<< getAllVariables
-  return $! case match
-            of Nothing -> Nothing
-               Just (v, b) -> Just (varBindingValue v b)
+  case match of
+    Just (v, b) -> return $ Just (varBindingValue v b, id)
+    Nothing ->
+      case Core.unpackConAppCT ty
+      of Just (con, args)
+           | con `SF.isPyonBuiltin` SF.the_int ->
+               return_value (SF.pyonBuiltin SF.the_passConv_int_addr) (SF.pyonBuiltin SF.the_passConv_int)
+           | con `SF.isPyonBuiltin` SF.the_list ->
+               make_app (SF.pyonBuiltin SF.the_passConv_list) args
+         _ -> return Nothing
   where
     match_type gl_ty (v, binding@(ReadVB _ _ v_type))
       | Just (con, [dict_type]) <- Core.unpackConAppCT v_type,
@@ -448,6 +456,45 @@ findPassConv ty = do
       | otherwise = return False
     match_type _ (_, _) = return False
 
+    obj_info = Gluon.internalSynInfo ObjectLevel
+
+    -- Return a value           
+    return_value addr ptr =
+      let value = Core.ReadConV (Gluon.mkInternalVarE addr) ptr
+      in return $ Just (value, id)
+    
+    -- Call a function to create the PassConv value 
+    make_app op args = do
+      -- Get PassConv values of parameters 
+      arg_data <- findPassConvs args
+      case arg_data of
+        Nothing -> return Nothing
+        Just (arg_pcs, arg_context) -> do
+          return_addr <- Gluon.newAnonymousVariable ObjectLevel
+          return_ptr <- Gluon.newAnonymousVariable ObjectLevel
+          let return_addr_exp = Gluon.mkInternalVarE return_addr
+              arg_types = [ Core.ValCE (Gluon.internalSynInfo TypeLevel) $ Core.TypeV t
+                          | t <- args]
+              arg_pc_vals = [ Core.ValCE obj_info x | x <- arg_pcs]
+              return_arg = Core.writePointerRV noSourcePos return_addr_exp return_ptr
+              pc_type = Core.AppCT (Core.conCT $ SF.pyonBuiltin SF.the_PassConv) [ty]
+              op_exp = Core.ValCE obj_info (Core.OwnedConV op)
+              call_expr = Core.AppCE obj_info op_exp (arg_types ++ arg_pc_vals) (Just return_arg)
+              ctx body = Core.LetCE obj_info (Core.LocalB return_addr return_ptr Core.::: pc_type) call_expr body
+              
+              use_val = Core.ReadVarV return_addr_exp return_ptr
+          return $ Just (use_val, arg_context . ctx)
+
+findPassConvs (t:ts) = findPassConv t >>= continue
+  where
+    continue Nothing = return Nothing
+    continue (Just (val, ctx)) = do
+      rest <- findPassConvs ts
+      return $! case rest
+                of Nothing -> Nothing
+                   Just (vals, ctx') -> Just (val:vals, ctx . ctx')
+
+findPassConvs [] = return (Just ([], id))
 
 withEffectParameter :: EVar -> (Core.CBind Core.CParam Rec -> GenCore a)
                     -> GenCore a
@@ -728,8 +775,8 @@ genCopy :: RetBinding -> Core.RCExp -> GenCore Core.RCExp
 genCopy rb@(WriteRB a p ty) source = do
   mpass_conv <- findPassConv ty
   case mpass_conv of
-    Just pass_conv -> do
-      return $ copy_expr ty pass_conv
+    Just (pass_conv, ctx) -> do
+      return $ ctx $ copy_expr ty pass_conv
     Nothing -> internalError "genCopy: Cannot generate copying code"
   where
     copy_expr ty pass_conv =

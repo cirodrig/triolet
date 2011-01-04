@@ -155,6 +155,7 @@ data Value s =
   | WriteVarV !(AddrExp s) !PtrVar
   | ValueConV !Con
   | OwnedConV !Con
+  | ReadConV !(AddrExp s) !Con
   | LitV !SystemF.Lit
   | TypeV (RecCType s)
 

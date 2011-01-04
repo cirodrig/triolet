@@ -93,6 +93,7 @@ mkRWVal value =
      WriteVarV addr v -> WriteVarV (RWExp addr) v
      ValueConV c -> ValueConV c
      OwnedConV c -> OwnedConV c
+     ReadConV addr c -> ReadConV (RWExp addr) c
      LitV l -> LitV l
      TypeV t -> TypeV (RWType t)
 
@@ -257,6 +258,7 @@ leaveRWVal value =
      WriteVarV a p -> WriteVarV (fromRWExp a) p
      ValueConV v -> ValueConV v
      OwnedConV v -> OwnedConV v
+     ReadConV a p -> ReadConV (fromRWExp a) p
      LitV l -> LitV l
      TypeV t -> TypeV (fromRWType t)
 

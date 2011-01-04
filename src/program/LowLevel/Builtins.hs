@@ -50,7 +50,7 @@ module LowLevel.Builtins
         the_fun_AdditiveDict_pass_conv,
         the_fun_MultiplicativeDict_pass_conv,
         the_bivar_OpaqueTraversableDict_list,
-        the_bivar_int_pass_conv,
+        the_bivar_passConv_int,
         the_bivar_float_pass_conv,
         the_bivar_bool_pass_conv,
         the_bivar_TraversableDict_pass_conv,
