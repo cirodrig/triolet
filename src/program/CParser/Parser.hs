@@ -343,14 +343,16 @@ resOp s =
     "@" -> atsign
     "**" -> doublestar
 
+-- | Create a variable with the Gluon name
 handleAt :: (LType Parsed)-> (LType Parsed) -> (LType Parsed)
 handleAt a b =
   case (a,b) of
-    (L pos1 x, L pos2 y) -> (L pos1 (AppT (L pos2 (VarT "@")) [a,b]))
+    (L pos1 x, L pos2 y) -> (L pos1 (AppT (L pos2 (VarT "AtE")) [a,b]))
     
+-- | Create a variable with the Gluon name
 handleDStar :: (LType Parsed)-> (LType Parsed) -> (LType Parsed)
 handleDStar a b = case (a,b)
-  of (L pos1 x, L pos2 y) -> (L pos1 (AppT (L pos2 (VarT "**")) [a,b]))
+  of (L pos1 x, L pos2 y) -> (L pos1 (AppT (L pos2 (VarT "SconjE")) [a,b]))
 
 -------------------------------------------------------------------------------
 -- * Entry point

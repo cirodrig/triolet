@@ -331,6 +331,10 @@ constant fun_iota : NoneType -> Stream int;
 
 constant fun_undefined : (a : Pure) -> a;
 
+constant eqDict_Tuple2 : (a : Pure) -> (b : Pure) -> EqDict a -> EqDict b -> EqDict (PyonTuple2 a b);
+
+constant ordDict_Tuple2 : (a : Pure) -> (b : Pure) -> OrdDict a -> OrdDict b -> OrdDict (PyonTuple2 a b);
+
 {- Constructors inserted after effect inference.  These constructors deal
 -- with data at a low level, where the representation becomes visible.
 -}

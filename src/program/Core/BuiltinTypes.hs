@@ -18,6 +18,8 @@ import SystemF.Builtins
 import Core.Syntax
 import Core.Gluon
 import Core.Print
+import GlobalVar
+import Globals
 
 -- | Format the table of types as a string for human reading.
 dumpCoreTypes :: () -> String
@@ -586,6 +588,13 @@ tupleConType 2 = mkConType $ do
   return (OwnRT ::: constructor_type)
 
 constructorTable =
+  let tbl = readInitGlobalVar the_coreTypes
+      tbl1 = IntMap.insert (fromIdent $ conID $ pyonBuiltin the_fun_subscript)
+             subscriptType tbl
+  in tbl1
+
+{-
+constructorTable =
   IntMap.fromList [(fromIdent $ conID c, ty) | (c, ty) <- table]
   where
     table = [ (pyonBuiltin the_passConv_int,
@@ -713,3 +722,4 @@ constructorTable =
             , (pyonBuiltin SystemF.Builtins.the_fun_generateList,
                listGenerateType)
             ]
+-}

@@ -109,6 +109,12 @@ pyonBuiltinPassConvAddresses =
   , "passConv_NoneType_addr"
   , "passConv_Any_addr"
   , "passConv_owned_addr"
+  , "eqDict_int_addr"
+  , "eqDict_float_addr"
+  , "additiveDict_int_zero_addr"
+  , "additiveDict_float_zero_addr"
+  , "multiplicativeDict_int_one_addr"
+  , "multiplicativeDict_float_one_addr"
   , "OpaqueTraversableDict_list_addr"
   ]
 
@@ -119,6 +125,8 @@ pyonBuiltinPassConvPointers =
   , "passConv_NoneType_ptr"
   , "passConv_Any_ptr"
   , "passConv_owned_ptr"
+  , "eqDict_int_ptr"
+  , "eqDict_float_ptr"
   , "OpaqueTraversableDict_list_ptr"
   ]
 
@@ -151,6 +159,10 @@ pyonBuiltinFunctions =
   , "sub_complex"
   , "negate_complex"
   , "zero_complex"
+    
+    -- Type class constructors
+  , "eqDict_Tuple2"
+  , "ordDict_Tuple2"
 
     -- Functions inserted by effect inference
   , "fun_return"

@@ -8,20 +8,31 @@ import Gluon.Common.SourcePos
 import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Core(Var, Con(conID), Rec)
+import Gluon.Core.Level
 import qualified Gluon.Core.Builtins as Gluon
 import qualified Gluon.Core as Gluon
 import CParser.AST
+import CParser.LevelInference()
 import qualified SystemF.Builtins as SF
 import qualified Core.Syntax as Core
 
-type ConTable = IntMap.IntMap Core.RCType
+type ConTable = IntMap.IntMap (Core.CBind Core.CReturnT Rec)
 
-addressType = Core.ExpCT $ Gluon.mkInternalConE (Gluon.builtin Gluon.the_Addr)
-pointerType = Core.ExpCT $ Gluon.mkInternalConE (SF.pyonBuiltin SF.the_Ptr)
+addressType = Core.ValRT Core.::: addr_type
+  where
+    addr_type = Core.ExpCT $ Gluon.mkInternalConE (Gluon.builtin Gluon.the_Addr)
+
+pointerType = Core.ValRT Core.::: ptr_type
+  where
+    ptr_type = Core.ExpCT $ Gluon.mkInternalConE (SF.pyonBuiltin SF.the_Ptr)
+
 emptyEffect = Core.ExpCT $ Gluon.mkInternalConE (Gluon.builtin Gluon.the_EmpE)
 
 fromLICon (LICon c) = c
 fromLICon _ = internalError "fromLICon"
+
+fromLIVar (LIVar v) = v
+fromLIVar _ = internalError "fromLIVar"
 
 translateType :: LvLType -> Core.RCType
 translateType lty =
@@ -31,13 +42,29 @@ translateType lty =
      VarT (LIKind k) -> Core.ExpCT $ Gluon.mkLitE noSourcePos (Gluon.KindL k)
      LitT l -> internalError "translateType: Not implemented for literals"
      AppT op args -> Core.appCT (translateType op) (map translateType args)
-     FunT {} -> Core.FunCT $ translateFunType lty
+     FunT {} 
+       | getLevel lty == Gluon.KindLevel -> translateFunKind lty
+       | otherwise -> Core.FunCT $ translateFunType lty
 
 translateFunType :: LvLType -> Core.RCFunType
 translateFunType (unLoc -> FunT param meff rng) =
   Core.arrCT (translateParamType param)
-             (maybe emptyEffect translateType meff)
-             (translateReturnType rng)
+  (maybe emptyEffect translateType meff)
+  (translateReturnType rng)
+
+translateFunKind (unLoc -> FunT param _ rng)
+  | ValuePT Nothing pt <- param,
+    Value == rtRepr rng =
+      case translateType pt
+      of Core.ExpCT param_kind ->
+           case translateType $ rtType rng
+           of Core.ExpCT ret_kind ->
+                Core.ExpCT $ Gluon.mkInternalArrowE False param_kind ret_kind
+              _ -> not_kind
+         _ -> not_kind
+  | otherwise = not_kind
+  where
+    not_kind = internalError "Expression is not a valid kind"
 
 translateParamType (ValuePT v t) =
   let param =
@@ -64,12 +91,14 @@ translateReturnType rt
     translate_repr Boxed = Core.OwnRT
     translate_repr Reference = Core.WriteRT
 
-translateDecl :: LvDecl -> [(Con, Core.RCType)]
+translateDecl :: LvDecl -> [(Con, Core.CBind Core.CReturnT Rec)]
 translateDecl (BoxedDecl v ty) =
-  [(fromLICon v, translateType ty)]
+  [(fromLICon v, Core.OwnRT Core.::: translateType ty)]
 
 translateDecl (DataDecl a p ty) =
-  [(fromLICon a, addressType), (fromLICon p, pointerType)]
+  [(fromLICon p, Core.ReadRT addr Core.::: translateType ty)]
+  where
+    addr = Gluon.mkInternalVarE (fromLIVar a)
 
 createCoreTable :: LvModule -> ConTable
 createCoreTable (Module decls) =

@@ -7,6 +7,7 @@ where
 
 import Control.Monad
 import qualified Data.Map as Map
+import Data.Maybe
 
 import Gluon.Common.Label
 import Gluon.Common.Identifier
@@ -143,17 +144,23 @@ def parsed_name resolved_var =
     let s = addToEnv parsed_name resolved_var names
     in returnNR () s
 
+-- | \"Define\" a global variable.  We actually look up a predefined variable 
+--   name here, like 'use', but with a different error message.
+globalDef :: Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
+globalDef = fetch "Could not find global name:"
+
+use :: Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
+use = fetch "Could not find:"
+
 -- | Use a variable, but provide location information in case of an error
-fetch :: Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
-fetch parsed_name pos = NR $ \env names -> 
-  case (lookupInEnv parsed_name names) of
-    Just i -> returnNR i names
-    Nothing -> 
-      case (lookupInEnv "Unfound Error" names) of
-        Just i -> return (i, names, (not_found :))
-        Nothing -> error "No unfound error definition"
+fetch :: String -> Identifier Parsed -> SourcePos -> NR (Identifier Resolved)
+fetch error_header parsed_name pos = NR $ \env names ->
+  let m_ident = lookupInEnv parsed_name names
+      error_message = if isNothing m_ident then Just not_found else Nothing
+      Just i = m_ident
+  in return (i, names, (maybeToList error_message ++))
   where
-    not_found = "Could not find: " ++ parsed_name ++ " (" ++ show pos ++ ")"
+    not_found = error_header ++ " " ++ parsed_name ++ " (" ++ show pos ++ ")"
 
 -------------------------------------------------------------------------------
 -- Name resolution
@@ -193,28 +200,28 @@ mkdfVar parsed_name = do
 
 resolveModuleNR :: PModule -> NR RModule
 resolveModuleNR (Module dlist) = do
-  rlist <- enter $ mapM (traverse resolveDecl) dlist
+  rlist <- enter $ mapM resolveDecl dlist
   return $ Module rlist
 
 
-resolveDecl :: (Decl Parsed) -> NR (Decl Resolved)
-resolveDecl decl = 
+resolveDecl :: (Located (Decl Parsed)) -> NR (Located (Decl Resolved))
+resolveDecl (L pos decl) = 
   case decl of
     BoxedDecl declVar declType -> do
-      rVar <- mkdfVar declVar -- Define before, for use in Type
+      rVar <- globalDef declVar pos
       rType <- enter $ resolveLType declType
-      return $ BoxedDecl rVar rType
+      return $ L pos $ BoxedDecl rVar rType
     DataDecl addr ptr declType -> do
-      rAddr <- mkdfVar addr
-      rPtr <- mkdfVar ptr --originally used 'newRVar ptr'. Differs by (1) checks default environment for conflict with BuiltIn (2) reveals Pointer name to the rest of the Declaration Type definition.
+      rAddr <- globalDef addr pos
+      rPtr <- globalDef ptr pos
       rType <- resolveLType declType
-      return $ DataDecl rAddr rPtr rType
+      return $ L pos $ DataDecl rAddr rPtr rType
 
 
 resolveLType :: PLType -> NR RLType
 resolveLType (L pos lt) =
   case lt of
-    VarT tVar -> do rVar <- fetch tVar pos
+    VarT tVar -> do rVar <- use tVar pos
                     return $ L pos (VarT rVar)
     LitT tLit -> return $ L pos (LitT tLit)
     AppT tOper tArgs -> do oper <- resolveLType tOper
