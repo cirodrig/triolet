@@ -418,13 +418,17 @@ genPrimCall prim args =
      PrimModZ Signed _ ->
        -- Emit a (floor) modulus operation using
        -- C's (to-zero) remainder operation
-       --   (x % y) + ((x >= 0) == (y >= 0) ? 0 : y)
+       -- >  x % y == 0 ? 0 :
+       -- >    (y >= 0 ? x % y      + (x < 0 ? y : 0)
+       -- >            : -(-x % -y) + (x < 0 ? 0 : -y))
        case args
        of [x, y] ->
             let remainder = binary' CRmdOp x y
-                correction =
-                  cCond (geZero x `equals` geZero y) zero y
-            in binary' CAddOp remainder correction
+                zero_check = equals remainder zero
+                pos_rem = add remainder $ cCond (ltZero x) y zero
+                neg_rem = add (neg (binary' CRmdOp (neg x) (neg y))) $
+                          cCond (ltZero x) zero (neg y)
+            in cCond zero_check zero $ cCond (geZero y) pos_rem neg_rem
      PrimMaxZ _ _ ->
        case args
        of [x, y] -> cCond (binary' CGeqOp x y) x y
@@ -489,6 +493,9 @@ genPrimCall prim args =
   where
     zero = smallIntConst 0
     geZero x = binary' CGeqOp x zero
+    ltZero x = binary' CLeOp x zero
+    add x y = binary' CAddOp x y
+    neg x = cUnary CMinOp x
     equals x y = binary' CEqOp x y
     binary' op x y = cBinary op x y
     binary op [x, y] = binary' op x y
