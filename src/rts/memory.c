@@ -1,7 +1,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include "pyon_internal.h"
+#include "pyon.h"
 
 /* When defined, print a message on every allocation and deallocation. */
 #define CHATTY_ALLOC

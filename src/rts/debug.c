@@ -1,7 +1,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include "pyon_internal.h"
+#include "pyon.h"
 
 /* Debugging routines that can be called from pyon */
 
