@@ -32,6 +32,10 @@ namedDecl (specs, deriv) name =
   let declr = CDeclr (Just name) deriv Nothing [] internalNode
   in CDecl specs [(Just declr, Nothing, Nothing)] internalNode
 
+staticDeclSpecs :: DeclSpecs -> DeclSpecs
+staticDeclSpecs (specs, derived) =
+  (CStorageSpec (CStatic internalNode) : specs, derived)
+
 funDeclSpecs :: [CDecl] -> DeclSpecs -> DeclSpecs
 funDeclSpecs param_types (return_specs, return_derived_declr) =
   let fn_derived_declr = CFunDeclr (Right (param_types, False)) [] internalNode

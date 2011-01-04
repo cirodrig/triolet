@@ -670,8 +670,8 @@ makeFunctionCode fallthrough local_function = do
   return $ CBlockStmt $ CLabel (lfunLabel local_function) compound [] internalNode
 
 -- | Generate a forward declaration and definition of a function
-genFun :: FunDef -> GenC (CDecl, CFunDef)
-genFun (Def v fun) 
+genFun :: Set.Set Var -> FunDef -> GenC (CDecl, CFunDef)
+genFun exported_vars (Def v fun) 
   | not (isPrimFun fun) = 
       internalError "genFun: Can only generate primitive-call functions"
   | otherwise = do
@@ -680,7 +680,8 @@ genFun (Def v fun)
     param_decls <- sequence [declareLocalVariable v Nothing
                             | v <- funParams fun]
     let -- Function declaration
-        (return_type_specs, fun_declr) = funDeclSpecs param_decls return_type
+        (return_type_specs, fun_declr) =
+          mark_static_if_not_exported $ funDeclSpecs param_decls return_type
         fun_decl = CDeclr (Just (varIdent v)) fun_declr Nothing [] internalNode
 
     -- Create the function body
@@ -696,6 +697,11 @@ genFun (Def v fun)
   where
     from_prim_type (PrimType t) = t
     from_prim_type _ = internalError "genFun: Unexpected record type"
+
+    mark_static_if_not_exported specs =
+      if v `Set.member` exported_vars
+      then specs
+      else staticDeclSpecs specs
 
     -- Insert local variables for the stack data pointer
     insert_stack_variable_def (CCompound llabs block_items info) =
@@ -719,11 +725,13 @@ genFun (Def v fun)
       in CCompound llabs (map CBlockDecl defs ++ block_items) info
 
 -- | Create a global static data definition and initialization code.
-genData :: GlobalVars -> DataDef -> (CExtDecl, CStat)
-genData gvars (Def v (StaticData record_type values)) =
+genData :: GlobalVars -> Set.Set Var -> DataDef -> (CExtDecl, CStat)
+genData gvars exported_vars (Def v (StaticData record_type values)) =
   (CDeclExt $
-   declareBytes v (recordSize record_type) (recordAlignment record_type),
+   declareBytes not_exported v (recordSize record_type) (recordAlignment record_type),
    initializeBytes gvars v record_type values)
+  where
+    not_exported = not $ v `Set.member` exported_vars
 
 -- | Declare an external variable.  Its actual type is unimportant, since it
 -- is cast to the appropriate type every time it is used.  Use an array type
@@ -791,7 +799,9 @@ initializationFunction stmts =
   in CFunDef [static, return_type] fun_decl [] body internalNode
 
 generateCFile :: Module -> IO String
-generateCFile (Module {moduleImports = imports, moduleGlobals = defs}) = do
+generateCFile (Module { moduleImports = imports
+                      , moduleGlobals = defs
+                      , moduleExports = exports}) = do
   ident_supply <- newNameSupply
       
   -- Create an import declaration for symbols that are not defined in
@@ -799,14 +809,15 @@ generateCFile (Module {moduleImports = imports, moduleGlobals = defs}) = do
   let import_decls =
         concatMap genImport $
         filter (not . (`Set.member` defined_vars) . importVar) imports
-      
-  let (data_defs, data_inits) = unzip $ map (genData global_vars) datas
+  
+  let (data_defs, data_inits) =
+        unzip $ map (genData global_vars exported_vars) datas
   let init_fun = initializationFunction data_inits
   
   ((fun_decls, fun_defs), structs) <-  
     withTheLLVarIdentSupply $ \var_supply ->
     let gen_c_env = Env global_vars Map.empty ident_supply var_supply
-    in runGenC (mapAndUnzipM genFun funs) gen_c_env Map.empty
+    in runGenC (mapAndUnzipM (genFun defined_vars) funs) gen_c_env Map.empty
        
   let struct_decls =
         [declareStruct name (map primTypeDeclSpecs fields)
@@ -823,6 +834,8 @@ generateCFile (Module {moduleImports = imports, moduleGlobals = defs}) = do
     (funs, datas) = partitionGlobalDefs defs
     defined_vars = Set.fromList $ map globalDefiniendum defs
     global_vars = defined_vars `Set.union` Set.fromList (map importVar imports)
+    exported_vars = Set.fromList $ map fst exports
+      
       
 makeCFileText top_level =
   let transl_module = CTranslUnit top_level internalNode

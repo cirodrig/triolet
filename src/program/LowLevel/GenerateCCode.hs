@@ -23,15 +23,19 @@ import LowLevel.GenerateCUtils
 -- Declarations, literals, and values
 
 -- | Define an unitialized piece of global data.
-declareBytes :: Var -> Int -> Int -> CDecl
-declareBytes v size align =
+declareBytes :: Bool -> Var -> Int -> Int -> CDecl
+declareBytes is_static v size align =
   let array = CArrDeclr [] (CArrSize False $ smallIntConst size) internalNode
       align_expr = smallIntConst align
       align_attr = CAttr (builtinIdent "aligned") [align_expr] internalNode
       ident = varIdent v
       declr = CDeclr (Just ident) [array] Nothing [align_attr] internalNode
       type_spec = CTypeSpec (CCharType internalNode)
-  in CDecl [type_spec] [(Just declr, Nothing, Nothing)] internalNode
+      decl_specs = static ++ [type_spec]
+        where static = if is_static
+                       then [CStorageSpec $ CStatic internalNode]
+                       else []
+  in CDecl decl_specs [(Just declr, Nothing, Nothing)] internalNode
 
 declareVariable :: Ident -> DeclSpecs -> Maybe CExpr -> CDecl
 declareVariable name (type_specs, derived_declr) initializer =
