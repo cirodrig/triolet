@@ -401,7 +401,10 @@ inferApp result_type info op args = do
   whenM (liftIO $ expReturn result_exp `mentionsAnyE` local_regions) $ do
     fail "inferApp: Local regions escape"
   
-  return return_value
+  -- FIXME: use result_eff
+  -- Side effect is cleared here to silence some error messages, but this will
+  -- lead to erroneous programs not being detected.
+  return (result_exp, emptyEffect)
                        
 
 -- | Get the variance of an expression's parameters.  Unknowns are treated
