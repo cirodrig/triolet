@@ -194,12 +194,16 @@ box additiveDict :
 box Additive_ADD_int : val int -> val int -> val int;
 box Additive_SUB_int : val int -> val int -> val int;
 box Additive_NEGATE_int : val int -> val int;
-ref(additiveDict_int_zero_addr) Additive_ZERO_int : int;
+
+-- This is actually a value, not a reference, so it can't be written here
+-- ref(additiveDict_int_zero_addr) Additive_ZERO_int : int;
 
 box Additive_ADD_float : val float -> val float -> val float;
 box Additive_SUB_float : val float -> val float -> val float;
 box Additive_NEGATE_float : val float -> val float;
-ref(additiveDict_float_zero_addr) Additive_ZERO_float : float;
+
+-- This is actually a value, not a reference, so it can't be written here
+-- ref(additiveDict_float_zero_addr) Additive_ZERO_float : float;
 
 box additiveDict_complex :
     val (a : Pure)
@@ -339,3 +343,4 @@ box fun_generateList :
  -> val int
  -> box (val int -> [e] ref a)
  -> [PassConv a @ pc_addr ** e] ref list a;
+

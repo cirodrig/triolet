@@ -185,7 +185,18 @@ pevalExp expression@(uncurryUnpackPolymorphicCall -> Just (op, ty_args, args)) =
 pevalExp expression =
   case expression
   of VarE {expVar = v} -> lookupVarDefault expression v
-     ConE {} -> return expression
+     ConE {expInfo = inf, expCon = c} 
+       -- Replace constants with literal values.  This helps 
+       -- representation selection represent these as values.
+       | c `isPyonBuiltin` zeroMember . the_AdditiveDict_int ->
+           return $ LitE inf (IntL 0) (mkInternalConE $ pyonBuiltin the_int)
+       | c `isPyonBuiltin` zeroMember . the_AdditiveDict_float ->
+           return $ LitE inf (FloatL 0) (mkInternalConE $ pyonBuiltin the_float)
+       | c `isPyonBuiltin` oneMember . the_MultiplicativeDict_int ->
+           return $ LitE inf (IntL 1) (mkInternalConE $ pyonBuiltin the_int)
+       | c `isPyonBuiltin` oneMember . the_MultiplicativeDict_float ->
+           return $ LitE inf (FloatL 1) (mkInternalConE $ pyonBuiltin the_float)
+       | otherwise -> return expression
      LitE {} -> return expression
      TyAppE {expOper = op} -> do
        op' <- pevalExp op
