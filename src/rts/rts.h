@@ -20,4 +20,11 @@
   ALLOC_OBJECT_p @! type.header.info = infotable; \
   v = ALLOC_OBJECT_p as owned;
 
-#include "arch/rts_x86.h"
+#if defined(ARCH_I386)
+# include "arch/rts_x86.h"
+#elif defined(ARCH_X86_64)
+# include "arch/rts_x86_64.h"
+#else
+# error "Unrecognized architecture"
+#endif
+
