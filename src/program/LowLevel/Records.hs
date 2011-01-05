@@ -19,7 +19,6 @@ import LowLevel.Record
 data TypeTag =
     Int8Tag | Int16Tag | Int32Tag | Int64Tag
   | Float32Tag | Float64Tag
-  | OwnedRefTag
   deriving(Eq, Ord, Enum, Show)
 
 intSizeTypeTag S8 = Int8Tag
@@ -30,21 +29,17 @@ intSizeTypeTag S64 = Int64Tag
 -- | A bits tag, representing the physical representation of a value in memory.
 -- Bits-tagged data are always promoted to a value at least as big as the 
 -- 'dynamicScalarAlignment'.
---
--- /FIXME/: The fields of this type are platform-dependnet
-data BitsTag = Bits32Tag | Bits64Tag | OwnedRefBitsTag
+data BitsTag = Bits32Tag | Bits64Tag
              deriving(Eq, Ord, Enum, Show)
 
 -- | Get the bits tag of a primitive type.  The primitive type must be a
 -- suitable size, perhaps by being promoted.
 toBitsTag :: PrimType -> BitsTag
-toBitsTag ty =
-  case ty
-  of OwnedType -> OwnedRefBitsTag
-     _ | sizeOf ty == 4 -> Bits32Tag
-       | sizeOf ty == 8 -> Bits64Tag
-       | otherwise ->
-         internalError "toBitsTag: Cannot generate tag for this data size"
+toBitsTag ty
+  | sizeOf ty == 4 = Bits32Tag
+  | sizeOf ty == 8 = Bits64Tag
+  | otherwise =
+    internalError "toBitsTag: Cannot generate tag for this data size"
 
 -- | An info table tag, which indicates an info table's type
 data InfoTag = FunTag | PAPTag | ConTag
@@ -57,7 +52,7 @@ toTypeTag (IntType _ sz)  = intSizeTypeTag sz
 toTypeTag (FloatType S32) = Float32Tag
 toTypeTag (FloatType S64) = Float64Tag
 toTypeTag PointerType     = intSizeTypeTag pointerSize
-toTypeTag OwnedType       = OwnedRefTag
+toTypeTag OwnedType       = intSizeTypeTag pointerSize
 
 -- | Get the type tag of a primitive type as used in function application.
 -- Only the integer/floating distinction is made (because we care about what

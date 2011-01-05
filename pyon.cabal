@@ -13,7 +13,6 @@ Data-Files:
   symbols/SFBuiltin.glu
   symbols/coretypes
   include/pyon.h
-  include/pyon_types.h
   include/pyon_list.h
   testcases/*.py
   interfaces/memory_py.pi

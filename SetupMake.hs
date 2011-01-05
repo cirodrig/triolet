@@ -180,7 +180,7 @@ compilePyAsmRtsFile pyon_program data_path build_path source_path src =
       i_file = source_path </> src `replaceExtension` ".pyasm"
   in MakeRule [o_file, iface_file] [i_file, "bootstrap_data"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n" ++
-     pyon_program ++ " -B " ++ data_path ++ " --keep-c-files $< -o " ++ o_file
+     pyon_program ++ " -B " ++ data_path ++ " --keep-c-files $< -o " ++ o_file ++ " " ++ intercalate " " targetFlags
 
 -- | Copy a file
 copyDataFile :: MakeRuleTemplate
@@ -193,6 +193,14 @@ copyDataFile build_path source_path src =
       
 -------------------------------------------------------------------------------
 -- Command-line options used in makefiles
+
+force32BitCompilation :: Bool
+force32BitCompilation =
+  case (System.Info.arch, System.Info.os)
+  of ("i386", _)          -> True
+     ("x86_64", "darwin") -> True
+     ("x86_64", "linux")  -> False
+     _                    -> error "Unrecognized host architecture"
 
 data CompileMode = CompileMode | LinkMode
 
@@ -237,7 +245,6 @@ packageDocFlags exe lbi = do
       , pkg_info   <- maybeToList $ lookupInstalledPackageId pkg_index ipid
       , iface_path <- haddockInterfaces pkg_info
       , html_path  <- haddockHTMLs pkg_info]
-    
 
 pyonExtensionFlags exe =
   ["-X" ++ show ext | ext <- extensions $ buildInfo exe]
@@ -252,8 +259,26 @@ layoutGhcPathFlags exe lbi = o_flags ++ i_flags
     o_flags = ["-outputdir", layoutBuildDir lbi]
     i_flags = ["-i" ++ path | path <- layoutBuildDir lbi : pyonSearchPaths lbi exe]
 
+targetFlags = word_size ++ force_32bit ++ arch
+  where
+    arch =
+      case System.Info.arch
+      of "i386" -> ["-DARCH_I386"]
+         "x86_64" -> ["-DARCH_X86_64"]
+         _ -> error "Unrecognized architecture"
+    word_size =
+      case System.Info.arch
+      of "i386" -> ["-DWORD_SIZE=4"]
+         "x86_64" -> ["-DWORD_SIZE=8"]
+         _ -> error "Unrecognized architecture"
+    force_32bit =
+      if force32BitCompilation
+      then ["-DFORCE_32_BIT"]
+      else []
+
 -- | Get the options to pass to GHC for compiling a HS file.
 pyonGhcOpts exe lbi =
+  targetFlags ++
   pyonGhcPathFlags exe lbi ++
   packageFlags CompileMode exe lbi ++
   pyonExtensionFlags exe
@@ -299,13 +324,17 @@ generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = 
        Nothing -> die "Cannot find 'ghc'"
   
   -- Force 32-bit compilation?
-  (cc_32b_flag, l_32b_flag, linkshared_32b_flag) <-
-    let y = (["-m32"], ["-optl-m32"], [])
-        n = ([], [], [])
-    in case System.Info.arch
-       of "i386" -> return y
-          "x86_64" -> return y
-          _ -> die "Unrecognized host architecture"
+  let (cc_32b_flag, l_32b_flag, linkshared_32b_flag) =
+        if force32BitCompilation
+        then (["-m32"], ["-optl-m32"], [])
+        else ([], [], [])
+
+  -- Linker commands
+  linkshared <-
+    case System.Info.os
+    of "darwin" -> return "libtool -dynamic"
+       "linux"  -> return "gcc -shared"
+       _ -> die "Unrecognized operating system"
 
   -- Compute file lists
   let pyon_source_files = getSources pyon_rules
@@ -324,9 +353,10 @@ generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = 
            -- executables
          , ("CC", cc_path)
          , ("HC", hc_path)
-         , ("LINKSHARED", "libtool -dynamic")
+         , ("LINKSHARED", intercalate " " (linkshared : linkshared_32b_flag))
            -- flags
          , ("CCFLAGS", intercalate " " (cc_32b_flag ++ cc_warning_flags))
+         , ("RTS_CCFLAGS", intercalate " " targetFlags)
          , ("LFLAGS", intercalate " " l_32b_flag)
          , ("LINKFLAGS", intercalate " " linkshared_32b_flag)
            -- paths outside the project directory

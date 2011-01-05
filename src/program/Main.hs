@@ -1,5 +1,5 @@
 
-{-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE CPP, ForeignFunctionInterface #-}
 module Main(main) where
 
 import Control.Exception
@@ -251,7 +251,10 @@ compileCFile c_fname o_fname = do
   let compiler_opts =
         [ "-c"                  -- Compile
         , "-g"                  -- Emit debug information
+#ifdef FORCE_32_BIT
         , "-m32"                -- 32-bit mode
+#endif
+        , "-fPIC"               -- Position-independent code
         , "-xc"                 -- Source is a C file
         , c_fname               -- Input filename
         , "-o", o_fname         -- Output filename

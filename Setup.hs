@@ -97,6 +97,7 @@ doBuild pkg_desc lbi hooks flags = do
       main_path <- findFile (pyonSearchPaths lbi exe) (modulePath exe)
       let hsdep_args =
             ["-M", "-dep-makefile", ".depend_hs.mk"] ++
+            targetFlags ++
             pyonGhcPathFlags exe lbi ++
             [main_path]
       

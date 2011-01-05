@@ -1,6 +1,7 @@
 {-| Machine-level data types.
 -}
 
+{-# LANGUAGE CPP #-}
 module LowLevel.Types where
 
 import Control.Applicative
@@ -34,16 +35,21 @@ data PrimType =
                                 --   count updates when copied or discarded
     deriving (Eq, Ord, Show)
 
--- | /FIXME/: This is architecture-dependent.
 pointerSize :: Size
-pointerSize = S32
-
--- | /FIXME/: This is architecture-dependent.
 nativeIntSize :: Size
+nativeFloatSize :: Size
+
+#if WORD_SIZE == 4
+pointerSize = S32
 nativeIntSize = S32
+#elif WORD_SIZE == 8
+pointerSize = S64
+nativeIntSize = S32
+#else
+# error "Unknown word size for the target architecture"
+#endif
 
 -- | /FIXME/: This is architecture-dependent.
-nativeFloatSize :: Size
 nativeFloatSize = S32
 
 -- | The maximum alignment of any scalar value, in bytes.
@@ -93,8 +99,6 @@ coerceToRepresentableInt Signed sz n =
 -- | The alignment of scalar values in dynamically constructed data structures,
 -- such as stacks and partial application records.
 --
--- All promoted types must have a size that is a multiple of this size.
---
 -- If unaligned loads are not permissible, this must be equal to
 -- 'maxScalarAlignment'.  On architectures supporting unaligned loads, or if
 -- unaligned loads are emulated in software, smaller alignments are
@@ -103,7 +107,13 @@ coerceToRepresentableInt Signed sz n =
 -- 
 -- /FIXME/: This is architecture-dependent.
 dynamicScalarAlignment :: Int
+#if WORD_SIZE == 4
 dynamicScalarAlignment = 4
+#elif WORD_SIZE == 8
+dynamicScalarAlignment = 8
+#else
+# error "Unknown word size for the target architecture"
+#endif
 
 nativeIntType, nativeWordType, nativeFloatType :: PrimType
 nativeIntType = IntType Signed nativeIntSize

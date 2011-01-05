@@ -11,18 +11,13 @@ LIB_FLAGS=$(foreach lib, $(LIBS), -l$(lib))
 PYON_HS_INCLUDEDIR_FLAGS=\
   -isrc/program -i$(BUILDDIR)/pyon $(foreach dir, $(INCLUDEDIRS), -I$(dir))
 
-CLAY_HS_INCLUDEDIR_FLAGS=\
-  -isrc/program -isrc/rts \
-  -i$(BUILDDIR)/pyon -i$(BUILDDIR)/rts \
-  $(foreach dir, $(INCLUDEDIRS), -I$(dir))
-
 C_INCLUDEDIR_FLAGS= $(foreach dir, $(INCLUDEDIRS), -I$(dir))
 
 LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
 
 ## Aggregate parameters for specific commands
 
-RTS_C_C_OPTS=$(CCFLAGS) -g \
+RTS_C_C_OPTS=$(CCFLAGS) $(RTS_CCFLAGS) -g -fPIC \
  -Isrc/rts -I$(RTS_BUILD_DIR) -I$(DATA_BUILD_DIR)/include \
  $(C_INCLUDEDIR_FLAGS)
 
@@ -33,10 +28,5 @@ RTS_C_OPTS=-Ilibrary $(CCFLAGS) -dynamic
 
 ## File lists
 
-CLAY_SRCS=ComputeLayout.hs
-
-CLAY_SOURCE_FILES=$(foreach src, $(CLAY_SRCS), $(SRCDIR)/rts/$(src))
-
 PYON_TARGET=$(BUILDDIR)/pyon/pyon
-CLAY_TARGET=$(BUILDDIR)/computelayout/computelayout
 RTS_TARGET=$(BUILDDIR)/rts/libpyonrts.so

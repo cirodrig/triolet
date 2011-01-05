@@ -372,6 +372,17 @@ promotedPrimTypesRecord :: Mutability -> [PrimType] -> StaticRecord
 promotedPrimTypesRecord mut tys =
   staticRecord [(mut, PrimField $ promoteType t) | t <- tys]
 
+-- | Create a record representing arguments of a PAP.
+--   The record's fields are promoted, then padded to a multiple of
+--   'dynamicScalarAlignment'.
+papArgsRecord :: Mutability -> [PrimType] -> StaticRecord
+papArgsRecord mut tys =
+  staticRecord $ concatMap mk_field tys
+  where
+    mk_field ty =
+      let pty = promoteType ty
+      in [(Constant, AlignField dynamicScalarAlignment), (mut, PrimField pty)]
+
 -- | A recursive group's shared closure record.  The record contains captured
 -- variables and pointers to functions in the group.
 groupSharedRecord :: StaticRecord -> StaticRecord -> StaticRecord
@@ -825,7 +836,7 @@ emitInexactEntry clo = do
     store_field ptr fld return_val = storeField fld ptr return_val
 
     -- Record type of parameters
-    param_record = promotedPrimTypesRecord Constant $
+    param_record = papArgsRecord Constant $
                    map valueToPrimType $
                    ftParamTypes $ closureType clo
   
@@ -1149,11 +1160,11 @@ pickApplyFun tags =
 
 -- | The available 'apply' functions
 applyFunctions :: ApplyTrie
-applyFunctions = [ (Int32Tag, i_node)
+applyFunctions = [ (Int32Tag, i32_node)
                  , (Float32Tag, f_node)
-                 , (OwnedRefTag, o_node)]
+                 , (Int64Tag, i64_node)]
   where
-    i_node = ApplyTrieNode 
+    i32_node = ApplyTrieNode 
              (llBuiltin the_prim_apply_i32_f) 
              (llBuiltin the_prim_apply_i32)
              []
@@ -1161,7 +1172,7 @@ applyFunctions = [ (Int32Tag, i_node)
              (llBuiltin the_prim_apply_f32_f)
              (llBuiltin the_prim_apply_f32)
              []
-    o_node = ApplyTrieNode
-             (llBuiltin the_prim_apply_p_f)
-             (llBuiltin the_prim_apply_p)
-             []
+    i64_node = ApplyTrieNode
+               (llBuiltin the_prim_apply_i64_f)
+               (llBuiltin the_prim_apply_i64)
+               []

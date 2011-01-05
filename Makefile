@@ -35,9 +35,9 @@ $(PYON_TARGET) : $(PYON_OBJECT_FILES)
 	$(HC) $(PYON_OBJECT_FILES) -o $@ $(PYON_L_OPTS)
 
 # Link RTS files into a dynamic library
-$(RTS_TARGET) : $(CLAY_TARGET) $(RTS_OBJECT_FILES)
+$(RTS_TARGET) : $(RTS_OBJECT_FILES)
 	mkdir -p $(dir $(RTS_TARGET))
-	$(LINKSHARED) -g -install_name libpyonrts.so $(RTS_OBJECT_FILES) -o $(RTS_TARGET) -lc $(LINKFLAGS)
+	$(LINKSHARED) -g $(RTS_OBJECT_FILES) -o $(RTS_TARGET) -lc $(LINKFLAGS)
 
 # Move the library into the data directory
 $(DATA_BUILD_DIR)/libpyonrts.so : $(RTS_TARGET)

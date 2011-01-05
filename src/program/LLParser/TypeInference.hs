@@ -1232,8 +1232,13 @@ resolveExternDecl decl = do
        Nothing -> do
          impent <- createImport label new_type
          return (False, impent)
+  
+  let new_decl =
+        case decl
+        of ExternDecl _ l -> ExternDecl new_type l
+           ImportDecl _ l _ -> ImportDecl new_type l (LL.importVar impent)
 
-  return (decl {externType = new_type}, is_builtin, impent)
+  return (new_decl, is_builtin, impent)
   where
     -- Verify that the given labels match
     check_external_name label impent =

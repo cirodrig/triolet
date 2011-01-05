@@ -4,52 +4,46 @@
 //
 // All functions apply 'obj' to 'arg', and either return a new object or
 // write their return value to the given address.
-procedure apply_i64_f (int64 obj, pointer arg) -> owned {
+procedure apply_i64_f (owned obj, int64 arg) -> owned {
   data pointer ret;
   data int64 arg_ref;
   !arg_ref = arg;
-  () = () primcall apply_dword(obj, arg_ref, ret);
+  () = () primcall apply_word(obj, arg_ref, ret);
   owned load ret;
 };
 
-procedure apply_i64 (int64 obj, pointer arg, pointer ret) -> () {
+procedure apply_i64 (owned obj, int64 arg, pointer ret) -> () {
   data int64 arg_ref;
   !arg_ref = arg;
-  () primcall apply_dword(obj, arg_ref, ret);
+  () primcall apply_word(obj, arg_ref, ret);
 };
 
 procedure apply_i32_f (owned obj, int32 arg) -> owned {
   data pointer ret;
-  data pointer arg_ref;
-  !arg_ref = arg;     // Assume sizeof(int32) == sizeof(pointer)        
+  data int64 arg_ref;
+  !arg_ref = arg; // Store 32-bit int in low bits of 64-bit int
   () = () primcall apply_word(obj, arg_ref, ret);
   owned load ret;
 };
 
 procedure apply_i32 (owned obj, int arg, pointer ret) -> () {
   data pointer arg_ref;
-  !arg_ref = arg;               // Assume sizeof(int32) == sizeof(pointer)
+  !arg_ref = arg; // Store 32-bit int in low bits of 64-bit int
   () primcall apply_word(obj, arg_ref, ret);
 };
 
 procedure apply_f32_f (owned obj, float arg) -> owned {
   data pointer ret;
-  data pointer arg_ref;
-  !arg_ref = arg;               // Assume sizeof(float) == sizeof(pointer)
+  data int64 arg_ref;
+  !arg_ref = arg; // Store 32-bit float in low bits of 64-bit int
   () = () primcall apply_word(obj, arg_ref, ret);
   owned load ret;
 };
 
 procedure apply_f32 (owned obj, float arg, pointer ret) -> () {
   data pointer arg_ref;
-  !arg_ref = arg;               // Assume sizeof(float) == sizeof(pointer)
+  !arg_ref = arg; // Store 32-bit float in low bits of 64-bit int
   () primcall apply_word(obj, arg_ref, ret);
-};
-
-procedure apply_dword (owned obj, pointer arg_ref, pointer ret) -> () {
-  // Not implemented
-  () = () primcall pyon_db_int(int 99);
-  () primcall exit (int -1);
 };
 
 procedure apply_word (owned obj, pointer arg_ref, pointer ret) -> () {

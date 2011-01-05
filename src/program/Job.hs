@@ -75,7 +75,7 @@ foreign import ccall "unistd.h mkdtemp" mkdtemp :: Ptr CChar -> IO (Ptr CChar)
 
 -- | Create a temporary directory.  The directory name is returned.
 tmpdir :: IO FilePath
-tmpdir = withCString "/tmp/pyon.XXXXX" $ \template -> do
+tmpdir = withCString "/tmp/pyon.XXXXXX" $ \template -> do
   dirname <- mkdtemp template
   if dirname == nullPtr
     then throwErrno "Creating directory for temporary files"
