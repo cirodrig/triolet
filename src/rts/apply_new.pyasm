@@ -21,7 +21,7 @@ extern procedure pyon.internal.apply_new.apply_f32(owned, float, pointer) -> ();
 
 #include "new_pyasm_records.h"
 
-#if defined(ARCH_X86)
+#if defined(ARCH_I386)
 # include "arch/apply_x86.h"
 #elif defined(ARCH_X86_64)
 # include "arch/apply_x86_64.h"
@@ -123,7 +123,7 @@ procedure inline pap_arity(owned p) -> uint16 {
 };
 
 
-#if defined(ARCH_X86)
+#if defined(ARCH_I386)
 # include "arch/apply_x86.pyasm"
 #elif defined(ARCH_X86_64)
 # include "arch/apply_x86_64.pyasm"

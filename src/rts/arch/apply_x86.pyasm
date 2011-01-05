@@ -4,7 +4,7 @@
 //
 // All functions apply 'obj' to 'arg', and either return a new object or
 // write their return value to the given address.
-procedure apply_i64_f (int64 obj, pointer arg) -> owned {
+procedure apply_i64_f (owned obj, int64 arg) -> owned {
   data pointer ret;
   data int64 arg_ref;
   !arg_ref = arg;
@@ -12,7 +12,7 @@ procedure apply_i64_f (int64 obj, pointer arg) -> owned {
   owned load ret;
 };
 
-procedure apply_i64 (int64 obj, pointer arg, pointer ret) -> () {
+procedure apply_i64 (owned obj, int64 arg, pointer ret) -> () {
   data int64 arg_ref;
   !arg_ref = arg;
   () primcall apply_dword(obj, arg_ref, ret);
