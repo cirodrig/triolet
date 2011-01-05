@@ -2,6 +2,16 @@
 -- Data types
 box makeComplex : val float -> val float -> ref complex float;
 
+box pyonTuple2 :
+    val (a : Pure)
+ -> val (b : Pure)
+-- -> ref(pc1) PassConv a
+-- -> ref(pc2) PassConv b
+ -> ref(ra) a
+ -> ref(rb) b
+ -> [a @ ra ** b @ rb]
+    ref PyonTuple2 a b;
+
 -- Load and store functions
 box fun_load_int      : ref(r) int      -> [int @ r] val int;
 box fun_load_float    : ref(r) float    -> [int @ r] val float;
@@ -337,6 +347,16 @@ box fun_generate :
  -> [PassConv a @ pc_addr] box LazyStream e a;
 
 box fun_generateList :
+    val (e : Effect)
+ -> val (a : Pure)
+ -> ref(pc_addr) PassConv a
+ -> val int
+ -> box (val int -> [e] ref a)
+ -> [PassConv a @ pc_addr ** e] ref list a;
+
+-- Like fun_generateList, but tells the compiler to vectorize the worker
+-- function
+box fun_vectorGenerateList :
     val (e : Effect)
  -> val (a : Pure)
  -> ref(pc_addr) PassConv a

@@ -10,6 +10,8 @@ extern function pyon.internal.list.list_traverse
   (unit, pointer, pointer) -> owned;
 extern function pyon.internal.list.list_generate
   (unit, unit, pointer, int, owned, pointer) -> ();
+extern function pyon.internal.list.list_vGenerate
+  (unit, unit, pointer, int, owned, pointer) -> ();
 
 extern function pyon.internal.list.subscript
   (unit, pointer, pointer, int) -> pointer;

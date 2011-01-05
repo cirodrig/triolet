@@ -244,7 +244,11 @@ cseCall cc op args = do
 cseStm :: Stm -> CSE Stm
 cseStm statement =
   case statement
-  of LetE lhs rhs stm -> do
+  of LetE [f_var] (ValA [LamV f]) stm ->
+       -- Convert a lambda into a letrec
+       let new_statement = LetrecE [Def f_var f] stm
+       in cseStm new_statement
+     LetE lhs rhs stm -> do
        (rhs', exprs) <- cseAtom rhs
        case exprs of
          Nothing -> return ()

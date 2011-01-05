@@ -134,6 +134,7 @@ toPointerImport (ImportClosureFun ep mvalue) =
         (toPointerFunctionType $ entryPointsType ep)
         (functionArity ep)
         (toPointerVar $ directEntry ep)
+        (fmap toPointerVar $ vectorEntry ep)
         (toPointerVar $ exactEntry ep)
         (toPointerVar $ inexactEntry ep)
         (fmap toPointerVar $ deallocEntry ep)

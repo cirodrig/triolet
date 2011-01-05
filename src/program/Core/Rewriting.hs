@@ -9,6 +9,7 @@ import Control.Monad hiding(mapM)
 import Data.IORef
 import Data.Maybe
 import Data.Traversable
+import Debug.Trace
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
@@ -72,11 +73,13 @@ data instance CExpOf Rw Rw =
                  , generateCallCount :: RWCExp
                  , generateCallProducer :: RWCExp}
   | GenerateListCall { rexpInfo :: !SynInfo
+                     , generateListCallVectorize :: !Bool -- Should vectorize?
                      , generateListCallEffect :: RCType
                      , generateListCallType :: RCType
                      , generateListCallRepr :: RWCExp
                      , generateListCallCount :: RWCExp
-                     , generateListCallProducer :: RWCExp}
+                     , generateListCallProducer :: RWCExp
+                     , generateListCallReturn :: RWCExp}
   | ReturnCall { rexpInfo :: !SynInfo
                , returnCallEffect :: RCType
                , returnCallType :: RCType
@@ -303,6 +306,12 @@ leaveRWCExp expression =
      GenerateCall inf eff ty repr count producer ->
        rebuild_call inf (SF.pyonBuiltin SF.the_fun_generate)
        [eff, ty] [repr, count, producer] Nothing
+     GenerateListCall inf False eff ty repr count producer ret ->
+       rebuild_call inf (SF.pyonBuiltin SF.the_fun_generateList)
+       [eff, ty] [repr, count, producer] (Just ret)
+     GenerateListCall inf True eff ty repr count producer ret ->
+       rebuild_call inf (SF.pyonBuiltin SF.the_fun_vectorGenerateList)
+       [eff, ty] [repr, count, producer] (Just ret)
      ReturnCall inf eff ty repr f ->
        rebuild_call inf (SF.pyonBuiltin SF.the_fun_return)
        [eff, ty] [repr, f] Nothing
@@ -387,7 +396,13 @@ type Rewrite a = a -> RW a
 
 -------------------------------------------------------------------------------
 
-rewriteExp' expression =
+vectorRewriter expression =
+  case expression
+  of GenerateListCall {} -> do
+       return $ expression {generateListCallVectorize = True}
+     _ -> return expression
+
+streamRewriter expression =
   case expression
   of BindCall { rexpInfo = inf
               , bindCallEffect = eff
@@ -396,14 +411,9 @@ rewriteExp' expression =
               , bindCallProducedRepr = prepr
               , bindCallTransformedRepr = trepr
               , bindCallProducer = producer
-              , bindCallTransformer = transformer} -> do
-       producer' <- rewriteExp' producer
-       transformer' <- rewriteExp' transformer
-       let new_expr =
-             expression { bindCallProducer = producer'
-                        , bindCallTransformer = transformer'}
-       fmap (fromMaybe new_expr) $
-         rebuildMapStream' inf eff ptype ttype prepr trepr producer' transformer'
+              , bindCallTransformer = transformer} ->
+       try_rewrite $
+         rebuildMapStream' inf eff ptype ttype prepr trepr producer transformer
      MapStreamCall { rexpInfo = inf
                    , mapStreamCallEffect = eff
                    , mapStreamCallProducedType = ptype
@@ -411,100 +421,114 @@ rewriteExp' expression =
                    , mapStreamCallProducedRepr = prepr
                    , mapStreamCallTransformedRepr = trepr
                    , mapStreamCallTransformer = transformer
-                   , mapStreamCallProducer = producer} -> do
-       producer' <- rewriteExp' producer
-       transformer' <- rewriteExp' transformer
-       let new_expr =
-             expression { mapStreamCallProducer = producer'
-                        , mapStreamCallTransformer = transformer'}
-       fmap (fromMaybe new_expr) $
-         rewriteMapStreamApp' inf eff ptype ttype prepr trepr producer' transformer'
+                   , mapStreamCallProducer = producer} ->
+       trace "MapStreamCall" $ try_rewrite $
+         rewriteMapStreamApp' inf eff ptype ttype prepr trepr transformer producer
      BuildListCall { rexpInfo = inf
                    , buildListCallEffect = eff
                    , buildListCallType = ty
                    , buildListCallRepr = repr
                    , buildListCallProducer = producer
-                   , buildListCallReturn = ret} -> do
-       producer' <- rewriteExp' producer
-       ret' <- rewriteExp' ret
-       let new_expr =
-             expression { buildListCallProducer = producer'
-                        , buildListCallReturn = ret'}
-       fmap (fromMaybe new_expr) $
-         rewriteBuildListApp' inf eff ty repr producer' ret'
-     GenerateCall { rexpInfo = inf
-                  , generateCallEffect = eff
-                  , generateCallType = ty
-                  , generateCallRepr = repr
-                  , generateCallCount = count
-                  , generateCallProducer = producer} -> do
-       count' <- rewriteExp' count
-       producer' <- rewriteExp' producer
-       return $ expression { generateCallCount = count'
-                           , generateCallProducer = producer'}
-     GenerateListCall { rexpInfo = inf
-                      , generateListCallEffect = eff
-                      , generateListCallType = ty
-                      , generateListCallRepr = repr
-                      , generateListCallCount = count
-                      , generateListCallProducer = producer} -> do
-       count' <- rewriteExp' count
-       producer' <- rewriteExp' producer
-       return $ expression { generateListCallCount = count'
-                           , generateListCallProducer = producer'}
-     ReturnCall { rexpInfo = inf
-                , returnCallEffect = eff
-                , returnCallType = ty
-                , returnCallRepr = repr
-                , returnCallFunction = f} -> do
-       f' <- rewriteExp' f
-       return $ expression { returnCallFunction = f'}
-     OtherExp expression' -> fmap OtherExp $ rewriteExp'' expression'
+                   , buildListCallReturn = ret} ->
+       try_rewrite $
+         rewriteBuildListApp' inf eff ty repr producer ret
+     _ -> return expression
+  where
+    try_rewrite rw = do
+      x <- rw
+      case x of
+        Just new_x -> do
+          somethingChanged
+          return new_x
+        Nothing -> return expression
 
-rewriteExp'' :: Rewrite (CExpOf Rec Rw)
-rewriteExp'' expression =
+rewriteExp rewriter expression = recursive_rewrite >>= rewriter
+  where
+    recrw = rewriteExp rewriter
+    recursive_rewrite =
+      case expression
+      of BindCall { bindCallProducer = producer
+                  , bindCallTransformer = transformer} -> do
+           producer' <- recrw producer
+           transformer' <- recrw transformer
+           return $ expression { bindCallProducer = producer'
+                               , bindCallTransformer = transformer'}
+         MapStreamCall { mapStreamCallTransformer = transformer
+                       , mapStreamCallProducer = producer} -> do
+           producer' <- recrw producer
+           transformer' <- recrw transformer
+           return $ expression { mapStreamCallProducer = producer'
+                               , mapStreamCallTransformer = transformer'}
+         BuildListCall { buildListCallProducer = producer
+                       , buildListCallReturn = ret} -> do
+           producer' <- recrw producer
+           ret' <- recrw ret
+           return $ expression { buildListCallProducer = producer'
+                               , buildListCallReturn = ret'}
+         GenerateCall { generateCallCount = count
+                      , generateCallProducer = producer} -> do
+           count' <- recrw count
+           producer' <- recrw producer
+           return $ expression { generateCallCount = count'
+                               , generateCallProducer = producer'}
+         GenerateListCall { generateListCallCount = count
+                          , generateListCallProducer = producer} -> do
+           count' <- recrw count
+           producer' <- recrw producer
+           return $ expression { generateListCallCount = count'
+                               , generateListCallProducer = producer'}
+         ReturnCall { returnCallFunction = f} -> do
+           f' <- recrw f
+           return $ expression { returnCallFunction = f'}
+         OtherExp expression' ->
+           fmap OtherExp $ rewriteExp'' rewriter expression'
+
+rewriteExp'' :: Rewrite (CExpOf Rw Rw) -> Rewrite (CExpOf Rec Rw)
+rewriteExp'' rewriter expression =
   case expression
   of ValCE {} -> return expression
      AppCE inf op args rarg -> do
-       op' <- rewriteExp' op
-       args' <- mapM rewriteExp' args
-       rarg' <- mapM rewriteExp' rarg
+       op' <- recrw op
+       args' <- mapM recrw args
+       rarg' <- mapM recrw rarg
        return $ AppCE inf op' args' rarg'
      LamCE inf f -> do
-       f' <- rewriteFun' f
+       f' <- rewriteFun' rewriter f
        return $ LamCE inf f'
      LetCE inf binder rhs body -> do
-       rhs' <- rewriteExp' rhs
-       body' <- rewriteExp' body
+       rhs' <- recrw rhs
+       body' <- recrw body
        return $ LetCE inf binder rhs' body'
      LetrecCE inf defs body -> do
-       defs' <- mapM rewriteDef' defs
-       body' <- rewriteExp' body
+       defs' <- mapM (rewriteDef' rewriter) defs
+       body' <- recrw body
        return $ LetrecCE inf defs' body'
      CaseCE inf scr alts -> do
-       scr' <- rewriteExp' scr
-       alts' <- mapM rewriteAlt' alts
+       scr' <- recrw scr
+       alts' <- mapM (rewriteAlt' rewriter) alts
        return $ CaseCE inf scr' alts'
+  where
+    recrw = rewriteExp rewriter
 
-rewriteAlt' :: Rewrite RWCAlt
-rewriteAlt' (RWCAlt alt) = do
-  body <- rewriteExp' $ caltBody alt
+rewriteAlt' :: Rewrite (CExpOf Rw Rw) -> Rewrite RWCAlt
+rewriteAlt' rewriter (RWCAlt alt) = do
+  body <- rewriteExp rewriter $ caltBody alt
   return $ RWCAlt $ alt {caltBody = body}
 
-rewriteFun' :: Rewrite RWCFun
-rewriteFun' (RWCFun fun) = do
-  body <- rewriteExp' $ cfunBody fun
+rewriteFun' :: Rewrite (CExpOf Rw Rw) -> Rewrite RWCFun
+rewriteFun' rewriter (RWCFun fun) = do
+  body <- rewriteExp rewriter $ cfunBody fun
   return $ RWCFun $ fun {cfunBody = body}
 
-rewriteDef' :: Rewrite (CDef Rw)
-rewriteDef' (CDef v f) = fmap (CDef v) (rewriteFun' f)
+rewriteDef' :: Rewrite (CExpOf Rw Rw) -> Rewrite (CDef Rw)
+rewriteDef' rewriter (CDef v f) = fmap (CDef v) (rewriteFun' rewriter f)
 
 -- Rewrite applications of 'buildList'
 rewriteBuildListApp' inf effect val_type val_repr producer rarg =
   case producer
   of GenerateCall { generateCallCount = generate_count
                   , generateCallProducer = generate_producer} ->
-       return $ Just $ GenerateListCall inf effect val_type val_repr generate_count generate_producer
+       return $ Just $ GenerateListCall inf False effect val_type val_repr generate_count generate_producer rarg
      _ -> return Nothing
 
 -- Rewrite applications of 'mapStream'
@@ -647,20 +671,20 @@ removeReturn' expression =
 -------------------------------------------------------------------------------
 -- Entry point
 
--- | Apply rewriting rules in a single pass through the module.
-rewriteOnce :: CModule Rw -> RW (CModule Rw)
-rewriteOnce mod = do
-  defss' <- mapM (mapM rewriteDef') $ cmodDefs mod
-  return $ mod {cmodDefs = defss'}
+rewriteUntilConvergence var_supply rewriter def = go def
+  where
+    go def = do
+      (def', changed) <- runRW var_supply $ rewriteDef' rewriter def
+      if changed then go def' else return def'
+
+rewriteDefFully :: IdentSupply Var -> CDef Rw -> IO (CDef Rw)
+rewriteDefFully var_supply def = do
+  def1 <- rewriteUntilConvergence var_supply streamRewriter def
+  rewriteUntilConvergence var_supply vectorRewriter def1
 
 -- | Apply rewriting rules to a module as much as possible.
---
--- TODO: iterate per-function rather than globally
 rewrite :: CModule Rec -> IO (CModule Rec)
-rewrite mod = withTheVarIdentSupply $ \var_supply ->
-  -- Keep rewriting until there are no more rewrite opportunitites
-  let run_until_convergence x = do
-        (x', changed) <- runRW var_supply $ rewriteOnce x
-        if changed then run_until_convergence x' else return x'
-  in do mod' <- run_until_convergence $ mkRWCModule mod
-        return $ leaveRWCModule mod'
+rewrite mod = withTheVarIdentSupply $ \var_supply -> do
+  let mod' = mkRWCModule mod
+  defs' <- mapM (mapM $ rewriteDefFully var_supply) $ cmodDefs mod'
+  return $ leaveRWCModule (mod' {cmodDefs = defs'})

@@ -217,7 +217,7 @@ function list_traverse_initialize(pointer state) -> () {
   ();
 };
 
-function list_generate
+function inline list_generate
   (unit _, unit _, pointer repr, int count, owned f, pointer ret) -> () {
   elem_size = repr @! PassConv.size;
   elem_align = repr @! PassConv.align;
@@ -235,11 +235,17 @@ function list_generate
   ();
 };
 
+// Vectorized variant
+function inline list_vGenerate
+  (unit x, unit y, pointer repr, int count, owned f, pointer ret) -> () {
+  () call list_generate(x, y, repr, count, f, ret);
+};
+
 // Get a pointer to an array element.
 // elem_repr : PassConv is the element's representation.
 // base is the base pointer
 // index is the index of the element to select
-function subscript(unit _, pointer elem_repr, pointer base, int index) -> pointer {
+function inline subscript(unit _, pointer elem_repr, pointer base, int index) -> pointer {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   pad_elem_size = PAD(elem_size, elem_align);

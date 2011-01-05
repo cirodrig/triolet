@@ -25,6 +25,7 @@ where
 import Gluon.Common.Error
 import LowLevel.Types
 import LowLevel.Record
+import {-# SOURCE #-} LowLevel.Syntax
 
 -- | A type that may be put into a variable
 data ValueType = PrimType !PrimType

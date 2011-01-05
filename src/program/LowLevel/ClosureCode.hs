@@ -276,7 +276,7 @@ createGlobalClosure (Def v fun)
       entry_points <-
         case varName v
         of Just name -> mkGlobalEntryPoints (funType fun) name v
-           Nothing -> mkEntryPoints NeverDeallocate (funType fun) Nothing
+           Nothing -> mkEntryPoints NeverDeallocate False (funType fun) Nothing
       return $ Just $ mkGlobalClosure v entry_points
   | otherwise = return Nothing
 
@@ -315,7 +315,7 @@ mkRecClosures defs captureds = do
   -- Create entry points structure
   deallocator_fn <- newAnonymousVar (PrimType PointerType)
   entry_points <- forM defs $ \(Def v f) ->
-    mkEntryPoints (CustomDeallocator deallocator_fn) (funType f) (varName v)
+    mkEntryPoints (CustomDeallocator deallocator_fn) False (funType f) (varName v)
  
   return $ closureGroup $
     lazyZip3 (map definiendum defs) entry_points captureds
@@ -914,17 +914,18 @@ emitRecClosures grp directs = do
   return (defs, generateRecursiveClosures grp)
 
 -- | Generate the code and data of a lambda function
-emitLambdaClosure :: FunctionType -> Fun -> [Var] -> CC (GenM Val)
-emitLambdaClosure lambda_type direct captured_vars = do
+emitLambdaClosure :: FunctionType -> Bool -> Fun -> [Var] -> CC (GenM Val)
+emitLambdaClosure lambda_type vectorize direct captured_vars = do
   (defs, gen_closure) <-
-    runFreshVarCC $ emitLambdaClosure1 lambda_type direct captured_vars
+    runFreshVarCC $
+    emitLambdaClosure1 lambda_type vectorize direct captured_vars
   writeDefs defs
   return gen_closure
 
-emitLambdaClosure1 :: FunctionType -> Fun -> [Var]
+emitLambdaClosure1 :: FunctionType -> Bool -> Fun -> [Var]
                    -> FreshVarM (Defs, GenM Val)
-emitLambdaClosure1 lambda_type direct captured_vars = do
-  fun_var <- newAnonymousVar (PrimType OwnedType)  
+emitLambdaClosure1 lambda_type vectorize direct captured_vars = do
+  fun_var <- newAnonymousVar (PrimType OwnedType)
 
   -- Use the default deallocation function if there are no captured variables
   want_dealloc <-
@@ -933,12 +934,15 @@ emitLambdaClosure1 lambda_type direct captured_vars = do
     else do v <- newAnonymousVar (PrimType PointerType)
             return $ CustomDeallocator v
 
-  entry_points <- mkEntryPoints want_dealloc lambda_type Nothing
+  entry_points <- mkEntryPoints want_dealloc vectorize lambda_type Nothing
   let clo = mkNonrecClosure fun_var entry_points captured_vars
       
   -- Generate code
   info_def <- emitInfoTable clo
   let direct_def = Def (closureDirectEntry clo) direct
+  vector_def <- if vectorize
+                then undefined
+                else return Nothing
   exact_def <- emitExactEntry clo
   inexact_def <- emitInexactEntry clo
   free_defs <- generateClosureFree clo
@@ -947,8 +951,9 @@ emitLambdaClosure1 lambda_type direct captured_vars = do
   let gen_closure = do generateLocalClosure clo
                        return $ VarV fun_var
   
-  return (free_defs ++ mkDefs [direct_def, exact_def, inexact_def] [info_def],
-          gen_closure)
+      defs = free_defs ++
+             mkDefs (maybeToList vector_def ++ [direct_def, exact_def, inexact_def]) [info_def]
+  return (defs, gen_closure)
 
 -------------------------------------------------------------------------------
 

@@ -184,6 +184,7 @@ pyonBuiltinFunctions =
   , "fun_subscript"
   , "fun_generate"
   , "fun_generateList"
+  , "fun_vectorGenerateList"
   ]
 
 pyonBuiltinConstructors =

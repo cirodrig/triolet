@@ -15,6 +15,27 @@ data pointer Stream_info = InfoTableHeader {
   TAG_CON
 };
 
+function passConv_iter (unit _, pointer _, pointer ret) -> () {
+  ret @! PassConv.size = sizeof Stream;
+  ret @! PassConv.align = sizeof Stream;
+  ret @! PassConv.copy = Stream_copy;
+  ret @! PassConv.finalize = Stream_dealloc;
+  ();
+};
+
+procedure Stream_copy (pointer src, pointer dst) -> () {
+  dst @! Stream.next = src @! Stream.next;
+  dst @! Stream.initialize = src @! Stream.initialize;
+  dst @! Stream.return_repr.size = src @! Stream.return_repr.size;
+  dst @! Stream.return_repr.align = src @! Stream.return_repr.align;
+  dst @! Stream.return_repr.copy = src @! Stream.return_repr.copy;
+  dst @! Stream.return_repr.finalize = src @! Stream.return_repr.finalize;
+  dst @! Stream.state_size = src @! Stream.state_size;
+  dst @! Stream.state_align = src @! Stream.state_align;
+  dst @! Stream.state_finalize = src @! Stream.state_finalize;
+  ();  
+};
+
 // Deallocate a Stream
 procedure Stream_dealloc (pointer self) -> () {
   // Not implemented

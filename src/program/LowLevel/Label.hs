@@ -34,6 +34,8 @@ data LabelTag =
     NormalLabel
     -- | A global function direct entry point.
   | DirectEntryLabel
+    -- | A global function vector entry point.
+  | VectorEntryLabel
     -- | A global function exact entry point.
   | ExactEntryLabel
     -- | A global function inexact entry point.
@@ -109,6 +111,7 @@ encodeNameString s = concatMap encodeLetter s
 encodeLabelTag :: LabelTag -> String
 encodeLabelTag NormalLabel       = ""
 encodeLabelTag DirectEntryLabel  = "qD"
+encodeLabelTag VectorEntryLabel  = "qV"
 encodeLabelTag ExactEntryLabel   = "qE"
 encodeLabelTag InexactEntryLabel = "qF"
 

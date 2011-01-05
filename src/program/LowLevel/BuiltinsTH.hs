@@ -166,6 +166,10 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_fun_subscript) |])
   , (PyonName module_list "list_generate",
      Right [| pyonBuiltin (SystemF.the_fun_generateList) |])
+  , (PyonName module_list "list_vGenerate",
+     Right [| pyonBuiltin (SystemF.the_fun_vectorGenerateList) |])
+  , (PyonName module_stream "passConv_iter",
+     Right [| pyonBuiltin (SystemF.the_passConv_iter) |])
   , (PyonName module_stream "Stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
   , (PyonName module_stream "Stream_return",

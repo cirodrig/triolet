@@ -452,10 +452,10 @@ flattenImport :: Import -> Import
 flattenImport (ImportClosureFun ep Nothing) =
   let ep' =
         case ep
-        of EntryPoints ty arity dir exa ine dea inf glo ->
+        of EntryPoints ty arity dir vec exa ine dea inf glo ->
              let ty'    = flattenFunctionType ty
                  arity' = length $ ftParamTypes ty'
-             in EntryPoints ty' arity' dir exa ine dea inf glo
+             in EntryPoints ty' arity' dir vec exa ine dea inf glo
   in ImportClosureFun ep' Nothing
 
 flattenImport (ImportPrimFun v t Nothing) =

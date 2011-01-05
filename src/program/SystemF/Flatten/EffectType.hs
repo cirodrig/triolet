@@ -294,6 +294,8 @@ dataTypeTable =
     --  4. Variances of type parameters
     assocs =
       [ (SF.pyonBuiltin SF.the_PassConv, ref, [], [Invariant])
+      , (SF.pyonBuiltin SF.the_EqDict, ref, [], [Invariant])
+      , (SF.pyonBuiltin SF.the_OrdDict, ref, [], [Invariant])
       , (SF.pyonBuiltin SF.the_AdditiveDict, ref, [], [Invariant])
       , (SF.pyonBuiltin SF.the_MultiplicativeDict, ref, [], [Invariant])
       , (SF.pyonBuiltin SF.the_TraversableDict, ref, [], [Invariant])

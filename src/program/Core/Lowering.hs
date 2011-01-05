@@ -77,7 +77,11 @@ convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
           , (oneMember $ pyonBuiltin the_MultiplicativeDict_float,
              value (LLType $ PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 1))
           , (pyonBuiltin the_passConv_int,
-             value (LLType $ PrimType PointerType) (LL.VarV $ llBuiltin the_bivar_passConv_int))]
+             value (LLType $ PrimType PointerType) (LL.VarV $ llBuiltin the_bivar_passConv_int))
+          , (pyonBuiltin the_True,
+             value (LLType $ PrimType pyonBoolType) (LL.LitV $ LL.BoolL True))
+          , (pyonBuiltin the_False,
+             value (LLType $ PrimType pyonBoolType) (LL.LitV $ LL.BoolL False))]
 
 globalVarAssignment =
   IntMap.fromList [(fromIdent $ varID c, v) | (c, v) <- tbl]

@@ -106,6 +106,7 @@ module SystemF.Builtins
         the_fun_subscript,
         the_fun_generate,
         the_fun_generateList,
+        the_fun_vectorGenerateList,
         the_dummy_addr,
         getPyonTupleType, getPyonTupleType',
         getPyonTupleCon, getPyonTupleCon',

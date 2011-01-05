@@ -126,7 +126,7 @@ ccStm returns stm =
 ccLambdaFunction :: Fun -> CC (GenM Val)
 ccLambdaFunction fun = do
   (direct_fun, captured_vars) <- ccHoistedFun fun
-  emitLambdaClosure (funType fun) direct_fun captured_vars
+  emitLambdaClosure (funType fun) False direct_fun captured_vars
 
 -- | Perform closure conversion on the body of a function.
 ccFunBody :: Fun -> CC (GenM Stm)

@@ -2,6 +2,9 @@
 // The info table for stream objects
 extern data pointer pyon.internal.stream.Stream_info;
 
+extern function pyon.internal.stream.passConv_iter
+  (unit, pointer, pointer) -> ();
+
 // Stream constructors
 extern function pyon.internal.stream.Stream_return
   (unit, unit, pointer, owned) -> owned;

@@ -590,7 +590,10 @@ tupleConType 2 = mkConType $ do
 constructorTable =
   let tbl = readInitGlobalVar the_coreTypes
       tbl1 = IntMap.insert (fromIdent $ conID $ pyonBuiltin the_fun_subscript)
-             subscriptType tbl
+             subscriptType $
+             IntMap.insert (fromIdent $ conID $ pyonBuiltin the_True) (ValRT ::: conCT (pyonBuiltin the_bool)) $
+             IntMap.insert (fromIdent $ conID $ pyonBuiltin the_False) (ValRT ::: conCT (pyonBuiltin the_bool)) $
+             tbl
   in tbl1
 
 {-

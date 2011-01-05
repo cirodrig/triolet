@@ -472,7 +472,7 @@ createDynamicRecord field_types = do
     compute_offsets [] zero one (map snd field_types)
   
   -- Create the record
-  let fields = [mkField o m t | (o, (m, t)) <- zip offsets field_types]
+  let fields = [mkDynamicField o m t | (o, (m, t)) <- zip offsets field_types]
   return $ record fields size alignment
   where
     zero = nativeIntV 0
@@ -520,8 +520,8 @@ suspendedCreateDynamicRecord field_types = do
   size_v <- newAnonymousVar (PrimType nativeWordType)
   align_v <- newAnonymousVar (PrimType nativeWordType)
   offsets <- replicateM (length field_types) $
-             newAnonymousVar (PrimType nativeWordType)
-  let fields = [ mkField (VarV off) m o
+             newAnonymousVar (PrimType nativeIntType)
+  let fields = [ mkDynamicField (VarV off) m o
                | (off, (m, o)) <- zip offsets field_types]
       code = compute_record_layout size_v align_v offsets
   return (code, record fields (VarV size_v) (VarV align_v))
@@ -827,7 +827,7 @@ mkGlobalEntryPoints ftype label global_closure
       exa <- make_entry_point ExactEntryLabel
       ine <- make_entry_point InexactEntryLabel
       let arity = length $ ftParamTypes ftype
-      return $! EntryPoints ftype arity dir exa ine Nothing inf (Just global_closure)
+      return $! EntryPoints ftype arity dir Nothing exa ine Nothing inf (Just global_closure)
   where
     -- If the global closure is externally visible, the other entry points
     -- will also be externally visible
@@ -837,16 +837,22 @@ mkGlobalEntryPoints ftype label global_closure
          then newExternalVar new_label (PrimType PointerType)
          else newVar (Just new_label) (PrimType PointerType)
 
+-- | Create an 'EntryPoints' data structure for a non-externally-visible
+-- global function.
 mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
                  WantClosureDeallocator
+              -> Bool           -- ^ If true, create a vector entry point
               -> FunctionType   -- ^ Function type
               -> Maybe Label    -- ^ Function name
               -> m EntryPoints  -- ^ Creates an EntryPoints structure
-mkEntryPoints want_dealloc ftype label
+mkEntryPoints want_dealloc want_vec ftype label
   | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
   | otherwise = do
       [inf, dir, exa, ine] <-
         replicateM 4 $ newVar label (PrimType PointerType)
+      vec <- if want_vec 
+             then liftM Just $ newVar label (PrimType PointerType)
+             else return Nothing
       dea <- case want_dealloc
              of NeverDeallocate -> return Nothing
                 DefaultDeallocator ->
@@ -855,7 +861,7 @@ mkEntryPoints want_dealloc ftype label
                 CustomDeallocator f ->
                   return $ Just f
       let arity = length $ ftParamTypes ftype
-      return $! EntryPoints ftype arity dir exa ine dea inf Nothing
+      return $! EntryPoints ftype arity dir vec exa ine dea inf Nothing
 {-
 passConvValue :: Int -> Int -> Var -> Var -> Val
 passConvValue size align copy finalize =

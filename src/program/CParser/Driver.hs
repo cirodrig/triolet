@@ -50,6 +50,7 @@ predefinedVarDetails =
            , pyonBuiltin the_list
            , pyonBuiltin the_LazyStream
            , getPyonTupleType' 2
+           , getPyonTupleCon' 2
            , Gluon.builtin Gluon.the_EmpE
            , Gluon.builtin Gluon.the_AtE
            , Gluon.builtin Gluon.the_SconjE
@@ -158,6 +159,7 @@ predefinedVarDetails =
            , pyonBuiltin the_fun_return
            , pyonBuiltin the_fun_generate
            , pyonBuiltin the_fun_generateList
+           , pyonBuiltin the_fun_vectorGenerateList
            ]
 
 parseCoreModule :: IdentSupply Gluon.Var -> IO ConTable

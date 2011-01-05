@@ -15,6 +15,16 @@ import Export
 import LowLevel.CodeTypes
 import LowLevel.Label
 
+-- | Create a dynamic field.
+--
+-- This function is here rather than in "LowLevel.Records" 
+-- due to module dependences.
+mkDynamicField :: Val -> Mutability -> DynamicFieldType -> DynamicField
+mkDynamicField offset mutable field_type
+  | valType offset /= PrimType nativeIntType =
+      internalError "mkDynamicField: Offset has wrong type"
+  | otherwise = mkField' offset mutable field_type
+
 -- | Attached to function definitions to indicate how many places in the 
 --   code contain a reference to the function.
 --
@@ -457,6 +467,7 @@ data EntryPoints =
   { _epType          :: {-# UNPACK #-} !FunctionType
   , _epArity         :: {-# UNPACK #-} !Int
   , _epDirectEntry   :: !Var
+  , _epVectorEntry   :: !(Maybe Var) -- Only for vectorized functions
   , _epExactEntry    :: !Var
   , _epInexactEntry  :: !Var
   , _epDeallocEntry  :: !(Maybe Var)      -- Nothing if never deallocated
@@ -476,6 +487,10 @@ functionArity = _epArity
 -- | Get the direct entry point of a function
 directEntry :: EntryPoints -> Var
 directEntry = _epDirectEntry
+
+-- | Get the vector entry point of a function
+vectorEntry :: EntryPoints -> Maybe Var
+vectorEntry = _epVectorEntry
 
 -- | Get the exact entry point of a function
 exactEntry :: EntryPoints -> Var

@@ -443,6 +443,8 @@ findPassConv ty = do
                return_value (SF.pyonBuiltin SF.the_passConv_int_addr) (SF.pyonBuiltin SF.the_passConv_int)
            | con `SF.isPyonBuiltin` SF.the_list ->
                make_app (SF.pyonBuiltin SF.the_passConv_list) args
+           | con == SF.getPyonTupleCon' 2 ->
+               make_app (SF.getPyonTuplePassConv' 2) args
          _ -> return Nothing
   where
     match_type gl_ty (v, binding@(ReadVB _ _ v_type))

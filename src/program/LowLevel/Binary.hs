@@ -219,6 +219,7 @@ instance Binary EntryPoints where
   put ep = put (entryPointsType ep) >>
            -- Don't need to put arity
            put (directEntry ep) >>
+           put (vectorEntry ep) >>
            put (exactEntry ep) >>
            put (inexactEntry ep) >>
            put (deallocEntry ep) >>
@@ -228,12 +229,13 @@ instance Binary EntryPoints where
   get = do ftype <- get
            let arity = length $ ftParamTypes ftype
            dir <- get
+           vec <- get
            exa <- get
            ine <- get
            dea <- get
            inf <- get
            glo <- get
-           return $ EntryPoints ftype arity dir exa ine dea inf glo
+           return $ EntryPoints ftype arity dir vec exa ine dea inf glo
 
 instance Binary Import where
   put (ImportClosureFun ep f) =

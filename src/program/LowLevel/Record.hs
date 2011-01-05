@@ -42,14 +42,17 @@ data Field t =
         }
 
 -- | Create a record field specification
-mkField :: t -> Mutability -> FieldType t -> Field t
-mkField offset mutable field_type =
+mkField' :: t -> Mutability -> FieldType t -> Field t
+mkField' offset mutable field_type =
   let ftype = case mutable
               of Mutable  -> makeFieldTypeMutable field_type
                  Constant -> field_type
   in case field_type 
      of AlignField _ -> internalError "mkField: Unexpected alignment field"
         _ -> Field offset mutable ftype
+
+mkField :: Int -> Mutability -> StaticFieldType -> StaticField
+mkField = mkField'
 
 -- | A record field type
 data FieldType t =
