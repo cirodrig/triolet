@@ -64,11 +64,12 @@ main = do
 -- | Run a task.  This is the entry point for each stage of the
 -- compiler.
 runTask :: Task a -> IO a
-runTask (PreprocessCPP { cppInput = in_file
+runTask (PreprocessCPP { cppMacros = macros
+                       , cppInput = in_file
                        , cppOutput = cpp_file}) = do
   in_path <- readFilePath in_file
   out_path <- writeFilePath cpp_file
-  invokeCPP in_path out_path
+  invokeCPP macros in_path out_path
 
 runTask (ParsePyonAsm {parseAsmInput = file}) = do
   input_text <- readFileAsString file
@@ -97,20 +98,23 @@ runTask (CompileGenCToObject { compileGenCInput = c_file
   compileCFile c_path o_path
 
 -- | Invoke the C preprocessor
-invokeCPP :: FilePath -> FilePath -> IO ()
-invokeCPP inpath outpath = do
+invokeCPP :: [(String, Maybe String)] -> FilePath -> FilePath -> IO ()
+invokeCPP macros inpath outpath = do
   rc <- rawSystem "gcc" cpp_opts
   unless (rc == ExitSuccess) $ do
     putStrLn "Compilation failed: Error in C preprocessor" 
     exitFailure  
   where
     cpp_opts =
+      macro_opts ++
       [ "-E"                    -- preprocess only
       , "-xc"                   -- preprocess in C mode
       , "-nostdinc"             -- do not search standard include paths
       , inpath                  -- input path
       , "-o", outpath           -- output path
       ]
+    macro_opts = [ "-D" ++ key ++ maybe "" ('=':) value
+                 | (key, value) <- macros]
 
 -- | Compile a pyon file from source code to low-level code.
 compilePyonToPyonAsm :: FilePath -> String -> IO LowLevel.Module

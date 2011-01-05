@@ -264,7 +264,8 @@ writeFilePath file = writeFileHelper (\path () -> return path) file ()
 data Task a where
   -- Run CPP on a file
   PreprocessCPP          
-    { cppInput :: ReadFile
+    { cppMacros :: [(String, Maybe String)]
+    , cppInput :: ReadFile
     , cppOutput :: WriteFile
     } :: Task ()
   -- Parse a PyonAsm file
