@@ -154,6 +154,8 @@ compilePyonToPyonAsm path text = do
   flat_mod <- Core.unpackDataStructures flat_mod
   flat_mod <- Core.rewrite flat_mod
   flat_mod <- return $ Core.partialEvaluate flat_mod
+  flat_mod <- Core.rewrite flat_mod
+  flat_mod <- return $ Core.partialEvaluate flat_mod
 
   putStrLn ""
   putStrLn "Simplified core"
@@ -180,6 +182,7 @@ loadIface iface_file = do
 -- | Compile an input low-level module to C code.  Generate an interface file.
 -- Generate a header file if there are exported routines.
 compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
+  print $ LowLevel.pprModule ll_mod
   -- Low-level transformations
   ll_mod <- LowLevel.makeBuiltinPrimOps ll_mod
   ll_mod <- LowLevel.flattenRecordTypes ll_mod
@@ -191,6 +194,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   print $ LowLevel.pprModule ll_mod
   
   -- First round of optimizations
+  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  ll_mod <- LowLevel.inlineModule ll_mod
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   ll_mod <- LowLevel.inlineModule ll_mod
@@ -219,6 +225,13 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   putStrLn "Reference counting"
   print $ LowLevel.pprModule ll_mod  
   
+  -- Second round of optimizations
+  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  putStrLn ""
+  putStrLn "Second optimization pass"
+  print $ LowLevel.pprModule ll_mod  
+
   -- Generate and compile a C file
   c_mod <- LowLevel.generateCFile ll_mod
       
