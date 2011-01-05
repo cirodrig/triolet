@@ -108,7 +108,7 @@ pevalExp expression =
            , cexpReturnArg = mra}
        | length args == length (cfunParams fun) ->
          -- Apply the function to its arguments
-         eliminateFun fun args mra
+         pevalExp $ eliminateFun fun args mra
      AppCE {cexpOper = op, cexpArgs = args, cexpReturnArg = mra} ->
        let op' = pevalExp op
            args' = map pevalExp args
@@ -119,7 +119,7 @@ pevalExp expression =
      LetCE {cexpBinder = b, cexpRhs = rhs, cexpBody = body} ->
        let rhs' = pevalExp rhs
            body' = pevalExp body
-       in expression {cexpRhs = rhs', cexpBody = body}
+       in expression {cexpRhs = rhs', cexpBody = body'}
      LetrecCE {cexpDefs = defs, cexpBody = body} ->
        let defs' = map pevalDef defs
            body' = pevalExp body
