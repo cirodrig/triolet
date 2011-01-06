@@ -26,6 +26,7 @@ import SetupMake
 import SetupTest
 
 makeProgram = simpleProgram "make"
+gxxProgram = simpleProgram "g++"
 
 -- Remove a file, but recover on error
 lenientRemoveFile verb f = removeFile f `catch` check_err 
@@ -152,7 +153,7 @@ doClean orig_clean pkg_desc _lbi hooks flags = do
 doTest args _ pkg_desc lbi = runRegressionTests
 
 hooks = simpleUserHooks
-  { hookedPrograms = makeProgram : hookedPrograms simpleUserHooks
+  { hookedPrograms = gxxProgram : makeProgram : hookedPrograms simpleUserHooks
   , runTests = doTest
   , cleanHook = doClean (cleanHook simpleUserHooks)
   , buildHook = doBuild

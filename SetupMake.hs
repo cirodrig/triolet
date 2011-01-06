@@ -168,6 +168,15 @@ compileCRtsFile build_path source_path src =
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(CC) $(RTS_C_C_OPTS) -c $< -o $@"
 
+-- | Generate a rule to compile a C file for the RTS
+compileCxxRtsFile :: MakeRuleTemplate
+compileCxxRtsFile build_path source_path src =
+  let o_file = build_path </> src `replaceExtension` ".o"
+      i_file = source_path </> src `replaceExtension` ".cc"
+  in MakeRule [o_file] [i_file, "bootstrap_data"] $
+     "mkdir -p " ++ takeDirectory o_file ++ "\n\
+     \$(CXX) $(RTS_CXX_C_OPTS) -c $< -o $@"
+
 -- | Generate a rule to compile a low-level pyon file for the RTS
 --
 -- > build_path/A.o : src_path/A.pyasm bootstrap_data
@@ -318,6 +327,10 @@ generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = 
     case lookupProgram gccProgram $ withPrograms lbi
     of Just pgm -> return $ programPath pgm
        Nothing -> die "Cannot find 'gcc'"
+  cxx_path <-
+    case lookupProgram (simpleProgram "g++") $ withPrograms lbi
+    of Just pgm -> return $ programPath pgm
+       Nothing -> die "Cannot find 'g++'"
   hc_path <- 
     case lookupProgram ghcProgram $ withPrograms lbi
     of Just pgm -> return $ programPath pgm
@@ -352,11 +365,14 @@ generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = 
          , ("SRCDIR", "src")
            -- executables
          , ("CC", cc_path)
+         , ("CXX", cxx_path)
          , ("HC", hc_path)
          , ("LINKSHARED", intercalate " " (linkshared : linkshared_32b_flag))
            -- flags
          , ("CCFLAGS", intercalate " " (cc_32b_flag ++ cc_warning_flags))
          , ("RTS_CCFLAGS", intercalate " " targetFlags)
+         , ("CXXFLAGS", intercalate " " cc_32b_flag)
+         , ("RTS_CXXFLAGS", intercalate " " targetFlags)
          , ("LFLAGS", intercalate " " l_32b_flag)
          , ("LINKFLAGS", intercalate " " linkshared_32b_flag)
            -- paths outside the project directory
@@ -418,9 +434,11 @@ generateRtsRules verb lbi = do
   info verb "Locating source code files for RTS"
   c_rules <- generateBuildRules compileCRtsFile rts_build_dir rts_source_paths
              rtsCSourceFiles
+  cxx_rules <- generateBuildRules compileCxxRtsFile rts_build_dir
+               rts_source_paths rtsCxxSourceFiles
   asm_rules <- generateBuildRules (compilePyAsmRtsFile pyon_program data_path)
                rts_build_dir rts_source_paths rtsPyAsmFiles
-  let rules = c_rules ++ asm_rules
+  let rules = c_rules ++ cxx_rules ++ asm_rules
   return (rules, concatMap makePrerequisites rules)
   where
     pyon_program = pyonBuildDir lbi </> "pyon"
