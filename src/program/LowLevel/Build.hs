@@ -494,9 +494,7 @@ createDynamicRecord field_types = do
       compute_offsets (start_offset : offsets) end_offset next_align fields
 
     compute_offsets offsets cur_offset cur_align [] = do
-      -- Add padding to end of structure
-      end_offset <- addRecordPadding cur_offset cur_align
-      return (reverse offsets, end_offset, cur_align)
+      return (reverse offsets, cur_offset, cur_align)
 
 suspendedCreateConstDynamicRecord :: forall m m'.
                                      (Monad m, Supplies m (Ident Var),
