@@ -59,6 +59,7 @@ runMake lbi flags args =
 preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
   ppRunAlex exe $ "LLParser" </> "Lexer"
   ppRunAlex exe $ "CParser" </> "Lexer"
+  ppRunAlex exe $ "CParser2" </> "Lexer"
   where
     verb = fromFlag $ buildVerbosity flags
     autogen_dir = autogenModulesDir lbi

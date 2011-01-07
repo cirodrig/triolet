@@ -38,7 +38,8 @@ Executable pyon
     gluon,
     gluon-eval
   Extensions:
-    MultiParamTypeClasses, PatternGuards, GADTs, EmptyDataDecls
+    MultiParamTypeClasses, PatternGuards, GADTs, EmptyDataDecls, TypeOperators,
+      TypeFamilies
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon
@@ -49,6 +50,8 @@ Executable pyon
     InitializeGlobals
     Job
     CommandLine
+    Builtins.BuiltinsTH
+    Builtins.Builtins
     Parser.Driver
     Parser.Parser
     Parser.ParserSyntax
@@ -92,6 +95,16 @@ Executable pyon
     Core.BuiltinTypes
     Core.Rewriting
     Core.Unpacking
+    CParser2.AST
+    CParser2.Driver
+    CParser2.GenCore
+    CParser2.LevelInference
+    CParser2.LexData
+    CParser2.Lexer
+    CParser2.Parser
+    CParser2.Pretty
+    CParser2.PrettyAST
+    CParser2.Resolve
     CParser.AST
     CParser.Driver
     CParser.GenCore
@@ -138,4 +151,5 @@ Executable pyon
     LowLevel.ReferenceCounting
     LowLevel.Rename
     LowLevel.Types
-
+    Type.Var
+    Type.Type

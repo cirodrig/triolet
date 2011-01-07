@@ -12,6 +12,7 @@ module LowLevel.Label
         showLocalID,
         Label(..),
         labelLocalNameAsString,
+        builtinLabel,
         pyonLabel,
         externPyonLabel,
         anonymousPyonLabel,
@@ -81,6 +82,10 @@ labelLocalNameAsString l =
   case labelLocalName l
   of Left s  -> s
      Right _ -> internalError "labelLocalNameAsString: Name is not a string"
+
+-- | A label of a builtin Pyon variable
+builtinLabel :: String -> Label
+builtinLabel name = pyonLabel builtinModuleName name
 
 -- | A label of a regular Pyon variable
 pyonLabel :: ModuleName -> String -> Label

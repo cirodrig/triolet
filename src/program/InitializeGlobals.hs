@@ -12,12 +12,17 @@ import Parser.Driver
 import Parser.ParserSyntax(createParserGlobals)
 import SystemF.Builtins
 import CParser.Driver
+import qualified CParser2.Driver
 import LowLevel.InitializeBuiltins
+import Builtins.Builtins
 import Globals
 import GlobalVar
 
 loadBuiltins :: IO ()
-loadBuiltins =
+loadBuiltins = do
+  -- Initialize the Core builtins
+  withTheNewVarIdentSupply Builtins.Builtins.initializeBuiltins
+
   withTheVarIdentSupply $ \varIDs ->
     withTheConIdentSupply $ \conIDs -> do
 
@@ -44,6 +49,8 @@ loadBuiltins =
         
       -- Initialize the Core types
       initializeGlobalVar the_coreTypes (parseCoreModule varIDs)
+      withTheNewVarIdentSupply $ \supply ->
+        initializeGlobalVar the_newCoreTypes (CParser2.Driver.parseCoreModule supply)
 
       -- Initialize the low-level builtins
       withTheLLVarIdentSupply initializeLowLevelBuiltins
