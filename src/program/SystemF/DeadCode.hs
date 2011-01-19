@@ -185,11 +185,8 @@ edcExp expression =
        mention v >> return expression
      LitE {} ->
        return expression
-     TyAppE {expOper = op, expTyArg = arg} -> do
-       op' <- edcExp op
-       edcScanType arg
-       return $ expression {expOper = op'}
-     CallE {expOper = op, expArgs = args} -> do
+     AppE {expOper = op, expArgs = args} -> do
+       -- Type arguments don't change
        op' <- edcExp op
        args' <- mapM edcExp args
        return $ expression {expOper = op', expArgs = args'}

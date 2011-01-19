@@ -218,13 +218,13 @@ mkConE pos c = TIExp $ SystemF.VarE (synInfo pos) c
 mkLitE :: SourcePos -> SystemF.Lit -> TIExp
 mkLitE pos l = TIExp $ SystemF.LitE (synInfo pos) l
 
-mkTyAppE :: SourcePos -> TIExp -> TIType -> TIExp
-mkTyAppE pos oper arg = TIExp $ SystemF.TyAppE (synInfo pos) oper arg
+mkAppE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
+mkAppE pos oper ts args = TIExp $ SystemF.AppE (synInfo pos) oper ts args
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
   let con = mkConE pos (SystemF.pyonBuiltin SystemF.the_fun_undefined)
-  in mkPolyCallE pos con [ty] []
+  in mkAppE pos con [ty] []
 
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
@@ -244,18 +244,10 @@ mkIfE pos cond tr fa =
                     }
   in TIExp $ SystemF.CaseE (synInfo pos) cond [true_alt, false_alt]
 
-mkCallE :: SourcePos -> TIExp -> [TIExp] -> TIExp
-mkCallE pos oper args = TIExp $ SystemF.CallE (synInfo pos) oper args
-
 -- | Create a call of a polymorphic function with no constraint arguments.
--- This does not follow the calling convention for constraint arguments, which
--- should be \"called\" separately.
 mkPolyCallE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
-mkPolyCallE pos oper ty_args args =
-  let mono_oper = foldl (mkTyAppE pos) oper ty_args
-  in if null args
-     then mono_oper
-     else TIExp $ SystemF.CallE (synInfo pos) mono_oper args
+mkPolyCallE pos oper [] [] = oper
+mkPolyCallE pos oper ty_args args = mkAppE pos oper ty_args args
 
 mkLetE :: SourcePos -> SystemF.Pat TI -> TIExp -> TIExp -> TIExp
 mkLetE pos lhs rhs body = TIExp $ SystemF.LetE (synInfo pos) lhs rhs body 
@@ -268,10 +260,8 @@ mkLetrecE pos defs body = TIExp $ SystemF.LetrecE (synInfo pos) defs body
 
 mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> [TIExp] -> TIExp
 mkDictE pos cls inst_type scs methods =
-  let -- First, apply the dictionary constructor to the instance type
-      dict1 = mkTyAppE pos (mkConE pos $ clsDictCon cls) inst_type
-      -- Then apply to all arguments
-  in mkCallE pos dict1 (scs ++ methods)
+  -- Apply the dictionary constructor to the instance type and all arguments
+  mkAppE pos (mkConE pos $ clsDictCon cls) [inst_type] (scs ++ methods)
 
 -- | Create an expression that selects and instantiates a class method.
 -- Return the expression and the placeholders produced by instantiation.
@@ -440,15 +430,9 @@ instanceExpression :: SourcePos
                    -> IO (Placeholders, TIExp) 
                       -- ^ Dictionary placeholders and instance expression
 instanceExpression pos ty_params constraint exp = do
-  -- Apply the instantiated expression to each type parameter
-  -- The first type parameter in the list is applied first
-  let applyTypeParam exp tp = mkTyAppE pos exp (convertHMType tp)
-  let value_exp = foldl applyTypeParam exp ty_params
-  
-  if null constraint && null ty_params then return ([], value_exp) else do
-    -- Create a call expression with placeholder arguments
-    placeholders <- mapM (mkDictPlaceholder pos) constraint
-    return (placeholders, mkCallE pos value_exp placeholders)
+  let types = map convertHMType ty_params
+  placeholders <- mapM (mkDictPlaceholder pos) constraint
+  return (placeholders, mkPolyCallE pos exp types placeholders)
 
 -- | Create an instance expression where all constraints are satisfied
 -- by a proof environment
@@ -461,15 +445,9 @@ instanceExpressionWithProofs :: ProofEnvironment -- ^ A proof environment
                              -> TIExp      -- ^ Instantiated first-order expression
                              -> IO TIExp   -- ^ Instance expression
 instanceExpressionWithProofs env pos ty_params constraint exp = do
-  -- Apply the instantiated expression to each type parameter
-  -- The first type parameter in the list is applied first
-  let applyTypeParam exp tp = mkTyAppE pos exp (convertHMType tp)
-  let value_exp = foldl applyTypeParam exp ty_params
-  
-  if null constraint && null ty_params then return value_exp else do
-    -- Create a call expression with class dictionary arguments
-    dictionaries <- mapM getProof constraint
-    return $ mkCallE pos value_exp dictionaries
+  let types = map convertHMType ty_params
+  dictionaries <- mapM getProof constraint
+  return $ mkPolyCallE pos exp types dictionaries
   where
     getProof prd = do
       mprf <- lookupProof prd env

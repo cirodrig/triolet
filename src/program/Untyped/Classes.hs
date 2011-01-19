@@ -375,12 +375,12 @@ toProof pos env derivation =
      FunPassConvDerivation { conclusion = prd@(IsInst ty _)
                            } -> do
        let con = SystemF.pyonBuiltin SystemF.the_repr_owned
-           prf = mkTyAppE pos (mkVarE pos con) (convertHMType ty)
+           prf = mkPolyCallE pos (mkVarE pos con) [convertHMType ty] []
        return (True, [], prf)
        
      MagicDerivation {} -> do
        -- Create a magic proof value
-       return (True, [], mkTyAppE pos (mkConE noSourcePos $ SystemF.pyonBuiltin SystemF.the_fun_undefined) (convertPredicate $ conclusion derivation))
+       return (True, [], mkPolyCallE pos (mkConE noSourcePos $ SystemF.pyonBuiltin SystemF.the_fun_undefined) [convertPredicate $ conclusion derivation] [])
   where
     returnIdProof prd (Just e) = return (True, [], e)
     returnIdProof prd Nothing  = do ph <- mkDictPlaceholder pos prd

@@ -505,7 +505,7 @@ inferExpressionType expression =
        -- Unify expected function type with actual function type
        unifyInf pos function_type op_ty
        
-       return (mkCallE pos op_exp arg_exps, result_type)
+       return (mkPolyCallE pos op_exp [] arg_exps, result_type)
      IfE {expCondition = cond, expIfTrue = tr, expIfFalse = fa} -> do
        (cond_exp, cond_ty) <- inferExpressionType cond
        
@@ -633,7 +633,7 @@ inferExportType (Export { exportAnnotation = ann
 
   -- Create a new function that calls the exported variable
   let call_args = map (mkVarE pos) param_vars
-      call_exp = mkCallE pos inst_exp call_args
+      call_exp = mkPolyCallE pos inst_exp [] call_args
       params = zipWith mkVarP param_vars (map convertHMType dom)
   wrapper_fun <- liftIO $ mkFunction pos [] params (convertHMType rng) call_exp
   

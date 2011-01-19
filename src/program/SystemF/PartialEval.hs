@@ -59,10 +59,14 @@ uncurryCall :: RExp -> RExp
 uncurryCall op = fromMaybe op $ uncurryCall' op
 
 -- | Uncurry a function call.  Return 'Nothing' if nothing changes.
-uncurryCall' (CallE {expInfo = inf, expOper = op, expArgs = args}) =
+uncurryCall' (AppE {expInfo = inf,
+                    expOper = op,
+                    expTyArgs = [],
+                    expArgs = args}) =
   case uncurryCall op
-  of CallE {expOper = op', expArgs = args'} ->
-       Just $ CallE {expInfo = inf, expOper = op', expArgs = args' ++ args}
+  of AppE {expOper = op', expTyArgs = ty_args, expArgs = args'} ->
+       Just $ AppE {expInfo = inf, expOper = op', expTyArgs = ty_args,
+                    expArgs = args' ++ args}
      _ -> Nothing
 
 uncurryCall' _ = Nothing
@@ -106,8 +110,7 @@ isSimpleExp expression =
   case expression
   of VarE {} -> True
      LitE {} -> True
-     TyAppE {expOper = e} -> isSimpleExp e
-     CallE {expOper = op} -> is_dictionary_operator op
+     AppE {expOper = op} -> is_dictionary_operator op
      FunE {} -> False
      LetE {} -> False
      LetrecE {} -> False
@@ -116,7 +119,6 @@ isSimpleExp expression =
     -- Dictionary constructor expressions are inlined to enable later
     -- optimizations
     is_dictionary_operator (VarE {expVar = c}) = isDictionaryCon c
-    is_dictionary_operator (TyAppE {expOper = e}) = is_dictionary_operator e
     is_dictionary_operator (LetE {expBody = b}) = is_dictionary_operator b
     is_dictionary_operator _ = False
 
@@ -199,10 +201,7 @@ pevalExp expression =
            return $ LitE inf (FloatL 1 (VarT $ pyonBuiltin the_float))
        | otherwise -> lookupVarDefault expression v
      LitE {} -> return expression
-     TyAppE {expOper = op} -> do
-       op' <- pevalExp op
-       return $ expression {expOper = op'}
-     CallE {} -> internalError "pevalExp" -- Should have been already matched
+     AppE {} -> internalError "pevalExp" -- Should have been already matched
      FunE {expFun = f} -> do
        f' <- pevalFun f
        return $ expression {expFun = f'}
@@ -267,11 +266,7 @@ pevalApp inf op tys args =
         find_known_oper (LetrecE {expBody = body}) = find_known_oper body
         find_known_oper _ = Nothing
                       
-    rebuild_call op (t:ts) args =
-      let op' = TyAppE inf op t
-      in rebuild_call op' ts args
-
-    rebuild_call op [] args = CallE inf op args
+    rebuild_call op ts args = AppE inf op ts args
     
     float_type = VarT $ pyonBuiltin the_float
 

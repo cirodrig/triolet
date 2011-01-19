@@ -103,15 +103,11 @@ pprExpFlagsPrec flags prec expression =
   of VarE {expVar = v} ->
          pprVarFlags flags v
      LitE {expLit = l} -> pprLit l
-     TyAppE {expOper = e, expTyArg = t} ->
+     AppE {expOper = e, expTyArgs = ts, expArgs = es} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
-             tDoc = pprSFType t
-             doc = eDoc <+> text "@" <> tDoc
-         in parenthesize precTyApp doc prec
-     CallE {expOper = e, expArgs = es} ->
-         let args = tuple $ map (pprExpFlagsPrec flags precOuter) es
-             oper = pprExpFlagsPrec flags precApp e
-         in sep [oper, nest 4 args]
+             tDoc = [text "@" <> pprSFType t | t <- ts]
+             aDoc = map (pprExpFlagsPrec flags precOuter) es
+         in hang eDoc 4 (tuple (tDoc ++ aDoc))
      FunE {expFun = f} ->
          pprFunFlags flags f
      LetE {expBinder = pat, expValue = rhs, expBody = body} ->

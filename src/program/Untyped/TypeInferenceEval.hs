@@ -36,12 +36,10 @@ evExp expression =
        case e
        of VarE info v   -> return $ VarE info v
           LitE info l   -> return $ LitE info l
-          TyAppE info op t -> do op' <- evExp op
-                                 t' <- evType t
-                                 return $ TyAppE info op' t'
-          CallE info op args -> do op' <- evExp op
-                                   args' <- mapM evExp args
-                                   return $ CallE info op' args'
+          AppE info op ts args -> do op' <- evExp op
+                                     ts' <- mapM evType ts
+                                     args' <- mapM evExp args
+                                     return $ AppE info op' ts' args'
           FunE info f -> do f' <- evFun f
                             return $ FunE info f'
           LetE info p r b -> do p' <- evPat p

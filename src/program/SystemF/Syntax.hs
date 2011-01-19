@@ -26,7 +26,7 @@ module SystemF.Syntax
      Export(..),
      Module(..),
      isValueExp,
-     unpackTypeApplication, unpackPolymorphicCall,
+     unpackPolymorphicCall,
      {-
      mapSFExp, mapAlt, mapPat,
      traverseSFExp, traverseAlt, traversePat,-}
@@ -119,7 +119,14 @@ data instance SFExpOf Rec s =
     { expInfo :: ExpInfo
     , expLit :: !Lit
     }
-    -- | Type application
+    -- | Application
+  | AppE
+    { expInfo :: ExpInfo
+    , expOper :: SFRecExp s
+    , expTyArgs :: [SFType s]
+    , expArgs :: [SFRecExp s]
+    }
+{-    -- | Type application
   | TyAppE
     { expInfo :: ExpInfo
     , expOper :: SFRecExp s
@@ -130,7 +137,7 @@ data instance SFExpOf Rec s =
     { expInfo :: ExpInfo
     , expOper :: SFRecExp s
     , expArgs :: [SFRecExp s]
-    }
+    }-}
     -- | Lambda expression
   | FunE
     { expInfo :: ExpInfo
@@ -289,7 +296,7 @@ traversePat t pattern =
 -- This function examines only expression constructors, and avoids inspecting
 -- let or letrec expressions.
 --
--- Constructors 'CallE', 'LetE', and 'LetrecE' are assumed to have side
+-- Constructors 'AppE', 'LetE', and 'LetrecE' are assumed to have side
 -- effects.  Lambda expressions have no side effects, since they return but
 -- do not execute their function.
 
@@ -298,14 +305,14 @@ isValueExp expression =
   case expression
   of VarE {} -> True
      LitE {} -> True
-     TyAppE {expOper = e} -> isValueExp e
-     CallE {} -> False
+     AppE {} -> False
      FunE {} -> True
      LetE {} -> False
      LetrecE {} -> False
      CaseE {expScrutinee = scr, expAlternatives = alts} ->
        isValueExp scr && all (isValueExp . altBody) alts
        
+{-
 -- | Extract all type parameters from the expression.  Return the base 
 -- expression, which is not a type application, and all the type parameters 
 -- it was applied to.
@@ -314,12 +321,11 @@ unpackTypeApplication e = unpack [] e
   where
     unpack types (TyAppE {expOper = op, expTyArg = SFType ty}) =
       unpack (ty : types) op
-    unpack types e = (e, types)
+    unpack types e = (e, types)-}
 
 unpackPolymorphicCall :: RExp -> Maybe (RExp, [Type], [RExp])
-unpackPolymorphicCall (CallE {expOper = op, expArgs = args}) =
-  case unpackTypeApplication op
-  of (poly_op, ty_args) -> Just (poly_op, ty_args, args)
+unpackPolymorphicCall (AppE {expOper = op, expTyArgs = ts, expArgs = xs}) =
+  Just (op, map fromSFType ts, xs)
 
 unpackPolymorphicCall _ = Nothing
 

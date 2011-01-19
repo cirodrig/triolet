@@ -511,9 +511,7 @@ createFunctionCoercion param_coercions e_rt g_rt ret_coercion = do
                             return (v, e_param, co)
 
 mkCall :: ExpInfo -> RepExp -> [SFType Rep] -> [RepExp] -> RepExp
-mkCall inf op ty_args args = RepExp $ CallE inf inst_op args
-  where
-    inst_op = foldl (\x y -> RepExp $ TyAppE inf x y) op ty_args
+mkCall inf op ty_args args = RepExp $ AppE inf op ty_args args
 
 -------------------------------------------------------------------------------
 -- Representation infernece
@@ -600,8 +598,7 @@ inferReprExp texpression@(TypedSFExp (TypeAnn ty expression)) = do
   case expression of
     VarE inf v -> inferVarE inf v
     LitE inf l -> inferLitE inf l
-    TyAppE {} -> inferCall texpression
-    CallE {} -> inferCall texpression
+    AppE inf op ty_args args -> inferCall inf op ty_args args
     FunE inf f -> inferFunE inf f
     LetE inf b rhs body -> inferLetE inf b rhs body
     LetrecE inf defs body -> inferLetrecE inf defs body
@@ -622,24 +619,10 @@ inferLitE inf l = do
   let exp = RepExp (LitE inf l)
   return (mempty, exp, asReadReturnRepr return_repr ::: literalType l)
 
-inferCall expression =
-  case unpack_call expression
-  of (inf, op, t_args, v_args) -> do
-       (op_wr, op', op_type) <-
-         coerceInferredExp BoxRT =<< inferReprExp op
-       (expr, return_type) <-
-         inferApplication inf op' op_type t_args v_args
-       return (op_wr, expr, return_type)
-  where
-    unpack_call call_expression@(TypedSFExp (TypeAnn op_ty expression)) =
-      case expression
-      of CallE inf op args -> unpack_types inf args op []
-         TyAppE {expInfo = inf} -> unpack_types inf [] call_expression []
-    
-    unpack_types inf args op@(TypedSFExp (TypeAnn op_ty op_expression)) ty_args =
-      case op_expression
-      of TyAppE _ op' arg -> unpack_types inf args op' (arg:ty_args)
-         _ -> (inf, op, ty_args, args)
+inferCall inf op t_args v_args = do
+  (op_wr, op', op_type) <- coerceInferredExp BoxRT =<< inferReprExp op
+  (expr, return_type) <- inferApplication inf op' op_type t_args v_args
+  return (op_wr, expr, return_type)
 
 inferApplication inf op op_type t_args v_args = do 
   -- Apply operator to argument types

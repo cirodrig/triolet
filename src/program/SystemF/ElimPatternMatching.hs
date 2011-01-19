@@ -85,11 +85,8 @@ elimPMExp expression =
   case expression
   of VarE {} -> return expression
      LitE {} -> return expression
-     TyAppE inf op arg -> do
-       op' <- elimPMExp op
-       return $ TyAppE inf op' arg
-     CallE inf op args ->
-       CallE inf <$> elimPMExp op <*> traverse elimPMExp args
+     AppE inf op ty_args args ->
+       AppE inf <$> elimPMExp op <*> pure ty_args <*> traverse elimPMExp args
      FunE inf f -> FunE inf <$> elimPMFun f
      LetE { expInfo = inf
           , expBinder = pat

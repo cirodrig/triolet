@@ -244,10 +244,8 @@ typeInferExp expression =
          typeInferVarE inf v
        LitE {expInfo = inf, expLit = l} ->
          checkLiteralType inf l
-       TyAppE {expInfo = inf, expOper = op, expTyArg = arg} ->
-         typeInferTyAppE inf op arg
-       CallE {expInfo = inf, expOper = op, expArgs = args} ->
-         typeInferCallE inf op args
+       AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
+         typeInferAppE inf op ts args
        FunE {expInfo = inf, expFun = f} -> do
          ti_fun <- typeInferFun f
          return $ TypedSFExp $ TypeAnn (getTypeAnn ti_fun) (FunE inf ti_fun)
@@ -291,33 +289,33 @@ isValidLiteralType ty lit =
        -- Literals cannot have other types 
        False
 
-typeInferTyAppE :: ExpInfo -> RExp -> RType -> TCM TRExp
-typeInferTyAppE inf op arg = do
+typeInferAppE inf op ty_args args = do
+  let pos = getSourcePos inf
   ti_op <- typeInferExp op
-  ti_arg <- typeInferType arg
+  let op_type = getTypeAnn ti_op
 
-  -- Apply operator to argument
-  app_type <- applyType (getTypeAnn ti_op) (getTypeAnn ti_arg) (Just $ fromSFType arg)
-  case app_type of
-    Just result_type ->
-      return $ TypedSFExp $ TypeAnn result_type (TyAppE inf ti_op ti_arg)
-    Nothing ->
-      typeError "Error in type application"
+  -- Apply to type arguments
+  ti_ty_args <- mapM typeInferType ty_args
+  inst_type <- computeInstantiatedType pos op_type ti_ty_args
 
-typeInferCallE :: ExpInfo -> RExp -> [RExp] -> TCM TRExp
-typeInferCallE inf op args = do
-  -- Infer types of parameters
-  ti_op <- typeInferExp op
+  -- Apply to other arguments
   ti_args <- mapM typeInferExp args
-
-  -- Compute result type
-  result_type <- computeAppliedType 
-                 (getSourcePos inf)
-                 (getTypeAnn ti_op) 
-                 (map getTypeAnn ti_args)
-
-  let new_exp = CallE inf ti_op ti_args
+  result_type <- computeAppliedType pos inst_type (map getTypeAnn ti_args)
+  
+  let new_exp = AppE inf ti_op ti_ty_args ti_args
   return $ TypedSFExp $ TypeAnn result_type new_exp
+
+computeInstantiatedType :: SourcePos -> Type -> [TRType] -> TCM Type
+computeInstantiatedType inf op_type args = go op_type args
+  where
+    go op_type (TypedSFType (TypeAnn arg_kind arg) : args) = do
+      -- Apply operator to argument
+      app_type <- applyType op_type arg_kind (Just $ fromSFType arg)
+      case app_type of
+        Just result_type -> go result_type args
+        Nothing -> typeError "Error in type application"
+
+    go op_type [] = return op_type
 
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
@@ -326,7 +324,7 @@ computeAppliedType :: SourcePos
                    -> [Type] 
                    -> TCM Type
 computeAppliedType pos op_type arg_types =
-  traceShow (text "CAT" <+> (pprType op_type $$ vcat (map pprType arg_types))) $ apply op_type arg_types
+  apply op_type arg_types
   where
     apply op_type (arg_t:arg_ts) = do
       result <- applyType op_type arg_t Nothing
