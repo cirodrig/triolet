@@ -190,7 +190,7 @@ edcExp expression =
        op' <- edcExp op
        args' <- mapM edcExp args
        return $ expression {expOper = op', expArgs = args'}
-     FunE {expFun = f} -> do
+     LamE {expFun = f} -> do
        f' <- edcFun f
        return $ expression {expFun = f'}
      LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->

@@ -108,7 +108,7 @@ pprExpFlagsPrec flags prec expression =
              tDoc = [text "@" <> pprSFType t | t <- ts]
              aDoc = map (pprExpFlagsPrec flags precOuter) es
          in hang eDoc 4 (tuple (tDoc ++ aDoc))
-     FunE {expFun = f} ->
+     LamE {expFun = f} ->
          pprFunFlags flags f
      LetE {expBinder = pat, expValue = rhs, expBody = body} ->
          let e1 = hang (pprPatFlags flags pat <+> equals) 2

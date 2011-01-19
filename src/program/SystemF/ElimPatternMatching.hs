@@ -87,7 +87,7 @@ elimPMExp expression =
      LitE {} -> return expression
      AppE inf op ty_args args ->
        AppE inf <$> elimPMExp op <*> pure ty_args <*> traverse elimPMExp args
-     FunE inf f -> FunE inf <$> elimPMFun f
+     LamE inf f -> LamE inf <$> elimPMFun f
      LetE { expInfo = inf
           , expBinder = pat
           , expValue = rhs

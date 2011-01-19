@@ -253,7 +253,7 @@ mkLetE :: SourcePos -> SystemF.Pat TI -> TIExp -> TIExp -> TIExp
 mkLetE pos lhs rhs body = TIExp $ SystemF.LetE (synInfo pos) lhs rhs body 
 
 mkFunE :: SourcePos -> SystemF.Fun TI -> TIExp
-mkFunE pos fun = TIExp $ SystemF.FunE (synInfo pos) fun
+mkFunE pos fun = TIExp $ SystemF.LamE (synInfo pos) fun
 
 mkLetrecE :: SourcePos -> [SystemF.Def TI] -> TIExp -> TIExp
 mkLetrecE pos defs body = TIExp $ SystemF.LetrecE (synInfo pos) defs body

@@ -383,9 +383,9 @@ specializeMaybe expression =
      LitE {} -> return $ Just expression -- Literals are never specialized
      AppE {expInfo = inf, expOper = op, expTyArgs = ty_args, expArgs = args} -> 
        specializeCall inf op ty_args args
-     FunE {expInfo = inf, expFun = f} -> do
+     LamE {expInfo = inf, expFun = f} -> do
        f' <- specializeFun f
-       return $ Just $ FunE {expInfo = inf, expFun = f'}
+       return $ Just $ LamE {expInfo = inf, expFun = f'}
      LetE {expInfo = inf, expBinder = b, expValue = rhs, expBody = body} -> do
        rhs' <- specialize rhs
 
@@ -451,7 +451,7 @@ substituteTraversableMethods traverse_var build_var expr = go expr
            | otherwise -> expr
          LitE {} -> expr
          AppE inf op ty_args args -> AppE inf (go op) ty_args (map go args)
-         FunE inf f -> FunE inf $ dofun f
+         LamE inf f -> LamE inf $ dofun f
          LetE inf b rhs body -> LetE inf b (go rhs) (go body)
          LetrecE inf defs b ->
            LetrecE inf [Def v (dofun f) | Def v f <- defs] (go b)

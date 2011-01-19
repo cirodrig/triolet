@@ -111,7 +111,7 @@ isSimpleExp expression =
   of VarE {} -> True
      LitE {} -> True
      AppE {expOper = op} -> is_dictionary_operator op
-     FunE {} -> False
+     LamE {} -> False
      LetE {} -> False
      LetrecE {} -> False
      CaseE {} -> False
@@ -202,7 +202,7 @@ pevalExp expression =
        | otherwise -> lookupVarDefault expression v
      LitE {} -> return expression
      AppE {} -> internalError "pevalExp" -- Should have been already matched
-     FunE {expFun = f} -> do
+     LamE {expFun = f} -> do
        f' <- pevalFun f
        return $ expression {expFun = f'}
 

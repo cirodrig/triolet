@@ -139,7 +139,7 @@ data instance SFExpOf Rec s =
     , expArgs :: [SFRecExp s]
     }-}
     -- | Lambda expression
-  | FunE
+  | LamE
     { expInfo :: ExpInfo
     , expFun :: Fun s
     }
@@ -226,7 +226,7 @@ mapSFExp e a f t expression =
      LitE info l ty -> LitE info l (t ty)
      TyAppE info op arg -> TyAppE info (e op) (t arg)
      CallE info op args -> CallE info (e op) (map e args)
-     FunE info fun -> FunE info (f fun)
+     LamE info fun -> LamE info (f fun)
      LetE info p e1 e2 -> LetE info (mapPat t p) (e e1) (e e2)
      LetrecE info defs body -> LetrecE info (map mapDef defs) (e body)
      CaseE info scr alts -> CaseE info (e scr) (map a alts)
@@ -253,7 +253,7 @@ traverseSFExp e a f t expression =
      LitE info l ty -> LitE info l `liftM` t ty
      TyAppE info op arg -> TyAppE info `liftM` e op `ap` t arg
      CallE info op args -> CallE info `liftM` e op `ap` mapM e args
-     FunE info fun -> FunE info `liftM` f fun
+     LamE info fun -> LamE info `liftM` f fun
      LetE info p e1 e2 ->
        LetE info `liftM` traversePat t p `ap` e e1 `ap` e e2
      LetrecE info defs body ->
@@ -306,7 +306,7 @@ isValueExp expression =
   of VarE {} -> True
      LitE {} -> True
      AppE {} -> False
-     FunE {} -> True
+     LamE {} -> True
      LetE {} -> False
      LetrecE {} -> False
      CaseE {expScrutinee = scr, expAlternatives = alts} ->

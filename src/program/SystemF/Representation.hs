@@ -482,7 +482,7 @@ createFunctionCoercion param_coercions e_rt g_rt ret_coercion = do
   params <- mapM create_coercion_parameter param_coercions
   return $ WrapperCoercion $ \real_fun -> coerced_fun real_fun params
   where
-    coerced_fun real_fun params = RepExp $ FunE obj_info coercion_fun
+    coerced_fun real_fun params = RepExp $ LamE obj_info coercion_fun
       where
         obj_info = internalSynInfo ObjectLevel
         ty_params = takeWhile (\(v, _, _) -> getLevel v == TypeLevel) params
@@ -599,7 +599,7 @@ inferReprExp texpression@(TypedSFExp (TypeAnn ty expression)) = do
     VarE inf v -> inferVarE inf v
     LitE inf l -> inferLitE inf l
     AppE inf op ty_args args -> inferCall inf op ty_args args
-    FunE inf f -> inferFunE inf f
+    LamE inf f -> inferFunE inf f
     LetE inf b rhs body -> inferLetE inf b rhs body
     LetrecE inf defs body -> inferLetrecE inf defs body
     CaseE inf scr alts -> inferCaseE inf scr alts
@@ -693,7 +693,7 @@ inferApp _ _ _ = internalError "inferApp: Unexpected operator type"
 inferFunE inf f = do
   f' <- inferFun f
   fun_type <- getFunType f
-  let new_expr = RepExp $ FunE inf f'
+  let new_expr = RepExp $ LamE inf f'
   return (mempty, new_expr, BoxRT ::: fun_type)
 
 inferFun (TypedSFFun (TypeAnn _ f)) =

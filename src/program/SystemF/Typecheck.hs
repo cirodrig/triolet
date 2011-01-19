@@ -246,9 +246,9 @@ typeInferExp expression =
          checkLiteralType inf l
        AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
          typeInferAppE inf op ts args
-       FunE {expInfo = inf, expFun = f} -> do
+       LamE {expInfo = inf, expFun = f} -> do
          ti_fun <- typeInferFun f
-         return $ TypedSFExp $ TypeAnn (getTypeAnn ti_fun) (FunE inf ti_fun)
+         return $ TypedSFExp $ TypeAnn (getTypeAnn ti_fun) (LamE inf ti_fun)
        LetE {expInfo = inf, expBinder = pat, expValue = e, expBody = body} ->
          typeInferLetE inf pat e body
        LetrecE {expInfo = inf, expDefs = defs, expBody = body} ->

@@ -40,8 +40,8 @@ evExp expression =
                                      ts' <- mapM evType ts
                                      args' <- mapM evExp args
                                      return $ AppE info op' ts' args'
-          FunE info f -> do f' <- evFun f
-                            return $ FunE info f'
+          LamE info f -> do f' <- evFun f
+                            return $ LamE info f'
           LetE info p r b -> do p' <- evPat p
                                 r' <- evExp r
                                 b' <- evExp b
