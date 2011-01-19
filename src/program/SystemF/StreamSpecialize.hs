@@ -23,14 +23,15 @@ import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Common.SourcePos
 import Gluon.Common.Supply
-import qualified Gluon.Core as Gluon
 import Gluon.Core.Level
-import Gluon.Core(Var, varName, varID, Con, conID)
+import Gluon.Core(internalSynInfo)
 
 import Globals
-import SystemF.Builtins
+import Builtins.Builtins
 import SystemF.Print
 import SystemF.Syntax
+import Type.Var
+import Type.Type
 
 withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c
 withMany f xs k = go xs k
@@ -40,22 +41,22 @@ withMany f xs k = go xs k
 
 -- | A specialization table is stored as a trie.  At each level, inspect one
 -- type parameter and take a branch.
-data SpclTable a =
-    Don'tCare !(SpclTable a)
+data SpclTable =
+    Don'tCare !SpclTable
     -- ^ Specialize (is stream) (is not stream)
-  | Specialize !(SpclTable a) !(SpclTable a)
+  | Specialize !SpclTable !SpclTable
     -- | The specialized variable
-  | End a
+  | End !Var
     -- | This variable was a stream dictionary, and was eliminated by 
     -- specialization
   | EliminatedDict
 
-showSpclTable :: SpclTable a -> Doc
+showSpclTable :: SpclTable -> Doc
 showSpclTable (Don'tCare x) =
   hang (text "Don'tCare") 2 $ showSpclTable x
 showSpclTable (Specialize l r) =
   hang (text "Specialize") 2 $ showSpclTable l $$ showSpclTable r
-showSpclTable (End a) = text "End"
+showSpclTable (End v) = text "End"
 showSpclTable EliminatedDict = text "Eliminated"
 
 -- | Properties of a type that are important to specialization.
@@ -68,23 +69,33 @@ data SpclType =
 -- | If the type is a traversable dictionary type, return the type parameter,
 -- which must be a type variable.  Otherwise, return Nothing.
 traversableDictTypeParameter :: RType -> Maybe Var
-traversableDictTypeParameter ty =
-      case ty
-      of Gluon.AppE { Gluon.expOper = Gluon.ConE {Gluon.expCon = c}
-                    , Gluon.expArgs = [arg]}
+traversableDictTypeParameter (SFType ty) =
+      case fromVarApp ty
+      of Just (c, args)
            | c `isPyonBuiltin` the_TraversableDict ->
                -- Argument must be a type variable
-               case arg
-               of Gluon.VarE {Gluon.expVar = v} -> Just v
+               case args
+               of [VarT v] -> Just v
                   _ -> internalError "traversableDictTypeParameter: Unexpected traversable dictionary type"
          _ -> Nothing
   
 traversableDictTypeParameter _ = internalError "traversableDictTypeParameter"
 
+-- | Information about whether a type is a stream.
+-- The stream type is a stream; all other types are not.
+globalTypeTable :: IntMap.IntMap SpclType
+globalTypeTable =
+  IntMap.fromList [(fromIdent $ varID v, is_stream v)
+                  | v <- pureV : allBuiltinVars, getLevel v /= ObjectLevel]
+  where
+    is_stream v
+      | v `isPyonBuiltin` the_Stream = IsStreamType
+      | otherwise = NotStreamType
+
 -- | Information about how to specialize built-in functions and constructors.
-globalConTable :: IntMap.IntMap (SpclTable Con)
+globalConTable :: IntMap.IntMap SpclTable
 globalConTable =
-  IntMap.fromList [(fromIdent $ conID $ pyonBuiltin c, tbl)
+  IntMap.fromList [(fromIdent $ varID $ pyonBuiltin c, tbl)
                   | (c, tbl) <- assocs]
   where
     -- Create an entry that is not specialized.  The 'arity' is the number of 
@@ -95,62 +106,62 @@ globalConTable =
         don't_cares n x = iterate Don'tCare (End x) !! n
 
     assocs =
-      [ unchanged 0 the_passConv_int
-      , unchanged 0 the_passConv_float
-      , unchanged 0 the_passConv_bool
-      , unchanged 0 the_passConv_NoneType
-      , unchanged 1 the_passConv_iter
-      , unchanged 1 the_passConv_list
-      , unchanged 0 the_passConv_Any
-      , unchanged 1 the_passConv_owned
+      [ unchanged 0 the_repr_int
+      , unchanged 0 the_repr_float
+      , unchanged 0 the_repr_bool
+      , unchanged 0 the_repr_NoneType
+      , unchanged 1 the_repr_iter
+      , unchanged 1 the_repr_list
+      , unchanged 0 the_repr_Any
+      , unchanged 1 the_repr_owned
       , unchanged 0 the_makeComplex
-      , unchanged 0 (\_ -> getPyonTuplePassConv' 0)
-      , unchanged 1 (\_ -> getPyonTuplePassConv' 1)
-      , unchanged 2 (\_ -> getPyonTuplePassConv' 2)
-      , unchanged 0 (\_ -> getPyonTupleCon' 0)
-      , unchanged 1 (\_ -> getPyonTupleCon' 1)
-      , unchanged 2 (\_ -> getPyonTupleCon' 2)
+      , unchanged 0 (const $ pyonTupleReprCon 0)
+      , unchanged 1 (const $ pyonTupleReprCon 1)
+      , unchanged 2 (const $ pyonTupleReprCon 2)
+      , unchanged 0 (const $ pyonTupleCon 0)
+      , unchanged 1 (const $ pyonTupleCon 1)
+      , unchanged 2 (const $ pyonTupleCon 2)
       , unchanged 1 the_eqDict
       , unchanged 1 the_ordDict
       , unchanged 1 the_traversableDict
       , unchanged 1 the_additiveDict
       , unchanged 1 the_multiplicativeDict
-      , unchanged 0 (eqMember . the_EqDict_int)
-      , unchanged 0 (neMember . the_EqDict_int)
-      , unchanged 0 (eqMember . the_EqDict_float)
-      , unchanged 0 (neMember . the_EqDict_float)
-      , unchanged 2 (eqMember . the_EqDict_Tuple2)
-      , unchanged 2 (neMember . the_EqDict_Tuple2)
-      , unchanged 0 (gtMember . the_OrdDict_int)
-      , unchanged 0 (geMember . the_OrdDict_int)
-      , unchanged 0 (ltMember . the_OrdDict_int)
-      , unchanged 0 (leMember . the_OrdDict_int)
-      , unchanged 0 (gtMember . the_OrdDict_float)
-      , unchanged 0 (geMember . the_OrdDict_float)
-      , unchanged 0 (ltMember . the_OrdDict_float)
-      , unchanged 0 (leMember . the_OrdDict_float)
-      , unchanged 0 (gtMember . the_OrdDict_Tuple2)
-      , unchanged 0 (geMember . the_OrdDict_Tuple2)
-      , unchanged 0 (ltMember . the_OrdDict_Tuple2)
-      , unchanged 0 (leMember . the_OrdDict_Tuple2)
-      , unchanged 0 (addMember . the_AdditiveDict_int)
-      , unchanged 0 (subMember . the_AdditiveDict_int)
-      , unchanged 0 (negateMember . the_AdditiveDict_int)
-      , unchanged 0 (zeroMember . the_AdditiveDict_int)
-      , unchanged 0 (addMember . the_AdditiveDict_float)
-      , unchanged 0 (subMember . the_AdditiveDict_float)
-      , unchanged 0 (negateMember . the_AdditiveDict_float)
-      , unchanged 0 (zeroMember . the_AdditiveDict_float)
-      , unchanged 0 (mulMember . the_MultiplicativeDict_int)
-      , unchanged 0 (fromIntMember . the_MultiplicativeDict_int)
-      , unchanged 0 (oneMember . the_MultiplicativeDict_int)
-      , unchanged 0 (mulMember . the_MultiplicativeDict_float)
-      , unchanged 0 (fromIntMember . the_MultiplicativeDict_float)
-      , unchanged 0 (oneMember . the_MultiplicativeDict_float)
-      , unchanged 1 (traverseMember . the_TraversableDict_Stream)
-      , unchanged 1 (buildMember . the_TraversableDict_Stream)
-      , unchanged 1 (traverseMember . the_TraversableDict_list)
-      , unchanged 1 (buildMember . the_TraversableDict_list)
+      , unchanged 0 the_EqDict_int_eq
+      , unchanged 0 the_EqDict_int_ne
+      , unchanged 0 the_EqDict_float_eq
+      , unchanged 0 the_EqDict_float_ne
+      , unchanged 2 the_EqDict_Tuple2_eq
+      , unchanged 2 the_EqDict_Tuple2_ne
+      , unchanged 0 the_OrdDict_int_le
+      , unchanged 0 the_OrdDict_int_lt
+      , unchanged 0 the_OrdDict_int_ge
+      , unchanged 0 the_OrdDict_int_gt
+      , unchanged 0 the_OrdDict_float_le
+      , unchanged 0 the_OrdDict_float_lt
+      , unchanged 0 the_OrdDict_float_ge
+      , unchanged 0 the_OrdDict_float_gt
+      , unchanged 0 the_OrdDict_Tuple2_le
+      , unchanged 0 the_OrdDict_Tuple2_lt
+      , unchanged 0 the_OrdDict_Tuple2_ge
+      , unchanged 0 the_OrdDict_Tuple2_gt
+      , unchanged 0 the_AdditiveDict_int_add
+      , unchanged 0 the_AdditiveDict_int_sub
+      , unchanged 0 the_AdditiveDict_int_negate
+      , unchanged 0 the_AdditiveDict_int_zero
+      , unchanged 0 the_AdditiveDict_float_add
+      , unchanged 0 the_AdditiveDict_float_sub
+      , unchanged 0 the_AdditiveDict_float_negate
+      , unchanged 0 the_AdditiveDict_float_zero
+      , unchanged 0 the_MultiplicativeDict_int_mul
+      , unchanged 0 the_MultiplicativeDict_int_fromInt
+      , unchanged 0 the_MultiplicativeDict_int_one
+      , unchanged 0 the_MultiplicativeDict_float_mul
+      , unchanged 0 the_MultiplicativeDict_float_fromInt
+      , unchanged 0 the_MultiplicativeDict_float_one
+      , unchanged 1 the_TraversableDict_Stream_traverse
+      , unchanged 1 the_TraversableDict_Stream_build
+      , unchanged 1 the_TraversableDict_list_traverse
+      , unchanged 1 the_TraversableDict_list_build
       , unchanged 1 the_oper_DIV
       , unchanged 0 the_oper_MOD
       , unchanged 1 the_oper_POWER
@@ -158,7 +169,6 @@ globalConTable =
       , unchanged 0 the_oper_BITWISEAND
       , unchanged 0 the_oper_BITWISEOR
       , unchanged 0 the_oper_BITWISEXOR
-      , unchanged 1 the_oper_NEGATE
       , unchanged 2 the_oper_CAT_MAP
       , unchanged 1 the_oper_DO
       , unchanged 1 the_fun_undefined
@@ -192,13 +202,12 @@ globalConTable =
 
 -- | Create a specialization table for a value that isn't specialized.
 -- The table has one don't-care parameter for each type parameter.
-unchangedType :: RType -> a -> SpclTable a
-unchangedType ty x = add_don't_cares ty (End x)
+unchangedType :: RType -> Var -> SpclTable
+unchangedType (SFType ty) x = add_don't_cares ty (End x)
   where
     add_don't_cares ty x =
       case ty
-      of Gluon.FunE { Gluon.expMParam = Gluon.Binder' _ dom ()
-                    , Gluon.expRange = ty2}
+      of FunT (_ ::: dom) (_ ::: ty2)
            | getLevel dom == KindLevel -> Don'tCare $ add_don't_cares ty2 x
          _ -> x
 
@@ -208,15 +217,14 @@ newtype Spcl a = Spcl (ReaderT SpclEnv IO a) deriving(Monad, Functor)
 
 runSpcl :: IdentSupply Var -> Spcl a -> IO a
 runSpcl supply (Spcl m) =
-  let env = SpclEnv supply IntMap.empty IntMap.empty globalConTable
+  let env = SpclEnv supply globalTypeTable globalConTable
   in runReaderT m env
 
 data SpclEnv =
   SpclEnv
   { spclEnvVarIDs :: !(IdentSupply Var)
   , spclEnvTypes :: IntMap.IntMap SpclType
-  , spclEnvVarTable :: IntMap.IntMap (SpclTable Var)
-  , spclEnvConTable :: IntMap.IntMap (SpclTable Con)
+  , spclEnvTable :: IntMap.IntMap SpclTable
   }
 
 instance Supplies Spcl (Ident Var) where
@@ -245,23 +253,17 @@ lookupType v = spclAsks $ \env ->
   of Nothing -> internalError $ "lookupType: No information for type variable " ++ show v
      Just x  -> x
 
-assumeVarSpclTable :: Var -> SpclTable Var -> Spcl a -> Spcl a
+assumeVarSpclTable :: Var -> SpclTable -> Spcl a -> Spcl a
 assumeVarSpclTable v tbl m = spclLocal add_entry m
   where
     add_entry env =
-      env {spclEnvVarTable =
-              IntMap.insert (fromIdent $ varID v) tbl $ spclEnvVarTable env}
+      env {spclEnvTable =
+              IntMap.insert (fromIdent $ varID v) tbl $ spclEnvTable env}
 
-lookupVarSpclTable :: Var -> Spcl (SpclTable Var)
+lookupVarSpclTable :: Var -> Spcl SpclTable
 lookupVarSpclTable v = spclAsks $ \env ->
-  case IntMap.lookup (fromIdent $ varID v) $ spclEnvVarTable env
-  of Nothing -> internalError $ "lookupVarSpclTable: No information for variable" ++ show v
-     Just x  -> x
-
-lookupConSpclTable :: Con -> Spcl (SpclTable Con)
-lookupConSpclTable c = spclAsks $ \env ->
-  case IntMap.lookup (fromIdent $ conID c) $ spclEnvConTable env
-  of Nothing -> internalError $ "lookupConSpclTable: No information for constructor " ++ showLabel (Gluon.conName c)
+  case IntMap.lookup (fromIdent $ varID v) $ spclEnvTable env
+  of Nothing -> internalError $ "lookupVarSpclTable: No information for variable " ++ show v
      Just x  -> x
 
 -- | Specialize a type.  Type variables that have been specialized to 'Stream'
@@ -269,44 +271,35 @@ lookupConSpclTable c = spclAsks $ \env ->
 --
 -- N.B. We assume the type is not stream-polymorphic.
 specializeType :: RType -> Spcl RType
-specializeType ty =
+specializeType (SFType ty) = fmap SFType $ specializeType' ty
+
+specializeType' ty =
   case ty
-  of Gluon.VarE {Gluon.expVar = v} -> do
+  of VarT v -> do
        spcl_type <- lookupType v
        case spcl_type of
-         IsStreamType -> return $ stream_type $ Gluon.getSourcePos ty
+         IsStreamType -> return $ VarT (pyonBuiltin the_Stream)
          _            -> return ty
-     Gluon.FunE { Gluon.expMParam = Gluon.Binder' mv dom ()
-                , Gluon.expRange = rng} -> do
-       spcl_dom <- specializeType dom
-       
-       -- Assume this type is not specialized
-       spcl_rng <- assumeTypeMaybe mv Don'tCareType $ specializeType rng
+     AppT op arg -> liftM2 AppT (specializeType' op) (specializeType' arg)
+     FunT (ValPT mparam ::: dom) (ret ::: rng) -> do
+       dom' <- specializeType' dom
 
-       return $ ty {Gluon.expMParam = Gluon.Binder' mv spcl_dom ()
-                   , Gluon.expRange = spcl_rng}
-     _ -> Gluon.traverseExp specializeType do_tuple do_sum ty
-  where
-    stream_type pos = Gluon.mkConE pos $ pyonBuiltin the_Stream
-    do_tuple = Gluon.traverseTuple specializeType do_tuple
-    do_sum = Gluon.traverseSum specializeType do_sum
+       -- Assume the parameter is not specialized
+       rng' <- assumeTypeMaybe mparam Don'tCareType $ specializeType' rng
+       return $ FunT (ValPT mparam ::: dom') (ret ::: rng')
 
 -- | Use the given type to select one entry from a specialization table.    
 --   The table determines what decision has to be made.  If a specialization 
 --   decision is to be made, then decide whether the given type is a 'Stream'
 --   type.
-pickSpecialization :: SpclTable a -> RType -> Spcl (Bool, SpclTable a)
+pickSpecialization :: SpclTable -> RType -> Spcl (Bool, SpclTable)
 pickSpecialization tbl ty =
   case tbl
   of Don'tCare x    -> return (True, x)
      Specialize l r -> do
        spcl_type <-
-         case ty
-         of Gluon.VarE {Gluon.expVar = v} -> lookupType v
-            Gluon.ConE {Gluon.expCon = c}
-              | c `isPyonBuiltin` the_Stream -> return IsStreamType
-            Gluon.AppE {Gluon.expOper = Gluon.ConE {Gluon.expCon = c}}
-              | c `isPyonBuiltin` the_Stream -> return IsStreamType
+         case fromVarApp $ fromSFType ty
+         of Just (v, _) -> lookupType v
             _ -> return NotStreamType
        pick_one spcl_type l r
      _ -> wrong
@@ -316,7 +309,7 @@ pickSpecialization tbl ty =
     pick_one Don'tCareType _ _ = wrong
     wrong = internalError "pickSpecialization"
 
-pickFullSpecialization :: SpclTable a -> [RType] -> Spcl (Maybe ([Bool], a))
+pickFullSpecialization :: SpclTable -> [RType] -> Spcl (Maybe ([Bool], Var))
 pickFullSpecialization tbl tys = pick [] tbl tys
   where
     pick tl tbl (ty:tys) = do
@@ -359,7 +352,7 @@ specializePat _ = internalError "specializePat: Not a variable pattern"
 -- | Assume a pattern-bound variable.  The variable is monomorphic and 
 -- will not be specialized.
 assumePat :: RPat -> Spcl a -> Spcl a
-assumePat (VarP v _) m = assumeVarSpclTable v (End v) m
+assumePat (VarP v t) m = assumeVarSpclTable v (unchangedType t v) m
 
 assumePats :: [RPat] -> Spcl a -> Spcl a
 assumePats ps m = foldr assumePat m ps
@@ -375,20 +368,6 @@ specializeAndAssumePats :: [RPat] -> ([RPat] -> Spcl a) -> Spcl a
 specializeAndAssumePats ps k =
   withMany specializeAndAssumePat ps (k . catMaybes)
 
--- | Specialize a binder.
-specializeBinder :: Binder Rec () -> Spcl (Binder Rec ())
-specializeBinder (Binder v ty ()) = do
-  ty' <- specializeType ty
-  return $ Binder v ty' ()
-
--- | Assume a binder-bound variable.  The variable is monomorphic and 
--- will not be specialized.
-assumeBinder :: Binder Rec () -> Spcl a -> Spcl a
-assumeBinder (Binder v ty ()) m = assumeVarSpclTable v (unchangedType ty v) m
-
-assumeBinders :: [Binder Rec ()] -> Spcl a -> Spcl a
-assumeBinders bs m = foldr assumeBinder m bs
-
 -- | Specialize an expression.
 specialize :: RExp -> Spcl RExp
 specialize expression = do
@@ -401,7 +380,6 @@ specializeMaybe :: RExp -> Spcl (Maybe RExp)
 specializeMaybe expression =
   case expression
   of VarE {} -> specializeTyAppExpNonCall expression
-     ConE {} -> specializeTyAppExpNonCall expression
      LitE {expType = ty} -> do
        ty' <- specializeType ty
        return $ Just $ expression {expType = ty'}
@@ -454,13 +432,12 @@ matchTraversableDictCall expression =
   where
     is_the_constructor op =
       case op
-      of ConE {expCon = c} ->
-           c `isPyonBuiltin` the_traversableDict
-         _ -> False
+      of VarE {expVar = c} -> c `isPyonBuiltin` the_traversableDict
+         _      -> False
 
 specializeDictionaryAlternative (Alt { altTyArgs = [_]
-                                     , altParams = [Binder traverse_var _ (),
-                                                    Binder build_var _ ()]
+                                     , altParams = [VarP traverse_var _,
+                                                    VarP build_var _]
                                      , altBody = body
                                      }) =
   let body' = substituteTraversableMethods traverse_var build_var body
@@ -468,24 +445,34 @@ specializeDictionaryAlternative (Alt { altTyArgs = [_]
 
 -- | Replace any occurences of dictionary methods with the Gluon constructors
 -- for stream build and traverse methods.
-substituteTraversableMethods traverse_var build_var expr = doexpr expr
+substituteTraversableMethods traverse_var build_var expr = go expr
   where
-    doexpr (VarE {expInfo = inf, expVar = v})
-      | v == traverse_var =
-        ConE { expInfo = inf
-             , expCon = traverseMember $ pyonBuiltin the_TraversableDict_Stream}
-      | v == build_var =
-        ConE { expInfo = inf
-             , expCon = buildMember $ pyonBuiltin the_TraversableDict_Stream}
+    go expr =
+      case expr
+      of VarE {expInfo = inf, expVar = v}
+           | v == traverse_var ->
+             VarE {expInfo = inf, 
+                   expVar = pyonBuiltin the_TraversableDict_Stream_traverse}
+           | v == build_var ->
+             VarE {expInfo = inf,
+                   expVar = pyonBuiltin the_TraversableDict_Stream_build}
+           | otherwise -> expr
+         LitE {} -> expr
+         TyAppE inf op arg -> TyAppE inf (go op) arg
+         CallE inf op args -> CallE inf (go op) (map go args)
+         FunE inf f -> FunE inf $ dofun f
+         LetE inf b rhs body -> LetE inf b (go rhs) (go body)
+         LetrecE inf defs b ->
+           LetrecE inf [Def v (dofun f) | Def v f <- defs] (go b)
+         CaseE inf scr alts ->
+           CaseE inf (go scr) (map doalt alts)
       
-    doexpr e = mapSFExp doexpr doalt dofun id e
-    doalt = mapAlt doexpr id
-    dofun f = f {funBody = doexpr $ funBody f}
+    doalt a = a {altBody = go $ altBody a}
+    dofun f = f {funBody = go $ funBody f}
 
 specializeCall inf op args = 
   case op
   of VarE {} -> specializeTyAppExp op >>= specialize_args
-     ConE {} -> specializeTyAppExp op >>= specialize_args
      TyAppE {} -> specializeTyAppExp op >>= specialize_args
      _ -> specializeMaybe op >>= specialize_args . spclTyAppFromMaybe
   where
@@ -530,14 +517,14 @@ specializeTyAppExpNonCall expression =
 specializeTyAppExp expression = do
   traversable_dict_param <- matchTraversableDictCall expression
   case traversable_dict_param of
-    Just (Gluon.ConE {Gluon.expCon = c})
+    Just (SFType (VarT c))
       | c `isPyonBuiltin` the_Stream ->
           -- Remove Stream dictionaries
           return ErasedTyApp
       | c `isPyonBuiltin` the_list ->
           -- Replace with a list dictionary
-          let dict_expr = ConE defaultExpInfo $
-                          pyonBuiltin the_OpaqueTraversableDict_list
+          let dict_expr = VarE { expInfo = internalSynInfo ObjectLevel
+                               , expVar = pyonBuiltin the_OpaqueTraversableDict_list}
           in return $ SpclDictExp dict_expr
       | otherwise -> internalError "Cannot specialize Traversable dictionary"
     Nothing -> do
@@ -597,15 +584,6 @@ specializeOperator exp = spcl [] exp
                return $ Just (VarE {expInfo = inf , expVar = v},
                               keep_args)
 
-         ConE {expInfo = inf, expCon = c} -> do
-           tbl <- lookupConSpclTable c
-           val <- pickFullSpecialization tbl tl
-           case val of
-             Nothing -> return Nothing
-             Just (keep_args, c) ->
-               return $ Just (ConE {expInfo = inf, expCon = c},
-                              keep_args)
-
          _ -> internalError "specializeTyApp: Unexpected type application"
 
 specializeAlt :: RAlt -> Spcl RAlt
@@ -614,12 +592,16 @@ specializeAlt alternative = do
 
   -- Add constructor-bound parameters to the environment.  We assume that
   -- constructors never contain dictionaries.
-  binders' <- mapM specializeBinder $ altParams alternative
-  assumeBinders binders' $ do
+  binders' <- mapM specialize_param $ altParams alternative
+  assumePats binders' $ do
     body <- specialize $ altBody alternative
     return $ alternative { altTyArgs = ty_args
                          , altParams = binders'
                          , altBody = body}
+  where
+    specialize_param (VarP var ty) = do
+      ty' <- specializeType ty
+      return (VarP var ty')
 
 -- | Specialize a monomorphic function
 specializeFun :: RFun -> Spcl RFun
@@ -628,7 +610,7 @@ specializeFun function
       internalError "specializeFun: Function is polymorphic"
   | otherwise = do
       specializeAndAssumePats (funParams function) $ \params -> do
-        return_type <- specializeType $ funReturnType function
+        return_type <- specializeType $funReturnType function
         body <- specialize $ funBody function
         return $ function { funParams = params
                           , funReturnType = return_type
@@ -636,7 +618,7 @@ specializeFun function
 
 -- | Specialize a polymorphic function.  Create a new function definition for
 -- each specialized instance.
-specializePolymorphicFun :: SpclTable Var -> Def Rec -> Spcl [Def Rec]
+specializePolymorphicFun :: SpclTable -> Def Rec -> Spcl [Def Rec]
 specializePolymorphicFun tbl (Def orig_var orig_fun) =
   go tbl [] (funTyParams orig_fun)
   where
@@ -683,7 +665,7 @@ specializePolymorphicFun tbl (Def orig_var orig_fun) =
 -- | Create a specialization table from the given signature.  An element of
 -- the signature is @True@ if it is used for specialization, @False@
 -- otherwise.
-createSpclTable :: Spcl a -> [Bool] -> Spcl (SpclTable a)
+createSpclTable :: Spcl Var -> [Bool] -> Spcl SpclTable
 createSpclTable mk_entry sig = create sig
   where
     create (True : sig)  = liftM2 Specialize (create sig) (create sig)
@@ -693,7 +675,7 @@ createSpclTable mk_entry sig = create sig
 -- | Create a function's specialization table.  Based on the function's 
 -- parameters, create a table and new variables for all possible 
 -- specializations.  The actual functions aren't created.
-createFunSpclTable :: Def Rec -> Spcl (SpclTable Var)
+createFunSpclTable :: Def Rec -> Spcl SpclTable
 createFunSpclTable (Def fun_name function) = let 
   -- Find type variables that are parameters of Traversable dictionary types
   -- in the parameter list
@@ -716,7 +698,7 @@ createFunSpclTable (Def fun_name function) = let
     traversable_dict_parameter (VarP _ ty) = traversableDictTypeParameter ty
     
     -- Create a new function name
-    make_new_var = Gluon.newVar (varName fun_name) Gluon.ObjectLevel
+    make_new_var = newClonedVar fun_name
       
 specializeDefs :: DefGroup Rec -> Spcl a -> Spcl (DefGroup Rec, a)
 specializeDefs dg m = do
@@ -761,5 +743,5 @@ specializeModule (Module module_name defs exports) = do
 
 doSpecialization :: RModule -> IO RModule
 doSpecialization mod =
-  withTheVarIdentSupply $ \supply ->
+  withTheNewVarIdentSupply $ \supply ->
   runSpcl supply $ specializeModule mod

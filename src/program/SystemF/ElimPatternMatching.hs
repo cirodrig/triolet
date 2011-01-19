@@ -1,17 +1,28 @@
 {- | This module converts pattern matching to case statements before
 -- parameter-passing convention specialization is run.
 -} 
+
+{-# LANGUAGE FlexibleInstances, TypeSynonymInstances #-}
 module SystemF.ElimPatternMatching
        (eliminatePatternMatching)
 where
 
-import Control.Monad
+import Prelude hiding(mapM)
+
+import Control.Applicative
+import Control.Monad hiding(mapM)
+import Data.Traversable
 
 import Gluon.Common.SourcePos
-import qualified Gluon.Core as Gluon
-import Globals
+import Gluon.Common.Identifier
+import Gluon.Common.Supply
+import Gluon.Core(mkSynInfo)
+import Gluon.Core.Level
 import SystemF.Syntax
-import SystemF.Builtins
+import Builtins.Builtins
+import Type.Var
+import Type.Type
+import Globals
   
 catEndo :: [a -> a] -> a -> a
 catEndo fs x = foldr ($) x fs
@@ -19,30 +30,45 @@ catEndo fs x = foldr ($) x fs
 -- | Convert all pattern matching to @case@ statements.  After conversion, 
 -- the only patterns that remain are 'VarP' patterns.
 eliminatePatternMatching :: RModule -> IO RModule
-eliminatePatternMatching (Module module_name ds exports) = do
-  ds' <- mapM (mapM elimPMDef) ds
-  return $ Module module_name ds' exports
+eliminatePatternMatching (Module module_name ds exports) =
+  withTheNewVarIdentSupply $ \id_supply -> runPM id_supply $ do
+    ds' <- mapM (mapM elimPMDef) ds
+    return $ Module module_name ds' exports
 
 -- | Get the type of a pattern
 patternType :: RPat -> RType
 patternType (WildP ty) = ty
 patternType (VarP _ ty) = ty
 patternType (TupleP ps) =
-  let field_types = map patternType ps
+  let field_types = map (fromSFType . patternType) ps
       tuple_size = length ps
-      tuple_con = getPyonTupleType' tuple_size
-  in tuple_size `seq`
-     Gluon.mkConAppE noSourcePos tuple_con field_types
+      tuple_con = pyonTupleTypeCon tuple_size
+  in tuple_size `seq` SFType (varApp tuple_con field_types)
 
 -- | The pattern matching elimination monad.  Run in IO so we can create new
 -- variables
-type PM = IO
+newtype PM a = PM (IdentSupply Var -> IO a)
+
+instance Functor PM where
+  fmap f (PM g) = PM (\s -> fmap f (g s))
+
+instance Applicative PM where
+  pure = return
+  (<*>) = ap
+
+instance Monad PM where
+  return x = PM (\_ -> return x)
+  PM m >>= k = PM (\supply -> do x <- m supply
+                                 case k x of PM n -> n supply)
+
+instance Supplies PM VarID where
+  fresh = PM supplyValue
+
+runPM supply (PM f) = f supply
 
 -- | Create a new temporary variable
 pmNewVar :: PM Var
-pmNewVar = do
-  var_id <- getNextVarIdent
-  return $ Gluon.mkAnonymousVariable var_id Gluon.ObjectLevel
+pmNewVar = newAnonymousVar ObjectLevel
 
 elimPMDef :: RDef -> PM RDef
 elimPMDef (Def v f) = do f' <- elimPMFun f
@@ -57,7 +83,15 @@ elimPMFun fun@(Fun {funInfo = inf, funParams = params, funBody = body}) = do
 elimPMExp :: RExp -> PM RExp
 elimPMExp expression =
   case expression
-  of LetE { expInfo = inf
+  of VarE {} -> return expression
+     LitE {} -> return expression
+     TyAppE inf op arg -> do
+       op' <- elimPMExp op
+       return $ TyAppE inf op' arg
+     CallE inf op args ->
+       CallE inf <$> elimPMExp op <*> traverse elimPMExp args
+     FunE inf f -> FunE inf <$> elimPMFun f
+     LetE { expInfo = inf
           , expBinder = pat
           , expValue = rhs
           , expBody = body} -> do
@@ -70,10 +104,15 @@ elimPMExp expression =
                      , expValue = rhs'
                      , expBody = transformer body'
                      }
-     _ -> traverseSFExp elimPMExp elimPMAlt elimPMFun return expression 
+     LetrecE inf defs body ->
+       LetrecE inf <$> traverse elimPMDef defs <*> elimPMExp body
+     CaseE inf scr alts ->
+       CaseE inf <$> elimPMExp scr <*> traverse elimPMAlt alts
 
 elimPMAlt :: RAlt -> PM RAlt
-elimPMAlt x = traverseAlt elimPMExp return x
+elimPMAlt alt = do
+  body <- elimPMExp $ altBody alt
+  return $ alt {altBody = body}
 
 -- | Eliminate a pattern match.  Return a 'VarP' pattern and a transformation
 -- on the code that uses the pattern-bound variables.
@@ -91,7 +130,6 @@ elimPMPat pos pat@(TupleP ps) = do
   -- Eliminate sub-patterns
   (fields, transformer) <- elimPMPats pos ps
   let field_types = [t | VarP _ t <- fields]
-      field_vars = [Gluon.Binder v t () | VarP v t <- fields]
   
   -- Create a new variable pattern to replace the tuple pattern 
   pat_var <- pmNewVar
@@ -101,9 +139,9 @@ elimPMPat pos pat@(TupleP ps) = do
   
   -- Create a 'case' statement for this pattern
   let transformer' code =
-        let new_info = Gluon.mkSynInfo pos Gluon.ObjectLevel
+        let new_info = mkSynInfo pos ObjectLevel
             body = transformer code
-            alt = Alt (getPyonTupleCon' tuple_size) field_types field_vars body
+            alt = Alt (pyonTupleCon tuple_size) field_types fields body
         in CaseE new_info (VarE new_info pat_var) [alt]
 
   return (VarP pat_var new_pat_type, transformer')

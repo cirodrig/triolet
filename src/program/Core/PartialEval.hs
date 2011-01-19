@@ -6,12 +6,16 @@
 module Core.PartialEval
        (partialEvaluate)
 where
-
+  
+import Debug.Trace
+import Text.PrettyPrint.HughesPJ
+  
 import Gluon.Common.Error
 import Gluon.Core(Rec)
 import qualified Gluon.Core as Gluon
 import qualified SystemF.Builtins as SF
 import Core.Syntax
+import Core.Print
 
 dummyAddress :: AddrExp Rec
 dummyAddress = Gluon.mkInternalVarE (SF.pyonBuiltin SF.the_dummy_addr)

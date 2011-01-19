@@ -61,12 +61,26 @@ liModule (Module rlist) = do
    lilist <- mapM (\x -> traverse (liDecl Map.empty) x) rlist
    return $ Module lilist
 
+liDataConDecl lmap (DataConDecl v ty params args rng) = do
+  liType <- liReturnType lmap ty
+  (liVar, _) <- predLvl (getLevel liType) v lmap
+  (liParams, lmap') <- liParamTypes lmap params
+  liArgs <- mapM (liReturnType lmap') args
+  liRng <- liReturnType lmap' rng
+  return $ DataConDecl liVar liType liParams liArgs liRng
+
 -- Check the Type's level, then infer
 liDecl :: LMap -> (Decl Resolved) -> IO (Decl LevelInferred)
-liDecl lmap (Decl declVar declType) = do
+liDecl lmap (VarDecl declVar declType) = do
    liType <- liReturnType lmap declType
    (liVar,_) <- predLvl (getLevel liType) declVar lmap
-   return $ Decl liVar liType
+   return $ VarDecl liVar liType
+
+liDecl lmap (DataDecl declVar repr declType cons) = do
+   liType <- liReturnType lmap declType
+   (liVar,lmap') <- predLvl (getLevel liType) declVar lmap
+   liCons <- mapM (traverse (liDataConDecl lmap)) cons
+   return $ DataDecl liVar repr liType liCons
 
 -- Entry Point for Type
 liLType :: LMap -> RLType -> IO (LType LevelInferred)
@@ -86,7 +100,18 @@ liLType lmap (L pos rType) = case rType
         (lParam,umap) <- liParamType lmap fParam
         lRng <- liReturnType umap fRng
         return $ L pos (FunT lParam lRng)
-        
+
+-- Perform level inference on a sequence of parameter types
+liParamTypes :: LMap
+             -> [ParamType Resolved]
+             -> IO ([ParamType LevelInferred], LMap)
+liParamTypes lmap (pt:pts) = do
+  (pt', lmap') <- liParamType lmap pt
+  (pts', lmap'') <- liParamTypes lmap' pts
+  return (pt' : pts', lmap'')
+
+liParamTypes lmap [] = return ([], lmap)
+
 -- Find Type's level, and if needed, assign predecessor and insert to update Map
 liParamType :: LMap -> (ParamType Resolved)
             -> IO (ParamType LevelInferred, LMap)

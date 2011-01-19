@@ -1,0 +1,86 @@
+
+-- Data types
+
+bool : val pure;
+int : val pure;
+float : val pure;
+NoneType : val pure;
+
+data ref Repr : val (val pure -> val pure) {};
+data box Stream : val (val pure -> val pure) {};
+data ref list : val (val pure -> val pure) {};
+
+data ref PyonTuple2 : val (val pure -> val pure -> val pure)
+{
+  pyonTuple2 : (val a : pure) -> (val b : pure)
+            -> read a -> read b -> write PyonTuple2 a b,
+  (val a : pure, val b : pure) (read a, read b) : read PyonTuple2 a b;
+};
+
+data ref AdditiveDict : val (val pure -> val pure)
+{
+  additiveDict : (val a : pure)
+              -> read Repr a
+              -> box (read a -> read a -> write a)
+              -> box (read a -> read a -> write a)
+              -> box (read a -> write a)
+              -> read a
+              -> write AdditiveDict a,
+  (val a : pure) (read Repr a,
+       	   	  box (read a -> read a -> write a),
+       	   	  box (read a -> read a -> write a),
+		  box (read a -> write a),
+		  read a) : read AdditiveDict a;
+};
+
+data ref TraversableDict : val (val (val pure -> val pure) -> val pure)
+{
+  traversableDict :
+      (val t : val pure -> val pure)
+   -> box ((val a : pure) -> read Repr a -> read t a -> box Stream a)
+   -> box ((val a : pure) -> read Repr a -> box Stream a -> write t a)
+   -> write TraversableDict t,
+  (val t : val pure -> val pure)
+  (box ((val a : pure) -> read Repr a -> read t a -> box Stream a),
+   box ((val a : pure) -> read Repr a -> box Stream a -> write t a))
+  : read TraversableDict t;
+};
+
+-------------------------------------------------------------------------------
+-- Representation dictionaries
+
+repr_int : read Repr int;
+repr_float : read Repr float;
+
+repr_list : (val a : pure) -> read Repr a -> write Repr (list a);
+
+repr_PyonTuple2 :
+    (val a : pure) -> (val b : pure) -> read Repr a -> read Repr b
+ -> write Repr (PyonTuple2 a b);
+
+OpaqueTraversableDict_list : read TraversableDict list;
+
+TraversableDict_Stream_build :
+  (val a : pure) -> read Repr a -> box Stream a -> box Stream a;
+
+TraversableDict_Stream_traverse :
+  (val a : pure) -> read Repr a -> box Stream a -> box Stream a;
+
+-------------------------------------------------------------------------------
+-- Numeric dictionaries
+
+AdditiveDict_int_add : val int -> val int -> val int;
+AdditiveDict_int_sub : val int -> val int -> val int;
+AdditiveDict_int_negate : val int -> val int;
+AdditiveDict_int_zero : val int;
+
+-------------------------------------------------------------------------------
+-- Other functions
+
+oper_DO : (val a : pure) -> read Repr a -> read a -> box Stream a;
+
+oper_CAT_MAP :
+    (val a : pure) -> (val b : pure) -> read Repr a -> read Repr b
+ -> box Stream a
+ -> box (read a -> box Stream b)
+ -> box Stream b;

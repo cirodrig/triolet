@@ -1,5 +1,5 @@
 
-module CParser2.Driver(ConTable, parseCoreModule)
+module CParser2.Driver(parseCoreModule)
 where
 
 import System.FilePath
@@ -10,6 +10,8 @@ import Gluon.Common.SourcePos
 import Gluon.Common.Identifier
 import Builtins.Builtins
 import Type.Var
+import Type.Type
+import Type.Environment
 import CParser2.AST
 import CParser2.Lexer
 import CParser2.Parser
@@ -19,8 +21,10 @@ import CParser2.GenCore
 import LowLevel.Label
 import Paths
 
+import CParser2.PrettyAST()
+
 predefinedVarDetails :: [(String, VarDetails)]
-predefinedVarDetails = map mk_var_details allBuiltinVars
+predefinedVarDetails = map mk_var_details (pureV : allBuiltinVars)
   where
     mk_var_details v = (name, PredefinedVar v)
       where
@@ -171,7 +175,7 @@ predefinedVarDetails = map mk_var_details allBuiltinVars
            , pyonBuiltin the_fun_vectorGenerateList
            ]-}
 
-parseCoreModule :: IdentSupply Var -> IO ConTable
+parseCoreModule :: IdentSupply Var -> IO TypeEnv
 parseCoreModule ident_supply = do
   pathname <- getDataFileName ("symbols" </> "coretypes2")
   input_file <- readFile pathname

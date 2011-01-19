@@ -9,15 +9,15 @@ where
 import Data.Maybe
 import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Identifier
-import Gluon.Common.Label
-import qualified Gluon.Core as Gluon
-import qualified Gluon.Core.Print as Gluon
 import Export
-import SystemF.Builtins
+import Type.Type
+import Type.Var
+import LowLevel.Label
+import Builtins.Builtins
 import SystemF.Syntax
 
-pprVar :: Var -> Doc
-pprVar = pprVarFlags defaultPrintFlags
+pprSFType :: SFType Rec -> Doc
+pprSFType (SFType t) = pprType t
 
 pprPat :: RPat -> Doc
 pprPat = pprPatFlags defaultPrintFlags
@@ -60,14 +60,7 @@ pprExportSpec (ExportSpec lang name) =
   text (foreignLanguageName lang) <+> text (show name)
 
 pprVarFlags :: PrintFlags -> Var -> Doc
-pprVarFlags flags v =
-  let lab = case Gluon.varName v
-            of Nothing -> text "_"
-               Just label -> text (showLabel label)
-      id = if printVariableIDs flags || isNothing (Gluon.varName v)
-           then text $ '\'' : show (fromIdent $ Gluon.varID v)
-           else empty
-  in lab <> id
+pprVarFlags flags v = pprVar v
 
 pprLit (IntL n) = text (show n)
 pprLit (FloatL f) = text (show f)
@@ -77,17 +70,13 @@ pprLit NoneL = text "None"
 pprPatFlags :: PrintFlags -> RPat -> Doc
 pprPatFlags flags pat = 
   case pat
-  of WildP ty  -> text "_" <+> colon <+> Gluon.pprExp ty
-     VarP v ty -> pprVarFlags flags v <+> colon <+> Gluon.pprExp ty
+  of WildP ty  -> text "_" <+> colon <+> pprSFType ty
+     VarP v ty -> pprVarFlags flags v <+> colon <+> pprSFType ty
      TupleP ps -> tuple $ map (pprPatFlags flags) ps
 
 pprTyPatFlags :: PrintFlags -> RTyPat -> Doc
 pprTyPatFlags flags (TyPat v ty) =
-  Gluon.pprVar v <+> colon <+> Gluon.pprExp ty
-
-pprBinderFlags :: PrintFlags -> Gluon.RBinder () -> Doc
-pprBinderFlags flags (Gluon.Binder v ty ()) =
-  pprVarFlags flags v <+> colon <+> Gluon.pprExp ty
+  pprVar v <+> colon <+> pprSFType ty
 
 pprExpFlags :: PrintFlags -> RExp -> Doc
 pprExpFlags flags expression = pprExpFlagsPrec flags precOuter expression
@@ -113,13 +102,11 @@ pprExpFlagsPrec flags prec expression =
   case expression
   of VarE {expVar = v} ->
          pprVarFlags flags v
-     ConE {expCon = c} ->
-         text (showLabel $ Gluon.conName c)
      LitE {expLit = l, expType = t} ->
-         pprTypeAnnotation (pprLit l) (Gluon.pprExp t) prec
+         pprTypeAnnotation (pprLit l) (pprSFType t) prec
      TyAppE {expOper = e, expTyArg = t} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
-             tDoc = Gluon.pprExp t
+             tDoc = pprSFType t
              doc = eDoc <+> text "@" <> tDoc
          in parenthesize precTyApp doc prec
      CallE {expOper = e, expArgs = es} ->
@@ -138,11 +125,11 @@ pprExpFlagsPrec flags prec expression =
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
      CaseE {expScrutinee = e, expAlternatives = [alt1, alt2]} 
-         | altConstructor alt1 == pyonBuiltin the_True &&
-           altConstructor alt2 == pyonBuiltin the_False ->
+         | altConstructor alt1 `isPyonBuiltin` the_True &&
+           altConstructor alt2 `isPyonBuiltin` the_False ->
              pprIf flags e (altBody alt1) (altBody alt2)
-         | altConstructor alt2 == pyonBuiltin the_True &&
-           altConstructor alt1 == pyonBuiltin the_False ->
+         | altConstructor alt2 `isPyonBuiltin` the_True &&
+           altConstructor alt1 `isPyonBuiltin` the_False ->
              pprIf flags e (altBody alt2) (altBody alt1)
      CaseE {expScrutinee = e, expAlternatives = alts} ->
        let doc = text "case" <+> pprExpFlagsPrec flags precOuter e $$
@@ -164,10 +151,9 @@ pprAltFlags flags (Alt { altConstructor = c
                        , altParams = params
                        , altBody = body
                        }) =
-  let ty_args_doc = map (text "@" <>) $ map Gluon.pprExp ty_args
-      params_doc = map (parens . pprBinderFlags flags) params
-      pattern =
-        text (showLabel $ Gluon.conName c) <+> hsep (ty_args_doc ++ params_doc)
+  let ty_args_doc = map (text "@" <>) $ map pprSFType ty_args
+      params_doc = [parens $ pprPatFlags flags p | p <- params]
+      pattern = pprVar c <+> sep (ty_args_doc ++ params_doc)
       body_doc = pprExpFlagsPrec flags precOuter body 
   in hang (pattern <> text ".") 2 body_doc
 
@@ -185,7 +171,7 @@ pprFunParameters isLambda flags fun = sep param_doc
       -- Value parameters
       map (parens . pprPatFlags flags) (funParams fun) ++
       -- Return type
-      [introduce_return_type $ Gluon.pprExp (funReturnType fun)]
+      [introduce_return_type $ pprSFType $ funReturnType fun]
 
     introduce_return_type t
       | isLambda  = nest (-3) $ text "->" <+> t

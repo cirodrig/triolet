@@ -15,10 +15,11 @@ import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Error
 import Gluon.Common.Label
 import Gluon.Common.SourcePos
-import qualified Gluon.Core
+import Gluon.Common.Supply
+import Gluon.Core.Level
 import Globals
 import qualified SystemF.Syntax as SystemF
-import qualified SystemF.Builtins as SystemF
+import qualified Builtins.Builtins as SystemF
 import Untyped.Builtins
 import Untyped.Data
 import Untyped.Syntax
@@ -29,6 +30,7 @@ import Untyped.Unification
 import Untyped.Classes
 import Untyped.TypeAssignment
 import Untyped.TypeInferenceEval
+import Type.Var(Var, mkAnonymousVar)
 
 zipWithM3 :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
 zipWithM3 f (x:xs) (y:ys) (z:zs) = do
@@ -91,7 +93,7 @@ requirePredicate p = require [p]
 -- | Require the given type to have a parameter-passing convention
 requirePassable :: HMType -> Inf ()
 requirePassable ty = do 
-  require [ty `IsInst` tiBuiltin the_Passable]
+  require [ty `IsInst` tiBuiltin the_Repr]
 
 -- | Add a constraint to the context
 require :: Constraint -> Inf ()
@@ -133,7 +135,7 @@ instantiateVariable pos v = Inf $ \env ->
          instantiateTypeAssignment pos ass
          
        -- There must be a parameter passing convention for this type
-       let cst = ty `IsInst` tiBuiltin the_Passable
+       let cst = ty `IsInst` tiBuiltin the_Repr
 
        return (cst:constraint, vars, placeholders, (val, ty))
 
@@ -430,8 +432,8 @@ constraintToProofEnvironment cst = mapAndUnzipM convert cst
   where
     convert prd = do
       -- Create a variable to hold the proof object
-      v_id <- getNextVarIdent
-      let v = Gluon.Core.mkAnonymousVariable v_id Gluon.Core.ObjectLevel
+      v_id <- withTheNewVarIdentSupply supplyValue
+      let v = mkAnonymousVar v_id ObjectLevel
       
       let exp = mkVarE noSourcePos v
           pat = mkVarP v (convertPredicate prd) 
@@ -485,7 +487,7 @@ inferExpressionType expression =
      TupleE {expFields = fs} -> do
        (f_exps, f_tys) <- inferExpressionTypes fs
        let -- Create the tuple expression
-           tuple_con = SystemF.getPyonTupleCon' $ length f_tys
+           tuple_con = SystemF.pyonTupleCon $ length f_tys
            f_tys' = map convertHMType f_tys
            tuple_expr = mkPolyCallE pos (mkConE pos tuple_con) f_tys' f_exps
        return (tuple_expr, tupleType f_tys)
@@ -626,9 +628,8 @@ inferExportType (Export { exportAnnotation = ann
   inst_exp <- instantiate_export_var pos var ty
   
   -- Create a variable for each parameter
-  param_var_ids <- liftIO $ replicateM (length dom) getNextVarIdent
-  let param_vars = [Gluon.Core.mkAnonymousVariable n Gluon.Core.ObjectLevel
-                   | n <- param_var_ids]
+  param_var_ids <- liftIO $ withTheNewVarIdentSupply $ \var_supply -> replicateM (length dom) (supplyValue var_supply)
+  let param_vars = [mkAnonymousVar n ObjectLevel | n <- param_var_ids]
 
   -- Create a new function that calls the exported variable
   let call_args = map (mkVarE pos) param_vars

@@ -12,6 +12,7 @@ Data-Dir:	dist/build/data
 Data-Files:
   symbols/SFBuiltin.glu
   symbols/coretypes
+  symbols/coretypes2
   include/pyon.h
   include/pyon_list.h
   testcases/*.py
@@ -77,6 +78,7 @@ Executable pyon
     SystemF.ElimPatternMatching
     SystemF.PartialEval
     SystemF.Print
+    SystemF.Representation
     SystemF.StreamSpecialize
     SystemF.Syntax
     SystemF.Typecheck
@@ -151,5 +153,9 @@ Executable pyon
     LowLevel.ReferenceCounting
     LowLevel.Rename
     LowLevel.Types
-    Type.Var
+    Type.Compare
+    Type.Environment
+    Type.Eval
+    Type.Rename
     Type.Type
+    Type.Var

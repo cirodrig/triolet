@@ -4,8 +4,8 @@ module Type.Var
        (Var, varID, varName, 
         VarID,
         pprVar,
-        mkVar, mkAnonymousVar,
-        newVar, newAnonymousVar)
+        mkVar, mkAnonymousVar, mkClonedVar,
+        newVar, newAnonymousVar, newClonedVar)
 where
 
 import Text.PrettyPrint.HughesPJ
@@ -58,6 +58,11 @@ mkVar = Var
 mkAnonymousVar :: VarID -> Level -> Var
 mkAnonymousVar id lv = mkVar id Nothing lv
 
+mkClonedVar :: VarID -> Var -> Var
+mkClonedVar id old_v =
+  let new_lab = fmap cloneLabel $ varName old_v
+  in mkVar id new_lab (getLevel old_v)
+
 newVar :: (Monad m, Supplies m VarID) => Maybe Label -> Level -> m Var
 newVar lab lv = do
   id <- fresh
@@ -65,6 +70,11 @@ newVar lab lv = do
 
 newAnonymousVar :: (Monad m, Supplies m VarID) => Level -> m Var
 newAnonymousVar lv = newVar Nothing lv
+
+newClonedVar :: (Monad m, Supplies m VarID) => Var -> m Var
+newClonedVar v = do
+  id <- fresh
+  return $ mkClonedVar id v
 
 pprVar :: Var -> Doc
 pprVar v = text (show v)

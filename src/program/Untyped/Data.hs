@@ -16,11 +16,12 @@ import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Gluon.Common.SourcePos
-import Gluon.Core(Structure)
-import qualified Gluon.Core as Gluon
+import Gluon.Core(Structure, SynInfo)
 import SystemF.Syntax as SystemF
 import Untyped.Kind
 import {-# SOURCE #-} Untyped.Syntax as Untyped
+import qualified Type.Type as SystemF
+import qualified Type.Var as SystemF
 
 -- | The value bound to a variable in the parser.
 --
@@ -161,8 +162,8 @@ data Class =
   , clsMethods :: [ClassMethod]
   , clsName :: String
   , clsInstances :: [Instance]
-  , clsTypeCon :: !Gluon.Con    -- ^ Class dictionary type constructor
-  , clsDictCon :: Gluon.Con     -- ^ Class dictionary constructor
+  , clsTypeCon :: !SystemF.Var    -- ^ Class dictionary type constructor
+  , clsDictCon :: SystemF.Var     -- ^ Class dictionary constructor
   }
 
 -- | A class method interface declaration.  Information used for class
@@ -188,12 +189,12 @@ data Instance =
   , insType :: HMType
     -- | If given, this global constructor is the instance's predefined value.
     -- The constructor is parameterized over the qvars and constraint.
-  , insCon :: !(Maybe Gluon.Con)
+  , insCon :: !(Maybe SystemF.Var)
   , insMethods :: [InstanceMethod]
   }
 
 -- | Each instance method is defined as some constructor in System F
-newtype InstanceMethod = InstanceMethod {inmName :: Gluon.Con}
+newtype InstanceMethod = InstanceMethod {inmName :: SystemF.Var}
 
 -- | A derivation of a predicate, containing enough information to reconstruct
 -- the derivation steps in the form of a proof object
@@ -239,14 +240,14 @@ instance Structure TI
 data instance SystemF.SFExpOf TI TI =
     -- | A placeholder for a recursive variable
     RecVarPH
-    { phExpInfo :: Gluon.SynInfo
+    { phExpInfo :: SynInfo
     , phExpVariable :: Untyped.Variable
     , phExpTyVar :: TyCon
     , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
     }
     -- | A placeholder for a class dictionary
   | DictPH
-    { phExpInfo :: Gluon.SynInfo
+    { phExpInfo :: SynInfo
     , phExpPredicate :: Predicate
     , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
     }
@@ -257,6 +258,11 @@ data instance SystemF.SFExpOf TI TI =
     --
     -- This kind of expression only comes from built-in terms.
   | TIRecExp SystemF.RExp
+
+data instance SystemF.Pat TI =
+    TIWildP TIType
+  | TIVarP SystemF.Var TIType
+  | TITupleP [SystemF.Pat TI]
 
 newtype instance SystemF.AltOf TI TI = TIAlt (SystemF.AltOf Rec TI)
 newtype instance SystemF.FunOf TI TI = TIFun (SystemF.FunOf Rec TI)
@@ -272,6 +278,6 @@ type Placeholder = TIExp
 type Placeholders = [Placeholder]
 
 -- | Types are not evaluated until type inference completes
-newtype instance Gluon.ExpOf TI TI = DelayedType (IO Gluon.RExp)
+newtype instance SystemF.SFType TI = DelayedType (IO SystemF.RType)
 
-type TIType = SystemF.TypeOf TI TI
+type TIType = SystemF.SFType TI

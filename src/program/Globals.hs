@@ -10,6 +10,7 @@ import qualified CParser.Driver as CParser
 import qualified CParser2.Driver as CParser2
 import qualified LowLevel.Syntax as LowLevel
 import GlobalVar
+import qualified Type.Environment
 import qualified Type.Type
 import qualified Type.Var
 
@@ -50,8 +51,13 @@ the_coreTypes :: InitGlobalVar (CParser.ConTable)
 {-# NOINLINE the_coreTypes #-}
 the_coreTypes = defineInitGlobalVar ()
 
+-- | The types of System F terms.
+the_systemFTypes :: InitGlobalVar Type.Environment.TypeEnv
+{-# NOINLINE the_systemFTypes #-}
+the_systemFTypes = defineInitGlobalVar ()
+
 -- | The types of Core terms.
-the_newCoreTypes :: InitGlobalVar (CParser2.ConTable)
+the_newCoreTypes :: InitGlobalVar Type.Environment.TypeEnv
 {-# NOINLINE the_newCoreTypes #-}
 the_newCoreTypes = defineInitGlobalVar ()
 

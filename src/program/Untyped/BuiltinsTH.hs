@@ -6,6 +6,7 @@ import Language.Haskell.TH(Strict(..))
 import Language.Haskell.TH.Syntax(Lift(..))
 import Gluon.Common.THRecord
 import Gluon.Core hiding(Kind)
+import qualified Type.Var
 import Untyped.Data
 import Untyped.Kind
 import Untyped.Syntax
@@ -64,7 +65,7 @@ pyonOtherGlobals =
 -- | All predefined class names
 pyonClasses :: [String]
 pyonClasses =
-  ["Passable", "Traversable",
+  ["Repr", "Traversable",
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Vector"]
@@ -75,7 +76,7 @@ pyonClasses =
 tiBuiltinSpecification =
   recordDef "TIBuiltins" fields
   where
-    fields = [('_':name, IsStrict, [t| Con |])
+    fields = [('_':name, IsStrict, [t| Type.Var.Var |])
              | name <- pyonSourceTypes ] ++ 
              [("_con_" ++ name, IsStrict, [t| TyCon |])
              | name <- pyonSourceTypes] ++

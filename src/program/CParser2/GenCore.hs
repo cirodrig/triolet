@@ -1,6 +1,6 @@
 
 {-# LANGUAGE ViewPatterns #-}
-module CParser2.GenCore (ConTable, createCoreTable) where
+module CParser2.GenCore (createCoreTable) where
 
 import qualified Data.IntMap as IntMap
 
@@ -12,9 +12,8 @@ import CParser2.AST
 import CParser2.LevelInference()
 import Type.Type((:::)(..))
 import qualified Type.Type as Type
+import Type.Environment
 import Type.Var
-
-type ConTable = IntMap.IntMap (Type.ReturnRepr ::: Type.Type)
 
 translateType :: Located (Type LevelInferred) -> Type.Type
 translateType lty =
@@ -44,12 +43,22 @@ translateReturnType (ReturnType rrepr ty) =
            WriteRT -> Type.WriteRT
   in repr Type.::: translateType ty
 
-translateDecl :: Decl LevelInferred -> (Var, Type.ReturnRepr ::: Type.Type)
-translateDecl (Decl v rt) = (v, translateReturnType rt)
+translateDataConDecl data_type_con decl =
+  let ty = translateReturnType $ dconType decl
+      params = map translateParamType $ dconParams decl
+      args = map translateReturnType $ dconArgs decl
+      rng = translateReturnType $ dconRng decl
+  in (dconVar decl, ty, DataConType params args rng data_type_con)
+      
+
+translateDecl :: Decl LevelInferred -> (TypeEnv -> TypeEnv)
+translateDecl (VarDecl v rt) = insertType v (translateReturnType rt)
+translateDecl (DataDecl t repr rt cons) =
+  let descr = DataTypeDescr t (translateReturnType rt) repr (map (translateDataConDecl t . unLoc) cons)
+  in insertDataType descr
 
 createCoreTable (Module decls) =
-  IntMap.fromList [(fromIdent $ varID v, rt)
-                  | d <- decls, let (v, rt) = translateDecl $ unLoc d]
+  foldr ($) wiredInTypeEnv $ map (translateDecl . unLoc) decls
 
 {-
 addressType = Core.ValRT Core.::: addr_type

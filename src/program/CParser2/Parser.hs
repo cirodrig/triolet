@@ -17,7 +17,7 @@ import Text.ParserCombinators.Parsec((<|>), (<?>), unexpected, choice,
 import CParser2.AST
 import CParser2.Lexer
 import Gluon.Common.SourcePos as PySrcPos
-
+import Type.Type(Repr(..))
 
 -- | The parser type
 type P a = PS.GenParser Token () a
@@ -124,6 +124,11 @@ literal :: P Lit
 literal = fmap IntL int <|>
           fmap FloatL float
         
+representation :: P Repr
+representation = (match ValTok >> return Value) <|>
+                 (match BoxTok >> return Boxed) <|>
+                 (match RefTok >> return Referenced)
+
 -- match the corresponding Repr Token
 returnRepr :: P ReturnRepr
 returnRepr = choice [match tok >> return repr | (tok, repr) <- reprs]
@@ -169,12 +174,35 @@ located p = do
  
 
 topDecl :: P (LDecl Parsed)
-topDecl = located $ do 
-  repr <- returnRepr
+topDecl = located (var_decl <|> datatype_decl) 
+  where
+    var_decl = do
+      declVar <- identifier
+      match ColonTok 
+      declType <- returnType
+      return $ VarDecl declVar declType
+
+    datatype_decl = do
+      match DataTok
+      repr <- representation
+      declVar <- identifier
+      match ColonTok 
+      declType <- returnType
+      match LBraceTok
+      cons <- dataConDecl `sepEndBy` match SemiTok
+      match RBraceTok
+      return $ DataDecl declVar repr declType cons
+
+dataConDecl = located $ do
   declVar <- identifier
-  match ColonTok 
-  declType <- located anyPType
-  return $ Decl declVar (ReturnType repr declType)
+  match ColonTok
+  declType <- returnType
+  match CommaTok
+  params <- parens $ anyParamT `sepBy` match CommaTok
+  args <- parens $ returnType `sepBy` match CommaTok
+  match ColonTok
+  rng <- returnType
+  return $ DataConDecl declVar declType params args rng
 
 -- No restrictions on what comes next in the token stream
 anyPType :: P PType

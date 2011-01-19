@@ -15,7 +15,7 @@ import Gluon.Common.Error
 import Gluon.Common.Label
 import Gluon.Common.THRecord
 import qualified Gluon.Core as Gluon
-import qualified SystemF.Builtins as SystemF
+import qualified Builtins.Builtins as SystemF
 import qualified SystemF.Syntax as SystemF
 import Untyped.Data
 import Untyped.Kind
@@ -26,6 +26,7 @@ import Untyped.GenSystemF
 import Untyped.Unification
 import Untyped.BuiltinsTH
 import Untyped.Builtins
+import Type.Type
 
 pyonBuiltin = SystemF.pyonBuiltin
 
@@ -34,7 +35,7 @@ f @@ g = appTy f g
 -- | Create an 'untyped' type constructor that corresponds to the given
 -- System F type constructor
 builtinTyCon name kind sf_con =
-  let y = Gluon.mkInternalConE sf_con
+  let y = SystemF.SFType (VarT sf_con)
   in mkTyCon (builtinLabel name) kind y
 
 -------------------------------------------------------------------------------
@@ -95,12 +96,18 @@ mkEqClass = mdo
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
         Nothing
-        (fromEqDict SystemF.the_EqDict_int)
+        [ InstanceMethod $
+          pyonBuiltin SystemF.the_EqDict_int_eq
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_EqDict_int_ne]
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
         Nothing
-        (fromEqDict SystemF.the_EqDict_float)
+        [ InstanceMethod $
+          pyonBuiltin SystemF.the_EqDict_float_eq
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_EqDict_float_ne]
   tuple2_instance <- do
     a <- newTyVar Star Nothing
     b <- newTyVar Star Nothing
@@ -111,16 +118,12 @@ mkEqClass = mdo
                       , insClass = cls
                       , insType = TupleTy 2 @@ ConTy a @@ ConTy b
                       , insCon = Nothing
-                      , insMethods = fromEqDict SystemF.the_EqDict_Tuple2
+                      , insMethods = [ InstanceMethod $
+                                       pyonBuiltin SystemF.the_EqDict_Tuple2_eq 
+                                     , InstanceMethod $
+                                       pyonBuiltin SystemF.the_EqDict_Tuple2_ne]
                       }
   return cls
-  where
-    fromEqDict field_name =
-      case pyonBuiltin field_name
-      of SystemF.EqDictMembers eq ne ->
-           [ InstanceMethod eq
-           , InstanceMethod ne
-           ]
 
 mkOrdClass = mdo
   a <- newTyVar Star Nothing
@@ -145,12 +148,26 @@ mkOrdClass = mdo
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
         Nothing
-        (fromOrdDict SystemF.the_OrdDict_int)
+        [ InstanceMethod $
+          pyonBuiltin SystemF.the_OrdDict_int_lt
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_OrdDict_int_le
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_OrdDict_int_gt
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_OrdDict_int_ge]
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
         Nothing
-        (fromOrdDict SystemF.the_OrdDict_float)
+        [ InstanceMethod $
+          pyonBuiltin SystemF.the_OrdDict_float_lt
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_OrdDict_float_le
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_OrdDict_float_gt
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_OrdDict_float_ge]
 
   tuple2_instance <- do
     a <- newTyVar Star Nothing
@@ -162,18 +179,16 @@ mkOrdClass = mdo
                       , insClass = cls
                       , insType = TupleTy 2 @@ ConTy a @@ ConTy b
                       , insCon = Nothing
-                      , insMethods = fromOrdDict SystemF.the_OrdDict_Tuple2
+                      , insMethods = [ InstanceMethod $
+                                       pyonBuiltin SystemF.the_OrdDict_Tuple2_lt
+                                     , InstanceMethod $
+                                       pyonBuiltin SystemF.the_OrdDict_Tuple2_le
+                                     , InstanceMethod $
+                                       pyonBuiltin SystemF.the_OrdDict_Tuple2_gt
+                                     , InstanceMethod $
+                                       pyonBuiltin SystemF.the_OrdDict_Tuple2_ge] 
                       }
   return cls
-  where
-    fromOrdDict field_name =
-      case pyonBuiltin field_name
-      of SystemF.OrdDictMembers lt le gt ge ->
-           [ InstanceMethod lt
-           , InstanceMethod le
-           , InstanceMethod gt
-           , InstanceMethod ge
-           ]
 
 mkTraversableClass = mdo
   t <- newTyVar (Star :-> Star) Nothing
@@ -207,19 +222,20 @@ mkTraversableClass = mdo
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_list)
         Nothing
-        (fromTraversableDict SystemF.the_TraversableDict_list)
+        [ InstanceMethod $
+          pyonBuiltin SystemF.the_TraversableDict_list_traverse
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_TraversableDict_list_build]
       iter_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_iter)
         Nothing
-        (fromTraversableDict SystemF.the_TraversableDict_Stream)
+        [ InstanceMethod $
+          pyonBuiltin SystemF.the_TraversableDict_Stream_traverse
+        , InstanceMethod $
+          pyonBuiltin SystemF.the_TraversableDict_Stream_build]
 
   return cls
-  where
-    fromTraversableDict field_name =
-      case pyonBuiltin field_name
-      of SystemF.TraversableDictMembers iter build -> [ InstanceMethod iter
-                                                      , InstanceMethod build]
 
 mkAdditiveClass = mdo
   a <- newTyVar Star Nothing
@@ -245,12 +261,18 @@ mkAdditiveClass = mdo
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
         Nothing
-        (fromAdditiveDict SystemF.the_AdditiveDict_int)
+        [ InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_int_add
+        , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_int_sub
+        , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_int_negate
+        , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_int_zero]
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
         Nothing
-        (fromAdditiveDict SystemF.the_AdditiveDict_float)
+        [ InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_float_add
+        , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_float_sub
+        , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_float_negate
+        , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_float_zero]
   
   b <- newTyVar Star Nothing
   let complex_instance =
@@ -266,15 +288,6 @@ mkAdditiveClass = mdo
                    , InstanceMethod (pyonBuiltin SystemF.the_zero_complex)]
                  }
   return cls
-  where
-    fromAdditiveDict field_name =
-      case pyonBuiltin field_name
-      of SystemF.AdditiveDictMembers add sub neg zero ->
-           [ InstanceMethod add
-           , InstanceMethod sub
-           , InstanceMethod neg
-           , InstanceMethod zero
-           ]
 
 mkMultiplicativeClass = mdo
   a <- newTyVar Star Nothing
@@ -298,19 +311,24 @@ mkMultiplicativeClass = mdo
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_int)
         Nothing
-        (fromMultiplicativeDict SystemF.the_MultiplicativeDict_int)
+        [ InstanceMethod $
+          pyonBuiltin $ SystemF.the_MultiplicativeDict_int_mul
+        , InstanceMethod $
+          pyonBuiltin $ SystemF.the_MultiplicativeDict_int_fromInt
+        , InstanceMethod $
+          pyonBuiltin $ SystemF.the_MultiplicativeDict_int_one]
       float_instance =
         monomorphicInstance cls
         (ConTy $ tiBuiltin the_con_float)
         Nothing
-        (fromMultiplicativeDict SystemF.the_MultiplicativeDict_float)
+        [ InstanceMethod $
+          pyonBuiltin $ SystemF.the_MultiplicativeDict_float_mul
+        , InstanceMethod $
+          pyonBuiltin $ SystemF.the_MultiplicativeDict_float_fromInt
+        , InstanceMethod $
+          pyonBuiltin $ SystemF.the_MultiplicativeDict_float_one]
   
   return cls
-  where
-    fromMultiplicativeDict field_name =
-      case pyonBuiltin field_name
-      of SystemF.MultiplicativeDictMembers mul fromInt one ->
-           [InstanceMethod mul, InstanceMethod fromInt, InstanceMethod one]
   
 mkVectorClass = mdo
   a <- newTyVar Star Nothing
@@ -338,33 +356,33 @@ mkPassableClass = mdo
   let cls = Class { clsParam = a
                   , clsConstraint = []
                   , clsMethods = []
-                  , clsName = "Passable"
+                  , clsName = "Repr"
                   , clsInstances = [int_instance, float_instance,
                                     bool_instance, none_instance,
                                     complex_instance,
                                     any_instance,
                                     list_instance, iter_instance,
                                     tuple2_instance]
-                  , clsTypeCon = pyonBuiltin SystemF.the_PassConv
+                  , clsTypeCon = pyonBuiltin SystemF.the_Repr
                   , clsDictCon =
-                    internalError "Class 'Passable' has no dictionary constructor"
+                    internalError "Class 'Repr' has no dictionary constructor"
                   }
   
   let int_instance =
         monomorphicInstance cls (ConTy $ tiBuiltin the_con_int)
-        (Just $ pyonBuiltin SystemF.the_passConv_int) []
+        (Just $ pyonBuiltin SystemF.the_repr_int) []
   let float_instance =
         monomorphicInstance cls (ConTy $ tiBuiltin the_con_float)
-        (Just $ pyonBuiltin SystemF.the_passConv_float) []
+        (Just $ pyonBuiltin SystemF.the_repr_float) []
   let bool_instance =
         monomorphicInstance cls (ConTy $ tiBuiltin the_con_bool)
-        (Just $ pyonBuiltin SystemF.the_passConv_bool) []
+        (Just $ pyonBuiltin SystemF.the_repr_bool) []
   let none_instance =
         monomorphicInstance cls (ConTy $ tiBuiltin the_con_NoneType)
-        (Just $ pyonBuiltin SystemF.the_passConv_NoneType) []
+        (Just $ pyonBuiltin SystemF.the_repr_NoneType) []
   let any_instance =
         monomorphicInstance cls (ConTy $ tiBuiltin the_con_Any)
-        (Just $ pyonBuiltin SystemF.the_passConv_Any) []
+        (Just $ pyonBuiltin SystemF.the_repr_Any) []
         
   b <- newTyVar Star Nothing
   let list_instance =
@@ -373,7 +391,7 @@ mkPassableClass = mdo
         , insConstraint = [passable $ ConTy b]
         , insClass = cls
         , insType = ConTy (tiBuiltin the_con_list) @@ ConTy b
-        , insCon = Just $ pyonBuiltin SystemF.the_passConv_list
+        , insCon = Just $ pyonBuiltin SystemF.the_repr_list
         , insMethods = []
         }
   let iter_instance =
@@ -382,7 +400,7 @@ mkPassableClass = mdo
         , insConstraint = [passable $ ConTy b]
         , insClass = cls
         , insType = ConTy (tiBuiltin the_con_iter) @@ ConTy b
-        , insCon = Just $ pyonBuiltin SystemF.the_passConv_iter
+        , insCon = Just $ pyonBuiltin SystemF.the_repr_iter
         , insMethods = []
         }
   let complex_instance =
@@ -391,7 +409,7 @@ mkPassableClass = mdo
         , insConstraint = [passable $ ConTy b]
         , insClass = cls
         , insType = ConTy (tiBuiltin the_con_complex) @@ ConTy b
-        , insCon = Just $ pyonBuiltin SystemF.the_passConv_complex
+        , insCon = Just $ pyonBuiltin SystemF.the_repr_complex
         , insMethods = []
         }
   
@@ -402,7 +420,7 @@ mkPassableClass = mdo
         , insConstraint = [passable $ ConTy b, passable $ ConTy c]
         , insClass = cls
         , insType = TupleTy 2 @@ ConTy b @@ ConTy c
-        , insCon = Just $ SystemF.getPyonTuplePassConv' 2
+        , insCon = Just $ SystemF.pyonTupleReprCon 2
         , insMethods = []
         }
   
@@ -411,7 +429,7 @@ mkPassableClass = mdo
 -------------------------------------------------------------------------------
 -- Global function initialization
 
-passable t = t `IsInst` tiBuiltin the_Passable
+passable t = t `IsInst` tiBuiltin the_Repr
 
 mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
   let tT = ConTy t
@@ -499,7 +517,7 @@ mkBinaryIntType =
 mkGlobalVar name typ con = do
   scm <- typ
   let exp pos = TIRecExp $
-                SystemF.ConE (Gluon.mkSynInfo pos Gluon.ObjectLevel) con
+                SystemF.VarE (Gluon.mkSynInfo pos Gluon.ObjectLevel) con
   let ass = polymorphicAssignment scm exp
   predefinedVariable (Just $ builtinLabel name) ass
 
@@ -541,7 +559,7 @@ initializeTIBuiltins = do
             , ("Additive", [| mkAdditiveClass |])
             , ("Multiplicative", [| mkMultiplicativeClass |])
             , ("Vector", [| mkVectorClass |])
-            , ("Passable", [| mkPassableClass |])
+            , ("Repr", [| mkPassableClass |])
             ]
 
           globals =

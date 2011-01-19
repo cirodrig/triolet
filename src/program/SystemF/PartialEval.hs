@@ -16,9 +16,12 @@ import Data.Maybe
 
 import Gluon.Common.SourcePos
 import Gluon.Common.Error
-import Gluon.Core(mkSynInfo, mkInternalConE, Level(..))
-import SystemF.Builtins
+import Gluon.Core(mkSynInfo)
+import Gluon.Core.Level
+import Builtins.Builtins
 import SystemF.Syntax
+import Type.Var
+import Type.Type
 
 catEndo :: [a -> a] -> a -> a
 catEndo fs x = foldr ($) x fs
@@ -44,8 +47,8 @@ deconstructTupleExp expression =
   -- If the operator is a tuple value constructor, then return the arguments
   -- otherwise, return nothing
   case uncurryUnpackPolymorphicCall expression
-  of Just (ConE {expCon = con}, ty_args, args)
-       | Just con == getPyonTupleCon (length args) -> Just args
+  of Just (VarE {expVar = con}, ty_args, args)
+       | con == pyonTupleCon (length args) -> Just args
      _ -> Nothing
 
 -- | Uncurry a function call.
@@ -85,7 +88,7 @@ unpackPolymorphicCallAndBindings expression =
             Just ((inf, pat, val) : bindings, op, ty_args, args)
           Nothing -> Nothing
      _ -> case uncurryUnpackPolymorphicCall expression
-          of Just (op, ty_args, args) -> Just ([], op, ty_args, args)
+          of Just (op, ty_args, args) -> Just ([], op, map SFType ty_args, args)
              Nothing -> Nothing
 
 applyBindings :: [(ExpInfo, RPat, RExp)] -> RExp -> RExp
@@ -102,7 +105,6 @@ isSimpleExp :: RExp -> Bool
 isSimpleExp expression =
   case expression
   of VarE {} -> True
-     ConE {} -> True
      LitE {} -> True
      TyAppE {expOper = e} -> isSimpleExp e
      CallE {expOper = op} -> is_dictionary_operator op
@@ -113,7 +115,7 @@ isSimpleExp expression =
   where
     -- Dictionary constructor expressions are inlined to enable later
     -- optimizations
-    is_dictionary_operator (ConE {expCon = c}) = isDictionaryCon c
+    is_dictionary_operator (VarE {expVar = c}) = isDictionaryCon c
     is_dictionary_operator (TyAppE {expOper = e}) = is_dictionary_operator e
     is_dictionary_operator (LetE {expBody = b}) = is_dictionary_operator b
     is_dictionary_operator _ = False
@@ -180,23 +182,22 @@ pevalExp expression@(uncurryUnpackPolymorphicCall -> Just (op, ty_args, args)) =
   op' <- pevalExp op
 
   -- TODO: Try to statically evaluate this function
-  return $ pevalApp (expInfo expression) op' ty_args args'
+  return $ pevalApp (expInfo expression) op' (map SFType ty_args) args'
 
 pevalExp expression =
   case expression
-  of VarE {expVar = v} -> lookupVarDefault expression v
-     ConE {expInfo = inf, expCon = c} 
+  of VarE {expInfo = inf, expVar = v}
        -- Replace constants with literal values.  This helps 
        -- representation selection represent these as values.
-       | c `isPyonBuiltin` zeroMember . the_AdditiveDict_int ->
-           return $ LitE inf (IntL 0) (mkInternalConE $ pyonBuiltin the_int)
-       | c `isPyonBuiltin` zeroMember . the_AdditiveDict_float ->
-           return $ LitE inf (FloatL 0) (mkInternalConE $ pyonBuiltin the_float)
-       | c `isPyonBuiltin` oneMember . the_MultiplicativeDict_int ->
-           return $ LitE inf (IntL 1) (mkInternalConE $ pyonBuiltin the_int)
-       | c `isPyonBuiltin` oneMember . the_MultiplicativeDict_float ->
-           return $ LitE inf (FloatL 1) (mkInternalConE $ pyonBuiltin the_float)
-       | otherwise -> return expression
+       | v `isPyonBuiltin` the_AdditiveDict_int_zero ->
+           return $ LitE inf (IntL 0) (SFType $ VarT $ pyonBuiltin the_int)
+       | v `isPyonBuiltin` the_AdditiveDict_float_zero ->
+           return $ LitE inf (FloatL 0) (SFType $ VarT $ pyonBuiltin the_float)
+       | v `isPyonBuiltin` the_MultiplicativeDict_int_one ->
+           return $ LitE inf (IntL 1) (SFType $ VarT $ pyonBuiltin the_int)
+       | v `isPyonBuiltin` the_MultiplicativeDict_float_one ->
+           return $ LitE inf (FloatL 1) (SFType $ VarT $ pyonBuiltin the_float)
+       | otherwise -> lookupVarDefault expression v
      LitE {} -> return expression
      TyAppE {expOper = op} -> do
        op' <- pevalExp op
@@ -242,16 +243,16 @@ pevalExp expression =
 pevalApp inf op tys args =
   case known_oper
   of Just con
-       | con `isPyonBuiltin` fromIntMember . the_MultiplicativeDict_int ->
+       | con `isPyonBuiltin` the_MultiplicativeDict_int_fromInt ->
            -- fromInt (n :: Int) = n
            case args of [arg] -> arg
-       | con `isPyonBuiltin` fromIntMember . the_MultiplicativeDict_float ->
+       | con `isPyonBuiltin` the_MultiplicativeDict_float_fromInt ->
            -- fromInt (n :: Float) = n as a float
            case args
            of [LitE {expLit = IntL n}] ->
                 LitE { expInfo = inf
                      , expLit = FloatL (fromIntegral n)
-                     , expType = mkInternalConE (pyonBuiltin the_float)}
+                     , expType = SFType $ VarT (pyonBuiltin the_float)}
               _ -> internalError "pevalApp"
      _ ->
        -- Can't evaluate; rebuild the call expression
@@ -262,7 +263,7 @@ pevalApp inf op tys args =
     -- around the operator.  Look through those.
     known_oper = find_known_oper op
       where
-        find_known_oper (ConE {expCon = c}) = Just c
+        find_known_oper (VarE {expVar = v}) = Just v
         find_known_oper (LetE {expBody = body}) = find_known_oper body
         find_known_oper (LetrecE {expBody = body}) = find_known_oper body
         find_known_oper _ = Nothing
@@ -280,7 +281,7 @@ eliminateCase :: SourcePos -> RExp -> [Alt Rec] -> Maybe RExp
 eliminateCase pos scrutinee alternatives =
   -- Is the scrutinee a constructor application?
   case unpackPolymorphicCallAndBindings scrutinee
-  of Just (bindings, ConE {expCon = scrutinee_con}, ty_args, args) ->
+  of Just (bindings, VarE {expVar = scrutinee_con}, ty_args, args) ->
        -- Find a matching alternative
        case find ((scrutinee_con ==) . altConstructor) alternatives
        of Just alt ->
@@ -294,9 +295,9 @@ eliminateCase pos scrutinee alternatives =
           Nothing -> Nothing    -- No matching alternative
      _ -> Nothing               -- Cannot determine constructor of scrutinee
   where
-    make_let (arg, Binder v ty ()) expr =
+    make_let (arg, pat) expr =
       LetE { expInfo = mkSynInfo pos ObjectLevel
-           , expBinder = VarP v ty
+           , expBinder = pat
            , expValue = arg
            , expBody = expr
            }

@@ -29,6 +29,7 @@ import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.Typecheck as SystemF
 import qualified SystemF.Flatten.EffectInference as SystemF
 import qualified SystemF.Print as SystemF
+import qualified SystemF.Representation as SystemF
 import qualified Core.Lowering as Core
 import qualified Core.Print as Core
 import qualified Core.PartialEval as Core
@@ -49,6 +50,8 @@ import qualified LowLevel.InterfaceFile as LowLevel
 import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
+
+import CParser2.Driver()
 
 main = do
   -- Initialiation
@@ -143,11 +146,8 @@ compilePyonToPyonAsm path text = do
   -- Convert to core
   flat_mod <- do
     tc_mod <- SystemF.typeCheckModule sf_mod
-    case tc_mod of
-      Left errs -> do mapM_ (putStrLn . showTypeCheckError) errs
-                      fail "Type checking failed in core"
-      Right m -> do SystemF.inferSideEffects m
-                    -- SystemF.flatten m
+    _ <- SystemF.inferRepresentations tc_mod -- Incomplete
+    SystemF.inferSideEffects tc_mod
 
   putStrLn ""
   putStrLn "Core"

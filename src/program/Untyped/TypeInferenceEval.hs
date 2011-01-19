@@ -11,6 +11,8 @@ import Control.Monad
 import Gluon.Common.Error
 import qualified Gluon.Core.Syntax as Gluon
 import SystemF.Syntax
+import Type.Type
+import Type.Var
 import qualified Untyped.Data as Untyped
 
 evType :: Untyped.TIType -> IO RType
@@ -20,13 +22,10 @@ evTyParam :: TyPat Untyped.TI -> IO RTyPat
 evTyParam (TyPat v t) = TyPat v `liftM` evType t
 
 evPat :: Pat Untyped.TI -> IO RPat
-evPat (WildP t)   = WildP `liftM` evType t
-evPat (VarP v t)  = VarP v `liftM` evType t
-evPat (TupleP ps) = TupleP `liftM` mapM evPat ps
+evPat (Untyped.TIWildP t)   = WildP `liftM` evType t
+evPat (Untyped.TIVarP v t)  = VarP v `liftM` evType t
+evPat (Untyped.TITupleP ps) = TupleP `liftM` mapM evPat ps
 
-evBinder :: Gluon.Binder Untyped.TI () -> IO (Gluon.Binder Rec ())
-evBinder (Gluon.Binder v t ()) = do t' <- evType t
-                                    return $ Gluon.Binder v t' ()
 
 evExp :: Untyped.TIExp -> IO RExp
 evExp expression =
@@ -36,7 +35,6 @@ evExp expression =
      Untyped.TIExp e ->
        case e
        of VarE info v   -> return $ VarE info v
-          ConE info c   -> return $ ConE info c
           LitE info l t -> do t' <- evType t
                               return $ LitE info l t'
           TyAppE info op t -> do op' <- evExp op
@@ -65,7 +63,7 @@ evExp expression =
 evAlt (Untyped.TIAlt (Alt c ty_params params body)) = do
   ty_params' <- mapM evType ty_params
   body' <- evExp body
-  params' <- mapM evBinder params
+  params' <- mapM evPat params
   return $ Alt c ty_params' params' body'
 
 -- | Get the expression that was stored for a placeholder, and evaluate it

@@ -23,7 +23,8 @@ import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Error
 import Gluon.Common.MonadLogic
 import Gluon.Common.SourcePos
-import Gluon.Core(Level(..), Var(..))
+import Gluon.Common.Supply
+import Gluon.Core.Level
 import qualified Gluon.Core as Gluon
 import Untyped.Data
 import Untyped.HMType
@@ -31,8 +32,9 @@ import Untyped.Kind
 import Untyped.GenSystemF
 import Untyped.Builtins
 import qualified SystemF.Syntax as SystemF
-import qualified SystemF.Builtins as SystemF
+import qualified Builtins.Builtins as SystemF
 import Untyped.Unification
+import Type.Var
 import Globals
 
 pprList :: [Doc] -> Doc
@@ -55,7 +57,7 @@ isInstancePredicate _ = False
 
 -- | Somewhat of a hack.  Decide whether this is the distinguished type class
 -- for object layout information. 
-isPassableClass cls = clsName cls == "Passable"
+isPassableClass cls = clsName cls == "Repr"
 
 -------------------------------------------------------------------------------
 -- Context reduction
@@ -372,8 +374,8 @@ toProof pos env derivation =
 
      FunPassConvDerivation { conclusion = prd@(IsInst ty _)
                            } -> do
-       let con = SystemF.pyonBuiltin SystemF.the_passConv_owned
-           prf = mkTyAppE pos (mkConE pos con) (convertHMType ty)
+       let con = SystemF.pyonBuiltin SystemF.the_repr_owned
+           prf = mkTyAppE pos (mkVarE pos con) (convertHMType ty)
        return (True, [], prf)
        
      MagicDerivation {} -> do
@@ -388,7 +390,7 @@ toProof pos env derivation =
     -- update the environment
     toLocalProofs :: [Derivation]
                   -> ProofEnvironment
-                  -> (ProofEnvironment -> [Var] -> IO (TIExp, Placeholders))
+                  -> (ProofEnvironment -> [SystemF.Var] -> IO (TIExp, Placeholders))
                   -> IO (TIExp, Placeholders)
     toLocalProofs derivations env k = do
       (placeholders, proofs) <- toProofs pos env derivations
@@ -411,7 +413,7 @@ addToProofEnv :: SourcePos
               -> Derivation
               -> TIExp
               -> ProofEnvironment
-              -> (ProofEnvironment -> Var -> IO (TIExp, a))
+              -> (ProofEnvironment -> SystemF.Var -> IO (TIExp, a))
               -> IO (TIExp, a)
 addToProofEnv pos derivation proof env k =
   withLocalAssignment pos proof (convertPredicate $ conclusion derivation) $ \v ->
@@ -422,7 +424,7 @@ addToProofEnv pos derivation proof env k =
 addManyToProofEnv :: SourcePos
                   -> [(Derivation, TIExp)]
                   -> ProofEnvironment 
-                  -> (ProofEnvironment -> [Var] -> IO (TIExp, a))
+                  -> (ProofEnvironment -> [SystemF.Var] -> IO (TIExp, a))
                   -> IO (TIExp, a)
 addManyToProofEnv pos ((derivation, proof) : bindings) env k =
   addToProofEnv pos derivation proof env $ \env' v ->
@@ -432,18 +434,18 @@ addManyToProofEnv _ [] env k = k env []
 
 -- | Assign an expression to a new local variable over the scope of
 -- another expression.  A let-expression is constructed to bind the variable.
-withLocalAssignment :: SourcePos -> TIExp -> TIType -> (Var -> IO (TIExp, a)) 
+withLocalAssignment :: SourcePos -> TIExp -> TIType -> (SystemF.Var -> IO (TIExp, a)) 
                     -> IO (TIExp, a)
 withLocalAssignment pos rhs ty make_body = do
   -- Create new variable
-  id <- getNextVarIdent
-  let v = Gluon.mkAnonymousVariable id ObjectLevel
+  id <- withTheNewVarIdentSupply supplyValue
+  let v = mkAnonymousVar id ObjectLevel
   
   -- Create body
   (body, x) <- make_body v
   
   -- Create let expression
-  return (mkLetE pos (SystemF.VarP v ty) rhs body, x)
+  return (mkLetE pos (TIVarP v ty) rhs body, x)
 
 withLocalAssignments :: SourcePos
                      -> [(TIExp, TIType)] 

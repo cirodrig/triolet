@@ -2,15 +2,16 @@
 -}
 
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, UndecidableInstances #-}
-module CParser.PrettyAST() where
+module CParser2.PrettyAST() where
 
 import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Identifier
-import Gluon.Common.Label
+import LowLevel.Label
 import Gluon.Core(Var, conName)
-import CParser.Pretty
-import CParser.AST
+import CParser2.Pretty
+import CParser2.AST
+import Type.Type(Repr(..))
 
 pprWithHeading heading_name x = hang (text (heading_name ++ ":")) 2 (ppr x)
 
@@ -30,73 +31,69 @@ instance Pretty Lit where
 instance Pretty ResolvedVar where
   ppr (ResolvedVar var mlbl _) =
     case mlbl
-    of Just lbl -> text (showLabel lbl) <+> parens (text $ show var)
+    of Just lbl -> case labelLocalName lbl
+                   of Left nm -> text nm <+> parens (text $ show var)
        Nothing  -> text (show var) <+> text "(No label)"
-
--- Variable Name, ID, and Level
-instance Pretty LIVar where
-  ppr (LIVar v) = text (show v)
-  ppr (LICon c) = text (labelUnqualifiedName $ conName c)
-  ppr (LIKind k) = text "<KIND>"
 
 instance Pretty (Identifier ix) => Pretty (Type ix) where
   ppr iden =
     case iden
     of VarT var ->
          text "(VarT)" <+> ppr var
-       LitT lit ->
-         text "(LitT)" <+> ppr lit
        AppT oper args ->
        -- Not related to Pycore; $$ chosen to represent Application
          braces $
          text " " <> ppr oper <+> text "$$" <+> vcat (map ppr args) <> text " "
-       FunT param maybeEff range ->
+       FunT param range ->
          let param_doc = pprWithHeading "Parameter" param
-             eff_doc = case maybeEff
-                       of Nothing -> empty
-                          Just eff -> pprWithHeading "Effect" eff
              range_doc = pprWithHeading "ReturnType" range
-         in pprDocWithHeading "FunT" (param_doc $$ eff_doc $$ range_doc)
+         in pprDocWithHeading "FunT" (param_doc $$ range_doc)
                
+instance Pretty Repr where
+  ppr Value = text "val"
+  ppr Boxed = text "box"
+  ppr Referenced = text "ref"
 
 instance Pretty (Identifier ix) => Pretty (ParamType ix) where
-  ppr param =
-    case param
-    of ValuePT maybePvar ptype ->
-         let param_doc =
-               case maybePvar
-               of Nothing   -> empty
-                  Just pvar -> pprWithHeading "Variable" pvar
-         in text "--Value PT--" $$
-            param_doc $$
-            pprWithHeading "Type" ptype
-       BoxedPT ptype ->
-         text "--Boxed PT--" $$
-         pprWithHeading "Type" ptype
-       ReferencedPT paddr ptype ->
-         text "--Referenced PT--" $$
-         pprWithHeading "Address" paddr $$
-         pprWithHeading "Type" ptype
+  ppr (ParamType param_repr ptype) =
+    case param_repr
+    of ValuePT Nothing -> ordinary "val" 
+       ValuePT (Just pvar) -> text "val" <+> ppr pvar <+> text ":" <+> ppr ptype
+       BoxedPT -> ordinary "box"
+       ReadPT -> ordinary "read"
+       WritePT -> ordinary "write"
+    where
+      ordinary txt = text txt <+> ppr ptype
 
 instance Pretty (Identifier ix) => Pretty (ReturnType ix) where
   ppr (ReturnType repr rtype) =
     let repr_doc = text $ case repr
-                          of Value -> "--Value RT--"
-                             Boxed -> "--Boxed RT--"
-                             Reference -> "--Reference RT--"
+                          of ValueRT -> "--Value RT--"
+                             BoxedRT -> "--Boxed RT--"
+                             ReadRT -> "--Read RT--"
+                             WriteRT -> "--Write RT--"
     in repr_doc $$ pprWithHeading "Type" rtype
+
+instance Pretty (Identifier ix) => Pretty (DataConDecl ix) where
+  ppr (DataConDecl v ty params args rng) =
+    pprWithHeading "Variable" v $$
+    pprWithHeading "Type" ty $$
+    (vcat $ map ppr params) $$ 
+    (vcat $ map ppr args) $$ 
+    pprWithHeading "Constructed type" rng
 
 instance Pretty (Identifier ix) => Pretty (Decl ix) where
   ppr dec =
     case dec
-    of BoxedDecl dvar dtype ->
-         show_decl "BoxedDecl" $
+    of VarDecl dvar dtype ->
+         show_decl "Variable" $
          pprWithHeading "Variable" dvar $$ pprWithHeading "Type" dtype
-       DataDecl daddr dptr dtype ->
-         show_decl "DataDecl" $
-         pprWithHeading "Address" daddr $$
-         pprWithHeading "Pointer" dptr $$
-         pprWithHeading "Type" dtype
+       DataDecl dvar repr dtype cons ->
+         show_decl "Data type" $
+         pprWithHeading "Variable" dvar $$
+         pprWithHeading "Type" dtype $$
+         pprWithHeading "Representation" repr $$
+         nest 2 (vcat $ map ppr cons)
     where
       show_decl heading content =
         hang (text $ "*** " ++ heading ++ " ***") 1 content

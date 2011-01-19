@@ -29,11 +29,11 @@ import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Error
 import Gluon.Common.MonadLogic
 import Gluon.Common.SourcePos
+import Gluon.Common.Supply
 import Gluon.Core.Level
 import Gluon.Core.Builtins
 import Gluon.Core(SynInfo, mkSynInfo, internalSynInfo,
-                  Structure, Rec, ExpOf(..))
-import qualified Gluon.Core as Gluon
+                  Structure, Rec)
 import Globals
 import Export
 import Untyped.HMType
@@ -42,7 +42,9 @@ import Untyped.Unification
 import Untyped.Data
 import qualified Untyped.Syntax as Untyped
 import qualified SystemF.Syntax as SystemF
-import qualified SystemF.Builtins as SystemF
+import qualified Builtins.Builtins as SystemF
+import Type.Var
+import qualified Type.Type
 
 debugPlaceholders = False
 
@@ -189,7 +191,7 @@ setPlaceholderElaboration ph exp
       putMVar (phExpResolution ph) exp
   | otherwise = internalError "Not a placeholder"
 
-delayType :: Gluon.RExp -> TIType
+delayType :: SystemF.RType -> TIType
 delayType t = DelayedType (return t)
 
 objectSynInfo :: SynInfo
@@ -199,19 +201,19 @@ synInfo :: SourcePos -> SynInfo
 synInfo pos = mkSynInfo pos ObjectLevel
 
 mkWildP :: TIType -> SystemF.Pat TI
-mkWildP ty = SystemF.WildP ty
+mkWildP ty = TIWildP ty
 
 mkVarP :: SystemF.Var -> TIType -> SystemF.Pat TI 
-mkVarP v ty = SystemF.VarP v ty
+mkVarP v ty = TIVarP v ty
 
 mkTupleP :: [SystemF.Pat TI] -> SystemF.Pat TI
-mkTupleP fs = SystemF.TupleP fs
+mkTupleP fs = TITupleP fs
 
 mkVarE :: SourcePos -> SystemF.Var -> TIExp
 mkVarE pos v = TIExp $ SystemF.VarE (synInfo pos) v
 
-mkConE :: SourcePos -> Gluon.Con -> TIExp
-mkConE pos c = TIExp $ SystemF.ConE (synInfo pos) c
+mkConE :: SourcePos -> SystemF.Var -> TIExp
+mkConE pos c = TIExp $ SystemF.VarE (synInfo pos) c
 
 mkLitE :: SourcePos -> SystemF.Lit -> TIType -> TIExp
 mkLitE pos l t = TIExp $ SystemF.LitE (synInfo pos) l t
@@ -295,11 +297,11 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
 
   -- Create anonymous parameter variables
   parameter_vars <- replicateM (num_superclasses + num_methods) $ do
-    var_id <- getNextVarIdent
-    return $ Gluon.mkAnonymousVariable var_id ObjectLevel
+    var_id <- withTheNewVarIdentSupply supplyValue
+    return $ mkAnonymousVar var_id ObjectLevel
 
   -- Create binders for the parameters
-  let mkParameter var ty = Gluon.Binder var ty ()
+  let mkParameter var ty = TIVarP var ty
       parameters = zipWith mkParameter parameter_vars (sc_types ++ m_types)
 
   -- Create a case expression that matches against the class dictionary,
@@ -352,31 +354,29 @@ mkExport pos spec f = SystemF.Export pos spec f
 -- Conversion to System F
 
 convertKind :: Kind -> TIType
-convertKind k = delayType $ convertKind' k
+convertKind k = delayType $ SystemF.SFType $ convertKind' k
     
-convertKind' Star =
-  Gluon.pureKindE
-
-convertKind' (k1 :-> k2) =
-  Gluon.mkArrowE noSourcePos False (convertKind' k1) (convertKind' k2)
+convertKind' Star = Type.Type.pureT
+convertKind' (k1 :-> k2) = mkArrowType (convertKind' k1) (convertKind' k2)
 
 convertHMType :: HMType -> TIType
-convertHMType ty = DelayedType $ convertHMType' ty 
+convertHMType ty = DelayedType $ fmap SystemF.SFType $ convertHMType' ty 
                    
 convertHMType' ty = do
   ty' <- canonicalizeHead ty
   case ty' of
     ConTy c | isTyVar c -> do
       v <- tyVarToSystemF c
-      return $ VarE (internalSynInfo TypeLevel) v
-            | otherwise ->
-      tyConToSystemF c
+      return $ Type.Type.VarT v
+            | otherwise -> do
+      sf_ty <- tyConToSystemF c
+      return (SystemF.fromSFType sf_ty)
       
     -- Function types should only appear within an AppTy term
     FunTy _ -> fail "Unexpected function type constructor"
 
     TupleTy n ->
-      return $ ConE (internalSynInfo TypeLevel) $ SystemF.getPyonTupleType' n
+      return $ Type.Type.VarT $ SystemF.pyonTupleTypeCon n
 
     AppTy _ _ -> do
       (operator, arguments) <- uncurryTypeApplication ty'
@@ -394,24 +394,27 @@ convertHMType' ty = do
               fail "Wrong number of arguments to function after type inference"
         _ -> do
           oper_type <- convertHMType' operator 
-          return $ Gluon.mkAppE noSourcePos oper_type arg_types
-                   
+          return $ Type.Type.typeApp oper_type arg_types
+
+mkArrowType :: Type.Type.Type -> Type.Type.Type -> Type.Type.Type
+mkArrowType d r = Type.Type.FunT (Type.Type.ValPT Nothing Type.Type.::: d) (Type.Type.ValRT Type.Type.::: r)
+
 -- | Make the type of an uncurried Pyon function from @domain@ to @range@.
 --
 -- Depending on the calling convention indicated by the range, a stream 
 -- function or action function is generated.
-mkFunctionType :: [SystemF.RType]      -- ^ domain
-               -> SystemF.RType        -- ^ range
-               -> SystemF.RType        -- ^ System F type
+mkFunctionType :: [Type.Type.Type]      -- ^ domain
+               -> Type.Type.Type        -- ^ range
+               -> Type.Type.Type        -- ^ System F type
 mkFunctionType domain range =
-  foldr (Gluon.mkArrowE noSourcePos False) range domain
+  foldr mkArrowType range domain
 
 convertPredicate :: Predicate -> TIType
-convertPredicate prd = DelayedType $ convertPredicate' prd 
+convertPredicate prd = DelayedType $ fmap SystemF.SFType $ convertPredicate' prd 
 
 convertPredicate' (IsInst ty cls) = do
   ty' <- convertHMType' ty
-  return $ Gluon.mkConAppE noSourcePos (clsTypeCon cls) [ty']
+  return $ Type.Type.varApp (clsTypeCon cls) [ty']
 
 -- | Convert a type scheme to a function type.  Each quantified variable
 -- becomes a parameter in the function type.
@@ -420,12 +423,14 @@ convertTyScheme (TyScheme qvars cst ty) = DelayedType $ do
   qvars' <- mapM tyVarToSystemF qvars
   cst' <- mapM convertPredicate' cst
   ty' <- convertHMType' ty
-  let constrained_type = foldr (Gluon.mkArrowE noSourcePos False) ty' cst'
+  let constrained_type = mkFunctionType cst' ty'
       parametric_type = foldr mkFun constrained_type (zip qvars qvars')
-  return parametric_type
+  return $ SystemF.SFType parametric_type
   where
     mkFun (v, gluon_v) ty =
-      Gluon.mkFunE noSourcePos False gluon_v (convertKind' $ tyConKind v) ty
+      let param = Type.Type.ValPT (Just gluon_v) Type.Type.::: convertKind' (tyConKind v)
+          result = Type.Type.ValRT Type.Type.::: ty
+      in Type.Type.FunT param result
 
 -- | Create an instance expression with placeholders for all constraints
 instanceExpression :: SourcePos

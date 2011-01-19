@@ -48,6 +48,36 @@ infix 4 `isPyonBuiltin`
 isPyonBuiltin :: Var -> (PyonBuiltins -> Var) -> Bool
 v `isPyonBuiltin` name = v == pyonBuiltin name
 
+pyonTupleTypeCon :: Int -> Var
+pyonTupleTypeCon n | n < 0 = internalError "pyonTupleTypeCon"
+                   | otherwise = cons !! n
+  where
+    cons = [ pyonBuiltin the_PyonTuple0
+           , pyonBuiltin the_PyonTuple1
+           , pyonBuiltin the_PyonTuple2
+           , pyonBuiltin the_PyonTuple3
+           ]
+
+pyonTupleCon :: Int -> Var
+pyonTupleCon n | n < 0 = internalError "pyonTupleCon"
+               | otherwise = cons !! n
+  where
+    cons = [ pyonBuiltin the_pyonTuple0
+           , pyonBuiltin the_pyonTuple1
+           , pyonBuiltin the_pyonTuple2
+           , pyonBuiltin the_pyonTuple3
+           ]
+
+pyonTupleReprCon :: Int -> Var
+pyonTupleReprCon n | n < 0 = internalError "pyonTupleReprCon"
+                   | otherwise = cons !! n
+  where
+    cons = [ pyonBuiltin the_repr_PyonTuple0
+           , pyonBuiltin the_repr_PyonTuple1
+           , pyonBuiltin the_repr_PyonTuple2
+           , pyonBuiltin the_repr_PyonTuple3
+           ]
+
 -------------------------------------------------------------------------------
 -- Initializing the builtins
 

@@ -15,6 +15,7 @@ import CParser.Driver
 import qualified CParser2.Driver
 import LowLevel.InitializeBuiltins
 import Builtins.Builtins
+import Type.Environment
 import Globals
 import GlobalVar
 
@@ -49,8 +50,11 @@ loadBuiltins = do
         
       -- Initialize the Core types
       initializeGlobalVar the_coreTypes (parseCoreModule varIDs)
-      withTheNewVarIdentSupply $ \supply ->
-        initializeGlobalVar the_newCoreTypes (CParser2.Driver.parseCoreModule supply)
+
+      withTheNewVarIdentSupply $ \supply -> do
+        core_types <- CParser2.Driver.parseCoreModule supply
+        initializeGlobalVar the_newCoreTypes (return core_types)
+        initializeGlobalVar the_systemFTypes (return $ convertToPureTypeEnv core_types)
 
       -- Initialize the low-level builtins
       withTheLLVarIdentSupply initializeLowLevelBuiltins

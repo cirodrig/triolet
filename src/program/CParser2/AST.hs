@@ -16,6 +16,7 @@ import Gluon.Common.SourcePos
 import Gluon.Core.Level
 import LowLevel.Label
 import Type.Var
+import Type.Type(Repr(..))
 
 -- | Details about an externally defined variable
 data VarDetails =
@@ -67,12 +68,6 @@ data Lit =
     IntL !Integer
   | FloatL !Double
 
--- | A data representation
-data Repr = Value        -- ^ pass by value
-          | Boxed        -- ^ pass a reference to a memory-managed object
-          | Reference    -- ^ pass a reference to a memory area
-            deriving(Eq)
-
 -- | The AST data structure representing a type
 data Type ix =
 
@@ -113,8 +108,23 @@ data ReturnType ix = ReturnType ReturnRepr (LType ix)
 
 data ReturnRepr = ValueRT | BoxedRT | ReadRT | WriteRT
 
--- | A top-level type declaration.  This declares a piece of global data 
-data Decl ix = Decl (Identifier ix) (ReturnType ix)
+-- | A data constructor declaration.
+--   Corresponds to @Type.Environment.DataConType@.
+data DataConDecl ix =
+  DataConDecl
+  { dconVar :: Identifier ix
+  , dconType :: ReturnType ix
+  , dconParams :: [ParamType ix]
+  , dconArgs :: [ReturnType ix]
+  , dconRng :: ReturnType ix
+  }
+
+type LDataConDecl ix = Located (DataConDecl ix)
+
+-- | A top-level type declaration.  This declares a piece of global data
+--   or a data type.
+data Decl ix = VarDecl (Identifier ix) (ReturnType ix)
+             | DataDecl (Identifier ix) Repr (ReturnType ix) [LDataConDecl ix]
 
 type LDecl ix = Located (Decl ix)
 

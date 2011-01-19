@@ -8,11 +8,10 @@ import Data.Set(Set)
 
 import Gluon.Common.SourcePos
 import Gluon.Common.Error
-import qualified Gluon.Core as Gluon
-import Gluon.Core(VarID, varID)
-import qualified Gluon.Eval.Typecheck as Gluon
-import SystemF.Builtins
+import Builtins.Builtins
 import SystemF.Syntax
+import Type.Type
+import Type.Var
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
@@ -38,8 +37,8 @@ deconstructTupleExp expression =
   -- If the operator is a tuple value constructor, then return the arguments
   -- otherwise, return nothing
   case unpackPolymorphicCall expression
-  of Just (ConE {expCon = con}, ty_args, args)
-       | Just con == getPyonTupleCon (length args) -> Just args
+  of Just (VarE {expVar = con}, ty_args, args)
+       | con == pyonTupleCon (length args) -> Just args
      _ -> Nothing
 
 -------------------------------------------------------------------------------
@@ -88,51 +87,17 @@ masks vs m = pass $ do x <- m
 
 -- | Mention all variables in a type
 edcScanType :: RType -> GetMentionsSet ()
-edcScanType t = scanType t >> return ()
+edcScanType (SFType t) = scanType t
   where
-    scanType :: Gluon.RExp 
-             -> GetMentionsSet (Gluon.RecExp Gluon.TrivialStructure)
-    scanType expression =
-      case expression
-      of -- Scan the body of lambda/function type expressions, then delete
-         -- the bound variable from the set
-         Gluon.LamE { Gluon.expParam = Gluon.Binder v ty ()
-                    , Gluon.expBody = b} -> do
-           scanType ty
-           mask v $ scanType b
-         Gluon.FunE { Gluon.expMParam = Gluon.Binder' v ty ()
-                    , Gluon.expRange = b} -> do
-           scanType ty
-           maybe id mask v $ scanType b
-
-         -- Mention variables
-         Gluon.VarE {Gluon.expVar = v} -> do
-           mention v
-           return Gluon.TrivialExp
-
-         -- Recurse on other expressions
-         _ -> do (Gluon.traverseExp scanType scanTuple scanProd expression
-                    :: GetMentionsSet (Gluon.Exp Gluon.TrivialStructure))
-                 return Gluon.TrivialExp
-
-    scanTuple :: Gluon.RTuple
-              -> GetMentionsSet (Gluon.RecTuple Gluon.TrivialStructure)
-    scanTuple t =
-      case t
-      of Gluon.Binder' v ty val Gluon.:&: b -> do
-           scanType ty
-           scanType val
-           maybe id mask v $ scanTuple b
-         Gluon.Nil -> return Gluon.TrivialTuple
-
-    scanProd :: Gluon.RSum
-             -> GetMentionsSet (Gluon.RecSum Gluon.TrivialStructure)
-    scanProd p =
-      case p
-      of Gluon.Binder' v ty () Gluon.:*: b -> do
-           scanType ty
-           maybe id mask v $ scanProd b
-         Gluon.Unit -> return Gluon.TrivialSum
+    scanType :: Type -> GetMentionsSet ()
+    scanType (VarT v) = mention v
+    scanType (AppT t1 t2) = scanType t1 >> scanType t2
+    scanType (FunT (ValPT (Just v) ::: dom) (_ ::: rng)) = do
+      scanType dom
+      mask v $ scanType rng
+    scanType (FunT (_ ::: dom) (_ ::: rng)) = do
+      scanType dom
+      scanType rng
 
 -- | Find mentioned variables in an export declaration
 edcExport :: Export Rec -> GetMentionsSet (Export Rec)
@@ -161,17 +126,16 @@ edcMaskPat pat m =
 
        -- If all patterns are wildcards, then use a single wildcard pattern
        let new_pat = if all isWildcard pats'
-                     then let con = getPyonTupleType' (length pats')
-                              ty = Gluon.mkInternalConAppE con $
-                                   map wildcardType pats'
-                          in WildP ty
+                     then let con = pyonTupleTypeCon (length pats')
+                              ty = varApp con $ map wildcardType pats'
+                          in WildP $ SFType ty
                      else TupleP pats'
        return (new_pat, x)
   where
     isWildcard (WildP _) = True
     isWildcard _ = False
 
-    wildcardType (WildP t) = t
+    wildcardType (WildP t) = fromSFType t
     wildcardType _ = error "Not a wildcard pattern"
 
 edcMaskPats :: [RPat] -> GetMentionsSet a -> GetMentionsSet ([RPat], a)
@@ -219,8 +183,6 @@ edcExp expression =
   case expression
   of VarE {expVar = v} ->
        mention v >> return expression
-     ConE {expCon = c} ->
-       return expression
      LitE {expType = t} -> do
        edcScanType t
        return expression
@@ -250,7 +212,7 @@ edcExp expression =
 -- | Dead code elimination for a case alternative
 edcAlt alt = do
   -- Mask out variables bound by the alternative and simplify the body
-  body' <- masks (Set.fromList [varID v | Binder v _ () <- altParams alt]) $ do
+  body' <- masks (Set.fromList [varID v | VarP v _ <- altParams alt]) $ do
     edcExp (altBody alt)
   return $ alt {altBody = body'} 
 

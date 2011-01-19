@@ -32,9 +32,11 @@ data Tok =
   | ColonTok
   | ArrowTok
   | BoxTok
+  | DataTok
   | LetTok
   | LetrecTok
   | ReadTok
+  | RefTok
   | WildTok
   | WriteTok
   | ValTok
@@ -61,9 +63,11 @@ showTok t =
        ColonTok     -> "colon"
        ArrowTok     -> "arrow"
        BoxTok       -> "'box'"
+       DataTok      -> "'data'"
        LetTok       -> "'let'"
        LetrecTok    -> "'letrec'"
        ReadTok      -> "'read'"
+       ReadTok      -> "'ref'"
        WildTok      -> "underscore"
        WriteTok     -> "'write'"
        ValTok       -> "'val'"

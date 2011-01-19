@@ -15,6 +15,7 @@ import Parser.SSA
 import Gluon.Common.Error
 import Gluon.Common.Label
 import Gluon.Common.SourcePos
+import Gluon.Common.Supply
 import Gluon.Common.MonadLogic
 import qualified Gluon.Core as Gluon
 import qualified Untyped.Data as U
@@ -23,7 +24,9 @@ import qualified SystemF.Syntax as SF
 import qualified Untyped.HMType as U
 import qualified Untyped.Kind as U
 import Untyped.Builtins
+import Type.Var(mkVar)
 import Globals
+import LowLevel.Label
 import qualified Export
 
 -- | During conversion, we keep an assignment from
@@ -131,13 +134,15 @@ withMaybeForallAnnotation (Just a) k = withForallAnnotation a $ k . Just
 -- | Create a new untyped variable with the given name
 newVariable :: String -> Cvt U.Variable
 newVariable name = do
-  sfvar_id <- liftIO getNextVarIdent
-  let sfvar = Just $ Gluon.mkVar sfvar_id label Gluon.ObjectLevel
-  liftIO $ U.newVariable label sfvar
+  sfvar_id <- liftIO $ withTheNewVarIdentSupply supplyValue
+  let sfvar = Just $ mkVar sfvar_id p_label Gluon.ObjectLevel
+  liftIO $ U.newVariable u_label sfvar
   where
-    label = if null name
-            then Nothing
-            else Just $ pgmLabel (moduleName "pyonfile") name
+    (u_label, p_label) =
+      if null name
+      then (Nothing, Nothing)
+      else (Just $ pgmLabel (moduleName "pyonfile") name,
+            Just $ pyonLabel (moduleName "pyonfile") name)
 
 -------------------------------------------------------------------------------
 

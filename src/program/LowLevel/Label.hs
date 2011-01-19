@@ -16,6 +16,7 @@ module LowLevel.Label
         pyonLabel,
         externPyonLabel,
         anonymousPyonLabel,
+        cloneLabel,
         mangleLabel,
         mangleModuleScopeLabel
        )
@@ -56,7 +57,7 @@ showLocalID (LocalID n) = show n
 -- | A label of low-level code.  Labels encode everything about a variable
 --   name (except for the variable ID).
 --   A variable must have a unqiue label if it's visible outside its own 
---   module.  In general, varaibles that are local to a module don't have 
+--   module.  In general, variables that are local to a module don't have 
 --   labels.
 data Label =
   Label 
@@ -100,6 +101,13 @@ externPyonLabel mod name ext_name =
 anonymousPyonLabel :: ModuleName -> LocalID -> Maybe String -> Label
 anonymousPyonLabel mod id ext_name =
   Label mod (Right id) NormalLabel ext_name
+
+-- | Create a label that is like the given label and can be attached to a
+--   different variable.  Anything that would cause a name conflict, such
+--   as an external name, is removed.  The cloned label must not be externally
+--   visible.
+cloneLabel :: Label -> Label
+cloneLabel lab = lab {labelExternalName = Nothing}
 
 -- | Encode a string appearing in a name.  Characters used by mangling are
 -- replaced by a two-character string beginning with \'q\'.
