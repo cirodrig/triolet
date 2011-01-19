@@ -380,9 +380,7 @@ specializeMaybe :: RExp -> Spcl (Maybe RExp)
 specializeMaybe expression =
   case expression
   of VarE {} -> specializeTyAppExpNonCall expression
-     LitE {expType = ty} -> do
-       ty' <- specializeType ty
-       return $ Just $ expression {expType = ty'}
+     LitE {} -> return $ Just expression -- Literals are never specialized
      TyAppE {} -> specializeTyAppExpNonCall expression
      CallE {expInfo = inf, expOper = op, expArgs = args} -> 
        specializeCall inf op args

@@ -242,8 +242,8 @@ typeInferExp expression =
     case expression
     of VarE {expInfo = inf, expVar = v} ->
          typeInferVarE inf v
-       LitE {expInfo = inf, expLit = l, expType = t} ->
-         checkLiteralType inf l t
+       LitE {expInfo = inf, expLit = l} ->
+         checkLiteralType inf l
        TyAppE {expInfo = inf, expOper = op, expTyArg = arg} ->
          typeInferTyAppE inf op arg
        CallE {expInfo = inf, expOper = op, expArgs = args} ->
@@ -266,13 +266,14 @@ typeInferVarE inf var = do
 
 -- Use the type that was attached to the literal value, but also verify that
 -- it's a valid type
-checkLiteralType :: ExpInfo -> Lit -> RType -> TCM TRExp
-checkLiteralType inf l t = do
+checkLiteralType :: ExpInfo -> Lit -> TCM TRExp
+checkLiteralType inf l = do
   -- Check that type is valid
-  t' <- typeInferType t
+  let literal_type = literalType l
+  _ <- typeInferType (SFType literal_type)
   
-  if isValidLiteralType (fromSFType t) l
-    then return $ TypedSFExp $ TypeAnn (fromSFType t) (LitE inf l t')
+  if isValidLiteralType literal_type l
+    then return $ TypedSFExp $ TypeAnn literal_type (LitE inf l)
     else typeError "Not a valid literal type"
 
 isValidLiteralType ty lit =
@@ -282,8 +283,8 @@ isValidLiteralType ty lit =
        -- Based on the literal, check whether the type constructor is 
        -- acceptable
        case lit
-       of IntL _ -> v `isPyonBuiltin` the_int
-          FloatL _ -> v `isPyonBuiltin` the_float
+       of IntL _ _ -> v `isPyonBuiltin` the_int
+          FloatL _ _ -> v `isPyonBuiltin` the_float
           BoolL _ -> v `isPyonBuiltin` the_bool
           NoneL -> v `isPyonBuiltin` the_NoneType
      Nothing ->

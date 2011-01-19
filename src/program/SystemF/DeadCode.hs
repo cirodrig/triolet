@@ -183,8 +183,7 @@ edcExp expression =
   case expression
   of VarE {expVar = v} ->
        mention v >> return expression
-     LitE {expType = t} -> do
-       edcScanType t
+     LitE {} ->
        return expression
      TyAppE {expOper = op, expTyArg = arg} -> do
        op' <- edcExp op

@@ -62,8 +62,8 @@ pprExportSpec (ExportSpec lang name) =
 pprVarFlags :: PrintFlags -> Var -> Doc
 pprVarFlags flags v = pprVar v
 
-pprLit (IntL n) = text (show n)
-pprLit (FloatL f) = text (show f)
+pprLit (IntL n _) = text (show n)
+pprLit (FloatL f _) = text (show f)
 pprLit (BoolL b) = text (show b)
 pprLit NoneL = text "None"
 
@@ -102,8 +102,7 @@ pprExpFlagsPrec flags prec expression =
   case expression
   of VarE {expVar = v} ->
          pprVarFlags flags v
-     LitE {expLit = l, expType = t} ->
-         pprTypeAnnotation (pprLit l) (pprSFType t) prec
+     LitE {expLit = l} -> pprLit l
      TyAppE {expOper = e, expTyArg = t} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
              tDoc = pprSFType t

@@ -215,8 +215,8 @@ mkVarE pos v = TIExp $ SystemF.VarE (synInfo pos) v
 mkConE :: SourcePos -> SystemF.Var -> TIExp
 mkConE pos c = TIExp $ SystemF.VarE (synInfo pos) c
 
-mkLitE :: SourcePos -> SystemF.Lit -> TIType -> TIExp
-mkLitE pos l t = TIExp $ SystemF.LitE (synInfo pos) l t
+mkLitE :: SourcePos -> SystemF.Lit -> TIExp
+mkLitE pos l = TIExp $ SystemF.LitE (synInfo pos) l
 
 mkTyAppE :: SourcePos -> TIExp -> TIType -> TIExp
 mkTyAppE pos oper arg = TIExp $ SystemF.TyAppE (synInfo pos) oper arg

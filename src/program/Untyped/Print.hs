@@ -19,8 +19,8 @@ showBlock (d:ds) = vcat ((text "{" <+> d) : (map (semi <+>) ds ++ [text "}"]))
 
 pprLit :: Lit -> Doc
 pprLit NoneL = text "None"
-pprLit (IntL n) = text $ show n
-pprLit (FloatL d) = text $ show d
+pprLit (IntL n _) = text $ show n
+pprLit (FloatL d _) = text $ show d
 pprLit (BoolL b) = text $ show b
 
 pprVariable :: Variable -> Doc

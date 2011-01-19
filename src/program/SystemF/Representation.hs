@@ -599,7 +599,7 @@ inferReprExp :: TRExp -> InferRepr (WrapperCode, SFRecExp Rep, ReturnType)
 inferReprExp texpression@(TypedSFExp (TypeAnn ty expression)) = do
   case expression of
     VarE inf v -> inferVarE inf v
-    LitE inf l ty -> inferLitE inf l ty
+    LitE inf l -> inferLitE inf l
     TyAppE {} -> inferCall texpression
     CallE {} -> inferCall texpression
     FunE inf f -> inferFunE inf f
@@ -617,11 +617,10 @@ inferVarE inf v = do
   let exp = RepExp (VarE inf v)
   return (mempty, exp, return_type) 
 
-inferLitE inf l (TypedSFType (TypeAnn _ (SFType ty))) = do
-  ty' <- infFixUpType ty
-  return_repr <- infTypeRepr ty'
-  let exp = RepExp (LitE inf l (RepType ty'))
-  return (mempty, exp, asReadReturnRepr return_repr ::: ty')
+inferLitE inf l = do
+  return_repr <- infTypeRepr $ literalType l
+  let exp = RepExp (LitE inf l)
+  return (mempty, exp, asReadReturnRepr return_repr ::: literalType l)
 
 inferCall expression =
   case unpack_call expression

@@ -15,6 +15,7 @@ module SystemF.Syntax
      Alt,
      Var,
      Lit(..),
+     literalType,
      Pat(..),
      TyPat(..),
      ExpInfo, defaultExpInfo,
@@ -71,14 +72,20 @@ newtype instance SFType Rec = SFType {fromSFType :: Type}
 
 -- | Literal values.
 --
--- Integer and floating-point iteral values have an unspecified type.
--- The type is given when the literal is used in an expression.
+-- Integer and floating-point literal values have a explicit type.  The type
+-- must mention only constants, not type variables.
 data Lit =
-    IntL !Integer
-  | FloatL {-# UNPACK #-} !Double
+    IntL !Integer !Type
+  | FloatL {-# UNPACK #-} !Double !Type
   | BoolL {-# UNPACK #-} !Bool
   | NoneL
   deriving(Typeable)
+
+literalType :: Lit -> Type
+literalType (IntL _ t) = t
+literalType (FloatL _ t) = t
+literalType (BoolL _) = VarT $ pyonBuiltin the_bool
+literalType NoneL = VarT $ pyonBuiltin the_NoneType
 
 -- | Patterns.
 data instance Pat Rec =
@@ -111,7 +118,6 @@ data instance SFExpOf Rec s =
   | LitE
     { expInfo :: ExpInfo
     , expLit :: !Lit
-    , expType :: SFType s
     }
     -- | Type application
   | TyAppE

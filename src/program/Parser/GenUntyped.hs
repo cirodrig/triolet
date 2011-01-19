@@ -25,6 +25,8 @@ import qualified Untyped.HMType as U
 import qualified Untyped.Kind as U
 import Untyped.Builtins
 import Type.Var(mkVar)
+import qualified Type.Type
+import qualified Builtins.Builtins
 import Globals
 import LowLevel.Label
 import qualified Export
@@ -205,13 +207,17 @@ doExpr expr =
                 of IntLit n ->
                      -- Generate a call to 'fromInt' to cast to any valid value
                      let oper = tiBuiltin the___fromint__
-                     in callVariable pos oper [make_literal (SF.IntL n)]
-                   FloatLit f -> make_literal $ SF.FloatL f
+                         int_type = Type.Type.VarT (Builtins.Builtins.pyonBuiltin Builtins.Builtins.the_int)
+                     in callVariable pos oper [make_literal (SF.IntL n int_type)]
+                   FloatLit f ->
+                     let float_type = Type.Type.VarT (Builtins.Builtins.pyonBuiltin Builtins.Builtins.the_float)
+                     in make_literal $ SF.FloatL f float_type
                    ImaginaryLit d ->
                      -- Generate a call to 'makeComplex'
                      let oper = tiBuiltin the_makeComplex
-                         real = make_literal (SF.FloatL 0)
-                         imag = make_literal (SF.FloatL d)
+                         float_type = Type.Type.VarT (Builtins.Builtins.pyonBuiltin Builtins.Builtins.the_float)
+                         real = make_literal (SF.FloatL 0 float_type)
+                         imag = make_literal (SF.FloatL d float_type)
                      in callVariable pos oper [real, imag]
                    BoolLit b -> make_literal $ SF.BoolL b
                    NoneLit -> make_literal $ SF.NoneL

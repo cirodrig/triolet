@@ -190,13 +190,13 @@ pevalExp expression =
        -- Replace constants with literal values.  This helps 
        -- representation selection represent these as values.
        | v `isPyonBuiltin` the_AdditiveDict_int_zero ->
-           return $ LitE inf (IntL 0) (SFType $ VarT $ pyonBuiltin the_int)
+           return $ LitE inf (IntL 0 (VarT $ pyonBuiltin the_int))
        | v `isPyonBuiltin` the_AdditiveDict_float_zero ->
-           return $ LitE inf (FloatL 0) (SFType $ VarT $ pyonBuiltin the_float)
+           return $ LitE inf (FloatL 0 (VarT $ pyonBuiltin the_float))
        | v `isPyonBuiltin` the_MultiplicativeDict_int_one ->
-           return $ LitE inf (IntL 1) (SFType $ VarT $ pyonBuiltin the_int)
+           return $ LitE inf (IntL 1 (VarT $ pyonBuiltin the_int))
        | v `isPyonBuiltin` the_MultiplicativeDict_float_one ->
-           return $ LitE inf (FloatL 1) (SFType $ VarT $ pyonBuiltin the_float)
+           return $ LitE inf (FloatL 1 (VarT $ pyonBuiltin the_float))
        | otherwise -> lookupVarDefault expression v
      LitE {} -> return expression
      TyAppE {expOper = op} -> do
@@ -249,10 +249,9 @@ pevalApp inf op tys args =
        | con `isPyonBuiltin` the_MultiplicativeDict_float_fromInt ->
            -- fromInt (n :: Float) = n as a float
            case args
-           of [LitE {expLit = IntL n}] ->
+           of [LitE {expLit = IntL n _}] ->
                 LitE { expInfo = inf
-                     , expLit = FloatL (fromIntegral n)
-                     , expType = SFType $ VarT (pyonBuiltin the_float)}
+                     , expLit = FloatL (fromIntegral n) float_type}
               _ -> internalError "pevalApp"
      _ ->
        -- Can't evaluate; rebuild the call expression
@@ -273,6 +272,8 @@ pevalApp inf op tys args =
       in rebuild_call op' ts args
 
     rebuild_call op [] args = CallE inf op args
+    
+    float_type = VarT $ pyonBuiltin the_float
 
 -- | Attempt to eliminate a case statement.  If the scrutinee is a constructor
 -- application and it matches an alternative, replace the case statement

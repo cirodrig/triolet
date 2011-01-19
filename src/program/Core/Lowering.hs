@@ -645,10 +645,10 @@ convertExp expression =
           ReadConV _ c  -> lookup_con c
           LitV lit      ->
             case lit
-            of SystemF.IntL n   -> literal (PrimType pyonIntType) $ 
+            of SystemF.IntL n _ -> literal (PrimType pyonIntType) $ 
                                    LL.IntL Signed pyonIntSize n
-               SystemF.FloatL d -> literal (PrimType pyonFloatType) $
-                                   LL.FloatL pyonFloatSize d
+               SystemF.FloatL d _ -> literal (PrimType pyonFloatType) $
+                                     LL.FloatL pyonFloatSize d
                SystemF.BoolL b  -> literal (PrimType pyonBoolType) $ LL.BoolL b
                SystemF.NoneL    -> literal (PrimType pyonNoneType) LL.UnitL
           TypeV _       -> literal (PrimType UnitType) LL.UnitL

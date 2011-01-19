@@ -35,8 +35,7 @@ evExp expression =
      Untyped.TIExp e ->
        case e
        of VarE info v   -> return $ VarE info v
-          LitE info l t -> do t' <- evType t
-                              return $ LitE info l t'
+          LitE info l   -> return $ LitE info l
           TyAppE info op t -> do op' <- evExp op
                                  t' <- evType t
                                  return $ TyAppE info op' t'

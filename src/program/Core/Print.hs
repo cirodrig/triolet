@@ -111,8 +111,8 @@ pprValue val =
      OwnedConV c -> text $ showLabel $ conName c
      ReadConV a p -> parens $ text "bor" <+> (text $ showLabel $ conName p) <> text "@" <> pprExp a
      LitV l -> case l
-               of SystemF.IntL n -> text $ show n
-                  SystemF.FloatL d -> text $ show d
+               of SystemF.IntL n _ -> text $ show n
+                  SystemF.FloatL d _ -> text $ show d
                   SystemF.BoolL b -> text $ show b
                   SystemF.NoneL -> text "None"
      TypeV ty -> parens $ pprType ty
