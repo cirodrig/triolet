@@ -14,10 +14,10 @@
 {-# LANGUAGE TypeFamilies, EmptyDataDecls, FlexibleInstances, DeriveDataTypeable #-}
 module Untyped.GenSystemF where
 
-import Prelude hiding(mapM)
+import Prelude hiding(mapM, sequence)
 import Control.Applicative
 import Control.Concurrent.MVar
-import Control.Monad hiding(forM, mapM)
+import Control.Monad hiding(forM, mapM, sequence)
 import Data.Function
 import Data.Maybe
 import qualified Data.Set as Set
@@ -191,7 +191,7 @@ setPlaceholderElaboration ph exp
       putMVar (phExpResolution ph) exp
   | otherwise = internalError "Not a placeholder"
 
-delayType :: SystemF.RType -> TIType
+delayType :: SystemF.TypSF -> TIType
 delayType t = DelayedType (return t)
 
 objectSynInfo :: SynInfo
@@ -203,23 +203,23 @@ synInfo pos = mkSynInfo pos ObjectLevel
 mkWildP :: TIType -> SystemF.Pat TI
 mkWildP ty = TIWildP ty
 
-mkVarP :: SystemF.Var -> TIType -> SystemF.Pat TI 
+mkVarP :: Var -> TIType -> SystemF.Pat TI 
 mkVarP v ty = TIVarP v ty
 
 mkTupleP :: [SystemF.Pat TI] -> SystemF.Pat TI
 mkTupleP fs = TITupleP fs
 
-mkVarE :: SourcePos -> SystemF.Var -> TIExp
-mkVarE pos v = TIExp $ SystemF.VarE (synInfo pos) v
+mkVarE :: SourcePos -> Var -> TIExp
+mkVarE pos v = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos) v
 
-mkConE :: SourcePos -> SystemF.Var -> TIExp
-mkConE pos c = TIExp $ SystemF.VarE (synInfo pos) c
+mkConE :: SourcePos -> Var -> TIExp
+mkConE pos c = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos) c
 
 mkLitE :: SourcePos -> SystemF.Lit -> TIExp
-mkLitE pos l = TIExp $ SystemF.LitE (synInfo pos) l
+mkLitE pos l = TIExp $ SystemF.LitE (SystemF.mkExpInfo pos) l
 
 mkAppE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
-mkAppE pos oper ts args = TIExp $ SystemF.AppE (synInfo pos) oper ts args
+mkAppE pos oper ts args = TIExp $ SystemF.AppE (SystemF.mkExpInfo pos) oper ts args
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
@@ -242,7 +242,7 @@ mkIfE pos cond tr fa =
                     , SystemF.altParams = []
                     , SystemF.altBody = fa
                     }
-  in TIExp $ SystemF.CaseE (synInfo pos) cond [true_alt, false_alt]
+  in TIExp $ SystemF.CaseE (SystemF.mkExpInfo pos) cond [true_alt, false_alt]
 
 -- | Create a call of a polymorphic function with no constraint arguments.
 mkPolyCallE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
@@ -250,13 +250,13 @@ mkPolyCallE pos oper [] [] = oper
 mkPolyCallE pos oper ty_args args = mkAppE pos oper ty_args args
 
 mkLetE :: SourcePos -> SystemF.Pat TI -> TIExp -> TIExp -> TIExp
-mkLetE pos lhs rhs body = TIExp $ SystemF.LetE (synInfo pos) lhs rhs body 
+mkLetE pos lhs rhs body = TIExp $ SystemF.LetE (SystemF.mkExpInfo pos) lhs rhs body 
 
 mkFunE :: SourcePos -> SystemF.Fun TI -> TIExp
-mkFunE pos fun = TIExp $ SystemF.LamE (synInfo pos) fun
+mkFunE pos fun = TIExp $ SystemF.LamE (SystemF.mkExpInfo pos) fun
 
 mkLetrecE :: SourcePos -> [SystemF.Def TI] -> TIExp -> TIExp
-mkLetrecE pos defs body = TIExp $ SystemF.LetrecE (synInfo pos) defs body
+mkLetrecE pos defs body = TIExp $ SystemF.LetrecE (SystemF.mkExpInfo pos) defs body
 
 mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> [TIExp] -> TIExp
 mkDictE pos cls inst_type scs methods =
@@ -304,7 +304,7 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
   let alt = TIAlt $
             SystemF.Alt (clsDictCon cls) [convertHMType inst_type] parameters alt_body
 
-  return (placeholders, TIExp $ SystemF.CaseE (synInfo pos) dict [alt])
+  return (placeholders, TIExp $ SystemF.CaseE (SystemF.mkExpInfo pos) dict [alt])
 
 -- | Create a placeholder for a recursive variable.  The variable is assumed
 -- to have a monomorphic type, which is later generalized.
@@ -330,12 +330,13 @@ mkFunction :: SourcePos -> [TyCon] -> [SystemF.Pat TI] -> TIType -> TIExp
            -> IO (SystemF.Fun TI)
 mkFunction pos ty_params params ret_type body = do
   ty_params' <- mapM convertTyParam ty_params
-  return $ TIFun $ SystemF.Fun (mkSynInfo pos ObjectLevel) ty_params' params ret_type body
+  return $ TIFun $ SystemF.Fun (SystemF.mkExpInfo pos) ty_params' params (TIRet ret_type) body
   where
+    convertTyParam :: TyCon -> IO (SystemF.TyPat TI)
     convertTyParam ty_param = do
       v <- tyVarToSystemF ty_param
       let k = convertKind $ tyConKind ty_param
-      return $ SystemF.TyPat v k
+      return $ TITyPat v k
 
 mkExport :: SourcePos -> ExportSpec -> SystemF.Fun TI -> SystemF.Export TI
 mkExport pos spec f = SystemF.Export pos spec f
@@ -344,13 +345,13 @@ mkExport pos spec f = SystemF.Export pos spec f
 -- Conversion to System F
 
 convertKind :: Kind -> TIType
-convertKind k = delayType $ SystemF.SFType $ convertKind' k
+convertKind k = delayType $ SystemF.TypSF $ convertKind' k
     
 convertKind' Star = Type.Type.pureT
 convertKind' (k1 :-> k2) = mkArrowType (convertKind' k1) (convertKind' k2)
 
 convertHMType :: HMType -> TIType
-convertHMType ty = DelayedType $ fmap SystemF.SFType $ convertHMType' ty 
+convertHMType ty = DelayedType $ fmap SystemF.TypSF $ convertHMType' ty 
                    
 convertHMType' ty = do
   ty' <- canonicalizeHead ty
@@ -360,7 +361,7 @@ convertHMType' ty = do
       return $ Type.Type.VarT v
             | otherwise -> do
       sf_ty <- tyConToSystemF c
-      return (SystemF.fromSFType sf_ty)
+      return (SystemF.fromTypSF sf_ty)
       
     -- Function types should only appear within an AppTy term
     FunTy _ -> fail "Unexpected function type constructor"
@@ -400,7 +401,7 @@ mkFunctionType domain range =
   foldr mkArrowType range domain
 
 convertPredicate :: Predicate -> TIType
-convertPredicate prd = DelayedType $ fmap SystemF.SFType $ convertPredicate' prd 
+convertPredicate prd = DelayedType $ fmap SystemF.TypSF $ convertPredicate' prd 
 
 convertPredicate' (IsInst ty cls) = do
   ty' <- convertHMType' ty
@@ -415,7 +416,7 @@ convertTyScheme (TyScheme qvars cst ty) = DelayedType $ do
   ty' <- convertHMType' ty
   let constrained_type = mkFunctionType cst' ty'
       parametric_type = foldr mkFun constrained_type (zip qvars qvars')
-  return $ SystemF.SFType parametric_type
+  return $ SystemF.TypSF parametric_type
   where
     mkFun (v, gluon_v) ty =
       let param = Type.Type.ValPT (Just gluon_v) Type.Type.::: convertKind' (tyConKind v)

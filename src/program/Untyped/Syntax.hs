@@ -16,6 +16,7 @@ import qualified SystemF.Syntax as SystemF
 import SystemF.Syntax(Lit(..))
 import Untyped.HMType
 import Untyped.Data
+import Type.Var(Var)
 
 data Ann = Ann SourcePos
 
@@ -25,7 +26,7 @@ data Variable =
   , varName :: !(Maybe Label)
     -- | If this variable corresponds to a variable in System F, this is the 
     -- System F variable.  Otherwise, this is Nothing.
-  , varSystemFVariable :: {-# UNPACK #-} !(Maybe SystemF.Var)
+  , varSystemFVariable :: {-# UNPACK #-} !(Maybe Var)
     -- | System F translation of this variable; assigned by type inference
   , varTranslation :: {-# UNPACK #-} !(MVar TypeAssignment)
   }
@@ -38,7 +39,7 @@ variableIDSupply = unsafePerformIO newIdentSupply
 getNextVariableID :: IO (Ident Variable)
 getNextVariableID = supplyValue variableIDSupply
 
-newVariable :: Maybe Label -> Maybe SystemF.Var -> IO Variable
+newVariable :: Maybe Label -> Maybe Var -> IO Variable
 newVariable lab sf = do
   id <- getNextVariableID
   translation <- newEmptyMVar

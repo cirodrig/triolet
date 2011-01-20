@@ -417,7 +417,7 @@ makePolymorphicFunction proofs pos (TyScheme qvars cst fot) (TIFun fo_function)
     convertTyParam ty_param = do
       v <- tyVarToSystemF ty_param
       let k = convertKind $ tyConKind ty_param
-      return $ SystemF.TyPat v k
+      return $ TITyPat v k
 
     getProofParam prd = do
       mpat <- lookupProofParam prd proofs
@@ -701,7 +701,7 @@ doTypeInference m = do
         then unify noSourcePos (ConTy v) (ConTy $ tiBuiltin the_con_Any)
         else return []
 
-typeInferModule :: Module -> IO SystemF.RModule
+typeInferModule :: Module -> IO (SystemF.Module SystemF.SF)
 typeInferModule m = do
   -- Run type inference
   ti_module <- doTypeInference $ inferModuleTypes m

@@ -129,7 +129,7 @@ newRigidTyVar k lab = do
   return $! TyCon id lab k True Nothing sfvar con_descr
 
 -- | Create a type constructor
-mkTyCon :: Label -> Kind -> SystemF.RType -> IO TyCon
+mkTyCon :: Label -> Kind -> SystemF.TypSF -> IO TyCon
 mkTyCon name kind value = do
   id <- newTyConID
   let var = error "Type constructor is not a variable"
@@ -455,7 +455,7 @@ prType prec t = do
 
 -- | Get the System F equivalent of a type variable.  It's created if it didn't
 -- exist.  The variable must not have been unified with anything.
-tyVarToSystemF :: TyCon -> IO SystemF.Var
+tyVarToSystemF :: TyCon -> IO Var
 tyVarToSystemF c
   | not $ isTyVar c = fail "Expecting a variable"
   | otherwise = do -- Check that the variable hasn't been unified
@@ -475,7 +475,7 @@ tyVarToSystemF c
           writeIORef ref (Just v)
           return v
       
-tyConToSystemF :: TyCon -> IO SystemF.RType
+tyConToSystemF :: TyCon -> IO SystemF.TypSF
 tyConToSystemF c
   | isTyVar c = fail "Expecting a constructor"
   | otherwise = return $ tcSystemFValue $ tcConInfo c

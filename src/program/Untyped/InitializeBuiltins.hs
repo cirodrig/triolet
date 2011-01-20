@@ -35,7 +35,7 @@ f @@ g = appTy f g
 -- | Create an 'untyped' type constructor that corresponds to the given
 -- System F type constructor
 builtinTyCon name kind sf_con =
-  let y = SystemF.SFType (VarT sf_con)
+  let y = SystemF.TypSF (VarT sf_con)
   in mkTyCon (builtinLabel name) kind y
 
 -------------------------------------------------------------------------------
@@ -516,8 +516,8 @@ mkBinaryIntType =
 
 mkGlobalVar name typ con = do
   scm <- typ
-  let exp pos = TIRecExp $
-                SystemF.VarE (Gluon.mkSynInfo pos Gluon.ObjectLevel) con
+  let exp pos = TIRecExp $ SystemF.ExpSF $
+                SystemF.VarE (SystemF.mkExpInfo pos) con
   let ass = polymorphicAssignment scm exp
   predefinedVariable (Just $ builtinLabel name) ass
 

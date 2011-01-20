@@ -390,7 +390,7 @@ toProof pos env derivation =
     -- update the environment
     toLocalProofs :: [Derivation]
                   -> ProofEnvironment
-                  -> (ProofEnvironment -> [SystemF.Var] -> IO (TIExp, Placeholders))
+                  -> (ProofEnvironment -> [Var] -> IO (TIExp, Placeholders))
                   -> IO (TIExp, Placeholders)
     toLocalProofs derivations env k = do
       (placeholders, proofs) <- toProofs pos env derivations
@@ -413,7 +413,7 @@ addToProofEnv :: SourcePos
               -> Derivation
               -> TIExp
               -> ProofEnvironment
-              -> (ProofEnvironment -> SystemF.Var -> IO (TIExp, a))
+              -> (ProofEnvironment -> Var -> IO (TIExp, a))
               -> IO (TIExp, a)
 addToProofEnv pos derivation proof env k =
   withLocalAssignment pos proof (convertPredicate $ conclusion derivation) $ \v ->
@@ -424,7 +424,7 @@ addToProofEnv pos derivation proof env k =
 addManyToProofEnv :: SourcePos
                   -> [(Derivation, TIExp)]
                   -> ProofEnvironment 
-                  -> (ProofEnvironment -> [SystemF.Var] -> IO (TIExp, a))
+                  -> (ProofEnvironment -> [Var] -> IO (TIExp, a))
                   -> IO (TIExp, a)
 addManyToProofEnv pos ((derivation, proof) : bindings) env k =
   addToProofEnv pos derivation proof env $ \env' v ->
@@ -434,7 +434,7 @@ addManyToProofEnv _ [] env k = k env []
 
 -- | Assign an expression to a new local variable over the scope of
 -- another expression.  A let-expression is constructed to bind the variable.
-withLocalAssignment :: SourcePos -> TIExp -> TIType -> (SystemF.Var -> IO (TIExp, a)) 
+withLocalAssignment :: SourcePos -> TIExp -> TIType -> (Var -> IO (TIExp, a)) 
                     -> IO (TIExp, a)
 withLocalAssignment pos rhs ty make_body = do
   -- Create new variable

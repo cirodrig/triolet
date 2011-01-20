@@ -29,21 +29,21 @@ catEndo fs x = foldr ($) x fs
 
 -- | Convert all pattern matching to @case@ statements.  After conversion, 
 -- the only patterns that remain are 'VarP' patterns.
-eliminatePatternMatching :: RModule -> IO RModule
+eliminatePatternMatching :: Module SF -> IO (Module SF)
 eliminatePatternMatching (Module module_name ds exports) =
   withTheNewVarIdentSupply $ \id_supply -> runPM id_supply $ do
     ds' <- mapM (mapM elimPMDef) ds
     return $ Module module_name ds' exports
 
 -- | Get the type of a pattern
-patternType :: RPat -> RType
+patternType :: PatSF -> Type
 patternType (WildP ty) = ty
 patternType (VarP _ ty) = ty
 patternType (TupleP ps) =
-  let field_types = map (fromSFType . patternType) ps
+  let field_types = map patternType ps
       tuple_size = length ps
       tuple_con = pyonTupleTypeCon tuple_size
-  in tuple_size `seq` SFType (varApp tuple_con field_types)
+  in varApp tuple_con field_types
 
 -- | The pattern matching elimination monad.  Run in IO so we can create new
 -- variables
@@ -70,24 +70,30 @@ runPM supply (PM f) = f supply
 pmNewVar :: PM Var
 pmNewVar = newAnonymousVar ObjectLevel
 
-elimPMDef :: RDef -> PM RDef
+elimPMDef :: Def SF -> PM (Def SF)
 elimPMDef (Def v f) = do f' <- elimPMFun f
                          return $ Def v f'
 
-elimPMFun :: RFun -> PM RFun
-elimPMFun fun@(Fun {funInfo = inf, funParams = params, funBody = body}) = do
+elimPMFun :: FunSF -> PM FunSF
+elimPMFun (FunSF fun@(Fun { funInfo = inf
+                          , funParams = params
+                          , funBody = body})) = do
   (params', transformer) <- elimPMPats (getSourcePos inf) params
   body' <- elimPMExp body
-  return $ fun {funParams = params', funBody = transformer body'}
+  return $ FunSF $ fun {funParams = params', funBody = transformer body'}
 
-elimPMExp :: RExp -> PM RExp
+elimPMExp :: ExpSF -> PM ExpSF
 elimPMExp expression =
-  case expression
+  case fromExpSF expression
   of VarE {} -> return expression
      LitE {} -> return expression
-     AppE inf op ty_args args ->
-       AppE inf <$> elimPMExp op <*> pure ty_args <*> traverse elimPMExp args
-     LamE inf f -> LamE inf <$> elimPMFun f
+     AppE inf op ty_args args -> do
+       op' <- elimPMExp op 
+       args' <- traverse elimPMExp args
+       return $ ExpSF $ AppE inf op' ty_args args'
+     LamE inf f -> do
+       f' <- elimPMFun f
+       return $ ExpSF $ LamE inf f'
      LetE { expInfo = inf
           , expBinder = pat
           , expValue = rhs
@@ -96,24 +102,28 @@ elimPMExp expression =
        (pat', transformer) <- elimPMPat (getSourcePos inf) pat
        rhs' <- elimPMExp rhs
        body' <- elimPMExp body
-       return $ LetE { expInfo = inf
-                     , expBinder = pat'
-                     , expValue = rhs'
-                     , expBody = transformer body'
-                     }
-     LetrecE inf defs body ->
-       LetrecE inf <$> traverse elimPMDef defs <*> elimPMExp body
-     CaseE inf scr alts ->
-       CaseE inf <$> elimPMExp scr <*> traverse elimPMAlt alts
+       return $ ExpSF $ LetE { expInfo = inf
+                             , expBinder = pat'
+                             , expValue = rhs'
+                             , expBody = transformer body'
+                             }
+     LetrecE inf defs body -> do
+       defs' <- traverse elimPMDef defs 
+       body' <- elimPMExp body
+       return $ ExpSF $ LetrecE inf defs' body'
+     CaseE inf scr alts -> do
+       scr' <- elimPMExp scr 
+       alts' <- traverse elimPMAlt alts
+       return $ ExpSF $ CaseE inf scr' alts'
 
-elimPMAlt :: RAlt -> PM RAlt
-elimPMAlt alt = do
+elimPMAlt :: AltSF -> PM AltSF
+elimPMAlt (AltSF alt) = do
   body <- elimPMExp $ altBody alt
-  return $ alt {altBody = body}
+  return $ AltSF $ alt {altBody = body}
 
 -- | Eliminate a pattern match.  Return a 'VarP' pattern and a transformation
 -- on the code that uses the pattern-bound variables.
-elimPMPat :: SourcePos -> RPat -> PM (RPat, RExp -> RExp)
+elimPMPat :: SourcePos -> PatSF -> PM (PatSF, ExpSF -> ExpSF)
 elimPMPat _ pat@(WildP ty) = do
   -- Create a new variable for this pattern
   pat_var <- pmNewVar
@@ -126,7 +136,7 @@ elimPMPat _ pat@(VarP _ _) =
 elimPMPat pos pat@(TupleP ps) = do
   -- Eliminate sub-patterns
   (fields, transformer) <- elimPMPats pos ps
-  let field_types = [t | VarP _ t <- fields]
+  let field_types = [TypSF t | VarP _ t <- fields]
   
   -- Create a new variable pattern to replace the tuple pattern 
   pat_var <- pmNewVar
@@ -136,14 +146,14 @@ elimPMPat pos pat@(TupleP ps) = do
   
   -- Create a 'case' statement for this pattern
   let transformer' code =
-        let new_info = mkSynInfo pos ObjectLevel
+        let new_info = mkExpInfo pos
             body = transformer code
             alt = Alt (pyonTupleCon tuple_size) field_types fields body
-        in CaseE new_info (VarE new_info pat_var) [alt]
+        in ExpSF $ CaseE new_info (ExpSF $ VarE new_info pat_var) [AltSF alt]
 
   return (VarP pat_var new_pat_type, transformer')
 
-elimPMPats :: SourcePos -> [RPat] -> PM ([RPat], RExp -> RExp)
+elimPMPats :: SourcePos -> [PatSF] -> PM ([PatSF], ExpSF -> ExpSF)
 elimPMPats pos ps = do
   (ps', transformers) <- mapAndUnzipM (elimPMPat pos) ps
   return (ps', catEndo transformers)

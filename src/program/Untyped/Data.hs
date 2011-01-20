@@ -97,7 +97,7 @@ type TyVarSet = Set.Set TyCon
 data TyConDescr =
   TyConDescr
   { -- | The System F constructor
-    tcSystemFValue :: SystemF.RType
+    tcSystemFValue :: SystemF.TypSF
   }
 
 -- | An atomic type-level entity, such as a type variable or constructor
@@ -237,7 +237,7 @@ data TI deriving(Typeable)
 instance Structure TI
 
 -- | Type inferred expressions, which may contain placeholders
-data instance SystemF.SFExpOf TI TI =
+data instance SystemF.Exp TI =
     -- | A placeholder for a recursive variable
     RecVarPH
     { phExpInfo :: SynInfo
@@ -257,27 +257,31 @@ data instance SystemF.SFExpOf TI TI =
     -- | An expression that was written directly in System F
     --
     -- This kind of expression only comes from built-in terms.
-  | TIRecExp SystemF.RExp
+  | TIRecExp SystemF.ExpSF
 
 data instance SystemF.Pat TI =
     TIWildP TIType
   | TIVarP SystemF.Var TIType
   | TITupleP [SystemF.Pat TI]
 
-newtype instance SystemF.AltOf TI TI = TIAlt (SystemF.AltOf Rec TI)
-newtype instance SystemF.FunOf TI TI = TIFun (SystemF.FunOf Rec TI)
+data instance SystemF.TyPat TI = TITyPat SystemF.Var TIType
+
+newtype instance SystemF.Ret TI = TIRet TIType
+
+newtype instance SystemF.Alt TI = TIAlt (SystemF.BaseAlt TI)
+newtype instance SystemF.Fun TI = TIFun (SystemF.BaseFun TI)
 
 -- | A type inference System F expression
-type TIExp = SystemF.SFExpOf TI TI
+type TIExp = SystemF.Exp TI
 
 -- | Other expressions use regular System F constructors
-type TIExp' = SystemF.SFExpOf Rec TI
+type TIExp' = SystemF.BaseExp TI
 
 -- | A Placeholder is a RecVarPH or DictPH term
 type Placeholder = TIExp
 type Placeholders = [Placeholder]
 
 -- | Types are not evaluated until type inference completes
-newtype instance SystemF.SFType TI = DelayedType (IO SystemF.RType)
+newtype instance SystemF.Typ TI = DelayedType (IO SystemF.TypSF)
 
-type TIType = SystemF.SFType TI
+type TIType = SystemF.Typ TI

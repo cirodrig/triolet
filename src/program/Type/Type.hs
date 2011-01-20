@@ -94,11 +94,24 @@ data ParamRepr =
 -- means that a pointer to the data is returned.  A write return means that
 -- the return address is taken as a parameter, and will be written in the
 -- function.
+--
+-- The three representations 'ReadRT', 'WriteRT', and 'OutRT' all pertain to 
+-- referenced objects.
+-- 'ReadRT' is used for reading an object that was already created.  We can't
+-- decide where we want the data, but we take whatever address we find it at.
+-- 'WriteRT' is used for creating an object.  We decide where we want
+-- the data to go before it's even created, and we tell the creator where to
+-- put its output.
+-- 'OutRT' is a write-only pointer.  Whereas a 'WriteRT' value is passed in
+-- the direction that data flows, an 'OutRT' value
+-- is passed in the opposite direction.  It's the consumer of a value telling
+-- the producer where to put it.
 data ReturnRepr =
-    ValRT
-  | BoxRT
-  | ReadRT
-  | WriteRT
+    ValRT                       -- ^ A value
+  | BoxRT                       -- ^ A boxed object reference
+  | ReadRT                      -- ^ A reference chosen by the producer
+  | WriteRT                     -- ^ A reference chosen by the consumer  
+  | OutRT                       -- ^ A pointer to write-only data
 
 returnReprToRepr :: ReturnRepr -> Repr
 returnReprToRepr ValRT   = Value

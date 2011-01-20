@@ -16,26 +16,26 @@ import LowLevel.Label
 import Builtins.Builtins
 import SystemF.Syntax
 
-pprSFType :: SFType Rec -> Doc
-pprSFType (SFType t) = pprType t
+pprTyp :: TypSF -> Doc
+pprTyp (TypSF t) = pprType t
 
-pprPat :: RPat -> Doc
+pprPat :: PatSF -> Doc
 pprPat = pprPatFlags defaultPrintFlags
 
-pprExp :: RExp -> Doc
+pprExp :: ExpSF -> Doc
 pprExp = pprExpFlags defaultPrintFlags
 
-pprFun :: RFun -> Doc
+pprFun :: FunSF -> Doc
 pprFun = pprFunFlags defaultPrintFlags
 
-pprDef :: RDef -> Doc
+pprDef :: Def SF -> Doc
 pprDef = pprDefFlags defaultPrintFlags
 
-pprExport :: Export Rec -> Doc
+pprExport :: Export SF -> Doc
 pprExport (Export pos spec f) =
   text "export" <+> pprExportSpec spec $$ nest 2 (pprFun f)
 
-pprModule :: RModule -> Doc
+pprModule :: Module SF -> Doc
 pprModule (Module module_name defs exports) =
   text "module" <+> text (showModuleName module_name) $$
   vcat (map (braces . vcat . map pprDef) defs) $$
@@ -67,18 +67,18 @@ pprLit (FloatL f _) = text (show f)
 pprLit (BoolL b) = text (show b)
 pprLit NoneL = text "None"
 
-pprPatFlags :: PrintFlags -> RPat -> Doc
+pprPatFlags :: PrintFlags -> PatSF -> Doc
 pprPatFlags flags pat = 
   case pat
-  of WildP ty  -> text "_" <+> colon <+> pprSFType ty
-     VarP v ty -> pprVarFlags flags v <+> colon <+> pprSFType ty
+  of WildP ty  -> text "_" <+> colon <+> pprType ty
+     VarP v ty -> pprVarFlags flags v <+> colon <+> pprType ty
      TupleP ps -> tuple $ map (pprPatFlags flags) ps
 
-pprTyPatFlags :: PrintFlags -> RTyPat -> Doc
-pprTyPatFlags flags (TyPat v ty) =
-  pprVar v <+> colon <+> pprSFType ty
+pprTyPatFlags :: PrintFlags -> TyPat SF -> Doc
+pprTyPatFlags flags (TyPatSF v ty) =
+  pprVar v <+> colon <+> pprTyp (TypSF ty)
 
-pprExpFlags :: PrintFlags -> RExp -> Doc
+pprExpFlags :: PrintFlags -> ExpSF -> Doc
 pprExpFlags flags expression = pprExpFlagsPrec flags precOuter expression
 
 -- Precedences for expression printing.
@@ -97,15 +97,15 @@ pprTypeAnnotation :: Doc -> Doc -> Int -> Doc
 pprTypeAnnotation val ty context = 
   parenthesize precTyAnnot (val <+> colon <+> ty) context
 
-pprExpFlagsPrec :: PrintFlags -> Int -> RExp -> Doc
-pprExpFlagsPrec flags prec expression =
+pprExpFlagsPrec :: PrintFlags -> Int -> ExpSF -> Doc
+pprExpFlagsPrec flags prec (ExpSF expression) =
   case expression
   of VarE {expVar = v} ->
          pprVarFlags flags v
      LitE {expLit = l} -> pprLit l
      AppE {expOper = e, expTyArgs = ts, expArgs = es} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
-             tDoc = [text "@" <> pprSFType t | t <- ts]
+             tDoc = [text "@" <> pprTyp t | t <- ts]
              aDoc = map (pprExpFlagsPrec flags precOuter) es
          in hang eDoc 4 (tuple (tDoc ++ aDoc))
      LamE {expFun = f} ->
@@ -119,7 +119,7 @@ pprExpFlagsPrec flags prec expression =
          let defsText = vcat $ map (pprDefFlags flags) ds
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
-     CaseE {expScrutinee = e, expAlternatives = [alt1, alt2]} 
+     CaseE {expScrutinee = e, expAlternatives = [AltSF alt1, AltSF alt2]} 
          | altConstructor alt1 `isPyonBuiltin` the_True &&
            altConstructor alt2 `isPyonBuiltin` the_False ->
              pprIf flags e (altBody alt1) (altBody alt2)
@@ -140,13 +140,13 @@ pprIf flags cond tr fa =
      text "else" <+> faText
 
 
-pprAltFlags :: PrintFlags -> Alt Rec -> Doc
-pprAltFlags flags (Alt { altConstructor = c
-                       , altTyArgs = ty_args
-                       , altParams = params
-                       , altBody = body
-                       }) =
-  let ty_args_doc = map (text "@" <>) $ map pprSFType ty_args
+pprAltFlags :: PrintFlags -> AltSF -> Doc
+pprAltFlags flags (AltSF (Alt { altConstructor = c
+                              , altTyArgs = ty_args
+                              , altParams = params
+                              , altBody = body
+                              })) =
+  let ty_args_doc = map (text "@" <>) $ map pprTyp ty_args
       params_doc = [parens $ pprPatFlags flags p | p <- params]
       pattern = pprVar c <+> sep (ty_args_doc ++ params_doc)
       body_doc = pprExpFlagsPrec flags precOuter body 
@@ -157,8 +157,8 @@ lambda = text [toEnum 0xCE, toEnum 0xBB]
 
 -- Print the function parameters, as they would appear in a lambda expression
 -- or function definition.
-pprFunParameters :: Bool -> PrintFlags -> RFun -> Doc
-pprFunParameters isLambda flags fun = sep param_doc
+pprFunParameters :: Bool -> PrintFlags -> FunSF -> Doc
+pprFunParameters isLambda flags (FunSF fun) = sep param_doc
   where
     param_doc =
       -- Type parameters
@@ -166,7 +166,7 @@ pprFunParameters isLambda flags fun = sep param_doc
       -- Value parameters
       map (parens . pprPatFlags flags) (funParams fun) ++
       -- Return type
-      [introduce_return_type $ pprSFType $ funReturnType fun]
+      [introduce_return_type $ pprTyp (case funReturn fun of RetSF t -> TypSF t)]
 
     introduce_return_type t
       | isLambda  = nest (-3) $ text "->" <+> t
@@ -174,13 +174,13 @@ pprFunParameters isLambda flags fun = sep param_doc
 
     ty_param p = text "@" <> parens (pprTyPatFlags flags p)
 
-pprFunFlags :: PrintFlags -> RFun -> Doc
+pprFunFlags :: PrintFlags -> FunSF -> Doc
 pprFunFlags flags fun =
   let params = pprFunParameters True flags fun
-      body = pprExpFlags flags $ funBody fun
+      body = pprExpFlags flags $ funBody (fromFunSF fun)
   in hang (lambda <+> params <> text ".") 4 body
 
 pprDefFlags flags (Def v fun) =
   let params = pprFunParameters False flags fun
-      body = pprExpFlags flags $ funBody fun
+      body = pprExpFlags flags $ funBody (fromFunSF fun)
   in hang (pprVarFlags flags v <+> params <+> equals) 4 body

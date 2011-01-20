@@ -27,27 +27,27 @@ catEndo :: [a -> a] -> a -> a
 catEndo fs x = foldr ($) x fs
 
 -- | The 'PE' monad holds the current variable-to-value assignment.
-type PE a = Reader (Map.Map Var RExp) a
+type PE a = Reader (Map.Map Var ExpSF) a
 
 runPE m = runReader m Map.empty
 
 -- | Look up the value of a variable
-lookupVar :: Var -> PE (Maybe RExp)
+lookupVar :: Var -> PE (Maybe ExpSF)
 lookupVar v = asks (Map.lookup v)
 
 -- | Look up the value of a variable; supply a default value if none
 -- is available
-lookupVarDefault :: RExp -> Var -> PE RExp
+lookupVarDefault :: ExpSF -> Var -> PE ExpSF
 lookupVarDefault defl v = asks (Map.findWithDefault defl v)
 
 -- | If the expression is a tuple expression, then return the expression's
 -- field values.
-deconstructTupleExp :: RExp -> Maybe [RExp]
+deconstructTupleExp :: ExpSF -> Maybe [ExpSF]
 deconstructTupleExp expression =
   -- If the operator is a tuple value constructor, then return the arguments
   -- otherwise, return nothing
   case uncurryUnpackPolymorphicCall expression
-  of Just (VarE {expVar = con}, ty_args, args)
+  of Just (ExpSF (VarE {expVar = con}), ty_args, args)
        | con == pyonTupleCon (length args) -> Just args
      _ -> Nothing
 
@@ -55,8 +55,8 @@ deconstructTupleExp expression =
 --
 -- Transform nested calls of the form @((f x y) z w)@ into flat calls
 -- of the form @(f x y z w)@.
-uncurryCall :: RExp -> RExp
-uncurryCall op = fromMaybe op $ uncurryCall' op
+uncurryCall :: ExpSF -> ExpSF
+uncurryCall (ExpSF op) = ExpSF $ fromMaybe op $ uncurryCall' op
 
 -- | Uncurry a function call.  Return 'Nothing' if nothing changes.
 uncurryCall' (AppE {expInfo = inf,
@@ -64,7 +64,7 @@ uncurryCall' (AppE {expInfo = inf,
                     expTyArgs = [],
                     expArgs = args}) =
   case uncurryCall op
-  of AppE {expOper = op', expTyArgs = ty_args, expArgs = args'} ->
+  of ExpSF (AppE {expOper = op', expTyArgs = ty_args, expArgs = args'}) ->
        Just $ AppE {expInfo = inf, expOper = op', expTyArgs = ty_args,
                     expArgs = args' ++ args}
      _ -> Nothing
@@ -76,13 +76,13 @@ uncurryUnpackPolymorphicCall e = unpackPolymorphicCall (uncurryCall e)
 
 -- | Unpack a polymorphic call, possibly surrounded by let-expressions.
 -- Return the unpacked call and bindings.
-unpackPolymorphicCallAndBindings :: RExp
-                                 -> Maybe ([(ExpInfo, RPat, RExp)],
-                                           RExp,
-                                           [RType],
-                                           [RExp])
+unpackPolymorphicCallAndBindings :: ExpSF
+                                 -> Maybe ([(ExpInfo, PatSF, ExpSF)],
+                                           ExpSF,
+                                           [TypSF],
+                                           [ExpSF])
 unpackPolymorphicCallAndBindings expression =
-  case expression
+  case fromExpSF expression
   of LetE { expInfo = inf
           , expBinder = pat
           , expValue = val
@@ -92,25 +92,24 @@ unpackPolymorphicCallAndBindings expression =
             Just ((inf, pat, val) : bindings, op, ty_args, args)
           Nothing -> Nothing
      _ -> case uncurryUnpackPolymorphicCall expression
-          of Just (op, ty_args, args) -> Just ([], op, map SFType ty_args, args)
+          of Just (op, ty_args, args) -> Just ([], op, map TypSF ty_args, args)
              Nothing -> Nothing
 
-applyBindings :: [(ExpInfo, RPat, RExp)] -> RExp -> RExp
+applyBindings :: [(ExpInfo, PatSF, ExpSF)] -> ExpSF -> ExpSF
 applyBindings bs e = foldr make_let e bs
   where
-    make_let (info, pat, rhs) body =
-      LetE {expInfo = info, expBinder = pat, expValue = rhs, expBody = body}
+    make_let (info, pat, rhs) body = ExpSF $ LetE info pat rhs body
 
 -- | Return True if the expression is \"simple\" and thus worthy of
 -- inlining.  We don't want to increase the amount of work performed by
 -- by evaluating the same expression repeatedly, unless it is a known-cheap
 -- expression.
-isSimpleExp :: RExp -> Bool
+isSimpleExp :: ExpSF -> Bool
 isSimpleExp expression =
-  case expression
+  case fromExpSF expression
   of VarE {} -> True
      LitE {} -> True
-     AppE {expOper = op} -> is_dictionary_operator op
+     AppE {expOper = op} -> is_dictionary_operator (fromExpSF op)
      LamE {} -> False
      LetE {} -> False
      LetrecE {} -> False
@@ -119,16 +118,17 @@ isSimpleExp expression =
     -- Dictionary constructor expressions are inlined to enable later
     -- optimizations
     is_dictionary_operator (VarE {expVar = c}) = isDictionaryCon c
-    is_dictionary_operator (LetE {expBody = b}) = is_dictionary_operator b
+    is_dictionary_operator (LetE {expBody = b}) =
+      is_dictionary_operator $ fromExpSF b
     is_dictionary_operator _ = False
 
 -- | Given a value and the pattern it is bound to, add the bound value(s)
 -- to the environment.  The caller should verify that the value has no
 -- side effects.  Any values that cannot be added to the environment will be
 -- ignored.
-bindValue :: RPat -> RExp -> PE a -> PE a
+bindValue :: PatSF -> ExpSF -> PE a -> PE a
 bindValue (WildP _)   _ m = m
-bindValue (VarP v t)  e m | isSimpleExp e = local (Map.insert v e) m
+bindValue (VarP v _)  e m | isSimpleExp e = local (Map.insert v e) m
                           | otherwise     = m
 bindValue (TupleP ps) e m =
   case deconstructTupleExp e
@@ -137,13 +137,13 @@ bindValue (TupleP ps) e m =
 
 -------------------------------------------------------------------------------
 
-partialEvaluateModule :: RModule -> RModule
+partialEvaluateModule :: Module SF -> Module SF
 partialEvaluateModule (Module module_name defss exports) =
   let (defss', exports') = runPE (pevalDefGroups defss exports)
   in Module module_name defss' exports'
 
-pevalDefGroups :: [DefGroup Rec] -> [Export Rec]
-               -> PE ([DefGroup Rec], [Export Rec])
+pevalDefGroups :: [DefGroup SF] -> [Export SF]
+               -> PE ([DefGroup SF], [Export SF])
 pevalDefGroups (defs:defss) exports = do
   (defs', (defss', exports')) <-
     pevalDefGroup defs $ pevalDefGroups defss exports
@@ -153,29 +153,29 @@ pevalDefGroups [] exports = do
   exports' <- mapM pevalExport exports 
   return ([], exports')
 
-pevalExport :: Export Rec -> PE (Export Rec)
+pevalExport :: Export SF -> PE (Export SF)
 pevalExport export = do
   fun <- pevalFun (exportFunction export)
   return $ export {exportFunction = fun}
 
-pevalDefGroup :: DefGroup Rec -> PE a -> PE (DefGroup Rec, a)
+pevalDefGroup :: DefGroup SF -> PE a -> PE (DefGroup SF, a)
 pevalDefGroup dg m = do
   dg' <- mapM pevalDef dg
   x <- m
   return (dg', x)
 
-pevalDef :: RDef -> PE RDef
+pevalDef :: Def SF -> PE (Def SF)
 pevalDef (Def v f) = do
   f' <- pevalFun f
   return $ Def v f'
 
-pevalFun :: RFun -> PE RFun
-pevalFun f = do
+pevalFun :: FunSF -> PE FunSF
+pevalFun (FunSF f) = do
   body <- pevalExp $ funBody f
-  return $ f {funBody = body}
+  return $ FunSF $ f {funBody = body}
 
 -- | Partial evaluation of an expression.
-pevalExp :: RExp -> PE RExp
+pevalExp :: ExpSF -> PE ExpSF
 
 -- Function call evaluation
 pevalExp expression@(uncurryUnpackPolymorphicCall -> Just (op, ty_args, args)) = do
@@ -184,50 +184,45 @@ pevalExp expression@(uncurryUnpackPolymorphicCall -> Just (op, ty_args, args)) =
   op' <- pevalExp op
 
   -- TODO: Try to statically evaluate this function
-  return $ pevalApp (expInfo expression) op' (map SFType ty_args) args'
+  return $ pevalApp (expInfo $ fromExpSF expression) op' (map TypSF ty_args) args'
 
 pevalExp expression =
-  case expression
+  case fromExpSF expression
   of VarE {expInfo = inf, expVar = v}
        -- Replace constants with literal values.  This helps 
        -- representation selection represent these as values.
        | v `isPyonBuiltin` the_AdditiveDict_int_zero ->
-           return $ LitE inf (IntL 0 (VarT $ pyonBuiltin the_int))
+           return_lit inf $ IntL 0 int_type
        | v `isPyonBuiltin` the_AdditiveDict_float_zero ->
-           return $ LitE inf (FloatL 0 (VarT $ pyonBuiltin the_float))
+           return_lit inf $ FloatL 0 float_type
        | v `isPyonBuiltin` the_MultiplicativeDict_int_one ->
-           return $ LitE inf (IntL 1 (VarT $ pyonBuiltin the_int))
+           return_lit inf $ IntL 1 int_type
        | v `isPyonBuiltin` the_MultiplicativeDict_float_one ->
-           return $ LitE inf (FloatL 1 (VarT $ pyonBuiltin the_float))
+           return_lit inf $ FloatL 1 float_type
        | otherwise -> lookupVarDefault expression v
      LitE {} -> return expression
      AppE {} -> internalError "pevalExp" -- Should have been already matched
-     LamE {expFun = f} -> do
+     LamE {expInfo = inf, expFun = f} -> do
        f' <- pevalFun f
-       return $ expression {expFun = f'}
+       return $ ExpSF $ LamE {expInfo = inf, expFun = f'}
 
      -- This expression is generated sometimes by SSA.
      -- Replace "let x = FOO in x" with FOO.  Continue simplifying FOO.
      LetE { expBinder = VarP v _
           , expValue = rhs
-          , expBody = VarE {expVar = v'}}
+          , expBody = ExpSF (VarE {expVar = v'})}
        | v == v' ->
          pevalExp rhs
-     LetE {expBinder = pat, expValue = rhs, expBody = body} -> do
-       -- Simplify RHS
-       rhs' <- pevalExp rhs
+     LetE inf pat rhs body -> do
+       rhs' <- pevalExp rhs     -- Simplify RHS
+       body' <- bindValue pat rhs' $ pevalExp body -- Evaluate body
+       return $ ExpSF $ LetE inf pat rhs' body'
 
-       -- Bind pattern and evaluate body
-       body' <- bindValue pat rhs' $ pevalExp body
-
-       return $ expression {expValue = rhs', expBody = body'}
-
-     LetrecE {expDefs = defs, expBody = body} -> do
+     LetrecE inf defs body -> do
        (defs', body') <- pevalDefGroup defs $ pevalExp body
+       return $ ExpSF $ LetrecE inf defs' body'
 
-       return $ expression {expDefs = defs', expBody = body'}
-
-     CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} -> do
+     CaseE inf scr alts -> do
        scr' <- pevalExp scr
 
        -- If possible, eliminate this case statement
@@ -235,7 +230,11 @@ pevalExp expression =
          Just e -> pevalExp e
          Nothing -> do
            alts' <- mapM pevalAlt alts
-           return $ expression {expScrutinee = scr', expAlternatives = alts'}
+           return $ ExpSF $ CaseE inf scr' alts'
+  where
+    return_lit inf l = return $ ExpSF $ LitE inf l
+    int_type = VarT $ pyonBuiltin the_int
+    float_type = VarT $ pyonBuiltin the_float
 
 -- | Attempt to statically evalaute a known function.  The operands have
 --   already been evaluated.
@@ -248,9 +247,9 @@ pevalApp inf op tys args =
        | con `isPyonBuiltin` the_MultiplicativeDict_float_fromInt ->
            -- fromInt (n :: Float) = n as a float
            case args
-           of [LitE {expLit = IntL n _}] ->
-                LitE { expInfo = inf
-                     , expLit = FloatL (fromIntegral n) float_type}
+           of [ExpSF (LitE {expLit = IntL n _})] ->
+                ExpSF $ LitE { expInfo = inf
+                             , expLit = FloatL (fromIntegral n) float_type}
               _ -> internalError "pevalApp"
      _ ->
        -- Can't evaluate; rebuild the call expression
@@ -259,27 +258,30 @@ pevalApp inf op tys args =
     -- Find the operator, if it is a constructor variable.
     -- Previous partial evaluation may have left useless 'let' expressions 
     -- around the operator.  Look through those.
-    known_oper = find_known_oper op
+    known_oper = find_known_oper (fromExpSF op)
       where
-        find_known_oper (VarE {expVar = v}) = Just v
-        find_known_oper (LetE {expBody = body}) = find_known_oper body
-        find_known_oper (LetrecE {expBody = body}) = find_known_oper body
+        find_known_oper (VarE {expVar = v}) =
+          Just v
+        find_known_oper (LetE {expBody = body}) =
+          find_known_oper $ fromExpSF body
+        find_known_oper (LetrecE {expBody = body}) =
+          find_known_oper $ fromExpSF body
         find_known_oper _ = Nothing
                       
-    rebuild_call op ts args = AppE inf op ts args
+    rebuild_call op ts args = ExpSF $ AppE inf op ts args
     
     float_type = VarT $ pyonBuiltin the_float
 
 -- | Attempt to eliminate a case statement.  If the scrutinee is a constructor
 -- application and it matches an alternative, replace the case statement
 -- with the alternative.
-eliminateCase :: SourcePos -> RExp -> [Alt Rec] -> Maybe RExp
+eliminateCase :: SourcePos -> ExpSF -> [AltSF] -> Maybe ExpSF
 eliminateCase pos scrutinee alternatives =
   -- Is the scrutinee a constructor application?
   case unpackPolymorphicCallAndBindings scrutinee
-  of Just (bindings, VarE {expVar = scrutinee_con}, ty_args, args) ->
+  of Just (bindings, ExpSF (VarE {expVar = scrutinee_con}), ty_args, args) ->
        -- Find a matching alternative
-       case find ((scrutinee_con ==) . altConstructor) alternatives
+       case find ((scrutinee_con ==) . altConstructor) $ map fromAltSF alternatives
        of Just alt ->
             -- Assume that type arguments match, because the code passed
             -- type checking.
@@ -292,13 +294,9 @@ eliminateCase pos scrutinee alternatives =
      _ -> Nothing               -- Cannot determine constructor of scrutinee
   where
     make_let (arg, pat) expr =
-      LetE { expInfo = mkSynInfo pos ObjectLevel
-           , expBinder = pat
-           , expValue = arg
-           , expBody = expr
-           }
+      ExpSF $ LetE (mkExpInfo pos) pat arg expr
 
-pevalAlt :: Alt Rec -> PE (Alt Rec)
-pevalAlt alt = do
+pevalAlt :: AltSF -> PE AltSF
+pevalAlt (AltSF alt) = do
   body' <- pevalExp $ altBody alt
-  return $ alt {altBody = body'}
+  return $ AltSF $ alt {altBody = body'}

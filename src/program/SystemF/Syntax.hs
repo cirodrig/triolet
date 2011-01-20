@@ -7,21 +7,17 @@
 
 {-# LANGUAGE DeriveDataTypeable, FlexibleInstances #-}
 module SystemF.Syntax
-    (Rec,
-     SFExpOf(..),
-     SFType(..),
-     SFRecExp, RecAlt,
-     RExp, RType, RAlt, RPat, RTyPat, RFun, RDef, RModule,
-     Alt,
-     Var,
-     Lit(..),
+    (Lit(..),
      literalType,
-     Pat(..),
-     TyPat(..),
-     ExpInfo, defaultExpInfo,
-     SFExp,
-     AltOf(..),
-     FunOf(..), Fun,
+     ExpInfo,
+     defaultExpInfo,
+     mkExpInfo,
+     Typ(..), Pat(..), TyPat(..), Ret(..), Exp(..), Alt(..), Fun(..),
+     SF,
+     TypSF, PatSF, RetSF, ExpSF, AltSF, FunSF,
+     BaseExp(..),
+     BaseAlt(..),
+     BaseFun(..),
      Def(..), DefGroup,
      Export(..),
      Module(..),
@@ -40,35 +36,11 @@ import Data.Typeable
 import Gluon.Common.Error
 import Gluon.Common.Label
 import Gluon.Common.SourcePos
-import Gluon.Core(Structure, Rec, SynInfo, internalSynInfo)
 import Gluon.Core.Level
 import Builtins.Builtins
 import Type.Var
 import Type.Type
 import Export
-
-data family SFExpOf a :: * -> *
-data family AltOf a :: * -> *
-data family FunOf a :: * -> *
-
-type SFRecExp s = SFExpOf s s
-type RecAlt s = AltOf s s
-type Fun s = FunOf s s
-type Alt s = AltOf Rec s
-data family SFType a :: *
-data family Pat a :: *
-
-type SFExp = SFExpOf Rec
-type RExp = SFRecExp Rec
-type RType = SFType Rec
-type RAlt = AltOf Rec Rec
-type RPat = Pat Rec
-type RTyPat = TyPat Rec
-type RDef = Def Rec
-type RFun = Fun Rec
-type RModule = Module Rec
-
-newtype instance SFType Rec = SFType {fromSFType :: Type}
 
 -- | Literal values.
 --
@@ -87,28 +59,79 @@ literalType (FloatL _ t) = t
 literalType (BoolL _) = VarT $ pyonBuiltin the_bool
 literalType NoneL = VarT $ pyonBuiltin the_NoneType
 
--- | Patterns.
-data instance Pat Rec =
-    WildP RType                    -- ^ Wildcard pattern
-  | VarP Var RType                 -- ^ Variable pattern binding
-  | TupleP [Pat Rec]               -- ^ Tuple pattern
+-- | Information common to all expressions.
+data ExpInfo = ExpInfo SourcePos
+
+defaultExpInfo :: ExpInfo
+defaultExpInfo = ExpInfo noSourcePos
+
+mkExpInfo :: SourcePos -> ExpInfo
+mkExpInfo = ExpInfo
+
+instance HasSourcePos ExpInfo where
+  getSourcePos (ExpInfo p) = p
+
+-- Data types used in representing code.  Data types are parameterized
+
+data family Typ a               -- ^ A type; can be a wrapper around 'Type'
+data family Pat a               -- ^ A pattern binding
+data family TyPat a             -- ^ A pattern binding for types
+data family Ret a               -- ^ A return declaration
+data family Exp a               -- ^ An expression
+data family Alt a               -- ^ A case alternative
+data family Fun a               -- ^ A function
+
+instance Typeable1 Typ where
+  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Typ") []
 
 instance Typeable1 Pat where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Pat") []
           
--- | Type-level patterns.
-data TyPat s = TyPat Var (SFType s)
-             deriving(Typeable)
+instance Typeable1 TyPat where
+  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.TyPat") []
 
--- | Information common to all expressions.
-type ExpInfo = SynInfo
+instance Typeable1 Ret where
+  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Ret") []
 
--- | Default values of 'ExpInfo'.
-defaultExpInfo :: ExpInfo
-defaultExpInfo = internalSynInfo ObjectLevel
+instance Typeable1 Exp where
+  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Exp") []
 
--- | Expressions.
-data instance SFExpOf Rec s =
+instance Typeable1 Alt where
+  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Alt") []
+
+instance Typeable1 Fun where
+  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Fun") []
+
+-- | The System F code representation
+data SF
+
+type TypSF = Typ SF
+type PatSF = Pat SF
+type RetSF = Ret SF
+type ExpSF = Exp SF
+type AltSF = Alt SF
+type FunSF = Fun SF
+
+newtype instance Typ SF = TypSF {fromTypSF :: Type}
+-- Pat SF is a data type
+-- Ret SF is a data type
+newtype instance Exp SF = ExpSF {fromExpSF :: BaseExp SF}
+newtype instance Alt SF = AltSF {fromAltSF :: BaseAlt SF}
+newtype instance Fun SF = FunSF {fromFunSF :: BaseFun SF}
+
+-- | Patterns
+data instance Pat SF =
+    WildP Type                    -- ^ Wildcard pattern
+  | VarP Var Type                 -- ^ Variable pattern binding
+  | TupleP [PatSF]                -- ^ Tuple pattern
+
+newtype instance Ret SF = RetSF {retSFType :: Type}
+
+-- | Type-level patterns
+data instance TyPat SF = TyPatSF Var Type
+
+-- | Expressions
+data BaseExp s =
     -- | A variable reference
     VarE
     { expInfo :: ExpInfo
@@ -121,80 +144,54 @@ data instance SFExpOf Rec s =
     }
     -- | Application
   | AppE
-    { expInfo :: ExpInfo
-    , expOper :: SFRecExp s
-    , expTyArgs :: [SFType s]
-    , expArgs :: [SFRecExp s]
+    { expInfo   :: ExpInfo
+    , expOper   :: Exp s
+    , expTyArgs :: [Typ s]
+    , expArgs   :: [Exp s]
     }
-{-    -- | Type application
-  | TyAppE
-    { expInfo :: ExpInfo
-    , expOper :: SFRecExp s
-    , expTyArg :: SFType s
-    }
-    -- | Function call
-  | CallE
-    { expInfo :: ExpInfo
-    , expOper :: SFRecExp s
-    , expArgs :: [SFRecExp s]
-    }-}
     -- | Lambda expression
   | LamE
     { expInfo :: ExpInfo
-    , expFun :: Fun s
+    , expFun  :: Fun s
     }
     -- | Let expression
   | LetE
-    { expInfo :: ExpInfo
+    { expInfo   :: ExpInfo
     , expBinder :: Pat s
-    , expValue :: SFRecExp s
-    , expBody :: SFRecExp s
+    , expValue  :: Exp s
+    , expBody   :: Exp s
     }
     -- | Recursive definition group
   | LetrecE
     { expInfo :: ExpInfo
     , expDefs :: [Def s]
-    , expBody :: SFRecExp s
+    , expBody :: Exp s
     }
     -- | Case analysis 
   | CaseE
     { expInfo :: ExpInfo
-    , expScrutinee :: SFRecExp s
-    , expAlternatives :: [RecAlt s]
+    , expScrutinee :: Exp s
+    , expAlternatives :: [Alt s]
     }
 
-data instance AltOf Rec s =
+data BaseAlt s =
   Alt { altConstructor :: !Var
-      , altTyArgs :: [SFType s]
+      , altTyArgs      :: [Typ s]
         
-      , altParams :: [Pat s]
-      , altBody :: SFRecExp s
+      , altParams      :: [Pat s]
+      , altBody        :: Exp s
       }
 
-instance Typeable1 (SFExpOf Rec) where
-  typeOf1 x =
-    let con1 = mkTyCon "SystemF.Syntax.SFExpOf"
-        arg1 = typeOf (undefined :: Rec)
-    in mkTyConApp con1 [arg1]
-          
-instance HasSourcePos (SFExpOf Rec s) where
-  getSourcePos _ = noSourcePos
-  -- Not implemented!
-  setSourcePos _ _ = internalError "HasSourcePos.setSourcePos"
+instance HasSourcePos (BaseExp s) where
+  getSourcePos e = getSourcePos (expInfo e)
 
-data instance FunOf Rec s =
-  Fun { funInfo :: ExpInfo
-      , funTyParams :: [TyPat s] -- ^ Type parameters
-      , funParams :: [Pat s]     -- ^ Object parameters
-      , funReturnType :: SFType s -- ^ Return type
-      , funBody :: SFRecExp s
+data BaseFun s =
+  Fun { funInfo       :: ExpInfo
+      , funTyParams   :: [TyPat s]   -- ^ Type parameters
+      , funParams     :: [Pat s]     -- ^ Object parameters
+      , funReturn     :: Ret s       -- ^ Return type
+      , funBody       :: Exp s
       }
-
-instance Typeable1 (FunOf Rec) where
-  typeOf1 x =
-    let con1 = mkTyCon "SystemF.Syntax.FunOf"
-        arg1 = typeOf (undefined :: Rec)
-    in mkTyConApp con1 [arg1]
 
 data Def s = Def Var (Fun s)
          deriving(Typeable)
@@ -212,86 +209,6 @@ data Export s =
 data Module s = Module !ModuleName [DefGroup s] [Export s]
             deriving(Typeable)
 
-{-
--- | Map a function over an expression.
-mapSFExp :: (Structure a, Structure b)
-         => (SFRecExp a -> SFRecExp b)
-         -> (RecAlt a -> RecAlt b)
-         -> (FunOf a a -> FunOf b b)
-         -> (SFType a -> SFType b)
-         -> SFExpOf Rec a -> SFExpOf Rec b
-mapSFExp e a f t expression =
-  case expression
-  of VarE info v -> VarE info v
-     LitE info l ty -> LitE info l (t ty)
-     TyAppE info op arg -> TyAppE info (e op) (t arg)
-     CallE info op args -> CallE info (e op) (map e args)
-     LamE info fun -> LamE info (f fun)
-     LetE info p e1 e2 -> LetE info (mapPat t p) (e e1) (e e2)
-     LetrecE info defs body -> LetrecE info (map mapDef defs) (e body)
-     CaseE info scr alts -> CaseE info (e scr) (map a alts)
-  where
-    mapDef (Def v fun) = Def v (f fun)
-
-mapAlt :: (Structure a, Structure b)
-       => (SFRecExp a -> SFRecExp b)
-       -> (SFType a -> SFType b)
-       -> Alt a -> Alt b
-mapAlt e t (Alt con ty_args params body) =
-  Alt con (map t ty_args) [(v, repr ::: t ty) | (v, repr ::: ty) <- params] (e body)
-
--- | Map a monadic function over an expression.
-traverseSFExp :: (Monad m, Structure a, Structure b)
-              => (SFRecExp a -> m (SFRecExp b))
-              -> (RecAlt a -> m (RecAlt b))
-              -> (FunOf a a -> m (FunOf b b))
-              -> (SFType a -> m (SFType b))
-              -> SFExpOf Rec a -> m (SFExpOf Rec b)
-traverseSFExp e a f t expression =
-  case expression
-  of VarE info v -> return $ VarE info v
-     LitE info l ty -> LitE info l `liftM` t ty
-     TyAppE info op arg -> TyAppE info `liftM` e op `ap` t arg
-     CallE info op args -> CallE info `liftM` e op `ap` mapM e args
-     LamE info fun -> LamE info `liftM` f fun
-     LetE info p e1 e2 ->
-       LetE info `liftM` traversePat t p `ap` e e1 `ap` e e2
-     LetrecE info defs body ->
-       LetrecE info `liftM` mapM traverseDef defs `ap` e body
-     CaseE info scr alts ->
-       CaseE info `liftM` e scr `ap` mapM a alts
-  where
-    traverseDef (Def v fun) = Def v `liftM` f fun
-    
-traverseAlt :: (Monad m, Structure a, Structure b)
-            => (SFRecExp a -> m (SFRecExp b))
-            -> (SFType a -> m (SFType b))
-            -> Alt a -> m (Alt b)
-traverseAlt e t (Alt con ty_args params body) =
-  Alt con `liftM` mapM t ty_args `ap` mapM traverse_param params `ap` e body
-  where
-    traverse_param (v, repr ::: ty) = do
-      ty' <- t ty
-      return (v, repr ::: ty')
-
-mapPat :: (Structure a, Structure b)
-       => (SFType a -> SFType b)
-       -> Pat a -> Pat b
-mapPat t pattern =
-  case pattern
-  of WildP ty -> WildP (t ty)
-     VarP v ty -> VarP v (t ty)
-     TupleP ps -> TupleP (map (mapPat t) ps)
-
-traversePat :: (Monad m, Structure a, Structure b)
-            => (SFType a -> m (SFType b))
-            -> Pat a -> m (Pat b)
-traversePat t pattern =
-  case pattern
-  of WildP ty -> WildP `liftM` t ty
-     VarP v ty -> VarP v `liftM` t ty
-     TupleP ps -> TupleP `liftM` mapM (traversePat t) ps
--}
 -- | Return True only if the given expression has no side effects.
 -- This function examines only expression constructors, and avoids inspecting
 -- let or letrec expressions.
@@ -300,8 +217,8 @@ traversePat t pattern =
 -- effects.  Lambda expressions have no side effects, since they return but
 -- do not execute their function.
 
-isValueExp :: SFRecExp Rec -> Bool
-isValueExp expression =
+isValueExp :: ExpSF -> Bool
+isValueExp (ExpSF expression) =
   case expression
   of VarE {} -> True
      LitE {} -> True
@@ -310,22 +227,11 @@ isValueExp expression =
      LetE {} -> False
      LetrecE {} -> False
      CaseE {expScrutinee = scr, expAlternatives = alts} ->
-       isValueExp scr && all (isValueExp . altBody) alts
+       isValueExp scr && all (isValueExp . altBody . fromAltSF) alts
        
-{-
--- | Extract all type parameters from the expression.  Return the base 
--- expression, which is not a type application, and all the type parameters 
--- it was applied to.
-unpackTypeApplication :: RExp -> (RExp, [Type])
-unpackTypeApplication e = unpack [] e
-  where
-    unpack types (TyAppE {expOper = op, expTyArg = SFType ty}) =
-      unpack (ty : types) op
-    unpack types e = (e, types)-}
-
-unpackPolymorphicCall :: RExp -> Maybe (RExp, [Type], [RExp])
-unpackPolymorphicCall (AppE {expOper = op, expTyArgs = ts, expArgs = xs}) =
-  Just (op, map fromSFType ts, xs)
+unpackPolymorphicCall :: ExpSF -> Maybe (ExpSF, [Type], [ExpSF])
+unpackPolymorphicCall (ExpSF (AppE {expOper = op, expTyArgs = ts, expArgs = xs})) =
+  Just (op, map fromTypSF ts, xs)
 
 unpackPolymorphicCall _ = Nothing
 
