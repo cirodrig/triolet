@@ -1,9 +1,15 @@
 
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
-module Type.Compare(sameParamRepr, sameReturnRepr, compareTypes)
+module Type.Compare
+       (sameParamRepr,
+        sameReturnRepr,
+        compareTypes,
+        unifyTypeWithPattern
+       )
 where
 
 import Control.Monad.Reader
+import qualified Data.IntMap as IntMap
 
 import Gluon.Common.Identifier
 import Gluon.Common.MonadLogic
@@ -21,6 +27,8 @@ sameParamRepr (ValPT _) (ValPT _) = True
 sameParamRepr BoxPT     BoxPT     = True 
 sameParamRepr ReadPT    ReadPT    = True 
 sameParamRepr WritePT   WritePT   = True 
+sameParamRepr OutPT     OutPT     = True 
+sameParamRepr SideEffectPT SideEffectPT = True 
 sameParamRepr _         _         = False
 
 -- | True if the given representations are the same, False otherwise.
@@ -29,6 +37,8 @@ sameReturnRepr ValRT     ValRT     = True
 sameReturnRepr BoxRT     BoxRT     = True 
 sameReturnRepr ReadRT    ReadRT    = True 
 sameReturnRepr WriteRT   WriteRT   = True 
+sameReturnRepr OutRT     OutRT     = True 
+sameReturnRepr SideEffectRT SideEffectRT = True 
 sameReturnRepr _         _         = False
 
 data CmpEnv =
@@ -76,3 +86,71 @@ cmpReturns (ret1 ::: rng1) (ret2 ::: rng2)
   | sameReturnRepr ret1 ret2 = cmpType rng1 rng2
   | otherwise = return False
 
+-- | Given an expected type @t_e@, a set of flexible variables @fv$, and a
+--   given type @t_g@, try to construct a unifying substitution
+--   @S : fv -> Type@ such that @S(t_e) = t_g@.  The substitution applied to
+--   the expected type makes it equal to the given type.
+unifyTypeWithPattern :: IdentSupply Var
+                     -> TypeEnv
+                     -> [Var]   -- ^ Free variables in expected type
+                     -> Type    -- ^ Expected type
+                     -> Type    -- ^ Given type
+                     -> IO (Maybe Substitution)
+unifyTypeWithPattern id_supply _ free_vars expected given =
+  runFreshVarM id_supply calculate_substitution
+  where
+    calculate_substitution = do
+      result <- unify init_substitution expected given
+      return $ case result
+               of Just sub -> Just $ substitutionFromMap $ IntMap.mapMaybe id sub
+                  Nothing -> Nothing
+
+    init_substitution = IntMap.fromList [(fromIdent $ varID v, Nothing)
+                                        | v <- free_vars]
+
+-- | A substitution used in unification.  All flexible variables are in
+--   the substitution.  If they haven't been assigned a value, their
+--   value in the map is 'Nothing'.
+type USubst = IntMap.IntMap (Maybe Type)
+
+-- | Search for a substitution that unifies @expected@ with @given@.
+--   Return a unifying substition if found.
+unify :: USubst -> Type -> Type -> FreshVarM (Maybe USubst)
+unify subst expected given = do
+  -- Rename 'expected' so that bound variables match
+  (given', expected') <- leftUnifyBoundVariables given expected
+  match_unify expected' given'
+  where
+    no_unifier   = return Nothing
+    unified_by s = return (Just s)
+
+    -- Run two unification tasks sequentially
+    unify2 s (e1, e2) (g1, g2) = do
+      result1 <- unify s e1 g1
+      case result1 of
+        Just s' -> unify s' e2 g2
+        Nothing -> no_unifier
+
+    match_unify (VarT v) given =
+      case IntMap.lookup (fromIdent $ varID v) subst
+      of Just (Just v_value) ->
+           -- v has been assigned a value; substitute it
+           unify subst v_value given
+         Just Nothing -> 
+           -- v is flexible; assign it and succeed
+           unified_by $ IntMap.insert (fromIdent $ varID v) (Just given) subst
+         Nothing ->
+           -- v is rigid; must be equal to 'given'
+           case given
+           of VarT v' | v == v' -> unified_by subst
+              _ -> no_unifier
+
+    match_unify (AppT t1 t2) (AppT t3 t4) =
+      unify2 subst (t1, t2) (t3, t4)
+
+    match_unify (FunT (r1 ::: t1) (r2 ::: t2)) (FunT (r3 ::: t3) (r4 ::: t4))
+      | sameParamRepr r1 r3 && sameReturnRepr r2 r4 =
+          unify2 subst (t1, t2) (t3, t4)
+      | otherwise = no_unifier
+       
+    match_unify _ _ = no_unifier

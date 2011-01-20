@@ -75,9 +75,13 @@ Executable pyon
     SystemF.Builtins
     SystemF.BuiltinsTH
     SystemF.DeadCode
+    SystemF.DictEnv
     SystemF.ElimPatternMatching
+    SystemF.MemoryIR
+    SystemF.OutputPassing
     SystemF.PartialEval
     SystemF.Print
+    SystemF.PrintMemoryIR
     SystemF.Representation
     SystemF.StreamSpecialize
     SystemF.Syntax

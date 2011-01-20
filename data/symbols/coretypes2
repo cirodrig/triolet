@@ -58,6 +58,9 @@ repr_PyonTuple2 :
     (val a : pure) -> (val b : pure) -> read Repr a -> read Repr b
  -> write Repr (PyonTuple2 a b);
 
+-- This always returns the same, global object
+repr_Repr : (val a : Pure) -> read Repr a;
+
 OpaqueTraversableDict_list : read TraversableDict list;
 
 TraversableDict_Stream_build :

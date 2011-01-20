@@ -66,6 +66,8 @@ pyonBuiltinVariableNames =
   , "repr_PyonTuple1"
   , "repr_PyonTuple2"
   , "repr_PyonTuple3"
+  , "repr_Repr"
+  , "repr_AdditiveDict"
   , "TraversableDict_Stream"
   , "TraversableDict_Stream_traverse"
   , "TraversableDict_Stream_build"
@@ -147,6 +149,16 @@ pyonBuiltinVariableNames =
   , "fun_zip_SS"
   , "fun_zip_SN"
   , "fun_zip_NS"
+    
+    -- Inserted by representation inference
+  , "load"
+  , "store"
+  , "copy"
+  , "loadBox"
+  , "storeBox"
+  , "copyBox"
+  , "boxToPtr"
+  , "ptrToBox"
   ]
 
 pyonBuiltinsSpecification =

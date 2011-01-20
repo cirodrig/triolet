@@ -102,6 +102,9 @@ newtype Substitution = S {unS :: IntMap.IntMap Type}
 substitution :: [(Var, Type)] -> Substitution
 substitution xs = S $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- xs]
 
+substitutionFromMap :: IntMap.IntMap Type -> Substitution
+substitutionFromMap = S
+
 emptySubstitution :: Substitution
 emptySubstitution = S IntMap.empty
 

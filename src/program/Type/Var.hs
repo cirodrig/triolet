@@ -1,13 +1,17 @@
 
-{-# LANGUAGE FlexibleContexts, TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
 module Type.Var
        (Var, varID, varName, 
         VarID,
         pprVar,
         mkVar, mkAnonymousVar, mkClonedVar,
-        newVar, newAnonymousVar, newClonedVar)
+        newVar, newAnonymousVar, newClonedVar,
+        FreshVarM,
+        runFreshVarM)
 where
 
+import Control.Monad
+import Control.Monad.Trans
 import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Identifier
@@ -78,3 +82,26 @@ newClonedVar v = do
 
 pprVar :: Var -> Doc
 pprVar v = text (show v)
+
+-- | A monad for performing simple computations that require a variable
+--   supply
+newtype FreshVarM a = FreshVarM (IdentSupply Var -> IO a)
+
+runFreshVarM :: IdentSupply Var -> FreshVarM a -> IO a
+runFreshVarM supply (FreshVarM f) = f supply
+
+instance Functor FreshVarM where
+  fmap f (FreshVarM g) = FreshVarM (\env -> fmap f (g env))
+
+instance Monad FreshVarM where
+  return x = FreshVarM (\_ -> return x)
+  m >>= k = FreshVarM $ \env ->
+    case m
+    of FreshVarM f1 -> do x <- f1 env
+                          case k x of FreshVarM f2 -> f2 env
+
+instance MonadIO FreshVarM where
+  liftIO m = FreshVarM (\_ -> m)
+
+instance Supplies FreshVarM (Ident Var) where
+  fresh = FreshVarM supplyValue

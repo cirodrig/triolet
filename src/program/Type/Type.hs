@@ -84,9 +84,11 @@ data Repr = Value               -- ^ Represented as a value.  Variables hold
 -- /argument/, which writes its data at the given address.
 data ParamRepr =
     ValPT !(Maybe Var)       -- ^ Pass as a (possibly dependent) value
-  | BoxPT                       -- ^ Pass a boxed reference
-  | ReadPT                      -- ^ Pass a readable reference
-  | WritePT                     -- ^ Pass a written reference
+  | BoxPT                    -- ^ Pass a boxed reference
+  | ReadPT                   -- ^ Pass a readable reference
+  | WritePT                  -- ^ Pass a written reference
+  | OutPT                    -- ^ Pass an output reference
+  | SideEffectPT             -- ^ A dummy parameter representing a dependence
 
 -- | A return parameter representation.
 --
@@ -106,12 +108,17 @@ data ParamRepr =
 -- the direction that data flows, an 'OutRT' value
 -- is passed in the opposite direction.  It's the consumer of a value telling
 -- the producer where to put it.
+--
+-- 'SideEffectRT' is for dummy values that are passed around to keep track of
+-- dependences.  Functions that store into memory return this.  Without it,
+-- the functions would look like dead code because they don't return anything.
 data ReturnRepr =
     ValRT                       -- ^ A value
   | BoxRT                       -- ^ A boxed object reference
   | ReadRT                      -- ^ A reference chosen by the producer
   | WriteRT                     -- ^ A reference chosen by the consumer  
   | OutRT                       -- ^ A pointer to write-only data
+  | SideEffectRT                -- ^ A dummy value to track dependences
 
 returnReprToRepr :: ReturnRepr -> Repr
 returnReprToRepr ValRT   = Value

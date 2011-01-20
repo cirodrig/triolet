@@ -1,6 +1,11 @@
 
 {-# LANGUAGE FlexibleInstances #-}
-module SystemF.Representation(inferRepresentations)
+module SystemF.Representation
+       (Rep,
+        Typ(..), TyPat(..), Pat(..), Ret(..), Exp(..), Alt(..), Fun(..),
+        TypR, PatR, RetR, ExpR, AltR, FunR,
+        returnType,
+        inferRepresentations)
 where
 
 import Control.Monad
@@ -38,11 +43,11 @@ newtype instance Ret Rep = RetR ReturnType
 
 data instance Exp Rep =
     -- | Convert a readable reference to a value by loading the data.
-    -- The ReturnRepr must be 'Val' or 'Box'.
+    -- The Repr must be 'Value' or 'Boxed'.
     LoadExpr Repr Type ExpR
 
     -- | Convert a value to a writable reference by storing the data.
-    -- The ReturnRepr must be 'Val' or 'Box'.
+    -- The Repr must be 'Value' or 'Boxed'.
   | StoreExpr Repr Type ExpR
     
     -- | Reinterpret a readable pointer as a boxed object.
@@ -59,7 +64,7 @@ data instance Exp Rep =
   | CopyExpr Type ExpR
     
     -- | Other expressions.
-  | ExpR (BaseExp Rep)
+  | ExpR {-# UNPACK #-}!ReturnType (BaseExp Rep)
 
 newtype instance Fun Rep = FunR (BaseFun Rep)
 newtype instance Alt Rep = AltR (BaseAlt Rep)
@@ -71,6 +76,15 @@ type RetR = Ret Rep
 type ExpR = Exp Rep
 type FunR = Fun Rep
 type AltR = Alt Rep
+
+returnType :: ExpR -> ReturnType
+returnType (LoadExpr Value ty _) = ValRT ::: ty
+returnType (LoadExpr Boxed ty _) = BoxRT ::: ty
+returnType (StoreExpr _ ty _)    = WriteRT ::: ty
+returnType (AsBoxExpr ty _)      = BoxRT ::: ty
+returnType (AsReadExpr ty _)     = ReadRT ::: ty
+returnType (CopyExpr ty _)       = WriteRT ::: ty
+returnType (ExpR rt _)           = rt
 
 -- | Create the return representation corresponding to a 'Repr' for a value
 --   that is read, rather than written.
@@ -232,12 +246,13 @@ isIdCoercion _ = False
 --   Store the value to a temporary variable, then read it.
 valToReadCoercion ty tmpvar = BinderCoercion $ \producer ->
   let rhs_exp = StoreExpr Value ty producer
-      use_exp = ExpR $ VarE defaultExpInfo tmpvar
+      use_exp = ExpR (ReadRT ::: ty) $ VarE defaultExpInfo tmpvar
       wrapper body =
-        ExpR $ LetE { expInfo = defaultExpInfo
-                    , expBinder = PatR tmpvar (WritePT ::: ty)
-                    , expValue = rhs_exp
-                    , expBody = body}
+        ExpR (returnType body) $
+        LetE { expInfo = defaultExpInfo
+             , expBinder = PatR tmpvar (WritePT ::: ty)
+             , expValue = rhs_exp
+             , expBody = body}
   in (use_exp, wrapper)
 
 valToWriteCoercion ty = WrapperCoercion (\e -> StoreExpr Value ty e)
@@ -257,33 +272,37 @@ copyCoercion ty = WrapperCoercion (\e -> CopyExpr ty e)
 
 -- | Coerce @Write -> Val@
 writeToValCoercion ty tmpvar = BinderCoercion $ \producer ->
-  let use_exp = LoadExpr Value ty $ ExpR $ VarE defaultExpInfo tmpvar
+  let use_exp = LoadExpr Value ty $
+                ExpR (ReadRT ::: ty) $ VarE defaultExpInfo tmpvar
       wrapper body =
-        ExpR $ LetE { expInfo = defaultExpInfo
-                    , expBinder = PatR tmpvar (WritePT ::: ty)
-                    , expValue = producer
-                    , expBody = body}
+        ExpR (returnType body) $
+        LetE { expInfo = defaultExpInfo
+             , expBinder = PatR tmpvar (WritePT ::: ty)
+             , expValue = producer
+             , expBody = body}
   in (use_exp, wrapper)
 
 -- | Coerce @Write -> Box@
 writeToBoxCoercion ty tmpvar = BinderCoercion $ \producer ->
-  let use_exp = AsBoxExpr ty $
-                ExpR $ VarE defaultExpInfo tmpvar
+  let use_exp = LoadExpr Boxed ty $
+                ExpR (ReadRT ::: ty) $ VarE defaultExpInfo tmpvar
       wrapper body =
-        ExpR $ LetE { expInfo = defaultExpInfo
-                    , expBinder = PatR tmpvar (WritePT ::: ty)
-                    , expValue = producer
-                    , expBody = body}
+        ExpR (returnType body) $
+        LetE { expInfo = defaultExpInfo
+             , expBinder = PatR tmpvar (WritePT ::: ty)
+             , expValue = producer
+             , expBody = body}
   in (use_exp, wrapper)
 
 -- | Coerce @Write -> Read@
 writeToReadCoercion ty tmpvar = BinderCoercion $ \producer ->
-  let use_exp = ExpR $ VarE defaultExpInfo tmpvar
+  let use_exp = ExpR (ReadRT ::: ty) $ VarE defaultExpInfo tmpvar
       wrapper body =
-        ExpR $ LetE { expInfo = defaultExpInfo
-                      , expBinder = PatR tmpvar (WritePT ::: ty)
-                      , expValue = producer
-                      , expBody = body}
+        ExpR (returnType body) $
+        LetE { expInfo = defaultExpInfo
+             , expBinder = PatR tmpvar (WritePT ::: ty)
+             , expValue = producer
+             , expBody = body}
   in (use_exp, wrapper)
 
 -------------------------------------------------------------------------------
@@ -456,29 +475,32 @@ coerceType e_type g_type = do
       if isIdCoercion ret_coercion &&
          and [isIdCoercion co | (_, co) <- param_coercions]
         then return mempty
-        else createFunctionCoercion param_coercions e_rt g_rt ret_coercion
+        else createFunctionCoercion e_type param_coercions e_rt g_rt ret_coercion
 
-createFunctionCoercion :: [(ParamType, Coercion)]
+createFunctionCoercion :: Type
+                       -> [(ParamType, Coercion)]
                        -> ReturnType
                        -> ReturnType
                        -> Coercion
                        -> InferRepr Coercion
-createFunctionCoercion param_coercions e_rt g_rt ret_coercion = do
+createFunctionCoercion e_type param_coercions e_rt g_rt ret_coercion = do
   params <- mapM create_coercion_parameter param_coercions
   return $ WrapperCoercion $ \real_fun -> coerced_fun real_fun params
   where
-    coerced_fun real_fun params = ExpR $ LamE defaultExpInfo coercion_fun
+    coerced_fun real_fun params =
+      ExpR (BoxRT ::: e_type) $ LamE defaultExpInfo coercion_fun
       where
         ty_params = takeWhile (\(v, _, _) -> getLevel v == TypeLevel) params
         val_params = dropWhile (\(v, _, _) -> getLevel v == TypeLevel) params
 
         coercion_fun =
-          let param_exprs = [(co, ExpR $ VarE defaultExpInfo v)
-                            | (v, _, co) <- val_params]
+          let param_exprs = [(co, ExpR (paramReprToReturnRepr prepr ::: pt) $
+                                  VarE defaultExpInfo v)
+                            | (v, prepr ::: pt, co) <- val_params]
               typaram_types = [TypR (VarT v) | (v, _, _) <- ty_params]
               body = applyCoercions param_exprs $ \param_exprs' ->
                 let call_expr =
-                      mkCall defaultExpInfo real_fun typaram_types param_exprs'
+                      mkCall defaultExpInfo g_rt real_fun typaram_types param_exprs'
                 in applyCoercion ret_coercion call_expr id
           in FunR $ Fun { funInfo = defaultExpInfo
                         , funTyParams = [TyPatR v t
@@ -494,8 +516,8 @@ createFunctionCoercion param_coercions e_rt g_rt ret_coercion = do
          _ ::: e_type -> do v <- newAnonymousVar (pred $ getLevel e_type)
                             return (v, e_param, co)
 
-mkCall :: ExpInfo -> ExpR -> [TypR] -> [ExpR] -> ExpR
-mkCall inf op ty_args args = ExpR $ AppE inf op ty_args args
+mkCall :: ExpInfo -> ReturnType -> ExpR -> [TypR] -> [ExpR] -> ExpR
+mkCall inf rt op ty_args args = ExpR rt $ AppE inf op ty_args args
 
 -------------------------------------------------------------------------------
 -- Representation infernece
@@ -595,13 +617,14 @@ inferVarE inf v = do
         of Just t -> t
            Nothing -> internalError "inferVarE: No type for variable"
                       
-  let exp = ExpR (VarE inf v)
+  let exp = ExpR return_type (VarE inf v)
   return (mempty, exp, return_type) 
 
 inferLitE inf l = do
   return_repr <- infTypeRepr $ literalType l
-  let exp = ExpR (LitE inf l)
-  return (mempty, exp, asReadReturnRepr return_repr ::: literalType l)
+  let return_type = asReadReturnRepr return_repr ::: literalType l
+  let exp = ExpR return_type (LitE inf l)
+  return (mempty, exp, return_type)
 
 inferCall inf op t_args v_args = do
   (op_wr, op', op_type) <- coerceInferredExp BoxRT =<< inferReprExp op
@@ -617,7 +640,7 @@ inferApplication inf op op_type t_args v_args = do
   
   -- Create call expression
   let new_t_args = [TypR t | TypTSF (TypeAnn _ t) <- t_args]
-      new_call = mkCall inf op new_t_args new_v_args
+      new_call = mkCall inf ret_ty op new_t_args new_v_args
   return (applyWrapper wrappers new_call, ret_ty)
   where
     pos = getSourcePos inf
@@ -677,7 +700,7 @@ inferApp _ _ _ = internalError "inferApp: Unexpected operator type"
 inferFunE inf f = do
   f' <- inferFun f
   fun_type <- getFunType f
-  let new_expr = ExpR $ LamE inf f'
+  let new_expr = ExpR (BoxRT ::: fun_type) $ LamE inf f'
   return (mempty, new_expr, BoxRT ::: fun_type)
 
 inferFun (FunTSF (TypeAnn _ f)) =
@@ -698,13 +721,13 @@ inferLetE inf binder rhs body = do
   (rhs_wr, rhs', rhs_ty) <- inferReprExp rhs
   withPat binder $ \pat' -> do
     (body_wr, body', body_ty) <- inferReprExp body
-    let new_expr = ExpR $ LetE inf pat' rhs' body'
+    let new_expr = ExpR body_ty $ LetE inf pat' rhs' body'
     return (body_wr, applyWrapper rhs_wr new_expr, body_ty)
 
 inferLetrecE inf defs body = do
   withDefs defs $ \defs' -> do
     (wr, body', ret_type) <- inferReprExp body
-    let new_expr = ExpR $ LetrecE inf defs' body' 
+    let new_expr = ExpR ret_type $ LetrecE inf defs' body' 
     return (wr, new_expr, ret_type)
 
 inferCaseE inf scr alts = do
@@ -717,7 +740,7 @@ inferCaseE inf scr alts = do
   ret_repr <- liftM asWriteReturnRepr $ infTypeRepr ret_type
   alts' <- mapM (inferAlt (getSourcePos inf) ret_repr) alts
   
-  let new_expr = ExpR $ CaseE inf scr' alts'
+  let new_expr = ExpR (ret_repr ::: ret_type) $ CaseE inf scr' alts'
   return (mempty,
           applyWrapper scr_wrapper new_expr,
           ret_repr ::: ret_type)
@@ -809,7 +832,7 @@ inferTopLevel [] exports = do
 
 inferModule (Module modname defss exports) = do
   (defss', exports') <- inferTopLevel defss exports
-  return ()
+  return (Module modname defss' exports')
 
 inferRepresentations mod =
   withTheNewVarIdentSupply $ \var_supply -> do
@@ -817,25 +840,3 @@ inferRepresentations mod =
     let env = InferReprEnv core_types var_supply
     runInferRepr env $ inferModule mod
 
-{-
-
-inferTyAppE inf op (TypedSFType (TypeAnn arg_ty (SFType arg))) = do
-  (op', BoxRT ::: op_type) <- coerceReturnRepr Boxed =<< inferReprExp op
-  arg_ty' <- infFixUpType arg_ty
-  arg' <- infFixUpType arg
-  mreturn_type <- infApplyType (getSourcePos inf) op' arg_ty' (Just arg')
-  return_type <-
-    case mreturn_type
-    of Just t -> return t
-       Nothing -> internalError "inferTyAppE"
-  let exp = ExpR (TyAppE inf op' arg')
-  return (exp, return_type)
-
-inferCallE inf op args = do
-  (op', BoxRT ::: op_type) <- coerceReturnRepr Boxed =<< inferReprExp op
-  (args', arg_types) <- mapAndUnzipM inferReprExp args
-  
-  (return_type, arg_coercions) <- applyCallType op_type arg_types
-  let exp = arg_coercions ExpR (CallE inf op' args')
-  undefined
--}
