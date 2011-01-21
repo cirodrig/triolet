@@ -86,6 +86,8 @@ Executable pyon
     SystemF.StreamSpecialize
     SystemF.Syntax
     SystemF.Typecheck
+    SystemF.TypecheckSF
+    SystemF.TypecheckMem
     SystemF.Flatten.Effect
     SystemF.Flatten.EffectExp
     SystemF.Flatten.EffectType

@@ -19,19 +19,30 @@ typeOfApp :: IdentSupply Var
           -> SourcePos
           -> TypeEnv
           -> Type               -- ^ Operator type
-          -> Type               -- ^ Argument type
+          -> ReturnType         -- ^ Argument type and representation
           -> Maybe Type         -- ^ Argument value; only used if operator is
                                 --   dependent
-          -> IO (Maybe (ReturnRepr ::: Type))
-typeOfApp id_supply pos env op_type arg_type m_arg =
+          -> IO (Maybe ReturnType)
+typeOfApp id_supply pos env op_type (arg_repr ::: arg_type) m_arg =
   case op_type
-  of FunT (fun_arg ::: dom) result -> do
-       type_ok <- compareTypes id_supply pos env dom arg_type
-       if type_ok
-         then apply fun_arg m_arg result
-         else return Nothing
+  of FunT (fun_arg ::: dom) result 
+       | repr_match fun_arg arg_repr -> do
+           type_ok <- compareTypes id_supply pos env dom arg_type
+           if type_ok
+             then apply fun_arg m_arg result
+             else return Nothing
      _ -> return Nothing
   where
+    -- Does the function's expected representation match the argument's
+    -- actual representation?
+    repr_match (ValPT _) ValRT = True
+    repr_match BoxPT BoxRT = True
+    repr_match ReadPT ReadRT = True 
+    repr_match WritePT WriteRT = True
+    repr_match OutPT OutRT = True
+    repr_match SideEffectPT SideEffectRT = True
+    repr_match _ _ = False
+
     apply (ValPT (Just pv)) (Just arg) result =
       let subst = singletonSubstitution pv arg
           result' = substituteBinding subst result

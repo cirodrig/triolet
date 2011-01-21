@@ -91,7 +91,7 @@ pprFun (FunM fun) =
       body_doc = pprExp $ funBody fun
   in text "lambda" <+> sep [pprParenList (ty_params_doc ++ params_doc),
                             nest (-3) $ text "->" <+> return_doc] <> text "." $$
-     body_doc
+     nest 4 body_doc
 
 pprDef (Def v f) = hang (pprVar v) 2 (pprFun f)
 

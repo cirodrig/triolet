@@ -128,6 +128,8 @@ createDictEnv :: FreshVarM (DictEnv.DictEnv MkDict)
 createDictEnv = do
   let int_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_int))
                  ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_int)
+  let float_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_float))
+                   ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float)
   repr_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_Repr) [VarT arg],
      createDict_Repr arg)
@@ -137,7 +139,9 @@ createDictEnv = do
   additive_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_AdditiveDict) [VarT arg],
      createDict_AdditiveDict arg)
-  return $ DictEnv.DictEnv [repr_dict, int_dict, tuple2_dict, additive_dict]
+  return $ DictEnv.DictEnv [repr_dict,
+                            float_dict, int_dict,
+                            tuple2_dict, additive_dict]
 
 getParamType v subst =
   case substituteVar v subst
@@ -204,7 +208,7 @@ createDict_AdditiveDict param_var subst use_dict =
     mk_pat tmpvar dict_repr = LocalVarP tmpvar dict_type dict_repr
     
     mk_dict param_dict =
-      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
+      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_AdditiveDict)
       in ExpM $ AppE defaultExpInfo oper [TypM param] [param_dict]
 
 -------------------------------------------------------------------------------
@@ -287,8 +291,9 @@ genLet inf (PatR pat_var pat_type) rhs body =
   case pat_type
   of WritePT ::: ty ->
        -- This pattern binds a locally allocated variable
-       withReprDictionary ty $ \repr_dict -> do
-         let pattern = LocalVarP pat_var ty repr_dict
+       let mem_ty = convertToMemType ty
+       in withReprDictionary mem_ty $ \repr_dict -> do
+         let pattern = LocalVarP pat_var mem_ty repr_dict
              ret_arg = ExpM $ VarE defaultExpInfo pat_var
          rhs' <- withRetArg ret_arg $ genExp rhs
          body' <- genExp body
@@ -299,7 +304,7 @@ genLet inf (PatR pat_var pat_type) rhs body =
 
      _ -> do
        -- This pattern binds a scalar variable
-       let pattern = MemVarP pat_var pat_type
+       let pattern = MemVarP pat_var (convertToMemParamType pat_type)
        rhs' <- genExp rhs
        body' <- genExp body
        return $ ExpM $ LetE inf pattern rhs' body'
@@ -345,13 +350,7 @@ genFun (FunR f) = do
                       , funBody = body}
   where
     mk_pat (PatR v pat_type) =
-      let new_pat_type =
-            case pat_type
-            of WritePT ::: ty ->
-                 -- Write parameters become functions
-                 let fun_type = FunT (OutPT ::: ty) (SideEffectRT ::: ty)
-                 in BoxPT ::: fun_type
-               _ -> pat_type
+      let new_pat_type = convertToMemParamType pat_type
       in MemVarP v new_pat_type
 
     -- Create the return parameter if one is needed
@@ -386,7 +385,7 @@ genAlt (AltR alt) = do
                BoxPT -> BoxPT
                ReadPT -> ReadPT
                _ -> internalError "genAlt"
-      in MemVarP v (new_repr ::: ty)
+      in MemVarP v (new_repr ::: convertToMemType ty)
 
 genDef :: Def Rep -> OP (Def Mem)
 genDef (Def v f) = do

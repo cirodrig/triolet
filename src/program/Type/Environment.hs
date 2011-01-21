@@ -11,13 +11,19 @@ module Type.Environment
         wiredInTypeEnv,
         insertType,
         insertDataType,
-        convertToPureTypeEnv)
+        convertToPureTypeEnv,
+        convertToMemTypeEnv,
+        convertToMemParamType,
+        convertToMemReturnType,
+        convertToMemType,
+       )
 where
 
 import qualified Data.IntMap as IntMap
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
+import Gluon.Core.Level
 import Type.Var
 import Type.Type
 
@@ -119,6 +125,7 @@ lookupType v (TypeEnv env) =
 
 -------------------------------------------------------------------------------
 
+-- | Convert an ordinary type environment to a pure type environment
 convertToPureTypeEnv :: TypeEnv -> TypeEnv
 convertToPureTypeEnv (TypeEnv m) =
   TypeEnv (IntMap.map convertToPureTypeAssignment m)
@@ -151,4 +158,52 @@ convertToPureDataConType (DataConType params args range ty_con) =
               (map convertToPureReturnType args)
               (convertToPureReturnType range)
               ty_con
+
+-------------------------------------------------------------------------------
+
+-- | Convert an ordinary type environment to an explicit memory passing
+--   type environment
+convertToMemTypeEnv :: TypeEnv -> TypeEnv
+convertToMemTypeEnv (TypeEnv m) =
+  TypeEnv (IntMap.map convertToMemTypeAssignment m)
   
+convertToMemTypeAssignment ass =
+  case ass
+  of VarTypeAssignment rt ->
+       VarTypeAssignment (convertToMemReturnType rt)
+     TyConTypeAssignment rt cons ->
+       TyConTypeAssignment (convertToMemReturnType rt) cons
+     DataConTypeAssignment rt con_type ->
+       DataConTypeAssignment (convertToMemReturnType rt) (convertToMemDataConType con_type)
+
+
+convertToMemParamType (repr ::: ty) 
+  | getLevel ty == TypeLevel =
+    case repr
+    of WritePT ->
+         -- Convert to a function type (output_pointer -> sideeffect)
+         BoxPT ::: FunT (OutPT ::: convertToMemType ty) (SideEffectRT ::: convertToMemType ty)
+       _ -> repr ::: convertToMemType ty
+  | otherwise =
+    repr ::: convertToMemType ty
+
+convertToMemReturnType (repr ::: ty)
+  | getLevel ty == TypeLevel =
+    case repr
+    of WriteRT ->
+         BoxRT ::: FunT (OutPT ::: convertToMemType ty) (SideEffectRT ::: convertToMemType ty)
+       _ -> repr ::: convertToMemType ty
+  | otherwise =
+      repr ::: convertToMemType ty
+
+convertToMemType ty =
+  case ty
+  of VarT t -> ty
+     AppT op arg -> AppT (convertToMemType op) (convertToMemType arg)
+     FunT arg ret -> FunT (convertToMemParamType arg) (convertToMemReturnType ret) 
+
+convertToMemDataConType (DataConType params args range ty_con) =
+  DataConType (map convertToMemParamType params)
+              (map convertToMemReturnType args)
+              (convertToMemReturnType range)
+              ty_con

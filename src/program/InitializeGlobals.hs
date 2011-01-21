@@ -55,6 +55,7 @@ loadBuiltins = do
         core_types <- CParser2.Driver.parseCoreModule supply
         initializeGlobalVar the_newCoreTypes (return core_types)
         initializeGlobalVar the_systemFTypes (return $ convertToPureTypeEnv core_types)
+        initializeGlobalVar the_memTypes (return $ convertToMemTypeEnv core_types)
 
       -- Initialize the low-level builtins
       withTheLLVarIdentSupply initializeLowLevelBuiltins

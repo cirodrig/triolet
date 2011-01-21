@@ -1,10 +1,17 @@
 
 -- Data types
 
-bool : val pure;
-int : val pure;
-float : val pure;
-NoneType : val pure;
+data val bool : val pure
+{
+  True : val bool,
+  () () : val bool;
+  False : val bool,
+  () () : val bool;
+};
+
+data val int : val pure {};
+data val float : val pure {};
+data val NoneType : val pure {};
 
 data ref Repr : val (val pure -> val pure) {};
 data box Stream : val (val pure -> val pure) {};
@@ -24,7 +31,7 @@ data ref AdditiveDict : val (val pure -> val pure)
               -> box (read a -> read a -> write a)
               -> box (read a -> read a -> write a)
               -> box (read a -> write a)
-              -> read a
+              -> write a
               -> write AdditiveDict a,
   (val a : pure) (read Repr a,
        	   	  box (read a -> read a -> write a),
@@ -49,6 +56,10 @@ data ref TraversableDict : val (val (val pure -> val pure) -> val pure)
 -------------------------------------------------------------------------------
 -- Representation dictionaries
 
+load : (val a : pure) -> read Repr a -> read a -> val a;
+store : (val a : pure) -> read Repr a -> val a -> write a;
+copy : (val a : pure) -> read Repr a -> read a -> write a;
+
 repr_int : read Repr int;
 repr_float : read Repr float;
 
@@ -58,8 +69,11 @@ repr_PyonTuple2 :
     (val a : pure) -> (val b : pure) -> read Repr a -> read Repr b
  -> write Repr (PyonTuple2 a b);
 
+repr_AdditiveDict :
+    (val a : pure) -> read Repr a -> write Repr (AdditiveDict a);
+
 -- This always returns the same, global object
-repr_Repr : (val a : Pure) -> read Repr a;
+repr_Repr : (val a : pure) -> read Repr a;
 
 OpaqueTraversableDict_list : read TraversableDict list;
 
@@ -76,6 +90,11 @@ AdditiveDict_int_add : val int -> val int -> val int;
 AdditiveDict_int_sub : val int -> val int -> val int;
 AdditiveDict_int_negate : val int -> val int;
 AdditiveDict_int_zero : val int;
+
+AdditiveDict_float_add : val float -> val float -> val float;
+AdditiveDict_float_sub : val float -> val float -> val float;
+AdditiveDict_float_negate : val float -> val float;
+AdditiveDict_float_zero : val float;
 
 -------------------------------------------------------------------------------
 -- Other functions

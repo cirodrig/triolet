@@ -11,7 +11,6 @@ where
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
-import Debug.Trace
 
 import Text.PrettyPrint.HughesPJ
 
@@ -22,9 +21,11 @@ import Gluon.Common.SourcePos
 import Gluon.Common.Supply
 import Gluon.Core.Level
 import Gluon.Core(internalSynInfo)
+import Builtins.Builtins
 import SystemF.Syntax
-import SystemF.Typecheck
+import SystemF.TypecheckSF
 import SystemF.Print
+import SystemF.PrintMemoryIR(pprReturnType)
 import Type.Compare
 import Type.Eval
 import Type.Environment
@@ -97,12 +98,6 @@ asWriteReturnRepr :: Repr -> ReturnRepr
 asWriteReturnRepr Value = ValRT
 asWriteReturnRepr Boxed = BoxRT
 asWriteReturnRepr Referenced = WriteRT
-
-paramReprToReturnRepr :: ParamRepr -> ReturnRepr
-paramReprToReturnRepr (ValPT _) = ValRT
-paramReprToReturnRepr BoxPT = BoxRT
-paramReprToReturnRepr ReadPT = ReadRT
-paramReprToReturnRepr WritePT = WriteRT
 
 asReadParamRepr :: ParamRepr -> Repr -> ParamRepr
 asReadParamRepr (ValPT mv)       Value = ValPT mv
@@ -506,6 +501,7 @@ createFunctionCoercion e_type param_coercions e_rt g_rt ret_coercion = do
                         , funTyParams = [TyPatR v t
                                         | (v, _ ::: t, _) <- ty_params]
                         , funParams = [PatR v t | (v, t, _) <- val_params]
+                        , funReturn = RetR e_rt
                         , funBody = body}
       
     create_coercion_parameter :: (ParamType, Coercion)
@@ -552,17 +548,19 @@ withTyPats subst (p:ps) f =
 
 withTyPats subst [] f = f subst []
 
-withPat :: PatTSF -> (Pat Rep -> InferRepr a) -> InferRepr a
-withPat (TypedVarP v (TypTSF (TypeAnn _ ty))) f = do
+withPat :: Bool -> PatTSF -> (Pat Rep -> InferRepr a) -> InferRepr a
+withPat is_let (TypedVarP v (TypTSF (TypeAnn _ ty))) f = do
   repr <- infTypeRepr ty
   let p_repr = case repr
                of Value -> ValPT Nothing
                   Boxed -> BoxPT
-                  Referenced -> ReadPT
+                  Referenced -> if is_let
+                                then WritePT
+                                else ReadPT
       r_repr = asReadReturnRepr repr
   assume v (r_repr ::: ty) $ f (PatR v (p_repr ::: ty))
 
-withPats = withMany withPat
+withPats is_let = withMany (withPat is_let)
 
 withDefs :: [Def (Typed SF)] -> ([Def Rep] -> InferRepr a) -> InferRepr a
 withDefs defs f = assume_defs $ mapM inferDef defs >>= f
@@ -685,15 +683,17 @@ inferApp :: SourcePos
 inferApp pos (BoxRT ::: FunT (param_repr ::: dom) result) arg_exp = do
   -- Infer parameter
   let expected_repr = paramReprToReturnRepr param_repr
-  (wr, arg_exp', arg_rtype) <-
-    coerceInferredExp expected_repr =<< inferReprExp arg_exp
+  (wr, arg_exp', arg_rtype) <- inferReprExp arg_exp
   
   -- Return the range.  Cannot handle dependent parameters.
   case param_repr of
     ValPT (Just _) -> internalError "inferApp: Unexpected dependent parameter"
     _ -> return ()
 
-  return (wr, arg_exp', result)
+  -- Coerce parameter
+  co <- coerceReturnType (expected_repr ::: dom) arg_rtype
+  let (arg_exp'', co_wr) = coercionToWrapper co arg_exp'
+  return (wr `mappend` co_wr, arg_exp'', result)
 
 inferApp _ _ _ = internalError "inferApp: Unexpected operator type"
 
@@ -705,7 +705,7 @@ inferFunE inf f = do
 
 inferFun (FunTSF (TypeAnn _ f)) =
   withTyPats emptySubstitution (funTyParams f) $ \ty_subst ty_pats ->
-  withPats (funParams f) $ \pats -> do
+  withPats False (funParams f) $ \pats -> do
     let expected_return_type = case funReturn f of RetTSF t -> t
     (body_wrapper, body, body_type) <-
       inferWriteReturnExp (Just expected_return_type) (funBody f)
@@ -719,7 +719,7 @@ inferFun (FunTSF (TypeAnn _ f)) =
 
 inferLetE inf binder rhs body = do
   (rhs_wr, rhs', rhs_ty) <- inferReprExp rhs
-  withPat binder $ \pat' -> do
+  withPat True binder $ \pat' -> do
     (body_wr, body', body_ty) <- inferReprExp body
     let new_expr = ExpR body_ty $ LetE inf pat' rhs' body'
     return (body_wr, applyWrapper rhs_wr new_expr, body_ty)

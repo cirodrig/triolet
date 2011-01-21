@@ -26,7 +26,8 @@ import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCode as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
-import qualified SystemF.Typecheck as SystemF
+import qualified SystemF.TypecheckSF
+import qualified SystemF.TypecheckMem
 import qualified SystemF.Flatten.EffectInference as SystemF
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
@@ -146,9 +147,10 @@ compilePyonToPyonAsm path text = do
   
   -- Convert to core
   flat_mod <- do
-    tc_mod <- SystemF.typeCheckModule sf_mod
+    tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
     xmod <- SystemF.generateMemoryIR tc_mod -- Eventually replaces the Core path
     print $ SystemF.PrintMemoryIR.pprModule xmod
+    SystemF.TypecheckMem.typeCheckModule xmod
     SystemF.inferSideEffects tc_mod
 
   putStrLn ""

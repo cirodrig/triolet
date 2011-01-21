@@ -9,6 +9,7 @@ module Type.Type(Type(..),
                  ReturnRepr(..),
                  paramReprToRepr,
                  returnReprToRepr,
+                 paramReprToReturnRepr,
                  typeApp, varApp,
                  fromTypeApp, fromVarApp,
                  pureFunType, funType,
@@ -132,6 +133,14 @@ paramReprToRepr BoxPT     = Boxed
 paramReprToRepr ReadPT    = Referenced
 paramReprToRepr WritePT   = Referenced
 
+paramReprToReturnRepr :: ParamRepr -> ReturnRepr
+paramReprToReturnRepr (ValPT _) = ValRT
+paramReprToReturnRepr BoxPT = BoxRT
+paramReprToReturnRepr ReadPT = ReadRT
+paramReprToReturnRepr WritePT = WriteRT
+paramReprToReturnRepr OutPT = OutRT
+paramReprToReturnRepr SideEffectPT = SideEffectRT
+
 instance HasLevel Var => HasLevel Type where
   getLevel (VarT v) = getLevel v
   getLevel (AppT op _) = getLevel op
@@ -212,6 +221,8 @@ pprReturn (ret ::: rng) =
            BoxRT -> text "box"
            ReadRT -> text "read"
            WriteRT -> text "write"
+           OutRT -> text "out"
+           SideEffectRT -> text "sideeffect"
   in repr_doc <+> pprFunArgType (returnReprToRepr ret) rng
       
 pprParam (arg ::: dom) =
@@ -222,6 +233,8 @@ pprParam (arg ::: dom) =
      BoxPT -> ordinary_lhs $ text "box"
      ReadPT -> ordinary_lhs $ text "read"
      WritePT -> ordinary_lhs $ text "write"
+     OutPT -> ordinary_lhs $ text "out"
+     SideEffectPT -> ordinary_lhs $ text "sideeffect"
   where
     ordinary_lhs repr_doc =
       repr_doc <+> pprFunArgType (paramReprToRepr arg) dom

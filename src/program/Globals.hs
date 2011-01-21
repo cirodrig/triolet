@@ -61,6 +61,11 @@ the_newCoreTypes :: InitGlobalVar Type.Environment.TypeEnv
 {-# NOINLINE the_newCoreTypes #-}
 the_newCoreTypes = defineInitGlobalVar ()
 
+-- | The types of explicit-memory terms.
+the_memTypes :: InitGlobalVar Type.Environment.TypeEnv
+{-# NOINLINE the_memTypes #-}
+the_memTypes = defineInitGlobalVar ()
+
 withTheVarIdentSupply :: (Supply (Ident Var) -> IO a) -> IO a
 withTheVarIdentSupply f = withStaticGlobalVar the_varIdentSupply f
 
