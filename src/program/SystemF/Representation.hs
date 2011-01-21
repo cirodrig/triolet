@@ -177,6 +177,21 @@ instance Monoid WrapperCode where
   w `mappend` NoWrapper = w
   Wrapper f `mappend` Wrapper g = Wrapper (f . g)
 
+-- | A coercion modifies the representation of a value returned by an 
+--   expression.  Coercions can be either a wrapper or a binder.
+--
+-- * A /wrapper/ is applied to the expression that will be coerced.
+--   The wrapped expression is used in place of the original
+--   expression.
+--
+-- * A /binder/ is applied to the expression and the consumer of
+--   the expression's value.  It builds some piece of code containing the
+--   producer and consumer.
+--
+-- As an example, when @bar@ in the function call @foo(bar)@ is wrapped,
+-- the code becomes @foo (T (bar))@.  If a binder is ued, the code 
+-- becomes @let x = T1(bar) in foo(T2(x))@.  @T1@ and @T2@ stand for
+-- code that's inserted by teh coercion.
 data Coercion =
     -- | Don't coerce
     NoCoercion
