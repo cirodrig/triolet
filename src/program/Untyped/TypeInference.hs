@@ -474,10 +474,10 @@ inferExpressionType expression =
        instantiateVariable pos v
      LiteralE {expLit = l} ->
        let ty = case l
-                of SystemF.IntL _ _ -> ConTy $ tiBuiltin the_con_int
-                   SystemF.FloatL _ _ -> ConTy $ tiBuiltin the_con_float
-                   SystemF.BoolL _ -> ConTy $ tiBuiltin the_con_bool
-                   SystemF.NoneL -> ConTy $ tiBuiltin the_con_NoneType
+                of IntL _ -> ConTy $ tiBuiltin the_con_int
+                   FloatL _ -> ConTy $ tiBuiltin the_con_float
+                   BoolL _ -> ConTy $ tiBuiltin the_con_bool
+                   NoneL -> ConTy $ tiBuiltin the_con_NoneType
        in return (mkLitE pos l, ty)
      UndefinedE {} -> do
        tyvar <- liftIO $ newTyVar Star Nothing

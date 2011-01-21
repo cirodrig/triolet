@@ -14,9 +14,6 @@ pprParenList xs = parens $ sep $ punctuate (text ",") xs
 pprLit :: Lit -> Doc
 pprLit (IntL n _) = text (show n)
 pprLit (FloatL n _) = text (show n)
-pprLit (BoolL True) = text "True"
-pprLit (BoolL False) = text "False"
-pprLit NoneL = text "None"
 
 pprParamRepr repr =
   case repr

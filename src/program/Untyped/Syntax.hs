@@ -13,7 +13,6 @@ import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Export
 import qualified SystemF.Syntax as SystemF
-import SystemF.Syntax(Lit(..))
 import Untyped.HMType
 import Untyped.Data
 import Type.Var(Var)
@@ -71,6 +70,11 @@ data Pattern =
     , patFields :: [Pattern]
     }
   deriving(Typeable)
+
+data Lit = IntL !Integer
+         | FloatL !Double
+         | BoolL !Bool
+         | NoneL
 
 data Expression =
     -- | A reference to a variable

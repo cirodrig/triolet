@@ -103,8 +103,6 @@ checkLiteralType l =
            case lit
            of IntL _ _ -> v `isPyonBuiltin` the_int
               FloatL _ _ -> v `isPyonBuiltin` the_float
-              BoolL _ -> v `isPyonBuiltin` the_bool
-              NoneL -> v `isPyonBuiltin` the_NoneType
          Nothing ->
            -- Literals cannot have other types 
            False

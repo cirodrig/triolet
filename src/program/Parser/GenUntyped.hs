@@ -207,20 +207,17 @@ doExpr expr =
                 of IntLit n ->
                      -- Generate a call to 'fromInt' to cast to any valid value
                      let oper = tiBuiltin the___fromint__
-                         int_type = Type.Type.VarT (Builtins.Builtins.pyonBuiltin Builtins.Builtins.the_int)
-                     in callVariable pos oper [make_literal (SF.IntL n int_type)]
+                     in callVariable pos oper [make_literal (U.IntL n)]
                    FloatLit f ->
-                     let float_type = Type.Type.VarT (Builtins.Builtins.pyonBuiltin Builtins.Builtins.the_float)
-                     in make_literal $ SF.FloatL f float_type
+                     make_literal $ U.FloatL f
                    ImaginaryLit d ->
                      -- Generate a call to 'makeComplex'
                      let oper = tiBuiltin the_makeComplex
-                         float_type = Type.Type.VarT (Builtins.Builtins.pyonBuiltin Builtins.Builtins.the_float)
-                         real = make_literal (SF.FloatL 0 float_type)
-                         imag = make_literal (SF.FloatL d float_type)
+                         real = make_literal (U.FloatL 0)
+                         imag = make_literal (U.FloatL d)
                      in callVariable pos oper [real, imag]
-                   BoolLit b -> make_literal $ SF.BoolL b
-                   NoneLit -> make_literal $ SF.NoneL
+                   BoolLit b -> make_literal $ U.BoolL b
+                   NoneLit -> make_literal U.NoneL
        in return l'
      Tuple pos es -> do
        es' <- mapM doExpr es

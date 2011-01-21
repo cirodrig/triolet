@@ -64,8 +64,6 @@ pprVarFlags flags v = pprVar v
 
 pprLit (IntL n _) = text (show n)
 pprLit (FloatL f _) = text (show f)
-pprLit (BoolL b) = text (show b)
-pprLit NoneL = text "None"
 
 pprPatFlags :: PrintFlags -> PatSF -> Doc
 pprPatFlags flags pat = 

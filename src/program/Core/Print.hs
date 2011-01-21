@@ -113,8 +113,8 @@ pprValue val =
      LitV l -> case l
                of SystemF.IntL n _ -> text $ show n
                   SystemF.FloatL d _ -> text $ show d
-                  SystemF.BoolL b -> text $ show b
-                  SystemF.NoneL -> text "None"
+                  --SystemF.BoolL b -> text $ show b
+                  --SystemF.NoneL -> text "None"
      TypeV ty -> parens $ pprType ty
 
 pprCExp :: RCExp -> Doc

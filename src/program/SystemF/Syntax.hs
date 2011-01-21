@@ -49,15 +49,11 @@ import Export
 data Lit =
     IntL !Integer !Type
   | FloatL {-# UNPACK #-} !Double !Type
-  | BoolL {-# UNPACK #-} !Bool
-  | NoneL
   deriving(Typeable)
 
 literalType :: Lit -> Type
 literalType (IntL _ t) = t
 literalType (FloatL _ t) = t
-literalType (BoolL _) = VarT $ pyonBuiltin the_bool
-literalType NoneL = VarT $ pyonBuiltin the_NoneType
 
 -- | Information common to all expressions.
 data ExpInfo = ExpInfo SourcePos

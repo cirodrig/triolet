@@ -533,8 +533,8 @@ dataConLayoutNumFields EnumValueLayout = 0
 dataConstructorFieldLayout :: Con -> [RCType]
                            -> Cvt (LL.Lit, BuildBlock (), DataConLayout)
 dataConstructorFieldLayout datacon ty_args
-  | datacon `isPyonBuiltin` the_True = enum_value (LL.BoolL True)
-  | datacon `isPyonBuiltin` the_False = enum_value (LL.BoolL False)
+  | datacon `isPyonBuiltin` the_True = enum_value undefined {-(LL.BoolL True)-}
+  | datacon `isPyonBuiltin` the_False = enum_value undefined {-(LL.BoolL False)-}
   | datacon == getPyonTupleCon' 2 = do
       (unzip -> (sequence_ -> computation1, field_layouts)) <-
         mapM lowerToFieldType ty_args
@@ -649,8 +649,8 @@ convertExp expression =
                                    LL.IntL Signed pyonIntSize n
                SystemF.FloatL d _ -> literal (PrimType pyonFloatType) $
                                      LL.FloatL pyonFloatSize d
-               SystemF.BoolL b  -> literal (PrimType pyonBoolType) $ LL.BoolL b
-               SystemF.NoneL    -> literal (PrimType pyonNoneType) LL.UnitL
+               --SystemF.BoolL b  -> literal (PrimType pyonBoolType) $ LL.BoolL b
+               --SystemF.NoneL    -> literal (PrimType pyonNoneType) LL.UnitL
           TypeV _       -> literal (PrimType UnitType) LL.UnitL
      AppCE {cexpOper = op, cexpArgs = args, cexpReturnArg = rarg} ->
        convertApp op args rarg

@@ -39,6 +39,7 @@ pyonBuiltinVariableNames =
   [ -- Data constructors
     "True"
   , "False"
+  , "None"
   , "pyonTuple0"
   , "pyonTuple1"
   , "pyonTuple2"

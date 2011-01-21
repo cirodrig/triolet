@@ -7,7 +7,6 @@ import Text.PrettyPrint.HughesPJ
 import Gluon.Common.Identifier
 import Gluon.Common.Label
 import Untyped.Syntax
-import SystemF.Syntax(Lit(..))
 
 showTuple :: [Doc] -> Doc
 showTuple = parens . sep . punctuate comma
@@ -18,10 +17,10 @@ showBlock [d]    = d
 showBlock (d:ds) = vcat ((text "{" <+> d) : (map (semi <+>) ds ++ [text "}"]))
 
 pprLit :: Lit -> Doc
-pprLit NoneL = text "None"
-pprLit (IntL n _) = text $ show n
-pprLit (FloatL d _) = text $ show d
+pprLit (IntL n) = text $ show n
+pprLit (FloatL d) = text $ show d
 pprLit (BoolL b) = text $ show b
+pprLit NoneL = text "None"
 
 pprVariable :: Variable -> Doc
 pprVariable v =

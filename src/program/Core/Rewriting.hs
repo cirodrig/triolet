@@ -630,7 +630,7 @@ rebuildMapStream' inf eff p_type t_type p_repr t_repr producer transformer = do
           -- Apply the evaluator to arguments
           transform_call =
             appRWCE inf (valRWCE inf (OwnedVarV evaluator_var))
-            [valRWCE inf (LitV SF.NoneL)]
+            [valRWCE inf (LitV undefined {-SF.NoneL-})]
             (Just $ mkRWCExp $ writePointerRV (getSourcePos inf)
              (Gluon.mkInternalVarE return_addr) return_ptr)
                 

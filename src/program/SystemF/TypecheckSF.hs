@@ -211,21 +211,6 @@ typeInferLitE inf l = do
   checkLiteralType l
   return $ ExpTSF $ TypeAnn literal_type (LitE inf l)
 
-isValidLiteralType ty lit =
-  -- Get the type constructor
-  case fromVarApp ty
-  of Just (v, args) ->
-       -- Based on the literal, check whether the type constructor is 
-       -- acceptable
-       case lit
-       of IntL _ _ -> v `isPyonBuiltin` the_int
-          FloatL _ _ -> v `isPyonBuiltin` the_float
-          BoolL _ -> v `isPyonBuiltin` the_bool
-          NoneL -> v `isPyonBuiltin` the_NoneType
-     Nothing ->
-       -- Literals cannot have other types 
-       False
-
 typeInferAppE inf op ty_args args = do
   let pos = getSourcePos inf
   ti_op <- typeInferExp op

@@ -215,8 +215,22 @@ mkVarE pos v = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos) v
 mkConE :: SourcePos -> Var -> TIExp
 mkConE pos c = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos) c
 
-mkLitE :: SourcePos -> SystemF.Lit -> TIExp
-mkLitE pos l = TIExp $ SystemF.LitE (SystemF.mkExpInfo pos) l
+mkLitE :: SourcePos -> Untyped.Lit -> TIExp
+mkLitE pos l =
+  TIExp $ case l
+          of Untyped.IntL n      -> sf_literal $ SystemF.IntL n sf_int_type
+             Untyped.FloatL n    -> sf_literal $ SystemF.FloatL n sf_float_type
+             Untyped.BoolL True  -> sf_constructor SystemF.the_True
+             Untyped.BoolL False -> sf_constructor SystemF.the_False
+             Untyped.NoneL       -> sf_constructor SystemF.the_None
+  where
+    sf_literal l =
+      SystemF.LitE (SystemF.mkExpInfo pos) l
+    sf_constructor c =
+      SystemF.VarE (SystemF.mkExpInfo pos) (SystemF.pyonBuiltin c)
+
+    sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.the_int)
+    sf_float_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.the_float)
 
 mkAppE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
 mkAppE pos oper ts args = TIExp $ SystemF.AppE (SystemF.mkExpInfo pos) oper ts args
