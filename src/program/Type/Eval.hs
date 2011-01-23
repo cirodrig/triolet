@@ -3,6 +3,7 @@ module Type.Eval where
 
 import Control.Monad.Reader
 
+import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.MonadLogic
 import Gluon.Common.SourcePos
@@ -53,3 +54,30 @@ typeOfApp id_supply pos env op_type (arg_repr ::: arg_type) m_arg =
   
     -- Non-dependent type
     apply _ _ result = return (Just result)
+
+-- | Given a data constructor type and the type arguments it will be applied
+--   to, get the types of the data constructor fields and the
+--   constructed value.  The types are not typechecked. 
+instantiateDataConType :: DataConType -> [Type]
+                       -> ([ReturnType], ReturnType)
+instantiateDataConType con_ty arg_vals
+  | length (dataConPatternParams con_ty) /= length arg_vals =
+      internalError "instantiateDataConType"
+  | otherwise =
+      let subst = instantiate_arguments emptySubstitution $
+                  zip (dataConPatternParams con_ty) arg_vals
+
+          -- Apply the substitution to field and range types
+          fields = map (substituteBinding subst) $ dataConPatternArgs con_ty
+          range = substituteBinding subst $ dataConPatternRange con_ty
+      in (fields, range)
+  where
+    -- Instantiate the type by substituing arguments for the constructor's
+    -- type parameters
+    instantiate_arguments subst ((param_repr ::: _, arg_val) : args) =
+      let subst' = case param_repr
+                   of ValPT (Just param_var) ->
+                        insertSubstitution param_var arg_val subst
+      in instantiate_arguments subst' args
+  
+    instantiate_arguments subst' [] = subst'

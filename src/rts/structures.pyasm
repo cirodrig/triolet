@@ -6,10 +6,26 @@ module pyon.internal.structures;
 #include "apply_py.h"
 #include "structures.h"
 #include "list.h"
+import procedure exit (int) -> ();
+
 #include "pyasm_records.h"
 
+// Representation of Repr objects
+data pointer repr_Repr_value = PassConv {
+  sizeof PassConv,
+  alignof PassConv,
+  copy_PassConv,
+  dummy_finalizer
+};
+
+// Return the representation of a Repr object.  The parameter is a type
+// parameter.
+function inline repr_Repr (unit _) -> pointer {
+  repr_Repr_value;
+};
+
 // Parameter-passing convention dictionary of ints
-data pointer passConv_int = PassConv {
+data pointer repr_int = PassConv {
   sizeof int32,
   alignof int32,
   copy4F,
@@ -17,18 +33,18 @@ data pointer passConv_int = PassConv {
 };
 
 // Parameter-passing convention dictionary of floats
-data pointer float_pass_conv = PassConv {
+data pointer repr_float = PassConv {
   sizeof float,
   alignof float,
   copy4F,
   dummy_finalizer
 };
 
-// Parameter-passing convention dictionary of itself
-data pointer PassConv_pass_conv = PassConv {
-  sizeof PassConv,
-  alignof PassConv,
-  copy_PassConv,
+// Parameter-passing convention dictionary of bool
+data pointer repr_bool = PassConv {
+  sizeof bool,
+  alignof bool,
+  copy1F,
   dummy_finalizer
 };
 
@@ -38,6 +54,32 @@ function copy_PassConv (unit _, pointer src, pointer dst) -> () {
   dst @! PassConv.copy = src @! PassConv.copy;
   dst @! PassConv.finalize = src @! PassConv.finalize;
   ();
+};
+
+function inline repr_PyonTuple2 (unit _, unit _,
+                                 pointer repr1, pointer repr2,
+                                 pointer ret) -> () {
+  size1 = repr1 @! PassConv.size;
+  align1 = repr1 @! PassConv.align;
+  size2 = repr2 @! PassConv.size;
+  align2 = repr2 @! PassConv.align;
+  typedef tuple = PyonTuple2(bytes(value size1, value align1), bytes(value size2, value align2));
+
+  ret @! PassConv.size = sizeof tuple;
+  ret @! PassConv.align = alignof tuple;
+  ret @! PassConv.copy = owned call copy_PyonTuple2
+    (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
+     size1, align1, size2, align2);
+  ret @! PassConv.finalize = dummy_finalizer;
+  ();
+};
+
+function inline copy_PyonTuple2(owned copy1, owned copy2,
+                         word size1, word align1, word size2, word align2,
+                         pointer src, pointer dst) -> () {
+  typedef tuple = PyonTuple2(bytes(value size1, value align1), bytes(value size2, value align2));
+  () = () call copy1 (src @ tuple.member1, dst @ tuple.member1);
+  () call copy2 (src @ tuple.member2, dst @ tuple.member2);
 };
 
 data pointer OpaqueTraversableDict_list = TraversableDict {
@@ -73,7 +115,7 @@ function finalize_complex
   ();
 };
 
-function inline AdditiveDict_pass_conv (unit _, pointer repr, pointer ret) -> () {
+function inline repr_AdditiveDict (unit _, pointer repr, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
   copy = repr @! PassConv.copy;
@@ -87,22 +129,20 @@ function inline AdditiveDict_pass_conv (unit _, pointer repr, pointer ret) -> ()
 };
 
 function AdditiveDict_copy
-  (word size, word align, owned copy_zero, pointer src, pointer dst) -> () {
+  (word size, word align, owned copy_value, pointer src, pointer dst) -> () {
   typedef dictionary = AdditiveDict(bytes(value size, value align));
 
-  () = () call copy_PassConv(nil, src @ dictionary.repr, dst @ dictionary.repr);
   dst @! dictionary.add = src @! dictionary.add;
   dst @! dictionary.subtract = src @! dictionary.subtract;
   dst @! dictionary.negate = src @! dictionary.negate;
-  () call (copy_zero) (src @ dictionary.zero, dst @ dictionary.zero);  
+  () call (copy_value) (src @ dictionary.zero, dst @ dictionary.zero);  
 };
 
-function inline MultiplicativeDict_pass_conv
-  (unit _, pointer additive_dict, pointer ret) -> () {
-  repr = additive_dict @ AdditiveDict(unit).repr;
-  size = repr @! PassConv.size;
-  align = repr @! PassConv.align;
-  copy = repr @! PassConv.copy;
+function inline repr_MultiplicativeDict
+  (unit _, pointer value_repr, pointer ret) -> () {
+  size = value_repr @! PassConv.size;
+  align = value_repr @! PassConv.align;
+  copy = value_repr @! PassConv.copy;
   typedef dictionary = MultiplicativeDict(bytes(value size, value align));
 
   ret @! PassConv.size = sizeof dictionary;
@@ -113,51 +153,51 @@ function inline MultiplicativeDict_pass_conv
 };
 
 function MultiplicativeDict_copy
-  (word size, word align, owned copy_one, pointer src, pointer dst) -> () {
+  (word size, word align, owned copy_value, pointer src, pointer dst) -> () {
   typedef dictionary = MultiplicativeDict(bytes(value size, value align));
 
-  () = () call AdditiveDict_copy(size, align, copy_one,
+  () = () call AdditiveDict_copy(size, align, copy_value,
                                  src @ dictionary.additive,
                                  dst @ dictionary.additive);
   dst @! dictionary.mul = src @! dictionary.mul;
   dst @! dictionary.fromInt = src @! dictionary.fromInt;
-  () call (copy_one) (src @ dictionary.one, dst @ dictionary.one);
+  () call (copy_value) (src @ dictionary.one, dst @ dictionary.one);
 };
 
 // Construct an Additive dictionary
 function inline additiveDict
   (unit _, pointer repr,
-   owned add, owned sub, owned negate, pointer zero, pointer ret) -> () {
+   owned add, owned sub, owned negate, owned write_zero, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
   typedef dictionary = AdditiveDict(bytes(value size, value align));
 
-  () = () call copy_PassConv (nil, repr, ret @ dictionary.repr);
   ret @! dictionary.add = add;
   ret @! dictionary.subtract = sub;
   ret @! dictionary.negate = negate;
-  () call (repr @! PassConv.copy) (zero, ret @ dictionary.zero);
+  () call write_zero (ret @ dictionary.zero);
 };
 
-function inline multiplicativeDict
-  (unit _, pointer additive,
-   owned mul, owned from_int, pointer one, pointer ret) -> () {
-  repr = additive @ AdditiveDict(unit).repr;
+function multiplicativeDict
+  (unit _, pointer repr,
+   owned write_additive,
+   owned mul, owned from_int, owned write_one, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
-  copy = repr @! PassConv.copy;
   typedef dictionary = MultiplicativeDict(bytes(value size, value align));
 
-  () = () call AdditiveDict_copy (size, align, copy,
-                                  additive, ret @ dictionary.additive);
+  () = () call write_additive (ret @ dictionary.additive);
   ret @! dictionary.mul = mul;
   ret @! dictionary.fromInt = from_int;
-  () call copy (one, ret @ dictionary.one);
+  () call write_one (ret @ dictionary.one);
 };
 
 function inline additiveDict_complex
   (unit type, pointer member_additive, pointer ret) -> ()
 {
+  () primcall exit (int -1);
+  // FIXME
+/*
   member_size = member_additive @! AdditiveDict(unit).repr.size;
   member_align = member_additive @! AdditiveDict(unit).repr.align;
   typedef member = bytes(value member_size, value member_align);
@@ -183,7 +223,7 @@ function inline additiveDict_complex
                             member_additive @ member_dict.zero);
   () = () call member_copy (ret @ dictionary.zero.imag,
                             member_additive @ member_dict.zero);
-  ();
+  (); */
 };
 
 function inline makeComplex(float re, float im, pointer ret) -> () {

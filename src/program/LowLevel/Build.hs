@@ -305,7 +305,7 @@ primAddP ptr off =
 primAddPAs ptr off ptr' =
   bindAtom1 ptr' $ PrimA PrimAddP [ptr, off]
 
-primLoad mut ty ptr dst = primLoadOff mut ty ptr (nativeIntV 0)
+primLoad mut ty ptr dst = primLoadOff mut ty ptr (nativeIntV 0) dst
 primLoadOff mut ty ptr off dst
   | valType off /= PrimType nativeIntType =
       internalError "primLoadOff: Offset has wrong type"
@@ -461,6 +461,10 @@ createConstDynamicRecord :: forall m. (Monad m, Supplies m (Ident Var)) =>
                             [DynamicFieldType] -> Gen m DynamicRecord
 createConstDynamicRecord fs = createDynamicRecord [(Constant, f) | f <- fs]
 
+createMutableDynamicRecord :: forall m. (Monad m, Supplies m (Ident Var)) =>
+                            [DynamicFieldType] -> Gen m DynamicRecord
+createMutableDynamicRecord fs = createDynamicRecord [(Mutable, f) | f <- fs]
+
 -- | Create a dynamic record.  Given the record field types, the offsets of
 -- all fields are computed and returned.  Code is emitted to compute the
 -- offsets.
@@ -555,13 +559,11 @@ fromPrimType (RecordField rec) =
   in RecordType $ Rec fs sz al
   where
     from_dynamic_field fld =
-      mkField (from_lit $ fieldOffset fld) (fieldMutable fld) (as_value_type $ fromPrimType $ fieldType fld)
+      mkField (from_lit $ fieldOffset fld) (fieldMutable fld) (valueToFieldType $ fromPrimType $ fieldType fld)
 
     from_lit (LitV (IntL _ _ n)) = fromIntegral n
     from_lit _ = internalError "fromPrimType: Unexpected non-constant value"
 
-    as_value_type (PrimType ty) = PrimField ty
-    as_value_type (RecordType rec) = RecordField rec
 fromPrimType _ = internalError "Expecting a primitive field type"
 
 -- | Load one field of a record into a variable

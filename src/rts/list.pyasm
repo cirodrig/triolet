@@ -357,19 +357,19 @@ procedure list_peek (pointer elem_repr,
 // Contents are from Sloane's A002485.
 function list_db (pointer list) -> () {
   my_int = pointer primcall pyon_alloc (sizeof int);
-  () = () primcall list_create_uninitialized (passConv_int, word 6, list);
+  () = () primcall list_create_uninitialized (repr_int, word 6, list);
   !my_int = int 1;
-  () = () primcall list_poke(passConv_int, list, word 0, my_int);
+  () = () primcall list_poke(repr_int, list, word 0, my_int);
   !my_int = int 3;
-  () = () primcall list_poke(passConv_int, list, word 1, my_int);
+  () = () primcall list_poke(repr_int, list, word 1, my_int);
   !my_int = int 22;
-  () = () primcall list_poke(passConv_int, list, word 2, my_int);
+  () = () primcall list_poke(repr_int, list, word 2, my_int);
   !my_int = int 333;
-  () = () primcall list_poke(passConv_int, list, word 3, my_int);
+  () = () primcall list_poke(repr_int, list, word 3, my_int);
   !my_int = int 355;
-  () = () primcall list_poke(passConv_int, list, word 4, my_int);
+  () = () primcall list_poke(repr_int, list, word 4, my_int);
   !my_int = int 103993;
-  () = () primcall list_poke(passConv_int, list, word 5, my_int);
+  () = () primcall list_poke(repr_int, list, word 5, my_int);
   () primcall pyon_dealloc (my_int);
 };
 
@@ -379,37 +379,37 @@ procedure list_test () -> () {
   my_int = pointer primcall pyon_alloc (sizeof int);
 
   // Create list
-  () = () primcall list_create_uninitialized (passConv_int, word 5, my_list);
+  () = () primcall list_create_uninitialized (repr_int, word 5, my_list);
   !my_int = int 333;
-  () = () primcall list_poke(passConv_int, my_list, word 0, my_int);
+  () = () primcall list_poke(repr_int, my_list, word 0, my_int);
   !my_int = int 444;
-  () = () primcall list_poke(passConv_int, my_list, word 1, my_int);
+  () = () primcall list_poke(repr_int, my_list, word 1, my_int);
   !my_int = int 555;
-  () = () primcall list_poke(passConv_int, my_list, word 2, my_int);
+  () = () primcall list_poke(repr_int, my_list, word 2, my_int);
   !my_int = int 666;
-  () = () primcall list_poke(passConv_int, my_list, word 3, my_int);
+  () = () primcall list_poke(repr_int, my_list, word 3, my_int);
   !my_int = int 777;
-  () = () primcall list_poke(passConv_int, my_list, word 4, my_int);
+  () = () primcall list_poke(repr_int, my_list, word 4, my_int);
 
   // Duplicate list
   my_list2 = pointer primcall pyon_alloc (sizeof PyonList);
-  () = () call list_build (nil, nil, passConv_int, owned call list_traverse(passConv_int, my_list), my_list2);
+  () = () call list_build (nil, nil, repr_int, owned call list_traverse(repr_int, my_list), my_list2);
 
   // Read list
-  () = () primcall list_peek(passConv_int, my_list2, word 0, my_int);
+  () = () primcall list_peek(repr_int, my_list2, word 0, my_int);
   () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(passConv_int, my_list2, word 1, my_int);
+  () = () primcall list_peek(repr_int, my_list2, word 1, my_int);
   () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(passConv_int, my_list2, word 2, my_int);
+  () = () primcall list_peek(repr_int, my_list2, word 2, my_int);
   () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(passConv_int, my_list2, word 3, my_int);
+  () = () primcall list_peek(repr_int, my_list2, word 3, my_int);
   () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(passConv_int, my_list2, word 4, my_int);
+  () = () primcall list_peek(repr_int, my_list2, word 4, my_int);
   () = () primcall pyon_db_int(int load my_int);
 
   // Free stuff
-  () = () call list_finalize(passConv_int, my_list);
-  () = () call list_finalize(passConv_int, my_list2);
+  () = () call list_finalize(repr_int, my_list);
+  () = () call list_finalize(repr_int, my_list2);
   () = () primcall pyon_dealloc(my_list);
   () = () primcall pyon_dealloc(my_list2);
   () = () primcall pyon_dealloc(my_int);
@@ -426,7 +426,7 @@ procedure pyon_List_PyonInt_FromArray (cint n_elems, pointer arr) -> pointer {
 
 // Copy the contents of a list into an array
 procedure pyon_List_PyonInt_ToArray (pointer list, pointer dat) -> () {
-  () primcall pyon_list_to_array_POD (passConv_int, list, dat);
+  () primcall pyon_list_to_array_POD (repr_int, list, dat);
 };
 
 procedure pyon_List_PyonInt_Length (pointer list) -> cint {
@@ -435,7 +435,7 @@ procedure pyon_List_PyonInt_Length (pointer list) -> cint {
 };
 
 procedure pyon_List_PyonInt_Copy (pointer list) -> pointer {
-  pointer primcall pyon_list_copy_POD (passConv_int, list);
+  pointer primcall pyon_list_copy_POD (repr_int, list);
 };
 
 procedure pyon_List_PyonInt_Free (pointer list) -> () {

@@ -9,6 +9,7 @@ module LowLevel.CodeTypes
         module LowLevel.Record,
         ValueType(..),
         valueToPrimType,
+        valueToFieldType,
         CallConvention(..),
         FunctionType,
         primFunctionType,
@@ -42,6 +43,10 @@ valueToPrimType :: ValueType -> PrimType
 valueToPrimType (PrimType pt) = pt
 valueToPrimType _ =
   internalError "Expecting a primitive type, got a record type"
+
+valueToFieldType :: ValueType -> StaticFieldType
+valueToFieldType (PrimType pt) = PrimField pt
+valueToFieldType (RecordType rt) = RecordField rt
 
 -- | A function calling convention
 data CallConvention =

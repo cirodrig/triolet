@@ -177,6 +177,9 @@ instance HasSize (Field Int) where
 constStaticRecord :: [StaticFieldType] -> StaticRecord
 constStaticRecord fs = staticRecord [(Constant, f) | f <- fs]
 
+mutableStaticRecord :: [StaticFieldType] -> StaticRecord
+mutableStaticRecord fs = staticRecord [(Mutable, f) | f <- fs]
+
 staticRecord :: [(Mutability, StaticFieldType)] -> StaticRecord
 staticRecord fs = let
   field_offsets = compute_offsets 0 fs

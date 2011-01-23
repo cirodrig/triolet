@@ -138,10 +138,13 @@ createDictEnv = do
      createDict_Tuple2 arg1 arg2)
   additive_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_AdditiveDict) [VarT arg],
-     createDict_AdditiveDict arg)
+     createSimpleDict the_AdditiveDict the_repr_AdditiveDict arg)
+  multiplicative_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_MultiplicativeDict) [VarT arg],
+     createSimpleDict the_MultiplicativeDict the_repr_MultiplicativeDict arg)
   return $ DictEnv.DictEnv [repr_dict,
                             float_dict, int_dict,
-                            tuple2_dict, additive_dict]
+                            tuple2_dict, additive_dict, multiplicative_dict]
 
 getParamType v subst =
   case substituteVar v subst
@@ -162,7 +165,7 @@ createDict_Tuple2 param_var1 param_var2 subst use_dict =
     body <- saveAndUseDict data_type dict_exp use_dict
     return $ ExpM $ LetE { expInfo = defaultExpInfo 
                          , expBinder = mk_pat tmpvar dict_repr
-                         , expValue = mk_dict dict1 dict2
+                         , expValue = mk_dict tmpvar dict1 dict2
                          , expBody = body}
   where
     param1 = getParamType param_var1 subst
@@ -176,9 +179,11 @@ createDict_Tuple2 param_var1 param_var2 subst use_dict =
       LocalVarP tmpvar dict_type dict_repr
     
     -- Construct the dictionary
-    mk_dict dict1 dict2 =
+    mk_dict tmpvar dict1 dict2 =
       let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
-      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2] [dict1, dict2]
+          return_arg = ExpM $ VarE defaultExpInfo tmpvar
+      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
+         [dict1, dict2, return_arg]
 
 -- | Representation of 'Repr' dictionaries.  All 'Repr' dictionaries have
 --   the same representation.  There's a predefined global variable for that,
@@ -190,7 +195,10 @@ createDict_Repr param_var subst use_dict = use_dict expr
     op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Repr)
     expr = ExpM $ AppE defaultExpInfo op [TypM param_type] []
 
-createDict_AdditiveDict param_var subst use_dict =
+-- | Create the representation of a single-parameter class dictionary.
+--   Takes the class dictionary as the first parameter, and the repr
+--   constructor function as the second parameter.
+createSimpleDict tycon_selector repr_selector param_var subst use_dict =
   withReprDictionary param $ \param_dict ->
   withReprDictionary dict_type $ \dict_repr -> do
     tmpvar <- newAnonymousVar ObjectLevel
@@ -198,18 +206,19 @@ createDict_AdditiveDict param_var subst use_dict =
     body <- saveAndUseDict data_type dict_exp use_dict
     return $ ExpM $ LetE { expInfo = defaultExpInfo 
                          , expBinder = mk_pat tmpvar dict_repr
-                         , expValue = mk_dict param_dict
+                         , expValue = mk_dict tmpvar param_dict
                          , expBody = body}  
   where
     param = getParamType param_var subst
-    data_type = varApp (pyonBuiltin the_AdditiveDict) [param]
+    data_type = varApp (pyonBuiltin tycon_selector) [param]
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
     
     mk_pat tmpvar dict_repr = LocalVarP tmpvar dict_type dict_repr
     
-    mk_dict param_dict =
-      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_AdditiveDict)
-      in ExpM $ AppE defaultExpInfo oper [TypM param] [param_dict]
+    mk_dict tmpvar param_dict =
+      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin repr_selector)
+          return_arg = ExpM $ VarE defaultExpInfo tmpvar
+      in ExpM $ AppE defaultExpInfo oper [TypM param] [param_dict, return_arg]
 
 -------------------------------------------------------------------------------
 -- Transformations on IR data structures

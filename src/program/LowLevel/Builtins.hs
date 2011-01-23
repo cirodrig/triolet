@@ -36,7 +36,8 @@ module LowLevel.Builtins
         the_fun_copy2F,
         the_fun_copy4F,
         the_fun_copy,
-        the_fun_makeComplex,
+        the_bivar_repr_Repr_value,
+        {- the_fun_makeComplex,
         the_fun_load_int,
         the_fun_load_float,
         the_fun_load_NoneType,
@@ -55,7 +56,7 @@ module LowLevel.Builtins
         the_bivar_float_pass_conv,
         the_bivar_bool_pass_conv,
         the_bivar_TraversableDict_pass_conv,
-        the_bivar_PassConv_pass_conv)
+        the_bivar_PassConv_pass_conv -})
 where
 
 import Control.Monad
@@ -66,7 +67,6 @@ import qualified Language.Haskell.TH as TH
 import Gluon.Common.Error
 import Gluon.Common.Identifier
 import Gluon.Common.THRecord
-import Gluon.Core(Con(..))
 import GlobalVar
 import LowLevel.Label
 import LowLevel.Syntax
@@ -74,6 +74,9 @@ import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Records
 import LowLevel.BuiltinsTH
+import qualified Type.Var
+
+type SFVar = Type.Var.Var
 
 $(sequence [declareRecord lowLevelBuiltinsRecord])
 
@@ -150,10 +153,10 @@ builtinConTable =
 
 -- | Get the low-level variable corresponding to a builtin function
 -- constructor from core
-lowerBuiltinCoreFunction :: Con -> Maybe Var
-lowerBuiltinCoreFunction c = IntMap.lookup (fromIdent $ conID c) tbl
+lowerBuiltinCoreFunction :: SFVar -> Maybe Var
+lowerBuiltinCoreFunction c = IntMap.lookup (fromIdent $ Type.Var.varID c) tbl
   where
-    tbl = IntMap.fromList [ (fromIdent $ conID c, v lowLevelBuiltins)
+    tbl = IntMap.fromList [ (fromIdent $ Type.Var.varID c, v lowLevelBuiltins)
                           | (c, v) <- builtinConTable]
 
 -- | The low-level built-in global variables

@@ -45,6 +45,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.Traversable
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Gluon.Common.Error
 import Gluon.Common.Identifier
@@ -55,6 +56,7 @@ import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.Label
 import LowLevel.CodeTypes hiding(Field, fieldType, recordFields)
+import qualified LowLevel.Print as LL
 import qualified LowLevel.Syntax as LL
 import Globals
 
@@ -1155,22 +1157,28 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
            let domain' = map convertToValueType domain
                range' = map convertToValueType range
                exttype = primFunctionType domain' range'
+               doc = hang (text "expected") 9 (LL.pprFunctionType imptype) $$
+                     hang (text "got") 9 (LL.pprFunctionType exttype)
            in throwErrorMaybe $
-              if imptype == exttype then Nothing else incompatible_builtin
+              if imptype == exttype then Nothing else incompatible_builtin doc
          (ExternFunction domain range, LL.ImportClosureFun ep _) ->
            let domain' = map convertToValueType domain
                range' = map convertToValueType range
                exttype = closureFunctionType domain' range'
+               doc = hang (text "expected") 9 (LL.pprFunctionType $ LL.entryPointsType ep) $$
+                     hang (text "got") 9 (LL.pprFunctionType exttype)
            in throwErrorMaybe $
               if LL.entryPointsType ep == exttype
               then Nothing
-              else incompatible_builtin
+              else incompatible_builtin doc
          (ExternData etype, LL.ImportData v _) ->
-           throwErrorMaybe $
-           if PrimType etype == LL.varType v
-           then Nothing
-           else incompatible_builtin
-         _ -> throwErrorMaybe incompatible_builtin
+           let doc = hang (text "expected") 9 (LL.pprPrimType etype) $$
+                     hang (text "got") 9 (LL.pprValueType $ LL.varType v)
+           in throwErrorMaybe $
+              if PrimType etype == LL.varType v
+              then Nothing
+              else incompatible_builtin doc
+         _ -> throwErrorMaybe (incompatible_builtin (text "Object has wrong class"))
 
     compare_to_def (FunctionDefEnt d)
       | functionIsProcedure d, 
@@ -1204,9 +1212,10 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
       Just $ "Incompatible definition of exported variable '" ++
       labelLocalNameAsString (fromJust $ LL.varName $ LL.importVar impent) ++ "'"
       
-    incompatible_builtin =
+    incompatible_builtin details =
       Just $ "Incompatible definition of built-in variable '" ++
-      labelLocalNameAsString (fromJust $ LL.varName $ LL.importVar impent) ++ "'"
+      labelLocalNameAsString (fromJust $ LL.varName $ LL.importVar impent) ++ "'\n" ++
+      show details
 
 -- | Resolve an external variable declaration.
 --   No variables are defined.

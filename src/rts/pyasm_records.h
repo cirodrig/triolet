@@ -40,7 +40,6 @@ record PAPHeader {
 
 // Additive dictionary
 record AdditiveDict(a) {
-  const PassConv repr;		// Represesntation of the data type
   const owned add;			// Add two values
   const owned subtract;		// A value minus another
   const owned negate;			// Negate a value
@@ -71,6 +70,11 @@ record complex(a) {
 record Pair(a) {
   a fst;
   a snd;
+};
+
+record PyonTuple2(a, b) {
+  const a member1;
+  const b member2;
 };
 
 /* Arrays (called "lists")

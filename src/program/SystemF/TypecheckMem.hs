@@ -13,6 +13,7 @@ module SystemF.TypecheckMem
         Ret(..),
         TypTM, ExpTM, AltTM, FunTM, PatTM,
         fromTypTM,
+        fromPatTM,
         functionType,
         typeCheckModule)
 where
@@ -59,7 +60,7 @@ newtype instance Fun (Typed Mem) = FunTM (RTypeAnn (BaseFun TM))
 data instance Pat (Typed Mem) = TypedMemVarP Var ParamType
                               | TypedLocalVarP Var Type ExpTM
 data instance TyPat (Typed Mem) = TyPatTM Var TypTM
-newtype instance Ret (Typed Mem) = RetTM ReturnType
+newtype instance Ret (Typed Mem) = RetTM {fromRetTM :: ReturnType}
 
 type TM = Typed Mem
 
@@ -83,6 +84,11 @@ fromTypTM (TypTM (RTypeAnn _ t)) = t
 
 tyPatType :: TyPat Mem -> Type
 tyPatType (TyPatM _ t) = t
+
+fromPatTM :: PatTM -> PatM
+fromPatTM (TypedMemVarP v pt) = MemVarP v pt
+fromPatTM (TypedLocalVarP v ty repr) = LocalVarP v ty repr'
+  where repr' = internalError "fromPatTM: Not implemented"
 
 -- | Determine the type that a pattern-bound variable has after it's been 
 --   bound.

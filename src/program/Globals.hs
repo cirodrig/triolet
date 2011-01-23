@@ -1,6 +1,7 @@
 
 module Globals where
 
+import qualified Data.Map as Map
 import Gluon.Common.Supply
 import Gluon.Common.Identifier
 import Gluon.Core
@@ -65,6 +66,12 @@ the_newCoreTypes = defineInitGlobalVar ()
 the_memTypes :: InitGlobalVar Type.Environment.TypeEnv
 {-# NOINLINE the_memTypes #-}
 the_memTypes = defineInitGlobalVar ()
+
+-- | A map from builtin System F function variables 
+--   to builtin low-level function variables
+the_loweringMap :: InitGlobalVar (Map.Map Type.Var.Var LowLevel.Var)
+{-# NOINLINE the_loweringMap #-}
+the_loweringMap = defineInitGlobalVar ()
 
 withTheVarIdentSupply :: (Supply (Ident Var) -> IO a) -> IO a
 withTheVarIdentSupply f = withStaticGlobalVar the_varIdentSupply f

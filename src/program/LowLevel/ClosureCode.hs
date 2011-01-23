@@ -504,7 +504,8 @@ closure var is_global entry captured recursive = checks $
     checks k
       -- Closure variable must be owned
       | varType var /= PrimType OwnedType =
-          internalError "closure: Wrong variable type"
+          internalError $
+          "closure: Wrong variable type for function: " ++ show var
       -- If global, captured variables must be empty
       | is_global && not (null captured) =
           internalError "closure: Top-level function cannot capture variables"

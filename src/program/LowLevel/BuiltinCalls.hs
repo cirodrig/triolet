@@ -165,7 +165,7 @@ inliningRules =
                   | (v, f) <- tbl]
   where
     tbl =
-      [ (the_fun_load_int, loadOp (PrimType pyonIntType))
+      [ {-(the_fun_load_int, loadOp (PrimType pyonIntType))
       , (the_fun_store_int, storeOp (PrimType pyonIntType))
       , (the_fun_load_float, loadOp (PrimType pyonFloatType))
       , (the_fun_store_float, storeOp (PrimType pyonFloatType))
@@ -186,5 +186,5 @@ inliningRules =
       , (the_fun_mul_int,
          binaryPrimOp $ PrimMulZ Signed pyonIntSize)
       , (the_fun_mul_float,
-         binaryPrimOp $ PrimMulF pyonFloatSize)
+         binaryPrimOp $ PrimMulF pyonFloatSize) -}
       ]

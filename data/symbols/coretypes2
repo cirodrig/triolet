@@ -20,24 +20,36 @@ data ref list : val (val pure -> val pure) {};
 data ref PyonTuple2 : val (val pure -> val pure -> val pure)
 {
   pyonTuple2 : (val a : pure) -> (val b : pure)
-            -> read a -> read b -> write PyonTuple2 a b,
+            -> write a -> write b -> write PyonTuple2 a b,
   (val a : pure, val b : pure) (read a, read b) : read PyonTuple2 a b;
 };
 
 data ref AdditiveDict : val (val pure -> val pure)
 {
   additiveDict : (val a : pure)
-              -> read Repr a
-              -> box (read a -> read a -> write a)
+               -> box (read a -> read a -> write a)
               -> box (read a -> read a -> write a)
               -> box (read a -> write a)
               -> write a
               -> write AdditiveDict a,
-  (val a : pure) (read Repr a,
-       	   	  box (read a -> read a -> write a),
+  (val a : pure) (box (read a -> read a -> write a),
        	   	  box (read a -> read a -> write a),
 		  box (read a -> write a),
 		  read a) : read AdditiveDict a;
+};
+
+data ref MultiplicativeDict : val (val pure -> val pure)
+{
+  multiplicativeDict : (val a : pure)
+                    -> write AdditiveDict a
+                    -> box (read a -> read a -> write a)
+                    -> box (val int -> write a)
+                    -> write a
+                    -> write MultiplicativeDict a,
+  (val a : pure) (read AdditiveDict a,
+                  box (read a -> read a -> write a),
+                  box (val int -> write a),
+                  read a) : read MultiplicativeDict a;
 };
 
 data ref TraversableDict : val (val (val pure -> val pure) -> val pure)
@@ -72,6 +84,9 @@ repr_PyonTuple2 :
 repr_AdditiveDict :
     (val a : pure) -> read Repr a -> write Repr (AdditiveDict a);
 
+repr_MultiplicativeDict :
+    (val a : pure) -> read Repr a -> write Repr (MultiplicativeDict a);
+
 -- This always returns the same, global object
 repr_Repr : (val a : pure) -> read Repr a;
 
@@ -82,6 +97,15 @@ TraversableDict_Stream_build :
 
 TraversableDict_Stream_traverse :
   (val a : pure) -> read Repr a -> box Stream a -> box Stream a;
+
+-------------------------------------------------------------------------------
+-- Comparison dictionaries
+
+EqDict_int_eq : val int -> val int -> val bool;
+EqDict_int_ne : val int -> val int -> val bool;
+
+EqDict_float_eq : val float -> val float -> val bool;
+EqDict_float_ne : val float -> val float -> val bool;
 
 -------------------------------------------------------------------------------
 -- Numeric dictionaries
@@ -95,6 +119,13 @@ AdditiveDict_float_add : val float -> val float -> val float;
 AdditiveDict_float_sub : val float -> val float -> val float;
 AdditiveDict_float_negate : val float -> val float;
 AdditiveDict_float_zero : val float;
+
+
+MultiplicativeDict_int_mul : val int -> val int -> val int;
+MultiplicativeDict_int_fromInt : val int -> val int;
+
+MultiplicativeDict_float_mul : val float -> val float -> val float;
+MultiplicativeDict_float_fromInt : val int -> val float;
 
 -------------------------------------------------------------------------------
 -- Other functions

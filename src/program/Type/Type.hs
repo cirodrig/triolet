@@ -7,12 +7,16 @@ module Type.Type(Type(..),
                  Repr(..),
                  ParamRepr(..),
                  ReturnRepr(..),
+                 sameParamRepr,
+                 sameReturnRepr,
                  paramReprToRepr,
                  returnReprToRepr,
                  paramReprToReturnRepr,
+                 returnReprToParamRepr,
                  typeApp, varApp,
                  fromTypeApp, fromVarApp,
                  pureFunType, funType,
+                 fromFunType, fromPureFunType,
                  kindT, pureT,
                  kindV, pureV,
                  firstAvailableVarID,
@@ -56,7 +60,7 @@ fromVarApp t = case fromTypeApp t
                of (VarT v, args) -> Just (v, args)
                   _ -> Nothing
 
-pureFunType, funType :: [(ParamRepr ::: Type)] -> ReturnRepr ::: Type -> Type
+pureFunType, funType :: [ParamType] -> ReturnType -> Type
 pureFunType = constructFunctionType ValRT
 funType = constructFunctionType BoxRT
 
@@ -65,6 +69,17 @@ constructFunctionType repr ps ret = go ps
   where
     go [p]    = FunT p ret 
     go (p:ps) = FunT p (repr ::: go ps)
+
+fromPureFunType, fromFunType :: Type -> ([ParamType], ReturnType)
+fromPureFunType = deconstructFunctionType ValRT
+fromFunType = deconstructFunctionType BoxRT
+
+deconstructFunctionType repr ty = go id (repr ::: ty)
+  where
+    go hd (value_repr ::: FunT dom rng)
+      | sameReturnRepr repr value_repr = go (hd . (dom:)) rng
+
+    go hd return_type = (hd [], return_type)
 
 data x ::: y = x ::: y
 
@@ -140,6 +155,35 @@ paramReprToReturnRepr ReadPT = ReadRT
 paramReprToReturnRepr WritePT = WriteRT
 paramReprToReturnRepr OutPT = OutRT
 paramReprToReturnRepr SideEffectPT = SideEffectRT
+
+returnReprToParamRepr :: ReturnRepr -> ParamRepr
+returnReprToParamRepr ValRT = ValPT Nothing
+returnReprToParamRepr BoxRT = BoxPT
+returnReprToParamRepr ReadRT = ReadPT
+returnReprToParamRepr WriteRT = WritePT
+returnReprToParamRepr OutRT = OutPT
+returnReprToParamRepr SideEffectRT = SideEffectPT
+
+-- | True if the given representations are the same, False otherwise.
+--   Parameter variables are ignored.
+sameParamRepr :: ParamRepr -> ParamRepr -> Bool
+sameParamRepr (ValPT _) (ValPT _) = True
+sameParamRepr BoxPT     BoxPT     = True 
+sameParamRepr ReadPT    ReadPT    = True 
+sameParamRepr WritePT   WritePT   = True 
+sameParamRepr OutPT     OutPT     = True 
+sameParamRepr SideEffectPT SideEffectPT = True 
+sameParamRepr _         _         = False
+
+-- | True if the given representations are the same, False otherwise.
+sameReturnRepr :: ReturnRepr -> ReturnRepr -> Bool
+sameReturnRepr ValRT     ValRT     = True
+sameReturnRepr BoxRT     BoxRT     = True 
+sameReturnRepr ReadRT    ReadRT    = True 
+sameReturnRepr WriteRT   WriteRT   = True 
+sameReturnRepr OutRT     OutRT     = True 
+sameReturnRepr SideEffectRT SideEffectRT = True 
+sameReturnRepr _         _         = False
 
 instance HasLevel Var => HasLevel Type where
   getLevel (VarT v) = getLevel v

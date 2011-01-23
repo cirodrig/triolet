@@ -63,8 +63,6 @@ lookup var_supply tenv key (DictEnv xs) = go xs
   where
     go (TypePattern qvars t mk_value : xs) = do
       -- Try to match 'key' against this pattenr
-      print (text "?" <+> pprType key)
-      print (text "-" <+> pprType t)
       match <- unifyTypeWithPattern var_supply tenv qvars t key
       case match of
         Nothing     -> go xs

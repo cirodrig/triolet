@@ -9,8 +9,8 @@ import Language.Haskell.TH.Syntax(Lift(..))
 import Gluon.Common.Error
 import Gluon.Common.Label
 import Gluon.Common.THRecord
-import qualified SystemF.Builtins as SystemF
-import SystemF.Builtins(pyonBuiltin)
+import qualified Builtins.Builtins as SystemF
+import Builtins.Builtins(pyonBuiltin)
 import LowLevel.Types
 import LowLevel.Record
 import LowLevel.CodeTypes
@@ -153,8 +153,8 @@ builtinFunctions =
 
     -- Functions translated from Core
   , (PyonName module_memory_py "copy",
-     Right [| pyonBuiltin (SystemF.the_fun_copy) |])
-  , (PyonName module_structures "makeComplex",
+     Right [| pyonBuiltin (SystemF.the_copy) |])
+{-  , (PyonName module_structures "makeComplex",
      Right [| pyonBuiltin (SystemF.the_makeComplex) |])
   , (PyonName module_list "list_build",
      Right [| pyonBuiltin (SystemF.buildMember . SystemF.the_TraversableDict_list) |])
@@ -191,59 +191,55 @@ builtinFunctions =
   , (PyonName module_structures "multiplicativeDict",
      Right [| pyonBuiltin (SystemF.the_multiplicativeDict) |])
   , (PyonName module_structures "additiveDict_complex",
-     Right [| pyonBuiltin (SystemF.the_additiveDict_complex) |])
-  , (PyonName module_structures "complex_pass_conv",
+     Right [| pyonBuiltin (SystemF.the_additiveDict_complex) |])-}
+  , (PyonName module_structures "repr_Repr",
+     Right [| SystemF.pyonBuiltin (SystemF.the_repr_Repr) |])
+  {-, (PyonName module_structures "complex_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,
                           PrimType PointerType,
-                          PrimType PointerType] [])
-  , (PyonName module_structures "AdditiveDict_pass_conv",
-     Left $
-     closureFunctionType [PrimType UnitType,
-                          PrimType PointerType,
-                          PrimType PointerType] [])
-  , (PyonName module_structures "MultiplicativeDict_pass_conv",
-     Left $
-     closureFunctionType [PrimType UnitType,
-                          PrimType PointerType,
-                          PrimType PointerType] [])
-  , (PyonName module_structures "passConv_pyonTuple2",
-     Right [| SystemF.getPyonTuplePassConv' 2 |])
+                          PrimType PointerType] []) -}
+  , (PyonName module_structures "repr_AdditiveDict",
+     Right [| SystemF.pyonBuiltin (SystemF.the_repr_AdditiveDict) |])
+  , (PyonName module_structures "repr_MultiplicativeDict",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_MultiplicativeDict |])
+  , (PyonName module_structures "repr_PyonTuple2",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_PyonTuple2 |])
     
     -- Functions that are replaced by primitive operations
   , (PyonName builtinModuleName "eq_int",
-     Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_int) |])
+     Right [| pyonBuiltin (SystemF.the_EqDict_int_eq) |])
   , (PyonName builtinModuleName "ne_int",
-     Right [| pyonBuiltin (SystemF.neMember . SystemF.the_EqDict_int) |])
+     Right [| pyonBuiltin (SystemF.the_EqDict_int_ne) |])
   , (PyonName builtinModuleName "eq_float",
-     Right [| pyonBuiltin (SystemF.eqMember . SystemF.the_EqDict_float) |])
+     Right [| pyonBuiltin (SystemF.the_EqDict_float_eq) |])
   , (PyonName builtinModuleName "ne_float",
-     Right [| pyonBuiltin (SystemF.neMember . SystemF.the_EqDict_float) |])
+     Right [| pyonBuiltin (SystemF.the_EqDict_float_ne) |])
   , (PyonName module_prim "add_int",
-     Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_int) |])
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_int_add) |])
   , (PyonName module_prim "sub_int", 
-     Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_int) |])
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_int_sub) |])
   , (PyonName module_prim "negate_int",
-     Right [| pyonBuiltin (SystemF.negateMember . SystemF.the_AdditiveDict_int) |])
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_int_negate) |])
     -- zero_int was replaced by a literal value
-  , (PyonName builtinModuleName "add_float",
-     Right [| pyonBuiltin (SystemF.addMember . SystemF.the_AdditiveDict_float) |])
-  , (PyonName builtinModuleName "sub_float",
-     Right [| pyonBuiltin (SystemF.subMember . SystemF.the_AdditiveDict_float) |])
+  , (PyonName module_prim "add_float",
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_float_add) |])
+  , (PyonName module_prim "sub_float",
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_float_sub) |])
   , (PyonName module_prim "negate_float",
-     Right [| pyonBuiltin (SystemF.negateMember . SystemF.the_AdditiveDict_float) |])
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_float_negate) |])
     -- zero_float was replaced by a literal value
   , (PyonName module_prim "mul_int",
-     Right [| pyonBuiltin (SystemF.mulMember . SystemF.the_MultiplicativeDict_int) |])
+     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_int_mul) |])
   , (PyonName module_prim "fromint_int",
-     Right [| pyonBuiltin (SystemF.fromIntMember . SystemF.the_MultiplicativeDict_int) |])
+     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_int_fromInt) |])
     -- one_int was replaced by a literal value
   , (PyonName module_prim "mul_float",
-     Right [| pyonBuiltin (SystemF.mulMember . SystemF.the_MultiplicativeDict_float) |])
+     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_float_mul) |])
   , (PyonName module_prim "fromint_float",
-     Right [| pyonBuiltin (SystemF.fromIntMember . SystemF.the_MultiplicativeDict_float) |])
+     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_float_fromInt) |])
     -- one_float was replaced by a literal value
-  , (PyonName builtinModuleName "load_int",
+{-  , (PyonName builtinModuleName "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])
   , (PyonName builtinModuleName "load_float",
      Right [| pyonBuiltin (SystemF.the_fun_load_float) |])
@@ -262,22 +258,32 @@ builtinFunctions =
   , (PyonName builtinModuleName "store_bool",
      Right [| pyonBuiltin (SystemF.the_fun_store_bool) |])
   , (PyonName builtinModuleName "store_NoneType",
-     Right [| pyonBuiltin (SystemF.the_fun_store_NoneType) |])
+     Right [| pyonBuiltin (SystemF.the_fun_store_NoneType) |])-}
   ]
 
 -- | Predefined global data
 builtinGlobals =
   [ -- Info tables
-    (biName "pap_info", PrimType PointerType)
-  , (biName "global_closure_info", PrimType PointerType)
+    (biName "pap_info",
+     Left $ PrimType PointerType)
+  , (biName "global_closure_info",
+     Left $ PrimType PointerType)
     -- Dictionaries
-  , (PyonName module_structures "OpaqueTraversableDict_list", PrimType PointerType)
+  , (PyonName module_structures "OpaqueTraversableDict_list",
+     Left $ PrimType PointerType)
     -- Physical representations of data types
-  , (PyonName module_structures "passConv_int", PrimType PointerType)
-  , (CName module_structures "float_pass_conv", PrimType PointerType)
-  , (CName module_structures "bool_pass_conv", PrimType PointerType)
-  , (PyonName module_structures "TraversableDict_pass_conv", PrimType PointerType)
-  , (CName module_structures "PassConv_pass_conv", PrimType PointerType)
+  , (PyonName module_structures "repr_Repr_value",
+     Left $ PrimType PointerType)
+  , (PyonName module_structures "repr_int",
+     Right [| pyonBuiltin (SystemF.the_repr_int) |] )
+  , (PyonName module_structures "repr_float",
+     Right [| pyonBuiltin (SystemF.the_repr_float) |] )
+  , (PyonName module_structures "repr_bool",
+     Right [| pyonBuiltin (SystemF.the_repr_bool) |] )
+  , (PyonName module_structures "TraversableDict_pass_conv",
+     Left $ PrimType PointerType)
+  , (CName module_structures "PassConv_pass_conv",
+     Left $ PrimType PointerType)
   ]
 
 builtinVarPrimName nm = "the_biprim_" ++ builtinVarUnqualifiedName nm

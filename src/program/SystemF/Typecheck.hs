@@ -112,7 +112,7 @@ checkLiteralType l =
 instantiatePatternType :: SourcePos -- ^ Position where pattern was mentioned
                        -> DataConType    -- ^ Constructor to instantiate
                        -> [(Type, Type)] -- ^ Each type argument and its kind
-                       -> TCM ([ReturnRepr ::: Type], ReturnRepr ::: Type)
+                       -> TCM ([ReturnType], ReturnType)
                        -- ^ Compute field types and range type
 instantiatePatternType pos con_ty arg_vals
   | length (dataConPatternParams con_ty) /= length arg_vals =
@@ -122,10 +122,8 @@ instantiatePatternType pos con_ty arg_vals
                zip (dataConPatternParams con_ty) arg_vals
       
       -- Apply substitution to field and range types
-      let fields = [repr ::: substitute subst t
-                   | repr ::: t <- dataConPatternArgs con_ty]
-          range = case dataConPatternRange con_ty
-                  of repr ::: t -> repr ::: substitute subst t
+      let fields = map (substituteBinding subst) $ dataConPatternArgs con_ty
+          range = substituteBinding subst $ dataConPatternRange con_ty
       return (fields, range)
   where
     -- Instantiate the type by substituing arguments for the constructor's

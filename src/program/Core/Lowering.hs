@@ -53,7 +53,7 @@ debugShowAtom message m = do
 --   constructors that take no parameters are translated to a value.
 convertCon :: Con -> CvExp
 convertCon c =
-  case lowerBuiltinCoreFunction c
+  case lowerBuiltinCoreFunction undefined {- c -}
   of Just var -> value (CoreType $ conCoreReturnType c) (LL.VarV var)
      Nothing ->
        case IntMap.lookup (fromIdent $ conID c) convertConTable
@@ -68,7 +68,7 @@ convertCon c =
 -- a global variable in low-level code.
 convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
   where
-    tbl = [ (zeroMember $ pyonBuiltin the_AdditiveDict_int,
+    tbl = [ {- (zeroMember $ pyonBuiltin the_AdditiveDict_int,
              value (LLType $ PrimType pyonIntType) (LL.LitV $ LL.IntL Signed pyonIntSize 0))
           , (zeroMember $ pyonBuiltin the_AdditiveDict_float,
              value (LLType $ PrimType pyonFloatType) (LL.LitV $ LL.FloatL pyonFloatSize 0))
@@ -81,17 +81,17 @@ convertConTable = IntMap.fromList [(fromIdent $ conID c, v) | (c, v) <- tbl]
           , (pyonBuiltin the_True,
              value (LLType $ PrimType pyonBoolType) (LL.LitV $ LL.BoolL True))
           , (pyonBuiltin the_False,
-             value (LLType $ PrimType pyonBoolType) (LL.LitV $ LL.BoolL False))]
+             value (LLType $ PrimType pyonBoolType) (LL.LitV $ LL.BoolL False)) -}]
 
 globalVarAssignment =
   IntMap.fromList [(fromIdent $ varID c, v) | (c, v) <- tbl]
   where
-    tbl = [ (pyonBuiltin the_passConv_int_ptr,
+    tbl = [ {- (pyonBuiltin the_passConv_int_ptr,
              (LLType $ PrimType PointerType, llBuiltin the_bivar_passConv_int))
           , (pyonBuiltin the_passConv_float_ptr,
              (LLType $ PrimType PointerType, llBuiltin the_bivar_float_pass_conv))
           , (pyonBuiltin the_OpaqueTraversableDict_list_ptr,
-             (LLType $ PrimType PointerType, llBuiltin the_bivar_OpaqueTraversableDict_list))
+             (LLType $ PrimType PointerType, llBuiltin the_bivar_OpaqueTraversableDict_list)) -}
           ]
 
 isProductType c
@@ -344,7 +344,7 @@ lookupPassConv ty = do
 --   that transformation.
 getPassConv :: RCType
             -> Cvt ([LoweringType] -> BuildBlock LL.Atom -> BuildBlock LL.Atom,  LL.Val)
-getPassConv ty = do
+getPassConv ty = undefined {-do
   -- See if one is already available
   mpcvar <- lookupPassConv ty 
   case mpcvar of
@@ -407,7 +407,7 @@ getPassConv ty = do
           emitAtom0 $ LL.closureCallA (LL.VarV pc_ctor) [ LL.LitV LL.UnitL
                                                         , arg_pc
                                                         , LL.VarV list_pc_ptr]
-
+-}
 -------------------------------------------------------------------------------
 -- Data structure lowering
 

@@ -1,9 +1,7 @@
 
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
 module Type.Compare
-       (sameParamRepr,
-        sameReturnRepr,
-        compareTypes,
+       (compareTypes,
         unifyTypeWithPattern
        )
 where
@@ -19,27 +17,6 @@ import Type.Environment
 import Type.Rename
 import Type.Type
 import Type.Var
-
--- | True if the given representations are the same, False otherwise.
---   Parameter variables are ignored.
-sameParamRepr :: ParamRepr -> ParamRepr -> Bool
-sameParamRepr (ValPT _) (ValPT _) = True
-sameParamRepr BoxPT     BoxPT     = True 
-sameParamRepr ReadPT    ReadPT    = True 
-sameParamRepr WritePT   WritePT   = True 
-sameParamRepr OutPT     OutPT     = True 
-sameParamRepr SideEffectPT SideEffectPT = True 
-sameParamRepr _         _         = False
-
--- | True if the given representations are the same, False otherwise.
-sameReturnRepr :: ReturnRepr -> ReturnRepr -> Bool
-sameReturnRepr ValRT     ValRT     = True
-sameReturnRepr BoxRT     BoxRT     = True 
-sameReturnRepr ReadRT    ReadRT    = True 
-sameReturnRepr WriteRT   WriteRT   = True 
-sameReturnRepr OutRT     OutRT     = True 
-sameReturnRepr SideEffectRT SideEffectRT = True 
-sameReturnRepr _         _         = False
 
 data CmpEnv =
   CmpEnv

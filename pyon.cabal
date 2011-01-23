@@ -39,8 +39,8 @@ Executable pyon
     gluon,
     gluon-eval
   Extensions:
-    MultiParamTypeClasses, PatternGuards, GADTs, EmptyDataDecls, TypeOperators,
-      TypeFamilies
+    ScopedTypeVariables, MultiParamTypeClasses, PatternGuards, GADTs,
+    EmptyDataDecls, TypeOperators, TypeFamilies
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon
@@ -77,6 +77,10 @@ Executable pyon
     SystemF.DeadCode
     SystemF.DictEnv
     SystemF.ElimPatternMatching
+    SystemF.Lowering.Datatypes
+    SystemF.Lowering.Marshaling
+    SystemF.Lowering.Lowering
+    SystemF.Lowering.LowerMonad
     SystemF.MemoryIR
     SystemF.OutputPassing
     SystemF.PartialEval

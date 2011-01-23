@@ -29,6 +29,7 @@ import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.TypecheckSF
 import qualified SystemF.TypecheckMem
 import qualified SystemF.Flatten.EffectInference as SystemF
+import qualified SystemF.Lowering.Lowering as SystemF
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.OutputPassing as SystemF
@@ -40,7 +41,6 @@ import qualified Core.Rewriting as Core
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
-import qualified LowLevel.BuiltinCalls as LowLevel
 import qualified LowLevel.CSE as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.DeadCode as LowLevel
@@ -146,13 +146,14 @@ compilePyonToPyonAsm path text = do
   print $ SystemF.pprModule sf_mod
   
   -- Convert to core
-  flat_mod <- do
+  ll_mod <- do
     tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
     xmod <- SystemF.generateMemoryIR tc_mod -- Eventually replaces the Core path
     print $ SystemF.PrintMemoryIR.pprModule xmod
-    SystemF.TypecheckMem.typeCheckModule xmod
-    SystemF.inferSideEffects tc_mod
-
+    tc_xmod <- SystemF.TypecheckMem.typeCheckModule xmod
+    --SystemF.inferSideEffects tc_mod
+    SystemF.lowerModule tc_xmod
+{-
   putStrLn ""
   putStrLn "Core"
   print $ Core.pprCModule flat_mod
@@ -168,9 +169,9 @@ compilePyonToPyonAsm path text = do
   putStrLn ""
   putStrLn "Simplified core"
   print $ Core.pprCModule flat_mod
-
   -- Convert to low-level form
-  ll_mod <- Core.lower flat_mod
+  ll_mod <- Core.lower flat_mod-}
+
   putStrLn ""
   putStrLn "Lowered"
   print $ LowLevel.pprModule ll_mod
@@ -192,7 +193,6 @@ loadIface iface_file = do
 compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   print $ LowLevel.pprModule ll_mod
   -- Low-level transformations
-  ll_mod <- LowLevel.makeBuiltinPrimOps ll_mod
   ll_mod <- LowLevel.flattenRecordTypes ll_mod
   
   -- Link to interfaces

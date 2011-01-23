@@ -733,11 +733,22 @@ inferFun (FunTSF (TypeAnn _ f)) =
                         , funBody = co_body}
 
 inferLetE inf binder rhs body = do
+  -- Infer the RHS
   (rhs_wr, rhs', rhs_ty) <- inferReprExp rhs
+  
   withPat True binder $ \pat' -> do
+    -- Coerce RHS to a form that's compatible with the binder
+    let PatR _ (pat_repr ::: pat_type) = pat'
+    rhs_coercion <-
+      coerceReturnType (paramReprToReturnRepr pat_repr ::: pat_type) rhs_ty
+    let (co_rhs, rhs_co_wr) = coercionToWrapper rhs_coercion rhs'
+        
+    -- Infer body
     (body_wr, body', body_ty) <- inferReprExp body
-    let new_expr = ExpR body_ty $ LetE inf pat' rhs' body'
-    return (body_wr, applyWrapper rhs_wr new_expr, body_ty)
+    let new_expr = ExpR body_ty $ LetE inf pat' co_rhs body'
+        
+    -- Apply all RHS coercions
+    return (body_wr, applyWrapper (rhs_wr `mappend` rhs_co_wr) new_expr, body_ty)
 
 inferLetrecE inf defs body = do
   withDefs defs $ \defs' -> do

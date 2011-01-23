@@ -247,7 +247,7 @@ cseStm statement =
   of LetE [f_var] (ValA [LamV f]) stm ->
        -- Convert a lambda into a letrec
        let new_statement = LetrecE [Def f_var f] stm
-       in cseStm new_statement
+       in check_def f_var f $ cseStm new_statement
      LetE lhs rhs stm -> do
        (rhs', exprs) <- cseAtom rhs
        case exprs of
@@ -283,6 +283,14 @@ cseStm statement =
       
     assign_variable v Nothing = return ()
     assign_variable v (Just e) = modifyCSEEnv $ updateCSEEnv v e
+    
+    -- Inserted for debugging.  Verify that the function's calling convention
+    -- and its type match.
+    check_def f_var f x =
+      case funConvention f
+      of PrimCall | varType f_var == PrimType PointerType -> x
+         ClosureCall | varType f_var == PrimType OwnedType -> x
+         _ -> internalError "cseStm: Lambda function has wrong type"
 
 cseDef :: FunDef -> CSEF FunDef
 cseDef (Def v f) = Def v <$> cseFun f

@@ -44,7 +44,7 @@ pyonBuiltinVariableNames =
   , "pyonTuple1"
   , "pyonTuple2"
   , "pyonTuple3"
-    
+
     -- Class constructors
   , "traversableDict"
   , "eqDict"
@@ -69,6 +69,7 @@ pyonBuiltinVariableNames =
   , "repr_PyonTuple3"
   , "repr_Repr"
   , "repr_AdditiveDict"
+  , "repr_MultiplicativeDict"
   , "TraversableDict_Stream"
   , "TraversableDict_Stream_traverse"
   , "TraversableDict_Stream_build"
