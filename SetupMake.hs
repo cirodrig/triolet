@@ -291,9 +291,10 @@ generateCabalMakefile verbosity exe lbi = do
   (pyon_rules, pyon_files) <- generatePyonRules verbosity lbi exe
   (rts_rules, rts_files) <- generateRtsRules verbosity lbi
   (data_rules, prebuilt_data_files) <- generateDataRules verbosity lbi
+  test_rules <- generateTestRules verbosity lbi
   variables <- generateVariables exe lbi pyon_rules rts_rules data_rules
                prebuilt_data_files
-  writeCabalMakefile variables (pyon_rules ++ rts_rules ++ data_rules)
+  writeCabalMakefile variables (pyon_rules ++ rts_rules ++ data_rules ++ test_rules)
 
 -- | Create variables for a makefile.
 generateVariables :: Executable
@@ -457,6 +458,26 @@ generateDataRules verb lbi = do
       [copyDataFile (dataBuildDir lbi) "data" filename
       | filename <- prebuiltDataFiles]
 
+generateTestRules verbosity lbi = do
+  -- Generate a single rule.  The first filename in the list is the main file. 
+  source_files <- mapM find_file ["testdriver.hs", "TestCase.hs"]
+
+  let rule = MakeRule [out_file] source_files $
+             "mkdir -p " ++ takeDirectory out_file ++ "\n\
+             \$(HC) " ++ hcflags ++ " --make $< -o $@"
+  return [rule]
+  where
+    hcflags = intercalate " " (include_flags ++ dir_flags)
+    include_flags = ["-i" ++ path | path <- search_paths]
+    dir_flags = ["-outputdir", out_path]
+    search_paths = testDriverSearchPaths lbi
+    out_path = testDriverBuildDir lbi
+    out_file = testDriverProgram lbi
+    
+    find_file fname = do 
+      path <- findFilePath' search_paths fname
+      return $ path </> fname
+    
 -- Write configured variables and rules into a makefile for use by 'make'
 writeCabalMakefile :: [(String, String)] -- key/value pairs
                    -> [MakeRule]

@@ -23,7 +23,6 @@ import Distribution.Verbosity
 
 import SetupPaths
 import SetupMake
-import SetupTest
 
 makeProgram = simpleProgram "make"
 gxxProgram = simpleProgram "g++"
@@ -48,9 +47,8 @@ writePathsModule verb pkg_desc lbi = do
   createDirectoryIfMissingVerbose verb True autogen_dir
   rewriteFile (autogen_dir </> autogen_filename) paths_module
 
-runMake lbi flags args =
-  let verb = fromFlag $ buildVerbosity flags  
-  in runDbProgram verb makeProgram (withPrograms lbi) args
+runMake lbi verbosity args =
+  runDbProgram verbosity makeProgram (withPrograms lbi) args
 
 -------------------------------------------------------------------------------
 -- Hooks
@@ -90,7 +88,6 @@ doBuild pkg_desc lbi hooks flags = do
     verb = fromFlag $ buildVerbosity flags
 
     build_exe exe = do
-      print $ pyonGhcOpts exe lbi
       -- Generate make rules and variables
       generateCabalMakefile verb exe lbi
 
@@ -116,7 +113,7 @@ doBuild pkg_desc lbi hooks flags = do
       rawSystemExit verb "makedepend" cdep_args
 
       -- Run 'make'
-      runMake lbi flags ["build"]
+      runMake lbi verb ["build"]
 
 -- | Compile documentation of the compiler's source code
 doHaddock pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
@@ -150,7 +147,16 @@ doClean orig_clean pkg_desc _lbi hooks flags = do
   
   orig_clean pkg_desc _lbi hooks flags
 
-doTest args _ pkg_desc lbi = runRegressionTests
+doTest args _ pkg_desc lbi = do
+  let verb = normal
+  -- Generate make rules and variables
+  withExe pkg_desc $ \exe -> generateCabalMakefile verb exe lbi
+  
+  -- Compile the test driver
+  runMake lbi verb [testDriverProgram lbi]
+  
+  -- Run the test driver
+  rawSystemExit verb (testDriverProgram lbi) []
 
 hooks = simpleUserHooks
   { hookedPrograms = gxxProgram : makeProgram : hookedPrograms simpleUserHooks

@@ -30,6 +30,18 @@ rtsBuildDir lbi = buildDir lbi </> "rts"
 dataBuildDir :: LocalBuildInfo -> FilePath
 dataBuildDir lbi = buildDir lbi </> "data"
 
+-- | Directories containing source files belonging to the test driver
+testDriverSearchPaths :: LocalBuildInfo -> [FilePath]
+testDriverSearchPaths lbi = testDriverBuildDir lbi : ["src/testdriver"]
+
+-- | Destination for the test driver files
+testDriverBuildDir :: LocalBuildInfo -> FilePath
+testDriverBuildDir lbi = buildDir lbi </> "testdriver"
+
+-- | The test driver executable
+testDriverProgram :: LocalBuildInfo -> FilePath
+testDriverProgram lbi = testDriverBuildDir lbi </> "testdriver"
+
 -- | Directory containing regression tests
 testSourceDir = "test"
 
