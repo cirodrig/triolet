@@ -1,5 +1,5 @@
 
-module CParser2.Parser(parseFile)
+module CParser.Parser(parseFile)
 where
 
 import qualified Text.ParserCombinators.Parsec as PS
@@ -14,8 +14,8 @@ import Text.ParserCombinators.Parsec((<|>), (<?>), unexpected, choice,
                                      option, optionMaybe, many, many1, endBy,
                                      sepEndBy, sepBy, sepBy1)
 
-import CParser2.AST
-import CParser2.Lexer
+import CParser.AST
+import CParser.Lexer
 import Common.SourcePos as PySrcPos
 import Type.Type(Repr(..))
 

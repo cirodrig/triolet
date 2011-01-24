@@ -46,8 +46,6 @@ import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
 
-import CParser2.Driver()
-
 main = do
   -- Initialiation
   loadBuiltins

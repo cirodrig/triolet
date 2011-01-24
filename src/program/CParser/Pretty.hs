@@ -1,5 +1,5 @@
 
-module CParser2.Pretty where
+module CParser.Pretty where
 
 import Text.PrettyPrint.HughesPJ
 

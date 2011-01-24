@@ -1,5 +1,5 @@
 
-module CParser2.Driver(parseCoreModule)
+module CParser.Driver(parseCoreModule)
 where
 
 import System.FilePath
@@ -13,15 +13,15 @@ import Builtins.Builtins
 import Type.Var
 import Type.Type
 import Type.Environment
-import CParser2.AST
-import CParser2.Lexer
-import CParser2.Parser
-import CParser2.Resolve
-import CParser2.LevelInference
-import CParser2.GenCore
+import CParser.AST
+import CParser.Lexer
+import CParser.Parser
+import CParser.Resolve
+import CParser.LevelInference
+import CParser.GenCore
 import Paths
 
-import CParser2.PrettyAST()
+import CParser.PrettyAST()
 
 predefinedVarDetails :: [(String, VarDetails)]
 predefinedVarDetails = map mk_var_details (pureV : allBuiltinVars)

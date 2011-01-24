@@ -2,7 +2,7 @@
 -}
 
 {-# LANGUAGE DeriveDataTypeable #-}
-module CParser2.LexData where
+module CParser.LexData where
 
 import Control.Exception
 import Data.Typeable

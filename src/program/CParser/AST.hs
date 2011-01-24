@@ -5,7 +5,7 @@ frontend.
 -}
 
 {-# LANGUAGE TypeFamilies #-}
-module CParser2.AST where
+module CParser.AST where
 
 import Control.Monad
 import Data.Foldable

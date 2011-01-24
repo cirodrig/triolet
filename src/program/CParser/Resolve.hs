@@ -2,7 +2,7 @@
 -}
 
 {-# LANGUAGE FlexibleInstances #-}
-module CParser2.Resolve(globalEnvironment, resolveModule)
+module CParser.Resolve(globalEnvironment, resolveModule)
 where
 
 import Control.Monad
@@ -14,7 +14,7 @@ import Common.Supply
 import Common.SourcePos
 import Common.Label
 import Type.Var
-import CParser2.AST
+import CParser.AST
 
 -------------------------------------------------------------------------------
 -- Name resolution environments

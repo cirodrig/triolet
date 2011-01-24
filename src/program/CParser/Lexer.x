@@ -1,6 +1,6 @@
 
 {
-module CParser2.Lexer
+module CParser.Lexer
     (LexerError(..),
      Token(..), Tok(..), showTok, showToken,
      lexify
@@ -10,7 +10,7 @@ where
 import Control.Exception
 
 import Common.SourcePos
-import CParser2.LexData
+import CParser.LexData
 
 }
 

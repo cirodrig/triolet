@@ -2,14 +2,14 @@
 -}
 
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, UndecidableInstances #-}
-module CParser2.PrettyAST() where
+module CParser.PrettyAST() where
 
 import Text.PrettyPrint.HughesPJ
 
 import Common.Identifier
 import Common.Label
-import CParser2.Pretty
-import CParser2.AST
+import CParser.Pretty
+import CParser.AST
 import Type.Type(Var, Repr(..))
 
 pprWithHeading heading_name x = hang (text (heading_name ++ ":")) 2 (ppr x)

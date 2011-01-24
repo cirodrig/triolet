@@ -5,7 +5,6 @@ import qualified Data.Map as Map
 import Common.Supply
 import Common.Identifier
 import qualified SystemF.Syntax as SystemF
-import qualified CParser2.Driver as CParser2
 import qualified LowLevel.Syntax as LowLevel
 import GlobalVar
 import Type.Environment

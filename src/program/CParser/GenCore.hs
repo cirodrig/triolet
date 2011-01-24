@@ -1,14 +1,14 @@
 
 {-# LANGUAGE ViewPatterns #-}
-module CParser2.GenCore (createCoreTable) where
+module CParser.GenCore (createCoreTable) where
 
 import qualified Data.IntMap as IntMap
 
 import Common.SourcePos
 import Common.Error
 import Common.Identifier
-import CParser2.AST
-import CParser2.LevelInference()
+import CParser.AST
+import CParser.LevelInference()
 import Type.Type((:::)(..), Level(..))
 import qualified Type.Type as Type
 import Type.Environment

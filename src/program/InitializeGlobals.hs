@@ -9,7 +9,7 @@ import Control.Concurrent.MVar
 
 import Parser.Driver
 import Parser.ParserSyntax(createParserGlobals)
-import qualified CParser2.Driver
+import qualified CParser.Driver
 import LowLevel.InitializeBuiltins
 import Builtins.Builtins
 import Type.Environment
@@ -28,7 +28,7 @@ loadBuiltins = do
     in return (n + length vars, vars)
   
   withTheNewVarIdentSupply $ \supply -> do
-    core_types <- CParser2.Driver.parseCoreModule supply
+    core_types <- CParser.Driver.parseCoreModule supply
     initializeGlobalVar the_newCoreTypes (return core_types)
     initializeGlobalVar the_systemFTypes (return $ convertToPureTypeEnv core_types)
     initializeGlobalVar the_memTypes (return $ convertToMemTypeEnv core_types)

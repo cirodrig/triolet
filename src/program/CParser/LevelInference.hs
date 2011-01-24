@@ -1,6 +1,6 @@
 
 {-# LANGUAGE FlexibleContexts, UndecidableInstances #-}
-module CParser2.LevelInference(levelInferModule) where
+module CParser.LevelInference(levelInferModule) where
 
 import qualified Data.Map as Map
 import Data.Foldable as Fold
@@ -10,7 +10,7 @@ import Common.Identifier
 import Common.Label
 import Type.Var
 import Type.Level
-import CParser2.AST
+import CParser.AST
 
 type LIVar = Var
 
