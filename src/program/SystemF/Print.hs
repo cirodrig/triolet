@@ -8,11 +8,11 @@ where
 
 import Data.Maybe
 import Text.PrettyPrint.HughesPJ
-import Gluon.Common.Identifier
+import Common.Identifier
+import Common.Label
 import Export
 import Type.Type
 import Type.Var
-import LowLevel.Label
 import Builtins.Builtins
 import SystemF.Syntax
 

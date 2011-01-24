@@ -7,15 +7,14 @@ import Control.Monad
 import System.IO.Unsafe
 
 import Language.Haskell.TH(Strict(..), listE, varE, mkName)
-import Gluon.Common.THRecord
-import Gluon.Common.Supply
-import Gluon.Common.Identifier
-import Gluon.Common.Error
-import Gluon.Core.Level
+import Common.THRecord
+import Common.Supply
+import Common.Identifier
+import Common.Error
+import Common.Label
 
 import Builtins.BuiltinsTH
-import LowLevel.Label
-import Type.Var
+import Type.Type
 
 $(do d <- declareRecord pyonBuiltinsSpecification
      return [d])

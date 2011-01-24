@@ -6,17 +6,19 @@ import Control.Monad
 import Control.Monad.Writer
 import qualified Data.Set as Set
 import Data.Set(Set)
+import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Gluon.Core(Con(..))
+import Common.Error
+import Common.Identifier
+import Common.Supply
+import Common.Label
 import LowLevel.Builtins
 import LowLevel.FreshVar
-import LowLevel.Label
 import LowLevel.Syntax
 import LowLevel.CodeTypes
 import LowLevel.Records
+import LowLevel.Print
 
 newtype MkStm = MkStm (Stm -> Stm)
 

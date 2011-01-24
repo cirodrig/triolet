@@ -11,17 +11,16 @@ import qualified Data.IntMap as IntMap
 import Data.List
 import qualified Data.Set as Set
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Label
-import Gluon.Common.Supply
+import Common.Error
+import Common.Identifier
+import Common.Label
+import Common.Supply
 import LLParser.AST
 import LLParser.TypeInference
 import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.CodeTypes hiding(Field)
-import LowLevel.Label
 import qualified LowLevel.Syntax as LL
 import Globals
 import Export

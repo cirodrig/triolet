@@ -13,7 +13,7 @@ import Foreign.Ptr
 import {-# SOURCE #-} Parser.SSA
 
 import qualified Language.Python.Common.AST as Python
-import Gluon.Common.SourcePos(SourcePos)
+import Common.SourcePos(SourcePos)
 import Export
 import Untyped.Data(ParserVarBinding)
 import Untyped.Builtins

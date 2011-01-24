@@ -10,8 +10,8 @@ where
 
 import System.IO.Unsafe
 import Control.Concurrent.MVar
-import Gluon.Common.Error
-import Gluon.Common.MonadLogic
+import Common.Error
+import Common.MonadLogic
 
 -- | A statically defined global variable.
 --

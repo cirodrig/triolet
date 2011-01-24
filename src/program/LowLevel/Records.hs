@@ -3,7 +3,7 @@ module LowLevel.Records where
 
 import Data.Word
 
-import Gluon.Common.Error
+import Common.Error
 import LowLevel.Types
 import LowLevel.Record
 

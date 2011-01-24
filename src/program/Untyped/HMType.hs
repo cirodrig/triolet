@@ -40,22 +40,20 @@ import Debug.Trace
 import System.IO.Unsafe
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.MonadLogic
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Common.Identifier
-import Gluon.Common.Label
-import Gluon.Core(Rec)
-import Gluon.Core.Level
+import Common.Error
+import Common.MonadLogic
+import Common.SourcePos
+import Common.Supply
+import Common.Identifier
+import Common.Label
 
 import Globals
 import qualified SystemF.Syntax as SystemF
-import LowLevel.Label(pyonLabel)
 import Untyped.Data
 import Untyped.Kind
 import Untyped.Unification
 import Type.Var
+import Type.Level
 
 tyConIDSupply :: Supply (Ident TyCon)
 {-# NOINLINE tyConIDSupply #-}
@@ -468,9 +466,7 @@ tyVarToSystemF c
         Just v  -> return v
         Nothing -> do
           id <- withTheNewVarIdentSupply supplyValue
-          let lab = case tcName c
-                    of Nothing -> Nothing
-                       Just l -> Just $ pyonLabel (moduleOf l) (labelUnqualifiedName l)
+          let lab = tcName c
           let v = mkVar id lab TypeLevel
           writeIORef ref (Just v)
           return v

@@ -27,20 +27,26 @@ Executable pyon
   Hs-Source-Dirs: src/program
   Build-Depends:
     base >= 4 && < 5,
+    array,
+    bytestring,
+    template-haskell,
+    directory,
+    filepath,
+    process,
+    random,
     binary,
     containers,
     mtl,
     MaybeT,
     fgl,
+    pretty,
     language-python-pyon == 0.2.1,
     language-c,
     parsec == 3.*,
-    utf8-string,
-    gluon,
-    gluon-eval
+    utf8-string
   Extensions:
     ScopedTypeVariables, MultiParamTypeClasses, PatternGuards, GADTs,
-    EmptyDataDecls, TypeOperators, TypeFamilies
+    EmptyDataDecls, TypeOperators, TypeFamilies, DeriveDataTypeable
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon
@@ -53,6 +59,13 @@ Executable pyon
     CommandLine
     Builtins.BuiltinsTH
     Builtins.Builtins
+    Common.Error
+    Common.Identifier
+    Common.Label
+    Common.MonadLogic
+    Common.SourcePos
+    Common.Supply
+    Common.THRecord
     Parser.Driver
     Parser.Parser
     Parser.ParserSyntax
@@ -72,8 +85,6 @@ Executable pyon
     Untyped.TypeInference
     Untyped.TypeInferenceEval
     Untyped.Unification
-    SystemF.Builtins
-    SystemF.BuiltinsTH
     SystemF.DeadCode
     SystemF.DictEnv
     SystemF.ElimPatternMatching
@@ -92,21 +103,6 @@ Executable pyon
     SystemF.Typecheck
     SystemF.TypecheckSF
     SystemF.TypecheckMem
-    SystemF.Flatten.Effect
-    SystemF.Flatten.EffectExp
-    SystemF.Flatten.EffectType
-    SystemF.Flatten.EffectInference
-    SystemF.Flatten.Constraint
-    SystemF.Flatten.GenCore
-    Core.Syntax
-    Core.Print
-    Core.Gluon
-    Core.PartialEval
-    Core.Lowering
-    Core.TypeLowering
-    Core.BuiltinTypes
-    Core.Rewriting
-    Core.Unpacking
     CParser2.AST
     CParser2.Driver
     CParser2.GenCore
@@ -117,16 +113,6 @@ Executable pyon
     CParser2.Pretty
     CParser2.PrettyAST
     CParser2.Resolve
-    CParser.AST
-    CParser.Driver
-    CParser.GenCore
-    CParser.LevelInference
-    CParser.LexData
-    CParser.Lexer
-    CParser.Parser
-    CParser.Pretty
-    CParser.PrettyAST
-    CParser.Resolve
     LLParser.AST
     LLParser.LexCode
     LLParser.Lexer
@@ -143,7 +129,6 @@ Executable pyon
     LowLevel.Inlining
     LowLevel.InterfaceFile
     LowLevel.Build
-    LowLevel.BuiltinCalls
     LowLevel.ClosureSelect
     LowLevel.Closures
     LowLevel.ClosureCode
@@ -154,7 +139,6 @@ Executable pyon
     LowLevel.GenerateCCode
     LowLevel.GenerateCHeader
     LowLevel.GenerateCUtils
-    LowLevel.Label
     LowLevel.Syntax
     LowLevel.Print
     LowLevel.Record
@@ -166,6 +150,7 @@ Executable pyon
     Type.Compare
     Type.Environment
     Type.Eval
+    Type.Level
     Type.Rename
     Type.Type
     Type.Var

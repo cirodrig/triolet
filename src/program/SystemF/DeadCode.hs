@@ -6,12 +6,11 @@ import Control.Monad.Writer
 import qualified Data.Set as Set
 import Data.Set(Set)
 
-import Gluon.Common.SourcePos
-import Gluon.Common.Error
+import Common.SourcePos
+import Common.Error
 import Builtins.Builtins
 import SystemF.Syntax
 import Type.Type
-import Type.Var
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.

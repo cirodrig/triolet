@@ -69,9 +69,9 @@ import Data.Maybe
 import qualified Data.Set as Set
 import Debug.Trace
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
+import Common.Error
+import Common.Identifier
+import Common.Supply
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.Print

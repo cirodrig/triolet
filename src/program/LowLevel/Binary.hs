@@ -4,10 +4,10 @@ module LowLevel.Binary where
 import Control.Applicative
 import Data.Binary
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
+import Common.Error
+import Common.Identifier
+import Common.Label
 import LowLevel.BinaryUtils
-import LowLevel.Label
 import LowLevel.Syntax
 import LowLevel.CodeTypes
 
@@ -104,8 +104,8 @@ instance Binary Lit where
       pick _ = readError "Lit.get"
 
 instance Binary ModuleName where
-  put mn = put (showModuleName mn)
-  get = moduleName <$> get
+  put (ModuleName mn) = put mn
+  get = ModuleName <$> get
 
 instance Binary LabelTag where
   put = putEnum

@@ -11,7 +11,7 @@
 -- 
 -}
 
-{-# LANGUAGE TypeFamilies, EmptyDataDecls, FlexibleInstances, DeriveDataTypeable #-}
+{-# LANGUAGE FlexibleInstances, DeriveDataTypeable #-}
 module Untyped.GenSystemF where
 
 import Prelude hiding(mapM, sequence)
@@ -26,14 +26,10 @@ import Data.Typeable(Typeable)
 import qualified Data.Map as Map
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.MonadLogic
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Core.Level
-import Gluon.Core.Builtins
-import Gluon.Core(SynInfo, mkSynInfo, internalSynInfo,
-                  Structure, Rec)
+import Common.Error
+import Common.MonadLogic
+import Common.SourcePos
+import Common.Supply
 import Globals
 import Export
 import Untyped.HMType
@@ -42,9 +38,11 @@ import Untyped.Unification
 import Untyped.Data
 import qualified Untyped.Syntax as Untyped
 import qualified SystemF.Syntax as SystemF
+import SystemF.Syntax(ExpInfo, mkExpInfo)
 import qualified Builtins.Builtins as SystemF
 import Type.Var
 import qualified Type.Type
+import Type.Level
 
 debugPlaceholders = False
 
@@ -194,12 +192,6 @@ setPlaceholderElaboration ph exp
 delayType :: SystemF.TypSF -> TIType
 delayType t = DelayedType (return t)
 
-objectSynInfo :: SynInfo
-objectSynInfo = internalSynInfo ObjectLevel
-
-synInfo :: SourcePos -> SynInfo
-synInfo pos = mkSynInfo pos ObjectLevel
-
 mkWildP :: TIType -> SystemF.Pat TI
 mkWildP ty = TIWildP ty
 
@@ -210,10 +202,10 @@ mkTupleP :: [SystemF.Pat TI] -> SystemF.Pat TI
 mkTupleP fs = TITupleP fs
 
 mkVarE :: SourcePos -> Var -> TIExp
-mkVarE pos v = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos) v
+mkVarE pos v = TIExp $ SystemF.VarE (mkExpInfo pos) v
 
 mkConE :: SourcePos -> Var -> TIExp
-mkConE pos c = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos) c
+mkConE pos c = TIExp $ SystemF.VarE (mkExpInfo pos) c
 
 mkLitE :: SourcePos -> Untyped.Lit -> TIExp
 mkLitE pos l =
@@ -225,15 +217,15 @@ mkLitE pos l =
              Untyped.NoneL       -> sf_constructor SystemF.the_None
   where
     sf_literal l =
-      SystemF.LitE (SystemF.mkExpInfo pos) l
+      SystemF.LitE (mkExpInfo pos) l
     sf_constructor c =
-      SystemF.VarE (SystemF.mkExpInfo pos) (SystemF.pyonBuiltin c)
+      SystemF.VarE (mkExpInfo pos) (SystemF.pyonBuiltin c)
 
     sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.the_int)
     sf_float_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.the_float)
 
 mkAppE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
-mkAppE pos oper ts args = TIExp $ SystemF.AppE (SystemF.mkExpInfo pos) oper ts args
+mkAppE pos oper ts args = TIExp $ SystemF.AppE (mkExpInfo pos) oper ts args
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
@@ -256,7 +248,7 @@ mkIfE pos cond tr fa =
                     , SystemF.altParams = []
                     , SystemF.altBody = fa
                     }
-  in TIExp $ SystemF.CaseE (SystemF.mkExpInfo pos) cond [true_alt, false_alt]
+  in TIExp $ SystemF.CaseE (mkExpInfo pos) cond [true_alt, false_alt]
 
 -- | Create a call of a polymorphic function with no constraint arguments.
 mkPolyCallE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
@@ -264,13 +256,13 @@ mkPolyCallE pos oper [] [] = oper
 mkPolyCallE pos oper ty_args args = mkAppE pos oper ty_args args
 
 mkLetE :: SourcePos -> SystemF.Pat TI -> TIExp -> TIExp -> TIExp
-mkLetE pos lhs rhs body = TIExp $ SystemF.LetE (SystemF.mkExpInfo pos) lhs rhs body 
+mkLetE pos lhs rhs body = TIExp $ SystemF.LetE (mkExpInfo pos) lhs rhs body 
 
 mkFunE :: SourcePos -> SystemF.Fun TI -> TIExp
-mkFunE pos fun = TIExp $ SystemF.LamE (SystemF.mkExpInfo pos) fun
+mkFunE pos fun = TIExp $ SystemF.LamE (mkExpInfo pos) fun
 
 mkLetrecE :: SourcePos -> [SystemF.Def TI] -> TIExp -> TIExp
-mkLetrecE pos defs body = TIExp $ SystemF.LetrecE (SystemF.mkExpInfo pos) defs body
+mkLetrecE pos defs body = TIExp $ SystemF.LetrecE (mkExpInfo pos) defs body
 
 mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> [TIExp] -> TIExp
 mkDictE pos cls inst_type scs methods =
@@ -318,7 +310,7 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
   let alt = TIAlt $
             SystemF.Alt (clsDictCon cls) [convertHMType inst_type] parameters alt_body
 
-  return (placeholders, TIExp $ SystemF.CaseE (SystemF.mkExpInfo pos) dict [alt])
+  return (placeholders, TIExp $ SystemF.CaseE (mkExpInfo pos) dict [alt])
 
 -- | Create a placeholder for a recursive variable.  The variable is assumed
 -- to have a monomorphic type, which is later generalized.
@@ -329,7 +321,7 @@ mkRecVarPlaceholder :: SourcePos
 mkRecVarPlaceholder pos variable ty = do
   tyvar <- newTyVar Star Nothing
   actual <- newEmptyMVar
-  return $ RecVarPH (mkSynInfo pos ObjectLevel) variable tyvar actual
+  return $ RecVarPH (mkExpInfo pos) variable tyvar actual
 
 mkDictPlaceholder :: SourcePos -> Predicate -> IO TIExp
 mkDictPlaceholder pos p = do
@@ -338,13 +330,13 @@ mkDictPlaceholder pos p = do
     ph_doc <- runPpr $ uShow p
     print $ text "Creating placeholder for" <+> ph_doc
   actual <- newEmptyMVar
-  return $ DictPH (mkSynInfo pos ObjectLevel) p actual
+  return $ DictPH (mkExpInfo pos) p actual
 
 mkFunction :: SourcePos -> [TyCon] -> [SystemF.Pat TI] -> TIType -> TIExp 
            -> IO (SystemF.Fun TI)
 mkFunction pos ty_params params ret_type body = do
   ty_params' <- mapM convertTyParam ty_params
-  return $ TIFun $ SystemF.Fun (SystemF.mkExpInfo pos) ty_params' params (TIRet ret_type) body
+  return $ TIFun $ SystemF.Fun (mkExpInfo pos) ty_params' params (TIRet ret_type) body
   where
     convertTyParam :: TyCon -> IO (SystemF.TyPat TI)
     convertTyParam ty_param = do

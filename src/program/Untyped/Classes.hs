@@ -20,12 +20,10 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ 
 
-import Gluon.Common.Error
-import Gluon.Common.MonadLogic
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Core.Level
-import qualified Gluon.Core as Gluon
+import Common.Error
+import Common.MonadLogic
+import Common.SourcePos
+import Common.Supply
 import Untyped.Data
 import Untyped.HMType
 import Untyped.Kind
@@ -34,6 +32,7 @@ import Untyped.Builtins
 import qualified SystemF.Syntax as SystemF
 import qualified Builtins.Builtins as SystemF
 import Untyped.Unification
+import Type.Level
 import Type.Var
 import Globals
 

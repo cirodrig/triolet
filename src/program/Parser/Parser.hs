@@ -38,7 +38,7 @@ import Export
 import Parser.ParserSyntax
 import {-# SOURCE #-} Parser.SSA
 
-import Gluon.Common.SourcePos(SourcePos, fileSourcePos)
+import Common.SourcePos(SourcePos, fileSourcePos)
 
 toSourcePos :: Py.SrcSpan -> SourcePos
 toSourcePos pos =

@@ -13,10 +13,9 @@ import qualified Data.Set as Set
 import Data.Typeable(Typeable)
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Identifier
-import Gluon.Common.Label
-import Gluon.Common.SourcePos
-import Gluon.Core(Structure, SynInfo)
+import Common.Identifier
+import Common.Label
+import Common.SourcePos
 import SystemF.Syntax as SystemF
 import Untyped.Kind
 import {-# SOURCE #-} Untyped.Syntax as Untyped
@@ -234,20 +233,19 @@ data TypeAssignment =
 
 -- | Internal type inference representation of System F
 data TI deriving(Typeable)
-instance Structure TI
 
 -- | Type inferred expressions, which may contain placeholders
 data instance SystemF.Exp TI =
     -- | A placeholder for a recursive variable
     RecVarPH
-    { phExpInfo :: SynInfo
+    { phExpInfo :: SystemF.ExpInfo
     , phExpVariable :: Untyped.Variable
     , phExpTyVar :: TyCon
     , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
     }
     -- | A placeholder for a class dictionary
   | DictPH
-    { phExpInfo :: SynInfo
+    { phExpInfo :: SystemF.ExpInfo
     , phExpPredicate :: Predicate
     , phExpResolution :: {-# UNPACK #-} !(MVar TIExp)
     }

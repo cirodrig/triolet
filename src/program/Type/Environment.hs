@@ -21,10 +21,8 @@ where
 
 import qualified Data.IntMap as IntMap
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Core.Level
-import Type.Var
+import Common.Error
+import Common.Identifier
 import Type.Type
 
 -- | A type assigned to a Var

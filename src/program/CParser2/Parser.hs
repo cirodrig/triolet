@@ -16,7 +16,7 @@ import Text.ParserCombinators.Parsec((<|>), (<?>), unexpected, choice,
 
 import CParser2.AST
 import CParser2.Lexer
-import Gluon.Common.SourcePos as PySrcPos
+import Common.SourcePos as PySrcPos
 import Type.Type(Repr(..))
 
 -- | The parser type

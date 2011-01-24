@@ -6,7 +6,7 @@ present; memory just leaks.
 module LowLevel.ReferenceCounting(insertReferenceCounting)
 where
 
-import Gluon.Common.Error
+import Common.Error
 import LowLevel.Syntax
 import LowLevel.CodeTypes
 import Export

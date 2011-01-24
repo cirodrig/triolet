@@ -7,7 +7,7 @@ module CParser2.LexData where
 import Control.Exception
 import Data.Typeable
 
-import Gluon.Common.SourcePos
+import Common.SourcePos
 
 -- | A token produced by lexical analysis
 data Token = Token !SourcePos !Tok

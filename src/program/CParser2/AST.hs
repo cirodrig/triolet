@@ -11,12 +11,11 @@ import Control.Monad
 import Data.Foldable
 import Data.Traversable
 
-import Gluon.Common.Identifier
-import Gluon.Common.SourcePos
-import Gluon.Core.Level
-import LowLevel.Label
+import Common.Identifier
+import Common.SourcePos
+import Common.Label
 import Type.Var
-import Type.Type(Repr(..))
+import Type.Type(Level(..), HasLevel(..), Repr(..))
 
 -- | Details about an externally defined variable
 data VarDetails =

@@ -10,9 +10,9 @@ import Control.Monad.ST
 import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
+import Common.Error
+import Common.Identifier
+import Common.Supply
 import Builtins.Builtins
 import LowLevel.Build
 import qualified LowLevel.Builtins as LL
@@ -23,7 +23,6 @@ import SystemF.Lowering.Datatypes
 import SystemF.Syntax
 import Type.Environment
 import Type.Type
-import Type.Var
 
 newtype Lower a = Lower (ReaderT LowerEnv IO a)
                 deriving(Functor, Monad, MonadIO)

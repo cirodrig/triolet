@@ -1,6 +1,8 @@
 
 {-# LANGUAGE FlexibleContexts, UndecidableInstances #-}
-module Type.Type(Type(..),
+module Type.Type(module Type.Var,
+                 module Type.Level,
+                 Type(..),
                  ParamType,
                  ReturnType,
                  (:::)(..),
@@ -25,11 +27,11 @@ where
 
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Core.Level
-import LowLevel.Label
+import Common.Error
+import Common.Identifier
+import Common.Label
 import Type.Var
+import Type.Level
 
 data Type =
     -- | A variable or constructor

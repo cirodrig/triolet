@@ -24,8 +24,8 @@ import Data.Monoid
 import Data.Traversable
 import Debug.Trace
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
+import Common.Error
+import Common.Identifier
 import LowLevel.FreshVar
 import LowLevel.Build
 import LowLevel.CodeTypes

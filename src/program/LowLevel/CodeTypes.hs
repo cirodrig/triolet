@@ -23,7 +23,7 @@ module LowLevel.CodeTypes
        )
 where
 
-import Gluon.Common.Error
+import Common.Error
 import LowLevel.Types
 import LowLevel.Record
 import {-# SOURCE #-} LowLevel.Syntax

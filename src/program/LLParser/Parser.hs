@@ -9,8 +9,8 @@ import Text.ParserCombinators.Parsec hiding(string)
 import qualified Text.ParserCombinators.Parsec.Pos as Parsec
 import Text.ParserCombinators.Parsec.Expr
 
-import qualified Gluon.Common.SourcePos
-import LowLevel.Label
+import qualified Common.SourcePos
+import Common.Label
 import LowLevel.Types
 import LowLevel.Record(Mutability(..))
 import LLParser.Lexer
@@ -18,19 +18,19 @@ import LLParser.AST
 
 type P a = GenParser T () a
 
-toParsecPos :: Gluon.Common.SourcePos.SourcePos -> Parsec.SourcePos
+toParsecPos :: Common.SourcePos.SourcePos -> Parsec.SourcePos
 toParsecPos pos =
-  let Just filename = Gluon.Common.SourcePos.sourceFile pos 
-      Just line = Gluon.Common.SourcePos.sourceLine pos
-      Just col = Gluon.Common.SourcePos.sourceColumn pos
+  let Just filename = Common.SourcePos.sourceFile pos 
+      Just line = Common.SourcePos.sourceLine pos
+      Just col = Common.SourcePos.sourceColumn pos
   in Parsec.newPos filename line col
 
-fromParsecPos :: Parsec.SourcePos -> Gluon.Common.SourcePos.SourcePos
+fromParsecPos :: Parsec.SourcePos -> Common.SourcePos.SourcePos
 fromParsecPos pos =
   let filename = Parsec.sourceName pos 
       line = Parsec.sourceLine pos
       col = Parsec.sourceColumn pos
-  in Gluon.Common.SourcePos.fileSourcePos filename line col
+  in Common.SourcePos.fileSourcePos filename line col
 
 tPos (T pos _) = pos
 tToken (T _ t) = t
@@ -67,13 +67,13 @@ string = tokenPrim showT nextParsecPos get_string
 parseModuleName :: P ModuleName
 parseModuleName = do
   components <- identifier `sepBy1` match DotTok
-  return $ moduleName $ intercalate "." components
+  return $ ModuleName $ intercalate "." components
 
 fullyQualifiedName :: P (ModuleName, String)
 fullyQualifiedName = do
   components <- identifier `sepBy1` match DotTok
   unless (length components >= 2) $ fail "must provide a fully-qualified name"
-  let mod = moduleName (intercalate "." $ init components)
+  let mod = ModuleName (intercalate "." $ init components)
   return (mod, last components)
 
 integer :: P Integer

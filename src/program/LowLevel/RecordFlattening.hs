@@ -18,15 +18,14 @@ import qualified Data.IntMap as IntMap
 import Data.Maybe
 import Data.Traversable(mapM)
 
-import Gluon.Common.Error
-import Gluon.Common.MonadLogic
-import Gluon.Common.Supply
-import Gluon.Common.Identifier
+import Common.Error
+import Common.MonadLogic
+import Common.Supply
+import Common.Identifier
 import LowLevel.CodeTypes
 import LowLevel.Records
 import LowLevel.Syntax
 import LowLevel.Build
-import SystemF.Builtins
 import Export
 import Globals
 

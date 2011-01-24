@@ -218,17 +218,10 @@ findExeConfig exe lbi =
   of Just x  -> snd x
      Nothing -> error "Configuration error: Missing list of package dependences"
 
--- | Get flags to use for package dependences.  We exclude the 'gluon-eval'
--- package when compiling, and allow GHC to infer it, due to errors when the
--- interpreter (invoked to compile Template Haskell) tries to load C++ object
--- code.
-packageFlags mode exe lbi =
+-- | Get flags to use for package dependences.
+packageFlags mode exe lbi = "-hide-all-packages" :
   concat [["-package", show $ disp package_id]
-         | (_, package_id) <-
-             componentPackageDeps $ findExeConfig exe lbi,
-           case mode
-           of CompileMode -> pkgName package_id /= PackageName "gluon-eval"
-              LinkMode -> True]
+         | (_, package_id) <- componentPackageDeps $ findExeConfig exe lbi]
 
 -- | Get flags for installed package documentation.  These are used to create
 -- links when building the documentation.

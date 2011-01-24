@@ -3,16 +3,15 @@ module Type.Eval where
 
 import Control.Monad.Reader
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.MonadLogic
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
+import Common.Error
+import Common.Identifier
+import Common.MonadLogic
+import Common.SourcePos
+import Common.Supply
 import Type.Compare
 import Type.Environment
 import Type.Rename
 import Type.Type
-import Type.Var
 
 -- | Compute the type produced by applying a value of type @op_type@ to
 --   a value of type @arg_type@.

@@ -7,7 +7,7 @@ import Control.Monad
 import Language.Haskell.TH
 import System.IO.Unsafe
 
-import Gluon.Common.THRecord
+import Common.THRecord
 import Untyped.BuiltinsTH
 import Untyped.Kind
 import Untyped.Data

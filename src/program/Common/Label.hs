@@ -1,16 +1,17 @@
 {-| External representation of variable names.  Variable names have to be
 -- mangled to avoid cross-file name clashes.
 -}
-module LowLevel.Label
-       (ModuleName,
-        moduleName,
+
+{-# LANGUAGE TemplateHaskell #-}
+module Common.Label
+       (ModuleName(..),
         builtinModuleName,
-        showModuleName,
         LabelTag(..),
         LocalID(..),
         newLocalIDSupply,
         showLocalID,
         Label(..),
+        showLabel,
         labelLocalNameAsString,
         builtinLabel,
         pyonLabel,
@@ -22,11 +23,21 @@ module LowLevel.Label
        )
 where
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Gluon.Common.Label(ModuleName, builtinModuleName, moduleName, showModuleName)
+import Language.Haskell.TH.Syntax(Lift(..))
+  
+import Common.Error
+import Common.Identifier
+import Common.Supply
 import LowLevel.Types
+
+newtype ModuleName = ModuleName {showModuleName :: String}
+                   deriving(Eq, Ord, Show)
+
+instance Lift ModuleName where
+  lift (ModuleName s) = [| ModuleName s |]
+
+builtinModuleName :: ModuleName
+builtinModuleName = ModuleName "Builtin"
 
 -- | A label tag, used to distinguish multiple variables that were created
 -- from the same original variable.
@@ -77,6 +88,14 @@ data Label =
   , labelExternalName :: !(Maybe String)
   }
   deriving(Eq, Ord)
+
+-- | Print a human-readable summary of the label.
+showLabel :: Label -> String
+showLabel lab =
+  let base = case labelLocalName lab
+             of Left str -> str
+                Right id -> showLocalID id
+  in "\"" ++ base ++ "'" ++ encodeLabelTag (labelTag lab) ++ "\""
 
 labelLocalNameAsString :: Label -> String
 labelLocalNameAsString l =

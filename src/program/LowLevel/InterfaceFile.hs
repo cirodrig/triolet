@@ -26,15 +26,15 @@ import Data.Traversable
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Supply
+import Common.Error
+import Common.Supply
+import Common.Label
 import LowLevel.Binary
 import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.CodeTypes
 import LowLevel.FreshVar
 import LowLevel.Inlining
-import LowLevel.Label
 import LowLevel.Rename
 import LowLevel.Print
 import LowLevel.Syntax

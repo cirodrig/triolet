@@ -7,10 +7,10 @@ import Data.Function
 import Data.Typeable(Typeable)
 import System.IO.Unsafe
 
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Common.Identifier
-import Gluon.Common.Label
+import Common.SourcePos
+import Common.Supply
+import Common.Identifier
+import Common.Label
 import Export
 import qualified SystemF.Syntax as SystemF
 import Untyped.HMType
@@ -158,12 +158,9 @@ data Module = Module !ModuleName [DefGroup] [Export]
 
 instance HasSourcePos Expression where
   getSourcePos e = case expAnnotation e of Ann pos -> pos
-  setSourcePos e p = e {expAnnotation = Ann p}
 
 instance HasSourcePos Function where
   getSourcePos f = case funAnnotation f of Ann pos -> pos
-  setSourcePos f p = f {funAnnotation = Ann p}
 
 instance HasSourcePos FunctionDef where
   getSourcePos (FunctionDef _ f) = getSourcePos f
-  setSourcePos (FunctionDef v f) p = FunctionDef v (setSourcePos f p)

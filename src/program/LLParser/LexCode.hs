@@ -17,7 +17,7 @@ module LLParser.LexCode
 where
 
 import Data.Char
-import Gluon.Common.SourcePos
+import Common.SourcePos
 
 -- | A token produced by lexical analysis
 data Token =

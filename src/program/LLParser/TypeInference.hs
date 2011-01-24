@@ -47,14 +47,14 @@ import Data.Traversable
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
+import Common.Error
+import Common.Identifier
+import Common.Supply
+import Common.Label
 import LLParser.AST
 import LowLevel.Build
 import LowLevel.Builtins
 import LowLevel.FreshVar
-import LowLevel.Label
 import LowLevel.CodeTypes hiding(Field, fieldType, recordFields)
 import qualified LowLevel.Print as LL
 import qualified LowLevel.Syntax as LL

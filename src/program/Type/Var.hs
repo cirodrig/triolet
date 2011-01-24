@@ -14,10 +14,10 @@ import Control.Monad
 import Control.Monad.Trans
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Gluon.Core.Level
-import LowLevel.Label
+import Common.Identifier
+import Common.Supply
+import Common.Label
+import Type.Level
 
 -- | A variable or constructor.
 --

@@ -9,7 +9,7 @@ where
 
 import Control.Exception
 
-import Gluon.Common.SourcePos
+import Common.SourcePos
 import CParser2.LexData
 
 }

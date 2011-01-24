@@ -4,8 +4,8 @@ module Untyped.Print
 where
 
 import Text.PrettyPrint.HughesPJ
-import Gluon.Common.Identifier
-import Gluon.Common.Label
+import Common.Identifier
+import Common.Label
 import Untyped.Syntax
 
 showTuple :: [Doc] -> Doc

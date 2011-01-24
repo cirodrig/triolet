@@ -18,19 +18,16 @@ import Debug.Trace
 
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Label
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Core.Level
-import Gluon.Core(internalSynInfo)
+import Common.Error
+import Common.Identifier
+import Common.Label
+import Common.SourcePos
+import Common.Supply
 
 import Globals
 import Builtins.Builtins
 import SystemF.Print
 import SystemF.Syntax
-import Type.Var
 import Type.Type
 
 withMany :: (a -> (b -> c) -> c) -> [a] -> ([b] -> c) -> c

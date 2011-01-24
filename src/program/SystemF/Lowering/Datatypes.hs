@@ -29,10 +29,9 @@ import Data.Maybe
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Gluon.Core.Level
+import Common.Error
+import Common.Identifier
+import Common.Supply
 import Builtins.Builtins
 import LowLevel.Build
 import qualified LowLevel.Syntax as LL
@@ -42,7 +41,6 @@ import SystemF.Syntax
 import Type.Environment
 import Type.Eval
 import Type.Type
-import Type.Var
 
 -- | A 'PolyRepr' value is a placeholder for the representation dictionary of
 --   the given type.  It is only used for polymorphic types (type variables,

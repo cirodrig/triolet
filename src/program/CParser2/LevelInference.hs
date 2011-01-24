@@ -5,11 +5,11 @@ module CParser2.LevelInference(levelInferModule) where
 import qualified Data.Map as Map
 import Data.Foldable as Fold
 
-import Gluon.Common.SourcePos
-import Gluon.Common.Identifier
-import Gluon.Core.Level
+import Common.SourcePos
+import Common.Identifier
+import Common.Label
 import Type.Var
-import LowLevel.Label
+import Type.Level
 import CParser2.AST
 
 type LIVar = Var

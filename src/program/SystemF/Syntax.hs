@@ -33,12 +33,10 @@ where
 import Control.Monad
 import Data.Typeable
 
-import Gluon.Common.Error
-import Gluon.Common.Label
-import Gluon.Common.SourcePos
-import Gluon.Core.Level
+import Common.Error
+import Common.Label
+import Common.SourcePos
 import Builtins.Builtins
-import Type.Var
 import Type.Type
 import Export
 

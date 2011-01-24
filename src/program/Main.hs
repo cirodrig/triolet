@@ -13,7 +13,6 @@ import System.FilePath
 import System.IO
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Eval.Error
 import InitializeGlobals
 import CommandLine
 import Job
@@ -28,16 +27,10 @@ import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.TypecheckSF
 import qualified SystemF.TypecheckMem
-import qualified SystemF.Flatten.EffectInference as SystemF
 import qualified SystemF.Lowering.Lowering as SystemF
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.OutputPassing as SystemF
-import qualified Core.Lowering as Core
-import qualified Core.Print as Core
-import qualified Core.PartialEval as Core
-import qualified Core.Unpacking as Core
-import qualified Core.Rewriting as Core
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
@@ -136,6 +129,7 @@ compilePyonToPyonAsm path text = do
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
   sf_mod <- return $ SystemF.eliminateDeadCode sf_mod
   sf_mod <- SystemF.eliminatePatternMatching sf_mod
+  print $ SystemF.pprModule sf_mod
   sf_mod <- SystemF.doSpecialization sf_mod
 
   -- Re-run partial evaluation to simplify the specialized code.

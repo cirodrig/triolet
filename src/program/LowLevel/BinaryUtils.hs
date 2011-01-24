@@ -3,7 +3,7 @@ module LowLevel.BinaryUtils where
 
 import Data.Binary
 
-import Gluon.Common.Error
+import Common.Error
 
 readError m = internalError m
 

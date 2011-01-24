@@ -14,7 +14,7 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as Set
 
-import Gluon.Common.Error
+import Common.Error
 import LowLevel.Print
 import LowLevel.Syntax
 import LowLevel.Types

@@ -3,12 +3,9 @@
 module Builtins.BuiltinsTH where
        
 import Language.Haskell.TH(Strict(..))
-import Gluon.Common.THRecord
-import LowLevel.Label
+import Common.THRecord
+import Common.Label
 import Type.Var
-
-pyonBuiltinModuleNameString = "builtin"
-pyonBuiltinModuleName = moduleName pyonBuiltinModuleNameString
 
 pyonBuiltinTypeNames =
   [ "bool"

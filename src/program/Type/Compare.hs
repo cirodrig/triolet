@@ -9,14 +9,13 @@ where
 import Control.Monad.Reader
 import qualified Data.IntMap as IntMap
 
-import Gluon.Common.Identifier
-import Gluon.Common.MonadLogic
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
+import Common.Identifier
+import Common.MonadLogic
+import Common.SourcePos
+import Common.Supply
 import Type.Environment
 import Type.Rename
 import Type.Type
-import Type.Var
 
 data CmpEnv =
   CmpEnv

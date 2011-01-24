@@ -7,7 +7,7 @@ import Data.List
 
 import LowLevel.Types
 import LowLevel.Record(Mutability(..))
-import LowLevel.Label
+import Common.Label
 
 data Parsed
 

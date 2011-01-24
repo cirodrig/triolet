@@ -13,16 +13,16 @@ import Data.Maybe
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
+import Common.Error
+import Common.Identifier
+import Common.Label
+import Common.Supply
 import Builtins.Builtins
 import LowLevel.Build
 import qualified LowLevel.Builtins as LL
 import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
 import qualified LowLevel.Print as LL
-import LowLevel.Label
 import SystemF.Lowering.Datatypes
 import SystemF.Lowering.Marshaling
 import SystemF.Lowering.LowerMonad

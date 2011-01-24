@@ -2,7 +2,7 @@
 These expressions are used in common subexpression elimination.
 -}
 
-{-# LANGUAGE TypeFamilies, FlexibleContexts, Rank2Types, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts, Rank2Types, ScopedTypeVariables #-}
 module LowLevel.Expr
        (CSEVal, fromCSEVal,
         Expr, varExpr, litExpr, appExpr,
@@ -37,9 +37,9 @@ import Data.Monoid
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ hiding(empty)
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
+import Common.Error
+import Common.Identifier
+import Common.Supply
 import LowLevel.Build
 import LowLevel.CodeTypes
 import LowLevel.Syntax

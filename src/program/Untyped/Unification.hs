@@ -18,8 +18,8 @@ import Data.List
 import qualified Data.Map as Map
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Identifier
-import Gluon.Common.SourcePos
+import Common.Identifier
+import Common.SourcePos
 import Untyped.Data
 
 substTc = _substTc

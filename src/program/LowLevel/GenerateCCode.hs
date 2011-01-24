@@ -3,7 +3,8 @@
 
 module LowLevel.GenerateCCode where
 
-import Gluon.Common.Error
+import Common.Error
+import Common.Label
 
 import Language.C.Data.Ident
 import Language.C.Data.Node
@@ -12,7 +13,6 @@ import Language.C.Syntax.AST
 import Language.C.Syntax.Constants
 
 import LowLevel.Builtins
-import LowLevel.Label
 import LowLevel.Types
 import LowLevel.Record
 import LowLevel.Syntax

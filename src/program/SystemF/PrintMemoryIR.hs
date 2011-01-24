@@ -3,11 +3,10 @@ module SystemF.PrintMemoryIR where
 
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Label
+import Common.Label
 import SystemF.Syntax
 import SystemF.MemoryIR
 import Type.Type
-import Type.Var
 
 pprParenList xs = parens $ sep $ punctuate (text ",") xs
 

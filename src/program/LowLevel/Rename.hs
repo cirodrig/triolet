@@ -26,8 +26,8 @@ import qualified Data.IntMap as IntMap
 import Data.Maybe
 import Data.Traversable
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
+import Common.Error
+import Common.Identifier
 import LowLevel.FreshVar
 import LowLevel.Syntax
 import Export

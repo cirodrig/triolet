@@ -4,9 +4,8 @@ module Type.Rename where
 
 import Data.Maybe
 
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Type.Var
+import Common.Identifier
+import Common.Supply
 import Type.Type
 
 import qualified Data.IntMap as IntMap

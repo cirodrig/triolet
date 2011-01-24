@@ -8,12 +8,12 @@ import Data.Maybe
 import Data.Monoid
 import Data.Typeable
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
+import Common.Error
+import Common.Identifier
+import Common.Supply
+import Common.Label
 import Export
 import LowLevel.CodeTypes
-import LowLevel.Label
 
 -- | Create a dynamic field.
 --

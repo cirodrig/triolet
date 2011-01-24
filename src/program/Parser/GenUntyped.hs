@@ -12,23 +12,22 @@ import Data.Traversable
 import qualified Language.Python.Common.AST as Python
 import Parser.ParserSyntax
 import Parser.SSA
-import Gluon.Common.Error
-import Gluon.Common.Label
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Common.MonadLogic
-import qualified Gluon.Core as Gluon
+import Common.Error
+import Common.Label
+import Common.SourcePos
+import Common.Supply
+import Common.MonadLogic
 import qualified Untyped.Data as U
 import qualified Untyped.Syntax as U
 import qualified SystemF.Syntax as SF
 import qualified Untyped.HMType as U
 import qualified Untyped.Kind as U
 import Untyped.Builtins
+import Type.Level
 import Type.Var(mkVar)
 import qualified Type.Type
 import qualified Builtins.Builtins
 import Globals
-import LowLevel.Label
 import qualified Export
 
 -- | During conversion, we keep an assignment from
@@ -124,7 +123,7 @@ withForallAnnotation ann m = withMany with_ann ann m
       -- Create a type variable
       let lab = case varName v
                 of "" -> Nothing
-                   nm -> Just $ pgmLabel (moduleName "pyonfile") nm
+                   nm -> Just $ pyonLabel (ModuleName "pyonfile") nm
       tyvar <- liftIO $ U.newRigidTyVar kind lab
 
       -- Add to environment
@@ -137,14 +136,14 @@ withMaybeForallAnnotation (Just a) k = withForallAnnotation a $ k . Just
 newVariable :: String -> Cvt U.Variable
 newVariable name = do
   sfvar_id <- liftIO $ withTheNewVarIdentSupply supplyValue
-  let sfvar = Just $ mkVar sfvar_id p_label Gluon.ObjectLevel
+  let sfvar = Just $ mkVar sfvar_id p_label ObjectLevel
   liftIO $ U.newVariable u_label sfvar
   where
     (u_label, p_label) =
       if null name
       then (Nothing, Nothing)
-      else (Just $ pgmLabel (moduleName "pyonfile") name,
-            Just $ pyonLabel (moduleName "pyonfile") name)
+      else (Just $ pyonLabel (ModuleName "pyonfile") name,
+            Just $ pyonLabel (ModuleName "pyonfile") name)
 
 -------------------------------------------------------------------------------
 
@@ -457,7 +456,7 @@ convertModule :: Module SSAID -> Cvt U.Module
 convertModule (Module module_name defss exports) =
   withMany convertDefGroup defss $ \defss' -> do
     exports' <- mapM doExport exports
-    return $ U.Module (moduleName module_name) defss' exports'
+    return $ U.Module (ModuleName module_name) defss' exports'
 
 convertToUntyped :: [(SSAVar, U.ParserVarBinding)]
                  -> Module SSAID 

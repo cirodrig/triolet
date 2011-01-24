@@ -51,7 +51,7 @@ import System.Directory
 import System.FilePath
 import System.Random
 
-import Gluon.Common.Error
+import Common.Error
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel
 

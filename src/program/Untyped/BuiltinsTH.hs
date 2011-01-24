@@ -4,8 +4,7 @@ module Untyped.BuiltinsTH where
 
 import Language.Haskell.TH(Strict(..))
 import Language.Haskell.TH.Syntax(Lift(..))
-import Gluon.Common.THRecord
-import Gluon.Core hiding(Kind)
+import Common.THRecord
 import qualified Type.Var
 import Untyped.Data
 import Untyped.Kind

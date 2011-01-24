@@ -7,12 +7,12 @@ import qualified Data.Map as Map
 import Data.Maybe
 import qualified Language.Haskell.TH as TH
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.THRecord
+import Common.Error
+import Common.Identifier
+import Common.Label
+import Common.THRecord
 import GlobalVar
 import Globals
-import LowLevel.Label
 import LowLevel.Syntax
 import LowLevel.CodeTypes
 import LowLevel.BuiltinsTH
@@ -20,8 +20,8 @@ import LowLevel.Builtins
 import LowLevel.Build
 import LowLevel.FreshVar
 import qualified Type.Environment
-import Type.Type
-import qualified Type.Var
+import Type.Type hiding(Var, runFreshVarM)
+-- import qualified Type.Var
 
 -- This module helps us translate System F types into low-level types
 import {-# SOURCE #-} SystemF.Lowering.Datatypes

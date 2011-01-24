@@ -8,10 +8,9 @@ to functions.
 module SystemF.OutputPassing (generateMemoryIR)
 where
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Gluon.Core.Level
+import Common.Error
+import Common.Identifier
+import Common.Supply
   
 import Builtins.Builtins
 import qualified SystemF.DictEnv as DictEnv
@@ -22,7 +21,6 @@ import SystemF.MemoryIR
 import Type.Environment
 import Type.Rename
 import Type.Type
-import Type.Var
 import GlobalVar
 import Globals
 

@@ -5,9 +5,10 @@ where
 import System.FilePath
 import System.IO
 
-import Gluon.Common.Error
-import Gluon.Common.SourcePos
-import Gluon.Common.Identifier
+import Common.Error
+import Common.SourcePos
+import Common.Identifier
+import Common.Label
 import Builtins.Builtins
 import Type.Var
 import Type.Type
@@ -18,7 +19,6 @@ import CParser2.Parser
 import CParser2.Resolve
 import CParser2.LevelInference
 import CParser2.GenCore
-import LowLevel.Label
 import Paths
 
 import CParser2.PrettyAST()
@@ -185,7 +185,7 @@ parseCoreModule ident_supply = do
   parsed_ast <- parseFile pathname input_tokens
 
   -- Resolve names
-  let modname = moduleName $ takeBaseName pathname
+  let modname = ModuleName $ takeBaseName pathname
   resolve_env <- globalEnvironment ident_supply predefinedVarDetails
   resolved_ast <- resolveModule ident_supply resolve_env modname parsed_ast
   

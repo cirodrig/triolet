@@ -6,7 +6,7 @@ module SystemF.Lowering.Marshaling(createCMarshalingFunction,
                                    getCExportSig)
 where
 
-import Gluon.Common.Error
+import Common.Error
 import Builtins.Builtins
 import qualified LowLevel.CodeTypes as LL
 import qualified LowLevel.Syntax as LL

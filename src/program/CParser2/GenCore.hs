@@ -4,13 +4,12 @@ module CParser2.GenCore (createCoreTable) where
 
 import qualified Data.IntMap as IntMap
 
-import Gluon.Common.SourcePos
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Core.Level
+import Common.SourcePos
+import Common.Error
+import Common.Identifier
 import CParser2.AST
 import CParser2.LevelInference()
-import Type.Type((:::)(..))
+import Type.Type((:::)(..), Level(..))
 import qualified Type.Type as Type
 import Type.Environment
 import Type.Var

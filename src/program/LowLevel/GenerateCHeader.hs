@@ -11,7 +11,7 @@ import Language.C.Pretty
 import Language.C.Syntax.AST
 import Language.C.Syntax.Constants
 
-import Gluon.Common.Error
+import Common.Error
 import Export
 import LowLevel.Syntax
 import LowLevel.GenerateCUtils

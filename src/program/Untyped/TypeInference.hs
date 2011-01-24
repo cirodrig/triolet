@@ -12,11 +12,10 @@ import Data.Maybe
 import qualified Data.Set as Set
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Label
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Core.Level
+import Common.Error
+import Common.Label
+import Common.SourcePos
+import Common.Supply
 import Globals
 import qualified SystemF.Syntax as SystemF
 import qualified Builtins.Builtins as SystemF
@@ -30,6 +29,7 @@ import Untyped.Unification
 import Untyped.Classes
 import Untyped.TypeAssignment
 import Untyped.TypeInferenceEval
+import Type.Level
 import Type.Var(Var, mkAnonymousVar)
 
 zipWithM3 :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]

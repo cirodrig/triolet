@@ -4,12 +4,11 @@ module LowLevel.Print where
 
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Identifier
-import qualified Gluon.Core as Gluon
+import Common.Identifier
+import Common.Label
 import Export
 import LowLevel.CodeTypes
 import LowLevel.Syntax
-import LowLevel.Label
 
 fillBracketList :: [Doc] -> Doc
 fillBracketList xs = brackets $ fsep $ punctuate (text ",") xs

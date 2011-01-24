@@ -8,11 +8,9 @@ where
 import Control.Concurrent.MVar
 import Control.Monad
 
-import Gluon.Common.Error
-import qualified Gluon.Core.Syntax as Gluon
+import Common.Error
 import SystemF.Syntax
 import Type.Type
-import Type.Var
 import qualified Untyped.Data as Untyped
 
 evTypSF :: Untyped.TIType -> IO TypSF

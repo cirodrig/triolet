@@ -12,8 +12,8 @@ where
 
 import Control.Monad
 
-import Gluon.Common.Error
-import Gluon.Common.SourcePos
+import Common.Error
+import Common.SourcePos
 import Untyped.GenSystemF
 import Untyped.HMType
 import Untyped.Kind

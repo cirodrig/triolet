@@ -13,11 +13,9 @@ import Control.Applicative
 import Control.Monad hiding(mapM)
 import Data.Traversable
 
-import Gluon.Common.SourcePos
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Gluon.Core(mkSynInfo)
-import Gluon.Core.Level
+import Common.SourcePos
+import Common.Identifier
+import Common.Supply
 import SystemF.Syntax
 import Builtins.Builtins
 import Type.Var

@@ -6,9 +6,9 @@ where
 import Language.Haskell.TH(Strict(..))
 import Language.Haskell.TH.Syntax(Lift(..))
 
-import Gluon.Common.Error
-import Gluon.Common.Label
-import Gluon.Common.THRecord
+import Common.Error
+import Common.Label
+import Common.THRecord
 import qualified Builtins.Builtins as SystemF
 import Builtins.Builtins(pyonBuiltin)
 import LowLevel.Types
@@ -82,7 +82,7 @@ instance Lift BuiltinVarName where
 
 biName = CName builtinModuleName
 
-applyName = PyonName (moduleName "pyon.internal.apply_new")
+applyName = PyonName (ModuleName "pyon.internal.apply_new")
 
 -- | Predefined primitive functions
 builtinPrimitives =
@@ -126,11 +126,11 @@ builtinPrimitives =
 
 closureBinaryFunctionType t = closureFunctionType [t, t] [t]
 
-module_prim = moduleName "pyon.internal.prim"
-module_memory_py = moduleName "pyon.internal.memory_py"
-module_stream = moduleName "pyon.internal.stream"
-module_structures = moduleName "pyon.internal.structures"
-module_list = moduleName "pyon.internal.list"
+module_prim = ModuleName "pyon.internal.prim"
+module_memory_py = ModuleName "pyon.internal.memory_py"
+module_stream = ModuleName "pyon.internal.stream"
+module_structures = ModuleName "pyon.internal.structures"
+module_list = ModuleName "pyon.internal.list"
 
 -- | Predefined closure functions and the core constructor they're derived
 -- from.

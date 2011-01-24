@@ -6,12 +6,11 @@ module CParser2.PrettyAST() where
 
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Identifier
-import LowLevel.Label
-import Gluon.Core(Var, conName)
+import Common.Identifier
+import Common.Label
 import CParser2.Pretty
 import CParser2.AST
-import Type.Type(Repr(..))
+import Type.Type(Var, Repr(..))
 
 pprWithHeading heading_name x = hang (text (heading_name ++ ":")) 2 (ppr x)
 

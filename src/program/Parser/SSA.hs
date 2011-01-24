@@ -31,7 +31,7 @@ import Data.Maybe
 import Data.Traversable
 import Foreign.Ptr(nullPtr)
 
-import Gluon.Common.SourcePos
+import Common.SourcePos
 import Parser.ParserSyntax
 import Untyped.Data(ParserVarBinding)
 

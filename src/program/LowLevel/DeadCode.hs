@@ -8,7 +8,7 @@ import qualified Data.IntMap as IntMap
 import Data.Monoid
 import Data.Traversable
 
-import Gluon.Common.Identifier
+import Common.Identifier
 import LowLevel.Syntax
 
 -- | A map from variable IDs to the number of uses the variable has.

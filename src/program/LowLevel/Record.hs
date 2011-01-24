@@ -5,7 +5,8 @@ module LowLevel.Record where
 import Control.Applicative
 import Data.Binary
 import Data.Bits
-import Gluon.Common.Error
+
+import Common.Error
 import LowLevel.BinaryUtils
 import LowLevel.Types
 import {-# SOURCE #-} LowLevel.Syntax

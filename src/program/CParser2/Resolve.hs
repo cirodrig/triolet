@@ -9,10 +9,10 @@ import Control.Monad
 import qualified Data.Map as Map
 import Data.Maybe
 
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Gluon.Common.SourcePos
-import LowLevel.Label
+import Common.Identifier
+import Common.Supply
+import Common.SourcePos
+import Common.Label
 import Type.Var
 import CParser2.AST
 

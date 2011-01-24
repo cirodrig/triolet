@@ -14,13 +14,11 @@ import Data.Monoid
 
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.MonadLogic
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Core.Level
-import Gluon.Core(internalSynInfo)
+import Common.Error
+import Common.Identifier
+import Common.MonadLogic
+import Common.SourcePos
+import Common.Supply
 import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.TypecheckSF

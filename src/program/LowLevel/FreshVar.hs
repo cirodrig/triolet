@@ -6,8 +6,8 @@ where
 
 import Control.Monad.ST
 
-import Gluon.Common.Supply
-import Gluon.Common.Identifier
+import Common.Supply
+import Common.Identifier
 
 import {-# SOURCE #-} LowLevel.Syntax
 

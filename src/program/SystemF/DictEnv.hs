@@ -11,15 +11,13 @@ This module is meant to be imported qualified.
 module SystemF.DictEnv where
 
 import Text.PrettyPrint.HughesPJ
-import Gluon.Common.SourcePos
-import Gluon.Common.Supply
-import Gluon.Common.Identifier
-import Gluon.Core.Level
+import Common.SourcePos
+import Common.Supply
+import Common.Identifier
 import Type.Compare
 import Type.Environment
 import Type.Rename
 import Type.Type
-import Type.Var
 
 -- | A first-order pattern that can be matched against types
 data TypePattern a = TypePattern [Var] Type (Substitution -> a)

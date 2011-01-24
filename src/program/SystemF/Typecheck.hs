@@ -12,18 +12,16 @@ import Data.Maybe
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.Supply
-import Gluon.Common.SourcePos
-import Gluon.Core.Level
+import Common.Error
+import Common.Identifier
+import Common.Supply
+import Common.SourcePos
 
 import GlobalVar
 import Globals
 import SystemF.Print
 import SystemF.Syntax
 import Builtins.Builtins
-import Type.Var
 import Type.Eval
 import Type.Environment
 import Type.Type

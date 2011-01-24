@@ -64,11 +64,11 @@ import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
 import qualified Language.Haskell.TH as TH
 
-import Gluon.Common.Error
-import Gluon.Common.Identifier
-import Gluon.Common.THRecord
+import Common.Error
+import Common.Identifier
+import Common.THRecord
+import Common.Label
 import GlobalVar
-import LowLevel.Label
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Record

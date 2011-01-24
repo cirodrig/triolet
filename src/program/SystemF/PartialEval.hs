@@ -14,10 +14,8 @@ import Data.List
 import qualified Data.Map as Map
 import Data.Maybe
 
-import Gluon.Common.SourcePos
-import Gluon.Common.Error
-import Gluon.Core(mkSynInfo)
-import Gluon.Core.Level
+import Common.SourcePos
+import Common.Error
 import Builtins.Builtins
 import SystemF.Syntax
 import Type.Var

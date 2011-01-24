@@ -16,13 +16,12 @@ import Language.C.Pretty
 import Language.C.Syntax.AST
 import Language.C.Syntax.Constants
 
-import Gluon.Common.Error
-import qualified Gluon.Common.Identifier
-import Gluon.Common.Identifier(fromIdent, IdentSupply)
-import Gluon.Common.Label
-import Gluon.Common.Supply
+import Common.Error
+import qualified Common.Identifier
+import Common.Identifier(fromIdent, IdentSupply)
+import Common.Label
+import Common.Supply
 import LowLevel.Builtins
-import LowLevel.Label
 import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Print
@@ -99,7 +98,7 @@ instance Monad GenC where
 instance MonadFix GenC where
   mfix f = GenC $ \env st -> mfix $ \ ~(x, st') -> runGenC (f x) env st 
 
-instance Supplies GenC (Gluon.Common.Identifier.Ident Var) where
+instance Supplies GenC (Common.Identifier.Ident Var) where
   fresh = GenC $ \env st -> do n <- supplyValue (varIDSupply env)
                                return (n, st)
 

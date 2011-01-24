@@ -11,8 +11,8 @@ import Language.C.Pretty
 import Language.C.Syntax.AST
 import Language.C.Syntax.Constants
 
-import Gluon.Common.Error
-import LowLevel.Label
+import Common.Error
+import Common.Label
 import LowLevel.Syntax
 import LowLevel.CodeTypes
 

@@ -11,10 +11,9 @@ import Control.Concurrent.MVar
 import Control.Monad
 import qualified Language.Haskell.TH as TH
 
-import Gluon.Common.Error
-import Gluon.Common.Label
-import Gluon.Common.THRecord
-import qualified Gluon.Core as Gluon
+import Common.Error
+import Common.Label
+import Common.THRecord
 import qualified Builtins.Builtins as SystemF
 import qualified SystemF.Syntax as SystemF
 import Untyped.Data
@@ -26,7 +25,7 @@ import Untyped.GenSystemF
 import Untyped.Unification
 import Untyped.BuiltinsTH
 import Untyped.Builtins
-import Type.Type
+import qualified Type.Type
 
 pyonBuiltin = SystemF.pyonBuiltin
 
@@ -35,7 +34,7 @@ f @@ g = appTy f g
 -- | Create an 'untyped' type constructor that corresponds to the given
 -- System F type constructor
 builtinTyCon name kind sf_con =
-  let y = SystemF.TypSF (VarT sf_con)
+  let y = SystemF.TypSF (Type.Type.VarT sf_con)
   in mkTyCon (builtinLabel name) kind y
 
 -------------------------------------------------------------------------------

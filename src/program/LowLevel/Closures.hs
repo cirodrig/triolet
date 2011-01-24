@@ -24,9 +24,9 @@ import Data.Monoid
 import qualified Data.Set as Set
 import Debug.Trace
 
-import Gluon.Common.Error
-import Gluon.Common.MonadLogic
-import Gluon.Common.Identifier
+import Common.Error
+import Common.MonadLogic
+import Common.Identifier
 import LowLevel.Builtins
 import LowLevel.FreshVar
 import LowLevel.Print
