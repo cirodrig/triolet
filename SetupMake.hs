@@ -256,11 +256,6 @@ pyonGhcPathFlags exe lbi = o_flags ++ i_flags
     o_flags = ["-outputdir", pyonBuildDir lbi]
     i_flags = ["-i" ++ path | path <- pyonBuildDir lbi : pyonSearchPaths lbi exe]
 
-layoutGhcPathFlags exe lbi = o_flags ++ i_flags
-  where
-    o_flags = ["-outputdir", layoutBuildDir lbi]
-    i_flags = ["-i" ++ path | path <- layoutBuildDir lbi : pyonSearchPaths lbi exe]
-
 targetFlags = word_size ++ force_32bit ++ arch
   where
     arch =
@@ -288,12 +283,6 @@ pyonGhcOpts exe lbi =
 -- | Get the options for linking the \'pyon\' binary.
 pyonLinkOpts exe lbi =
   packageFlags LinkMode exe lbi
-
--- | Get the options for compiling the \'ComputeLayout\' binary.  The binary
--- is compiled and linked in one step.  It's compiled with @--make@, so
--- packages are not needed.
-layoutCompileOpts exe lbi =
-  layoutGhcPathFlags exe lbi ++ pyonExtensionFlags exe
 
 -------------------------------------------------------------------------------
 -- Rules to generate a makefile
@@ -377,7 +366,6 @@ generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = 
          , ("PYON_OBJECT_FILES", makefileList pyon_object_files)
          , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts exe lbi)
          , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts exe lbi)
-         , ("LAYOUT_CL_OPTS", intercalate " " $ layoutCompileOpts exe lbi)
          , ("RTS_SOURCE_FILES", makefileList rts_source_files)
          , ("RTS_OBJECT_FILES", makefileList rts_object_files)
          , ("RTS_INTERFACE_FILES", makefileList rts_interface_files)

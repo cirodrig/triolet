@@ -18,14 +18,6 @@ pyonSearchPaths lbi exe = autogenModulesDir lbi : hsSourceDirs (buildInfo exe)
 pyonBuildDir :: LocalBuildInfo -> FilePath
 pyonBuildDir lbi = buildDir lbi </> "pyon"
 
--- | The directories where source files for the ComputeLayout program are
-layoutSearchPaths :: LocalBuildInfo -> Executable -> [FilePath]
-layoutSearchPaths lbi exe = autogenModulesDir lbi : "src/rts" : hsSourceDirs (buildInfo exe)
-
--- | Destination for object files belonging to the \"ComputeLayout\" program
-layoutBuildDir :: LocalBuildInfo -> FilePath
-layoutBuildDir lbi = buildDir lbi </> "rts"
-
 -- | Directories containing source files belonging to the RTS
 rtsSearchPaths :: LocalBuildInfo -> [FilePath]
 rtsSearchPaths lbi = rtsBuildDir lbi : ["src/rts"]
