@@ -50,5 +50,4 @@ rtsPyAsmFiles = ["apply_new.pyasm",
 
 -- | Data files that are not programmatically generated
 prebuiltDataFiles = ["include/pyon.h", "include/pyon_list.h",
-                     "symbols/coretypes", "symbols/coretypes2",
-		     "symbols/SFBuiltin.glu"]
+                     "symbols/coretypes"]
