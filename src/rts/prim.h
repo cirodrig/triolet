@@ -1,4 +1,7 @@
 
+extern function pyon.internal.prim.storeBox (unit, owned, pointer) -> ();
+extern function pyon.internal.prim.loadBox (unit, pointer) -> owned;
+
 extern function pyon.internal.prim.add_int (int, int) -> int;
 extern function pyon.internal.prim.sub_int (int, int) -> int;
 extern function pyon.internal.prim.negate_int (int) -> int;

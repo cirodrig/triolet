@@ -73,8 +73,18 @@ withRetArg :: ExpM -> OP a -> OP a
 withRetArg ra k = OP $ \env _ -> runOP k env (Just ra)
 
 lookupDictionary :: Type -> OP (Maybe MkDict)
-lookupDictionary ty = OP $ \env _ -> do
-  DictEnv.lookup (opVarSupply env) (opTypeEnv env) ty (opDictEnv env)
+lookupDictionary ty = OP $ \env _ ->
+  case ty
+  of FunT {} ->
+       -- Functions all have the same representation
+       return $ Just $ mk_fun_dict ty
+     _ -> DictEnv.lookup (opVarSupply env) (opTypeEnv env) ty (opDictEnv env)
+  where
+    mk_fun_dict ty k =
+      -- Create a boxed representation object, and pass it to the continuation 
+      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Boxed)
+          call = ExpM $ AppE defaultExpInfo op [TypM ty] []
+      in k call
 
 -- | Add a dictionary to the environment.  It will be used if it is 
 --   needed in the remainder of the computation.

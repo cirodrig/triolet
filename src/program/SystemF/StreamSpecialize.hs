@@ -110,7 +110,7 @@ globalConTable =
       , unchanged 1 the_repr_iter
       , unchanged 1 the_repr_list
       , unchanged 0 the_repr_Any
-      , unchanged 1 the_repr_owned
+      , unchanged 1 the_repr_Boxed
       , unchanged 0 the_makeComplex
       , unchanged 0 (const $ pyonTupleReprCon 0)
       , unchanged 1 (const $ pyonTupleReprCon 1)

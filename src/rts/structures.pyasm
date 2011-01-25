@@ -2,6 +2,7 @@
 module pyon.internal.structures;
 
 #include "rts.h"
+#include "prim.h"
 #include "memory_py.h"
 #include "apply_py.h"
 #include "structures.h"
@@ -22,6 +23,23 @@ data pointer repr_Repr_value = PassConv {
 // parameter.
 function inline repr_Repr (unit _) -> pointer {
   repr_Repr_value;
+};
+
+data pointer repr_Boxed_value = PassConv {
+  sizeof owned,
+  alignof owned,
+#if WORD_SIZE == 4
+  copy4F,
+#else
+# error "Don't know how to copy Boxed values"
+#endif
+  dummy_finalizer
+};
+
+// Return the representation of a Boxed object.  The parameter is a type
+// parameter.
+function inline repr_Boxed (unit _) -> pointer {
+  repr_Boxed_value;
 };
 
 // Parameter-passing convention dictionary of ints

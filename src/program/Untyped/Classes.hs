@@ -373,7 +373,7 @@ toProof pos env derivation =
 
      FunPassConvDerivation { conclusion = prd@(IsInst ty _)
                            } -> do
-       let con = SystemF.pyonBuiltin SystemF.the_repr_owned
+       let con = SystemF.pyonBuiltin SystemF.the_repr_Boxed
            prf = mkPolyCallE pos (mkVarE pos con) [convertHMType ty] []
        return (True, [], prf)
        

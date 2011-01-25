@@ -262,7 +262,7 @@ compileEnumValueCase ty disjuncts scrutinee alternatives = do
     -- Generate code of each alternative branch
     branches <- lift $ forM alt_bodies $ \mk_alt_body -> do
       execBuild return_types $ do
-        mk_alt_body []
+        emitCode =<< mk_alt_body []
         return cont
 
     -- Build the case statement

@@ -58,7 +58,7 @@ pyonBuiltinVariableNames =
   , "repr_list"
   , "repr_NoneType"
   , "repr_Any"
-  , "repr_owned"
+  , "repr_Boxed"
   , "repr_iter"
   , "repr_PyonTuple0"
   , "repr_PyonTuple1"

@@ -7,6 +7,15 @@ module pyon.internal.prim;
 #include "prim.h"
 #include "pyasm_records.h"
 
+function inline storeBox (unit _, owned arg, pointer dst) -> () {
+  !dst = arg;
+  ();
+};
+
+function inline loadBox (unit _, pointer src) -> owned {
+  owned load src;
+};
+
 function add_int (int x, int y) -> int {
   x + y;
 };

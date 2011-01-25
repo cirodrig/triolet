@@ -76,6 +76,9 @@ load : (val a : pure) -> read Repr a -> read a -> val a;
 store : (val a : pure) -> read Repr a -> val a -> write a;
 copy : (val a : pure) -> read Repr a -> read a -> write a;
 
+loadBox : (val a : pure) -> read a -> box a;
+storeBox : (val a : pure) -> box a -> write a;
+
 repr_int : read Repr int;
 repr_float : read Repr float;
 
@@ -93,6 +96,9 @@ repr_MultiplicativeDict :
 
 -- This always returns the same, global object
 repr_Repr : (val a : pure) -> read Repr a;
+
+-- This always returns the same, global object
+repr_Boxed : (val a : pure) -> read Repr a;
 
 OpaqueTraversableDict_list : read TraversableDict list;
 

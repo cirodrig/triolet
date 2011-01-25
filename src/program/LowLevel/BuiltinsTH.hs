@@ -194,6 +194,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_additiveDict_complex) |])-}
   , (PyonName module_structures "repr_Repr",
      Right [| SystemF.pyonBuiltin (SystemF.the_repr_Repr) |])
+  , (PyonName module_structures "repr_Boxed",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_Boxed |])
   {-, (PyonName module_structures "complex_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,
@@ -215,6 +217,10 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_EqDict_float_eq) |])
   , (PyonName builtinModuleName "ne_float",
      Right [| pyonBuiltin (SystemF.the_EqDict_float_ne) |])
+  , (PyonName module_prim "storeBox",
+     Right [| pyonBuiltin SystemF.the_storeBox |])
+  , (PyonName module_prim "loadBox",
+     Right [| pyonBuiltin SystemF.the_loadBox |])
   , (PyonName module_prim "add_int",
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_int_add) |])
   , (PyonName module_prim "sub_int", 

@@ -11,6 +11,7 @@ where
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
+import Debug.Trace
 
 import Text.PrettyPrint.HughesPJ
 
@@ -638,21 +639,47 @@ inferLitE inf l = do
   return (mempty, exp, return_type)
 
 inferCall inf op t_args v_args = do
-  (op_wr, op', op_type) <- coerceInferredExp BoxRT =<< inferReprExp op
-  (expr, return_type) <- inferApplication inf op' op_type t_args v_args
-  return (op_wr, expr, return_type)
+  -- Convert operator to a function
+  (op_wr, op', op_type) <- inferReprExp op
 
-inferApplication inf op op_type t_args v_args = do 
+  -- Convert argument types to their natural representation.
+  natural_t_args <- mapM (infFixUpType . fromTypTSF) t_args
+
+  -- Debugging
+  let types_doc = text "op" <+> pprReturnType op_type $$
+                  text "tt" <+> vcat (map pprType natural_t_args) $$
+                  text "aa" <+> vcat [pprType t | ExpTSF (TypeAnn t _) <- v_args]
+  when False $ InferRepr $ \_ -> print (text "inferCall" <+> types_doc)
+  
+  -- Apply and coercer arguments
+  (co_op_wr, expr, return_type) <-
+    inferApplication inf op' op_type natural_t_args v_args
+  return (op_wr `mappend` co_op_wr, expr, return_type)
+
+inferApplication inf op (op_repr ::: op_type) t_args v_args = do 
+  -- Coerce operator to boxed type
+  op_coercion <- coerceReturn op_type BoxRT op_repr
+  let (op', op_co_wrapper) = coercionToWrapper op_coercion op
+
   -- Apply operator to argument types
-  inst_op_type <- instantiate op_type t_args
+  inst_op_type <- instantiate (BoxRT ::: op_type) t_args
   
   -- Apply to arguments
-  (wrappers, new_v_args, ret_ty) <- apply inst_op_type v_args
+  (wrappers, new_v_args, ret_ty, leftover_v_args) <- apply inst_op_type v_args
   
   -- Create call expression
-  let new_t_args = [TypR t | TypTSF (TypeAnn _ t) <- t_args]
-      new_call = mkCall inf ret_ty op new_t_args new_v_args
-  return (applyWrapper wrappers new_call, ret_ty)
+  let new_t_args = [TypR t | t <- t_args]
+      new_call = mkCall inf ret_ty op' new_t_args new_v_args
+      
+  -- If there are leftover arguments, make another call
+  if null leftover_v_args
+    then return (op_co_wrapper, applyWrapper wrappers new_call, ret_ty)
+    else do (next_call_wrapper, complete_call, final_ret_ty) <-
+              inferApplication inf new_call ret_ty [] leftover_v_args
+              
+            return (op_co_wrapper,
+                    applyWrapper (wrappers `mappend` next_call_wrapper) complete_call,
+                    final_ret_ty)
   where
     pos = getSourcePos inf
 
@@ -662,11 +689,16 @@ inferApplication inf op op_type t_args v_args = do
     instantiate ty [] = return ty
     
     apply op_ty (arg:args) = do
-      (wr, arg', op_ty') <- inferApp pos op_ty arg
-      (wrs, args', ret_ty) <- apply op_ty' args
-      return (wr `mappend` wrs, arg':args', ret_ty)
+      result <- inferApp pos op_ty arg
+      case result of
+        Right (wr, arg', op_ty') -> do
+          (wrs, args', ret_ty, leftover_args) <- apply op_ty' args
+          return (wr `mappend` wrs, arg':args', ret_ty, leftover_args)
+        Left () ->
+          -- Cannot apply because function has wrong representation
+          return (mempty, [], op_ty, arg:args)
 
-    apply op_ty [] = return (mempty, [], op_ty)
+    apply op_ty [] = return (mempty, [], op_ty, [])
 
 -- | Compute the result type produced by a type application.
 --
@@ -674,10 +706,9 @@ inferApplication inf op op_type t_args v_args = do
 -- type inference.
 inferTypeApp :: SourcePos
              -> ReturnType
-             -> TypTSF
+             -> Type
              -> InferRepr ReturnType
-inferTypeApp pos (BoxRT ::: FunT (ValPT mparam ::: _) (ret ::: rng))
-                 (TypTSF (TypeAnn _ arg)) =
+inferTypeApp pos (BoxRT ::: FunT (ValPT mparam ::: _) (ret ::: rng)) arg =
   case mparam
   of Nothing -> return (ret ::: rng)
      Just param_var ->
@@ -689,10 +720,13 @@ inferTypeApp _ _ _ = internalError "Error in type application during representat
 -- | Compute the result of a type application, given the type of the operator
 --   and the argument expression.
 --   Returns the coerced argument and the type returned by the application.
+--
+--   If the argument is a function but has the wrong representation, then
+--   return a @Left@ value instead of computing the result.
 inferApp :: SourcePos
          -> ReturnType
          -> ExpTSF
-         -> InferRepr (WrapperCode, ExpR, ReturnType)
+         -> InferRepr (Either () (WrapperCode, ExpR, ReturnType))
 inferApp pos (BoxRT ::: FunT (param_repr ::: dom) result) arg_exp = do
   -- Infer parameter
   let expected_repr = paramReprToReturnRepr param_repr
@@ -706,7 +740,9 @@ inferApp pos (BoxRT ::: FunT (param_repr ::: dom) result) arg_exp = do
   -- Coerce parameter
   co <- coerceReturnType (expected_repr ::: dom) arg_rtype
   let (arg_exp'', co_wr) = coercionToWrapper co arg_exp'
-  return (wr `mappend` co_wr, arg_exp'', result)
+  return $ Right (wr `mappend` co_wr, arg_exp'', result)
+
+inferApp _ (_ ::: FunT {}) _ = return (Left ())
 
 inferApp _ _ _ = internalError "inferApp: Unexpected operator type"
 

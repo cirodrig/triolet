@@ -233,13 +233,20 @@ pprType (AppT op arg) = ppr_app op [arg]
 
 pprType (FunT arg ret) =
   let repr = case ret
-             of BoxRT ::: FunT {} -> Just Boxed
-                ValRT ::: FunT {} -> Just Value
+             of repr ::: FunT {} -> Just repr
                 _ -> Nothing
       fun_doc = pprTypeRepr repr (FunT arg ret)
   in case repr
-     of Just Boxed -> text "box" <+> parens fun_doc
-        Just Value -> text "val" <+> parens fun_doc
+     of Just rrepr ->
+          let rrepr_doc =
+                case rrepr
+                of ValRT -> text "val"
+                   BoxRT -> text "box"
+                   ReadRT -> text "read"
+                   WriteRT -> text "write"
+                   OutRT -> text "out"
+                   SideEffectRT -> text "sideeffect"
+          in rrepr_doc <+> parens fun_doc
         _ -> fun_doc
 
 pprTypeRepr repr ty =
@@ -251,9 +258,8 @@ pprFunType erepr params (ret_repr ::: FunT arg ret)
   | return_repr_match = pprFunType erepr (pprParam arg : params) ret
   where
     return_repr_match =
-      case ret_repr
-      of BoxRT -> erepr == Just Boxed
-         ValRT -> erepr == Just Value
+      case erepr
+      of Just r -> sameReturnRepr r ret_repr
          _ -> False
 
 pprFunType erepr params ret =
@@ -269,7 +275,7 @@ pprReturn (ret ::: rng) =
            WriteRT -> text "write"
            OutRT -> text "out"
            SideEffectRT -> text "sideeffect"
-  in repr_doc <+> pprFunArgType (returnReprToRepr ret) rng
+  in repr_doc <+> pprFunArgType ret rng
       
 pprParam (arg ::: dom) =
   case arg
@@ -283,4 +289,4 @@ pprParam (arg ::: dom) =
      SideEffectPT -> ordinary_lhs $ text "sideeffect"
   where
     ordinary_lhs repr_doc =
-      repr_doc <+> pprFunArgType (paramReprToRepr arg) dom
+      repr_doc <+> pprFunArgType (paramReprToReturnRepr arg) dom
