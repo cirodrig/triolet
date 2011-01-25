@@ -11,7 +11,11 @@ data val bool : val pure
 
 data val int : val pure {};
 data val float : val pure {};
-data val NoneType : val pure {};
+data val NoneType : val pure
+{
+  None : val NoneType,
+  () () : val NoneType;
+};
 
 data ref Repr : val (val pure -> val pure) {};
 data box Stream : val (val pure -> val pure) {};
@@ -106,6 +110,16 @@ EqDict_int_ne : val int -> val int -> val bool;
 
 EqDict_float_eq : val float -> val float -> val bool;
 EqDict_float_ne : val float -> val float -> val bool;
+
+OrdDict_int_lt : val int -> val int -> val bool;
+OrdDict_int_le : val int -> val int -> val bool;
+OrdDict_int_gt : val int -> val int -> val bool;
+OrdDict_int_ge : val int -> val int -> val bool;
+
+OrdDict_float_lt : val float -> val float -> val bool;
+OrdDict_float_le : val float -> val float -> val bool;
+OrdDict_float_gt : val float -> val float -> val bool;
+OrdDict_float_ge : val float -> val float -> val bool;
 
 -------------------------------------------------------------------------------
 -- Numeric dictionaries

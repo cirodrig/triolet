@@ -123,6 +123,9 @@ globalConTable =
       , unchanged 1 the_traversableDict
       , unchanged 1 the_additiveDict
       , unchanged 1 the_multiplicativeDict
+      , unchanged 0 the_None
+      , unchanged 0 the_True
+      , unchanged 0 the_False
       , unchanged 0 the_EqDict_int_eq
       , unchanged 0 the_EqDict_int_ne
       , unchanged 0 the_EqDict_float_eq
