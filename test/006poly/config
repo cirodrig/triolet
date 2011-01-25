@@ -2,5 +2,5 @@ TestConfig {
   synopsis	 = "Polymorphic parameter and return passing",
   pyonSources	 = ["poly.pyon"],
   cSources	 = ["main.c"],
-  expectedResult = ShouldPrint "(7)(8)(2.71828)(3.14159)"
+  expectedResult = ShouldPrint "(11)(13)(2.71828)(3.14159)"
 }

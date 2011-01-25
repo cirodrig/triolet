@@ -1,0 +1,6 @@
+
+def adds(u, v, w):
+     return -u + v - (zero + w)
+
+export ccall "adds_int" adds : int * int * int -> int
+export ccall "adds_float" adds : float * float * float -> float

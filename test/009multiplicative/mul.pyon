@@ -1,0 +1,6 @@
+
+def muls(u, v):
+     return (u + one) * (v + 2)
+
+export ccall "muls_int" muls : int * int -> int
+export ccall "muls_float" muls : float * float -> float

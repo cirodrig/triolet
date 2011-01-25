@@ -1,0 +1,9 @@
+
+def pick(xy, b):
+    (x, y) = xy
+    return y if b else x
+
+def tuples(x : int, y : int, b : bool):
+    return pick((lambda u, v: u + v, lambda u, v: u - v), b)(x, y)
+
+export ccall tuples : int * int * bool -> int

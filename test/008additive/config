@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Additive dictionary passing",
+  pyonSources	 = ["add.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "(-21)(1.375)"
+}
