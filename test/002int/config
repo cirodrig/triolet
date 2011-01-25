@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Integer math",
+  pyonSources	 = ["i.py"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "ok"
+}

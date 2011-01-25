@@ -1,0 +1,8 @@
+
+def apply(f : int -> int, x : int): return f(x)
+
+def doubled(x : int):
+    def add(y : int): return y + y
+    return apply(add, x)
+
+export ccall doubled : int -> int

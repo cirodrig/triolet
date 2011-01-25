@@ -150,13 +150,17 @@ doClean orig_clean pkg_desc _lbi hooks flags = do
 doTest args _ pkg_desc lbi = do
   let verb = normal
   -- Generate make rules and variables
-  withExe pkg_desc $ \exe -> generateCabalMakefile verb exe lbi
+  withExe pkg_desc $ \exe -> do generateCabalMakefile verb exe lbi
   
   -- Compile the test driver
   runMake lbi verb [testDriverProgram lbi]
   
   -- Run the test driver
-  rawSystemExit verb (testDriverProgram lbi) []
+  let flag_32 = if force32BitCompilation then ["-m32"] else []
+      cc_flags = flag_32
+      ld_flags = flag_32
+      test_arguments = [buildDir lbi, show cc_flags, show ld_flags]
+  rawSystemExit verb (testDriverProgram lbi) test_arguments
 
 hooks = simpleUserHooks
   { hookedPrograms = gxxProgram : makeProgram : hookedPrograms simpleUserHooks

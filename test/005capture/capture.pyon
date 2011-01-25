@@ -1,0 +1,12 @@
+# Test capturing a variable in a closure
+
+def subtractor(x : float):
+    return lambda y: y - x
+
+def product_on(f : float -> float, g, h):
+    return f(g) * f(h)
+
+def capture(f : float, g : float, h : float):
+    return product_on(subtractor(f), g, h)
+
+export ccall capture : float * float * float -> float

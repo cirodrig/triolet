@@ -1,0 +1,10 @@
+
+export ccall compare : int * int * float * float -> bool
+
+def compare(x : int, y : int, f : float, g : float):
+    if x == y:
+        return f == g
+    elif x < y:
+        return f < g
+    else:
+        return f > g

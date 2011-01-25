@@ -1,7 +1,0 @@
-RegressionTest
-{ testDir = "002int"
-, testResult = ShouldRun
-, testPyonSources = ["i.pyon"]
-, testPyasmSources = []
-, testCSources = ["main.c"]
-}

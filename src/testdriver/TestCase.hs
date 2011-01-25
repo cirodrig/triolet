@@ -1,12 +1,13 @@
 {-| Regression test cases.
 -}
 
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE MultiParamTypeClasses, DeriveDataTypeable #-}
 module TestCase where
 
 import Prelude hiding(catch)
 
 import Control.Monad
+import Control.Monad.Reader
 import Control.Monad.Trans
 import Control.Exception
 import Data.Char
@@ -17,37 +18,73 @@ import System.Directory
 import System.FilePath
 import System.IO
 import System.Process
+import System.Posix.Env
 
 -- | Print a command before running it
 dbReadProcessWithExitCode prog args stdin = do
-  when debug $ liftIO $ print $ intercalate " " (prog : args)
+  when debug $ liftIO $ putStrLn $ intercalate " " (prog : args)
   readProcessWithExitCode prog args stdin
   where
     debug = False
 
-newtype Tester a = Tester {runTester :: IO a}
+data TesterConfig =
+  TesterConfig
+  { -- | Directory for temporary files
+    temporaryPath :: !FilePath
+    -- | Directory holding Pyon's build files
+  , buildDir :: !FilePath
+    -- | Platform-specific options for the C compiler
+  , platformCOpts :: [String]
+    -- | Platform-specific options for the linker
+  , platformLinkOpts :: [String]
+  }
+
+newtype Tester a = Tester {runTester :: TesterConfig -> IO a}
+
+-- | Run a tester.  The tester's working directory is its designated
+--   temporary path.
+launchTester :: TesterConfig -> Tester a -> IO a
+launchTester cfg m =
+  bracket getCurrentDirectory setCurrentDirectory $ \_ -> do 
+    setCurrentDirectory (temporaryPath cfg)
+    runTester m cfg
 
 instance Monad Tester where
-  return x = Tester (return x)
-  m >>= k = Tester $ do x <- runTester m
-                        runTester (k x)
+  return x = Tester $ \_ -> return x
+  m >>= k = Tester $ \cfg -> do x <- runTester m cfg
+                                runTester (k x) cfg
+
+instance MonadReader TesterConfig Tester where
+  ask = Tester $ \cfg -> return cfg
+  local f m = Tester $ \cfg -> runTester m (f cfg)
 
 instance MonadIO Tester where
-  liftIO m = Tester m
+  liftIO m = Tester $ \_ -> m
 
 handleTester :: Exception e => (e -> Tester a) -> Tester a -> Tester a
 handleTester = flip catchTester
 
 catchTester :: Exception e => Tester a -> (e -> Tester a) -> Tester a
 catchTester m handler = 
-  Tester $ (\e -> runTester (handler e)) `handle` runTester m 
+  Tester $ \cfg -> (\e -> runTester (handler e) cfg) `handle` runTester m cfg
 
 -- | Run a command in a different directory
 withDirectory :: FilePath -> Tester a -> Tester a
-withDirectory path (Tester tester) = Tester $
+withDirectory path m = Tester $ \cfg ->
   bracket getCurrentDirectory setCurrentDirectory $ \_ -> do 
     setCurrentDirectory path
-    tester
+    runTester m cfg
+
+-- | Run a command with an alterd environment variable
+withEnv :: String -> (Maybe String -> String) -> Tester a -> Tester a
+withEnv key alter_value m = Tester $ \cfg ->
+  bracket get_env reset_env $ \old_value -> do
+    setEnv key (alter_value old_value) True
+    runTester m cfg
+  where
+    get_env = getEnv key
+    reset_env Nothing          = unsetEnv key
+    reset_env (Just old_value) = setEnv key old_value True
 
 -------------------------------------------------------------------------------
                         
@@ -130,10 +167,10 @@ instance Show TestFailure where
                            of ExitSuccess -> 0
                               ExitFailure n -> n
         out_text = if null out
-                   then "No output on stdout\n"
+                   then "No output on stdout"
                    else "First few characters of stdout:\n" ++ take 160 out
         err_text = if null err 
-                   then "No output on stderr\n"
+                   then "No output on stderr"
                    else "First few characters of stderr:\n" ++ take 160 err
     in "Test program terminated with result code  " ++ show_code ++ "\n" ++
        out_text ++ "\n" ++ err_text
@@ -158,52 +195,57 @@ testExecutableName = "testprogram"
 --
 --   The test is run with the given path as its working directory.
 --   The working directory is cleared after finishing the test case.
-runTest :: FilePath             -- ^ Directory for temporary files
-        -> TestCase             -- ^ Test case to run
+runTest :: TestCase             -- ^ Test case to run
         -> Tester TestResult
-runTest test_path test_case = withDirectory test_path run_test_case
-  where
-    -- Run a test case.  Return the test result.
-    run_test_case :: Tester TestResult
-    run_test_case = (return . TestFailed) `handleTester`
-      case testExpectedResult test_case
-      of ShouldNotCompile ->
-           let compile_then_fail = do
-                 compile_and_link
-                 return (TestFailed CompileErrorDetectionFailed)
+runTest test_case = (return . TestFailed) `handleTester`
+  case testExpectedResult test_case
+  of ShouldNotCompile ->
+       let compile_then_fail = do
+             compile_and_link
+             return (TestFailed CompileErrorDetectionFailed)
 
-               -- If compilation failed, then the test passes
-               check_exception (CompileFailed _) =
-                 return TestSucceeded
+           -- If compilation failed, then the test passes
+           check_exception (CompileFailed _) =
+             return TestSucceeded
                
-               check_exception exc = return (TestFailed exc)
-           in compile_then_fail `catchTester` check_exception
+           check_exception exc = return (TestFailed exc)
+       in compile_then_fail `catchTester` check_exception
 
-         ShouldCompile -> do
-           compile_and_link
-           return TestSucceeded
+     ShouldCompile -> do
+       compile_and_link
+       return TestSucceeded
 
-         ShouldRun -> do
-           compile_and_link
-           run
-           return TestSucceeded
+     ShouldRun -> do
+       compile_and_link
+       run
+       return TestSucceeded
 
-         ShouldPrint expected_out -> do
-           compile_and_link
-           (out, err) <- run
-           check_output expected_out out
-           return TestSucceeded
+     ShouldPrint expected_out -> do
+       compile_and_link
+       (out, err) <- run
+       check_output expected_out out
+       return TestSucceeded
 
+  where
     compile_and_link = do
-      mapM_ (compilePyonFile test_path test_case) $ testPyonSources test_case
-      mapM_ (compileCFile test_path test_case) $ testCSources test_case
-      linkTest test_path test_case
+      mapM_ (compilePyonFile test_case) $ testPyonSources test_case
+      mapM_ (compileCFile test_case) $ testCSources test_case
+      linkTest test_case
 
-    run = liftIO $ do
-      (rc, out, err) <- readProcessWithExitCode testExecutableName [] ""
-      case rc of 
-        ExitSuccess   -> return (out, err)
-        ExitFailure _ -> throwIO $
+    run = do
+      dir <- asks temporaryPath
+      build_dir <- asks buildDir
+      let prog = dir </> testExecutableName
+          lib_path = build_dir </> "rts"
+          insert_lib_path = maybe lib_path (\x -> lib_path ++ ":" ++ x)
+          
+      (rc, out, err) <-
+        -- Tell the dynamic loader where to find the pyonrts library
+        withEnv "DYLD_LIBRARY_PATH" insert_lib_path $
+        liftIO $ dbReadProcessWithExitCode prog [] ""
+      case rc of
+        ExitSuccess   -> liftIO $ return (out, err)
+        ExitFailure _ -> liftIO $ throwIO $
                          RunFailed { resultCode = rc 
                                    , resultStdoutLog = out
                                    , resultStderrLog = err}
@@ -213,36 +255,48 @@ runTest test_path test_case = withDirectory test_path run_test_case
       then liftIO $ throwIO $ CheckFailed expected_out out
       else return ()
 
-compilePyonFile test_path test_case file_path = liftIO $ do
-  (rc, _, err) <- dbReadProcessWithExitCode "pyon" flags ""
+-- | Attempt to do a step of compilation.  If the command fails, then return
+-- an error message.
+runCompileCommand fail_message program opts stdin = do
+  (rc, _, err) <- liftIO $ dbReadProcessWithExitCode program opts stdin
   when (rc /= ExitSuccess) $
-    throwIO $ CompileFailed (fail_message err)
-  where
-    flags = ["-x", "pyon", file_path, "-o", obj_path]
-    obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
-    fail_message err = "File: " ++ file_path ++ "\n" ++ err
+    liftIO $ throwIO $ CompileFailed (fail_message err)
 
-compileCFile test_path test_case file_path = liftIO $ do
-  (rc, _, err) <- dbReadProcessWithExitCode "gcc" flags ""
-  when (rc /= ExitSuccess) $
-    throwIO $ CompileFailed (fail_message err)
-  where
-    flags = ["-c", file_path, "-o", obj_path]
-    obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
-    fail_message err = "File: " ++ file_path ++ "\n" ++ err
+compilePyonFile test_case file_path = do
+  test_path <- asks temporaryPath
+  let obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
+      flags = ["-x", "pyon", file_path, "-o", obj_path]
+      fail_message err = "File: " ++ file_path ++ "\n" ++ err
 
-linkTest test_path test_case = liftIO $ do
-  (rc, _, err) <- dbReadProcessWithExitCode "gcc" link_arguments ""
-  when (rc /= ExitSuccess) $
-    throwIO $ CompileFailed (fail_message err)
-  where
-    fail_message err = err
-    
-    link_arguments = ["-o", testExecutableName] ++
-                     c_file_paths ++ pyon_file_paths
+  runCompileCommand fail_message "pyon" flags ""
+
+compileCFile test_case file_path = do
+  build_dir <- asks buildDir
+  test_path <- asks temporaryPath
+  platform_opts <- asks platformCOpts
+  let obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
+      opts = platform_opts ++
+             ["-I", test_path,   -- Include files in the output directory
+              "-I", build_dir </> "data" </> "include", -- Pyon library
+              "-c", file_path,
+              "-o", obj_path]
+      fail_message err = "File: " ++ file_path ++ "\n" ++ err
   
-    c_file_paths = [test_path </> takeFileName file `replaceExtension` ".o"
-                   | file <- testCSources test_case]
-    pyon_file_paths = [test_path </> takeFileName file `replaceExtension` ".o"
-                      | file <- testPyonSources test_case]
+  runCompileCommand fail_message "gcc" opts ""
 
+linkTest test_case = do
+  test_path <- asks temporaryPath
+  build_dir <- asks buildDir
+  platform_opts <- asks platformLinkOpts
+  let c_file_paths = [test_path </> takeFileName file `replaceExtension` ".o"
+                     | file <- testCSources test_case]
+      pyon_file_paths = [test_path </> takeFileName file `replaceExtension` ".o"
+                        | file <- testPyonSources test_case]
+      link_opts = platform_opts ++ 
+                  ["-o", testExecutableName] ++
+                  c_file_paths ++ pyon_file_paths ++
+                  ["-L" ++ build_dir </> "rts",
+                   "-lpyonrts"]
+      fail_message err = err
+
+  runCompileCommand fail_message "gcc" link_opts ""

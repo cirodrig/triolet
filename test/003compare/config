@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Integer and floating-point comparison",
+  pyonSources	 = ["compare.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "ok"
+}

@@ -1,0 +1,5 @@
+
+def pick(x, y, b : bool): return x if b else y
+
+export ccall "pick_int" pick : int * int * bool -> int
+export ccall "pick_float" pick : float * float * bool -> float

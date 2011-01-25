@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Variable capture test",
+  pyonSources	 = ["capture.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "ok"
+}
