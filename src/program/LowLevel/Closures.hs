@@ -6,7 +6,7 @@ runs before reference counting is inserted.
 
 Data structures should be flattened before running closure conversion.
 CSE and DCE must be performed (at least once) before running closure
-conversion.
+conversion, to fix up frame pointer references.
 
 'RecV' values are not allowed.  'PackA' and 'UnpackA' atoms are not allowed.
 Frame pointers may only be accessed in top-level functions.
