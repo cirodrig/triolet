@@ -274,12 +274,17 @@ runCompileCommand fail_message program opts stdin = do
     liftIO $ throwIO $ CompileFailed (fail_message err)
 
 compilePyonFile test_case file_path = do
+  build_dir <- asks buildDir
   test_path <- asks temporaryPath
   let obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
-      flags = ["-x", "pyon", file_path, "-o", obj_path]
+      pyon_program_path = build_dir </> "pyon" </> "pyon"
+      build_data_path = build_dir </> "data"
+      flags = ["-B", build_data_path, -- Link to the local library files
+               "-x", "pyon",    -- Compile in pyon mode
+               file_path, "-o", obj_path]
       fail_message err = "File: " ++ file_path ++ "\n" ++ err
 
-  runCompileCommand fail_message "pyon" flags ""
+  runCompileCommand fail_message pyon_program_path flags ""
 
 compileCFile test_case file_path = do
   build_dir <- asks buildDir
