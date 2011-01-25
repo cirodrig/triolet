@@ -120,25 +120,33 @@ createModuleInterface mod = do
   renaming <- createExternNames (moduleModuleName mod) (moduleNameSupply mod) $
               [v | Def v _ <- pre_imports, not $ varIsExternal v]
 
-  withTheLLVarIdentSupply $ \ll_supply -> runFreshVarM ll_supply $ do
-    -- Rename all uses of the exported variables.
-    -- Also, rename definitions of the exported variables.
-    mod1 <- renameModule RenameNothing renaming mod
-    let mod2 = renameGlobalDefinitions renaming mod1
-    pre_imports' <- mapM (renamePreImport renaming) pre_imports
+  (renamed_mod, interface) <-
+    withTheLLVarIdentSupply $ \ll_supply -> runFreshVarM ll_supply $ do
+      -- Rename all uses of the exported variables.
+      -- Also, rename definitions of the exported variables.
+      mod1 <- renameModule RenameNothing renaming mod
+      let mod2 = renameGlobalDefinitions renaming mod1
+      pre_imports' <- mapM (renamePreImport renaming) pre_imports
 
-    -- Create the interface
-    exports <- mapM mkImport pre_imports'
-    let imports = map clearImportDefinition $ moduleImports mod
-    let interface = Interface { ifaceImports = imports
-                              , ifaceExports = exports}
-        
-    -- Extend the export list with the new exported variables
-    let new_exports = [(v, PyonExportSig) | Def v _ <- pre_imports'
-                                          , not $ v `Set.member` export_vars]
-        mod3 = mod2 {moduleExports = new_exports ++ moduleExports mod2}
-    
-    return (mod3, interface)
+      -- Create the interface
+      exports <- mapM mkImport pre_imports'
+      let imports = map clearImportDefinition $ moduleImports mod
+      let interface = Interface { ifaceImports = imports
+                                , ifaceExports = exports}
+          
+      -- Extend the export list with the new exported variables
+      let new_exports = [(v, PyonExportSig) | Def v _ <- pre_imports'
+                                            , not $ v `Set.member` export_vars]
+          mod3 = mod2 {moduleExports = new_exports ++ moduleExports mod2}
+      
+      return (mod3, interface)
+
+  -- DEBUG: Print the interface
+  when False $ print $
+    text ("Module interface of " ++ showModuleName (moduleModuleName mod)) $$
+    pprInterface interface
+
+  return (renamed_mod, interface)
 
 -- | Rename each non-external variable in the list to a new,
 --   externally visible name.
@@ -192,15 +200,6 @@ slurpExports exported gdefs
   where
     is_exported gdef = globalDefiniendum gdef `Set.member` exported
 
-{-
--- | Partition global definitions into those that are exported and those that
---   aren't
-pickPyonExports :: Module -> ([GlobalDef], [GlobalDef])
-pickPyonExports mod = partition is_exported $ moduleGlobals mos
-  where
-    exported_vars = [v | (v, PyonExportSig) <- moduleExports mod]
-    is_exported d = globalDefiniendum d `elem` exported_vars-}
-      
 mkPreImport :: GlobalDef -> PreImport
 mkPreImport (GlobalFunDef (Def v f)) =
   let f_val = if funIsInlinable f && funSmallEnoughForInlining f
@@ -271,14 +270,14 @@ addInterfaceToModuleImports iface mod = do
       -- closure.
       --
       -- Using a set also eliminates duplicate list entries. 
-      import_variables =
+      extern_variables =
         Set.toList $ Set.fromList $
         allBuiltins ++ map importVar (moduleImports mod)
-  
+
   -- Rename variables in the interface
   (rn_imports, rn_exports) <- 
     withTheLLVarIdentSupply $ \id_supply -> runFreshVarM id_supply $ do
-      renameInterface import_variables iface
+      renameInterface extern_variables iface
   
   -- Insert imports into the module's imports, replacing the existing imports.
   -- Error out if a type mismatch is detected.
@@ -299,65 +298,56 @@ addInterfaceToModuleImports iface mod = do
 --
 --   Imported symbols are discarded if one of the given variables has the
 --   same label, or else renamed to a new variable name.
-renameInterface :: [Var] -> Interface -> FreshVarM ([Import], [Import])
-renameInterface import_variables iface = do
-  -- Create new variables
-  i_results <- mapM pick_renaming_or_discard $ ifaceImports iface
-  let (new_i_variables, orig_imports) = unzip $ catMaybes i_results
-  let orig_exports = ifaceExports iface
-  new_e_variables <- mapM pick_renamed_name $ map importVar orig_exports
+renameInterface :: [Var]        -- ^ Variables targeted by renaming
+                -> Interface    -- ^ Interface that should be renamed
+                -> FreshVarM ([Import], [Import]) -- ^ Computes the new imports and exports
+renameInterface extern_variables iface = do
+  -- Discard imports if the variable name is found in extern_variables.
+  -- Those variables are
+  -- already defined, or will be defined by another loaded interface.
+  let orig_imports = filter is_extern $ ifaceImports iface
+        where
+          is_extern impent =
+            externVarName (importVar impent) `Map.member` extern_variable_labels
+      orig_exports = ifaceExports iface
 
-  -- Create renaming
-  let renaming = mkRenaming $
-                 zip (map importVar orig_exports) new_e_variables ++
-                 zip (map importVar orig_imports) new_i_variables
-  
+  -- Get all external variables in the interface.  Remove duplicates. 
+  let iface_extern_variables =
+        let imp_vars = map importVar orig_imports
+            exp_vars = map importVar orig_exports
+        in imp_vars ++ (exp_vars \\ imp_vars)
+
+  -- Create a renaming for these variables
+  new_e_vars <- mapM pick_renamed_name iface_extern_variables
+  let renaming = mkRenaming $ zip iface_extern_variables new_e_vars
+
   -- Apply renaming
   new_imports <- mapM (rename_import renaming) orig_imports
   new_exports <- mapM (rename_import renaming) orig_exports
   return (new_imports, new_exports)
   where
     -- Map from variable name to variable
-    import_variable_labels =
-      Map.fromList [(get_label v, v) | v <- import_variables]
-      where
-        get_label v =
-          case varName v
-          of Just lab -> lab
-             Nothing  -> internalError $ "renameInterface: " ++
-                         "Imported variable has no label"
+    extern_variable_labels =
+      Map.fromList [(externVarName v, v) | v <- extern_variables]
 
-    -- Decide what to rename an exported variable to.  Discard if there's
-    -- a preexisting variable with the same name.
-    -- Otherwise create a new variable.
-    pick_renaming_or_discard impent
-      | Just global_var <- Map.lookup lab import_variable_labels =
-          return Nothing
-      | otherwise = do
-          -- Rename to a new variable with the same label
-          new_var <- newExternalVar lab (varType $ importVar impent)
-          return $ Just (new_var, impent)
-      where
-        lab = case varName $ importVar impent
-              of Just l  -> l
-                 Nothing -> internalError $ "renameInterface: " ++
-                            "Interface variable has no label"
-    
-    -- Decide what to rename an exported variable to.  Rename to the
+    externVarName v =
+      case varName v
+      of Just lab -> lab
+         Nothing  -> internalError $ "renameInterface: " ++
+                     "Imported variable has no label"
+
+    -- Decide what to rename an external variable to.  Rename to the
     -- preexisting variable with the same name, if one exists.
     -- Otherwise create a new variable.
     pick_renamed_name interface_var
-      | Just global_var <- Map.lookup lab import_variable_labels =
+      | Just global_var <- Map.lookup lab extern_variable_labels =
           -- Rename to the preexisting variable with the same label
           return global_var
       | otherwise =
           -- Rename to a new variable with the same label
           newExternalVar lab (varType interface_var)
       where
-        lab = case varName interface_var
-              of Just l  -> l
-                 Nothing -> internalError $ "renameInterface: " ++
-                            "Interface variable has no label"
+        lab = externVarName interface_var
 
     -- Rename within an imported module
     rename_import renaming impent =
