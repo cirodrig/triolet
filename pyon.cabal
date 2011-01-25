@@ -10,9 +10,7 @@ Build-Type:	Custom
 
 Data-Dir:	dist/build/data
 Data-Files:
-  symbols/SFBuiltin.glu
   symbols/coretypes
-  symbols/coretypes2
   include/pyon.h
   include/pyon_list.h
   testcases/*.py
