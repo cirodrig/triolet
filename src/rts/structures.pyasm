@@ -30,6 +30,8 @@ data pointer repr_Boxed_value = PassConv {
   alignof owned,
 #if WORD_SIZE == 4
   copy4F,
+#elif WORD_SIZE == 8
+  copy8F,
 #else
 # error "Don't know how to copy Boxed values"
 #endif

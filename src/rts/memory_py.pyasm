@@ -37,6 +37,12 @@ function copy4F (pointer src, pointer dst) -> () {
   ();
 };
 
+// Copy 8 bytes
+function copy8F (pointer src, pointer dst) -> () {
+  !dst = uint64 load src;
+  ();
+};
+
 // Copy some bytes according to a PassConv object
 function copy (unit _, pointer passconv, pointer src, pointer dst) -> () {
   () call (passconv @! PassConv.copy) (src, dst);

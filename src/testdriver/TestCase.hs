@@ -16,6 +16,7 @@ import Data.Typeable
 import System.Exit
 import System.Directory
 import System.FilePath
+import System.Info
 import System.IO
 import System.Process
 import System.Posix.Env
@@ -85,6 +86,21 @@ withEnv key alter_value m = Tester $ \cfg ->
     get_env = getEnv key
     reset_env Nothing          = unsetEnv key
     reset_env (Just old_value) = setEnv key old_value True
+
+-- | Set up the environment so that the dynamic library loader knows where to
+--   find the RTS library (libpyonrts.so)
+withLdPath :: Tester a -> Tester a
+withLdPath m = do
+  build_dir <- asks buildDir
+  let lib_path = build_dir </> "rts"
+      insert_lib_path = maybe lib_path (\x -> lib_path ++ ":" ++ x)
+
+      var_name = case os
+                 of "linux" -> "LD_LIBRARY_PATH"
+                    "darwin" -> "DYLD_LIBRARY_PATH"
+                    _ -> error "Unrecognized OS; don't know how to set up environment"
+
+  withEnv var_name insert_lib_path m
 
 -------------------------------------------------------------------------------
                         
@@ -234,15 +250,10 @@ runTest test_case = (return . TestFailed) `handleTester`
 
     run = do
       dir <- asks temporaryPath
-      build_dir <- asks buildDir
       let prog = dir </> testExecutableName
-          lib_path = build_dir </> "rts"
-          insert_lib_path = maybe lib_path (\x -> lib_path ++ ":" ++ x)
           
       (rc, out, err) <-
-        -- Tell the dynamic loader where to find the pyonrts library
-        withEnv "DYLD_LIBRARY_PATH" insert_lib_path $
-        liftIO $ dbReadProcessWithExitCode prog [] ""
+        withLdPath $ liftIO $ dbReadProcessWithExitCode prog [] ""
       case rc of
         ExitSuccess   -> liftIO $ return (out, err)
         ExitFailure _ -> liftIO $ throwIO $
