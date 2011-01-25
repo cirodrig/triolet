@@ -247,7 +247,7 @@ valDataTypeLayout tenv (tycon, data_type, con_types, ty_args)
 readDataTypeLayout :: TypeEnv -> (Var, DataType, [DataConType], [Type])
                    -> PointerLayout
 readDataTypeLayout tenv typedescr@(tycon, data_type, con_types, ty_args)
-  -- | bool, int, and float have special representations
+  -- bool, int, and float have special representations
   | tycon `isPyonBuiltin` the_bool ||
     tycon `isPyonBuiltin` the_int ||
     tycon `isPyonBuiltin` the_float =

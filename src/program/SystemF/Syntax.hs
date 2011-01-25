@@ -65,15 +65,17 @@ mkExpInfo = ExpInfo
 instance HasSourcePos ExpInfo where
   getSourcePos (ExpInfo p) = p
 
--- Data types used in representing code.  Data types are parameterized
+-- Data types used in representing code.  Data types are indexed by a
+-- data format; different indices are used in different stages of the
+-- compiler to customize the data structures.
 
-data family Typ a               -- ^ A type; can be a wrapper around 'Type'
-data family Pat a               -- ^ A pattern binding
-data family TyPat a             -- ^ A pattern binding for types
-data family Ret a               -- ^ A return declaration
-data family Exp a               -- ^ An expression
-data family Alt a               -- ^ A case alternative
-data family Fun a               -- ^ A function
+data family Typ a               -- A type; can be a wrapper around 'Type'
+data family Pat a               -- A pattern binding
+data family TyPat a             -- A pattern binding for types
+data family Ret a               -- A return declaration
+data family Exp a               -- An expression
+data family Alt a               -- A case alternative
+data family Fun a               -- A function
 
 instance Typeable1 Typ where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Typ") []
