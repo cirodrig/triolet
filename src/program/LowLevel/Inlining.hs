@@ -388,6 +388,25 @@ makeImportsInlinable imports = do
          _ -> Nothing
 
 -------------------------------------------------------------------------------
+-- Specialize a function that has been partially applied
+
+-- | Specialize a lambda function.
+--
+--   For each parameter whose argument is given, the argument is bound 
+--   in a let expression.  A specialized function with the remaining parameters
+--   is returned.
+specializeLambda fun args
+  | length args >= length (funParams fun) || 
+    funConvention fun /= ClosureCall =
+      internalError "specializeLamba"
+
+  | otherwise =
+      let bindings = zip (funParams fun) args
+          leftover_params = drop (length args) $ funParams fun
+      in do forM_ bindings $ \(param, val) -> bindAtom1 param $ ValA [val]
+            return $ fun {funParams = leftover_params}
+
+-------------------------------------------------------------------------------
 
 type GenM a = Gen FreshVarM a
 
@@ -486,7 +505,12 @@ tryInlineCall cc op args retvars mk_cont = do
 inlineTailLambda cc fun args =
   case length args `compare` length (funParams fun)
   of LT ->
-       internalError "inlineTailLambda: not implemented for undersaturated calls"
+       -- Undersaturated call, returning a function.
+       -- Bind the known arguments to variables and define the function.
+       if cc == ClosureCall
+       then do specialized_fun <- lift $ specializeLambda fun args
+               return $ ReturnE $ ValA [LamV specialized_fun]
+       else internalError "inlineTailLambda: Malformed function call"
      EQ -> do
       InlSpec _ _ _ _ params stm _ <- lift $ lift $ makeLambdaFunInlinable fun
       inlineTailCall params args stm
@@ -496,7 +520,16 @@ inlineTailLambda cc fun args =
 inlineLambda cc fun args retvars mk_cont =
   case length args `compare` length (funParams fun)
   of LT ->
-       internalError "inlineLambda: not implemented for undersaturated calls"
+       -- Undersaturated call, returning a function.
+       -- Bind the known arguments to variables and define the function.
+       case retvars
+       of [retvar]
+            | cc == ClosureCall && varType retvar == PrimType OwnedType -> do
+                specialized_fun <- lift $ specializeLambda fun args 
+                lift $ emitLetrec [Def retvar specialized_fun]
+                mk_cont
+          _ ->
+            internalError "inlineLambda: Malformed function call"
      EQ -> do
        InlSpec _ _ _ _ params _ inl_stm <-
          lift $ lift $ makeLambdaFunInlinable fun

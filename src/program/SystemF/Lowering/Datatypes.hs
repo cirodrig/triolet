@@ -67,6 +67,10 @@ data PointerLayout =
     ValueReference !ValueLayout
     -- | A scalar value that is accessed by reference (get a pointer to it)
   | ScalarReference !ValueLayout
+    -- | A reference to a dynamically allocated value.  This occupies one
+    --   pointer worth of space.  If the boolean value is true, it is a
+    --   boxed object (with a header); otherwise it is a referenced object.
+  | IndirectReference !Bool PointerLayout
     -- | A polymorphic value, accessed by reference
   | PolyReference !PolyRepr
     -- | A product type
@@ -105,6 +109,8 @@ pprPointerLayout pl =
   case pl
   of ValueReference vl -> hang (text "value") 4 $ pprValueLayout vl
      ScalarReference vl -> hang (text "scalar") 4 $ pprValueLayout vl
+     IndirectReference True l -> text "box" <+> parens (pprPointerLayout l)
+     IndirectReference False l -> text "ref" <+> parens (pprPointerLayout l)
      PolyReference (PolyRepr t) -> text "poly" <+> pprType t
      ProductReference v fs ->
        pprConstructorClause v $ pprProduct pprPointerLayout fs
@@ -171,13 +177,16 @@ paramTypeLayout tenv (repr ::: ty) =
   typeLayout tenv (paramReprToReturnRepr repr ::: ty)
 
 -- | Get the layout of a value, given its return type.
+--
+--   This function calls one of several internal functions to find the
+--   value's layout, depending on the given representation and type.
 typeLayout :: TypeEnv -> ReturnType -> Either ValueLayout PointerLayout
 typeLayout tenv (repr ::: scrutinee_type) =
   case repr
   of ValRT  -> Left $ valTypeLayout tenv scrutinee_type
-     BoxRT  -> Left OpaqueBoxedValue
-     ReadRT -> Right $ readTypeLayout tenv scrutinee_type
-     OutRT  -> Right $ readTypeLayout tenv scrutinee_type
+     BoxRT  -> Right $ memTypeLayout tenv scrutinee_type
+     ReadRT -> Right $ memTypeLayout tenv scrutinee_type
+     OutRT  -> Right $ memTypeLayout tenv scrutinee_type
      _ -> internalError "typeLayout: Unexpected representation"
 
 lookupDataTypeForLayout tenv ty 
@@ -186,8 +195,9 @@ lookupDataTypeForLayout tenv ty
     Just cons <- sequence [lookupDataCon c tenv
                           | c <- dataTypeDataConstructors data_type] =
       (tycon, data_type, cons, ty_args)
-  | otherwise = internalError $ "typeLayout: Unknown type: " ++ show (pprType ty)
+  | otherwise = internalError $ "typeLayout: Unknown data type: " ++ show (pprType ty)
 
+-- | Get the layout of a value of type 'ty', represented as a value
 valTypeLayout tenv ty =
   case getLevel ty
   of TypeLevel ->
@@ -196,10 +206,27 @@ valTypeLayout tenv ty =
        -- Types are erased
        SpecialValue (LL.PrimType LL.UnitType)
      _ -> internalError "valTypeLayout"
-      
 
-readTypeLayout tenv ty =
-  readDataTypeLayout tenv $ lookupDataTypeForLayout tenv ty
+-- | Get the layout of an object field that is stored in memory.
+memFieldLayout tenv ty =
+  case fromVarApp ty
+  of Just (op, args) ->
+       case lookupDataType op tenv
+       of Just _ ->
+            -- This field is a data type; compute its layout
+            memTypeLayout tenv ty
+          Nothing ->
+            -- This field is an application of a type variable.
+            -- It has an unknown layout; use runtime layout information.
+            PolyReference (PolyRepr ty)
+     Nothing ->
+       case ty
+       of FunT {} -> ScalarReference OpaqueBoxedValue
+          _ -> internalError "memFieldLayout"
+
+-- | Get the layout of an object that is represented by reference.
+memTypeLayout tenv ty =
+  memDataTypeLayout tenv $ lookupDataTypeForLayout tenv ty
 
 valDataTypeLayout :: TypeEnv -> (Var, DataType, [DataConType], [Type])
                   -> ValueLayout
@@ -244,14 +271,24 @@ valDataTypeLayout tenv (tycon, data_type, con_types, ty_args)
 
     unit_layout con = ScalarValue con LL.UnitType
 
-readDataTypeLayout :: TypeEnv -> (Var, DataType, [DataConType], [Type])
+-- | Get the layout of an object that's stored in memory
+memDataTypeLayout :: TypeEnv -> (Var, DataType, [DataConType], [Type])
                    -> PointerLayout
-readDataTypeLayout tenv typedescr@(tycon, data_type, con_types, ty_args)
+memDataTypeLayout tenv typedescr@(tycon, data_type, con_types, ty_args)
   -- bool, int, and float have special representations
   | tycon `isPyonBuiltin` the_bool ||
     tycon `isPyonBuiltin` the_int ||
     tycon `isPyonBuiltin` the_float =
       ScalarReference $ valDataTypeLayout tenv typedescr
+
+  -- Boxed and Referenced have special representations in memory
+  | tycon `isPyonBuiltin` the_Boxed =
+      let [arg] = ty_args
+      in IndirectReference True $ memFieldLayout tenv arg
+
+  | tycon `isPyonBuiltin` the_Referenced =
+      let [arg] = ty_args
+      in IndirectReference False $ memFieldLayout tenv arg
 
   | all_nullary_constructors, [con] <- cons =
       ProductReference con []
@@ -277,19 +314,5 @@ readDataTypeLayout tenv typedescr@(tycon, data_type, con_types, ty_args)
     field_layout (BoxRT ::: _) =
       ValueReference OpaqueBoxedValue
 
-    field_layout (ReadRT ::: ty) =
-      case fromVarApp ty
-      of Just (op, args) ->
-           case lookupDataType op tenv
-           of Just _ ->
-                -- This field is a data type; compute its layout
-                readTypeLayout tenv ty
-              Nothing ->
-                -- This field is an application of a type variable.
-                -- It has an unknown layout; use runtime layout information.
-                PolyReference (PolyRepr ty)
-         Nothing ->
-           case ty
-           of FunT {} -> ScalarReference OpaqueBoxedValue
-              _ -> internalError "readDataTypeLayout"
+    field_layout (ReadRT ::: ty) = memFieldLayout tenv ty
 

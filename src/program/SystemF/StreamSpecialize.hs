@@ -110,7 +110,7 @@ globalConTable =
       , unchanged 1 the_repr_iter
       , unchanged 1 the_repr_list
       , unchanged 0 the_repr_Any
-      , unchanged 1 the_repr_Boxed
+      , unchanged 1 the_repr_Box
       , unchanged 0 the_makeComplex
       , unchanged 0 (const $ pyonTupleReprCon 0)
       , unchanged 1 (const $ pyonTupleReprCon 1)
@@ -126,6 +126,7 @@ globalConTable =
       , unchanged 0 the_None
       , unchanged 0 the_True
       , unchanged 0 the_False
+      , unchanged 1 the_boxed
       , unchanged 0 the_EqDict_int_eq
       , unchanged 0 the_EqDict_int_ne
       , unchanged 0 the_EqDict_float_eq

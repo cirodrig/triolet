@@ -194,8 +194,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_additiveDict_complex) |])-}
   , (PyonName module_structures "repr_Repr",
      Right [| SystemF.pyonBuiltin (SystemF.the_repr_Repr) |])
-  , (PyonName module_structures "repr_Boxed",
-     Right [| SystemF.pyonBuiltin SystemF.the_repr_Boxed |])
+  , (PyonName module_structures "repr_Box",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
   {-, (PyonName module_structures "complex_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,

@@ -82,7 +82,7 @@ lookupDictionary ty = OP $ \env _ ->
   where
     mk_fun_dict ty k =
       -- Create a boxed representation object, and pass it to the continuation 
-      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Boxed)
+      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
           call = ExpM $ AppE defaultExpInfo op [TypM ty] []
       in k call
 
@@ -141,6 +141,9 @@ createDictEnv = do
   repr_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_Repr) [VarT arg],
      createDict_Repr arg)
+  boxed_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_Boxed) [VarT arg],
+     createDict_boxed arg)
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin the_PyonTuple2) [VarT arg1, VarT arg2],
      createDict_Tuple2 arg1 arg2)
@@ -150,7 +153,7 @@ createDictEnv = do
   multiplicative_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_MultiplicativeDict) [VarT arg],
      createSimpleDict the_MultiplicativeDict the_repr_MultiplicativeDict arg)
-  return $ DictEnv.DictEnv [repr_dict,
+  return $ DictEnv.DictEnv [repr_dict, boxed_dict,
                             float_dict, int_dict,
                             tuple2_dict, additive_dict, multiplicative_dict]
 
@@ -202,6 +205,16 @@ createDict_Repr param_var subst use_dict = use_dict expr
     param_type = getParamType param_var subst
     op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Repr)
     expr = ExpM $ AppE defaultExpInfo op [TypM param_type] []
+
+-- | Representation of 'Boxed' dictionaries.  All 'Boxed' dictionaries have
+--   the same representation as other boxed objects.  To get the dictionary,
+--   call the @the_repr_Box@ function with the dictionary type.
+createDict_boxed param_var subst use_dict = use_dict expr
+  where
+    param_type = getParamType param_var subst
+    dict_type = varApp (pyonBuiltin the_Boxed) [param_type]
+    op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
+    expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
 
 -- | Create the representation of a single-parameter class dictionary.
 --   Takes the class dictionary as the first parameter, and the repr

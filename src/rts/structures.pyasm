@@ -25,7 +25,7 @@ function inline repr_Repr (unit _) -> pointer {
   repr_Repr_value;
 };
 
-data pointer repr_Boxed_value = PassConv {
+data pointer repr_Box_value = PassConv {
   sizeof owned,
   alignof owned,
 #if WORD_SIZE == 4
@@ -40,8 +40,8 @@ data pointer repr_Boxed_value = PassConv {
 
 // Return the representation of a Boxed object.  The parameter is a type
 // parameter.
-function inline repr_Boxed (unit _) -> pointer {
-  repr_Boxed_value;
+function inline repr_Box (unit _) -> pointer {
+  repr_Box_value;
 };
 
 // Parameter-passing convention dictionary of ints
@@ -83,7 +83,8 @@ function inline repr_PyonTuple2 (unit _, unit _,
   align1 = repr1 @! PassConv.align;
   size2 = repr2 @! PassConv.size;
   align2 = repr2 @! PassConv.align;
-  typedef tuple = PyonTuple2(bytes(value size1, value align1), bytes(value size2, value align2));
+  typedef tuple = PyonTuple2(bytes(value size1, value align1),
+  	  	             bytes(value size2, value align2));
 
   ret @! PassConv.size = sizeof tuple;
   ret @! PassConv.align = alignof tuple;

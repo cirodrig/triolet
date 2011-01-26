@@ -153,3 +153,13 @@ assumeVariableWithType v ty k = do
         update env = env {varMap = IntMap.insert (fromIdent $ varID v) new_v $ 
                                    varMap env}
 
+-- | Add a type variable to the type environment
+assumeType :: Var -> Type -> Lower a -> Lower a
+assumeType v kind (Lower m)
+  | getLevel v /= TypeLevel = internalError "assumeType: Not a type variable"
+  | getLevel kind /= KindLevel = internalError "assumeType: Not a kind"
+  | otherwise = Lower $ local update m
+  where
+    update env = env {typeEnvironment = insertType v (ValRT ::: kind) $
+                                        typeEnvironment env}
+

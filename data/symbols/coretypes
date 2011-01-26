@@ -21,6 +21,20 @@ data ref Repr : val (val pure -> val pure) {};
 data box Stream : val (val pure -> val pure) {};
 data ref list : val (val pure -> val pure) {};
 
+-- This data structure has a special representation
+data box Boxed : val (val pure -> val pure)
+{
+  boxed : (val a : pure) -> write a -> box Boxed a,
+  (val a : pure) (read a) : box Boxed a;
+};
+
+-- This data structure has a special representation
+data ref Referenced : val (val pure -> val pure)
+{
+  referenced : (val a : pure) -> write a -> write Referenced a,
+  (val a : pure) (read a) : read Referenced a;
+};
+
 data ref PyonTuple2 : val (val pure -> val pure -> val pure)
 {
   pyonTuple2 : (val a : pure) -> (val b : pure)
@@ -98,7 +112,7 @@ repr_MultiplicativeDict :
 repr_Repr : (val a : pure) -> read Repr a;
 
 -- This always returns the same, global object
-repr_Boxed : (val a : pure) -> read Repr a;
+repr_Box : (val a : pure) -> read Repr a;
 
 OpaqueTraversableDict_list : read TraversableDict list;
 

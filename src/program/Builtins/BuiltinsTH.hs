@@ -20,7 +20,8 @@ pyonBuiltinTypeNames =
   , "PyonTuple2"
   , "PyonTuple3"
   , "Stream"
-  , "LazyStream"
+  , "Boxed"
+  , "Referenced"
     
     -- Dictionary types
   , "Repr"
@@ -41,6 +42,8 @@ pyonBuiltinVariableNames =
   , "pyonTuple1"
   , "pyonTuple2"
   , "pyonTuple3"
+  , "boxed"
+  , "referenced"
 
     -- Class constructors
   , "traversableDict"
@@ -58,7 +61,7 @@ pyonBuiltinVariableNames =
   , "repr_list"
   , "repr_NoneType"
   , "repr_Any"
-  , "repr_Boxed"
+  , "repr_Box"
   , "repr_iter"
   , "repr_PyonTuple0"
   , "repr_PyonTuple1"

@@ -59,11 +59,16 @@ mkClassMethod cls index name sig = do
   var <- predefinedVariable (Just $ builtinLabel name) ass
   return $ ClassMethod name sig var
 
+getClassMethod :: Class -> Int -> ClassMethod
+getClassMethod cls ix
+  | ix < 0 || ix >= length (clsMethods cls) = internalError "getClassMethod"
+  | otherwise = clsMethods cls !! ix
+
 -- | Look up a method of the given class and return its type scheme
 classMethodType :: (TIBuiltins -> Class) -> Int -> TyScheme
 classMethodType cls_field index =
   let cls = tiBuiltin cls_field
-  in mkMethodType cls (clmSignature $ clsMethods cls !! index)
+  in mkMethodType cls (clmSignature $ getClassMethod cls index)
 
 monomorphicInstance cls ty mcon methods =
   Instance { insQVars = []
@@ -359,7 +364,7 @@ mkPassableClass = mdo
                   , clsInstances = [int_instance, float_instance,
                                     bool_instance, none_instance,
                                     complex_instance,
-                                    any_instance,
+                                    any_instance, boxed_instance,
                                     list_instance, iter_instance,
                                     tuple2_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_Repr
@@ -411,6 +416,15 @@ mkPassableClass = mdo
         , insCon = Just $ pyonBuiltin SystemF.the_repr_complex
         , insMethods = []
         }
+  let boxed_instance =
+        Instance
+        { insQVars = [b]
+        , insConstraint = []
+        , insClass = cls
+        , insType = ConTy (tiBuiltin the_con_Boxed) @@ ConTy b
+        , insCon = Just $ pyonBuiltin SystemF.the_repr_Box
+        , insMethods = []
+        }        
   
   c <- newTyVar Star Nothing
   let tuple2_instance =
@@ -469,6 +483,12 @@ mkIotaType =
   return $ monomorphic $
   functionType [ConTy (tiBuiltin the_con_NoneType)] (ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_int))
 
+mkBoxedType =
+  forallType [Star] $ \[a] ->
+  let aT = ConTy a
+      ty = functionType [aT] (ConTy (tiBuiltin the_con_Boxed) @@ aT)
+  in ([], ty)
+
 mkUndefinedType =
   forallType [Star] $ \[a] -> ([], ConTy a)
 
@@ -520,7 +540,7 @@ mkGlobalVar name typ con = do
   let ass = polymorphicAssignment scm exp
   predefinedVariable (Just $ builtinLabel name) ass
 
-getClassVar name cls index = clmVariable $ clsMethods cls !! index
+getClassVar name cls index = clmVariable $ getClassMethod cls index
 
 -------------------------------------------------------------------------------
 -- Main function
@@ -549,6 +569,7 @@ initializeTIBuiltins = do
             , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |])
             , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
+            , ("Boxed", Star :-> Star, [| pyonBuiltin SystemF.the_Boxed |])
             ]
             
           classes =
@@ -578,6 +599,9 @@ initializeTIBuiltins = do
               ),
               ("iota", [| mkIotaType |]
               , [| pyonBuiltin SystemF.the_fun_iota |]
+              ),
+              ("boxed", [| mkBoxedType |]
+              , [| pyonBuiltin SystemF.the_boxed |]
               ),
               ("__undefined__", [| mkUndefinedType |]
               , [| pyonBuiltin SystemF.the_fun_undefined |]
@@ -640,7 +664,7 @@ initializeTIBuiltins = do
                 ('_':member_name,
                  [| -- Verify the method's name
                     let v = clmVariable $
-                            clsMethods (tiBuiltin $(cls)) !! index
+                            getClassMethod (tiBuiltin $(cls)) index
                     in return $ if varName v /= Just (builtinLabel member_name)
                                 then internalError "Inconsistent class method name"
                                 else v |])
