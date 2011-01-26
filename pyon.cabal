@@ -35,7 +35,6 @@ Executable pyon
     binary,
     containers,
     mtl,
-    MaybeT,
     fgl,
     pretty,
     language-python-pyon == 0.2.1,
