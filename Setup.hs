@@ -25,6 +25,7 @@ import SetupPaths
 import SetupMake
 
 makeProgram = simpleProgram "make"
+makedependProgram = simpleProgram "makedepend"
 gxxProgram = simpleProgram "g++"
 
 -- Remove a file, but recover on error
@@ -49,6 +50,9 @@ writePathsModule verb pkg_desc lbi = do
 
 runMake lbi verbosity args =
   runDbProgram verbosity makeProgram (withPrograms lbi) args
+
+runMakedepend lbi verbosity args =
+  runDbProgram verbosity makedependProgram (withPrograms lbi) args
 
 -------------------------------------------------------------------------------
 -- Hooks
@@ -106,10 +110,11 @@ doBuild pkg_desc lbi hooks flags = do
       unless depfile_exists $ writeFile ".depend.mk" ""
       let cdep_args =
             ["-f.depend.mk", "-p" ++ rtsBuildDir lbi] ++
+            targetFlags ++      -- Preprocessor definitions
             map ("-I" ++) (rtsSearchPaths lbi) ++
             ["-I" ++ "data/include"] ++
             rts_c_files
-      rawSystemExit verb "makedepend" cdep_args
+      runMakedepend lbi verb cdep_args
 
       -- Run 'make'
       runMake lbi verb ["build"]
@@ -162,7 +167,8 @@ doTest args _ pkg_desc lbi = do
   rawSystemExit verb (testDriverProgram lbi) test_arguments
 
 hooks = simpleUserHooks
-  { hookedPrograms = gxxProgram : makeProgram : hookedPrograms simpleUserHooks
+  { hookedPrograms = gxxProgram : makeProgram : makedependProgram :
+                     hookedPrograms simpleUserHooks
   , runTests = doTest
   , cleanHook = doClean (cleanHook simpleUserHooks)
   , buildHook = doBuild
