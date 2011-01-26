@@ -12,7 +12,6 @@ where
 
 import Control.Monad
 import Control.Monad.Trans
-import Control.Monad.Maybe
 import Data.List
 import Data.Maybe
 import Data.Function
@@ -38,6 +37,18 @@ import Globals
 
 pprList :: [Doc] -> Doc
 pprList xs = brackets $ sep $ punctuate (text ",") xs
+
+newtype MaybeT m a = MaybeT {runMaybeT :: m (Maybe a)}
+
+instance Monad m => Monad (MaybeT m) where
+  return x = MaybeT $ return (Just x)
+  m >>= k = MaybeT $ do mx <- runMaybeT m
+                        case mx of
+                          Just x -> runMaybeT (k x)
+                          Nothing -> return Nothing
+
+instance MonadTrans MaybeT where
+  lift m = MaybeT $ liftM Just m
 
 doAny :: Monad m => [MaybeT m a] -> MaybeT m a
 doAny xs = MaybeT $ case xs of 

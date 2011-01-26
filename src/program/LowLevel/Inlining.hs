@@ -399,12 +399,6 @@ instance (Monad m, Applicative m) => Applicative (Gen m) where
   pure x = lift (pure x)
   (<*>) = ap
 
-instance (Monad m, Applicative m) => Applicative (ReaderT a m) where
-  pure x = lift (pure x)
-  m1 <*> m2 = do f <- m1
-                 x <- m2
-                 return (f x)
-
 type Inl m a = ReaderT (IntMap.IntMap InlSpec) m a 
                
 type InlG a = Inl (Gen FreshVarM) a
