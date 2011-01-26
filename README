@@ -2,26 +2,18 @@
 Building
 --------
 
-This package uses autoconf and make.  The typical build process is
+This is a Cabal package.  The typical build process is
 
-autoconf
-./configure --prefix=$PWD/rt
-make
-make install
-
-You can also run 'make doc' to build Haddock documentation.
+ghc --make Setup
+./Setup configure
+./Setup build
+./Setup install
 
 Using
 -----
 
 After building, some environment variables need to be set up.
 Add the 'bin' subdirectory of the install path to PATH.
-Ensure the installed python modules are in the python search path.  You may
-need to add the directory containing the Python 'pyon' package to PYTHONPATH.
-
-At this point, you can import and run compiler modules from pyon.
-The script 'pyon_testsuite' runs the test suite.
-The script 'pyon_compile' compiles a single source file.
 
 Hacking
 -------
