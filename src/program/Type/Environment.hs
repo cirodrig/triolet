@@ -29,18 +29,18 @@ import Type.Type
 data TypeAssignment =
     -- | Type of a variable
     VarTypeAssignment
-    { varType :: !(ReturnRepr ::: Type)
+    { varType :: !ReturnType
     }
     -- | Type of a type constructor
   | TyConTypeAssignment
-    { varType :: !(ReturnRepr ::: Type)
+    { varType :: !ReturnType
       
     , dataType :: !DataType
     }
     -- | Type of a data constructor
   | DataConTypeAssignment
     { -- | Type of the data constructor when used as an operator 
-      varType :: !(ReturnRepr ::: Type)
+      varType :: !ReturnType
 
     , dataConType :: !DataConType
     }
@@ -59,14 +59,14 @@ data DataType =
 data DataConType =
   DataConType
   { -- | Parameters (passed as arguments)
-    dataConPatternParams :: [ParamRepr ::: Type]
+    dataConPatternParams :: [ParamType]
 
     -- | Arguments (bound to variables)
-  , dataConPatternArgs :: [ReturnRepr ::: Type]
+  , dataConPatternArgs :: [ReturnType]
 
     -- | Type of the constructed value.
     -- May mention the pattern parameters.
-  , dataConPatternRange :: ReturnRepr ::: Type
+  , dataConPatternRange :: ReturnType
 
   , dataConTyCon :: Var
   }
@@ -90,7 +90,7 @@ insertType v t (TypeEnv env) =
   TypeEnv (IntMap.insert (fromIdent $ varID v) (VarTypeAssignment t) env)
 
 data DataTypeDescr =
-  DataTypeDescr Var (ReturnRepr ::: Type) Repr [(Var, (ReturnRepr ::: Type), DataConType)]
+  DataTypeDescr Var ReturnType Repr [(Var, ReturnType, DataConType)]
 
 insertDataType :: DataTypeDescr -> TypeEnv -> TypeEnv
 insertDataType (DataTypeDescr ty_con kind repr ctors) (TypeEnv env) =
@@ -117,7 +117,7 @@ lookupDataType v (TypeEnv env) =
      _ -> Nothing
 
 -- | Look up the type of a variable
-lookupType :: Var -> TypeEnv -> Maybe (ReturnRepr ::: Type)
+lookupType :: Var -> TypeEnv -> Maybe ReturnType
 lookupType v (TypeEnv env) =
   fmap varType $ IntMap.lookup (fromIdent $ varID v) env
 
