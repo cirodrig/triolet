@@ -248,7 +248,7 @@ basicExpr =
       fmap SizeofE parseType
     alignof_expr = do
       match AlignofTok 
-      fmap SizeofE parseType
+      fmap AlignofE parseType
 
 -- Parse an expression that began with an identifier 
 basicExprWithIdentifier :: String -> P (Expr Parsed)
