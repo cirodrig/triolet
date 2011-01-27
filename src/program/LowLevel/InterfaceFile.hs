@@ -82,11 +82,24 @@ mkImport pre_import = label `seq` -- Verify that label is valid
 
 -------------------------------------------------------------------------------
 
+-- | A module interface, declaring the symbols imported and exported by a
+--   module.  A variable appears in the export list (possibly with a
+--   definition) if it is defined by the module.  A variable appears in the
+--   import list if it is used by the module.  A variable never appears in
+--   both lists.
+--
+--   The invariants on variable IDs are not maintained across modules or
+--   module interfaces.  Specifically, most of the compiler assumes that
+--   every variable has a unique ID, and the global ID counter is larger
+--   than the largest variable ID.  A module interface loaded from a file
+--   doesn't necessarily satisfy the invariant.  The
+--   'addInterfaceToModuleExports' function renames variables to
+--   re-establish the invariant.
 data Interface =
   Interface
   { -- | Symbols imported by the interface.  These variables
     --   must not have a definition.
-    ifaceImports :: [Import] 
+    ifaceImports :: [Import]
     -- | Symbols exported by the interface.  These variables may have a
     --   definition.
   , ifaceExports :: [Import]
