@@ -24,7 +24,7 @@ import Paths
 import CParser.PrettyAST()
 
 predefinedVarDetails :: [(String, VarDetails)]
-predefinedVarDetails = map mk_var_details (pureV : allBuiltinVars)
+predefinedVarDetails = map mk_var_details (pureV : intindexV : allBuiltinVars)
   where
     mk_var_details v = (name, PredefinedVar v)
       where

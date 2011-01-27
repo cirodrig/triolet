@@ -19,8 +19,8 @@ module Type.Type(module Type.Var,
                  fromTypeApp, fromVarApp,
                  pureFunType, funType,
                  fromFunType, fromPureFunType,
-                 kindT, pureT,
-                 kindV, pureV,
+                 kindT, pureT, intindexT,
+                 kindV, pureV, intindexV,
                  firstAvailableVarID,
                  pprType, pprParam, pprReturn)
 where
@@ -195,14 +195,17 @@ instance HasLevel Var => HasLevel Type where
 kindT, pureT :: Type
 kindT = VarT kindV
 pureT = VarT pureV
+intindexT = VarT intindexV
 
 kindV, pureV :: Var
 
 kindV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "kind") SortLevel
 pureV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "pure") KindLevel
+intindexV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
 
 kindVarID = toIdent 1
 pureVarID = toIdent 2
+intindexVarID = toIdent 3
 
 -- | The first variable ID that's not reserved for predefined variables
 firstAvailableVarID :: VarID

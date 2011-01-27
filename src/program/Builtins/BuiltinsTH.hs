@@ -22,6 +22,7 @@ pyonBuiltinTypeNames =
   , "Stream"
   , "Boxed"
   , "Referenced"
+  , "IndexedInt"
     
     -- Dictionary types
   , "Repr"
@@ -44,6 +45,7 @@ pyonBuiltinVariableNames =
   , "pyonTuple3"
   , "boxed"
   , "referenced"
+  , "indexedInt"
 
     -- Class constructors
   , "traversableDict"
@@ -124,6 +126,14 @@ pyonBuiltinVariableNames =
   , "MultiplicativeDict_float_mul"
   , "MultiplicativeDict_float_fromInt"
   , "MultiplicativeDict_float_one"
+
+    -- Integer index arithmetic 
+  , "zero_i"
+  , "plus_i"
+  , "minus_i"
+  , "zero_ii"
+  , "plus_ii"
+  , "minus_ii"
 
     -- Built-in functions
   , "oper_DO"
