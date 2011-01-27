@@ -7,6 +7,7 @@ License-File:	LICENSE
 Stability:	experimental
 Author:		Christopher Rodrigues
 Build-Type:	Custom
+Tested-With:	GHC == 6.12.1, GHC == 6.12.3
 
 Data-Dir:	dist/build/data
 Data-Files:
