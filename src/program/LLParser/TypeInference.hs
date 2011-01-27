@@ -20,7 +20,7 @@ inferred given the expression itself and the type environment.
 -}
 
 {-# LANGUAGE TypeFamilies, FlexibleInstances, ScopedTypeVariables,
-  RecursiveDo, Rank2Types, EmptyDataDecls, StandaloneDeriving,
+  DoRec, Rank2Types, EmptyDataDecls, StandaloneDeriving,
   TypeSynonymInstances #-}
 module LLParser.TypeInference
        (Typed, TExp(..), NamedType(..), TypedRecord(..), TypeSynonym(..),
@@ -83,8 +83,8 @@ instance Show TExp where
 --   evaluation if we try to show them during type inference, because of
 --   how they interace with name lookup.
 instance Show TypedRecord where
-  show rec = 
-    case rec
+  show recd = 
+    case recd
     of TypedRecord nm xs
          | null xs -> nm
          | otherwise -> 
@@ -258,8 +258,8 @@ instance Monad NR where
     runNR (k x) ctx env' errs'
 
 instance MonadFix NR where
-  mfix f = NR $ \ctx env errs -> mdo
-    rv@(x, env', errs') <- runNR (f x) ctx env errs
+  mfix f = NR $ \ctx env errs -> do
+    rec rv@(x, env', errs') <- runNR (f x) ctx env errs
     return rv
 
 instance Supplies NR (Ident LL.Var) where
@@ -295,15 +295,15 @@ throwErrorMaybe err = NR $ \_ env errs ->
 -- | Enter a recursive scope.  Start building a local dictionary; pass the
 -- final dictionary back in as input when done.
 enterRec :: NR a -> NR a
-enterRec m = NR $ \ctx env errs -> mdo
-  let init_local_scope =
-        RecScope { completeDict = partialDict (head $ currentScope env')
-                 , partialDict = emptyDict
-                 }
-      init_env = env {currentScope = init_local_scope : currentScope env}
-  (x, env', errs') <- runNR m ctx init_env errs
-  let env'' = Env { nextTypeParameter = nextTypeParameter env
-                  , currentScope = tail $ currentScope env'}
+enterRec m = NR $ \ctx env errs -> do
+  rec { let init_local_scope =
+             RecScope { completeDict = partialDict (head $ currentScope env')
+                      , partialDict = emptyDict
+                      }
+            init_env = env {currentScope = init_local_scope : currentScope env}
+        ; (x, env', errs') <- runNR m ctx init_env errs
+        ; let env'' = Env { nextTypeParameter = nextTypeParameter env
+                          , currentScope = tail $ currentScope env'} }
   return (x, env'', errs')
 
 -- | Enter a nonrecursvie scope.
@@ -512,9 +512,9 @@ expectRecordType message ty = throwErrorMaybe $
      _ -> Just message
 
 convertToStaticRecord :: TypedRecord -> StaticRecord
-convertToStaticRecord rec =
+convertToStaticRecord recd =
   let field_types = [(m, convertToStaticFieldType t)
-                    | FieldDef m t _ <- typedRecordFields rec]
+                    | FieldDef m t _ <- typedRecordFields recd]
   in staticRecord field_types
 
 convertToValueType :: Type Typed -> ValueType
@@ -971,8 +971,8 @@ resolveLValue lvalue ty =
     pass = return ()
 
 resolveField :: Field Parsed -> NR (TypeParametric (Field Typed))
-resolveField (Field rec fnames mtype) = do 
-  record' <- resolveType0 rec
+resolveField (Field recd fnames mtype) = do 
+  record' <- resolveType0 recd
   mtype' <- traverse resolveType mtype
   fnames' <- mapM resolveFieldSpec fnames
   return $ Field record' <$> sequenceA fnames' <*> sequenceA mtype'
@@ -990,8 +990,8 @@ fieldType ty flds =
   in case flds
      of RecordFS fname : flds ->
           case real_ty
-          of NamedT (RecordT rec) ->
-               fieldType (record_field_type rec fname) flds
+          of NamedT (RecordT recd) ->
+               fieldType (record_field_type recd fname) flds
              _ ->
                error $ "Non-record type does not have field '" ++ fname ++ "'"
         ArrayFS _ : flds ->
@@ -1000,8 +1000,8 @@ fieldType ty flds =
              _ -> error "Base of array index expression is not an array"
         [] -> ty
   where
-    record_field_type rec fname =
-      case find (\(FieldDef _ _ nm) -> nm == fname) $ typedRecordFields rec
+    record_field_type recd fname =
+      case find (\(FieldDef _ _ nm) -> nm == fname) $ typedRecordFields recd
       of Just (FieldDef _ t _) -> t
          Nothing -> error $ "Record type does not have field '" ++ fname ++ "'"
 

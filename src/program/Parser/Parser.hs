@@ -8,7 +8,7 @@
 -- names and redefinitions of parameter variables, are detected here. 
 -}
 
-{-# LANGUAGE FlexibleInstances, RecursiveDo #-}
+{-# LANGUAGE FlexibleInstances, DoRec #-}
 module Parser.Parser(convertStatement, convertModule, parseModule)
 where
 
@@ -211,7 +211,8 @@ instance Applicative Cvt where
 -- We do things slightly differently at global scope, since there's no next
 -- scope to propagate to.
 enter_ :: Bool -> Cvt a -> Cvt a
-enter_ isGlobalScope m = Cvt $ \initialState -> mdo
+enter_ isGlobalScope m = Cvt $ \initialState -> do
+  rec { 
   -- Run the local computation in a modified environment
   (final, localUses, localDefs, result) <- do
     ret <- run m $ addNewScope final initialState
@@ -224,19 +225,19 @@ enter_ isGlobalScope m = Cvt $ \initialState -> mdo
 
   -- Nonlocal variables, plus uses that are not satisfied locally,
   -- propagate upward
-  let boundHere = Set.fromList $ mapMaybe localBindingName $ Map.elems final
-      usesNotBoundHere = Set.fromList $
-                         Map.keys $
-                         Map.filter isNonlocalUse final
-      defsNotBoundHere = Set.fromList $
-                         Map.keys $
-                         Map.filter isNonlocalDef final
-      nonlocalUses = Set.union
-                     (localUses `Set.difference` boundHere)
-                     usesNotBoundHere
-      nonlocalDefs = Set.union
-                     (localDefs `Set.difference` boundHere)
-                     defsNotBoundHere
+  ; let boundHere = Set.fromList $ mapMaybe localBindingName $ Map.elems final
+        usesNotBoundHere = Set.fromList $
+                           Map.keys $
+                           Map.filter isNonlocalUse final
+        defsNotBoundHere = Set.fromList $
+                           Map.keys $
+                           Map.filter isNonlocalDef final
+        nonlocalUses = Set.union
+                       (localUses `Set.difference` boundHere)
+                       usesNotBoundHere
+        nonlocalDefs = Set.union
+                       (localDefs `Set.difference` boundHere)
+                       defsNotBoundHere }
   return $! case result
             of Right (finalState, resultValue) ->
                  OK finalState nonlocalUses nonlocalDefs resultValue

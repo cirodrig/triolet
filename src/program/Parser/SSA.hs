@@ -1,5 +1,5 @@
 
-{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE DoRec #-}
 module Parser.SSA
        (JoinNode(..),
         FallthroughCount(..),
@@ -338,9 +338,10 @@ ssaSuite suite = do
   (stmts, ctl) <- regularizeControl False suite
   ssa_suite stmts ctl
   where
-    ssa_suite (stm:stms) ctl = mdo
+    ssa_suite (stm:stms) ctl = do
+      rec { 
       (hasret1, stm') <- ssaStmt (head stms') stm
-      ((retid, hasret2, hasft, joinrefs), stms') <- ssa_suite stms ctl
+      ; ((retid, hasret2, hasft, joinrefs), stms') <- ssa_suite stms ctl }
       return ((retid, hasret1 || hasret2, hasft, joinrefs), stm':stms')
 
     ssa_suite [] ctl = do

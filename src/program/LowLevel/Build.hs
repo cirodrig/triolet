@@ -1,5 +1,5 @@
 
-{-# LANGUAGE ViewPatterns, FlexibleInstances, FlexibleContexts, NoMonomorphismRestriction, ScopedTypeVariables, RecursiveDo #-}
+{-# LANGUAGE ViewPatterns, FlexibleInstances, FlexibleContexts, NoMonomorphismRestriction, ScopedTypeVariables, DoRec #-}
 module LowLevel.Build where
 
 import Control.Monad
@@ -47,8 +47,8 @@ instance MonadIO m => MonadIO (Gen m) where
                            return (x, mempty))
 
 instance MonadFix m => MonadFix (Gen m) where
-  mfix f = Gen (\rt -> mdo rv@(x, stms) <- case f x of Gen m -> m rt
-                           return rv)
+  mfix f = Gen (\rt -> do rec rv@(x, stms) <- case f x of Gen m -> m rt
+                          return rv)
 
 instance MonadTrans Gen where
   lift m = Gen (\_ -> do x <- m
@@ -402,17 +402,17 @@ instance ToDynamicRecordData Val where
   toDynamicFieldType x = x
 
 instance ToDynamicRecordData Int where
-  toDynamicRecord rec = let
-    fs = map toDynamicField $ recordFields rec
-    size = nativeWordV $ recordSize rec
-    alignment = nativeWordV $ recordAlignment rec
+  toDynamicRecord recd = let
+    fs = map toDynamicField $ recordFields recd
+    size = nativeWordV $ recordSize recd
+    alignment = nativeWordV $ recordAlignment recd
     in record fs size alignment
 
   toDynamicField (Field off m ty) =
     Field (nativeIntV off) m (toDynamicFieldType ty)
 
   toDynamicFieldType (PrimField t) = PrimField t
-  toDynamicFieldType (RecordField rec) = RecordField $ toDynamicRecord rec
+  toDynamicFieldType (RecordField recd) = RecordField $ toDynamicRecord recd
   toDynamicFieldType (BytesField s a) =
         BytesField (nativeWordV s) (nativeWordV a)
 
@@ -554,10 +554,10 @@ addRecordPadding off alignment
 
 fromPrimType :: DynamicFieldType -> ValueType
 fromPrimType (PrimField ty) = PrimType ty
-fromPrimType (RecordField rec) =
-  let sz = from_lit $ recordSize rec
-      al = from_lit $ recordAlignment rec
-      fs = map from_dynamic_field $ recordFields rec
+fromPrimType (RecordField recd) =
+  let sz = from_lit $ recordSize recd
+      al = from_lit $ recordAlignment recd
+      fs = map from_dynamic_field $ recordFields recd
   in RecordType $ Rec fs sz al
   where
     from_dynamic_field fld =

@@ -37,7 +37,7 @@ register sizes; so, for example, a bool is stored as a native integer.
 
 -}
 
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, RecursiveDo, ViewPatterns #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances, DoRec, ViewPatterns #-}
 module LowLevel.ClosureCode
        (varPrimType,
         GenM, CC,
@@ -287,16 +287,16 @@ withLocalFunctions :: [FunDef]          -- ^ Function definitions
                    -> (GenM () -> CC a) -- ^ Incorporate the closure code
                                         -- generator into the program
                    -> CC a
-withLocalFunctions defs scan gen = check_functions $ mdo
+withLocalFunctions defs scan gen = check_functions $ do
   -- Create recursive function closures
-  clos <- mkRecClosures defs captureds
+  rec { clos <- mkRecClosures defs captureds
   
   -- Scan functions
-  (unzip -> ~(funs, captureds)) <- localClosures clos scan
+        ; (unzip -> ~(funs, captureds)) <- localClosures clos scan
 
   -- Generate closure code
-  (defs', gen_code) <- runFreshVarCC $ emitRecClosures clos funs
-  writeDefs defs'
+        ; (defs', gen_code) <- runFreshVarCC $ emitRecClosures clos funs
+        ; writeDefs defs' }
   
   -- Generate remaining code
   localClosures clos $ gen gen_code
