@@ -4,9 +4,9 @@
 data val bool : val pure
 {
   True : val bool,
-  () () : val bool;
+  () () () : val bool;
   False : val bool,
-  () () : val bool;
+  () () () : val bool;
 };
 
 data val int : val pure {};
@@ -14,7 +14,7 @@ data val float : val pure {};
 data val NoneType : val pure
 {
   None : val NoneType,
-  () () : val NoneType;
+  () () () : val NoneType;
 };
 
 data ref Repr : val (val pure -> val pure) {};
@@ -25,21 +25,21 @@ data ref list : val (val pure -> val pure) {};
 data box Boxed : val (val pure -> val pure)
 {
   boxed : (val a : pure) -> write a -> box Boxed a,
-  (val a : pure) (read a) : box Boxed a;
+  (val a : pure) () (read a) : box Boxed a;
 };
 
 -- This data structure has a special representation
 data ref Referenced : val (val pure -> val pure)
 {
   referenced : (val a : pure) -> write a -> write Referenced a,
-  (val a : pure) (read a) : read Referenced a;
+  (val a : pure) () (read a) : read Referenced a;
 };
 
 data ref PyonTuple2 : val (val pure -> val pure -> val pure)
 {
   pyonTuple2 : (val a : pure) -> (val b : pure)
             -> write a -> write b -> write PyonTuple2 a b,
-  (val a : pure, val b : pure) (read a, read b) : read PyonTuple2 a b;
+  (val a : pure, val b : pure) () (read a, read b) : read PyonTuple2 a b;
 };
 
 data ref AdditiveDict : val (val pure -> val pure)
@@ -50,10 +50,11 @@ data ref AdditiveDict : val (val pure -> val pure)
               -> box (read a -> write a)
               -> write a
               -> write AdditiveDict a,
-  (val a : pure) (box (read a -> read a -> write a),
-       	   	  box (read a -> read a -> write a),
-		  box (read a -> write a),
-		  read a) : read AdditiveDict a;
+  (val a : pure) ()
+  (box (read a -> read a -> write a),
+   box (read a -> read a -> write a),
+   box (read a -> write a),
+   read a) : read AdditiveDict a;
 };
 
 data ref MultiplicativeDict : val (val pure -> val pure)
@@ -64,10 +65,11 @@ data ref MultiplicativeDict : val (val pure -> val pure)
                     -> box (val int -> write a)
                     -> write a
                     -> write MultiplicativeDict a,
-  (val a : pure) (read AdditiveDict a,
-                  box (read a -> read a -> write a),
-                  box (val int -> write a),
-                  read a) : read MultiplicativeDict a;
+  (val a : pure) ()
+  (read AdditiveDict a,
+   box (read a -> read a -> write a),
+   box (val int -> write a),
+   read a) : read MultiplicativeDict a;
 };
 
 data ref TraversableDict : val (val (val pure -> val pure) -> val pure)
@@ -77,7 +79,7 @@ data ref TraversableDict : val (val (val pure -> val pure) -> val pure)
    -> box ((val a : pure) -> read Repr a -> read t a -> box Stream a)
    -> box ((val a : pure) -> read Repr a -> box Stream a -> write t a)
    -> write TraversableDict t,
-  (val t : val pure -> val pure)
+  (val t : val pure -> val pure) ()
   (box ((val a : pure) -> read Repr a -> read t a -> box Stream a),
    box ((val a : pure) -> read Repr a -> box Stream a -> write t a))
   : read TraversableDict t;

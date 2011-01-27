@@ -113,8 +113,13 @@ data DataConDecl ix =
   DataConDecl
   { dconVar :: Identifier ix
   , dconType :: ReturnType ix
+    -- | Type parameters
   , dconParams :: [ParamType ix]
+    -- | Existential types
+  , dconExTypes :: [ParamType ix]
+    -- | Fields
   , dconArgs :: [ReturnType ix]
+    -- | Type of the constructed value
   , dconRng :: ReturnType ix
   }
 

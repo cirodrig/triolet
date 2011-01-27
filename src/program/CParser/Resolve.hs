@@ -203,14 +203,18 @@ resolveModuleNR (Module dlist) = do
   rlist <- enter $ mapM resolveDecl dlist
   return $ Module rlist
 
-resolveDataConDecl (L pos (DataConDecl v ty params args rng)) = do
+resolveDataConDecl (L pos (DataConDecl v ty params ex_types args rng)) = do
   rVar <- globalDef v pos
   rType <- enter $ resolveReturnType ty
   enter $ do
     rParams <- mapM resolveParamType params
-    rArgs <- mapM resolveReturnType args
+    (rExTypes, rArgs) <- enter $ do
+      rExTypes <- mapM resolveParamType ex_types
+      rArgs <- mapM resolveReturnType args
+      return (rExTypes, rArgs)
+    -- The return type may not mention existential variables
     rRng <- resolveReturnType rng
-    return $ L pos $ DataConDecl rVar rType rParams rArgs rRng
+    return $ L pos $ DataConDecl rVar rType rParams rExTypes rArgs rRng
 
 resolveDecl :: (Located (Decl Parsed)) -> NR (Located (Decl Resolved))
 resolveDecl (L pos decl) =

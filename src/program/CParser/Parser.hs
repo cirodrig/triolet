@@ -198,11 +198,12 @@ dataConDecl = located $ do
   match ColonTok
   declType <- returnType
   match CommaTok
-  params <- parens $ anyParamT `sepBy` match CommaTok
-  args <- parens $ returnType `sepBy` match CommaTok
+  params <- parens $ anyParamT `sepBy` match CommaTok -- Forall types
+  ex_params <- parens $ anyParamT `sepBy` match CommaTok -- Existential types
+  args <- parens $ returnType `sepBy` match CommaTok     -- Fields
   match ColonTok
   rng <- returnType
-  return $ DataConDecl declVar declType params args rng
+  return $ DataConDecl declVar declType params ex_params args rng
 
 -- No restrictions on what comes next in the token stream
 anyPType :: P PType

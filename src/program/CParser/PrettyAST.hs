@@ -74,12 +74,20 @@ instance Pretty (Identifier ix) => Pretty (ReturnType ix) where
     in repr_doc $$ pprWithHeading "Type" rtype
 
 instance Pretty (Identifier ix) => Pretty (DataConDecl ix) where
-  ppr (DataConDecl v ty params args rng) =
-    pprWithHeading "Variable" v $$
-    pprWithHeading "Type" ty $$
-    (vcat $ map ppr params) $$ 
-    (vcat $ map ppr args) $$ 
-    pprWithHeading "Constructed type" rng
+  ppr (DataConDecl v ty params ex_types args rng) =
+    let ex_types_doc =
+          if null ex_types
+          then empty
+          else hang (text "Existential types") 2 $ vcat (map ppr ex_types)
+        params_doc =
+          if null params
+          then empty
+          else hang (text "Type parameters") 2 $ vcat (map ppr params)
+    in pprWithHeading "Variable" v $$
+       pprWithHeading "Type" ty $$
+       ex_types_doc $$
+       params_doc $$
+       pprWithHeading "Constructed type" rng
 
 instance Pretty (Identifier ix) => Pretty (Decl ix) where
   ppr dec =

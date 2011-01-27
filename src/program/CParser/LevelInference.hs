@@ -61,13 +61,14 @@ liModule (Module rlist) = do
    lilist <- mapM (\x -> traverse (liDecl Map.empty) x) rlist
    return $ Module lilist
 
-liDataConDecl lmap (DataConDecl v ty params args rng) = do
+liDataConDecl lmap (DataConDecl v ty params ex_types args rng) = do
   liType <- liReturnType lmap ty
   (liVar, _) <- predLvl (getLevel liType) v lmap
   (liParams, lmap') <- liParamTypes lmap params
-  liArgs <- mapM (liReturnType lmap') args
-  liRng <- liReturnType lmap' rng
-  return $ DataConDecl liVar liType liParams liArgs liRng
+  (liExTypes, lmap'') <- liParamTypes lmap' ex_types
+  liArgs <- mapM (liReturnType lmap'') args
+  liRng <- liReturnType lmap'' rng
+  return $ DataConDecl liVar liType liParams liExTypes liArgs liRng
 
 -- Check the Type's level, then infer
 liDecl :: LMap -> (Decl Resolved) -> IO (Decl LevelInferred)
