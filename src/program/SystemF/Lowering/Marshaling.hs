@@ -6,6 +6,8 @@ module SystemF.Lowering.Marshaling(createCMarshalingFunction,
                                    getCExportSig)
 where
 
+import Data.Maybe
+
 import Common.Error
 import Builtins.Builtins
 import qualified LowLevel.CodeTypes as LL
@@ -123,7 +125,7 @@ marshalCReturn ty =
 -- | Wrap the lowered function 'f' in marshaling code for C.  Produce a
 -- primitive function.
 createCMarshalingFunction :: ExportSig -> LL.Fun -> Lower LL.Fun
-createCMarshalingFunction (CExportSig dom rng) f = do
+createCMarshalingFunction sig@(CExportSig dom rng) f = do
   -- Generate marshaling code
   marshal_params <- mapM marshalCParameter dom
   marshal_return <- marshalCReturn rng
@@ -162,9 +164,37 @@ getCExportSig :: Type -> ExportSig
 getCExportSig ty =
   case fromFunType ty
   of (params, return) ->
-       let param_types = [getCExportType t | _ ::: t <- params]
-           return_type = case return of _ ::: t -> getCExportType t
+       let param_types = mapMaybe get_param_export_type params
+           return_type = get_return_export_type params return
        in CExportSig param_types return_type
+  where
+    get_param_export_type (prepr ::: ty) =
+      case prepr
+      of ValPT _ -> Just $ getCExportType ty
+         BoxPT -> Just $ getCExportType ty
+         ReadPT -> Just $ getCExportType ty
+         OutPT -> Nothing
+         _ -> internalError "getCExportSig: Unexpected type"
+
+    -- If the function returns a value, then return that value
+    -- If it returns by writing a pointer, then return the output object
+    get_return_export_type params (rrepr ::: ty) =
+      let return_type =
+            case rrepr
+            of ValRT -> Just $ getCExportType ty
+               BoxRT -> Just $ getCExportType ty
+               SideEffectRT -> Nothing
+               _ -> internalError "getCExportSig: Unexpected type"
+          param_type =
+            if null params
+            then Nothing
+            else case last params
+                 of OutPT ::: pty -> Just $ getCExportType pty
+                    _ -> Nothing
+      in case (param_type, return_type)
+         of (Just t, Nothing) -> t
+            (Nothing, Just t) -> t
+            _ -> internalError "getCExportSig: Unexpected type"
 
 getCExportType :: Type -> ExportDataType
 getCExportType ty =

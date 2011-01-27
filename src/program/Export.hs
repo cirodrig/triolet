@@ -36,6 +36,7 @@ data ExportDataType =
   | PyonComplexFloatET          -- ^ Pyon complex float type
   | CIntET                      -- ^ C int type
   | CFloatET                    -- ^ C float type
+    deriving(Show)
 
 -- | An exported function signature
 data ExportSig =
@@ -44,4 +45,4 @@ data ExportSig =
     PyonExportSig
     -- | Exported to C.  The C type signature is given here.
   | CExportSig [ExportDataType] ExportDataType
-    
+    deriving(Show)
