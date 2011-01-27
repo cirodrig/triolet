@@ -9,7 +9,7 @@ module pyon.internal.structures;
 #include "list.h"
 import procedure exit (int) -> ();
 
-#include "pyasm_records.h"
+#include "new_pyasm_records.h"
 
 // Representation of Repr objects
 data pointer repr_Repr_value = PassConv {

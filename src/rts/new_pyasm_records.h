@@ -35,7 +35,6 @@ record FunInfo(n_args) {
 
 // Additive dictionary
 record AdditiveDict(a) {
-  const PassConv repr;		// Represesntation of the data type
   const owned add;			// Add two values
   const owned subtract;		// A value minus another
   const owned negate;			// Negate a value
@@ -62,7 +61,13 @@ record complex(a) {
   const a imag;
 };
 
-// Pairs of objects; 2-tuples
+// Pyon 2-tuples
+record PyonTuple2(a, b) {
+  const a member1;
+  const b member2;
+};
+
+// Pairs of objects
 record Pair(a) {
   a fst;
   a snd;
