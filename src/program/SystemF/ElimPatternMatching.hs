@@ -146,7 +146,7 @@ elimPMPat pos pat@(TupleP ps) = do
   let transformer' code =
         let new_info = mkExpInfo pos
             body = transformer code
-            alt = Alt (pyonTupleCon tuple_size) field_types fields body
+            alt = Alt (pyonTupleCon tuple_size) field_types [] fields body
         in ExpSF $ CaseE new_info (ExpSF $ VarE new_info pat_var) [AltSF alt]
 
   return (VarP pat_var new_pat_type, transformer')

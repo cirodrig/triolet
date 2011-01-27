@@ -58,10 +58,19 @@ data DataType =
 -- | Describes how a data constructor behaves in a pattern matchi
 data DataConType =
   DataConType
-  { -- | Parameters (passed as arguments)
+  { -- | Type parameters.  Type parameters are passed as arguments when 
+    --   constructing a value and when deconstructing it.
+    --   These must be value patterns (@ValPT _@).
     dataConPatternParams :: [ParamType]
 
-    -- | Arguments (bound to variables)
+    -- | Existential types.  These are passed
+    --   as arguments when constructing a value, and matched as paramters
+    --   when deconstructing it.  They have no run-time representation.
+    --   These must be dependent value patterns (@ValPT (Just _)@).
+  , dataConPatternExTypes :: [ParamType]
+
+    -- | Fields.  These are passed as arguments when constructing a value,
+    -- and matched as parameters when deconstructing it.
   , dataConPatternArgs :: [ReturnType]
 
     -- | Type of the constructed value.
@@ -151,8 +160,9 @@ convertToPureType ty =
      AppT op arg -> AppT (convertToPureType op) (convertToPureType arg)
      FunT arg ret -> FunT (convertToPureParamType arg) (convertToPureReturnType ret)
 
-convertToPureDataConType (DataConType params args range ty_con) =
+convertToPureDataConType (DataConType params eparams args range ty_con) =
   DataConType (map convertToPureParamType params)
+              (map convertToPureParamType eparams)
               (map convertToPureReturnType args)
               (convertToPureReturnType range)
               ty_con
@@ -200,8 +210,9 @@ convertToMemType ty =
      AppT op arg -> AppT (convertToMemType op) (convertToMemType arg)
      FunT arg ret -> FunT (convertToMemParamType arg) (convertToMemReturnType ret) 
 
-convertToMemDataConType (DataConType params args range ty_con) =
+convertToMemDataConType (DataConType params eparams args range ty_con) =
   DataConType (map convertToMemParamType params)
+              (map convertToMemParamType eparams)
               (map convertToMemReturnType args)
               (convertToMemReturnType range)
               ty_con

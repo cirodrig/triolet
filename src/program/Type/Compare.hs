@@ -1,12 +1,15 @@
 
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
 module Type.Compare
-       (compareTypes,
+       (typeMentions,
+        typeMentionsAny,
+        compareTypes,
         unifyTypeWithPattern
        )
 where
 
 import Control.Monad.Reader
+import qualified Data.Set as Set
 import qualified Data.IntMap as IntMap
 
 import Common.Identifier
@@ -16,6 +19,30 @@ import Common.Supply
 import Type.Environment
 import Type.Rename
 import Type.Type
+
+-- | Determine whether the type mentions a variable.
+--   It's assumed that name shadowing does /not/ occur.  If a variable is
+--   defined somewhere inside the type and then used, that counts as a mention.
+--   
+typeMentions :: Type -> Var -> Bool
+typeMentions t target = search t
+  where
+    search (VarT v) = v == target
+    search (AppT op arg) = search op || search arg
+    search (FunT (_ ::: dom) (_ ::: rng)) = search dom || search rng
+
+-- | Determine whether the type mentions a variable in the set.
+--   It's assumed that name shadowing does /not/ occur.  If a variable is
+--   defined somewhere inside the type and then used, that counts as a mention.
+--   
+typeMentionsAny :: Type -> Set.Set Var -> Bool
+typeMentionsAny t target = search t
+  where
+    search (VarT v) = v `Set.member` target
+    search (AppT op arg) = search op || search arg
+    search (FunT (_ ::: dom) (_ ::: rng)) = search dom || search rng
+
+-------------------------------------------------------------------------------
 
 data CmpEnv =
   CmpEnv

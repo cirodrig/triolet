@@ -822,7 +822,9 @@ mkGlobalEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
                     -> Var            -- ^ Global closure variable
                     -> m EntryPoints  -- ^ Creates an EntryPoints structure
 mkGlobalEntryPoints ftype label global_closure
-  | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
+  | not $ ftIsClosure ftype =
+    internalError $
+    "mkGlobalEntryPoints: Not a closure function: " ++ show global_closure
   | otherwise = do
       inf <- newVar (Just label) (PrimType PointerType)
       dir <- make_entry_point DirectEntryLabel
@@ -848,7 +850,8 @@ mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
               -> Maybe Label    -- ^ Function name
               -> m EntryPoints  -- ^ Creates an EntryPoints structure
 mkEntryPoints want_dealloc want_vec ftype label
-  | ftIsPrim ftype = internalError "mkEntryPoints: Not a closure function"
+  | not $ ftIsClosure ftype =
+    internalError "mkEntryPoints: Not a closure function"
   | otherwise = do
       [inf, dir, exa, ine] <-
         replicateM 4 $ newVar label (PrimType PointerType)

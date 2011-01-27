@@ -68,7 +68,8 @@ assumeVarG v return_type k = liftT1 (assumeVar v return_type) k
 assumeVar :: Var -> ReturnType -> (LL.Var -> Lower a) -> Lower a
 assumeVar v rt k = do
   tenv <- getTypeEnv
-  case lowerReturnType tenv rt of
+  rtype <- liftFreshVarM $ lowerReturnType tenv rt 
+  case rtype of
     Just t -> assumeVariableWithType v t $ \ll_var ->
       assumeBoundReprDict rt ll_var (k ll_var)
     Nothing -> internalError "assumeVar: Unexpected representation"
@@ -209,7 +210,7 @@ calculateScrutineeLayout :: ReturnType
                          -> Lower (Either ValueLayout PointerLayout)
 calculateScrutineeLayout rt = do
   env <- getTypeEnv
-  return $ typeLayout env rt
+  liftFreshVarM $ typeLayout env rt
 
 -- | A case alternative generator, given the all the field values,
 --   will generate the code of the case statement.  The code returns
@@ -344,39 +345,40 @@ compileStore :: Type -> ExpTM -> ExpTM -> GenLower Code
 compileStore store_type value address = do
   -- Determine layout of this value
   tenv <- lift getTypeEnv
-  let value_type = lowerValueType tenv store_type
+  value_type <- lift $ liftFreshVarM $ lowerValueType tenv store_type
 
   -- Generate the value and store it
   arg_val <- asVal =<< lowerExp value
   dst_val <- asVal =<< lowerExp address
-  let atom = LL.PrimA (LL.PrimStore LL.Mutable value_type) [dst_val,
-                                                            nativeIntV 0,
-                                                            arg_val]
+  let primop = LL.PrimStore LL.Mutable value_type
+      atom = LL.PrimA primop [dst_val, nativeIntV 0, arg_val]
   return $ atomCode [] atom
 
 compileLoad :: Type -> ExpTM -> GenLower Code
 compileLoad load_type address = do
   -- Determine layout of this value
   tenv <- lift getTypeEnv
-  let value_type = lowerValueType tenv load_type
+  value_type <- lift $ liftFreshVarM $ lowerValueType tenv load_type
 
   -- Load it
   src_val <- asVal =<< lowerExp address
-  let atom = LL.PrimA (LL.PrimLoad LL.Mutable value_type) [src_val,
-                                                           nativeIntV 0]
+  let primop = LL.PrimLoad LL.Mutable value_type
+  let atom = LL.PrimA primop [src_val, nativeIntV 0]
   return $ atomCode [value_type] atom
 
 -- | Compile a data constructor.  If the data constructor takes no   
 --   arguments, the constructor value is returned; otherwise a function 
 --   is returned.  All type arguments must be provided.
 compileConstructor :: Var -> DataConType -> [Type] -> GenLower Code
-compileConstructor con con_type ty_args =
-  lift (calculateScrutineeLayout result_type) >>= make_code
+compileConstructor con con_type ty_args = do
+  (_, field_types, result_type) <-
+    lift $ liftFreshVarM $
+    instantiateDataConTypeWithFreshVariables con_type ty_args
+  lift (calculateScrutineeLayout result_type) >>= make_code field_types
   where
-    (field_types, result_type) = instantiateDataConType con_type ty_args
   
-    make_code :: Either ValueLayout PointerLayout -> GenLower Code
-    make_code (Left value_layout) =
+    make_code :: [ReturnType] -> Either ValueLayout PointerLayout -> GenLower Code
+    make_code field_types (Left value_layout) =
       case value_layout
       of ScalarValue con LL.UnitType -> return $ valCode (LL.LitV LL.UnitL)
          EnumValue ty disjuncts      -> compileEnumValueCtor con ty disjuncts
@@ -384,7 +386,7 @@ compileConstructor con con_type ty_args =
            case valueLayoutType value_layout
            of LL.RecordType rt -> compileRecordValueCtor con rt field_types
 
-    make_code (Right pointer_layout) = do
+    make_code field_types (Right pointer_layout) = do
       ll_record <- pointerLayoutRecord pointer_layout
       case pointer_layout of
         IndirectReference is_boxed layouts ->
@@ -405,7 +407,8 @@ compileRecordValueCtor con rt field_types = lift $ do
   let record_fields = LL.recordFields rt
   
   -- Create a parameter for each field
-  let ll_param_types = [lowerValueType tenv ty | _ ::: ty <- field_types]
+  ll_param_types <-
+    liftFreshVarM $ sequence [lowerValueType tenv ty | _ ::: ty <- field_types]
   params <- mapM LL.newAnonymousVar ll_param_types
   
   -- Build a record out of the parameers
@@ -592,14 +595,14 @@ lowerApp rt op ty_args args = do
       let argument_types = [t | TypTM (RTypeAnn _ t) <- ty_args]
       op' <- asVal =<< compileConstructor op_var op_data_con argument_types
       args' <- mapM (asVal <=< lowerExp) args
-      let returns = lowerFunctionReturn tenv rt
+      returns <- lift $ liftFreshVarM $ lowerFunctionReturn tenv rt
       return $ atomCode returns (LL.closureCallA op' args')
 
     lower_function tenv = do
       op' <- asVal =<< lowerExp op
       ty_args' <- mapM (asVal <=< lowerTypeValue) ty_args
       args' <- mapM (asVal <=< lowerExp) args
-      let returns = lowerFunctionReturn tenv rt
+      returns <- lift $ liftFreshVarM $ lowerFunctionReturn tenv rt
       return $ atomCode returns (LL.closureCallA op' (ty_args' ++ args'))
 
 lowerLam _ f = do
@@ -653,7 +656,8 @@ lowerFun (FunTM (RTypeAnn _ fun)) =
   withMany lower_type_param (funTyParams fun) $ \ty_params ->
   withMany lower_param (funParams fun) $ \params -> do
     tenv <- getTypeEnv
-    let returns = lowerFunctionReturn tenv $ fromRetTM $ funReturn fun
+    returns <- liftFreshVarM $
+               lowerFunctionReturn tenv $ fromRetTM $ funReturn fun
     genClosureFun (ty_params ++ params) returns $ lower_body (funBody fun)
   where
     -- Types are passed, but not used.  Lower them to the unit value.
@@ -666,16 +670,6 @@ lowerFun (FunTM (RTypeAnn _ fun)) =
 
     lower_param (TypedLocalVarP {}) _ =
       internalError "lowerFun: Unexpected local variable"
-    
-    lower_return (SideEffectRT ::: _) =
-      -- If the function returns by side effect, there's no return value
-      return []
-
-    lower_return return_type = do
-      type_env <- getTypeEnv
-      return $ case typeLayout type_env return_type
-               of Left value_type -> [valueLayoutType value_type]
-                  Right _ -> [LL.PrimType LL.PointerType]
     
     lower_body body = do
       atom <- asAtom =<< lowerExp body

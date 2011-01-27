@@ -42,6 +42,13 @@ import Type.Environment
 import Type.Eval
 import Type.Type
 
+-- | Add a list of variables to the type environment. 
+--   This is called on existential variables from a data structure.
+insertExistentialVars :: [ParamType] -> TypeEnv -> TypeEnv
+insertExistentialVars params env = foldr ins env params
+  where
+    ins (ValPT (Just v) ::: ty) env = insertType v (ValRT ::: ty) env
+
 -- | A 'PolyRepr' value is a placeholder for the representation dictionary of
 --   the given type.  It is only used for polymorphic types (type variables,
 --   or type variables applied to arguments).  The type is used as a key to
@@ -136,43 +143,46 @@ valueLayoutType layout =
 
 -- | Determine the lowered type corresponding to the given data type when
 --   it is passed by value.  The data must be representable as a value.
-lowerValueType :: TypeEnv -> Type -> LL.ValueType
-lowerValueType tenv ty =
-  case typeLayout tenv (ValRT ::: ty)
-  of Left vlayout -> valueLayoutType vlayout
-     Right _ -> internalError "lowerValueType"
+lowerValueType :: TypeEnv -> Type -> FreshVarM LL.ValueType
+lowerValueType tenv ty = do
+  layout <- typeLayout tenv (ValRT ::: ty)
+  case layout of
+    Left vlayout -> return $ valueLayoutType vlayout
+    Right _ -> internalError "lowerValueType"
 
 -- | Determine the lowered type corresponding to the given data type and
 --   representation, if there is one.  Side effect types don't have a
 --   lowered equivalent.
-lowerReturnType :: TypeEnv -> ReturnType -> Maybe LL.ValueType
+lowerReturnType :: TypeEnv -> ReturnType -> FreshVarM (Maybe LL.ValueType)
 lowerReturnType tenv (rrepr ::: rtype) =
   case rrepr
-  of ValRT -> Just $ lowerValueType tenv rtype
-     BoxRT -> Just (LL.PrimType LL.OwnedType)
-     ReadRT -> Just (LL.PrimType LL.PointerType)
-     OutRT -> Just (LL.PrimType LL.PointerType)
+  of ValRT -> fmap Just $ lowerValueType tenv rtype
+     BoxRT -> return $ Just (LL.PrimType LL.OwnedType)
+     ReadRT -> return $ Just (LL.PrimType LL.PointerType)
+     OutRT -> return $ Just (LL.PrimType LL.PointerType)
      WriteRT -> internalError "lowerReturnType: Invalid representation"
-     SideEffectRT -> Nothing
+     SideEffectRT -> return Nothing
 
-lowerParamType :: TypeEnv -> ParamType -> Maybe LL.ValueType
+lowerParamType :: TypeEnv -> ParamType -> FreshVarM (Maybe LL.ValueType)
 lowerParamType tenv (prepr ::: ptype) =
   lowerReturnType tenv (paramReprToReturnRepr prepr ::: ptype)
 
-lowerFunctionReturn :: TypeEnv -> ReturnType -> [LL.ValueType]
-lowerFunctionReturn tenv rt = maybeToList $ lowerReturnType tenv rt
+lowerFunctionReturn :: TypeEnv -> ReturnType -> FreshVarM [LL.ValueType]
+lowerFunctionReturn tenv rt = fmap maybeToList $ lowerReturnType tenv rt
 
-lowerFunctionType :: TypeEnv -> Type -> LL.FunctionType
-lowerFunctionType tenv ty =
+lowerFunctionType :: TypeEnv -> Type -> FreshVarM LL.FunctionType
+lowerFunctionType tenv ty = do
   let (params, ret) = fromFunType ty
-      param_types = catMaybes $ map (lowerParamType tenv) params
-      ret_type = lowerFunctionReturn tenv ret
-  in LL.closureFunctionType param_types ret_type
+  m_param_types <- mapM (lowerParamType tenv) params
+  let param_types = catMaybes m_param_types
+  ret_type <- lowerFunctionReturn tenv ret
+  return $ LL.closureFunctionType param_types ret_type
 
 -------------------------------------------------------------------------------
 
 -- | Get the layout of a value, given its parameter type.
-paramTypeLayout :: TypeEnv -> ParamType -> Either ValueLayout PointerLayout
+paramTypeLayout :: TypeEnv -> ParamType
+                -> FreshVarM (Either ValueLayout PointerLayout)
 paramTypeLayout tenv (repr ::: ty) =
   typeLayout tenv (paramReprToReturnRepr repr ::: ty)
 
@@ -180,13 +190,15 @@ paramTypeLayout tenv (repr ::: ty) =
 --
 --   This function calls one of several internal functions to find the
 --   value's layout, depending on the given representation and type.
-typeLayout :: TypeEnv -> ReturnType -> Either ValueLayout PointerLayout
+typeLayout :: TypeEnv
+           -> ReturnType 
+           -> FreshVarM (Either ValueLayout PointerLayout)
 typeLayout tenv (repr ::: scrutinee_type) =
   case repr
-  of ValRT  -> Left $ valTypeLayout tenv scrutinee_type
-     BoxRT  -> Right $ memTypeLayout tenv scrutinee_type
-     ReadRT -> Right $ memTypeLayout tenv scrutinee_type
-     OutRT  -> Right $ memTypeLayout tenv scrutinee_type
+  of ValRT  -> fmap Left $ valTypeLayout tenv scrutinee_type
+     BoxRT  -> fmap Right $ memTypeLayout tenv scrutinee_type
+     ReadRT -> fmap Right $ memTypeLayout tenv scrutinee_type
+     OutRT  -> fmap Right $ memTypeLayout tenv scrutinee_type
      _ -> internalError "typeLayout: Unexpected representation"
 
 lookupDataTypeForLayout tenv ty 
@@ -204,7 +216,7 @@ valTypeLayout tenv ty =
        valDataTypeLayout tenv $ lookupDataTypeForLayout tenv ty
      KindLevel ->
        -- Types are erased
-       SpecialValue (LL.PrimType LL.UnitType)
+       return $ SpecialValue (LL.PrimType LL.UnitType)
      _ -> internalError "valTypeLayout"
 
 -- | Get the layout of an object field that is stored in memory.
@@ -218,10 +230,10 @@ memFieldLayout tenv ty =
           Nothing ->
             -- This field is an application of a type variable.
             -- It has an unknown layout; use runtime layout information.
-            PolyReference (PolyRepr ty)
+            return $ PolyReference (PolyRepr ty)
      Nothing ->
        case ty
-       of FunT {} -> ScalarReference OpaqueBoxedValue
+       of FunT {} -> return $ ScalarReference OpaqueBoxedValue
           _ -> internalError "memFieldLayout"
 
 -- | Get the layout of an object that is represented by reference.
@@ -229,26 +241,29 @@ memTypeLayout tenv ty =
   memDataTypeLayout tenv $ lookupDataTypeForLayout tenv ty
 
 valDataTypeLayout :: TypeEnv -> (Var, DataType, [DataConType], [Type])
-                  -> ValueLayout
+                  -> FreshVarM ValueLayout
 valDataTypeLayout tenv (tycon, data_type, con_types, ty_args)
-  | tycon `isPyonBuiltin` the_bool = bool_layout
-  | tycon `isPyonBuiltin` the_int = int_layout
-  | tycon `isPyonBuiltin` the_float = float_layout
+  | tycon `isPyonBuiltin` the_bool = return bool_layout
+  | tycon `isPyonBuiltin` the_int = return int_layout
+  | tycon `isPyonBuiltin` the_float = return float_layout
 
-  | all_nullary_constructors, [con] <- cons = unit_layout con
+  | all_nullary_constructors, [con] <- cons = return $ unit_layout con
 
   | all_nullary_constructors =
       let disjuncts = zip (dataTypeDataConstructors data_type) $
                       map nativeWordL [0..]
-      in EnumValue LL.nativeWordType disjuncts
+      in return $ EnumValue LL.nativeWordType disjuncts
 
-  | [con] <- cons, [con_type] <- con_types =
+  | [con] <- cons, [con_type] <- con_types = do
       -- This is a product type
-      let (field_reprs, _) = instantiateDataConType con_type ty_args
-          field_layouts = [valTypeLayout tenv ty
-                          | repr ::: ty <- field_reprs,
-                            check_val_repr repr]
-      in RecordValue con field_layouts
+      (ex_vars, field_reprs, _) <-
+        instantiateDataConTypeWithFreshVariables con_type ty_args
+
+      let local_tenv = insertExistentialVars ex_vars tenv
+      field_layouts <- sequence [valTypeLayout local_tenv ty
+                                | repr ::: ty <- field_reprs,
+                                  check_val_repr repr]
+      return $ RecordValue con field_layouts
 
   | otherwise =
       internalError "valDataTypeLayout: Cannot construct value of this type"
@@ -273,46 +288,52 @@ valDataTypeLayout tenv (tycon, data_type, con_types, ty_args)
 
 -- | Get the layout of an object that's stored in memory
 memDataTypeLayout :: TypeEnv -> (Var, DataType, [DataConType], [Type])
-                   -> PointerLayout
+                   -> FreshVarM PointerLayout
 memDataTypeLayout tenv typedescr@(tycon, data_type, con_types, ty_args)
   -- bool, int, and float have special representations
   | tycon `isPyonBuiltin` the_bool ||
     tycon `isPyonBuiltin` the_int ||
     tycon `isPyonBuiltin` the_float =
-      ScalarReference $ valDataTypeLayout tenv typedescr
+      fmap ScalarReference $ valDataTypeLayout tenv typedescr
 
   -- Boxed and Referenced have special representations in memory
   | tycon `isPyonBuiltin` the_Boxed =
       let [arg] = ty_args
-      in IndirectReference True $ memFieldLayout tenv arg
+      in fmap (IndirectReference True) $ memFieldLayout tenv arg
 
   | tycon `isPyonBuiltin` the_Referenced =
       let [arg] = ty_args
-      in IndirectReference False $ memFieldLayout tenv arg
+      in fmap (IndirectReference False) $ memFieldLayout tenv arg
 
   | all_nullary_constructors, [con] <- cons =
-      ProductReference con []
+      return $ ProductReference con []
 
   | all_nullary_constructors =
       let disjuncts = [(con, []) | con <- cons] 
-      in SOPReference disjuncts
+      in return $ SOPReference disjuncts
 
-  | [con] <- cons, [con_type] <- con_types =
+  | [con] <- cons, [con_type] <- con_types = do
       -- This is a product type
-      let (field_reprs, _) = instantiateDataConType con_type ty_args
-      in ProductReference con $ map field_layout field_reprs
-      
+      (ex_vars, field_reprs, _) <-
+        instantiateDataConTypeWithFreshVariables con_type ty_args
+
+      let local_tenv = insertExistentialVars ex_vars tenv
+      field_layouts <- mapM (field_layout local_tenv) field_reprs
+      return $ ProductReference con field_layouts
+
+  | otherwise =
+      internalError "memDataTypeLayout: Not implemented for SOP types"
   where
     cons = dataTypeDataConstructors data_type
 
     -- True if no constructors have fields
     all_nullary_constructors = all (null . dataConPatternArgs) con_types
     
-    field_layout (ValRT ::: ty) =
-      ValueReference $ valTypeLayout tenv ty
+    field_layout local_tenv (ValRT ::: ty) =
+      fmap ValueReference $ valTypeLayout local_tenv ty
 
-    field_layout (BoxRT ::: _) =
-      ValueReference OpaqueBoxedValue
+    field_layout local_tenv (BoxRT ::: _) =
+      return $ ValueReference OpaqueBoxedValue
 
-    field_layout (ReadRT ::: ty) = memFieldLayout tenv ty
+    field_layout local_tenv (ReadRT ::: ty) = memFieldLayout local_tenv ty
 

@@ -107,37 +107,31 @@ checkLiteralType l =
 
 -- | Instantiate a data constructor's type in a pattern, given the
 --   pattern's type arguments.
+--   Verify that the argument type kinds and existental type kinds are correct.
 instantiatePatternType :: SourcePos -- ^ Position where pattern was mentioned
                        -> DataConType    -- ^ Constructor to instantiate
                        -> [(Type, Type)] -- ^ Each type argument and its kind
-                       -> TCM ([ReturnType], ReturnType)
+                       -> [(Var, Type)]  -- ^ Each existential variable and its kind
+                       -> TCM ([ParamType], [ReturnType], ReturnType)
                        -- ^ Compute field types and range type
-instantiatePatternType pos con_ty arg_vals
+instantiatePatternType pos con_ty arg_vals ex_vars
   | length (dataConPatternParams con_ty) /= length arg_vals =
-      internalError "instantiateConType"
+      internalError "instantiatePatternType: Wrong number of type parameters"
+  | length (dataConPatternExTypes con_ty) /= length ex_vars =
+      internalError "instantiatePatternType: Wrong number of existential variables"
   | otherwise = do
-      subst <- instantiate_arguments emptySubstitution $
-               zip (dataConPatternParams con_ty) arg_vals
+      -- Check argument types
+      zipWithM_ check_argument_type (dataConPatternParams con_ty) arg_vals
       
-      -- Apply substitution to field and range types
-      let fields = map (substituteBinding subst) $ dataConPatternArgs con_ty
-          range = substituteBinding subst $ dataConPatternRange con_ty
-      return (fields, range)
+      -- Check existential types
+      zipWithM_ check_ex_pattern (dataConPatternExTypes con_ty) ex_vars
+
+      -- Instantiate the type
+      return $
+        instantiateDataConType con_ty (map fst arg_vals) (map fst ex_vars)
   where
-    -- Instantiate the type by substituing arguments for the constructor's
-    -- type parameters
-    instantiate_arguments subst ((param, (arg_val, arg_type)) : args) = do
-      -- Apply substitution to parameter
-      let (param_repr ::: param_type) = substituteBinding subst param
-          
-      -- Does argument type match parameter type?
-      checkType pos param_type arg_type
+    check_argument_type (_ ::: expected_type) (_, given_type) =
+      checkType pos expected_type given_type
       
-      -- Update the substitution
-      let subst' = case param_repr
-                   of ValPT (Just param_var) ->
-                        insertSubstitution param_var arg_val subst
-      
-      instantiate_arguments subst' args
-    
-    instantiate_arguments subst [] = return subst
+    check_ex_pattern (_ ::: expected_type) (_, given_type) =
+      checkType pos expected_type given_type

@@ -30,6 +30,9 @@ newtype Lower a = Lower (ReaderT LowerEnv IO a)
 runLowering :: LowerEnv -> Lower a -> IO a
 runLowering env (Lower m) = runReaderT m env
 
+liftFreshVarM :: FreshVarM a -> Lower a
+liftFreshVarM m = Lower $ ReaderT $ \env -> runFreshVarM (varSupply env) m
+
 type GenLower a = Gen Lower a
 
 data LowerEnv =

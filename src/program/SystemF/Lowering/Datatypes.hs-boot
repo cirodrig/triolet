@@ -5,4 +5,4 @@ import qualified LowLevel.CodeTypes as LL
 import Type.Type
 import Type.Environment
 
-lowerFunctionType :: TypeEnv -> Type -> LL.FunctionType
+lowerFunctionType :: TypeEnv -> Type -> FreshVarM LL.FunctionType

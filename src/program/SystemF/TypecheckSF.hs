@@ -24,6 +24,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Data.Typeable(Typeable)
 import Data.Maybe
+import qualified Data.Set as Set
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
@@ -326,6 +327,7 @@ typeInferCaseE inf scr alts = do
 typeCheckAlternative :: SourcePos -> Type -> Alt SF -> TCM AltTSF
 typeCheckAlternative pos scr_type (AltSF (Alt { altConstructor = con
                                               , altTyArgs = types
+                                              , altExTypes = ex_fields
                                               , altParams = fields
                                               , altBody = body})) = do
   -- Process arguments
@@ -333,24 +335,36 @@ typeCheckAlternative pos scr_type (AltSF (Alt { altConstructor = con
 
   -- Apply constructor to type arguments
   con_ty <- tcLookupDataCon con
-  (arg_types, _ ::: con_scr_type) <-
+  (_, arg_types, _ ::: con_scr_type) <-
     let argument_types = [(ty, kind) | TypTSF (TypeAnn kind ty) <- arg_vals]
-    in instantiatePatternType pos con_ty argument_types
-  
+        existential_types = [(v, kind) | TyPatSF v kind <- ex_fields]
+    in instantiatePatternType pos con_ty argument_types existential_types
+
   -- Verify that applied type matches constructor type
   checkType pos scr_type con_scr_type
+  
+  -- Add existential types to environment
+  withMany assumeTyPat ex_fields $ \ex_fields' -> do
 
-  -- Verify that fields have the expected types
-  check_number_of_fields arg_types fields
-  fields' <- zipWithM (checkAltParam pos) arg_types fields
+    -- Verify that fields have the expected types
+    check_number_of_fields arg_types fields
+    fields' <- zipWithM (checkAltParam pos) arg_types fields
 
-  -- Match the resulting type against the function type
-  -- field1 -> field2 -> ... -> scr_type
-  ti_body <- bindParamTypes fields' $ typeInferExp body
+    -- Match the resulting type against the function type
+    -- field1 -> field2 -> ... -> scr_type
+    ti_body <- bindParamTypes fields' $ typeInferExp body
 
-  let new_alt = Alt con arg_vals fields' ti_body
-  return $ AltTSF $ TypeAnn (getTypeAnn ti_body) new_alt
+    -- The existential type must not escape
+    let ret_type = getTypeAnn ti_body
+    when (ret_type `typeMentionsAny` Set.fromList existential_vars) $
+      typeError "Existential variable escapes"
+
+    let new_alt = Alt con arg_vals ex_fields' fields' ti_body
+    return $ AltTSF $ TypeAnn ret_type new_alt
   where
+    -- The existential variables bound by this pattern
+    existential_vars = [v | TyPatSF v _ <- ex_fields]
+
     check_number_of_fields atypes fs
       | length atypes /= length fields =
         internalError $ "typeCheckAlternative: Wrong number of fields in pattern (expected " ++

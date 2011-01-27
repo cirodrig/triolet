@@ -34,6 +34,7 @@ loadBuiltins = do
     initializeGlobalVar the_memTypes (return $ convertToMemTypeEnv core_types)
 
   -- Initialize the low-level builtins
-  withTheLLVarIdentSupply $ \supply -> do
-    mem_types <- readInitGlobalVarIO the_memTypes
-    initializeLowLevelBuiltins supply mem_types
+  withTheLLVarIdentSupply $ \ll_supply -> do
+    withTheNewVarIdentSupply $ \supply -> do
+      mem_types <- readInitGlobalVarIO the_memTypes
+      initializeLowLevelBuiltins supply ll_supply mem_types

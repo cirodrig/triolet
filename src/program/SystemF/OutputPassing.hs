@@ -401,10 +401,12 @@ genFun (FunR f) = do
 genAlt :: Alt Rep -> OP (Alt Mem)
 genAlt (AltR alt) = do
   let ty_args = [TypM t | TypR t <- altTyArgs alt]
+      ex_types = [TyPatM v t | TyPatR v t <- altExTypes alt]
       params = map mk_pat $ altParams alt
   body <- genExp $ altBody alt
   return $ AltM $ Alt { altConstructor = altConstructor alt
                       , altTyArgs = ty_args
+                      , altExTypes = ex_types
                       , altParams = params
                       , altBody = body}
   where

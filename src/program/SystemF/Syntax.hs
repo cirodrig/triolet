@@ -173,7 +173,7 @@ data BaseExp s =
 data BaseAlt s =
   Alt { altConstructor :: !Var
       , altTyArgs      :: [Typ s]
-        
+      , altExTypes     :: [TyPat s]
       , altParams      :: [Pat s]
       , altBody        :: Exp s
       }

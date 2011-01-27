@@ -3,6 +3,7 @@
 module LowLevel.InitializeBuiltins(initializeLowLevelBuiltins)
 where
   
+import Control.Monad
 import qualified Data.Map as Map
 import Data.Maybe
 import qualified Language.Haskell.TH as TH
@@ -19,9 +20,10 @@ import LowLevel.BuiltinsTH
 import LowLevel.Builtins
 import LowLevel.Build
 import LowLevel.FreshVar
+import LowLevel.Print
 import qualified Type.Environment
 import Type.Type hiding(Var, runFreshVarM)
--- import qualified Type.Var
+import qualified Type.Var
 
 -- This module helps us translate System F types into low-level types
 import {-# SOURCE #-} SystemF.Lowering.Datatypes
@@ -43,7 +45,8 @@ initializeClosureField :: IdentSupply Var
                        -> BuiltinVarName 
                        -> FunctionType
                        -> IO (Var, EntryPoints)
-initializeClosureField supply name fty =
+initializeClosureField supply name fty = do
+  when (not $ ftIsClosure fty) $ print "initializeClosureField: Error"
   runFreshVarM supply $ do
     let (mod, nm, ext_name) = fromBuiltinVarName name
         lab = externPyonLabel mod nm ext_name
@@ -76,9 +79,14 @@ initializeGlobalField supply nm ty
     typeOk (PrimType OwnedType) = True
     typeOk _ = False-}
 
-lowerBuiltinFunType type_env con =
+lowerBuiltinFunType :: IdentSupply Type.Var.Var
+                    -> Type.Environment.TypeEnv
+                    -> Type.Var.Var
+                    -> IO FunctionType
+lowerBuiltinFunType v_ids type_env con =
   case Type.Environment.lookupType con type_env
-  of Just (BoxRT ::: ty) -> lowerFunctionType type_env ty
+  of Just (BoxRT ::: ty) -> do
+       Type.Var.runFreshVarM v_ids $ lowerFunctionType type_env ty
      Just _ -> internalError $
                "lowerBuiltinFunType: Incompatible representation for " ++ show con
      Nothing -> internalError $
@@ -87,23 +95,29 @@ lowerBuiltinFunType type_env con =
   
 -- | Given an identifier supply, and the memory-annotated type environment,
 --   initialize the builtin variables.
-initializeLowLevelBuiltins :: IdentSupply Var -> Type.Environment.TypeEnv -> IO ()
-initializeLowLevelBuiltins v_ids mem_type_env = do
+initializeLowLevelBuiltins :: IdentSupply Type.Var.Var
+                           -> IdentSupply Var
+                           -> Type.Environment.TypeEnv 
+                           -> IO ()
+initializeLowLevelBuiltins type_var_ids v_ids mem_type_env = do
   -- Create the record
   builtins_record <-
     $(
       let closure_type :: Either FunctionType TH.ExpQ -> TH.ExpQ
-          closure_type (Left t) = [| t |]
+          -- Returns a quoted (IO FunctionType)
+          closure_type (Left t) = [| return t |]
           closure_type (Right conQ) =
-            [| lowerBuiltinFunType mem_type_env $conQ |]
+            [| lowerBuiltinFunType type_var_ids mem_type_env $conQ |]
+
           init_primitives =
             [("the_biprim_" ++ builtinVarUnqualifiedName nm,
               [| initializePrimField v_ids nm ty |]) 
             | (nm, ty) <- builtinPrimitives]
           init_functions =
             [("the_bifun_" ++ builtinVarUnqualifiedName nm,
-              let fty = closure_type ty
-              in [| initializeClosureField v_ids nm $fty |])
+              let mk_fty = closure_type ty
+              in [| do fty <- $mk_fty
+                       initializeClosureField v_ids nm fty |])
             | (nm, ty) <- builtinFunctions]
           init_globals =
             [("the_bivar_" ++ builtinVarUnqualifiedName nm,

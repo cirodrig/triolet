@@ -814,62 +814,49 @@ inferScrutinee scr = do
   let (co_scr, co_wr) = coercionToWrapper coercion scr'
   return (scr_wrapper `mappend` co_wr, co_scr)
 
-inferAlt pos repr (AltTSF (TypeAnn _ (Alt con ty_args params body))) = do  
-  -- Instantiate the constructor's actual type with the given type arguments
-  (dc_params, dc_args, _) <- lookup_con_type
-  let subst = instantiate dc_params
-              [t | TypTSF (TypeAnn _ t) <- ty_args]
-      inst_dc_args = map (substituteBinding subst) dc_args
-  
+inferAlt pos repr (AltTSF (TypeAnn _ (Alt con ty_args ex_vars params body))) = do  
+  -- Fix up the given type arguments
+  natural_ty_args <- mapM (infFixUpType . fromTypTSF) ty_args
+
+  let existential_vars = [v | TyPatTSF v _ <- ex_vars]
+
+  -- Instantiate the constructor's actual type with these type arguments
+  mdcon <- infLookupDataCon con
+  let dcon = case mdcon
+             of Just c -> c
+                Nothing -> internalError "inferAlt: Not a data constructor"
+      (inst_ex_vars, inst_args, _) =
+        instantiateDataConType dcon natural_ty_args existential_vars
+
   -- Construct Alt parameters with correct representation information
-  let rep_ty_args = [TypR t | TypTSF (TypeAnn _ t) <- ty_args]
-      rep_params = zipWith mk_ty_pat params inst_dc_args
+  let rep_ty_args = [TypR t | t <- natural_ty_args]
+      rep_existential_vars =
+        [TyPatR v ty | ValPT (Just v) ::: ty <- inst_ex_vars]
+      rep_params = zipWith mk_ty_pat params inst_args
         where
           mk_ty_pat (TypedVarP v _) (return_repr ::: repr_type) =
-            let param_repr =
-                  case return_repr
-                  of ValRT -> ValPT Nothing
-                     BoxRT -> BoxPT
-                     ReadRT -> ReadPT
-                     WriteRT -> internalError "inferAlt"
+            let param_repr = returnReprToParamRepr return_repr
             in PatR v (param_repr ::: repr_type)
 
   -- Infer the body
   (body_wrapper, body', body_type) <-
-    assume_fields rep_params $ inferReturnExp True Nothing body
+    assume_fields rep_existential_vars rep_params $
+    inferReturnExp True Nothing body
   let body'' = applyWrapper body_wrapper body'
   
   -- Construct the new Alt
   let new_alt = AltR $ Alt { altConstructor = con
                            , altTyArgs = rep_ty_args
+                           , altExTypes = rep_existential_vars
                            , altParams = rep_params
                            , altBody = body''}
   return new_alt
   where
-    -- Look up the actual representation of this alternative.
-    -- This will replace the representation that was used in System F.
-    lookup_con_type = do
-      mdcon <- infLookupDataCon con
-      case mdcon of
-        Just dcon -> return
-                     (dataConPatternParams dcon,
-                      dataConPatternArgs dcon,
-                      dataConPatternRange dcon)
-        Nothing ->
-          internalError "inferAlt: Constructor is not a data constructor"
-  
-    instantiate params args = inst emptySubstitution params args  
+    assume_fields ty_params params m =
+      foldr assume_type (foldr assume_field m params) ty_params
       where
-        inst s ((ValPT (Just v) ::: _) : params) (arg : args) =
-          let s' = insertSubstitution v arg s
-          in inst s' params args
-      
-        inst s (_ : params) (_ : args) = inst s params args
-        
-        inst s [] [] = s
-    
-    assume_fields params m = foldr assume_field m params
-      where
+        assume_type (TyPatR v ty) m =
+          assume v (ValRT ::: ty) m
         assume_field (PatR v (repr ::: ty)) m =
           assume v (paramReprToReturnRepr repr ::: ty) m
 
