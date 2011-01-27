@@ -25,9 +25,21 @@ data val IndexedInt : val (val intindex -> val pure)
   (val n : intindex) () (val int) : val (IndexedInt n);
 };
 
+data ref array : val (val intindex -> val pure -> val pure) {};
+
 data ref Repr : val (val pure -> val pure) {};
 data box Stream : val (val pure -> val pure) {};
-data ref list : val (val pure -> val pure) {};
+data ref list : val (val pure -> val pure)
+{
+  make_list : (val a : pure)
+           -> (val n : intindex)
+           -> val IndexedInt n
+           -> write Referenced (array n a)
+           -> write list a,
+  (val a : pure) (val n : intindex)
+  (val IndexedInt n,
+   read Referenced (array n a)) : read list a;
+};
 
 -- This data structure has a special representation
 data box Boxed : val (val pure -> val pure)

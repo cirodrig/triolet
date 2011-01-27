@@ -23,6 +23,7 @@ pyonBuiltinTypeNames =
   , "Boxed"
   , "Referenced"
   , "IndexedInt"
+  , "array"
     
     -- Dictionary types
   , "Repr"
@@ -46,6 +47,7 @@ pyonBuiltinVariableNames =
   , "boxed"
   , "referenced"
   , "indexedInt"
+  , "make_list"
 
     -- Class constructors
   , "traversableDict"
