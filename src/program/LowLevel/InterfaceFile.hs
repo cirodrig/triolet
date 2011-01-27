@@ -130,7 +130,16 @@ createModuleInterface mod = do
 
       -- Create the interface
       exports <- mapM mkImport pre_imports'
-      let imports = map clearImportDefinition $ moduleImports mod
+
+      -- If a symbol is in the export list, it shouldn't be in the import
+      -- list too.  (Really, it should be an error if a symbol is ever in
+      -- both lists.)
+      let imports = filter not_in_exports $
+                    map clearImportDefinition $ moduleImports mod
+            where
+              not_in_exports impent =
+                all ((importVar impent /=) . importVar) exports
+
       let interface = Interface { ifaceImports = imports
                                 , ifaceExports = exports}
           
@@ -275,40 +284,56 @@ addInterfaceToModuleImports iface mod = do
         allBuiltins ++ map importVar (moduleImports mod)
 
   -- Rename variables in the interface
-  (rn_imports, rn_exports) <- 
+  (rn_imports, rn_exports, interface_renaming) <-
     withTheLLVarIdentSupply $ \id_supply -> runFreshVarM id_supply $ do
       renameInterface extern_variables iface
-  
-  -- Insert imports into the module's imports, replacing the existing imports.
+
+  -- DEBUG
+  when False $ do
+    putStrLn "Renamed interface"
+    putStrLn "** imports"
+    print $ map importVar (ifaceImports iface)
+    putStrLn "** exports"
+    print $ map importVar (ifaceExports iface)
+    putStrLn "** pre-existing variables"
+    print extern_variables
+    putStrLn "** renaming"
+    print interface_renaming
+
+  -- Insert the interface's symbols into the module's imports,
+  -- replacing the existing imports.
   -- Error out if a type mismatch is detected.
   let imports = rn_imports ++ rn_exports ++
                 filter not_from_interface (moduleImports mod)
         where
           not_from_interface impent =
             let v = importVar impent
-            in all ((v /=) . importVar) $ rn_exports
+            in all ((v /=) . importVar) rn_exports
       
   return $ mod {moduleImports = imports}
 
 -- | Rename an interface's imported and exported symbols, given the set of
 --   variables that the interface's symbols should be renamed to.
+--   The renaming that was applied to the interface is returned.
 --
 --   Exported symbols are renamed to one of the given variables, if one has
 --   the same label, or else to a new variable name.
 --
---   Imported symbols are discarded if one of the given variables has the
---   same label, or else renamed to a new variable name.
+--   Imported symbols are discarded if the variable name is found in the 
+--   list of renamed variables.  Otherwise they are renamed to a new variable
+--   name.
 renameInterface :: [Var]        -- ^ Variables targeted by renaming
                 -> Interface    -- ^ Interface that should be renamed
-                -> FreshVarM ([Import], [Import]) -- ^ Computes the new imports and exports
+                -> FreshVarM ([Import], [Import], Renaming)
+                -- ^ Computes the new imports and exports
 renameInterface extern_variables iface = do
   -- Discard imports if the variable name is found in extern_variables.
   -- Those variables are
   -- already defined, or will be defined by another loaded interface.
-  let orig_imports = filter is_extern $ ifaceImports iface
+  let orig_imports = filter is_not_duplicate $ ifaceImports iface
         where
-          is_extern impent =
-            externVarName (importVar impent) `Map.member` extern_variable_labels
+          is_not_duplicate impent =
+            externVarName (importVar impent) `Map.notMember` extern_variable_labels
       orig_exports = ifaceExports iface
 
   -- Get all external variables in the interface.  Remove duplicates. 
@@ -324,7 +349,7 @@ renameInterface extern_variables iface = do
   -- Apply renaming
   new_imports <- mapM (rename_import renaming) orig_imports
   new_exports <- mapM (rename_import renaming) orig_exports
-  return (new_imports, new_exports)
+  return (new_imports, new_exports, renaming)
   where
     -- Map from variable name to variable
     extern_variable_labels =
