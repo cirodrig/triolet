@@ -46,12 +46,12 @@ withMany f xs k = go xs k
     go []     k = k []
 
 -- | Called by 'assumeVar' and related functions.  If the type is a
---   Repr dictionary passed as a readable pointer, record the dictionary
+--   Repr dictionary passed as a boxed pointer, record the dictionary
 --   in the environment.  Otherwise don't change the environment.
 assumeBoundReprDict :: ReturnType -> LL.Var -> Lower a -> Lower a
 assumeBoundReprDict (repr ::: ty) bound_var m =
   case repr
-  of ReadRT ->
+  of BoxRT ->
        case fromVarApp ty
        of Just (con, [arg])
             | con `isPyonBuiltin` the_Repr ->
@@ -143,13 +143,22 @@ codeType (ExpCode tys _) = tys
 -------------------------------------------------------------------------------
 -- Data structure operations: store, load, deconstruct, and construct
 
+-- | Compute the record layout of a boxed object.
+--   The record will have one field for the header and one for the object
+--   contents.
+ownedLayoutRecord :: OwnedLayout -> GenLower LL.DynamicRecord
+ownedLayoutRecord (Box layout) = do 
+  contents_layout <- pointerLayoutRecordField layout
+  createConstDynamicRecord [ LL.RecordField objectHeaderRecord'
+                           , contents_layout]
+
 -- | Compute the record type of a 'PointerLayout'
 pointerLayoutRecord :: PointerLayout -> GenLower LL.DynamicRecord
 pointerLayoutRecord layout =
   case layout
   of ValueReference _ -> internalError "pointerLayoutRecord: Not a record"
      ScalarReference _ -> internalError "pointerLayoutRecord: Not a record"
-     IndirectReference _ _ -> singleton_record
+     IndirectReference _ -> singleton_record
      PolyReference _ -> singleton_record
      ProductReference _ layouts -> do
        fields <- mapM pointerLayoutRecordField layouts
@@ -169,9 +178,7 @@ pointerLayoutRecordField layout =
        return $ toDynamicFieldType $ LL.valueToFieldType $ valueLayoutType val
      ScalarReference val ->
        return $ toDynamicFieldType $ LL.valueToFieldType $ valueLayoutType val
-     IndirectReference True _ ->
-       return $ LL.PrimField LL.OwnedType
-     IndirectReference False _ ->
+     IndirectReference _ ->
        return $ LL.PrimField LL.PointerType
      PolyReference (PolyRepr ty) -> do
        -- Get the object's size and alignment from a Repr dictionary
@@ -206,8 +213,7 @@ pointerLayoutRecordField layout =
 
 -- | Calculate the layout of a case scrutinee /or/ a data constructor result
 --   that has the given type.
-calculateScrutineeLayout :: ReturnType
-                         -> Lower (Either ValueLayout PointerLayout)
+calculateScrutineeLayout :: ReturnType -> Lower Layout
 calculateScrutineeLayout rt = do
   env <- getTypeEnv
   liftFreshVarM $ typeLayout env rt
@@ -224,8 +230,8 @@ compileCase :: ReturnType -> Lower GenCase
 compileCase scrutinee_type =
   calculateScrutineeLayout scrutinee_type >>= make_code
   where
-    make_code :: Either ValueLayout PointerLayout -> Lower GenCase
-    make_code (Left value_layout) =
+    make_code :: Layout -> Lower GenCase
+    make_code (ValueLayout value_layout) =
       return $!
       case value_layout
       of ScalarValue con LL.UnitType -> compileUnitValueCase con
@@ -234,16 +240,29 @@ compileCase scrutinee_type =
            case valueLayoutType value_layout
            of LL.RecordType rt -> compileRecordValueCase con rt
 
-    make_code (Right pointer_layout) =
+    make_code (OwnedLayout owned_layout@(Box pointer_layout)) =
       return $ \scrutinee alts -> do
+        scr_val <- asVal scrutinee
+        ll_record <- ownedLayoutRecord owned_layout
+        let contents_field = ll_record LL.!!: 1
+            LL.RecordField contents_record = LL.fieldType contents_field
+        contents_ptr <- referenceField contents_field scr_val
+        make_pointer_layout_code contents_record pointer_layout contents_ptr alts
+
+    make_code (PointerLayout pointer_layout) =
+      return $ \scrutinee alts -> do
+        scr_val <- asVal scrutinee
         ll_record <- pointerLayoutRecord pointer_layout
-        case pointer_layout of
-          IndirectReference is_boxed field_layout ->
-            compileIndirectReferenceCase is_boxed field_layout scrutinee alts
-          ProductReference con layouts ->
-            compileRecordPointerCase con ll_record layouts scrutinee alts
-          SOPReference disjuncts ->
-            compileRecordSOPCase ll_record disjuncts scrutinee alts
+        make_pointer_layout_code ll_record pointer_layout scr_val alts
+
+    make_pointer_layout_code ll_record pointer_layout scrutinee alts =
+      case pointer_layout of
+        IndirectReference field_layout ->
+          compileIndirectReferenceCase field_layout scrutinee alts
+        ProductReference con layouts ->
+          compileRecordPointerCase con ll_record layouts scrutinee alts
+        SOPReference disjuncts ->
+          compileRecordSOPCase ll_record disjuncts scrutinee alts
     
 compileUnitValueCase con scrutinee [(alt_con, alt_body)]
   | con == alt_con = do
@@ -293,35 +312,26 @@ compileEnumValueCase ty disjuncts scrutinee alternatives = do
           | ty == LL.nativeWordType = map nativeWordL [0..]
           | otherwise = internalError "compileCase"
 
-compileIndirectReferenceCase is_boxed field_layout scrutinee [(alt_con, alt_body)] = do
+-- | Get a pointer to the contents of a boxed object.  Move past the header
+--   and any alignment bytes.
+getBoxedObjectContents field_layout scrutinee = do
+  padding_size <-
+    addRecordPadding header_size (LL.recordAlignment field_layout)
+  primAddP scrutinee padding_size
+  where
+    header_size = nativeIntV $ LL.sizeOf LL.objectHeaderRecord
+
+compileIndirectReferenceCase field_layout scrutinee [(alt_con, alt_body)] = do
   -- The scrutinee is a pointer to the pointer to the object.
   -- Get the pointer to the object.
-  scr_val <- asVal scrutinee
-  tmp_var <- lift $ LL.newAnonymousVar ll_object_type
-  primLoadConst ll_object_type scr_val tmp_var
-  object_ptr <- get_object_ptr (LL.VarV tmp_var)
-  alt_body [valCode object_ptr]
-  where
-    ll_object_type = if is_boxed
-                     then LL.PrimType LL.OwnedType
-                     else LL.PrimType LL.PointerType
-  
-    -- Get the actual object pointer.  Move past the boxed object header.
-    get_object_ptr object_ref =
-      if is_boxed
-      then do base_ptr <- primAddP object_ref (nativeIntV $ LL.sizeOf LL.objectHeaderRecord)
-              field_record <- pointerLayoutRecord field_layout
-              let field_align = LL.recordAlignment field_record
-              addRecordPadding base_ptr field_align
-      else return object_ref
-       
-  
+  tmp_var <- lift $ LL.newAnonymousVar (LL.PrimType LL.PointerType)
+  primLoadConst (LL.PrimType LL.PointerType) scrutinee tmp_var
+  alt_body [valCode (LL.VarV tmp_var)]
 
 compileRecordPointerCase con record_type layouts scrutinee [(alt_con, alt_body)] 
   | alt_con == con = do
-      scr_ptr <- asVal scrutinee
       field_values <-
-        zipWithM (loadCaseField scr_ptr) (LL.recordFields record_type) layouts
+        zipWithM (loadCaseField scrutinee) (LL.recordFields record_type) layouts
       alt_body (map valCode field_values)
 
 compileRecordSOPCase = internalError "compileRecordSOPCase: Not implemented"
@@ -334,7 +344,7 @@ loadCaseField scr_ptr field field_layout =
   case field_layout
   of ValueReference value_layout -> loadField field scr_ptr
      ScalarReference _ -> get_field_reference
-     IndirectReference _ _ -> get_field_reference
+     IndirectReference _ -> get_field_reference
      PolyReference (PolyRepr _) -> get_field_reference
      ProductReference _ _ -> get_field_reference
      SOPReference _ -> get_field_reference
@@ -377,20 +387,39 @@ compileConstructor con con_type ty_args = do
   lift (calculateScrutineeLayout result_type) >>= make_code field_types
   where
   
-    make_code :: [ReturnType] -> Either ValueLayout PointerLayout -> GenLower Code
-    make_code field_types (Left value_layout) =
+    make_code :: [ReturnType] -> Layout -> GenLower Code
+    make_code field_types (ValueLayout value_layout) =
       case value_layout
-      of ScalarValue con LL.UnitType -> return $ valCode (LL.LitV LL.UnitL)
-         EnumValue ty disjuncts      -> compileEnumValueCtor con ty disjuncts
+      of ScalarValue con LL.UnitType ->
+           return $ valCode (LL.LitV LL.UnitL)
+         EnumValue ty disjuncts ->
+           compileEnumValueCtor con ty disjuncts
          RecordValue con layouts ->
            case valueLayoutType value_layout
            of LL.RecordType rt -> compileRecordValueCtor con rt field_types
 
-    make_code field_types (Right pointer_layout) = do
+    make_code field_types (OwnedLayout owned_layout@(Box pointer_layout)) = do
+      -- Compute layout of this object
+      ll_record <- traceShow (pprOwnedLayout owned_layout) $ ownedLayoutRecord owned_layout
+      let contents_field = ll_record LL.!!: 1
+          LL.RecordField contents_record = LL.fieldType contents_field
+
+      -- Make the constructor function
+      ctor_fun <-
+        asVal =<< make_pointer_layout_code field_types contents_record pointer_layout
+      
+      -- Create a new object, using that constructor function to write its
+      -- contents
+      compileBoxCtor field_types ll_record pointer_layout ctor_fun
+
+    make_code field_types (PointerLayout pointer_layout) = do
       ll_record <- pointerLayoutRecord pointer_layout
+      make_pointer_layout_code field_types ll_record pointer_layout
+    
+    make_pointer_layout_code field_types ll_record pointer_layout =
       case pointer_layout of
-        IndirectReference is_boxed layouts ->
-          compileIndirectCtor is_boxed field_types layouts
+        IndirectReference layouts ->
+          compileIndirectCtor field_types layouts
         ProductReference con layouts ->
           compileRecordPointerCtor con ll_record field_types layouts
         SOPReference disjuncts ->
@@ -416,7 +445,40 @@ compileRecordValueCtor con rt field_types = lift $ do
       record_fun = LL.closureFun params [LL.RecordType rt] record_expr
   return $ valCode $ LL.LamV record_fun
 
-compileIndirectCtor False [field_type] field_layout = lift $ do
+compileBoxCtor field_types ll_record pointer_layout ctor_fun = lift $ do
+  -- Create a boxed object and use 'ctor_fun' to initialize it.
+  tenv <- getTypeEnv
+
+  -- Create a parameter for each field
+  let ll_param_types = map (constructorParameterType tenv) field_layouts
+  params <- mapM LL.newAnonymousVar ll_param_types
+  
+  -- Create the function body.  The function returns an owned pointer.
+  fun_body <- execBuild [LL.PrimType LL.OwnedType] $ do
+    obj <- allocateHeapMem (LL.recordSize ll_record)
+    -- FIXME: initialize object header
+    obj_owned_ptr <- emitAtom1 (LL.PrimType LL.OwnedType) $
+                     LL.PrimA LL.PrimCastToOwned [obj]
+
+    contents_ptr <- referenceField (ll_record LL.!!: 1) obj_owned_ptr
+    
+    -- Use the constructor function to initialize the object's contents
+    emitAtom0 $ LL.closureCallA ctor_fun (map LL.VarV params ++ [contents_ptr])
+    return $ LL.ReturnE $ LL.ValA [obj_owned_ptr]
+  
+  let box_fun = LL.closureFun params [LL.PrimType LL.OwnedType] fun_body
+  return $ valCode $ LL.LamV box_fun
+  where
+    -- Determine what parameters are expected by the constructor function
+    field_layouts =
+      case pointer_layout of
+        IndirectReference layout -> [layout]
+        ProductReference con layouts -> layouts
+        SOPReference disjuncts ->
+          internalError "SOPReference is not implemented"
+
+
+compileIndirectCtor [field_type] field_layout = lift $ do
   -- Create a referenced object
   -- Create a parameter for the field.  The parameter is a function.
   param <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
@@ -440,38 +502,13 @@ compileIndirectCtor False [field_type] field_layout = lift $ do
   let function = LL.closureFun [param, ret_param] [] function_body
   return $ valCode (LL.LamV function)
 
-compileIndirectCtor True [field_type] field_layout = lift $ do
-  -- Create a parameter for the field.  The parameter is a function.
-  param <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
-
-  function_body <- execBuild [LL.PrimType LL.OwnedType] $ do
-    -- Construct a boxed object and return a reference to it.
-    -- Allocate memory for this object
-    contents_record <- pointerLayoutRecord field_layout
-    obj_record <- createConstDynamicRecord [LL.RecordField objectHeaderRecord',
-                                            LL.RecordField contents_record]
-    heap_ptr <- allocateHeapMem $ LL.recordSize obj_record
-    
-    -- FIXME: Write object header
-    init_heap_ptr <- emitAtom1 (LL.PrimType LL.OwnedType) $ LL.PrimA LL.PrimCastToOwned [heap_ptr]
-    
-    -- Write the object
-    contents_ptr <- referenceField (obj_record LL.!!: 1) init_heap_ptr
-    emitAtom0 $ LL.closureCallA (LL.VarV param) [contents_ptr]
-    
-    -- Return the pointer
-    return $ LL.ReturnE $ LL.ValA [init_heap_ptr]
-  
-  let function = LL.closureFun [param] [LL.PrimType LL.OwnedType] function_body
-  return $ valCode (LL.LamV function)
-
 compileRecordPointerCtor con record field_types field_layouts = lift $ do
   when (null field_types) $ internalError "compileRecordValueCtor"
   tenv <- getTypeEnv
   let record_fields = LL.recordFields record
   
   -- Create a parameter for each field
-  let ll_param_types = map (parameter_type tenv) field_layouts
+  let ll_param_types = map (constructorParameterType tenv) field_layouts
   params <- mapM LL.newAnonymousVar ll_param_types
   
   -- Create a parameter for the return value
@@ -487,17 +524,6 @@ compileRecordPointerCtor con record field_types field_layouts = lift $ do
   let function = LL.closureFun (params ++ [ret_param]) [] function_body
   return $ valCode (LL.LamV function)
   where
-    -- Decide how to pass this parameter
-    parameter_type tenv field_layout =
-      case field_layout
-      of ValueReference val_layout -> valueLayoutType val_layout
-         ScalarReference _ -> LL.PrimType LL.OwnedType
-         IndirectReference True _ -> LL.PrimType LL.OwnedType
-         IndirectReference False _ -> LL.PrimType LL.OwnedType
-         PolyReference _ -> LL.PrimType LL.OwnedType
-         ProductReference _ _ -> LL.PrimType LL.OwnedType
-         SOPReference _ -> LL.PrimType LL.OwnedType
-
     -- Emit the code to store one parameter
     store_param :: TypeEnv -> LL.Val
                 -> (LL.Var, LL.DynamicField, ReturnType, PointerLayout)
@@ -515,6 +541,16 @@ compileRecordPointerCtor con record field_types field_layouts = lift $ do
            dst_addr <- referenceField record_field ret_ptr
            emitAtom0 $ LL.closureCallA (LL.VarV param) [dst_addr]
       
+-- Decide how to pass a parameter to a constructor function
+constructorParameterType tenv field_layout =
+  case field_layout
+  of ValueReference val_layout -> valueLayoutType val_layout
+     ScalarReference _ -> LL.PrimType LL.OwnedType
+     IndirectReference _ -> LL.PrimType LL.OwnedType
+     PolyReference _ -> LL.PrimType LL.OwnedType
+     ProductReference _ _ -> LL.PrimType LL.OwnedType
+     SOPReference _ -> LL.PrimType LL.OwnedType
+
 compileRecordSOPCtor = internalError "compileRecordSOPCtor: Not implemented"
 
 -------------------------------------------------------------------------------
@@ -686,11 +722,10 @@ lowerDef (Def v f) = do
 lowerDefGroup :: [Def (Typed Mem)] -> ([LL.FunDef] -> Lower a) -> Lower a
 lowerDefGroup defs k = assume_variables $ k =<< mapM lowerDef defs
   where
-    -- Since we convert all functions to pointers, the type is not used
-    notype = internalError "lowerDefGroup: Type has not been computed"
+    assume_variables m =
+      foldr assume_variable m [(v, rt) | Def v (FunTM (RTypeAnn rt _)) <- defs]
 
-    assume_variables m = foldr assume_variable m [v | Def v _ <- defs]
-    assume_variable v m = assumeVar v (BoxRT ::: notype) $ \_ -> m
+    assume_variable (v, return_type) m = assumeVar v return_type $ \_ -> m
 
 lowerDefGroupG :: [Def (Typed Mem)] -> ([LL.FunDef] -> GenLower a) -> GenLower a
 lowerDefGroupG defs = liftT1 (lowerDefGroup defs)

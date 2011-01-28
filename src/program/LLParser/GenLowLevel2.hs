@@ -163,6 +163,8 @@ genDataExpr expr =
        let srecord = case dereferenceTypeSynonym rec_type
                      of NamedT (RecordT rec) -> convertToStaticRecord rec
                         _ -> internalError "genExpr: Expecting record type"
+       when (length (LowLevel.CodeTypes.recordFields srecord) /= length fields) $
+         error "Wrong number of fields in record expression"
        fields' <- mapM genDataExpr fields
        return $ LL.RecV srecord fields'
      SizeofE ty ->
@@ -324,6 +326,8 @@ genExpr tenv expr =
                          of NamedT (RecordT rec) -> convertToStaticRecord rec
                             _ -> internalError "genExpr: Expecting record type"
            atom = LL.PackA record_type fs'
+       when (length (LowLevel.CodeTypes.recordFields record_type) /= length fs) $
+         error "Wrong number of fields in record expression"
        return $ GenAtom [RecordType record_type] atom
      FieldE base fld -> do
        addr <- asVal =<< subexpr base

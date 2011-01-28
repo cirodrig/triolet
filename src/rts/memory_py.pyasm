@@ -4,7 +4,7 @@ module pyon.internal.memory_py;
 #include "rts.h"
 #include "memory_py.h"
 #include "apply_py.h"
-#include "pyasm_records.h"
+#include "new_pyasm_records.h"
 
 // Deallocate an object.  Calls 'pyon_dealloc'.
 function deallocF (pointer p) -> () {
@@ -44,6 +44,6 @@ function copy8F (pointer src, pointer dst) -> () {
 };
 
 // Copy some bytes according to a PassConv object
-function copy (unit _, pointer passconv, pointer src, pointer dst) -> () {
+function copy (unit _, owned passconv, pointer src, pointer dst) -> () {
   () call (passconv @! PassConv.copy) (src, dst);
 };

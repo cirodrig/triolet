@@ -72,7 +72,8 @@ pointerTypeTag =
 -- | A parameter passing convention consists of size, alignment, copy,
 -- and finalize functions
 passConvRecord :: StaticRecord
-passConvRecord = constStaticRecord [ PrimField nativeWordType
+passConvRecord = constStaticRecord [ RecordField objectHeaderRecord
+                                   , PrimField nativeWordType
                                    , PrimField nativeWordType
                                    , PrimField OwnedType
                                    , PrimField OwnedType
@@ -81,7 +82,8 @@ passConvRecord = constStaticRecord [ PrimField nativeWordType
 -- | The record type of a traversable class dictionary
 traversableDictRecord :: StaticRecord
 traversableDictRecord =
-  constStaticRecord [ PrimField OwnedType
+  constStaticRecord [ RecordField objectHeaderRecord
+                    , PrimField OwnedType
                     , PrimField OwnedType]
 
 -- | An info table is a piece of statically defined global data.  Every 

@@ -11,21 +11,13 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
-// Representation of Repr objects
-data pointer repr_Repr_value = PassConv {
-  sizeof PassConv,
-  alignof PassConv,
-  copy_Repr,
-  dummy_finalizer
+data pointer repr_info = InfoTableHeader {
+  dummy_finalizer,
+  TAG_CON
 };
 
-// Return the representation of a Repr object.  The parameter is a type
-// parameter.
-function inline repr_Repr (unit _) -> pointer {
-  repr_Repr_value;
-};
-
-data pointer repr_Box_value = PassConv {
+data owned repr_Box_value = PassConv {
+  ObjectHeader { int 1, repr_info },
   sizeof owned,
   alignof owned,
 #if WORD_SIZE == 4
@@ -40,12 +32,23 @@ data pointer repr_Box_value = PassConv {
 
 // Return the representation of a Boxed object.  The parameter is a type
 // parameter.
-function inline repr_Box (unit _) -> pointer {
+function inline repr_Box (unit _) -> owned {
+  repr_Box_value;
+};
+
+// Exactly the same as repr_Box, but it has a different System F type
+function inline repr_Boxed (unit _) -> owned {
+  repr_Box_value;
+};
+
+// Exactly the same as repr_Box, but it has a different System F type
+function inline repr_Stream (unit _) -> owned {
   repr_Box_value;
 };
 
 // Parameter-passing convention dictionary of ints
-data pointer repr_int = PassConv {
+data owned repr_int = PassConv {
+  ObjectHeader { int 1, repr_info },
   sizeof int32,
   alignof int32,
   copy4F,
@@ -53,7 +56,8 @@ data pointer repr_int = PassConv {
 };
 
 // Parameter-passing convention dictionary of floats
-data pointer repr_float = PassConv {
+data owned repr_float = PassConv {
+  ObjectHeader { int 1, repr_info },
   sizeof float,
   alignof float,
   copy4F,
@@ -61,7 +65,8 @@ data pointer repr_float = PassConv {
 };
 
 // Parameter-passing convention dictionary of bool
-data pointer repr_bool = PassConv {
+data owned repr_bool = PassConv {
+  ObjectHeader { int 1, repr_info },
   sizeof bool,
   alignof bool,
   copy1F,
@@ -77,8 +82,8 @@ function copy_Repr (unit _, pointer src, pointer dst) -> () {
 };
 
 function inline repr_PyonTuple2 (unit _, unit _,
-                                 pointer repr1, pointer repr2,
-                                 pointer ret) -> () {
+                                 owned repr1, owned repr2) -> owned {
+  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   size1 = repr1 @! PassConv.size;
   align1 = repr1 @! PassConv.align;
   size2 = repr2 @! PassConv.size;
@@ -92,7 +97,7 @@ function inline repr_PyonTuple2 (unit _, unit _,
     (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
      size1, align1, size2, align2);
   ret @! PassConv.finalize = dummy_finalizer;
-  ();
+  ret;
 };
 
 function inline copy_PyonTuple2(owned copy1, owned copy2,
@@ -103,10 +108,18 @@ function inline copy_PyonTuple2(owned copy1, owned copy2,
   () call copy2 (src @ tuple.member2, dst @ tuple.member2);
 };
 
-data pointer OpaqueTraversableDict_list = TraversableDict {
+#if 0
+data pointer TraversableDict_info = InfoTableHeader {
+  dummy_finalizer,
+  TAG_CON
+};
+
+data owned OpaqueTraversableDict_list = TraversableDict {
+  ObjectHeader { int 1, TraversableDict_info },
   list_traverse,
   list_build
 };
+#endif
 
 function inline complex_pass_conv (unit _, pointer repr, pointer ret) -> () {
   size = repr @! PassConv.size;

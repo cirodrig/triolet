@@ -27,7 +27,7 @@ data val IndexedInt : val (val intindex -> val pure)
 
 data ref array : val (val intindex -> val pure -> val pure) {};
 
-data ref Repr : val (val pure -> val pure) {};
+data box Repr : val (val pure -> val pure) {};
 data box Stream : val (val pure -> val pure) {};
 data ref list : val (val pure -> val pure)
 {
@@ -62,93 +62,88 @@ data ref PyonTuple2 : val (val pure -> val pure -> val pure)
   (val a : pure, val b : pure) () (read a, read b) : read PyonTuple2 a b;
 };
 
-data ref AdditiveDict : val (val pure -> val pure)
+data box AdditiveDict : val (val pure -> val pure)
 {
   additiveDict : (val a : pure)
                -> box (read a -> read a -> write a)
               -> box (read a -> read a -> write a)
               -> box (read a -> write a)
               -> write a
-              -> write AdditiveDict a,
+              -> box AdditiveDict a,
   (val a : pure) ()
   (box (read a -> read a -> write a),
    box (read a -> read a -> write a),
    box (read a -> write a),
-   read a) : read AdditiveDict a;
+   read a) : box AdditiveDict a;
 };
 
-data ref MultiplicativeDict : val (val pure -> val pure)
+data box MultiplicativeDict : val (val pure -> val pure)
 {
   multiplicativeDict : (val a : pure)
-                    -> write AdditiveDict a
+                    -> box AdditiveDict a
                     -> box (read a -> read a -> write a)
                     -> box (val int -> write a)
                     -> write a
-                    -> write MultiplicativeDict a,
+                    -> box MultiplicativeDict a,
   (val a : pure) ()
-  (read AdditiveDict a,
+  (box AdditiveDict a,
    box (read a -> read a -> write a),
    box (val int -> write a),
-   read a) : read MultiplicativeDict a;
+   read a) : box MultiplicativeDict a;
 };
 
-data ref TraversableDict : val (val (val pure -> val pure) -> val pure)
+data box TraversableDict : val (val (val pure -> val pure) -> val pure)
 {
   traversableDict :
       (val t : val pure -> val pure)
-   -> box ((val a : pure) -> read Repr a -> read t a -> box Stream a)
-   -> box ((val a : pure) -> read Repr a -> box Stream a -> write t a)
-   -> write TraversableDict t,
+   -> box ((val a : pure) -> box Repr a -> read t a -> box Stream a)
+   -> box ((val a : pure) -> box Repr a -> box Stream a -> write t a)
+   -> box TraversableDict t,
   (val t : val pure -> val pure) ()
-  (box ((val a : pure) -> read Repr a -> read t a -> box Stream a),
-   box ((val a : pure) -> read Repr a -> box Stream a -> write t a))
-  : read TraversableDict t;
+  (box ((val a : pure) -> box Repr a -> read t a -> box Stream a),
+   box ((val a : pure) -> box Repr a -> box Stream a -> write t a))
+  : box TraversableDict t;
 };
 
 -------------------------------------------------------------------------------
 -- Representation dictionaries
 
-load : (val a : pure) -> read Repr a -> read a -> val a;
-store : (val a : pure) -> read Repr a -> val a -> write a;
-copy : (val a : pure) -> read Repr a -> read a -> write a;
+load : (val a : pure) -> box Repr a -> read a -> val a;
+store : (val a : pure) -> box Repr a -> val a -> write a;
+copy : (val a : pure) -> box Repr a -> read a -> write a;
 
 loadBox : (val a : pure) -> read a -> box a;
 storeBox : (val a : pure) -> box a -> write a;
 
-repr_int : read Repr int;
-repr_float : read Repr float;
+repr_int : box Repr int;
+repr_float : box Repr float;
+repr_bool : box Repr bool;
 
-repr_list : (val a : pure) -> read Repr a -> write Repr (list a);
+repr_list : (val a : pure) -> box Repr a -> box Repr (list a);
 
 repr_PyonTuple2 :
-    (val a : pure) -> (val b : pure) -> read Repr a -> read Repr b
- -> write Repr (PyonTuple2 a b);
-
-repr_AdditiveDict :
-    (val a : pure) -> read Repr a -> write Repr (AdditiveDict a);
-
-repr_MultiplicativeDict :
-    (val a : pure) -> read Repr a -> write Repr (MultiplicativeDict a);
+    (val a : pure) -> (val b : pure) -> box Repr a -> box Repr b
+ -> box Repr (PyonTuple2 a b);
 
 -- This always returns the same, global object
-repr_Repr : (val a : pure) -> read Repr a;
+repr_Box : (val a : pure) -> box Repr a;
 
--- This always returns the same, global object
-repr_Box : (val a : pure) -> read Repr a;
+repr_Boxed : (val a : pure) -> box Repr (Boxed a);
+repr_Stream : (val a : pure) -> box Repr (Stream a);
 
-OpaqueTraversableDict_list : read TraversableDict list;
+OpaqueTraversableDict_list : box TraversableDict list;
 
 TraversableDict_Stream_build :
-  (val a : pure) -> read Repr a -> box Stream a -> box Stream a;
+  (val a : pure) -> box Repr a -> box Stream a -> box Stream a;
 
 TraversableDict_Stream_traverse :
-  (val a : pure) -> read Repr a -> box Stream a -> box Stream a;
+  (val a : pure) -> box Repr a -> box Stream a -> box Stream a;
 
 TraversableDict_list_build :
-  (val a : pure) -> read Repr a -> box Stream a -> write list a;
+  (val a : pure) -> box Repr a -> box Stream a -> write list a;
 
 TraversableDict_list_traverse :
-  (val a : pure) -> read Repr a -> read list a -> box Stream a;
+  (val a : pure) -> box Repr a -> read list a -> box Stream a;
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
@@ -212,10 +207,10 @@ minus_ii : (val m : intindex)
 -------------------------------------------------------------------------------
 -- Other functions
 
-oper_DO : (val a : pure) -> read Repr a -> write a -> box Stream a;
+oper_DO : (val a : pure) -> box Repr a -> write a -> box Stream a;
 
 oper_CAT_MAP :
-    (val a : pure) -> (val b : pure) -> read Repr a -> read Repr b
+    (val a : pure) -> (val b : pure) -> box Repr a -> box Repr b
  -> box Stream a
  -> box (read a -> box Stream b)
  -> box Stream b;

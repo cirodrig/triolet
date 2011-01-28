@@ -231,9 +231,17 @@ unpackPolymorphicCall (ExpSF (AppE {expOper = op, expTyArgs = ts, expArgs = xs})
 
 unpackPolymorphicCall _ = Nothing
 
+-- | Return True iff this is a dictionary type constructor.
 isDictionaryCon :: Var -> Bool
 isDictionaryCon v = v `elem` [ pyonBuiltin the_Repr
                              , pyonBuiltin the_TraversableDict
                              , pyonBuiltin the_AdditiveDict
                              , pyonBuiltin the_MultiplicativeDict
                              ]
+
+-- | Return True if this is a singleton type constructor.
+--   Return False if not a singleton type constructor, or if unknown.
+--
+--   Singleton types are data types that have exactly one value.
+isSingletonCon :: Var -> Bool
+isSingletonCon v = isDictionaryCon v -- Currently only dictionaries

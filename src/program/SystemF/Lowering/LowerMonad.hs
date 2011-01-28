@@ -84,10 +84,10 @@ initializeLowerEnv var_supply ll_var_supply type_env var_map = do
     mk_multiplicative_dict arg = \subst -> undefined
 
     -- Get a representation dictionary for (Repr a)
-    mk_repr_dict _ _ = return (repr_Repr_value :: LL.Val)
+    mk_repr_dict _ _ = return repr_Box_value
 
     -- This is the representation dictionary for Repr objects
-    repr_Repr_value = LL.VarV $ LL.llBuiltin LL.the_bivar_repr_Repr_value
+    repr_Box_value = LL.VarV $ LL.llBuiltin LL.the_bivar_repr_Box_value
 
 instance Supplies Lower (Ident Var) where
   fresh = Lower $ ReaderT $ \env -> supplyValue $ varSupply env

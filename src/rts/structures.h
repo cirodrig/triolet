@@ -14,19 +14,15 @@ extern function pyon.internal.structures.additiveDict_complex
 extern function pyon.internal.structures.makeComplex
   (float, float, pointer) -> ();
 
-extern function pyon.internal.structures.repr_Repr (unit) -> pointer;
-extern function pyon.internal.structures.repr_Box (unit) -> pointer;
-extern function pyon.internal.structures.repr_AdditiveDict
-  (unit, pointer, pointer) -> ();
-extern function pyon.internal.structures.repr_MultiplicativeDict
-  (unit, pointer, pointer) -> ();
+extern function pyon.internal.structures.repr_Box (unit) -> owned;
+extern function pyon.internal.structures.repr_Boxed (unit) -> owned;
+extern function pyon.internal.structures.repr_Stream (unit) -> owned;
 
 extern function pyon.internal.structures.repr_PyonTuple2
-  (unit, unit, pointer, pointer, pointer) -> ();
+  (unit, unit, owned, owned) -> owned;
 
-extern data pointer pyon.internal.structures.repr_Repr_value;
-extern data pointer pyon.internal.structures.repr_Box_value;
-extern data pointer pyon.internal.structures.repr_int;
-extern data pointer pyon.internal.structures.repr_float;
-extern data pointer pyon.internal.structures.repr_bool;
-extern data pointer pyon.internal.structures.OpaqueTraversableDict_list;
+extern data owned pyon.internal.structures.repr_Box_value;
+extern data owned pyon.internal.structures.repr_int;
+extern data owned pyon.internal.structures.repr_float;
+extern data owned pyon.internal.structures.repr_bool;
+extern data owned pyon.internal.structures.OpaqueTraversableDict_list;

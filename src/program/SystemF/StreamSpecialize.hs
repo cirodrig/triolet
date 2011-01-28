@@ -107,7 +107,6 @@ globalConTable =
       , unchanged 0 the_repr_float
       , unchanged 0 the_repr_bool
       , unchanged 0 the_repr_NoneType
-      , unchanged 1 the_repr_iter
       , unchanged 1 the_repr_list
       , unchanged 0 the_repr_Any
       , unchanged 1 the_repr_Box

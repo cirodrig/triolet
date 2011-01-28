@@ -8,6 +8,8 @@ to functions.
 module SystemF.OutputPassing (generateMemoryIR)
 where
 
+import Control.Monad
+  
 import Common.Error
 import Common.Identifier
 import Common.Supply
@@ -106,7 +108,7 @@ withReprDictionary param_type f = do
 saveDictionaryPattern :: PatM -> OP a -> OP a
 saveDictionaryPattern pattern m = 
   case pattern
-  of MemVarP pat_var (ReadPT ::: ty)
+  of MemVarP pat_var (BoxPT ::: ty)
        | Just repr_type <- get_repr_type ty ->
            saveDictionary repr_type (ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m
@@ -138,21 +140,13 @@ createDictEnv = do
                  ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_int)
   let float_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_float))
                    ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float)
-  repr_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_Repr) [VarT arg],
-     createDict_Repr arg)
-  boxed_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_Boxed) [VarT arg],
-     createDict_boxed arg)
+  repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
+  boxed_dict <- createBoxedDictPattern (pyonBuiltin the_Boxed) 1
+  additive_dict <- createBoxedDictPattern (pyonBuiltin the_AdditiveDict) 1
+  multiplicative_dict <- createBoxedDictPattern (pyonBuiltin the_MultiplicativeDict) 1
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin the_PyonTuple2) [VarT arg1, VarT arg2],
      createDict_Tuple2 arg1 arg2)
-  additive_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_AdditiveDict) [VarT arg],
-     createSimpleDict the_AdditiveDict the_repr_AdditiveDict arg)
-  multiplicative_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_MultiplicativeDict) [VarT arg],
-     createSimpleDict the_MultiplicativeDict the_repr_MultiplicativeDict arg)
   return $ DictEnv.DictEnv [repr_dict, boxed_dict,
                             float_dict, int_dict,
                             tuple2_dict, additive_dict, multiplicative_dict]
@@ -169,14 +163,13 @@ saveAndUseDict dict_type dict_val k =
 
 createDict_Tuple2 param_var1 param_var2 subst use_dict =
   withReprDictionary param1 $ \dict1 ->
-  withReprDictionary param2 $ \dict2 ->
-  withReprDictionary dict_type $ \dict_repr -> do
+  withReprDictionary param2 $ \dict2 -> do
     tmpvar <- newAnonymousVar ObjectLevel
     let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
     body <- saveAndUseDict data_type dict_exp use_dict
     return $ ExpM $ LetE { expInfo = defaultExpInfo 
-                         , expBinder = mk_pat tmpvar dict_repr
-                         , expValue = mk_dict tmpvar dict1 dict2
+                         , expBinder = mk_pat tmpvar
+                         , expValue = mk_dict dict1 dict2
                          , expBody = body}
   where
     param1 = getParamType param_var1 subst
@@ -186,60 +179,36 @@ createDict_Tuple2 param_var1 param_var2 subst use_dict =
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
     
     -- Construct the local variable pattern
-    mk_pat tmpvar dict_repr =
-      LocalVarP tmpvar dict_type dict_repr
+    mk_pat tmpvar =
+      MemVarP tmpvar (BoxPT ::: dict_type)
     
     -- Construct the dictionary
-    mk_dict tmpvar dict1 dict2 =
+    mk_dict dict1 dict2 =
       let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
-          return_arg = ExpM $ VarE defaultExpInfo tmpvar
       in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
-         [dict1, dict2, return_arg]
+         [dict1, dict2]
 
--- | Representation of 'Repr' dictionaries.  All 'Repr' dictionaries have
---   the same representation.  There's a predefined global variable for that,
---   so we can return a reference to it.  However, we still need to wrap it
---   in a function to deal with polymorphism.
-createDict_Repr param_var subst use_dict = use_dict expr
+-- | Get the representation dictionary for a boxed data type.
+--   
+--   To get the dictionary, call the @the_repr_Box@ function with
+--   boxed data type as its parameter.
+createBoxedDictPattern :: Var -> Int -> FreshVarM (DictEnv.TypePattern MkDict)
+createBoxedDictPattern con arity = do
+  param_vars <- replicateM arity $ newAnonymousVar TypeLevel
+  return $
+    DictEnv.pattern param_vars (match_type param_vars) (create_dict param_vars)
   where
-    param_type = getParamType param_var subst
-    op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Repr)
-    expr = ExpM $ AppE defaultExpInfo op [TypM param_type] []
+    match_type param_vars = varApp con (map VarT param_vars) 
 
--- | Representation of 'Boxed' dictionaries.  All 'Boxed' dictionaries have
---   the same representation as other boxed objects.  To get the dictionary,
---   call the @the_repr_Box@ function with the dictionary type.
-createDict_boxed param_var subst use_dict = use_dict expr
-  where
-    param_type = getParamType param_var subst
-    dict_type = varApp (pyonBuiltin the_Boxed) [param_type]
-    op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
-    expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
-
--- | Create the representation of a single-parameter class dictionary.
---   Takes the class dictionary as the first parameter, and the repr
---   constructor function as the second parameter.
-createSimpleDict tycon_selector repr_selector param_var subst use_dict =
-  withReprDictionary param $ \param_dict ->
-  withReprDictionary dict_type $ \dict_repr -> do
-    tmpvar <- newAnonymousVar ObjectLevel
-    let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
-    body <- saveAndUseDict data_type dict_exp use_dict
-    return $ ExpM $ LetE { expInfo = defaultExpInfo 
-                         , expBinder = mk_pat tmpvar dict_repr
-                         , expValue = mk_dict tmpvar param_dict
-                         , expBody = body}  
-  where
-    param = getParamType param_var subst
-    data_type = varApp (pyonBuiltin tycon_selector) [param]
-    dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    
-    mk_pat tmpvar dict_repr = LocalVarP tmpvar dict_type dict_repr
-    
-    mk_dict tmpvar param_dict =
-      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin repr_selector)
-          return_arg = ExpM $ VarE defaultExpInfo tmpvar
-      in ExpM $ AppE defaultExpInfo oper [TypM param] [param_dict, return_arg]
+    -- Create a function call expression
+    --
+    -- > the_repr_Box (con arg1 arg2 ... argN)
+    create_dict param_vars subst use_dict = use_dict expr
+      where
+        param_types = [getParamType v subst | v <- param_vars]
+        dict_type = varApp con param_types
+        op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
+        expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
 
 -------------------------------------------------------------------------------
 -- Transformations on IR data structures

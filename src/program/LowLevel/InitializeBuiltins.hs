@@ -92,6 +92,17 @@ lowerBuiltinFunType v_ids type_env con =
      Nothing -> internalError $
                 "lowerBuiltinFunType: Missing type for " ++ show con
 
+lowerBuiltinObjType :: Type.Environment.TypeEnv
+                    -> Type.Var.Var
+                    -> IO ValueType
+lowerBuiltinObjType type_env var =
+  case Type.Environment.lookupType var type_env
+  of Just (BoxRT ::: _)  -> return $ PrimType OwnedType
+     Just (ReadRT ::: _) -> return $ PrimType PointerType
+     Just _ -> internalError $
+               "lowerBuiltinObjType: Incompatible representation for " ++ show var
+     Nothing -> internalError $
+               "lowerBuiltinObjType: Missing type for " ++ show var
   
 -- | Given an identifier supply, and the memory-annotated type environment,
 --   initialize the builtin variables.
@@ -121,10 +132,13 @@ initializeLowLevelBuiltins type_var_ids v_ids mem_type_env = do
             | (nm, ty) <- builtinFunctions]
           init_globals =
             [("the_bivar_" ++ builtinVarUnqualifiedName nm,
-              let ty = case src
-                       of Left t -> t
-                          Right _ -> PrimType PointerType -- All Pyon globals are referenced by pointer
-              in [| initializeVarField v_ids nm ty |]) 
+              let mk_ty =
+                    case src
+                    of Left t -> [| return t |]
+                       Right conQ -> 
+                         [| lowerBuiltinObjType mem_type_env $conQ |]
+              in [| do ty <- $mk_ty
+                       initializeVarField v_ids nm ty |]) 
             | (nm, src) <- builtinGlobals]
           inits = init_primitives ++ init_functions ++ init_globals
       in initializeRecordM lowLevelBuiltinsRecord inits)

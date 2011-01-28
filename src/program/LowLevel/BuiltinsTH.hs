@@ -192,19 +192,17 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_multiplicativeDict) |])
   , (PyonName module_structures "additiveDict_complex",
      Right [| pyonBuiltin (SystemF.the_additiveDict_complex) |])-}
-  , (PyonName module_structures "repr_Repr",
-     Right [| SystemF.pyonBuiltin (SystemF.the_repr_Repr) |])
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
+  , (PyonName module_structures "repr_Boxed",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_Boxed |])
+  , (PyonName module_structures "repr_Stream",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_Stream |])
   {-, (PyonName module_structures "complex_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,
                           PrimType PointerType,
                           PrimType PointerType] []) -}
-  , (PyonName module_structures "repr_AdditiveDict",
-     Right [| SystemF.pyonBuiltin (SystemF.the_repr_AdditiveDict) |])
-  , (PyonName module_structures "repr_MultiplicativeDict",
-     Right [| SystemF.pyonBuiltin SystemF.the_repr_MultiplicativeDict |])
   , (PyonName module_structures "repr_PyonTuple2",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_PyonTuple2 |])
     
@@ -276,20 +274,16 @@ builtinGlobals =
      Left $ PrimType PointerType)
     -- Dictionaries
   , (PyonName module_structures "OpaqueTraversableDict_list",
-     Left $ PrimType PointerType)
+     Right [| pyonBuiltin SystemF.the_OpaqueTraversableDict_list |])
     -- Physical representations of data types
-  , (PyonName module_structures "repr_Repr_value",
-     Left $ PrimType PointerType)
+  , (PyonName module_structures "repr_Box_value",
+     Left $ PrimType OwnedType)
   , (PyonName module_structures "repr_int",
      Right [| pyonBuiltin (SystemF.the_repr_int) |] )
   , (PyonName module_structures "repr_float",
      Right [| pyonBuiltin (SystemF.the_repr_float) |] )
   , (PyonName module_structures "repr_bool",
      Right [| pyonBuiltin (SystemF.the_repr_bool) |] )
-  , (PyonName module_structures "TraversableDict_pass_conv",
-     Left $ PrimType PointerType)
-  , (CName module_structures "PassConv_pass_conv",
-     Left $ PrimType PointerType)
   ]
 
 builtinVarPrimName nm = "the_biprim_" ++ builtinVarUnqualifiedName nm

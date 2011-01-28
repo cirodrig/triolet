@@ -14,6 +14,7 @@ record ObjectHeader {
 
 // Objet layout information
 record PassConv {
+  const ObjectHeader header;
   const word size;                    // Size in bytes
   const word align;                   // Alignment in bytes
   const owned copy;                   // Duplicate a value
@@ -35,22 +36,25 @@ record FunInfo(n_args) {
 
 // Additive dictionary
 record AdditiveDict(a) {
+  const ObjectHeader header;
   const owned add;			// Add two values
-  const owned subtract;		// A value minus another
+  const owned subtract;			// A value minus another
   const owned negate;			// Negate a value
-  const a zero;			// The zero value
+  const a zero;				// The zero value
 };
 
 // Multiplicative dictionary
 record MultiplicativeDict(a) {
-  const AdditiveDict(a) additive;     // Additive dictionary
+  const ObjectHeader header;
+  const owned additive;			// Additive dictionary
   const owned mul;			// Multiply two values
-  const owned fromInt;		// Create from an integer
-  const a one;			// The one value
+  const owned fromInt;			// Create from an integer
+  const a one;				// The one value
 };
 
 // Traversable dictionary
 record TraversableDict {
+  const ObjectHeader header;
   const owned traverse;               // Traverse an object
   const owned build;                  // Build an object
 };

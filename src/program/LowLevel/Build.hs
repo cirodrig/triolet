@@ -765,10 +765,10 @@ selectPassConvSize, selectPassConvAlignment,
   selectPassConvCopy,
   selectPassConvFinalize :: (Monad m, Supplies m (Ident Var)) =>
                             Val -> Gen m Val
-selectPassConvSize = loadField (passConvRecord' !!: 0)
-selectPassConvAlignment = loadField (passConvRecord' !!: 1)
-selectPassConvCopy = loadField (passConvRecord' !!: 2)
-selectPassConvFinalize = loadField (passConvRecord' !!: 3)
+selectPassConvSize = loadField (passConvRecord' !!: 1)
+selectPassConvAlignment = loadField (passConvRecord' !!: 2)
+selectPassConvCopy = loadField (passConvRecord' !!: 3)
+selectPassConvFinalize = loadField (passConvRecord' !!: 4)
 
 -------------------------------------------------------------------------------
 -- Dictionaries

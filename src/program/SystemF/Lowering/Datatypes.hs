@@ -12,8 +12,11 @@ access the contents of a data structure.
 module SystemF.Lowering.Datatypes
        (PolyRepr(..),
         ValueLayout(..),
+        OwnedLayout(..),
         PointerLayout(..),
+        Layout(..),
         pprValueLayout,
+        pprOwnedLayout,
         pprPointerLayout,
         valueLayoutType,
         typeLayout,
@@ -66,7 +69,8 @@ data ValueLayout =
   | RecordValue !Var [ValueLayout]
   | EnumValue !LL.PrimType [(Var, LL.Lit)]
 
--- | The layout of a non-value.  Non-values are accessed through pointers.
+-- | The layout of a referenced object.
+--   Non-values are accessed through pointers.
 --   A 'PointerLayout' object gives us the object's layout in memory.
 --   Each disjunct is labeled with the data constructor.
 data PointerLayout =
@@ -75,15 +79,23 @@ data PointerLayout =
     -- | A scalar value that is accessed by reference (get a pointer to it)
   | ScalarReference !ValueLayout
     -- | A reference to a dynamically allocated value.  This occupies one
-    --   pointer worth of space.  If the boolean value is true, it is a
-    --   boxed object (with a header); otherwise it is a referenced object.
-  | IndirectReference !Bool PointerLayout
+    --   pointer worth of space.
+  | IndirectReference PointerLayout
     -- | A polymorphic value, accessed by reference
   | PolyReference !PolyRepr
     -- | A product type
   | ProductReference !Var [PointerLayout]
     -- | A sum-of-products type
   | SOPReference [(Var, [PointerLayout])]
+
+-- | The layout of a boxed object.  It is like a referenced object,
+--   except that there is a header we have to account for.
+data OwnedLayout = Box PointerLayout
+
+data Layout =
+    ValueLayout !ValueLayout
+  | OwnedLayout !OwnedLayout
+  | PointerLayout !PointerLayout
 
 -- | Pretty-print a @constructor => layout@ term.
 pprConstructorClause :: Var -> Doc -> Doc
@@ -111,13 +123,16 @@ pprValueLayout vl =
      EnumValue ty cases ->
        text "enum" <+> LL.pprPrimType ty $$ nest 4 (pprSum LL.pprLit cases)
 
+pprOwnedLayout :: OwnedLayout -> Doc
+pprOwnedLayout (Box pl) = 
+  text "box" <+> parens (pprPointerLayout pl)
+
 pprPointerLayout :: PointerLayout -> Doc
 pprPointerLayout pl =
   case pl
   of ValueReference vl -> hang (text "value") 4 $ pprValueLayout vl
      ScalarReference vl -> hang (text "scalar") 4 $ pprValueLayout vl
-     IndirectReference True l -> text "box" <+> parens (pprPointerLayout l)
-     IndirectReference False l -> text "ref" <+> parens (pprPointerLayout l)
+     IndirectReference l -> text "ref" <+> parens (pprPointerLayout l)
      PolyReference (PolyRepr t) -> text "poly" <+> pprType t
      ProductReference v fs ->
        pprConstructorClause v $ pprProduct pprPointerLayout fs
@@ -147,8 +162,8 @@ lowerValueType :: TypeEnv -> Type -> FreshVarM LL.ValueType
 lowerValueType tenv ty = do
   layout <- typeLayout tenv (ValRT ::: ty)
   case layout of
-    Left vlayout -> return $ valueLayoutType vlayout
-    Right _ -> internalError "lowerValueType"
+    ValueLayout vlayout -> return $ valueLayoutType vlayout
+    _ -> internalError "lowerValueType"
 
 -- | Determine the lowered type corresponding to the given data type and
 --   representation, if there is one.  Side effect types don't have a
@@ -181,24 +196,25 @@ lowerFunctionType tenv ty = do
 -------------------------------------------------------------------------------
 
 -- | Get the layout of a value, given its parameter type.
-paramTypeLayout :: TypeEnv -> ParamType
-                -> FreshVarM (Either ValueLayout PointerLayout)
+paramTypeLayout :: TypeEnv -> ParamType -> FreshVarM Layout
 paramTypeLayout tenv (repr ::: ty) =
   typeLayout tenv (paramReprToReturnRepr repr ::: ty)
 
--- | Get the layout of a value, given its return type.
+-- | Get the layout of a value, given its return type.  The value must be
+--   in the natural representation for its type, and the head term must
+--   be a type constructor application.
 --
 --   This function calls one of several internal functions to find the
 --   value's layout, depending on the given representation and type.
-typeLayout :: TypeEnv
-           -> ReturnType 
-           -> FreshVarM (Either ValueLayout PointerLayout)
+typeLayout :: TypeEnv -> ReturnType -> FreshVarM Layout
 typeLayout tenv (repr ::: scrutinee_type) =
   case repr
-  of ValRT  -> fmap Left $ valTypeLayout tenv scrutinee_type
-     BoxRT  -> fmap Right $ memTypeLayout tenv scrutinee_type
-     ReadRT -> fmap Right $ memTypeLayout tenv scrutinee_type
-     OutRT  -> fmap Right $ memTypeLayout tenv scrutinee_type
+  of ValRT  -> fmap ValueLayout $ valTypeLayout tenv scrutinee_type
+     -- Boxed object have the same layout as referenced objects except
+     -- for the boxing
+     BoxRT  -> fmap (OwnedLayout . Box) $ memTypeLayout tenv scrutinee_type
+     ReadRT -> fmap PointerLayout $ memTypeLayout tenv scrutinee_type
+     OutRT  -> fmap PointerLayout $ memTypeLayout tenv scrutinee_type
      _ -> internalError "typeLayout: Unexpected representation"
 
 lookupDataTypeForLayout tenv ty 
@@ -296,14 +312,10 @@ memDataTypeLayout tenv typedescr@(tycon, data_type, con_types, ty_args)
     tycon `isPyonBuiltin` the_float =
       fmap ScalarReference $ valDataTypeLayout tenv typedescr
 
-  -- Boxed and Referenced have special representations in memory
-  | tycon `isPyonBuiltin` the_Boxed =
-      let [arg] = ty_args
-      in fmap (IndirectReference True) $ memFieldLayout tenv arg
-
+  -- Referenced has a special representation in memory
   | tycon `isPyonBuiltin` the_Referenced =
       let [arg] = ty_args
-      in fmap (IndirectReference False) $ memFieldLayout tenv arg
+      in fmap IndirectReference $ memFieldLayout tenv arg
 
   | all_nullary_constructors, [con] <- cons =
       return $ ProductReference con []

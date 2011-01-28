@@ -405,10 +405,10 @@ mkPassableClass = do
   ; let iter_instance =
           Instance
           { insQVars = [b]
-          , insConstraint = [passable $ ConTy b]
+          , insConstraint = []
           , insClass = cls
           , insType = ConTy (tiBuiltin the_con_iter) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_iter
+          , insCon = Just $ pyonBuiltin SystemF.the_repr_Stream
           , insMethods = []
           }
   ; let complex_instance =
@@ -426,7 +426,7 @@ mkPassableClass = do
           , insConstraint = []
           , insClass = cls
           , insType = ConTy (tiBuiltin the_con_Boxed) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_Box
+          , insCon = Just $ pyonBuiltin SystemF.the_repr_Boxed
           , insMethods = []
           }        
   ; c <- newTyVar Star Nothing
