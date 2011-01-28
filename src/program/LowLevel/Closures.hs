@@ -156,9 +156,13 @@ ccHoistedFun fun = do
   -- If the input function was a primitive-call function, then there is no
   -- way to deal with free variables
   when (isPrimFun fun && not (null free_var_list)) $
-    error "Procedure has free variables"
+    free_variables_error free_var_list
 
   return (new_fun, free_var_list)
+  where
+    free_variables_error fvs =
+      let free_variables = intercalate ", " $ map show fvs
+      in error $ "Procedure has free variables: " ++ free_variables
 
 -- | Perform closure conversion on a function that won't be hoisted.
 --   The function body is closure-converted.  A primitive-call function 
