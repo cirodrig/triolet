@@ -100,7 +100,6 @@ record Stream {
   const owned next;                   // How to get the next stream element
   const owned initialize;             // How to initialize the stream state
   const PassConv return_repr;		// Representation of return value
-  const word state_size;              // Size of stream state
-  const word state_align;             // Alignment of stream state
-  const owned state_finalize;         // Finalizer for stream state
+  const PassConv state_repr;		// Representation of stream state.
+                                      // The copy function will not be used.
 };

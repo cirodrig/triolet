@@ -4,74 +4,56 @@ module pyon.internal.stream;
 #include "rts.h"
 #include "debug.h"
 #include "memory_py.h"
+#include "structures.h"
 #include "stream.h"
-#include "apply_py.h"
 
-#include "pyasm_records.h"
+extern procedure builtin.exit "exit" (pointer, pointer) -> ();
+
+#include "new_pyasm_records.h"
 
 // The info table of a stream
 data pointer Stream_info = InfoTableHeader {
-  Stream_dealloc,
+  dummy_finalizer,
   TAG_CON
 };
 
-function passConv_iter (unit _, pointer _, pointer ret) -> () {
-  ret @! PassConv.size = sizeof Stream;
-  ret @! PassConv.align = sizeof Stream;
-  ret @! PassConv.copy = Stream_copy;
-  ret @! PassConv.finalize = Stream_dealloc;
-  ();
-};
-
-procedure Stream_copy (pointer src, pointer dst) -> () {
-  dst @! Stream.next = src @! Stream.next;
-  dst @! Stream.initialize = src @! Stream.initialize;
-  dst @! Stream.return_repr.size = src @! Stream.return_repr.size;
-  dst @! Stream.return_repr.align = src @! Stream.return_repr.align;
-  dst @! Stream.return_repr.copy = src @! Stream.return_repr.copy;
-  dst @! Stream.return_repr.finalize = src @! Stream.return_repr.finalize;
-  dst @! Stream.state_size = src @! Stream.state_size;
-  dst @! Stream.state_align = src @! Stream.state_align;
-  dst @! Stream.state_finalize = src @! Stream.state_finalize;
-  ();  
-};
-
-// Deallocate a Stream
-procedure Stream_dealloc (pointer self) -> () {
-  // Not implemented
-  ();
+// A stream's state will never be copied.  Abort if we try to copy it.
+function copy_stream_state(pointer src, pointer dst) -> () {
+  () primcall exit (int -1);
 };
 
 /*****************************************************************************/
 /* return */
-
-// A "return" stream produces one value, then quits.  The value is produced
+#if 0
+// A 'return' stream produces one value, then quits.  The value is produced
 // by calling a function.
+//
+// The stream state is a bool, whose value says whether the stream's single
+// output has been produced yet.
+//   true  -> depleted
+//   false -> value is available
 
 // Create a stream that produces a single value
-function Stream_return (unit _, unit _,
+function Stream_return (unit _,
                         pointer return_type_repr,
                         owned produce_value) -> owned {
-  ALLOC_OBJECT(s, Stream, Stream_info)
-  s @! Stream.next = owned call Stream_return_next(s @ Stream.return_repr,
-                                                   produce_value);
+  s = (pointer primcall pyon_alloc (sizeof Stream)) as owned;
+  // FIXME: initialize header
+
+  s @! Stream.next = owned call Stream_return_next(produce_value);
   s @! Stream.initialize = Stream_return_initialize;
-  s @! Stream.return_repr.size = return_type_repr @! PassConv.size;
-  s @! Stream.return_repr.align = return_type_repr @! PassConv.align;
-  s @! Stream.return_repr.copy = return_type_repr @! PassConv.copy;
-  s @! Stream.return_repr.finalize = return_type_repr @! PassConv.finalize;
-  s @! Stream.state_size = sizeof bool;
-  s @! Stream.state_align = alignof bool;
-  s @! Stream.state_finalize = dummy_finalizer;
+  () = () call copy_Repr (nil, return_type_repr, s @! Stream.return_repr);
+  s @! Stream.state_repr.size = sizeof bool;
+  s @! Stream.state_repr.align = alignof bool;
+  s @! Stream.state_repr.copy = copy_stream_state;
+  s @! Stream.state_repr.finalize = dummy_finalizer;
   s;
 };
 
-function Stream_return_next (pointer return_type_repr,
-                             owned produce_value,
+function Stream_return_next (owned produce_value,
                              pointer state,
                              pointer ret) -> bool {
-  b = bool load state;
-  if (b) {
+  if (bool load state) {
     // Stream is depleted
     false;
   } else {
@@ -90,65 +72,91 @@ function Stream_return_initialize(pointer state) -> () {
   ();
 };
 
+#endif
+
 /*****************************************************************************/
 /* bind */
 
-/* The state of a chained stream consists of:
- *  1. The transformer stream (or NULL)
- *  2. The transformer stream's state (if transformer stream is not NULL)
- *  3. The producer stream's state
- *  4. The producer's current output value
- *
- * The current output value has to be stored because the transformer stream
- * may reference it.
- */
-record Stream_bind_state {
+// A bound stream consists of a producer stream and a consumer function that
+// returns a stream.  The consumer transforms every element returned by the
+// producer.
+//
+// The state of a bound stream consists of:
+//  1. The current transformer stream, or NULL.
+//     If non-null, the next value is pulled from this stream.  Otherwise,
+//     We need to pull from the producer and create a new transformer stream.
+//  2. A pointer to the current transformer stream's state, or NULL.
+//  3. The producer stream's current output value.  This value
+//     may be referenced by the transformer stream.  It's garbage if the
+//     transformer stream is NULL.
+//  4. The producer stream's state.
+record Stream_bind_state(pstateT, presultT) {
   pointer transformer;          // Transformer stream (owned or NULL)
   pointer transformer_state;    // Transformer stream's state, or NULL
-  pointer producer_state;       // Producer's state
-  pointer temporary_state;      // Producer's current output value
+  presultT temporary_state;     // Producer's current output value
                                 // (if transformer stream is not NULL)
-  PassConv produced_repr;
+  pstateT producer_state;       // Producer's state
 };
 
+#if 0
 // Chain streams together.
-function Stream_bind (unit _, unit _, unit _,
+function Stream_bind (unit _, unit _,
                       pointer produced_type_repr,
                       pointer transformed_type_repr,
                       owned producer,
                       owned transformer) -> owned {
-  ALLOC_OBJECT(s, Stream, Stream_info)
-  produced_type_size = produced_type_repr @! PassConv.size;
-  produced_type_fini = produced_type_repr @! PassConv.finalize;
-  s @! Stream.next =
-      owned call Stream_bind_next(produced_type_fini, producer, transformer);
-  s @! Stream.initialize =
-      owned call Stream_bind_initialize(produced_type_size, producer);
-  s @! Stream.return_repr.size = transformed_type_repr @! PassConv.size;
-  s @! Stream.return_repr.align = transformed_type_repr @! PassConv.align;
-  s @! Stream.return_repr.copy = transformed_type_repr @! PassConv.copy;
-  s @! Stream.return_repr.finalize = transformed_type_repr @! PassConv.finalize;
-  s @! Stream.state_size = sizeof Stream_bind_state;
-  s @! Stream.state_align = alignof Stream_bind_state;
-  s @! Stream.state_finalize =
-      owned call Stream_bind_finalize(produced_type_fini,
-                                      producer @! Stream.state_finalize);
+  producer_state_size = producer @! Stream.state_repr.size;
+  producer_state_align = producer @! Stream.state_repr.align;
+  typedef produced_state =
+    bytes(value producer_state_size, value producer_state_align);
+  producer_result_size = produced_type_repr @! PassConv.size;
+  producer_result_align = produced_type_repr @! PassConv.align;
+  typedef produced_type =
+    bytes(value producer_result_size, value producer_result_align);
+
+  typedef stream_state = Stream_bind_state(produced_state, produced_type);
+
+  produced_type_repr_val = PassConv load produced_type_repr;
+
+  s = () primcall pyon_alloc (sizeof Stream);
+  // FIXME: Initialize header
+
+  s @! Stream.next = owned call Stream_bind_next
+    (produced_type_repr_val, producer, transformer);
+  s @! Stream.initialize = owned call Stream_bind_initialize
+    (producer_result_size, producer_result_align, producer);
+  () = () call copy_Repr (transformed_type_repr, s @! Stream.return_repr);
+  s @! Stream.state_repr.size = sizeof stream_state;
+  s @! Stream.state_repr.align = alignof stream_state;
+  s @! Stream.state_repr.copy = copy_stream_state;
+  s @! Stream.state_repr.finalize = dummy_finalizer;
   s;
 };
 
 // Initialize a bound stream.
-function Stream_bind_initialize (word produced_type_size,
+function Stream_bind_initialize (word producer_result_size,
+                                 word producer_result_align,
                                  owned producer,
                                  pointer state) -> () {
+  producer_state_size = producer @! Stream.state_repr.size;
+  producer_state_align = producer @! Stream.state_repr.align;
+  typedef producer_state =
+    bytes(value producer_state_size, value producer_state_align);
+  typedef produced_type =
+    bytes(value producer_result_size, value producer_result_align);
+
+  typedef stream_state = Stream_bind_state(produced_state, produced_type);
+
+
+  typedef stream_state = Stream_bind_state(produced_state);
+
   // Initialize the transformer pointer
-  state @! Stream_bind_state.transformer = null;
-  state @! Stream_bind_state.transformer_state = null;
+  state @! stream_state.transformer = null;
+  state @! stream_state.transformer_state = null;
 
   // Initialize the producer state
-  pstate =
-      pointer primcall pyon_alloc(producer @! Stream.state_size);
-  () = () call (producer @! Stream.initialize) (pstate);
-  state @! Stream_bind_state.producer_state = pstate;
+  () = () call (producer @! Stream.initialize)
+    (state @ stream_state.producer_state);
 
   // Allocate the temporary storage
   state @! Stream_bind_state.temporary_state =
@@ -250,10 +258,12 @@ function Stream_bind_finalize (owned produced_type_fini,
   () = () call finalize_producer (producer_state);
   () primcall pyon_dealloc (producer_state);
 };
+#endif
 
 /*****************************************************************************/
 /* generate */
 
+#if 0
 // A stream consisting of the sequence f(0), f(1), ... f(limit-1).
 // The stream state holds the next value to generate.
 function Stream_generate
@@ -292,10 +302,12 @@ function Stream_generate_initialize (pointer state) -> () {
   !state = int 0;
   ();
 };
+#endif
 
 /*****************************************************************************/
 /* map */
 
+#if 0
 // State of Stream_map.
 // The state consists of the produced value's representation and temporary
 // storage for the produced value.
@@ -356,10 +368,12 @@ function Stream_map_initialize
     pointer primcall pyon_alloc (produced_size);
   ();
 };
+#endif
 
 /*****************************************************************************/
 /* reduce */
 
+#if 0
 function inline Stream_reduce
   (unit _, unit _,
    pointer passconv, pointer _,
@@ -432,3 +446,4 @@ function inline reduce
   // Clean up
   ();
 };
+#endif

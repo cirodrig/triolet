@@ -15,7 +15,7 @@ import procedure exit (int) -> ();
 data pointer repr_Repr_value = PassConv {
   sizeof PassConv,
   alignof PassConv,
-  copy_PassConv,
+  copy_Repr,
   dummy_finalizer
 };
 
@@ -68,7 +68,7 @@ data pointer repr_bool = PassConv {
   dummy_finalizer
 };
 
-function copy_PassConv (unit _, pointer src, pointer dst) -> () {
+function copy_Repr (unit _, pointer src, pointer dst) -> () {
   dst @! PassConv.size = src @! PassConv.size;
   dst @! PassConv.align = src @! PassConv.align;
   dst @! PassConv.copy = src @! PassConv.copy;

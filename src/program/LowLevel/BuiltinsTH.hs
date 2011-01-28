@@ -155,13 +155,13 @@ builtinFunctions =
   , (PyonName module_memory_py "copy",
      Right [| pyonBuiltin (SystemF.the_copy) |])
 {-  , (PyonName module_structures "makeComplex",
-     Right [| pyonBuiltin (SystemF.the_makeComplex) |])
+     Right [| pyonBuiltin (SystemF.the_makeComplex) |]) -}
+  , (PyonName module_list "repr_list",
+     Right [| pyonBuiltin SystemF.the_repr_list |])
   , (PyonName module_list "list_build",
-     Right [| pyonBuiltin (SystemF.buildMember . SystemF.the_TraversableDict_list) |])
+     Right [| pyonBuiltin SystemF.the_TraversableDict_list_build |])
   , (PyonName module_list "list_traverse",
-     Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_list) |])
-  , (PyonName module_list "passConv_list",
-     Right [| pyonBuiltin (SystemF.the_passConv_list) |])
+     Right [| pyonBuiltin SystemF.the_TraversableDict_list_traverse |]) {-
   , (PyonName module_list "subscript",
      Right [| pyonBuiltin (SystemF.the_fun_subscript) |])
   , (PyonName module_list "list_generate",
@@ -169,11 +169,11 @@ builtinFunctions =
   , (PyonName module_list "list_vGenerate",
      Right [| pyonBuiltin (SystemF.the_fun_vectorGenerateList) |])
   , (PyonName module_stream "passConv_iter",
-     Right [| pyonBuiltin (SystemF.the_passConv_iter) |])
+     Right [| pyonBuiltin (SystemF.the_passConv_iter) |]) -}
   , (PyonName module_stream "Stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
   , (PyonName module_stream "Stream_return",
-     Right [| pyonBuiltin (SystemF.the_fun_return) |])
+     Right [| pyonBuiltin (SystemF.the_oper_DO) |]) {-
   , (PyonName module_stream "Stream_generate",
      Right [| pyonBuiltin (SystemF.the_fun_generate) |])
   , (PyonName module_stream "Stream_map",

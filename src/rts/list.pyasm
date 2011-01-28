@@ -118,7 +118,7 @@ procedure list_grow (pointer elem_repr, pointer list, word new_size) -> () {
 };
 
 // Create a list from a stream of unknown size
-function list_build (unit _, unit _, pointer elem_repr, owned stream, pointer list) -> () {
+function list_build (unit _, pointer elem_repr, owned stream, pointer list) -> () {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   pad_elem_size = PAD(elem_size, elem_align);

@@ -144,6 +144,12 @@ TraversableDict_Stream_build :
 TraversableDict_Stream_traverse :
   (val a : pure) -> read Repr a -> box Stream a -> box Stream a;
 
+TraversableDict_list_build :
+  (val a : pure) -> read Repr a -> box Stream a -> write list a;
+
+TraversableDict_list_traverse :
+  (val a : pure) -> read Repr a -> read list a -> box Stream a;
+
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
 
@@ -206,10 +212,11 @@ minus_ii : (val m : intindex)
 -------------------------------------------------------------------------------
 -- Other functions
 
-oper_DO : (val a : pure) -> read Repr a -> read a -> box Stream a;
+oper_DO : (val a : pure) -> read Repr a -> write a -> box Stream a;
 
 oper_CAT_MAP :
     (val a : pure) -> (val b : pure) -> read Repr a -> read Repr b
  -> box Stream a
  -> box (read a -> box Stream b)
  -> box Stream b;
+

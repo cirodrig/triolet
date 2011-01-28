@@ -5,7 +5,7 @@ extern procedure pyon.internal.list.list_test "list_test" () -> ();
 extern function pyon.internal.list.list_db (pointer) -> ();
 extern function pyon.internal.list.list_copy (pointer, pointer, pointer) -> ();
 extern function pyon.internal.list.list_finalize (pointer, pointer) -> ();
-extern function pyon.internal.list.list_build (unit, unit, pointer, owned, pointer) -> ();
+extern function pyon.internal.list.list_build (unit, pointer, owned, pointer) -> ();
 extern function pyon.internal.list.list_traverse
   (unit, pointer, pointer) -> owned;
 extern function pyon.internal.list.list_generate

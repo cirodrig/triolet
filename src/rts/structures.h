@@ -2,6 +2,9 @@
 extern function pyon.internal.structures.copy_PyonTuple2
   (owned, owned, word, word, word, word, pointer, pointer) -> ();
 
+extern function pyon.internal.structures.copy_Repr
+  (unit, pointer, pointer) -> ();
+
 extern function pyon.internal.structures.complex_pass_conv
   (unit, pointer, pointer) -> ();
 
