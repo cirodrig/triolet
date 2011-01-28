@@ -97,7 +97,8 @@ enterLetrec :: [(Var, Int)] -> Scan -> Scan
 enterLetrec functions f = \m -> f (insert_functions m)
   where
     insert_functions m =
-      foldr (uncurry Map.insert) m [(v, (a, Context [] TopContext)) | (v, a) <- functions]
+      foldr (uncurry Map.insert) m [(v, (a, Context [] TopContext))
+                                   | (v, a) <- functions]
 
 -- | A function was tail-called with the specified number of arguments
 tailCalled :: Var -> Int -> Scan

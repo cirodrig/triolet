@@ -42,6 +42,7 @@ module LowLevel.ClosureCode
        (varPrimType,
         GenM, CC,
         runCC,
+        FreeVars,
         withHoistedVariables,
         withUnhoistedVariables,
         isHoisted,

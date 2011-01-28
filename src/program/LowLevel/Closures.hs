@@ -23,6 +23,7 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as Set
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.MonadLogic
@@ -135,17 +136,20 @@ ccFunBody fun =
   where
     return_prim_types = map valueToPrimType $ funReturnTypes fun
 
--- | Perform closure conversion on the body of a function and return the
---   closure-converted function.  Only the direct entry is constructed; if
---   a function closure is desired, the other parts must be built elsewhere.
+-- | Perform closure conversion on the body of a function. 
+--   Return a code generator for the function body and the set of captured
+--   variables.
+ccHoistedFunBody :: Fun -> CC (GenM Stm, FreeVars)
+ccHoistedFunBody fun = listenFreeVars $ ccFunBody fun
+
+-- | Given a function that is to be closure converted, a code generator
+--   for the closure-converted function body (produced by 'ccHoistedFunBody'), 
+--   and a set of captured variables, return the closure-converted function.
 --
---   The direct entry point function and a list of captured variables
---   are returned.
-ccHoistedFun :: Fun -> CC (Fun, [Var])
-ccHoistedFun fun = do
-  -- Do closure conversion in the function body, and get the set of variables
-  -- mentioned in the function body
-  (mk_body, free_vars) <- listenFreeVars $ ccFunBody fun
+--   Only the function's direct entry is constructed.  Other parts of the
+--   converted function must be built elsewhere.
+ccCreateHoistedFun :: Fun -> GenM Stm -> FreeVars -> CC (Fun, [Var])
+ccCreateHoistedFun fun mk_body free_vars = do
   body <- execBuild (funReturnTypes fun) mk_body
 
   -- Add the free variables as extra parameters
@@ -163,6 +167,18 @@ ccHoistedFun fun = do
     free_variables_error fvs =
       let free_variables = intercalate ", " $ map show fvs
       in error $ "Procedure has free variables: " ++ free_variables
+
+-- | Perform closure conversion on a non-recursive or top-level function. 
+--   Recursive functions are processed by 'ccLocalGroup'.
+--
+--   The direct entry point function and a list of captured variables
+--   are returned.
+ccHoistedFun :: Fun -> CC (Fun, [Var])
+ccHoistedFun fun = do
+  -- Do closure conversion in the function body, and get the set of variables
+  -- mentioned in the function body
+  (mk_body, free_vars) <- ccHoistedFunBody fun
+  ccCreateHoistedFun fun mk_body free_vars
 
 -- | Perform closure conversion on a function that won't be hoisted.
 --   The function body is closure-converted.  A primitive-call function 
@@ -187,18 +203,30 @@ ccLocalGroup defs do_body = withParameters (map definiendum defs) $ do
   hoisted <- mapM (isHoisted . definiendum) defs
   let (h_defs, l_defs) = partition_by hoisted defs
 
-  generate_hoisted_functions h_defs $ \hoisted_code -> 
+  generate_hoisted_group h_defs $ \hoisted_code -> 
     withUnhoistedVariables (map definiendum l_defs) $ do
       unhoisted_code <- generate_unhoisted l_defs
       do_body (hoisted_code >> emitLetrec unhoisted_code)
   where
-    generate_hoisted_functions :: [FunDef]
-                               -> (GenM () -> CC a)
-                               -> CC a
-    generate_hoisted_functions [] k = k (return ())
-    generate_hoisted_functions h_defs k =
-      withLocalFunctions h_defs (mapM (ccHoistedFun . definiens) h_defs) k
+    generate_hoisted_group :: [FunDef]
+                           -> (GenM () -> CC a)
+                           -> CC a
+    generate_hoisted_group [] k = k (return ())
+    generate_hoisted_group h_defs k =
+      withLocalFunctions h_defs (generate_hoisted_functions h_defs) k
 
+    generate_hoisted_functions h_defs = do
+      let functions = map definiens h_defs
+      -- Closure-convert and find free variables in all functions
+      (mk_bodies, free_varss) <- mapAndUnzipM ccHoistedFunBody functions
+
+      -- Combine the free variable sets
+      let free_vars = Set.unions free_varss
+      
+      -- Create and return the hoisted functions
+      sequence [ccCreateHoistedFun f mk_body free_vars  
+               | (f, mk_body) <- zip functions mk_bodies]
+                        
     generate_unhoisted l_defs = mapM gen l_defs
       where
         gen (Def v f) = do
