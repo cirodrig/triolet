@@ -1,0 +1,6 @@
+
+def listadd1(xs : list(int)) -> list(int):
+  return [x + 1 for x in xs]
+
+export ccall listadd1 : list(int) -> list(int)
+

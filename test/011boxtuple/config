@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Constructing boxed objects",
+  pyonSources	 = ["boxed.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "10"
+}

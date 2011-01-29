@@ -1,0 +1,9 @@
+
+def foo(x):
+    return (boxed(x), x)
+
+def bar(y : int):
+	(_, (z, _)) = foo((y+1, y+2))
+	return z
+
+export ccall bar : int -> int
