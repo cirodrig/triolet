@@ -1000,12 +1000,12 @@ genVarCall return_types fun args = lookupClosure fun >>= select
            op <- use_fun
            genIndirectCall return_types op args
          EQ -> do               -- Saturated
-           return $ directCall captured_vars entry args
+           directCall captured_vars entry args
          GT -> do
            -- Oversaturated; generate a direct call followed by an
            -- indirect call
            let (direct_args, indir_args) = splitAt arity args
-           let direct_call = directCall captured_vars entry direct_args
+           direct_call <- directCall captured_vars entry direct_args
            let direct_val = emitAtom1 (PrimType OwnedType) =<< direct_call
            genIndirectCall return_types direct_val indir_args
       where
@@ -1014,11 +1014,13 @@ genVarCall return_types fun args = lookupClosure fun >>= select
         captured_vars = closureCapturedVariables ep
 
 -- | Produce a direct call to the given primitive function.
-directCall :: [Var] -> Var -> [GenM Val] -> GenM Atom
+directCall :: [Var] -> Var -> [GenM Val] -> CC (GenM Atom)
 directCall captured_vars v args = do
-  args' <- sequence args
-  let captured_args = map VarV captured_vars
-  return $ primCallA (VarV v) (captured_args ++ args')
+  mentions captured_vars
+  return $ do
+    args' <- sequence args
+    let captured_args = map VarV captured_vars
+    return $ primCallA (VarV v) (captured_args ++ args')
 
 -- | Produce an indirect call of the given operator
 genIndirectCall :: [PrimType]   -- ^ Return types
