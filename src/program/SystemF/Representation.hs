@@ -417,51 +417,60 @@ coerceParameter ty e_repr g_repr =
 
 coerceReturnType :: ReturnType -> ReturnType -> InferRepr Coercion
 coerceReturnType (e_repr ::: e_type) (g_repr ::: g_type) = do
-  co_type <- coerceType e_type g_type
+  (co_type, e_type', g_type') <- coerceType e_type g_type
   
   -- Do types match?
   if isIdCoercion co_type
-    then coerceReturn e_type e_repr g_repr
+    then coerceReturn e_type' e_repr g_repr
     else do
       -- Coerce the given value to the type's natural representation.
       -- The natural representation is the same for given and expected types.
-      natural_repr <- infTypeRepr g_type
+      natural_repr <- infTypeRepr g_type'
       let n_repr = asWriteReturnRepr natural_repr
-      co1 <- coerceReturn g_type n_repr g_repr
+      co1 <- coerceReturn g_type' n_repr g_repr
       
       -- Coerce the coerced value to the expected representation
-      co3 <- coerceReturn e_type e_repr n_repr
+      co3 <- coerceReturn e_type' e_repr n_repr
       return (co3 `mappend` co_type `mappend` co1)
 
 coerceParameterType :: ParamType -> ParamType -> InferRepr Coercion
 coerceParameterType (e_repr ::: e_type) (g_repr ::: g_type) = do
-  co_type <- coerceType e_type g_type
+  (co_type, e_type', g_type') <- coerceType e_type g_type
   
   -- Do types match?
   if isIdCoercion co_type
-    then coerceParameter e_type e_repr g_repr
+    then coerceParameter e_type' e_repr g_repr
     else do
       -- Coerce the given value to the type's natural representation.
       -- The natural representation is the same for given and expected types.
-      natural_repr <- infTypeRepr g_type
-      co1 <- coerceParameter g_type (asWriteParamRepr g_repr natural_repr) g_repr
+      natural_repr <- infTypeRepr g_type'
+      co1 <- coerceParameter g_type' (asWriteParamRepr g_repr natural_repr) g_repr
       
       -- Coerce the coerced value to the expected representation
-      co3 <- coerceParameter e_type e_repr (asReadParamRepr e_repr natural_repr)
+      co3 <- coerceParameter e_type' e_repr (asReadParamRepr e_repr natural_repr)
       return (co3 `mappend` co_type `mappend` co1)
 
-coerceType :: Type -> Type -> InferRepr Coercion
+-- | Coerce from given to expected type.
+--   A coercion is returned.
+--   The types are also returned, renamed so that their bound variables match.
+coerceType :: Type -> Type -> InferRepr (Coercion, Type, Type)
 coerceType e_type g_type = do
-  utypes <- unifyBoundVariables e_type g_type
-  case utypes of
-    (VarT e_var, VarT g_var)
-      | e_var == g_var -> return mempty
-      | otherwise -> internalError "coerceType"
-    (FunT {}, FunT {}) -> coerce_function_type [] e_type g_type
-    (e_type', g_type') -> do
+  -- Rename the types, then coerce
+  (e_type', g_type') <- unifyBoundVariables e_type g_type
+  coercion <- compute_coercion e_type' g_type'
+  return (coercion, e_type', g_type')
+  where
+    compute_coercion (VarT e_var) (VarT g_var)
+      | e_var == g_var = return mempty
+      | otherwise = internalError "coerceType"
+
+    compute_coercion e_type'@(FunT {}) g_type'@(FunT {}) =
+      coerce_function_type [] e_type' g_type'
+
+    compute_coercion e_type' g_type' = do
       ok <- infCompareTypes noSourcePos e_type' g_type'
       if ok then return mempty else internalError "coerceType: Type mismatch"
-  where
+
     coerce_function_type
       r_param_coercions
       (FunT e_param e_result)
