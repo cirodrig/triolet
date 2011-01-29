@@ -367,27 +367,11 @@ genExpr tenv expr =
        e' <- subexpr e
        genCast (convertToValueType ty) e'
      SizeofE ty -> do
-       size <-
-         case ty
-         of BytesT size _ -> return $ mkWordVal size
-            NamedT (SynonymT syn) ->
-              return $ dynamicTypeSize $ lookupTypeSynonym syn tenv
-            NamedT (RecordT rec) -> do
-              dynamic_rec <- convertToDynamicRecord tenv rec
-              return $ recordSize dynamic_rec
-            _ -> return $ nativeWordV $ sizeOf $ convertToValueType ty
-       return $ GenVal size
+       dyn_type <- genDynamicType tenv ty
+       return $ GenVal $ dynamicTypeSize dyn_type
      AlignofE ty -> do
-       align <-
-         case ty
-         of BytesT _ align -> return $ mkWordVal align
-            NamedT (SynonymT syn) ->
-              return $ dynamicTypeAlign $ lookupTypeSynonym syn tenv
-            NamedT (RecordT rec) -> do
-              dynamic_rec <- convertToDynamicRecord tenv rec
-              return $ recordAlignment dynamic_rec
-            _ -> return $ nativeWordV $ alignOf $ convertToValueType ty
-       return $ GenVal align
+       dyn_type <- genDynamicType tenv ty
+       return $ GenVal $ dynamicTypeAlign dyn_type
   where
     subexpr e = genExpr tenv e
     data_expr = lift $ fmap GenVal $ genDataExpr expr
