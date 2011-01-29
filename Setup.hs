@@ -163,7 +163,7 @@ doTest args _ pkg_desc lbi = do
   let flag_32 = if force32BitCompilation then ["-m32"] else []
       cc_flags = flag_32
       ld_flags = flag_32
-      test_arguments = [buildDir lbi, show cc_flags, show ld_flags]
+      test_arguments = [buildDir lbi, show cc_flags, show ld_flags] ++ args
   rawSystemExit verb (testDriverProgram lbi) test_arguments
 
 hooks = simpleUserHooks

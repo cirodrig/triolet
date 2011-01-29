@@ -85,14 +85,31 @@ runTests test_cases = do
       liftIO $ print result
       return $! stats `mappend` testResultStatistic result test_case
 
+loadAllTests package_dir =
+  loadTests (package_dir </> "test")
+
+loadNamedTests package_dir names = mapM load_test names
+  where
+    load_test test_name = do
+      let test_dir = package_dir </> "test" </> test_name
+      exists <- doesDirectoryExist test_dir
+      if exists
+        then loadTestCase test_dir
+        else fail $ "Test case does not exist: " ++ test_name
+
 main = do
   -- Set up paths
-  [rel_build_dir, extra_cflags, extra_lflags] <- getArgs 
+  rel_build_dir : extra_cflags : extra_lflags : other_args <- getArgs 
   build_dir <- canonicalizePath rel_build_dir 
   curdir <- getCurrentDirectory
 
-  -- Load tests
-  tests <- loadTests (curdir </> "test")
+  -- Parse arguments
+  let test_loader =
+        case other_args
+        of [] -> loadAllTests curdir
+           test_names -> loadNamedTests curdir test_names
+
+  tests <- test_loader
 
   -- Run tests
   tmp_base_dir <- getTemporaryDirectory
