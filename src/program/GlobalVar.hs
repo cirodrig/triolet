@@ -40,7 +40,17 @@ modifyStaticGlobalVar (SGV v) f = modifyMVar v f
 newtype InitGlobalVar a = IGV {getIGV :: MVar a}
 
 defineInitGlobalVar :: () -> InitGlobalVar a
-defineInitGlobalVar () = unsafePerformIO $ return . IGV =<< newEmptyMVar
+defineInitGlobalVar x = unsafePerformIO (realDefineInitGlobalVar x)
+
+-- The parameter 'x' is a hack to prevent CSE
+{-# NOINLINE realDefineInitGlobalVar #-}
+realDefineInitGlobalVar x = do
+  mvar <- x `seq` newEmptyMVar
+  return (IGV mvar)
+
+-- | Return True if the variable has been initialized.
+testInitGlobalVar :: InitGlobalVar a -> IO Bool
+testInitGlobalVar (IGV v) = fmap not $ isEmptyMVar v
 
 initializeGlobalVar :: InitGlobalVar a -> IO a -> IO ()
 initializeGlobalVar (IGV v) m = do

@@ -20,6 +20,8 @@ import CParser.Resolve
 import CParser.LevelInference
 import CParser.GenCore
 import Paths
+import GlobalVar
+import Globals
 
 import CParser.PrettyAST()
 
