@@ -3,11 +3,12 @@ module pyon.internal.stream;
 
 #include "rts.h"
 #include "debug.h"
+#include "apply_py.h"
 #include "memory_py.h"
 #include "structures.h"
 #include "stream.h"
 
-extern procedure builtin.exit "exit" (pointer, pointer) -> ();
+import procedure exit (pointer, pointer) -> ();
 
 #include "new_pyasm_records.h"
 
@@ -17,14 +18,14 @@ data pointer Stream_info = InfoTableHeader {
   TAG_CON
 };
 
-// A stream's state will never be copied.  Abort if we try to copy it.
-function copy_stream_state(pointer src, pointer dst) -> () {
-  () primcall exit (int -1);
+procedure inline Stream_alloc () -> owned {
+  s = pointer primcall pyon_alloc (sizeof Stream);
+  // FIXME: initialize header
+  s as owned;
 };
 
 /*****************************************************************************/
 /* return */
-#if 0
 // A 'return' stream produces one value, then quits.  The value is produced
 // by calling a function.
 //
@@ -34,23 +35,19 @@ function copy_stream_state(pointer src, pointer dst) -> () {
 //   false -> value is available
 
 // Create a stream that produces a single value
-function Stream_return (unit _,
-                        pointer return_type_repr,
+function inline Stream_return (unit _,
+                        owned return_type_repr,
                         owned produce_value) -> owned {
-  s = (pointer primcall pyon_alloc (sizeof Stream)) as owned;
-  // FIXME: initialize header
-
+  s = owned primcall Stream_alloc();
   s @! Stream.next = owned call Stream_return_next(produce_value);
   s @! Stream.initialize = Stream_return_initialize;
-  () = () call copy_Repr (nil, return_type_repr, s @! Stream.return_repr);
-  s @! Stream.state_repr.size = sizeof bool;
-  s @! Stream.state_repr.align = alignof bool;
-  s @! Stream.state_repr.copy = copy_stream_state;
-  s @! Stream.state_repr.finalize = dummy_finalizer;
+  s @! Stream.state_size = sizeof bool;
+  s @! Stream.state_align = alignof bool;
+  s @! Stream.state_finalize = dummy_finalizer; // It's plain old data
   s;
 };
 
-function Stream_return_next (owned produce_value,
+function inline Stream_return_next (owned produce_value,
                              pointer state,
                              pointer ret) -> bool {
   if (bool load state) {
@@ -59,20 +56,15 @@ function Stream_return_next (owned produce_value,
   } else {
     // Stream has data
     !state = true;      // Remember that value was produced
-
-    // Produce the value
     () = () call produce_value (ret);
-
     true;
   };
 };
 
-function Stream_return_initialize(pointer state) -> () {
+function inline Stream_return_initialize(pointer state) -> () {
   !state = false;
   ();
 };
-
-#endif
 
 /*****************************************************************************/
 /* bind */
@@ -91,300 +83,232 @@ function Stream_return_initialize(pointer state) -> () {
 //     transformer stream is NULL.
 //  4. The producer stream's state.
 record Stream_bind_state(pstateT, presultT) {
-  pointer transformer;          // Transformer stream (owned or NULL)
-  pointer transformer_state;    // Transformer stream's state, or NULL
-  presultT temporary_state;     // Producer's current output value
+  pointer tf;                   // Transformer stream (owned or NULL)
+  pointer tf_state;             // Transformer stream's state
                                 // (if transformer stream is not NULL)
-  pstateT producer_state;       // Producer's state
+  presultT pr_result;           // Producer's current output value
+                                // (if transformer stream is not NULL)
+  pstateT pr_state;             // Producer's state
 };
 
-#if 0
 // Chain streams together.
-function Stream_bind (unit _, unit _,
-                      pointer produced_type_repr,
-                      pointer transformed_type_repr,
-                      owned producer,
-                      owned transformer) -> owned {
-  producer_state_size = producer @! Stream.state_repr.size;
-  producer_state_align = producer @! Stream.state_repr.align;
-  typedef produced_state =
-    bytes(value producer_state_size, value producer_state_align);
-  producer_result_size = produced_type_repr @! PassConv.size;
-  producer_result_align = produced_type_repr @! PassConv.align;
-  typedef produced_type =
-    bytes(value producer_result_size, value producer_result_align);
+function inline Stream_bind (unit _, unit _,
+                      owned pr_repr,   // Produced type representation
+                      owned tf_repr,   // Transformed type representation
+                      owned pr,        // Producer stream
+                      owned tf)        // Transformer stream
+    -> owned {
+  pr_state_size = pr @! Stream.state_size;
+  pr_state_align = pr @! Stream.state_align;
+  pr_result_size = pr_repr @! PassConv.size;
+  pr_result_align = pr_repr @! PassConv.align;
+  typedef pr_state_type = bytes(value pr_state_size, value pr_state_align);
+  typedef pr_result_type = bytes(value pr_result_size, value pr_result_align);
+  typedef state_type = Stream_bind_state(pr_state_type, pr_result_type);
 
-  typedef stream_state = Stream_bind_state(produced_state, produced_type);
+  s = owned primcall Stream_alloc ();
 
-  produced_type_repr_val = PassConv load produced_type_repr;
-
-  s = () primcall pyon_alloc (sizeof Stream);
-  // FIXME: Initialize header
-
-  s @! Stream.next = owned call Stream_bind_next
-    (produced_type_repr_val, producer, transformer);
-  s @! Stream.initialize = owned call Stream_bind_initialize
-    (producer_result_size, producer_result_align, producer);
-  () = () call copy_Repr (transformed_type_repr, s @! Stream.return_repr);
-  s @! Stream.state_repr.size = sizeof stream_state;
-  s @! Stream.state_repr.align = alignof stream_state;
-  s @! Stream.state_repr.copy = copy_stream_state;
-  s @! Stream.state_repr.finalize = dummy_finalizer;
-  s;
-};
-
-// Initialize a bound stream.
-function Stream_bind_initialize (word producer_result_size,
-                                 word producer_result_align,
-                                 owned producer,
-                                 pointer state) -> () {
-  producer_state_size = producer @! Stream.state_repr.size;
-  producer_state_align = producer @! Stream.state_repr.align;
-  typedef producer_state =
-    bytes(value producer_state_size, value producer_state_align);
-  typedef produced_type =
-    bytes(value producer_result_size, value producer_result_align);
-
-  typedef stream_state = Stream_bind_state(produced_state, produced_type);
-
-
-  typedef stream_state = Stream_bind_state(produced_state);
-
-  // Initialize the transformer pointer
-  state @! stream_state.transformer = null;
-  state @! stream_state.transformer_state = null;
-
-  // Initialize the producer state
-  () = () call (producer @! Stream.initialize)
-    (state @ stream_state.producer_state);
-
-  // Allocate the temporary storage
-  state @! Stream_bind_state.temporary_state =
-      pointer primcall pyon_alloc (produced_type_size);
-
-  ();
-};
-
-// Get the next value from the stream.
-// First, try to pull from the transformer.
-// If that is not successful, try to pull a new value from the producer, then
-// create a transformer and try to pull a value from it again.
-// If the transformer and producer are both depleted, the stream is depleted.
-function Stream_bind_next(owned produced_type_fini,
-                          owned producer,
-                          owned mk_transformer,
-                          pointer state,
-                          pointer ret) -> bool {
   letrec {
-    function loop (int _) -> bool {
-      // Is transformer active?
-      transformer = state @! Stream_bind_state.transformer;
-      if (transformer != null) {
-        // Call the transformer stream
-        transformer = state @! Stream_bind_state.transformer as owned;
-        transformer_state = state @! Stream_bind_state.transformer_state;
-        b = bool call (transformer @! Stream.next) (transformer_state, ret);
-
-        // Was a value produced?
-        if (b) {
-          // Done
-          true;
-        } else {
-          // Transformer is depleted; release transformer
-          () = () call (transformer @! Stream.state_finalize) (transformer_state);
-          () = () primcall pyon_dealloc(transformer_state);
-          // DECREF(transformer as pointer)
-          state @! Stream_bind_state.transformer = null;
-
-          // Free temporary state
-          () = () call produced_type_fini
-              (state @! Stream_bind_state.temporary_state);
-
-          // Retry
-          bool call loop (int 0);
-        };
-      } else {
-        // Produce a new value
-        value_produced = bool call (producer @! Stream.next)
-            (state @! Stream_bind_state.producer_state,
-             state @! Stream_bind_state.temporary_state);
-        
-        if (value_produced) {
-          // Run the transformer to create an output stream
-          transformer_stream =
-              owned call mk_transformer (state @! Stream_bind_state.temporary_state);
-
-          // Begin producing from the output stream
-          transformer_state =
-            pointer primcall pyon_alloc (transformer_stream @! Stream.state_size);
-          () = () call (transformer_stream @! Stream.initialize) (transformer_state);
-
-          // Retry, with the new transformer stream
-          state @! Stream_bind_state.transformer = transformer_stream;
-          state @! Stream_bind_state.transformer_state = transformer_state;
-          bool call loop (int 0);
-        } else {
-          // Stream is depleted
-          false;
-        };
-      };
+    function initialize (pointer state) -> () {
+      // Initialize a bound stream.
+      // Initialize the producer's state and clear the transformer's state.
+      state @! state_type.tf = null;
+      state @! state_type.tf_state = null;
+      // pr_result is uninitialized
+      () call (pr @! Stream.initialize) (state @ state_type.pr_state);
     }
   };
-  bool call loop (int 0);
-};
 
-function Stream_bind_finalize (owned produced_type_fini,
-                               owned finalize_producer,
-                               pointer state) -> () {
-  // Release the transformer
-  transformer_ptr = state @! Stream_bind_state.transformer;
-  () = if (transformer_ptr != null) {
-    transformer = state @! Stream_bind_state.transformer as owned;
-    transformer_state = state @! Stream_bind_state.transformer_state;
-    () = () call (transformer @! Stream.state_finalize) (transformer_state);
-    () = () primcall pyon_dealloc (transformer_state);
-    // DECREF(transformer_ptr)
+  s @! Stream.initialize = initialize;
 
-    // Finalize the temporary state
-    () call produced_type_fini (state @! Stream_bind_state.temporary_state);
-  } else {
-    ();
-  };
-  // Free the temporary state
-  () = () primcall pyon_dealloc (state @! Stream_bind_state.temporary_state);
+  letrec {
+    function next (pointer state, pointer out) -> bool {
+      // Get a new value from the stream.
+      letrec {
+        // Try getting a value from the producer, then creating a transformer.
+        procedure pull_from_producer () -> bool {
+          pr_has_data = bool call (pr @! Stream.next)
+            (state @ state_type.pr_state, state @ state_type.pr_result);
+          if (pr_has_data) {
+            // Create a new transformer stream
+            tf_owned = owned call tf (state @ state_type.pr_result);
 
-  // Release the producer's state
-  producer_state = state @! Stream_bind_state.producer_state;
-  () = () call finalize_producer (producer_state);
-  () primcall pyon_dealloc (producer_state);
-};
-#endif
+            // Initialize the transformer stream
+            state @! state_type.tf = tf_owned as pointer;
+            tf_state = pointer primcall pyon_alloc
+              (tf_owned @! Stream.state_size);
+            () = () call (tf_owned @! Stream.initialize) (tf_state);
+            state @! state_type.tf_state = tf_state;
+            
+            // Pull from the transformer stream
+            bool primcall pull_from_transformer ();
+          } else {
+            // Stream is depleted
+            false;
+          };
+        }; // end pull_from_producer
 
-/*****************************************************************************/
-/* generate */
+        // Try getting the value from the transformer.
+        procedure pull_from_transformer () -> bool {
+          // Is there an active transformer stream?
+          tf_stream = state @! state_type.tf;
+          if (tf_stream == null) {
+            // Create a new one
+            bool primcall pull_from_producer ();
+          } else {
+            // Try to get a value from the current transformer object.
+            // If that fails, try to get a new value from the producer object.
+            tf_owned = tf_stream as owned;
+            tf_state = state @! state_type.tf_state;
+            tf_has_data = bool call (tf_owned @! Stream.next) (tf_state, out);
+            if (tf_has_data) {
+              true;
+            } else {
+              // Clean up transformer
+              () = () call (tf_owned @! Stream.state_finalize) (tf_state);
+              () = () primcall pyon_dealloc (tf_state);
+              state @! state_type.tf = null;
 
-#if 0
-// A stream consisting of the sequence f(0), f(1), ... f(limit-1).
-// The stream state holds the next value to generate.
-function Stream_generate
-  (unit _, unit _, pointer return_conv, int limit, owned f) -> owned {
-  ALLOC_OBJECT(s, Stream, Stream_info)
+              // Clean up the produced value
+              () = () call (pr_repr @! PassConv.finalize)
+                (state @ state_type.pr_result);
 
-  s @! Stream.next = owned call Stream_generate_next(limit, f);
-  s @! Stream.initialize = Stream_generate_initialize;
-  s @! Stream.return_repr.size = return_conv @! PassConv.size;
-  s @! Stream.return_repr.align = return_conv @! PassConv.align;
-  s @! Stream.return_repr.copy = return_conv @! PassConv.copy;
-  s @! Stream.return_repr.finalize = return_conv @! PassConv.finalize;
-  s @! Stream.state_size = sizeof int;
-  s @! Stream.state_align = alignof int;
+              // Get a new value from the producer, then retry
+              bool primcall pull_from_producer ();
+            };
+          };
+        } // end pull_from_transformer
+      }; // end letrec
+      bool primcall pull_from_transformer();
+    } // end next
+  }; // end letrec
+
+  s @! Stream.next = next;
+  s @! Stream.state_size = sizeof state_type;
+  s @! Stream.state_align = alignof state_type;
   s @! Stream.state_finalize = dummy_finalizer;
   s;
 };
 
-function Stream_generate_next
-  (int limit, owned f, pointer state, pointer ret) -> bool {
-  // Get the current counter value
-  n = int load state;
-  if (n >= limit) {
-    // Stream is depleted
-    false;
-  } else {
-    // Update the counter
-    !state = n + int 1;
-    // Produce a value
-    () = () call f (n, ret);
-    true;
+/*****************************************************************************/
+/* generate */
+
+// A stream consisting of the sequence f(0), f(1), ... f(limit-1).
+// The stream state holds the next value to generate.
+function Stream_generate
+  (unit _, unit _, owned ret_repr, int limit, owned f) -> owned {
+  s = owned primcall Stream_alloc();
+
+  s @! Stream.initialize = Stream_generate_initialize;
+
+  letrec {
+    function next (pointer state, pointer ret) -> bool {
+      // Get the current counter value
+      n = int load state;
+      if (n >= limit) {
+        // Stream is depleted
+        false;
+      } else {
+        // Update the counter
+        !state = n + int 1;
+
+        // Produce a value
+        () = () call f (n, ret);
+        true;
+      };
+    }
   };
+  s @! Stream.next = next;
+  s @! Stream.state_size = sizeof int;
+  s @! Stream.state_align = alignof int;
+  s @! Stream.state_finalize = dummy_finalizer; // It's plain old data 
+  s;
 };
 
 function Stream_generate_initialize (pointer state) -> () {
   !state = int 0;
   ();
 };
-#endif
 
 /*****************************************************************************/
 /* map */
 
-#if 0
 // State of Stream_map.
 // The state consists of the produced value's representation and temporary
 // storage for the produced value.
-record Stream_map_state {
-  pointer producer_state;           // State of producer stream
-  pointer temporary_state;          // Holds output of producer
+record Stream_map_state(pstateT, presultT) {
+  pstateT pr_state;             // State of producer stream
+  presultT pr_result;           // Holds output of producer
 };
 
 function Stream_map
-  (unit _, unit _, unit _,
-   pointer produced_repr, pointer transformed_repr,
-   owned transformer, owned producer) -> owned {
-  ALLOC_OBJECT(s, Stream, Stream_info)
+  (unit _, unit _,
+   owned pr_repr,               // Representation of a produced value
+   owned tf_repr,               // Representation of a transformed value
+   owned tf,                    // Transformer function
+   owned pr)                    // Producer stream
+   -> owned {
+  pr_state_size = pr @! Stream.state_size;
+  pr_state_align = pr @! Stream.state_align;
+  typedef pr_state_type = bytes (value pr_state_size, value pr_state_align);
+  pr_result_size = pr_repr @! PassConv.size;
+  pr_result_align = pr_repr @! PassConv.align;
+  typedef pr_result_type = bytes (value pr_result_size, value pr_result_align);
 
-  s @! Stream.next = owned call Stream_map_next
-    (transformer, producer, produced_repr @! PassConv.finalize);
-  s @! Stream.initialize = owned call Stream_map_initialize
-    (transformed_repr @! PassConv.size,
-     transformed_repr @! PassConv.align,
-     producer);
-  s @! Stream.return_repr.size = transformed_repr @! PassConv.size;
-  s @! Stream.return_repr.align = transformed_repr @! PassConv.align;
-  s @! Stream.return_repr.copy = transformed_repr @! PassConv.copy;
-  s @! Stream.return_repr.finalize = transformed_repr @! PassConv.finalize;
-  s @! Stream.state_size = sizeof Stream_map_state;
-  s @! Stream.state_align = alignof Stream_map_state;
+  typedef state_type = Stream_map_state (pr_state_type, pr_result_type);
+
+  s = owned primcall Stream_alloc ();
+
+  letrec {
+    function initialize (pointer state) -> () {
+      () = () call (pr @! Stream.initialize) (state @ state_type.pr_state);
+      // pr_result is uninitialized
+      ();
+    }
+  };
+  
+  s @! Stream.initialize = initialize;
+
+  letrec {
+    function next (pointer state, pointer out) -> bool {
+      // Run the producer to get a value.  Write the value into the
+      // reserved memory area.
+      pr_has_data = bool call (pr @! Stream.next)
+        (state @ state_type.pr_state, state @ state_type.pr_result);
+
+      if (pr_has_data) {
+        // Transform the value
+        () = () call tf (state @ state_type.pr_result, out);
+        true;
+      } else {
+        false;
+      };
+    }
+  };
+
+  s @! Stream.next = next;
+
+  s @! Stream.state_size = sizeof state_type;
+  s @! Stream.state_align = alignof state_type;
   s @! Stream.state_finalize = dummy_finalizer;
   s;
 };
-        
-function Stream_map_next
-  (owned transformer, owned producer, owned finalize_produced_state,
-   pointer state, pointer ret) -> bool {
-  temporary_state = state @! Stream_map_state.temporary_state;
-  // Run the producer
-  b = bool call (producer @! Stream.next)
-    (state @! Stream_map_state.producer_state, temporary_state);
-
-  if (b) {
-    // Transform its result
-    () = () call transformer (temporary_state, ret);
-
-    // Finalize the temporary data
-    () = () call finalize_produced_state (temporary_state);
-    true;
-  } else {
-    false;
-  };
-};
-
-function Stream_map_initialize
-  (word produced_size, word produced_align, owned producer, pointer state) -> () {
-  producer_state = pointer primcall pyon_alloc (producer @! Stream.state_size);
-  () = () call (producer @! Stream.initialize) (producer_state);
-
-  state @! Stream_map_state.producer_state = producer_state;
-  state @! Stream_map_state.temporary_state =
-    pointer primcall pyon_alloc (produced_size);
-  ();
-};
-#endif
 
 /*****************************************************************************/
 /* reduce */
 
-#if 0
 function inline Stream_reduce
   (unit _, unit _,
-   pointer passconv, pointer _,
+   owned repr_element,
+   owned _,
    owned reducer,
    pointer init,
    owned stream,
    pointer ret) -> () {
-  elem_size = passconv @! PassConv.size;
-  elem_align = passconv @! PassConv.align;
-  elem_copy = passconv @! PassConv.copy;
-  elem_finalize = passconv @! PassConv.finalize;
+  elem_size = repr_element @! PassConv.size;
+  elem_align = repr_element @! PassConv.align;
+  elem_copy = repr_element @! PassConv.copy;
+  elem_finalize = repr_element @! PassConv.finalize;
   typedef elem_type = bytes(value elem_size, value elem_align);
 
   // Setup
@@ -420,18 +344,18 @@ function inline Stream_reduce
 
   // Cleanup
   () = () call (stream @! Stream.state_finalize) (st);
+  () = () primcall pyon_dealloc(st);
   () = () call elem_copy (acc1, ret);
   () = () call elem_finalize (acc1);
   () = () primcall pyon_dealloc(accs);
   ();
 };
 
-
 function inline reduce
-  (unit _, unit _, unit _,
-   pointer traversable,
-   pointer elem_repr,
-   pointer container_repr,
+  (unit _, unit _,
+   owned traversable,
+   owned elem_repr,
+   owned container_repr,
    owned reducer,
    pointer initial_value,
    pointer container,
@@ -446,4 +370,3 @@ function inline reduce
   // Clean up
   ();
 };
-#endif

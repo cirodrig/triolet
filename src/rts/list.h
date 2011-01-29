@@ -1,26 +1,17 @@
 
-// For testing the low-level code directly
-extern procedure pyon.internal.list.list_test "list_test" () -> ();
+extern function pyon.internal.list.repr_list (unit, owned) -> owned;
 
-extern function pyon.internal.list.list_db (pointer) -> ();
-extern function pyon.internal.list.list_copy (pointer, pointer, pointer) -> ();
-extern function pyon.internal.list.list_finalize (pointer, pointer) -> ();
-extern function pyon.internal.list.list_build (unit, owned, owned, pointer) -> ();
+extern function pyon.internal.list.list_build
+  (unit, owned, owned, pointer) -> ();
 extern function pyon.internal.list.list_traverse
   (unit, owned, pointer) -> owned;
 extern function pyon.internal.list.list_generate
-  (unit, unit, pointer, int, owned, pointer) -> ();
+  (unit, unit, owned, int, owned, pointer) -> ();
 extern function pyon.internal.list.list_vGenerate
   (unit, unit, pointer, int, owned, pointer) -> ();
 
 extern function pyon.internal.list.subscript
-  (unit, pointer, pointer, int) -> pointer;
-
-extern function pyon.internal.list.passConv_list
-  (unit, pointer, pointer) -> ();
-
-extern procedure pyon.internal.list.list_peek
-  (pointer, pointer, word, pointer) -> ();
+  (unit, owned, pointer, int) -> pointer;
 
 // Exported to C
 extern procedure pyon.internal.list.pyon_List_PyonInt_FromArray "pyon_List_PyonInt_FromArray"

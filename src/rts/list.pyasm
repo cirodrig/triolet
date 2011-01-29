@@ -11,102 +11,93 @@ module pyon.internal.list;
 
 #include "new_pyasm_records.h"
 
-#if 0
-// Duplicate a list
-function list_copy_real(word elem_size, word elem_align, owned elem_copy,
-                        pointer src, pointer dst) -> () {
-  num_elems = src @! PyonList.nelems;
+function repr_list (unit _, owned elem_repr) -> owned {
+  repr = pointer primcall pyon_alloc (sizeof PassConv);
+  // FIXME: Initialize repr header
+  repr @! PassConv.size = sizeof PyonList;
+  repr @! PassConv.align = alignof PyonList;
+  repr @! PassConv.copy = owned call list_copy (elem_repr);
+  repr @! PassConv.finalize = owned call list_finalize (elem_repr);
+  repr;
+};
 
-  // Allocate a multiple of the list element's alignment to each element
-  // so that all elements will be aligned
-  pad_elem_size = PAD(elem_size, elem_align);
+function list_copy (owned elem_repr, pointer src, pointer dst) -> () {
+  nelems = src @! PyonList.nelems;
+  dst @! PyonList.nelems = nelems;
 
-  // Duplicate contents
-  contents = pointer primcall pyon_alloc (pad_elem_size * num_elems);
-  (_, _, _) = while (word count       = num_elems,
-                     pointer src_elem = src @! PyonList.contents,
-                     pointer dst_elem = contents)
-                    (count != word 0) {
-    () = () call elem_copy(src, dst);
-    (num_elems - word 1,
-     src ^+ pad_elem_size as int,
-     dst ^+ pad_elem_size as int);
+  // Copy list elements
+  elem_size = elem_repr @! PassConv.size;
+  elem_align = elem_repr @! PassConv.align;
+  copy_elem = elem_repr @! PassConv.copy;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef src_contents_type = const_array(value nelems, elem_type);
+  typedef dst_contents_type = array(value nelems, elem_type);
+
+  src_contents = src @! PyonList.contents;
+  dst_contents = pointer primcall pyon_alloc (sizeof dst_contents_type);
+  dst @! PyonList.contents = dst_contents;
+
+  _ = while (int index = int 0) (index < nelems) {
+    () = () call copy_elem (src_contents @ src_contents_type[index],
+                            dst_contents @ dst_contents_type[index]);
+    index + int 1;
   };
-
-  dst @! PyonList.nelems = src @! PyonList.nelems;
-  dst @! PyonList.contents = contents;
   ();
 };
 
-
-function list_copy(pointer elem_repr, pointer src, pointer dst) -> () {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  elem_copy = elem_repr @! PassConv.copy;
-  () call list_copy_real(elem_size, elem_align, elem_copy, src, dst);
-};
-
-// Finalize a list
-function list_finalize_real (word elem_size, word elem_align, owned elem_fini, pointer list) -> () {
-  pad_elem_size = PAD(elem_size, elem_align);
-
-  num_elems = list @! PyonList.nelems;
+function list_finalize (owned elem_repr, pointer list) -> () {
+  nelems = list @! PyonList.nelems;
   contents = list @! PyonList.contents;
 
-  // Finalize list contents
-  (_, _) = while (word nelems = num_elems, pointer contents = contents)
-                 (nelems != word 0) {
-    () = () call elem_fini(contents);
-    (nelems - word 1, contents ^+ pad_elem_size as int);
-  };
-
-  // Free the array
-  () primcall pyon_dealloc (contents);
-};
-
-function list_finalize (pointer elem_repr, pointer list) -> () {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  elem_fini = elem_repr @! PassConv.finalize;
-  () call list_finalize_real (elem_size, elem_align, elem_fini, list);
+  finalize_elem = elem_repr @! PassConv.finalize;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef contents_type = array(value nelems, elem_type);
+
+  _ = while (int index = int 0) (index < nelems) {
+    () = () call finalize_elem (contents @ contents_type[index]);
+    index + int 1;
+  };
+  ();
 };
 
 // Create a list, leaving its elements uninitialized
-procedure list_create_uninitialized (pointer elem_repr,
-                                     word size,
+procedure list_create_uninitialized (owned elem_repr,
+                                     int nelems,
                                      pointer list) -> () {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  pad_elem_size = PAD(elem_size, elem_align);
-  contents = pointer primcall pyon_alloc (pad_elem_size * size);
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef array_type = array(value nelems, elem_type);
   
-  list @! PyonList.nelems = size;
-  list @! PyonList.contents = contents;
+  list @! PyonList.nelems = nelems;
+  list @! PyonList.contents = pointer primcall pyon_alloc (sizeof array_type);
   ();
 };
 
 // Increase the size of a list.  The list's 'contents' field may be modified.
+// The list's 'size' field is ignored.
+// Returns the new list size.
 //
-// The new size parameter is the number of elements the new list should
-// contain.  This must be no less than the current number of elements,
-// and may be larger than the final list.  The old list contents are
+// The old list contents are
 // copied to the new list; the new contents are uninitialized.
-procedure list_grow (pointer elem_repr, pointer list, word new_size) -> () {
+procedure list_grow (pointer elem_repr, pointer list, int old_size) -> () {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  pad_elem_size = PAD(elem_size, elem_align);
+  typedef elem_type = bytes(value elem_size, value elem_align);
 
-  new_size_bytes = pad_elem_size * new_size;
-  old_size_bytes = pad_elem_size * list @! PyonList.nelems;
+  typedef old_array_type = array(value old_size, elem_type);
+  new_size = old_size * int 2;
+  typedef new_array_type = array(value new_size, elem_type);
+
   old_contents = list @! PyonList.contents;
-
-  // Allocate new list contents
-  new_contents = pointer primcall pyon_alloc (new_size_bytes);
+  new_contents = pointer primcall pyon_alloc (sizeof new_array_type);
 
   // Copy old contents to new list
   _ = pointer primcall memcpy (new_contents,
                                old_contents,
-                               old_size_bytes);
+                               sizeof old_array_type);
 
   // Free old contents
   () = () primcall pyon_dealloc(old_contents);
@@ -115,18 +106,20 @@ procedure list_grow (pointer elem_repr, pointer list, word new_size) -> () {
   // Don't save the new size anywhere; caller is responsible for keeping
   // track.
   list @! PyonList.contents = new_contents;
-  ();
+  new_size;
 };
 
 // Create a list from a stream of unknown size
-function list_build (unit _, pointer elem_repr, owned stream, pointer list) -> () {
+function list_build
+    (unit _, owned elem_repr, owned stream, pointer ret) -> () {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  pad_elem_size = PAD(elem_size, elem_align);
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef array_type = array(value int 0, elem_type);
 
   // Initialize list with 4 elements
-  list_size = word 4;
-  () = () primcall list_create_uninitialized (elem_repr, list_size, list);
+  list_size = int 4;
+  () = () primcall list_create_uninitialized (elem_repr, list_size, ret);
 
   // Set up stream
   stream_next = stream @! Stream.next;
@@ -135,32 +128,29 @@ function list_build (unit _, pointer elem_repr, owned stream, pointer list) -> (
 
   // Populate the list contents (pull_values); then finish building the list.
   letrec {
-    procedure pull_values (word n_elems, word list_size) -> () {
+    procedure pull_values (int n_elems, int list_size) -> () {
       // Make sure list can hold another element
       new_list_size = if (n_elems == list_size) {
-        new_list_size = list_size * word 2;
-        () = () primcall list_grow (elem_repr, list, new_list_size);
-        new_list_size;
+        int primcall list_grow (elem_repr, ret, list_size);
       } else {
         list_size;
       };
       
-      // Pull from the straem
-      current_elem = (list @! PyonList.contents) ^+
-                     (n_elems * pad_elem_size) as int;
-      b = bool call stream_next (stream_state, current_elem);
-      if (b) {
+      // Pull from the stream
+      current_elem = (ret @! PyonList.contents) @ array_type[n_elems];
+      has_data = bool call stream_next (stream_state, current_elem);
+      if (has_data) {
         // Continue pulling
-        () primcall pull_values (n_elems + word 1, new_list_size);
+        () primcall pull_values (n_elems + int 1, new_list_size);
       } else {
         // Stream is depleted.  Finish constructing list.
         () primcall finish (n_elems);
       };
     };
 
-    procedure finish (word n_elems) -> () {
+    procedure finish (int n_elems) -> () {
       // Save the number of list elements that was created
-      list @! PyonList.nelems = n_elems;
+      ret @! PyonList.nelems = n_elems;
 
       // Finalize the stream
       () = () call (stream @! Stream.state_finalize) (stream_state);
@@ -168,111 +158,98 @@ function list_build (unit _, pointer elem_repr, owned stream, pointer list) -> (
       ();   
     }
   };
-  () primcall pull_values (word 0, list_size);
+  () primcall pull_values (int 0, list_size);
 };
 
-// Create a stream that traverses the list
-function inline list_traverse (unit _, pointer elem_repr, pointer list) -> owned {
-  ALLOC_OBJECT(s, Stream, Stream_info)
-  s @! Stream.next = owned call list_traverse_next (s @ Stream.return_repr,
-                                                    list);
-  s @! Stream.initialize = list_traverse_initialize;
-  s @! Stream.return_repr.size = elem_repr @! PassConv.size;
-  s @! Stream.return_repr.align = elem_repr @! PassConv.align;
-  s @! Stream.return_repr.copy = elem_repr @! PassConv.copy;
-  s @! Stream.return_repr.finalize = elem_repr @! PassConv.finalize;
-  s @! Stream.state_size = sizeof word;
-  s @! Stream.state_align = alignof word;
+// Create a stream that traverses the list.
+// The stream state is an int, which is the index of the next value to return.
+function inline list_traverse (unit _, owned elem_repr, pointer list) -> owned {
+  elem_size = elem_repr @! PassConv.size;
+  elem_align = elem_repr @! PassConv.align;
+  copy_elem = elem_repr @! PassConv.copy;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+
+  s = owned primcall Stream_alloc();
+
+  letrec {
+    function initialize (pointer state) -> () {
+      !state = int 0;
+      ();
+    }
+  };
+
+  s @! Stream.initialize = initialize;
+
+  nelems = list @! PyonList.nelems;
+  contents = list @! PyonList.contents;
+  typedef array_type = const_array(value nelems, elem_type);
+
+  letrec {
+    function next (pointer state, pointer ret) -> bool {
+      index = int load state;
+      if (index >= nelems) {
+        false;
+      } else {
+        // Increment the counter
+        !state = index + int 1;
+        // Return a value
+        () = () call copy_elem (contents @ array_type[index], ret);
+        true;
+      };
+    }
+  };
+
+  s @! Stream.next = next;
+
+  s @! Stream.state_size = sizeof int;
+  s @! Stream.state_align = alignof int;
   s @! Stream.state_finalize = dummy_finalizer;
   s;
 };
 
-// Return the current list element, go to next
-function inline list_traverse_next (pointer elem_repr,
-                             pointer list,
-                             pointer state,
-                             pointer ret) -> bool {
-  index = word load state;
-  if (index < list @! PyonList.nelems) {
-
-    // Go to next index
-    !state = index + word 1;
-
-    // Put output
-    elem_size = elem_repr @! PassConv.size;
-    elem_align = elem_repr @! PassConv.align;
-    elem_copy = elem_repr @! PassConv.copy;
-    pad_elem_size = PAD(elem_size, elem_align);
-    () = () call elem_copy ((list @! PyonList.contents) ^+ ((pad_elem_size * index) as int), ret);
-    true;
-  } else {
-    // List is depleted
-    false;
-  };
-};
-
-// Initialize the stream state.  The state is the current list index, and
-// it should be initialized to the first list index, zero.
-function list_traverse_initialize(pointer state) -> () {
-  !state = word 0;
-  ();
-};
 
 function inline list_generate
-  (unit _, unit _, pointer repr, int count, owned f, pointer ret) -> () {
-  elem_size = repr @! PassConv.size;
-  elem_align = repr @! PassConv.align;
-  pad_elem_size = PAD(elem_size, elem_align);
+  (unit _, unit _, owned elem_repr, int count, owned f, pointer ret) -> () {
+  elem_size = elem_repr @! PassConv.size;
+  elem_align = elem_repr @! PassConv.align;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef contents_type = array(value count, elem_type);
 
   // Create list
-  () = () primcall list_create_uninitialized (repr, count as word, ret);
+  () = () primcall list_create_uninitialized (elem_repr, count, ret);
 
   // Write list contents
-  (_, _) = while (int index = int 0,
-                  pointer elem = ret @! PyonList.contents) (index != count) {
-    () = () call f (index, elem);
-    (index + int 1, elem ^+ pad_elem_size as int);
+  contents = ret @! PyonList.contents;
+  _ = while (int index = int 0) (index != count) {
+    () = () call f (index, contents @ contents_type[index]);
+    index + int 1;
   };
   ();
 };
 
+#if 0
 // Vectorized variant
 function inline list_vGenerate
   (unit x, unit y, pointer repr, int count, owned f, pointer ret) -> () {
   () call list_generate(x, y, repr, count, f, ret);
 };
+#endif
 
 // Get a pointer to an array element.
 // elem_repr : PassConv is the element's representation.
 // base is the base pointer
 // index is the index of the element to select
-function inline subscript(unit _, pointer elem_repr, pointer base, int index) -> pointer {
+function inline subscript(unit _, owned elem_repr, pointer base, int index) -> pointer {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  pad_elem_size = PAD(elem_size, elem_align);
-  base ^+ (pad_elem_size as int * index);
+  base @ array(value int 0, bytes(value elem_size, value elem_align))[index];
 };
 
-function passConv_list
-  (unit _, pointer elem_repr, pointer ret) -> ()
-{
-  ret @! PassConv.size = sizeof PyonList;
-  ret @! PassConv.align = alignof PyonList;
-  ret @! PassConv.copy =
-    owned call list_copy_real (elem_repr @! PassConv.size,
-                               elem_repr @! PassConv.align,
-                               elem_repr @! PassConv.copy);
-  ret @! PassConv.finalize =
-    owned call list_finalize_real (elem_repr @! PassConv.size,
-                                   elem_repr @! PassConv.align,
-                                   elem_repr @! PassConv.finalize);
-  ();
-};
 
 // Allocate and construct a list, given a suitably initialized data array.
 // The data array is stolen by the list.
 // A pointer to the new list is returned.
-procedure pyon_list_from_array (word n_elems,
+procedure pyon_list_from_array (int n_elems,
                                 pointer arr) -> pointer {
   l = pointer primcall pyon_alloc (sizeof PyonList);
   l @! PyonList.nelems = n_elems;
@@ -282,39 +259,39 @@ procedure pyon_list_from_array (word n_elems,
 
 // Copy the contents of a plain-old-data list into an array.
 // The list is not modified.
-procedure pyon_list_to_array_POD (pointer elem_repr,
+procedure pyon_list_to_array_POD (owned elem_repr,
                                   pointer list,
                                   pointer arr) -> () {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  pad_elem_size = PAD(elem_size, elem_align);
+  typedef elem_type = bytes(value elem_size, value elem_align);
+  typedef array_type = array(value list @! PyonList.nelems, elem_type);
 
-  () = () primcall memcpy (arr, list @! PyonList.contents,
-                           pad_elem_size * list @! PyonList.nelems);
+  () = () primcall memcpy
+    (arr,
+     list @! PyonList.contents,
+     sizeof array_type);
   ();
 };
 
-procedure pyon_list_length (pointer list) -> word {
+procedure pyon_list_length (pointer list) -> int {
   list @! PyonList.nelems;
 };
 
 // Allocate and return a copy of the POD list.
-procedure pyon_list_copy_POD (pointer elem_repr, pointer in_list) -> pointer {
+procedure pyon_list_copy_POD (owned elem_repr, pointer in_list) -> pointer {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  pad_elem_size = PAD(elem_size, elem_align);
   nelems = in_list @! PyonList.nelems;
+  typedef array_type = array(value nelems, bytes(value elem_size, value elem_align));
 
   // Create a copy of the data array
-  data_size = pad_elem_size * nelems;
-  contents = pointer primcall pyon_alloc(data_size);
-  () = () primcall memcpy(contents, in_list @! PyonList.contents, data_size);
+  contents = pointer primcall pyon_alloc(sizeof array_type);
+  () = () primcall memcpy
+    (contents, in_list @! PyonList.contents, sizeof array_type);
 
   // Create and return a new list object
-  new_list = pointer primcall pyon_alloc(sizeof PyonList);
-  new_list @! PyonList.nelems = nelems;
-  new_list @! PyonList.contents = contents;
-  new_list;
+  pointer primcall pyon_list_from_array (nelems, contents);
 };
 
 // Free the POD list.
@@ -323,106 +300,17 @@ procedure pyon_list_free_POD (pointer list) -> () {
   () primcall pyon_dealloc(list);
 };
 
-/*****************************************************************************/
-/* Testing */
+///////////////////////////////////////////////////////////////////////////////
+// Exported to C
 
-// Write one element of a list.  The element should start out uninitialized.
-procedure list_poke (pointer elem_repr,
-                     pointer list,
-                     word index,
-                     pointer val) -> () {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  elem_copy = elem_repr @! PassConv.copy;
-  pad_elem_size = PAD(elem_size, elem_align);
-
-  elem_ptr = (list @! PyonList.contents) ^+ (pad_elem_size * index) as int;
-  () call elem_copy(val, elem_ptr);
-};
-
-// Read one element of a list.
-procedure list_peek (pointer elem_repr,
-                     pointer list,
-                     word index,
-                     pointer val) -> () {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  elem_copy = elem_repr @! PassConv.copy;
-  pad_elem_size = PAD(elem_size, elem_align);
-
-  elem_ptr = (list @! PyonList.contents) ^+ (pad_elem_size * index) as int;
-  () call elem_copy(elem_ptr, val);  
-};
-
-// Initialize a predefined six-element list of integers.
-// Contents are from Sloane's A002485.
-function list_db (pointer list) -> () {
-  my_int = pointer primcall pyon_alloc (sizeof int);
-  () = () primcall list_create_uninitialized (repr_int, word 6, list);
-  !my_int = int 1;
-  () = () primcall list_poke(repr_int, list, word 0, my_int);
-  !my_int = int 3;
-  () = () primcall list_poke(repr_int, list, word 1, my_int);
-  !my_int = int 22;
-  () = () primcall list_poke(repr_int, list, word 2, my_int);
-  !my_int = int 333;
-  () = () primcall list_poke(repr_int, list, word 3, my_int);
-  !my_int = int 355;
-  () = () primcall list_poke(repr_int, list, word 4, my_int);
-  !my_int = int 103993;
-  () = () primcall list_poke(repr_int, list, word 5, my_int);
-  () primcall pyon_dealloc (my_int);
-};
-
-// A routine to test several of the above routines
-procedure list_test () -> () {
-  my_list = pointer primcall pyon_alloc (sizeof PyonList);
-  my_int = pointer primcall pyon_alloc (sizeof int);
-
-  // Create list
-  () = () primcall list_create_uninitialized (repr_int, word 5, my_list);
-  !my_int = int 333;
-  () = () primcall list_poke(repr_int, my_list, word 0, my_int);
-  !my_int = int 444;
-  () = () primcall list_poke(repr_int, my_list, word 1, my_int);
-  !my_int = int 555;
-  () = () primcall list_poke(repr_int, my_list, word 2, my_int);
-  !my_int = int 666;
-  () = () primcall list_poke(repr_int, my_list, word 3, my_int);
-  !my_int = int 777;
-  () = () primcall list_poke(repr_int, my_list, word 4, my_int);
-
-  // Duplicate list
-  my_list2 = pointer primcall pyon_alloc (sizeof PyonList);
-  () = () call list_build (nil, nil, repr_int, owned call list_traverse(repr_int, my_list), my_list2);
-
-  // Read list
-  () = () primcall list_peek(repr_int, my_list2, word 0, my_int);
-  () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(repr_int, my_list2, word 1, my_int);
-  () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(repr_int, my_list2, word 2, my_int);
-  () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(repr_int, my_list2, word 3, my_int);
-  () = () primcall pyon_db_int(int load my_int);
-  () = () primcall list_peek(repr_int, my_list2, word 4, my_int);
-  () = () primcall pyon_db_int(int load my_int);
-
-  // Free stuff
-  () = () call list_finalize(repr_int, my_list);
-  () = () call list_finalize(repr_int, my_list2);
-  () = () primcall pyon_dealloc(my_list);
-  () = () primcall pyon_dealloc(my_list2);
-  () = () primcall pyon_dealloc(my_int);
-  ();
-};
-
-// Exported to C: Create a list from an array of CInt.
+// Create a list from an array of CInt.
 // The list holds a copy of the given array.
-procedure pyon_List_PyonInt_FromArray (cint n_elems, pointer arr) -> pointer {
-  new_arr = pointer primcall pyon_alloc (n_elems as word * sizeof pyint);
-  () = () primcall memcpy (new_arr, arr, n_elems as word * sizeof pyint);
-  pointer primcall pyon_list_from_array(n_elems as word, new_arr);
+procedure pyon_List_PyonInt_FromArray (int n_elems, pointer arr) -> pointer {
+  typedef array_type = array(value n_elems, int);
+ 
+  new_arr = pointer primcall pyon_alloc (sizeof array_type);
+  () = () primcall memcpy (new_arr, arr, sizeof array_type);
+  pointer primcall pyon_list_from_array(n_elems, new_arr);
 };
 
 // Copy the contents of a list into an array
@@ -431,7 +319,7 @@ procedure pyon_List_PyonInt_ToArray (pointer list, pointer dat) -> () {
 };
 
 procedure pyon_List_PyonInt_Length (pointer list) -> cint {
-  l = word primcall pyon_list_length (list);
+  l = int primcall pyon_list_length (list);
   l as cint;
 };
 
@@ -442,4 +330,3 @@ procedure pyon_List_PyonInt_Copy (pointer list) -> pointer {
 procedure pyon_List_PyonInt_Free (pointer list) -> () {
   pointer primcall pyon_list_free_POD (list);
 };
-#endif

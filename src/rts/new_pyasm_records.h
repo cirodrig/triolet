@@ -85,9 +85,9 @@ record Pair(a) {
  * list, but rather passed to functions that operate on the list.
  */
 record PyonList {
-  const word nelems;			// Number of elements in the list.
+  int nelems;			// Number of elements in the list.
                                 // Actual allocated size may be larger.
-  const pointer contents;		// Pointer to list contents
+  pointer contents;		// Pointer to list contents
 };
 
 /* A stream of values.  Stream elements are computed on demand.
@@ -98,12 +98,15 @@ record PyonList {
  *
  * initialize : pointer to state -> ()
  *   Initialize the stream state.
+ *
+ * finalize : pointer to state -> ()
+ *   Finalize the stream state.
  */
 record Stream {
   const ObjectHeader header;
   const owned next;                   // How to get the next stream element
   const owned initialize;             // How to initialize the stream state
-  const PassConv return_repr;		// Representation of return value
-  const PassConv state_repr;		// Representation of stream state.
-                                      // The copy function will not be used.
+  const word state_size;	      // Size of state
+  const word state_align;	      // Alignment of state
+  const owned state_finalize;		// How to finalize the stream state
 };
