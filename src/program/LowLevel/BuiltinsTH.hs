@@ -276,6 +276,12 @@ builtinFunctions =
      Right [| pyonBuiltin SystemF.the_RemainderDict_float_floordiv |])
   , (PyonName module_prim "div_float",
      Right [| pyonBuiltin SystemF.the_FractionalDict_float_div |])
+  , (PyonName module_prim "scale_float",
+     Right [| pyonBuiltin SystemF.the_VectorDict_float_scale |])
+  , (PyonName module_prim "magnitude_float",
+     Right [| pyonBuiltin SystemF.the_VectorDict_float_magnitude |])
+  , (PyonName module_prim "magnitude2_float",
+     Right [| pyonBuiltin SystemF.the_VectorDict_float_magnitude2 |])
     -- one_float was replaced by a literal value
 {-  , (PyonName builtinModuleName "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])

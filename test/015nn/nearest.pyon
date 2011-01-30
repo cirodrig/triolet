@@ -1,0 +1,16 @@
+
+def minIndex(xs):
+    def pickMin(x, y):
+    	(_, xv) = x
+	(_, yv) = y
+	return x if xv <= yv else y
+    (i, _) = reduce1 (pickMin, zip(count, xs))
+    return i
+
+def nearestNeighbors(refs, inputs):
+    return [minIndex(magnitude2(inp - ref) for ref in refs) for inp in inputs]
+
+export ccall "nearest" nearestNeighbors : list(float) * list(float) -> list(int)
+
+
+

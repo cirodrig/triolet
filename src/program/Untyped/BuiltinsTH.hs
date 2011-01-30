@@ -54,7 +54,8 @@ pyonSourceGlobals =
   , "__floordiv__"
   , "__div__"
   , "scale"
-  , "norm"
+  , "magnitude"
+  , "magnitude2"
   ]
 
 -- | Global variables that can't be referred to by name 

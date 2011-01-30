@@ -132,6 +132,18 @@ function div_float(float x, float y) -> float {
   x / y;
 };
 
+function scale_float(float vec, float factor) -> float {
+  vec * factor;
+};
+
+function magnitude_float(float vec) -> float {
+  vec;
+};
+
+function magnitude2_float(float vec) -> float {
+  vec * vec;
+};
+
 function load_complexFloat (pointer x) -> (complex(float)) {
   typedef cpxfloat = complex(float);
   complex(float) {x @! cpxfloat.real, x @! cpxfloat.imag};

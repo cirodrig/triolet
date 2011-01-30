@@ -144,6 +144,21 @@ data box FractionalDict : val (val pure -> val pure)
    box (read a -> read a -> write a)) : box FractionalDict a;
 };
 
+data box VectorDict : val (val pure -> val pure)
+{
+  vectorDict : (val a : pure)
+            -> box AdditiveDict a
+            -> box (read a -> val float -> write a)
+            -> box (read a -> val float)
+            -> box (read a -> val float)
+            -> box VectorDict a,
+  (val a : pure) ()
+  (box AdditiveDict a,
+   box (read a -> val float -> write a),
+   box (read a -> val float),
+   box (read a -> val float)) : box VectorDict a;
+};
+
 data box TraversableDict : val (val (val pure -> val pure) -> val pure)
 {
   traversableDict :
@@ -251,6 +266,11 @@ RemainderDict_float_mod : val float -> val float -> val float;
 
 
 FractionalDict_float_div : val float -> val float -> val float;
+
+
+VectorDict_float_scale : val float -> val float -> val float;
+VectorDict_float_magnitude : val float -> val float;
+VectorDict_float_magnitude2 : val float -> val float;
 
 -------------------------------------------------------------------------------
 -- integer index arithmetic

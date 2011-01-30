@@ -135,6 +135,9 @@ pyonBuiltinVariableNames =
   , "RemainderDict_float_floordiv"
   , "RemainderDict_float_mod"
   , "FractionalDict_float_div"
+  , "VectorDict_float_scale"
+  , "VectorDict_float_magnitude"
+  , "VectorDict_float_magnitude2"
 
     -- Integer index arithmetic 
   , "zero_i"

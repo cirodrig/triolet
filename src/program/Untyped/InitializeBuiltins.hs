@@ -337,24 +337,36 @@ mkMultiplicativeClass = do
   return cls
   
 mkVectorClass = do
-  rec {
-  a <- newTyVar Star Nothing
-  ; let normScheme = monomorphic $
-                     functionType [ConTy a] (ConTy $ tiBuiltin the_con_float)
-        scaleScheme = monomorphic $
-                      functionType [ConTy a, ConTy $ tiBuiltin the_con_int] (ConTy a)
+  rec a <- newTyVar Star Nothing
+      let normScheme = monomorphic $
+                       functionType [ConTy a] (ConTy $ tiBuiltin the_con_float)
+          scaleScheme = monomorphic $
+                        functionType [ConTy a, ConTy $ tiBuiltin the_con_float] (ConTy a)
 
-  ; let cls = Class { clsParam = a
-                    , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Additive]
-                    , clsMethods = [scale, norm]
-                    , clsName = "Vector"
-                    , clsInstances = []
-                    , clsTypeCon = pyonBuiltin SystemF.the_VectorDict
-                    , clsDictCon = pyonBuiltin SystemF.the_vectorDict
-                    }
+      let cls =
+            Class { clsParam = a
+                  , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Additive]
+                  , clsMethods = [scale, magnitude, magnitude2]
+                  , clsName = "Vector"
+                  , clsInstances = [float_instance]
+                  , clsTypeCon = pyonBuiltin SystemF.the_VectorDict
+                  , clsDictCon = pyonBuiltin SystemF.the_vectorDict
+                  }
 
-  ; scale <- mkClassMethod cls 0 "scale" scaleScheme
-  ; norm <- mkClassMethod cls 1 "norm" normScheme }
+      scale <- mkClassMethod cls 0 "scale" scaleScheme
+      magnitude <- mkClassMethod cls 1 "magnitude" normScheme
+      magnitude2 <- mkClassMethod cls 2 "magnitude2" normScheme
+
+      let float_instance =
+            monomorphicInstance cls
+            (ConTy $ tiBuiltin the_con_float)
+            Nothing
+            [ InstanceMethod $
+              pyonBuiltin SystemF.the_VectorDict_float_scale
+            , InstanceMethod $
+              pyonBuiltin SystemF.the_VectorDict_float_magnitude
+            , InstanceMethod $
+              pyonBuiltin SystemF.the_VectorDict_float_magnitude2]
 
   return cls
 
@@ -711,7 +723,7 @@ initializeTIBuiltins = do
             , ([| the_Multiplicative |], ["__mul__", "__fromint__", "one"])
             , ([| the_Remainder |], ["__floordiv__", "__mod__"])
             , ([| the_Fractional |], ["__div__"])
-            , ([| the_Vector |], ["scale", "norm"])
+            , ([| the_Vector |], ["scale", "magnitude", "magnitude2"])
             ]
 
           -- Construct initializers
