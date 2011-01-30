@@ -77,6 +77,24 @@ type ExpR = Exp Rep
 type FunR = Fun Rep
 type AltR = Alt Rep
 
+-- | Print an expression.  For debugging.
+pprExpR :: ExpR -> Doc
+pprExpR exp =
+  case exp
+  of LoadExpr _ _ e -> text "LOAD" <+> pprExpR e
+     StoreExpr _ _ e -> text "STORE" <+> pprExpR e
+     AsBoxExpr _ e -> text "AS_BOX" <+> pprExpR e
+     AsReadExpr _ e -> text "AS_READ" <+> pprExpR e
+     CopyExpr _ e -> text "COPY" <+> pprExpR e
+     ExpR _ exp' -> 
+       case exp'
+       of VarE _ v -> pprVar v
+          AppE _ op ts args -> hang (parens (pprExpR op)) 2 $
+                               parens $ sep $ punctuate (text ",")
+                               (map (pprType . fromTypR) ts ++
+                                map pprExpR args)
+          _ -> text "EXPRESSION"
+
 returnType :: ExpR -> ReturnType
 returnType (LoadExpr Value ty _) = ValRT ::: ty
 returnType (LoadExpr Boxed ty _) = BoxRT ::: ty
@@ -807,12 +825,13 @@ inferCaseE inf scr alts = do
   let sf_ret_type = getTypeAnn $ head alts
   ret_type <- infFixUpType sf_ret_type
   ret_repr <- liftM asWriteReturnRepr $ infTypeRepr ret_type
-  alts' <- mapM (inferAlt (getSourcePos inf) ret_repr) alts
+  let ret_rtype = ret_repr ::: ret_type
+  alts' <- mapM (inferAlt (getSourcePos inf) ret_rtype) alts
   
-  let new_expr = ExpR (ret_repr ::: ret_type) $ CaseE inf scr' alts'
+  let new_expr = ExpR ret_rtype $ CaseE inf scr' alts'
   return (mempty,
           applyWrapper scr_wrapper new_expr,
-          ret_repr ::: ret_type)
+          ret_rtype)
 
 inferScrutinee scr = do
   (scr_wrapper, scr', scr_repr ::: scr_ty) <- inferReprExp scr
@@ -823,7 +842,7 @@ inferScrutinee scr = do
   let (co_scr, co_wr) = coercionToWrapper coercion scr'
   return (scr_wrapper `mappend` co_wr, co_scr)
 
-inferAlt pos repr (AltTSF (TypeAnn _ (Alt con ty_args ex_vars params body))) = do  
+inferAlt pos expected_rtype (AltTSF (TypeAnn _ (Alt con ty_args ex_vars params body))) = do
   -- Fix up the given type arguments
   natural_ty_args <- mapM (infFixUpType . fromTypTSF) ty_args
 
@@ -847,18 +866,23 @@ inferAlt pos repr (AltTSF (TypeAnn _ (Alt con ty_args ex_vars params body))) = d
             let param_repr = returnReprToParamRepr return_repr
             in PatR v (param_repr ::: repr_type)
 
-  -- Infer the body
-  (body_wrapper, body', body_type) <-
-    assume_fields rep_existential_vars rep_params $
-    inferReturnExp True Nothing body
-  let body'' = applyWrapper body_wrapper body'
+  body' <-
+    assume_fields rep_existential_vars rep_params $ do
+      -- Infer the body and coerce to expected representation
+      (body_wrapper, body', body_rtype) <- inferReprExp body
+      
+      body_co <- coerceReturnType expected_rtype body_rtype
+
+      let body'' = applyWrapper body_wrapper $
+                   applyCoercion body_co body' id
+      return body''
   
   -- Construct the new Alt
   let new_alt = AltR $ Alt { altConstructor = con
                            , altTyArgs = rep_ty_args
                            , altExTypes = rep_existential_vars
                            , altParams = rep_params
-                           , altBody = body''}
+                           , altBody = body'}
   return new_alt
   where
     assume_fields ty_params params m =

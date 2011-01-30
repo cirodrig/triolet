@@ -140,6 +140,7 @@ compilePyonToPyonAsm path text = do
   ll_mod <- do
     tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
     xmod <- SystemF.generateMemoryIR tc_mod -- Eventually replaces the Core path
+    putStrLn "Memory"
     print $ SystemF.PrintMemoryIR.pprModule xmod
     tc_xmod <- SystemF.TypecheckMem.typeCheckModule xmod
     --SystemF.inferSideEffects tc_mod
