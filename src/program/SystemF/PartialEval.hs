@@ -46,7 +46,7 @@ deconstructTupleExp expression =
   -- otherwise, return nothing
   case uncurryUnpackPolymorphicCall expression
   of Just (ExpSF (VarE {expVar = con}), ty_args, args)
-       | con == pyonTupleCon (length args) -> Just args
+       | isPyonTupleCon con -> Just args
      _ -> Nothing
 
 -- | Uncurry a function call.

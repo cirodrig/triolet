@@ -37,7 +37,7 @@ deconstructTupleExp expression =
   -- otherwise, return nothing
   case unpackPolymorphicCall expression
   of Just (ExpSF (VarE {expVar = con}), ty_args, args)
-       | con == pyonTupleCon (length args) -> Just args
+       | isPyonTupleCon con -> Just args
      _ -> Nothing
 
 -------------------------------------------------------------------------------
