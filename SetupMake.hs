@@ -18,6 +18,7 @@ import Distribution.InstalledPackageInfo
 import Distribution.ModuleName hiding(main)
 import Distribution.Package
 import Distribution.PackageDescription
+import Distribution.Simple.Compiler
 import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.PackageIndex
 import Distribution.Simple.Program
@@ -211,15 +212,13 @@ force32BitCompilation =
      ("x86_64", "linux")  -> False
      _                    -> error "Unrecognized host architecture"
 
-data CompileMode = CompileMode | LinkMode
-
 findExeConfig exe lbi =
   case find ((exeName exe ==) . fst) $ executableConfigs lbi
   of Just x  -> snd x
      Nothing -> error "Configuration error: Missing list of package dependences"
 
 -- | Get flags to use for package dependences.
-packageFlags mode exe lbi = "-hide-all-packages" :
+packageFlags exe lbi = "-hide-all-packages" :
   concat [["-package", show $ disp package_id]
          | (_, package_id) <- componentPackageDeps $ findExeConfig exe lbi]
 
@@ -256,6 +255,7 @@ pyonGhcPathFlags exe lbi = o_flags ++ i_flags
     o_flags = ["-outputdir", pyonBuildDir lbi]
     i_flags = ["-i" ++ path | path <- pyonBuildDir lbi : pyonSearchPaths lbi exe]
 
+-- | Target-specific compilation flags
 targetFlags = word_size ++ force_32bit ++ arch
   where
     arch =
@@ -273,16 +273,27 @@ targetFlags = word_size ++ force_32bit ++ arch
       then ["-DFORCE_32_BIT"]
       else []
 
--- | Get the options to pass to GHC for compiling a HS file.
+optimizationFlags lbi = prof_flag ++ opt_flag
+  where
+    prof_flag =
+      if withProfExe lbi then ["-prof"] else []
+    opt_flag =
+      case withOptimization lbi
+      of NoOptimisation -> ["-O0"]
+         _ -> ["-O"]
+
+-- | Get the options to pass to GHC for compiling a HS file that is part of
+--   the Pyon executable.
 pyonGhcOpts exe lbi =
   targetFlags ++
+  optimizationFlags lbi ++
   pyonGhcPathFlags exe lbi ++
-  packageFlags CompileMode exe lbi ++
+  packageFlags exe lbi ++
   pyonExtensionFlags exe
 
 -- | Get the options for linking the \'pyon\' binary.
 pyonLinkOpts exe lbi =
-  packageFlags LinkMode exe lbi
+  packageFlags exe lbi
 
 -------------------------------------------------------------------------------
 -- Rules to generate a makefile
