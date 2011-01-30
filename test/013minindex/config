@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Compute a reduction to find the minimum index in a list",
+  pyonSources	 = ["minindex.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "4"
+}

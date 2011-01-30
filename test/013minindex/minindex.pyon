@@ -1,0 +1,11 @@
+
+# Find the index of the minimum element of xs
+def minIndex(xs):
+    def pick_min(x, y):
+        (_, xv) = x
+        (_, yv) = y
+        return x if xv <= yv else y
+    (i, _) = reduce1(pick_min, zip(count, xs))
+    return i
+
+export ccall "min_float" minIndex : list(float) -> int
