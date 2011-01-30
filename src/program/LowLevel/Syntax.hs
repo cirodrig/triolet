@@ -119,6 +119,7 @@ data Prim =
     -- Cast a floating-point value to a signed integral value
   | PrimCastFToZ !Size !Size
   -- - | PrimCastToFloat             -- ^ Cast to a floating-point value
+  | PrimCmpF !Size !CmpOp       -- ^ Floating-point comparison
   | PrimAddF !Size              -- ^ Floating-point addition
   | PrimSubF !Size              -- ^ Floating-point subtraction
   | PrimMulF !Size              -- ^ Floating-point multiplication
@@ -146,6 +147,7 @@ primReturnType prim =
      PrimCastFromOwned        -> pointer
      PrimCastZToF _ sz        -> float sz
      PrimCastFToZ _ sz        -> int Signed sz
+     PrimCmpF _ _             -> bool
      PrimAddF sz              -> float sz
      PrimSubF sz              -> float sz
      PrimMulF sz              -> float sz

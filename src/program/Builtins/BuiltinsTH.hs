@@ -151,13 +151,14 @@ pyonBuiltinVariableNames =
   , "fun_reduce"
   , "fun_reduce1"
   , "fun_zip"
-  , "fun_iota"
+  , "count"
   , "makeComplex"
     
     -- Inserted by stream specialization
   , "fun_map_Stream"
   , "fun_reduce_Stream"
   , "fun_reduce1_Stream"
+  , "fun_zip_Stream"
   , "fun_zip_SS"
   , "fun_zip_SN"
   , "fun_zip_NS"

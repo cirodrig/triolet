@@ -147,8 +147,12 @@ createDictEnv = do
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin the_PyonTuple2) [VarT arg1, VarT arg2],
      createDict_Tuple2 arg1 arg2)
+  list_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_list) [VarT arg],
+     createDict_list arg)
   return $ DictEnv.DictEnv [repr_dict, boxed_dict,
                             float_dict, int_dict,
+                            list_dict,
                             tuple2_dict, additive_dict, multiplicative_dict]
 
 getParamType v subst =
@@ -187,6 +191,16 @@ createDict_Tuple2 param_var1 param_var2 subst use_dict =
       let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
       in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
          [dict1, dict2]
+
+createDict_list param_var subst use_dict =
+  withReprDictionary param $ \elt_dict ->
+  let list_dict = mk_list_dict elt_dict
+  in use_dict list_dict
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_list)
+    mk_list_dict elt_dict =
+      ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
 
 -- | Get the representation dictionary for a boxed data type.
 --   

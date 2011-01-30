@@ -16,6 +16,62 @@ function inline loadBox (unit _, pointer src) -> owned {
   owned load src;
 };
 
+function inline ptrToBox (unit _, pointer ptr) -> owned {
+  ptr as owned;
+};
+
+function inline boxToPtr (unit _, owned box) -> pointer {
+  box as pointer;
+};
+
+function eq_int (int x, int y) -> bool {
+  x == y;
+};
+
+function ne_int (int x, int y) -> bool {
+  x != y;
+};
+
+function lt_int (int x, int y) -> bool {
+  x < y;
+};
+
+function le_int (int x, int y) -> bool {
+  x <= y;
+};
+
+function gt_int (int x, int y) -> bool {
+  x > y;
+};
+
+function ge_int (int x, int y) -> bool {
+  x >= y;
+};
+
+function eq_float (float x, float y) -> bool {
+  x == y;
+};
+
+function ne_float (float x, float y) -> bool {
+  x != y;
+};
+
+function lt_float (float x, float y) -> bool {
+  x < y;
+};
+
+function le_float (float x, float y) -> bool {
+  x <= y;
+};
+
+function gt_float (float x, float y) -> bool {
+  x > y;
+};
+
+function ge_float (float x, float y) -> bool {
+  x >= y;
+};
+
 function add_int (int x, int y) -> int {
   x + y;
 };

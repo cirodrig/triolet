@@ -54,10 +54,11 @@ instance Binary Prim where
        PrimCastFromOwned -> putWord8 016
        PrimCastZToF x y  -> putWord8 017 >> put x >> put y
        PrimCastFToZ x y  -> putWord8 018 >> put x >> put y
-       PrimAddF x        -> putWord8 019 >> put x
-       PrimSubF x        -> putWord8 020 >> put x
-       PrimMulF x        -> putWord8 021 >> put x
-       PrimModF x        -> putWord8 022 >> put x
+       PrimCmpF x y      -> putWord8 019 >> put x >> put y
+       PrimAddF x        -> putWord8 020 >> put x
+       PrimSubF x        -> putWord8 021 >> put x
+       PrimMulF x        -> putWord8 022 >> put x
+       PrimModF x        -> putWord8 023 >> put x
        
   get = getWord8 >>= pick
     where
@@ -80,10 +81,11 @@ instance Binary Prim where
       pick 016 = pure PrimCastFromOwned
       pick 017 = PrimCastZToF <$> get <*> get
       pick 018 = PrimCastFToZ <$> get <*> get
-      pick 019 = PrimAddF <$> get
-      pick 020 = PrimSubF <$> get
-      pick 021 = PrimMulF <$> get
-      pick 022 = PrimModF <$> get
+      pick 019 = PrimCmpF <$> get <*> get
+      pick 020 = PrimAddF <$> get
+      pick 021 = PrimSubF <$> get
+      pick 022 = PrimMulF <$> get
+      pick 023 = PrimModF <$> get
       pick _ = readError "Prim.get"
 
 instance Binary Lit where

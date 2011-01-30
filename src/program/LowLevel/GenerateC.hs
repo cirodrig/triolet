@@ -482,6 +482,12 @@ genPrimCall prim args =
             in CCast decl val internalNode
      PrimGetFrameP ->
        CVar (internalIdent "frame_ptr") internalNode
+     PrimCmpF _ CmpEQ -> binary CEqOp args
+     PrimCmpF _ CmpNE -> binary CNeqOp args
+     PrimCmpF _ CmpLT -> binary CLeOp args
+     PrimCmpF _ CmpLE -> binary CLeqOp args
+     PrimCmpF _ CmpGT -> binary CGrOp args
+     PrimCmpF _ CmpGE -> binary CGeqOp args
      PrimAddF _ -> binary CAddOp args
      PrimSubF _ -> binary CSubOp args
      PrimMulF _ -> binary CMulOp args

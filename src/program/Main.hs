@@ -127,8 +127,7 @@ compilePyonToPyonAsm path text = do
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
   sf_mod <- return $ SystemF.eliminateDeadCode sf_mod
   sf_mod <- SystemF.eliminatePatternMatching sf_mod
-  print $ SystemF.pprModule sf_mod
-  sf_mod <- SystemF.doSpecialization sf_mod
+  -- sf_mod <- SystemF.doSpecialization sf_mod
 
   -- Re-run partial evaluation to simplify the specialized code.
   -- In particular, we must put 'do' operators into standard form.

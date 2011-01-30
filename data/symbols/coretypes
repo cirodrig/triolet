@@ -62,6 +62,34 @@ data ref PyonTuple2 : val (val pure -> val pure -> val pure)
   (val a : pure, val b : pure) () (read a, read b) : read PyonTuple2 a b;
 };
 
+data box EqDict : val (val pure -> val pure)
+{
+  eqDict : (val a : pure)
+        -> box (read a -> read a -> val bool)
+        -> box (read a -> read a -> val bool)
+        -> box EqDict a,
+  (val a : pure) ()
+  (box (read a -> read a -> val bool),
+   box (read a -> read a -> val bool)) : box EqDict a;
+};
+
+data box OrdDict : val (val pure -> val pure)
+{
+  ordDict : (val a : pure)
+         -> box EqDict a
+         -> box (read a -> read a -> val bool)
+         -> box (read a -> read a -> val bool)
+         -> box (read a -> read a -> val bool)
+         -> box (read a -> read a -> val bool)
+         -> box OrdDict a,
+  (val a : pure) ()
+  (box EqDict a,
+   box (read a -> read a -> val bool),
+   box (read a -> read a -> val bool),
+   box (read a -> read a -> val bool),
+   box (read a -> read a -> val bool)) : box OrdDict a;
+};
+
 data box AdditiveDict : val (val pure -> val pure)
 {
   additiveDict : (val a : pure)
@@ -114,6 +142,12 @@ copy : (val a : pure) -> box Repr a -> read a -> write a;
 
 loadBox : (val a : pure) -> read a -> box a;
 storeBox : (val a : pure) -> box a -> write a;
+
+-- Cast a read reference to a boxed reference (operationally the id function)
+ptrToBox : (val a : pure) -> read a -> box a;
+
+-- Cast a boxed reference to a read reference (operationally the id function)
+boxToPtr : (val a : pure) -> box a -> read a;
 
 repr_int : box Repr int;
 repr_float : box Repr float;
@@ -215,3 +249,86 @@ oper_CAT_MAP :
  -> box (read a -> box Stream b)
  -> box Stream b;
 
+fun_map_Stream : (val a : pure)
+	      -> (val b : pure)
+       	      -> box Repr a
+       	      -> box Repr b
+       	      -> box (read a -> write b)
+       	      -> box Stream a
+       	      -> box Stream b;
+
+fun_map : (val s : val pure -> val pure)
+       -> (val t : val pure -> val pure)
+       -> (val a : pure)
+       -> (val b : pure)
+       -> box TraversableDict s
+       -> box TraversableDict t
+       -> box Repr a
+       -> box Repr b
+       -> box (read a -> write b)
+       -> read s a
+       -> write t b;
+
+fun_reduce_Stream : (val a : pure)
+          	 -> box Repr a
+          	 -> box (read a -> read a -> write a)
+	  	 -> read a
+          	 -> box Stream a
+          	 -> write a;
+
+fun_reduce : (val t : val pure -> val pure)
+          -> (val a : pure)
+          -> box TraversableDict t
+          -> box Repr a
+          -> box (read a -> read a -> write a)
+	  -> read a
+          -> read t a
+          -> write a;
+
+fun_reduce1_Stream : (val a : pure)
+          	  -> box Repr a
+          	  -> box (read a -> read a -> write a)
+          	  -> box Stream a
+          	  -> write a;
+
+fun_reduce1 : (val t : val pure -> val pure)
+           -> (val a : pure)
+           -> box TraversableDict t
+           -> box Repr a
+           -> box (read a -> read a -> write a)
+           -> read t a
+           -> write a;
+
+fun_zip_Stream : (val a : pure)
+       	      -> (val b : pure)
+       	      -> box Repr a
+       	      -> box Repr b
+       	      -> box Stream a
+       	      -> box Stream b
+       	      -> box Stream (PyonTuple2 a b);
+
+fun_zip : (val s : val pure -> val pure)
+       -> (val t : val pure -> val pure)
+       -> (val u : val pure -> val pure)
+       -> (val a : pure)
+       -> (val b : pure)
+       -> box TraversableDict s
+       -> box TraversableDict t
+       -> box TraversableDict u
+       -> box Repr a
+       -> box Repr b
+       -> read s a
+       -> read t b
+       -> write u (PyonTuple2 a b);
+
+count : box Stream int;
+
+{-
+zip_SS : (val a : pure)
+      -> (val b : pure)
+      -> box Repr a
+      -> box Repr b
+      -> box Stream a
+      -> box Stream b
+      -> box Stream (PyonTuple2 a b);
+-}

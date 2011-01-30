@@ -173,7 +173,7 @@ hmTypeKind (FunTy n)     = nAryKind (n+1)
 hmTypeKind (TupleTy n)   = nAryKind n
 hmTypeKind (AppTy t1 t2) = case hmTypeKind t1
                            of _ :-> k -> k
-                              Star    -> error "Kind error in type application"
+                              Star    -> kindError
 
 hmTypeMap :: (HMType -> HMType) -> HMType -> HMType
 hmTypeMap f t =

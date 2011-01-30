@@ -133,6 +133,7 @@ primHasSideEffect prim =
      PrimGetFrameP {}     -> False
      PrimCastZToF {}      -> False
      PrimCastFToZ {}      -> False
+     PrimCmpF {}          -> False
      PrimAddF {}          -> False
      PrimSubF {}          -> False
      PrimMulF {}          -> False

@@ -461,30 +461,38 @@ mkReduceType = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
   in ([tT `IsInst` tiBuiltin the_Traversable,
-       passable aT, passable (tT @@ aT)],
+       passable aT],
       functionType [functionType [aT, aT] aT, aT, tT @@ aT] aT)
 
 mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
   in ([tT `IsInst` tiBuiltin the_Traversable,
-       passable aT, passable (tT @@ aT)],
+       passable aT],
       functionType [functionType [aT, aT] aT, tT @@ aT] aT)
 
 mkZipType =
-  forallType [Star :-> Star, Star :-> Star, Star, Star] $ \ [s, t, a, b] ->
+  forallType [ Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
+             , Star
+             , Star] $ \ [s, t, u, a, b] ->
   let sT = ConTy s
       tT = ConTy t
+      uT = ConTy u
       aT = ConTy a
       bT = ConTy b
   in ([ sT `IsInst` tiBuiltin the_Traversable
-      , tT `IsInst` tiBuiltin the_Traversable]
+      , tT `IsInst` tiBuiltin the_Traversable
+      , uT `IsInst` tiBuiltin the_Traversable
+      , passable aT
+      , passable bT]
      , functionType [sT @@ aT, tT @@ bT]
-       (ConTy (tiBuiltin the_con_iter) @@ (TupleTy 2 @@ aT @@ bT)))
+       (uT @@ (TupleTy 2 @@ aT @@ bT)))
 
-mkIotaType =
+mkCountType =
   return $ monomorphic $
-  functionType [ConTy (tiBuiltin the_con_NoneType)] (ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_int))
+  ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_int)
 
 mkBoxedType =
   forallType [Star] $ \[a] ->
@@ -600,8 +608,8 @@ initializeTIBuiltins = do
               ("zip", [| mkZipType |]
               , [| pyonBuiltin SystemF.the_fun_zip |]
               ),
-              ("iota", [| mkIotaType |]
-              , [| pyonBuiltin SystemF.the_fun_iota |]
+              ("count", [| mkCountType |]
+              , [| pyonBuiltin SystemF.the_count |]
               ),
               ("boxed", [| mkBoxedType |]
               , [| pyonBuiltin SystemF.the_boxed |]

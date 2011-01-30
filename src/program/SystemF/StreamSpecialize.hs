@@ -172,7 +172,7 @@ globalConTable =
       , unchanged 2 the_oper_CAT_MAP
       , unchanged 1 the_oper_DO
       , unchanged 1 the_fun_undefined
-      , unchanged 0 the_fun_iota
+      , unchanged 0 the_count
       , unchanged 1 the_additiveDict_complex
       , unchanged 1 the_add_complex
       , unchanged 1 the_sub_complex

@@ -286,6 +286,9 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
   let num_superclasses = length $ clsConstraint cls
       num_methods = length $ clsMethods cls
       
+  when (index >= num_methods) $
+    internalError "mkMethodInstanceE: index out of range"
+
   -- Get the type of each field.  Rename the class variable to match
   -- this instance.
   let instantiation = substitutionFromList [(clsParam cls, inst_type)]
@@ -305,7 +308,8 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
   -- Create a case expression that matches against the class dictionary,
   -- selects one of its fields, and instantiates the field to a monomorphic
   -- type
-  let method_var = mkVarE pos $ parameter_vars !! (num_superclasses + index)
+  let method_var =
+        mkVarE pos $ parameter_vars !! (num_superclasses + index)
   (placeholders, alt_body) <-
     instanceExpression pos ty_params constraint method_var
       

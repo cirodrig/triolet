@@ -27,7 +27,7 @@ pyonSourceGlobals =
   , "reduce"
   , "reduce1"
   , "zip"
-  , "iota"
+  , "count"
   , "boxed"
   , "__undefined__"
   , "__div__"

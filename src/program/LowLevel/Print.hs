@@ -143,6 +143,7 @@ pprInfixPrim prim =
      PrimAnd -> Just $ text "&&"
      PrimOr -> Just $ text "||"
      PrimAddP -> Just $ text "^+"
+     PrimCmpF _ c -> Just $ comparison c
      PrimAddF _ -> Just $ text "+"
      PrimSubF _ -> Just $ text "-"
      PrimMulF _ -> Just $ text "*"
@@ -189,6 +190,7 @@ pprPrim prim =
            PrimGetFrameP -> "get_frame_ptr"
            PrimCastFToZ _ _ -> "cast_float_int"
            PrimCastZToF _ _ -> "cast_int_float"
+           PrimCmpF _ c -> comparison c
            PrimAddF _ -> "fadd"
            PrimSubF _ -> "fsub"
            PrimMulF _ -> "fmul"

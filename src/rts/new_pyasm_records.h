@@ -71,6 +71,12 @@ record PyonTuple2(a, b) {
   const b member2;
 };
 
+// Mutable 2-tuples
+record MPyonTuple2(a, b) {
+  a member1;
+  b member2;
+};
+
 // Pairs of objects
 record Pair(a) {
   a fst;

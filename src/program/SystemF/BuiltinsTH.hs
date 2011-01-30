@@ -152,7 +152,7 @@ pyonBuiltinFunctions =
   , "fun_zip_SS"
   , "fun_zip_NS"
   , "fun_zip_SN"
-  , "fun_iota"
+  , "fun_count"
   , "fun_undefined"
   , "additiveDict_complex"
   , "add_complex"

@@ -175,23 +175,27 @@ builtinFunctions =
   , (PyonName module_stream "Stream_return",
      Right [| pyonBuiltin (SystemF.the_oper_DO) |]) {-
   , (PyonName module_stream "Stream_generate",
-     Right [| pyonBuiltin (SystemF.the_fun_generate) |])
+     Right [| pyonBuiltin (SystemF.the_fun_generate) |]) -}
   , (PyonName module_stream "Stream_map",
      Right [| pyonBuiltin (SystemF.the_fun_map_Stream) |])
-  , (PyonName module_stream "reduce",
-     Right [| pyonBuiltin (SystemF.the_fun_reduce) |])
+  , (PyonName module_stream "map",
+     Right [| pyonBuiltin (SystemF.the_fun_map) |])
   , (PyonName module_stream "Stream_reduce",
      Right [| pyonBuiltin (SystemF.the_fun_reduce_Stream) |])
+  , (PyonName module_stream "reduce",
+     Right [| pyonBuiltin (SystemF.the_fun_reduce) |])
+  , (PyonName module_stream "Stream_reduce1",
+     Right [| pyonBuiltin (SystemF.the_fun_reduce1_Stream) |])
+  , (PyonName module_stream "reduce1",
+     Right [| pyonBuiltin (SystemF.the_fun_reduce1) |])
+  , (PyonName module_stream "Stream_zip",
+     Right [| pyonBuiltin (SystemF.the_fun_zip_Stream) |])
+  , (PyonName module_stream "zip",
+     Right [| pyonBuiltin (SystemF.the_fun_zip) |])
   , (PyonName module_stream "Stream_build",
-     Right [| pyonBuiltin (SystemF.buildMember . SystemF.the_TraversableDict_Stream) |])
+     Right [| pyonBuiltin (SystemF.the_TraversableDict_Stream_build) |])
   , (PyonName module_stream "Stream_traverse",
-     Right [| pyonBuiltin (SystemF.traverseMember . SystemF.the_TraversableDict_Stream) |])
-  , (PyonName module_structures "additiveDict",
-     Right [| pyonBuiltin (SystemF.the_additiveDict) |])
-  , (PyonName module_structures "multiplicativeDict",
-     Right [| pyonBuiltin (SystemF.the_multiplicativeDict) |])
-  , (PyonName module_structures "additiveDict_complex",
-     Right [| pyonBuiltin (SystemF.the_additiveDict_complex) |])-}
+     Right [| pyonBuiltin (SystemF.the_TraversableDict_Stream_traverse) |])
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
   , (PyonName module_structures "repr_Boxed",
@@ -207,18 +211,38 @@ builtinFunctions =
      Right [| SystemF.pyonBuiltin SystemF.the_repr_PyonTuple2 |])
     
     -- Functions that are replaced by primitive operations
-  , (PyonName builtinModuleName "eq_int",
-     Right [| pyonBuiltin (SystemF.the_EqDict_int_eq) |])
-  , (PyonName builtinModuleName "ne_int",
-     Right [| pyonBuiltin (SystemF.the_EqDict_int_ne) |])
-  , (PyonName builtinModuleName "eq_float",
-     Right [| pyonBuiltin (SystemF.the_EqDict_float_eq) |])
-  , (PyonName builtinModuleName "ne_float",
-     Right [| pyonBuiltin (SystemF.the_EqDict_float_ne) |])
   , (PyonName module_prim "storeBox",
      Right [| pyonBuiltin SystemF.the_storeBox |])
   , (PyonName module_prim "loadBox",
      Right [| pyonBuiltin SystemF.the_loadBox |])
+  , (PyonName module_prim "ptrToBox",
+     Right [| pyonBuiltin SystemF.the_ptrToBox |])
+  , (PyonName module_prim "boxToPtr",
+     Right [| pyonBuiltin SystemF.the_boxToPtr |])
+  , (PyonName module_prim "eq_int",
+     Right [| pyonBuiltin (SystemF.the_EqDict_int_eq) |])
+  , (PyonName module_prim "ne_int",
+     Right [| pyonBuiltin (SystemF.the_EqDict_int_ne) |])
+  , (PyonName module_prim "eq_float",
+     Right [| pyonBuiltin (SystemF.the_EqDict_float_eq) |])
+  , (PyonName module_prim "ne_float",
+     Right [| pyonBuiltin (SystemF.the_EqDict_float_ne) |])
+  , (PyonName module_prim "lt_int",
+     Right [| pyonBuiltin SystemF.the_OrdDict_int_lt |])
+  , (PyonName module_prim "le_int",
+     Right [| pyonBuiltin SystemF.the_OrdDict_int_le |])
+  , (PyonName module_prim "gt_int",
+     Right [| pyonBuiltin SystemF.the_OrdDict_int_gt |])
+  , (PyonName module_prim "ge_int",
+     Right [| pyonBuiltin SystemF.the_OrdDict_int_ge |])
+  , (PyonName module_prim "lt_float",
+     Right [| pyonBuiltin SystemF.the_OrdDict_float_lt |])
+  , (PyonName module_prim "le_float",
+     Right [| pyonBuiltin SystemF.the_OrdDict_float_le |])
+  , (PyonName module_prim "gt_float",
+     Right [| pyonBuiltin SystemF.the_OrdDict_float_gt |])
+  , (PyonName module_prim "ge_float",
+     Right [| pyonBuiltin SystemF.the_OrdDict_float_ge |])
   , (PyonName module_prim "add_int",
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_int_add) |])
   , (PyonName module_prim "sub_int", 
@@ -275,6 +299,9 @@ builtinGlobals =
     -- Dictionaries
   , (PyonName module_structures "OpaqueTraversableDict_list",
      Right [| pyonBuiltin SystemF.the_OpaqueTraversableDict_list |])
+    -- Streams
+  , (PyonName module_stream "Stream_count",
+     Right [| pyonBuiltin (SystemF.the_count) |])
     -- Physical representations of data types
   , (PyonName module_structures "repr_Box_value",
      Left $ PrimType OwnedType)

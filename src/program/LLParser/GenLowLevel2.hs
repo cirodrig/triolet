@@ -410,6 +410,7 @@ genBinaryOp op l_arg r_arg =
       let operator =
             case returnType l_arg
             of [PrimType (IntType sgn sz)] -> LL.PrimCmpZ sgn sz cmp_op
+               [PrimType (FloatType sz)] -> LL.PrimCmpF sz cmp_op
                [PrimType PointerType] -> LL.PrimCmpP cmp_op
                _ -> internalError "Binary comparison not implemented for this type"
       l_val <- asVal l_arg
