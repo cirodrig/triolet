@@ -400,7 +400,7 @@ compileConstructor con con_type ty_args = do
 
     make_code field_types (OwnedLayout owned_layout@(Box pointer_layout)) = do
       -- Compute layout of this object
-      ll_record <- traceShow (pprOwnedLayout owned_layout) $ ownedLayoutRecord owned_layout
+      ll_record <- ownedLayoutRecord owned_layout
       let contents_field = ll_record LL.!!: 1
           LL.RecordField contents_record = LL.fieldType contents_field
 
