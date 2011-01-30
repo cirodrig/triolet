@@ -404,6 +404,8 @@ genBinaryOp op l_arg r_arg =
      SubOp -> arithmetic LL.PrimSubZ LL.PrimSubF
      MulOp -> arithmetic LL.PrimMulZ LL.PrimMulF
      ModOp -> arithmetic LL.PrimModZ LL.PrimModF
+     DivOp -> division
+     IntDivOp -> integer_division
      _ -> internalError "mkBinary: Unhandled binary operator"
   where
     comparison cmp_op = do
@@ -443,6 +445,28 @@ genBinaryOp op l_arg r_arg =
                [PrimType (FloatType sz)] ->
                  LL.PrimA (float_op sz) [l_val, r_val]
                _ -> internalError "Arithmetic operator not implemented for this type"
+      return $ GenAtom (returnType l_arg) atom
+    
+    division = do
+      l_val <- asVal l_arg
+      r_val <- asVal r_arg
+      atom <-
+        case returnType l_arg
+        of [PrimType (FloatType sz)] ->
+             return $ LL.PrimA (LL.PrimDivF sz) [l_val, r_val]
+      return $ GenAtom (returnType l_arg) atom
+    
+    integer_division = do
+      l_val <- asVal l_arg
+      r_val <- asVal r_arg
+      atom <-
+        case returnType l_arg
+        of [PrimType (IntType sgn sz)] ->
+             return $ LL.PrimA (LL.PrimDivZ sgn sz) [l_val, r_val]
+           [rty@(PrimType (FloatType sz))] -> do
+             quotient <- emitAtom1 rty $ LL.PrimA (LL.PrimDivF sz) [l_val, r_val]
+             let round_op = LL.PrimRoundF LL.Floor sz Signed nativeIntSize
+             return $ LL.PrimA round_op [quotient]
       return $ GenAtom (returnType l_arg) atom
     
 genCast :: ValueType -> GenExpr -> G GenExpr

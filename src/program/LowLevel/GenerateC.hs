@@ -414,20 +414,9 @@ genPrimCall prim args =
      PrimSubZ _ _ -> binary CSubOp args
      PrimMulZ _ _ -> binary CMulOp args
      PrimModZ Unsigned _ -> binary CRmdOp args -- Unsigned modulus operation
-     PrimModZ Signed _ ->
-       -- Emit a (floor) modulus operation using
-       -- C's (to-zero) remainder operation
-       -- >  x % y == 0 ? 0 :
-       -- >    (y >= 0 ? x % y      + (x < 0 ? y : 0)
-       -- >            : -(-x % -y) + (x < 0 ? 0 : -y))
-       case args
-       of [x, y] ->
-            let remainder = binary' CRmdOp x y
-                zero_check = equals remainder zero
-                pos_rem = add remainder $ cCond (ltZero x) y zero
-                neg_rem = add (neg (binary' CRmdOp (neg x) (neg y))) $
-                          cCond (ltZero x) zero (neg y)
-            in cCond zero_check zero $ cCond (geZero y) pos_rem neg_rem
+     PrimModZ Signed _ -> integer_modulus args
+     PrimDivZ Unsigned _ -> binary CDivOp args -- Unsigned division operation
+     PrimDivZ Signed _ -> integer_div args
      PrimMaxZ _ _ ->
        case args
        of [x, y] -> cCond (binary' CGeqOp x y) x y
@@ -443,8 +432,8 @@ genPrimCall prim args =
      PrimCmpP CmpLE -> binary CLeqOp args
      PrimCmpP CmpGT -> binary CGrOp args
      PrimCmpP CmpGE -> binary CGeqOp args
-     PrimAnd -> binary CAndOp args
-     PrimOr -> binary COrOp args
+     PrimAnd -> binary CLndOp args
+     PrimOr -> binary CLorOp args
      PrimNot -> case args of [arg] -> CUnary CNegOp arg internalNode
      PrimAddP ->
        case args of [ptr, off] -> offset ptr off
@@ -491,7 +480,16 @@ genPrimCall prim args =
      PrimAddF _ -> binary CAddOp args
      PrimSubF _ -> binary CSubOp args
      PrimMulF _ -> binary CMulOp args
-     PrimModF _ -> internalError "Not implemented: floating-point modulus"
+     PrimModF _ -> float_modulus args
+     PrimDivF _ -> binary CDivOp args
+     PrimRoundF mode _ sgn sz ->
+       let round_op = case mode
+                      of Floor -> internalIdent "floor"
+                         Ceiling -> internalIdent "ceil"
+                         Truncate -> internalIdent "trunc"
+                         Nearest -> internalIdent "round"
+           [arg] = args
+       in cCast (IntType sgn sz) $ cCall (cVar round_op) [arg]
      _ -> internalError $ 
           "Cannot generate C code for primitive operation: " ++
           show (pprPrim prim)
@@ -505,6 +503,37 @@ genPrimCall prim args =
     binary' op x y = cBinary op x y
     binary op [x, y] = binary' op x y
     binary op _ = internalError "genPrimCall: Wrong number of arguments"
+    
+    float_modulus [x, y] =
+      -- x mod y = x - y * floor(x / y)
+      let div_op = binary' CDivOp x y
+          floor_op = cCall (cVar (internalIdent "floor")) [div_op]
+          mul_op = binary' CMulOp y floor_op
+          sub_op = binary' CSubOp x mul_op
+      in sub_op
+
+    integer_modulus [x, y] =
+      -- Emit a (floor) modulus operation using
+      -- C's (to-zero) remainder operation
+      -- >  x % y == 0 ? 0 :
+      -- >    (y >= 0 ? x % y      + (x < 0 ? y : 0)
+      -- >            : -(-x % -y) + (x < 0 ? 0 : -y))
+      let remainder = binary' CRmdOp x y
+          zero_check = equals remainder zero
+          pos_rem = add remainder $ cCond (ltZero x) y zero
+          neg_rem = add (neg (binary' CRmdOp (neg x) (neg y))) $
+                    cCond (ltZero x) zero (neg y)
+      in cCond zero_check zero $ cCond (geZero y) pos_rem neg_rem
+
+    integer_div [x, y] =
+      -- Floor division using C's round-to-zero division
+      -- >  (x >= 0) == (y >= 0) || x % y == 0 ? x / y : x / y - 1
+      let remainder = binary' CRmdOp x y
+          same_sign = geZero x `equals` geZero y
+          test = binary' CLorOp same_sign remainder
+          frac = binary' CDivOp x y
+          adjusted_frac = binary' CSubOp frac (smallIntConst 1)
+      in cCond test frac adjusted_frac
 
 -------------------------------------------------------------------------------
 -- Statements
@@ -849,5 +878,6 @@ makeCFileText top_level =
   
 cModuleHeader =
   "#include <inttypes.h>\n\
+  \#include <math.h>\n\
   \typedef void *PyonPtr;\n\
   \#define PYON_OFF(base, offset) ((PyonPtr)((char *)(base) + (offset)))\n"

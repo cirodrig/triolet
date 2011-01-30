@@ -266,6 +266,16 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_float_mul) |])
   , (PyonName module_prim "fromint_float",
      Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_float_fromInt) |])
+  , (PyonName module_prim "mod_int",
+     Right [| pyonBuiltin SystemF.the_RemainderDict_int_mod |])
+  , (PyonName module_prim "floordiv_int",
+     Right [| pyonBuiltin SystemF.the_RemainderDict_int_floordiv |])
+  , (PyonName module_prim "mod_float",
+     Right [| pyonBuiltin SystemF.the_RemainderDict_float_mod |])
+  , (PyonName module_prim "floordiv_float",
+     Right [| pyonBuiltin SystemF.the_RemainderDict_float_floordiv |])
+  , (PyonName module_prim "div_float",
+     Right [| pyonBuiltin SystemF.the_FractionalDict_float_div |])
     -- one_float was replaced by a literal value
 {-  , (PyonName builtinModuleName "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])

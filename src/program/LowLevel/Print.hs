@@ -1,5 +1,6 @@
 
 {-# LANGUAGE PatternGuards #-}
+{-# OPTIONS -fwarn-incomplete-patterns #-}
 module LowLevel.Print where
 
 import Text.PrettyPrint.HughesPJ
@@ -138,6 +139,7 @@ pprInfixPrim prim =
      PrimSubZ _ _ -> Just $ text "-"
      PrimMulZ _ _ -> Just $ text "*"
      PrimModZ _ _ -> Just $ text "%"
+     PrimDivZ _ _ -> Just $ text "/"
      PrimCmpZ _ _ c -> Just $ comparison c
      PrimCmpP c -> Just $ comparison c
      PrimAnd -> Just $ text "&&"
@@ -147,6 +149,8 @@ pprInfixPrim prim =
      PrimAddF _ -> Just $ text "+"
      PrimSubF _ -> Just $ text "-"
      PrimMulF _ -> Just $ text "*"
+     PrimModF _ -> Just $ text "%"
+     PrimDivF _ -> Just $ text "/"
      _ -> Nothing
   where
     comparison c =
@@ -173,6 +177,7 @@ pprPrim prim =
            PrimSubZ _ _ -> "sub"
            PrimMulZ _ _ -> "mul"
            PrimModZ _ _ -> "mod"
+           PrimDivZ _ _ -> "div"
            PrimMaxZ _ _ -> "max"
            PrimCmpZ _ _ c -> comparison c
            PrimCmpP c -> comparison c
@@ -195,6 +200,11 @@ pprPrim prim =
            PrimSubF _ -> "fsub"
            PrimMulF _ -> "fmul"
            PrimModF _ -> "fmod"
+           PrimDivF _ -> "fdiv"
+           PrimRoundF Floor _ _ _ -> "floor"
+           PrimRoundF Ceiling _ _ _ -> "ceil"
+           PrimRoundF Nearest _ _ _ -> "round"
+           PrimRoundF Truncate _ _ _ -> "trunc"
       ty =
         case prim
         of PrimLoad _ t -> pprValueType t

@@ -358,6 +358,65 @@ mkVectorClass = do
 
   return cls
 
+mkRemainderClass = do
+  a <- newTyVar Star Nothing
+  let divScheme = monomorphic $
+                  functionType [ConTy a, ConTy a] (ConTy (tiBuiltin the_con_int))
+      remScheme = monomorphic $
+                  functionType [ConTy a, ConTy a] (ConTy a)
+  rec let cls =
+            Class { clsParam = a
+                  , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Multiplicative]
+                  , clsMethods = [divide, remainder]
+                  , clsName = "Remainder"
+                  , clsInstances = [int_instance, float_instance]
+                  , clsTypeCon = pyonBuiltin SystemF.the_RemainderDict
+                  , clsDictCon = pyonBuiltin SystemF.the_remainderDict
+                  }
+      divide <- mkClassMethod cls 0 "__floordiv__" divScheme
+      remainder <- mkClassMethod cls 1 "__mod__" remScheme
+      let int_instance =
+            monomorphicInstance cls
+            (ConTy $ tiBuiltin the_con_int)
+            Nothing
+            [ InstanceMethod $
+              pyonBuiltin $ SystemF.the_RemainderDict_int_floordiv
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_RemainderDict_int_mod]
+          float_instance =
+            monomorphicInstance cls
+            (ConTy $ tiBuiltin the_con_float)
+            Nothing
+            [ InstanceMethod $
+              pyonBuiltin $ SystemF.the_RemainderDict_float_floordiv
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_RemainderDict_float_mod]
+
+  return cls
+
+mkFractionalClass = do
+  a <- newTyVar Star Nothing
+  let divScheme = monomorphic $
+                  functionType [ConTy a, ConTy a] (ConTy a)
+  rec let cls =
+            Class { clsParam = a
+                  , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Multiplicative]
+                  , clsMethods = [divide]
+                  , clsName = "Fractional"
+                  , clsInstances = [float_instance]
+                  , clsTypeCon = pyonBuiltin SystemF.the_FractionalDict
+                  , clsDictCon = pyonBuiltin SystemF.the_fractionalDict
+                  }
+      divide <- mkClassMethod cls 0 "__div__" divScheme
+      let float_instance =
+            monomorphicInstance cls
+            (ConTy $ tiBuiltin the_con_float)
+            Nothing
+            [ InstanceMethod $
+              pyonBuiltin $ SystemF.the_FractionalDict_float_div]
+
+  return cls
+
 mkPassableClass = do
   rec {
   a <- newTyVar Star Nothing
@@ -589,6 +648,8 @@ initializeTIBuiltins = do
             , ("Traversable", [| mkTraversableClass |])
             , ("Additive", [| mkAdditiveClass |])
             , ("Multiplicative", [| mkMultiplicativeClass |])
+            , ("Remainder", [| mkRemainderClass |])
+            , ("Fractional", [| mkFractionalClass |])
             , ("Vector", [| mkVectorClass |])
             , ("Repr", [| mkPassableClass |])
             ]
@@ -629,15 +690,6 @@ initializeTIBuiltins = do
               ("makeComplex", [| mkMakeComplexType |]
               , [| pyonBuiltin SystemF.the_makeComplex |]
               ),
-              ("__div__", [| mkBinaryOpType |]
-              , [| pyonBuiltin SystemF.the_oper_DIV |]
-              ),
-              ("__mod__", [| mkBinaryIntType |]
-              , [| pyonBuiltin SystemF.the_oper_MOD |]
-              ),
-              ("__floordiv__", [| mkBinaryOpType |]
-              , [| pyonBuiltin SystemF.the_oper_FLOORDIV |]
-              ),
               ("__power__", [| mkBinaryOpType |]
               , [| pyonBuiltin SystemF.the_oper_POWER |]
               ),
@@ -657,6 +709,8 @@ initializeTIBuiltins = do
             , ([| the_Traversable |], ["__iter__", "__build__"])
             , ([| the_Additive |], ["__add__", "__sub__", "__negate__", "zero"])
             , ([| the_Multiplicative |], ["__mul__", "__fromint__", "one"])
+            , ([| the_Remainder |], ["__floordiv__", "__mod__"])
+            , ([| the_Fractional |], ["__div__"])
             , ([| the_Vector |], ["scale", "norm"])
             ]
 

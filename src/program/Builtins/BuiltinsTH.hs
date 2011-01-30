@@ -32,6 +32,8 @@ pyonBuiltinTypeNames =
   , "OrdDict"
   , "AdditiveDict"
   , "MultiplicativeDict"
+  , "RemainderDict"
+  , "FractionalDict"
   , "VectorDict"
   ]
 
@@ -55,6 +57,8 @@ pyonBuiltinVariableNames =
   , "ordDict"
   , "additiveDict"
   , "multiplicativeDict"
+  , "remainderDict"
+  , "fractionalDict"
   , "vectorDict"
 
     -- Class instances
@@ -126,6 +130,11 @@ pyonBuiltinVariableNames =
   , "MultiplicativeDict_float_mul"
   , "MultiplicativeDict_float_fromInt"
   , "MultiplicativeDict_float_one"
+  , "RemainderDict_int_floordiv"
+  , "RemainderDict_int_mod"
+  , "RemainderDict_float_floordiv"
+  , "RemainderDict_float_mod"
+  , "FractionalDict_float_div"
 
     -- Integer index arithmetic 
   , "zero_i"
@@ -139,9 +148,6 @@ pyonBuiltinVariableNames =
   , "oper_DO"
   , "oper_GUARD"
   , "oper_CAT_MAP"
-  , "oper_DIV"
-  , "oper_MOD"
-  , "oper_FLOORDIV"
   , "oper_POWER"
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"

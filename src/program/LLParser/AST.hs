@@ -24,6 +24,8 @@ type instance VarName Parsed = String
 data BinOp =
     MulOp                       -- ^ '*'
   | ModOp                       -- ^ '%'
+  | DivOp                       -- ^ '/'
+  | IntDivOp                    -- ^ '%/'
   | AddOp                       -- ^ '+'
   | SubOp                       -- ^ '-'
   | PointerAddOp                -- ^ '^+'

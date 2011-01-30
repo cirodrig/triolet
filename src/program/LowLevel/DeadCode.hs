@@ -118,6 +118,7 @@ primHasSideEffect prim =
      PrimSubZ {}          -> False
      PrimMulZ {}          -> False
      PrimModZ {}          -> False
+     PrimDivZ {}          -> False
      PrimMaxZ {}          -> False
      PrimCmpZ {}          -> False
      PrimCmpP {}          -> False
@@ -138,6 +139,8 @@ primHasSideEffect prim =
      PrimSubF {}          -> False
      PrimMulF {}          -> False
      PrimModF {}          -> False
+     PrimDivF {}          -> False
+     PrimRoundF {}        -> False
 
 dceAtom :: DCE Atom
 dceAtom atom = nudge 1 $

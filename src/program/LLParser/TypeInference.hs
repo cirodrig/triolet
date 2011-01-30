@@ -607,6 +607,8 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
   case op
   of MulOp -> arithmetic
      ModOp -> arithmetic
+     DivOp -> division
+     IntDivOp -> int_division
      AddOp -> arithmetic
      SubOp -> arithmetic
      PointerAddOp -> pointer
@@ -634,6 +636,9 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
     number_check (PrimT (FloatType {})) = Nothing
     number_check _ = Just "Expecting integral or floating-point type"
 
+    floating_check (PrimT (FloatType {})) = Nothing
+    floating_check _ = Just "Expecting floating-point type"
+
     pointer_check (PrimT PointerType) = Nothing 
     pointer_check (PrimT OwnedType) = Nothing 
     pointer_check _ = Just "Expecting 'pointer' or 'owned' type"
@@ -653,6 +658,18 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
                    , number_check y
                    , eq_primtype_check x y]
     
+    division =
+      x `checking` [ single_parameter
+                   , floating_check x 
+                   , floating_check y
+                   , eq_primtype_check x y]
+
+    int_division =
+      PrimT nativeIntType `checking` [ single_parameter
+                                     , number_check x 
+                                     , number_check y
+                                     , eq_primtype_check x y]
+
     pointer =
       x `checking` [single_parameter, pointer_check x, native_int_check y]
 

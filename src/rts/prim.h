@@ -24,12 +24,17 @@ extern function pyon.internal.prim.sub_int (int, int) -> int;
 extern function pyon.internal.prim.negate_int (int) -> int;
 extern function pyon.internal.prim.mul_int (int, int) -> int;
 extern function pyon.internal.prim.fromint_int (int) -> int;
+extern function pyon.internal.prim.floordiv_int (int, int) -> int;
+extern function pyon.internal.prim.mod_int (int, int) -> int;
 
 extern function pyon.internal.prim.add_float (float, float) -> float;
 extern function pyon.internal.prim.sub_float (float, float) -> float;
 extern function pyon.internal.prim.negate_float (float) -> float;
 extern function pyon.internal.prim.mul_float (float, float) -> float;
 extern function pyon.internal.prim.fromint_float (int) -> float;
+extern function pyon.internal.prim.floordiv_float (float, float) -> int;
+extern function pyon.internal.prim.mod_float (float, float) -> float;
+extern function pyon.internal.prim.div_float (float, float) -> float;
 
 extern function pyon.internal.prim.load_complexFloat
   (pointer) -> (complex(float));

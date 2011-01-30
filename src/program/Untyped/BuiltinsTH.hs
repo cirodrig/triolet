@@ -30,9 +30,6 @@ pyonSourceGlobals =
   , "count"
   , "boxed"
   , "__undefined__"
-  , "__div__"
-  , "__mod__"
-  , "__floordiv__"
   , "__power__"
   , "__and__"
   , "__or__"
@@ -53,6 +50,9 @@ pyonSourceGlobals =
   , "__mul__"
   , "__fromint__"
   , "one"
+  , "__mod__"
+  , "__floordiv__"
+  , "__div__"
   , "scale"
   , "norm"
   ]
@@ -69,6 +69,7 @@ pyonClasses =
   ["Repr", "Traversable",
    "Eq", "Ord",
    "Additive", "Multiplicative",
+   "Remainder", "Fractional",
    "Vector"]
 
 -- Global variable fields are not strict because some of them are built 

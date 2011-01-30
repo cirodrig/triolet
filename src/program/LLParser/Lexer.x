@@ -98,6 +98,8 @@ rules :-
 "-" / @notsym		{ tok MinusTok }
 "^+" / @notsym		{ tok PointerPlusTok }
 "%" / @notsym		{ tok PercentTok }
+"%/" / @notsym		{ tok IntegerDivideTok }
+"/" / @notsym		{ tok DivideTok }
 "*"			{ tok StarTok }
 "!+" / @notsym		{ tok DerefPlusTok }
 

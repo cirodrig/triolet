@@ -92,6 +92,14 @@ function fromint_int(int x) -> int {
   x;
 };
 
+function floordiv_int(int x, int y) -> int {
+  x %/ y;
+};
+
+function mod_int(int x, int y) -> int {
+  x % y;
+};
+
 function add_float (float x, float y) -> float {
   x + y;
 };
@@ -110,6 +118,18 @@ function mul_float(float x, float y) -> float {
 
 function fromint_float(int x) -> float {
   x as float;
+};
+
+function floordiv_float(float x, float y) -> int {
+  x %/ y;
+};
+
+function mod_float(float x, float y) -> float {
+  x % y;
+};
+
+function div_float(float x, float y) -> float {
+  x / y;
 };
 
 function load_complexFloat (pointer x) -> (complex(float)) {

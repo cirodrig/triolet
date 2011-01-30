@@ -57,6 +57,10 @@ fromCodeSize (CodeSize n) | n < 0     = Nothing
 data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE
            deriving(Eq, Ord, Bounded, Enum)
 
+-- | A floating-point rounding mode
+data RoundMode = Floor | Ceiling | Truncate | Nearest
+               deriving (Eq, Ord, Bounded, Enum)
+
 data Prim =
     -- | @PrimCastZ from-sign to-sign size@
     -- 
@@ -70,6 +74,7 @@ data Prim =
   | PrimSubZ !Signedness !Size  -- ^ Subtract Y from X
   | PrimMulZ !Signedness !Size  -- ^ Multiply X by Y
   | PrimModZ !Signedness !Size  -- ^ Remainder (floor) of X modulo Y
+  | PrimDivZ !Signedness !Size  -- ^ Divide (floor) X by Y
   | PrimMaxZ !Signedness !Size  -- ^ Compute maximum
   | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
   | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers
@@ -124,6 +129,11 @@ data Prim =
   | PrimSubF !Size              -- ^ Floating-point subtraction
   | PrimMulF !Size              -- ^ Floating-point multiplication
   | PrimModF !Size              -- ^ Floating-point modulus
+  | PrimDivF !Size              -- ^ Floating-point division
+    -- | @PrimRoundF mode from-size to-sign to-size
+    --
+    --   Floating-point to integer conversion.
+  | PrimRoundF !RoundMode !Size !Signedness !Size
 
 primReturnType :: Prim -> [ValueType]
 primReturnType prim =
@@ -133,6 +143,7 @@ primReturnType prim =
      PrimSubZ sgn sz          -> int sgn sz
      PrimMulZ sgn sz          -> int sgn sz
      PrimModZ sgn sz          -> int sgn sz
+     PrimDivZ sgn sz          -> int sgn sz
      PrimMaxZ sgn sz          -> int sgn sz
      PrimCmpZ _ _ _           -> bool
      PrimCmpP _               -> bool
@@ -152,6 +163,8 @@ primReturnType prim =
      PrimSubF sz              -> float sz
      PrimMulF sz              -> float sz
      PrimModF sz              -> float sz
+     PrimDivF sz              -> float sz
+     PrimRoundF _ _ sgn sz    -> int sgn sz
   where
     int sgn sz = [PrimType $ IntType sgn sz]
     float sz = [PrimType $ FloatType sz]

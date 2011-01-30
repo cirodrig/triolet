@@ -49,6 +49,8 @@ data Token =
   | MinusTok
   | PointerPlusTok
   | PercentTok
+  | IntegerDivideTok
+  | DivideTok
   | StarTok
   | DerefPlusTok
   | WildTok
@@ -122,6 +124,8 @@ showToken PlusTok = "plus"
 showToken MinusTok = "minus"
 showToken PointerPlusTok = "'^+'"
 showToken PercentTok = "percent sign"
+showToken IntegerDivideTok = "integer division sign"
+showToken DivideTok = "forward slash"
 showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
 showToken WildTok = "wildcard"

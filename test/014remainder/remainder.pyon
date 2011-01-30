@@ -1,0 +1,10 @@
+
+def remainder(x,y):
+    a = __fromint__(x // y)
+    b = x % y
+    return (a * y) + b + b
+
+export ccall "remainder_int" remainder : int * int -> int
+export ccall "remainder_float" remainder : float * float -> float
+
+
