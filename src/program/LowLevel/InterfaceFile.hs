@@ -349,10 +349,10 @@ renameInterface extern_variables iface = do
             externVarName (importVar impent) `Map.notMember` extern_variable_labels
       orig_exports = ifaceExports iface
 
-  -- Get all external variables in the interface.  Remove duplicates. 
+  -- Get all external variables in the interface.  Remove duplicates.
   let iface_extern_variables =
-        let imp_vars = map importVar orig_imports
-            exp_vars = map importVar orig_exports
+        let imp_vars = map importVar $ ifaceImports iface
+            exp_vars = map importVar $ ifaceExports iface
         in imp_vars ++ (exp_vars \\ imp_vars)
 
   -- Create a renaming for these variables
