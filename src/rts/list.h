@@ -26,3 +26,15 @@ extern procedure pyon.internal.list.pyon_List_PyonInt_Copy "pyon_List_PyonInt_Co
 extern procedure pyon.internal.list.pyon_List_PyonInt_Free "pyon_List_PyonInt_Free"
   (pointer) -> ();
 
+extern procedure pyon.internal.list.pyon_List_PyonFloat_FromArray "pyon_List_PyonFloat_FromArray"
+  (cint, pointer) -> pointer;
+
+extern procedure pyon.internal.list.pyon_List_PyonFloat_ToArray "pyon_List_PyonFloat_ToArray"
+  (pointer, pointer) -> ();
+extern procedure pyon.internal.list.pyon_List_PyonFloat_Length "pyon_List_PyonFloat_Length"
+  (pointer) -> cint;
+extern procedure pyon.internal.list.pyon_List_PyonFloat_Copy "pyon_List_PyonFloat_Copy"
+  (pointer) -> pointer;
+extern procedure pyon.internal.list.pyon_List_PyonFloat_Free "pyon_List_PyonFloat_Free"
+  (pointer) -> ();
+

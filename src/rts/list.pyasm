@@ -330,3 +330,30 @@ procedure pyon_List_PyonInt_Copy (pointer list) -> pointer {
 procedure pyon_List_PyonInt_Free (pointer list) -> () {
   pointer primcall pyon_list_free_POD (list);
 };
+
+
+procedure pyon_List_PyonFloat_FromArray (int n_elems, pointer arr) -> pointer {
+  typedef array_type = array(value n_elems, float);
+ 
+  new_arr = pointer primcall pyon_alloc (sizeof array_type);
+  () = () primcall memcpy (new_arr, arr, sizeof array_type);
+  pointer primcall pyon_list_from_array(n_elems, new_arr);
+};
+
+// Copy the contents of a list into an array
+procedure pyon_List_PyonFloat_ToArray (pointer list, pointer dat) -> () {
+  () primcall pyon_list_to_array_POD (repr_float, list, dat);
+};
+
+procedure pyon_List_PyonFloat_Length (pointer list) -> cint {
+  l = int primcall pyon_list_length (list);
+  l as cint;
+};
+
+procedure pyon_List_PyonFloat_Copy (pointer list) -> pointer {
+  pointer primcall pyon_list_copy_POD (repr_float, list);
+};
+
+procedure pyon_List_PyonFloat_Free (pointer list) -> () {
+  pointer primcall pyon_list_free_POD (list);
+};
