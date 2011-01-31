@@ -97,6 +97,7 @@ Executable pyon
     SystemF.Print
     SystemF.PrintMemoryIR
     SystemF.Representation
+    SystemF.Rename
     SystemF.StreamSpecialize
     SystemF.Syntax
     SystemF.Typecheck

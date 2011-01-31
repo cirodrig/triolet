@@ -27,6 +27,8 @@ data instance Pat Mem =
     -- | A local, dynamically allocated variable.  The dynamically allocated
     --   memory exists as long as the variable is in scope.  The pattern takes
     --   a representation dictionary for this type as a parameter.
+    --
+    --   This pattern may only appear as the binder of a let expression.
   | LocalVarP Var Type ExpM
 
 data instance TyPat Mem  = TyPatM Var Type

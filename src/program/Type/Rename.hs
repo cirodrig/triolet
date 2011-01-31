@@ -1,8 +1,9 @@
 
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 module Type.Rename where
 
 import Data.Maybe
+import Data.Monoid
 
 import Common.Identifier
 import Common.Supply
@@ -11,6 +12,10 @@ import Type.Type
 import qualified Data.IntMap as IntMap
 
 newtype Renaming = R {unR :: IntMap.IntMap Var}
+
+instance Monoid Renaming where
+  mempty = R mempty
+  mappend x y = R (mappend (unR x) (unR y))
 
 renaming :: [(Var, Var)] -> Renaming
 renaming xs = R $ IntMap.fromList [(fromIdent $ varID v1, v2) | (v1, v2) <- xs]
@@ -55,6 +60,13 @@ instance Renameable Type where
          return $ FunT (ValPT (Just v') ::: dom) (renameBinding rn result)
        -- Other terms don't bind variables
        _ -> return ty
+
+-- We do not have an instance for ParamRepr ::: Type
+-- because it binds variables that are visible outside itself 
+
+instance Renameable (ReturnRepr ::: Type) where
+  rename rn (repr ::: ty) = repr ::: rename rn ty
+  freshen ty = return ty
 
 -- | Freshen variables bound in the types such that the same variable is 
 --   bound by the outermost term in both types.  The outermost term is always
