@@ -17,7 +17,7 @@ instance Lift Kind where
 -- | All predefined data type names recognized by the Pyon parser
 pyonSourceTypes :: [String] 
 pyonSourceTypes =
-  ["int", "float", "complex", "bool", "NoneType", "iter", "list", "Any",
+  ["int", "float", "Complex", "bool", "NoneType", "iter", "list", "Any",
    "Boxed"]
 
 -- | All predefined global functions recognized by the Pyon parser
@@ -30,10 +30,10 @@ pyonSourceGlobals =
   , "count"
   , "boxed"
   , "__undefined__"
-  , "__power__"
   , "__and__"
   , "__or__"
   , "__xor__"
+  , "complex"
     -- Class methods
   , "__eq__"
   , "__ne__"
@@ -56,12 +56,21 @@ pyonSourceGlobals =
   , "scale"
   , "magnitude"
   , "magnitude2"
+  , "__fromfloat__"
+  , "__power__"
+  , "exp"
+  , "log"
+  , "sqrt"
+  , "sin"
+  , "cos"
+  , "tan"
+  , "pi"
   ]
 
 -- | Global variables that can't be referred to by name 
 pyonOtherGlobals :: [String]
 pyonOtherGlobals =
-  [ "do", "guard", "iterBind", "makeComplex"
+  [ "do", "guard", "iterBind"
   ]
 
 -- | All predefined class names
@@ -71,6 +80,7 @@ pyonClasses =
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Remainder", "Fractional",
+   "Floating",
    "Vector"]
 
 -- Global variable fields are not strict because some of them are built 

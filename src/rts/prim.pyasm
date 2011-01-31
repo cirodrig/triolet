@@ -144,6 +144,10 @@ function magnitude2_float(float vec) -> float {
   vec * vec;
 };
 
+function fromfloat_float (float x) -> float {
+  x;
+};
+
 function load_complexFloat (pointer x) -> (complex(float)) {
   typedef cpxfloat = complex(float);
   complex(float) {x @! cpxfloat.real, x @! cpxfloat.imag};

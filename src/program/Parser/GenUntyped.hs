@@ -208,13 +208,16 @@ doExpr expr =
                      let oper = tiBuiltin the___fromint__
                      in callVariable pos oper [make_literal (U.IntL n)]
                    FloatLit f ->
-                     make_literal $ U.FloatL f
+                     -- Generate a call to 'fromFloat' to cast to any valid value
+                     let oper = tiBuiltin the___fromfloat__
+                     in callVariable pos oper [make_literal (U.FloatL f)]
                    ImaginaryLit d ->
-                     -- Generate a call to 'makeComplex'
-                     let oper = tiBuiltin the_makeComplex
-                         real = make_literal (U.FloatL 0)
-                         imag = make_literal (U.FloatL d)
-                     in callVariable pos oper [real, imag]
+                     -- Generate a call to 'makeComplex' and 'fromFloat'
+                     let oper1 = tiBuiltin the___fromfloat__
+                         oper2 = tiBuiltin the_complex
+                         real = callVariable pos oper1 [make_literal (U.FloatL 0)]
+                         imag = callVariable pos oper1 [make_literal (U.FloatL d)]
+                     in callVariable pos oper2 [real, imag]
                    BoolLit b -> make_literal $ U.BoolL b
                    NoneLit -> make_literal U.NoneL
        in return l'

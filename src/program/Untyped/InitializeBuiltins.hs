@@ -284,7 +284,7 @@ mkAdditiveClass = do
           Instance { insQVars = [b]
                    , insConstraint = [ConTy b `IsInst` cls]
                    , insClass = cls
-                   , insType = ConTy (tiBuiltin the_con_complex) @@ ConTy b
+                   , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
                    , insCon = Just $ pyonBuiltin SystemF.the_additiveDict_complex
                    , insMethods =
                      [ InstanceMethod (pyonBuiltin SystemF.the_add_complex)
@@ -333,6 +333,57 @@ mkMultiplicativeClass = do
             pyonBuiltin $ SystemF.the_MultiplicativeDict_float_fromInt
           , InstanceMethod $
             pyonBuiltin $ SystemF.the_MultiplicativeDict_float_one] }
+  
+  return cls
+  
+mkFloatingClass = do
+  rec a <- newTyVar Star Nothing
+      let binScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy a)
+          unScheme  = monomorphic $ functionType [ConTy a] (ConTy a)
+          fromFloatScheme = monomorphic $
+                            functionType [ConTy $ tiBuiltin the_con_float] (ConTy a)
+      let cls = Class { clsParam = a
+                      , clsConstraint = []
+                      , clsMethods = [fromfloat, power, expfn, logfn, sqrtfn,
+                                      sinfn, cosfn, tanfn, pi]
+                      , clsName = "Floating"
+                      , clsInstances = [float_instance]
+                      , clsTypeCon = pyonBuiltin SystemF.the_FloatingDict
+                      , clsDictCon = pyonBuiltin SystemF.the_floatingDict
+                      }
+
+      fromfloat <- mkClassMethod cls 0 "__fromfloat__" fromFloatScheme
+      power <- mkClassMethod cls 1 "__power__" binScheme
+      expfn <- mkClassMethod cls 2 "exp" unScheme
+      logfn <- mkClassMethod cls 3 "log" unScheme
+      sqrtfn <- mkClassMethod cls 4 "sqrt" unScheme
+      sinfn <- mkClassMethod cls 5 "sin" unScheme
+      cosfn <- mkClassMethod cls 6 "cos" unScheme
+      tanfn <- mkClassMethod cls 7 "tan" unScheme
+      pi <- mkClassMethod cls 8 "pi" (monomorphic (ConTy a))
+  
+      let float_instance =
+            monomorphicInstance cls
+            (ConTy $ tiBuiltin the_con_float)
+            Nothing
+            [ InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_fromfloat
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_power
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_exp
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_log
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_sqrt
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_sin
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_cos
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_tan
+            , InstanceMethod $
+              pyonBuiltin $ SystemF.the_FloatingDict_float_pi]
   
   return cls
   
@@ -487,8 +538,8 @@ mkPassableClass = do
           { insQVars = [b]
           , insConstraint = [passable $ ConTy b]
           , insClass = cls
-          , insType = ConTy (tiBuiltin the_con_complex) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_complex
+          , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
+          , insCon = Just $ pyonBuiltin SystemF.the_repr_Complex
           , insMethods = []
           }
   ; let boxed_instance =
@@ -605,7 +656,7 @@ mkMakeComplexType =
   return $ monomorphic $
   functionType [ ConTy (tiBuiltin the_con_float)
                , ConTy (tiBuiltin the_con_float)]
-  (ConTy (tiBuiltin the_con_complex) @@ ConTy (tiBuiltin the_con_float))
+  (ConTy (tiBuiltin the_con_Complex) @@ ConTy (tiBuiltin the_con_float))
 
 mkBinaryOpType =
   forallType [Star] $ \[a] ->
@@ -645,7 +696,7 @@ initializeTIBuiltins = do
             -- 3. system F constructor
             [ ("int", Star, [| pyonBuiltin SystemF.the_int |])
             , ("float", Star, [| pyonBuiltin SystemF.the_float |])
-            , ("complex", Star :-> Star, [| pyonBuiltin SystemF.the_complex |])
+            , ("Complex", Star :-> Star, [| pyonBuiltin SystemF.the_Complex |])
             , ("bool", Star, [| pyonBuiltin SystemF.the_bool |])
             , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |])
             , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |])
@@ -662,6 +713,7 @@ initializeTIBuiltins = do
             , ("Multiplicative", [| mkMultiplicativeClass |])
             , ("Remainder", [| mkRemainderClass |])
             , ("Fractional", [| mkFractionalClass |])
+            , ("Floating", [| mkFloatingClass |])
             , ("Vector", [| mkVectorClass |])
             , ("Repr", [| mkPassableClass |])
             ]
@@ -699,11 +751,8 @@ initializeTIBuiltins = do
               ("iterBind", [| mkIterBindType |]
               , [| pyonBuiltin SystemF.the_oper_CAT_MAP |]
               ),
-              ("makeComplex", [| mkMakeComplexType |]
-              , [| pyonBuiltin SystemF.the_makeComplex |]
-              ),
-              ("__power__", [| mkBinaryOpType |]
-              , [| pyonBuiltin SystemF.the_oper_POWER |]
+              ("complex", [| mkMakeComplexType |]
+              , [| pyonBuiltin SystemF.the_complex |]
               ),
               ("__and__", [| mkBinaryIntType |]
               , [| pyonBuiltin SystemF.the_oper_BITWISEAND |]
@@ -723,6 +772,9 @@ initializeTIBuiltins = do
             , ([| the_Multiplicative |], ["__mul__", "__fromint__", "one"])
             , ([| the_Remainder |], ["__floordiv__", "__mod__"])
             , ([| the_Fractional |], ["__div__"])
+            , ([| the_Floating |], ["__fromfloat__", "__power__",
+                                    "exp", "log", "sqrt",
+                                    "sin", "cos", "tan", "pi"])
             , ([| the_Vector |], ["scale", "magnitude", "magnitude2"])
             ]
 

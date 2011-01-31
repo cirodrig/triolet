@@ -162,7 +162,6 @@ globalConTable =
       , unchanged 1 the_TraversableDict_Stream_build
       , unchanged 1 the_TraversableDict_list_traverse
       , unchanged 1 the_TraversableDict_list_build
-      , unchanged 1 the_oper_POWER
       , unchanged 0 the_oper_BITWISEAND
       , unchanged 0 the_oper_BITWISEOR
       , unchanged 0 the_oper_BITWISEXOR

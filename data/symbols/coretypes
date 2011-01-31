@@ -25,6 +25,12 @@ data val IndexedInt : val (val intindex -> val pure)
   (val n : intindex) () (val int) : val (IndexedInt n);
 };
 
+data ref Complex : val (val pure -> val pure)
+{
+  complex : (val a : pure) -> write a -> write a -> write Complex a,
+  (val a : pure) () (read a, read a) : read Complex a;
+};
+
 data ref array : val (val intindex -> val pure -> val pure) {};
 
 data box Repr : val (val pure -> val pure) {};
@@ -142,6 +148,31 @@ data box FractionalDict : val (val pure -> val pure)
   (val a : pure) ()
   (box MultiplicativeDict a,
    box (read a -> read a -> write a)) : box FractionalDict a;
+};
+
+data box FloatingDict : val (val pure -> val pure)
+{
+  floatingDict : (val a : pure)
+	      -> box (val float -> write a)
+	      -> box (read a -> read a -> write a)
+	      -> box (read a -> write a)
+	      -> box (read a -> write a)
+	      -> box (read a -> write a)
+	      -> box (read a -> write a)
+	      -> box (read a -> write a)
+	      -> box (read a -> write a)
+	      -> write a
+	      -> box FloatingDict a,
+  (val a : pure) ()
+  (box (val float -> write a),
+   box (read a -> read a -> write a),
+   box (read a -> write a),
+   box (read a -> write a),
+   box (read a -> write a),
+   box (read a -> write a),
+   box (read a -> write a),
+   box (read a -> write a),
+   read a) : box FloatingDict a;
 };
 
 data box VectorDict : val (val pure -> val pure)
@@ -267,6 +298,16 @@ RemainderDict_float_mod : val float -> val float -> val float;
 
 FractionalDict_float_div : val float -> val float -> val float;
 
+
+FloatingDict_float_fromfloat : val float -> val float;
+FloatingDict_float_power : val float -> val float -> val float;
+FloatingDict_float_exp : val float -> val float;
+FloatingDict_float_log : val float -> val float;
+FloatingDict_float_sqrt : val float -> val float;
+FloatingDict_float_sin : val float -> val float;
+FloatingDict_float_cos : val float -> val float;
+FloatingDict_float_tan : val float -> val float;
+FloatingDict_float_pi : val float;
 
 VectorDict_float_scale : val float -> val float -> val float;
 VectorDict_float_magnitude : val float -> val float;

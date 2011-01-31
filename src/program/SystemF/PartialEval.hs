@@ -197,6 +197,8 @@ pevalExp expression =
            return_lit inf $ IntL 1 int_type
        | v `isPyonBuiltin` the_MultiplicativeDict_float_one ->
            return_lit inf $ FloatL 1 float_type
+       | v `isPyonBuiltin` the_FloatingDict_float_pi ->
+           return_lit inf $ FloatL pi float_type
        | otherwise -> lookupVarDefault expression v
      LitE {} -> return expression
      AppE {} -> internalError "pevalExp" -- Should have been already matched
@@ -239,6 +241,9 @@ pevalExp expression =
 pevalApp inf op tys args =
   case known_oper
   of Just con
+       | con `isPyonBuiltin` the_FloatingDict_float_fromfloat ->
+           -- fromFloat (n :: Float) = n
+           case args of [arg] -> arg
        | con `isPyonBuiltin` the_MultiplicativeDict_int_fromInt ->
            -- fromInt (n :: Int) = n
            case args of [arg] -> arg

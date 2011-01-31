@@ -282,6 +282,8 @@ builtinFunctions =
      Right [| pyonBuiltin SystemF.the_VectorDict_float_magnitude |])
   , (PyonName module_prim "magnitude2_float",
      Right [| pyonBuiltin SystemF.the_VectorDict_float_magnitude2 |])
+  , (PyonName module_prim "fromfloat_float",
+     Right [| pyonBuiltin SystemF.the_FloatingDict_float_fromfloat |])
     -- one_float was replaced by a literal value
 {-  , (PyonName builtinModuleName "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])
