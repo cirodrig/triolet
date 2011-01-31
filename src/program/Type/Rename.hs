@@ -144,3 +144,8 @@ instance Substitutable Type where
        FunT (arg ::: dom) result ->
          FunT (arg ::: substitute sb dom) (substituteBinding sb result)
 
+-- We do not have a Substitutable instance for ParamRepr ::: Type
+-- because it binds variables that are visible outside itself 
+
+instance Substitutable (ReturnRepr ::: Type) where
+  substitute s (repr ::: ty) = repr ::: substitute s ty

@@ -42,6 +42,22 @@ freshenPatM (MemVarP v ty) = do
 
 freshenPatM (LocalVarP {}) = internalError "freshenPatM: Unexpected pattern"
 
+-- | Apply a substitution to a type pattern
+substituteTyPatM :: Substitution -> TyPatM -> TyPatM
+substituteTyPatM s pattern =
+  case pattern
+  of TyPatM v ty -> TyPatM v (substitute s ty)
+
+-- | Apply a substitution to a pattern
+substitutePatM :: Substitution -> PatM -> PatM
+substitutePatM s pattern =
+  case pattern
+  of MemVarP v (repr ::: ty) ->
+       case repr
+       of ValPT (Just _) -> internalError "substitutePatM: Superfluous binding"
+          _ -> MemVarP v (repr ::: substitute s ty)
+     LocalVarP v ty dict -> LocalVarP v (substitute s ty) (substitute s dict)
+
 instance Renameable (Typ Mem) where
   rename rn (TypM t) = TypM $ rename rn t
   freshen (TypM t) = liftM TypM $ freshen t
@@ -146,3 +162,52 @@ instance Renameable (Fun Mem) where
                         , funBody = body}
       
 renameDefM rn (Def v f) = Def v (rename rn f)
+
+instance Substitutable (Typ Mem) where
+  substitute s (TypM t) = TypM $ substitute s t
+
+instance Substitutable (Ret Mem) where
+  substitute s (RetM rt) = RetM (substitute s rt)
+
+instance Substitutable (Exp Mem) where
+  substitute s (ExpM expression) = ExpM $
+    case expression
+    of VarE inf v ->
+         case substituteVar v s
+         of Just _ ->
+              internalError "Exp Mem.substitute: type substituted for variable"
+            Nothing -> expression
+       LitE {} -> expression
+       AppE inf op ts es ->
+         AppE inf (recurse op) (map recurse ts) (map recurse es)
+       LamE inf f ->
+         LamE inf (recurse f)
+       LetE inf p val body ->
+         LetE inf (substitutePatM s p) (recurse val) (recurse body)
+       LetrecE inf defs body ->
+         LetrecE inf (map (substituteDefM s) defs) (recurse body)
+       CaseE inf scr alts ->
+         CaseE inf (recurse scr) (map recurse alts)
+    where
+      {-# INLINE recurse #-}
+      recurse :: Substitutable a => a -> a
+      recurse = substitute s
+
+instance Substitutable (Alt Mem) where
+  substitute s (AltM alt) =
+    AltM $ Alt { altConstructor = altConstructor alt
+               , altTyArgs = map (substitute s) $ altTyArgs alt
+               , altExTypes = map (substituteTyPatM s) $ altExTypes alt
+               , altParams = map (substitutePatM s) $ altParams alt
+               , altBody = substitute s $ altBody alt}
+
+instance Substitutable (Fun Mem) where
+  substitute s (FunM fun) =
+    FunM $ Fun { funInfo = funInfo fun
+               , funTyParams = map (substituteTyPatM s) $ funTyParams fun 
+               , funParams = map (substitutePatM s) $ funParams fun
+               , funReturn = substitute s $ funReturn fun
+               , funBody = substitute s $ funBody fun}
+
+substituteDefM s (Def v f) = Def v (substitute s f)
+
