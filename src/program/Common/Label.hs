@@ -95,7 +95,9 @@ showLabel lab =
   let base = case labelLocalName lab
              of Left str -> str
                 Right id -> showLocalID id
-  in "\"" ++ base ++ "'" ++ encodeLabelTag (labelTag lab) ++ "\""
+      tag = encodeLabelTag (labelTag lab)
+      tagstr = if null tag then "" else '\'' : tag
+  in base ++ tagstr
 
 labelLocalNameAsString :: Label -> String
 labelLocalNameAsString l =
