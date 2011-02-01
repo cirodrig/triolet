@@ -169,11 +169,6 @@ globalConTable =
       , unchanged 1 the_oper_DO
       , unchanged 1 the_fun_undefined
       , unchanged 0 the_count
-      , unchanged 1 the_additiveDict_complex
-      , unchanged 1 the_add_complex
-      , unchanged 1 the_sub_complex
-      , unchanged 1 the_negate_complex
-      , unchanged 1 the_zero_complex
       , (the_fun_map,
          Specialize
          (Don'tCare $ Don'tCare $ End $ pyonBuiltin the_fun_map_Stream)

@@ -1,0 +1,182 @@
+
+module pyon.internal.complex;
+
+#include "rts.h"
+#include "memory_py.h"
+#include "apply_py.h"
+#include "prim.h"
+#include "complex.h"
+
+import procedure exit (int) -> ();
+
+#include "new_pyasm_records.h"
+
+function repr_Complex (unit _, owned repr_element) -> owned {
+  elt_size = repr_element @! PassConv.size;
+  elt_align = repr_element @! PassConv.align;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef cpx = complex(elt_type);
+
+  repr = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
+  // FIXME: Initialize object header
+
+  repr @! PassConv.size = sizeof elt_type;
+  repr @! PassConv.align = alignof elt_type;
+
+  copy_elt = repr_element @! PassConv.copy;
+  letrec {
+    function copy (pointer src, pointer dst) -> () {
+      () = () call copy_elt (src @ cpx.real, dst @ cpx.real);
+      () = () call copy_elt (src @ cpx.imag, dst @ cpx.imag);
+      ();
+    }
+  };
+  repr @! PassConv.copy = copy;
+
+  finalize_elt = repr_element @! PassConv.finalize;
+  letrec {
+    function finalize (pointer x) -> () {
+      () = () call finalize_elt (x @ cpx.real);
+      () = () call finalize_elt (x @ cpx.imag);
+      ();
+    }
+  };
+  repr @! PassConv.finalize = finalize;
+  repr;
+};
+
+function AdditiveDict_Complex_add
+  (unit _, owned repr_elt, owned additive_elt,
+   pointer x, pointer y, pointer ret) -> () {
+  elt_size = repr_elt @! PassConv.size;
+  elt_align = repr_elt @! PassConv.align;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef cpx = complex(elt_type);
+
+  add = additive_elt @! AdditiveDict(elt_type).add;
+  () = () call add (x @ cpx.real, y @ cpx.real, ret @ cpx.real);
+  () = () call add (x @ cpx.imag, y @ cpx.imag, ret @ cpx.imag);
+  ();
+};
+
+function AdditiveDict_Complex_sub
+  (unit _, owned repr_elt, owned additive_elt,
+   pointer x, pointer y, pointer ret) -> () {
+  elt_size = repr_elt @! PassConv.size;
+  elt_align = repr_elt @! PassConv.align;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef cpx = complex(elt_type);
+
+  sub = additive_elt @! AdditiveDict(elt_type).subtract;
+  () = () call sub (x @ cpx.real, y @ cpx.real, ret @ cpx.real);
+  () = () call sub (x @ cpx.imag, y @ cpx.imag, ret @ cpx.imag);
+  ();
+};
+
+function AdditiveDict_Complex_negate
+  (unit _, owned repr_elt, owned additive_elt,
+   pointer x, pointer ret) -> () {
+  elt_size = repr_elt @! PassConv.size;
+  elt_align = repr_elt @! PassConv.align;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef cpx = complex(elt_type);
+
+  negate = additive_elt @! AdditiveDict(elt_type).negate;
+  () = () call negate (x @ cpx.real, ret @ cpx.real);
+  () = () call negate (x @ cpx.imag, ret @ cpx.imag);
+  ();
+};
+
+function AdditiveDict_Complex_zero
+  (unit _, owned repr_elt, owned additive_elt, pointer ret) -> () {
+  elt_size = repr_elt @! PassConv.size;
+  elt_align = repr_elt @! PassConv.align;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef cpx = complex(elt_type);
+
+  copy = repr_elt @! PassConv.copy;
+  zero = additive_elt @ AdditiveDict(elt_type).zero;
+  () = () call copy (zero, ret @ cpx.real);
+  () = () call copy (zero, ret @ cpx.imag);
+  ();
+};
+
+function MultiplicativeDict_Complex_mul
+  (unit _, owned repr_elt, owned multiplicative_elt,
+   pointer x, pointer y, pointer ret) -> () {
+  elt_size = repr_elt @! PassConv.size;
+  elt_align = repr_elt @! PassConv.align;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef cpx = complex(elt_type);
+
+  // Use two temporary variables to compute intermediate results
+  tmp1 = pointer primcall pyon_alloc (sizeof elt_type);
+  tmp2 = pointer primcall pyon_alloc (sizeof elt_type);
+
+  additive_elt = multiplicative_elt @! MultiplicativeDict(elt_type).additive;
+  add = additive_elt @! AdditiveDict(elt_type).add;
+  sub = additive_elt @! AdditiveDict(elt_type).subtract;
+  mul = multiplicative_elt @! MultiplicativeDict(elt_type).mul;
+  finalize_elt = repr_elt @! PassConv.finalize;
+
+  // Compute real part
+  () = () call mul (x @ cpx.real, y @ cpx.real, tmp1);
+  () = () call mul (x @ cpx.imag, y @ cpx.imag, tmp2);
+  () = () call sub (tmp1, tmp2, ret @ cpx.real);
+  () = () call finalize_elt(tmp1);
+  () = () call finalize_elt(tmp2);
+
+  // Compute imaginary part
+  () = () call mul (x @ cpx.real, y @ cpx.imag, tmp1);
+  () = () call mul (x @ cpx.imag, y @ cpx.real, tmp2);
+  () = () call add (tmp1, tmp2, ret @ cpx.imag);
+  () = () call finalize_elt(tmp1);
+  () = () call finalize_elt(tmp2);
+
+  // Clean up
+  () = () primcall pyon_dealloc(tmp1);
+  () primcall pyon_dealloc(tmp2);
+};
+
+function MultiplicativeDict_Complex_fromInt
+  (unit _, owned repr_elt, owned multiplicative_elt,
+   int intval, pointer ret) -> () {
+  elt_size = repr_elt @! PassConv.size;
+  elt_align = repr_elt @! PassConv.align;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef cpx = complex(elt_type);
+
+  // Create the number (fromint intval, 0)
+  fromint = multiplicative_elt @! MultiplicativeDict(elt_type).fromInt;
+  additive_elt = multiplicative_elt @! MultiplicativeDict(elt_type).additive;
+  zero = additive_elt @ AdditiveDict(elt_type).zero;
+
+  () = () call fromint (intval, ret @ cpx.real);
+  () = () call (repr_elt @! PassConv.copy) (zero, ret @ cpx.imag);
+  ();
+};
+
+function MultiplicativeDict_Complex_one
+  (unit _, owned repr_elt, owned multiplicative_elt, pointer ret) -> () {
+  elt_size = repr_elt @! PassConv.size;
+  elt_align = repr_elt @! PassConv.align;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef cpx = complex(elt_type);
+
+  // Create the number (1, 0)
+  one = multiplicative_elt @ MultiplicativeDict(elt_type).one;
+  additive_elt = multiplicative_elt @! MultiplicativeDict(elt_type).additive;
+  zero = multiplicative_elt @ AdditiveDict(elt_type).zero;
+  copy = repr_elt @! PassConv.copy;
+
+  () = () call copy (one, ret @ cpx.real);
+  () = () call copy (zero, ret @ cpx.imag);
+  ();
+};
+
+function FractionalDict_Complex_div
+  (unit _, owned repr_elt, owned multiplicative_elt,
+   pointer x, pointer y, pointer ret) -> () {
+  // Not implemented
+  () primcall exit(int -1);
+};

@@ -41,8 +41,3 @@ extern function pyon.internal.prim.magnitude2_float (float) -> float;
 
 extern function pyon.internal.prim.fromfloat_float (float) -> float;
 
-extern function pyon.internal.prim.load_complexFloat
-  (pointer) -> (complex(float));
-extern function pyon.internal.prim.store_complexFloat
-  (complex(float), pointer) -> ();
-

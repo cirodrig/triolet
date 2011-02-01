@@ -130,6 +130,7 @@ module_prim = ModuleName "pyon.internal.prim"
 module_memory_py = ModuleName "pyon.internal.memory_py"
 module_stream = ModuleName "pyon.internal.stream"
 module_structures = ModuleName "pyon.internal.structures"
+module_complex = ModuleName "pyon.internal.complex"
 module_list = ModuleName "pyon.internal.list"
 
 -- | Predefined closure functions and the core constructor they're derived
@@ -257,6 +258,14 @@ builtinFunctions =
   , (PyonName module_prim "negate_float",
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_float_negate) |])
     -- zero_float was replaced by a literal value
+  , (PyonName module_complex "AdditiveDict_Complex_add",
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_Complex_add) |])
+  , (PyonName module_complex "AdditiveDict_Complex_sub",
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_Complex_sub) |])
+  , (PyonName module_complex "AdditiveDict_Complex_negate",
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_Complex_negate) |])
+  , (PyonName module_complex "AdditiveDict_Complex_zero",
+     Right [| pyonBuiltin (SystemF.the_AdditiveDict_Complex_zero) |])
   , (PyonName module_prim "mul_int",
      Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_int_mul) |])
   , (PyonName module_prim "fromint_int",
@@ -266,6 +275,12 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_float_mul) |])
   , (PyonName module_prim "fromint_float",
      Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_float_fromInt) |])
+  , (PyonName module_complex "MultiplicativeDict_Complex_mul",
+     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_Complex_mul) |])
+  , (PyonName module_complex "MultiplicativeDict_Complex_fromInt",
+     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_Complex_fromInt) |])
+  , (PyonName module_complex "MultiplicativeDict_Complex_one",
+     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_Complex_one) |])
   , (PyonName module_prim "mod_int",
      Right [| pyonBuiltin SystemF.the_RemainderDict_int_mod |])
   , (PyonName module_prim "floordiv_int",
@@ -280,8 +295,8 @@ builtinFunctions =
      Right [| pyonBuiltin SystemF.the_VectorDict_float_scale |])
   , (PyonName module_prim "magnitude_float",
      Right [| pyonBuiltin SystemF.the_VectorDict_float_magnitude |])
-  , (PyonName module_prim "magnitude2_float",
-     Right [| pyonBuiltin SystemF.the_VectorDict_float_magnitude2 |])
+  , (PyonName module_prim "dot_float",
+     Right [| pyonBuiltin SystemF.the_VectorDict_float_dot |])
   , (PyonName module_prim "fromfloat_float",
      Right [| pyonBuiltin SystemF.the_FloatingDict_float_fromfloat |])
     -- one_float was replaced by a literal value

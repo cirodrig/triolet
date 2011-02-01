@@ -58,6 +58,7 @@ rtsCxxSourceFiles = []
 -- | Pyon-asm files used in RTS
 rtsPyAsmFiles = ["apply_new.pyasm",
                  "memory_py.pyasm", "prim.pyasm", "structures.pyasm",
+                 "complex.pyasm",
 		 "list.pyasm", "stream.pyasm"]
 
 -- | Data files that are not programmatically generated

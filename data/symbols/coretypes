@@ -144,7 +144,7 @@ data box FractionalDict : val (val pure -> val pure)
   fractionalDict : (val a : pure)
   	        -> box MultiplicativeDict a
 	        -> box (read a -> read a -> write a)
-	        -> box RemainderDict a,
+	        -> box FractionalDict a,
   (val a : pure) ()
   (box MultiplicativeDict a,
    box (read a -> read a -> write a)) : box FractionalDict a;
@@ -181,13 +181,13 @@ data box VectorDict : val (val pure -> val pure)
             -> box AdditiveDict a
             -> box (read a -> val float -> write a)
             -> box (read a -> val float)
-            -> box (read a -> val float)
+            -> box (read a -> read a -> val float)
             -> box VectorDict a,
   (val a : pure) ()
   (box AdditiveDict a,
    box (read a -> val float -> write a),
    box (read a -> val float),
-   box (read a -> val float)) : box VectorDict a;
+   box (read a -> read a -> val float)) : box VectorDict a;
 };
 
 data box TraversableDict : val (val (val pure -> val pure) -> val pure)
@@ -224,6 +224,7 @@ repr_float : box Repr float;
 repr_bool : box Repr bool;
 
 repr_list : (val a : pure) -> box Repr a -> box Repr (list a);
+repr_Complex : (val a : pure) -> box Repr a -> box Repr (Complex a);
 
 repr_PyonTuple2 :
     (val a : pure) -> (val b : pure) -> box Repr a -> box Repr b
@@ -281,12 +282,57 @@ AdditiveDict_float_sub : val float -> val float -> val float;
 AdditiveDict_float_negate : val float -> val float;
 AdditiveDict_float_zero : val float;
 
+AdditiveDict_Complex_add :
+    (val a : pure)
+ -> box Repr a
+ -> box AdditiveDict a
+ -> read Complex a
+ -> read Complex a
+ -> write Complex a;
+AdditiveDict_Complex_sub :
+    (val a : pure)
+ -> box Repr a
+ -> box AdditiveDict a
+ -> read Complex a
+ -> read Complex a
+ -> write Complex a;
+AdditiveDict_Complex_negate :
+    (val a : pure)
+ -> box Repr a
+ -> box AdditiveDict a
+ -> read Complex a
+ -> write Complex a;
+AdditiveDict_Complex_zero :
+    (val a : pure)
+ -> box Repr a
+ -> box AdditiveDict a
+ -> write Complex a;
+
 
 MultiplicativeDict_int_mul : val int -> val int -> val int;
 MultiplicativeDict_int_fromInt : val int -> val int;
 
 MultiplicativeDict_float_mul : val float -> val float -> val float;
 MultiplicativeDict_float_fromInt : val int -> val float;
+
+MultiplicativeDict_Complex_mul :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> read Complex a
+ -> read Complex a
+ -> write Complex a;
+MultiplicativeDict_Complex_fromInt :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> val int
+ -> write Complex a;
+MultiplicativeDict_Complex_one :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> write Complex a;
 
 
 RemainderDict_int_floordiv : val int -> val int -> val int;
@@ -297,6 +343,14 @@ RemainderDict_float_mod : val float -> val float -> val float;
 
 
 FractionalDict_float_div : val float -> val float -> val float;
+
+FractionalDict_Complex_div :
+    (val a : pure)
+ -> box Repr a
+ -> box FractionalDict a
+ -> read Complex a
+ -> read Complex a
+ -> write Complex a;
 
 
 FloatingDict_float_fromfloat : val float -> val float;
@@ -309,9 +363,105 @@ FloatingDict_float_cos : val float -> val float;
 FloatingDict_float_tan : val float -> val float;
 FloatingDict_float_pi : val float;
 
+FloatingDict_Complex_fromfloat :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> box FloatingDict a
+ -> val float
+ -> write Complex a;
+FloatingDict_Complex_power :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> box FloatingDict a
+ -> read Complex a
+ -> read Complex a
+ -> write Complex a;
+FloatingDict_Complex_exp :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> box FloatingDict a
+ -> read Complex a
+ -> write Complex a;
+FloatingDict_Complex_log :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> box FloatingDict a
+ -> read Complex a
+ -> write Complex a;
+FloatingDict_Complex_sqrt :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> read Complex a
+ -> write Complex a;
+FloatingDict_Complex_sin :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> box FloatingDict a
+ -> read Complex a
+ -> write Complex a;
+FloatingDict_Complex_cos :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> box FloatingDict a
+ -> read Complex a
+ -> write Complex a;
+FloatingDict_Complex_tan :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> box FloatingDict a
+ -> read Complex a
+ -> write Complex a;
+FloatingDict_Complex_pi :
+    (val a : pure)
+ -> box Repr a
+ -> box MultiplicativeDict a
+ -> box FractionalDict a
+ -> box FloatingDict a
+ -> write Complex a;
+
+
 VectorDict_float_scale : val float -> val float -> val float;
 VectorDict_float_magnitude : val float -> val float;
-VectorDict_float_magnitude2 : val float -> val float;
+VectorDict_float_dot : val float -> val float -> val float;
+
+VectorDict_Complex_scale :
+    (val a : pure)
+ -> box Repr a
+ -> box VectorDict a
+ -> read Complex a
+ -> val float
+ -> write Complex a;
+
+VectorDict_Complex_magnitude :
+    (val a : pure)
+ -> box Repr a
+ -> box VectorDict a
+ -> read Complex a
+ -> val float;
+
+VectorDict_Complex_dot :
+    (val a : pure)
+ -> box Repr a
+ -> box VectorDict a
+ -> read Complex a
+ -> read Complex a
+ -> write float;
 
 -------------------------------------------------------------------------------
 -- integer index arithmetic

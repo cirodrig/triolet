@@ -282,15 +282,16 @@ mkAdditiveClass = do
   ; b <- newTyVar Star Nothing
   ; let complex_instance =
           Instance { insQVars = [b]
-                   , insConstraint = [ConTy b `IsInst` cls]
+                   , insConstraint = [passable (ConTy b),
+                                      ConTy b `IsInst` cls]
                    , insClass = cls
                    , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
-                   , insCon = Just $ pyonBuiltin SystemF.the_additiveDict_complex
+                   , insCon = Nothing
                    , insMethods =
-                     [ InstanceMethod (pyonBuiltin SystemF.the_add_complex)
-                     , InstanceMethod (pyonBuiltin SystemF.the_sub_complex)
-                     , InstanceMethod (pyonBuiltin SystemF.the_negate_complex)
-                     , InstanceMethod (pyonBuiltin SystemF.the_zero_complex)]
+                     [ InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_add)
+                     , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_sub)
+                     , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_negate)
+                     , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_zero)]
                    } }
   return cls
 
@@ -304,7 +305,8 @@ mkMultiplicativeClass = do
                     , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Additive]
                     , clsMethods = [times, fromInt, one]
                     , clsName = "Multiplicative"
-                    , clsInstances = [int_instance, float_instance]
+                    , clsInstances = [int_instance, float_instance,
+                                      complex_instance]
                     , clsTypeCon = pyonBuiltin SystemF.the_MultiplicativeDict
                     , clsDictCon = pyonBuiltin SystemF.the_multiplicativeDict
                     }
@@ -332,7 +334,20 @@ mkMultiplicativeClass = do
           , InstanceMethod $
             pyonBuiltin $ SystemF.the_MultiplicativeDict_float_fromInt
           , InstanceMethod $
-            pyonBuiltin $ SystemF.the_MultiplicativeDict_float_one] }
+            pyonBuiltin $ SystemF.the_MultiplicativeDict_float_one]
+  ; b <- newTyVar Star Nothing
+  ; let complex_instance =
+          Instance { insQVars = [b]
+                   , insConstraint = [passable (ConTy b),
+                                      ConTy b `IsInst` cls]
+                   , insClass = cls
+                   , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
+                   , insCon = Nothing
+                   , insMethods =
+                     [ InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_mul)
+                     , InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_fromInt)
+                     , InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_one)]
+                   } }
   
   return cls
   
@@ -347,7 +362,7 @@ mkFloatingClass = do
                       , clsMethods = [fromfloat, power, expfn, logfn, sqrtfn,
                                       sinfn, cosfn, tanfn, pi]
                       , clsName = "Floating"
-                      , clsInstances = [float_instance]
+                      , clsInstances = [float_instance, complex_instance]
                       , clsTypeCon = pyonBuiltin SystemF.the_FloatingDict
                       , clsDictCon = pyonBuiltin SystemF.the_floatingDict
                       }
@@ -384,29 +399,61 @@ mkFloatingClass = do
               pyonBuiltin $ SystemF.the_FloatingDict_float_tan
             , InstanceMethod $
               pyonBuiltin $ SystemF.the_FloatingDict_float_pi]
+
+      b <- newTyVar Star Nothing
+      let complex_instance =
+             Instance { insQVars = [b]
+                      , insConstraint = [passable (ConTy b),
+                                         ConTy b `IsInst` tiBuiltin the_Multiplicative,
+                                         ConTy b `IsInst` tiBuiltin the_Fractional,
+                                         ConTy b `IsInst` cls]
+                      , insClass = cls
+                      , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
+                      , insCon = Nothing
+                      , insMethods =
+                        [ InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_fromfloat
+                        , InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_power
+                        , InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_exp
+                        , InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_log
+                        , InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_sqrt
+                        , InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_sin
+                        , InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_cos
+                        , InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_tan
+                        , InstanceMethod $
+                          pyonBuiltin SystemF.the_FloatingDict_Complex_pi]}
   
   return cls
   
 mkVectorClass = do
   rec a <- newTyVar Star Nothing
-      let normScheme = monomorphic $
-                       functionType [ConTy a] (ConTy $ tiBuiltin the_con_float)
+      let float_type = ConTy $ tiBuiltin the_con_float
+          normScheme = monomorphic $ functionType [ConTy a] float_type
           scaleScheme = monomorphic $
-                        functionType [ConTy a, ConTy $ tiBuiltin the_con_float] (ConTy a)
+                        functionType [ConTy a, float_type] (ConTy a)
+          dotScheme = monomorphic $
+                      functionType [ConTy a, ConTy a] float_type
 
       let cls =
             Class { clsParam = a
                   , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Additive]
-                  , clsMethods = [scale, magnitude, magnitude2]
+                  , clsMethods = [scale, magnitude, dot]
                   , clsName = "Vector"
-                  , clsInstances = [float_instance]
+                  , clsInstances = [float_instance, complex_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_VectorDict
                   , clsDictCon = pyonBuiltin SystemF.the_vectorDict
                   }
 
       scale <- mkClassMethod cls 0 "scale" scaleScheme
       magnitude <- mkClassMethod cls 1 "magnitude" normScheme
-      magnitude2 <- mkClassMethod cls 2 "magnitude2" normScheme
+      dot <- mkClassMethod cls 2 "dot" dotScheme
 
       let float_instance =
             monomorphicInstance cls
@@ -417,7 +464,23 @@ mkVectorClass = do
             , InstanceMethod $
               pyonBuiltin SystemF.the_VectorDict_float_magnitude
             , InstanceMethod $
-              pyonBuiltin SystemF.the_VectorDict_float_magnitude2]
+              pyonBuiltin SystemF.the_VectorDict_float_dot]
+
+      b <- newTyVar Star Nothing
+      let complex_instance =
+            Instance { insQVars = [b]
+                     , insConstraint = [passable (ConTy b),
+                                        ConTy b `IsInst` cls]
+                     , insClass = cls
+                     , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
+                     , insCon = Nothing
+                     , insMethods =
+                         [ InstanceMethod $
+                           pyonBuiltin SystemF.the_VectorDict_Complex_scale
+                         , InstanceMethod $
+                           pyonBuiltin SystemF.the_VectorDict_Complex_magnitude
+                         , InstanceMethod $
+                           pyonBuiltin SystemF.the_VectorDict_Complex_dot]}
 
   return cls
 
@@ -466,7 +529,7 @@ mkFractionalClass = do
                   , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Multiplicative]
                   , clsMethods = [divide]
                   , clsName = "Fractional"
-                  , clsInstances = [float_instance]
+                  , clsInstances = [float_instance, complex_instance]
                   , clsTypeCon = pyonBuiltin SystemF.the_FractionalDict
                   , clsDictCon = pyonBuiltin SystemF.the_fractionalDict
                   }
@@ -477,6 +540,18 @@ mkFractionalClass = do
             Nothing
             [ InstanceMethod $
               pyonBuiltin $ SystemF.the_FractionalDict_float_div]
+
+      b <- newTyVar Star Nothing
+      let complex_instance =
+            Instance { insQVars = [b]
+                     , insConstraint = [passable (ConTy b),
+                                        ConTy b `IsInst` cls]
+                     , insClass = cls
+                     , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
+                     , insCon = Nothing
+                     , insMethods =
+                         [ InstanceMethod $
+                           pyonBuiltin SystemF.the_FractionalDict_Complex_div]}
 
   return cls
 
@@ -653,10 +728,9 @@ mkIterBindType =
    (ConTy (tiBuiltin the_con_iter) @@ ConTy b))
 
 mkMakeComplexType =
-  return $ monomorphic $
-  functionType [ ConTy (tiBuiltin the_con_float)
-               , ConTy (tiBuiltin the_con_float)]
-  (ConTy (tiBuiltin the_con_Complex) @@ ConTy (tiBuiltin the_con_float))
+  forallType [Star] $ \[a] ->
+  ([], functionType [ConTy a, ConTy a]
+       (ConTy (tiBuiltin the_con_Complex) @@ ConTy a))
 
 mkBinaryOpType =
   forallType [Star] $ \[a] ->
@@ -775,7 +849,7 @@ initializeTIBuiltins = do
             , ([| the_Floating |], ["__fromfloat__", "__power__",
                                     "exp", "log", "sqrt",
                                     "sin", "cos", "tan", "pi"])
-            , ([| the_Vector |], ["scale", "magnitude", "magnitude2"])
+            , ([| the_Vector |], ["scale", "magnitude", "dot"])
             ]
 
           -- Construct initializers

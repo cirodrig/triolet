@@ -150,9 +150,12 @@ createDictEnv = do
   list_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_list) [VarT arg],
      createDict_list arg)
+  complex_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_Complex) [VarT arg],
+     createDict_complex arg)
   return $ DictEnv.DictEnv [repr_dict, boxed_dict,
                             float_dict, int_dict,
-                            list_dict,
+                            list_dict, complex_dict,
                             tuple2_dict, additive_dict, multiplicative_dict]
 
 getParamType v subst =
@@ -200,6 +203,16 @@ createDict_list param_var subst use_dict =
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_list)
     mk_list_dict elt_dict =
+      ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
+
+createDict_complex param_var subst use_dict =
+  withReprDictionary param $ \elt_dict ->
+  let cpx_dict = mk_cpx_dict elt_dict
+  in use_dict cpx_dict
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Complex)
+    mk_cpx_dict elt_dict =
       ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
 
 -- | Get the representation dictionary for a boxed data type.

@@ -55,7 +55,7 @@ pyonSourceGlobals =
   , "__div__"
   , "scale"
   , "magnitude"
-  , "magnitude2"
+  , "dot"
   , "__fromfloat__"
   , "__power__"
   , "exp"
