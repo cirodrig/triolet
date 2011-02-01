@@ -1,6 +1,6 @@
 
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
-module SystemF.Rename where
+module SystemF.Rename(freshen) where
 
 import Control.Monad
 import Data.Monoid
