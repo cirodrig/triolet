@@ -72,24 +72,8 @@ function ge_float (float x, float y) -> bool {
   x >= y;
 };
 
-function add_int (int x, int y) -> int {
-  x + y;
-};
-
-function sub_int (int x, int y) -> int {
-  x - y;
-};
-
 function negate_int (int x) -> int {
   int 0 - x;
-};
-
-function mul_int(int x, int y) -> int {
-  x * y;
-};
-
-function fromint_int(int x) -> int {
-  x;
 };
 
 function floordiv_int(int x, int y) -> int {
@@ -100,20 +84,8 @@ function mod_int(int x, int y) -> int {
   x % y;
 };
 
-function add_float (float x, float y) -> float {
-  x + y;
-};
-
-function sub_float (float x, float y) -> float {
-  x - y;
-};
-
 function negate_float (float x) -> float {
   float 0.0 - x;
-};
-
-function mul_float(float x, float y) -> float {
-  x * y;
 };
 
 function fromint_float(int x) -> float {
@@ -130,20 +102,4 @@ function mod_float(float x, float y) -> float {
 
 function div_float(float x, float y) -> float {
   x / y;
-};
-
-function scale_float(float vec, float factor) -> float {
-  vec * factor;
-};
-
-function magnitude_float(float vec) -> float {
-  vec;
-};
-
-function magnitude2_float(float vec) -> float {
-  vec * vec;
-};
-
-function fromfloat_float (float x) -> float {
-  x;
 };

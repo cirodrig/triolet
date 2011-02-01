@@ -104,11 +104,10 @@ atomHasSideEffect atom =
      
 -- | Return True if an execution of this primitive operation can have an
 --   observable side effect in normal program execution, other than 
---   producing a result value.
+--   producing a result value or an arithmetic exception.
 --
 --   Loads have no side effect.  They have no observable effect and don't 
---   fail in normal execution.  However, some arithmetic operations can cause
---   side effects via exceptions.
+--   fail in normal execution.
 primHasSideEffect :: Prim -> Bool
 primHasSideEffect prim =
   case prim
@@ -141,6 +140,8 @@ primHasSideEffect prim =
      PrimModF {}          -> False
      PrimDivF {}          -> False
      PrimRoundF {}        -> False
+     PrimPowF {}          -> False
+     PrimUnaryF {}        -> False
 
 dceAtom :: DCE Atom
 dceAtom atom = nudge 1 $

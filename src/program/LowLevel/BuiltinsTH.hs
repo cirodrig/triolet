@@ -244,17 +244,11 @@ builtinFunctions =
      Right [| pyonBuiltin SystemF.the_OrdDict_float_gt |])
   , (PyonName module_prim "ge_float",
      Right [| pyonBuiltin SystemF.the_OrdDict_float_ge |])
-  , (PyonName module_prim "add_int",
-     Right [| pyonBuiltin (SystemF.the_AdditiveDict_int_add) |])
-  , (PyonName module_prim "sub_int", 
-     Right [| pyonBuiltin (SystemF.the_AdditiveDict_int_sub) |])
+    -- the_AdditiveDict_int_{add,sub} were replaced by intrinsics
   , (PyonName module_prim "negate_int",
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_int_negate) |])
     -- zero_int was replaced by a literal value
-  , (PyonName module_prim "add_float",
-     Right [| pyonBuiltin (SystemF.the_AdditiveDict_float_add) |])
-  , (PyonName module_prim "sub_float",
-     Right [| pyonBuiltin (SystemF.the_AdditiveDict_float_sub) |])
+    -- the_AdditiveDict_float_{add,sub} were replaced by intrinsics
   , (PyonName module_prim "negate_float",
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_float_negate) |])
     -- zero_float was replaced by a literal value
@@ -266,13 +260,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_Complex_negate) |])
   , (PyonName module_complex "AdditiveDict_Complex_zero",
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_Complex_zero) |])
-  , (PyonName module_prim "mul_int",
-     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_int_mul) |])
-  , (PyonName module_prim "fromint_int",
-     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_int_fromInt) |])
-    -- one_int was replaced by a literal value
-  , (PyonName module_prim "mul_float",
-     Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_float_mul) |])
+    -- the_MultiplicativeDict_int_* are intrinsics
+    -- the_MultiplicativeDict_float_mul is intrinsic
   , (PyonName module_prim "fromint_float",
      Right [| pyonBuiltin (SystemF.the_MultiplicativeDict_float_fromInt) |])
   , (PyonName module_complex "MultiplicativeDict_Complex_mul",
@@ -291,14 +280,6 @@ builtinFunctions =
      Right [| pyonBuiltin SystemF.the_RemainderDict_float_floordiv |])
   , (PyonName module_prim "div_float",
      Right [| pyonBuiltin SystemF.the_FractionalDict_float_div |])
-  , (PyonName module_prim "scale_float",
-     Right [| pyonBuiltin SystemF.the_VectorDict_float_scale |])
-  , (PyonName module_prim "magnitude_float",
-     Right [| pyonBuiltin SystemF.the_VectorDict_float_magnitude |])
-  , (PyonName module_prim "dot_float",
-     Right [| pyonBuiltin SystemF.the_VectorDict_float_dot |])
-  , (PyonName module_prim "fromfloat_float",
-     Right [| pyonBuiltin SystemF.the_FloatingDict_float_fromfloat |])
     -- one_float was replaced by a literal value
 {-  , (PyonName builtinModuleName "load_int",
      Right [| pyonBuiltin (SystemF.the_fun_load_int) |])

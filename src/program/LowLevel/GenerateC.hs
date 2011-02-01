@@ -482,14 +482,54 @@ genPrimCall prim args =
      PrimMulF _ -> binary CMulOp args
      PrimModF _ -> float_modulus args
      PrimDivF _ -> binary CDivOp args
-     PrimRoundF mode _ sgn sz ->
-       let round_op = case mode
-                      of Floor -> internalIdent "floor"
-                         Ceiling -> internalIdent "ceil"
-                         Truncate -> internalIdent "trunc"
-                         Nearest -> internalIdent "round"
+     PrimRoundF mode fp_sz sgn sz ->
+       let round_op_name =
+             case mode
+             of Floor -> case fp_sz 
+                         of S32 -> "floorf"
+                            S64 -> "floor"
+                Ceiling -> case fp_sz 
+                           of S32 -> "ceilf"
+                              S64 -> "ceil"
+                Truncate -> case fp_sz 
+                            of S32 -> "truncf"
+                               S64 -> "trunc"
+                Nearest -> case fp_sz 
+                           of S32 -> "roundf"
+                              S64 -> "round"
+           round_op = internalIdent round_op_name
            [arg] = args
        in cCast (IntType sgn sz) $ cCall (cVar round_op) [arg]
+     PrimPowF sz ->
+       let op = case sz
+                of S32 -> internalIdent "powf"
+                   S64 -> internalIdent "pow"
+           [x, y] = args
+       in cCall (cVar op) [x, y]
+     PrimUnaryF intrinsic fp_sz ->
+       let op_name =
+             case intrinsic
+             of ExpI -> case fp_sz
+                        of S32 -> "expf"
+                           S64 -> "exp"
+                LogI -> case fp_sz
+                        of S32 -> "logf"
+                           S64 -> "log"
+                SqrtI -> case fp_sz
+                         of S32 -> "sqrtf"
+                            S64 -> "sqrt"
+                SinI -> case fp_sz
+                        of S32 -> "sinf"
+                           S64 -> "sin"
+                CosI -> case fp_sz
+                        of S32 -> "cosf"
+                           S64 -> "cos"
+                TanI -> case fp_sz
+                        of S32 -> "tanf"
+                           S64 -> "tan"
+           op = internalIdent op_name
+           [arg] = args
+       in cCall (cVar op) [arg]
      _ -> internalError $ 
           "Cannot generate C code for primitive operation: " ++
           show (pprPrim prim)

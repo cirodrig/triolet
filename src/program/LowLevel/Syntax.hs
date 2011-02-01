@@ -61,6 +61,11 @@ data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE
 data RoundMode = Floor | Ceiling | Truncate | Nearest
                deriving (Eq, Ord, Bounded, Enum)
 
+-- | An intrinsic floating-point unary operation
+data UnaryFPIntrinsic =
+    ExpI | LogI | SqrtI | SinI | CosI | TanI
+    deriving (Eq, Ord, Bounded, Enum)
+
 data Prim =
     -- | @PrimCastZ from-sign to-sign size@
     -- 
@@ -132,8 +137,11 @@ data Prim =
   | PrimDivF !Size              -- ^ Floating-point division
     -- | @PrimRoundF mode from-size to-sign to-size
     --
-    --   Floating-point to integer conversion.
+--   Floating-point to integer conversion.
   | PrimRoundF !RoundMode !Size !Signedness !Size
+    
+  | PrimPowF !Size              -- ^ Floating-point exponentiation
+  | PrimUnaryF !UnaryFPIntrinsic !Size -- ^ Intrinsic FP function
 
 primReturnType :: Prim -> [ValueType]
 primReturnType prim =
@@ -164,7 +172,9 @@ primReturnType prim =
      PrimMulF sz              -> float sz
      PrimModF sz              -> float sz
      PrimDivF sz              -> float sz
+     PrimPowF sz              -> float sz
      PrimRoundF _ _ sgn sz    -> int sgn sz
+     PrimUnaryF _ sz          -> float sz
   where
     int sgn sz = [PrimType $ IntType sgn sz]
     float sz = [PrimType $ FloatType sz]

@@ -37,6 +37,10 @@ instance Binary RoundMode where
   put = putEnum
   get = getEnum "RoundMode.get"
 
+instance Binary UnaryFPIntrinsic where
+  put = putEnum
+  get = getEnum "UnaryFPIntrinsic.get"
+
 instance Binary Prim where
   put p =
     case p
@@ -67,6 +71,8 @@ instance Binary Prim where
        PrimModF x        -> putWord8 024 >> put x
        PrimDivF x        -> putWord8 025 >> put x
        PrimRoundF r x y z -> putWord8 026 >> put r >> put x >> put y >> put z
+       PrimPowF x        -> putWord8 027 >> put x
+       PrimUnaryF x y    -> putWord8 028 >> put x >> put y
 
   get = getWord8 >>= pick
     where
@@ -97,6 +103,8 @@ instance Binary Prim where
       pick 024 = PrimModF <$> get
       pick 025 = PrimDivF <$> get
       pick 026 = PrimRoundF <$> get <*> get <*> get <*> get
+      pick 027 = PrimPowF <$> get
+      pick 028 = PrimUnaryF <$> get <*> get
       pick _ = readError "Prim.get"
 
 instance Binary Lit where

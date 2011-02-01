@@ -1,4 +1,6 @@
 
+def magnitude2(x): return dot(x, x)
+
 def minIndex(xs):
     def pickMin(x, y):
     	(_, xv) = x

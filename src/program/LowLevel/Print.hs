@@ -151,6 +151,7 @@ pprInfixPrim prim =
      PrimMulF _ -> Just $ text "*"
      PrimModF _ -> Just $ text "%"
      PrimDivF _ -> Just $ text "/"
+     PrimPowF _ -> Just $ text "**"
      _ -> Nothing
   where
     comparison c =
@@ -205,6 +206,8 @@ pprPrim prim =
            PrimRoundF Ceiling _ _ _ -> "ceil"
            PrimRoundF Nearest _ _ _ -> "round"
            PrimRoundF Truncate _ _ _ -> "trunc"
+           PrimPowF _ -> "fpow"
+           PrimUnaryF op _ -> unary_float op
       ty =
         case prim
         of PrimLoad _ t -> pprValueType t
@@ -212,6 +215,14 @@ pprPrim prim =
            _ -> empty
   in text name <+> ty
   where
+    unary_float op =
+      case op
+      of ExpI -> "fexp"
+         LogI -> "flog"
+         SqrtI -> "fsqrt"
+         SinI -> "fsin"
+         CosI -> "fcos"
+         TanI -> "ftan"
     comparison c =
       case c
       of CmpEQ -> "cmp_eq"

@@ -1,4 +1,8 @@
 {-| Information about low-level builtin symbols.
+
+This file contains a translation for every built-in variable that may be
+lowered from System F, except for intrinsics which are in
+"LowLevel.Intrinsics".
 -}
 
 {-# LANGUAGE TemplateHaskell #-}
@@ -23,14 +27,8 @@ module LowLevel.Builtins
         the_prim_apply_f32,
         the_prim_apply_i64_f,
         the_prim_apply_i64,
-        the_fun_add_int,
-        the_fun_sub_int,
         the_fun_negate_int,
-        the_fun_add_float,
-        the_fun_sub_float,
         the_fun_negate_float,
-        the_fun_mul_int,
-        the_fun_mul_float,
         the_fun_dummy_finalizer,
         the_fun_copy1F,
         the_fun_copy2F,
@@ -166,4 +164,3 @@ the_lowLevelBuiltins = defineInitGlobalVar ()
 
 lowLevelBuiltins :: LowLevelBuiltins
 lowLevelBuiltins = readInitGlobalVar the_lowLevelBuiltins
-

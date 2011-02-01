@@ -20,6 +20,7 @@ import Common.Supply
 import Builtins.Builtins
 import LowLevel.Build
 import qualified LowLevel.Builtins as LL
+import qualified LowLevel.Intrinsics as LL
 import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
 import qualified LowLevel.Records as LL
@@ -594,15 +595,18 @@ lowerExp (ExpTM (RTypeAnn return_type expression)) =
      LetrecE _ defs body -> lowerLetrec return_type defs body
      CaseE _ scr alts -> lowerCase return_type scr alts
 
-lowerVar _ v = do
-  tenv <- lift getTypeEnv
-  case lookupDataCon v tenv of
-    Just data_con ->
-      -- If the constructor takes type arguments, it should be processed by
-      -- lowerApp.
-      compileConstructor v data_con []
-    Nothing -> lift $ do ll_v <- lookupVar v
-                         return $ valCode (LL.VarV ll_v)
+lowerVar _ v =
+  case LL.lowerIntrinsicOp v
+  of Just lower_var -> lift $ fmap valCode lower_var
+     Nothing -> do
+       tenv <- lift getTypeEnv
+       case lookupDataCon v tenv of
+         Just data_con ->
+           -- If the constructor takes type arguments, it should be
+           -- processed by lowerApp.
+           compileConstructor v data_con []
+         Nothing -> lift $ do ll_v <- lookupVar v
+                              return $ valCode (LL.VarV ll_v)
 
 lowerLit _ lit =
   case lit
