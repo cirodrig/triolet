@@ -20,18 +20,17 @@ import Type.Type
 -- | Compute the type produced by applying a value of type @op_type@ to
 --   a value of type @arg_type@.
 typeOfApp :: IdentSupply Var
-          -> SourcePos
           -> TypeEnv
           -> Type               -- ^ Operator type
           -> ReturnType         -- ^ Argument type and representation
           -> Maybe Type         -- ^ Argument value; only used if operator is
                                 --   dependent
           -> IO (Maybe ReturnType)
-typeOfApp id_supply pos env op_type (arg_repr ::: arg_type) m_arg =
+typeOfApp id_supply env op_type (arg_repr ::: arg_type) m_arg =
   case op_type
   of FunT (fun_arg ::: dom) result 
        | repr_match fun_arg arg_repr -> do
-           type_ok <- compareTypes id_supply pos env dom arg_type
+           type_ok <- compareTypes id_supply env dom arg_type
            if type_ok
              then apply fun_arg m_arg result
              else return Nothing

@@ -73,7 +73,7 @@ tcLookupDataCon v = do
 
 checkType :: SourcePos -> Type -> Type -> TCM Bool
 checkType pos expected given = ReaderT $ \env -> do
-  compareTypes (tcVarIDSupply env) pos (tcTypeEnv env) expected given
+  compareTypes (tcVarIDSupply env) (tcTypeEnv env) expected given
 
 checkReturnType :: SourcePos -> ReturnType -> ReturnType -> TCM Bool
 checkReturnType pos (erepr ::: etype) (grepr ::: gtype)
@@ -82,7 +82,7 @@ checkReturnType pos (erepr ::: etype) (grepr ::: gtype)
 
 applyType :: Type -> ReturnType -> Maybe Type -> TCM (Maybe ReturnType)
 applyType op_type arg_type arg = ReaderT $ \env -> do
-  applied <- typeOfApp (tcVarIDSupply env) noSourcePos (tcTypeEnv env)
+  applied <- typeOfApp (tcVarIDSupply env) (tcTypeEnv env)
              op_type arg_type arg
   return applied
 

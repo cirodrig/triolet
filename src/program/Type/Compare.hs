@@ -46,8 +46,7 @@ typeMentionsAny t target = search t
 
 data CmpEnv =
   CmpEnv
-  { reason :: SourcePos         -- ^ Reason for comparing types
-  , varIDSupply :: !(IdentSupply Var) -- ^ Variable ID supply
+  { varIDSupply :: !(IdentSupply Var) -- ^ Variable ID supply
   , typeEnv :: TypeEnv          -- ^ The current type environment
   }
 
@@ -56,19 +55,18 @@ newtype CmpM a = CmpM (ReaderT CmpEnv IO a) deriving(Monad)
 instance Supplies CmpM (Ident Var) where
   fresh = CmpM $ ReaderT $ \env -> supplyValue $ varIDSupply env
 
-runCmpM (CmpM m) id_supply pos env =
-  runReaderT m (CmpEnv pos id_supply env)
+runCmpM (CmpM m) id_supply env =
+  runReaderT m (CmpEnv id_supply env)
 
 -- | Compare two types.  Return True if the given type is equal to or a subtype
 --   of the expected type, False otherwise.
 compareTypes :: IdentSupply Var
-             -> SourcePos       -- ^ Reason for comparing types
              -> TypeEnv         -- ^ Initial type environment
              -> Type            -- ^ Expected type
              -> Type            -- ^ Given Type
              -> IO Bool
-compareTypes id_supply pos env expected given =
-  runCmpM (cmpType expected given) id_supply pos env
+compareTypes id_supply env expected given =
+  runCmpM (cmpType expected given) id_supply env
 
 cmpType :: Type -> Type -> CmpM Bool
 cmpType expected given = cmp =<< unifyBoundVariables expected given
