@@ -138,15 +138,29 @@ compilePyonToPyonAsm path text = do
   putStrLn "System F"
   print $ SystemF.pprModule sf_mod
   
-  -- Convert to core
-  ll_mod <- do
-    tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
-    xmod <- SystemF.generateMemoryIR tc_mod -- Eventually replaces the Core path
-    putStrLn "Memory"
-    print $ SystemF.PrintMemoryIR.pprModule xmod
-    tc_xmod <- SystemF.TypecheckMem.typeCheckModule xmod
-    --SystemF.inferSideEffects tc_mod
-    SystemF.lowerModule tc_xmod
+  -- Convert to explicit memory representation
+  tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
+  mem_mod <- SystemF.generateMemoryIR tc_mod
+    
+  putStrLn "Memory"
+  print $ SystemF.PrintMemoryIR.pprModule mem_mod
+  
+  mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  
+  putStrLn "Rewritten-Memory"
+  print $ SystemF.PrintMemoryIR.pprModule mem_mod
+  
+  -- Optimizations on memory representation
+  mem_mod <- SystemF.floatModule mem_mod
+
+  putStrLn "Floated"
+  print $ SystemF.PrintMemoryIR.pprModule mem_mod
+
+  -- Lower
+  tc_mem_mod <- SystemF.TypecheckMem.typeCheckModule mem_mod
+  --SystemF.inferSideEffects tc_mod
+  ll_mod <- SystemF.lowerModule tc_mem_mod
+
 {-
   putStrLn ""
   putStrLn "Core"

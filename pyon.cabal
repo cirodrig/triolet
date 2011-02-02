@@ -87,6 +87,8 @@ Executable pyon
     SystemF.DeadCode
     SystemF.DictEnv
     SystemF.ElimPatternMatching
+    SystemF.Floating
+    SystemF.LocalExprRewrite
     SystemF.Lowering.Datatypes
     SystemF.Lowering.Marshaling
     SystemF.Lowering.Lowering
