@@ -82,9 +82,11 @@ instantiateDataConType con_ty arg_vals ex_vars
           (subst2, ex_params) = instantiate_exvars subst1 $
                                 zip (dataConPatternExTypes con_ty) ex_vars
 
-          -- Apply the substitution to field and range types
+          -- Apply the substitution to field and range types.
           fields = map (substituteBinding subst2) $ dataConPatternArgs con_ty
-          range = substituteBinding subst2 $ dataConPatternRange con_ty
+          -- Use subst1 because existential variables cannot appear
+          -- in the range.
+          range = substituteBinding subst1 $ dataConPatternRange con_ty
       in (ex_params, fields, range)
   where
     -- Instantiate the type by substituing arguments for the constructor's

@@ -115,7 +115,7 @@ isSimpleExp expression =
   where
     -- Dictionary constructor expressions are inlined to enable later
     -- optimizations
-    is_dictionary_operator (VarE {expVar = c}) = isDictionaryCon c
+    is_dictionary_operator (VarE {expVar = c}) = isDictionaryTypeCon c
     is_dictionary_operator (LetE {expBody = b}) =
       is_dictionary_operator $ fromExpSF b
     is_dictionary_operator _ = False

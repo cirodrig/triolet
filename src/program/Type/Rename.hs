@@ -2,14 +2,17 @@
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 module Type.Rename where
 
+import Control.Monad
 import Data.Maybe
 import Data.Monoid
+import Data.Traversable(traverse)
 
 import Common.Identifier
 import Common.Supply
 import Type.Type
 
 import qualified Data.IntMap as IntMap
+import qualified Data.Set as Set
 
 newtype Renaming = R {unR :: IntMap.IntMap Var}
 
@@ -23,6 +26,9 @@ renaming xs = R $ IntMap.fromList [(fromIdent $ varID v1, v2) | (v1, v2) <- xs]
 singletonRenaming :: Var -> Var -> Renaming
 singletonRenaming v1 v2 = renaming [(v1, v2)]
 
+insertRenaming :: Var -> Var -> Renaming -> Renaming
+insertRenaming v1 v2 (R rn) = R $ IntMap.insert (fromIdent $ varID v1) v2 rn
+
 renameVar :: Var -> Renaming -> Maybe Var
 renameVar v (R m) = IntMap.lookup (fromIdent $ varID v) m
 
@@ -35,10 +41,25 @@ class Renameable a where
   
   -- | Rename variables bound in the outermost term to new, fresh names
   freshen :: (Monad m, Supplies m VarID) => a -> m a
+  
+  -- | Find the variables that are used in, but not defined in, the expression
+  freeVariables :: a -> Set.Set Var
+
+instance Renameable a => Renameable (Maybe a) where
+  rename rn x = fmap (rename rn) x
+  freshen Nothing  = return Nothing
+  freshen (Just x) = liftM Just $ freshen x
+  freeVariables x = maybe Set.empty freeVariables x
+
+instance Renameable a => Renameable [a] where
+  rename rn xs = map (rename rn) xs
+  freshen xs = mapM freshen xs
+  freeVariables xs = Set.unions $ map freeVariables xs
 
 instance Renameable Var where
   rename rn v = fromMaybe v $ renameVar v rn
   freshen v = return v
+  freeVariables v = Set.singleton v
 
 instance Renameable Type where
   rename rn ty =
@@ -61,12 +82,25 @@ instance Renameable Type where
        -- Other terms don't bind variables
        _ -> return ty
 
+  freeVariables ty =
+    case ty
+    of VarT v -> Set.singleton v
+       AppT op arg -> Set.union (freeVariables op) (freeVariables arg)
+       FunT (arg ::: dom) (ret ::: rng) ->
+         let fv_dom = freeVariables dom 
+             fv_rng = freeVariables rng
+             fv_local = case arg
+                        of ValPT (Just v) -> Set.delete v fv_rng
+                           _ -> fv_rng
+         in Set.union fv_dom fv_rng
+
 -- We do not have an instance for ParamRepr ::: Type
 -- because it binds variables that are visible outside itself 
 
 instance Renameable (ReturnRepr ::: Type) where
   rename rn (repr ::: ty) = repr ::: rename rn ty
   freshen ty = return ty
+  freeVariables (_ ::: ty) = freeVariables ty
 
 -- | Freshen variables bound in the types such that the same variable is 
 --   bound by the outermost term in both types.  The outermost term is always
@@ -133,6 +167,12 @@ substituteBinding rn (x ::: t) = x ::: substitute rn t
 
 class Substitutable a where
   substitute :: Substitution -> a -> a
+
+instance Substitutable a => Substitutable (Maybe a) where
+  substitute s x = fmap (substitute s) x
+
+instance Substitutable a => Substitutable [a] where
+  substitute s xs = map (substitute s) xs
 
 instance Substitutable Type where
   substitute sb ty =

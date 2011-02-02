@@ -26,7 +26,9 @@ module SystemF.Syntax
      {-
      mapSFExp, mapAlt, mapPat,
      traverseSFExp, traverseAlt, traversePat,-}
-     isDictionaryCon
+     isDictionaryTypeCon,
+     isDictionaryDataCon,
+     isSingletonCon
     )
 where
 
@@ -232,16 +234,38 @@ unpackPolymorphicCall (ExpSF (AppE {expOper = op, expTyArgs = ts, expArgs = xs})
 unpackPolymorphicCall _ = Nothing
 
 -- | Return True iff this is a dictionary type constructor.
-isDictionaryCon :: Var -> Bool
-isDictionaryCon v = v `elem` [ pyonBuiltin the_Repr
-                             , pyonBuiltin the_TraversableDict
-                             , pyonBuiltin the_AdditiveDict
-                             , pyonBuiltin the_MultiplicativeDict
-                             ]
+isDictionaryTypeCon :: Var -> Bool
+isDictionaryTypeCon v =
+  v `elem` [ pyonBuiltin the_Repr
+           , pyonBuiltin the_TraversableDict
+           , pyonBuiltin the_EqDict
+           , pyonBuiltin the_OrdDict
+           , pyonBuiltin the_AdditiveDict
+           , pyonBuiltin the_MultiplicativeDict
+           , pyonBuiltin the_FractionalDict
+           , pyonBuiltin the_RemainderDict
+           , pyonBuiltin the_FloatingDict
+           , pyonBuiltin the_VectorDict
+           ]
+
+-- | Return True iff this is a dictionary data constructor.
+isDictionaryDataCon :: Var -> Bool
+isDictionaryDataCon v =
+  v `elem` [ -- There's no data constructor for "Repr" in System F
+             pyonBuiltin the_traversableDict
+           , pyonBuiltin the_eqDict
+           , pyonBuiltin the_ordDict
+           , pyonBuiltin the_additiveDict
+           , pyonBuiltin the_multiplicativeDict
+           , pyonBuiltin the_fractionalDict
+           , pyonBuiltin the_remainderDict
+           , pyonBuiltin the_floatingDict
+           , pyonBuiltin the_vectorDict
+           ]
 
 -- | Return True if this is a singleton type constructor.
 --   Return False if not a singleton type constructor, or if unknown.
 --
 --   Singleton types are data types that have exactly one value.
 isSingletonCon :: Var -> Bool
-isSingletonCon v = isDictionaryCon v -- Currently only dictionaries
+isSingletonCon v = isDictionaryTypeCon v -- Currently only dictionaries
