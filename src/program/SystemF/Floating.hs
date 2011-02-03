@@ -497,7 +497,7 @@ floatInExport exp = do
 floatModule :: Module Mem -> IO (Module Mem)
 floatModule (Module mod_name defss exports) =
   withTheNewVarIdentSupply $ \id_supply -> do
-    tenv <- readInitGlobalVarIO the_newCoreTypes
+    tenv <- readInitGlobalVarIO the_memTypes
     let flt_env = FloatCtx {fcVarSupply = id_supply,
                             fcTypeEnv = tenv,
                             fcReadVars = IntSet.empty}
