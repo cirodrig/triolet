@@ -7,6 +7,7 @@ module Type.Environment
         lookupType,
         lookupDataType,
         lookupDataCon,
+        getAllDataConstructors,
         emptyTypeEnv,
         wiredInTypeEnv,
         insertType,
@@ -77,7 +78,8 @@ data DataConType =
     -- May mention the pattern parameters.
   , dataConPatternRange :: ReturnType
 
-  , dataConTyCon :: Var
+  , dataConCon :: Var           -- ^ This data constructor
+  , dataConTyCon :: Var         -- ^ The type inhabited by constructed values
   }
 
 -- | A type environment maps variables to types
@@ -99,7 +101,7 @@ insertType v t (TypeEnv env) =
   TypeEnv (IntMap.insert (fromIdent $ varID v) (VarTypeAssignment t) env)
 
 data DataTypeDescr =
-  DataTypeDescr Var ReturnType Repr [(Var, ReturnType, DataConType)]
+  DataTypeDescr Var ReturnType Repr [(ReturnType, DataConType)]
 
 insertDataType :: DataTypeDescr -> TypeEnv -> TypeEnv
 insertDataType (DataTypeDescr ty_con kind repr ctors) (TypeEnv env) =
@@ -109,9 +111,9 @@ insertDataType (DataTypeDescr ty_con kind repr ctors) (TypeEnv env) =
     ty_con_assignment =
       (ty_con, TyConTypeAssignment kind (DataType repr data_cons))
     data_con_assignments =
-      [(data_con, DataConTypeAssignment ty dtor)
-      | (data_con, ty, dtor) <- ctors]
-    data_cons = [v | (v, _, _) <- ctors]
+      [(dataConCon dtor, DataConTypeAssignment ty dtor)
+      | (ty, dtor) <- ctors]
+    data_cons = [dataConCon dtor | (_, dtor) <- ctors]
 
 lookupDataCon :: Var -> TypeEnv -> Maybe DataConType
 lookupDataCon v (TypeEnv env) =
@@ -129,6 +131,13 @@ lookupDataType v (TypeEnv env) =
 lookupType :: Var -> TypeEnv -> Maybe ReturnType
 lookupType v (TypeEnv env) =
   fmap varType $ IntMap.lookup (fromIdent $ varID v) env
+
+-- | Get all data constructors in the type environment
+getAllDataConstructors :: TypeEnv -> IntMap.IntMap DataConType
+getAllDataConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env 
+  where
+    get_data_con (DataConTypeAssignment _ dcon) = Just dcon 
+    get_data_con _ = Nothing
 
 -------------------------------------------------------------------------------
 
@@ -160,11 +169,12 @@ convertToPureType ty =
      AppT op arg -> AppT (convertToPureType op) (convertToPureType arg)
      FunT arg ret -> FunT (convertToPureParamType arg) (convertToPureReturnType ret)
 
-convertToPureDataConType (DataConType params eparams args range ty_con) =
+convertToPureDataConType (DataConType params eparams args range con ty_con) =
   DataConType (map convertToPureParamType params)
               (map convertToPureParamType eparams)
               (map convertToPureReturnType args)
               (convertToPureReturnType range)
+              con
               ty_con
 
 -------------------------------------------------------------------------------
@@ -210,9 +220,10 @@ convertToMemType ty =
      AppT op arg -> AppT (convertToMemType op) (convertToMemType arg)
      FunT arg ret -> FunT (convertToMemParamType arg) (convertToMemReturnType ret) 
 
-convertToMemDataConType (DataConType params eparams args range ty_con) =
+convertToMemDataConType (DataConType params eparams args range con ty_con) =
   DataConType (map convertToMemParamType params)
               (map convertToMemParamType eparams)
               (map convertToMemReturnType args)
               (convertToMemReturnType range)
+              con
               ty_con

@@ -48,7 +48,7 @@ translateDataConDecl data_type_con decl =
       ex_types = map translateParamType $ dconExTypes decl
       args = map translateReturnType $ dconArgs decl
       rng = translateReturnType $ dconRng decl
-  in (dconVar decl, ty, DataConType params ex_types args rng data_type_con)
+  in (ty, DataConType params ex_types args rng (dconVar decl) data_type_con)
       
 
 translateDecl :: Decl LevelInferred -> (TypeEnv -> TypeEnv)

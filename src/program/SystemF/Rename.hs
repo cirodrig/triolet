@@ -1,6 +1,16 @@
 
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
-module SystemF.Rename(freshen, renamePatM, freshenPatM, freshenPatMs, renameTyPatM, freshenTyPatMs) where
+module SystemF.Rename
+       (freshen,
+        renamePatM,
+        substitutePatM,
+        freshenPatM,
+        freshenPatMs,
+        renameTyPatM,
+        substituteTyPatM,
+        freshenTyPatM,
+        freshenTyPatMs)
+where
 
 import Control.Monad
 import Data.Monoid
@@ -305,30 +315,3 @@ instance Substitutable (Fun Mem) where
                , funBody = substitute s $ funBody fun}
 
 substituteDefM s (Def v f) = Def v (substitute s f)
-
--- TODO: Move this function to the appropriate place
--- | Given a function and its arguments, get an expresion equivalent to
---   the function applied to those arguments.
-betaReduce :: (Monad m, Supplies m VarID) =>
-              ExpInfo -> FunM -> [TypM] -> [ExpM] -> m ExpM
-betaReduce inf (FunM fun) ty_args args = do
-  -- Substitute type arguments for type parameters
-  let type_subst =
-        substitution [(tv, t)
-                     | (TyPatM tv _, TypM t) <- zip (funTyParams fun) ty_args]
-        
-  -- Rename parameters
-  (params, param_renaming) <-
-    freshenPatMs $ map (substitutePatM type_subst) $ funParams fun
-  
-  -- Rename function body
-  let body = rename param_renaming $ substitute type_subst $ funBody fun
-  
-  -- Bind parameters to arguments
-  return $ bind_parameters params args body
-  where
-    bind_parameters params args body =
-      foldr bind_parameter body $ zip params args
-    
-    bind_parameter (param, arg) body =
-      ExpM $ LetE inf param arg body
