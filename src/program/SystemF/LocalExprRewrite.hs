@@ -33,6 +33,9 @@ instance Supplies LR VarID where
   fresh = LR (\sup -> supplyValue sup)
   supplyToST = undefined    
 
+-------------------------------------------------------------------------------
+-- Local restructuring
+
 data LetPart s = LetPart { lpInfo :: ExpInfo
                          , lpBinder :: Pat s
                          , lpValue :: Exp s
@@ -54,33 +57,20 @@ constructLet body parts = do
   result <- foldM shapeLet body parts
   return result
 
-rwAlt :: AltM -> LR AltM
-rwAlt (AltM (Alt const tyArgs exTypes params body)) = do
-  body' <- rwExp body
-  return $ AltM $ Alt const tyArgs exTypes params body'
-     
 delveExp :: ExpM -> LR ([LetPartM], ExpM)
 delveExp (ExpM ex) = do
   case ex of
-    LetE inf bind val body -> do
-      body' <- rwExp body
+    LetE inf bind@(MemVarP var ptype) val body -> do
       (letPs, replaceExp) <- delveExp val
-      case bind of
-        MemVarP var ptype -> do
-          let letPart = LetPart inf bind replaceExp
-          return ( letPart:letPs , body')
-        _ -> do
-          let result = ExpM $ LetE inf bind replaceExp body'
-          return (letPs, result)
+      let letPart = LetPart inf bind replaceExp
+      return ( letPart:letPs , body)
+
     AppE inf oper tyArgs args -> do
-      tupList <- mapM delveExp args
-      let (letParts, toReplaceArgs) = unzip tupList
+      (letParts, toReplaceArgs) <- mapAndUnzipM delveExp args
       let letParts' = concat letParts
       let replacedApp = ExpM $ AppE inf oper tyArgs toReplaceArgs
       return (letParts', replacedApp)
-    _ -> do
-      ex' <- rwExp (ExpM ex)
-      return ([], ex')    
+    _ -> return ([], ExpM ex)
 
 {-
 topExp :: ExpM -> LR ExpM
@@ -114,44 +104,54 @@ topExp (ExpM ex) = do
     -}
     
 restructureExp :: ExpM -> LR ExpM
-restructureExp (ExpM ex) = do
-  case ex of
-    LetE inf bind val body -> do
-      body' <- rwExp body
-      (letPs, val') <- {-trace "Done with body, moving to Val"-} delveExp val
-      let replaced = ExpM $ LetE inf bind val' body'
-      postLet <- constructLet replaced letPs
-      return postLet
-    AppE inf oper tyArgs args -> do
-      oper' <- rwExp oper
-      tupList <- mapM delveExp args
-      let (letParts, toReplaceArgs) = unzip tupList
-      let letParts' = concat letParts
-      let replacedApp = ExpM $ AppE inf oper' tyArgs toReplaceArgs
-      afterLetParts <- constructLet replacedApp letParts'
-      return afterLetParts
-    _ -> return $ ExpM ex
+restructureExp ex = do
+  (let_parts, ex') <- delveExp ex
+  constructLet ex' let_parts
+
+-------------------------------------------------------------------------------
+-- Traversing code
     
 rwExp :: ExpM -> LR ExpM
-rwExp (ExpM ex) = do
-  case ex of
-    LetE inf bind val body -> do
-      ex' <- restructureExp (ExpM ex)
-      return $ ex'
-    CaseE inf scrut alts -> do scrut' <- rwExp scrut
-                               alts' <- mapM rwAlt alts
-                               return $ ExpM $ CaseE inf scrut' alts'
-    AppE inf oper tyArgs args -> do
-      ex' <- restructureExp (ExpM ex)
-      return $ ex'
-    LetrecE inf defs body -> do defs' <- mapM rwDef defs
-                                body' <- rwExp body
-                                return $ ExpM $ LetrecE inf defs' body'
-    LamE inf fun -> do fun' <- rwFun fun
-                       return $ ExpM $ LamE inf fun'
-    _ -> return $ ExpM ex -- Var and Lit
+rwExp expression = do
+  -- Simplify this expression
+  ex1 <- restructureExp expression
+
+  -- Simplify subexpressions
+  case fromExpM ex1 of
+    VarE {} -> return ex1
+    LitE {} -> return ex1
+    AppE inf op ty_args args -> do
+      op' <- rwExp op
+      args' <- mapM rwExp args
+      return $ ExpM $ AppE inf op' ty_args args'
+    LamE inf fun -> do
+      fun' <- rwFun fun
+      return $ ExpM $ LamE inf fun'
+    LetE inf bind val body ->
+      case bind
+      of MemVarP {} -> do
+           val' <- rwExp val
+           body' <- rwExp body
+           return $ ExpM $ LetE inf bind val' body'
+         LocalVarP v ty dict -> do
+           dict' <- rwExp dict
+           val' <- rwExp val
+           body' <- rwExp body
+           return $ ExpM $ LetE inf (LocalVarP v ty dict') val' body'
+    LetrecE inf defs body -> do
+      defs' <- mapM rwDef defs
+      body' <- rwExp body
+      return $ ExpM $ LetrecE inf defs' body'
+    CaseE inf scrut alts -> do
+      scrut' <- rwExp scrut
+      alts' <- mapM rwAlt alts
+      return $ ExpM $ CaseE inf scrut' alts'
     
-    
+rwAlt :: AltM -> LR AltM
+rwAlt (AltM (Alt const tyArgs exTypes params body)) = do
+  body' <- rwExp body
+  return $ AltM $ Alt const tyArgs exTypes params body'
+     
 rwFun :: FunM -> LR FunM
 rwFun (FunM f) = do
   body' <- rwExp (funBody f)
