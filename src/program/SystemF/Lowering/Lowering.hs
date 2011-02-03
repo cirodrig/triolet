@@ -227,8 +227,10 @@ type GenAltBody = [Code] -> GenLower Code
 -- | A code generator for a case statement.  
 type GenCase = Code -> [(Var, GenAltBody)] -> GenLower Code
 
-compileCase :: ReturnType -> Lower GenCase
-compileCase scrutinee_type =
+compileCase :: ReturnType       -- ^ The case statement's result type
+            -> ReturnType       -- ^ The scrutinee type
+            -> Lower GenCase
+compileCase ret_type scrutinee_type =
   calculateScrutineeLayout scrutinee_type >>= make_code
   where
     make_code :: Layout -> Lower GenCase
@@ -236,8 +238,9 @@ compileCase scrutinee_type =
       return $!
       case value_layout
       of ScalarValue con LL.UnitType -> compileUnitValueCase con
-         EnumValue ty disjuncts      -> compileEnumValueCase ty disjuncts
-         RecordValue con layouts     ->
+         EnumValue ty disjuncts ->
+           compileEnumValueCase ret_type ty disjuncts
+         RecordValue con layouts ->
            case valueLayoutType value_layout
            of LL.RecordType rt -> compileRecordValueCase con rt
 
@@ -263,7 +266,7 @@ compileCase scrutinee_type =
         ProductReference con layouts ->
           compileRecordPointerCase con ll_record layouts scrutinee alts
         SOPReference disjuncts ->
-          compileRecordSOPCase ll_record disjuncts scrutinee alts
+          compileRecordSOPCase ret_type ll_record disjuncts scrutinee alts
     
 compileUnitValueCase con scrutinee [(alt_con, alt_body)]
   | con == alt_con = do
@@ -279,10 +282,14 @@ compileRecordValueCase con record_type scrutinee [(alt_con, alt_body)]
       record_fields <- unpackRecord record_type scrutinee_val
       alt_body $ map (valCode . LL.VarV) record_fields
 
-compileEnumValueCase ty disjuncts scrutinee alternatives = do
+compileEnumValueCase ret_type ty disjuncts scrutinee alternatives = do
   scr_val <- asVal scrutinee
 
-  return_types <- getReturnTypes
+  -- Compute the low-level return type
+  return_types <- lift $ do
+    tenv <- getTypeEnv
+    liftFreshVarM $ lowerFunctionReturn tenv ret_type
+
   return_vars <- lift $ mapM LL.newAnonymousVar return_types
   getContinuation False return_vars $ \cont -> do
     let (alt_constructors, alt_bodies) = unzip alternatives
@@ -675,9 +682,9 @@ lowerLetrec _ defs body =
     emitLetrec defs'
     lowerExp body
 
-lowerCase _ scr alts = do
+lowerCase return_type scr alts = do
   let ExpTM (RTypeAnn scrutinee_type _) = scr
-  case_generator <- lift $ compileCase scrutinee_type
+  case_generator <- lift $ compileCase return_type scrutinee_type
 
   scr_code <- lowerExp scr
   case_generator scr_code (map lowerAlt alts)
