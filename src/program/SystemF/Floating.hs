@@ -74,13 +74,14 @@ data ContextItem =
   { ctxUses :: Set.Set Var
   , ctxExp :: !ContextExp}
 
+-- | Make a 'ContextItem'.
 contextItem :: ContextExp -> ContextItem
 contextItem e = ContextItem (freeVariablesContextExp e) e
   where
-    freeVariablesContextExp (LetCtx (MemVarP v (_ ::: ty)) rhs) =
+    freeVariablesContextExp (LetCtx _ (MemVarP v (_ ::: ty)) rhs) =
       freeVariables ty `Set.union` freeVariables rhs
 
-    freeVariablesContextExp (CaseCtx scrutinee _ ty_args ty_pats pats) = 
+    freeVariablesContextExp (CaseCtx _ scrutinee _ ty_args ty_pats pats) = 
       let scr_fv = freeVariables scrutinee
           ty_fv = Set.unions $ map freeVariables ty_args
           typat_fv = Set.unions $ map freeVariables [t | TyPatM _ t <- ty_pats]
@@ -96,12 +97,12 @@ data ContextExp =
     -- | A let expression that doesn't allocate local memory (not @LocalVarP@).
     --
     --   @let <pattern> = <rhs> in (...)@
-    LetCtx PatM ExpM
+    LetCtx ExpInfo PatM ExpM
     -- | A case expression with a single alternative.  The alternative's
-    --   fields are stored unpacked, sans the alternative body.
+    --   fields are included, sans the alternative body.
     --
     --   @case <scrutinee> of <alternative>. (...)@
-  | CaseCtx ExpM !Var [TypM] [TyPatM] [PatM]
+  | CaseCtx ExpInfo ExpM !Var [TypM] [TyPatM] [PatM]
 
 renameContextItem :: Renaming -> ContextItem -> ContextItem
 renameContextItem rn item =
@@ -118,32 +119,32 @@ freshenContextItem item = do
 renameContextExp :: Renaming -> ContextExp -> ContextExp
 renameContextExp rn cexp = 
   case cexp
-  of LetCtx pat body ->
-       LetCtx (renamePatM rn pat) (rename rn body)
-     CaseCtx scr con ty_args ty_params params ->
-       CaseCtx (rename rn scr) con (rename rn ty_args)
+  of LetCtx inf pat body ->
+       LetCtx inf (renamePatM rn pat) (rename rn body)
+     CaseCtx inf scr con ty_args ty_params params ->
+       CaseCtx inf (rename rn scr) con (rename rn ty_args)
        (map (renameTyPatM rn) ty_params)  
        (map (renamePatM rn) params)
 
 freshenContextExp :: (Monad m, Supplies m VarID) =>
                      ContextExp -> m (ContextExp, Renaming)
-freshenContextExp (LetCtx pat body) = do
+freshenContextExp (LetCtx inf pat body) = do
   (pat', rn) <- freshenPatM pat
-  return (LetCtx pat' (rename rn body), rn)
+  return (LetCtx inf pat' (rename rn body), rn)
 
-freshenContextExp (CaseCtx scr alt_con ty_args ty_params params) = do
+freshenContextExp (CaseCtx inf scr alt_con ty_args ty_params params) = do
   (ty_params', ty_renaming) <- freshenTyPatMs ty_params 
   (params', param_renaming) <-
     freshenPatMs $ map (renamePatM ty_renaming) params
   let rn = ty_renaming `mappend` param_renaming
-  return (CaseCtx scr alt_con ty_args ty_params' params', rn)
+  return (CaseCtx inf scr alt_con ty_args ty_params' params', rn)
 
 -- | Get the variables defined by the context
 ctxDefs :: ContextItem -> [Var]
 ctxDefs item =
   case ctxExp item
-  of LetCtx (MemVarP v _) _ -> [v]
-     CaseCtx _ _ _ ty_params params ->
+  of LetCtx _ (MemVarP v _) _ -> [v]
+     CaseCtx _ _ _ _ ty_params params ->
        [v | TyPatM v _ <- ty_params] ++ [v | MemVarP v _ <- params]
 
 -- | Extract the part of the context that depends on the given variables.
@@ -188,7 +189,7 @@ nubContext id_supply tenv ctx =
     nub_r types rn new_ctx (c:cs) =
       let rn_c = renameContextItem rn c -- Rename before inspecting
       in case ctxExp rn_c
-         of LetCtx (MemVarP pvar param_type@(_ ::: ptype)) rhs
+         of LetCtx _ (MemVarP pvar param_type@(_ ::: ptype)) rhs
               | isFloatableParamType param_type -> do
                   -- This context can be eliminated
                   -- Is there already a definition of this variable?
@@ -217,10 +218,10 @@ applyContext :: Context -> ExpM -> ExpM
 applyContext (c:ctx) e =
   let apply_c =
         case ctxExp c
-        of LetCtx pat rhs -> ExpM $ LetE defaultExpInfo pat rhs e
-           CaseCtx scr con ty_args ty_params params ->
+        of LetCtx inf pat rhs -> ExpM $ LetE inf pat rhs e
+           CaseCtx inf scr con ty_args ty_params params ->
              let alt = AltM $ Alt con ty_args ty_params params e
-             in ExpM $ CaseE defaultExpInfo scr [alt]
+             in ExpM $ CaseE inf scr [alt]
   in applyContext ctx $! apply_c
 
 applyContext [] e = e
@@ -296,6 +297,7 @@ anchor vs m = Flt $ \ctx -> do
 
   return (new_exp, indep)
 
+-- | Put all floated bindings here
 anchorAll :: Flt ExpM -> Flt ExpM
 anchorAll m = Flt $ \ctx -> do
   (exp, context) <- runFlt m ctx
@@ -332,7 +334,7 @@ floatInExp (ExpM expression) =
      LetE inf pat@(MemVarP pat_var pat_type) rhs body
        | isFloatableParamType pat_type -> do
            -- Float this binding
-           rn <- float $ LetCtx pat rhs
+           rn <- float $ LetCtx inf pat rhs
 
            -- Rename and continue processing the body
            floatInExp $ rename rn body
@@ -361,7 +363,7 @@ floatInExp (ExpM expression) =
        
        -- Make the case expression to float
        let AltM (Alt con alt_targs alt_tparams alt_params alt_body) = head alts
-           ctx = CaseCtx scr con alt_targs alt_tparams alt_params
+           ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params
        if isDictionaryDataCon con
          then do rn <- float ctx
                  floatInExp $ rename rn alt_body
@@ -377,7 +379,7 @@ floatDictionary inf dict_expr op_var ty_args args = do
   -- Create the binding that will be floated
   dict_var <- newAnonymousVar ObjectLevel
   let dict_param_type = returnReprToParamRepr dict_repr ::: dict_type
-      ctx = LetCtx (MemVarP dict_var dict_param_type) $ ExpM dict_expr
+      ctx = LetCtx inf (MemVarP dict_var dict_param_type) $ ExpM dict_expr
       
   -- Return the variable
   rn <- float ctx
