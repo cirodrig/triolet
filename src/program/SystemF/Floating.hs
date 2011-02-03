@@ -2,7 +2,8 @@
 
 Some code is aggressively moved upward as far as possible
 to increase opportunities for other optimizations.  We float definitions of
-singleton values and case-of-dictionary expressions this way.
+singleton values, case-of-dictionary expressions, and case-of-read-variable 
+expressions this way.
 -}
 
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
@@ -12,6 +13,7 @@ where
 import Control.Monad
 import Data.List
 import Data.Monoid
+import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
 import Common.Error
@@ -233,6 +235,9 @@ data FloatCtx =
              -- | The global type environment.  Local types are not added to
              --   the environment.
            , fcTypeEnv :: !TypeEnv
+             -- | IDs of readable reference variables that are not in
+             -- @fcTypeEnv@.
+           , fcReadVars :: IntSet.IntSet 
            }
 
 newtype Flt a =
@@ -307,6 +312,33 @@ anchorAll m = Flt $ \ctx -> do
   let new_exp = applyContext context' (rename rn exp)
   return (new_exp, [])
 
+isReadReference :: Var -> Flt Bool
+isReadReference v = Flt $ \ctx ->
+  let readable_local = fromIdent (varID v) `IntSet.member` fcReadVars ctx
+      readable_global = case lookupType v (fcTypeEnv ctx)
+                        of Just (ReadRT ::: _) -> True
+                           _ -> False
+  in return (readable_local || readable_global, [])
+
+-- | Indicate that a variable is a readable reference
+addReadVar :: Var -> Flt ExpM -> Flt ExpM
+addReadVar v m = Flt $ \ctx ->
+  let ctx' = ctx {fcReadVars = IntSet.insert (fromIdent $ varID v) $
+                               fcReadVars ctx}
+  in runFlt m ctx
+
+-- | If the pattern binds a readable variable, indicate that the variable is
+--   a readable reference.  The pattern's type is ignored.
+--
+--   A @LocalVarP@ is counted as a readable reference.
+--   It's only a readable reference in the body of a let-binding, not the rhs.
+addPatternVar :: PatM -> Flt ExpM -> Flt ExpM
+addPatternVar (MemVarP v (ReadPT ::: _)) = addReadVar v
+addPatternVar (MemVarP v _)              = id
+addPatternVar (LocalVarP v _ _)          = addReadVar v
+
+addPatternVars ps x = foldr addPatternVar x ps
+
 fltNubContext :: FloatCtx -> Context -> IO (Context, Renaming)
 fltNubContext ctx context =
   nubContext (fcVarSupply ctx) (fcTypeEnv ctx) context
@@ -331,22 +363,37 @@ floatInExp (ExpM expression) =
      LamE inf f -> do
        f' <- floatInFun (Just []) f
        return $ ExpM $ LamE inf f'
-     LetE inf pat@(MemVarP pat_var pat_type) rhs body
+     LetE inf pat rhs body ->
+       floatInLet inf pat rhs body
+     LetrecE inf defs body -> do
+       -- Don't float anything that references a local function
+       let local_vars = [v | Def v _ <- defs]
+       defs' <- forM defs $ \(Def v f) -> do
+         f' <- floatInFun (Just local_vars) f
+         return $ Def v f'
+       body' <- anchor local_vars $ floatInExp body
+       return $ ExpM $ LetrecE inf defs' body'
+     CaseE inf scr alts ->
+       floatInCase inf scr alts
+  
+floatInLet inf pat rhs body =
+  case pat
+  of MemVarP pat_var pat_type
        | isFloatableParamType pat_type -> do
            -- Float this binding
            rn <- float $ LetCtx inf pat rhs
 
            -- Rename and continue processing the body
-           floatInExp $ rename rn body
+           addPatternVar pat $ floatInExp $ rename rn body
        | otherwise -> do
            rhs' <- floatInExp rhs
-           body' <- anchor [pat_var] $ floatInExp body
+           body' <- addPatternVar pat $ anchor [pat_var] $ floatInExp body
            return $ ExpM $ LetE inf pat rhs' body'
-     
-     LetE inf (LocalVarP pat_var pat_type pat_dict) rhs body -> do
+
+     LocalVarP pat_var pat_type pat_dict -> do
        pat_dict' <- floatInExp pat_dict
        rhs' <- anchor [pat_var] $ floatInExp rhs
-       body' <- anchor [pat_var] $ floatInExp body
+       body' <- addPatternVar pat $ anchor [pat_var] $ floatInExp body
        return $ ExpM $ LetE inf (LocalVarP pat_var pat_type pat_dict') rhs' body'
      
      LetrecE inf defs body -> do
@@ -363,7 +410,7 @@ floatInExp (ExpM expression) =
        
        -- Make the case expression to float
        let AltM (Alt con alt_targs alt_tparams alt_params alt_body) = head alts
-           ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params
+           ctx = CaseCtx scr con alt_targs alt_tparams alt_params
        if isDictionaryDataCon con
          then do rn <- float ctx
                  floatInExp $ rename rn alt_body
@@ -403,7 +450,9 @@ floatDictionary inf dict_expr op_var ty_args args = do
 
 floatInAlt :: AltM -> Flt AltM
 floatInAlt (AltM alt) = do
-  body' <- anchor local_vars $ floatInExp $ altBody alt
+  body' <- addPatternVars (altParams alt) $
+           anchor local_vars $
+           floatInExp (altBody alt)
   return $ AltM $ alt {altBody = body'}
   where
     local_vars =
@@ -417,7 +466,8 @@ floatInAlt (AltM alt) = do
 --   regardless of the value given.
 floatInFun :: Maybe [Var] -> FunM -> Flt FunM
 floatInFun m_local_vars (FunM fun) = do
-  body <- anchor_local_vars $ floatInExp $ funBody fun
+  body <- addPatternVars (funParams fun) $ anchor_local_vars $
+          floatInExp (funBody fun)
   return $ FunM $ fun {funBody = body}
   where
     anchor_local_vars m =
@@ -444,7 +494,9 @@ floatModule :: Module Mem -> IO (Module Mem)
 floatModule (Module mod_name defss exports) =
   withTheNewVarIdentSupply $ \id_supply -> do
     tenv <- readInitGlobalVarIO the_newCoreTypes
-    let flt_env = FloatCtx {fcVarSupply = id_supply, fcTypeEnv = tenv}
+    let flt_env = FloatCtx {fcVarSupply = id_supply,
+                            fcTypeEnv = tenv,
+                            fcReadVars = IntSet.empty}
     defss' <- runTopLevelFlt float_defss flt_env
     exports' <- runTopLevelFlt float_exports flt_env
     return $ Module mod_name defss' exports'
