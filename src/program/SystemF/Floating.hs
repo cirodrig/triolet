@@ -395,27 +395,31 @@ floatInLet inf pat rhs body =
        rhs' <- anchor [pat_var] $ floatInExp rhs
        body' <- addPatternVar pat $ anchor [pat_var] $ floatInExp body
        return $ ExpM $ LetE inf (LocalVarP pat_var pat_type pat_dict') rhs' body'
-     
-     LetrecE inf defs body -> do
-       -- Don't float anything that references a local function
-       let local_vars = [v | Def v _ <- defs]
-       defs' <- forM defs $ \(Def v f) -> do
-         f' <- floatInFun (Just local_vars) f
-         return $ Def v f'
-       body' <- anchor local_vars $ floatInExp body
-       return $ ExpM $ LetrecE inf defs' body'
-     
-     CaseE inf scr alts -> do
-       scr' <- floatInExp scr
-       
-       -- Make the case expression to float
-       let AltM (Alt con alt_targs alt_tparams alt_params alt_body) = head alts
-           ctx = CaseCtx scr con alt_targs alt_tparams alt_params
-       if isDictionaryDataCon con
-         then do rn <- float ctx
-                 floatInExp $ rename rn alt_body
-         else do alts' <- mapM floatInAlt alts
-                 return $ ExpM $ CaseE inf scr' alts'
+
+floatInCase inf scr alts = do
+  scr' <- floatInExp scr
+  floatable <- is_floatable scr'
+  if floatable
+    then do rn <- float ctx
+            addPatternVars alt_params $ floatInExp $ rename rn alt_body
+    else do alts' <- mapM floatInAlt alts
+            return $ ExpM $ CaseE inf scr' alts'
+  where
+    AltM (Alt con alt_targs alt_tparams alt_params alt_body) = head alts
+    ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params
+    
+    is_floatable scr'
+      | length alts /= 1 =
+          -- Don't float a case with multiple alternatives
+          return False
+      | isDictionaryDataCon con =
+          -- Always float dictionary inspection 
+          return True
+      | ExpM (VarE _ scr_var) <- scr' =
+          -- Float if scrutinee is a readable reference
+          isReadReference scr_var
+      | otherwise =
+          return False
 
 -- | Float out a dictionary construction expression
 floatDictionary inf dict_expr op_var ty_args args = do
