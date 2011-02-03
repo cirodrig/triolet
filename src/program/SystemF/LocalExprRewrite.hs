@@ -296,31 +296,32 @@ betaReduce inf (FunM fun) ty_args args = do
 data LetPart s = LetPart { lpInfo :: ExpInfo
                          , lpBinder :: Pat s
                          , lpValue :: Exp s
-                         -- lpBody :: Exp s
+                         -- Body :: Exp s
                          }
                   
-type LetPartM = LetPart Mem              
-                                                   
-
-shapeLet :: ExpM -> LetPartM -> LR ExpM
-shapeLet body (LetPart lpInf lpBind lpVal) = do
-  let reshaped = ExpM $ LetE lpInf lpBind lpVal body
-  renamed <- freshen reshaped
-  return renamed
+type LetPartM = LetPart Mem                                                                
   
 constructLet :: ExpM -> [LetPartM] -> LR ExpM
 constructLet body [] = return body
 constructLet body parts = do
   result <- foldM shapeLet body parts
   return result
+  
+  where
+    shapeLet :: ExpM -> LetPartM -> LR ExpM
+    shapeLet body (LetPart lpInf lpBind lpVal) =
+      return $ ExpM $ LetE lpInf lpBind lpVal body
 
 delveExp :: ExpM -> LR ([LetPartM], ExpM)
 delveExp (ExpM ex) = do
   case ex of
-    LetE inf bind@(MemVarP var ptype) val body -> do
-      (letPs, replaceExp) <- delveExp val
-      let letPart = LetPart inf bind replaceExp
-      return ( letPart:letPs , body)
+    LetE _ bind@(MemVarP {}) _ _ -> do
+      freshenedEx <- freshen (ExpM ex) -- renames bind and body fields as defined in Rename.hs for non-LocalVar cases
+      case fromExpM freshenedEx of
+        LetE inf2 bind2@(MemVarP var ptype) val2 body2 -> do
+          (letPs, replaceExp) <- delveExp val2
+          let letPart = LetPart inf2 bind2 replaceExp
+          return ( letPart:letPs , body2)
 
     AppE inf oper tyArgs args -> do
       (letParts, toReplaceArgs) <- mapAndUnzipM delveExp args
