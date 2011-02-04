@@ -42,21 +42,10 @@ deconstructTupleExp expression =
 
 -------------------------------------------------------------------------------
 
--- | Sets form a monoid under the union operation
-newtype Union a = Union {getUnion :: Set a}
-
-instance Ord a => Monoid (Union a) where
-    mempty = Union (Set.empty)
-    mappend s t = Union $ getUnion s `Set.union` getUnion t
-    mconcat xs = Union $ Set.unions $ map getUnion xs
-
-onUnion :: (Set a -> Set a) -> Union a -> Union a
-onUnion f (Union s) = Union (f s)
-
 -- | Dead code elimination on a value produces a new value and a set of
 -- all variable names referenced by the value.
 type EDC a = a -> GetMentionsSet a
-type GetMentionsSet a = Writer (Union VarID) a
+type GetMentionsSet a = Writer (Set VarID) a
 
 evalEDC :: (a -> GetMentionsSet b) -> a -> b
 evalEDC f x = case runWriter $ f x of (x', _) -> x'
@@ -64,25 +53,25 @@ evalEDC f x = case runWriter $ f x of (x', _) -> x'
 -- | Mention a variable.  This prevents the assignment of this variable from
 -- being eliminated.
 mention :: Var -> GetMentionsSet ()
-mention v = tell (Union $ Set.singleton (varID v))
+mention v = tell (Set.singleton (varID v))
 
 -- | Filter out a mention of a variable.  The variable will not appear in
 -- the returned mentions set.
 mask :: Var -> GetMentionsSet a -> GetMentionsSet a
 mask v m = pass $ do x <- m
-                     return (x, onUnion $ Set.delete (varID v))
+                     return (x, Set.delete (varID v))
 
 -- | Filter out a mention of a variable, and also check whether the variable
 -- is mentioned.  Return True if the variable is mentioned.
 maskAndCheck :: Var -> GetMentionsSet a -> GetMentionsSet (Bool, a)
 maskAndCheck v m = pass $ do
   (x, mentions_set) <- listen m
-  return ( (varID v `Set.member` getUnion mentions_set, x)
-         , onUnion $ Set.delete (varID v))
+  return ( (varID v `Set.member` mentions_set, x)
+         , Set.delete (varID v))
 
 masks :: Set VarID -> GetMentionsSet a -> GetMentionsSet a
 masks vs m = pass $ do x <- m
-                       return (x, onUnion (`Set.difference` vs))
+                       return (x, (`Set.difference` vs))
 
 -- | Mention all variables in a type
 edcScanType :: TypSF -> GetMentionsSet ()
