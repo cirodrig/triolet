@@ -45,6 +45,7 @@ pprTyPat (TyPatM v t) = pprVar v <+> text ":" <+> pprType t
 
 pprPat :: PatM -> Doc
 pprPat (MemVarP v pt) = pprVar v <+> text ":" <+> pprParamType pt
+pprPat (MemWildP pt) = text "_" <+> text ":" <+> pprParamType pt
 pprPat (LocalVarP v t e) =
   text "local" <+> pprVar v <+> text ":" <+> pprType t <+> parens (pprExp e)
 

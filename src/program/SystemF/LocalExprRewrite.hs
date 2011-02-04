@@ -471,6 +471,8 @@ rwLet inf bind val body =
        let ret_exp =
              ExpM $ LetE inf (LocalVarP bind_var bind_type dict') val' body'
        return (ret_exp, ret_val)
+
+     MemWildP {} -> internalError "rwLet"
   where
     -- The computed value for this let expression cannot mention the locally 
     -- defined variable.  If it's in the body's
@@ -554,7 +556,9 @@ rwAlt scr (AltM (Alt const tyArgs exTypes params body)) = assume_params $ do
       foldr assume_ex_type (foldr assume_param m params) exTypes
     
     assume_ex_type (TyPatM v ty) m = assume v (ValRT ::: ty) m
+
     assume_param (MemVarP v pty) m = assumeParamType v pty m
+    assume_param (MemWildP _) m = m
 
 rwFun :: FunM -> LR FunM
 rwFun (FunM f) = do

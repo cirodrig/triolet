@@ -12,6 +12,7 @@ where
 
 import Control.Monad
 import Data.List
+import Data.Maybe
 import Data.Monoid
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -80,8 +81,8 @@ data ContextItem =
 contextItem :: ContextExp -> ContextItem
 contextItem e = ContextItem (freeVariablesContextExp e) e
   where
-    freeVariablesContextExp (LetCtx _ (MemVarP v (_ ::: ty)) rhs) =
-      freeVariables ty `Set.union` freeVariables rhs
+    freeVariablesContextExp (LetCtx _ pat rhs) =
+      freeVariables (patMType pat) `Set.union` freeVariables rhs
 
     freeVariablesContextExp (CaseCtx _ scrutinee _ ty_args ty_pats pats) = 
       let scr_fv = freeVariables scrutinee
@@ -89,8 +90,7 @@ contextItem e = ContextItem (freeVariablesContextExp e) e
           typat_fv = Set.unions $ map freeVariables [t | TyPatM _ t <- ty_pats]
           
           -- Get free variables from patterns; remove existential variables
-          pat_fv1 = Set.unions $
-                    map freeVariables [ty | MemVarP _ (_ ::: ty) <- pats]
+          pat_fv1 = Set.unions $ map (freeVariables . patMType) pats
           pat_fv = foldr Set.delete pat_fv1 [v | TyPatM v _ <- ty_pats]
       in Set.unions [scr_fv, ty_fv, typat_fv, pat_fv]
 
@@ -145,9 +145,9 @@ freshenContextExp (CaseCtx inf scr alt_con ty_args ty_params params) = do
 ctxDefs :: ContextItem -> [Var]
 ctxDefs item =
   case ctxExp item
-  of LetCtx _ (MemVarP v _) _ -> [v]
+  of LetCtx _ pat _ -> [patMVar' pat]
      CaseCtx _ _ _ _ ty_params params ->
-       [v | TyPatM v _ <- ty_params] ++ [v | MemVarP v _ <- params]
+       [v | TyPatM v _ <- ty_params] ++ mapMaybe patMVar params
 
 -- | Extract the part of the context that depends on the given variables.
 --   The context is partitioned into two contexts, of which the first is
@@ -336,6 +336,7 @@ addPatternVar :: PatM -> Flt ExpM -> Flt ExpM
 addPatternVar (MemVarP v (ReadPT ::: _)) = addReadVar v
 addPatternVar (MemVarP v _)              = id
 addPatternVar (LocalVarP v _ _)          = addReadVar v
+addPatternVar (MemWildP _)               = id
 
 addPatternVars ps x = foldr addPatternVar x ps
 
@@ -395,6 +396,8 @@ floatInLet inf pat rhs body =
        rhs' <- anchor [pat_var] $ floatInExp rhs
        body' <- addPatternVar pat $ anchor [pat_var] $ floatInExp body
        return $ ExpM $ LetE inf (LocalVarP pat_var pat_type pat_dict') rhs' body'
+
+     MemWildP {} -> internalError "floatInLet"
 
 floatInCase inf scr alts = do
   scr' <- floatInExp scr
@@ -460,7 +463,7 @@ floatInAlt (AltM alt) = do
   return $ AltM $ alt {altBody = body'}
   where
     local_vars =
-      [v | TyPatM v _ <- altExTypes alt] ++ [v | MemVarP v _ <- altParams alt]
+      [v | TyPatM v _ <- altExTypes alt] ++ mapMaybe patMVar (altParams alt)
 
 -- | Perform floating on a function.
 --
@@ -480,7 +483,7 @@ floatInFun m_local_vars (FunM fun) = do
          Just extra_local_vars -> anchor (param_vars ++ extra_local_vars) m
 
     param_vars = [v | TyPatM v _ <- funTyParams fun] ++
-                 [v | MemVarP v _ <- funParams fun]
+                 mapMaybe patMVar (funParams fun)
 
 -- | Perform floating on a top-level function definition.
 --   No bindings are floated out of the function.

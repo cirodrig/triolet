@@ -89,6 +89,15 @@ assumeLocalVar v v_size k =
     deallocateHeapMem (LL.VarV ll_var)
     return x
 
+-- | Create an anonymous variable for a wildcard pattern. 
+assumeWildVar :: ReturnType -> (LL.Var -> Lower a) -> Lower a
+assumeWildVar rt k = do
+  tenv <- getTypeEnv
+  rtype <- liftFreshVarM $ lowerReturnType tenv rt 
+  case rtype of
+    Just ty -> LL.newAnonymousVar ty >>= k
+    Nothing -> internalError "assumeWildVar: Unexpected representation"
+
 -------------------------------------------------------------------------------
 -- Code fragments
 
@@ -573,6 +582,10 @@ bindPattern (MemVarP v (repr ::: ty)) value m = do
     bindAtom1 ll_var =<< asAtom value
     m
 
+bindPattern (MemWildP _) value m =
+  -- Emit the code for this pattern, but don't use the result
+  asVal value >> m
+
 -- | Lower a type that is passed as an argument to an expression.
 --   In most cases, the type becomes a unit value.
 lowerTypeValue :: TypTM -> GenLower Code
@@ -677,6 +690,9 @@ lowerLet _ binder rhs body =
          liftT (assumeBoundReprDict (ReadRT ::: ty) ll_var) $
            generateCode =<< lowerExp body
 
+     TypedMemWildP {} ->
+       internalError "lowerLet"
+
 lowerLetrec _ defs body =
   lowerDefGroupG defs $ \defs' -> do
     emitLetrec defs'
@@ -714,6 +730,9 @@ lowerFun (FunTM (RTypeAnn _ fun)) =
       
     lower_param (TypedMemVarP v (param_repr ::: ty)) k =
       assumeVar v (paramReprToReturnRepr param_repr ::: ty) k
+
+    lower_param (TypedMemWildP (param_repr ::: ty)) k =
+      assumeWildVar (paramReprToReturnRepr param_repr ::: ty) k
 
     lower_param (TypedLocalVarP {}) _ =
       internalError "lowerFun: Unexpected local variable"

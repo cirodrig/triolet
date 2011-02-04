@@ -13,6 +13,7 @@ module SystemF.Rename
 where
 
 import Control.Monad
+import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as Set
 
@@ -65,6 +66,8 @@ freshenPatM (MemVarP v ty) = do
 
 freshenPatM (LocalVarP {}) = internalError "freshenPatM: Unexpected pattern"
 
+freshenPatM (MemWildP ty) = return (MemWildP ty, mempty)
+
 -- | Freshen a list of variable bindings. 
 --   There must not be any local variable bindings in the list.
 --   None of the bindings may refer to a variable bound by another member of
@@ -72,15 +75,18 @@ freshenPatM (LocalVarP {}) = internalError "freshenPatM: Unexpected pattern"
 freshenPatMs :: (Monad m, Supplies m VarID) => [PatM] -> m ([PatM], Renaming)
 freshenPatMs pats = do
   (pats', assocs) <- mapAndUnzipM freshen_pattern pats
-  return (pats', renaming assocs)
+  return (pats', renaming $ catMaybes assocs)
   where
     freshen_pattern (MemVarP v param_ty) = do
       v' <- newClonedVar v
-      return (MemVarP v' param_ty, (v, v'))
+      return (MemVarP v' param_ty, Just (v, v'))
 
     freshen_pattern (LocalVarP {}) =
       internalError "freshenPatMs: Unexpected pattern"
                                    
+    freshen_pattern (MemWildP param_ty) =
+      return (MemWildP param_ty, Nothing)
+
 -- | Apply a substitution to a type pattern
 substituteTyPatM :: Substitution -> TyPatM -> TyPatM
 substituteTyPatM s pattern =
@@ -96,7 +102,11 @@ substitutePatM s pattern =
        of ValPT (Just _) -> internalError "substitutePatM: Superfluous binding"
           _ -> MemVarP v (repr ::: substitute s ty)
      LocalVarP v ty dict -> LocalVarP v (substitute s ty) (substitute s dict)
-
+     MemWildP (repr ::: ty) ->
+       case repr
+       of ValPT (Just _) -> internalError "substitutePatM: Superfluous binding"
+          _ -> MemWildP (repr ::: substitute s ty)
+     
 instance Renameable (Typ Mem) where
   rename rn (TypM t) = TypM $ rename rn t
   freshen (TypM t) = liftM TypM $ freshen t
@@ -170,6 +180,11 @@ instance Renameable (Exp Mem) where
              rhs_fv = freeVariables rhs
              body_fv = Set.delete v $ freeVariables body
          in ty_fv `Set.union` rhs_fv `Set.union` body_fv
+       LetE _ (MemWildP (_ ::: ty)) rhs body ->
+         let ty_fv = freeVariables ty
+             rhs_fv = freeVariables rhs
+             body_fv = freeVariables body
+         in ty_fv `Set.union` rhs_fv `Set.union` body_fv
        LetE _ (LocalVarP v ty dict) rhs body ->
          let ty_fv = freeVariables ty
              dict_fv = freeVariables dict
@@ -214,10 +229,10 @@ instance Renameable (Alt Mem) where
           
         -- Get free variables from patterns; remove existential variables
         pat_fv1 = Set.unions $
-                  map freeVariables [ty | MemVarP _ (_ ::: ty) <- altParams alt]
+                  map (freeVariables . patMType) $ altParams alt
         pat_fv = foldr Set.delete pat_fv1 typat_vars
 
-        pat_vars = [v | MemVarP v _ <- altParams alt]
+        pat_vars = mapMaybe patMVar $ altParams alt
         
         -- Get free variables from body;
         -- remove existential variables and fields
@@ -253,10 +268,10 @@ instance Renameable (Fun Mem) where
           
         -- Get free variables from patterns; remove type parameter variables
         pat_fv1 = Set.unions $
-                  map freeVariables [ty | MemVarP _ (_ ::: ty) <- funParams fun]
+                  map (freeVariables . patMType) $ funParams fun
         pat_fv = foldr Set.delete pat_fv1 typat_vars
 
-        pat_vars = [v | MemVarP v _ <- funParams fun]
+        pat_vars = mapMaybe patMVar $ funParams fun
         
         -- Get free variables from body and return type;
         -- remove existential variables and fields
