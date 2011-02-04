@@ -1,13 +1,13 @@
 {-| Memory-level dead code elimination. 
 --
--- This module does two important things for us.
+-- This module does two important things.
 -- It eliminates redundant let-bindings, and it converts
 -- unused pattern bindings to wildcards.
 --
 -- Wildcard pattern bindings facilitate elimination of case statements.
 -}
 
-module SystemF.DeadCodeMem(eliminateDeadCode)
+module SystemF.DeadCodeMem(eliminateLocalDeadCode, eliminateDeadCode)
 where
 
 import Control.Monad.Writer
@@ -21,6 +21,13 @@ import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.DeadCode
 import Type.Type
+
+-- | Locally eliminate dead code.  Top-level bindings are not eliminated.
+eliminateLocalDeadCode :: Module Mem -> Module Mem
+eliminateLocalDeadCode (Module module_name defss exports) =
+  let defss' = map (map (evalEDC edcDef)) defss
+      exports' = map (evalEDC edcExport) exports
+  in Module module_name defss' exports'
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
@@ -132,10 +139,21 @@ edcExp expression@(ExpM base_expression) =
          ds' <- mapM edcDef ds
          e' <- edcExp e
          return $ ExpM $ base_expression {expDefs = ds', expBody = e'}
-     CaseE {expScrutinee = scr, expAlternatives = alts} -> do
+     CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} -> do
        scr' <- edcExp scr
        alts' <- mapM edcAlt alts
-       return $ ExpM $ base_expression {expScrutinee = scr', expAlternatives = alts'}
+       case alts' of
+         [alt'] | null (altExTypes $ fromAltM alt') &&
+                  all isWildPatM (altParams $ fromAltM alt') ->
+           -- This case statement has no effect
+           return (altBody $ fromAltM alt')
+         _ -> 
+           return $ ExpM $ CaseE { expInfo = inf
+                                 , expScrutinee = scr'
+                                 , expAlternatives = alts'}
+
+isWildPatM (MemWildP {}) = True
+isWildPatM _ = False
 
 -- | Dead code elimination for a case alternative
 edcAlt (AltM alt) = do
