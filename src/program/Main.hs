@@ -22,7 +22,8 @@ import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
 import qualified Untyped.TypeInference as Untyped
 import qualified SystemF.PartialEval as SystemF
-import qualified SystemF.DeadCodeSF as SystemF
+import qualified SystemF.DeadCodeSF
+import qualified SystemF.DeadCodeMem
 import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.TypecheckSF
@@ -127,7 +128,7 @@ compilePyonToPyonAsm path text = do
   
   -- System F transformations
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
-  sf_mod <- return $ SystemF.eliminateDeadCode sf_mod
+  sf_mod <- return $ SystemF.DeadCodeSF.eliminateDeadCode sf_mod
   sf_mod <- SystemF.eliminatePatternMatching sf_mod
   -- sf_mod <- SystemF.doSpecialization sf_mod
 
@@ -152,6 +153,7 @@ compilePyonToPyonAsm path text = do
   
   -- Optimizations on memory representation
   mem_mod <- SystemF.floatModule mem_mod
+  mem_mod <- return $ SystemF.DeadCodeMem.eliminateDeadCode mem_mod
 
   putStrLn "Floated"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod

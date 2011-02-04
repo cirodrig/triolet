@@ -10,6 +10,7 @@ import Common.SourcePos
 import Common.Error
 import Builtins.Builtins
 import SystemF.Syntax
+import SystemF.DeadCode
 import Type.Type
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
@@ -42,50 +43,9 @@ deconstructTupleExp expression =
 
 -------------------------------------------------------------------------------
 
--- | Dead code elimination on a value produces a new value and a set of
--- all variable names referenced by the value.
-type EDC a = a -> GetMentionsSet a
-type GetMentionsSet a = Writer (Set VarID) a
-
-evalEDC :: (a -> GetMentionsSet b) -> a -> b
-evalEDC f x = case runWriter $ f x of (x', _) -> x'
-
--- | Mention a variable.  This prevents the assignment of this variable from
--- being eliminated.
-mention :: Var -> GetMentionsSet ()
-mention v = tell (Set.singleton (varID v))
-
--- | Filter out a mention of a variable.  The variable will not appear in
--- the returned mentions set.
-mask :: Var -> GetMentionsSet a -> GetMentionsSet a
-mask v m = pass $ do x <- m
-                     return (x, Set.delete (varID v))
-
--- | Filter out a mention of a variable, and also check whether the variable
--- is mentioned.  Return True if the variable is mentioned.
-maskAndCheck :: Var -> GetMentionsSet a -> GetMentionsSet (Bool, a)
-maskAndCheck v m = pass $ do
-  (x, mentions_set) <- listen m
-  return ( (varID v `Set.member` mentions_set, x)
-         , Set.delete (varID v))
-
-masks :: Set VarID -> GetMentionsSet a -> GetMentionsSet a
-masks vs m = pass $ do x <- m
-                       return (x, (`Set.difference` vs))
-
 -- | Mention all variables in a type
 edcScanType :: TypSF -> GetMentionsSet ()
-edcScanType (TypSF t) = scanType t
-  where
-    scanType :: Type -> GetMentionsSet ()
-    scanType (VarT v) = mention v
-    scanType (AppT t1 t2) = scanType t1 >> scanType t2
-    scanType (FunT (ValPT (Just v) ::: dom) (_ ::: rng)) = do
-      scanType dom
-      mask v $ scanType rng
-    scanType (FunT (_ ::: dom) (_ ::: rng)) = do
-      scanType dom
-      scanType rng
+edcScanType (TypSF t) = edcType t
 
 -- | Find mentioned variables in an export declaration
 edcExport :: Export SF -> GetMentionsSet (Export SF)
@@ -195,8 +155,11 @@ edcExp expression@(ExpSF base_expression) =
 
 -- | Dead code elimination for a case alternative
 edcAlt (AltSF alt) = do
+  mapM_ edcScanType $ altTyArgs alt
   -- Mask out variables bound by the alternative and simplify the body
-  body' <- masks (Set.fromList [varID v | VarP v _ <- altParams alt]) $ do
+  let local_vars = [varID v | VarP v _ <- altParams alt] ++
+                   [varID v | TyPatSF v _ <- altExTypes alt]
+  body' <- masks (Set.fromList local_vars) $ do
     edcExp (altBody alt)
   return $ AltSF $ alt {altBody = body'} 
 
