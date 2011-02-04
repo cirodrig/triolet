@@ -849,18 +849,58 @@ rwCase inf scrut alts = do
         bind_field _ _ = internalError "rwCase: Unexpected pattern"
 
 rwAlt :: Maybe Var -> AltM -> LR AltM
-rwAlt scr (AltM (Alt const tyArgs exTypes params body)) = assume_params $ do
-  -- TODO: If scrutinee variable is given, assign it a known value
-  (body', _) <- rwExp body
-  return $ AltM $ Alt const tyArgs exTypes params body'
+rwAlt scr (AltM (Alt con tyArgs exTypes params body)) = do
+  -- If we're going to record a known value for the scrutinee, 
+  -- convert wildcard to non-wildcard patterns.  This increases the
+  -- usefulness of recording known values.
+  labeled_params <-
+    if isJust scr
+    then mapM labelParameter params
+    else return params
+
+  assume_params labeled_params $ do
+    (body', _) <- rwExp body
+    return $ AltM $ Alt con tyArgs exTypes labeled_params body'
   where
-    assume_params m =
-      foldr assume_ex_type (foldr assume_param m params) exTypes
+    assume_params labeled_params m = do
+      tenv <- getTypeEnv
+      let with_known_value = assume_scrutinee tenv labeled_params m
+          with_params = foldr assume_param with_known_value labeled_params
+          with_ty_params = foldr assume_ex_type with_params exTypes
+      with_ty_params
     
     assume_ex_type (TyPatM v ty) m = assume v (ValRT ::: ty) m
 
     assume_param (MemVarP v pty) m = assumeParamType v pty m
     assume_param (MemWildP _) m = m
+    
+    -- If the scrutinee is a variable, add its known value to the environment.
+    -- It will be used if the variable is inspected again. 
+    assume_scrutinee tenv labeled_params m =
+      case scr
+      of Just scrutinee_var ->
+           let ex_args = [TypM (VarT v) | TyPatM v _ <- exTypes]
+               dcon_ty_args = tyArgs ++ ex_args
+               arg_values = map (mk_arg . patMVar) labeled_params
+               Just (data_type, dcon_type) = lookupDataConWithType con tenv
+               data_value = dataValue defaultExpInfo data_type dcon_type dcon_ty_args arg_values
+           in withMaybeValue scrutinee_var data_value m
+         Nothing -> m
+      where
+        mk_arg (Just var) = Just (VarValue defaultExpInfo var)
+        mk_arg Nothing =
+          -- It would be safe to return Nothing here.
+          -- However, we tried to give every parameter a variable name,
+          -- so this shouldn't be Nothing.
+          internalError "rwAlt"
+
+labelParameter param = 
+  case param
+  of MemVarP {} -> return param
+     LocalVarP {} -> return param
+     MemWildP pty -> do
+       pvar <- newAnonymousVar ObjectLevel
+       return (MemVarP pvar pty)
 
 rwFun :: FunM -> LR FunM
 rwFun (FunM f) = do
