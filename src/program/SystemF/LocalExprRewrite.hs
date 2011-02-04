@@ -6,6 +6,7 @@ where
 import Control.Monad
 import qualified Data.IntMap as IntMap
 import Data.List as List
+import Data.Maybe
 import qualified Data.Set as Set
 import Debug.Trace
 
@@ -50,6 +51,10 @@ instance Monad LR where
 instance Supplies LR VarID where
   fresh = LR (\env -> supplyValue (lrIdSupply env))
   supplyToST = undefined
+
+liftFreshVarM :: FreshVarM a -> LR a
+liftFreshVarM m = LR $ \env -> do
+  runFreshVarM (lrIdSupply env) m
 
 lookupKnownValue :: Var -> LR MaybeValue
 lookupKnownValue v = LR $ \env ->
@@ -185,18 +190,18 @@ worthInlining kv =
 -- | Convert a known value to an expression.  It's an error if the known
 --   value cannot be converted (e.g. it's a data constructor with some
 --   unknown fields).
-knownValueExp :: KnownValue -> ExpM
+knownValueExp :: KnownValue -> Maybe ExpM
 knownValueExp kv = 
   case kv
-  of VarValue inf v -> ExpM $ VarE inf v
-     LitValue inf l -> ExpM $ LitE inf l
-     FunValue inf f -> ExpM $ LamE inf f
+  of VarValue inf v -> Just $ ExpM $ VarE inf v
+     LitValue inf l -> Just $ ExpM $ LitE inf l
+     FunValue inf f -> Just $ ExpM $ LamE inf f
      DataValue inf con _ ty_args args ->
        -- Get argument values.  All arguments must have a known value.
-       case sequence $ map (fmap knownValueExp) args
+       case sequence $ map (knownValueExp =<<) args
        of Just arg_values ->
-            ExpM $ AppE inf (ExpM $ VarE inf con) ty_args arg_values
-          Nothing -> internalError "knownValueExp: Unknown value"
+            Just $ ExpM $ AppE inf (ExpM $ VarE inf con) ty_args arg_values
+          Nothing -> Nothing
 
 computeExpValue :: ExpM -> LR MaybeValue
 computeExpValue (ExpM expression) =
@@ -226,6 +231,10 @@ computeExpValue (ExpM expression) =
      -- Cannot represent the value of other expressions
      _ -> return Nothing
 
+-- | Construct a known value for a data constructor application
+--
+--   FIXME: We don't handle writable references properly, neither 
+--   in data values, nor in fields.  Come up with a plan for this.
 dataValue :: ExpInfo -> Var -> DataConType -> [TypM] -> [MaybeValue]
           -> MaybeValue
 dataValue inf op_var dcon_type ty_args args
@@ -394,7 +403,9 @@ rwVar original_expression inf v =
   where
     rewrite (Just val)
         -- Inline the value
-      | worthInlining val = (knownValueExp val, Just val)
+      | worthInlining val,
+        Just known_exp <- knownValueExp val = (known_exp, Just val)
+
         -- Otherwise, don't inline, but propagate the value
       | otherwise = (original_expression, Just val)
     rewrite Nothing =
@@ -480,12 +491,62 @@ rwLetrec inf defs body = withDefs defs $ \defs' -> do
 rwCase inf scrut alts = do
   (scrut', scrut_val) <- rwExp scrut
   
-  -- TODO: Case of known value transformation
-  alts' <- mapM rwAlt alts
-  return (ExpM $ CaseE inf scrut' alts', Nothing)
+  case scrut_val of {-
+    -- Commented out because we don't handle WriteRT fields properly
+    Just (DataValue _ con _ ty_args margs)
+      | Just args <- sequence $ map (knownValueExp =<<) margs -> do
+        -- Case of known value.  Replace this case statement with the
+        -- appropriate alternative.
+        new_expr <- inline_alternative con ty_args args
+        traceShow (text "Rewrote" <+> pprExp (ExpM $ CaseE inf scrut alts) $$
+                   text "to" <+> pprExp new_expr) $
+          rwExp new_expr -}
+    _ -> do
+      let scrutinee_var =
+            case scrut'
+            of ExpM (VarE _ scrut_var) -> Just scrut_var
+               _ -> Nothing
 
-rwAlt :: AltM -> LR AltM
-rwAlt (AltM (Alt const tyArgs exTypes params body)) = assume_params $ do
+      -- Cannot eliminate this case statement
+      alts' <- mapM (rwAlt scrutinee_var) alts
+      return (ExpM $ CaseE inf scrut' alts', Nothing)
+  where
+    inline_alternative con ty_args args =
+      case find ((con ==) . altConstructor . fromAltM) alts
+      of Just (AltM alt) 
+           | length (altTyArgs alt) + length (altExTypes alt) /=
+             length ty_args ->
+               internalError "rwCase: Wrong number of type parameters"
+           | length (altParams alt) /= length args ->
+               internalError "rwCase: Wrong number of fields"
+           | otherwise ->
+               let ex_types = drop (length $ altTyArgs alt) ty_args
+               in bind_alternative
+                  (altExTypes alt) ex_types
+                  (altParams alt) args
+                  (altBody alt)
+               
+           -- Bind values with let 
+         Nothing -> internalError "rwCase: No matching alternative"
+
+    bind_alternative ex_pats ex_types pats args body =
+      let let_bindings = map (substitutePatM ex_type_subst) pats
+          subst_body = substitute ex_type_subst body
+          new_exp = foldr bind_field subst_body $ zip let_bindings args
+      in return new_exp
+      where
+        -- Substitute known types for the existential type variables
+        ex_type_subst =
+            substitution $
+            zip [v | TyPatM v _ <- ex_pats] $ map fromTypM ex_types
+        
+        -- Bind a data field to a variable
+        bind_field (pattern, value) body =
+          ExpM $ LetE inf pattern value body
+
+rwAlt :: Maybe Var -> AltM -> LR AltM
+rwAlt scr (AltM (Alt const tyArgs exTypes params body)) = assume_params $ do
+  -- TODO: If scrutinee variable is given, assign it a known value
   (body', _) <- rwExp body
   return $ AltM $ Alt const tyArgs exTypes params body'
   where
