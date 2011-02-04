@@ -80,7 +80,9 @@ withMaybeValue v (Just val) m = withKnownValue v val m
 -- | Add a function definition's value to the environment
 withDefValue :: Def Mem -> LR a -> LR a
 withDefValue (Def v f) m =
-  withKnownValue v (FunValue (funInfo $ fromFunM f) f) m
+  let fun_info = funInfo $ fromFunM f
+      fun_exp = ExpM $ VarE fun_info v
+  in withKnownValue v (FunValue fun_info (Just fun_exp) f) m
 
 withDefValues :: [Def Mem] -> LR a -> LR a
 withDefValues defs m = foldr withDefValue m defs
@@ -124,10 +126,14 @@ dumpKnownValues m = LR $ \env ->
 --   This is used for various kinds of compile-time partial evaluation:
 --   inlining, constant propagation, copy propagation, and case of
 --   known value elimination.
+--
+--   The 'cheapValue', if available, is a value that should be inlined
+--   even if it doesn't enable any optimizations.
 data KnownValue =
     -- | A function, which may be inlined where it is used.
     FunValue
-    { knownInfo :: ExpInfo 
+    { knownInfo :: ExpInfo
+    , _cheapValue :: !(Maybe ExpM)
     , knownFun  :: !FunM
     }
 
@@ -137,6 +143,7 @@ data KnownValue =
     --   a single-argument function that writes into its argument.
   | DataValue
     { knownInfo    :: ExpInfo 
+    , _cheapValue :: !(Maybe ExpM)
     , knownDataCon :: !Var 
       -- | Representation of the constructed value, as it would be seen when
       --   inspected by a case statement.
@@ -172,18 +179,44 @@ data KnownValue =
 
 type MaybeValue = Maybe KnownValue
 
+cheapValue :: KnownValue -> Maybe ExpM
+cheapValue (FunValue {_cheapValue = v}) = v
+cheapValue (DataValue {_cheapValue = v}) = v
+cheapValue (LitValue inf l) = Just (ExpM $ LitE inf l)
+cheapValue (VarValue inf v) = Just (ExpM $ VarE inf v)
+
+-- | Set the cheap value of a 'KnownValue', but only if it isn't already
+--   assigned.
+--
+--   This is used on values that are assigned to let-expressions.
+weakAssignCheapValue :: ExpM -> KnownValue -> KnownValue
+weakAssignCheapValue new_value kv
+  | isJust $ cheapValue kv = kv
+  | otherwise = kv {_cheapValue = Just new_value}
+
+weakAssignCheapVarValue :: ExpInfo -> Var -> KnownValue -> KnownValue
+weakAssignCheapVarValue inf v kv =
+  weakAssignCheapValue (ExpM (VarE inf v)) kv
+
 pprKnownValue :: KnownValue -> Doc
 pprKnownValue kv =
   case kv
-  of FunValue _ f -> pprFun f
-     DataValue _ con _ ty_args ex_types fields ->
+  of FunValue _ m_cheap_value f ->
+       with_cheap_value m_cheap_value $ pprFun f
+     DataValue _ m_cheap_value con _ ty_args ex_types fields ->
        let type_docs =
              map (text "@" <>) $ map (pprType . fromTypM) (ty_args ++ ex_types)
            field_docs = map pprMaybeValue fields
-       in pprVar con <>
-          parens (sep $ punctuate (text ",") $ type_docs ++ field_docs)
+           data_doc =
+             pprVar con <>
+             parens (sep $ punctuate (text ",") $ type_docs ++ field_docs)
+       in with_cheap_value m_cheap_value data_doc
      VarValue _ v -> pprVar v
      LitValue _ l -> pprLit l
+  where
+    with_cheap_value Nothing doc = doc
+    with_cheap_value (Just e) doc =
+      parens $ hang ((pprExp e) <+> text "=") 2 doc
      
 pprMaybeValue :: MaybeValue -> Doc
 pprMaybeValue Nothing = text "(?)"
@@ -197,8 +230,11 @@ knownValueMentions kv search_v =
   case kv
   of VarValue _ v -> v == search_v
      LitValue _ _ -> False
-     FunValue _ f -> search_v `Set.member` freeVariables f
-     DataValue _ _ _ ty_args ex_types args ->
+     FunValue _ cheap_value f ->
+       search_v `Set.member` freeVariables cheap_value ||
+       search_v `Set.member` freeVariables f
+     DataValue _ cheap_value _ _ ty_args ex_types args ->
+       search_v `Set.member` freeVariables cheap_value ||
        any (`typeMentions` search_v) (map fromTypM ty_args) ||
        any (`typeMentions` search_v) (map fromTypM ex_types) ||
        any (`maybeValueMentions` search_v) args
@@ -211,9 +247,11 @@ knownValueMentionsAny kv search_vs =
   case kv
   of VarValue _ v -> v `Set.member` search_vs
      LitValue _ _ -> False
-     FunValue _ f -> not $ Set.null $
-                     Set.intersection search_vs (freeVariables f)
-     DataValue _ _ _ ty_args ex_types args ->
+     FunValue _ cheap_value f ->
+       not (Set.null $ Set.intersection search_vs (freeVariables f)) ||
+       not (Set.null $ Set.intersection search_vs (freeVariables cheap_value))
+     DataValue _ cheap_value _ _ ty_args ex_types args ->
+       not (Set.null $ Set.intersection search_vs (freeVariables cheap_value)) ||
        any (`typeMentionsAny` search_vs) (map fromTypM ty_args) ||
        any (`typeMentionsAny` search_vs) (map fromTypM ex_types) ||
        any (`maybeValueMentionsAny` search_vs) args
@@ -228,8 +266,8 @@ maybeValueMentionsAny (Just kv) v = knownValueMentionsAny kv v
 
 -- | Given that this is the value of an expression, should we replace the  
 --   expression with this value?
-worthInlining :: KnownValue -> Bool
-worthInlining kv = 
+worthPropagating :: KnownValue -> Bool
+worthPropagating kv = 
   case kv
   of FunValue {} -> True -- Always inline functions
      DataValue {knownFields = args} -> null args -- Inline nullary data values
@@ -244,8 +282,10 @@ knownValueExp kv =
   case kv
   of VarValue inf v -> Just $ ExpM $ VarE inf v
      LitValue inf l -> Just $ ExpM $ LitE inf l
-     FunValue inf f -> Just $ ExpM $ LamE inf f
-     DataValue inf con _ ty_args ex_types args ->
+     FunValue _ (Just cheap_value) _ -> Just cheap_value
+     FunValue inf Nothing f -> Just (ExpM $ LamE inf f)
+     DataValue _ (Just cheap_value) _ _ _ _ _ -> Just cheap_value
+     DataValue inf Nothing con _ ty_args ex_types args ->
        -- Get argument values.  All arguments must have a known value.
        case sequence $ map (knownValueExp =<<) args
        of Just arg_values ->
@@ -263,17 +303,27 @@ forgetVariables forget_vars mv = forget mv
            | v `Set.member` forget_vars -> Nothing
            | otherwise -> Just kv
          LitValue _ _ -> Just kv
-         FunValue _ f
-           | Set.null $ freeVariables f `Set.intersection` forget_vars ->
-               Just kv
-           | otherwise -> Nothing
-         DataValue inf con repr ty_args ex_types args
+         FunValue inf cheap_value f
+           | not (Set.null $ Set.intersection forget_vars (freeVariables f)) ->
+               Nothing
+           | otherwise ->
+             let new_cheap_value =
+                   if Set.null $ Set.intersection forget_vars (freeVariables cheap_value)
+                   then cheap_value
+                   else Nothing
+             in Just $ FunValue inf new_cheap_value f
+
+         DataValue inf m_cheap_value con repr ty_args ex_types args
            | any (`typeMentionsAny` forget_vars) (map fromTypM ty_args) ||
              any (`typeMentionsAny` forget_vars) (map fromTypM ex_types) ->
                Nothing
            | otherwise ->
                let args' = map forget args
-               in Just $ DataValue inf con repr ty_args ex_types args'
+                   m_cheap_value' =
+                     if Set.null $ Set.intersection forget_vars (freeVariables m_cheap_value)
+                     then m_cheap_value
+                     else Nothing
+               in Just $ DataValue inf m_cheap_value' con repr ty_args ex_types args'
 
 -- | Construct a known value for a data constructor application,
 --   given the arguments.  If this data constructor takes an output pointer
@@ -293,7 +343,7 @@ dataValue inf d_type dcon_type ty_args args
                 BoxRT -> arg_value
                 _ -> Nothing
             | (fld_repr ::: _, arg_value) <- zip field_types args]
-      in Just (DataValue inf (dataConCon dcon_type)
+      in Just (DataValue inf Nothing (dataConCon dcon_type)
                case_repr parametric_ty_args existential_ty_args remembered_arg_values)
   | otherwise = Nothing
   where
@@ -337,7 +387,8 @@ initializeKnownValues tenv =
          null (dataConPatternArgs dcon) =
            let rrepr ::: _ = dataConPatternRange dcon
                con = dataConCon dcon
-           in Just $ DataValue defaultExpInfo con rrepr [] [] []
+               cheap_expr = Just (ExpM $ VarE defaultExpInfo con)
+           in Just $ DataValue defaultExpInfo cheap_expr con rrepr [] [] []
        | otherwise = Nothing
               
 -------------------------------------------------------------------------------
@@ -345,6 +396,9 @@ initializeKnownValues tenv =
 
 -- | Given a function and its arguments, get an expresion equivalent to
 --   the function applied to those arguments.
+--
+--   No need to simplify the expression; it will be rewritten after beta
+--   reduction.
 betaReduce :: (Monad m, Supplies m VarID) =>
               ExpInfo -> FunM -> [TypM] -> [ExpM] -> m ExpM
 betaReduce inf (FunM fun) ty_args args = do
@@ -425,9 +479,10 @@ delveExp (ExpM ex) = do
           return ( letPart:letPs , body2)
 
     AppE inf oper tyArgs args -> do
+      (letPart1, toReplaceOper) <- delveExp oper
       (letParts, toReplaceArgs) <- mapAndUnzipM delveExp args
-      let letParts' = concat letParts
-      let replacedApp = ExpM $ AppE inf oper tyArgs toReplaceArgs
+      let letParts' = letPart1 ++ concat letParts
+      let replacedApp = ExpM $ AppE inf toReplaceOper tyArgs toReplaceArgs
       return (letParts', replacedApp)
 
     _ -> return ([], ExpM ex)
@@ -518,7 +573,7 @@ rwExp' expression = do
     AppE inf op ty_args args -> rwApp inf op ty_args args
     LamE inf fun -> do
       fun' <- rwFun fun
-      rwExpReturn (ExpM $ LamE inf fun', Just $ FunValue inf fun')
+      rwExpReturn (ExpM $ LamE inf fun', Just $ FunValue inf Nothing fun')
     LetE inf bind val body -> rwLet inf bind val body
     LetrecE inf defs body -> rwLetrec inf defs body
     CaseE inf scrut alts -> rwCase inf scrut alts
@@ -539,8 +594,7 @@ rwVar original_expression inf v =
   where
     rewrite (Just val)
         -- Inline the value
-      | worthInlining val,
-        Just known_exp <- knownValueExp val = (known_exp, Just val)
+      | Just cheap_value <- cheapValue val = (cheap_value, Just val)
 
         -- Otherwise, don't inline, but propagate the value
       | otherwise = (original_expression, Just val)
@@ -558,7 +612,7 @@ rwApp inf op ty_args args = do
     floatedContextSetup float_op_bind $
     -- Is this a fully applied call to a known function or data constructor?
     case op_val
-    of Just (FunValue _ funm@(FunM fun))
+    of Just (FunValue _ _ funm@(FunM fun))
          | length (funTyParams fun) == length ty_args &&
            length (funParams fun) == length args ->
              inline_function_call funm
@@ -622,8 +676,15 @@ rwDataConApp inf op data_type dcon_type float_spec ty_args args = do
            
   return (floatbind, new_exp, value)
   where
+    -- Decide whether to float a field.
+    -- If a parameter was given, the field is floatable.
+    -- Float if it's floatable, and not a very simple expression.
     rw_field Nothing arg = rw_unfloated_field arg
-    rw_field (Just ptype) arg = rw_floated_field ptype arg
+    rw_field (Just ptype) arg = 
+      case fromExpM arg
+      of VarE {} -> rw_unfloated_field arg
+         LitE {} -> rw_unfloated_field arg
+         _ -> rw_floated_field ptype arg
     
     -- Rewrite and float a field.
     -- The field's value gets assigned to a new variable.
@@ -631,17 +692,19 @@ rwDataConApp inf op data_type dcon_type float_spec ty_args args = do
     rw_floated_field param_type arg = do
       (arg', arg_value) <- rwExp arg
       arg_var <- newAnonymousVar ObjectLevel
-      let pattern = MemVarP arg_var param_type
+      let local_arg_value =
+            fmap (weakAssignCheapVarValue inf arg_var) arg_value
+          pattern = MemVarP arg_var param_type
           context = contextItem $ LetCtx inf pattern arg'
           env =
-            withMaybeValue arg_var arg_value .
+            withMaybeValue arg_var local_arg_value .
             assumeParamType arg_var param_type
           
           float_bind =
             RWFloat { floatedContextSetup = env
                     , floatedVariables = Set.singleton arg_var
                     , floatedBindings = [context]}
-      return (float_bind, ExpM $ VarE inf arg_var, arg_value)
+      return (float_bind, ExpM $ VarE inf arg_var, local_arg_value)
     
     -- Rewrite a field.  Don't float it.
     rw_unfloated_field arg = do
@@ -652,11 +715,15 @@ rwLet inf bind val body =
   case bind
   of MemVarP bind_var bind_rtype -> do
        (val', val_value) <- rwExp val
+       
+       -- The variable can be used to refer to this value
+       let local_val_value =
+             fmap (weakAssignCheapVarValue inf bind_var) val_value
 
        -- Add the local variable to the environment while rewriting the body
        (body', body_val) <-
          assumeParamType bind_var bind_rtype $
-         withMaybeValue bind_var val_value $
+         withMaybeValue bind_var local_val_value $
          rwExp body
        
        let ret_val = mask_local_variable bind_var body_val
@@ -702,7 +769,7 @@ rwCase inf scrut alts = do
   (scrut', scrut_val) <- rwExp scrut
   
   case scrut_val of
-    Just (DataValue _ con _ _ ex_args margs) ->
+    Just (DataValue _ _ con _ _ ex_args margs) ->
       -- Case of known value.  Select the appropriate alternative and discard
       -- the others.
       case find ((con ==) . altConstructor . fromAltM) alts
