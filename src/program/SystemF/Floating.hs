@@ -7,7 +7,12 @@ expressions this way.
 -}
 
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
-module SystemF.Floating(floatModule)
+module SystemF.Floating
+       (Context,
+        ContextItem, contextItem,
+        ContextExp(..),
+        applyContext,
+        floatModule)
 where
 
 import Control.Monad

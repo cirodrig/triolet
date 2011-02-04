@@ -1,5 +1,5 @@
 
-{-# LANGUAGE TypeSynonymInstances, FlexibleContexts #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types #-}
 module SystemF.LocalExprRewrite (rewriteLocalExpr)
 where
 
@@ -7,14 +7,17 @@ import Control.Monad
 import qualified Data.IntMap as IntMap
 import Data.List as List
 import Data.Maybe
+import Data.Monoid
 import qualified Data.Set as Set
 import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
+import SystemF.Floating
 import SystemF.MemoryIR
 import SystemF.Syntax
 import SystemF.Rename
 import SystemF.TypecheckMem(functionType)
-import qualified SystemF.PrintMemoryIR
+import SystemF.PrintMemoryIR
 
 import Common.Error
 import Common.Identifier
@@ -104,6 +107,15 @@ assumeDefs defs m = foldr assumeDef m defs
 assumeDef :: Def Mem -> LR a -> LR a
 assumeDef (Def v f) m = assume v (BoxRT ::: functionType f) m
 
+-- | Print the known values on entry to the computation.
+dumpKnownValues :: LR a -> LR a
+dumpKnownValues m = LR $ \env ->
+  let kv_doc = hang (text "dumpKnownValues") 2 $
+               vcat [hang (text (show n)) 8 (pprKnownValue kv)
+                    | (n, kv) <- IntMap.toList $ lrKnownValues env]
+  in traceShow kv_doc $ runLR m env
+
+
 -------------------------------------------------------------------------------
 -- Known values
 
@@ -120,12 +132,24 @@ data KnownValue =
     }
 
     -- | A fully applied data constructor.
+    --
+    --   In the case of reference objects, the fully applied constructor is
+    --   a single-argument function that writes into its argument.
   | DataValue
     { knownInfo    :: ExpInfo 
     , knownDataCon :: !Var 
-    , knownRepr    :: !ReturnRepr 
+      -- | Representation of the constructed value, as it would be seen when
+      --   inspected by a case statement.
+    , knownRepr    :: !ReturnRepr
+      -- | Type arguments, which should match a case alternative's
+      --   'altTyArgs'.
     , knownTyArgs  :: [TypM] 
-    , knownArgs    :: [MaybeValue]
+      -- | Existential types, one for each pattern in a
+      --   case alternative's 'altExTypes'
+    , knownExTypes :: [TypM] 
+      -- | Data fields, one for each pattenr in a case
+      -- alternative's 'altParams'
+    , knownFields  :: [MaybeValue]
     }
     
     -- | A literal value.
@@ -134,9 +158,13 @@ data KnownValue =
     , knownLit  :: Lit
     }
     
-    -- | A variable reference.
+    -- | A variable reference, where nothing 
+    --   further is known about what's assigned to the variable.  This is
+    --   also used for data constructors that have not been applied to
+    --   arguments.
     --
-    --   This is only built for variables with unknown values.
+    --   Nullary data constructors are not described by a 'VarValue',
+    --   but rather by a 'DataValue'.
   | VarValue
     { knownInfo :: ExpInfo
     , knownVar  :: !Var
@@ -144,19 +172,40 @@ data KnownValue =
 
 type MaybeValue = Maybe KnownValue
 
+pprKnownValue :: KnownValue -> Doc
+pprKnownValue kv =
+  case kv
+  of FunValue _ f -> pprFun f
+     DataValue _ con _ ty_args ex_types fields ->
+       let type_docs =
+             map (text "@" <>) $ map (pprType . fromTypM) (ty_args ++ ex_types)
+           field_docs = map pprMaybeValue fields
+       in pprVar con <>
+          parens (sep $ punctuate (text ",") $ type_docs ++ field_docs)
+     VarValue _ v -> pprVar v
+     LitValue _ l -> pprLit l
+     
+pprMaybeValue :: MaybeValue -> Doc
+pprMaybeValue Nothing = text "(?)"
+pprMaybeValue (Just kv) = pprKnownValue kv
+
 -- | Is the variable mentioned in the value?
+--
+--   Does not check data constructors.
 knownValueMentions :: KnownValue -> Var -> Bool
 knownValueMentions kv search_v =
   case kv
   of VarValue _ v -> v == search_v
      LitValue _ _ -> False
      FunValue _ f -> search_v `Set.member` freeVariables f
-     DataValue _ con _ ty_args args ->
-       search_v == con ||
+     DataValue _ _ _ ty_args ex_types args ->
        any (`typeMentions` search_v) (map fromTypM ty_args) ||
+       any (`typeMentions` search_v) (map fromTypM ex_types) ||
        any (`maybeValueMentions` search_v) args
 
 -- | Is any of the variables mentioned in the value?
+--
+--   Does not check data constructors.
 knownValueMentionsAny :: KnownValue -> Set.Set Var -> Bool
 knownValueMentionsAny kv search_vs =
   case kv
@@ -164,9 +213,9 @@ knownValueMentionsAny kv search_vs =
      LitValue _ _ -> False
      FunValue _ f -> not $ Set.null $
                      Set.intersection search_vs (freeVariables f)
-     DataValue _ con _ ty_args args ->
-       con `Set.member` search_vs ||
+     DataValue _ _ _ ty_args ex_types args ->
        any (`typeMentionsAny` search_vs) (map fromTypM ty_args) ||
+       any (`typeMentionsAny` search_vs) (map fromTypM ex_types) ||
        any (`maybeValueMentionsAny` search_vs) args
 
 maybeValueMentions :: MaybeValue -> Var -> Bool
@@ -183,7 +232,7 @@ worthInlining :: KnownValue -> Bool
 worthInlining kv = 
   case kv
   of FunValue {} -> True -- Always inline functions
-     DataValue {knownArgs = args} -> null args -- Inline nullary data values
+     DataValue {knownFields = args} -> null args -- Inline nullary data values
      LitValue {} -> True
      VarValue {} -> True
 
@@ -196,63 +245,84 @@ knownValueExp kv =
   of VarValue inf v -> Just $ ExpM $ VarE inf v
      LitValue inf l -> Just $ ExpM $ LitE inf l
      FunValue inf f -> Just $ ExpM $ LamE inf f
-     DataValue inf con _ ty_args args ->
+     DataValue inf con _ ty_args ex_types args ->
        -- Get argument values.  All arguments must have a known value.
        case sequence $ map (knownValueExp =<<) args
        of Just arg_values ->
-            Just $ ExpM $ AppE inf (ExpM $ VarE inf con) ty_args arg_values
+            Just $ ExpM $ AppE inf (ExpM $ VarE inf con) (ty_args ++ ex_types) arg_values
           Nothing -> Nothing
 
-computeExpValue :: ExpM -> LR MaybeValue
-computeExpValue (ExpM expression) =
-  case expression
-  of VarE inf v -> do
-       -- If the variable's value is known, return that.  Otherwise,  
-       -- propagate the variable to all its uses.
-       mval <- lookupKnownValue v
-       case mval of
-         Just val -> return mval
-         Nothing -> return $ Just (VarValue inf v)
-     LitE inf l -> return $ Just (LitValue inf l)
-     
-     AppE inf op ty_args args -> do
-       tenv <- getTypeEnv
+-- | Remove references to any of the given variables in the known value
+forgetVariables :: Set.Set Var -> MaybeValue -> MaybeValue
+forgetVariables forget_vars mv = forget mv
+  where
+    forget Nothing = Nothing
+    forget (Just kv) =
+      case kv
+      of VarValue _ v 
+           | v `Set.member` forget_vars -> Nothing
+           | otherwise -> Just kv
+         LitValue _ _ -> Just kv
+         FunValue _ f
+           | Set.null $ freeVariables f `Set.intersection` forget_vars ->
+               Just kv
+           | otherwise -> Nothing
+         DataValue inf con repr ty_args ex_types args
+           | any (`typeMentionsAny` forget_vars) (map fromTypM ty_args) ||
+             any (`typeMentionsAny` forget_vars) (map fromTypM ex_types) ->
+               Nothing
+           | otherwise ->
+               let args' = map forget args
+               in Just $ DataValue inf con repr ty_args ex_types args'
 
-       -- If the operator is a data constructor, get its value 
-       case op of
-         ExpM (VarE _ op_var)
-           | Just dcon_type <- lookupDataCon op_var tenv -> do
-               arg_values <- mapM computeExpValue args
-               return $ dataValue inf op_var dcon_type ty_args arg_values
-
-         _ -> return Nothing
-     LamE inf f -> return $ Just (FunValue inf f)
-
-     -- Cannot represent the value of other expressions
-     _ -> return Nothing
-
--- | Construct a known value for a data constructor application
---
---   FIXME: We don't handle writable references properly, neither 
---   in data values, nor in fields.  Come up with a plan for this.
-dataValue :: ExpInfo -> Var -> DataConType -> [TypM] -> [MaybeValue]
+-- | Construct a known value for a data constructor application,
+--   given the arguments.  If this data constructor takes an output pointer
+--   argument, that argument should /not/ be included among the parameters.
+dataValue :: ExpInfo
+          -> DataType           -- ^ The data type being constructed
+          -> DataConType        -- ^ The data constructor being used
+          -> [TypM]             -- ^ Type arguments to the constructor
+          -> [MaybeValue]       -- ^ Value arguments to the constructor
           -> MaybeValue
-dataValue inf op_var dcon_type ty_args args
-  | ok_for_inlining,
-    length ty_args == (length (dataConPatternParams dcon_type) +
-                       length (dataConPatternExTypes dcon_type)),
-    length args == length (dataConPatternArgs dcon_type) =
-      Just (DataValue inf op_var return_repr ty_args args)
+dataValue inf d_type dcon_type ty_args args
+  | length ty_args == num_expected_ty_args,
+    length args == num_expected_args =
+      let remembered_arg_values =
+            [case fld_repr
+             of ValRT -> arg_value
+                BoxRT -> arg_value
+                _ -> Nothing
+            | (fld_repr ::: _, arg_value) <- zip field_types args]
+      in Just (DataValue inf (dataConCon dcon_type)
+               case_repr parametric_ty_args existential_ty_args remembered_arg_values)
   | otherwise = Nothing
   where
-    return_repr = case dataConPatternRange dcon_type
-                  of repr ::: _ -> repr
+    (field_types, result_type) =
+      instantiateDataConTypeWithExistentials dcon_type (map fromTypM ty_args)
 
-    ok_for_inlining = 
-      case return_repr
-      of ValRT -> True
-         BoxRT -> True
-         _ -> False
+    -- Representation of this data value when inspected by a case statement 
+    case_repr =
+      case dataTypeRepresentation d_type
+      of Value -> ValRT
+         Boxed -> BoxRT
+         Referenced -> ReadRT
+
+    dcon_num_pattern_params = length (dataConPatternParams dcon_type)
+
+    -- The number of type arguments needed to make a fully applied
+    -- data constructor
+    num_expected_ty_args = dcon_num_pattern_params +
+                           length (dataConPatternExTypes dcon_type)
+
+    -- The number of value arguments needed to make a fully applied
+    -- data constructor.  There's an extra argument for the output pointer
+    -- if the result is a reference.
+    num_expected_args = length (dataConPatternArgs dcon_type)
+    
+    parametric_ty_args = take dcon_num_pattern_params ty_args
+    existential_ty_args = drop dcon_num_pattern_params ty_args
+
+    -- 
   
 -- | Create known values for data constructors in the global type environment.
 --   In particular, nullary data constructors get a 'DataValue'.
@@ -267,7 +337,7 @@ initializeKnownValues tenv =
          null (dataConPatternArgs dcon) =
            let rrepr ::: _ = dataConPatternRange dcon
                con = dataConCon dcon
-           in Just $ DataValue defaultExpInfo con rrepr [] []
+           in Just $ DataValue defaultExpInfo con rrepr [] [] []
        | otherwise = Nothing
               
 -------------------------------------------------------------------------------
@@ -308,7 +378,7 @@ data LetPart s = LetPart { lpInfo :: ExpInfo
                          -- Body :: Exp s
                          }
                   
-type LetPartM = LetPart Mem                                                                
+type LetPartM = LetPart Mem
   
 constructLet :: ExpM -> [LetPartM] -> LR ExpM
 constructLet body [] = return body
@@ -320,6 +390,28 @@ constructLet body parts = do
     shapeLet :: ExpM -> LetPartM -> LR ExpM
     shapeLet body (LetPart lpInf lpBind lpVal) =
       return $ ExpM $ LetE lpInf lpBind lpVal body
+
+-- | Determine which parameters of an application term should be floated.
+--   Returns a list containing a 'ParamType' for each argument that should be
+--   floated.  The caller should check that the list length is equal to the 
+--   actual number of operands in the application term.
+floatedAppParameters :: DataConType -> [TypM] -> Maybe [Maybe ParamType]
+floatedAppParameters dcon_type ty_args
+  -- Float if all type arguments are supplied,
+  -- and the representation is Value or Boxed
+  | length ty_args == length (dataConPatternParams dcon_type) +
+                      length (dataConPatternExTypes dcon_type) =
+      let types = map fromTypM ty_args
+          (field_types, _) =
+            instantiateDataConTypeWithExistentials dcon_type types
+      in Just $ map floatable field_types
+  | otherwise = Nothing
+  where
+    floatable (rrepr ::: ty) =
+      case rrepr
+      of ValRT -> Just (ValPT Nothing ::: ty)
+         BoxRT -> Just (BoxPT ::: ty)
+         _ -> Nothing
 
 delveExp :: ExpM -> LR ([LetPartM], ExpM)
 delveExp (ExpM ex) = do
@@ -337,6 +429,7 @@ delveExp (ExpM ex) = do
       let letParts' = concat letParts
       let replacedApp = ExpM $ AppE inf oper tyArgs toReplaceArgs
       return (letParts', replacedApp)
+
     _ -> return ([], ExpM ex)
 
 {-
@@ -378,28 +471,71 @@ restructureExp ex = do
 -------------------------------------------------------------------------------
 -- Traversing code
 
+data RWFloat =
+  RWFloat
+  { -- | Add floated variables' types and known values to the environment
+    floatedContextSetup :: forall a. LR a -> LR a
+    -- | The variables that are floated
+  , floatedVariables :: Set.Set Var
+    -- | The floated bindings
+  , floatedBindings :: Context
+  }
+
+-- | @f1 `mappend` f2@ puts f1 outside f2
+instance Monoid RWFloat where
+  mempty = RWFloat { floatedContextSetup = id
+                   , floatedVariables = Set.empty
+                   , floatedBindings = []}
+  f1 `mappend` f2 =
+    RWFloat { floatedContextSetup = floatedContextSetup f1 .
+                                    floatedContextSetup f2
+            , floatedVariables = floatedVariables f1 `Set.union`
+                                 floatedVariables f2
+              -- Note order of floated bindings: f2 goes on the inside
+            , floatedBindings = floatedBindings f2 ++ floatedBindings f1}
+
 -- | Rewrite an expression.
+--
 --   Return the expression's value if it can be determined at compile time.
 rwExp :: ExpM -> LR (ExpM, MaybeValue)
 rwExp expression = do
-  -- Simplify this expression
+  (flt, expression', mvalue) <- rwExp' expression
+  
+  -- If the known value mentions any floated variables, then forget it.
+  -- The floated variables are no longer in scope.
+  let ret_value = forgetVariables (floatedVariables flt) mvalue
+  return (applyContext (floatedBindings flt) expression', ret_value)
+
+rwExp' :: ExpM -> LR (RWFloat, ExpM, MaybeValue)
+rwExp' expression = do
+  -- Flatten nested let and case statements
   ex1 <- restructureExp expression
 
   -- Simplify subexpressions
   case fromExpM ex1 of
     VarE inf v -> rwVar ex1 inf v
-    LitE inf l -> return (ex1, Just $ LitValue inf l)
+    LitE inf l -> rwExpReturn (ex1, Just $ LitValue inf l)
     AppE inf op ty_args args -> rwApp inf op ty_args args
     LamE inf fun -> do
       fun' <- rwFun fun
-      return (ExpM $ LamE inf fun', Just $ FunValue inf fun')
+      rwExpReturn (ExpM $ LamE inf fun', Just $ FunValue inf fun')
     LetE inf bind val body -> rwLet inf bind val body
     LetrecE inf defs body -> rwLetrec inf defs body
     CaseE inf scrut alts -> rwCase inf scrut alts
+
+-- | Rewrite a list of expressions that are in the same scope,
+--   such as arguments of a function call.
+rwExps' :: [ExpM] -> LR (RWFloat, [ExpM], [MaybeValue])
+rwExps' es = do
+  results <- mapM rwExp' es
+  case unzip3 results of
+    (floats, exps, values) -> return (mconcat floats, exps, values)
+
+rwExpReturn (exp, val) = return (mempty, exp, val)
     
 -- | Rewrite a variable expression and compute its value.
 rwVar original_expression inf v =
-  return . rewrite =<< lookupKnownValue v
+  rwExpReturn . rewrite =<< lookupKnownValue v
   where
     rewrite (Just val)
         -- Inline the value
@@ -412,33 +548,105 @@ rwVar original_expression inf v =
       -- Set up for copy propagation
       (original_expression, Just $ VarValue inf v)
 
+rwApp :: ExpInfo -> ExpM -> [TypM] -> [ExpM]
+      -> LR (RWFloat, ExpM, MaybeValue)
 rwApp inf op ty_args args = do       
-  (op', op_val) <- rwExp op
+  (float_op_bind, op', op_val) <- rwExp' op
+
+  -- Add the operator's value to the environment while processing arguments
+  (result_float, result_exp, result_val) <-
+    floatedContextSetup float_op_bind $
+    -- Is this a fully applied call to a known function or data constructor?
+    case op_val
+    of Just (FunValue _ funm@(FunM fun))
+         | length (funTyParams fun) == length ty_args &&
+           length (funParams fun) == length args ->
+             inline_function_call funm
+
+       Just (VarValue _ op_var) -> do
+         -- Check if it's a data constructor, and if so, rewrite it
+         data_con_result <- tryRwDataConApp inf op' op_var ty_args args
+         case data_con_result of
+           Just result -> return result
+           Nothing -> unknown_app op'
+
+       _ -> unknown_app op'
   
-  -- Is this a fully applied call to a known function?
-  case op_val of
-    Just (FunValue _ funm@(FunM fun))
-      | length (funTyParams fun) == length ty_args &&
-        length (funParams fun) == length args -> do
-          -- Inline the function and continue to simplify it  
-          rwExp =<< betaReduce inf funm ty_args args
-    _ -> do
-      -- Continue processing function arguments
-      (args', arg_vals) <- mapAndUnzipM rwExp args
-      value <- make_app_value op' arg_vals
-      return (ExpM $ AppE inf op' ty_args args', value)
+  -- Include the operator's floated bindings in the result
+  return (float_op_bind `mappend` result_float, result_exp, result_val)
   where
-    -- If the operator is a data constructor,
-    -- then try to build a data constructor value
-    make_app_value new_op arg_vals = 
-      case new_op
-      of ExpM (VarE _ op_var) -> do
-           tenv <- getTypeEnv
-           case lookupDataCon op_var tenv of
-             Just dcon_type ->
-               return $ dataValue inf op_var dcon_type ty_args arg_vals
-             Nothing -> return Nothing
+    unknown_app op' = do
+      (arg_floats, args', _) <- rwExps' args
+      let new_exp = ExpM $ AppE inf op' ty_args args'
+      return (arg_floats, new_exp, Nothing)
+
+    -- Inline the function call and continue to simplify it.
+    -- The arguments will be processed after inlining.
+    inline_function_call funm =
+      rwExp' =<< betaReduce inf funm ty_args args
+
+-- | Try to rewrite a data constructor application.
+--   Return the rewritten result if successful, Nothing otherwise.
+tryRwDataConApp :: ExpInfo
+                -> ExpM         -- ^ Data constructor expression
+                -> Var          -- ^ Data constructor variable
+                -> [TypM]       -- ^ Type arguments
+                -> [ExpM]       -- ^ Value arguments, not simplified yet
+                -> LR (Maybe (RWFloat, ExpM, MaybeValue))
+tryRwDataConApp inf op op_var ty_args args = do
+  tenv <- getTypeEnv
+  case lookupDataConWithType op_var tenv of
+    Just (con_type, dcon_type) ->
+      case floatedAppParameters dcon_type ty_args
+      of Just float_spec | length float_spec == length args ->
+           liftM Just $
+           rwDataConApp inf op con_type dcon_type float_spec ty_args args
          _ -> return Nothing
+    _ -> return Nothing
+
+-- | Rewrite a data constructor application.  Called by 'tryRwDataConApp'.
+rwDataConApp :: ExpInfo
+             -> ExpM            -- ^ Data constructor expression
+             -> DataType        -- ^ Data type being constructed
+             -> DataConType     -- ^ Data constructor used
+             -> [Maybe ParamType] -- ^ Which arguments should be floated
+             -> [TypM]          -- ^ Type arguments
+             -> [ExpM]          -- ^ Value arguments, not simplified yet
+             -> LR (RWFloat, ExpM, MaybeValue)
+rwDataConApp inf op data_type dcon_type float_spec ty_args args = do
+  fields <- zipWithM rw_field float_spec args
+  let (floatbinds, args', arg_values) = unzip3 fields
+      floatbind = mconcat floatbinds
+      value = dataValue inf data_type dcon_type ty_args arg_values
+      new_exp = ExpM $ AppE inf op ty_args args'
+           
+  return (floatbind, new_exp, value)
+  where
+    rw_field Nothing arg = rw_unfloated_field arg
+    rw_field (Just ptype) arg = rw_floated_field ptype arg
+    
+    -- Rewrite and float a field.
+    -- The field's value gets assigned to a new variable.
+    -- Return a function that adds the new variable to the environment.
+    rw_floated_field param_type arg = do
+      (arg', arg_value) <- rwExp arg
+      arg_var <- newAnonymousVar ObjectLevel
+      let pattern = MemVarP arg_var param_type
+          context = contextItem $ LetCtx inf pattern arg'
+          env =
+            withMaybeValue arg_var arg_value .
+            assumeParamType arg_var param_type
+          
+          float_bind =
+            RWFloat { floatedContextSetup = env
+                    , floatedVariables = Set.singleton arg_var
+                    , floatedBindings = [context]}
+      return (float_bind, ExpM $ VarE inf arg_var, arg_value)
+    
+    -- Rewrite a field.  Don't float it.
+    rw_unfloated_field arg = do
+      (arg', arg_value) <- rwExp arg
+      return (mempty, arg', arg_value)
 
 rwLet inf bind val body =       
   case bind
@@ -452,7 +660,7 @@ rwLet inf bind val body =
          rwExp body
        
        let ret_val = mask_local_variable bind_var body_val
-       return (ExpM $ LetE inf bind val' body', ret_val)
+       rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
 
      LocalVarP bind_var bind_type dict -> do
        (dict', _) <- rwExp dict
@@ -470,7 +678,7 @@ rwLet inf bind val body =
        let ret_val = mask_local_variable bind_var body_val
        let ret_exp =
              ExpM $ LetE inf (LocalVarP bind_var bind_type dict') val' body'
-       return (ret_exp, ret_val)
+       rwExpReturn (ret_exp, ret_val)
 
      MemWildP {} -> internalError "rwLet"
   where
@@ -488,63 +696,90 @@ rwLetrec inf defs body = withDefs defs $ \defs' -> do
       ret_value = if body_value `maybeValueMentionsAny` local_vars
                   then Nothing
                   else body_value
-  return (ExpM $ LetrecE inf defs' body', ret_value)
+  rwExpReturn (ExpM $ LetrecE inf defs' body', ret_value)
 
 rwCase inf scrut alts = do
   (scrut', scrut_val) <- rwExp scrut
   
-  case scrut_val of {-
-    -- Commented out because we don't handle WriteRT fields properly
-    Just (DataValue _ con _ ty_args margs)
-      | Just args <- sequence $ map (knownValueExp =<<) margs -> do
-        -- Case of known value.  Replace this case statement with the
-        -- appropriate alternative.
-        new_expr <- inline_alternative con ty_args args
-        traceShow (text "Rewrote" <+> pprExp (ExpM $ CaseE inf scrut alts) $$
-                   text "to" <+> pprExp new_expr) $
-          rwExp new_expr -}
-    _ -> do
-      let scrutinee_var =
-            case scrut'
-            of ExpM (VarE _ scrut_var) -> Just scrut_var
-               _ -> Nothing
-
-      -- Cannot eliminate this case statement
-      alts' <- mapM (rwAlt scrutinee_var) alts
-      return (ExpM $ CaseE inf scrut' alts', Nothing)
-  where
-    inline_alternative con ty_args args =
+  case scrut_val of
+    Just (DataValue _ con _ _ ex_args margs) ->
+      -- Case of known value.  Select the appropriate alternative and discard
+      -- the others.
       case find ((con ==) . altConstructor . fromAltM) alts
-      of Just (AltM alt) 
-           | length (altTyArgs alt) + length (altExTypes alt) /=
-             length ty_args ->
-               internalError "rwCase: Wrong number of type parameters"
-           | length (altParams alt) /= length args ->
-               internalError "rwCase: Wrong number of fields"
-           | otherwise ->
-               let ex_types = drop (length $ altTyArgs alt) ty_args
-               in bind_alternative
-                  (altExTypes alt) ex_types
-                  (altParams alt) args
-                  (altBody alt)
-               
-           -- Bind values with let 
-         Nothing -> internalError "rwCase: No matching alternative"
-
-    bind_alternative ex_pats ex_types pats args body =
-      let let_bindings = map (substitutePatM ex_type_subst) pats
-          subst_body = substitute ex_type_subst body
-          new_exp = foldr bind_field subst_body $ zip let_bindings args
-      in return new_exp
+      of Just altm ->
+           -- Try to inline this case alternative
+           case inline_alternative altm ex_args margs
+           of Just eliminated_case ->
+                -- Rewrite the new expression, including the body of the
+                -- alternative
+                rwExp' eliminated_case
+              Nothing -> no_eliminate scrut' [altm]
+    _ -> no_eliminate scrut' alts
+  where
+    -- Cannot eliminate this case statement.  Possibly eliminated
+    -- some case alternatives.
+    no_eliminate scrut' reduced_alts = do
+      alts' <- mapM (rwAlt scrutinee_var) reduced_alts
+      rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
       where
-        -- Substitute known types for the existential type variables
-        ex_type_subst =
-            substitution $
-            zip [v | TyPatM v _ <- ex_pats] $ map fromTypM ex_types
-        
-        -- Bind a data field to a variable
-        bind_field (pattern, value) body =
-          ExpM $ LetE inf pattern value body
+        scrutinee_var =
+          case scrut'
+          of ExpM (VarE _ scrut_var) -> Just scrut_var
+             _ -> Nothing
+
+    -- Try to inline a case alternative.  Succeed if all non-wildcard 
+    -- variables have a known value.  Otherwise fail.
+    -- This builds an expression and doesn't try to simplify it.
+    inline_alternative (AltM alt) ex_args args
+      | length (altExTypes alt) /= length ex_args =
+          internalError "rwCase: Wrong number of type parameters"
+      | length (altParams alt) /= length args =
+          internalError "rwCase: Wrong number of fields"
+      | otherwise =
+          let -- Substitute known types for the existential type variables
+              ex_type_subst =
+                substitution $
+                zip [v | TyPatM v _ <- altExTypes alt] $ map fromTypM ex_args
+
+              patterns = map (substitutePatM ex_type_subst) (altParams alt)
+              subst_body = substitute ex_type_subst (altBody alt)
+
+          in -- Identify (pattern, value) pairs that should be bound by 
+             -- let expressions
+             case sequence $ zipWith bind_field patterns args
+             of Nothing ->
+                  -- Cannot create bindings because some values are unknown
+                  Nothing
+                Just m_bindings ->
+                  let bindings = catMaybes m_bindings
+                      new_exp = foldr make_binding subst_body bindings
+                  in Just new_exp
+      where
+        make_binding (pat, rhs) body = ExpM $ LetE inf pat rhs body
+
+        -- Attempt to bind a value to a data field.
+        -- Return Nothing if a binding is required but cannot be built.
+        -- Return (Just Nothing) if no binding is required.
+        -- Return (Just (Just (p, v))) to produce binding (p, v).
+        bind_field :: PatM -> MaybeValue -> Maybe (Maybe (PatM, ExpM))
+        bind_field (MemWildP {}) _  =
+          return Nothing
+
+        bind_field pat@(MemVarP v (prepr ::: ptype)) kv
+          | okay_for_binding = do
+              value <- kv 
+              exp <- knownValueExp value
+              return $ Just (pat, exp)
+          | otherwise = Nothing   -- Cannot bind this pattern
+          where
+            -- We can only bind value and boxed parameters this way
+            okay_for_binding =
+              case prepr
+              of ValPT _ -> True
+                 BoxPT -> True
+                 _ -> False
+
+        bind_field _ _ = internalError "rwCase: Unexpected pattern"
 
 rwAlt :: Maybe Var -> AltM -> LR AltM
 rwAlt scr (AltM (Alt const tyArgs exTypes params body)) = assume_params $ do

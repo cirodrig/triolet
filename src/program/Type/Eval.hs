@@ -2,7 +2,8 @@
 module Type.Eval
        (typeOfApp,
         instantiateDataConType,
-        instantiateDataConTypeWithFreshVariables)
+        instantiateDataConTypeWithFreshVariables,
+        instantiateDataConTypeWithExistentials)
 where
 
 import Control.Monad.Reader
@@ -124,3 +125,41 @@ instantiateDataConTypeWithFreshVariables con_ty arg_vals = do
                   newAnonymousVar TypeLevel
   return $ instantiateDataConType con_ty arg_vals pattern_vars
 
+-- | Given a data constructor type and the type arguments at which it's used,
+--   including existential types, get the instantiated type.
+--
+--   Returns the the data constructor fields'
+--   types as they appear in a pattern match and the constructed value's type.
+-- The types are not typechecked.
+instantiateDataConTypeWithExistentials ::
+    DataConType -- ^ Type to instantiate
+ -> [Type]      -- ^ Type parameters and existential types
+ -> ([ReturnType], ReturnType)
+instantiateDataConTypeWithExistentials con_ty arg_vals
+  | length (dataConPatternParams con_ty) +
+    length (dataConPatternExTypes con_ty) /= length arg_vals =
+      internalError $ "instantiateDataConTypeWithExistentials: " ++
+                      "Wrong number of type parameters"
+  | otherwise =
+      let -- Assign parameters and existential types
+          type_params =
+            dataConPatternParams con_ty ++ dataConPatternExTypes con_ty
+          subst = instantiate_arguments emptySubstitution $
+                  zip type_params arg_vals
+
+          -- Apply the substitution to field and range types
+          fields = map (substituteBinding subst) $ dataConPatternArgs con_ty
+          range = substituteBinding subst $ dataConPatternRange con_ty
+      in (fields, range)
+  where
+    -- Instantiate the type by substituing arguments for the constructor's
+    -- type parameters
+    instantiate_arguments :: Substitution -> [(ParamType, Type)]
+                          -> Substitution
+    instantiate_arguments subst ((param_repr ::: _, arg_val) : args) =
+      let subst' = case param_repr
+                   of ValPT (Just param_var) ->
+                        insertSubstitution param_var arg_val subst
+      in instantiate_arguments subst' args
+  
+    instantiate_arguments subst' [] = subst'

@@ -7,6 +7,7 @@ module Type.Environment
         lookupType,
         lookupDataType,
         lookupDataCon,
+        lookupDataConWithType,
         getAllDataConstructors,
         emptyTypeEnv,
         wiredInTypeEnv,
@@ -126,6 +127,12 @@ lookupDataType v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Just (TyConTypeAssignment _ tc) -> Just tc
      _ -> Nothing
+
+lookupDataConWithType :: Var -> TypeEnv -> Maybe (DataType, DataConType)
+lookupDataConWithType v env = do
+  dcon <- lookupDataCon v env
+  dtype <- lookupDataType (dataConTyCon dcon) env
+  return (dtype, dcon)
 
 -- | Look up the type of a variable
 lookupType :: Var -> TypeEnv -> Maybe ReturnType

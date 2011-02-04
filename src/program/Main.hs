@@ -146,14 +146,19 @@ compilePyonToPyonAsm path text = do
   putStrLn "Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
   
+  -- Optimizations on memory representation.
+  -- First, perform a forward optimization pass which (among other things) 
+  -- inlines code to enable further optimization.  Then hoist definitions
+  -- and eliminate dead code.  These expose more optimization opportunities
+  -- that are captured by a second forward optimization pass.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   
   putStrLn "Rewritten-Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
   
-  -- Optimizations on memory representation
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateDeadCode mem_mod
+  mem_mod <- SystemF.rewriteLocalExpr mem_mod
 
   putStrLn "Floated"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod

@@ -34,11 +34,14 @@ renameTyPatM rn pattern =
 renamePatM :: Renaming -> PatM -> PatM
 renamePatM rn pattern =
   case pattern
-  of MemVarP v (repr ::: ty) ->
-       case repr
-       of ValPT (Just _) -> internalError "renamePatM: Superfluous binding"
-          _ -> MemVarP v (repr ::: rename rn ty)
+  of MemVarP v prepr -> MemVarP v (rename_prepr prepr)
      LocalVarP v ty dict -> LocalVarP v (rename rn ty) (rename rn dict)
+     MemWildP prepr -> MemWildP (rename_prepr prepr)
+  where
+    rename_prepr (repr ::: ty) =
+      case repr
+      of ValPT (Just _) -> internalError "renamePatM: Superfluous binding"
+         _ -> repr ::: rename rn ty
 
 -- | Freshen a type variable binding
 freshenTyPatM :: (Monad m, Supplies m VarID) => TyPatM -> m (TyPatM, Renaming)
