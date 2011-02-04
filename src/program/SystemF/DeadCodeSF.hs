@@ -1,5 +1,5 @@
 
-module SystemF.DeadCode(eliminateDeadCode)
+module SystemF.DeadCodeSF(eliminateDeadCode)
 where
 
 import Control.Monad.Writer

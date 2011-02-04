@@ -84,7 +84,7 @@ Executable pyon
     Untyped.TypeInference
     Untyped.TypeInferenceEval
     Untyped.Unification
-    SystemF.DeadCode
+    SystemF.DeadCodeSF
     SystemF.DictEnv
     SystemF.ElimPatternMatching
     SystemF.Floating

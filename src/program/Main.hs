@@ -22,7 +22,7 @@ import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
 import qualified Untyped.TypeInference as Untyped
 import qualified SystemF.PartialEval as SystemF
-import qualified SystemF.DeadCode as SystemF
+import qualified SystemF.DeadCodeSF as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.TypecheckSF
