@@ -12,6 +12,7 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
+import Builtins.Builtins
 import SystemF.Floating
 import SystemF.MemoryIR
 import SystemF.Syntax
@@ -176,6 +177,14 @@ data KnownValue =
     { knownInfo :: ExpInfo
     , knownVar  :: !Var
     }
+    
+    -- | A heap state value.  Only side-effecting expressions return these.
+  | KnownHeapState !HeapState
+ 
+-- | A known state of the contents of memory
+data HeapState =
+  -- | A known value is stored in a known address
+  StoredValue !KnownValue !Var
 
 type MaybeValue = Maybe KnownValue
 
@@ -184,6 +193,7 @@ cheapValue (FunValue {_cheapValue = v}) = v
 cheapValue (DataValue {_cheapValue = v}) = v
 cheapValue (LitValue inf l) = Just (ExpM $ LitE inf l)
 cheapValue (VarValue inf v) = Just (ExpM $ VarE inf v)
+cheapValue (KnownHeapState _) = Nothing
 
 -- | Set the cheap value of a 'KnownValue', but only if it isn't already
 --   assigned.
@@ -192,7 +202,10 @@ cheapValue (VarValue inf v) = Just (ExpM $ VarE inf v)
 weakAssignCheapValue :: ExpM -> KnownValue -> KnownValue
 weakAssignCheapValue new_value kv
   | isJust $ cheapValue kv = kv
-  | otherwise = kv {_cheapValue = Just new_value}
+  | otherwise =
+      case kv
+      of KnownHeapState _ -> kv -- Can't assign this a value
+         _ -> kv {_cheapValue = Just new_value}
 
 weakAssignCheapVarValue :: ExpInfo -> Var -> KnownValue -> KnownValue
 weakAssignCheapVarValue inf v kv =
@@ -213,6 +226,7 @@ pprKnownValue kv =
        in with_cheap_value m_cheap_value data_doc
      VarValue _ v -> pprVar v
      LitValue _ l -> pprLit l
+     KnownHeapState _ -> text "(heap)"
   where
     with_cheap_value Nothing doc = doc
     with_cheap_value (Just e) doc =
@@ -238,6 +252,8 @@ knownValueMentions kv search_v =
        any (`typeMentions` search_v) (map fromTypM ty_args) ||
        any (`typeMentions` search_v) (map fromTypM ex_types) ||
        any (`maybeValueMentions` search_v) args
+     KnownHeapState st ->
+       heapStateMentions st search_v
 
 -- | Is any of the variables mentioned in the value?
 --
@@ -255,6 +271,8 @@ knownValueMentionsAny kv search_vs =
        any (`typeMentionsAny` search_vs) (map fromTypM ty_args) ||
        any (`typeMentionsAny` search_vs) (map fromTypM ex_types) ||
        any (`maybeValueMentionsAny` search_vs) args
+     KnownHeapState st ->
+       heapStateMentionsAny st search_vs
 
 maybeValueMentions :: MaybeValue -> Var -> Bool
 maybeValueMentions Nothing _ = False
@@ -263,6 +281,17 @@ maybeValueMentions (Just kv) v = knownValueMentions kv v
 maybeValueMentionsAny :: MaybeValue -> Set.Set Var -> Bool
 maybeValueMentionsAny Nothing _ = False
 maybeValueMentionsAny (Just kv) v = knownValueMentionsAny kv v
+
+heapStateMentions st search_v =
+  case st
+  of StoredValue kv location ->
+       location == search_v || kv `knownValueMentions` search_v
+
+heapStateMentionsAny st search_vars =
+  case st
+  of StoredValue kv location ->
+       location `Set.member` search_vars ||
+       kv `knownValueMentionsAny` search_vars
 
 -- | Given that this is the value of an expression, should we replace the  
 --   expression with this value?
@@ -273,6 +302,7 @@ worthPropagating kv =
      DataValue {knownFields = args} -> null args -- Inline nullary data values
      LitValue {} -> True
      VarValue {} -> True
+     KnownHeapState {} -> False
 
 -- | Convert a known value to an expression.  It's an error if the known
 --   value cannot be converted (e.g. it's a data constructor with some
@@ -291,6 +321,7 @@ knownValueExp kv =
        of Just arg_values ->
             Just $ ExpM $ AppE inf (ExpM $ VarE inf con) (ty_args ++ ex_types) arg_values
           Nothing -> Nothing
+     KnownHeapState {} -> Nothing
 
 -- | Remove references to any of the given variables in the known value
 forgetVariables :: Set.Set Var -> MaybeValue -> MaybeValue
@@ -324,6 +355,11 @@ forgetVariables forget_vars mv = forget mv
                      then m_cheap_value
                      else Nothing
                in Just $ DataValue inf m_cheap_value' con repr ty_args ex_types args'
+         KnownHeapState (StoredValue stored_kv v)
+           | v `Set.member` forget_vars -> Nothing
+           | otherwise -> do
+               stored_kv' <- forget (Just stored_kv)
+               return $ KnownHeapState (StoredValue stored_kv' v)
 
 -- | Construct a known value for a data constructor application,
 --   given the arguments.  If this data constructor takes an output pointer
@@ -617,6 +653,15 @@ rwApp inf op ty_args args = do
            length (funParams fun) == length args ->
              inline_function_call funm
 
+       -- Some functions have special rewrite semantics
+       Just (VarValue _ op_var)
+         | op_var `isPyonBuiltin` the_store ->
+           rwStoreApp inf op' ty_args args
+         | op_var `isPyonBuiltin` the_load ->
+           rwLoadApp inf op' ty_args args
+         | op_var `isPyonBuiltin` the_copy ->
+           rwCopyApp inf op' ty_args args
+
        Just (VarValue _ op_var) -> do
          -- Check if it's a data constructor, and if so, rewrite it
          data_con_result <- tryRwDataConApp inf op' op_var ty_args args
@@ -638,6 +683,54 @@ rwApp inf op ty_args args = do
     -- The arguments will be processed after inlining.
     inline_function_call funm =
       rwExp' =<< betaReduce inf funm ty_args args
+
+-- | Attempt to statically evaluate a store
+rwStoreApp inf op' ty_args args = do
+  (arg_floats, args', arg_values) <- rwExps' args
+  let new_exp = ExpM $ AppE inf op' ty_args args'
+      new_value = stored_value arg_values
+  return (arg_floats, new_exp, new_value)
+  where
+    -- Keep track of what was stored in memory
+    stored_value [_, Just stored_value, Just (VarValue {knownVar = dstvar})] =
+      Just $ KnownHeapState (StoredValue stored_value dstvar)
+    stored_value [_, _, _] = Nothing
+    stored_value _ =
+      internalError "rwStoreApp: Wrong number of arguments in call"
+      
+-- | Attempt to statically evaluate a load
+rwLoadApp inf op' ty_args args = do
+  (arg_floats, args', arg_values) <- rwExps' args
+  let new_exp = ExpM $ AppE inf op' ty_args args'
+  case loaded_value arg_values of
+    Just (m_loaded_exp, new_value) ->
+      return (arg_floats, fromMaybe new_exp m_loaded_exp, new_value)
+    Nothing ->
+      return (arg_floats, new_exp, Nothing)
+  where
+    -- Do we know what was stored here?
+    loaded_value [_, Just (KnownHeapState (StoredValue kv _))] =
+      Just (cheapValue kv, Just kv)
+    loaded_value [_, _] = Nothing
+    loaded_value _ =
+      internalError "rwLoadApp: Wrong number of arguments in call"
+
+-- | Attempt to statically evaluate a copy
+rwCopyApp inf op' ty_args args = do
+  (arg_floats, args', arg_values) <- rwExps' args
+  let new_exp = ExpM $ AppE inf op' ty_args args'
+      new_value = copied_value arg_values
+  return (arg_floats, new_exp, Nothing)
+  where
+    -- Do we know what was stored here?
+    copied_value [_,
+                  Just (KnownHeapState (StoredValue kv _)),
+                  Just (VarValue {knownVar = dstvar})] =
+      -- Reference the source value instead of the destination value
+      Just (KnownHeapState (StoredValue kv dstvar))
+    copied_value [_, _, _] = Nothing
+    copied_value _ =
+      internalError "rwCopyApp: Wrong number of arguments in call"
 
 -- | Try to rewrite a data constructor application.
 --   Return the rewritten result if successful, Nothing otherwise.
