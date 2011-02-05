@@ -151,6 +151,8 @@ compilePyonToPyonAsm path text = do
   -- inlines code to enable further optimization.  Then hoist definitions
   -- and eliminate dead code.  These expose more optimization opportunities
   -- that are captured by a second forward optimization pass.
+  -- After this second optimization pass, eliminate dead code
+  -- in each function.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   
   putStrLn "Rewritten-Memory"
@@ -159,6 +161,7 @@ compilePyonToPyonAsm path text = do
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
 
   putStrLn "Floated"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
