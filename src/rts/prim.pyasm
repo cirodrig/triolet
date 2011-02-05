@@ -103,3 +103,11 @@ function mod_float(float x, float y) -> float {
 function div_float(float x, float y) -> float {
   x / y;
 };
+
+// Get a pointer to an array element
+function subscript
+ (unit _, unit _, owned repr, pointer base, int index) -> pointer {
+   typedef elt_type = bytes(value repr @! PassConv.size,
+                            value repr @! PassConv.align);
+   base @ const_array(value int 0, elt_type)[index];
+};

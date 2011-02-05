@@ -17,6 +17,7 @@ import SystemF.Floating
 import SystemF.MemoryIR
 import SystemF.Syntax
 import SystemF.Rename
+import SystemF.Rewrite
 import SystemF.TypecheckMem(functionType)
 import SystemF.PrintMemoryIR
 
@@ -646,33 +647,53 @@ rwApp inf op ty_args args = do
   -- Add the operator's value to the environment while processing arguments
   (result_float, result_exp, result_val) <-
     floatedContextSetup float_op_bind $
-    -- Is this a fully applied call to a known function or data constructor?
-    case op_val
-    of Just (FunValue _ _ funm@(FunM fun))
-         | length (funTyParams fun) == length ty_args &&
-           length (funParams fun) == length args ->
-             inline_function_call funm
+    rwAppWithOperator inf op' op_val ty_args args
 
-       -- Some functions have special rewrite semantics
-       Just (VarValue _ op_var)
-         | op_var `isPyonBuiltin` the_store ->
-           rwStoreApp inf op' ty_args args
-         | op_var `isPyonBuiltin` the_load ->
-           rwLoadApp inf op' ty_args args
-         | op_var `isPyonBuiltin` the_copy ->
-           rwCopyApp inf op' ty_args args
-
-       Just (VarValue _ op_var) -> do
-         -- Check if it's a data constructor, and if so, rewrite it
-         data_con_result <- tryRwDataConApp inf op' op_var ty_args args
-         case data_con_result of
-           Just result -> return result
-           Nothing -> unknown_app op'
-
-       _ -> unknown_app op'
-  
   -- Include the operator's floated bindings in the result
   return (float_op_bind `mappend` result_float, result_exp, result_val)
+
+-- | Rewrite an application, depending on what the operator is.
+--   The operator has been simplified, but the arguments have not.
+rwAppWithOperator inf op' op_val ty_args args =
+  -- If the operator is an application and there are no type arguments,
+  -- then uncurry the application
+  case op'
+  of ExpM (AppE _ inner_op inner_ty_args inner_args)
+       | null ty_args ->
+         rwAppWithOperator inf inner_op Nothing inner_ty_args (inner_args ++ args)
+     _ ->
+       -- Apply simplification tecnhiques specific to this operator
+       case op_val
+       of Just (FunValue _ _ funm@(FunM fun))
+            | length (funTyParams fun) == length ty_args &&
+              length (funParams fun) == length args ->
+                inline_function_call funm
+
+          -- Some functions have special rewrite semantics
+          Just (VarValue _ op_var)
+            | op_var `isPyonBuiltin` the_store ->
+              rwStoreApp inf op' ty_args args
+            | op_var `isPyonBuiltin` the_load ->
+              rwLoadApp inf op' ty_args args
+            | op_var `isPyonBuiltin` the_copy ->
+              rwCopyApp inf op' ty_args args
+
+          Just (VarValue _ op_var) -> do
+            -- Check if it's a data constructor, and if so, rewrite it
+            data_con_result <- tryRwDataConApp inf op' op_var ty_args args
+            case data_con_result of
+              Just result -> return result
+              Nothing -> do
+                tenv <- getTypeEnv
+                
+                -- Try to rewrite this application
+                rewritten <- liftFreshVarM $
+                             rewriteApp tenv inf op_var ty_args args
+                case rewritten of 
+                  Just new_expr -> rwExp' new_expr
+                  Nothing -> unknown_app op'
+
+          _ -> unknown_app op'
   where
     unknown_app op' = do
       (arg_floats, args', _) <- rwExps' args

@@ -84,6 +84,7 @@ Executable pyon
     Untyped.TypeInference
     Untyped.TypeInferenceEval
     Untyped.Unification
+    SystemF.Build
     SystemF.DeadCode
     SystemF.DeadCodeSF
     SystemF.DeadCodeMem
@@ -102,6 +103,7 @@ Executable pyon
     SystemF.PrintMemoryIR
     SystemF.Representation
     SystemF.Rename
+    SystemF.Rewrite
     SystemF.StreamSpecialize
     SystemF.Syntax
     SystemF.Typecheck

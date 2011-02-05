@@ -163,8 +163,6 @@ builtinFunctions =
      Right [| pyonBuiltin SystemF.the_TraversableDict_list_build |])
   , (PyonName module_list "list_traverse",
      Right [| pyonBuiltin SystemF.the_TraversableDict_list_traverse |]) {-
-  , (PyonName module_list "subscript",
-     Right [| pyonBuiltin (SystemF.the_fun_subscript) |])
   , (PyonName module_list "list_generate",
      Right [| pyonBuiltin (SystemF.the_fun_generateList) |])
   , (PyonName module_list "list_vGenerate",
@@ -174,9 +172,9 @@ builtinFunctions =
   , (PyonName module_stream "Stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
   , (PyonName module_stream "Stream_return",
-     Right [| pyonBuiltin (SystemF.the_oper_DO) |]) {-
-  , (PyonName module_stream "Stream_generate",
-     Right [| pyonBuiltin (SystemF.the_fun_generate) |]) -}
+     Right [| pyonBuiltin (SystemF.the_oper_DO) |])
+  , (PyonName module_stream "generate",
+     Right [| pyonBuiltin (SystemF.the_generate) |])
   , (PyonName module_stream "Stream_map",
      Right [| pyonBuiltin (SystemF.the_fun_map_Stream) |])
   , (PyonName module_stream "map",
@@ -211,6 +209,9 @@ builtinFunctions =
   , (PyonName module_structures "repr_PyonTuple2",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_PyonTuple2 |])
     
+  , (PyonName module_prim "subscript",
+     Right [| pyonBuiltin (SystemF.the_subscript) |])
+
     -- Functions that are replaced by primitive operations
   , (PyonName module_prim "storeBox",
      Right [| pyonBuiltin SystemF.the_storeBox |])

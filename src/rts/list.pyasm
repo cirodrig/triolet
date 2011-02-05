@@ -209,7 +209,8 @@ function inline list_traverse (unit _, owned elem_repr, pointer list) -> owned {
 
 
 function inline list_generate
-  (unit _, unit _, owned elem_repr, int count, owned f, pointer ret) -> () {
+  (unit _, unit _, owned elem_repr, IndexedInt count_n, owned f, pointer ret) -> () {
+  IndexedInt {count} = count_n;
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   typedef elem_type = bytes(value elem_size, value elem_align);
@@ -234,17 +235,6 @@ function inline list_vGenerate
   () call list_generate(x, y, repr, count, f, ret);
 };
 #endif
-
-// Get a pointer to an array element.
-// elem_repr : PassConv is the element's representation.
-// base is the base pointer
-// index is the index of the element to select
-function inline subscript(unit _, owned elem_repr, pointer base, int index) -> pointer {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  base @ array(value int 0, bytes(value elem_size, value elem_align))[index];
-};
-
 
 // Allocate and construct a list, given a suitably initialized data array.
 // The data array is stolen by the list.

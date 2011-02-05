@@ -6,12 +6,9 @@ extern function pyon.internal.list.list_build
 extern function pyon.internal.list.list_traverse
   (unit, owned, pointer) -> owned;
 extern function pyon.internal.list.list_generate
-  (unit, unit, owned, int, owned, pointer) -> ();
+  (unit, unit, owned, IndexedInt, owned, pointer) -> ();
 extern function pyon.internal.list.list_vGenerate
   (unit, unit, pointer, int, owned, pointer) -> ();
-
-extern function pyon.internal.list.subscript
-  (unit, owned, pointer, int) -> pointer;
 
 // Exported to C
 extern procedure pyon.internal.list.pyon_List_PyonInt_FromArray "pyon_List_PyonInt_FromArray"

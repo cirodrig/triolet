@@ -21,6 +21,10 @@ record PassConv {
   const owned finalize;               // Finalize a value
 };
 
+record IndexedInt {
+  const int n;
+};
+
 // Function info table
 record FunInfo(n_args) {
   const InfoTableHeader header;

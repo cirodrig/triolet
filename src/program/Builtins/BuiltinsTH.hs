@@ -207,6 +207,10 @@ pyonBuiltinVariableNames =
   , "copyBox"
   , "boxToPtr"
   , "ptrToBox"
+  
+    -- Inserted by rewrite rules
+  , "generate"
+  , "subscript"
   ]
 
 pyonBuiltinsSpecification =

@@ -46,3 +46,6 @@ extern function pyon.internal.stream.zip
    pointer, pointer, pointer) -> ();
 
 extern data owned pyon.internal.stream.Stream_count;
+
+extern function pyon.internal.stream.generate
+  (unit, unit, IndexedInt, owned, owned) -> owned;

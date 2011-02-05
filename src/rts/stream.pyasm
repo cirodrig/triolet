@@ -595,4 +595,43 @@ function Stream_count_next (pointer state, pointer out) -> bool {
   !state = current + int 1;
   !out = current;
   true;
-}; 
+};
+
+/*****************************************************************************/
+/* generate */
+
+// The stream state holds the next index to generate
+
+function generate
+  (unit _, unit _, IndexedInt indexed_count, owned elt_repr, owned generator)
+  -> owned {
+  IndexedInt {count} = indexed_count;
+  s = pointer primcall Stream_alloc();
+
+  letrec {
+    function initialize (pointer state) -> () {
+      !state = int 0;
+      ();
+    }
+  };
+  s @! Stream.initialize = initialize;
+
+  letrec {
+    function next (pointer state, pointer out) -> bool {
+      ix = int load state;
+      if (ix >= count) {
+        // Stream is depleted
+        false;
+      } else {
+        !state = ix + int 1;
+        () = () call generator (ix, out);
+        true;
+      };
+    }
+  };
+  s @! Stream.next = next;
+  s @! Stream.state_size = sizeof int;
+  s @! Stream.state_align = alignof int;
+  s @! Stream.state_finalize = dummy_finalizer;
+  s;
+};

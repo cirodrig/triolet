@@ -568,6 +568,20 @@ fun_zip : (val s : val pure -> val pure)
 
 count : box Stream int;
 
+generate : (val n : intindex)
+        -> (val a : pure)
+        -> val IndexedInt n
+        -> box Repr a
+        -> box (val int -> write a)
+        -> box Stream a;
+
+subscript : (val n : intindex)
+         -> (val a : pure)
+         -> box Repr a
+         -> read array n a
+         -> val int
+         -> read a;
+
 {-
 zip_SS : (val a : pure)
       -> (val b : pure)
