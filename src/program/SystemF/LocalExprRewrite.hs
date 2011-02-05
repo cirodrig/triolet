@@ -438,22 +438,51 @@ initializeKnownValues tenv =
 --   reduction.
 betaReduce :: (Monad m, Supplies m VarID) =>
               ExpInfo -> FunM -> [TypM] -> [ExpM] -> m ExpM
-betaReduce inf (FunM fun) ty_args args = do
-  -- Substitute type arguments for type parameters
-  let type_subst =
-        substitution [(tv, t)
-                     | (TyPatM tv _, TypM t) <- zip (funTyParams fun) ty_args]
-        
-  -- Rename parameters
-  (params, param_renaming) <-
-    freshenPatMs $ map (substitutePatM type_subst) $ funParams fun
-  
-  -- Rename function body
-  let body = rename param_renaming $ substitute type_subst $ funBody fun
-  
-  -- Bind parameters to arguments
-  return $ bind_parameters params args body
+betaReduce inf (FunM fun) ty_args args
+  | length ty_args /= length (funTyParams fun) =
+      internalError "betaReduce: Not implemented for partial type application"
+  | otherwise = do
+      -- Substitute type arguments for type parameters
+      let type_subst =
+            substitution [(tv, t)
+                         | (TyPatM tv _, TypM t) <-
+                             zip (funTyParams fun) ty_args]
+
+          -- Apply substitution to parameters and body
+      (params, param_renaming) <-
+        freshenPatMs $ map (substitutePatM type_subst) $ funParams fun
+      let body = rename param_renaming $ substitute type_subst $ funBody fun
+      let ret = rename param_renaming $ substitute type_subst $ funReturn fun
+          
+      -- Is the function fully applied? 
+      return $! case length args `compare` length params
+                of LT -> undersaturated_app args params body ret
+                   EQ -> saturated_app args params body
+                   GT -> oversaturated_app args params body
   where
+    oversaturated_app args params body =
+      let applied_args = take (length params) args
+          excess_args = drop (length params) args
+          applied_expr = saturated_app applied_args params body
+      in ExpM $ AppE inf applied_expr [] excess_args
+  
+    saturated_app args params body =
+      -- Bind parameters to arguments
+      bind_parameters params args body
+    
+    -- To process an undersaturated application,
+    -- assign the parameters that have been applied and 
+    -- create a new function that takes the remaining arguments.
+    undersaturated_app args params body return =
+      let applied_params = take (length args) params
+          excess_params = drop (length args) params
+          new_fun = FunM $ Fun { funInfo = funInfo fun
+                               , funTyParams = []
+                               , funParams = excess_params
+                               , funBody = body
+                               , funReturn = return}
+      in bind_parameters applied_params args (ExpM $ LamE inf new_fun)
+
     bind_parameters params args body =
       foldr bind_parameter body $ zip params args
     
@@ -664,10 +693,8 @@ rwAppWithOperator inf op' op_val ty_args args =
      _ ->
        -- Apply simplification tecnhiques specific to this operator
        case op_val
-       of Just (FunValue _ _ funm@(FunM fun))
-            | length (funTyParams fun) == length ty_args &&
-              length (funParams fun) == length args ->
-                inline_function_call funm
+       of Just (FunValue _ _ funm@(FunM fun)) ->
+            inline_function_call funm
 
           -- Some functions have special rewrite semantics
           Just (VarValue _ op_var)
@@ -1008,6 +1035,7 @@ rwAlt scr (AltM (Alt con tyArgs exTypes params body)) = do
           -- so this shouldn't be Nothing.
           internalError "rwAlt"
 
+-- | Ensure that the parameter binds a variable.
 labelParameter param = 
   case param
   of MemVarP {} -> return param
