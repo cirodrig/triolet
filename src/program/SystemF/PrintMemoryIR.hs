@@ -76,9 +76,10 @@ pprExp (ExpM expression) =
 pprAlt (AltM alt) =
   let con_doc = pprVar $ altConstructor alt
       args_doc = pprParenList [pprType t | TypM t <- altTyArgs alt]
+      ex_types_doc = map (parens . pprTyPat) $ altExTypes alt
       params_doc = map (parens . pprPat) $ altParams alt
       body_doc = pprExp $ altBody alt
-  in con_doc <+> sep (args_doc : params_doc) <> text "." $$
+  in con_doc <+> sep (args_doc : ex_types_doc ++ params_doc) <> text "." $$
      nest 2 body_doc
 
 pprFun (FunM fun) =
