@@ -585,12 +585,12 @@ data owned Stream_count = Stream {
   dummy_finalizer
 };
 
-function Stream_count_initialize (pointer state) -> () {
+function inline Stream_count_initialize (pointer state) -> () {
   !state = int 0;
   ();
 };
 
-function Stream_count_next (pointer state, pointer out) -> bool {
+function inline Stream_count_next (pointer state, pointer out) -> bool {
   current = int load state;
   !state = current + int 1;
   !out = current;
@@ -602,7 +602,7 @@ function Stream_count_next (pointer state, pointer out) -> bool {
 
 // The stream state holds the next index to generate
 
-function generate
+function inline generate
   (unit _, unit _, IndexedInt indexed_count, owned elt_repr, owned generator)
   -> owned {
   IndexedInt {count} = indexed_count;
