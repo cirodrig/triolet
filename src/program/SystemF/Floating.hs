@@ -369,6 +369,11 @@ floatInExp (ExpM expression) =
      LamE inf f -> do
        f' <- floatInFun (Just []) f
        return $ ExpM $ LamE inf f'
+     
+     -- Special case: let x = lambda (...) becomes a letrec
+     LetE inf (MemVarP v _) (ExpM (LamE _ f)) body ->
+       floatInExp $ ExpM $ LetrecE inf [Def v f] body
+
      LetE inf pat rhs body ->
        floatInLet inf pat rhs body
      LetrecE inf defs body -> do
