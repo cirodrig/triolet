@@ -15,12 +15,14 @@ module SystemF.Floating
         floatModule)
 where
 
-import Control.Monad
+import Prelude hiding(mapM)
+import Control.Monad hiding(forM, mapM)
 import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
+import Data.Traversable
 
 import Common.Error
 import Common.Identifier
@@ -372,18 +374,14 @@ floatInExp (ExpM expression) =
      
      -- Special case: let x = lambda (...) becomes a letrec
      LetE inf (MemVarP v _) (ExpM (LamE _ f)) body ->
-       floatInExp $ ExpM $ LetrecE inf [Def v f] body
+       floatInExp $ ExpM $ LetrecE inf (NonRec (Def v f)) body
 
      LetE inf pat rhs body ->
        floatInLet inf pat rhs body
-     LetrecE inf defs body -> do
-       -- Don't float anything that references a local function
-       let local_vars = [v | Def v _ <- defs]
-       defs' <- forM defs $ \(Def v f) -> do
-         f' <- floatInFun (Just local_vars) f
-         return $ Def v f'
-       body' <- anchor local_vars $ floatInExp body
-       return $ ExpM $ LetrecE inf defs' body'
+
+     LetrecE inf defs body ->
+       floatInLetrec inf defs body
+
      CaseE inf scr alts ->
        floatInCase inf scr alts
   
@@ -409,6 +407,22 @@ floatInLet inf pat rhs body =
 
      MemWildP {} -> internalError "floatInLet"
 
+floatInLetrec inf defs body = do
+  defs' <- float_defs
+  body' <- anchor def_vars $ floatInExp body
+  return $ ExpM $ LetrecE inf defs' body'
+  where
+    def_vars = [v | Def v _ <- defGroupMembers defs]
+    float_defs =
+      case defs
+      of NonRec (Def v f) -> do
+           f' <- floatInFun (Just []) f
+           return $ NonRec (Def v f')
+         Rec defs -> liftM Rec $ forM defs $ \(Def v f) -> do
+           -- Don't float anything that mentions one of the local functions
+           f' <- floatInFun (Just def_vars) f
+           return $ Def v f'
+    
 floatInCase inf scr alts = do
   scr' <- floatInExp scr
   floatable <- is_floatable scr'

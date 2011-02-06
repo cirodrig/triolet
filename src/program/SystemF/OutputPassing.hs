@@ -8,7 +8,9 @@ to functions.
 module SystemF.OutputPassing (generateMemoryIR)
 where
 
-import Control.Monad
+import Prelude hiding(mapM)
+import Control.Monad hiding(mapM)
+import Data.Traversable(mapM)
   
 import Common.Error
 import Common.Identifier

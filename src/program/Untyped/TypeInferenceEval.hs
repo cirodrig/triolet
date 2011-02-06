@@ -5,8 +5,10 @@ module Untyped.TypeInferenceEval
        (evalTypeInferenceResult)
 where
 
+import Prelude hiding(mapM)
 import Control.Concurrent.MVar
-import Control.Monad
+import Control.Monad hiding(mapM)
+import Data.Traversable(mapM)
 
 import Common.Error
 import SystemF.Syntax

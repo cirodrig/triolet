@@ -18,10 +18,13 @@ module SystemF.TypecheckSF
         typeCheckModule)
 where
 
+import Prelude hiding(mapM)
+
 import Control.Applicative(Const(..))
 import Control.Exception
-import Control.Monad
-import Control.Monad.Reader
+import Control.Monad hiding(mapM)
+import Control.Monad.Reader hiding(mapM)
+import Data.Traversable(mapM)
 import Data.Typeable(Typeable)
 import Data.Maybe
 import qualified Data.Set as Set
@@ -141,7 +144,7 @@ assumeTyPat (TyPatSF v t) k = do
 assumeDef :: Def SF -> TCM a -> TCM a
 assumeDef (Def v fun) = assume v (ValRT ::: functionType fun)
 
-assumeDefs defs m = foldr assumeDef m defs
+assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
 typeInferType :: TypSF -> TCM TypTSF
 typeInferType (TypSF ty) =
@@ -296,7 +299,7 @@ typeInferLetE inf pat expression body = do
     let new_exp = LetE inf pat' ti_exp ti_body
     return $ ExpTSF $ TypeAnn (getTypeAnn ti_body) new_exp
 
-typeInferLetrecE :: ExpInfo -> [Def SF] -> ExpSF -> TCM ExpTSF
+typeInferLetrecE :: ExpInfo -> DefGroup (Def SF) -> ExpSF -> TCM ExpTSF
 typeInferLetrecE inf defs body =
   typeCheckDefGroup defs $ \defs' -> do
     ti_body <- typeInferExp body
@@ -383,13 +386,13 @@ checkAltParam pos (_ ::: expected_type) (VarP field_var given_type) = do
   checkType pos expected_type (fromTypTSF gt)
   return (TypedVarP field_var gt)
 
-typeCheckDefGroup :: [Def SF] -> ([Def TSF] -> TCM b) -> TCM b
-typeCheckDefGroup defs k = assumeDefs defs $ do
-  -- Check all defined function bodies
-  xs <- mapM typeCheckDef defs
-
-  -- Run the continuation in this environment
-  k xs
+typeCheckDefGroup :: DefGroup (Def SF) -> (DefGroup (Def TSF) -> TCM b) -> TCM b
+typeCheckDefGroup defgroup k = 
+  case defgroup
+  of Rec {} ->
+       assumeDefs defgroup (k =<< mapM typeCheckDef defgroup)
+     NonRec {} ->
+       (assumeDefs defgroup . k) =<< mapM typeCheckDef defgroup
   where
     -- To typecheck a definition, check the function it contains
     typeCheckDef (Def v fun) = do

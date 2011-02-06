@@ -741,23 +741,30 @@ lowerFun (FunTM (RTypeAnn _ fun)) =
       atom <- asAtom =<< lowerExp body
       return (LL.ReturnE atom)
 
--- | Lower a function definition.  The function variable must already have
---   been translated.
-lowerDef :: Def (Typed Mem) -> Lower LL.FunDef
-lowerDef (Def v f) = do
-  v' <- lookupVar v
-  f' <- lowerFun f
-  return (LL.Def v' f')
-
-lowerDefGroup :: [Def (Typed Mem)] -> ([LL.FunDef] -> Lower a) -> Lower a
-lowerDefGroup defs k = assume_variables $ k =<< mapM lowerDef defs
+-- | Lower a definition group.
+lowerDefGroup :: DefGroup (Def (Typed Mem))
+              -> ([LL.FunDef] -> Lower a)
+              -> Lower a
+lowerDefGroup defgroup k = 
+  case defgroup
+  of NonRec (Def v f) -> do
+       -- Lower the function before adding the variable to the environment
+       f' <- lowerFun f
+       assume_variable (Def v f) $ \v' -> k [LL.Def v' f']
+     Rec defs ->
+       -- Add all variables to the environment, then lower
+       assume_variables defs $ \vs' -> do
+         fs' <- mapM lowerFun [f | Def _ f <- defs]
+         k $ zipWith LL.Def vs' fs'
   where
-    assume_variables m =
-      foldr assume_variable m [(v, rt) | Def v (FunTM (RTypeAnn rt _)) <- defs]
+    assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (v, return_type) m = assumeVar v return_type $ \_ -> m
+    assume_variable (Def v (FunTM (RTypeAnn return_type _))) k =
+      assumeVar v return_type k
 
-lowerDefGroupG :: [Def (Typed Mem)] -> ([LL.FunDef] -> GenLower a) -> GenLower a
+lowerDefGroupG :: DefGroup (Def (Typed Mem))
+               -> ([LL.FunDef] -> GenLower a)
+               -> GenLower a
 lowerDefGroupG defs = liftT1 (lowerDefGroup defs)
 
 lowerExport :: ModuleName
@@ -781,14 +788,14 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
       return $ LL.Def v wrapped_fun
 
 lowerModuleCode :: ModuleName 
-                -> [[Def (Typed Mem)]] 
+                -> [DefGroup (Def (Typed Mem))]
                 -> [Export (Typed Mem)]
                 -> Lower ([[LL.FunDef]], [(LL.Var, ExportSig)])
 lowerModuleCode module_name defss exports = lower_definitions defss
   where
     lower_definitions (defs:defss) =
       lowerDefGroup defs $ \defs' -> do
-        (defss', export_sigs) <- lowerModuleCode module_name defss exports
+        (defss', export_sigs) <- lower_definitions defss
         return (defs' : defss', export_sigs)
 
     lower_definitions [] = do

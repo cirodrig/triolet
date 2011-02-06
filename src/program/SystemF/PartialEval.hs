@@ -9,10 +9,12 @@
 module SystemF.PartialEval(partialEvaluateModule)
 where
 
-import Control.Monad.Reader
+import Prelude hiding(mapM)
+import Control.Monad.Reader hiding(mapM)
 import Data.List
 import qualified Data.Map as Map
 import Data.Maybe
+import Data.Traversable(mapM)
 
 import Common.SourcePos
 import Common.Error
@@ -140,15 +142,15 @@ partialEvaluateModule (Module module_name defss exports) =
   let (defss', exports') = runPE (pevalDefGroups defss exports)
   in Module module_name defss' exports'
 
-pevalDefGroups :: [DefGroup SF] -> [Export SF]
-               -> PE ([DefGroup SF], [Export SF])
+pevalDefGroups :: [DefGroup (Def SF)] -> [Export SF]
+               -> PE ([DefGroup (Def SF)], [Export SF])
 pevalDefGroups (defs:defss) exports = do
   (defs', (defss', exports')) <-
     pevalDefGroup defs $ pevalDefGroups defss exports
   return (defs' : defss', exports')
 
-pevalDefGroups [] exports = do 
-  exports' <- mapM pevalExport exports 
+pevalDefGroups [] exports = do
+  exports' <- mapM pevalExport exports
   return ([], exports')
 
 pevalExport :: Export SF -> PE (Export SF)
@@ -156,7 +158,7 @@ pevalExport export = do
   fun <- pevalFun (exportFunction export)
   return $ export {exportFunction = fun}
 
-pevalDefGroup :: DefGroup SF -> PE a -> PE (DefGroup SF, a)
+pevalDefGroup :: DefGroup (Def SF) -> PE a -> PE (DefGroup (Def SF), a)
 pevalDefGroup dg m = do
   dg' <- mapM pevalDef dg
   x <- m

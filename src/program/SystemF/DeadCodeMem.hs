@@ -25,7 +25,7 @@ import Type.Type
 -- | Locally eliminate dead code.  Top-level bindings are not eliminated.
 eliminateLocalDeadCode :: Module Mem -> Module Mem
 eliminateLocalDeadCode (Module module_name defss exports) =
-  let defss' = map (map (evalEDC edcDef)) defss
+  let defss' = map (fmap (evalEDC edcDef)) defss
       exports' = map (evalEDC edcExport) exports
   in Module module_name defss' exports'
 
@@ -36,11 +36,9 @@ eliminateDeadCode (Module module_name defss exports) =
   let (defss', exports') = evalEDC edcTopLevelGroup defss
   in Module module_name defss' exports'
   where
-    edcTopLevelGroup (ds:dss) =
-      masks (Set.fromList [varID v | Def v _ <- ds]) $ do
-        ds' <- mapM edcDef ds
-        (dss', exports') <- edcTopLevelGroup dss
-        return (ds' : dss', exports')
+    edcTopLevelGroup (ds:dss) = do
+      (ds', (dss', exports')) <- edcDefGroup ds $ edcTopLevelGroup dss
+      return (ds' : dss', exports')
     
     edcTopLevelGroup [] = do
       exports' <- mapM edcExport exports
@@ -103,6 +101,20 @@ edcDef (Def v f) = do
   f' <- edcFun f
   return $ Def v f'
 
+edcDefGroup :: DefGroup (Def Mem)
+            -> GetMentionsSet a
+            -> GetMentionsSet (DefGroup (Def Mem), a)
+edcDefGroup defgroup m =
+  case defgroup
+  of NonRec def -> do
+       def' <- edcDef def
+       x <- mask (case def of Def v _ -> v) m
+       return (NonRec def', x)
+     Rec defs -> masks (Set.fromList [varID v | Def v _ <- defs]) $ do
+       defs' <- mapM edcDef defs
+       x <- m
+       return (Rec defs', x)
+
 edcFun :: EDC FunM
 edcFun (FunM function@(Fun { funTyParams = tps
                            , funParams = ps
@@ -134,11 +146,9 @@ edcExp expression@(ExpM base_expression) =
        return $ ExpM $ base_expression {expFun = f'}
      LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->
        edcLetE info p e1 e2
-     LetrecE {expDefs = ds, expBody = e} ->
-       masks (Set.fromList [varID v | Def v _ <- ds]) $ do
-         ds' <- mapM edcDef ds
-         e' <- edcExp e
-         return $ ExpM $ base_expression {expDefs = ds', expBody = e'}
+     LetrecE {expDefs = defgroup, expBody = e} -> do
+       (defgroup', e') <- edcDefGroup defgroup (edcExp e)
+       return $ ExpM $ base_expression {expDefs = defgroup', expBody = e'}
      CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} -> do
        scr' <- edcExp scr
        alts' <- mapM edcAlt alts

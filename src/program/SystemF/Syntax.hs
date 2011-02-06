@@ -18,7 +18,8 @@ module SystemF.Syntax
      BaseExp(..),
      BaseAlt(..),
      BaseFun(..),
-     Def(..), DefGroup,
+     Def(..),
+     DefGroup(..), defGroupMembers,
      Export(..),
      Module(..),
      isValueExp,
@@ -34,6 +35,9 @@ where
 
 import Control.Monad
 import Data.Typeable
+import qualified Data.Foldable
+import Data.Monoid
+import qualified Data.Traversable
 
 import Common.Error
 import Common.Label
@@ -162,7 +166,7 @@ data BaseExp s =
     -- | Recursive definition group
   | LetrecE
     { expInfo :: ExpInfo
-    , expDefs :: [Def s]
+    , expDefs :: DefGroup (Def s)
     , expBody :: Exp s
     }
     -- | Case analysis 
@@ -194,7 +198,29 @@ data BaseFun s =
 data Def s = Def Var (Fun s)
          deriving(Typeable)
 
-type DefGroup s = [Def s]
+-- | A definition group consists of either a single non-recursive definition
+--   or a list of recursive definitions.  The list must not be empty.
+data DefGroup a = NonRec a | Rec [a]
+
+defGroupMembers :: DefGroup a -> [a]
+defGroupMembers (NonRec x) = [x]
+defGroupMembers (Rec xs) = xs
+
+instance Functor DefGroup where
+  fmap f (NonRec x) = NonRec (f x)
+  fmap f (Rec xs) = Rec (map f xs)
+
+instance Data.Foldable.Foldable DefGroup where
+  foldMap f (NonRec x) = f x
+  foldMap f (Rec xs) = mconcat (map f xs)
+  foldr f z (NonRec x) = f x z
+  foldr f z (Rec xs) = foldr f z xs
+
+instance Data.Traversable.Traversable DefGroup where
+  traverse f (NonRec x) = fmap NonRec (f x)
+  traverse f (Rec xs) = fmap Rec (Data.Traversable.traverse f xs)
+  mapM f (NonRec x) = liftM NonRec (f x)
+  mapM f (Rec xs) = liftM Rec (Data.Traversable.mapM f xs)
 
 -- | An exported variable declaration
 data Export s =
@@ -204,7 +230,7 @@ data Export s =
   , exportFunction :: Fun s
   }
 
-data Module s = Module !ModuleName [DefGroup s] [Export s]
+data Module s = Module !ModuleName [DefGroup (Def s)] [Export s]
             deriving(Typeable)
 
 -- | Return True only if the given expression has no side effects.

@@ -20,11 +20,9 @@ eliminateDeadCode (Module module_name defss exports) =
   let (defss', exports') = evalEDC edcTopLevelGroup defss
   in Module module_name defss' exports'
   where
-    edcTopLevelGroup (ds:dss) =
-      masks (Set.fromList [varID v | Def v _ <- ds]) $ do
-        ds' <- mapM edcDef ds
-        (dss', exports') <- edcTopLevelGroup dss
-        return (ds' : dss', exports')
+    edcTopLevelGroup (ds:dss) = do
+      (ds', (dss', exports')) <- edcDefGroup ds $ edcTopLevelGroup dss
+      return (ds' : dss', exports')
     
     edcTopLevelGroup [] = do
       exports' <- mapM edcExport exports
@@ -113,6 +111,20 @@ edcDef (Def v f) = do
   f' <- edcFun f
   return $ Def v f'
 
+edcDefGroup :: DefGroup (Def SF)
+            -> GetMentionsSet a
+            -> GetMentionsSet (DefGroup (Def SF), a)
+edcDefGroup defgroup m =
+  case defgroup
+  of NonRec def -> do
+       def' <- edcDef def
+       x <- mask (case def of Def v _ -> v) m
+       return (NonRec def', x)
+     Rec defs -> masks (Set.fromList [varID v | Def v _ <- defs]) $ do
+       defs' <- mapM edcDef defs
+       x <- m
+       return (Rec defs', x)
+
 edcFun :: EDC FunSF
 edcFun (FunSF function@(Fun { funTyParams = tps
                             , funParams = ps
@@ -143,11 +155,9 @@ edcExp expression@(ExpSF base_expression) =
        return $ ExpSF $ base_expression {expFun = f'}
      LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->
        edcLetE info p e1 e2
-     LetrecE {expDefs = ds, expBody = e} ->
-       masks (Set.fromList [varID v | Def v _ <- ds]) $ do
-         ds' <- mapM edcDef ds
-         e' <- edcExp e
-         return $ ExpSF $ base_expression {expDefs = ds', expBody = e'}
+     LetrecE {expDefs = ds, expBody = e} -> do
+       (ds', e') <- edcDefGroup ds $ edcExp e
+       return $ ExpSF $ base_expression {expDefs = ds', expBody = e'}
      CaseE {expScrutinee = scr, expAlternatives = alts} -> do
        scr' <- edcExp scr
        alts' <- mapM edcAlt alts

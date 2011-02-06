@@ -8,9 +8,11 @@ module SystemF.Representation
         inferRepresentations)
 where
 
-import Control.Monad
+import Prelude hiding(mapM)
+import Control.Monad hiding(mapM)
 import Data.Maybe
 import Data.Monoid
+import Data.Traversable(mapM)
 import Debug.Trace
 
 import Text.PrettyPrint.HughesPJ
@@ -603,10 +605,14 @@ withPat is_let (TypedVarP v (TypTSF (TypeAnn _ ty))) f = do
 
 withPats is_let = withMany (withPat is_let)
 
-withDefs :: [Def (Typed SF)] -> ([Def Rep] -> InferRepr a) -> InferRepr a
-withDefs defs f = assume_defs $ mapM inferDef defs >>= f
+withDefs :: DefGroup (Def (Typed SF)) -> (DefGroup (Def Rep) -> InferRepr a)
+         -> InferRepr a
+withDefs defgroup f = 
+  case defgroup
+  of NonRec {} -> (assume_defs . f) =<< mapM inferDef defgroup
+     Rec {} -> assume_defs (f =<< mapM inferDef defgroup)
   where
-    assume_defs m = foldr assume_def m defs
+    assume_defs m = foldr assume_def m (defGroupMembers defgroup)
     assume_def (Def v f) m = do
       ty <- getFunType f
       assume v (BoxRT ::: ty) m

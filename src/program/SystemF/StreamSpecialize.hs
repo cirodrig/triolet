@@ -389,11 +389,11 @@ specializeMaybe expression =
                                     , expBinder = b'
                                     , expValue = rhs'
                                     , expBody = body'}
-     LetrecE {expInfo = inf, expDefs = defs, expBody = body} -> do
-       (defs', body') <- specializeDefs defs $ specialize body
-       return $ Just $ ExpSF $ LetrecE { expInfo = inf
-                                       , expDefs = defs'
-                                       , expBody = body'}
+     LetrecE {expInfo = inf, expDefs = defgroup, expBody = body} -> do
+       (defgroups, body') <- specializeDefs defgroup $ specialize body
+       let new_exp = foldr mk_exp body' defgroups
+             where mk_exp g b = ExpSF $ LetrecE inf g b
+       return $ Just new_exp
      CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} -> do
        mscr' <- specializeMaybe scr
        case mscr' of
@@ -451,7 +451,7 @@ substituteTraversableMethods traverse_var build_var expr = go expr
          LetE inf b rhs body ->
            ExpSF $ LetE inf b (go rhs) (go body)
          LetrecE inf defs b ->
-           ExpSF $ LetrecE inf [Def v (dofun f) | Def v f <- defs] (go b)
+           ExpSF $ LetrecE inf (fmap (\(Def v f) -> Def v (dofun f)) defs) (go b)
          CaseE inf scr alts ->
            ExpSF $ CaseE inf (go scr) (map doalt alts)
       
@@ -665,21 +665,30 @@ createFunSpclTable (Def fun_name (FunSF function)) = let
     -- Create a new function name
     make_new_var = newClonedVar fun_name
       
-specializeDefs :: DefGroup SF -> Spcl a -> Spcl (DefGroup SF, a)
+specializeDefs :: DefGroup (Def SF) -> Spcl a -> Spcl ([DefGroup (Def SF)], a)
 specializeDefs dg m = do
   -- Create specialization tables for each function
-  tables <- mapM createFunSpclTable dg
+  tables <- mapM createFunSpclTable dg_members
 
   -- Add variables to environment
-  add_tables_to_environment tables dg $ do
-    -- Specialize the functions
-    (concat -> new_defs) <- zipWithM specializePolymorphicFun tables dg
+  add_tables_to_environment tables dg_members $ do
+    -- Specialize the functions.  If the original group was recursive, create
+    -- one recursive group.  Otherwise create many non-recursive definitions.
+    new_def_list <- zipWithM specializePolymorphicFun tables dg_members
+    let new_dg = 
+          case dg
+          of NonRec {} -> map NonRec $ concat new_def_list
+             Rec {} -> [Rec $ concat new_def_list]
 
     x <- m
-    return (new_defs, x)
+    return (new_dg, x)
   where
-    add_tables_to_environment tables dg m =
-      foldr add_table_to_environment m $ zip tables dg
+    dg_members = case dg
+                 of NonRec x -> [x]
+                    Rec xs -> xs
+
+    add_tables_to_environment tables dg_members m =
+      foldr add_table_to_environment m $ zip tables dg_members
 
     add_table_to_environment (table, Def v _) m =
       assumeVarSpclTable v table m
@@ -689,13 +698,13 @@ specializeExport (Export pos spec f) = do
   f' <- specializeFun f
   return (Export pos spec f')
 
-specializeTopLevelDefs :: [DefGroup SF] 
+specializeTopLevelDefs :: [DefGroup (Def SF)]
                        -> [Export SF]
-                       -> Spcl ([DefGroup SF], [Export SF])
+                       -> Spcl ([DefGroup (Def SF)], [Export SF])
 specializeTopLevelDefs (dg:dgs) exports = do
   (dg', (dgs', exports')) <-
     specializeDefs dg $ specializeTopLevelDefs dgs exports
-  return (dg' : dgs', exports')
+  return (dg' ++ dgs', exports')
 
 specializeTopLevelDefs [] exports = do
   exports' <- mapM specializeExport exports

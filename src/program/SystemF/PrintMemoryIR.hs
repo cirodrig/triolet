@@ -66,7 +66,7 @@ pprExp (ExpM expression) =
            body_doc = pprExp body
        in hang (pat_doc <+> text "=") 4 rhs_doc $$ body_doc
      LetrecE _ defs body ->
-       let defs_doc = map pprDef defs
+       let defs_doc = map pprDef $ defGroupMembers defs
            body_doc = pprExp body
        in text "letrec" $$ nest 2 (vcat defs_doc) $$ body_doc
      CaseE _ scr alts ->
@@ -98,5 +98,5 @@ pprExport (Export _ _ f) =
 
 pprModule (Module modname defs exports) =
   text "module" <+> text (showModuleName modname) $$
-  vcat (map pprDef $ concat defs) $$
+  vcat (map pprDef $ concatMap defGroupMembers defs) $$
   vcat (map pprExport exports)

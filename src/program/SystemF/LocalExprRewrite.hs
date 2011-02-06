@@ -3,12 +3,14 @@
 module SystemF.LocalExprRewrite (rewriteLocalExpr)
 where
 
-import Control.Monad
+import Prelude hiding(mapM)
+import Control.Monad hiding(mapM)
 import qualified Data.IntMap as IntMap
 import Data.List as List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as Set
+import Data.Traversable(mapM)
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
@@ -86,8 +88,8 @@ withDefValue (Def v f) m =
       fun_exp = ExpM $ VarE fun_info v
   in withKnownValue v (FunValue fun_info (Just fun_exp) f) m
 
-withDefValues :: [Def Mem] -> LR a -> LR a
-withDefValues defs m = foldr withDefValue m defs
+withDefValues :: DefGroup (Def Mem) -> LR a -> LR a
+withDefValues defs m = foldr withDefValue m $ defGroupMembers defs
 
 -- | Get the current type environment
 getTypeEnv :: LR TypeEnv
@@ -105,8 +107,8 @@ assumeParamType v (prepr ::: ptype) m =
   assume v (paramReprToReturnRepr prepr ::: ptype) m
 
 -- | Add the function definition types to the environment
-assumeDefs :: [Def Mem] -> LR a -> LR a
-assumeDefs defs m = foldr assumeDef m defs
+assumeDefs :: DefGroup (Def Mem) -> LR a -> LR a
+assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
 assumeDef :: Def Mem -> LR a -> LR a
 assumeDef (Def v f) m = assume v (BoxRT ::: functionType f) m
@@ -900,7 +902,7 @@ rwLet inf bind val body =
 rwLetrec inf defs body = withDefs defs $ \defs' -> do
   (body', body_value) <- rwExp body
       
-  let local_vars = Set.fromList [v | Def v _ <- defs']
+  let local_vars = Set.fromList [v | Def v _ <- defGroupMembers defs']
       ret_value = if body_value `maybeValueMentionsAny` local_vars
                   then Nothing
                   else body_value
@@ -1065,7 +1067,7 @@ rwExport (Export pos spec f) = do
 
 -- | Rewrite a definition group.  Then, add the defined functions to the
 --   environment and rewrite something else.
-withDefs :: [Def Mem] -> ([Def Mem] -> LR a) -> LR a
+withDefs :: DefGroup (Def Mem) -> (DefGroup (Def Mem) -> LR a) -> LR a
 withDefs defs k = assumeDefs defs $ do
   -- Don't add values to the environment -- we don't want recursive inlining
   defs' <- mapM rwDef defs

@@ -667,7 +667,7 @@ inferModuleTypes (Module module_name defss exports) = do
     inferDefGroups (defs:defss) =
       inferDefGroup True defs $ \defs' -> do
         (defss', exports') <- inferDefGroups defss
-        return (defs':defss', exports')
+        return (SystemF.Rec defs':defss', exports')
     inferDefGroups [] = do 
       exports' <- mapM inferExportType exports
       return ([], exports')

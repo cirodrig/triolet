@@ -18,10 +18,12 @@ module SystemF.TypecheckMem
         typeCheckModule)
 where
 
+import Prelude hiding(mapM)
 import Control.Applicative(Const(..))
 import Control.Exception
-import Control.Monad
-import Control.Monad.Reader
+import Control.Monad hiding(mapM)
+import Control.Monad.Reader hiding(mapM)
+import Data.Traversable(mapM)
 import Data.Typeable(Typeable)
 import Data.Maybe
 import qualified Data.Set as Set
@@ -149,7 +151,7 @@ assumeTyPat (TyPatM v t) k = do
 assumeDef :: Def Mem -> TCM a -> TCM a
 assumeDef (Def v fun) = assume v (BoxRT ::: functionType fun)
 
-assumeDefs defs m = foldr assumeDef m defs
+assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
 typeInferType :: TypM -> TCM TypTM
 typeInferType (TypM ty) =
@@ -313,7 +315,7 @@ typeInferLetE inf pat expression body = do
     type_infer_pattern (MemWildP pt) =
       internalError "typeInferLetE: Unexpected wildcard"
 
-typeInferLetrecE :: ExpInfo -> [Def Mem] -> ExpM -> TCM ExpTM
+typeInferLetrecE :: ExpInfo -> DefGroup (Def Mem) -> ExpM -> TCM ExpTM
 typeInferLetrecE inf defs body =
   typeCheckDefGroup defs $ \defs' -> do
     ti_body <- typeInferExp body
@@ -410,9 +412,11 @@ checkAltParam pos expected_type pattern = do
            of MemVarP field_var ptype -> TypedMemVarP field_var ptype
               MemWildP ptype -> TypedMemWildP ptype
 
-typeCheckDefGroup :: [Def Mem] -> ([Def TM] -> TCM b) -> TCM b
-typeCheckDefGroup defs k = assumeDefs defs $ do
-  k =<< mapM typeCheckDef defs
+typeCheckDefGroup :: DefGroup (Def Mem) -> (DefGroup (Def TM) -> TCM b) -> TCM b
+typeCheckDefGroup defgroup k = 
+  case defgroup
+  of NonRec {} -> (assumeDefs defgroup . k) =<< mapM typeCheckDef defgroup
+     Rec {} -> assumeDefs defgroup (k =<< mapM typeCheckDef defgroup)
   where
     -- To typecheck a definition, check the function it contains
     typeCheckDef (Def v fun) = do
