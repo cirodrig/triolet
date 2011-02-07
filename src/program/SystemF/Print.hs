@@ -113,7 +113,7 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
                   (pprExpFlags flags rhs)
              e2 = pprExpFlags flags body
          in text "let" <+> e1 $$ e2
-     LetrecE {expDefs = ds, expBody = body} ->
+     LetfunE {expDefs = ds, expBody = body} ->
          let defsText = vcat $ map (pprDefFlags flags) $ defGroupMembers ds
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e

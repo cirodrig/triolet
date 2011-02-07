@@ -146,7 +146,7 @@ edcExp expression@(ExpM base_expression) =
        return $ ExpM $ base_expression {expFun = f'}
      LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->
        edcLetE info p e1 e2
-     LetrecE {expDefs = defgroup, expBody = e} -> do
+     LetfunE {expDefs = defgroup, expBody = e} -> do
        (defgroup', e') <- edcDefGroup defgroup (edcExp e)
        return $ ExpM $ base_expression {expDefs = defgroup', expBody = e'}
      CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} -> do

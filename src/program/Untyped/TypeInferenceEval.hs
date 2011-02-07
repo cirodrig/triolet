@@ -49,9 +49,9 @@ evExp expression =
                                 r' <- evExp r
                                 b' <- evExp b
                                 return $ LetE info p' r' b'
-          LetrecE info defs b -> do defs' <- mapM evDef defs
+          LetfunE info defs b -> do defs' <- mapM evDef defs
                                     b' <- evExp b
-                                    return $ LetrecE info defs' b'
+                                    return $ LetfunE info defs' b'
           CaseE info scr alts -> do scr' <- evExp scr
                                     alts' <- mapM evAlt alts
                                     return $ CaseE info scr' alts'

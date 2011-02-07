@@ -569,9 +569,9 @@ topExp (ExpM ex) = do
       afterLetParts <- constructLet replacedApp letParts'
 --      afterLetAndCaseParts <- constructCase afterLetParts caseParts'
       return afterLetParts
-    LetrecE inf defs body -> do defs' <- mapM rwDef defs
+    LetfunE inf defs body -> do defs' <- mapM rwDef defs
                                 body' <- topExp body
-                                return $ ExpM $ LetrecE inf defs' body'
+                                return $ ExpM $ LetfunE inf defs' body'
     LamE inf fun -> do fun' <- rwFun fun
                        return $ ExpM $ LamE inf fun'
     _ -> return $ ExpM ex -- Var and Lit
@@ -602,7 +602,7 @@ rwExp expression = do
       fun' <- rwFun fun
       rwExpReturn (ExpM $ LamE inf fun', Just $ FunValue inf Nothing fun')
     LetE inf bind val body -> rwLet inf bind val body
-    LetrecE inf defs body -> rwLetrec inf defs body
+    LetfunE inf defs body -> rwLetrec inf defs body
     CaseE inf scrut alts -> rwCase inf scrut alts
 
 -- | Rewrite a list of expressions that are in the same scope,
@@ -778,7 +778,7 @@ rwLetrec inf defs body = withDefs defs $ \defs' -> do
       
   let local_vars = Set.fromList [v | Def v _ <- defGroupMembers defs']
       ret_value = forgetVariables local_vars body_value
-  rwExpReturn (ExpM $ LetrecE inf defs' body', ret_value)
+  rwExpReturn (ExpM $ LetfunE inf defs' body', ret_value)
 
 rwCase inf scrut alts = do
   (scrut', scrut_val) <- rwExp scrut

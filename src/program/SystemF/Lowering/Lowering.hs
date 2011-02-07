@@ -612,7 +612,7 @@ lowerExp (ExpTM (RTypeAnn return_type expression)) =
      AppE _ op ty_args args -> lowerApp return_type op ty_args args
      LamE _ f -> lift $ lowerLam return_type f
      LetE _ binder rhs body -> lowerLet return_type binder rhs body
-     LetrecE _ defs body -> lowerLetrec return_type defs body
+     LetfunE _ defs body -> lowerLetrec return_type defs body
      CaseE _ scr alts -> lowerCase return_type scr alts
 
 lowerVar _ v =

@@ -389,10 +389,10 @@ specializeMaybe expression =
                                     , expBinder = b'
                                     , expValue = rhs'
                                     , expBody = body'}
-     LetrecE {expInfo = inf, expDefs = defgroup, expBody = body} -> do
+     LetfunE {expInfo = inf, expDefs = defgroup, expBody = body} -> do
        (defgroups, body') <- specializeDefs defgroup $ specialize body
        let new_exp = foldr mk_exp body' defgroups
-             where mk_exp g b = ExpSF $ LetrecE inf g b
+             where mk_exp g b = ExpSF $ LetfunE inf g b
        return $ Just new_exp
      CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} -> do
        mscr' <- specializeMaybe scr
@@ -450,8 +450,8 @@ substituteTraversableMethods traverse_var build_var expr = go expr
            ExpSF $ LamE inf $ dofun f
          LetE inf b rhs body ->
            ExpSF $ LetE inf b (go rhs) (go body)
-         LetrecE inf defs b ->
-           ExpSF $ LetrecE inf (fmap (\(Def v f) -> Def v (dofun f)) defs) (go b)
+         LetfunE inf defs b ->
+           ExpSF $ LetfunE inf (fmap (\(Def v f) -> Def v (dofun f)) defs) (go b)
          CaseE inf scr alts ->
            ExpSF $ CaseE inf (go scr) (map doalt alts)
       

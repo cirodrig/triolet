@@ -297,7 +297,7 @@ flattenExp' expression expression_type =
        expr' <- reifyBindings' $ do floatPatBinding (convertPattern pat) rhs' 
                                     asStatement body
        returnStatement expr'
-     LetrecE { expInfo = inf
+     LetfunE { expInfo = inf
              , expDefs = defs
              , expBody = body} -> do
        defs' <- flattenDefGroup defs

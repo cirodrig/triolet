@@ -105,10 +105,10 @@ elimPMExp expression =
                              , expValue = rhs'
                              , expBody = transformer body'
                              }
-     LetrecE inf defs body -> do
+     LetfunE inf defs body -> do
        defs' <- traverse elimPMDef defs 
        body' <- elimPMExp body
-       return $ ExpSF $ LetrecE inf defs' body'
+       return $ ExpSF $ LetfunE inf defs' body'
      CaseE inf scr alts -> do
        scr' <- elimPMExp scr 
        alts' <- traverse elimPMAlt alts

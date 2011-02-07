@@ -298,10 +298,10 @@ genExp' return_type expression =
        return $ ExpM $ LamE inf f'
      LetE inf lhs rhs body ->
        genLet inf lhs rhs body
-     LetrecE inf defs body -> do
+     LetfunE inf defs body -> do
        defs' <- mapM genDef defs
        body' <- genExp body
-       return $ ExpM $ LetrecE inf defs' body'
+       return $ ExpM $ LetfunE inf defs' body'
      CaseE inf scr alts -> do
        scr' <- genExp scr
        alts' <- mapM genAlt alts

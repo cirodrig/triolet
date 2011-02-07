@@ -136,8 +136,8 @@ instance Renameable (Exp Mem) where
          LamE inf (recurse f)
        LetE inf p val body ->
          LetE inf (renamePatM rn p) (recurse val) (recurse body)
-       LetrecE inf defs body ->
-         LetrecE inf (fmap (renameDefM rn) defs) (recurse body)
+       LetfunE inf defs body ->
+         LetfunE inf (fmap (renameDefM rn) defs) (recurse body)
        CaseE inf scr alts ->
          CaseE inf (recurse scr) (map recurse alts)
     where
@@ -159,12 +159,12 @@ instance Renameable (Exp Mem) where
          let body' = rename rn body
          return $ ExpM $ LetE inf pat' rhs body'
 
-       LetrecE inf (NonRec (Def v f)) body -> do
+       LetfunE inf (NonRec (Def v f)) body -> do
          v' <- newClonedVar v
          let body' = rename (singletonRenaming v v') body
-         return $ ExpM $ LetrecE inf (NonRec (Def v' f)) body'
+         return $ ExpM $ LetfunE inf (NonRec (Def v' f)) body'
 
-       LetrecE inf (Rec defs) body -> do
+       LetfunE inf (Rec defs) body -> do
          let def_vars = [v | Def v _ <- defs]
          renamed_vars <- mapM newClonedVar def_vars
          
@@ -173,7 +173,7 @@ instance Renameable (Exp Mem) where
              local_functions = [rename rn f | Def _ f <- defs]
              defs' = zipWith Def renamed_vars local_functions
              body' = rename rn body
-         return $ ExpM $ LetrecE inf (Rec defs') body'
+         return $ ExpM $ LetfunE inf (Rec defs') body'
 
        _ -> return (ExpM expression)
 
@@ -201,11 +201,11 @@ instance Renameable (Exp Mem) where
              rhs_fv = Set.delete v $ freeVariables rhs
              body_fv = Set.delete v $ freeVariables body
          in ty_fv `Set.union` dict_fv `Set.union` rhs_fv `Set.union` body_fv
-       LetrecE _ (NonRec (Def v f)) body ->
+       LetfunE _ (NonRec (Def v f)) body ->
          let body_fv = freeVariables body
              fn_fv = freeVariables f
          in Set.union (Set.delete v body_fv) fn_fv
-       LetrecE _ (Rec defs) body ->
+       LetfunE _ (Rec defs) body ->
          let local_functions = [v | Def v _ <- defs]
              fn_fv = Set.unions [freeVariables f | Def _ f <- defs]
              body_fv = freeVariables body
@@ -318,8 +318,8 @@ instance Substitutable (Exp Mem) where
          LamE inf (recurse f)
        LetE inf p val body ->
          LetE inf (substitutePatM s p) (recurse val) (recurse body)
-       LetrecE inf defs body ->
-         LetrecE inf (fmap (substituteDefM s) defs) (recurse body)
+       LetfunE inf defs body ->
+         LetfunE inf (fmap (substituteDefM s) defs) (recurse body)
        CaseE inf scr alts ->
          CaseE inf (recurse scr) (map recurse alts)
     where

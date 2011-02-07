@@ -193,8 +193,8 @@ typeInferExp (ExpSF expression) =
          return $ ExpTSF $ TypeAnn (getTypeAnn ti_fun) (LamE inf ti_fun)
        LetE {expInfo = inf, expBinder = pat, expValue = e, expBody = body} ->
          typeInferLetE inf pat e body
-       LetrecE {expInfo = inf, expDefs = defs, expBody = body} ->
-         typeInferLetrecE inf defs body
+       LetfunE {expInfo = inf, expDefs = defs, expBody = body} ->
+         typeInferLetfunE inf defs body
        CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
          typeInferCaseE inf scr alts
          
@@ -299,11 +299,11 @@ typeInferLetE inf pat expression body = do
     let new_exp = LetE inf pat' ti_exp ti_body
     return $ ExpTSF $ TypeAnn (getTypeAnn ti_body) new_exp
 
-typeInferLetrecE :: ExpInfo -> DefGroup (Def SF) -> ExpSF -> TCM ExpTSF
-typeInferLetrecE inf defs body =
+typeInferLetfunE :: ExpInfo -> DefGroup (Def SF) -> ExpSF -> TCM ExpTSF
+typeInferLetfunE inf defs body =
   typeCheckDefGroup defs $ \defs' -> do
     ti_body <- typeInferExp body
-    let new_exp = LetrecE inf defs' ti_body
+    let new_exp = LetfunE inf defs' ti_body
     return $ ExpTSF $ TypeAnn (getTypeAnn ti_body) new_exp
 
 typeInferCaseE :: ExpInfo -> ExpSF -> [AltSF] -> TCM ExpTSF

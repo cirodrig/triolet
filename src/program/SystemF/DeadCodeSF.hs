@@ -155,7 +155,7 @@ edcExp expression@(ExpSF base_expression) =
        return $ ExpSF $ base_expression {expFun = f'}
      LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->
        edcLetE info p e1 e2
-     LetrecE {expDefs = ds, expBody = e} -> do
+     LetfunE {expDefs = ds, expBody = e} -> do
        (ds', e') <- edcDefGroup ds $ edcExp e
        return $ ExpSF $ base_expression {expDefs = ds', expBody = e'}
      CaseE {expScrutinee = scr, expAlternatives = alts} -> do

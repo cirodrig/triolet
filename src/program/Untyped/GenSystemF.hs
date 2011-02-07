@@ -265,7 +265,7 @@ mkFunE pos fun = TIExp $ SystemF.LamE (mkExpInfo pos) fun
 
 mkLetrecE :: SourcePos -> [SystemF.Def TI] -> TIExp -> TIExp
 mkLetrecE pos defs body =
-  TIExp $ SystemF.LetrecE (mkExpInfo pos) (SystemF.Rec defs) body
+  TIExp $ SystemF.LetfunE (mkExpInfo pos) (SystemF.Rec defs) body
 
 mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> [TIExp] -> TIExp
 mkDictE pos cls inst_type scs methods =

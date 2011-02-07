@@ -652,7 +652,7 @@ inferReprExp texpression@(ExpTSF (TypeAnn ty expression)) = do
     AppE inf op ty_args args -> inferCall inf op ty_args args
     LamE inf f -> inferFunE inf f
     LetE inf b rhs body -> inferLetE inf b rhs body
-    LetrecE inf defs body -> inferLetrecE inf defs body
+    LetfunE inf defs body -> inferLetfunE inf defs body
     CaseE inf scr alts -> inferCaseE inf scr alts
 
 inferVarE inf v = do
@@ -817,10 +817,10 @@ inferLetE inf binder rhs body = do
     -- Apply all RHS coercions
     return (body_wr, applyWrapper (rhs_wr `mappend` rhs_co_wr) new_expr, body_ty)
 
-inferLetrecE inf defs body = do
+inferLetfunE inf defs body = do
   withDefs defs $ \defs' -> do
     (wr, body', ret_type) <- inferReprExp body
-    let new_expr = ExpR ret_type $ LetrecE inf defs' body' 
+    let new_expr = ExpR ret_type $ LetfunE inf defs' body' 
     return (wr, new_expr, ret_type)
 
 inferCaseE inf scr alts = do

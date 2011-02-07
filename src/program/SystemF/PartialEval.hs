@@ -112,7 +112,7 @@ isSimpleExp expression =
      AppE {expOper = op} -> is_dictionary_operator (fromExpSF op)
      LamE {} -> False
      LetE {} -> False
-     LetrecE {} -> False
+     LetfunE {} -> False
      CaseE {} -> False
   where
     -- Dictionary constructor expressions are inlined to enable later
@@ -220,9 +220,9 @@ pevalExp expression =
        body' <- bindValue pat rhs' $ pevalExp body -- Evaluate body
        return $ ExpSF $ LetE inf pat rhs' body'
 
-     LetrecE inf defs body -> do
+     LetfunE inf defs body -> do
        (defs', body') <- pevalDefGroup defs $ pevalExp body
-       return $ ExpSF $ LetrecE inf defs' body'
+       return $ ExpSF $ LetfunE inf defs' body'
 
      CaseE inf scr alts -> do
        scr' <- pevalExp scr
@@ -269,7 +269,7 @@ pevalApp inf op tys args =
           Just v
         find_known_oper (LetE {expBody = body}) =
           find_known_oper $ fromExpSF body
-        find_known_oper (LetrecE {expBody = body}) =
+        find_known_oper (LetfunE {expBody = body}) =
           find_known_oper $ fromExpSF body
         find_known_oper _ = Nothing
                       

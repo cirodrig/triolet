@@ -199,8 +199,8 @@ typeInferExp (ExpM expression) =
          return $ ExpTM $ RTypeAnn return_type (LamE inf ti_fun)
        LetE {expInfo = inf, expBinder = pat, expValue = e, expBody = body} ->
          typeInferLetE inf pat e body
-       LetrecE {expInfo = inf, expDefs = defs, expBody = body} ->
-         typeInferLetrecE inf defs body
+       LetfunE {expInfo = inf, expDefs = defs, expBody = body} ->
+         typeInferLetfunE inf defs body
        CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
          typeInferCaseE inf scr alts
 
@@ -315,11 +315,11 @@ typeInferLetE inf pat expression body = do
     type_infer_pattern (MemWildP pt) =
       internalError "typeInferLetE: Unexpected wildcard"
 
-typeInferLetrecE :: ExpInfo -> DefGroup (Def Mem) -> ExpM -> TCM ExpTM
-typeInferLetrecE inf defs body =
+typeInferLetfunE :: ExpInfo -> DefGroup (Def Mem) -> ExpM -> TCM ExpTM
+typeInferLetfunE inf defs body =
   typeCheckDefGroup defs $ \defs' -> do
     ti_body <- typeInferExp body
-    let new_exp = LetrecE inf defs' ti_body
+    let new_exp = LetfunE inf defs' ti_body
     return $ ExpTM $ RTypeAnn (getExpType ti_body) new_exp
 
 typeInferCaseE :: ExpInfo -> ExpM -> [AltM] -> TCM ExpTM

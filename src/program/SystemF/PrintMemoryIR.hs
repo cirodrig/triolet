@@ -65,7 +65,7 @@ pprExp (ExpM expression) =
            rhs_doc = pprExp rhs
            body_doc = pprExp body
        in hang (pat_doc <+> text "=") 4 rhs_doc $$ body_doc
-     LetrecE _ defs body ->
+     LetfunE _ defs body ->
        let defs_doc = map pprDef $ defGroupMembers defs
            body_doc = pprExp body
        in text "letrec" $$ nest 2 (vcat defs_doc) $$ body_doc

@@ -164,7 +164,7 @@ data BaseExp s =
     , expBody   :: Exp s
     }
     -- | Recursive definition group
-  | LetrecE
+  | LetfunE
     { expInfo :: ExpInfo
     , expDefs :: DefGroup (Def s)
     , expBody :: Exp s
@@ -235,9 +235,9 @@ data Module s = Module !ModuleName [DefGroup (Def s)] [Export s]
 
 -- | Return True only if the given expression has no side effects.
 -- This function examines only expression constructors, and avoids inspecting
--- let or letrec expressions.
+-- let or letfun expressions.
 --
--- Constructors 'AppE', 'LetE', and 'LetrecE' are assumed to have side
+-- Constructors 'AppE', 'LetE', and 'LetfunE' are assumed to have side
 -- effects.  Lambda expressions have no side effects, since they return but
 -- do not execute their function.
 
@@ -249,7 +249,7 @@ isValueExp (ExpSF expression) =
      AppE {} -> False
      LamE {} -> True
      LetE {} -> False
-     LetrecE {} -> False
+     LetfunE {} -> False
      CaseE {expScrutinee = scr, expAlternatives = alts} ->
        isValueExp scr && all (isValueExp . altBody . fromAltSF) alts
        

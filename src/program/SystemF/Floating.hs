@@ -139,7 +139,7 @@ contextItem e = ContextItem (freeVariablesContextExp e) e
           pat_fv = foldr Set.delete pat_fv1 [v | TyPatM v _ <- ty_pats]
       in Set.unions [scr_fv, ty_fv, typat_fv, pat_fv]
    
-    freeVariablesContextExp (LetrecCtx _ defgroup) =
+    freeVariablesContextExp (LetfunCtx _ defgroup) =
       case defgroup
       of NonRec (Def v f) -> freeVariables f
          Rec defs -> 
@@ -159,11 +159,11 @@ data ContextExp =
     --
     --   @case <scrutinee> of <alternative>. (...)@
   | CaseCtx ExpInfo ExpM !Var [TypM] [TyPatM] [PatM]
-    -- | A letrec expression
-  | LetrecCtx ExpInfo (DefGroup (Def Mem))
+    -- | A letfun expression
+  | LetfunCtx ExpInfo (DefGroup (Def Mem))
 
-isLetrecCtx (LetrecCtx {}) = True
-isLetrecCtx _ = False
+isLetfunCtx (LetfunCtx {}) = True
+isLetfunCtx _ = False
 
 renameContextItem :: Renaming -> ContextItem -> ContextItem
 renameContextItem rn item =
@@ -186,8 +186,8 @@ renameContextExp rn cexp =
        CaseCtx inf (rename rn scr) con (rename rn ty_args)
        (map (renameTyPatM rn) ty_params)  
        (map (renamePatM rn) params)
-     LetrecCtx inf defs ->
-       LetrecCtx inf (fmap (renameDefM rn) defs)
+     LetfunCtx inf defs ->
+       LetfunCtx inf (fmap (renameDefM rn) defs)
 
 freshenContextExp :: (Monad m, Supplies m VarID) =>
                      ContextExp -> m (ContextExp, Renaming)
@@ -202,18 +202,18 @@ freshenContextExp (CaseCtx inf scr alt_con ty_args ty_params params) = do
   let rn = ty_renaming `mappend` param_renaming
   return (CaseCtx inf scr alt_con ty_args ty_params' params', rn)
 
-freshenContextExp (LetrecCtx inf defs) =
+freshenContextExp (LetfunCtx inf defs) =
   case defs
   of NonRec (Def v f) -> do
        v' <- newClonedVar v
        let new_defs = NonRec (Def v' f)
-       return (LetrecCtx inf new_defs, singletonRenaming v v')
+       return (LetfunCtx inf new_defs, singletonRenaming v v')
      Rec defs -> do
        let local_vars = [v | Def v _ <- defs]
        new_vars <- mapM newClonedVar local_vars
        let rn = renaming $ zip local_vars new_vars
            new_defs = map (renameDefM rn) defs
-       return (LetrecCtx inf (Rec new_defs), rn)
+       return (LetfunCtx inf (Rec new_defs), rn)
 
 -- | Get the variables defined by the context
 ctxDefs :: ContextItem -> [Var]
@@ -222,7 +222,7 @@ ctxDefs item =
   of LetCtx _ pat _ -> [patMVar' pat]
      CaseCtx _ _ _ _ ty_params params ->
        [v | TyPatM v _ <- ty_params] ++ mapMaybe patMVar params
-     LetrecCtx _ defs ->
+     LetfunCtx _ defs ->
        [v | Def v _ <- defGroupMembers defs]
 
 -- | Extract the part of the context that satisfies the predicate, 
@@ -300,8 +300,8 @@ applyContext (c:ctx) e =
            CaseCtx inf scr con ty_args ty_params params ->
              let alt = AltM $ Alt con ty_args ty_params params e
              in ExpM $ CaseE inf scr [alt]
-           LetrecCtx inf defs ->
-             ExpM $ LetrecE inf defs e
+           LetfunCtx inf defs ->
+             ExpM $ LetfunE inf defs e
   in applyContext ctx $! apply_c
 
 applyContext [] e = e
@@ -433,7 +433,7 @@ anchorOuterScope :: [Var] -> Flt ExpM -> Flt ExpM
 anchorOuterScope vs m = addLocalVars vs $ anchor check m
   where
     vars_set = Set.fromList vs
-    check c = not (isLetrecCtx $ ctxExp c) || ctxUses c `intersects` vars_set
+    check c = not (isLetfunCtx $ ctxExp c) || ctxUses c `intersects` vars_set
 
 -- | Get all floated bindings.  No bindings are floated out of this call.
 getFloatedBindings :: Flt a -> Flt (a, Context)
@@ -545,13 +545,13 @@ createFlattenedApp inf op_var ty_args args = do
       -- This argument stays in place
       flattenApp arg
 
-    -- Special case: lambda (...) becomes a letrec and gets floated
+    -- Special case: lambda (...) becomes a letfun and gets floated
     flatten_arg (Just _) arg@(ExpM (LamE lam_info f)) = do
       f' <- floatInFun (LocalAnchor []) f
 
       -- Bind the function to a new variable and float it outward
       tmpvar <- newAnonymousVar ObjectLevel
-      let floated_ctx = LetrecCtx lam_info (NonRec (Def tmpvar f'))
+      let floated_ctx = LetfunCtx lam_info (NonRec (Def tmpvar f'))
       rn <- float floated_ctx
       
       -- Get the renamed variable
@@ -595,15 +595,15 @@ floatInExp (ExpM expression) =
        f' <- floatInFun (LocalAnchor []) f
        return $ ExpM $ LamE inf f'
      
-     -- Special case: let x = lambda (...) becomes a letrec
+     -- Special case: let x = lambda (...) becomes a letfun
      LetE inf (MemVarP v _) (ExpM (LamE _ f)) body ->
-       floatInExp $ ExpM $ LetrecE inf (NonRec (Def v f)) body
+       floatInExp $ ExpM $ LetfunE inf (NonRec (Def v f)) body
 
      LetE inf pat rhs body ->
        floatInLet inf pat rhs body
 
-     LetrecE inf defs body ->
-       floatInLetrec inf defs body
+     LetfunE inf defs body ->
+       floatInLetfun inf defs body
 
      CaseE inf scr alts ->
        floatInCase inf scr alts
@@ -658,7 +658,7 @@ floatInLet inf pat rhs body =
 
      MemWildP {} -> internalError "floatInLet"
 
-floatInLetrec inf defs body = do
+floatInLetfun inf defs body = do
   -- Float the contents of these functions.  If it's a recursive binding,
   -- don't float anything that mentions one of the local functions.
   defs' <-
@@ -667,7 +667,7 @@ floatInLetrec inf defs body = do
        Rec {}    -> traverse (float_function_body def_vars) defs
 
   -- Float these functions
-  rn <- float (LetrecCtx inf defs')
+  rn <- float (LetfunCtx inf defs')
   
   -- Float the body
   floatInExp $ rename rn body
@@ -810,11 +810,11 @@ mergeDefGroups :: DefGroup (Def Mem)
 mergeDefGroups dg1 dg2 = Rec (defGroupMembers dg1 ++ defGroupMembers dg2)
     
 makeDefGroup :: Context -> Maybe (DefGroup (Def Mem))
-makeDefGroup xs = case concatMap (fromLetrecCtx . ctxExp) xs
+makeDefGroup xs = case concatMap (fromLetfunCtx . ctxExp) xs
                   of []   -> Nothing
                      defs -> Just (Rec defs)
   where
-    fromLetrecCtx (LetrecCtx _ dg) = defGroupMembers dg
+    fromLetfunCtx (LetfunCtx _ dg) = defGroupMembers dg
 
 floatModule :: Module Mem -> IO (Module Mem)
 floatModule (Module mod_name defss exports) =
