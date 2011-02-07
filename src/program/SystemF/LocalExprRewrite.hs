@@ -430,6 +430,19 @@ initializeKnownValues tenv =
            in Just $ DataValue defaultExpInfo cheap_expr con rrepr [] [] []
        | otherwise = Nothing
               
+-- | Try to construct the value of an expression, if it's easy to get.
+--
+--   This is called if we've already simplified an expression and thrown
+--   away its value, and now we want to get it back.
+makeExpValue :: ExpM -> LR MaybeValue
+makeExpValue (ExpM expression) =
+  case expression
+  of VarE inf v -> do
+       mvalue <- lookupKnownValue v
+       return $ mvalue `mplus` Just (VarValue inf v)
+     LitE inf l -> return $ Just $ LitValue inf l
+     _ -> return Nothing
+
 -------------------------------------------------------------------------------
 -- Inlining
 
@@ -513,28 +526,6 @@ constructLet body parts = do
     shapeLet body (LetPart lpInf lpBind lpVal) =
       return $ ExpM $ LetE lpInf lpBind lpVal body
 
--- | Determine which parameters of an application term should be floated.
---   Returns a list containing a 'ParamType' for each argument that should be
---   floated.  The caller should check that the list length is equal to the 
---   actual number of operands in the application term.
-floatedAppParameters :: DataConType -> [TypM] -> Maybe [Maybe ParamType]
-floatedAppParameters dcon_type ty_args
-  -- Float if all type arguments are supplied,
-  -- and the representation is Value or Boxed
-  | length ty_args == length (dataConPatternParams dcon_type) +
-                      length (dataConPatternExTypes dcon_type) =
-      let types = map fromTypM ty_args
-          (field_types, _) =
-            instantiateDataConTypeWithExistentials dcon_type types
-      in Just $ map floatable field_types
-  | otherwise = Nothing
-  where
-    floatable (rrepr ::: ty) =
-      case rrepr
-      of ValRT -> Just (ValPT Nothing ::: ty)
-         BoxRT -> Just (BoxPT ::: ty)
-         _ -> Nothing
-
 delveExp :: ExpM -> LR ([LetPartM], ExpM)
 delveExp (ExpM ex) = do
   case ex of
@@ -594,43 +585,11 @@ restructureExp ex = do
 -------------------------------------------------------------------------------
 -- Traversing code
 
-data RWFloat =
-  RWFloat
-  { -- | Add floated variables' types and known values to the environment
-    floatedContextSetup :: forall a. LR a -> LR a
-    -- | The variables that are floated
-  , floatedVariables :: Set.Set Var
-    -- | The floated bindings
-  , floatedBindings :: Context
-  }
-
--- | @f1 `mappend` f2@ puts f1 outside f2
-instance Monoid RWFloat where
-  mempty = RWFloat { floatedContextSetup = id
-                   , floatedVariables = Set.empty
-                   , floatedBindings = []}
-  f1 `mappend` f2 =
-    RWFloat { floatedContextSetup = floatedContextSetup f1 .
-                                    floatedContextSetup f2
-            , floatedVariables = floatedVariables f1 `Set.union`
-                                 floatedVariables f2
-              -- Note order of floated bindings: f2 goes on the inside
-            , floatedBindings = floatedBindings f2 ++ floatedBindings f1}
-
 -- | Rewrite an expression.
 --
---   Return the expression's value if it can be determined at compile time.
+--   Return the expression's value if it can be determined.
 rwExp :: ExpM -> LR (ExpM, MaybeValue)
 rwExp expression = do
-  (flt, expression', mvalue) <- rwExp' expression
-  
-  -- If the known value mentions any floated variables, then forget it.
-  -- The floated variables are no longer in scope.
-  let ret_value = forgetVariables (floatedVariables flt) mvalue
-  return (applyContext (floatedBindings flt) expression', ret_value)
-
-rwExp' :: ExpM -> LR (RWFloat, ExpM, MaybeValue)
-rwExp' expression = do
   -- Flatten nested let and case statements
   ex1 <- restructureExp expression
 
@@ -648,13 +607,10 @@ rwExp' expression = do
 
 -- | Rewrite a list of expressions that are in the same scope,
 --   such as arguments of a function call.
-rwExps' :: [ExpM] -> LR (RWFloat, [ExpM], [MaybeValue])
-rwExps' es = do
-  results <- mapM rwExp' es
-  case unzip3 results of
-    (floats, exps, values) -> return (mconcat floats, exps, values)
+rwExps :: [ExpM] -> LR ([ExpM], [MaybeValue])
+rwExps es = mapAndUnzipM rwExp es
 
-rwExpReturn (exp, val) = return (mempty, exp, val)
+rwExpReturn (exp, val) = return (exp, val)
     
 -- | Rewrite a variable expression and compute its value.
 rwVar original_expression inf v =
@@ -670,28 +626,24 @@ rwVar original_expression inf v =
       -- Set up for copy propagation
       (original_expression, Just $ VarValue inf v)
 
-rwApp :: ExpInfo -> ExpM -> [TypM] -> [ExpM]
-      -> LR (RWFloat, ExpM, MaybeValue)
-rwApp inf op ty_args args = do       
-  (float_op_bind, op', op_val) <- rwExp' op
-
-  -- Add the operator's value to the environment while processing arguments
-  (result_float, result_exp, result_val) <-
-    floatedContextSetup float_op_bind $
-    rwAppWithOperator inf op' op_val ty_args args
-
-  -- Include the operator's floated bindings in the result
-  return (float_op_bind `mappend` result_float, result_exp, result_val)
+rwApp :: ExpInfo -> ExpM -> [TypM] -> [ExpM] -> LR (ExpM, MaybeValue)
+rwApp inf op ty_args args = do
+  (op', op_val) <- rwExp op
+  rwAppWithOperator inf op' op_val ty_args args
 
 -- | Rewrite an application, depending on what the operator is.
 --   The operator has been simplified, but the arguments have not.
+--
+--   This function is usually called from 'rwApp'.  It calls itself 
+--   recursively to flatten out curried applications.
 rwAppWithOperator inf op' op_val ty_args args =
   -- If the operator is an application and there are no type arguments,
   -- then uncurry the application
   case op'
   of ExpM (AppE _ inner_op inner_ty_args inner_args)
-       | null ty_args ->
-         rwAppWithOperator inf inner_op Nothing inner_ty_args (inner_args ++ args)
+       | null ty_args -> do
+         inner_op_value <- makeExpValue inner_op
+         rwAppWithOperator inf inner_op inner_op_value inner_ty_args (inner_args ++ args)
      _ ->
        -- Apply simplification tecnhiques specific to this operator
        case op_val
@@ -708,38 +660,33 @@ rwAppWithOperator inf op' op_val ty_args args =
               rwCopyApp inf op' ty_args args
 
           Just (VarValue _ op_var) -> do
-            -- Check if it's a data constructor, and if so, rewrite it
-            data_con_result <- tryRwDataConApp inf op' op_var ty_args args
-            case data_con_result of
-              Just result -> return result
-              Nothing -> do
-                tenv <- getTypeEnv
+            tenv <- getTypeEnv
                 
-                -- Try to rewrite this application
-                rewritten <- liftFreshVarM $
-                             rewriteApp tenv inf op_var ty_args args
-                case rewritten of 
-                  Just new_expr -> rwExp' new_expr
-                  Nothing -> unknown_app op'
+            -- Try to rewrite this application
+            rewritten <- liftFreshVarM $
+                         rewriteApp tenv inf op_var ty_args args
+            case rewritten of 
+              Just new_expr -> rwExp new_expr
+              Nothing -> unknown_app op'
 
           _ -> unknown_app op'
   where
     unknown_app op' = do
-      (arg_floats, args', _) <- rwExps' args
+      (args', _) <- rwExps args
       let new_exp = ExpM $ AppE inf op' ty_args args'
-      return (arg_floats, new_exp, Nothing)
+      return (new_exp, Nothing)
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
     inline_function_call funm =
-      rwExp' =<< betaReduce inf funm ty_args args
+      rwExp =<< betaReduce inf funm ty_args args
 
 -- | Attempt to statically evaluate a store
 rwStoreApp inf op' ty_args args = do
-  (arg_floats, args', arg_values) <- rwExps' args
+  (args', arg_values) <- rwExps args
   let new_exp = ExpM $ AppE inf op' ty_args args'
       new_value = stored_value arg_values
-  return (arg_floats, new_exp, new_value)
+  return (new_exp, new_value)
   where
     -- Keep track of what was stored in memory
     stored_value [_, Just stored_value, Just (VarValue {knownVar = dstvar})] =
@@ -750,13 +697,13 @@ rwStoreApp inf op' ty_args args = do
       
 -- | Attempt to statically evaluate a load
 rwLoadApp inf op' ty_args args = do
-  (arg_floats, args', arg_values) <- rwExps' args
+  (args', arg_values) <- rwExps args
   let new_exp = ExpM $ AppE inf op' ty_args args'
   case loaded_value arg_values of
     Just (m_loaded_exp, new_value) ->
-      return (arg_floats, fromMaybe new_exp m_loaded_exp, new_value)
+      return (fromMaybe new_exp m_loaded_exp, new_value)
     Nothing ->
-      return (arg_floats, new_exp, Nothing)
+      return (new_exp, Nothing)
   where
     -- Do we know what was stored here?
     loaded_value [_, Just (KnownHeapState (StoredValue kv _))] =
@@ -767,10 +714,10 @@ rwLoadApp inf op' ty_args args = do
 
 -- | Attempt to statically evaluate a copy
 rwCopyApp inf op' ty_args args = do
-  (arg_floats, args', arg_values) <- rwExps' args
+  (args', arg_values) <- rwExps args
   let new_exp = ExpM $ AppE inf op' ty_args args'
       new_value = copied_value arg_values
-  return (arg_floats, new_exp, Nothing)
+  return (new_exp, Nothing)
   where
     -- Do we know what was stored here?
     copied_value [_,
@@ -781,78 +728,6 @@ rwCopyApp inf op' ty_args args = do
     copied_value [_, _, _] = Nothing
     copied_value _ =
       internalError "rwCopyApp: Wrong number of arguments in call"
-
--- | Try to rewrite a data constructor application.
---   Return the rewritten result if successful, Nothing otherwise.
-tryRwDataConApp :: ExpInfo
-                -> ExpM         -- ^ Data constructor expression
-                -> Var          -- ^ Data constructor variable
-                -> [TypM]       -- ^ Type arguments
-                -> [ExpM]       -- ^ Value arguments, not simplified yet
-                -> LR (Maybe (RWFloat, ExpM, MaybeValue))
-tryRwDataConApp inf op op_var ty_args args = do
-  tenv <- getTypeEnv
-  case lookupDataConWithType op_var tenv of
-    Just (con_type, dcon_type) ->
-      case floatedAppParameters dcon_type ty_args
-      of Just float_spec | length float_spec == length args ->
-           liftM Just $
-           rwDataConApp inf op con_type dcon_type float_spec ty_args args
-         _ -> return Nothing
-    _ -> return Nothing
-
--- | Rewrite a data constructor application.  Called by 'tryRwDataConApp'.
-rwDataConApp :: ExpInfo
-             -> ExpM            -- ^ Data constructor expression
-             -> DataType        -- ^ Data type being constructed
-             -> DataConType     -- ^ Data constructor used
-             -> [Maybe ParamType] -- ^ Which arguments should be floated
-             -> [TypM]          -- ^ Type arguments
-             -> [ExpM]          -- ^ Value arguments, not simplified yet
-             -> LR (RWFloat, ExpM, MaybeValue)
-rwDataConApp inf op data_type dcon_type float_spec ty_args args = do
-  fields <- zipWithM rw_field float_spec args
-  let (floatbinds, args', arg_values) = unzip3 fields
-      floatbind = mconcat floatbinds
-      value = dataValue inf data_type dcon_type ty_args arg_values
-      new_exp = ExpM $ AppE inf op ty_args args'
-           
-  return (floatbind, new_exp, value)
-  where
-    -- Decide whether to float a field.
-    -- If a parameter was given, the field is floatable.
-    -- Float if it's floatable, and not a very simple expression.
-    rw_field Nothing arg = rw_unfloated_field arg
-    rw_field (Just ptype) arg = 
-      case fromExpM arg
-      of VarE {} -> rw_unfloated_field arg
-         LitE {} -> rw_unfloated_field arg
-         _ -> rw_floated_field ptype arg
-    
-    -- Rewrite and float a field.
-    -- The field's value gets assigned to a new variable.
-    -- Return a function that adds the new variable to the environment.
-    rw_floated_field param_type arg = do
-      (arg', arg_value) <- rwExp arg
-      arg_var <- newAnonymousVar ObjectLevel
-      let local_arg_value =
-            fmap (weakAssignCheapVarValue inf arg_var) arg_value
-          pattern = MemVarP arg_var param_type
-          context = contextItem $ LetCtx inf pattern arg'
-          env =
-            withMaybeValue arg_var local_arg_value .
-            assumeParamType arg_var param_type
-          
-          float_bind =
-            RWFloat { floatedContextSetup = env
-                    , floatedVariables = Set.singleton arg_var
-                    , floatedBindings = [context]}
-      return (float_bind, ExpM $ VarE inf arg_var, local_arg_value)
-    
-    -- Rewrite a field.  Don't float it.
-    rw_unfloated_field arg = do
-      (arg', arg_value) <- rwExp arg
-      return (mempty, arg', arg_value)
 
 rwLet inf bind val body =       
   case bind
@@ -895,17 +770,14 @@ rwLet inf bind val body =
     -- The computed value for this let expression cannot mention the locally 
     -- defined variable.  If it's in the body's
     -- value, we have to forget about it.
-    mask_local_variable bind_var ret_val 
-      | ret_val `maybeValueMentions` bind_var = Nothing
-      | otherwise = ret_val
+    mask_local_variable bind_var ret_val =
+      forgetVariables (Set.singleton bind_var) ret_val
 
 rwLetrec inf defs body = withDefs defs $ \defs' -> do
   (body', body_value) <- rwExp body
       
   let local_vars = Set.fromList [v | Def v _ <- defGroupMembers defs']
-      ret_value = if body_value `maybeValueMentionsAny` local_vars
-                  then Nothing
-                  else body_value
+      ret_value = forgetVariables local_vars body_value
   rwExpReturn (ExpM $ LetrecE inf defs' body', ret_value)
 
 rwCase inf scrut alts = do
@@ -922,7 +794,7 @@ rwCase inf scrut alts = do
            of Just eliminated_case ->
                 -- Rewrite the new expression, including the body of the
                 -- alternative
-                rwExp' eliminated_case
+                rwExp eliminated_case
               Nothing -> no_eliminate scrut' [altm]
     _ -> no_eliminate scrut' alts
   where
