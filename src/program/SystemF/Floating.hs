@@ -75,6 +75,39 @@ findByType id_supply tenv ptype assocs = search assocs
     
     search [] = return Nothing
 
+-- | Determine which parameters of a data constructor application
+--   should be converted to direct style.  It's an error if the wrong
+--   number of type parameters is given.  Returns a list containing a
+--   'ParamType' for each
+--   argument that should be converted.  The list length may be different
+--   from the number of operands in an appliation term.  Excess operands
+--   should not be floated.
+directStyleAppParameters :: DataConType
+                         -> [TypM]
+                         -> Maybe [Maybe ParamType]
+directStyleAppParameters dcon_type ty_args
+  -- Float if all type arguments are supplied,
+  -- and the representation is Value or Boxed
+  | length ty_args /= length (dataConPatternParams dcon_type) +
+                      length (dataConPatternExTypes dcon_type) =
+      internalError "directStyleAppParameters: Wrong number of type arguments"
+  | otherwise =
+      let types = map fromTypM ty_args
+          (field_types, _) =
+            instantiateDataConTypeWithExistentials dcon_type types
+      in Just $ map floatable field_types
+  | otherwise = Nothing
+  where
+    -- Value and boxed operands are floatable
+    floatable (rrepr ::: ty) =
+      case rrepr
+      of ValRT -> Just (ValPT Nothing ::: ty)
+         BoxRT -> Just (BoxPT ::: ty)
+         _ -> Nothing
+
+-------------------------------------------------------------------------------
+-- Floatable contexts
+
 -- | A floatable context.
 --
 --   The head of the list is the innermost context, and may reference variables
@@ -213,22 +246,6 @@ splitContext predicate ctx =
 
     split _ dep indep [] = (dep, indep)
 
--- | Split the parts of the context that are and are not dependent on
---   the given variables.  Returns the dependent and independent components.
-splitContextOnVars :: [Var] -> Context -> (Context, Context)
-splitContextOnVars vs ctx =
-  let var_set = Set.fromList vs
-  in splitContext (\c -> ctxUses c `intersects` var_set) ctx
-
--- | Split the parts of the context that are and are not dependent on
---   the given variable IDs.  Returns the dependent and independent components.
-splitContextOnVarSet :: IntSet.IntSet -> Context -> (Context, Context)
-splitContextOnVarSet vs ctx =
-  let check c =
-        -- Does c use any variables from the set? 
-        or [fromIdent (varID v) `IntSet.member` vs | v <- Set.toList $ ctxUses c]
-  in splitContext check ctx
-
 -- | Remove redundant definitions of the same dictionary from the context.
 --   The outermost definition is retained.
 --
@@ -290,6 +307,7 @@ applyContext (c:ctx) e =
 applyContext [] e = e
 
 -------------------------------------------------------------------------------
+-- The floating monad
 
 data FloatCtx = 
   FloatCtx { fcVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
@@ -361,20 +379,39 @@ float ctx_exp = do
   -- Float this binding
   Flt $ \_ -> return (rn, ctx)
 
--- | Put floated bindings here if they satisfy the predicate or if they
---   depend on a binding that satisfies the predicate
-anchor :: (ContextItem -> Bool) -> Flt ExpM -> Flt ExpM
-anchor predicate m = Flt $ \ctx -> do
-  (exp, context) <- runFlt m ctx
+-- | Helper function for calling 'nubContext'
+fltNubContext :: FloatCtx -> Context -> IO (Context, Renaming)
+fltNubContext ctx context =
+  nubContext (fcVarSupply ctx) (fcTypeEnv ctx) context
+
+-- | Run a computation that returns a predicate.  Capture floated bindings
+--   that are produced by the computation, if they satisfy the predicate.
+--
+--   The process can rename and eliminate unneeded bindings.
+--   A renaming is returned.  The
+--   renaming should be applied to any code over which the bindings are in
+--   scope.
+grabContext :: Flt (a, ContextItem -> Bool) -> Flt (a, Context, Renaming)
+grabContext m = Flt $ \ctx -> do
+  ((x, predicate), context) <- runFlt m ctx
   
   -- Find dependent bindings
   let (dep, indep) = splitContext predicate context
 
   -- Remove redundant bindings
   (dep', rn) <- fltNubContext ctx dep
-  let new_exp = applyContext dep' (rename rn exp)
 
-  return (new_exp, indep)
+  return ((x, dep', rn), indep)
+
+-- | Put floated bindings here if they satisfy the predicate or if they
+--   depend on a binding that satisfies the predicate
+anchor :: (ContextItem -> Bool) -> Flt ExpM -> Flt ExpM
+anchor predicate m = do
+  (exp, dep_context, rn) <- grabContext $ do
+    x <- m
+    return (x, predicate)
+
+  return $ applyContext dep_context (rename rn exp)
 
 -- | Put floated bindings here, if they depend on the specified variable
 anchorOnVar :: Var -> Flt ExpM -> Flt ExpM
@@ -393,7 +430,7 @@ anchorOnVars vs m = addLocalVars vs $ anchor check m
 --   are permitted to float out.  Function bindings are floated only if they
 --   do not depend on the given variables.
 anchorOuterScope :: [Var] -> Flt ExpM -> Flt ExpM
-anchorOuterScope vs m = addLocalVars vs $ anchor check m 
+anchorOuterScope vs m = addLocalVars vs $ anchor check m
   where
     vars_set = Set.fromList vs
     check c = not (isLetrecCtx $ ctxExp c) || ctxUses c `intersects` vars_set
@@ -446,27 +483,114 @@ addPatternVar (MemWildP _)               = id
 
 addPatternVars ps x = foldr addPatternVar x ps
 
-fltNubContext :: FloatCtx -> Context -> IO (Context, Renaming)
-fltNubContext ctx context =
-  nubContext (fcVarSupply ctx) (fcTypeEnv ctx) context
-
 -------------------------------------------------------------------------------
+
+-- | Flatten an application.  Some of the application's operands are
+--   bound to new variables and floated up a short distance.  They aren't 
+--   floated past any preexisting variable bindings.
+--
+--   The purpose of flattening is to partially convert the application to
+--   direct style.  For example, flattening @f(g(x), y, h(1))@ produces
+--
+--   > let tmp1 = g(x) in
+--   > let tmp2 = h(1) in
+--   > f(tmp1, y, tmp2)
+--
+--   This goes on simultaneously with regular, long-distance floating.
+--   Dictionary construction is floated as far as possible.
+--   Data constructor applications are converted to direct style, except
+--   that fields that are initialized by a writer function are left alone.
+--   Other terms are not converted to direct style.
+--   Lambda expressions are long-distance floated if they would be flattened,
+--   or left in place otherwise.
+flattenApp :: ExpM -> Flt (ExpM, Context)
+flattenApp expression =
+  case fromExpM expression
+  of AppE inf (ExpM (VarE _ op_var)) ty_args args ->
+       -- Convert this expression to direct style
+       createFlattenedApp inf op_var ty_args args
+
+     AppE inf op ty_args args -> do
+       -- Don't flatten this expresion.  Flatten subexpressions.
+       (op', op_context) <- flattenApp op
+       (args', arg_contexts) <- mapAndUnzipM flattenApp args
+       let new_exp = ExpM $ AppE inf op' ty_args args'
+       return (new_exp, concat (op_context : arg_contexts))
+
+     _ -> do
+       -- Don't alter
+       new_exp <- floatInExp expression
+       return (new_exp, [])
+
+createFlattenedApp inf op_var ty_args args = do
+  -- Determine which parameters should be moved
+  tenv <- getTypeEnv
+  let mdcon_type = lookupDataCon op_var tenv
+      moved = moved_parameters mdcon_type
+
+  -- Flatten arguments
+  (unzip -> (args', concat -> arg_contexts)) <- zipWithM flatten_arg moved args
+  
+  -- Create the new expression
+  let new_expr = ExpM $ AppE inf (ExpM $ VarE inf op_var) ty_args args'
+
+  -- If this is a dictionary expression, then float it.
+  -- Otherwise return it.
+  if isDictionaryDataCon op_var
+    then do dict_expr <- floatDictionary inf new_expr op_var ty_args
+            return (dict_expr, arg_contexts)
+    else return (new_expr, arg_contexts)
+  where
+    flatten_arg Nothing arg =
+      -- This argument stays in place
+      flattenApp arg
+
+    -- Special case: lambda (...) becomes a letrec and gets floated
+    flatten_arg (Just _) arg@(ExpM (LamE lam_info f)) = do
+      f' <- floatInFun (LocalAnchor []) f
+
+      -- Bind the function to a new variable and float it outward
+      tmpvar <- newAnonymousVar ObjectLevel
+      let floated_ctx = LetrecCtx lam_info (NonRec (Def tmpvar f'))
+      rn <- float floated_ctx
+      
+      -- Get the renamed variable
+      let floated_var = rename rn tmpvar
+      return (ExpM $ VarE inf floated_var, [])
+
+    flatten_arg (Just param_type) arg = do
+      (arg_expr, subcontext) <- flattenApp arg
+
+      -- If this argument is trivial, leave it where it is.
+      -- Otherwise, bind it to a new variable.
+      if is_trivial_arg arg_expr
+        then return (arg, [])
+        else do
+          tmpvar <- newAnonymousVar ObjectLevel
+          let binding =
+                contextItem $ LetCtx inf (MemVarP tmpvar param_type) arg_expr
+          return (ExpM $ VarE inf tmpvar, subcontext ++ [binding])
+    
+    is_trivial_arg (ExpM (VarE {})) = True
+    is_trivial_arg (ExpM (LitE {})) = True
+    is_trivial_arg _ = False
+
+    -- Based on the data constructor's type, pick which arguments to move.
+    -- A Just value means the argument should be moved, and has the given type.
+    -- If unknown, don't move an argument.
+    moved_parameters :: Maybe DataConType -> [Maybe ParamType]
+    moved_parameters Nothing = repeat Nothing
+    moved_parameters (Just dcon_type) =
+      case directStyleAppParameters dcon_type ty_args
+      of Nothing -> repeat Nothing
+         Just xs -> xs ++ repeat Nothing
 
 floatInExp :: ExpM -> Flt ExpM
 floatInExp (ExpM expression) =
   case expression
   of VarE {} -> return $ ExpM expression
      LitE {} -> return $ ExpM expression
-     AppE inf (ExpM (VarE _ op_var)) ty_args args
-       | isDictionaryDataCon op_var -> do
-           -- Float out this dictionary constructor.
-           -- Bind the dictionary value to a new variable.
-           floatDictionary inf expression op_var ty_args args
-     AppE inf op ty_args args -> do
-       op' <- floatInExp op
-       -- ty_args don't contain anything floatable
-       args' <- mapM floatInExp args
-       return $ ExpM $ AppE inf op' ty_args args'
+     AppE {} -> floatInApp (ExpM expression)
      LamE inf f -> do
        f' <- floatInFun (LocalAnchor []) f
        return $ ExpM $ LamE inf f'
@@ -483,18 +607,46 @@ floatInExp (ExpM expression) =
 
      CaseE inf scr alts ->
        floatInCase inf scr alts
+
+floatInApp :: ExpM -> Flt ExpM
+floatInApp expression = do
+  -- Flatten the expression and catch any floated bindings that depend on
+  -- local variables
+  ((new_expression, local_context), dependent_context, rn) <-
+    grabContext flatten_expression 
   
+  -- Put the dependent context inside the local context
+  return $ applyContext local_context $
+           applyContext dependent_context $
+           rename rn new_expression
+  where 
+    flatten_expression = do
+      -- Flatten the expression
+      result@(_, local_context) <- flattenApp expression
+    
+      -- Find the new variable bindings that were created
+      let local_defs = IntSet.fromList $ map (fromIdent . varID) $
+                       concatMap ctxDefs local_context
+    
+      -- Any floated bindings that mention these variables should be caught
+      let check c = or [fromIdent (varID v) `IntSet.member` local_defs
+                       | v <- Set.toList $ ctxUses c]
+
+      return (result, check)
+
 floatInLet inf pat rhs body =
   case pat
-  of MemVarP pat_var pat_type
-       | isFloatableParamType pat_type -> do
+  of MemVarP pat_var pat_type -> do
+       -- Float the RHS
+       rhs' <- floatInExp rhs
+       if isFloatableParamType pat_type
+         then do
            -- Float this binding
-           rn <- float $ LetCtx inf pat rhs
+           rn <- float $ LetCtx inf pat rhs'
 
            -- Rename and continue processing the body
            addPatternVar pat $ floatInExp $ rename rn body
-       | otherwise -> do
-           rhs' <- floatInExp rhs
+         else do
            body' <- addPatternVar pat $ anchorOnVar pat_var $ floatInExp body
            return $ ExpM $ LetE inf pat rhs' body'
 
@@ -507,14 +659,12 @@ floatInLet inf pat rhs body =
      MemWildP {} -> internalError "floatInLet"
 
 floatInLetrec inf defs body = do
-  -- Float the contents of these functions
+  -- Float the contents of these functions.  If it's a recursive binding,
+  -- don't float anything that mentions one of the local functions.
   defs' <-
     case defs
-    of NonRec {} ->
-         traverse (float_function_body []) defs
-       Rec {} ->
-         -- Don't float anything that mentions one of the local functions
-         traverse (float_function_body def_vars) defs
+    of NonRec {} -> traverse (float_function_body []) defs
+       Rec {}    -> traverse (float_function_body def_vars) defs
 
   -- Float these functions
   rn <- float (LetrecCtx inf defs')
@@ -555,7 +705,7 @@ floatInCase inf scr alts = do
           return False
 
 -- | Float out a dictionary construction expression
-floatDictionary inf dict_expr op_var ty_args args = do
+floatDictionary inf dict_expr op_var ty_args = do
   -- Compute the type of the dictionary
   tenv <- getTypeEnv
   let dict_repr ::: dict_type = dictionary_type tenv
@@ -563,27 +713,26 @@ floatDictionary inf dict_expr op_var ty_args args = do
   -- Create the binding that will be floated
   dict_var <- newAnonymousVar ObjectLevel
   let dict_param_type = returnReprToParamRepr dict_repr ::: dict_type
-      ctx = LetCtx inf (MemVarP dict_var dict_param_type) $ ExpM dict_expr
+      ctx = LetCtx inf (MemVarP dict_var dict_param_type) dict_expr
       
   -- Return the variable
   rn <- float ctx
   return $ ExpM $ VarE inf (rename rn dict_var)
   where
-    dictionary_type tenv =
-      case lookupDataCon op_var tenv
-      of Just dc_type ->
-           -- Determine which type arguments are universally quantified
-           let num_universal_types = length $ dataConPatternParams dc_type
-               num_existential_types = length $ dataConPatternExTypes dc_type
-               inst_type_args = map fromTypM $ take num_universal_types ty_args
+    dictionary_type tenv
+      | Just dc_type <- lookupDataCon op_var tenv =
+        -- Determine which type arguments are universally quantified
+        let num_universal_types = length $ dataConPatternParams dc_type
+            num_existential_types = length $ dataConPatternExTypes dc_type
+            inst_type_args = map fromTypM $ take num_universal_types ty_args
                
-               -- Existential variables cannot appear in the return type
-               inst_ex_args = replicate num_existential_types $
-                              internalError "floatDictionary: Unexpected use of existential variable"
-               (_, _, result_type) =
-                 instantiateDataConType dc_type inst_type_args inst_ex_args
-           in result_type
-         Nothing -> internalError "floatDictionary"
+            -- Existential variables cannot appear in the return type
+            inst_ex_args = replicate num_existential_types $
+                           internalError "floatDictionary: Unexpected use of existential variable"
+            (_, _, result_type) =
+              instantiateDataConType dc_type inst_type_args inst_ex_args
+        in result_type
+      | otherwise = internalError "floatDictionary"
 
 floatInAlt :: AltM -> Flt AltM
 floatInAlt (AltM alt) = do
@@ -647,6 +796,8 @@ floatInTopLevelDefGroup defgroup =
                  of Nothing -> [Rec defs']
                     Just b_defs -> [mergeDefGroups b_defs $ Rec defs']
 
+-- | Perform floating on an exported function definition.  The floated
+--   definitions become a new definition group.
 floatInExport :: Export Mem -> Flt ([DefGroup (Def Mem)], Export Mem)
 floatInExport exp = do
   (f', bindings) <-
