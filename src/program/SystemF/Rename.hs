@@ -9,7 +9,9 @@ module SystemF.Rename
         renameTyPatM,
         substituteTyPatM,
         freshenTyPatM,
-        freshenTyPatMs)
+        freshenTyPatMs,
+        renameDefM,
+        substituteDefM)
 where
 
 import Control.Monad

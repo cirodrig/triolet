@@ -6,7 +6,7 @@ singleton values, case-of-dictionary expressions, and case-of-read-variable
 expressions this way.
 -}
 
-{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts, ViewPatterns #-}
 module SystemF.Floating
        (Context,
         ContextItem, contextItem,
@@ -16,6 +16,7 @@ module SystemF.Floating
 where
 
 import Prelude hiding(mapM)
+import Control.Applicative
 import Control.Monad hiding(forM, mapM)
 import Data.List
 import Data.Maybe
@@ -38,6 +39,10 @@ import Type.Rename
 import Type.Type
 import Globals
 import GlobalVar
+
+-- | Do s1 and s2 intersect?
+intersects :: Ord a => Set.Set a -> Set.Set a -> Bool
+s1 `intersects` s2 = not $ Set.null $ Set.intersection s1 s2
 
 -- | Is this a singleton type?
 isSingletonType :: Type -> Bool
@@ -100,6 +105,15 @@ contextItem e = ContextItem (freeVariablesContextExp e) e
           pat_fv1 = Set.unions $ map (freeVariables . patMType) pats
           pat_fv = foldr Set.delete pat_fv1 [v | TyPatM v _ <- ty_pats]
       in Set.unions [scr_fv, ty_fv, typat_fv, pat_fv]
+   
+    freeVariablesContextExp (LetrecCtx _ defgroup) =
+      case defgroup
+      of NonRec (Def v f) -> freeVariables f
+         Rec defs -> 
+           let functions_fv =
+                 Set.unions $ map freeVariables [f | Def _ f <- defs]
+               local_variables = [v | Def v _ <- defs]
+           in foldr Set.delete functions_fv local_variables
 
 -- | An expression sans body that can be floated outward.
 data ContextExp =
@@ -112,6 +126,11 @@ data ContextExp =
     --
     --   @case <scrutinee> of <alternative>. (...)@
   | CaseCtx ExpInfo ExpM !Var [TypM] [TyPatM] [PatM]
+    -- | A letrec expression
+  | LetrecCtx ExpInfo (DefGroup (Def Mem))
+
+isLetrecCtx (LetrecCtx {}) = True
+isLetrecCtx _ = False
 
 renameContextItem :: Renaming -> ContextItem -> ContextItem
 renameContextItem rn item =
@@ -134,6 +153,8 @@ renameContextExp rn cexp =
        CaseCtx inf (rename rn scr) con (rename rn ty_args)
        (map (renameTyPatM rn) ty_params)  
        (map (renamePatM rn) params)
+     LetrecCtx inf defs ->
+       LetrecCtx inf (fmap (renameDefM rn) defs)
 
 freshenContextExp :: (Monad m, Supplies m VarID) =>
                      ContextExp -> m (ContextExp, Renaming)
@@ -148,6 +169,19 @@ freshenContextExp (CaseCtx inf scr alt_con ty_args ty_params params) = do
   let rn = ty_renaming `mappend` param_renaming
   return (CaseCtx inf scr alt_con ty_args ty_params' params', rn)
 
+freshenContextExp (LetrecCtx inf defs) =
+  case defs
+  of NonRec (Def v f) -> do
+       v' <- newClonedVar v
+       let new_defs = NonRec (Def v' f)
+       return (LetrecCtx inf new_defs, singletonRenaming v v')
+     Rec defs -> do
+       let local_vars = [v | Def v _ <- defs]
+       new_vars <- mapM newClonedVar local_vars
+       let rn = renaming $ zip local_vars new_vars
+           new_defs = map (renameDefM rn) defs
+       return (LetrecCtx inf (Rec new_defs), rn)
+
 -- | Get the variables defined by the context
 ctxDefs :: ContextItem -> [Var]
 ctxDefs item =
@@ -155,20 +189,22 @@ ctxDefs item =
   of LetCtx _ pat _ -> [patMVar' pat]
      CaseCtx _ _ _ _ ty_params params ->
        [v | TyPatM v _ <- ty_params] ++ mapMaybe patMVar params
+     LetrecCtx _ defs ->
+       [v | Def v _ <- defGroupMembers defs]
 
--- | Extract the part of the context that depends on the given variables.
+-- | Extract the part of the context that satisfies the predicate, 
+--   as well as any dependent parts of the context.
 --   The context is partitioned into two contexts, of which the first is
---   dependent on and the second is independent of the given variables.
-splitContext :: [Var] -> Context -> (Context, Context)
-splitContext vars ctx =
+--   dependent on and the second is independent of the predicate.
+splitContext :: (ContextItem -> Bool) -> Context -> (Context, Context)
+splitContext predicate ctx =
   -- Start processing from the outermost context and work inwards
-  split (Set.fromList vars) [] [] (reverse ctx)
+  split Set.empty [] [] (reverse ctx)
   where
     split varset dep indep (c:ctx)
-      | not $ Set.null $ ctxUses c `Set.intersection` varset =
-          -- This element of the context is dependent.
-          -- Anything dependent on this element must be added to the 
-          -- dependent set.
+      | predicate c || ctxUses c `intersects` varset =
+          -- This element of the context should be retained,
+          -- or depends on something that should be retained.
           let varset' = foldr Set.insert varset $ ctxDefs c
           in split varset' (c : dep) indep ctx
       | otherwise =
@@ -176,6 +212,22 @@ splitContext vars ctx =
           split varset dep (c : indep) ctx
 
     split _ dep indep [] = (dep, indep)
+
+-- | Split the parts of the context that are and are not dependent on
+--   the given variables.  Returns the dependent and independent components.
+splitContextOnVars :: [Var] -> Context -> (Context, Context)
+splitContextOnVars vs ctx =
+  let var_set = Set.fromList vs
+  in splitContext (\c -> ctxUses c `intersects` var_set) ctx
+
+-- | Split the parts of the context that are and are not dependent on
+--   the given variable IDs.  Returns the dependent and independent components.
+splitContextOnVarSet :: IntSet.IntSet -> Context -> (Context, Context)
+splitContextOnVarSet vs ctx =
+  let check c =
+        -- Does c use any variables from the set? 
+        or [fromIdent (varID v) `IntSet.member` vs | v <- Set.toList $ ctxUses c]
+  in splitContext check ctx
 
 -- | Remove redundant definitions of the same dictionary from the context.
 --   The outermost definition is retained.
@@ -231,6 +283,8 @@ applyContext (c:ctx) e =
            CaseCtx inf scr con ty_args ty_params params ->
              let alt = AltM $ Alt con ty_args ty_params params e
              in ExpM $ CaseE inf scr [alt]
+           LetrecCtx inf defs ->
+             ExpM $ LetrecE inf defs e
   in applyContext ctx $! apply_c
 
 applyContext [] e = e
@@ -244,7 +298,11 @@ data FloatCtx =
            , fcTypeEnv :: !TypeEnv
              -- | IDs of readable reference variables that are not in
              -- @fcTypeEnv@.
-           , fcReadVars :: IntSet.IntSet 
+           , fcReadVars :: IntSet.IntSet
+             -- | IDs of variables that are not global and not defined by a
+             --   floated binding.  If a binding does /not/ depend on any of
+             --   these variables, it can float to the top level.
+           , fcLocalVars :: IntSet.IntSet
            }
 
 newtype Flt a =
@@ -276,6 +334,14 @@ instance Monad Flt where
     (y, w2) <- runFlt (k x) ctx
     return (y, w2 ++ w1)
 
+instance Functor Flt where
+  fmap f (Flt g) = Flt (\ctx -> do (x, context) <- g ctx 
+                                   return (f x, context))
+
+instance Applicative Flt where
+  pure = return
+  (<*>) = ap
+
 instance Supplies Flt (Ident Var) where
   fresh = Flt $ \ctx -> do x <- supplyValue (fcVarSupply ctx)
                            return (x, [])
@@ -295,29 +361,48 @@ float ctx_exp = do
   -- Float this binding
   Flt $ \_ -> return (rn, ctx)
 
--- | Put floated bindings here, if they depend on the specified variables
-anchor :: [Var] -> Flt ExpM -> Flt ExpM
-anchor vs m = Flt $ \ctx -> do
+-- | Put floated bindings here if they satisfy the predicate or if they
+--   depend on a binding that satisfies the predicate
+anchor :: (ContextItem -> Bool) -> Flt ExpM -> Flt ExpM
+anchor predicate m = Flt $ \ctx -> do
   (exp, context) <- runFlt m ctx
   
   -- Find dependent bindings
-  let (dep, indep) = splitContext vs context
-      
+  let (dep, indep) = splitContext predicate context
+
   -- Remove redundant bindings
   (dep', rn) <- fltNubContext ctx dep
   let new_exp = applyContext dep' (rename rn exp)
 
   return (new_exp, indep)
 
--- | Put all floated bindings here
-anchorAll :: Flt ExpM -> Flt ExpM
-anchorAll m = Flt $ \ctx -> do
-  (exp, context) <- runFlt m ctx
-  
-  -- Remove redundant bindings
-  (context', rn) <- fltNubContext ctx context
-  let new_exp = applyContext context' (rename rn exp)
-  return (new_exp, [])
+-- | Put floated bindings here, if they depend on the specified variable
+anchorOnVar :: Var -> Flt ExpM -> Flt ExpM
+anchorOnVar v m = addLocalVar v $ anchor check m
+  where
+    check c = v `Set.member` ctxUses c
+
+-- | Put floated bindings here, if they depend on the specified variables
+anchorOnVars :: [Var] -> Flt ExpM -> Flt ExpM
+anchorOnVars vs m = addLocalVars vs $ anchor check m
+  where
+    var_set = Set.fromList vs
+    check c = ctxUses c `intersects` var_set
+
+-- | Anchor bindings inside a top-level function.  Only function bindings
+--   are permitted to float out.  Function bindings are floated only if they
+--   do not depend on the given variables.
+anchorOuterScope :: [Var] -> Flt ExpM -> Flt ExpM
+anchorOuterScope vs m = addLocalVars vs $ anchor check m 
+  where
+    vars_set = Set.fromList vs
+    check c = not (isLetrecCtx $ ctxExp c) || ctxUses c `intersects` vars_set
+
+-- | Get all floated bindings.  No bindings are floated out of this call.
+getFloatedBindings :: Flt a -> Flt (a, Context)
+getFloatedBindings m = Flt $ \ctx -> do
+  (x, context) <- runFlt m ctx
+  return ((x, context), [])
 
 isReadReference :: Var -> Flt Bool
 isReadReference v = Flt $ \ctx ->
@@ -332,9 +417,23 @@ addReadVar :: Var -> Flt ExpM -> Flt ExpM
 addReadVar v m = Flt $ \ctx ->
   let ctx' = ctx {fcReadVars = IntSet.insert (fromIdent $ varID v) $
                                fcReadVars ctx}
-  in runFlt m ctx
+  in runFlt m ctx'
 
--- | If the pattern binds a readable variable, indicate that the variable is
+-- | Indicate that a variable is a local variable
+addLocalVar :: Var -> Flt ExpM -> Flt ExpM
+addLocalVar v m = Flt $ \ctx ->
+  let ctx' = ctx {fcLocalVars = IntSet.insert (fromIdent $ varID v) $
+                                fcLocalVars ctx}
+  in runFlt m ctx'
+
+addLocalVars :: [Var] -> Flt ExpM -> Flt ExpM
+addLocalVars vs m = Flt $ \ctx ->
+  let ids = map (fromIdent . varID) vs
+      ctx' = ctx {fcLocalVars = foldr IntSet.insert (fcLocalVars ctx) ids}
+  in runFlt m ctx'
+
+-- | Add a pattern variable to the environment.
+--   If the pattern binds a readable variable, indicate that the variable is
 --   a readable reference.  The pattern's type is ignored.
 --
 --   A @LocalVarP@ is counted as a readable reference.
@@ -369,7 +468,7 @@ floatInExp (ExpM expression) =
        args' <- mapM floatInExp args
        return $ ExpM $ AppE inf op' ty_args args'
      LamE inf f -> do
-       f' <- floatInFun (Just []) f
+       f' <- floatInFun (LocalAnchor []) f
        return $ ExpM $ LamE inf f'
      
      -- Special case: let x = lambda (...) becomes a letrec
@@ -396,33 +495,40 @@ floatInLet inf pat rhs body =
            addPatternVar pat $ floatInExp $ rename rn body
        | otherwise -> do
            rhs' <- floatInExp rhs
-           body' <- addPatternVar pat $ anchor [pat_var] $ floatInExp body
+           body' <- addPatternVar pat $ anchorOnVar pat_var $ floatInExp body
            return $ ExpM $ LetE inf pat rhs' body'
 
      LocalVarP pat_var pat_type pat_dict -> do
        pat_dict' <- floatInExp pat_dict
-       rhs' <- anchor [pat_var] $ floatInExp rhs
-       body' <- addPatternVar pat $ anchor [pat_var] $ floatInExp body
+       rhs' <- anchorOnVar pat_var $ floatInExp rhs
+       body' <- addPatternVar pat $ anchorOnVar pat_var $ floatInExp body
        return $ ExpM $ LetE inf (LocalVarP pat_var pat_type pat_dict') rhs' body'
 
      MemWildP {} -> internalError "floatInLet"
 
 floatInLetrec inf defs body = do
-  defs' <- float_defs
-  body' <- anchor def_vars $ floatInExp body
-  return $ ExpM $ LetrecE inf defs' body'
+  -- Float the contents of these functions
+  defs' <-
+    case defs
+    of NonRec {} ->
+         traverse (float_function_body []) defs
+       Rec {} ->
+         -- Don't float anything that mentions one of the local functions
+         traverse (float_function_body def_vars) defs
+
+  -- Float these functions
+  rn <- float (LetrecCtx inf defs')
+  
+  -- Float the body
+  floatInExp $ rename rn body
   where
     def_vars = [v | Def v _ <- defGroupMembers defs]
-    float_defs =
-      case defs
-      of NonRec (Def v f) -> do
-           f' <- floatInFun (Just []) f
-           return $ NonRec (Def v f')
-         Rec defs -> liftM Rec $ forM defs $ \(Def v f) -> do
-           -- Don't float anything that mentions one of the local functions
-           f' <- floatInFun (Just def_vars) f
-           return $ Def v f'
     
+    -- Perform floating in the function body
+    float_function_body local_vars (Def v f) = do
+      f' <- floatInFun (LocalAnchor local_vars) f
+      return (Def v f')
+
 floatInCase inf scr alts = do
   scr' <- floatInExp scr
   floatable <- is_floatable scr'
@@ -482,20 +588,26 @@ floatDictionary inf dict_expr op_var ty_args args = do
 floatInAlt :: AltM -> Flt AltM
 floatInAlt (AltM alt) = do
   body' <- addPatternVars (altParams alt) $
-           anchor local_vars $
+           anchorOnVars local_vars $
            floatInExp (altBody alt)
   return $ AltM $ alt {altBody = body'}
   where
     local_vars =
       [v | TyPatM v _ <- altExTypes alt] ++ mapMaybe patMVar (altParams alt)
 
+-- | What needs to be anchored when floating in a function definition.
+data FunAnchor =
+    LocalAnchor [Var]           -- ^ Anchor the given local variables
+  | GlobalAnchor                -- ^ Anchor everything except function bindings
+
 -- | Perform floating on a function.
 --
 --   If a Just value, @m_local_vars@ is the set of variables whose definitions 
---   should not be floated out of the function.  If Nothing, then no bindings
---   will be floated out.  The function's parameters will not be floated out
+--   should not be floated out of the function.  If Nothing, then 
+--   it's a top-level function, and only function bindings may be floated out.
+--   The function's parameters will not be floated out
 --   regardless of the value given.
-floatInFun :: Maybe [Var] -> FunM -> Flt FunM
+floatInFun :: FunAnchor -> FunM -> Flt FunM
 floatInFun m_local_vars (FunM fun) = do
   body <- addPatternVars (funParams fun) $ anchor_local_vars $
           floatInExp (funBody fun)
@@ -503,8 +615,9 @@ floatInFun m_local_vars (FunM fun) = do
   where
     anchor_local_vars m =
       case m_local_vars
-      of Nothing -> anchorAll m
-         Just extra_local_vars -> anchor (param_vars ++ extra_local_vars) m
+      of GlobalAnchor -> anchorOuterScope param_vars m
+         LocalAnchor extra_local_vars ->
+           anchorOnVars (param_vars ++ extra_local_vars) m
 
     param_vars = [v | TyPatM v _ <- funTyParams fun] ++
                  mapMaybe patMVar (funParams fun)
@@ -513,13 +626,44 @@ floatInFun m_local_vars (FunM fun) = do
 --   No bindings are floated out of the function.
 floatInTopLevelDef :: Def Mem -> Flt (Def Mem)
 floatInTopLevelDef (Def v f) = do
-  f' <- floatInFun Nothing f
+  f' <- floatInFun GlobalAnchor f
   return (Def v f')
 
-floatInExport :: Export Mem -> Flt (Export Mem)
+-- | Perform floating on a top-level definition group.
+--
+--   If function bindings were floated out, they may be produced as
+--   a new definition group.
+floatInTopLevelDefGroup :: DefGroup (Def Mem) -> Flt [DefGroup (Def Mem)]
+floatInTopLevelDefGroup defgroup = 
+  case defgroup
+  of NonRec def -> do
+       (def', bindings) <- getFloatedBindings $ floatInTopLevelDef def
+       return $! case makeDefGroup bindings
+                 of Nothing -> [NonRec def']
+                    Just b_defs -> [b_defs, NonRec def']
+     Rec defs -> do
+       (defs', bindings) <- getFloatedBindings $ mapM floatInTopLevelDef defs
+       return $! case makeDefGroup bindings
+                 of Nothing -> [Rec defs']
+                    Just b_defs -> [mergeDefGroups b_defs $ Rec defs']
+
+floatInExport :: Export Mem -> Flt ([DefGroup (Def Mem)], Export Mem)
 floatInExport exp = do
-  f' <- floatInFun Nothing $ exportFunction exp
-  return $ exp {exportFunction = f'}
+  (f', bindings) <-
+    getFloatedBindings $ floatInFun GlobalAnchor $ exportFunction exp
+  return (maybeToList $ makeDefGroup bindings, exp {exportFunction = f'})
+
+mergeDefGroups :: DefGroup (Def Mem)
+               -> DefGroup (Def Mem)
+               -> DefGroup (Def Mem)
+mergeDefGroups dg1 dg2 = Rec (defGroupMembers dg1 ++ defGroupMembers dg2)
+    
+makeDefGroup :: Context -> Maybe (DefGroup (Def Mem))
+makeDefGroup xs = case concatMap (fromLetrecCtx . ctxExp) xs
+                  of []   -> Nothing
+                     defs -> Just (Rec defs)
+  where
+    fromLetrecCtx (LetrecCtx _ dg) = defGroupMembers dg
 
 floatModule :: Module Mem -> IO (Module Mem)
 floatModule (Module mod_name defss exports) =
@@ -529,10 +673,11 @@ floatModule (Module mod_name defss exports) =
                             fcTypeEnv = tenv,
                             fcReadVars = IntSet.empty}
     defss' <- runTopLevelFlt float_defss flt_env
-    exports' <- runTopLevelFlt float_exports flt_env
-    return $ Module mod_name defss' exports'
+    (unzip -> (export_defs, exports')) <-
+      runTopLevelFlt float_exports flt_env
+    return $ Module mod_name (concat $ defss' ++ export_defs) exports'
   where
-    float_defss = mapM (mapM floatInTopLevelDef) defss
+    float_defss = mapM floatInTopLevelDefGroup defss
     float_exports = mapM floatInExport exports
     
     
