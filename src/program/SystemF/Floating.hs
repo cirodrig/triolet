@@ -84,7 +84,7 @@ findByType id_supply tenv ptype assocs = search assocs
 --   should not be floated.
 directStyleAppParameters :: DataConType
                          -> [TypM]
-                         -> Maybe [Maybe ParamType]
+                         -> [Maybe ParamType]
 directStyleAppParameters dcon_type ty_args
   -- Float if all type arguments are supplied,
   -- and the representation is Value or Boxed
@@ -95,8 +95,7 @@ directStyleAppParameters dcon_type ty_args
       let types = map fromTypM ty_args
           (field_types, _) =
             instantiateDataConTypeWithExistentials dcon_type types
-      in Just $ map floatable field_types
-  | otherwise = Nothing
+      in map floatable field_types
   where
     -- Value and boxed operands are floatable
     floatable (rrepr ::: ty) =
@@ -581,9 +580,7 @@ createFlattenedApp inf op_var ty_args args = do
     moved_parameters :: Maybe DataConType -> [Maybe ParamType]
     moved_parameters Nothing = repeat Nothing
     moved_parameters (Just dcon_type) =
-      case directStyleAppParameters dcon_type ty_args
-      of Nothing -> repeat Nothing
-         Just xs -> xs ++ repeat Nothing
+      directStyleAppParameters dcon_type ty_args ++ repeat Nothing
 
 floatInExp :: ExpM -> Flt ExpM
 floatInExp (ExpM expression) =
