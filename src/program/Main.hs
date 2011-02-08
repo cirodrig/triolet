@@ -147,25 +147,29 @@ compilePyonToPyonAsm path text = do
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
   
   -- Optimizations on memory representation.
-  -- First, perform a forward optimization pass which (among other things) 
-  -- inlines code to enable further optimization.  Then hoist definitions
-  -- and eliminate dead code.  These expose more optimization opportunities
-  -- that are captured by a second forward optimization pass.
-  -- After this second optimization pass, eliminate dead code
-  -- in each function.
+  -- The first group of optimizations performs inlining to create bigger 
+  -- functions, then floating and dead code elimination.  These steps 
+  -- are primarily setup to improve the accuracy of the simplifier.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
-  
-  putStrLn "Rewritten-Memory"
-  print $ SystemF.PrintMemoryIR.pprModule mem_mod
-  
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateDeadCode mem_mod
+  
+  putStrLn "Prepared Memory"
+  print $ SystemF.PrintMemoryIR.pprModule mem_mod
+
+  -- The next group of optimizations does the real work of optimization.
+  -- Currently there's a dependence between DCE and rewriting that we
+  -- stupidly resolve by running them lots of times.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
-  -- TODO: Figure out why one rewrite pass isn't enough
+  mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
+  mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
+  mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
 
-  putStrLn "Floated"
+  putStrLn "Optimized Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
 
   -- Lower

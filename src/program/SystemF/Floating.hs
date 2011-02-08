@@ -11,6 +11,7 @@ module SystemF.Floating
        (Context,
         ContextItem, contextItem,
         ContextExp(..),
+        freshenContextExp,
         applyContext,
         floatModule)
 where

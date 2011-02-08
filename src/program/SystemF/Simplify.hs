@@ -516,81 +516,55 @@ betaReduce inf (FunM fun) ty_args args
 
 -------------------------------------------------------------------------------
 -- Local restructuring
-
-data LetPart s = LetPart { lpInfo :: ExpInfo
-                         , lpBinder :: Pat s
-                         , lpValue :: Exp s
-                         -- Body :: Exp s
-                         }
-                  
-type LetPartM = LetPart Mem
-  
-constructLet :: ExpM -> [LetPartM] -> LR ExpM
-constructLet body [] = return body
-constructLet body parts = do
-  result <- foldM shapeLet body parts
-  return result
-  
-  where
-    shapeLet :: ExpM -> LetPartM -> LR ExpM
-    shapeLet body (LetPart lpInf lpBind lpVal) =
-      return $ ExpM $ LetE lpInf lpBind lpVal body
-
-delveExp :: ExpM -> LR ([LetPartM], ExpM)
-delveExp (ExpM ex) = do
-  case ex of
-    LetE _ bind@(MemVarP {}) _ _ -> do
-      freshenedEx <- freshen (ExpM ex) -- renames bind and body fields as defined in Rename.hs for non-LocalVar cases
-      case fromExpM freshenedEx of
-        LetE inf2 bind2@(MemVarP var ptype) val2 body2 -> do
-          (letPs, replaceExp) <- delveExp val2
-          let letPart = LetPart inf2 bind2 replaceExp
-          return ( letPart:letPs , body2)
-
-    AppE inf oper tyArgs args -> do
-      (letPart1, toReplaceOper) <- delveExp oper
-      (letParts, toReplaceArgs) <- mapAndUnzipM delveExp args
-      let letParts' = letPart1 ++ concat letParts
-      let replacedApp = ExpM $ AppE inf toReplaceOper tyArgs toReplaceArgs
-      return (letParts', replacedApp)
-
-    _ -> return ([], ExpM ex)
-
-{-
-topExp :: ExpM -> LR ExpM
-topExp (ExpM ex) = do
-  case ex of
-    LetE inf bind val body -> do
-      body' <- {-trace "Top Checking body of a Let"-} topExp body
-      (letPs, casePs, val') <- {-trace "Done with body, moving to Val"-} delveExp val
-      let replaced = ExpM $ LetE inf bind val' body'
-      postLet <- {-trace ("For the val on LetE:: "++(show (List.length letPs))++" lets, "++(show (List.length casePs))++" cases")-} constructLet replaced letPs
---      postCase <- constructCase postLet casePs
-      return postLet
-    CaseE inf scrut alts -> do scrut' <- topExp scrut
-                               alts' <- mapM rwAlt alts
-                               return $ ExpM $ CaseE inf scrut' alts'
-    AppE inf oper tyArgs args -> do
-      tupList <- mapM delveExp args
-      let (letParts, caseParts, toReplaceArgs) = unzip3 tupList
-      let letParts' = concat letParts
---      let caseParts' = concat caseParts
-      let replacedApp = ExpM $ AppE inf oper tyArgs toReplaceArgs
-      afterLetParts <- constructLet replacedApp letParts'
---      afterLetAndCaseParts <- constructCase afterLetParts caseParts'
-      return afterLetParts
-    LetfunE inf defs body -> do defs' <- mapM rwDef defs
-                                body' <- topExp body
-                                return $ ExpM $ LetfunE inf defs' body'
-    LamE inf fun -> do fun' <- rwFun fun
-                       return $ ExpM $ LamE inf fun'
-    _ -> return $ ExpM ex -- Var and Lit
-    -}
     
+-- Before trying to simplify an expression, we restruture it to increase the 
+-- scopes of temporary variables.  Let-expressions are floated out from the
+-- RHS of other let expressions and from inside function calls.
+
+-- | Extract floatable bindings from an expression.  The floatable bindings
+--   are added to the context parameter.
+delveExp :: Context -> ExpM -> LR (Context, ExpM)
+delveExp input_context (ExpM ex) = do
+  case ex of
+    LetE inf bind@(MemVarP {}) rhs body -> do
+      -- First process the rhs
+      (rhs_context, flattened_rhs) <- delveExp input_context rhs
+      
+      -- Float this binding
+      (floated_bind, rn) <- freshenContextExp $ LetCtx inf bind flattened_rhs
+      let output_context = contextItem floated_bind : rhs_context
+          rn_body = rename rn body
+      
+      return (output_context, rn_body)
+
+    LetE inf bind@(LocalVarP {}) rhs body -> do
+      -- Float let-bindings out of the RHS.  Don't float this let-binding.
+      (rhs_context, flattened_rhs) <- delveExp input_context rhs
+      
+      let replaced_let = ExpM $ LetE inf bind flattened_rhs body
+      return (rhs_context, replaced_let)
+      
+
+    AppE inf oper tyArgs args -> do
+      (ctx1, oper') <- delveExp input_context oper
+      (ctx2, args') <- delveExps ctx1 args
+      let replaced_app = ExpM $ AppE inf oper' tyArgs args'
+      return (ctx2, replaced_app)
+
+    _ -> return (input_context, ExpM ex)
+
+delveExps :: Context -> [ExpM] -> LR (Context, [ExpM])
+delveExps ctx (exp:exps) = do
+  (ctx', exp') <- delveExp ctx exp
+  (ctx'', exps') <- delveExps ctx' exps
+  return (ctx'', exp' : exps')
+
+delveExps ctx [] = return (ctx, [])
+
 restructureExp :: ExpM -> LR ExpM
 restructureExp ex = do
-  (let_parts, ex') <- delveExp ex
-  constructLet ex' let_parts
+  (ctx, ex') <- delveExp [] ex
+  return $ applyContext ctx ex'
 
 -------------------------------------------------------------------------------
 -- Traversing code
