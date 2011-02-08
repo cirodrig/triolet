@@ -34,7 +34,7 @@ eliminateLocalDeadCode (Module module_name defss exports) =
 eliminateDeadCode :: Module Mem -> Module Mem
 eliminateDeadCode (Module module_name defss exports) =
   let (defss', exports') = evalEDC edcTopLevelGroup defss
-  in Module module_name defss' exports'
+  in Module module_name (concat defss') exports'
   where
     edcTopLevelGroup (ds:dss) = do
       (ds', (dss', exports')) <- edcDefGroup ds $ edcTopLevelGroup dss
@@ -101,19 +101,33 @@ edcDef (Def v f) = do
   f' <- edcFun f
   return $ Def v f'
 
+-- | Eliminate dead code in a definition group and partition the group into
+--   strongly-connected components.
 edcDefGroup :: DefGroup (Def Mem)
             -> GetMentionsSet a
-            -> GetMentionsSet (DefGroup (Def Mem), a)
+            -> GetMentionsSet ([DefGroup (Def Mem)], a)
 edcDefGroup defgroup m =
   case defgroup
   of NonRec def -> do
+       -- Eliminate dead code.  Decide whether the definition is dead.
        def' <- edcDef def
-       x <- mask (case def of Def v _ -> v) m
-       return (NonRec def', x)
-     Rec defs -> masks (Set.fromList [varID v | Def v _ <- defs]) $ do
-       defs' <- mapM edcDef defs
-       x <- m
-       return (Rec defs', x)
+       (mentioned, x) <- maskAndCheck (case def of Def v _ -> v) m
+       return $! if mentioned
+                 then ([NonRec def'], x)
+                 else ([], x)
+     Rec defs ->
+       let local_vars = Set.fromList [varID v | Def v _ <- defs]
+       in masks local_vars $ do
+         -- Eliminate dead code and find references to the local variables
+         defs_and_uses <- mapM (listen . edcDef) defs
+         (x, m_uses) <- listen m
+
+         -- Partition into strongly connected components
+         let members = [(new_def, varID v, mentions_set)
+                       | (Def v _, (new_def, mentions_set)) <-
+                           zip defs defs_and_uses]
+             new_defs = partitionDefGroup members m_uses
+         return (new_defs, x)
 
 edcFun :: EDC FunM
 edcFun (FunM function@(Fun { funTyParams = tps
@@ -146,9 +160,9 @@ edcExp expression@(ExpM base_expression) =
        return $ ExpM $ base_expression {expFun = f'}
      LetE {expInfo = info, expBinder = p, expValue = e1, expBody = e2} ->
        edcLetE info p e1 e2
-     LetfunE {expDefs = defgroup, expBody = e} -> do
+     LetfunE {expInfo = info, expDefs = defgroup, expBody = e} -> do
        (defgroup', e') <- edcDefGroup defgroup (edcExp e)
-       return $ ExpM $ base_expression {expDefs = defgroup', expBody = e'}
+       return $ foldr (make_letfun info) e' defgroup'
      CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} -> do
        scr' <- edcExp scr
        alts' <- mapM edcAlt alts
@@ -161,6 +175,8 @@ edcExp expression@(ExpM base_expression) =
            return $ ExpM $ CaseE { expInfo = inf
                                  , expScrutinee = scr'
                                  , expAlternatives = alts'}
+  where
+    make_letfun info dg e = ExpM $ LetfunE info dg e
 
 isWildPatM (MemWildP {}) = True
 isWildPatM _ = False
