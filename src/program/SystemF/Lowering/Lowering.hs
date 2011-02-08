@@ -306,7 +306,7 @@ compileEnumValueCase ret_type ty disjuncts scrutinee alternatives = do
     -- Generate code of each alternative branch
     branches <- lift $ forM alt_bodies $ \mk_alt_body -> do
       execBuild return_types $ do
-        emitCode =<< mk_alt_body []
+        bindAtom return_vars =<< asAtom =<< mk_alt_body []
         return cont
 
     -- Build the case statement
@@ -367,6 +367,25 @@ loadCaseField scr_ptr field field_layout =
      SOPReference _ -> get_field_reference
   where
     get_field_reference = referenceField field scr_ptr
+
+-- | Create a one-argument function that stores into its argument
+compileStoreFunction :: Type -> ExpTM -> Lower Code
+compileStoreFunction store_type value = do
+  -- Generate a lambda function that stores the data
+  addr_var <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
+  fun_body <- do
+    -- Determine layout of this value
+    tenv <- getTypeEnv
+    value_type <- liftFreshVarM $ lowerValueType tenv store_type
+
+    execBuild [] $ do
+      arg_val <- asVal =<< lowerExp value
+      let primop = LL.PrimStore LL.Mutable value_type
+          atom = LL.PrimA primop [LL.VarV addr_var, nativeIntV 0, arg_val]
+      return (LL.ReturnE atom)
+
+  let fun = LL.closureFun [addr_var] [] fun_body
+  return $ valCode (LL.LamV fun)
 
 compileStore :: Type -> ExpTM -> ExpTM -> GenLower Code
 compileStore store_type value address = do
@@ -603,6 +622,8 @@ lowerExp (ExpTM (RTypeAnn return_type expression)) =
            case (ty_args, args)
            of ([TypTM (RTypeAnn _ store_type)], [_, value, address]) ->
                 compileStore store_type value address
+              ([TypTM (RTypeAnn _ store_type)], [_, value]) ->
+                lift $ compileStoreFunction store_type value
               _ -> internalError "lowerExp: Wrong number of arguments to store"
        | op `isPyonBuiltin` the_load ->
            case (ty_args, args)
