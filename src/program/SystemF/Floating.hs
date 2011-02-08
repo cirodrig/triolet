@@ -29,6 +29,7 @@ import Common.Error
 import Common.Identifier
 import Common.Supply
 import Common.MonadLogic
+import Builtins.Builtins
 import SystemF.Rename
 import SystemF.Syntax
 import SystemF.MemoryIR
@@ -524,8 +525,7 @@ flattenApp expression =
 createFlattenedApp inf op_var ty_args args = do
   -- Determine which parameters should be moved
   tenv <- getTypeEnv
-  let mdcon_type = lookupDataCon op_var tenv
-      moved = moved_parameters mdcon_type
+  let moved = moved_parameters tenv
 
   -- Flatten arguments
   (unzip -> (args', concat -> arg_contexts)) <- zipWithM flatten_arg moved args
@@ -577,10 +577,20 @@ createFlattenedApp inf op_var ty_args args = do
     -- Based on the data constructor's type, pick which arguments to move.
     -- A Just value means the argument should be moved, and has the given type.
     -- If unknown, don't move an argument.
-    moved_parameters :: Maybe DataConType -> [Maybe ParamType]
-    moved_parameters Nothing = repeat Nothing
-    moved_parameters (Just dcon_type) =
-      directStyleAppParameters dcon_type ty_args ++ repeat Nothing
+    moved_parameters :: TypeEnv -> [Maybe ParamType]
+    moved_parameters tenv = 
+      case lookupDataCon op_var tenv
+      of Just dcon_type ->
+           -- Move the movable fields of data constructors
+           directStyleAppParameters dcon_type ty_args ++ repeat Nothing
+         Nothing
+           | op_var `isPyonBuiltin` the_store ->
+               -- Also move the argument of 'store', so that we can
+               -- do store-load propagation 
+               let [TypM store_type] = ty_args
+               in [Nothing, Just (ValPT Nothing ::: store_type), Nothing]
+           | otherwise ->
+               repeat Nothing
 
 floatInExp :: ExpM -> Flt ExpM
 floatInExp (ExpM expression) =

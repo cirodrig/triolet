@@ -90,6 +90,7 @@ Executable pyon
     SystemF.DeadCodeMem
     SystemF.DictEnv
     SystemF.ElimPatternMatching
+    SystemF.EtaReduce
     SystemF.Floating
     SystemF.KnownValue
     SystemF.Lowering.Datatypes

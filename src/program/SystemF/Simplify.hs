@@ -31,6 +31,7 @@ import SystemF.Rename
 import SystemF.Rewrite
 import SystemF.TypecheckMem(functionType)
 import SystemF.PrintMemoryIR
+import SystemF.KnownValue
 
 import Common.Error
 import Common.Identifier
@@ -94,8 +95,7 @@ withMaybeValue v (Just val) m = withKnownValue v val m
 withDefValue :: Def Mem -> LR a -> LR a
 withDefValue (Def v f) m =
   let fun_info = funInfo $ fromFunM f
-      fun_exp = ExpM $ VarE fun_info v
-  in withKnownValue v (FunValue fun_info (Just fun_exp) f) m
+  in withKnownValue v (ComplexValue (Just v) $ FunValue fun_info f) m
 
 withDefValues :: DefGroup (Def Mem) -> LR a -> LR a
 withDefValues defs m = foldr withDefValue m $ defGroupMembers defs
@@ -134,6 +134,7 @@ dumpKnownValues m = LR $ \env ->
 -------------------------------------------------------------------------------
 -- Known values
 
+{-
 -- | A value that is known (or partially known) at compile time.
 --
 --   This is used for various kinds of compile-time partial evaluation:
@@ -438,7 +439,7 @@ initializeKnownValues tenv =
                cheap_expr = Just (ExpM $ VarE defaultExpInfo con)
            in Just $ DataValue defaultExpInfo cheap_expr con rrepr [] [] []
        | otherwise = Nothing
-              
+-}              
 -- | Try to construct the value of an expression, if it's easy to get.
 --
 --   This is called if we've already simplified an expression and thrown
@@ -609,7 +610,7 @@ rwExp expression = do
     AppE inf op ty_args args -> rwApp inf op ty_args args
     LamE inf fun -> do
       fun' <- rwFun fun
-      rwExpReturn (ExpM $ LamE inf fun', Just $ FunValue inf Nothing fun')
+      rwExpReturn (ExpM $ LamE inf fun', Just $ ComplexValue Nothing $ FunValue inf fun')
     LetE inf bind val body -> rwLet inf bind val body
     LetfunE inf defs body -> rwLetrec inf defs body
     CaseE inf scrut alts -> rwCase inf scrut alts
@@ -627,7 +628,7 @@ rwVar original_expression inf v =
   where
     rewrite (Just val)
         -- Inline the value
-      | Just cheap_value <- cheapValue val = (cheap_value, Just val)
+      | Just cheap_value <- asTrivialValue val = (cheap_value, Just val)
 
         -- Otherwise, don't inline, but propagate the value
       | otherwise = (original_expression, Just val)
@@ -656,7 +657,7 @@ rwAppWithOperator inf op' op_val ty_args args =
      _ ->
        -- Apply simplification tecnhiques specific to this operator
        case op_val
-       of Just (FunValue _ _ funm@(FunM fun)) ->
+       of Just (ComplexValue _ (FunValue _ funm@(FunM fun))) ->
             inline_function_call funm
 
           -- Some functions have special rewrite semantics
@@ -676,7 +677,13 @@ rwAppWithOperator inf op' op_val ty_args args =
                          rewriteApp tenv inf op_var ty_args args
             case rewritten of 
               Just new_expr -> rwExp new_expr
-              Nothing -> unknown_app op'
+              Nothing ->
+                -- Try to construct a value for this application
+                case lookupDataConWithType op_var tenv  
+                of Just (type_con, data_con) ->
+                     data_con_app type_con data_con op'
+                   Nothing ->
+                     unknown_app op'
 
           _ -> unknown_app op'
   where
@@ -684,6 +691,12 @@ rwAppWithOperator inf op' op_val ty_args args =
       (args', _) <- rwExps args
       let new_exp = ExpM $ AppE inf op' ty_args args'
       return (new_exp, Nothing)
+
+    data_con_app type_con data_con op' = do
+      (args', arg_values) <- rwExps args
+      let new_exp = ExpM $ AppE inf op' ty_args args'
+          new_value = dataConValue inf type_con data_con ty_args arg_values
+      return (new_exp, new_value)
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
@@ -698,9 +711,15 @@ rwStoreApp inf op' ty_args args = do
   return (new_exp, new_value)
   where
     -- Keep track of what was stored in memory
-    stored_value [_, Just stored_value, Just (VarValue {knownVar = dstvar})] =
-      Just $ KnownHeapState (StoredValue stored_value dstvar)
+    stored_value [_, Just stored_value, _] =
+      Just $ complexKnownValue $ StoredValue Value stored_value
     stored_value [_, _, _] = Nothing
+    stored_value [_, Just stored_value] =
+      -- When applied to an argument, this will store a value
+      Just $ complexKnownValue $
+      WriterValue $ complexKnownValue $
+      StoredValue Value stored_value
+    stored_value [_, _] = Nothing
     stored_value _ =
       internalError "rwStoreApp: Wrong number of arguments in call"
       
@@ -715,8 +734,8 @@ rwLoadApp inf op' ty_args args = do
       return (new_exp, Nothing)
   where
     -- Do we know what was stored here?
-    loaded_value [_, Just (KnownHeapState (StoredValue kv _))] =
-      Just (cheapValue kv, Just kv)
+    loaded_value [_, Just (ComplexValue _ (StoredValue Value val))] =
+      Just (asTrivialValue val, Just val)
     loaded_value [_, _] = Nothing
     loaded_value _ =
       internalError "rwLoadApp: Wrong number of arguments in call"
@@ -729,12 +748,13 @@ rwCopyApp inf op' ty_args args = do
   return (new_exp, Nothing)
   where
     -- Do we know what was stored here?
-    copied_value [_,
-                  Just (KnownHeapState (StoredValue kv _)),
-                  Just (VarValue {knownVar = dstvar})] =
+    copied_value [_, Just src_val, Just dst_val] =
       -- Reference the source value instead of the destination value
-      Just (KnownHeapState (StoredValue kv dstvar))
+      Just src_val
     copied_value [_, _, _] = Nothing
+    copied_value [_, Just src_val] =
+      Just $ complexKnownValue $ WriterValue src_val
+    copied_value [_, _] = Nothing
     copied_value _ =
       internalError "rwCopyApp: Wrong number of arguments in call"
 
@@ -745,7 +765,7 @@ rwLet inf bind val body =
        
        -- The variable can be used to refer to this value
        let local_val_value =
-             fmap (weakAssignCheapVarValue inf bind_var) val_value
+             fmap (setTrivialValue bind_var) val_value
 
        -- Add the local variable to the environment while rewriting the body
        (body', body_val) <-
@@ -762,7 +782,7 @@ rwLet inf bind val body =
        -- Add the variable to the environment while rewriting the rhs
        (val', val_value) <-
          assume bind_var (OutRT ::: bind_type) $ rwExp val
-           
+
        -- Add the local variable to the environment while rewriting the body
        (body', body_val) <-
          assume bind_var (ReadRT ::: bind_type) $
@@ -780,20 +800,20 @@ rwLet inf bind val body =
     -- defined variable.  If it's in the body's
     -- value, we have to forget about it.
     mask_local_variable bind_var ret_val =
-      forgetVariables (Set.singleton bind_var) ret_val
+      forgetVariables (Set.singleton bind_var) =<< ret_val
 
 rwLetrec inf defs body = withDefs defs $ \defs' -> do
   (body', body_value) <- rwExp body
       
   let local_vars = Set.fromList [v | Def v _ <- defGroupMembers defs']
-      ret_value = forgetVariables local_vars body_value
+      ret_value = forgetVariables local_vars =<< body_value
   rwExpReturn (ExpM $ LetfunE inf defs' body', ret_value)
 
 rwCase inf scrut alts = do
   (scrut', scrut_val) <- rwExp scrut
   
   case scrut_val of
-    Just (DataValue _ _ con _ _ ex_args margs) ->
+    Just (ComplexValue _ (DataValue _ con _ ex_args margs)) ->
       -- Case of known value.  Select the appropriate alternative and discard
       -- the others.
       case find ((con ==) . altConstructor . fromAltM) alts
@@ -859,7 +879,7 @@ rwCase inf scrut alts = do
         bind_field pat@(MemVarP v (prepr ::: ptype)) kv
           | okay_for_binding = do
               value <- kv 
-              exp <- knownValueExp value
+              exp <- asTrivialValue value
               return $ Just (pat, exp)
           | otherwise = Nothing   -- Cannot bind this pattern
           where
@@ -903,11 +923,10 @@ rwAlt scr (AltM (Alt con tyArgs exTypes params body)) = do
     assume_scrutinee tenv labeled_params m =
       case scr
       of Just scrutinee_var ->
-           let ex_args = [TypM (VarT v) | TyPatM v _ <- exTypes]
-               dcon_ty_args = tyArgs ++ ex_args
+           let ex_args = [v | TyPatM v _ <- exTypes]
                arg_values = map (mk_arg . patMVar) labeled_params
                Just (data_type, dcon_type) = lookupDataConWithType con tenv
-               data_value = dataValue defaultExpInfo data_type dcon_type dcon_ty_args arg_values
+               data_value = patternValue defaultExpInfo data_type dcon_type tyArgs ex_args arg_values
            in withMaybeValue scrutinee_var data_value m
          Nothing -> m
       where

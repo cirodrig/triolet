@@ -3,12 +3,18 @@
 Most of the simplification performed by the simplifier relies on knowing some
 approximation of the run-time value of an expresion or a variable.  The
 'KnownValue' data type is how we store this information.
+
+A data value that's in the correct representation for a @case@ statement is
+represented by a 'DataValue' term.  If it's stored in memory and could be
+inspected after loading, it's represented by a 'StoredValue' term.  If it's
+an initializer for the contents of memory, it's a 'WriterValue' term.
 -}
 
 module SystemF.KnownValue where
 
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
+import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
@@ -45,6 +51,9 @@ data KnownValue =
     -- | A complex value.  If a variable is given, the variable holds this 
     --   value.
   | ComplexValue !(Maybe Var) !ComplexValue
+
+complexKnownValue :: ComplexValue -> KnownValue
+complexKnownValue = ComplexValue Nothing
 
 -- | A complex value.  Complex values are generally not worth inlining unless
 --   it enables further optimizations.
@@ -96,6 +105,15 @@ setTrivialValue var kv =
   case kv
   of ComplexValue Nothing val -> ComplexValue (Just var) val
      _ -> kv
+
+-- | Get the value stored in memory after a writer has executed.
+resultOfWriterValue :: KnownValue -> MaybeValue
+resultOfWriterValue (VarValue _ _) = Nothing 
+resultOfWriterValue (ComplexValue _ (WriterValue kv)) = Just kv
+resultOfWriterValue (ComplexValue _ (FunValue _ _)) = Nothing
+resultOfWriterValue _ =
+  -- Other values are not valid
+  internalError "resultOfWriterValue"
 
 -- | Remove references to any of the given variables in the known value.
 --   The given variables may not include data constructors.
@@ -194,8 +212,33 @@ maybeValueMentionsAny :: MaybeValue -> Set.Set Var -> Bool
 maybeValueMentionsAny Nothing _ = False
 maybeValueMentionsAny (Just kv) v = knownValueMentionsAny kv v
 -}
+
+dataConValue :: ExpInfo
+             -> DataType           -- ^ The data type being constructed
+             -> DataConType        -- ^ The data constructor being used
+             -> [TypM]             -- ^ Type arguments to the constructor
+             -> [MaybeValue]       -- ^ Value arguments to the constructor
+             -> MaybeValue
+dataConValue inf d_type dcon_type ty_args val_args =
+  dataConstructorValue inf True d_type dcon_type ty_args val_args
+
+-- | Construct a known value for an expression that was satisfied by a 
+--   pattern match, given the type arguments and matched fields.
+patternValue :: ExpInfo
+             -> DataType           -- ^ The data type being constructed
+             -> DataConType        -- ^ The data constructor being used
+             -> [TypM]             -- ^ Type arguments to the constructor
+             -> [Var]              -- ^ Existential variables
+             -> [MaybeValue]       -- ^ Value arguments to the constructor
+             -> MaybeValue
+patternValue inf d_type dcon_type ty_args ex_vars val_args =
+  let data_con_ty_args = ty_args ++ [TypM (VarT v) | v <- ex_vars]
+  in dataConstructorValue inf False d_type dcon_type data_con_ty_args val_args
+
 -- | Construct a known value for a data constructor application,
---   given the arguments.
+--   given the arguments.  The arguments may be those that were passed to 
+--   a data constructor application, or those that were obtained by a
+--   pattern match.
 --
 --   * If this data constructor is undersaturated, 'Nothing' is returned.
 --
@@ -209,28 +252,43 @@ maybeValueMentionsAny (Just kv) v = knownValueMentionsAny kv v
 --   * If this data constructor is saturated and also passed an output
 --   pointer, and the data constructor returns by side effect, a 'StoredValue'
 --   value is returned.
-dataConValue :: ExpInfo
+dataConstructorValue :: ExpInfo
+             -> Bool               -- ^ Based on constructor arguments?
              -> DataType           -- ^ The data type being constructed
              -> DataConType        -- ^ The data constructor being used
              -> [TypM]             -- ^ Type arguments to the constructor
              -> [MaybeValue]       -- ^ Value arguments to the constructor
              -> MaybeValue
-dataConValue inf d_type dcon_type ty_args val_args
+dataConstructorValue inf is_constructor d_type dcon_type ty_args val_args =
+  let x = dataConstructorValue' inf is_constructor d_type dcon_type ty_args val_args
+  in traceShow (pprVar (dataConCon dcon_type) $$ nest 4 (vcat (map pprMaybeValue val_args))) $ traceShow (pprMaybeValue x) x
+
+dataConstructorValue' inf is_constructor d_type dcon_type ty_args val_args
   | length ty_args /= num_expected_ty_args =
       internalError "dataConValue: Wrong number of type arguments"
-  | length val_args <= num_expected_args =
+
+  | length val_args < num_expected_args =
       Nothing                   -- Undersaturated application
+
+  | is_referenced && is_constructor && length val_args == num_expected_args =
+      -- Fully applied constructor with no output pointer
+      Just $ complexKnownValue $ WriterValue data_value
+  
   | length val_args == num_expected_args =
-      case dataTypeRepresentation d_type
-      of Referenced -> Just $ ComplexValue Nothing $ WriterValue data_value
-         Value -> Just data_value
-         Boxed -> Just data_value
-  | length val_args == 1 + num_expected_args =
-      case dataTypeRepresentation d_type
-      of Referenced -> Just $ ComplexValue Nothing $ StoredValue Referenced data_value
-         _ -> internalError "dataConValue: Too many value arguments"
+      -- Either a pattern with all arguments,
+      -- or a data constructor that returns its result
+      Just data_value
+
+  | is_referenced && is_constructor && length val_args == 1 + num_expected_args =
+      -- Fully applied constructor with output pointer
+      Just $ complexKnownValue $ StoredValue Referenced data_value
+
   | otherwise = internalError "dataConValue: Too many value arguments"
   where
+    is_referenced = dataTypeRepresentation d_type == Referenced
+
+    con = dataConCon dcon_type
+
     (field_types, result_type) =
       instantiateDataConTypeWithExistentials dcon_type (map fromTypM ty_args)
 
@@ -245,8 +303,7 @@ dataConValue inf d_type dcon_type ty_args val_args
     existential_ty_args = drop dcon_num_pattern_params ty_args
 
     -- The number of value arguments needed to make a fully applied
-    -- data constructor.  There's an extra argument for the output pointer
-    -- if the result is a reference.
+    -- data constructor.  This does not include the output pointer.
     num_expected_args = length (dataConPatternArgs dcon_type)
 
     -- The data constructor fields.  If there are more arguments, they number 
@@ -255,9 +312,23 @@ dataConValue inf d_type dcon_type ty_args val_args
 
     -- If all type arguments and fields are present, this is the data value
     data_value =
-      ComplexValue Nothing $
-      DataValue inf (dataConCon dcon_type)
-      parametric_ty_args existential_ty_args field_args
+      let fields =
+            if is_constructor
+            then zipWith makeConstructorDataField field_types field_args
+            else zipWith makePatternDataField field_types field_args
+      in complexKnownValue $
+         DataValue inf con parametric_ty_args existential_ty_args fields
+
+-- Determine the value that the field will have, given the parameter
+-- that was passed for this field.
+makeConstructorDataField _ Nothing = Nothing
+makeConstructorDataField (field_repr ::: _) (Just field_arg) =
+  case field_repr
+  of ReadRT -> resultOfWriterValue field_arg
+     ValRT -> Just field_arg
+     BoxRT -> Just field_arg
+
+makePatternDataField _ arg = arg
 
 -- | Create known values for data constructors in the global type environment.
 --   In particular, nullary data constructors get a 'DataValue'.

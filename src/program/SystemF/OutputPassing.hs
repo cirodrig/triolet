@@ -18,6 +18,7 @@ import Common.Supply
   
 import Builtins.Builtins
 import qualified SystemF.DictEnv as DictEnv
+import SystemF.EtaReduce
 import SystemF.Syntax
 import SystemF.Typecheck
 import SystemF.Representation
@@ -437,6 +438,8 @@ generateMemoryIR :: Module (Typed SF) -> IO (Module Mem)
 generateMemoryIR mod = do
   repr_mod <- inferRepresentations mod
 
-  withTheNewVarIdentSupply $ \var_supply -> do
+  mem_mod <- withTheNewVarIdentSupply $ \var_supply -> do
     global_env <- setupEnvironment var_supply
     runOP (genModule repr_mod) global_env Nothing
+
+  return $ etaReduceModule mem_mod
