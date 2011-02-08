@@ -436,7 +436,10 @@ execInlG return_type (ReaderT f) =
 --   entries for functions that may be inlined.
 type InlineEnv = IntMap.IntMap Fun
 
-assignCallParameters params args = lift $ zipWithM_ bind_arg params args
+assignCallParameters params args 
+  | length params /= length args =
+    internalError "assignCallParameters: wrong number of parameters"
+  | otherwise = lift $ zipWithM_ bind_arg params args
   where
     bind_arg param arg = bindAtom1 param $ ValA [arg]
 
@@ -470,6 +473,7 @@ tryInlineTailCall cc op args = do
   where
     inline Nothing = no_inline
     inline (Just (InlSpec inl_req fcc fsize fuses params stm _)) 
+      | length args /= length params = no_inline
       | worthInlining inl_req fcc fsize fuses =
           inlStatus ("Inlining: " ++ show (pprVar op)) $ 
           inlineTailCall params args stm
@@ -514,8 +518,17 @@ inlineTailLambda cc fun args =
      EQ -> do
       InlSpec _ _ _ _ params stm _ <- lift $ lift $ makeLambdaFunInlinable fun
       inlineTailCall params args stm
-     GT ->
-       internalError "inlineTailLambda: not implemented for oversaturated calls"
+     GT -> do
+       -- Oversaturated call.
+       -- Inline the call (not a tail call) with the correct number of arguments.
+       -- In the continuation, call with the remaining arguments.
+       ret_var <- lift $ lift $ newAnonymousVar (PrimType OwnedType)
+       let now_args = take (length (funParams fun)) args
+           later_args = drop (length (funParams fun)) args
+           call_remaining_args :: InlG Stm
+           call_remaining_args =
+             return $ ReturnE $ closureCallA (VarV ret_var) later_args
+       inlineLambda cc fun now_args [ret_var] call_remaining_args
 
 inlineLambda cc fun args retvars mk_cont =
   case length args `compare` length (funParams fun)
@@ -534,8 +547,20 @@ inlineLambda cc fun args retvars mk_cont =
        InlSpec _ _ _ _ params _ inl_stm <-
          lift $ lift $ makeLambdaFunInlinable fun
        inlineCall params args retvars inl_stm mk_cont
-     GT ->
-       internalError "inlineLambda: not implemented for oversaturated calls"
+     GT -> do
+       -- Oversaturated call.
+       -- Inline the call with the correct number of arguments.
+       -- In the continuation, call with the remaining arguments.
+       ret_var <- lift $ lift $ newAnonymousVar (PrimType OwnedType)
+       let now_args = take (length (funParams fun)) args
+           later_args = drop (length (funParams fun)) args
+           call_remaining_args :: InlG Stm
+           call_remaining_args = do
+             -- Call the function
+             lift $ bindAtom retvars $ closureCallA (VarV ret_var) later_args
+             -- Do everything else
+             mk_cont
+       inlineLambda cc fun now_args [ret_var] call_remaining_args
 
 inlineTailCall params args stm = do
   assignCallParameters params args
