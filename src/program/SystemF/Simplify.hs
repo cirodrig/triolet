@@ -1,6 +1,15 @@
+{-| The simplifier.
+
+The simplifier makes a forward sweep through a program, more or less in
+execution order, and tries to statically evaluate what it can.
+
+This sweep performs copy propagation, constant propagation,
+beta reduction (includes inlining), case-of-known-value elimination,
+and some local expression reordering.
+-}
 
 {-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types #-}
-module SystemF.LocalExprRewrite (rewriteLocalExpr)
+module SystemF.Simplify (rewriteLocalExpr)
 where
 
 import Prelude hiding(mapM)

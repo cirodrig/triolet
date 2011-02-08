@@ -28,7 +28,7 @@ import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.TypecheckSF
 import qualified SystemF.TypecheckMem
-import qualified SystemF.LocalExprRewrite as SystemF
+import qualified SystemF.Simplify as SystemF
 import qualified SystemF.Lowering.Lowering as SystemF
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
