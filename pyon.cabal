@@ -91,6 +91,7 @@ Executable pyon
     SystemF.DictEnv
     SystemF.ElimPatternMatching
     SystemF.Floating
+    SystemF.KnownValue
     SystemF.Lowering.Datatypes
     SystemF.Lowering.Marshaling
     SystemF.Lowering.Lowering
