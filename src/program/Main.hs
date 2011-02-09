@@ -161,14 +161,17 @@ compilePyonToPyonAsm path text = do
   -- Currently there's a dependence between DCE and rewriting that we
   -- stupidly resolve by running them lots of times.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
-  mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
+  mem_mod <- SystemF.floatModule mem_mod
+  mem_mod <- return $ SystemF.DeadCodeMem.eliminateDeadCode mem_mod
 
   putStrLn "Optimized Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
