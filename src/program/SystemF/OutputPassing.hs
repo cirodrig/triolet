@@ -145,6 +145,7 @@ createDictEnv = do
                    ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float)
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
   boxed_dict <- createBoxedDictPattern (pyonBuiltin the_Boxed) 1
+  stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 1
   additive_dict <- createBoxedDictPattern (pyonBuiltin the_AdditiveDict) 1
   multiplicative_dict <- createBoxedDictPattern (pyonBuiltin the_MultiplicativeDict) 1
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
@@ -156,7 +157,7 @@ createDictEnv = do
   complex_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_Complex) [VarT arg],
      createDict_complex arg)
-  return $ DictEnv.DictEnv [repr_dict, boxed_dict,
+  return $ DictEnv.DictEnv [repr_dict, boxed_dict, stream_dict,
                             float_dict, int_dict,
                             list_dict, complex_dict,
                             tuple2_dict, additive_dict, multiplicative_dict]

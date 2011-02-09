@@ -286,7 +286,19 @@ valToReadCoercion ty tmpvar = BinderCoercion $ \producer ->
 
 valToWriteCoercion ty = WrapperCoercion (\e -> StoreExpr Value ty e)
 
-boxToReadCoercion ty = WrapperCoercion (\e -> AsReadExpr ty e)
+-- boxToReadCoercion ty = WrapperCoercion (\e -> AsReadExpr ty e)
+-- | Coerce @Box -> Read@.
+--   Store the value to a temporary variable, then read it.
+boxToReadCoercion ty tmpvar = BinderCoercion $ \producer ->
+  let rhs_exp = StoreExpr Boxed ty producer
+      use_exp = ExpR (ReadRT ::: ty) $ VarE defaultExpInfo tmpvar
+      wrapper body =
+        ExpR (returnType body) $
+        LetE { expInfo = defaultExpInfo
+             , expBinder = PatR tmpvar (WritePT ::: ty)
+             , expValue = rhs_exp
+             , expBody = body}
+  in (use_exp, wrapper)
 
 boxToWriteCoercion ty = WrapperCoercion (\e -> StoreExpr Boxed ty e)
 
@@ -294,7 +306,7 @@ boxToWriteCoercion ty = WrapperCoercion (\e -> StoreExpr Boxed ty e)
 loadValCoercion ty = WrapperCoercion (\e -> LoadExpr Value ty e)
 
 -- | Coerce @Read -> Box@
-asBoxCoercion ty = WrapperCoercion (\e -> AsBoxExpr ty e)
+asBoxCoercion ty = WrapperCoercion (\e -> LoadExpr Boxed ty e)
 
 -- | Coerce @Read -> Write@
 copyCoercion ty = WrapperCoercion (\e -> CopyExpr ty e)
@@ -402,7 +414,9 @@ coerceReturn ty e_repr g_repr =
        of ValRT -> do
             tmpvar <- newAnonymousVar ObjectLevel
             return $ valToReadCoercion ty tmpvar
-          BoxRT -> return $ boxToReadCoercion ty
+          BoxRT -> do
+            tmpvar <- newAnonymousVar ObjectLevel
+            return $ boxToReadCoercion ty tmpvar
           ReadRT -> return idCoercion
           WriteRT -> do
             tmpvar <- newAnonymousVar ObjectLevel
