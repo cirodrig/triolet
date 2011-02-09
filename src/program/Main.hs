@@ -163,6 +163,7 @@ compilePyonToPyonAsm path text = do
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
