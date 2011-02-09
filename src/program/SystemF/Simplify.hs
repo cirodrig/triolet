@@ -738,22 +738,36 @@ rwLoadApp inf op' ty_args args = do
     loaded_value _ =
       internalError "rwLoadApp: Wrong number of arguments in call"
 
--- | Attempt to statically evaluate a load of a boxed object
-rwLoadBoxApp inf op' ty_args args = do
-  (args', arg_values) <- rwExps args
-  let new_exp = ExpM $ AppE inf op' ty_args args'
-  case loaded_value arg_values of
-    Just (m_loaded_exp, new_value) ->
-      return (fromMaybe new_exp m_loaded_exp, new_value)
-    Nothing ->
-      return (new_exp, Nothing)
-  where
-    -- Do we know what was stored here?
-    loaded_value [Just (ComplexValue _ (StoredValue Boxed val))] =
-        Just (asTrivialValue val, Just val)
-    loaded_value [_] = Nothing
-    loaded_value _ =
-      internalError "rwLoadBoxApp: Wrong number of arguments in call"
+-- | Attempt to statically evaluate a load of a boxed object.
+--   Since we may be loading and then callign a function,
+--   we have to deal with excess arguments.    
+rwLoadBoxApp inf op' ty_args (addr_arg : excess_args) = do
+  -- Simplify the load expression, which involves only the first argument
+  (addr_arg', addr_value) <- rwExp addr_arg
+  let load_exp = ExpM $ AppE inf op' ty_args [addr_arg']
+      loaded_value =
+        case addr_value
+        of Just (ComplexValue _ (StoredValue Boxed val)) -> Just val
+           _ -> Nothing
+      
+      -- Try to make a simplified expression
+      m_loaded_exp = loaded_value >>= asTrivialValue
+      simplified_exp = fromMaybe load_exp m_loaded_exp
+  
+  -- Process any remaining arguments
+  case excess_args of
+    [] -> return (simplified_exp, loaded_value)
+    _ -> case m_loaded_exp
+         of Nothing -> do
+              -- Cannot simplify this expression further.
+              -- Process the other subexpressions.
+              (args', _) <- rwExps excess_args
+              let new_exp = ExpM $ AppE inf simplified_exp [] args'
+              return (new_exp, Nothing)
+            Just loaded_exp ->
+              -- We have eliminated this load expression.  Try simplifying
+              -- the application that we got as a result.
+              rwAppWithOperator inf loaded_exp loaded_value [] excess_args
 
 -- | Attempt to statically evaluate a copy
 rwCopyApp inf op' ty_args args = do
