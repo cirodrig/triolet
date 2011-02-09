@@ -46,6 +46,16 @@ caseOfList tenv scrutinee list_type mk_body =
     array_type size_index =
       TypM $ varApp (pyonBuiltin the_array) [VarT size_index, fromTypM list_type]
 
+caseOfTraversableDict :: TypeEnv
+                      -> MkExpM
+                      -> TypM
+                      -> (Var -> Var -> MkExpM)
+                      -> MkExpM
+caseOfTraversableDict tenv scrutinee container_type mk_body =
+  caseE scrutinee
+  [mkAlt tenv (pyonBuiltin the_traversableDict) [container_type] $
+   \ [] [trv, bld] -> mk_body trv bld]
+
 -------------------------------------------------------------------------------
 -- Rewrite rules
 
@@ -56,7 +66,9 @@ type RewriteRule = TypeEnv -> ExpInfo -> [TypM] -> [ExpM]
 rewriteRules :: Map.Map Var RewriteRule
 rewriteRules = Map.fromList table
   where
-    table = [(pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)]
+    table = [ (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
+            , (pyonBuiltin the_fun_zip, rwZip)
+            ]
 
 -- | Attempt to rewrite an application term.
 --   If it can be rewritten, return the new expression.
@@ -91,3 +103,40 @@ rwTraverseList tenv inf [elt_type] [elt_repr, list] = fmap Just $
           varE ret_var])]
   
 rwTraverseList _ _ _ _ = return Nothing
+
+-- | Rewrite calls to @zip@ to call @zipStream@
+--
+-- > case t1 of TraversableDict trv1 _.
+-- > case t2 of TraversableDict trv2 _.
+-- > case t3 of TraversableDict _ bld3.
+-- > bld3
+-- >   (PyonTuple2 element1 element2)
+-- >   (repr_PyonTuple2 element1 element2 repr1 repr2)
+-- >   (zipStream element1 element2 repr1 repr2
+-- >     (trv1 element1 repr1 input1)
+-- >     (trv2 element2 repr2 input2))
+rwZip :: RewriteRule
+rwZip tenv inf
+  [container1, container2, container3, element1, element2]
+  (traversable1 : traversable2 : traversable3 : repr1 : repr2 :
+   input1 : input2 : other_args) =
+  fmap Just $
+  caseOfTraversableDict tenv (return traversable1) container1 $ \trv1 _ ->
+  caseOfTraversableDict tenv (return traversable2) container2 $ \trv2 _ ->
+  caseOfTraversableDict tenv (return traversable3) container3 $ \_ bld3 ->
+  let tuple_type = varApp (pyonBuiltin the_PyonTuple2)
+                   [fromTypM element1, fromTypM element2]
+      tuple_repr = varAppE (pyonBuiltin the_repr_PyonTuple2)
+                   [element1, element2]
+                   [return repr1, return repr2] 
+      app_other_args = map return other_args
+  in varAppE bld3
+     [TypM tuple_type]
+     ([tuple_repr,
+       varAppE (pyonBuiltin the_fun_zip_Stream)
+       [element1, element2]
+       [return repr1, return repr2,
+        varAppE trv1 [element1] [return repr1, return input1],
+        varAppE trv2 [element2] [return repr2, return input2]]] ++
+      app_other_args)
+  
