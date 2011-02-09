@@ -638,8 +638,12 @@ rwAppWithOperator inf op' op_val ty_args args =
           Just (VarValue _ op_var)
             | op_var `isPyonBuiltin` the_store ->
               rwStoreApp inf op' ty_args args
+            | op_var `isPyonBuiltin` the_storeBox ->
+              rwStoreBoxApp inf op' ty_args args
             | op_var `isPyonBuiltin` the_load ->
               rwLoadApp inf op' ty_args args
+            | op_var `isPyonBuiltin` the_loadBox ->
+              rwLoadBoxApp inf op' ty_args args
             | op_var `isPyonBuiltin` the_copy ->
               rwCopyApp inf op' ty_args args
 
@@ -677,7 +681,7 @@ rwAppWithOperator inf op' op_val ty_args args =
     inline_function_call funm =
       rwExp =<< betaReduce inf funm ty_args args
 
--- | Attempt to statically evaluate a store
+-- | Attempt to statically evaluate a store operation
 rwStoreApp inf op' ty_args args = do
   (args', arg_values) <- rwExps args
   let new_exp = ExpM $ AppE inf op' ty_args args'
@@ -697,6 +701,26 @@ rwStoreApp inf op' ty_args args = do
     stored_value _ =
       internalError "rwStoreApp: Wrong number of arguments in call"
       
+-- | Attempt to statically evaluate a store of a boxed object
+rwStoreBoxApp inf op' ty_args args = do
+  (args', arg_values) <- rwExps args
+  let new_exp = ExpM $ AppE inf op' ty_args args'
+      new_value = stored_value arg_values
+  return (new_exp, new_value)
+  where
+    -- Keep track of what was stored in memory
+    stored_value [Just stored_value, _] =
+      Just $ complexKnownValue $ StoredValue Boxed stored_value
+    stored_value [_, _] = Nothing
+    stored_value [Just stored_value] =
+      -- When applied to an argument, this will store a value
+      Just $ complexKnownValue $
+      WriterValue $ complexKnownValue $
+      StoredValue Boxed stored_value
+    stored_value [_] = Nothing
+    stored_value _ =
+      internalError "rwStoreBoxApp: Wrong number of arguments in call"
+
 -- | Attempt to statically evaluate a load
 rwLoadApp inf op' ty_args args = do
   (args', arg_values) <- rwExps args
@@ -709,10 +733,27 @@ rwLoadApp inf op' ty_args args = do
   where
     -- Do we know what was stored here?
     loaded_value [_, Just (ComplexValue _ (StoredValue Value val))] =
-      Just (asTrivialValue val, Just val)
+        Just (asTrivialValue val, Just val)
     loaded_value [_, _] = Nothing
     loaded_value _ =
       internalError "rwLoadApp: Wrong number of arguments in call"
+
+-- | Attempt to statically evaluate a load of a boxed object
+rwLoadBoxApp inf op' ty_args args = do
+  (args', arg_values) <- rwExps args
+  let new_exp = ExpM $ AppE inf op' ty_args args'
+  case loaded_value arg_values of
+    Just (m_loaded_exp, new_value) ->
+      return (fromMaybe new_exp m_loaded_exp, new_value)
+    Nothing ->
+      return (new_exp, Nothing)
+  where
+    -- Do we know what was stored here?
+    loaded_value [Just (ComplexValue _ (StoredValue Boxed val))] =
+        Just (asTrivialValue val, Just val)
+    loaded_value [_] = Nothing
+    loaded_value _ =
+      internalError "rwLoadBoxApp: Wrong number of arguments in call"
 
 -- | Attempt to statically evaluate a copy
 rwCopyApp inf op' ty_args args = do

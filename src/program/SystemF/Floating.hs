@@ -590,6 +590,11 @@ createFlattenedApp inf op_var ty_args args = do
                -- do store-load propagation 
                let [TypM store_type] = ty_args
                in [Nothing, Just (ValPT Nothing ::: store_type), Nothing]
+           | op_var `isPyonBuiltin` the_storeBox ->
+               -- Also move the argument of 'storeBox', so that we can
+               -- do store-load propagation 
+               let [TypM store_type] = ty_args
+               in [Just (BoxPT ::: store_type), Nothing]
            | otherwise ->
                repeat Nothing
 
