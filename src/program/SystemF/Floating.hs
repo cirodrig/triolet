@@ -56,8 +56,8 @@ isSingletonType ty =
 -- | Return true if this is the type of a floatable let-binding parameter.
 --   The type must be a singleton type, and it must be in the type's natural
 --   representation.
-isFloatableParamType :: ParamType -> Bool
-isFloatableParamType (prepr ::: ptype) =
+isFloatableSingletonParamType :: ParamType -> Bool
+isFloatableSingletonParamType (prepr ::: ptype) =
   floatable_repr prepr && isSingletonType ptype
   where
     -- Only allow floating on values in their natural representation.
@@ -269,7 +269,7 @@ nubContext id_supply tenv ctx =
       let rn_c = renameContextItem rn c -- Rename before inspecting
       in case ctxExp rn_c
          of LetCtx _ (MemVarP pvar param_type@(_ ::: ptype)) rhs
-              | isFloatableParamType param_type -> do
+              | isFloatableSingletonParamType param_type -> do
                   -- This context can be eliminated
                   -- Is there already a definition of this variable?
                   defined_var <- findByType id_supply tenv ptype types
@@ -477,12 +477,22 @@ addLocalVars vs m = Flt $ \ctx ->
 --   A @LocalVarP@ is counted as a readable reference.
 --   It's only a readable reference in the body of a let-binding, not the rhs.
 addPatternVar :: PatM -> Flt ExpM -> Flt ExpM
-addPatternVar (MemVarP v (ReadPT ::: _)) = addReadVar v
-addPatternVar (MemVarP v _)              = id
-addPatternVar (LocalVarP v _ _)          = addReadVar v
-addPatternVar (MemWildP _)               = id
+addPatternVar pat m = addRnPatternVar mempty pat m
+
+-- | Rename the pattern and then add it to the environment.
+--   The renaming is applied to the pattern-bound variables as well as the
+--   types.
+--
+--   We use this when a binding is renamed and floated.
+addRnPatternVar :: Renaming -> PatM -> Flt ExpM -> Flt ExpM
+addRnPatternVar rn (MemVarP v (ReadPT ::: _)) = addReadVar (rename rn v)
+addRnPatternVar _  (MemVarP v _)              = id
+addRnPatternVar rn (LocalVarP v _ _)          = addReadVar (rename rn v)
+addRnPatternVar _  (MemWildP _)               = id
 
 addPatternVars ps x = foldr addPatternVar x ps
+
+addRnPatternVars rn ps x = foldr (addRnPatternVar rn) x ps
 
 -------------------------------------------------------------------------------
 
@@ -652,7 +662,7 @@ floatInLet inf pat rhs body =
   of MemVarP pat_var pat_type -> do
        -- Float the RHS
        rhs' <- floatInExp rhs
-       if isFloatableParamType pat_type
+       if isFloatableSingletonParamType pat_type
          then do
            -- Float this binding
            rn <- float $ LetCtx inf pat rhs'
@@ -697,7 +707,9 @@ floatInCase inf scr alts = do
   floatable <- is_floatable scr'
   if floatable
     then do rn <- float ctx
-            addPatternVars alt_params $ floatInExp $ rename rn alt_body
+            -- The floated variables were renamed. 
+            -- Add the /renamed/ pattern variables to the environment.
+            addRnPatternVars rn alt_params $ floatInExp $ rename rn alt_body
     else do alts' <- mapM floatInAlt alts
             return $ ExpM $ CaseE inf scr' alts'
   where
