@@ -511,8 +511,8 @@ betaReduce inf (FunM fun) ty_args args
     bind_parameters params args body =
       foldr bind_parameter body $ zip params args
     
-    bind_parameter (param, arg) body =
-      ExpM $ LetE inf param arg body
+    bind_parameter (MemWildP {}, _) body = body
+    bind_parameter (param, arg) body = ExpM $ LetE inf param arg body
 
 -------------------------------------------------------------------------------
 -- Local restructuring
@@ -923,6 +923,9 @@ elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
                   new_exp = foldr make_binding subst_body bindings
               in Just new_exp
   where
+    -- Construct a let-binding from the values returned by bind_field
+    -- and a body expression
+    make_binding (MemWildP {}, _) body = body
     make_binding (pat, rhs) body = ExpM $ LetE inf pat rhs body
 
     -- Attempt to bind a value to a data field.
