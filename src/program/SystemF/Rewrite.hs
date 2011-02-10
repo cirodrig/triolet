@@ -3,6 +3,7 @@ module SystemF.Rewrite
        (rewriteApp)
 where
 
+import Control.Monad
 import qualified Data.Map as Map
 import Data.Maybe
 import Debug.Trace
@@ -71,6 +72,7 @@ rewriteRules = Map.fromList table
     table = [ (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
             , (pyonBuiltin the_TraversableDict_Stream_traverse, rwBuildTraverseStream)
             , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildTraverseStream)
+            , (pyonBuiltin the_oper_CAT_MAP, rwBindStream)
             , (pyonBuiltin the_fun_zip, rwZip)
             , (pyonBuiltin the_fun_zip_Stream, rwZipStream)
             , (pyonBuiltin the_fun_reduce, rwReduce)
@@ -115,6 +117,25 @@ rwTraverseList _ _ _ _ = return Nothing
 rwBuildTraverseStream :: RewriteRule
 rwBuildTraverseStream tenv inf [_] [_, stream] = return $ Just stream
 rwBuildTraverseStream _ _ _ _ = return Nothing
+
+-- | Rewrite applications of the stream @bind@ operator when the producer
+--   or transformer has a well-behaved data flow pattern.
+--
+--   * Transformer is rewritable to @\x -> return f(x)@: rewrite to a
+--     mapStream
+rwBindStream :: RewriteRule
+rwBindStream tenv inf
+  [elt1, elt2]
+  [repr1, repr2, producer, transformer] =
+  case unreturnStreamTransformer transformer
+  of Just map_fn ->
+       fmap Just $
+       varAppE (pyonBuiltin the_fun_map_Stream)
+       [elt1, elt2]
+       [return repr1, return repr2, return map_fn, return producer]
+     _ -> return Nothing
+
+rwBindStream _ _ _ _ = return Nothing
 
 -- | Rewrite calls to @zip@ to call @zipStream@
 --
@@ -288,3 +309,47 @@ streamShape expression =
                           , ssGenerator = \ix ->
                               appE (return writer) [] [return ix]}
        | otherwise -> Nothing
+
+-- | Convert a stream transformer that produces a singleton stream
+--   into a function that writes its result.
+unreturnStreamTransformer :: ExpM -> Maybe ExpM
+unreturnStreamTransformer expr =
+  case expr
+  of ExpM (LamE inf (FunM f)) -> do
+       -- The function takes a single parameter, which is a readable
+       -- reference to a value of type @elt_type@.
+       new_ret_type <- unreturn_return $ funReturn f
+       new_body <- unreturnExp $ funBody f
+       return $ ExpM $ LamE inf $ FunM $ f { funReturn = new_ret_type
+                                           , funBody = new_body}
+     _ -> mzero
+  where
+    -- Convert a return type of @box Stream a@ to @out a -> SideEffect a@
+    unreturn_return (RetM (BoxRT ::: rt))
+      | Just (op_var, [elt_type]) <- fromVarApp rt,
+        op_var `isPyonBuiltin` the_Stream =
+          return $ RetM (BoxRT ::: FunT (OutPT ::: elt_type) 
+                                        (SideEffectRT ::: elt_type))
+
+    unreturn_return _ = mzero
+
+-- | Convert an expression whose return value is @return x@ stream into
+--   an expression whose return value is @x@.
+unreturnExp expression =
+  case fromExpM expression
+  of VarE {} -> Nothing
+     LitE {} -> Nothing
+     AppE inf (ExpM (VarE _ op_var)) ty_args [_, arg]
+       | op_var `isPyonBuiltin` the_oper_DO -> Just arg
+     AppE {} -> Nothing
+     LetE inf bind rhs body -> 
+       fmap ExpM $ fmap (LetE inf bind rhs) $ unreturnExp body
+     LetfunE inf defs body ->
+       fmap ExpM $ fmap (LetfunE inf defs) $ unreturnExp body
+     CaseE inf scr alts ->
+       fmap ExpM $ fmap (CaseE inf scr) $ mapM unreturnAlt alts
+
+unreturnAlt (AltM alt) = do
+  body <- unreturnExp $ altBody alt
+  return $ AltM (alt {altBody = body})
+
