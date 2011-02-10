@@ -4,9 +4,11 @@ module SystemF.Rewrite
 where
 
 import qualified Data.Map as Map
+import Data.Maybe
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
+import Common.Error
 import Builtins.Builtins
 import SystemF.Build
 import SystemF.Syntax
@@ -70,6 +72,7 @@ rewriteRules = Map.fromList table
             , (pyonBuiltin the_TraversableDict_Stream_traverse, rwBuildTraverseStream)
             , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildTraverseStream)
             , (pyonBuiltin the_fun_zip, rwZip)
+            , (pyonBuiltin the_fun_zip_Stream, rwZipStream)
             ]
 
 -- | Attempt to rewrite an application term.
@@ -148,3 +151,106 @@ rwZip tenv inf
       app_other_args)
   
 rwZip _ _ _ _ = return Nothing
+
+-- | Rewrite calls to @zipStream@ when we know the size of the stream.
+--
+-- > zipStream(count, generate(n, f)) -> generate(n, \i -> (i, f i))
+-- > zipStream(generate(n, f), count) -> generate(n, \i -> (f i, i))
+-- > zipStream(generate(n1, f1), generate(n2, f2)) ->
+--     generate(min(n1, n2), \i -> (f1 i, f2 i))
+rwZipStream :: RewriteRule
+rwZipStream tenv inf
+  [element1, element2]
+  [repr1, repr2, stream1, stream2]
+  | Just shape1 <- streamShape stream1,
+    Just shape2 <- streamShape stream2 =
+      let zipped_stream = zipStreams [shape1, shape2]
+          elem_ty = ssType zipped_stream
+      in case ssShape zipped_stream
+         of Nothing -> return Nothing -- Can't deal with infinite streams
+            Just (shp_ty, shp_val) ->
+              fmap Just $
+              varAppE (pyonBuiltin the_generate)
+              [shp_ty, TypM elem_ty]
+              [return shp_val,
+               varAppE (pyonBuiltin the_repr_PyonTuple2)
+               [element1, element2] [return repr1, return repr2],
+               lamE $ mkFun []
+               (\ [] -> return ([ValPT Nothing ::: VarT (pyonBuiltin the_int)],
+                                BoxRT ::: FunT (OutPT ::: elem_ty)
+                                          (SideEffectRT ::: elem_ty)))
+               (\ [] [ixvar] ->
+                 ssGenerator zipped_stream $ ExpM (VarE defaultExpInfo ixvar))]
+
+rwZipStream _ _ _ _ = return Nothing
+
+
+-- | The shape of a stream.
+data ShapeStream =
+  ShapeStream
+  { -- | The number of elements in the stream.
+    --   If the stream is infinite,
+    --   this is 'Nothing'.  Otherwise, this is a type index @n@ of
+    --   kind @intindex@ and an expression of type
+    --   @val IndexedInt n@,
+    --   both giving the actual number of stream elements.
+    --
+    --   There is no way to represent an unknown number of elements.
+    ssShape :: Maybe (TypM, ExpM)
+    
+    -- | The type of a stream element
+  , ssType :: Type
+
+    -- | Given an expression that evaluates to the index of the desired
+    --   stream element (with type @val int@), produce an expression that
+    --   evaluates to the desired stream element, as a write reference. 
+  , ssGenerator :: ExpM -> MkExpM
+  }
+
+-- | Zip together a list of two or more streams
+zipStreams :: [ShapeStream] -> ShapeStream
+zipStreams ss
+  | length ss < 2 = internalError "zipStreams: Need at least two streams"
+  | length ss > 2 = internalError "zipStreams: Not implemented for this case"
+  | otherwise =
+      let shape = case mapMaybe ssShape ss
+                  of [] -> Nothing
+                     xs -> Just $ foldr1 combine_shapes xs
+          typ = varApp (pyonBuiltin the_PyonTuple2) (map ssType ss)
+          gen ix = varAppE (pyonBuiltin the_pyonTuple2)
+                   (map (TypM . ssType) ss)
+                   [ssGenerator stream ix | stream <- ss]
+      in ShapeStream shape typ gen
+  where
+    -- Combine shapes, using the "min" operator to get the minimum value
+    combine_shapes (typ1, val1) (typ2, val2) =
+      let typ = TypM $
+                varApp (pyonBuiltin the_min_i) [fromTypM typ1, fromTypM typ2]
+          val = ExpM $ AppE defaultExpInfo min_ii [typ1, typ2] [val1, val2] 
+      in (typ, val)
+    
+    min_ii = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
+
+-- | Given a stream, get its shape.
+streamShape :: ExpM -> Maybe ShapeStream
+streamShape expression =
+  case unpackVarAppM expression
+  of Nothing -> Nothing
+     Just (op_var, ty_args, args)
+       | op_var `isPyonBuiltin` the_count ->
+           Just $
+           ShapeStream { ssShape = Nothing
+                       , ssType = VarT $ pyonBuiltin the_int
+                       , ssGenerator = \ix ->
+                           varAppE (pyonBuiltin the_store)
+                           [TypM $ VarT $ pyonBuiltin the_int]
+                           [varE $ pyonBuiltin the_repr_int, return ix]}
+       | op_var `isPyonBuiltin` the_generate ->
+           let [size_arg, type_arg] = ty_args
+               [size_val, repr, writer] = args
+           in Just $
+              ShapeStream { ssShape = Just (TypM size_arg, size_val)
+                          , ssType = type_arg
+                          , ssGenerator = \ix ->
+                              appE (return writer) [] [return ix]}
+       | otherwise -> Nothing

@@ -82,3 +82,14 @@ type RetM = Ret Mem
 type ExpM = Exp Mem
 type AltM = Alt Mem
 type FunM = Fun Mem
+
+unpackVarAppM :: ExpM -> Maybe (Var, [Type], [ExpM])
+unpackVarAppM (ExpM (AppE { expOper = ExpM (VarE _ op)
+                          , expTyArgs = ts
+                          , expArgs = xs})) =
+  Just (op, map fromTypM ts, xs)
+
+unpackVarAppM (ExpM (VarE { expVar = op })) =
+  Just (op, [], [])
+
+unpackVarAppM _ = Nothing

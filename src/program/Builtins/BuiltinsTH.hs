@@ -170,9 +170,11 @@ pyonBuiltinVariableNames =
   , "zero_i"
   , "plus_i"
   , "minus_i"
+  , "min_i"
   , "zero_ii"
   , "plus_ii"
   , "minus_ii"
+  , "min_ii"
 
     -- Built-in functions
   , "oper_DO"

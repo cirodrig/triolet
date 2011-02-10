@@ -469,6 +469,7 @@ VectorDict_Complex_dot :
 zero_i : val intindex;
 plus_i : val (val intindex -> val intindex -> val intindex);
 minus_i : val (val intindex -> val intindex -> val intindex);
+min_i : val (val intindex -> val intindex -> val intindex);
 
 zero_ii : val (IndexedInt zero_i);
 plus_ii : (val m : intindex)
@@ -482,6 +483,12 @@ minus_ii : (val m : intindex)
         -> val (IndexedInt m)
         -> val (IndexedInt n)
         -> val (IndexedInt (minus_i m n));
+
+min_ii : (val m : intindex)
+      -> (val n : intindex)
+      -> val (IndexedInt m)
+      -> val (IndexedInt n)
+      -> val (IndexedInt (min_i m n));
 
 -------------------------------------------------------------------------------
 -- Other functions
