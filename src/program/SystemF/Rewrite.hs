@@ -73,6 +73,8 @@ rewriteRules = Map.fromList table
             , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildTraverseStream)
             , (pyonBuiltin the_fun_zip, rwZip)
             , (pyonBuiltin the_fun_zip_Stream, rwZipStream)
+            , (pyonBuiltin the_fun_reduce, rwReduce)
+            , (pyonBuiltin the_fun_reduce1, rwReduce1)
             ]
 
 -- | Attempt to rewrite an application term.
@@ -184,6 +186,38 @@ rwZipStream tenv inf
 
 rwZipStream _ _ _ _ = return Nothing
 
+rwReduce :: RewriteRule
+rwReduce tenv inf
+  [container, element]
+  (traversable : repr : reducer : init : input : other_args) =
+  fmap Just $
+  caseOfTraversableDict tenv (return traversable) container $ \trv _ ->
+  let app_other_args = map return other_args
+  in varAppE (pyonBuiltin the_fun_reduce_Stream)
+     [element]
+     ([return repr, return reducer, return init,
+       varAppE trv [element] [return repr, return input]] ++
+      app_other_args)
+
+rwReduce _ _ _ _ = return Nothing
+
+-- | @reduce1@ is just like @reduce@ except there's no initial value
+rwReduce1 :: RewriteRule
+rwReduce1 tenv inf
+  [container, element]
+  (traversable : repr : reducer : input : other_args) =
+  fmap Just $
+  caseOfTraversableDict tenv (return traversable) container $ \trv _ ->
+  let app_other_args = map return other_args
+  in varAppE (pyonBuiltin the_fun_reduce1_Stream)
+     [element]
+     ([return repr, return reducer,
+       varAppE trv [element] [return repr, return input]] ++
+      app_other_args)
+
+rwReduce1 _ _ _ _ = return Nothing
+
+-------------------------------------------------------------------------------
 
 -- | The shape of a stream.
 data ShapeStream =
