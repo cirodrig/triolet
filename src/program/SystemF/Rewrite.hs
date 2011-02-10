@@ -67,6 +67,8 @@ rewriteRules :: Map.Map Var RewriteRule
 rewriteRules = Map.fromList table
   where
     table = [ (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
+            , (pyonBuiltin the_TraversableDict_Stream_traverse, rwBuildTraverseStream)
+            , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildTraverseStream)
             , (pyonBuiltin the_fun_zip, rwZip)
             ]
 
@@ -104,6 +106,11 @@ rwTraverseList tenv inf [elt_type] [elt_repr, list] = fmap Just $
   
 rwTraverseList _ _ _ _ = return Nothing
 
+-- | The Stream instances of 'build' and 'traverse' are identity functions
+rwBuildTraverseStream :: RewriteRule
+rwBuildTraverseStream tenv inf [_] [_, stream] = return $ Just stream
+rwBuildTraverseStream _ _ _ _ = return Nothing
+
 -- | Rewrite calls to @zip@ to call @zipStream@
 --
 -- > case t1 of TraversableDict trv1 _.
@@ -140,3 +147,4 @@ rwZip tenv inf
         varAppE trv2 [element2] [return repr2, return input2]]] ++
       app_other_args)
   
+rwZip _ _ _ _ = return Nothing
