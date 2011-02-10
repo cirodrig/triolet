@@ -1,0 +1,5 @@
+
+def dotproduct(xs, ys):
+    return reduce(lambda x, y: x + y, 0, x * y for (x, y) in zip(xs, ys))
+
+export ccall dotproduct : list(float) * list(float) -> float

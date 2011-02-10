@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Compute dot product of two lists",
+  pyonSources	 = ["dot.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "ok"
+}
