@@ -36,9 +36,12 @@ renameTyPatM rn pattern =
 renamePatM :: Renaming -> PatM -> PatM
 renamePatM rn pattern =
   case pattern
-  of MemVarP v prepr -> MemVarP v (rename_prepr prepr)
-     LocalVarP v ty dict -> LocalVarP v (rename rn ty) (rename rn dict)
-     MemWildP prepr -> MemWildP (rename_prepr prepr)
+  of MemVarP v prepr uses ->
+       MemVarP v (rename_prepr prepr) uses
+     LocalVarP v ty dict uses ->
+       LocalVarP v (rename rn ty) (rename rn dict) uses
+     MemWildP prepr ->
+       MemWildP (rename_prepr prepr)
   where
     rename_prepr (repr ::: ty) =
       case repr
@@ -65,13 +68,9 @@ freshenTyPatMs pats = do
 
 -- | Freshen a variable binding that is /not/ a local variable binding.
 freshenPatM :: (Monad m, Supplies m VarID) => PatM -> m (PatM, Renaming)
-freshenPatM (MemVarP v ty) = do
-  v' <- newClonedVar v
-  return (MemVarP v' ty, singletonRenaming v v')
-
-freshenPatM (LocalVarP {}) = internalError "freshenPatM: Unexpected pattern"
-
-freshenPatM (MemWildP ty) = return (MemWildP ty, mempty)
+freshenPatM pat = do 
+  (pat', assocs) <- freshenPattern pat
+  return (pat', maybe mempty (uncurry singletonRenaming) assocs)
 
 -- | Freshen a list of variable bindings. 
 --   There must not be any local variable bindings in the list.
@@ -79,18 +78,18 @@ freshenPatM (MemWildP ty) = return (MemWildP ty, mempty)
 --   the list. 
 freshenPatMs :: (Monad m, Supplies m VarID) => [PatM] -> m ([PatM], Renaming)
 freshenPatMs pats = do
-  (pats', assocs) <- mapAndUnzipM freshen_pattern pats
+  (pats', assocs) <- mapAndUnzipM freshenPattern pats
   return (pats', renaming $ catMaybes assocs)
-  where
-    freshen_pattern (MemVarP v param_ty) = do
-      v' <- newClonedVar v
-      return (MemVarP v' param_ty, Just (v, v'))
 
-    freshen_pattern (LocalVarP {}) =
-      internalError "freshenPatMs: Unexpected pattern"
+freshenPattern (MemVarP v param_ty uses) = do
+  v' <- newClonedVar v
+  return (MemVarP v' param_ty uses, Just (v, v'))
+
+freshenPattern (LocalVarP {}) =
+  internalError "freshenPattern: Unexpected pattern"
                                    
-    freshen_pattern (MemWildP param_ty) =
-      return (MemWildP param_ty, Nothing)
+freshenPattern (MemWildP param_ty) =
+  return (MemWildP param_ty, Nothing)
 
 -- | Apply a substitution to a type pattern
 substituteTyPatM :: Substitution -> TyPatM -> TyPatM
@@ -102,11 +101,12 @@ substituteTyPatM s pattern =
 substitutePatM :: Substitution -> PatM -> PatM
 substitutePatM s pattern =
   case pattern
-  of MemVarP v (repr ::: ty) ->
+  of MemVarP v (repr ::: ty) uses ->
        case repr
        of ValPT (Just _) -> internalError "substitutePatM: Superfluous binding"
-          _ -> MemVarP v (repr ::: substitute s ty)
-     LocalVarP v ty dict -> LocalVarP v (substitute s ty) (substitute s dict)
+          _ -> MemVarP v (repr ::: substitute s ty) uses
+     LocalVarP v ty dict uses ->
+       LocalVarP v (substitute s ty) (substitute s dict) uses
      MemWildP (repr ::: ty) ->
        case repr
        of ValPT (Just _) -> internalError "substitutePatM: Superfluous binding"
@@ -147,12 +147,12 @@ instance Renameable (Exp Mem) where
 
   freshen (ExpM expression) =
     case expression
-    of LetE inf (LocalVarP v ty dict) rhs body -> do
+    of LetE inf (LocalVarP v ty dict uses) rhs body -> do
          -- This variable is in scope over the rhs and the body
          v' <- newClonedVar v
          let rhs' = rename (singletonRenaming v v') rhs
          let body' = rename (singletonRenaming v v') body
-         return $ ExpM $ LetE inf (LocalVarP v' ty dict) rhs' body'
+         return $ ExpM $ LetE inf (LocalVarP v' ty dict uses) rhs' body'
 
        LetE inf pat rhs body -> do
          (pat', rn) <- freshenPatM pat
@@ -185,22 +185,19 @@ instance Renameable (Exp Mem) where
                                  Set.union (freeVariables ty_args) $
                                  freeVariables args
        LamE _ f -> freeVariables f
-       LetE _ (MemVarP v (_ ::: ty)) rhs body ->
-         let ty_fv = freeVariables ty
+       LetE _ pat rhs body ->
+         let ty_fv = freeVariables $ patMType pat
              rhs_fv = freeVariables rhs
-             body_fv = Set.delete v $ freeVariables body
-         in ty_fv `Set.union` rhs_fv `Set.union` body_fv
-       LetE _ (MemWildP (_ ::: ty)) rhs body ->
-         let ty_fv = freeVariables ty
-             rhs_fv = freeVariables rhs
-             body_fv = freeVariables body
-         in ty_fv `Set.union` rhs_fv `Set.union` body_fv
-       LetE _ (LocalVarP v ty dict) rhs body ->
-         let ty_fv = freeVariables ty
-             dict_fv = freeVariables dict
-             rhs_fv = Set.delete v $ freeVariables rhs
-             body_fv = Set.delete v $ freeVariables body
-         in ty_fv `Set.union` dict_fv `Set.union` rhs_fv `Set.union` body_fv
+             body_fv = case patMVar pat 
+                       of Nothing -> freeVariables body
+                          Just v -> Set.delete v $ freeVariables body
+         in case pat
+            of MemVarP {} -> ty_fv `Set.union` rhs_fv `Set.union` body_fv
+               MemWildP {} -> ty_fv `Set.union` rhs_fv `Set.union` body_fv
+               LocalVarP {} ->
+                 let rhs_fv' = Set.delete (patMVar' pat) rhs_fv
+                     dict_fv = freeVariables $ patMDict pat
+                 in ty_fv `Set.union` dict_fv `Set.union` rhs_fv `Set.union` body_fv
        LetfunE _ (NonRec (Def v f)) body ->
          let body_fv = freeVariables body
              fn_fv = freeVariables f

@@ -88,17 +88,15 @@ tyPatType :: TyPat Mem -> Type
 tyPatType (TyPatM _ t) = t
 
 fromPatTM :: PatTM -> PatM
-fromPatTM (TypedMemVarP v pt) = MemVarP v pt
-fromPatTM (TypedLocalVarP v ty repr) = LocalVarP v ty repr'
+fromPatTM (TypedMemVarP v pt) = memVarP v pt
+fromPatTM (TypedLocalVarP v ty repr) = localVarP v ty repr'
   where repr' = internalError "fromPatTM: Not implemented"
-fromPatTM (TypedMemWildP pt) = MemWildP pt
+fromPatTM (TypedMemWildP pt) = memWildP pt
 
 -- | Determine the type that a pattern-bound variable has after it's been 
 --   bound.
 patType :: PatM -> ReturnType
-patType (MemVarP _ (prepr ::: ty)) = paramReprToReturnRepr prepr ::: ty
-patType (MemWildP (prepr ::: ty)) = paramReprToReturnRepr prepr ::: ty
-patType (LocalVarP _ t _) = ReadRT ::: t
+patType = patMReturnType
 
 functionType :: FunM -> Type 
 functionType (FunM (Fun { funTyParams = ty_params
@@ -106,31 +104,27 @@ functionType (FunM (Fun { funTyParams = ty_params
                         , funReturn = RetM ret
                         })) =
   let ty_param_reprs = [ValPT (Just v) ::: k | TyPatM v k <- ty_params]
-      param_reprs = map get_param_repr params
+      param_reprs = map patMParamType params
       ret_repr = ret
   in funType (ty_param_reprs ++ param_reprs) ret_repr
-  where
-    get_param_repr (MemVarP _ rt) = rt
-    get_param_repr (MemWildP rt) = rt
-    get_param_repr (LocalVarP _ _ _) = internalError "functionType"
 
 -------------------------------------------------------------------------------
 
 assumePat :: PatM -> (PatTM -> TCM b) -> TCM b
-assumePat (MemVarP v (prepr ::: ty)) k =
+assumePat (MemVarP v (prepr ::: ty) _) k =
   assume v (paramReprToReturnRepr prepr ::: ty) $
   k (TypedMemVarP v (prepr ::: ty))
 
-assumePat (LocalVarP v ty repr) k = internalError "assumePat"
+assumePat (LocalVarP {}) k = internalError "assumePat"
 
 assumePat (MemWildP (prepr ::: ty)) k = k (TypedMemWildP (prepr ::: ty))
 
 -- | Add pattern-bound variables from a let statement to the environment 
 --   while processing the definition of the local value
 assumeDefiningLetPattern :: PatM -> TCM a -> TCM a
-assumeDefiningLetPattern (MemVarP _ _) m = m -- Not visible during definition
-assumeDefiningLetPattern (LocalVarP v ty _) m = assume v (OutRT ::: ty) m
-assumeDefiningLetPattern (MemWildP _) _ =
+assumeDefiningLetPattern (MemVarP {}) m = m -- Not visible during definition
+assumeDefiningLetPattern (LocalVarP v ty _ _) m = assume v (OutRT ::: ty) m
+assumeDefiningLetPattern (MemWildP {}) _ =
   internalError "assumeDefiningLetPattern: Unexpected wildcard"
 
 -- | Add pattern-bound variables from a let statement to the environment 
@@ -138,9 +132,9 @@ assumeDefiningLetPattern (MemWildP _) _ =
 assumeUsingLetPattern :: PatM -> TCM a -> TCM a
 assumeUsingLetPattern pattern k =
   case pattern
-  of MemVarP _ _      -> assumePat pattern $ \_ -> k
-     LocalVarP v ty _ -> assume v (ReadRT ::: ty) k
-     MemWildP _       -> internalError "assumeUsingLetPattern: Unexpected wildcard"
+  of MemVarP {}         -> assumePat pattern $ \_ -> k
+     LocalVarP v ty _ _ -> assume v (ReadRT ::: ty) k
+     MemWildP {}        -> internalError "assumeUsingLetPattern: Unexpected wildcard"
      
 assumeTyPat :: TyPat Mem -> (TyPat TM -> TCM b) -> TCM b
 assumeTyPat (TyPatM v t) k = do
@@ -308,8 +302,8 @@ typeInferLetE inf pat expression body = do
       new_exp = LetE inf ti_pat ti_exp ti_body
   return $ ExpTM $ RTypeAnn return_type new_exp
   where
-    type_infer_pattern (MemVarP v pt) = return $ TypedMemVarP v pt
-    type_infer_pattern (LocalVarP v ty repr) = do
+    type_infer_pattern (MemVarP v pt _) = return $ TypedMemVarP v pt
+    type_infer_pattern (LocalVarP v ty repr _) = do
       repr' <- typeInferExp repr
       return $ TypedLocalVarP v ty repr'
     type_infer_pattern (MemWildP pt) =
@@ -409,7 +403,7 @@ checkAltParam pos expected_type pattern = do
   let gtype = paramReprToReturnRepr given_repr ::: given_type
   checkReturnType pos expected_type gtype
   return $ case pattern
-           of MemVarP field_var ptype -> TypedMemVarP field_var ptype
+           of MemVarP field_var ptype _ -> TypedMemVarP field_var ptype
               MemWildP ptype -> TypedMemWildP ptype
 
 typeCheckDefGroup :: DefGroup (Def Mem) -> (DefGroup (Def TM) -> TCM b) -> TCM b

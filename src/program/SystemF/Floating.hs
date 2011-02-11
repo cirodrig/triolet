@@ -268,16 +268,16 @@ nubContext id_supply tenv ctx =
     nub_r types rn new_ctx (c:cs) =
       let rn_c = renameContextItem rn c -- Rename before inspecting
       in case ctxExp rn_c
-         of LetCtx _ (MemVarP pvar param_type@(_ ::: ptype)) rhs
-              | isFloatableSingletonParamType param_type -> do
+         of LetCtx _ pat@(MemVarP {}) rhs
+              | isFloatableSingletonParamType (patMParamType pat) -> do
                   -- This context can be eliminated
                   -- Is there already a definition of this variable?
-                  defined_var <- findByType id_supply tenv ptype types
+                  defined_var <- findByType id_supply tenv (patMType pat) types
                   case defined_var of
-                    Just v -> eliminate_item pvar v
+                    Just v -> eliminate_item (patMVar' pat) v
                     Nothing ->
                       -- Not eliminated; add to context
-                      let types' = (ptype, pvar) : types
+                      let types' = (patMType pat, patMVar' pat) : types
                           new_ctx' = rn_c : new_ctx
                       in nub_r types' rn new_ctx' cs
             _ ->
@@ -485,10 +485,12 @@ addPatternVar pat m = addRnPatternVar mempty pat m
 --
 --   We use this when a binding is renamed and floated.
 addRnPatternVar :: Renaming -> PatM -> Flt ExpM -> Flt ExpM
-addRnPatternVar rn (MemVarP v (ReadPT ::: _)) = addReadVar (rename rn v)
-addRnPatternVar _  (MemVarP v _)              = id
-addRnPatternVar rn (LocalVarP v _ _)          = addReadVar (rename rn v)
-addRnPatternVar _  (MemWildP _)               = id
+addRnPatternVar rn pat =
+  case pat
+  of MemVarP {}
+       | ReadPT <- patMRepr pat -> addReadVar (rename rn $ patMVar' pat)
+     LocalVarP {} -> addReadVar (rename rn $ patMVar' pat)
+     _ -> id
 
 addPatternVars ps x = foldr addPatternVar x ps
 
@@ -578,7 +580,7 @@ createFlattenedApp inf op_var ty_args args = do
         else do
           tmpvar <- newAnonymousVar ObjectLevel
           let binding =
-                contextItem $ LetCtx inf (MemVarP tmpvar param_type) arg_expr
+                contextItem $ LetCtx inf (memVarP tmpvar param_type) arg_expr
           return (ExpM $ VarE inf tmpvar, subcontext ++ [binding])
     
     is_trivial_arg (ExpM (VarE {})) = True
@@ -619,8 +621,8 @@ floatInExp (ExpM expression) =
        return $ ExpM $ LamE inf f'
      
      -- Special case: let x = lambda (...) becomes a letfun
-     LetE inf (MemVarP v _) (ExpM (LamE _ f)) body ->
-       floatInExp $ ExpM $ LetfunE inf (NonRec (Def v f)) body
+     LetE inf pat@(MemVarP {}) (ExpM (LamE _ f)) body ->
+       floatInExp $ ExpM $ LetfunE inf (NonRec (Def (patMVar' pat) f)) body
 
      LetE inf pat rhs body ->
        floatInLet inf pat rhs body
@@ -659,13 +661,14 @@ floatInApp expression = do
 
 floatInLet inf pat rhs body =
   case pat
-  of MemVarP pat_var pat_type -> do
+  of MemVarP pat_var pat_type _ -> do
        -- Float the RHS
        rhs' <- floatInExp rhs
        if isFloatableSingletonParamType pat_type
          then do
-           -- Float this binding
-           rn <- float $ LetCtx inf pat rhs'
+           -- Float this binding.  Since the binding may be combined with
+           -- other bindings, set the uses to 'many'.
+           rn <- float $ LetCtx inf (setPatMUses Many pat) rhs'
 
            -- Rename and continue processing the body
            addPatternVar pat $ floatInExp $ rename rn body
@@ -673,11 +676,12 @@ floatInLet inf pat rhs body =
            body' <- addPatternVar pat $ anchorOnVar pat_var $ floatInExp body
            return $ ExpM $ LetE inf pat rhs' body'
 
-     LocalVarP pat_var pat_type pat_dict -> do
+     LocalVarP pat_var pat_type pat_dict uses -> do
        pat_dict' <- floatInExp pat_dict
        rhs' <- anchorOnVar pat_var $ floatInExp rhs
        body' <- addPatternVar pat $ anchorOnVar pat_var $ floatInExp body
-       return $ ExpM $ LetE inf (LocalVarP pat_var pat_type pat_dict') rhs' body'
+       let pat' = LocalVarP pat_var pat_type pat_dict' uses
+       return $ ExpM $ LetE inf pat' rhs' body'
 
      MemWildP {} -> internalError "floatInLet"
 
@@ -738,7 +742,7 @@ floatDictionary inf dict_expr op_var ty_args = do
   -- Create the binding that will be floated
   dict_var <- newAnonymousVar ObjectLevel
   let dict_param_type = returnReprToParamRepr dict_repr ::: dict_type
-      ctx = LetCtx inf (MemVarP dict_var dict_param_type) dict_expr
+      ctx = LetCtx inf (memVarP dict_var dict_param_type) dict_expr
       
   -- Return the variable
   rn <- float ctx

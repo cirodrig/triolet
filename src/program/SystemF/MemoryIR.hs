@@ -5,10 +5,34 @@ with more detailed information about how data structures fit
 into memory.  Each variable binding gets extra information.
 -}
 
-module SystemF.MemoryIR where
+module SystemF.MemoryIR
+       (Mem,
+        Mentions(..),
+        Typ(..),
+        TyPat(..),
+        Pat(MemVarP, LocalVarP, MemWildP),
+        memVarP, localVarP, memWildP,
+        patMVar,
+        patMVar',
+        patMType,
+        patMParamType,
+        patMRepr,
+        patMReturnType,
+        patMReturnRepr,
+        patMDict,
+        patMUses,
+        setPatMUses,
+        Ret(..),
+        Exp(..),
+        Alt(..),
+        Fun(..),
+        TypM, PatM, TyPatM, RetM, ExpM, AltM, FunM, unpackVarAppM
+       )
+where
 
 import Common.Error
 import SystemF.Syntax
+import SystemF.DeadCode(Mentions(..))
 import Type.Type
 import Type.Var
 
@@ -23,51 +47,88 @@ data instance Pat Mem =
     --   * ValPT Nothing: bind a value
     --   * BoxPT, ReadPT, OutPT: bind a pointer
     --   * WritePT: not permitted
-    MemVarP Var !ParamType
+    MemVarP
+    { _patMVar :: Var 
+    , _patMParamType :: {-#UNPACK#-}!ParamType
+    , _patMUses :: !Mentions
+    }
 
     -- | A local, dynamically allocated variable.  The dynamically allocated
     --   memory exists as long as the variable is in scope.  The pattern takes
     --   a representation dictionary for this type as a parameter.
     --
     --   This pattern may only appear as the binder of a let expression.
-  | LocalVarP Var Type ExpM
+  | LocalVarP 
+    { _patMVar :: Var
+    , _patMType :: Type
+    , _patMDict :: ExpM
+    , _patMUses :: !Mentions
+    }
     
     -- | A wildcard pattern.  No variable is bound to this value.
     --
     -- This pattern may only appear in a function parameter or case 
     -- alternative.  It may not appear in a let expression.
-  | MemWildP !ParamType
+  | MemWildP 
+    { _patMParamType :: {-#UNPACK#-}!ParamType
+    }
+
+memVarP :: Var -> ParamType -> PatM
+memVarP v pt = MemVarP v pt Many
+
+localVarP :: Var -> Type -> ExpM -> PatM
+localVarP v t d = LocalVarP v t d Many
+
+memWildP :: ParamType -> PatM
+memWildP pt = MemWildP pt
 
 patMVar :: PatM -> Maybe Var
-patMVar (MemVarP v _) = Just v
-patMVar (LocalVarP v _ _) = Just v
-patMVar (MemWildP _) = Nothing
+patMVar (MemVarP {_patMVar = v}) = Just v
+patMVar (LocalVarP {_patMVar = v}) = Just v
+patMVar (MemWildP {}) = Nothing
 
 patMVar' :: PatM -> Var
-patMVar' pat =
-  case patMVar pat
-  of Just v -> v
-     Nothing -> internalError "patMVar': Unexpected wildcard pattern"
+patMVar' = _patMVar
 
 patMType :: PatM -> Type
-patMType (MemVarP _ (_ ::: ty)) = ty
-patMType (LocalVarP _ ty _) = ty
-patMType (MemWildP (_ ::: ty)) = ty
+patMType (MemVarP {_patMParamType = _ ::: ty}) = ty
+patMType (LocalVarP {_patMType = ty}) = ty
+patMType (MemWildP {_patMParamType = _ ::: ty}) = ty
+
+patMDict (LocalVarP {_patMDict = d}) = d
+patMDict _ = internalError "patMDict"
 
 -- | Get the representation of the value bound to this pattern.
 --   It's an error to call this on a 'LocalVarP'.
 patMRepr :: PatM -> ParamRepr
-patMRepr (MemVarP _ (prepr ::: _)) = prepr
-patMRepr (LocalVarP _ _ _) = internalError "patMRepr"
-patMRepr (MemWildP (prepr ::: _)) = prepr
+patMRepr (MemVarP {_patMParamType = prepr ::: _}) = prepr
+patMRepr (LocalVarP {}) = internalError "patMRepr"
+patMRepr (MemWildP {_patMParamType = prepr ::: _}) = prepr
+
+-- | Get the representation of the value bound to this pattern.
+patMParamType :: PatM -> ParamType
+patMParamType (MemVarP {_patMParamType = pt}) = pt
+patMParamType (MemWildP {_patMParamType = pt}) = pt
+patMParamType (LocalVarP {}) = internalError "patMParamType"
 
 -- | Get the representation of the value bound by this pattern.
 --   For let expressions, this is the representation seen in the body
 --   of the expression, not the representation seen in the RHS.
 patMReturnRepr :: PatM -> ReturnRepr
-patMReturnRepr (MemVarP _ (prepr ::: _)) = paramReprToReturnRepr prepr
-patMReturnRepr (LocalVarP _ _ _) = ReadRT
-patMReturnRepr (MemWildP (prepr ::: _)) = paramReprToReturnRepr prepr
+patMReturnRepr (MemVarP {_patMParamType = prepr ::: _}) =
+  paramReprToReturnRepr prepr
+patMReturnRepr (LocalVarP {}) = ReadRT
+patMReturnRepr (MemWildP {_patMParamType = prepr ::: _}) =
+  paramReprToReturnRepr prepr
+
+patMReturnType :: PatM -> ReturnType
+patMReturnType pat = patMReturnRepr pat ::: patMType pat
+
+patMUses :: PatM -> Mentions
+patMUses = _patMUses
+
+setPatMUses :: Mentions -> PatM -> PatM
+setPatMUses m pat = pat {_patMUses = m}
 
 data instance TyPat Mem  = TyPatM Var Type
 newtype instance Ret Mem = RetM {fromRetM :: ReturnType}

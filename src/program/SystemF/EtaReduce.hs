@@ -29,17 +29,17 @@ hrExport export =
 --   least one parameter or type parameter.
 hrFun (FunM f) =
   case funParams f
-  of ps@(_:_) | MemVarP _ (OutPT ::: _) <- last ps,
+  of ps@(_:_) | OutPT <- patMRepr (last ps),
           not (null $ init ps) || not (null $ funTyParams f) ->
        FunM (etaReduceFunction f)
      _ -> FunM (noEtaReduceFunction f)
 
 -- Eta-reduce a function that is suitable for eta reduction
 etaReduceFunction f =
-  let MemVarP param_var param_repr = last $ funParams f
+  let out_param = last $ funParams f
       params = init $ funParams f
-      body = etaReduceExp (Just param_var) $ funBody f
-      ret_type = FunT param_repr (fromRetM (funReturn f))
+      body = etaReduceExp (patMVar out_param) $ funBody f
+      ret_type = FunT (patMParamType out_param) (fromRetM (funReturn f))
   in f { funParams = params
        , funBody = body
        , funReturn = RetM (BoxRT ::: ret_type)}
@@ -54,7 +54,7 @@ hrLambdaFun :: ExpInfo -> FunM -> ExpM
 hrLambdaFun inf (FunM f) =
   case funParams f
   of [] -> ExpM $ LamE inf (FunM $ noEtaReduceFunction f)
-     ps | MemVarP _ (OutPT ::: _) <- last ps ->
+     ps | OutPT <- patMRepr (last ps) ->
        let f' = etaReduceFunction f
        in if null (funParams f') && null (funTyParams f')
           then funBody f'

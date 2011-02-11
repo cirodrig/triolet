@@ -61,16 +61,16 @@ edcExport export = do
 edcMaskPat :: PatM -> GetMentionsSet a -> GetMentionsSet (PatM, a)
 edcMaskPat pat m =
   case pat
-  of MemWildP (_ ::: t) -> do
-       edcType t
+  of MemWildP {} -> do
+       edcType $ patMType pat
        x <- m
        return (pat, x)
-     MemVarP v ptype@(_ ::: t) -> do
-       edcType t
-       (mentioned, x) <- maskAndCheck v m
+     MemVarP {} -> do
+       edcType $ patMType pat
+       (mentioned, x) <- maskAndCheck (patMVar' pat) m
 
        -- If not mentioned, replace this pattern with a wildcard
-       let new_pat = if mentioned then pat else MemWildP ptype
+       let new_pat = if mentioned then pat else MemWildP (patMParamType pat)
        return (new_pat, x)
      LocalVarP {} -> internalError "edcMaskPat"
 
@@ -214,11 +214,11 @@ edcLetE info binder rhs body = do
   where
     elim_dead_code_in_binder =
       case binder
-      of MemVarP v (_ ::: ty) -> do
-           edcType ty
+      of MemVarP {} -> do
+           edcType $ patMType binder
            return binder
-         LocalVarP v ty dict -> do
+         LocalVarP v ty dict uses -> do
            dict' <- edcExp dict
-           edcType ty
-           return $ LocalVarP v ty dict'
+           edcType $ patMType binder
+           return $ LocalVarP v ty dict' uses
          MemWildP {} -> internalError "edcLetE"

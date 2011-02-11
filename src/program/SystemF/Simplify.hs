@@ -789,7 +789,7 @@ rwCopyApp inf op' ty_args args = do
 
 rwLet inf bind val body =       
   case bind
-  of MemVarP bind_var bind_rtype -> do
+  of MemVarP bind_var bind_rtype _ -> do
        (val', val_value) <- rwExp val
        
        -- The variable can be used to refer to this value
@@ -805,7 +805,7 @@ rwLet inf bind val body =
        let ret_val = mask_local_variable bind_var body_val
        rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
 
-     LocalVarP bind_var bind_type dict -> do
+     LocalVarP bind_var bind_type dict uses -> do
        (dict', _) <- rwExp dict
 
        -- Add the variable to the environment while rewriting the rhs
@@ -820,7 +820,7 @@ rwLet inf bind val body =
            
        let ret_val = mask_local_variable bind_var body_val
        let ret_exp =
-             ExpM $ LetE inf (LocalVarP bind_var bind_type dict') val' body'
+             ExpM $ LetE inf (LocalVarP bind_var bind_type dict' uses) val' body'
        rwExpReturn (ret_exp, ret_val)
 
      MemWildP {} -> internalError "rwLet"
@@ -936,7 +936,7 @@ elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
     bind_field (MemWildP {}) _ =
       return Nothing
 
-    bind_field pat@(MemVarP v (prepr ::: ptype)) arg
+    bind_field pat@(MemVarP {}) arg
       | okay_for_value_binding =
           case arg
           of Just arg_exp -> return $ Just (pat, arg_exp)
@@ -948,13 +948,14 @@ elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
       where
         -- We can only bind value and boxed parameters this way
         okay_for_value_binding =
-          case prepr
+          case patMRepr pat
           of ValPT _ -> True
              BoxPT -> True
              _ -> False
 
         okay_for_reference_binding =
-          bind_reference_values && case prepr of {ReadPT -> True; _ -> False}
+          bind_reference_values &&
+          case patMRepr pat of {ReadPT -> True; _ -> False}
 
     bind_field _ _ = internalError "rwCase: Unexpected pattern"
 
@@ -981,7 +982,7 @@ rwAlt scr (AltM (Alt con tyArgs exTypes params body)) = do
     
     assume_ex_type (TyPatM v ty) m = assume v (ValRT ::: ty) m
 
-    assume_param (MemVarP v pty) m = assumeParamType v pty m
+    assume_param (MemVarP v pty _) m = assumeParamType v pty m
     assume_param (MemWildP _) m = m
     
     -- If the scrutinee is a variable, add its known value to the environment.
@@ -1010,7 +1011,7 @@ labelParameter param =
      LocalVarP {} -> return param
      MemWildP pty -> do
        pvar <- newAnonymousVar ObjectLevel
-       return (MemVarP pvar pty)
+       return (memVarP pvar pty)
 
 rwFun :: FunM -> LR FunM
 rwFun (FunM f) = do

@@ -111,7 +111,7 @@ withReprDictionary param_type f = do
 saveDictionaryPattern :: PatM -> OP a -> OP a
 saveDictionaryPattern pattern m = 
   case pattern
-  of MemVarP pat_var (BoxPT ::: ty)
+  of MemVarP pat_var (BoxPT ::: ty) _
        | Just repr_type <- get_repr_type ty ->
            saveDictionary repr_type (ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m
@@ -191,7 +191,7 @@ createDict_Tuple2 param_var1 param_var2 subst use_dict =
     
     -- Construct the local variable pattern
     mk_pat tmpvar =
-      MemVarP tmpvar (BoxPT ::: dict_type)
+      memVarP tmpvar (BoxPT ::: dict_type)
     
     -- Construct the dictionary
     mk_dict dict1 dict2 =
@@ -323,7 +323,7 @@ genLet inf (PatR pat_var pat_type) rhs body =
        -- This pattern binds a locally allocated variable
        let mem_ty = convertToMemType ty
        in withReprDictionary mem_ty $ \repr_dict -> do
-         let pattern = LocalVarP pat_var mem_ty repr_dict
+         let pattern = localVarP pat_var mem_ty repr_dict
              ret_arg = ExpM $ VarE defaultExpInfo pat_var
          rhs' <- withRetArg ret_arg $ genExp rhs
          body' <- genExp body
@@ -334,7 +334,7 @@ genLet inf (PatR pat_var pat_type) rhs body =
 
      _ -> do
        -- This pattern binds a scalar variable
-       let pattern = MemVarP pat_var (convertToMemParamType pat_type)
+       let pattern = memVarP pat_var (convertToMemParamType pat_type)
        rhs' <- genExp rhs
        body' <- genExp body
        return $ ExpM $ LetE inf pattern rhs' body'
@@ -357,7 +357,7 @@ genArgument expression =
        let function =
              FunM $ Fun { funInfo = defaultExpInfo
                         , funTyParams = []
-                        , funParams = [MemVarP tmpvar (OutPT ::: ty)]
+                        , funParams = [memVarP tmpvar (OutPT ::: ty)]
                         , funReturn = RetM (SideEffectRT ::: ty)
                         , funBody = lam_body}
        return $ ExpM $ LamE defaultExpInfo function
@@ -381,13 +381,13 @@ genFun (FunR f) = do
   where
     mk_pat (PatR v pat_type) =
       let new_pat_type = convertToMemParamType pat_type
-      in MemVarP v new_pat_type
+      in memVarP v new_pat_type
 
     -- Create the return parameter if one is needed
     mk_return_pat (RetR (WriteRT ::: ty)) = do
       return_var <- newAnonymousVar ObjectLevel
       return (Just return_var,
-              [MemVarP return_var (OutPT ::: ty)],
+              [memVarP return_var (OutPT ::: ty)],
               RetM (SideEffectRT ::: ty))
     
     mk_return_pat (RetR return_type) =
@@ -417,7 +417,7 @@ genAlt (AltR alt) = do
                BoxPT -> BoxPT
                ReadPT -> ReadPT
                _ -> internalError "genAlt"
-      in MemVarP v (new_repr ::: convertToMemType ty)
+      in memVarP v (new_repr ::: convertToMemType ty)
 
 genDef :: Def Rep -> OP (Def Mem)
 genDef (Def v f) = do

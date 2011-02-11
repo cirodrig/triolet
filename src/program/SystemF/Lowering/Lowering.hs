@@ -596,7 +596,7 @@ bindPatterns pats m = foldr (uncurry bindPattern) m pats
 
 -- | Bind a pattern-bound variable to the result of some code
 bindPattern :: PatM -> Code -> GenLower a -> GenLower a
-bindPattern (MemVarP v (repr ::: ty)) value m = do
+bindPattern (MemVarP v (repr ::: ty) _) value m = do
   assumeVarG v (paramReprToReturnRepr repr ::: ty) $ \ll_var -> do
     bindAtom1 ll_var =<< asAtom value
     m

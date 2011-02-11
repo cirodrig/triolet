@@ -44,10 +44,18 @@ pprTyPat :: TyPat Mem -> Doc
 pprTyPat (TyPatM v t) = pprVar v <+> text ":" <+> pprType t
 
 pprPat :: PatM -> Doc
-pprPat (MemVarP v pt) = pprVar v <+> text ":" <+> pprParamType pt
-pprPat (MemWildP pt) = text "_" <+> text ":" <+> pprParamType pt
-pprPat (LocalVarP v t e) =
-  text "local" <+> pprVar v <+> text ":" <+> pprType t <+> parens (pprExp e)
+pprPat pat =
+  case pat
+  of MemVarP v pt uses -> 
+       pprUses uses <+> pprVar v <+> text ":" <+> pprParamType pt
+     MemWildP pt -> 
+       text "_" <+> text ":" <+> pprParamType pt
+     LocalVarP v t e uses ->
+       text "local" <+> pprUses uses <+>
+       pprVar v <+> text ":" <+> pprType t <+> parens (pprExp e)
+
+pprUses One = text "[1]"
+pprUses Many = empty
 
 pprExp :: ExpM -> Doc
 pprExp (ExpM expression) =

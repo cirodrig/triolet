@@ -60,7 +60,7 @@ mkFun typaram_kinds mk_params mk_body = do
   param_vars <- mapM (const $ newAnonymousVar ObjectLevel) param_types
   body <- mk_body typaram_vars param_vars
   let typarams = zipWith TyPatM typaram_vars typaram_kinds
-      params = zipWith MemVarP param_vars param_types
+      params = zipWith memVarP param_vars param_types
       ret = RetM return_type
   return $ FunM $ Fun defaultExpInfo typarams params ret body
   where
@@ -84,7 +84,7 @@ mkAlt tenv con ty_args mk_body =
        
        let ex_params = [TyPatM v t
                        | (v, _ ::: t) <- zip typat_vars ex_param_types]
-           patterns = [MemVarP v (returnReprToParamRepr repr ::: ty)
+           patterns = [memVarP v (returnReprToParamRepr repr ::: ty)
                       | (v, repr ::: ty) <- zip pat_vars param_types]
        return $ AltM $ Alt con ty_args ex_params patterns body
      _ -> internalError "mkAlt"
