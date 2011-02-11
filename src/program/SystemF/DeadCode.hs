@@ -13,7 +13,7 @@ import Type.Type
 
 -- | The number of times a variable is mentioned, stored in a 'MentionsSet'.
 --   If a variable is not mentioned at all, it's not stored in the set.
-data Mentions = One | Many
+data Mentions = One | Many deriving(Show)
 
 type MentionsSet = IntMap.IntMap Mentions
 
@@ -51,11 +51,13 @@ mask v m = pass $ do x <- m
                      return (x, IntMap.delete (fromIdent $ varID v))
 
 -- | Filter out a mention of a variable, and also check whether the variable
--- is mentioned.  Return True if the variable is mentioned.
-maskAndCheck :: Var -> GetMentionsSet a -> GetMentionsSet (Bool, a)
+--   is mentioned.  Return @Nothing@ if the variable is not mentioned,
+--   @Just One@ if it's mentioned exactly once, or @Just Many@ if it's
+--   mentioned more than once.
+maskAndCheck :: Var -> GetMentionsSet a -> GetMentionsSet (Maybe Mentions, a)
 maskAndCheck v m = pass $ do
   (x, mentions_set) <- listen m
-  return ( (fromIdent (varID v) `IntMap.member` mentions_set, x)
+  return ( (IntMap.lookup (fromIdent (varID v)) mentions_set, x)
          , IntMap.delete (fromIdent $ varID v))
 
 masks :: MentionsSet -> GetMentionsSet a -> GetMentionsSet a

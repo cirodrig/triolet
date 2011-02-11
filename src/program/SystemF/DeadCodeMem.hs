@@ -13,6 +13,7 @@ where
 import Control.Monad.Writer
 import qualified Data.IntSet as IntSet
 import Data.IntSet(IntSet)
+import Data.Maybe
 
 import Common.SourcePos
 import Common.Error
@@ -70,7 +71,10 @@ edcMaskPat pat m =
        (mentioned, x) <- maskAndCheck (patMVar' pat) m
 
        -- If not mentioned, replace this pattern with a wildcard
-       let new_pat = if mentioned then pat else MemWildP (patMParamType pat)
+       let new_pat =
+             case mentioned
+             of Nothing -> memWildP (patMParamType pat)
+                Just u  -> setPatMUses u pat
        return (new_pat, x)
      LocalVarP {} -> internalError "edcMaskPat"
 
@@ -112,7 +116,7 @@ edcDefGroup defgroup m =
        -- Eliminate dead code.  Decide whether the definition is dead.
        def' <- edcDef def
        (mentioned, x) <- maskAndCheck (case def of Def v _ -> v) m
-       return $! if mentioned
+       return $! if isJust mentioned
                  then ([NonRec def'], x)
                  else ([], x)
      Rec defs ->
@@ -204,13 +208,13 @@ edcLetE :: ExpInfo -> PatM -> ExpM -> ExpM -> GetMentionsSet ExpM
 edcLetE info binder rhs body = do
   -- Scan the body and find out if it references the bound variable
   (is_live, body') <- maskAndCheck (patMVar' binder) $ edcExp body
-  if not is_live
-    then return body'           -- RHS is eliminated
-    else do
+  case is_live of
+    Nothing -> return body'           -- RHS is eliminated
+    Just uses -> do
       -- Must also mask the RHS, since it could mention the local variable
       rhs' <- mask (patMVar' binder) $ edcExp rhs
       binder' <- elim_dead_code_in_binder
-      return $ ExpM $ LetE info binder' rhs' body'
+      return $ ExpM $ LetE info (setPatMUses uses binder') rhs' body'
   where
     elim_dead_code_in_binder =
       case binder

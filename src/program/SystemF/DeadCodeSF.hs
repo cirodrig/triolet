@@ -5,6 +5,7 @@ where
 import Control.Monad.Writer
 import qualified Data.IntSet as IntSet
 import Data.IntSet(IntSet)
+import Data.Maybe
 
 import Common.SourcePos
 import Common.Error
@@ -65,7 +66,7 @@ edcMaskPat pat m =
        (mentioned, x) <- maskAndCheck v m
 
        -- If not mentioned, replace this pattern with a wildcard
-       let new_pat = if mentioned then pat else WildP t
+       let new_pat = if isJust mentioned then pat else WildP t
        return (new_pat, x)
      TupleP ps -> do
        (pats', x) <- edcMaskPats ps m
