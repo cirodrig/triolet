@@ -10,6 +10,7 @@ where
 
 import Prelude hiding(mapM)
 import Control.Monad hiding(mapM)
+import Control.Monad.Trans
 import Data.Traversable(mapM)
   
 import Common.Error
@@ -18,6 +19,7 @@ import Common.Supply
   
 import Builtins.Builtins
 import qualified SystemF.DictEnv as DictEnv
+import SystemF.ReprDict
 import SystemF.EtaReduce
 import SystemF.Syntax
 import SystemF.Typecheck
@@ -41,10 +43,6 @@ ptrToBoxOp = ExpM $ VarE defaultExpInfo (pyonBuiltin the_ptrToBox)
 returnApp op ty_args args =
   return $ ExpM $ AppE defaultExpInfo op ty_args args
 
--- | Given a substitution, construct a dictionary and make the dictionary
---   available over the scope of some computation.
-type MkDict = (ExpM -> OP ExpM) -> OP ExpM
-
 -- | Keep track of global variables and representation dictionaries
 data OPEnv = OPEnv { opVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
                      
@@ -52,7 +50,7 @@ data OPEnv = OPEnv { opVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
                      
                      -- Representation dictionaries, indexed by the
                      -- dictionary's parameter type
-                   , opDictEnv :: DictEnv.DictEnv MkDict
+                   , opDictEnv :: DictEnv.DictEnv (MkDict OP)
                    }
 
 newtype OP a = OP {runOP :: OPEnv -> Maybe ExpM -> IO a}
@@ -66,6 +64,18 @@ instance Monad OP where
 instance Supplies OP (Ident Var) where
   fresh = OP $ \env _ -> supplyValue (opVarSupply env)
 
+instance MonadIO OP where
+  liftIO m = OP (\_ _ -> m)
+
+instance ReprDictMonad OP where
+  withVarIDs f = OP $ \env mrarg -> runOP (f $ opVarSupply env) env mrarg
+  withTypeEnv f = OP $ \env mrarg -> runOP (f $ opTypeEnv env) env mrarg
+  withDictEnv f = OP $ \env mrarg -> runOP (f $ opDictEnv env) env mrarg
+
+  localDictEnv f m = OP $ \env rarg ->
+    let env' = env {opDictEnv = f $ opDictEnv env}
+    in runOP m env' rarg
+
 -- | Get the current return argument, and reset it.
 takeRetArg :: (ExpM -> OP a) -> OP a
 takeRetArg k = OP $ \env mrarg ->
@@ -77,56 +87,6 @@ takeRetArg k = OP $ \env mrarg ->
 withRetArg :: ExpM -> OP a -> OP a
 withRetArg ra k = OP $ \env _ -> runOP k env (Just ra)
 
-lookupDictionary :: Type -> OP (Maybe MkDict)
-lookupDictionary ty = OP $ \env _ ->
-  case ty
-  of FunT {} ->
-       -- Functions all have the same representation
-       return $ Just $ mk_fun_dict ty
-     _ -> DictEnv.lookup (opVarSupply env) (opTypeEnv env) ty (opDictEnv env)
-  where
-    mk_fun_dict ty k =
-      -- Create a boxed representation object, and pass it to the continuation 
-      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
-          call = ExpM $ AppE defaultExpInfo op [TypM ty] []
-      in k call
-
--- | Add a dictionary to the environment.  It will be used if it is 
---   needed in the remainder of the computation.
-saveDictionary :: Type -> ExpM -> OP a -> OP a
-saveDictionary dict_type dict_exp k = OP $ \env mrarg -> do
-  let dict_pattern = DictEnv.monoPattern dict_type ($ dict_exp)
-      env' = env {opDictEnv = DictEnv.insert dict_pattern $ opDictEnv env}
-    in runOP k env' mrarg
-
-withReprDictionary :: Type -> (ExpM -> OP ExpM) -> OP ExpM
-withReprDictionary param_type f = do
-  mdict <- lookupDictionary param_type
-  case mdict of
-    Just dict -> do dict f
-    Nothing -> internalError $ "withReprDictionary: Cannot construct dictionary for type:\n" ++ show (pprType param_type)
-
--- | If the pattern binds a representation dictionary, record the dictionary 
---   in the environment so it can be looked up later.
-saveDictionaryPattern :: PatM -> OP a -> OP a
-saveDictionaryPattern pattern m = 
-  case pattern
-  of MemVarP pat_var (BoxPT ::: ty) _
-       | Just repr_type <- get_repr_type ty ->
-           saveDictionary repr_type (ExpM $ VarE defaultExpInfo pat_var) m
-     _ -> m
-  where
-    get_repr_type ty = 
-      case fromVarApp ty 
-      of Just (op, [arg])
-           | op `isPyonBuiltin` the_Repr -> Just arg
-         _ -> Nothing
-
--- | Find patterns that bind representation dictionaries, and record them
---   in the environment.
-saveDictionaryPatterns :: [PatM] -> OP a -> OP a
-saveDictionaryPatterns ps m = foldr saveDictionaryPattern m ps
-
 -------------------------------------------------------------------------------
 -- Initial value of environment
     
@@ -137,110 +97,6 @@ setupEnvironment var_supply = do
   dict_env <- runFreshVarM var_supply createDictEnv
   return (OPEnv var_supply type_env dict_env)
 
-createDictEnv :: FreshVarM (DictEnv.DictEnv MkDict)
-createDictEnv = do
-  let int_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_int))
-                 ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_int)
-  let float_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_float))
-                   ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float)
-  repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
-  boxed_dict <- createBoxedDictPattern (pyonBuiltin the_Boxed) 1
-  stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 1
-  additive_dict <- createBoxedDictPattern (pyonBuiltin the_AdditiveDict) 1
-  multiplicative_dict <- createBoxedDictPattern (pyonBuiltin the_MultiplicativeDict) 1
-  tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (pyonBuiltin the_PyonTuple2) [VarT arg1, VarT arg2],
-     createDict_Tuple2 arg1 arg2)
-  list_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_list) [VarT arg],
-     createDict_list arg)
-  complex_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_Complex) [VarT arg],
-     createDict_complex arg)
-  return $ DictEnv.DictEnv [repr_dict, boxed_dict, stream_dict,
-                            float_dict, int_dict,
-                            list_dict, complex_dict,
-                            tuple2_dict, additive_dict, multiplicative_dict]
-
-getParamType v subst =
-  case substituteVar v subst
-  of Just v -> v
-     Nothing -> internalError "getParamType"
-
--- | Add a dictionary to the environment and pass it to the given computation.
-saveAndUseDict :: Type -> ExpM -> (ExpM -> OP ExpM) -> OP ExpM
-saveAndUseDict dict_type dict_val k =
-  saveDictionary dict_type dict_val $ k dict_val
-
-createDict_Tuple2 param_var1 param_var2 subst use_dict =
-  withReprDictionary param1 $ \dict1 ->
-  withReprDictionary param2 $ \dict2 -> do
-    tmpvar <- newAnonymousVar ObjectLevel
-    let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
-    body <- saveAndUseDict data_type dict_exp use_dict
-    return $ ExpM $ LetE { expInfo = defaultExpInfo 
-                         , expBinder = mk_pat tmpvar
-                         , expValue = mk_dict dict1 dict2
-                         , expBody = body}
-  where
-    param1 = getParamType param_var1 subst
-    param2 = getParamType param_var2 subst
-    
-    data_type = varApp (pyonBuiltin the_PyonTuple2) [param1, param2]
-    dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    
-    -- Construct the local variable pattern
-    mk_pat tmpvar =
-      memVarP tmpvar (BoxPT ::: dict_type)
-    
-    -- Construct the dictionary
-    mk_dict dict1 dict2 =
-      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
-      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
-         [dict1, dict2]
-
-createDict_list param_var subst use_dict =
-  withReprDictionary param $ \elt_dict ->
-  let list_dict = mk_list_dict elt_dict
-  in use_dict list_dict
-  where
-    param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_list)
-    mk_list_dict elt_dict =
-      ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
-
-createDict_complex param_var subst use_dict =
-  withReprDictionary param $ \elt_dict ->
-  let cpx_dict = mk_cpx_dict elt_dict
-  in use_dict cpx_dict
-  where
-    param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Complex)
-    mk_cpx_dict elt_dict =
-      ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
-
--- | Get the representation dictionary for a boxed data type.
---   
---   To get the dictionary, call the @the_repr_Box@ function with
---   boxed data type as its parameter.
-createBoxedDictPattern :: Var -> Int -> FreshVarM (DictEnv.TypePattern MkDict)
-createBoxedDictPattern con arity = do
-  param_vars <- replicateM arity $ newAnonymousVar TypeLevel
-  return $
-    DictEnv.pattern param_vars (match_type param_vars) (create_dict param_vars)
-  where
-    match_type param_vars = varApp con (map VarT param_vars) 
-
-    -- Create a function call expression
-    --
-    -- > the_repr_Box (con arg1 arg2 ... argN)
-    create_dict param_vars subst use_dict = use_dict expr
-      where
-        param_types = [getParamType v subst | v <- param_vars]
-        dict_type = varApp con param_types
-        op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
-        expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
-
 -------------------------------------------------------------------------------
 -- Transformations on IR data structures
 
@@ -248,7 +104,7 @@ genExp :: Exp Rep -> OP ExpM
 genExp expression =
   case expression
   of LoadExpr Value ty e ->
-       withReprDictionary ty $ \repr_dict -> do
+       withReprDict ty $ \repr_dict -> do
          e' <- genExp e
          returnApp loadOp [TypM ty] [repr_dict, e']
      LoadExpr Boxed ty e -> do
@@ -256,7 +112,7 @@ genExp expression =
        returnApp loadBoxOp [TypM ty] [e']
      StoreExpr Value ty e ->
        takeRetArg $ \ret_arg ->
-       withReprDictionary ty $ \repr_dict -> do
+       withReprDict ty $ \repr_dict -> do
          e' <- genExp e
          returnApp storeOp [TypM ty] [repr_dict, e', ret_arg]
      StoreExpr Boxed ty e ->
@@ -272,7 +128,7 @@ genExp expression =
      CopyExpr ty e -> do
        e' <- genExp e
        takeRetArg $ \ret_arg ->
-         withReprDictionary ty $ \repr_dict -> do
+         withReprDict ty $ \repr_dict -> do
            returnApp copyOp [TypM ty] [repr_dict, e', ret_arg]
      ExpR rt e -> genExp' rt e
 
@@ -322,7 +178,7 @@ genLet inf (PatR pat_var pat_type) rhs body =
   of WritePT ::: ty ->
        -- This pattern binds a locally allocated variable
        let mem_ty = convertToMemType ty
-       in withReprDictionary mem_ty $ \repr_dict -> do
+       in withReprDict mem_ty $ \repr_dict -> do
          let pattern = localVarP pat_var mem_ty repr_dict
              ret_arg = ExpM $ VarE defaultExpInfo pat_var
          rhs' <- withRetArg ret_arg $ genExp rhs
@@ -371,7 +227,7 @@ genFun (FunR f) = do
       pats = map mk_pat (funParams f) ++ return_pat
   
   body <- with_return_var return_var $
-          saveDictionaryPatterns pats $
+          saveReprDictPatterns pats $
           genExp (funBody f)
   return $ FunM $ Fun { funInfo = funInfo f
                       , funTyParams = ty_pats

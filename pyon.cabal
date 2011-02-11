@@ -104,6 +104,7 @@ Executable pyon
     SystemF.PrintMemoryIR
     SystemF.Representation
     SystemF.Rename
+    SystemF.ReprDict
     SystemF.Rewrite
     SystemF.Simplify
     SystemF.StreamSpecialize
