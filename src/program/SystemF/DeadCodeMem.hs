@@ -11,8 +11,8 @@ module SystemF.DeadCodeMem(eliminateLocalDeadCode, eliminateDeadCode)
 where
 
 import Control.Monad.Writer
-import qualified Data.Set as Set
-import Data.Set(Set)
+import qualified Data.IntSet as IntSet
+import Data.IntSet(IntSet)
 
 import Common.SourcePos
 import Common.Error
@@ -116,8 +116,8 @@ edcDefGroup defgroup m =
                  then ([NonRec def'], x)
                  else ([], x)
      Rec defs ->
-       let local_vars = Set.fromList [varID v | Def v _ <- defs]
-       in masks local_vars $ do
+       let local_vars = [v | Def v _ <- defs]
+       in masks (mentionsSet local_vars) $ do
          -- Eliminate dead code and find references to the local variables
          defs_and_uses <- mapM (listen . edcDef) defs
          (x, m_uses) <- listen m

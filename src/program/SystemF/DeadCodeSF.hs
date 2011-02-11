@@ -3,8 +3,8 @@ module SystemF.DeadCodeSF(eliminateDeadCode)
 where
 
 import Control.Monad.Writer
-import qualified Data.Set as Set
-import Data.Set(Set)
+import qualified Data.IntSet as IntSet
+import Data.IntSet(IntSet)
 
 import Common.SourcePos
 import Common.Error
@@ -120,7 +120,7 @@ edcDefGroup defgroup m =
        def' <- edcDef def
        x <- mask (case def of Def v _ -> v) m
        return (NonRec def', x)
-     Rec defs -> masks (Set.fromList [varID v | Def v _ <- defs]) $ do
+     Rec defs -> masks (mentionsSet [v | Def v _ <- defs]) $ do
        defs' <- mapM edcDef defs
        x <- m
        return (Rec defs', x)
@@ -167,9 +167,9 @@ edcExp expression@(ExpSF base_expression) =
 edcAlt (AltSF alt) = do
   mapM_ edcScanType $ altTyArgs alt
   -- Mask out variables bound by the alternative and simplify the body
-  let local_vars = [varID v | VarP v _ <- altParams alt] ++
-                   [varID v | TyPatSF v _ <- altExTypes alt]
-  body' <- masks (Set.fromList local_vars) $ do
+  let local_vars = [v | VarP v _ <- altParams alt] ++
+                   [v | TyPatSF v _ <- altExTypes alt]
+  body' <- masks (mentionsSet local_vars) $ do
     edcExp (altBody alt)
   return $ AltSF $ alt {altBody = body'} 
 
