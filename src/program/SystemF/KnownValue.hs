@@ -47,6 +47,12 @@ data KnownValue =
     -- | A variable reference, where nothing is known about the variable's
     --   value
   | VarValue ExpInfo !Var
+  
+    -- | An expression that should be inlined unconditionally,
+    --   the variable that it was originally bound to,
+    --   and its known value.  This value is used for variables that are
+    --   known to be used exactly once.
+  | InlinedValue !Var ExpM !MaybeValue
 
     -- | A complex value.  If a variable is given, the variable holds this 
     --   value.
@@ -89,11 +95,15 @@ data ComplexValue =
 
 -- | Get a trivial expression (a variable or literal) equivalent to this
 --   known value, if possible.
+--
+--   If this value was chosen to be unconditionally inlined, this returns
+--   the entire expression no matter how complex it is.
 asTrivialValue :: KnownValue -> Maybe ExpM
 asTrivialValue kv = 
   case kv
   of LitValue inf l -> Just $ ExpM $ LitE inf l 
      VarValue inf v -> Just $ ExpM $ VarE inf v
+     InlinedValue _ e _ -> Just e
      ComplexValue (Just v) _ -> Just $ ExpM $ VarE defaultExpInfo v
      ComplexValue Nothing  _ -> Nothing
 
@@ -109,6 +119,7 @@ setTrivialValue var kv =
 -- | Get the value stored in memory after a writer has executed.
 resultOfWriterValue :: KnownValue -> MaybeValue
 resultOfWriterValue (VarValue _ _) = Nothing 
+resultOfWriterValue (InlinedValue _ _ mv) = mv >>= resultOfWriterValue
 resultOfWriterValue (ComplexValue _ (WriterValue kv)) = Just kv
 resultOfWriterValue (ComplexValue _ (FunValue _ _)) = Nothing
 resultOfWriterValue _ =
@@ -123,6 +134,12 @@ forgetVariables varset kv = forget kv
     forget kv =
       case kv
       of VarValue _ v
+           | v `Set.member` varset -> Nothing
+           | otherwise -> Just kv
+         InlinedValue v _ _
+           -- Al variables referenced by this value have a lifetime at least 
+           -- as long as 'v'.   If 'v' is in scope, all other variables are
+           -- also in scope.
            | v `Set.member` varset -> Nothing
            | otherwise -> Just kv
          LitValue _ _ -> Just kv
@@ -165,6 +182,8 @@ pprKnownValue kv =
   case kv
   of VarValue _ v -> pprVar v
      LitValue _ l -> pprLit l
+     InlinedValue v exp _ ->
+       parens $ pprVar v <+> text "=" <+> pprExp exp
      ComplexValue Nothing cv -> pprComplexValue cv
      ComplexValue (Just v) cv ->
        parens $ pprVar v <+> text "=" <+> pprComplexValue cv

@@ -141,6 +141,8 @@ saveAndUseDict :: ReprDictMonad m =>
 saveAndUseDict dict_type dict_val k =
   saveReprDict dict_type dict_val $ k dict_val
 
+createDict_Tuple2 :: ReprDictMonad m =>
+                     Var -> Var -> Substitution -> (ExpM -> m ExpM) -> m ExpM
 createDict_Tuple2 param_var1 param_var2 subst use_dict =
   withReprDict param1 $ \dict1 ->
   withReprDict param2 $ \dict2 -> do
@@ -168,6 +170,8 @@ createDict_Tuple2 param_var1 param_var2 subst use_dict =
       in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
          [dict1, dict2]
 
+createDict_list :: ReprDictMonad m =>
+                   Var -> Substitution -> (ExpM -> m ExpM) -> m ExpM
 createDict_list param_var subst use_dict =
   withReprDict param $ \elt_dict ->
   let list_dict = mk_list_dict elt_dict
@@ -178,6 +182,8 @@ createDict_list param_var subst use_dict =
     mk_list_dict elt_dict =
       ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
 
+createDict_complex :: ReprDictMonad m =>
+                      Var -> Substitution -> (ExpM -> m ExpM) -> m ExpM
 createDict_complex param_var subst use_dict =
   withReprDict param $ \elt_dict ->
   let cpx_dict = mk_cpx_dict elt_dict

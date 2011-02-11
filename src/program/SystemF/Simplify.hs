@@ -14,6 +14,7 @@ where
 
 import Prelude hiding(mapM)
 import Control.Monad hiding(mapM)
+import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import Data.List as List
 import Data.Maybe
@@ -37,6 +38,7 @@ import Common.Error
 import Common.Identifier
 import Common.Supply
 import qualified SystemF.DictEnv as DictEnv
+import SystemF.ReprDict
 import Type.Compare
 import Type.Rename
 import Type.Type
@@ -55,6 +57,8 @@ data LREnv =
     
     -- | Types of variables
   , lrTypeEnv :: TypeEnv
+    
+  , lrDictEnv :: MkDictEnv LR
   }
 
 newtype LR a = LR {runLR :: LREnv -> IO a}
@@ -64,10 +68,21 @@ instance Monad LR where
   m >>= k = LR $ \env -> do
     x <- runLR m env
     runLR (k x) env
+
+instance MonadIO LR where
+  liftIO m = LR (\_ -> m)
     
 instance Supplies LR VarID where
   fresh = LR (\env -> supplyValue (lrIdSupply env))
   supplyToST = undefined
+
+instance ReprDictMonad LR where
+  withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply env) env
+  withTypeEnv f = LR $ \env -> runLR (f $ lrTypeEnv env) env
+  withDictEnv f = LR $ \env -> runLR (f $ lrDictEnv env) env
+  localDictEnv f m = LR $ \env ->
+    let env' = env {lrDictEnv = f $ lrDictEnv env}
+    in runLR m env'
 
 liftFreshVarM :: FreshVarM a -> LR a
 liftFreshVarM m = LR $ \env -> do
@@ -100,10 +115,6 @@ withDefValue (Def v f) m =
 withDefValues :: DefGroup (Def Mem) -> LR a -> LR a
 withDefValues defs m = foldr withDefValue m $ defGroupMembers defs
 
--- | Get the current type environment
-getTypeEnv :: LR TypeEnv
-getTypeEnv = LR $ \env -> return (lrTypeEnv env)
-
 -- | Add a variable's type to the environment 
 assume :: Var -> ReturnType -> LR a -> LR a
 assume v rt m = LR $ \env ->
@@ -114,6 +125,28 @@ assume v rt m = LR $ \env ->
 assumeParamType :: Var -> ParamType -> LR a -> LR a
 assumeParamType v (prepr ::: ptype) m =
   assume v (paramReprToReturnRepr prepr ::: ptype) m
+
+-- | Add a pattern-bound variable to the environment.  
+--   This adds the variable's type to the environment and
+--   its dictionary information if it is a dictionary.
+--   The pattern must not be a local variable pattern.
+assumePattern :: PatM -> LR a -> LR a
+assumePattern (LocalVarP {}) _ = internalError "assumePattern"
+
+assumePattern pat m =
+  saveReprDictPattern pat $ 
+  case patMVar pat of
+    Just v -> assumeParamType v (patMParamType pat) m
+    Nothing -> m
+
+assumePatterns :: [PatM] -> LR a -> LR a
+assumePatterns pats m = foldr assumePattern m pats
+
+assumeTyPatM :: TyPatM -> LR a -> LR a
+assumeTyPatM (TyPatM v ty) m = assume v (ValRT ::: ty) m
+
+assumeTyPatMs :: [TyPatM] -> LR a -> LR a
+assumeTyPatMs typats m = foldr assumeTyPatM m typats
 
 -- | Add the function definition types to the environment
 assumeDefs :: DefGroup (Def Mem) -> LR a -> LR a
@@ -789,16 +822,19 @@ rwCopyApp inf op' ty_args args = do
 
 rwLet inf bind val body =       
   case bind
-  of MemVarP bind_var bind_rtype _ -> do
+  of MemVarP bind_var bind_rtype uses -> do
        (val', val_value) <- rwExp val
        
-       -- The variable can be used to refer to this value
+       -- If the variable is used exactly once, then inline it.
+       -- Otherwise, propagate the variable's known value.
        let local_val_value =
-             fmap (setTrivialValue bind_var) val_value
+             case uses
+             of One -> Just $ InlinedValue bind_var val' val_value
+                Many -> fmap (setTrivialValue bind_var) val_value
 
        -- Add the local variable to the environment while rewriting the body
        (body', body_val) <-
-         assumeParamType bind_var bind_rtype $
+         assumePattern bind $
          withMaybeValue bind_var local_val_value $
          rwExp body
        
@@ -976,14 +1012,9 @@ rwAlt scr (AltM (Alt con tyArgs exTypes params body)) = do
     assume_params labeled_params m = do
       tenv <- getTypeEnv
       let with_known_value = assume_scrutinee tenv labeled_params m
-          with_params = foldr assume_param with_known_value labeled_params
-          with_ty_params = foldr assume_ex_type with_params exTypes
+          with_params = assumePatterns labeled_params with_known_value
+          with_ty_params = foldr assumeTyPatM with_params exTypes
       with_ty_params
-    
-    assume_ex_type (TyPatM v ty) m = assume v (ValRT ::: ty) m
-
-    assume_param (MemVarP v pty _) m = assumeParamType v pty m
-    assume_param (MemWildP _) m = m
     
     -- If the scrutinee is a variable, add its known value to the environment.
     -- It will be used if the variable is inspected again. 
@@ -1014,14 +1045,12 @@ labelParameter param =
        return (memVarP pvar pty)
 
 rwFun :: FunM -> LR FunM
-rwFun (FunM f) = do
-  (body', _) <- rwExp (funBody f)
-  return $ FunM $ Fun { funInfo = funInfo f
-                      , funTyParams = funTyParams f
-                      , funParams = funParams f
-                      , funReturn = funReturn f
-                      , funBody = body'}
-    
+rwFun (FunM f) =
+  assumeTyPatMs (funTyParams f) $
+  assumePatterns (funParams f) $ do
+    (body', _) <- rwExp (funBody f)
+    return $ FunM $ f {funBody = body'}
+
 rwDef :: Def Mem -> LR (Def Mem)
 rwDef (Def v f) = do
   f' <- rwFun f
@@ -1057,10 +1086,12 @@ rewriteLocalExpr :: Module Mem -> IO (Module Mem)
 rewriteLocalExpr mod = do
   withTheNewVarIdentSupply $ \var_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
+    denv <- runFreshVarM var_supply createDictEnv
     let global_known_values = initializeKnownValues tenv
     let env = LREnv { lrIdSupply = var_supply
                     , lrKnownValues = global_known_values
                     , lrTypeEnv = tenv
+                    , lrDictEnv = denv
                     }
     runLR (rwModule mod) env
 
