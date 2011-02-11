@@ -176,18 +176,8 @@ pevalFun (FunSF f) = do
 
 -- | Partial evaluation of an expression.
 pevalExp :: ExpSF -> PE ExpSF
-
--- Function call evaluation
-pevalExp expression@(uncurryUnpackPolymorphicCall -> Just (op, ty_args, args)) = do
-  -- Evaluate subexpressions
-  args' <- mapM pevalExp args
-  op' <- pevalExp op
-
-  -- TODO: Try to statically evaluate this function
-  return $ pevalApp (expInfo $ fromExpSF expression) op' (map TypSF ty_args) args'
-
 pevalExp expression =
-  case fromExpSF expression
+  case fromExpSF (uncurryCall expression)
   of VarE {expInfo = inf, expVar = v}
        -- Replace constants with literal values.  This helps 
        -- representation selection represent these as values.
@@ -203,7 +193,10 @@ pevalExp expression =
            return_lit inf $ FloatL pi float_type
        | otherwise -> lookupVarDefault expression v
      LitE {} -> return expression
-     AppE {} -> internalError "pevalExp" -- Should have been already matched
+     AppE {expInfo = inf, expOper = op, expTyArgs = tys, expArgs = args} -> do
+       op' <- pevalExp op
+       args' <- mapM pevalExp args
+       return $ pevalApp inf op' tys args'
      LamE {expInfo = inf, expFun = f} -> do
        f' <- pevalFun f
        return $ ExpSF $ LamE {expInfo = inf, expFun = f'}
@@ -256,6 +249,10 @@ pevalApp inf op tys args =
                 ExpSF $ LitE { expInfo = inf
                              , expLit = FloatL (fromIntegral n) float_type}
               _ -> internalError "pevalApp"
+       | con `isPyonBuiltin` the_TraversableDict_list_traverse ->
+           case rewriteTraverseExpresion inf tys args
+           of Just new_exp -> new_exp
+              Nothing -> rebuild_call op tys args
      _ ->
        -- Can't evaluate; rebuild the call expression
        rebuild_call op tys args
@@ -277,6 +274,49 @@ pevalApp inf op tys args =
     
     float_type = VarT $ pyonBuiltin the_float
 
+-- The defaulting rules sometimes make a polymorphic function return a list
+-- which is then converted to a stream.  For some known functions, we change 
+-- the code to return a Stream and eliminate the conversion.
+rewriteTraverseExpresion inf [return_type] [return_repr, input] =
+  case unpackPolymorphicCallAndBindings input
+  of Just (bindings, ExpSF (VarE {expVar = input_op}), ty_args, args)
+       | input_op `isPyonBuiltin` the_fun_zip ->
+         case ty_args
+         of [container1, container2, _, elem1, elem2] ->
+              case args
+              of [trav1, trav2, _, repr1, repr2, input1, input2] ->
+                   -- Replace the output container and traversable types
+                   let oper =
+                         ExpSF $ VarE inf (pyonBuiltin the_fun_zip)
+                   in Just $ applyBindings bindings $ ExpSF $ AppE inf oper
+                      [container1, container2,
+                       TypSF $ VarT (pyonBuiltin the_Stream), elem1, elem2]
+                      [trav1, trav2, traversable_Stream, repr1, repr2,
+                       input1, input2]
+       | input_op `isPyonBuiltin` the_fun_map ->
+         case ty_args
+         of [container1, _, in_type, out_type] ->
+              case args
+              of [trav1, _, in_repr, out_repr, fun, input] ->
+                   -- Replace the output container and traversable types
+                   let oper =
+                         ExpSF $ VarE inf (pyonBuiltin the_fun_map)
+                   in Just $ applyBindings bindings $ ExpSF $ AppE inf oper
+                      [container1, TypSF $ VarT (pyonBuiltin the_Stream),
+                       in_type, out_type]
+                      [trav1, traversable_Stream, in_repr, out_repr, input]
+     _ -> Nothing
+  where
+    -- The traversable dictionary for the Stream type
+    traversable_Stream =
+      ExpSF $ AppE defaultExpInfo
+      (ExpSF $ VarE defaultExpInfo (pyonBuiltin the_traversableDict))
+      [TypSF $ VarT (pyonBuiltin the_Stream)]
+      [ExpSF $ VarE defaultExpInfo (pyonBuiltin the_TraversableDict_Stream_traverse),
+       ExpSF $ VarE defaultExpInfo (pyonBuiltin the_TraversableDict_Stream_build)]
+
+rewriteTraverseExpresion _ _ _ = Nothing
+  
 -- | Attempt to eliminate a case statement.  If the scrutinee is a constructor
 -- application and it matches an alternative, replace the case statement
 -- with the alternative.
