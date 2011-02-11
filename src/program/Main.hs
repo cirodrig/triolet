@@ -128,7 +128,7 @@ compilePyonToPyonAsm path text = do
   
   -- System F transformations
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
-  sf_mod <- return $ SystemF.DeadCodeSF.eliminateDeadCode sf_mod
+  sf_mod <- SystemF.DeadCodeSF.eliminateDeadCode sf_mod
   sf_mod <- SystemF.eliminatePatternMatching sf_mod
   -- sf_mod <- SystemF.doSpecialization sf_mod
 
@@ -152,7 +152,7 @@ compilePyonToPyonAsm path text = do
   -- are primarily setup to improve the accuracy of the simplifier.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- return $ SystemF.DeadCodeMem.eliminateDeadCode mem_mod
+  mem_mod <- SystemF.DeadCodeMem.eliminateDeadCode mem_mod
   
   putStrLn "Prepared Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
@@ -162,16 +162,16 @@ compilePyonToPyonAsm path text = do
   -- stupidly resolve by running them lots of times.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
+  mem_mod <- SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
+  mem_mod <- SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- return $ SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
+  mem_mod <- SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- return $ SystemF.DeadCodeMem.eliminateDeadCode mem_mod
+  mem_mod <- SystemF.DeadCodeMem.eliminateDeadCode mem_mod
 
   putStrLn "Optimized Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod

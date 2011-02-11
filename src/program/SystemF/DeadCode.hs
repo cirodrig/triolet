@@ -1,6 +1,7 @@
 
 module SystemF.DeadCode where
 
+import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.Graph as Graph
 import qualified Data.IntMap as IntMap
@@ -9,6 +10,7 @@ import Common.Identifier
 import Common.SourcePos
 import Common.Error
 import SystemF.Syntax
+import Type.Environment
 import Type.Type
 
 -- | The number of times a variable is mentioned, stored in a 'MentionsSet'.
@@ -27,13 +29,15 @@ mentionsSet vs = idMentionsSet (map varID vs)
 idMentionsSet :: [VarID] -> MentionsSet
 idMentionsSet ids = IntMap.fromList [(fromIdent id, One) | id <- ids]
 
--- | Dead code elimination on a value produces a new value and a set of
--- all variable names referenced by the value.
 type EDC a = a -> GetMentionsSet a
-type GetMentionsSet a = Writer MentionsSet a
 
-evalEDC :: (a -> GetMentionsSet b) -> a -> b
-evalEDC f x = case runWriter $ f x of (x', _) -> x'
+-- | Dead code elimination takes the global type environment as a parameter,
+--   which is used to look up type and data constructors only.
+--   It returns information on what variable references were observed.
+type GetMentionsSet a = ReaderT TypeEnv (Writer MentionsSet) a
+
+evalEDC :: TypeEnv -> (a -> GetMentionsSet b) -> a -> b
+evalEDC tenv f x = case runWriter (runReaderT (f x) tenv) of (x', _) -> x'
 
 -- | Mention a variable.  This prevents the assignment of this variable from
 -- being eliminated.

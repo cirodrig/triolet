@@ -10,6 +10,7 @@
 module SystemF.DeadCodeMem(eliminateLocalDeadCode, eliminateDeadCode)
 where
 
+import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.IntSet as IntSet
 import Data.IntSet(IntSet)
@@ -21,21 +22,27 @@ import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.DeadCode
+import Type.Eval
+import Type.Environment
 import Type.Type
+import Globals
+import GlobalVar
 
 -- | Locally eliminate dead code.  Top-level bindings are not eliminated.
-eliminateLocalDeadCode :: Module Mem -> Module Mem
-eliminateLocalDeadCode (Module module_name defss exports) =
-  let defss' = map (fmap (evalEDC edcDef)) defss
-      exports' = map (evalEDC edcExport) exports
-  in Module module_name defss' exports'
+eliminateLocalDeadCode :: Module Mem -> IO (Module Mem)
+eliminateLocalDeadCode (Module module_name defss exports) = do
+  tenv <- readInitGlobalVarIO the_memTypes
+  let defss' = map (fmap (evalEDC tenv edcDef)) defss
+      exports' = map (evalEDC tenv edcExport) exports
+  return $ Module module_name defss' exports'
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
-eliminateDeadCode :: Module Mem -> Module Mem
-eliminateDeadCode (Module module_name defss exports) =
-  let (defss', exports') = evalEDC edcTopLevelGroup defss
-  in Module module_name (concat defss') exports'
+eliminateDeadCode :: Module Mem -> IO (Module Mem)
+eliminateDeadCode (Module module_name defss exports) = do
+  tenv <- readInitGlobalVarIO the_memTypes
+  let (defss', exports') = evalEDC tenv edcTopLevelGroup defss
+  return $ Module module_name (concat defss') exports'
   where
     edcTopLevelGroup (ds:dss) = do
       (ds', (dss', exports')) <- edcDefGroup ds $ edcTopLevelGroup dss
@@ -154,11 +161,8 @@ edcExp expression@(ExpM base_expression) =
        mention v >> return expression
      LitE {} ->
        return expression
-     AppE {expOper = op, expArgs = args} -> do
-       -- Type arguments don't change
-       op' <- edcExp op
-       args' <- mapM edcExp args
-       return $ ExpM $ base_expression {expOper = op', expArgs = args'}
+     AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
+       edcAppE inf op ts args
      LamE {expFun = f} -> do
        f' <- edcFun f
        return $ ExpM $ base_expression {expFun = f'}
@@ -199,6 +203,45 @@ edcAlt (AltM alt) = do
                       , altExTypes = typats
                       , altParams = pats
                       , altBody = body}
+
+-- | Dead code elimination for function application.
+--
+--   Perform dead code elimination on subexpressions as usual.
+--   However, we use a special rule for marking uses when the operator is
+--   a data constructor.  If an operand is a variable, and its representation
+--   in the data constructor is 'Value' or 'Boxed', then the occurrence
+--   behaves like multiple references.  We do this
+--   because we do not want the value to be inlined in the simplifier.
+edcAppE inf op ty_args args = do
+  op' <- edcExp op
+  args' <- mapM edcExp args
+  tenv <- ask
+  add_datacon_uses tenv op' args'
+  return $ ExpM $ AppE inf op' ty_args args'
+  where
+    -- If this is an application of a data constructor,
+    -- mark some arguments as used many times.
+    --
+    -- Only the data constructor fields that are actually supplied
+    -- in this application matter.
+    -- Other arguments/fields are ignored when 'zip' is called.
+    add_datacon_uses tenv (ExpM (VarE _ op_var)) edc_args
+      | Just (data_type, dcon_type) <- lookupDataConWithType op_var tenv =
+          let (field_types, _) =
+                instantiateDataConTypeWithExistentials dcon_type (map fromTypM ty_args)
+          in zipWithM_ mark_used_arg field_types edc_args
+    
+    add_datacon_uses _ _ _ = return ()
+
+    -- If the argument is a variable, and the corresponding field is a
+    -- value or boxed object, treat this as many uses
+    mark_used_arg field_type (ExpM (VarE _ arg_var)) =
+      case field_type
+      of ValRT ::: _ -> mentionMany arg_var
+         BoxRT ::: _   -> mentionMany arg_var
+         _ -> return ()
+    
+    mark_used_arg _ _ = return ()
 
 -- | Dead code elimination for a \"let\" expression.
 --

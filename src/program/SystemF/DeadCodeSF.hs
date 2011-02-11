@@ -13,13 +13,16 @@ import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.DeadCode
 import Type.Type
+import Globals
+import GlobalVar
 
 -- | One-pass dead code elimination.  Eliminate variables that are assigned
 -- but not used.
-eliminateDeadCode :: Module SF -> Module SF
-eliminateDeadCode (Module module_name defss exports) =
-  let (defss', exports') = evalEDC edcTopLevelGroup defss
-  in Module module_name defss' exports'
+eliminateDeadCode :: Module SF -> IO (Module SF)
+eliminateDeadCode (Module module_name defss exports) = do
+  tenv <- readInitGlobalVarIO the_systemFTypes
+  let (defss', exports') = evalEDC tenv edcTopLevelGroup defss
+  return $ Module module_name defss' exports'
   where
     edcTopLevelGroup (ds:dss) = do
       (ds', (dss', exports')) <- edcDefGroup ds $ edcTopLevelGroup dss
