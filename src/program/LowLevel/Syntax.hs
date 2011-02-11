@@ -81,6 +81,7 @@ data Prim =
   | PrimModZ !Signedness !Size  -- ^ Remainder (floor) of X modulo Y
   | PrimDivZ !Signedness !Size  -- ^ Divide (floor) X by Y
   | PrimMaxZ !Signedness !Size  -- ^ Compute maximum
+  | PrimMinZ !Signedness !Size  -- ^ Compute minimum
   | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
   | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers
   | PrimAnd                           -- ^ Boolean and
@@ -153,6 +154,7 @@ primReturnType prim =
      PrimModZ sgn sz          -> int sgn sz
      PrimDivZ sgn sz          -> int sgn sz
      PrimMaxZ sgn sz          -> int sgn sz
+     PrimMinZ sgn sz          -> int sgn sz
      PrimCmpZ _ _ _           -> bool
      PrimCmpP _               -> bool
      PrimAnd                  -> bool

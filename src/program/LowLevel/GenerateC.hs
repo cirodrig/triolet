@@ -420,6 +420,9 @@ genPrimCall prim args =
      PrimMaxZ _ _ ->
        case args
        of [x, y] -> cCond (binary' CGeqOp x y) x y
+     PrimMinZ _ _ ->
+       case args
+       of [x, y] -> cCond (binary' CLeOp x y) x y
      PrimCmpZ _ _ CmpEQ -> binary CEqOp args
      PrimCmpZ _ _ CmpNE -> binary CNeqOp args
      PrimCmpZ _ _ CmpLT -> binary CLeOp args

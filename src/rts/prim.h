@@ -31,3 +31,6 @@ extern function pyon.internal.prim.div_float (float, float) -> float;
 
 extern function pyon.internal.prim.subscript
   (unit, unit, owned, pointer, int) -> pointer;
+
+extern function pyon.internal.prim.min_ii
+  (unit, unit, IndexedInt, IndexedInt) -> IndexedInt;

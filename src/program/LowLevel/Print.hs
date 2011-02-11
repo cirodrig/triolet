@@ -180,6 +180,7 @@ pprPrim prim =
            PrimModZ _ _ -> "mod"
            PrimDivZ _ _ -> "div"
            PrimMaxZ _ _ -> "max"
+           PrimMinZ _ _ -> "min"
            PrimCmpZ _ _ c -> comparison c
            PrimCmpP c -> comparison c
            PrimAnd -> "and"

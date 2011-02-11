@@ -252,6 +252,8 @@ builtinFunctions =
     -- the_AdditiveDict_float_{add,sub} were replaced by intrinsics
   , (PyonName module_prim "negate_float",
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_float_negate) |])
+  , (PyonName module_prim "min_ii",
+     Right [| pyonBuiltin (SystemF.the_min_ii) |])
     -- zero_float was replaced by a literal value
   , (PyonName module_complex "AdditiveDict_Complex_add",
      Right [| pyonBuiltin (SystemF.the_AdditiveDict_Complex_add) |])
