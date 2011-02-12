@@ -500,7 +500,7 @@ rwCopyApp inf op' ty_args args = do
   (args', arg_values) <- rwExps args
   let new_exp = ExpM $ AppE inf op' ty_args args'
       new_value = copied_value arg_values
-  return (new_exp, Nothing)
+  return (new_exp, new_value)
   where
     -- Do we know what was stored here?
     copied_value [_, Just src_val, Just dst_val] =

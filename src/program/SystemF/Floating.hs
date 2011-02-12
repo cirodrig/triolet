@@ -128,6 +128,11 @@ floatedParameters tenv op_var ty_args =
            -- do store-load propagation 
            let [TypM store_type] = ty_args
            in [Just (BoxPT ::: store_type), Nothing]
+       | op_var `isPyonBuiltin` the_copy ->
+           -- Move the source argument of 'copy' to increase the success rate
+           -- of copy elimination
+           let [TypM store_type] = ty_args
+           in [Nothing, Just (ReadPT ::: store_type), Nothing]
        | otherwise ->
            repeat Nothing
 
