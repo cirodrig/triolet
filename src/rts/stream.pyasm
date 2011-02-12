@@ -329,7 +329,7 @@ function inline Stream_reduce
   accs = pointer primcall pyon_alloc (sizeof Pair(elem_type));
   reduce_tmp = pointer primcall pyon_alloc (elem_size);
   stream_next = stream @! Stream.next;
-  () = () call elem_copy (accs @ Pair(elem_type).fst, init);
+  () = () call elem_copy (init, accs @ Pair(elem_type).fst);
 
   // Main loop.
   // At start, old_acc holds accumulator, new_acc is uninitialized,
