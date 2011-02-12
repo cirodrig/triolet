@@ -325,7 +325,9 @@ rwVar original_expression inf v =
   rwExpReturn . rewrite =<< lookupKnownValue v
   where
     rewrite (Just val)
-        -- Inline the value
+        -- Replace with an inlined or trivial value
+      | Just (inl_value, val') <- asInlinedValue val = (inl_value, Just val')
+      
       | Just cheap_value <- asTrivialValue val = (cheap_value, Just val)
 
         -- Otherwise, don't inline, but propagate the value

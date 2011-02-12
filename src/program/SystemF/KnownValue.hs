@@ -122,11 +122,11 @@ setTrivialValue var kv =
 --   Inlining is not contagious: if some other variable gets assigned an
 --   inlined value, that doesn't mean we should automatically inline that
 --   variable.
-asInlinedValue :: KnownValue -> Maybe (ExpM, Maybe KnownValue)
+asInlinedValue :: KnownValue -> Maybe (ExpM, KnownValue)
 asInlinedValue kv =
   case kv
-  of InlinedValue _ exp -> Just (exp, Nothing)
-     ComplexValue v (Just exp) val -> Just (exp, Just $ ComplexValue v Nothing val)
+  of InlinedValue v exp -> Just (exp, VarValue defaultExpInfo v)
+     ComplexValue v (Just exp) val -> Just (exp, ComplexValue v Nothing val)
      _ -> Nothing
 
 setInlinedValue :: Var -> ExpM -> MaybeValue -> KnownValue
