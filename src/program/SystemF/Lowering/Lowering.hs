@@ -47,17 +47,20 @@ withMany f xs k = go xs k
     go []     k = k []
 
 -- | Called by 'assumeVar' and related functions.  If the type is a
---   Repr dictionary passed as a boxed pointer, record the dictionary
---   in the environment.  Otherwise don't change the environment.
-assumeBoundReprDict :: ReturnType -> LL.Var -> Lower a -> Lower a
-assumeBoundReprDict (repr ::: ty) bound_var m =
+--   Repr dictionary passed as a boxed pointer or an IndexedInt passed as
+--   a value, record the dictionary in the environment.
+--   Otherwise don't change the environment.
+assumeSingletonValue :: ReturnType -> LL.Var -> Lower a -> Lower a
+assumeSingletonValue (repr ::: ty) bound_var m =
   case repr
-  of BoxRT ->
-       case fromVarApp ty
-       of Just (con, [arg])
-            | con `isPyonBuiltin` the_Repr ->
-              assumeReprDict arg (LL.VarV bound_var) m
-          _ -> m
+  of BoxRT
+       | Just (con, [arg]) <- fromVarApp ty,
+         con `isPyonBuiltin` the_Repr ->
+           assumeReprDict arg (LL.VarV bound_var) m
+     ValRT
+       | Just (con, [arg]) <- fromVarApp ty,
+         con `isPyonBuiltin` the_IndexedInt ->
+           assumeIndexedInt arg (LL.VarV bound_var) m
      _ -> m
 
 assumeVarG :: Var -> ReturnType -> (LL.Var -> GenLower a) -> GenLower a
@@ -72,7 +75,7 @@ assumeVar v rt k = do
   rtype <- liftFreshVarM $ lowerReturnType tenv rt 
   case rtype of
     Just t -> assumeVariableWithType v t $ \ll_var ->
-      assumeBoundReprDict rt ll_var (k ll_var)
+      assumeSingletonValue rt ll_var (k ll_var)
     Nothing -> internalError "assumeVar: Unexpected representation"
 
 -- | Create a local, dynamically allocated variable for a let expression.
@@ -169,6 +172,7 @@ pointerLayoutRecord layout =
   of ValueReference _ -> internalError "pointerLayoutRecord: Not a record"
      ScalarReference _ -> internalError "pointerLayoutRecord: Not a record"
      IndirectReference _ -> singleton_record
+     ArrayReference _ _ -> singleton_record
      PolyReference _ -> singleton_record
      ProductReference _ layouts -> do
        fields <- mapM pointerLayoutRecordField layouts
@@ -190,6 +194,25 @@ pointerLayoutRecordField layout =
        return $ toDynamicFieldType $ LL.valueToFieldType $ valueLayoutType val
      IndirectReference _ ->
        return $ LL.PrimField LL.PointerType
+     ArrayReference size element_layout -> do
+       -- Get the size and alignment of an array element.
+       elt_field <- pointerLayoutRecordField element_layout
+       elt_record <- createMutableDynamicRecord [elt_field]
+       let elt_size = LL.recordSize elt_record
+           elt_align = LL.recordAlignment elt_record
+       padded_size <- addRecordPadding elt_size elt_align
+       u_padded_size <- primCastZ (LL.PrimType LL.nativeWordType) padded_size
+       
+       -- Unsigned multiply by the array size.
+       -- Use the size type index to look up the size variable.
+       size_value <- do
+         indexed_size <- lookupIndexedInt size
+         size <- emitAtom1 (LL.PrimType LL.nativeIntType) $
+                 LL.UnpackA LL.indexedIntRecord indexed_size
+         primCastZ (LL.PrimType LL.nativeWordType) size
+       array_size <- nativeMulUZ padded_size size_value
+
+       return $ LL.BytesField array_size elt_align
      PolyReference (PolyRepr ty) -> do
        -- Get the object's size and alignment from a Repr dictionary
        lookupReprDict ty $ \dict -> do
@@ -455,6 +478,8 @@ compileConstructor con con_type ty_args = do
       case pointer_layout of
         IndirectReference layouts ->
           compileIndirectCtor field_types layouts
+        ArrayReference _ _ ->
+          internalError "compileConstructor: Unexpected array constructor"
         ProductReference con layouts ->
           compileRecordPointerCtor con ll_record field_types layouts
         SOPReference disjuncts ->
@@ -508,6 +533,8 @@ compileBoxCtor field_types ll_record pointer_layout ctor_fun = lift $ do
     field_layouts =
       case pointer_layout of
         IndirectReference layout -> [layout]
+        ArrayReference _ _ ->
+          internalError "compileConstructor: Unexpected array constructor"
         ProductReference con layouts -> layouts
         SOPReference disjuncts ->
           internalError "SOPReference is not implemented"
@@ -576,12 +603,14 @@ compileRecordPointerCtor con record field_types field_layouts = lift $ do
            dst_addr <- referenceField record_field ret_ptr
            emitAtom0 $ LL.closureCallA (LL.VarV param) [dst_addr]
       
--- Decide how to pass a parameter to a constructor function
+-- Decide how to pass a parameter to a constructor function.
+-- Most parameters are passed using a writer function.
 constructorParameterType tenv field_layout =
   case field_layout
   of ValueReference val_layout -> valueLayoutType val_layout
      ScalarReference _ -> LL.PrimType LL.OwnedType
      IndirectReference _ -> LL.PrimType LL.OwnedType
+     ArrayReference _ _ -> LL.PrimType LL.OwnedType
      PolyReference _ -> LL.PrimType LL.OwnedType
      ProductReference _ _ -> LL.PrimType LL.OwnedType
      SOPReference _ -> LL.PrimType LL.OwnedType
@@ -707,7 +736,7 @@ lowerLet _ binder rhs body =
          -- If it's a dictionary variable, add it to the environment while
          -- generating code of the body.
          -- Force all body code to be generated here.
-         liftT (assumeBoundReprDict (ReadRT ::: ty) ll_var) $
+         liftT (assumeSingletonValue (ReadRT ::: ty) ll_var) $
            generateCode =<< lowerExp body
 
      TypedMemWildP {} ->

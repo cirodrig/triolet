@@ -39,7 +39,15 @@ data LowerEnv =
   LowerEnv { varSupply :: {-# UNPACK #-}!(IdentSupply Var)
            , llVarSupply :: {-# UNPACK #-}!(IdentSupply LL.Var)
            , typeEnvironment :: !TypeEnv
+             
+             -- | The type-indexed integers in the environment.
+             --   Indexed by the type index.
+           , intEnvironment :: DictEnv.DictEnv (GenLower LL.Val)
+
+             -- | The 'Repr' dictionaries in the environment.  Indexed
+             --   by the dictionary's type parameter.
            , reprDictEnvironment :: DictEnv.DictEnv (GenLower LL.Val)
+
              -- | A low-level variable is associated to each variable that
              --   is in scope
            , varMap :: IntMap.IntMap LL.Var
@@ -54,8 +62,8 @@ initializeLowerEnv var_supply ll_var_supply type_env var_map = do
   repr_env <- runFreshVarM var_supply $ mk_repr_env
   let global_map = IntMap.fromList [(fromIdent $ varID v, v')
                                    | (v, v') <- Map.toList var_map]
-                                                   
-  return $ LowerEnv var_supply ll_var_supply type_env repr_env global_map
+      int_env = DictEnv.empty
+  return $ LowerEnv var_supply ll_var_supply type_env int_env repr_env global_map
   where
     -- Populate the environment with globally defined Repr instances
     mk_repr_env = do 
@@ -138,6 +146,30 @@ assumeReprDict ty val (Lower m) = Lower $ local update m
     update env = env {reprDictEnvironment =
                          DictEnv.insert (DictEnv.monoPattern ty (return val)) $
                          reprDictEnvironment env}
+
+-- | Find an integer indexed by the given index, which should be a type
+--   of kind @intindex@.  Fail if not found.
+lookupIndexedInt :: Type -> GenLower LL.Val
+lookupIndexedInt ty = do
+  match <- lift lookup_dict
+  case match of
+    Just int_val -> int_val
+    Nothing -> internalError $ 
+               "lookupIndexedInt: Not found for index:\n" ++ show (pprType ty)
+  where
+    lookup_dict = Lower $ ReaderT $ \env -> do
+      let var_supply = varSupply env
+          tenv = typeEnvironment env
+      DictEnv.lookup var_supply tenv ty (intEnvironment env)
+
+
+-- | Add an indexed integer for this type index to the environment
+assumeIndexedInt :: Type -> LL.Val -> Lower a -> Lower a
+assumeIndexedInt ty val (Lower m) = Lower $ local update m
+  where
+    update env = env {intEnvironment =
+                         DictEnv.insert (DictEnv.monoPattern ty (return val)) $
+                         intEnvironment env}
 
 lookupVar :: Var -> Lower LL.Var
 lookupVar v = Lower $ ReaderT $ \env ->

@@ -81,6 +81,9 @@ data PointerLayout =
     -- | A reference to a dynamically allocated value.  This occupies one
     --   pointer worth of space.
   | IndirectReference PointerLayout
+    -- | An array of something.  The array's size (a type index) and 
+    --   element layout are given.
+  | ArrayReference Type !PointerLayout
     -- | A polymorphic value, accessed by reference
   | PolyReference !PolyRepr
     -- | A product type
@@ -133,6 +136,8 @@ pprPointerLayout pl =
   of ValueReference vl -> hang (text "value") 4 $ pprValueLayout vl
      ScalarReference vl -> hang (text "scalar") 4 $ pprValueLayout vl
      IndirectReference l -> text "ref" <+> parens (pprPointerLayout l)
+     ArrayReference ty l ->
+       text "array" <+> parens (pprType ty <> text "," <+> pprPointerLayout l)
      PolyReference (PolyRepr t) -> text "poly" <+> pprType t
      ProductReference v fs ->
        pprConstructorClause v $ pprProduct pprPointerLayout fs
@@ -316,6 +321,12 @@ memDataTypeLayout tenv typedescr@(tycon, data_type, con_types, ty_args)
   | tycon `isPyonBuiltin` the_Referenced =
       let [arg] = ty_args
       in fmap IndirectReference $ memFieldLayout tenv arg
+         
+  -- Arrays have a special representation in memory
+  | tycon `isPyonBuiltin` the_array =
+      case ty_args
+      of [size, elt_type] ->
+           fmap (ArrayReference size) $ memFieldLayout tenv elt_type
 
   | all_nullary_constructors, [con] <- cons =
       return $ ProductReference con []
@@ -348,4 +359,3 @@ memDataTypeLayout tenv typedescr@(tycon, data_type, con_types, ty_args)
       return $ ValueReference OpaqueBoxedValue
 
     field_layout local_tenv (ReadRT ::: ty) = memFieldLayout local_tenv ty
-
