@@ -73,6 +73,7 @@ rewriteRules = Map.fromList table
             , (pyonBuiltin the_TraversableDict_Stream_traverse, rwBuildTraverseStream)
             , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildTraverseStream)
             , (pyonBuiltin the_oper_CAT_MAP, rwBindStream)
+            , (pyonBuiltin the_fun_map_Stream, rwMapStream)
             , (pyonBuiltin the_fun_zip, rwZip)
             , (pyonBuiltin the_fun_zip_Stream, rwZipStream)
             , (pyonBuiltin the_fun_reduce, rwReduce)
@@ -88,8 +89,13 @@ rewriteApp tenv inf op_var ty_args args =
   of Just rw -> trace_rewrite $ rw tenv inf ty_args args
      Nothing -> return Nothing
   where
-    trace_rewrite = traceShow $
-                    text "rewrite" <+> pprExp (ExpM $ AppE defaultExpInfo (ExpM (VarE defaultExpInfo op_var)) ty_args args)
+    trace_rewrite m = do 
+      x <- m
+      case x of
+        Nothing -> return x
+        Just e' -> traceShow (text "rewrite" <+> old_exp $$ text "    -->" <+> pprExp e') $ return x
+    
+    old_exp = pprExp (ExpM $ AppE defaultExpInfo (ExpM (VarE defaultExpInfo op_var)) ty_args args)
 
 rwTraverseList :: RewriteRule
 rwTraverseList tenv inf [elt_type] [elt_repr, list] = fmap Just $
@@ -137,6 +143,45 @@ rwBindStream tenv inf
 
 rwBindStream _ _ _ _ = return Nothing
 
+rwMapStream :: RewriteRule
+rwMapStream tenv inf
+  [elt1, elt2]
+  [repr1, repr2, transformer, producer] =
+  case unpackVarAppM producer
+  of Just (op_var, pr_ty_args, pr_args)
+       | op_var `isPyonBuiltin` the_generate ->
+         case pr_ty_args
+         of [g_sizeix, g_ty] ->
+              case pr_args
+              of [g_count, g_repr, g_fun] ->
+                   fmap Just $
+                   rewriteMapOfGenerate tenv inf elt2 repr2 transformer g_sizeix g_ty g_count g_repr g_fun
+     _ -> return Nothing
+
+rwMapStream _ _ _ _ = return Nothing
+
+-- Rewrite
+--
+-- > map (f2, generate (n, f1))
+--
+-- to                 
+-- > generate (n, \i -> let tmp = f1 i tmp in f2 i tmp)
+rewriteMapOfGenerate tenv inf elt2 repr2 transformer
+                     g_sizeix g_ty g_count g_repr g_fun = do
+  tmpvar <- newAnonymousVar ObjectLevel
+  varAppE (pyonBuiltin the_generate) [TypM g_sizeix, elt2]
+    [return g_count, return repr2,
+     lamE $ mkFun []
+     (\ [] -> return ([ValPT Nothing ::: VarT (pyonBuiltin the_int)],
+                      BoxRT ::: FunT (OutPT ::: fromTypM elt2) (SideEffectRT ::: fromTypM elt2)))
+     (\ [] [ixvar] -> do
+         rhs <- appE (return g_fun) [] [varE ixvar, varE tmpvar]
+         body <- appE (return transformer) [] [varE tmpvar]
+         let binder = localVarP tmpvar g_ty g_repr
+             let_expr = ExpM $ LetE defaultExpInfo binder rhs body
+         return let_expr)]
+              
+     
 -- | Rewrite calls to @zip@ to call @zipStream@
 --
 -- > case t1 of TraversableDict trv1 _.
