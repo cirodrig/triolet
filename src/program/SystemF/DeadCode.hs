@@ -19,6 +19,13 @@ data Mentions = One | Many deriving(Show)
 
 type MentionsSet = IntMap.IntMap Mentions
 
+newtype MSet = MSet MentionsSet
+
+-- When taking the set union, we need to add mentions together
+instance Monoid MSet where
+  mempty = MSet mempty
+  mappend (MSet s1) (MSet s2) = MSet (msetUnion s1 s2)
+
 msetUnion :: MentionsSet -> MentionsSet -> MentionsSet
 msetUnion s1 s2 = IntMap.unionWith (\_ _ -> Many) s1 s2 
 
@@ -34,7 +41,7 @@ type EDC a = a -> GetMentionsSet a
 -- | Dead code elimination takes the global type environment as a parameter,
 --   which is used to look up type and data constructors only.
 --   It returns information on what variable references were observed.
-type GetMentionsSet a = ReaderT TypeEnv (Writer MentionsSet) a
+type GetMentionsSet a = ReaderT TypeEnv (Writer MSet) a
 
 evalEDC :: TypeEnv -> (a -> GetMentionsSet b) -> a -> b
 evalEDC tenv f x = case runWriter (runReaderT (f x) tenv) of (x', _) -> x'
@@ -42,17 +49,18 @@ evalEDC tenv f x = case runWriter (runReaderT (f x) tenv) of (x', _) -> x'
 -- | Mention a variable.  This prevents the assignment of this variable from
 -- being eliminated.
 mention :: Var -> GetMentionsSet ()
-mention v = tell (IntMap.singleton (fromIdent $ varID v) One)
+mention v = tell (MSet $ IntMap.singleton (fromIdent $ varID v) One)
 
 -- | Mention a variable as it it was mentioned many times.
 mentionMany :: Var -> GetMentionsSet ()
-mentionMany v = tell (IntMap.singleton (fromIdent $ varID v) Many)
+mentionMany v = tell (MSet $ IntMap.singleton (fromIdent $ varID v) Many)
 
 -- | Filter out a mention of a variable.  The variable will not appear in
 -- the returned mentions set.
 mask :: Var -> GetMentionsSet a -> GetMentionsSet a
-mask v m = pass $ do x <- m
-                     return (x, IntMap.delete (fromIdent $ varID v))
+mask v m = pass $ do
+  x <- m
+  return (x, \(MSet s) -> MSet $ IntMap.delete (fromIdent $ varID v) s)
 
 -- | Filter out a mention of a variable, and also check whether the variable
 --   is mentioned.  Return @Nothing@ if the variable is not mentioned,
@@ -60,13 +68,13 @@ mask v m = pass $ do x <- m
 --   mentioned more than once.
 maskAndCheck :: Var -> GetMentionsSet a -> GetMentionsSet (Maybe Mentions, a)
 maskAndCheck v m = pass $ do
-  (x, mentions_set) <- listen m
+  (x, MSet mentions_set) <- listen m
   return ( (IntMap.lookup (fromIdent (varID v)) mentions_set, x)
-         , IntMap.delete (fromIdent $ varID v))
+         , \(MSet s) -> MSet $ IntMap.delete (fromIdent $ varID v) s)
 
 masks :: MentionsSet -> GetMentionsSet a -> GetMentionsSet a
 masks vs m = pass $ do x <- m
-                       return (x, (`IntMap.difference` vs))
+                       return (x, \(MSet s) -> MSet (s `IntMap.difference` vs))
 
 -- | Find variables that are mentioned in the type
 edcType :: Type -> GetMentionsSet ()

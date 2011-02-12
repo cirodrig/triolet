@@ -131,11 +131,11 @@ edcDefGroup defgroup m =
        in masks (mentionsSet local_vars) $ do
          -- Eliminate dead code and find references to the local variables
          defs_and_uses <- mapM (listen . edcDef) defs
-         (x, m_uses) <- listen m
+         (x, MSet m_uses) <- listen m
 
          -- Partition into strongly connected components
          let members = [(new_def, varID v, mentions_set)
-                       | (Def v _, (new_def, mentions_set)) <-
+                       | (Def v _, (new_def, MSet mentions_set)) <-
                            zip defs defs_and_uses]
              new_defs = partitionDefGroup members m_uses
          return (new_defs, x)
