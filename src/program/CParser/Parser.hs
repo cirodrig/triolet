@@ -134,14 +134,16 @@ returnRepr :: P ReturnRepr
 returnRepr = choice [match tok >> return repr | (tok, repr) <- reprs]
   where
     reprs = [(ValTok, ValueRT), (BoxTok, BoxedRT),
-             (ReadTok, ReadRT), (WriteTok, WriteRT)]
+             (ReadTok, ReadRT), (WriteTok, WriteRT),
+             (OutTok, OutRT), (SideEffectTok, SideEffectRT)]
 
 -- match the corresponding Repr Token.  Doesn't match dependent parameters.
 paramRepr :: P (ParamRepr Parsed)
 paramRepr = choice [match tok >> return repr | (tok, repr) <- reprs]
   where
     reprs = [(ValTok, ValuePT Nothing), (BoxTok, BoxedPT),
-             (ReadTok, ReadPT), (WriteTok, WritePT)]
+             (ReadTok, ReadPT), (WriteTok, WritePT),
+             (OutTok, OutPT), (SideEffectTok, SideEffectPT)]
 
 -------------------------------------------------------------------------------
 -- * Derived parsers

@@ -31,6 +31,8 @@ translateParamType (ParamType prepr ty) =
            BoxedPT -> Type.BoxPT
            ReadPT -> Type.ReadPT
            WritePT -> Type.WritePT
+           OutPT -> Type.OutPT
+           SideEffectPT -> Type.SideEffectPT
   in repr Type.::: translateType ty
 
 translateReturnType (ReturnType rrepr ty) =
@@ -40,6 +42,8 @@ translateReturnType (ReturnType rrepr ty) =
            BoxedRT -> Type.BoxRT
            ReadRT -> Type.ReadRT
            WriteRT -> Type.WriteRT
+           OutRT -> Type.OutRT
+           SideEffectRT -> Type.SideEffectRT
   in repr Type.::: translateType ty
 
 translateDataConDecl data_type_con decl =

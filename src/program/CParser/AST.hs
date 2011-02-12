@@ -100,12 +100,14 @@ data ParamRepr ix =
   | BoxedPT
   | ReadPT
   | WritePT
+  | OutPT
+  | SideEffectPT
 
 -- | A return type, describing a function return value's type and
 --   representation.
 data ReturnType ix = ReturnType ReturnRepr (LType ix)
 
-data ReturnRepr = ValueRT | BoxedRT | ReadRT | WriteRT
+data ReturnRepr = ValueRT | BoxedRT | ReadRT | WriteRT | OutRT | SideEffectRT
 
 -- | A data constructor declaration.
 --   Corresponds to @Type.Environment.DataConType@.

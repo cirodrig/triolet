@@ -35,8 +35,10 @@ data Tok =
   | DataTok
   | LetTok
   | LetrecTok
+  | OutTok
   | ReadTok
   | RefTok
+  | SideEffectTok
   | WildTok
   | WriteTok
   | ValTok
@@ -66,8 +68,10 @@ showTok t =
        DataTok      -> "'data'"
        LetTok       -> "'let'"
        LetrecTok    -> "'letrec'"
+       OutTok       -> "'out'"
        ReadTok      -> "'read'"
-       ReadTok      -> "'ref'"
+       RefTok       -> "'ref'"
+       SideEffectTok -> "'sideeffect'"
        WildTok      -> "underscore"
        WriteTok     -> "'write'"
        ValTok       -> "'val'"

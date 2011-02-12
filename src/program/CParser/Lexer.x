@@ -71,8 +71,10 @@ rules :- ----------------------------------------------------------------------
 <0>     "data" / @eow		{ posnTok DataTok }
 <0>	"let" / @eow		{ posnTok LetTok }
 <0>	"letrec" / @eow		{ posnTok LetrecTok }
+<0>	"out" / @eow		{ posnTok OutTok }
 <0>	"read" / @eow		{ posnTok ReadTok }
 <0>	"ref" / @eow		{ posnTok RefTok }
+<0>	"sideeffect" / @eow	{ posnTok SideEffectTok }
 <0>	"val" / @eow		{ posnTok ValTok }
 <0>	"write" / @eow		{ posnTok WriteTok }
 <0>	"_" / @eow		{ posnTok WildTok }

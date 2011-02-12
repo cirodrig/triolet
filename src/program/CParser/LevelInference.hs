@@ -130,6 +130,8 @@ liParamType lmap (ParamType repr ty) = do
          BoxedPT -> return (BoxedPT, lmap)
          ReadPT -> return (ReadPT, lmap)
          WritePT -> return (WritePT, lmap)
+         OutPT -> return (OutPT, lmap)
+         SideEffectPT -> return (SideEffectPT, lmap)
 
 liReturnType :: LMap -> (ReturnType Resolved) -> IO (ReturnType LevelInferred)
 liReturnType lmap (ReturnType rtRepr rtType) = do

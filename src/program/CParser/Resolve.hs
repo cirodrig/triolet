@@ -255,6 +255,8 @@ resolveParamType (ParamType repr ty) = do
               BoxedPT -> return BoxedPT
               ReadPT -> return ReadPT
               WritePT -> return WritePT
+              OutPT -> return OutPT
+              SideEffectPT -> return SideEffectPT
   return $ ParamType repr' ty'
 
 resolveReturnType :: (ReturnType Parsed) -> NR (ReturnType Resolved)
