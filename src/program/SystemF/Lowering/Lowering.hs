@@ -417,9 +417,8 @@ compileLoad load_type address = do
 --   is returned.  All type arguments must be provided.
 compileConstructor :: Var -> DataConType -> [Type] -> GenLower Code
 compileConstructor con con_type ty_args = do
-  (_, field_types, result_type) <-
-    lift $ liftFreshVarM $
-    instantiateDataConTypeWithFreshVariables con_type ty_args
+  let (field_types, result_type) =
+        instantiateDataConTypeWithExistentials con_type ty_args
   lift (calculateScrutineeLayout result_type) >>= make_code field_types
   where
   
