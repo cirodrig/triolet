@@ -50,7 +50,7 @@ data OPEnv = OPEnv { opVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
                      
                      -- Representation dictionaries, indexed by the
                      -- dictionary's parameter type
-                   , opDictEnv :: DictEnv.DictEnv (MkDict OP)
+                   , opDictEnv :: MkDictEnv
                    }
 
 newtype OP a = OP {runOP :: OPEnv -> Maybe ExpM -> IO a}

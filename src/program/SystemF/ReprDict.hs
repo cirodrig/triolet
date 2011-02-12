@@ -1,11 +1,13 @@
 {-| Code generation of @Repr@ dictionaries.
 -}
 
-{-# LANGUAGE FlexibleInstances, FlexibleContexts, TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts, TypeSynonymInstances, 
+    Rank2Types #-}
 module SystemF.ReprDict where
 
 import Control.Monad
 import Control.Monad.Trans
+import Control.Monad.Trans.Maybe
 
 import Common.Error
 import Common.Supply
@@ -20,10 +22,11 @@ import Type.Type
 -- | A @MkDict m@ constructs a dictionary in monad @m2, which is normally
 --   an instance of 'ReprDictMonad', and makes the dictionary available over
 --   the scope of some computation.
-type MkDict m = (ExpM -> m ExpM) -> m ExpM
+newtype MkDict =
+  MkDict {mkDict :: forall m. ReprDictMonad m => (ExpM -> m ExpM) -> m ExpM}
 
 -- | A 'DictEnv' containing 'MkDict' values
-type MkDictEnv m = DictEnv.DictEnv (MkDict m)
+type MkDictEnv = DictEnv.DictEnv MkDict
 
 -- | A monad that keeps track of representation dictionaries
 class (Monad m, MonadIO m, Supplies m VarID) => ReprDictMonad m where
@@ -39,15 +42,27 @@ class (Monad m, MonadIO m, Supplies m VarID) => ReprDictMonad m where
   withTypeEnv :: (TypeEnv -> m a) -> m a
   withTypeEnv f = getTypeEnv >>= f
 
-  getDictEnv :: m (MkDictEnv m)
+  getDictEnv :: m MkDictEnv
   getDictEnv = withDictEnv return
 
-  withDictEnv :: (MkDictEnv m -> m a) -> m a
+  withDictEnv :: (MkDictEnv -> m a) -> m a
   withDictEnv f = getDictEnv >>= f
   
-  localDictEnv :: (MkDictEnv m -> MkDictEnv m) -> m a -> m a
+  localDictEnv :: (MkDictEnv -> MkDictEnv) -> m a -> m a
 
-lookupReprDict :: ReprDictMonad m => Type -> m (Maybe (MkDict m))
+instance Supplies m VarID => Supplies (MaybeT m) VarID where
+  fresh = lift fresh
+
+instance ReprDictMonad m => ReprDictMonad (MaybeT m) where
+  getVarIDs = lift getVarIDs
+  withVarIDs f = MaybeT $ withVarIDs (runMaybeT . f)
+  getTypeEnv = lift getTypeEnv
+  withTypeEnv f = MaybeT $ withTypeEnv (runMaybeT . f)
+  getDictEnv = lift getDictEnv 
+  withDictEnv f = MaybeT $ withDictEnv (runMaybeT . f)
+  localDictEnv f (MaybeT m) = MaybeT (localDictEnv f m)
+
+lookupReprDict :: ReprDictMonad m => Type -> m (Maybe MkDict)
 lookupReprDict ty =
   case ty
   of FunT {} ->
@@ -63,7 +78,7 @@ lookupReprDict ty =
       -- Create a boxed representation object, and pass it to the continuation 
       let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
           call = ExpM $ AppE defaultExpInfo op [TypM ty] []
-      in ($ call)
+      in MkDict ($ call)
 
 -- | Add a dictionary to the environment.  It will be used if it is 
 --   needed in the remainder of the computation.
@@ -71,7 +86,7 @@ saveReprDict :: ReprDictMonad m => Type -> ExpM -> m a -> m a
 saveReprDict dict_type dict_exp m =
   localDictEnv (DictEnv.insert dict_pattern) m
   where
-    dict_pattern = DictEnv.monoPattern dict_type ($ dict_exp)
+    dict_pattern = DictEnv.monoPattern dict_type (MkDict ($ dict_exp))
 
 -- | If the pattern binds a representation dictionary, record the dictionary 
 --   in the environment so it can be looked up later.
@@ -98,19 +113,18 @@ withReprDict :: ReprDictMonad m => Type -> (ExpM -> m ExpM) -> m ExpM
 withReprDict param_type f = do
   mdict <- lookupReprDict param_type
   case mdict of
-    Just dict -> dict f
+    Just (MkDict dict) -> dict f
     Nothing -> internalError err_msg 
   where
     err_msg = "withReprDict: Cannot construct dictionary for type:\n" ++
               show (pprType param_type)
 
-createDictEnv :: ReprDictMonad m =>
-                 FreshVarM (DictEnv.DictEnv (MkDict m))
+createDictEnv :: FreshVarM MkDictEnv
 createDictEnv = do
   let int_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_int))
-                 ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_int)
+                 (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_int))
   let float_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_float))
-                   ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float)
+                   (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float))
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
   boxed_dict <- createBoxedDictPattern (pyonBuiltin the_Boxed) 1
   stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 1
@@ -141,9 +155,8 @@ saveAndUseDict :: ReprDictMonad m =>
 saveAndUseDict dict_type dict_val k =
   saveReprDict dict_type dict_val $ k dict_val
 
-createDict_Tuple2 :: ReprDictMonad m =>
-                     Var -> Var -> Substitution -> (ExpM -> m ExpM) -> m ExpM
-createDict_Tuple2 param_var1 param_var2 subst use_dict =
+createDict_Tuple2 :: Var -> Var -> Substitution -> MkDict
+createDict_Tuple2 param_var1 param_var2 subst = MkDict $ \use_dict ->
   withReprDict param1 $ \dict1 ->
   withReprDict param2 $ \dict2 -> do
     tmpvar <- newAnonymousVar ObjectLevel
@@ -170,9 +183,8 @@ createDict_Tuple2 param_var1 param_var2 subst use_dict =
       in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
          [dict1, dict2]
 
-createDict_list :: ReprDictMonad m =>
-                   Var -> Substitution -> (ExpM -> m ExpM) -> m ExpM
-createDict_list param_var subst use_dict =
+createDict_list :: Var -> Substitution -> MkDict
+createDict_list param_var subst = MkDict $ \use_dict ->
   withReprDict param $ \elt_dict ->
   let list_dict = mk_list_dict elt_dict
   in use_dict list_dict
@@ -182,9 +194,8 @@ createDict_list param_var subst use_dict =
     mk_list_dict elt_dict =
       ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
 
-createDict_complex :: ReprDictMonad m =>
-                      Var -> Substitution -> (ExpM -> m ExpM) -> m ExpM
-createDict_complex param_var subst use_dict =
+createDict_complex :: Var -> Substitution -> MkDict
+createDict_complex param_var subst = MkDict $ \use_dict ->
   withReprDict param $ \elt_dict ->
   let cpx_dict = mk_cpx_dict elt_dict
   in use_dict cpx_dict
@@ -198,9 +209,7 @@ createDict_complex param_var subst use_dict =
 --   
 --   To get the dictionary, call the @the_repr_Box@ function with
 --   boxed data type as its parameter.
-createBoxedDictPattern :: ReprDictMonad m =>
-                          Var -> Int
-                       -> FreshVarM (DictEnv.TypePattern (MkDict m))
+createBoxedDictPattern :: Var -> Int -> FreshVarM (DictEnv.TypePattern MkDict)
 createBoxedDictPattern con arity = do
   param_vars <- replicateM arity $ newAnonymousVar TypeLevel
   return $
@@ -211,7 +220,7 @@ createBoxedDictPattern con arity = do
     -- Create a function call expression
     --
     -- > the_repr_Box (con arg1 arg2 ... argN)
-    create_dict param_vars subst use_dict = use_dict expr
+    create_dict param_vars subst = MkDict ($ expr)
       where
         param_types = [getParamType v subst | v <- param_vars]
         dict_type = varApp con param_types

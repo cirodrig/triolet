@@ -15,6 +15,7 @@ where
 import Prelude hiding(mapM)
 import Control.Monad hiding(mapM)
 import Control.Monad.Trans
+import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
 import Data.List as List
 import Data.Maybe
@@ -58,7 +59,7 @@ data LREnv =
     -- | Types of variables
   , lrTypeEnv :: TypeEnv
     
-  , lrDictEnv :: MkDictEnv LR
+  , lrDictEnv :: MkDictEnv
   }
 
 newtype LR a = LR {runLR :: LREnv -> IO a}
@@ -880,38 +881,34 @@ rwCase inf scrut alts = do
   tenv <- getTypeEnv
   case scrut' of
     ExpM (AppE _ (ExpM (VarE _ op_var)) ty_args args)
-      | Just (type_con, data_con) <- lookupDataConWithType op_var tenv ->
+      | Just (type_con, data_con) <- lookupDataConWithType op_var tenv -> do
           -- Eliminate case-of-constructor expressions using the actual
           -- argument values.  We can eliminate case statements this way
           -- even when we can't compute known values for the fields.
-          case find_alternative op_var
-          of Just altm ->
-               let ex_args = drop (length $ dataConPatternParams data_con) ty_args
-               in case elimCaseAlternative True inf altm ex_args (map Just args)
-                  of Just eliminated_case ->
-                       rwExp eliminated_case
-                     Nothing -> no_eliminate scrut' [altm]
-             Nothing -> internalError "rwCase: Missing alternative"
+          let altm = find_alternative op_var
+              ex_args = drop (length $ dataConPatternParams data_con) ty_args
+          m_elim <- elimCaseAlternative True inf altm ex_args (map Just args)
+          case m_elim of
+            Just eliminated_case -> rwExp eliminated_case
+            Nothing  -> no_eliminate scrut' [altm]
     _ -> case scrut_val
-         of Just (ComplexValue _ (DataValue _ con _ ex_args margs)) ->
+         of Just (ComplexValue _ (DataValue _ con _ ex_args margs)) -> do
               -- Case of known value.
               -- Select the appropriate alternative and discard others.
               -- If possible, eliminate the expression.
-              case find_alternative con
-              of Just altm ->
-                   let arg_vals = map (>>= asTrivialValue) margs
-                   -- Try to inline this case alternative
-                   in case elimCaseAlternative False inf altm ex_args arg_vals
-                      of Just eliminated_case ->
-                           -- Rewrite the new expression, including the body of
-                           -- the alternative
-                           rwExp eliminated_case
-                         Nothing -> no_eliminate scrut' [altm]
-                 Nothing -> internalError "rwCase: Missing alternative"
+              let altm = find_alternative con
+                  arg_vals = map (>>= asTrivialValue) margs
+              m_elim <- elimCaseAlternative False inf altm ex_args arg_vals
+              case m_elim of
+                Just eliminated_case -> rwExp eliminated_case
+                Nothing -> no_eliminate scrut' [altm]
             _ -> no_eliminate scrut' alts
   where
     -- Find the alternative matching constructor @con@
-    find_alternative con = find ((con ==) . altConstructor . fromAltM) alts
+    find_alternative con =
+      case find ((con ==) . altConstructor . fromAltM) alts
+      of Just alt -> alt
+         Nothing -> internalError "rwCase: Missing alternative"
 
     -- Cannot eliminate this case statement.  Possibly eliminated
     -- some case alternatives.
@@ -933,13 +930,13 @@ rwCase inf scrut alts = do
 --   given for the writable case fields, and they should be bound to local
 --   variables.  Otherwise, those fields won't be bound.
 elimCaseAlternative :: Bool -> ExpInfo -> AltM -> [TypM] -> [Maybe ExpM]
-                    -> Maybe ExpM
+                    -> LR (Maybe ExpM)
 elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
   | length (altExTypes alt) /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length args =
       internalError "rwCase: Wrong number of fields"
-  | otherwise =
+  | otherwise = runMaybeT $ do
       let -- Substitute known types for the existential type variables
           ex_type_subst =
             substitution $
@@ -948,16 +945,12 @@ elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
           patterns = map (substitutePatM ex_type_subst) (altParams alt)
           subst_body = substitute ex_type_subst (altBody alt)
 
-      in -- Identify (pattern, value) pairs that should be bound by 
-         -- let expressions
-         case sequence $ zipWith bind_field patterns args
-         of Nothing ->
-              -- Cannot create bindings because some values are unknown
-              Nothing
-            Just m_bindings ->
-              let bindings = catMaybes m_bindings
-                  new_exp = foldr make_binding subst_body bindings
-              in Just new_exp
+      -- Identify (pattern, value) pairs that should be bound by 
+      -- let expressions
+      m_bindings <- zipWithM bind_field patterns args
+      let bindings = catMaybes m_bindings
+          new_exp = foldr make_binding subst_body bindings
+      return new_exp
   where
     -- Construct a let-binding from the values returned by bind_field
     -- and a body expression
@@ -968,18 +961,28 @@ elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
     -- Return Nothing if a binding is required but cannot be built.
     -- Return (Just Nothing) if no binding is required.
     -- Return (Just (Just (p, v))) to produce binding (p, v).
-    bind_field :: PatM -> Maybe ExpM -> Maybe (Maybe (PatM, ExpM))
+    bind_field :: PatM -> Maybe ExpM -> MaybeT LR (Maybe (PatM, ExpM))
     bind_field (MemWildP {}) _ =
       return Nothing
 
     bind_field pat@(MemVarP {}) arg
-      | okay_for_value_binding =
-          case arg
-          of Just arg_exp -> return $ Just (pat, arg_exp)
-             Nothing -> mzero -- Cannot bind this pattern
-      | okay_for_reference_binding =
-          -- TODO: Create a local variable expression
-          internalError "rwCase: Not implemented for reference fields"
+      | okay_for_value_binding = do
+          arg_exp <- MaybeT $ return arg
+          return $ Just (pat, arg_exp)
+      | okay_for_reference_binding = do
+          -- Bind this expression to a local variable.  We can reuse the
+          -- same variable that we were given.
+          -- The expression is a writer function; apply it to the
+          -- local variable so that it will write it.
+          arg_exp <- MaybeT $ return arg
+          let out_exp = ExpM $ VarE defaultExpInfo (patMVar' pat)
+              initializer_exp = ExpM $ AppE defaultExpInfo arg_exp [] [out_exp]
+          
+          -- Look up the representation dictionary for this type
+          dict_exp <- withReprDict (patMType pat) return
+
+          let binder = localVarP (patMVar' pat) (patMType pat) dict_exp
+          return $ Just (binder, initializer_exp)
       | otherwise = mzero   -- Cannot bind this pattern
       where
         -- We can only bind value and boxed parameters this way
