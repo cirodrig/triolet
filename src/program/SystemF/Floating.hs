@@ -13,6 +13,7 @@ module SystemF.Floating
         ContextExp(..),
         freshenContextExp,
         applyContext,
+        floatedParameters',
         floatModule)
 where
 
@@ -105,6 +106,37 @@ directStyleAppParameters dcon_type ty_args
       of ValRT -> Just (ValPT Nothing ::: ty)
          BoxRT -> Just (BoxPT ::: ty)
          _ -> Nothing
+
+-- | Based on the operator variable, pick which arguments should be floated.
+--
+-- A Just value means the argument should be moved, and has the given type.
+-- If unknown, don't move an argument.
+floatedParameters :: TypeEnv -> Var -> [TypM] -> [Maybe ParamType]
+floatedParameters tenv op_var ty_args =
+  case lookupDataCon op_var tenv
+  of Just dcon_type ->
+       -- Move the movable fields of data constructors
+       directStyleAppParameters dcon_type ty_args ++ repeat Nothing
+     Nothing
+       | op_var `isPyonBuiltin` the_store ->
+           -- Also move the argument of 'store', so that we can
+           -- do store-load propagation 
+           let [TypM store_type] = ty_args
+           in [Nothing, Just (ValPT Nothing ::: store_type), Nothing]
+       | op_var `isPyonBuiltin` the_storeBox ->
+           -- Also move the argument of 'storeBox', so that we can
+           -- do store-load propagation 
+           let [TypM store_type] = ty_args
+           in [Just (BoxPT ::: store_type), Nothing]
+       | otherwise ->
+           repeat Nothing
+
+-- | Determine which parameters should be floated.  Return True if the
+--   parameter should be floated, False otherwise.  For parameters where it's
+--   unknown, False is returned.
+floatedParameters' :: TypeEnv -> Var -> [TypM] -> [Bool]
+floatedParameters' tenv op ty_args =
+  map isJust $ floatedParameters tenv op ty_args
 
 -------------------------------------------------------------------------------
 -- Floatable contexts
@@ -538,7 +570,7 @@ flattenApp expression =
 createFlattenedApp inf op_var ty_args args = do
   -- Determine which parameters should be moved
   tenv <- getTypeEnv
-  let moved = moved_parameters tenv
+  let moved = floatedParameters tenv op_var ty_args
 
   -- Flatten arguments
   (unzip -> (args', concat -> arg_contexts)) <- zipWithM flatten_arg moved args
@@ -586,29 +618,6 @@ createFlattenedApp inf op_var ty_args args = do
     is_trivial_arg (ExpM (VarE {})) = True
     is_trivial_arg (ExpM (LitE {})) = True
     is_trivial_arg _ = False
-
-    -- Based on the data constructor's type, pick which arguments to move.
-    -- A Just value means the argument should be moved, and has the given type.
-    -- If unknown, don't move an argument.
-    moved_parameters :: TypeEnv -> [Maybe ParamType]
-    moved_parameters tenv = 
-      case lookupDataCon op_var tenv
-      of Just dcon_type ->
-           -- Move the movable fields of data constructors
-           directStyleAppParameters dcon_type ty_args ++ repeat Nothing
-         Nothing
-           | op_var `isPyonBuiltin` the_store ->
-               -- Also move the argument of 'store', so that we can
-               -- do store-load propagation 
-               let [TypM store_type] = ty_args
-               in [Nothing, Just (ValPT Nothing ::: store_type), Nothing]
-           | op_var `isPyonBuiltin` the_storeBox ->
-               -- Also move the argument of 'storeBox', so that we can
-               -- do store-load propagation 
-               let [TypM store_type] = ty_args
-               in [Just (BoxPT ::: store_type), Nothing]
-           | otherwise ->
-               repeat Nothing
 
 floatInExp :: ExpM -> Flt ExpM
 floatInExp (ExpM expression) =

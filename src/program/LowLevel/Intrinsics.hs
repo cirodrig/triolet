@@ -17,6 +17,7 @@ import Builtins.Builtins
 import LowLevel.Syntax
 import LowLevel.Build
 import LowLevel.CodeTypes
+import LowLevel.Records
 import qualified Type.Var
 
 lowerIntrinsicOp :: (Monad m, Supplies m (Ident Var)) =>
@@ -111,13 +112,10 @@ id_int = do
   let atom = ValA [VarV param_var]
   return $ LamV $ closureFun [param_var] [int_type] $ ReturnE atom
 
--- | A binary operation on indexed ints.  It takes two unit parameters
---   and two records.
-indexedIntRecord :: StaticRecord
-indexedIntRecord = constStaticRecord [PrimField nativeIntType] 
-
 indexedIntType = RecordType indexedIntRecord
 
+-- | A binary operation on indexed ints.  It takes two unit parameters
+--   and two records.
 binary_indexed_int :: (Monad m, Supplies m (Ident Var)) => Prim -> m Val
 binary_indexed_int op = do
   param_var1 <- newAnonymousVar (PrimType UnitType)

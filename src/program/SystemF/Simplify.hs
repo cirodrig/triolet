@@ -111,7 +111,7 @@ withMaybeValue v (Just val) m = withKnownValue v val m
 withDefValue :: Def Mem -> LR a -> LR a
 withDefValue (Def v f) m =
   let fun_info = funInfo $ fromFunM f
-  in withKnownValue v (ComplexValue (Just v) $ FunValue fun_info f) m
+  in withKnownValue v (ComplexValue (Just v) Nothing $ FunValue fun_info f) m
 
 withDefValues :: DefGroup (Def Mem) -> LR a -> LR a
 withDefValues defs m = foldr withDefValue m $ defGroupMembers defs
@@ -164,316 +164,6 @@ dumpKnownValues m = LR $ \env ->
                     | (n, kv) <- IntMap.toList $ lrKnownValues env]
   in traceShow kv_doc $ runLR m env
 
-
--------------------------------------------------------------------------------
--- Known values
-
-{-
--- | A value that is known (or partially known) at compile time.
---
---   This is used for various kinds of compile-time partial evaluation:
---   inlining, constant propagation, copy propagation, and case of
---   known value elimination.
---
---   The 'cheapValue', if available, is a value that should be inlined
---   even if it doesn't enable any optimizations.
-data KnownValue =
-    -- | A function, which may be inlined where it is used.
-    FunValue
-    { knownInfo :: ExpInfo
-    , _cheapValue :: !(Maybe ExpM)
-    , knownFun  :: !FunM
-    }
-
-    -- | A fully applied data constructor.
-    --
-    --   In the case of reference objects, the fully applied constructor is
-    --   a single-argument function that writes into its argument.
-  | DataValue
-    { knownInfo    :: ExpInfo 
-    , _cheapValue :: !(Maybe ExpM)
-    , knownDataCon :: !Var 
-      -- | Representation of the constructed value, as it would be seen when
-      --   inspected by a case statement.
-    , knownRepr    :: !ReturnRepr
-      -- | Type arguments, which should match a case alternative's
-      --   'altTyArgs'.
-    , knownTyArgs  :: [TypM] 
-      -- | Existential types, one for each pattern in a
-      --   case alternative's 'altExTypes'
-    , knownExTypes :: [TypM] 
-      -- | Data fields, one for each pattenr in a case
-      -- alternative's 'altParams'
-    , knownFields  :: [MaybeValue]
-    }
-    
-    -- | A literal value.
-  | LitValue
-    { knownInfo :: ExpInfo
-    , knownLit  :: Lit
-    }
-    
-    -- | A variable reference, where nothing 
-    --   further is known about what's assigned to the variable.  This is
-    --   also used for data constructors that have not been applied to
-    --   arguments.
-    --
-    --   Nullary data constructors are not described by a 'VarValue',
-    --   but rather by a 'DataValue'.
-  | VarValue
-    { knownInfo :: ExpInfo
-    , knownVar  :: !Var
-    }
-    
-    -- | A heap state value.  Only side-effecting expressions return these.
-  | KnownHeapState !HeapState
- 
--- | A known state of the contents of memory
-data HeapState =
-  -- | A known value is stored in a known address
-  StoredValue !KnownValue !Var
-
-type MaybeValue = Maybe KnownValue
-
-cheapValue :: KnownValue -> Maybe ExpM
-cheapValue (FunValue {_cheapValue = v}) = v
-cheapValue (DataValue {_cheapValue = v}) = v
-cheapValue (LitValue inf l) = Just (ExpM $ LitE inf l)
-cheapValue (VarValue inf v) = Just (ExpM $ VarE inf v)
-cheapValue (KnownHeapState _) = Nothing
-
--- | Set the cheap value of a 'KnownValue', but only if it isn't already
---   assigned.
---
---   This is used on values that are assigned to let-expressions.
-weakAssignCheapValue :: ExpM -> KnownValue -> KnownValue
-weakAssignCheapValue new_value kv
-  | isJust $ cheapValue kv = kv
-  | otherwise =
-      case kv
-      of KnownHeapState _ -> kv -- Can't assign this a value
-         _ -> kv {_cheapValue = Just new_value}
-
-weakAssignCheapVarValue :: ExpInfo -> Var -> KnownValue -> KnownValue
-weakAssignCheapVarValue inf v kv =
-  weakAssignCheapValue (ExpM (VarE inf v)) kv
-
-pprKnownValue :: KnownValue -> Doc
-pprKnownValue kv =
-  case kv
-  of FunValue _ m_cheap_value f ->
-       with_cheap_value m_cheap_value $ pprFun f
-     DataValue _ m_cheap_value con _ ty_args ex_types fields ->
-       let type_docs =
-             map (text "@" <>) $ map (pprType . fromTypM) (ty_args ++ ex_types)
-           field_docs = map pprMaybeValue fields
-           data_doc =
-             pprVar con <>
-             parens (sep $ punctuate (text ",") $ type_docs ++ field_docs)
-       in with_cheap_value m_cheap_value data_doc
-     VarValue _ v -> pprVar v
-     LitValue _ l -> pprLit l
-     KnownHeapState _ -> text "(heap)"
-  where
-    with_cheap_value Nothing doc = doc
-    with_cheap_value (Just e) doc =
-      parens $ hang ((pprExp e) <+> text "=") 2 doc
-     
-pprMaybeValue :: MaybeValue -> Doc
-pprMaybeValue Nothing = text "(?)"
-pprMaybeValue (Just kv) = pprKnownValue kv
-
--- | Is the variable mentioned in the value?
---
---   Does not check data constructors.
-knownValueMentions :: KnownValue -> Var -> Bool
-knownValueMentions kv search_v =
-  case kv
-  of VarValue _ v -> v == search_v
-     LitValue _ _ -> False
-     FunValue _ cheap_value f ->
-       search_v `Set.member` freeVariables cheap_value ||
-       search_v `Set.member` freeVariables f
-     DataValue _ cheap_value _ _ ty_args ex_types args ->
-       search_v `Set.member` freeVariables cheap_value ||
-       any (`typeMentions` search_v) (map fromTypM ty_args) ||
-       any (`typeMentions` search_v) (map fromTypM ex_types) ||
-       any (`maybeValueMentions` search_v) args
-     KnownHeapState st ->
-       heapStateMentions st search_v
-
--- | Is any of the variables mentioned in the value?
---
---   Does not check data constructors.
-knownValueMentionsAny :: KnownValue -> Set.Set Var -> Bool
-knownValueMentionsAny kv search_vs =
-  case kv
-  of VarValue _ v -> v `Set.member` search_vs
-     LitValue _ _ -> False
-     FunValue _ cheap_value f ->
-       not (Set.null $ Set.intersection search_vs (freeVariables f)) ||
-       not (Set.null $ Set.intersection search_vs (freeVariables cheap_value))
-     DataValue _ cheap_value _ _ ty_args ex_types args ->
-       not (Set.null $ Set.intersection search_vs (freeVariables cheap_value)) ||
-       any (`typeMentionsAny` search_vs) (map fromTypM ty_args) ||
-       any (`typeMentionsAny` search_vs) (map fromTypM ex_types) ||
-       any (`maybeValueMentionsAny` search_vs) args
-     KnownHeapState st ->
-       heapStateMentionsAny st search_vs
-
-maybeValueMentions :: MaybeValue -> Var -> Bool
-maybeValueMentions Nothing _ = False
-maybeValueMentions (Just kv) v = knownValueMentions kv v
-
-maybeValueMentionsAny :: MaybeValue -> Set.Set Var -> Bool
-maybeValueMentionsAny Nothing _ = False
-maybeValueMentionsAny (Just kv) v = knownValueMentionsAny kv v
-
-heapStateMentions st search_v =
-  case st
-  of StoredValue kv location ->
-       location == search_v || kv `knownValueMentions` search_v
-
-heapStateMentionsAny st search_vars =
-  case st
-  of StoredValue kv location ->
-       location `Set.member` search_vars ||
-       kv `knownValueMentionsAny` search_vars
-
--- | Given that this is the value of an expression, should we replace the  
---   expression with this value?
-worthPropagating :: KnownValue -> Bool
-worthPropagating kv = 
-  case kv
-  of FunValue {} -> True -- Always inline functions
-     DataValue {knownFields = args} -> null args -- Inline nullary data values
-     LitValue {} -> True
-     VarValue {} -> True
-     KnownHeapState {} -> False
-
--- | Convert a known value to an expression.  It's an error if the known
---   value cannot be converted (e.g. it's a data constructor with some
---   unknown fields).
-knownValueExp :: KnownValue -> Maybe ExpM
-knownValueExp kv = 
-  case kv
-  of VarValue inf v -> Just $ ExpM $ VarE inf v
-     LitValue inf l -> Just $ ExpM $ LitE inf l
-     FunValue _ (Just cheap_value) _ -> Just cheap_value
-     FunValue inf Nothing f -> Just (ExpM $ LamE inf f)
-     DataValue _ (Just cheap_value) _ _ _ _ _ -> Just cheap_value
-     DataValue inf Nothing con _ ty_args ex_types args ->
-       -- Get argument values.  All arguments must have a known value.
-       case sequence $ map (knownValueExp =<<) args
-       of Just arg_values ->
-            Just $ ExpM $ AppE inf (ExpM $ VarE inf con) (ty_args ++ ex_types) arg_values
-          Nothing -> Nothing
-     KnownHeapState {} -> Nothing
-
--- | Remove references to any of the given variables in the known value
-forgetVariables :: Set.Set Var -> MaybeValue -> MaybeValue
-forgetVariables forget_vars mv = forget mv
-  where
-    forget Nothing = Nothing
-    forget (Just kv) =
-      case kv
-      of VarValue _ v 
-           | v `Set.member` forget_vars -> Nothing
-           | otherwise -> Just kv
-         LitValue _ _ -> Just kv
-         FunValue inf cheap_value f
-           | not (Set.null $ Set.intersection forget_vars (freeVariables f)) ->
-               Nothing
-           | otherwise ->
-             let new_cheap_value =
-                   if Set.null $ Set.intersection forget_vars (freeVariables cheap_value)
-                   then cheap_value
-                   else Nothing
-             in Just $ FunValue inf new_cheap_value f
-
-         DataValue inf m_cheap_value con repr ty_args ex_types args
-           | any (`typeMentionsAny` forget_vars) (map fromTypM ty_args) ||
-             any (`typeMentionsAny` forget_vars) (map fromTypM ex_types) ->
-               Nothing
-           | otherwise ->
-               let args' = map forget args
-                   m_cheap_value' =
-                     if Set.null $ Set.intersection forget_vars (freeVariables m_cheap_value)
-                     then m_cheap_value
-                     else Nothing
-               in Just $ DataValue inf m_cheap_value' con repr ty_args ex_types args'
-         KnownHeapState (StoredValue stored_kv v)
-           | v `Set.member` forget_vars -> Nothing
-           | otherwise -> do
-               stored_kv' <- forget (Just stored_kv)
-               return $ KnownHeapState (StoredValue stored_kv' v)
-
--- | Construct a known value for a data constructor application,
---   given the arguments.  If this data constructor takes an output pointer
---   argument, that argument should /not/ be included among the parameters.
-dataValue :: ExpInfo
-          -> DataType           -- ^ The data type being constructed
-          -> DataConType        -- ^ The data constructor being used
-          -> [TypM]             -- ^ Type arguments to the constructor
-          -> [MaybeValue]       -- ^ Value arguments to the constructor
-          -> MaybeValue
-dataValue inf d_type dcon_type ty_args args
-  | length ty_args == num_expected_ty_args,
-    length args == num_expected_args =
-      let remembered_arg_values =
-            [case fld_repr
-             of ValRT -> arg_value
-                BoxRT -> arg_value
-                _ -> Nothing
-            | (fld_repr ::: _, arg_value) <- zip field_types args]
-      in Just (DataValue inf Nothing (dataConCon dcon_type)
-               case_repr parametric_ty_args existential_ty_args remembered_arg_values)
-  | otherwise = Nothing
-  where
-    (field_types, result_type) =
-      instantiateDataConTypeWithExistentials dcon_type (map fromTypM ty_args)
-
-    -- Representation of this data value when inspected by a case statement 
-    case_repr =
-      case dataTypeRepresentation d_type
-      of Value -> ValRT
-         Boxed -> BoxRT
-         Referenced -> ReadRT
-
-    dcon_num_pattern_params = length (dataConPatternParams dcon_type)
-
-    -- The number of type arguments needed to make a fully applied
-    -- data constructor
-    num_expected_ty_args = dcon_num_pattern_params +
-                           length (dataConPatternExTypes dcon_type)
-
-    -- The number of value arguments needed to make a fully applied
-    -- data constructor.  There's an extra argument for the output pointer
-    -- if the result is a reference.
-    num_expected_args = length (dataConPatternArgs dcon_type)
-    
-    parametric_ty_args = take dcon_num_pattern_params ty_args
-    existential_ty_args = drop dcon_num_pattern_params ty_args
-
-    -- 
-  
--- | Create known values for data constructors in the global type environment.
---   In particular, nullary data constructors get a 'DataValue'.
-initializeKnownValues :: TypeEnv -> IntMap.IntMap KnownValue
-initializeKnownValues tenv =
-  let datacons = getAllDataConstructors tenv
-  in IntMap.mapMaybe make_datacon_value datacons
-  where
-     make_datacon_value dcon
-       | null (dataConPatternParams dcon) &&
-         null (dataConPatternExTypes dcon) &&
-         null (dataConPatternArgs dcon) =
-           let rrepr ::: _ = dataConPatternRange dcon
-               con = dataConCon dcon
-               cheap_expr = Just (ExpM $ VarE defaultExpInfo con)
-           in Just $ DataValue defaultExpInfo cheap_expr con rrepr [] [] []
-       | otherwise = Nothing
--}              
 -- | Try to construct the value of an expression, if it's easy to get.
 --
 --   This is called if we've already simplified an expression and thrown
@@ -618,7 +308,7 @@ rwExp expression = do
     AppE inf op ty_args args -> rwApp inf op ty_args args
     LamE inf fun -> do
       fun' <- rwFun fun
-      rwExpReturn (ExpM $ LamE inf fun', Just $ ComplexValue Nothing $ FunValue inf fun')
+      rwExpReturn (ExpM $ LamE inf fun', Just $ complexKnownValue $ FunValue inf fun')
     LetE inf bind val body -> rwLet inf bind val body
     LetfunE inf defs body -> rwLetrec inf defs body
     CaseE inf scrut alts -> rwCase inf scrut alts
@@ -665,10 +355,10 @@ rwAppWithOperator inf op' op_val ty_args args =
      _ ->
        -- Apply simplification tecnhiques specific to this operator
        case op_val
-       of Just (ComplexValue _ (FunValue _ funm@(FunM fun))) ->
+       of Just (ComplexValue _ _ (FunValue _ funm@(FunM fun))) ->
             inline_function_call funm
 
-          -- Some functions have special rewrite semantics
+          -- Use special rewrite semantics for built-in functions
           Just (VarValue _ op_var)
             | op_var `isPyonBuiltin` the_store ->
               rwStoreApp inf op' ty_args args
@@ -766,9 +456,11 @@ rwLoadApp inf op' ty_args args = do
       return (new_exp, Nothing)
   where
     -- Do we know what was stored here?
-    loaded_value [_, Just (ComplexValue _ (StoredValue Value val))] =
-        Just (asTrivialValue val, Just val)
-    loaded_value [_, _] = Nothing
+    loaded_value [_, addr_value] =
+      case addr_value 
+      of Just (ComplexValue _ _ (StoredValue Value val)) ->
+           Just (asTrivialValue val, Just val)
+         _ -> Nothing
     loaded_value _ =
       internalError "rwLoadApp: Wrong number of arguments in call"
 
@@ -781,7 +473,7 @@ rwLoadBoxApp inf op' ty_args (addr_arg : excess_args) = do
   let load_exp = ExpM $ AppE inf op' ty_args [addr_arg']
       loaded_value =
         case addr_value
-        of Just (ComplexValue _ (StoredValue Boxed val)) -> Just val
+        of Just (ComplexValue _ _ (StoredValue Boxed val)) -> Just val
            _ -> Nothing
       
       -- Try to make a simplified expression
@@ -830,7 +522,7 @@ rwLet inf bind val body =
        -- Otherwise, propagate the variable's known value.
        let local_val_value =
              case uses
-             of One -> Just $ InlinedValue bind_var val' val_value
+             of One -> Just $ setInlinedValue bind_var val' val_value
                 Many -> fmap (setTrivialValue bind_var) val_value
 
        -- Add the local variable to the environment while rewriting the body
@@ -892,7 +584,7 @@ rwCase inf scrut alts = do
             Just eliminated_case -> rwExp eliminated_case
             Nothing  -> no_eliminate scrut' [altm]
     _ -> case scrut_val
-         of Just (ComplexValue _ (DataValue _ con _ ex_args margs)) -> do
+         of Just (ComplexValue _ _ (DataValue _ con _ ex_args margs)) -> do
               -- Case of known value.
               -- Select the appropriate alternative and discard others.
               -- If possible, eliminate the expression.

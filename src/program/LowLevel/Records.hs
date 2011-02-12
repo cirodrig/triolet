@@ -69,6 +69,10 @@ pointerTypeTag =
 -------------------------------------------------------------------------------
 -- Record types
 
+-- | An indexed int is a record containing an int.
+indexedIntRecord :: StaticRecord
+indexedIntRecord = constStaticRecord [PrimField nativeIntType] 
+
 -- | A parameter passing convention consists of size, alignment, copy,
 -- and finalize functions
 passConvRecord :: StaticRecord

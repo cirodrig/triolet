@@ -589,12 +589,17 @@ subscript : (val n : intindex)
          -> val int
          -> read a;
 
-{-
-zip_SS : (val a : pure)
-      -> (val b : pure)
-      -> box Repr a
-      -> box Repr b
-      -> box Stream a
-      -> box Stream b
-      -> box Stream (PyonTuple2 a b);
--}
+-- Like subscript, but modifies an output pointer
+subscript_out : (val n : intindex)
+             -> (val a : pure)
+             -> box Repr a
+             -> out array n a
+             -> val int
+             -> out a;
+
+doall : (val n : intindex)
+     -> (val a : pure)
+     -> (val b : pure)
+     -> val IndexedInt n
+     -> box (val int -> sideeffect b)
+     -> sideeffect a;

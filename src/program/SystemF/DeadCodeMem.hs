@@ -22,6 +22,7 @@ import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.DeadCode
+import SystemF.Floating(floatedParameters')
 import Type.Eval
 import Type.Environment
 import Type.Type
@@ -219,29 +220,22 @@ edcAppE inf op ty_args args = do
   add_datacon_uses tenv op' args'
   return $ ExpM $ AppE inf op' ty_args args'
   where
-    -- If this is an application of a data constructor,
-    -- mark some arguments as used many times.
-    --
-    -- Only the data constructor fields that are actually supplied
-    -- in this application matter.
-    -- Other arguments/fields are ignored when 'zip' is called.
-    add_datacon_uses tenv (ExpM (VarE _ op_var)) edc_args
-      | Just (data_type, dcon_type) <- lookupDataConWithType op_var tenv =
-          let (field_types, _) =
-                instantiateDataConTypeWithExistentials dcon_type (map fromTypM ty_args)
-          in zipWithM_ mark_used_arg field_types edc_args
-    
-    add_datacon_uses _ _ _ = return ()
+    -- Determine which parameters should be floated.
+    -- If a parameter should be floated, mark it as having multiple uses
+    -- so it won't get inlined.
+    floated_parameters tenv op' =
+      case op'
+      of ExpM (VarE _ op_var) -> Just $ floatedParameters' tenv op_var ty_args
+         _ -> Nothing
 
-    -- If the argument is a variable, and the corresponding field is a
-    -- value or boxed object, treat this as many uses
-    mark_used_arg field_type (ExpM (VarE _ arg_var)) =
-      case field_type
-      of ValRT ::: _ -> mentionMany arg_var
-         BoxRT ::: _   -> mentionMany arg_var
-         _ -> return ()
-    
-    mark_used_arg _ _ = return ()
+    -- If an argument is a variable and should be floated,
+    -- mark the argument as being used many times.
+    add_datacon_uses tenv op' edc_args =
+      case floated_parameters tenv op'
+      of Nothing -> return ()
+         Just floated_params ->
+           mapM_ mentionMany $ 
+           [v | (ExpM (VarE _ v), True) <- zip edc_args floated_params]
 
 -- | Dead code elimination for a \"let\" expression.
 --

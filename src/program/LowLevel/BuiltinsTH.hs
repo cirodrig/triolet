@@ -211,6 +211,11 @@ builtinFunctions =
     
   , (PyonName module_prim "subscript",
      Right [| pyonBuiltin (SystemF.the_subscript) |])
+  , (PyonName module_prim "subscript_out",
+     Right [| pyonBuiltin (SystemF.the_subscript_out) |])
+
+  , (PyonName module_prim "doall",
+     Right [| pyonBuiltin (SystemF.the_doall) |])
 
     -- Functions that are replaced by primitive operations
   , (PyonName module_prim "storeBox",

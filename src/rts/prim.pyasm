@@ -111,3 +111,20 @@ function inline subscript
                             value repr @! PassConv.align);
    base @ const_array(value int 0, elt_type)[index];
 };
+
+// Get a pointer to an array element.  Exactly the same as 'subscript'.
+function inline subscript_out
+ (unit _, unit _, owned repr, pointer base, int index) -> pointer {
+   typedef elt_type = bytes(value repr @! PassConv.size,
+                            value repr @! PassConv.align);
+   base @ const_array(value int 0, elt_type)[index];
+};
+
+function inline doall (unit _, unit _, unit _, IndexedInt ix, owned f) -> () {
+  IndexedInt {count} = ix;
+  _ = while (int n = int 0) (n < count) {
+    () = () call f (n);
+    n + int 1;
+  };
+  ();
+};

@@ -213,6 +213,8 @@ pyonBuiltinVariableNames =
     -- Inserted by rewrite rules
   , "generate"
   , "subscript"
+  , "subscript_out"
+  , "doall"
   ]
 
 pyonBuiltinsSpecification =

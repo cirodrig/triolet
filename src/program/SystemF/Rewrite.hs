@@ -70,6 +70,7 @@ rewriteRules :: Map.Map Var RewriteRule
 rewriteRules = Map.fromList table
   where
     table = [ (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
+            , (pyonBuiltin the_TraversableDict_list_build, rwBuildList)
             , (pyonBuiltin the_TraversableDict_Stream_traverse, rwBuildTraverseStream)
             , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildTraverseStream)
             , (pyonBuiltin the_oper_CAT_MAP, rwBindStream)
@@ -118,6 +119,44 @@ rwTraverseList tenv inf [elt_type] [elt_repr, list] = fmap Just $
           varE ret_var])]
   
 rwTraverseList _ _ _ _ = return Nothing
+
+rwBuildList :: RewriteRule
+rwBuildList tenv inf [elt_type] (elt_repr : stream : other_args) =
+  case unpackVarAppM stream
+  of Just (op, stream_ty_args, stream_args)
+       | op `isPyonBuiltin` the_generate ->
+           case stream_ty_args
+           of [size, _] ->
+                case stream_args
+                of [count, _, generate_fn] ->
+                     fmap Just $
+                     buildListDoall inf elt_type elt_repr stream other_args size count generate_fn
+  
+     _ -> return Nothing
+
+rwBuildList _ _ _ _ = return Nothing
+
+buildListDoall inf elt_type elt_repr stream other_args size count generate_fn =
+  let array_type = varApp (pyonBuiltin the_array) [size, fromTypM elt_type]
+  in varAppE (pyonBuiltin the_make_list)
+     [elt_type, TypM size]
+     ([return count,
+       varAppE (pyonBuiltin the_referenced) [TypM array_type]
+       [lamE $ mkFun []
+        (\ [] -> return ([OutPT ::: array_type], SideEffectRT ::: array_type))
+        (\ [] [out_ptr] ->
+          varAppE (pyonBuiltin the_doall)
+          [TypM size, TypM array_type, elt_type]
+          [return count,
+           lamE $ mkFun []
+           (\ [] -> return ([ValPT Nothing ::: VarT (pyonBuiltin the_int)],
+                            SideEffectRT ::: fromTypM elt_type))
+           (\ [] [index_var] ->
+             appE (return generate_fn) [] 
+             [varE index_var,
+              varAppE (pyonBuiltin the_subscript_out) [TypM size, elt_type]
+              [return elt_repr, varE out_ptr, varE index_var]])])]] ++
+      map return other_args)
 
 -- | The Stream instances of 'build' and 'traverse' are identity functions
 rwBuildTraverseStream :: RewriteRule

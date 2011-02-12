@@ -47,19 +47,19 @@ data KnownValue =
     -- | A variable reference, where nothing is known about the variable's
     --   value
   | VarValue ExpInfo !Var
-  
-    -- | An expression that should be inlined unconditionally,
-    --   the variable that it was originally bound to,
-    --   and its known value.  This value is used for variables that are
-    --   known to be used exactly once.
-  | InlinedValue !Var ExpM !MaybeValue
+
+    -- | A variable's inlined value.  The expression should be inlined
+    --   wherever the variable is used.  Aside from the inlining directive,
+    --   these values behave like 'VarValue's.
+  | InlinedValue Var ExpM
 
     -- | A complex value.  If a variable is given, the variable holds this 
-    --   value.
-  | ComplexValue !(Maybe Var) !ComplexValue
+    --   value.  If an expression is given, the expression should be inlined
+    --   in place of the value.
+  | ComplexValue !(Maybe Var) !(Maybe ExpM) !ComplexValue
 
 complexKnownValue :: ComplexValue -> KnownValue
-complexKnownValue = ComplexValue Nothing
+complexKnownValue = ComplexValue Nothing Nothing
 
 -- | A complex value.  Complex values are generally not worth inlining unless
 --   it enables further optimizations.
@@ -103,9 +103,9 @@ asTrivialValue kv =
   case kv
   of LitValue inf l -> Just $ ExpM $ LitE inf l 
      VarValue inf v -> Just $ ExpM $ VarE inf v
-     InlinedValue _ e _ -> Just e
-     ComplexValue (Just v) _ -> Just $ ExpM $ VarE defaultExpInfo v
-     ComplexValue Nothing  _ -> Nothing
+     InlinedValue _ _ -> Nothing
+     ComplexValue (Just v) _ _ -> Just $ ExpM $ VarE defaultExpInfo v
+     ComplexValue Nothing _ _ -> Nothing
 
 -- | Record that a known value has been bound to a variable.
 --   If the value is nontrivial and not already associated with a variable,
@@ -113,15 +113,41 @@ asTrivialValue kv =
 setTrivialValue :: Var -> KnownValue -> KnownValue
 setTrivialValue var kv =
   case kv
-  of ComplexValue Nothing val -> ComplexValue (Just var) val
+  of ComplexValue Nothing _ val -> ComplexValue (Just var) Nothing val
      _ -> kv
+
+-- | Get the inlined expression for this value, if there is one, as well
+--   as any other value information.
+--
+--   Inlining is not contagious: if some other variable gets assigned an
+--   inlined value, that doesn't mean we should automatically inline that
+--   variable.
+asInlinedValue :: KnownValue -> Maybe (ExpM, Maybe KnownValue)
+asInlinedValue kv =
+  case kv
+  of InlinedValue _ exp -> Just (exp, Nothing)
+     ComplexValue v (Just exp) val -> Just (exp, Just $ ComplexValue v Nothing val)
+     _ -> Nothing
+
+setInlinedValue :: Var -> ExpM -> MaybeValue -> KnownValue
+setInlinedValue var val kv =
+  case kv
+  of Just (ComplexValue Nothing _ kv') ->
+       ComplexValue (Just var) (Just val) kv'
+     Just kv' -> kv'
+     Nothing -> InlinedValue var val
+
+clearInlinedValue :: KnownValue -> KnownValue
+clearInlinedValue (InlinedValue v _) = VarValue defaultExpInfo v
+clearInlinedValue (ComplexValue v _ cv) = ComplexValue v Nothing cv
+clearInlinedValue kv = kv
 
 -- | Get the value stored in memory after a writer has executed.
 resultOfWriterValue :: KnownValue -> MaybeValue
 resultOfWriterValue (VarValue _ _) = Nothing 
-resultOfWriterValue (InlinedValue _ _ mv) = mv >>= resultOfWriterValue
-resultOfWriterValue (ComplexValue _ (WriterValue kv)) = Just kv
-resultOfWriterValue (ComplexValue _ (FunValue _ _)) = Nothing
+resultOfWriterValue (InlinedValue _ _) = Nothing
+resultOfWriterValue (ComplexValue _ _ (WriterValue kv)) = Just kv
+resultOfWriterValue (ComplexValue _ _ (FunValue _ _)) = Nothing
 resultOfWriterValue _ =
   -- Other values are not valid
   internalError "resultOfWriterValue"
@@ -136,16 +162,19 @@ forgetVariables varset kv = forget kv
       of VarValue _ v
            | v `Set.member` varset -> Nothing
            | otherwise -> Just kv
-         InlinedValue v _ _
+         InlinedValue v _
            -- Al variables referenced by this value have a lifetime at least 
            -- as long as 'v'.   If 'v' is in scope, all other variables are
            -- also in scope.
            | v `Set.member` varset -> Nothing
            | otherwise -> Just kv
          LitValue _ _ -> Just kv
-         ComplexValue stored_name cv ->
+         ComplexValue stored_name stored_value cv ->
            -- First eliminate variables from 'stored_name' and 'cv'
            -- individually.  Then construct a new value from what's left.
+           --
+           -- If stored_name is not eliminated,
+           -- stored_value won't be eliminated either.
            let cv' =
                  case cv
                  of FunValue _ f
@@ -164,17 +193,19 @@ forgetVariables varset kv = forget kv
                       fmap WriterValue $ forget kv
                     StoredValue repr kv ->
                       fmap (StoredValue repr) $ forget kv
-               stored_name' =
+               (stored_name', stored_value') =
                  case stored_name
-                 of Just v | v `Set.member` varset -> Nothing
-                    _ -> stored_name
+                 of Just v | v `Set.member` varset -> (Nothing, Nothing)
+                    _ -> (stored_name, stored_value)
            in case cv'
               of Nothing ->
                    case stored_name'
                    of Nothing -> Nothing
-                      Just v -> Just $ VarValue defaultExpInfo v
+                      Just v -> case stored_value'
+                                of Nothing -> Just $ VarValue defaultExpInfo v
+                                   Just sv -> Just $ InlinedValue v sv
                  Just complex_value ->
-                   Just $ ComplexValue stored_name' complex_value
+                   Just $ ComplexValue stored_name' stored_value' complex_value
 
 -- | Pretty-print a known value
 pprKnownValue :: KnownValue -> Doc
@@ -182,10 +213,10 @@ pprKnownValue kv =
   case kv
   of VarValue _ v -> pprVar v
      LitValue _ l -> pprLit l
-     InlinedValue v exp _ ->
+     InlinedValue v exp ->
        parens $ pprVar v <+> text "=" <+> pprExp exp
-     ComplexValue Nothing cv -> pprComplexValue cv
-     ComplexValue (Just v) cv ->
+     ComplexValue Nothing _ cv -> pprComplexValue cv
+     ComplexValue (Just v) _ cv ->
        parens $ pprVar v <+> text "=" <+> pprComplexValue cv
                                  
 pprComplexValue :: ComplexValue -> Doc
@@ -327,7 +358,8 @@ dataConstructorValue' inf is_constructor d_type dcon_type ty_args val_args
 
     -- The data constructor fields.  If there are more arguments, they number 
     -- one, and are the output pointer.
-    field_args = take num_expected_args val_args
+    -- Discard inlining directives.
+    field_args = map (fmap clearInlinedValue) $ take num_expected_args val_args
 
     -- If all type arguments and fields are present, this is the data value
     data_value =
@@ -362,5 +394,5 @@ initializeKnownValues tenv =
          null (dataConPatternArgs dcon) =
            let con = dataConCon dcon
                data_value = DataValue defaultExpInfo con [] [] []
-           in Just $ ComplexValue (Just con) data_value
+           in Just $ ComplexValue (Just con) Nothing data_value
        | otherwise = Nothing
