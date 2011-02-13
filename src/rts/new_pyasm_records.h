@@ -81,7 +81,7 @@ record MPyonTuple2(a, b) {
   b member2;
 };
 
-// Pairs of objects
+// Pairs of mutable objects
 record Pair(a) {
   a fst;
   a snd;

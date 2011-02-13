@@ -168,10 +168,12 @@ pyonBuiltinVariableNames =
 
     -- Integer index arithmetic 
   , "zero_i"
+  , "one_i"
   , "plus_i"
   , "minus_i"
   , "min_i"
   , "zero_ii"
+  , "one_ii"
   , "plus_ii"
   , "minus_ii"
   , "min_ii"
@@ -215,6 +217,7 @@ pyonBuiltinVariableNames =
   , "subscript"
   , "subscript_out"
   , "doall"
+  , "for"
   ]
 
 pyonBuiltinsSpecification =

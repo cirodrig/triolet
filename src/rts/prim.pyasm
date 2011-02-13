@@ -128,3 +128,43 @@ function inline doall (unit _, unit _, unit _, IndexedInt ix, owned f) -> () {
   };
   ();
 };
+
+function inline for
+  (unit _, unit _,
+   owned acc_repr, IndexedInt ix, pointer init, owned f, pointer ret) -> () {
+  IndexedInt {count} = ix;
+
+  // The for loop has an 'input' and an 'output' accumulator, and swaps
+  // between them.
+  acc_size = acc_repr @! PassConv.size;
+  acc_align = acc_repr @! PassConv.align;
+  acc_copy = acc_repr @! PassConv.copy;
+  acc_finalize = acc_repr @! PassConv.finalize;
+  typedef acc_type = bytes(value acc_size, value acc_align);
+  typedef acc_pair = Pair(acc_type);
+
+  // Setup
+  accs = pointer primcall pyon_alloc (sizeof acc_pair);
+  () = () call acc_copy (init, accs @ acc_pair.fst);
+
+  // Main loop.
+  // At start, old_acc holds accumulator, new_acc is uninitialized,
+  // reduce_tmp is uninitialized.
+  // At termination, old_acc holds final accumulator, new_acc is uninitialized,
+  // reduce_tmp is uninitialized.
+  (_, final_acc, clear_acc) =
+    while (int n = int 0,
+           pointer old_acc = accs @ acc_pair.fst,
+           pointer new_acc = accs @ acc_pair.snd)
+          (n < count) {
+    () = () call f (n, old_acc, new_acc);
+    () = () call acc_finalize (old_acc);
+    (n + int 1, new_acc, old_acc);
+  };
+  
+  // Cleanup
+  () = () call acc_copy (final_acc, ret);
+  () = () call acc_finalize (final_acc);
+  () = () primcall pyon_dealloc (accs);
+  ();
+};

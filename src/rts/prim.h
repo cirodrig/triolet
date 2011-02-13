@@ -40,3 +40,6 @@ extern function pyon.internal.prim.min_ii
 
 extern function pyon.internal.prim.doall
   (unit, unit, unit, IndexedInt, owned) -> ();
+
+extern function pyon.internal.prim.for
+  (unit, unit, owned, IndexedInt, pointer, owned, pointer) -> ();

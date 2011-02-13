@@ -20,30 +20,30 @@ function dummy_finalizer (pointer p) -> () {
 };
 
 // Copy 1 byte
-function copy1F (pointer src, pointer dst) -> () {
+function inline copy1F (pointer src, pointer dst) -> () {
   !dst = uint8 load src;
   ();
 };
 
 // Copy 2 bytes
-function copy2F (pointer src, pointer dst) -> () {
+function inline copy2F (pointer src, pointer dst) -> () {
   !dst = uint16 load src;
   ();
 };
 
 // Copy 4 bytes
-function copy4F (pointer src, pointer dst) -> () {
+function inline copy4F (pointer src, pointer dst) -> () {
   !dst = uint32 load src;
   ();
 };
 
 // Copy 8 bytes
-function copy8F (pointer src, pointer dst) -> () {
+function inline copy8F (pointer src, pointer dst) -> () {
   !dst = uint64 load src;
   ();
 };
 
 // Copy some bytes according to a PassConv object
-function copy (unit _, owned passconv, pointer src, pointer dst) -> () {
+function inline copy (unit _, owned passconv, pointer src, pointer dst) -> () {
   () call (passconv @! PassConv.copy) (src, dst);
 };

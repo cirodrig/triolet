@@ -70,8 +70,14 @@ lowerIntrinsicOp v
          id_float)
       , (pyonBuiltin the_VectorDict_float_dot,
          binary_float (PrimMulF S32))
+      , (pyonBuiltin the_zero_ii,
+         indexed_int_constant 0)
+      , (pyonBuiltin the_one_ii,
+         indexed_int_constant 1)
       , (pyonBuiltin the_min_ii,
          binary_indexed_int (PrimMinZ Signed S32))
+      , (pyonBuiltin the_minus_ii,
+         binary_indexed_int (PrimSubZ Signed S32))
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
@@ -113,6 +119,9 @@ id_int = do
   return $ LamV $ closureFun [param_var] [int_type] $ ReturnE atom
 
 indexedIntType = RecordType indexedIntRecord
+
+indexed_int_constant :: (Monad m, Supplies m (Ident Var)) => Integer -> m Val
+indexed_int_constant n = return $ RecV indexedIntRecord [nativeIntV n]
 
 -- | A binary operation on indexed ints.  It takes two unit parameters
 --   and two records.

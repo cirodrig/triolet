@@ -59,6 +59,8 @@ caseOfTraversableDict tenv scrutinee container_type mk_body =
   [mkAlt tenv (pyonBuiltin the_traversableDict) [container_type] $
    \ [] [trv, bld] -> mk_body trv bld]
 
+intType = VarT (pyonBuiltin the_int)
+
 -------------------------------------------------------------------------------
 -- Rewrite rules
 
@@ -78,7 +80,9 @@ rewriteRules = Map.fromList table
             , (pyonBuiltin the_fun_zip, rwZip)
             , (pyonBuiltin the_fun_zip_Stream, rwZipStream)
             , (pyonBuiltin the_fun_reduce, rwReduce)
+            , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
             , (pyonBuiltin the_fun_reduce1, rwReduce1)
+            , (pyonBuiltin the_fun_reduce1_Stream, rwReduce1Stream)
             ]
 
 -- | Attempt to rewrite an application term.
@@ -106,7 +110,7 @@ rwTraverseList tenv inf [elt_type] [elt_repr, list] = fmap Just $
     [varE size_var,
      return elt_repr,
      lamE $ mkFun []
-     (\ [] -> return ([ValPT Nothing ::: VarT (pyonBuiltin the_int),
+     (\ [] -> return ([ValPT Nothing ::: intType,
                        OutPT ::: fromTypM elt_type],
                       SideEffectRT ::: fromTypM elt_type))
      (\ [] [index_var, ret_var] ->
@@ -149,7 +153,7 @@ buildListDoall inf elt_type elt_repr stream other_args size count generate_fn =
           [TypM size, TypM array_type, elt_type]
           [return count,
            lamE $ mkFun []
-           (\ [] -> return ([ValPT Nothing ::: VarT (pyonBuiltin the_int)],
+           (\ [] -> return ([ValPT Nothing ::: intType],
                             SideEffectRT ::: fromTypM elt_type))
            (\ [] [index_var] ->
              appE (return generate_fn) [] 
@@ -211,7 +215,7 @@ rewriteMapOfGenerate tenv inf elt2 repr2 transformer
   varAppE (pyonBuiltin the_generate) [TypM g_sizeix, elt2]
     [return g_count, return repr2,
      lamE $ mkFun []
-     (\ [] -> return ([ValPT Nothing ::: VarT (pyonBuiltin the_int)],
+     (\ [] -> return ([ValPT Nothing ::: intType],
                       BoxRT ::: FunT (OutPT ::: fromTypM elt2) (SideEffectRT ::: fromTypM elt2)))
      (\ [] [ixvar] -> do
          rhs <- appE (return g_fun) [] [varE ixvar, varE tmpvar]
@@ -283,7 +287,7 @@ rwZipStream tenv inf
                varAppE (pyonBuiltin the_repr_PyonTuple2)
                [element1, element2] [return repr1, return repr2],
                lamE $ mkFun []
-               (\ [] -> return ([ValPT Nothing ::: VarT (pyonBuiltin the_int)],
+               (\ [] -> return ([ValPT Nothing ::: intType],
                                 BoxRT ::: FunT (OutPT ::: elem_ty)
                                           (SideEffectRT ::: elem_ty)))
                (\ [] [ixvar] ->
@@ -321,6 +325,92 @@ rwReduce1 tenv inf
       app_other_args)
 
 rwReduce1 _ _ _ _ = return Nothing
+
+rwReduceStream :: RewriteRule
+rwReduceStream tenv inf [element] (elt_repr : reducer : init : stream : other_args) =
+  case unpackVarAppM stream
+  of Just (op, ty_args, args)
+       | op `isPyonBuiltin` the_generate ->
+           case ty_args
+           of [size, _] ->
+                case args
+                of [count, _, producer] ->
+                     fmap Just $
+                     rwReduceGenerate tenv inf element elt_repr reducer init other_args size count producer
+     _ -> return Nothing
+
+rwReduceStream _ _ _ _ = return Nothing
+
+rwReduceGenerate tenv inf element elt_repr reducer init other_args size count producer =
+  -- Create a sequential loop.
+  -- In each loop iteration, generate a value and combine it with the accumulator. 
+  varAppE (pyonBuiltin the_for) [TypM size, element]
+  (return elt_repr :
+   return count :
+   return init :
+   (lamE $ mkFun []
+   (\ [] -> return ([ValPT Nothing ::: intType, ReadPT ::: fromTypM element,
+                     OutPT ::: fromTypM element],
+                    SideEffectRT ::: fromTypM element))
+   (\ [] [ix, acc, ret] -> do
+       tmpvar <- newAnonymousVar ObjectLevel
+       let tmpvar_binder = localVarP tmpvar (fromTypM element) elt_repr
+       -- Produce a new value
+       rhs <- appE (return producer) [] [varE ix, varE tmpvar]
+       -- Combine with accumulator
+       body <- appE (return reducer) [] [varE acc, varE tmpvar, varE ret]
+       return $ ExpM $ LetE defaultExpInfo tmpvar_binder rhs body)) :
+   map return other_args)
+
+rwReduce1Stream :: RewriteRule
+rwReduce1Stream tenv inf [element] (elt_repr : reducer : stream : other_args) =
+  case unpackVarAppM stream
+  of Just (op, ty_args, args)
+       | op `isPyonBuiltin` the_generate ->
+           case ty_args
+           of [size, _] ->
+                case args
+                of [count, _, producer] ->
+                     fmap Just $
+                     rwReduce1Generate tenv inf element elt_repr reducer other_args size count producer
+     _ -> return Nothing
+
+rwReduce1Stream _ _ _ _ = return Nothing
+
+rwReduce1Generate tenv inf element elt_repr reducer other_args size count producer = do
+  producer_var <- newAnonymousVar ObjectLevel
+  let producer_type = funType [ValPT Nothing ::: intType, OutPT ::: fromTypM element]
+                      (SideEffectRT ::: fromTypM element)
+      producer_binder = memVarP producer_var (BoxPT ::: producer_type)
+
+  -- Get the first value.
+  -- This may crash if there aren't any values.
+  tmpvar <- newAnonymousVar ObjectLevel
+  let tmpvar_binder = localVarP tmpvar (fromTypM element) elt_repr
+  rhs <- varAppE producer_var [] [litE (IntL 0 intType), varE tmpvar]
+  
+  -- Loop over the remaining values
+  producer_plus_1 <-
+    lamE $ mkFun []
+    (\ [] -> return ([ValPT Nothing ::: intType],
+                     BoxRT ::: FunT (OutPT ::: fromTypM element) (SideEffectRT ::: fromTypM element)))
+    (\ [] [index] ->
+      varAppE producer_var []
+      [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
+       [varE index, litE (IntL 1 intType)]])
+  
+  let size_minus_1 = varApp (pyonBuiltin the_minus_i) [size, VarT (pyonBuiltin the_one_i)]
+  count_minus_1 <-
+    varAppE (pyonBuiltin the_minus_ii)
+    [TypM size, TypM $ VarT (pyonBuiltin the_one_i)]
+    [return count, varE (pyonBuiltin the_one_ii)]
+
+  body <- rwReduceGenerate tenv inf element elt_repr reducer
+          (ExpM $ VarE defaultExpInfo tmpvar) other_args size_minus_1 count_minus_1 producer_plus_1
+          
+  -- Build a let expression
+  return $ ExpM $ LetE defaultExpInfo producer_binder producer $
+           ExpM $ LetE defaultExpInfo tmpvar_binder rhs body
 
 -------------------------------------------------------------------------------
 

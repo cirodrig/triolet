@@ -216,6 +216,8 @@ builtinFunctions =
 
   , (PyonName module_prim "doall",
      Right [| pyonBuiltin (SystemF.the_doall) |])
+  , (PyonName module_prim "for",
+     Right [| pyonBuiltin (SystemF.the_for) |])
 
     -- Functions that are replaced by primitive operations
   , (PyonName module_prim "storeBox",
