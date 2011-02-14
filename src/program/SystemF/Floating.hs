@@ -84,6 +84,24 @@ findByType id_supply tenv ptype assocs = search assocs
     
     search [] = return Nothing
 
+-- | Compute the type of a type application.  We assume there's no 
+--   type error in the application.
+computeInstantiatedType :: ReturnType -> [TypM] -> ReturnType
+computeInstantiatedType op_rtype args = apply_types op_rtype args
+  where
+    apply_types op_rtype [] = op_rtype
+    apply_types (BoxRT ::: FunT arg_ptype ret_rtype) (arg:args) =
+      case arg_ptype
+      of ValPT (Just param) ::: _ ->
+           let subst = singletonSubstitution param (fromTypM arg)
+           in apply_types (substituteBinding subst ret_rtype) args
+         ValPT Nothing ::: _ -> ret_rtype
+         _ -> bad_application
+
+    apply_types _ _ = bad_application
+
+    bad_application = internalError "Unexpected type error during floating"
+
 -- | Determine which parameters of a data constructor application
 --   should be converted to direct style.  It's an error if the wrong
 --   number of type parameters is given.  Returns a list containing a
@@ -597,10 +615,14 @@ createFlattenedApp inf op_var ty_args args = do
 
   -- If this is a dictionary expression, then float it.
   -- Otherwise return it.
-  if isDictionaryDataCon op_var
-    then do dict_expr <- floatDictionary inf new_expr op_var ty_args
-            return (dict_expr, arg_contexts)
-    else return (new_expr, arg_contexts)
+  case () of
+    () | isDictionaryDataCon op_var -> do
+           dict_expr <- floatDictionary inf new_expr op_var ty_args
+           return (dict_expr, arg_contexts)
+       | isReprCon op_var -> do
+           dict_expr <- floatReprDict inf new_expr op_var ty_args (length args')
+           return (dict_expr, arg_contexts)
+       | otherwise -> return (new_expr, arg_contexts)
   where
     flatten_arg Nothing arg =
       -- This argument stays in place
@@ -624,7 +646,7 @@ createFlattenedApp inf op_var ty_args args = do
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
       if isTrivialExp arg_expr
-        then return (arg, [])
+        then return (arg_expr, subcontext)
         else do
           tmpvar <- newAnonymousVar ObjectLevel
           let binding =
@@ -784,6 +806,33 @@ floatDictionary inf dict_expr op_var ty_args = do
               instantiateDataConType dc_type inst_type_args inst_ex_args
         in result_type
       | otherwise = internalError "floatDictionary"
+
+-- | Float out a @Repr@ dictionary construction expression.
+--   This is different from 'floatDictionary' since the operator isn't
+--   a data constructor.
+floatReprDict inf dict_expr op_var ty_args num_args = do
+  -- Get the type of the dictionary expression
+  tenv <- getTypeEnv
+  let BoxRT ::: dict_type = dictionary_type tenv
+
+  -- Create the binding that will be floated
+  dict_var <- newAnonymousVar ObjectLevel
+  let dict_param_type = BoxPT ::: dict_type
+      ctx = LetCtx inf (memVarP dict_var dict_param_type) dict_expr
+
+  -- Return the variable.  It's not renamed, since it's a new variable.
+  float ctx
+  return $ ExpM $ VarE inf dict_var
+  where
+    dictionary_type tenv =
+      case lookupType op_var tenv of
+        Just op_type ->
+          let app_type = computeInstantiatedType op_type ty_args
+          in drop_arg_types num_args app_type
+        _ -> internalError "floatReprDict"
+
+    drop_arg_types 0 t = t
+    drop_arg_types n (BoxRT ::: (FunT _ rt)) = drop_arg_types (n - 1) rt
 
 floatInAlt :: AltM -> Flt AltM
 floatInAlt (AltM alt) = do

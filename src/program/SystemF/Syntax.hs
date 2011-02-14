@@ -29,7 +29,8 @@ module SystemF.Syntax
      traverseSFExp, traverseAlt, traversePat,-}
      isDictionaryTypeCon,
      isDictionaryDataCon,
-     isSingletonCon
+     isSingletonCon,
+     isReprCon
     )
 where
 
@@ -294,4 +295,18 @@ isDictionaryDataCon v =
 --
 --   Singleton types are data types that have exactly one value.
 isSingletonCon :: Var -> Bool
-isSingletonCon v = isDictionaryTypeCon v -- Currently only dictionaries
+isSingletonCon v = isDictionaryTypeCon v
+
+-- | Return True iff this is a @Repr@ dictionary constructor.
+isReprCon :: Var -> Bool
+isReprCon v =
+  v `elem` [ pyonBuiltin the_repr_int
+           , pyonBuiltin the_repr_float
+           , pyonBuiltin the_repr_bool
+           , pyonBuiltin the_repr_list
+           , pyonBuiltin the_repr_Complex
+           , pyonBuiltin the_repr_PyonTuple2
+           , pyonBuiltin the_repr_Box
+           , pyonBuiltin the_repr_Boxed
+           , pyonBuiltin the_repr_Stream
+           ]
