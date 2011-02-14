@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Floating-point intrinsic functions",
+  pyonSources	 = ["fp.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "ok"
+}

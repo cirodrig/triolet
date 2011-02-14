@@ -1,0 +1,13 @@
+
+# This returns approximately n/2
+def f(n):
+	return log(sqrt(exp(n)))
+
+# This returns approximately 1
+def g(n):
+	x = sin(n)
+	y = cos(n)
+	return x * x + y * y
+
+export ccall f : float -> float
+export ccall g : float -> float
