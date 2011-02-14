@@ -68,6 +68,12 @@ isFloatableSingletonParamType (prepr ::: ptype) =
     floatable_repr (ValPT Nothing) = True
     floatable_repr _ = False
 
+-- | Return True if the expression is a variable or literal, False otherwise.
+isTrivialExp :: ExpM -> Bool
+isTrivialExp (ExpM (VarE {})) = True
+isTrivialExp (ExpM (LitE {})) = True
+isTrivialExp _                = False
+
 -- | Find a value indexed by a type.  Analogous to 'lookup'.
 findByType :: IdentSupply Var -> TypeEnv -> Type -> [(Type, a)] -> IO (Maybe a)
 findByType id_supply tenv ptype assocs = search assocs
@@ -405,11 +411,17 @@ instance Supplies Flt (Ident Var) where
 getTypeEnv :: Flt TypeEnv
 getTypeEnv = Flt $ \ctx -> return (fcTypeEnv ctx, [])
 
+-- | Float a binding, when the bound variable is a fresh variable.
+--   This should not be used to float preexisting bindings; use
+--   'floatAndRename' for that.
+float :: ContextExp -> Flt ()
+float ctx_exp = Flt $ \_ -> return ((), [contextItem ctx_exp])
+
 -- | Float a binding.  The binding will be renamed.
 --   The returned renaming should be applied to any 
 --   expression that may use the binding.
-float :: ContextExp -> Flt Renaming
-float ctx_exp = do
+floatAndRename :: ContextExp -> Flt Renaming
+floatAndRename ctx_exp = do
   -- Rename floated variables to avoid name conflicts
   (ctx_exp', rn) <- freshenContextExp ctx_exp
   let ctx = [contextItem ctx_exp']
@@ -601,28 +613,23 @@ createFlattenedApp inf op_var ty_args args = do
       -- Bind the function to a new variable and float it outward
       tmpvar <- newAnonymousVar ObjectLevel
       let floated_ctx = LetfunCtx lam_info (NonRec (Def tmpvar f'))
-      rn <- float floated_ctx
+      float floated_ctx
       
-      -- Get the renamed variable
-      let floated_var = rename rn tmpvar
-      return (ExpM $ VarE inf floated_var, [])
+      -- Return the function variable
+      return (ExpM $ VarE inf tmpvar, [])
 
     flatten_arg (Just param_type) arg = do
       (arg_expr, subcontext) <- flattenApp arg
 
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
-      if is_trivial_arg arg_expr
+      if isTrivialExp arg_expr
         then return (arg, [])
         else do
           tmpvar <- newAnonymousVar ObjectLevel
           let binding =
                 contextItem $ LetCtx inf (memVarP tmpvar param_type) arg_expr
           return (ExpM $ VarE inf tmpvar, subcontext ++ [binding])
-    
-    is_trivial_arg (ExpM (VarE {})) = True
-    is_trivial_arg (ExpM (LitE {})) = True
-    is_trivial_arg _ = False
 
 floatInExp :: ExpM -> Flt ExpM
 floatInExp (ExpM expression) =
@@ -682,7 +689,7 @@ floatInLet inf pat rhs body =
          then do
            -- Float this binding.  Since the binding may be combined with
            -- other bindings, set the uses to 'many'.
-           rn <- float $ LetCtx inf (setPatMUses Many pat) rhs'
+           rn <- floatAndRename $ LetCtx inf (setPatMUses Many pat) rhs'
 
            -- Rename and continue processing the body
            addPatternVar pat $ floatInExp $ rename rn body
@@ -691,6 +698,7 @@ floatInLet inf pat rhs body =
            return $ ExpM $ LetE inf pat rhs' body'
 
      LocalVarP pat_var pat_type pat_dict uses -> do
+       -- Float the dictionary argument
        pat_dict' <- floatInExp pat_dict
        rhs' <- anchorOnVar pat_var $ floatInExp rhs
        body' <- addPatternVar pat $ anchorOnVar pat_var $ floatInExp body
@@ -708,7 +716,7 @@ floatInLetfun inf defs body = do
        Rec {}    -> traverse (float_function_body def_vars) defs
 
   -- Float these functions
-  rn <- float (LetfunCtx inf defs')
+  rn <- floatAndRename (LetfunCtx inf defs')
   
   -- Float the body
   floatInExp $ rename rn body
@@ -724,7 +732,7 @@ floatInCase inf scr alts = do
   scr' <- floatInExp scr
   floatable <- is_floatable scr'
   if floatable
-    then do rn <- float ctx
+    then do rn <- floatAndRename ctx
             -- The floated variables were renamed. 
             -- Add the /renamed/ pattern variables to the environment.
             addRnPatternVars rn alt_params $ floatInExp $ rename rn alt_body
@@ -758,9 +766,9 @@ floatDictionary inf dict_expr op_var ty_args = do
   let dict_param_type = returnReprToParamRepr dict_repr ::: dict_type
       ctx = LetCtx inf (memVarP dict_var dict_param_type) dict_expr
       
-  -- Return the variable
-  rn <- float ctx
-  return $ ExpM $ VarE inf (rename rn dict_var)
+  -- Return the variable.  It's not renamed, since it's a new variable.
+  float ctx
+  return $ ExpM $ VarE inf dict_var
   where
     dictionary_type tenv
       | Just dc_type <- lookupDataCon op_var tenv =
