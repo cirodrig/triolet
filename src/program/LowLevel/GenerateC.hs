@@ -572,8 +572,9 @@ genPrimCall prim args =
       -- Floor division using C's round-to-zero division
       -- >  (x >= 0) == (y >= 0) || x % y == 0 ? x / y : x / y - 1
       let remainder = binary' CRmdOp x y
+          zero_check = equals remainder zero
           same_sign = geZero x `equals` geZero y
-          test = binary' CLorOp same_sign remainder
+          test = binary' CLorOp same_sign zero_check
           frac = binary' CDivOp x y
           adjusted_frac = binary' CSubOp frac (smallIntConst 1)
       in cCond test frac adjusted_frac
