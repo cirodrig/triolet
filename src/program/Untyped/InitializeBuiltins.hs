@@ -567,7 +567,8 @@ mkPassableClass = do
                                       complex_instance,
                                       any_instance, boxed_instance,
                                       list_instance, iter_instance,
-                                      tuple2_instance]
+                                      tuple2_instance, tuple3_instance,
+                                      tuple4_instance]
                     , clsTypeCon = pyonBuiltin SystemF.the_Repr
                     , clsDictCon =
                       internalError "Class 'Repr' has no dictionary constructor"
@@ -635,7 +636,30 @@ mkPassableClass = do
           , insType = TupleTy 2 @@ ConTy b @@ ConTy c
           , insCon = Just $ SystemF.pyonTupleReprCon 2
           , insMethods = []
-          } }
+          }
+  ; d <- newTyVar Star Nothing
+  ; let tuple3_instance =
+          Instance
+          { insQVars = [b, c, d]
+          , insConstraint = [passable $ ConTy b, passable $ ConTy c,
+                             passable $ ConTy d]
+          , insClass = cls
+          , insType = TupleTy 3 @@ ConTy b @@ ConTy c @@ ConTy d
+          , insCon = Just $ SystemF.pyonTupleReprCon 3
+          , insMethods = []
+          }
+  ; e <- newTyVar Star Nothing
+  ; let tuple4_instance =
+          Instance
+          { insQVars = [b, c, d, e]
+          , insConstraint = [passable $ ConTy b, passable $ ConTy c,
+                             passable $ ConTy d, passable $ ConTy e]
+          , insClass = cls
+          , insType = TupleTy 4 @@ ConTy b @@ ConTy c @@ ConTy d @@ ConTy e
+          , insCon = Just $ SystemF.pyonTupleReprCon 4
+          , insMethods = []
+          }
+  }
   
   return cls
 
@@ -686,6 +710,62 @@ mkZipType =
       , passable bT]
      , functionType [sT @@ aT, tT @@ bT]
        (uT @@ (TupleTy 2 @@ aT @@ bT)))
+
+mkZip3Type =
+  forallType [ Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
+             , Star
+             , Star
+             , Star] $ \ [s, t, u, v, a, b, c] ->
+  let sT = ConTy s
+      tT = ConTy t
+      uT = ConTy u
+      vT = ConTy v
+      aT = ConTy a
+      bT = ConTy b
+      cT = ConTy c
+  in ([ sT `IsInst` tiBuiltin the_Traversable
+      , tT `IsInst` tiBuiltin the_Traversable
+      , uT `IsInst` tiBuiltin the_Traversable
+      , vT `IsInst` tiBuiltin the_Traversable
+      , passable aT
+      , passable bT
+      , passable cT]
+     , functionType [sT @@ aT, tT @@ bT, uT @@ cT]
+       (vT @@ (TupleTy 3 @@ aT @@ bT @@ cT)))
+
+mkZip4Type =
+  forallType [ Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
+             , Star
+             , Star
+             , Star
+             , Star] $ \ [s, t, u, v, w, a, b, c, d] ->
+  let sT = ConTy s
+      tT = ConTy t
+      uT = ConTy u
+      vT = ConTy v
+      wT = ConTy w
+      aT = ConTy a
+      bT = ConTy b
+      cT = ConTy c
+      dT = ConTy d
+  in ([ sT `IsInst` tiBuiltin the_Traversable
+      , tT `IsInst` tiBuiltin the_Traversable
+      , uT `IsInst` tiBuiltin the_Traversable
+      , vT `IsInst` tiBuiltin the_Traversable
+      , wT `IsInst` tiBuiltin the_Traversable
+      , passable aT
+      , passable bT
+      , passable cT
+      , passable dT]
+     , functionType [sT @@ aT, tT @@ bT, uT @@ cT, vT @@ dT]
+       (wT @@ (TupleTy 4 @@ aT @@ bT @@ cT @@ dT)))
 
 mkCountType =
   return $ monomorphic $
@@ -806,6 +886,12 @@ initializeTIBuiltins = do
               ),
               ("zip", [| mkZipType |]
               , [| pyonBuiltin SystemF.the_fun_zip |]
+              ),
+              ("zip3", [| mkZip3Type |]
+              , [| pyonBuiltin SystemF.the_fun_zip3 |]
+              ),
+              ("zip4", [| mkZip4Type |]
+              , [| pyonBuiltin SystemF.the_fun_zip4 |]
               ),
               ("count", [| mkCountType |]
               , [| pyonBuiltin SystemF.the_count |]

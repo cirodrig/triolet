@@ -68,6 +68,27 @@ data ref PyonTuple2 : val (val pure -> val pure -> val pure)
   (val a : pure, val b : pure) () (read a, read b) : read PyonTuple2 a b;
 };
 
+data ref PyonTuple3 : val (val pure -> val pure -> val pure -> val pure)
+{
+  pyonTuple3 : (val a : pure) -> (val b : pure) -> (val c : pure)
+            -> write a -> write b -> write c -> write PyonTuple3 a b c,
+  (val a : pure, val b : pure, val c : pure) ()
+  (read a, read b, read c) : read PyonTuple3 a b c;
+};
+
+data ref PyonTuple4 :
+  val (val pure -> val pure -> val pure -> val pure -> val pure)
+{
+  pyonTuple4 : (val a : pure)
+            -> (val b : pure)
+            -> (val c : pure)
+            -> (val d : pure)
+            -> write a -> write b -> write c -> write d
+            -> write PyonTuple4 a b c d,
+  (val a : pure, val b : pure, val c : pure, val d : pure) ()
+  (read a, read b, read c, read d) : read PyonTuple4 a b c d;
+};
+
 data box EqDict : val (val pure -> val pure)
 {
   eqDict : (val a : pure)
@@ -229,6 +250,16 @@ repr_Complex : (val a : pure) -> box Repr a -> box Repr (Complex a);
 repr_PyonTuple2 :
     (val a : pure) -> (val b : pure) -> box Repr a -> box Repr b
  -> box Repr (PyonTuple2 a b);
+
+repr_PyonTuple3 :
+    (val a : pure) -> (val b : pure) -> (val c : pure)
+ -> box Repr a -> box Repr b -> box Repr c
+ -> box Repr (PyonTuple3 a b c);
+
+repr_PyonTuple4 :
+    (val a : pure) -> (val b : pure) -> (val c : pure) -> (val d : pure)
+ -> box Repr a -> box Repr b -> box Repr c -> box Repr d
+ -> box Repr (PyonTuple4 a b c d);
 
 -- This always returns the same, global object
 repr_Box : (val a : pure) -> box Repr a;
@@ -561,6 +592,31 @@ fun_zip_Stream : (val a : pure)
        	      -> box Stream b
        	      -> box Stream (PyonTuple2 a b);
 
+fun_zip3_Stream : (val a : pure)
+               -> (val b : pure)
+               -> (val c : pure)
+               -> box Repr a
+               -> box Repr b
+               -> box Repr c
+               -> box Stream a
+               -> box Stream b
+               -> box Stream c
+               -> box Stream (PyonTuple3 a b c);
+
+fun_zip4_Stream : (val a : pure)
+               -> (val b : pure)
+               -> (val c : pure)
+               -> (val d : pure)
+               -> box Repr a
+               -> box Repr b
+               -> box Repr c
+               -> box Repr d
+               -> box Stream a
+               -> box Stream b
+               -> box Stream c
+               -> box Stream d
+               -> box Stream (PyonTuple4 a b c d);
+
 fun_zip : (val s : val pure -> val pure)
        -> (val t : val pure -> val pure)
        -> (val u : val pure -> val pure)
@@ -574,6 +630,49 @@ fun_zip : (val s : val pure -> val pure)
        -> read s a
        -> read t b
        -> write u (PyonTuple2 a b);
+
+fun_zip3 : (val s : val pure -> val pure)
+        -> (val t : val pure -> val pure)
+        -> (val u : val pure -> val pure)
+        -> (val v : val pure -> val pure)
+        -> (val a : pure)
+        -> (val b : pure)
+        -> (val c : pure)
+        -> box TraversableDict s
+        -> box TraversableDict t
+        -> box TraversableDict u
+        -> box TraversableDict v
+        -> box Repr a
+        -> box Repr b
+        -> box Repr c
+        -> read s a
+        -> read t b
+        -> read u c
+        -> write v (PyonTuple3 a b c);
+
+fun_zip4 : (val s : val pure -> val pure)
+        -> (val t : val pure -> val pure)
+        -> (val u : val pure -> val pure)
+        -> (val v : val pure -> val pure)
+        -> (val w : val pure -> val pure)
+        -> (val a : pure)
+        -> (val b : pure)
+        -> (val c : pure)
+        -> (val d : pure)
+        -> box TraversableDict s
+        -> box TraversableDict t
+        -> box TraversableDict u
+        -> box TraversableDict v
+        -> box TraversableDict w
+        -> box Repr a
+        -> box Repr b
+        -> box Repr c
+        -> box Repr d
+        -> read s a
+        -> read t b
+        -> read u c
+        -> read v d
+        -> write w (PyonTuple4 a b c d);
 
 count : box Stream int;
 

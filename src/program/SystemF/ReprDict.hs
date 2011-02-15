@@ -114,7 +114,7 @@ withReprDict param_type f = do
   mdict <- lookupReprDict param_type
   case mdict of
     Just (MkDict dict) -> dict f
-    Nothing -> internalError err_msg 
+    Nothing -> internalError err_msg
   where
     err_msg = "withReprDict: Cannot construct dictionary for type:\n" ++
               show (pprType param_type)
@@ -133,6 +133,21 @@ createDictEnv = do
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin the_PyonTuple2) [VarT arg1, VarT arg2],
      createDict_Tuple2 arg1 arg2)
+  tuple3_dict <- do
+    v1 <- newAnonymousVar TypeLevel
+    v2 <- newAnonymousVar TypeLevel
+    v3 <- newAnonymousVar TypeLevel
+    return $ DictEnv.pattern [v1, v2, v3]
+      (varApp (pyonBuiltin the_PyonTuple3) [VarT v1, VarT v2, VarT v3])
+      (createDict_Tuple3 v1 v2 v3)
+  tuple4_dict <- do
+    v1 <- newAnonymousVar TypeLevel
+    v2 <- newAnonymousVar TypeLevel
+    v3 <- newAnonymousVar TypeLevel
+    v4 <- newAnonymousVar TypeLevel
+    return $ DictEnv.pattern [v1, v2, v3, v4]
+      (varApp (pyonBuiltin the_PyonTuple4) [VarT v1, VarT v2, VarT v3, VarT v4])
+      (createDict_Tuple4 v1 v2 v3 v4)
   list_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_list) [VarT arg],
      createDict_list arg)
@@ -142,7 +157,8 @@ createDictEnv = do
   return $ DictEnv.DictEnv [repr_dict, boxed_dict, stream_dict,
                             float_dict, int_dict,
                             list_dict, complex_dict,
-                            tuple2_dict, additive_dict, multiplicative_dict]
+                            tuple2_dict, tuple3_dict, tuple4_dict,
+                            additive_dict, multiplicative_dict]
 
 getParamType v subst =
   case substituteVar v subst
@@ -182,6 +198,66 @@ createDict_Tuple2 param_var1 param_var2 subst = MkDict $ \use_dict ->
       let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
       in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
          [dict1, dict2]
+
+createDict_Tuple3 :: Var -> Var -> Var -> Substitution -> MkDict
+createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $ \use_dict ->
+  withReprDict param1 $ \dict1 ->
+  withReprDict param2 $ \dict2 ->
+  withReprDict param3 $ \dict3 -> do
+    tmpvar <- newAnonymousVar ObjectLevel
+    let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
+    body <- saveAndUseDict data_type dict_exp use_dict
+    return $ ExpM $ LetE { expInfo = defaultExpInfo 
+                         , expBinder = mk_pat tmpvar
+                         , expValue = mk_dict dict1 dict2 dict3
+                         , expBody = body}
+  where
+    param1 = getParamType pv1 subst
+    param2 = getParamType pv2 subst
+    param3 = getParamType pv3 subst
+
+    data_type = varApp (pyonBuiltin the_PyonTuple3) [param1, param2, param3]
+    dict_type = varApp (pyonBuiltin the_Repr) [data_type]
+    
+    -- Construct the local variable pattern
+    mk_pat tmpvar = memVarP tmpvar (BoxPT ::: dict_type)
+    
+    -- Construct the dictionary
+    mk_dict dict1 dict2 dict3 =
+      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple3)
+      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2, TypM param3]
+         [dict1, dict2, dict3]
+
+createDict_Tuple4 :: Var -> Var -> Var -> Var -> Substitution -> MkDict
+createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $ \use_dict ->
+  withReprDict param1 $ \dict1 ->
+  withReprDict param2 $ \dict2 ->
+  withReprDict param3 $ \dict3 ->
+  withReprDict param4 $ \dict4 -> do
+    tmpvar <- newAnonymousVar ObjectLevel
+    let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
+    body <- saveAndUseDict data_type dict_exp use_dict
+    return $ ExpM $ LetE { expInfo = defaultExpInfo 
+                         , expBinder = mk_pat tmpvar
+                         , expValue = mk_dict dict1 dict2 dict3 dict4
+                         , expBody = body}
+  where
+    param1 = getParamType pv1 subst
+    param2 = getParamType pv2 subst
+    param3 = getParamType pv3 subst
+    param4 = getParamType pv4 subst
+
+    data_type = varApp (pyonBuiltin the_PyonTuple4) [param1, param2, param3, param4]
+    dict_type = varApp (pyonBuiltin the_Repr) [data_type]
+    
+    -- Construct the local variable pattern
+    mk_pat tmpvar = memVarP tmpvar (BoxPT ::: dict_type)
+    
+    -- Construct the dictionary
+    mk_dict dict1 dict2 dict3 dict4 =
+      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple4)
+      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2, TypM param3, TypM param4]
+         [dict1, dict2, dict3, dict4]
 
 createDict_list :: Var -> Substitution -> MkDict
 createDict_list param_var subst = MkDict $ \use_dict ->

@@ -27,6 +27,8 @@ pyonSourceGlobals =
   , "reduce"
   , "reduce1"
   , "zip"
+  , "zip3"
+  , "zip4"
   , "count"
   , "boxed"
   , "__undefined__"

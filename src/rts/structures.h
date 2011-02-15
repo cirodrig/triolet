@@ -21,6 +21,12 @@ extern function pyon.internal.structures.repr_Stream (unit) -> owned;
 extern function pyon.internal.structures.repr_PyonTuple2
   (unit, unit, owned, owned) -> owned;
 
+extern function pyon.internal.structures.repr_PyonTuple3
+  (unit, unit, unit, owned, owned, owned) -> owned;
+
+extern function pyon.internal.structures.repr_PyonTuple4
+  (unit, unit, unit, unit, owned, owned, owned, owned) -> owned;
+
 extern data owned pyon.internal.structures.repr_Box_value;
 extern data owned pyon.internal.structures.repr_int;
 extern data owned pyon.internal.structures.repr_float;

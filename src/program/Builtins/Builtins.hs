@@ -49,24 +49,26 @@ v `isPyonBuiltin` name = v == pyonBuiltin name
 
 pyonTupleTypeCon :: Int -> Var
 pyonTupleTypeCon n | n < 0 = internalError "pyonTupleTypeCon"
-                   | n >= 4 = internalError "pyonTupleTypeCon: Unsupported size"
+                   | n >= 5 = internalError "pyonTupleTypeCon: Unsupported size"
                    | otherwise = cons !! n
   where
     cons = [ pyonBuiltin the_PyonTuple0
            , pyonBuiltin the_PyonTuple1
            , pyonBuiltin the_PyonTuple2
            , pyonBuiltin the_PyonTuple3
+           , pyonBuiltin the_PyonTuple4
            ]
 
 pyonTupleCon :: Int -> Var
 pyonTupleCon n | n < 0 = internalError "pyonTupleCon"
-               | n >= 4 = internalError $ "pyonTupleCon: Unsupported size"
+               | n >= 5 = internalError $ "pyonTupleCon: Unsupported size"
                | otherwise = cons !! n
   where
     cons = [ pyonBuiltin the_pyonTuple0
            , pyonBuiltin the_pyonTuple1
            , pyonBuiltin the_pyonTuple2
            , pyonBuiltin the_pyonTuple3
+           , pyonBuiltin the_pyonTuple4
            ]
 
 isPyonTupleCon :: Var -> Bool
@@ -76,17 +78,19 @@ isPyonTupleCon v = v `elem` cons
            , pyonBuiltin the_pyonTuple1
            , pyonBuiltin the_pyonTuple2
            , pyonBuiltin the_pyonTuple3
+           , pyonBuiltin the_pyonTuple4
            ]
 
 pyonTupleReprCon :: Int -> Var
 pyonTupleReprCon n | n < 0 = internalError "pyonTupleReprCon"
-                   | n >= 4 = internalError "pyonTupleReprCon: Unsupported size"
+                   | n >= 5 = internalError "pyonTupleReprCon: Unsupported size"
                    | otherwise = cons !! n
   where
     cons = [ pyonBuiltin the_repr_PyonTuple0
            , pyonBuiltin the_repr_PyonTuple1
            , pyonBuiltin the_repr_PyonTuple2
            , pyonBuiltin the_repr_PyonTuple3
+           , pyonBuiltin the_repr_PyonTuple4
            ]
 
 -------------------------------------------------------------------------------

@@ -45,6 +45,23 @@ extern function pyon.internal.stream.zip
   (unit, unit, unit, unit, unit, owned, owned, owned, owned, owned,
    pointer, pointer, pointer) -> ();
 
+extern function pyon.internal.stream.Stream_zip3
+  (unit, unit, unit, owned, owned, owned, owned, owned, owned) -> owned;
+
+extern function pyon.internal.stream.zip3
+  (unit, unit, unit, unit, unit, unit, unit,
+   owned, owned, owned, owned, owned, owned, owned,
+   pointer, pointer, pointer, pointer) -> ();
+
+extern function pyon.internal.stream.Stream_zip4
+  (unit, unit, unit, unit,
+   owned, owned, owned, owned, owned, owned, owned, owned) -> owned;
+
+extern function pyon.internal.stream.zip4
+  (unit, unit, unit, unit, unit, unit, unit, unit, unit,
+   owned, owned, owned, owned, owned, owned, owned, owned, owned,
+   pointer, pointer, pointer, pointer, pointer) -> ();
+
 extern data owned pyon.internal.stream.Stream_count;
 
 extern function pyon.internal.stream.generate

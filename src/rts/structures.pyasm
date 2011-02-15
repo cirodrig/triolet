@@ -108,6 +108,83 @@ function inline copy_PyonTuple2(owned copy1, owned copy2,
   () call copy2 (src @ tuple.member2, dst @ tuple.member2);
 };
 
+function inline repr_PyonTuple3 (unit _, unit _, unit _,
+                                 owned repr1, owned repr2, owned repr3) -> owned {
+  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
+  size1 = repr1 @! PassConv.size;
+  align1 = repr1 @! PassConv.align;
+  size2 = repr2 @! PassConv.size;
+  align2 = repr2 @! PassConv.align;
+  size3 = repr3 @! PassConv.size;
+  align3 = repr3 @! PassConv.align;
+  typedef tuple = PyonTuple3(bytes(value size1, value align1),
+  	  	             bytes(value size2, value align2),
+			     bytes(value size3, value align3));
+
+  ret @! PassConv.size = sizeof tuple;
+  ret @! PassConv.align = alignof tuple;
+  ret @! PassConv.copy = owned call copy_PyonTuple3
+    (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
+     repr3 @! PassConv.copy,
+     size1, align1, size2, align2, size3, align3);
+  ret @! PassConv.finalize = dummy_finalizer;
+  ret;
+};
+
+function inline copy_PyonTuple3(owned copy1, owned copy2, owned copy3,
+                         word size1, word align1, word size2, word align2,
+			 word size3, word align3,
+                         pointer src, pointer dst) -> () {
+  typedef tuple = PyonTuple3(bytes(value size1, value align1),
+  	  	  	     bytes(value size2, value align2),
+  	  	  	     bytes(value size3, value align3));
+  () = () call copy1 (src @ tuple.member1, dst @ tuple.member1);
+  () = () call copy2 (src @ tuple.member2, dst @ tuple.member2);
+  () call copy3 (src @ tuple.member3, dst @ tuple.member3);
+};
+
+function inline repr_PyonTuple4
+    (unit _, unit _, unit _, unit _,
+     owned repr1, owned repr2, owned repr3, owned repr4) -> owned {
+  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
+  size1 = repr1 @! PassConv.size;
+  align1 = repr1 @! PassConv.align;
+  size2 = repr2 @! PassConv.size;
+  align2 = repr2 @! PassConv.align;
+  size3 = repr3 @! PassConv.size;
+  align3 = repr3 @! PassConv.align;
+  size4 = repr4 @! PassConv.size;
+  align4 = repr4 @! PassConv.align;
+  typedef tuple = PyonTuple4(bytes(value size1, value align1),
+  	  	             bytes(value size2, value align2),
+			     bytes(value size3, value align3),
+			     bytes(value size4, value align4));
+
+  ret @! PassConv.size = sizeof tuple;
+  ret @! PassConv.align = alignof tuple;
+  ret @! PassConv.copy = owned call copy_PyonTuple4
+    (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
+     repr3 @! PassConv.copy, repr4 @! PassConv.copy,
+     size1, align1, size2, align2, size3, align3, size4, align4);
+  ret @! PassConv.finalize = dummy_finalizer;
+  ret;
+};
+
+function inline copy_PyonTuple4(owned copy1, owned copy2, owned copy3,
+                         owned copy4,
+                         word size1, word align1, word size2, word align2,
+			 word size3, word align3, word size4, word align4,
+                         pointer src, pointer dst) -> () {
+  typedef tuple = PyonTuple4(bytes(value size1, value align1),
+  	  	  	     bytes(value size2, value align2),
+  	  	  	     bytes(value size3, value align3),
+  	  	  	     bytes(value size4, value align4));
+  () = () call copy1 (src @ tuple.member1, dst @ tuple.member1);
+  () = () call copy2 (src @ tuple.member2, dst @ tuple.member2);
+  () = () call copy3 (src @ tuple.member3, dst @ tuple.member3);
+  () call copy4 (src @ tuple.member4, dst @ tuple.member4);
+};
+
 #if 0
 data pointer TraversableDict_info = InfoTableHeader {
   dummy_finalizer,

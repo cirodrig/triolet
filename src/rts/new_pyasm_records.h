@@ -81,6 +81,36 @@ record MPyonTuple2(a, b) {
   b member2;
 };
 
+// Pyon 3-tuples
+record PyonTuple3(a, b, c) {
+  const a member1;
+  const b member2;
+  const c member3;
+};
+
+// Mutable 3-tuples
+record MPyonTuple3(a, b, c) {
+  a member1;
+  b member2;
+  c member3;
+};
+
+// Pyon 4-tuples
+record PyonTuple4(a, b, c, d) {
+  const a member1;
+  const b member2;
+  const c member3;
+  const d member4;
+};
+
+// Mutable 4-tuples
+record MPyonTuple4(a, b, c, d) {
+  a member1;
+  b member2;
+  c member3;
+  d member4;
+};
+
 // Pairs of mutable objects
 record Pair(a) {
   a fst;

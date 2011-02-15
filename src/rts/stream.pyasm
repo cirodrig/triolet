@@ -484,8 +484,8 @@ function Stream_zip
   p2_state_size = p2 @! Stream.state_size;
   p2_state_align = p2 @! Stream.state_align;
   typedef p2_state_type = bytes(value p2_state_size, value p2_state_align);
-  p2_result_size = repr_data1 @! PassConv.size;
-  p2_result_align = repr_data1 @! PassConv.align;
+  p2_result_size = repr_data2 @! PassConv.size;
+  p2_result_align = repr_data2 @! PassConv.align;
   typedef p2_result_type = bytes(value p2_result_size, value p2_result_align);
 
   typedef state_type = Stream_zip_state (p1_state_type, p2_state_type);
@@ -517,7 +517,7 @@ function Stream_zip
         } else {
           // Stream 2 is exhausted.  Discard result of stream 1.
           () = () call (repr_data1 @! PassConv.finalize)
-            (state @ state_type.p2_state);
+            (out @ output_type.member1);
           false;
         };
       } else {
@@ -562,11 +562,335 @@ function zip
    stream_p1 = owned call (traversable_p1 @! TraversableDict.traverse)
      (nil, repr_data1, p1);
    stream_p2 = owned call (traversable_p2 @! TraversableDict.traverse)
-     (nil, repr_data1, p2);
+     (nil, repr_data2, p2);
 
    // Zip
    zip_stream = owned call Stream_zip
      (nil, nil, repr_data1, repr_data2, stream_p1, stream_p2);
+
+   // Create output data
+   () call (traversable_out @! TraversableDict.build)
+     (nil, repr_tuple, zip_stream, out);
+};
+
+/*****************************************************************************/
+/* zip3 */
+
+// State of Stream_zip3.
+// The state consists of the states of all three input streams.
+record Stream_zip3_state(p1stateT, p2stateT, p3stateT) {
+  p1stateT p1_state;
+  p2stateT p2_state;
+  p3stateT p3_state;
+};
+
+function Stream_zip3
+  (unit _, unit _, unit _,
+   owned repr_data1,            // Representation of p1's output
+   owned repr_data2,            // Representation of p2's output
+   owned repr_data3,            // Representation of p3's output
+   owned p1,
+   owned p2,
+   owned p3) -> owned {
+  p1_state_size = p1 @! Stream.state_size;
+  p1_state_align = p1 @! Stream.state_align;
+  typedef p1_state_type = bytes(value p1_state_size, value p1_state_align);
+  p1_result_size = repr_data1 @! PassConv.size;
+  p1_result_align = repr_data1 @! PassConv.align;
+  typedef p1_result_type = bytes(value p1_result_size, value p1_result_align);
+  p2_state_size = p2 @! Stream.state_size;
+  p2_state_align = p2 @! Stream.state_align;
+  typedef p2_state_type = bytes(value p2_state_size, value p2_state_align);
+  p2_result_size = repr_data2 @! PassConv.size;
+  p2_result_align = repr_data2 @! PassConv.align;
+  typedef p2_result_type = bytes(value p2_result_size, value p2_result_align);
+  p3_state_size = p3 @! Stream.state_size;
+  p3_state_align = p3 @! Stream.state_align;
+  typedef p3_state_type = bytes(value p3_state_size, value p3_state_align);
+  p3_result_size = repr_data3 @! PassConv.size;
+  p3_result_align = repr_data3 @! PassConv.align;
+  typedef p3_result_type = bytes(value p3_result_size, value p3_result_align);
+
+  typedef state_type = Stream_zip3_state
+    (p1_state_type, p2_state_type, p3_state_type);
+  typedef output_type = MPyonTuple3
+    (p1_result_type, p2_result_type, p3_result_type);
+
+  s = pointer primcall Stream_alloc();
+
+  letrec {
+    function initialize(pointer state) -> () {
+      () = () call (p1 @! Stream.initialize) (state @ state_type.p1_state);
+      () = () call (p2 @! Stream.initialize) (state @ state_type.p2_state);
+      () = () call (p3 @! Stream.initialize) (state @ state_type.p3_state);
+      ();
+    }
+  };
+  s @! Stream.initialize = initialize;
+
+  p1_next = p1 @! Stream.next;
+  p2_next = p2 @! Stream.next;
+  p3_next = p3 @! Stream.next;
+
+  letrec {
+    function next(pointer state, pointer out) -> bool {
+      p1_has_data = bool call p1_next
+        (state @ state_type.p1_state, out @ output_type.member1);
+      if (p1_has_data) {
+        p2_has_data = bool call p2_next
+        (state @ state_type.p2_state, out @ output_type.member2);
+        if (p2_has_data) {
+          p3_has_data = bool call p3_next
+          (state @ state_type.p3_state, out @ output_type.member3);
+          if (p3_has_data) {
+            true;
+          } else {
+            // Stream 3 is exhausted.  Discard results of streams 1 and 2.
+            () = () call (repr_data2 @! PassConv.finalize)
+              (out @ output_type.member2);
+            () = () call (repr_data1 @! PassConv.finalize)
+              (out @ output_type.member1);
+            false;
+          };
+        } else {
+          // Stream 2 is exhausted.  Discard result of stream 1.
+          () = () call (repr_data1 @! PassConv.finalize)
+            (out @ output_type.member1);
+          false;
+        };
+      } else {
+        false;
+      };
+    }
+  };
+
+  s @! Stream.next = next;
+  s @! Stream.state_size = sizeof state_type;
+  s @! Stream.state_align = alignof state_type;
+
+  letrec {
+    function finalize(pointer state) -> () {
+      () = () call (p1 @! Stream.state_finalize)
+        (state @ state_type.p1_state);
+      () = () call (p2 @! Stream.state_finalize)
+        (state @ state_type.p2_state);
+      () = () call (p3 @! Stream.state_finalize)
+        (state @ state_type.p3_state);
+      ();
+    }
+  };
+
+  s @! Stream.state_finalize = finalize;
+  s;
+};
+
+function zip3
+  (unit _, unit _, unit _, unit _, unit _, unit _, unit _,
+   owned traversable_p1,        // First producer methods
+   owned traversable_p2,        // Second producer methods
+   owned traversable_p3,        // Third producer methods
+   owned traversable_out,       // Output methods
+   owned repr_data1,            // Representation of p1's output
+   owned repr_data2,            // Representation of p2's output
+   owned repr_data3,            // Representation of p3's output
+   pointer p1,
+   pointer p2,
+   pointer p3,
+   pointer out)
+   -> () {
+   // Create a tuple representation object
+   repr_tuple = owned call repr_PyonTuple3 (nil, nil, nil, repr_data1, repr_data2, repr_data3);
+
+   // Traverse input objects
+   stream_p1 = owned call (traversable_p1 @! TraversableDict.traverse)
+     (nil, repr_data1, p1);
+   stream_p2 = owned call (traversable_p2 @! TraversableDict.traverse)
+     (nil, repr_data2, p2);
+   stream_p3 = owned call (traversable_p3 @! TraversableDict.traverse)
+     (nil, repr_data3, p3);
+
+   // Zip
+   zip_stream = owned call Stream_zip3
+     (nil, nil, nil, repr_data1, repr_data2, repr_data3, stream_p1, stream_p2, stream_p3);
+
+   // Create output data
+   () call (traversable_out @! TraversableDict.build)
+     (nil, repr_tuple, zip_stream, out);
+};
+
+/*****************************************************************************/
+/* zip4 */
+
+// State of Stream_zip4.
+// The state consists of the states of all three input streams.
+record Stream_zip4_state(p1stateT, p2stateT, p3stateT, p4stateT) {
+  p1stateT p1_state;
+  p2stateT p2_state;
+  p3stateT p3_state;
+  p4stateT p4_state;
+};
+
+function Stream_zip4
+  (unit _, unit _, unit _, unit _,
+   owned repr_data1,            // Representation of p1's output
+   owned repr_data2,            // Representation of p2's output
+   owned repr_data3,            // Representation of p3's output
+   owned repr_data4,            // Representation of p4's output
+   owned p1,
+   owned p2,
+   owned p3,
+   owned p4) -> owned {
+  p1_state_size = p1 @! Stream.state_size;
+  p1_state_align = p1 @! Stream.state_align;
+  typedef p1_state_type = bytes(value p1_state_size, value p1_state_align);
+  p1_result_size = repr_data1 @! PassConv.size;
+  p1_result_align = repr_data1 @! PassConv.align;
+  typedef p1_result_type = bytes(value p1_result_size, value p1_result_align);
+  p2_state_size = p2 @! Stream.state_size;
+  p2_state_align = p2 @! Stream.state_align;
+  typedef p2_state_type = bytes(value p2_state_size, value p2_state_align);
+  p2_result_size = repr_data2 @! PassConv.size;
+  p2_result_align = repr_data2 @! PassConv.align;
+  typedef p2_result_type = bytes(value p2_result_size, value p2_result_align);
+  p3_state_size = p3 @! Stream.state_size;
+  p3_state_align = p3 @! Stream.state_align;
+  typedef p3_state_type = bytes(value p3_state_size, value p3_state_align);
+  p3_result_size = repr_data3 @! PassConv.size;
+  p3_result_align = repr_data3 @! PassConv.align;
+  typedef p3_result_type = bytes(value p3_result_size, value p3_result_align);
+  p4_state_size = p4 @! Stream.state_size;
+  p4_state_align = p4 @! Stream.state_align;
+  typedef p4_state_type = bytes(value p4_state_size, value p4_state_align);
+  p4_result_size = repr_data4 @! PassConv.size;
+  p4_result_align = repr_data4 @! PassConv.align;
+  typedef p4_result_type = bytes(value p4_result_size, value p4_result_align);
+
+  typedef state_type = Stream_zip4_state
+    (p1_state_type, p2_state_type, p3_state_type, p4_state_type);
+  typedef output_type = MPyonTuple4
+    (p1_result_type, p2_result_type, p3_result_type, p4_result_type);
+
+  s = pointer primcall Stream_alloc();
+
+  letrec {
+    function initialize(pointer state) -> () {
+      () = () call (p1 @! Stream.initialize) (state @ state_type.p1_state);
+      () = () call (p2 @! Stream.initialize) (state @ state_type.p2_state);
+      () = () call (p3 @! Stream.initialize) (state @ state_type.p3_state);
+      () = () call (p4 @! Stream.initialize) (state @ state_type.p4_state);
+      ();
+    }
+  };
+  s @! Stream.initialize = initialize;
+
+  p1_next = p1 @! Stream.next;
+  p2_next = p2 @! Stream.next;
+  p3_next = p3 @! Stream.next;
+  p4_next = p4 @! Stream.next;
+
+  letrec {
+    function next(pointer state, pointer out) -> bool {
+      p1_has_data = bool call p1_next
+        (state @ state_type.p1_state, out @ output_type.member1);
+      if (p1_has_data) {
+        p2_has_data = bool call p2_next
+        (state @ state_type.p2_state, out @ output_type.member2);
+        if (p2_has_data) {
+          p3_has_data = bool call p3_next
+          (state @ state_type.p3_state, out @ output_type.member3);
+          if (p3_has_data) {
+            p4_has_data = bool call p4_next
+            (state @ state_type.p4_state, out @ output_type.member4);
+            if (p4_has_data) {
+              true;
+            } else {
+              // Stream 4 is exhausted.  Discard results of other streams.
+              () = () call (repr_data3 @! PassConv.finalize)
+                (out @ output_type.member3);
+              () = () call (repr_data2 @! PassConv.finalize)
+                (out @ output_type.member2);
+              () = () call (repr_data1 @! PassConv.finalize)
+                (out @ output_type.member1);
+              false;
+            };
+          } else {
+            // Stream 3 is exhausted.  Discard results of streams 1 and 2.
+            () = () call (repr_data2 @! PassConv.finalize)
+              (out @ output_type.member2);
+            () = () call (repr_data1 @! PassConv.finalize)
+              (out @ output_type.member1);
+            false;
+          };
+        } else {
+          // Stream 2 is exhausted.  Discard result of stream 1.
+          () = () call (repr_data1 @! PassConv.finalize)
+            (out @ output_type.member1);
+          false;
+        };
+      } else {
+        false;
+      };
+    }
+  };
+
+  s @! Stream.next = next;
+  s @! Stream.state_size = sizeof state_type;
+  s @! Stream.state_align = alignof state_type;
+
+  letrec {
+    function finalize(pointer state) -> () {
+      () = () call (p1 @! Stream.state_finalize)
+        (state @ state_type.p1_state);
+      () = () call (p2 @! Stream.state_finalize)
+        (state @ state_type.p2_state);
+      () = () call (p3 @! Stream.state_finalize)
+        (state @ state_type.p3_state);
+      () = () call (p4 @! Stream.state_finalize)
+        (state @ state_type.p4_state);
+      ();
+    }
+  };
+
+  s @! Stream.state_finalize = finalize;
+  s;
+};
+
+function zip4
+  (unit _, unit _, unit _, unit _, unit _, unit _, unit _, unit _, unit _,
+   owned traversable_p1,        // First producer methods
+   owned traversable_p2,        // Second producer methods
+   owned traversable_p3,        // Third producer methods
+   owned traversable_p4,        // Fourth producer methods
+   owned traversable_out,       // Output methods
+   owned repr_data1,            // Representation of p1's output
+   owned repr_data2,            // Representation of p2's output
+   owned repr_data3,            // Representation of p3's output
+   owned repr_data4,            // Representation of p4's output
+   pointer p1,
+   pointer p2,
+   pointer p3,
+   pointer p4,
+   pointer out)
+   -> () {
+   // Create a tuple representation object
+   repr_tuple = owned call repr_PyonTuple4
+     (nil, nil, nil, nil, repr_data1, repr_data2, repr_data3, repr_data4);
+
+   // Traverse input objects
+   stream_p1 = owned call (traversable_p1 @! TraversableDict.traverse)
+     (nil, repr_data1, p1);
+   stream_p2 = owned call (traversable_p2 @! TraversableDict.traverse)
+     (nil, repr_data2, p2);
+   stream_p3 = owned call (traversable_p3 @! TraversableDict.traverse)
+     (nil, repr_data3, p3);
+   stream_p4 = owned call (traversable_p4 @! TraversableDict.traverse)
+     (nil, repr_data4, p4);
+
+   // Zip
+   zip_stream = owned call Stream_zip4
+     (nil, nil, nil, nil,
+      repr_data1, repr_data2, repr_data3, repr_data4,
+      stream_p1, stream_p2, stream_p3, stream_p4);
 
    // Create output data
    () call (traversable_out @! TraversableDict.build)

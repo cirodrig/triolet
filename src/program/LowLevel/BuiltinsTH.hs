@@ -189,8 +189,16 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_fun_reduce1) |])
   , (PyonName module_stream "Stream_zip",
      Right [| pyonBuiltin (SystemF.the_fun_zip_Stream) |])
+  , (PyonName module_stream "Stream_zip3",
+     Right [| pyonBuiltin (SystemF.the_fun_zip3_Stream) |])
+  , (PyonName module_stream "Stream_zip4",
+     Right [| pyonBuiltin (SystemF.the_fun_zip4_Stream) |])
   , (PyonName module_stream "zip",
      Right [| pyonBuiltin (SystemF.the_fun_zip) |])
+  , (PyonName module_stream "zip3",
+     Right [| pyonBuiltin (SystemF.the_fun_zip3) |])
+  , (PyonName module_stream "zip4",
+     Right [| pyonBuiltin (SystemF.the_fun_zip4) |])
   , (PyonName module_stream "Stream_build",
      Right [| pyonBuiltin (SystemF.the_TraversableDict_Stream_build) |])
   , (PyonName module_stream "Stream_traverse",
@@ -208,6 +216,10 @@ builtinFunctions =
                           PrimType PointerType] []) -}
   , (PyonName module_structures "repr_PyonTuple2",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_PyonTuple2 |])
+  , (PyonName module_structures "repr_PyonTuple3",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_PyonTuple3 |])
+  , (PyonName module_structures "repr_PyonTuple4",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_PyonTuple4 |])
     
   , (PyonName module_prim "subscript",
      Right [| pyonBuiltin (SystemF.the_subscript) |])

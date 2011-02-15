@@ -181,14 +181,6 @@ globalConTable =
          Specialize
          (Don'tCare $ End $ pyonBuiltin the_fun_reduce1_Stream) 
          (Don'tCare $ End $ pyonBuiltin the_fun_reduce1))
-      , (the_fun_zip,
-         Specialize
-         (Specialize
-          (Don'tCare $ Don'tCare $ End $ pyonBuiltin the_fun_zip_SS)
-          (Don'tCare $ Don'tCare $ End $ pyonBuiltin the_fun_zip_SN))
-         (Specialize
-          (Don'tCare $ Don'tCare $ End $ pyonBuiltin the_fun_zip_NS)
-          (Don'tCare $ Don'tCare $ End $ pyonBuiltin the_fun_zip)))
       ]
 
 -- | Create a specialization table for a value that isn't specialized.
