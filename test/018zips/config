@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Zip functions",
+  pyonSources	 = ["zips.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "done"
+}
