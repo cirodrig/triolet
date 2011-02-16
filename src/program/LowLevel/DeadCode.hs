@@ -10,6 +10,7 @@ import Data.Traversable
 
 import Common.Identifier
 import LowLevel.Syntax
+import LowLevel.CodeTypes
 
 -- | A map from variable IDs to the number of uses the variable has.
 --   If a variable has no uses, it is not in the map.
@@ -40,45 +41,90 @@ useUnions = IntMap.unionsWith mappend
 funDefinitionSize :: Fun -> Int
 funDefinitionSize f = length (funParams f) + length (funReturnTypes f) + 1 
 
+-- | A map giving the arities of functions
+type ArityMap = IntMap.IntMap Int
+
+-- | The DCE monad.
+newtype DCEM a = DCEM (ArityMap -> DCEResult a)
+
 data DCEResult a =
   DCEResult
-  { size      :: !Int
+  { size      :: {-#UNPACK#-}!Int
   , uses      :: UseMap
   , dceResult :: a
   }
 
-type DCE a = a -> DCEResult a
+type DCE a = a -> DCEM a
 
-instance Functor DCEResult where
-  fmap f x = x {dceResult = f (dceResult x)}
+instance Functor DCEM where
+  fmap f (DCEM x) = DCEM $ \arity ->
+    case x arity 
+    of DCEResult s u y -> DCEResult s u (f y)
 
-instance Applicative DCEResult where
-  pure x  = DCEResult 0 IntMap.empty x
-  DCEResult s1 u1 f <*> DCEResult s2 u2 x =
-    DCEResult (s1 + s2) (useUnion u1 u2) (f x)
+modifyResult :: (DCEResult a -> DCEResult b) -> DCEM a -> DCEM b
+modifyResult f (DCEM x) = DCEM $ \arity -> f $ x arity
 
-instance Monad DCEResult where
+instance Applicative DCEM where
+  pure x  = DCEM $ \_ -> DCEResult 0 IntMap.empty x
+  DCEM f1 <*> DCEM f2 =
+    DCEM $ \arity ->
+    case f1 arity
+    of DCEResult s1 u1 f ->
+         case f2 arity
+         of DCEResult s2 u2 x ->
+              DCEResult (s1 + s2) (useUnion u1 u2) (f x)
+
+instance Monad DCEM where
   return = pure
-  m >>= k = case m
-            of DCEResult s1 u1 x ->
-                 case k x
-                 of DCEResult s2 u2 y ->
-                      DCEResult (s1 + s2) (useUnion u1 u2) y
+  DCEM f >>= k = DCEM $ \arity ->
+    case f arity
+    of DCEResult s1 u1 x ->
+         case k x
+         of DCEM f' ->
+              case f' arity 
+              of DCEResult s2 u2 y ->
+                   DCEResult (s1 + s2) (useUnion u1 u2) y
 
 -- | Add something to the code size
-nudge :: Int -> DCEResult a -> DCEResult a
-nudge n x = x {size = size x + n}
+nudge :: Int -> DCEM a -> DCEM a
+nudge n m = modifyResult (\x -> x {size = size x + n}) m
 
-use :: Var -> DCEResult ()
-use v = let use_map = IntMap.singleton (fromIdent $ varID v) OneUse
-        in DCEResult 0 use_map ()
+use :: Var -> DCEM ()
+use v = DCEM $ \arity ->
+  let use_map = IntMap.singleton (fromIdent $ varID v) OneUse
+  in DCEResult 0 use_map ()
+
+-- | Add the arity of a defined function to the environment
+assumeFunctionArity :: Var -> Int -> DCEM a -> DCEM a
+assumeFunctionArity fname n (DCEM g) = DCEM $ \arity ->
+  let arity' = IntMap.insert (fromIdent $ varID fname) n arity
+  in g arity'
+
+assumeFunctionArities :: [FunDef] -> DCEM a -> DCEM a
+assumeFunctionArities defs m = foldr assume_arity m defs
+  where
+    assume_arity (Def v f) m = assumeFunctionArity v (length $ funParams f) m
+
+-- | Try to get the arity of a function, given its name
+lookupFunctionArity :: Var -> DCEM (Maybe Int)
+lookupFunctionArity v = DCEM $ \arity ->
+  DCEResult 0 IntMap.empty (IntMap.lookup (fromIdent $ varID v) arity)
+
+-- | Get the code size computed by the computation
+tellSize :: DCEM a -> DCEM (Int, a)
+tellSize = modifyResult $ \(DCEResult s u x) -> DCEResult s u (s, x)
+
+-- | Get the uses computed by the computation
+tellUses :: DCEM a -> DCEM (UseMap, a)
+tellUses = modifyResult $ \(DCEResult s u x) -> DCEResult s u (u, x)
 
 -- | Get all observed uses.  Don't propagate uses.
-takeUses :: DCEResult a -> DCEResult (UseMap, a)
-takeUses (DCEResult s u x) = DCEResult s IntMap.empty (u, x)
+takeUses :: DCEM a -> DCEM (UseMap, a)
+takeUses =
+  modifyResult $ \(DCEResult s u x) -> DCEResult s IntMap.empty (u, x)
 
-putUses :: UseMap -> DCEResult ()
-putUses uses = DCEResult 0 uses ()
+putUses :: UseMap -> DCEM ()
+putUses uses = DCEM $ \_ -> DCEResult 0 uses ()
 
 dceVal :: DCE Val
 dceVal value = nudge 1 $
@@ -93,14 +139,19 @@ dceVals vs = traverse dceVal vs
 
 -- | Return True if the atom can have an observable side effect in normal
 --   program execution, other than producing a result value.
-atomHasSideEffect :: Atom -> Bool
+atomHasSideEffect :: Atom -> DCEM Bool
 atomHasSideEffect atom = 
   case atom
-  of ValA {} -> False
-     CallA {} -> True
-     PrimA prim _ -> primHasSideEffect prim
-     PackA {} -> False
-     UnpackA {} -> False
+  of ValA {} -> return False
+     CallA _ (VarV callee) args -> do
+       arity <- lookupFunctionArity callee
+       case arity of
+         Just n | n > length args -> return False -- Partial application
+         _ -> return True       -- Fully applied or unknown callee
+     CallA {} -> return True    -- Unknown callee
+     PrimA prim _ -> return $ primHasSideEffect prim
+     PackA {} -> return False
+     UnpackA {} -> return False
      
 -- | Return True if an execution of this primitive operation can have an
 --   observable side effect in normal program execution, other than 
@@ -173,7 +224,8 @@ dceStm statement =
 dceLet params rhs body = do
   (uses, body') <- takeUses $ dceStm body
   putUses $ deleteUses params uses
-  if atomHasSideEffect rhs || any (`isUsedIn` uses) params
+  has_effect <- atomHasSideEffect rhs 
+  if has_effect || any (`isUsedIn` uses) params
     then do rhs' <- dceAtom rhs
             return (LetE params rhs' body')
     else return body'
@@ -184,50 +236,51 @@ dceLetrec defs body = make_letrec <$> dceDefGroup defs (dceStm body)
       | null defs' = body'
       | otherwise = LetrecE defs' body'
 
-dceDefGroup :: [FunDef] -> DCEResult a -> DCEResult ([FunDef], a)
-dceDefGroup defs body = do
-  -- Compute size and use information
-  (filtered_uses, (new_body, annotated_defs)) <-
-    takeUses $ (,) <$> body <*> filterFunDefs (uses body) defs
-        
-  let new_defs = [ rebuildFunDef filtered_uses def result
-                 | (def, result) <- annotated_defs]
+dceDefGroup :: [FunDef] -> DCEM a -> DCEM ([FunDef], a)
+dceDefGroup defs body = assumeFunctionArities defs $ do
+  (body_uses, new_body) <- takeUses body
+
+  -- Perform DCE and collect use information in function bodies
+  annotated_defs <- forM defs $ \(Def v f) -> takeUses $ do
+    f' <- dceFun f
+    return (Def v f')
+    
+  let all_uses = useUnions (body_uses : map fst annotated_defs)
+
+  -- Remove unused functions
+  -- TODO: use reachability from body as liveness criterion
+  let live_defs = filter is_live annotated_defs
+        where
+          is_live (_, Def v _) = v `isUsedIn` all_uses
+
+  -- Uses from the still-live functions are real.  Compute new definitions.
+  let live_uses = useUnions (body_uses : map fst live_defs)
+      new_defs = map (setFunDefUses live_uses . snd) live_defs
 
   -- Expose all uses except the locally defined functions
-  putUses $ deleteUses (map definiendum new_defs) filtered_uses
+  putUses $ deleteUses (map definiendum new_defs) live_uses
 
   -- Add code size for the function definitions
   let def_code_size = sum $ map (funDefinitionSize . definiens) new_defs
   nudge def_code_size (return ())
-        
+
   return (new_defs, new_body)
 
-filterFunDefs :: UseMap         -- ^ Uses outside this definition group
-              -> [FunDef]       -- ^ Original definitions
-              -> DCEResult [(FunDef, Fun)]
-filterFunDefs ext_uses defs =
-  let dce_funs = map (dceFun . definiens) defs 
-      all_uses = useUnions (ext_uses : map uses dce_funs)
-  in sequenceA [do {f <- dce_fun; return (def, f)}
-               | (def, dce_fun) <- zip defs dce_funs
-               , definiendum def `isUsedIn` all_uses]
-
 -- | Rebuild a function definition after DCE.
-rebuildFunDef :: UseMap -> FunDef -> Fun -> FunDef 
-rebuildFunDef use_map old_def new_fun =
-  let fname = definiendum old_def
-      fuses = lookupUses fname use_map
-      annotated_fun = setFunUses fuses new_fun
-  in annotated_fun `seq` Def fname annotated_fun
+setFunDefUses :: UseMap -> FunDef -> FunDef 
+setFunDefUses use_map (Def fname f) =
+  let fuses = lookupUses fname use_map
+      annotated_fun = setFunUses fuses f
+  in Def fname $! annotated_fun
 
 -- | Perform dead code elimination on a function.  Only the function body 
 --   contributes to the code size.
 dceFun :: DCE Fun
-dceFun fun =
-  let DCEResult size uses body = dceStm (funBody fun)
-      fun' = setFunSize (codeSize size) $
+dceFun fun = do
+  (body_size, body) <- tellSize $ dceStm (funBody fun)
+  let fun' = setFunSize (codeSize body_size) $
              mkFun (funConvention fun) (funInlineRequest fun) (funFrameSize fun) (funParams fun) (funReturnTypes fun) body
-  in DCEResult size uses fun'
+  return fun'
 
 -- | Perform dead code elimination on a data definition.  The data definition
 --   is scanned to find out what variables it references.
@@ -235,18 +288,24 @@ dceDataDef :: DCE DataDef
 dceDataDef (Def v (StaticData rec vals)) =
   (Def v . StaticData rec) <$> dceVals vals
 
-dceTopLevel :: [GlobalDef]      -- ^ Global definitions
-            -> [Var]            -- ^ Exported variables
-            -> DCEResult [GlobalDef]
-dceTopLevel defs exports = do
-  let other_uses = use_exports *> dce_data_defs
-  
-  -- First pass: perform DCE and find all uses
-  (filtered_uses, (annotated_fun_defs, new_data_defs)) <-
-    takeUses $ (,) <$> filterFunDefs (uses other_uses) fun_defs <*> other_uses
+assumeImportedArity impent m =
+  case impent
+  of ImportClosureFun ep _ ->
+       assumeFunctionArity (importVar impent) (functionArity ep) m
+     ImportPrimFun _ ty _ ->
+       assumeFunctionArity (importVar impent) (length $ ftParamTypes ty) m
+     ImportData _ _ -> m
 
-  let new_fun_defs = [ rebuildFunDef filtered_uses def result
-                     | (def, result) <- annotated_fun_defs]
+assumeImportedArities imps m = foldr assumeImportedArity m imps
+
+dceTopLevel :: [Import]         -- ^ Imported variables
+            -> [GlobalDef]      -- ^ Global definitions
+            -> [Var]            -- ^ Exported variables
+            -> DCEM [GlobalDef]
+dceTopLevel imps defs exports = assumeImportedArities imps $ do
+  -- Perform DCE and find all uses
+  (new_fun_defs, new_data_defs) <-
+    dceDefGroup fun_defs (use_exports *> dce_data_defs)
   
   -- Don't need to compute uses or code size
   return (map GlobalFunDef new_fun_defs ++ map GlobalDataDef new_data_defs)
@@ -265,6 +324,10 @@ dceTopLevel defs exports = do
 --   Also annotate functions with code size and number of uses.
 eliminateDeadCode :: Module -> Module
 eliminateDeadCode mod@(Module { moduleGlobals = gs
-                              , moduleExports = es}) =
-  let gs' = dceResult $ dceTopLevel gs (map fst es)
+                              , moduleExports = es
+                              , moduleImports = imps}) =
+  let gs' = runDCE $ dceTopLevel imps gs (map fst es)
   in mod {moduleGlobals = gs'}
+  where
+    runDCE (DCEM f) =
+      dceResult $ f IntMap.empty
