@@ -54,6 +54,14 @@ runMake lbi verbosity args =
 runMakedepend lbi verbosity args =
   runDbProgram verbosity makedependProgram (withPrograms lbi) args
 
+generateDepFile lbi exe verbosity depfile main_path =
+  rawSystemExit verbosity "ghc" hsdep_args
+  where
+    hsdep_args =
+      ["-M", "-dep-makefile", depfile] ++
+      pyonGhcOpts exe lbi ++
+      [main_path]
+
 -------------------------------------------------------------------------------
 -- Hooks
 
@@ -95,15 +103,18 @@ doBuild pkg_desc lbi hooks flags = do
       -- Generate make rules and variables
       generateCabalMakefile verb exe lbi
 
-      -- Generate Haskell dependences
       main_path <- findFile (pyonSearchPaths lbi exe) (modulePath exe)
-      let hsdep_args =
-            ["-M", "-dep-makefile", ".depend_hs.mk"] ++
-            pyonGhcOpts exe lbi ++
-            [main_path]
-      
-      rawSystemExit verb "ghc" hsdep_args
 
+      -- Generate Haskell dependences (without profiling)
+      let noprof_lbi = lbi {withProfExe = False}
+      generateDepFile noprof_lbi exe verb ".depend_hs.mk" main_path
+      
+      -- Generate Haskell dependences (with profiling)
+      -- If not using profiling, generate an empty file 
+      if withProfExe lbi
+        then generateDepFile lbi exe verb ".depend_hs_p.mk" main_path
+        else writeFile ".depend_hs_p.mk" ""
+      
       -- Generate C dependences
       rts_c_files <- mapM (findFile $ rtsSearchPaths lbi) rtsCSourceFiles
       depfile_exists <- doesFileExist ".depend.mk"

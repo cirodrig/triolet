@@ -46,6 +46,7 @@ Executable pyon
   Extensions:
     ScopedTypeVariables, MultiParamTypeClasses, PatternGuards, GADTs,
     EmptyDataDecls, TypeOperators, TypeFamilies, DeriveDataTypeable
+  Ghc-Options: -auto
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon

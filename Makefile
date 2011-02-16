@@ -47,10 +47,13 @@ $(DATA_BUILD_DIR)/libpyonrts.so : $(RTS_TARGET)
 # Generic rules
 
 %.hi : %.o ;
+%.p_hi : %.hi %.p_o ;
 %_stub.c : %.o ;
 %_stub.h : %.o ;
 %.hi-boot : %.o-boot ;
+%.p_hi-boot : %.hi-boot %.p_o-boot ;
 
 # Dependences
 include .depend_hs.mk
+include .depend_hs_p.mk
 include .depend.mk

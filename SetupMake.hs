@@ -145,6 +145,17 @@ pyonHsFileTemplate build_path src_path file =
      \$(HC) -c $< $(PYON_HS_C_OPTS)\n\
      \touch " ++ hi_file
 
+-- Compile with profiling
+pyonHsProfFileTemplate :: MakeRuleTemplate
+pyonHsProfFileTemplate build_path src_path file =
+  let src_file = src_path </> file `replaceExtension` ".hs"
+      o_file = build_path </> file `replaceExtension` ".p_o"
+      hi_file = build_path </> file `replaceExtension` ".p_hi"
+  in MakeRule [o_file] [src_file] $
+     "mkdir -p " ++ takeDirectory o_file ++ "\n\
+     \$(HC) -c $< $(PYON_HS_PC_OPTS)\n\
+     \touch " ++ hi_file
+
 -- | Generate a rule to compile a .hs-boot file
 --
 -- > build_path/A.o-boot : src_path/A.hs-boot
@@ -158,6 +169,16 @@ compileHsBootFile build_path src_path file =
   in MakeRule [o_file] [src_file] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n\
      \$(HC) -c $< $(PYON_HS_C_OPTS)\n\
+     \touch " ++ hi_file
+
+compileHsProfBootFile :: MakeRuleTemplate
+compileHsProfBootFile build_path src_path file =
+  let src_file = src_path </> file `replaceExtension` ".hs-boot"
+      o_file = build_path </> file `replaceExtension` ".p_o-boot"
+      hi_file = build_path </> file `replaceExtension` ".p_hi-boot"
+  in MakeRule [o_file] [src_file] $
+     "mkdir -p " ++ takeDirectory o_file ++ "\n\
+     \$(HC) -c $< $(PYON_HS_PC_OPTS)\n\
      \touch " ++ hi_file
 
 -- | Generate a rule to compile a C file for the RTS
@@ -273,8 +294,13 @@ targetFlags = word_size ++ force_32bit ++ arch
       then ["-DFORCE_32_BIT"]
       else []
 
-optimizationFlags lbi = prof_flag ++ opt_flag
+optimizationFlags lbi = prof_flag ++ opt_flag ++ suffixes
   where
+    -- If compiling with profiling, use different filename suffixes
+    suffixes =
+      if withProfExe lbi
+      then ["-osuf", "p_o", "-hisuf", "p_hi"]
+      else []
     prof_flag =
       if withProfExe lbi then ["-prof"] else []
     opt_flag =
@@ -282,10 +308,17 @@ optimizationFlags lbi = prof_flag ++ opt_flag
       of NoOptimisation -> ["-O0"]
          _ -> ["-O"]
 
+-- | Get the extra GHC command-line parameters that were specified 
+--   in the build configuration
+configuredGhcFlags exe lbi =
+  let compiler_flavor = compilerFlavor $ compiler lbi
+  in fromMaybe [] $ lookup compiler_flavor $ options (buildInfo exe)
+
 -- | Get the options to pass to GHC for compiling a HS file that is part of
 --   the Pyon executable.
 pyonGhcOpts exe lbi =
   targetFlags ++
+  configuredGhcFlags exe lbi ++
   optimizationFlags lbi ++
   pyonGhcPathFlags exe lbi ++
   packageFlags exe lbi ++
@@ -293,17 +326,22 @@ pyonGhcOpts exe lbi =
 
 -- | Get the options for linking the \'pyon\' binary.
 pyonLinkOpts exe lbi =
+  targetFlags ++
+  configuredGhcFlags exe lbi ++ 
+  optimizationFlags lbi ++
   packageFlags exe lbi
 
 -------------------------------------------------------------------------------
 -- Rules to generate a makefile
 
 generateCabalMakefile verbosity exe lbi = do
-  (pyon_rules, pyon_files) <- generatePyonRules verbosity lbi exe
+  (pyon_rules, pyon_object_files, pyon_source_files) <-
+    generatePyonRules verbosity lbi exe
   (rts_rules, rts_files) <- generateRtsRules verbosity lbi
   (data_rules, prebuilt_data_files) <- generateDataRules verbosity lbi
   test_rules <- generateTestRules verbosity lbi
   variables <- generateVariables exe lbi pyon_rules rts_rules data_rules
+               pyon_object_files pyon_source_files
                prebuilt_data_files
   writeCabalMakefile variables (pyon_rules ++ rts_rules ++ data_rules ++ test_rules)
 
@@ -314,8 +352,11 @@ generateVariables :: Executable
                   -> [MakeRule]
                   -> [MakeRule]
                   -> [FilePath]
+                  -> [FilePath]
+                  -> [FilePath]
                   -> IO [(String, String)]
-generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = do
+generateVariables exe lbi pyon_rules rts_rules data_rules 
+                  pyon_object_files pyon_source_files prebuilt_data_files = do
   -- Get paths
   cc_path <-
     case lookupProgram gccProgram $ withPrograms lbi
@@ -344,9 +385,7 @@ generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = 
        _ -> die "Unrecognized operating system"
 
   -- Compute file lists
-  let pyon_source_files = getSources pyon_rules
-      pyon_object_files = getObjectTargets pyon_rules
-      rts_source_files = getSources rts_rules
+  let rts_source_files = getSources rts_rules
       rts_object_files = getObjectTargets rts_rules
       rts_interface_files = getInterfaceTargets rts_rules
       interface_data_files =
@@ -376,7 +415,8 @@ generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = 
            -- files in the project directory
          , ("PYON_SOURCE_FILES", makefileList pyon_source_files)
          , ("PYON_OBJECT_FILES", makefileList pyon_object_files)
-         , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts exe lbi)
+         , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts exe (lbi {withProfExe = False}))
+         , ("PYON_HS_PC_OPTS", intercalate " " $ pyonGhcOpts exe (lbi {withProfExe = True}))
          , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts exe lbi)
          , ("RTS_SOURCE_FILES", makefileList rts_source_files)
          , ("RTS_OBJECT_FILES", makefileList rts_object_files)
@@ -402,23 +442,44 @@ generateVariables exe lbi pyon_rules rts_rules data_rules prebuilt_data_files = 
 
 -- | Create Makefile rules to create all object files used in building the
 -- 'pyon' executable.
+--
+--   Returns the rules, the set of object files, and the set of source files.
 generatePyonRules :: Verbosity
                   -> LocalBuildInfo
                   -> Executable
-                  -> IO ([MakeRule], [FilePath])
+                  -> IO ([MakeRule], [FilePath], [FilePath])
 generatePyonRules verb lbi exe = do
   info verb "Locating source code files for 'pyon'"
   hs_rules <- generateBuildRules pyonHsFileTemplate pyon_build_dir
               pyon_source_paths pyon_modules
-  boot_rules <- generateBuildRulesWhenFound compileHsBootFile pyon_build_dir
+  hs_p_rules <- generateBuildRules pyonHsProfFileTemplate pyon_build_dir
                 pyon_source_paths pyon_modules
-  let rules = hs_rules ++ boot_rules
-      source_files = concatMap makePrerequisites rules
-  return (rules, source_files)
+  boot_rules <- generateBuildRulesWhenFound compileHsBootFile pyon_build_dir
+                pyon_source_paths boot_modules
+  boot_p_rules <- generateBuildRulesWhenFound compileHsProfBootFile pyon_build_dir
+                  pyon_source_paths boot_modules
+
+  let rules = hs_rules ++ hs_p_rules ++ boot_rules ++ boot_p_rules
+      -- The profiling and non-profiling rules have the same sources, so
+      -- just look at the non-profiling rules.
+      source_files = concatMap makePrerequisites (hs_rules ++ boot_rules)
+      
+      -- The object files depend on whether we're doing profiling.
+      -- Ignore o-boot files, they are not real object files.
+      object_files =
+        if withProfExe lbi
+        then filter ((".p_o" `isPrefixOf`) . takeExtension) $ 
+             concatMap makeTargets hs_p_rules
+        else filter ((".o" `isPrefixOf`) . takeExtension) $ 
+             concatMap makeTargets hs_rules
+  return (rules, object_files, source_files)
   where
     pyon_build_dir = pyonBuildDir lbi
     pyon_source_paths = pyonSearchPaths lbi exe
     pyon_modules = [toFilePath m `addExtension` ".hs"
+                   | m <- fromString "Main" : exeModules exe]
+  
+    boot_modules = [toFilePath m `addExtension` ".hs-boot"
                    | m <- fromString "Main" : exeModules exe]
 
 -- | Create Makefile rules for all object files in the RTS.
