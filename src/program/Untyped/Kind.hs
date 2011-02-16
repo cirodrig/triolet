@@ -5,13 +5,14 @@ module Untyped.Kind where
 import Data.Typeable(Typeable)
 import Text.PrettyPrint.HughesPJ
 
+infixr :->
 data Kind = Star | Kind :-> Kind
           deriving(Eq, Typeable)
 
 showKind :: Kind -> String
 showKind Star = "*"
-showKind (k :-> Star) = showKind k ++ " -> *"
-showKind (k :-> k') = showKind k ++ " -> (" ++ showKind k' ++ ")"
+showKind (Star :-> k) = "* -> " ++ showKind k
+showKind (k :-> k') = "(" ++ showKind k ++ ") -> " ++ showKind k'
 
 pprKind :: Kind -> Doc
 pprKind k = text $ showKind k
