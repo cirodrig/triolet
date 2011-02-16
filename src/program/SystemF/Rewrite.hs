@@ -10,6 +10,7 @@ import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
+import Common.MonadLogic
 import Builtins.Builtins
 import SystemF.Build
 import SystemF.Syntax
@@ -79,6 +80,10 @@ rewriteRules = Map.fromList table
             , (pyonBuiltin the_fun_map_Stream, rwMapStream)
             , (pyonBuiltin the_fun_zip, rwZip)
             , (pyonBuiltin the_fun_zip_Stream, rwZipStream)
+            , (pyonBuiltin the_fun_zip3, rwZip3)
+            , (pyonBuiltin the_fun_zip3_Stream, rwZip3Stream)
+            , (pyonBuiltin the_fun_zip4, rwZip4)
+            , (pyonBuiltin the_fun_zip4_Stream, rwZip4Stream)
             , (pyonBuiltin the_fun_reduce, rwReduce)
             , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
             , (pyonBuiltin the_fun_reduce1, rwReduce1)
@@ -223,8 +228,7 @@ rewriteMapOfGenerate tenv inf elt2 repr2 transformer
          let binder = localVarP tmpvar g_ty g_repr
              let_expr = ExpM $ LetE defaultExpInfo binder rhs body
          return let_expr)]
-              
-     
+
 -- | Rewrite calls to @zip@ to call @zipStream@
 --
 -- > case t1 of TraversableDict trv1 _.
@@ -238,30 +242,46 @@ rewriteMapOfGenerate tenv inf elt2 repr2 transformer
 -- >     (trv2 element2 repr2 input2))
 rwZip :: RewriteRule
 rwZip tenv inf
-  [container1, container2, container3, element1, element2]
+  [TypM container1, TypM container2, container3, TypM element1, TypM element2]
   (traversable1 : traversable2 : traversable3 : repr1 : repr2 :
    input1 : input2 : other_args) =
-  fmap Just $
-  caseOfTraversableDict tenv (return traversable1) container1 $ \trv1 _ ->
-  caseOfTraversableDict tenv (return traversable2) container2 $ \trv2 _ ->
-  caseOfTraversableDict tenv (return traversable3) container3 $ \_ bld3 ->
-  let tuple_type = varApp (pyonBuiltin the_PyonTuple2)
-                   [fromTypM element1, fromTypM element2]
-      tuple_repr = varAppE (pyonBuiltin the_repr_PyonTuple2)
-                   [element1, element2]
-                   [return repr1, return repr2] 
-      app_other_args = map return other_args
-  in varAppE bld3
-     [TypM tuple_type]
-     ([tuple_repr,
-       varAppE (pyonBuiltin the_fun_zip_Stream)
-       [element1, element2]
-       [return repr1, return repr2,
-        varAppE trv1 [element1] [return repr1, return input1],
-        varAppE trv2 [element2] [return repr2, return input2]]] ++
-      app_other_args)
-  
+  let zip_args = [ZipArg container1 element1 traversable1 repr1 input1,
+                  ZipArg container2 element2 traversable2 repr2 input2]
+  in fmap Just $
+     generalizedRewriteZip tenv inf zip_args container3 traversable3 other_args
+
 rwZip _ _ _ _ = return Nothing
+
+rwZip3 :: RewriteRule
+rwZip3 tenv inf
+  [TypM container1, TypM container2, TypM container3, container4,
+   TypM element1, TypM element2, TypM element3]
+  (traversable1 : traversable2 : traversable3 : traversable4 :
+   repr1 : repr2 : repr3 :
+   input1 : input2 : input3 : other_args) =
+  let zip_args = [ZipArg container1 element1 traversable1 repr1 input1,
+                  ZipArg container2 element2 traversable2 repr2 input2,
+                  ZipArg container3 element3 traversable3 repr3 input3]
+  in fmap Just $
+     generalizedRewriteZip tenv inf zip_args container4 traversable4 other_args
+
+rwZip3 _ _ _ _ = return Nothing
+
+rwZip4 :: RewriteRule
+rwZip4 tenv inf
+  [TypM container1, TypM container2, TypM container3, TypM container4, container5,
+   TypM element1, TypM element2, TypM element3, TypM element4]
+  (traversable1 : traversable2 : traversable3 : traversable4 : traversable5 :
+   repr1 : repr2 : repr3 : repr4 :
+   input1 : input2 : input3 : input4 : other_args) =
+  let zip_args = [ZipArg container1 element1 traversable1 repr1 input1,
+                  ZipArg container2 element2 traversable2 repr2 input2,
+                  ZipArg container3 element3 traversable3 repr3 input3,
+                  ZipArg container4 element4 traversable4 repr4 input4]
+  in fmap Just $
+     generalizedRewriteZip tenv inf zip_args container5 traversable5 other_args
+
+rwZip4 _ _ _ _ = return Nothing
 
 -- | Rewrite calls to @zipStream@ when we know the size of the stream.
 --
@@ -273,27 +293,53 @@ rwZipStream :: RewriteRule
 rwZipStream tenv inf
   [element1, element2]
   [repr1, repr2, stream1, stream2]
-  | Just shape1 <- streamShape stream1,
-    Just shape2 <- streamShape stream2 =
-      let zipped_stream = zipStreams [shape1, shape2]
-          elem_ty = ssType zipped_stream
-      in case ssShape zipped_stream
-         of Nothing -> return Nothing -- Can't deal with infinite streams
-            Just (shp_ty, shp_val) ->
-              fmap Just $
-              varAppE (pyonBuiltin the_generate)
-              [shp_ty, TypM elem_ty]
-              [return shp_val,
-               varAppE (pyonBuiltin the_repr_PyonTuple2)
-               [element1, element2] [return repr1, return repr2],
-               lamE $ mkFun []
-               (\ [] -> return ([ValPT Nothing ::: intType],
-                                BoxRT ::: FunT (OutPT ::: elem_ty)
-                                          (SideEffectRT ::: elem_ty)))
-               (\ [] [ixvar] ->
-                 ssGenerator zipped_stream $ ExpM (VarE defaultExpInfo ixvar))]
+  | Just shape1 <- streamShape repr1 stream1,
+    Just shape2 <- streamShape repr2 stream2 =
+      generalizedZipStream [shape1, shape2]
 
 rwZipStream _ _ _ _ = return Nothing
+
+rwZip3Stream :: RewriteRule
+rwZip3Stream tenv inf
+  [element1, element2, element3]
+  [repr1, repr2, repr3, stream1, stream2, stream3]
+  | Just shape1 <- streamShape repr1 stream1,
+    Just shape2 <- streamShape repr2 stream2,
+    Just shape3 <- streamShape repr3 stream3 =
+      generalizedZipStream [shape1, shape2, shape3]
+
+rwZip3Stream _ _ _ _ = return Nothing
+
+rwZip4Stream :: RewriteRule
+rwZip4Stream tenv inf
+  [element1, element2, element3, element4]
+  [repr1, repr2, repr3, repr4, stream1, stream2, stream3, stream4]
+  | Just shape1 <- streamShape repr1 stream1,
+    Just shape2 <- streamShape repr2 stream2,
+    Just shape3 <- streamShape repr3 stream3,
+    Just shape4 <- streamShape repr4 stream4 =
+      generalizedZipStream [shape1, shape2, shape3, shape4]
+
+rwZip4Stream _ _ _ _ = return Nothing
+
+generalizedZipStream streams =
+  let zipped_stream = zipStreams streams
+      elem_ty = ssType zipped_stream
+      tuple_repr = ssRepr zipped_stream
+  in case ssShape zipped_stream
+     of Nothing -> return Nothing -- Can't deal with infinite streams
+        Just (shp_ty, shp_val) ->
+          fmap Just $
+          varAppE (pyonBuiltin the_generate)
+          [shp_ty, TypM elem_ty]
+          [return shp_val,
+           return tuple_repr,
+           lamE $ mkFun []
+           (\ [] -> return ([ValPT Nothing ::: intType],
+                            BoxRT ::: FunT (OutPT ::: elem_ty)
+                            (SideEffectRT ::: elem_ty)))
+           (\ [] [ixvar] ->
+             ssGenerator zipped_stream $ ExpM (VarE defaultExpInfo ixvar))]
 
 rwReduce :: RewriteRule
 rwReduce tenv inf
@@ -414,6 +460,48 @@ rwReduce1Generate tenv inf element elt_repr reducer other_args size count produc
 
 -------------------------------------------------------------------------------
 
+-- | An argument to one of the 'zip' family of functions.
+data ZipArg =
+  ZipArg
+  { zipContainerType   :: Type  -- ^ The container type being zipped
+  , zipElementType     :: Type  -- ^ The data type stored in the contianer
+  , zipTraversableDict :: ExpM  -- ^ @TraversableDict@ for the container
+  , zipElementDict     :: ExpM  -- ^ @Repr@ of the element
+  , zipContainerValue  :: ExpM  -- ^ The container value
+  }
+     
+-- | Generalized rewriting of zip_N to zipStream_N.  Takes a list of inputs
+--   and the output as parameters.
+generalizedRewriteZip :: TypeEnv -> ExpInfo -> [ZipArg] -> TypM -> ExpM
+                      -> [ExpM]
+                      -> FreshVarM ExpM
+generalizedRewriteZip tenv inf inputs out_ty out_traversable other_args =
+  withMany get_traverse_method inputs $ \traverse_methods ->
+  caseOfTraversableDict tenv (return out_traversable) out_ty $ \_ bld ->
+  let tuple_size = length inputs
+      field_types = map zipElementType inputs
+      tuple_type = varApp (pyonTupleTypeCon tuple_size) field_types
+      tuple_repr = varAppE (pyonTupleReprCon tuple_size) (map TypM field_types)
+                   (map (return . zipElementDict) inputs)
+      app_other_args = map return other_args
+  in varAppE bld [TypM tuple_type]
+     (tuple_repr :
+      varAppE (zipper tuple_size) (map TypM field_types)
+      ([return $ zipElementDict input | input <- inputs] ++
+       [varAppE traverse [TypM $ zipElementType input]
+        [return $ zipElementDict input, return $ zipContainerValue input] 
+       | (traverse, input) <- zip traverse_methods inputs]) :
+      app_other_args)
+  where
+    get_traverse_method input k =
+      caseOfTraversableDict tenv (return $ zipTraversableDict input)
+      (TypM $ zipContainerType input) $ \traverse_method _ -> k traverse_method
+
+zipper 2 = pyonBuiltin the_fun_zip_Stream
+zipper 3 = pyonBuiltin the_fun_zip3_Stream
+zipper 4 = pyonBuiltin the_fun_zip4_Stream
+zipper n = internalError $ "zipper: Cannot zip " ++ show n ++ " streams"
+
 -- | The shape of a stream.
 data ShapeStream =
   ShapeStream
@@ -430,6 +518,9 @@ data ShapeStream =
     -- | The type of a stream element
   , ssType :: Type
 
+    -- | The representation dictionary of a stream element
+  , ssRepr :: ExpM
+
     -- | Given an expression that evaluates to the index of the desired
     --   stream element (with type @val int@), produce an expression that
     --   evaluates to the desired stream element, as a write reference. 
@@ -439,18 +530,23 @@ data ShapeStream =
 -- | Zip together a list of two or more streams
 zipStreams :: [ShapeStream] -> ShapeStream
 zipStreams ss
-  | length ss < 2 = internalError "zipStreams: Need at least two streams"
-  | length ss > 2 = internalError "zipStreams: Not implemented for this case"
+  | num_streams < 2 = internalError "zipStreams: Need at least two streams"
   | otherwise =
       let shape = case mapMaybe ssShape ss
                   of [] -> Nothing
                      xs -> Just $ foldr1 combine_shapes xs
-          typ = varApp (pyonBuiltin the_PyonTuple2) (map ssType ss)
-          gen ix = varAppE (pyonBuiltin the_pyonTuple2)
+          typ = varApp (pyonTupleTypeCon num_streams) (map ssType ss)
+          repr = ExpM $ AppE defaultExpInfo 
+                 (ExpM $ VarE defaultExpInfo (pyonTupleReprCon num_streams))
+                 (map (TypM . ssType) ss)
+                 (map ssRepr ss)
+          gen ix = varAppE (pyonTupleCon num_streams)
                    (map (TypM . ssType) ss)
                    [ssGenerator stream ix | stream <- ss]
-      in ShapeStream shape typ gen
+      in ShapeStream shape typ repr gen
   where
+    num_streams = length ss
+
     -- Combine shapes, using the "min" operator to get the minimum value
     combine_shapes (typ1, val1) (typ2, val2) =
       let typ = TypM $
@@ -460,9 +556,9 @@ zipStreams ss
     
     min_ii = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
 
--- | Given a stream, get its shape.
-streamShape :: ExpM -> Maybe ShapeStream
-streamShape expression =
+-- | Given a stream and the repr of a stream element, get its shape.
+streamShape :: ExpM -> ExpM -> Maybe ShapeStream
+streamShape repr expression =
   case unpackVarAppM expression
   of Nothing -> Nothing
      Just (op_var, ty_args, args)
@@ -470,6 +566,7 @@ streamShape expression =
            Just $
            ShapeStream { ssShape = Nothing
                        , ssType = VarT $ pyonBuiltin the_int
+                       , ssRepr = repr
                        , ssGenerator = \ix ->
                            varAppE (pyonBuiltin the_store)
                            [TypM $ VarT $ pyonBuiltin the_int]
@@ -480,6 +577,7 @@ streamShape expression =
            in Just $
               ShapeStream { ssShape = Just (TypM size_arg, size_val)
                           , ssType = type_arg
+                          , ssRepr = repr
                           , ssGenerator = \ix ->
                               appE (return writer) [] [return ix]}
        | otherwise -> Nothing

@@ -293,6 +293,39 @@ rewriteTraverseExpresion inf [return_type] [return_repr, input] =
                        TypSF $ VarT (pyonBuiltin the_Stream), elem1, elem2]
                       [trav1, trav2, traversable_Stream, repr1, repr2,
                        input1, input2]
+       | input_op `isPyonBuiltin` the_fun_zip3 ->
+         case ty_args
+         of [container1, container2, container3, _, elem1, elem2, elem3] ->
+              case args
+              of [trav1, trav2, trav3, _, repr1, repr2, repr3,
+                  input1, input2, input3] ->
+                   -- Replace the output container and traversable types
+                   let oper =
+                         ExpSF $ VarE inf (pyonBuiltin the_fun_zip3)
+                   in Just $ applyBindings bindings $ ExpSF $ AppE inf oper
+                      [container1, container2, container3,
+                       TypSF $ VarT (pyonBuiltin the_Stream),
+                       elem1, elem2, elem3]
+                      [trav1, trav2, trav3, traversable_Stream,
+                       repr1, repr2, repr3,
+                       input1, input2, input3]
+       | input_op `isPyonBuiltin` the_fun_zip4 ->
+         case ty_args
+         of [container1, container2, container3, container4, _,
+             elem1, elem2, elem3, elem4] ->
+              case args
+              of [trav1, trav2, trav3, trav4, _, repr1, repr2, repr3, repr4,
+                  input1, input2, input3, input4] ->
+                   -- Replace the output container and traversable types
+                   let oper =
+                         ExpSF $ VarE inf (pyonBuiltin the_fun_zip4)
+                   in Just $ applyBindings bindings $ ExpSF $ AppE inf oper
+                      [container1, container2, container3, container4,
+                       TypSF $ VarT (pyonBuiltin the_Stream),
+                       elem1, elem2, elem3, elem4]
+                      [trav1, trav2, trav3, trav4, traversable_Stream,
+                       repr1, repr2, repr3, repr4,
+                       input1, input2, input3, input4]
        | input_op `isPyonBuiltin` the_fun_map ->
          case ty_args
          of [container1, _, in_type, out_type] ->
