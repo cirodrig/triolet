@@ -400,6 +400,8 @@ convertHMType' ty = do
           oper_type <- convertHMType' operator 
           return $ Type.Type.typeApp oper_type arg_types
 
+    AnyTy k -> return $ Type.Type.AnyT $ convertKind' k
+
 mkArrowType :: Type.Type.Type -> Type.Type.Type -> Type.Type.Type
 mkArrowType d r = Type.Type.FunT (Type.Type.ValPT Nothing Type.Type.::: d) (Type.Type.ValRT Type.Type.::: r)
 

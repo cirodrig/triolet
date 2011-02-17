@@ -30,6 +30,7 @@ typeMentions t target = search t
     search (VarT v) = v == target
     search (AppT op arg) = search op || search arg
     search (FunT (_ ::: dom) (_ ::: rng)) = search dom || search rng
+    search (AnyT k) = search k
 
 -- | Determine whether the type mentions a variable in the set.
 --   It's assumed that name shadowing does /not/ occur.  If a variable is
@@ -41,6 +42,7 @@ typeMentionsAny t target = search t
     search (VarT v) = v `Set.member` target
     search (AppT op arg) = search op || search arg
     search (FunT (_ ::: dom) (_ ::: rng)) = search dom || search rng
+    search (AnyT k) = search k
 
 -------------------------------------------------------------------------------
 
@@ -60,6 +62,9 @@ runCmpM (CmpM m) id_supply env =
 
 -- | Compare two types.  Return True if the given type is equal to or a subtype
 --   of the expected type, False otherwise.
+--
+--   The types being compared are assumed to have the same kind.  If they do
+--   not, the result of comparison is undefined.
 compareTypes :: IdentSupply Var
              -> TypeEnv         -- ^ Initial type environment
              -> Type            -- ^ Expected type
@@ -75,6 +80,7 @@ cmpType expected given = cmp =<< unifyBoundVariables expected given
     cmp (AppT op1 arg1, AppT op2 arg2) = cmpType op1 op2 >&&> cmpType arg1 arg2
     cmp (FunT (arg1 ::: dom1) result1, FunT (arg2 ::: dom2) result2) =
       cmpType dom1 dom2 >&&> cmpFun arg1 arg2 dom2 result1 result2
+    cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
 
     cmp (_, _) = return False
 
@@ -153,5 +159,9 @@ unify subst expected given = do
       | sameParamRepr r1 r3 && sameReturnRepr r2 r4 =
           unify2 subst (t1, t2) (t3, t4)
       | otherwise = no_unifier
+
+    match_unify (AnyT _) (AnyT _) =
+      -- Assume the types have the same kind.  That means they're equal.
+      unified_by subst
        
     match_unify _ _ = no_unifier

@@ -175,6 +175,7 @@ convertToPureType ty =
   of VarT t -> ty
      AppT op arg -> AppT (convertToPureType op) (convertToPureType arg)
      FunT arg ret -> FunT (convertToPureParamType arg) (convertToPureReturnType ret)
+     AnyT _ -> ty
 
 convertToPureDataConType (DataConType params eparams args range con ty_con) =
   DataConType (map convertToPureParamType params)
@@ -225,7 +226,8 @@ convertToMemType ty =
   case ty
   of VarT t -> ty
      AppT op arg -> AppT (convertToMemType op) (convertToMemType arg)
-     FunT arg ret -> FunT (convertToMemParamType arg) (convertToMemReturnType ret) 
+     FunT arg ret -> FunT (convertToMemParamType arg) (convertToMemReturnType ret)
+     AnyT _ -> ty
 
 convertToMemDataConType (DataConType params eparams args range con ty_con) =
   DataConType (map convertToMemParamType params)

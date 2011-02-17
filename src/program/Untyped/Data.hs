@@ -140,6 +140,9 @@ data HMType =
   | TupleTy {-# UNPACK #-} !Int
     -- | A type application
   | AppTy HMType HMType
+    -- | A distinct type with the specified kind.  This is used for data
+    --   types that have no constraints on them.
+  | AnyTy !Kind
     deriving(Typeable)
 
 -- | A type scheme

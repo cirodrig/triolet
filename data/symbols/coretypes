@@ -34,7 +34,11 @@ data ref Complex : val (val pure -> val pure)
 data ref array : val (val intindex -> val pure -> val pure) {};
 
 data box Repr : val (val pure -> val pure) {};
-data box Stream : val (val pure -> val pure) {};
+
+-- A stream is indexed by a shape and an element type.
+-- Container types are punned as shapes.
+data box Stream : val (val (val pure -> val pure) -> val pure -> val pure) {};
+
 data ref list : val (val pure -> val pure)
 {
   make_list : (val a : pure)
@@ -215,12 +219,12 @@ data box TraversableDict : val (val (val pure -> val pure) -> val pure)
 {
   traversableDict :
       (val t : val pure -> val pure)
-   -> box ((val a : pure) -> box Repr a -> read t a -> box Stream a)
-   -> box ((val a : pure) -> box Repr a -> box Stream a -> write t a)
+   -> box ((val a : pure) -> box Repr a -> read t a -> box Stream t a)
+   -> box ((val a : pure) -> box Repr a -> box Stream t a -> write t a)
    -> box TraversableDict t,
   (val t : val pure -> val pure) ()
-  (box ((val a : pure) -> box Repr a -> read t a -> box Stream a),
-   box ((val a : pure) -> box Repr a -> box Stream a -> write t a))
+  (box ((val a : pure) -> box Repr a -> read t a -> box Stream t a),
+   box ((val a : pure) -> box Repr a -> box Stream t a -> write t a))
   : box TraversableDict t;
 };
 
@@ -265,21 +269,29 @@ repr_PyonTuple4 :
 repr_Box : (val a : pure) -> box Repr a;
 
 repr_Boxed : (val a : pure) -> box Repr (Boxed a);
-repr_Stream : (val a : pure) -> box Repr (Stream a);
+repr_Stream : (val t : val pure -> val pure) -> (val a : pure)
+           -> box Repr (Stream t a);
+
+-- Representation of a referenced object that contains nothing and will
+-- never be accessed.  At runtime, the reference will be an arbitrary pointer,
+-- possibly NULL.
+repr_EmptyReference : (val a : pure) -> box Repr a;
 
 OpaqueTraversableDict_list : box TraversableDict list;
 
 TraversableDict_Stream_build :
-  (val a : pure) -> box Repr a -> box Stream a -> box Stream a;
+    (val t : val pure -> val pure) -> (val a : pure)
+ -> box Repr a -> box Stream (Stream t) a -> box Stream t a;
 
 TraversableDict_Stream_traverse :
-  (val a : pure) -> box Repr a -> box Stream a -> box Stream a;
+    (val t : val pure -> val pure) -> (val a : pure)
+ -> box Repr a -> box Stream t a -> box Stream (Stream t) a;
 
 TraversableDict_list_build :
-  (val a : pure) -> box Repr a -> box Stream a -> write list a;
+  (val a : pure) -> box Repr a -> box Stream list a -> write list a;
 
 TraversableDict_list_traverse :
-  (val a : pure) -> box Repr a -> read list a -> box Stream a;
+  (val a : pure) -> box Repr a -> read list a -> box Stream list a;
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
@@ -526,21 +538,22 @@ min_ii : (val m : intindex)
 -------------------------------------------------------------------------------
 -- Other functions
 
-oper_DO : (val a : pure) -> box Repr a -> write a -> box Stream a;
+oper_DO : (val a : pure) -> box Repr a -> write a -> box Stream list a;
 
 oper_CAT_MAP :
     (val a : pure) -> (val b : pure) -> box Repr a -> box Repr b
- -> box Stream a
- -> box (read a -> box Stream b)
- -> box Stream b;
+ -> box Stream list a
+ -> box (read a -> box Stream list b)
+ -> box Stream list b;
 
-fun_map_Stream : (val a : pure)
+fun_map_Stream : (val t : val pure -> val pure)
+              -> (val a : pure)
 	      -> (val b : pure)
        	      -> box Repr a
        	      -> box Repr b
        	      -> box (read a -> write b)
-       	      -> box Stream a
-       	      -> box Stream b;
+       	      -> box Stream t a
+       	      -> box Stream t b;
 
 fun_map : (val s : val pure -> val pure)
        -> (val t : val pure -> val pure)
@@ -554,11 +567,12 @@ fun_map : (val s : val pure -> val pure)
        -> read s a
        -> write t b;
 
-fun_reduce_Stream : (val a : pure)
+fun_reduce_Stream : (val t : val pure -> val pure)
+		 -> (val a : pure)
           	 -> box Repr a
           	 -> box (read a -> read a -> write a)
 	  	 -> read a
-          	 -> box Stream a
+          	 -> box Stream t a
           	 -> write a;
 
 fun_reduce : (val t : val pure -> val pure)
@@ -570,10 +584,11 @@ fun_reduce : (val t : val pure -> val pure)
           -> read t a
           -> write a;
 
-fun_reduce1_Stream : (val a : pure)
+fun_reduce1_Stream : (val t : val pure -> val pure)
+		  -> (val a : pure)
           	  -> box Repr a
           	  -> box (read a -> read a -> write a)
-          	  -> box Stream a
+          	  -> box Stream t a
           	  -> write a;
 
 fun_reduce1 : (val t : val pure -> val pure)
@@ -584,26 +599,29 @@ fun_reduce1 : (val t : val pure -> val pure)
            -> read t a
            -> write a;
 
-fun_zip_Stream : (val a : pure)
+fun_zip_Stream : (val t : val pure -> val pure)
+	      -> (val a : pure)
        	      -> (val b : pure)
        	      -> box Repr a
        	      -> box Repr b
-       	      -> box Stream a
-       	      -> box Stream b
-       	      -> box Stream (PyonTuple2 a b);
+       	      -> box Stream t a
+       	      -> box Stream t b
+       	      -> box Stream t (PyonTuple2 a b);
 
-fun_zip3_Stream : (val a : pure)
+fun_zip3_Stream : (val t : val pure -> val pure)
+	       -> (val a : pure)
                -> (val b : pure)
                -> (val c : pure)
                -> box Repr a
                -> box Repr b
                -> box Repr c
-               -> box Stream a
-               -> box Stream b
-               -> box Stream c
-               -> box Stream (PyonTuple3 a b c);
+               -> box Stream t a
+               -> box Stream t b
+               -> box Stream t c
+               -> box Stream t (PyonTuple3 a b c);
 
-fun_zip4_Stream : (val a : pure)
+fun_zip4_Stream : (val t : val pure -> val pure)
+	       -> (val a : pure)
                -> (val b : pure)
                -> (val c : pure)
                -> (val d : pure)
@@ -611,11 +629,11 @@ fun_zip4_Stream : (val a : pure)
                -> box Repr b
                -> box Repr c
                -> box Repr d
-               -> box Stream a
-               -> box Stream b
-               -> box Stream c
-               -> box Stream d
-               -> box Stream (PyonTuple4 a b c d);
+               -> box Stream t a
+               -> box Stream t b
+               -> box Stream t c
+               -> box Stream t d
+               -> box Stream t (PyonTuple4 a b c d);
 
 fun_zip : (val s : val pure -> val pure)
        -> (val t : val pure -> val pure)
@@ -674,14 +692,14 @@ fun_zip4 : (val s : val pure -> val pure)
         -> read v d
         -> write w (PyonTuple4 a b c d);
 
-count : box Stream int;
+count : (val t : val pure -> val pure) -> box Stream t int;
 
 generate : (val n : intindex)
         -> (val a : pure)
         -> val IndexedInt n
         -> box Repr a
         -> box (val int -> write a)
-        -> box Stream a;
+        -> box Stream list a;
 
 subscript : (val n : intindex)
          -> (val a : pure)

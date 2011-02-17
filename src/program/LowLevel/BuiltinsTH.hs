@@ -203,12 +203,16 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_TraversableDict_Stream_build) |])
   , (PyonName module_stream "Stream_traverse",
      Right [| pyonBuiltin (SystemF.the_TraversableDict_Stream_traverse) |])
+  , (PyonName module_stream "Stream_count",
+     Right [| pyonBuiltin (SystemF.the_count) |])
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
   , (PyonName module_structures "repr_Boxed",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Boxed |])
   , (PyonName module_structures "repr_Stream",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Stream |])
+  , (PyonName module_structures "repr_EmptyReference",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_EmptyReference |])
   {-, (PyonName module_structures "complex_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,
@@ -335,9 +339,6 @@ builtinGlobals =
     -- Dictionaries
   , (PyonName module_structures "OpaqueTraversableDict_list",
      Right [| pyonBuiltin SystemF.the_OpaqueTraversableDict_list |])
-    -- Streams
-  , (PyonName module_stream "Stream_count",
-     Right [| pyonBuiltin (SystemF.the_count) |])
     -- Physical representations of data types
   , (PyonName module_structures "repr_Box_value",
      Left $ PrimType OwnedType)

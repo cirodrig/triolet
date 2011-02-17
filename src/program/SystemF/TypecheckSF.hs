@@ -172,6 +172,8 @@ typeInferType (TypSF ty) =
        case getLevel rng of
          TypeLevel -> return_type pureT
          KindLevel -> return_type kindT
+
+     AnyT k -> return_type k
   where
     assume_param (ValPT (Just v)) t k = assume v (ValRT ::: t) k
     assume_param _ _ k = k
@@ -230,7 +232,7 @@ typeInferAppE inf op ty_args args = do
   return $ ExpTSF $ TypeAnn result_type new_exp
 
 computeInstantiatedType :: SourcePos -> Type -> [TypTSF] -> TCM Type
-computeInstantiatedType inf op_type args = go op_type args
+computeInstantiatedType inf op_type_ all_args = go op_type_ all_args
   where
     go op_type (TypTSF (TypeAnn arg_kind arg) : args) = do
       -- Apply operator to argument
@@ -257,6 +259,10 @@ computeAppliedType pos op_type arg_types =
         Nothing -> typeError $ "Error in application at " ++ show pos
     
     apply op_type [] = return op_type
+    
+    -- For debugging
+    trace_types = traceShow (hang (text "computeAppliedType") 4 $
+                             pprType op_type $$ vcat (map pprType arg_types))
 
 typeInferFun :: FunSF -> TCM FunTSF
 typeInferFun fun@(FunSF (Fun { funInfo = info

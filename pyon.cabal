@@ -63,6 +63,7 @@ Executable pyon
     Common.Identifier
     Common.Label
     Common.MonadLogic
+    Common.PrecDoc
     Common.SourcePos
     Common.Supply
     Common.THRecord

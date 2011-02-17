@@ -68,12 +68,20 @@ lookupReprDict ty =
   of FunT {} ->
        -- Functions all have the same representation
        return $ Just $ mk_fun_dict ty
+     AnyT {} ->
+       -- These values act like referenced objects, but contain nothing
+       return $ Just $ mk_any_dict ty
      _ -> do
        tenv <- getTypeEnv
        id_supply <- getVarIDs
        denv <- getDictEnv
        liftIO $ DictEnv.lookup id_supply tenv ty denv
   where
+    mk_any_dict ty =
+      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_EmptyReference)
+          call = ExpM $ AppE defaultExpInfo op [TypM ty] []
+      in MkDict ($ call)
+
     mk_fun_dict ty =
       -- Create a boxed representation object, and pass it to the continuation 
       let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
@@ -127,7 +135,7 @@ createDictEnv = do
                    (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float))
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
   boxed_dict <- createBoxedDictPattern (pyonBuiltin the_Boxed) 1
-  stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 1
+  stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 2
   additive_dict <- createBoxedDictPattern (pyonBuiltin the_AdditiveDict) 1
   multiplicative_dict <- createBoxedDictPattern (pyonBuiltin the_MultiplicativeDict) 1
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->

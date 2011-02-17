@@ -690,7 +690,7 @@ doTypeInference m = do
   (_, unbound_vars, _, x) <- runInf m env
   
   -- Any unbound variables that haven't been unified shall now be converted
-  -- to the special type 'Any'
+  -- to an Any type
   mapM_ defaultFreeVariable $ Set.toList unbound_vars
 
   return x
@@ -698,7 +698,7 @@ doTypeInference m = do
     defaultFreeVariable v = do
       b <- isCanonicalTyVar v
       if b
-        then unify noSourcePos (ConTy v) (ConTy $ tiBuiltin the_con_Any)
+        then unify noSourcePos (ConTy v) (AnyTy $ tyConKind v)
         else return []
 
 typeInferModule :: Module -> IO (SystemF.Module SystemF.SF)

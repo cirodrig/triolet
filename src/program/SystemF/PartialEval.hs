@@ -290,7 +290,7 @@ rewriteTraverseExpresion inf [return_type] [return_repr, input] =
                          ExpSF $ VarE inf (pyonBuiltin the_fun_zip)
                    in Just $ applyBindings bindings $ ExpSF $ AppE inf oper
                       [container1, container2,
-                       TypSF $ VarT (pyonBuiltin the_Stream), elem1, elem2]
+                       stream_type, elem1, elem2]
                       [trav1, trav2, traversable_Stream, repr1, repr2,
                        input1, input2]
        | input_op `isPyonBuiltin` the_fun_zip3 ->
@@ -304,7 +304,7 @@ rewriteTraverseExpresion inf [return_type] [return_repr, input] =
                          ExpSF $ VarE inf (pyonBuiltin the_fun_zip3)
                    in Just $ applyBindings bindings $ ExpSF $ AppE inf oper
                       [container1, container2, container3,
-                       TypSF $ VarT (pyonBuiltin the_Stream),
+                       stream_type,
                        elem1, elem2, elem3]
                       [trav1, trav2, trav3, traversable_Stream,
                        repr1, repr2, repr3,
@@ -321,7 +321,7 @@ rewriteTraverseExpresion inf [return_type] [return_repr, input] =
                          ExpSF $ VarE inf (pyonBuiltin the_fun_zip4)
                    in Just $ applyBindings bindings $ ExpSF $ AppE inf oper
                       [container1, container2, container3, container4,
-                       TypSF $ VarT (pyonBuiltin the_Stream),
+                       stream_type,
                        elem1, elem2, elem3, elem4]
                       [trav1, trav2, trav3, trav4, traversable_Stream,
                        repr1, repr2, repr3, repr4,
@@ -335,18 +335,26 @@ rewriteTraverseExpresion inf [return_type] [return_repr, input] =
                    let oper =
                          ExpSF $ VarE inf (pyonBuiltin the_fun_map)
                    in Just $ applyBindings bindings $ ExpSF $ AppE inf oper
-                      [container1, TypSF $ VarT (pyonBuiltin the_Stream),
+                      [container1, stream_type,
                        in_type, out_type]
                       [trav1, traversable_Stream, in_repr, out_repr, input]
      _ -> Nothing
   where
+    stream_type =
+      TypSF $ varApp (pyonBuiltin the_Stream) [VarT $ pyonBuiltin the_list]
+
+    traverse_exp =
+      ExpSF $ VarE defaultExpInfo (pyonBuiltin the_TraversableDict_Stream_traverse)
+    build_exp =
+      ExpSF $ VarE defaultExpInfo (pyonBuiltin the_TraversableDict_Stream_build)
+
     -- The traversable dictionary for the Stream type
     traversable_Stream =
       ExpSF $ AppE defaultExpInfo
       (ExpSF $ VarE defaultExpInfo (pyonBuiltin the_traversableDict))
-      [TypSF $ VarT (pyonBuiltin the_Stream)]
-      [ExpSF $ VarE defaultExpInfo (pyonBuiltin the_TraversableDict_Stream_traverse),
-       ExpSF $ VarE defaultExpInfo (pyonBuiltin the_TraversableDict_Stream_build)]
+      [stream_type]
+      [ExpSF $ AppE defaultExpInfo traverse_exp [TypSF $ VarT $ pyonBuiltin the_list] [],
+       ExpSF $ AppE defaultExpInfo build_exp [TypSF $ VarT $ pyonBuiltin the_list] []]
 
 rewriteTraverseExpresion _ _ _ = Nothing
   

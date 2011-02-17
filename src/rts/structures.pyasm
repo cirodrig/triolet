@@ -41,8 +41,28 @@ function inline repr_Boxed (unit _) -> owned {
   repr_Box_value;
 };
 
+// A reference to an "empty" object.
+// The referenced object will never be accessed.  The reference does not
+// necessarily point to a valid address, depending on how the memory allocator
+// works.
+data owned repr_EmptyRef = PassConv {
+  ObjectHeader { int 1, repr_info },
+  word 0,
+  word 1,
+  dummy_copy,
+  dummy_finalizer
+};
+
+function inline dummy_copy (pointer src, pointer dst) -> () {
+  (); // Do nothing
+};
+
+function inline repr_EmptyReference (unit _) -> owned {
+  repr_EmptyRef;
+};
+
 // Exactly the same as repr_Box, but it has a different System F type
-function inline repr_Stream (unit _) -> owned {
+function inline repr_Stream (unit _, unit _) -> owned {
   repr_Box_value;
 };
 

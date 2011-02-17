@@ -16,7 +16,8 @@ extern function pyon.internal.structures.makeComplex
 
 extern function pyon.internal.structures.repr_Box (unit) -> owned;
 extern function pyon.internal.structures.repr_Boxed (unit) -> owned;
-extern function pyon.internal.structures.repr_Stream (unit) -> owned;
+extern function pyon.internal.structures.repr_EmptyReference (unit) -> owned;
+extern function pyon.internal.structures.repr_Stream (unit, unit) -> owned;
 
 extern function pyon.internal.structures.repr_PyonTuple2
   (unit, unit, owned, owned) -> owned;

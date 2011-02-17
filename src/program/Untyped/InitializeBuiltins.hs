@@ -37,6 +37,13 @@ builtinTyCon name kind sf_con =
   let y = SystemF.TypSF (Type.Type.VarT sf_con)
   in mkTyCon (builtinLabel name) kind y
 
+-- | Create the type of an iterator/stream.
+--   The first argument is the stream shape, the second is the element type.
+iterType :: HMType -> HMType -> HMType
+iterType shp ty = ConTy (tiBuiltin the_con_iter) @@ shp @@ ty
+
+listIterType = iterType (ConTy (tiBuiltin the_con_list))
+
 -------------------------------------------------------------------------------
 -- Class initialization
 
@@ -195,34 +202,34 @@ mkOrdClass = do
   return cls
 
 mkTraversableClass = do
-  rec { t <- newTyVar (Star :-> Star) Nothing
-        ; iter_scheme <-
-            forallType [Star] $ \[a] ->
-            let aT = ConTy a
-                tT = ConTy t
-            in ( [passable aT]
-               , functionType [tT @@ aT] (ConTy (tiBuiltin the_con_iter) @@ aT))
+  t <- newTyVar (Star :-> Star) Nothing
+  iter_scheme <-
+    forallType [Star] $ \[a] ->
+    let aT = ConTy a
+        tT = ConTy t
+    in ([passable aT], functionType [tT @@ aT] (iterType tT aT))
 
-        ; build_scheme <-
-            forallType [Star] $ \[a] ->
-            let aT = ConTy a
-                tT = ConTy t
-            in ( [passable aT]
-               , functionType [ConTy (tiBuiltin the_con_iter) @@ aT] (tT @@ aT))
-        
-        ; let cls = Class { clsParam = t
-                          , clsConstraint = []
-                          , clsMethods = [iter, build]
-                          , clsName = "Traversable"
-                          , clsInstances = [list_instance, iter_instance]
-                          , clsTypeCon = pyonBuiltin SystemF.the_TraversableDict
-                          , clsDictCon = pyonBuiltin SystemF.the_traversableDict
-                          }
+  build_scheme <-
+    forallType [Star] $ \[a] ->
+    let aT = ConTy a
+        tT = ConTy t
+    in ([passable aT], functionType [iterType tT aT] (tT @@ aT))
 
-        ; iter <- mkClassMethod cls 0 "__iter__" iter_scheme
-        ; build <- mkClassMethod cls 1 "__build__" build_scheme
+  rec { let cls = Class { clsParam = t
+                        , clsConstraint = []
+                        , clsMethods = [iter, build]
+                        , clsName = "Traversable"
+                        , clsInstances = [list_instance, iter_instance]
+                        , clsTypeCon = pyonBuiltin SystemF.the_TraversableDict
+                        , clsDictCon = pyonBuiltin SystemF.the_traversableDict
+                        }
+
+      ; iter <- mkClassMethod cls 0 "__iter__" iter_scheme
+      ; build <- mkClassMethod cls 1 "__build__" build_scheme
   
-        ; let list_instance =
+      ; t2 <- newTyVar (Star :-> Star) Nothing
+
+      ; let list_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_list)
                 Nothing
@@ -230,14 +237,20 @@ mkTraversableClass = do
                   pyonBuiltin SystemF.the_TraversableDict_list_traverse
                 , InstanceMethod $
                   pyonBuiltin SystemF.the_TraversableDict_list_build]
-              iter_instance =
-                monomorphicInstance cls
-                (ConTy $ tiBuiltin the_con_iter)
-                Nothing
+
+            iter_instance =
+              -- A stream of anything is iterable
+              Instance
+              { insQVars = [t2]
+              , insConstraint = []
+              , insClass = cls
+              , insType = ConTy (tiBuiltin the_con_iter) @@ ConTy t2
+              , insCon = Nothing
+              , insMethods =
                 [ InstanceMethod $
                   pyonBuiltin SystemF.the_TraversableDict_Stream_traverse
                 , InstanceMethod $
-                  pyonBuiltin SystemF.the_TraversableDict_Stream_build] }
+                  pyonBuiltin SystemF.the_TraversableDict_Stream_build] } }
 
   return cls
 
@@ -591,6 +604,7 @@ mkPassableClass = do
           (Just $ pyonBuiltin SystemF.the_repr_Any) []
         
   ; b <- newTyVar Star Nothing
+  ; t <- newTyVar (Star :-> Star) Nothing
   ; let list_instance =
           Instance
           { insQVars = [b]
@@ -602,10 +616,10 @@ mkPassableClass = do
           }
   ; let iter_instance =
           Instance
-          { insQVars = [b]
+          { insQVars = [t, b]
           , insConstraint = []
           , insClass = cls
-          , insType = ConTy (tiBuiltin the_con_iter) @@ ConTy b
+          , insType = iterType (ConTy t) (ConTy b)
           , insCon = Just $ pyonBuiltin SystemF.the_repr_Stream
           , insMethods = []
           }
@@ -768,8 +782,8 @@ mkZip4Type =
        (wT @@ (TupleTy 4 @@ aT @@ bT @@ cT @@ dT)))
 
 mkCountType =
-  return $ monomorphic $
-  ConTy (tiBuiltin the_con_iter) @@ ConTy (tiBuiltin the_con_int)
+  forallType [Star :-> Star] $ \[t] ->
+  ([], iterType (ConTy t) (ConTy $ tiBuiltin the_con_int))
 
 mkBoxedType =
   forallType [Star] $ \[a] ->
@@ -783,29 +797,36 @@ mkUndefinedType =
 mkMakelistType =
   forallType [Star] $ \[a] ->
   let aT = ConTy a
-      sT = ConTy (tiBuiltin the_con_iter) @@ aT
+      sT = listIterType aT
       lT = ConTy (tiBuiltin the_con_list) @@ aT
   in ([passable aT], functionType [sT] lT)
 
 mkDoType =
   forallType [Star] $ \[a] ->
-  ([passable (ConTy a)], functionType [ConTy a] (ConTy (tiBuiltin the_con_iter) @@ ConTy a))
+  ([passable (ConTy a)],
+   functionType [ConTy a] (listIterType $ ConTy a))
 
 mkGuardType =
   forallType [Star] $ \[a] ->
   ([], functionType [ ConTy (tiBuiltin the_con_bool)
-                    , ConTy (tiBuiltin the_con_iter) @@ ConTy a]
-       (ConTy (tiBuiltin the_con_iter) @@ ConTy a))
+                    , listIterType (ConTy a)]
+       (listIterType (ConTy a)))
+
+mkMapStreamType =
+  forallType [Star :-> Star, Star, Star] $ \[t, a, b] ->
+  let tT = ConTy t
+      aT = ConTy a
+      bT = ConTy b
+  in ([passable aT, passable bT],
+      functionType [functionType [aT] bT, iterType tT aT] (iterType tT bT))
 
 mkIterBindType =
   forallType [Star, Star] $ \[a, b] ->
   let aT = ConTy a
       bT = ConTy b
   in ([passable aT, passable bT],
-   functionType [ ConTy (tiBuiltin the_con_iter) @@ aT
-                , functionType [aT] (ConTy (tiBuiltin the_con_iter) @@ bT)
-                ]
-   (ConTy (tiBuiltin the_con_iter) @@ ConTy b))
+      functionType [listIterType aT, functionType [aT] (listIterType bT)]
+      (listIterType bT))
 
 mkMakeComplexType =
   forallType [Star] $ \[a] ->
@@ -853,7 +874,8 @@ initializeTIBuiltins = do
             , ("Complex", Star :-> Star, [| pyonBuiltin SystemF.the_Complex |])
             , ("bool", Star, [| pyonBuiltin SystemF.the_bool |])
             , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |])
-            , ("iter", Star :-> Star, [| pyonBuiltin SystemF.the_Stream |])
+            , ("iter", (Star :-> Star) :-> Star :-> Star,
+               [| pyonBuiltin SystemF.the_Stream |])
             , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
             , ("Boxed", Star :-> Star, [| pyonBuiltin SystemF.the_Boxed |])
@@ -910,6 +932,9 @@ initializeTIBuiltins = do
               ),
               ("iterBind", [| mkIterBindType |]
               , [| pyonBuiltin SystemF.the_oper_CAT_MAP |]
+              ),
+              ("mapStream", [| mkMapStreamType |]
+              , [| pyonBuiltin SystemF.the_fun_map_Stream |]
               ),
               ("complex", [| mkMakeComplexType |]
               , [| pyonBuiltin SystemF.the_complex |]

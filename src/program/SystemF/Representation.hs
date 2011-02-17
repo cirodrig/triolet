@@ -144,6 +144,7 @@ typeRepr env t =
   of TypeLevel ->
        case fromTypeApp t
        of (FunT {}, _) -> Boxed
+          (AnyT _, _) -> Referenced
           (VarT var, args) ->
             case lookupDataType var env
             of Just op_type -> dataTypeRepresentation op_type
@@ -161,7 +162,7 @@ fixUpTypeRepresentations env ty = go ty
   where
     go ty =
       case ty
-      of VarT v -> ty
+      of VarT _ -> ty
          AppT t1 t2 -> AppT (go t1) (go t2)
          FunT (arg ::: dom) (ret ::: rng) ->
            let dom' = go dom
@@ -173,6 +174,7 @@ fixUpTypeRepresentations env ty = go ty
                rng' = fixUpTypeRepresentations env' rng
                ret' = asWriteReturnRepr $ typeRepr env rng'
            in FunT (arg' ::: dom') (ret' ::: rng')
+         AnyT _ -> ty
 
 getFunType :: FunTSF -> InferRepr Type
 getFunType f = infFixUpType $ getTypeAnn f

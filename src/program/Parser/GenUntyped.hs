@@ -253,14 +253,28 @@ doExpr expr =
 
 doIterator :: SSAIterFor Expr -> Cvt U.Expression
 doIterator (IterFor pos params dom body) = do
-  -- Convert "FOO for x in BAR" to bind(__iter__(bar), lambda x. FOO)
   dom' <- doExpr dom
-  convertParameters params $ \[param'] -> do
-    body' <- doComprehension body 
-    let body_fun = U.Function (U.Ann pos) Nothing [param'] Nothing body'
-    let iterator = callVariable pos (tiBuiltin the___iter__) [dom']
-    return $ callVariable pos (tiBuiltin the_iterBind)
-      [iterator, U.FunE (U.Ann pos) body_fun]
+  convertParameters params $ \[param'] ->
+    case body
+    of CompBody simple_body -> do
+         -- When body is a simple expression, convert
+         -- "FOO for x in BAR" to mapStream(lambda x. FOO, __iter__(bar)).
+         --
+         -- This works for a broader range of types than the general case.
+         body_expr <- doExpr simple_body
+         let body_fun =
+               U.Function (U.Ann pos) Nothing [param'] Nothing body_expr
+         let iterator = callVariable pos (tiBuiltin the___iter__) [dom']
+         return $ callVariable pos (tiBuiltin the_mapStream)
+           [U.FunE (U.Ann pos) body_fun, iterator]
+         
+       _ -> do
+         -- Convert "FOO for x in BAR" to bind(__iter__(bar), lambda x. FOO)
+         body' <- doComprehension body 
+         let body_fun = U.Function (U.Ann pos) Nothing [param'] Nothing body'
+         let iterator = callVariable pos (tiBuiltin the___iter__) [dom']
+         return $ callVariable pos (tiBuiltin the_iterBind)
+           [iterator, U.FunE (U.Ann pos) body_fun]
 
 doGuard :: SSAIterIf Expr -> Cvt U.Expression
 doGuard (IterIf pos cond body) = do

@@ -77,6 +77,7 @@ pyonBuiltinVariableNames =
   , "repr_Box"
   , "repr_Stream"
   , "repr_Boxed"
+  , "repr_EmptyReference"
   , "repr_PyonTuple0"
   , "repr_PyonTuple1"
   , "repr_PyonTuple2"

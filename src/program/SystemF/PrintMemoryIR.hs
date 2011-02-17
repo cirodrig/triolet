@@ -3,6 +3,7 @@ module SystemF.PrintMemoryIR where
 
 import Text.PrettyPrint.HughesPJ
 
+import Common.PrecDoc
 import Common.Label
 import SystemF.Syntax
 import SystemF.MemoryIR
@@ -15,30 +16,24 @@ pprLit (IntL n _) = text (show n)
 pprLit (FloatL n _) = text (show n)
 
 pprParamRepr repr =
-  case repr
-  of ValPT (Just v) -> text "val" <> braces (pprVar v) 
-     ValPT Nothing -> text "val"
-     BoxPT -> text "box"
-     ReadPT -> text "read"
-     WritePT -> text "write"
-     OutPT -> text "out"
-     SideEffectPT -> text "sideeffect"
-
-pprReturnRepr repr =
-  case repr
-  of ValRT -> text "val"
-     BoxRT -> text "box"
-     ReadRT -> text "read"
-     WriteRT -> text "write"
-     OutRT -> text "out"
-     SideEffectRT -> text "sideeffect"
+  let repr_word = pprParamReprWord repr
+  in case repr
+     of ValPT (Just v) -> repr_word <> braces (pprVar v) 
+        _ -> repr_word
 
 pprParamType :: ParamType -> Doc
-pprParamType (repr ::: ty) = pprParamRepr repr <+> pprType ty
+pprParamType pt = unparenthesized $ pprParamTypePrec pt
 
-pprReturnType (repr ::: ty) = pprReturnRepr repr <+> pprType ty
+pprParamTypePrec :: ParamType -> PrecDoc
+pprParamTypePrec (repr ::: ty) =
+  pprParamRepr repr <+> pprType ty `hasPrec` appPrec
 
-pprRet (RetM ret) = pprReturnType ret
+pprReturnType rt = unparenthesized $ pprReturnTypePrec rt
+
+pprReturnTypePrec (repr ::: ty) =
+  pprReturnRepr repr <+> pprType ty `hasPrec` appPrec
+
+pprRet (RetM ret) = pprReturnTypePrec ret
 
 pprTyPat :: TyPat Mem -> Doc
 pprTyPat (TyPatM v t) = pprVar v <+> text ":" <+> pprType t
@@ -58,28 +53,32 @@ pprUses One = text "[1]"
 pprUses Many = empty
 
 pprExp :: ExpM -> Doc
-pprExp (ExpM expression) =
+pprExp e = unparenthesized $ pprExpPrec e
+
+pprExpPrec (ExpM expression) =
   case expression
-  of VarE _ v -> pprVar v
-     LitE _ l -> pprLit l
+  of VarE _ v -> hasAtomicPrec $ pprVar v
+     LitE _ l -> hasAtomicPrec $ pprLit l
      AppE _ op ty_args args ->
-       let op_doc = pprExp op
-           ty_args_doc = [pprType t | TypM t <- ty_args]
-           args_doc = map pprExp args
-       in hang (pprExp op) 8 (pprParenList (ty_args_doc ++ args_doc))
-     LamE _ f -> pprFun f
+       let op_doc = pprExpPrec op ?+ appPrec
+           ty_args_doc = [pprTypePrec t ?+ outerPrec | TypM t <- ty_args]
+           args_doc = [pprExpPrec arg ?+ outerPrec | arg <- args]
+       in hang op_doc 8 (pprParenList (ty_args_doc ++ args_doc)) `hasPrec` appPrec
+     LamE _ f -> pprFunPrec f
      LetE _ pat rhs body ->
        let pat_doc = pprPat pat
-           rhs_doc = pprExp rhs
-           body_doc = pprExp body
-       in hang (pat_doc <+> text "=") 4 rhs_doc $$ body_doc
+           rhs_doc = pprExpPrec rhs ?+ outerPrec
+           body_doc = pprExpPrec body ?+ outerPrec
+       in hang (pat_doc <+> text "=") 4 rhs_doc $$ body_doc `hasPrec` stmtPrec
      LetfunE _ defs body ->
        let defs_doc = map pprDef $ defGroupMembers defs
            body_doc = pprExp body
-       in text "letrec" $$ nest 2 (vcat defs_doc) $$ body_doc
+       in text "letfun" $$ nest 2 (vcat defs_doc) $$ body_doc
+          `hasPrec` stmtPrec
      CaseE _ scr alts ->
-       text "case" <+> pprExp scr $$
-       text "of" <+> vcat (map pprAlt alts)
+       let case_doc = text "case" <+> pprExpPrec scr ? stmtPrec 
+           of_doc = text "of" <+> vcat (map pprAlt alts)
+       in case_doc $$ of_doc `hasPrec` stmtPrec
 
 pprAlt (AltM alt) =
   let con_doc = pprVar $ altConstructor alt
@@ -90,14 +89,17 @@ pprAlt (AltM alt) =
   in con_doc <+> sep (args_doc : ex_types_doc ++ params_doc) <> text "." $$
      nest 2 body_doc
 
-pprFun (FunM fun) =
+pprFun f = unparenthesized $ pprFunPrec f
+
+pprFunPrec (FunM fun) =
   let ty_params_doc = map pprTyPat $ funTyParams fun
       params_doc = map pprPat $ funParams fun
-      return_doc = pprRet $ funReturn fun
-      body_doc = pprExp $ funBody fun
-  in text "lambda" <+> sep [pprParenList (ty_params_doc ++ params_doc),
-                            nest (-3) $ text "->" <+> return_doc] <> text "." $$
-     nest 4 body_doc
+      return_doc = pprRet (funReturn fun) ?+ funPrec
+      body_doc = pprExpPrec (funBody fun) ? stmtPrec
+      sig_doc = sep [pprParenList (ty_params_doc ++ params_doc),
+                     nest (-3) $ text "->" <+> return_doc]
+  in text "lambda" <+> sig_doc <> text "." $$ nest 4 body_doc
+     `hasPrec` stmtPrec
 
 pprDef (Def v f) = hang (pprVar v) 2 (pprFun f)
 

@@ -72,6 +72,7 @@ instance Renameable Type where
          AppT (rename rn op) (rename rn arg)
        FunT (arg ::: dom) (ret ::: rng) ->
          FunT (arg ::: rename rn dom) (ret ::: rename rn rng)
+       AnyT _ -> ty             -- Kinds are not renameable
 
   freshen ty =
     case ty
@@ -93,6 +94,7 @@ instance Renameable Type where
                         of ValPT (Just v) -> Set.delete v fv_rng
                            _ -> fv_rng
          in Set.union fv_dom fv_rng
+       AnyT k -> freeVariables k
 
 -- We do not have an instance for ParamRepr ::: Type
 -- because it binds variables that are visible outside itself 
@@ -183,6 +185,7 @@ instance Substitutable Type where
          AppT (substitute sb op) (substitute sb arg)
        FunT (arg ::: dom) result ->
          FunT (arg ::: substitute sb dom) (substituteBinding sb result)
+       AnyT _ -> ty             -- Kinds are not substitutable
 
 -- We do not have a Substitutable instance for ParamRepr ::: Type
 -- because it binds variables that are visible outside itself 

@@ -25,12 +25,12 @@ procedure inline Stream_alloc () -> owned {
 };
 
 // Traverse a stream.  Simply return the stream.
-function inline Stream_traverse (unit _, owned _, owned stream) -> owned {
+function inline Stream_traverse (unit _, unit _, owned _, owned stream) -> owned {
   stream;
 };
 
 // Build a stream.  Simply return the stream.
-function inline Stream_build (unit _, owned _, owned stream) -> owned {
+function inline Stream_build (unit _, unit _, owned _, owned stream) -> owned {
   stream;
 };
 
@@ -252,7 +252,7 @@ record Stream_map_state(pstateT, presultT) {
 };
 
 function Stream_map
-  (unit _, unit _,
+  (unit _, unit _, unit _,
    owned pr_repr,               // Representation of a produced value
    owned tf_repr,               // Representation of a transformed value
    owned tf,                    // Transformer function
@@ -301,6 +301,8 @@ function Stream_map
   s @! Stream.state_size = sizeof state_type;
   s @! Stream.state_align = alignof state_type;
   s @! Stream.state_finalize = dummy_finalizer;
+  () = () primcall pyon_db_int (int -1771);
+  () = () primcall pyon_db_pointer (s as pointer);
   s;
 };
 
@@ -308,7 +310,7 @@ function Stream_map
 /* reduce */
 
 function inline Stream_reduce
-  (unit _,
+  (unit _, unit _,
    owned repr_element,
    owned reducer,
    pointer init,
@@ -369,10 +371,16 @@ function inline reduce
    pointer container,
    pointer ret) -> () {
   // Traverse the object and reduce the resulting stream
+  () = () primcall pyon_db_pointer(traversable as pointer);
+  () = () primcall pyon_db_pointer(elem_repr as pointer);
+  () = () primcall pyon_db_pointer(reducer as pointer);
+  () = () primcall pyon_db_pointer(initial_value);
+  () = () primcall pyon_db_pointer(container);
   stream = owned call (traversable @! TraversableDict.traverse)
                       (nil, elem_repr, container);
+  () = () primcall pyon_db_pointer(stream as pointer);
 
-  () = () call Stream_reduce (nil, elem_repr, reducer,
+  () = () call Stream_reduce (nil, nil, elem_repr, reducer,
                               initial_value, stream, ret);
 
   // Clean up
@@ -385,7 +393,7 @@ function inline reduce
 // Like reduce, except that we take the first element from the stream.
 // Terminate with error if stream is empty.
 function inline Stream_reduce1
-  (unit _,
+  (unit _, unit _,
    owned repr_element,
    owned reducer,
    owned stream,
@@ -470,7 +478,7 @@ record Stream_zip_state(p1stateT, p2stateT) {
 };
 
 function Stream_zip
-  (unit _, unit _,
+  (unit _, unit _, unit _,
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned p1,
@@ -585,7 +593,7 @@ record Stream_zip3_state(p1stateT, p2stateT, p3stateT) {
 };
 
 function Stream_zip3
-  (unit _, unit _, unit _,
+  (unit _, unit _, unit _, unit _,
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned repr_data3,            // Representation of p3's output
@@ -731,7 +739,7 @@ record Stream_zip4_state(p1stateT, p2stateT, p3stateT, p4stateT) {
 };
 
 function Stream_zip4
-  (unit _, unit _, unit _, unit _,
+  (unit _, unit _, unit _, unit _, unit _,
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned repr_data3,            // Representation of p3's output
@@ -900,7 +908,7 @@ function zip4
 /*****************************************************************************/
 /* count */
 
-data owned Stream_count = Stream {
+data owned Stream_counter = Stream {
   INIT_OBJECT_HEADER,
   Stream_count_next,
   Stream_count_initialize,
@@ -920,6 +928,13 @@ function inline Stream_count_next (pointer state, pointer out) -> bool {
   !out = current;
   true;
 };
+
+// This function is polymorphic in the stream shape.  It always returns the
+// same stream.
+function inline Stream_count (unit _) -> owned {
+  Stream_counter;
+};
+
 
 /*****************************************************************************/
 /* generate */

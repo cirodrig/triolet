@@ -171,6 +171,7 @@ typeInferType (TypM ty) =
        case getLevel rng of
          TypeLevel -> return_type (ValRT ::: pureT)
          KindLevel -> return_type (ValRT ::: kindT)
+     AnyT k -> return_type (ValRT ::: k)
   where
     assume_param (ValPT (Just v)) t k = assume v (ValRT ::: t) k
     assume_param _ _ k = k

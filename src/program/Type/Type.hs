@@ -15,18 +15,27 @@ module Type.Type(module Type.Var,
                  returnReprToRepr,
                  paramReprToReturnRepr,
                  returnReprToParamRepr,
+
+                 -- * Construction and deconstruction helper routines
                  typeApp, varApp,
                  fromTypeApp, fromVarApp,
                  pureFunType, funType,
                  fromFunType, fromPureFunType,
+
+                 -- * Predefined types
                  kindT, pureT, intindexT,
                  kindV, pureV, intindexV,
                  firstAvailableVarID,
-                 pprType, pprParam, pprReturn)
+
+                 -- * Pretty-printing
+                 pprType, pprTypePrec, pprReprType,
+                 pprParam, pprReturn,
+                 pprParamReprWord, pprReturnRepr)
 where
 
 import Text.PrettyPrint.HughesPJ
 
+import Common.PrecDoc
 import Common.Error
 import Common.Identifier
 import Common.Label
@@ -40,6 +49,9 @@ data Type =
   | AppT Type Type
     -- | A function type
   | FunT !ParamType !ReturnType
+    -- | An arbitrary, opaque type inhabiting the given kind.  The kind has
+    --   no free type variables.
+  | AnyT Type
 
 type ParamType = ParamRepr ::: Type
 type ReturnType = ReturnRepr ::: Type
@@ -66,10 +78,10 @@ pureFunType, funType :: [ParamType] -> ReturnType -> Type
 pureFunType = constructFunctionType ValRT
 funType = constructFunctionType BoxRT
 
-constructFunctionType repr [] ret = internalError "funType: No parameters" 
+constructFunctionType repr [] ret = internalError "funType: No parameters"
 constructFunctionType repr ps ret = go ps
   where
-    go [p]    = FunT p ret 
+    go [p]    = FunT p ret
     go (p:ps) = FunT p (repr ::: go ps)
 
 fromPureFunType, fromFunType :: Type -> ([ParamType], ReturnType)
@@ -115,7 +127,7 @@ data ParamRepr =
 -- the return address is taken as a parameter, and will be written in the
 -- function.
 --
--- The three representations 'ReadRT', 'WriteRT', and 'OutRT' all pertain to 
+-- The three representations 'ReadRT', 'WriteRT', and 'OutRT' all pertain to
 -- referenced objects.
 -- 'ReadRT' is used for reading an object that was already created.  We can't
 -- decide where we want the data, but we take whatever address we find it at.
@@ -134,7 +146,7 @@ data ReturnRepr =
     ValRT                       -- ^ A value
   | BoxRT                       -- ^ A boxed object reference
   | ReadRT                      -- ^ A reference chosen by the producer
-  | WriteRT                     -- ^ A reference chosen by the consumer  
+  | WriteRT                     -- ^ A reference chosen by the consumer
   | OutRT                       -- ^ A pointer to write-only data
   | SideEffectRT                -- ^ A dummy value to track dependences
 
@@ -170,27 +182,28 @@ returnReprToParamRepr SideEffectRT = SideEffectPT
 --   Parameter variables are ignored.
 sameParamRepr :: ParamRepr -> ParamRepr -> Bool
 sameParamRepr (ValPT _) (ValPT _) = True
-sameParamRepr BoxPT     BoxPT     = True 
-sameParamRepr ReadPT    ReadPT    = True 
-sameParamRepr WritePT   WritePT   = True 
-sameParamRepr OutPT     OutPT     = True 
-sameParamRepr SideEffectPT SideEffectPT = True 
+sameParamRepr BoxPT     BoxPT     = True
+sameParamRepr ReadPT    ReadPT    = True
+sameParamRepr WritePT   WritePT   = True
+sameParamRepr OutPT     OutPT     = True
+sameParamRepr SideEffectPT SideEffectPT = True
 sameParamRepr _         _         = False
 
 -- | True if the given representations are the same, False otherwise.
 sameReturnRepr :: ReturnRepr -> ReturnRepr -> Bool
 sameReturnRepr ValRT     ValRT     = True
-sameReturnRepr BoxRT     BoxRT     = True 
-sameReturnRepr ReadRT    ReadRT    = True 
-sameReturnRepr WriteRT   WriteRT   = True 
-sameReturnRepr OutRT     OutRT     = True 
-sameReturnRepr SideEffectRT SideEffectRT = True 
+sameReturnRepr BoxRT     BoxRT     = True
+sameReturnRepr ReadRT    ReadRT    = True
+sameReturnRepr WriteRT   WriteRT   = True
+sameReturnRepr OutRT     OutRT     = True
+sameReturnRepr SideEffectRT SideEffectRT = True
 sameReturnRepr _         _         = False
 
 instance HasLevel Var => HasLevel Type where
   getLevel (VarT v) = getLevel v
   getLevel (AppT op _) = getLevel op
   getLevel (FunT _ (_ ::: rng)) = getLevel rng
+  getLevel (AnyT _) = TypeLevel
 
 kindT, pureT :: Type
 kindT = VarT kindV
@@ -214,10 +227,34 @@ firstAvailableVarID = toIdent 10
 -------------------------------------------------------------------------------
 -- Pretty-printing
 
+-- | Pretty-print the name of a 'ParamRepr'.  The parameter variable (if any)
+--   is ignored.
+pprParamReprWord :: ParamRepr -> Doc
+pprParamReprWord prepr =
+  text $ case prepr
+         of ValPT _      -> "val"
+            BoxPT        -> "box"
+            ReadPT       -> "read"
+            WritePT      -> "write"
+            OutPT        -> "out"
+            SideEffectPT -> "sideeffect"
+
+-- | Pretty-print a 'ReturnRepr'.
+pprReturnRepr :: ReturnRepr -> Doc
+pprReturnRepr rrepr =
+  text $ case rrepr
+         of ValRT        -> "val"
+            BoxRT        -> "box"
+            ReadRT       -> "read"
+            WriteRT      -> "write"
+            OutRT        -> "out"
+            SideEffectRT -> "sideeffect"
+
+{-
 pprTypeParen :: Type -> Doc
 pprTypeParen t = parens $ pprType t
 
-pprAppArgType t = 
+pprAppArgType t =
   case t
   of VarT {} -> pprType t
      _ -> pprTypeParen t
@@ -225,71 +262,65 @@ pprAppArgType t =
 pprFunArgType repr t =
   case t
   of FunT {} -> parens (pprTypeRepr (Just repr) t)
-     _ -> pprTypeRepr (Just repr) t
+     _ -> pprTypeRepr (Just repr) t-}
 
 pprType :: Type -> Doc
-pprType (VarT v) = pprVar v
-pprType (AppT op arg) = ppr_app op [arg]
-  where
-    ppr_app (AppT op' arg') args = ppr_app op' (arg':args)
-    ppr_app op' args = pprAppArgType op' <+> sep (map pprAppArgType args)
+pprType t = unparenthesized $ pprTypePrec t
 
-pprType (FunT arg ret) =
-  let repr = case ret
-             of repr ::: FunT {} -> Just repr
-                _ -> Nothing
-      fun_doc = pprTypeRepr repr (FunT arg ret)
-  in case repr
-     of Just rrepr ->
-          let rrepr_doc =
-                case rrepr
-                of ValRT -> text "val"
-                   BoxRT -> text "box"
-                   ReadRT -> text "read"
-                   WriteRT -> text "write"
-                   OutRT -> text "out"
-                   SideEffectRT -> text "sideeffect"
-          in rrepr_doc <+> parens fun_doc
-        _ -> fun_doc
-
-pprTypeRepr repr ty =
+pprTypePrec :: Type -> PrecDoc
+pprTypePrec ty =
   case ty
-  of FunT arg ret -> pprFunType repr [pprParam arg] ret
-     _ -> pprType ty
-
-pprFunType erepr params (ret_repr ::: FunT arg ret)
-  | return_repr_match = pprFunType erepr (pprParam arg : params) ret
+  of VarT v -> hasAtomicPrec $ pprVar v
+     AppT op arg -> ppr_app op [arg] `hasPrec` appPrec
+     FunT arg ret -> pprFunType Nothing ty
+     AnyT k -> text "Any :" <+> pprTypePrec k ?+ typeAnnPrec `hasPrec` typeAnnPrec
   where
-    return_repr_match =
-      case erepr
-      of Just r -> sameReturnRepr r ret_repr
-         _ -> False
+    -- Uncurry the application
+    ppr_app (AppT op' arg') args = ppr_app op' (arg':args)
+    ppr_app op' args = sep [pprTypePrec t ?+ appPrec | t <- op' : args]
 
-pprFunType erepr params ret =
-  let items = reverse (pprReturn ret : map (<+> text "->") params)
-  in sep items
+-- | Pretty-print a type with an implicit representation.  The implicit
+--   representation is used when printing function types.
+pprReprType :: ReturnRepr -> Type -> PrecDoc
+pprReprType rrepr ty =
+  case ty
+  of FunT arg ret -> pprFunType (Just rrepr) ty
+     _ -> pprTypePrec ty
 
-pprReturn (ret ::: rng) =  
-  let repr_doc =
-        case ret
-        of ValRT -> text "val"
-           BoxRT -> text "box"
-           ReadRT -> text "read"
-           WriteRT -> text "write"
-           OutRT -> text "out"
-           SideEffectRT -> text "sideeffect"
-  in repr_doc <+> pprFunArgType ret rng
+-- | Pretty-print a function type.
+pprFunType :: Maybe ReturnRepr -> Type -> PrecDoc
+pprFunType erepr (FunT arg ret) =
+  let (params, return) = decompose_function (pprParam arg :) ret
+      param_docs = [param ?+ appPrec <+> text "->" | param <- params]
+      return_doc = return ?+ appPrec
+  in sep (param_docs ++ [return_doc]) `hasPrec` funPrec
+  where
+    -- Decompose the function into a parameter list and a return type
+    decompose_function hd (ret_repr ::: FunT arg ret)
+      | return_repr_match ret_repr =
+          decompose_function (hd . (pprParam arg :)) ret
+    
+    decompose_function hd ty = (hd [], pprReturn ty)
+
+    -- Is this the same as the expected representation?
+    return_repr_match repr = maybe False (sameReturnRepr repr) erepr
+
+pprFunType _ _ = internalError "pprFunType"
+
+pprReturn :: ReturnType -> PrecDoc
+pprReturn (ret ::: rng) =
+  let repr_doc = pprReturnRepr ret
+  in repr_doc <+> pprReprType ret rng ? appPrec `hasPrec` appPrec
       
+pprParam :: ParamType -> PrecDoc
 pprParam (arg ::: dom) =
   case arg
-  of ValPT Nothing -> ordinary_lhs $ text "val"
-     ValPT (Just v) -> parens $
-                       text "val" <+> pprVar v <+> text ":" <+> pprType dom
-     BoxPT -> ordinary_lhs $ text "box"
-     ReadPT -> ordinary_lhs $ text "read"
-     WritePT -> ordinary_lhs $ text "write"
-     OutPT -> ordinary_lhs $ text "out"
-     SideEffectPT -> ordinary_lhs $ text "sideeffect"
+  of ValPT (Just v) ->
+       arg_word <+> pprVar v <+> text ":" <+> pprTypePrec dom ?+ typeAnnPrec
+       `hasPrec` typeAnnPrec
+     _ -> ordinary_lhs
   where
-    ordinary_lhs repr_doc =
-      repr_doc <+> pprFunArgType (paramReprToReturnRepr arg) dom
+    arg_word = pprParamReprWord arg
+    ordinary_lhs =
+      arg_word <+> pprReprType (paramReprToReturnRepr arg) dom ? appPrec
+      `hasPrec` appPrec

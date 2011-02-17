@@ -72,7 +72,7 @@ pyonSourceGlobals =
 -- | Global variables that can't be referred to by name 
 pyonOtherGlobals :: [String]
 pyonOtherGlobals =
-  [ "do", "guard", "iterBind"
+  [ "do", "guard", "iterBind", "mapStream"
   ]
 
 -- | All predefined class names

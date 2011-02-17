@@ -1,5 +1,6 @@
 
 {-# LANGUAGE TypeFamilies, DeriveDataTypeable #-}
+{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 module Untyped.HMType
        (Substitution,
         mergeSubstitutions,
@@ -11,7 +12,9 @@ module Untyped.HMType
         newTyVar, newRigidTyVar, mkTyCon, duplicateTyVar,
         HMType(..),
         appTy,
-        tupleType, functionType,
+        tupleType,
+        functionType,
+        anyType,
         uncurryTypeApplication,
         inspectTypeApplication,
         hmTypeKind,
@@ -147,25 +150,31 @@ duplicateTyVar v =
 isNoRep NoRep = True
 isNoRep _ = False
 
-kindError = error "Kind error in type application"
+-- | Report a kind error.  Give very rough information about where the
+--   error occurred.
+kindError loc =
+  error $ "Kind error in " ++ loc
 
 -- | Apply a type of kind @k1 -> k2@ to a type of kind @k1@
 appTy :: HMType -> HMType -> HMType
 s `appTy` t =
   case hmTypeKind s
-  of k :-> _ -> if hmTypeKind t == k then s `AppTy` t else kindError
-     _       -> kindError
+  of k :-> _ | hmTypeKind t == k -> s `AppTy` t
+     _ -> kindError "type application"
 
 tupleType :: [HMType] -> HMType
 tupleType ts 
-  | any ((Star /=) . hmTypeKind) ts = kindError
+  | any ((Star /=) . hmTypeKind) ts = kindError "tuple field type"
   | otherwise = foldl AppTy (TupleTy $ length ts) ts
 
 functionType :: [HMType] -> HMType -> HMType
 functionType dom rng 
-  | any ((Star /=) . hmTypeKind) dom = kindError 
-  | Star /= hmTypeKind rng = kindError
+  | any ((Star /=) . hmTypeKind) dom = kindError "function parameter type"
+  | Star /= hmTypeKind rng = kindError "function return type"
   | otherwise = foldl AppTy (FunTy $ length dom) (dom ++ [rng])
+
+anyType :: Kind -> HMType
+anyType = AnyTy
 
 hmTypeKind :: HMType -> Kind
 hmTypeKind (ConTy c)     = tcKind c
@@ -173,7 +182,8 @@ hmTypeKind (FunTy n)     = nAryKind (n+1)
 hmTypeKind (TupleTy n)   = nAryKind n
 hmTypeKind (AppTy t1 t2) = case hmTypeKind t1
                            of _ :-> k -> k
-                              Star    -> kindError
+                              Star    -> kindError "type application"
+hmTypeKind (AnyTy k)     = k
 
 hmTypeMap :: (HMType -> HMType) -> HMType -> HMType
 hmTypeMap f t =
@@ -244,7 +254,7 @@ assertCanonicalTyVar v = do
 unifyTyVars :: TyCon -> TyCon -> IO ()
 unifyTyVars v1 v2 
   | v1 == v2 = return ()
-  | tyConKind v1 /= tyConKind v2 = kindError
+  | tyConKind v1 /= tyConKind v2 = kindError "type unification"
   | otherwise = do
       assertCanonicalTyVar v1
       assertCanonicalTyVar v2
@@ -255,7 +265,7 @@ unifyTyVars v1 v2
 -- The variable should be canonical.
 unifyTyVar :: TyCon -> HMType -> IO ()
 unifyTyVar v t 
-  | tyConKind v /= hmTypeKind t = kindError
+  | tyConKind v /= hmTypeKind t = kindError "type unification"
   | otherwise = do
   assertCanonicalTyVar v
   occursCheck v t
@@ -339,6 +349,7 @@ instance Unifiable HMType where
       (TupleTy t1, TupleTy t2) -> require $ t1 == t2
       (AppTy a b,  AppTy c d)  -> do unify pos a c
                                      unify pos b d
+      (AnyTy k1, AnyTy k2)     -> require $ k1 == k2
       _ -> failure
     where
       success = return []
@@ -374,6 +385,7 @@ instance Unifiable HMType where
           (ConTy c1, ConTy c2) -> require $ c1 == c2
           (FunTy n1, FunTy n2) -> require $ n1 == n2
           (TupleTy t1, TupleTy t2) -> require $ t1 == t2
+          (AnyTy k1, AnyTy k2) -> require $ k1 == k2
           -- Recurse on app terms
           (AppTy a b,  AppTy c d) -> do result1 <- match_ subst a c
                                         case result1 of
@@ -395,6 +407,7 @@ instance Unifiable HMType where
       (FunTy n1,   FunTy n2)   -> return $ n1 == n2
       (TupleTy t1, TupleTy t2) -> return $ t1 == t2
       (AppTy a b,  AppTy c d)  -> uEqual a c >&&> uEqual b d
+      (AnyTy k1,   AnyTy k2)   -> return $ k1 == k2
       _ -> return False
     
 -------------------------------------------------------------------------------
@@ -434,6 +447,8 @@ prType prec t = do
     AppTy _ _ -> 
       -- Should not happen after uncurrying
       internalError "prType"
+    AnyTy k ->
+      return $ parens (text "AnyTy" <+> text (showKind k))
   where
     conName c =
       case tcName c

@@ -86,6 +86,8 @@ edcType (FunT (ValPT (Just v) ::: dom) (_ ::: rng)) = do
 edcType (FunT (_ ::: dom) (_ ::: rng)) = do
   edcType dom
   edcType rng
+edcType (AnyT _) =
+  return ()    -- AnyT can only mention kinds, which we don't care about
 
 -- | Given the members of a definition group, the variables mentioned by them, 
 --   and the set of members that are referenced by the rest of the program,
