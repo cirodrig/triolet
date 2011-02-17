@@ -181,7 +181,7 @@ topDecl = located (var_decl <|> datatype_decl)
     var_decl = do
       declVar <- identifier
       match ColonTok 
-      declType <- returnType
+      declType <- anyReturnType
       return $ VarDecl declVar declType
 
     datatype_decl = do
@@ -189,7 +189,7 @@ topDecl = located (var_decl <|> datatype_decl)
       repr <- representation
       declVar <- identifier
       match ColonTok 
-      declType <- returnType
+      declType <- anyReturnType
       match LBraceTok
       cons <- dataConDecl `sepEndBy` match SemiTok
       match RBraceTok
@@ -198,38 +198,81 @@ topDecl = located (var_decl <|> datatype_decl)
 dataConDecl = located $ do
   declVar <- identifier
   match ColonTok
-  declType <- returnType
+  declType <- anyReturnType
   match CommaTok
   params <- parens $ anyParamT `sepBy` match CommaTok -- Forall types
   ex_params <- parens $ anyParamT `sepBy` match CommaTok -- Existential types
-  args <- parens $ returnType `sepBy` match CommaTok     -- Fields
+  args <- parens $ anyReturnType `sepBy` match CommaTok     -- Fields
   match ColonTok
-  rng <- returnType
+  rng <- anyReturnType
   return $ DataConDecl declVar declType params ex_params args rng
 
+-------------------------------------------------------------------------------
+-- Type parsing
+
+-- Parse any return type.
+-- Function types are boxed if no representation is given.
+-- This is not used to parse a subexpression of a type.
+anyReturnType :: P (ReturnType Parsed)
+anyReturnType = returnType (Just BoxedRT)
+
 -- No restrictions on what comes next in the token stream
-anyPType :: P PType
-anyPType = PS.try funT <|> readAppVarT
+anyPType :: Maybe ReturnRepr -> P (LType Parsed)
+anyPType implicit_rrepr =
+   -- This first case is here to propagate implicit_rrepr through parentheses
+  PS.try (parens (anyPType implicit_rrepr)) <|>
+  PS.try (funT implicit_rrepr) <|>
+  appType
 
--- Distinct P Types, no Application or Functions, only singular VarT, or guarded terms       
-distPType :: P PType
-distPType = readVarT <|> parens anyPType
+-- A type application or tighter-binding term.  The implicit return
+-- representation is used if the term is a parenthesized function.
+appPType :: Maybe ReturnRepr -> P (LType Parsed)
+appPType implicit_rrepr =
+  PS.try (parens (anyPType implicit_rrepr)) <|> appType
 
--- Use to get the head of an Application.  No Literal. Allowing parentheses case for lambda types
-headAppPType :: P PType
-headAppPType = readVarT <|> parens anyPType
+-- A type application or tighter-binding term.  There's no implicit return
+-- representation.
+appType :: P (LType Parsed)
+appType = do
+  pos <- locatePosition
+  head <- distPType
+  lst <- many distPType -- If head is followed by more types, it's an application
+  if null lst
+    then return head
+    else return $ L pos (AppT head lst)
 
--- Make a VarT with an expected Identifier
-readVarT :: P PType
-readVarT = fmap VarT identifier
+-- A variable or parenthesized type
+distPType :: P (LType Parsed)
+distPType = parse_var <|> parens (anyPType Nothing)
+  where
+    parse_var = located (VarT <$> identifier)
 
--- Match a function, in particular, the ArrowTok
-funT :: P PType
-funT = do 
+-- Match a function type.  The function's return representation may be
+-- implicitly determined by the context in which this type appears.
+funT :: Maybe ReturnRepr -> P (LType Parsed)
+funT implicit_rrepr = located $ do
   param <- paramT
   match ArrowTok
-  range <- returnType
+  range <- returnType implicit_rrepr
   return $ FunT param range
+
+-- Parse a return type.  This consists of a representation followed by a type.
+-- If the parsing context implicitly determines a representation, then the
+-- representation is optional.
+returnType implicit_rrepr = implicit_multi_return <|> single_return
+  where
+    -- The range is a function without an explicit representation.  Give the
+    -- range the same representation that this function has.
+    implicit_multi_return =
+      case implicit_rrepr
+      of Nothing -> PS.pzero
+         Just r  -> ReturnType r <$> PS.try (funT implicit_rrepr)
+
+    -- The range has an explicit representation, followed by a type
+    single_return = do
+      rrepr <- returnRepr 
+      rtype <- anyPType (Just rrepr)
+      return $ ReturnType rrepr rtype
 
 -- A parser for any parameter type
 anyParamT :: P (ParamType Parsed)
@@ -240,66 +283,30 @@ anyParamT = val_param <|> readParamT anyPType <|> parens anyParamT
         dep = do
           v <- identifier
           match ColonTok
-          ty <- located anyPType
+          ty <- anyPType (Just ValueRT)
           return $ ParamType (ValuePT (Just v)) ty
         
         nondep = do
-          ty <- located anyPType
+          ty <- anyPType (Just ValueRT)
           return $ ParamType (ValuePT Nothing) ty
 
 -- A parser for parameter types that don't bind a variable
-paramT = readParamT readAppVarT <|> parens anyParamT
+paramT = readParamT appPType <|> parens anyParamT
 
 readParamT read_type = do
   repr <- paramRepr
-  ty <- located read_type
+  ty <- read_type (Just $ as_return_repr repr)
   return $ ParamType repr ty
+  where
+    as_return_repr (ValuePT _) = ValueRT
+    as_return_repr BoxedPT = BoxedRT
+    as_return_repr ReadPT = ReadRT
+    as_return_repr WritePT = WriteRT
+    as_return_repr OutPT = OutRT
+    as_return_repr SideEffectPT = SideEffectRT
 
--- Find the Type of a function's return type
-returnType :: P (ReturnType Parsed)
-returnType = PS.try multiReturn <|>
-             PS.try implicitMultiReturn <|>
-             singleReturn
-
--- We've already started a function, but we might be curried into another function's parameter.  Eventually, something will become this ReturnType's type
--- of the form " [after Function ->] val int -> val int"
-implicitMultiReturn :: P (ReturnType Parsed)
-implicitMultiReturn = do
-  ft <- located funT
-  return $ ReturnType BoxedRT ft
-
--- ReturnType with another function curried
--- of the form " [after Function ->] val val int -> val int", with both keywords explicit
-multiReturn :: P (ReturnType Parsed)
-multiReturn = do
-  rtRepr <- returnRepr
-  ft <- located funT
-  return $ ReturnType rtRepr ft
-
--- Just a plain ReturnType, no currying
-singleReturn :: P (ReturnType Parsed)
-singleReturn =
-  do rtRepr <- returnRepr
-     rtType <- located readAppVarT
-     return $ ReturnType rtRepr rtType
-                                     
--- Traverse down productions to keep associativity and precendence
--- Eventually boils down to either AppT, a single VarT, or a parenthesis-guarded Type of any kind                                     
-readAppVarT :: P PType
-readAppVarT = do
-  s <- expr
-  return $ unLoc s
-
-atomicAppVarT :: P (LType Parsed)
-atomicAppVarT = do
-  pos <- locatePosition
-  head <- located headAppPType
-  lst <- optionMaybe( (many1 (located distPType)))
-  case lst of
-    Nothing  -> return head
-    Just args -> return $ L pos (AppT head args)
-
-expr = buildExpressionParser table atomicAppVarT
+{-
+expr = buildExpressionParser table appType
 
 table = [ [binOp "@" handleAt AssocNone]
         , [binOp "**" handleDStar AssocRight]
@@ -321,6 +328,7 @@ handleAt a b =
 handleDStar :: (LType Parsed)-> (LType Parsed) -> (LType Parsed)
 handleDStar a b = case (a,b)
   of (L pos1 x, L pos2 y) -> (L pos1 (AppT (L pos2 (VarT "SconjE")) [a,b]))
+-}
 
 -------------------------------------------------------------------------------
 -- * Entry point
