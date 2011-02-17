@@ -250,16 +250,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   (ll_mod, ll_interface) <- LowLevel.createModuleInterface ll_mod
   writeFileAsByteString i_file $ encode ll_interface
 
-  -- Closure converion
+  -- Closure conversion
   ll_mod <- LowLevel.closureConvert ll_mod
-  putStrLn ""
-  putStrLn "Closure converted"
-  print $ LowLevel.pprModule ll_mod  
-
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
-  putStrLn ""
-  putStrLn "Reference counting"
-  print $ LowLevel.pprModule ll_mod  
   
   -- Second round of optimizations
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
