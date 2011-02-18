@@ -299,4 +299,10 @@ generateMemoryIR mod = do
     global_env <- setupEnvironment var_supply
     runOP (genModule repr_mod) global_env Nothing
 
-  return $ etaReduceModule mem_mod
+  -- Eta-reduction is disabled. 
+  -- It's not always a valid transformation because it changes side effects,
+  -- sometimes resulting in dangling pointer accesses.
+  -- Do we still need it?
+
+  -- return $ etaReduceModule mem_mod
+  return mem_mod

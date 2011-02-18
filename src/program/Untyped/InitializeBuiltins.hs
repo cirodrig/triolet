@@ -687,8 +687,8 @@ mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
       aT = ConTy a
       bT = ConTy b
   in ([ tT `IsInst` tiBuiltin the_Traversable
-      , passable (tT @@ aT)
-      , passable (tT @@ bT)
+      , passable aT
+      , passable bT
       ],
       functionType [functionType [aT] bT, tT @@ aT] (tT @@ bT))
 
@@ -708,78 +708,51 @@ mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
 
 mkZipType =
   forallType [ Star :-> Star
-             , Star :-> Star
-             , Star :-> Star
              , Star
-             , Star] $ \ [s, t, u, a, b] ->
-  let sT = ConTy s
-      tT = ConTy t
-      uT = ConTy u
+             , Star] $ \ [t, a, b] ->
+  let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
-  in ([ sT `IsInst` tiBuiltin the_Traversable
-      , tT `IsInst` tiBuiltin the_Traversable
-      , uT `IsInst` tiBuiltin the_Traversable
+  in ([ tT `IsInst` tiBuiltin the_Traversable
       , passable aT
       , passable bT]
-     , functionType [sT @@ aT, tT @@ bT]
-       (uT @@ (TupleTy 2 @@ aT @@ bT)))
+     , functionType [tT @@ aT, tT @@ bT]
+       (tT @@ (TupleTy 2 @@ aT @@ bT)))
 
 mkZip3Type =
   forallType [ Star :-> Star
-             , Star :-> Star
-             , Star :-> Star
-             , Star :-> Star
              , Star
              , Star
-             , Star] $ \ [s, t, u, v, a, b, c] ->
-  let sT = ConTy s
-      tT = ConTy t
-      uT = ConTy u
-      vT = ConTy v
+             , Star] $ \ [t, a, b, c] ->
+  let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
       cT = ConTy c
-  in ([ sT `IsInst` tiBuiltin the_Traversable
-      , tT `IsInst` tiBuiltin the_Traversable
-      , uT `IsInst` tiBuiltin the_Traversable
-      , vT `IsInst` tiBuiltin the_Traversable
+  in ([ tT `IsInst` tiBuiltin the_Traversable
       , passable aT
       , passable bT
       , passable cT]
-     , functionType [sT @@ aT, tT @@ bT, uT @@ cT]
-       (vT @@ (TupleTy 3 @@ aT @@ bT @@ cT)))
+     , functionType [tT @@ aT, tT @@ bT, tT @@ cT]
+       (tT @@ (TupleTy 3 @@ aT @@ bT @@ cT)))
 
 mkZip4Type =
   forallType [ Star :-> Star
-             , Star :-> Star
-             , Star :-> Star
-             , Star :-> Star
-             , Star :-> Star
              , Star
              , Star
              , Star
-             , Star] $ \ [s, t, u, v, w, a, b, c, d] ->
-  let sT = ConTy s
-      tT = ConTy t
-      uT = ConTy u
-      vT = ConTy v
-      wT = ConTy w
+             , Star] $ \ [t, a, b, c, d] ->
+  let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
       cT = ConTy c
       dT = ConTy d
-  in ([ sT `IsInst` tiBuiltin the_Traversable
-      , tT `IsInst` tiBuiltin the_Traversable
-      , uT `IsInst` tiBuiltin the_Traversable
-      , vT `IsInst` tiBuiltin the_Traversable
-      , wT `IsInst` tiBuiltin the_Traversable
+  in ([ tT `IsInst` tiBuiltin the_Traversable
       , passable aT
       , passable bT
       , passable cT
       , passable dT]
-     , functionType [sT @@ aT, tT @@ bT, uT @@ cT, vT @@ dT]
-       (wT @@ (TupleTy 4 @@ aT @@ bT @@ cT @@ dT)))
+     , functionType [tT @@ aT, tT @@ bT, tT @@ cT, tT @@ dT]
+       (tT @@ (TupleTy 4 @@ aT @@ bT @@ cT @@ dT)))
 
 mkCountType =
   forallType [Star :-> Star] $ \[t] ->
@@ -819,6 +792,13 @@ mkMapStreamType =
       bT = ConTy b
   in ([passable aT, passable bT],
       functionType [functionType [aT] bT, iterType tT aT] (iterType tT bT))
+
+mkListIterType =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+  in ([],
+      functionType [iterType tT aT] (iterType (ConTy $ tiBuiltin the_con_list) aT))
 
 mkIterBindType =
   forallType [Star, Star] $ \[a, b] ->
@@ -920,6 +900,9 @@ initializeTIBuiltins = do
               ),
               ("boxed", [| mkBoxedType |]
               , [| pyonBuiltin SystemF.the_boxed |]
+              ),
+              ("listiter", [| mkListIterType |]
+              , [| pyonBuiltin SystemF.the_fun_asList_Stream |]
               ),
               ("__undefined__", [| mkUndefinedType |]
               , [| pyonBuiltin SystemF.the_fun_undefined |]

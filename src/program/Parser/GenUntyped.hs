@@ -233,7 +233,8 @@ doExpr expr =
        return $ callVariable pos (convertBinaryOperator op) [l', r']
      ListComp pos iter -> do
        iter' <- doIterator iter
-       return $ callVariable pos (tiBuiltin the___build__) [iter']
+       -- Currently we have to explicitly insert __build__ where we want it 
+       return $ iter' -- callVariable pos (tiBuiltin the___build__) [iter']
      Generator pos iter -> do
        doIterator iter
      Call pos op args -> do
@@ -254,25 +255,25 @@ doExpr expr =
 doIterator :: SSAIterFor Expr -> Cvt U.Expression
 doIterator (IterFor pos params dom body) = do
   dom' <- doExpr dom
+  -- Currently we have to explicitly insert __iter__ where we want it
+  let iterator = dom' -- callVariable pos (tiBuiltin the___iter__) [dom']
   convertParameters params $ \[param'] ->
     case body
     of CompBody simple_body -> do
          -- When body is a simple expression, convert
-         -- "FOO for x in BAR" to mapStream(lambda x. FOO, __iter__(bar)).
+         -- "FOO for x in BAR" to map(lambda x. FOO, bar).
          --
          -- This works for a broader range of types than the general case.
          body_expr <- doExpr simple_body
          let body_fun =
                U.Function (U.Ann pos) Nothing [param'] Nothing body_expr
-         let iterator = callVariable pos (tiBuiltin the___iter__) [dom']
-         return $ callVariable pos (tiBuiltin the_mapStream)
+         return $ callVariable pos (tiBuiltin the_map)
            [U.FunE (U.Ann pos) body_fun, iterator]
          
        _ -> do
-         -- Convert "FOO for x in BAR" to bind(__iter__(bar), lambda x. FOO)
+         -- Convert "FOO for x in BAR" to bind(bar, lambda x. FOO)
          body' <- doComprehension body 
          let body_fun = U.Function (U.Ann pos) Nothing [param'] Nothing body'
-         let iterator = callVariable pos (tiBuiltin the___iter__) [dom']
          return $ callVariable pos (tiBuiltin the_iterBind)
            [iterator, U.FunE (U.Ann pos) body_fun]
 

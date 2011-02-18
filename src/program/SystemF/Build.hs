@@ -25,13 +25,26 @@ appE :: MkExpM -> [TypM] -> [MkExpM] -> MkExpM
 appE op t_args args = do
   op' <- op
   args' <- sequence args
-  return $ ExpM $ AppE defaultExpInfo op' t_args args'
+  return $ mkAppE op' t_args args'
+
+-- | Create an application term, uncurrying the operator if possible
+mkAppE :: ExpM -> [TypM] -> [ExpM] -> ExpM
+mkAppE op [] [] = op 
+
+mkAppE (ExpM (AppE _ op t_args args1)) [] args2 =
+  ExpM $ AppE defaultExpInfo op t_args (args1 ++ args2)
+    
+mkAppE (ExpM (AppE _ op t_args1 [])) t_args2 args =
+  ExpM $ AppE defaultExpInfo op (t_args1 ++ t_args2) args
+    
+mkAppE op t_args args =
+  ExpM $ AppE defaultExpInfo op t_args args
 
 varAppE :: Var -> [TypM] -> [MkExpM] -> MkExpM
 varAppE op_var t_args args = do
   let op = ExpM $ VarE defaultExpInfo op_var
   args' <- sequence args
-  return $ ExpM $ AppE defaultExpInfo op t_args args'
+  return $ mkAppE op t_args args'
 
 lamE :: MkFunM -> MkExpM
 lamE mk_f = do 

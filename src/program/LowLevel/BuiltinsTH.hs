@@ -173,6 +173,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
   , (PyonName module_stream "Stream_return",
      Right [| pyonBuiltin (SystemF.the_oper_DO) |])
+  , (PyonName module_stream "Stream_asList",
+     Right [| pyonBuiltin (SystemF.the_fun_asList_Stream) |])    
   , (PyonName module_stream "generate",
      Right [| pyonBuiltin (SystemF.the_generate) |])
   , (PyonName module_stream "Stream_map",

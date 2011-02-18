@@ -5,7 +5,7 @@ def minIndex(xs):
         (_, xv) = x
         (_, yv) = y
         return x if xv <= yv else y
-    (i, _) = reduce1(pick_min, zip(count, xs))
+    (i, _) = reduce1(pick_min, zip(count, __iter__(xs)))
     return i
 
 export ccall "min_float" minIndex : list(float) -> int

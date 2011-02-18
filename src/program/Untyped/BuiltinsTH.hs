@@ -31,6 +31,7 @@ pyonSourceGlobals =
   , "zip4"
   , "count"
   , "boxed"
+  , "listiter"
   , "__undefined__"
   , "__and__"
   , "__or__"

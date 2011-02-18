@@ -201,6 +201,13 @@ function inline Stream_bind (unit _, unit _,
 };
 
 /*****************************************************************************/
+/* reinterpret a stream's domain as the list domain */
+
+function inline Stream_asList (unit _, unit _, owned stream) -> owned {
+  stream;
+};
+
+/*****************************************************************************/
 /* generate */
 
 // A stream consisting of the sequence f(0), f(1), ... f(limit-1).
@@ -553,10 +560,8 @@ function Stream_zip
 };
 
 function zip
-  (unit _, unit _, unit _, unit _, unit _,
-   owned traversable_p1,        // First producer methods
-   owned traversable_p2,        // Second producer methods
-   owned traversable_out,       // Output methods
+  (unit _, unit _, unit _,
+   owned traversable,           // Container methods
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    pointer p1,
@@ -567,9 +572,9 @@ function zip
    repr_tuple = owned call repr_PyonTuple2 (nil, nil, repr_data1, repr_data2);
 
    // Traverse input objects
-   stream_p1 = owned call (traversable_p1 @! TraversableDict.traverse)
+   stream_p1 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data1, p1);
-   stream_p2 = owned call (traversable_p2 @! TraversableDict.traverse)
+   stream_p2 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data2, p2);
 
    // Zip
@@ -577,7 +582,7 @@ function zip
      (nil, nil, repr_data1, repr_data2, stream_p1, stream_p2);
 
    // Create output data
-   () call (traversable_out @! TraversableDict.build)
+   () call (traversable @! TraversableDict.build)
      (nil, repr_tuple, zip_stream, out);
 };
 
@@ -693,11 +698,8 @@ function Stream_zip3
 };
 
 function zip3
-  (unit _, unit _, unit _, unit _, unit _, unit _, unit _,
-   owned traversable_p1,        // First producer methods
-   owned traversable_p2,        // Second producer methods
-   owned traversable_p3,        // Third producer methods
-   owned traversable_out,       // Output methods
+  (unit _, unit _, unit _, unit _,
+   owned traversable,           // Container methods
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned repr_data3,            // Representation of p3's output
@@ -710,11 +712,11 @@ function zip3
    repr_tuple = owned call repr_PyonTuple3 (nil, nil, nil, repr_data1, repr_data2, repr_data3);
 
    // Traverse input objects
-   stream_p1 = owned call (traversable_p1 @! TraversableDict.traverse)
+   stream_p1 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data1, p1);
-   stream_p2 = owned call (traversable_p2 @! TraversableDict.traverse)
+   stream_p2 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data2, p2);
-   stream_p3 = owned call (traversable_p3 @! TraversableDict.traverse)
+   stream_p3 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data3, p3);
 
    // Zip
@@ -722,7 +724,7 @@ function zip3
      (nil, nil, nil, repr_data1, repr_data2, repr_data3, stream_p1, stream_p2, stream_p3);
 
    // Create output data
-   () call (traversable_out @! TraversableDict.build)
+   () call (traversable @! TraversableDict.build)
      (nil, repr_tuple, zip_stream, out);
 };
 
@@ -864,12 +866,8 @@ function Stream_zip4
 };
 
 function zip4
-  (unit _, unit _, unit _, unit _, unit _, unit _, unit _, unit _, unit _,
-   owned traversable_p1,        // First producer methods
-   owned traversable_p2,        // Second producer methods
-   owned traversable_p3,        // Third producer methods
-   owned traversable_p4,        // Fourth producer methods
-   owned traversable_out,       // Output methods
+  (unit _, unit _, unit _, unit _, unit _,
+   owned traversable,           // Container methods
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned repr_data3,            // Representation of p3's output
@@ -885,13 +883,13 @@ function zip4
      (nil, nil, nil, nil, repr_data1, repr_data2, repr_data3, repr_data4);
 
    // Traverse input objects
-   stream_p1 = owned call (traversable_p1 @! TraversableDict.traverse)
+   stream_p1 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data1, p1);
-   stream_p2 = owned call (traversable_p2 @! TraversableDict.traverse)
+   stream_p2 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data2, p2);
-   stream_p3 = owned call (traversable_p3 @! TraversableDict.traverse)
+   stream_p3 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data3, p3);
-   stream_p4 = owned call (traversable_p4 @! TraversableDict.traverse)
+   stream_p4 = owned call (traversable @! TraversableDict.traverse)
      (nil, repr_data4, p4);
 
    // Zip
@@ -901,7 +899,7 @@ function zip4
       stream_p1, stream_p2, stream_p3, stream_p4);
 
    // Create output data
-   () call (traversable_out @! TraversableDict.build)
+   () call (traversable @! TraversableDict.build)
      (nil, repr_tuple, zip_stream, out);
 };
 

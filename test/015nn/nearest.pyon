@@ -6,7 +6,7 @@ def minIndex(xs):
     	(_, xv) = x
 	(_, yv) = y
 	return x if xv <= yv else y
-    (i, _) = reduce1 (pickMin, zip(count, xs))
+    (i, _) = reduce1 (pickMin, zip(count, __iter__(xs)))
     return i
 
 def nearestNeighbors(refs, inputs):

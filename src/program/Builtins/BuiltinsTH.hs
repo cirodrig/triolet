@@ -206,6 +206,7 @@ pyonBuiltinVariableNames =
   , "fun_zip_Stream"
   , "fun_zip3_Stream"
   , "fun_zip4_Stream"
+  , "fun_asList_Stream"
     
     -- Inserted by representation inference
   , "load"
