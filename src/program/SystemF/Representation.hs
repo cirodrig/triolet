@@ -609,7 +609,9 @@ withTyPats subst [] f = f subst []
 
 withPat :: Bool -> PatTSF -> (Pat Rep -> InferRepr a) -> InferRepr a
 withPat is_let (TypedVarP v (TypTSF (TypeAnn _ ty))) f = do
-  repr <- infTypeRepr ty
+  -- Compute the natural type and representation for this System F type
+  ty' <- infFixUpType ty
+  repr <- infTypeRepr ty'
   let p_repr = case repr
                of Value -> ValPT Nothing
                   Boxed -> BoxPT
@@ -617,7 +619,7 @@ withPat is_let (TypedVarP v (TypTSF (TypeAnn _ ty))) f = do
                                 then WritePT
                                 else ReadPT
       r_repr = asReadReturnRepr repr
-  assume v (r_repr ::: ty) $ f (PatR v (p_repr ::: ty))
+  assume v (r_repr ::: ty') $ f (PatR v (p_repr ::: ty'))
 
 withPats is_let = withMany (withPat is_let)
 
