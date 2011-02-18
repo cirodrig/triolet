@@ -36,6 +36,9 @@ import Type.Var
 import Globals
 import GlobalVar
 
+-- | If this flag is set, print each attempted type coercion.
+dbPrintCoercions = False
+
 data Rep
 
 newtype instance Typ Rep = TypR {fromTypR :: Type}
@@ -391,6 +394,29 @@ infCompareTypes pos e_type g_type = InferRepr $ \env ->
 -------------------------------------------------------------------------------
 -- Coercions
 
+-- | Coerce a returned value to the specified representation.
+--   This entry point prints debugging output when 'dbPrintCoercions' is set.
+coerceReturnEntry :: Type -> ReturnRepr -> ReturnRepr -> InferRepr Coercion
+coerceReturnEntry ty e_repr g_repr
+  | dbPrintCoercions =
+      let message =
+            text "coerceReturn" <+>
+            (pprType ty $$
+             pprReturnRepr e_repr <+> text "from" <+> pprReturnRepr g_repr)
+      in traceShow message $ coerceReturn ty e_repr g_repr
+  | otherwise = coerceReturn ty e_repr g_repr
+
+-- | Coerce a return type to the specified representation.
+--   This entry point prints debugging output when 'dbPrintCoercions' is set.
+coerceReturnTypeEntry :: ReturnType -> ReturnType -> InferRepr Coercion
+coerceReturnTypeEntry e_rt g_rt
+  | dbPrintCoercions =
+      let message =
+            text "coerceReturnType" <+>
+            (pprReturnType e_rt $$ pprReturnType g_rt)
+      in traceShow message $ coerceReturnType e_rt g_rt
+  | otherwise = coerceReturnType e_rt g_rt
+
 -- | Coerce a returned value to the specified representation
 coerceReturn :: Type -> ReturnRepr -> ReturnRepr -> InferRepr Coercion
 coerceReturn ty e_repr g_repr =
@@ -582,7 +608,7 @@ coerceInferredExp :: ReturnRepr
                   -> (WrapperCode, ExpR, ReturnType)
                   -> InferRepr (WrapperCode, ExpR, ReturnType)
 coerceInferredExp e_repr given@(wr, expression, g_repr ::: g_rt) = do
-  co <- coerceReturn g_rt e_repr g_repr
+  co <- coerceReturnEntry g_rt e_repr g_repr
   let (expression', co_wr) = coercionToWrapper co expression
   return (wr `mappend` co_wr, expression', e_repr ::: g_rt)
 
@@ -652,7 +678,7 @@ inferReturnExp to_write mtype expression = do
 
   -- Coerce it
   co <-
-    coerceReturnType (return_repr ::: expected_type) (inf_repr ::: inf_type)
+    coerceReturnTypeEntry (return_repr ::: expected_type) (inf_repr ::: inf_type)
   let (exp'', co_wr) = coercionToWrapper co exp'
   return (wr `mappend` co_wr, exp'', return_repr ::: expected_type)
 
@@ -709,7 +735,7 @@ inferCall inf op t_args v_args = do
 
 inferApplication inf op (op_repr ::: op_type) t_args v_args = do 
   -- Coerce operator to boxed type
-  op_coercion <- coerceReturn op_type BoxRT op_repr
+  op_coercion <- coerceReturnEntry op_type BoxRT op_repr
   let (op', op_co_wrapper) = coercionToWrapper op_coercion op
 
   -- Apply operator to argument types
@@ -789,7 +815,7 @@ inferApp pos (BoxRT ::: FunT (param_repr ::: dom) result) arg_exp = do
     _ -> return ()
 
   -- Coerce parameter
-  co <- coerceReturnType (expected_repr ::: dom) arg_rtype
+  co <- coerceReturnTypeEntry (expected_repr ::: dom) arg_rtype
   let (arg_exp'', co_wr) = coercionToWrapper co arg_exp'
   return $ Right (wr `mappend` co_wr, arg_exp'', result)
 
@@ -825,7 +851,7 @@ inferLetE inf binder rhs body = do
     -- Coerce RHS to a form that's compatible with the binder
     let PatR _ (pat_repr ::: pat_type) = pat'
     rhs_coercion <-
-      coerceReturnType (paramReprToReturnRepr pat_repr ::: pat_type) rhs_ty
+      coerceReturnTypeEntry (paramReprToReturnRepr pat_repr ::: pat_type) rhs_ty
     let (co_rhs, rhs_co_wr) = coercionToWrapper rhs_coercion rhs'
         
     -- Infer body
@@ -862,7 +888,7 @@ inferScrutinee scr = do
   expected_scr_ty <- infTypeRepr scr_ty
 
   -- Coerce to read return type
-  coercion <- coerceReturn scr_ty (asReadReturnRepr expected_scr_ty) scr_repr
+  coercion <- coerceReturnEntry scr_ty (asReadReturnRepr expected_scr_ty) scr_repr
   let (co_scr, co_wr) = coercionToWrapper coercion scr'
   return (scr_wrapper `mappend` co_wr, co_scr)
 
@@ -895,7 +921,7 @@ inferAlt pos expected_rtype (AltTSF (TypeAnn _ (Alt con ty_args ex_vars params b
       -- Infer the body and coerce to expected representation
       (body_wrapper, body', body_rtype) <- inferReprExp body
       
-      body_co <- coerceReturnType expected_rtype body_rtype
+      body_co <- coerceReturnTypeEntry expected_rtype body_rtype
 
       let body'' = applyWrapper body_wrapper $
                    applyCoercion body_co body' id
