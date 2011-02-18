@@ -347,13 +347,15 @@ rwApp inf op ty_args args = do
 --   This function is usually called from 'rwApp'.  It calls itself 
 --   recursively to flatten out curried applications.
 rwAppWithOperator inf op' op_val ty_args args =
-  -- If the operator is an application and there are no type arguments,
-  -- then uncurry the application
+  -- First, try to uncurry this application
   case op'
   of ExpM (AppE _ inner_op inner_ty_args inner_args)
        | null ty_args -> do
          inner_op_value <- makeExpValue inner_op
          rwAppWithOperator inf inner_op inner_op_value inner_ty_args (inner_args ++ args)
+       | null inner_args -> do
+         inner_op_value <- makeExpValue inner_op
+         rwAppWithOperator inf inner_op inner_op_value (inner_ty_args ++ ty_args) args
      _ ->
        -- Apply simplification tecnhiques specific to this operator
        case op_val
