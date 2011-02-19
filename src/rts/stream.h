@@ -41,6 +41,12 @@ extern function pyon.internal.stream.Stream_reduce1
 extern function pyon.internal.stream.reduce1
   (unit, unit, owned, owned, owned, pointer, pointer) -> ();
 
+extern function pyon.internal.stream.histogram
+  (unit, int, owned, pointer) -> ();
+
+extern function pyon.internal.stream.histogramArray
+  (unit, unit, IndexedInt, owned, pointer) -> ();
+
 extern function pyon.internal.stream.Stream_zip
   (unit, unit, unit, owned, owned, owned, owned) -> owned;
 
@@ -68,6 +74,8 @@ extern function pyon.internal.stream.zip4
 extern data owned pyon.internal.stream.Stream_counter;
 
 extern function pyon.internal.stream.Stream_count (unit) -> owned;
+
+extern function pyon.internal.stream.Stream_range (int) -> owned;
 
 extern function pyon.internal.stream.generate
   (unit, unit, IndexedInt, owned, owned) -> owned;

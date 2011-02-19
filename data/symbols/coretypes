@@ -680,6 +680,19 @@ fun_zip4 : (val t : val pure -> val pure)
 
 count : (val t : val pure -> val pure) -> box Stream t int;
 
+range : val int -> box Stream list int;
+
+histogram : (val t : val pure -> val pure)
+         -> val int
+         -> box Stream t int
+         -> write list int;
+
+histogramArray : (val t : val pure -> val pure)
+              -> (val n : intindex)
+              -> val IndexedInt n
+              -> box Stream t int
+              -> write array n int;
+
 generate : (val n : intindex)
         -> (val a : pure)
         -> val IndexedInt n

@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Histogramming",
+  pyonSources	 = ["histo.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "11,6,6,4,4,4,4,2,4,4,2,4,4,2,4,4,4,4,6,6,11,"
+}

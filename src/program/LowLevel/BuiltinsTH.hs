@@ -207,6 +207,10 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_TraversableDict_Stream_traverse) |])
   , (PyonName module_stream "Stream_count",
      Right [| pyonBuiltin (SystemF.the_count) |])
+  , (PyonName module_stream "Stream_range",
+     Right [| pyonBuiltin (SystemF.the_range) |])
+  , (PyonName module_stream "histogram",
+     Right [| pyonBuiltin (SystemF.the_histogram) |])
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
   , (PyonName module_structures "repr_Boxed",

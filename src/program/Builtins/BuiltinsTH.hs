@@ -183,6 +183,7 @@ pyonBuiltinVariableNames =
   , "min_ii"
 
     -- Built-in functions
+  , "floor"
   , "oper_DO"
   , "oper_GUARD"
   , "oper_CAT_MAP"
@@ -197,6 +198,8 @@ pyonBuiltinVariableNames =
   , "fun_zip3"
   , "fun_zip4"
   , "count"
+  , "range"
+  , "histogram"
   , "makeComplex"
     
     -- Inserted by stream specialization
@@ -207,6 +210,7 @@ pyonBuiltinVariableNames =
   , "fun_zip3_Stream"
   , "fun_zip4_Stream"
   , "fun_asList_Stream"
+  , "histogramArray"
     
     -- Inserted by representation inference
   , "load"

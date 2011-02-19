@@ -21,6 +21,7 @@ data pointer Stream_info = InfoTableHeader {
 procedure inline Stream_alloc () -> owned {
   s = pointer primcall pyon_alloc (sizeof Stream);
   // FIXME: initialize header
+  s @! Stream.header.info = Stream_info;
   s as owned;
 };
 
@@ -308,7 +309,6 @@ function Stream_map
   s @! Stream.state_size = sizeof state_type;
   s @! Stream.state_align = alignof state_type;
   s @! Stream.state_finalize = dummy_finalizer;
-  () = () primcall pyon_db_int (int -1771);
   () = () primcall pyon_db_pointer (s as pointer);
   s;
 };
@@ -471,6 +471,64 @@ function inline reduce1
   () = () call Stream_reduce1 (nil, elem_repr, reducer, stream, ret);
 
   // Clean up
+  ();
+};
+
+/*****************************************************************************/
+/* histogram */
+
+// Given a stream of integers, use the elements of the stream to compute a
+// histogram.
+function histogramArray
+  (unit _, unit _, IndexedInt size, owned stream, pointer ret) -> () {
+  data int stream_val;      // The current value taken from the stream
+
+  IndexedInt {hist_size} = size;
+  typedef arrayT = array(value hist_size, int);
+
+  // Initialize histogram to zeros
+  _ = while (int index = int 0) (index < hist_size) {
+    ret @! arrayT[index] = int 0;
+    index + int 1;
+  };
+
+  // Setup
+  st = pointer primcall pyon_alloc (stream @! Stream.state_size);
+  () = () call (stream @! Stream.initialize) (st);
+  stream_next = stream @! Stream.next;
+
+  // Main loop.  Update histogram until stream is depleted.
+  _ = while (bool not_depleted = true) (not_depleted) {
+    // Pull a value from the stream
+    not_depleted = bool call stream_next (st, stream_val);
+
+    () = if (not_depleted) {
+      // Add 1 to histogram entry, if not out-of-bounds
+      insert_index = int load stream_val;
+      if (insert_index >= int 0 && insert_index < hist_size) {
+        ret @! arrayT[insert_index] = ret @! arrayT[insert_index] + int 1;
+        ();
+      } else { (); };
+    } else { (); };
+    not_depleted;
+  };
+
+  // Cleanup
+  () = () call (stream @! Stream.state_finalize) (st);
+  ();
+};
+
+function histogram
+  (unit _, int hist_size, owned stream, pointer ret) -> () {
+  typedef array_type = array(value hist_size, int);
+
+  // Compute the histogram
+  ret_array = pointer primcall pyon_alloc (sizeof array_type);
+  () = () call histogramArray(nil, nil, IndexedInt {hist_size}, stream, ret_array);
+
+  // Initialize the list
+  ret @! PyonList.nelems = hist_size;
+  ret @! PyonList.contents = ret_array;
   ();
 };
 
@@ -933,6 +991,19 @@ function inline Stream_count (unit _) -> owned {
   Stream_counter;
 };
 
+/*****************************************************************************/
+/* range */
+
+function inline Stream_range (int n) -> owned {
+  owned call generate(nil, nil, IndexedInt {n}, repr_int, range_get_value);
+};
+
+// Get the value of the current element of a 'range' stream.  This is just the
+// index.
+function range_get_value (int n, pointer out) -> () {
+  !out = n;
+  ();
+};
 
 /*****************************************************************************/
 /* generate */

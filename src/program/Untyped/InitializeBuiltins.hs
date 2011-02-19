@@ -758,6 +758,21 @@ mkCountType =
   forallType [Star :-> Star] $ \[t] ->
   ([], iterType (ConTy t) (ConTy $ tiBuiltin the_con_int))
 
+mkRangeType =
+  let int_type = ConTy $ tiBuiltin the_con_int
+  in return $ monomorphic $
+     functionType [int_type] (iterType (ConTy $ tiBuiltin the_con_list) int_type)
+
+mkHistogramType =
+  forallType [Star :-> Star] $ \[t] ->
+  let int_type = ConTy $ tiBuiltin the_con_int
+  in ([], functionType [int_type, iterType (ConTy t) int_type]
+          (ConTy (tiBuiltin the_con_list) @@ int_type))
+
+mkFloorType =
+  return $ monomorphic $
+  functionType [ConTy $ tiBuiltin the_con_float] (ConTy $ tiBuiltin the_con_int)
+
 mkBoxedType =
   forallType [Star] $ \[a] ->
   let aT = ConTy a
@@ -897,6 +912,15 @@ initializeTIBuiltins = do
               ),
               ("count", [| mkCountType |]
               , [| pyonBuiltin SystemF.the_count |]
+              ),
+              ("range", [| mkRangeType |]
+              , [| pyonBuiltin SystemF.the_range |]
+              ),
+              ("histogram", [| mkHistogramType |]
+              , [| pyonBuiltin SystemF.the_histogram |]
+              ),
+              ("floor", [| mkFloorType |]
+              , [| pyonBuiltin SystemF.the_floor |]
               ),
               ("boxed", [| mkBoxedType |]
               , [| pyonBuiltin SystemF.the_boxed |]

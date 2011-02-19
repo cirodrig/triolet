@@ -70,6 +70,8 @@ lowerIntrinsicOp v
          id_float)
       , (pyonBuiltin the_VectorDict_float_dot,
          binary_float (PrimMulF S32))
+      , (pyonBuiltin the_floor,
+         float_to_int Floor)
       , (pyonBuiltin the_zero_ii,
          indexed_int_constant 0)
       , (pyonBuiltin the_one_ii,
@@ -102,6 +104,14 @@ binary_int op = do
   let atom = PrimA op [VarV param_var1, VarV param_var2]
   return $ LamV $ closureFun [param_var1, param_var2] [int_type] $ ReturnE atom
 
+-- | Round a FP number
+float_to_int round_mode = do
+  let int_type = PrimType (IntType Signed S32)
+  let float_type = PrimType (FloatType S32)
+  param_var <- newAnonymousVar float_type
+  let atom = PrimA (PrimRoundF round_mode S32 Signed S32) [VarV param_var]
+  return $ LamV $ closureFun [param_var] [int_type] $ ReturnE atom
+  
 -- | This is the identity function on floats.
 id_float :: (Monad m, Supplies m (Ident Var)) => m Val
 id_float = do
