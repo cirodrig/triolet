@@ -248,10 +248,10 @@ pevalApp inf op tys args =
            of [ExpSF (LitE {expLit = IntL n _})] ->
                 ExpSF $ LitE { expInfo = inf
                              , expLit = FloatL (fromIntegral n) float_type}
-              _ -> internalError "pevalApp"
+              _ -> rebuild_call
      _ ->
        -- Can't evaluate; rebuild the call expression
-       rebuild_call op tys args
+       rebuild_call
   where
     -- Find the operator, if it is a constructor variable.
     -- Previous partial evaluation may have left useless 'let' expressions 
@@ -266,7 +266,7 @@ pevalApp inf op tys args =
           find_known_oper $ fromExpSF body
         find_known_oper _ = Nothing
                       
-    rebuild_call op ts args = ExpSF $ AppE inf op ts args
+    rebuild_call = ExpSF $ AppE inf op tys args
     
     float_type = VarT $ pyonBuiltin the_float
 
