@@ -53,6 +53,8 @@ data Token =
   | DivideTok
   | StarTok
   | DerefPlusTok
+  | AndTok
+  | OrTok
   | WildTok
   | AlignofTok
   | AsTok
@@ -128,6 +130,8 @@ showToken IntegerDivideTok = "integer division sign"
 showToken DivideTok = "forward slash"
 showToken StarTok = "asterisk"
 showToken DerefPlusTok = "'!+'"
+showToken AndTok = "boolean and"
+showToken OrTok = "boolean or"
 showToken WildTok = "wildcard"
 showToken AlignofTok = "'alignof'"
 showToken AsTok = "'as'"

@@ -36,6 +36,8 @@ data BinOp =
   | CmpLEOp                     -- ^ '<='
   | CmpGTOp                     -- ^ '>'
   | CmpGEOp                     -- ^ '>='
+  | AndOp                       -- ^ '&&'
+  | OrOp                        -- ^ '||'
   deriving(Show)
 
 data UnaryOp = NegateOp deriving(Show)

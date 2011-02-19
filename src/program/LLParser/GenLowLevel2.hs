@@ -406,6 +406,8 @@ genBinaryOp op l_arg r_arg =
      ModOp -> arithmetic LL.PrimModZ LL.PrimModF
      DivOp -> division
      IntDivOp -> integer_division
+     AndOp -> boolean LL.PrimAnd
+     OrOp -> boolean LL.PrimOr
      _ -> internalError "mkBinary: Unhandled binary operator"
   where
     comparison cmp_op = do
@@ -446,6 +448,15 @@ genBinaryOp op l_arg r_arg =
                  LL.PrimA (float_op sz) [l_val, r_val]
                _ -> internalError "Arithmetic operator not implemented for this type"
       return $ GenAtom (returnType l_arg) atom
+    
+    boolean op =
+      case returnType l_arg
+      of [PrimType BoolType] -> do
+           l_val <- asVal l_arg
+           r_val <- asVal r_arg
+           let atom = LL.PrimA op [l_val, r_val]
+           return $ GenAtom [PrimType BoolType] atom
+         _ -> internalError "Wrong argument type for boolean operator"
     
     division = do
       l_val <- asVal l_arg

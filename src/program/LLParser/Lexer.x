@@ -102,6 +102,8 @@ rules :-
 "/" / @notsym		{ tok DivideTok }
 "*"			{ tok StarTok }
 "!+" / @notsym		{ tok DerefPlusTok }
+"&&" / @notsym		{ tok AndTok }
+"||" / @notsym		{ tok OrTok }
 
 -- Other symbols
 \" @string \"		{ stringTok }

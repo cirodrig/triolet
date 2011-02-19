@@ -619,6 +619,8 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
      CmpLEOp -> comparison
      CmpGTOp -> comparison
      CmpGEOp -> comparison
+     AndOp -> boolean
+     OrOp -> boolean
   where
     single_parameter =
       if length xs == 1 && length ys == 1
@@ -649,6 +651,9 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
     native_int_check (PrimT t)
       | t == nativeIntType = Nothing
       | otherwise = Just "Expecting a native int type"
+
+    bool_check (PrimT BoolType) = Nothing
+    bool_check _ = Just "Expecting bool type"
 
     retval `checking` checks = foldr check retval checks
     
@@ -681,6 +686,11 @@ getBinaryType op xs@(~[x]) ys@(~[y]) =
                                 , primtype_check x
                                 , primtype_check y
                                 , eq_primtype_check x y]
+
+    boolean =
+      PrimT BoolType `checking` [ single_parameter
+                                , bool_check x
+                                , bool_check y]
 
 -- | Determine the type of a unary operation's result.  Throw errors if the
 -- operation is ill-typed.

@@ -198,6 +198,8 @@ operators =
     , Infix (binaryOp LessEqualTok CmpLEOp) AssocNone
     , Infix (binaryOp GreaterThanTok CmpGTOp) AssocNone
     , Infix (binaryOp GreaterEqualTok CmpGEOp) AssocNone]
+  , [ Infix (binaryOp AndTok AndOp) AssocLeft]
+  , [ Infix (binaryOp OrTok OrOp) AssocLeft]
   ]
   where
     binaryOp tok op = match tok >> return (\x y -> BinaryE op x y)
