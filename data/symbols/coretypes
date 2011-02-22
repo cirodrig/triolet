@@ -25,6 +25,14 @@ data val IndexedInt : val (val intindex -> val pure)
   (val n : intindex) () (val int) : val (IndexedInt n);
 };
 
+-- An existential indexed singleton integer type.
+-- We can convert int to this type.
+data val SomeIndexedInt : val pure
+{
+  someIndexedInt : (val n : intindex) -> val int -> val SomeIndexedInt,
+  () (val n : intindex) (val IndexedInt n) : val SomeIndexedInt;
+};
+
 data ref Complex : val (val pure -> val pure)
 {
   complex : (val a : pure) -> write a -> write a -> write Complex a,
@@ -509,6 +517,9 @@ VectorDict_Complex_dot :
 -------------------------------------------------------------------------------
 -- integer index arithmetic
 
+-- Promote an integer to a type index
+defineIntIndex : val int -> val SomeIndexedInt;
+
 zero_i : val intindex;
 one_i : val intindex;
 plus_i : val (val intindex -> val intindex -> val intindex);
@@ -681,6 +692,11 @@ fun_zip4 : (val t : val pure -> val pure)
 count : (val t : val pure -> val pure) -> box Stream t int;
 
 range : val int -> box Stream list int;
+
+-- A type-indexed version of 'range'
+rangeIndexed : (val n : intindex)
+            -> val IndexedInt n
+            -> box Stream (array n) int;
 
 histogram : (val t : val pure -> val pure)
          -> val int

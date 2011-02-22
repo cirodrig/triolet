@@ -104,6 +104,11 @@ function div_float(float x, float y) -> float {
   x / y;
 };
 
+// Interpret an int as a size index
+function inline defineIntIndex (int n) -> SomeIndexedInt {
+  SomeIndexedInt {IndexedInt {n}};
+};
+
 // Get a pointer to an array element
 function inline subscript
  (unit _, unit _, owned repr, pointer base, int index) -> pointer {

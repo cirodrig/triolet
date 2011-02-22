@@ -25,6 +25,10 @@ record IndexedInt {
   const int n;
 };
 
+record SomeIndexedInt {
+  const IndexedInt index;
+};
+
 // Function info table
 record FunInfo(n_args) {
   const InfoTableHeader header;

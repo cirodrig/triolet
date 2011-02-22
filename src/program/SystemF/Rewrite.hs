@@ -60,6 +60,20 @@ caseOfTraversableDict tenv scrutinee container_type mk_body =
   [mkAlt tenv (pyonBuiltin the_traversableDict) [container_type] $
    \ [] [trv, bld] -> mk_body trv bld]
 
+caseOfSomeIndexedInt :: TypeEnv
+                     -> MkExpM
+                     -> (Var -> Var -> MkExpM)
+                     -> MkExpM
+caseOfSomeIndexedInt tenv scrutinee mk_body =
+  caseE scrutinee
+  [mkAlt tenv (pyonBuiltin the_someIndexedInt) [] $
+   \ [intindex] [intvalue] -> mk_body intindex intvalue]
+
+defineAndInspectIndexedInt tenv int_value mk_body =
+  let define_indexed_int =
+        varAppE (pyonBuiltin the_defineIntIndex) [] [int_value]
+  in caseOfSomeIndexedInt tenv define_indexed_int mk_body
+
 intType = VarT (pyonBuiltin the_int)
 
 -------------------------------------------------------------------------------
@@ -72,7 +86,8 @@ type RewriteRule = TypeEnv -> ExpInfo -> [TypM] -> [ExpM]
 rewriteRules :: Map.Map Var RewriteRule
 rewriteRules = Map.fromList table
   where
-    table = [ (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
+    table = [ (pyonBuiltin the_range, rwRange)
+            , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
             , (pyonBuiltin the_TraversableDict_list_build, rwBuildList)
             , (pyonBuiltin the_fun_map, rwMap)
             , (pyonBuiltin the_fun_zip, rwZip)
@@ -107,6 +122,18 @@ rewriteApp tenv inf op_var ty_args args =
         Just e' -> traceShow (text "rewrite" <+> old_exp $$ text "    -->" <+> pprExp e') $ return x
     
     old_exp = pprExp (ExpM $ AppE defaultExpInfo (ExpM (VarE defaultExpInfo op_var)) ty_args args)
+
+-- | Convert 'range' into an explicitly indexed variant
+rwRange :: RewriteRule
+rwRange tenv inf [] [count] =
+  fmap Just $
+  defineAndInspectIndexedInt tenv (return count)
+  (\intindex intvalue ->
+    varAppE (pyonBuiltin the_fun_asList_Stream)
+    [TypM $ varApp (pyonBuiltin the_array) [VarT intindex], TypM intType]
+    [varAppE (pyonBuiltin the_rangeIndexed) [TypM $ VarT intindex] [varE intvalue]])
+
+rwRange _ _ _ _ = return Nothing
 
 rwTraverseList :: RewriteRule
 rwTraverseList tenv inf [elt_type] [elt_repr, list] = fmap Just $
@@ -352,33 +379,30 @@ generalizedZipStream shape_type streams =
 
 -- | Turn a list-building histogram into an array-building histogram
 --
--- > asIndexRef n (\n index ->
--- >   make_list int n index
--- >     referenced (array n int) (histogramArray t n index input))
+-- > rwHistogram t size input
+--
+-- becomes
+--
+-- > case (defineIntIndex size)
+-- > of SomeIntIndex n index.
+-- >      make_list int n index
+-- >        (referenced (array n int) (histogramArray t n index input)))
 rwHistogram :: RewriteRule
 rwHistogram tenv inf [container] (size : input : other_args) =
   fmap Just $
-  -- Turn the int parameter into a type index
-  varAppE (pyonBuiltin the_asIndexRef)
-  [TypM list_type]
-  (return size :
-   (lamE $ mkFun [intindexT]
-   (\ [n] -> return ([ValPT Nothing :::
-                      varApp (pyonBuiltin the_IndexedInt) [VarT n]],
-                     BoxRT ::: FunT (OutPT ::: list_type)
-                                    (SideEffectRT ::: list_type)))
-   (\ [n] [index] ->
-     varAppE (pyonBuiltin the_make_list)
-     [TypM intType, TypM $ VarT n]
-     [varE index,
-      varAppE (pyonBuiltin the_referenced)
-      [TypM $ varApp (pyonBuiltin the_array) [VarT n, intType]]
-      [varAppE (pyonBuiltin the_histogramArray)
-       [container, TypM $ VarT n]
-       [varE index, return input]]])) :
-   map return other_args)
-  where
-    list_type = varApp (pyonBuiltin the_list) [intType]
+  defineAndInspectIndexedInt tenv (return size)
+  (\n index ->
+    varAppE (pyonBuiltin the_make_list)
+    [TypM intType, TypM $ VarT n]
+    (varE index :
+     varAppE (pyonBuiltin the_referenced)
+     [TypM $ varApp (pyonBuiltin the_array) [VarT n, intType]]
+     [varAppE (pyonBuiltin the_histogramArray)
+      [container, TypM $ VarT n]
+      [varE index, return input]] :
+     map return other_args))
+
+rwHistogram _ _ _ _ = return Nothing
 
 rwReduce :: RewriteRule
 rwReduce tenv inf

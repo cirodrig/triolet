@@ -29,6 +29,8 @@ extern function pyon.internal.prim.floordiv_float (float, float) -> int;
 extern function pyon.internal.prim.mod_float (float, float) -> float;
 extern function pyon.internal.prim.div_float (float, float) -> float;
 
+extern function pyon.internal.prim.defineIntIndex (int) -> SomeIndexedInt;
+
 extern function pyon.internal.prim.subscript
   (unit, unit, owned, pointer, int) -> pointer;
 

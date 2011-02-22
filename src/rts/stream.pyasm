@@ -995,7 +995,12 @@ function inline Stream_count (unit _) -> owned {
 /* range */
 
 function inline Stream_range (int n) -> owned {
-  owned call generate(nil, nil, IndexedInt {n}, repr_int, range_get_value);
+  owned call Stream_rangeIndexed(nil, IndexedInt {n});
+};
+
+// A type-indexed variant of 'range'
+function inline Stream_rangeIndexed (unit _, IndexedInt index) -> owned {
+  owned call generate(nil, nil, index, repr_int, range_get_value);
 };
 
 // Get the value of the current element of a 'range' stream.  This is just the

@@ -68,6 +68,56 @@ isFloatableSingletonParamType (prepr ::: ptype) =
     floatable_repr (ValPT Nothing) = True
     floatable_repr _ = False
 
+-- | Return True if a case statement deconstructing a value with this data
+--   constructor should always be floated
+isFloatableCaseDataCon :: Var -> Bool
+isFloatableCaseDataCon con =
+  isDictionaryDataCon con ||
+  con `isPyonBuiltin` the_someIndexedInt
+
+-- | If the given application term is floatable, then determine its type
+--   and return a binder for it.  Otherwise return Nothing.
+floatableAppParamType :: TypeEnv -> Var -> [TypM] -> [ExpM] -> Maybe ParamType
+floatableAppParamType tenv op_var ty_args args
+  | isDictionaryDataCon op_var = Just dictionary_binding
+  | isReprCon op_var           = Just repr_binding
+  | op_var `isPyonBuiltin` the_defineIntIndex &&
+    length args == 1           = Just intindex_binding
+  | otherwise                  = Nothing
+  where
+    -- Type of op_var, if it is a data constructor
+    Just dc_type = lookupDataCon op_var tenv
+    
+    -- Type of op_var
+    Just op_type = lookupType op_var tenv
+
+    -- The parameter type for a floated dictionary expression
+    dictionary_binding =
+      -- Determine which type arguments are universally quantified
+      let num_universal_types = length $ dataConPatternParams dc_type
+          num_existential_types = length $ dataConPatternExTypes dc_type
+          inst_type_args = map fromTypM $ take num_universal_types ty_args
+               
+          -- Existential variables cannot appear in the return type
+          inst_ex_args = replicate num_existential_types $
+                         internalError "floatDictionary: Unexpected use of existential variable"
+      in case instantiateDataConType dc_type inst_type_args inst_ex_args
+         of (_, _, rrepr ::: rtype) ->
+              returnReprToParamRepr rrepr ::: rtype
+
+    -- The parameter type for a floated Repr expression
+    repr_binding =
+      let app_type = computeInstantiatedType op_type ty_args
+      in case drop_arg_types (length args) app_type
+         of BoxRT ::: t -> BoxPT ::: t
+      where
+        drop_arg_types 0 t = t
+        drop_arg_types n (BoxRT ::: (FunT _ rt)) = drop_arg_types (n - 1) rt
+
+    intindex_binding =
+      -- Return value has type SomeIndexedInt
+      ValPT Nothing ::: VarT (pyonBuiltin the_SomeIndexedInt)
+
 -- | Return True if the expression is a variable or literal, False otherwise.
 isTrivialExp :: ExpM -> Bool
 isTrivialExp (ExpM (VarE {})) = True
@@ -613,16 +663,18 @@ createFlattenedApp inf op_var ty_args args = do
   -- Create the new expression
   let new_expr = ExpM $ AppE inf (ExpM $ VarE inf op_var) ty_args args'
 
-  -- If this is a dictionary expression, then float it.
-  -- Otherwise return it.
-  case () of
-    () | isDictionaryDataCon op_var -> do
-           dict_expr <- floatDictionary inf new_expr op_var ty_args
-           return (dict_expr, arg_contexts)
-       | isReprCon op_var -> do
-           dict_expr <- floatReprDict inf new_expr op_var ty_args (length args')
-           return (dict_expr, arg_contexts)
-       | otherwise -> return (new_expr, arg_contexts)
+  -- If this is a floatable expression, then float it and substitute a variable
+  -- in its place.  Otherwise return it.
+  floated_expr <- 
+    case floatableAppParamType tenv op_var ty_args args'
+    of Just ptype -> do
+         floated_var <- newAnonymousVar ObjectLevel
+         float (LetCtx inf (memVarP floated_var ptype) new_expr)
+         return (ExpM $ VarE inf floated_var)
+       Nothing ->
+         return new_expr
+
+  return (floated_expr, arg_contexts)
   where
     flatten_arg Nothing arg =
       -- This argument stays in place
@@ -766,73 +818,14 @@ floatInCase inf scr alts = do
     
     is_floatable scr'
       | length alts /= 1 =
-          -- Don't float a case with multiple alternatives
-          return False
-      | isDictionaryDataCon con =
-          -- Always float dictionary inspection 
-          return True
+          return False  -- Don't float a case with multiple alternatives 
+      | isFloatableCaseDataCon con =
+          return True   -- Float if this is a desirable type to float 
       | ExpM (VarE _ scr_var) <- scr' =
           -- Float if scrutinee is a readable reference
           isReadReference scr_var
       | otherwise =
           return False
-
--- | Float out a dictionary construction expression
-floatDictionary inf dict_expr op_var ty_args = do
-  -- Compute the type of the dictionary
-  tenv <- getTypeEnv
-  let dict_repr ::: dict_type = dictionary_type tenv
-  
-  -- Create the binding that will be floated
-  dict_var <- newAnonymousVar ObjectLevel
-  let dict_param_type = returnReprToParamRepr dict_repr ::: dict_type
-      ctx = LetCtx inf (memVarP dict_var dict_param_type) dict_expr
-      
-  -- Return the variable.  It's not renamed, since it's a new variable.
-  float ctx
-  return $ ExpM $ VarE inf dict_var
-  where
-    dictionary_type tenv
-      | Just dc_type <- lookupDataCon op_var tenv =
-        -- Determine which type arguments are universally quantified
-        let num_universal_types = length $ dataConPatternParams dc_type
-            num_existential_types = length $ dataConPatternExTypes dc_type
-            inst_type_args = map fromTypM $ take num_universal_types ty_args
-               
-            -- Existential variables cannot appear in the return type
-            inst_ex_args = replicate num_existential_types $
-                           internalError "floatDictionary: Unexpected use of existential variable"
-            (_, _, result_type) =
-              instantiateDataConType dc_type inst_type_args inst_ex_args
-        in result_type
-      | otherwise = internalError "floatDictionary"
-
--- | Float out a @Repr@ dictionary construction expression.
---   This is different from 'floatDictionary' since the operator isn't
---   a data constructor.
-floatReprDict inf dict_expr op_var ty_args num_args = do
-  -- Get the type of the dictionary expression
-  tenv <- getTypeEnv
-  let BoxRT ::: dict_type = dictionary_type tenv
-
-  -- Create the binding that will be floated
-  dict_var <- newAnonymousVar ObjectLevel
-  let dict_param_type = BoxPT ::: dict_type
-      ctx = LetCtx inf (memVarP dict_var dict_param_type) dict_expr
-
-  -- Return the variable.  It's not renamed, since it's a new variable.
-  float ctx
-  return $ ExpM $ VarE inf dict_var
-  where
-    dictionary_type tenv =
-      case lookupType op_var tenv of
-        Just op_type ->
-          let app_type = computeInstantiatedType op_type ty_args
-          in drop_arg_types num_args app_type
-        _ -> internalError "floatReprDict"
-
-    drop_arg_types 0 t = t
-    drop_arg_types n (BoxRT ::: (FunT _ rt)) = drop_arg_types (n - 1) rt
 
 floatInAlt :: AltM -> Flt AltM
 floatInAlt (AltM alt) = do

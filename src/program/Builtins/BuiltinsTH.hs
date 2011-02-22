@@ -24,6 +24,7 @@ pyonBuiltinTypeNames =
   , "Boxed"
   , "Referenced"
   , "IndexedInt"
+  , "SomeIndexedInt"
   , "array"
     
     -- Dictionary types
@@ -53,6 +54,7 @@ pyonBuiltinVariableNames =
   , "boxed"
   , "referenced"
   , "indexedInt"
+  , "someIndexedInt"
   , "make_list"
 
     -- Class constructors
@@ -223,6 +225,8 @@ pyonBuiltinVariableNames =
   , "ptrToBox"
   
     -- Inserted by rewrite rules
+  , "defineIntIndex"
+  , "rangeIndexed"
   , "generate"
   , "subscript"
   , "subscript_out"

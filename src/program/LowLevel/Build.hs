@@ -430,6 +430,7 @@ unpackRecord rtype val = do
     newFieldVar sfield = 
       case fieldType sfield
       of PrimField vtype -> newAnonymousVar (PrimType vtype)
+         RecordField rtype -> newAnonymousVar (RecordType rtype)
          BytesField {} -> internalError "unpackRecord"
 
 -- | Select one field of a pass-by-value record

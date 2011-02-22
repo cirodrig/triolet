@@ -77,5 +77,8 @@ extern function pyon.internal.stream.Stream_count (unit) -> owned;
 
 extern function pyon.internal.stream.Stream_range (int) -> owned;
 
+extern function pyon.internal.stream.Stream_rangeIndexed
+  (unit, IndexedInt) -> owned;
+
 extern function pyon.internal.stream.generate
   (unit, unit, IndexedInt, owned, owned) -> owned;
