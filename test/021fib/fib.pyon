@@ -1,0 +1,10 @@
+
+def fib(n : int) -> int:
+	if n <= 1: return 1
+	else: return fib(n-1) + fib(n-2)
+
+def fibs(count : int) -> list(int):
+	return __build__([fib(n) for n in range(count)])
+
+export ccall fibs : int -> list(int)
+
