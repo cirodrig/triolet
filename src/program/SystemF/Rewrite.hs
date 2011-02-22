@@ -84,6 +84,7 @@ rewriteRules = Map.fromList table
             , (pyonBuiltin the_fun_zip4_Stream, rwZip4Stream)
             {- Rewrites temporarily disabled while we change Stream types
             , (pyonBuiltin the_oper_CAT_MAP, rwBindStream) -}
+            , (pyonBuiltin the_histogram, rwHistogram)
             , (pyonBuiltin the_fun_reduce, rwReduce)
             , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
             , (pyonBuiltin the_fun_reduce1, rwReduce1)
@@ -348,6 +349,36 @@ generalizedZipStream shape_type streams =
 
           -- Cast the stream shape to the expected type
           return $ castStreamExpressionShape (fromTypM shape_type) zipped_shape elem_ty tuple_repr zip_expr
+
+-- | Turn a list-building histogram into an array-building histogram
+--
+-- > asIndexRef n (\n index ->
+-- >   make_list int n index
+-- >     referenced (array n int) (histogramArray t n index input))
+rwHistogram :: RewriteRule
+rwHistogram tenv inf [container] (size : input : other_args) =
+  fmap Just $
+  -- Turn the int parameter into a type index
+  varAppE (pyonBuiltin the_asIndexRef)
+  [TypM list_type]
+  (return size :
+   (lamE $ mkFun [intindexT]
+   (\ [n] -> return ([ValPT Nothing :::
+                      varApp (pyonBuiltin the_IndexedInt) [VarT n]],
+                     BoxRT ::: FunT (OutPT ::: list_type)
+                                    (SideEffectRT ::: list_type)))
+   (\ [n] [index] ->
+     varAppE (pyonBuiltin the_make_list)
+     [TypM intType, TypM $ VarT n]
+     [varE index,
+      varAppE (pyonBuiltin the_referenced)
+      [TypM $ varApp (pyonBuiltin the_array) [VarT n, intType]]
+      [varAppE (pyonBuiltin the_histogramArray)
+       [container, TypM $ VarT n]
+       [varE index, return input]]])) :
+   map return other_args)
+  where
+    list_type = varApp (pyonBuiltin the_list) [intType]
 
 rwReduce :: RewriteRule
 rwReduce tenv inf
