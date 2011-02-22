@@ -15,8 +15,8 @@ record ObjectHeader {
 // Objet layout information
 record PassConv {
   const ObjectHeader header;
-  const word size;                    // Size in bytes
-  const word align;                   // Alignment in bytes
+  const uint size;                    // Size in bytes
+  const uint align;                   // Alignment in bytes
   const owned copy;                   // Duplicate a value
   const owned finalize;               // Finalize a value
 };
@@ -146,7 +146,7 @@ record Stream {
   const ObjectHeader header;
   const owned next;                   // How to get the next stream element
   const owned initialize;             // How to initialize the stream state
-  const word state_size;	      // Size of state
-  const word state_align;	      // Alignment of state
+  const uint state_size;	      // Size of state
+  const uint state_align;	      // Alignment of state
   const owned state_finalize;		// How to finalize the stream state
 };

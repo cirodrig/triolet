@@ -265,6 +265,7 @@ data Task a where
   -- Run CPP on a file
   PreprocessCPP          
     { cppMacros :: [(String, Maybe String)]
+    , cppIncludeSearchPaths :: [FilePath]
     , cppInput :: ReadFile
     , cppOutput :: WriteFile
     } :: Task ()

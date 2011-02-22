@@ -4,6 +4,7 @@
 
 int main()
 {
+  Pyon_init();
   float x = f(77.77);		/* Result is 0.5 * 77.77 */
   float y = g(5.0/9.0);		/* Result is 1 */
 

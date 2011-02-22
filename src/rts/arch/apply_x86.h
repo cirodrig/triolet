@@ -1,10 +1,10 @@
+// This file is obsolete; delete it
 
-#define PAP_WORDSIZE (word 4)
+#define PAP_WORDSIZE (word WORD_SIZE)
 
 // For each data type that is handled by an 'apply' function, we define
 // the data type's size, how to write it to memory at an address, and how
 // to read it from memory into a variable.
-#define POINTER_ARG_WORDSIZE (word 1)
 #define POINTER_ARG_PUT(dst_addr, src) !(dst_addr) = (src)
 #define POINTER_ARG_GET(dst_var, src) dst_var = pointer load (src)
 

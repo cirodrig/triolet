@@ -4,6 +4,7 @@
 
 int main()
 {
+  Pyon_init();
   int n = doubled(21);
   printf("%d", n);
   return 0;

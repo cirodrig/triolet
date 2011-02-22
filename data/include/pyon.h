@@ -5,11 +5,12 @@
 #define PYON_H
 
 #include <inttypes.h>
+#include <gc.h>
 
 /* Basic Pyon data types */
-typedef int32_t PyonInt;
+typedef int PyonInt;
 typedef float PyonFloat;
-typedef int32_t PyonBool;
+typedef int PyonBool;
 typedef void *PyonPtr;
 
 typedef struct {
@@ -17,9 +18,13 @@ typedef struct {
   PyonFloat imag;
 } PyonComplexFloat;
 
-typedef void (*PyonFreeFunc)(PyonPtr);
-
 /* Pyon data structure interfaces */
 #include "pyon_list.h"
+
+static inline void Pyon_init(void) {
+  /* N.B. the GC must be initialized from the main program, not from a library.
+   * That is why this code is in a header file. */
+  GC_INIT();
+}
 
 #endif

@@ -3,6 +3,7 @@
 
 int main()
 {
+  Pyon_init();
   int result = int_math(8,9,10,11);
   if (result == 793)
     printf("ok");

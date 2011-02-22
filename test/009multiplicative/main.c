@@ -4,6 +4,7 @@
 
 int main()
 {
+  Pyon_init();
   float f = muls_float(1.5, 3.125);
   int i = muls_int(3, 9);
   printf("(%d)(%.4f)", i, f);

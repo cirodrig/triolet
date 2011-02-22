@@ -1,13 +1,15 @@
 {-| Machine-level data types.
 -}
 
-{-# LANGUAGE CPP #-}
 module LowLevel.Types where
 
 import Control.Applicative
 import Data.Bits
 import Data.Binary
+
+import Common.Error
 import LowLevel.BinaryUtils
+import Machine
 
 data Signedness = Signed | Unsigned
                 deriving(Eq, Ord, Show, Enum)
@@ -39,15 +41,15 @@ pointerSize :: Size
 nativeIntSize :: Size
 nativeFloatSize :: Size
 
-#if WORD_SIZE == 4
-pointerSize = S32
-nativeIntSize = S32
-#elif WORD_SIZE == 8
-pointerSize = S64
-nativeIntSize = S32
-#else
-# error "Unknown word size for the target architecture"
-#endif
+pointerSize
+  | targetWordSizeBytes == 4 = S32
+  | targetWordSizeBytes == 8 = S64
+  | otherwise = internalError $ "Cannot generate code for target word size (" ++ show targetWordSizeBytes ++ ")"
+       
+nativeIntSize
+  | targetIntSizeBytes == 4 = S32
+  | targetIntSizeBytes == 8 = S64
+  | otherwise = internalError $ "Cannot generate code for target int size (" ++ show targetIntSizeBytes ++ ")"
 
 -- | /FIXME/: This is architecture-dependent.
 nativeFloatSize = S32
@@ -107,13 +109,7 @@ coerceToRepresentableInt Signed sz n =
 -- 
 -- /FIXME/: This is architecture-dependent.
 dynamicScalarAlignment :: Int
-#if WORD_SIZE == 4
-dynamicScalarAlignment = 4
-#elif WORD_SIZE == 8
-dynamicScalarAlignment = 8
-#else
-# error "Unknown word size for the target architecture"
-#endif
+dynamicScalarAlignment = targetWordSizeBytes
 
 nativeIntType, nativeWordType, nativeFloatType :: PrimType
 nativeIntType = IntType Signed nativeIntSize

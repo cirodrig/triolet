@@ -9,6 +9,7 @@ PyonFloat input_array[] =
 
 int main()
 {
+  Pyon_init();
   PyonList *l = pyon_List_PyonInt_FromArray(10, input_array);
   PyonInt ix = min_float(l);
   pyon_List_PyonInt_Free(l);

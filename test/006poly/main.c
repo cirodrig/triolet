@@ -4,6 +4,8 @@
 
 int main()
 {
+  Pyon_init();
+
   float e = 2.71828;
   float p = 3.14159;
   int pick11 = pick_int(11, 13, 1);

@@ -3,6 +3,7 @@
 
 int main()
 {
+  Pyon_init();
   int x1_true  = compare(1, 1, 0.5, 0.5);
   int x2_false = compare(1, 1, 0.5, 1.5);
   int x3_false = compare(1, 1, 0.5, -0.5);

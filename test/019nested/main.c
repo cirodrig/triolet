@@ -8,6 +8,7 @@ PyonFloat ys[] = {5.9, 2.3, 4.3, 3.8, 3.4, 2.3};
 
 int main()
 {
+  Pyon_init();
   PyonList *pxs = pyon_List_PyonFloat_FromArray(6, xs);
   PyonList *pys = pyon_List_PyonFloat_FromArray(6, ys);
 

@@ -1,5 +1,5 @@
 
-import procedure pyon_alloc (word) -> pointer;
+import procedure pyon_alloc (uint) -> pointer;
 import procedure pyon_dealloc (pointer) -> ();
 import procedure memcpy (pointer, pointer, word) -> ();
 

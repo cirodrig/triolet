@@ -1,3 +1,4 @@
+// Remove this file; it's unused
 
 /* A lookup table, indexed by type tag, giving the size of a value stored in
  * a PAP's argument block.  The size is given as a multiple of PAP_ARG_WORDSIZE

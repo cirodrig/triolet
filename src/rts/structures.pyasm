@@ -121,7 +121,7 @@ function inline repr_PyonTuple2 (unit _, unit _,
 };
 
 function inline copy_PyonTuple2(owned copy1, owned copy2,
-                         word size1, word align1, word size2, word align2,
+                         uint size1, uint align1, uint size2, uint align2,
                          pointer src, pointer dst) -> () {
   typedef tuple = PyonTuple2(bytes(value size1, value align1), bytes(value size2, value align2));
   () = () call copy1 (src @ tuple.member1, dst @ tuple.member1);
@@ -152,8 +152,8 @@ function inline repr_PyonTuple3 (unit _, unit _, unit _,
 };
 
 function inline copy_PyonTuple3(owned copy1, owned copy2, owned copy3,
-                         word size1, word align1, word size2, word align2,
-			 word size3, word align3,
+                         uint size1, uint align1, uint size2, uint align2,
+			 uint size3, uint align3,
                          pointer src, pointer dst) -> () {
   typedef tuple = PyonTuple3(bytes(value size1, value align1),
   	  	  	     bytes(value size2, value align2),
@@ -192,8 +192,8 @@ function inline repr_PyonTuple4
 
 function inline copy_PyonTuple4(owned copy1, owned copy2, owned copy3,
                          owned copy4,
-                         word size1, word align1, word size2, word align2,
-			 word size3, word align3, word size4, word align4,
+                         uint size1, uint align1, uint size2, uint align2,
+			 uint size3, uint align3, uint size4, uint align4,
                          pointer src, pointer dst) -> () {
   typedef tuple = PyonTuple4(bytes(value size1, value align1),
   	  	  	     bytes(value size2, value align2),
@@ -233,7 +233,7 @@ function inline complex_pass_conv (unit _, pointer repr, pointer ret) -> () {
 };
 
 function inline copy_complex
-  (word size, word align, owned copy_member, pointer src, pointer dst) -> () {
+  (uint size, uint align, owned copy_member, pointer src, pointer dst) -> () {
   typedef cpx = complex(bytes(value size, value align));
   () = () call copy_member (src @ cpx.real, dst @ cpx.real);
   () = () call copy_member (src @ cpx.imag, dst @ cpx.imag);
@@ -241,7 +241,7 @@ function inline copy_complex
 };
 
 function finalize_complex
-  (word size, word align, owned finalize_member, pointer self) -> () {
+  (uint size, uint align, owned finalize_member, pointer self) -> () {
   // Not implemented
   ();
 };
@@ -260,7 +260,7 @@ function inline repr_AdditiveDict (unit _, pointer repr, pointer ret) -> () {
 };
 
 function AdditiveDict_copy
-  (word size, word align, owned copy_value, pointer src, pointer dst) -> () {
+  (uint size, uint align, owned copy_value, pointer src, pointer dst) -> () {
   typedef dictionary = AdditiveDict(bytes(value size, value align));
 
   dst @! dictionary.add = src @! dictionary.add;
@@ -284,7 +284,7 @@ function inline repr_MultiplicativeDict
 };
 
 function MultiplicativeDict_copy
-  (word size, word align, owned copy_value, pointer src, pointer dst) -> () {
+  (uint size, uint align, owned copy_value, pointer src, pointer dst) -> () {
   typedef dictionary = MultiplicativeDict(bytes(value size, value align));
 
   () = () call AdditiveDict_copy(size, align, copy_value,
@@ -364,21 +364,21 @@ function inline makeComplex(float re, float im, pointer ret) -> () {
   ();
 };
 
-function inline complex_add(word size, word align, owned member_add,
+function inline complex_add(uint size, uint align, owned member_add,
                      pointer x, pointer y, pointer ret) -> () {
   typedef cpx = complex(bytes(value size, value align));
   () = () call member_add (x @ cpx.real, y @ cpx.real, ret @ cpx.real);
   () call member_add (x @ cpx.imag, y @ cpx.imag, ret @ cpx.imag);
 };
 
-function inline complex_sub(word size, word align, owned member_sub,
+function inline complex_sub(uint size, uint align, owned member_sub,
                      pointer x, pointer y, pointer ret) -> () {
   typedef cpx = complex(bytes(value size, value align));
   () = () call member_sub (x @ cpx.real, y @ cpx.real, ret @ cpx.real);
   () call member_sub (x @ cpx.imag, y @ cpx.imag, ret @ cpx.imag);
 };
 
-function inline complex_negate(word size, word align, owned member_negate,
+function inline complex_negate(uint size, uint align, owned member_negate,
                         pointer x, pointer ret) -> () {
   typedef cpx = complex(bytes(value size, value align));
   () = () call member_negate (x @ cpx.real, ret @ cpx.real);

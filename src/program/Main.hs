@@ -1,5 +1,5 @@
 
-{-# LANGUAGE CPP, ForeignFunctionInterface #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
 module Main(main) where
 
 import Control.Exception
@@ -64,11 +64,12 @@ main = do
 -- compiler.
 runTask :: Task a -> IO a
 runTask (PreprocessCPP { cppMacros = macros
+                       , cppIncludeSearchPaths = include_paths
                        , cppInput = in_file
                        , cppOutput = cpp_file}) = do
   in_path <- readFilePath in_file
   out_path <- writeFilePath cpp_file
-  invokeCPP macros in_path out_path
+  invokeCPP macros include_paths in_path out_path
 
 runTask (ParsePyonAsm {parseAsmInput = file}) = do
   input_text <- readFileAsString file
@@ -97,8 +98,8 @@ runTask (CompileGenCToObject { compileGenCInput = c_file
   compileCFile c_path o_path
 
 -- | Invoke the C preprocessor
-invokeCPP :: [(String, Maybe String)] -> FilePath -> FilePath -> IO ()
-invokeCPP macros inpath outpath = do
+invokeCPP :: [(String, Maybe String)] -> [FilePath] -> FilePath -> FilePath -> IO ()
+invokeCPP macros include_paths inpath outpath = do
   rc <- rawSystem "gcc" cpp_opts
   unless (rc == ExitSuccess) $ do
     putStrLn "Compilation failed: Error in C preprocessor" 
@@ -106,6 +107,7 @@ invokeCPP macros inpath outpath = do
   where
     cpp_opts =
       macro_opts ++
+      include_path_opts ++
       [ "-E"                    -- preprocess only
       , "-xc"                   -- preprocess in C mode
       , "-nostdinc"             -- do not search standard include paths
@@ -114,6 +116,7 @@ invokeCPP macros inpath outpath = do
       ]
     macro_opts = [ "-D" ++ key ++ maybe "" ('=':) value
                  | (key, value) <- macros]
+    include_path_opts = ["-I" ++ path | path <- include_paths]
 
 -- | Compile a pyon file from source code to low-level code.
 compilePyonToPyonAsm :: FilePath -> String -> IO LowLevel.Module
@@ -276,9 +279,6 @@ compileCFile c_fname o_fname = do
   let compiler_opts =
         [ "-c"                  -- Compile
         , "-g"                  -- Emit debug information
-#ifdef FORCE_32_BIT
-        , "-m32"                -- 32-bit mode
-#endif
         , "-fPIC"               -- Position-independent code
         , "-xc"                 -- Source is a C file
         , c_fname               -- Input filename

@@ -15,6 +15,7 @@ PyonInt expect_outs4[] = {-39, 21, 0, 4, 2};
 
 int main()
 {
+  Pyon_init();
   PyonList *pxs = pyon_List_PyonInt_FromArray(5, xs);
   PyonList *pys = pyon_List_PyonInt_FromArray(6, ys);
   PyonList *pzs = pyon_List_PyonInt_FromArray(6, zs);

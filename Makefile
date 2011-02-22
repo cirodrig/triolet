@@ -32,12 +32,13 @@ data : bootstrap_data testcases $(DATA_BUILD_DIR)/include/pyon.h $(DATA_BUILD_DI
 # Link all object files
 $(PYON_TARGET) : $(PYON_OBJECT_FILES)
 	mkdir -p $(dir $(PYON_TARGET))
-	$(HC) $(PYON_OBJECT_FILES) -o $@ $(PYON_L_OPTS)
+	$(HC) $(PYON_L_OPTS) $(PYON_OBJECT_FILES) -o $@
 
 # Link RTS files into a dynamic library
 $(RTS_TARGET) : $(RTS_OBJECT_FILES)
 	mkdir -p $(dir $(RTS_TARGET))
-	$(LINKSHARED) -g $(RTS_OBJECT_FILES) -o $(RTS_TARGET) -lc $(LINKFLAGS)
+	$(LINKSHARED) $(RTS_LINK_OPTS) \
+		-g $(RTS_OBJECT_FILES) -o $(RTS_TARGET) -lc -lgc -lm
 
 # Move the library into the data directory
 $(DATA_BUILD_DIR)/libpyonrts.so : $(RTS_TARGET)

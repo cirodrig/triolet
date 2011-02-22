@@ -6,6 +6,7 @@
 
 int main()
 {
+  Pyon_init();
   PyonList *l = histo(100);
   PyonInt data[SIZE];
 

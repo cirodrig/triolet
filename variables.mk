@@ -8,27 +8,15 @@ include cabal.mk
 
 LIB_FLAGS=$(foreach lib, $(LIBS), -l$(lib))
 
-PYON_HS_INCLUDEDIR_FLAGS=\
-  -isrc/program -i$(BUILDDIR)/pyon $(foreach dir, $(INCLUDEDIRS), -I$(dir))
-
-C_INCLUDEDIR_FLAGS= $(foreach dir, $(INCLUDEDIRS), -I$(dir))
-
-LIBDIR_FLAGS=$(foreach dir, $(LIBDIRS), -L$(dir))
-
 ## Aggregate parameters for specific commands
 
-RTS_C_C_OPTS=$(CCFLAGS) $(RTS_CCFLAGS) -g -fPIC \
- -Isrc/rts -I$(RTS_BUILD_DIR) -I$(DATA_BUILD_DIR)/include \
- $(C_INCLUDEDIR_FLAGS)
+#RTS_C_C_OPTS=$(RTS_CCFLAGS) -g -fPIC \
+# -Isrc/rts -I$(RTS_BUILD_DIR) -I$(DATA_BUILD_DIR)/include \
+# $(C_INCLUDEDIR_FLAGS)
 
-RTS_CXX_C_OPTS=$(CXXFLAGS) $(RTS_CXXFLAGS) -g -fPIC \
- -Isrc/rts -I$(RTS_BUILD_DIR) -I$(DATA_BUILD_DIR)/include \
- $(C_INCLUDEDIR_FLAGS)
-
-# Compile the RTS for dynamic linking.  RTS files will include the same header
-# that compiled Pyon files will include; this file is found in the 'library'
-# directory.
-RTS_C_OPTS=-Ilibrary $(CCFLAGS) -dynamic
+#RTS_CXX_C_OPTS=$(RTS_CXXFLAGS) -g -fPIC \
+# -Isrc/rts -I$(RTS_BUILD_DIR) -I$(DATA_BUILD_DIR)/include \
+# $(C_INCLUDEDIR_FLAGS)
 
 ## File lists
 

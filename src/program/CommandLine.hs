@@ -64,6 +64,8 @@ optionDescrs =
     "specify output file"
   , Option "D" [] (ReqArg (\mac -> Opt $ addMacro mac) "MACRO")
     "define a preprocessor macro; ignored when compiling pyon files"
+  , Option "I" [] (ReqArg (\mac -> Opt $ addIncludePath mac) "PATH")
+    "add a path to the include search path; ignored when compiling pyon files"
   ]
 
 -- | Parse command-line arguments.  If they specify a job to perform, return
@@ -130,6 +132,8 @@ data InterpretOptsState =
   , interpreterErrors :: [String]
     -- | List of preprocessor macros
   , ppMacros :: [(String, Maybe String)]
+    -- | List of include search paths, in /reverse/ order
+  , includeSearchPaths :: [String]
   }
 
 initialState = InterpretOptsState { currentAction = CompileObject
@@ -139,6 +143,7 @@ initialState = InterpretOptsState { currentAction = CompileObject
                                   , inputFiles = []
                                   , interpreterErrors = []
                                   , ppMacros = []
+                                  , includeSearchPaths = []
                                   }
 
 putError st e = st {interpreterErrors = e : interpreterErrors st}
@@ -172,6 +177,9 @@ addMacro mac st =
         of (name, '=':value) -> (name, Just value)
            (name, []) -> (name, Nothing)
   in st {ppMacros = macro : ppMacros st}
+
+addIncludePath path st =
+  st {includeSearchPaths = path : includeSearchPaths st}
 
 setOutput file st =
   case outputFile st of
@@ -219,14 +227,18 @@ compileObjectJob config (file_path, language) moutput_path = do
           ifile = writeFileFromPath iface_path
           outfile = writeFileFromPath output_path
       compileWithCFile config output_path $
-        return $ \cfile -> pyonCompilation infile iface_files cfile ifile hfile outfile
+        return $ \cfile -> pyonCompilation infile iface_files
+                           cfile ifile hfile outfile
 
     PyonAsmLanguage ->
       let infile = readFileFromPath file_path
           ifile = writeFileFromPath iface_path
           outfile = writeFileFromPath output_path
       in compileWithCFile config output_path $
-         return $ \cfile -> pyonAsmCompilation (ppMacros config) infile cfile ifile outfile
+         return $ \cfile -> pyonAsmCompilation
+                            (reverse $ ppMacros config)
+                            (reverse $ includeSearchPaths config)
+                            infile cfile ifile outfile
   where
     from_suffix path
       | takeExtension path == ".pyon" = return PyonLanguage
@@ -281,14 +293,15 @@ pyonCompilation infile iface_files cfile ifile hfile outfile = do
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 
 pyonAsmCompilation :: [(String, Maybe String)] -- ^ Preprocessor macros
+                   -> [String]                 -- ^ Include paths
                    -> ReadFile  -- ^ Input pyasm file
                    -> TempFile  -- ^ Temporary C file
                    -> WriteFile -- ^ Output interface file
                    -> WriteFile -- ^ Output object file
                    -> Job ()
-pyonAsmCompilation macros infile cfile ifile outfile = do
+pyonAsmCompilation macros search_paths infile cfile ifile outfile = do
   asm <- withAnonymousFile ".pyasm" $ \ppfile -> do
-    taskJob $ PreprocessCPP macros infile (writeTempFile ppfile)
+    taskJob $ PreprocessCPP macros search_paths infile (writeTempFile ppfile)
     taskJob $ ParsePyonAsm (readTempFile ppfile)
     
   -- Don't link to any interfaces

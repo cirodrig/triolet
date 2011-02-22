@@ -4,6 +4,7 @@
 
 int main()
 {
+  Pyon_init();
   int x = bar(9);
   printf("%d", x);
   return 0;

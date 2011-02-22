@@ -7,6 +7,7 @@ PyonFloat inp_array[] = {0.764, -0.07, -0.972, 0.993, -0.447, 0.221};
 
 int main()
 {
+  Pyon_init();
   PyonList *ref_list = pyon_List_PyonFloat_FromArray(5, ref_array);
   PyonList *inp_list = pyon_List_PyonFloat_FromArray(6, inp_array);
   PyonList *nn_list = nearest(ref_list, inp_list);

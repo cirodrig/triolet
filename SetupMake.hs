@@ -26,6 +26,7 @@ import Distribution.Simple.Utils
 import Distribution.Text
 import Distribution.Verbosity
 
+import SetupConfig
 import SetupPaths
 
 -- | Makefile-style dependency checking.  Return 'True' if the target is older
@@ -60,7 +61,7 @@ data MakeRule =
   MakeRule
   { makeTargets :: [String]
   , makePrerequisites :: [String]
-  , makeCommand :: String
+  , makeCommands :: String
   }
 
 makeTarget rule =
@@ -73,7 +74,7 @@ formatMakeRule rule =
   let criterion =
         concat (intersperse " " $ makeTargets rule) ++ " : " ++
         concat (intersperse " " $ makePrerequisites rule)
-      command = unlines $ map ('\t':) $ lines $ makeCommand rule
+      command = unlines $ map ('\t':) $ lines $ makeCommands rule
   in criterion ++ '\n' : command ++ "\n\n"
 
 type MakeRuleTemplate = FilePath -- ^ Target directory
@@ -204,14 +205,15 @@ compileCxxRtsFile build_path source_path src =
 -- > build_path/A.o : src_path/A.pyasm bootstrap_data
 -- > 	mkdir -p build_path
 -- > 	pyon_program -B build_path/data $< -o $@
-compilePyAsmRtsFile :: FilePath -> FilePath -> MakeRuleTemplate
-compilePyAsmRtsFile pyon_program data_path build_path source_path src =
+compilePyAsmRtsFile :: ExtraConfigFlags -> FilePath -> FilePath -> MakeRuleTemplate
+compilePyAsmRtsFile econfig pyon_program data_path build_path source_path src =
   let o_file = build_path </> src `replaceExtension` ".o"
       iface_file = build_path </> src `replaceExtension` ".pi"
       i_file = source_path </> src `replaceExtension` ".pyasm"
   in MakeRule [o_file, iface_file] [i_file, "bootstrap_data"] $
      "mkdir -p " ++ takeDirectory o_file ++ "\n" ++
-     pyon_program ++ " -B " ++ data_path ++ " --keep-c-files $< -o " ++ o_file ++ " " ++ intercalate " " targetFlags
+     pyon_program ++ " -B " ++ data_path ++
+     " $(RTS_PYASM_C_OPTS) --keep-c-files $< -o " ++ o_file
 
 -- | Copy a file
 copyDataFile :: MakeRuleTemplate
@@ -225,6 +227,9 @@ copyDataFile build_path source_path src =
 -------------------------------------------------------------------------------
 -- Command-line options used in makefiles
 
+{-
+-- | If we are using 32-bit GHC on a 64-bit system, then we need to force
+--   32-bit mode when linking pyon
 force32BitCompilation :: Bool
 force32BitCompilation =
   case (System.Info.arch, System.Info.os)
@@ -232,7 +237,8 @@ force32BitCompilation =
      ("x86_64", "darwin") -> True
      ("x86_64", "linux")  -> False
      _                    -> error "Unrecognized host architecture"
-
+-}
+      
 findExeConfig exe lbi =
   case find ((exeName exe ==) . fst) $ executableConfigs lbi
   of Just x  -> snd x
@@ -276,8 +282,35 @@ pyonGhcPathFlags exe lbi = o_flags ++ i_flags
     o_flags = ["-outputdir", pyonBuildDir lbi]
     i_flags = ["-i" ++ path | path <- pyonBuildDir lbi : pyonSearchPaths lbi exe]
 
--- | Target-specific compilation flags
-targetFlags = word_size ++ force_32bit ++ arch
+-- | Target-specific compilation flags for C, C++, and pyasm code. 
+targetCompileFlags econfig = target_paths
+  where
+    target_paths =
+      ["-I" ++ path | path <- configTargetIncludeDirs econfig]
+
+-- | Flags for compiling RTS C/C++ files
+rtsCCompileFlags is_cxx lbi econfig =
+  cc_warning_flags ++ dynamic_flags ++ rts_include_paths ++
+  targetCompileFlags econfig
+  where
+    dynamic_flags = ["-fPIC"]   -- Position-independent code
+
+    rts_include_paths = ["-I" ++ path | path <- rtsSearchPaths lbi]
+
+    cc_warning_flags =
+      -- In C, these flags turn some C warnings into errors.
+      -- In C++, they're errors by default.
+      if is_cxx
+      then []
+      else ["-Werror", "-Wimplicit-function-declaration", "-Wimplicit-int"]
+
+-- | Flags for compiling pyasm files.
+rtsPyasmCompileFlags lbi = rts_include_paths
+  where
+    rts_include_paths = ["-I" ++ path | path <- rtsSearchPaths lbi]
+    
+{-
+targetCompileDefines = word_size ++ arch
   where
     arch =
       case System.Info.arch
@@ -288,11 +321,12 @@ targetFlags = word_size ++ force_32bit ++ arch
       case System.Info.arch
       of "i386" -> ["-DWORD_SIZE=4"]
          "x86_64" -> ["-DWORD_SIZE=8"]
-         _ -> error "Unrecognized architecture"
-    force_32bit =
-      if force32BitCompilation
-      then ["-DFORCE_32_BIT"]
-      else []
+         _ -> error "Unrecognized architecture"-}
+
+targetLinkFlags econfig = target_paths
+  where
+    target_paths =
+      ["-L" ++ path | path <- configTargetLibDirs econfig]
 
 optimizationFlags lbi = prof_flag ++ opt_flag ++ suffixes
   where
@@ -316,8 +350,7 @@ configuredGhcFlags exe lbi =
 
 -- | Get the options to pass to GHC for compiling a HS file that is part of
 --   the Pyon executable.
-pyonGhcOpts exe lbi =
-  targetFlags ++
+pyonGhcOpts econfig exe lbi =
   configuredGhcFlags exe lbi ++
   optimizationFlags lbi ++
   pyonGhcPathFlags exe lbi ++
@@ -325,8 +358,7 @@ pyonGhcOpts exe lbi =
   pyonExtensionFlags exe
 
 -- | Get the options for linking the \'pyon\' binary.
-pyonLinkOpts exe lbi =
-  targetFlags ++
+pyonLinkOpts econfig exe lbi =
   configuredGhcFlags exe lbi ++ 
   optimizationFlags lbi ++
   packageFlags exe lbi
@@ -334,19 +366,20 @@ pyonLinkOpts exe lbi =
 -------------------------------------------------------------------------------
 -- Rules to generate a makefile
 
-generateCabalMakefile verbosity exe lbi = do
+generateCabalMakefile verbosity econfig exe lbi = do
   (pyon_rules, pyon_object_files, pyon_source_files) <-
     generatePyonRules verbosity lbi exe
-  (rts_rules, rts_files) <- generateRtsRules verbosity lbi
+  (rts_rules, rts_files) <- generateRtsRules verbosity econfig lbi
   (data_rules, prebuilt_data_files) <- generateDataRules verbosity lbi
   test_rules <- generateTestRules verbosity lbi
-  variables <- generateVariables exe lbi pyon_rules rts_rules data_rules
+  variables <- generateVariables econfig exe lbi pyon_rules rts_rules data_rules
                pyon_object_files pyon_source_files
                prebuilt_data_files
   writeCabalMakefile variables (pyon_rules ++ rts_rules ++ data_rules ++ test_rules)
 
 -- | Create variables for a makefile.
-generateVariables :: Executable
+generateVariables :: ExtraConfigFlags
+                  -> Executable
                   -> LocalBuildInfo
                   -> [MakeRule]
                   -> [MakeRule]
@@ -355,7 +388,7 @@ generateVariables :: Executable
                   -> [FilePath]
                   -> [FilePath]
                   -> IO [(String, String)]
-generateVariables exe lbi pyon_rules rts_rules data_rules 
+generateVariables econfig exe lbi pyon_rules rts_rules data_rules 
                   pyon_object_files pyon_source_files prebuilt_data_files = do
   -- Get paths
   cc_path <-
@@ -371,12 +404,6 @@ generateVariables exe lbi pyon_rules rts_rules data_rules
     of Just pgm -> return $ programPath pgm
        Nothing -> die "Cannot find 'ghc'"
   
-  -- Force 32-bit compilation?
-  let (cc_32b_flag, l_32b_flag, linkshared_32b_flag) =
-        if force32BitCompilation
-        then (["-m32"], ["-optl-m32"], [])
-        else ([], [], [])
-
   -- Linker commands
   linkshared <-
     case System.Info.os
@@ -396,36 +423,43 @@ generateVariables exe lbi pyon_rules rts_rules data_rules
            ("BUILDDIR", buildDir lbi)
          , ("DATADIR", "data")
          , ("SRCDIR", "src")
-           -- executables
-         , ("CC", cc_path)
-         , ("CXX", cxx_path)
-         , ("HC", hc_path)
-         , ("LINKSHARED", intercalate " " (linkshared : linkshared_32b_flag))
-           -- flags
-         , ("CCFLAGS", intercalate " " (cc_32b_flag ++ cc_warning_flags))
-         , ("RTS_CCFLAGS", intercalate " " targetFlags)
-         , ("CXXFLAGS", intercalate " " cc_32b_flag)
-         , ("RTS_CXXFLAGS", intercalate " " targetFlags)
-         , ("LFLAGS", intercalate " " l_32b_flag)
-         , ("LINKFLAGS", intercalate " " linkshared_32b_flag)
+         , ("PYON_BUILD_DIR", pyonBuildDir lbi)
+         , ("RTS_BUILD_DIR", rtsBuildDir lbi)
+         , ("DATA_BUILD_DIR", dataBuildDir lbi)
            -- paths outside the project directory
          , ("INCLUDEDIRS", "")
          , ("LIBDIRS", "")
          , ("LIBS", "")
-           -- files in the project directory
-         , ("PYON_SOURCE_FILES", makefileList pyon_source_files)
-         , ("PYON_OBJECT_FILES", makefileList pyon_object_files)
-         , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts exe (lbi {withProfExe = False}))
-         , ("PYON_HS_PC_OPTS", intercalate " " $ pyonGhcOpts exe (lbi {withProfExe = True}))
-         , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts exe lbi)
+
+           -- executables
+         , ("CC", cc_path)
+         , ("CXX", cxx_path)
+         , ("HC", hc_path)
+         , ("LINKSHARED", linkshared)
+
+           -- flags: RTS
+         -- , ("CCFLAGS", intercalate " " (cc_32b_flag ++ cc_warning_flags))
+         , ("RTS_C_C_OPTS", intercalate " " (rtsCCompileFlags False lbi econfig))
+         -- , ("CXXFLAGS", intercalate " " cc_32b_flag)
+         , ("RTS_CXX_C_OPTS", intercalate " " (rtsCCompileFlags True lbi econfig))
+         -- , ("LFLAGS", intercalate " " (targetLdLinkFlags econfig))
+         , ("RTS_PYASM_C_OPTS", intercalate " " (rtsPyasmCompileFlags lbi))
+         , ("RTS_LINK_OPTS", intercalate " " (targetLinkFlags econfig))
+           -- flags: pyon program
+         , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts econfig exe (lbi {withProfExe = False}))
+         , ("PYON_HS_PC_OPTS", intercalate " " $ pyonGhcOpts econfig exe (lbi {withProfExe = True}))
+         , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts econfig exe lbi)
+
+           -- files: RTS
          , ("RTS_SOURCE_FILES", makefileList rts_source_files)
          , ("RTS_OBJECT_FILES", makefileList rts_object_files)
          , ("RTS_INTERFACE_FILES", makefileList rts_interface_files)
+           -- files: pyon program
+         , ("PYON_SOURCE_FILES", makefileList pyon_source_files)
+         , ("PYON_OBJECT_FILES", makefileList pyon_object_files)
+           -- files: pyon data files
          , ("BOOT_DATA_FILES", makefileList prebuilt_data_files)
          , ("INTERFACE_DATA_FILES", makefileList interface_data_files)
-         , ("PYON_BUILD_DIR", pyonBuildDir lbi)
-         , ("RTS_BUILD_DIR", rtsBuildDir lbi)
-         , ("DATA_BUILD_DIR", dataBuildDir lbi)
          ]
   where
     makefileList ss = concat $ intersperse " " ss
@@ -436,9 +470,6 @@ generateVariables exe lbi pyon_rules rts_rules data_rules
         filter ((".o" ==) . takeExtension) $ concatMap makeTargets rules
     getInterfaceTargets rules = 
         filter ((".pi" ==) . takeExtension) $ concatMap makeTargets rules
-
-    cc_warning_flags = ["-Werror", "-Wimplicit-function-declaration",
-                        "-Wimplicit-int"]
 
 -- | Create Makefile rules to create all object files used in building the
 -- 'pyon' executable.
@@ -483,14 +514,15 @@ generatePyonRules verb lbi exe = do
                    | m <- fromString "Main" : exeModules exe]
 
 -- | Create Makefile rules for all object files in the RTS.
-generateRtsRules :: Verbosity -> LocalBuildInfo -> IO ([MakeRule], [FilePath])
-generateRtsRules verb lbi = do
+generateRtsRules :: Verbosity -> ExtraConfigFlags -> LocalBuildInfo
+                 -> IO ([MakeRule], [FilePath])
+generateRtsRules verb econfig lbi = do
   info verb "Locating source code files for RTS"
   c_rules <- generateBuildRules compileCRtsFile rts_build_dir rts_source_paths
              rtsCSourceFiles
   cxx_rules <- generateBuildRules compileCxxRtsFile rts_build_dir
                rts_source_paths rtsCxxSourceFiles
-  asm_rules <- generateBuildRules (compilePyAsmRtsFile pyon_program data_path)
+  asm_rules <- generateBuildRules (compilePyAsmRtsFile econfig pyon_program data_path)
                rts_build_dir rts_source_paths rtsPyAsmFiles
   let rules = c_rules ++ cxx_rules ++ asm_rules
   return (rules, concatMap makePrerequisites rules)

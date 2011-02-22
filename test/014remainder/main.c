@@ -4,6 +4,7 @@
 
 int main()
 {
+  Pyon_init();
   PyonInt n = remainder_int(667, 37);
   PyonFloat f = remainder_float(71.707, 32.45);
 

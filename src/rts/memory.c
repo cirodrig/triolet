@@ -1,6 +1,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <gc.h>
 #include "pyon.h"
 
 /* When defined, print a message on every allocation and deallocation. */
@@ -10,7 +11,7 @@
 PyonPtr
 pyon_alloc(uint32_t size)
 {
-  PyonPtr ptr = malloc(size);
+  PyonPtr ptr = GC_MALLOC(size);
 #ifdef CHATTY_ALLOC
   fprintf(stderr, "Allocating   %p (%d bytes)\n", ptr, (int)size);
 #endif
@@ -24,5 +25,5 @@ pyon_dealloc(PyonPtr p)
 #ifdef CHATTY_ALLOC
   fprintf(stderr, "Deallocating %p\n", p);
 #endif
-  free(p);
+  GC_FREE(p);
 }

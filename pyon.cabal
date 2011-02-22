@@ -50,6 +50,7 @@ Executable pyon
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon
+    Machine
     Paths
     Export
     Globals

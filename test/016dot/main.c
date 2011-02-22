@@ -7,6 +7,7 @@ PyonFloat vec2_array[] = {-0.1246, -0.5272, 0.1423, 0.5318, -0.2551, 0.8277};
 
 int main()
 {
+  Pyon_init();
   PyonList *vec1 = pyon_List_PyonFloat_FromArray(6, vec1_array);
   PyonList *vec2 = pyon_List_PyonFloat_FromArray(6, vec2_array);
   PyonFloat prod = dotproduct(vec1, vec2);

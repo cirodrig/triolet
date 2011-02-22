@@ -1,6 +1,6 @@
 
 extern function pyon.internal.structures.copy_PyonTuple2
-  (owned, owned, word, word, word, word, pointer, pointer) -> ();
+  (owned, owned, uint, uint, uint, uint, pointer, pointer) -> ();
 
 extern function pyon.internal.structures.copy_Repr
   (unit, pointer, pointer) -> ();

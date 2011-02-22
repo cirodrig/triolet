@@ -1,4 +1,6 @@
 
+#error "This file is no longer in use"
+
 // A partial application
 record PAP(arg_size) {
   const ObjectHeader header;	      // Object header

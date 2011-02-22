@@ -4,6 +4,7 @@
 
 int main()
 {
+  Pyon_init();
   float f = capture(1.75, 2, 3);
   if (f == 0.3125)
     printf("ok");

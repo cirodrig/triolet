@@ -312,7 +312,7 @@ linkTest test_case = do
                   ["-o", testExecutableName] ++
                   c_file_paths ++ pyon_file_paths ++
                   ["-L" ++ build_dir </> "rts",
-                   "-lpyonrts", "-lm"]
+                   "-lpyonrts", "-lgc", "-lm"]
       fail_message err = err
 
   runCompileCommand fail_message "gcc" link_opts ""

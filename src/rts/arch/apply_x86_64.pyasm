@@ -63,7 +63,7 @@ procedure apply_word (owned obj, pointer arg_ref, pointer ret) -> () {
     else {
       // Undersaturated application
       // Create a PAP
-      typedef my_pap = PAP(value word 0);
+      typedef my_pap = PAP(value int 0);
       new_pap = owned primcall pap_new (obj, uint16 1, uint16 1);
       POINTER_ARG_GET(arg, arg_ref);
       POINTER_ARG_PUT(new_pap @ my_pap.args as pointer, arg);
@@ -73,11 +73,11 @@ procedure apply_word (owned obj, pointer arg_ref, pointer ret) -> () {
   } else if (obj_tag == TAG_PAP) {
     // Determine PAP's arity
     arity = uint16 primcall pap_arity(obj);
-    typedef my_pap = PAP(value word 0);
+    typedef my_pap = PAP(value int 0);
 
     // Add argument to PAP
     new_pap = owned primcall pap_grow(obj, uint16 1);
-    arg_offset = (obj @! my_pap.arg_size) as word * PAP_WORDSIZE;
+    arg_offset = (obj @! my_pap.arg_size) as uint * PAP_WORDSIZE;
     POINTER_ARG_GET(arg, arg_ref);
     POINTER_ARG_PUT(new_pap @ my_pap.args ^+ arg_offset as int, arg);
 

@@ -308,9 +308,9 @@ procedure pyon_List_PyonInt_ToArray (pointer list, pointer dat) -> () {
   () primcall pyon_list_to_array_POD (repr_int, list, dat);
 };
 
-procedure pyon_List_PyonInt_Length (pointer list) -> cint {
+procedure pyon_List_PyonInt_Length (pointer list) -> int {
   l = int primcall pyon_list_length (list);
-  l as cint;
+  l as int;
 };
 
 procedure pyon_List_PyonInt_Copy (pointer list) -> pointer {
@@ -335,9 +335,9 @@ procedure pyon_List_PyonFloat_ToArray (pointer list, pointer dat) -> () {
   () primcall pyon_list_to_array_POD (repr_float, list, dat);
 };
 
-procedure pyon_List_PyonFloat_Length (pointer list) -> cint {
+procedure pyon_List_PyonFloat_Length (pointer list) -> int {
   l = int primcall pyon_list_length (list);
-  l as cint;
+  l as int;
 };
 
 procedure pyon_List_PyonFloat_Copy (pointer list) -> pointer {

@@ -20,7 +20,12 @@ pyonBuildDir lbi = buildDir lbi </> "pyon"
 
 -- | Directories containing source files belonging to the RTS
 rtsSearchPaths :: LocalBuildInfo -> [FilePath]
-rtsSearchPaths lbi = rtsBuildDir lbi : ["src/rts"]
+rtsSearchPaths lbi =
+  [ rtsBuildDir lbi                -- Compiled files
+  , buildDir lbi </> "autogen"     -- Auto-generated files
+  , dataBuildDir lbi </> "include" -- Predefined include files
+  , "src/rts"                      -- Source files
+  ]
 
 -- | Destination for object files belonging to the RTS
 rtsBuildDir :: LocalBuildInfo -> FilePath

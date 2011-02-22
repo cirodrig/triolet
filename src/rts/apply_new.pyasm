@@ -21,13 +21,26 @@ extern procedure pyon.internal.apply_new.apply_f32(owned, float, pointer) -> ();
 
 #include "new_pyasm_records.h"
 
-#if defined(ARCH_I386)
-# include "arch/apply_x86.h"
-#elif defined(ARCH_X86_64)
-# include "arch/apply_x86_64.h"
-#else
-# error "Unrecognized architecture"
-#endif
+// The word size.  Partially applied data is organized as words.
+#define PAP_WORDSIZE (uint WORD_SIZE)
+
+// For each data type that is handled by an 'apply' function, we define
+// the data type's size, how to write it to memory at an address, and how
+// to read it from memory into a variable.
+#define POINTER_ARG_PUT(dst_addr, src) !(dst_addr) = (src)
+#define POINTER_ARG_GET(dst_var, src) dst_var = pointer load (src)
+
+// A partial application.  The argument is the size of the argument space
+// in bytes.
+//
+// This is not arch-specific
+record PAP(argsz) {
+  const ObjectHeader header;		// Object header
+  const owned fun;			// Partially applied function
+  const uint16 nargs;                 // Number of arguments stored in PAP
+  const uint16 arg_size;	      // Size of arguments in words
+  const bytes(value argsz, value PAP_WORDSIZE) args; // Argument data
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -51,13 +64,13 @@ procedure pap_arguments_size (int nargs, pointer type_tags) -> uint16 {
   typedef size_arr = const_array(value int 0, uint8);
   (_, _, size) = while (int count = nargs,
       	       	        pointer type_tags = type_tags,
-			word size = word 0)
+			uint size = uint 0)
 		       (count != int 0) {
     type_tag = uint8 load type_tags;
     arg_size = pyon_type_tag_pap_size @! size_arr[type_tag as int];
     (count - int 1,
      type_tags ^+ sizeof uint8 as int,
-     size + arg_size as word);
+     size + arg_size as uint);
   };
   size;
 };
@@ -67,9 +80,9 @@ procedure pap_arguments_size (int nargs, pointer type_tags) -> uint16 {
 // Return a pointer to the PAP itself.
 // Its argument block isn't initialized.
 procedure pap_new (owned fun, uint16 nargs, uint16 arg_size) -> owned {
-  typedef my_pap = PAP(value arg_size as word * PAP_WORDSIZE);
+  typedef my_pap = PAP(value arg_size as uint * PAP_WORDSIZE);
   obj = pointer primcall pyon_alloc(sizeof my_pap);
-  obj @! my_pap.header.refct = word 1;
+  obj @! my_pap.header.refct = int 1;
   obj @! my_pap.header.info = PAP_info;
   obj @! my_pap.fun = fun;
   obj @! my_pap.nargs = nargs;
@@ -81,7 +94,7 @@ procedure pap_new (owned fun, uint16 nargs, uint16 arg_size) -> owned {
 // The new arguments are uninitialized.
 // Returns the new PAP.
 procedure pap_grow(owned pap, uint16 n_new_args) -> owned {
-  typedef old_pap_t = PAP(value word 0);
+  typedef old_pap_t = PAP(value int 0);
   fun = pap @! old_pap_t.fun;
   fun_info = fun @! ObjectHeader.info;
   n_old_args = pap @! old_pap_t.nargs;
@@ -98,7 +111,7 @@ procedure pap_grow(owned pap, uint16 n_new_args) -> owned {
 
   // Initialize arguments that were in the old PAP
   () = () primcall memcpy (new_pap @ old_pap_t.args, pap @ old_pap_t.args,
-                           (old_arg_size * PAP_WORDSIZE) as int);
+                           old_arg_size as int * PAP_WORDSIZE as int);
   new_pap;
 };
 
@@ -106,7 +119,7 @@ procedure pap_grow(owned pap, uint16 n_new_args) -> owned {
 // function arity.
 // The function's indirect entry point is called.
 procedure pap_call(owned pap, pointer ret) -> () {
-  typedef my_pap = PAP(value word 0);
+  typedef my_pap = PAP(value int 0);
   fun = pap @! my_pap.fun;
   fun_info = fun @! ObjectHeader.info;
   args = pap @ my_pap.args;
@@ -122,10 +135,9 @@ procedure inline pap_arity(owned p) -> uint16 {
   uint16 primcall fun_arity (p @! PAP(value int 0).fun);
 };
 
-
-#if defined(ARCH_I386)
+#if WORD_SIZE == 4
 # include "arch/apply_x86.pyasm"
-#elif defined(ARCH_X86_64)
+#elif WORD_SIZE == 8
 # include "arch/apply_x86_64.pyasm"
 #else
 # error "Unrecognized architecture"

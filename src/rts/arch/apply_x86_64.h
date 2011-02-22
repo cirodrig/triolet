@@ -1,5 +1,6 @@
+// This file is obsolete; delete it
 
-#define PAP_WORDSIZE (word 8)
+#define PAP_WORDSIZE (uint 8)
 
 // For each data type that is handled by an 'apply' function, we define
 // the data type's size, how to write it to memory at an address, and how
