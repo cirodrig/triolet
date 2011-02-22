@@ -212,7 +212,7 @@ getCExportType ty =
                    _ -> unsupported
        | con `isPyonBuiltin` the_list ->
            case args
-           of [arg] -> ListET $! getCExportType arg
+           of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
      _ -> unsupported
   where
     unsupported = internalError "Unsupported exported type"

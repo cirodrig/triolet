@@ -5,6 +5,9 @@ found in that stage's directory.
 
 module Export where
 
+import Text.Show
+import Type.Type
+
 -- | The foreign language to which a name is exported.
 data ForeignLanguage =
   CCall
@@ -23,8 +26,10 @@ data ExportSpec =
 
 -- | A data type that can be exported to foreign functions.
 data ExportDataType =
-    -- | A Pyon list
-    ListET ExportDataType
+    -- | A Pyon list.
+    --   The list contents can have any monomorphic type.  It's an error
+    --   for the list to mention type variables other than constructors.
+    ListET Type
     -- | A C array.  The array is passed as a pointer.  The array
     -- size is passed as an additional parameter.
   | CSizeArrayET ExportDataType
@@ -36,7 +41,21 @@ data ExportDataType =
   | PyonComplexFloatET          -- ^ Pyon complex float type
   | CIntET                      -- ^ C int type
   | CFloatET                    -- ^ C float type
-    deriving(Show)
+
+instance Show ExportDataType where
+  showsPrec prec edt = 
+    case edt
+    of ListET ty ->
+         showParen (prec >= 10) $ 
+         showString "ListET (" . shows (pprType ty) . showChar ')'
+       CSizeArrayET et ->
+         showString "CSizeArrayET " . showsPrec 10 et
+       PyonIntET -> showString "PyonIntET"
+       PyonFloatET -> showString "PyonFloatET"
+       PyonBoolET -> showString "PyonBoolET"
+       PyonComplexFloatET -> showString "PyonComplexFloatET"
+       CIntET -> showString "CIntET"
+       CFloatET -> showString "CFloatET"
 
 -- | An exported function signature
 data ExportSig =
