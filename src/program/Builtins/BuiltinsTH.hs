@@ -202,6 +202,7 @@ pyonBuiltinVariableNames =
   , "count"
   , "range"
   , "histogram"
+  , "safeSubscript"
   , "makeComplex"
     
     -- Inserted by stream specialization

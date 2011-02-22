@@ -716,6 +716,12 @@ generate : (val n : intindex)
         -> box (val int -> write a)
         -> box Stream (array n) a;
 
+safeSubscript : (val a : pure)
+             -> box Repr a
+             -> read list a
+             -> val int
+             -> write a;
+
 subscript : (val n : intindex)
          -> (val a : pure)
          -> box Repr a

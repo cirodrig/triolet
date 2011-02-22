@@ -479,6 +479,8 @@ expression expr =
                    , Py.left_op_arg = l
                    , Py.right_op_arg = r} -> 
          Binary source_pos op <$> expression l <*> expression r
+       Py.Subscript {Py.subscriptee = base, Py.subscript_exprs = [index]} ->
+         Subscript source_pos <$> expression base <*> expression index
        Py.UnaryOp {Py.operator = op, Py.op_arg = arg} -> 
          Unary source_pos op <$> expression arg
        Py.Lambda {Py.lambda_args = args, Py.lambda_body = body} -> 
@@ -804,6 +806,7 @@ instance MentionsVars (Expr Int) where
            Tuple _ es -> mentionedVars es
            Unary _ _ e -> mentionedVars e
            Binary _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
+           Subscript _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
            ListComp _ it -> mentionedVars it
            Generator _ it -> mentionedVars it
            Call _ e es -> mentionedVars (e:es)

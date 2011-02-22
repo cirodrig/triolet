@@ -9,6 +9,8 @@ module pyon.internal.list;
 #include "list.h"
 #include "structures.h"
 
+import procedure exit "exit" (int) -> ();
+
 #include "new_pyasm_records.h"
 
 function repr_list (unit _, owned elem_repr) -> owned {
@@ -207,6 +209,21 @@ function inline list_traverse (unit _, owned elem_repr, pointer list) -> owned {
   s;
 };
 
+function inline safeSubscript
+  (unit _, owned elt_repr, pointer list, int index, pointer ret) -> () {
+  nelems = list @! PyonList.nelems;
+  contents = list @! PyonList.contents;
+  elt_size = elt_repr @! PassConv.size;
+  elt_align = elt_repr @! PassConv.align;
+
+  if (index < int 0 || index >= nelems) {
+    () primcall exit (int -1);
+  } else {
+    typedef ary = const_array(value nelems,
+                              bytes(value elt_size, value elt_align));
+    () call (elt_repr @! PassConv.copy)(contents @ ary[index], ret);
+  };
+};
 
 function inline list_generate
   (unit _, unit _, owned elem_repr, IndexedInt count_n, owned f, pointer ret) -> () {

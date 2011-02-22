@@ -162,7 +162,9 @@ builtinFunctions =
   , (PyonName module_list "list_build",
      Right [| pyonBuiltin SystemF.the_TraversableDict_list_build |])
   , (PyonName module_list "list_traverse",
-     Right [| pyonBuiltin SystemF.the_TraversableDict_list_traverse |]) {-
+     Right [| pyonBuiltin SystemF.the_TraversableDict_list_traverse |])
+  , (PyonName module_list "safeSubscript",
+     Right [| pyonBuiltin (SystemF.the_safeSubscript) |]) {-
   , (PyonName module_list "list_generate",
      Right [| pyonBuiltin (SystemF.the_fun_generateList) |])
   , (PyonName module_list "list_vGenerate",

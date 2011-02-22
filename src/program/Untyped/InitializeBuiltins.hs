@@ -769,6 +769,13 @@ mkHistogramType =
   in ([], functionType [int_type, iterType (ConTy t) int_type]
           (ConTy (tiBuiltin the_con_list) @@ int_type))
 
+mkSafeSubscriptType =
+  forallType [Star] $ \[a] ->
+  let aT = ConTy a
+      listT = ConTy (tiBuiltin the_con_list) @@ aT
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([passable aT], functionType [listT, int_type] aT)
+
 mkFloorType =
   return $ monomorphic $
   functionType [ConTy $ tiBuiltin the_con_float] (ConTy $ tiBuiltin the_con_int)
@@ -918,6 +925,9 @@ initializeTIBuiltins = do
               ),
               ("histogram", [| mkHistogramType |]
               , [| pyonBuiltin SystemF.the_histogram |]
+              ),
+              ("safeSubscript", [| mkSafeSubscriptType |]
+              , [| pyonBuiltin SystemF.the_safeSubscript |]
               ),
               ("floor", [| mkFloorType |]
               , [| pyonBuiltin SystemF.the_floor |]

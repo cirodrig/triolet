@@ -287,6 +287,7 @@ ssaExpr expression =
      Tuple pos es      -> Tuple pos <$> traverse ssaExpr es 
      Unary pos op x    -> Unary pos op <$> ssaExpr x
      Binary pos op x y -> Binary pos op <$> ssaExpr x <*> ssaExpr y
+     Subscript pos x y -> Subscript pos <$> ssaExpr x <*> ssaExpr y
      ListComp pos it   -> ListComp pos <$> ssaIterFor it
      Generator pos it  -> Generator pos <$> ssaIterFor it
      Call pos op args  -> Call pos <$> ssaExpr op <*> traverse ssaExpr args

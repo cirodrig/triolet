@@ -231,6 +231,10 @@ doExpr expr =
        l' <- doExpr l
        r' <- doExpr r
        return $ callVariable pos (convertBinaryOperator op) [l', r']
+     Subscript pos base index -> do
+       base' <- doExpr base
+       index' <- doExpr index
+       return $ callVariable pos (tiBuiltin the_safeSubscript) [base', index']
      ListComp pos iter -> do
        iter' <- doIterator iter
        -- Currently we have to explicitly insert __build__ where we want it 
