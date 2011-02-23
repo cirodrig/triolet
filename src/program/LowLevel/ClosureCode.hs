@@ -288,15 +288,15 @@ withLocalFunctions :: [FunDef]          -- ^ Function definitions
                                         -- generator into the program
                    -> CC a
 withLocalFunctions defs scan gen = check_functions $ do
-  -- Create recursive function closures
-  rec { clos <- mkRecClosures defs captureds
+  rec -- Create recursive function closures
+      clos <- mkRecClosures defs captureds
   
-  -- Scan functions
-        ; (unzip -> ~(funs, captureds)) <- localClosures clos scan
+      -- Scan functions
+      (unzip -> ~(funs, captureds)) <- localClosures clos scan
 
   -- Generate closure code
-        ; (defs', gen_code) <- runFreshVarCC $ emitRecClosures clos funs
-        ; writeDefs defs' }
+  (defs', gen_code) <- runFreshVarCC $ emitRecClosures clos funs
+  writeDefs defs'
   
   -- Generate remaining code
   localClosures clos $ gen gen_code
