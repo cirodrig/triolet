@@ -55,6 +55,7 @@ data RnPolicy =
   | RenameLocals      -- ^ Rename everything except global variables
   | RenameParameters  -- ^ Rename function parameters and let-bound variables, 
                       --   but not letrec-bound variables
+  | RenameFunctions   -- ^ Rename function names bound by a 'Def' only
   | RenameNothing     -- ^ Don't rename anything; only apply the given renaming
 
 type Rn = (RnPolicy, Renaming)
@@ -92,6 +93,7 @@ renameParameters rn param_vars =
   of RenameEverything -> rename
      RenameLocals     -> rename
      RenameParameters -> rename
+     RenameFunctions  -> don't
      RenameNothing    -> don't
   where
     rename = renameVariables (rnRenaming rn) param_vars
@@ -103,6 +105,7 @@ renameLetrecFunction rn var =
   of RenameEverything -> rename
      RenameLocals     -> rename
      RenameParameters -> don't
+     RenameFunctions  -> rename
      RenameNothing    -> don't
   where
     don't = return (rnRenaming rn, var)
@@ -114,20 +117,33 @@ renameLetrecFunctions rn vars =
   of RenameEverything -> rename
      RenameLocals     -> rename
      RenameParameters -> don't
+     RenameFunctions  -> rename
      RenameNothing    -> don't
   where
     don't = return (rnRenaming rn, vars)
     rename = renameVariables (rnRenaming rn) vars
-  
-renameGlobalEntities rn vars = 
+
+renameGlobalFunction rn var = 
   case rnPolicy rn
   of RenameEverything -> rename
      RenameLocals     -> don't
      RenameParameters -> don't
+     RenameFunctions  -> rename
      RenameNothing    -> don't
   where
-    don't = return (rnRenaming rn, vars)
-    rename = renameVariables (rnRenaming rn) vars
+    don't = return (rnRenaming rn, var)
+    rename = renameVariable (rnRenaming rn) var
+
+renameGlobalData rn var = 
+  case rnPolicy rn
+  of RenameEverything -> rename
+     RenameLocals     -> don't
+     RenameParameters -> don't
+     RenameFunctions  -> don't
+     RenameNothing    -> don't
+  where
+    don't = return (rnRenaming rn, var)
+    rename = renameVariable (rnRenaming rn) var
 
 rnVar :: Renaming -> Var -> Var
 rnVar rn v = fromMaybe v $ IntMap.lookup (fromIdent $ varID v) rn
@@ -234,11 +250,16 @@ rnTopLevel rn global_defs exports = do
            return (GlobalDataDef (Def new_name dat'))
 
     -- Rename names of global functions and data
-    rename_globals = do
-      (renaming, definienda) <-
-        renameGlobalEntities rn $ map globalDefiniendum global_defs
-      let rn1 = setRenaming renaming rn
-      return (rn1, definienda)
+    rename_globals = go rn id global_defs
+      where
+        go in_rn hd (def : defs) = do
+          (renaming, v') <-
+            case def
+            of GlobalFunDef (Def v _) -> renameGlobalFunction in_rn v
+               GlobalDataDef (Def v _) -> renameGlobalData in_rn v
+          go (setRenaming renaming in_rn) (hd . (v' :)) defs
+
+        go rn hd [] = return (rn, hd [])
 
 -- | Rename variables in a value.  Start with the given renaming.
 renameVal :: RnPolicy -> Renaming -> Val -> FreshVarM Val
