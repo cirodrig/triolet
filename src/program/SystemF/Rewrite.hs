@@ -618,10 +618,21 @@ interpretStream repr expression =
            { sShape = UnboundedShape
            , sType = intType
            , sRepr = repr
-           , sGenerator = \ix ->
-               varAppE (pyonBuiltin the_store) [TypM intType]
-               [varE $ pyonBuiltin the_repr_int, return ix]}
+           , sGenerator = counting_generator}
+       | op_var `isPyonBuiltin` the_rangeIndexed ->
+         let [size_index] = ty_args
+             [size_val] = args
+         in Just $ InterpretedStream
+            { sShape = Array1DShape (TypM size_index) size_val
+            , sType = intType
+            , sRepr = repr
+            , sGenerator = counting_generator}
      _ -> Nothing
+  where
+    -- A generator for the sequence [0, 1, 2, ...]
+    counting_generator ix =
+      varAppE (pyonBuiltin the_store) [TypM intType]
+      [varE $ pyonBuiltin the_repr_int, return ix]
 
 -- | Produce program code of an interpreted stream.  The generated code
 --   will have the specified shape.  If code cannot be generated,
