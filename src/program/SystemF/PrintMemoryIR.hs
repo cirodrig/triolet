@@ -71,9 +71,9 @@ pprExpPrec (ExpM expression) =
            body_doc = pprExpPrec body ?+ outerPrec
        in hang (pat_doc <+> text "=") 4 rhs_doc $$ body_doc `hasPrec` stmtPrec
      LetfunE _ defs body ->
-       let defs_doc = map pprDef $ defGroupMembers defs
+       let defs_doc = pprDefGroup defs
            body_doc = pprExp body
-       in text "letfun" $$ nest 2 (vcat defs_doc) $$ body_doc
+       in text "letfun" <+> defs_doc $$ body_doc
           `hasPrec` stmtPrec
      CaseE _ scr alts ->
        let case_doc = text "case" <+> pprExpPrec scr ? stmtPrec 
@@ -103,10 +103,18 @@ pprFunPrec (FunM fun) =
 
 pprDef (Def v f) = hang (pprVar v) 2 (pprFun f)
 
+pprDefGroup :: DefGroup (Def Mem) -> Doc
+pprDefGroup dg =
+  case dg
+  of NonRec _ -> text "nonrec {" $$ nest 2 members $$ text "}"
+     Rec _ -> text "rec {" $$ nest 2 members $$ text "}"
+  where
+    members = vcat $ map pprDef $ defGroupMembers dg
+
 pprExport (Export _ _ f) =
   text "export" <+> pprFun f
 
 pprModule (Module modname defs exports) =
   text "module" <+> text (showModuleName modname) $$
-  vcat (map pprDef $ concatMap defGroupMembers defs) $$
+  vcat (map pprDefGroup defs) $$
   vcat (map pprExport exports)
