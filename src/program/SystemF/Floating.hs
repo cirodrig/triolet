@@ -317,14 +317,17 @@ freshenContextExp (CaseCtx inf scr alt_con ty_args ty_params params) = do
 freshenContextExp (LetfunCtx inf defs) =
   case defs
   of NonRec (Def v f) -> do
+       -- Don't need to rename inside the definition
        v' <- newClonedVar v
        let new_defs = NonRec (Def v' f)
        return (LetfunCtx inf new_defs, singletonRenaming v v')
      Rec defs -> do
+       -- Rename bodies of all local functions
        let local_vars = [v | Def v _ <- defs]
        new_vars <- mapM newClonedVar local_vars
        let rn = renaming $ zip local_vars new_vars
-           new_defs = map (renameDefM rn) defs
+           new_defs = [Def new_var (rename rn f)
+                      | (new_var, Def _ f) <- zip new_vars defs]
        return (LetfunCtx inf (Rec new_defs), rn)
 
 -- | Get the variables defined by the context
