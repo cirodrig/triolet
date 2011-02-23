@@ -33,22 +33,24 @@ pprValueType :: ValueType -> Doc
 pprValueType (PrimType pt) = pprPrimType pt
 pprValueType (RecordType rt) = pprStaticRecord rt
 
-pprPrimType UnitType = text "unit"
-pprPrimType BoolType = text "bool"
-pprPrimType (IntType sign size) =
-  let sgn = case sign
-            of Signed   -> 'i'
-               Unsigned -> 'u'
-      sz  = case size
-            of S8 -> "8"
-               S16 -> "16"
-               S32 -> "32"
-               S64 -> "64"
-  in text (sgn : sz)
-pprPrimType (FloatType S32) = text "f32"
-pprPrimType (FloatType S64) = text "f64"
-pprPrimType PointerType = text "ptr"
-pprPrimType OwnedType = text "own"
+pprPrimType pt = 
+  case pt
+  of UnitType -> text "unit"
+     BoolType -> text "bool"
+     IntType sign size ->
+       let sgn = case sign
+                 of Signed   -> 'i'
+                    Unsigned -> 'u'
+       in text (sgn : show_size size)
+     FloatType size ->
+       text ('f' : show_size size)
+     PointerType -> text "ptr"
+     OwnedType -> text "own"
+  where
+    show_size S8 = "8"
+    show_size S16 = "16"
+    show_size S32 = "32"
+    show_size S64 = "64"
 
 pprStaticRecord rt = pprRecordType (text . show) rt
 pprDynamicRecord rt = pprRecordType pprVal rt
