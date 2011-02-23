@@ -113,8 +113,14 @@ withDefValue (Def v f) m =
   let fun_info = funInfo $ fromFunM f
   in withKnownValue v (ComplexValue (Just v) Nothing $ FunValue fun_info f) m
 
+-- | Add a function definition to the environment, but don't inline it
+withUninlinedDefValue :: Def Mem -> LR a -> LR a
+withUninlinedDefValue (Def v f) m =
+  withMaybeValue v Nothing m
+
 withDefValues :: DefGroup (Def Mem) -> LR a -> LR a
-withDefValues defs m = foldr withDefValue m $ defGroupMembers defs
+withDefValues (NonRec def) m = withDefValue def m
+withDefValues (Rec _)      m = m
 
 -- | Add a variable's type to the environment 
 assume :: Var -> ReturnType -> LR a -> LR a
