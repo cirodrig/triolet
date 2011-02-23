@@ -40,6 +40,7 @@ import qualified LowLevel.RecordFlattening as LowLevel
 import qualified LowLevel.CSE as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.DeadCode as LowLevel
+import qualified LowLevel.LambdaConvert as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
@@ -254,6 +255,8 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   writeFileAsByteString i_file $ encode ll_interface
 
   -- Closure conversion
+  ll_mod <- LowLevel.lambdaConvert ll_mod -- Remove lambda values
+  -- TODO: minimize recursion groups produced by 'lambdaConvert'
   ll_mod <- LowLevel.closureConvert ll_mod
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
   

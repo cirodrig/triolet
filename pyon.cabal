@@ -152,6 +152,7 @@ Executable pyon
     LowLevel.GenerateCHeader
     LowLevel.GenerateCUtils
     LowLevel.Intrinsics
+    LowLevel.LambdaConvert
     LowLevel.Syntax
     LowLevel.Print
     LowLevel.Record
