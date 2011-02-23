@@ -410,10 +410,6 @@ specializeLambda fun args
 
 type GenM a = Gen FreshVarM a
 
-instance Applicative FreshVarM where
-  pure = return
-  (<*>) = ap
-
 instance (Monad m, Applicative m) => Applicative (Gen m) where
   pure x = lift (pure x)
   (<*>) = ap

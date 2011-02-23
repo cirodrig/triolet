@@ -4,6 +4,8 @@ module LowLevel.FreshVar
        (FreshVarM, runFreshVarM)
 where
 
+import Control.Applicative
+import Control.Monad
 import Control.Monad.ST
 
 import Common.Supply
@@ -18,6 +20,10 @@ runFreshVarM id_supply (FreshVarM f) = stToIO (f id_supply)
 
 instance Functor FreshVarM where
   fmap f (FreshVarM g) = FreshVarM (\supply -> fmap f (g supply))
+
+instance Applicative FreshVarM where 
+  pure = return
+  (<*>) = ap
 
 instance Monad FreshVarM where
   return x = FreshVarM (\_ -> return x)
