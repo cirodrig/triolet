@@ -55,8 +55,7 @@ module LowLevel.ClosureCode
         
         -- * Code generation
         genVarCall,
-        genIndirectCall,
-        emitLambdaClosure
+        genIndirectCall
        )
 where
 
@@ -397,7 +396,6 @@ data Closure =
   Closure
   { -- | The variable that will point to this closure.  If the function 
     --   originally was bound to a variable, this is the same variable.
-    --   If it was a lambda function, this is a new anonymous variable.
     _cVariable :: !Var
     -- | True if the closure is for a global function.  If True, the closure
     -- is not recursive, has no captured variables, and will be generated as 
@@ -926,48 +924,6 @@ emitRecClosures grp directs = do
   let defs = mkDefs [free_def] [] ++ member_defs
   return (defs, generateRecursiveClosures grp)
 
--- | Generate the code and data of a lambda function
-emitLambdaClosure :: FunctionType -> Bool -> Fun -> [Var] -> CC (GenM Val)
-emitLambdaClosure lambda_type vectorize direct captured_vars = do
-  (defs, gen_closure) <-
-    runFreshVarCC $
-    emitLambdaClosure1 lambda_type vectorize direct captured_vars
-  writeDefs defs
-  return gen_closure
-
-emitLambdaClosure1 :: FunctionType -> Bool -> Fun -> [Var]
-                   -> FreshVarM (Defs, GenM Val)
-emitLambdaClosure1 lambda_type vectorize direct captured_vars = do
-  fun_var <- newAnonymousVar (PrimType OwnedType)
-
-  -- Use the default deallocation function if there are no captured variables
-  want_dealloc <-
-    if null captured_vars
-    then return DefaultDeallocator
-    else do v <- newAnonymousVar (PrimType PointerType)
-            return $ CustomDeallocator v
-
-  entry_points <- mkEntryPoints want_dealloc vectorize lambda_type Nothing
-  let clo = mkNonrecClosure fun_var entry_points captured_vars
-      
-  -- Generate code
-  info_def <- emitInfoTable clo
-  let direct_def = Def (closureDirectEntry clo) direct
-  vector_def <- if vectorize
-                then undefined
-                else return Nothing
-  exact_def <- emitExactEntry clo
-  inexact_def <- emitInexactEntry clo
-  free_defs <- generateClosureFree clo
-  
-  -- Create the function variable, then pass it as a parameter to something 
-  let gen_closure = do generateLocalClosure clo
-                       return $ VarV fun_var
-  
-      defs = free_defs ++
-             mkDefs (maybeToList vector_def ++ [direct_def, exact_def, inexact_def]) [info_def]
-  return (defs, gen_closure)
-
 -------------------------------------------------------------------------------
 
 -- | Generate a call to a variable.  If the variable has a known direct entry
@@ -975,29 +931,28 @@ emitLambdaClosure1 lambda_type vectorize direct captured_vars = do
 -- Otherwise, an indirect call is generated.
 genVarCall :: [PrimType]        -- ^ Return types
            -> Var               -- ^ Function that is called
-           -> [GenM Val]        -- ^ Argument generators
+           -> [Val]             -- ^ Arguments
            -> CC (GenM Atom)
-genVarCall return_types fun args = lookupClosure fun >>= select
+genVarCall return_types fun args = do
+  mention fun
+  lookupClosure fun >>= select
   where
-    use_fun = mention fun >> return (return (VarV fun))
+    op = VarV fun
 
     -- Unknown function
     select Nothing = do
-      op <- use_fun
       genIndirectCall return_types op args
     
     -- Function converted to local procedure.
     -- All calls are direct primitive calls and no variables are captured.
     select (Just (Left v)) =
-      return $ do args' <- sequence args
-                  return $ primCallA (VarV v) args'
+      return $ return $ primCallA (VarV v) args
 
     -- Function converted to closure-based function.  Check the arity to
     -- decide what kind of call to generate.
     select (Just (Right ep)) =
       case length args `compare` arity
       of LT -> do               -- Undersaturated
-           op <- use_fun
            genIndirectCall return_types op args
          EQ -> do               -- Saturated
            directCall captured_vars entry args
@@ -1006,37 +961,34 @@ genVarCall return_types fun args = lookupClosure fun >>= select
            -- indirect call
            let (direct_args, indir_args) = splitAt arity args
            direct_call <- directCall captured_vars entry direct_args
-           let direct_val = emitAtom1 (PrimType OwnedType) =<< direct_call
-           genIndirectCall return_types direct_val indir_args
+           direct_op_var <- newAnonymousVar (PrimType OwnedType)
+           indir_call <- genIndirectCall return_types (VarV direct_op_var) indir_args
+
+           return $ do bindAtom1 direct_op_var =<< direct_call
+                       indir_call
       where
         arity = closureArity ep
         entry = closureDirectEntry ep
         captured_vars = closureCapturedVariables ep
 
 -- | Produce a direct call to the given primitive function.
-directCall :: [Var] -> Var -> [GenM Val] -> CC (GenM Atom)
+directCall :: [Var] -> Var -> [Val] -> CC (GenM Atom)
 directCall captured_vars v args = do
   mentions captured_vars
   return $ do
-    args' <- sequence args
     let captured_args = map VarV captured_vars
-    return $ primCallA (VarV v) (captured_args ++ args')
+    return $ primCallA (VarV v) (captured_args ++ args)
 
 -- | Produce an indirect call of the given operator
 genIndirectCall :: [PrimType]   -- ^ Return types
-                -> GenM Val     -- ^ Called function
-                -> [GenM Val]   -- ^ Arguments
+                -> Val          -- ^ Called function
+                -> [Val]        -- ^ Arguments
                 -> CC (GenM Atom)
 
 -- No arguments to closure function: Don't call
-genIndirectCall return_types mk_op [] = return $ do
-  op <- mk_op
-  return $ ValA [op]
+genIndirectCall return_types op [] = return $ return $ ValA [op]
 
-genIndirectCall return_types mk_op mk_args = return $ do
-  op <- mk_op
-  args <- sequence mk_args
-
+genIndirectCall return_types op args = return $ do
   -- Get the function info table and captured variables
   inf_ptr <- loadField (objectHeaderRecord !!: 1) op
 

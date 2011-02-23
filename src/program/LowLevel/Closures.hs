@@ -8,7 +8,7 @@ Data structures should be flattened before running closure conversion.
 CSE and DCE must be performed (at least once) before running closure
 conversion, to fix up frame pointer references.
 
-'RecV' values are not allowed.  'PackA' and 'UnpackA' atoms are not allowed.
+'PackA' atoms are not allowed.
 Frame pointers may only be accessed in top-level functions.
 -}
 
@@ -42,18 +42,17 @@ import Globals
 -------------------------------------------------------------------------------
 -- Closure conversion and hoisting
 
--- | Perform closure conversion on a value.
--- 
-ccValue :: Val -> CC (GenM Val)
+-- | Identify mentioned variables, which may need to be captured during 
+--   closure conversion.
+ccValue :: Val -> CC ()
 ccValue value =
   case value
-  of VarV v  -> do mention v
-                   return (return value)
-     LamV f  -> ccLambdaFunction f
-     RecV {} -> internalError "ccValue"
-     _       -> return (return value)
+  of VarV v    -> mention v
+     LitV _    -> return ()
+     LamV f    -> internalError "ccValue"
+     RecV _ vs -> mapM_ ccValue vs
 
-ccValues xs = mapM ccValue xs
+ccValues xs = mapM_ ccValue xs
 
 -- | Perform closure conversion on an atom.
 ccAtom :: [PrimType]         -- ^ atom's return types
@@ -62,32 +61,32 @@ ccAtom :: [PrimType]         -- ^ atom's return types
 ccAtom returns atom =
   case atom
   of ValA vs -> do
-       vs' <- ccValues vs
-       return $ ValA `liftM` sequence vs'
+       ccValues vs
+       return (return atom)
 
      -- Generate a direct call if possible
-     CallA ClosureCall (VarV v) vs -> 
-       genVarCall returns v =<< ccValues vs
+     CallA ClosureCall (VarV v) vs -> do
+       ccValues vs
+       genVarCall returns v vs
 
      -- General case
      CallA conv v vs -> do
-       v' <- ccValue v
-       vs' <- ccValues vs
+       ccValue v
+       ccValues vs
        case conv of
-         ClosureCall -> genIndirectCall returns v' vs'
+         ClosureCall -> genIndirectCall returns v vs
          -- Primitive calls are always direct
-         PrimCall    -> return (liftM2 primCallA v' (sequence vs'))
+         PrimCall    -> return (return $ primCallA v vs)
 
      PrimA prim vs -> do
-       vs' <- ccValues vs
-       return $ PrimA prim `liftM` sequence vs'
+       ccValues vs
+       return (return atom)
 
-     UnpackA record (VarV v) -> do
-       mention v
-       return (return $ UnpackA record (VarV v))
+     UnpackA record val -> do
+       ccValue val
+       return (return atom)
 
      PackA {} -> internalError "ccAtom: unexpected 'pack'"
-     UnpackA {} -> internalError "ccAtom: unexpected 'unpack'"
 
 ccStm :: [PrimType] -> Stm -> CC (GenM Stm)
 ccStm returns stm =
@@ -103,9 +102,9 @@ ccStm returns stm =
          body' <- ccStm returns body
          return (mk_defs >> body')
      SwitchE val alts -> do
-       val' <- ccValue val
+       ccValue val
        alts' <- mapM cc_alt alts
-       return (rebuild_switch val' alts')
+       return (rebuild_switch val alts')
      ReturnE atom -> do
        mk_atom <- ccAtom returns atom
        return (fmap ReturnE mk_atom)
@@ -114,20 +113,11 @@ ccStm returns stm =
       stm' <- ccStm returns stm
       return (lit, stm')
 
-    rebuild_switch mk_val mk_alts = do
-      val' <- mk_val
+    rebuild_switch val mk_alts = do
       alts' <- forM mk_alts $ \(lit, mk_stm) -> do
         stm <- lift (execBuild (map PrimType returns) mk_stm)
         return (lit, stm)
-      return (SwitchE val' alts')
-
--- | Perform closure conversion on a lambda function.  Return the
--- closure-converted function.  New top-level functions and data are produced
--- as a side effect.
-ccLambdaFunction :: Fun -> CC (GenM Val)
-ccLambdaFunction fun = do
-  (direct_fun, captured_vars) <- ccHoistedFun fun
-  emitLambdaClosure (funType fun) False direct_fun captured_vars
+      return (SwitchE val alts')
 
 -- | Perform closure conversion on the body of a function.
 ccFunBody :: Fun -> CC (GenM Stm)
@@ -262,7 +252,7 @@ scanDataValue :: Val -> Val
 scanDataValue value = 
   case value
   of LamV {} -> internalError "scanDataValue"
-     RecV {} -> internalError "scanDataValue"
+     RecV r vs -> RecV r $ map scanDataValue vs
      _       -> value
 
 -- | Perform closure conversion on a data definition.
@@ -443,7 +433,6 @@ scanTopLevel fun_defs data_defs =
 closureConvert :: Module -> IO Module
 closureConvert mod =
   withTheLLVarIdentSupply $ \var_ids -> do
-
     -- Perform closure conversion
     let (fun_defs, data_defs) = partitionGlobalDefs $ moduleGlobals mod
         imports = moduleImports mod

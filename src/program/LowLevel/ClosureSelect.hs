@@ -24,11 +24,10 @@ import Globals
 -------------------------------------------------------------------------------
 -- Closure constraints
 
--- | An implication constraint used to identify functions that are dead and 
+-- | An implication constraint used to identify
 --   functions that should be hoisted.  Variables that appear in implication
 --   constraints are function variables bound in @Letrec@ statements.  If a
---   function is 'Implied', it means that some property (is-dead or
---   should-hoist) is true of that function.
+--   function is 'Implied', it means that the function should be hoisted.
 data Impl = Implied Var         -- ^ The variable is true
           | [Var] :=> Var       -- ^ True if any prerequisite is true
 
@@ -70,9 +69,7 @@ type Constraints = [Impl]
 --   definitions that enclose the use but not the definition.
 --   If any of them are marked for hoisting, then the function must be
 --   hoisted.
-data Context = Context [Var] ContextBase
-
-data ContextBase = TopContext | LamContext
+newtype Context = Context [Var]
 
 -- | Information about the definitions of functions that are candidates for  
 --   hoisting.
@@ -81,33 +78,25 @@ type FunMap = Map.Map Var (Int, Context)
 -- | A scan for computing hoisting.
 type Scan = FunMap -> Constraints
 
-enterLambda :: Scan -> Scan
-enterLambda f = \m -> f (Map.map use_lam_context m)
-  where
-    use_lam_context (arity, _) = (arity, Context [] LamContext)
-
 enterFun :: Var -> Scan -> Scan
 enterFun defining_fun f = \m -> f (Map.map add_to_context m)
   where
-    add_to_context (arity, Context ctx base) =
-      (arity, Context (defining_fun:ctx) base)
+    add_to_context (arity, Context ctx) =
+      (arity, Context (defining_fun:ctx))
 
 -- | Track some more function variables
 enterLetrec :: [(Var, Int)] -> Scan -> Scan
 enterLetrec functions f = \m -> f (insert_functions m)
   where
-    insert_functions m =
-      foldr (uncurry Map.insert) m [(v, (a, Context [] TopContext))
-                                   | (v, a) <- functions]
+    insert_functions m = foldr insert_function m functions 
+      where
+        insert_function (v, a) m = Map.insert v (a, Context []) m
 
 -- | A function was tail-called with the specified number of arguments
 tailCalled :: Var -> Int -> Scan
 tailCalled v num_args arity_map
-  | Just (arity, Context parents base) <- arity_entry,
-    arity <= num_args =
-      case base
-      of TopContext -> [parents :=> v]
-         LamContext -> [Implied v]
+  | Just (arity, Context parents) <- arity_entry,
+    arity <= num_args = [parents :=> v]
          
   | Just _ <- arity_entry =
       [Implied v]               -- Undersaturated application
@@ -128,7 +117,7 @@ scanValue val =
   case val
   of VarV v -> referenced v
      LitV _ -> mempty
-     LamV f -> enterLambda $ scanStm $ funBody f
+     LamV f -> internalError "scanValue"
      RecV {} -> internalError "scanValue"
 
 scanValues vals = mconcat (map scanValue vals)
@@ -162,7 +151,7 @@ scanStm statement =
      ReturnE atom -> scanAtom True atom
   where
     get_arity (Def v f) = (v, length $ funParams f)
-    
+
 scanDef :: FunDef -> Scan
 scanDef (Def v f) = enterFun v $ scanStm $ funBody f
 
