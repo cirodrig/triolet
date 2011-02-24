@@ -594,7 +594,7 @@ genStatement returns stm =
        (code, fallthrough) <- genStatement returns stm'
        return (CCode block_items : code, fallthrough)
      LetrecE funs stm' ->
-       genLocalFunctions returns funs $ \localfs -> do
+       genLocalFunctions returns (groupMembers funs) $ \localfs -> do
          label <- newAnonymousLabel
          (code, fallthrough) <- genStatement returns stm'
          return ([Group $ LocalFunctionGroup label code localfs fallthrough],
@@ -909,8 +909,9 @@ generateCFile (Module { moduleImports = imports
                   map CFDefExt fun_defs
   return $ makeCFileText top_level
   where
-    (funs, datas) = partitionGlobalDefs defs
-    defined_vars = Set.fromList $ map globalDefiniendum defs
+    flattened_defs = concatMap groupMembers defs
+    (funs, datas) = partitionGlobalDefs flattened_defs
+    defined_vars = Set.fromList $ map globalDefiniendum flattened_defs
     global_vars = defined_vars `Set.union` Set.fromList (map importVar imports)
     exported_vars = Set.fromList $ map fst exports
       

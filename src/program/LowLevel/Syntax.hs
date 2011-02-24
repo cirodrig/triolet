@@ -2,8 +2,12 @@
 {-# LANGUAGE FlexibleContexts, DeriveDataTypeable #-}
 module LowLevel.Syntax where
 
-import Control.Monad
+import Prelude hiding(mapM)
+import Control.Applicative
+import Control.Monad hiding(mapM)
 import Data.Function
+import Data.Foldable(Foldable(..))
+import Data.Traversable(Traversable(..))
 import Data.Maybe
 import Data.Monoid
 import Data.Typeable
@@ -327,7 +331,7 @@ data Stm =
     -- | Bind an atom's result to temporary variables
     LetE [ParamVar] Atom Stm
     -- | Define local functions
-  | LetrecE [FunDef] Stm
+  | LetrecE !(Group FunDef) Stm
     -- | Conditional branch.  Inspect the value, then execute an alternative.
   | SwitchE Val [Alt]
     -- | Produce a value
@@ -402,6 +406,26 @@ globalDefiniendum :: GlobalDef -> Var
 globalDefiniendum (GlobalFunDef d) = definiendum d
 globalDefiniendum (GlobalDataDef d) = definiendum d
 
+data Group a = NonRec a | Rec [a]
+
+instance Functor Group where
+  fmap f (NonRec x) = NonRec (f x)
+  fmap f (Rec xs) = Rec (fmap f xs)
+
+instance Foldable Group where
+  foldMap f (NonRec x) = f x
+  foldMap f (Rec xs) = mconcat (map f xs)
+
+instance Traversable Group where
+  traverse f (NonRec x) = NonRec <$> f x
+  traverse f (Rec xs) = Rec <$> traverse f xs
+  mapM f (NonRec x) = NonRec `liftM` f x
+  mapM f (Rec xs) = Rec `liftM` mapM f xs
+
+groupMembers :: Group a -> [a]
+groupMembers (NonRec x) = [x]
+groupMembers (Rec xs)   = xs
+
 partitionGlobalDefs :: [GlobalDef] -> ([FunDef], [DataDef])
 partitionGlobalDefs ds = part id id ds
   where
@@ -460,7 +484,7 @@ data Module =
   { moduleModuleName :: !ModuleName
   , moduleNameSupply :: !(Supply LocalID)
   , moduleImports :: [Import]    -- ^ Imported, externally defined variables
-  , moduleGlobals :: [GlobalDef] -- ^ Global definitions
+  , moduleGlobals :: [Group GlobalDef] -- ^ Global definitions
   , moduleExports :: [(Var, ExportSig)] -- ^ Exported functions and their
                                         --   externally visible types
   }

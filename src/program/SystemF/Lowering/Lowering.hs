@@ -792,19 +792,19 @@ lowerFun (FunTM (RTypeAnn _ fun)) =
 
 -- | Lower a definition group.
 lowerDefGroup :: DefGroup (Def (Typed Mem))
-              -> ([LL.FunDef] -> Lower a)
+              -> (LL.Group LL.FunDef -> Lower a)
               -> Lower a
 lowerDefGroup defgroup k = 
   case defgroup
   of NonRec (Def v f) -> do
        -- Lower the function before adding the variable to the environment
        f' <- lowerFun f
-       assume_variable (Def v f) $ \v' -> k [LL.Def v' f']
+       assume_variable (Def v f) $ \v' -> k (LL.NonRec (LL.Def v' f'))
      Rec defs ->
        -- Add all variables to the environment, then lower
        assume_variables defs $ \vs' -> do
          fs' <- mapM lowerFun [f | Def _ f <- defs]
-         k $ zipWith LL.Def vs' fs'
+         k $ LL.Rec $ zipWith LL.Def vs' fs'
   where
     assume_variables defs k = withMany assume_variable defs k
 
@@ -812,7 +812,7 @@ lowerDefGroup defgroup k =
       assumeVar v return_type k
 
 lowerDefGroupG :: DefGroup (Def (Typed Mem))
-               -> ([LL.FunDef] -> GenLower a)
+               -> (LL.Group LL.FunDef -> GenLower a)
                -> GenLower a
 lowerDefGroupG defs = liftT1 (lowerDefGroup defs)
 
@@ -839,7 +839,7 @@ lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
 lowerModuleCode :: ModuleName 
                 -> [DefGroup (Def (Typed Mem))]
                 -> [Export (Typed Mem)]
-                -> Lower ([[LL.FunDef]], [(LL.Var, ExportSig)])
+                -> Lower ([LL.Group LL.FunDef], [(LL.Var, ExportSig)])
 lowerModuleCode module_name defss exports = lower_definitions defss
   where
     lower_definitions (defs:defss) =
@@ -850,7 +850,7 @@ lowerModuleCode module_name defss exports = lower_definitions defss
     lower_definitions [] = do
       ll_exports <- mapM (lowerExport module_name) exports
       let (functions, signatures) = unzip ll_exports
-      return ([functions], signatures)
+      return ([LL.Rec functions], signatures)
 
 lowerModule :: Module (Typed Mem) -> IO LL.Module
 lowerModule (Module mod_name globals exports) = do
@@ -867,7 +867,7 @@ lowerModule (Module mod_name globals exports) = do
   return $ LL.Module { LL.moduleModuleName = mod_name
                      , LL.moduleNameSupply = ll_name_supply
                      , LL.moduleImports = LL.allBuiltinImports
-                     , LL.moduleGlobals = map LL.GlobalFunDef $
-                                          concat ll_functions
+                     , LL.moduleGlobals = map (fmap LL.GlobalFunDef) 
+                                          ll_functions
                      , LL.moduleExports = ll_export_sigs}
 

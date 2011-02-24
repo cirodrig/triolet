@@ -175,13 +175,19 @@ rnStm rn statement =
        (renaming, params') <- renameParameters rn params
        stm' <- rnStm (setRenaming renaming rn) stm
        return $ LetE params' rhs' stm'
-     LetrecE defs stm -> do
+     LetrecE (NonRec def) stm -> do
+       definiens <- rnFun rn $ definiens def
+       (renaming, definiendum) <-
+         renameLetrecFunction rn $ definiendum def
+       stm' <- rnStm (setRenaming renaming rn) stm
+       return $ LetrecE (NonRec (Def definiendum definiens)) stm'
+     LetrecE (Rec defs) stm -> do
        (renaming, definienda) <-
          renameLetrecFunctions rn $ map definiendum defs
        definientia <-
          mapM (rnFun (setRenaming renaming rn) . definiens) defs
        stm' <- rnStm (setRenaming renaming rn) stm
-       return $ LetrecE (zipWith Def definienda definientia) stm'
+       return $ LetrecE (Rec $ zipWith Def definienda definientia) stm'
      SwitchE scr alts -> do
        scr' <- rnVal rn scr
        alts' <- mapM rename_alt alts
@@ -232,34 +238,60 @@ rnImport rn impent =
 rnExport :: Renaming -> (Var, ExportSig) -> (Var, ExportSig)
 rnExport rn (v, sig) = (rnVar rn v, sig)
 
-rnTopLevel :: Rn -> [GlobalDef] -> [(Var, ExportSig)]
-           -> FreshVarM (Renaming, [GlobalDef], [(Var, ExportSig)])
+rnTopLevel :: Rn -> [Group GlobalDef] -> [(Var, ExportSig)]
+           -> FreshVarM (Renaming, [Group GlobalDef], [(Var, ExportSig)])
 rnTopLevel rn global_defs exports = do
-  (rn', definienda) <- rename_globals
-  global_defs' <- zipWithM (rename rn') definienda global_defs
+  -- Rename the defined variables
+  (rn', global_defs') <- rename_globals1 rn global_defs
   let exports' = map (rnExport (rnRenaming rn')) exports
   return (rnRenaming rn', global_defs', exports')
   where
-    rename rn2 new_name global_def = 
+    -- Rename names of global functions and data
+    rename_globals1 :: Rn
+                    -> [Group GlobalDef]
+                    -> FreshVarM (Rn, [Group GlobalDef])
+    rename_globals1 rn (group : groups) = do
+      (rn', group') <- rename_global_group rn id group
+      (rn'', groups') <- rename_globals1 rn' groups
+      return (rn'', group' : groups')
+    
+    rename_globals1 rn [] = return (rn, [])
+
+    -- Rename one definition group
+    rename_global_group in_rn hd (NonRec def) = do
+      (rn, [v']) <- rename_global_defs in_rn [def]
+      -- The definition cannot refer to itself, so use the original renaming.
+      def' <- rename in_rn v' def
+      return (rn, NonRec def')
+ 
+    rename_global_group in_rn hd (Rec defs) = do
+      -- Rename bound variables
+      (rn, vs) <- rename_global_defs in_rn defs
+      -- Rename definitions, which may refer to the bound variables
+      defs' <- zipWithM (rename rn) vs defs
+      return (rn, Rec defs')
+    
+    -- Rename the variables that are defined by some global definitions
+    rename_global_defs in_rn (def : defs) = do
+      (renaming, v) <-
+        case def
+        of GlobalFunDef (Def v _) -> renameGlobalFunction in_rn v
+           GlobalDataDef (Def v _) -> renameGlobalData in_rn v
+      (renaming', vs) <- rename_global_defs (setRenaming renaming in_rn) defs
+      return (renaming', v : vs)
+      
+    rename_global_defs rn [] = return (rn, [])
+
+    -- Rename a global definition.
+    rename in_rn new_name global_def =
       case global_def
       of GlobalFunDef (Def _ fun) -> do
-           fun' <- rnFun rn2 fun
+           fun' <- rnFun in_rn fun
            return (GlobalFunDef (Def new_name fun'))
          GlobalDataDef (Def _ dat) -> do
-           dat' <- rnStaticData rn2 dat
+           dat' <- rnStaticData in_rn dat
            return (GlobalDataDef (Def new_name dat'))
 
-    -- Rename names of global functions and data
-    rename_globals = go rn id global_defs
-      where
-        go in_rn hd (def : defs) = do
-          (renaming, v') <-
-            case def
-            of GlobalFunDef (Def v _) -> renameGlobalFunction in_rn v
-               GlobalDataDef (Def v _) -> renameGlobalData in_rn v
-          go (setRenaming renaming in_rn) (hd . (v' :)) defs
-
-        go rn hd [] = return (rn, hd [])
 
 -- | Rename variables in a value.  Start with the given renaming.
 renameVal :: RnPolicy -> Renaming -> Val -> FreshVarM Val

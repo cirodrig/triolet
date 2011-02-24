@@ -46,63 +46,6 @@ inlStatus message k =
   else k
 
 -------------------------------------------------------------------------------
--- Topological sorting
-
--- | Topologically sort a group of function definitions.  If there are SCCs,
---   pick an arbitrary order for the functions in the SCCs.
---
--- This way of ordering function definitions is probably more
--- complicated than necessary.
-topSortDefGroup :: [FunDef] -> [FunDef]
-topSortDefGroup defs =
-  let nodes = map definiendum defs
-      node_map = Map.fromList $ zip nodes [0..]
-      edges = concatMap (findReferences (Set.fromList $ map definiendum defs)) defs
-      
-      gr = mkUGraph
-           [0 .. length nodes - 1]
-           [(node_map Map.! s, node_map Map.! d) | (s, d) <- edges]
-      gr' = breakReferenceLoops gr
-  in map (defs !!) $ concat $ reverse $ scc gr'
-
-breakReferenceLoops :: Gr () () -> Gr () ()
-breakReferenceLoops gr =
-  case find ((> 1) . length) $ scc gr
-  of Nothing -> gr
-     Just (n:_) ->
-       case match n gr
-       of (Just (_, n, (), out_edges), gr') ->
-            breakReferenceLoops (([], n, (), out_edges) & gr')
-
-findReferences :: Set.Set Var -> FunDef -> [(Var, Var)]
-findReferences referents (Def fname fun) = [(fname, v) | v <- find_fun fun]
-  where
-    find_fun f = find_stm $ funBody f
-    find_stm statement =
-      case statement
-      of LetE _ rhs body -> find_atom rhs ++ find_stm body
-         LetrecE defs body -> concatMap (find_fun . definiens) defs ++
-                              find_stm body
-         SwitchE s alts -> concatMap (find_stm . snd) alts ++ find_val s
-         ReturnE a -> find_atom a
-
-    find_atom atom =
-      case atom
-      of ValA vs -> concatMap find_val vs
-         CallA _ v vs -> concatMap find_val (v:vs)
-         PrimA _ vs -> concatMap find_val vs
-         PackA _ vs -> concatMap find_val vs
-         UnpackA _ v -> find_val v
-
-    find_val value =
-      case value
-      of VarV v | v `Set.member` referents -> [v]
-                | otherwise -> []
-         RecV _ vs -> concatMap find_val vs
-         LitV _ -> []
-         LamV f -> find_fun f
-
--------------------------------------------------------------------------------
 -- Finding function endpoints 
 
 {- $functionendpoints
@@ -222,19 +165,19 @@ tailCallScanFun f = tailCallScanStm (funBody f)
 
 tailCallScanDefs defs scan = with_definitions (scan `mappend` scan_definitions)
   where
-    with_definitions k = foldr with_definition k defs
+    with_definitions k = foldr with_definition k (groupMembers defs)
     with_definition def k =
       withDefinition (definiendum def) (length $ funParams $ definiens def) k
     
     scan_definitions =
       mconcat [setCallingContext (Just fname) $ tailCallScanFun fun
-              | Def fname fun <- defs]
+              | Def fname fun <- groupMembers defs]
 
 -- | Scan a top-level function.  Indicate that the function is used outside of
 --   the scanned code.
 tailCallScanTopLevelFunction :: FunDef -> TailCallScan
 tailCallScanTopLevelFunction def =
-  tailCallScanDefs [def] (use $ definiendum def)
+  tailCallScanDefs (Rec [def]) (use $ definiendum def)
 
 -- | Create the tail-call graph of a top-level function.
 -- Return the set of root nodes and the graph.
@@ -535,7 +478,7 @@ inlineLambda cc fun args retvars mk_cont =
        of [retvar]
             | cc == ClosureCall && varType retvar == PrimType OwnedType -> do
                 specialized_fun <- lift $ specializeLambda fun args 
-                lift $ emitLetrec [Def retvar specialized_fun]
+                lift $ emitLetrec (NonRec (Def retvar specialized_fun))
                 mk_cont
           _ ->
             internalError "inlineLambda: Malformed function call"
@@ -640,23 +583,15 @@ inlFun f = do
     rt = funReturnTypes f
 
 -- TODO: Inlining in definition groups; find SCCs and choose loop breakers
-inlDefGroupF defs m =
-  foldr inline_def (fmap ((,) []) m) $ topSortDefGroup defs 
-  where
-    inline_def def m = do
-      def' <- inlDef def
-      (defs', x) <- withDefF def' m
-      return (def' : defs', x)
+inlDefGroupF defs m = do
+  defs' <- traverse inlDef defs
+  x <- withDefsF (groupMembers defs') m
+  return (defs', x)
 
-inlDefGroupG defs m = inline_defs id $ topSortDefGroup defs
-  where
-    inline_defs defs' (d:ds) = do
-      def' <- embedInlF $ inlDef d
-      withDefG def' $ inline_defs (defs' . (def':)) ds
-    
-    inline_defs defs' [] = do
-      lift $ emitLetrec (defs' [])
-      m
+inlDefGroupG defs m = do 
+  defs' <- embedInlF $ traverse inlDef defs
+  lift $ emitLetrec defs'
+  withDefsG (groupMembers defs') m
 
 inlDef (Def v f) = Def v <$> inlFun f
 
@@ -684,21 +619,35 @@ withDef t def@(Def v f) m
     add_inline_spec new_inline_spec inline_specs =
       IntMap.insert (fromIdent $ varID v) new_inline_spec inline_specs
 
+inlTopLevelDef (GlobalFunDef d) = GlobalFunDef <$> inlDef d
+
+-- Do not inline into a data def
+inlTopLevelDef (GlobalDataDef d) = return $ GlobalDataDef d
+
+inlTopLevelDefGroup defs m = do
+  defs' <- traverse inlTopLevelDef defs
+  x <- withDefsF (fst $ partitionGlobalDefs $ groupMembers defs') m
+  return (defs', x)
+
+inlGlobals :: [Group GlobalDef] -> InlF [Group GlobalDef]
+inlGlobals (defs:defss) = do
+  liftM (uncurry (:)) $ inlTopLevelDefGroup defs $ inlGlobals defss
+
+inlGlobals [] = return []
+
 -------------------------------------------------------------------------------
 
 inlineModule :: Module -> IO Module
 inlineModule mod =
   withTheLLVarIdentSupply $ \var_ids -> do
     -- Inline functions
-    let (fdefs, ddefs) = partitionGlobalDefs $ moduleGlobals mod
-    (fdefs', ()) <- inline_defs var_ids fdefs
-    let gdefs' = map GlobalFunDef fdefs' ++ map GlobalDataDef ddefs
-        inlined_mod = mod {moduleGlobals = gdefs'}
+    globals <- inline_defs var_ids $ moduleGlobals mod
+    let inlined_mod = mod {moduleGlobals = globals}
 
     -- Rename so that all inlined variables are unique
     runFreshVarM var_ids $ renameModule RenameLocals emptyRenaming inlined_mod
   where
-    inline_defs var_ids fdefs =
+    inline_defs var_ids globals =
       runFreshVarM var_ids $ do
         import_map <- makeImportsInlinable (moduleImports mod)
-        runReaderT (inlDefGroupF fdefs $ return ()) import_map
+        runReaderT (inlGlobals globals) import_map

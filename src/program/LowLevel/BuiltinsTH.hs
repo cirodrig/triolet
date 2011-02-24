@@ -48,7 +48,7 @@ instance Lift (Record Int) where
                           | f <- recordFields rec]
                  sz = sizeOf rec
                  al = alignOf rec
-             in [| Rec [mkField o m t | (o, m, t) <- fields] sz al |]
+             in [| Record [mkField o m t | (o, m, t) <- fields] sz al |]
 
 instance Lift ValueType where
   lift (PrimType pt) = [| PrimType pt |]

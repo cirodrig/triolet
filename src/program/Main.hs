@@ -256,7 +256,7 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
 
   -- Closure conversion
   ll_mod <- LowLevel.lambdaConvert ll_mod -- Remove lambda values
-  -- TODO: minimize recursion groups produced by 'lambdaConvert'
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod -- Minimize recursion groups
   ll_mod <- LowLevel.closureConvert ll_mod
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
   

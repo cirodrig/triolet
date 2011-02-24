@@ -144,8 +144,8 @@ scanStm statement =
   of LetE params rhs body ->
        scanAtom False rhs `mappend` scanStm body
      LetrecE defs stm ->
-       enterLetrec (map get_arity defs) $
-       mconcat (map scanDef defs) `mappend` scanStm stm
+       enterLetrec (map get_arity $ groupMembers defs) $
+       mconcat (map scanDef $ groupMembers defs) `mappend` scanStm stm
      SwitchE cond alts ->
        scanValue cond `mappend` mconcat [scanStm s | (_, s) <- alts] 
      ReturnE atom -> scanAtom True atom

@@ -288,10 +288,14 @@ flattenStm statement =
        defineParams vs $ \vs' -> do
          next_statement' <- flattenStm next_statement
          return (atom_statements $ assignment vs' atom' next_statement')
-     LetrecE defs next_statement ->
+     LetrecE (NonRec def) next_statement -> do
+       def' <- flatten_def def
+       stm' <- defineParam (definiendum def) $ \_ -> flattenStm next_statement
+       return (LetrecE (NonRec def') stm')
+     LetrecE (Rec defs) next_statement ->
        defineParams (map definiendum defs) $ \_ -> do
          defs' <- mapM flatten_def defs
-         fmap (LetrecE defs') $ flattenStm next_statement
+         fmap (LetrecE (Rec defs')) $ flattenStm next_statement
      SwitchE val alts -> do
        val' <- flattenSingleVal val
        alts' <- mapM flatten_alt alts
@@ -415,11 +419,24 @@ flattenExportedParam etype original_param = do
     from_var (VarV v) = v
     from_var _ = internalError "flattenExportedParam: Unexpected value"
 
-flattenTopLevel :: ExportMap -> [GlobalDef] -> RF [GlobalDef]
-flattenTopLevel exports defs =
-  -- Ensure that all globals are defined
-  defineParams (map globalDefiniendum defs) $ \_ -> mapM flatten defs
+flattenTopLevel :: ExportMap -> [Group GlobalDef] -> RF [Group GlobalDef]
+flattenTopLevel exports defs = do
+  flatten_groups defs
   where
+    flatten_groups (NonRec def : defss) = do
+      def' <- flatten def
+      defss' <- defineParam (globalDefiniendum def) $ \_ ->
+        flatten_groups defss
+      return (NonRec def' : defss')
+    
+    flatten_groups (Rec defs : defss) =
+      defineParams (map globalDefiniendum defs) $ \_ -> do
+        defs' <- mapM flatten defs
+        defss' <- flatten_groups defss
+        return (Rec defs' : defss')
+    
+    flatten_groups [] = return []
+
     flatten (GlobalFunDef (Def v f)) = do
       f' <- case IntMap.lookup (fromIdent $ varID v) exports
             of Nothing  -> flattenFun f

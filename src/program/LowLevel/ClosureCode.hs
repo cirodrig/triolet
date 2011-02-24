@@ -47,6 +47,7 @@ module LowLevel.ClosureCode
         withUnhoistedVariables,
         isHoisted,
         withParameter, withParameters,
+        withImports,
         withLocalFunctions,
         withGlobalFunctions,
         writeFun, writeData,
@@ -71,6 +72,7 @@ import Debug.Trace
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
 import Common.Supply
 import LowLevel.Builtins
 import LowLevel.FreshVar
@@ -106,17 +108,6 @@ isDefaultDeallocator v = v == llBuiltin the_prim_pyon_dealloc
 
 -------------------------------------------------------------------------------
 
-type Defs = [([FunDef], [DataDef])]
-
-mkDefs :: [FunDef] -> [DataDef] -> Defs
-mkDefs f d = [(f, d)]
-
-noDefs :: Defs
-noDefs = []
-
-concatDefs :: Defs -> Defs -> Defs
-concatDefs = (++)
-
 -- | The monad used by closure conversion while scanning a program.
 --
 -- When scanning part of a program, closure conversion keeps track of the 
@@ -129,7 +120,7 @@ concatDefs = (++)
 -- During scanning, all functions (including local and global functions) 
 -- are written out as global definitions.  These definitions are assembled
 -- into the body of the closure-converted module.
-newtype CC a = CC (CCEnv -> IO (a, FreeVars, Defs))
+newtype CC a = CC (CCEnv -> IO (a, FreeVars, [GlobalDef]))
 
 data CCEnv =
   CCEnv
@@ -154,18 +145,14 @@ emptyCCEnv var_ids globals =
 runCC :: IdentSupply Var        -- ^ Variable ID supply
       -> [Var]                  -- ^ Global variables
       -> CC ()                  -- ^ Computation to run
-      -> IO ([FunDef], [DataDef]) -- ^ Compute new global definitions 
+      -> IO [GlobalDef]         -- ^ Compute new global definitions 
 runCC var_ids globals (CC f) = do
   let env = emptyCCEnv var_ids globals
   ((), _, defs) <- f env
-  return $ accumulate id id defs
-  where
-    accumulate funs datas ((funs', datas'):defs) =
-      accumulate (funs . (funs' ++)) (datas . (datas' ++)) defs
-    accumulate funs datas [] = (funs [], datas [])
+  return defs
 
-returnCC :: a -> IO (a, FreeVars, Defs)
-returnCC x = return (x, Set.empty, noDefs)
+returnCC :: a -> IO (a, FreeVars, [GlobalDef])
+returnCC x = return (x, Set.empty, [])
 
 instance Functor CC where
   fmap f (CC x) = CC $ \env -> do (y, a, b) <- x env
@@ -178,7 +165,7 @@ instance Monad CC where
     case k x of
       CC g -> do
         (y, fv2, defs2) <- g env
-        return (y, Set.union fv1 fv2, concatDefs defs1 defs2)
+        return (y, Set.union fv1 fv2, defs1 ++ defs2)
 
 instance MonadFix CC where
   mfix f = CC $ \env -> mfix $ \ ~(x, _, _) -> case (f x) of CC f' -> f' env
@@ -241,28 +228,36 @@ withUnhoistedVariables xs (CC f) = CC $ \env -> f (insert_closures env)
       env {envEntryPoints = foldr (uncurry IntMap.insert) (envEntryPoints env)
                             [(fromIdent $ varID v, Left v) | v <- xs]}
 
--- | Generate global functions and data from a set of global functions.
-withGlobalFunctions :: [Import] -- ^ Imported functions
-                    -> [FunDef] -- ^ Functions to process 
-                    -> CC [Fun] -- ^ Scanner that creates direct functions
-                    -> CC ()    -- ^ Code that may access functions
-                    -> CC ()
-withGlobalFunctions imports defs scan gen = do
-  -- Create closures for imported functions
+-- | Add closure information about imports to the environment
+withImports :: [Import] -> CC a -> CC a
+withImports imports m =
   let import_closures = [mkGlobalClosure v ep
                         | ImportClosureFun ep _ <- imports
                         , let Just v = globalClosure ep]
+  in localClosures import_closures m
+
+-- | Generate global functions and data from a set of global functions.
+withGlobalFunctions :: Group GlobalDef -- ^ Functions to process 
+                    -> (FunDef -> CC Fun) -- ^ Scanner that creates direct functions
+                    -> CC ()    -- ^ Code that may access functions
+                    -> CC ()
+withGlobalFunctions defs scan gen = do
+  let (fdefs, ddefs) = partitionGlobalDefs $ groupMembers defs
 
   -- Create closures for global functions.  Procedures don't get closures.
-  global_closures <- runFreshVarCC $ mapM createGlobalClosure defs
+  global_closures <- runFreshVarCC $ mapM createGlobalClosure fdefs
   
-  let closures = import_closures ++ catMaybes global_closures
-  funs <- localClosures closures scan
+  let closures = catMaybes global_closures
+  direct_entries <- localClosures closures $ mapM scan fdefs
+  
+  -- Emit data definitions
+  mapM_ writeData ddefs
   
   -- Generate code of closures
-  defs' <- runFreshVarCC $
-           forM (zip3 (map definiendum defs) global_closures funs) $ \(d, c, f) ->
-           emitGlobalClosure d c f
+  defs' <-
+    runFreshVarCC $
+    zipWithM3 emitGlobalClosure
+    (map definiendum fdefs) global_closures direct_entries
   writeDefs (concat defs')
     
   -- Run other code
@@ -325,12 +320,12 @@ mkRecClosures defs captureds = do
     lazyZip3 []     _      _       = []
 
 -- | Write some global object definitions
-writeDefs :: Defs -> CC ()
+writeDefs :: [GlobalDef] -> CC ()
 writeDefs defs = CC $ \_ ->
   return ((), Set.empty, defs) 
 
-writeFun f = writeDefs $ mkDefs [f] []
-writeData d = writeDefs $ mkDefs [] [d]
+writeFun f = writeDefs [GlobalFunDef f]
+writeData d = writeDefs [GlobalDataDef d]
 
 -- | Record that a variable has been used.  Global variables are ignored.
 mention :: Var -> CC ()
@@ -338,7 +333,7 @@ mention v = CC $ \env ->
   let free_vars = if fromIdent (varID v) `IntSet.member` envGlobals env
                   then Set.empty
                   else Set.singleton v
-  in free_vars `seq` return ((), free_vars, noDefs)
+  in free_vars `seq` return ((), free_vars, [])
 
 -- | Record that some variables have been used.  Global variables are ignored.
 mentions :: [Var] -> CC ()
@@ -346,7 +341,7 @@ mentions vs = CC $ \env ->
   let globals = envGlobals env
       free_vars = Set.fromList $
                   filter (not . (`IntSet.member` globals) . fromIdent . varID) vs
-  in free_vars `seq` return ((), free_vars, noDefs)
+  in free_vars `seq` return ((), free_vars, [])
 
 -- | Get the set of free variables that were used in the computation.
 listenFreeVars :: CC a -> CC (a, FreeVars)
@@ -606,7 +601,7 @@ initializeClosure group_record clo clo_ptr = do
 
 -- | Generate a free function for a non-recursive, non-top-level closure.
 -- The free function is added to the set of top-level definitions.
-generateClosureFree :: Closure -> FreshVarM Defs
+generateClosureFree :: Closure -> FreshVarM [GlobalDef]
 generateClosureFree clo 
   | not $ closureIsLocal clo =
       internalError "generateClosureFree: Not a local closure"
@@ -633,7 +628,7 @@ generateClosureFree clo
   
   -- Write this to the closure's deallocation function entry
   let fun = primFun [param] [] fun_body
-  return $ mkDefs [Def dealloc_fun fun] []
+  return [GlobalFunDef $ Def dealloc_fun fun]
 
 -- | Generate a shared closure record value and a function that frees the
 -- entire recursive function group.
@@ -880,7 +875,7 @@ emitInfoTable clo =
 -- | Generate the code and data of a global function.  For closure functions,
 -- an info table, a global closure, and entry points are generated.  For
 -- primitive functions, only the global function is generated.
-emitGlobalClosure :: Var -> Maybe Closure -> Fun -> FreshVarM Defs
+emitGlobalClosure :: Var -> Maybe Closure -> Fun -> FreshVarM [GlobalDef]
 
 -- Emit a closure function
 emitGlobalClosure direct_entry (Just clo) direct = do
@@ -894,16 +889,20 @@ emitGlobalClosure direct_entry (Just clo) direct = do
     internalError "emitGlobalClosure: Must not have deallocator"
   closure_def <- generateGlobalClosure clo
   
-  return $ mkDefs [direct_def, exact_def, inexact_def] [info_def, closure_def]
+  return [GlobalFunDef direct_def, 
+          GlobalFunDef exact_def, 
+          GlobalFunDef inexact_def,
+          GlobalDataDef info_def,
+          GlobalDataDef closure_def]
 
 -- Emit a primitive function
 emitGlobalClosure direct_entry Nothing direct = do
-  return $ mkDefs [Def direct_entry direct] []
+  return [GlobalFunDef $ Def direct_entry direct]
 
 -- | Generate the code and data of a group of recursive closures.
 -- An info table and entry points are generated.  The code for dynamically
 -- allocating closures is returned.
-emitRecClosures :: ClosureGroup -> [Fun] -> FreshVarM (Defs, GenM ())
+emitRecClosures :: ClosureGroup -> [Fun] -> FreshVarM ([GlobalDef], GenM ())
 emitRecClosures grp directs = do
   -- Emit info table and entry points of each function 
   member_defs <- forM (zip grp directs) $ \(clo, direct) -> do
@@ -911,7 +910,10 @@ emitRecClosures grp directs = do
     let direct_def = Def (closureDirectEntry clo) direct
     exact_def <- emitExactEntry clo
     inexact_def <- emitInexactEntry clo
-    return ([direct_def, exact_def, inexact_def], [info_def])
+    return [GlobalFunDef direct_def, 
+            GlobalFunDef exact_def, 
+            GlobalFunDef inexact_def,
+            GlobalDataDef info_def]
     
   -- Emit the deallocation function.  
   -- All members of the group use the same one.
@@ -921,7 +923,7 @@ emitRecClosures grp directs = do
   free_def <- emitSharedClosureRecordFree free_var grp
   
   -- Return code for generating closures
-  let defs = mkDefs [free_def] [] ++ member_defs
+  let defs = GlobalFunDef free_def : concat member_defs
   return (defs, generateRecursiveClosures grp)
 
 -------------------------------------------------------------------------------
@@ -1009,7 +1011,7 @@ genIndirectCall return_types op args = return $ do
     inexact_call <- lift $ fmap (primFun [] return_types') $
                     execBuild return_types' $
                     make_inexact_call ret_vars op args cont
-    emitLetrec [Def inexact_call_var inexact_call]
+    emitLetrec (NonRec (Def inexact_call_var inexact_call))
     
     check_arity <-
       lift $ execBuild return_types' $ do

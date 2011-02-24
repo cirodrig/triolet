@@ -127,7 +127,8 @@ createModuleInterface :: Module -> IO (Module, Interface)
 createModuleInterface mod = do
   -- Find all exported symbols, transitively
   let export_vars = Set.fromList [v | (v, PyonExportSig) <- moduleExports mod]
-      (pre_imports, _) = slurpExports export_vars $ moduleGlobals mod
+      (pre_imports, _) =
+        slurpExports export_vars $ concatMap groupMembers $ moduleGlobals mod
       
   -- Rename all exported variables to externally visible names
   renaming <- createExternNames (moduleModuleName mod) (moduleNameSupply mod) $
@@ -189,7 +190,7 @@ createExternNames mod_name id_supply from_vars =
 -- | Replace the globally defined variables that are in the renaming.
 --   All other appearances of the variables have already been renamed.
 renameGlobalDefinitions renaming mod =
-  mod {moduleGlobals = map rename_global_def $ moduleGlobals mod}
+  mod {moduleGlobals = map (fmap rename_global_def) $ moduleGlobals mod}
   where
     rename_global_def (GlobalFunDef def)
       | Just v <- lookupRenamedVar renaming $ definiendum def =
@@ -267,7 +268,7 @@ findRefsStm stm =
   of LetE _ rhs body ->
        findRefsAtom rhs `mappend` findRefsStm body
      LetrecE defs body ->
-       mconcat (findRefsStm body : map (findRefsFun . definiens) defs)
+       mconcat (findRefsStm body : map (findRefsFun . definiens) (groupMembers defs))
      SwitchE v alts ->
        mconcat (findRefsVal v : map (findRefsStm . snd) alts)
      ReturnE atom -> findRefsAtom atom

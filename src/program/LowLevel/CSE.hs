@@ -5,10 +5,12 @@
 module LowLevel.CSE(commonSubexpressionElimination)
 where
 
+import Prelude hiding(mapM, sequence)
 import Control.Applicative
-import Control.Monad.State
+import Control.Monad.State hiding(mapM, sequence)
 import qualified Data.IntMap as IntMap
 import Data.Maybe
+import Data.Traversable
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
@@ -246,7 +248,7 @@ cseStm statement =
   case statement
   of LetE [f_var] (ValA [LamV f]) stm ->
        -- Convert a lambda into a letrec
-       let new_statement = LetrecE [Def f_var f] stm
+       let new_statement = LetrecE (NonRec (Def f_var f)) stm
        in check_def f_var f $ cseStm new_statement
      LetE lhs rhs stm -> do
        (rhs', exprs) <- cseAtom rhs
@@ -270,7 +272,7 @@ cseStm statement =
       case lookup scrutinee alts
       of Just taken_path -> cseStm taken_path
          Nothing -> internalError "cseStm: Missing alternative"
-       
+
     -- Otherwise, scrutinee is not statically known
     evaluate_switch alts scrutinee_value = do
       rt <- lift getReturnTypes
@@ -280,7 +282,7 @@ cseStm statement =
         cse_alt rt (lit, stm) = do
           stm' <- runCSEF $ evalCSE rt $ cseStm stm
           return (lit, stm')
-      
+
     assign_variable v Nothing = return ()
     assign_variable v (Just e) = modifyCSEEnv $ updateCSEEnv v e
     
@@ -364,8 +366,8 @@ commonSubexpressionElimination :: Module -> IO Module
 commonSubexpressionElimination mod =
   withTheLLVarIdentSupply $ \var_supply -> do
     runFreshVarM var_supply $ do
-      globals' <- mapM (cseGlobal arities global_env) $ moduleGlobals mod
+      globals' <- mapM (mapM (cseGlobal arities global_env)) $ moduleGlobals mod
       return $ mod {moduleGlobals = globals'}
   where
     (arities, global_env) =
-      scanGlobalData (moduleImports mod) (moduleGlobals mod)
+      scanGlobalData (moduleImports mod) (concatMap groupMembers $ moduleGlobals mod)

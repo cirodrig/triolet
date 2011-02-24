@@ -127,7 +127,7 @@ getContinuation primcall live_outs f = Gen $ \return_type -> do
   (stm, MkStm stms) <- runGen (f cont_call) return_type
   
   -- Put the continuation into a 'letrec' statement
-  let stms' cont_stm = LetrecE [Def cont_var cont_fun] (stms stm)
+  let stms' cont_stm = LetrecE (NonRec (Def cont_var cont_fun)) (stms stm)
         where
           cont_fun = mkFun convention False 0 live_outs return_type cont_stm
   
@@ -159,7 +159,11 @@ stmFreeVars stm =
   of LetE params rhs body ->
        let body_fv = foldr Set.delete (stmFreeVars body) params
        in Set.union body_fv $ atomFreeVars rhs
-     LetrecE defs body ->
+     LetrecE (NonRec def) body ->
+       let body_fv = stmFreeVars body
+           fun_fv = funFreeVars $ definiens def
+       in Set.delete (definiendum def) body_fv `Set.union` fun_fv
+     LetrecE (Rec defs) body ->
        let fun_vars = map definiendum defs
            body_fv = stmFreeVars body
            funs_fvs = map (funFreeVars . definiens) defs
@@ -202,7 +206,7 @@ bindAtom1 var atom = emit $ LetE [var] atom
 bindAtom :: Monad m => [Var] -> Atom -> Gen m ()
 bindAtom vars atom = emit $ LetE vars atom
 
-emitLetrec :: Monad m => [FunDef] -> Gen m ()
+emitLetrec :: Monad m => Group FunDef -> Gen m ()
 emitLetrec defs = emit $ LetrecE defs
 
 -- | Generate a no-op
@@ -559,7 +563,7 @@ fromPrimType (RecordField recd) =
   let sz = from_lit $ recordSize recd
       al = from_lit $ recordAlignment recd
       fs = map from_dynamic_field $ recordFields recd
-  in RecordType $ Rec fs sz al
+  in RecordType $ record fs sz al
   where
     from_dynamic_field fld =
       mkField (from_lit $ fieldOffset fld) (fieldMutable fld) (valueToFieldType $ fromPrimType $ fieldType fld)

@@ -102,7 +102,7 @@ toPointerStm statement =
   of LetE vs atom stm' ->
        LetE (map toPointerVar vs) (toPointerAtom atom) (toPointerStm stm')
      LetrecE defs stm' ->
-       LetrecE (map toPointerDef defs) (toPointerStm stm')
+       LetrecE (fmap toPointerDef defs) (toPointerStm stm')
      SwitchE val alts ->
        SwitchE (toPointerVal val) [(x, toPointerStm s) | (x, s) <- alts]
      ReturnE atom ->
@@ -166,7 +166,7 @@ toPointerGlobalDef (GlobalDataDef d) = GlobalDataDef $ toPointerDataDef d
 -- pointers become unmanaged pointers.
 insertReferenceCounting :: Module -> IO Module
 insertReferenceCounting mod =
-  let defs' = map toPointerGlobalDef $ moduleGlobals mod
+  let defs' = map (fmap toPointerGlobalDef) $ moduleGlobals mod
       imports' = map toPointerImport $ moduleImports mod
       exports' = map toPointerExport $ moduleExports mod
   in return $ mod { moduleImports = imports'

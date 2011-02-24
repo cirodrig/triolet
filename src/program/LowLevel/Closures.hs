@@ -180,23 +180,20 @@ ccUnhoistedFun fun = do
 
 -- | Perform closure conversion on a letrec-bound function group.
 --
---   Functions in the group that are hoisted become closures.
---   Functions in the group that are un-hoisted become a new 'letrec'.
---
---   Because of the way functions are selected for hoisting, hoisted functions 
---   never reference un-hoisted functions in the same group.  Therefore
---   hoisted function definitions appear first in the transformed code,
---   followed by un-hoisted functions.
-ccLocalGroup :: [FunDef] -> (GenM () -> CC (GenM a)) -> CC (GenM a) 
-ccLocalGroup defs do_body = withParameters (map definiendum defs) $ do
+--   Either all functions in the group are hoisted, or all functions are
+--   un-hoisted. Hoisted functions become closures.
+--   Un-hoisted functions become a new 'letrec'.
+ccLocalGroup :: Group FunDef -> (GenM () -> CC (GenM a)) -> CC (GenM a) 
+ccLocalGroup defs do_body = withParameters (map definiendum $ groupMembers defs) $ do
   -- Determine which functions are hoisted
-  hoisted <- mapM (isHoisted . definiendum) defs
-  let (h_defs, l_defs) = partition_by hoisted defs
-
-  generate_hoisted_group h_defs $ \hoisted_code -> 
-    withUnhoistedVariables (map definiendum l_defs) $ do
-      unhoisted_code <- generate_unhoisted l_defs
-      do_body (hoisted_code >> emitLetrec unhoisted_code)
+  hoisted <- mapM (isHoisted . definiendum) $ groupMembers defs
+  if and hoisted
+    then generate_hoisted_group (groupMembers defs) do_body
+    else if all not hoisted
+         then withUnhoistedVariables (map definiendum $ groupMembers defs) $ do
+                unhoisted_code <- generate_unhoisted (groupMembers defs)
+                do_body (emitLetrec unhoisted_code)
+         else internalError "ccLocalGroup"
   where
     generate_hoisted_group :: [FunDef]
                            -> (GenM () -> CC a)
@@ -217,18 +214,11 @@ ccLocalGroup defs do_body = withParameters (map definiendum defs) $ do
       sequence [ccCreateHoistedFun f mk_body free_vars  
                | (f, mk_body) <- zip functions mk_bodies]
                         
-    generate_unhoisted l_defs = mapM gen l_defs
+    generate_unhoisted l_defs = fmap Rec $ mapM gen l_defs
       where
         gen (Def v f) = do
           f' <- ccUnhoistedFun f
           return $ Def v f'
-
-    -- Partition list 2 by the boolean value in list 1
-    partition_by flags values = par id id flags values
-      where
-        par hd_l hd_r (True:flags)  (x:xs) = par (hd_l . (x:)) hd_r flags xs
-        par hd_l hd_r (False:flags) (x:xs) = par hd_l (hd_r . (x:)) flags xs
-        par hd_l hd_r []            _      = (hd_l [], hd_r [])
 
 closureConvertTopLevelFunction :: FunDef -> CC Fun
 closureConvertTopLevelFunction def@(Def v f) =
@@ -241,11 +231,14 @@ closureConvertTopLevelFunction def@(Def v f) =
 closureConvertTopLevelFunctions :: IdentSupply Var
                                 -> [Var]
                                 -> [Import]
-                                -> [FunDef]
-                                -> IO ([FunDef], [DataDef])
+                                -> [Group GlobalDef]
+                                -> IO [GlobalDef]
 closureConvertTopLevelFunctions var_ids globals imports defs =
-  runCC var_ids globals $ do
-    withGlobalFunctions imports defs (mapM closureConvertTopLevelFunction defs) (return ())
+  runCC var_ids globals $ withImports imports $ cc_globals defs
+  where
+    cc_globals (group : groups) =
+      withGlobalFunctions group closureConvertTopLevelFunction $ cc_globals groups
+    cc_globals [] = return ()
 
 -- | Perform closure conversion on a data value.
 scanDataValue :: Val -> Val
@@ -434,21 +427,19 @@ closureConvert :: Module -> IO Module
 closureConvert mod =
   withTheLLVarIdentSupply $ \var_ids -> do
     -- Perform closure conversion
-    let (fun_defs, data_defs) = partitionGlobalDefs $ moduleGlobals mod
-        imports = moduleImports mod
-        global_vars = map globalDefiniendum (moduleGlobals mod) ++
+    let imports = moduleImports mod
+        global_vars = [globalDefiniendum d
+                      | g <- moduleGlobals mod, d <- groupMembers g] ++
                       map importVar imports
-    (fun_defs', fun_data_defs') <-
-      closureConvertTopLevelFunctions var_ids global_vars imports fun_defs
-    let data_defs' = convertDataDefs data_defs
+    defs' <-
+      closureConvertTopLevelFunctions var_ids global_vars imports $
+      moduleGlobals mod
         
     -- Rename variables so that variable names are unique
     -- within a top-level function
-    renamed_fun_defs <-
-      runFreshVarM var_ids $ mapM (renameInFunDef RenameParameters) fun_defs'
-    
-    let new_global_defs = map GlobalFunDef renamed_fun_defs ++
-                          map GlobalDataDef (data_defs' ++ fun_data_defs')
-    
-    return $ mod {moduleGlobals = new_global_defs}
-
+    renamed_defs <- runFreshVarM var_ids $ mapM rename_global_fun defs'
+    return $ mod {moduleGlobals = [Rec renamed_defs]}
+  where
+    rename_global_fun (GlobalFunDef fdef) =
+      liftM GlobalFunDef $ renameInFunDef RenameParameters fdef
+    rename_global_fun ddef@(GlobalDataDef _) = return ddef

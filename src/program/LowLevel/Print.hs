@@ -284,8 +284,7 @@ pprStm stmt =
            rhs = pprAtom atom
        in hang (binder <+> text "<-") 8 rhs $$ pprStm body
      LetrecE defs body ->
-       text "letrec" $$
-       nest 4 (pprFunDefs defs) $$
+       text "let" <+> pprGroup pprFunDef defs $$
        pprStm body
      SwitchE val alts -> text "switch" <> parens (pprVal val) $$
                          nest 2 (vcat $ map print_alt alts)
@@ -342,7 +341,10 @@ pprExports exports = vcat [text "export" <+> pprVar v | (v, _) <- exports]
 pprGlobalDef (GlobalDataDef d) = pprDataDef d
 pprGlobalDef (GlobalFunDef d) = pprFunDef d
 
-pprGlobalDefs defs = vcat $ map pprGlobalDef defs
+pprGlobalDefs defs = vcat $ map (pprGroup pprGlobalDef) defs
+
+pprGroup pr (NonRec x) = text "nonrec {" $$ nest 2 (pr x) $$ text "}"
+pprGroup pr (Rec xs) = text "rec {" $$ nest 2 (vcat $ map pr xs) $$ text "}"
 
 pprModule :: Module -> Doc
 pprModule (Module modname _ imports defs exports) =

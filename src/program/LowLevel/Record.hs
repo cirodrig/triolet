@@ -20,10 +20,10 @@ data Mutability = Mutable | Constant
 -- Record types are used for computing the physical layout of data and
 -- generating load and store instructions.
 data Record t =
-  Rec { recordFields_ :: ![Field t]
-      , recordSize_ :: !t
-      , recordAlignment_ :: !t
-      }
+  Record { recordFields_ :: ![Field t]
+         , recordSize_ :: !t
+         , recordAlignment_ :: !t
+         }
 
 -- | A record field.  A field contains information about its offset, whether
 --   its value is mutable, and what data type it contains.  Mutability only
@@ -72,7 +72,7 @@ isAlignField (AlignField {}) = True
 isAlignField _ = False
 
 record :: [Field t] -> t -> t -> Record t
-record = Rec
+record = Record
 
 recordFields :: Record t -> [Field t]
 recordFields = recordFields_
@@ -266,9 +266,9 @@ instance Binary StaticFieldType where
       pick 3 = AlignField <$> get
 
 instance Binary StaticRecord where
-  put (Rec fs sz al) = put sz >> put al >> put fs
+  put (Record fs sz al) = put sz >> put al >> put fs
   get = do sz <- get
            al <- get
            fs <- get
-           return (Rec fs sz al)
+           return (Record fs sz al)
 

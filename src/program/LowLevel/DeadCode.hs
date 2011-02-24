@@ -1,13 +1,16 @@
 
+{-# LANGUAGE Rank2Types #-}
 module LowLevel.DeadCode(eliminateDeadCode)
 where
 
-import Prelude hiding(mapM)
+import Prelude hiding(mapM, sequence)
 import Control.Applicative
+import qualified Data.Graph as Graph
 import qualified Data.IntMap as IntMap
 import Data.Monoid
 import Data.Traversable
 
+import Common.Error
 import Common.Identifier
 import LowLevel.Syntax
 import LowLevel.CodeTypes
@@ -230,41 +233,16 @@ dceLet params rhs body = do
             return (LetE params rhs' body')
     else return body'
 
-dceLetrec defs body = make_letrec <$> dceDefGroup defs (dceStm body)
+dceLetrec defs body = make_letrec <$> dceLocalDefGroup defs (dceStm body)
   where
-    make_letrec (defs', body') 
-      | null defs' = body'
-      | otherwise = LetrecE defs' body'
+    make_letrec (defs', body') = foldr LetrecE body' defs'
 
-dceDefGroup :: [FunDef] -> DCEM a -> DCEM ([FunDef], a)
-dceDefGroup defs body = assumeFunctionArities defs $ do
-  (body_uses, new_body) <- takeUses body
-
-  -- Perform DCE and collect use information in function bodies
-  annotated_defs <- forM defs $ \(Def v f) -> takeUses $ do
-    f' <- dceFun f
-    return (Def v f')
-    
-  let all_uses = useUnions (body_uses : map fst annotated_defs)
-
-  -- Remove unused functions
-  -- TODO: use reachability from body as liveness criterion
-  let live_defs = filter is_live annotated_defs
-        where
-          is_live (_, Def v _) = v `isUsedIn` all_uses
-
-  -- Uses from the still-live functions are real.  Compute new definitions.
-  let live_uses = useUnions (body_uses : map fst live_defs)
-      new_defs = map (setFunDefUses live_uses . snd) live_defs
-
-  -- Expose all uses except the locally defined functions
-  putUses $ deleteUses (map definiendum new_defs) live_uses
-
-  -- Add code size for the function definitions
-  let def_code_size = sum $ map (funDefinitionSize . definiens) new_defs
-  nudge def_code_size (return ())
-
-  return (new_defs, new_body)
+dceLocalDefGroup :: Group FunDef -> DCEM a -> DCEM ([Group FunDef], a)
+dceLocalDefGroup defs body =
+  dceDefGroup assume_function definiendum dce_def defs body
+  where
+    assume_function fdef = assumeFunctionArities [fdef]
+    dce_def (Def v f) = Def v <$> dceFun f
 
 -- | Rebuild a function definition after DCE.
 setFunDefUses :: UseMap -> FunDef -> FunDef 
@@ -288,6 +266,114 @@ dceDataDef :: DCE DataDef
 dceDataDef (Def v (StaticData rec vals)) =
   (Def v . StaticData rec) <$> dceVals vals
 
+dceTopLevelDef :: DCE GlobalDef
+dceTopLevelDef (GlobalFunDef (Def v f)) = GlobalFunDef . Def v <$> dceFun f
+dceTopLevelDef (GlobalDataDef ddef) = GlobalDataDef <$> dceDataDef ddef
+
+dceDefGroup :: (forall b. a -> DCEM b -> DCEM b) -> (a -> Var) -> DCE a
+            -> Group a -> DCEM b -> DCEM ([Group a], b)
+dceDefGroup assume get_definiendum dce group m = do
+  -- Find out which group members are used
+  (body_uses, new_body) <- assume_defs $ takeUses m
+
+  case group of
+    NonRec def 
+      | not $ get_definiendum def `isUsedIn` body_uses ->
+          -- This function is not used, we don't need to scan it
+          putUses body_uses >> return ([], new_body)
+      | otherwise -> do
+          def' <- dce def
+          putUses body_uses >> return ([NonRec def'], new_body)
+    Rec defs -> do
+      -- Split this group into minimal mutually recursive groups.
+      -- First, find uses in each function.
+      uses_and_defs <- assume_defs $ mapM (takeUses . dce) defs
+
+      -- Partition this definition group
+      let annotated_uses =
+            [(varID $ get_definiendum def, uses, def)
+            | (uses, def) <- uses_and_defs]
+          (partitioned_uses, groups) =
+            partitionDefGroup annotated_uses body_uses
+      putUses partitioned_uses
+      return (groups, new_body)
+  where
+    assume_defs m = foldr assume m $ groupMembers group
+
+dceTopLevelDefGroup :: Group GlobalDef
+                    -> DCEM a
+                    -> DCEM ([Group GlobalDef], a)
+dceTopLevelDefGroup group m =
+  dceDefGroup assume_function globalDefiniendum dceTopLevelDef group m
+  where
+    assume_function (GlobalFunDef fdef) = assumeFunctionArities [fdef]
+    assume_function (GlobalDataDef _) = id
+
+dceTopLevelDefGroups (group : groups) m = do
+  (groups1, (groups2, x)) <-
+    dceTopLevelDefGroup group $ dceTopLevelDefGroups groups m
+  return (groups1 ++ groups2, x)
+  
+dceTopLevelDefGroups [] m = do
+  x <- m
+  return ([], x)
+
+-- | Partition a definition group into SCCs.
+partitionDefGroup :: forall a.
+                     [(Ident Var, UseMap, a)]
+                  -> UseMap
+                  -> (UseMap, [Group a])
+partitionDefGroup members external_refs =
+  let member_id_set =
+        IntMap.fromList [(fromIdent n, ManyUses) | (n, _, _) <- members]
+      
+      -- Restrict set 's' to the members of the definition group
+      restrict s = IntMap.intersection s member_id_set
+
+      -- Create a dummy variable ID for the graph node that represents 
+      -- external references to the definition group
+      dummy_id = toIdent $ 1 + fst (IntMap.findMax member_id_set)
+
+      graph = (Nothing, dummy_id, nodes $ restrict external_refs) :
+              [(Just (x, ys), n, nodes $ restrict ys) | (n, ys, x) <- members]
+      
+      -- Partition into SCCs.
+      -- Only keep the definitions that precede the dummy node
+      -- (meaning that they're referenced by something external).
+      -- The remaining definitions are dead.
+      sccs = fst $ break is_dummy_node $ Graph.stronglyConnComp graph
+      
+      defgroups = to_defgroups sccs
+      uses = useUnion (to_usemap sccs) external_refs
+  in (uses, defgroups)
+  where
+    nodes :: UseMap -> [Ident Var]
+    nodes = map toIdent . IntMap.keys
+
+    to_usemap sccs = useUnions $ concatMap members sccs
+      where
+        members :: Graph.SCC (Maybe (a, UseMap)) -> [UseMap]
+        members (Graph.AcyclicSCC (Just (_, uses))) = [uses]
+        members (Graph.AcyclicSCC _) = internalError "partitionDefGroup"
+        members (Graph.CyclicSCC xs) =
+          case sequence xs
+          of Just xs' -> map snd xs'
+             _ -> internalError "partitionDefGroup"
+
+    to_defgroups sccs = map to_defgroup sccs
+
+    to_defgroup (Graph.AcyclicSCC (Just x)) =
+      NonRec (fst x)
+    to_defgroup (Graph.AcyclicSCC _) =
+      internalError "partitionDefGroup"
+    to_defgroup (Graph.CyclicSCC xs) =
+      case sequence xs
+      of Just xs' -> Rec (map fst xs')
+         _ -> internalError "partitionDefGroup"
+    
+    is_dummy_node (Graph.AcyclicSCC Nothing) = True
+    is_dummy_node _ = False
+
 assumeImportedArity impent m =
   case impent
   of ImportClosureFun ep _ ->
@@ -298,26 +384,19 @@ assumeImportedArity impent m =
 
 assumeImportedArities imps m = foldr assumeImportedArity m imps
 
-dceTopLevel :: [Import]         -- ^ Imported variables
-            -> [GlobalDef]      -- ^ Global definitions
-            -> [Var]            -- ^ Exported variables
-            -> DCEM [GlobalDef]
+dceTopLevel :: [Import]          -- ^ Imported variables
+            -> [Group GlobalDef] -- ^ Global definitions
+            -> [Var]             -- ^ Exported variables
+            -> DCEM [Group GlobalDef]
 dceTopLevel imps defs exports = assumeImportedArities imps $ do
   -- Perform DCE and find all uses
-  (new_fun_defs, new_data_defs) <-
-    dceDefGroup fun_defs (use_exports *> dce_data_defs)
-  
-  -- Don't need to compute uses or code size
-  return (map GlobalFunDef new_fun_defs ++ map GlobalDataDef new_data_defs)
+  (new_defs, ()) <- dceTopLevelDefGroups defs use_exports
+  return new_defs
   where
-    (fun_defs, data_defs) = partitionGlobalDefs defs
-
     -- All exported variables are used an unknown number of times
     use_exports = 
       putUses $ IntMap.fromList [(fromIdent $ varID v, ManyUses)
                                 | v <- exports]
-
-    dce_data_defs = mapM dceDataDef data_defs
 
 -- | Eliminate dead code in a module.
 --

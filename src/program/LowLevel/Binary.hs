@@ -3,6 +3,7 @@
 module LowLevel.Binary where
 
 import Control.Applicative
+import Control.Monad
 import Data.Binary
 
 import Common.Error
@@ -223,6 +224,16 @@ instance Binary StaticData where
 instance (Binary a) => Binary (Def a) where
   put (Def v x) = put v >> put x
   get = Def <$> get <*> get
+
+-- | A nonrecursive group is encoded as (0 ++ value);
+--   a recursive group is encoded as ((1 + length) ++ concat values)
+instance (Binary a) => Binary (Group a) where
+  put (NonRec x) = put (0 :: Int) >> put x
+  put (Rec xs) = put (1 + length xs :: Int) >> mapM_ put xs
+  get = get >>= get_group
+    where
+      get_group (0 :: Int) = NonRec <$> get
+      get_group (n :: Int) = Rec <$> replicateM (n - 1) get
 
 instance Binary GlobalDef where
   put (GlobalFunDef d) = putWord8 0 >> put d

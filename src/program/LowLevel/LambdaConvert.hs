@@ -21,7 +21,7 @@ import Globals
 emitLetrec :: L Stm -> FreshVarM Stm
 emitLetrec m = do
   (stm, defs) <- runWriterT m
-  return $ if null defs then stm else LetrecE defs stm
+  return $ if null defs then stm else LetrecE (Rec defs) stm
 
 -- | During lambda conversion, function definitions are floated to the 
 --   nearest valid location.
@@ -84,9 +84,15 @@ cvtGlobalDef (GlobalDataDef ddef) = do
   (ddef', new_defs) <- runWriterT $ cvtDef cvtData ddef
   return (map GlobalFunDef new_defs ++ [GlobalDataDef ddef'])
 
+-- | Everything is smushed into a single recursive group.
+--   DCE can sort it out later.
+cvtGlobalDefGroup :: Group GlobalDef -> FreshVarM (Group GlobalDef)
+cvtGlobalDefGroup group =
+  Rec . concat <$> mapM cvtGlobalDef (groupMembers group)
+
 lambdaConvert :: Module -> IO Module
 lambdaConvert mod =
   withTheLLVarIdentSupply $ \var_ids -> do
     global_defs <- runFreshVarM var_ids $
-                   mapM cvtGlobalDef $ moduleGlobals mod
-    return $ mod {moduleGlobals = concat global_defs}
+                   mapM cvtGlobalDefGroup $ moduleGlobals mod
+    return $ mod {moduleGlobals = global_defs}

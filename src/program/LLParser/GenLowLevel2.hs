@@ -562,7 +562,7 @@ genStmt tenv stmt =
        genLetAssignment tenv lvals atom
        genStmt tenv body
      LetrecS fdefs body -> do
-       emitLetrec =<< lift (mapM (genFunctionDef tenv) fdefs)
+       emitLetrec . LL.Rec =<< lift (mapM (genFunctionDef tenv) fdefs)
        genStmt tenv body
      TypedefS (SynonymT (TypeSynonym type_id _)) ty stmt -> do
        -- Compute specification of this type
@@ -587,7 +587,7 @@ genStmtAtom tenv stmt =
        genLetAssignment tenv lvals atom
        genStmtAtom tenv body
      LetrecS fdefs body -> do
-       emitLetrec =<< lift (mapM (genFunctionDef tenv) fdefs)
+       emitLetrec . LL.Rec =<< lift (mapM (genFunctionDef tenv) fdefs)
        genStmtAtom tenv body
      IfS cond if_true if_false Nothing -> do
        -- Generate an if statement, then group its result values into an atom
@@ -690,8 +690,8 @@ genWhileFunction tenv while_var params cond body cont = do
     cond' <- asVal =<< genExpr tenv cond
     genIf cond' true_path false_path
   
-  emitLetrec [LL.Def while_var $
-              LL.primFun param_vars return_types function_body]
+  emitLetrec (LL.Rec [LL.Def while_var $
+                      LL.primFun param_vars return_types function_body])
 
 -- | Generate an if-else expression in tail position
 genTailIf :: TypeEnv -> Expr Typed -> Stmt Typed -> Stmt Typed -> G LL.Stm
@@ -831,7 +831,7 @@ generateLowLevelModule module_name externs defs = do
     let defined_here = Set.fromList $ map LL.globalDefiniendum global_defs
         (exports, imports) = find_exports defined_here
     
-    return $ LL.Module module_name supply externs global_defs exports
+    return $ LL.Module module_name supply externs [LL.Rec global_defs] exports
   where
     -- If a variable is external and defined here, it's exported
     find_exports defined_here = partitionEithers $ map pick_export externs
