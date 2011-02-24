@@ -60,9 +60,9 @@ procedure pap_argument_size(int index, pointer type_tags) -> uint16 {
 // Add up the sizes of the first nargs arguments, using the type tags to
 // determine sizes.
 // The return value is a number of PAP_WORDSIZE words.
-procedure pap_arguments_size (int nargs, pointer type_tags) -> uint16 {
+procedure pap_arguments_size (uint16 nargs, pointer type_tags) -> uint16 {
   typedef size_arr = const_array(value int 0, uint8);
-  (_, _, size) = while (int count = nargs,
+  (_, _, size) = while (int count = nargs as int,
       	       	        pointer type_tags = type_tags,
 			uint size = uint 0)
 		       (count != int 0) {
