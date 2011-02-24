@@ -3,6 +3,8 @@
 
 module Common.MonadLogic where
 
+import Control.Monad
+
 infixr 3 >&&>
 infixr 2 >||>
 
@@ -73,6 +75,10 @@ mapAccumM f acc xs = go acc id xs
                             go acc' (ys . (y:)) xs
 
       go acc ys [] = return (acc, ys [])
+
+zipWithM3 :: Monad m => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
+zipWithM3 f (x:xs) (y:ys) (z:zs) = liftM2 (:) (f x y z) (zipWithM3 f xs ys zs)
+zipWithM3 f _ _ _ = return []
 
 -- | Apply a list of context transformations to a computation.  This is based
 -- on a FFI library function, reproduced here because it's useful
