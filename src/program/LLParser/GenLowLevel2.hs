@@ -632,7 +632,8 @@ genTailWhile tenv inits cond body = do
   -- When done, return the loop-carried variables
   let cont = return $ LL.ReturnE $ LL.ValA
              [LL.VarV $ parameterVar p | (p, _) <- inits]
-  genWhileFunction tenv while_var inits cond body cont
+  return_types <- getReturnTypes
+  genWhileFunction tenv while_var inits return_types cond body cont
   initializers <- mapM (asVal <=< genExpr tenv) (map snd inits)
   return $ LL.ReturnE $ LL.primCallA (LL.VarV while_var) initializers
 
@@ -644,9 +645,10 @@ genMedialWhile tenv inits cond body lhs mk_cont = do
   while_var <- lift $ LL.newAnonymousVar (PrimType PointerType)
   
   -- Turn the continuation into a function so we can call it.
+  return_types <- getReturnTypes
   getContinuation True param_vars $ \cont -> do
     -- Generate the while function
-    genWhileFunction tenv while_var inits cond body (return cont)
+    genWhileFunction tenv while_var inits return_types cond body (return cont)
     
     -- Call the while function
     initializers <- mapM (asVal <=< genExpr tenv) (map snd inits)
@@ -666,11 +668,15 @@ genMedialWhile tenv inits cond body lhs mk_cont = do
 -- >     cont (tmp1 ... tmpN);
 -- >   };
 genWhileFunction :: TypeEnv
-                 -> LL.Var -> [(Parameter Typed, Expr Typed)] -> Expr Typed
+                 -> LL.Var
+                 -> [(Parameter Typed, Expr Typed)]
+                 -> [ValueType]
+                 -> Expr Typed
                  -> Stmt Typed -> G LL.Stm -> G ()
-genWhileFunction tenv while_var params cond body cont = do
+genWhileFunction tenv while_var params return_types cond body cont = do
   let param_vars = [parameterVar p | (p, _) <- params]
-      return_types = [convertToValueType t | (Parameter t _, _) <- params]
+      -- Types of values that are passed to the continuation
+      live_out_types = [convertToValueType t | (Parameter t _, _) <- params]
 
   function_body <- lift $ execBuild return_types $ do
     -- When condition fails, run the continuation
@@ -679,7 +685,7 @@ genWhileFunction tenv while_var params cond body cont = do
     -- When it succeeds, run the body and loop
     let true_path = do
           -- Create new temporary variables to hold live-out values
-          return_vars <- lift $ mapM LL.newAnonymousVar return_types
+          return_vars <- lift $ mapM LL.newAnonymousVar live_out_types
           
           -- Generate body and bind its result
           bindAtom return_vars =<< genStmtAtom tenv body
