@@ -8,6 +8,8 @@ module Common.Identifier
     )
 where
 
+import Data.Ix
+
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Syntax as TH
 
@@ -23,6 +25,12 @@ type IdentSupply a = Supply (Ident a)
 
 instance Show (Ident a) where
     show (Ident n) = '#':show n
+
+instance Ix (Ident a) where
+  range (lo, hi) = map toIdent $ range (fromIdent lo, fromIdent hi)
+  index (lo, hi) i = index (fromIdent lo, fromIdent hi) (fromIdent i)
+  inRange (lo, hi) i = inRange (fromIdent lo, fromIdent hi) (fromIdent i)
+  rangeSize (lo, hi) = rangeSize (fromIdent lo, fromIdent hi)
 
 instance TH.Lift (Ident a) where
     lift (Ident n) = [| Ident n |] 
