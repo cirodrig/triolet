@@ -239,7 +239,7 @@ genManyResults rtn exprs =
   of AssignValues xs  -> return_exprs $ zipWith genAssignVar xs exprs
      DefineValues xs  -> zipWithM declare_variable xs exprs
      ReturnValues []  -> return_nothing
-     ReturnValues [t] -> return_stm $ cReturn (Just expr)
+     ReturnValues [t] -> expr `seq` return_stm (cReturn $ Just expr)
      ReturnValues xs  -> do
        struct_name <- getStructName $ map valueToPrimType xs
        let struct_decl = anonymousDecl $ identDeclSpecs struct_name
@@ -749,7 +749,7 @@ makeFunctionCode fallthrough local_function = do
 
 -- | Generate a forward declaration and definition of a function
 genFun :: Set.Set Var -> FunDef -> GenC (CDecl, CFunDef)
-genFun exported_vars (Def v fun) 
+genFun exported_vars (Def v fun)
   | not (isPrimFun fun) = 
       internalError "genFun: Can only generate primitive-call functions"
   | otherwise = do
