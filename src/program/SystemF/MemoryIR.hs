@@ -22,6 +22,8 @@ module SystemF.MemoryIR
         patMDict,
         patMUses,
         setPatMUses,
+        patMDmd,
+        setPatMDmd,
         Ret(..),
         Exp(..),
         Alt(..),
@@ -32,6 +34,7 @@ where
 
 import Common.Error
 import SystemF.Syntax
+import SystemF.Demand
 import SystemF.DeadCode(Mentions(..))
 import Type.Type
 import Type.Var
@@ -50,7 +53,7 @@ data instance Pat Mem =
     MemVarP
     { _patMVar :: Var 
     , _patMParamType :: {-#UNPACK#-}!ParamType
-    , _patMUses :: !Mentions
+    , _patMUses :: {-#UNPACK#-}!Dmd
     }
 
     -- | A local, dynamically allocated variable.  The dynamically allocated
@@ -62,7 +65,7 @@ data instance Pat Mem =
     { _patMVar :: Var
     , _patMType :: Type
     , _patMDict :: ExpM
-    , _patMUses :: !Mentions
+    , _patMUses :: {-#UNPACK#-}!Dmd
     }
     
     -- | A wildcard pattern.  No variable is bound to this value.
@@ -74,10 +77,10 @@ data instance Pat Mem =
     }
 
 memVarP :: Var -> ParamType -> PatM
-memVarP v pt = MemVarP v pt Many
+memVarP v pt = MemVarP v pt unknownDmd
 
 localVarP :: Var -> Type -> ExpM -> PatM
-localVarP v t d = LocalVarP v t d Many
+localVarP v t d = LocalVarP v t d unknownDmd
 
 memWildP :: ParamType -> PatM
 memWildP pt = MemWildP pt
@@ -124,11 +127,34 @@ patMReturnRepr (MemWildP {_patMParamType = prepr ::: _}) =
 patMReturnType :: PatM -> ReturnType
 patMReturnType pat = patMReturnRepr pat ::: patMType pat
 
+-- | For compatibility with old code, we can convert between mentions and
+--   demand types.
+mentionToDmd :: Mentions -> Dmd
+mentionToDmd One  = Dmd OnceUnsafe Used
+mentionToDmd Many = Dmd ManyUnsafe Used
+
+-- | For compatibility with old code, we can convert between mentions and
+--   demand types.  The conversion from 'Dmd' to 'Mentions' is lossy.
+dmdToMention :: Dmd -> Mentions
+dmdToMention dmd = case multiplicity dmd
+                   of Dead       -> One
+                      OnceSafe   -> One
+                      OnceUnsafe -> One
+                      _          -> Many
+
 patMUses :: PatM -> Mentions
-patMUses = _patMUses
+patMUses = dmdToMention . _patMUses
 
 setPatMUses :: Mentions -> PatM -> PatM
-setPatMUses m pat = pat {_patMUses = m}
+setPatMUses m pat = pat {_patMUses = mentionToDmd m}
+
+patMDmd :: PatM -> Dmd
+patMDmd (MemVarP {_patMUses = u}) = u
+patMDmd (LocalVarP {_patMUses = u}) = u
+patMDmd (MemWildP {}) = bottom
+
+setPatMDmd :: Dmd -> PatM -> PatM
+setPatMDmd m pat = pat {_patMUses = m}
 
 data instance TyPat Mem  = TyPatM Var Type
 newtype instance Ret Mem = RetM {fromRetM :: ReturnType}

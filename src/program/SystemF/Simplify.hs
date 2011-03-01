@@ -531,7 +531,7 @@ rwLet inf bind val body =
        -- If the variable is used exactly once, then inline it.
        -- Otherwise, propagate the variable's known value.
        let local_val_value =
-             case uses
+             case patMUses bind
              of One -> Just $ setInlinedValue bind_var val' val_value
                 Many -> fmap (setTrivialValue bind_var) val_value
 

@@ -5,6 +5,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.PrecDoc
 import Common.Label
+import SystemF.Demand
 import SystemF.Syntax
 import SystemF.MemoryIR
 import Type.Type
@@ -42,15 +43,12 @@ pprPat :: PatM -> Doc
 pprPat pat =
   case pat
   of MemVarP v pt uses -> 
-       pprUses uses <+> pprVar v <+> text ":" <+> pprParamType pt
+       text (showDmd uses) <+> pprVar v <+> text ":" <+> pprParamType pt
      MemWildP pt -> 
        text "_" <+> text ":" <+> pprParamType pt
      LocalVarP v t e uses ->
-       text "local" <+> pprUses uses <+>
+       text "local" <+> text (showDmd uses) <+>
        pprVar v <+> text ":" <+> pprType t <+> parens (pprExp e)
-
-pprUses One = text "[1]"
-pprUses Many = empty
 
 pprExp :: ExpM -> Doc
 pprExp e = unparenthesized $ pprExpPrec e

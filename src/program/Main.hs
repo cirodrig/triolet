@@ -23,7 +23,7 @@ import qualified Untyped.Print as Untyped
 import qualified Untyped.TypeInference as Untyped
 import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
-import qualified SystemF.DeadCodeMem
+import qualified SystemF.DemandAnalysis as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.TypecheckSF
@@ -61,6 +61,12 @@ main = do
   -- Do work
   runJob runTask job
   
+iterateM :: Monad m => (a -> m a) -> Int -> a -> m a
+iterateM f n x = go n x 
+  where
+    go 0 x = return x
+    go n x = f x >>= go (n-1)
+
 -- | Run a task.  This is the entry point for each stage of the
 -- compiler.
 runTask :: Task a -> IO a
@@ -156,7 +162,7 @@ compilePyonToPyonAsm path text = do
   -- are primarily setup to improve the accuracy of the simplifier.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.DeadCodeMem.eliminateDeadCode mem_mod
+  mem_mod <- SystemF.demandAnalysis mem_mod
   
   putStrLn "Prepared Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
@@ -166,16 +172,13 @@ compilePyonToPyonAsm path text = do
   -- stupidly resolve by running them lots of times.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
+  mem_mod <- SystemF.demandAnalysis mem_mod
+  mem_mod <- iterateM (SystemF.rewriteLocalExpr >=>
+                       SystemF.floatModule >=>
+                       SystemF.localDemandAnalysis) 3 mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
-  mem_mod <- SystemF.rewriteLocalExpr mem_mod
-  mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.DeadCodeMem.eliminateLocalDeadCode mem_mod
-  mem_mod <- SystemF.rewriteLocalExpr mem_mod
-  mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.DeadCodeMem.eliminateDeadCode mem_mod
+  mem_mod <- SystemF.demandAnalysis mem_mod
 
   putStrLn "Optimized Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
@@ -184,25 +187,6 @@ compilePyonToPyonAsm path text = do
   tc_mem_mod <- SystemF.TypecheckMem.typeCheckModule mem_mod
   --SystemF.inferSideEffects tc_mod
   ll_mod <- SystemF.lowerModule tc_mem_mod
-
-{-
-  putStrLn ""
-  putStrLn "Core"
-  print $ Core.pprCModule flat_mod
-
-  -- Simplify core
-  flat_mod <- return $ Core.partialEvaluate flat_mod
-  flat_mod <- Core.unpackDataStructures flat_mod
-  flat_mod <- Core.rewrite flat_mod
-  flat_mod <- return $ Core.partialEvaluate flat_mod
-  flat_mod <- Core.rewrite flat_mod
-  flat_mod <- return $ Core.partialEvaluate flat_mod
-
-  putStrLn ""
-  putStrLn "Simplified core"
-  print $ Core.pprCModule flat_mod
-  -- Convert to low-level form
-  ll_mod <- Core.lower flat_mod-}
 
   putStrLn ""
   putStrLn "Lowered"
@@ -234,15 +218,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   print $ LowLevel.pprModule ll_mod
   
   -- First round of optimizations
-  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
-  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
-  ll_mod <- LowLevel.inlineModule ll_mod
-  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
-  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
-  ll_mod <- LowLevel.inlineModule ll_mod
-  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
-  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
-  ll_mod <- LowLevel.inlineModule ll_mod
+  ll_mod <- iterateM (LowLevel.commonSubexpressionElimination >=>
+                      return . LowLevel.eliminateDeadCode >=>
+                      LowLevel.inlineModule) 3 ll_mod
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   ll_mod <- return $ LowLevel.clearImportedFunctionDefinitions ll_mod

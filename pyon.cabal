@@ -88,9 +88,10 @@ Executable pyon
     Untyped.TypeInferenceEval
     Untyped.Unification
     SystemF.Build
+    SystemF.Demand
+    SystemF.DemandAnalysis
     SystemF.DeadCode
     SystemF.DeadCodeSF
-    SystemF.DeadCodeMem
     SystemF.DictEnv
     SystemF.ElimPatternMatching
     SystemF.EtaReduce
