@@ -238,8 +238,13 @@ dceLetrec defs body = make_letrec <$> dceLocalDefGroup defs (dceStm body)
     make_letrec (defs', body') = foldr LetrecE body' defs'
 
 dceLocalDefGroup :: Group FunDef -> DCEM a -> DCEM ([Group FunDef], a)
-dceLocalDefGroup defs body =
-  dceDefGroup assume_function definiendum dce_def defs body
+dceLocalDefGroup defs body = do
+  (groups, use_map, body') <-
+    dceDefGroup assume_function definiendum dce_def defs body
+    
+  -- Annotate functions that are used once.  They will be inlined.
+  let ann_groups = map (fmap (setFunDefUses use_map)) groups
+  return (ann_groups, body')
   where
     assume_function fdef = assumeFunctionArities [fdef]
     dce_def (Def v f) = Def v <$> dceFun f
@@ -271,7 +276,7 @@ dceTopLevelDef (GlobalFunDef (Def v f)) = GlobalFunDef . Def v <$> dceFun f
 dceTopLevelDef (GlobalDataDef ddef) = GlobalDataDef <$> dceDataDef ddef
 
 dceDefGroup :: (forall b. a -> DCEM b -> DCEM b) -> (a -> Var) -> DCE a
-            -> Group a -> DCEM b -> DCEM ([Group a], b)
+            -> Group a -> DCEM b -> DCEM ([Group a], UseMap, b)
 dceDefGroup assume get_definiendum dce group m = do
   -- Find out which group members are used
   (body_uses, new_body) <- assume_defs $ takeUses m
@@ -280,10 +285,10 @@ dceDefGroup assume get_definiendum dce group m = do
     NonRec def 
       | not $ get_definiendum def `isUsedIn` body_uses ->
           -- This function is not used, we don't need to scan it
-          putUses body_uses >> return ([], new_body)
+          putUses body_uses >> return ([], body_uses, new_body)
       | otherwise -> do
           def' <- dce def
-          putUses body_uses >> return ([NonRec def'], new_body)
+          putUses body_uses >> return ([NonRec def'], body_uses, new_body)
     Rec defs -> do
       -- Split this group into minimal mutually recursive groups.
       -- First, find uses in each function.
@@ -296,18 +301,29 @@ dceDefGroup assume get_definiendum dce group m = do
           (partitioned_uses, groups) =
             partitionDefGroup annotated_uses body_uses
       putUses partitioned_uses
-      return (groups, new_body)
+      return (groups, partitioned_uses, new_body)
   where
     assume_defs m = foldr assume m $ groupMembers group
 
 dceTopLevelDefGroup :: Group GlobalDef
                     -> DCEM a
                     -> DCEM ([Group GlobalDef], a)
-dceTopLevelDefGroup group m =
-  dceDefGroup assume_function globalDefiniendum dceTopLevelDef group m
+dceTopLevelDefGroup group m = do
+  (groups, use_map, x) <-
+    dceDefGroup assume_function globalDefiniendum dceTopLevelDef group m
+
+  -- Annotate functions that are used once.  They will be inlined.
+  let ann_groups = map (fmap (annotate_uses use_map)) groups
+
+  return (groups, x)
   where
     assume_function (GlobalFunDef fdef) = assumeFunctionArities [fdef]
     assume_function (GlobalDataDef _) = id
+    
+    annotate_uses use_map (GlobalFunDef fdef) =
+      GlobalFunDef $ setFunDefUses use_map fdef
+    
+    annotate_uses _ ddef@(GlobalDataDef _) = ddef
 
 dceTopLevelDefGroups (group : groups) m = do
   (groups1, (groups2, x)) <-
