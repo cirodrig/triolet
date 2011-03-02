@@ -72,7 +72,8 @@ data Multiplicity =
   | OnceSafe        -- ^ Used once, not under lambda
   | ManySafe        -- ^ Used in multiple mutually-exclusive locations
   | OnceUnsafe      -- ^ Used once under a lambda
-  | ManyUnsafe      -- ^ Used many times 
+  | ManyUnsafe      -- ^ Used many times
+  deriving(Eq)
 
 showMultiplicity :: Multiplicity -> String
 showMultiplicity Dead = "0"

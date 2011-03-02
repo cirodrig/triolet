@@ -26,6 +26,7 @@ import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Builtins.Builtins
+import SystemF.Demand
 import SystemF.Floating
 import SystemF.MemoryIR
 import SystemF.Syntax
@@ -111,7 +112,7 @@ withMaybeValue v (Just val) m = withKnownValue v val m
 withDefValue :: Def Mem -> LR a -> LR a
 withDefValue (Def v f) m =
   let fun_info = funInfo $ fromFunM f
-  in withKnownValue v (ComplexValue (Just v) Nothing $ FunValue fun_info f) m
+  in withKnownValue v (ComplexValue (Just v) $ FunValue fun_info f) m
 
 -- | Add a function definition to the environment, but don't inline it
 withUninlinedDefValue :: Def Mem -> LR a -> LR a
@@ -327,20 +328,20 @@ rwExps es = mapAndUnzipM rwExp es
 rwExpReturn (exp, val) = return (exp, val)
     
 -- | Rewrite a variable expression and compute its value.
-rwVar original_expression inf v =
-  rwExpReturn . rewrite =<< lookupKnownValue v
+rwVar original_expression inf v = lookupKnownValue v >>= rewrite
   where
     rewrite (Just val)
         -- Replace with an inlined or trivial value
-      | Just (inl_value, val') <- asInlinedValue val = (inl_value, Just val')
-      
-      | Just cheap_value <- asTrivialValue val = (cheap_value, Just val)
+      | Just inl_value <- asInlinedValue val = rwExp inl_value
+
+      | Just cheap_value <- asTrivialValue val =
+          rwExpReturn (cheap_value, Just val)
 
         -- Otherwise, don't inline, but propagate the value
-      | otherwise = (original_expression, Just val)
+      | otherwise = rwExpReturn (original_expression, Just val)
     rewrite Nothing =
       -- Set up for copy propagation
-      (original_expression, Just $ VarValue inf v)
+      rwExpReturn (original_expression, Just $ VarValue inf v)
 
 rwApp :: ExpInfo -> ExpM -> [TypM] -> [ExpM] -> LR (ExpM, MaybeValue)
 rwApp inf op ty_args args = do
@@ -365,7 +366,7 @@ rwAppWithOperator inf op' op_val ty_args args =
      _ ->
        -- Apply simplification tecnhiques specific to this operator
        case op_val
-       of Just (ComplexValue _ _ (FunValue _ funm@(FunM fun))) ->
+       of Just (ComplexValue _ (FunValue _ funm@(FunM fun))) ->
             inline_function_call funm
 
           -- Use special rewrite semantics for built-in functions
@@ -468,7 +469,7 @@ rwLoadApp inf op' ty_args args = do
     -- Do we know what was stored here?
     loaded_value [_, addr_value] =
       case addr_value 
-      of Just (ComplexValue _ _ (StoredValue Value val)) ->
+      of Just (ComplexValue _ (StoredValue Value val)) ->
            Just (asTrivialValue val, Just val)
          _ -> Nothing
     loaded_value _ =
@@ -483,7 +484,7 @@ rwLoadBoxApp inf op' ty_args (addr_arg : excess_args) = do
   let load_exp = ExpM $ AppE inf op' ty_args [addr_arg']
       loaded_value =
         case addr_value
-        of Just (ComplexValue _ _ (StoredValue Boxed val)) -> Just val
+        of Just (ComplexValue _ (StoredValue Boxed val)) -> Just val
            _ -> Nothing
       
       -- Try to make a simplified expression
@@ -527,13 +528,13 @@ rwLet inf bind val body =
   case bind
   of MemVarP bind_var bind_rtype uses -> do
        (val', val_value) <- rwExp val
-       
+
        -- If the variable is used exactly once, then inline it.
        -- Otherwise, propagate the variable's known value.
        let local_val_value =
              case patMUses bind
-             of One -> Just $ setInlinedValue bind_var val' val_value
-                Many -> fmap (setTrivialValue bind_var) val_value
+             of One -> Just $ InlinedValue val
+                _ -> fmap (setTrivialValue bind_var) val_value
 
        -- Add the local variable to the environment while rewriting the body
        (body', body_val) <-
@@ -594,7 +595,7 @@ rwCase inf scrut alts = do
             Just eliminated_case -> rwExp eliminated_case
             Nothing  -> no_eliminate scrut' [altm]
     _ -> case scrut_val
-         of Just (ComplexValue _ _ (DataValue _ con _ ex_args margs)) -> do
+         of Just (ComplexValue _ (DataValue _ con _ ex_args margs)) -> do
               -- Case of known value.
               -- Select the appropriate alternative and discard others.
               -- If possible, eliminate the expression.
