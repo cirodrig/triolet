@@ -277,6 +277,7 @@ repr_PyonTuple4 :
 repr_Box : (val a : pure) -> box Repr a;
 
 repr_Boxed : (val a : pure) -> box Repr (Boxed a);
+repr_Referenced : (val a : pure) -> box Repr a -> box Repr (Referenced a);
 repr_Stream : (val t : val pure -> val pure) -> (val a : pure)
            -> box Repr (Stream t a);
 
@@ -284,6 +285,9 @@ repr_Stream : (val t : val pure -> val pure) -> (val a : pure)
 -- never be accessed.  At runtime, the reference will be an arbitrary pointer,
 -- possibly NULL.
 repr_EmptyReference : (val a : pure) -> box Repr a;
+
+repr_array : (val n : intindex) -> (val e : pure)
+          -> val IndexedInt n -> box Repr e -> box Repr (array n e);
 
 OpaqueTraversableDict_list : box TraversableDict list;
 

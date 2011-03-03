@@ -51,6 +51,7 @@ data OPEnv = OPEnv { opVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
                      -- Representation dictionaries, indexed by the
                      -- dictionary's parameter type
                    , opDictEnv :: MkDictEnv
+                   , opIntEnv :: IntIndexEnv
                    }
 
 newtype OP a = OP {runOP :: OPEnv -> Maybe ExpM -> IO a}
@@ -71,9 +72,12 @@ instance ReprDictMonad OP where
   withVarIDs f = OP $ \env mrarg -> runOP (f $ opVarSupply env) env mrarg
   withTypeEnv f = OP $ \env mrarg -> runOP (f $ opTypeEnv env) env mrarg
   withDictEnv f = OP $ \env mrarg -> runOP (f $ opDictEnv env) env mrarg
-
+  getIntIndexEnv = OP $ \env _ -> return (opIntEnv env)
   localDictEnv f m = OP $ \env rarg ->
     let env' = env {opDictEnv = f $ opDictEnv env}
+    in runOP m env' rarg
+  localIntIndexEnv f m = OP $ \env rarg ->
+    let env' = env {opIntEnv = f $ opIntEnv env}
     in runOP m env' rarg
 
 -- | Get the current return argument, and reset it.
@@ -94,8 +98,8 @@ withRetArg ra k = OP $ \env _ -> runOP k env (Just ra)
 setupEnvironment :: IdentSupply Var -> IO OPEnv
 setupEnvironment var_supply = do
   type_env <- readInitGlobalVarIO the_newCoreTypes
-  dict_env <- runFreshVarM var_supply createDictEnv
-  return (OPEnv var_supply type_env dict_env)
+  (dict_env, int_env) <- runFreshVarM var_supply createDictEnv
+  return (OPEnv var_supply type_env dict_env int_env)
 
 -------------------------------------------------------------------------------
 -- Transformations on IR data structures

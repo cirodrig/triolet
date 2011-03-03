@@ -61,6 +61,7 @@ data LREnv =
   , lrTypeEnv :: TypeEnv
     
   , lrDictEnv :: MkDictEnv
+  , lrIntEnv :: IntIndexEnv
   }
 
 newtype LR a = LR {runLR :: LREnv -> IO a}
@@ -82,8 +83,12 @@ instance ReprDictMonad LR where
   withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply env) env
   withTypeEnv f = LR $ \env -> runLR (f $ lrTypeEnv env) env
   withDictEnv f = LR $ \env -> runLR (f $ lrDictEnv env) env
+  getIntIndexEnv = LR $ \env -> return (lrIntEnv env)
   localDictEnv f m = LR $ \env ->
     let env' = env {lrDictEnv = f $ lrDictEnv env}
+    in runLR m env'
+  localIntIndexEnv f m = LR $ \env ->
+    let env' = env {lrIntEnv = f $ lrIntEnv env}
     in runLR m env'
 
 liftFreshVarM :: FreshVarM a -> LR a
@@ -102,6 +107,10 @@ withKnownValue v val m = LR $ \env ->
         IntMap.insert (fromIdent $ varID v) val mapping
       env' = env {lrKnownValues = insert_assignment $ lrKnownValues env}
   in runLR m env'
+  where
+    -- Debugging: Show the known value for this variable
+    trace_assignment =
+      traceShow (text "Simpl" <+> pprVar v <+> text "=" <+> pprKnownValue val)
 
 -- | Add a variable's value to the environment, if known
 withMaybeValue :: Var -> MaybeValue -> LR a -> LR a
@@ -532,8 +541,8 @@ rwLet inf bind val body =
        -- If the variable is used exactly once, then inline it.
        -- Otherwise, propagate the variable's known value.
        let local_val_value =
-             case patMUses bind
-             of One -> Just $ InlinedValue val
+             case multiplicity $ patMDmd bind
+             of OnceSafe -> Just $ InlinedValue val
                 _ -> fmap (setTrivialValue bind_var) val_value
 
        -- Add the local variable to the environment while rewriting the body
@@ -551,11 +560,13 @@ rwLet inf bind val body =
        -- Add the variable to the environment while rewriting the rhs
        (val', val_value) <-
          assume bind_var (OutRT ::: bind_type) $ rwExp val
+       let local_val_value =
+             fmap (setTrivialValue bind_var) val_value
 
        -- Add the local variable to the environment while rewriting the body
        (body', body_val) <-
          assume bind_var (ReadRT ::: bind_type) $
-         withMaybeValue bind_var val_value $
+         withMaybeValue bind_var local_val_value $
          rwExp body
            
        let ret_val = mask_local_variable bind_var body_val
@@ -570,6 +581,43 @@ rwLet inf bind val body =
     -- value, we have to forget about it.
     mask_local_variable bind_var ret_val =
       forgetVariables (Set.singleton bind_var) =<< ret_val
+
+{-
+rwLetBinding inf bind rhs mk_body =
+  case bind
+  of MemVarP bind_var bind_rtype uses 
+       | OnceSafe <- multiplicity uses ->
+           -- Inline this binding unconditionally.  Don't add the bound
+           -- variable to the type environment.
+           withMaybeValue bind_var (Just $ InlinedValue rhs) mk_body
+       | Decond (Just con) spc <- specificity uses -> do
+           tenv <- getTypeEnv
+           case unpackDataConApp tenv con rhs of
+             Just (ty_args, args) -> rwFieldBindings 
+               
+         deconDataConstructor con 
+           -- Deconstruct this binding if possible
+         case 
+
+-- | Attempt to deconstruct a let binding.
+--   If we've determined that the bound value is
+--   /only/ deconstructed, then try to individually bind the fields to local
+--   variables.
+
+deconLetBinding :: Var          -- ^ bound variable
+                -> Maybe Var    -- ^ constructor
+                -> [Specificity] -- ^ demands on fields
+                -> ExpM          -- ^ expression whose result is bound
+                -> LR ExpM       -- ^ body computation
+                -> LR ExpM       -- ^ simplifier of the let expression
+deconLetBinding pat_var mcon field_demands rhs do_body =
+  case rhs
+  of ExpM (AppE _ (ExpM (VarE _ op_var)) ty_args args)
+       | mcon == Just op_var -> do
+           tenv <- getTypeEnv
+           case lookupDataConWithType op_var tenv of
+             Just dcon -> undefined
+-}               
 
 rwLetrec inf defs body = withDefs defs $ \defs' -> do
   (body', body_value) <- rwExp body
@@ -596,15 +644,9 @@ rwCase inf scrut alts = do
             Nothing  -> no_eliminate scrut' [altm]
     _ -> case scrut_val
          of Just (ComplexValue _ (DataValue _ con _ ex_args margs)) -> do
-              -- Case of known value.
-              -- Select the appropriate alternative and discard others.
-              -- If possible, eliminate the expression.
-              let altm = find_alternative con
-                  arg_vals = map (>>= asTrivialValue) margs
-              m_elim <- elimCaseAlternative False inf altm ex_args arg_vals
-              case m_elim of
-                Just eliminated_case -> rwExp eliminated_case
-                Nothing -> no_eliminate scrut' [altm]
+              case_of_known_value scrut' con ex_args margs
+            Just (ComplexValue _ (StoredValue Referenced (ComplexValue _ (DataValue _ con _ ex_args margs)))) -> do
+              case_of_known_value scrut' con ex_args margs              
             _ -> no_eliminate scrut' alts
   where
     -- Find the alternative matching constructor @con@
@@ -612,6 +654,17 @@ rwCase inf scrut alts = do
       case find ((con ==) . altConstructor . fromAltM) alts
       of Just alt -> alt
          Nothing -> internalError "rwCase: Missing alternative"
+
+    case_of_known_value scrut' con ex_args margs = do
+      -- Case of known value.
+      -- Select the appropriate alternative and discard others.
+      -- If possible, eliminate the expression.
+      let altm = find_alternative con
+          arg_vals = map (>>= asTrivialValue) margs
+      m_elim <- elimCaseAlternative False inf altm ex_args arg_vals
+      case m_elim of
+        Just eliminated_case -> rwExp eliminated_case
+        Nothing -> no_eliminate scrut' [altm]
 
     -- Cannot eliminate this case statement.  Possibly eliminated
     -- some case alternatives.
@@ -629,12 +682,13 @@ rwCase inf scrut alts = do
 --   will fail.  Return the eliminated expression if elimination succeeded,
 --   @Nothing@ otherwise.
 --
---   If @bind_reference_values@ is 'True', then write references may be
---   given for the writable case fields, and they should be bound to local
---   variables.  Otherwise, those fields won't be bound.
+--   If @from_writer@ is 'True', then write references may be
+--   given for the writable case fields, and they should write to local
+--   variables.  Otherwise, read references may be given for those fields,
+--   and they should be assigned to new variables.
 elimCaseAlternative :: Bool -> ExpInfo -> AltM -> [TypM] -> [Maybe ExpM]
                     -> LR (Maybe ExpM)
-elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
+elimCaseAlternative from_writer inf (AltM alt) ex_args args
   | length (altExTypes alt) /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length args =
@@ -672,7 +726,8 @@ elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
       | okay_for_value_binding = do
           arg_exp <- MaybeT $ return arg
           return $ Just (pat, arg_exp)
-      | okay_for_reference_binding = do
+
+      | from_writer && okay_for_reference_binding = do
           -- Bind this expression to a local variable.  We can reuse the
           -- same variable that we were given.
           -- The expression is a writer function; apply it to the
@@ -686,6 +741,12 @@ elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
 
           let binder = localVarP (patMVar' pat) (patMType pat) dict_exp
           return $ Just (binder, initializer_exp)
+
+      | not from_writer && okay_for_reference_binding = do
+          -- Assign this expression to a local variable.
+          arg_exp <- MaybeT $ return arg
+          return $ Just (pat, arg_exp)
+
       | otherwise = mzero   -- Cannot bind this pattern
       where
         -- We can only bind value and boxed parameters this way
@@ -696,7 +757,6 @@ elimCaseAlternative bind_reference_values inf (AltM alt) ex_args args
              _ -> False
 
         okay_for_reference_binding =
-          bind_reference_values &&
           case patMRepr pat of {ReadPT -> True; _ -> False}
 
     bind_field _ _ = internalError "rwCase: Unexpected pattern"
@@ -792,12 +852,13 @@ rewriteLocalExpr :: Module Mem -> IO (Module Mem)
 rewriteLocalExpr mod = do
   withTheNewVarIdentSupply $ \var_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
-    denv <- runFreshVarM var_supply createDictEnv
+    (denv, ienv) <- runFreshVarM var_supply createDictEnv
     let global_known_values = initializeKnownValues tenv
     let env = LREnv { lrIdSupply = var_supply
                     , lrKnownValues = global_known_values
                     , lrTypeEnv = tenv
                     , lrDictEnv = denv
+                    , lrIntEnv = ienv
                     }
     runLR (rwModule mod) env
 

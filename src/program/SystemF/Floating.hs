@@ -13,6 +13,7 @@ module SystemF.Floating
         ContextExp(..),
         freshenContextExp,
         applyContext,
+        isTrivialExp,
         floatedParameters',
         floatModule)
 where
@@ -20,21 +21,28 @@ where
 import Prelude hiding(mapM)
 import Control.Applicative
 import Control.Monad hiding(forM, mapM)
+import Control.Monad.Trans
 import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Data.Traversable
+import Debug.Trace
+import Text.PrettyPrint.HughesPJ hiding(float)
 
 import Common.Error
 import Common.Identifier
 import Common.Supply
 import Common.MonadLogic
 import Builtins.Builtins
+import SystemF.Demand
+import qualified SystemF.DictEnv as DictEnv
 import SystemF.Rename
+import SystemF.ReprDict
 import SystemF.Syntax
 import SystemF.MemoryIR
+import SystemF.PrintMemoryIR
 import Type.Compare
 import Type.Environment
 import Type.Eval
@@ -152,6 +160,16 @@ computeInstantiatedType op_rtype args = apply_types op_rtype args
 
     bad_application = internalError "Unexpected type error during floating"
 
+-- | How to float a parameter of a data constructor or function.
+data FltParamType =
+    -- | Do not float this parameter
+    Don'tFloat
+    -- | Float this parameter by assigning its value to a local variable
+  | FloatParam ParamType Specificity
+    -- | Float this parameter by writing it into a local variable, then
+    --   copying the local variable
+  | FloatLocal Type Specificity
+
 -- | Determine which parameters of a data constructor application
 --   should be converted to direct style.  It's an error if the wrong
 --   number of type parameters is given.  Returns a list containing a
@@ -159,12 +177,14 @@ computeInstantiatedType op_rtype args = apply_types op_rtype args
 --   argument that should be converted.  The list length may be different
 --   from the number of operands in an appliation term.  Excess operands
 --   should not be floated.
+--
+--   Specificities are used to help decide whether to float reference fields.
+--   A reference field is not floated if a specificity is not provided.
 directStyleAppParameters :: DataConType
                          -> [TypM]
-                         -> [Maybe ParamType]
-directStyleAppParameters dcon_type ty_args
-  -- Float if all type arguments are supplied,
-  -- and the representation is Value or Boxed
+                         -> [Specificity]
+                         -> [FltParamType]
+directStyleAppParameters dcon_type ty_args spcs
   | length ty_args /= length (dataConPatternParams dcon_type) +
                       length (dataConPatternExTypes dcon_type) =
       internalError "directStyleAppParameters: Wrong number of type arguments"
@@ -172,50 +192,69 @@ directStyleAppParameters dcon_type ty_args
       let types = map fromTypM ty_args
           (field_types, _) =
             instantiateDataConTypeWithExistentials dcon_type types
-      in map floatable field_types
+      in zipWith floatable field_types (map Just spcs ++ repeat Nothing)
   where
-    -- Value and boxed operands are floatable
-    floatable (rrepr ::: ty) =
+    -- Value and boxed operands are floatable.
+    -- Read operands may be floated, depending on how they are demanded.
+    floatable (rrepr ::: ty) spc =
       case rrepr
-      of ValRT -> Just (ValPT Nothing ::: ty)
-         BoxRT -> Just (BoxPT ::: ty)
-         _ -> Nothing
+      of ValRT -> FloatParam (ValPT Nothing ::: ty) (fromMaybe Used spc)
+         BoxRT -> FloatParam (BoxPT ::: ty) (fromMaybe Used spc)
+         ReadRT -> case spc
+                   of Nothing -> Don'tFloat
+                      Just Unused -> Don'tFloat
+                      Just s -> FloatLocal ty s
 
 -- | Based on the operator variable, pick which arguments should be floated.
 --
 -- A Just value means the argument should be moved, and has the given type.
 -- If unknown, don't move an argument.
-floatedParameters :: TypeEnv -> Var -> [TypM] -> [Maybe ParamType]
-floatedParameters tenv op_var ty_args =
+floatedParameters :: TypeEnv -> Specificity -> Var -> [TypM] -> [FltParamType]
+floatedParameters tenv spc op_var ty_args =
   case lookupDataCon op_var tenv
   of Just dcon_type ->
        -- Move the movable fields of data constructors
-       directStyleAppParameters dcon_type ty_args ++ repeat Nothing
+       case spc
+       of Decond (Just con) spcs
+            | con /= op_var ->
+              internalError "floatedParameters: Invalid demand"
+            | otherwise ->
+              directStyleAppParameters dcon_type ty_args spcs ++ repeat Don'tFloat
+          _ ->
+            directStyleAppParameters dcon_type ty_args [] ++ repeat Don'tFloat
      Nothing
        | op_var `isPyonBuiltin` the_store ->
            -- Also move the argument of 'store', so that we can
            -- do store-load propagation 
            let [TypM store_type] = ty_args
-           in [Nothing, Just (ValPT Nothing ::: store_type), Nothing]
+           in [Don'tFloat,
+               FloatParam (ValPT Nothing ::: store_type) Used,
+               Don'tFloat]
        | op_var `isPyonBuiltin` the_storeBox ->
            -- Also move the argument of 'storeBox', so that we can
            -- do store-load propagation 
            let [TypM store_type] = ty_args
-           in [Just (BoxPT ::: store_type), Nothing]
+           in [FloatParam (BoxPT ::: store_type) Used,
+               Don'tFloat]
        | op_var `isPyonBuiltin` the_copy ->
            -- Move the source argument of 'copy' to increase the success rate
            -- of copy elimination
            let [TypM store_type] = ty_args
-           in [Nothing, Just (ReadPT ::: store_type), Nothing]
+           in [Don'tFloat,
+               FloatParam (ReadPT ::: store_type) Used,
+               Don'tFloat]
        | otherwise ->
-           repeat Nothing
+           repeat Don'tFloat
 
 -- | Determine which parameters should be floated.  Return True if the
 --   parameter should be floated, False otherwise.  For parameters where it's
 --   unknown, False is returned.
 floatedParameters' :: TypeEnv -> Var -> [TypM] -> [Bool]
 floatedParameters' tenv op ty_args =
-  map isJust $ floatedParameters tenv op ty_args
+  map is_floated $ floatedParameters tenv Used op ty_args
+  where
+    is_floated (FloatParam{}) = True
+    is_floated _ = False
 
 -------------------------------------------------------------------------------
 -- Floatable contexts
@@ -429,6 +468,10 @@ data FloatCtx =
              -- | The global type environment.  Local types are not added to
              --   the environment.
            , fcTypeEnv :: !TypeEnv
+             -- | Representation dictionaries in scope
+           , fcDictEnv :: MkDictEnv
+             -- | Indexed integers in scope
+           , fcIntEnv :: IntIndexEnv
              -- | IDs of readable reference variables that are not in
              -- @fcTypeEnv@.
            , fcReadVars :: IntSet.IntSet
@@ -479,8 +522,20 @@ instance Supplies Flt (Ident Var) where
   fresh = Flt $ \ctx -> do x <- supplyValue (fcVarSupply ctx)
                            return (x, [])
 
-getTypeEnv :: Flt TypeEnv
-getTypeEnv = Flt $ \ctx -> return (fcTypeEnv ctx, [])
+instance MonadIO Flt where
+  liftIO m = Flt (\_ -> do {x <- m; return (x, [])})
+
+instance ReprDictMonad Flt where
+  getVarIDs = Flt $ \ctx -> return (fcVarSupply ctx, [])
+  getTypeEnv = Flt $ \ctx -> return (fcTypeEnv ctx, [])
+  getDictEnv = Flt $ \ctx -> return (fcDictEnv ctx, [])
+  getIntIndexEnv = Flt $ \ctx -> return (fcIntEnv ctx, [])
+  localDictEnv f m = Flt $ \ctx ->
+    let ctx' = ctx {fcDictEnv = f $ fcDictEnv ctx}
+    in runFlt m ctx'
+  localIntIndexEnv f m = Flt $ \ctx ->
+    let ctx' = ctx {fcIntEnv = f $ fcIntEnv ctx}
+    in runFlt m ctx'
 
 -- | Float a binding, when the bound variable is a fresh variable.
 --   This should not be used to float preexisting bindings; use
@@ -528,15 +583,25 @@ grabContext m = Flt $ \ctx -> do
 --   depend on a binding that satisfies the predicate
 anchor :: (ContextItem -> Bool) -> Flt ExpM -> Flt ExpM
 anchor predicate m = do
-  (exp, dep_context, rn) <- grabContext $ do
+  (x, _) <- anchor' predicate (do {x <- m; return (x, ())})
+  return x
+
+anchor' :: (ContextItem -> Bool) -> Flt (ExpM, a) -> Flt (ExpM, a)
+anchor' predicate m = do
+  ((exp, other_data), dep_context, rn) <- grabContext $ do
     x <- m
     return (x, predicate)
 
-  return $ applyContext dep_context (rename rn exp)
+  return (applyContext dep_context (rename rn exp), other_data)
 
 -- | Put floated bindings here, if they depend on the specified variable
 anchorOnVar :: Var -> Flt ExpM -> Flt ExpM
 anchorOnVar v m = addLocalVar v $ anchor check m
+  where
+    check c = v `Set.member` ctxUses c
+
+anchorOnVar' :: Var -> Flt (ExpM, a) -> Flt (ExpM, a)
+anchorOnVar' v m = addLocalVar v $ anchor' check m
   where
     check c = v `Set.member` ctxUses c
 
@@ -578,13 +643,13 @@ addReadVar v m = Flt $ \ctx ->
   in runFlt m ctx'
 
 -- | Indicate that a variable is a local variable
-addLocalVar :: Var -> Flt ExpM -> Flt ExpM
+addLocalVar :: Var -> Flt a -> Flt a
 addLocalVar v m = Flt $ \ctx ->
   let ctx' = ctx {fcLocalVars = IntSet.insert (fromIdent $ varID v) $
                                 fcLocalVars ctx}
   in runFlt m ctx'
 
-addLocalVars :: [Var] -> Flt ExpM -> Flt ExpM
+addLocalVars :: [Var] -> Flt a -> Flt a
 addLocalVars vs m = Flt $ \ctx ->
   let ids = map (fromIdent . varID) vs
       ctx' = ctx {fcLocalVars = foldr IntSet.insert (fcLocalVars ctx) ids}
@@ -592,7 +657,8 @@ addLocalVars vs m = Flt $ \ctx ->
 
 -- | Add a pattern variable to the environment.
 --   If the pattern binds a readable variable, indicate that the variable is
---   a readable reference.  The pattern's type is ignored.
+--   a readable reference.  If the pattern binds a representation dictionary,
+--   add the dictionary to the environment.
 --
 --   A @LocalVarP@ is counted as a readable reference.
 --   It's only a readable reference in the body of a let-binding, not the rhs.
@@ -600,8 +666,9 @@ addPatternVar :: PatM -> Flt ExpM -> Flt ExpM
 addPatternVar pat m = addRnPatternVar mempty pat m
 
 -- | Rename the pattern and then add it to the environment.
+--
 --   The renaming is applied to the pattern-bound variables as well as the
---   types.
+--   pattern's types.
 --
 --   We use this when a binding is renamed and floated.
 addRnPatternVar :: Renaming -> PatM -> Flt ExpM -> Flt ExpM
@@ -610,6 +677,10 @@ addRnPatternVar rn pat =
   of MemVarP {}
        | ReadPT <- patMRepr pat -> addReadVar (rename rn $ patMVar' pat)
      LocalVarP {} -> addReadVar (rename rn $ patMVar' pat)
+     MemVarP pat_var ptype uses ->
+       let rn_pattern =
+             MemVarP (rename rn pat_var) (renameBinding rn ptype) uses
+       in saveReprDictPattern rn_pattern
      _ -> id
 
 addPatternVars ps x = foldr addPatternVar x ps
@@ -636,17 +707,17 @@ addRnPatternVars rn ps x = foldr (addRnPatternVar rn) x ps
 --   Other terms are not converted to direct style.
 --   Lambda expressions are long-distance floated if they would be flattened,
 --   or left in place otherwise.
-flattenApp :: ExpM -> Flt (ExpM, Context)
-flattenApp expression =
+flattenApp :: Specificity -> ExpM -> Flt (ExpM, Context)
+flattenApp spc expression =
   case fromExpM expression
   of AppE inf (ExpM (VarE _ op_var)) ty_args args ->
        -- Convert this expression to direct style
-       createFlattenedApp inf op_var ty_args args
+       createFlattenedApp spc inf op_var ty_args args
 
      AppE inf op ty_args args -> do
        -- Don't flatten this expresion.  Flatten subexpressions.
-       (op', op_context) <- flattenApp op
-       (args', arg_contexts) <- mapAndUnzipM flattenApp args
+       (op', op_context) <- flattenApp Used op
+       (args', arg_contexts) <- mapAndUnzipM (flattenApp Used) args
        let new_exp = ExpM $ AppE inf op' ty_args args'
        return (new_exp, concat (op_context : arg_contexts))
 
@@ -655,10 +726,10 @@ flattenApp expression =
        new_exp <- floatInExp expression
        return (new_exp, [])
 
-createFlattenedApp inf op_var ty_args args = do
+createFlattenedApp spc inf op_var ty_args args = do
   -- Determine which parameters should be moved
   tenv <- getTypeEnv
-  let moved = floatedParameters tenv op_var ty_args
+  let moved = floatedParameters tenv spc op_var ty_args
 
   -- Flatten arguments
   (unzip -> (args', concat -> arg_contexts)) <- zipWithM flatten_arg moved args
@@ -679,12 +750,17 @@ createFlattenedApp inf op_var ty_args args = do
 
   return (floated_expr, arg_contexts)
   where
-    flatten_arg Nothing arg =
+    flatten_arg Don'tFloat arg =
       -- This argument stays in place
-      flattenApp arg
+      flattenApp Used arg
+
+    -- DEBUG: Don't float local variables
+    {- flatten_arg (FloatLocal {}) arg =
+      -- This argument stays in place
+      flattenApp Used arg -}
 
     -- Special case: lambda (...) becomes a letfun and gets floated
-    flatten_arg (Just _) arg@(ExpM (LamE lam_info f)) = do
+    flatten_arg (FloatParam _ _) arg@(ExpM (LamE lam_info f)) = do
       f' <- floatInFun (LocalAnchor []) f
 
       -- Bind the function to a new variable and float it outward
@@ -695,25 +771,77 @@ createFlattenedApp inf op_var ty_args args = do
       -- Return the function variable
       return (ExpM $ VarE inf tmpvar, [])
 
-    flatten_arg (Just param_type) arg = do
-      (arg_expr, subcontext) <- flattenApp arg
+    flatten_arg (FloatParam param_type spc) arg = do
+      (arg_expr, subcontext) <- flattenApp spc arg
 
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
       if isTrivialExp arg_expr
         then return (arg_expr, subcontext)
-        else do
-          tmpvar <- newAnonymousVar ObjectLevel
-          let binding =
-                contextItem $ LetCtx inf (memVarP tmpvar param_type) arg_expr
-          return (ExpM $ VarE inf tmpvar, subcontext ++ [binding])
+        else flatten_mem_arg arg_expr subcontext param_type spc
+  
+    flatten_arg (FloatLocal ty spc) arg = do
+      (arg_expr, subcontext) <- flattenApp spc arg
+
+      -- If this argument is trivial, leave it where it is.
+      -- Otherwise, bind it to a new variable.
+      if isTrivialExp arg_expr
+        then return (arg_expr, subcontext)
+        else flatten_local_arg arg_expr subcontext ty spc 
+
+    flatten_mem_arg arg_expr subcontext param_type spc = do
+      tmpvar <- newAnonymousVar ObjectLevel
+      let binder = setPatMDmd (Dmd ManyUnsafe spc) $ memVarP tmpvar param_type 
+          binding = contextItem $ LetCtx inf binder arg_expr
+      return (ExpM $ VarE inf tmpvar, binding : subcontext)
+
+    flatten_local_arg arg_expr subcontext param_type spc = do
+      -- Write the value to a temporary variable
+      tmpvar <- newAnonymousVar ObjectLevel
+      dict <- withReprDict param_type return
+      let binder = setPatMDmd (Dmd ManyUnsafe spc) $
+                   localVarP tmpvar param_type dict
+          initializer = ExpM $ AppE defaultExpInfo arg_expr []
+                        [ExpM $ VarE defaultExpInfo tmpvar]
+          binding = contextItem $ LetCtx inf binder initializer
+
+      -- Copy the value to its destination.  The copy should be
+      -- eliminated by DCE later.
+      let copy = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
+          tmpvar_exp = ExpM $ VarE inf tmpvar
+          use = ExpM $ AppE defaultExpInfo copy [TypM param_type] [dict, tmpvar_exp]
+      return (use, binding : subcontext)
 
 floatInExp :: ExpM -> Flt ExpM
-floatInExp (ExpM expression) =
+floatInExp = floatInExpDmd unknownDmd
+
+-- | Perform floating on an expression in the RHS of a let statement.
+--
+--   The locally floated bindings are returned, and should be
+--   placed outside the let:
+--
+--   > let FLOATED_BINDINGS
+--   > in let ORIGINAL_BINDING
+--   >    in ORIGINAL_BODY
+floatInExpRhs :: Dmd -> ExpM -> Flt (ExpM, Context)
+floatInExpRhs dmd expressionM@(ExpM expression) =
+  case expression
+  of AppE {} -> floatInApp dmd expressionM
+     _ -> do e <- floatInExpDmd dmd expressionM
+             return (e, [])
+
+-- | Perform floating on an expression whose result is demanded in a known way.
+--
+--   Demand information is taken from variable bindings.  It is produced by
+--   demand analysis.
+floatInExpDmd :: Dmd -> ExpM -> Flt ExpM
+floatInExpDmd dmd (ExpM expression) =
   case expression
   of VarE {} -> return $ ExpM expression
      LitE {} -> return $ ExpM expression
-     AppE {} -> floatInApp (ExpM expression)
+     AppE {} -> do
+       (new_expression, ctx) <- floatInApp dmd (ExpM expression)
+       return $ applyContext ctx new_expression
      LamE inf f -> do
        f' <- floatInFun (LocalAnchor []) f
        return $ ExpM $ LamE inf f'
@@ -723,29 +851,28 @@ floatInExp (ExpM expression) =
        floatInExp $ ExpM $ LetfunE inf (NonRec (Def (patMVar' pat) f)) body
 
      LetE inf pat rhs body ->
-       floatInLet inf pat rhs body
+       floatInLet dmd inf pat rhs body
 
      LetfunE inf defs body ->
-       floatInLetfun inf defs body
+       floatInLetfun dmd inf defs body
 
      CaseE inf scr alts ->
-       floatInCase inf scr alts
+       floatInCase dmd inf scr alts
 
-floatInApp :: ExpM -> Flt ExpM
-floatInApp expression = do
+floatInApp :: Dmd -> ExpM -> Flt (ExpM, Context)
+floatInApp dmd expression = do
   -- Flatten the expression and catch any floated bindings that depend on
   -- local variables
   ((new_expression, local_context), dependent_context, rn) <-
     grabContext flatten_expression 
   
   -- Put the dependent context inside the local context
-  return $ applyContext local_context $
-           applyContext dependent_context $
-           rename rn new_expression
+  let context = dependent_context ++ local_context
+  return (rename rn new_expression, context)
   where 
     flatten_expression = do
       -- Flatten the expression
-      result@(_, local_context) <- flattenApp expression
+      result@(_, local_context) <- flattenApp (specificity dmd) expression
     
       -- Find the new variable bindings that were created
       let local_defs = IntSet.fromList $ map (fromIdent . varID) $
@@ -757,34 +884,43 @@ floatInApp expression = do
 
       return (result, check)
 
-floatInLet inf pat rhs body =
+floatInLet dmd inf pat rhs body =
   case pat
-  of MemVarP pat_var pat_type _ -> do
+  of MemVarP pat_var pat_type pat_dmd -> do
        -- Float the RHS
-       rhs' <- floatInExp rhs
+       (rhs', rhs_context) <- floatInExpRhs pat_dmd rhs
        if isFloatableSingletonParamType pat_type
          then do
            -- Float this binding.  Since the binding may be combined with
            -- other bindings, set the uses to 'many'.
-           rn <- floatAndRename $ LetCtx inf (setPatMUses Many pat) rhs'
+           rn <- floatAndRename $ LetCtx inf (setPatMUses Many pat) $
+                 applyContext rhs_context rhs'
 
            -- Rename and continue processing the body
-           addPatternVar pat $ floatInExp $ rename rn body
-         else do
-           body' <- addPatternVar pat $ anchorOnVar pat_var $ floatInExp body
-           return $ ExpM $ LetE inf pat rhs' body'
+           addRnPatternVar rn pat $ floatInExpDmd dmd $ rename rn body
+         else unfloated_rhs rhs_context pat rhs'
 
-     LocalVarP pat_var pat_type pat_dict uses -> do
+     LocalVarP pat_var pat_type pat_dict pat_dmd -> do
        -- Float the dictionary argument
        pat_dict' <- floatInExp pat_dict
-       rhs' <- anchorOnVar pat_var $ floatInExp rhs
-       body' <- addPatternVar pat $ anchorOnVar pat_var $ floatInExp body
-       let pat' = LocalVarP pat_var pat_type pat_dict' uses
-       return $ ExpM $ LetE inf pat' rhs' body'
+       let pat' = LocalVarP pat_var pat_type pat_dict' dmd
+       (rhs', rhs_context) <- anchorOnVar' pat_var $ floatInExpRhs pat_dmd rhs
+       unfloated_rhs rhs_context pat' rhs'
 
      MemWildP {} -> internalError "floatInLet"
+  where
+    -- The let-bound variable was not floated.  Process the body and rebuild
+    -- a let expression.
+    unfloated_rhs rhs_context new_pat new_rhs = do
+      -- Float in the body of the let statement
+      body' <- addPatternVar new_pat $
+               anchorOnVar (patMVar' new_pat) $ floatInExpDmd dmd body
 
-floatInLetfun inf defs body = do
+      -- Floated bindings from RHS are applied to the entire let-expression
+      let new_expression = ExpM $ LetE inf new_pat new_rhs body'
+      return $ applyContext rhs_context new_expression
+
+floatInLetfun dmd inf defs body = do
   -- Float the contents of these functions.  If it's a recursive binding,
   -- don't float anything that mentions one of the local functions.
   defs' <-
@@ -796,7 +932,7 @@ floatInLetfun inf defs body = do
   rn <- floatAndRename (LetfunCtx inf defs')
   
   -- Float the body
-  floatInExp $ rename rn body
+  floatInExpDmd dmd $ rename rn body
   where
     def_vars = [v | Def v _ <- defGroupMembers defs]
     
@@ -805,14 +941,14 @@ floatInLetfun inf defs body = do
       f' <- floatInFun (LocalAnchor local_vars) f
       return (Def v f')
 
-floatInCase inf scr alts = do
+floatInCase dmd inf scr alts = do
   scr' <- floatInExp scr
   floatable <- is_floatable scr'
   if floatable
     then do rn <- floatAndRename ctx
             -- The floated variables were renamed. 
             -- Add the /renamed/ pattern variables to the environment.
-            addRnPatternVars rn alt_params $ floatInExp $ rename rn alt_body
+            addRnPatternVars rn alt_params $ floatInExpDmd dmd $ rename rn alt_body
     else do alts' <- mapM floatInAlt alts
             return $ ExpM $ CaseE inf scr' alts'
   where
@@ -916,8 +1052,11 @@ floatModule :: Module Mem -> IO (Module Mem)
 floatModule (Module mod_name defss exports) =
   withTheNewVarIdentSupply $ \id_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
+    (dict_env, int_env) <- runFreshVarM id_supply createDictEnv
     let flt_env = FloatCtx {fcVarSupply = id_supply,
                             fcTypeEnv = tenv,
+                            fcDictEnv = dict_env,
+                            fcIntEnv = int_env,
                             fcReadVars = IntSet.empty}
     defss' <- runTopLevelFlt float_defss flt_env
     (unzip -> (export_defs, exports')) <-

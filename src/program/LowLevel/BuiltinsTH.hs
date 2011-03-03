@@ -217,12 +217,16 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_histogram) |])
   , (PyonName module_stream "histogramArray",
      Right [| pyonBuiltin (SystemF.the_histogramArray) |])
+  , (PyonName module_structures "repr_array",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_array |])
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
   , (PyonName module_structures "repr_Boxed",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Boxed |])
   , (PyonName module_structures "repr_Stream",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Stream |])
+  , (PyonName module_structures "repr_Referenced",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_Referenced |])
   , (PyonName module_structures "repr_EmptyReference",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_EmptyReference |])
   {-, (PyonName module_structures "complex_pass_conv",

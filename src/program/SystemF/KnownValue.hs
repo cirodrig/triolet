@@ -152,9 +152,9 @@ resultOfWriterValue (VarValue _ _) = Nothing
 resultOfWriterValue (InlinedValue _) = Nothing
 resultOfWriterValue (ComplexValue _ (WriterValue kv)) = Just kv
 resultOfWriterValue (ComplexValue _ (FunValue _ _)) = Nothing
-resultOfWriterValue _ =
+resultOfWriterValue v =
   -- Other values are not valid
-  internalError "resultOfWriterValue"
+  internalError $ "resultOfWriterValue " ++ show (pprKnownValue v)
 
 -- | Remove references to any of the given variables in the known value.
 --   The given variables may not include data constructors.
@@ -266,6 +266,7 @@ dataConValue :: ExpInfo
              -> [MaybeValue]       -- ^ Value arguments to the constructor
              -> MaybeValue
 dataConValue inf d_type dcon_type ty_args val_args =
+  trace "dataConValue" $
   dataConstructorValue inf True d_type dcon_type ty_args val_args
 
 -- | Construct a known value for an expression that was satisfied by a 
@@ -278,6 +279,7 @@ patternValue :: ExpInfo
              -> [MaybeValue]       -- ^ Value arguments to the constructor
              -> MaybeValue
 patternValue inf d_type dcon_type ty_args ex_vars val_args =
+  trace "patternValue" $
   let data_con_ty_args = ty_args ++ [TypM (VarT v) | v <- ex_vars]
   in dataConstructorValue inf False d_type dcon_type data_con_ty_args val_args
 

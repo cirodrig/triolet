@@ -250,7 +250,9 @@ dmdLetE spc inf binder rhs body = do
   case multiplicity demand of
     Dead -> return body'        -- RHS is eliminated
     _ -> do
-      -- Must also mask the RHS, since it could mention the local variable
+      -- Must also mask the RHS, since it could mention the local variable.
+      -- Mentions in the RHS only define the variable; we don't count them 
+      -- as uses.
       rhs' <- maskDemand (patMVar' binder) $ dmdExp Used rhs
       binder' <- elim_dead_code_in_binder
       return $ ExpM $ LetE inf (setPatMDmd demand binder') rhs' body'
