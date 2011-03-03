@@ -38,15 +38,18 @@ hrFun (FunM f) =
 etaReduceFunction f =
   let out_param = last $ funParams f
       params = init $ funParams f
-      body = etaReduceExp (patMVar out_param) $ funBody f
+      mbody = etaReduceExp (patMVar out_param) $ funBody f
       ret_type = FunT (patMParamType out_param) (fromRetM (funReturn f))
-  in f { funParams = params
-       , funBody = body
-       , funReturn = RetM (BoxRT ::: ret_type)}
+  in case mbody
+     of Just body -> f { funParams = params
+                       , funBody = body
+                       , funReturn = RetM (BoxRT ::: ret_type)}
+        Nothing -> noEtaReduceFunction f
 
 -- | Perform eta-reduction inside a function, but don't eta-reduce the function
 noEtaReduceFunction f =
-  f {funBody = etaReduceExp Nothing $ funBody f}
+  f {funBody = case etaReduceExp Nothing $ funBody f
+               of Just e -> e}
 
 -- | Eta-reduce a lambda function, producing a new expression.  If the
 --   function was eliminated, the new expression is the reduced function body.
@@ -63,7 +66,14 @@ hrLambdaFun inf (FunM f) =
 
 -- | When eta-reducing an expression, the argument to be stripped is passed
 --   along as a parameter.
-etaReduceExp :: Maybe Var -> ExpM -> ExpM
+--
+--   Because eta reduction causes side effects to be delayed, we
+--   conservatively disallow eta reduction if there is a locally allocated
+--   variable in the scope of the functions that are being modified.
+--
+--   TODO: Refactor into a non-failing recursive transformer and a failing
+--   eta-reducer.
+etaReduceExp :: Maybe Var -> ExpM -> Maybe ExpM
 etaReduceExp strip_arg (ExpM expression) =
   case expression
   of VarE {} -> can't_strip
@@ -83,30 +93,42 @@ etaReduceExp strip_arg (ExpM expression) =
                      _ -> case last args'
                           of ExpM (VarE _ arg_v) | v == arg_v -> init args'
                              _ -> failed
-       in stripped_args `seq` ExpM (AppE inf op' ty_args stripped_args)
-     LamE inf f -> hrLambdaFun inf f
-     LetE inf binder val body ->
+       in stripped_args `seq`
+          return (ExpM (AppE inf op' ty_args stripped_args))
+     LamE inf f -> return $ hrLambdaFun inf f
+     LetE inf (LocalVarP pat_var pat_type pat_dict pat_dmd) val body ->
+       case strip_arg
+       of Just _ -> Nothing -- Can't eta-reduce
+          Nothing -> do
+            let val' = hrNonTail val
+                dict' = hrNonTail pat_dict
+                pat' = LocalVarP pat_var pat_type dict' pat_dmd
+            body' <- hrTail body
+            return $ ExpM (LetE inf pat' val' body')
+     LetE inf binder val body -> do
        let val' = hrNonTail val
-           body' = hrTail body
-       in ExpM (LetE inf binder val' body')
-     LetfunE inf defs body ->
+       body' <- hrTail body
+       return $ ExpM (LetE inf binder val' body')
+     LetfunE inf defs body -> do
        let defs' = fmap hrDef defs
-           body' = hrTail body
-       in ExpM (LetfunE inf defs' body')
-     CaseE inf scr alts ->
+       body' <- hrTail body
+       return $ ExpM (LetfunE inf defs' body')
+     CaseE inf scr alts -> do
        let scr' = hrNonTail scr
-           alts' = map (etaReduceAlt strip_arg) alts
-       in ExpM (CaseE inf scr' alts')
+       alts' <- mapM (etaReduceAlt strip_arg) alts
+       return $ ExpM (CaseE inf scr' alts')
   where
-    hrNonTail e = etaReduceExp Nothing e
+    hrNonTail e = case etaReduceExp Nothing e
+                  of Just e' -> e'
     hrTail e = etaReduceExp strip_arg e
 
     failed = internalError "etaReduceExp"
 
     -- This expression can't be eta-reduced
     can't_strip = case strip_arg
-                  of Nothing -> ExpM expression
+                  of Nothing -> return $ ExpM expression
                      Just _ -> failed
 
-etaReduceAlt strip_arg (AltM alt) =
-  AltM $ alt {altBody = etaReduceExp strip_arg $ altBody alt}
+etaReduceAlt strip_arg (AltM alt) = do
+  body <- etaReduceExp strip_arg $ altBody alt
+  return $ AltM $ alt {altBody = body}
