@@ -41,6 +41,36 @@ function inline repr_Boxed (unit _) -> owned {
   repr_Box_value;
 };
 
+// Exactly the same as repr_Box, but it has a different System F type
+function inline repr_Referenced (unit _, owned elt_repr) -> owned {
+  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
+  ret @! PassConv.size = sizeof pointer;
+  ret @! PassConv.align = alignof pointer;
+
+  letrec {
+    function copy (pointer src, pointer dst) -> () {
+      // Allocate some new memory
+      new_obj = pointer primcall pyon_alloc (elt_repr @! PassConv.size);
+
+      // Copy into it
+      () = () call (elt_repr @! PassConv.copy) (pointer load src, new_obj);
+      !dst = new_obj;
+      ();
+    }
+  };
+  ret @! PassConv.copy = copy;
+
+  letrec {
+    function finalize (pointer self) -> () {
+      contents = pointer load self;
+      () = () call (elt_repr @! PassConv.finalize) (contents);
+      () primcall pyon_dealloc (contents);
+    }
+  };
+  ret @! PassConv.finalize = finalize;
+  ret;
+};
+
 // A reference to an "empty" object.
 // The referenced object will never be accessed.  The reference does not
 // necessarily point to a valid address, depending on how the memory allocator
@@ -64,6 +94,43 @@ function inline repr_EmptyReference (unit _) -> owned {
 // Exactly the same as repr_Box, but it has a different System F type
 function inline repr_Stream (unit _, unit _) -> owned {
   repr_Box_value;
+};
+
+function inline repr_array
+  (unit _, unit _, IndexedInt count, owned elt_repr) -> owned {
+  IndexedInt {size} = count;
+  typedef elt_type = bytes(value elt_repr @! PassConv.size,
+                           value elt_repr @! PassConv.align);
+  typedef array_type = const_array(value count, elt_type);
+
+  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
+  ret @! PassConv.size = sizeof array_type;
+  ret @! PassConv.align = alignof array_type;
+
+  elt_copy = elt_repr @! PassConv.copy;
+  letrec {
+    function copy (pointer src, pointer dst) -> () {
+      _ = while (int i = int 0) (i < size) {
+        () = () call elt_copy (src @ array_type[i], dst @ array_type[i]);
+        i + int 1;
+      };
+      ();
+    }
+  };
+  ret @! PassConv.copy = copy;
+
+  elt_finalize = elt_repr @! PassConv.finalize;
+  letrec {
+    function finalize (pointer self) -> () {
+      _ = while (int i = int 0) (i < size) {
+        () = () call elt_finalize (self @ array_type[i]);
+        i + int 1;
+      };
+      ();
+    }
+  };
+  ret @! PassConv.finalize = finalize;
+  ret;
 };
 
 // Parameter-passing convention dictionary of ints
