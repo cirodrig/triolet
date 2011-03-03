@@ -78,9 +78,9 @@ data Multiplicity =
 showMultiplicity :: Multiplicity -> String
 showMultiplicity Dead = "0"
 showMultiplicity OnceSafe = "1"
-showMultiplicity ManySafe = "∞"
+showMultiplicity ManySafe = "*"
 showMultiplicity OnceUnsafe = "1+"
-showMultiplicity ManyUnsafe = "∞+"
+showMultiplicity ManyUnsafe = "*+"
 
 safeMultiplicity :: Multiplicity -> Bool
 safeMultiplicity Dead = True
