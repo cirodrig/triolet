@@ -3,6 +3,8 @@
 module LowLevel.InitializeBuiltins(initializeLowLevelBuiltins)
 where
   
+import Prelude hiding(catch)
+import Control.Exception
 import Control.Monad
 import qualified Data.Map as Map
 import Data.Maybe
@@ -85,8 +87,12 @@ lowerBuiltinFunType :: IdentSupply Type.Var.Var
                     -> IO FunctionType
 lowerBuiltinFunType v_ids type_env con =
   case Type.Environment.lookupType con type_env
-  of Just (BoxRT ::: ty) -> do
-       Type.Var.runFreshVarM v_ids $ lowerFunctionType type_env ty
+  of Just (BoxRT ::: ty) ->
+       Type.Var.runFreshVarM v_ids (lowerFunctionType type_env ty) `catch`
+       \(exc :: SomeException) -> do
+         putStrLn $ "Error while processing builtin '" ++ show con ++ "'"
+         throwIO exc
+
      Just _ -> internalError $
                "lowerBuiltinFunType: Incompatible representation for " ++ show con
      Nothing -> internalError $
