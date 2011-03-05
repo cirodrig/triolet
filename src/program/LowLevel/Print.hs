@@ -105,6 +105,10 @@ pprFunSignature domain range =
 pprFunDef :: FunDef -> Doc
 pprFunDef (Def v f) =
   let intro = if isPrimFun f then text "procedure" else text "function"
+      uses = case funUses f
+             of ZeroUses -> text "[0]"
+                OneUse -> text "[1]"
+                ManyUses -> empty
       inl = if funInlineRequest f then text "INLINE" else empty
       param_doc = map pprVarLong $ funParams f
       ret_doc = map pprValueType $ funReturnTypes f
@@ -112,7 +116,7 @@ pprFunDef (Def v f) =
       local_doc = if funFrameSize f == 0
                   then empty
                   else text "frame size:" <+> text (show $ funFrameSize f)
-  in intro <+> inl <+> leader <+> text "=" $$
+  in intro <+> uses <+> inl <+> leader <+> text "=" $$
      nest 4 local_doc $$
      nest 4 (pprBlock (funBody f))
 
