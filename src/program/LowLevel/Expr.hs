@@ -169,7 +169,7 @@ pprExpr (CAExpr op args) = foldr1 (\x y -> x <+> pprInfixCAOp op <+> y) $
                            map pprExprParens args
 pprExpr (BinExpr op l r) = pprBinOp op <+> pprExprParens l <+> pprExprParens r
 pprExpr (UnExpr op e) = pprUnOp op <+> pprExprParens e
-
+pprExpr GetFramePExpr = text "GetFrameP"
 
 -- | A lookup trie for matching expressions.
 --
