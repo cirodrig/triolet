@@ -80,6 +80,15 @@ evalCSE rt m = CSET $ \a env -> do
 runCSEF :: CSEF a -> CSE a
 runCSEF m = CSET $ \a env -> lift $ runCSET m a env
 
+-- | Add a definition group's arities to the environment.
+withDefs :: Group FunDef -> CSET m a -> CSET m a
+withDefs defs m = CSET $ \a env ->
+  let a' = foldr insert_def a $ groupMembers defs
+  in runCSET m a' env
+  where
+    insert_def (Def v f) arity_map =
+      insertArity v (length $ funParams f) arity_map
+
 -------------------------------------------------------------------------------
 
 findArity :: Monad m => Var -> CSET m (Maybe Int)
@@ -178,19 +187,15 @@ cseCall cc op args = do
     check_op (op', mop_expr) args' marg_exprs
       | cc /= ClosureCall =
           no_expr op' args'     -- Not a closure function
-      | Nothing <- marg_exprs =
-          no_expr op' args'     -- Can't construct expressions for arguments
       | Just op_expr <- mop_expr,
-        Just (arity, op_oper, op_args) <- fromAppExpr op_expr,
-        Just arg_exprs <- marg_exprs =
-          application arity op' args' op_oper op_args arg_exprs
+        Just (arity, op_oper, op_args) <- fromAppExpr op_expr =
+          application arity op' args' op_oper op_args marg_exprs
       | Just op_expr <- mop_expr,
-        VarV op_var <- op', 
-        Just arg_exprs <- marg_exprs = do
+        VarV op_var <- op' = do
           marity <- findArity op_var
           case marity of
             Just arity ->
-              application arity op' args' op_expr [] arg_exprs
+              application arity op' args' op_expr [] marg_exprs
             Nothing -> no_expr op' args'
       | otherwise =
           no_expr op' args'     -- Can't determine arity of operator
@@ -200,14 +205,17 @@ cseCall cc op args = do
 
     -- A closure-call appliction with known arity was found.
     -- If it's saturated, then generate a fully saturated application.
-    -- If it's undersaturated, then add an expression to the environment.
+    -- If it's undersaturated, then add the new value to the environment.
     --
     -- The atom is (CallA ClosureCall op_val arg_vals).
     -- The expression is (appExpr arity op_expr (op_arg_exprs ++ arg_exprs)).
-    application arity op_val arg_vals op_expr op_arg_exprs arg_exprs =
-      case (length op_arg_exprs + length arg_exprs) `compare` arity
-      of LT -> -- Undersaturated
-           return (rebuild_call, Just [Just applied_expr])
+    application arity op_val arg_vals op_expr op_arg_exprs marg_exprs =
+      case (length op_arg_exprs + length arg_vals) `compare` arity
+      of LT | Just arg_exprs <- marg_exprs -> -- Undersaturated
+           -- Construct an expression for the partial application value
+           let applied_expr = appExpr arity op_expr (op_arg_exprs ++ arg_exprs)
+           in return (rebuild_call, Just [Just applied_expr])
+            | otherwise -> no_expr op_val arg_vals
          EQ | null op_arg_exprs -> -- Original call was saturated
                 return (rebuild_call, Nothing) 
             | otherwise -> do -- Original call was unsaturated; now saturated
@@ -223,9 +231,6 @@ cseCall cc op args = do
                 -- TODO: Optimize this case
                 return (rebuild_call, Nothing)
       where
-        -- The expression representing this partial application
-        applied_expr = appExpr arity op_expr (op_arg_exprs ++ arg_exprs)
-        
         -- Rebuild the call expression with no changes
         rebuild_call = CallA ClosureCall op_val arg_vals
         
@@ -257,9 +262,15 @@ cseStm statement =
          Just es -> zipWithM_ assign_variable lhs es
        lift $ bindAtom lhs rhs'
        cseStm stm
-     LetrecE defs stm -> do
-       lift . emitLetrec =<< runCSEF (mapM cseDef defs)
-       cseStm stm
+     LetrecE defgroup stm -> do
+       let cse_defs =
+             -- If this definition group is recursive, add arities to the
+             -- environment
+             case defgroup
+             of NonRec def -> liftM NonRec $ cseDef def
+                Rec defs   -> withDefs defgroup $ liftM Rec $ mapM cseDef defs
+       lift . emitLetrec =<< runCSEF cse_defs
+       withDefs defgroup $ cseStm stm
      SwitchE scr alts ->
        cseVal' scr >>= evaluate_switch alts
      ReturnE atom -> do
