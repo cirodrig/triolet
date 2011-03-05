@@ -65,7 +65,7 @@ cvtStm statement =
     cvtAlt (lit, stm) = (,) lit <$> cvtStm stm
        
 cvtFun :: Fun -> FreshVarM Fun
-cvtFun f = mkFun (funConvention f) False (funFrameSize f) (funParams f)
+cvtFun f = mkFun (funConvention f) (funInlineRequest f) (funFrameSize f) (funParams f)
            (funReturnTypes f) <$> cvtStm (funBody f)
 
 cvtFunDef = cvtDef cvtFun
