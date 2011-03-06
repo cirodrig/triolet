@@ -356,7 +356,6 @@ dataConstructorValue' inf is_constructor d_type dcon_type ty_args val_args
 
     -- The data constructor fields.  If there are more arguments, they number 
     -- one, and are the output pointer.
-    -- Discard inlining directives.
     field_args = take num_expected_args val_args
 
     -- If all type arguments and fields are present, this is the data value

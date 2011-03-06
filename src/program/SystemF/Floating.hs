@@ -724,17 +724,21 @@ addRnPatternVars rn ps x = foldr (addRnPatternVar rn) x ps
 --   Other terms are not converted to direct style.
 --   Lambda expressions are long-distance floated if they would be flattened,
 --   or left in place otherwise.
-flattenApp :: Specificity -> ExpM -> Flt (ExpM, Context)
-flattenApp spc expression =
+--
+--   Initializers (copy and store calls) are floated only if
+--   @float_initializers@ is True.  They should only be floated when the
+--   application appears in the RHS of an assignment that can be eliminated.
+flattenApp :: Bool -> Specificity -> ExpM -> Flt (ExpM, Context)
+flattenApp float_initializers spc expression =
   case fromExpM expression
   of AppE inf (ExpM (VarE _ op_var)) ty_args args ->
        -- Convert this expression to direct style
-       createFlattenedApp spc inf op_var ty_args args
+       createFlattenedApp float_initializers spc inf op_var ty_args args
 
      AppE inf op ty_args args -> do
        -- Don't flatten this expresion.  Flatten subexpressions.
-       (op', op_context) <- flattenApp Used op
-       (args', arg_contexts) <- mapAndUnzipM (flattenApp Used) args
+       (op', op_context) <- flattenApp False Used op
+       (args', arg_contexts) <- mapAndUnzipM (flattenApp False Used) args
        let new_exp = ExpM $ AppE inf op' ty_args args'
        return (new_exp, concat (op_context : arg_contexts))
 
@@ -743,7 +747,7 @@ flattenApp spc expression =
        new_exp <- floatInExp expression
        return (new_exp, [])
 
-createFlattenedApp spc inf op_var ty_args args = do
+createFlattenedApp float_initializers spc inf op_var ty_args args = do
   -- Determine which parameters should be moved
   tenv <- getTypeEnv
   let moved = floatedParameters tenv spc op_var ty_args
@@ -769,12 +773,7 @@ createFlattenedApp spc inf op_var ty_args args = do
   where
     flatten_arg Don'tFloat arg =
       -- This argument stays in place
-      flattenApp Used arg
-
-    -- DEBUG: Don't float local variables
-    {- flatten_arg (FloatLocal {}) arg =
-      -- This argument stays in place
-      flattenApp Used arg -}
+      flattenApp False Used arg
 
     -- Special case: lambda (...) becomes a letfun and gets floated
     flatten_arg (FloatParam _ _) arg@(ExpM (LamE lam_info f)) = do
@@ -789,20 +788,22 @@ createFlattenedApp spc inf op_var ty_args args = do
       return (ExpM $ VarE inf tmpvar, [])
 
     flatten_arg (FloatParam param_type spc) arg = do
-      (arg_expr, subcontext) <- flattenApp spc arg
+      (arg_expr, subcontext) <- flattenApp False spc arg
 
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
-      if not $ isOkParamForFloating arg_expr
+      if isTrivialExp arg_expr
+         || (isDataMovementExp arg_expr && not float_initializers)
         then return (arg_expr, subcontext)
         else flatten_mem_arg arg_expr subcontext param_type spc
   
     flatten_arg (FloatLocal ty spc) arg = do
-      (arg_expr, subcontext) <- flattenApp spc arg
+      (arg_expr, subcontext) <- flattenApp False spc arg
 
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
-      if not $ isOkParamForFloating arg_expr
+      if isTrivialExp arg_expr
+         || (isDataMovementExp arg_expr && not float_initializers)
         then return (arg_expr, subcontext)
         else flatten_local_arg arg_expr subcontext ty spc 
 
@@ -843,7 +844,7 @@ floatInExp = floatInExpDmd unknownDmd
 floatInExpRhs :: Dmd -> ExpM -> Flt (ExpM, Context)
 floatInExpRhs dmd expressionM@(ExpM expression) =
   case expression
-  of AppE {} -> floatInApp dmd expressionM
+  of AppE {} -> floatInApp True dmd expressionM
      _ -> do e <- floatInExpDmd dmd expressionM
              return (e, [])
 
@@ -857,7 +858,7 @@ floatInExpDmd dmd (ExpM expression) =
   of VarE {} -> return $ ExpM expression
      LitE {} -> return $ ExpM expression
      AppE {} -> do
-       (new_expression, ctx) <- floatInApp dmd (ExpM expression)
+       (new_expression, ctx) <- floatInApp False dmd (ExpM expression)
        return $ applyContext ctx new_expression
      LamE inf f -> do
        f' <- floatInFun (LocalAnchor []) f
@@ -876,8 +877,8 @@ floatInExpDmd dmd (ExpM expression) =
      CaseE inf scr alts ->
        floatInCase dmd inf scr alts
 
-floatInApp :: Dmd -> ExpM -> Flt (ExpM, Context)
-floatInApp dmd expression = do
+floatInApp :: Bool -> Dmd -> ExpM -> Flt (ExpM, Context)
+floatInApp float_initializers dmd expression = do
   -- Flatten the expression and catch any floated bindings that depend on
   -- local variables
   ((new_expression, local_context), dependent_context, rn) <-
@@ -889,7 +890,8 @@ floatInApp dmd expression = do
   where 
     flatten_expression = do
       -- Flatten the expression
-      result@(_, local_context) <- flattenApp (specificity dmd) expression
+      result@(_, local_context) <-
+        flattenApp float_initializers (specificity dmd) expression
     
       -- Find the new variable bindings that were created
       let local_defs = IntSet.fromList $ map (fromIdent . varID) $

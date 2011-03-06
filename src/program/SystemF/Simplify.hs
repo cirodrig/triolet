@@ -353,9 +353,17 @@ rwVar original_expression inf v = lookupKnownValue v >>= rewrite
       rwExpReturn (original_expression, Just $ VarValue inf v)
 
 rwApp :: ExpInfo -> ExpM -> [TypM] -> [ExpM] -> LR (ExpM, MaybeValue)
-rwApp inf op ty_args args = do
-  (op', op_val) <- rwExp op
-  rwAppWithOperator inf op' op_val ty_args args
+rwApp inf op ty_args args =
+  -- First try to uncurry this application
+  case op
+  of ExpM (AppE _ inner_op inner_ty_args inner_args)
+       | null ty_args ->
+           rwApp inf inner_op inner_ty_args (inner_args ++ args)
+       | null inner_args ->
+           rwApp inf inner_op (inner_ty_args ++ ty_args) args
+     _ -> do
+       (op', op_val) <- rwExp op
+       rwAppWithOperator inf op' op_val ty_args args
 
 -- | Rewrite an application, depending on what the operator is.
 --   The operator has been simplified, but the arguments have not.
@@ -363,7 +371,9 @@ rwApp inf op ty_args args = do
 --   This function is usually called from 'rwApp'.  It calls itself 
 --   recursively to flatten out curried applications.
 rwAppWithOperator inf op' op_val ty_args args =
-  -- First, try to uncurry this application
+  -- First, try to uncurry this application.
+  -- This happens if the operator was rewritten to an application;
+  -- otherwise we would have uncurried it in 'rwApp'.
   case op'
   of ExpM (AppE _ inner_op inner_ty_args inner_args)
        | null ty_args -> do
@@ -518,7 +528,7 @@ rwLoadBoxApp inf op' ty_args (addr_arg : excess_args) = do
 -- | Attempt to statically evaluate a copy
 rwCopyApp inf op' ty_args args = do
   (args', arg_values) <- rwExps args
-  let new_exp = ExpM $ AppE inf op' ty_args args'
+  let new_exp = copy_expression args' arg_values
       new_value = copied_value arg_values
   return (new_exp, new_value)
   where
@@ -532,6 +542,24 @@ rwCopyApp inf op' ty_args args = do
     copied_value [_, _] = Nothing
     copied_value _ =
       internalError "rwCopyApp: Wrong number of arguments in call"
+    
+    -- Transform a copy into a store if the source value is known
+    copy_expression (repr : src : other_args) (_ : Just src_value : _)
+      | ComplexValue _ (StoredValue Value stored_value) <- src_value,
+        Just stored_exp <- asTrivialValue stored_value =
+          let [store_type] = ty_args
+              store_op = ExpM $ VarE inf (pyonBuiltin the_store)
+          in ExpM $ AppE inf store_op [store_type] (repr : stored_exp : other_args)
+    
+      | ComplexValue _ (StoredValue Boxed stored_value) <- src_value,
+        Just stored_exp <- asTrivialValue stored_value =
+          let [store_type] = ty_args
+              store_op = ExpM $ VarE inf (pyonBuiltin the_storeBox)
+          in ExpM $ AppE inf store_op [store_type] (stored_exp : other_args)
+
+    -- Otherwise return a copy expression
+    copy_expression args _ = ExpM $ AppE inf op' ty_args args
+      
 
 rwLet inf bind val body =       
   case bind

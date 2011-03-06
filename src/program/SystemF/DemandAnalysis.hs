@@ -23,6 +23,7 @@ import qualified Data.Graph as Graph
 import qualified Data.IntMap as IntMap
 import Data.List
 import Data.Maybe
+import Debug.Trace
 
 import Common.Error
 import Common.Identifier
@@ -31,6 +32,7 @@ import SystemF.Floating
 import SystemF.Demand
 import SystemF.Syntax
 import SystemF.MemoryIR
+import SystemF.PrintMemoryIR
 import Type.Environment
 import Type.Type
 import GlobalVar
@@ -202,6 +204,15 @@ dmdExp spc expressionM@(ExpM expression) =
        let mk_let defgroup e = ExpM (LetfunE inf defgroup e)
        return $ foldr mk_let body' dg'
      CaseE inf scr alts -> dmdCaseE spc inf scr alts
+  where
+    {- -- Debugging output, show what was demanded in this expression
+    trace_dmd m = do
+      (x, dmd) <- listen m
+      trace ("dmdExp\n" ++ show (pprExp expressionM) ++ "\n" ++
+             intercalate "\n" [show v ++ " |-> " ++ showDmd d
+                              | (v,d) <- IntMap.toList dmd])  $ return x
+    -}
+      
 
 -- | Dead code elimination for function application.
 --
