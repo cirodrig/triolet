@@ -132,6 +132,23 @@ isTrivialExp (ExpM (VarE {})) = True
 isTrivialExp (ExpM (LitE {})) = True
 isTrivialExp _                = False
 
+-- | Return True if the expression performs data movement,
+--   i.e., if it's a load, store, or copy expression.
+isDataMovementExp :: ExpM -> Bool
+isDataMovementExp expr =
+  case unpackVarAppM expr
+  of Just (op, _, _)
+       | op `isPyonBuiltin` the_store ||
+         op `isPyonBuiltin` the_copy ||
+         op `isPyonBuiltin` the_load -> True
+     _ -> False
+
+-- | Return True if the expression is worth floating out of a data constructor.
+--   If the expression performs any computation other than moving data into
+--   the destination, it's worth floating.
+isOkParamForFloating :: ExpM -> Bool
+isOkParamForFloating e = not (isTrivialExp e || isDataMovementExp e)
+
 -- | Find a value indexed by a type.  Analogous to 'lookup'.
 findByType :: IdentSupply Var -> TypeEnv -> Type -> [(Type, a)] -> IO (Maybe a)
 findByType id_supply tenv ptype assocs = search assocs
@@ -776,7 +793,7 @@ createFlattenedApp spc inf op_var ty_args args = do
 
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
-      if isTrivialExp arg_expr
+      if not $ isOkParamForFloating arg_expr
         then return (arg_expr, subcontext)
         else flatten_mem_arg arg_expr subcontext param_type spc
   
@@ -785,7 +802,7 @@ createFlattenedApp spc inf op_var ty_args args = do
 
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
-      if isTrivialExp arg_expr
+      if not $ isOkParamForFloating arg_expr
         then return (arg_expr, subcontext)
         else flatten_local_arg arg_expr subcontext ty spc 
 
