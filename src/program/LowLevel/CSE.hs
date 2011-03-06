@@ -18,6 +18,7 @@ import Common.Error
 import Common.Identifier
 import LowLevel.FreshVar
 import LowLevel.Build
+import LowLevel.Builtins
 import LowLevel.CodeTypes
 import LowLevel.Syntax
 import LowLevel.Expr
@@ -185,6 +186,10 @@ cseCall cc op args = do
   where
     -- Check the operator to decide if this is a partial application
     check_op (op', mop_expr) args' marg_exprs
+      | cc == PrimCall =
+          -- Can't create an expression for a primitive call.
+          -- Try to simplify the call.
+          return $ simplifyPrimCall op' args'
       | cc /= ClosureCall =
           no_expr op' args'     -- Not a closure function
       | Just op_expr <- mop_expr,
@@ -247,6 +252,29 @@ cseCall cc op args = do
     make_expr (VarV arg_v, Nothing) = return $ varExpr arg_v
     make_expr (LitV arg_l, Nothing) = return $ litExpr arg_l
     make_expr _ = mzero
+
+-- Try to simplify a primitive function call.
+-- Mostly, optimizations are enabled by inlining.
+-- However, a few built-in functions are special-cased here.
+simplifyPrimCall :: Val -> [Val] -> (Atom, Maybe [Maybe Expr])
+simplifyPrimCall op_val arg_vals =
+  case op_val
+  of VarV op_var
+       | op_var == llBuiltin the_prim_pyon_alloc ->
+           case arg_vals
+           of [LitV (IntL _ _ 0)] ->
+                -- Allocation of zero bytes: return NULL
+                (ValA [LitV NullL], Just [Just $ litExpr NullL])
+              _ -> rebuild_call
+       | op_var == llBuiltin the_prim_pyon_dealloc ->
+           case arg_vals
+           of [LitV NullL] ->
+                -- Deallocation of NULL: do nothing
+                (ValA [], Just [])
+              _ -> rebuild_call
+     _ -> rebuild_call
+  where
+    rebuild_call = (CallA PrimCall op_val arg_vals, Nothing)
 
 cseStm :: Stm -> CSE Stm
 cseStm statement =
