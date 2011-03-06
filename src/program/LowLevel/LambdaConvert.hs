@@ -1,8 +1,14 @@
-{-| Conversion of lambda expressions to letrec expressions. 
+{-| Local transformations to enable closure conversion.
 
-This is performed just before closure conversion.  Moving lambda 
-expressions into separate statements simplifies closure conversion because 
-now it doesn't have to deal with values containing functions.
+The main transformation is to convert lambda expressions to
+local function definitions, which can subsequently be closure-converted.
+Lambda-conversion also increases the success rate of value numbering,
+since it turns lambdas (which can't be value numbered) into local functions
+(which can).
+
+Also, expressions that are not quite tail calls, of the form
+@let x = foo(1,2) in x@, are fixed up into tail calls of the form 
+@foo(1,2)@ where possible.
 -}
 
 module LowLevel.LambdaConvert(lambdaConvert)
@@ -17,6 +23,18 @@ import LowLevel.CodeTypes
 import LowLevel.FreshVar
 import LowLevel.Syntax
 import Globals
+
+-- | Fix up a statement into a tail call using a form of backward
+--   copy propagation.
+fixupTailCalls :: Stm -> Stm
+fixupTailCalls (LetE params rhs (ReturnE (ValA values)))
+  | length params == length values &&
+    and (zipWith isVarValue params values) = ReturnE rhs
+  where
+    isVarValue v1 (VarV v2) = v1 == v2
+    isVarValue _ _ = False
+
+fixupTailCalls s = s
 
 emitLetrec :: L Stm -> FreshVarM Stm
 emitLetrec m = do
@@ -52,7 +70,7 @@ cvtAtom atom =
 
 cvtStm :: Stm -> FreshVarM Stm
 cvtStm statement =
-  case statement
+  case fixupTailCalls statement
   of LetE params rhs body ->
        emitLetrec $ LetE params <$> cvtAtom rhs <*> lift (cvtStm body)
      LetrecE defs body ->
