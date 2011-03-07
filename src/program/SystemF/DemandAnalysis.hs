@@ -90,8 +90,11 @@ mention :: Var -> Df ()
 mention v = mentionHelper v $ Dmd OnceSafe Used
 
 -- | A variable was used multiple times.  This prevents inlining.
+--
+--   We put 'Unused' as the specificity here to avoid contaminating the 
+--   specificity information that we compute.
 mentionMany :: Var -> Df ()
-mentionMany v = mentionHelper v $ Dmd ManySafe Used
+mentionMany v = mentionHelper v $ Dmd ManySafe Unused
 
 -- | A variable was used with the given specificity.
 mentionSpecificity :: Var -> Specificity -> Df ()
