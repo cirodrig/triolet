@@ -337,7 +337,9 @@ data Stm =
     -- | Produce a value
   | ReturnE Atom
 
-data Fun =
+-- | A function.  The parameter is the data type used for the function body,
+--   usually 'Stm'.
+data FunBase a =
   Fun 
   { -- | The function's calling convention
     funConvention  :: !CallConvention
@@ -353,21 +355,23 @@ data Fun =
   , funFrameSize   :: {-# UNPACK #-}!Int
   , funParams      :: [ParamVar] 
   , funReturnTypes :: [ValueType] 
-  , funBody        :: Stm
+  , funBody        :: a
   }
 
-isPrimFun, isClosureFun :: Fun -> Bool
+type Fun = FunBase Stm
+
+isPrimFun, isClosureFun :: FunBase a -> Bool
 isPrimFun f = funConvention f == PrimCall
 isClosureFun f = funConvention f == ClosureCall
 
-setFunSize :: CodeSize -> Fun -> Fun
+setFunSize :: CodeSize -> FunBase a -> FunBase a
 setFunSize sz f = f {funSize = sz}
 
 setFunUses :: Uses -> Fun -> Fun
 setFunUses u f = f {funUses = u}
 
-mkFun :: CallConvention -> Bool -> Int -> [ParamVar] -> [ValueType] -> Stm
-      -> Fun
+mkFun :: CallConvention -> Bool -> Int -> [ParamVar] -> [ValueType] -> a
+      -> FunBase a
 mkFun cc inl_req frame_size params returns body =
   Fun { funConvention  = cc
       , funSize        = unknownCodeSize
@@ -385,6 +389,14 @@ closureFun params returns body =
 primFun :: [ParamVar] -> [ValueType] -> Stm -> Fun
 primFun params returns body =
   mkFun PrimCall False 0 params returns body
+
+changeFunBody :: (a -> b) -> FunBase a -> FunBase b
+changeFunBody f (Fun cc s u inl fs p r b) = Fun cc s u inl fs p r (f b)
+
+changeFunBodyM :: Monad m => (a -> m b) -> FunBase a -> m (FunBase b)
+changeFunBodyM f (Fun cc s u inl fs p r b) =
+  do b' <- f b
+     return $ Fun cc s u inl fs p r b'
 
 type Alt = (Lit, Stm)
 

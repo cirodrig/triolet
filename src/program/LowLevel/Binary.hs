@@ -1,5 +1,6 @@
 
 {-# OPTIONS -fwarn-incomplete-patterns #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 module LowLevel.Binary where
 
 import Control.Applicative

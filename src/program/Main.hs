@@ -41,6 +41,7 @@ import qualified LowLevel.CSE as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.DeadCode as LowLevel
 import qualified LowLevel.LambdaConvert as LowLevel
+import qualified LowLevel.LocalCPS as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
@@ -217,10 +218,30 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   putStrLn "Lowered and flattened"
   print $ LowLevel.pprModule ll_mod
   
-  -- First round of optimizations
+  -- First round of optimizations: Simplify code, and 
+  -- eliminate trivial lambda abstractions that were introduced by lowering
+  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  ll_mod <- LowLevel.inlineModule ll_mod
+  
+  -- Second round of optimization: in addition to the other steps,
+  -- convert lambdas to local functions.  This increases freedom for
+  -- optimizing partial applications whose arguments are functions.
+  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
+  ll_mod <- LowLevel.lambdaConvert ll_mod
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  ll_mod <- LowLevel.inlineModule ll_mod
+  
+-- Additional rounds: more inlining
   ll_mod <- iterateM (LowLevel.commonSubexpressionElimination >=>
                       return . LowLevel.eliminateDeadCode >=>
                       LowLevel.inlineModule) 3 ll_mod
+
+  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
+  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
+  ll_mod <- LowLevel.inlineModule ll_mod
+
+  -- Cleanup
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   ll_mod <- return $ LowLevel.clearImportedFunctionDefinitions ll_mod
@@ -233,7 +254,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   writeFileAsByteString i_file $ encode ll_interface
 
   -- Closure conversion
-  ll_mod <- LowLevel.lambdaConvert ll_mod -- Remove lambda values
+  -- Remove any lambda values created by the last round of optimization
+  ll_mod <- LowLevel.lambdaConvert ll_mod
+  ll_mod <- LowLevel.lcpsModule ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod -- Minimize recursion groups
   ll_mod <- LowLevel.closureConvert ll_mod
   ll_mod <- LowLevel.insertReferenceCounting ll_mod

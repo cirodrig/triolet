@@ -154,6 +154,7 @@ Executable pyon
     LowLevel.GenerateCUtils
     LowLevel.Intrinsics
     LowLevel.LambdaConvert
+    LowLevel.LocalCPS
     LowLevel.Syntax
     LowLevel.Print
     LowLevel.Record
