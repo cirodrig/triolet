@@ -130,6 +130,7 @@ module_prim = ModuleName "pyon.internal.prim"
 module_memory_py = ModuleName "pyon.internal.memory_py"
 module_stream = ModuleName "pyon.internal.stream"
 module_structures = ModuleName "pyon.internal.structures"
+module_effects = ModuleName "pyon.internal.effects"
 module_complex = ModuleName "pyon.internal.complex"
 module_list = ModuleName "pyon.internal.list"
 
@@ -217,6 +218,16 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_histogram) |])
   , (PyonName module_stream "histogramArray",
      Right [| pyonBuiltin (SystemF.the_histogramArray) |])
+  , (PyonName module_stream "createHistogram",
+     Right [| pyonBuiltin (SystemF.the_createHistogram) |])
+  , (PyonName module_effects "emptyEffTok",
+     Right [| pyonBuiltin (SystemF.the_emptyEffTok) |])
+  , (PyonName module_effects "toEffTok",
+     Right [| pyonBuiltin (SystemF.the_toEffTok) |])
+  , (PyonName module_effects "propagateEffTok",
+     Right [| pyonBuiltin (SystemF.the_propagateEffTok) |])
+  , (PyonName module_effects "seqEffTok",
+     Right [| pyonBuiltin (SystemF.the_seqEffTok) |])
   , (PyonName module_structures "repr_array",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_array |])
   , (PyonName module_structures "repr_Box",
@@ -360,6 +371,8 @@ builtinGlobals =
     -- Physical representations of data types
   , (PyonName module_structures "repr_Box_value",
      Left $ PrimType OwnedType)
+  , (PyonName module_structures "repr_EffTok",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_EffTok |])
   , (PyonName module_structures "repr_int",
      Right [| pyonBuiltin (SystemF.the_repr_int) |] )
   , (PyonName module_structures "repr_float",

@@ -1,0 +1,32 @@
+
+module pyon.internal.effects;
+
+#include "rts.h"
+#include "debug.h"
+#include "apply_py.h"
+#include "memory_py.h"
+#include "effects.h"
+
+// Effect tokens are dummy objects.  We do not actually read or write them,
+// but we need functions that pretend to read and write them to resepct
+// dependences.
+
+function inline emptyEffTok (pointer _) -> () {
+  ();
+};
+
+function inline toEffTok (unit _, pointer _) -> () {
+  ();
+};
+
+function inline propagateEffTok (pointer _, pointer _) -> () {
+  ();
+};
+
+// Call f1, then f2.
+// The functions take pointer parameters that they ignore;
+// they are executed for their side effects.
+function inline seqEffTok (owned f1, owned f2, pointer _) -> () {
+  () = () call f1 (null);
+  () call f2 (null);
+};

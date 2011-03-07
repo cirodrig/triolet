@@ -265,7 +265,8 @@ compileObjectJob config (file_path, language) moutput_path = do
         -- These are the RTS interface files that were generated when
         -- the compiler was built
         interface_files =
-          ["memory_py.pi", "prim.pi", "structures.pi", "list.pi", "stream.pi"]
+          ["memory_py.pi", "prim.pi", "structures.pi", "list.pi", "stream.pi",
+           "effects.pi"]
    
 -- | Compile and generate an intermediate C file.
 -- If C files are kept, put the C file in the same location as the output, with

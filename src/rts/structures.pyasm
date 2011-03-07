@@ -160,6 +160,16 @@ data owned repr_bool = PassConv {
   dummy_finalizer
 };
 
+// Parameter-passing convention dictionary of EffTok,
+// which contains no data
+data owned repr_EffTok = PassConv {
+  ObjectHeader { int 1, repr_info },
+  word 0,
+  word 1,
+  dummy_copy,
+  dummy_finalizer
+};
+
 function copy_Repr (unit _, pointer src, pointer dst) -> () {
   dst @! PassConv.size = src @! PassConv.size;
   dst @! PassConv.align = src @! PassConv.align;

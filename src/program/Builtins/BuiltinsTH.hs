@@ -26,6 +26,7 @@ pyonBuiltinTypeNames =
   , "IndexedInt"
   , "SomeIndexedInt"
   , "array"
+  , "EffTok"
     
     -- Dictionary types
   , "Repr"
@@ -82,6 +83,7 @@ pyonBuiltinVariableNames =
   , "repr_Referenced"
   , "repr_EmptyReference"
   , "repr_array"
+  , "repr_EffTok"
   , "repr_PyonTuple0"
   , "repr_PyonTuple1"
   , "repr_PyonTuple2"
@@ -235,6 +237,12 @@ pyonBuiltinVariableNames =
   , "subscript_out"
   , "doall"
   , "for"
+  , "createHistogram"
+    
+  , "emptyEffTok"
+  , "toEffTok"
+  , "propagateEffTok"
+  , "seqEffTok"
   ]
 
 pyonBuiltinsSpecification =

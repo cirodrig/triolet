@@ -169,14 +169,14 @@ compilePyonToPyonAsm path text = do
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
 
   -- The next group of optimizations does the real work of optimization.
-  -- Currently there's a dependence between DCE and rewriting that we
+  -- Currently there are inter-pass dependences that we
   -- stupidly resolve by running them lots of times.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- SystemF.demandAnalysis mem_mod
   mem_mod <- iterateM (SystemF.rewriteLocalExpr >=>
                        SystemF.floatModule >=>
-                       SystemF.localDemandAnalysis) 3 mem_mod
+                       SystemF.localDemandAnalysis) 7 mem_mod
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- SystemF.demandAnalysis mem_mod

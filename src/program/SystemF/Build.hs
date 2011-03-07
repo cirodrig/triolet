@@ -7,6 +7,7 @@ module SystemF.Build where
 import Common.Error
 import SystemF.Syntax
 import SystemF.MemoryIR
+import Builtins.Builtins
 import Type.Environment
 import Type.Eval
 import Type.Type
@@ -54,6 +55,14 @@ lamE mk_f = do
 letE :: PatM -> ExpM -> ExpM -> ExpM
 letE pat val body = ExpM $ LetE defaultExpInfo pat val body
 
+localE :: TypM -> ExpM -> (ExpM -> MkExpM) -> (ExpM -> MkExpM) -> MkExpM
+localE ty repr mk_rhs mk_body = do
+  tmpvar <- newAnonymousVar ObjectLevel
+  let tmpvar_binder = localVarP tmpvar (fromTypM ty) repr
+  rhs <- mk_rhs (ExpM $ VarE defaultExpInfo tmpvar)
+  body <- mk_body (ExpM $ VarE defaultExpInfo tmpvar)
+  return $ ExpM $ LetE defaultExpInfo tmpvar_binder rhs body
+
 letfunE :: DefGroup (Def Mem) -> ExpM -> ExpM
 letfunE defs body = ExpM $ LetfunE defaultExpInfo defs body
 
@@ -62,6 +71,15 @@ caseE scr alts = do
   scr' <- scr
   alts' <- sequence alts
   return $ ExpM $ CaseE defaultExpInfo scr' alts'
+
+ifE :: MkExpM -> MkExpM -> MkExpM -> MkExpM
+ifE mk_cond mk_tr mk_fa = do
+  cond <- mk_cond
+  tr <- mk_tr
+  fa <- mk_fa
+  let true  = AltM $ Alt (pyonBuiltin the_True) [] [] [] tr
+      false = AltM $ Alt (pyonBuiltin the_False) [] [] [] fa
+  return $ ExpM $ CaseE defaultExpInfo cond [true, false]
 
 mkFun :: [Type]
       -> ([Var] -> FreshVarM ([ParamType], ReturnType))

@@ -20,6 +20,9 @@ import Type.Environment
 import Type.Eval
 import Type.Type
 
+-- | Type index for stream expressions 
+data Stream
+
 -------------------------------------------------------------------------------
 -- Helper functions for writing code
 
@@ -74,6 +77,16 @@ defineAndInspectIndexedInt tenv int_value mk_body =
         varAppE (pyonBuiltin the_defineIntIndex) [] [int_value]
   in caseOfSomeIndexedInt tenv define_indexed_int mk_body
 
+caseOfIndexedInt :: TypeEnv
+                 -> MkExpM
+                 -> Type
+                 -> (Var -> MkExpM)
+                 -> MkExpM
+caseOfIndexedInt tenv scrutinee int_index mk_body =
+  caseE scrutinee
+  [mkAlt tenv (pyonBuiltin the_indexedInt) [TypM int_index] $
+   \ [] [intvalue] -> mk_body intvalue]
+
 intType = VarT (pyonBuiltin the_int)
 
 -------------------------------------------------------------------------------
@@ -100,10 +113,12 @@ rewriteRules = Map.fromList table
             {- Rewrites temporarily disabled while we change Stream types
             , (pyonBuiltin the_oper_CAT_MAP, rwBindStream) -}
             , (pyonBuiltin the_histogram, rwHistogram)
+            , (pyonBuiltin the_histogramArray, rwHistogramArray)
             , (pyonBuiltin the_fun_reduce, rwReduce)
             , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
             , (pyonBuiltin the_fun_reduce1, rwReduce1)
             , (pyonBuiltin the_fun_reduce1_Stream, rwReduce1Stream)
+            , (pyonBuiltin the_for, rwFor)
             ]
 
 -- | Attempt to rewrite an application term.
@@ -404,6 +419,51 @@ rwHistogram tenv inf [container] (size : input : other_args) =
 
 rwHistogram _ _ _ _ = return Nothing
 
+rwHistogramArray :: RewriteRule
+rwHistogramArray tenv inf [shape_type, size_ix] (size : input : other_args) =
+  case interpretStream2 (fromTypM shape_type) repr_int input
+  of Just s -> do
+       fmap Just $
+         varAppE (pyonBuiltin the_createHistogram)
+         [size_ix]
+         (return size :
+          lamE (mkFun []
+          (\ [] -> return ([BoxPT ::: funType [ ValPT Nothing ::: intType
+                                              , OutPT ::: eff_type]
+                                              (SideEffectRT ::: eff_type),
+                            ReadPT ::: eff_type,
+                            OutPT ::: eff_type],
+                           SideEffectRT ::: eff_type))
+          (\ [] [writer, in_eff, out_eff] ->
+            make_histogram_writer s writer in_eff out_eff)) :
+          map return other_args)
+     Nothing -> return Nothing
+  where
+    eff_type = VarT (pyonBuiltin the_EffTok)
+    repr_int = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int)
+    repr_eff = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_EffTok)
+    
+    make_histogram_writer s writer in_eff out_eff = do
+      accumulator_fn <-
+        lamE $ mkFun []
+        (\ [] -> return ([ReadPT ::: eff_type, ReadPT ::: intType,
+                          OutPT ::: eff_type], SideEffectRT ::: eff_type))
+        (\ [] [in_eff2, index, out_eff2] -> do
+            let fst_eff =
+                  varAppE (pyonBuiltin the_propagateEffTok) []
+                  [varE in_eff2]
+                snd_eff =
+                  varAppE writer [] [varAppE (pyonBuiltin the_load)
+                                     [TypM intType]
+                                     [return repr_int, varE index]]
+            varAppE (pyonBuiltin the_seqEffTok) []
+              [fst_eff, snd_eff, varE out_eff2])
+      let in_eff_exp = ExpM $ VarE defaultExpInfo in_eff
+      let out_eff_exp = ExpM $ VarE defaultExpInfo out_eff
+      translateStreamToFold tenv eff_type repr_eff in_eff_exp accumulator_fn out_eff_exp s
+      
+rwHistogramArray _ _ _ _ = return Nothing
+
 rwReduce :: RewriteRule
 rwReduce tenv inf
   [container, element]
@@ -438,6 +498,12 @@ rwReduce1 _ _ _ _ = return Nothing
 rwReduceStream :: RewriteRule
 rwReduceStream tenv inf [shape_type, element]
   (elt_repr : reducer : init : stream : other_args) =
+  case interpretStream2 (fromTypM shape_type) elt_repr stream
+  of Just s ->
+       fmap Just $
+       translateStreamToFoldWithExtraArgs tenv (fromTypM element) elt_repr init reducer s other_args
+     Nothing -> return Nothing
+  {-
   case interpretStream elt_repr stream
   of Just s ->
        case sShape s
@@ -446,6 +512,7 @@ rwReduceStream tenv inf [shape_type, element]
             rwReduceGenerate inf element elt_repr reducer init other_args size count (sGenerator s)
           _ -> return Nothing
      _ -> return Nothing
+-}
 
 rwReduceStream _ _ _ _ = return Nothing
 
@@ -518,6 +585,52 @@ rwReduce1Generate inf element elt_repr reducer other_args size count producer = 
   return $ ExpM $ LetfunE defaultExpInfo (NonRec (Def producer_var producer_fn)) $
            ExpM $ LetE defaultExpInfo tmpvar_binder rhs body
 
+-- | Inline a call of \'for\'.
+--
+-- > for (n, a, repr, count, init, f, ret)
+--
+-- -->
+--
+-- > case count of IndexedInt bound.
+-- >   letrec loop i acc =
+-- >     if i == bound
+-- >     then copy (a, repr, acc, ret)
+-- >     else local acc2 = f i acc acc2
+-- >          loop (i + 1) acc2
+-- >   loop 0 init
+rwFor :: RewriteRule
+rwFor tenv inf [TypM size_ix, TypM acc_type] args =
+  case args
+  of [acc_repr, size, init, fun, ret] ->
+       fmap Just $ rewrite_for_loop acc_repr size init fun ret
+     [acc_repr, size, init, fun] ->
+       fmap Just $ lamE $ mkFun []
+       (\ [] -> return ([OutPT ::: acc_type], SideEffectRT ::: acc_type))
+       (\ [] [ret] -> let ret_var = ExpM $ VarE defaultExpInfo ret
+                      in rewrite_for_loop acc_repr size init fun ret_var)
+     _ -> return Nothing
+  where
+    rewrite_for_loop acc_repr size init fun ret =
+      caseOfIndexedInt tenv (return size) size_ix $ \bound -> do
+        loop_var <- newAnonymousVar ObjectLevel
+        loop_fun <-
+          mkFun []
+          (\ [] -> return ([ ValPT Nothing ::: intType, ReadPT ::: acc_type],
+                           SideEffectRT ::: acc_type))
+          (\ [] [i, acc] -> do
+              ifE (varAppE (pyonBuiltin the_EqDict_int_eq) []
+                   [varE i, varE bound])
+                (varAppE (pyonBuiltin the_copy) [TypM acc_type]
+                 [return acc_repr, varE acc, return ret])
+                (localE (TypM acc_type) acc_repr
+                 (\lv -> appE (return fun) [] [varE i, varE acc, return lv])
+                 (\lv -> varAppE loop_var []
+                         [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
+                          [varE i, litE $ IntL 1 intType],
+                          return lv])))
+        loop_call <- varAppE loop_var [] [litE $ IntL 0 intType, return init]
+        return $ letfunE (Rec [Def loop_var loop_fun]) loop_call
+
 -------------------------------------------------------------------------------
 
 -- | An argument to one of the 'zip' family of functions.
@@ -572,7 +685,15 @@ shapeType shp =
      Array1DShape (TypM index) _ -> varApp (pyonBuiltin the_array) [index]
      UnknownShape (TypM s_index) -> s_index
   
+-- | Get the shape encoded in a type.
+typeShape :: Type -> Shape
+typeShape ty = UnknownShape (TypM ty)
+
+listShape = UnknownShape (TypM (VarT $ pyonBuiltin the_list))
+
 -- | The interpreted value of a stream.
+--
+--   This is the old data type; it will eventually be replaced by 'ExpS'.
 data InterpretedStream =
   InterpretedStream
   { -- | The stream's shape
@@ -589,6 +710,339 @@ data InterpretedStream =
     --   evaluates to the desired stream element, as a write reference. 
   , sGenerator :: ExpM -> MkExpM
   }
+
+-- | The interpreted value of a stream.
+data instance Exp Stream =
+    GenerateStream
+    { -- | The stream's shape
+      _sexpShape :: !Shape
+
+      -- | The type of a stream element
+    , _sexpType :: Type
+
+      -- | The representation dictionary of a stream element
+    , _sexpRepr :: ExpM
+
+      -- | Given an expression that evaluates to the index of the desired
+      --   stream element (with type @val int@), produce an expression that
+      --   evaluates to the desired stream element, as a write reference. 
+    , _sexpGenerator :: ExpM -> MkExpM
+    }
+  | BindStream
+    { -- | The source stream
+      _sexpSrcStream :: ExpS
+
+      -- | The transformer,
+      --   which is a one-parameter function returning a stream
+    , _sexpTransStream :: (PatM, ExpS)
+    }
+  | CaseStream
+    { -- | The stream's shape
+      _sexpShape :: !Shape
+    , _sexpScrutinee :: ExpM
+    , _sexpAlternatives :: [AltS]
+    }
+
+-- | Get the shape of a stream
+sexpShape :: ExpS -> Shape
+sexpShape (GenerateStream {_sexpShape = s}) = s
+sexpShape (BindStream _ _) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list)
+sexpShape (CaseStream {_sexpShape = s}) = s
+
+-- | Get the type of a stream element
+sexpElementType :: ExpS -> Type
+sexpElementType (GenerateStream {_sexpType = t}) = t
+sexpElementType (BindStream _ (_, s)) = sexpElementType s
+sexpElementType (CaseStream {_sexpAlternatives = alt:_}) =
+  sexpElementType $ altBody $ fromAltS alt
+
+-- | Get the representation dictionary of a stream element
+sexpElementRepr :: ExpS -> ExpM
+sexpElementRepr (GenerateStream {_sexpRepr = e}) = e
+sexpElementRepr (BindStream _ (_, s)) = sexpElementRepr s
+sexpElementRepr (CaseStream {_sexpAlternatives = alt:_}) =
+  sexpElementRepr $ altBody $ fromAltS alt
+
+newtype instance Alt Stream = AltS {fromAltS :: BaseAlt Stream}
+
+newtype instance Typ Stream = TypS {fromTypS :: Type}
+newtype instance TyPat Stream = TyPatS {fromTyPatS :: TyPatM}
+newtype instance Pat Stream = PatS {fromPatS :: PatM}
+
+type ExpS = Exp Stream
+type TypS = Typ Stream
+type TyPatS = TyPat Stream
+type PatS = Pat Stream
+type AltS = Alt Stream
+
+-- | Given a stream and the repr of a stream element, get its shape.
+--
+--   We may change the stream's type by ignoring functions that only
+--   affect the advertised stream shape.
+interpretStream2 :: Type -> ExpM -> ExpM -> Maybe ExpS
+interpretStream2 shape_type repr expression =
+  case unpackVarAppM expression
+  of Just (op_var, ty_args, args)
+       | op_var `isPyonBuiltin` the_TraversableDict_Stream_traverse ->
+         case (ty_args, args)
+         of ([shape_type2, _], [_, stream_arg]) ->
+              interpretStream2 shape_type2 repr stream_arg
+       | op_var `isPyonBuiltin` the_TraversableDict_Stream_build ->
+         case (ty_args, args)
+         of ([shape_type2, _], [_, stream_arg]) ->
+              let stream_of_shape =
+                    varApp (pyonBuiltin the_Stream) [shape_type2]
+              in interpretStream2 stream_of_shape repr stream_arg
+       | op_var `isPyonBuiltin` the_fun_asList_Stream ->
+         case (ty_args, args)
+         of ([shape_type2, _], [stream_arg]) ->
+              interpretStream2 shape_type2 repr stream_arg
+       | op_var `isPyonBuiltin` the_generate ->
+         let [size_arg, type_arg] = ty_args
+             [size_val, repr, writer] = args
+         in Just $ GenerateStream
+            { _sexpShape = Array1DShape (TypM size_arg) size_val
+            , _sexpType = type_arg
+            , _sexpRepr = repr
+            , _sexpGenerator = \ix ->
+                appE (return writer) [] [return ix]}
+       | op_var `isPyonBuiltin` the_count ->
+           Just $ GenerateStream
+           { _sexpShape = UnboundedShape
+           , _sexpType = intType
+           , _sexpRepr = repr
+           , _sexpGenerator = counting_generator}
+       | op_var `isPyonBuiltin` the_rangeIndexed ->
+         let [size_index] = ty_args
+             [size_val] = args
+         in Just $ GenerateStream
+            { _sexpShape = Array1DShape (TypM size_index) size_val
+            , _sexpType = intType
+            , _sexpRepr = repr
+            , _sexpGenerator = counting_generator}
+       | op_var `isPyonBuiltin` the_oper_CAT_MAP ->
+         case args
+         of [src_repr, _, src, transformer] ->
+              -- Transformer must be a single-parameter lambda function
+              case transformer
+              of ExpM (LamE _ (FunM (Fun { funTyParams = []
+                                         , funParams = [param]
+                                         , funBody = body}))) -> do
+                   src_stream <- interpretStream2 list_shape src_repr src
+                   body_stream <- interpretStream2 list_shape repr body
+                   return $ BindStream src_stream (param, body_stream)
+                 _ -> Nothing
+            _ -> Nothing
+     _ -> case fromExpM expression
+          of CaseE _ scr alts -> do
+               alts' <- mapM (interpretStreamAlt shape_type repr) alts
+               let shape = case alts'
+                           of [alt] -> sexpShape $ altBody $ fromAltS alt
+                              _ -> typeShape shape_type
+               return $ CaseStream shape scr alts'
+             _ -> Nothing
+  where
+    list_shape = VarT $ pyonBuiltin the_list
+
+    -- A generator for the sequence [0, 1, 2, ...]
+    counting_generator ix =
+      varAppE (pyonBuiltin the_store) [TypM intType]
+      [varE $ pyonBuiltin the_repr_int, return ix]
+
+interpretStreamAlt :: Type -> ExpM -> AltM -> Maybe AltS
+interpretStreamAlt shape_type repr (AltM alt) = do
+  body <- interpretStream2 shape_type repr $ altBody alt
+  return $ AltS $ Alt { altConstructor = altConstructor alt
+                      , altTyArgs = map (TypS . fromTypM) $ altTyArgs alt
+                      , altExTypes = map TyPatS $ altExTypes alt
+                      , altParams = map PatS $ altParams alt
+                      , altBody = body}
+
+-- | Produce program code of an interpreted stream.  The generated code
+--   will have the specified shape.  If code cannot be generated,
+--   return Nothing.
+encodeStream2 :: TypM -> ExpS -> FreshVarM (Maybe ExpM)
+encodeStream2 expected_shape stream = do
+  m_encoded <-
+    case stream
+    of GenerateStream {_sexpGenerator = gen} ->
+         case sexpShape stream
+         of Array1DShape size_ix size_val ->
+              fmap Just $
+              varAppE (pyonBuiltin the_generate)
+              [size_ix, TypM elt_type]
+              [return size_val,
+               return elt_repr,
+               lamE $ mkFun []
+               (\ [] -> return ([ValPT Nothing ::: intType],
+                                BoxRT ::: FunT (OutPT ::: elt_type)
+                                               (SideEffectRT ::: elt_type)))
+               (\ [] [index_var] ->
+                 gen (ExpM $ VarE defaultExpInfo index_var))]
+       _ -> return Nothing
+
+  -- Cast the shape type to the one that the code expects
+  let given_shape = shapeType s_shape
+      cast_shape expr = castStreamExpressionShape (fromTypM expected_shape) given_shape elt_type elt_repr expr
+  return $ m_encoded >>= cast_shape
+  where
+    s_shape = sexpShape stream
+    elt_type = sexpElementType stream
+    elt_repr = sexpElementRepr stream
+    
+-- | Zip together a list of two or more streams
+zipStreams2 :: [ExpS] -> ExpS
+zipStreams2 [] = internalError "zipStreams: Need at least one stream"
+zipStreams2 [s] = s
+zipStreams2 ss
+  | Just shape <- zipped_shape =
+      let elt_types = map sexpElementType ss
+          typ = varApp (pyonTupleTypeCon num_streams) elt_types
+          repr = ExpM $ AppE defaultExpInfo
+                 (ExpM $ VarE defaultExpInfo (pyonTupleReprCon num_streams))
+                 (map TypM elt_types)
+                 (map sexpElementRepr ss)
+          gen ix = varAppE (pyonTupleCon num_streams)
+                   (map TypM elt_types)
+                   [_sexpGenerator stream ix | stream <- ss] -- FIXME: Handle other stream types
+      in GenerateStream shape typ repr gen
+  where
+    num_streams = length ss
+
+    zipped_shape = foldr combine_shapes (Just UnboundedShape) $ map sexpShape ss
+          
+    -- Combine shapes if possible. 
+    -- Array shapes are combined using the "min" operator to get the
+    -- minimum value.
+    combine_shapes _              Nothing = Nothing 
+    combine_shapes shp'           (Just UnboundedShape) = Just shp'
+    combine_shapes UnboundedShape (Just shp) = Just shp
+    combine_shapes shp'           (Just (Array1DShape typ1 val1)) =
+      case shp'
+      of Array1DShape typ2 val2 ->
+           let typ = TypM $
+                     varApp (pyonBuiltin the_min_i) [fromTypM typ1, fromTypM typ2]
+               val = ExpM $ AppE defaultExpInfo min_ii [typ1, typ2] [val1, val2] 
+           in Just $ Array1DShape typ val
+         _ -> Nothing
+    combine_shapes shp'           mshp@(Just (UnknownShape _)) =
+      case shp'
+      of UnknownShape _ -> mshp
+         _ -> Nothing
+    
+    min_ii = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
+
+-- | Translate a stream to a sequential \'fold\' operation.
+--   This function deals with variability in the number of given arguments. 
+translateStreamToFoldWithExtraArgs ::
+    TypeEnv
+ -> Type   -- ^ Accumulator type
+ -> ExpM   -- ^ Accumulator representation
+ -> ExpM   -- ^ Initial value
+ -> ExpM   -- ^ Accumulator function
+ -> ExpS   -- ^ Stream to be translated
+ -> [ExpM]                      -- ^ Zero or one extra arguments
+ -> MkExpM -- ^ Translated expression
+translateStreamToFoldWithExtraArgs
+  tenv acc_ty acc_repr init acc_f stream [out_ptr] =
+    translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream
+
+translateStreamToFoldWithExtraArgs
+  tenv acc_ty acc_repr init acc_f stream [] =
+    lamE $ mkFun []
+    (\ [] -> return ([OutPT ::: acc_ty], SideEffectRT ::: acc_ty))
+    (\ [] [out_ptr] ->
+      let out_arg = ExpM $ VarE defaultExpInfo out_ptr
+      in translateStreamToFold tenv acc_ty acc_repr init acc_f out_arg stream)
+
+translateStreamToFoldWithExtraArgs
+  tenv acc_ty acc_repr init acc_f stream _ =
+    -- Other numbers of arguments are ill-typed
+    internalError "translateStreamToFoldWithExtraArgs"
+
+-- | Translate a stream to a sequential \'fold\' operation.
+--
+--   The accumulator function has type @(read acc -> read a -> write acc)@
+--   where @a@ is the stream's element type and @acc@ is the accumulator type.
+--
+--   The translated expression is a writer that writes a value of the
+--   accumulator type.
+translateStreamToFold :: TypeEnv
+                      -> Type   -- ^ Accumulator type
+                      -> ExpM   -- ^ Accumulator representation
+                      -> ExpM   -- ^ Initial value
+                      -> ExpM   -- ^ Accumulator function
+                      -> ExpM   -- ^ Output pointer
+                      -> ExpS   -- ^ Stream to be translated
+                      -> MkExpM -- ^ Translated expression
+translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
+  case stream
+  of GenerateStream {} ->
+       case sexpShape stream
+       of Array1DShape size_ix size_val ->
+            varAppE (pyonBuiltin the_for)
+            [size_ix, TypM acc_ty]
+            [return acc_repr,
+             return size_val,
+             return init,
+             lamE $ mkFun []
+             (\ [] -> return ([ValPT Nothing ::: intType,
+                               ReadPT ::: acc_ty,
+                               OutPT ::: acc_ty],
+                              SideEffectRT ::: acc_ty))
+             (\ [] [index_var, acc_in, acc_out] ->
+               -- Call the generator function,
+               -- bind its result to a local variable
+               let ix = ExpM $ VarE defaultExpInfo index_var
+               in localE (TypM $ sexpElementType stream) (sexpElementRepr stream)
+                  (\lv -> appE (_sexpGenerator stream ix) [] [return lv])
+                  (\lv -> appE (return acc_f) []
+                          [varE acc_in, return lv, varE acc_out])),
+             return out_ptr]
+     BindStream src (binder, trans) -> do
+       let src_out_ty = sexpElementType src
+
+       -- Create a new accumulator function that runs the transformer stream 
+       -- and folds over it.  It will be used as the source stream's  
+       -- accumulator.  The accumulator function has 'binder' as one of
+       -- its parameters.
+       consumer <- do
+         acc_in_var <- newAnonymousVar ObjectLevel
+         let m_producer_var = patMVar binder
+         acc_out_var <- newAnonymousVar ObjectLevel
+         let params = [memVarP acc_in_var (ReadPT ::: acc_ty),
+                       binder,
+                       memVarP acc_out_var (OutPT ::: acc_ty)]
+             retn = RetM (SideEffectRT ::: acc_ty)
+         let local_init = ExpM $ VarE defaultExpInfo acc_in_var
+         let local_out = ExpM $ VarE defaultExpInfo acc_out_var
+         body <- translateStreamToFold tenv acc_ty acc_repr local_init acc_f local_out trans
+         return $ ExpM $ LamE defaultExpInfo $
+           FunM $ Fun { funInfo = defaultExpInfo
+                      , funTyParams = []
+                      , funParams = params
+                      , funReturn = retn
+                      , funBody = body}
+
+       -- Fold over the source stream
+       translateStreamToFold tenv acc_ty acc_repr init consumer out_ptr src
+
+     CaseStream shp scr alts -> do
+       -- Translate each case alternative
+       alts' <- forM alts $ \(AltS alt) -> do
+         new_body <-
+           translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr (altBody alt)
+         return $ AltM $ Alt { altConstructor = altConstructor alt
+                             , altTyArgs = 
+                                 map (TypM . fromTypS) $ altTyArgs alt
+                             , altExTypes = map fromTyPatS $ altExTypes alt
+                             , altParams = map fromPatS $ altParams alt
+                             , altBody = new_body}
+             
+         
+
+       return $ ExpM $ CaseE defaultExpInfo scr alts'
+         
 
 -- | Given a stream and the repr of a stream element, get its shape.
 --

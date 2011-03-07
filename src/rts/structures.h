@@ -33,6 +33,7 @@ extern function pyon.internal.structures.repr_PyonTuple3
 extern function pyon.internal.structures.repr_PyonTuple4
   (unit, unit, unit, unit, owned, owned, owned, owned) -> owned;
 
+extern data owned pyon.internal.structures.repr_EffTok;
 extern data owned pyon.internal.structures.repr_Box_value;
 extern data owned pyon.internal.structures.repr_int;
 extern data owned pyon.internal.structures.repr_float;

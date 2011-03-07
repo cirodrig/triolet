@@ -532,6 +532,28 @@ function histogram
   ();
 };
 
+// Initialize a histogram with zeros.
+// Call the given function to compute the histogram.
+function inline createHistogram
+  (unit _, IndexedInt size_ix, owned initializer, pointer ret) -> () {
+  IndexedInt {size} = size_ix;
+  typedef array_type = array (value size, int);
+
+  // Fill the array with zeros 
+  _ = while (int i = int 0) (i < size) {
+    ret @! array_type[i] = int 0;
+    i + int 1;
+  };
+
+  letrec {
+    function write_histogram (int index, pointer dummy_out) -> () {
+      ret @! array_type[index] = ret @! array_type[index] + int 1;
+      ();
+    }
+  };
+  () call initializer(write_histogram, null, null);
+};
+
 /*****************************************************************************/
 /* zip */
 

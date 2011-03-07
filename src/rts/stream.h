@@ -47,6 +47,9 @@ extern function pyon.internal.stream.histogram
 extern function pyon.internal.stream.histogramArray
   (unit, unit, IndexedInt, owned, pointer) -> ();
 
+extern function pyon.internal.stream.createHistogram
+  (unit, IndexedInt, owned, pointer) -> ();
+
 extern function pyon.internal.stream.Stream_zip
   (unit, unit, unit, owned, owned, owned, owned) -> owned;
 

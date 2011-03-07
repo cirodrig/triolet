@@ -33,6 +33,26 @@ data val SomeIndexedInt : val pure
   () (val n : intindex) (val IndexedInt n) : val SomeIndexedInt;
 };
 
+-- A dummy token that we use to stand in for dependences due to
+-- imperative computation that is inserted by the compiler.
+--
+-- We take advantage of the fact that EffTok is a unit value, and therefore
+-- it is not accessed by load or store instructions when reading or writing it,
+-- and therefore we can safely masquerade NULL pointers as EffTok references.
+data val EffTok : val pure {};
+
+emptyEffTok : write EffTok;
+
+-- Translate to a side effect.
+-- This function is translated specially when converting from Core to LowLevel.
+toEffTok : (val a : pure) -> sideeffect a -> write EffTok;
+
+-- Propagate a side effect.
+propagateEffTok : read EffTok -> write EffTok;
+
+-- Perform two side-effecting operations in sequence.
+seqEffTok : write EffTok -> write EffTok -> write EffTok;
+
 data ref Complex : val (val pure -> val pure)
 {
   complex : (val a : pure) -> write a -> write a -> write Complex a,
@@ -288,6 +308,8 @@ repr_EmptyReference : (val a : pure) -> box Repr a;
 
 repr_array : (val n : intindex) -> (val e : pure)
           -> val IndexedInt n -> box Repr e -> box Repr (array n e);
+
+repr_EffTok : box Repr EffTok;
 
 OpaqueTraversableDict_list : box TraversableDict list;
 
@@ -712,6 +734,13 @@ histogramArray : (val t : val pure -> val pure)
               -> val IndexedInt n
               -> box Stream t int
               -> write array n int;
+
+-- Low-level function for imperatively initializing an histogram
+createHistogram :
+    (val n : intindex)
+ -> val IndexedInt n
+ -> box (box (val int -> write EffTok) -> read EffTok -> write EffTok)
+ -> write array n int;
 
 generate : (val n : intindex)
         -> (val a : pure)
