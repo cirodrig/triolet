@@ -16,6 +16,7 @@ information about how a value is demanded.
 module SystemF.Demand where
 
 import qualified Data.IntMap as IntMap
+import qualified Data.Set as Set
 import Data.List
 import Data.Maybe
 
@@ -23,6 +24,7 @@ import Common.Error
 import Common.Identifier
 import Type.Environment
 import Type.Type
+import Type.Rename
 
 -------------------------------------------------------------------------------
 -- The dataflow domain
@@ -119,6 +121,43 @@ data Specificity =
     -- ^ Loaded at the given type and representation.  The representation
     --   is either 'Value' or 'Boxed'.
   | Unused            -- ^ Not used at all.  This is the bottom value.
+
+instance Renameable Specificity where
+  rename rn spc =
+    case spc
+    of Decond con ty_args ex_types spcs ->
+         Decond con (rename rn ty_args) [(v, rename rn t) | (v, t) <- ex_types]
+         (rename rn spcs)
+       Loaded repr ty spc ->
+         Loaded repr (rename rn ty) (rename rn spc)
+       
+       -- Other constructors don't mention variables
+       _ -> spc
+
+  freshen spc =
+    case spc
+    of Decond con ty_args ex_types spcs -> do
+         -- Freshen the existential variables 
+         new_evars <- mapM newClonedVar $ map fst ex_types
+         let rn = renaming [(old_v, new_v)
+                           | ((old_v, _), new_v) <- zip ex_types new_evars]
+             ex_types' = [(new_v, k) | ((_, k), new_v) <- zip ex_types new_evars]
+         return $ Decond con ty_args ex_types' (rename rn spcs)
+       -- Other constructors don't bind new variables
+       _ -> return spc
+
+  freeVariables spc =
+    case spc
+    of Used -> Set.empty
+       Inspected -> Set.empty
+       Decond v tys ex_var_bindings spcs ->
+         let ex_vars = map fst ex_var_bindings
+             field_fvs = foldr Set.delete (freeVariables spcs) ex_vars
+         in freeVariables tys `Set.union`
+            freeVariables (map snd ex_var_bindings) `Set.union`
+            field_fvs
+       Loaded _ ty spc -> freeVariables ty `Set.union` freeVariables spc
+       Unused -> Set.empty
 
 -- | Construct a 'Specificity' for a value used as the reference parameter of 
 --   a load.  The 'Repr' argument indicates whether the loaded data is boxed.
