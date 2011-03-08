@@ -443,15 +443,15 @@ rwStoreApp inf op' ty_args args = do
   return (new_exp, new_value)
   where
     -- Keep track of what was stored in memory
-    stored_value [_, Just stored_value, _] =
+    stored_value [Just stored_value, _] =
       Just $ complexKnownValue $ StoredValue Value stored_value
-    stored_value [_, _, _] = Nothing
-    stored_value [_, Just stored_value] =
+    stored_value [_, _] = Nothing
+    stored_value [Just stored_value] =
       -- When applied to an argument, this will store a value
       Just $ complexKnownValue $
       WriterValue $ complexKnownValue $
       StoredValue Value stored_value
-    stored_value [_, _] = Nothing
+    stored_value [_] = Nothing
     stored_value _ =
       internalError "rwStoreApp: Wrong number of arguments in call"
       
@@ -486,7 +486,7 @@ rwLoadApp inf op' ty_args args = do
       return (new_exp, Nothing)
   where
     -- Do we know what was stored here?
-    loaded_value [_, addr_value] =
+    loaded_value [addr_value] =
       case addr_value 
       of Just (ComplexValue _ (StoredValue Value val)) ->
            Just (asTrivialValue val, Just val)
@@ -549,7 +549,7 @@ rwCopyApp inf op' ty_args args = do
         Just stored_exp <- asTrivialValue stored_value =
           let [store_type] = ty_args
               store_op = ExpM $ VarE inf (pyonBuiltin the_store)
-          in ExpM $ AppE inf store_op [store_type] (repr : stored_exp : other_args)
+          in ExpM $ AppE inf store_op [store_type] (stored_exp : other_args)
     
       | ComplexValue _ (StoredValue Boxed stored_value) <- src_value,
         Just stored_exp <- asTrivialValue stored_value =

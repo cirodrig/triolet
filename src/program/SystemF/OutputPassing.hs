@@ -107,18 +107,16 @@ setupEnvironment var_supply = do
 genExp :: Exp Rep -> OP ExpM
 genExp expression =
   case expression
-  of LoadExpr Value ty e ->
-       withReprDict ty $ \repr_dict -> do
-         e' <- genExp e
-         returnApp loadOp [TypM ty] [repr_dict, e']
+  of LoadExpr Value ty e -> do
+       e' <- genExp e
+       returnApp loadOp [TypM ty] [e']
      LoadExpr Boxed ty e -> do
        e' <- genExp e
        returnApp loadBoxOp [TypM ty] [e']
      StoreExpr Value ty e ->
-       takeRetArg $ \ret_arg ->
-       withReprDict ty $ \repr_dict -> do
+       takeRetArg $ \ret_arg -> do
          e' <- genExp e
-         returnApp storeOp [TypM ty] [repr_dict, e', ret_arg]
+         returnApp storeOp [TypM ty] [e', ret_arg]
      StoreExpr Boxed ty e ->
        takeRetArg $ \ret_arg -> do
          e' <- genExp e

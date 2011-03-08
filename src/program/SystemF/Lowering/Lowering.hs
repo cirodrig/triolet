@@ -648,14 +648,14 @@ lowerExp (ExpTM (RTypeAnn return_type expression)) =
      AppE _ (ExpTM (RTypeAnn _ (VarE _ op))) ty_args args 
        | op `isPyonBuiltin` the_store ->
            case (ty_args, args)
-           of ([TypTM (RTypeAnn _ store_type)], [_, value, address]) ->
+           of ([TypTM (RTypeAnn _ store_type)], [value, address]) ->
                 compileStore store_type value address
-              ([TypTM (RTypeAnn _ store_type)], [_, value]) ->
+              ([TypTM (RTypeAnn _ store_type)], [value]) ->
                 lift $ compileStoreFunction store_type value
               _ -> internalError "lowerExp: Wrong number of arguments to store"
        | op `isPyonBuiltin` the_load ->
            case (ty_args, args)
-           of ([TypTM (RTypeAnn _ load_type)], [_, address]) ->
+           of ([TypTM (RTypeAnn _ load_type)], [address]) ->
                 compileLoad load_type address
               _ -> internalError "loadExp: Wrong number of arguments to load"
      AppE _ op ty_args args -> lowerApp return_type op ty_args args

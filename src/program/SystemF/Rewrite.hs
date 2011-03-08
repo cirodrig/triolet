@@ -455,7 +455,7 @@ rwHistogramArray tenv inf [shape_type, size_ix] (size : input : other_args) =
                 snd_eff =
                   varAppE writer [] [varAppE (pyonBuiltin the_load)
                                      [TypM intType]
-                                     [return repr_int, varE index]]
+                                     [varE index]]
             varAppE (pyonBuiltin the_seqEffTok) []
               [fst_eff, snd_eff, varE out_eff2])
       let in_eff_exp = ExpM $ VarE defaultExpInfo in_eff
@@ -846,8 +846,7 @@ interpretStream2 shape_type repr expression =
 
     -- A generator for the sequence [0, 1, 2, ...]
     counting_generator ix =
-      varAppE (pyonBuiltin the_store) [TypM intType]
-      [varE $ pyonBuiltin the_repr_int, return ix]
+      varAppE (pyonBuiltin the_store) [TypM intType] [return ix]
 
 interpretStreamAlt :: Type -> ExpM -> AltM -> Maybe AltS
 interpretStreamAlt shape_type repr (AltM alt) = do
@@ -1085,8 +1084,7 @@ interpretStream repr expression =
   where
     -- A generator for the sequence [0, 1, 2, ...]
     counting_generator ix =
-      varAppE (pyonBuiltin the_store) [TypM intType]
-      [varE $ pyonBuiltin the_repr_int, return ix]
+      varAppE (pyonBuiltin the_store) [TypM intType] [return ix]
 
 -- | Produce program code of an interpreted stream.  The generated code
 --   will have the specified shape.  If code cannot be generated,

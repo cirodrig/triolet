@@ -244,8 +244,7 @@ floatedParameters tenv spc op_var ty_args =
            -- Also move the argument of 'store', so that we can
            -- do store-load propagation 
            let [TypM store_type] = ty_args
-           in [Don'tFloat,
-               FloatParam (ValPT Nothing ::: store_type) Used,
+           in [FloatParam (ValPT Nothing ::: store_type) Used,
                Don'tFloat]
        | op_var `isPyonBuiltin` the_storeBox ->
            -- Also move the argument of 'storeBox', so that we can

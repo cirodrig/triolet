@@ -259,8 +259,10 @@ data box TraversableDict : val (val (val pure -> val pure) -> val pure)
 -------------------------------------------------------------------------------
 -- Representation dictionaries
 
-load : (val a : pure) -> box Repr a -> read a -> val a;
-store : (val a : pure) -> box Repr a -> val a -> write a;
+-- Loaded and stored types must be statically known.
+-- Code is generated specifically for the type at the callsite.
+load : (val a : pure) -> read a -> val a;
+store : (val a : pure) -> val a -> write a;
 copy : (val a : pure) -> box Repr a -> read a -> write a;
 
 loadBox : (val a : pure) -> read a -> box a;

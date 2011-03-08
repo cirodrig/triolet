@@ -228,12 +228,12 @@ dmdAppE inf op ty_args args = do
     use_modes =
       case op
       of ExpM (VarE _ op_var)
-           | op_var `isPyonBuiltin` the_load && length args == 2 ->
+           | op_var `isPyonBuiltin` the_load && length args == 1 ->
              case ty_args
-             of [ty] -> [Used, loadSpecificity Value (fromTypM ty) Used]
+             of [ty] -> [loadSpecificity Value (fromTypM ty) Used]
            | op_var `isPyonBuiltin` the_loadBox && length args == 1 ->
              case ty_args
-             of [ty] -> [Used, loadSpecificity Boxed (fromTypM ty) Used]
+             of [ty] -> [loadSpecificity Boxed (fromTypM ty) Used]
            | op_var `isPyonBuiltin` the_copy && length args == 2 ->
                [Used, Inspected]
            | op_var `isPyonBuiltin` the_copy && length args == 3 ->
