@@ -105,39 +105,64 @@ instance Dataflow Multiplicity where
 data Specificity =
     Used              -- ^ Used in an unknown way.  This is the top value.
   | Inspected
-    -- ^ Deconstructed by a case statement or read by 'copy'
-  | Decond !(Maybe Var) [Specificity]
-    -- ^ Deconstructed at a known constructor or read by 'load'.
+    -- ^ Deconstructed by a case statement or read by 'copy'.
+  | Decond !Var [Type] [(Var, Type)] [Specificity]
+    -- ^ Deconstructed at a known constructor.
+    --
+    --   We save the type arguments and existential type parameters
+    --   of the data constructor
+    --   so that we can create a @case@ statement from this info.
+    --
     --   Includes a list describing how each field is used.  There is one list
-    --   member for each value field; none for type fields.
+    --   member for each value field.
+  | Loaded !Repr Type Specificity
+    -- ^ Loaded at the given type and representation.  The representation
+    --   is either 'Value' or 'Boxed'.
   | Unused            -- ^ Not used at all.  This is the bottom value.
+
+-- | Construct a 'Specificity' for a value used as the reference parameter of 
+--   a load.  The 'Repr' argument indicates whether the loaded data is boxed.
+loadSpecificity :: Repr -> Type -> Specificity -> Specificity
+loadSpecificity repr ty spc = Loaded repr ty spc
 
 instance Dataflow Specificity where
   bottom = Unused
 
   joinPar Unused x = x
   joinPar x Unused = x
-  joinPar (Decond decon1 specs1) (Decond decon2 specs2) =
+  joinPar (Decond decon1 t1 e1 specs1) (Decond decon2 _ _ specs2) =
     if decon1 == decon2
     then if length specs1 /= length specs2
-         then internalError "Specificity.join: Mismatched deconstructors"
-         else Decond decon1 $ zipWith joinPar specs1 specs2
+         then mismatchedSpecificityDeconstructors
+         else Decond decon1 t1 e1 $ zipWith joinPar specs1 specs2
     else Inspected
+  joinPar (Loaded r1 t1 s1) (Loaded r2 _ s2) =
+    if r1 /= r2
+    then mismatchedSpecificityDeconstructors
+    else Loaded r1 t1 (joinPar s1 s2)
+  joinPar (Decond {}) (Loaded {}) = mismatchedSpecificityDeconstructors
+  joinPar (Loaded {}) (Decond {}) = mismatchedSpecificityDeconstructors
   joinPar Inspected (Decond {}) = Inspected
+  joinPar Inspected (Loaded {}) = Inspected
   joinPar (Decond {}) Inspected = Inspected
+  joinPar (Loaded {}) Inspected = Inspected
   joinPar Inspected Inspected = Inspected
   joinPar Used _ = Used
   joinPar _ Used = Used
   
   joinSeq = joinPar
 
+mismatchedSpecificityDeconstructors =
+  internalError "Specificity.join: Mismatched deconstructors"
+
 showSpecificity :: Specificity -> String
 showSpecificity Unused = "0"
-showSpecificity (Decond mv spcs) =
-  "D{" ++ showmv mv ++ concatMap showSpecificity spcs ++ "}"
+showSpecificity (Decond c tys ty_args spcs) =
+  "D{" ++ showmv ++ concatMap showSpecificity spcs ++ "}"
   where
-    showmv Nothing = ""
-    showmv (Just c) = show c ++ ":"
+    showmv | null tys && null ty_args = show c ++ ":"
+           | otherwise = "(" ++ show c ++ " ...):"
+showSpecificity (Loaded r _ spc) = "L{" ++ showSpecificity spc ++ "}"
 showSpecificity Inspected = "I"
 showSpecificity Used = "U"
 

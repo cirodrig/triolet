@@ -232,7 +232,7 @@ floatedParameters tenv spc op_var ty_args =
   of Just dcon_type ->
        -- Move the movable fields of data constructors
        case spc
-       of Decond (Just con) spcs
+       of Decond con _ _ spcs
             | con /= op_var ->
               internalError "floatedParameters: Invalid demand"
             | otherwise ->

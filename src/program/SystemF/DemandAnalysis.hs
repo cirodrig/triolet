@@ -105,12 +105,6 @@ mentionSpecificity v spc = mentionHelper v $ Dmd OnceSafe spc
 mentionMultiCase :: Var -> Df ()
 mentionMultiCase v = mentionHelper v $ Dmd OnceSafe Inspected
 
--- | A variable was used in a single-alternative case statement or \'load\'
---   function.
-mentionSingleCase :: Var -> (Maybe Var, [Specificity]) -> Df ()
-mentionSingleCase v (mcon, fields) =
-  mentionHelper v $ Dmd OnceSafe (Decond mcon fields)
-
 -- | Get the demand on variable @v@ produced by the given code; also, remove
 --   @v@ from the demanded set
 getDemand :: Var -> Df a -> Df (a, Dmd)
@@ -235,7 +229,11 @@ dmdAppE inf op ty_args args = do
       case op
       of ExpM (VarE _ op_var)
            | op_var `isPyonBuiltin` the_load && length args == 2 ->
-               [Used, Decond Nothing [Used]]
+             case ty_args
+             of [ty] -> [Used, loadSpecificity Value (fromTypM ty) Used]
+           | op_var `isPyonBuiltin` the_loadBox && length args == 1 ->
+             case ty_args
+             of [ty] -> [Used, loadSpecificity Boxed (fromTypM ty) Used]
            | op_var `isPyonBuiltin` the_copy && length args == 2 ->
                [Used, Inspected]
            | op_var `isPyonBuiltin` the_copy && length args == 3 ->
@@ -311,7 +309,11 @@ dmdAlt result_spc (AltM alt) = do
     dmdExp result_spc (altBody alt)
 
   let use_pattern =
-        Decond (Just $ altConstructor alt) (map (specificity . patMDmd) pats)
+        -- How the alternative's value is demanded
+        Decond (altConstructor alt)
+        (map fromTypM $ altTyArgs alt)
+        [(v, t) | TyPatM v t <- altExTypes alt]
+        (map (specificity . patMDmd) pats)
       new_alt = AltM $ Alt { altConstructor = altConstructor alt
                            , altTyArgs = altTyArgs alt
                            , altExTypes = typats
