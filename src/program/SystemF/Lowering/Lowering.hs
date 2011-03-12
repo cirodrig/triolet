@@ -364,9 +364,8 @@ getBoxedObjectContents field_layout scrutinee = do
 compileIndirectReferenceCase field_layout scrutinee [(alt_con, alt_body)] = do
   -- The scrutinee is a pointer to the pointer to the object.
   -- Get the pointer to the object.
-  tmp_var <- lift $ LL.newAnonymousVar (LL.PrimType LL.PointerType)
-  primLoadConst (LL.PrimType LL.PointerType) scrutinee tmp_var
-  alt_body [valCode (LL.VarV tmp_var)]
+  val <- primLoadConst (LL.PrimType LL.PointerType) scrutinee
+  alt_body [valCode val]
 
 compileRecordPointerCase con record_type layouts scrutinee [(alt_con, alt_body)] 
   | alt_con == con = do
