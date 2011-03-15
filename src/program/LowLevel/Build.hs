@@ -465,15 +465,17 @@ dynamicFieldTypeSize :: (ToDynamicRecordData a) => FieldType a -> Val
 dynamicFieldTypeSize (toDynamicFieldType -> ft) =
   case ft
   of PrimField vt   -> nativeWordV $ sizeOf vt
-     RecordField r -> recordSize r
-     BytesField s _  -> s
+     RecordField r  -> recordSize r
+     BytesField s _ -> s
+     AlignField _   -> nativeWordV 0
 
 dynamicFieldTypeAlignment :: (ToDynamicRecordData a) => FieldType a -> Val
 dynamicFieldTypeAlignment (toDynamicFieldType -> ft) =
   case ft
   of PrimField vt   -> nativeWordV $ alignOf vt
-     RecordField r -> recordAlignment r
-     BytesField _ a  -> a
+     RecordField r  -> recordAlignment r
+     BytesField _ a -> a
+     AlignField a   -> a
 
 createConstDynamicRecord :: forall m. (Monad m, Supplies m (Ident Var)) =>
                             [DynamicFieldType] -> Gen m DynamicRecord
@@ -494,7 +496,9 @@ createDynamicRecord field_types = do
     compute_offsets [] zero one (map snd field_types)
   
   -- Create the record
-  let fields = [mkDynamicField o m t | (o, (m, t)) <- zip offsets field_types]
+  let fields = [mkDynamicField o m t
+               | (o, (m, t)) <- zip offsets field_types,
+                 not $ isAlignField t]
   return $ record fields size alignment
   where
     zero = nativeIntV 0
