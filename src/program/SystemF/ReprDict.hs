@@ -176,6 +176,8 @@ createDictEnv = do
                  (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_int))
   let float_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_float))
                    (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float))
+  let efftok_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_EffTok))
+                    (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_EffTok))
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
   boxed_dict <- createBoxedDictPattern (pyonBuiltin the_Boxed) 1
   stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 2
@@ -214,7 +216,7 @@ createDictEnv = do
 
   let dict_env = DictEnv.DictEnv [repr_dict, boxed_dict,
                                   stream_dict,
-                                  float_dict, int_dict,
+                                  float_dict, int_dict, efftok_dict,
                                   list_dict, complex_dict, array_dict,
                                   referenced_dict,
                                   tuple2_dict, tuple3_dict, tuple4_dict,
