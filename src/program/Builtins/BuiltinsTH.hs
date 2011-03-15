@@ -228,6 +228,10 @@ pyonBuiltinVariableNames =
   , "copyBox"
   , "boxToPtr"
   , "ptrToBox"
+    
+    -- Inserted by argument flattening
+  , "deadBox"
+  , "deadRef"
   
     -- Inserted by rewrite rules
   , "defineIntIndex"

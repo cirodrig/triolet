@@ -577,6 +577,12 @@ min_ii : (val m : intindex)
 -------------------------------------------------------------------------------
 -- Other functions
 
+-- A dummy boxed object that is used as a placeholder for a dead value.
+deadBox : (val a : pure) -> box a;
+
+-- A dummy referenced object that is used as a placeholder for a dead value.
+deadRef : (val a : pure) -> read a;
+
 oper_DO : (val a : pure) -> box Repr a -> write a -> box Stream list a;
 
 oper_CAT_MAP :

@@ -181,6 +181,8 @@ createDictEnv = do
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
   boxed_dict <- createBoxedDictPattern (pyonBuiltin the_Boxed) 1
   stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 2
+  eq_dict <- createBoxedDictPattern (pyonBuiltin the_EqDict) 1
+  ord_dict <- createBoxedDictPattern (pyonBuiltin the_OrdDict) 1
   additive_dict <- createBoxedDictPattern (pyonBuiltin the_AdditiveDict) 1
   multiplicative_dict <- createBoxedDictPattern (pyonBuiltin the_MultiplicativeDict) 1
   referenced_dict <- DictEnv.pattern1 $ \arg -> 
@@ -220,6 +222,7 @@ createDictEnv = do
                                   list_dict, complex_dict, array_dict,
                                   referenced_dict,
                                   tuple2_dict, tuple3_dict, tuple4_dict,
+                                  eq_dict, ord_dict,
                                   additive_dict, multiplicative_dict]
       index_env = DictEnv.empty
   return (dict_env, index_env)
