@@ -69,10 +69,19 @@ data FunInfo =
             -- | The group where the function is defined
           , defGroup :: !GroupID
             -- | Context in which a function is used.  The context consists
-            --   of all definition groups that enclose the use but not
+            --   of all function definitions that enclose the use but not
             --   the definition.  If any of them are marked for
             --   hoisting, then the function must be hoisted.
+            --
+            --   A definition group is /not/ part of the context of its body.
           , useContext :: [GroupID]
+            -- | Scope in which a function is used.  The scope consists
+            --   of all function definitions that are in scope at the use but
+            --   not the definition.  If any of them are marked for
+            --   hoisting, then the function must be hoisted.
+            --
+            --   A definition group /is/ part of the scope of its body.
+          , useScope :: [GroupID]
           }
 
 -- | While generating constraints, a map is used to keep track of all
@@ -116,7 +125,7 @@ data ScanInputs =
   , scanIdSupply :: {-# UNPACK #-}!(IdentSupply UnsolvedGroup)
   }
 
--- | Add a definition group to the context where a function is being used.
+-- | Add a definition group to the scope where a function is being used.
 --
 --   This puts a new group in between preexisting definitions and their uses.
 pushContext :: GroupID -> ScanInputs -> ScanInputs
@@ -127,15 +136,24 @@ pushContext context_fun si =
       finfo {useContext = (context_fun:useContext finfo)}
 
 -- | Add a group's local functions to the environment.
-extendContext :: GroupID -> [FunDef] -> ScanInputs -> ScanInputs
-extendContext gid defs si =
-  si {scanFunMap = insert_defs $ scanFunMap si}
+extendContext :: Bool -> GroupID -> [FunDef] -> ScanInputs -> ScanInputs
+extendContext in_context gid defs si =
+  si {scanFunMap = insert_defs $ Map.map add_to_context $ scanFunMap si}
   where
+    insert_defs :: FunMap -> FunMap
     insert_defs m = foldr insert_def m defs
 
     insert_def (Def v f) m =
-      let info = FunInfo (length $ funParams f) gid []
+      let info = FunInfo (length $ funParams f) gid [] []
       in Map.insert v info m
+
+    add_to_context :: FunInfo -> FunInfo
+    add_to_context finfo
+      | in_context =
+          finfo {useContext = (gid:useContext finfo),
+                 useScope = (gid:useScope finfo)}
+      | otherwise =
+          finfo {useScope = (gid:useScope finfo)}
 
 
 -- | A scan for computing hoisting and capture information.
@@ -166,11 +184,15 @@ enterGroup gid (Scan f) =
 --
 --   Add the definition group to the environment, and remove the defined
 --   variables from the captured variable set.
-defineGroup :: GroupID -> [FunDef] -> Scan -> Scan
-defineGroup gid fdefs (Scan f) =
+--
+--   If 'in_context' is True, then we're processing the function definitions
+--   and should add them to the context.  Otherwise we're processing the
+--   body of the definition group and we should not add them to the context.
+defineGroup :: Bool -> GroupID -> [FunDef] -> Scan -> Scan
+defineGroup in_context gid fdefs (Scan f) =
   define_group $
   defines (map definiendum fdefs) $
-  Scan $ \i -> f (extendContext gid fdefs $ pushContext gid i)
+  Scan $ \i -> f (extendContext in_context gid fdefs i)
   where
     define_group (Scan f) = Scan $ \env -> do
       (c_csts, c, h_csts, h, groups) <- f env
@@ -295,7 +317,7 @@ scanGroup group scan_body = Scan $ \i -> do
     case group
     of Rec fs ->
          -- Scan all functions in the group.  Remove references to the group.
-         defineGroup group_id (groupMembers group) $
+         defineGroup True group_id (groupMembers group) $
          mconcat $ map (scanFun . definiens) fs
 
        NonRec f -> do
@@ -308,7 +330,7 @@ scanGroup group scan_body = Scan $ \i -> do
 
   -- Process the body
   (body_c_csts, body_c, body_h_csts, body_h, body_groups) <-
-    flip runScan i $ defineGroup group_id (groupMembers group) scan_body
+    flip runScan i $ defineGroup False group_id (groupMembers group) scan_body
 
   return (captInheritUnion local_c_csts body_c_csts,
           Set.union body_c local_captured,
