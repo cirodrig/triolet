@@ -522,6 +522,14 @@ createDynamicRecord field_types = do
     compute_offsets offsets cur_offset cur_align [] = do
       return (reverse offsets, cur_offset, cur_align)
 
+-- | Create a dynamic record with only one field.  No code is generated.
+singletonDynamicRecord :: Mutability -> DynamicFieldType -> DynamicRecord
+singletonDynamicRecord mut field_type =
+  let fields = [mkField' (nativeIntV 0) mut field_type]
+      size = dynamicFieldTypeSize field_type
+      align = dynamicFieldTypeAlignment field_type
+  in record fields size align
+
 suspendedCreateConstDynamicRecord :: forall m m'.
                                      (Monad m, Supplies m (Ident Var),
                                       Monad m', Supplies m' (Ident Var)) =>
