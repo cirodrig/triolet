@@ -206,7 +206,7 @@ pointerLayoutRecordField layout =
        -- Unsigned multiply by the array size.
        -- Use the size type index to look up the size variable.
        size_value <- do
-         indexed_size <- lookupIndexedInt size
+         indexed_size <- lift $ lookupIndexedInt size
          size <- emitAtom1 (LL.PrimType LL.nativeIntType) $
                  LL.UnpackA LL.indexedIntRecord indexed_size
          primCastZ (LL.PrimType LL.nativeWordType) size

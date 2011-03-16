@@ -42,7 +42,7 @@ data LowerEnv =
              
              -- | The type-indexed integers in the environment.
              --   Indexed by the type index.
-           , intEnvironment :: DictEnv.DictEnv (GenLower LL.Val)
+           , intEnvironment :: DictEnv.DictEnv LL.Val
 
              -- | The 'Repr' dictionaries in the environment.  Indexed
              --   by the dictionary's type parameter.
@@ -149,11 +149,11 @@ assumeReprDict ty val (Lower m) = Lower $ local update m
 
 -- | Find an integer indexed by the given index, which should be a type
 --   of kind @intindex@.  Fail if not found.
-lookupIndexedInt :: Type -> GenLower LL.Val
+lookupIndexedInt :: Type -> Lower LL.Val
 lookupIndexedInt ty = do
-  match <- lift lookup_dict
+  match <- lookup_dict
   case match of
-    Just int_val -> int_val
+    Just int_val -> return int_val
     Nothing -> internalError $ 
                "lookupIndexedInt: Not found for index:\n" ++ show (pprType ty)
   where
@@ -168,7 +168,7 @@ assumeIndexedInt :: Type -> LL.Val -> Lower a -> Lower a
 assumeIndexedInt ty val (Lower m) = Lower $ local update m
   where
     update env = env {intEnvironment =
-                         DictEnv.insert (DictEnv.monoPattern ty (return val)) $
+                         DictEnv.insert (DictEnv.monoPattern ty val) $
                          intEnvironment env}
 
 lookupVar :: Var -> Lower LL.Var
