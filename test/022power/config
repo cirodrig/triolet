@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "A sequential loop",
+  pyonSources	 = ["mypower.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "1096"
+}

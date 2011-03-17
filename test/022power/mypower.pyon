@@ -1,0 +1,11 @@
+
+# Exponentiation by iterated multiplication
+def mypow(base : float, e : int) -> float:
+  # Test type inference of variables f, x.
+  def iterate(f, x, n : int):
+    if n == 0: return x
+    else: return iterate(f, f(x), n - 1)
+
+  return iterate(lambda x: base * x, 1, e)
+
+export ccall mypow : float * int -> float;
