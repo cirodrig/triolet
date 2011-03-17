@@ -98,6 +98,35 @@ assumePats pats m = foldr assumePat m pats
 -------------------------------------------------------------------------------
 -- Argument flattening and code generation, driven by function parameter types 
 
+-- | What is being flattened.  The decision of whether to flatten is made
+--   differently depending on what is being flattened.
+--
+--   'ReturnField' is a field of a return value or local variable that can be
+--   at least partially flattened.
+data What = Parameter | Return | Local | ReturnField deriving(Eq)
+
+fieldWhat :: What -> What
+
+-- Flattened parameters follow the same flattening rules as parameters
+fieldWhat Parameter = Parameter
+
+-- Other data types place restrictions on what can go into a field
+fieldWhat Return = ReturnField
+fieldWhat Local = ReturnField
+fieldWhat ReturnField = ReturnField
+
+-- | Is the type constructor's natural representation 'Value'?
+naturalValueTyCon :: TypeEnv -> Var -> Bool
+naturalValueTyCon tenv con =
+  case lookupDataType con tenv
+  of Just dtype -> dataTypeRepresentation dtype == Value
+     Nothing -> False
+
+naturalValueTyConAF :: Var -> AF Bool
+naturalValueTyConAF con = do
+  tenv <- getTypeEnv
+  return $ naturalValueTyCon tenv con
+
 -- | If the parameter is a type constructor that has a single data constructor,
 --   return its type and data constructors
 fromSingletonTyCon :: TypeEnv -> Var -> Maybe (DataType, DataConType)
@@ -135,6 +164,22 @@ data WrapPat' =
     -- | Parameter value is dead, and is not passed at all
   | DeadWP ExpM
 
+-- | True if all unpacked fields of the pattern are values
+unpacksToAValue :: ReturnType -> WrapPat' -> Bool
+unpacksToAValue (rrepr ::: _) wpat =
+  case wpat
+  of IdWP _              -> case rrepr
+                            of {ValRT -> True; _ -> False}
+     -- Deconstructed patterns must have no existentials and only
+     -- acceptable fields
+     DeconWP _ _ _ [] fs -> all unpacks' fs
+     DeconWP _ _ _ _  _  -> False
+     LoadWP Value _ _    -> True
+     LoadWP _     _ _    -> False
+     DeadWP _            -> False
+  where
+    unpacks' (WrapPat pat wp) = unpacksToAValue (patMReturnType pat) wp
+
 -- | How to unwrap a function's return parameter.  If the function doesn't 
 --   write into its destination (that is, there's no return parameter), we
 --   make no attempt to unwrap the return value.
@@ -170,23 +215,23 @@ data DeconRepr = DeconValue | DeconBoxed | DeconReferenced ExpM
 
 -- | Wrap a sequence of patterns.  Variables bound by earlier patterns are
 --   available in the scope of later patterns.
-wrapPatterns :: [PatM] -> AF [WrapPat]
-wrapPatterns (pat:pats) = do
-  wrap_pat <- wrapPattern pat
-  wrap_pats <- assumePat pat $ wrapPatterns pats
+wrapPatterns :: What -> [PatM] -> AF [WrapPat]
+wrapPatterns what (pat:pats) = do
+  wrap_pat <- wrapPattern what pat
+  wrap_pats <- assumePat pat $ wrapPatterns what pats
   return (wrap_pat : wrap_pats)
 
-wrapPatterns [] = return []
+wrapPatterns _ [] = return []
 
 -- | Decide how to pass one of the original function's parameters to the 
 --   worker.
-wrapPattern :: PatM -> AF WrapPat
-wrapPattern pat = do
-  wrapping <- wrapPattern' pat (specificity $ patMDmd pat)
+wrapPattern :: What -> PatM -> AF WrapPat
+wrapPattern what pat = do
+  wrapping <- wrapPattern' what pat (specificity $ patMDmd pat)
   return $ WrapPat pat wrapping
 
-wrapPattern' :: PatM -> Specificity -> AF WrapPat'
-wrapPattern' pat pattern_specificity =
+wrapPattern' :: What -> PatM -> Specificity -> AF WrapPat'
+wrapPattern' what pat pattern_specificity =
   case pat
   of MemVarP {} -> do
        -- Rename existential type variables so that they don't produce
@@ -197,15 +242,41 @@ wrapPattern' pat pattern_specificity =
      LocalVarP {} ->
        internalError "wrapPattern: Unexpected pattern"
   where
-    wrap_var_pattern Used = unchanged
+    -- No use information is available
+    wrap_var_pattern Used =
+      case what
+      of Return ->
+           case fromVarApp $ patMType pat
+           of Just (con, args) -> do
+                loadable <- naturalValueTyConAF con
+                if loadable
+                  then loaded Value (patMType pat)
+                  else unchanged
+              Nothing -> unchanged
+         _ -> unchanged
+    
+    -- The variable will be loaded from memory.  We always want to flatten it.
     wrap_var_pattern (Loaded repr ty _) = loaded repr ty
-    wrap_var_pattern Unused = dead
 
+    -- The variable is dead.
+    -- If it's a parameter or a field of a local variable, eliminate it.
+    wrap_var_pattern Unused =
+      case what
+      of Parameter -> dead
+         ReturnField -> dead
+         _ -> unchanged
+
+    -- The variable is deconstructed.  We always want to flatten it.
+    -- However, we are limited in what we can flatten in return values and 
+    -- local variables; if flattening is impossible, leave it unchanged.
     wrap_var_pattern (Decond con ty_args ex_types spcs) = do
       tenv <- getTypeEnv
       case lookupDataConWithType con tenv of
-        Just (data_type, dcon_type) ->
-          deconPattern data_type dcon_type con ty_args ex_types spcs
+        Just (data_type, dcon_type) -> do
+          mx <- deconPattern what data_type dcon_type con ty_args ex_types spcs
+          case mx of
+            Nothing -> unchanged
+            Just x -> return x
         Nothing ->
           internalError "wrapPattern: Deconstructed unknown type"
 
@@ -216,8 +287,11 @@ wrapPattern' pat pattern_specificity =
            tenv <- getTypeEnv
            case fromSingletonTyCon tenv ty_op of
              Nothing -> unchanged
-             Just (data_type, dcon_type) ->
-               deconSingletonPattern data_type dcon_type ty_args
+             Just (data_type, dcon_type) -> do
+               mx <- deconSingletonPattern what data_type dcon_type ty_args
+               case mx of
+                 Nothing -> unchanged
+                 Just x  -> return x
          Nothing -> unchanged
 
     unchanged =
@@ -238,14 +312,20 @@ wrapPattern' pat pattern_specificity =
 
 -- | Deconstruct a pattern variable, given the deconstruction demand that was
 --   placed on it
-deconPattern :: DataType
+deconPattern :: What
+             -> DataType
              -> DataConType
              -> Var             -- ^ Constuctor to deconstruct
              -> [Type]          -- ^ Type arguments
              -> [(Var, Type)]   -- ^ Existential types
              -> [Specificity]   -- ^ Demand on fields
-             -> AF WrapPat'
-deconPattern data_type dcon_type con ty_args ex_types spcs = do
+             -> AF (Maybe WrapPat')
+deconPattern what data_type dcon_type con ty_args ex_types spcs
+  | what /= Parameter && not (null ex_types) =
+      -- Cannot deconstruct existential types in this position
+      return Nothing
+
+  | otherwise = do
   let ex_pats = [TyPatM v t | (v, t) <- ex_types]
       data_con_args = ty_args ++ map (VarT . fst) ex_types
       (field_rtypes, instantiated_rtype) =
@@ -255,18 +335,22 @@ deconPattern data_type dcon_type con ty_args ex_types spcs = do
     internalError "dconPattern: Inconsistent number of parameters"
   
   -- Create patterns and decide how to further deconstruct each field
-  fields <-
-    assumeTyPats ex_pats $
-    forM (zip field_rtypes spcs) $ \(rrepr ::: rtype, spc) -> do
-      pat_var <- newAnonymousVar ObjectLevel
-      let pattern = memVarP pat_var (returnReprToParamRepr rrepr ::: rtype)
-      wrapping <- wrapPattern' pattern spc
-      return $ WrapPat pattern wrapping
+  m_fields <- deconPatternFields what ex_pats (zip field_rtypes spcs)
+  case m_fields of
+    Nothing -> return Nothing
+    Just fields -> do
+      -- Determine the pattern's representation
+      repr <- instantiatedReprDict instantiated_rtype
 
-  -- Determine the pattern's representation
-  repr <- instantiatedReprDict instantiated_rtype
-      
-  return $ DeconWP repr con (map TypM ty_args) ex_pats fields
+      return $ Just $ DeconWP repr con (map TypM ty_args) ex_pats fields
+  where
+    -- Decide whether the unwrapped field is allowed here.
+    -- In non-parameter positions, the unwrapped field must be representable
+    -- as a value.
+    acceptable_field =
+      case what
+      of Parameter -> \_            -> True
+         _         -> \(rtype, fld) -> unpacksToAValue rtype fld
 
 instantiatedReprDict :: ReturnType -> AF DeconRepr
 instantiatedReprDict (ValRT ::: _) = return DeconValue
@@ -278,48 +362,81 @@ instantiatedReprDict (ReadRT ::: ty) =
 --   its arguments.  The proper arguments to the data constructor are
 --   determined by instantiating the constructor's type, then unifying it
 --   with the pattern type.
-deconSingletonPattern :: DataType
+deconSingletonPattern :: What
+                      -> DataType
                       -> DataConType
                       -> [Type]
-                      -> AF WrapPat'
-deconSingletonPattern data_type dcon_type type_arguments = do
-  -- Instantiate the data constructor with fresh type variables
-  inst_a_types <- replicateM num_universal_types $ newAnonymousVar TypeLevel
-  inst_e_types <- replicateM num_existential_types $ newAnonymousVar TypeLevel
-  let (ex_params, fields, inst_repr ::: inst_type) =
-        instantiateDataConType dcon_type (map VarT inst_a_types) inst_e_types
-  
-  -- Unify with the actual type
-  let actual_type = varApp (dataConTyCon dcon_type) type_arguments
-  m_u_subst <- unifyTypeWithPatternAF inst_a_types inst_type actual_type
-  u_subst <- case m_u_subst
-             of Just s -> return s
-                Nothing -> internalError "deconSingletonPattern"
-             
-  -- Apply substitution to the type arguments
-  let actual_a_types = map instantiate_var inst_a_types
-        where
-          instantiate_var v =
-            case substituteVar v u_subst
-            of Just t -> t
-               Nothing -> internalError "deconSingletonPattern"
-  
-  -- Process the data type's fields.
-  -- We have no information about the demand, so assume 'Used'.
-  let actual_fields = map (substituteBinding u_subst) fields
-  field_wrappers <- forM actual_fields $ \(rrepr ::: rtype) -> do
-    field_var <- newAnonymousVar ObjectLevel
-    let pattern = memVarP field_var (returnReprToParamRepr rrepr ::: rtype)
-    wrapPattern pattern
+                      -> AF (Maybe WrapPat')
+deconSingletonPattern what data_type dcon_type type_arguments 
+  | what /= Parameter && num_existential_types /= 0 =
+      -- Cannot deconstruct existential types in this position
+      return Nothing
 
-  -- Construct the return value
-  repr <- instantiatedReprDict (inst_repr ::: actual_type)
-  let ty_args = map TypM actual_a_types
-      ex_types = [TyPatM v ty | ValPT (Just v) ::: ty <- ex_params]
-  return $ DeconWP repr (dataConCon dcon_type) ty_args ex_types field_wrappers
+  | otherwise = do
+      -- Instantiate the data constructor with fresh type variables
+      inst_a_types <- new_variables num_universal_types
+      inst_e_types <- new_variables num_existential_types
+      let (ex_params, fields, inst_repr ::: inst_type) =
+            instantiateDataConType dcon_type (map VarT inst_a_types) inst_e_types
+  
+      -- Unify with the actual type
+      let actual_type = varApp (dataConTyCon dcon_type) type_arguments
+          ex_types = [TyPatM v ty | ValPT (Just v) ::: ty <- ex_params]
+      m_u_subst <- unifyTypeWithPatternAF inst_a_types inst_type actual_type
+      u_subst <- case m_u_subst
+                 of Just s -> return s
+                    Nothing -> internalError "deconSingletonPattern"
+
+      -- Apply substitution to the type arguments
+      let actual_a_types = map instantiate_var inst_a_types
+            where
+              instantiate_var v =
+                case substituteVar v u_subst
+                of Just t -> t
+                   Nothing -> internalError "deconSingletonPattern"
+
+      -- Process the data type's fields.
+      -- We have no information about the demand, so assume 'Used'.
+      let actual_fields = map (substituteBinding u_subst) fields
+      m_field_wrappers <-
+        deconPatternFields what ex_types (zip actual_fields $ repeat Used)
+      case m_field_wrappers of
+        Nothing -> return Nothing
+        Just field_wrappers -> do
+          -- Construct the return value
+          repr <- instantiatedReprDict (inst_repr ::: actual_type)
+          let ty_args = map TypM actual_a_types
+          return $ Just $
+            DeconWP repr (dataConCon dcon_type) ty_args ex_types field_wrappers
   where
+    new_variables n = replicateM n (newAnonymousVar TypeLevel)
     num_universal_types = length $ dataConPatternParams dcon_type
     num_existential_types = length $ dataConPatternExTypes dcon_type
+
+-- | Wrap the fields of a deconstructeded pattern variable.
+deconPatternFields :: What      -- ^ How the enclosing object is used
+                   -> [TyPatM]  -- ^ Existential types
+                   -> [(ReturnType, Specificity)] -- ^ Fields
+                   -> AF (Maybe [WrapPat])
+deconPatternFields what ex_pats fields = do
+  fields' <- assumeTyPats ex_pats $ mapM decon_field fields
+  return $
+    if all acceptable_field fields' then Just fields' else Nothing
+  where
+    decon_field (rrepr ::: rtype, spc) = do
+      pat_var <- newAnonymousVar ObjectLevel
+      let pattern =
+            setPatMDmd (Dmd bottom spc) $
+            memVarP pat_var (returnReprToParamRepr rrepr ::: rtype)
+      wrapPattern (fieldWhat what) pattern
+
+    -- Decide whether the unwrapped field is allowed here.
+    -- In non-parameter positions, the unwrapped field must be representable
+    -- as a value.
+    acceptable_field =
+      case what
+      of Parameter -> \_ -> True
+         _ -> \(WrapPat pat fld) -> unpacksToAValue (patMReturnType pat) fld
 
 -- | Generate code to unwrap a parameter.  The code takes the original, 
 --   wrapper parameter and exposes the worker parameters via let or
@@ -565,7 +682,8 @@ deconSingletonReturn data_type dcon_type ty_args
     -- Try to unpack reference returns
     wrap_field (ReadPT ::: ty) = do
       pat_var <- newAnonymousVar ObjectLevel
-      wrapper@(WrapPat _ wp) <- wrapPattern (memVarP pat_var (ReadPT ::: ty))
+      wrapper@(WrapPat _ wp) <-
+        wrapPattern ReturnField (memVarP pat_var (ReadPT ::: ty))
       case wp of
         LoadWP Value _ _ -> return $ Just wrapper
         _ -> return Nothing
@@ -730,7 +848,7 @@ wrapFunctionType ty_params params ret = do
            _ -> (params, Nothing)
   
   -- Compute how to convert parameters
-  wrap_params <- wrapPatterns params
+  wrap_params <- wrapPatterns Parameter params
   wrap_ret <- case out_param
               of Nothing -> return NoWrapRet
                  Just p -> wrapRet p
