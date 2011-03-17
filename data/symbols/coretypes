@@ -121,6 +121,34 @@ data ref PyonTuple4 :
   (read a, read b, read c, read d) : read PyonTuple4 a b c d;
 };
 
+data val UnboxedTuple2 : val (val pure -> val pure -> val pure)
+{
+  unboxedTuple2 : (val a : pure) -> (val b : pure) -> val a -> val b
+               -> val UnboxedTuple2 a b,
+  (val a : pure, val b : pure) () (val a, val b) : val UnboxedTuple2 a b;
+};
+
+data val UnboxedTuple3 : val (val pure -> val pure -> val pure -> val pure)
+{
+  unboxedTuple3 : (val a : pure) -> (val b : pure) -> (val c : pure)
+               -> val a -> val b -> val c -> val UnboxedTuple3 a b c,
+  (val a : pure, val b : pure, val c : pure) ()
+  (val a, val b, val c) : val UnboxedTuple3 a b c;
+};
+
+data val UnboxedTuple4 :
+  val (val pure -> val pure -> val pure -> val pure -> val pure)
+{
+  unboxedTuple4 : (val a : pure)
+               -> (val b : pure)
+               -> (val c : pure)
+               -> (val d : pure)
+               -> val a -> val b -> val c -> val d
+            -> val UnboxedTuple4 a b c d,
+  (val a : pure, val b : pure, val c : pure, val d : pure) ()
+  (val a, val b, val c, val d) : val UnboxedTuple4 a b c d;
+};
+
 data box EqDict : val (val pure -> val pure)
 {
   eqDict : (val a : pure)

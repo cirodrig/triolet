@@ -17,6 +17,7 @@ where
 
 import Control.Monad.Reader
 import Data.Maybe
+import qualified Data.Set as Set
   
 import Common.Error
 import Common.Identifier
@@ -97,6 +98,20 @@ assumePats pats m = foldr assumePat m pats
 -------------------------------------------------------------------------------
 -- Argument flattening and code generation, driven by function parameter types 
 
+-- | If the parameter is a type constructor that has a single data constructor,
+--   return its type and data constructors
+fromSingletonTyCon :: TypeEnv -> Var -> Maybe (DataType, DataConType)
+fromSingletonTyCon tenv ty_op =
+  case lookupDataType ty_op tenv
+  of Nothing -> Nothing
+     Just data_type ->
+       case dataTypeDataConstructors data_type
+       of [con] ->
+            case lookupDataCon con tenv
+            of Just dcon_type -> Just (data_type, dcon_type)
+               Nothing -> internalError "fromSingletonTyCon"
+          _ -> Nothing
+
 -- | Argument flattening information attached to a variable binder
 data WrapPat = WrapPat !PatM !WrapPat'
   
@@ -119,6 +134,34 @@ data WrapPat' =
 
     -- | Parameter value is dead, and is not passed at all
   | DeadWP ExpM
+
+-- | How to unwrap a function's return parameter.  If the function doesn't 
+--   write into its destination (that is, there's no return parameter), we
+--   make no attempt to unwrap the return value.
+data WrapRet = WrapRet !PatM !WrapRet'
+             | NoWrapRet        -- ^ Function doesn't have a return parameter
+
+-- | True if the wrapper specification says not to change the function's
+--   return value.
+isIdRet :: WrapRet -> Bool
+isIdRet NoWrapRet = True
+isIdRet (WrapRet _ IdWR) = True
+isIdRet _ = False
+
+data WrapRet' =
+    -- | Return value is unchanged
+    IdWR
+
+    -- | Return value is stored into a temporary variable after returning.
+  | StoreWR !Repr ExpM
+    
+    -- | Fields of the return value are passed as an unboxed tuple.
+    --   Keep track of the original return data contructor so that it
+    --   can be reboxed.
+    --   Existential types are not allowed in the return data constructor.
+    --
+    --   The dictionary for this type is also saved.
+  | UnboxedWR !ExpM !Var [TypM] [WrapPat]
 
 -- | Representation of an object that should be deconstructed.
 --   If it is passed by reference, its representation dictionary is needed
@@ -171,16 +214,10 @@ wrapPattern' pat pattern_specificity =
       case fromVarApp $ patMType pat
       of Just (ty_op, ty_args) -> do
            tenv <- getTypeEnv
-           case lookupDataType ty_op tenv of
+           case fromSingletonTyCon tenv ty_op of
              Nothing -> unchanged
-             Just data_type ->
-               case dataTypeDataConstructors data_type
-               of [con] ->
-                    case lookupDataCon con tenv
-                    of Just dcon_type ->
-                         deconSingletonPattern data_type dcon_type ty_args
-                       _ -> internalError "wrapPattern"
-                  _ -> unchanged -- Not a singleton type
+             Just (data_type, dcon_type) ->
+               deconSingletonPattern data_type dcon_type ty_args
          Nothing -> unchanged
 
     unchanged =
@@ -374,7 +411,7 @@ rewrapPattern (WrapPat pat wrap_spec) =
     storeBox_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_storeBox)
     deadBox_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadBox)
     deadRef_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadRef)
-    
+
 rewrapDeconPat pat dc_repr con ty_args ex_types fields =
   -- Undo a case statement by constructing a value
   let (field_contexts, field_exprs) = unzip $ map rewrapPattern fields
@@ -388,7 +425,7 @@ rewrapDeconPat pat dc_repr con ty_args ex_types fields =
            DeconBoxed -> memVarP (patMVar' pat) (patMParamType pat)
            DeconReferenced dict ->
              localVarP (patMVar' pat) (patMType pat) dict
-      
+
       return_expr =
         -- If binding to a local variable, the variable is an output parameter
         case dc_repr
@@ -435,6 +472,282 @@ unwrappedParameters pats =
   let (ty_args, val_args) = unzip $ map unwrappedParameter pats
   in (concat ty_args, concat val_args)
 
+-- | Get the return type of the unwrapped return value.
+-- Returns 'Nothing' if there's no unwrapped return value.
+unwrappedReturnType :: WrapRet -> Maybe RetM
+unwrappedReturnType NoWrapRet =
+  Nothing
+
+unwrappedReturnType (WrapRet _ IdWR) =
+  Nothing
+
+unwrappedReturnType (WrapRet pat (StoreWR Value _)) =
+  Just $ RetM $ ValRT ::: patMType pat
+
+unwrappedReturnType (WrapRet pat (UnboxedWR _ _ _ fields)) =
+  let ([], unboxed_tuple_params) = unwrappedParameters fields
+      unboxed_tuple_types = map patMType unboxed_tuple_params
+      con = unboxedTupleCon $ length unboxed_tuple_params
+  in Just $ RetM $ ValRT ::: varApp con unboxed_tuple_types
+
+-- | Given a return parameter, determine how to wrap the return value
+wrapRet :: PatM -> AF WrapRet
+wrapRet pat@(MemVarP pat_var (OutPT ::: pat_type) _) = do
+  wrapper <- wrapRetType pat_type
+  return $ WrapRet pat wrapper
+
+wrapRet _ = internalError "wrapRet: Unexpected parameter representation"
+
+wrapRetType :: Type -> AF WrapRet'
+wrapRetType pat_type =
+  case fromVarApp pat_type
+  of Just (ty_op, ty_args) -> do
+       tenv <- getTypeEnv
+       case fromSingletonTyCon tenv ty_op of
+         Just (data_type, dcon_type) ->
+           -- This data type has a single constructor with no existential
+           -- variables
+           deconSingletonReturn data_type dcon_type ty_args
+         _ -> case lookupDataType ty_op tenv
+              of Just dtype | dataTypeRepresentation dtype == Value -> do
+                   -- This data type can be loaded
+                   dict <- withReprDict pat_type return
+                   return $ StoreWR Value dict
+                 _ -> return IdWR
+     Nothing -> return IdWR
+
+deconSingletonReturn data_type dcon_type ty_args
+  | not $ null $ dataConPatternExTypes dcon_type =
+      -- Cannot deconstruct if it has existential types
+      return IdWR
+  | otherwise = do
+      -- Instantiate the data constructor with fresh type variables
+      inst_a_types <- replicateM num_universal_types $ newAnonymousVar TypeLevel
+      let ([], fields, inst_repr ::: inst_type) =
+            instantiateDataConType dcon_type (map VarT inst_a_types) []
+  
+      -- Unify with the actual type
+      let actual_type = varApp (dataConTyCon dcon_type) ty_args
+      m_u_subst <- unifyTypeWithPatternAF inst_a_types inst_type actual_type
+      u_subst <- case m_u_subst
+                 of Just s -> return s
+                    Nothing -> internalError "deconSingletonReturn"
+
+      -- Apply substitution to the type arguments
+      let actual_a_types = map instantiate_var inst_a_types
+            where
+              instantiate_var v =
+                case substituteVar v u_subst
+                of Just t -> t
+                   Nothing -> internalError "deconSingletonReturn"
+
+      -- Wrap the fields
+      field_wrappers <- mapM wrap_field [returnReprToParamRepr rrepr ::: rtype
+                                        | rrepr ::: rtype <- fields]
+      case sequence field_wrappers of
+        Nothing -> return IdWR
+        Just wrappers -> do
+          dict <- withReprDict actual_type return
+          return $ UnboxedWR dict (dataConCon dcon_type)
+                   (map TypM actual_a_types) wrappers
+  where
+    num_universal_types = length $ dataConPatternParams dcon_type
+
+    -- Do not need to unpack value returns
+    wrap_field (ValPT _ ::: ty) = do
+      pat_var <- newAnonymousVar ObjectLevel
+      return $ Just $
+        WrapPat (memVarP pat_var (ValPT Nothing ::: ty)) (IdWP Nothing)
+    
+    -- Cannot unpack boxed returns
+    wrap_field (BoxPT ::: _) = return Nothing
+      
+    -- Try to unpack reference returns
+    wrap_field (ReadPT ::: ty) = do
+      pat_var <- newAnonymousVar ObjectLevel
+      wrapper@(WrapPat _ wp) <- wrapPattern (memVarP pat_var (ReadPT ::: ty))
+      case wp of
+        LoadWP Value _ _ -> return $ Just wrapper
+        _ -> return Nothing
+
+-- | Determine whether the variable appears in the expression
+checkForVariable :: Var -> ExpM -> Bool
+checkForVariable v e = v `Set.member` freeVariables e
+
+-- | Apply the transformation to each expression in tail position.
+--   Look through let, letfun, and case statements.
+mapOverTailExprs :: (ExpM -> AF ExpM) -> ExpM -> AF ExpM
+mapOverTailExprs f expression =
+  case fromExpM expression
+  of LetE inf binder rhs body ->
+       -- FIXME: add local var to environment
+       liftM (ExpM . LetE inf binder rhs) $ mapOverTailExprs f body
+     LetfunE inf defs body ->
+       -- FIXME: add local vars to environment
+       liftM (ExpM . LetfunE inf defs) $ mapOverTailExprs f body
+     CaseE inf scr alts -> do
+       -- FIXME: Add locals to environment
+       alts' <- mapM map_alt alts
+       return $ ExpM $ CaseE inf scr alts'
+     _ -> f expression
+  where
+    map_alt (AltM alt) = do
+      body <- mapOverTailExprs f $ altBody alt
+      return $ AltM (alt {altBody = body})
+
+-- | Generate code to unwrap a return parameter.  The code is put into the
+--   worker function to turn the original return value into an unwrapped
+--   return value.
+unwrapReturn :: WrapRet -> ExpM -> AF ExpM
+unwrapReturn NoWrapRet worker_body = return worker_body
+
+unwrapReturn (WrapRet rparam IdWR) worker_body = return worker_body
+
+-- Save a return value to a temporary variable.  Load and return it.
+
+unwrapReturn (WrapRet rparam (StoreWR Value dict)) worker_body =
+  mapOverTailExprs unwrap_return worker_body
+  where
+    unwrap_return tail_expr =
+      let binder = localVarP (patMVar' rparam) (patMType rparam) dict
+          load_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_load)
+          load_exp = ExpM $ AppE defaultExpInfo load_op
+                     [TypM $ patMType rparam]
+                     [ExpM $ VarE defaultExpInfo (patMVar' rparam)]
+      in return $ ExpM $ LetE defaultExpInfo binder tail_expr load_exp
+
+
+-- Unwrap a data type with a single constructor.
+--
+-- > local rparam = worker_body
+-- > in case rparam
+-- > of C t1 ... tM x1 ... xN.
+-- >      case x1 of ....
+-- >      case x2 of ....
+-- >      unboxedTupleK t1 ... tK y1 ... yK
+
+unwrapReturn (WrapRet rparam (UnboxedWR dict con ty_args fields)) worker_body = 
+  mapOverTailExprs unwrap_return worker_body
+  where
+    unwrap_return :: ExpM -> AF ExpM
+    unwrap_return tail_expr =
+      let -- unwrap each each field
+          unwrap_context = concatMap unwrapPattern fields
+          
+          -- Create the unboxed value
+          ([], unwrapped_args) = unwrappedArguments fields
+          unwrapped_types = case unwrappedParameters fields
+                            of ([], params) -> map (TypM . patMType) params
+          unboxed_con =
+            ExpM $ VarE defaultExpInfo (unboxedTupleCon $ length unwrapped_args)
+          unboxed_app =
+            ExpM $ AppE defaultExpInfo unboxed_con unwrapped_types unwrapped_args
+
+          -- Deconstruct the original value
+          scrutinee = ExpM $ VarE defaultExpInfo (patMVar' rparam)
+          case_stm = ExpM $ CaseE defaultExpInfo scrutinee
+                     [AltM $ Alt { altConstructor = con
+                                 , altTyArgs = ty_args
+                                 , altExTypes = []
+                                 , altParams = [pat | WrapPat pat _ <- fields]
+                                 , altBody = unboxed_app}]
+
+          -- Bind the original return value
+          wrapped_binder = localVarP (patMVar' rparam) (patMType rparam) dict
+      in return $ ExpM $ LetE defaultExpInfo wrapped_binder tail_expr case_stm
+
+-- | Generate code to rewrap a return parameter.  The code is placed into a
+--   wrapper function following a call to the worker.
+--
+--   If the parameter gets unwrapped, then the given expression (which is a   
+--   call to the worker function) returns an unboxed return value.  The
+--   unboxed return value will be written into the return variable.
+rewrapReturn :: WrapRet -> ExpM -> AF ExpM
+rewrapReturn NoWrapRet worker_call = return worker_call
+
+rewrapReturn (WrapRet rparam IdWR) worker_call = return worker_call
+
+-- Store a value into the return variable
+
+rewrapReturn (WrapRet rparam (StoreWR Value dict)) worker_call =
+  mapOverTailExprs rewrap_return worker_call
+  where
+    rewrap_return tail_expr =
+      let store_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_store)
+          store_exp = ExpM $ AppE defaultExpInfo store_op
+                      [TypM $ patMType rparam]
+                      [tail_expr, ExpM $ VarE defaultExpInfo (patMVar' rparam)]
+      in return store_exp
+
+-- Rewrap a data type with a single constructor.
+-- Starting with an unboxed tuple, produce a value in the original return type.
+--
+-- > case worker_call
+-- > of unboxedTupleN t1 ... tN x1 ... xN.
+-- >      let y1 = (rewrap some of x1 ... xN)
+-- >      ...
+-- >      let yM = (rewrap some of x1 ... xN)
+-- >      con ty_args y1 ... yM rparam
+--
+rewrapReturn (WrapRet rparam (UnboxedWR _ con ty_args fields)) worker_call =
+  mapOverTailExprs rewrap_boxed_return worker_call
+  where
+    rewrap_boxed_return tail_expr =
+      let wrap_context = concatMap (fst . rewrapPattern) fields
+          
+          -- Apply the constructor to the rewrapped 
+          con_exp = ExpM $ VarE defaultExpInfo con
+          retvar_exp = ExpM $ VarE defaultExpInfo (patMVar' rparam)
+          field_output_exps = [ExpM $ VarE defaultExpInfo (patMVar' pat)
+                              | WrapPat pat _ <- fields]
+          build_return_data =
+            ExpM $ AppE defaultExpInfo con_exp ty_args
+            (field_output_exps ++ [retvar_exp])
+            
+          -- Match the worker's return value against an unboxed tuple
+          ([], unboxed_tuple_params) = unwrappedParameters fields
+          unboxed_tuple_types = map patMType unboxed_tuple_params
+          unboxed_tuple_size = length unboxed_tuple_params
+          unboxed_alt = AltM $
+            Alt { altConstructor = unboxedTupleCon unboxed_tuple_size
+                , altTyArgs = map TypM unboxed_tuple_types
+                , altExTypes = []
+                , altParams = unboxed_tuple_params
+                , altBody = applyContext wrap_context build_return_data}
+
+      in return $ ExpM $ CaseE defaultExpInfo tail_expr [unboxed_alt]
+
+-- | Given a function's parameters and return type, determine how
+--   to wrap the function.  Return the conversion specifications, the 
+--   worker function's parameters, and the worker function's return type.
+wrapFunctionType :: [TyPatM] -> [PatM] -> RetM
+                 -> AF ([WrapPat], WrapRet, [TyPatM], [PatM], RetM)
+wrapFunctionType ty_params params ret = do
+  let (in_params, out_param) =
+        -- Separate the output parameter from the other parameters
+        case patMParamType (last params)
+        of OutPT ::: _ -> (init params, Just $ last params)
+           _ -> (params, Nothing)
+  
+  -- Compute how to convert parameters
+  wrap_params <- wrapPatterns params
+  wrap_ret <- case out_param
+              of Nothing -> return NoWrapRet
+                 Just p -> wrapRet p
+
+  -- Get the new parameters
+  let (p_ty_params, p_params) = unwrappedParameters wrap_params
+      out_param =
+        case wrap_ret
+        of NoWrapRet -> Nothing               -- No return parameter
+           WrapRet pat IdWR -> Just pat       -- Unchanged
+           WrapRet pat _ -> Nothing           -- Eliminated return parameter
+      
+      ty_params' = ty_params ++ p_ty_params
+      params' = p_params ++ maybeToList out_param
+      ret' = fromMaybe ret $ unwrappedReturnType wrap_ret
+  return (wrap_params, wrap_ret, ty_params', params', ret')
+
 -------------------------------------------------------------------------------
 -- Argument flattening transformation
 
@@ -451,41 +764,45 @@ flattenFunctionArguments (Def fun_name (FunM fun)) =
       params = funParams fun
       ret = funReturn fun
   in assumeTyPats ty_params $ assumePats params $ do
-    wrap_pats <- wrapPatterns params
+    (wrap_pats, wrap_ret, work_ty_params, work_params, work_ret) <-
+      wrapFunctionType ty_params params ret
     
     -- Flatten functions inside the function body
     fun_body <- flattenInExp $ funBody fun
     let fun' = fun {funBody = fun_body}
 
     -- Construct wrapper, if it's beneficial
-    if all isIdWrapper wrap_pats
+    if all isIdWrapper wrap_pats && isIdRet wrap_ret
       then do
         return (Nothing, Def fun_name (FunM fun'))
       else do
         worker@(Def worker_name _) <-
-          mkWorkerFunction ty_params wrap_pats fun_name (FunM fun')
+          mkWorkerFunction work_ty_params work_params work_ret
+          wrap_pats wrap_ret fun_name (funInfo fun) fun_body
         wrapper <-
-          mkWrapperFunction ty_params wrap_pats fun_name ret worker_name
+          mkWrapperFunction ty_params wrap_pats wrap_ret fun_name ret worker_name
         return (Just worker, wrapper)
 
-mkWorkerFunction :: [TyPatM] -> [WrapPat] -> Var -> FunM -> AF (Def Mem)
-mkWorkerFunction original_ty_params wrap_pats wrapper_name (FunM original_fun) = do
+mkWorkerFunction :: [TyPatM] -> [PatM] -> RetM
+                 -> [WrapPat] -> WrapRet -> Var -> ExpInfo -> ExpM
+                 -> AF (Def Mem)
+mkWorkerFunction ty_params params ret wrap_pats wrap_ret wrapper_name inf body = do
   -- Create a new variable for the worker
   worker_name <- newClonedVar wrapper_name
   
+  -- Unwrap the return value
+  body1 <- unwrapReturn wrap_ret body
+
   -- Re-wrap the unwrapped arguments
   let wrap_context = concatMap (fst . rewrapPattern) wrap_pats
-      wrapped_body = applyContext wrap_context $ funBody original_fun
-      (ty_params, val_params) = unwrappedParameters wrap_pats
-      
-      wrap_fn = FunM $ Fun (funInfo original_fun)
-                (original_ty_params ++ ty_params) val_params
-                (funReturn original_fun) wrapped_body
+      wrapped_body = applyContext wrap_context body1
+      wrap_fn = FunM $ Fun inf ty_params params ret wrapped_body
 
   return $ Def worker_name wrap_fn
 
-mkWrapperFunction :: [TyPatM] -> [WrapPat] -> Var -> RetM -> Var -> AF (Def Mem)
-mkWrapperFunction original_ty_params wrap_pats wrapper_name worker_ret worker_name =
+mkWrapperFunction :: [TyPatM] -> [WrapPat] -> WrapRet -> Var -> RetM -> Var
+                  -> AF (Def Mem)
+mkWrapperFunction original_ty_params wrap_pats wrap_ret wrapper_name worker_ret worker_name = do
   let unwrap_context = concatMap unwrapPattern wrap_pats
       
       -- Create a call to the worker
@@ -493,12 +810,15 @@ mkWrapperFunction original_ty_params wrap_pats wrapper_name worker_ret worker_na
       orig_ty_args = [TypM t | TyPatM _ t <- original_ty_params]
       call = ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo worker_name)
              (orig_ty_args ++ call_ty_args) call_args
+  
+  -- Rewrap the return value
+  call1 <- rewrapReturn wrap_ret call
       
-      -- Create the wrapper function
-      wrapper_body = applyContext unwrap_context call
+     -- Create the wrapper function
+  let wrapper_body = applyContext unwrap_context call1
       wrapper_fun = FunM $ Fun defaultExpInfo original_ty_params
                     [pat | WrapPat pat _ <- wrap_pats] worker_ret wrapper_body
-  in return $ Def wrapper_name wrapper_fun
+  return $ Def wrapper_name wrapper_fun
 
 -- | Perform flattening in the body of a function, but don't change the
 --   function's arguments

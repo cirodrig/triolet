@@ -93,6 +93,26 @@ pyonTupleReprCon n | n < 0 = internalError "pyonTupleReprCon"
            , pyonBuiltin the_repr_PyonTuple4
            ]
 
+unboxedTupleTypeCon :: Int -> Var
+unboxedTupleTypeCon n
+  | n < 2 || n >= 5 = internalError "unboxedTupleTypeCon: Unsupported size"
+  | otherwise = cons !! (n - 2)
+  where
+    cons = [ pyonBuiltin the_UnboxedTuple2
+           , pyonBuiltin the_UnboxedTuple3
+           , pyonBuiltin the_UnboxedTuple4
+           ]
+
+unboxedTupleCon :: Int -> Var
+unboxedTupleCon n
+  | n < 2 || n >= 5 = internalError "unboxedTupleCon: Unsupported size"
+  | otherwise = cons !! (n - 2)
+  where
+    cons = [ pyonBuiltin the_unboxedTuple2
+           , pyonBuiltin the_unboxedTuple3
+           , pyonBuiltin the_unboxedTuple4
+           ]
+
 -------------------------------------------------------------------------------
 -- Initializing the builtins
 
