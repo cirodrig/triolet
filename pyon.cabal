@@ -99,9 +99,9 @@ Executable pyon
     SystemF.EtaReduce
     SystemF.Floating
     SystemF.KnownValue
-    SystemF.Lowering.Datatypes
+    SystemF.Lowering.Datatypes2
     SystemF.Lowering.Marshaling
-    SystemF.Lowering.Lowering
+    SystemF.Lowering.Lowering2
     SystemF.Lowering.LowerMonad
     SystemF.MemoryIR
     SystemF.OutputPassing

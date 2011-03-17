@@ -28,7 +28,7 @@ import Type.Type hiding(Var, runFreshVarM)
 import qualified Type.Var
 
 -- This module helps us translate System F types into low-level types
-import {-# SOURCE #-} SystemF.Lowering.Datatypes
+import {-# SOURCE #-} SystemF.Lowering.Datatypes2
 
 fromBuiltinVarName :: BuiltinVarName -> (ModuleName, String, Maybe String)
 fromBuiltinVarName (CName mod nm) = (mod, nm, Just nm)
@@ -82,13 +82,14 @@ initializeGlobalField supply nm ty
     typeOk _ = False-}
 
 lowerBuiltinFunType :: IdentSupply Type.Var.Var
+                    -> IdentSupply Var
                     -> Type.Environment.TypeEnv
                     -> Type.Var.Var
                     -> IO FunctionType
-lowerBuiltinFunType v_ids type_env con =
+lowerBuiltinFunType type_v_ids v_ids type_env con =
   case Type.Environment.lookupType con type_env
   of Just (BoxRT ::: ty) ->
-       Type.Var.runFreshVarM v_ids (lowerFunctionType type_env ty) `catch`
+       lowerFunctionType v_ids type_v_ids type_env ty `catch`
        \(exc :: SomeException) -> do
          putStrLn $ "Error while processing builtin '" ++ show con ++ "'"
          throwIO exc
@@ -124,7 +125,7 @@ initializeLowLevelBuiltins type_var_ids v_ids mem_type_env = do
           -- Returns a quoted (IO FunctionType)
           closure_type (Left t) = [| return t |]
           closure_type (Right conQ) =
-            [| lowerBuiltinFunType type_var_ids mem_type_env $conQ |]
+            [| lowerBuiltinFunType type_var_ids v_ids mem_type_env $conQ |]
 
           init_primitives =
             [("the_biprim_" ++ builtinVarUnqualifiedName nm,

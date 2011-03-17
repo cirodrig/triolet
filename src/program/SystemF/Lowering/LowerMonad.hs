@@ -19,7 +19,6 @@ import qualified LowLevel.Builtins as LL
 import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
 import qualified SystemF.DictEnv as DictEnv
-import SystemF.Lowering.Datatypes
 import SystemF.Syntax
 import Type.Environment
 import Type.Type
