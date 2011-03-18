@@ -77,11 +77,17 @@ isFloatableSingletonParamType (prepr ::: ptype) =
     floatable_repr _ = False
 
 -- | Return True if a case statement deconstructing a value with this data
---   constructor should always be floated
+--   constructor should always be floated.
+--
+--   These data types have a single constructor.  Furthermore, they are
+--   value data types (therefore cheap to construct) or inserted by the
+--   compiler (therefore we can somewhat bound the amount of work performed
+--   by executing them).
 isFloatableCaseDataCon :: Var -> Bool
 isFloatableCaseDataCon con =
   isDictionaryDataCon con ||
-  con `isPyonBuiltin` the_someIndexedInt
+  con `isPyonBuiltin` the_someIndexedInt ||
+  isUnboxedTupleCon con
 
 -- | If the given application term is floatable, then determine its type
 --   and return a binder for it.  Otherwise return Nothing.

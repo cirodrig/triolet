@@ -113,6 +113,13 @@ unboxedTupleCon n
            , pyonBuiltin the_unboxedTuple4
            ]
 
+isUnboxedTupleCon :: Var -> Bool
+isUnboxedTupleCon c =
+  c `elem` [ pyonBuiltin the_unboxedTuple2
+           , pyonBuiltin the_unboxedTuple3
+           , pyonBuiltin the_unboxedTuple4
+           ]
+
 -------------------------------------------------------------------------------
 -- Initializing the builtins
 

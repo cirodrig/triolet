@@ -592,43 +592,46 @@ rwReduce1Generate inf element elt_repr reducer other_args size count producer = 
 -- -->
 --
 -- > case count of IndexedInt bound.
--- >   letrec loop i acc =
+-- >   letrec loop i acc ret' =
 -- >     if i == bound
--- >     then copy (a, repr, acc, ret)
+-- >     then copy (a, repr, acc, ret')
 -- >     else local acc2 = f i acc acc2
--- >          loop (i + 1) acc2
--- >   loop 0 init
+-- >          loop (i + 1) acc2 ret'
+-- >   loop 0 init ret'
 rwFor :: RewriteRule
 rwFor tenv inf [TypM size_ix, TypM acc_type] args =
   case args
   of [acc_repr, size, init, fun, ret] ->
-       fmap Just $ rewrite_for_loop acc_repr size init fun ret
+       fmap Just $ rewrite_for_loop acc_repr size init fun (Just ret)
      [acc_repr, size, init, fun] ->
-       fmap Just $ lamE $ mkFun []
-       (\ [] -> return ([OutPT ::: acc_type], SideEffectRT ::: acc_type))
-       (\ [] [ret] -> let ret_var = ExpM $ VarE defaultExpInfo ret
-                      in rewrite_for_loop acc_repr size init fun ret_var)
+       fmap Just $ rewrite_for_loop acc_repr size init fun Nothing
      _ -> return Nothing
   where
-    rewrite_for_loop acc_repr size init fun ret =
+    rewrite_for_loop acc_repr size init fun maybe_ret =
       caseOfIndexedInt tenv (return size) size_ix $ \bound -> do
         loop_var <- newAnonymousVar ObjectLevel
         loop_fun <-
           mkFun []
-          (\ [] -> return ([ ValPT Nothing ::: intType, ReadPT ::: acc_type],
+          (\ [] -> return ([ ValPT Nothing ::: intType
+                           , ReadPT ::: acc_type
+                           , OutPT ::: acc_type],
                            SideEffectRT ::: acc_type))
-          (\ [] [i, acc] -> do
+          (\ [] [i, acc, retvar] -> do
               ifE (varAppE (pyonBuiltin the_EqDict_int_eq) []
                    [varE i, varE bound])
                 (varAppE (pyonBuiltin the_copy) [TypM acc_type]
-                 [return acc_repr, varE acc, return ret])
+                 [return acc_repr, varE acc, varE retvar])
                 (localE (TypM acc_type) acc_repr
                  (\lv -> appE (return fun) [] [varE i, varE acc, return lv])
                  (\lv -> varAppE loop_var []
                          [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
                           [varE i, litE $ IntL 1 intType],
-                          return lv])))
-        loop_call <- varAppE loop_var [] [litE $ IntL 0 intType, return init]
+                          return lv,
+                          varE retvar])))
+        let loop_arguments = litE (IntL 0 intType) :
+                             return init :
+                             maybeToList (fmap return maybe_ret)
+        loop_call <- varAppE loop_var [] loop_arguments
         return $ letfunE (Rec [Def loop_var loop_fun]) loop_call
 
 -------------------------------------------------------------------------------
