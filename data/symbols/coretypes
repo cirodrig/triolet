@@ -39,7 +39,14 @@ data val SomeIndexedInt : val pure
 -- We take advantage of the fact that EffTok is a unit value, and therefore
 -- it is not accessed by load or store instructions when reading or writing it,
 -- and therefore we can safely masquerade NULL pointers as EffTok references.
-data val EffTok : val pure {};
+data val EffTok : val pure
+{
+  -- We never use the constructor 'effTok' in code, because it could be
+  -- optimized away.  We don't want the optimizer to mess with this data type
+  -- because it stands in for real dependences.
+  -- Instead, use 'emptyEffTok' to produce an EffTok value.
+  effTok : val EffTok, () () () : val EffTok;
+};
 
 emptyEffTok : write EffTok;
 

@@ -63,6 +63,7 @@ pyonBuiltinVariableNames =
   , "indexedInt"
   , "someIndexedInt"
   , "make_list"
+  , "effTok"
 
     -- Class constructors
   , "traversableDict"
