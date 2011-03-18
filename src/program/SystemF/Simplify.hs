@@ -196,6 +196,240 @@ makeExpValue (ExpM expression) =
 -------------------------------------------------------------------------------
 -- Inlining
 
+-- | Decide whether to inline the expression, which is the RHS of an
+--   assignment, /before/ simplifying it.  If inlining is indicated, it
+--   must be possible to replace all occurrences of the assigned variable
+--   with the inlined value; to ensure this, reference values are never
+--   pre-inlined.  Pre-inlining is performed only if it does not duplicate
+--   code or work.
+--
+--   If the expression should be inlined, return a 'KnownValue' holding
+--   the equivalent value.  Non-writer expressions become an
+--   'InlinedValue'.  Writer expressions become a 'DataValue' containing
+--   'InlinedValue's.
+worthPreInlining :: TypeEnv -> Dmd -> ExpM -> Maybe KnownValue
+worthPreInlining tenv dmd expr =
+  let should_inline =
+        case multiplicity dmd
+        of OnceSafe -> inlckTrue
+           ManySafe -> inlckTrivial
+           OnceUnsafe -> inlckTrivial `inlckOr` inlckFunction
+           _ -> inlckFalse
+  in if should_inline tenv dmd expr
+     then Just (InlinedValue expr)
+     else Nothing
+
+{- Value inlining (below) is disabled; it currently
+-- interacts poorly with other optimizations.
+
+-- | Decide whether to inline the expression, which is the RHS of an
+--   assignment, /after/ simplifying it.  The assignment is not deleted.
+--   If inlining makes the assignment dead (we try to ensure that it does),
+--   it will be deleted by dead code elimination.
+--
+--   The expression is a value, boxed, or writer expression.
+--
+--   If the expression should be inlined, return a 'KnownValue' holding
+--   the equivalent value.  Non-writer expressions become an
+--   'InlinedValue'.  Writer expressions become a 'DataValue' containing
+--   'InlinedValue's.
+worthPostInlining :: TypeEnv -> Bool -> Dmd -> ExpM -> Maybe KnownValue
+worthPostInlining tenv is_writer dmd expr =
+  let should_inline =
+        case multiplicity dmd
+        of OnceSafe 
+             | is_writer -> demanded_safe
+             | otherwise -> inlckTrue
+           ManySafe ->
+             -- Inlining does not duplicate work, but may duplicate code.
+             -- Inline as long as code duplicatation is small and bounded.
+             data_only
+           OnceUnsafe ->
+             -- Inlining does not duplicate code, but may duplicate work.
+             -- Inline as long as work duplication is small and bounded.
+             data_and_functions
+           ManyUnsafe -> 
+             -- Inline as long as code and work duplication are both 
+             -- small and bounded.
+             demanded_data_only
+           _ -> inlckFalse
+  in if should_inline tenv dmd expr
+     then data_value is_writer expr
+     else Nothing
+  where
+    -- The expression will be inlined; convert it into a known value.
+    -- Non-writer fields are simply inlined.
+    data_value False expr = Just $ InlinedValue expr
+    
+    -- Writer fields are converted to readable data constructor values
+    data_value True expr =
+      case unpackVarAppM expr
+      of Just (op, ty_args, args)
+           | op `isPyonBuiltin` the_store ->
+               -- Behave like 'rwStoreApp'.
+               -- Allow the store to cancel with a later load.
+               let [source] = args
+               in Just $ complexKnownValue $
+                  WriterValue $ complexKnownValue $
+                  StoredValue Value $ InlinedValue source
+
+           | op `isPyonBuiltin` the_storeBox ->
+               -- Behave like 'rwStoreBoxApp'.
+               -- Allow the store to cancel with a later load.
+               let [source] = args
+               in Just $ complexKnownValue $
+                  WriterValue $ complexKnownValue $
+                  StoredValue Boxed $ InlinedValue source
+
+           | op `isPyonBuiltin` the_copy ->
+               -- When using the value, read the source value directly
+               let [_, source] = args
+               in Just $ complexKnownValue $ WriterValue $ InlinedValue source
+           | Just dcon <- lookupDataCon op tenv ->
+               let (field_types, _) =
+                     instantiateDataConTypeWithExistentials dcon ty_args
+                   
+                   Just tycon = lookupDataType (dataConTyCon dcon) tenv
+
+                   is_writer_field (ValRT ::: _) = False
+                   is_writer_field (BoxRT ::: _) = False
+                   is_writer_field (ReadRT ::: _) = True
+
+                   fields = [data_value (is_writer_field fld) arg
+                            | (fld, arg) <- zip field_types args]
+               in if length args /= length field_types
+                  then internalError "worthPostInlining"
+                  else dataConValue defaultExpInfo tycon dcon
+                       (map TypM ty_args) fields
+         _ -> Nothing
+
+    demanded_safe =
+      inlckTrivial `inlckOr`
+      inlckFunction `inlckOr`
+      inlckConstructor demanded_safe `inlckOr`
+      inlckDataMovement inlckTrue demanded_safe
+    
+    data_only =
+      inlckTrivial `inlckOr` inlckConstructor data_only
+    
+    data_and_functions =
+      inlckTrivial `inlckOr`
+      inlckFunction `inlckOr`
+      inlckConstructor data_and_functions
+    
+    demanded_data_only =
+      inlckTrivial `inlckOr`
+      inlckDemanded `inlckAnd` demanded_constructor
+      where
+        demanded_constructor =
+          inlckConstructor demanded_data_only `inlckOr`
+          inlckDataMovement demanded_data_only demanded_data_only
+
+-- | Decide whether a local variable assignment is worth inlining.
+--   The expression initializes the local variable.
+--   We can only handle data constructor expressions; refuse to inline other
+--   expressions.  Convert the expression
+--   to a writer by removing the destination argument, then call
+--   'worthPostInlining'.
+worthPostInliningLocal tenv dmd lhs_var rhs_value =
+  case unpackDataConAppM tenv rhs_value
+  of Just (data_con, ty_args, args) 
+       | null args -> err
+       | otherwise ->
+           let args' = init args
+               destination_arg = last args
+           in case destination_arg
+              of ExpM (VarE _ v) | v == lhs_var ->
+                   -- The expected pattern has been matched.  Rebuild the
+                   -- expression sans its last argument.
+                   let op = ExpM $ VarE defaultExpInfo (dataConCon data_con)
+                       writer_exp =
+                         ExpM $ AppE defaultExpInfo op (map TypM ty_args) args'
+                   in worthPostInlining tenv True dmd writer_exp
+                 _ -> err
+
+     -- We can't inline other expressions
+     _ -> Nothing
+  where
+    err = internalError "worthPostInliningLocal: Unexpected expression"
+-}
+  
+-- | A test performed to decide whether to inline an expression
+type InlineCheck = TypeEnv -> Dmd -> ExpM -> Bool
+
+inlckTrue, inlckFalse :: InlineCheck
+inlckTrue _ _ _  = True
+inlckFalse _ _ _ = False
+
+inlckOr :: InlineCheck -> InlineCheck -> InlineCheck
+infixr 2 `inlckOr`
+inlckOr a b tenv dmd e = a tenv dmd e || b tenv dmd e
+
+inlckAnd :: InlineCheck -> InlineCheck -> InlineCheck
+infixr 3 `inlckAnd`
+inlckAnd a b tenv dmd e = a tenv dmd e && b tenv dmd e
+
+-- | Is the expression trivial?
+inlckTrivial :: InlineCheck
+inlckTrivial _ _ e = isTrivialExp e
+
+-- | Is the expression a lambda function?
+inlckFunction :: InlineCheck
+inlckFunction _ _ (ExpM (LamE {})) = True
+inlckFunction _ _ _ = False
+
+-- | Is the expression a data constructor application?
+--
+--   If so, apply the given check to its fields.
+inlckConstructor :: InlineCheck -> InlineCheck
+inlckConstructor ck tenv dmd expression =
+  case unpackDataConAppM tenv expression
+  of Just (dcon, _, args) ->
+       -- This is a data constructor application.
+       -- Test its fields.
+       let field_demands =
+             case specificity dmd
+             of Decond _ _ _ spcs -> map (Dmd (multiplicity dmd)) spcs
+                _ -> replicate (length args) $ Dmd (multiplicity dmd) Used
+       in and $ zipWith (ck tenv) field_demands args
+     Nothing -> False
+
+-- | Is the expression demanded at least as much as being inspected?
+--
+--   If it's demanded, then the head of the expression will probably be
+--   eliminated after it's inlined.
+inlckDemanded :: InlineCheck
+inlckDemanded _ dmd _ =
+  case specificity dmd
+  of Decond {} -> True
+     Inspected -> True
+     _         -> False
+
+-- | Is the expression a data movement expression?
+--
+--   If so, check its arguments.
+inlckDataMovement :: InlineCheck -- ^ Test other arguments
+                  -> InlineCheck -- ^ Test stored data argument
+                  -> InlineCheck
+inlckDataMovement ptr_ck data_check tenv dmd expression =
+  case unpackVarAppM expression
+  of Just (op, _, args)
+       | op `isPyonBuiltin` the_store ->
+           let [dat] = args
+               dat_spc = case specificity dmd
+                         of Loaded _ _ spc -> spc
+                            _ -> Used
+               dat_dmd = Dmd (multiplicity dmd) dat_spc
+           in data_check tenv dat_dmd dat
+       | op `isPyonBuiltin` the_load ->
+           let [src] = args
+           in ptr_ck tenv (Dmd (multiplicity dmd) Used) src
+       | op `isPyonBuiltin` the_copy ->
+           let [repr, src] = args
+           in ptr_ck tenv (Dmd (multiplicity dmd) Used) repr &&
+              ptr_ck tenv (Dmd (multiplicity dmd) Used) src
+     _ -> False
+
 -- | Given a function and its arguments, get an expresion equivalent to
 --   the function applied to those arguments.
 --
@@ -564,32 +798,43 @@ rwCopyApp inf op' ty_args args = do
 rwLet inf bind val body =       
   case bind
   of MemVarP bind_var bind_rtype uses -> do
-       (val', val_value) <- rwExp val
+       tenv <- getTypeEnv
+       case worthPreInlining tenv uses val of
+         Just val -> do
+           -- The variable is used exactly once; inline it.
+           (body', body_val) <- withKnownValue bind_var val $ rwExp body
+           let ret_val = mask_local_variable bind_var body_val
+           rwExpReturn (body', ret_val)
 
-       -- If the variable is used exactly once, then inline it.
-       -- Otherwise, propagate the variable's known value.
-       let local_val_value =
-             case multiplicity $ patMDmd bind
-             of OnceSafe -> Just $ InlinedValue val
-                _ -> fmap (setTrivialValue bind_var) val_value
+         Nothing -> do
+           (val', val_value) <- rwExp val
 
-       -- Add the local variable to the environment while rewriting the body
-       (body', body_val) <-
-         assumePattern bind $
-         withMaybeValue bind_var local_val_value $
-         rwExp body
+           -- Inline the RHS expression, if desirable.  If inlining is not  
+           -- indicated, then propagate its known value.
+           let local_val_value =
+                 fmap (setTrivialValue bind_var) $ val_value
+
+           -- Add the local variable to the environment and rewrite the body
+           (body', body_val) <-
+             assumePattern bind $
+             withMaybeValue bind_var local_val_value $
+             rwExp body
        
-       let ret_val = mask_local_variable bind_var body_val
-       rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
+           let ret_val = mask_local_variable bind_var body_val
+           rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
 
      LocalVarP bind_var bind_type dict uses -> do
+       tenv <- getTypeEnv
        (dict', _) <- rwExp dict
 
        -- Add the variable to the environment while rewriting the rhs
        (val', val_value) <-
          assume bind_var (OutRT ::: bind_type) $ rwExp val
+       
+       -- Inline the RHS expression, if desirable.  If inlining is not  
+       -- indicated, then propagate its known value.
        let local_val_value =
-             fmap (setTrivialValue bind_var) val_value
+             fmap (setTrivialValue bind_var) $ val_value
 
        -- Add the local variable to the environment while rewriting the body
        (body', body_val) <-
@@ -658,24 +903,24 @@ rwCase inf scrut alts = do
   (scrut', scrut_val) <- rwExp scrut
   
   tenv <- getTypeEnv
-  case scrut' of
-    ExpM (AppE _ (ExpM (VarE _ op_var)) ty_args args)
-      | Just (type_con, data_con) <- lookupDataConWithType op_var tenv -> do
-          -- Eliminate case-of-constructor expressions using the actual
-          -- argument values.  We can eliminate case statements this way
-          -- even when we can't compute known values for the fields.
-          let altm = find_alternative op_var
-              ex_args = drop (length $ dataConPatternParams data_con) ty_args
-          m_elim <- elimCaseAlternative True inf altm ex_args (map Just args)
-          case m_elim of
-            Just eliminated_case -> rwExp eliminated_case
-            Nothing  -> no_eliminate scrut' [altm]
+  case unpackDataConAppM tenv scrut' of
+    Just (data_con, ty_args, args) -> do
+      -- Eliminate case-of-constructor expressions using the actual
+      -- argument values.  We can eliminate case statements this way
+      -- even when we can't compute known values for the fields.
+      let altm = find_alternative $ dataConCon data_con
+          ex_args = map TypM $
+                    drop (length $ dataConPatternParams data_con) ty_args
+      m_elim <- elimCaseAlternative True inf altm ex_args (map Just args)
+      case m_elim of
+        Just eliminated_case -> rwExp eliminated_case
+        Nothing  -> no_eliminate scrut' Nothing [altm]
     _ -> case scrut_val
          of Just (ComplexValue _ (DataValue _ con _ ex_args margs)) -> do
               case_of_known_value scrut' con ex_args margs
             Just (ComplexValue _ (StoredValue Referenced (ComplexValue _ (DataValue _ con _ ex_args margs)))) -> do
               case_of_known_value scrut' con ex_args margs              
-            _ -> no_eliminate scrut' alts
+            _ -> no_eliminate scrut' Nothing alts
   where
     -- Find the alternative matching constructor @con@
     find_alternative con =
@@ -692,12 +937,13 @@ rwCase inf scrut alts = do
       m_elim <- elimCaseAlternative False inf altm ex_args arg_vals
       case m_elim of
         Just eliminated_case -> rwExp eliminated_case
-        Nothing -> no_eliminate scrut' [altm]
+        Nothing -> no_eliminate scrut' (Just (ex_args, margs)) [altm]
 
     -- Cannot eliminate this case statement.  Possibly eliminated
-    -- some case alternatives.
-    no_eliminate scrut' reduced_alts = do
-      alts' <- mapM (rwAlt scrutinee_var) reduced_alts
+    -- some case alternatives.  If we know the values of some fields,
+    -- we can use that to simplify the body of the case statement.
+    no_eliminate scrut' m_arg_values reduced_alts = do
+      alts' <- mapM (rwAlt scrutinee_var m_arg_values) reduced_alts
       rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
       where
         scrutinee_var =
@@ -789,8 +1035,8 @@ elimCaseAlternative from_writer inf (AltM alt) ex_args args
 
     bind_field _ _ = internalError "rwCase: Unexpected pattern"
 
-rwAlt :: Maybe Var -> AltM -> LR AltM
-rwAlt scr (AltM (Alt con tyArgs exTypes params body)) = do
+rwAlt :: Maybe Var -> Maybe ([TypM], [MaybeValue]) -> AltM -> LR AltM
+rwAlt scr m_values (AltM (Alt con tyArgs exTypes params body)) = do
   -- If we're going to record a known value for the scrutinee, 
   -- convert wildcard to non-wildcard patterns.  This increases the
   -- usefulness of recording known values.
@@ -799,16 +1045,42 @@ rwAlt scr (AltM (Alt con tyArgs exTypes params body)) = do
     then mapM labelParameter params
     else return params
 
-  assume_params labeled_params $ do
+  -- Get the known values of the fields.  If values are given for the fields,
+  -- the number of fields must match.  If there are existential variables,
+  -- we must rename them.
+  let values = 
+        case m_values
+        of Just (ex_args, given_values)
+             | length given_values /= length params ||
+               length ex_args /= length exTypes ->
+                 internalError "rwAlt"
+             | not $ null exTypes ->
+                 -- Not implemented.
+                 -- To implement this, we need to unify existential
+                 -- variable names appearing in the values with
+                 -- existential variable names appearing in the
+                 -- pattern.
+                 repeat Nothing
+             | otherwise ->
+                 given_values
+           _ -> repeat Nothing
+
+  assume_params (zip values labeled_params) $ do
     (body', _) <- rwExp body
     return $ AltM $ Alt con tyArgs exTypes labeled_params body'
   where
     assume_params labeled_params m = do
       tenv <- getTypeEnv
       let with_known_value = assume_scrutinee tenv labeled_params m
-          with_params = assumePatterns labeled_params with_known_value
+          with_params = assume_parameters labeled_params with_known_value
           with_ty_params = foldr assumeTyPatM with_params exTypes
       with_ty_params
+      
+    assume_parameters labeled_params m = foldr assume_param m labeled_params
+    
+    -- Add a parameter and its value to the environment
+    assume_param (maybe_value, param) m =
+      assumePattern param $ withMaybeValue (patMVar' param) maybe_value m
     
     -- If the scrutinee is a variable, add its known value to the environment.
     -- It will be used if the variable is inspected again. 
@@ -816,18 +1088,23 @@ rwAlt scr (AltM (Alt con tyArgs exTypes params body)) = do
       case scr
       of Just scrutinee_var ->
            let ex_args = [v | TyPatM v _ <- exTypes]
-               arg_values = map (mk_arg . patMVar) labeled_params
+               arg_values = map mk_arg labeled_params
                Just (data_type, dcon_type) = lookupDataConWithType con tenv
                data_value = patternValue defaultExpInfo data_type dcon_type tyArgs ex_args arg_values
            in withMaybeValue scrutinee_var data_value m
          Nothing -> m
       where
-        mk_arg (Just var) = Just (VarValue defaultExpInfo var)
-        mk_arg Nothing =
-          -- It would be safe to return Nothing here.
-          -- However, we tried to give every parameter a variable name,
-          -- so this shouldn't be Nothing.
-          internalError "rwAlt"
+        mk_arg (maybe_val, pat) =
+          case patMVar pat
+          of Just var ->
+               case maybe_val
+               of Just val -> Just (setTrivialValue var val)
+                  Nothing  -> Just (VarValue defaultExpInfo var)
+             Nothing ->
+               -- It would be safe to return Nothing here.
+               -- However, we tried to give every parameter a variable name,
+               -- so this shouldn't be Nothing.
+               internalError "rwAlt"
 
 -- | Ensure that the parameter binds a variable.
 labelParameter param = 

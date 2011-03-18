@@ -28,7 +28,8 @@ module SystemF.MemoryIR
         Exp(..),
         Alt(..),
         Fun(..),
-        TypM, PatM, TyPatM, RetM, ExpM, AltM, FunM, unpackVarAppM
+        TypM, PatM, TyPatM, RetM, ExpM, AltM, FunM,
+        unpackVarAppM, unpackDataConAppM
        )
 where
 
@@ -36,6 +37,7 @@ import Common.Error
 import SystemF.Syntax
 import SystemF.Demand
 import SystemF.DeadCode(Mentions(..))
+import Type.Environment
 import Type.Type
 import Type.Var
 
@@ -180,3 +182,18 @@ unpackVarAppM (ExpM (VarE { expVar = op })) =
   Just (op, [], [])
 
 unpackVarAppM _ = Nothing
+
+-- | If the expression is a data constructor application, return the data
+--   constructor and arguments
+unpackDataConAppM :: TypeEnv -> ExpM -> Maybe (DataConType, [Type], [ExpM])
+unpackDataConAppM tenv (ExpM (AppE { expOper = ExpM (VarE _ op)
+                                   , expTyArgs = ts
+                                   , expArgs = xs}))
+  | Just dcon <- lookupDataCon op tenv =
+      Just (dcon, map fromTypM ts, xs)
+
+unpackDataConAppM tenv (ExpM (VarE { expVar = op }))
+  | Just dcon <- lookupDataCon op tenv =
+      Just (dcon, [], [])
+
+unpackDataConAppM _ _ = Nothing
