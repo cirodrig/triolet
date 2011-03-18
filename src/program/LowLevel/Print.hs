@@ -64,7 +64,12 @@ pprRecordType ppr_value rt =
   in hang (text "record" <+> sz <+> text "%" <+> al) 4 fields
 
 pprField ppr_value fld =
-  ppr_value (fieldOffset fld) <> text ":" <+> pprFieldType ppr_value (fieldType fld)
+  mutability (fieldMutable fld) <+>
+  ppr_value (fieldOffset fld) <> text ":" <+>
+  pprFieldType ppr_value (fieldType fld)
+  where
+    mutability Constant = text "const"
+    mutability Mutable  = empty
 
 pprStaticFieldType :: StaticFieldType -> Doc
 pprStaticFieldType = pprFieldType (text . show)
