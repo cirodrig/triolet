@@ -178,10 +178,16 @@ flattenAtom atom =
      CallA conv op vs ->
        return_atom $
        CallA conv `liftM` flattenSingleVal op `ap` flattenValList vs
+     -- Eliminate a load of a unit value
+     PrimA (PrimLoad m (PrimType UnitType)) _ ->
+       return (id, ValA [])
      -- If loading a record, load its parts individually
      PrimA (PrimLoad m (RecordType rec_type)) vs -> do
        [ptr, off] <- flattenValList vs
        flattenLoad m rec_type ptr off
+     -- Eliminate a store of a unit value
+     PrimA (PrimStore m (PrimType UnitType)) _ ->
+       return (id, ValA [])
      -- If storing a record, load its parts individually
      PrimA (PrimStore m (RecordType rec_type)) vs ->
        flattenStore m rec_type =<< flattenValList vs
@@ -220,7 +226,7 @@ flattenLoad op_mutable record_type ptr off = do
            return (LetE [v] atom, v)
          _ -> internalError "flattenLoad"
   
-flattenStore op_mutable record_type (ptr : off : values) = do 
+flattenStore op_mutable record_type (ptr : off : values) = do
   -- Compute (ptr ^+ off)
   (compute_base, base) <- pointerOffsetCode ptr off
 
