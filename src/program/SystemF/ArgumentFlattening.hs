@@ -296,16 +296,12 @@ wrapPattern' what pat pattern_specificity =
     -- No use information is available
     wrap_var_pattern Used =
       case what
-      of Return ->
-           case fromVarApp $ patMType pat
-           of Just (con, args) -> do
-                loadable <- naturalValueTyConAF con
-                if loadable
-                  then loaded Value (patMType pat)
-                  else unchanged
-              Nothing -> unchanged
-         _ -> unchanged
-    
+      of Local -> unchanged
+         _ -> 
+           if patMRepr pat `sameParamRepr` ReadPT
+           then wrap_loadable_scalar
+           else unchanged
+         
     -- The variable will be loaded from memory.  We always want to flatten it.
     wrap_var_pattern (Loaded repr ty _) = loaded repr ty
 
@@ -345,11 +341,25 @@ wrapPattern' what pat pattern_specificity =
                     Nothing -> unchanged
                     Just x  -> return x
                 Nothing ->
-                  if naturalValueTyCon tenv ty_op
+                  -- Try to pass a loaded value, if possible
+                  if patMRepr pat `sameParamRepr` ReadPT &&
+                     naturalValueTyCon tenv ty_op
                   then loaded Value ty
                   else unchanged
             Nothing -> unchanged
 
+    -- Try to pass the parameter as a loaded value,
+    -- if it's possible to load and store the parameter type.
+    -- The parameter (before wrapping) must be passed by reference.
+    wrap_loadable_scalar =
+      case fromVarApp $ patMType pat
+      of Just (con, args) -> do
+           loadable <- naturalValueTyConAF con
+           if loadable
+             then loaded Value (patMType pat)
+             else unchanged
+         Nothing -> unchanged
+    
     unchanged =
       case patMRepr pat
       of ReadPT -> do
@@ -482,7 +492,7 @@ deconPatternFields what ex_pats fields = do
     decon_field (rrepr ::: rtype, spc) = do
       pat_var <- newAnonymousVar ObjectLevel
       let pattern =
-            setPatMDmd (Dmd bottom spc) $
+            setPatMDmd (Dmd ManyUnsafe spc) $
             memVarP pat_var (returnReprToParamRepr rrepr ::: rtype)
       wrapPattern (fieldWhat what) pattern
 
@@ -587,7 +597,9 @@ rewrapPattern (WrapPat pat wrap_spec) =
 
 rewrapDeconPat pat dc_repr con ty_args ex_types fields =
   -- Undo a case statement by constructing a value
-  let (field_contexts, field_exprs) = unzip $ map rewrapPattern fields
+  let -- (field_contexts, field_exprs) = unzip $ map rewrapPattern fields
+      -- Create values or writers for each field
+      field_exprs = map (rewrapReturnField Nothing) fields
       expr = ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo con)
              (ty_args ++ [TypM $ VarT v | TyPatM v _ <- ex_types])
              (field_exprs ++ return_expr)
@@ -606,7 +618,7 @@ rewrapDeconPat pat dc_repr con ty_args ex_types fields =
            _ -> []
              
       ctx = contextItem $ LetCtx defaultExpInfo pattern expr
-  in ctx : concat field_contexts
+  in [ctx]
 
 -- | Generate code to rewrap a return value.  Given the unwrapped values,
 --   produce a writer or write to the given destination
@@ -622,8 +634,9 @@ rewrapReturnField mdst (WrapPat pat wrap_spec) =
                 BoxPT   -> pattern_var_exp
                 ReadPT  ->
                   let Just dict = mdict
+                      src = ExpM $ VarE defaultExpInfo (patMVar' pat)
                   in ExpM $ AppE defaultExpInfo copy_op [TypM $ patMType pat]
-                     (dict : maybeToList mdst)
+                     (dict : src : maybeToList mdst)
        in param_exp
      
      DeconWP dc_repr con ty_args ex_types fields ->
@@ -1215,7 +1228,6 @@ lvExp expression = traceShow (pprExp expression) $
        when (isJust m_unpacking) $
          internalError "lvExp: Unexpected unpacked variable"
        return expression
-       -- return expression
      LitE {} -> return expression
      AppE inf op ty_args args -> lvApp inf op ty_args args
      LamE inf f -> do
@@ -1235,7 +1247,7 @@ lvApp inf op ty_args args =
            -- If copying an unpacked variable, rewrap it.  The rewrapped value
            -- is returned directly without being further copied.
            case args
-           of src_arg : other_args ->
+           of _ : src_arg : other_args ->
                 case src_arg
                 of ExpM (VarE src_info src_var) -> do
                      m_unpacking <- lookupUnpackedLocalVariable src_var
