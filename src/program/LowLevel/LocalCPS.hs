@@ -347,7 +347,17 @@ chooseLcpsCont ctx grp body =
       all_same = let (c:cs) = continuations in all (c ==) cs
   in case continuations
      of RCont cont_var : _
-          | all_same && body `containsLetContinuation` cont_var ->
+          -- To be LCPS-transformed, all return continuations must be the same.
+          --
+          -- FIXME: This potentially captures variables, but we don't handle
+          -- variable capture at all, leading to errors in closure conversion!
+          -- tree.
+          --
+          -- We used to have this more restrictive test, but it turns many
+          -- many proper tail-calls into non-tail calls.
+          --
+          -- > all_same && body `containsLetContinuation` cont_var
+          | all_same ->
               (Just cont_var, assign_cont cont_var ctx)
         _ : _ -> (Nothing, ctx)
         [] -> internalError "chooseLcpsCont: Empty definition group"
