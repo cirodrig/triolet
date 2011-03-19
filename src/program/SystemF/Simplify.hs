@@ -119,13 +119,13 @@ withMaybeValue v (Just val) m = withKnownValue v val m
 
 -- | Add a function definition's value to the environment
 withDefValue :: Def Mem -> LR a -> LR a
-withDefValue (Def v f) m =
+withDefValue (Def v _ f) m =
   let fun_info = funInfo $ fromFunM f
   in withKnownValue v (ComplexValue (Just v) $ FunValue fun_info f) m
 
 -- | Add a function definition to the environment, but don't inline it
 withUninlinedDefValue :: Def Mem -> LR a -> LR a
-withUninlinedDefValue (Def v f) m =
+withUninlinedDefValue (Def v _ f) m =
   withMaybeValue v Nothing m
 
 withDefValues :: DefGroup (Def Mem) -> LR a -> LR a
@@ -170,7 +170,7 @@ assumeDefs :: DefGroup (Def Mem) -> LR a -> LR a
 assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
 assumeDef :: Def Mem -> LR a -> LR a
-assumeDef (Def v f) m = assume v (BoxRT ::: functionType f) m
+assumeDef (Def v _ f) m = assume v (BoxRT ::: functionType f) m
 
 -- | Print the known values on entry to the computation.
 dumpKnownValues :: LR a -> LR a
@@ -895,7 +895,7 @@ deconLetBinding pat_var mcon field_demands rhs do_body =
 rwLetrec inf defs body = withDefs defs $ \defs' -> do
   (body', body_value) <- rwExp body
       
-  let local_vars = Set.fromList [v | Def v _ <- defGroupMembers defs']
+  let local_vars = Set.fromList $ map definiendum $ defGroupMembers defs'
       ret_value = forgetVariables local_vars =<< body_value
   rwExpReturn (ExpM $ LetfunE inf defs' body', ret_value)
 
@@ -1123,9 +1123,7 @@ rwFun (FunM f) =
     return $ FunM $ f {funBody = body'}
 
 rwDef :: Def Mem -> LR (Def Mem)
-rwDef (Def v f) = do
-  f' <- rwFun f
-  return (Def v f')
+rwDef def = mapMDefiniens rwFun def
 
 rwExport :: Export Mem -> LR (Export Mem)
 rwExport (Export pos spec f) = do

@@ -657,7 +657,7 @@ withDefs defgroup f =
      Rec {} -> assume_defs (f =<< mapM inferDef defgroup)
   where
     assume_defs m = foldr assume_def m (defGroupMembers defgroup)
-    assume_def (Def v f) m = do
+    assume_def (Def v _ f) m = do
       ty <- getFunType f
       assume v (BoxRT ::: ty) m
 
@@ -943,9 +943,7 @@ inferAlt pos expected_rtype (AltTSF (TypeAnn _ (Alt con ty_args ex_vars params b
         assume_field (PatR v (repr ::: ty)) m =
           assume v (paramReprToReturnRepr repr ::: ty) m
 
-inferDef (Def v f) = do
-  f' <- inferFun f
-  return $ Def v f'
+inferDef def = mapMDefiniens inferFun def
 
 inferExport (Export pos spec f) = do
   f' <- inferFun f

@@ -18,7 +18,9 @@ module SystemF.Syntax
      BaseExp(..),
      BaseAlt(..),
      BaseFun(..),
-     Def(..),
+     Def(..), mkDef, mkWrapperDef,
+     mapMDefiniens,
+     DefOrigin(..),
      DefGroup(..), defGroupMembers,
      Export(..),
      Module(..),
@@ -196,8 +198,30 @@ data BaseFun s =
       , funBody       :: Exp s
       }
 
-data Def s = Def Var (Fun s)
-         deriving(Typeable)
+-- | A function definition
+data Def s =
+  Def
+  { definiendum :: Var
+  , defOrigin :: !DefOrigin
+  , definiens :: Fun s
+  }
+  deriving(Typeable)
+
+mkDef :: Var -> Fun s -> Def s
+mkDef v f = Def v DefSomewhere f
+
+mkWrapperDef :: Var -> Fun s -> Def s
+mkWrapperDef v f = Def v DefWrapper f
+
+mapMDefiniens :: Monad m => (Fun s -> m (Fun s')) -> Def s -> m (Def s')
+mapMDefiniens f def = do fun <- f (definiens def)
+                         return $ def {definiens = fun}
+
+-- | Where a definition came from.  A definition's origin is a useful
+--   optimization hint.
+data DefOrigin =
+    DefWrapper                    -- ^ A wrapper function
+  | DefSomewhere                  -- ^ Other origin
 
 -- | A definition group consists of either a single non-recursive definition
 --   or a list of recursive definitions.  The list must not be empty.

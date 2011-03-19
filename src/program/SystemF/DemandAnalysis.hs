@@ -334,14 +334,14 @@ dmdFun (FunM f) = do
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 
 dmdDef :: DmdAnl (Def Mem)
-dmdDef (Def v f) = liftM (Def v) $ dmdFun f
+dmdDef def = mapMDefiniens dmdFun def
 
 dmdGroup :: DefGroup (Def Mem) -> Df b -> Df ([DefGroup (Def Mem)], b)
 dmdGroup defgroup do_body =
   case defgroup
-  of NonRec def@(Def v _) -> do
+  of NonRec def -> do
        -- Eliminate dead code.  Decide whether the definition is dead.
-       (body, dmd) <- getDemand v do_body
+       (body, dmd) <- getDemand (definiendum def) do_body
        case multiplicity dmd of
          Dead -> return ([], body)
          _ -> do
@@ -349,7 +349,7 @@ dmdGroup defgroup do_body =
            return ([NonRec def'], body)
 
      Rec defs ->
-       let local_vars = [v | Def v _ <- defs]
+       let local_vars = map definiendum defs
        in maskDemands local_vars $ rec_dmd defs
   where
     rec_dmd defs = Df $ \tenv ->
@@ -358,8 +358,8 @@ dmdGroup defgroup do_body =
           (body, body_uses) = runDf do_body tenv
 
           -- Partition into strongly connected components
-          members = [((new_def, uses), varID v, uses)
-                    | (new_def@(Def v _), uses) <- defs_and_uses]
+          members = [((new_def, uses), varID $ definiendum new_def, uses)
+                    | (new_def, uses) <- defs_and_uses]
           new_defs_and_uses = partitionDefGroup members body_uses
           new_defs = map (fmap fst) new_defs_and_uses
           new_uses = joinSeqs $ map snd $ concatMap defGroupMembers new_defs_and_uses

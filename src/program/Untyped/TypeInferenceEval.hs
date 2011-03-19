@@ -85,7 +85,7 @@ evFun (Untyped.TIFun f) = do
                        }
 
 evDef :: Def Untyped.TI -> IO (Def SF)
-evDef (Def v f) = Def v `liftM` evFun f
+evDef def = mapMDefiniens evFun def
 
 evExport :: Export Untyped.TI -> IO (Export SF)
 evExport (Export pos spec f) = Export pos spec `liftM` evFun f

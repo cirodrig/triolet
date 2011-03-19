@@ -582,7 +582,7 @@ rwReduce1Generate inf element elt_repr reducer other_args size count producer = 
           (ExpM $ VarE defaultExpInfo tmpvar) other_args size_minus_1 count_minus_1 producer_plus_1
           
   -- Build a let expression
-  return $ ExpM $ LetfunE defaultExpInfo (NonRec (Def producer_var producer_fn)) $
+  return $ ExpM $ LetfunE defaultExpInfo (NonRec (mkDef producer_var producer_fn)) $
            ExpM $ LetE defaultExpInfo tmpvar_binder rhs body
 
 -- | Inline a call of \'for\'.
@@ -632,7 +632,7 @@ rwFor tenv inf [TypM size_ix, TypM acc_type] args =
                              return init :
                              maybeToList (fmap return maybe_ret)
         loop_call <- varAppE loop_var [] loop_arguments
-        return $ letfunE (Rec [Def loop_var loop_fun]) loop_call
+        return $ letfunE (Rec [mkDef loop_var loop_fun]) loop_call
 
 -------------------------------------------------------------------------------
 

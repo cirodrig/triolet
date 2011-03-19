@@ -165,9 +165,7 @@ pevalDefGroup dg m = do
   return (dg', x)
 
 pevalDef :: Def SF -> PE (Def SF)
-pevalDef (Def v f) = do
-  f' <- pevalFun f
-  return $ Def v f'
+pevalDef def = mapMDefiniens pevalFun def
 
 pevalFun :: FunSF -> PE FunSF
 pevalFun (FunSF f) = do

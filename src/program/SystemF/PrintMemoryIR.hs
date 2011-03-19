@@ -99,7 +99,7 @@ pprFunPrec (FunM fun) =
   in text "lambda" <+> sig_doc <> text "." $$ nest 4 body_doc
      `hasPrec` stmtPrec
 
-pprDef (Def v f) = hang (pprVar v) 2 (pprFun f)
+pprDef (Def v _ f) = hang (pprVar v) 2 (pprFun f)
 
 pprDefGroup :: DefGroup (Def Mem) -> Doc
 pprDefGroup dg =

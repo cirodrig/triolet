@@ -368,19 +368,19 @@ lowerDefGroup :: DefGroup (Def (Typed Mem))
               -> Lower a
 lowerDefGroup defgroup k = 
   case defgroup
-  of NonRec (Def v f) -> do
+  of NonRec def -> do
        -- Lower the function before adding the variable to the environment
-       f' <- lowerFun f
-       assume_variable (Def v f) $ \v' -> k (LL.NonRec (LL.Def v' f'))
+       f' <- lowerFun $ definiens def
+       assume_variable def $ \v' -> k (LL.NonRec (LL.Def v' f'))
      Rec defs ->
        -- Add all variables to the environment, then lower
        assume_variables defs $ \vs' -> do
-         fs' <- mapM lowerFun [f | Def _ f <- defs]
+         fs' <- mapM (lowerFun . definiens) defs
          k $ LL.Rec $ zipWith LL.Def vs' fs'
   where
     assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (Def v (FunTM (RTypeAnn return_type _))) k =
+    assume_variable (Def v _ (FunTM (RTypeAnn return_type _))) k =
       assumeVar v return_type k
 
 lowerDefGroupG :: DefGroup (Def (Typed Mem))

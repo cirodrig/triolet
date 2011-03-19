@@ -464,7 +464,7 @@ inferDefGroup is_top_level defs k =
       sfvar <- case varSystemFVariable v
                of Just sfvar -> return sfvar 
                   Nothing -> internalError "Variable has no System F translation"
-      return $ SystemF.Def sfvar function
+      return $ SystemF.mkDef sfvar function
 
 -- | Infer an expression's type and parameter-passing convention
 inferExpressionType :: Expression -> Inf (TIExp, HMType)

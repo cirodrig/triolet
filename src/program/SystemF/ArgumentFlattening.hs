@@ -1048,8 +1048,10 @@ unwrappedLocalPattern (WrapRet pat uw_var (DeadWP _)) =
 --   body is transformed and a single definition is returned.  Otherwise,
 --   the worker is returned, followed by the wrapper.
 flattenFunctionArguments :: Def Mem -> AF (Maybe (Def Mem), Def Mem)
-flattenFunctionArguments (Def fun_name (FunM fun)) =
-  let ty_params = funTyParams fun
+flattenFunctionArguments def =
+  let fun_name = definiendum def
+      FunM fun = definiens def
+      ty_params = funTyParams fun
       params = funParams fun
       ret = funReturn fun
   in assumeTyPats ty_params $ assumePats params $ do
@@ -1063,14 +1065,14 @@ flattenFunctionArguments (Def fun_name (FunM fun)) =
     -- Construct wrapper, if it's beneficial
     if all isIdWrapper wrap_pats && isIdRet wrap_ret
       then do
-        return (Nothing, Def fun_name (FunM fun'))
+        return (Nothing, mkDef fun_name (FunM fun'))
       else do
-        worker@(Def worker_name _) <-
+        worker <-
           mkWorkerFunction work_ty_params work_params work_ret
           wrap_pats wrap_ret fun_name (funInfo fun) fun_body
         wrapper <-
           mkWrapperFunction ty_params params ret
-          wrap_pats wrap_rpat wrap_ret fun_name ret worker_name
+          wrap_pats wrap_rpat wrap_ret fun_name ret (definiendum worker)
         return (Just worker, wrapper)
 
 mkWorkerFunction :: [TyPatM] -> [PatM] -> RetM
@@ -1088,7 +1090,7 @@ mkWorkerFunction ty_params params ret wrap_pats wrap_ret wrapper_name inf body =
       wrapped_body = applyContext wrap_context body1
       wrap_fn = FunM $ Fun inf ty_params params ret wrapped_body
 
-  return $ Def worker_name wrap_fn
+  return $ mkDef worker_name wrap_fn
 
 mkWrapperFunction :: [TyPatM] -> [PatM] -> RetM
                   -> [WrapPat] -> Maybe PatM -> WrapRet -> Var
@@ -1115,7 +1117,7 @@ mkWrapperFunction original_ty_params original_params original_ret
       wrapper_fun = FunM $ Fun defaultExpInfo
                     original_ty_params original_params original_ret
                     wrapper_body
-  return $ Def wrapper_name wrapper_fun
+  return $ mkWrapperDef wrapper_name wrapper_fun
 
 -- | Perform flattening in the body of a function, but don't change the
 --   function's arguments
@@ -1200,7 +1202,7 @@ lvInFun (FunM f) =
     return $ FunM $ f {funBody = fun_body}
 
 lvDef :: Def Mem -> LF (Def Mem)
-lvDef (Def v f) = liftM (Def v) (lvInFun f)
+lvDef def = mapMDefiniens lvInFun def
 
 lvExp :: ExpM -> LF ExpM
 lvExp expression = traceShow (pprExp expression) $

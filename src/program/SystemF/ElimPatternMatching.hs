@@ -69,8 +69,7 @@ pmNewVar :: PM Var
 pmNewVar = newAnonymousVar ObjectLevel
 
 elimPMDef :: Def SF -> PM (Def SF)
-elimPMDef (Def v f) = do f' <- elimPMFun f
-                         return $ Def v f'
+elimPMDef def = mapMDefiniens elimPMFun def
 
 elimPMFun :: FunSF -> PM FunSF
 elimPMFun (FunSF fun@(Fun { funInfo = inf

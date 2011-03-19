@@ -20,7 +20,7 @@ etaReduceModule (Module mod_name defss exports) =
       exports' = map hrExport exports
   in Module mod_name defss' exports'
 
-hrDef (Def v f) = Def v (hrFun f)
+hrDef def = def {definiens = hrFun $ definiens def}
 
 hrExport export =
   export {exportFunction = hrFun $ exportFunction export}

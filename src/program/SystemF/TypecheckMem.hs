@@ -143,7 +143,7 @@ assumeTyPat (TyPatM v t) k = do
 
 -- Assume a function definition.  Do not check the function definition's body.
 assumeDef :: Def Mem -> TCM a -> TCM a
-assumeDef (Def v fun) = assume v (BoxRT ::: functionType fun)
+assumeDef (Def v _ fun) = assume v (BoxRT ::: functionType fun)
 
 assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
@@ -414,9 +414,7 @@ typeCheckDefGroup defgroup k =
      Rec {} -> assumeDefs defgroup (k =<< mapM typeCheckDef defgroup)
   where
     -- To typecheck a definition, check the function it contains
-    typeCheckDef (Def v fun) = do
-      fun_val <- typeInferFun fun
-      return $ Def v fun_val
+    typeCheckDef def = mapMDefiniens typeInferFun def
 
 typeCheckExport :: Export Mem -> TCM (Export TM)
 typeCheckExport (Export pos spec f) = do

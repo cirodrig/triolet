@@ -443,7 +443,7 @@ substituteTraversableMethods traverse_var build_var expr = go expr
          LetE inf b rhs body ->
            ExpSF $ LetE inf b (go rhs) (go body)
          LetfunE inf defs b ->
-           ExpSF $ LetfunE inf (fmap (\(Def v f) -> Def v (dofun f)) defs) (go b)
+           ExpSF $ LetfunE inf (fmap (\(Def v o f) -> Def v o (dofun f)) defs) (go b)
          CaseE inf scr alts ->
            ExpSF $ CaseE inf (go scr) (map doalt alts)
       
@@ -575,7 +575,7 @@ specializeFun (FunSF function)
 -- | Specialize a polymorphic function.  Create a new function definition for
 -- each specialized instance.
 specializePolymorphicFun :: SpclTable -> Def SF -> Spcl [Def SF]
-specializePolymorphicFun tbl (Def orig_var (FunSF orig_fun)) =
+specializePolymorphicFun tbl (Def orig_var origin (FunSF orig_fun)) =
   go tbl [] (funTyParams orig_fun)
   where
     -- Specialize according to the specialization table.
@@ -616,7 +616,7 @@ specializePolymorphicFun tbl (Def orig_var (FunSF orig_fun)) =
                                , funParams = params
                                , funReturn = RetSF (fromTypSF return_type)
                                , funBody = body}
-        return $ Def derived_name (FunSF new_fun)
+        return $ Def derived_name origin (FunSF new_fun)
 
 -- | Create a specialization table from the given signature.  An element of
 -- the signature is @True@ if it is used for specialization, @False@
@@ -632,7 +632,7 @@ createSpclTable mk_entry sig = create sig
 -- parameters, create a table and new variables for all possible 
 -- specializations.  The actual functions aren't created.
 createFunSpclTable :: Def SF -> Spcl SpclTable
-createFunSpclTable (Def fun_name (FunSF function)) = let 
+createFunSpclTable (Def fun_name origin (FunSF function)) = let 
   -- Find type variables that are parameters of Traversable dictionary types
   -- in the parameter list
   traversable_variables =
@@ -682,7 +682,7 @@ specializeDefs dg m = do
     add_tables_to_environment tables dg_members m =
       foldr add_table_to_environment m $ zip tables dg_members
 
-    add_table_to_environment (table, Def v _) m =
+    add_table_to_environment (table, Def v _ _) m =
       assumeVarSpclTable v table m
 
 specializeExport :: Export SF -> Spcl (Export SF)

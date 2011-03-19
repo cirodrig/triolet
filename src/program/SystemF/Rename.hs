@@ -159,19 +159,21 @@ instance Renameable (Exp Mem) where
          let body' = rename rn body
          return $ ExpM $ LetE inf pat' rhs body'
 
-       LetfunE inf (NonRec (Def v f)) body -> do
+       LetfunE inf (NonRec def) body -> do
+         let v = definiendum def
          v' <- newClonedVar v
          let body' = rename (singletonRenaming v v') body
-         return $ ExpM $ LetfunE inf (NonRec (Def v' f)) body'
+             def' = def {definiendum = v'}
+         return $ ExpM $ LetfunE inf (NonRec def') body'
 
        LetfunE inf (Rec defs) body -> do
-         let def_vars = [v | Def v _ <- defs]
+         let def_vars = map definiendum defs
          renamed_vars <- mapM newClonedVar def_vars
          
          -- Rename everything
          let rn = renaming $ zip def_vars renamed_vars
-             local_functions = [rename rn f | Def _ f <- defs]
-             defs' = zipWith Def renamed_vars local_functions
+             defs' = [d {definiendum = v, definiens = rename rn $ definiens d}
+                     | (v, d) <- zip renamed_vars defs]
              body' = rename rn body
          return $ ExpM $ LetfunE inf (Rec defs') body'
 
@@ -198,13 +200,13 @@ instance Renameable (Exp Mem) where
                  let rhs_fv' = Set.delete (patMVar' pat) rhs_fv
                      dict_fv = freeVariables $ patMDict pat
                  in ty_fv `Set.union` dict_fv `Set.union` rhs_fv `Set.union` body_fv
-       LetfunE _ (NonRec (Def v f)) body ->
+       LetfunE _ (NonRec def) body ->
          let body_fv = freeVariables body
-             fn_fv = freeVariables f
-         in Set.union (Set.delete v body_fv) fn_fv
+             fn_fv = freeVariables $ definiens def
+         in Set.union (Set.delete (definiendum def) body_fv) fn_fv
        LetfunE _ (Rec defs) body ->
-         let local_functions = [v | Def v _ <- defs]
-             fn_fv = Set.unions [freeVariables f | Def _ f <- defs]
+         let local_functions = map definiendum defs
+             fn_fv = Set.unions $ map (freeVariables . definiens) defs
              body_fv = freeVariables body
          in foldr Set.delete (Set.union fn_fv body_fv) local_functions
        CaseE _ scr alts ->
@@ -292,7 +294,7 @@ instance Renameable (Fun Mem) where
                              (typat_vars ++ pat_vars)
       in typat_fv `Set.union` pat_fv `Set.union` return_and_body_fv
       
-renameDefM rn (Def v f) = Def v (rename rn f)
+renameDefM rn def = def {definiens = rename rn $ definiens def}
 
 instance Substitutable (Typ Mem) where
   substitute s (TypM t) = TypM $ substitute s t
@@ -340,4 +342,4 @@ instance Substitutable (Fun Mem) where
                , funReturn = substitute s $ funReturn fun
                , funBody = substitute s $ funBody fun}
 
-substituteDefM s (Def v f) = Def v (substitute s f)
+substituteDefM s def = def {definiens = substitute s $ definiens def}

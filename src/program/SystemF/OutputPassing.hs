@@ -278,9 +278,7 @@ genAlt (AltR alt) = do
       in memVarP v (new_repr ::: convertToMemType ty)
 
 genDef :: Def Rep -> OP (Def Mem)
-genDef (Def v f) = do
-  f' <- genFun f
-  return (Def v f')
+genDef def = mapMDefiniens genFun def
 
 genExport :: Export Rep -> OP (Export Mem)
 genExport (Export pos spec f) = do

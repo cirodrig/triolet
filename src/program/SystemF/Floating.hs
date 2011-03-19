@@ -314,11 +314,11 @@ contextItem e = ContextItem (freeVariablesContextExp e) e
    
     freeVariablesContextExp (LetfunCtx _ defgroup) =
       case defgroup
-      of NonRec (Def v f) -> freeVariables f
-         Rec defs -> 
+      of NonRec def -> freeVariables $ definiens def
+         Rec defs ->
            let functions_fv =
-                 Set.unions $ map freeVariables [f | Def _ f <- defs]
-               local_variables = [v | Def v _ <- defs]
+                 Set.unions $ map (freeVariables . definiens) defs
+               local_variables = map definiendum defs
            in foldr Set.delete functions_fv local_variables
 
 -- | An expression sans body that can be floated outward.
@@ -377,18 +377,20 @@ freshenContextExp (CaseCtx inf scr alt_con ty_args ty_params params) = do
 
 freshenContextExp (LetfunCtx inf defs) =
   case defs
-  of NonRec (Def v f) -> do
+  of NonRec def -> do
        -- Don't need to rename inside the definition
+       let v = definiendum def
        v' <- newClonedVar v
-       let new_defs = NonRec (Def v' f)
+       let new_defs = NonRec (def {definiendum = v'})
        return (LetfunCtx inf new_defs, singletonRenaming v v')
      Rec defs -> do
        -- Rename bodies of all local functions
-       let local_vars = [v | Def v _ <- defs]
+       let local_vars = map definiendum defs
        new_vars <- mapM newClonedVar local_vars
        let rn = renaming $ zip local_vars new_vars
-           new_defs = [Def new_var (rename rn f)
-                      | (new_var, Def _ f) <- zip new_vars defs]
+           new_defs = [def {definiendum = new_var,
+                            definiens = rename rn $ definiens def}
+                      | (new_var, def) <- zip new_vars defs]
        return (LetfunCtx inf (Rec new_defs), rn)
 
 -- | Get the variables defined by the context
@@ -398,8 +400,7 @@ ctxDefs item =
   of LetCtx _ pat _ -> [patMVar' pat]
      CaseCtx _ _ _ _ ty_params params ->
        [v | TyPatM v _ <- ty_params] ++ mapMaybe patMVar params
-     LetfunCtx _ defs ->
-       [v | Def v _ <- defGroupMembers defs]
+     LetfunCtx _ defs -> map definiendum $ defGroupMembers defs
 
 -- | Extract the part of the context that satisfies the predicate, 
 --   as well as any dependent parts of the context.
@@ -786,7 +787,7 @@ createFlattenedApp float_initializers spc inf op_var ty_args args = do
 
       -- Bind the function to a new variable and float it outward
       tmpvar <- newAnonymousVar ObjectLevel
-      let floated_ctx = LetfunCtx lam_info (NonRec (Def tmpvar f'))
+      let floated_ctx = LetfunCtx lam_info (NonRec (mkDef tmpvar f'))
       float floated_ctx
       
       -- Return the function variable
@@ -871,7 +872,7 @@ floatInExpDmd dmd (ExpM expression) =
      
      -- Special case: let x = lambda (...) becomes a letfun
      LetE inf pat@(MemVarP {}) (ExpM (LamE _ f)) body ->
-       floatInExp $ ExpM $ LetfunE inf (NonRec (Def (patMVar' pat) f)) body
+       floatInExp $ ExpM $ LetfunE inf (NonRec (mkDef (patMVar' pat) f)) body
 
      LetE inf pat rhs body ->
        floatInLet dmd inf pat rhs body
@@ -958,12 +959,11 @@ floatInLetfun dmd inf defs body = do
   -- Float the body
   floatInExpDmd dmd $ rename rn body
   where
-    def_vars = [v | Def v _ <- defGroupMembers defs]
+    def_vars = map definiendum $ defGroupMembers defs
     
     -- Perform floating in the function body
-    float_function_body local_vars (Def v f) = do
-      f' <- floatInFun (LocalAnchor local_vars) f
-      return (Def v f')
+    float_function_body local_vars def =
+      mapMDefiniens (floatInFun (LocalAnchor local_vars)) def
 
 floatInCase dmd inf scr alts = do
   scr' <- floatInExp scr
@@ -1030,9 +1030,9 @@ floatInFun m_local_vars (FunM fun) = do
 -- | Perform floating on a top-level function definition.
 --   No bindings are floated out of the function.
 floatInTopLevelDef :: Def Mem -> Flt (Def Mem)
-floatInTopLevelDef (Def v f) = do
-  f' <- floatInFun GlobalAnchor f
-  return (Def v f')
+floatInTopLevelDef def = do
+  f' <- floatInFun GlobalAnchor $ definiens def
+  return $ def {definiens = f'}
 
 -- | Perform floating on a top-level definition group.
 --

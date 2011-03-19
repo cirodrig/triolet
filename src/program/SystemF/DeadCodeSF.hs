@@ -111,9 +111,7 @@ edcMaskTyPats [] m = do x <- m
                         return ([], x)
 
 edcDef :: EDC (Def SF)
-edcDef (Def v f) = do
-  f' <- edcFun f
-  return $ Def v f'
+edcDef def = mapMDefiniens edcFun def
 
 edcDefGroup :: DefGroup (Def SF)
             -> GetMentionsSet a
@@ -122,9 +120,9 @@ edcDefGroup defgroup m =
   case defgroup
   of NonRec def -> do
        def' <- edcDef def
-       x <- mask (case def of Def v _ -> v) m
+       x <- mask (definiendum def) m
        return (NonRec def', x)
-     Rec defs -> masks (mentionsSet [v | Def v _ <- defs]) $ do
+     Rec defs -> masks (mentionsSet $ map definiendum defs) $ do
        defs' <- mapM edcDef defs
        x <- m
        return (Rec defs', x)
@@ -165,7 +163,8 @@ edcExp expression@(ExpSF base_expression) =
      CaseE {expScrutinee = scr, expAlternatives = alts} -> do
        scr' <- edcExp scr
        alts' <- mapM edcAlt alts
-       return $ ExpSF $ base_expression {expScrutinee = scr', expAlternatives = alts'}
+       return $ ExpSF $ base_expression {expScrutinee = scr',
+                                         expAlternatives = alts'}
 
 -- | Dead code elimination for a case alternative
 edcAlt (AltSF alt) = do

@@ -178,7 +178,7 @@ pprFunFlags flags fun =
       body = pprExpFlags flags $ funBody (fromFunSF fun)
   in hang (lambda <+> params <> text ".") 4 body
 
-pprDefFlags flags (Def v fun) =
+pprDefFlags flags (Def v _ fun) =
   let params = pprFunParameters False flags fun
       body = pprExpFlags flags $ funBody (fromFunSF fun)
   in hang (pprVarFlags flags v <+> params <+> equals) 4 body
