@@ -503,7 +503,8 @@ finalizeGroup id_supply grp = do
 
 printUnsolvedGroup :: UnsolvedGroup -> IO ()
 printUnsolvedGroup grp = do
-  print $ text "group" <+> fsep (map (pprVar . definiendum) $ groupMembers $ groupDefs grp)
+  print $ text "group" <+> text (show $ groupID grp) <+> 
+    fsep (map (pprVar . definiendum) $ groupMembers $ groupDefs grp)
   capt <- readIORef $ groupCapturedVal grp
   print $ text "  captured" <+> fsep (map pprVar $ Set.toList capt)
   putStrLn $ "  inherits " ++ show (groupInheritedCaptures grp)
@@ -544,12 +545,24 @@ findFunctionsToHoist var_ids global_vars def = do
   -- Generate constraints
   (h_csts, hoisted, groups, id_bound) <- scanTopLevelDef global_vars def
 
+  -- Debugging
+  when False $ do
+    let Def global_name _ = def
+    putStrLn $ "Hoisting in " ++ show global_name
+    mapM_ printUnsolvedGroup groups
+    putStrLn $ "Initial hoisted set: " ++ show hoisted
+    print h_csts
+
   -- Solve constraints
   table <- mkGroupArray groups id_bound
   setupAndSolveHoistingConstraints h_csts hoisted table
   setupAndSolveCaptureConstraints table groups
   final_groups <- mapM (finalizeGroup var_ids) groups
   
+  -- Debugging
+  when False $ do
+    mapM_ printGroup final_groups
+
   -- Look up results
   let lookup_function v =
         case find (\g -> v `elem` groupFunctions g) final_groups
