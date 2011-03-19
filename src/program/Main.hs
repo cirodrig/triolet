@@ -169,7 +169,8 @@ compilePyonToPyonAsm path text = do
   putStrLn "Prepared Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
 
-  -- The next group of optimizations does the real work of optimization.
+  -- The next group of optimizations does the main set of optimizations,
+  -- including high-level transformations via rewriting.
   -- Currently there are inter-pass dependences that we
   -- stupidly resolve by running them lots of times.
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
@@ -181,6 +182,23 @@ compilePyonToPyonAsm path text = do
   mem_mod <- SystemF.rewriteLocalExpr mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- SystemF.demandAnalysis mem_mod
+
+  -- Flatten function arguments and local variables.
+  -- We transform arguments and returns first, then run a simplifier pass 
+  -- to rebuild demand information.
+  -- Argument flattening leads to more precise demand information,
+  -- which makes local variable flattening more effective.
+  mem_mod <- SystemF.flattenArguments mem_mod
+  mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- SystemF.floatModule mem_mod
+  mem_mod <- SystemF.demandAnalysis mem_mod
+  mem_mod <- SystemF.flattenLocals mem_mod
+  
+  -- Re-run the simplifier to eliminate redundant code left behind by
+  -- flattening
+  mem_mod <- iterateM (SystemF.rewriteLocalExpr >=>
+                       SystemF.floatModule >=>
+                       SystemF.localDemandAnalysis) 4 mem_mod
 
   putStrLn "Optimized Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
