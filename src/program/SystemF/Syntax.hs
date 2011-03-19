@@ -20,7 +20,10 @@ module SystemF.Syntax
      BaseFun(..),
      Def(..), mkDef, mkWrapperDef,
      mapMDefiniens,
-     DefOrigin(..),
+     modifyDefAnnotation,
+     defIsWrapper,
+     DefAnn(..),
+     defaultDefAnn,
      DefGroup(..), defGroupMembers,
      Export(..),
      Module(..),
@@ -202,26 +205,36 @@ data BaseFun s =
 data Def s =
   Def
   { definiendum :: Var
-  , defOrigin :: !DefOrigin
+  , defAnnotation :: {-#UNPACK#-}!DefAnn
   , definiens :: Fun s
   }
   deriving(Typeable)
 
 mkDef :: Var -> Fun s -> Def s
-mkDef v f = Def v DefSomewhere f
+mkDef v f = Def v defaultDefAnn f
 
 mkWrapperDef :: Var -> Fun s -> Def s
-mkWrapperDef v f = Def v DefWrapper f
+mkWrapperDef v f = Def v (DefAnn True) f
 
 mapMDefiniens :: Monad m => (Fun s -> m (Fun s')) -> Def s -> m (Def s')
 mapMDefiniens f def = do fun <- f (definiens def)
                          return $ def {definiens = fun}
 
--- | Where a definition came from.  A definition's origin is a useful
---   optimization hint.
-data DefOrigin =
-    DefWrapper                    -- ^ A wrapper function
-  | DefSomewhere                  -- ^ Other origin
+modifyDefAnnotation :: (DefAnn -> DefAnn) -> Def s -> Def s
+modifyDefAnnotation f d = d {defAnnotation = f (defAnnotation d)}
+
+defIsWrapper :: Def s -> Bool
+defIsWrapper def = defAnnWrapper $ defAnnotation def
+
+-- | Annotations on a function definition
+data DefAnn =
+  DefAnn
+  { -- | True if the definition is a wrapper function.
+    defAnnWrapper :: {-#UNPACK#-}!Bool
+  }
+
+defaultDefAnn :: DefAnn
+defaultDefAnn = DefAnn False
 
 -- | A definition group consists of either a single non-recursive definition
 --   or a list of recursive definitions.  The list must not be empty.

@@ -1133,10 +1133,23 @@ rwExport (Export pos spec f) = do
 -- | Rewrite a definition group.  Then, add the defined functions to the
 --   environment and rewrite something else.
 withDefs :: DefGroup (Def Mem) -> (DefGroup (Def Mem) -> LR a) -> LR a
-withDefs defs k = assumeDefs defs $ do
-  -- Don't add values to the environment -- we don't want recursive inlining
-  defs' <- mapM rwDef defs
-  withDefValues defs' $ k defs'
+withDefs (NonRec def) k = do
+  def' <- rwDef def
+  assumeDef def' $ withDefValue def' $ k (NonRec def')
+
+withDefs defgroup@(Rec defs) k = assumeDefs defgroup $ do
+  -- Don't inline recursive functions in general.  However, we _do_ want to
+  -- inline wrapper functions into non-wrapper functions, even in recursive
+  -- definition groups.  So process the wrapper functions first, followed by
+  -- the other functions.
+  let (wrappers, others) = partition defIsWrapper defs
+  wrappers' <- mapM rwDef wrappers
+  with_wrappers wrappers' $ do
+    others' <- mapM rwDef others
+    let defgroup' = Rec (wrappers' ++ others')
+    withDefValues defgroup' $ k defgroup'
+  where
+    with_wrappers wrs m = foldr withDefValue m wrs
 
 rwModule :: Module Mem -> LR (Module Mem)
 rwModule (Module mod_name defss exports) = rw_top_level id defss
