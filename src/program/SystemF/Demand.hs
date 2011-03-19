@@ -30,8 +30,10 @@ import Type.Rename
 -- The dataflow domain
 
 class Dataflow a where
-  -- | The least element
+  -- | The least element.  This is the most specific possible value,
+  --   and the identity element of 'joinPar' and 'joinSeq'.
   bottom :: a
+
   -- | Join two elements derived from mutually exclusive code paths
   joinPar :: a -> a -> a
   -- | Join two elements derived from non-exclusive code paths.

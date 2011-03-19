@@ -358,7 +358,9 @@ dmdGroup defgroup do_body =
           (body, body_uses) = runDf do_body tenv
 
           -- Partition into strongly connected components
-          members = [((new_def, uses), varID $ definiendum new_def, uses)
+          members = [((new_def, uses),
+                      varID $ definiendum new_def,
+                      uses)
                     | (new_def, uses) <- defs_and_uses]
           new_defs_and_uses = partitionDefGroup members body_uses
           new_defs = map (fmap fst) new_defs_and_uses
@@ -372,7 +374,7 @@ dmdGroup defgroup do_body =
 --   members of the list.
 partitionDefGroup :: [(a, VarID, Dmds)]
                      -- ^ The members of the definition group, their IDs, and
-                     -- the IDs of the variables they reference
+                     --   the IDs of the variables they reference
                   -> Dmds -- ^ References to members of definition group
                   -> [DefGroup a] -- ^ The partitioned definition group
 partitionDefGroup members external_refs =
