@@ -1215,7 +1215,7 @@ lvDef :: Def Mem -> LF (Def Mem)
 lvDef def = mapMDefiniens lvInFun def
 
 lvExp :: ExpM -> LF ExpM
-lvExp expression = traceShow (pprExp expression) $
+lvExp expression =
   case fromExpM expression
   of VarE _ v -> do
        -- It's an error to see an unpacked local variable here.
