@@ -91,6 +91,40 @@ caseOfIndexedInt tenv scrutinee int_index mk_body =
   [mkAlt tenv (pyonBuiltin the_indexedInt) [TypM int_index] $
    \ [] [intvalue] -> mk_body intvalue]
 
+-- | Create an array where each array element is a function of its index only
+--
+--   If no return pointer is given, a writer function is generated.
+defineArray :: TypM             -- Array element type
+            -> TypM             -- Array size type index
+            -> MkExpM           -- Array size
+            -> MkExpM           -- Array element representation
+            -> Maybe MkExpM     -- Optional return pointer
+            -> (Var -> MkExpM -> MkExpM) -- Element writer code
+            -> MkExpM
+defineArray elt_type size_ix size elt_repr rptr writer =
+  varAppE (pyonBuiltin the_make_list)
+  [elt_type, size_ix]
+  ([size,
+    varAppE (pyonBuiltin the_referenced) [TypM array_type]
+    [lamE $ mkFun []
+     (\ [] -> return ([OutPT ::: array_type], SideEffectRT ::: array_type))
+     (\ [] [out_ptr] ->
+       varAppE (pyonBuiltin the_doall)
+       [size_ix, TypM array_type, elt_type]
+       [size,
+        lamE $ mkFun []
+        (\ [] -> return ([ValPT Nothing ::: intType],
+                         SideEffectRT ::: fromTypM elt_type))
+        (\ [] [index_var] ->
+          let out_expr =
+                varAppE (pyonBuiltin the_subscript_out) [size_ix, elt_type]
+                [elt_repr, varE out_ptr, varE index_var]
+          in writer index_var out_expr)])]] ++
+   maybeToList rptr)
+  where
+    array_type =
+      varApp (pyonBuiltin the_array) [fromTypM size_ix, fromTypM elt_type]
+
 intType = VarT (pyonBuiltin the_int)
 
 -------------------------------------------------------------------------------
@@ -208,26 +242,16 @@ rwBuildList tenv inf [elt_type] (elt_repr : stream : other_args)
 rwBuildList _ _ _ _ = return Nothing
 
 buildListDoall inf elt_type elt_repr other_args size count generator =
-  let array_type = varApp (pyonBuiltin the_array) [fromTypM size, fromTypM elt_type]
-  in varAppE (pyonBuiltin the_make_list)
-     [elt_type, size]
-     ([return count,
-       varAppE (pyonBuiltin the_referenced) [TypM array_type]
-       [lamE $ mkFun []
-        (\ [] -> return ([OutPT ::: array_type], SideEffectRT ::: array_type))
-        (\ [] [out_ptr] ->
-          varAppE (pyonBuiltin the_doall)
-          [size, TypM array_type, elt_type]
-          [return count,
-           lamE $ mkFun []
-           (\ [] -> return ([ValPT Nothing ::: intType],
-                            SideEffectRT ::: fromTypM elt_type))
-           (\ [] [index_var] ->
-             appE (generator (ExpM $ VarE defaultExpInfo index_var)) []
-             [varAppE (pyonBuiltin the_subscript_out) [size, elt_type]
-              [return elt_repr, varE out_ptr, varE index_var]])])]] ++
-      map return other_args)
+  let return_ptr =
+        case other_args
+        of [x] -> Just (return x)
+           []  -> Nothing
 
+      write_array index mk_dst =
+        appE (generator (ExpM $ VarE defaultExpInfo index)) [] [mk_dst]
+
+  in defineArray elt_type size
+     (return count) (return elt_repr) return_ptr write_array
 
 {- Disabled while we change types
 
