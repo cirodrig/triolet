@@ -347,8 +347,19 @@ rwZip4 _ _ _ _ = return Nothing
 
 rwMapStream :: RewriteRule
 rwMapStream tenv inf
-  [shape_type, elt1, elt2]
-  [repr1, repr2, transformer, producer]
+  ty_args@[shape_type, elt1, elt2]
+  args@[repr1, repr2, transformer, producer]
+  | Just s <- interpretStream2 (fromTypM shape_type) repr2 map_expr = do
+      encodeStream2 shape_type s
+  where
+    map_op = ExpM $ VarE inf (pyonBuiltin the_fun_map_Stream)
+    map_expr =
+      ExpM $ AppE inf map_op ty_args args
+              
+{- Obsoleted by the new interpretStream function
+rwMapStream tenv inf
+  ty_args@[shape_type, elt1, elt2]
+  args@[repr1, repr2, transformer, producer]
   | Just shape <- interpretStream repr1 producer =
     let new_shape =
           -- Fuse the transformer into the generator expression
@@ -370,7 +381,8 @@ rwMapStream tenv inf
                   let binder = localVarP tmpvar (fromTypM elt1) repr1
                       let_expr = ExpM $ LetE inf binder rhs body
                   return let_expr)}
-    in encodeStream shape_type new_shape 
+    in traceShow (text "rwMapStream NO" <+> pprType (shapeType $ sShape shape)) $ encodeStream shape_type new_shape
+-}
 
 rwMapStream _ _ _ _ = return Nothing
 
@@ -882,6 +894,15 @@ interpretStream2 shape_type repr expression =
                    return $ BindStream src_stream (param, body_stream)
                  _ -> Nothing
             _ -> Nothing
+       | op_var `isPyonBuiltin` the_fun_map_Stream ->
+         let [_, _, out_type] = ty_args
+         in case args
+            of [src_repr, out_repr, transformer, producer] ->
+                 case interpretStream2 shape_type src_repr producer
+                 of Just s ->
+                      Just $ mapStream out_type out_repr transformer s
+                    Nothing -> Nothing
+               _ -> Nothing
      _ -> case fromExpM expression
           of CaseE _ scr alts -> do
                alts' <- mapM (interpretStreamAlt shape_type repr) alts
@@ -896,6 +917,35 @@ interpretStream2 shape_type repr expression =
     -- A generator for the sequence [0, 1, 2, ...]
     counting_generator ix =
       varAppE (pyonBuiltin the_store) [TypM intType] [return ix]
+
+-- | Create an interpreted 'map' stream
+mapStream out_type out_repr transformer producer = transform producer
+  where
+    transform (GenerateStream shape ty repr gen) =
+      -- Fuse the transformer into the generator expression
+      let gen' ix =
+            lamE $ mkFun []
+            (\ [] -> return ([OutPT ::: out_type],
+                             SideEffectRT ::: out_type))
+             (\ [] [outvar] -> do
+                 tmpvar <- newAnonymousVar ObjectLevel
+                 -- Compute the input to 'map'
+                 rhs <- appE (gen ix) [] [varE tmpvar]
+                 -- Compute the output of 'map'
+                 body <- appE (return transformer) [] [varE tmpvar, varE outvar]
+                 let binder = localVarP tmpvar ty repr
+                     let_expr = ExpM $ LetE defaultExpInfo binder rhs body
+                 return let_expr)
+      in GenerateStream shape out_type out_repr gen'
+
+    transform (BindStream src (binder, body)) =
+      BindStream src (binder, transform body)
+
+    transform (CaseStream shp scr alts) =
+      CaseStream shp scr (map (map_alt transform) alts)
+        
+    map_alt f (AltS alt) =
+      AltS $ alt {altBody = f $ altBody alt}
 
 interpretStreamAlt :: Type -> ExpM -> AltM -> Maybe AltS
 interpretStreamAlt shape_type repr (AltM alt) = do
@@ -1091,11 +1141,12 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
 
        return $ ExpM $ CaseE defaultExpInfo scr alts'
          
-
 -- | Given a stream and the repr of a stream element, get its shape.
 --
 --   We may change the stream's type by ignoring functions that only
 --   affect the advertised stream shape.
+--
+--   TODO: Eliminate this function; call 'interpretStream2' instead.
 interpretStream :: ExpM -> ExpM -> Maybe InterpretedStream
 interpretStream repr expression =
   case unpackVarAppM expression
