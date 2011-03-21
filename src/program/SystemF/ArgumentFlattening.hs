@@ -232,9 +232,25 @@ unpacksToAValue (rrepr ::: _) wpat =
 --
 --   In some cases, the unpacked value needs to be assigned to a temporary 
 --   variable.  A temporary variable is included here for that purpose.
---   If the unwrapping is a 'LoadWP', then 
+--   If the unwrapping is a 'LoadWP', then the temporary variable from the
+--   'WrapPat'' object is used.
+--
+--   A @WrapRet a b c@ term should be constructed with 'mkWrapRet', which
+--   also does error checking.
 data WrapRet = WrapRet !PatM !Var !WrapPat'
              | NoWrapRet        -- ^ Function doesn't have a return parameter
+
+-- | Create a 'WrapRet' term, and check for errors
+mkWrapRet :: PatM -> WrapPat' -> AFMonad e WrapRet
+mkWrapRet pat@(MemVarP pat_var (OutPT ::: _) _) wp = do
+  -- If the wrapper is 'LoadWP', then use the return variable that has already
+  -- been created.  Otherwise create a new one.
+  retvar <- case wp
+            of LoadWP _ _ v -> return v
+               _ -> newClonedVar pat_var
+  return $ WrapRet pat retvar wp
+
+mkWrapRet _ _ = internalError "mkWrapRet: Invalid pattern"
 
 -- | True if the wrapper specification says not to change the function's
 --   return value.
@@ -242,22 +258,6 @@ isIdRet :: WrapRet -> Bool
 isIdRet NoWrapRet = True
 isIdRet (WrapRet _ _ (IdWP _)) = True
 isIdRet _ = False
-
-{-
-data WrapRet' =
-    -- | Return value is unchanged
-    IdWR
-
-    -- | Return value is stored into a temporary variable after returning.
-  | StoreWR !Repr ExpM
-    
-    -- | Fields of the return value are passed as an unboxed tuple.
-    --   Keep track of the original return data contructor so that it
-    --   can be reboxed.
-    --   Existential types are not allowed in the return data constructor.
-    --
-    --   The dictionary for this type is also saved.
-  | UnboxedWR !ExpM !Var [TypM] [WrapPat]-}
 
 -- | Representation of an object that should be deconstructed.
 --   If it is passed by reference, its representation dictionary is needed
@@ -732,13 +732,7 @@ unwrappedReturnType (WrapRet pat _ (DeadWP _)) =
 wrapRet :: PatM -> AFMonad e WrapRet
 wrapRet pat@(MemVarP pat_var (OutPT ::: pat_type) _) = do
   wrapper <- wrapPattern' Return pat Used
-
-  -- If the wrapper is 'LoadWP', then use the return variable that has already
-  -- been created.  Otherwise create a new one.
-  retvar <- case wrapper
-            of LoadWP _ _ v -> return v
-               _ -> newClonedVar pat_var
-  return $ WrapRet pat retvar wrapper
+  mkWrapRet pat wrapper
 
 wrapRet _ = internalError "wrapRet: Unexpected parameter representation"
 
@@ -1027,9 +1021,12 @@ wrapLocalPattern :: PatM -> AFMonad e (Maybe WrapRet)
 wrapLocalPattern (MemVarP {}) = return Nothing
 wrapLocalPattern (MemWildP {}) = return Nothing
 wrapLocalPattern pat@(LocalVarP var ty dict uses) = do
-  newvar <- newClonedVar var
-  wp <- wrapPattern' Local (memVarP var (ReadPT ::: ty)) (specificity uses)
-  return $ Just $ WrapRet pat newvar wp
+  -- Make a function parameter that binds the same data type as this local 
+  -- variable
+  let param = setPatMDmd (patMDmd pat) $ memVarP var (OutPT ::: ty)
+  wp <- wrapPattern' Local param (specificity uses)
+  wrap_ret <- mkWrapRet param wp
+  return $ Just wrap_ret
 
 -- | Get the pattern used to bind an unwrapped local variable.
 --   This should only be called on local variable that are being unwrapped.
