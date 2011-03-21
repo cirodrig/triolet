@@ -162,7 +162,7 @@ compilePyonToPyonAsm path text = do
   -- The first group of optimizations performs inlining to create bigger 
   -- functions, then floating and dead code elimination.  These steps 
   -- are primarily setup to improve the accuracy of the simplifier.
-  mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- SystemF.rewriteWithGeneralRules mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- SystemF.demandAnalysis mem_mod
 
@@ -173,13 +173,13 @@ compilePyonToPyonAsm path text = do
   -- including high-level transformations via rewriting.
   -- Currently there are inter-pass dependences that we
   -- stupidly resolve by running them lots of times.
-  mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- SystemF.rewriteWithGeneralRules mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- SystemF.demandAnalysis mem_mod
-  mem_mod <- iterateM (SystemF.rewriteLocalExpr >=>
+  mem_mod <- iterateM (SystemF.rewriteWithGeneralRules >=>
                        SystemF.floatModule >=>
                        SystemF.localDemandAnalysis) 7 mem_mod
-  mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- SystemF.rewriteWithSequentialRules mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- SystemF.demandAnalysis mem_mod
 
@@ -189,14 +189,14 @@ compilePyonToPyonAsm path text = do
   -- Argument flattening leads to more precise demand information,
   -- which makes local variable flattening more effective.
   mem_mod <- SystemF.flattenArguments mem_mod
-  mem_mod <- SystemF.rewriteLocalExpr mem_mod
+  mem_mod <- SystemF.rewriteWithSequentialRules mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- SystemF.demandAnalysis mem_mod
   mem_mod <- SystemF.flattenLocals mem_mod
   
   -- Re-run the simplifier to eliminate redundant code left behind by
   -- flattening
-  mem_mod <- iterateM (SystemF.rewriteLocalExpr >=>
+  mem_mod <- iterateM (SystemF.rewriteWithSequentialRules >=>
                        SystemF.floatModule >=>
                        SystemF.localDemandAnalysis) 4 mem_mod
 

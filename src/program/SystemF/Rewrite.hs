@@ -1,6 +1,10 @@
 
 module SystemF.Rewrite
-       (rewriteApp)
+       (RewriteRuleSet,
+        generalRewrites,
+        sequentializingRewrites,
+        combineRuleSets,
+        rewriteApp)
 where
 
 import Control.Monad
@@ -96,8 +100,17 @@ intType = VarT (pyonBuiltin the_int)
 type RewriteRule = TypeEnv -> ExpInfo -> [TypM] -> [ExpM]
                 -> FreshVarM (Maybe ExpM)
 
-rewriteRules :: Map.Map Var RewriteRule
-rewriteRules = Map.fromList table
+-- | A set of rewrite rules
+type RewriteRuleSet = Map.Map Var RewriteRule
+
+-- | Combine multiple rule sets.  Rule sets earlier in the list take precedence
+--   over later ones.
+combineRuleSets :: [RewriteRuleSet] -> RewriteRuleSet
+combineRuleSets = Map.unions
+
+-- | General-purpose rewrite rules that should always be applied
+generalRewrites :: RewriteRuleSet
+generalRewrites = Map.fromList table
   where
     table = [ (pyonBuiltin the_range, rwRange)
             , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
@@ -110,23 +123,32 @@ rewriteRules = Map.fromList table
             , (pyonBuiltin the_fun_zip_Stream, rwZipStream) 
             , (pyonBuiltin the_fun_zip3_Stream, rwZip3Stream)
             , (pyonBuiltin the_fun_zip4_Stream, rwZip4Stream)
-            {- Rewrites temporarily disabled while we change Stream types
-            , (pyonBuiltin the_oper_CAT_MAP, rwBindStream) -}
             , (pyonBuiltin the_histogram, rwHistogram)
-            , (pyonBuiltin the_histogramArray, rwHistogramArray)
             , (pyonBuiltin the_fun_reduce, rwReduce)
-            , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
             , (pyonBuiltin the_fun_reduce1, rwReduce1)
-            , (pyonBuiltin the_fun_reduce1_Stream, rwReduce1Stream)
+              {- Rewrites temporarily disabled while we change Stream types
+            , (pyonBuiltin the_oper_CAT_MAP, rwBindStream) -}
             , (pyonBuiltin the_for, rwFor)
+            ]
+
+-- | Rewrite rules that transform potentially parallel algorithms into
+--   sequential algorithms.  The sequential algorithms are more efficient.
+--   These rules should be applied after outer loops are parallelized.
+sequentializingRewrites :: RewriteRuleSet
+sequentializingRewrites = Map.fromList table
+  where
+    table = [ (pyonBuiltin the_histogramArray, rwHistogramArray)
+            , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
+            , (pyonBuiltin the_fun_reduce1_Stream, rwReduce1Stream)
             ]
 
 -- | Attempt to rewrite an application term.
 --   If it can be rewritten, return the new expression.
-rewriteApp :: TypeEnv -> ExpInfo -> Var -> [TypM] -> [ExpM]
+rewriteApp :: RewriteRuleSet
+           -> TypeEnv -> ExpInfo -> Var -> [TypM] -> [ExpM]
            -> FreshVarM (Maybe ExpM)
-rewriteApp tenv inf op_var ty_args args =
-  case Map.lookup op_var rewriteRules
+rewriteApp ruleset tenv inf op_var ty_args args =
+  case Map.lookup op_var ruleset
   of Just rw -> trace_rewrite $ rw tenv inf ty_args args
      Nothing -> return Nothing
   where

@@ -9,7 +9,9 @@ and some local expression reordering.
 -}
 
 {-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types #-}
-module SystemF.Simplify (rewriteLocalExpr)
+module SystemF.Simplify (rewriteLocalExpr,
+                         rewriteWithGeneralRules,
+                         rewriteWithSequentialRules)
 where
 
 import Prelude hiding(mapM)
@@ -53,6 +55,9 @@ import GlobalVar
 data LREnv =
   LREnv
   { lrIdSupply :: {-# UNPACK #-}!(Supply VarID)
+    
+    -- | Active rewrite rules
+  , lrRewriteRules :: !RewriteRuleSet
 
     -- | Information about the values stored in variables
   , lrKnownValues :: IntMap.IntMap KnownValue
@@ -94,6 +99,9 @@ instance ReprDictMonad LR where
 liftFreshVarM :: FreshVarM a -> LR a
 liftFreshVarM m = LR $ \env -> do
   runFreshVarM (lrIdSupply env) m
+
+getRewriteRules :: LR RewriteRuleSet
+getRewriteRules = LR $ \env -> return (lrRewriteRules env)
 
 lookupKnownValue :: Var -> LR MaybeValue
 lookupKnownValue v = LR $ \env ->
@@ -637,10 +645,11 @@ rwAppWithOperator inf op' op_val ty_args args =
 
           Just (VarValue _ op_var) -> do
             tenv <- getTypeEnv
+            ruleset <- getRewriteRules
                 
             -- Try to rewrite this application
             rewritten <- liftFreshVarM $
-                         rewriteApp tenv inf op_var ty_args args
+                         rewriteApp ruleset tenv inf op_var ty_args args
             case rewritten of 
               Just new_expr -> rwExp new_expr
               Nothing ->
@@ -1110,7 +1119,7 @@ rwAlt scr m_values (AltM (Alt con tyArgs exTypes params body)) = do
 labelParameter param = 
   case param
   of MemVarP {} -> return param
-     LocalVarP {} -> return param
+     LocalVarP {} -> internalError "labelParameter: Unexpected pattern"
      MemWildP pty -> do
        pvar <- newAnonymousVar ObjectLevel
        return (memVarP pvar pty)
@@ -1164,13 +1173,14 @@ rwModule (Module mod_name defss exports) = rw_top_level id defss
       exports' <- mapM rwExport exports
       return $ Module mod_name (defss' []) exports'
 
-rewriteLocalExpr :: Module Mem -> IO (Module Mem)
-rewriteLocalExpr mod = do
+rewriteLocalExpr :: RewriteRuleSet -> Module Mem -> IO (Module Mem)
+rewriteLocalExpr ruleset mod = do
   withTheNewVarIdentSupply $ \var_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
     (denv, ienv) <- runFreshVarM var_supply createDictEnv
     let global_known_values = initializeKnownValues tenv
     let env = LREnv { lrIdSupply = var_supply
+                    , lrRewriteRules = ruleset
                     , lrKnownValues = global_known_values
                     , lrTypeEnv = tenv
                     , lrDictEnv = denv
@@ -1178,4 +1188,11 @@ rewriteLocalExpr mod = do
                     }
     runLR (rwModule mod) env
 
+rewriteWithGeneralRules, rewriteWithSequentialRules
+  :: Module Mem -> IO (Module Mem)
 
+rewriteWithGeneralRules = rewriteLocalExpr generalRewrites
+
+rewriteWithSequentialRules = rewriteLocalExpr rules 
+  where
+    rules = combineRuleSets [generalRewrites, sequentializingRewrites]
