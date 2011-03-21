@@ -184,9 +184,11 @@ pprLFunDef (Def v f) =
 -- Scanning to identify LCPS candidates.  A scan computes return continuations
 -- of local functions.
 
--- | The set of local functions.  Only local functions are considered for
---   the local CPS transformation; other variables are ignored.
-type Relevant = IntSet.IntSet
+-- | The set of local functions, and their arities.
+--   Only local functions are considered for the local CPS transformation;
+--   other variables are ignored.  To be CPS-transformed, a function has to
+--   be called with the right number of arguments.
+type Relevant = IntMap.IntMap Int
 
 -- | A scan to identify LCPS candidates.
 --   The parameters are the set of local functions and the current statement's 
@@ -197,12 +199,12 @@ instance Monoid Scan where
   mempty = Scan (\_ _ -> bottom)
   mappend (Scan f1) (Scan f2) = Scan (\r c -> f1 r c `join` f2 r c)
 
-addRelevant :: Var -> Scan -> Scan
-addRelevant v (Scan f) =
-  Scan $ \r -> f (IntSet.insert (fromIdent $ varID v) r)
+addRelevant :: Var -> Int -> Scan -> Scan
+addRelevant v a (Scan f) =
+  Scan $ \r -> f (IntMap.insert (fromIdent $ varID v) a r)
 
-addRelevants :: [Var] -> Scan -> Scan
-addRelevants vs s = foldr addRelevant s vs
+addRelevants :: [(Var, Int)] -> Scan -> Scan
+addRelevants vs s = foldr (uncurry addRelevant) s vs
 
 -- | Set the return continuation of the scanned code.  The return continuation
 --   is what executes after the scanned code finishes executing.
@@ -214,19 +216,25 @@ setCont rc (Scan f) = Scan (\r _ -> f r rc)
 --   If the variable is not a candidate for transformation, nothing happens.
 tellRCont :: Var -> RCont -> Scan
 tellRCont v c = Scan $ \relevant _ ->
-  if fromIdent (varID v) `IntSet.member` relevant
+  if fromIdent (varID v) `IntMap.member` relevant
   then singletonRConts v c
   else IntMap.empty
 
--- | Record the current return continuation as the
---   variable's return continuation.
+-- | The variable was called with some arguments.
 --
 --   If the variable is not a candidate for transformation, nothing happens.
-tellCurrentRCont :: Var -> Scan
-tellCurrentRCont v = Scan $ \relevant rc ->
-  if fromIdent (varID v) `IntSet.member` relevant
-  then singletonRConts v rc
-  else IntMap.empty
+--
+--   If it's a saturated call of a known function, then record the current
+--   return continuation as the variable's return continuation.
+--
+--   If it's an under- or oversaturated call, then the function's return
+--   continuation becomes unknown.
+tellCurrentRCont :: Var -> Int -> Scan
+tellCurrentRCont v n_args = Scan $ \relevant rc ->
+  case IntMap.lookup (fromIdent $ varID v) relevant
+  of Nothing -> IntMap.empty
+     Just arity | arity == n_args -> singletonRConts v rc
+                | otherwise       -> singletonRConts v Top
 
 scanValue :: Val -> Scan
 scanValue value =
@@ -244,7 +252,7 @@ scanAtom atom =
   of ValA vs -> scanValues vs
      CallA _ (VarV callee) vs ->
        -- The callee is called with the current return continuation
-       tellCurrentRCont callee `mappend`
+       tellCurrentRCont callee (length vs) `mappend`
        scanValues vs
      CallA _ v vs ->
        scanValues (v:vs)
@@ -263,7 +271,11 @@ scanDefGroup group scan_body = Scan $ \relevant rcont ->
                   (lookupCont v body_conts) | Def v f <- groupMembers group]
   in join body_conts fun_conts
   where
-    in_scope scan = addRelevants (map definiendum $ groupMembers group) scan
+    -- Names and arities of functions in the definition group
+    arities :: [(Var, Int)]
+    arities = [(definiendum def, length $ funParams $ definiens def)
+              | def <- groupMembers group]
+    in_scope scan = addRelevants arities scan
     scan_fun f = scanStm $ funBody f
 
 scanStm :: LStm -> Scan
@@ -500,7 +512,7 @@ localContinuationPassingConversion (Def global_name global_fun) = do
   -- Setup and analysis
   annotated_fun <- annotateFun global_fun
   let return_continuations =
-        runScan (scanStm $ funBody annotated_fun) IntSet.empty Top
+        runScan (scanStm $ funBody annotated_fun) IntMap.empty Top
   
   -- Transformation
   let transform_ctx =
