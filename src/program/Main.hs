@@ -30,6 +30,7 @@ import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.TypecheckSF
 import qualified SystemF.TypecheckMem
 import qualified SystemF.Simplify as SystemF
+import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
@@ -178,7 +179,15 @@ compilePyonToPyonAsm path text = do
   mem_mod <- SystemF.demandAnalysis mem_mod
   mem_mod <- iterateM (SystemF.rewriteWithGeneralRules >=>
                        SystemF.floatModule >=>
-                       SystemF.localDemandAnalysis) 7 mem_mod
+                       SystemF.localDemandAnalysis) 6 mem_mod
+
+  -- Parallelize loops, then sequentialize the remaining loops
+  putStrLn "Loop rewrite"
+  print $ SystemF.PrintMemoryIR.pprModule mem_mod
+  mem_mod <- SystemF.parallelLoopRewrite mem_mod
+  mem_mod <- SystemF.rewriteWithGeneralRules mem_mod
+  mem_mod <- SystemF.floatModule mem_mod
+  mem_mod <- SystemF.demandAnalysis mem_mod
   mem_mod <- SystemF.rewriteWithSequentialRules mem_mod
   mem_mod <- SystemF.floatModule mem_mod
   mem_mod <- SystemF.demandAnalysis mem_mod

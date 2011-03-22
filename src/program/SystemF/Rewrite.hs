@@ -2,6 +2,7 @@
 module SystemF.Rewrite
        (RewriteRuleSet,
         generalRewrites,
+        parallelizingRewrites,
         sequentializingRewrites,
         combineRuleSets,
         rewriteApp)
@@ -166,6 +167,14 @@ generalRewrites = Map.fromList table
             ]
 
 -- | Rewrite rules that transform potentially parallel algorithms into
+--   explicitly parallel algorithms.
+parallelizingRewrites :: RewriteRuleSet
+parallelizingRewrites = Map.fromList table
+  where
+    table = [ (pyonBuiltin the_fun_reduce_Stream, rwParallelReduceStream)
+            ]
+
+-- | Rewrite rules that transform potentially parallel algorithms into
 --   sequential algorithms.  The sequential algorithms are more efficient.
 --   These rules should be applied after outer loops are parallelized.
 sequentializingRewrites :: RewriteRuleSet
@@ -178,6 +187,9 @@ sequentializingRewrites = Map.fromList table
 
 -- | Attempt to rewrite an application term.
 --   If it can be rewritten, return the new expression.
+--
+--   The type environment is only used for looking up data types and
+--   constructors.
 rewriteApp :: RewriteRuleSet
            -> TypeEnv -> ExpInfo -> Var -> [TypM] -> [ExpM]
            -> FreshVarM (Maybe ExpM)
@@ -552,6 +564,68 @@ rwReduce1 tenv inf
       app_other_args)
 
 rwReduce1 _ _ _ _ = return Nothing
+
+-- | Parallelize a reduction.
+--   This rewrite is nonterminating, so we must limit how often it's performed.
+rwParallelReduceStream :: RewriteRule
+rwParallelReduceStream tenv inf
+  [shape_type, elt]
+  (elt_repr : reducer : init : stream : other_args) =
+  case interpretStream2 (fromTypM shape_type) elt_repr stream
+  of Just s -> do
+       -- Create a block-wise version of the stream
+       size_var <- newAnonymousVar TypeLevel
+       count_var <- newAnonymousVar ObjectLevel
+       base_var <- newAnonymousVar ObjectLevel
+       
+       trace "rwParallelReduceStream" $ case blockStream size_var count_var base_var s of
+         Nothing -> return Nothing
+         Just (bs, bs_size, bs_count) -> do
+           -- > blocked_reduce elt bs_size elt_repr bs_count 0 reducer init
+           -- >   (\ix ct b -> reduceStream list_shape elt elt_repr
+           -- >                reducer init (asListShape bs))
+
+           -- Create the worker function, which processes one block
+           worker_stream <-
+             encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
+           worker_retvar <- newAnonymousVar ObjectLevel
+           case worker_stream of
+             Nothing -> return Nothing
+             Just ws -> do
+               worker_body <-
+                 varAppE (pyonBuiltin the_fun_reduce_Stream)
+                 [TypM $ VarT (pyonBuiltin the_list), elt]
+                 [return elt_repr,
+                  return reducer,
+                  return init,
+                  return ws,
+                  varE worker_retvar]
+               
+               let param1 = memVarP count_var $
+                            ValPT Nothing :::
+                            varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
+                   param2 = memVarP base_var (ValPT Nothing ::: intType)
+                   param3 = memVarP worker_retvar (OutPT ::: fromTypM elt)
+                   worker_fn =
+                     FunM $
+                     Fun { funInfo = inf
+                         , funTyParams = [TyPatM size_var intindexT]
+                         , funParams = [param1, param2, param3]
+                         , funReturn = RetM $ SideEffectRT ::: fromTypM elt
+                         , funBody = worker_body}
+                     
+               -- Create the blocked_reduce call
+               call <-
+                 varAppE (pyonBuiltin the_blocked_reduce) [elt, bs_size]
+                 (return elt_repr : return bs_count : litE (IntL 0 intType) :
+                  return reducer : return init :
+                  return (ExpM $ LamE defaultExpInfo worker_fn) :
+                  map return other_args)
+               return $ Just call
+
+     Nothing -> return Nothing
+
+rwParallelReduce _ _ _ _ = return Nothing
 
 rwReduceStream :: RewriteRule
 rwReduceStream tenv inf [shape_type, element]
@@ -987,7 +1061,59 @@ encodeStream2 expected_shape stream = do
     s_shape = sexpShape stream
     elt_type = sexpElementType stream
     elt_repr = sexpElementRepr stream
-    
+
+-- | Convert a stream over an integer domain into a stream over
+--   an arbitrary, contiguous subset of the integer domain.
+--   Return the new stream and the size (type index and value)
+--   of the original domain.
+--   The variables are the size of the subset (a type index),
+--   the size of the subset (an indexed int), and the first element of the
+--   subset (an ordinary int).
+--
+--   The returned stream will have an array shape.
+blockStream :: Var -> Var -> Var -> ExpS -> Maybe (ExpS, TypM, ExpM)
+blockStream size_var count_var base_var stream =
+  case stream
+  of GenerateStream (Array1DShape orig_size orig_count) ty repr gen ->
+       -- We don't generate values starting from zero, but rather starting
+       -- from the given base.  Add the base to the index.
+       let gen' ix = do
+             ix' <- varAppE (pyonBuiltin the_AdditiveDict_int_add) []
+                    [return ix, varE base_var]
+             gen ix'
+       
+           shape = Array1DShape (TypM (VarT size_var))
+                   (ExpM $ VarE defaultExpInfo count_var)
+       in return (GenerateStream shape ty repr gen', orig_size, orig_count)
+
+     BindStream src tf -> do
+       -- block the source stream
+       (src', orig_size, orig_count) <-
+         blockStream size_var count_var base_var src
+       return (BindStream src' tf, orig_size, orig_count)
+
+     CaseStream _ scr [AltS alt] -> do
+       -- block the single alternative
+       (body, orig_size, orig_count) <-
+         blockStream size_var count_var base_var $ altBody alt
+       let alt' = alt {altBody = body}
+           shp = sexpShape body
+       return (CaseStream shp scr [AltS alt'], orig_size, orig_count)
+     
+     CaseStream (Array1DShape orig_size orig_count) scr alts -> do
+       -- Block each branch of the case statement.  All branches must 
+       -- have the same shape. 
+       alts' <- forM alts $ \ (AltS alt) -> do 
+         (body, _, _) <- blockStream size_var count_var base_var $ altBody alt
+         return $ AltS $ alt {altBody = body}
+       let shp = Array1DShape (TypM (VarT size_var))
+                 (ExpM $ VarE defaultExpInfo count_var)
+       return (CaseStream shp scr alts', orig_size, orig_count)
+
+     _ ->
+       -- The stream's shape is unknown, so we can't decompose it into blocks
+       Nothing
+
 -- | Zip together a list of two or more streams
 zipStreams2 :: [ExpS] -> ExpS
 zipStreams2 [] = internalError "zipStreams: Need at least one stream"

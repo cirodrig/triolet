@@ -5,6 +5,7 @@ module pyon.internal.prim;
 #include "memory_py.h"
 #include "apply_py.h"
 #include "prim.h"
+#include "debug.h"
 #include "new_pyasm_records.h"
 
 function inline storeBox (unit _, owned arg, pointer dst) -> () {
@@ -172,4 +173,69 @@ function inline for
   () = () call acc_finalize (final_acc);
   () = () primcall pyon_dealloc (accs);
   ();
+};
+
+// A parallel reduction.  The iteration space is partitioned at run time
+// and 'generator' is called on a single member of the iteration space.
+function inline blocked_reduce
+  (unit _, unit _, owned acc_repr, IndexedInt size, int first,
+   owned reducer, pointer init, owned generator, pointer ret) -> ()
+{
+  IndexedInt {count} = size;
+  acc_size = acc_repr @! PassConv.size;
+
+  letrec {
+    // Allocate memory for an accumulator value
+    function allocate_mem (int _) -> pointer {
+      pointer primcall pyon_alloc (acc_size);
+    };
+
+    // Get a copy of the initial value
+    function get_initial_value (pointer ret) -> () {
+      () call (acc_repr @! PassConv.copy) (init, ret);
+    };
+
+    // Given the current accumulator value and the range to process,
+    // compute and accumulate the reduction value over this range.
+    function accumulate_range (pointer old_value, int lcount, int lfirst, pointer ret) -> () {
+      // Reduce over this range
+      local_value = pointer primcall pyon_alloc (acc_repr @! PassConv.size);
+      lsize = IndexedInt {lcount};
+      () = () call generator (nil, lsize, lfirst, local_value);
+
+      // Accumulate into output
+      () = () call reducer (old_value, local_value, ret);
+
+      () = () call (acc_repr @! PassConv.finalize) (local_value);
+      () = () call (acc_repr @! PassConv.finalize) (old_value);
+      ();
+    }
+  };
+
+  // Main computation is written in C++
+  () primcall pyon_C_blocked_reduce(allocate_mem,
+                                    get_initial_value,
+                                    accumulate_range,
+                                    reducer,
+                                    count, first, ret);
+};
+
+// Called from the C side of 'blocked_reduce'
+procedure blocked_reduce_allocate (owned f) -> pointer {
+  pointer call f (int 0);
+};
+
+// Called from the C side of 'blocked_reduce'
+procedure blocked_reduce_initial_value (owned f, pointer ret) -> () {
+  () call f (ret);
+};
+
+procedure blocked_reduce_accumulate_range
+  (owned f, pointer init, int count, int first, pointer ret) -> () {
+  () call f (init, count, first, ret);
+};
+
+procedure blocked_reduce_reducer
+  (owned f, pointer x, pointer y, pointer ret) -> () {
+  () call f (x, y, ret);
 };

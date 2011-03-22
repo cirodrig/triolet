@@ -99,6 +99,7 @@ Executable pyon
     SystemF.EtaReduce
     SystemF.Floating
     SystemF.KnownValue
+    SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2
     SystemF.Lowering.Marshaling
     SystemF.Lowering.Lowering2

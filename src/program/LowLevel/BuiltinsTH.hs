@@ -263,6 +263,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_doall) |])
   , (PyonName module_prim "for",
      Right [| pyonBuiltin (SystemF.the_for) |])
+  , (PyonName module_prim "blocked_reduce",
+     Right [| pyonBuiltin (SystemF.the_blocked_reduce) |])
 
     -- Functions that are replaced by primitive operations
   , (PyonName module_prim "storeBox",

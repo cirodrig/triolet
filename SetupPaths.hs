@@ -58,7 +58,7 @@ cabalMakeFile = "cabal.mk"
 rtsCSourceFiles = ["apply_data.c", "memory.c", "debug.c"]
 
 -- | C++ Source files used in RTS
-rtsCxxSourceFiles = []
+rtsCxxSourceFiles = ["par_loops.cc"]
 
 -- | Pyon-asm files used in RTS
 rtsPyAsmFiles = ["apply_new.pyasm",

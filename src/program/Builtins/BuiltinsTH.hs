@@ -248,6 +248,7 @@ pyonBuiltinVariableNames =
   , "subscript_out"
   , "doall"
   , "for"
+  , "blocked_reduce"
   , "createHistogram"
     
   , "emptyEffTok"

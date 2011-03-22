@@ -11,6 +11,7 @@ and some local expression reordering.
 {-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types #-}
 module SystemF.Simplify (rewriteLocalExpr,
                          rewriteWithGeneralRules,
+                         rewriteWithParallelRules,
                          rewriteWithSequentialRules)
 where
 
@@ -1188,10 +1189,14 @@ rewriteLocalExpr ruleset mod = do
                     }
     runLR (rwModule mod) env
 
-rewriteWithGeneralRules, rewriteWithSequentialRules
+rewriteWithGeneralRules, rewriteWithParallelRules, rewriteWithSequentialRules
   :: Module Mem -> IO (Module Mem)
 
 rewriteWithGeneralRules = rewriteLocalExpr generalRewrites
+
+rewriteWithParallelRules = rewriteLocalExpr rules 
+  where
+    rules = combineRuleSets [generalRewrites, parallelizingRewrites]
 
 rewriteWithSequentialRules = rewriteLocalExpr rules 
   where

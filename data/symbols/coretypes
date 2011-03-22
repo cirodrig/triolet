@@ -829,3 +829,16 @@ for : (val n : intindex)
    -> read acc
    -> box (val int -> read acc -> write acc)
    -> write acc;
+
+-- Blocked parallel reduction
+blocked_reduce :
+    (val acc : pure)
+ -> (val n : intindex)
+ -> box Repr acc
+ -> val IndexedInt n		-- Size of range
+ -> val int			-- First member of range
+ -> box (read acc -> read acc -> write acc) -- Reducer
+ -> read acc			-- Initial value
+ -> box ((val n : intindex) -> val IndexedInt n -> val int -> write acc)
+    -- ^ Generate value given range
+ -> write acc;

@@ -10,6 +10,7 @@ module Type.Var
         runFreshVarM)
 where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans
 import Text.PrettyPrint.HughesPJ
@@ -92,6 +93,10 @@ runFreshVarM supply (FreshVarM f) = f supply
 
 instance Functor FreshVarM where
   fmap f (FreshVarM g) = FreshVarM (\env -> fmap f (g env))
+
+instance Applicative FreshVarM where
+  pure = return
+  (<*>) = ap
 
 instance Monad FreshVarM where
   return x = FreshVarM (\_ -> return x)
