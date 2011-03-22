@@ -33,11 +33,13 @@ data ExtraConfigFlags =
     --   target code.  These directories are found by querying the
     --   C++ compiler.
   , configCxxLibDirs :: [FilePath]
+    -- | Whether TBB is enabled
+  , configTBB :: Bool
   }
   deriving (Read, Show)
 
 defaultExtraConfigFlags :: ExtraConfigFlags
-defaultExtraConfigFlags = ExtraConfigFlags [] [] []
+defaultExtraConfigFlags = ExtraConfigFlags [] [] [] True
 
 -- Write custom configure information to a file
 writeExtraConfigFile :: ExtraConfigFlags -> IO ()

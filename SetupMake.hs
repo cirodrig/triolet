@@ -283,10 +283,15 @@ pyonGhcPathFlags exe lbi = o_flags ++ i_flags
     i_flags = ["-i" ++ path | path <- pyonBuildDir lbi : pyonSearchPaths lbi exe]
 
 -- | Target-specific compilation flags for C, C++, and pyasm code. 
-targetCompileFlags econfig = target_paths
+targetCompileFlags econfig = target_paths ++ target_tbb
   where
     target_paths =
       ["-I" ++ path | path <- configTargetIncludeDirs econfig]
+
+    target_tbb =
+      if configTBB econfig
+      then ["-DUSE_TBB"]   
+      else []
 
 -- | Flags for compiling RTS C/C++ files
 rtsCCompileFlags is_cxx lbi econfig =
@@ -305,10 +310,15 @@ rtsCCompileFlags is_cxx lbi econfig =
       else ["-Werror", "-Wimplicit-function-declaration", "-Wimplicit-int"]
 
 -- | Flags for compiling pyasm files.
-rtsPyasmCompileFlags lbi = rts_include_paths
+rtsPyasmCompileFlags lbi econfig = rts_include_paths ++ rts_tbb
   where
     rts_include_paths = ["-I" ++ path | path <- rtsSearchPaths lbi]
     
+    rts_tbb =
+      if configTBB econfig
+      then ["-DUSE_TBB"]   
+      else []
+
 {-
 targetCompileDefines = word_size ++ arch
   where
@@ -326,7 +336,15 @@ targetCompileDefines = word_size ++ arch
 targetLinkFlags econfig = target_paths
   where
     target_paths =
-      ["-L" ++ path | path <- configTargetLibDirs econfig ++ configCxxLibDirs econfig]
+      ["-L" ++ path | path <- configTargetLibDirs econfig ++
+                              configCxxLibDirs econfig]
+
+targetLibs econfig = target_tbb ++ ["-lgc", "-lc", "-lm", "-lstdc++"]
+  where
+    target_tbb =
+      if configTBB econfig
+      then ["-ltbb"]
+      else []
 
 optimizationFlags lbi = prof_flag ++ opt_flag ++ suffixes
   where
@@ -430,6 +448,7 @@ generateVariables econfig exe lbi pyon_rules rts_rules data_rules
          , ("INCLUDEDIRS", "")
          , ("LIBDIRS", "")
          , ("LIBS", "")
+         , ("TARGET_LIBS", intercalate " " $ targetLibs econfig)
 
            -- executables
          , ("CC", cc_path)
@@ -443,7 +462,7 @@ generateVariables econfig exe lbi pyon_rules rts_rules data_rules
          -- , ("CXXFLAGS", intercalate " " cc_32b_flag)
          , ("RTS_CXX_C_OPTS", intercalate " " (rtsCCompileFlags True lbi econfig))
          -- , ("LFLAGS", intercalate " " (targetLdLinkFlags econfig))
-         , ("RTS_PYASM_C_OPTS", intercalate " " (rtsPyasmCompileFlags lbi))
+         , ("RTS_PYASM_C_OPTS", intercalate " " (rtsPyasmCompileFlags lbi econfig))
          , ("RTS_LINK_OPTS", intercalate " " (targetLinkFlags econfig))
            -- flags: pyon program
          , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts econfig exe (lbi {withProfExe = False}))

@@ -28,7 +28,7 @@ import Distribution.Simple.Configure
 import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.PreProcess
 import Distribution.Simple.Program
-import Distribution.Simple.Setup
+import Distribution.Simple.Setup hiding(boolOpt)
 import Distribution.Simple.Utils
 import Distribution.Text
 import Distribution.Verbosity
@@ -282,7 +282,7 @@ hooks = simpleUserHooks
 
 customConfigureCommand progs =
   let stdcmd = configureCommand progs -- The command provided by Cabal
-      custom_options _ = [include_option, lib_option]
+      custom_options _ = [include_option, lib_option, tbb_option]
       options mode =
         map (liftOption configStdFlags setConfigStdFlags)
         (commandOptions stdcmd mode) ++
@@ -298,7 +298,15 @@ customConfigureCommand progs =
      default_flags
      options
   where
-    include_option, lib_option :: OptionField CustomConfigFlags
+    include_option, lib_option, tbb_option :: OptionField CustomConfigFlags
+    tbb_option =
+      option [] ["tbb"]
+      "parallel execution using the Threading Building Blocks library"
+      get_tbb set_tbb (boolOpt return id [] [])
+    get_tbb = configTBB . configExtraFlags
+    set_tbb val flags = modifyConfigExtraFlags flags $ \flags2 ->
+      flags2 {configTBB = val}
+
     include_option =
       option [] ["extra-target-include-dirs"]
       "An additional include directory to use when compiling pyon code"

@@ -38,7 +38,7 @@ $(PYON_TARGET) : $(PYON_OBJECT_FILES)
 $(RTS_TARGET) : $(RTS_OBJECT_FILES)
 	mkdir -p $(dir $(RTS_TARGET))
 	$(LINKSHARED) $(RTS_LINK_OPTS) \
-		-g $(RTS_OBJECT_FILES) -o $(RTS_TARGET) -lc -lgc -lm -lstdc++
+		-g $(RTS_OBJECT_FILES) -o $(RTS_TARGET) $(TARGET_LIBS)
 
 # Move the library into the data directory
 $(DATA_BUILD_DIR)/libpyonrts.so : $(RTS_TARGET)
