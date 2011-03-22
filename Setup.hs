@@ -41,6 +41,38 @@ makeProgram = simpleProgram "make"
 makedependProgram = simpleProgram "makedepend"
 gxxProgram = simpleProgram "g++"
 
+-- | Given the output string produced by @g++ -print-search-dirs@,
+--   extract a list of library search paths.
+--
+--   Die with an error message if parsing fails.
+extractGxxLibraryPaths :: Verbosity -> String -> IO [FilePath]
+extractGxxLibraryPaths verb search_dirs =
+  -- Find the "libraries:" line of the output
+  case find ("libraries:" `isPrefixOf`) $ lines search_dirs
+  of Just line ->
+       case break ('=' ==) line
+       of (_, '=':fields) -> filter_paths $ split fields
+          _ -> failed
+     _ -> failed
+  where
+    failed = die "Could not parse output of 'g++ -print-search-paths'"
+
+    -- Split a colon-separated list of file names
+    split fs =
+      case break (':' ==) fs
+      of ([]  , [])        -> []
+         (path, ':' : fs') -> path : split fs'
+         (path, [])        -> [path]
+
+    -- Discard nonexistent file names
+    filter_paths paths = filterM directory_exists paths
+      where
+        directory_exists path = do
+          e <- doesDirectoryExist path
+          when (not e) $
+            info verb $ "Dropping non-existent C++ search path " ++ path
+          return e
+
 -- Remove a file, but recover on error
 lenientRemoveFile verb f = removeFile f `catch` check_err 
   where
@@ -290,8 +322,18 @@ customConfigureCommand progs =
 customConfigureAction hooks custom_flags args = do
   configureAction hooks (configStdFlags custom_flags) args
   
+  let verb = fromFlagOrDefault normal $
+             configVerbosity $ configStdFlags custom_flags
+
+  -- Query search paths from g++
+  search_paths <- rawSystemStdout verb "g++" ["-print-search-dirs"]
+  lib_paths <- extractGxxLibraryPaths verb search_paths
+  let custom_flags' =
+        modifyConfigExtraFlags custom_flags $
+        \f -> f {configCxxLibDirs = lib_paths}
+
   -- Save the GC install prefix to a file
-  writeExtraConfigFile (configExtraFlags custom_flags)
+  writeExtraConfigFile (configExtraFlags custom_flags')
 
 -------------------------------------------------------------------------------
 -- The following code is copied from Distribution.Simple.  The only difference

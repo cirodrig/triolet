@@ -326,7 +326,7 @@ targetCompileDefines = word_size ++ arch
 targetLinkFlags econfig = target_paths
   where
     target_paths =
-      ["-L" ++ path | path <- configTargetLibDirs econfig]
+      ["-L" ++ path | path <- configTargetLibDirs econfig ++ configCxxLibDirs econfig]
 
 optimizationFlags lbi = prof_flag ++ opt_flag ++ suffixes
   where

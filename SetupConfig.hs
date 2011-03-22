@@ -29,11 +29,15 @@ data ExtraConfigFlags =
     configTargetIncludeDirs :: [FilePath]
     -- | Library directories to use when compiling target code
   , configTargetLibDirs :: [FilePath]
+    -- | Compiler-specific library directories to use when compiling
+    --   target code.  These directories are found by querying the
+    --   C++ compiler.
+  , configCxxLibDirs :: [FilePath]
   }
   deriving (Read, Show)
 
 defaultExtraConfigFlags :: ExtraConfigFlags
-defaultExtraConfigFlags = ExtraConfigFlags [] []
+defaultExtraConfigFlags = ExtraConfigFlags [] [] []
 
 -- Write custom configure information to a file
 writeExtraConfigFile :: ExtraConfigFlags -> IO ()
