@@ -12,6 +12,7 @@ extern "C" {
 #ifdef USE_TBB
 # include "tbb/tbb_stddef.h"
 # include "tbb/blocked_range.h"
+# include "tbb/parallel_for.h"
 # include "tbb/parallel_reduce.h"
 #endif
 
@@ -154,6 +155,57 @@ pyon_C_blocked_reduce(void *allocate_fn,
 
   // Copy result
   blocked_reduce_copy(copy_fn, body.value, ret);
+}
+
+#endif	// USE_TBB
+
+/*****************************************************************************/
+/* Parallelized doall */
+
+/* Functions written in low-level pyon */
+extern "C" void
+blocked_doall_worker(void *worker_fn, PyonInt count, PyonInt first);
+
+/* Function exported to pyon */
+extern "C" void
+pyon_C_blocked_doall(void *worker_fn,
+		     PyonInt count,
+		     PyonInt first);
+
+#ifndef USE_TBB
+
+// Sequential implementation: do everything in one thread
+extern "C" void
+pyon_C_blocked_doall(void *worker_fn,
+		     PyonInt count,
+		     PyonInt first)
+{
+  blocked_doall_worker(worker_fn, count, first);
+}
+
+#else  // USE_TBB
+
+// Parallel loop partitioned using TBB
+
+struct BlockedDoer {
+  void *worker_fn;
+
+  BlockedDoer(void *_worker) : worker_fn(_worker) {}
+
+  void operator()(blocked_range<int> &range) const {
+    int first = range.begin();
+    int count = range.end() - first;
+    blocked_doall_worker(worker_fn, count, first);
+  }
+};
+
+extern "C" void
+pyon_C_blocked_doall(void *worker_fn,
+		     PyonInt count,
+		     PyonInt first)
+{
+  parallel_for(blocked_range<int>(first, first + count),
+	       BlockedDoer(worker_fn));
 }
 
 #endif	// USE_TBB

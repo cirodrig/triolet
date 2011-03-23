@@ -244,3 +244,14 @@ procedure blocked_reduce_reducer
   (owned f, pointer x, pointer y, pointer ret) -> () {
   () call f (x, y, ret);
 };
+
+function inline blocked_doall
+  (unit _, unit _, unit _, IndexedInt size, int first, owned worker) -> () {
+  IndexedInt {count} = size;
+
+  () primcall pyon_C_blocked_doall (worker, count, first);
+};
+
+procedure blocked_doall_worker (owned f, int count, int first) -> () {
+  () call f (count, first);
+};

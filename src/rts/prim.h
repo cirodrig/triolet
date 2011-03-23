@@ -64,3 +64,13 @@ extern procedure pyon.internal.prim.blocked_reduce_accumulate_range
   "blocked_reduce_accumulate_range" (owned, pointer, int, int, pointer) -> ();
 extern procedure pyon.internal.prim.blocked_reduce_reducer
   "blocked_reduce_reducer" (owned, pointer, pointer, pointer) -> ();
+
+extern function pyon.internal.prim.blocked_doall
+  (unit, unit, unit, IndexedInt, int, owned) -> ();
+
+// C implementation of blocked_doall
+import procedure pyon_C_blocked_doall
+  (owned, int, int) -> ();
+
+extern procedure pyon.internal.prim.blocked_doall_worker
+  "blocked_doall_worker" (owned, int, int) -> ();

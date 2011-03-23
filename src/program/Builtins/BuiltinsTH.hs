@@ -249,6 +249,7 @@ pyonBuiltinVariableNames =
   , "doall"
   , "for"
   , "blocked_reduce"
+  , "blocked_doall"
   , "createHistogram"
     
   , "emptyEffTok"

@@ -842,3 +842,13 @@ blocked_reduce :
  -> box ((val n : intindex) -> val IndexedInt n -> val int -> write acc)
     -- ^ Generate value given range
  -> write acc;
+
+-- Blocked parallel loop
+blocked_doall :
+    (val n : intindex)
+ -> (val a : pure)
+ -> (val b : pure)
+ -> val IndexedInt n
+ -> val int
+ -> box ((val n : intindex) -> val IndexedInt n -> val int -> sideeffect b)
+ -> sideeffect a;

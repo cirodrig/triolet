@@ -172,6 +172,7 @@ parallelizingRewrites :: RewriteRuleSet
 parallelizingRewrites = Map.fromList table
   where
     table = [ (pyonBuiltin the_fun_reduce_Stream, rwParallelReduceStream)
+            , (pyonBuiltin the_doall, rwParallelDoall)
             ]
 
 -- | Rewrite rules that transform potentially parallel algorithms into
@@ -625,7 +626,34 @@ rwParallelReduceStream tenv inf
 
      Nothing -> return Nothing
 
-rwParallelReduce _ _ _ _ = return Nothing
+rwParallelReduceStream _ _ _ _ = return Nothing
+
+rwParallelDoall :: RewriteRule
+rwParallelDoall tenv inf [size_ix, result_eff, element_eff] [size, worker] =
+  -- Strip-mine a doall loop.  The new outer loop is parallel.  The new
+  -- inner loop is the same as the original loop except that an offset is 
+  -- added to the loop counter.
+  fmap Just $
+  varAppE (pyonBuiltin the_blocked_doall) [size_ix, result_eff, element_eff]
+  [return size,
+   litE (IntL 0 intType),
+   lamE $ mkFun [intindexT]
+   (\ [mindex] -> return ([ValPT Nothing :::
+                           varApp (pyonBuiltin the_IndexedInt) [VarT mindex],
+                           ValPT Nothing ::: intType],
+                          SideEffectRT ::: fromTypM element_eff))
+   (\ [mindex] [msize, offset] ->
+     varAppE (pyonBuiltin the_doall) [TypM (VarT mindex), result_eff, element_eff]
+     [varE msize,
+      lamE $ mkFun []
+      (\ [] -> return ([ValPT Nothing ::: intType],
+                       SideEffectRT ::: fromTypM element_eff))
+      (\ [] [ix] ->
+        appE (return worker) []
+        [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
+         [varE offset, varE ix]])])]
+  
+rwParallelDoall _ _ _ _ = return Nothing
 
 rwReduceStream :: RewriteRule
 rwReduceStream tenv inf [shape_type, element]

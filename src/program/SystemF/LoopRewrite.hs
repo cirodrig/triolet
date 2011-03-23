@@ -46,7 +46,8 @@ incOtherLoopCount m = local inc_count m
 
 parLoopOperator, otherLoopOperator :: Var -> Bool
 parLoopOperator v =
-  v `elem` [pyonBuiltin the_blocked_reduce]
+  v `elem` [pyonBuiltin the_blocked_reduce,
+            pyonBuiltin the_blocked_doall]
 
 otherLoopOperator v =
   v `elem` [pyonBuiltin the_for,
