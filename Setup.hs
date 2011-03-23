@@ -19,6 +19,7 @@ import Distribution.PackageDescription.Parse
 import Distribution.PackageDescription.Configuration
          (flattenPackageDescription)
 import Distribution.Simple
+import qualified Distribution.Simple.Build.Macros
 import Distribution.Simple.Build.PathsModule
 import Distribution.Simple.BuildPaths
 import Distribution.Simple.Command
@@ -133,6 +134,17 @@ writeMachineHeader verb lbi target = do
       "#define INT_SIZE " ++ show (targetIntSize target) ++ "\n" ++
       "#endif\n"
 
+-- Write the auto-generated 'cabal_macros' header file.
+writeCabalMacrosHeader :: Verbosity -> PackageDescription -> LocalBuildInfo
+                       -> IO ()
+writeCabalMacrosHeader verb pkg_desc lbi = do
+  let autogen_dir = autogenModulesDir lbi
+      autogen_filename = "cabal_macros.h"
+  
+  createDirectoryIfMissingVerbose verb True autogen_dir
+  rewriteFile (autogen_dir </> autogen_filename) $
+    Distribution.Simple.Build.Macros.generate pkg_desc lbi
+
 runMake lbi verbosity args =
   runDbProgram verbosity makeProgram (withPrograms lbi) args
 
@@ -178,6 +190,7 @@ preProcess pkg_desc lbi hooks flags = withExe pkg_desc $ \exe -> do
 doBuild pkg_desc lbi hooks flags = do
   -- Generate modules if they don't alredy exist
   writePathsModule verb pkg_desc lbi
+  writeCabalMacrosHeader verb pkg_desc lbi
   target_architecture <- computeTargetArchitectureParameters verb
   writeMachineModule verb lbi target_architecture
   writeMachineHeader verb lbi target_architecture

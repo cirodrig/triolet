@@ -19,6 +19,7 @@ import Distribution.ModuleName hiding(main)
 import Distribution.Package
 import Distribution.PackageDescription
 import Distribution.Simple.Compiler
+import Distribution.Simple.GHC
 import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.PackageIndex
 import Distribution.Simple.Program
@@ -369,11 +370,16 @@ configuredGhcFlags exe lbi =
 -- | Get the options to pass to GHC for compiling a HS file that is part of
 --   the Pyon executable.
 pyonGhcOpts econfig exe lbi =
+  let clbi = case lookup "pyon" $ executableConfigs lbi
+             of Nothing -> error "Unexpected missing build info"
+                Just x -> x
+  in ghcOptions lbi (buildInfo exe) clbi "dist/build/pyon"
+  {-
   configuredGhcFlags exe lbi ++
   optimizationFlags lbi ++
   pyonGhcPathFlags exe lbi ++
   packageFlags exe lbi ++
-  pyonExtensionFlags exe
+  pyonExtensionFlags exe -}
 
 -- | Get the options for linking the \'pyon\' binary.
 pyonLinkOpts econfig exe lbi =
