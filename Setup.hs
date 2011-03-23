@@ -267,7 +267,7 @@ doTest args _ pkg_desc lbi = do
   
   -- Run the test driver
   let cc_flags = targetCompileFlags econfig
-      ld_flags = targetLinkFlags econfig
+      ld_flags = targetLinkFlags econfig ++ targetLibs econfig
       test_arguments = [buildDir lbi, show cc_flags, show ld_flags] ++ args
   rawSystemExit verb (testDriverProgram lbi) test_arguments
 

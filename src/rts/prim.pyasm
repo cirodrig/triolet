@@ -214,6 +214,7 @@ function inline blocked_reduce
 
   // Main computation is written in C++
   () primcall pyon_C_blocked_reduce(allocate_mem,
+				    acc_repr @! PassConv.copy,
                                     get_initial_value,
                                     accumulate_range,
                                     reducer,
@@ -223,6 +224,10 @@ function inline blocked_reduce
 // Called from the C side of 'blocked_reduce'
 procedure blocked_reduce_allocate (owned f) -> pointer {
   pointer call f (int 0);
+};
+
+procedure blocked_reduce_copy (owned f, pointer src, pointer dst) -> () {
+  () call f (src, dst);
 };
 
 // Called from the C side of 'blocked_reduce'

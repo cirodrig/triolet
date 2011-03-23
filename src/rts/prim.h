@@ -51,11 +51,13 @@ extern function pyon.internal.prim.blocked_reduce
 
 // C implementation of blocked_reduce
 import procedure pyon_C_blocked_reduce
-  (owned, owned, owned, owned, int, int, pointer) -> ();
+  (owned, owned, owned, owned, owned, int, int, pointer) -> ();
 
 // Functions called from the C side of the library
 extern procedure pyon.internal.prim.blocked_reduce_allocate
   "blocked_reduce_allocate" (owned) -> pointer;
+extern procedure pyon.internal.prim.blocked_reduce_copy
+  "blocked_reduce_copy" (owned, pointer, pointer) -> ();
 extern procedure pyon.internal.prim.blocked_reduce_initial_value
   "blocked_reduce_initial_value" (owned, pointer) -> ();
 extern procedure pyon.internal.prim.blocked_reduce_accumulate_range
