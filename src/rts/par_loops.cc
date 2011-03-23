@@ -192,7 +192,7 @@ struct BlockedDoer {
 
   BlockedDoer(void *_worker) : worker_fn(_worker) {}
 
-  void operator()(blocked_range<int> &range) const {
+  void operator()(tbb::blocked_range<int> &range) const {
     int first = range.begin();
     int count = range.end() - first;
     blocked_doall_worker(worker_fn, count, first);
@@ -204,8 +204,8 @@ pyon_C_blocked_doall(void *worker_fn,
 		     PyonInt count,
 		     PyonInt first)
 {
-  parallel_for(blocked_range<int>(first, first + count),
-	       BlockedDoer(worker_fn));
+  tbb::parallel_for(tbb::blocked_range<int>(first, first + count),
+		    BlockedDoer(worker_fn));
 }
 
 #endif	// USE_TBB
