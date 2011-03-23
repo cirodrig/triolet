@@ -382,10 +382,7 @@ pyonGhcOpts econfig exe lbi =
   pyonExtensionFlags exe -}
 
 -- | Get the options for linking the \'pyon\' binary.
-pyonLinkOpts econfig exe lbi =
-  configuredGhcFlags exe lbi ++ 
-  optimizationFlags lbi ++
-  packageFlags exe lbi
+pyonLinkOpts econfig exe lbi = pyonGhcOpts econfig exe lbi
 
 -------------------------------------------------------------------------------
 -- Rules to generate a makefile
