@@ -311,6 +311,8 @@ compileCFile c_fname o_fname = do
   let compiler_opts =
         [ "-c"                  -- Compile
         , "-g"                  -- Emit debug information
+        , "-O2"                 -- Optimize
+        , "-fno-strict-aliasing" -- Do not assume distinct types are unaliased
         , "-fPIC"               -- Position-independent code
         , "-xc"                 -- Source is a C file
         , c_fname               -- Input filename
