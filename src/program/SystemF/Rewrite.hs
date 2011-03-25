@@ -92,36 +92,50 @@ caseOfIndexedInt tenv scrutinee int_index mk_body =
   [mkAlt tenv (pyonBuiltin the_indexedInt) [TypM int_index] $
    \ [] [intvalue] -> mk_body intvalue]
 
--- | Create an array where each array element is a function of its index only
+-- | Create a list where each array element is a function of its index only
 --
 --   If no return pointer is given, a writer function is generated.
-defineArray :: TypM             -- Array element type
-            -> TypM             -- Array size type index
-            -> MkExpM           -- Array size
-            -> MkExpM           -- Array element representation
-            -> Maybe MkExpM     -- Optional return pointer
-            -> (Var -> MkExpM -> MkExpM) -- Element writer code
-            -> MkExpM
-defineArray elt_type size_ix size elt_repr rptr writer =
+defineList :: TypM             -- Array element type
+           -> TypM             -- Array size type index
+           -> MkExpM           -- Array size
+           -> MkExpM           -- Array element representation
+           -> Maybe MkExpM     -- Optional return pointer
+           -> (Var -> MkExpM -> MkExpM) -- Element writer code
+           -> MkExpM
+defineList elt_type size_ix size elt_repr rptr writer =
   varAppE (pyonBuiltin the_make_list)
   [elt_type, size_ix]
   ([size,
     varAppE (pyonBuiltin the_referenced) [TypM array_type]
-    [lamE $ mkFun []
-     (\ [] -> return ([OutPT ::: array_type], SideEffectRT ::: array_type))
-     (\ [] [out_ptr] ->
-       varAppE (pyonBuiltin the_doall)
-       [size_ix, TypM array_type, elt_type]
-       [size,
-        lamE $ mkFun []
-        (\ [] -> return ([ValPT Nothing ::: intType],
-                         SideEffectRT ::: fromTypM elt_type))
-        (\ [] [index_var] ->
-          let out_expr =
-                varAppE (pyonBuiltin the_subscript_out) [size_ix, elt_type]
-                [elt_repr, varE out_ptr, varE index_var]
-          in writer index_var out_expr)])]] ++
+    [defineArray elt_type size_ix size elt_repr writer]] ++
    maybeToList rptr)
+  where
+    array_type =
+      varApp (pyonBuiltin the_array) [fromTypM size_ix, fromTypM elt_type]
+
+-- | Create a writer function for an array where each array element
+--   is a function of its index only.
+defineArray :: TypM             -- Array element type
+            -> TypM             -- Array size type index
+            -> MkExpM           -- Array size
+            -> MkExpM           -- Array element representation
+            -> (Var -> MkExpM -> MkExpM) -- Element writer code
+            -> MkExpM
+defineArray elt_type size_ix size elt_repr writer =
+  lamE $ mkFun []
+  (\ [] -> return ([OutPT ::: array_type], SideEffectRT ::: array_type))
+  (\ [] [out_ptr] ->
+    varAppE (pyonBuiltin the_doall)
+    [size_ix, TypM array_type, elt_type]
+    [size,
+     lamE $ mkFun []
+     (\ [] -> return ([ValPT Nothing ::: intType],
+                      SideEffectRT ::: fromTypM elt_type))
+     (\ [] [index_var] ->
+       let out_expr =
+             varAppE (pyonBuiltin the_subscript_out) [size_ix, elt_type]
+             [elt_repr, varE out_ptr, varE index_var]
+       in writer index_var out_expr)])
   where
     array_type =
       varApp (pyonBuiltin the_array) [fromTypM size_ix, fromTypM elt_type]
@@ -173,6 +187,7 @@ parallelizingRewrites = Map.fromList table
   where
     table = [ (pyonBuiltin the_fun_reduce_Stream, rwParallelReduceStream)
             , (pyonBuiltin the_fun_reduce1_Stream, rwParallelReduce1Stream)
+            , (pyonBuiltin the_histogramArray, rwParallelHistogramArray)
             , (pyonBuiltin the_doall, rwParallelDoall)
             ]
 
@@ -264,7 +279,7 @@ buildListDoall inf elt_type elt_repr other_args size count generator =
       write_array index mk_dst =
         appE (generator (ExpM $ VarE defaultExpInfo index)) [] [mk_dst]
 
-  in defineArray elt_type size
+  in defineList elt_type size
      (return count) (return elt_repr) return_ptr write_array
 
 {- Disabled while we change types
@@ -673,6 +688,125 @@ rwParallelReduce1Stream tenv inf
           return $ Just call
 
 rwParallelReduce1Stream _ _ _ _ = return Nothing
+
+-- | Parallelize a histogram computation.
+--
+--   The parallel part computes multiple, privatized histograms, then
+--   sums them up.  A single privatized histogram is generated using the
+--   same loop we started with, only traversing a smaller domain. 
+rwParallelHistogramArray :: RewriteRule
+rwParallelHistogramArray tenv inf
+  [shape_type, size_ix] (size : input : other_args) = do
+  m_stream <- interpretAndBlockStream (fromTypM shape_type) int_repr input
+  case m_stream of
+    Nothing -> return Nothing
+    Just (size_var, count_var, base_var, bs, bs_size, bs_count) -> do
+      -- > local empty_hist = defineArray size_ix size int_repr
+      -- >                    (\_ dst -> store int 0 dst) empty_hist
+      -- > in blocked_reduce (array size_ix int) bs_size repr_int bs_count 0
+      -- >    (\a b ret -> doall (\i -> store (load a[i] + load b[i]) ret[i]))
+      -- >    empty_hist
+      -- >    (\ix ct b -> histogramArray list_shape size_ix size
+      -- >                 (asListShape bs))
+      worker_stream <-
+        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
+      case worker_stream of
+        Nothing -> return Nothing
+        Just ws ->
+          let write_into return_arg = do
+                -- Define an empty histogram, i.e. a zero-filled array
+                empty_hist <- newAnonymousVar ObjectLevel
+                empty_hist_rhs <- appE zero_array [] [varE empty_hist]
+                array_repr_exp <- array_repr
+                let binder = localVarP empty_hist array_type array_repr_exp
+
+                -- Compute the histogram
+                compute_hist <-
+                  varAppE (pyonBuiltin the_blocked_reduce) 
+                  [TypM array_type, bs_size]
+                  [array_repr,
+                   return bs_count,
+                   litE (IntL 0 intType),
+                   elementwise_add,
+                   varE empty_hist,
+                   worker_fn size_var count_var base_var ws,
+                   return_arg]
+
+                return $ ExpM $
+                  LetE defaultExpInfo binder empty_hist_rhs compute_hist
+          in case other_args
+             of [] ->
+                  -- Return a writer funciton
+                  fmap Just $ lamE $ mkFun []
+                  (\ [] -> return ([OutPT ::: array_type],
+                                   SideEffectRT ::: array_type))
+                  (\ [] [ret_var] -> write_into (varE ret_var))
+                [ret_val] ->
+                  -- Write into the return argument
+                  fmap Just $ write_into (return ret_val)
+                _ ->
+                  internalError "rwParallelHistogramArray"
+
+  where
+    array_type = varApp (pyonBuiltin the_array) [fromTypM size_ix, intType]
+    
+    int_repr = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int)
+    array_repr = varAppE (pyonBuiltin the_repr_array)
+                 [size_ix, TypM intType] [return size, return int_repr]
+
+    -- A single parallel task
+    --    
+    -- > \ local_size local_count base ret.
+    -- >     histogramArray list_shape histo_size histo_count stream ret
+    worker_fn size_var count_var base_var bs = do
+      retvar <- newAnonymousVar ObjectLevel
+      fn_body <- varAppE (pyonBuiltin the_histogramArray)
+                 [TypM $ VarT (pyonBuiltin the_list), size_ix]
+                 [return size, return bs, varE retvar]
+      let param1 = memVarP count_var $
+                   ValPT Nothing :::
+                   varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
+          param2 = memVarP base_var $ ValPT Nothing ::: intType
+          param3 = memVarP retvar $ OutPT ::: array_type
+          ret = RetM $ SideEffectRT ::: array_type
+      return $ ExpM $ LamE defaultExpInfo $ FunM $
+        Fun { funInfo = inf
+            , funTyParams = [TyPatM size_var intindexT]
+            , funParams = [param1, param2, param3]
+            , funReturn = ret
+            , funBody = fn_body}
+  
+    -- Initialize an array with all zeros
+    zero_array =
+      defineArray (TypM intType) size_ix (return size) (return int_repr)
+      (\_ out_expr -> varAppE (pyonBuiltin the_store) [TypM intType]
+                      [litE $ IntL 0 intType, out_expr])
+    
+    -- Add two arrays, elementwise
+    elementwise_add =
+      lamE $ mkFun []
+      (\ [] -> return ([ReadPT ::: array_type,
+                        ReadPT ::: array_type,
+                        OutPT ::: array_type],
+                       SideEffectRT ::: array_type))
+      (\ [] [a, b, ret_ptr] ->
+        appE
+        (defineArray (TypM intType) size_ix (return size) (return int_repr)
+         (\index_var out_expr ->
+           let load_element array_ptr_var =
+                 -- Load an array element from array_ptr_var at index_var
+                 varAppE (pyonBuiltin the_load) [TypM intType]
+                 [varAppE (pyonBuiltin the_subscript)
+                  [size_ix, TypM intType]
+                  [return int_repr, varE array_ptr_var, varE index_var]]
+           in varAppE (pyonBuiltin the_store) [TypM intType]
+              [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
+               [load_element a, load_element b], out_expr]))
+        []
+        [varE ret_ptr])
+
+rwParallelHistogramArray _ _ _ _ = return Nothing
+
 
 rwParallelDoall :: RewriteRule
 rwParallelDoall tenv inf [size_ix, result_eff, element_eff] [size, worker] =
