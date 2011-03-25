@@ -843,6 +843,18 @@ blocked_reduce :
     -- ^ Generate value given range
  -> write acc;
 
+-- Blocked parallel reduction with no neutral element
+blocked_reduce1 :
+    (val acc : pure)
+ -> (val n : intindex)
+ -> box Repr acc
+ -> val IndexedInt n		-- Size of range
+ -> val int			-- First member of range
+ -> box (read acc -> read acc -> write acc) -- Reducer
+ -> box ((val n : intindex) -> val IndexedInt n -> val int -> write acc)
+    -- ^ Generate value given range
+ -> write acc;
+
 -- Blocked parallel loop
 blocked_doall :
     (val n : intindex)

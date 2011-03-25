@@ -6,6 +6,9 @@ module pyon.internal.prim;
 #include "apply_py.h"
 #include "prim.h"
 #include "debug.h"
+
+import procedure exit (int) -> ();
+
 #include "new_pyasm_records.h"
 
 function inline storeBox (unit _, owned arg, pointer dst) -> () {
@@ -190,11 +193,6 @@ function inline blocked_reduce
       pointer primcall pyon_alloc (acc_size);
     };
 
-    // Get a copy of the initial value
-    function get_initial_value (pointer ret) -> () {
-      () call (acc_repr @! PassConv.copy) (init, ret);
-    };
-
     // Given the current accumulator value and the range to process,
     // compute and accumulate the reduction value over this range.
     function accumulate_range (pointer old_value, int lcount, int lfirst, pointer ret) -> () {
@@ -215,10 +213,87 @@ function inline blocked_reduce
   // Main computation is written in C++
   () primcall pyon_C_blocked_reduce(allocate_mem,
 				    acc_repr @! PassConv.copy,
-                                    get_initial_value,
                                     accumulate_range,
                                     reducer,
-                                    count, first, ret);
+                                    init, count, first, ret);
+};
+
+// A parallel reduction with no neutral element.
+// The iteration space is partitioned at run time
+// and 'generator' is called on a single member of the iteration space.
+//
+// We inject a distinguished pointer into the space of valid values for this
+// data type.  That pointer serves as the neutral element, so that we can use
+// the same parallel function as a regular reduction.
+//
+// Every parallel task must process at least one element of
+// the input range, so that the output of every parallel task is not the
+// neutral element.  This is enforced by the implementation of
+// 'pyon_C_blocked_reduce'.
+function blocked_reduce1
+  (unit _, unit _, owned acc_repr, IndexedInt size, int first,
+   owned reducer, owned generator, pointer ret) -> ()
+{
+  // We use the address of this data as the neutral element of the reduction.
+  // The data is never accessed.
+  data int8 uninitialized_value;
+ 
+  IndexedInt {count} = size;
+  acc_size = acc_repr @! PassConv.size;
+
+  letrec {
+    // Allocate memory for an accumulator value
+    function allocate_mem (int _) -> pointer {
+      pointer primcall pyon_alloc (acc_size);
+    };
+
+    // Given the current accumulator value and the range to process,
+    // compute and accumulate the reduction value over this range.
+    function accumulate_range
+        (pointer old_value, int lcount, int lfirst, pointer ret) -> () {
+      lsize = IndexedInt {lcount};
+
+      if (old_value == uninitialized_value) {
+        // Reduce over this range and return the output directly
+        () call generator (nil, lsize, lfirst, ret);
+      } else {
+        local_value = pointer primcall pyon_alloc (acc_repr @! PassConv.size);
+        () = () call generator (nil, lsize, lfirst, local_value);
+
+        // Accumulate into output
+        () = () call reducer (old_value, local_value, ret);
+
+        () = () call (acc_repr @! PassConv.finalize) (local_value);
+        () = () call (acc_repr @! PassConv.finalize) (old_value);
+        ();
+      };
+    };
+
+    // Combine two extended values.  At least one must not be the neutral
+    // element.
+    function join_values (pointer x, pointer y, pointer ret) -> () {
+      if (x == uninitialized_value) {
+        if (y == uninitialized_value) {
+          () primcall exit(int -1);
+        } else {
+          () call (acc_repr @! PassConv.copy) (y, ret);
+        };
+      } else {
+        if (y == uninitialized_value) {
+          () call (acc_repr @! PassConv.copy) (x, ret);
+        } else {
+          () call reducer (x, y, ret);
+        };
+      };
+    }
+  };
+
+  // Main computation is written in C++
+  () primcall pyon_C_blocked_reduce(allocate_mem,
+				    acc_repr @! PassConv.copy,
+                                    accumulate_range,
+                                    reducer,
+                                    uninitialized_value, count, first, ret);
 };
 
 // Called from the C side of 'blocked_reduce'
@@ -228,11 +303,6 @@ procedure blocked_reduce_allocate (owned f) -> pointer {
 
 procedure blocked_reduce_copy (owned f, pointer src, pointer dst) -> () {
   () call f (src, dst);
-};
-
-// Called from the C side of 'blocked_reduce'
-procedure blocked_reduce_initial_value (owned f, pointer ret) -> () {
-  () call f (ret);
 };
 
 procedure blocked_reduce_accumulate_range

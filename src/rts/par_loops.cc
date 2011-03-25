@@ -25,8 +25,6 @@ blocked_reduce_allocate(void *fn);
 extern "C" void
 blocked_reduce_copy(void *fn, void *src, void *dst);
 extern "C" void
-blocked_reduce_initial_value(void *fn, void *ret);
-extern "C" void
 blocked_reduce_accumulate_range(void *fn,
 				void *initial_value,
 				PyonInt count,
@@ -40,9 +38,9 @@ blocked_reduce_reducer(void *fn, void *x, void *y, void *ret);
 extern "C" void
 pyon_C_blocked_reduce(void *allocate_fn,
 		      void *copy_fn,
-		      void *initial_value_fn,
 		      void *accumulate_range_fn,
 		      void *reducer_fn,
+		      void *initial_value,
 		      PyonInt count,
 		      PyonInt first,
 		      void *ret);
@@ -55,17 +53,13 @@ pyon_C_blocked_reduce(void *allocate_fn,
 void
 pyon_C_blocked_reduce(void *allocate_fn,
 		      void *copy_fn,
-		      void *initial_value_fn,
 		      void *accumulate_range_fn,
 		      void *reducer_fn,
+		      void *initial_value,
 		      PyonInt count,
 		      PyonInt first,
 		      void *ret)
 {
-  // Create the neutral element of the reduction
-  void *initial_value = blocked_reduce_allocate(allocate_fn);
-  blocked_reduce_initial_value(initial_value_fn, initial_value);
-
   // Perform the reduction
   blocked_reduce_accumulate_range(accumulate_range_fn,
 				  initial_value,
@@ -83,9 +77,11 @@ struct BlockedReducePlan {
   // These are all pyon functions
   void *allocate_fn;
   void *copy_fn;
-  void *initial_value_fn;
   void *accumulate_range_fn;
   void *reducer_fn;
+
+  // The initial value of the reduction; a read-only reference
+  void *initial_value;
 };
 
 // A partial reduction result, together with methods for computing a
@@ -94,59 +90,61 @@ struct BlockedReducePlan {
 // Implements the parallel_reduce Body concept.
 struct BlockedReducer {
   BlockedReducePlan *const plan;
+  bool has_value;		// If true, then 'value' holds valid data
   void *value;
 
-  void initialize(void) {
-    // Use 'plan' to initialize 'value'.
-    // Called from constructor functions.
-    value = blocked_reduce_allocate(plan->allocate_fn);
-    blocked_reduce_initial_value(plan->initial_value_fn, value);
-  };
+  BlockedReducer(BlockedReducePlan *_plan) :
+    plan(_plan), has_value(false), value(NULL) {};
 
-  BlockedReducer(BlockedReducePlan *_plan) : plan(_plan) {
-    initialize();
-  };
+  BlockedReducer(BlockedReducer &other, tbb::split) :
+    plan(other.plan), has_value(false), value(NULL) {};
 
-  BlockedReducer(BlockedReducer &other, tbb::split) : plan(other.plan) {
-    initialize();
+  void *get_value() const {
+    // If we have a partially computed value, then return that;
+    // Otherwise, use the initial value as the partially computed value
+    return has_value ? value : plan->initial_value;
   };
 
   void operator()(const tbb::blocked_range<int> &range) {
     int first = range.begin();
     int count = range.end() - first;
-
+    void *old_value = get_value();
     void *new_value = blocked_reduce_allocate(plan->allocate_fn);
     blocked_reduce_accumulate_range(plan->accumulate_range_fn,
-				    value, count, first, new_value);
+				    old_value, count, first, new_value);
 
     // TODO: finalize and deallocate old value
+    has_value = true;
     value = new_value;
   };
 
   void join (BlockedReducer &other) {
+    void *old_value1 = get_value();
+    void *old_value2 = other.get_value();
     void *new_value = blocked_reduce_allocate(plan->allocate_fn);
-    blocked_reduce_reducer(plan->reducer_fn, value, other.value, new_value);
+    blocked_reduce_reducer(plan->reducer_fn, old_value1, old_value2, new_value);
     
     // TODO: finalize and deallocate old value
+    has_value = true;
     value = new_value;
-  }
+  };
 };
 
 void
 pyon_C_blocked_reduce(void *allocate_fn,
 		      void *copy_fn,
-		      void *initial_value_fn,
 		      void *accumulate_range_fn,
 		      void *reducer_fn,
+		      void *initial_value,
 		      PyonInt count,
 		      PyonInt first,
 		      void *ret)
 {
   BlockedReducePlan plan = {allocate_fn,
 			    copy_fn,
-			    initial_value_fn,
 			    accumulate_range_fn,
-			    reducer_fn};
+			    reducer_fn,
+			    initial_value};
 
   // Use TBB's parallel_reduce template
   tbb::blocked_range<int> range(first, first + count);
