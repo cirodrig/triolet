@@ -580,7 +580,7 @@ rwParallelReduceStream tenv inf
        count_var <- newAnonymousVar ObjectLevel
        base_var <- newAnonymousVar ObjectLevel
        
-       trace "rwParallelReduceStream" $ case blockStream size_var count_var base_var s of
+       case blockStream size_var count_var base_var s of
          Nothing -> return Nothing
          Just (bs, bs_size, bs_count) -> do
            -- > blocked_reduce elt bs_size elt_repr bs_count 0 reducer init
