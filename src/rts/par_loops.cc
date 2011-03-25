@@ -20,52 +20,44 @@ extern "C" {
 /* Parallelized reduction */
 
 /* Functions written in low-level pyon */
-extern "C" void *
-blocked_reduce_allocate(void *fn);
 extern "C" void
 blocked_reduce_copy(void *fn, void *src, void *dst);
-extern "C" void
+extern "C" void *
 blocked_reduce_accumulate_range(void *fn,
 				void *initial_value,
 				PyonInt count,
-				PyonInt first,
-				void *ret);
-extern "C" void
-blocked_reduce_reducer(void *fn, void *x, void *y, void *ret);
+				PyonInt first);
+extern "C" void *
+blocked_reduce_reducer(void *fn, void *x, void *y);
 
 
 /* Function exported to pyon */
-extern "C" void
-pyon_C_blocked_reduce(void *allocate_fn,
-		      void *copy_fn,
+extern "C" void *
+pyon_C_blocked_reduce(void *copy_fn,
 		      void *accumulate_range_fn,
 		      void *reducer_fn,
 		      void *initial_value,
 		      PyonInt count,
-		      PyonInt first,
-		      void *ret);
+		      PyonInt first);
 
 
 
 #ifndef USE_TBB
 
 // No parallel implementation available; use sequential reduction
-void
-pyon_C_blocked_reduce(void *allocate_fn,
-		      void *copy_fn,
+void *
+pyon_C_blocked_reduce(void *copy_fn,
 		      void *accumulate_range_fn,
 		      void *reducer_fn,
 		      void *initial_value,
 		      PyonInt count,
-		      PyonInt first,
-		      void *ret)
+		      PyonInt first)
 {
   // Perform the reduction
-  blocked_reduce_accumulate_range(accumulate_range_fn,
-				  initial_value,
-				  count,
-				  first,
-				  ret);
+  return blocked_reduce_accumulate_range(accumulate_range_fn,
+					 initial_value,
+					 count,
+					 first);
 }
 
 #else  // USE_TBB
@@ -75,7 +67,6 @@ pyon_C_blocked_reduce(void *allocate_fn,
 // Data that are constant over an invocation of 'blocked_reduce'.
 struct BlockedReducePlan {
   // These are all pyon functions
-  void *allocate_fn;
   void *copy_fn;
   void *accumulate_range_fn;
   void *reducer_fn;
@@ -109,39 +100,33 @@ struct BlockedReducer {
     int first = range.begin();
     int count = range.end() - first;
     void *old_value = get_value();
-    void *new_value = blocked_reduce_allocate(plan->allocate_fn);
-    blocked_reduce_accumulate_range(plan->accumulate_range_fn,
-				    old_value, count, first, new_value);
 
-    // TODO: finalize and deallocate old value
+    value = blocked_reduce_accumulate_range(plan->accumulate_range_fn,
+					    old_value, count, first);
     has_value = true;
-    value = new_value;
+
+    // TODO: finalize and deallocate old value if it's not initial_value
   };
 
   void join (BlockedReducer &other) {
     void *old_value1 = get_value();
     void *old_value2 = other.get_value();
-    void *new_value = blocked_reduce_allocate(plan->allocate_fn);
-    blocked_reduce_reducer(plan->reducer_fn, old_value1, old_value2, new_value);
-    
-    // TODO: finalize and deallocate old value
+    value = blocked_reduce_reducer(plan->reducer_fn, old_value1, old_value2);
     has_value = true;
-    value = new_value;
+    
+    // TODO: finalize and deallocate old value if it's not initial_value
   };
 };
 
-void
-pyon_C_blocked_reduce(void *allocate_fn,
-		      void *copy_fn,
+void *
+pyon_C_blocked_reduce(void *copy_fn,
 		      void *accumulate_range_fn,
 		      void *reducer_fn,
 		      void *initial_value,
 		      PyonInt count,
-		      PyonInt first,
-		      void *ret)
+		      PyonInt first)
 {
-  BlockedReducePlan plan = {allocate_fn,
-			    copy_fn,
+  BlockedReducePlan plan = {copy_fn,
 			    accumulate_range_fn,
 			    reducer_fn,
 			    initial_value};
@@ -151,8 +136,8 @@ pyon_C_blocked_reduce(void *allocate_fn,
   BlockedReducer body(&plan);
   tbb::parallel_reduce(range, body);
 
-  // Copy result
-  blocked_reduce_copy(copy_fn, body.value, ret);
+  // Return the result, which may be the initial value
+  return body.get_value();
 }
 
 #endif	// USE_TBB
