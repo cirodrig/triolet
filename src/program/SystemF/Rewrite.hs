@@ -9,6 +9,8 @@ module SystemF.Rewrite
 where
 
 import Control.Monad
+import Control.Monad.Trans
+import Control.Monad.Trans.Maybe
 import qualified Data.Map as Map
 import Data.Maybe
 import Debug.Trace
@@ -1242,13 +1244,13 @@ interpretStreamAlt shape_type repr (AltM alt) = do
 --   will have the specified shape.  If code cannot be generated,
 --   return Nothing.
 encodeStream2 :: TypM -> ExpS -> FreshVarM (Maybe ExpM)
-encodeStream2 expected_shape stream = do
-  m_encoded <-
+encodeStream2 expected_shape stream = runMaybeT $ do
+  encoded <-
     case stream
     of GenerateStream {_sexpGenerator = gen} ->
          case sexpShape stream
          of Array1DShape size_ix size_val ->
-              fmap Just $
+              lift $
               varAppE (pyonBuiltin the_generate)
               [size_ix, TypM elt_type]
               [return size_val,
@@ -1259,16 +1261,48 @@ encodeStream2 expected_shape stream = do
                                                (SideEffectRT ::: elt_type)))
                (\ [] [index_var] ->
                  gen (ExpM $ VarE defaultExpInfo index_var))]
-       _ -> return Nothing
+
+       BindStream src (pat, dst) -> do
+         src' <- MaybeT $ encodeStream2 (TypM list_type) src
+         dst' <- MaybeT $ encodeStream2 (TypM list_type) dst
+         let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_oper_CAT_MAP)
+         return $
+           ExpM $ AppE defaultExpInfo oper
+           [TypM $ sexpElementType src, TypM $ sexpElementType dst]
+           [sexpElementRepr src, sexpElementRepr dst,
+            src',
+            ExpM $ LamE defaultExpInfo $
+            FunM $ Fun { funInfo = defaultExpInfo
+                       , funTyParams = []
+                       , funParams = [pat]
+                       , funReturn =
+                         RetM $ BoxRT :::
+                         varApp (pyonBuiltin the_Stream)
+                         [list_type, sexpElementType dst]
+                       , funBody = dst'}]
+
+       CaseStream shp scr alts -> do
+         alts' <- mapM (encode_alt (TypM $ shapeType shp)) alts
+         return $ ExpM $ CaseE defaultExpInfo scr alts'
+
+       _ -> mzero
 
   -- Cast the shape type to the one that the code expects
   let given_shape = shapeType s_shape
-      cast_shape expr = castStreamExpressionShape (fromTypM expected_shape) given_shape elt_type elt_repr expr
-  return $ m_encoded >>= cast_shape
+  MaybeT $ return $ castStreamExpressionShape (fromTypM expected_shape) given_shape elt_type elt_repr encoded
   where
+    list_type = VarT (pyonBuiltin the_list)
     s_shape = sexpShape stream
     elt_type = sexpElementType stream
     elt_repr = sexpElementRepr stream
+    
+    encode_alt expected_shape (AltS alt) = do
+      body <- MaybeT $ encodeStream2 expected_shape $ altBody alt
+      return $ AltM $ Alt { altConstructor = altConstructor alt
+                          , altTyArgs = map (TypM . fromTypS) $ altTyArgs alt
+                          , altExTypes = map fromTyPatS $ altExTypes alt
+                          , altParams = map fromPatS $ altParams alt
+                          , altBody = body}
 
 -- | Convert a stream over an integer domain into a stream over
 --   an arbitrary, contiguous subset of the integer domain.
