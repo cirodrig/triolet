@@ -572,60 +572,52 @@ rwReduce1 _ _ _ _ = return Nothing
 rwParallelReduceStream :: RewriteRule
 rwParallelReduceStream tenv inf
   [shape_type, elt]
-  (elt_repr : reducer : init : stream : other_args) =
-  case interpretStream2 (fromTypM shape_type) elt_repr stream
-  of Just s -> do
-       -- Create a block-wise version of the stream
-       size_var <- newAnonymousVar TypeLevel
-       count_var <- newAnonymousVar ObjectLevel
-       base_var <- newAnonymousVar ObjectLevel
-       
-       case blockStream size_var count_var base_var s of
-         Nothing -> return Nothing
-         Just (bs, bs_size, bs_count) -> do
-           -- > blocked_reduce elt bs_size elt_repr bs_count 0 reducer init
-           -- >   (\ix ct b -> reduceStream list_shape elt elt_repr
-           -- >                reducer init (asListShape bs))
+  (elt_repr : reducer : init : stream : other_args) = do
+  m_stream <- interpretAndBlockStream (fromTypM shape_type) elt_repr stream
+  case m_stream of
+    Nothing -> return Nothing
+    Just (size_var, count_var, base_var, bs, bs_size, bs_count) -> do
+      -- > blocked_reduce elt bs_size elt_repr bs_count 0 reducer init
+      -- >   (\ix ct b -> reduceStream list_shape elt elt_repr
+      -- >                reducer init (asListShape bs))
 
-           -- Create the worker function, which processes one block
-           worker_stream <-
-             encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
-           worker_retvar <- newAnonymousVar ObjectLevel
-           case worker_stream of
-             Nothing -> return Nothing
-             Just ws -> do
-               worker_body <-
-                 varAppE (pyonBuiltin the_fun_reduce_Stream)
-                 [TypM $ VarT (pyonBuiltin the_list), elt]
-                 [return elt_repr,
-                  return reducer,
-                  return init,
-                  return ws,
-                  varE worker_retvar]
-               
-               let param1 = memVarP count_var $
-                            ValPT Nothing :::
-                            varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
-                   param2 = memVarP base_var (ValPT Nothing ::: intType)
-                   param3 = memVarP worker_retvar (OutPT ::: fromTypM elt)
-                   worker_fn =
-                     FunM $
-                     Fun { funInfo = inf
-                         , funTyParams = [TyPatM size_var intindexT]
-                         , funParams = [param1, param2, param3]
-                         , funReturn = RetM $ SideEffectRT ::: fromTypM elt
-                         , funBody = worker_body}
-                     
-               -- Create the blocked_reduce call
-               call <-
-                 varAppE (pyonBuiltin the_blocked_reduce) [elt, bs_size]
-                 (return elt_repr : return bs_count : litE (IntL 0 intType) :
-                  return reducer : return init :
-                  return (ExpM $ LamE defaultExpInfo worker_fn) :
-                  map return other_args)
-               return $ Just call
-
-     Nothing -> return Nothing
+      -- Create the worker function, which processes one block
+      worker_stream <-
+        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
+      worker_retvar <- newAnonymousVar ObjectLevel
+      case worker_stream of
+        Nothing -> return Nothing
+        Just ws -> do
+          worker_body <-
+            varAppE (pyonBuiltin the_fun_reduce_Stream)
+            [TypM $ VarT (pyonBuiltin the_list), elt]
+            [return elt_repr,
+             return reducer,
+             return init,
+             return ws,
+             varE worker_retvar]
+          
+          let param1 = memVarP count_var $
+                       ValPT Nothing :::
+                       varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
+              param2 = memVarP base_var (ValPT Nothing ::: intType)
+              param3 = memVarP worker_retvar (OutPT ::: fromTypM elt)
+              worker_fn =
+                FunM $
+                Fun { funInfo = inf
+                    , funTyParams = [TyPatM size_var intindexT]
+                    , funParams = [param1, param2, param3]
+                    , funReturn = RetM $ SideEffectRT ::: fromTypM elt
+                    , funBody = worker_body}
+                
+          -- Create the blocked_reduce call
+          call <-
+            varAppE (pyonBuiltin the_blocked_reduce) [elt, bs_size]
+            (return elt_repr : return bs_count : litE (IntL 0 intType) :
+             return reducer : return init :
+             return (ExpM $ LamE defaultExpInfo worker_fn) :
+             map return other_args)
+          return $ Just call
 
 rwParallelReduceStream _ _ _ _ = return Nothing
 
@@ -634,59 +626,51 @@ rwParallelReduceStream _ _ _ _ = return Nothing
 rwParallelReduce1Stream :: RewriteRule
 rwParallelReduce1Stream tenv inf
   [shape_type, elt]
-  (elt_repr : reducer : stream : other_args) =
-  case interpretStream2 (fromTypM shape_type) elt_repr stream
-  of Just s -> do
-       -- Create a block-wise version of the stream
-       size_var <- newAnonymousVar TypeLevel
-       count_var <- newAnonymousVar ObjectLevel
-       base_var <- newAnonymousVar ObjectLevel
-       
-       case blockStream size_var count_var base_var s of
-         Nothing -> return Nothing
-         Just (bs, bs_size, bs_count) -> do
-           -- > blocked_reduce1 elt bs_size elt_repr bs_count 0 reducer
-           -- >   (\ix ct b -> reduce1Stream list_shape elt elt_repr
-           -- >                reducer (asListShape bs))
+  (elt_repr : reducer : stream : other_args) = do
+  m_stream <- interpretAndBlockStream (fromTypM shape_type) elt_repr stream
+  case m_stream of
+    Nothing -> return Nothing
+    Just (size_var, count_var, base_var, bs, bs_size, bs_count) -> do
+      -- > blocked_reduce1 elt bs_size elt_repr bs_count 0 reducer
+      -- >   (\ix ct b -> reduce1Stream list_shape elt elt_repr
+      -- >                reducer (asListShape bs))
 
-           -- Create the worker function, which processes one block
-           worker_stream <-
-             encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
-           worker_retvar <- newAnonymousVar ObjectLevel
-           case worker_stream of
-             Nothing -> return Nothing
-             Just ws -> do
-               worker_body <-
-                 varAppE (pyonBuiltin the_fun_reduce1_Stream)
-                 [TypM $ VarT (pyonBuiltin the_list), elt]
-                 [return elt_repr,
-                  return reducer,
-                  return ws,
-                  varE worker_retvar]
-               
-               let param1 = memVarP count_var $
-                            ValPT Nothing :::
-                            varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
-                   param2 = memVarP base_var (ValPT Nothing ::: intType)
-                   param3 = memVarP worker_retvar (OutPT ::: fromTypM elt)
-                   worker_fn =
-                     FunM $
-                     Fun { funInfo = inf
-                         , funTyParams = [TyPatM size_var intindexT]
-                         , funParams = [param1, param2, param3]
-                         , funReturn = RetM $ SideEffectRT ::: fromTypM elt
-                         , funBody = worker_body}
-                     
-               -- Create the blocked_reduce call
-               call <-
-                 varAppE (pyonBuiltin the_blocked_reduce1) [elt, bs_size]
-                 (return elt_repr : return bs_count : litE (IntL 0 intType) :
-                  return reducer :
-                  return (ExpM $ LamE defaultExpInfo worker_fn) :
-                  map return other_args)
-               return $ Just call
-
-     Nothing -> return Nothing
+      -- Create the worker function, which processes one block
+      worker_stream <-
+        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
+      worker_retvar <- newAnonymousVar ObjectLevel
+      case worker_stream of
+        Nothing -> return Nothing
+        Just ws -> do
+          worker_body <-
+            varAppE (pyonBuiltin the_fun_reduce1_Stream)
+            [TypM $ VarT (pyonBuiltin the_list), elt]
+            [return elt_repr,
+             return reducer,
+             return ws,
+             varE worker_retvar]
+          
+          let param1 = memVarP count_var $
+                       ValPT Nothing :::
+                       varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
+              param2 = memVarP base_var (ValPT Nothing ::: intType)
+              param3 = memVarP worker_retvar (OutPT ::: fromTypM elt)
+              worker_fn =
+                FunM $
+                Fun { funInfo = inf
+                    , funTyParams = [TyPatM size_var intindexT]
+                    , funParams = [param1, param2, param3]
+                    , funReturn = RetM $ SideEffectRT ::: fromTypM elt
+                    , funBody = worker_body}
+                
+          -- Create the blocked_reduce call
+          call <-
+            varAppE (pyonBuiltin the_blocked_reduce1) [elt, bs_size]
+            (return elt_repr : return bs_count : litE (IntL 0 intType) :
+             return reducer :
+             return (ExpM $ LamE defaultExpInfo worker_fn) :
+             map return other_args)
+          return $ Just call
 
 rwParallelReduce1Stream _ _ _ _ = return Nothing
 
@@ -1203,6 +1187,24 @@ blockStream size_var count_var base_var stream =
      _ ->
        -- The stream's shape is unknown, so we can't decompose it into blocks
        Nothing
+
+-- | Interpret a stream and attempt to create a blocked version of it.
+interpretAndBlockStream :: Type -> ExpM -> ExpM
+                        -> FreshVarM (Maybe (Var, Var, Var, ExpS, TypM, ExpM))
+interpretAndBlockStream shape_type elt_repr stream_exp =  
+  case interpretStream2 shape_type elt_repr stream_exp
+  of Just s -> do
+       -- Create a block-wise version of the stream
+       size_var <- newAnonymousVar TypeLevel
+       count_var <- newAnonymousVar ObjectLevel
+       base_var <- newAnonymousVar ObjectLevel
+       
+       case blockStream size_var count_var base_var s of
+         Nothing ->
+           return Nothing
+         Just (bs, bs_size, bs_count) ->
+           return $ Just (size_var, count_var, base_var, bs, bs_size, bs_count)
+     Nothing -> return Nothing
 
 -- | Zip together a list of two or more streams
 zipStreams2 :: [ExpS] -> ExpS
