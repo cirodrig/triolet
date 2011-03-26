@@ -268,7 +268,15 @@ unifyTyVar v t
   | tyConKind v /= hmTypeKind t = kindError "type unification"
   | otherwise = do
   assertCanonicalTyVar v
-  occursCheck v t
+  
+  -- If 'v' is a component of 't', then we cannot unify because it would create
+  -- an infinite type
+  whenM (occursCheck v t) $ do
+    (vdoc, tdoc) <- runPpr $ liftM2 (,) (pprGetTyConName (tcID v)) (uShow t)
+    let eq_doc = vdoc <+> text "=" <+> tdoc
+    fail $ "Type inference failed\nCannot create the infinite type " ++
+      show eq_doc
+
   writeIORef (getTyVarRep v) (TypeRep t)
 
 -- | Convert a flexible type variable to a canonical expression
