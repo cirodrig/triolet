@@ -17,6 +17,8 @@ extern function pyon.internal.stream.Stream_return
   (unit, owned, owned) -> owned;
 extern function pyon.internal.stream.Stream_bind
   (unit, unit, owned, owned, owned, owned) -> owned;
+extern function pyon.internal.stream.Stream_guard
+  (unit, owned, bool, owned) -> owned;
 extern function pyon.internal.stream.Stream_generate
   (unit, unit, owned, int, owned) -> owned;
 

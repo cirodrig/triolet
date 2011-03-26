@@ -626,6 +626,9 @@ deadRef : (val a : pure) -> read a;
 
 oper_DO : (val a : pure) -> box Repr a -> write a -> box Stream list a;
 
+oper_GUARD : (val a : pure)
+          -> box Repr a -> val bool -> box Stream list a -> box Stream list a;
+
 oper_CAT_MAP :
     (val a : pure) -> (val b : pure) -> box Repr a -> box Repr b
  -> box Stream list a

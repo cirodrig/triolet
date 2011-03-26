@@ -177,6 +177,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_passConv_iter) |]) -}
   , (PyonName module_stream "Stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
+  , (PyonName module_stream "Stream_guard",
+     Right [| pyonBuiltin (SystemF.the_oper_GUARD) |])
   , (PyonName module_stream "Stream_return",
      Right [| pyonBuiltin (SystemF.the_oper_DO) |])
   , (PyonName module_stream "Stream_asList",

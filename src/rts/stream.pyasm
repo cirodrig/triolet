@@ -78,6 +78,32 @@ function inline Stream_return_initialize(pointer state) -> () {
 };
 
 /*****************************************************************************/
+/* empty */
+
+// An empty stream contains nothing
+function inline Stream_empty (unit _) -> owned {
+  empty_stream;
+};
+
+function inline Stream_empty_next (pointer st, pointer ret) -> bool {
+  // Return false to indicate that no data is available
+  false;
+};
+
+function inline Stream_empty_initialize ( pointer st) -> () {
+  ();
+};
+
+data owned empty_stream = Stream {
+  INIT_OBJECT_HEADER,
+  Stream_empty_next,
+  Stream_empty_initialize,
+  uint 0,
+  uint 1,
+  dummy_finalizer
+};
+
+/*****************************************************************************/
 /* bind */
 
 // A bound stream consists of a producer stream and a consumer function that
@@ -206,6 +232,21 @@ function inline Stream_bind (unit _, unit _,
 
 function inline Stream_asList (unit _, unit _, owned stream) -> owned {
   stream;
+};
+
+/*****************************************************************************/
+/* guard */
+
+function inline Stream_guard
+  (unit _, owned elt_repr, bool guard_value, owned stream) -> owned {
+
+  if (guard_value) {
+    // Return the argument stream
+    stream;
+  } else {
+    // Return an empty stream
+    owned call Stream_empty (nil);
+  };
 };
 
 /*****************************************************************************/

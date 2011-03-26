@@ -803,9 +803,10 @@ mkDoType =
 
 mkGuardType =
   forallType [Star] $ \[a] ->
-  ([], functionType [ ConTy (tiBuiltin the_con_bool)
-                    , listIterType (ConTy a)]
-       (listIterType (ConTy a)))
+  ([passable (ConTy a)],
+   functionType [ ConTy (tiBuiltin the_con_bool)
+                , listIterType (ConTy a)]
+   (listIterType (ConTy a)))
 
 mkMapStreamType =
   forallType [Star :-> Star, Star, Star] $ \[t, a, b] ->
