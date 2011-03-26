@@ -1,0 +1,15 @@
+
+# This recursive function has type
+#   forall a. Multiplicative a => int * int -> (int, a)
+# due to the number "1" in the return value.
+def recf(x : int, y : int):
+        if x > 0:
+                return recf(x - 1, y + 1)
+        else:
+                return (y, 1)
+
+def entrypoint(x, y):
+        (u, v) = recf(x, y)
+        return u * v
+
+export ccall entrypoint : int * int -> int
