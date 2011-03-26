@@ -198,6 +198,8 @@ typeInferExp (ExpM expression) =
          typeInferLetfunE inf defs body
        CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
          typeInferCaseE inf scr alts
+       ExceptE {expInfo = inf, expType = rt} ->
+         return $ ExpTM $ RTypeAnn rt (ExceptE inf rt)
 
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCM ExpTM

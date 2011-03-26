@@ -140,6 +140,8 @@ instance Renameable (Exp Mem) where
          LetfunE inf (fmap (renameDefM rn) defs) (recurse body)
        CaseE inf scr alts ->
          CaseE inf (recurse scr) (map recurse alts)
+       ExceptE inf rty ->
+         ExceptE inf (rename rn rty)
     where
       {-# INLINE recurse #-}
       recurse :: Renameable a => a -> a
@@ -211,6 +213,8 @@ instance Renameable (Exp Mem) where
          in foldr Set.delete (Set.union fn_fv body_fv) local_functions
        CaseE _ scr alts ->
          freeVariables scr `Set.union` freeVariables alts
+       ExceptE _ rty ->
+         freeVariables rty
 
 instance Renameable (Alt Mem) where
   rename rn (AltM alt) =
@@ -321,6 +325,8 @@ instance Substitutable (Exp Mem) where
          LetfunE inf (fmap (substituteDefM s) defs) (recurse body)
        CaseE inf scr alts ->
          CaseE inf (recurse scr) (map recurse alts)
+       ExceptE inf ty ->
+         ExceptE inf (substitute s ty)
     where
       {-# INLINE recurse #-}
       recurse :: Substitutable a => a -> a

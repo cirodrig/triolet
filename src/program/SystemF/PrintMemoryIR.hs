@@ -77,6 +77,8 @@ pprExpPrec (ExpM expression) =
        let case_doc = text "case" <+> pprExpPrec scr ? stmtPrec 
            of_doc = text "of" <+> vcat (map pprAlt alts)
        in case_doc $$ of_doc `hasPrec` stmtPrec
+     ExceptE _ rt ->
+       text "except" <+> pprReturnType rt `hasPrec` stmtPrec
 
 pprAlt (AltM alt) =
   let con_doc = pprVar $ altConstructor alt

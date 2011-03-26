@@ -201,6 +201,7 @@ dmdExp spc expressionM@(ExpM expression) =
        let mk_let defgroup e = ExpM (LetfunE inf defgroup e)
        return $ foldr mk_let body' dg'
      CaseE inf scr alts -> dmdCaseE spc inf scr alts
+     ExceptE _ (_ ::: ty) -> dfType ty >> return expressionM
   where
     {- -- Debugging output, show what was demanded in this expression
     trace_dmd m = do

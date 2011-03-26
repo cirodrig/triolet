@@ -86,8 +86,11 @@ applyName = PyonName (ModuleName "pyon.internal.apply_new")
 
 -- | Predefined primitive functions
 builtinPrimitives =
-  [ -- debug.c
-    (biName "pyon_db_int",
+  [ -- C library functions
+    (biName "exit",
+     primFunctionType [PrimType nativeIntType] [])
+    -- debug.c
+  , (biName "pyon_db_int",
      primFunctionType [PrimType nativeIntType] [])
   , (biName "pyon_db_word",
      primFunctionType [PrimType nativeWordType] [])

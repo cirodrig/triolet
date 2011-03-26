@@ -197,6 +197,8 @@ pyonBuiltinVariableNames =
 
     -- Built-in functions
   , "floor"
+  , "or"
+  , "and"
   , "oper_DO"
   , "oper_GUARD"
   , "oper_CAT_MAP"

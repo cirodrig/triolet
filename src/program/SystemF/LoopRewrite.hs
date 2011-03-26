@@ -74,6 +74,7 @@ rwExp expression =
      LetE inf b rhs body -> ExpM <$> (LetE inf b <$> rwExp rhs <*> rwExp body)
      LetfunE inf defs body -> ExpM <$> (LetfunE inf <$> mapM rwDef defs <*> rwExp body)
      CaseE inf scr alts -> ExpM <$> (CaseE inf <$> rwExp scr <*> mapM rwAlt alts)
+     ExceptE _ _ -> return expression
 
 rwApp inf (ExpM (VarE op_inf op_var)) ty_args args
   | parLoopOperator op_var =

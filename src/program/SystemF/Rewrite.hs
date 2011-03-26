@@ -180,6 +180,7 @@ generalRewrites = Map.fromList table
               {- Rewrites temporarily disabled while we change Stream types
             , (pyonBuiltin the_oper_CAT_MAP, rwBindStream) -}
             , (pyonBuiltin the_for, rwFor)
+            , (pyonBuiltin the_safeSubscript, rwSafeSubscript)
             ]
 
 -- | Rewrite rules that transform potentially parallel algorithms into
@@ -975,6 +976,49 @@ rwFor tenv inf [TypM size_ix, TypM acc_type] args =
                              maybeToList (fmap return maybe_ret)
         loop_call <- varAppE loop_var [] loop_arguments
         return $ letfunE (Rec [mkDef loop_var loop_fun]) loop_call
+
+-- | Inline a definition of the safeSubscript function
+--
+-- > if (i < 0 || i >= size)
+-- > then exception 
+-- > else array[i]
+rwSafeSubscript :: RewriteRule
+rwSafeSubscript tenv inf [elt_type] [elt_repr, list, ix] =
+  -- Create a function taking the un-applied parameters
+  fmap Just $
+  lamE $ mkFun []
+  (\ [] -> return ([OutPT ::: fromTypM elt_type],
+                   SideEffectRT ::: fromTypM elt_type))
+  (\ [] [out_ptr] ->
+    rwSafeSubscriptBody tenv inf elt_type elt_repr list ix (varE out_ptr))
+ 
+rwSafeSubscript tenv inf [elt_type] [elt_repr, list, ix, dst] =
+  fmap Just $
+  rwSafeSubscriptBody tenv inf elt_type elt_repr list ix (return dst)
+ 
+rwSafeSubscript _ _ _ _ = return Nothing
+
+rwSafeSubscriptBody :: TypeEnv -> ExpInfo -> TypM -> ExpM
+                    -> ExpM -> ExpM -> MkExpM -> MkExpM
+rwSafeSubscriptBody tenv inf elt_type elt_repr list ix ret =
+  caseOfList tenv (return list) elt_type $ \size_ix size array ->
+  caseOfIndexedInt tenv (varE size) (VarT size_ix) $ \size_int -> do
+    ix_var <- newAnonymousVar ObjectLevel
+    subscript_expr <-
+      ifE (varAppE (pyonBuiltin the_or) []
+           [varAppE (pyonBuiltin the_OrdDict_int_lt) []
+            [varE ix_var, litE (IntL 0 intType)],
+            varAppE (pyonBuiltin the_OrdDict_int_ge) []
+            [varE ix_var, varE size_int]])
+      (exceptE (SideEffectRT ::: fromTypM elt_type))
+      (varAppE (pyonBuiltin the_copy) [elt_type]
+       [return elt_repr,
+        varAppE (pyonBuiltin the_subscript) [TypM (VarT size_ix), elt_type]
+        [return elt_repr, varE array, varE ix_var],
+        ret])
+      
+    return $
+      letE (memVarP ix_var (ValPT Nothing ::: intType)) ix subscript_expr
 
 -------------------------------------------------------------------------------
 

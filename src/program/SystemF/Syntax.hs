@@ -181,6 +181,11 @@ data BaseExp s =
     , expScrutinee :: Exp s
     , expAlternatives :: [Alt s]
     }
+    -- | Interrupt execution.  This expression does not return.
+  | ExceptE
+    { expInfo :: ExpInfo
+    , expType :: ReturnType
+    }
 
 data BaseAlt s =
   Alt { altConstructor :: !Var
@@ -290,6 +295,7 @@ isValueExp (ExpSF expression) =
      LetfunE {} -> False
      CaseE {expScrutinee = scr, expAlternatives = alts} ->
        isValueExp scr && all (isValueExp . altBody . fromAltSF) alts
+     ExceptE {} -> False
        
 unpackPolymorphicCall :: ExpSF -> Maybe (ExpSF, [Type], [ExpSF])
 unpackPolymorphicCall (ExpSF (AppE {expOper = op, expTyArgs = ts, expArgs = xs})) =

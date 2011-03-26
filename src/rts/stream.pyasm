@@ -8,7 +8,7 @@ module pyon.internal.stream;
 #include "structures.h"
 #include "stream.h"
 
-import procedure exit (pointer, pointer) -> ();
+import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 

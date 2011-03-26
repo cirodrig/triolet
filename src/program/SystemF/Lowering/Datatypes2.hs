@@ -39,7 +39,7 @@ module SystemF.Lowering.Datatypes2
         lowerFunctionType,
 
         -- * Creating layouts
-        Layout,
+        Layout(ValLayout, MemLayout),
         getLayout,
         AlgLayout,
         getAlgLayout,

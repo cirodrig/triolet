@@ -571,6 +571,7 @@ rwExp expression = do
     LetE inf bind val body -> rwLet inf bind val body
     LetfunE inf defs body -> rwLetrec inf defs body
     CaseE inf scrut alts -> rwCase inf scrut alts
+    ExceptE _ _ -> rwExpReturn (ex1, Nothing)
 
 -- | Rewrite a list of expressions that are in the same scope,
 --   such as arguments of a function call.

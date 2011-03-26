@@ -34,7 +34,9 @@ lowerIntrinsicOp v
       IntMap.fromList [(fromIdent $ Type.Var.varID v, f) | (v, f) <- assocs]
 
     assocs =
-      [ (pyonBuiltin the_AdditiveDict_int_add,
+      [ (pyonBuiltin the_or, binary_bool PrimOr)
+      , (pyonBuiltin the_and, binary_bool PrimAnd)
+      , (pyonBuiltin the_AdditiveDict_int_add,
          binary_int (PrimAddZ Signed S32))
       , (pyonBuiltin the_AdditiveDict_int_sub,
          binary_int (PrimSubZ Signed S32))
@@ -103,6 +105,13 @@ binary_int op = do
   param_var2 <- newAnonymousVar int_type
   let atom = PrimA op [VarV param_var1, VarV param_var2]
   return $ LamV $ closureFun [param_var1, param_var2] [int_type] $ ReturnE atom
+
+binary_bool op = do
+  let bool_type = PrimType BoolType
+  param_var1 <- newAnonymousVar bool_type
+  param_var2 <- newAnonymousVar bool_type
+  let atom = PrimA op [VarV param_var1, VarV param_var2]
+  return $ LamV $ closureFun [param_var1, param_var2] [bool_type] $ ReturnE atom
 
 -- | Round a FP number
 float_to_int round_mode = do

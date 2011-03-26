@@ -883,6 +883,8 @@ floatInExpDmd dmd (ExpM expression) =
      CaseE inf scr alts ->
        floatInCase dmd inf scr alts
 
+     ExceptE {} -> return $ ExpM expression
+
 floatInApp :: Bool -> Dmd -> ExpM -> Flt (ExpM, Context)
 floatInApp float_initializers dmd expression = do
   -- Flatten the expression and catch any floated bindings that depend on

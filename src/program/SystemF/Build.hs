@@ -72,6 +72,9 @@ caseE scr alts = do
   alts' <- sequence alts
   return $ ExpM $ CaseE defaultExpInfo scr' alts'
 
+exceptE :: ReturnType -> MkExpM
+exceptE ty = return $ ExpM $ ExceptE defaultExpInfo ty
+
 ifE :: MkExpM -> MkExpM -> MkExpM -> MkExpM
 ifE mk_cond mk_tr mk_fa = do
   cond <- mk_cond

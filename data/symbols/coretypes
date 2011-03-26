@@ -578,6 +578,12 @@ VectorDict_Complex_dot :
  -> write float;
 
 -------------------------------------------------------------------------------
+-- other arithmetic
+
+or : val bool -> val bool -> val bool;
+and : val bool -> val bool -> val bool;
+
+-------------------------------------------------------------------------------
 -- integer index arithmetic
 
 -- Promote an integer to a type index

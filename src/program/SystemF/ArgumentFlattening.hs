@@ -1175,6 +1175,7 @@ flattenInExp expression =
        scr' <- flattenInExp scr
        alts' <- mapM flattenInAlt alts
        return $ ExpM $ CaseE inf scr' alts'
+     ExceptE {} -> return expression
 
 flattenInAlt :: AltM -> AF AltM
 flattenInAlt (AltM alt) =
@@ -1236,6 +1237,7 @@ lvExp expression =
        body' <- lvExp body
        return $ ExpM $ LetfunE inf new_defs body'
      CaseE inf scr alts -> lvCase inf scr alts
+     ExceptE _ _ -> return expression
 
 lvApp inf op ty_args args =
   case op

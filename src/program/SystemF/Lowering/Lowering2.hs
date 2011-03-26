@@ -232,6 +232,7 @@ lowerExp (ExpTM (RTypeAnn return_type expression)) =
      LetE _ binder rhs body -> lowerLet return_type binder rhs body
      LetfunE _ defs body -> lowerLetrec return_type defs body
      CaseE _ scr alts -> lowerCase return_type scr alts
+     ExceptE _ _ -> lowerExcept return_type
 
 lowerVar _ v =
   case LL.lowerIntrinsicOp v
@@ -336,6 +337,49 @@ lowerAltBody return_type alt field_values =
   -- Bind the field values and generate the body
   let params = map fromPatTM $ altParams alt
   in bindPatterns (zip params field_values) $ lowerExp $ altBody alt
+
+lowerExcept return_type = do
+  -- Call exit() and return a value, which is never used
+  emitAtom0 $ LL.primCallA (LL.VarV (LL.llBuiltin LL.the_prim_exit))
+    [nativeIntV (-1)]
+  return_value
+  where
+    -- Create a value of the correct low-level type.  Since this code is dead,
+    -- the value is never used.
+    return_value =
+      case return_type
+      of ReadRT ::: _ -> fmap RetVal $
+                         return_ll_value (LL.PrimType LL.PointerType)
+         OutRT ::: _ -> fmap RetVal $
+                        return_ll_value (LL.PrimType LL.PointerType)
+         BoxRT ::: _ -> fmap RetVal $
+                        return_ll_value (LL.PrimType LL.OwnedType)
+         ValRT ::: rtype -> do
+           layout <- lift $ getLayout return_type
+           case layout of
+             ValLayout vtype -> fmap RetVal $ return_ll_value vtype
+             MemLayout _ -> internalError "lowerExcept"
+         SideEffectRT ::: _ -> return NoVal
+
+    -- Return a value of the desired type.  The actual value is unimportant
+    -- because we're generating dead code.
+    return_ll_value (LL.PrimType pt) =
+      case pt
+      of LL.PointerType -> return $ LL.LitV LL.NullL
+         LL.OwnedType -> emitAtom1 (LL.PrimType LL.OwnedType) $
+                         LL.PrimA LL.PrimCastToOwned [LL.LitV LL.NullL]
+         LL.UnitType -> return $ LL.LitV LL.UnitL
+         LL.BoolType -> return $ LL.LitV (LL.BoolL False)
+         LL.IntType sgn sz -> return $ LL.LitV (LL.IntL sgn sz 0)
+         LL.FloatType sz -> return $ LL.LitV (LL.FloatL sz 0)
+
+    return_ll_value (LL.RecordType recd) = do
+      fields <- mapM (return_ll_value . to_value_type . LL.fieldType) $ 
+                LL.recordFields recd
+      return $ LL.RecV recd fields
+      where
+        to_value_type (LL.PrimField pt) = LL.PrimType pt
+        to_value_type (LL.RecordField rt) = LL.RecordType rt
 
 lowerFun :: FunTM -> Lower LL.Fun
 lowerFun (FunTM (RTypeAnn _ fun)) =
