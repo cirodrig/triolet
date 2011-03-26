@@ -15,6 +15,8 @@ extern function pyon.internal.stream.Stream_build
 // Stream constructors and functions
 extern function pyon.internal.stream.Stream_return
   (unit, owned, owned) -> owned;
+extern function pyon.internal.stream.Stream_empty
+  (unit, owned) -> owned;
 extern function pyon.internal.stream.Stream_bind
   (unit, unit, owned, owned, owned, owned) -> owned;
 extern function pyon.internal.stream.Stream_guard

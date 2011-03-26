@@ -81,7 +81,7 @@ function inline Stream_return_initialize(pointer state) -> () {
 /* empty */
 
 // An empty stream contains nothing
-function inline Stream_empty (unit _) -> owned {
+function inline Stream_empty (unit _, owned _) -> owned {
   empty_stream;
 };
 

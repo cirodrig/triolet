@@ -202,6 +202,7 @@ pyonBuiltinVariableNames =
   , "oper_DO"
   , "oper_GUARD"
   , "oper_CAT_MAP"
+  , "oper_EMPTY"
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"
   , "oper_BITWISEXOR"
