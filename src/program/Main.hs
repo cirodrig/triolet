@@ -27,11 +27,13 @@ import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
+import qualified SystemF.Syntax as SystemF
 import qualified SystemF.TypecheckSF
 import qualified SystemF.TypecheckMem
 import qualified SystemF.Simplify as SystemF
 import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
+import qualified SystemF.MemoryIR as SystemF
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.OutputPassing as SystemF
@@ -128,6 +130,19 @@ invokeCPP macros include_paths inpath outpath = do
                  | (key, value) <- macros]
     include_path_opts = ["-I" ++ path | path <- include_paths]
 
+-- | General-purpose high-level optimizations
+highLevelOptimizations :: Bool -> Bool -> SystemF.Module SystemF.Mem
+                       -> IO (SystemF.Module SystemF.Mem)
+highLevelOptimizations global_demand_analysis use_sequential_rules mod = do
+  mod <- if use_sequential_rules
+         then SystemF.rewriteWithSequentialRules mod
+         else SystemF.rewriteWithGeneralRules mod
+  mod <- SystemF.floatModule mod
+  mod <- if global_demand_analysis
+         then SystemF.demandAnalysis mod
+         else SystemF.localDemandAnalysis mod
+  return mod
+
 -- | Compile a pyon file from source code to low-level code.
 compilePyonToPyonAsm :: FilePath -> String -> IO LowLevel.Module
 compilePyonToPyonAsm path text = do
@@ -163,9 +178,7 @@ compilePyonToPyonAsm path text = do
   -- The first group of optimizations performs inlining to create bigger 
   -- functions, then floating and dead code elimination.  These steps 
   -- are primarily setup to improve the accuracy of the simplifier.
-  mem_mod <- SystemF.rewriteWithGeneralRules mem_mod
-  mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.demandAnalysis mem_mod
+  mem_mod <- highLevelOptimizations True False mem_mod
 
   putStrLn "Prepared Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
@@ -174,40 +187,37 @@ compilePyonToPyonAsm path text = do
   -- including high-level transformations via rewriting.
   -- Currently there are inter-pass dependences that we
   -- stupidly resolve by running them lots of times.
-  mem_mod <- SystemF.rewriteWithGeneralRules mem_mod
-  mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.demandAnalysis mem_mod
-  mem_mod <- iterateM (SystemF.rewriteWithGeneralRules >=>
-                       SystemF.floatModule >=>
-                       SystemF.localDemandAnalysis) 6 mem_mod
+  mem_mod <- highLevelOptimizations True False mem_mod
+  mem_mod <- iterateM (highLevelOptimizations False False) 6 mem_mod
 
   -- Parallelize loops, then sequentialize the remaining loops
-  putStrLn "Loop rewrite"
-  print $ SystemF.PrintMemoryIR.pprModule mem_mod
   mem_mod <- SystemF.parallelLoopRewrite mem_mod
-  mem_mod <- SystemF.rewriteWithGeneralRules mem_mod
-  mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.demandAnalysis mem_mod
-  mem_mod <- SystemF.rewriteWithSequentialRules mem_mod
-  mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.demandAnalysis mem_mod
+  mem_mod <- highLevelOptimizations False False mem_mod
+  mem_mod <- iterateM (highLevelOptimizations False True) 2 mem_mod
+  putStrLn "Loop rewritten"
+  print $ SystemF.PrintMemoryIR.pprModule mem_mod
 
   -- Flatten function arguments and local variables.
   -- We transform arguments and returns first, then run a simplifier pass 
   -- to rebuild demand information.
   -- Argument flattening leads to more precise demand information,
   -- which makes local variable flattening more effective.
-  mem_mod <- SystemF.flattenArguments mem_mod
-  mem_mod <- SystemF.rewriteWithSequentialRules mem_mod
-  mem_mod <- SystemF.floatModule mem_mod
-  mem_mod <- SystemF.demandAnalysis mem_mod
-  mem_mod <- SystemF.flattenLocals mem_mod
+  --
+  -- Loop through this twice because some streams are still being
+  -- converted to loops at this point.  This issue should really be fixed
+  -- by improving the optimizations that come before this point.
+  let flatten_variables mod = do
+        mod <- SystemF.flattenArguments mod
+        mod <- highLevelOptimizations False True mod
+        mod <- SystemF.flattenLocals mod
+
+        -- Simplify the code that was introduced by flattening. 
+        -- Flattening also enables more value propagation and rewrites, which
+        -- may expose more opportunities for flattening.
+        mod <- iterateM (highLevelOptimizations False True) 4 mod
+        return mod
   
-  -- Re-run the simplifier to eliminate redundant code left behind by
-  -- flattening
-  mem_mod <- iterateM (SystemF.rewriteWithSequentialRules >=>
-                       SystemF.floatModule >=>
-                       SystemF.localDemandAnalysis) 4 mem_mod
+  mem_mod <- iterateM flatten_variables 3 mem_mod
 
   putStrLn "Optimized Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
