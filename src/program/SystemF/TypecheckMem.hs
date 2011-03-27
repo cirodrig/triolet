@@ -15,7 +15,8 @@ module SystemF.TypecheckMem
         fromTypTM,
         fromPatTM,
         functionType,
-        typeCheckModule)
+        typeCheckModule,
+        typeCheckExp)
 where
 
 import Prelude hiding(mapM)
@@ -438,3 +439,8 @@ typeCheckModule (Module module_name defs exports) = do
     typeCheckDefGroups [] exports = do 
       exports' <- mapM typeCheckExport exports
       return ([], exports')
+
+typeCheckExp :: IdentSupply Var -> TypeEnv -> ExpM -> IO ExpTM
+typeCheckExp id_supply tenv expression =
+  let env = TCEnv id_supply tenv
+  in runReaderT (typeInferExp expression) env

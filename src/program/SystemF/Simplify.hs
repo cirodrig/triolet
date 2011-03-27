@@ -35,7 +35,7 @@ import SystemF.MemoryIR
 import SystemF.Syntax
 import SystemF.Rename
 import SystemF.Rewrite
-import SystemF.TypecheckMem(functionType)
+import SystemF.TypecheckMem
 import SystemF.PrintMemoryIR
 import SystemF.KnownValue
 
@@ -201,6 +201,12 @@ makeExpValue (ExpM expression) =
        return $ mvalue `mplus` Just (VarValue inf v)
      LitE inf l -> return $ Just $ LitValue inf l
      _ -> return Nothing
+
+-- | Run type inferernce on an expression
+rwInferExpType :: ExpM -> LR ReturnType
+rwInferExpType expression = LR $ \env -> do
+  tc_expression <- typeCheckExp (lrIdSupply env) (lrTypeEnv env) expression
+  return $ case tc_expression of ExpTM (RTypeAnn ty _) -> ty
 
 -------------------------------------------------------------------------------
 -- Inlining
@@ -820,19 +826,23 @@ rwLet inf bind val body =
          Nothing -> do
            (val', val_value) <- rwExp val
 
-           -- Inline the RHS expression, if desirable.  If inlining is not  
-           -- indicated, then propagate its known value.
-           let local_val_value =
-                 fmap (setTrivialValue bind_var) $ val_value
+           -- If the RHS expression raises an exception, then the entire
+           -- let-expression raises an exception.
+           glom_exceptions (assumePattern bind) val' $ do
+             -- Inline the RHS expression, if desirable.  If
+             -- inlining is not indicated, then propagate its known
+             -- value.
+             let local_val_value =
+                   fmap (setTrivialValue bind_var) $ val_value
 
-           -- Add the local variable to the environment and rewrite the body
-           (body', body_val) <-
-             assumePattern bind $
-             withMaybeValue bind_var local_val_value $
-             rwExp body
+             -- Add local variable to the environment and rewrite the body
+             (body', body_val) <-
+               assumePattern bind $
+               withMaybeValue bind_var local_val_value $
+               rwExp body
        
-           let ret_val = mask_local_variable bind_var body_val
-           rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
+             let ret_val = mask_local_variable bind_var body_val
+             rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
 
      LocalVarP bind_var bind_type dict uses -> do
        tenv <- getTypeEnv
@@ -842,21 +852,24 @@ rwLet inf bind val body =
        (val', val_value) <-
          assume bind_var (OutRT ::: bind_type) $ rwExp val
        
-       -- Inline the RHS expression, if desirable.  If inlining is not  
-       -- indicated, then propagate its known value.
-       let local_val_value =
-             fmap (setTrivialValue bind_var) $ val_value
+       -- If the RHS expression raises an exception, then the entire
+       -- let-expression raises an exception.
+       glom_exceptions (assume bind_var (ReadRT ::: bind_type)) val' $ do
+         -- Inline the RHS expression, if desirable.  If inlining is not  
+         -- indicated, then propagate its known value.
+         let local_val_value =
+               fmap (setTrivialValue bind_var) $ val_value
 
-       -- Add the local variable to the environment while rewriting the body
-       (body', body_val) <-
-         assume bind_var (ReadRT ::: bind_type) $
-         withMaybeValue bind_var local_val_value $
-         rwExp body
+         -- Add the local variable to the environment while rewriting the body
+         (body', body_val) <-
+           assume bind_var (ReadRT ::: bind_type) $
+           withMaybeValue bind_var local_val_value $
+           rwExp body
            
-       let ret_val = mask_local_variable bind_var body_val
-       let ret_exp =
-             ExpM $ LetE inf (LocalVarP bind_var bind_type dict' uses) val' body'
-       rwExpReturn (ret_exp, ret_val)
+         let ret_val = mask_local_variable bind_var body_val
+         let ret_exp =
+               ExpM $ LetE inf (LocalVarP bind_var bind_type dict' uses) val' body'
+         rwExpReturn (ret_exp, ret_val)
 
      MemWildP {} -> internalError "rwLet"
   where
@@ -865,6 +878,16 @@ rwLet inf bind val body =
     -- value, we have to forget about it.
     mask_local_variable bind_var ret_val =
       forgetVariables (Set.singleton bind_var) =<< ret_val
+
+    -- If the given value is an exception-raising expression, then we should
+    -- convert the entire let-expression to an exception-raising expression
+    -- with the same type as the body expression.
+    glom_exceptions assume_pattern rewritten_rhs normal_case =
+      case rewritten_rhs
+      of ExpM (ExceptE exc_inf _) -> do
+           return_type <- assume_pattern $ rwInferExpType body
+           return (ExpM $ ExceptE exc_inf return_type, Nothing)
+         _ -> normal_case       -- Otherwise, continue as normal
 
 {-
 rwLetBinding inf bind rhs mk_body =
