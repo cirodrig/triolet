@@ -342,7 +342,7 @@ wrapPattern' what pat pattern_specificity =
                     Just x  -> return x
                 Nothing ->
                   -- Try to pass a loaded value, if possible
-                  if patMRepr pat `sameParamRepr` ReadPT &&
+                  if (patMRepr pat `sameParamRepr` OutPT || patMRepr pat `sameParamRepr` ReadPT) &&
                      naturalValueTyCon tenv ty_op
                   then loaded Value ty
                   else unchanged
