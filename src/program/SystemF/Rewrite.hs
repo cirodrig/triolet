@@ -204,6 +204,7 @@ sequentializingRewrites = Map.fromList table
     table = [ (pyonBuiltin the_histogramArray, rwHistogramArray)
             , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
             , (pyonBuiltin the_fun_reduce1_Stream, rwReduce1Stream)
+            , (pyonBuiltin the_fun_fold_Stream, rwFoldStream)
             ]
 
 -- | Attempt to rewrite an application term.
@@ -396,7 +397,7 @@ rwMapStream :: RewriteRule
 rwMapStream tenv inf
   ty_args@[shape_type, elt1, elt2]
   args@[repr1, repr2, transformer, producer]
-  | Just s <- interpretStream2 (fromTypM shape_type) repr2 map_expr = do
+  | Just s <- interpretStream2 (fromTypM shape_type) (fromTypM elt2) repr2 map_expr = do
       encodeStream2 shape_type s
   where
     map_op = ExpM $ VarE inf (pyonBuiltin the_fun_map_Stream)
@@ -526,7 +527,7 @@ rwHistogram _ _ _ _ = return Nothing
 
 rwHistogramArray :: RewriteRule
 rwHistogramArray tenv inf [shape_type, size_ix] (size : input : other_args) =
-  case interpretStream2 (fromTypM shape_type) repr_int input
+  case interpretStream2 (fromTypM shape_type) intType repr_int input
   of Just s -> do
        fmap Just $
          varAppE (pyonBuiltin the_createHistogram)
@@ -606,7 +607,7 @@ rwParallelReduceStream :: RewriteRule
 rwParallelReduceStream tenv inf
   [shape_type, elt]
   (elt_repr : reducer : init : stream : other_args) = do
-  m_stream <- interpretAndBlockStream (fromTypM shape_type) elt_repr stream
+  m_stream <- interpretAndBlockStream (fromTypM shape_type) (fromTypM elt) elt_repr stream
   case m_stream of
     Nothing -> return Nothing
     Just (size_var, count_var, base_var, bs, bs_size, bs_count) -> do
@@ -660,7 +661,7 @@ rwParallelReduce1Stream :: RewriteRule
 rwParallelReduce1Stream tenv inf
   [shape_type, elt]
   (elt_repr : reducer : stream : other_args) = do
-  m_stream <- interpretAndBlockStream (fromTypM shape_type) elt_repr stream
+  m_stream <- interpretAndBlockStream (fromTypM shape_type) (fromTypM elt) elt_repr stream
   case m_stream of
     Nothing -> return Nothing
     Just (size_var, count_var, base_var, bs, bs_size, bs_count) -> do
@@ -715,7 +716,7 @@ rwParallelReduce1Stream _ _ _ _ = return Nothing
 rwParallelHistogramArray :: RewriteRule
 rwParallelHistogramArray tenv inf
   [shape_type, size_ix] (size : input : other_args) = do
-  m_stream <- interpretAndBlockStream (fromTypM shape_type) int_repr input
+  m_stream <- interpretAndBlockStream (fromTypM shape_type) intType int_repr input
   case m_stream of
     Nothing -> return Nothing
     Just (size_var, count_var, base_var, bs, bs_size, bs_count) -> do
@@ -856,23 +857,25 @@ rwParallelDoall _ _ _ _ = return Nothing
 rwReduceStream :: RewriteRule
 rwReduceStream tenv inf [shape_type, element]
   (elt_repr : reducer : init : stream : other_args) =
-  case interpretStream2 (fromTypM shape_type) elt_repr stream
+  case interpretStream2 (fromTypM shape_type) (fromTypM element) elt_repr stream
   of Just s ->
        fmap Just $
        translateStreamToFoldWithExtraArgs tenv (fromTypM element) elt_repr init reducer s other_args
      Nothing -> return Nothing
-  {-
-  case interpretStream elt_repr stream
-  of Just s ->
-       case sShape s
-       of Array1DShape size count ->
-            fmap Just $
-            rwReduceGenerate inf element elt_repr reducer init other_args size count (sGenerator s)
-          _ -> return Nothing
-     _ -> return Nothing
--}
-
+  
 rwReduceStream _ _ _ _ = return Nothing
+
+rwFoldStream :: RewriteRule
+rwFoldStream tenv inf [elt_type, acc_type]
+  (elt_repr : acc_repr : reducer : init : stream : other_args) =
+  case interpretStream2 (VarT (pyonBuiltin the_list)) (fromTypM elt_type)
+       elt_repr stream
+  of Just s ->
+       fmap Just $
+       translateStreamToFoldWithExtraArgs tenv (fromTypM acc_type) acc_repr init reducer s other_args
+     Nothing -> return Nothing
+
+rwFoldStream _ _ _ _ = return Nothing
 
 rwReduceGenerate :: ExpInfo -> TypM -> ExpM -> ExpM -> ExpM -> [ExpM]
                  -> TypM -> ExpM -> (ExpM -> MkExpM) -> FreshVarM ExpM
@@ -1158,6 +1161,15 @@ data instance Exp Stream =
     { _sexpType :: Type
     , _sexpRepr :: ExpM
     }
+    -- | An unrecognized stream expression.  We can't transform the expression,
+    --   but if it occurs inside a larger stream expression we may still be
+    --   able to transform the parts that can be interpreted.
+  | UnknownStream
+    { _sexpShape :: Shape
+    , _sexpType :: Type
+    , _sexpRepr :: ExpM
+    , _sexpExp :: ExpM
+    }
 
 -- | Get the shape of a stream
 sexpShape :: ExpS -> Shape
@@ -1166,6 +1178,7 @@ sexpShape (BindStream _ _) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list)
 sexpShape (CaseStream {_sexpShape = s}) = s
 sexpShape (ReturnStream {}) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list)
 sexpShape (EmptyStream {}) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list)
+sexpShape (UnknownStream {_sexpShape = s}) = s
 
 -- | Get the type of a stream element
 sexpElementType :: ExpS -> Type
@@ -1175,6 +1188,7 @@ sexpElementType (CaseStream {_sexpAlternatives = alt:_}) =
   sexpElementType $ altBody $ fromAltS alt
 sexpElementType (ReturnStream {_sexpType = t}) = t
 sexpElementType (EmptyStream {_sexpType = t}) = t
+sexpElementType (UnknownStream {_sexpType = t}) = t
 
 -- | Get the representation dictionary of a stream element
 sexpElementRepr :: ExpS -> ExpM
@@ -1184,6 +1198,7 @@ sexpElementRepr (CaseStream {_sexpAlternatives = alt:_}) =
   sexpElementRepr $ altBody $ fromAltS alt
 sexpElementRepr (ReturnStream {_sexpRepr = e}) = e
 sexpElementRepr (EmptyStream {_sexpRepr = e}) = e
+sexpElementRepr (UnknownStream {_sexpRepr = e}) = e
 
 newtype instance Alt Stream = AltS {fromAltS :: BaseAlt Stream}
 
@@ -1197,39 +1212,75 @@ type TyPatS = TyPat Stream
 type PatS = Pat Stream
 type AltS = Alt Stream
 
--- | Given a stream and the repr of a stream element, get its shape.
+pprExpS :: ExpS -> Doc
+pprExpS stream =
+  case stream
+  of GenerateStream shp ty repr gen ->
+       text "generate" <+> parens (pprType ty) <+> text "(...)"
+     BindStream src (pat, trans) ->
+       text "bind" $$
+       pprPat pat <+> text "<-" $$
+       nest 4 (pprExpS src) $$
+       pprExpS trans
+     CaseStream shp scr alts ->
+       text "case" <+> pprExp scr $$
+       text "of" <+> vcat (map pprAltS alts)
+     ReturnStream ty repr writer ->
+       text "return" <+> parens (pprType ty) <+> text "(...)"
+     EmptyStream ty repr ->
+       text "empty" <+> parens (pprType ty)
+     UnknownStream shp ty repr exp ->
+       text "unknown" <+> parens (pprType ty) $$
+       nest 4 (braces $ pprExp exp)
+
+pprAltS (AltS alt) =
+  let con_doc = pprVar $ altConstructor alt
+      args_doc = pprParenList [pprType t | TypS t <- altTyArgs alt]
+      ex_types_doc = map (parens . pprTyPat . fromTyPatS) $ altExTypes alt
+      params_doc = map (parens . pprPat . fromPatS) $ altParams alt
+      body_doc = pprExpS $ altBody alt
+  in con_doc <+> sep (args_doc : ex_types_doc ++ params_doc) <> text "." $$
+     nest 2 body_doc
+
+-- | Given a stream and the type and repr of a stream element, get its shape.
 --
 --   We may change the stream's type by ignoring functions that only
 --   affect the advertised stream shape.
-interpretStream2 :: Type -> ExpM -> ExpM -> Maybe ExpS
-interpretStream2 shape_type repr expression =
+interpretStream2 :: Type -> Type -> ExpM -> ExpM -> Maybe ExpS
+interpretStream2 shape_type elt_type repr expression =
+  -- If we didn't interpret anything useful, then return Nothing
+  case interpretStream2' shape_type elt_type repr expression
+  of s@(UnknownStream {}) -> Nothing
+     s -> Just s
+
+interpretStream2' shape_type elt_type repr expression =
   case unpackVarAppM expression
   of Just (op_var, ty_args, args)
        | op_var `isPyonBuiltin` the_TraversableDict_Stream_traverse ->
          case (ty_args, args)
          of ([shape_type2, _], [_, stream_arg]) ->
-              interpretStream2 shape_type2 repr stream_arg
+              interpretStream2' shape_type2 elt_type repr stream_arg
        | op_var `isPyonBuiltin` the_TraversableDict_Stream_build ->
          case (ty_args, args)
          of ([shape_type2, _], [_, stream_arg]) ->
               let stream_of_shape =
                     varApp (pyonBuiltin the_Stream) [shape_type2]
-              in interpretStream2 stream_of_shape repr stream_arg
+              in interpretStream2' stream_of_shape elt_type repr stream_arg
        | op_var `isPyonBuiltin` the_fun_asList_Stream ->
          case (ty_args, args)
          of ([shape_type2, _], [stream_arg]) ->
-              interpretStream2 shape_type2 repr stream_arg
+              interpretStream2' shape_type2 elt_type repr stream_arg
        | op_var `isPyonBuiltin` the_generate ->
          let [size_arg, type_arg] = ty_args
              [size_val, repr, writer] = args
-         in Just $ GenerateStream
+         in GenerateStream
             { _sexpShape = Array1DShape (TypM size_arg) size_val
             , _sexpType = type_arg
             , _sexpRepr = repr
             , _sexpGenerator = \ix ->
                 appE (return writer) [] [return ix]}
        | op_var `isPyonBuiltin` the_count ->
-           Just $ GenerateStream
+           GenerateStream
            { _sexpShape = UnboundedShape
            , _sexpType = intType
            , _sexpRepr = repr
@@ -1237,52 +1288,53 @@ interpretStream2 shape_type repr expression =
        | op_var `isPyonBuiltin` the_rangeIndexed ->
          let [size_index] = ty_args
              [size_val] = args
-         in Just $ GenerateStream
+         in GenerateStream
             { _sexpShape = Array1DShape (TypM size_index) size_val
             , _sexpType = intType
             , _sexpRepr = repr
             , _sexpGenerator = counting_generator}
        | op_var `isPyonBuiltin` the_oper_CAT_MAP ->
-         case args
-         of [src_repr, _, src, transformer] ->
-              -- Transformer must be a single-parameter lambda function
-              case transformer
-              of ExpM (LamE _ (FunM (Fun { funTyParams = []
-                                         , funParams = [param]
-                                         , funBody = body}))) -> do
-                   src_stream <- interpretStream2 list_shape src_repr src
-                   body_stream <- interpretStream2 list_shape repr body
-                   return $ BindStream src_stream (param, body_stream)
-                 _ -> Nothing
-            _ -> Nothing
+         let [src_type, tr_type] = ty_args
+         in case args
+            of [src_repr, _, src, transformer] ->
+                 -- Transformer must be a single-parameter lambda function
+                 case transformer
+                 of ExpM (LamE _ (FunM (Fun { funTyParams = []
+                                            , funParams = [param]
+                                            , funBody = body}))) ->
+                      let src_stream =
+                            interpretStream2' list_shape src_type src_repr src
+                          body_stream =
+                            interpretStream2' list_shape tr_type repr body
+                      in BindStream src_stream (param, body_stream)
+                    _ -> no_interpretation
+               _ -> no_interpretation
        | op_var `isPyonBuiltin` the_oper_DO ->
          let [type_arg] = ty_args
          in case args
             of [repr, writer] ->
-                 Just $ ReturnStream type_arg repr (return writer)
-               _ -> Nothing
+                 ReturnStream type_arg repr (return writer)
+               _ -> no_interpretation
        | op_var `isPyonBuiltin` the_oper_EMPTY ->
          let [type_arg] = ty_args
          in case args
-            of [repr] -> Just $ EmptyStream type_arg repr
-               _ -> Nothing
+            of [repr] -> EmptyStream type_arg repr
+               _ -> no_interpretation
        | op_var `isPyonBuiltin` the_fun_map_Stream ->
          let [_, _, out_type] = ty_args
          in case args
             of [src_repr, out_repr, transformer, producer] ->
-                 case interpretStream2 shape_type src_repr producer
-                 of Just s ->
-                      Just $ mapStream out_type out_repr transformer s
-                    Nothing -> Nothing
-               _ -> Nothing
+                 mapStream out_type out_repr transformer $
+                 interpretStream2' shape_type out_type src_repr producer
+               _ -> no_interpretation
      _ -> case fromExpM expression
-          of CaseE _ scr alts -> do
-               alts' <- mapM (interpretStreamAlt shape_type repr) alts
-               let shape = case alts'
+          of CaseE _ scr alts ->
+               let alts' = map (interpretStreamAlt shape_type elt_type repr) alts
+                   shape = case alts'
                            of [alt] -> sexpShape $ altBody $ fromAltS alt
                               _ -> typeShape shape_type
-               return $ CaseStream shape scr alts'
-             _ -> Nothing
+               in CaseStream shape scr alts'
+             _ -> no_interpretation
   where
     list_shape = VarT $ pyonBuiltin the_list
 
@@ -1290,7 +1342,15 @@ interpretStream2 shape_type repr expression =
     counting_generator ix =
       varAppE (pyonBuiltin the_store) [TypM intType] [return ix]
 
--- | Create an interpreted 'map' stream
+    no_interpretation =
+      UnknownStream (typeShape shape_type) elt_type repr expression
+
+-- | Map a function over the interpreted stream
+mapStream :: Type               -- ^ Transformed type
+          -> ExpM               -- ^ Transformed repr
+          -> ExpM               -- ^ Transformer
+          -> ExpS               -- ^ Producer stream
+          -> ExpS               -- ^ Transformed stream
 mapStream out_type out_repr transformer producer = transform producer
   where
     transform (GenerateStream shape ty repr gen) =
@@ -1302,7 +1362,7 @@ mapStream out_type out_repr transformer producer = transform producer
       BindStream src (binder, transform body)
 
     transform (CaseStream shp scr alts) =
-      CaseStream shp scr (map (map_alt transform) alts)
+      CaseStream shp scr (map transform_alt alts)
         
     transform (ReturnStream ty repr writer) =
       let writer' = apply_transformer ty repr writer
@@ -1311,8 +1371,16 @@ mapStream out_type out_repr transformer producer = transform producer
     transform (EmptyStream _ _) =
       EmptyStream out_type out_repr
 
-    map_alt f (AltS alt) =
-      AltS $ alt {altBody = f $ altBody alt}
+    transform (UnknownStream shp in_type in_repr expr) =
+      -- Can't simplify; build a "map" expression
+      UnknownStream shp out_type out_repr $
+      ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo (pyonBuiltin the_fun_map_Stream))
+      [TypM (shapeType shp), TypM in_type, TypM out_type]
+      [in_repr, out_repr, transformer, expr]
+
+    transform_alt (AltS alt) =
+      let body = transform $ altBody alt
+      in AltS $ alt {altBody = body}
 
     -- Apply the transformer function to the given expression's result.
     -- The given expression and the returned expression are both writer
@@ -1333,14 +1401,14 @@ mapStream out_type out_repr transformer producer = transform producer
               let_expr = ExpM $ LetE defaultExpInfo binder rhs body
           return let_expr)
 
-interpretStreamAlt :: Type -> ExpM -> AltM -> Maybe AltS
-interpretStreamAlt shape_type repr (AltM alt) = do
-  body <- interpretStream2 shape_type repr $ altBody alt
-  return $ AltS $ Alt { altConstructor = altConstructor alt
-                      , altTyArgs = map (TypS . fromTypM) $ altTyArgs alt
-                      , altExTypes = map TyPatS $ altExTypes alt
-                      , altParams = map PatS $ altParams alt
-                      , altBody = body}
+interpretStreamAlt :: Type -> Type -> ExpM -> AltM -> AltS
+interpretStreamAlt shape_type elt_type repr (AltM alt) =
+  let body = interpretStream2' shape_type elt_type repr $ altBody alt
+  in AltS $ Alt { altConstructor = altConstructor alt
+                , altTyArgs = map (TypS . fromTypM) $ altTyArgs alt
+                , altExTypes = map TyPatS $ altExTypes alt
+                , altParams = map PatS $ altParams alt
+                , altBody = body}
 
 -- | Produce program code of an interpreted stream.  The generated code
 --   will have the specified shape.  If code cannot be generated,
@@ -1395,6 +1463,8 @@ encodeStream2 expected_shape stream = runMaybeT $ do
        EmptyStream ty repr -> do
          let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_oper_EMPTY)
          return $ ExpM $ AppE defaultExpInfo oper [TypM ty] [repr]
+
+       UnknownStream _ _ _ expr -> return expr
 
        _ -> mzero
 
@@ -1468,10 +1538,10 @@ blockStream size_var count_var base_var stream =
        Nothing
 
 -- | Interpret a stream and attempt to create a blocked version of it.
-interpretAndBlockStream :: Type -> ExpM -> ExpM
+interpretAndBlockStream :: Type -> Type -> ExpM -> ExpM
                         -> FreshVarM (Maybe (Var, Var, Var, ExpS, TypM, ExpM))
-interpretAndBlockStream shape_type elt_repr stream_exp =  
-  case interpretStream2 shape_type elt_repr stream_exp
+interpretAndBlockStream shape_type elt_type elt_repr stream_exp =  
+  case interpretStream2 shape_type elt_type elt_repr stream_exp
   of Just s -> do
        -- Create a block-wise version of the stream
        size_var <- newAnonymousVar TypeLevel
@@ -1651,6 +1721,16 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
        let copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
        return $ ExpM $
          AppE defaultExpInfo copy_op [TypM acc_ty] [acc_repr, init, out_ptr]
+         
+     UnknownStream shp ty repr expr ->
+       -- Fold over this uninterpreted stream
+       -- FIXME: Generate a _sequential_ fold
+       let op = ExpM $ VarE defaultExpInfo $ pyonBuiltin the_fun_fold_Stream
+           Just list_stream =
+             -- Cast to list shape
+             castStreamExpressionShape (VarT $ pyonBuiltin the_list) (shapeType shp) ty repr expr
+       in return $ ExpM $ AppE defaultExpInfo op [TypM ty, TypM acc_ty]
+          [repr, acc_repr, acc_f, init, list_stream, out_ptr]       
          
 -- | Given a stream and the repr of a stream element, get its shape.
 --

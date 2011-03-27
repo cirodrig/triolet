@@ -221,6 +221,7 @@ pyonBuiltinVariableNames =
   , "makeComplex"
     
     -- Inserted by stream specialization
+  , "fun_fold_Stream"
   , "fun_map_Stream"
   , "fun_reduce_Stream"
   , "fun_reduce1_Stream"

@@ -638,6 +638,16 @@ oper_CAT_MAP :
  -> box (read a -> box Stream list b)
  -> box Stream list b;
 
+-- Sequential fold over a stream
+fun_fold_Stream : (val a : pure)
+	       -> (val acc : pure)
+               -> box Repr a
+               -> box Repr acc
+               -> box (read acc -> read a -> write acc)
+               -> read acc
+               -> box Stream list a
+               -> write acc;
+
 -- Reinterpret a stream as having list shape
 fun_asList_Stream : (val t : val pure -> val pure)
                  -> (val a : pure)
