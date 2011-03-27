@@ -1,0 +1,33 @@
+
+# Get the slice xs[i+j+1 :]
+@forall(a)
+def tail_slice(xs : list(a), i : int) -> iter(list, a):
+  return (xs[i + j + 1] for j in range(len(xs) - i - 1))
+
+@forall(a)
+def tails(xs : list(a)) -> iter(list, (a, iter(list, a))):
+  N = len(xs)
+  return ((xs[i], tail_slice(xs, i)) for i in range(N))
+
+# Get all pairs of members of xs
+def all_pairs(xs):
+  return ((a, b) for (a, bs) in tails(xs) for b in bs)
+
+def sum(xs): return reduce(lambda x, y: x + y, 0, xs)
+
+# Compute the potential energy of a set of point objects
+# interacting with a 1/d^2 force
+def compute_energy(xs, ys, zs):
+  def force(u, v):
+    (x1, y1, z1) = u
+    (x2, y2, z2) = v
+    dx = x1 - x2
+    dy = y1 - y2
+    dz = z1 - z2
+    distance = dx*dx + dy*dy + dz*dz
+    return 1 / distance
+
+  zipped_list = zip3(xs, ys, zs)
+  return sum(force(u, v) for (u, v) in all_pairs(zipped_list))
+
+export ccall compute_energy : list(float) * list(float) * list(float) -> float

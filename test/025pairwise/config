@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Pairwise comparison of members of a set",
+  pyonSources	 = ["pairwise.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "ok"
+}
