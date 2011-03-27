@@ -340,8 +340,10 @@ lowerAltBody return_type alt field_values =
 
 lowerExcept return_type = do
   -- Call exit() and return a value, which is never used
-  emitAtom0 $ LL.primCallA (LL.VarV (LL.llBuiltin LL.the_prim_exit))
-    [nativeIntV (-1)]
+  -- The call is commented out because we perform unsafe code reordering.
+  -- Fix it!
+  -- emitAtom0 $ LL.primCallA (LL.VarV (LL.llBuiltin LL.the_prim_exit))
+  --  [nativeIntV (-1)]
   return_value
   where
     -- Create a value of the correct low-level type.  Since this code is dead,
