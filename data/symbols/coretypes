@@ -774,6 +774,8 @@ count : (val t : val pure -> val pure) -> box Stream t int;
 
 range : val int -> box Stream list int;
 
+len : (val a : pure) -> read list a -> val int;
+
 -- A type-indexed version of 'range'
 rangeIndexed : (val n : intindex)
             -> val IndexedInt n

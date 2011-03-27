@@ -163,6 +163,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_makeComplex) |]) -}
   , (PyonName module_list "repr_list",
      Right [| pyonBuiltin SystemF.the_repr_list |])
+  , (PyonName module_list "list_len",
+     Right [| pyonBuiltin SystemF.the_len |])
   , (PyonName module_list "list_build",
      Right [| pyonBuiltin SystemF.the_TraversableDict_list_build |])
   , (PyonName module_list "list_traverse",

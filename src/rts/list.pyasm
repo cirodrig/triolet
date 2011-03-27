@@ -111,6 +111,11 @@ procedure list_grow (pointer elem_repr, pointer list, int old_size) -> int {
   new_size;
 };
 
+// Get the length of a list
+function inline list_len (unit _, pointer p) -> int {
+  p @! PyonList.nelems;
+};
+
 // Create a list from a stream of unknown size
 function list_build
     (unit _, owned elem_repr, owned stream, pointer ret) -> () {

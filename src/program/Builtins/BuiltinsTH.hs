@@ -215,6 +215,7 @@ pyonBuiltinVariableNames =
   , "fun_zip4"
   , "count"
   , "range"
+  , "len"
   , "histogram"
   , "safeSubscript"
   , "makeComplex"

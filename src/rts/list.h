@@ -1,6 +1,8 @@
 
 extern function pyon.internal.list.repr_list (unit, owned) -> owned;
 
+extern function pyon.internal.list.list_len
+  (unit, pointer) -> int;
 extern function pyon.internal.list.list_build
   (unit, owned, owned, pointer) -> ();
 extern function pyon.internal.list.list_traverse

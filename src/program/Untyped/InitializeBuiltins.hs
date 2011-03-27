@@ -763,6 +763,11 @@ mkRangeType =
   in return $ monomorphic $
      functionType [int_type] (iterType (ConTy $ tiBuiltin the_con_list) int_type)
 
+mkLenType =
+  forallType [Star] $ \[a] ->
+  ([], functionType [ConTy (tiBuiltin the_con_list) @@ ConTy a]
+       (ConTy $ tiBuiltin the_con_int))
+
 mkHistogramType =
   forallType [Star :-> Star] $ \[t] ->
   let int_type = ConTy $ tiBuiltin the_con_int
@@ -923,6 +928,9 @@ initializeTIBuiltins = do
               ),
               ("range", [| mkRangeType |]
               , [| pyonBuiltin SystemF.the_range |]
+              ),
+              ("len", [| mkLenType |]
+              , [| pyonBuiltin SystemF.the_len |]
               ),
               ("histogram", [| mkHistogramType |]
               , [| pyonBuiltin SystemF.the_histogram |]

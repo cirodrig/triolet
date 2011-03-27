@@ -31,6 +31,7 @@ pyonSourceGlobals =
   , "zip4"
   , "count"
   , "range"
+  , "len"
   , "histogram"
   , "boxed"
   , "listiter"
