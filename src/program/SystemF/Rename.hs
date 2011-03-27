@@ -11,15 +11,20 @@ module SystemF.Rename
         freshenTyPatM,
         freshenTyPatMs,
         renameDefM,
-        substituteDefM)
+        substituteDefM,
+        freshenModuleFully)
 where
 
+import Control.Applicative
 import Control.Monad
+import Control.Monad.Reader
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as Set
+import Debug.Trace
 
 import Common.Error
+import Common.MonadLogic
 import Common.Supply
 import SystemF.Syntax
 import SystemF.MemoryIR
@@ -349,3 +354,134 @@ instance Substitutable (Fun Mem) where
                , funBody = substitute s $ funBody fun}
 
 substituteDefM s def = def {definiens = substitute s $ definiens def}
+
+-------------------------------------------------------------------------------
+-- Recursive renaming.  All names bound in an expression are renamed to fresh
+-- names.
+
+type Freshen a = ReaderT Renaming FreshVarM a
+
+freshenVar :: Var -> (Var -> Freshen a) -> Freshen a
+freshenVar v k = do
+  v' <- lift $ newClonedVar v
+  local (insertRenaming v v') $ k v'
+
+lookupVar :: Var -> Freshen Var
+lookupVar v = asks (flip rename v)
+
+-- | Apply the current renaming to the type.  It's unnecessary to rename
+--   variables bound inside the type.
+freshenType ty = ReaderT $ \rn -> return $ rename rn ty
+
+freshenDmd dmd = ReaderT $ \rn -> return $ rename rn dmd
+
+freshenRet (RetM (rrepr ::: rtype)) =
+  ReaderT $ \rn -> return (RetM (rrepr ::: rename rn rtype))
+
+freshenTyParam (TyPatM v ty) k = do
+  ty' <- freshenType ty
+  freshenVar v $ \v' -> k (TyPatM v' ty')
+
+freshenParam (MemVarP v (prepr ::: ty) dmd) k = do
+  ty' <- freshenType ty
+  dmd' <- freshenDmd dmd
+  freshenVar v $ \v' -> k (MemVarP v' (prepr ::: ty') dmd')
+
+freshenParam (MemWildP (prepr ::: ty)) k = do
+  ty' <- freshenType ty
+  k (MemWildP (prepr ::: ty'))
+
+freshenParam (LocalVarP {}) _ = internalError "freshenParam"
+
+freshenExp (ExpM expression) = ExpM <$>
+  case expression
+  of VarE inf v -> VarE inf <$> lookupVar v
+     LitE _ _ -> return expression
+     AppE inf op ty_args args ->
+       AppE inf <$>
+       freshenExp op <*>
+       mapM freshenType ty_args <*>
+       mapM freshenExp args
+     LamE inf f -> LamE inf <$> freshenFun f
+     LetE inf (LocalVarP pat_var ty dict uses) rhs body -> do
+       ty' <- freshenType ty
+       dict' <- freshenExp dict
+       uses' <- freshenDmd uses
+       freshenVar pat_var $ \pat_var' -> do
+         rhs' <- freshenExp rhs
+         body' <- freshenExp body
+         trace ("freshenLocal " ++ show pat_var ++ " " ++ show pat_var') $
+           return $ LetE inf (LocalVarP pat_var' ty' dict' uses') rhs' body'
+         
+     LetE inf binder rhs body -> do
+       rhs' <- freshenExp rhs
+       freshenParam binder $ \binder' -> do
+         body' <- freshenExp body
+         return $ LetE inf binder' rhs' body'
+     
+     LetfunE inf defs body ->
+       freshenDefGroup defs $ \defs' -> LetfunE inf defs' <$> freshenExp body
+
+     CaseE inf scr alts ->
+       CaseE inf <$> freshenExp scr <*> mapM freshenAlt alts
+
+     ExceptE inf ty -> ExceptE inf <$> freshenType ty
+
+freshenAlt (AltM alt) = do
+  ty_args <- mapM freshenType $ altTyArgs alt
+  withMany freshenTyParam (altExTypes alt) $ \ex_types ->
+    withMany freshenParam (altParams alt) $ \params -> do
+      body <- freshenExp $ altBody alt
+      return $ AltM $ Alt { altConstructor = altConstructor alt
+                          , altTyArgs = ty_args
+                          , altExTypes = ex_types
+                          , altParams = params
+                          , altBody = body}
+
+freshenFun (FunM f) =
+  withMany freshenTyParam (funTyParams f) $ \ty_params ->
+  withMany freshenParam (funParams f) $ \params -> do
+    body <- freshenExp $ funBody f
+    ret <- freshenRet $ funReturn f
+    return $ FunM $ f { funTyParams = ty_params
+                      , funParams = params
+                      , funReturn = ret
+                      , funBody = body}
+
+freshenDefGroup :: DefGroup (Def Mem)
+                -> (DefGroup (Def Mem) -> Freshen a) -> Freshen a
+freshenDefGroup (NonRec def) k = do
+  f' <- freshenFun $ definiens def
+  freshenVar (definiendum def) $ \v' ->
+    let def' = def {definiendum = v', definiens = f'}
+    in k (NonRec def')
+
+freshenDefGroup (Rec defs) k = do
+  withMany freshenVar (map definiendum defs) $ \vs' -> do
+    defs' <- zipWithM freshen_def vs' defs 
+    k (Rec defs')
+  where
+    freshen_def new_v def = do
+      f' <- freshenFun $ definiens def
+      return $ def {definiendum = new_v, definiens = f'}
+
+-- | Rename all bound variables in a module
+--   (except those bound inside types or demand annotations).
+freshenModuleFully :: Module Mem -> FreshVarM (Module Mem)
+freshenModuleFully (Module modname groups exports) =
+  runReaderT freshen_module mempty
+  where
+    freshen_module = do
+      (groups', exports') <- freshen_defs id groups
+      return $ Module modname groups' exports'
+
+    freshen_defs hd (g:gs) =
+      freshenDefGroup g $ \g' -> freshen_defs (hd . (g':)) gs
+
+    freshen_defs hd [] = do
+      exports' <- mapM freshen_export exports
+      return (hd [], exports')
+    
+    freshen_export e = do
+      f <- freshenFun $ exportFunction e
+      return $ e {exportFunction = f}

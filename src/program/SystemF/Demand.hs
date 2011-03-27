@@ -57,6 +57,14 @@ data Dmd = Dmd { multiplicity :: !Multiplicity
                , specificity :: !Specificity
                }
 
+-- | A 'Dmd' can be renamed by renaming its specificity.
+--   The 'multiplicity' field does not mention variable names.
+instance Renameable Dmd where
+  rename rn dmd = dmd {specificity = rename rn $ specificity dmd}
+  freshen dmd = do spc <- freshen $ specificity dmd
+                   return $ dmd {specificity = spc}
+  freeVariables dmd = freeVariables $ specificity dmd
+
 -- | The default demand value, 
 --   assigned to variables before demand analysis has run.
 unknownDmd :: Dmd

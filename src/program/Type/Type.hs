@@ -104,7 +104,7 @@ data Repr = Value               -- ^ Represented as a value.  Variables hold
                                 --   memory-managed data.
           | Referenced          -- ^ Referenced.  Variables hold a pointer to
                                 --   non-memory-managed data.
-            deriving (Eq, Ord)
+            deriving (Eq, Ord, Show)
 
 -- | A function parameter representation.
 --

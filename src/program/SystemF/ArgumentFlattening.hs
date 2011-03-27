@@ -34,6 +34,7 @@ import SystemF.Floating
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
+import SystemF.Rename
 import SystemF.ReprDict
 import Type.Compare
 import Type.Environment
@@ -1394,4 +1395,8 @@ flattenLocals mod =
     (dict_env, intindex_env) <- runFreshVarM id_supply createDictEnv
     type_env <- readInitGlobalVarIO the_memTypes
     let env = AFLVEnv id_supply type_env dict_env intindex_env IntMap.empty
-    runReaderT (unAF $ lvModuleContents mod) env
+    mod' <- runReaderT (unAF $ lvModuleContents mod) env
+    
+    -- Flattening creates multiple local variables with the same name.
+    -- Rename them.
+    runFreshVarM id_supply $ freshenModuleFully mod'
