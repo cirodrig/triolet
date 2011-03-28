@@ -19,6 +19,7 @@ module SystemF.Syntax
      BaseAlt(..),
      BaseFun(..),
      Def(..), mkDef, mkWrapperDef,
+     mapDefiniens,
      mapMDefiniens,
      modifyDefAnnotation,
      defIsWrapper,
@@ -220,6 +221,9 @@ mkDef v f = Def v defaultDefAnn f
 
 mkWrapperDef :: Var -> Fun s -> Def s
 mkWrapperDef v f = Def v (DefAnn True) f
+
+mapDefiniens :: (Fun s -> Fun s') -> Def s -> Def s'
+mapDefiniens f def = def {definiens = f $ definiens def}
 
 mapMDefiniens :: Monad m => (Fun s -> m (Fun s')) -> Def s -> m (Def s')
 mapMDefiniens f def = do fun <- f (definiens def)

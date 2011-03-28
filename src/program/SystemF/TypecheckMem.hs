@@ -12,6 +12,8 @@ module SystemF.TypecheckMem
         TyPat(..),
         Ret(..),
         TypTM, ExpTM, AltTM, FunTM, PatTM,
+        discardTypeAnnotationsExp,
+        discardTypeAnnotationsFun,
         fromTypTM,
         fromPatTM,
         functionType,
@@ -88,10 +90,12 @@ fromTypTM (TypTM (RTypeAnn _ t)) = t
 tyPatType :: TyPat Mem -> Type
 tyPatType (TyPatM _ t) = t
 
+fromTyPatTM :: TyPatTM -> TyPatM
+fromTyPatTM (TyPatTM v t) = TyPatM v (fromTypTM t)
+
 fromPatTM :: PatTM -> PatM
 fromPatTM (TypedMemVarP v pt) = memVarP v pt
-fromPatTM (TypedLocalVarP v ty repr) = localVarP v ty repr'
-  where repr' = internalError "fromPatTM: Not implemented"
+fromPatTM (TypedLocalVarP v ty repr) = localVarP v ty (dtae repr)
 fromPatTM (TypedMemWildP pt) = memWildP pt
 
 -- | Determine the type that a pattern-bound variable has after it's been 
@@ -99,6 +103,44 @@ fromPatTM (TypedMemWildP pt) = memWildP pt
 patType :: PatM -> ReturnType
 patType = patMReturnType
 
+-- | An abbreviation for the long function name
+dtae = discardTypeAnnotationsExp
+
+-- | Remove type annotations from an expression
+discardTypeAnnotationsExp :: ExpTM -> ExpM
+discardTypeAnnotationsExp (ExpTM (RTypeAnn _ expression)) = ExpM $ 
+  case expression
+  of VarE inf v -> VarE inf v
+     LitE inf l -> LitE inf l
+     AppE inf op ty_args args ->
+       AppE inf (dtae op) (map (TypM . fromTypTM) ty_args) (map dtae args)
+     LamE inf f -> LamE inf $ discardTypeAnnotationsFun f
+     LetE inf pat rhs body ->
+       LetE inf (fromPatTM pat) (dtae rhs) (dtae body)
+     LetfunE inf defs body ->
+       let defs' = fmap (mapDefiniens discardTypeAnnotationsFun) defs
+       in LetfunE inf defs' (dtae body)
+     CaseE inf scr alts ->
+       CaseE inf (dtae scr) (map discard_alt alts)
+     ExceptE inf rty -> ExceptE inf rty
+  where
+    discard_alt (AltTM (RTypeAnn _ alt)) =
+      AltM $ Alt { altConstructor = altConstructor alt
+                 , altTyArgs = map (TypM . fromTypTM) $ altTyArgs alt
+                 , altExTypes = map fromTyPatTM $ altExTypes alt
+                 , altParams = map fromPatTM $ altParams alt
+                 , altBody = dtae $ altBody alt}
+
+discardTypeAnnotationsFun :: FunTM -> FunM
+discardTypeAnnotationsFun (FunTM (RTypeAnn _ f)) =
+  FunM $ Fun { funInfo = funInfo f
+             , funTyParams = map fromTyPatTM $ funTyParams f
+             , funParams = map fromPatTM $ funParams f
+             , funReturn = RetM $ fromRetTM $ funReturn f
+             , funBody = dtae $ funBody f}
+
+
+-- | Get the type of a function using its parameter and return types.
 functionType :: FunM -> Type 
 functionType (FunM (Fun { funTyParams = ty_params
                         , funParams = params
