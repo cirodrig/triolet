@@ -117,6 +117,13 @@ etaReduceExp strip_arg (ExpM expression) =
        let scr' = hrNonTail scr
        alts' <- mapM (etaReduceAlt strip_arg) alts
        return $ ExpM (CaseE inf scr' alts')
+     ExceptE {} ->
+       case strip_arg
+       of Just _ ->
+            -- Can't eta-reduce an exception, because it might cause
+            -- the exception to be raised sooner
+            Nothing
+          Nothing -> return $ ExpM expression
   where
     hrNonTail e = case etaReduceExp Nothing e
                   of Just e' -> e'
