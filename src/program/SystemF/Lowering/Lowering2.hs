@@ -308,7 +308,7 @@ lowerLet _ binder rhs body =
          result <- lowerExp rhs
          let debug_rhs_type = case rhs of ExpTM (RTypeAnn rtype _) -> rtype
          case result of NoVal -> return ()
-                        _ -> traceShow (pprReturnType debug_rhs_type) $ internalError "lowerLet"
+                        _ -> internalError "lowerLet"
          
          -- If it's a dictionary variable, add it to the environment while
          -- generating code of the body.

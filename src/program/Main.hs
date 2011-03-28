@@ -26,7 +26,6 @@ import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
-import qualified SystemF.EtaReduce as SystemF
 import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.TypecheckSF
@@ -138,7 +137,6 @@ highLevelOptimizations global_demand_analysis use_sequential_rules mod = do
   mod <- if use_sequential_rules
          then SystemF.rewriteWithSequentialRules mod
          else SystemF.rewriteWithGeneralRules mod
-  mod <- return $ SystemF.etaReduceModule mod
   mod <- SystemF.floatModule mod
   mod <- if global_demand_analysis
          then SystemF.demandAnalysis mod

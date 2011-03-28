@@ -30,6 +30,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Builtins.Builtins
 import SystemF.Demand
+import SystemF.EtaReduce
 import SystemF.Floating
 import SystemF.MemoryIR
 import SystemF.Syntax
@@ -676,7 +677,28 @@ rwAppWithOperator inf op' op_val ty_args args =
       return (new_exp, Nothing)
 
     data_con_app type_con data_con op' = do
-      (args', arg_values) <- rwExps args
+      -- Try to eta-reduce writer arguments, because this increases the
+      -- likelihood that we can value-propagate them
+      let types = map fromTypM ty_args
+          (field_types, _) =
+            instantiateDataConTypeWithExistentials data_con types
+          
+          -- Eta-reduce writer arguments, leave other arguments alone
+          extended_field_types = map Just field_types ++ repeat Nothing
+          eta_reduced_args = zipWith eta_reduce_arg args extended_field_types
+            where
+              -- Only eta-reduce known writer arguments
+              eta_reduce_arg arg (Just (ReadRT ::: _)) = eta_reduce arg
+              eta_reduce_arg arg _ = arg
+
+              eta_reduce (ExpM (LamE inf f)) =
+                etaReduceSingleLambdaFunction inf f
+              eta_reduce e = e
+
+      -- Simplify arguments
+      (args', arg_values) <- rwExps eta_reduced_args
+      
+      -- Construct a value from this expression
       let new_exp = ExpM $ AppE inf op' ty_args args'
           new_value = dataConValue inf type_con data_con ty_args arg_values
       return (new_exp, new_value)
