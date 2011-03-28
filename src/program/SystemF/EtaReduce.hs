@@ -82,19 +82,19 @@ etaReduceExp strip_arg (ExpM expression) =
        let op' = hrNonTail op
            args' = map hrNonTail args
 
-           -- If stripping, the last argument must be a variable.
-           -- The variable must match strip_arg.  Remove that argument.
-           stripped_args =
-             case strip_arg
-             of Nothing -> args'
-                Just v ->
-                  case args'
-                  of [] -> failed
-                     _ -> case last args'
-                          of ExpM (VarE _ arg_v) | v == arg_v -> init args'
-                             _ -> failed
-       in stripped_args `seq`
-          return (ExpM (AppE inf op' ty_args stripped_args))
+       in do -- If stripping, the last argument must be a variable.
+             -- The variable must match strip_arg.  Remove that argument.
+             stripped_args <-
+               case strip_arg
+               of Nothing -> return args'
+                  Just v
+                    | null args' -> Nothing
+                    | otherwise ->
+                      case last args'
+                      of ExpM (VarE _ arg_v)
+                           | v == arg_v -> return $ init args'
+                         _ -> Nothing
+             return (ExpM (AppE inf op' ty_args stripped_args))
      LamE inf f -> return $ hrLambdaFun inf f
      LetE inf (LocalVarP pat_var pat_type pat_dict pat_dmd) val body ->
        case strip_arg
@@ -134,7 +134,7 @@ etaReduceExp strip_arg (ExpM expression) =
     -- This expression can't be eta-reduced
     can't_strip = case strip_arg
                   of Nothing -> return $ ExpM expression
-                     Just _ -> failed
+                     Just _ -> Nothing
 
 etaReduceAlt strip_arg (AltM alt) = do
   body <- etaReduceExp strip_arg $ altBody alt
