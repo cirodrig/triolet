@@ -88,10 +88,11 @@ runTask (ParsePyonAsm {parseAsmInput = file}) = do
   input_path <- readFilePath file
   parsePyonAsm input_path input_text
 
-runTask (CompilePyonToPyonAsm {compilePyonInput = file}) = do
+runTask (CompilePyonToPyonAsm { compilePyonInput = file
+                              , compileFlags = cflags}) = do
   input_text <- readFileAsString file
   input_path <- readFilePath file
-  compilePyonToPyonAsm input_path input_text
+  compilePyonToPyonAsm cflags input_path input_text
 
 runTask (CompilePyonAsmToGenC { compileAsmInput = ll_mod
                               , compileAsmIfaces = ifaces
@@ -144,8 +145,9 @@ highLevelOptimizations global_demand_analysis use_sequential_rules mod = do
   return mod
 
 -- | Compile a pyon file from source code to low-level code.
-compilePyonToPyonAsm :: FilePath -> String -> IO LowLevel.Module
-compilePyonToPyonAsm path text = do
+compilePyonToPyonAsm :: CompileFlags -> FilePath -> String
+                     -> IO LowLevel.Module
+compilePyonToPyonAsm compile_flags path text = do
   -- Parse and generate untyped code
   untyped_mod <- parseFile path text
   putStrLn "Untyped"
@@ -191,8 +193,12 @@ compilePyonToPyonAsm path text = do
   mem_mod <- iterateM (highLevelOptimizations False False) 6 mem_mod
 
   -- Parallelize loops, then sequentialize the remaining loops
-  mem_mod <- SystemF.parallelLoopRewrite mem_mod
-  mem_mod <- highLevelOptimizations False False mem_mod
+  mem_mod <-
+    if lookupCompileFlag DoParallelization compile_flags  
+    then do mem_mod <- SystemF.parallelLoopRewrite mem_mod
+            highLevelOptimizations False False mem_mod
+    else return mem_mod
+
   mem_mod <- iterateM (highLevelOptimizations False True) 2 mem_mod
   putStrLn "Loop rewritten"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod

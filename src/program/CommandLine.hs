@@ -15,6 +15,7 @@ where
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
+import qualified Data.Set as Set
 import System.Console.GetOpt
 import System.Environment
 import System.FilePath
@@ -66,6 +67,8 @@ optionDescrs =
     "define a preprocessor macro; ignored when compiling pyon files"
   , Option "I" [] (ReqArg (\mac -> Opt $ addIncludePath mac) "PATH")
     "add a path to the include search path; ignored when compiling pyon files"
+  , Option "f" [] (ReqArg (Opt . addFlag) "FLAG")
+    "enable/disable a compiler flag"
   ]
 
 -- | Parse command-line arguments.  If they specify a job to perform, return
@@ -134,6 +137,8 @@ data InterpretOptsState =
   , ppMacros :: [(String, Maybe String)]
     -- | List of include search paths, in /reverse/ order
   , includeSearchPaths :: [String]
+    -- | Set of boolean compilation settings chosen with \"-f\"
+  , commandLineFlags :: CompileFlags
   }
 
 initialState = InterpretOptsState { currentAction = CompileObject
@@ -144,6 +149,9 @@ initialState = InterpretOptsState { currentAction = CompileObject
                                   , interpreterErrors = []
                                   , ppMacros = []
                                   , includeSearchPaths = []
+                                  , commandLineFlags =
+                                      -- Some flags are enabled by default 
+                                      Set.fromList [DoParallelization]
                                   }
 
 putError st e = st {interpreterErrors = e : interpreterErrors st}
@@ -180,6 +188,21 @@ addMacro mac st =
 
 addIncludePath path st =
   st {includeSearchPaths = path : includeSearchPaths st}
+
+addFlag flagname st =
+  let (negated, base_flagname) =
+        case flagname
+        of 'n':'o':'-':neg_flagname -> (True, neg_flagname)
+           _ -> (False, flagname)
+  in case lookup base_flagname flag_names
+     of Nothing  -> putError st $ "Unrecognized flag: " ++ show flagname
+        Just flg ->
+          let update_flag =
+                if negated then Set.delete flg else Set.insert flg
+          in st {commandLineFlags = update_flag $ commandLineFlags st}
+  where
+    flag_names :: [(String, CompileFlag)]
+    flag_names = [("parallelize", DoParallelization)]
 
 setOutput file st =
   case outputFile st of
@@ -227,7 +250,8 @@ compileObjectJob config (file_path, language) moutput_path = do
           ifile = writeFileFromPath iface_path
           outfile = writeFileFromPath output_path
       compileWithCFile config output_path $
-        return $ \cfile -> pyonCompilation infile iface_files
+        return $ \cfile -> pyonCompilation
+                           (commandLineFlags config) infile iface_files
                            cfile ifile hfile outfile
 
     PyonAsmLanguage ->
@@ -280,15 +304,16 @@ compileWithCFile config output_path mk_do_work
       do_work <- mk_do_work
       return $ withAnonymousFile ".c" $ do_work
 
-pyonCompilation :: ReadFile     -- ^ Input pyon file
+pyonCompilation :: CompileFlags -- ^ Command-line flags
+                -> ReadFile     -- ^ Input pyon file
                 -> [ReadFile]   -- ^ Input interface files
                 -> TempFile     -- ^ Temporary C file
                 -> WriteFile    -- ^ Output interface file
                 -> WriteFile    -- ^ Output header file
                 -> WriteFile    -- ^ Output object file
                 -> Job ()
-pyonCompilation infile iface_files cfile ifile hfile outfile = do
-  asm <- taskJob $ CompilePyonToPyonAsm infile
+pyonCompilation compile_flags infile iface_files cfile ifile hfile outfile = do
+  asm <- taskJob $ CompilePyonToPyonAsm compile_flags infile
   ifaces <- mapM (taskJob . LoadIface) iface_files
   taskJob $ CompilePyonAsmToGenC asm ifaces (writeTempFile cfile) ifile hfile
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile

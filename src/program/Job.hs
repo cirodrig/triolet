@@ -28,6 +28,11 @@ module Job
         writeFileAsByteString,
         writeFilePath,
         
+        -- * Compilation flags
+        CompileFlag(..),
+        CompileFlags,
+        lookupCompileFlag,
+
         -- * Jobs
         Task(..),
         Job,
@@ -45,6 +50,7 @@ import Control.Monad
 import Data.ByteString.Lazy(ByteString)
 import qualified Data.ByteString.Lazy as ByteString
 import Data.IORef
+import qualified Data.Set as Set
 import Foreign.C
 import Foreign.Ptr
 import System.Directory
@@ -257,6 +263,19 @@ writeFilePath :: WriteFile -> IO FilePath
 writeFilePath file = writeFileHelper (\path () -> return path) file ()
 
 -------------------------------------------------------------------------------
+-- User-configurable flags
+
+-- | A user-configurable boolean flag affecting compilation
+data CompileFlag =
+    DoParallelization        -- ^ Enable parallelizing transformations
+    deriving (Eq, Ord, Enum)
+
+type CompileFlags = Set.Set CompileFlag
+
+lookupCompileFlag :: CompileFlag -> CompileFlags -> Bool
+lookupCompileFlag flg set = Set.member flg set
+
+-------------------------------------------------------------------------------
 -- Tasks
 
 -- | A single step within a job.  The implementation of each task is provided 
@@ -275,7 +294,8 @@ data Task a where
     } :: Task LowLevel.Module
   -- Compile a Pyon file
   CompilePyonToPyonAsm
-    { compilePyonInput :: ReadFile
+    { compileFlags :: CompileFlags
+    , compilePyonInput :: ReadFile
     } :: Task LowLevel.Module
   -- Compile a PyonAsm file
   CompilePyonAsmToGenC
