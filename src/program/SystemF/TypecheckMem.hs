@@ -18,7 +18,7 @@ module SystemF.TypecheckMem
         fromPatTM,
         functionType,
         typeCheckModule,
-        typeCheckExp)
+        inferExpType)
 where
 
 import Prelude hiding(mapM)
@@ -482,7 +482,31 @@ typeCheckModule (Module module_name defs exports) = do
       exports' <- mapM typeCheckExport exports
       return ([], exports')
 
-typeCheckExp :: IdentSupply Var -> TypeEnv -> ExpM -> IO ExpTM
-typeCheckExp id_supply tenv expression =
+-- | Infer the type of an expression.  The expression is assumed to be
+--   well-typed; this function doesn't check for most errors.
+inferExpType :: IdentSupply Var -> TypeEnv -> ExpM -> IO ReturnType
+inferExpType id_supply tenv expression =
   let env = TCEnv id_supply tenv
-  in runReaderT (typeInferExp expression) env
+  in runReaderT (infer_exp expression) env
+  where
+    -- Get the return type of an expression.  Skip parts that don't matter 
+    -- to the return type.  Variable bindings are added to the environment,
+    -- but their definitions are skipped.
+    infer_exp expression =
+      case fromExpM expression
+      of LamE _ f -> return $ BoxRT ::: functionType f
+         LetE _ pat e body ->
+           assumeUsingLetPattern pat $ infer_exp body
+         LetfunE _ defs body ->
+           assumeDefs defs $ infer_exp body
+         CaseE _ _ (alt : _) ->
+           infer_alt alt
+         ExceptE _ rt ->
+           return rt
+         _ ->
+           fmap getExpType $ typeInferExp expression
+
+    infer_alt (AltM alt) =
+      withMany assumeTyPat (altExTypes alt) $ \_ ->
+      withMany assumePat (altParams alt) $ \_ ->
+      infer_exp $ altBody alt

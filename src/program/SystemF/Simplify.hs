@@ -206,8 +206,7 @@ makeExpValue (ExpM expression) =
 -- | Run type inferernce on an expression
 rwInferExpType :: ExpM -> LR ReturnType
 rwInferExpType expression = LR $ \env -> do
-  tc_expression <- typeCheckExp (lrIdSupply env) (lrTypeEnv env) expression
-  return $ case tc_expression of ExpTM (RTypeAnn ty _) -> ty
+  inferExpType (lrIdSupply env) (lrTypeEnv env) expression
 
 -------------------------------------------------------------------------------
 -- Inlining
