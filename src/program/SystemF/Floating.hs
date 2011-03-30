@@ -41,6 +41,7 @@ import qualified SystemF.DictEnv as DictEnv
 import SystemF.Rename
 import SystemF.ReprDict
 import SystemF.Syntax
+import SystemF.TypecheckMem
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
 import Type.Compare
@@ -488,8 +489,7 @@ applyContext [] e = e
 
 data FloatCtx = 
   FloatCtx { fcVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
-             -- | The global type environment.  Local types are not added to
-             --   the environment.
+             -- | The type environment
            , fcTypeEnv :: !TypeEnv
              -- | Representation dictionaries in scope
            , fcDictEnv :: MkDictEnv
@@ -560,6 +560,23 @@ instance ReprDictMonad Flt where
     let ctx' = ctx {fcIntEnv = f $ fcIntEnv ctx}
     in runFlt m ctx'
 
+-- | Add a variable to the type environment
+assume :: Var -> ReturnType -> Flt a -> Flt a
+assume v rty m = Flt $ \ctx ->
+  let ctx' = ctx {fcTypeEnv = insertType v rty $ fcTypeEnv ctx}
+  in runFlt m ctx'
+
+-- | Add a definition group to the type environment,
+--   after renaming the function names.
+--
+--   It's not necessary to rename the function types.
+assumeRnDefGroup :: Renaming -> DefGroup (Def Mem) -> Flt a -> Flt a
+assumeRnDefGroup rn defgroup m =
+  let function_types = [(rename rn $ definiendum def,
+                         BoxRT ::: functionType (definiens def))
+                       | def <- defGroupMembers defgroup]
+  in foldr (uncurry assume) m function_types
+     
 -- | Float a binding, when the bound variable is a fresh variable.
 --   This should not be used to float preexisting bindings; use
 --   'floatAndRename' for that.
@@ -678,7 +695,7 @@ addLocalVars vs m = Flt $ \ctx ->
       ctx' = ctx {fcLocalVars = foldr IntSet.insert (fcLocalVars ctx) ids}
   in runFlt m ctx'
 
--- | Add a pattern variable to the environment.
+-- | Add a pattern variable to the type environment.
 --   If the pattern binds a readable variable, indicate that the variable is
 --   a readable reference.  If the pattern binds a representation dictionary,
 --   add the dictionary to the environment.
@@ -696,15 +713,30 @@ addPatternVar pat m = addRnPatternVar mempty pat m
 --   We use this when a binding is renamed and floated.
 addRnPatternVar :: Renaming -> PatM -> Flt ExpM -> Flt ExpM
 addRnPatternVar rn pat =
-  case pat
-  of MemVarP {}
-       | ReadPT <- patMRepr pat -> addReadVar (rename rn $ patMVar' pat)
-     LocalVarP {} -> addReadVar (rename rn $ patMVar' pat)
-     MemVarP pat_var ptype uses ->
-       let rn_pattern =
-             MemVarP (rename rn pat_var) (renameBinding rn ptype) uses
-       in saveReprDictPattern rn_pattern
-     _ -> id
+  let rn_pattern =
+        case pat
+        of MemVarP v ptype uses ->
+             MemVarP (rename rn v) (renameBinding rn ptype) (rename rn uses)
+           LocalVarP v ty dict uses ->
+             LocalVarP (rename rn v) (rename rn ty) (rename rn dict) (rename rn uses)
+           MemWildP ptype ->
+             MemWildP (renameBinding rn ptype)
+             
+             
+  in case rn_pattern
+     of MemVarP v ptype uses
+          | ReadPT <- patMRepr pat ->
+              assume v (patMReturnType rn_pattern) .
+              saveReprDictPattern rn_pattern .
+              addReadVar v
+          | otherwise ->  
+              assume v (patMReturnType rn_pattern) .
+              saveReprDictPattern rn_pattern
+        LocalVarP v ty dict uses -> 
+          assume v (ReadRT ::: ty) .
+          saveReprDictPattern rn_pattern .
+          addReadVar v
+        MemWildP _ -> id
 
 addPatternVars ps x = foldr addPatternVar x ps
 
@@ -931,7 +963,11 @@ floatInLet dmd inf pat rhs body =
        -- Float the dictionary argument
        pat_dict' <- floatInExp pat_dict
        let pat' = LocalVarP pat_var pat_type pat_dict' dmd
-       (rhs', rhs_context) <- anchorOnVar' pat_var $ floatInExpRhs pat_dmd rhs
+       (rhs', rhs_context) <-
+         assume pat_var (OutRT ::: pat_type) $
+         anchorOnVar' pat_var $
+         floatInExpRhs pat_dmd rhs
+
        unfloated_rhs rhs_context pat' rhs'
 
      MemWildP {} -> internalError "floatInLet"
@@ -953,13 +989,14 @@ floatInLetfun dmd inf defs body = do
   defs' <-
     case defs
     of NonRec {} -> traverse (float_function_body []) defs
-       Rec {}    -> traverse (float_function_body def_vars) defs
+       Rec {}    -> assumeRnDefGroup mempty defs $
+                    traverse (float_function_body def_vars) defs
 
   -- Float these functions
   rn <- floatAndRename (LetfunCtx inf defs')
-  
+
   -- Float the body
-  floatInExpDmd dmd $ rename rn body
+  assumeRnDefGroup rn defs' $ floatInExpDmd dmd $ rename rn body
   where
     def_vars = map definiendum $ defGroupMembers defs
     
@@ -1049,7 +1086,9 @@ floatInTopLevelDefGroup defgroup =
                  of Nothing -> [NonRec def']
                     Just b_defs -> [b_defs, NonRec def']
      Rec defs -> do
-       (defs', bindings) <- getFloatedBindings $ mapM floatInTopLevelDef defs
+       (defs', bindings) <-
+         assumeRnDefGroup mempty defgroup $
+         getFloatedBindings $ mapM floatInTopLevelDef defs
        return $! case makeDefGroup bindings
                  of Nothing -> [Rec defs']
                     Just b_defs -> [mergeDefGroups b_defs $ Rec defs']
@@ -1074,6 +1113,17 @@ makeDefGroup xs = case concatMap (fromLetfunCtx . ctxExp) xs
   where
     fromLetfunCtx (LetfunCtx _ dg) = defGroupMembers dg
 
+floatTopLevel (defs:defss) exports = do
+  new_defs <- floatInTopLevelDefGroup defs
+  (defss', exports') <- assume_new_defs new_defs $ floatTopLevel defss exports
+  return (new_defs ++ defss', exports')
+  where
+    assume_new_defs new_defs m = foldr (assumeRnDefGroup mempty) m new_defs
+
+floatTopLevel [] exports = do
+  (unzip -> (export_defs, exports')) <- mapM floatInExport exports
+  return (concat export_defs, exports')
+
 floatModule :: Module Mem -> IO (Module Mem)
 floatModule (Module mod_name defss exports) =
   withTheNewVarIdentSupply $ \id_supply -> do
@@ -1084,12 +1134,6 @@ floatModule (Module mod_name defss exports) =
                             fcDictEnv = dict_env,
                             fcIntEnv = int_env,
                             fcReadVars = IntSet.empty}
-    defss' <- runTopLevelFlt float_defss flt_env
-    (unzip -> (export_defs, exports')) <-
-      runTopLevelFlt float_exports flt_env
-    return $ Module mod_name (concat $ defss' ++ export_defs) exports'
-  where
-    float_defss = mapM floatInTopLevelDefGroup defss
-    float_exports = mapM floatInExport exports
-    
-    
+    (defss', exports') <- runTopLevelFlt (floatTopLevel defss exports) flt_env
+    return $ Module mod_name defss' exports'
+
