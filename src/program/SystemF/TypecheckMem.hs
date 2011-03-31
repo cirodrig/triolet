@@ -18,7 +18,8 @@ module SystemF.TypecheckMem
         fromPatTM,
         functionType,
         typeCheckModule,
-        inferExpType)
+        inferExpType,
+        inferAppType)
 where
 
 import Prelude hiding(mapM)
@@ -510,3 +511,20 @@ inferExpType id_supply tenv expression =
       withMany assumeTyPat (altExTypes alt) $ \_ ->
       withMany assumePat (altParams alt) $ \_ ->
       infer_exp $ altBody alt
+
+-- | Infer the type of an application, given the operator type and argument
+--   types.  If the application is not well-typed, an exception is raised.
+inferAppType :: IdentSupply Var
+             -> TypeEnv
+             -> ReturnType      -- ^ Operator type
+             -> [TypM]          -- ^ Type arguments
+             -> [ReturnType]    -- ^ Operand types
+             -> IO ReturnType
+inferAppType id_supply tenv op_type ty_args arg_types =
+  let env = TCEnv id_supply tenv
+  in runReaderT infer_type env
+  where
+    infer_type = do
+      ti_ty_args <- mapM typeInferType ty_args
+      inst_type <- computeInstantiatedType noSourcePos op_type ti_ty_args
+      computeAppliedType noSourcePos inst_type arg_types
