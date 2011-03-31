@@ -862,7 +862,7 @@ unwrapReturn (WrapRet rparam _ (LoadWP Boxed dict _)) worker_body =
   mapOverTailExprs unwrap_return worker_body
   where
     unwrap_return tail_expr =
-      let binder = memVarP (patMVar' rparam) (BoxPT ::: patMType rparam)
+      let binder = localVarP (patMVar' rparam) (patMType rparam) dict
           load_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_loadBox)
           load_exp = ExpM $ AppE defaultExpInfo load_op
                      [TypM $ patMType rparam]
