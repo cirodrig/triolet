@@ -90,6 +90,36 @@ isFloatableCaseDataCon con =
   con `isPyonBuiltin` the_someIndexedInt ||
   isUnboxedTupleCon con
 
+-- | Return True if the expression ends with an exception-raising statement 
+--   and does not return normally.
+isExceptingExp :: ExpM -> Bool
+isExceptingExp (ExpM exp) =
+  case exp
+  of LetE _ _ _ body  -> isExceptingExp body
+     LetfunE _ _ body -> isExceptingExp body
+     CaseE _ scr alts -> all isExceptingAlt alts
+     ExceptE {}       -> True
+     _                -> False
+
+isExceptingAlt :: AltM -> Bool
+isExceptingAlt (AltM alt) =
+  isExceptingExp $ altBody alt
+
+-- | Set the return type of a case alternative.  The alternative must
+--   satisfy the 'isExceptingAlt' predicate.
+setExceptionReturnType :: ReturnType -> AltM -> AltM
+setExceptionReturnType rt (AltM alt) =
+  AltM $ alt {altBody = set_exp_type $ altBody alt}
+  where
+    set_exp_type (ExpM expression) =
+      ExpM $
+      case expression
+      of LetE inf pat rhs body -> LetE inf pat rhs $ set_exp_type body
+         LetfunE inf defs body -> LetfunE inf defs $ set_exp_type body
+         CaseE inf e alts -> CaseE inf e $ map (setExceptionReturnType rt) alts
+         ExceptE inf _ -> ExceptE inf rt
+         _ -> internalError "setExceptionReturnType: Unexpected expression"
+
 -- | If the given application term is floatable, then determine its type
 --   and return a binder for it.  Otherwise return Nothing.
 floatableAppParamType :: TypeEnv -> Var -> [TypM] -> [ExpM] -> Maybe ParamType
@@ -303,7 +333,7 @@ contextItem e = ContextItem (freeVariablesContextExp e) e
     freeVariablesContextExp (LetCtx _ pat rhs) =
       freeVariables (patMType pat) `Set.union` freeVariables rhs
 
-    freeVariablesContextExp (CaseCtx _ scrutinee _ ty_args ty_pats pats) = 
+    freeVariablesContextExp (CaseCtx _ scrutinee _ ty_args ty_pats pats exc_alts) = 
       let scr_fv = freeVariables scrutinee
           ty_fv = Set.unions $ map freeVariables ty_args
           typat_fv = Set.unions $ map freeVariables [t | TyPatM _ t <- ty_pats]
@@ -311,7 +341,9 @@ contextItem e = ContextItem (freeVariablesContextExp e) e
           -- Get free variables from patterns; remove existential variables
           pat_fv1 = Set.unions $ map (freeVariables . patMType) pats
           pat_fv = foldr Set.delete pat_fv1 [v | TyPatM v _ <- ty_pats]
-      in Set.unions [scr_fv, ty_fv, typat_fv, pat_fv]
+          
+          alts_fv = freeVariables exc_alts
+      in Set.unions [scr_fv, ty_fv, typat_fv, pat_fv, alts_fv]
    
     freeVariablesContextExp (LetfunCtx _ defgroup) =
       case defgroup
@@ -328,11 +360,15 @@ data ContextExp =
     --
     --   @let <pattern> = <rhs> in (...)@
     LetCtx ExpInfo PatM ExpM
-    -- | A case expression with a single alternative.  The alternative's
-    --   fields are included, sans the alternative body.
+    -- | A case expression.  The case expression has a single
+    --   alternative that can return normally, and possibly other
+    --   alternatives that raise exceptions instead of returning.
+    --   The normal alternative's fields are included except for the
+    --   alternative body, which is not part of the context.
     --
-    --   @case <scrutinee> of <alternative>. (...)@
-  | CaseCtx ExpInfo ExpM !Var [TypM] [TyPatM] [PatM]
+    --   @case <scrutinee> 
+    --    of { <alternative>. (...); <excepting alternatives>}@
+  | CaseCtx ExpInfo ExpM !Var [TypM] [TyPatM] [PatM] [AltM]
     -- | A letfun expression
   | LetfunCtx ExpInfo (DefGroup (Def Mem))
 
@@ -356,10 +392,11 @@ renameContextExp rn cexp =
   case cexp
   of LetCtx inf pat body ->
        LetCtx inf (renamePatM rn pat) (rename rn body)
-     CaseCtx inf scr con ty_args ty_params params ->
+     CaseCtx inf scr con ty_args ty_params params exc_alts ->
        CaseCtx inf (rename rn scr) con (rename rn ty_args)
        (map (renameTyPatM rn) ty_params)  
        (map (renamePatM rn) params)
+       (map (rename rn) exc_alts)
      LetfunCtx inf defs ->
        LetfunCtx inf (fmap (renameDefM rn) defs)
 
@@ -369,12 +406,13 @@ freshenContextExp (LetCtx inf pat body) = do
   (pat', rn) <- freshenPatM pat
   return (LetCtx inf pat' (rename rn body), rn)
 
-freshenContextExp (CaseCtx inf scr alt_con ty_args ty_params params) = do
+freshenContextExp (CaseCtx inf scr alt_con ty_args ty_params params exc_alts) = do
   (ty_params', ty_renaming) <- freshenTyPatMs ty_params 
   (params', param_renaming) <-
     freshenPatMs $ map (renamePatM ty_renaming) params
   let rn = ty_renaming `mappend` param_renaming
-  return (CaseCtx inf scr alt_con ty_args ty_params' params', rn)
+  exc_alts' <- freshen exc_alts
+  return (CaseCtx inf scr alt_con ty_args ty_params' params' exc_alts', rn)
 
 freshenContextExp (LetfunCtx inf defs) =
   case defs
@@ -399,7 +437,7 @@ ctxDefs :: ContextItem -> [Var]
 ctxDefs item =
   case ctxExp item
   of LetCtx _ pat _ -> [patMVar' pat]
-     CaseCtx _ _ _ _ ty_params params ->
+     CaseCtx _ _ _ _ ty_params params _ ->
        [v | TyPatM v _ <- ty_params] ++ mapMaybe patMVar params
      LetfunCtx _ defs -> map definiendum $ defGroupMembers defs
 
@@ -469,20 +507,33 @@ nubContext id_supply tenv ctx =
 
     nub_r _ rn new_ctx [] = return (new_ctx, rn)
 
--- | Apply a context to an expression to produce a new expression
-applyContext :: Context -> ExpM -> ExpM
-applyContext (c:ctx) e =
-  let apply_c =
+-- | Apply a context to an expression to produce a new expression.
+--   If the context could contain a case statement with excepting branches,
+--   then the expression's return type must be passed as an argument.
+applyContextRT :: Maybe ReturnType -> Context -> ExpM -> ExpM
+applyContextRT m_return_type (c:ctx) e =
+  let return_type =
+        -- Get the return type.  It's only needed for excepting alternatives 
+        -- in case statements.
+        case m_return_type
+        of Nothing ->
+             internalError "applyContext: Need return type for floated case statement"
+           Just rt -> rt
+
+      apply_c =
         case ctxExp c
         of LetCtx inf pat rhs -> ExpM $ LetE inf pat rhs e
-           CaseCtx inf scr con ty_args ty_params params ->
-             let alt = AltM $ Alt con ty_args ty_params params e
-             in ExpM $ CaseE inf scr [alt]
+           CaseCtx inf scr con ty_args ty_params params exc_alts ->
+             let alts = AltM (Alt con ty_args ty_params params e) :
+                        map (setExceptionReturnType return_type) exc_alts
+             in ExpM $ CaseE inf scr alts
            LetfunCtx inf defs ->
              ExpM $ LetfunE inf defs e
-  in applyContext ctx $! apply_c
+  in applyContextRT m_return_type ctx $! apply_c
 
-applyContext [] e = e
+applyContextRT _ [] e = e
+
+applyContext = applyContextRT Nothing
 
 -------------------------------------------------------------------------------
 -- The floating monad
@@ -560,11 +611,22 @@ instance ReprDictMonad Flt where
     let ctx' = ctx {fcIntEnv = f $ fcIntEnv ctx}
     in runFlt m ctx'
 
+fltInferExpType :: ExpM -> Flt ReturnType
+fltInferExpType e = Flt $ \ctx -> traceShow (text "fltInferExpType" <+> pprExp e) $ do
+  return_type <- inferExpType (fcVarSupply ctx) (fcTypeEnv ctx) e
+  return (return_type, [])
+
 -- | Add a variable to the type environment
 assume :: Var -> ReturnType -> Flt a -> Flt a
 assume v rty m = Flt $ \ctx ->
   let ctx' = ctx {fcTypeEnv = insertType v rty $ fcTypeEnv ctx}
   in runFlt m ctx'
+
+-- | Add a variable from a type pattern to the type environment
+assumeTyPatM :: TyPatM -> Flt a -> Flt a
+assumeTyPatM (TyPatM v t) m = assume v (ValRT ::: t) m
+
+assumeTyParams ty_params m = foldr assumeTyPatM m ty_params
 
 -- | Add a definition group to the type environment,
 --   after renaming the function names.
@@ -646,8 +708,8 @@ anchorOnVar' v m = addLocalVar v $ anchor' check m
     check c = v `Set.member` ctxUses c
 
 -- | Put floated bindings here, if they depend on the specified variables
-anchorOnVars :: [Var] -> Flt ExpM -> Flt ExpM
-anchorOnVars vs m = addLocalVars vs $ anchor check m
+anchorOnVars :: [Var] -> Flt (ExpM, a) -> Flt (ExpM, a)
+anchorOnVars vs m = addLocalVars vs $ anchor' check m
   where
     var_set = Set.fromList vs
     check c = ctxUses c `intersects` var_set
@@ -655,8 +717,8 @@ anchorOnVars vs m = addLocalVars vs $ anchor check m
 -- | Anchor bindings inside a top-level function.  Only function bindings
 --   are permitted to float out.  Function bindings are floated only if they
 --   do not depend on the given variables.
-anchorOuterScope :: [Var] -> Flt ExpM -> Flt ExpM
-anchorOuterScope vs m = addLocalVars vs $ anchor check m
+anchorOuterScope :: [Var] -> Flt (ExpM, a) -> Flt (ExpM, a)
+anchorOuterScope vs m = addLocalVars vs $ anchor' check m
   where
     vars_set = Set.fromList vs
     check c = not (isLetfunCtx $ ctxExp c) || ctxUses c `intersects` vars_set
@@ -676,7 +738,7 @@ isReadReference v = Flt $ \ctx ->
   in return (readable_local || readable_global, [])
 
 -- | Indicate that a variable is a readable reference
-addReadVar :: Var -> Flt ExpM -> Flt ExpM
+addReadVar :: Var -> Flt a -> Flt a
 addReadVar v m = Flt $ \ctx ->
   let ctx' = ctx {fcReadVars = IntSet.insert (fromIdent $ varID v) $
                                fcReadVars ctx}
@@ -702,7 +764,7 @@ addLocalVars vs m = Flt $ \ctx ->
 --
 --   A @LocalVarP@ is counted as a readable reference.
 --   It's only a readable reference in the body of a let-binding, not the rhs.
-addPatternVar :: PatM -> Flt ExpM -> Flt ExpM
+addPatternVar :: PatM -> Flt a -> Flt a
 addPatternVar pat m = addRnPatternVar mempty pat m
 
 -- | Rename the pattern and then add it to the environment.
@@ -711,7 +773,7 @@ addPatternVar pat m = addRnPatternVar mempty pat m
 --   pattern's types.
 --
 --   We use this when a binding is renamed and floated.
-addRnPatternVar :: Renaming -> PatM -> Flt ExpM -> Flt ExpM
+addRnPatternVar :: Renaming -> PatM -> Flt a -> Flt a
 addRnPatternVar rn pat =
   let rn_pattern =
         case pat
@@ -721,8 +783,7 @@ addRnPatternVar rn pat =
              LocalVarP (rename rn v) (rename rn ty) (rename rn dict) (rename rn uses)
            MemWildP ptype ->
              MemWildP (renameBinding rn ptype)
-             
-             
+
   in case rn_pattern
      of MemVarP v ptype uses
           | ReadPT <- patMRepr pat ->
@@ -741,6 +802,9 @@ addRnPatternVar rn pat =
 addPatternVars ps x = foldr addPatternVar x ps
 
 addRnPatternVars rn ps x = foldr (addRnPatternVar rn) x ps
+
+undefinedReturnType :: ReturnType
+undefinedReturnType = undefined
 
 -------------------------------------------------------------------------------
 
@@ -782,7 +846,7 @@ flattenApp float_initializers spc expression =
 
      _ -> do
        -- Don't alter
-       new_exp <- floatInExp expression
+       (new_exp, _) <- floatInExp expression
        return (new_exp, [])
 
 createFlattenedApp float_initializers spc inf op_var ty_args args = do
@@ -868,7 +932,7 @@ createFlattenedApp float_initializers spc inf op_var ty_args args = do
           use = ExpM $ AppE defaultExpInfo copy [TypM param_type] [dict, tmpvar_exp]
       return (use, binding : subcontext)
 
-floatInExp :: ExpM -> Flt ExpM
+floatInExp :: ExpM -> Flt (ExpM, ReturnType)
 floatInExp = floatInExpDmd unknownDmd
 
 -- | Perform floating on an expression in the RHS of a let statement.
@@ -879,28 +943,29 @@ floatInExp = floatInExpDmd unknownDmd
 --   > let FLOATED_BINDINGS
 --   > in let ORIGINAL_BINDING
 --   >    in ORIGINAL_BODY
-floatInExpRhs :: Dmd -> ExpM -> Flt (ExpM, Context)
+floatInExpRhs :: Dmd -> ExpM -> Flt (ExpM, (ReturnType, Context))
 floatInExpRhs dmd expressionM@(ExpM expression) =
   case expression
-  of AppE {} -> floatInApp True dmd expressionM
-     _ -> do e <- floatInExpDmd dmd expressionM
-             return (e, [])
+  of AppE {} -> do (e, ctx) <- floatInApp True dmd expressionM
+                   return (e, (undefinedReturnType, ctx))
+     _ -> do (e, rt) <- floatInExpDmd dmd expressionM
+             return (e, (rt, []))
 
 -- | Perform floating on an expression whose result is demanded in a known way.
 --
 --   Demand information is taken from variable bindings.  It is produced by
 --   demand analysis.
-floatInExpDmd :: Dmd -> ExpM -> Flt ExpM
+floatInExpDmd :: Dmd -> ExpM -> Flt (ExpM, ReturnType)
 floatInExpDmd dmd (ExpM expression) =
   case expression
-  of VarE {} -> return $ ExpM expression
-     LitE {} -> return $ ExpM expression
+  of VarE {} -> unchanged
+     LitE {} -> unchanged
      AppE {} -> do
        (new_expression, ctx) <- floatInApp False dmd (ExpM expression)
-       return $ applyContext ctx new_expression
+       return (applyContext ctx new_expression, undefinedReturnType)
      LamE inf f -> do
        f' <- floatInFun (LocalAnchor []) f
-       return $ ExpM $ LamE inf f'
+       return (ExpM $ LamE inf f', undefinedReturnType)
      
      -- Special case: let x = lambda (...) becomes a letfun
      LetE inf pat@(MemVarP {}) (ExpM (LamE _ f)) body ->
@@ -915,7 +980,9 @@ floatInExpDmd dmd (ExpM expression) =
      CaseE inf scr alts ->
        floatInCase dmd inf scr alts
 
-     ExceptE {} -> return $ ExpM expression
+     ExceptE {} -> unchanged
+  where
+    unchanged = return (ExpM expression, undefinedReturnType)
 
 floatInApp :: Bool -> Dmd -> ExpM -> Flt (ExpM, Context)
 floatInApp float_initializers dmd expression = do
@@ -947,7 +1014,7 @@ floatInLet dmd inf pat rhs body =
   case pat
   of MemVarP pat_var pat_type pat_dmd -> do
        -- Float the RHS
-       (rhs', rhs_context) <- floatInExpRhs pat_dmd rhs
+       (rhs', (_, rhs_context)) <- floatInExpRhs pat_dmd rhs
        if isFloatableSingletonParamType pat_type
          then do
            -- Float this binding.  Since the binding may be combined with
@@ -961,9 +1028,9 @@ floatInLet dmd inf pat rhs body =
 
      LocalVarP pat_var pat_type pat_dict pat_dmd -> do
        -- Float the dictionary argument
-       pat_dict' <- floatInExp pat_dict
+       (pat_dict', _) <- floatInExp pat_dict
        let pat' = LocalVarP pat_var pat_type pat_dict' dmd
-       (rhs', rhs_context) <-
+       (rhs', (_, rhs_context)) <-
          assume pat_var (OutRT ::: pat_type) $
          anchorOnVar' pat_var $
          floatInExpRhs pat_dmd rhs
@@ -976,12 +1043,13 @@ floatInLet dmd inf pat rhs body =
     -- a let expression.
     unfloated_rhs rhs_context new_pat new_rhs = do
       -- Float in the body of the let statement
-      body' <- addPatternVar new_pat $
-               anchorOnVar (patMVar' new_pat) $ floatInExpDmd dmd body
+      (body', _) <-
+        addPatternVar new_pat $
+        anchorOnVar' (patMVar' new_pat) $ floatInExpDmd dmd body
 
       -- Floated bindings from RHS are applied to the entire let-expression
       let new_expression = ExpM $ LetE inf new_pat new_rhs body'
-      return $ applyContext rhs_context new_expression
+      return (applyContext rhs_context new_expression, undefinedReturnType)
 
 floatInLetfun dmd inf defs body = do
   -- Float the contents of these functions.  If it's a recursive binding,
@@ -1005,21 +1073,22 @@ floatInLetfun dmd inf defs body = do
       mapMDefiniens (floatInFun (LocalAnchor local_vars)) def
 
 floatInCase dmd inf scr alts = do
-  scr' <- floatInExp scr
+  (scr', _) <- floatInExp scr
   floatable <- is_floatable scr'
   if floatable
     then do rn <- floatAndRename ctx
             -- The floated variables were renamed. 
             -- Add the /renamed/ pattern variables to the environment.
             addRnPatternVars rn alt_params $ floatInExpDmd dmd $ rename rn alt_body
-    else do alts' <- mapM floatInAlt alts
-            return $ ExpM $ CaseE inf scr' alts'
+    else do (unzip -> (alts', return_type : _)) <- mapM floatInAlt alts
+            return (ExpM $ CaseE inf scr' alts', return_type)
   where
-    AltM (Alt con alt_targs alt_tparams alt_params alt_body) = head alts
-    ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params
+    (exc_alts, normal_alts) = partition isExceptingAlt alts
+    [AltM (Alt con alt_targs alt_tparams alt_params alt_body)] = normal_alts
+    ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params exc_alts
     
     is_floatable scr'
-      | length alts /= 1 =
+      | length normal_alts /= 1 =
           return False  -- Don't float a case with multiple alternatives 
       | isFloatableCaseDataCon con =
           return True   -- Float if this is a desirable type to float 
@@ -1029,12 +1098,14 @@ floatInCase dmd inf scr alts = do
       | otherwise =
           return False
 
-floatInAlt :: AltM -> Flt AltM
+floatInAlt :: AltM -> Flt (AltM, ReturnType)
 floatInAlt (AltM alt) = do
-  body' <- addPatternVars (altParams alt) $
-           anchorOnVars local_vars $
-           floatInExp (altBody alt)
-  return $ AltM $ alt {altBody = body'}
+  (body', body_type) <-
+    assumeTyParams (altExTypes alt) $
+    addPatternVars (altParams alt) $
+    anchorOnVars local_vars $
+    floatInExp (altBody alt)
+  return (AltM $ alt {altBody = body'}, body_type)
   where
     local_vars =
       [v | TyPatM v _ <- altExTypes alt] ++ mapMaybe patMVar (altParams alt)
@@ -1053,8 +1124,10 @@ data FunAnchor =
 --   regardless of the value given.
 floatInFun :: FunAnchor -> FunM -> Flt FunM
 floatInFun m_local_vars (FunM fun) = do
-  body <- addPatternVars (funParams fun) $ anchor_local_vars $
-          floatInExp (funBody fun)
+  (body, _) <- assumeTyParams (funTyParams fun) $
+               addPatternVars (funParams fun) $
+               anchor_local_vars $
+               floatInExp (funBody fun)
   return $ FunM $ fun {funBody = body}
   where
     anchor_local_vars m =

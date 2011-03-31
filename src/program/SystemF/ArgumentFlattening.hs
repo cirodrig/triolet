@@ -540,7 +540,7 @@ unwrapPattern (WrapPat pat wrap_spec) =
 unwrapDeconPat scrutinee dc_repr con ty_args ex_types fields =
   let field_contexts = map unwrapPattern fields
       ctx = contextItem $ CaseCtx defaultExpInfo scrutinee
-            con ty_args ex_types [pat | WrapPat pat _ <- fields]
+            con ty_args ex_types [pat | WrapPat pat _ <- fields] []
   in concat field_contexts ++ [ctx]
 
 -- | Generate code to rewrap a parameter.  Given the unwrapped values,
