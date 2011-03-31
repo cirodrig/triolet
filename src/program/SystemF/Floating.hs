@@ -9,10 +9,13 @@ expressions this way.
 {-# LANGUAGE FlexibleInstances, FlexibleContexts, ViewPatterns #-}
 module SystemF.Floating
        (Context,
-        ContextItem, contextItem,
+        ContextItem,
+        contextItem,
+        contextItemUses,
         ContextExp(..),
         freshenContextExp,
         applyContext,
+        splitContext,
         isTrivialExp,
         floatedParameters',
         floatModule)
@@ -325,6 +328,11 @@ data ContextItem =
   ContextItem
   { ctxUses :: Set.Set Var
   , ctxExp :: !ContextExp}
+
+-- | Get the set of variables that are used by the context item and not
+--   defined by it.
+contextItemUses :: ContextItem -> Set.Set Var
+contextItemUses = ctxUses
 
 -- | Make a 'ContextItem'.
 contextItem :: ContextExp -> ContextItem

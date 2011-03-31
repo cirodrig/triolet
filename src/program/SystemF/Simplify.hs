@@ -527,11 +527,22 @@ delveExp input_context (ExpM ex) = do
       return (output_context, rn_body)
 
     LetE inf bind@(LocalVarP {}) rhs body -> do
-      -- Float let-bindings out of the RHS.  Don't float this let-binding.
+      -- Don't float this let-binding.
+      -- Float let-bindings out of the RHS,
+      -- unless they mention the bound variable.
       (rhs_context, flattened_rhs) <- delveExp input_context rhs
       
-      let replaced_let = ExpM $ LetE inf bind flattened_rhs body
-      return (rhs_context, replaced_let)
+      -- Don't float anything that depends on the bound variable.
+      -- Any dependent bindings remain inside the RHS.
+      let bound_variable = patMVar' bind
+          mentions_bound_variable item =
+            bound_variable `Set.member` contextItemUses item
+          (dep_context, indep_context) =
+            splitContext mentions_bound_variable rhs_context
+          rhs' = applyContext dep_context flattened_rhs
+
+      let replaced_let = ExpM $ LetE inf bind rhs' body
+      return (indep_context, replaced_let)
       
 
     AppE inf oper tyArgs args -> do
