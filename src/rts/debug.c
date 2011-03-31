@@ -13,6 +13,10 @@ void pyon_db_int(int32_t i) {
   fprintf(stderr, "pyon_db: %d\n", i);
 }
 
+void pyon_db_float(float f) {
+  fprintf(stderr, "pyon_db: %g\n", f);
+}
+
 void pyon_db_pointer(void *p) {
   fprintf(stderr, "pyon_db: %p\n", p);
 }
