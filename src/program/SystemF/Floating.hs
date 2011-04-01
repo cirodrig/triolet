@@ -624,6 +624,12 @@ fltInferExpType e = Flt $ \ctx -> traceShow (text "fltInferExpType" <+> pprExp e
   return_type <- inferExpType (fcVarSupply ctx) (fcTypeEnv ctx) e
   return (return_type, [])
 
+fltInferAppType :: ReturnType -> [TypM] -> [ReturnType] -> Flt ReturnType
+fltInferAppType op_type ty_args arg_types = Flt $ \ctx -> do
+  return_type <-
+    inferAppType (fcVarSupply ctx) (fcTypeEnv ctx) op_type ty_args arg_types
+  return (return_type, [])
+
 -- | Add a variable to the type environment
 assume :: Var -> ReturnType -> Flt a -> Flt a
 assume v rty m = Flt $ \ctx ->
@@ -691,33 +697,37 @@ grabContext m = Flt $ \ctx -> do
 
 -- | Put floated bindings here if they satisfy the predicate or if they
 --   depend on a binding that satisfies the predicate
-anchor :: (ContextItem -> Bool) -> Flt ExpM -> Flt ExpM
+anchor :: (ContextItem -> Bool) -> Flt (ExpM, ReturnType)
+       -> Flt (ExpM, ReturnType)
 anchor predicate m = do
-  (x, _) <- anchor' predicate (do {x <- m; return (x, ())})
-  return x
+  (x, rt, _) <- anchor' predicate (do {(x, rt) <- m; return (x, rt, ())})
+  return (x, rt)
 
-anchor' :: (ContextItem -> Bool) -> Flt (ExpM, a) -> Flt (ExpM, a)
+anchor' :: (ContextItem -> Bool) -> Flt (ExpM, ReturnType, a)
+        -> Flt (ExpM, ReturnType, a)
 anchor' predicate m = do
-  ((exp, other_data), dep_context, rn) <- grabContext $ do
+  ((exp, return_type, other_data), dep_context, rn) <- grabContext $ do
     x <- m
     return (x, predicate)
 
-  return (applyContext dep_context (rename rn exp), other_data)
+  return (applyContext dep_context (rename rn exp),
+          rename rn return_type,
+          other_data)
 
 -- | Put floated bindings here, if they depend on the specified variable
-anchorOnVar :: Var -> Flt ExpM -> Flt ExpM
+anchorOnVar :: Var -> Flt (ExpM, ReturnType) -> Flt (ExpM, ReturnType)
 anchorOnVar v m = addLocalVar v $ anchor check m
   where
     check c = v `Set.member` ctxUses c
 
-anchorOnVar' :: Var -> Flt (ExpM, a) -> Flt (ExpM, a)
+anchorOnVar' :: Var -> Flt (ExpM, ReturnType, a) -> Flt (ExpM, ReturnType, a)
 anchorOnVar' v m = addLocalVar v $ anchor' check m
   where
     check c = v `Set.member` ctxUses c
 
 -- | Put floated bindings here, if they depend on the specified variables
-anchorOnVars :: [Var] -> Flt (ExpM, a) -> Flt (ExpM, a)
-anchorOnVars vs m = addLocalVars vs $ anchor' check m
+anchorOnVars :: [Var] -> Flt (ExpM, ReturnType) -> Flt (ExpM, ReturnType)
+anchorOnVars vs m = addLocalVars vs $ anchor check m
   where
     var_set = Set.fromList vs
     check c = ctxUses c `intersects` var_set
@@ -725,8 +735,8 @@ anchorOnVars vs m = addLocalVars vs $ anchor' check m
 -- | Anchor bindings inside a top-level function.  Only function bindings
 --   are permitted to float out.  Function bindings are floated only if they
 --   do not depend on the given variables.
-anchorOuterScope :: [Var] -> Flt (ExpM, a) -> Flt (ExpM, a)
-anchorOuterScope vs m = addLocalVars vs $ anchor' check m
+anchorOuterScope :: [Var] -> Flt (ExpM, ReturnType) -> Flt (ExpM, ReturnType)
+anchorOuterScope vs m = addLocalVars vs $ anchor check m
   where
     vars_set = Set.fromList vs
     check c = not (isLetfunCtx $ ctxExp c) || ctxUses c `intersects` vars_set
@@ -838,7 +848,7 @@ undefinedReturnType = undefined
 --   Initializers (copy and store calls) are floated only if
 --   @float_initializers@ is True.  They should only be floated when the
 --   application appears in the RHS of an assignment that can be eliminated.
-flattenApp :: Bool -> Specificity -> ExpM -> Flt (ExpM, Context)
+flattenApp :: Bool -> Specificity -> ExpM -> Flt (ExpM, ReturnType, Context)
 flattenApp float_initializers spc expression =
   case fromExpM expression
   of AppE inf (ExpM (VarE _ op_var)) ty_args args ->
@@ -847,26 +857,35 @@ flattenApp float_initializers spc expression =
 
      AppE inf op ty_args args -> do
        -- Don't flatten this expresion.  Flatten subexpressions.
-       (op', op_context) <- flattenApp False Used op
-       (args', arg_contexts) <- mapAndUnzipM (flattenApp False Used) args
+       (op', op_type, op_context) <- flattenApp False Used op
+       (unzip3 -> (args', arg_types, arg_contexts)) <-
+         mapM (flattenApp False Used) args
        let new_exp = ExpM $ AppE inf op' ty_args args'
-       return (new_exp, concat (op_context : arg_contexts))
+
+       return_type <- fltInferAppType op_type ty_args arg_types
+
+       return (new_exp, return_type, concat (op_context : arg_contexts))
 
      _ -> do
        -- Don't alter
-       (new_exp, _) <- floatInExp expression
-       return (new_exp, [])
+       (new_exp, rt) <- floatInExp expression
+       return (new_exp, rt, [])
 
 createFlattenedApp float_initializers spc inf op_var ty_args args = do
   -- Determine which parameters should be moved
   tenv <- getTypeEnv
+  let op_type = case lookupType op_var tenv
+                of Nothing -> internalError "createFlattenedApp"
+                   Just t -> t
   let moved = floatedParameters tenv spc op_var ty_args
 
   -- Flatten arguments
-  (unzip -> (args', concat -> arg_contexts)) <- zipWithM flatten_arg moved args
+  (unzip3 -> (args', arg_types, concat -> arg_contexts)) <-
+    zipWithM flatten_arg moved args
   
   -- Create the new expression
   let new_expr = ExpM $ AppE inf (ExpM $ VarE inf op_var) ty_args args'
+  return_type <- fltInferAppType op_type ty_args arg_types
 
   -- If this is a floatable expression, then float it and substitute a variable
   -- in its place.  Otherwise return it.
@@ -879,8 +898,9 @@ createFlattenedApp float_initializers spc inf op_var ty_args args = do
        Nothing ->
          return new_expr
 
-  return (floated_expr, arg_contexts)
+  return (floated_expr, return_type, arg_contexts)
   where
+    flatten_arg :: FltParamType -> ExpM -> Flt (ExpM, ReturnType, Context)
     flatten_arg Don'tFloat arg =
       -- This argument stays in place
       flattenApp False Used arg
@@ -895,35 +915,35 @@ createFlattenedApp float_initializers spc inf op_var ty_args args = do
       float floated_ctx
       
       -- Return the function variable
-      return (ExpM $ VarE inf tmpvar, [])
+      return (ExpM $ VarE inf tmpvar, BoxRT ::: functionType f', [])
 
     flatten_arg (FloatParam param_type spc) arg = do
-      (arg_expr, subcontext) <- flattenApp False spc arg
+      (arg_expr, return_type, subcontext) <- flattenApp False spc arg
 
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
       if isTrivialExp arg_expr
          || (isDataMovementExp arg_expr && not float_initializers)
-        then return (arg_expr, subcontext)
-        else flatten_mem_arg arg_expr subcontext param_type spc
+        then return (arg_expr, return_type, subcontext)
+        else flatten_mem_arg return_type arg_expr subcontext param_type spc
   
     flatten_arg (FloatLocal ty spc) arg = do
-      (arg_expr, subcontext) <- flattenApp False spc arg
+      (arg_expr, return_type, subcontext) <- flattenApp False spc arg
 
       -- If this argument is trivial, leave it where it is.
       -- Otherwise, bind it to a new variable.
       if isTrivialExp arg_expr
          || (isDataMovementExp arg_expr && not float_initializers)
-        then return (arg_expr, subcontext)
-        else flatten_local_arg arg_expr subcontext ty spc 
+        then return (arg_expr, return_type, subcontext)
+        else flatten_local_arg return_type arg_expr subcontext ty spc 
 
-    flatten_mem_arg arg_expr subcontext param_type spc = do
+    flatten_mem_arg rtype arg_expr subcontext param_type spc = do
       tmpvar <- newAnonymousVar ObjectLevel
       let binder = setPatMDmd (Dmd ManyUnsafe spc) $ memVarP tmpvar param_type 
           binding = contextItem $ LetCtx inf binder arg_expr
-      return (ExpM $ VarE inf tmpvar, binding : subcontext)
+      return (ExpM $ VarE inf tmpvar, rtype, binding : subcontext)
 
-    flatten_local_arg arg_expr subcontext param_type spc = do
+    flatten_local_arg rtype arg_expr subcontext param_type spc = do
       -- Write the value to a temporary variable
       tmpvar <- newAnonymousVar ObjectLevel
       dict <- withReprDict param_type return
@@ -938,7 +958,7 @@ createFlattenedApp float_initializers spc inf op_var ty_args args = do
       let copy = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
           tmpvar_exp = ExpM $ VarE inf tmpvar
           use = ExpM $ AppE defaultExpInfo copy [TypM param_type] [dict, tmpvar_exp]
-      return (use, binding : subcontext)
+      return (use, rtype, binding : subcontext)
 
 floatInExp :: ExpM -> Flt (ExpM, ReturnType)
 floatInExp = floatInExpDmd unknownDmd
@@ -951,15 +971,20 @@ floatInExp = floatInExpDmd unknownDmd
 --   > let FLOATED_BINDINGS
 --   > in let ORIGINAL_BINDING
 --   >    in ORIGINAL_BODY
-floatInExpRhs :: Dmd -> ExpM -> Flt (ExpM, (ReturnType, Context))
+floatInExpRhs :: Dmd -> ExpM -> Flt (ExpM, ReturnType, Context)
 floatInExpRhs dmd expressionM@(ExpM expression) =
   case expression
-  of AppE {} -> do (e, ctx) <- floatInApp True dmd expressionM
-                   return (e, (undefinedReturnType, ctx))
+  of AppE {} -> floatInApp True dmd expressionM
      _ -> do (e, rt) <- floatInExpDmd dmd expressionM
-             return (e, (rt, []))
+             return (e, rt, [])
 
 -- | Perform floating on an expression whose result is demanded in a known way.
+--   Returns the floated expression and its return type.  Both of these may
+--   have some variables renamed.
+--
+--   This function calls itself recursively,
+--   possibly after renaming subexpressions.  Renamed variables are added to
+--   the environment.
 --
 --   Demand information is taken from variable bindings.  It is produced by
 --   demand analysis.
@@ -969,11 +994,11 @@ floatInExpDmd dmd (ExpM expression) =
   of VarE {} -> unchanged
      LitE {} -> unchanged
      AppE {} -> do
-       (new_expression, ctx) <- floatInApp False dmd (ExpM expression)
-       return (applyContext ctx new_expression, undefinedReturnType)
+       (new_expression, rt, ctx) <- floatInApp False dmd (ExpM expression)
+       return (applyContext ctx new_expression, rt)
      LamE inf f -> do
        f' <- floatInFun (LocalAnchor []) f
-       return (ExpM $ LamE inf f', undefinedReturnType)
+       return (ExpM $ LamE inf f', BoxRT ::: functionType f')
      
      -- Special case: let x = lambda (...) becomes a letfun
      LetE inf pat@(MemVarP {}) (ExpM (LamE _ f)) body ->
@@ -990,22 +1015,24 @@ floatInExpDmd dmd (ExpM expression) =
 
      ExceptE {} -> unchanged
   where
-    unchanged = return (ExpM expression, undefinedReturnType)
+    unchanged = do
+      ty <- fltInferExpType (ExpM expression)
+      return (ExpM expression, ty)
 
-floatInApp :: Bool -> Dmd -> ExpM -> Flt (ExpM, Context)
+floatInApp :: Bool -> Dmd -> ExpM -> Flt (ExpM, ReturnType, Context)
 floatInApp float_initializers dmd expression = do
   -- Flatten the expression and catch any floated bindings that depend on
   -- local variables
-  ((new_expression, local_context), dependent_context, rn) <-
-    grabContext flatten_expression 
+  ((new_expression, return_type, local_context), dependent_context, rn) <-
+    grabContext flatten_expression
   
   -- Put the dependent context inside the local context
   let context = dependent_context ++ local_context
-  return (rename rn new_expression, context)
+  return (rename rn new_expression, rename rn return_type, context)
   where 
     flatten_expression = do
       -- Flatten the expression
-      result@(_, local_context) <-
+      result@(_, return_type, local_context) <-
         flattenApp float_initializers (specificity dmd) expression
     
       -- Find the new variable bindings that were created
@@ -1022,7 +1049,7 @@ floatInLet dmd inf pat rhs body =
   case pat
   of MemVarP pat_var pat_type pat_dmd -> do
        -- Float the RHS
-       (rhs', (_, rhs_context)) <- floatInExpRhs pat_dmd rhs
+       (rhs', _, rhs_context) <- floatInExpRhs pat_dmd rhs
        if isFloatableSingletonParamType pat_type
          then do
            -- Float this binding.  Since the binding may be combined with
@@ -1038,7 +1065,7 @@ floatInLet dmd inf pat rhs body =
        -- Float the dictionary argument
        (pat_dict', _) <- floatInExp pat_dict
        let pat' = LocalVarP pat_var pat_type pat_dict' dmd
-       (rhs', (_, rhs_context)) <-
+       (rhs', _, rhs_context) <-
          assume pat_var (OutRT ::: pat_type) $
          anchorOnVar' pat_var $
          floatInExpRhs pat_dmd rhs
@@ -1051,13 +1078,13 @@ floatInLet dmd inf pat rhs body =
     -- a let expression.
     unfloated_rhs rhs_context new_pat new_rhs = do
       -- Float in the body of the let statement
-      (body', _) <-
+      (body', body_type) <-
         addPatternVar new_pat $
-        anchorOnVar' (patMVar' new_pat) $ floatInExpDmd dmd body
+        anchorOnVar (patMVar' new_pat) $ floatInExpDmd dmd body
 
       -- Floated bindings from RHS are applied to the entire let-expression
       let new_expression = ExpM $ LetE inf new_pat new_rhs body'
-      return (applyContext rhs_context new_expression, undefinedReturnType)
+      return (applyContext rhs_context new_expression, body_type)
 
 floatInLetfun dmd inf defs body = do
   -- Float the contents of these functions.  If it's a recursive binding,
@@ -1087,13 +1114,25 @@ floatInCase dmd inf scr alts = do
     then do rn <- floatAndRename ctx
             -- The floated variables were renamed. 
             -- Add the /renamed/ pattern variables to the environment.
-            addRnPatternVars rn alt_params $ floatInExpDmd dmd $ rename rn alt_body
+            assume_renamed_type_params rn $
+              addRnPatternVars rn alt_params $
+              floatInExpDmd dmd $
+              rename rn alt_body
     else do (unzip -> (alts', return_type : _)) <- mapM floatInAlt alts
             return (ExpM $ CaseE inf scr' alts', return_type)
   where
     (exc_alts, normal_alts) = partition isExceptingAlt alts
     [AltM (Alt con alt_targs alt_tparams alt_params alt_body)] = normal_alts
     ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params exc_alts
+    
+    -- Rename pattern-bound variables in the type parameters and add them
+    -- to the environment
+    assume_renamed_type_params rn m =
+      foldr assume_renamed_type_param m alt_tparams
+      where
+        assume_renamed_type_param (TyPatM tyvar kind) m =
+          assume (rename rn tyvar) (ValRT ::: rename rn kind) m
+        
     
     is_floatable scr'
       | length normal_alts /= 1 =
