@@ -14,7 +14,9 @@ module SystemF.Floating
         contextItemUses,
         ContextExp(..),
         freshenContextExp,
+        asCaseCtx,
         applyContext,
+        applyContextWithType,
         splitContext,
         isTrivialExp,
         floatedParameters',
@@ -543,6 +545,8 @@ applyContextRT _ [] e = e
 
 applyContext = applyContextRT Nothing
 
+applyContextWithType t = applyContextRT (Just t)
+
 -------------------------------------------------------------------------------
 -- The floating monad
 
@@ -620,7 +624,7 @@ instance ReprDictMonad Flt where
     in runFlt m ctx'
 
 fltInferExpType :: ExpM -> Flt ReturnType
-fltInferExpType e = Flt $ \ctx -> traceShow (text "fltInferExpType" <+> pprExp e) $ do
+fltInferExpType e = Flt $ \ctx -> do
   return_type <- inferExpType (fcVarSupply ctx) (fcTypeEnv ctx) e
   return (return_type, [])
 
@@ -1109,34 +1113,34 @@ floatInLetfun dmd inf defs body = do
 
 floatInCase dmd inf scr alts = do
   (scr', _) <- floatInExp scr
-  floatable <- is_floatable scr'
-  if floatable
-    then do rn <- floatAndRename ctx
-            -- The floated variables were renamed. 
-            -- Add the /renamed/ pattern variables to the environment.
-            assume_renamed_type_params rn $
-              addRnPatternVars rn alt_params $
-              floatInExpDmd dmd $
-              rename rn alt_body
-    else do (unzip -> (alts', return_type : _)) <- mapM floatInAlt alts
-            return (ExpM $ CaseE inf scr' alts', return_type)
+  
+  -- Decide whether it's possible to float the case expression
+  case asCaseCtx (ExpM (CaseE inf scr' alts)) of
+    Nothing -> not_floatable scr'
+    Just (ctx@(CaseCtx _ _ con _ alt_tparams alt_params _), alt_body) -> do
+      floatable <- is_floatable con scr'
+      if not floatable then not_floatable scr'  else do
+        rn <- floatAndRename ctx
+        -- The floated variables were renamed. 
+        -- Add the /renamed/ pattern variables to the environment.
+        assume_renamed_type_params rn alt_tparams $
+          addRnPatternVars rn alt_params $
+          floatInExpDmd dmd $
+          rename rn alt_body
   where
-    (exc_alts, normal_alts) = partition isExceptingAlt alts
-    [AltM (Alt con alt_targs alt_tparams alt_params alt_body)] = normal_alts
-    ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params exc_alts
+    not_floatable scr' = do
+      (alts', return_type : _) <- mapAndUnzipM floatInAlt alts
+      return (ExpM $ CaseE inf scr' alts', return_type)
     
     -- Rename pattern-bound variables in the type parameters and add them
     -- to the environment
-    assume_renamed_type_params rn m =
+    assume_renamed_type_params rn alt_tparams m =
       foldr assume_renamed_type_param m alt_tparams
       where
         assume_renamed_type_param (TyPatM tyvar kind) m =
           assume (rename rn tyvar) (ValRT ::: rename rn kind) m
-        
     
-    is_floatable scr'
-      | length normal_alts /= 1 =
-          return False  -- Don't float a case with multiple alternatives 
+    is_floatable con scr'
       | isFloatableCaseDataCon con =
           return True   -- Float if this is a desirable type to float 
       | ExpM (VarE _ scr_var) <- scr' =
@@ -1144,6 +1148,20 @@ floatInCase dmd inf scr alts = do
           isReadReference scr_var
       | otherwise =
           return False
+
+-- | Decompose the expression into a case context and a body expression, if
+--   the expression can be decomposed this way.  There must be exactly one
+--   case alternative that does not always raise an exception.
+asCaseCtx :: ExpM -> Maybe (ContextExp, ExpM)
+asCaseCtx (ExpM (CaseE inf scr alts)) =
+  let (exc_alts, normal_alts) = partition isExceptingAlt alts
+      [AltM (Alt con alt_targs alt_tparams alt_params alt_body)] = normal_alts
+      ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params exc_alts
+  in if length normal_alts /= 1 
+     then Nothing
+     else Just (ctx, alt_body)
+
+asCaseCtx _ = Nothing
 
 floatInAlt :: AltM -> Flt (AltM, ReturnType)
 floatInAlt (AltM alt) = do

@@ -468,7 +468,7 @@ betaReduce inf (FunM fun) ty_args args
       let body = rename param_renaming $ substitute type_subst $ funBody fun
       let ret = rename param_renaming $ substitute type_subst $ funReturn fun
           
-      -- Is the function fully applied? 
+      -- Is the function fully applied?
       return $! case length args `compare` length params
                 of LT -> undersaturated_app args params body ret
                    EQ -> saturated_app args params body
@@ -543,7 +543,18 @@ delveExp input_context (ExpM ex) = do
 
       let replaced_let = ExpM $ LetE inf bind rhs' body
       return (indep_context, replaced_let)
-      
+
+    CaseE {}
+      | Just (ctx, case_body) <- asCaseCtx (ExpM ex) -> do
+          -- Rename the context to avoid name conflicts
+          (ctx', rn) <- freshenContextExp ctx
+          let rn_body = rename rn case_body
+
+          -- Float out this case context
+          (body_context, flattened_body) <-
+            delveExp (contextItem ctx' : input_context) rn_body
+
+          return (body_context, flattened_body)
 
     AppE inf oper tyArgs args -> do
       (ctx1, oper') <- delveExp input_context oper
@@ -564,7 +575,11 @@ delveExps ctx [] = return (ctx, [])
 restructureExp :: ExpM -> LR ExpM
 restructureExp ex = do
   (ctx, ex') <- delveExp [] ex
-  return $ applyContext ctx ex'
+  if null ctx then return ex' else do
+    -- Use the original expression's type as the return type.  It's the same as
+    -- the new expression's type.
+    e_type <- rwInferExpType ex
+    return $ applyContextWithType e_type ctx ex'
 
 -------------------------------------------------------------------------------
 -- Traversing code
@@ -851,7 +866,8 @@ rwLet inf bind val body =
        case worthPreInlining tenv uses val of
          Just val -> do
            -- The variable is used exactly once; inline it.
-           (body', body_val) <- withKnownValue bind_var val $ rwExp body
+           (body', body_val) <-
+             assumePattern bind $ withKnownValue bind_var val $ rwExp body
            let ret_val = mask_local_variable bind_var body_val
            rwExpReturn (body', ret_val)
 
@@ -1231,7 +1247,7 @@ rwModule (Module mod_name defss exports) = rw_top_level id defss
       return $ Module mod_name (defss' []) exports'
 
 rewriteLocalExpr :: RewriteRuleSet -> Module Mem -> IO (Module Mem)
-rewriteLocalExpr ruleset mod = do
+rewriteLocalExpr ruleset mod =
   withTheNewVarIdentSupply $ \var_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
     (denv, ienv) <- runFreshVarM var_supply createDictEnv
