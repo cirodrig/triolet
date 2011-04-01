@@ -1321,11 +1321,11 @@ interpretStream2' shape_type elt_type repr expression =
             of [repr] -> EmptyStream type_arg repr
                _ -> no_interpretation
        | op_var `isPyonBuiltin` the_fun_map_Stream ->
-         let [_, _, out_type] = ty_args
+         let [_, src_type, out_type] = ty_args
          in case args
             of [src_repr, out_repr, transformer, producer] ->
                  mapStream out_type out_repr transformer $
-                 interpretStream2' shape_type out_type src_repr producer
+                 interpretStream2' shape_type src_type src_repr producer
                _ -> no_interpretation
      _ -> case fromExpM expression
           of CaseE _ scr alts ->
