@@ -1,0 +1,8 @@
+
+def sum(xs): return reduce(lambda x, y: x + y, 0, xs)
+
+def f(initializer):
+	return __build__([sum(initializer(1/6 * __fromint__(i))) for i in range(6)])
+
+export ccall f : (float -> list(float)) -> list(float)
+
