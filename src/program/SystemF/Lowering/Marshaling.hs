@@ -6,12 +6,15 @@ module SystemF.Lowering.Marshaling(createCMarshalingFunction,
                                    getCExportSig)
 where
 
+import Control.Monad
+import Control.Monad.Trans
 import Data.Maybe
 
 import Common.Error
 import Builtins.Builtins
 import qualified LowLevel.CodeTypes as LL
 import qualified LowLevel.Syntax as LL
+import qualified LowLevel.Builtins as LL
 import LowLevel.Build
 import LowLevel.Records
 import SystemF.Syntax
@@ -19,6 +22,32 @@ import SystemF.MemoryIR
 import SystemF.Lowering.LowerMonad
 import Type.Type
 import Export
+
+-- | Construct a representation dictionary for a marshalable type.
+--   For types with an unknown head, 'lookupReprDict' is called.  Known types
+--   are handled by case.
+computeReprDict :: Type -> GenLower LL.Val
+computeReprDict ty =
+  case fromVarApp ty
+  of Just (op, args)
+       | op `isPyonBuiltin` the_list -> do
+           let [element_type] = args
+           let list_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_list)
+           element_dict <- computeReprDict element_type
+           emitAtom1 owned_type $
+             LL.closureCallA list_repr_ctor [LL.LitV LL.UnitL, element_dict]
+       | op `isPyonBuiltin` the_int ->
+           return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_int
+       | op `isPyonBuiltin` the_float ->
+           return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_float
+       | op `isPyonBuiltin` the_bool ->
+           return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_bool
+       | otherwise -> lookupReprDict ty return
+  where
+    owned_type = LL.PrimType LL.OwnedType
+           
+-------------------------------------------------------------------------------
+-- Parameter marshaling
 
 -- | Code for marshaling one function parameter
 data ParameterMarshaler =
@@ -38,30 +67,91 @@ combineParameterMarshalers pms =
    sequence_ $ map pmCode pms,
    map pmOutput pms)
 
+-- | Marshal a function parameter that was passed from C.  The converted
+--   parameter will be passed to a pyon function.
 marshalCParameter :: ExportDataType -> Lower ParameterMarshaler
 marshalCParameter ty =
   case ty
-  of ListET _ -> pass_by_reference
-     PyonIntET -> marshal_value (LL.PrimType LL.pyonIntType)
-     PyonFloatET -> marshal_value (LL.PrimType LL.pyonFloatType)
-     PyonComplexFloatET -> marshal_value (LL.RecordType complex_float_type)
-     PyonBoolET -> marshal_value (LL.PrimType LL.pyonBoolType)
+  of ListET _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
+     PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
+     PyonComplexFloatET ->
+       passParameterWithType (LL.RecordType complex_float_type)
+     PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
+     FunctionET args ret -> marshalParameterFunctionFromC args ret
   where
     complex_float_type = complexRecord (LL.PrimField LL.pyonFloatType)
 
-    -- Pass an object reference
-    pass_by_reference = do
-      v <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
-      return $ ParameterMarshaler { pmInputs = [v]
-                                  , pmCode = return ()
-                                  , pmOutput = LL.VarV v}
+-- | Marshal a function parameter that was passed from pyon.  The converted
+--   parameter will be passed to a C function.
+demarshalCParameter :: ExportDataType -> Lower ParameterMarshaler
+demarshalCParameter ty =
+  case ty
+  of ListET _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
+     PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
+     PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
+     FunctionET args ret -> marshalParameterFunctionToC args ret
 
-    -- Pass a primitive type by value
-    marshal_value t = do
-      v <- LL.newAnonymousVar t
-      return $ ParameterMarshaler { pmInputs = [v]
-                                  , pmCode = return ()
-                                  , pmOutput = LL.VarV v}
+-- | Pass a parameter as a single variable.
+passParameterWithType :: LL.ValueType -> Lower ParameterMarshaler
+passParameterWithType t = do
+  v <- LL.newAnonymousVar t
+  return $ ParameterMarshaler { pmInputs = [v]
+                              , pmCode = return ()
+                              , pmOutput = LL.VarV v}
+
+-- | Marshal a function parameter that holds a function from C to pyon.
+--
+--   The marshaling code creates a wrapper function is created that
+--   takes pyon parameters, converts them to C, calls the C function,
+--   converts its return value to Pyon, and returns it.
+
+marshalParameterFunctionFromC :: [ExportDataType]
+                              -> ExportDataType
+                              -> Lower ParameterMarshaler
+marshalParameterFunctionFromC params ret = do
+  -- The parameter from C
+  closure_ptr <- LL.newAnonymousVar (LL.RecordType cClosureRecord)
+  -- Pyon function
+  pyon_ptr <- LL.newAnonymousVar (LL.PrimType LL.OwnedType)
+
+  -- Parameters are passed from pyon to C; returns are passed from C to pyon
+  marshal_params <- mapM demarshalCParameter params
+  marshal_return <- demarshalCReturn ret
+  
+  -- The code generator creates a local function
+  let return_types = map LL.varType $ rmReturns marshal_return
+      (param_inputs, param_code, param_arguments) =
+        combineParameterMarshalers marshal_params
+
+      code = do
+        -- Unpack the parameter
+        [fun_ptr, cap_ptr] <- unpackRecord cClosureRecord (LL.VarV closure_ptr)
+        
+        -- Define a local function
+        f_body <- lift $ execBuild return_types $ do
+          param_code
+          rmCode marshal_return $ do
+            let call_args = LL.VarV cap_ptr : param_arguments ++ rmOutput marshal_return
+            return $ LL.primCallA (LL.VarV fun_ptr) call_args
+          return $ LL.ReturnE $ LL.ValA (map LL.VarV $ rmReturns marshal_return)
+        let f = LL.closureFun (param_inputs ++ rmInputs marshal_return) return_types f_body
+
+        emitLetrec (LL.NonRec (LL.Def pyon_ptr f))
+  
+  return $ ParameterMarshaler { pmInputs = [closure_ptr]
+                              , pmCode = code
+                              , pmOutput = LL.VarV pyon_ptr}
+
+marshalParameterFunctionToC :: [ExportDataType]
+                            -> ExportDataType
+                            -> Lower ParameterMarshaler
+marshalParameterFunctionToC params ret =
+  internalError "marshalParameterFunctionToC: Not implemented"
+
+-------------------------------------------------------------------------------
+-- Return marshaling
 
 data ReturnMarshaler =
   ReturnMarshaler
@@ -76,7 +166,6 @@ data ReturnMarshaler =
     -- | Return variables to return in the wrapper
   , rmReturns :: [LL.Var]}
 
-
 -- | Marshal a return value to C code.
 --
 -- Returns a list of parameters to the exported function,
@@ -87,10 +176,10 @@ marshalCReturn :: ExportDataType -> Lower ReturnMarshaler
 marshalCReturn ty =
   case ty
   of ListET _ -> return_new_reference (LL.RecordType listRecord)
-     PyonIntET -> marshal_value (LL.PrimType LL.pyonIntType)
-     PyonFloatET -> marshal_value (LL.PrimType LL.pyonFloatType)
-     PyonComplexFloatET -> marshal_value (LL.RecordType complex_float_type)
-     PyonBoolET -> marshal_value (LL.PrimType LL.pyonBoolType)
+     PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
+     PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
+     PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
+     PyonBoolET -> passReturnWithType (LL.PrimType LL.pyonBoolType)
   where
     complex_float_type = complexRecord (LL.PrimField LL.pyonFloatType)
 
@@ -111,16 +200,51 @@ marshalCReturn ty =
                                , rmOutput = [LL.VarV v] 
                                , rmReturns = [v]}
 
-    -- Just return a primitive value
-    marshal_value pt = do
-      v <- LL.newAnonymousVar pt
-      
-      let setup mk_real_call = bindAtom1 v =<< mk_real_call
-          
-      return $ ReturnMarshaler { rmInputs = []
+demarshalCReturn :: ExportDataType -> Lower ReturnMarshaler
+demarshalCReturn ty =
+  case ty
+  of ListET element_type ->
+       let list_type = varApp (pyonBuiltin the_list) [element_type]
+       in demarshal_reference list_type
+     PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
+     PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
+     PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
+     PyonBoolET -> passReturnWithType (LL.PrimType LL.pyonBoolType)
+  where
+    complex_float_type = complexRecord (LL.PrimField LL.pyonFloatType)
+    demarshal_reference ref_type = do
+      -- An uninitialized pyon object pointer is passed as a parameter to 
+      -- the marshaling function.  The C function returns a reference to an
+      -- object.  Copy the returned data into the destination function and
+      -- free the data.
+      pyon_ref <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
+
+      let setup mk_call = do
+            ret_val <- emitAtom1 (LL.PrimType LL.PointerType) =<< mk_call
+            dict <- computeReprDict ref_type
+
+            -- Copy to output
+            copy_fun <- selectPassConvCopy dict
+            emitAtom0 $ LL.closureCallA copy_fun [ret_val, LL.VarV pyon_ref]
+              
+            -- Deallocate
+            free_fun <- selectPassConvFinalize dict
+            emitAtom0 $ LL.closureCallA free_fun [ret_val]
+
+      -- Copy the C reference into the pyon reference
+      return $ ReturnMarshaler { rmInputs = [pyon_ref]
                                , rmCode = setup
                                , rmOutput = []
-                               , rmReturns = [v]}
+                               , rmReturns = []}
+
+-- Just return a primitive value
+passReturnWithType pt = do
+  v <- LL.newAnonymousVar pt
+  let setup mk_real_call = bindAtom1 v =<< mk_real_call
+  return $ ReturnMarshaler { rmInputs = []
+                           , rmCode = setup
+                           , rmOutput = []
+                           , rmReturns = [v]}
 
 -- | Wrap the lowered function 'f' in marshaling code for C.  Produce a
 -- primitive function.
@@ -162,11 +286,15 @@ createCMarshallingFunction _ _ =
 --   may break otherwise.
 getCExportSig :: Type -> ExportSig
 getCExportSig ty =
+  case getFunctionExportType ty
+  of (param_types, return_type) -> CExportSig param_types return_type
+
+getFunctionExportType ty =
   case fromFunType ty
   of (params, return) ->
        let param_types = mapMaybe get_param_export_type params
            return_type = get_return_export_type params return
-       in CExportSig param_types return_type
+       in (param_types, return_type)
   where
     get_param_export_type (prepr ::: ty) =
       case prepr
@@ -213,6 +341,9 @@ getCExportType ty =
        | con `isPyonBuiltin` the_list ->
            case args
            of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
+     _ | FunT {} <- ty ->
+       case getFunctionExportType ty
+       of (param_types, return_type) -> FunctionET param_types return_type
      _ -> unsupported
   where
     unsupported = internalError "Unsupported exported type"

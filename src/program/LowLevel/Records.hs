@@ -83,6 +83,12 @@ passConvRecord = constStaticRecord [ RecordField objectHeaderRecord
                                    , PrimField OwnedType
                                    ]
 
+-- | A closure created in C and passed to pyon code. 
+--   The closure is a struct with two fields.  The first
+--   is a function pointer, the second is a pointer to data.
+cClosureRecord = constStaticRecord [ PrimField PointerType
+                                   , PrimField PointerType]
+
 -- | The record type of a traversable class dictionary
 traversableDictRecord :: StaticRecord
 traversableDictRecord =

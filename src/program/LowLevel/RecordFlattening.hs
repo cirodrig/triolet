@@ -406,6 +406,7 @@ flattenExportedParam etype original_param = do
     PyonComplexFloatET ->
       unpack_record (complexRecord $ PrimField $ pyonFloatType) xparams
     PyonBoolET -> no_change'
+    FunctionET _ _ -> unpack_record cClosureRecord xparams
   where
     -- No flattening is performed for this parameter.
     -- Verify that the parameter hasn't been expanded.

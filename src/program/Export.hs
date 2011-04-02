@@ -5,6 +5,7 @@ found in that stage's directory.
 
 module Export where
 
+import Data.List
 import Text.Show
 import Type.Type
 
@@ -30,9 +31,14 @@ data ExportDataType =
     --   The list contents can have any monomorphic type.  It's an error
     --   for the list to mention type variables other than constructors.
     ListET Type
+
     -- | A C array.  The array is passed as a pointer.  The array
     -- size is passed as an additional parameter.
   | CSizeArrayET ExportDataType
+
+    -- | A function type.  Functions are passed as a struct containing a
+    --   function object and a pointer to bound variables.
+  | FunctionET [ExportDataType] ExportDataType
 
     -- Plain old data types
   | PyonIntET                   -- ^ Pyon int type
@@ -50,6 +56,16 @@ instance Show ExportDataType where
          showString "ListET (" . shows (pprType ty) . showChar ')'
        CSizeArrayET et ->
          showString "CSizeArrayET " . showsPrec 10 et
+       FunctionET params ret ->
+         let show_params :: String -> String
+             show_params string = foldr ($) string $
+                                  intersperse (showString ", ") $
+                                  map shows params
+         in showParen (prec >= 10) $
+            showString "FunctionET (" .
+            show_params .
+            showString ") -> " .
+            shows ret
        PyonIntET -> showString "PyonIntET"
        PyonFloatET -> showString "PyonFloatET"
        PyonBoolET -> showString "PyonBoolET"

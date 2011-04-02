@@ -28,6 +28,7 @@ module LowLevel.Builtins
         the_prim_apply_f32,
         the_prim_apply_i64_f,
         the_prim_apply_i64,
+        the_fun_repr_list,
         the_fun_negate_int,
         the_fun_negate_float,
         the_fun_dummy_finalizer,
@@ -36,6 +37,9 @@ module LowLevel.Builtins
         the_fun_copy4F,
         the_fun_copy,
         the_bivar_repr_Box_value,
+        the_bivar_repr_int,
+        the_bivar_repr_float,
+        the_bivar_repr_bool
         {- the_fun_makeComplex,
         the_fun_load_int,
         the_fun_load_float,

@@ -14,6 +14,11 @@ typedef int PyonBool;
 typedef void *PyonPtr;
 
 typedef struct {
+  void *function;
+  void *captured;
+} PyonClosure;
+
+typedef struct {
   PyonFloat real;
   PyonFloat imag;
 } PyonComplexFloat;

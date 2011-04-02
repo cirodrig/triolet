@@ -32,6 +32,7 @@ exportParamDeclSpecs export_type =
      PyonFloatET -> [nameDeclSpecs "PyonFloat"]
      PyonComplexFloatET -> [nameDeclSpecs "PyonComplexFloat"]
      PyonBoolET -> [nameDeclSpecs "PyonBool"]
+     FunctionET _ _ -> [nameDeclSpecs "PyonClosure"]
 
 -- | Get the declaration components to use to declare a function return type.
 -- The return type might occupy parameters and/or the return value.  If there's
@@ -50,6 +51,7 @@ exportReturnDeclSpecs export_type =
      PyonFloatET -> ([], nameDeclSpecs "PyonFloat")
      PyonComplexFloatET -> ([], nameDeclSpecs "PyonComplexFloat")
      PyonBoolET -> ([], nameDeclSpecs "PyonBool")
+     FunctionET _ _ -> ([], nameDeclSpecs "PyonClosure")
 
 -- | Get the declaration components to use to declare an exported function
 exportSigDeclSpecs :: ExportSig -> Maybe DeclSpecs
