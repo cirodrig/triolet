@@ -168,11 +168,11 @@ compilePyonToPyonAsm compile_flags path text = do
   putStrLn ""
   putStrLn "System F"
   print $ SystemF.pprModule sf_mod
-  
+
   -- Convert to explicit memory representation
   tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
   mem_mod <- SystemF.generateMemoryIR tc_mod
-    
+
   putStrLn "Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
   
@@ -275,15 +275,11 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   ll_mod <- LowLevel.lambdaConvert ll_mod
   ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
   ll_mod <- LowLevel.inlineModule ll_mod
-  
--- Additional rounds: more inlining
+
+  -- Additional rounds: more inlining
   ll_mod <- iterateM (LowLevel.commonSubexpressionElimination >=>
                       return . LowLevel.eliminateDeadCode >=>
-                      LowLevel.inlineModule) 3 ll_mod
-
-  ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
-  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod
-  ll_mod <- LowLevel.inlineModule ll_mod
+                      LowLevel.inlineModule) 4 ll_mod
 
   -- Cleanup
   ll_mod <- LowLevel.commonSubexpressionElimination ll_mod
