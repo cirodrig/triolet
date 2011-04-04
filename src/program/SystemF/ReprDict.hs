@@ -5,9 +5,11 @@
     Rank2Types #-}
 module SystemF.ReprDict where
 
-import Control.Monad
+import Prelude hiding(mapM)
+import Control.Monad hiding(mapM)
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
+import Data.Traversable(mapM)
 
 import Common.Error
 import Common.Supply
@@ -28,8 +30,10 @@ newtype MkDict =
 -- | A 'DictEnv' containing 'MkDict' values
 type MkDictEnv = DictEnv.DictEnv MkDict
 
+newtype MkInt = MkInt {mkInt :: forall m. ReprDictMonad m => m ExpM}
+
 -- | A 'DictEnv' containing indexed integer values
-type IntIndexEnv = DictEnv.DictEnv ExpM
+type IntIndexEnv = DictEnv.DictEnv MkInt
 
 -- | A monad that keeps track of representation dictionaries
 class (Monad m, MonadIO m, Supplies m VarID) => ReprDictMonad m where
@@ -103,7 +107,8 @@ lookupIndexedInt ty = do
   tenv <- getTypeEnv
   id_supply <- getVarIDs
   ienv <- getIntIndexEnv
-  liftIO $ DictEnv.lookup id_supply tenv ty ienv
+  mk <- liftIO $ DictEnv.lookup id_supply tenv ty ienv
+  mapM mkInt mk
 
 lookupIndexedInt' :: ReprDictMonad m => Type -> m ExpM
 lookupIndexedInt' ty = lookupIndexedInt ty >>= check
@@ -127,7 +132,7 @@ saveIndexedInt :: ReprDictMonad m => Type -> ExpM -> m a -> m a
 saveIndexedInt dict_type dict_exp m =
   localIntIndexEnv (DictEnv.insert dict_pattern) m
   where
-    dict_pattern = DictEnv.monoPattern dict_type dict_exp
+    dict_pattern = DictEnv.monoPattern dict_type (MkInt $ return dict_exp)
 
 -- | If the pattern binds a representation dictionary or int index,
 --   record the dictionary 
@@ -224,7 +229,11 @@ createDictEnv = do
                                   tuple2_dict, tuple3_dict, tuple4_dict,
                                   eq_dict, ord_dict,
                                   additive_dict, multiplicative_dict]
-      index_env = DictEnv.empty
+      
+  minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
+    (varApp (pyonBuiltin the_min_i) [VarT arg1, VarT arg2],
+     createInt_min arg1 arg2)
+  let index_env = DictEnv.DictEnv [minimum_int]
   return (dict_env, index_env)
 
 getParamType v subst =
@@ -406,3 +415,15 @@ createBoxedDictPattern con arity = do
         dict_type = varApp con param_types
         op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
         expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
+
+createInt_min param_var1 param_var2 subst = MkInt $ do
+  int1 <- lookupIndexedInt' param1
+  int2 <- lookupIndexedInt' param2
+  return $ ExpM $
+    AppE defaultExpInfo oper [TypM param1, TypM param2] [int1, int2]
+  where
+    param1 = getParamType param_var1 subst
+    param2 = getParamType param_var2 subst
+
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
+  
