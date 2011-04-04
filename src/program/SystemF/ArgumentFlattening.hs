@@ -486,16 +486,18 @@ deconPatternFields :: What      -- ^ How the enclosing object is used
                    -> [(ReturnType, Specificity)] -- ^ Fields
                    -> AFMonad e (Maybe [WrapPat])
 deconPatternFields what ex_pats fields = do
-  fields' <- assumeTyPats ex_pats $ mapM decon_field fields
-  return $
-    if all acceptable_field fields' then Just fields' else Nothing
+  -- Each field will be bound to a new variable.  Create pattern bindings.
+  field_pats <- mapM mk_field_pattern fields
+
+  -- Create WrapPats for each field
+  fields' <- assumeTyPats ex_pats $ wrapPatterns (fieldWhat what) field_pats
+  return $ if all acceptable_field fields' then Just fields' else Nothing
   where
-    decon_field (rrepr ::: rtype, spc) = do
+    mk_field_pattern (rrepr ::: rtype, spc) = do
       pat_var <- newAnonymousVar ObjectLevel
-      let pattern =
-            setPatMDmd (Dmd ManyUnsafe spc) $
-            memVarP pat_var (returnReprToParamRepr rrepr ::: rtype)
-      wrapPattern (fieldWhat what) pattern
+      return $
+        setPatMDmd (Dmd ManyUnsafe spc) $
+        memVarP pat_var (returnReprToParamRepr rrepr ::: rtype)
 
     -- Decide whether the unwrapped field is allowed here.
     -- In non-parameter positions, the unwrapped field must be representable
@@ -989,7 +991,7 @@ rewrapReturn override_dst (WrapRet rparam _ (DeconWP _ con ty_args [] fields)) w
 --   worker function's parameters, and the worker function's return type.
 wrapFunctionType :: [TyPatM] -> [PatM] -> RetM
                  -> AF ([WrapPat], Maybe PatM, WrapRet, [TyPatM], [PatM], RetM)
-wrapFunctionType ty_params params ret = do
+wrapFunctionType ty_params params ret = assumeTyPats ty_params $ do
   let (in_params, out_param) =
         -- Separate the output parameter from the other parameters
         case patMParamType (last params)
