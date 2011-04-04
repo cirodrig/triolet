@@ -180,7 +180,7 @@ function inline for
 
 // A parallel reduction.  The iteration space is partitioned at run time
 // and 'generator' is called on a single member of the iteration space.
-function inline blocked_reduce
+function blocked_reduce
   (unit _, unit _, owned acc_repr, IndexedInt size, int first,
    owned reducer, pointer init, owned generator, pointer ret) -> ()
 {
