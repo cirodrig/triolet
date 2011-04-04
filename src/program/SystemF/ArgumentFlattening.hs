@@ -1118,7 +1118,7 @@ mkWrapperFunction original_ty_params original_params original_ret
       return_arg = case wrap_rpat
                    of Nothing -> []
                       Just pat -> [ExpM $ VarE defaultExpInfo (patMVar' pat)]
-      orig_ty_args = [TypM t | TyPatM _ t <- original_ty_params]
+      orig_ty_args = [TypM $ VarT v | TyPatM v _ <- original_ty_params]
       call = ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo worker_name)
              (orig_ty_args ++ call_ty_args) (call_args ++ return_arg)
   
