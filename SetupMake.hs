@@ -361,6 +361,9 @@ optimizationFlags lbi = prof_flag ++ opt_flag ++ suffixes
       of NoOptimisation -> ["-O0"]
          _ -> ["-O"]
 
+-- | Extra GHC flags used when profiling
+profFlags = ["-prof", "-osuf", "p_o", "-hisuf", "p_hi"]
+
 -- | Get the extra GHC command-line parameters that were specified 
 --   in the build configuration
 configuredGhcFlags exe lbi =
@@ -373,7 +376,12 @@ pyonGhcOpts econfig exe lbi =
   let clbi = case lookup "pyon" $ executableConfigs lbi
              of Nothing -> error "Unexpected missing build info"
                 Just x -> x
-  in ghcOptions lbi (buildInfo exe) clbi "dist/build/pyon"
+      options =
+        ghcOptions lbi (buildInfo exe) clbi "dist/build/pyon"
+      prof_options = options ++ profFlags
+  in if withProfExe lbi
+     then prof_options
+     else options
   {-
   configuredGhcFlags exe lbi ++
   optimizationFlags lbi ++
