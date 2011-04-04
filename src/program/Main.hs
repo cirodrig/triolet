@@ -182,9 +182,6 @@ compilePyonToPyonAsm compile_flags path text = do
   -- are primarily setup to improve the accuracy of the simplifier.
   mem_mod <- highLevelOptimizations True False mem_mod
 
-  putStrLn "Prepared Memory"
-  print $ SystemF.PrintMemoryIR.pprModule mem_mod
-
   -- The next group of optimizations does the main set of optimizations,
   -- including high-level transformations via rewriting.
   -- Currently there are inter-pass dependences that we
