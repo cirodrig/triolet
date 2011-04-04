@@ -301,11 +301,11 @@ data LCPSContext =
     --   The return continuation also tells us where the groups should be
     --   moved to.
     --
-    --   When the group is inserted in its destination location, it is
+    --   When a group is inserted in its destination location, it is
     --   transformed using the context of where the group /originated/ and
     --   the return type of where the group was placed.  The original
     --   context is saved with the group for that purpose.
-    sunkenGroups :: IntMap.IntMap (LCPSContext, Group (Def LFun))
+    sunkenGroups :: IntMap.IntMap [(LCPSContext, Group (Def LFun))]
 
     -- | The set of return continuations identified for each local function
   , analysisReturnContinuations :: !RConts
@@ -333,12 +333,9 @@ data LCPSContext =
   , originalReturnTypes :: [ValueType]
   }
 
-insertSunkenGroup v defs ctx
-  | var_id `IntMap.member` sunkenGroups ctx =
-      -- We can only handle one definition group at a time
-      internalError "insertSunkenGroup: Found multiple definition groups moving to the same place"
-  | otherwise =
-      ctx {sunkenGroups = IntMap.insert var_id (ctx, defs) $ sunkenGroups ctx}
+insertSunkenGroup v defs ctx =
+  ctx {sunkenGroups = IntMap.insertWith (++) var_id [(ctx, defs)] $
+                      sunkenGroups ctx}
   where
     var_id = fromIdent $ varID v
 
@@ -441,12 +438,19 @@ lcpsStm ctx statement =
        of Nothing -> do
             body' <- lcpsStm ctx body
             return $ LetE params rhs body'
-          Just (grp_ctx, grp) -> do
+          Just groups -> do
             let ctx' = deleteSunkenGroup v ctx -- Not necessary, but reduces size of map
                 return_types = currentReturnTypes ctx'
 
-            -- Transform the functions in the definition group
-            grp' <- lcpsGroup grp_ctx (Just (v, return_types)) grp
+            -- Transform the functions in the definition group.
+            -- If there are multiple groups, merge them into one group.
+            let transform_group (grp_ctx, grp) =
+                  lcpsGroup grp_ctx (Just (v, return_types)) grp
+
+            grp' <- do groups' <- mapM transform_group groups
+                       case groups' of
+                         [grp] -> return grp
+                         _ -> return $ Rec $ concatMap groupMembers groups'
             
             -- The body of the 'let' becomes a continuation function
             -- and is inserted into the group
