@@ -289,7 +289,7 @@ function blocked_reduce1
 
   // Main computation is written in C++
   final_val = pointer primcall pyon_C_blocked_reduce
-    (acc_repr @! PassConv.copy, accumulate_range, reducer,
+    (acc_repr @! PassConv.copy, accumulate_range, join_values,
      uninitialized_value, count, first);
 
   () call (acc_repr @! PassConv.copy) (final_val, ret);
