@@ -350,7 +350,6 @@ function Stream_map
   s @! Stream.state_size = sizeof state_type;
   s @! Stream.state_align = alignof state_type;
   s @! Stream.state_finalize = dummy_finalizer;
-  () = () primcall pyon_db_pointer (s as pointer);
   s;
 };
 
@@ -419,14 +418,8 @@ function inline reduce
    pointer container,
    pointer ret) -> () {
   // Traverse the object and reduce the resulting stream
-  () = () primcall pyon_db_pointer(traversable as pointer);
-  () = () primcall pyon_db_pointer(elem_repr as pointer);
-  () = () primcall pyon_db_pointer(reducer as pointer);
-  () = () primcall pyon_db_pointer(initial_value);
-  () = () primcall pyon_db_pointer(container);
   stream = owned call (traversable @! TraversableDict.traverse)
                       (nil, elem_repr, container);
-  () = () primcall pyon_db_pointer(stream as pointer);
 
   () = () call Stream_reduce (nil, nil, elem_repr, reducer,
                               initial_value, stream, ret);
