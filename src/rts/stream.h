@@ -45,6 +45,9 @@ extern function pyon.internal.stream.Stream_reduce1
 extern function pyon.internal.stream.reduce1
   (unit, unit, owned, owned, owned, pointer, pointer) -> ();
 
+extern function pyon.internal.stream.Stream_fold
+  (unit, unit, owned, owned, owned, pointer, owned, pointer) -> ();
+
 extern function pyon.internal.stream.histogram
   (unit, int, owned, pointer) -> ();
 

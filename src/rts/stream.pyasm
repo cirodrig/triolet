@@ -509,6 +509,65 @@ function inline reduce1
 };
 
 /*****************************************************************************/
+/* fold */
+
+function inline Stream_fold
+  (unit _, unit _, owned repr_element, owned repr_acc,
+   owned reducer, pointer init, owned stream, pointer ret) -> () {
+  elem_size = repr_element @! PassConv.size;
+  elem_align = repr_element @! PassConv.align;
+  elem_copy = repr_element @! PassConv.copy;
+  elem_finalize = repr_element @! PassConv.finalize;
+  typedef elem_type = bytes(value elem_size, value elem_align);
+
+  acc_size = repr_acc @! PassConv.size;
+  acc_align = repr_acc @! PassConv.align;
+  acc_copy = repr_acc @! PassConv.copy;
+  acc_finalize = repr_acc @! PassConv.finalize;
+  typedef acc_type = bytes(value acc_size, value acc_align);
+
+
+  // Setup
+  st = pointer primcall pyon_alloc (stream @! Stream.state_size);
+  () = () call (stream @! Stream.initialize) (st);
+
+  // Allocate two accumulators and swap between them.
+  // That way, the accumulator can be updated safely.
+  accs = pointer primcall pyon_alloc (sizeof Pair(acc_type));
+  reduce_tmp = pointer primcall pyon_alloc (elem_size);
+  stream_next = stream @! Stream.next;
+  () = () call acc_copy (init, accs @ Pair(elem_type).fst);
+
+  // Main loop.
+  // At start, old_acc holds accumulator, new_acc is uninitialized,
+  // reduce_tmp is uninitialized.
+  // At termination, old_acc holds final accumulator, new_acc is uninitialized,
+  // reduce_tmp is uninitialized.
+  (acc1, acc2, _) = while (pointer old_acc = accs @ Pair(acc_type).fst,
+                           pointer new_acc = accs @ Pair(acc_type).snd,
+                           bool not_depleted = true)
+                          (not_depleted) {
+    not_depleted = bool call stream_next (st, reduce_tmp);
+    if (not_depleted) {
+      () = () call reducer (old_acc, reduce_tmp, new_acc);
+      () = () call elem_finalize (old_acc);
+      () = () call elem_finalize (reduce_tmp);
+      (new_acc, old_acc, true);
+    } else {
+      (old_acc, new_acc, false);
+    };
+  };
+
+  // Cleanup
+  () = () call (stream @! Stream.state_finalize) (st);
+  () = () primcall pyon_dealloc(st);
+  () = () call acc_copy (acc1, ret);
+  () = () call acc_finalize (acc1);
+  () = () primcall pyon_dealloc(accs);
+  ();
+};
+
+/*****************************************************************************/
 /* histogram */
 
 // Given a stream of integers, use the elements of the stream to compute a

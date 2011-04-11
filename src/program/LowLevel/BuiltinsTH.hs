@@ -201,6 +201,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_fun_reduce1_Stream) |])
   , (PyonName module_stream "reduce1",
      Right [| pyonBuiltin (SystemF.the_fun_reduce1) |])
+  , (PyonName module_stream "Stream_fold",
+     Right [| pyonBuiltin (SystemF.the_fun_fold_Stream) |])
   , (PyonName module_stream "Stream_zip",
      Right [| pyonBuiltin (SystemF.the_fun_zip_Stream) |])
   , (PyonName module_stream "Stream_zip3",
