@@ -156,6 +156,36 @@ data val UnboxedTuple4 :
   (val a, val b, val c, val d) : val UnboxedTuple4 a b c d;
 };
 
+data val UnboxedTuple5 :
+  val (val pure -> val pure -> val pure -> val pure -> val pure -> val pure)
+{
+  unboxedTuple5 : (val a : pure)
+               -> (val b : pure)
+               -> (val c : pure)
+               -> (val d : pure)
+               -> (val e : pure)
+               -> val a -> val b -> val c -> val d -> val e
+            -> val UnboxedTuple5 a b c d e,
+  (val a : pure, val b : pure, val c : pure, val d : pure, val e : pure) ()
+  (val a, val b, val c, val d, val e) : val UnboxedTuple5 a b c d e;
+};
+
+data val UnboxedTuple6 :
+  val (val pure -> val pure -> val pure -> val pure -> val pure -> val pure -> val pure)
+{
+  unboxedTuple6 : (val a : pure)
+               -> (val b : pure)
+               -> (val c : pure)
+               -> (val d : pure)
+               -> (val e : pure)
+               -> (val f : pure)
+               -> val a -> val b -> val c -> val d -> val e -> val f
+            -> val UnboxedTuple6 a b c d e f,
+  (val a : pure, val b : pure, val c : pure, val d : pure, val e : pure, val f : pure) ()
+  (val a, val b, val c, val d, val e, val f) : val UnboxedTuple6 a b c d e f;
+};
+
+
 data box EqDict : val (val pure -> val pure)
 {
   eqDict : (val a : pure)
