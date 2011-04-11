@@ -14,7 +14,6 @@ Data-Files:
   symbols/coretypes
   include/pyon.h
   include/pyon_list.h
-  testcases/*.py
   interfaces/memory_py.pi
   interfaces/effects.pi
   interfaces/prim.pi

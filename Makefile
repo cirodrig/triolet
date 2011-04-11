@@ -13,7 +13,7 @@ include variables.mk
 ###############################################################################
 # Targets
 
-.PHONY : default build bootstrap_data data testcases
+.PHONY : default build bootstrap_data data
 
 # Create executable, library, and scripts; then run Python's setup script 
 build : $(PYON_TARGET) $(RTS_TARGET) data
@@ -24,7 +24,7 @@ bootstrap_data : $(BOOT_DATA_FILES) \
 	$(DATA_BUILD_DIR)/include/pyon.h
 
 # Install all data files into the local build directory
-data : bootstrap_data testcases $(DATA_BUILD_DIR)/include/pyon.h $(DATA_BUILD_DIR)/libpyonrts.so $(INTERFACE_DATA_FILES)
+data : bootstrap_data $(DATA_BUILD_DIR)/include/pyon.h $(DATA_BUILD_DIR)/libpyonrts.so $(INTERFACE_DATA_FILES)
 
 ###############################################################################
 # Compilation
