@@ -1,7 +1,7 @@
 # The main makefile.
 #
-# This makefile contains commands that run after dependency generation.
-# Commands that run before dependency generation are in 'Makefile'.
+# This makefile is invoked from the Setup script to do tasks based on file
+# existence or timestamps.
 
 # Require a target
 default :
