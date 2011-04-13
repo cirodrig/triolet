@@ -1,0 +1,322 @@
+<html>
+<head>
+<title>Overview of the Pyon Language</title>
+</head>
+<body>
+
+<p>This document describes the syntax, data types, and functions supported in Pyon source code.</p>
+
+<h1>Syntax and semantics</h1>
+
+<p>Pyon is based on Python 3 for reasons of programmer familiarity.
+Python syntax is used whenever possible, in a way that usually does
+what a Python programmer would expect.  Internally, Pyon is similar to
+ML.  The user-level differences from Python 3 are described here.</p>
+
+<p>At the top level, a Pyon file consists of a sequence of function
+definitions and export statements.  (Export statements are described
+below.)  These may occur in any order.</p>
+
+<h2>Statements</h2>
+
+<p>In function bodies, Pyon supports 'if' and 'return' statements,
+assignment statements, expression statements, and function
+definitions.  Other statements are not permitted.</p>
+
+<p>Pyon source code may imperatively define and update local
+variables.  The code is internally translated to functional code,
+using the static single assignment transformation.  The translation
+has several implications for programmers.  One effect is that every
+variable must be defined before it is used on any code path.  A group
+of function definitions without other intervening statements may
+reference each other, allowing mutually recursive functions to be
+defined.</p>
+
+<p>Variable values are resolved at different times in Pyon versus
+standard Python.  Wen a local function uses a variable that is defined
+in an enclosing scope, it will observe the value at the time that the
+function is <i>defined</i>.  This is different from the behavior of
+Python code, which will observe the value at the time the function
+is <i>used</i>.  The following example illustrates the difference:</p>
+
+<pre>
+def foo(x):
+  y = 1
+  def bar(z): return y + z
+  y = 2
+  return bar(x)
+</pre>
+
+<p>In Python, the call <code>foo(100)</code> returns 102.  In Pyon, the call returns 101.</p>
+
+<h2>Typing</h2>
+
+<p>Pyon is statically typed using Hindley-Milner type inference with
+type class constraints.  Type inference is performed after SSA, so
+that different SSA variables may have different types even if they
+were derived from the same variable in the source code.</p>
+
+<p>Pyon supports optional type signatures on function parameters and
+returns, using Python 3 annotation syntax.  Two changes are made to
+Python syntax to support type signatures.  First, <code>-&gt;</code>
+is an infix operator that is only valid when used inside parameter and
+return annotations.  Second, the <code>@forall</code> decorator may be
+used for explicit quantification.  When used to decorate a function
+definition, it takes a list of variable names as arguments and
+introduces new type variables with those names.  Because it defines
+variables, "forall" does not follow Python's variable scoping rules.
+Type signatures use Python's expression syntax, but have different
+semantics.  There is currently no way to explicitly declare type class
+constraints in type signatures.</p>
+
+<p>Type signatures consist of:</p>
+<ul>
+ <li>References to variables or constants.</li>
+ <li>Function calls, denoting type application. Example: <code>list(int)</code></li>
+ <li>Tuple expressions, denoting tuple types.  Example: <code>(float, float, float)</code></li>
+ <li>Arrow expressions, denoting function types.  If a function takes
+ multiple parameters, the parameter types are multiplied together.
+ Example: <code>int * int -> int</code></li>
+</ul>
+
+<h2>Expressions</h2>
+
+<p>An expression that may define a variable, such as the destination
+of an assignment or the part of a list comprehension between the
+keywords "for" and "in", is called a "target".  Tuple targets and
+variable targets are supported.  Only tuples with 2, 3, and 4 elements
+are supported.  Array subscript targets are not supported.</p>
+
+<p>Unary negation is supported.</p>
+
+<p>The following binary operators are supported:
+<code>or and < <= > >= != == + - * / // % **</code></p>
+
+<p>Integer and floating-point literals, variable expressions, array
+subscripting, tuple construction, function calls, lambda expressions,
+conditional expressions, list comprehensions, and generators are
+supported.  Array subscripting only works on lists.  Generators may
+contain any number of "for" and "if" clauses following the initial,
+required "for" clause.  List comprehensions behave the same as
+generators (this is expected to change in future revisions).  Tuple
+construction is supported only for tuples with 2, 3, and 4
+elements.</p>
+
+<p>Function definitions and function calls support positional arguments only.</p>
+
+<h2>Export statements</h2>
+
+<p>Functions are exported using the following syntax.  STRING stands
+for a string.  IDENTIFIER stands for a Pyon identifier.  TYPE stands
+for a Pyon type.</p>
+
+<pre>
+export ccall STRING IDENTIFIER : TYPE
+</pre>
+
+<pre>
+export ccall IDENTIFIER : TYPE
+</pre>
+
+<p>The optional string is the name used to reference the function in
+C.  If not given, it defaults to the Pyon name.  The identifier is the
+name of the function to be exported.  The type is the exported type.
+Exported types may contain ints, floats, lists, and functions.  Tuple
+types are not supported in exported function parameters or returns,
+however, lists of tuples are allowed.  Some uses of function types are
+not supported.</p>
+
+<p>A function may be exported multiple times with different names.
+This is useful for polymorphic functions that are used with different
+types.</p>
+
+<h1>Predefined types</h1>
+
+<p>The supported data types and values are:</p>
+
+<ul>
+ <li>NoneType, which has the single value None</li>
+ <li>bool, which has the two values True and False</li>
+ <li>Tuples of 2, 3, and 4 elements</li>
+ <li>The numeric types "int" and "float"</li>
+ <li>Function types</li>
+ <li>The "list" type constructor.  It takes one parameter, the type of the list's members.  A list consists of an array and a nonnegative integer holding the array size.  All array elements have the same type.</li>
+ <li>The "stream" type constructor.  It takes two parameters.  The first is the shape of the stream, which is the container type that the stream corresponds to (see the type of __iter__).  The second is the type of the stream's elements.</li>
+</ul>
+
+<p>Stream shapes are not useful to users with the current feature set.
+Stream shapes may be useful in the future, if support is added for
+arrays of statically known size.  Stream shapes are used internally to
+label streams with shape information.</p>
+
+<h1>Predefined Functions</h1>
+
+<p>Each function listed below is shown with its name, type signature,
+and a description.  In the type signatures below, single-letter names
+are used to denote type variables and other names are used to denote
+constants.  Type class constraints are given in Haskell syntax.</p>
+
+</p>
+
+<p>
+<code>map : Traversable t => (a -> b) * t(a) -> t(b)</code><br>
+
+Apply a function to all elements of a container.</p>
+
+<p>
+<code>reduce : Traversable t => (a * a -> a) * a * t(a) -> a</code><br>
+
+Compute a reduction over all elements of a container.
+The reduction function is assumed to be be associative.
+The initial value is assumed to be an identity of the reduction function.</p>
+
+<p>
+<code>reduce1 : Traversable t => (a * a -> a) * t(a) -> a</code><br>
+
+Compute a reduction over all elements of a container.  The reduction
+function is assumed to be associative.  The container should be
+nonempty.  This function allows defining reductions such as argmin
+that have no identity value.</p>
+
+<p>
+<code>zip : Traversable t => t(a) * t(b) -> t((a, b))<br>
+zip3 : Traversable t => t(a) * t(b) * t(c) -> t((a, b, c))<br>
+zip4 : Traversable t => t(a) * t(b) * t(c) * t(d) -> t((a, b, c, d))</code><br>
+
+Zip two, three, or four containers together.</p>
+
+<p>
+<code>count : stream(a, int)</code><br>
+
+The infinite sequence [0, 1, ...]</p>
+
+<p>
+<code>range : int -> stream(list, int)</code><br>
+
+The sequence [0, 1 ... N-1]</p>
+
+<p>
+<code>len : list(a) -> int</code><br>
+
+Get the length of a list</p>
+
+<p>
+<code>histogram : Traversable t => int * t(int) -> list(int)</code><br>
+
+Compute an N-element histogram from the given stream.</p>
+
+<p>
+<code>floor : float -> int</code><br>
+
+Convert a float to an int, rounding down.</p>
+
+<p>
+<code>__undefined__ : a</code><br>
+
+An error value.  Since its type unifies with anything during type
+inference, it can be useful for debugging type errors.</p>
+
+<p>
+<code>__eq__ : Eq a => a * a -> bool<br>
+__ne__ : Eq a => a * a -> bool</code><br>
+
+Boolean equality or inequality comparison on equality-comparable types.</p>
+
+<p>
+<code>__lt__ : Ord a => a * a -> bool<br>
+__le__ : Ord a => a * a -> bool<br>
+__gt__ : Ord a => a * a -> bool<br>
+__ge__ : Ord a => a * a -> bool</code><br>
+
+Boolean ordering comparison on totally ordered types.</p>
+
+<p>
+<code>__iter__ : Traversable t => t(a) -> stream(t, a)</code><br>
+
+Iterate over the elements of a traversable container.</p>
+
+<p>
+<code>__build__ : Traversable t => stream(t, a) -> t(a)</code><br>
+
+Build a traversable container from a stream of elements.</p>
+
+<p>
+<code>__add__ : Additive a => a * a -> a<br>
+__sub__ : Additive a => a * a -> a<br>
+__negate__ : Additive a => a -> a<br>
+zero : Additive a => a</code><br>
+
+Group operations of an additive group.</p>
+
+<p>
+<code>__mul__ : Multiplicative a => a * a -> a</code><br>
+
+Multiply two numbers.</p>
+
+<p>
+<code>__fromint__ : Multiplicative a => int -> a</code><br>
+
+Convert an integer to another type.</p>
+
+<p>
+<code>one : Multiplicative a => a</code><br>
+
+The identity value of __mul__.</p>
+
+<p>
+<code>__floordiv__ : Remainder a => a * a -> int</code><br>
+
+Integer division, rounding to negative infinity.</p>
+
+<p>
+<code>__mod__ : Remainder a => a * a -> a</code><br>
+
+Remainder division.</p>
+
+<p>
+<code>__div__ : Fractional a => a * a -> a</code><br>
+
+Divide two numbers.</p>
+
+<p>
+<code>scale : Vector a => a * float -> a</code><br>
+
+Scalar multiplication with a vector.</p>
+
+<p>
+<code>magnitude : Vector a => a -> float</code><br>
+
+Get the magnitude of a vector.</p>
+
+<p>
+<code>dot : Vector a => a * a -> a</code><br>
+
+Inner product of two vectors.</p>
+
+<p>
+<code>__fromfloat__ : Floating a => float -> a</code><br>
+
+Convert a float to another floating-point type.</p>
+
+<p>
+<code>__power__ : Floating a => a * a -> a</code><br>
+
+Exponentiation.</p>
+
+<p>
+<code>exp : Floating a => a -> a<br>
+log : Floating a => a -> a<br>
+sqrt : Floating a => a -> a<br>
+sin : Floating a => a -> a<br>
+cos : Floating a => a -> a<br>
+tan : Floating a => a -> a</code><br>
+
+Unary intrinsic math functions.</p>
+
+<p>
+<code>pi : Floating a => a</code><br>
+
+The constant "pi".</p>
+
+</body>
+</html>
