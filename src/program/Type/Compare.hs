@@ -46,20 +46,6 @@ typeMentionsAny t target = search t
 
 -------------------------------------------------------------------------------
 
-data CmpEnv =
-  CmpEnv
-  { varIDSupply :: !(IdentSupply Var) -- ^ Variable ID supply
-  , typeEnv :: TypeEnv          -- ^ The current type environment
-  }
-
-newtype CmpM a = CmpM (ReaderT CmpEnv IO a) deriving(Monad)
-
-instance Supplies CmpM (Ident Var) where
-  fresh = CmpM $ ReaderT $ \env -> supplyValue $ varIDSupply env
-
-runCmpM (CmpM m) id_supply env =
-  runReaderT m (CmpEnv id_supply env)
-
 -- | Compare two types.  Return True if the given type is equal to or a subtype
 --   of the expected type, False otherwise.
 --
@@ -71,9 +57,9 @@ compareTypes :: IdentSupply Var
              -> Type            -- ^ Given Type
              -> IO Bool
 compareTypes id_supply env expected given =
-  runCmpM (cmpType expected given) id_supply env
+  runTypeEvalM (cmpType expected given) id_supply env
 
-cmpType :: Type -> Type -> CmpM Bool
+cmpType :: Type -> Type -> TypeEvalM Bool
 cmpType expected given = cmp =<< unifyBoundVariables expected given
   where
     cmp (VarT v1, VarT v2) = return $ v1 == v2
@@ -88,7 +74,7 @@ cmpType expected given = cmp =<< unifyBoundVariables expected given
       | sameParamRepr arg1 arg2 = cmpReturns result1 result2
       | otherwise               = return False
 
-cmpReturns :: ReturnRepr ::: Type -> ReturnRepr ::: Type -> CmpM Bool
+cmpReturns :: ReturnType -> ReturnType -> TypeEvalM Bool
 cmpReturns (ret1 ::: rng1) (ret2 ::: rng2)
   | sameReturnRepr ret1 ret2 = cmpType rng1 rng2
   | otherwise = return False
