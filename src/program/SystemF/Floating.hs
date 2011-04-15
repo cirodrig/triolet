@@ -611,9 +611,11 @@ instance Supplies Flt (Ident Var) where
 instance MonadIO Flt where
   liftIO m = Flt (\_ -> do {x <- m; return (x, [])})
 
+instance TypeEnvMonad Flt where
+  getTypeEnv = Flt $ \ctx -> return (fcTypeEnv ctx, [])
+
 instance ReprDictMonad Flt where
   getVarIDs = Flt $ \ctx -> return (fcVarSupply ctx, [])
-  getTypeEnv = Flt $ \ctx -> return (fcTypeEnv ctx, [])
   getDictEnv = Flt $ \ctx -> return (fcDictEnv ctx, [])
   getIntIndexEnv = Flt $ \ctx -> return (fcIntEnv ctx, [])
   localDictEnv f m = Flt $ \ctx ->

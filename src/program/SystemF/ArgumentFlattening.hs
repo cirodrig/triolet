@@ -75,9 +75,11 @@ instance Supplies (AFMonad e) (Ident Var) where
 liftFreshVarAF :: FreshVarM a -> AFMonad e a
 liftFreshVarAF m = AF $ ReaderT $ \env -> runFreshVarM (afVarSupply env) m
 
+instance TypeEnvMonad (AFMonad e) where
+  getTypeEnv = AF $ asks afTypeEnv
+
 instance ReprDictMonad (AFMonad e) where
   getVarIDs = AF $ asks afVarSupply
-  getTypeEnv = AF $ asks afTypeEnv
   getDictEnv = AF $ asks afDictEnv
   getIntIndexEnv = AF $ asks afIntIndexEnv
   localDictEnv f m =

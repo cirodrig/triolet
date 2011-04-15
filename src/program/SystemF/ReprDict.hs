@@ -36,15 +36,12 @@ newtype MkInt = MkInt {mkInt :: forall m. ReprDictMonad m => m ExpM}
 type IntIndexEnv = DictEnv.DictEnv MkInt
 
 -- | A monad that keeps track of representation dictionaries
-class (Monad m, MonadIO m, Supplies m VarID) => ReprDictMonad m where
+class (TypeEnvMonad m, MonadIO m, Supplies m VarID) => ReprDictMonad m where
   getVarIDs :: m (Supply VarID)
   getVarIDs = withVarIDs return
   
   withVarIDs :: (Supply VarID -> m a) -> m a
   withVarIDs f = getVarIDs >>= f
-  
-  getTypeEnv :: m TypeEnv
-  getTypeEnv = withTypeEnv return
 
   withTypeEnv :: (TypeEnv -> m a) -> m a
   withTypeEnv f = getTypeEnv >>= f
@@ -63,10 +60,12 @@ class (Monad m, MonadIO m, Supplies m VarID) => ReprDictMonad m where
 instance Supplies m VarID => Supplies (MaybeT m) VarID where
   fresh = lift fresh
 
+instance TypeEnvMonad m => TypeEnvMonad (MaybeT m) where
+  getTypeEnv = lift getTypeEnv
+
 instance ReprDictMonad m => ReprDictMonad (MaybeT m) where
   getVarIDs = lift getVarIDs
   withVarIDs f = MaybeT $ withVarIDs (runMaybeT . f)
-  getTypeEnv = lift getTypeEnv
   withTypeEnv f = MaybeT $ withTypeEnv (runMaybeT . f)
   getDictEnv = lift getDictEnv 
   withDictEnv f = MaybeT $ withDictEnv (runMaybeT . f)

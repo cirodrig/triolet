@@ -120,8 +120,8 @@ liftT1 t k = do
   g
   return x
 
-getTypeEnv :: Lower TypeEnv
-getTypeEnv = Lower $ asks typeEnvironment
+instance TypeEnvMonad Lower where
+  getTypeEnv = Lower $ asks typeEnvironment
 
 -- | Find the Repr dictionary for the given type, which should be a type
 --   variable.  Fail if not found.

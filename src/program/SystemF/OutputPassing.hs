@@ -68,6 +68,9 @@ instance Supplies OP (Ident Var) where
 instance MonadIO OP where
   liftIO m = OP (\_ _ -> m)
 
+instance TypeEnvMonad OP where
+  getTypeEnv = withTypeEnv return
+
 instance ReprDictMonad OP where
   withVarIDs f = OP $ \env mrarg -> runOP (f $ opVarSupply env) env mrarg
   withTypeEnv f = OP $ \env mrarg -> runOP (f $ opTypeEnv env) env mrarg

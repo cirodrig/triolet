@@ -1,13 +1,33 @@
+{-| Type environments.
 
+Type environments map variable names to types, data types, and type functions.
+
+The type environment changes depending on the stage of compilation.
+Type descriptions are read in as a \"specification\" type environment.  The 
+specifications do not directly describe intermediate code, but instead are
+converted to two different forms that do describe intermediate code.  The 
+\"pure\" type environment generated from the specification describes System F
+code before representation inference.  The \"mem\" type environment describes
+System F code after representation inference.
+-}
+
+{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 module Type.Environment
-       (TypeEnv,
+       (TypeEnvMonad(..),
+        EvalMonad,
+        TypeEvalM(..),
+        TypeEnv,
         DataType(..),
         DataConType(..),
         DataTypeDescr(..),
+        TypeFunction,
+        typeFunctionArity,
+        applyTypeFunction,
         lookupType,
         lookupDataType,
         lookupDataCon,
         lookupDataConWithType,
+        lookupTypeFunction,
         getAllDataConstructors,
         emptyTypeEnv,
         wiredInTypeEnv,
@@ -21,11 +41,51 @@ module Type.Environment
        )
 where
 
+import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 
 import Common.Error
 import Common.Identifier
+import Common.Supply
 import Type.Type
+
+-------------------------------------------------------------------------------
+-- Support for type-level computation
+
+-- | A monad that keeps track of the current type environment
+class Monad m => TypeEnvMonad m where
+  getTypeEnv :: m TypeEnv
+
+-- | A monad supporting type-level computation
+class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m
+
+-- | A simple monad supporting type-level computation
+newtype TypeEvalM a =
+  TypeEvalM {runTypeEvalM :: IdentSupply Var -> TypeEnv -> IO a}
+
+instance Monad TypeEvalM where
+  {-# INLINE return #-}
+  {-# INLINE (>>=) #-}
+  return x = TypeEvalM (\_ _ -> return x)
+  m >>= k = TypeEvalM $ \supply env -> do
+    x <- runTypeEvalM m supply env
+    runTypeEvalM (k x) supply env
+
+instance MonadIO TypeEvalM where
+  {-# INLINE liftIO #-}
+  liftIO m = TypeEvalM (\_ _ -> m)
+
+instance Supplies TypeEvalM (Ident Var) where
+  {-# INLINE fresh #-}
+  fresh = TypeEvalM (\supply _ -> supplyValue supply)
+
+instance TypeEnvMonad TypeEvalM where
+  {-# INLINE getTypeEnv #-}
+  getTypeEnv = TypeEvalM (\_ tenv -> return tenv)
+
+instance EvalMonad TypeEvalM
+
+-------------------------------------------------------------------------------
 
 -- | A type assigned to a Var
 data TypeAssignment =
@@ -45,6 +105,11 @@ data TypeAssignment =
       varType :: !ReturnType
 
     , dataConType :: !DataConType
+    }
+    -- | Type and definition of a type function
+  | TyFunTypeAssignment
+    { varType :: !ReturnType
+    , tyFunType :: !TypeFunction
     }
 
 data DataType =
@@ -83,6 +148,22 @@ data DataConType =
   , dataConTyCon :: Var         -- ^ The type inhabited by constructed values
   }
 
+-- | A function on types.  Type functions are evaluated during type checking.
+--   Type functions should /not/ operate on function types, because they are
+--   currently not converted correctly by 'convertToPureTypeEnv' or
+--   'convertToMemTypeEnv'.
+data TypeFunction =
+  TypeFunction
+  { _tyfunArity     :: !Int
+  , _tyfunReduction :: !([Type] -> TypeEvalM Type)
+  }
+
+typeFunctionArity :: TypeFunction -> Int
+typeFunctionArity = _tyfunArity
+
+applyTypeFunction :: TypeFunction -> [Type] -> TypeEvalM Type
+applyTypeFunction = _tyfunReduction
+
 -- | A type environment maps variables to types
 newtype TypeEnv = TypeEnv (IntMap.IntMap TypeAssignment)
 
@@ -116,26 +197,44 @@ insertDataType (DataTypeDescr ty_con kind repr ctors) (TypeEnv env) =
       | (ty, dtor) <- ctors]
     data_cons = [dataConCon dtor | (_, dtor) <- ctors]
 
+insertTypeFunction :: Var -> ReturnType -> Int -> ([Type] -> TypeEvalM Type)
+                   -> TypeEnv -> TypeEnv
+insertTypeFunction v ty arity f (TypeEnv env) =
+  TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyFunTypeAssignment ty tf) env
+  where
+    tf = TypeFunction arity f
+
 lookupDataCon :: Var -> TypeEnv -> Maybe DataConType
+{-# INLINE lookupDataCon #-}
 lookupDataCon v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Just (DataConTypeAssignment _ dtor) -> Just dtor
      _ -> Nothing
 
 lookupDataType :: Var -> TypeEnv -> Maybe DataType
+{-# INLINE lookupDataType #-}
 lookupDataType v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Just (TyConTypeAssignment _ tc) -> Just tc
      _ -> Nothing
 
 lookupDataConWithType :: Var -> TypeEnv -> Maybe (DataType, DataConType)
+{-# INLINE lookupDataConWithType #-}
 lookupDataConWithType v env = do
   dcon <- lookupDataCon v env
   dtype <- lookupDataType (dataConTyCon dcon) env
   return (dtype, dcon)
 
+lookupTypeFunction :: Var -> TypeEnv -> Maybe TypeFunction
+{-# INLINE lookupTypeFunction #-}
+lookupTypeFunction v (TypeEnv env) =
+  case IntMap.lookup (fromIdent $ varID v) env
+  of Just (TyFunTypeAssignment _ tf) -> Just tf
+     _ -> Nothing
+
 -- | Look up the type of a variable
 lookupType :: Var -> TypeEnv -> Maybe ReturnType
+{-# INLINE lookupType #-}
 lookupType v (TypeEnv env) =
   fmap varType $ IntMap.lookup (fromIdent $ varID v) env
 
@@ -161,6 +260,8 @@ convertToPureTypeAssignment ass =
        TyConTypeAssignment (convertToPureReturnType rt) cons
      DataConTypeAssignment rt con_type ->
        DataConTypeAssignment (convertToPureReturnType rt) (convertToPureDataConType con_type)
+     TyFunTypeAssignment rt f ->
+       TyFunTypeAssignment (convertToPureReturnType rt) f
 
 convertToPureParamType (param ::: ty) =
   let param' = case param
@@ -201,7 +302,8 @@ convertToMemTypeAssignment ass =
        TyConTypeAssignment (convertToMemReturnType rt) cons
      DataConTypeAssignment rt con_type ->
        DataConTypeAssignment (convertToMemReturnType rt) (convertToMemDataConType con_type)
-
+     TyFunTypeAssignment rt f ->
+       TyFunTypeAssignment (convertToMemReturnType rt) f
 
 convertToMemParamType (repr ::: ty) 
   | getLevel ty == TypeLevel =

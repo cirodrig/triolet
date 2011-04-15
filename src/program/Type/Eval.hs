@@ -18,6 +18,21 @@ import Type.Environment
 import Type.Rename
 import Type.Type
 
+-- Need a monad supplying ... for reduction
+
+-- | Reduce a type to weak head-normal form.  Evaluate type functions
+--   that are in head position.
+reduceToWhnf :: Type -> TypeEvalM Type
+reduceToWhnf ty =
+  case fromVarApp ty
+  of Just (op, args) | not (null args) -> do
+       env <- getTypeEnv
+       case lookupTypeFunction op env of
+         Nothing    -> return ty
+         Just tyfun -> applyTypeFunction tyfun args
+     _ -> return ty
+     
+
 -- | Compute the type produced by applying a value of type @op_type@ to
 --   a value of type @arg_type@.
 typeOfApp :: IdentSupply Var

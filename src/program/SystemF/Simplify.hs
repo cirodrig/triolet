@@ -86,6 +86,9 @@ instance Supplies LR VarID where
   fresh = LR (\env -> supplyValue (lrIdSupply env))
   supplyToST = undefined
 
+instance TypeEnvMonad LR where
+  getTypeEnv = withTypeEnv return
+
 instance ReprDictMonad LR where
   withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply env) env
   withTypeEnv f = LR $ \env -> runLR (f $ lrTypeEnv env) env
@@ -518,12 +521,12 @@ delveExp input_context (ExpM ex) = do
     LetE inf bind@(MemVarP {}) rhs body -> do
       -- First process the rhs
       (rhs_context, flattened_rhs) <- delveExp input_context rhs
-      
+
       -- Float this binding
       (floated_bind, rn) <- freshenContextExp $ LetCtx inf bind flattened_rhs
       let output_context = contextItem floated_bind : rhs_context
           rn_body = rename rn body
-      
+
       return (output_context, rn_body)
 
     LetE inf bind@(LocalVarP {}) rhs body -> do
@@ -531,7 +534,7 @@ delveExp input_context (ExpM ex) = do
       -- Float let-bindings out of the RHS,
       -- unless they mention the bound variable.
       (rhs_context, flattened_rhs) <- delveExp input_context rhs
-      
+
       -- Don't float anything that depends on the bound variable.
       -- Any dependent bindings remain inside the RHS.
       let bound_variable = patMVar' bind
