@@ -231,7 +231,7 @@ typeInferExp (ExpM expression) =
        LitE {expInfo = inf, expLit = l} ->
          typeInferLitE inf l
        AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
-         traceShow (text "typeInferAppE:" <+> pprExp (ExpM expression)) $ typeInferAppE inf op ts args
+         typeInferAppE (ExpM expression) inf op ts args
        LamE {expInfo = inf, expFun = f} -> do
          ti_fun <- typeInferFun f
          let FunTM (RTypeAnn return_type _) = ti_fun
@@ -259,13 +259,13 @@ typeInferLitE inf l = do
   checkLiteralType l
   return $ ExpTM $ RTypeAnn (ValRT ::: literal_type) (LitE inf l)
 
-typeInferAppE inf op ty_args args = do
+typeInferAppE orig_expr inf op ty_args args = do
   let pos = getSourcePos inf
   ti_op <- typeInferExp op
 
   -- Apply to type arguments
   ti_ty_args <- mapM typeInferType ty_args
-  inst_type <- traceShow (text "typeInferAppE" <+> pprReturnType (getExpType ti_op)) $ computeInstantiatedType pos (getExpType ti_op) ti_ty_args
+  inst_type <- traceShow (text "typeInferAppE" <+> pprExp orig_expr) $ computeInstantiatedType pos (getExpType ti_op) ti_ty_args
 
   -- Apply to other arguments
   ti_args <- mapM typeInferExp args
@@ -469,10 +469,10 @@ typeCheckExport (Export pos spec f) = do
 
 typeCheckModule (Module module_name defs exports) = do
   global_type_env <- readInitGlobalVarIO the_memTypes
-  withTheNewVarIdentSupply $ \varIDs ->
-    let env = TCEnv varIDs global_type_env
-    in do (defs', exports') <- runReaderT (typeCheckDefGroups defs exports) env
-          return $ Module module_name defs' exports'
+  withTheNewVarIdentSupply $ \varIDs -> do
+    let do_typecheck = typeCheckDefGroups defs exports
+    (defs', exports') <- runTypeEvalM do_typecheck varIDs global_type_env
+    return $ Module module_name defs' exports'
   where
     typeCheckDefGroups (defs:defss) exports = 
       typeCheckDefGroup defs $ \defs' -> do
@@ -487,8 +487,7 @@ typeCheckModule (Module module_name defs exports) = do
 --   well-typed; this function doesn't check for most errors.
 inferExpType :: IdentSupply Var -> TypeEnv -> ExpM -> IO ReturnType
 inferExpType id_supply tenv expression =
-  let env = TCEnv id_supply tenv
-  in runReaderT (infer_exp expression) env
+  runTypeEvalM (infer_exp expression) id_supply tenv
   where
     -- Get the return type of an expression.  Skip parts that don't matter 
     -- to the return type.  Variable bindings are added to the environment,
@@ -521,8 +520,7 @@ inferAppType :: IdentSupply Var
              -> [ReturnType]    -- ^ Operand types
              -> IO ReturnType
 inferAppType id_supply tenv op_type ty_args arg_types =
-  let env = TCEnv id_supply tenv
-  in runReaderT infer_type env
+  runTypeEvalM infer_type id_supply tenv
   where
     infer_type = do
       ti_ty_args <- mapM typeInferType ty_args

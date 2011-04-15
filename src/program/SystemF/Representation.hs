@@ -386,10 +386,10 @@ infFixUpType t = withTypeEnv $ \env -> fixUpTypeRepresentations  env t
 infTypeRepr t = withTypeEnv $ \env -> typeRepr env t
 
 infApplyType pos op arg arg_val = InferRepr $ \env ->
-  typeOfApp (irVarSupply env) (irTypeEnv env) op arg arg_val
+  runTypeEvalM (typeOfApp op arg arg_val) (irVarSupply env) (irTypeEnv env)
 
 infCompareTypes pos e_type g_type = InferRepr $ \env ->
-  compareTypes (irVarSupply env) (irTypeEnv env) e_type g_type
+  runTypeEvalM (compareTypes e_type g_type) (irVarSupply env) (irTypeEnv env)
 
 -------------------------------------------------------------------------------
 -- Coercions

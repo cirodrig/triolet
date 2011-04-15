@@ -196,7 +196,7 @@ findByType :: IdentSupply Var -> TypeEnv -> Type -> [(Type, a)] -> IO (Maybe a)
 findByType id_supply tenv ptype assocs = search assocs
   where
     search ((ty, val) : assocs) = do
-      found <- compareTypes id_supply tenv ptype ty
+      found <- runTypeEvalM (compareTypes ptype ty) id_supply tenv
       if found then return (Just val) else search assocs
     
     search [] = return Nothing

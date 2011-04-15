@@ -410,10 +410,10 @@ typeCheckExport (Export pos spec f) = do
 
 typeCheckModule (Module module_name defs exports) = do
   global_type_env <- readInitGlobalVarIO the_systemFTypes
-  withTheNewVarIdentSupply $ \varIDs ->
-    let env = TCEnv varIDs global_type_env
-    in do (defs', exports') <- runReaderT (typeCheckDefGroups defs exports) env
-          return $ Module module_name defs' exports'
+  withTheNewVarIdentSupply $ \varIDs -> do
+    let typecheck = typeCheckDefGroups defs exports
+    (defs', exports') <- runTypeEvalM typecheck varIDs global_type_env
+    return $ Module module_name defs' exports'
   where
     typeCheckDefGroups (defs:defss) exports = 
       typeCheckDefGroup defs $ \defs' -> do

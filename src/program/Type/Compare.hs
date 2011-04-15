@@ -3,6 +3,7 @@
 module Type.Compare
        (typeMentions,
         typeMentionsAny,
+        reduceToWhnf,
         compareTypes,
         unifyTypeWithPattern
        )
@@ -46,26 +47,45 @@ typeMentionsAny t target = search t
 
 -------------------------------------------------------------------------------
 
+-- | Reduce a type to weak head-normal form.  Evaluate type functions
+--   that are in head position.
+reduceToWhnf :: Type -> TypeEvalM Type
+reduceToWhnf ty =
+  case fromVarApp ty
+  of Just (op, args) | not (null args) -> do
+       env <- getTypeEnv
+       case lookupTypeFunction op env of
+         Nothing    -> return ty
+         Just tyfun -> applyTypeFunction tyfun args
+     _ -> return ty
+
 -- | Compare two types.  Return True if the given type is equal to or a subtype
 --   of the expected type, False otherwise.
 --
 --   The types being compared are assumed to have the same kind.  If they do
 --   not, the result of comparison is undefined.
-compareTypes :: IdentSupply Var
-             -> TypeEnv         -- ^ Initial type environment
-             -> Type            -- ^ Expected type
+compareTypes :: Type            -- ^ Expected type
              -> Type            -- ^ Given Type
-             -> IO Bool
-compareTypes id_supply env expected given =
-  runTypeEvalM (cmpType expected given) id_supply env
+             -> TypeEvalM Bool
+compareTypes t1 t2 = do
+  -- Ensure that the types are in weak head-normal form, then
+  -- compare them structurally
+  t1' <- reduceToWhnf t1
+  t2' <- reduceToWhnf t2
+  cmpType t1 t2
 
+-- | Structurally compare types.
+--
+--   Arguments are assumed to be in weak head-normal form and are assumed to
+--   inhabit the same kind.
 cmpType :: Type -> Type -> TypeEvalM Bool
 cmpType expected given = cmp =<< unifyBoundVariables expected given
   where
     cmp (VarT v1, VarT v2) = return $ v1 == v2
-    cmp (AppT op1 arg1, AppT op2 arg2) = cmpType op1 op2 >&&> cmpType arg1 arg2
+    cmp (AppT op1 arg1, AppT op2 arg2) =
+      compareTypes op1 op2 >&&> compareTypes arg1 arg2
     cmp (FunT (arg1 ::: dom1) result1, FunT (arg2 ::: dom2) result2) =
-      cmpType dom1 dom2 >&&> cmpFun arg1 arg2 dom2 result1 result2
+      compareTypes dom1 dom2 >&&> cmpFun arg1 arg2 dom2 result1 result2
     cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
 
     cmp (_, _) = return False
@@ -76,7 +96,7 @@ cmpType expected given = cmp =<< unifyBoundVariables expected given
 
 cmpReturns :: ReturnType -> ReturnType -> TypeEvalM Bool
 cmpReturns (ret1 ::: rng1) (ret2 ::: rng2)
-  | sameReturnRepr ret1 ret2 = cmpType rng1 rng2
+  | sameReturnRepr ret1 ret2 = compareTypes rng1 rng2
   | otherwise = return False
 
 -- | Given an expected type @t_e@, a set of flexible variables @fv$, and a

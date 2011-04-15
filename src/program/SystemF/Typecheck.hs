@@ -43,37 +43,31 @@ data Typed s deriving(Typeable)
 -------------------------------------------------------------------------------
 -- Type-checking environment
 
-data TCEnv = TCEnv 
-             { tcVarIDSupply :: !(IdentSupply Var)
-             , tcTypeEnv     :: TypeEnv
-             }
-
-type TCM a = ReaderT TCEnv IO a
+-- | The type-checking monad
+type TCM a = TypeEvalM a
 
 typeError = error
 
-assume :: Var -> ReturnRepr ::: Type -> TCM a -> TCM a 
-assume v t m = local add_to_env m
-  where
-    add_to_env env = env {tcTypeEnv = insertType v t $ tcTypeEnv env}
+assume :: Var -> ReturnType -> TCM a -> TCM a 
+assume v t m = TypeEvalM $ \supply env ->
+  runTypeEvalM m supply (insertType v t env)
 
 lookupVar :: Var -> TCM ReturnType
 lookupVar v = do
-  env <- asks tcTypeEnv
+  env <- getTypeEnv
   case lookupType v env of
     Just rt -> return rt
     Nothing -> internalError $ "lookupVar: No type for variable: " ++ show v
 
 tcLookupDataCon :: Var -> TCM DataConType
 tcLookupDataCon v = do
-  env <- asks tcTypeEnv
+  env <- getTypeEnv
   case lookupDataCon v env of
     Just dct -> return dct
     Nothing -> internalError $ "lookupVar: No type for data constructor: " ++ show v
 
 checkType :: SourcePos -> Type -> Type -> TCM Bool
-checkType pos expected given = ReaderT $ \env -> do
-  compareTypes (tcVarIDSupply env) (tcTypeEnv env) expected given
+checkType pos expected given = compareTypes expected given
 
 checkReturnType :: SourcePos -> ReturnType -> ReturnType -> TCM Bool
 checkReturnType pos (erepr ::: etype) (grepr ::: gtype)
@@ -81,10 +75,7 @@ checkReturnType pos (erepr ::: etype) (grepr ::: gtype)
   | otherwise = return False
 
 applyType :: Type -> ReturnType -> Maybe Type -> TCM (Maybe ReturnType)
-applyType op_type arg_type arg = ReaderT $ \env -> do
-  applied <- typeOfApp (tcVarIDSupply env) (tcTypeEnv env)
-             op_type arg_type arg
-  return applied
+applyType op_type arg_type arg = typeOfApp op_type arg_type arg
 
 checkLiteralType :: Lit -> TCM ()
 checkLiteralType l =

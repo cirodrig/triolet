@@ -63,6 +63,10 @@ class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m
 newtype TypeEvalM a =
   TypeEvalM {runTypeEvalM :: IdentSupply Var -> TypeEnv -> IO a}
 
+instance Functor TypeEvalM where
+  {-# INLINE fmap #-}
+  fmap f m = TypeEvalM $ \supply env -> fmap f (runTypeEvalM m supply env)
+
 instance Monad TypeEvalM where
   {-# INLINE return #-}
   {-# INLINE (>>=) #-}
