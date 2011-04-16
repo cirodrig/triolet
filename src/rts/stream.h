@@ -81,9 +81,7 @@ extern function pyon.internal.stream.zip4
    owned, owned, owned, owned, owned,
    pointer, pointer, pointer, pointer, pointer) -> ();
 
-extern data owned pyon.internal.stream.Stream_counter;
-
-extern function pyon.internal.stream.Stream_count (unit) -> owned;
+extern data owned pyon.internal.stream.Stream_count;
 
 extern function pyon.internal.stream.Stream_range (int) -> owned;
 

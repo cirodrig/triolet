@@ -171,6 +171,7 @@ compilePyonToPyonAsm compile_flags path text = do
 
   -- Convert to explicit memory representation
   tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
+  print "Generating memory IR"
   mem_mod <- SystemF.generateMemoryIR tc_mod
 
   putStrLn "Memory"

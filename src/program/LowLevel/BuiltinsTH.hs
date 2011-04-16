@@ -219,8 +219,6 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_TraversableDict_Stream_build) |])
   , (PyonName module_stream "Stream_traverse",
      Right [| pyonBuiltin (SystemF.the_TraversableDict_Stream_traverse) |])
-  , (PyonName module_stream "Stream_count",
-     Right [| pyonBuiltin (SystemF.the_count) |])
   , (PyonName module_stream "Stream_range",
      Right [| pyonBuiltin (SystemF.the_range) |])
   , (PyonName module_stream "Stream_rangeIndexed",
@@ -396,6 +394,9 @@ builtinGlobals =
      Right [| pyonBuiltin (SystemF.the_repr_float) |] )
   , (PyonName module_structures "repr_bool",
      Right [| pyonBuiltin (SystemF.the_repr_bool) |] )
+    -- Streams
+  , (PyonName module_stream "Stream_count",
+     Right [| pyonBuiltin (SystemF.the_count) |])
   ]
 
 builtinVarPrimName nm = "the_biprim_" ++ builtinVarUnqualifiedName nm

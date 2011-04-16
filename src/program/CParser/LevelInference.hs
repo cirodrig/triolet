@@ -44,7 +44,7 @@ lvlFromVarPos lmap resVar@(ResolvedVar _ _ det) pos =
 castLIVar :: ResolvedVar -> Level -> Identifier LevelInferred
 castLIVar (ResolvedVar ident label det) lvl =
   case det
-  of Just (PredefinedVar v) -> v
+  of Just (PredefinedVar v _) -> v
      Nothing -> mkVar ident label lvl
 
 -- Lazily add the Mapping, return updated Map and constructed LIVar
@@ -72,10 +72,10 @@ liDataConDecl lmap (DataConDecl v ty params ex_types args rng) = do
 
 -- Check the Type's level, then infer
 liDecl :: LMap -> (Decl Resolved) -> IO (Decl LevelInferred)
-liDecl lmap (VarDecl declVar declType) = do
+liDecl lmap (VarDecl declVar declType type_function) = do
    liType <- liReturnType lmap declType
    (liVar,_) <- predLvl (getLevel liType) declVar lmap
-   return $ VarDecl liVar liType
+   return $ VarDecl liVar liType type_function
 
 liDecl lmap (DataDecl declVar repr declType cons) = do
    liType <- liReturnType lmap declType

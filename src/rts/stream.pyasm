@@ -1100,12 +1100,6 @@ function inline Stream_count_next (pointer state, pointer out) -> bool {
   true;
 };
 
-// This function is polymorphic in the stream shape.  It always returns the
-// same stream.
-function inline Stream_count (unit _) -> owned {
-  Stream_counter;
-};
-
 /*****************************************************************************/
 /* range */
 

@@ -56,7 +56,10 @@ translateDataConDecl data_type_con decl =
       
 
 translateDecl :: Decl LevelInferred -> (TypeEnv -> TypeEnv)
-translateDecl (VarDecl v rt) = insertType v (translateReturnType rt)
+translateDecl (VarDecl v rt Nothing) =
+  insertType v (translateReturnType rt)
+translateDecl (VarDecl v rt (Just type_function)) =
+  insertTypeFunction v (translateReturnType rt) type_function
 translateDecl (DataDecl t repr rt cons) =
   let descr = DataTypeDescr t (translateReturnType rt) repr (map (translateDataConDecl t . unLoc) cons)
   in insertDataType descr

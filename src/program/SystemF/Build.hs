@@ -1,10 +1,11 @@
 {-| Helper functions for creating code.
 -}
 
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, Rank2Types #-}
 module SystemF.Build where
 
 import Common.Error
+import Common.Supply
 import SystemF.Syntax
 import SystemF.MemoryIR
 import Builtins.Builtins
@@ -16,13 +17,16 @@ type MkExpM = FreshVarM ExpM
 type MkAltM = FreshVarM AltM
 type MkFunM = FreshVarM FunM
 
-varE :: Var -> MkExpM
+{-# SPECIALIZE INLINE appE :: MkExpM -> [TypM] -> [MkExpM] -> MkExpM #-}
+{-# SPECIALIZE INLINE varAppE :: Var -> [TypM] -> [MkExpM] -> MkExpM #-}
+
+varE :: (Supplies m VarID) => Var -> m ExpM
 varE v = return $ ExpM $ VarE defaultExpInfo v
 
-litE :: Lit -> MkExpM
+litE :: (Supplies m VarID) => Lit -> m ExpM
 litE l = return $ ExpM $ LitE defaultExpInfo l
 
-appE :: MkExpM -> [TypM] -> [MkExpM] -> MkExpM
+appE :: (Supplies m VarID) => m ExpM -> [TypM] -> [m ExpM] -> m ExpM
 appE op t_args args = do
   op' <- op
   args' <- sequence args
@@ -41,13 +45,13 @@ mkAppE (ExpM (AppE _ op t_args1 [])) t_args2 args =
 mkAppE op t_args args =
   ExpM $ AppE defaultExpInfo op t_args args
 
-varAppE :: Var -> [TypM] -> [MkExpM] -> MkExpM
+varAppE :: (Supplies m VarID) => Var -> [TypM] -> [m ExpM] -> m ExpM
 varAppE op_var t_args args = do
   let op = ExpM $ VarE defaultExpInfo op_var
   args' <- sequence args
   return $ mkAppE op t_args args'
 
-lamE :: MkFunM -> MkExpM
+lamE :: (Supplies m VarID) => m FunM -> m ExpM
 lamE mk_f = do 
   f <- mk_f
   return $ ExpM $ LamE defaultExpInfo f
@@ -55,7 +59,8 @@ lamE mk_f = do
 letE :: PatM -> ExpM -> ExpM -> ExpM
 letE pat val body = ExpM $ LetE defaultExpInfo pat val body
 
-localE :: TypM -> ExpM -> (ExpM -> MkExpM) -> (ExpM -> MkExpM) -> MkExpM
+localE :: (Supplies m VarID) =>
+          TypM -> ExpM -> (ExpM -> m ExpM) -> (ExpM -> m ExpM) -> m ExpM
 localE ty repr mk_rhs mk_body = do
   tmpvar <- newAnonymousVar ObjectLevel
   let tmpvar_binder = localVarP tmpvar (fromTypM ty) repr
@@ -66,16 +71,16 @@ localE ty repr mk_rhs mk_body = do
 letfunE :: DefGroup (Def Mem) -> ExpM -> ExpM
 letfunE defs body = ExpM $ LetfunE defaultExpInfo defs body
 
-caseE :: MkExpM -> [MkAltM] -> MkExpM
+caseE :: (Supplies m VarID) => m ExpM -> [m AltM] -> m ExpM
 caseE scr alts = do
   scr' <- scr
   alts' <- sequence alts
   return $ ExpM $ CaseE defaultExpInfo scr' alts'
 
-exceptE :: ReturnType -> MkExpM
+exceptE :: (Supplies m VarID) => ReturnType -> m ExpM
 exceptE ty = return $ ExpM $ ExceptE defaultExpInfo ty
 
-ifE :: MkExpM -> MkExpM -> MkExpM -> MkExpM
+ifE :: (Supplies m VarID) => m ExpM -> m ExpM -> m ExpM -> m ExpM
 ifE mk_cond mk_tr mk_fa = do
   cond <- mk_cond
   tr <- mk_tr
@@ -84,10 +89,11 @@ ifE mk_cond mk_tr mk_fa = do
       false = AltM $ Alt (pyonBuiltin the_False) [] [] [] fa
   return $ ExpM $ CaseE defaultExpInfo cond [true, false]
 
-mkFun :: [Type]
-      -> ([Var] -> FreshVarM ([ParamType], ReturnType))
-      -> ([Var] -> [Var] -> MkExpM)
-      -> MkFunM
+mkFun :: (Supplies m VarID) =>
+         [Type]
+      -> ([Var] -> m ([ParamType], ReturnType))
+      -> ([Var] -> [Var] -> m ExpM)
+      -> m FunM
 mkFun typaram_kinds mk_params mk_body = do
   typaram_vars <- mapM (const $ newAnonymousVar TypeLevel) typaram_kinds
   (param_types, return_type) <- mk_params typaram_vars
@@ -100,14 +106,17 @@ mkFun typaram_kinds mk_params mk_body = do
   where
     mk_typaram_var _ = newAnonymousVar TypeLevel
 
-mkAlt :: TypeEnv -> Var -> [TypM]
-      -> ([Var] -> [Var] -> MkExpM)
-      -> MkAltM
-mkAlt tenv con ty_args mk_body =
+mkAlt :: (Supplies m VarID) =>
+         (forall a. FreshVarM a -> m a)
+      -> TypeEnv -> Var -> [TypM]
+      -> ([Var] -> [Var] -> m ExpM)
+      -> m AltM
+mkAlt lift_FreshVarM tenv con ty_args mk_body =
   case lookupDataCon con tenv
   of Just dcon_type -> do
        -- Get the types of the alternative patterns
        (ex_param_types, param_types, _) <-
+         lift_FreshVarM $
          instantiateDataConTypeWithFreshVariables dcon_type $
          map fromTypM ty_args
        

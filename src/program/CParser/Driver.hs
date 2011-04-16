@@ -2,6 +2,7 @@
 module CParser.Driver(parseCoreModule)
 where
 
+import qualified Data.Map as Map
 import System.FilePath
 import System.IO
 
@@ -10,6 +11,7 @@ import Common.SourcePos
 import Common.Identifier
 import Common.Label
 import Builtins.Builtins
+import Builtins.TypeFunctions
 import Type.Var
 import Type.Type
 import Type.Environment
@@ -28,14 +30,17 @@ import CParser.PrettyAST()
 predefinedVarDetails :: [(String, VarDetails)]
 predefinedVarDetails = map mk_var_details (pureV : intindexV : allBuiltinVars)
   where
-    mk_var_details v = (name, PredefinedVar v)
+    mk_var_details v = (name, PredefinedVar v type_function)
       where
         name =
           case varName v
-          of Just lab -> case labelLocalName lab
-                         of Left name -> name
-                            _ -> internalError "Unnamed predefined variable"
+          of Just lab ->
+               case labelLocalName lab
+               of Left name -> name
+                  _ -> internalError "Unnamed predefined variable"
              _ -> internalError "Unnamed predefined variable"
+        
+        type_function = Map.lookup v builtinTypeFunctions
 
 parseCoreModule :: IdentSupply Var -> IO TypeEnv
 parseCoreModule ident_supply = do

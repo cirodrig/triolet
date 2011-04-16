@@ -189,7 +189,7 @@ typeInferExp (ExpSF expression) =
        LitE {expInfo = inf, expLit = l} ->
          typeInferLitE inf l
        AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
-         typeInferAppE inf op ts args
+         typeInferAppE (ExpSF expression) inf op ts args
        LamE {expInfo = inf, expFun = f} -> do
          ti_fun <- typeInferFun f
          return $ ExpTSF $ TypeAnn (getTypeAnn ti_fun) (LamE inf ti_fun)
@@ -215,7 +215,7 @@ typeInferLitE inf l = do
   checkLiteralType l
   return $ ExpTSF $ TypeAnn literal_type (LitE inf l)
 
-typeInferAppE inf op ty_args args = do
+typeInferAppE orig_expr inf op ty_args args = do
   let pos = getSourcePos inf
   ti_op <- typeInferExp op
   let op_type = getTypeAnn ti_op

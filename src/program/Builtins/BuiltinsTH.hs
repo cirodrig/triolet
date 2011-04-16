@@ -33,6 +33,11 @@ pyonBuiltinTypeNames =
   , "array"
   , "EffTok"
     
+    -- Shape-related types
+  , "shape"
+  , "list_shape"
+  , "array_shape"
+
     -- Dictionary types
   , "Repr"
   , "TraversableDict"

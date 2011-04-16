@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, UndecidableInstances #-}
 module CParser.PrettyAST() where
 
+import Data.Maybe
 import Text.PrettyPrint.HughesPJ
 
 import Common.Identifier
@@ -92,9 +93,10 @@ instance Pretty (Identifier ix) => Pretty (DataConDecl ix) where
 instance Pretty (Identifier ix) => Pretty (Decl ix) where
   ppr dec =
     case dec
-    of VarDecl dvar dtype ->
+    of VarDecl dvar dtype type_function ->
          show_decl "Variable" $
-         pprWithHeading "Variable" dvar $$ pprWithHeading "Type" dtype
+         pprWithHeading "Variable" dvar $$ pprWithHeading "Type" dtype $$
+         if isJust type_function then text "(type function)" else empty
        DataDecl dvar repr dtype cons ->
          show_decl "Data type" $
          pprWithHeading "Variable" dvar $$

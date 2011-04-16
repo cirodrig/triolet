@@ -182,7 +182,7 @@ topDecl = located (var_decl <|> datatype_decl)
       declVar <- identifier
       match ColonTok 
       declType <- anyReturnType
-      return $ VarDecl declVar declType
+      return $ VarDecl declVar declType Nothing
 
     datatype_decl = do
       match DataTok

@@ -21,6 +21,7 @@ module Type.Environment
         DataConType(..),
         DataTypeDescr(..),
         TypeFunction,
+        typeFunction,
         typeFunctionArity,
         applyTypeFunction,
         lookupType,
@@ -33,6 +34,7 @@ module Type.Environment
         wiredInTypeEnv,
         insertType,
         insertDataType,
+        insertTypeFunction,
         convertToPureTypeEnv,
         convertToMemTypeEnv,
         convertToMemParamType,
@@ -41,6 +43,8 @@ module Type.Environment
        )
 where
 
+import Control.Applicative
+import Control.Monad
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 
@@ -66,6 +70,10 @@ newtype TypeEvalM a =
 instance Functor TypeEvalM where
   {-# INLINE fmap #-}
   fmap f m = TypeEvalM $ \supply env -> fmap f (runTypeEvalM m supply env)
+
+instance Applicative TypeEvalM where
+  pure = return
+  (<*>) = ap
 
 instance Monad TypeEvalM where
   {-# INLINE return #-}
@@ -159,8 +167,16 @@ data DataConType =
 data TypeFunction =
   TypeFunction
   { _tyfunArity     :: !Int
+
+    -- | How to evaluate a type function.  The length of the argument list
+    --   is exactly the size given by _tyfunArity.  The arguments are not
+    --   reduced.  The returned type should be in weak head-normal form.
   , _tyfunReduction :: !([Type] -> TypeEvalM Type)
   }
+
+-- | Create a type function
+typeFunction :: Int -> ([Type] -> TypeEvalM Type) -> TypeFunction
+typeFunction = TypeFunction
 
 typeFunctionArity :: TypeFunction -> Int
 typeFunctionArity = _tyfunArity
@@ -201,12 +217,10 @@ insertDataType (DataTypeDescr ty_con kind repr ctors) (TypeEnv env) =
       | (ty, dtor) <- ctors]
     data_cons = [dataConCon dtor | (_, dtor) <- ctors]
 
-insertTypeFunction :: Var -> ReturnType -> Int -> ([Type] -> TypeEvalM Type)
+insertTypeFunction :: Var -> ReturnType -> TypeFunction
                    -> TypeEnv -> TypeEnv
-insertTypeFunction v ty arity f (TypeEnv env) =
-  TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyFunTypeAssignment ty tf) env
-  where
-    tf = TypeFunction arity f
+insertTypeFunction v ty f (TypeEnv env) =
+  TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyFunTypeAssignment ty f) env
 
 lookupDataCon :: Var -> TypeEnv -> Maybe DataConType
 {-# INLINE lookupDataCon #-}

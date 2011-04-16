@@ -34,15 +34,15 @@ data LoopNesting =
   }
 
 -- | During loop rewriting, keep track of the current loop nesting
-type LRW a = ReaderT (TypeEnv, LoopNesting) FreshVarM a
+type LRW a = ReaderT LoopNesting TypeEvalM a
 
 incParLoopCount m = local inc_count m 
   where
-    inc_count (tenv, n) = (tenv, n {parLoops = 1 + parLoops n})
+    inc_count n = n {parLoops = 1 + parLoops n}
 
 incOtherLoopCount m = local inc_count m 
   where
-    inc_count (tenv, n) = (tenv, n {otherLoops = 1 + otherLoops n})
+    inc_count n = n {otherLoops = 1 + otherLoops n}
 
 parLoopOperator, otherLoopOperator :: Var -> Bool
 parLoopOperator v =
@@ -60,6 +60,11 @@ otherLoopOperator v =
             pyonBuiltin the_fun_reduce1,
             pyonBuiltin the_fun_reduce1_Stream,
             pyonBuiltin the_TraversableDict_list_build]
+
+-- | Use rewrite rules on an application
+useRewriteRules :: ExpInfo -> Var -> [TypM] -> [ExpM] -> LRW (Maybe ExpM)
+useRewriteRules inf op_var ty_args args =
+  lift $ rewriteApp parallelizingRewrites inf op_var ty_args args
 
 -------------------------------------------------------------------------------
 -- Traversal
@@ -92,10 +97,11 @@ rwApp inf op ty_args args = do
   return $ ExpM $ AppE inf op' ty_args args'
 
 rwAppOper subexpr_context inf op_inf op_var ty_args args = do
-  (tenv, loop_nesting) <- ask
+  loop_nesting <- ask
   case parLoops loop_nesting of
-    0 -> lift (rewriteApp parallelizingRewrites tenv inf op_var ty_args args) >>=
-         rebuild_from_rewrite
+    0 -> do
+      rewritten <- useRewriteRules inf op_var ty_args args
+      rebuild_from_rewrite rewritten
     _ -> recurse
   where
     -- If the rewrite succeeded, continue processing the rewritten expression
@@ -129,7 +135,8 @@ rwTopLevel defss exports = do
 parallelLoopRewrite (Module modname defss exports) =
   withTheNewVarIdentSupply $ \var_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
-    let global_state = (tenv, LoopNesting 0 0)
-    (defss', exports') <- runFreshVarM var_supply $
-                          runReaderT (rwTopLevel defss exports) global_state
+    let global_context = LoopNesting 0 0
+        rewrite = rwTopLevel defss exports
+    (defss', exports') <-
+      runTypeEvalM (runReaderT rewrite global_context) var_supply tenv
     return $ Module modname defss' exports'

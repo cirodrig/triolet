@@ -1,6 +1,6 @@
 
 @forall(a)
-def tails(xs : list(a)) -> iter(list, (a, iter(list, a))):
+def tails(xs : list(a)) -> iter(shape(list), (a, iter(shape(list), a))):
   N = len(xs)
 
   # This local function uses type variables from the enclosing scope

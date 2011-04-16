@@ -60,6 +60,7 @@ Executable pyon
     CommandLine
     Builtins.BuiltinsTH
     Builtins.Builtins
+    Builtins.TypeFunctions
     Common.Error
     Common.Identifier
     Common.Label

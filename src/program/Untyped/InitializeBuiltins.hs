@@ -40,7 +40,9 @@ builtinTyCon name kind sf_con =
 -- | Create the type of an iterator/stream.
 --   The first argument is the stream shape, the second is the element type.
 iterType :: HMType -> HMType -> HMType
-iterType shp ty = ConTy (tiBuiltin the_con_iter) @@ shp @@ ty
+iterType shp ty =
+  let shape_type = ConTy (tiBuiltin the_con_shape) @@ shp
+  in ConTy (tiBuiltin the_con_iter) @@ shape_type @@ ty
 
 listIterType = iterType (ConTy (tiBuiltin the_con_list))
 
@@ -244,7 +246,8 @@ mkTraversableClass = do
               { insQVars = [t2]
               , insConstraint = []
               , insClass = cls
-              , insType = ConTy (tiBuiltin the_con_iter) @@ ConTy t2
+              , insType = ConTy (tiBuiltin the_con_iter) @@
+                          (ConTy (tiBuiltin the_con_shape) @@ ConTy t2)
               , insCon = Nothing
               , insMethods =
                 [ InstanceMethod $
@@ -755,8 +758,8 @@ mkZip4Type =
        (tT @@ (TupleTy 4 @@ aT @@ bT @@ cT @@ dT)))
 
 mkCountType =
-  forallType [Star :-> Star] $ \[t] ->
-  ([], iterType (ConTy t) (ConTy $ tiBuiltin the_con_int))
+  return $ monomorphic $
+  iterType (ConTy $ tiBuiltin the_con_list) (ConTy $ tiBuiltin the_con_int)
 
 mkRangeType =
   let int_type = ConTy $ tiBuiltin the_con_int
@@ -882,11 +885,13 @@ initializeTIBuiltins = do
             , ("Complex", Star :-> Star, [| pyonBuiltin SystemF.the_Complex |])
             , ("bool", Star, [| pyonBuiltin SystemF.the_bool |])
             , ("NoneType", Star, [| pyonBuiltin SystemF.the_NoneType |])
-            , ("iter", (Star :-> Star) :-> Star :-> Star,
+            , ("iter", Star :-> Star :-> Star,
                [| pyonBuiltin SystemF.the_Stream |])
             , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
             , ("Boxed", Star :-> Star, [| pyonBuiltin SystemF.the_Boxed |])
+            , ("shape", (Star :-> Star) :-> Star,
+               [| pyonBuiltin SystemF.the_shape |])
             ]
             
           classes =

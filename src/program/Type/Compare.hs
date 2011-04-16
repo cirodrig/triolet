@@ -72,15 +72,21 @@ compareTypes t1 t2 = do
   -- compare them structurally
   t1' <- reduceToWhnf t1
   t2' <- reduceToWhnf t2
-  cmpType t1 t2
+  cmpType t1' t2'
 
 -- | Structurally compare types.
 --
 --   Arguments are assumed to be in weak head-normal form and are assumed to
 --   inhabit the same kind.
 cmpType :: Type -> Type -> TypeEvalM Bool
-cmpType expected given = cmp =<< unifyBoundVariables expected given
+cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
   where
+    -- For debugging, print the types being compared
+    debug x = x -- traceShow message x
+      where 
+        message = text "cmpType" <+>
+                  (pprType expected $$ text "----" $$ pprType given)
+
     cmp (VarT v1, VarT v2) = return $ v1 == v2
     cmp (AppT op1 arg1, AppT op2 arg2) =
       compareTypes op1 op2 >&&> compareTypes arg1 arg2

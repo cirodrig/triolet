@@ -105,6 +105,10 @@ liftFreshVarM :: FreshVarM a -> LR a
 liftFreshVarM m = LR $ \env -> do
   runFreshVarM (lrIdSupply env) m
 
+liftTypeEvalM :: TypeEvalM a -> LR a
+liftTypeEvalM m = LR $ \env -> do
+  runTypeEvalM m (lrIdSupply env) (lrTypeEnv env)
+
 getRewriteRules :: LR RewriteRuleSet
 getRewriteRules = LR $ \env -> return (lrRewriteRules env)
 
@@ -685,8 +689,8 @@ rwAppWithOperator inf op' op_val ty_args args =
             ruleset <- getRewriteRules
                 
             -- Try to rewrite this application
-            rewritten <- liftFreshVarM $
-                         rewriteApp ruleset tenv inf op_var ty_args args
+            rewritten <- liftTypeEvalM $
+                         rewriteApp ruleset inf op_var ty_args args
             case rewritten of 
               Just new_expr -> rwExp new_expr
               Nothing ->

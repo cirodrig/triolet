@@ -9,6 +9,7 @@ import Control.Monad
 import qualified Data.Map as Map
 import Data.Maybe
 
+import Common.Error
 import Common.Identifier
 import Common.Supply
 import Common.SourcePos
@@ -219,14 +220,26 @@ resolveDataConDecl (L pos (DataConDecl v ty params ex_types args rng)) = do
 resolveDecl :: (Located (Decl Parsed)) -> NR (Located (Decl Resolved))
 resolveDecl (L pos decl) =
   case decl
-  of VarDecl v ty -> do
+  of VarDecl v ty Nothing -> do
        rVar <- globalDef v pos
        rType <- enter $ resolveReturnType ty
-       return $ L pos $ VarDecl rVar rType
+
+       -- Get the predefined variable's type function
+       let ResolvedVar _ _ (Just details) = rVar
+           PredefinedVar _ m_ty_function = details
+       return $ L pos $ VarDecl rVar rType m_ty_function
+
      DataDecl v repr ty cons -> do
        rVar <- globalDef v pos
        rType <- enter $ resolveReturnType ty
        rCons <- mapM resolveDataConDecl cons
+
+       -- There must be no predefined type function
+       let ResolvedVar _ _ (Just details) = rVar
+           PredefinedVar _ m_ty_function = details
+       when (isJust m_ty_function) $
+         internalError "resolveDecl: Unexpected type function"
+
        return $ L pos $ DataDecl rVar repr rType rCons
 
 resolveLType :: PLType -> NR RLType

@@ -16,13 +16,23 @@ import Common.SourcePos
 import Common.Label
 import Type.Var
 import Type.Type(Level(..), HasLevel(..), Repr(..))
+import Type.Environment(TypeFunction)
 
--- | Details about an externally defined variable
+-- | Details about an externally defined variable.
+--
+--   The main piece of information is the external variable.
+--   By attaching a 'VarDetails' to a parser variable, the parser is directed
+--   to translate the parser variable to the given external variable. 
+--   Otherwise a new external variable will be created.
+--
+--   If a type-level variable stands for a built-in type function, then the
+--   type function value is also included here.  Type functions must be
+--   type-level entities, and must not be data types.
 data VarDetails =
-    PredefinedVar !Var
+    PredefinedVar !Var !(Maybe TypeFunction)
 
 instance HasLevel VarDetails where
-  getLevel (PredefinedVar v) = getLevel v
+  getLevel (PredefinedVar v _) = getLevel v
 
 instance Foldable Located where
   foldMap f x = f (unLoc x)
@@ -129,7 +139,10 @@ type LDataConDecl ix = Located (DataConDecl ix)
 
 -- | A top-level type declaration.  This declares a piece of global data
 --   or a data type.
-data Decl ix = VarDecl (Identifier ix) (ReturnType ix)
+--
+--   A global variable may have a type function definition.  Type function
+--   definitions are built-in, so the parser doesn't modify them.
+data Decl ix = VarDecl (Identifier ix) (ReturnType ix) (Maybe TypeFunction)
              | DataDecl (Identifier ix) Repr (ReturnType ix) [LDataConDecl ix]
 
 type LDecl ix = Located (Decl ix)
