@@ -273,13 +273,17 @@ rwTraverseList inf [elt_type] [elt_repr, list] = do
 rwTraverseList _ _ _ = return Nothing
 
 rwBuildList :: RewriteRule
-rwBuildList inf [elt_type] (elt_repr : stream : other_args)
-  | Just shape <- interpretStream elt_repr stream =
-    case sShape shape
-    of Array1DShape size_arg size_val ->
-         fmap Just $
-         buildListDoall inf elt_type elt_repr other_args size_arg size_val (sGenerator shape)
-       _ -> return Nothing
+rwBuildList inf [elt_type] (elt_repr : stream : other_args) =
+  case interpretStream2 (VarT (pyonBuiltin the_list_shape))
+       (fromTypM elt_type) elt_repr stream
+  of Just s@(GenerateStream {})
+       | Array1DShape size_arg size_val <- sexpShape s ->
+           -- Statically known stream size.
+           -- TODO: generalize to more stream constructors
+           fmap Just $
+           buildListDoall inf elt_type elt_repr other_args size_arg size_val
+           (_sexpGenerator s)
+     _ -> return Nothing
 
 rwBuildList _ _ _ = return Nothing
 
@@ -927,13 +931,13 @@ rwReduceGenerate inf element elt_repr reducer init other_args size count produce
 rwReduce1Stream :: RewriteRule
 rwReduce1Stream inf [shape_type, element]
   (elt_repr : reducer : stream : other_args) =
-  case interpretStream elt_repr stream
-  of Just s -> 
-       case sShape s
-       of Array1DShape size count ->
-            fmap Just $
-            rwReduce1Generate inf element elt_repr reducer other_args size count (sGenerator s)
-          _ -> return Nothing
+  case interpretStream2 (fromTypM shape_type) (fromTypM element)
+       elt_repr stream
+  of Just s@(GenerateStream {})
+       | Array1DShape size_arg size_val <- sexpShape s ->
+           fmap Just $
+           rwReduce1Generate inf element elt_repr reducer other_args
+           size_arg size_val (_sexpGenerator s)
      _ -> return Nothing
 
 rwReduce1Stream _ _ _ = return Nothing
