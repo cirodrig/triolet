@@ -489,32 +489,6 @@ rwZip4Stream inf
 
 rwZip4Stream _ _ _ = return Nothing
 
-generalizedZipStream :: TypM -> [InterpretedStream] -> TypeEvalM (Maybe ExpM)
-generalizedZipStream shape_type streams =
-  let zipped_stream = zipStreams streams -- Zip the streams
-      zipped_shape = shapeType $ sShape zipped_stream
-      elem_ty = sType zipped_stream
-      tuple_repr = sRepr zipped_stream
-  in case sShape zipped_stream
-     of UnboundedShape -> return Nothing -- Can't deal with infinite streams
-        UnknownShape _ -> return Nothing -- Don't cross the streams
-        Array1DShape shp_ty shp_val -> do
-          -- Generate code for a zipped loop
-          zip_expr <-
-            varAppE (pyonBuiltin the_generate)
-            [shp_ty, TypM elem_ty]
-            [return shp_val,
-             return tuple_repr,
-             lamE $ mkFun []
-             (\ [] -> return ([ValPT Nothing ::: intType],
-                              BoxRT ::: FunT (OutPT ::: elem_ty)
-                              (SideEffectRT ::: elem_ty)))
-             (\ [] [ixvar] ->
-               sGenerator zipped_stream $ ExpM (VarE defaultExpInfo ixvar))]
-
-          -- Cast the stream shape to the expected type
-          castStreamExpressionShape (fromTypM shape_type) zipped_shape elem_ty tuple_repr zip_expr
-
 generalizedZipStream2 :: TypM -> [ExpS] -> TypeEvalM (Maybe ExpM)
 generalizedZipStream2 shape_type streams =
   case zipStreams2 streams -- Zip the streams
@@ -1141,26 +1115,6 @@ typeShape ty = UnknownShape (TypM ty)
 listShape = UnknownShape (TypM (VarT $ pyonBuiltin the_list_shape))
 
 -- | The interpreted value of a stream.
---
---   This is the old data type; it will eventually be replaced by 'ExpS'.
-data InterpretedStream =
-  InterpretedStream
-  { -- | The stream's shape
-    sShape :: !Shape
-
-    -- | The type of a stream element
-  , sType :: Type
-
-    -- | The representation dictionary of a stream element
-  , sRepr :: ExpM
-
-    -- | Given an expression that evaluates to the index of the desired
-    --   stream element (with type @val int@), produce an expression that
-    --   evaluates to the desired stream element, as a write reference. 
-  , sGenerator :: ExpM -> TypeEvalM ExpM
-  }
-
--- | The interpreted value of a stream.
 data instance Exp Stream =
     GenerateStream
     { -- | The stream's shape
@@ -1771,82 +1725,6 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
        return $ ExpM $ AppE defaultExpInfo op [TypM ty, TypM acc_ty]
           [repr, acc_repr, acc_f, init, list_stream, out_ptr]       
          
--- | Given a stream and the repr of a stream element, get its shape.
---
---   We may change the stream's type by ignoring functions that only
---   affect the advertised stream shape.
---
---   TODO: Eliminate this function; call 'interpretStream2' instead.
-interpretStream :: ExpM -> ExpM -> Maybe InterpretedStream
-interpretStream repr expression =
-  case unpackVarAppM expression
-  of Just (op_var, ty_args, args)
-       | op_var `isPyonBuiltin` the_TraversableDict_Stream_traverse ->
-         case args of [_, stream_arg] -> interpretStream repr stream_arg
-       | op_var `isPyonBuiltin` the_TraversableDict_Stream_build ->
-         case args of [_, stream_arg] -> interpretStream repr stream_arg
-       | op_var `isPyonBuiltin` the_fun_asList_Stream ->
-         case args of [stream_arg] -> interpretStream repr stream_arg
-       | op_var `isPyonBuiltin` the_generate ->
-         let [size_arg, type_arg] = ty_args
-             [size_val, repr, writer] = args
-         in Just $ InterpretedStream
-            { sShape = Array1DShape (TypM size_arg) size_val
-            , sType = type_arg
-            , sRepr = repr
-            , sGenerator = \ix ->
-                appE (return writer) [] [return ix]}
-       | op_var `isPyonBuiltin` the_count ->
-           Just $ InterpretedStream
-           { sShape = UnboundedShape
-           , sType = intType
-           , sRepr = repr
-           , sGenerator = counting_generator}
-       | op_var `isPyonBuiltin` the_rangeIndexed ->
-         let [size_index] = ty_args
-             [size_val] = args
-         in Just $ InterpretedStream
-            { sShape = Array1DShape (TypM size_index) size_val
-            , sType = intType
-            , sRepr = repr
-            , sGenerator = counting_generator}
-     _ -> Nothing
-  where
-    -- A generator for the sequence [0, 1, 2, ...]
-    counting_generator ix =
-      varAppE (pyonBuiltin the_store) [TypM intType] [return ix]
-
--- | Produce program code of an interpreted stream.  The generated code
---   will have the specified shape.  If code cannot be generated,
---   return Nothing.
-encodeStream :: TypM -> InterpretedStream -> TypeEvalM (Maybe ExpM)
-encodeStream expected_shape stream = do
-  m_encoded <-
-    case sShape stream
-    of Array1DShape size_ix size_val ->
-         fmap Just $
-         varAppE (pyonBuiltin the_generate)
-         [size_ix, TypM $ sType stream]
-         [return size_val,
-          return $ sRepr stream,
-          lamE $ mkFun []
-          (\ [] -> return ([ValPT Nothing ::: intType],
-                           BoxRT ::: FunT (OutPT ::: sType stream)
-                                          (SideEffectRT ::: sType stream)))
-          (\ [] [index_var] ->
-            sGenerator stream (ExpM $ VarE defaultExpInfo index_var))]
-       _ -> return Nothing
-
-  -- Cast the shape type to the one that the code expects
-  let given_shape = shapeType $ sShape stream
-      elt_type = sType stream
-      elt_repr = sRepr stream
-  case m_encoded of
-    Nothing -> return Nothing
-    Just encoded ->
-      castStreamExpressionShape (fromTypM expected_shape) given_shape
-      elt_type elt_repr encoded
-
 -- | Cast a stream of type @Stream given elt@ to a stream of type
 --   @Stream expected elt@.
 castStreamExpressionShape :: Type -> Type -> Type -> ExpM -> ExpM -> TypeEvalM (Maybe ExpM)
@@ -1881,46 +1759,6 @@ castStreamExpressionShape expected_shape given_shape elt_type elt_repr expr = do
                   
     cast op ty_args args =
       ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo op) ty_args args
-
--- | Zip together a list of two or more streams
-zipStreams :: [InterpretedStream] -> InterpretedStream
-zipStreams ss
-  | num_streams < 2 = internalError "zipStreams: Need at least two streams"
-  | Just shape <- zipped_shape =
-      let typ = varApp (pyonTupleTypeCon num_streams) (map sType ss)
-          repr = ExpM $ AppE defaultExpInfo
-                 (ExpM $ VarE defaultExpInfo (pyonTupleReprCon num_streams))
-                 (map (TypM . sType) ss)
-                 (map sRepr ss)
-          gen ix = varAppE (pyonTupleCon num_streams)
-                   (map (TypM . sType) ss)
-                   [sGenerator stream ix | stream <- ss]
-      in InterpretedStream shape typ repr gen
-  where
-    num_streams = length ss
-
-    zipped_shape = foldr combine_shapes (Just UnboundedShape) $ map sShape ss
-          
-    -- Combine shapes if possible. 
-    -- Array shapes are combined using the "min" operator to get the
-    -- minimum value.
-    combine_shapes _              Nothing = Nothing 
-    combine_shapes shp'           (Just UnboundedShape) = Just shp'
-    combine_shapes UnboundedShape (Just shp) = Just shp
-    combine_shapes shp'           (Just (Array1DShape typ1 val1)) =
-      case shp'
-      of Array1DShape typ2 val2 ->
-           let typ = TypM $
-                     varApp (pyonBuiltin the_min_i) [fromTypM typ1, fromTypM typ2]
-               val = ExpM $ AppE defaultExpInfo min_ii [typ1, typ2] [val1, val2] 
-           in Just $ Array1DShape typ val
-         _ -> Nothing
-    combine_shapes shp'           mshp@(Just (UnknownShape _)) =
-      case shp'
-      of UnknownShape _ -> mshp
-         _ -> Nothing
-    
-    min_ii = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
 
 {-
 -- | Convert a stream transformer that produces a singleton stream
