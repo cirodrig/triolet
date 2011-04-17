@@ -458,34 +458,34 @@ rwMapStream _ _ _ = return Nothing
 --     generate(min(n1, n2), \i -> (f1 i, f2 i))
 rwZipStream :: RewriteRule
 rwZipStream inf
-  [shape_type, element1, element2]
+  [TypM shape_type, TypM elt1, TypM elt2]
   [repr1, repr2, stream1, stream2]
-  | Just shape1 <- interpretStream repr1 stream1,
-    Just shape2 <- interpretStream repr2 stream2 =
-      generalizedZipStream shape_type [shape1, shape2]
+  | Just s1 <- interpretStream2 shape_type elt1 repr1 stream1,
+    Just s2 <- interpretStream2 shape_type elt2 repr2 stream2 =
+      generalizedZipStream2 (TypM shape_type) [s1, s2]
 
 rwZipStream _ _ _ = return Nothing
 
 rwZip3Stream :: RewriteRule
 rwZip3Stream inf
-  [shape_type, element1, element2, element3]
+  [TypM shape_type, TypM elt1, TypM elt2, TypM elt3]
   [repr1, repr2, repr3, stream1, stream2, stream3]
-  | Just shape1 <- interpretStream repr1 stream1,
-    Just shape2 <- interpretStream repr2 stream2,
-    Just shape3 <- interpretStream repr3 stream3 =
-      generalizedZipStream shape_type [shape1, shape2, shape3]
+  | Just s1 <- interpretStream2 shape_type elt1 repr1 stream1,
+    Just s2 <- interpretStream2 shape_type elt2 repr2 stream2,
+    Just s3 <- interpretStream2 shape_type elt3 repr3 stream3 =
+      generalizedZipStream2 (TypM shape_type) [s1, s2, s3]
 
 rwZip3Stream _ _ _ = return Nothing
 
 rwZip4Stream :: RewriteRule
 rwZip4Stream inf
-  [shape_type, element1, element2, element3, element4]
+  [TypM shape_type, TypM elt1, TypM elt2, TypM elt3, TypM elt4]
   [repr1, repr2, repr3, repr4, stream1, stream2, stream3, stream4]
-  | Just shape1 <- interpretStream repr1 stream1,
-    Just shape2 <- interpretStream repr2 stream2,
-    Just shape3 <- interpretStream repr3 stream3,
-    Just shape4 <- interpretStream repr4 stream4 =
-      generalizedZipStream shape_type [shape1, shape2, shape3, shape4]
+  | Just s1 <- interpretStream2 shape_type elt1 repr1 stream1,
+    Just s2 <- interpretStream2 shape_type elt2 repr2 stream2,
+    Just s3 <- interpretStream2 shape_type elt3 repr3 stream3,
+    Just s4 <- interpretStream2 shape_type elt4 repr4 stream4 =
+      generalizedZipStream2 (TypM shape_type) [s1, s2, s3, s4]
 
 rwZip4Stream _ _ _ = return Nothing
 
@@ -514,6 +514,12 @@ generalizedZipStream shape_type streams =
 
           -- Cast the stream shape to the expected type
           castStreamExpressionShape (fromTypM shape_type) zipped_shape elem_ty tuple_repr zip_expr
+
+generalizedZipStream2 :: TypM -> [ExpS] -> TypeEvalM (Maybe ExpM)
+generalizedZipStream2 shape_type streams =
+  case zipStreams2 streams -- Zip the streams
+  of Just s -> encodeStream2 shape_type s
+     Nothing -> return Nothing
 
 -- | Turn a list-building histogram into an array-building histogram
 --
@@ -1588,9 +1594,9 @@ interpretAndBlockStream shape_type elt_type elt_repr stream_exp =
      Nothing -> return Nothing
 
 -- | Zip together a list of two or more streams
-zipStreams2 :: [ExpS] -> ExpS
+zipStreams2 :: [ExpS] -> Maybe ExpS
 zipStreams2 [] = internalError "zipStreams: Need at least one stream"
-zipStreams2 [s] = s
+zipStreams2 [s] = Just s
 zipStreams2 ss
   | Just shape <- zipped_shape =
       let elt_types = map sexpElementType ss
@@ -1602,7 +1608,8 @@ zipStreams2 ss
           gen ix = varAppE (pyonTupleCon num_streams)
                    (map TypM elt_types)
                    [_sexpGenerator stream ix | stream <- ss] -- FIXME: Handle other stream types
-      in GenerateStream shape typ repr gen
+      in Just $ GenerateStream shape typ repr gen
+  | otherwise = Nothing         -- Can't determine length of stream
   where
     num_streams = length ss
 
