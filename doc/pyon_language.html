@@ -9,9 +9,17 @@
 <h1>Syntax and semantics</h1>
 
 <p>Pyon is based on Python 3 for reasons of programmer familiarity.
-Python syntax is used whenever possible, in a way that usually does
-what a Python programmer would expect.  Internally, Pyon is similar to
-ML.  The user-level differences from Python 3 are described here.</p>
+Python syntax is used whenever possible, so that Pyon code will often
+(but not always) do what a Python programmer would expect the code to do.
+Internally, Pyon is similar to ML.  The differences from Python semantics
+may therefore be familar to programmers who also know ML or a related
+language.
+The user-level differences from Python 3 are described in this document.</p>
+
+<p>Although only a subset of Python 3 syntax is supported, the parser will
+recognize nearly all valid Python syntax.  By recognizing unsupported syntax,
+the Pyon compiler can produce more informative error messages.
+Only the binary "in" and "not in" operators are unrecognized by the parser.</p>
 
 <p>At the top level, a Pyon file consists of a sequence of function
 definitions and export statements.  (Export statements are described
@@ -47,7 +55,8 @@ def foo(x):
   return bar(x)
 </pre>
 
-<p>In Python, the call <code>foo(100)</code> returns 102.  In Pyon, the call returns 101.</p>
+<p>In Python, the call <code>foo(100)</code> returns 102.
+In Pyon, the call returns 101.</p>
 
 <h2>Typing</h2>
 
@@ -79,12 +88,18 @@ constraints in type signatures.</p>
  Example: <code>int * int -> int</code></li>
 </ul>
 
+<p>As an example of type annotations, here is a user-defined function for
+mapping over nested lists with an explicit type signature.</p>
+
+<pre>@forall(a, b)
+def nested_map(f : a -> b, lst : list(list(a))) -> list(list(b)):
+  return map(lambda l: map(f, l), lst)</pre>
+
 <h2>Expressions</h2>
 
-<p>An expression that may define a variable, such as the destination
-of an assignment or the part of a list comprehension between the
-keywords "for" and "in", is called a "target".  Tuple targets and
-variable targets are supported.  Only tuples with 2, 3, and 4 elements
+<p>A "target" is the part of an expression that defines or
+assigns variables.  Tuple targets and variable targets are supported.
+Only tuples with 2, 3, and 4 elements
 are supported.  Array subscript targets are not supported.</p>
 
 <p>Unary negation is supported.</p>
@@ -102,7 +117,23 @@ generators (this is expected to change in future revisions).  Tuple
 construction is supported only for tuples with 2, 3, and 4
 elements.</p>
 
-<p>Function definitions and function calls support positional arguments only.</p>
+<p>As an extension to Python, local variables may be defined inside
+an expression.  This feature is primarily meant to help in writing large
+list comprehensions.  In the following example, the expression
+<code>let x2 = x - center in x2 * x2</code> defines and assigns a
+local variable <code>x2</code>, then squares it.</p>
+
+<pre>def f(A, center):
+  B = [let x2 = x - center in x2 * x2 for x in A]
+  return B</pre>
+
+<p>A "let" expression assigns new variables, shadowing any
+previously existing variable with the same name, over the scope of some
+expression.  The new variables may only be referenced in the local
+expression that is introduced by the "in" keyword.</p>
+
+<p>Function definitions and function calls support positional
+arguments only.</p>
 
 <h2>Export statements</h2>
 
@@ -141,7 +172,12 @@ types.</p>
  <li>The numeric types "int" and "float"</li>
  <li>Function types</li>
  <li>The "list" type constructor.  It takes one parameter, the type of the list's members.  A list consists of an array and a nonnegative integer holding the array size.  All array elements have the same type.</li>
- <li>The "stream" type constructor.  It takes two parameters.  The first is the shape of the stream, which is the container type that the stream corresponds to (see the type of __iter__).  The second is the type of the stream's elements.</li>
+ <li>The "stream" type constructor.  It takes two parameters.  The first is
+  the shape of the stream.  The second is the type of the stream's
+  elements.</li>
+ <li>The "shape" type constructor.  It takes one parameter of kind
+  <code>* -> *</code>, representing a traversable container, and produces the
+  shape of that container.</li>
 </ul>
 
 <p>Stream shapes are not useful to users with the current feature set.
@@ -186,12 +222,12 @@ zip4 : Traversable t => t(a) * t(b) * t(c) * t(d) -> t((a, b, c, d))</code><br>
 Zip two, three, or four containers together.</p>
 
 <p>
-<code>count : stream(a, int)</code><br>
+<code>count : stream(shape(list), int)</code><br>
 
 The infinite sequence [0, 1, ...]</p>
 
 <p>
-<code>range : int -> stream(list, int)</code><br>
+<code>range : int -> stream(shape(list), int)</code><br>
 
 The sequence [0, 1 ... N-1]</p>
 
@@ -231,12 +267,12 @@ __ge__ : Ord a => a * a -> bool</code><br>
 Boolean ordering comparison on totally ordered types.</p>
 
 <p>
-<code>__iter__ : Traversable t => t(a) -> stream(t, a)</code><br>
+<code>__iter__ : Traversable t => t(a) -> stream(shape(t), a)</code><br>
 
 Iterate over the elements of a traversable container.</p>
 
 <p>
-<code>__build__ : Traversable t => stream(t, a) -> t(a)</code><br>
+<code>__build__ : Traversable t => stream(shape(t), a) -> t(a)</code><br>
 
 Build a traversable container from a stream of elements.</p>
 
