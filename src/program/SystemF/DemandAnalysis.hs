@@ -137,6 +137,7 @@ dfType :: Type -> Df ()
 dfType ty =
   case ty
   of VarT v -> mention v
+     IntT n -> return ()
      AppT t1 t2 -> dfType t1 >> dfType t2
      FunT (param ::: dom) (_ ::: rng) ->
        let mask_param m =

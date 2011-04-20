@@ -93,6 +93,7 @@ cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
     cmp (FunT (arg1 ::: dom1) result1, FunT (arg2 ::: dom2) result2) =
       compareTypes dom1 dom2 >&&> cmpFun arg1 arg2 dom2 result1 result2
     cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
+    cmp (IntT n1, IntT n2) = return $ n1 == n2
 
     cmp (_, _) = return False
 
@@ -175,5 +176,9 @@ unify subst expected given = do
     match_unify (AnyT _) (AnyT _) =
       -- Assume the types have the same kind.  That means they're equal.
       unified_by subst
-       
+
+    match_unify (IntT n1) (IntT n2)
+      | n1 == n2 = unified_by subst
+      | otherwise = no_unifier
+
     match_unify _ _ = no_unifier

@@ -247,6 +247,7 @@ resolveLType (L pos lt) =
   case lt of
     VarT tVar -> do rVar <- use tVar pos
                     return $ L pos (VarT rVar)
+    IntIndexT n -> return $ L pos (IntIndexT n)
     AppT tOper tArgs -> do oper <- resolveLType tOper
                            args <- mapM resolveLType tArgs
                            return $ L pos (AppT oper args)

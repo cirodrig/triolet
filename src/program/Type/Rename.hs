@@ -68,6 +68,7 @@ instance Renameable Type where
          case renameVar v rn
          of Nothing -> ty
             Just v' -> VarT v'
+       IntT _ -> ty
        AppT op arg ->
          AppT (rename rn op) (rename rn arg)
        FunT (arg ::: dom) (ret ::: rng) ->
@@ -86,6 +87,7 @@ instance Renameable Type where
   freeVariables ty =
     case ty
     of VarT v -> Set.singleton v
+       IntT _ -> Set.empty
        AppT op arg -> Set.union (freeVariables op) (freeVariables arg)
        FunT (arg ::: dom) (ret ::: rng) ->
          let fv_dom = freeVariables dom 
@@ -181,6 +183,7 @@ instance Substitutable Type where
     case ty
     of VarT v ->
          fromMaybe ty $ substituteVar v sb
+       IntT _ -> ty 
        AppT op arg ->
          AppT (substitute sb op) (substitute sb arg)
        FunT (arg ::: dom) result ->

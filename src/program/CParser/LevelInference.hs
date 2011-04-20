@@ -91,6 +91,7 @@ liLType lmap (L pos rType) = case rType
         let lvl = lvlFromVarPos lmap rVar pos
             livar = castLIVar rVar lvl
         return $ L pos (VarT livar)
+     IntIndexT n -> return $ L pos (IntIndexT n)
      AppT tOper tArgs -> do
      -- Recurse
         liOp <- liLType lmap tOper

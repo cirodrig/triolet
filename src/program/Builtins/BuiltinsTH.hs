@@ -193,8 +193,6 @@ pyonBuiltinVariableNames =
   , "VectorDict_Complex_dot"
 
     -- Integer index arithmetic 
-  , "zero_i"
-  , "one_i"
   , "plus_i"
   , "minus_i"
   , "min_i"

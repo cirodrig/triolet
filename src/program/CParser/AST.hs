@@ -85,6 +85,11 @@ data Type ix =
     { -- | The variable
       tVar :: Identifier ix
     }
+    
+    -- | An integer index
+  | IntIndexT
+    { tInt :: Integer
+    }
 
     -- | An application
   | AppT 

@@ -78,6 +78,12 @@ int = PS.tokenPrim showToken nextPosition matchAndReturn
       matchAndReturn (Token _ (IntTok n)) = Just n
       matchAndReturn _                    = Nothing
 
+intIndex :: P Integer
+intIndex = PS.tokenPrim showToken nextPosition matchAndReturn
+    where
+      matchAndReturn (Token _ (IntIndexTok n)) = Just n
+      matchAndReturn _                         = Nothing
+
 float :: P Double
 float = PS.tokenPrim showToken nextPosition matchAndReturn
     where
@@ -241,11 +247,12 @@ appType = do
     then return head
     else return $ L pos (AppT head lst)
 
--- A variable or parenthesized type
+-- A variable, literal or parenthesized type
 distPType :: P (LType Parsed)
-distPType = parse_var <|> parens (anyPType Nothing)
+distPType = parse_var <|> parse_int <|> parens (anyPType Nothing)
   where
     parse_var = located (VarT <$> identifier)
+    parse_int = located (IntIndexT <$> intIndex)
 
 -- Match a function type.  The function's return representation may be
 -- implicitly determined by the context in which this type appears.

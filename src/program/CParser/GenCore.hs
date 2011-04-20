@@ -18,6 +18,7 @@ translateType :: Located (Type LevelInferred) -> Type.Type
 translateType lty =
   case unLoc lty
   of VarT v -> Type.VarT v
+     IntIndexT n -> Type.IntT n
      AppT op args ->
        foldl Type.AppT (translateType op) (map translateType args)
      FunT dom rng ->

@@ -14,7 +14,8 @@ data Token = Token !SourcePos !Tok
 
 -- | A token produced by lexical analysis
 data Tok =
-    IntTok {-# UNPACK #-} !Integer
+    IntIndexTok {-# UNPACK #-} !Integer
+  | IntTok {-# UNPACK #-} !Integer
   | FloatTok {-# UNPACK #-} !Double
   | IdentTok String
   | OperTok String
@@ -47,7 +48,8 @@ data Tok =
 showTok :: Tok -> String
 showTok t =
     case t
-    of IntTok n     -> show n
+    of IntIndexTok n -> show n ++ "Z"
+       IntTok n     -> show n
        FloatTok n   -> show n
        IdentTok s   -> "'" ++ s ++ "'"
        OperTok s    -> "(" ++ s ++ ")"
@@ -112,9 +114,10 @@ posnTok t = Lex $ \posn _ _ -> TokenResult $ Token posn t
 -- Functions to create tokens.
 -- The lexical analyzer rules should accept only valid strings, so that
 -- calls to 'read' never fail.
-mkFloat, mkInt, mkIdent :: String -> Int -> Tok
+mkFloat, mkInt, mkIntIndex, mkIdent :: String -> Int -> Tok
 mkFloat s _ = FloatTok (fst $ head $ reads s)
 mkInt s _   = IntTok (fst $ head $ reads s)
+mkIntIndex s n = IntIndexTok (read $ take (n - 1) s) -- drop the trailing 'Z'
 mkIdent s n = IdentTok (take n s)
 mkOper s n  = OperTok (take n s)
 

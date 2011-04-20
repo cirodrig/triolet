@@ -61,6 +61,7 @@ rules :- ----------------------------------------------------------------------
 
 -- Numbers
 
+<0,att>	@signed "Z"		{ posn mkIntIndex }
 <0,att>	@signed			{ posn mkInt }
 <0,att>	@signed \. $digit+ ( $e @signed ) ?
 				{ posn mkFloat }

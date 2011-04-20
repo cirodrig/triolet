@@ -195,6 +195,7 @@ typeInferType :: TypM -> TCM TypTM
 typeInferType (TypM ty) =
   case ty
   of VarT v -> return_type =<< lookupVar v
+     IntT _ -> return_type (ValRT ::: intindexT)
      AppT op arg -> do
          -- Get type of operator and argument
          op' <- typeInferType (TypM op)

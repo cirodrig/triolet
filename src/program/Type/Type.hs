@@ -52,6 +52,8 @@ data Type =
     -- | An arbitrary, opaque type inhabiting the given kind.  The kind has
     --   no free type variables.
   | AnyT Type
+    -- | An integer type index.  These inhabit kind 'intIndexT'.
+  | IntT !Integer
 
 type ParamType = ParamRepr ::: Type
 type ReturnType = ReturnRepr ::: Type
@@ -204,21 +206,25 @@ instance HasLevel Var => HasLevel Type where
   getLevel (AppT op _) = getLevel op
   getLevel (FunT _ (_ ::: rng)) = getLevel rng
   getLevel (AnyT _) = TypeLevel
+  getLevel (IntT _) = TypeLevel
 
-kindT, pureT :: Type
+kindT, pureT, intindexT, posInftyT :: Type
 kindT = VarT kindV
 pureT = VarT pureV
 intindexT = VarT intindexV
+posInftyT = VarT posInftyV      -- Positive infinity
 
-kindV, pureV :: Var
+kindV, pureV, intindexV, posInftyV :: Var
 
 kindV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "kind") SortLevel
 pureV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "pure") KindLevel
 intindexV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
+posInftyV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "pos_infty") TypeLevel
 
 kindVarID = toIdent 1
 pureVarID = toIdent 2
 intindexVarID = toIdent 3
+posInftyVarID = toIdent 4
 
 -- | The first variable ID that's not reserved for predefined variables
 firstAvailableVarID :: VarID
@@ -274,6 +280,7 @@ pprTypePrec ty =
      AppT op arg -> ppr_app op [arg] `hasPrec` appPrec
      FunT arg ret -> pprFunType Nothing ty
      AnyT k -> text "Any :" <+> pprTypePrec k ?+ typeAnnPrec `hasPrec` typeAnnPrec
+     IntT n -> hasAtomicPrec $ text (show n)
   where
     -- Uncurry the application
     ppr_app (AppT op' arg') args = ppr_app op' (arg':args)

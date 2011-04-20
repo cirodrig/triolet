@@ -942,11 +942,11 @@ rwReduce1Generate inf element elt_repr reducer other_args size count producer = 
          [return index, litE (IntL 1 intType)]]
   
   let size_minus_1 = TypM $ varApp (pyonBuiltin the_minus_i)
-                     [fromTypM size, VarT (pyonBuiltin the_one_i)]
+                     [fromTypM size, IntT 1]
   count_minus_1 <-
     liftFreshVarM $ 
     varAppE (pyonBuiltin the_minus_ii)
-    [size, TypM $ VarT (pyonBuiltin the_one_i)]
+    [size, TypM $ IntT 1]
     [return count, varE (pyonBuiltin the_one_ii)]
 
   body <- rwReduceGenerate inf element elt_repr reducer
