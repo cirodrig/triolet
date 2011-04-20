@@ -73,6 +73,7 @@ data Expr id =
   | Call SourcePos (Expr id) [(Expr id)]
   | Cond SourcePos (Expr id) (Expr id) (Expr id) -- condition, true, false
   | Lambda SourcePos [Parameter id] (Expr id)
+  | Let SourcePos (Parameter id) (Expr id) (Expr id)
 
 type Annotation id = Maybe (Expr id)
 

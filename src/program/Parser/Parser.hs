@@ -470,6 +470,14 @@ expression expr =
          Tuple source_pos <$> traverse expression es
        Py.Call {Py.call_fun = f, Py.call_args = xs} -> 
          Call source_pos <$> expression f <*> traverse argument xs
+       Py.LetExpr { Py.let_target = ts
+                  , Py.let_rhs = rhs
+                  , Py.let_body = body} ->
+         let t = case ts
+                 of [t] -> t
+                    _ -> error "Multiple assignment not allowed in 'let'"
+         in enter $ Let source_pos <$>
+            exprToParam t <*> expression rhs <*> expression body
        Py.CondExpr { Py.ce_true_branch = tr
                    , Py.ce_condition = c
                    , Py.ce_false_branch = fa} -> 
@@ -812,6 +820,7 @@ instance MentionsVars (Expr Int) where
            Call _ e es -> mentionedVars (e:es)
            Cond _ e1 e2 e3 -> mentionedVars [e1, e2, e3]
            Lambda _ _ e -> mentionedVars e
+           Let _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
 
 instance MentionsVars (IterFor Int Expr) where
     mentionedVars (IterFor _ _ e c) =

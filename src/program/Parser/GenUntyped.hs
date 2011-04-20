@@ -250,6 +250,11 @@ doExpr expr =
        t' <- doExpr t
        f' <- doExpr f
        return $ U.IfE (U.Ann pos) c' t' f'
+     Let pos b rhs body -> do
+       rhs' <- doExpr rhs
+       convertParameter b $ \b' -> do
+         body' <- doExpr body
+         return $ U.LetE (U.Ann pos) b' rhs' body'
      Lambda pos params body ->
        convertParameters params $ \params' -> do
          body' <- doExpr body

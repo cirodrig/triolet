@@ -292,6 +292,10 @@ ssaExpr expression =
      Generator pos it  -> Generator pos <$> ssaIterFor it
      Call pos op args  -> Call pos <$> ssaExpr op <*> traverse ssaExpr args
      Cond pos c x y    -> Cond pos <$> ssaExpr c <*> ssaExpr x <*> ssaExpr y
+     Let pos b x y     -> do x' <- ssaExpr x
+                             b' <- defineParam b
+                             y' <- ssaExpr y
+                             return $ Let pos b' x' y'
      Lambda pos ps e   -> lambda pos ps e
   where
     lambda pos ps body =
