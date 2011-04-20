@@ -472,12 +472,15 @@ expression expr =
          Call source_pos <$> expression f <*> traverse argument xs
        Py.LetExpr { Py.let_target = ts
                   , Py.let_rhs = rhs
-                  , Py.let_body = body} ->
+                  , Py.let_body = body} -> do
          let t = case ts
                  of [t] -> t
                     _ -> error "Multiple assignment not allowed in 'let'"
-         in enter $ Let source_pos <$>
-            exprToParam t <*> expression rhs <*> expression body
+         rhs' <- expression rhs
+         enter $ do
+           t' <- exprToParam t 
+           body' <- expression body 
+           return $ Let source_pos t' rhs' body'
        Py.CondExpr { Py.ce_true_branch = tr
                    , Py.ce_condition = c
                    , Py.ce_false_branch = fa} -> 
