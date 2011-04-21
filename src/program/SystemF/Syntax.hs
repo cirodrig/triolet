@@ -1,9 +1,16 @@
--- | System F representation of Pyon code.
---
--- This is a short-lived representation produced as the output of type
--- inference.  It is translated to another form with the help of type
--- information.
--- Since it has no dependent types, renaming is not required.
+{-| System F representation of Pyon code.
+
+These data structures are used in two slightly different ways, before and  
+after representation selection.  After representation selection,
+value-level variables are annotated with a \"representation\", and
+there is a distinguished 'Pat' constructor for patterns that bind writable
+variables.
+
+In all cases, the data structures are very close to basic Haskell or ML
+data structures.  A program is a collection of functions ('Fun') whose
+body is an expression ('Exp').  Values are bound by patterns ('TyPat', 'Pat')
+and case statements branch to alternatives ('Alt').
+-}
 
 {-# LANGUAGE DeriveDataTypeable, FlexibleInstances #-}
 module SystemF.Syntax
