@@ -12,6 +12,7 @@ import qualified Data.Map as Map
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
 import Common.Supply
 import Builtins.Builtins
 import LowLevel.Build
@@ -22,6 +23,7 @@ import qualified SystemF.DictEnv as DictEnv
 import SystemF.Syntax
 import Type.Environment
 import Type.Type
+import Type.Rename
 
 newtype Lower a = Lower (ReaderT LowerEnv IO a)
                 deriving(Functor, Monad, MonadIO)
@@ -78,8 +80,23 @@ initializeLowerEnv var_supply ll_var_supply type_env var_map = do
       multiplicative_dict <- DictEnv.pattern1 $ \arg ->
         (varApp (pyonBuiltin the_MultiplicativeDict) [VarT arg],
          mk_multiplicative_dict arg)
+      (tuple2_dict, tuple3_dict, tuple4_dict) <- do
+        v1 <- newAnonymousVar TypeLevel
+        v2 <- newAnonymousVar TypeLevel
+        v3 <- newAnonymousVar TypeLevel
+        v4 <- newAnonymousVar TypeLevel
+        let ty2 = varApp (pyonBuiltin the_PyonTuple2)
+                  [VarT v1, VarT v2]
+        let ty3 = varApp (pyonBuiltin the_PyonTuple3)
+                  [VarT v1, VarT v2, VarT v3]
+        let ty4 = varApp (pyonBuiltin the_PyonTuple4)
+                  [VarT v1, VarT v2, VarT v3, VarT v4]
+        return (DictEnv.pattern [v1, v2] ty2 (mk_tuple_dict [v1, v2]),
+                DictEnv.pattern [v1, v2, v3] ty3 (mk_tuple_dict [v1, v2, v3]),
+                DictEnv.pattern [v1, v2, v3, v4] ty4 (mk_tuple_dict [v1, v2, v3]))
       return $ DictEnv.DictEnv [float_dict, int_dict, repr_dict,
-                                additive_dict, multiplicative_dict]
+                                additive_dict, multiplicative_dict,
+                                tuple2_dict, tuple3_dict, tuple4_dict]
 
     mono_dict ty val =
       DictEnv.monoPattern ty (return (LL.VarV $ LL.llBuiltin val))
@@ -95,6 +112,28 @@ initializeLowerEnv var_supply ll_var_supply type_env var_map = do
 
     -- This is the representation dictionary for Repr objects
     repr_Box_value = LL.VarV $ LL.llBuiltin LL.the_bivar_repr_Box_value
+    
+    mk_tuple_dict :: [Var] -> Substitution -> GenLower LL.Val
+    mk_tuple_dict args = \subst -> do
+      -- Get repr dictionaries for each type argument
+      withMany (with_arg_dict subst) args $ \arg_dicts -> do
+        -- Pick the correct function
+        let op = tuple_dict_constructor (length arg_dicts)
+            
+        -- Call the constructor function
+        emitAtom1 (LL.PrimType LL.OwnedType) $
+          LL.closureCallA (LL.VarV op) arg_dicts
+      
+      where
+        with_arg_dict subst arg k =
+          let arg' = case substituteVar arg subst
+                     of Just t -> t
+                        Nothing -> internalError "initializeLowerEnv"
+          in lookupReprDict arg' k
+    
+    tuple_dict_constructor 2 = LL.llBuiltin LL.the_fun_repr_PyonTuple2
+    tuple_dict_constructor 3 = LL.llBuiltin LL.the_fun_repr_PyonTuple3
+    tuple_dict_constructor 4 = LL.llBuiltin LL.the_fun_repr_PyonTuple4
 
 instance Supplies Lower (Ident Var) where
   fresh = Lower $ ReaderT $ \env -> supplyValue $ varSupply env
