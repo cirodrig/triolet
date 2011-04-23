@@ -30,6 +30,7 @@ module Type.Environment
         lookupDataConWithType,
         lookupTypeFunction,
         getAllDataConstructors,
+        getAllTypes,
         emptyTypeEnv,
         wiredInTypeEnv,
         insertType,
@@ -262,6 +263,10 @@ getAllDataConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env
   where
     get_data_con (DataConTypeAssignment _ dcon) = Just dcon 
     get_data_con _ = Nothing
+
+-- | Get all types in the type environment
+getAllTypes :: TypeEnv -> IntMap.IntMap ReturnType
+getAllTypes (TypeEnv env) = IntMap.map varType env
 
 -------------------------------------------------------------------------------
 
