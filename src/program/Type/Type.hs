@@ -23,8 +23,8 @@ module Type.Type(module Type.Var,
                  fromFunType, fromPureFunType,
 
                  -- * Predefined types
-                 kindT, pureT, intindexT,
-                 kindV, pureV, intindexV,
+                 kindT, pureT, intindexT, posInftyT,
+                 kindV, pureV, intindexV, posInftyV,
                  firstAvailableVarID,
 
                  -- * Pretty-printing

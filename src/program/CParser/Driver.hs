@@ -28,7 +28,7 @@ import Globals
 import CParser.PrettyAST()
 
 predefinedVarDetails :: [(String, VarDetails)]
-predefinedVarDetails = map mk_var_details (pureV : intindexV : allBuiltinVars)
+predefinedVarDetails = map mk_var_details (pureV : intindexV : posInftyV : allBuiltinVars)
   where
     mk_var_details v = (name, PredefinedVar v type_function)
       where

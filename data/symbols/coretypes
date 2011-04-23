@@ -630,8 +630,7 @@ and : val bool -> val bool -> val bool;
 -- Promote an integer to a type index
 defineIntIndex : val int -> val SomeIndexedInt;
 
--- zero_i : val intindex;
--- one_i : val intindex;
+pos_infty : val intindex;
 plus_i : val (val intindex -> val intindex -> val intindex);
 minus_i : val (val intindex -> val intindex -> val intindex);
 min_i : val (val intindex -> val intindex -> val intindex);
