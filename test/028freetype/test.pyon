@@ -1,0 +1,11 @@
+# This tests how polymorphism is inferred in nested functions
+
+def foo(x, n):
+	# This function has type (Additive a => a -> a),
+	# NOT (forall a. Additive a => a -> a).
+	# The type parameter 'a' is bound by 'foo'.
+	def bar(y): return x + y
+
+	return bar(__fromint__(n))
+
+export ccall foo : float * int -> float
