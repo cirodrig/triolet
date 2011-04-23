@@ -161,6 +161,11 @@ s `appTy` t =
   case hmTypeKind s
   of k :-> _ | hmTypeKind t == k -> s `AppTy` t
      _ -> kindError "type application"
+  where
+    -- For debugging: show the type that would have been produced 
+    show_type x = unsafePerformIO $ do
+      print =<< runPpr (uShow (AppTy s t))
+      return x
 
 tupleType :: [HMType] -> HMType
 tupleType ts 
