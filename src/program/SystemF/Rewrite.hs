@@ -171,6 +171,8 @@ generalRewrites = Map.fromList table
     table = [ (pyonBuiltin the_range, rwRange)
             , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
             , (pyonBuiltin the_TraversableDict_list_build, rwBuildList)
+            , (pyonBuiltin the_TraversableDict_Stream_traverse, rwTraverseStream)
+            , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildStream)
             , (pyonBuiltin the_oper_GUARD, rwGuard)
             , (pyonBuiltin the_fun_map, rwMap)
             , (pyonBuiltin the_fun_zip, rwZip)
@@ -286,6 +288,14 @@ rwBuildList inf [elt_type] (elt_repr : stream : other_args) =
      _ -> return Nothing
 
 rwBuildList _ _ _ = return Nothing
+
+rwTraverseStream :: RewriteRule
+rwTraverseStream inf _ [_, stream] = return (Just stream)
+rwTraverseStream _ _ _ = return Nothing
+
+rwBuildStream :: RewriteRule
+rwBuildStream inf _ [_, stream] = return (Just stream)
+rwBuildStream _ _ _ = return Nothing
 
 buildListDoall inf elt_type elt_repr other_args size count generator =
   let return_ptr =
