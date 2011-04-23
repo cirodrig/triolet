@@ -266,7 +266,7 @@ typeInferAppE orig_expr inf op ty_args args = do
 
   -- Apply to type arguments
   ti_ty_args <- mapM typeInferType ty_args
-  inst_type <- traceShow (text "typeInferAppE" <+> pprExp orig_expr) $ computeInstantiatedType pos (getExpType ti_op) ti_ty_args
+  inst_type <- computeInstantiatedType pos (getExpType ti_op) ti_ty_args
 
   -- Apply to other arguments
   ti_args <- mapM typeInferExp args
@@ -296,7 +296,6 @@ computeAppliedType :: SourcePos
                    -> [ReturnType]
                    -> TCM ReturnType
 computeAppliedType pos op_type arg_types =
-  traceShow (text "CAT" <+> vcat (pprReturnType op_type : map pprReturnType arg_types)) $
   apply op_type arg_types
   where
     apply (BoxRT ::: op_type) (arg_t:arg_ts) = do
