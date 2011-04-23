@@ -128,12 +128,17 @@ pyonFloatType = FloatType pyonFloatSize
 pyonBoolType = BoolType
 pyonNoneType = UnitType
 
--- | A data type that has associated byte-level size and alignment properties
+-- | A data type that has statically known memory management properties
 class HasSize a where
+  -- | Get the size
   sizeOf :: a -> Int
   
-  -- | Get an alignment.  Alignments must be a power of two.
+  -- | Get the alignment.  Alignments must be a power of two.
   alignOf :: a -> Int
+  
+  -- | Detemrine whether the data is pointerless.  A /pointerless/ value
+  --   contains no pointers that need to be tracked by the garbage collector.
+  pointerlessness :: a -> Bool
 
 instance HasSize Size where
   sizeOf S8  = 1
@@ -141,6 +146,7 @@ instance HasSize Size where
   sizeOf S32 = 4
   sizeOf S64 = 8
   alignOf = sizeOf
+  pointerlessness _ = True
 
 instance HasSize PrimType where
   sizeOf UnitType       = 0
@@ -151,6 +157,9 @@ instance HasSize PrimType where
   sizeOf OwnedType      = sizeOf pointerSize
   alignOf UnitType = 1
   alignOf x = sizeOf x
+  pointerlessness PointerType = False
+  pointerlessness OwnedType   = False
+  pointerlessness _           = True
 
 -- | Promote a type to at least the size of a machine word.  Promoted types
 -- are used in function calls, return values, and partial applications.

@@ -12,6 +12,15 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+// Allocate some memory.  Use the flag to determine what kind of allocation.
+procedure inline allocate (bool is_pointerless, uint size) -> pointer {
+  if (is_pointerless) {
+    pointer primcall pyon_alloc_nopointers (size);
+  } else {
+    pointer primcall pyon_alloc (size);
+  };
+};
+
 // The info table of a stream
 data pointer Stream_info = InfoTableHeader {
   dummy_finalizer,
@@ -375,8 +384,10 @@ function inline Stream_reduce
 
   // Allocate two accumulators and swap between them.
   // That way, the accumulator can be updated safely.
-  accs = pointer primcall pyon_alloc (sizeof Pair(elem_type));
-  reduce_tmp = pointer primcall pyon_alloc (elem_size);
+  accs = pointer primcall allocate (repr_element @! PassConv.is_pointerless,
+                                    sizeof Pair(elem_type));
+  reduce_tmp = pointer primcall allocate (repr_element @! PassConv.is_pointerless,
+                                          elem_size);
   stream_next = stream @! Stream.next;
   () = () call elem_copy (init, accs @ Pair(elem_type).fst);
 
@@ -451,8 +462,10 @@ function inline Stream_reduce1
 
   // Allocate two accumulators and swap between them.
   // That way, the accumulator can be updated safely.
-  accs = pointer primcall pyon_alloc (sizeof Pair(elem_type));
-  reduce_tmp = pointer primcall pyon_alloc (elem_size);
+  accs = pointer primcall allocate (repr_element @! PassConv.is_pointerless,
+                                    sizeof Pair(elem_type));
+  reduce_tmp = pointer primcall allocate (repr_element @! PassConv.is_pointerless,
+                                          elem_size);
   stream_next = stream @! Stream.next;
 
   // Take first value from stream.  Use it to initialize the accumulator.
@@ -533,8 +546,10 @@ function inline Stream_fold
 
   // Allocate two accumulators and swap between them.
   // That way, the accumulator can be updated safely.
-  accs = pointer primcall pyon_alloc (sizeof Pair(acc_type));
-  reduce_tmp = pointer primcall pyon_alloc (elem_size);
+  accs = pointer primcall allocate (repr_acc @! PassConv.is_pointerless,
+                                    sizeof Pair(acc_type));
+  reduce_tmp = pointer primcall allocate (repr_element @! PassConv.is_pointerless,
+                                          elem_size);
   stream_next = stream @! Stream.next;
   () = () call acc_copy (init, accs @ Pair(elem_type).fst);
 
@@ -616,7 +631,7 @@ function histogram
   typedef array_type = array(value hist_size, int);
 
   // Compute the histogram
-  ret_array = pointer primcall pyon_alloc (sizeof array_type);
+  ret_array = pointer primcall pyon_alloc_nopointers (sizeof array_type);
   () = () call histogramArray(nil, nil, IndexedInt {hist_size}, stream, ret_array);
 
   // Initialize the list

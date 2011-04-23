@@ -21,6 +21,7 @@ module LowLevel.Builtins
         getBuiltinImportByLabel,
         the_prim_exit,
         the_prim_pyon_alloc,
+        the_prim_pyon_alloc_nopointers,
         the_prim_pyon_dealloc,
         the_prim_apply_i32_f,
         the_prim_apply_i32,

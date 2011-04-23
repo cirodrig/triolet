@@ -18,6 +18,7 @@ function repr_list (unit _, owned elem_repr) -> owned {
   // FIXME: Initialize repr header
   repr @! PassConv.size = sizeof PyonList;
   repr @! PassConv.align = alignof PyonList;
+  repr @! PassConv.is_pointerless = NOT_POINTERLESS;
   repr @! PassConv.copy = owned call list_copy (elem_repr);
   repr @! PassConv.finalize = owned call list_finalize (elem_repr);
   repr;
@@ -36,7 +37,11 @@ function list_copy (owned elem_repr, pointer src, pointer dst) -> () {
   typedef dst_contents_type = array(value nelems, elem_type);
 
   src_contents = src @! PyonList.contents;
-  dst_contents = pointer primcall pyon_alloc (sizeof dst_contents_type);
+  dst_contents = if (elem_repr @! PassConv.is_pointerless) {
+    pointer primcall pyon_alloc_nopointers (sizeof dst_contents_type);
+  } else {
+    pointer primcall pyon_alloc (sizeof dst_contents_type);
+  };
   dst @! PyonList.contents = dst_contents;
 
   _ = while (int index = int 0) (index < nelems) {
@@ -74,7 +79,11 @@ procedure list_create_uninitialized (owned elem_repr,
   typedef array_type = array(value nelems, elem_type);
   
   list @! PyonList.nelems = nelems;
-  list @! PyonList.contents = pointer primcall pyon_alloc (sizeof array_type);
+  list @! PyonList.contents = if (elem_repr @! PassConv.is_pointerless) {
+    pointer primcall pyon_alloc_nopointers (sizeof array_type);
+  } else {
+    pointer primcall pyon_alloc (sizeof array_type);
+  };
   ();
 };
 
@@ -94,7 +103,11 @@ procedure list_grow (pointer elem_repr, pointer list, int old_size) -> int {
   typedef new_array_type = array(value new_size, elem_type);
 
   old_contents = list @! PyonList.contents;
-  new_contents = pointer primcall pyon_alloc (sizeof new_array_type);
+  new_contents = if (elem_repr @! PassConv.is_pointerless) {
+    pointer primcall pyon_alloc_nopointers (sizeof new_array_type);
+  } else {
+    pointer primcall pyon_alloc (sizeof new_array_type);
+  };
 
   // Copy old contents to new list
   _ = pointer primcall memcpy (new_contents,

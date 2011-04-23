@@ -190,7 +190,7 @@ marshalCReturn ty =
       
       let setup mk_real_call = do
             -- Allocate the return value
-            allocateHeapMemAs (nativeWordV $ LL.sizeOf t) v
+            allocateHeapMemAs (nativeWordV $ LL.sizeOf t) (boolV $ LL.pointerlessness t) v
             
             -- Call the function, which returns nothing
             emitAtom0 =<< mk_real_call

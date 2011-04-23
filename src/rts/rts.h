@@ -29,3 +29,6 @@
 #else
 # error "Unrecognized architecture"
 #endif
+
+#define IS_POINTERLESS true
+#define NOT_POINTERLESS false

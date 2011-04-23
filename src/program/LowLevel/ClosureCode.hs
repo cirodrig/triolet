@@ -532,7 +532,7 @@ finalizeCapturedVariables captured_ptr clo =
 -- The created closure is returned.
 allocateClosure :: Closure -> GenM Val
 allocateClosure clo =
-  allocateHeapMem $ nativeWordV $ recordSize $ closureRecord clo
+  allocateHeapMemComposite $ nativeWordV $ recordSize $ closureRecord clo
 
 -- | Initialize a closure.
 --
@@ -596,7 +596,7 @@ generateClosureFree clo
 generateSharedClosureRecord :: ClosureGroup -> [Val] -> GenM Val
 generateSharedClosureRecord clos ptrs = do
   -- Create a new record
-  shared_ptr <- allocateHeapMem $ nativeWordV $ sizeOf record
+  shared_ptr <- allocateHeapMemComposite $ nativeWordV $ sizeOf record
 
   -- Initialize its fields
   captured_vars_ptr <- referenceField (record !!: 0) shared_ptr
@@ -1005,7 +1005,7 @@ genIndirectCall return_types op args = do
     make_inexact_call ret_vars clo_ptr args cont = do
       -- Create temporary storage for return values
       let ret_record = primTypesRecord Constant return_types
-      ret_ptr <- allocateHeapMem $ nativeWordV $ recordSize ret_record
+      ret_ptr <- allocateHeapMemComposite $ nativeWordV $ recordSize ret_record
 
       -- Apply the function
       genApply clo_ptr args ret_ptr

@@ -11,6 +11,15 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+// Allocate some memory.  Use the flag to determine what kind of allocation.
+procedure inline allocate (bool is_pointerless, uint size) -> pointer {
+  if (is_pointerless) {
+    pointer primcall pyon_alloc_nopointers (size);
+  } else {
+    pointer primcall pyon_alloc (size);
+  };
+};
+
 function inline storeBox (unit _, owned arg, pointer dst) -> () {
   !dst = arg;
   ();
@@ -153,7 +162,8 @@ function inline for
   typedef acc_pair = Pair(acc_type);
 
   // Setup
-  accs = pointer primcall pyon_alloc (sizeof acc_pair);
+  accs = pointer primcall allocate (acc_repr @! PassConv.is_pointerless,
+       	 	 	  	    sizeof acc_pair);
   () = () call acc_copy (init, accs @ acc_pair.fst);
 
   // Main loop.
@@ -186,6 +196,7 @@ function blocked_reduce
 {
   IndexedInt {count} = size;
   acc_size = acc_repr @! PassConv.size;
+  acc_is_pointerless = acc_repr @! PassConv.is_pointerless;
 
   letrec {
     // Given the current accumulator value and the range to process,
@@ -193,12 +204,12 @@ function blocked_reduce
     function accumulate_range
       (pointer old_value, int lcount, int lfirst) -> pointer {
       // Reduce over this range
-      local_value = pointer primcall pyon_alloc (acc_size);
+      local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
       lsize = IndexedInt {lcount};
       () = () call generator (nil, lsize, lfirst, local_value);
 
       // Accumulate with old value
-      ret = pointer primcall pyon_alloc (acc_size);
+      ret = pointer primcall allocate (acc_is_pointerless, acc_size);
       () = () call reducer (old_value, local_value, ret);
       () = () call (acc_repr @! PassConv.finalize) (local_value);
       ret;
@@ -206,7 +217,7 @@ function blocked_reduce
 
     // Out-of-place reducer
     function oop_reducer (pointer x, pointer y) -> pointer {
-      ret = pointer primcall pyon_alloc (acc_size);
+      ret = pointer primcall allocate (acc_is_pointerless, acc_size);
       () = () call reducer (x, y, ret);
       ret;
     }
@@ -240,6 +251,7 @@ function blocked_reduce1
  
   IndexedInt {count} = size;
   acc_size = acc_repr @! PassConv.size;
+  acc_is_pointerless = acc_repr @! PassConv.is_pointerless;
 
   letrec {
     // Given the current accumulator value and the range to process,
@@ -250,15 +262,15 @@ function blocked_reduce1
 
       if (old_value == uninitialized_value) {
         // Reduce over this range and return the output directly
-        local_value = pointer primcall pyon_alloc (acc_size);
+        local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
         () = () call generator (nil, lsize, lfirst, local_value);
         local_value;
       } else {
-        local_value = pointer primcall pyon_alloc (acc_size);
+        local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
         () = () call generator (nil, lsize, lfirst, local_value);
 
         // Accumulate into output
-        ret_value = pointer primcall pyon_alloc (acc_size);
+        ret_value = pointer primcall allocate (acc_is_pointerless, acc_size);
         () = () call reducer (old_value, local_value, ret_value);
 
         () = () call (acc_repr @! PassConv.finalize) (local_value);
@@ -279,7 +291,7 @@ function blocked_reduce1
         if (y == uninitialized_value) {
           x;
         } else {
-          ret_value = pointer primcall pyon_alloc (acc_size);
+          ret_value = pointer primcall allocate (acc_is_pointerless, acc_size);
           () = () call reducer (x, y, ret_value);
           ret_value;
         };

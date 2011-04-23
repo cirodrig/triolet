@@ -11,6 +11,15 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+// Allocate some memory.  Use the flag to determine what kind of allocation.
+procedure inline allocate (bool is_pointerless, uint size) -> pointer {
+  if (is_pointerless) {
+    pointer primcall pyon_alloc_nopointers (size);
+  } else {
+    pointer primcall pyon_alloc (size);
+  };
+};
+
 data pointer repr_info = InfoTableHeader {
   dummy_finalizer,
   TAG_CON
@@ -27,7 +36,8 @@ data owned repr_Box_value = PassConv {
 #else
 # error "Don't know how to copy Boxed values"
 #endif
-  dummy_finalizer
+  dummy_finalizer,
+  NOT_POINTERLESS
 };
 
 // Return the representation of a Boxed object.  The parameter is a type
@@ -46,11 +56,13 @@ function inline repr_Referenced (unit _, owned elt_repr) -> owned {
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   ret @! PassConv.size = sizeof pointer;
   ret @! PassConv.align = alignof pointer;
+  ret @! PassConv.is_pointerless = NOT_POINTERLESS;
 
   letrec {
     function copy (pointer src, pointer dst) -> () {
       // Allocate some new memory
-      new_obj = pointer primcall pyon_alloc (elt_repr @! PassConv.size);
+      new_obj = pointer primcall allocate (elt_repr @! PassConv.is_pointerless,
+                                           elt_repr @! PassConv.size);
 
       // Copy into it
       () = () call (elt_repr @! PassConv.copy) (pointer load src, new_obj);
@@ -80,7 +92,8 @@ data owned repr_EmptyRef = PassConv {
   word 0,
   word 1,
   dummy_copy,
-  dummy_finalizer
+  dummy_finalizer,
+  IS_POINTERLESS
 };
 
 function inline dummy_copy (pointer src, pointer dst) -> () {
@@ -106,6 +119,7 @@ function inline repr_array
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   ret @! PassConv.size = sizeof array_type;
   ret @! PassConv.align = alignof array_type;
+  ret @! PassConv.is_pointerless = elt_repr @! PassConv.is_pointerless;
 
   elt_copy = elt_repr @! PassConv.copy;
   letrec {
@@ -139,7 +153,8 @@ data owned repr_int = PassConv {
   sizeof int32,
   alignof int32,
   copy4F,
-  dummy_finalizer
+  dummy_finalizer,
+  IS_POINTERLESS
 };
 
 // Parameter-passing convention dictionary of floats
@@ -148,7 +163,8 @@ data owned repr_float = PassConv {
   sizeof float,
   alignof float,
   copy4F,
-  dummy_finalizer
+  dummy_finalizer,
+  IS_POINTERLESS
 };
 
 // Parameter-passing convention dictionary of bool
@@ -157,7 +173,8 @@ data owned repr_bool = PassConv {
   sizeof bool,
   alignof bool,
   copy1F,
-  dummy_finalizer
+  dummy_finalizer,
+  IS_POINTERLESS
 };
 
 // Parameter-passing convention dictionary of EffTok,
@@ -167,7 +184,8 @@ data owned repr_EffTok = PassConv {
   word 0,
   word 1,
   dummy_copy,
-  dummy_finalizer
+  dummy_finalizer,
+  IS_POINTERLESS
 };
 
 function copy_Repr (unit _, pointer src, pointer dst) -> () {
@@ -175,6 +193,7 @@ function copy_Repr (unit _, pointer src, pointer dst) -> () {
   dst @! PassConv.align = src @! PassConv.align;
   dst @! PassConv.copy = src @! PassConv.copy;
   dst @! PassConv.finalize = src @! PassConv.finalize;
+  dst @! PassConv.is_pointerless = src @! PassConv.is_pointerless;
   ();
 };
 
@@ -190,6 +209,9 @@ function inline repr_PyonTuple2 (unit _, unit _,
 
   ret @! PassConv.size = sizeof tuple;
   ret @! PassConv.align = alignof tuple;
+  ret @! PassConv.is_pointerless =
+    repr1 @! PassConv.is_pointerless &&
+    repr2 @! PassConv.is_pointerless;
   ret @! PassConv.copy = owned call copy_PyonTuple2
     (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
      size1, align1, size2, align2);
@@ -220,6 +242,10 @@ function inline repr_PyonTuple3 (unit _, unit _, unit _,
 
   ret @! PassConv.size = sizeof tuple;
   ret @! PassConv.align = alignof tuple;
+  ret @! PassConv.is_pointerless =
+    repr1 @! PassConv.is_pointerless &&
+    repr2 @! PassConv.is_pointerless &&
+    repr3 @! PassConv.is_pointerless;
   ret @! PassConv.copy = owned call copy_PyonTuple3
     (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
      repr3 @! PassConv.copy,
@@ -259,6 +285,11 @@ function inline repr_PyonTuple4
 
   ret @! PassConv.size = sizeof tuple;
   ret @! PassConv.align = alignof tuple;
+  ret @! PassConv.is_pointerless =
+    repr1 @! PassConv.is_pointerless &&
+    repr2 @! PassConv.is_pointerless &&
+    repr3 @! PassConv.is_pointerless &&
+    repr4 @! PassConv.is_pointerless;
   ret @! PassConv.copy = owned call copy_PyonTuple4
     (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
      repr3 @! PassConv.copy, repr4 @! PassConv.copy,
@@ -295,6 +326,7 @@ data owned OpaqueTraversableDict_list = TraversableDict {
 };
 #endif
 
+// Is this redundant with 'repr_Complex' in complex.pyasm?
 function inline complex_pass_conv (unit _, pointer repr, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
@@ -302,6 +334,7 @@ function inline complex_pass_conv (unit _, pointer repr, pointer ret) -> () {
 
   ret @! PassConv.size = sizeof cpx;
   ret @! PassConv.align = alignof cpx;
+  ret @! PassConv.is_pointerless = repr @! PassConv.is_pointerless;
   ret @! PassConv.copy =
       owned call copy_complex (size, align, repr @! PassConv.copy);
   ret @! PassConv.finalize =
@@ -331,6 +364,7 @@ function inline repr_AdditiveDict (unit _, pointer repr, pointer ret) -> () {
 
   ret @! PassConv.size = sizeof dictionary;
   ret @! PassConv.align = alignof dictionary;
+  ret @! PassConv.is_pointerless = NOT_POINTERLESS;
   ret @! PassConv.copy = owned call AdditiveDict_copy (size, align, copy);
   ret @! PassConv.finalize = dummy_finalizer;
   ();
@@ -355,6 +389,7 @@ function inline repr_MultiplicativeDict
 
   ret @! PassConv.size = sizeof dictionary;
   ret @! PassConv.align = alignof dictionary;
+  ret @! PassConv.is_pointerless = NOT_POINTERLESS;
   ret @! PassConv.copy = owned call MultiplicativeDict_copy (size, align, copy);
   ret @! PassConv.finalize = dummy_finalizer;
   ();

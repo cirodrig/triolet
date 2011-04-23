@@ -74,14 +74,19 @@ indexedIntRecord :: StaticRecord
 indexedIntRecord = constStaticRecord [PrimField nativeIntType] 
 
 -- | A parameter passing convention consists of size, alignment, copy,
--- and finalize functions
+-- and finalize functions, and a flag indicating whether the object is
+-- pointerless.
+--
+-- Pointerless data does not need to be scanned during GC.
 passConvRecord :: StaticRecord
-passConvRecord = constStaticRecord [ RecordField objectHeaderRecord
-                                   , PrimField nativeWordType
-                                   , PrimField nativeWordType
-                                   , PrimField OwnedType
-                                   , PrimField OwnedType
-                                   ]
+passConvRecord = constStaticRecord
+                 [ RecordField objectHeaderRecord
+                 , PrimField nativeWordType -- Size
+                 , PrimField nativeWordType -- Alignment
+                 , PrimField OwnedType      -- Copy function
+                 , PrimField OwnedType      -- Finalize function
+                 , PrimField BoolType       -- Is pointerless?
+                 ]
 
 -- | A closure created in C and passed to pyon code. 
 --   The closure is a struct with two fields.  The first

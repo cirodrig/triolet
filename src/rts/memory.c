@@ -13,7 +13,18 @@ pyon_alloc(uint32_t size)
 {
   PyonPtr ptr = GC_MALLOC(size);
 #ifdef CHATTY_ALLOC
-  fprintf(stderr, "Allocating   %p (%d bytes)\n", ptr, (int)size);
+  fprintf(stderr, "Allocating - %p (%d bytes)\n", ptr, (int)size);
+#endif
+  return ptr;
+}
+
+/* Allocate some heap data that doesn't contain any pointers */
+PyonPtr
+pyon_alloc_nopointers(uint32_t size)
+{
+  PyonPtr ptr = GC_MALLOC_ATOMIC(size);
+#ifdef CHATTY_ALLOC
+  fprintf(stderr, "Allocating A %p (%d bytes)\n", ptr, (int)size);
 #endif
   return ptr;
 }

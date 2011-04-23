@@ -99,6 +99,8 @@ builtinPrimitives =
     -- memory.c
   , (biName "pyon_alloc",
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
+  , (biName "pyon_alloc_nopointers",
+     primFunctionType [PrimType nativeWordType] [PrimType PointerType])
   , (biName "pyon_dealloc",
      primFunctionType [PrimType PointerType] [])
     -- apply.c

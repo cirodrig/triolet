@@ -19,6 +19,7 @@ record PassConv {
   const uint align;                   // Alignment in bytes
   const owned copy;                   // Duplicate a value
   const owned finalize;               // Finalize a value
+  const bool is_pointerless;	      // Is pointerless?
 };
 
 record IndexedInt {

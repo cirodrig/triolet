@@ -399,6 +399,9 @@ uint16V n
       internalError "uint16V: Integer out of range"
   | otherwise = LitV $ IntL Unsigned S16 $ fromIntegral n
 
+boolV :: Bool -> Val
+boolV b = LitV (BoolL b)
+
 -------------------------------------------------------------------------------
 -- Record operations
 
@@ -659,7 +662,8 @@ allocateLocalMem :: (Monad m, Supplies m (Ident Var)) =>
 allocateLocalMem ptr_var pass_conv rtypes mk_block = do
   -- Allocate the object
   size <- selectPassConvSize pass_conv
-  allocateHeapMemAs size ptr_var
+  pointerless <- selectPassConvIsPointerless pass_conv
+  allocateHeapMemAs size pointerless ptr_var
   
   -- Generate code and bind its results to temporary variables
   rvars <- lift $ mapM newAnonymousVar rtypes
@@ -674,16 +678,48 @@ allocateLocalMem ptr_var pass_conv rtypes mk_block = do
   -- Return the temporary values
   return $ ValA $ map VarV rvars
 
--- | Allocate the given number of bytes on the heap.
-allocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m Val
-allocateHeapMem size =
-  emitAtom1 (PrimType PointerType) $
-  primCallA (builtinVar the_prim_pyon_alloc) [size]
+-- | Helper function for 'allocateHeapMem' and friends.
+allocate_with_dst f = do
+  dst_var <- lift $ newAnonymousVar (PrimType PointerType)
+  f dst_var
+  return (VarV dst_var)
+
+-- | Allocate the given number of bytes on the heap, deciding based on a
+--   value whether the data may contain pointers. 
+allocateHeapMem :: (Monad m, Supplies m (Ident Var)) =>
+                   Val          -- ^ Size of heap data (uint)
+                -> Val          -- ^ Whether data is pointerless (bool)
+                -> Gen m Val
+allocateHeapMem size is_pointerless =
+  allocate_with_dst (allocateHeapMemAs size is_pointerless)
+
+allocateHeapMemComposite :: (Monad m, Supplies m (Ident Var)) =>
+                            Val -> Gen m Val
+allocateHeapMemComposite size =
+  allocate_with_dst (allocateHeapMemCompositeAs size)
+
+allocateHeapMemPointerless :: (Monad m, Supplies m (Ident Var)) =>
+                              Val -> Gen m Val
+allocateHeapMemPointerless size =
+  allocate_with_dst (allocateHeapMemPointerlessAs size)
 
 allocateHeapMemAs :: (Monad m, Supplies m (Ident Var)) =>
-                     Val -> Var -> Gen m ()
-allocateHeapMemAs size dst =
+                     Val        -- ^ Size of heap data (uint)
+                  -> Val        -- ^ Whether data is pointerless (bool)
+                  -> Var        -- ^ Output variable
+                  -> Gen m ()
+allocateHeapMemAs size is_pointerless dst =
+  getContinuation True [dst] $ \cont ->
+  genIf is_pointerless (pointerless >> return cont) (composite >> return cont)
+  where
+    composite = allocateHeapMemCompositeAs size dst
+    pointerless = allocateHeapMemPointerlessAs size dst
+
+allocateHeapMemCompositeAs size dst =
   bindAtom1 dst $ primCallA (builtinVar the_prim_pyon_alloc) [size]
+
+allocateHeapMemPointerlessAs size dst =
+  bindAtom1 dst $ primCallA (builtinVar the_prim_pyon_alloc_nopointers) [size]
 
 deallocateHeapMem :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
 deallocateHeapMem ptr =
@@ -787,12 +823,14 @@ adjustObjectBy make_primcall n ptr
 
 selectPassConvSize, selectPassConvAlignment,
   selectPassConvCopy,
-  selectPassConvFinalize :: (Monad m, Supplies m (Ident Var)) =>
-                            Val -> Gen m Val
+  selectPassConvFinalize,
+  selectPassConvIsPointerless :: (Monad m, Supplies m (Ident Var)) =>
+                                 Val -> Gen m Val
 selectPassConvSize = loadField (passConvRecord' !!: 1)
 selectPassConvAlignment = loadField (passConvRecord' !!: 2)
 selectPassConvCopy = loadField (passConvRecord' !!: 3)
 selectPassConvFinalize = loadField (passConvRecord' !!: 4)
+selectPassConvIsPointerless = loadField (passConvRecord' !!: 5)
 
 -------------------------------------------------------------------------------
 -- Dictionaries

@@ -22,6 +22,7 @@ function repr_Complex (unit _, owned repr_element) -> owned {
 
   repr @! PassConv.size = sizeof elt_type;
   repr @! PassConv.align = alignof elt_type;
+  repr @! PassConv.is_pointerless = repr_element @! PassConv.is_pointerless;
 
   copy_elt = repr_element @! PassConv.copy;
   letrec {

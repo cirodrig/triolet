@@ -83,11 +83,12 @@ assumeVar v rt k = do
 --   its size.
 assumeLocalVar :: Var           -- ^ The variable name
                -> LL.Val        -- ^ The variable size (unsigned native int)
+               -> LL.Val        -- ^ The variable pointerlessness (bool)
                -> (LL.Var -> GenLower a) -- ^ Code using the variable
                -> GenLower a
-assumeLocalVar v v_size k =
+assumeLocalVar v v_size is_pointerless k =
   liftT1 (assumeVariableWithType v (LL.PrimType LL.PointerType)) $ \ll_var -> do
-    allocateHeapMemAs v_size ll_var
+    allocateHeapMemAs v_size is_pointerless ll_var
     x <- k ll_var
     deallocateHeapMem (LL.VarV ll_var)
     return x
@@ -301,9 +302,10 @@ lowerLet _ binder rhs body =
        -- Get the size of the local variable's data
        dict_val <- lowerExpToVal repr_dict
        local_size <- selectPassConvSize dict_val
+       local_pointerless <- selectPassConvIsPointerless dict_val
        
        -- Allocate local memory, then generate the rhs and body code
-       assumeLocalVar v local_size $ \ll_var -> do
+       assumeLocalVar v local_size local_pointerless $ \ll_var -> do
          -- The lowered RHS should not return anything
          result <- lowerExp rhs
          let debug_rhs_type = case rhs of ExpTM (RTypeAnn rtype _) -> rtype

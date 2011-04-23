@@ -166,14 +166,20 @@ instance HasSize (FieldType Int) where
   alignOf (PrimField v) = alignOf v
   alignOf (RecordField r) = alignOf r
   alignOf (BytesField _ a) = a
+  
+  pointerlessness (PrimField v) = pointerlessness v
+  pointerlessness (RecordField r) = pointerlessness r
+  pointerlessness (BytesField _ _) = False -- Unknown, assume it has pointers
 
 instance HasSize (Record Int) where
   sizeOf = recordSize
   alignOf = recordAlignment
+  pointerlessness = all pointerlessness . recordFields
 
 instance HasSize (Field Int) where
   sizeOf f = sizeOf (fieldType f)
   alignOf f = alignOf (fieldType f)
+  pointerlessness f = pointerlessness (fieldType f)
 
 constStaticRecord :: [StaticFieldType] -> StaticRecord
 constStaticRecord fs = staticRecord [(Constant, f) | f <- fs]

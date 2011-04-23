@@ -172,6 +172,9 @@ data ValProd =
 
 type ValLayout = LL.ValueType
 
+valIsPointerless :: ValLayout -> Bool
+valIsPointerless t = LL.pointerlessness t
+
 type Producer = GenLower LL.Val
 type Writer = LL.Val -> GenLower ()
 
@@ -215,12 +218,13 @@ data MemProd =
 
 data MemLayout =
   MLayout
-  { -- | The data type when used as a field of a record
-    memFieldType :: GenLower LL.DynamicFieldType
+  { -- | The data type when used as a field of a record,
+    --   and its pointerlessness.
+    memFieldType :: GenLower (LL.DynamicFieldType, LL.Val)
     
-    -- | The data type as a record
-  , memType :: GenLower LL.DynamicRecord
-    
+    -- | The data type as a record, and its pointerlessness.
+  , memType :: GenLower (LL.DynamicRecord, LL.Val)
+
     -- | Whether an object with this layout is stored via an indirection.
     --   If 'True', then the layout consists of a single pointer in memory
     --   that points to the real data; 'memFieldType' and 'memType' describe
@@ -257,12 +261,26 @@ readField (MemLayout mem_member) _ ptr =
 readField (ValLayout val_member) _ ptr =
   primLoadMutable val_member ptr
 
-layoutFieldType :: Layout -> GenLower LL.DynamicFieldType
+layoutFieldType :: Layout -> GenLower (LL.DynamicFieldType, LL.Val)
 layoutFieldType (MemLayout ml) = memFieldType ml
 layoutFieldType (ValLayout vl) =
-  return $! case vl
-            of LL.PrimType pt -> LL.PrimField pt
-               LL.RecordType rt -> LL.RecordField (toDynamicRecord rt)
+  let field_type =
+        case vl
+        of LL.PrimType pt -> LL.PrimField pt
+           LL.RecordType rt -> LL.RecordField (toDynamicRecord rt)
+  in return (field_type, boolV $ LL.pointerlessness vl)
+
+buildMemFieldType :: GenLower (LL.DynamicRecord, LL.Val)
+                  -> GenLower (LL.DynamicFieldType, LL.Val)
+buildMemFieldType m = do
+  (recd, is_pointerless) <- m
+  return (LL.RecordField recd, is_pointerless)
+
+buildMemRecord :: GenLower (LL.DynamicFieldType, LL.Val)
+               -> GenLower (LL.DynamicRecord, LL.Val)
+buildMemRecord m = do
+  (recd, is_pointerless) <- m
+  return (singletonDynamicRecord LL.Mutable recd, is_pointerless)
 
 -------------------------------------------------------------------------------
 -- Operations on value layouts
@@ -328,6 +346,8 @@ boxedLayout (Sum members get_tag) =
 
 boxedLayout (One m) = One (boxedLayout' m)
 
+-- | Helper function for 'boxedLayout'.  Construct the layout of a boxed
+--   sum type.
 boxedLayout' :: MemProd -> ValProd
 boxedLayout' (MemProd cons layout fields writer reader) =
   ValProd { valConstructors = cons
@@ -337,17 +357,18 @@ boxedLayout' (MemProd cons layout fields writer reader) =
         , valReader = new_reader}
   where
     new_writer fld_inits = do
-      record_type <- memType layout
-            
-      -- Allocate storage and initialize the contents
-      ptr <- allocateHeapMem (LL.recordSize record_type)
+      (record_type, _) <- memType layout
+
+      -- Allocate storage and initialize the contents.  Boxed objects
+      -- always contain pointers in their header.
+      ptr <- allocateHeapMemComposite (LL.recordSize record_type)
       writer record_type fld_inits ptr
-            
+
       -- Return an owned pointer
       emitAtom1 (LL.PrimType LL.OwnedType) $ LL.PrimA LL.PrimCastToOwned [ptr]
 
     new_reader owned_ptr = do
-      record_type <- memType layout
+      (record_type, _) <- memType layout
 
       -- Cast to a non-owned pointer before reading
       ptr <- emitAtom1 (LL.PrimType LL.PointerType) $
@@ -375,40 +396,45 @@ unionLayout :: [MemLayout] -> MemLayout
 unionLayout layouts =
   memBytesLayout $ do
     -- Compute the maximum size and alignment over all fields 
-    field_records <- mapM memType layouts
+    (field_records, pointerlessnesses) <- mapAndUnzipM memType layouts
     max_size <- computeMaximum $ map LL.recordSize field_records
     max_align <- computeMaximum $ map LL.recordAlignment field_records
-    return (max_size, max_align)
+    is_pointerless <- foldM primAnd (boolV True) pointerlessnesses
+    return (max_size, max_align, is_pointerless)
 
 -- | Layout of an object that occupies a single field  
 memValueLayout :: ValLayout -> MemLayout
 memValueLayout value_type =
   MLayout
-  (return field_type)
-  (return $ singletonDynamicRecord LL.Mutable field_type) 
+  (return (field_type, is_pointerless))
+  (buildMemRecord $ return (field_type, is_pointerless))
   False
   where
+    is_pointerless = boolV $ LL.pointerlessness value_type
     field_type = 
       case value_type
       of LL.PrimType pt -> LL.PrimField pt
          LL.RecordType rt -> LL.RecordField (toDynamicRecord rt)
 
 -- | Layout of an object that consists of undifferentiated bytes
-memBytesLayout :: GenLower (LL.Val, LL.Val) -- ^ Computes size and alignment
+memBytesLayout :: GenLower (LL.Val, LL.Val, LL.Val)
+                  -- ^ Computes size, alignment, and pointerlessness
                -> MemLayout     -- ^ Memory layout
 memBytesLayout mk_size =
-  MLayout mk_field_type
-  (fmap (singletonDynamicRecord LL.Mutable) mk_field_type)
-  False
+  MLayout mk_field_type (buildMemRecord mk_field_type) False
   where
     mk_field_type = do
-      (size, alignment) <- mk_size
-      return $ LL.BytesField size alignment
+      (size, alignment, is_pointerless) <- mk_size
+      return (LL.BytesField size alignment, is_pointerless)
 
 -- | Layout of an object that consists of a record
-memRecordLayout :: GenLower LL.DynamicRecord -> MemLayout
+memRecordLayout :: GenLower (LL.DynamicRecord, LL.Val) -> MemLayout
 memRecordLayout mk_record =
-  MLayout (fmap LL.RecordField mk_record) mk_record False
+  MLayout
+  { memFieldType = buildMemFieldType mk_record 
+  , memType = mk_record 
+  , memIsIndirect = False
+  }
 
 -- | The layout of an indirect reference.  The reference occupies one pointer
 --   worth of memory.  It points to a dynamically allocated data structure
@@ -421,9 +447,9 @@ referenceLayout layout =
   where
     writer _ [init] dst = do
       -- Allocate memory
-      referent_record <- memType layout
+      (referent_record, is_pointerless) <- memType layout
       let referent_size = LL.recordSize referent_record
-      referent <- allocateHeapMem referent_size
+      referent <- allocateHeapMem referent_size is_pointerless
       
       -- Initialize the allocated memory
       asWriter init referent
@@ -439,8 +465,9 @@ referenceLayout layout =
       return [referent]
 
     reference_layout =
-      MLayout (return field_type)
-      (return $ singletonDynamicRecord LL.Mutable field_type)
+      -- Create the layout of a reference.  It's a pointer.
+      MLayout (return (field_type, boolV False))
+      (return (singletonDynamicRecord LL.Mutable field_type, boolV False))
       True
       where
         field_type = LL.PrimField LL.PointerType
@@ -452,12 +479,13 @@ polymorphicLayout ty =
   memBytesLayout $ lookupReprDict ty $ \dict -> do
     size <- selectPassConvSize dict
     align <- selectPassConvAlignment dict
-    return (size, align)
+    is_pointerless <- selectPassConvIsPointerless dict
+    return (size, align, is_pointerless)
 
 arrayLayout :: LL.Val -> MemLayout -> MemLayout 
 arrayLayout count element =
   memBytesLayout $ do
-    element_record <- memType element
+    (element_record, is_pointerless) <- memType element
 
     -- Array size = count * (pad (alignment element) (size element)
     let elt_size = LL.recordSize element_record
@@ -467,15 +495,18 @@ arrayLayout count element =
     array_size <- nativeMulZ count padded_elt_size
     array_uint_size <- primCastZ (LL.PrimType LL.nativeWordType) array_size
     
-    return (array_uint_size, elt_align)
+    return (array_uint_size, elt_align, is_pointerless)
 
 -- | The layout of a product type.
 productMemLayout :: Var -> [Layout] -> MemProd
 productMemLayout con fields =
   MemProd [con] layout fields writer reader
   where
-    layout = memRecordLayout
-             (createMutableDynamicRecord =<< mapM layoutFieldType fields)
+    layout = memRecordLayout $ do
+      (field_types, pointerlesss) <- mapAndUnzipM layoutFieldType fields
+      pointerless <- foldM primAnd (boolV True) pointerlesss
+      recd <- createMutableDynamicRecord field_types
+      return (recd, pointerless)
 
     writer record_type initializers dst 
       | length initializers /= length fields = 
@@ -509,7 +540,9 @@ taggedSumMemLayout members = Sum tagged_members get_tag
     payload_layout = unionLayout $ map (memLayout . snd) members
     
     payload_alignment :: GenLower LL.Val
-    payload_alignment = fmap LL.recordAlignment $ memType payload_layout
+    payload_alignment = do
+      (recd, _) <- memType payload_layout
+      return (LL.recordAlignment recd)
     
     tag_type = LL.litType $ fst $ head members
     
@@ -517,10 +550,12 @@ taggedSumMemLayout members = Sum tagged_members get_tag
     -- given the same alignment in all cases
     tagged_type layout = do
       alignment <- payload_alignment
-      field_type <- memFieldType layout
-      createMutableDynamicRecord
-        [LL.AlignField alignment, LL.PrimField tag_type, field_type]
+      (field_type, is_pointerless) <- memFieldType layout
+      recd <- createMutableDynamicRecord
+              [LL.AlignField alignment, LL.PrimField tag_type, field_type]
+      return (recd, is_pointerless)
 
+    tagged_members :: [(LL.Lit, MemProd)]
     tagged_members = [(tag, tagged_member tag l) | (tag, l) <- members]
       where
         tagged_member tag (MemProd cons layout fs writer reader) =
@@ -554,7 +589,7 @@ objectLayout mem_layout =
   case mem_layout
   of Sum members get_tag ->
        let get_tag' ptr = do
-             payload <- memFieldType $ discardMemStructure mem_layout
+             (payload, _) <- memFieldType $ discardMemStructure mem_layout
              object_record <- mk_object_record payload
              payload_ptr <- referenceField (object_record !!: 1) ptr
              get_tag payload_ptr
@@ -579,8 +614,13 @@ objectLayout mem_layout =
           payload_ptr <- referenceField payload_field src
           reader payload_record payload_ptr
 
-    object_layout layout =
-      memRecordLayout (mk_object_record =<< memFieldType layout)
+    object_layout layout = memRecordLayout $ do
+      (field_type, _) <- memFieldType layout
+
+      -- The header has pointers that must be tracked,
+      -- so pointerlessness is False
+      recd <- mk_object_record field_type
+      return (recd, boolV False)
 
     mk_object_record payload =
       createMutableDynamicRecord [LL.RecordField objectHeaderRecord', payload]
@@ -642,7 +682,7 @@ algMemIntro' (MemProd { memLayout = layout
 
   fun_body <- execBuild [] $ do
     -- Create record type
-    record_type <- memType layout
+    (record_type, _) <- memType layout
 
     -- Write fields
     writer record_type (algInitializers params fs) (LL.VarV ret_param)
@@ -720,7 +760,7 @@ eliminateSum _ _ _ _ _ =
 algValElim layout scr branch = valReader layout scr >>= branch
 
 algMemElim layout scr branch = do
-  record_type <- memType $ memLayout layout
+  (record_type, _) <- memType $ memLayout layout
   memReader layout record_type scr >>= branch
 
 loadValue :: Layout -> LL.Val -> GenLower LL.Val

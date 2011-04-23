@@ -38,6 +38,8 @@ instance HasSize ValueType where
   sizeOf (RecordType rt) = sizeOf rt
   alignOf (PrimType pt) = alignOf pt
   alignOf (RecordType rt) = alignOf rt
+  pointerlessness (PrimType pt) = pointerlessness pt
+  pointerlessness (RecordType rt) = pointerlessness rt
 
 valueToPrimType :: ValueType -> PrimType
 valueToPrimType (PrimType pt) = pt
