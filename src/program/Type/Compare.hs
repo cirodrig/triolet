@@ -12,6 +12,7 @@ where
 import Control.Monad.Reader
 import qualified Data.Set as Set
 import qualified Data.IntMap as IntMap
+import Text.PrettyPrint.HughesPJ
 
 import Common.Identifier
 import Common.MonadLogic
