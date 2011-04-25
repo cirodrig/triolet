@@ -628,14 +628,14 @@ rwParallelReduceStream inf
 
       -- Create the worker function, which processes one block
       worker_stream <-
-        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
+        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list_shape) bs
       worker_retvar <- newAnonymousVar ObjectLevel
       case worker_stream of
         Nothing -> return Nothing
         Just ws -> liftFreshVarM $ do
           worker_body <-
             varAppE (pyonBuiltin the_fun_reduce_Stream)
-            [TypM $ VarT (pyonBuiltin the_list), elt]
+            [TypM $ VarT (pyonBuiltin the_list_shape), elt]
             [return elt_repr,
              return reducer,
              return init,
@@ -682,7 +682,7 @@ rwParallelReduce1Stream inf
 
       -- Create the worker function, which processes one block
       worker_stream <-
-        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
+        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list_shape) bs
       worker_retvar <- newAnonymousVar ObjectLevel
       case worker_stream of
         Nothing -> return Nothing
@@ -690,7 +690,7 @@ rwParallelReduce1Stream inf
           worker_body <-
             liftFreshVarM $
             varAppE (pyonBuiltin the_fun_reduce1_Stream)
-            [TypM $ VarT (pyonBuiltin the_list), elt]
+            [TypM $ VarT (pyonBuiltin the_list_shape), elt]
             [return elt_repr,
              return reducer,
              return ws,
@@ -741,7 +741,7 @@ rwParallelHistogramArray inf
       -- >    (\ix ct b -> histogramArray list_shape size_ix size
       -- >                 (asListShape bs))
       worker_stream <-
-        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list) bs
+        encodeStream2 (TypM $ VarT $ pyonBuiltin the_list_shape) bs
       case worker_stream of
         Nothing -> return Nothing
         Just ws ->
@@ -795,7 +795,7 @@ rwParallelHistogramArray inf
     worker_fn size_var count_var base_var bs = do
       retvar <- newAnonymousVar ObjectLevel
       fn_body <- varAppE (pyonBuiltin the_histogramArray)
-                 [TypM $ VarT (pyonBuiltin the_list), size_ix]
+                 [TypM $ VarT (pyonBuiltin the_list_shape), size_ix]
                  [return size, return bs, varE retvar]
       let param1 = memVarP count_var $
                    ValPT Nothing :::
@@ -1180,10 +1180,10 @@ data instance Exp Stream =
 -- | Get the shape of a stream
 sexpShape :: ExpS -> Shape
 sexpShape (GenerateStream {_sexpShape = s}) = s
-sexpShape (BindStream _ _) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list)
+sexpShape (BindStream _ _) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list_shape)
 sexpShape (CaseStream {_sexpShape = s}) = s
-sexpShape (ReturnStream {}) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list)
-sexpShape (EmptyStream {}) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list)
+sexpShape (ReturnStream {}) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list_shape)
+sexpShape (EmptyStream {}) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list_shape)
 sexpShape (UnknownStream {_sexpShape = s}) = s
 
 -- | Get the type of a stream element
@@ -1435,8 +1435,8 @@ encodeStream2 expected_shape stream = runMaybeT $ do
                  gen (ExpM $ VarE defaultExpInfo index_var))]
 
        BindStream src (pat, dst) -> do
-         src' <- MaybeT $ encodeStream2 (TypM list_type) src
-         dst' <- MaybeT $ encodeStream2 (TypM list_type) dst
+         src' <- MaybeT $ encodeStream2 (TypM list_shape) src
+         dst' <- MaybeT $ encodeStream2 (TypM list_shape) dst
          let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_oper_CAT_MAP)
          return $
            ExpM $ AppE defaultExpInfo oper
@@ -1450,7 +1450,7 @@ encodeStream2 expected_shape stream = runMaybeT $ do
                        , funReturn =
                          RetM $ BoxRT :::
                          varApp (pyonBuiltin the_Stream)
-                         [list_type, sexpElementType dst]
+                         [list_shape, sexpElementType dst]
                        , funBody = dst'}]
 
        CaseStream shp scr alts -> do
@@ -1474,7 +1474,7 @@ encodeStream2 expected_shape stream = runMaybeT $ do
   let given_shape = shapeType s_shape
   MaybeT $ castStreamExpressionShape (fromTypM expected_shape) given_shape elt_type elt_repr encoded
   where
-    list_type = VarT (pyonBuiltin the_list)
+    list_shape = VarT (pyonBuiltin the_list_shape)
     s_shape = sexpShape stream
     elt_type = sexpElementType stream
     elt_repr = sexpElementRepr stream
