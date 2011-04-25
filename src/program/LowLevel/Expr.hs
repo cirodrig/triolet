@@ -80,6 +80,7 @@ data BinOp =
   | MaxZOp !Signedness !Size
   | CmpZOp !Signedness !Size !CmpOp
   | AddPOp
+  | AndOp
     deriving(Eq, Ord)
 
 -- | A unary operator.
@@ -150,6 +151,7 @@ pprBinOp (CmpZOp _ _ cmp) =
             CmpGT -> "cmp_gt"
             CmpGE -> "cmp_ge"
 pprBinOp AddPOp = text "addp"
+pprBinOp AndOp = text "and"
 
 pprUnOp (LoadOp t) = text "load" <+> pprValueType t
 pprUnOp (CastZOp _ _ _) = text "cast"
@@ -422,6 +424,7 @@ isReducible expression =
                           MaxZOp {} -> True
                           CmpZOp {} -> False
                           AddPOp {} -> True
+                          AndOp {} -> True
      UnExpr op _    -> case op
                        of LoadOp {} -> False
                           CastZOp {} -> False
@@ -469,6 +472,7 @@ interpretPrim env op args = fmap (simplify env) $
      PrimMaxZ sgn sz -> Just $ binary (MaxZOp sgn sz)
      PrimCmpZ sgn sz op -> Just $ binary (CmpZOp sgn sz op)
      PrimAddP        -> Just $ binary AddPOp
+     PrimAnd         -> Just $ binary AndOp
      PrimCastZ ss ds sz -> Just $ unary (CastZOp ss ds sz)
      -- Only constant loads can become expressions
      PrimLoad Constant ty -> Just $ load_op ty
@@ -763,6 +767,13 @@ simplifyBinary AddPOp larg rarg
                   CAExpr (AddZOp Signed nativeIntSize) [larg2, rarg]
       in simplifyBinary AddPOp larg' rarg'
   | otherwise = BinExpr AddPOp larg rarg
+
+simplifyBinary AndOp larg rarg
+  | LitExpr (BoolL True) <- larg = rarg
+  | LitExpr (BoolL False) <- larg = LitExpr (BoolL False)
+  | LitExpr (BoolL True) <- rarg = larg
+  | LitExpr (BoolL False) <- rarg = LitExpr (BoolL False)
+  | otherwise = BinExpr AndOp larg rarg
 
 simplifyUnary op arg =
   case op
