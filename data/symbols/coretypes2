@@ -1,0 +1,870 @@
+
+{- Predefined names
+-- These names are predefined.  The definitions are here for reference.
+
+kind val;
+kind box;
+kind bare;
+kind out;
+
+type BoxedT : bare -> box;
+type BareT : box -> bare;
+type OutT : bare -> out;
+
+-}
+
+-- Data types
+
+data Stored : val -> bare
+{
+  stored (a : val) () (a) : Stored a;
+};
+
+data StoredBox : box -> bare
+{
+  storedBox (a : box) () (a) : StoredBox a;
+};
+
+data Boxed : bare -> box
+{
+  boxed (a : bare) () (a) : Boxed a;
+};
+
+data Referenced : bare -> bare
+{
+  referenced (a : bare) () (a) : Referenced a;
+};
+
+-- A pointer used for initializing data
+data OutPtr : bare -> out {};
+
+-- A dummy value representing the effect of initializing an object
+data IEffect : bare -> val {};
+
+data bool : val
+{
+  True () () () : bool;
+  False () () () : bool;
+};
+
+data int : val {};		-- Opaque
+data float : val {};		-- Opaque
+
+data NoneType : val
+{
+  None () () () : NoneType;
+};
+
+-- An indexed singleton integer type.
+-- Invariant: The type index gives up the integer value.
+data IndexedInt : intindex -> val
+{
+  indexedInt (n : intindex) () (int) : IndexedInt n;
+};
+
+-- An existential indexed singleton integer type.
+-- We can convert int to this type.
+data SomeIndexedInt : val
+{
+  someIndexedInt () (n : intindex) (IndexedInt n) : SomeIndexedInt;
+};
+
+-- A dummy token that we use to stand in for dependences due to
+-- imperative computation that is inserted by the compiler.
+--
+-- We take advantage of the fact that EffTok is a unit value, and therefore
+-- it is not accessed by load or store instructions when reading or writing it,
+-- and therefore we can safely masquerade NULL pointers as EffTok references.
+data EffTok : val
+{
+  -- We never use the constructor 'effTok' in code, because it could be
+  -- optimized away.  We don't want the optimizer to mess with this data type
+  -- because it stands in for real dependences.
+  -- Instead, use 'emptyEffTok' to produce an EffTok value.
+  effTok () () () : EffTok;
+};
+
+emptyEffTok : Stored EffTok;
+
+-- Translate to a side effect.
+-- This function is translated specially when converting from Core to LowLevel.
+-- toEffTok : (a : pure) -> sideeffect a -> Stored EffTok;
+
+-- Propagate a side effect.
+propagateEffTok : Stored EffTok -> write (Stored EffTok);
+
+-- Perform two side-effecting operations in sequence.
+seqEffTok : write (Stored EffTok)
+         -> write (Stored EffTok)
+	 -> write (Stored EffTok);
+
+data Complex : bare -> bare
+{
+  complex (a : bare) () (a, a) : Complex a;
+};
+
+data array : intindex -> bare -> bare
+{};
+
+-- A stream is indexed by a shape and an element type.
+-- Container types are punned as shapes.
+data Stream : bare -> bare -> box {};
+
+data list : bare -> bare
+{
+  make_list
+  (a : bare) (n : intindex)
+  (IndexedInt n, Referenced (array n a)) : list a;
+};
+
+data PyonTuple2 : bare -> bare -> bare
+{
+  pyonTuple2
+  (a : bare, b : bare) () (a, b) : PyonTuple2 a b;
+};
+
+data PyonTuple3 : bare -> bare -> bare -> bare
+{
+  pyonTuple3
+  (a : bare, b : bare, c : bare) () (a, b, c) : PyonTuple3 a b c;
+};
+
+data PyonTuple4 : bare -> bare -> bare -> bare -> bare
+{
+  pyonTuple4
+  (a : bare, b : bare, c : bare, d : bare) ()
+  (a, b, c, d) : PyonTuple4 a b c d;
+};
+
+data UnboxedTuple2 : val -> val -> val
+{
+  unboxedTuple2
+  (a : val, b : val) () (a, b) : UnboxedTuple2 a b;
+};
+
+data UnboxedTuple3 : val -> val -> val -> val
+{
+  unboxedTuple3
+  (a : val, b : val, c : val) () (a, b, c) : UnboxedTuple3 a b c;
+};
+
+data UnboxedTuple4 : val -> val -> val -> val -> val
+{
+  unboxedTuple4
+  (a : val, b : val, c : val, d : val) () (a, b, c, d) : UnboxedTuple4 a b c d;
+};
+
+data UnboxedTuple5 : val -> val -> val -> val -> val -> val
+{
+  unboxedTuple5
+  (a : val, b : val, c : val, d : val, e : val) ()
+  (a, b, c, d, e) : UnboxedTuple5 a b c d e;
+};
+
+data UnboxedTuple6 : val -> val -> val -> val -> val -> val -> val
+{
+  unboxedTuple6
+  (a : val, b : val, c : val, d : val, e : val, f : val) ()
+  (a, b, c, d, e, f) : UnboxedTuple6 a b c d e f;
+};
+
+-- Dictionaries
+
+data Repr : bare -> box {};
+
+data EqDict : bare -> box
+{
+  eqDict
+  (a : bare) ()
+  (a -> a -> bool, a -> a -> bool) : EqDict a;
+};
+
+data OrdDict : bare -> box
+{
+  ordDict
+  (a : bare) ()
+  (EqDict a,
+   a -> a -> bool,
+   a -> a -> bool,
+   a -> a -> bool,
+   a -> a -> bool) : OrdDict a;
+};
+
+data AdditiveDict : bare -> box
+{
+  additiveDict
+  (a : bare) ()
+  (a -> a -> write a,
+   a -> a -> write a,
+   a -> write a,
+   a) : AdditiveDict a;
+};
+
+data MultiplicativeDict : bare -> box
+{
+  multiplicativeDict
+  (a : bare) ()
+  (AdditiveDict a,
+   a -> a -> write a,
+   int -> write a,
+   a) : MultiplicativeDict a;
+};
+
+data RemainderDict : bare -> box
+{
+  remainderDict
+  (a : bare) ()
+  (MultiplicativeDict a,
+   a -> a -> int,
+   a -> a -> write a) : RemainderDict a;
+};
+
+data FractionalDict : bare -> box
+{
+  fractionalDict
+  (a : bare) ()
+  (MultiplicativeDict a, a -> a -> write a) : FractionalDict a;
+};
+
+data FloatingDict : bare -> box
+{
+  floatingDict
+  (a : bare) ()
+  (float -> write a,
+   a -> a -> write a,
+   a -> write a,
+   a -> write a,
+   a -> write a,
+   a -> write a,
+   a -> write a,
+   a -> write a,
+   a) : FloatingDict a;
+};
+
+data VectorDict : bare -> box
+{
+  vectorDict
+  (a : bare) ()
+  (AdditiveDict a,
+   a -> float -> write a,
+   a -> float,
+   a -> a -> float) : VectorDict a;
+};
+
+data TraversableDict : (bare -> bare) -> box
+{
+  traversableDict (t : bare -> bare) ()
+  ((a : bare) -> Repr a -> t a -> Stream (shape t) a,
+   (a : bare) -> Repr a -> Stream (shape t) a -> write (t a)) : TraversableDict t;
+};
+
+-------------------------------------------------------------------------------
+-- Shapes
+
+-- Get the stream shape corresponding to a container
+type shape : (bare -> bare) -> bare;
+
+-- The shape of a list stream
+data list_shape : bare {};
+
+-- The shape of an array stream
+data array_shape : intindex -> bare {};
+
+-------------------------------------------------------------------------------
+-- Representation dictionaries
+
+copy : (a : bare) -> Repr a -> a -> write a;
+
+repr_int : Repr (Stored int);
+repr_float : Repr (Stored float);
+repr_bool : Repr (Stored bool);
+
+repr_list : (a : bare) -> Repr a -> Repr (list a);
+repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
+
+repr_PyonTuple2 :
+    (a b : bare) -> Repr a -> Repr b -> Repr (PyonTuple2 a b);
+
+repr_PyonTuple3 :
+    (a b c : bare)
+ -> Repr a -> Repr b -> Repr c
+ -> Repr (PyonTuple3 a b c);
+
+repr_PyonTuple4 :
+    (a b c d : bare)
+ -> Repr a -> Repr b -> Repr c -> Repr d
+ -> Repr (PyonTuple4 a b c d);
+
+-- This always returns the same, global object
+repr_Box : (a : bare) -> Repr a;
+
+repr_Boxed : (a : bare) -> Repr (Boxed a);
+repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
+repr_Stream : (sh : bare) -> (a : bare) -> Repr (Stream sh a);
+
+-- Representation of a referenced object that contains nothing and will
+-- never be accessed.  At runtime, the reference will be an arbitrary pointer,
+-- possibly NULL.
+repr_EmptyReference : (a : bare) -> Repr a;
+
+repr_array : (n : intindex) -> (e : bare)
+          -> IndexedInt n -> Repr e -> Repr (array n e);
+
+repr_EffTok : Repr (Stored EffTok);
+
+OpaqueTraversableDict_list : TraversableDict list;
+
+TraversableDict_Stream_build :
+    (t : bare -> bare) -> (a : bare)
+ -> Repr a -> Stream (shape t) a -> Stream (shape t) a;
+
+TraversableDict_Stream_traverse :
+    (t : bare -> bare) -> (a : bare)
+ -> Repr a -> Stream (shape t) a -> Stream (shape t) a;
+
+TraversableDict_list_build :
+  (a : bare) -> Repr a -> Stream list_shape a -> write (list a);
+
+TraversableDict_list_traverse :
+  (a : bare) -> Repr a -> list a -> Stream list_shape a;
+
+-------------------------------------------------------------------------------
+-- Comparison dictionaries
+
+EqDict_int_eq : int -> int -> bool;
+EqDict_int_ne : int -> int -> bool;
+
+EqDict_float_eq : float -> float -> bool;
+EqDict_float_ne : float -> float -> bool;
+
+OrdDict_int_lt : int -> int -> bool;
+OrdDict_int_le : int -> int -> bool;
+OrdDict_int_gt : int -> int -> bool;
+OrdDict_int_ge : int -> int -> bool;
+
+OrdDict_float_lt : float -> float -> bool;
+OrdDict_float_le : float -> float -> bool;
+OrdDict_float_gt : float -> float -> bool;
+OrdDict_float_ge : float -> float -> bool;
+
+-------------------------------------------------------------------------------
+-- Numeric dictionaries
+
+AdditiveDict_int_add : int -> int -> int;
+AdditiveDict_int_sub : int -> int -> int;
+AdditiveDict_int_negate : int -> int;
+AdditiveDict_int_zero : int;
+
+AdditiveDict_float_add : float -> float -> float;
+AdditiveDict_float_sub : float -> float -> float;
+AdditiveDict_float_negate : float -> float;
+AdditiveDict_float_zero : float;
+
+AdditiveDict_Complex_add :
+    (a : bare)
+ -> Repr a
+ -> AdditiveDict a
+ -> Complex a
+ -> Complex a
+ -> write (Complex a);
+AdditiveDict_Complex_sub :
+    (a : bare)
+ -> Repr a
+ -> AdditiveDict a
+ -> Complex a
+ -> Complex a
+ -> write (Complex a);
+AdditiveDict_Complex_negate :
+    (a : bare)
+ -> Repr a
+ -> AdditiveDict a
+ -> Complex a
+ -> write (Complex a);
+AdditiveDict_Complex_zero :
+    (a : bare)
+ -> Repr a
+ -> AdditiveDict a
+ -> write (Complex a);
+
+
+MultiplicativeDict_int_mul : int -> int -> int;
+MultiplicativeDict_int_fromInt : int -> int;
+
+MultiplicativeDict_float_mul : float -> float -> float;
+MultiplicativeDict_float_fromInt : int -> float;
+
+MultiplicativeDict_Complex_mul :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> Complex a
+ -> Complex a
+ -> write (Complex a);
+MultiplicativeDict_Complex_fromInt :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> int
+ -> write (Complex a);
+MultiplicativeDict_Complex_one :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> write (Complex a);
+
+
+RemainderDict_int_floordiv : int -> int -> int;
+RemainderDict_int_mod : int -> int -> int;
+
+RemainderDict_float_floordiv : float -> float -> int;
+RemainderDict_float_mod : float -> float -> float;
+
+
+FractionalDict_float_div : float -> float -> float;
+
+FractionalDict_Complex_div :
+    (a : bare)
+ -> Repr a
+ -> FractionalDict a
+ -> Complex a
+ -> Complex a
+ -> write (Complex a);
+
+
+FloatingDict_float_fromfloat : float -> float;
+FloatingDict_float_power : float -> float -> float;
+FloatingDict_float_exp : float -> float;
+FloatingDict_float_log : float -> float;
+FloatingDict_float_sqrt : float -> float;
+FloatingDict_float_sin : float -> float;
+FloatingDict_float_cos : float -> float;
+FloatingDict_float_tan : float -> float;
+FloatingDict_float_pi : float;
+
+FloatingDict_Complex_fromfloat :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> FloatingDict a
+ -> float
+ -> write (Complex a);
+FloatingDict_Complex_power :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> FloatingDict a
+ -> Complex a
+ -> Complex a
+ -> write (Complex a);
+FloatingDict_Complex_exp :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> FloatingDict a
+ -> Complex a
+ -> write (Complex a);
+FloatingDict_Complex_log :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> FloatingDict a
+ -> Complex a
+ -> write (Complex a);
+FloatingDict_Complex_sqrt :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> Complex a
+ -> write (Complex a);
+FloatingDict_Complex_sin :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> FloatingDict a
+ -> Complex a
+ -> write (Complex a);
+FloatingDict_Complex_cos :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> FloatingDict a
+ -> Complex a
+ -> write (Complex a);
+FloatingDict_Complex_tan :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> FloatingDict a
+ -> Complex a
+ -> write (Complex a);
+FloatingDict_Complex_pi :
+    (a : bare)
+ -> Repr a
+ -> MultiplicativeDict a
+ -> FractionalDict a
+ -> FloatingDict a
+ -> write (Complex a);
+
+
+VectorDict_float_scale : float -> float -> float;
+VectorDict_float_magnitude : float -> float;
+VectorDict_float_dot : float -> float -> float;
+
+VectorDict_Complex_scale :
+    (a : bare)
+ -> Repr a
+ -> VectorDict a
+ -> Complex a
+ -> float
+ -> write (Complex a);
+
+VectorDict_Complex_magnitude :
+    (a : bare)
+ -> Repr a
+ -> VectorDict a
+ -> Complex a
+ -> float;
+
+VectorDict_Complex_dot :
+    (a : bare)
+ -> Repr a
+ -> VectorDict a
+ -> Complex a
+ -> Complex a
+ -> float;
+
+-------------------------------------------------------------------------------
+-- other arithmetic
+
+or : bool -> bool -> bool;
+and : bool -> bool -> bool;
+
+-------------------------------------------------------------------------------
+-- integer index arithmetic
+
+-- Promote an integer to a type index
+defineIntIndex : int -> SomeIndexedInt;
+
+type pos_infty : intindex;
+type plus_i : intindex -> intindex -> intindex;
+type minus_i : intindex -> intindex -> intindex;
+type min_i : intindex -> intindex -> intindex;
+
+zero_ii : IndexedInt 0;
+one_ii : IndexedInt 1;
+plus_ii : (m n : intindex)
+       -> IndexedInt m
+       -> IndexedInt n
+       -> IndexedInt (plus_i m n);
+
+minus_ii : (m n : intindex)
+        -> IndexedInt m
+        -> IndexedInt n
+        -> IndexedInt (minus_i m n);
+
+min_ii : (m n : intindex)
+      -> IndexedInt m
+      -> IndexedInt n
+      -> IndexedInt (min_i m n);
+
+-------------------------------------------------------------------------------
+-- Other functions
+
+-- A dummy boxed object that is used as a placeholder for a dead value.
+deadBox : (a : box) -> a;
+
+-- A dummy referenced object that is used as a placeholder for a dead value.
+deadRef : (a : bare) -> a;
+
+oper_DO : (a : bare) -> Repr a -> write a -> Stream list_shape a;
+
+oper_GUARD : (a : bare)
+          -> Repr a -> bool
+	  -> Stream list_shape a
+	  -> Stream list_shape a;
+
+-- An empty stream
+oper_EMPTY : (a : bare) -> Repr a -> Stream list_shape a;
+
+oper_CAT_MAP :
+    (a b : bare) -> Repr a -> Repr b
+ -> Stream list_shape a
+ -> (a -> Stream list_shape b)
+ -> Stream list_shape b;
+
+-- Sequential fold over a stream
+fun_fold_Stream : (a acc : bare)
+               -> Repr a
+               -> Repr acc
+               -> (acc -> a -> write acc)
+               -> acc
+               -> Stream list_shape a
+               -> write acc;
+
+-- Reinterpret a stream as having list shape
+fun_asList_Stream : (sh a : bare)
+                 -> Stream sh a
+                 -> Stream list_shape a;
+
+fun_map_Stream : (sh a b : bare)
+       	      -> Repr a
+       	      -> Repr b
+       	      -> (a -> write b)
+       	      -> Stream sh a
+       	      -> Stream sh b;
+
+fun_map : (t : bare -> bare)
+       -> (a b : bare)
+       -> TraversableDict t
+       -> Repr a
+       -> Repr b
+       -> (a -> write b)
+       -> t a
+       -> write (t b);
+
+fun_reduce_Stream : (sh a : bare)
+          	 -> Repr a
+          	 -> (a -> a -> write a)
+	  	 -> a
+          	 -> Stream sh a
+          	 -> write a;
+
+fun_reduce : (t : bare -> bare)
+          -> (a : bare)
+          -> TraversableDict t
+          -> Repr a
+          -> (a -> a -> write a)
+	  -> a
+          -> t a
+          -> write a;
+
+fun_reduce1_Stream : (sh a : bare)
+          	  -> Repr a
+          	  -> (a -> a -> write a)
+          	  -> Stream sh a
+          	  -> write a;
+
+fun_reduce1 : (t : bare -> bare)
+           -> (a : bare)
+           -> TraversableDict t
+           -> Repr a
+           -> (a -> a -> write a)
+           -> t a
+           -> write a;
+
+fun_zip_Stream : (sh a b : bare)
+       	      -> Repr a
+       	      -> Repr b
+       	      -> Stream sh a
+       	      -> Stream sh b
+       	      -> Stream sh (PyonTuple2 a b);
+
+fun_zip3_Stream : (sh a b c : bare)
+               -> Repr a
+               -> Repr b
+               -> Repr c
+               -> Stream sh a
+               -> Stream sh b
+               -> Stream sh c
+               -> Stream sh (PyonTuple3 a b c);
+
+fun_zip4_Stream : (sh a b c d : bare)
+               -> Repr a
+               -> Repr b
+               -> Repr c
+               -> Repr d
+               -> Stream sh a
+               -> Stream sh b
+               -> Stream sh c
+               -> Stream sh d
+               -> Stream sh (PyonTuple4 a b c d);
+
+zip_StreamArray : (sizeA sizeB : intindex)
+	       -> (a b : bare)
+               -> Repr a
+               -> Repr b
+               -> Stream (array_shape sizeA) a
+               -> Stream (array_shape sizeB) b
+               -> Stream (array_shape (min_i sizeA sizeB)) (PyonTuple2 a b);
+
+zip3_StreamArray :
+    (sizeA sizeB sizeC : intindex)
+ -> (a b c : bare)
+ -> Repr a
+ -> Repr b
+ -> Repr c
+ -> Stream (array_shape sizeA) a
+ -> Stream (array_shape sizeB) b
+ -> Stream (array_shape sizeC) c
+ -> Stream (array_shape (min_i (min_i sizeA sizeB) sizeC)) (PyonTuple3 a b c);
+
+zip4_StreamArray :
+    (sizeA sizeB sizeC sizeD : intindex)
+ -> (a b c d : bare)
+ -> Repr a
+ -> Repr b
+ -> Repr c
+ -> Repr d
+ -> Stream (array_shape sizeA) a
+ -> Stream (array_shape sizeB) b
+ -> Stream (array_shape sizeC) c
+ -> Stream (array_shape sizeD) d
+ -> Stream (array_shape (min_i (min_i (min_i sizeA sizeB) sizeC) sizeD)) (PyonTuple4 a b c d);
+
+fun_zip : (t : bare -> bare)
+       -> (a b : bare)
+       -> TraversableDict t
+       -> Repr a
+       -> Repr b
+       -> t a
+       -> t b
+       -> write (t (PyonTuple2 a b));
+
+fun_zip3 : (t : bare -> bare)
+        -> (a b c : bare)
+        -> TraversableDict t
+        -> Repr a
+        -> Repr b
+        -> Repr c
+        -> t a
+        -> t b
+        -> t c
+        -> write (t (PyonTuple3 a b c));
+
+fun_zip4 : (t : bare -> bare)
+        -> (a b c d : bare)
+        -> TraversableDict t
+        -> Repr a
+        -> Repr b
+        -> Repr c
+        -> Repr d
+        -> t a
+        -> t b
+        -> t c
+        -> t d
+        -> write (t (PyonTuple4 a b c d));
+
+count : Stream list_shape (Stored int);
+
+range : int -> Stream list_shape (Stored int);
+
+len : (a : bare) -> list a -> int;
+
+{-
+-- A type-indexed version of 'range'
+rangeIndexed : (val n : intindex)
+            -> val IndexedInt n
+            -> box Stream (array_shape n) int;
+
+histogram : (val t : val pure -> val pure)
+         -> val int
+         -> box Stream (shape t) int
+         -> write list int;
+
+histogramArray : (val sh : pure)
+              -> (val n : intindex)
+              -> val IndexedInt n
+              -> box Stream sh int
+              -> write array n int;
+
+-- Low-level function for imperatively initializing an histogram
+createHistogram :
+    (val n : intindex)
+ -> val IndexedInt n
+ -> box (box (val int -> write EffTok) -> read EffTok -> write EffTok)
+ -> write array n int;
+
+generate : (val n : intindex)
+        -> (val a : pure)
+        -> val IndexedInt n
+        -> box Repr a
+        -> box (val int -> write a)
+        -> box Stream (array_shape n) a;
+
+generate_forever : (val a : pure)
+                -> box Repr a
+                -> box (val int -> write a)
+                -> box Stream (array_shape pos_infty) a;
+
+safeSubscript : (val a : pure)
+             -> box Repr a
+             -> read list a
+             -> val int
+             -> write a;
+
+subscript : (val n : intindex)
+         -> (val a : pure)
+         -> box Repr a
+         -> read array n a
+         -> val int
+         -> read a;
+
+-- Like subscript, but modifies an output pointer
+subscript_out : (val n : intindex)
+             -> (val a : pure)
+             -> box Repr a
+             -> out array n a
+             -> val int
+             -> out a;
+
+-- Parallelizable loop
+doall : (val n : intindex)
+     -> (val a : pure)
+     -> (val b : pure)
+     -> val IndexedInt n
+     -> box (val int -> sideeffect b)
+     -> sideeffect a;
+
+-- Sequential loop
+for : (val n : intindex)
+   -> (val acc : pure)
+   -> box Repr acc
+   -> val IndexedInt n
+   -> read acc
+   -> box (val int -> read acc -> write acc)
+   -> write acc;
+
+-- Blocked parallel reduction
+blocked_reduce :
+    (val acc : pure)
+ -> (val n : intindex)
+ -> box Repr acc
+ -> val IndexedInt n		-- Size of range
+ -> val int			-- First member of range
+ -> box (read acc -> read acc -> write acc) -- Reducer
+ -> read acc			-- Initial value
+ -> box ((val n : intindex) -> val IndexedInt n -> val int -> write acc)
+    -- ^ Generate value given range
+ -> write acc;
+
+-- Blocked parallel reduction with no neutral element
+blocked_reduce1 :
+    (val acc : pure)
+ -> (val n : intindex)
+ -> box Repr acc
+ -> val IndexedInt n		-- Size of range
+ -> val int			-- First member of range
+ -> box (read acc -> read acc -> write acc) -- Reducer
+ -> box ((val n : intindex) -> val IndexedInt n -> val int -> write acc)
+    -- ^ Generate value given range
+ -> write acc;
+
+-- Blocked parallel loop
+blocked_doall :
+    (val n : intindex)
+ -> (val a : pure)
+ -> (val b : pure)
+ -> val IndexedInt n
+ -> val int
+ -> box ((val n : intindex) -> val IndexedInt n -> val int -> sideeffect b)
+ -> sideeffect a;
+
+-}

@@ -41,6 +41,10 @@ module Type.Environment
         convertToMemParamType,
         convertToMemReturnType,
         convertToMemType,
+       
+        -- * New conversion routines
+        specToPureTypeEnv,
+        specToMemTypeEnv,
        )
 where
 
@@ -52,6 +56,7 @@ import qualified Data.IntMap as IntMap
 import Common.Error
 import Common.Identifier
 import Common.Supply
+import Builtins.Builtins
 import Type.Type
 
 -------------------------------------------------------------------------------
@@ -114,8 +119,10 @@ data TypeAssignment =
     }
     -- | Type of a data constructor
   | DataConTypeAssignment
-    { -- | Type of the data constructor when used as an operator 
-      varType :: !ReturnType
+    { -- | Type of the data constructor when used as an operator.
+      --   This field will eventually be removed, and the type computed
+      --   on demand instead.
+      varType :: ReturnType
 
     , dataConType :: !DataConType
     }
@@ -196,7 +203,13 @@ wiredInTypeEnv :: TypeEnv
 wiredInTypeEnv =
   TypeEnv $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- entries]
   where
-    entries = [(pureV, VarTypeAssignment (ValRT ::: VarT kindV))]
+    entries = [(pureV, VarTypeAssignment (ValRT ::: kindT)),
+               (intindexV, VarTypeAssignment (ValRT ::: kindT)),
+               (valV, VarTypeAssignment (ValRT ::: kindT)),
+               (boxV, VarTypeAssignment (ValRT ::: kindT)),
+               (bareV, VarTypeAssignment (ValRT ::: kindT)),
+               (outV, VarTypeAssignment (ValRT ::: kindT)),
+               (posInftyV, VarTypeAssignment (ValRT ::: intindexT))]
 
 -- | Insert a variable type assignment
 insertType :: Var -> ReturnRepr ::: Type -> TypeEnv -> TypeEnv
@@ -363,3 +376,109 @@ convertToMemDataConType (DataConType params eparams args range con ty_con) =
               (convertToMemReturnType range)
               con
               ty_con
+              
+-------------------------------------------------------------------------------
+
+mapBinding f (x ::: t) = x ::: f t
+
+specToPureTypeEnv :: TypeEnv -> TypeEnv
+specToPureTypeEnv (TypeEnv m) =
+  TypeEnv (IntMap.map specToPureTypeAssignment m)
+
+specToPureTypeAssignment ass =
+  case ass
+  of VarTypeAssignment rt ->
+       VarTypeAssignment (mapBinding specToPureType rt)
+     TyConTypeAssignment rt cons ->
+       TyConTypeAssignment (mapBinding specToPureType rt) cons
+     DataConTypeAssignment _ con_type ->
+       DataConTypeAssignment undef_type (specToPureDataConType con_type)
+     TyFunTypeAssignment rt f ->
+       TyFunTypeAssignment (mapBinding specToPureType rt) f
+  where
+    undef_type =
+      internalError "specToPureTypeAssignment: Data constructor type is not used"
+
+specToPureType ty =
+  case fromVarApp ty
+  of Just (con, [arg])
+       -- Adapter types are ignored in the pure representation. 
+       -- Remove applications of 'write', 'Stored', and 'Boxed'.
+       | con `isPyonBuiltin` the_write || 
+         con `isPyonBuiltin` the_Stored ||
+         con `isPyonBuiltin` the_Boxed ->
+           specToPureType arg
+       
+     -- Recurse on other types
+     _ -> case ty
+          of VarT _ -> ty
+             AppT op arg -> AppT (specToPureType op) (specToPureType arg)
+             FunT arg ret -> FunT (mapBinding specToPureType arg) (mapBinding specToPureType ret)
+             AnyT _ -> ty
+             IntT _ -> ty
+
+specToPureDataConType dcon_type =
+  DataConType
+  { dataConPatternParams  = map type_param $ dataConPatternParams dcon_type
+  , dataConPatternExTypes = map type_param $ dataConPatternExTypes dcon_type
+  , dataConPatternArgs    = map field $ dataConPatternArgs dcon_type
+  , dataConPatternRange   = case dataConPatternRange dcon_type
+                            of ValRT ::: t -> ValRT ::: specToPureType t
+  , dataConCon            = dataConCon dcon_type
+  , dataConTyCon          = dataConTyCon dcon_type
+  }
+  where
+    type_param (ValPT (Just v) ::: t) = ValPT (Just v) ::: specToPureType t
+    field (ValRT ::: t) = ValRT ::: specToPureType t
+
+specToMemTypeEnv :: TypeEnv -> TypeEnv
+specToMemTypeEnv (TypeEnv m) =
+  TypeEnv (IntMap.map specToMemTypeAssignment m)
+
+specToMemTypeAssignment ass =
+  case ass
+  of VarTypeAssignment rt ->
+       VarTypeAssignment (mapBinding specToMemType rt)
+     TyConTypeAssignment rt cons ->
+       TyConTypeAssignment (mapBinding specToMemType rt) cons
+     DataConTypeAssignment _ con_type ->
+       DataConTypeAssignment undef_type (specToMemDataConType con_type)
+     TyFunTypeAssignment rt f ->
+       TyFunTypeAssignment (mapBinding specToMemType rt) f
+  where
+    undef_type =
+      internalError "specToMemTypeAssignment: Data constructor type is not used"
+
+specToMemType ty =
+  case fromVarApp ty
+  of Just (con, [arg])
+       -- Replace applications of 'write' by initializer functions.
+       | con `isPyonBuiltin` the_write ->
+           let mem_arg = specToMemType arg
+           in initializerType mem_arg
+       
+     -- Recurse on other types
+     _ -> case ty
+          of VarT _ -> ty
+             AppT op arg -> AppT (specToMemType op) (specToMemType arg)
+             FunT arg ret -> FunT (mapBinding specToMemType arg) (mapBinding specToMemType ret)
+             AnyT _ -> ty
+             IntT _ -> ty
+
+specToMemDataConType dcon_type =
+  DataConType
+  { dataConPatternParams  = map type_param $ dataConPatternParams dcon_type
+  , dataConPatternExTypes = map type_param $ dataConPatternExTypes dcon_type
+  , dataConPatternArgs    = map field $ dataConPatternArgs dcon_type
+  , dataConPatternRange   = case dataConPatternRange dcon_type
+                            of ValRT ::: t -> ValRT ::: specToMemType t
+  , dataConCon            = dataConCon dcon_type
+  , dataConTyCon          = dataConTyCon dcon_type
+  }
+  where
+    type_param (ValPT (Just v) ::: t) = ValPT (Just v) ::: specToMemType t
+    field (ValRT ::: t) = ValRT ::: specToMemType t
+
+initializerType t =
+  FunT (ValPT Nothing ::: varApp (pyonBuiltin the_OutPtr) [t])
+       (ValRT ::: varApp (pyonBuiltin the_IEffect) [t])

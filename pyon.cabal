@@ -12,6 +12,7 @@ Tested-With:	GHC == 6.12.1, GHC == 6.12.3
 Data-Dir:	dist/build/data
 Data-Files:
   symbols/coretypes
+  symbols/coretypes2
   include/pyon.h
   include/pyon_list.h
   interfaces/memory_py.pi
@@ -110,6 +111,7 @@ Executable pyon
     SystemF.Print
     SystemF.PrintMemoryIR
     SystemF.Representation
+    SystemF.ReprInference
     SystemF.Rename
     SystemF.ReprDict
     SystemF.Rewrite
@@ -129,6 +131,13 @@ Executable pyon
     CParser.Pretty
     CParser.PrettyAST
     CParser.Resolve
+    CParser2.AST
+    CParser2.Driver
+    CParser2.GenCore
+    CParser2.LexData
+    CParser2.Lexer
+    CParser2.Parser
+    CParser2.Resolve
     LLParser.AST
     LLParser.LexCode
     LLParser.Lexer

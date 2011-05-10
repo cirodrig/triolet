@@ -34,6 +34,7 @@ import qualified SystemF.Simplify as SystemF
 import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified SystemF.MemoryIR as SystemF
+import qualified SystemF.ReprInference as SystemF
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.OutputPassing as SystemF
@@ -171,9 +172,13 @@ compilePyonToPyonAsm compile_flags path text = do
 
   -- Convert to explicit memory representation
   tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
+  
+  print ""
+  print "Generating memory IR"
+  SystemF.representationInference sf_mod
   print "Generating memory IR"
   mem_mod <- SystemF.generateMemoryIR tc_mod
-
+  
   putStrLn "Memory"
   print $ SystemF.PrintMemoryIR.pprModule mem_mod
   

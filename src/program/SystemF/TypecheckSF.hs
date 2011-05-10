@@ -15,6 +15,7 @@ module SystemF.TypecheckSF
         TypTSF, ExpTSF, AltTSF, FunTSF, PatTSF,
         fromTypTSF,
         functionType,
+        functionTypeNew,
         typeCheckModule)
 where
 
@@ -117,6 +118,17 @@ functionType (FunSF (Fun { funTyParams = ty_params
       ret_repr = ValRT ::: ret
   in pureFunType (ty_param_reprs ++ param_reprs) ret_repr
       
+functionTypeNew :: FunSF -> Type 
+functionTypeNew (FunSF (Fun { funTyParams = ty_params
+                         , funParams = params
+                         , funReturn = RetSF ret
+                         })) =
+  let ty_param_reprs = [(v, k) | TyPatSF v k <- ty_params]
+      param_reprs = [ValPT Nothing ::: patType p | p <- params]
+      ret_repr = ValRT ::: ret
+  in forallFunType ty_param_reprs $
+     pureFunType param_reprs ret_repr
+
 -------------------------------------------------------------------------------
 
 applyPureType :: Type -> Type -> Maybe Type -> TCM (Maybe Type)

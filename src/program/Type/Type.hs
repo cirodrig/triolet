@@ -20,11 +20,12 @@ module Type.Type(module Type.Var,
                  typeApp, varApp,
                  fromTypeApp, fromVarApp,
                  pureFunType, funType,
+                 forallFunType,
                  fromFunType, fromPureFunType,
 
                  -- * Predefined types
-                 kindT, pureT, intindexT, posInftyT,
-                 kindV, pureV, intindexV, posInftyV,
+                 kindT, pureT, intindexT, valT, boxT, bareT, outT, posInftyT,
+                 kindV, pureV, intindexV, valV, boxV, bareV, outV, posInftyV,
                  firstAvailableVarID,
 
                  -- * Pretty-printing
@@ -47,13 +48,22 @@ data Type =
     VarT Var
     -- | A type application
   | AppT Type Type
-    -- | A function type
+    -- | A type function
+  | LamT Var Type ReturnType
+    -- | A function type.
+    --
+    --   Eventually this constructor will be simplified to @FunT Type Type@.
   | FunT !ParamType !ReturnType
+    -- | A universal quantifier
+  | AllT Var Type !ReturnType
     -- | An arbitrary, opaque type inhabiting the given kind.  The kind has
     --   no free type variables.
   | AnyT Type
     -- | An integer type index.  These inhabit kind 'intIndexT'.
   | IntT !Integer
+
+infixr 4 `FunT`
+infixl 7 `AppT`
 
 type ParamType = ParamRepr ::: Type
 type ReturnType = ReturnRepr ::: Type
@@ -85,6 +95,11 @@ constructFunctionType repr ps ret = go ps
   where
     go [p]    = FunT p ret
     go (p:ps) = FunT p (repr ::: go ps)
+
+forallFunType :: [(Var, Type)] -> Type -> Type
+forallFunType args ret = foldr fa ret args
+  where
+    fa (v, t) ret = AllT v t (ValRT ::: ret)
 
 fromPureFunType, fromFunType :: Type -> ([ParamType], ReturnType)
 fromPureFunType = deconstructFunctionType ValRT
@@ -205,26 +220,39 @@ instance HasLevel Var => HasLevel Type where
   getLevel (VarT v) = getLevel v
   getLevel (AppT op _) = getLevel op
   getLevel (FunT _ (_ ::: rng)) = getLevel rng
+  getLevel (LamT _ _ (_ ::: body)) = getLevel body
   getLevel (AnyT _) = TypeLevel
   getLevel (IntT _) = TypeLevel
 
-kindT, pureT, intindexT, posInftyT :: Type
+kindT, pureT, intindexT, valT, boxT, bareT, posInftyT :: Type
 kindT = VarT kindV
 pureT = VarT pureV
 intindexT = VarT intindexV
+valT = VarT valV
+boxT = VarT boxV
+bareT = VarT bareV
+outT = VarT outV
 posInftyT = VarT posInftyV      -- Positive infinity
 
-kindV, pureV, intindexV, posInftyV :: Var
+kindV, pureV, intindexV, valV, boxV, bareV, posInftyV :: Var
 
 kindV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "kind") SortLevel
-pureV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "pure") KindLevel
-intindexV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
-posInftyV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "pos_infty") TypeLevel
+pureV = mkVar pureVarID (Just $ pyonLabel builtinModuleName "pure") KindLevel
+intindexV = mkVar intindexVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
+valV = mkVar valVarID (Just $ pyonLabel builtinModuleName "val") KindLevel
+boxV = mkVar boxVarID (Just $ pyonLabel builtinModuleName "box") KindLevel
+bareV = mkVar bareVarID (Just $ pyonLabel builtinModuleName "bare") KindLevel
+outV = mkVar outVarID (Just $ pyonLabel builtinModuleName "out") KindLevel
+posInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "pos_infty") TypeLevel
 
 kindVarID = toIdent 1
 pureVarID = toIdent 2
 intindexVarID = toIdent 3
-posInftyVarID = toIdent 4
+valVarID = toIdent 4
+boxVarID = toIdent 5
+bareVarID = toIdent 6
+outVarID = toIdent 8
+posInftyVarID = toIdent 9
 
 -- | The first variable ID that's not reserved for predefined variables
 firstAvailableVarID :: VarID
@@ -278,13 +306,31 @@ pprTypePrec ty =
   case ty
   of VarT v -> hasAtomicPrec $ pprVar v
      AppT op arg -> ppr_app op [arg] `hasPrec` appPrec
+     LamT v dom (_ ::: body) -> ppr_lam [(v, dom)] body `hasPrec` lamPrec
      FunT arg ret -> pprFunType Nothing ty
+     AllT v dom (_ ::: rng) -> ppr_all [(v, dom)] rng `hasPrec` lamPrec
      AnyT k -> text "Any :" <+> pprTypePrec k ?+ typeAnnPrec `hasPrec` typeAnnPrec
      IntT n -> hasAtomicPrec $ text (show n)
   where
     -- Uncurry the application
     ppr_app (AppT op' arg') args = ppr_app op' (arg':args)
     ppr_app op' args = sep [pprTypePrec t ?+ appPrec | t <- op' : args]
+    
+    -- Uncurry the lambda abstraction.  Uncurrying builds the parameter list
+    -- in reverse order, so we reverse it again.
+    ppr_lam params (LamT v dom (_ ::: body)) = ppr_lam ((v, dom) : params) body
+    ppr_lam params e =
+      hang (text "lambda" <+> sep (map ppr_binder $ reverse params) <> text ".") 4
+      (pprTypePrec e ? lamPrec)
+
+    ppr_binder (v, t) =
+      parens $ pprVar v <+> text ":" <+> pprTypePrec t ?+ typeAnnPrec
+
+    -- Uncurry the type abstraction.
+    ppr_all params (AllT v dom (_ ::: rng)) = ppr_all ((v, dom) : params) rng
+    ppr_all params e =
+      hang (text "forall" <+> sep (map ppr_binder $ reverse params) <> text ".") 4
+      (pprTypePrec e ? lamPrec)
 
 -- | Pretty-print a type with an implicit representation.  The implicit
 --   representation is used when printing function types.

@@ -26,17 +26,31 @@ pyonBuiltinTypeNames =
   , "UnboxedTuple5"
   , "UnboxedTuple6"
   , "Stream"
-  , "Boxed"
-  , "Referenced"
   , "IndexedInt"
   , "SomeIndexedInt"
   , "array"
   , "EffTok"
     
+    -- Representation coercions
+  , "Stored"
+  , "StoredBox"
+  , "Boxed"
+  , "Referenced"
+  , "OutPtr"
+  , "IEffect"
+  , "write"
+  , "BoxedType"
+  , "BareType"
+    
     -- Shape-related types
   , "shape"
   , "list_shape"
   , "array_shape"
+
+    -- Integer type indices
+  , "plus_i"
+  , "minus_i"
+  , "min_i"
 
     -- Dictionary types
   , "Repr"
@@ -67,6 +81,8 @@ pyonBuiltinVariableNames =
   , "unboxedTuple4"
   , "unboxedTuple5"
   , "unboxedTuple6"
+  , "stored"
+  , "storedBox"
   , "boxed"
   , "referenced"
   , "indexedInt"
@@ -193,9 +209,6 @@ pyonBuiltinVariableNames =
   , "VectorDict_Complex_dot"
 
     -- Integer index arithmetic 
-  , "plus_i"
-  , "minus_i"
-  , "min_i"
   , "zero_ii"
   , "one_ii"
   , "plus_ii"
@@ -235,6 +248,9 @@ pyonBuiltinVariableNames =
   , "fun_zip_Stream"
   , "fun_zip3_Stream"
   , "fun_zip4_Stream"
+  , "zip_StreamArray"
+  , "zip3_StreamArray"
+  , "zip4_StreamArray"
   , "fun_asList_Stream"
   , "histogramArray"
     
@@ -256,6 +272,7 @@ pyonBuiltinVariableNames =
   , "defineIntIndex"
   , "rangeIndexed"
   , "generate"
+  , "generate_forever"
   , "subscript"
   , "subscript_out"
   , "doall"

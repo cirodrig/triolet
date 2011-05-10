@@ -112,7 +112,7 @@ instance Supplies NR (Ident Var) where
   fresh = NR (\env e -> do
     s <- supplyValue (varIDSupply env)
     returnNR s e)
-  supplyToST = undefined -- Raises warning if not provided
+  supplyToST = internalError "(NR (Ident Var)).supplyToST: Not implemented"
 
 -- | Get the current module's name.
 getModuleName :: NR ModuleName

@@ -1,6 +1,7 @@
 
 module Type.Eval
        (reduceToWhnf,
+        typeKind,
         typeOfApp,
         instantiateDataConType,
         instantiateDataConTypeWithFreshVariables,
@@ -18,6 +19,40 @@ import Type.Compare
 import Type.Environment
 import Type.Rename
 import Type.Type
+
+-- | Get the kind of a type.  The argument is assumed to be a type. 
+--   Minimal error checking is performed.
+typeKind :: TypeEnv -> Type -> Type
+typeKind tenv ty =
+  case ty
+  of VarT v ->
+       case lookupType v tenv
+       of Just (ValRT ::: k) -> k
+          _ -> internalError "typeKind: No type for variable"
+     IntT _ -> intindexT
+     AppT op _ ->
+       -- Assume the application is properly typed.  Add actual
+       -- argument to environment.
+       case op
+       of VarT v ->
+            case lookupType v tenv
+            of Just (ValRT ::: (_ `FunT` ValRT ::: rng)) ->
+                 typeKind tenv rng
+               _ -> internalError "typeKind: no type for variable"
+          LamT x dom (ValRT ::: rng) ->
+            typeKind (insertType x (ValRT ::: dom) tenv) rng
+          _ -> internalError "typeKind: Malformed application"
+     LamT x param_k (ValRT ::: ret_t) ->
+       -- A lambda function has an arrow kind
+       let ret_k = typeKind (insertType x (ValRT ::: param_k) tenv) ret_t
+       in ValPT Nothing ::: param_k `FunT` ValRT ::: ret_k
+     FunT _ _ ->
+       -- Functions are always boxed
+       boxT
+     AllT _ _ _ ->
+       -- Forall'd types are always boxed
+       boxT
+     _ -> internalError "typeKind: Unrecognized type"
 
 -- | Compute the type produced by applying a value of type @op_type@ to
 --   a value of type @arg_type@.

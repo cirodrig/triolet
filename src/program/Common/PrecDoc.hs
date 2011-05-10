@@ -3,7 +3,7 @@
 
 module Common.PrecDoc
        (Prec(..),
-        outerPrec, stmtPrec, typeAnnPrec, funPrec, appPrec, atomicPrec,
+        outerPrec, stmtPrec, typeAnnPrec, lamPrec, funPrec, appPrec, atomicPrec,
         PrecDoc,
         hasPrec, hasAtomicPrec,
         precedence,
@@ -34,9 +34,13 @@ stmtPrec = Prec 0
 typeAnnPrec :: Prec
 typeAnnPrec = Prec 4
 
+-- | The precedence of a type function
+lamPrec :: Prec
+lamPrec = Prec 5
+
 -- | The precedence of a function type
 funPrec :: Prec
-funPrec = Prec 5
+funPrec = Prec 6
 
 -- | The precedence of function application
 appPrec :: Prec
