@@ -1,6 +1,7 @@
 
 module SystemF.Rewrite
        (RewriteRuleSet,
+        getVariableReplacements,
         generalRewrites,
         parallelizingRewrites,
         sequentializingRewrites,
@@ -157,16 +158,37 @@ shapeOfType (TypM t) = TypM $ varApp (pyonBuiltin the_shape) [t]
 type RewriteRule = ExpInfo -> [TypM] -> [ExpM] -> TypeEvalM (Maybe ExpM)
 
 -- | A set of rewrite rules
-type RewriteRuleSet = Map.Map Var RewriteRule
+data RewriteRuleSet =
+  RewriteRuleSet
+  { -- | Rewrite rules for variable applications.  Given the variable and its
+    --   arguments, the rule tries to replace it with a simpler expression.
+    --
+    --   These rules are processed by 'rewriteApp'.
+    rewriteRules :: Map.Map Var RewriteRule
+
+    -- | Rewrite rules for variables.
+    --   Whenever the variable is seen, it is unconditionally replaced by the
+    --   expression.  These rules are processed by "SystemF.Simplify".
+  , rewriteVariables :: Map.Map Var ExpM
+  }
 
 -- | Combine multiple rule sets.  Rule sets earlier in the list take precedence
 --   over later ones.
 combineRuleSets :: [RewriteRuleSet] -> RewriteRuleSet
-combineRuleSets = Map.unions
+combineRuleSets rs =
+  RewriteRuleSet
+  (Map.unions $ map rewriteRules rs)
+  (Map.unions $ map rewriteVariables rs)
+
+-- | Get unconditional variable replacement rules.  For each
+--   (variable, expression) pair in the list, any occurrence of the variable 
+--   should be replaced by the corresponding expression.
+getVariableReplacements :: RewriteRuleSet -> [(Var, ExpM)]
+getVariableReplacements rs = Map.toList $ rewriteVariables rs
 
 -- | General-purpose rewrite rules that should always be applied
 generalRewrites :: RewriteRuleSet
-generalRewrites = Map.fromList table
+generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
   where
     table = [ (pyonBuiltin the_range, rwRange)
             , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
@@ -191,10 +213,32 @@ generalRewrites = Map.fromList table
             , (pyonBuiltin the_safeSubscript, rwSafeSubscript)
             ]
 
+    exprs = [ {- Disabled because the new function, 'generate_forever', 
+                 hasn't been written yet
+                 (pyonBuiltin the_count, count_expr) -} ]
+    
+    -- The following expression represents the "count" stream:
+    -- asList (array_shape pos_infty)
+    -- (generate_forever int repr_int (store int))
+    count_expr =
+      ExpM $ AppE defaultExpInfo as_list [TypM array_shape, TypM intType]
+      [generate_expr]
+      where
+        as_list =
+          ExpM $ VarE defaultExpInfo (pyonBuiltin the_fun_asList_Stream)
+        generate_f =
+          ExpM $ VarE defaultExpInfo (pyonBuiltin the_generate_forever)
+
+        array_shape = varApp (pyonBuiltin the_array_shape) [posInftyT]
+        generate_expr =
+          ExpM $ AppE defaultExpInfo generate_f [TypM intType]
+          [ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int),
+           ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo (pyonBuiltin the_store)) [TypM intType] []]
+
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.
 parallelizingRewrites :: RewriteRuleSet
-parallelizingRewrites = Map.fromList table
+parallelizingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
   where
     table = [ (pyonBuiltin the_fun_reduce_Stream, rwParallelReduceStream)
             , (pyonBuiltin the_fun_reduce1_Stream, rwParallelReduce1Stream)
@@ -206,7 +250,7 @@ parallelizingRewrites = Map.fromList table
 --   sequential algorithms.  The sequential algorithms are more efficient.
 --   These rules should be applied after outer loops are parallelized.
 sequentializingRewrites :: RewriteRuleSet
-sequentializingRewrites = Map.fromList table
+sequentializingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
   where
     table = [ (pyonBuiltin the_histogramArray, rwHistogramArray)
             , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
@@ -223,7 +267,7 @@ rewriteApp :: RewriteRuleSet
            -> ExpInfo -> Var -> [TypM] -> [ExpM]
            -> TypeEvalM (Maybe ExpM)
 rewriteApp ruleset inf op_var ty_args args =
-  case Map.lookup op_var ruleset
+  case Map.lookup op_var $ rewriteRules ruleset
   of Just rw -> trace_rewrite $ rw inf ty_args args
      Nothing -> return Nothing
   where

@@ -783,6 +783,50 @@ fun_zip4_Stream : (val sh : pure)
                -> box Stream sh d
                -> box Stream sh (PyonTuple4 a b c d);
 
+zip_StreamArray : (val sizeA : intindex)
+	       -> (val sizeB : intindex)
+	       -> (val a : pure)
+       	       -> (val b : pure)
+               -> box Repr a
+               -> box Repr b
+               -> box Stream (array_shape sizeA) a
+               -> box Stream (array_shape sizeB) b
+               -> box Stream (array_shape (min_i sizeA sizeB)) (PyonTuple2 a b);
+
+zip3_StreamArray :
+    (val sizeA : intindex)
+ -> (val sizeB : intindex)
+ -> (val sizeC : intindex)
+ -> (val a : pure)
+ -> (val b : pure)
+ -> (val c : pure)
+ -> box Repr a
+ -> box Repr b
+ -> box Repr c
+ -> box Stream (array_shape sizeA) a
+ -> box Stream (array_shape sizeB) b
+ -> box Stream (array_shape sizeC) c
+ -> box Stream (array_shape (min_i (min_i sizeA sizeB) sizeC)) (PyonTuple3 a b c);
+
+zip4_StreamArray :
+    (val sizeA : intindex)
+ -> (val sizeB : intindex)
+ -> (val sizeC : intindex)
+ -> (val sizeD : intindex)
+ -> (val a : pure)
+ -> (val b : pure)
+ -> (val c : pure)
+ -> (val d : pure)
+ -> box Repr a
+ -> box Repr b
+ -> box Repr c
+ -> box Repr d
+ -> box Stream (array_shape sizeA) a
+ -> box Stream (array_shape sizeB) b
+ -> box Stream (array_shape sizeC) c
+ -> box Stream (array_shape sizeD) d
+ -> box Stream (array_shape (min_i (min_i (min_i sizeA sizeB) sizeC) sizeD)) (PyonTuple4 a b c d);
+
 fun_zip : (val t : val pure -> val pure)
        -> (val a : pure)
        -> (val b : pure)
@@ -857,6 +901,11 @@ generate : (val n : intindex)
         -> box Repr a
         -> box (val int -> write a)
         -> box Stream (array_shape n) a;
+
+generate_forever : (val a : pure)
+                -> box Repr a
+                -> box (val int -> write a)
+                -> box Stream (array_shape pos_infty) a;
 
 safeSubscript : (val a : pure)
              -> box Repr a

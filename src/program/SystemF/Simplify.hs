@@ -1258,10 +1258,21 @@ rewriteLocalExpr ruleset mod =
   withTheNewVarIdentSupply $ \var_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
     (denv, ienv) <- runFreshVarM var_supply createDictEnv
+    
+    -- Take known data constructors from the type environment
     let global_known_values = initializeKnownValues tenv
+    
+    -- For each variable rewrite rule, create a known value that will be 
+    -- inlined in place of the variable.
+    let known_values = foldr insert_rewrite_rule global_known_values $
+                       getVariableReplacements ruleset
+          where
+            insert_rewrite_rule (v, e) m =
+              IntMap.insert (fromIdent $ varID v) (InlinedValue e) m
+
     let env = LREnv { lrIdSupply = var_supply
                     , lrRewriteRules = ruleset
-                    , lrKnownValues = global_known_values
+                    , lrKnownValues = known_values
                     , lrTypeEnv = tenv
                     , lrDictEnv = denv
                     , lrIntEnv = ienv
