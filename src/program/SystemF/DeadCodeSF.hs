@@ -130,13 +130,13 @@ edcDefGroup defgroup m =
 edcFun :: EDC FunSF
 edcFun (FunSF function@(Fun { funTyParams = tps
                             , funParams = ps
-                            , funReturn = RetSF return_type
+                            , funReturn = return_type
                             , funBody = body
                             })) = do
   (tps', (ps', b')) <-
     edcMaskTyPats tps $
     edcMaskPats ps $ do
-      edcScanType (TypSF return_type)
+      edcScanType return_type
       edcExp body
   return $ FunSF $ function {funTyParams = tps', funParams = ps', funBody = b'}
 

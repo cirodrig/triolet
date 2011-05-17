@@ -76,13 +76,12 @@ evFun :: Fun Untyped.TI -> IO FunSF
 evFun (Untyped.TIFun f) = do
   ty_params <- mapM evTyParam $ funTyParams f
   params <- mapM evPat $ funParams f
-  rt <- case funReturn f
-        of Untyped.TIRet t -> evType t
+  rt <- evType $ funReturn f
   body <- evExp $ funBody f
   return $ FunSF $ Fun { funInfo = funInfo f
                        , funTyParams = ty_params
                        , funParams = params
-                       , funReturn = RetSF rt
+                       , funReturn = TypSF rt
                        , funBody = body
                        }
 

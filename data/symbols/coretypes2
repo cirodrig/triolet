@@ -284,7 +284,7 @@ data array_shape : intindex -> bare {};
 
 copy : (a : bare) -> Repr a -> a -> Writer a;
 convertToBoxed : (a : bare) -> Repr a -> a -> BoxedType a;
-convertToBare : (a : bare) -> Repr a -> BoxedType a -> a;
+convertToBare : (a : bare) -> Repr a -> BoxedType a -> Writer a;
 
 repr_int : Repr (Stored int);
 repr_float : Repr (Stored float);

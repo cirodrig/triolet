@@ -13,6 +13,8 @@ builtinTypeFunctions :: Map.Map Var TypeFunction
 builtinTypeFunctions =
   Map.fromList
   [ (pyonBuiltin the_shape, shapeTF)
+  , (pyonBuiltin the_BoxedType, boxedTF)
+  , (pyonBuiltin the_BareType, bareTF)
   ]
 
 -- | Compute the shape of a data type
@@ -29,7 +31,7 @@ shapeTF = typeFunction 1 compute_shape
     simplify app_container_type container_type = do
       case fromVarApp app_container_type of
         Just (op, args)
-          | op `isPyonBuiltin` the_BareType ->
+          | op `isPyonBuiltin` the_Referenced ->
               case args
               of [arg] ->
                    case fromVarApp arg 
@@ -47,3 +49,57 @@ shapeTF = typeFunction 1 compute_shape
       where
         cannot_reduce =
           return $ varApp (pyonBuiltin the_shape) [container_type]
+
+-- | Compute the boxed representation of a data type
+boxedTF = typeFunction 1 compute_boxed
+  where
+    compute_boxed [arg_type] =
+      -- Evaluate and inspect the argument
+      eval =<< reduceToWhnf arg_type
+
+    eval arg =
+      case fromVarApp arg
+      of Just (op, args')
+           | op `isPyonBuiltin` the_BareType ->
+               -- BoxedType (BareType t)  =  t
+               case args'
+               of [arg'] -> reduceToWhnf arg'
+
+           | otherwise -> do
+               -- If the argument is a data constructor application, then
+               -- use 'Boxed' as the adapter type
+               tenv <- getTypeEnv
+               case lookupDataCon op tenv of
+                 Just _ -> return $ varApp (pyonBuiltin the_Boxed) [arg]
+                 _ -> cannot_reduce
+         _ -> cannot_reduce
+      where
+        cannot_reduce =
+          return $ varApp (pyonBuiltin the_BoxedType) [arg]
+          
+-- | Compute the bare representation of a type
+bareTF = typeFunction 1 compute_bare
+  where
+    compute_bare [arg_type] =
+      -- Evaluate and inspect the argument
+      eval =<< reduceToWhnf arg_type
+
+    eval arg =
+      case fromVarApp arg
+      of Just (op, args')
+           | op `isPyonBuiltin` the_BoxedType ->
+               -- BareType (BoxedType t)  =  t
+               case args'
+               of [arg'] -> reduceToWhnf arg'
+
+           | otherwise -> do
+               -- If the argument is a data constructor application, then
+               -- use 'Referenced' as the adapter type
+               tenv <- getTypeEnv
+               case lookupDataCon op tenv of
+                 Just _ -> return $ varApp (pyonBuiltin the_Referenced) [arg]
+                 _ -> cannot_reduce
+         _ -> cannot_reduce
+      where
+        cannot_reduce =
+          return $ varApp (pyonBuiltin the_BareType) [arg]

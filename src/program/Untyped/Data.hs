@@ -267,8 +267,6 @@ data instance SystemF.Pat TI =
 
 data instance SystemF.TyPat TI = TITyPat SystemF.Var TIType
 
-newtype instance SystemF.Ret TI = TIRet TIType
-
 newtype instance SystemF.Alt TI = TIAlt (SystemF.BaseAlt TI)
 newtype instance SystemF.Fun TI = TIFun (SystemF.BaseFun TI)
 

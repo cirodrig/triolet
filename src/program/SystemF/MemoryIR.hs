@@ -19,11 +19,10 @@ module SystemF.MemoryIR
         setPatMUses,
         patMDmd,
         setPatMDmd,
-        Ret(..),
         Exp(..),
         Alt(..),
         Fun(..),
-        TypM, PatM, TyPatM, RetM, ExpM, AltM, FunM,
+        TypM, PatM, TyPatM, ExpM, AltM, FunM,
         unpackVarAppM, unpackDataConAppM
        )
 where
@@ -147,7 +146,6 @@ setPatMDmd :: Dmd -> PatM -> PatM
 setPatMDmd m pat = pat {_patMUses = m}
 
 newtype instance TyPat Mem  = TyPatM Binder
-newtype instance Ret Mem = RetM {fromRetM :: Type}
 newtype instance Exp Mem = ExpM {fromExpM :: BaseExp Mem}
 newtype instance Alt Mem = AltM {fromAltM :: BaseAlt Mem}
 newtype instance Fun Mem = FunM {fromFunM :: BaseFun Mem}
@@ -155,7 +153,6 @@ newtype instance Fun Mem = FunM {fromFunM :: BaseFun Mem}
 type TypM = Typ Mem
 type PatM = Pat Mem
 type TyPatM = TyPat Mem
-type RetM = Ret Mem
 type ExpM = Exp Mem
 type AltM = Alt Mem
 type FunM = Fun Mem

@@ -116,6 +116,7 @@ Executable pyon
     SystemF.ReprDict
     -- SystemF.Rewrite
     --SystemF.Simplify
+    SystemF.SpecToMem
     SystemF.Syntax
     SystemF.Typecheck
     SystemF.TypecheckSF

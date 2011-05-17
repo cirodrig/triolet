@@ -36,8 +36,6 @@ pprReturnTypePrec (repr ::: ty) =
   pprReturnRepr repr <+> pprType ty `hasPrec` appPrec
 -}
 
-pprRet (RetM ret) = pprTypePrec ret
-
 pprTyPat :: TyPat Mem -> Doc
 pprTyPat (TyPatM (v ::: t)) = pprVar v <+> text ":" <+> pprType t
 
@@ -93,7 +91,7 @@ pprFun f = unparenthesized $ pprFunPrec f
 pprFunPrec (FunM fun) =
   let ty_params_doc = map pprTyPat $ funTyParams fun
       params_doc = map pprPat $ funParams fun
-      return_doc = pprRet (funReturn fun) ?+ funPrec
+      return_doc = pprTypePrec (fromTypM $ funReturn fun) ?+ funPrec
       body_doc = pprExpPrec (funBody fun) ? stmtPrec
       sig_doc = sep [pprParenList (ty_params_doc ++ params_doc),
                      nest (-3) $ text "->" <+> return_doc]

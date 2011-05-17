@@ -237,14 +237,14 @@ coerceType g_k e_k g_t =
               _ -> internalError "coerceType"
        | e_kv == valV && g_kv == boxV ->
            case fromVarApp g_t
-           of Just (op, [arg]) | op `isPyonBuiltin` the_Boxed ->
+           of Just (op, [arg]) | op `isPyonBuiltin` the_BoxedType ->
                 case fromVarApp arg
                 of Just (op, [arg2]) | op `isPyonBuiltin` the_Stored -> return arg2
                    _ -> internalError "coerceType"
               _ -> internalError "coerceType"
        | e_kv == boxV && g_kv == valV ->
            return $
-           varApp (pyonBuiltin the_Boxed)
+           varApp (pyonBuiltin the_BoxedType)
            [varApp (pyonBuiltin the_Stored) [g_t]]
        | e_kv == boxV && g_kv == bareV ->
            return $ boxedType g_t
@@ -488,6 +488,9 @@ copyCoercion ty = Coercion co
 -- | Coerce @write -> bare@ by assigning to a temporary variable, then
 --   reading from the temporary variable.
 --   The argument is the @bare@ type.
+--    
+--   Note that the data is put into a box, /not/ converted to a boxed 
+--   representation.
 
 -- The generated code is:
 -- let boxed_var = Boxed e
@@ -552,7 +555,7 @@ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
 
           -- Create a lambda function
           let fun_ty_args = [TyPatM d | d <- e_tydom]
-              fun_ret = RetM e_rng
+              fun_ret = TypM e_rng
               fun =
                 FunM $ Fun defaultExpInfo fun_ty_args e_params fun_ret body
           return $ ExpM $ LamE defaultExpInfo fun
@@ -884,8 +887,8 @@ reprParam (VarP v t) k = do
   (t', _) <- cvtNormalizeParamType t
   assumeReprDict v t' $ assumeValueTypes v t t' $ k (memVarP (v ::: t'))
 
-reprRet :: RetSF -> RI RetM
-reprRet (RetSF t) = fmap (RetM . fst) $ cvtNormalizeReturnType t
+reprRet :: TypSF -> RI TypM
+reprRet (TypSF t) = fmap (TypM . fst) $ cvtNormalizeReturnType t
 
 -- | Convert an expression's representation
 reprExp :: ExpSF -> RI (ExpM, Type)
@@ -992,7 +995,7 @@ reprFun (FunSF f) =
     ret <- reprRet (funReturn f)
     
     -- Coerce body to match the return type
-    co_body <- coerceExpToReturnType body_type (fromRetM ret) body
+    co_body <- coerceExpToReturnType body_type (fromTypM ret) body
     
     return $ FunM (Fun { funInfo = funInfo f
                        , funTyParams = ty_params

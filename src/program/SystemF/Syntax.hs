@@ -19,9 +19,9 @@ module SystemF.Syntax
      ExpInfo,
      defaultExpInfo,
      mkExpInfo,
-     Typ(..), Pat(..), TyPat(..), Ret(..), Exp(..), Alt(..), Fun(..),
+     Typ(..), Pat(..), TyPat(..), Exp(..), Alt(..), Fun(..),
      SF,
-     TypSF, PatSF, RetSF, ExpSF, AltSF, FunSF,
+     TypSF, PatSF, ExpSF, AltSF, FunSF,
      BaseExp(..),
      BaseAlt(..),
      BaseFun(..),
@@ -92,7 +92,6 @@ instance HasSourcePos ExpInfo where
 data family Typ a               -- A type; can be a wrapper around 'Type'
 data family Pat a               -- A pattern binding
 data family TyPat a             -- A pattern binding for types
-data family Ret a               -- A return declaration
 data family Exp a               -- An expression
 data family Alt a               -- A case alternative
 data family Fun a               -- A function
@@ -105,9 +104,6 @@ instance Typeable1 Pat where
           
 instance Typeable1 TyPat where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.TyPat") []
-
-instance Typeable1 Ret where
-  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Ret") []
 
 instance Typeable1 Exp where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Exp") []
@@ -123,14 +119,12 @@ data SF
 
 type TypSF = Typ SF
 type PatSF = Pat SF
-type RetSF = Ret SF
 type ExpSF = Exp SF
 type AltSF = Alt SF
 type FunSF = Fun SF
 
 newtype instance Typ SF = TypSF {fromTypSF :: Type}
 -- Pat SF is a data type
--- Ret SF is a data type
 newtype instance Exp SF = ExpSF {fromExpSF :: BaseExp SF}
 newtype instance Alt SF = AltSF {fromAltSF :: BaseAlt SF}
 newtype instance Fun SF = FunSF {fromFunSF :: BaseFun SF}
@@ -140,8 +134,6 @@ data instance Pat SF =
     WildP Type                    -- ^ Wildcard pattern
   | VarP Var Type                 -- ^ Variable pattern binding
   | TupleP [PatSF]                -- ^ Tuple pattern
-
-newtype instance Ret SF = RetSF {retSFType :: Type}
 
 -- | Type-level patterns
 newtype instance TyPat SF = TyPatSF Binder
@@ -210,7 +202,7 @@ data BaseFun s =
   Fun { funInfo       :: ExpInfo
       , funTyParams   :: [TyPat s]   -- ^ Type parameters
       , funParams     :: [Pat s]     -- ^ Object parameters
-      , funReturn     :: Ret s       -- ^ Return type
+      , funReturn     :: Typ s       -- ^ Return type
       , funBody       :: Exp s
       }
 

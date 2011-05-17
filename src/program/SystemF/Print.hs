@@ -164,7 +164,7 @@ pprFunParameters isLambda flags (FunSF fun) = sep param_doc
       -- Value parameters
       map (parens . pprPatFlags flags) (funParams fun) ++
       -- Return type
-      [introduce_return_type $ pprTyp (case funReturn fun of RetSF t -> TypSF t)]
+      [introduce_return_type $ pprTyp (funReturn fun)]
 
     introduce_return_type t
       | isLambda  = nest (-3) $ text "->" <+> t

@@ -10,7 +10,6 @@ module SystemF.TypecheckMem
         Fun(..),
         Pat(..),
         TyPat(..),
-        Ret(..),
         TypTM, ExpTM, AltTM, FunTM, PatTM,
         discardTypeAnnotationsExp,
         discardTypeAnnotationsFun,
@@ -60,7 +59,6 @@ newtype instance Fun (Typed Mem) = FunTM (TypeAnn (BaseFun TM))
 data instance Pat (Typed Mem) = TypedMemVarP Binder
                               | TypedMemWildP Type
 data instance TyPat (Typed Mem) = TyPatTM Var TypTM
-newtype instance Ret (Typed Mem) = RetTM {fromRetTM :: Type}
 
 type TM = Typed Mem
 
@@ -130,7 +128,7 @@ discardTypeAnnotationsFun (FunTM (TypeAnn _ f)) =
   FunM $ Fun { funInfo = funInfo f
              , funTyParams = map fromTyPatTM $ funTyParams f
              , funParams = map fromPatTM $ funParams f
-             , funReturn = RetM $ fromRetTM $ funReturn f
+             , funReturn = TypM $ fromTypTM $ funReturn f
              , funBody = dtae $ funBody f}
 
 
@@ -138,7 +136,7 @@ discardTypeAnnotationsFun (FunTM (TypeAnn _ f)) =
 functionType :: FunM -> Type 
 functionType (FunM (Fun { funTyParams = ty_params
                         , funParams = params
-                        , funReturn = RetM ret
+                        , funReturn = TypM ret
                         })) =
   forallType [b | TyPatM b <- ty_params] $
   funType (map patMType params) ret
@@ -271,13 +269,14 @@ typeInferFun :: FunM -> TCM FunTM
 typeInferFun fun@(FunM (Fun { funInfo = info
                             , funTyParams = ty_params
                             , funParams = params
-                            , funReturn = RetM return_type
+                            , funReturn = return_type
                             , funBody = body})) =
   assumeTyParams $ \new_ty_params -> assumeParams $ \new_params -> do
     ti_body <- typeInferExp body
 
     -- Inferred type must match return type
-    checkType noSourcePos return_type (getExpType ti_body)
+    new_ret_type <- typeInferType return_type
+    checkType noSourcePos (fromTypM return_type) (getExpType ti_body)
     
     -- Create the function's type
     let ty = functionType fun
@@ -286,7 +285,7 @@ typeInferFun fun@(FunM (Fun { funInfo = info
           Fun { funInfo = info
               , funTyParams = new_ty_params
               , funParams = new_params
-              , funReturn = RetTM return_type
+              , funReturn = new_ret_type
               , funBody = ti_body
               }
     return $ FunTM $ TypeAnn ty new_fun

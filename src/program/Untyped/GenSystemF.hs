@@ -343,7 +343,7 @@ mkFunction :: SourcePos -> [TyCon] -> [SystemF.Pat TI] -> TIType -> TIExp
            -> IO (SystemF.Fun TI)
 mkFunction pos ty_params params ret_type body = do
   ty_params' <- mapM convertTyParam ty_params
-  return $ TIFun $ SystemF.Fun (mkExpInfo pos) ty_params' params (TIRet ret_type) body
+  return $ TIFun $ SystemF.Fun (mkExpInfo pos) ty_params' params ret_type body
   where
     convertTyParam :: TyCon -> IO (SystemF.TyPat TI)
     convertTyParam ty_param = do

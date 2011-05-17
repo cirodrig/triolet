@@ -30,11 +30,12 @@ import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
 import qualified SystemF.TypecheckSF
+import qualified SystemF.TypecheckMem
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.ReprInference as SystemF
+import qualified SystemF.SpecToMem as SystemF
 {-
-import qualified SystemF.TypecheckMem
 import qualified SystemF.Simplify as SystemF
 import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
@@ -178,8 +179,12 @@ compilePyonToPyonAsm compile_flags path text = do
   
   print ""
   print "Generating memory IR"
-  repr_mod <- SystemF.representationInference sf_mod
+  spec_mod <- SystemF.representationInference sf_mod
+  let repr_mod = SystemF.convertSpecToMemTypes spec_mod
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  
+  -- Check for bugs in representation inference
+  SystemF.TypecheckMem.typeCheckModule repr_mod
   error "This stage of the compiler is not implemented"
   {-
   print "Generating memory IR"

@@ -11,7 +11,6 @@ module SystemF.TypecheckSF
         Fun(..),
         Pat(..),
         TyPat(..),
-        Ret(..),
         TypTSF, ExpTSF, AltTSF, FunTSF, PatTSF,
         fromTypTSF,
         functionType,
@@ -61,8 +60,6 @@ data instance Pat (Typed SF) =
 
 data instance TyPat (Typed SF) = TyPatTSF Var TypTSF
 
-newtype instance Ret (Typed SF) = RetTSF Type
-
 type TSF = Typed SF
 
 type TypTSF = Typ TSF
@@ -100,7 +97,7 @@ patType (TupleP ps) = let con = VarT $ pyonTupleTypeCon (length ps)
 functionType :: FunSF -> Type 
 functionType (FunSF (Fun { funTyParams = ty_params
                          , funParams = params
-                         , funReturn = RetSF ret
+                         , funReturn = TypSF ret
                          })) =
   forallType [b | TyPatSF b <- ty_params] $
   funType [patType p | p <- params] ret
@@ -219,14 +216,14 @@ typeInferFun :: FunSF -> TCM FunTSF
 typeInferFun fun@(FunSF (Fun { funInfo = info
                              , funTyParams = ty_params
                              , funParams = params
-                             , funReturn = RetSF return_type
+                             , funReturn = return_type
                              , funBody = body})) =
   assumeTyParams $ \new_ty_params -> assumeParams $ \new_params -> do
     ti_body <- typeInferExp body
-    ti_return_type <- typeInferType (TypSF return_type)
+    ti_return_type <- typeInferType return_type
     
     -- Inferred type must match return type
-    checkType noSourcePos return_type (getTypeAnn ti_body)
+    checkType noSourcePos (fromTypSF return_type) (getTypeAnn ti_body)
     
     -- Create the function's type
     let ty = functionType fun
@@ -235,7 +232,7 @@ typeInferFun fun@(FunSF (Fun { funInfo = info
           Fun { funInfo = info
               , funTyParams = new_ty_params
               , funParams = new_params
-              , funReturn = RetTSF return_type
+              , funReturn = ti_return_type
               , funBody = ti_body
               }
     return $ FunTSF $ TypeAnn ty new_fun
