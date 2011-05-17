@@ -3,12 +3,8 @@
 module Type.Type(module Type.Var,
                  module Type.Level,
                  Type(..),
-                 ParamType,
-                 ReturnType,
-                 (:::)(..),
                  Repr(..),
-                 ParamRepr(..),
-                 ReturnRepr(..),
+                 Binder(..),
                  sameParamRepr,
                  sameReturnRepr,
                  paramReprToRepr,
@@ -19,18 +15,24 @@ module Type.Type(module Type.Var,
                  -- * Construction and deconstruction helper routines
                  typeApp, varApp,
                  fromTypeApp, fromVarApp,
-                 pureFunType, funType,
-                 forallFunType,
-                 fromFunType, fromPureFunType,
+                 funType, fromFunType,
+                 forallType, fromForallType,
+                 fromForallFunType,
 
                  -- * Predefined types
-                 kindT, pureT, intindexT, valT, boxT, bareT, outT, posInftyT,
-                 kindV, pureV, intindexV, valV, boxV, bareV, outV, posInftyV,
+                 kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT,
+                 posInftyT,
+                 kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV,
+                 posInftyV,
                  firstAvailableVarID,
+
+                 -- * Kinds
+                 Kind,
+                 BaseKind(..),
+                 toBaseKind, fromBaseKind,
 
                  -- * Pretty-printing
                  pprType, pprTypePrec, pprReprType,
-                 pprParam, pprReturn,
                  pprParamReprWord, pprReturnRepr)
 where
 
@@ -49,13 +51,11 @@ data Type =
     -- | A type application
   | AppT Type Type
     -- | A type function
-  | LamT Var Type ReturnType
-    -- | A function type.
-    --
-    --   Eventually this constructor will be simplified to @FunT Type Type@.
-  | FunT !ParamType !ReturnType
+  | LamT {-#UNPACK#-}!Binder Type
+    -- | A function type
+  | FunT Type Type
     -- | A universal quantifier
-  | AllT Var Type !ReturnType
+  | AllT {-#UNPACK#-}!Binder Type
     -- | An arbitrary, opaque type inhabiting the given kind.  The kind has
     --   no free type variables.
   | AnyT Type
@@ -64,9 +64,6 @@ data Type =
 
 infixr 4 `FunT`
 infixl 7 `AppT`
-
-type ParamType = ParamRepr ::: Type
-type ReturnType = ReturnRepr ::: Type
 
 -- | Create a type application
 typeApp :: Type -> [Type] -> Type
@@ -86,33 +83,32 @@ fromVarApp t = case fromTypeApp t
                of (VarT v, args) -> Just (v, args)
                   _ -> Nothing
 
-pureFunType, funType :: [ParamType] -> ReturnType -> Type
-pureFunType = constructFunctionType ValRT
-funType = constructFunctionType BoxRT
+funType :: [Type] -> Type -> Type
+funType [] t = t
+funType (p:ps) t = FunT p (funType ps t)
 
-constructFunctionType repr [] ret = internalError "funType: No parameters"
-constructFunctionType repr ps ret = go ps
+fromFunType :: Type -> ([Type], Type)
+fromFunType t = go id t
   where
-    go [p]    = FunT p ret
-    go (p:ps) = FunT p (repr ::: go ps)
+    go hd (FunT dom rng) = go (hd . (dom:)) rng
+    go hd rng = (hd [], rng)
 
-forallFunType :: [(Var, Type)] -> Type -> Type
-forallFunType args ret = foldr fa ret args
+forallType :: [Binder] -> Type -> Type
+forallType args ret = foldr AllT ret args
+
+fromForallType :: Type -> ([Binder], Type)
+fromForallType t = go id t
   where
-    fa (v, t) ret = AllT v t (ValRT ::: ret)
+    go hd (AllT param rng) = go (hd . (param:)) rng
+    go hd t = (hd [], t)
 
-fromPureFunType, fromFunType :: Type -> ([ParamType], ReturnType)
-fromPureFunType = deconstructFunctionType ValRT
-fromFunType = deconstructFunctionType BoxRT
+fromForallFunType :: Type -> ([Binder], [Type], Type)
+fromForallFunType t =
+  let (qvars, monotype) = fromForallType t
+      (dom, rng) = fromFunType monotype
+  in (qvars, dom, rng)
 
-deconstructFunctionType repr ty = go id (repr ::: ty)
-  where
-    go hd (value_repr ::: FunT dom rng)
-      | sameReturnRepr repr value_repr = go (hd . (dom:)) rng
-
-    go hd return_type = (hd [], return_type)
-
-data x ::: y = x ::: y
+data Binder = Var ::: Type
 
 -- | A representation.
 data Repr = Value               -- ^ Represented as a value.  Variables hold
@@ -219,44 +215,91 @@ sameReturnRepr _         _         = False
 instance HasLevel Var => HasLevel Type where
   getLevel (VarT v) = getLevel v
   getLevel (AppT op _) = getLevel op
-  getLevel (FunT _ (_ ::: rng)) = getLevel rng
-  getLevel (LamT _ _ (_ ::: body)) = getLevel body
+  getLevel (LamT _ body) = getLevel body
+  getLevel (FunT _ rng) = getLevel rng
+  getLevel (AllT _ rng) = getLevel rng
   getLevel (AnyT _) = TypeLevel
   getLevel (IntT _) = TypeLevel
 
-kindT, pureT, intindexT, valT, boxT, bareT, posInftyT :: Type
+kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, posInftyT :: Type
 kindT = VarT kindV
-pureT = VarT pureV
 intindexT = VarT intindexV
 valT = VarT valV
 boxT = VarT boxV
 bareT = VarT bareV
 outT = VarT outV
+writeT = VarT writeV
+sideeffectT = VarT sideeffectV
 posInftyT = VarT posInftyV      -- Positive infinity
 
-kindV, pureV, intindexV, valV, boxV, bareV, posInftyV :: Var
+kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, posInftyV :: Var
 
 kindV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "kind") SortLevel
-pureV = mkVar pureVarID (Just $ pyonLabel builtinModuleName "pure") KindLevel
 intindexV = mkVar intindexVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
 valV = mkVar valVarID (Just $ pyonLabel builtinModuleName "val") KindLevel
 boxV = mkVar boxVarID (Just $ pyonLabel builtinModuleName "box") KindLevel
 bareV = mkVar bareVarID (Just $ pyonLabel builtinModuleName "bare") KindLevel
 outV = mkVar outVarID (Just $ pyonLabel builtinModuleName "out") KindLevel
+writeV = mkVar writeVarID (Just $ pyonLabel builtinModuleName "write") KindLevel
+sideeffectV = mkVar sideeffectVarID (Just $ pyonLabel builtinModuleName "sideeffect") KindLevel
 posInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "pos_infty") TypeLevel
 
 kindVarID = toIdent 1
-pureVarID = toIdent 2
-intindexVarID = toIdent 3
-valVarID = toIdent 4
-boxVarID = toIdent 5
-bareVarID = toIdent 6
-outVarID = toIdent 8
+intindexVarID = toIdent 2
+valVarID = toIdent 3
+boxVarID = toIdent 4
+bareVarID = toIdent 5
+outVarID = toIdent 6
+writeVarID = toIdent 7
+sideeffectVarID = toIdent 8
 posInftyVarID = toIdent 9
 
 -- | The first variable ID that's not reserved for predefined variables
 firstAvailableVarID :: VarID
 firstAvailableVarID = toIdent 10
+
+-------------------------------------------------------------------------------
+-- Convenience functions for kinds
+
+-- | Kinds and types are represented using the same data structures
+type Kind = Type
+
+-- | Base kinds as an enumerative data structure.  Each base kind corresponds
+--   to a variable.
+data BaseKind =
+    ValK
+  | BoxK
+  | BareK
+  | OutK
+  | WriteK
+  | IntIndexK
+  | SideEffectK
+    deriving(Eq, Ord, Show)
+
+-- | Convert a kind to a base kind.  Raises an error if the argument is not a
+--   base kind.
+toBaseKind :: Kind -> BaseKind
+toBaseKind (VarT kind_var) =
+  case lookup kind_var table
+  of Just k -> k
+     Nothing -> internalError "toBaseKind: Unrecognized type"
+  where
+    table = [(valV, ValK), (boxV, BoxK), (bareV, BareK), (outV, OutK),
+             (writeV, WriteK),
+             (intindexV, IntIndexK), (sideeffectV, SideEffectK)]
+
+toBaseKind _ = internalError "toBaseKind: Unrecognized type"
+
+fromBaseKind :: BaseKind -> Kind
+fromBaseKind k =
+  case k
+  of ValK -> valT
+     BoxK -> boxT
+     BareK -> bareT
+     OutK -> outT
+     WriteK -> writeT
+     IntIndexK -> intindexT
+     SideEffectK -> sideeffectT
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
@@ -306,9 +349,9 @@ pprTypePrec ty =
   case ty
   of VarT v -> hasAtomicPrec $ pprVar v
      AppT op arg -> ppr_app op [arg] `hasPrec` appPrec
-     LamT v dom (_ ::: body) -> ppr_lam [(v, dom)] body `hasPrec` lamPrec
-     FunT arg ret -> pprFunType Nothing ty
-     AllT v dom (_ ::: rng) -> ppr_all [(v, dom)] rng `hasPrec` lamPrec
+     LamT param body -> ppr_lam [param] body `hasPrec` lamPrec
+     FunT arg ret -> pprFunType ty
+     AllT binder rng -> ppr_all [binder] rng `hasPrec` lamPrec
      AnyT k -> text "Any :" <+> pprTypePrec k ?+ typeAnnPrec `hasPrec` typeAnnPrec
      IntT n -> hasAtomicPrec $ text (show n)
   where
@@ -318,16 +361,16 @@ pprTypePrec ty =
     
     -- Uncurry the lambda abstraction.  Uncurrying builds the parameter list
     -- in reverse order, so we reverse it again.
-    ppr_lam params (LamT v dom (_ ::: body)) = ppr_lam ((v, dom) : params) body
+    ppr_lam params (LamT param body) = ppr_lam (param : params) body
     ppr_lam params e =
       hang (text "lambda" <+> sep (map ppr_binder $ reverse params) <> text ".") 4
       (pprTypePrec e ? lamPrec)
 
-    ppr_binder (v, t) =
+    ppr_binder (v ::: t) =
       parens $ pprVar v <+> text ":" <+> pprTypePrec t ?+ typeAnnPrec
 
     -- Uncurry the type abstraction.
-    ppr_all params (AllT v dom (_ ::: rng)) = ppr_all ((v, dom) : params) rng
+    ppr_all params (AllT param rng) = ppr_all (param : params) rng
     ppr_all params e =
       hang (text "forall" <+> sep (map ppr_binder $ reverse params) <> text ".") 4
       (pprTypePrec e ? lamPrec)
@@ -337,43 +380,15 @@ pprTypePrec ty =
 pprReprType :: ReturnRepr -> Type -> PrecDoc
 pprReprType rrepr ty =
   case ty
-  of FunT arg ret -> pprFunType (Just rrepr) ty
+  of FunT {} -> pprFunType ty
      _ -> pprTypePrec ty
 
 -- | Pretty-print a function type.
-pprFunType :: Maybe ReturnRepr -> Type -> PrecDoc
-pprFunType erepr (FunT arg ret) =
-  let (params, return) = decompose_function (pprParam arg :) ret
-      param_docs = [param ?+ appPrec <+> text "->" | param <- params]
-      return_doc = return ?+ appPrec
+pprFunType :: Type -> PrecDoc
+pprFunType t =
+  let (params, return) = fromFunType t
+      param_docs = [pprTypePrec param ?+ appPrec <+> text "->" | param <- params]
+      return_doc = pprTypePrec return ?+ appPrec
   in sep (param_docs ++ [return_doc]) `hasPrec` funPrec
-  where
-    -- Decompose the function into a parameter list and a return type
-    decompose_function hd (ret_repr ::: FunT arg ret)
-      | return_repr_match ret_repr =
-          decompose_function (hd . (pprParam arg :)) ret
-    
-    decompose_function hd ty = (hd [], pprReturn ty)
 
-    -- Is this the same as the expected representation?
-    return_repr_match repr = maybe False (sameReturnRepr repr) erepr
-
-pprFunType _ _ = internalError "pprFunType"
-
-pprReturn :: ReturnType -> PrecDoc
-pprReturn (ret ::: rng) =
-  let repr_doc = pprReturnRepr ret
-  in repr_doc <+> pprReprType ret rng ? appPrec `hasPrec` appPrec
-      
-pprParam :: ParamType -> PrecDoc
-pprParam (arg ::: dom) =
-  case arg
-  of ValPT (Just v) ->
-       arg_word <+> pprVar v <+> text ":" <+> pprTypePrec dom ?+ typeAnnPrec
-       `hasPrec` typeAnnPrec
-     _ -> ordinary_lhs
-  where
-    arg_word = pprParamReprWord arg
-    ordinary_lhs =
-      arg_word <+> pprReprType (paramReprToReturnRepr arg) dom ? appPrec
-      `hasPrec` appPrec
+pprFunType _ = internalError "pprFunType"

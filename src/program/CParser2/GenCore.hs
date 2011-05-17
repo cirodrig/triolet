@@ -11,7 +11,7 @@ import Common.Error
 import Common.Identifier
 import Builtins.Builtins
 import CParser2.AST
-import Type.Type((:::)(..), Level(..))
+import Type.Type(Binder(..), Level(..))
 import qualified Type.Type as Type
 import Type.Environment
 import qualified Type.Eval as Type
@@ -21,15 +21,8 @@ import Type.Var
 
 toVar (ResolvedVar v _) = v
 
-translateDomain :: Domain Resolved -> Type.ParamType
-translateDomain (Domain param ty) =
-  Type.ValPT (Just $ toVar param) ::: translateType ty
-
-translateParamType :: RLType -> Type.ParamType
-translateParamType t = Type.ValPT Nothing ::: translateType t
-
-translateReturn :: RLType -> Type.ReturnType
-translateReturn t = Type.ValRT ::: translateType t
+translateDomain :: Domain Resolved -> Type.Binder
+translateDomain (Domain param ty) = toVar param ::: translateType ty
 
 translateType :: RLType -> Type.Type
 translateType lty =
@@ -39,13 +32,13 @@ translateType lty =
      AppT op arg ->
        Type.AppT (translateType op) (translateType arg)
      FunT dom rng ->
-       Type.FunT (translateParamType dom) (translateReturn rng)
+       Type.FunT (translateType dom) (translateType rng)
      AllT (Domain param ty) rng ->
-       Type.AllT (toVar param) (translateType ty) (translateReturn rng)
+       Type.AllT (toVar param ::: translateType ty) (translateType rng)
 
 -- | Translate a data constructor field to the type used for passing the 
 --   field as an argument to a constructor application.
-translateDataConFieldArgument :: TypeEnv -> RLType -> Type.ParamType
+translateDataConFieldArgument :: TypeEnv -> RLType -> Type.Type
 translateDataConFieldArgument tenv lty =
   let translated_type = translateType lty
       translated_kind = Type.typeKind tenv translated_type
@@ -53,8 +46,8 @@ translateDataConFieldArgument tenv lty =
      of Type.VarT kvar
           | kvar == Type.bareV ->
               -- Convert to writer
-              Type.ValPT Nothing ::: Type.varApp (pyonBuiltin the_write) [translated_type]
-          | otherwise -> Type.ValPT Nothing ::: translated_type
+              Type.varApp (pyonBuiltin the_Writer) [translated_type]
+          | otherwise -> translated_type
 
         -- Other terms should not occur 
         _ -> internalError "translateDataConFieldArgument: Unexpected kind"
@@ -62,8 +55,8 @@ translateDataConFieldArgument tenv lty =
 translateDataConDecl tenv data_type_con decl =
   let params = map translateDomain $ dconParams decl
       ex_types = map translateDomain $ dconExTypes decl
-      args = map translateReturn $ dconArgs decl
-      rng = translateReturn $ dconRng decl
+      args = map translateType $ dconArgs decl
+      rng = translateType $ dconRng decl
       ty = make_datacon_type params ex_types (dconArgs decl) (dconRng decl)
   in (ty, DataConType params ex_types args rng (toVar $ dconVar decl) data_type_con)
   where
@@ -71,20 +64,11 @@ translateDataConDecl tenv data_type_con decl =
     -- pattern matching on the data constructor
     make_datacon_type params ex_types args rng =
       let ty_params = params ++ ex_types
-          fields = map (translateDataConFieldArgument tenv) args
-          return = case translateDataConFieldArgument tenv rng
-                   of _ ::: t -> Type.ValRT ::: t
-      in make_params ty_params $ make_function fields return
-    
-    make_params :: [Type.ParamType] -> Type.ReturnType -> Type.ReturnType
-    make_params binders x = foldr make_param x binders
-      where
-        make_param (Type.ValPT (Just v) ::: t) t' = Type.ValRT ::: Type.AllT v t t'
-    
-    make_function :: [Type.ParamType] -> Type.ReturnType -> Type.ReturnType
-    make_function domains range = foldr mkfun range domains 
-      where
-        mkfun dom rng = Type.ValRT ::: (dom `Type.FunT` rng)
+          local_tenv = foldr insert_type tenv ty_params
+            where insert_type (v ::: t) e = insertType v t e
+          fields = map (translateDataConFieldArgument local_tenv) args
+          return = translateDataConFieldArgument local_tenv rng
+      in Type.forallType ty_params $ Type.funType fields return
 
 -- | Translate a global declaration.  The completed type environment may be
 --   used lazily in the translation.
@@ -92,13 +76,14 @@ translateDecl :: TypeEnv -> Decl Resolved -> (TypeEnv -> TypeEnv)
 translateDecl tenv (Decl name ent) =
   case ent
   of VarEnt ty ->
-       insertType core_name (translateReturn ty)
+       insertType core_name (translateType ty)
      TypeEnt ty (Just type_function) ->
-       insertTypeFunction core_name (translateReturn ty) type_function
+       insertTypeFunction core_name (translateType ty) type_function
      TypeEnt ty Nothing ->
-       insertType core_name (translateReturn ty)
+       insertType core_name (translateType ty)
      DataEnt ty data_cons ->
-       let descr = DataTypeDescr core_name (translateReturn ty) Type.Value
+       let kind = translateType ty
+           descr = DataTypeDescr core_name kind
                    (map (translateDataConDecl tenv core_name . unLoc) data_cons)
        in insertDataType descr
   where

@@ -11,65 +11,76 @@ module SystemF.Rename
         freshenTyPatM,
         freshenTyPatMs,
         renameDefM,
-        substituteDefM,
         freshenModuleFully)
 where
 
+import Prelude hiding(mapM)
 import Control.Applicative
-import Control.Monad
-import Control.Monad.Reader
+import Control.Monad hiding(mapM)
+import Control.Monad.Reader hiding(mapM)
 import Data.Maybe
 import Data.Monoid
+import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
+import Data.Traversable
 import Debug.Trace
 
 import Common.Error
+import Common.Identifier
 import Common.MonadLogic
 import Common.Supply
 import SystemF.Syntax
 import SystemF.MemoryIR
+import Type.Environment
 import Type.Type
 import Type.Rename
 
--- | Apply a renaming to a type pattern
-renameTyPatM :: Renaming -> TyPatM -> TyPatM
-renameTyPatM rn pattern =
-  case pattern
-  of TyPatM v ty -> TyPatM v (rename rn ty)
+renameMany :: (st -> a -> (st -> a -> b) -> b)
+           -> st -> [a] -> (st -> [a] -> b) -> b
+renameMany f rn (x:xs) k =
+  f rn x $ \rn' x' -> renameMany f rn' xs $ \rn'' xs' -> k rn'' (x':xs')
 
--- | Apply a renaming to a pattern
-renamePatM :: Renaming -> PatM -> PatM
-renamePatM rn pattern =
+renameMany _ rn [] k = k rn []
+
+-- | Apply a renaming to a type pattern. If necessary, rename the pattern
+--   variable to avoid name shadowing.
+renameTyPatM :: Renaming -> TyPatM -> (Renaming -> TyPatM -> a) -> a
+renameTyPatM rn (TyPatM binder) k =
+  renameBinding rn binder $ \rn' binder' ->
+  k rn' (TyPatM binder')
+
+renameTyPatMs = renameMany renameTyPatM
+
+-- | Apply a renaming to a pattern.  If necessary, rename the pattern
+--   variable to avoid name shadowing.
+renamePatM :: Renaming -> PatM -> (Renaming -> PatM -> a) -> a
+renamePatM rn pattern k =
   case pattern
-  of MemVarP v prepr uses ->
-       MemVarP v (rename_prepr prepr) uses
-     LocalVarP v ty dict uses ->
-       LocalVarP v (rename rn ty) (rename rn dict) uses
-     MemWildP prepr ->
-       MemWildP (rename_prepr prepr)
-  where
-    rename_prepr (repr ::: ty) =
-      case repr
-      of ValPT (Just _) -> internalError "renamePatM: Superfluous binding"
-         _ -> repr ::: rename rn ty
+  of MemVarP binding uses ->
+       renameBinding rn binding $ \rn' binding' ->
+       k rn' (MemVarP binding' (rename rn uses))
+     MemWildP ty -> k rn (MemWildP (rename rn ty))
+
+renamePatMs :: Renaming -> [PatM] -> (Renaming -> [PatM] -> a) -> a
+renamePatMs = renameMany renamePatM
 
 -- | Freshen a type variable binding
 freshenTyPatM :: (Monad m, Supplies m VarID) => TyPatM -> m (TyPatM, Renaming)
-freshenTyPatM (TyPatM v ty) = do
+freshenTyPatM (TyPatM (v ::: ty)) = do
   v' <- newClonedVar v
-  return (TyPatM v' ty, singletonRenaming v v')
+  return (TyPatM (v' ::: ty), singletonRenaming v v')
 
 -- | Freshen a list of type variable bindings.  None of the bindings refer to
 --   a variable bound by another member of the list.
 freshenTyPatMs :: (Monad m, Supplies m VarID) => [TyPatM]
                -> m ([TyPatM], Renaming)
-freshenTyPatMs pats = do                  
+freshenTyPatMs pats = do
   (pats', assocs) <- mapAndUnzipM freshen_pattern pats
   return (pats', renaming assocs)
   where
-    freshen_pattern (TyPatM v ty) = do
+    freshen_pattern (TyPatM (v ::: ty)) = do
       v' <- newClonedVar v
-      return (TyPatM v' ty, (v, v'))
+      return (TyPatM (v' ::: ty), (v, v'))
 
 -- | Freshen a variable binding that is /not/ a local variable binding.
 freshenPatM :: (Monad m, Supplies m VarID) => PatM -> m (PatM, Renaming)
@@ -86,37 +97,45 @@ freshenPatMs pats = do
   (pats', assocs) <- mapAndUnzipM freshenPattern pats
   return (pats', renaming $ catMaybes assocs)
 
-freshenPattern (MemVarP v param_ty uses) = do
+freshenPattern (MemVarP (v ::: param_ty) uses) = do
   v' <- newClonedVar v
-  return (MemVarP v' param_ty uses, Just (v, v'))
+  return (MemVarP (v' ::: param_ty) uses, Just (v, v'))
 
-freshenPattern (LocalVarP {}) =
-  internalError "freshenPattern: Unexpected pattern"
-                                   
 freshenPattern (MemWildP param_ty) =
   return (MemWildP param_ty, Nothing)
 
 -- | Apply a substitution to a type pattern
-substituteTyPatM :: Substitution -> TyPatM -> TyPatM
-substituteTyPatM s pattern =
-  case pattern
-  of TyPatM v ty -> TyPatM v (substitute s ty)
+substituteTyPatM :: EvalMonad m =>
+                    Substitution -> TyPatM
+                 -> (Substitution -> TyPatM -> m a)
+                 -> m a
+substituteTyPatM s (TyPatM binder) k =
+  substituteBinding s binder $ \s' binder' -> k s' (TyPatM binder')
 
+substituteTyPatMs :: EvalMonad m =>
+                     Substitution -> [TyPatM]
+                  -> (Substitution -> [TyPatM] -> m a)
+                  -> m a
+substituteTyPatMs = renameMany substituteTyPatM
+  
 -- | Apply a substitution to a pattern
-substitutePatM :: Substitution -> PatM -> PatM
-substitutePatM s pattern =
+substitutePatM :: EvalMonad m =>
+                  Substitution -> PatM -> (Substitution -> PatM -> m a) -> m a
+substitutePatM s pattern k =
   case pattern
-  of MemVarP v (repr ::: ty) uses ->
-       case repr
-       of ValPT (Just _) -> internalError "substitutePatM: Superfluous binding"
-          _ -> MemVarP v (repr ::: substitute s ty) uses
-     LocalVarP v ty dict uses ->
-       LocalVarP v (substitute s ty) (substitute s dict) uses
-     MemWildP (repr ::: ty) ->
-       case repr
-       of ValPT (Just _) -> internalError "substitutePatM: Superfluous binding"
-          _ -> MemWildP (repr ::: substitute s ty)
+  of MemVarP binder uses ->
+       substituteBinding s binder $ \s' binder' ->
+       k s' (MemVarP binder' uses)
+     MemWildP ty -> do
+       ty' <- substitute s ty
+       k s (MemWildP ty')
      
+substitutePatMs :: EvalMonad m =>
+                  Substitution -> [PatM]
+                -> (Substitution -> [PatM] -> m a)
+                -> m a
+substitutePatMs = renameMany substitutePatM
+
 instance Renameable (Typ Mem) where
   rename rn (TypM t) = TypM $ rename rn t
   freshen (TypM t) = liftM TypM $ freshen t
@@ -136,32 +155,23 @@ instance Renameable (Exp Mem) where
             Nothing -> expression
        LitE {} -> expression
        AppE inf op ts es ->
-         AppE inf (recurse op) (map recurse ts) (map recurse es)
+         AppE inf (rename rn op) (map (rename rn) ts) (map (rename rn) es)
        LamE inf f ->
-         LamE inf (recurse f)
+         LamE inf (rename rn f)
        LetE inf p val body ->
-         LetE inf (renamePatM rn p) (recurse val) (recurse body)
+         renamePatM rn p $ \rn' p' ->
+         LetE inf p' (rename rn val) (rename rn' body)
        LetfunE inf defs body ->
-         LetfunE inf (fmap (renameDefM rn) defs) (recurse body)
+         renameDefGroup rn defs $ \rn' defs' ->
+         LetfunE inf defs' (rename rn' body)
        CaseE inf scr alts ->
-         CaseE inf (recurse scr) (map recurse alts)
+         CaseE inf (rename rn scr) (map (rename rn) alts)
        ExceptE inf rty ->
          ExceptE inf (rename rn rty)
-    where
-      {-# INLINE recurse #-}
-      recurse :: Renameable a => a -> a
-      recurse = rename rn
 
   freshen (ExpM expression) =
     case expression
-    of LetE inf (LocalVarP v ty dict uses) rhs body -> do
-         -- This variable is in scope over the rhs and the body
-         v' <- newClonedVar v
-         let rhs' = rename (singletonRenaming v v') rhs
-         let body' = rename (singletonRenaming v v') body
-         return $ ExpM $ LetE inf (LocalVarP v' ty dict uses) rhs' body'
-
-       LetE inf pat rhs body -> do
+    of LetE inf pat rhs body -> do
          (pat', rn) <- freshenPatM pat
          let body' = rename rn body
          return $ ExpM $ LetE inf pat' rhs body'
@@ -200,13 +210,7 @@ instance Renameable (Exp Mem) where
              body_fv = case patMVar pat 
                        of Nothing -> freeVariables body
                           Just v -> Set.delete v $ freeVariables body
-         in case pat
-            of MemVarP {} -> ty_fv `Set.union` rhs_fv `Set.union` body_fv
-               MemWildP {} -> ty_fv `Set.union` rhs_fv `Set.union` body_fv
-               LocalVarP {} ->
-                 let rhs_fv' = Set.delete (patMVar' pat) rhs_fv
-                     dict_fv = freeVariables $ patMDict pat
-                 in ty_fv `Set.union` dict_fv `Set.union` rhs_fv `Set.union` body_fv
+         in ty_fv `Set.union` rhs_fv `Set.union` body_fv
        LetfunE _ (NonRec def) body ->
          let body_fv = freeVariables body
              fn_fv = freeVariables $ definiens def
@@ -223,31 +227,33 @@ instance Renameable (Exp Mem) where
 
 instance Renameable (Alt Mem) where
   rename rn (AltM alt) =
-    AltM $ Alt { altConstructor = altConstructor alt
-               , altTyArgs = map (rename rn) $ altTyArgs alt
-               , altExTypes = map (renameTyPatM rn) $ altExTypes alt
-               , altParams = map (renamePatM rn) $ altParams alt
-               , altBody = rename rn $ altBody alt}
+    let ty_args = rename rn (altTyArgs alt)
+    in renameTyPatMs rn (altExTypes alt) $ \rn' ex_types ->
+       renamePatMs rn' (altParams alt) $ \rn'' params ->
+       AltM $ Alt { altConstructor = altConstructor alt
+                  , altTyArgs = ty_args
+                  , altExTypes = ex_types
+                  , altParams = params
+                  , altBody = rename rn'' $ altBody alt}
 
   freshen (AltM alt) = do
     (ex_types, ex_renaming) <- freshenTyPatMs $ altExTypes alt
-    (params, param_renaming) <-
-      freshenPatMs $ map (renamePatM ex_renaming) $ altParams alt
-    
-    let renaming = ex_renaming `mappend` param_renaming
-    let body = rename renaming $ altBody alt    
+    renamePatMs ex_renaming (altParams alt) $ \ex_renaming' params -> do
+      (rn_params, param_renaming) <- freshenPatMs params
+      let renaming = param_renaming `mappend` ex_renaming'
+      let body = rename renaming $ altBody alt    
 
-    return $ AltM $ Alt { altConstructor = altConstructor alt
-                        , altTyArgs = altTyArgs alt
-                        , altExTypes = ex_types
-                        , altParams = params
-                        , altBody = body}
+      return $ AltM $ Alt { altConstructor = altConstructor alt
+                          , altTyArgs = altTyArgs alt
+                          , altExTypes = ex_types
+                          , altParams = rn_params
+                          , altBody = body}
 
   freeVariables (AltM alt) =
     let ty_fv = Set.unions $ map freeVariables $ altTyArgs alt
         typat_fv = Set.unions $
-                   map freeVariables [t | TyPatM _ t <- altExTypes alt]
-        typat_vars = [v | TyPatM v _ <- altExTypes alt]
+                   map freeVariables [t | TyPatM (_ ::: t) <- altExTypes alt]
+        typat_vars = [v | TyPatM (v ::: _) <- altExTypes alt]
           
         -- Get free variables from patterns; remove existential variables
         pat_fv1 = Set.unions $
@@ -264,29 +270,33 @@ instance Renameable (Alt Mem) where
 
 instance Renameable (Fun Mem) where
   rename rn (FunM fun) =
-    FunM $ Fun { funInfo = funInfo fun
-               , funTyParams = map (renameTyPatM rn) $ funTyParams fun 
-               , funParams = map (renamePatM rn) $ funParams fun
-               , funReturn = rename rn $ funReturn fun
-               , funBody = rename rn $ funBody fun}
+    renameTyPatMs rn (funTyParams fun) $ \rn' ty_params -> 
+    renamePatMs rn' (funParams fun) $ \rn'' params ->
+    let ret = rename rn'' $ funReturn fun
+        body = rename rn'' $ funBody fun
+    in FunM $ Fun { funInfo = funInfo fun
+                  , funTyParams = ty_params
+                  , funParams = params
+                  , funReturn = ret
+                  , funBody = body}
   
   freshen (FunM fun) = do
     (ty_params, ty_renaming) <- freshenTyPatMs $ funTyParams fun
-    (params, param_renaming) <-
-      freshenPatMs $ map (renamePatM ty_renaming) $ funParams fun
-    let renaming = ty_renaming `mappend` param_renaming
-    let ret = rename renaming $ funReturn fun
-        body = rename renaming $ funBody fun
-    return $ FunM $ Fun { funInfo = funInfo fun
-                        , funTyParams = ty_params
-                        , funParams = params
-                        , funReturn = ret
-                        , funBody = body}
+    renamePatMs ty_renaming (funParams fun) $ \ty_renaming' params -> do
+      (rn_params, param_renaming) <- freshenPatMs params
+      let renaming = param_renaming `mappend` ty_renaming'
+      let ret = rename renaming $ funReturn fun
+          body = rename renaming $ funBody fun
+      return $ FunM $ Fun { funInfo = funInfo fun
+                          , funTyParams = ty_params
+                          , funParams = rn_params
+                          , funReturn = ret
+                          , funBody = body}
 
   freeVariables (FunM fun) = do
     let typat_fv = Set.unions $
-                   map freeVariables [t | TyPatM _ t <- funTyParams fun]
-        typat_vars = [v | TyPatM v _ <- funTyParams fun]
+                   map freeVariables [t | TyPatM (_ ::: t) <- funTyParams fun]
+        typat_vars = [v | TyPatM (v ::: _) <- funTyParams fun]
           
         -- Get free variables from patterns; remove type parameter variables
         pat_fv1 = Set.unions $
@@ -302,58 +312,84 @@ instance Renameable (Fun Mem) where
         return_and_body_fv = foldr Set.delete (Set.union return_fv body_fv)
                              (typat_vars ++ pat_vars)
       in typat_fv `Set.union` pat_fv `Set.union` return_and_body_fv
-      
+
 renameDefM rn def = def {definiens = rename rn $ definiens def}
 
+renameDefGroup r (NonRec d) k = 
+  let group = NonRec $ renameDefM r d
+      r' = R $ IntMap.delete (fromIdent $ varID $ definiendum d) $ unR r
+  in k r' group
+
+renameDefGroup r (Rec defs) k =
+  let local_names = map definiendum defs
+      r' = R $ foldr (IntMap.delete . fromIdent . varID) (unR r) local_names
+  in k r' (Rec $ map (mapDefiniens (rename r')) defs)
+
 instance Substitutable (Typ Mem) where
-  substitute s (TypM t) = TypM $ substitute s t
+  substitute s (TypM t) = TypM `liftM` substitute s t
 
 instance Substitutable (Ret Mem) where
-  substitute s (RetM rt) = RetM (substitute s rt)
+  substitute s (RetM rt) = RetM `liftM` substitute s rt
 
 instance Substitutable (Exp Mem) where
-  substitute s (ExpM expression) = ExpM $
+  substitute s (ExpM expression) =
     case expression
     of VarE inf v ->
          case substituteVar v s
          of Just _ ->
               internalError "Exp Mem.substitute: type substituted for variable"
-            Nothing -> expression
-       LitE {} -> expression
-       AppE inf op ts es ->
-         AppE inf (recurse op) (map recurse ts) (map recurse es)
-       LamE inf f ->
-         LamE inf (recurse f)
-       LetE inf p val body ->
-         LetE inf (substitutePatM s p) (recurse val) (recurse body)
-       LetfunE inf defs body ->
-         LetfunE inf (fmap (substituteDefM s) defs) (recurse body)
-       CaseE inf scr alts ->
-         CaseE inf (recurse scr) (map recurse alts)
-       ExceptE inf ty ->
-         ExceptE inf (substitute s ty)
-    where
-      {-# INLINE recurse #-}
-      recurse :: Substitutable a => a -> a
-      recurse = substitute s
+            Nothing -> return (ExpM expression)
+       LitE {} -> return (ExpM expression)
+       AppE inf op ts es -> do
+         op' <- substitute s op
+         ts' <- mapM (substitute s) ts
+         es' <- mapM (substitute s) es
+         return $ ExpM $ AppE inf op' ts' es'
+       LamE inf f -> do
+         f' <- substitute s f
+         return $ ExpM $ LamE inf f'
+       LetE inf p val body -> do
+         val' <- substitute s val
+         substitutePatM s p $ \s' p' -> do
+           body' <- substitute s' body
+           return $ ExpM $ LetE inf p' val' body'
+       LetfunE inf defs body -> do
+         -- For simplicity, always rename the definition group 
+         ExpM (LetfunE inf defs' body') <- freshen (ExpM expression)
+         defs'' <- mapM (mapMDefiniens (substitute s)) defs'
+         body'' <- substitute s body'
+         return $ ExpM $ LetfunE inf defs'' body''
+       CaseE inf scr alts -> do
+         scr' <- substitute s scr
+         alts' <- mapM (substitute s) alts
+         return $ ExpM $ CaseE inf scr' alts'
+       ExceptE inf ty -> do
+         ty' <- substitute s ty
+         return $ ExpM $ ExceptE inf ty
 
 instance Substitutable (Alt Mem) where
-  substitute s (AltM alt) =
-    AltM $ Alt { altConstructor = altConstructor alt
-               , altTyArgs = map (substitute s) $ altTyArgs alt
-               , altExTypes = map (substituteTyPatM s) $ altExTypes alt
-               , altParams = map (substitutePatM s) $ altParams alt
-               , altBody = substitute s $ altBody alt}
+  substitute s (AltM alt) = do
+    ty_args <- mapM (substitute s) $ altTyArgs alt
+    substituteTyPatMs s (altExTypes alt) $ \s' ex_types ->
+      substitutePatMs s' (altParams alt) $ \s'' params -> do
+        body <- substitute s'' $ altBody alt
+        return $ AltM $ Alt { altConstructor = altConstructor alt
+                            , altTyArgs = ty_args
+                            , altExTypes = ex_types
+                            , altParams = params
+                            , altBody = body}
 
 instance Substitutable (Fun Mem) where
   substitute s (FunM fun) =
-    FunM $ Fun { funInfo = funInfo fun
-               , funTyParams = map (substituteTyPatM s) $ funTyParams fun 
-               , funParams = map (substitutePatM s) $ funParams fun
-               , funReturn = substitute s $ funReturn fun
-               , funBody = substitute s $ funBody fun}
-
-substituteDefM s def = def {definiens = substitute s $ definiens def}
+    substituteTyPatMs s (funTyParams fun) $ \s' ty_params ->
+    substitutePatMs s' (funParams fun) $ \s'' params -> do
+      body <- substitute s'' $ funBody fun
+      ret <- substitute s'' $ funReturn fun
+      return $ FunM $ Fun { funInfo = funInfo fun
+                          , funTyParams = ty_params
+                          , funParams = params
+                          , funReturn = ret
+                          , funBody = body}
 
 -------------------------------------------------------------------------------
 -- Recursive renaming.  All names bound in an expression are renamed to fresh
@@ -375,23 +411,21 @@ freshenType ty = ReaderT $ \rn -> return $ rename rn ty
 
 freshenDmd dmd = ReaderT $ \rn -> return $ rename rn dmd
 
-freshenRet (RetM (rrepr ::: rtype)) =
-  ReaderT $ \rn -> return (RetM (rrepr ::: rename rn rtype))
+freshenRet (RetM rtype) =
+  ReaderT $ \rn -> return (RetM (rename rn rtype))
 
-freshenTyParam (TyPatM v ty) k = do
+freshenTyParam (TyPatM (v ::: ty)) k = do
   ty' <- freshenType ty
-  freshenVar v $ \v' -> k (TyPatM v' ty')
+  freshenVar v $ \v' -> k (TyPatM (v' ::: ty'))
 
-freshenParam (MemVarP v (prepr ::: ty) dmd) k = do
+freshenParam (MemVarP (v ::: ty) dmd) k = do
   ty' <- freshenType ty
   dmd' <- freshenDmd dmd
-  freshenVar v $ \v' -> k (MemVarP v' (prepr ::: ty') dmd')
+  freshenVar v $ \v' -> k (MemVarP (v' ::: ty') dmd')
 
-freshenParam (MemWildP (prepr ::: ty)) k = do
+freshenParam (MemWildP ty) k = do
   ty' <- freshenType ty
-  k (MemWildP (prepr ::: ty'))
-
-freshenParam (LocalVarP {}) _ = internalError "freshenParam"
+  k (MemWildP ty')
 
 freshenExp (ExpM expression) = ExpM <$>
   case expression
@@ -403,16 +437,6 @@ freshenExp (ExpM expression) = ExpM <$>
        mapM freshenType ty_args <*>
        mapM freshenExp args
      LamE inf f -> LamE inf <$> freshenFun f
-     LetE inf (LocalVarP pat_var ty dict uses) rhs body -> do
-       ty' <- freshenType ty
-       dict' <- freshenExp dict
-       uses' <- freshenDmd uses
-       freshenVar pat_var $ \pat_var' -> do
-         rhs' <- freshenExp rhs
-         body' <- freshenExp body
-         trace ("freshenLocal " ++ show pat_var ++ " " ++ show pat_var') $
-           return $ LetE inf (LocalVarP pat_var' ty' dict' uses') rhs' body'
-         
      LetE inf binder rhs body -> do
        rhs' <- freshenExp rhs
        freshenParam binder $ \binder' -> do

@@ -10,16 +10,11 @@ module SystemF.MemoryIR
         Mentions(..),
         Typ(..),
         TyPat(..),
-        Pat(MemVarP, LocalVarP, MemWildP),
-        memVarP, localVarP, memWildP,
+        Pat(MemVarP, MemWildP),
+        memVarP, memWildP,
         patMVar,
         patMVar',
         patMType,
-        patMParamType,
-        patMRepr,
-        patMReturnType,
-        patMReturnRepr,
-        patMDict,
         patMUses,
         setPatMUses,
         patMDmd,
@@ -53,11 +48,11 @@ data instance Pat Mem =
     --   * BoxPT, ReadPT, OutPT: bind a pointer
     --   * WritePT: not permitted
     MemVarP
-    { _patMVar :: Var 
-    , _patMParamType :: {-#UNPACK#-}!ParamType
+    { _patMBinder :: {-#UNPACK#-}!Binder
     , _patMUses :: {-#UNPACK#-}!Dmd
     }
 
+{-
     -- | A local, dynamically allocated variable.  The dynamically allocated
     --   memory exists as long as the variable is in scope.  The pattern takes
     --   a representation dictionary for this type as a parameter.
@@ -68,41 +63,34 @@ data instance Pat Mem =
     , _patMType :: Type
     , _patMDict :: ExpM
     , _patMUses :: {-#UNPACK#-}!Dmd
-    }
+    } -}
     
     -- | A wildcard pattern.  No variable is bound to this value.
     --
     -- This pattern may only appear in a function parameter or case 
     -- alternative.  It may not appear in a let expression.
   | MemWildP 
-    { _patMParamType :: {-#UNPACK#-}!ParamType
+    { _patMType :: Type
     }
 
-memVarP :: Var -> ParamType -> PatM
-memVarP v pt = MemVarP v pt unknownDmd
+memVarP :: Binder -> PatM
+memVarP binder = MemVarP binder unknownDmd
 
-localVarP :: Var -> Type -> ExpM -> PatM
-localVarP v t d = LocalVarP v t d unknownDmd
-
-memWildP :: ParamType -> PatM
+memWildP :: Type -> PatM
 memWildP pt = MemWildP pt
 
 patMVar :: PatM -> Maybe Var
-patMVar (MemVarP {_patMVar = v}) = Just v
-patMVar (LocalVarP {_patMVar = v}) = Just v
+patMVar (MemVarP (v ::: _) _) = Just v
 patMVar (MemWildP {}) = Nothing
 
 patMVar' :: PatM -> Var
-patMVar' = _patMVar
+patMVar' p = case patMVar p of Just v -> v
 
 patMType :: PatM -> Type
-patMType (MemVarP {_patMParamType = _ ::: ty}) = ty
-patMType (LocalVarP {_patMType = ty}) = ty
-patMType (MemWildP {_patMParamType = _ ::: ty}) = ty
+patMType (MemVarP {_patMBinder = _ ::: ty}) = ty
+patMType (MemWildP {_patMType = ty}) = ty
 
-patMDict (LocalVarP {_patMDict = d}) = d
-patMDict _ = internalError "patMDict"
-
+{-
 -- | Get the representation of the value bound to this pattern.
 --   It's an error to call this on a 'LocalVarP'.
 patMRepr :: PatM -> ParamRepr
@@ -111,7 +99,7 @@ patMRepr (LocalVarP {}) = internalError "patMRepr"
 patMRepr (MemWildP {_patMParamType = prepr ::: _}) = prepr
 
 -- | Get the representation of the value bound to this pattern.
-patMParamType :: PatM -> ParamType
+patMParamType :: PatM -> Type
 patMParamType (MemVarP {_patMParamType = pt}) = pt
 patMParamType (MemWildP {_patMParamType = pt}) = pt
 patMParamType (LocalVarP {}) = internalError "patMParamType"
@@ -128,6 +116,7 @@ patMReturnRepr (MemWildP {_patMParamType = prepr ::: _}) =
 
 patMReturnType :: PatM -> ReturnType
 patMReturnType pat = patMReturnRepr pat ::: patMType pat
+-}
 
 -- | For compatibility with old code, we can convert between mentions and
 --   demand types.
@@ -152,14 +141,13 @@ setPatMUses m pat = pat {_patMUses = mentionToDmd m}
 
 patMDmd :: PatM -> Dmd
 patMDmd (MemVarP {_patMUses = u}) = u
-patMDmd (LocalVarP {_patMUses = u}) = u
 patMDmd (MemWildP {}) = bottom
 
 setPatMDmd :: Dmd -> PatM -> PatM
 setPatMDmd m pat = pat {_patMUses = m}
 
-data instance TyPat Mem  = TyPatM Var Type
-newtype instance Ret Mem = RetM {fromRetM :: ReturnType}
+newtype instance TyPat Mem  = TyPatM Binder
+newtype instance Ret Mem = RetM {fromRetM :: Type}
 newtype instance Exp Mem = ExpM {fromExpM :: BaseExp Mem}
 newtype instance Alt Mem = AltM {fromAltM :: BaseAlt Mem}
 newtype instance Fun Mem = FunM {fromFunM :: BaseFun Mem}

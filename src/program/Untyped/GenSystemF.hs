@@ -359,8 +359,9 @@ mkExport pos spec f = SystemF.Export pos spec f
 
 convertKind :: Kind -> TIType
 convertKind k = delayType $ SystemF.TypSF $ convertKind' k
-    
-convertKind' Star = Type.Type.pureT
+
+-- The base kind translates to a boxed type
+convertKind' Star = Type.Type.boxT
 convertKind' (k1 :-> k2) = mkArrowType (convertKind' k1) (convertKind' k2)
 
 convertHMType :: HMType -> TIType
@@ -403,7 +404,7 @@ convertHMType' ty = do
     AnyTy k -> return $ Type.Type.AnyT $ convertKind' k
 
 mkArrowType :: Type.Type.Type -> Type.Type.Type -> Type.Type.Type
-mkArrowType d r = Type.Type.FunT (Type.Type.ValPT Nothing Type.Type.::: d) (Type.Type.ValRT Type.Type.::: r)
+mkArrowType = Type.Type.FunT
 
 -- | Make the type of an uncurried Pyon function from @domain@ to @range@.
 --
@@ -414,6 +415,9 @@ mkFunctionType :: [Type.Type.Type]      -- ^ domain
                -> Type.Type.Type        -- ^ System F type
 mkFunctionType domain range =
   foldr mkArrowType range domain
+
+mkForallType :: Var -> Type.Type.Type -> Type.Type.Type -> Type.Type.Type
+mkForallType v dom rng = Type.Type.AllT (v Type.Type.::: dom) rng
 
 convertPredicate :: Predicate -> TIType
 convertPredicate prd = DelayedType $ fmap SystemF.TypSF $ convertPredicate' prd 
@@ -434,9 +438,7 @@ convertTyScheme (TyScheme qvars cst ty) = DelayedType $ do
   return $ SystemF.TypSF parametric_type
   where
     mkFun (v, gluon_v) ty =
-      let param = Type.Type.ValPT (Just gluon_v) Type.Type.::: convertKind' (tyConKind v)
-          result = Type.Type.ValRT Type.Type.::: ty
-      in Type.Type.FunT param result
+      mkForallType gluon_v (convertKind' (tyConKind v)) ty
 
 -- | Create an instance expression with placeholders for all constraints
 instanceExpression :: SourcePos

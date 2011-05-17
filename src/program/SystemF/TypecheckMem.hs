@@ -3,7 +3,7 @@
              FlexibleInstances, DeriveDataTypeable, TypeSynonymInstances #-}
 module SystemF.TypecheckMem
        (Typed,
-        RTypeAnn(..),
+        TypeAnn(..),
         Typ(..),
         Exp(..),
         Alt(..),
@@ -52,21 +52,15 @@ import Type.Type
 import Type.Rename
 import Type.Compare
 
-data RTypeAnn a = 
-  RTypeAnn { typeAnnotation :: {-# UNPACK #-}!ReturnType
-           , typeAnnValue :: a
-           }
+newtype instance Typ (Typed Mem) = TypTM (TypeAnn Type)
+newtype instance Exp (Typed Mem) = ExpTM (TypeAnn (BaseExp TM))
+newtype instance Alt (Typed Mem) = AltTM (TypeAnn (BaseAlt TM))
+newtype instance Fun (Typed Mem) = FunTM (TypeAnn (BaseFun TM))
 
-newtype instance Typ (Typed Mem) = TypTM (RTypeAnn Type)
-newtype instance Exp (Typed Mem) = ExpTM (RTypeAnn (BaseExp TM))
-newtype instance Alt (Typed Mem) = AltTM (RTypeAnn (BaseAlt TM))
-newtype instance Fun (Typed Mem) = FunTM (RTypeAnn (BaseFun TM))
-
-data instance Pat (Typed Mem) = TypedMemVarP Var ParamType
-                              | TypedLocalVarP Var Type ExpTM
-                              | TypedMemWildP ParamType
+data instance Pat (Typed Mem) = TypedMemVarP Binder
+                              | TypedMemWildP Type
 data instance TyPat (Typed Mem) = TyPatTM Var TypTM
-newtype instance Ret (Typed Mem) = RetTM {fromRetTM :: ReturnType}
+newtype instance Ret (Typed Mem) = RetTM {fromRetTM :: Type}
 
 type TM = Typed Mem
 
@@ -78,38 +72,37 @@ type PatTM = Pat TM
 type TyPatTM = TyPat TM
 
 -- | Get the type of an expression
-getExpType :: ExpTM -> ReturnType
-getExpType (ExpTM (RTypeAnn t _)) = t
+getExpType :: ExpTM -> Type
+getExpType (ExpTM (TypeAnn t _)) = t
 
 -- | Get the kind of a type
 getTypType :: TypTM -> Type
-getTypType (TypTM (RTypeAnn (_ ::: t) _)) = t
+getTypType (TypTM (TypeAnn t _)) = t
 
 fromTypTM :: TypTM -> Type 
-fromTypTM (TypTM (RTypeAnn _ t)) = t
+fromTypTM (TypTM (TypeAnn _ t)) = t
 
 tyPatType :: TyPat Mem -> Type
-tyPatType (TyPatM _ t) = t
+tyPatType (TyPatM (_ ::: t)) = t
 
 fromTyPatTM :: TyPatTM -> TyPatM
-fromTyPatTM (TyPatTM v t) = TyPatM v (fromTypTM t)
+fromTyPatTM (TyPatTM v t) = TyPatM (v ::: fromTypTM t)
 
 fromPatTM :: PatTM -> PatM
-fromPatTM (TypedMemVarP v pt) = memVarP v pt
-fromPatTM (TypedLocalVarP v ty repr) = localVarP v ty (dtae repr)
+fromPatTM (TypedMemVarP binder) = memVarP binder
 fromPatTM (TypedMemWildP pt) = memWildP pt
 
 -- | Determine the type that a pattern-bound variable has after it's been 
 --   bound.
-patType :: PatM -> ReturnType
-patType = patMReturnType
+patType :: PatM -> Type
+patType = patMType
 
 -- | An abbreviation for the long function name
 dtae = discardTypeAnnotationsExp
 
 -- | Remove type annotations from an expression
 discardTypeAnnotationsExp :: ExpTM -> ExpM
-discardTypeAnnotationsExp (ExpTM (RTypeAnn _ expression)) = ExpM $ 
+discardTypeAnnotationsExp (ExpTM (TypeAnn _ expression)) = ExpM $ 
   case expression
   of VarE inf v -> VarE inf v
      LitE inf l -> LitE inf l
@@ -125,7 +118,7 @@ discardTypeAnnotationsExp (ExpTM (RTypeAnn _ expression)) = ExpM $
        CaseE inf (dtae scr) (map discard_alt alts)
      ExceptE inf rty -> ExceptE inf rty
   where
-    discard_alt (AltTM (RTypeAnn _ alt)) =
+    discard_alt (AltTM (TypeAnn _ alt)) =
       AltM $ Alt { altConstructor = altConstructor alt
                  , altTyArgs = map (TypM . fromTypTM) $ altTyArgs alt
                  , altExTypes = map fromTyPatTM $ altExTypes alt
@@ -133,7 +126,7 @@ discardTypeAnnotationsExp (ExpTM (RTypeAnn _ expression)) = ExpM $
                  , altBody = dtae $ altBody alt}
 
 discardTypeAnnotationsFun :: FunTM -> FunM
-discardTypeAnnotationsFun (FunTM (RTypeAnn _ f)) =
+discardTypeAnnotationsFun (FunTM (TypeAnn _ f)) =
   FunM $ Fun { funInfo = funInfo f
              , funTyParams = map fromTyPatTM $ funTyParams f
              , funParams = map fromPatTM $ funParams f
@@ -147,27 +140,21 @@ functionType (FunM (Fun { funTyParams = ty_params
                         , funParams = params
                         , funReturn = RetM ret
                         })) =
-  let ty_param_reprs = [ValPT (Just v) ::: k | TyPatM v k <- ty_params]
-      param_reprs = map patMParamType params
-      ret_repr = ret
-  in funType (ty_param_reprs ++ param_reprs) ret_repr
+  forallType [b | TyPatM b <- ty_params] $
+  funType (map patMType params) ret
 
 -------------------------------------------------------------------------------
 
 assumePat :: PatM -> (PatTM -> TCM b) -> TCM b
-assumePat (MemVarP v (prepr ::: ty) _) k =
-  assume v (paramReprToReturnRepr prepr ::: ty) $
-  k (TypedMemVarP v (prepr ::: ty))
+assumePat (MemVarP (v ::: ty) _) k =
+  assume v ty $ k (TypedMemVarP (v ::: ty))
 
-assumePat (LocalVarP {}) k = internalError "assumePat"
-
-assumePat (MemWildP (prepr ::: ty)) k = k (TypedMemWildP (prepr ::: ty))
+assumePat (MemWildP ty) k = k (TypedMemWildP ty)
 
 -- | Add pattern-bound variables from a let statement to the environment 
 --   while processing the definition of the local value
 assumeDefiningLetPattern :: PatM -> TCM a -> TCM a
 assumeDefiningLetPattern (MemVarP {}) m = m -- Not visible during definition
-assumeDefiningLetPattern (LocalVarP v ty _ _) m = assume v (OutRT ::: ty) m
 assumeDefiningLetPattern (MemWildP {}) _ =
   internalError "assumeDefiningLetPattern: Unexpected wildcard"
 
@@ -177,52 +164,23 @@ assumeUsingLetPattern :: PatM -> TCM a -> TCM a
 assumeUsingLetPattern pattern k =
   case pattern
   of MemVarP {}         -> assumePat pattern $ \_ -> k
-     LocalVarP v ty _ _ -> assume v (ReadRT ::: ty) k
      MemWildP {}        -> internalError "assumeUsingLetPattern: Unexpected wildcard"
      
 assumeTyPat :: TyPat Mem -> (TyPat TM -> TCM b) -> TCM b
-assumeTyPat (TyPatM v t) k = do
+assumeTyPat (TyPatM (v ::: t)) k = do
   t' <- typeInferType (TypM t)
-  assume v (ValRT ::: t) $ k (TyPatTM v t')
+  assume v t $ k (TyPatTM v t')
 
 -- Assume a function definition.  Do not check the function definition's body.
 assumeDef :: Def Mem -> TCM a -> TCM a
-assumeDef (Def v _ fun) = assume v (BoxRT ::: functionType fun)
+assumeDef (Def v _ fun) = assume v (functionType fun)
 
 assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 
 typeInferType :: TypM -> TCM TypTM
-typeInferType (TypM ty) =
-  case ty
-  of VarT v -> return_type =<< lookupVar v
-     IntT _ -> return_type (ValRT ::: intindexT)
-     AppT op arg -> do
-         -- Get type of operator and argument
-         op' <- typeInferType (TypM op)
-         arg' <- typeInferType (TypM arg)
-         let inferred_arg = fromTypTM arg'
-             
-         -- Get type of application
-         applied <- applyType (getTypType op') (ValRT ::: getTypType arg') (Just inferred_arg)
-         case applied of
-           Nothing -> typeError "Error in type application"
-           Just result_t -> return_type result_t
-
-     FunT (param ::: dom) (ret ::: rng) -> do
-       -- Check that types are valid
-       typeInferType (TypM dom)
-       assume_param param dom $ typeInferType (TypM rng)
-
-       case getLevel rng of
-         TypeLevel -> return_type (ValRT ::: pureT)
-         KindLevel -> return_type (ValRT ::: kindT)
-     AnyT k -> return_type (ValRT ::: k)
-  where
-    assume_param (ValPT (Just v)) t k = assume v (ValRT ::: t) k
-    assume_param _ _ k = k
-    
-    return_type inferred_type =
-      return $ TypTM (RTypeAnn inferred_type ty)
+typeInferType (TypM ty) = do
+  k <- typeCheckType ty
+  return $ TypTM (TypeAnn k ty)
 
 typeInferExp :: ExpM -> TCM ExpTM
 typeInferExp (ExpM expression) =
@@ -235,8 +193,8 @@ typeInferExp (ExpM expression) =
          typeInferAppE (ExpM expression) inf op ts args
        LamE {expInfo = inf, expFun = f} -> do
          ti_fun <- typeInferFun f
-         let FunTM (RTypeAnn return_type _) = ti_fun
-         return $ ExpTM $ RTypeAnn return_type (LamE inf ti_fun)
+         let FunTM (TypeAnn return_type _) = ti_fun
+         return $ ExpTM $ TypeAnn return_type (LamE inf ti_fun)
        LetE {expInfo = inf, expBinder = pat, expValue = e, expBody = body} ->
          typeInferLetE inf pat e body
        LetfunE {expInfo = inf, expDefs = defs, expBody = body} ->
@@ -244,13 +202,13 @@ typeInferExp (ExpM expression) =
        CaseE {expInfo = inf, expScrutinee = scr, expAlternatives = alts} ->
          typeInferCaseE inf scr alts
        ExceptE {expInfo = inf, expType = rt} ->
-         return $ ExpTM $ RTypeAnn rt (ExceptE inf rt)
+         return $ ExpTM $ TypeAnn rt (ExceptE inf rt)
 
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCM ExpTM
 typeInferVarE inf var = do
   ty <- lookupVar var
-  return $ ExpTM $ RTypeAnn ty (VarE inf var)
+  return $ ExpTM $ TypeAnn ty (VarE inf var)
 
 -- Use the type that was attached to the literal value, but also verify that
 -- it's a valid type
@@ -258,7 +216,7 @@ typeInferLitE :: ExpInfo -> Lit -> TCM ExpTM
 typeInferLitE inf l = do
   let literal_type = literalType l
   checkLiteralType l
-  return $ ExpTM $ RTypeAnn (ValRT ::: literal_type) (LitE inf l)
+  return $ ExpTM $ TypeAnn literal_type (LitE inf l)
 
 typeInferAppE orig_expr inf op ty_args args = do
   let pos = getSourcePos inf
@@ -273,14 +231,15 @@ typeInferAppE orig_expr inf op ty_args args = do
   result_type <- computeAppliedType pos inst_type (map getExpType ti_args)
   
   let new_exp = AppE inf ti_op ti_ty_args ti_args
-  return $ ExpTM $ RTypeAnn result_type new_exp
+  return $ ExpTM $ TypeAnn result_type new_exp
 
-computeInstantiatedType :: SourcePos -> ReturnType -> [TypTM] -> TCM ReturnType
+-- | Compute the type of the result of applying an operator to some
+--   type arguments.
+computeInstantiatedType :: SourcePos -> Type -> [TypTM] -> TCM Type
 computeInstantiatedType inf op_type args = go op_type args
   where
-    go (BoxRT ::: op_type) (TypTM (RTypeAnn arg_kind arg) : args) = do
-      -- Apply operator to argument
-      app_type <- applyType op_type arg_kind (Just arg)
+    go op_type (TypTM (TypeAnn arg_kind arg) : args) = do
+      app_type <- typeOfTypeApp op_type arg_kind arg
       case app_type of
         Just result_type -> go result_type args
         Nothing -> typeError "Error in type application"
@@ -292,14 +251,14 @@ computeInstantiatedType inf op_type args = go op_type args
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
 computeAppliedType :: SourcePos 
-                   -> ReturnType
-                   -> [ReturnType]
-                   -> TCM ReturnType
+                   -> Type
+                   -> [Type]
+                   -> TCM Type
 computeAppliedType pos op_type arg_types =
   apply op_type arg_types
   where
-    apply (BoxRT ::: op_type) (arg_t:arg_ts) = do
-      result <- applyType op_type arg_t Nothing
+    apply op_type (arg_t:arg_ts) = do
+      result <- typeOfApp op_type arg_t
       case result of
         Just op_type' -> apply op_type' arg_ts
         Nothing -> typeError $ "Error in application at " ++ show pos
@@ -318,7 +277,7 @@ typeInferFun fun@(FunM (Fun { funInfo = info
     ti_body <- typeInferExp body
 
     -- Inferred type must match return type
-    checkReturnType noSourcePos return_type (getExpType ti_body)
+    checkType noSourcePos return_type (getExpType ti_body)
     
     -- Create the function's type
     let ty = functionType fun
@@ -330,7 +289,7 @@ typeInferFun fun@(FunM (Fun { funInfo = info
               , funReturn = RetTM return_type
               , funBody = ti_body
               }
-    return $ FunTM $ RTypeAnn (BoxRT ::: ty) new_fun
+    return $ FunTM $ TypeAnn ty new_fun
   where
     assumeTyParams = withMany assumeTyPat ty_params
     assumeParams = withMany assumePat params
@@ -341,18 +300,15 @@ typeInferLetE inf pat expression body = do
   ti_exp <- assumeDefiningLetPattern pat $ typeInferExp expression
 
   -- Expression type must match pattern type
-  checkReturnType noSourcePos (getExpType ti_exp) (patType pat)
+  checkType noSourcePos (getExpType ti_exp) (patType pat)
 
   -- Assume the pattern while inferring the body; result is the body's type
   ti_body <- assumeUsingLetPattern pat $ typeInferExp body
   let return_type = getExpType ti_body
       new_exp = LetE inf ti_pat ti_exp ti_body
-  return $ ExpTM $ RTypeAnn return_type new_exp
+  return $ ExpTM $ TypeAnn return_type new_exp
   where
-    type_infer_pattern (MemVarP v pt _) = return $ TypedMemVarP v pt
-    type_infer_pattern (LocalVarP v ty repr _) = do
-      repr' <- typeInferExp repr
-      return $ TypedLocalVarP v ty repr'
+    type_infer_pattern (MemVarP binder _) = return $ TypedMemVarP binder
     type_infer_pattern (MemWildP pt) =
       internalError "typeInferLetE: Unexpected wildcard"
 
@@ -361,7 +317,7 @@ typeInferLetfunE inf defs body =
   typeCheckDefGroup defs $ \defs' -> do
     ti_body <- typeInferExp body
     let new_exp = LetfunE inf defs' ti_body
-    return $ ExpTM $ RTypeAnn (getExpType ti_body) new_exp
+    return $ ExpTM $ TypeAnn (getExpType ti_body) new_exp
 
 typeInferCaseE :: ExpInfo -> ExpM -> [AltM] -> TCM ExpTM
 typeInferCaseE inf scr alts = do
@@ -377,14 +333,14 @@ typeInferCaseE inf scr alts = do
   ti_alts <- mapM (typeCheckAlternative pos scr_type) alts
 
   -- All alternatives must match
-  let alt_subst_types = [rt | AltTM (RTypeAnn rt _) <- ti_alts]
-  zipWithM (checkReturnType pos) alt_subst_types (tail alt_subst_types)
+  let alt_subst_types = [rt | AltTM (TypeAnn rt _) <- ti_alts]
+  zipWithM (checkType pos) alt_subst_types (tail alt_subst_types)
 
   -- The expression's type is the type of an alternative
-  let result_type = case head ti_alts of AltTM (RTypeAnn rt _) -> rt
-  return $! ExpTM $! RTypeAnn result_type $ CaseE inf ti_scr ti_alts
+  let result_type = case head ti_alts of AltTM (TypeAnn rt _) -> rt
+  return $! ExpTM $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
 
-typeCheckAlternative :: SourcePos -> ReturnType -> AltM -> TCM AltTM
+typeCheckAlternative :: SourcePos -> Type -> AltM -> TCM AltTM
 typeCheckAlternative pos scr_type (AltM (Alt { altConstructor = con
                                              , altTyArgs = types
                                              , altExTypes = ex_fields
@@ -397,12 +353,12 @@ typeCheckAlternative pos scr_type (AltM (Alt { altConstructor = con
   con_ty <- tcLookupDataCon con
   (_, inst_arg_types, con_scr_type) <-
     let argument_types =
-          [(ty, kind) | TypTM (RTypeAnn (_ ::: kind) ty) <- arg_vals]
-        existential_vars = [(v, k) | TyPatM v k <- ex_fields]
+          [(ty, kind) | TypTM (TypeAnn kind ty) <- arg_vals]
+        existential_vars = [(v, k) | TyPatM (v ::: k) <- ex_fields]
     in instantiatePatternType pos con_ty argument_types existential_vars
 
   -- Verify that applied type matches constructor type
-  checkReturnType pos scr_type con_scr_type
+  checkType pos scr_type con_scr_type
 
   -- Add existential variables to environment
   withMany assumeTyPat ex_fields $ \ex_fields' -> do
@@ -418,12 +374,12 @@ typeCheckAlternative pos scr_type (AltM (Alt { altConstructor = con
       ti_body <- typeInferExp body
 
       -- Make sure existential types don't escape 
-      let ret_repr ::: ret_type = getExpType ti_body
+      let ret_type = getExpType ti_body
       when (ret_type `typeMentionsAny` Set.fromList [v | TyPatTM v _ <- ex_fields']) $
         typeError "Existential type variable escapes"
 
       let new_alt = Alt con arg_vals ex_fields' fields' ti_body
-      return $ AltTM $ RTypeAnn (getExpType ti_body) new_alt
+      return $ AltTM $ TypeAnn (getExpType ti_body) new_alt
   where
     check_number_of_fields atypes fs
       | length atypes /= length fields =
@@ -433,24 +389,21 @@ typeCheckAlternative pos scr_type (AltM (Alt { altConstructor = con
 
     check_arg expected_rtype pat =
       let given_type = patMType pat
-          given_rrepr = paramReprToReturnRepr $ patMRepr pat
-      in checkReturnType pos expected_rtype (given_rrepr ::: given_type)
+      in checkType pos expected_rtype given_type
 
 bindParamTypes params m = foldr bind_param_type m params
   where
-    bind_param_type (TypedMemVarP param (param_repr ::: param_ty)) m =
-      assume param (paramReprToReturnRepr param_repr ::: param_ty) m
+    bind_param_type (TypedMemVarP (param ::: param_ty)) m =
+      assume param param_ty m
 
     bind_param_type (TypedMemWildP _) m = m
 
--- | Verify that the given paramater matches the expected parameter
+-- | Verify that the given parameter matches the expected parameter
 checkAltParam pos expected_type pattern = do 
-  let given_repr = patMRepr pattern 
-      given_type = patMType pattern
-  let gtype = paramReprToReturnRepr given_repr ::: given_type
-  checkReturnType pos expected_type gtype
+  let given_type = patMType pattern
+  checkType pos expected_type given_type
   return $ case pattern
-           of MemVarP field_var ptype _ -> TypedMemVarP field_var ptype
+           of MemVarP binder _ -> TypedMemVarP binder
               MemWildP ptype -> TypedMemWildP ptype
 
 typeCheckDefGroup :: DefGroup (Def Mem) -> (DefGroup (Def TM) -> TCM b) -> TCM b
@@ -485,7 +438,7 @@ typeCheckModule (Module module_name defs exports) = do
 
 -- | Infer the type of an expression.  The expression is assumed to be
 --   well-typed; this function doesn't check for most errors.
-inferExpType :: IdentSupply Var -> TypeEnv -> ExpM -> IO ReturnType
+inferExpType :: IdentSupply Var -> TypeEnv -> ExpM -> IO Type
 inferExpType id_supply tenv expression =
   runTypeEvalM (infer_exp expression) id_supply tenv
   where
@@ -494,7 +447,7 @@ inferExpType id_supply tenv expression =
     -- but their definitions are skipped.
     infer_exp expression =
       case fromExpM expression
-      of LamE _ f -> return $ BoxRT ::: functionType f
+      of LamE _ f -> return $ functionType f
          LetE _ pat e body ->
            assumeUsingLetPattern pat $ infer_exp body
          LetfunE _ defs body ->
@@ -515,10 +468,10 @@ inferExpType id_supply tenv expression =
 --   types.  If the application is not well-typed, an exception is raised.
 inferAppType :: IdentSupply Var
              -> TypeEnv
-             -> ReturnType      -- ^ Operator type
+             -> Type            -- ^ Operator type
              -> [TypM]          -- ^ Type arguments
-             -> [ReturnType]    -- ^ Operand types
-             -> IO ReturnType
+             -> [Type]          -- ^ Operand types
+             -> IO Type
 inferAppType id_supply tenv op_type ty_args arg_types =
   runTypeEvalM infer_type id_supply tenv
   where

@@ -73,25 +73,31 @@ instance ReprDictMonad m => ReprDictMonad (MaybeT m) where
   localDictEnv f (MaybeT m) = MaybeT (localDictEnv f m)
   localIntIndexEnv f (MaybeT m) = MaybeT (localIntIndexEnv f m)
 
+-- | Lookup the representation dictionary of a bare type
 lookupReprDict :: ReprDictMonad m => Type -> m (Maybe MkDict)
+lookupReprDict ty@(AnyT {}) =
+  -- These values act like referenced objects, but contain nothing
+  return $ Just $ mk_any_dict ty
+  where
+    mk_any_dict ty =
+      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_EmptyReference)
+          call = ExpM $ AppE defaultExpInfo op [TypM ty] []
+      in MkDict ($ call)
+     
 lookupReprDict ty =
-  case ty
-  of FunT {} ->
-       -- Functions all have the same representation
-       return $ Just $ mk_fun_dict ty
-     AnyT {} ->
-       -- These values act like referenced objects, but contain nothing
-       return $ Just $ mk_any_dict ty
+  case fromVarApp ty
+  of Just (op, [arg]) 
+       | op `isPyonBuiltin` the_BareType &&
+         is_function_type arg ->
+           return $ Just $ mk_fun_dict arg
      _ -> do
        tenv <- getTypeEnv
        id_supply <- getVarIDs
        denv <- getDictEnv
        liftIO $ DictEnv.lookup id_supply tenv ty denv
   where
-    mk_any_dict ty =
-      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_EmptyReference)
-          call = ExpM $ AppE defaultExpInfo op [TypM ty] []
-      in MkDict ($ call)
+    is_function_type (FunT {}) = True
+    is_function_type _ = False
 
     mk_fun_dict ty =
       -- Create a boxed representation object, and pass it to the continuation 
@@ -139,10 +145,9 @@ saveIndexedInt dict_type dict_exp m =
 saveReprDictPattern :: ReprDictMonad m => PatM -> m a -> m a
 saveReprDictPattern pattern m =
   case pattern
-  of MemVarP pat_var (BoxPT ::: ty) _
+  of MemVarP (pat_var ::: ty) _
        | Just repr_type <- get_repr_type ty ->
            saveReprDict repr_type (ExpM $ VarE defaultExpInfo pat_var) m
-     MemVarP pat_var (ValPT Nothing ::: ty) _
        | Just index <- get_int_index ty ->
            saveIndexedInt index (ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m
@@ -176,14 +181,17 @@ withReprDict param_type f = do
 
 createDictEnv :: FreshVarM (MkDictEnv, IntIndexEnv)
 createDictEnv = do
-  let int_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_int))
+  let int_dict = DictEnv.monoPattern
+                 (varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_int)])
                  (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_int))
-  let float_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_float))
+  let float_dict = DictEnv.monoPattern
+                   (varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_float)])
                    (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float))
-  let efftok_dict = DictEnv.monoPattern (VarT (pyonBuiltin the_EffTok))
+  let efftok_dict = DictEnv.monoPattern
+                    (varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_EffTok)])
                     (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_EffTok))
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
-  boxed_dict <- createBoxedDictPattern (pyonBuiltin the_Boxed) 1
+  boxed_dict <- createBoxedDictPattern (pyonBuiltin the_BoxedType) 1
   stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 2
   eq_dict <- createBoxedDictPattern (pyonBuiltin the_EqDict) 1
   ord_dict <- createBoxedDictPattern (pyonBuiltin the_OrdDict) 1
@@ -266,7 +274,7 @@ createDict_Tuple2 param_var1 param_var2 subst = MkDict $ \use_dict ->
     
     -- Construct the local variable pattern
     mk_pat tmpvar =
-      memVarP tmpvar (BoxPT ::: dict_type)
+      memVarP (tmpvar ::: dict_type)
     
     -- Construct the dictionary
     mk_dict dict1 dict2 =
@@ -295,7 +303,7 @@ createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $ \use_dict ->
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
     
     -- Construct the local variable pattern
-    mk_pat tmpvar = memVarP tmpvar (BoxPT ::: dict_type)
+    mk_pat tmpvar = memVarP (tmpvar ::: dict_type)
     
     -- Construct the dictionary
     mk_dict dict1 dict2 dict3 =
@@ -326,7 +334,7 @@ createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $ \use_dict ->
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
     
     -- Construct the local variable pattern
-    mk_pat tmpvar = memVarP tmpvar (BoxPT ::: dict_type)
+    mk_pat tmpvar = memVarP (tmpvar ::: dict_type)
     
     -- Construct the dictionary
     mk_dict dict1 dict2 dict3 dict4 =
@@ -385,7 +393,7 @@ createDict_array param_var1 param_var2 subst = MkDict $ \use_dict -> do
     
     -- Construct the local variable pattern
     mk_pat tmpvar =
-      memVarP tmpvar (BoxPT ::: dict_type)
+      memVarP (tmpvar ::: dict_type)
     
     -- Construct the dictionary
     mk_dict index dict2 =

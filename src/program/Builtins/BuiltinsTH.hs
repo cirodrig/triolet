@@ -38,7 +38,7 @@ pyonBuiltinTypeNames =
   , "Referenced"
   , "OutPtr"
   , "IEffect"
-  , "write"
+  , "Writer"
   , "BoxedType"
   , "BareType"
     
@@ -258,6 +258,8 @@ pyonBuiltinVariableNames =
   , "load"
   , "store"
   , "copy"
+  , "convertToBoxed"
+  , "convertToBare"
   , "loadBox"
   , "storeBox"
   , "copyBox"

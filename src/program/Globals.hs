@@ -33,7 +33,7 @@ the_systemFTypes :: InitGlobalVar Type.Environment.TypeEnv
 {-# NOINLINE the_systemFTypes #-}
 the_systemFTypes = defineInitGlobalVar ()
 
--- | The types of Core terms.
+-- | The types of Core terms.  This variable is going to go away.
 the_newCoreTypes :: InitGlobalVar Type.Environment.TypeEnv
 {-# NOINLINE the_newCoreTypes #-}
 the_newCoreTypes = defineInitGlobalVar ()

@@ -22,7 +22,9 @@ evType :: Untyped.TIType -> IO Type
 evType (Untyped.DelayedType m) = fmap fromTypSF m
 
 evTyParam :: TyPat Untyped.TI -> IO (TyPat SF)
-evTyParam (Untyped.TITyPat v t) = TyPatSF v `liftM` evType t
+evTyParam (Untyped.TITyPat v t) = do
+  t' <- evType t
+  return (TyPatSF (v ::: t'))
 
 evPat :: Pat Untyped.TI -> IO PatSF
 evPat (Untyped.TIWildP t)   = WildP `liftM` evType t

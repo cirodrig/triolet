@@ -25,6 +25,7 @@ import LowLevel.FreshVar
 import LowLevel.Print
 import qualified Type.Environment
 import Type.Type hiding(Var, runFreshVarM)
+import qualified Type.Eval
 import qualified Type.Var
 
 -- This module helps us translate System F types into low-level types
@@ -88,7 +89,7 @@ lowerBuiltinFunType :: IdentSupply Type.Var.Var
                     -> IO FunctionType
 lowerBuiltinFunType type_v_ids v_ids type_env con =
   case Type.Environment.lookupType con type_env
-  of Just (BoxRT ::: ty) ->
+  of Just ty ->
        lowerFunctionType v_ids type_v_ids type_env ty `catch`
        \(exc :: SomeException) -> do
          putStrLn $ "Error while processing builtin '" ++ show con ++ "'"
@@ -104,9 +105,12 @@ lowerBuiltinObjType :: Type.Environment.TypeEnv
                     -> IO ValueType
 lowerBuiltinObjType type_env var =
   case Type.Environment.lookupType var type_env
-  of Just (BoxRT ::: _)  -> return $ PrimType OwnedType
-     Just (ReadRT ::: _) -> return $ PrimType PointerType
-     Just _ -> internalError $
+  of Just t ->
+       case Type.Eval.typeKind type_env t
+       of Type.Type.VarT kind
+            | kind == Type.Type.boxV -> return $ PrimType OwnedType
+            | kind == Type.Type.bareV -> return $ PrimType OwnedType
+          _ -> internalError $
                "lowerBuiltinObjType: Incompatible representation for " ++ show var
      Nothing -> internalError $
                "lowerBuiltinObjType: Missing type for " ++ show var

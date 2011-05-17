@@ -24,11 +24,10 @@ import Paths
 import GlobalVar
 import Globals
 
-import CParser.PrettyAST()
-
 predefinedVarDetails :: [(String, VarDetails)]
 predefinedVarDetails =
-  map mk_var_details (valV : boxV : bareV : outV : intindexV :
+  map mk_var_details (valV : boxV : bareV : outV : intindexV : sideeffectV :
+                      writeV :
                       posInftyV : allBuiltinVars)
   where
     mk_var_details v = (name, PredefinedVar v type_function)

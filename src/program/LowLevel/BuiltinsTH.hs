@@ -282,14 +282,6 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_blocked_doall) |])
 
     -- Functions that are replaced by primitive operations
-  , (PyonName module_prim "storeBox",
-     Right [| pyonBuiltin SystemF.the_storeBox |])
-  , (PyonName module_prim "loadBox",
-     Right [| pyonBuiltin SystemF.the_loadBox |])
-  , (PyonName module_prim "ptrToBox",
-     Right [| pyonBuiltin SystemF.the_ptrToBox |])
-  , (PyonName module_prim "boxToPtr",
-     Right [| pyonBuiltin SystemF.the_boxToPtr |])
   , (PyonName module_prim "eq_int",
      Right [| pyonBuiltin (SystemF.the_EqDict_int_eq) |])
   , (PyonName module_prim "ne_int",

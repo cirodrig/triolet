@@ -59,6 +59,7 @@ lamE mk_f = do
 letE :: PatM -> ExpM -> ExpM -> ExpM
 letE pat val body = ExpM $ LetE defaultExpInfo pat val body
 
+{-
 localE :: (Supplies m VarID) =>
           TypM -> ExpM -> (ExpM -> m ExpM) -> (ExpM -> m ExpM) -> m ExpM
 localE ty repr mk_rhs mk_body = do
@@ -66,7 +67,7 @@ localE ty repr mk_rhs mk_body = do
   let tmpvar_binder = localVarP tmpvar (fromTypM ty) repr
   rhs <- mk_rhs (ExpM $ VarE defaultExpInfo tmpvar)
   body <- mk_body (ExpM $ VarE defaultExpInfo tmpvar)
-  return $ ExpM $ LetE defaultExpInfo tmpvar_binder rhs body
+  return $ ExpM $ LetE defaultExpInfo tmpvar_binder rhs body-}
 
 letfunE :: DefGroup (Def Mem) -> ExpM -> ExpM
 letfunE defs body = ExpM $ LetfunE defaultExpInfo defs body
@@ -77,7 +78,7 @@ caseE scr alts = do
   alts' <- sequence alts
   return $ ExpM $ CaseE defaultExpInfo scr' alts'
 
-exceptE :: (Supplies m VarID) => ReturnType -> m ExpM
+exceptE :: (Supplies m VarID) => Type -> m ExpM
 exceptE ty = return $ ExpM $ ExceptE defaultExpInfo ty
 
 ifE :: (Supplies m VarID) => m ExpM -> m ExpM -> m ExpM -> m ExpM
@@ -91,7 +92,7 @@ ifE mk_cond mk_tr mk_fa = do
 
 mkFun :: (Supplies m VarID) =>
          [Type]
-      -> ([Var] -> m ([ParamType], ReturnType))
+      -> ([Var] -> m ([Type], Type))
       -> ([Var] -> [Var] -> m ExpM)
       -> m FunM
 mkFun typaram_kinds mk_params mk_body = do
@@ -99,14 +100,14 @@ mkFun typaram_kinds mk_params mk_body = do
   (param_types, return_type) <- mk_params typaram_vars
   param_vars <- mapM (const $ newAnonymousVar ObjectLevel) param_types
   body <- mk_body typaram_vars param_vars
-  let typarams = zipWith TyPatM typaram_vars typaram_kinds
-      params = zipWith memVarP param_vars param_types
+  let typarams = [TyPatM (v ::: k) | (v, k) <- zip typaram_vars typaram_kinds]
+      params = [memVarP (v ::: t) | (v, t) <- zip param_vars param_types]
       ret = RetM return_type
   return $ FunM $ Fun defaultExpInfo typarams params ret body
   where
     mk_typaram_var _ = newAnonymousVar TypeLevel
 
-mkAlt :: (Supplies m VarID) =>
+mkAlt :: EvalMonad m =>
          (forall a. FreshVarM a -> m a)
       -> TypeEnv -> Var -> [TypM]
       -> ([Var] -> [Var] -> m ExpM)
@@ -116,19 +117,18 @@ mkAlt lift_FreshVarM tenv con ty_args mk_body =
   of Just dcon_type -> do
        -- Get the types of the alternative patterns
        (ex_param_types, param_types, _) <-
-         lift_FreshVarM $
          instantiateDataConTypeWithFreshVariables dcon_type $
          map fromTypM ty_args
        
        -- Create the rest of the code
-       let typat_vars = [v | ValPT (Just v) ::: _ <- ex_param_types]
+       let typat_vars = [v | v ::: _ <- ex_param_types]
        pat_vars <- mapM (const $ newAnonymousVar ObjectLevel) param_types
        body <- mk_body typat_vars pat_vars
        
-       let ex_params = [TyPatM v t
+       let ex_params = [TyPatM (v ::: t)
                        | (v, _ ::: t) <- zip typat_vars ex_param_types]
-           patterns = [memVarP v (returnReprToParamRepr repr ::: ty)
-                      | (v, repr ::: ty) <- zip pat_vars param_types]
+           patterns = [memVarP (v ::: ty)
+                      | (v, ty) <- zip pat_vars param_types]
        return $ AltM $ Alt con ty_args ex_params patterns body
      _ -> internalError "mkAlt"
 

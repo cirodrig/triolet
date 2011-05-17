@@ -16,6 +16,7 @@ pprLit :: Lit -> Doc
 pprLit (IntL n _) = text (show n)
 pprLit (FloatL n _) = text (show n)
 
+{-
 pprParamRepr repr =
   let repr_word = pprParamReprWord repr
   in case repr
@@ -33,22 +34,20 @@ pprReturnType rt = unparenthesized $ pprReturnTypePrec rt
 
 pprReturnTypePrec (repr ::: ty) =
   pprReturnRepr repr <+> pprType ty `hasPrec` appPrec
+-}
 
-pprRet (RetM ret) = pprReturnTypePrec ret
+pprRet (RetM ret) = pprTypePrec ret
 
 pprTyPat :: TyPat Mem -> Doc
-pprTyPat (TyPatM v t) = pprVar v <+> text ":" <+> pprType t
+pprTyPat (TyPatM (v ::: t)) = pprVar v <+> text ":" <+> pprType t
 
 pprPat :: PatM -> Doc
 pprPat pat =
   case pat
-  of MemVarP v pt uses -> 
-       text (showDmd uses) <+> pprVar v <+> text ":" <+> pprParamType pt
+  of MemVarP (v ::: pt) uses -> 
+       text (showDmd uses) <+> pprVar v <+> text ":" <+> pprType pt
      MemWildP pt -> 
-       text "_" <+> text ":" <+> pprParamType pt
-     LocalVarP v t e uses ->
-       text "local" <+> text (showDmd uses) <+>
-       pprVar v <+> text ":" <+> pprType t <+> parens (pprExp e)
+       text "_" <+> text ":" <+> pprType pt
 
 pprExp :: ExpM -> Doc
 pprExp e = unparenthesized $ pprExpPrec e
@@ -78,7 +77,7 @@ pprExpPrec (ExpM expression) =
            of_doc = text "of" <+> vcat (map pprAlt alts)
        in case_doc $$ of_doc `hasPrec` stmtPrec
      ExceptE _ rt ->
-       text "except" <+> pprReturnType rt `hasPrec` stmtPrec
+       text "except" <+> pprType rt `hasPrec` stmtPrec
 
 pprAlt (AltM alt) =
   let con_doc = pprVar $ altConstructor alt

@@ -33,9 +33,8 @@ types into compositions of lower-level operations.
 
 module SystemF.Lowering.Datatypes2
        (-- * Translation to low-level data types 
-        lowerParamType,
-        lowerReturnType,
-        lowerReturnTypeList,
+        lowerType,
+        lowerTypeList,
         lowerFunctionType,
 
         -- * Creating layouts
@@ -629,34 +628,36 @@ objectLayout mem_layout =
 -- Using layouts
 
 -- | Get the type of a variable corresponding to the given high-level type
-lowerReturnType :: ReturnType -> Lower (Maybe LL.ValueType)
-lowerReturnType rt = 
-  case rt
-  of ValRT ::: ty -> fmap Just $ getValLayout ty
-     BoxRT ::: _ -> return $ Just $ LL.PrimType LL.OwnedType
-     ReadRT ::: _ -> return $ Just $ LL.PrimType LL.PointerType
-     OutRT ::: _ -> return $ Just $ LL.PrimType LL.PointerType
-     WriteRT ::: _ -> internalError "lowerReturnType: Invalid representation"
-     SideEffectRT ::: _ -> return Nothing
+lowerType :: TypeEnv -> Type -> Lower (Maybe LL.ValueType)
+lowerType tenv ty = 
+  case toBaseKind $ typeKind tenv ty
+  of ValK        -> fmap Just $ getValLayout ty
+     BoxK        -> return $ Just $ LL.PrimType LL.OwnedType
+     BareK       -> return $ Just $ LL.PrimType LL.PointerType
+     OutK        -> return $ Just $ LL.PrimType LL.PointerType
+     SideEffectK -> return Nothing
+     _           -> internalError "lowerReturnType: Invalid representation"
 
-lowerReturnTypeList :: ReturnType -> Lower [LL.ValueType]
-lowerReturnTypeList rt = fmap maybeToList $ lowerReturnType rt
+lowerTypeList :: TypeEnv -> [Type] -> Lower [LL.ValueType]
+lowerTypeList tenv tys = liftM catMaybes $ mapM (lowerType tenv) tys
 
-lowerParamType :: ParamType -> Lower (Maybe LL.ValueType)
-lowerParamType (prepr ::: ptype) =
-  lowerReturnType (paramReprToReturnRepr prepr ::: ptype)
-
+-- | Compute the low-level function type corresponding to a Mem function.
+--   Uses the Mem type environment.
 lowerFunctionType :: IdentSupply LL.Var -> IdentSupply Var -> TypeEnv -> Type
                   -> IO LL.FunctionType
 lowerFunctionType ll_var_supply var_supply tenv ty = do
   -- FIXME: Don't recompute this every time the function is called!
   env <- initializeLowerEnv var_supply ll_var_supply tenv Map.empty
   runLowering env $ do
-    let (params, ret) = fromFunType ty
-    m_param_types <- mapM lowerParamType params
-    let param_types = catMaybes m_param_types
-    ret_type <- lowerReturnTypeList ret
-    return $ LL.closureFunctionType param_types ret_type
+    let (ty_params, monotype) = fromForallType ty
+        (params, ret) = fromFunType monotype
+        ll_ty_params = replicate (length ty_params) $ LL.PrimType LL.UnitType
+        local_tenv = foldr insert_type tenv ty_params
+          where insert_type (a ::: k) e = insertType a k e
+    param_types <- lowerTypeList local_tenv params
+    ret_type <- fmap maybeToList $ lowerType local_tenv ret
+    let ll_type = LL.closureFunctionType (ll_ty_params ++ param_types) ret_type
+    return ll_type
 
 -- | Generate the low-level translation of a data constructor.
 --   If the data constructor takes parameters or
@@ -776,14 +777,14 @@ storeValue (MemLayout _) _ _ = internalError "storeValue: Not a value"
 
 -- | Compute the low-level representation of an algebraic data type.
 --   It's an error to call this on a non-algebraic data type.
-getAlgLayout :: ReturnType -> Lower AlgLayout
-getAlgLayout (repr ::: ty) =
-  case repr
-  of ValRT -> fmap AlgValLayout $ getValAlgLayout ty
-     BoxRT -> fmap AlgValLayout $ getValAlgLayout ty
-     ReadRT -> ref_layout
-     OutRT -> ref_layout
-     _ -> internalError "getAlgLayout: Unexpected representation"
+getAlgLayout :: TypeEnv -> Type -> Lower AlgLayout
+getAlgLayout tenv ty =
+  case toBaseKind $ typeKind tenv ty
+  of ValK  -> fmap AlgValLayout $ getValAlgLayout ty
+     BoxK  -> fmap AlgValLayout $ getValAlgLayout ty
+     BareK -> ref_layout
+     OutK  -> ref_layout
+     _     -> internalError "getAlgLayout: Unexpected representation"
   where
     ref_layout = fmap AlgMemLayout $ getRefAlgLayout ty
 
@@ -882,9 +883,9 @@ getValDataTypeLayout (tycon, ty_args, datacons)
       return $ boxedObjectLayout $ taggedSumMemLayout $ zip tags members
   where
     -- True if this type is represented as a value; False if boxed
-    is_unboxed = case dataTypeRepresentation tycon
-                 of Value -> True
-                    Boxed -> False
+    is_unboxed = case dataTypeKind tycon
+                 of ValK -> True
+                    BoxK -> False
                     _ -> internalError "getValDataTypeLayout"
 
     -- True if no constructors have fields
@@ -905,8 +906,8 @@ getRefAlgLayout ty =
            of AnyT {} -> internalError "getAlgLayout: Not implemented for Any"
               _ -> internalError "getAlgLayout: Invalid type"
          Just inst_type@(data_type, _, _) ->
-           case dataTypeRepresentation data_type
-           of Referenced -> getRefDataTypeLayout inst_type
+           case dataTypeKind data_type
+           of BareK -> getRefDataTypeLayout inst_type
               _ -> internalError "getAlgLayout: Invalid representation"
 
 getRefDataTypeLayout :: InstantiatedDataType -> Lower AlgMemLayout
@@ -930,14 +931,15 @@ getRefDataTypeLayout (_, ty_args, datacons)
       return $ taggedSumMemLayout $ zip tags members
 
 -- | Compute the low-level representation of a data type
-getLayout :: ReturnType -> Lower Layout
-getLayout (repr ::: ty) =
-  case repr
-  of ValRT -> fmap ValLayout $ getValLayout ty
-     BoxRT -> return $ ValLayout (LL.PrimType LL.OwnedType)
-     ReadRT -> ref_layout
-     OutRT -> ref_layout
-     _ -> internalError "getLayout: Unexpected representation"
+getLayout :: Type -> Lower Layout
+getLayout ty = do
+  kind <- askTypeEnv (\tenv -> toBaseKind $ typeKind tenv ty)
+  case kind of
+    ValK  -> fmap ValLayout $ getValLayout ty
+    BoxK  -> return $ ValLayout (LL.PrimType LL.OwnedType)
+    BareK -> ref_layout
+    OutK  -> ref_layout
+    _     -> internalError "getLayout: Unexpected representation"
   where
     ref_layout = fmap MemLayout $ getRefLayout ty
 
@@ -957,9 +959,9 @@ getValLayout ty =
                 tenv <- getTypeEnv
                 case lookupDataTypeForLayout tenv ty of
                   Just inst_type@(tycon, _, _) ->
-                    case dataTypeRepresentation tycon
-                    of Boxed -> return (LL.PrimType LL.OwnedType)
-                       Value -> do
+                    case dataTypeKind tycon
+                    of BoxK -> return (LL.PrimType LL.OwnedType)
+                       ValK -> do
                          -- Use the algebraic data type layout
                          alg_layout <- getValDataTypeLayout inst_type
                          return $ discardValStructure alg_layout
@@ -989,10 +991,10 @@ getRefLayout ty =
                 return $ polymorphicLayout ty
               _ -> internalError "getRefLayout: Unexpected type"
          Just inst_type@(data_type, _, _) ->
-           case dataTypeRepresentation data_type
-           of Value -> fmap memValueLayout $ getValLayout ty
-              Boxed -> return $ memValueLayout (LL.PrimType LL.OwnedType)
-              Referenced -> do
+           case dataTypeKind data_type
+           of ValK -> fmap memValueLayout $ getValLayout ty
+              BoxK -> return $ memValueLayout (LL.PrimType LL.OwnedType)
+              BareK -> do
                 alg_layout <- getRefDataTypeLayout inst_type
                 return $ discardMemStructure alg_layout
               _ -> internalError "getAlgLayout: Invalid representation"
@@ -1002,7 +1004,7 @@ instantiateDataCon :: [Type] -> DataConType -> Lower [Layout]
 instantiateDataCon ty_args data_con = do
   -- Create existential variables and get the field types
   (ex_vars, field_reprs, _) <-
-    liftFreshVarM $ instantiateDataConTypeWithFreshVariables data_con ty_args
+    instantiateDataConTypeWithFreshVariables data_con ty_args
 
   -- Add existential variables to the environment
   insert_ex_vars ex_vars $
@@ -1010,7 +1012,7 @@ instantiateDataCon ty_args data_con = do
     mapM getLayout field_reprs
   where
     insert_ex_vars params m = foldr ins m params
-    ins (ValPT (Just v) ::: ty) m = assumeType v ty m
+    ins (v ::: ty) m = assumeType v ty m
 
 -- | Given a list of data constructors, create a list of tags. 
 --   The tag data type is chosen based on how many data constructors there are.

@@ -144,7 +144,7 @@ data instance Pat SF =
 newtype instance Ret SF = RetSF {retSFType :: Type}
 
 -- | Type-level patterns
-data instance TyPat SF = TyPatSF Var Type
+newtype instance TyPat SF = TyPatSF Binder
 
 -- | Expressions
 data BaseExp s =
@@ -192,7 +192,7 @@ data BaseExp s =
     -- | Interrupt execution.  This expression does not return.
   | ExceptE
     { expInfo :: ExpInfo
-    , expType :: ReturnType
+    , expType :: Type
     }
 
 data BaseAlt s =

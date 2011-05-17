@@ -40,6 +40,17 @@ printTypeAssertions = False
 
 data Typed s deriving(Typeable)
 
+-- | A type-annotated thing
+data TypeAnn a =
+  TypeAnn { typeAnnotation :: Type
+          , typeAnnValue :: a
+          }
+
+instance Functor TypeAnn where
+  fmap f (TypeAnn t x) = TypeAnn t (f x)
+
+class HasType a where getTypeAnn :: a -> Type
+
 -------------------------------------------------------------------------------
 -- Type-checking environment
 
@@ -48,11 +59,7 @@ type TCM a = TypeEvalM a
 
 typeError = error
 
-assume :: Var -> ReturnType -> TCM a -> TCM a 
-assume v t m = TypeEvalM $ \supply env ->
-  runTypeEvalM m supply (insertType v t env)
-
-lookupVar :: Var -> TCM ReturnType
+lookupVar :: Var -> TCM Type
 lookupVar v = do
   env <- getTypeEnv
   case lookupType v env of
@@ -68,14 +75,6 @@ tcLookupDataCon v = do
 
 checkType :: SourcePos -> Type -> Type -> TCM Bool
 checkType pos expected given = compareTypes expected given
-
-checkReturnType :: SourcePos -> ReturnType -> ReturnType -> TCM Bool
-checkReturnType pos (erepr ::: etype) (grepr ::: gtype)
-  | sameReturnRepr erepr grepr = checkType pos etype gtype
-  | otherwise = return False
-
-applyType :: Type -> ReturnType -> Maybe Type -> TCM (Maybe ReturnType)
-applyType op_type arg_type arg = typeOfApp op_type arg_type arg
 
 checkLiteralType :: Lit -> TCM ()
 checkLiteralType l =
@@ -103,7 +102,7 @@ instantiatePatternType :: SourcePos -- ^ Position where pattern was mentioned
                        -> DataConType    -- ^ Constructor to instantiate
                        -> [(Type, Type)] -- ^ Each type argument and its kind
                        -> [(Var, Type)]  -- ^ Each existential variable and its kind
-                       -> TCM ([ParamType], [ReturnType], ReturnType)
+                       -> TCM ([Binder], [Type], Type)
                        -- ^ Compute field types and range type
 instantiatePatternType pos con_ty arg_vals ex_vars
   | length (dataConPatternParams con_ty) /= length arg_vals =
@@ -118,8 +117,7 @@ instantiatePatternType pos con_ty arg_vals ex_vars
       zipWithM_ check_ex_pattern (dataConPatternExTypes con_ty) ex_vars
 
       -- Instantiate the type
-      return $
-        instantiateDataConType con_ty (map fst arg_vals) (map fst ex_vars)
+      instantiateDataConType con_ty (map fst arg_vals) (map fst ex_vars)
   where
     check_argument_type (_ ::: expected_type) (_, given_type) =
       checkType pos expected_type given_type

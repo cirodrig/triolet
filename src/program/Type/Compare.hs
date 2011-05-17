@@ -12,6 +12,7 @@ where
 import Control.Monad.Reader
 import qualified Data.Set as Set
 import qualified Data.IntMap as IntMap
+import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Common.Identifier
@@ -23,16 +24,20 @@ import Type.Rename
 import Type.Type
 
 -- | Determine whether the type mentions a variable.
---   It's assumed that name shadowing does /not/ occur.  If a variable is
---   defined somewhere inside the type and then used, that counts as a mention.
---   
 typeMentions :: Type -> Var -> Bool
 typeMentions t target = search t
   where
     search (VarT v) = v == target
     search (AppT op arg) = search op || search arg
-    search (FunT (_ ::: dom) (_ ::: rng)) = search dom || search rng
+    search (LamT (x ::: dom) body) 
+      | x == target = search dom     -- Shadowed by local binding
+      | otherwise = search dom || search body
+    search (FunT dom rng) = search dom || search rng
+    search (AllT (x ::: dom) rng) 
+      | x == target = search dom
+      | otherwise = search dom || search rng
     search (AnyT k) = search k
+    serach (IntT _) = False
 
 -- | Determine whether the type mentions a variable in the set.
 --   It's assumed that name shadowing does /not/ occur.  If a variable is
@@ -43,31 +48,53 @@ typeMentionsAny t target = search t
   where
     search (VarT v) = v `Set.member` target
     search (AppT op arg) = search op || search arg
-    search (FunT (_ ::: dom) (_ ::: rng)) = search dom || search rng
+    search (LamT (x ::: dom) body)
+      | x `Set.member` target = search dom
+      | otherwise = search dom || search body
+    search (FunT dom rng) = search dom || search rng
+    search (AllT (x ::: dom) rng)
+      | x `Set.member` target = search dom
+      | otherwise = search dom || search rng
     search (AnyT k) = search k
+    serach (IntT _) = False
 
 -------------------------------------------------------------------------------
 
 -- | Reduce a type to weak head-normal form.  Evaluate type functions
---   that are in head position.
-reduceToWhnf :: Type -> TypeEvalM Type
+--   that are in head position.  The type is assumed to be well-kinded.
+reduceToWhnf :: EvalMonad m => Type -> m Type
 reduceToWhnf ty =
-  case fromVarApp ty
-  of Just (op, args) | not (null args) -> do
-       env <- getTypeEnv
-       case lookupTypeFunction op env of
-         Nothing    -> return ty
-         Just tyfun -> applyTypeFunction tyfun args
+  case fromTypeApp ty
+  of (op_type, args) | not (null args) ->
+       case op_type
+       of VarT op_var -> reduce_function_con op_var args
+          LamT (v ::: dom) body -> reduce_lambda_fun v dom body args
      _ -> return ty
+  where
+    -- If the operator is a type function, then evaluate it
+    reduce_function_con op_var args = do
+      env <- getTypeEnv
+      case lookupTypeFunction op_var env of
+        Nothing    -> return ty
+        Just tyfun -> applyTypeFunction tyfun args
+
+    -- The operator is a lambda function; evaluate it
+    reduce_lambda_fun v dom body (arg : other_args) = do
+      -- Substitute 'arg' in place of 'v'
+      body' <- substitute (singletonSubstitution v arg) body
+            
+      -- Continue to reduce
+      reduceToWhnf $ typeApp body' other_args
 
 -- | Compare two types.  Return True if the given type is equal to or a subtype
 --   of the expected type, False otherwise.
 --
 --   The types being compared are assumed to have the same kind.  If they do
 --   not, the result of comparison is undefined.
-compareTypes :: Type            -- ^ Expected type
+compareTypes :: EvalMonad m =>
+                Type            -- ^ Expected type
              -> Type            -- ^ Given Type
-             -> TypeEvalM Bool
+             -> m Bool
 compareTypes t1 t2 = do
   -- Ensure that the types are in weak head-normal form, then
   -- compare them structurally
@@ -79,7 +106,7 @@ compareTypes t1 t2 = do
 --
 --   Arguments are assumed to be in weak head-normal form and are assumed to
 --   inhabit the same kind.
-cmpType :: Type -> Type -> TypeEvalM Bool
+cmpType :: EvalMonad m => Type -> Type -> m Bool
 cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
   where
     -- For debugging, print the types being compared
@@ -91,21 +118,27 @@ cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
     cmp (VarT v1, VarT v2) = return $ v1 == v2
     cmp (AppT op1 arg1, AppT op2 arg2) =
       compareTypes op1 op2 >&&> compareTypes arg1 arg2
-    cmp (FunT (arg1 ::: dom1) result1, FunT (arg2 ::: dom2) result2) =
-      compareTypes dom1 dom2 >&&> cmpFun arg1 arg2 dom2 result1 result2
+    cmp (FunT dom1 rng1, FunT dom2 rng2) =
+      compareTypes dom1 dom2 >&&> compareTypes rng1 rng2
+    cmp (LamT (a1 ::: dom1) body1, LamT (a2 ::: dom2) body2) =
+      compareTypes dom1 dom2 >&&> bindAndCompare a2 dom2 body1 body2
+    cmp (AllT (a1 ::: dom1) rng1, AllT (a2 ::: dom2) rng2) =
+      compareTypes dom1 dom2 >&&> bindAndCompare a2 dom2 rng1 rng2
     cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
     cmp (IntT n1, IntT n2) = return $ n1 == n2
 
+    -- Matching (\x. e1) with e2
+    -- is the same as matching (\x. e1) with (\x. e2 x)
+    cmp (t1@(LamT (a ::: dom) _), t2) =
+      cmp (t1, LamT (a ::: dom) (t2 `AppT` VarT a))
+
+    cmp (t1, t2@(LamT (a ::: dom) _)) =
+      cmp (LamT (a ::: dom) (t1 `AppT` VarT a), t2)
+
     cmp (_, _) = return False
-
-    cmpFun arg1 arg2 dom result1 result2
-      | sameParamRepr arg1 arg2 = cmpReturns result1 result2
-      | otherwise               = return False
-
-cmpReturns :: ReturnType -> ReturnType -> TypeEvalM Bool
-cmpReturns (ret1 ::: rng1) (ret2 ::: rng2)
-  | sameReturnRepr ret1 ret2 = compareTypes rng1 rng2
-  | otherwise = return False
+    
+    bindAndCompare x dom expected given =
+      assume x dom $ cmpType expected given
 
 -- | Given an expected type @t_e@, a set of flexible variables @fv$, and a
 --   given type @t_g@, try to construct a unifying substitution
@@ -169,10 +202,8 @@ unify subst expected given = do
     match_unify (AppT t1 t2) (AppT t3 t4) =
       unify2 subst (t1, t2) (t3, t4)
 
-    match_unify (FunT (r1 ::: t1) (r2 ::: t2)) (FunT (r3 ::: t3) (r4 ::: t4))
-      | sameParamRepr r1 r3 && sameReturnRepr r2 r4 =
-          unify2 subst (t1, t2) (t3, t4)
-      | otherwise = no_unifier
+    match_unify (FunT dom1 rng1) (FunT dom2 rng2) =
+      unify2 subst (dom1, rng1) (dom2, rng2)
 
     match_unify (AnyT _) (AnyT _) =
       -- Assume the types have the same kind.  That means they're equal.

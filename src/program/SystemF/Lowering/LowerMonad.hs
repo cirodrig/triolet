@@ -161,6 +161,13 @@ liftT1 t k = do
 
 instance TypeEnvMonad Lower where
   getTypeEnv = Lower $ asks typeEnvironment
+  
+  assume v t (Lower m) = Lower $ local update m
+    where
+      update env =
+        env {typeEnvironment = insertType v t $ typeEnvironment env}
+
+instance EvalMonad Lower
 
 -- | Find the Repr dictionary for the given type, which should be a type
 --   variable.  Fail if not found.
@@ -228,11 +235,7 @@ assumeVariableWithType v ty k = do
 
 -- | Add a type variable to the type environment
 assumeType :: Var -> Type -> Lower a -> Lower a
-assumeType v kind (Lower m)
+assumeType v kind m
   | getLevel v /= TypeLevel = internalError "assumeType: Not a type variable"
   | getLevel kind /= KindLevel = internalError "assumeType: Not a kind"
-  | otherwise = Lower $ local update m
-  where
-    update env = env {typeEnvironment = insertType v (ValRT ::: kind) $
-                                        typeEnvironment env}
-
+  | otherwise = assume v kind m

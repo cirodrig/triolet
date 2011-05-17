@@ -21,24 +21,25 @@ import Parser.Driver
 import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
 import qualified Untyped.TypeInference as Untyped
-import qualified SystemF.ArgumentFlattening as SystemF
+-- import qualified SystemF.ArgumentFlattening as SystemF
 import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
-import qualified SystemF.DemandAnalysis as SystemF
+-- import qualified SystemF.DemandAnalysis as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
-import qualified SystemF.StreamSpecialize as SystemF
+-- import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.Syntax as SystemF
+import qualified SystemF.MemoryIR as SystemF
 import qualified SystemF.TypecheckSF
+import qualified SystemF.Print as SystemF
+import qualified SystemF.PrintMemoryIR
+import qualified SystemF.ReprInference as SystemF
+{-
 import qualified SystemF.TypecheckMem
 import qualified SystemF.Simplify as SystemF
 import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
-import qualified SystemF.MemoryIR as SystemF
-import qualified SystemF.ReprInference as SystemF
-import qualified SystemF.Print as SystemF
-import qualified SystemF.PrintMemoryIR
 import qualified SystemF.OutputPassing as SystemF
-import qualified SystemF.Floating as SystemF
+import qualified SystemF.Floating as SystemF-}
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
@@ -132,6 +133,7 @@ invokeCPP macros include_paths inpath outpath = do
                  | (key, value) <- macros]
     include_path_opts = ["-I" ++ path | path <- include_paths]
 
+{-
 -- | General-purpose high-level optimizations
 highLevelOptimizations :: Bool -> Bool -> SystemF.Module SystemF.Mem
                        -> IO (SystemF.Module SystemF.Mem)
@@ -144,6 +146,7 @@ highLevelOptimizations global_demand_analysis use_sequential_rules mod = do
          then SystemF.demandAnalysis mod
          else SystemF.localDemandAnalysis mod
   return mod
+-}
 
 -- | Compile a pyon file from source code to low-level code.
 compilePyonToPyonAsm :: CompileFlags -> FilePath -> String
@@ -171,11 +174,14 @@ compilePyonToPyonAsm compile_flags path text = do
   print $ SystemF.pprModule sf_mod
 
   -- Convert to explicit memory representation
-  tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
+  -- tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
   
   print ""
   print "Generating memory IR"
-  SystemF.representationInference sf_mod
+  repr_mod <- SystemF.representationInference sf_mod
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  error "This stage of the compiler is not implemented"
+  {-
   print "Generating memory IR"
   mem_mod <- SystemF.generateMemoryIR tc_mod
   
@@ -241,6 +247,7 @@ compilePyonToPyonAsm compile_flags path text = do
   print $ LowLevel.pprModule ll_mod
   
   return ll_mod
+  -}
 
 parsePyonAsm input_path input_text = do
   (mod_name, externs, ast) <- LLParser.parseFile input_path input_text

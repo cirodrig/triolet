@@ -39,7 +39,16 @@ data Referenced : bare -> bare
 data OutPtr : bare -> out {};
 
 -- A dummy value representing the effect of initializing an object
-data IEffect : bare -> val {};
+data IEffect : bare -> sideeffect {};
+
+-- Type functions to convert between representations
+type BoxedType : bare -> box;
+type BareType : box -> bare;
+
+-- Designates an initializer function for a bare object
+type Writer : bare -> write;
+
+-- Normal data types
 
 data bool : val
 {
@@ -84,19 +93,19 @@ data EffTok : val
   effTok () () () : EffTok;
 };
 
-emptyEffTok : Stored EffTok;
+emptyEffTok : Writer (Stored EffTok);
 
 -- Translate to a side effect.
 -- This function is translated specially when converting from Core to LowLevel.
--- toEffTok : (a : pure) -> sideeffect a -> Stored EffTok;
+toEffTok : (a : bare) -> IEffect a -> Writer (Stored EffTok);
 
 -- Propagate a side effect.
-propagateEffTok : Stored EffTok -> write (Stored EffTok);
+propagateEffTok : Stored EffTok -> Writer (Stored EffTok);
 
 -- Perform two side-effecting operations in sequence.
-seqEffTok : write (Stored EffTok)
-         -> write (Stored EffTok)
-	 -> write (Stored EffTok);
+seqEffTok : Writer (Stored EffTok)
+         -> Writer (Stored EffTok)
+	 -> Writer (Stored EffTok);
 
 data Complex : bare -> bare
 {
@@ -194,9 +203,9 @@ data AdditiveDict : bare -> box
 {
   additiveDict
   (a : bare) ()
-  (a -> a -> write a,
-   a -> a -> write a,
-   a -> write a,
+  (a -> a -> Writer a,
+   a -> a -> Writer a,
+   a -> Writer a,
    a) : AdditiveDict a;
 };
 
@@ -205,8 +214,8 @@ data MultiplicativeDict : bare -> box
   multiplicativeDict
   (a : bare) ()
   (AdditiveDict a,
-   a -> a -> write a,
-   int -> write a,
+   a -> a -> Writer a,
+   int -> Writer a,
    a) : MultiplicativeDict a;
 };
 
@@ -216,28 +225,28 @@ data RemainderDict : bare -> box
   (a : bare) ()
   (MultiplicativeDict a,
    a -> a -> int,
-   a -> a -> write a) : RemainderDict a;
+   a -> a -> Writer a) : RemainderDict a;
 };
 
 data FractionalDict : bare -> box
 {
   fractionalDict
   (a : bare) ()
-  (MultiplicativeDict a, a -> a -> write a) : FractionalDict a;
+  (MultiplicativeDict a, a -> a -> Writer a) : FractionalDict a;
 };
 
 data FloatingDict : bare -> box
 {
   floatingDict
   (a : bare) ()
-  (float -> write a,
-   a -> a -> write a,
-   a -> write a,
-   a -> write a,
-   a -> write a,
-   a -> write a,
-   a -> write a,
-   a -> write a,
+  (float -> Writer a,
+   a -> a -> Writer a,
+   a -> Writer a,
+   a -> Writer a,
+   a -> Writer a,
+   a -> Writer a,
+   a -> Writer a,
+   a -> Writer a,
    a) : FloatingDict a;
 };
 
@@ -246,7 +255,7 @@ data VectorDict : bare -> box
   vectorDict
   (a : bare) ()
   (AdditiveDict a,
-   a -> float -> write a,
+   a -> float -> Writer a,
    a -> float,
    a -> a -> float) : VectorDict a;
 };
@@ -255,7 +264,7 @@ data TraversableDict : (bare -> bare) -> box
 {
   traversableDict (t : bare -> bare) ()
   ((a : bare) -> Repr a -> t a -> Stream (shape t) a,
-   (a : bare) -> Repr a -> Stream (shape t) a -> write (t a)) : TraversableDict t;
+   (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)) : TraversableDict t;
 };
 
 -------------------------------------------------------------------------------
@@ -273,7 +282,9 @@ data array_shape : intindex -> bare {};
 -------------------------------------------------------------------------------
 -- Representation dictionaries
 
-copy : (a : bare) -> Repr a -> a -> write a;
+copy : (a : bare) -> Repr a -> a -> Writer a;
+convertToBoxed : (a : bare) -> Repr a -> a -> BoxedType a;
+convertToBare : (a : bare) -> Repr a -> BoxedType a -> a;
 
 repr_int : Repr (Stored int);
 repr_float : Repr (Stored float);
@@ -295,8 +306,8 @@ repr_PyonTuple4 :
  -> Repr a -> Repr b -> Repr c -> Repr d
  -> Repr (PyonTuple4 a b c d);
 
--- This always returns the same, global object
-repr_Box : (a : bare) -> Repr a;
+-- Representation of any boxed object
+repr_Box : (a : box) -> Repr (BareType a);
 
 repr_Boxed : (a : bare) -> Repr (Boxed a);
 repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
@@ -323,7 +334,7 @@ TraversableDict_Stream_traverse :
  -> Repr a -> Stream (shape t) a -> Stream (shape t) a;
 
 TraversableDict_list_build :
-  (a : bare) -> Repr a -> Stream list_shape a -> write (list a);
+  (a : bare) -> Repr a -> Stream list_shape a -> Writer (list a);
 
 TraversableDict_list_traverse :
   (a : bare) -> Repr a -> list a -> Stream list_shape a;
@@ -366,25 +377,25 @@ AdditiveDict_Complex_add :
  -> AdditiveDict a
  -> Complex a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 AdditiveDict_Complex_sub :
     (a : bare)
  -> Repr a
  -> AdditiveDict a
  -> Complex a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 AdditiveDict_Complex_negate :
     (a : bare)
  -> Repr a
  -> AdditiveDict a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 AdditiveDict_Complex_zero :
     (a : bare)
  -> Repr a
  -> AdditiveDict a
- -> write (Complex a);
+ -> Writer (Complex a);
 
 
 MultiplicativeDict_int_mul : int -> int -> int;
@@ -399,18 +410,18 @@ MultiplicativeDict_Complex_mul :
  -> MultiplicativeDict a
  -> Complex a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 MultiplicativeDict_Complex_fromInt :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
  -> int
- -> write (Complex a);
+ -> Writer (Complex a);
 MultiplicativeDict_Complex_one :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
- -> write (Complex a);
+ -> Writer (Complex a);
 
 
 RemainderDict_int_floordiv : int -> int -> int;
@@ -428,7 +439,7 @@ FractionalDict_Complex_div :
  -> FractionalDict a
  -> Complex a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 
 
 FloatingDict_float_fromfloat : float -> float;
@@ -448,7 +459,7 @@ FloatingDict_Complex_fromfloat :
  -> FractionalDict a
  -> FloatingDict a
  -> float
- -> write (Complex a);
+ -> Writer (Complex a);
 FloatingDict_Complex_power :
     (a : bare)
  -> Repr a
@@ -457,7 +468,7 @@ FloatingDict_Complex_power :
  -> FloatingDict a
  -> Complex a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 FloatingDict_Complex_exp :
     (a : bare)
  -> Repr a
@@ -465,7 +476,7 @@ FloatingDict_Complex_exp :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 FloatingDict_Complex_log :
     (a : bare)
  -> Repr a
@@ -473,14 +484,14 @@ FloatingDict_Complex_log :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 FloatingDict_Complex_sqrt :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
  -> FractionalDict a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 FloatingDict_Complex_sin :
     (a : bare)
  -> Repr a
@@ -488,7 +499,7 @@ FloatingDict_Complex_sin :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 FloatingDict_Complex_cos :
     (a : bare)
  -> Repr a
@@ -496,7 +507,7 @@ FloatingDict_Complex_cos :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 FloatingDict_Complex_tan :
     (a : bare)
  -> Repr a
@@ -504,14 +515,14 @@ FloatingDict_Complex_tan :
  -> FractionalDict a
  -> FloatingDict a
  -> Complex a
- -> write (Complex a);
+ -> Writer (Complex a);
 FloatingDict_Complex_pi :
     (a : bare)
  -> Repr a
  -> MultiplicativeDict a
  -> FractionalDict a
  -> FloatingDict a
- -> write (Complex a);
+ -> Writer (Complex a);
 
 
 VectorDict_float_scale : float -> float -> float;
@@ -524,7 +535,7 @@ VectorDict_Complex_scale :
  -> VectorDict a
  -> Complex a
  -> float
- -> write (Complex a);
+ -> Writer (Complex a);
 
 VectorDict_Complex_magnitude :
     (a : bare)
@@ -584,7 +595,7 @@ deadBox : (a : box) -> a;
 -- A dummy referenced object that is used as a placeholder for a dead value.
 deadRef : (a : bare) -> a;
 
-oper_DO : (a : bare) -> Repr a -> write a -> Stream list_shape a;
+oper_DO : (a : bare) -> Repr a -> Writer a -> Stream list_shape a;
 
 oper_GUARD : (a : bare)
           -> Repr a -> bool
@@ -604,10 +615,10 @@ oper_CAT_MAP :
 fun_fold_Stream : (a acc : bare)
                -> Repr a
                -> Repr acc
-               -> (acc -> a -> write acc)
+               -> (acc -> a -> Writer acc)
                -> acc
                -> Stream list_shape a
-               -> write acc;
+               -> Writer acc;
 
 -- Reinterpret a stream as having list shape
 fun_asList_Stream : (sh a : bare)
@@ -617,7 +628,7 @@ fun_asList_Stream : (sh a : bare)
 fun_map_Stream : (sh a b : bare)
        	      -> Repr a
        	      -> Repr b
-       	      -> (a -> write b)
+       	      -> (a -> Writer b)
        	      -> Stream sh a
        	      -> Stream sh b;
 
@@ -626,39 +637,39 @@ fun_map : (t : bare -> bare)
        -> TraversableDict t
        -> Repr a
        -> Repr b
-       -> (a -> write b)
+       -> (a -> Writer b)
        -> t a
-       -> write (t b);
+       -> Writer (t b);
 
 fun_reduce_Stream : (sh a : bare)
           	 -> Repr a
-          	 -> (a -> a -> write a)
+          	 -> (a -> a -> Writer a)
 	  	 -> a
           	 -> Stream sh a
-          	 -> write a;
+          	 -> Writer a;
 
 fun_reduce : (t : bare -> bare)
           -> (a : bare)
           -> TraversableDict t
           -> Repr a
-          -> (a -> a -> write a)
+          -> (a -> a -> Writer a)
 	  -> a
           -> t a
-          -> write a;
+          -> Writer a;
 
 fun_reduce1_Stream : (sh a : bare)
           	  -> Repr a
-          	  -> (a -> a -> write a)
+          	  -> (a -> a -> Writer a)
           	  -> Stream sh a
-          	  -> write a;
+          	  -> Writer a;
 
 fun_reduce1 : (t : bare -> bare)
            -> (a : bare)
            -> TraversableDict t
            -> Repr a
-           -> (a -> a -> write a)
+           -> (a -> a -> Writer a)
            -> t a
-           -> write a;
+           -> Writer a;
 
 fun_zip_Stream : (sh a b : bare)
        	      -> Repr a
@@ -726,7 +737,7 @@ fun_zip : (t : bare -> bare)
        -> Repr b
        -> t a
        -> t b
-       -> write (t (PyonTuple2 a b));
+       -> Writer (t (PyonTuple2 a b));
 
 fun_zip3 : (t : bare -> bare)
         -> (a b c : bare)
@@ -737,7 +748,7 @@ fun_zip3 : (t : bare -> bare)
         -> t a
         -> t b
         -> t c
-        -> write (t (PyonTuple3 a b c));
+        -> Writer (t (PyonTuple3 a b c));
 
 fun_zip4 : (t : bare -> bare)
         -> (a b c d : bare)
@@ -750,7 +761,7 @@ fun_zip4 : (t : bare -> bare)
         -> t b
         -> t c
         -> t d
-        -> write (t (PyonTuple4 a b c d));
+        -> Writer (t (PyonTuple4 a b c d));
 
 count : Stream list_shape (Stored int);
 
@@ -758,113 +769,108 @@ range : int -> Stream list_shape (Stored int);
 
 len : (a : bare) -> list a -> int;
 
-{-
 -- A type-indexed version of 'range'
-rangeIndexed : (val n : intindex)
-            -> val IndexedInt n
-            -> box Stream (array_shape n) int;
+rangeIndexed : (n : intindex)
+            -> IndexedInt n
+            -> Stream (array_shape n) int;
 
-histogram : (val t : val pure -> val pure)
-         -> val int
-         -> box Stream (shape t) int
-         -> write list int;
+histogram : (t : bare -> bare)
+         -> int
+         -> Stream (shape t) int
+         -> Writer (list int);
 
-histogramArray : (val sh : pure)
-              -> (val n : intindex)
-              -> val IndexedInt n
-              -> box Stream sh int
-              -> write array n int;
+histogramArray : (sh : bare)
+              -> (n : intindex)
+              -> IndexedInt n
+              -> Stream sh int
+              -> Writer (array n int);
 
 -- Low-level function for imperatively initializing an histogram
 createHistogram :
-    (val n : intindex)
- -> val IndexedInt n
- -> box (box (val int -> write EffTok) -> read EffTok -> write EffTok)
- -> write array n int;
+    (n : intindex)
+ -> IndexedInt n
+ -> ((int -> Writer EffTok) -> EffTok -> Writer EffTok)
+ -> Writer (array n int);
 
-generate : (val n : intindex)
-        -> (val a : pure)
-        -> val IndexedInt n
-        -> box Repr a
-        -> box (val int -> write a)
-        -> box Stream (array_shape n) a;
+generate : (n : intindex)
+        -> (a : bare)
+        -> IndexedInt n
+        -> Repr a
+        -> (int -> Writer a)
+        -> Stream (array_shape n) a;
 
-generate_forever : (val a : pure)
-                -> box Repr a
-                -> box (val int -> write a)
-                -> box Stream (array_shape pos_infty) a;
+generate_forever : (a : bare)
+                -> Repr a
+                -> (int -> Writer a)
+                -> Stream (array_shape pos_infty) a;
 
-safeSubscript : (val a : pure)
-             -> box Repr a
-             -> read list a
-             -> val int
-             -> write a;
+safeSubscript : (a : bare)
+             -> Repr a
+             -> list a
+             -> int
+             -> Writer a;
 
-subscript : (val n : intindex)
-         -> (val a : pure)
-         -> box Repr a
-         -> read array n a
-         -> val int
-         -> read a;
+subscript : (n : intindex)
+         -> (a : bare)
+         -> Repr a
+         -> array n a
+         -> int
+         -> a;
 
 -- Like subscript, but modifies an output pointer
-subscript_out : (val n : intindex)
-             -> (val a : pure)
-             -> box Repr a
-             -> out array n a
-             -> val int
-             -> out a;
+subscript_out : (n : intindex)
+             -> (a : bare)
+             -> Repr a
+             -> OutPtr (array n a)
+             -> int
+             -> OutPtr a;
 
 -- Parallelizable loop
-doall : (val n : intindex)
-     -> (val a : pure)
-     -> (val b : pure)
-     -> val IndexedInt n
-     -> box (val int -> sideeffect b)
-     -> sideeffect a;
+doall : (n : intindex)
+     -> (a b : bare)
+     -> IndexedInt n
+     -> (int -> IEffect b)
+     -> IEffect a;
 
 -- Sequential loop
-for : (val n : intindex)
-   -> (val acc : pure)
-   -> box Repr acc
-   -> val IndexedInt n
-   -> read acc
-   -> box (val int -> read acc -> write acc)
-   -> write acc;
+for : (n : intindex)
+   -> (acc : bare)
+   -> Repr acc
+   -> IndexedInt n
+   -> acc
+   -> (int -> acc -> Writer acc)
+   -> Writer acc;
 
 -- Blocked parallel reduction
 blocked_reduce :
-    (val acc : pure)
- -> (val n : intindex)
- -> box Repr acc
- -> val IndexedInt n		-- Size of range
- -> val int			-- First member of range
- -> box (read acc -> read acc -> write acc) -- Reducer
- -> read acc			-- Initial value
- -> box ((val n : intindex) -> val IndexedInt n -> val int -> write acc)
+    (acc : bare)
+ -> (n : intindex)
+ -> Repr acc
+ -> IndexedInt n		-- Size of range
+ -> int	       			-- First member of range
+ -> (acc -> acc -> Writer acc) -- Reducer
+ -> acc			-- Initial value
+ -> ((n : intindex) -> IndexedInt n -> int -> Writer acc)
     -- ^ Generate value given range
- -> write acc;
+ -> Writer acc;
 
 -- Blocked parallel reduction with no neutral element
 blocked_reduce1 :
-    (val acc : pure)
- -> (val n : intindex)
- -> box Repr acc
- -> val IndexedInt n		-- Size of range
- -> val int			-- First member of range
- -> box (read acc -> read acc -> write acc) -- Reducer
- -> box ((val n : intindex) -> val IndexedInt n -> val int -> write acc)
+    (acc : bare)
+ -> (n : intindex)
+ -> Repr acc
+ -> IndexedInt n		-- Size of range
+ -> int			-- First member of range
+ -> (acc -> acc -> Writer acc) -- Reducer
+ -> ((n : intindex) -> IndexedInt n -> int -> Writer acc)
     -- ^ Generate value given range
- -> write acc;
+ -> Writer acc;
 
 -- Blocked parallel loop
 blocked_doall :
-    (val n : intindex)
- -> (val a : pure)
- -> (val b : pure)
- -> val IndexedInt n
- -> val int
- -> box ((val n : intindex) -> val IndexedInt n -> val int -> sideeffect b)
- -> sideeffect a;
-
--}
+    (n : intindex)
+ -> (a b : bare)
+ -> IndexedInt n
+ -> int
+ -> ((n : intindex) -> IndexedInt n -> int -> IEffect b)
+ -> IEffect a;

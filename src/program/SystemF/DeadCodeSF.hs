@@ -97,7 +97,7 @@ edcMaskPats [] m = do x <- m
                       return ([], x)
 
 edcMaskTyPat :: TyPat SF -> GetMentionsSet a -> GetMentionsSet (TyPat SF, a)
-edcMaskTyPat pat@(TyPatSF v ty) m = do
+edcMaskTyPat pat@(TyPatSF (v ::: ty)) m = do
   edcScanType (TypSF ty)
   x <- mask v m
   return (pat, x)
@@ -171,7 +171,7 @@ edcAlt (AltSF alt) = do
   mapM_ edcScanType $ altTyArgs alt
   -- Mask out variables bound by the alternative and simplify the body
   let local_vars = [v | VarP v _ <- altParams alt] ++
-                   [v | TyPatSF v _ <- altExTypes alt]
+                   [v | TyPatSF (v ::: _) <- altExTypes alt]
   body' <- masks (mentionsSet local_vars) $ do
     edcExp (altBody alt)
   return $ AltSF $ alt {altBody = body'} 

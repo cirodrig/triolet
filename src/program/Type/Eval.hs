@@ -1,7 +1,10 @@
 
 module Type.Eval
        (reduceToWhnf,
+        normalize,
         typeKind,
+        typeCheckType,
+        typeOfTypeApp,
         typeOfApp,
         instantiateDataConType,
         instantiateDataConTypeWithFreshVariables,
@@ -9,6 +12,7 @@ module Type.Eval
 where
 
 import Control.Monad.Reader
+import Debug.Trace
 
 import Common.Error
 import Common.Identifier
@@ -20,77 +24,137 @@ import Type.Environment
 import Type.Rename
 import Type.Type
 
--- | Get the kind of a type.  The argument is assumed to be a type. 
+-- | Evaluate a type as much as possible.
+--   The type is assumed to be well-kinded.
+normalize :: EvalMonad m => Type -> m Type
+normalize t =
+  -- Recursively reduce to WHNF
+  normalize_recursive =<< reduceToWhnf t
+  where
+    normalize_recursive t = 
+      case t
+      of VarT {} -> return t
+         AppT op arg ->
+           AppT `liftM` normalize op `ap` normalize arg
+         LamT (x ::: k) body ->
+           LamT (x ::: k) `liftM` assume x k (normalize body)
+         FunT dom rng ->
+           FunT `liftM` normalize dom `ap` normalize rng
+         AllT (x ::: k) rng ->
+           AllT (x ::: k) `liftM` assume x k (normalize rng)
+         AnyT {} -> return t
+         IntT {} -> return t
+
+-- | Get the type of a type.
 --   Minimal error checking is performed.
 typeKind :: TypeEnv -> Type -> Type
 typeKind tenv ty =
   case ty
   of VarT v ->
        case lookupType v tenv
-       of Just (ValRT ::: k) -> k
-          _ -> internalError "typeKind: No type for variable"
+       of Just k -> k
+          _ -> internalError $ "typeKind: No type for variable: " ++ show v
      IntT _ -> intindexT
      AppT op _ ->
-       -- Assume the application is properly typed.  Add actual
-       -- argument to environment.
-       case op
-       of VarT v ->
-            case lookupType v tenv
-            of Just (ValRT ::: (_ `FunT` ValRT ::: rng)) ->
-                 typeKind tenv rng
-               _ -> internalError "typeKind: no type for variable"
-          LamT x dom (ValRT ::: rng) ->
-            typeKind (insertType x (ValRT ::: dom) tenv) rng
+       -- Assume the application is properly typed.  Get the kind of the
+       -- operator's range.
+       case typeKind tenv op
+       of _ `FunT` k -> k
           _ -> internalError "typeKind: Malformed application"
-     LamT x param_k (ValRT ::: ret_t) ->
+     LamT (x ::: param_k) ret_t ->
        -- A lambda function has an arrow kind
-       let ret_k = typeKind (insertType x (ValRT ::: param_k) tenv) ret_t
-       in ValPT Nothing ::: param_k `FunT` ValRT ::: ret_k
-     FunT _ _ ->
-       -- Functions are always boxed
-       boxT
-     AllT _ _ _ ->
-       -- Forall'd types are always boxed
-       boxT
+       let ret_k = typeKind (insertType x param_k tenv) ret_t
+       in param_k `FunT` ret_k
+     FunT _ rng ->
+       case getLevel rng
+       of TypeLevel -> boxT     -- Functions are always boxed
+          KindLevel -> kindT
+     AllT (_ ::: _) rng ->
+       case getLevel rng
+       of TypeLevel -> boxT     -- Functions are always boxed
+          KindLevel -> internalError "typeKind: Unexpected type"
      _ -> internalError "typeKind: Unrecognized type"
 
+-- | Typecheck a type or kind.  If the term is valid, return its type,
+--   which is the same as what 'typeKind' returns.  Otherwise, raise an
+--   error.
+typeCheckType :: Type -> TypeEvalM Type
+typeCheckType ty =
+  case ty
+  of VarT v -> do
+       tenv <- getTypeEnv
+       case lookupType v tenv of 
+         Just t -> return t
+         Nothing ->
+           internalError $ "typeCheckType: No type for variable: " ++ show v
+     AppT op arg -> do
+       -- Get type of op and argument
+       op_k <- typeCheckType op
+       arg_k <- typeCheckType arg
+           
+       -- Get type of application
+       applied <- typeOfApp op_k arg_k
+       case applied of
+         Nothing -> trace (show (pprType ty) ++ "\n" ++ show (pprType op_k) ++ "\n" ++ show (pprType arg_k)) $ internalError "typeCheckType: Error in type application"
+         Just result_t -> return result_t
+
+     FunT dom rng -> do
+       -- Check that types are valid
+       typeCheckType dom
+       typeCheckType rng
+       return $! case getLevel rng
+                 of TypeLevel -> boxT
+                    KindLevel -> kindT
+
+     LamT (v ::: dom) body -> do
+       -- Get types of domain and range
+       dom_kind <- typeCheckType dom
+       body_kind <- assume v dom $ typeCheckType body
+       return $! case getLevel body
+                 of TypeLevel -> FunT dom_kind body_kind
+                    _ -> internalError "typeCheckType: Unexpected type"
+
+     AllT (v ::: dom) rng -> do
+       -- Check that domain and range are valid
+       typeCheckType dom
+       assume v dom $ typeCheckType rng
+       return $! case getLevel rng
+                 of TypeLevel -> boxT
+                    _ -> internalError "typeCheckType: Unexpected type"
+
+     AnyT k -> return k
+     IntT _ -> return intindexT
+
 -- | Compute the type produced by applying a value of type @op_type@ to
---   a value of type @arg_type@.
+--   the type argument @arg@.  Verify that the application is well-typed.
+typeOfTypeApp :: Type               -- ^ Operator type
+              -> Kind               -- ^ Argument kind
+              -> Type               -- ^ Argument
+              -> TypeEvalM (Maybe Type)
+typeOfTypeApp op_type arg_kind arg = do
+  whnf_op_type <- reduceToWhnf op_type
+  case whnf_op_type of
+    AllT (x ::: dom) rng -> do
+      type_ok <- compareTypes dom arg_kind
+      if type_ok
+        then fmap Just $ substitute (singletonSubstitution x arg) rng
+        else return Nothing
+    _ -> return Nothing
+
+-- | Compute the type produced by applying a value of type @op_type@ to
+--   a value of type @arg_type@.  Verify that the application is well-typed.
 typeOfApp :: Type               -- ^ Operator type
-          -> ReturnType         -- ^ Argument type and representation
-          -> Maybe Type         -- ^ Argument value; only used if operator is
-                                --   dependent
-          -> TypeEvalM (Maybe ReturnType)
-typeOfApp op_type (arg_repr ::: arg_type) m_arg =
-  case op_type
-  of FunT (fun_arg ::: dom) result 
-       | repr_match fun_arg arg_repr -> do
-           type_ok <- compareTypes dom arg_type
-           if type_ok
-             then apply fun_arg m_arg result
-             else return Nothing
-     _ -> return Nothing
-  where
-    -- Does the function's expected representation match the argument's
-    -- actual representation?
-    repr_match (ValPT _) ValRT = True
-    repr_match BoxPT BoxRT = True
-    repr_match ReadPT ReadRT = True 
-    repr_match WritePT WriteRT = True
-    repr_match OutPT OutRT = True
-    repr_match SideEffectPT SideEffectRT = True
-    repr_match _ _ = False
-
-    apply (ValPT (Just pv)) (Just arg) result =
-      let subst = singletonSubstitution pv arg
-          result' = substituteBinding subst result
-      in return (Just result')
-
-    -- Dependent type, but missing argument value
-    apply (ValPT (Just _)) Nothing _ = return Nothing
-  
-    -- Non-dependent type
-    apply _ _ result = return (Just result)
+          -> Type               -- ^ Argument type
+          -> TypeEvalM (Maybe Type)
+typeOfApp op_type arg_type = do
+  whnf_op_type <- reduceToWhnf op_type
+  case whnf_op_type of
+    FunT dom rng -> do
+      type_ok <- compareTypes dom arg_type
+      if type_ok
+        then return (Just rng)
+        else return Nothing
+    _ -> return Nothing
 
 -- | Given a data constructor type and the type arguments at which it's used,
 --   get the instantiated type.
@@ -98,17 +162,18 @@ typeOfApp op_type (arg_repr ::: arg_type) m_arg =
 --   Returns the existential type parameters, the data constructor fields'
 --   types as they appear in a pattern match, and the constructed value's type.
 -- The types are not typechecked.
-instantiateDataConType :: DataConType -- ^ Type to instantiate
+instantiateDataConType :: EvalMonad m =>
+                          DataConType -- ^ Type to instantiate
                        -> [Type]      -- ^ Type parameters
                        -> [Var]       -- ^ Existential variable names to
                                       -- instantiate to
-                       -> ([ParamType], [ReturnType], ReturnType)
+                       -> m ([Binder], [Type], Type)
 instantiateDataConType con_ty arg_vals ex_vars
   | length (dataConPatternParams con_ty) /= length arg_vals =
       internalError "instantiateDataConType: Wrong number of type parameters"
   | length (dataConPatternExTypes con_ty) /= length ex_vars =
       internalError "instantiateDataConType: Wrong number of existential variables"
-  | otherwise =
+  | otherwise = do
       let -- Assign parameters
           subst1 = instantiate_arguments emptySubstitution $
                    zip (dataConPatternParams con_ty) arg_vals
@@ -117,47 +182,45 @@ instantiateDataConType con_ty arg_vals ex_vars
           (subst2, ex_params) = instantiate_exvars subst1 $
                                 zip (dataConPatternExTypes con_ty) ex_vars
 
-          -- Apply the substitution to field and range types.
-          fields = map (substituteBinding subst2) $ dataConPatternArgs con_ty
-          -- Use subst1 because existential variables cannot appear
-          -- in the range.
-          range = substituteBinding subst1 $ dataConPatternRange con_ty
-      in (ex_params, fields, range)
+      -- Apply substitution to range type.  Use subst1 because existential
+      -- variables cannot appear in the range.
+      range <- substitute subst1 $ dataConPatternRange con_ty
+
+      -- Apply the substitution to field and range types
+      fields <- mapM (substitute subst2) $ dataConPatternArgs con_ty
+      return (ex_params, fields, range)
   where
     -- Instantiate the type by substituing arguments for the constructor's
     -- type parameters
-    instantiate_arguments :: Substitution -> [(ParamType, Type)]
+    instantiate_arguments :: Substitution -> [(Binder, Type)]
                           -> Substitution
-    instantiate_arguments subst ((param_repr ::: _, arg_val) : args) =
-      let subst' = case param_repr
-                   of ValPT (Just param_var) ->
-                        insertSubstitution param_var arg_val subst
+    instantiate_arguments subst ((param_var ::: _, arg_val) : args) =
+      let subst' = insertSubstitution param_var arg_val subst
       in instantiate_arguments subst' args
   
     instantiate_arguments subst' [] = subst'
 
     -- Instantiate existential types.  Rename each existential variable.
-    instantiate_exvars :: Substitution -> [(ParamType, Var)]
-                       -> (Substitution, [ParamType])
-    instantiate_exvars subst ((param_repr ::: extype, ex_var) : params) =
-      let old_ex_var = case param_repr
-                       of ValPT (Just old_ex_var) -> old_ex_var
-          subst' = insertSubstitution old_ex_var (VarT ex_var) subst
+    instantiate_exvars :: Substitution -> [(Binder, Var)]
+                       -> (Substitution, [Binder])
+    instantiate_exvars subst ((old_ex_var ::: extype, ex_var) : params) =
+      let subst' = insertSubstitution old_ex_var (VarT ex_var) subst
           !(subst'', params') = instantiate_exvars subst' params
-      in (subst'', ValPT (Just ex_var) ::: extype : params')
+      in (subst'', ex_var ::: extype : params')
     
     instantiate_exvars subst [] = (subst, [])
 
 -- | Like 'instantiateDataConType', but each existential variable is given
 --   a fresh name.
 instantiateDataConTypeWithFreshVariables :: 
+    EvalMonad m =>
     DataConType -- ^ Type to instantiate
  -> [Type]      -- ^ Type parameters
- -> FreshVarM ([ParamType], [ReturnType], ReturnType)
+ -> m ([Binder], [Type], Type)
 instantiateDataConTypeWithFreshVariables con_ty arg_vals = do
   pattern_vars <- replicateM (length $ dataConPatternExTypes con_ty) $
                   newAnonymousVar TypeLevel
-  return $ instantiateDataConType con_ty arg_vals pattern_vars
+  instantiateDataConType con_ty arg_vals pattern_vars
 
 -- | Given a data constructor type and the type arguments at which it's used,
 --   including existential types, get the instantiated type.
@@ -166,34 +229,33 @@ instantiateDataConTypeWithFreshVariables con_ty arg_vals = do
 --   types as they appear in a pattern match and the constructed value's type.
 -- The types are not typechecked.
 instantiateDataConTypeWithExistentials ::
+    EvalMonad m =>
     DataConType -- ^ Type to instantiate
  -> [Type]      -- ^ Type parameters and existential types
- -> ([ReturnType], ReturnType)
+ -> m ([Type], Type)
 instantiateDataConTypeWithExistentials con_ty arg_vals
   | length (dataConPatternParams con_ty) +
     length (dataConPatternExTypes con_ty) /= length arg_vals =
       internalError $ "instantiateDataConTypeWithExistentials: " ++
                       "Wrong number of type parameters"
-  | otherwise =
+  | otherwise = do
       let -- Assign parameters and existential types
           type_params =
             dataConPatternParams con_ty ++ dataConPatternExTypes con_ty
           subst = instantiate_arguments emptySubstitution $
                   zip type_params arg_vals
 
-          -- Apply the substitution to field and range types
-          fields = map (substituteBinding subst) $ dataConPatternArgs con_ty
-          range = substituteBinding subst $ dataConPatternRange con_ty
-      in (fields, range)
+      -- Apply the substitution to field and range types
+      fields <- mapM (substitute subst) $ dataConPatternArgs con_ty
+      range <- substitute subst $ dataConPatternRange con_ty
+      return (fields, range)
   where
     -- Instantiate the type by substituing arguments for the constructor's
     -- type parameters
-    instantiate_arguments :: Substitution -> [(ParamType, Type)]
+    instantiate_arguments :: Substitution -> [(Binder, Type)]
                           -> Substitution
-    instantiate_arguments subst ((param_repr ::: _, arg_val) : args) =
-      let subst' = case param_repr
-                   of ValPT (Just param_var) ->
-                        insertSubstitution param_var arg_val subst
+    instantiate_arguments subst ((param_var ::: _, arg_val) : args) =
+      let subst' = insertSubstitution param_var arg_val subst
       in instantiate_arguments subst' args
   
     instantiate_arguments subst' [] = subst'

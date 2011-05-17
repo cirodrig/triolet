@@ -5,12 +5,14 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import qualified Data.Graph as Graph
 import qualified Data.IntMap as IntMap
+import qualified Data.Set as Set
 
 import Common.Identifier
 import Common.SourcePos
 import Common.Error
 import SystemF.Syntax
 import Type.Environment
+import Type.Rename
 import Type.Type
 
 -- | The number of times a variable is mentioned, stored in a 'MentionsSet'.
@@ -55,6 +57,10 @@ mention v = tell (MSet $ IntMap.singleton (fromIdent $ varID v) One)
 mentionMany :: Var -> GetMentionsSet ()
 mentionMany v = tell (MSet $ IntMap.singleton (fromIdent $ varID v) Many)
 
+mentions :: [Var] -> GetMentionsSet ()
+mentions vs =
+  tell (MSet $ IntMap.fromList [(fromIdent $ varID v, One) | v <- vs])
+
 -- | Filter out a mention of a variable.  The variable will not appear in
 -- the returned mentions set.
 mask :: Var -> GetMentionsSet a -> GetMentionsSet a
@@ -78,16 +84,7 @@ masks vs m = pass $ do x <- m
 
 -- | Find variables that are mentioned in the type
 edcType :: Type -> GetMentionsSet ()
-edcType (VarT v) = mention v
-edcType (AppT t1 t2) = edcType t1 >> edcType t2
-edcType (FunT (ValPT (Just v) ::: dom) (_ ::: rng)) = do
-  edcType dom
-  mask v $ edcType rng
-edcType (FunT (_ ::: dom) (_ ::: rng)) = do
-  edcType dom
-  edcType rng
-edcType (AnyT _) =
-  return ()    -- AnyT can only mention kinds, which we don't care about
+edcType t = mentions $ Set.toList $ freeVariables t
 
 -- | Given the members of a definition group, the variables mentioned by them, 
 --   and the set of members that are referenced by the rest of the program,

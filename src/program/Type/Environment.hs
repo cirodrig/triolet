@@ -11,9 +11,10 @@ code before representation inference.  The \"mem\" type environment describes
 System F code after representation inference.
 -}
 
-{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances, Rank2Types #-}
 module Type.Environment
        (TypeEnvMonad(..),
+        assumeBinder,
         EvalMonad,
         TypeEvalM(..),
         TypeEnv,
@@ -31,16 +32,12 @@ module Type.Environment
         lookupTypeFunction,
         getAllDataConstructors,
         getAllTypes,
+        pprTypeEnv,
         emptyTypeEnv,
         wiredInTypeEnv,
         insertType,
         insertDataType,
         insertTypeFunction,
-        convertToPureTypeEnv,
-        convertToMemTypeEnv,
-        convertToMemParamType,
-        convertToMemReturnType,
-        convertToMemType,
        
         -- * New conversion routines
         specToPureTypeEnv,
@@ -52,6 +49,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
+import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
@@ -64,7 +62,18 @@ import Type.Type
 
 -- | A monad that keeps track of the current type environment
 class Monad m => TypeEnvMonad m where
+  -- | Get the current type environment
   getTypeEnv :: m TypeEnv
+  
+  -- | Query the current type environment
+  askTypeEnv :: (TypeEnv -> a) -> m a
+  askTypeEnv f = liftM f getTypeEnv
+
+  -- | Add a variable to the type environment
+  assume :: Var -> Type -> m a -> m a
+
+assumeBinder :: TypeEnvMonad m => Binder -> m a -> m a
+assumeBinder (v ::: t) m = assume v t m
 
 -- | A monad supporting type-level computation
 class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m
@@ -100,6 +109,9 @@ instance Supplies TypeEvalM (Ident Var) where
 instance TypeEnvMonad TypeEvalM where
   {-# INLINE getTypeEnv #-}
   getTypeEnv = TypeEvalM (\_ tenv -> return tenv)
+  
+  assume v t m =
+    TypeEvalM $ \supply tenv -> runTypeEvalM m supply (insertType v t tenv)
 
 instance EvalMonad TypeEvalM
 
@@ -109,11 +121,11 @@ instance EvalMonad TypeEvalM
 data TypeAssignment =
     -- | Type of a variable
     VarTypeAssignment
-    { varType :: !ReturnType
+    { varType :: !Type
     }
     -- | Type of a type constructor
   | TyConTypeAssignment
-    { varType :: !ReturnType
+    { varType :: !Type
       
     , dataType :: !DataType
     }
@@ -122,21 +134,21 @@ data TypeAssignment =
     { -- | Type of the data constructor when used as an operator.
       --   This field will eventually be removed, and the type computed
       --   on demand instead.
-      varType :: ReturnType
+      varType :: Type
 
     , dataConType :: !DataConType
     }
     -- | Type and definition of a type function
   | TyFunTypeAssignment
-    { varType :: !ReturnType
+    { varType :: !Type
     , tyFunType :: !TypeFunction
     }
 
 data DataType =
   DataType
-  { -- | The default representation used for values that are instances of
-    --   this type constructor
-    dataTypeRepresentation :: !Repr
+  { -- | The kind of a value whose type is a
+    --   fully applied instance of this data type.
+    dataTypeKind :: BaseKind
     
     -- | Data constructors of this data type
   , dataTypeDataConstructors :: [Var]
@@ -148,21 +160,21 @@ data DataConType =
   { -- | Type parameters.  Type parameters are passed as arguments when 
     --   constructing a value and when deconstructing it.
     --   These must be value patterns (@ValPT _@).
-    dataConPatternParams :: [ParamType]
+    dataConPatternParams :: [Binder]
 
     -- | Existential types.  These are passed
     --   as arguments when constructing a value, and matched as paramters
     --   when deconstructing it.  They have no run-time representation.
     --   These must be dependent value patterns (@ValPT (Just _)@).
-  , dataConPatternExTypes :: [ParamType]
+  , dataConPatternExTypes :: [Binder]
 
     -- | Fields.  These are passed as arguments when constructing a value,
     -- and matched as parameters when deconstructing it.
-  , dataConPatternArgs :: [ReturnType]
+  , dataConPatternArgs :: [Type]
 
     -- | Type of the constructed value.
     -- May mention the pattern parameters.
-  , dataConPatternRange :: ReturnType
+  , dataConPatternRange :: Type
 
   , dataConCon :: Var           -- ^ This data constructor
   , dataConTyCon :: Var         -- ^ The type inhabited by constructed values
@@ -179,17 +191,17 @@ data TypeFunction =
     -- | How to evaluate a type function.  The length of the argument list
     --   is exactly the size given by _tyfunArity.  The arguments are not
     --   reduced.  The returned type should be in weak head-normal form.
-  , _tyfunReduction :: !([Type] -> TypeEvalM Type)
+  , _tyfunReduction :: !(EvalMonad m => [Type] -> m Type)
   }
 
 -- | Create a type function
-typeFunction :: Int -> ([Type] -> TypeEvalM Type) -> TypeFunction
+typeFunction :: Int -> (forall m. EvalMonad m => [Type] -> m Type) -> TypeFunction
 typeFunction = TypeFunction
 
 typeFunctionArity :: TypeFunction -> Int
 typeFunctionArity = _tyfunArity
 
-applyTypeFunction :: TypeFunction -> [Type] -> TypeEvalM Type
+applyTypeFunction :: EvalMonad m => TypeFunction -> [Type] -> m Type
 applyTypeFunction = _tyfunReduction
 
 -- | A type environment maps variables to types
@@ -203,36 +215,42 @@ wiredInTypeEnv :: TypeEnv
 wiredInTypeEnv =
   TypeEnv $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- entries]
   where
-    entries = [(pureV, VarTypeAssignment (ValRT ::: kindT)),
-               (intindexV, VarTypeAssignment (ValRT ::: kindT)),
-               (valV, VarTypeAssignment (ValRT ::: kindT)),
-               (boxV, VarTypeAssignment (ValRT ::: kindT)),
-               (bareV, VarTypeAssignment (ValRT ::: kindT)),
-               (outV, VarTypeAssignment (ValRT ::: kindT)),
-               (posInftyV, VarTypeAssignment (ValRT ::: intindexT))]
+    entries = [(intindexV, VarTypeAssignment kindT),
+               (valV, VarTypeAssignment kindT),
+               (boxV, VarTypeAssignment kindT),
+               (bareV, VarTypeAssignment kindT),
+               (outV, VarTypeAssignment kindT),
+               (sideeffectV, VarTypeAssignment kindT),
+               (writeV, VarTypeAssignment kindT),
+               (posInftyV, VarTypeAssignment intindexT)]
 
 -- | Insert a variable type assignment
-insertType :: Var -> ReturnRepr ::: Type -> TypeEnv -> TypeEnv
+insertType :: Var -> Type -> TypeEnv -> TypeEnv
 insertType v t (TypeEnv env) =
   TypeEnv (IntMap.insert (fromIdent $ varID v) (VarTypeAssignment t) env)
 
+-- | A description of a data type that will be added to a type environment.
 data DataTypeDescr =
-  DataTypeDescr Var ReturnType Repr [(ReturnType, DataConType)]
+  DataTypeDescr Var Type [(Type, DataConType)]
 
 insertDataType :: DataTypeDescr -> TypeEnv -> TypeEnv
-insertDataType (DataTypeDescr ty_con kind repr ctors) (TypeEnv env) =
+insertDataType (DataTypeDescr ty_con kind ctors) (TypeEnv env) =
   TypeEnv $ foldr insert env (ty_con_assignment : data_con_assignments)
   where
     insert (v, a) env = IntMap.insert (fromIdent $ varID v) a env
     ty_con_assignment =
-      (ty_con, TyConTypeAssignment kind (DataType repr data_cons))
+      (ty_con, TyConTypeAssignment kind (DataType (result_kind kind) data_cons))
     data_con_assignments =
       [(dataConCon dtor, DataConTypeAssignment ty dtor)
       | (ty, dtor) <- ctors]
     data_cons = [dataConCon dtor | (_, dtor) <- ctors]
+    
+    -- The kind of a fully applied instance of the data constructor
+    result_kind k = case k
+                    of FunT _ k2 -> result_kind k2
+                       VarT {}   -> toBaseKind k
 
-insertTypeFunction :: Var -> ReturnType -> TypeFunction
-                   -> TypeEnv -> TypeEnv
+insertTypeFunction :: Var -> Type -> TypeFunction -> TypeEnv -> TypeEnv
 insertTypeFunction v ty f (TypeEnv env) =
   TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyFunTypeAssignment ty f) env
 
@@ -265,7 +283,7 @@ lookupTypeFunction v (TypeEnv env) =
      _ -> Nothing
 
 -- | Look up the type of a variable
-lookupType :: Var -> TypeEnv -> Maybe ReturnType
+lookupType :: Var -> TypeEnv -> Maybe Type
 {-# INLINE lookupType #-}
 lookupType v (TypeEnv env) =
   fmap varType $ IntMap.lookup (fromIdent $ varID v) env
@@ -278,9 +296,16 @@ getAllDataConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env
     get_data_con _ = Nothing
 
 -- | Get all types in the type environment
-getAllTypes :: TypeEnv -> IntMap.IntMap ReturnType
+getAllTypes :: TypeEnv -> IntMap.IntMap Type
 getAllTypes (TypeEnv env) = IntMap.map varType env
 
+-- | Create a docstring showing all types in the type environment
+pprTypeEnv :: TypeEnv -> Doc
+pprTypeEnv tenv =
+  vcat [ hang (text (show n) <+> text "|->") 8 (pprType t)
+       | (n, t) <- IntMap.toList $ getAllTypes tenv]
+
+{-
 -------------------------------------------------------------------------------
 
 -- | Convert an ordinary type environment to a pure type environment
@@ -376,60 +401,93 @@ convertToMemDataConType (DataConType params eparams args range con ty_con) =
               (convertToMemReturnType range)
               con
               ty_con
-              
+-}              
 -------------------------------------------------------------------------------
-
-mapBinding f (x ::: t) = x ::: f t
 
 specToPureTypeEnv :: TypeEnv -> TypeEnv
 specToPureTypeEnv (TypeEnv m) =
-  TypeEnv (IntMap.map specToPureTypeAssignment m)
+  TypeEnv (IntMap.mapMaybe specToPureTypeAssignment m)
 
+specToPureTypeAssignment :: TypeAssignment -> Maybe TypeAssignment
 specToPureTypeAssignment ass =
   case ass
   of VarTypeAssignment rt ->
-       VarTypeAssignment (mapBinding specToPureType rt)
+       VarTypeAssignment <$> specToPureTypeOrKind rt
      TyConTypeAssignment rt cons ->
-       TyConTypeAssignment (mapBinding specToPureType rt) cons
-     DataConTypeAssignment _ con_type ->
-       DataConTypeAssignment undef_type (specToPureDataConType con_type)
+       TyConTypeAssignment <$> specToPureKind rt <*> pure cons
+     DataConTypeAssignment rt con_type ->
+       DataConTypeAssignment <$> specToPureType rt
+                             <*> specToPureDataConType con_type
      TyFunTypeAssignment rt f ->
-       TyFunTypeAssignment (mapBinding specToPureType rt) f
-  where
-    undef_type =
-      internalError "specToPureTypeAssignment: Data constructor type is not used"
+       TyFunTypeAssignment <$> specToPureKind rt <*> pure f
+
+specToPureTypeOrKind e =
+  case getLevel e
+  of TypeLevel -> specToPureType e
+     KindLevel -> specToPureKind e
+     SortLevel -> Just e        -- Sorts are unchanged
+     _ -> internalError "specToPureTypeOrKind: Not a type, kind, or sort"
 
 specToPureType ty =
   case fromVarApp ty
   of Just (con, [arg])
        -- Adapter types are ignored in the pure representation. 
-       -- Remove applications of 'write', 'Stored', and 'Boxed'.
-       | con `isPyonBuiltin` the_write || 
+       -- Remove applications of 'Writer', 'Stored', and 'Boxed'.
+       | con `isPyonBuiltin` the_Writer || 
          con `isPyonBuiltin` the_Stored ||
          con `isPyonBuiltin` the_Boxed ->
            specToPureType arg
        
      -- Recurse on other types
      _ -> case ty
-          of VarT _ -> ty
-             AppT op arg -> AppT (specToPureType op) (specToPureType arg)
-             FunT arg ret -> FunT (mapBinding specToPureType arg) (mapBinding specToPureType ret)
-             AnyT _ -> ty
-             IntT _ -> ty
+          of VarT _ -> pure ty
+             AppT op arg -> AppT <$> specToPureType op <*> specToPureType arg
+             LamT (x ::: dom) body -> do
+               dom' <- specToPureKind dom
+               body' <- specToPureType body
+               return $ LamT (x ::: dom') body'
+             FunT arg ret -> FunT <$> specToPureType arg <*> specToPureType ret
+             AllT (x ::: dom) rng -> do
+               dom' <- specToPureKind dom
+               rng' <- specToPureType rng
+               return $ AllT (x ::: dom') rng'
+             AnyT _ -> pure ty
+             IntT _ -> pure ty
 
-specToPureDataConType dcon_type =
-  DataConType
-  { dataConPatternParams  = map type_param $ dataConPatternParams dcon_type
-  , dataConPatternExTypes = map type_param $ dataConPatternExTypes dcon_type
-  , dataConPatternArgs    = map field $ dataConPatternArgs dcon_type
-  , dataConPatternRange   = case dataConPatternRange dcon_type
-                            of ValRT ::: t -> ValRT ::: specToPureType t
-  , dataConCon            = dataConCon dcon_type
-  , dataConTyCon          = dataConTyCon dcon_type
-  }
+-- Every value is represented in boxed form, so they all have kind 'box'.
+-- Types that do not describe values (such as intindexT) can still have
+-- distinct kinds.
+--
+-- The kinds 'out' and 'sideeffect' have no equivalent pure term.  If
+-- they appear in a type, then 'Nothing' is returned.  The type environment
+-- entry that mentions this kind will be removed from the environment.
+specToPureKind :: Kind -> Maybe Kind
+specToPureKind k =
+  case k
+  of VarT kind_var
+       | kind_var == boxV      -> Just boxT
+       | kind_var == bareV     -> Just boxT
+       | kind_var == valV      -> Just boxT
+       | kind_var == intindexV -> Just intindexT
+       | otherwise             -> Nothing
+     dom `FunT` rng -> liftM2 FunT (specToPureKind dom) (specToPureKind rng)
+     _ -> internalError "specToPureKind: Unexpected kind"
+
+specToPureDataConType dcon_type = do
+  ty_params <- mapM type_param $ dataConPatternParams dcon_type
+  ex_types <- mapM type_param $ dataConPatternExTypes dcon_type
+  args <- mapM specToPureType $ dataConPatternArgs dcon_type
+  range <- specToPureType $ dataConPatternRange dcon_type
+  return $ DataConType
+           { dataConPatternParams  = ty_params
+           , dataConPatternExTypes = ex_types
+           , dataConPatternArgs    = args
+           , dataConPatternRange   = range
+           , dataConCon            = dataConCon dcon_type
+           , dataConTyCon          = dataConTyCon dcon_type
+           }
   where
-    type_param (ValPT (Just v) ::: t) = ValPT (Just v) ::: specToPureType t
-    field (ValRT ::: t) = ValRT ::: specToPureType t
+    type_param (v ::: t) = fmap (v :::) $ specToPureKind t
 
 specToMemTypeEnv :: TypeEnv -> TypeEnv
 specToMemTypeEnv (TypeEnv m) =
@@ -438,22 +496,19 @@ specToMemTypeEnv (TypeEnv m) =
 specToMemTypeAssignment ass =
   case ass
   of VarTypeAssignment rt ->
-       VarTypeAssignment (mapBinding specToMemType rt)
+       VarTypeAssignment (specToMemType rt)
      TyConTypeAssignment rt cons ->
-       TyConTypeAssignment (mapBinding specToMemType rt) cons
-     DataConTypeAssignment _ con_type ->
-       DataConTypeAssignment undef_type (specToMemDataConType con_type)
+       TyConTypeAssignment (specToMemType rt) cons
+     DataConTypeAssignment rt con_type ->
+       DataConTypeAssignment (specToMemType rt) (specToMemDataConType con_type)
      TyFunTypeAssignment rt f ->
-       TyFunTypeAssignment (mapBinding specToMemType rt) f
-  where
-    undef_type =
-      internalError "specToMemTypeAssignment: Data constructor type is not used"
+       TyFunTypeAssignment (specToMemType rt) f
 
 specToMemType ty =
   case fromVarApp ty
   of Just (con, [arg])
-       -- Replace applications of 'write' by initializer functions.
-       | con `isPyonBuiltin` the_write ->
+       -- Replace applications of 'Writer' by initializer functions.
+       | con `isPyonBuiltin` the_Writer ->
            let mem_arg = specToMemType arg
            in initializerType mem_arg
        
@@ -461,24 +516,28 @@ specToMemType ty =
      _ -> case ty
           of VarT _ -> ty
              AppT op arg -> AppT (specToMemType op) (specToMemType arg)
-             FunT arg ret -> FunT (mapBinding specToMemType arg) (mapBinding specToMemType ret)
+             FunT arg ret -> FunT (specToMemType arg) (specToMemType ret)
+             AllT (x ::: dom) rng ->
+               AllT (x ::: specToMemType dom) (specToMemType rng)
              AnyT _ -> ty
              IntT _ -> ty
+             LamT (x ::: dom) body ->
+               LamT (x ::: specToMemType dom) (specToMemType body)
+             AllT (x ::: dom) rng ->
+               LamT (x ::: specToMemType dom) (specToMemType rng)
 
 specToMemDataConType dcon_type =
   DataConType
   { dataConPatternParams  = map type_param $ dataConPatternParams dcon_type
   , dataConPatternExTypes = map type_param $ dataConPatternExTypes dcon_type
-  , dataConPatternArgs    = map field $ dataConPatternArgs dcon_type
-  , dataConPatternRange   = case dataConPatternRange dcon_type
-                            of ValRT ::: t -> ValRT ::: specToMemType t
+  , dataConPatternArgs    = map specToMemType $ dataConPatternArgs dcon_type
+  , dataConPatternRange   = specToMemType $ dataConPatternRange dcon_type
   , dataConCon            = dataConCon dcon_type
   , dataConTyCon          = dataConTyCon dcon_type
   }
   where
-    type_param (ValPT (Just v) ::: t) = ValPT (Just v) ::: specToMemType t
-    field (ValRT ::: t) = ValRT ::: specToMemType t
+    type_param (v ::: t) = v ::: specToMemType t
 
 initializerType t =
-  FunT (ValPT Nothing ::: varApp (pyonBuiltin the_OutPtr) [t])
-       (ValRT ::: varApp (pyonBuiltin the_IEffect) [t])
+  FunT (varApp (pyonBuiltin the_OutPtr) [t])
+       (varApp (pyonBuiltin the_IEffect) [t])

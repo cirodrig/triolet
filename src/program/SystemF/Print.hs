@@ -73,7 +73,7 @@ pprPatFlags flags pat =
      TupleP ps -> tuple $ map (pprPatFlags flags) ps
 
 pprTyPatFlags :: PrintFlags -> TyPat SF -> Doc
-pprTyPatFlags flags (TyPatSF v ty) =
+pprTyPatFlags flags (TyPatSF (v ::: ty)) =
   pprVar v <+> colon <+> pprTyp (TypSF ty)
 
 pprExpFlags :: PrintFlags -> ExpSF -> Doc

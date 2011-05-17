@@ -89,48 +89,47 @@ Executable pyon
     Untyped.TypeInference
     Untyped.TypeInferenceEval
     Untyped.Unification
-    SystemF.ArgumentFlattening
+    --SystemF.ArgumentFlattening
     SystemF.Build
     SystemF.Demand
-    SystemF.DemandAnalysis
+    --SystemF.DemandAnalysis
     SystemF.DeadCode
     SystemF.DeadCodeSF
     SystemF.DictEnv
     SystemF.ElimPatternMatching
-    SystemF.EtaReduce
-    SystemF.Floating
-    SystemF.KnownValue
-    SystemF.LoopRewrite
+    --SystemF.EtaReduce
+    --SystemF.Floating
+    --SystemF.KnownValue
+    --SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2
-    SystemF.Lowering.Marshaling
-    SystemF.Lowering.Lowering2
+    --SystemF.Lowering.Marshaling
+    --SystemF.Lowering.Lowering2
     SystemF.Lowering.LowerMonad
     SystemF.MemoryIR
-    SystemF.OutputPassing
+    --SystemF.OutputPassing
     SystemF.PartialEval
     SystemF.Print
     SystemF.PrintMemoryIR
-    SystemF.Representation
+    --SystemF.Representation
     SystemF.ReprInference
     SystemF.Rename
     SystemF.ReprDict
-    SystemF.Rewrite
-    SystemF.Simplify
-    SystemF.StreamSpecialize
+    -- SystemF.Rewrite
+    --SystemF.Simplify
     SystemF.Syntax
     SystemF.Typecheck
     SystemF.TypecheckSF
     SystemF.TypecheckMem
-    CParser.AST
-    CParser.Driver
-    CParser.GenCore
-    CParser.LevelInference
-    CParser.LexData
-    CParser.Lexer
-    CParser.Parser
-    CParser.Pretty
-    CParser.PrettyAST
-    CParser.Resolve
+    -- CParser.AST
+    -- CParser.Driver
+    -- CParser.GenCore
+    -- CParser.LevelInference
+    -- CParser.LexData
+    -- CParser.Lexer
+    -- CParser.Parser
+    -- CParser.Pretty
+    -- CParser.PrettyAST
+    -- CParser.Resolve
     CParser2.AST
     CParser2.Driver
     CParser2.GenCore
