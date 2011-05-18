@@ -21,19 +21,16 @@ import Type.Environment
 import Type.Rename
 import Type.Type
 
--- | A @MkDict m@ constructs a dictionary in monad @m2, which is normally
---   an instance of 'ReprDictMonad', and makes the dictionary available over
---   the scope of some computation.
+-- | A @MkDict@ constructs a value in a singleton type, such as a
+--   type class dictionary or an indexed int.
 newtype MkDict =
-  MkDict {mkDict :: forall m. ReprDictMonad m => (ExpM -> m ExpM) -> m ExpM}
+  MkDict {mkDict :: forall m. ReprDictMonad m => m ExpM}
 
--- | A 'DictEnv' containing 'MkDict' values
+-- | A 'DictEnv' containing dictionary values
 type MkDictEnv = DictEnv.DictEnv MkDict
 
-newtype MkInt = MkInt {mkInt :: forall m. ReprDictMonad m => m ExpM}
-
 -- | A 'DictEnv' containing indexed integer values
-type IntIndexEnv = DictEnv.DictEnv MkInt
+type IntIndexEnv = DictEnv.DictEnv MkDict
 
 -- | A monad that keeps track of representation dictionaries
 class (TypeEnvMonad m, MonadIO m, Supplies m VarID) => ReprDictMonad m where
@@ -82,7 +79,7 @@ lookupReprDict ty@(AnyT {}) =
     mk_any_dict ty =
       let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_EmptyReference)
           call = ExpM $ AppE defaultExpInfo op [TypM ty] []
-      in MkDict ($ call)
+      in MkDict (return call)
      
 lookupReprDict ty =
   case fromVarApp ty
@@ -103,7 +100,7 @@ lookupReprDict ty =
       -- Create a boxed representation object, and pass it to the continuation 
       let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
           call = ExpM $ AppE defaultExpInfo op [TypM ty] []
-      in MkDict ($ call)
+      in MkDict (return call)
 
 -- | Look up the integer value indexed by the given index.  The index must
 --   have kind 'intindex'.
@@ -113,7 +110,7 @@ lookupIndexedInt ty = do
   id_supply <- getVarIDs
   ienv <- getIntIndexEnv
   mk <- liftIO $ DictEnv.lookup id_supply tenv ty ienv
-  mapM mkInt mk
+  mapM (\(MkDict m) -> m) mk
 
 lookupIndexedInt' :: ReprDictMonad m => Type -> m ExpM
 lookupIndexedInt' ty = lookupIndexedInt ty >>= check
@@ -129,7 +126,7 @@ saveReprDict :: ReprDictMonad m => Type -> ExpM -> m a -> m a
 saveReprDict dict_type dict_exp m =
   localDictEnv (DictEnv.insert dict_pattern) m
   where
-    dict_pattern = DictEnv.monoPattern dict_type (MkDict ($ dict_exp))
+    dict_pattern = DictEnv.monoPattern dict_type (MkDict (return dict_exp))
 
 -- | Add an indexed int to the environment.  It will be used if it is 
 --   needed in the remainder of the computation.
@@ -137,7 +134,7 @@ saveIndexedInt :: ReprDictMonad m => Type -> ExpM -> m a -> m a
 saveIndexedInt dict_type dict_exp m =
   localIntIndexEnv (DictEnv.insert dict_pattern) m
   where
-    dict_pattern = DictEnv.monoPattern dict_type (MkInt $ return dict_exp)
+    dict_pattern = DictEnv.monoPattern dict_type (MkDict $ return dict_exp)
 
 -- | If the pattern binds a representation dictionary or int index,
 --   record the dictionary 
@@ -169,27 +166,29 @@ saveReprDictPattern pattern m =
 saveReprDictPatterns :: ReprDictMonad m => [PatM] -> m a -> m a
 saveReprDictPatterns ps m = foldr saveReprDictPattern m ps
 
-withReprDict :: ReprDictMonad m => Type -> (ExpM -> m ExpM) -> m ExpM
-withReprDict param_type f = do
+getReprDict :: ReprDictMonad m => Type -> m ExpM
+getReprDict param_type = do
   mdict <- lookupReprDict param_type
   case mdict of
-    Just (MkDict dict) -> dict f
+    Just (MkDict dict) -> dict
     Nothing -> internalError err_msg
   where
     err_msg = "withReprDict: Cannot construct dictionary for type:\n" ++
               show (pprType param_type)
 
+withReprDict :: ReprDictMonad m => Type -> (ExpM -> m a) -> m a
+withReprDict param_type k = do
+  dict <- getReprDict param_type
+  saveReprDict param_type dict (k dict)
+
 createDictEnv :: FreshVarM (MkDictEnv, IntIndexEnv)
 createDictEnv = do
-  let int_dict = DictEnv.monoPattern
-                 (varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_int)])
-                 (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_int))
-  let float_dict = DictEnv.monoPattern
-                   (varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_float)])
-                   (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_float))
-  let efftok_dict = DictEnv.monoPattern
-                    (varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_EffTok)])
-                    (MkDict ($ ExpM $ VarE defaultExpInfo $ pyonBuiltin the_repr_EffTok))
+  let int_dict =
+        valueDict (pyonBuiltin the_int) (pyonBuiltin the_repr_int)
+  let float_dict =
+        valueDict (pyonBuiltin the_float) (pyonBuiltin the_repr_float)
+  let efftok_dict =
+        valueDict (pyonBuiltin the_EffTok) (pyonBuiltin the_repr_EffTok)
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
   boxed_dict <- createBoxedDictPattern (pyonBuiltin the_BoxedType) 1
   stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 2
@@ -248,52 +247,36 @@ getParamType v subst =
   of Just v -> v
      Nothing -> internalError "getParamType"
 
--- | Add a dictionary to the environment and pass it to the given computation.
-saveAndUseDict :: ReprDictMonad m =>
-                  Type -> ExpM -> (ExpM -> m ExpM) -> m ExpM
-saveAndUseDict dict_type dict_val k =
-  saveReprDict dict_type dict_val $ k dict_val
+-- | Create a dictionary for a monomorphic value type.
+valueDict :: Var -> Var -> DictEnv.TypePattern MkDict
+valueDict value_var dict_var =
+  DictEnv.monoPattern pattern_type expr
+  where
+    pattern_type = varApp (pyonBuiltin the_Stored) [VarT value_var]
+    expr = MkDict $ return $ ExpM $ VarE defaultExpInfo dict_var
 
 createDict_Tuple2 :: Var -> Var -> Substitution -> MkDict
-createDict_Tuple2 param_var1 param_var2 subst = MkDict $ \use_dict ->
+createDict_Tuple2 param_var1 param_var2 subst = MkDict $
   withReprDict param1 $ \dict1 ->
-  withReprDict param2 $ \dict2 -> do
-    tmpvar <- newAnonymousVar ObjectLevel
-    let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
-    body <- saveAndUseDict data_type dict_exp use_dict
-    return $ ExpM $ LetE { expInfo = defaultExpInfo 
-                         , expBinder = mk_pat tmpvar
-                         , expValue = mk_dict dict1 dict2
-                         , expBody = body}
+  withReprDict param2 $ \dict2 ->
+  return $ ExpM $ AppE defaultExpInfo dict_oper [TypM param1, TypM param2]
+  [dict1, dict2]
   where
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
     
     data_type = varApp (pyonBuiltin the_PyonTuple2) [param1, param2]
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    
-    -- Construct the local variable pattern
-    mk_pat tmpvar =
-      memVarP (tmpvar ::: dict_type)
-    
-    -- Construct the dictionary
-    mk_dict dict1 dict2 =
-      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
-      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
-         [dict1, dict2]
+    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
 
 createDict_Tuple3 :: Var -> Var -> Var -> Substitution -> MkDict
-createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $ \use_dict ->
+createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $
   withReprDict param1 $ \dict1 ->
   withReprDict param2 $ \dict2 ->
-  withReprDict param3 $ \dict3 -> do
-    tmpvar <- newAnonymousVar ObjectLevel
-    let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
-    body <- saveAndUseDict data_type dict_exp use_dict
-    return $ ExpM $ LetE { expInfo = defaultExpInfo 
-                         , expBinder = mk_pat tmpvar
-                         , expValue = mk_dict dict1 dict2 dict3
-                         , expBody = body}
+  withReprDict param3 $ \dict3 ->
+  return $ ExpM $ AppE defaultExpInfo dict_oper
+      [TypM param1, TypM param2, TypM param3]
+      [dict1, dict2, dict3]
   where
     param1 = getParamType pv1 subst
     param2 = getParamType pv2 subst
@@ -301,29 +284,17 @@ createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $ \use_dict ->
 
     data_type = varApp (pyonBuiltin the_PyonTuple3) [param1, param2, param3]
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    
-    -- Construct the local variable pattern
-    mk_pat tmpvar = memVarP (tmpvar ::: dict_type)
-    
-    -- Construct the dictionary
-    mk_dict dict1 dict2 dict3 =
-      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple3)
-      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2, TypM param3]
-         [dict1, dict2, dict3]
+    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple3)
 
 createDict_Tuple4 :: Var -> Var -> Var -> Var -> Substitution -> MkDict
-createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $ \use_dict ->
+createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
   withReprDict param1 $ \dict1 ->
   withReprDict param2 $ \dict2 ->
   withReprDict param3 $ \dict3 ->
-  withReprDict param4 $ \dict4 -> do
-    tmpvar <- newAnonymousVar ObjectLevel
-    let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
-    body <- saveAndUseDict data_type dict_exp use_dict
-    return $ ExpM $ LetE { expInfo = defaultExpInfo 
-                         , expBinder = mk_pat tmpvar
-                         , expValue = mk_dict dict1 dict2 dict3 dict4
-                         , expBody = body}
+  withReprDict param4 $ \dict4 ->
+  return $ ExpM $ AppE defaultExpInfo dict_oper
+      [TypM param1, TypM param2, TypM param3, TypM param4]
+      [dict1, dict2, dict3, dict4]
   where
     param1 = getParamType pv1 subst
     param2 = getParamType pv2 subst
@@ -332,74 +303,45 @@ createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $ \use_dict ->
 
     data_type = varApp (pyonBuiltin the_PyonTuple4) [param1, param2, param3, param4]
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    
-    -- Construct the local variable pattern
-    mk_pat tmpvar = memVarP (tmpvar ::: dict_type)
-    
-    -- Construct the dictionary
-    mk_dict dict1 dict2 dict3 dict4 =
-      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple4)
-      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2, TypM param3, TypM param4]
-         [dict1, dict2, dict3, dict4]
+    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple4)
 
 createDict_list :: Var -> Substitution -> MkDict
-createDict_list param_var subst = MkDict $ \use_dict ->
+createDict_list param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  let list_dict = mk_list_dict elt_dict
-  in use_dict list_dict
+  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_list)
-    mk_list_dict elt_dict =
-      ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
 
 createDict_referenced :: Var -> Substitution -> MkDict
-createDict_referenced param_var subst = MkDict $ \use_dict ->
+createDict_referenced param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  let dict = ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
-  in use_dict dict
+  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Referenced)
 
 createDict_complex :: Var -> Substitution -> MkDict
-createDict_complex param_var subst = MkDict $ \use_dict ->
+createDict_complex param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
-  let cpx_dict = mk_cpx_dict elt_dict
-  in use_dict cpx_dict
+  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
   where
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Complex)
-    mk_cpx_dict elt_dict =
-      ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
 
 createDict_array :: Var -> Var -> Substitution -> MkDict
-createDict_array param_var1 param_var2 subst = MkDict $ \use_dict -> do
+createDict_array param_var1 param_var2 subst = MkDict $
   withReprDict param2 $ \dict2 -> do
     index <- lookupIndexedInt' param1
-    tmpvar <- newAnonymousVar ObjectLevel
-    let dict_exp = ExpM $ VarE defaultExpInfo tmpvar
-    body <- saveAndUseDict data_type dict_exp use_dict
-    return $ ExpM $ LetE { expInfo = defaultExpInfo 
-                         , expBinder = mk_pat tmpvar
-                         , expValue = mk_dict index dict2
-                         , expBody = body}
+    return $ ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
+      [index, dict2]
   where
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
     
     data_type = varApp (pyonBuiltin the_array) [param1, param2]
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    
-    -- Construct the local variable pattern
-    mk_pat tmpvar =
-      memVarP (tmpvar ::: dict_type)
-    
-    -- Construct the dictionary
-    mk_dict index dict2 =
-      let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_array)
-      in ExpM $ AppE defaultExpInfo oper [TypM param1, TypM param2]
-         [index, dict2]
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_array)
 
 -- | Get the representation dictionary for a boxed data type.
 --   
@@ -416,14 +358,14 @@ createBoxedDictPattern con arity = do
     -- Create a function call expression
     --
     -- > the_repr_Box (con arg1 arg2 ... argN)
-    create_dict param_vars subst = MkDict ($ expr)
+    create_dict param_vars subst = MkDict (return expr)
       where
         param_types = [getParamType v subst | v <- param_vars]
         dict_type = varApp con param_types
         op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
         expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
 
-createInt_min param_var1 param_var2 subst = MkInt $ do
+createInt_min param_var1 param_var2 subst = MkDict $ do
   int1 <- lookupIndexedInt' param1
   int2 <- lookupIndexedInt' param2
   return $ ExpM $
