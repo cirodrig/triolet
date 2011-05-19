@@ -255,16 +255,9 @@ pyonBuiltinVariableNames =
   , "histogramArray"
     
     -- Inserted by representation inference
-  , "load"
-  , "store"
   , "copy"
   , "convertToBoxed"
   , "convertToBare"
-  , "loadBox"
-  , "storeBox"
-  , "copyBox"
-  , "boxToPtr"
-  , "ptrToBox"
     
     -- Inserted by argument flattening
   , "deadBox"

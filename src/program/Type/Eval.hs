@@ -108,10 +108,10 @@ typeCheckType ty =
 
      LamT (v ::: dom) body -> do
        -- Get types of domain and range
-       dom_kind <- typeCheckType dom
+       _ <- typeCheckType dom
        body_kind <- assume v dom $ typeCheckType body
        return $! case getLevel body
-                 of TypeLevel -> FunT dom_kind body_kind
+                 of TypeLevel -> FunT dom body_kind
                     _ -> internalError "typeCheckType: Unexpected type"
 
      AllT (v ::: dom) rng -> do

@@ -3,14 +3,17 @@
 module SystemF.Rename
        (freshen,
         renamePatM,
+        renamePatMs,
         substitutePatM,
         freshenPatM,
         freshenPatMs,
         renameTyPatM,
+        renameTyPatMs,
         substituteTyPatM,
         freshenTyPatM,
         freshenTyPatMs,
         renameDefM,
+        renameDefGroup,
         freshenModuleFully)
 where
 
@@ -140,11 +143,6 @@ instance Renameable (Typ Mem) where
   rename rn (TypM t) = TypM $ rename rn t
   freshen (TypM t) = liftM TypM $ freshen t
   freeVariables (TypM t) = freeVariables t
-
-instance Renameable (Ret Mem) where
-  rename rn (RetM rt) = RetM (rename rn rt)
-  freshen (RetM rt) = liftM RetM $ freshen rt
-  freeVariables (RetM rt) = freeVariables rt
 
 instance Renameable (Exp Mem) where
   rename rn (ExpM expression) = ExpM $
@@ -328,9 +326,6 @@ renameDefGroup r (Rec defs) k =
 instance Substitutable (Typ Mem) where
   substitute s (TypM t) = TypM `liftM` substitute s t
 
-instance Substitutable (Ret Mem) where
-  substitute s (RetM rt) = RetM `liftM` substitute s rt
-
 instance Substitutable (Exp Mem) where
   substitute s (ExpM expression) =
     case expression
@@ -411,9 +406,6 @@ freshenType ty = ReaderT $ \rn -> return $ rename rn ty
 
 freshenDmd dmd = ReaderT $ \rn -> return $ rename rn dmd
 
-freshenRet (RetM rtype) =
-  ReaderT $ \rn -> return (RetM (rename rn rtype))
-
 freshenTyParam (TyPatM (v ::: ty)) k = do
   ty' <- freshenType ty
   freshenVar v $ \v' -> k (TyPatM (v' ::: ty'))
@@ -466,7 +458,7 @@ freshenFun (FunM f) =
   withMany freshenTyParam (funTyParams f) $ \ty_params ->
   withMany freshenParam (funParams f) $ \params -> do
     body <- freshenExp $ funBody f
-    ret <- freshenRet $ funReturn f
+    ret <- freshenType $ funReturn f
     return $ FunM $ f { funTyParams = ty_params
                       , funParams = params
                       , funReturn = ret

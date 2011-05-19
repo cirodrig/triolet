@@ -21,6 +21,7 @@ import Control.Monad.Reader.Class
 import Control.Monad.Writer.Class
 import qualified Data.Graph as Graph
 import qualified Data.IntMap as IntMap
+import qualified Data.Set as Set
 import Data.List
 import Data.Maybe
 import Debug.Trace
@@ -34,6 +35,7 @@ import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
 import Type.Environment
+import Type.Rename
 import Type.Type
 import GlobalVar
 import Globals
@@ -85,9 +87,18 @@ mentionHelper v dmd = do
     then return ()
     else tell $ useVariable v dmd
 
+mentionHelperList vs dmd = do
+  tenv <- ask
+  let used_variables = [v | v <- vs, isJust $ lookupType v tenv]
+  tell $ useVariables used_variables dmd
+
 -- | A variable was used somehow.  This is the most general case.
 mention :: Var -> Df ()
 mention v = mentionHelper v $ Dmd OnceSafe Used
+
+-- | Mention a list of variables, behaving the same as 'mention'.
+mentionList :: [Var] -> Df ()
+mentionList vs = mentionHelperList vs $ Dmd OnceSafe Used
 
 -- | A variable was used multiple times.  This prevents inlining.
 --
@@ -134,21 +145,10 @@ type DmdAnl a = a -> Df a
 -- | Get variables mentioned in a type.
 --   The type is not changed by demand analysis.
 dfType :: Type -> Df ()
-dfType ty =
-  case ty
-  of VarT v -> mention v
-     IntT n -> return ()
-     AppT t1 t2 -> dfType t1 >> dfType t2
-     FunT (param ::: dom) (_ ::: rng) ->
-       let mask_param m =
-             case param
-             of ValPT (Just v) -> maskDemand v m
-                _ -> m
-       in dfType dom >> mask_param (dfType rng)
-     AnyT k -> dfType k
+dfType ty = mentionList $ Set.toList $ freeVariables ty
 
 withTyPat :: TyPatM -> Df a -> Df (TyPatM, a)
-withTyPat pat@(TyPatM v ty) m = do
+withTyPat pat@(TyPatM (v ::: ty)) m = do
   dfType ty
   x <- maskDemand v m
   return (pat, x)
@@ -173,10 +173,9 @@ withParam pat m =
        -- If not mentioned, replace this pattern with a wildcard
        let new_pat =
              case multiplicity dmd
-             of Dead -> memWildP (patMParamType pat)
+             of Dead -> memWildP (patMType pat)
                 _ -> setPatMDmd dmd pat
        return (new_pat, x)
-     LocalVarP {} -> internalError "edcMaskPat"
 
 withParams :: [PatM] -> Df a -> Df ([PatM], a)
 withParams (pat : pats) m = do
@@ -202,7 +201,7 @@ dmdExp spc expressionM@(ExpM expression) =
        let mk_let defgroup e = ExpM (LetfunE inf defgroup e)
        return $ foldr mk_let body' dg'
      CaseE inf scr alts -> dmdCaseE spc inf scr alts
-     ExceptE _ (_ ::: ty) -> dfType ty >> return expressionM
+     ExceptE _ ty -> dfType ty >> return expressionM
   where
     {- -- Debugging output, show what was demanded in this expression
     trace_dmd m = do
@@ -226,16 +225,10 @@ dmdAppE inf op ty_args args = do
   return $ ExpM $ AppE inf op' ty_args args'
   where
     -- How the function arguments are used.
-    -- We special-case the functions 'load' and 'store'.
+    -- We special-case the 'load' function.
     use_modes =
       case op
       of ExpM (VarE _ op_var)
-           | op_var `isPyonBuiltin` the_load && length args == 1 ->
-             case ty_args
-             of [ty] -> [loadSpecificity Value (fromTypM ty) Used]
-           | op_var `isPyonBuiltin` the_loadBox && length args == 1 ->
-             case ty_args
-             of [ty] -> [loadSpecificity Boxed (fromTypM ty) Used]
            | op_var `isPyonBuiltin` the_copy && length args == 2 ->
                [Used, Inspected]
            | op_var `isPyonBuiltin` the_copy && length args == 3 ->
@@ -276,10 +269,6 @@ dmdLetE spc inf binder rhs body = do
       of MemVarP {} -> do
            dfType $ patMType binder
            return binder
-         LocalVarP v ty dict uses -> do
-           dict' <- dmdExp Used dict
-           dfType $ patMType binder
-           return $ LocalVarP v ty dict' uses
          MemWildP {} -> internalError "edcLetE"
 
 dmdCaseE result_spc inf scrutinee alts = do
@@ -314,7 +303,7 @@ dmdAlt result_spc (AltM alt) = do
         -- How the alternative's value is demanded
         Decond (altConstructor alt)
         (map fromTypM $ altTyArgs alt)
-        [(v, t) | TyPatM v t <- altExTypes alt]
+        [(v, t) | TyPatM (v ::: t) <- altExTypes alt]
         (map (specificity . patMDmd) pats)
       new_alt = AltM $ Alt { altConstructor = altConstructor alt
                            , altTyArgs = altTyArgs alt
@@ -330,8 +319,7 @@ dmdFun (FunM f) = do
     underLambda $
     withTyPats (funTyParams f) $
     withParams (funParams f) $ do
-      let RetM (_ ::: return_type) = funReturn f
-      dfType return_type
+      dfType $ fromTypM $ funReturn f
       dmdExp Used (funBody f)
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 

@@ -24,7 +24,7 @@ import qualified Untyped.TypeInference as Untyped
 -- import qualified SystemF.ArgumentFlattening as SystemF
 import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
--- import qualified SystemF.DemandAnalysis as SystemF
+import qualified SystemF.DemandAnalysis as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
 -- import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.Syntax as SystemF
@@ -35,12 +35,13 @@ import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.ReprInference as SystemF
 import qualified SystemF.SpecToMem as SystemF
+import qualified SystemF.Floating as SystemF
 {-
 import qualified SystemF.Simplify as SystemF
 import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified SystemF.OutputPassing as SystemF
-import qualified SystemF.Floating as SystemF-}
+-}
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
@@ -181,9 +182,13 @@ compilePyonToPyonAsm compile_flags path text = do
   print "Generating memory IR"
   spec_mod <- SystemF.representationInference sf_mod
   let repr_mod = SystemF.convertSpecToMemTypes spec_mod
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
   
   -- Check for bugs in representation inference
+  SystemF.TypecheckMem.typeCheckModule repr_mod
+  repr_mod <- SystemF.floatModule repr_mod
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  repr_mod <- SystemF.demandAnalysis repr_mod
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
   SystemF.TypecheckMem.typeCheckModule repr_mod
   error "This stage of the compiler is not implemented"
   {-

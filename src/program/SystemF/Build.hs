@@ -102,8 +102,7 @@ mkFun typaram_kinds mk_params mk_body = do
   body <- mk_body typaram_vars param_vars
   let typarams = [TyPatM (v ::: k) | (v, k) <- zip typaram_vars typaram_kinds]
       params = [memVarP (v ::: t) | (v, t) <- zip param_vars param_types]
-      ret = RetM return_type
-  return $ FunM $ Fun defaultExpInfo typarams params ret body
+  return $ FunM $ Fun defaultExpInfo typarams params (TypM return_type) body
   where
     mk_typaram_var _ = newAnonymousVar TypeLevel
 

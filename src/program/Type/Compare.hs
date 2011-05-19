@@ -15,6 +15,7 @@ import qualified Data.IntMap as IntMap
 import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
+import Common.Error
 import Common.Identifier
 import Common.MonadLogic
 import Common.SourcePos
@@ -150,8 +151,8 @@ unifyTypeWithPattern :: IdentSupply Var
                      -> Type    -- ^ Expected type
                      -> Type    -- ^ Given type
                      -> IO (Maybe Substitution)
-unifyTypeWithPattern id_supply _ free_vars expected given =
-  runFreshVarM id_supply calculate_substitution
+unifyTypeWithPattern id_supply tenv free_vars expected given =
+  runTypeEvalM calculate_substitution id_supply tenv
   where
     calculate_substitution = do
       result <- unify init_substitution expected given
@@ -169,11 +170,18 @@ type USubst = IntMap.IntMap (Maybe Type)
 
 -- | Search for a substitution that unifies @expected@ with @given@.
 --   Return a unifying substition if found.
-unify :: USubst -> Type -> Type -> FreshVarM (Maybe USubst)
+--
+--   This is in the type evaluation monad because types may be reduced during
+--   unification.
+unify :: USubst -> Type -> Type -> TypeEvalM (Maybe USubst)
 unify subst expected given = do
+  -- Evaluate both types to WHNF
+  expected1 <- reduceToWhnf expected
+  given1 <- reduceToWhnf given
+
   -- Rename 'expected' so that bound variables match
-  (given', expected') <- leftUnifyBoundVariables given expected
-  match_unify expected' given'
+  (given2, expected2) <- leftUnifyBoundVariables given1 expected1
+  match_unify expected2 given2
   where
     no_unifier   = return Nothing
     unified_by s = return (Just s)
@@ -213,4 +221,11 @@ unify subst expected given = do
       | n1 == n2 = unified_by subst
       | otherwise = no_unifier
 
+    match_unify (LamT {}) _ = not_implemented
+    match_unify _ (LamT {}) = not_implemented
+    match_unify (AllT {}) _ = not_implemented
+    match_unify _ (AllT {}) = not_implemented
+
     match_unify _ _ = no_unifier
+
+    not_implemented = internalError "unify: Not implemented for this type"

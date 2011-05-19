@@ -238,3 +238,6 @@ lambdaAbstracted = IntMap.map lambda_abstract
 
 useVariable :: Var -> Dmd -> Dmds
 useVariable v dmd = IntMap.singleton (fromIdent $ varID v) dmd
+
+useVariables :: [Var] -> Dmd -> Dmds
+useVariables vs dmd = IntMap.fromList [(fromIdent $ varID v, dmd) | v <- vs]

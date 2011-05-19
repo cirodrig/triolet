@@ -31,7 +31,7 @@ shapeTF = typeFunction 1 compute_shape
     simplify app_container_type container_type = do
       case fromVarApp app_container_type of
         Just (op, args)
-          | op `isPyonBuiltin` the_Referenced ->
+          | op `isPyonBuiltin` the_StoredBox ->
               case args
               of [arg] ->
                    case fromVarApp arg 
@@ -60,8 +60,10 @@ boxedTF = typeFunction 1 compute_boxed
     eval arg =
       case fromVarApp arg
       of Just (op, args')
-           | op `isPyonBuiltin` the_BareType ->
-               -- BoxedType (BareType t)  =  t
+           | op `isPyonBuiltin` the_BareType ||
+             op `isPyonBuiltin` the_StoredBox ->
+               -- BoxedType (BareType t)   =  t
+               -- BoxedType (StoredBox t)  =  t
                case args'
                of [arg'] -> reduceToWhnf arg'
 
@@ -69,7 +71,7 @@ boxedTF = typeFunction 1 compute_boxed
                -- If the argument is a data constructor application, then
                -- use 'Boxed' as the adapter type
                tenv <- getTypeEnv
-               case lookupDataCon op tenv of
+               case lookupDataType op tenv of
                  Just _ -> return $ varApp (pyonBuiltin the_Boxed) [arg]
                  _ -> cannot_reduce
          _ -> cannot_reduce
@@ -87,17 +89,19 @@ bareTF = typeFunction 1 compute_bare
     eval arg =
       case fromVarApp arg
       of Just (op, args')
-           | op `isPyonBuiltin` the_BoxedType ->
+           | op `isPyonBuiltin` the_BoxedType ||
+             op `isPyonBuiltin` the_Boxed ->
                -- BareType (BoxedType t)  =  t
+               -- BareType (Boxed t)      =  t
                case args'
                of [arg'] -> reduceToWhnf arg'
 
            | otherwise -> do
                -- If the argument is a data constructor application, then
-               -- use 'Referenced' as the adapter type
+               -- use 'StoredBox' as the adapter type
                tenv <- getTypeEnv
-               case lookupDataCon op tenv of
-                 Just _ -> return $ varApp (pyonBuiltin the_Referenced) [arg]
+               case lookupDataType op tenv of
+                 Just _ -> return $ varApp (pyonBuiltin the_StoredBox) [arg]
                  _ -> cannot_reduce
          _ -> cannot_reduce
       where

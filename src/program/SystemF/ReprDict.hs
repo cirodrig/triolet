@@ -353,7 +353,8 @@ createBoxedDictPattern con arity = do
   return $
     DictEnv.pattern param_vars (match_type param_vars) (create_dict param_vars)
   where
-    match_type param_vars = varApp con (map VarT param_vars) 
+    match_type param_vars =
+      varApp (pyonBuiltin the_StoredBox) [varApp con (map VarT param_vars)]
 
     -- Create a function call expression
     --

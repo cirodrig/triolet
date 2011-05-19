@@ -92,13 +92,13 @@ Executable pyon
     --SystemF.ArgumentFlattening
     SystemF.Build
     SystemF.Demand
-    --SystemF.DemandAnalysis
+    SystemF.DemandAnalysis
     SystemF.DeadCode
     SystemF.DeadCodeSF
     SystemF.DictEnv
     SystemF.ElimPatternMatching
     --SystemF.EtaReduce
-    --SystemF.Floating
+    SystemF.Floating
     --SystemF.KnownValue
     --SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2
