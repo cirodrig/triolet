@@ -253,8 +253,6 @@ createPhis scopes = do
   where
     paths = map fst scopes
 
-    combine_phis (a1, b1) (a2, b2) = (a1 `mplus` a2, b1 `mplus` b2)
-    
     make_phi (pvar, scopes) = do
       phi <- createPhi paths pvar scopes
       return (pvar, phi)

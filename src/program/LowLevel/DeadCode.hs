@@ -246,6 +246,7 @@ dceLocalDefGroup defs body = do
   let ann_groups = map (fmap (setFunDefUses use_map)) groups
   return (ann_groups, body')
   where
+    assume_function :: FunDef -> DCEM b -> DCEM b
     assume_function fdef = assumeFunctionArities [fdef]
     dce_def (Def v f) = Def v <$> dceFun f
 
@@ -303,6 +304,7 @@ dceDefGroup assume get_definiendum dce group m = do
       putUses partitioned_uses
       return (groups, partitioned_uses, new_body)
   where
+    assume_defs :: DCEM c -> DCEM c
     assume_defs m = foldr assume m $ groupMembers group
 
 dceTopLevelDefGroup :: Group GlobalDef
@@ -317,6 +319,7 @@ dceTopLevelDefGroup group m = do
 
   return (groups, x)
   where
+    assume_function :: GlobalDef -> DCEM a -> DCEM a
     assume_function (GlobalFunDef fdef) = assumeFunctionArities [fdef]
     assume_function (GlobalDataDef _) = id
     

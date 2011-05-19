@@ -306,9 +306,6 @@ genLocals locals =
   in do locals_ptr <- emitAtom1 (PrimType PointerType) (LL.PrimA LL.PrimGetFrameP [])
         zipWithM_ (primAddPAs locals_ptr) offsets local_vars
         return $ recordSize rec
-  where
-    assign_local_var locals_ptr v offset =
-      primAddPAs locals_ptr (nativeIntV offset) v
 
 -- | Generate code of an expression
 genExpr :: TypeEnv -> Expr Typed -> G GenExpr

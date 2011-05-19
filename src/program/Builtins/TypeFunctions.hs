@@ -20,6 +20,7 @@ builtinTypeFunctions =
 -- | Compute the shape of a data type
 shapeTF = typeFunction 1 compute_shape
   where
+    compute_shape :: forall m. EvalMonad m => [Type] -> m Type
     compute_shape [container_type] = do
       -- Apply to produce a type of kind *, which can be fully evaluated
       arg_type <- newAnonymousVar TypeLevel
@@ -28,6 +29,7 @@ shapeTF = typeFunction 1 compute_shape
 
     -- Pattern match against 'app_container_type'.  If nothing matches, then
     -- rebuild the original expression using 'container_type'.
+    simplify :: forall m. EvalMonad m => Type -> Type -> m Type
     simplify app_container_type container_type = do
       case fromVarApp app_container_type of
         Just (op, args)
@@ -53,10 +55,12 @@ shapeTF = typeFunction 1 compute_shape
 -- | Compute the boxed representation of a data type
 boxedTF = typeFunction 1 compute_boxed
   where
+    compute_boxed :: forall m. EvalMonad m => [Type] -> m Type
     compute_boxed [arg_type] =
       -- Evaluate and inspect the argument
       eval =<< reduceToWhnf arg_type
 
+    eval :: forall m. EvalMonad m => Type -> m Type
     eval arg =
       case fromVarApp arg
       of Just (op, args')
@@ -82,10 +86,12 @@ boxedTF = typeFunction 1 compute_boxed
 -- | Compute the bare representation of a type
 bareTF = typeFunction 1 compute_bare
   where
+    compute_bare :: forall m. EvalMonad m => [Type] -> m Type
     compute_bare [arg_type] =
       -- Evaluate and inspect the argument
       eval =<< reduceToWhnf arg_type
 
+    eval :: forall m. EvalMonad m => Type -> m Type
     eval arg =
       case fromVarApp arg
       of Just (op, args')

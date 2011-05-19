@@ -315,7 +315,12 @@ instance Trie TrieNode where
        UnExpr op e -> lookup2 op e $ tUn tr
        GetFramePExpr -> tGetFrameP tr
     where
+      lookup2 :: (Trie t1, Trie t2) =>
+                 Key t1 -> Key t2 -> t1 (t2 v) -> Maybe v
       lookup2 k1 k2 = lookup k2 <=< lookup k1
+
+      lookup3 :: (Trie t1, Trie t2, Trie t3) =>
+                 Key t1 -> Key t2 -> Key t3 -> t1 (t2 (t3 v)) -> Maybe v
       lookup3 k1 k2 k3 = lookup k3 <=< lookup k2 <=< lookup k1
 
   mapMaybeWithKey f tr =
@@ -327,7 +332,8 @@ instance Trie TrieNode where
        , tUn  = mapMaybeSub f UnExpr $ tUn tr
        , tGetFrameP = mapMaybeWithKey (f . const GetFramePExpr) $ tGetFrameP tr}
 
-updateTrieNode :: (forall t'. Trie t' => Key t' -> t' v -> t' v) -> Expr
+updateTrieNode :: forall v.
+                  (forall t'. Trie t' => Key t' -> t' v -> t' v) -> Expr
                -> TrieNode v -> TrieNode v
 updateTrieNode f k tr =
   case k
@@ -339,8 +345,13 @@ updateTrieNode f k tr =
      UnExpr op e -> tr {tUn = alter2 op e $ tUn tr}
      GetFramePExpr -> tr {tGetFrameP = f () $ tGetFrameP tr}
   where
-    alter3 k1 k2 k3 = alterSub k1 $ alterSub k2 $ f k3
+    alter2 :: forall t1 t2. (Trie t1, Trie t2) =>
+              Key t2 -> Key t1 -> t2 (t1 v) -> t2 (t1 v)
     alter2 k1 k2 = alterSub k1 $ f k2
+
+    alter3 :: forall t1 t2 t3. (Trie t1, Trie t2, Trie t3) =>
+              Key t3 -> Key t2 -> Key t1 -> t3 (t2 (t1 v)) -> t3 (t2 (t1 v))
+    alter3 k1 k2 k3 = alterSub k1 $ alterSub k2 $ f k3
 
 -------------------------------------------------------------------------------
 

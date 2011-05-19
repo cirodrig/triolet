@@ -90,7 +90,7 @@ ifE mk_cond mk_tr mk_fa = do
       false = AltM $ Alt (pyonBuiltin the_False) [] [] [] fa
   return $ ExpM $ CaseE defaultExpInfo cond [true, false]
 
-mkFun :: (Supplies m VarID) =>
+mkFun :: forall m. (Supplies m VarID) =>
          [Type]
       -> ([Var] -> m ([Type], Type))
       -> ([Var] -> [Var] -> m ExpM)
@@ -104,6 +104,7 @@ mkFun typaram_kinds mk_params mk_body = do
       params = [memVarP (v ::: t) | (v, t) <- zip param_vars param_types]
   return $ FunM $ Fun defaultExpInfo typarams params (TypM return_type) body
   where
+    mk_typaram_var :: forall a. a -> m Var
     mk_typaram_var _ = newAnonymousVar TypeLevel
 
 mkAlt :: EvalMonad m =>

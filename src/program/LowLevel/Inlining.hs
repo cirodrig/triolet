@@ -510,7 +510,8 @@ inlineCall params args retvars inl_stm mk_cont = do
   case inl_stm of
     Inlinable ZeroUses inl ->
       -- Ignore the continuation
-      let err = internalError "tryInlineCall"
+      let err :: forall a. a
+          err = internalError "tryInlineCall"
       in return $ inl (err, err)
     Inlinable OneUse inl -> do
       -- Inline the continuation

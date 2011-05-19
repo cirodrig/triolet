@@ -436,57 +436,52 @@ instance Monoid Coercion where
 -- | Coerce @val -> write@ using the @stored@ constructor.
 --   The argument is the @val@ type.
 toStoredCoercion :: Type -> Coercion
-toStoredCoercion ty = Coercion co
+toStoredCoercion ty = Coercion $ \k e ->
+  k (ExpM $ AppE defaultExpInfo stored_op [TypM ty] [e])
   where
-    co k e = k (ExpM $ AppE defaultExpInfo stored_op [TypM ty] [e])
     stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
 
 -- | Coerce @bare -> val@ using the @stored@ constructor.
 --   The argument is the @val@ type.
 fromStoredCoercion :: Type -> Coercion
-fromStoredCoercion ty = Coercion co
-  where
-    co k e = do
-      val_var <- newAnonymousVar ObjectLevel
-      (expr, x) <- k (ExpM $ VarE defaultExpInfo val_var)
-      
-      -- Create a case statement
-      let alt = AltM $ Alt { altConstructor = pyonBuiltin the_stored
-                           , altTyArgs = [TypM ty]
-                           , altExTypes = []
-                           , altParams = [memVarP (val_var ::: ty)]
-                           , altBody = expr}
-          cas = ExpM $ CaseE defaultExpInfo e [alt]
-      return (cas, x)
+fromStoredCoercion ty = Coercion $ \k e -> do
+  val_var <- newAnonymousVar ObjectLevel
+  (expr, x) <- k (ExpM $ VarE defaultExpInfo val_var)
+  
+  -- Create a case statement
+  let alt = AltM $ Alt { altConstructor = pyonBuiltin the_stored
+                       , altTyArgs = [TypM ty]
+                       , altExTypes = []
+                       , altParams = [memVarP (val_var ::: ty)]
+                       , altBody = expr}
+      cas = ExpM $ CaseE defaultExpInfo e [alt]
+  return (cas, x)
 
 -- | Coerce @bare -> box@ using the @convertToBoxed@ function.
 --   The argument is the @bare@ type.
 toBoxedTypeCoercion :: Type -> Coercion
-toBoxedTypeCoercion ty = Coercion co
+toBoxedTypeCoercion ty = Coercion $ \k e -> do
+  dict <- withReprDict ty return
+  k (ExpM $ AppE defaultExpInfo box_op [TypM ty] [dict, e])
   where
-    co k e = do
-      dict <- withReprDict ty return
-      k (ExpM $ AppE defaultExpInfo box_op [TypM ty] [dict, e])
     box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_convertToBoxed)
 
 -- | Coerce @box -> bare@ using the @convertToBare@ function.
 --   The argument is the @bare@ type.
 toBareTypeCoercion :: Type -> Coercion
-toBareTypeCoercion ty = Coercion co
+toBareTypeCoercion ty = Coercion $ \k e -> do
+  dict <- withReprDict ty return
+  k (ExpM $ AppE defaultExpInfo bare_op [TypM ty] [dict, e])
   where
-    co k e = do
-      dict <- withReprDict ty return
-      k (ExpM $ AppE defaultExpInfo bare_op [TypM ty] [dict, e])
     bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_convertToBare)
 
 -- | Coerce @read -> write@ using the @copy@ function.
 --   The argument is the @bare@ type.
 copyCoercion :: Type -> Coercion
-copyCoercion ty = Coercion co
+copyCoercion ty = Coercion $ \k e -> do
+  dict <- withReprDict ty return
+  k (ExpM $ AppE defaultExpInfo copy_op [TypM ty] [dict, e])
   where
-    co k e = do
-      dict <- withReprDict ty return
-      k (ExpM $ AppE defaultExpInfo copy_op [TypM ty] [dict, e])
     copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
 
 -- | Coerce @write -> bare@ by assigning to a temporary variable, then
@@ -501,25 +496,24 @@ copyCoercion ty = Coercion co
 -- in case boxed_var
 --    of Boxed read_var. k read_var
 writeLocalCoercion :: Type -> Coercion
-writeLocalCoercion ty = Coercion co
+writeLocalCoercion ty = Coercion $ \k e -> do
+  boxed_var <- newAnonymousVar ObjectLevel
+  read_var <- newAnonymousVar ObjectLevel
+  (expr, x) <- k (ExpM $ VarE defaultExpInfo read_var)
+  
+  let rhs = ExpM $ AppE defaultExpInfo box_op [TypM ty] [e]
+      expr_alt = AltM $ Alt { altConstructor = pyonBuiltin the_boxed
+                            , altTyArgs = [TypM ty]
+                            , altExTypes = []
+                            , altParams = [memVarP (read_var ::: ty)]
+                            , altBody = expr}
+      body = ExpM $ CaseE defaultExpInfo
+             (ExpM $ VarE defaultExpInfo boxed_var)
+             [expr_alt]
+      pattern = memVarP (boxed_var ::: box_type)
+      local_expr = ExpM $ LetE defaultExpInfo pattern rhs body
+  return (local_expr, x)
   where
-    co k e = do
-      boxed_var <- newAnonymousVar ObjectLevel
-      read_var <- newAnonymousVar ObjectLevel
-      (expr, x) <- k (ExpM $ VarE defaultExpInfo read_var)
-      
-      let rhs = ExpM $ AppE defaultExpInfo box_op [TypM ty] [e]
-          expr_alt = AltM $ Alt { altConstructor = pyonBuiltin the_boxed
-                                , altTyArgs = [TypM ty]
-                                , altExTypes = []
-                                , altParams = [memVarP (read_var ::: ty)]
-                                , altBody = expr}
-          body = ExpM $ CaseE defaultExpInfo
-                 (ExpM $ VarE defaultExpInfo boxed_var)
-                 [expr_alt]
-          pattern = memVarP (boxed_var ::: box_type)
-          local_expr = ExpM $ LetE defaultExpInfo pattern rhs body
-      return (local_expr, x)
     box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_boxed)
     box_type = varApp (pyonBuiltin the_Boxed) [ty]
 
@@ -536,36 +530,32 @@ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
       internalError "functionCoercion: Mismached function types"
   | null g_tydom && null g_dom =
       internalError "functionCoercion: Not a function type"
-  | otherwise = Coercion co
+  | otherwise = Coercion $ \k given_e -> make_wrapper_function given_e >>= k
   where
-    co k given_e = do
-      coerced_e <-
-        -- Insert expected function types into environment
-        assume_ty_params $ withMany define_param e_dom $ \e_params -> do
+    make_wrapper_function given_e = do
+      -- Insert expected function types into environment
+      assume_ty_params $ withMany define_param e_dom $ \e_params -> do
 
-          -- Compute result type and coerce arguments
-          let given_type = forallType g_tydom (funType g_dom g_rng)
-            
-          -- Expected parameters will be passed as type arguments
-          let type_args = [(VarT a, k) | a ::: k <- e_tydom]
-              value_args = [(ExpM $ VarE defaultExpInfo (patMVar' p),
-                             patMType p)
-                           | p <- e_params]
+        -- Compute result type and coerce arguments
+        let given_type = forallType g_tydom (funType g_dom g_rng)
+          
+        -- Expected parameters will be passed as type arguments
+        let type_args = [(VarT a, k) | a ::: k <- e_tydom]
+            value_args = [(ExpM $ VarE defaultExpInfo (patMVar' p),
+                           patMType p)
+                         | p <- e_params]
 
-          -- Create a call to the original function
-          (call, return_type) <-
-            reprApply given_e given_type type_args value_args
-          body <- coerceExpToReturnType return_type e_rng call
+        -- Create a call to the original function
+        (call, return_type) <-
+          reprApply given_e given_type type_args value_args
+        body <- coerceExpToReturnType return_type e_rng call
 
-          -- Create a lambda function
-          let fun_ty_args = [TyPatM d | d <- e_tydom]
-              fun_ret = TypM e_rng
-              fun =
-                FunM $ Fun defaultExpInfo fun_ty_args e_params fun_ret body
-          return $ ExpM $ LamE defaultExpInfo fun
-
-      -- Pass the coerced expression to the continuation
-      k coerced_e
+        -- Create a lambda function
+        let fun_ty_args = [TyPatM d | d <- e_tydom]
+            fun_ret = TypM e_rng
+            fun =
+              FunM $ Fun defaultExpInfo fun_ty_args e_params fun_ret body
+        return $ ExpM $ LamE defaultExpInfo fun
 
     -- Add the expected function type parameters to the environment
     assume_ty_params m = foldr assumeBinder m e_tydom

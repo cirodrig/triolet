@@ -791,8 +791,6 @@ emitInexactEntry clo = do
       sequence [storeField fld returns_ptr val
                | (fld, val) <- zip (recordFields return_record) return_vals]
 
-    store_field ptr fld return_val = storeField fld ptr return_val
-
     -- Record type of parameters
     param_record = papArgsRecord Constant $
                    map valueToPrimType $
@@ -1068,6 +1066,7 @@ pickApplyFun :: [TypeTag] -> (Int, Var, Var)
 pickApplyFun tags =
   pick 0 err err tags applyFunctions
   where
+    err :: forall a. a
     err = internalError "pickApplyFun: Cannot apply"
 
     pick n f g (tag:tags) trie =

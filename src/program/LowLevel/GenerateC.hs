@@ -658,6 +658,7 @@ genLocalFunctions returns fs m = do
   add_to_env local_functions $ m local_functions
   where
     -- Add the functions to the environment.  Uses 'local_functions' lazily.
+    add_to_env :: [LocalFunction] -> GenC b -> GenC b
     add_to_env local_functions =
       withLocalFunctions (lazy_zip fun_names local_functions)
       

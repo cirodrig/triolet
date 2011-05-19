@@ -29,6 +29,7 @@ toParsecSourcePos p template =
     flip PS.setSourceLine (fj $ PySrcPos.sourceLine p) $
     flip PS.setSourceColumn (fj $ PySrcPos.sourceColumn p) template
     where
+      fj :: Maybe a -> a
       fj (Just x) = x
       fj Nothing  = internalError "Lost source position in parser"
 

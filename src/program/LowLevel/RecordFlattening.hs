@@ -343,6 +343,7 @@ flattenStm statement =
     assign_variables [] [] _  _   = unpack_size_mismatch
     assign_variables _  _  [] _   = unpack_size_mismatch
 
+    unpack_size_mismatch :: forall a. a
     unpack_size_mismatch =
       internalError "flattenStm: Record size mismatch when unpacking parameters"
 
