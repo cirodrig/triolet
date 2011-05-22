@@ -25,7 +25,7 @@ import Distribution.Simple.BuildPaths
 import Distribution.Simple.Command
 import Distribution.Simple.Configure
   ( getPersistBuildConfig, maybeGetPersistBuildConfig
-  , writePersistBuildConfig, checkPersistBuildConfig)
+  , writePersistBuildConfig, checkPersistBuildConfigOutdated)
 import Distribution.Simple.LocalBuildInfo
 import Distribution.Simple.PreProcess
 import Distribution.Simple.Program
@@ -570,7 +570,10 @@ getBuildConfig hooks distPref = do
   lbi <- getPersistBuildConfig distPref
   case pkgDescrFile lbi of
     Nothing -> return ()
-    Just pkg_descr_file -> checkPersistBuildConfig distPref pkg_descr_file
+    Just pkg_descr_file -> do
+      outdated <- checkPersistBuildConfigOutdated distPref pkg_descr_file
+      when outdated $
+        die "Configuration file has changed; please reconfigure."
   return lbi {
     withPrograms = restoreProgramConfiguration
                      (builtinPrograms ++ hookedPrograms hooks)

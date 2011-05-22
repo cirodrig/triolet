@@ -276,7 +276,7 @@ packageDocFlags exe lbi = do
       , html_path  <- haddockHTMLs pkg_info]
 
 pyonExtensionFlags exe =
-  ["-X" ++ show ext | ext <- extensions $ buildInfo exe]
+  ["-X" ++ show ext | ext <- defaultExtensions $ buildInfo exe]
 
 pyonGhcPathFlags exe lbi = o_flags ++ i_flags
   where
@@ -390,7 +390,7 @@ pyonGhcOpts econfig exe lbi =
   pyonExtensionFlags exe -}
 
 -- | Get the options for linking the \'pyon\' binary.
-pyonLinkOpts econfig exe lbi = pyonGhcOpts econfig exe lbi
+pyonLinkOpts econfig exe lbi = ["-rtsopts"] ++ pyonGhcOpts econfig exe lbi
 
 -------------------------------------------------------------------------------
 -- Rules to generate a makefile
