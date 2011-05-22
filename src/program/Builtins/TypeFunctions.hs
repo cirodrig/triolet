@@ -52,7 +52,7 @@ shapeTF = typeFunction 1 compute_shape
         cannot_reduce =
           return $ varApp (pyonBuiltin the_shape) [container_type]
 
--- | Compute the boxed representation of a data type
+-- | Compute the boxed representation corresponding to a bare type
 boxedTF = typeFunction 1 compute_boxed
   where
     compute_boxed :: forall m. EvalMonad m => [Type] -> m Type
@@ -83,7 +83,7 @@ boxedTF = typeFunction 1 compute_boxed
         cannot_reduce =
           return $ varApp (pyonBuiltin the_BoxedType) [arg]
           
--- | Compute the bare representation of a type
+-- | Compute the bare representation corresponding to a boxed type
 bareTF = typeFunction 1 compute_bare
   where
     compute_bare :: forall m. EvalMonad m => [Type] -> m Type
@@ -93,23 +93,29 @@ bareTF = typeFunction 1 compute_bare
 
     eval :: forall m. EvalMonad m => Type -> m Type
     eval arg =
-      case fromVarApp arg
-      of Just (op, args')
-           | op `isPyonBuiltin` the_BoxedType ||
-             op `isPyonBuiltin` the_Boxed ->
-               -- BareType (BoxedType t)  =  t
-               -- BareType (Boxed t)      =  t
-               case args'
-               of [arg'] -> reduceToWhnf arg'
+      case arg
+      of FunT {} -> stored_type -- Functions are naturally boxed
+         AllT {} -> stored_type -- Forall'd types are naturally boxed
+         _ -> case fromVarApp arg
+              of Just (op, args')
+                   | op `isPyonBuiltin` the_BoxedType ||
+                     op `isPyonBuiltin` the_Boxed ->
+                       -- BareType (BoxedType t)  =  t
+                       -- BareType (Boxed t)      =  t
+                       case args'
+                       of [arg'] -> reduceToWhnf arg'
 
-           | otherwise -> do
-               -- If the argument is a data constructor application, then
-               -- use 'StoredBox' as the adapter type
-               tenv <- getTypeEnv
-               case lookupDataType op tenv of
-                 Just _ -> return $ varApp (pyonBuiltin the_StoredBox) [arg]
+                   | otherwise -> do
+                       -- If the argument is a data constructor
+                       -- application, then use 'StoredBox' as the
+                       -- adapter type
+                       tenv <- getTypeEnv
+                       case lookupDataType op tenv of
+                         Just _ -> stored_type
+                         _ -> cannot_reduce
                  _ -> cannot_reduce
-         _ -> cannot_reduce
       where
+        stored_type =
+          return $ varApp (pyonBuiltin the_StoredBox) [arg]
         cannot_reduce =
           return $ varApp (pyonBuiltin the_BareType) [arg]
