@@ -637,10 +637,10 @@ representationCoercion natural_ty natural_kind g_kind e_kind =
      (BoxK, ValK)         -> coerce_via WriteK
      (BoxK, BareK)        -> coerce_via WriteK
      (BareK, ValK)        -> return $ fromStoredCoercion natural_ty
-     (BareK, BoxK)        -> return $ toBoxedTypeCoercion bare_ty
+     (BareK, BoxK)        -> coerce_via WriteK
      (BareK, WriteK)      -> return $ copyCoercion bare_ty
      (WriteK, ValK)       -> coerce_via BareK
-     (WriteK, BoxK)       -> coerce_via BareK
+     (WriteK, BoxK)       -> return $ toBoxedTypeCoercion bare_ty
      (WriteK, BareK)      -> return $ writeLocalCoercion bare_ty
      _                    -> invalid_coercion
   where
