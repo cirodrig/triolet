@@ -710,7 +710,8 @@ rwAppWithOperator inf op' op_val ty_args args =
           -- Use special rewrite semantics for built-in functions
           Just (VarValue _ op_var)
             | op_var `isPyonBuiltin` the_copy ->
-              rwCopyApp inf op' ty_args args
+                case ty_args
+                of [ty] -> rwCopyApp inf op' ty args
 
           Just (VarValue _ op_var) -> do
             tenv <- getTypeEnv
@@ -771,11 +772,22 @@ rwAppWithOperator inf op' op_val ty_args args =
       rwExp =<< betaReduce inf funm ty_args args
 
 -- | Attempt to statically evaluate a copy
-rwCopyApp inf op' ty_args args = do
-  (args', arg_values) <- rwExps args
-  let new_exp = copy_expression args' arg_values
-      new_value = copied_value arg_values
-  return (new_exp, new_value)
+rwCopyApp inf copy_op ty args = do
+  whnf_type <- reduceToWhnf (fromTypM ty)
+  case fromVarApp whnf_type of
+    Just (op, [val_type])
+      | op `isPyonBuiltin` the_Stored ->
+          case args
+          of [repr, src] ->
+               copyStoredValue inf val_type repr src
+             _ ->
+               internalError "rwCopyApp: Unexpected number of arguments"
+    _ -> do
+      (args', arg_values) <- rwExps args
+  
+      let new_exp = copy_expression args' arg_values
+          new_value = copied_value arg_values
+      return (new_exp, new_value)
   where
     -- Do we know what was stored here?
     copied_value [_, Just src_val, Just dst_val] =
@@ -805,8 +817,22 @@ rwCopyApp inf op' ty_args args = do
     -}
 
     -- Otherwise return a copy expression
-    copy_expression args _ = ExpM $ AppE inf op' ty_args args
+    copy_expression args _ = ExpM $ AppE inf copy_op [ty] args
       
+-- | Rewrite a copy of a Stored value to a deconstruct and construct operation
+copyStoredValue inf val_type repr arg = do
+  tmpvar <- newAnonymousVar ObjectLevel
+  let stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
+      make_value = ExpM $ AppE inf stored_op [TypM val_type]
+                   [ExpM $ VarE inf tmpvar]
+      alt = AltM $ Alt { altConstructor = pyonBuiltin the_stored
+                       , altTyArgs = [TypM val_type]
+                       , altExTypes = []
+                       , altParams = [setPatMDmd (Dmd OnceSafe Used) $
+                                      memVarP (tmpvar ::: val_type)]
+                       , altBody = make_value}
+      new_expr = ExpM $ CaseE inf arg [alt]
+  rwExp new_expr
 
 rwLet inf bind val body =       
   case bind
