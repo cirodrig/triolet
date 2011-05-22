@@ -190,7 +190,9 @@ getVariableReplacements rs = Map.toList $ rewriteVariables rs
 generalRewrites :: RewriteRuleSet
 generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
   where
-    table = [ (pyonBuiltin the_range, rwRange)
+    table = [ (pyonBuiltin the_convertToBare, rwConvertToBare)
+            , (pyonBuiltin the_convertToBoxed, rwConvertToBoxed)
+            , (pyonBuiltin the_range, rwRange)
             , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
             , (pyonBuiltin the_TraversableDict_list_build, rwBuildList)
             , (pyonBuiltin the_TraversableDict_Stream_traverse, rwTraverseStream)
@@ -278,6 +280,98 @@ rewriteApp ruleset inf op_var ty_args args =
         Just e' -> traceShow (text "rewrite" <+> old_exp $$ text "    -->" <+> pprExp e') $ return x
     
     old_exp = pprExp (ExpM $ AppE defaultExpInfo (ExpM (VarE defaultExpInfo op_var)) ty_args args)
+
+-- | Turn a call of 'convertToBare' into a constructor application or
+--   case statement, if the type is known.  Also, cancel applications of
+--   'convertToBare' with 'convertToBoxed'.
+rwConvertToBare :: RewriteRule
+rwConvertToBare inf [TypM bare_type] [repr, arg] 
+  | Just (op, _, [_, arg']) <- unpackVarAppM arg,
+    op `isPyonBuiltin` the_convertToBoxed =
+      -- Cancel applications of these constructors 
+      -- convertToBare (repr, convertToBoxed (_, e)) = copy repr e
+      return $ Just $ copy_value arg'
+  | otherwise = do
+      -- If the bare type is "StoredBox t", then construct the value
+      whnf_type <- reduceToWhnf bare_type
+      case fromVarApp whnf_type of
+        Just (ty_op, [boxed_type])
+          | ty_op `isPyonBuiltin` the_StoredBox ->
+              fmap Just $ construct_stored_box boxed_type
+        _ -> do
+          -- If the boxed type is "Boxed t", then
+          -- deconstruct and copy the value
+          boxed_type <-
+            reduceToWhnf $ varApp (pyonBuiltin the_BoxedType) [whnf_type]
+          case fromVarApp boxed_type of
+            Just (ty_op, [_])
+              | ty_op `isPyonBuiltin` the_Boxed ->
+                  fmap Just $ deconstruct_boxed whnf_type
+            _ ->
+              -- Otherwise, cannot simplify
+              return Nothing
+  where
+    copy_value e =
+      ExpM $ AppE inf copy_op [TypM bare_type] [repr, e]
+      where
+        copy_op = ExpM $ VarE inf (pyonBuiltin the_copy)
+
+    -- Create the expression
+    --
+    -- > storedBox boxed_type arg
+    construct_stored_box boxed_type =
+      varAppE (pyonBuiltin the_storedBox) [TypM boxed_type] [return arg]
+
+    -- Create the expression
+    --
+    -- > case arg of boxed bare_type (x : bare_type) -> copy bare_type repr x
+    deconstruct_boxed whnf_type = do
+      tenv <- getTypeEnv
+      caseE (return arg)
+        [mkAlt undefined tenv (pyonBuiltin the_boxed)
+         [TypM whnf_type]
+         (\ [] [unboxed_ref] ->
+           varAppE (pyonBuiltin the_copy) [TypM whnf_type] [varE unboxed_ref])]
+
+rwConvertToBare _ _ _ = return Nothing
+
+rwConvertToBoxed :: RewriteRule
+rwConvertToBoxed inf [TypM bare_type] [repr, arg] 
+  | Just (op, _, [_, arg']) <- unpackVarAppM arg,
+    op `isPyonBuiltin` the_convertToBare = 
+      -- Cancel applications of these constructors 
+      -- convertToBoxed (_, convertToBare (_, e)) = e
+      return $ Just arg'
+  | otherwise = do
+      -- If the bare type is "StoredBox t", then deconstruct the value
+      whnf_type <- reduceToWhnf bare_type
+      case fromVarApp whnf_type of
+        Just (ty_op, [boxed_type])
+          | ty_op `isPyonBuiltin` the_StoredBox ->
+              fmap Just $ deconstruct_stored_box boxed_type
+        _ -> do
+          -- If the boxed type is "Boxed t", then construct the value
+          boxed_type <-
+            reduceToWhnf $ varApp (pyonBuiltin the_BoxedType) [whnf_type]
+          case fromVarApp boxed_type of
+            Just (ty_op, [_])
+              | ty_op `isPyonBuiltin` the_Boxed ->
+                  fmap Just $ construct_boxed whnf_type
+            _ ->
+              -- Otherwise, cannot simplify
+              return Nothing
+  where
+    deconstruct_stored_box boxed_type = do
+      tenv <- getTypeEnv
+      caseE (return arg)
+        [mkAlt undefined tenv (pyonBuiltin the_storedBox)
+         [TypM boxed_type]
+         (\ [] [boxed_ref] -> varE boxed_ref)]
+    
+    construct_boxed whnf_type = do
+      varAppE (pyonBuiltin the_boxed) [TypM whnf_type] [return arg]
+
+rwConvertToBoxed _ _ _ = return Nothing
 
 -- | Convert 'range' into an explicitly indexed variant
 rwRange :: RewriteRule
