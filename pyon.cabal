@@ -97,9 +97,9 @@ Executable pyon
     SystemF.DeadCodeSF
     SystemF.DictEnv
     SystemF.ElimPatternMatching
-    --SystemF.EtaReduce
+    SystemF.EtaReduce
     SystemF.Floating
-    --SystemF.KnownValue
+    SystemF.KnownValue
     --SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2
     --SystemF.Lowering.Marshaling
@@ -114,8 +114,8 @@ Executable pyon
     SystemF.ReprInference
     SystemF.Rename
     SystemF.ReprDict
-    -- SystemF.Rewrite
-    --SystemF.Simplify
+    SystemF.Rewrite
+    SystemF.Simplify
     SystemF.SpecToMem
     SystemF.Syntax
     SystemF.Typecheck

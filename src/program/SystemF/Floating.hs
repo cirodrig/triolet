@@ -9,6 +9,7 @@ expressions this way.
 {-# LANGUAGE FlexibleInstances, FlexibleContexts, ViewPatterns #-}
 module SystemF.Floating
        (Context,
+        assumeContext,
         ContextItem,
         contextItem,
         contextItemUses,
@@ -573,12 +574,13 @@ applyContextWithType t = applyContextRT (Just t)
 --   variables bound in a context.
 --
 --   Note that, since the head of the list is innermost, we use a left fold.
-assumeContext :: Context -> Flt a -> Flt a
+assumeContext :: (EvalMonad m, ReprDictMonad m) => Context -> m a -> m a
 assumeContext ctx m = foldl (flip assumeContextItem) m ctx
 
 -- | Extend the environment with types and dictionary assignments from
 --   variables bound in a context item.
-assumeContextItem :: ContextItem -> Flt a -> Flt a
+assumeContextItem :: (EvalMonad m, ReprDictMonad m) =>
+                     ContextItem -> m a -> m a
 assumeContextItem ci m =
   case ctxExp ci
   of LetCtx _ pat _ -> addPatternVar pat m
@@ -684,7 +686,7 @@ fltInferAppType op_type ty_args arg_types = Flt $ \ctx -> do
   return (return_type, [])
 
 -- | Add a variable from a type pattern to the type environment
-assumeTyPatM :: TyPatM -> Flt a -> Flt a
+assumeTyPatM :: (EvalMonad m, ReprDictMonad m) => TyPatM -> m a -> m a
 assumeTyPatM (TyPatM binder) m = assumeBinder binder m
 
 assumeTyParams ty_params m = foldr assumeTyPatM m ty_params
@@ -824,7 +826,7 @@ addLocalVars vs m = Flt $ \ctx ->
 -- | Add a pattern variable to the type environment.
 --   If the pattern binds a representation dictionary,
 --   add the dictionary to the environment.
-addPatternVar :: PatM -> Flt a -> Flt a
+addPatternVar :: (EvalMonad m, ReprDictMonad m) => PatM -> m a -> m a
 addPatternVar pat m =
   case pat
   of MemVarP binder uses -> assumeBinder binder $ saveReprDictPattern pat m
@@ -1166,11 +1168,11 @@ floatInCase dmd inf scr alts = do
 asCaseCtx :: ExpM -> Maybe (ContextExp, ExpM)
 asCaseCtx (ExpM (CaseE inf scr alts)) =
   let (exc_alts, normal_alts) = partition isExceptingAlt alts
-      [AltM (Alt con alt_targs alt_tparams alt_params alt_body)] = normal_alts
-      ctx = CaseCtx inf scr con alt_targs alt_tparams alt_params exc_alts
-  in if length normal_alts /= 1 
-     then Nothing
-     else Just (ctx, alt_body)
+  in case normal_alts
+     of [AltM (Alt con targs tparams params body)] -> 
+          let ctx = CaseCtx inf scr con targs tparams params exc_alts
+          in Just (ctx, body)
+        _ -> Nothing
 
 asCaseCtx _ = Nothing
 

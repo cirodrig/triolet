@@ -36,8 +36,8 @@ import qualified SystemF.PrintMemoryIR
 import qualified SystemF.ReprInference as SystemF
 import qualified SystemF.SpecToMem as SystemF
 import qualified SystemF.Floating as SystemF
-{-
 import qualified SystemF.Simplify as SystemF
+{-
 import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified SystemF.OutputPassing as SystemF
@@ -135,7 +135,6 @@ invokeCPP macros include_paths inpath outpath = do
                  | (key, value) <- macros]
     include_path_opts = ["-I" ++ path | path <- include_paths]
 
-{-
 -- | General-purpose high-level optimizations
 highLevelOptimizations :: Bool -> Bool -> SystemF.Module SystemF.Mem
                        -> IO (SystemF.Module SystemF.Mem)
@@ -148,7 +147,6 @@ highLevelOptimizations global_demand_analysis use_sequential_rules mod = do
          then SystemF.demandAnalysis mod
          else SystemF.localDemandAnalysis mod
   return mod
--}
 
 -- | Compile a pyon file from source code to low-level code.
 compilePyonToPyonAsm :: CompileFlags -> FilePath -> String
@@ -183,11 +181,19 @@ compilePyonToPyonAsm compile_flags path text = do
   spec_mod <- SystemF.representationInference sf_mod
   let repr_mod = SystemF.convertSpecToMemTypes spec_mod
   
-  -- Check for bugs in representation inference
-  SystemF.TypecheckMem.typeCheckModule repr_mod
-  repr_mod <- SystemF.floatModule repr_mod
+  -- Check for bugs after each pass by type checking
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
-  repr_mod <- SystemF.demandAnalysis repr_mod
+  repr_mod <- highLevelOptimizations True False repr_mod
+  repr_mod <- highLevelOptimizations True False repr_mod
+  repr_mod <- highLevelOptimizations False False repr_mod
+  repr_mod <- highLevelOptimizations False False repr_mod
+  
+  -- debug rewriting
+  putStrLn "Before RW"
+  putStrLn "After RW"
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+
+  putStrLn "After DMD"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   SystemF.TypecheckMem.typeCheckModule repr_mod
   error "This stage of the compiler is not implemented"

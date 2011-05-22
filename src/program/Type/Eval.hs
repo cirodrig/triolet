@@ -6,6 +6,7 @@ module Type.Eval
         typeCheckType,
         typeOfTypeApp,
         typeOfApp,
+        dataConFieldKinds,
         instantiateDataConType,
         instantiateDataConTypeWithFreshVariables,
         instantiateDataConTypeWithExistentials)
@@ -155,6 +156,16 @@ typeOfApp op_type arg_type = do
         then return (Just rng)
         else return Nothing
     _ -> return Nothing
+
+-- | Get the kinds of a data constructor's fields.
+dataConFieldKinds :: TypeEnv -> DataConType -> [BaseKind]
+dataConFieldKinds tenv dcon_type =
+  let local_tenv =
+        foldr insert_binder_type tenv $
+        dataConPatternParams dcon_type ++ dataConPatternExTypes dcon_type
+        where
+          insert_binder_type (v ::: t) e = insertType v t e
+  in [toBaseKind $ typeKind local_tenv t | t <- dataConPatternArgs dcon_type]
 
 -- | Given a data constructor type and the type arguments at which it's used,
 --   get the instantiated type.

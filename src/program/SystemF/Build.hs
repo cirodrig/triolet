@@ -59,15 +59,43 @@ lamE mk_f = do
 letE :: PatM -> ExpM -> ExpM -> ExpM
 letE pat val body = ExpM $ LetE defaultExpInfo pat val body
 
-{-
+initLocalE :: (Supplies m VarID) =>
+              TypM -> (Var -> m ExpM) -> (Var -> m ExpM) -> m ExpM
+initLocalE ty mk_rhs mk_body = localE ty rhs mk_body
+  where
+    rhs = do
+      -- Create a lambda expression (\x : OutPtr t. e1)
+      tmpvar_rhs <- newAnonymousVar ObjectLevel
+      rhs_body <- mk_rhs tmpvar_rhs
+      let out_type = outType (fromTypM ty)
+          rhs_fun = FunM $ Fun { funInfo = defaultExpInfo 
+                               , funTyParams = []
+                               , funParams = [memVarP (tmpvar_rhs ::: out_type)]
+                               , funReturn = TypM $ initEffectType out_type
+                               , funBody = rhs_body}
+      return $ ExpM $ LamE defaultExpInfo rhs_fun
+
 localE :: (Supplies m VarID) =>
-          TypM -> ExpM -> (ExpM -> m ExpM) -> (ExpM -> m ExpM) -> m ExpM
-localE ty repr mk_rhs mk_body = do
-  tmpvar <- newAnonymousVar ObjectLevel
-  let tmpvar_binder = localVarP tmpvar (fromTypM ty) repr
-  rhs <- mk_rhs (ExpM $ VarE defaultExpInfo tmpvar)
-  body <- mk_body (ExpM $ VarE defaultExpInfo tmpvar)
-  return $ ExpM $ LetE defaultExpInfo tmpvar_binder rhs body-}
+          TypM -> m ExpM -> (Var -> m ExpM) -> m ExpM
+localE ty mk_rhs mk_body = do
+  -- Apply the 'boxed' constructor to the RHS
+  rhs_initializer <- mk_rhs
+  let rhs = ExpM $ AppE defaultExpInfo boxed_con [ty] [rhs_initializer]
+  
+  -- Create the body
+  tmpvar_body <- newAnonymousVar ObjectLevel
+  body <- mk_body tmpvar_body
+  
+  -- Create a case statement that binds a temporary value for the body
+  let expr = ExpM $ CaseE defaultExpInfo rhs [alt]
+      alt = AltM $ Alt { altConstructor = pyonBuiltin the_boxed
+                       , altTyArgs = [ty]
+                       , altExTypes = []
+                       , altParams = [memVarP (tmpvar_body ::: fromTypM ty)]
+                       , altBody = body}
+  return expr
+  where
+    boxed_con = ExpM $ VarE defaultExpInfo (pyonBuiltin the_boxed)
 
 letfunE :: DefGroup (Def Mem) -> ExpM -> ExpM
 letfunE defs body = ExpM $ LetfunE defaultExpInfo defs body
@@ -131,6 +159,12 @@ mkAlt lift_FreshVarM tenv con ty_args mk_body =
                       | (v, ty) <- zip pat_vars param_types]
        return $ AltM $ Alt con ty_args ex_params patterns body
      _ -> internalError "mkAlt"
+
+outType t = varApp (pyonBuiltin the_OutPtr) [t]
+initEffectType t = varApp (pyonBuiltin the_IEffect) [t]
+storedType t = varApp (pyonBuiltin the_Stored) [t]
+
+writerType t = outType t `FunT` initEffectType t
 
 {-
 mkMemLetE :: FreshVarM ExpM

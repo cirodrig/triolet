@@ -5,11 +5,13 @@ module SystemF.Rename
         renamePatM,
         renamePatMs,
         substitutePatM,
+        substitutePatMs,
         freshenPatM,
         freshenPatMs,
         renameTyPatM,
         renameTyPatMs,
         substituteTyPatM,
+        substituteTyPatMs,
         freshenTyPatM,
         freshenTyPatMs,
         renameDefM,
@@ -34,6 +36,7 @@ import Common.MonadLogic
 import Common.Supply
 import SystemF.Syntax
 import SystemF.MemoryIR
+import SystemF.PrintMemoryIR
 import Type.Environment
 import Type.Type
 import Type.Rename

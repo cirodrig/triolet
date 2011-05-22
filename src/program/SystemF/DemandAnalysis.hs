@@ -13,7 +13,10 @@ information about how a value is demanded.
 
 {-# LANGUAGE TypeSynonymInstances, ViewPatterns #-}
 module SystemF.DemandAnalysis
-       (demandAnalysis, localDemandAnalysis)
+       (altSpecificity,
+        altListSpecificity,
+        demandAnalysis,
+        localDemandAnalysis)
 where
 
 import Control.Monad
@@ -289,6 +292,23 @@ dmdCaseE result_spc inf scrutinee alts = do
 isWildPatM (MemWildP {}) = True
 isWildPatM _ = False
 
+-- | Construct the specificity for a case scrutinee, based on how its value
+--   is bound by a case alternative
+altSpecificity :: AltM -> Specificity
+altSpecificity (AltM alt) =
+  Decond (altConstructor alt) (map fromTypM $ altTyArgs alt) ex_spcs fields
+  where
+    ex_spcs = [(v, t) | TyPatM (v ::: t) <- altExTypes alt]
+    fields = map (specificity . patMDmd) $ altParams alt
+
+-- | Construct the specificity for a case scrutinee, based on how its value
+--   is bound by a list of alternatives.  If there's more than one alternative,
+--   the specificity will be 'Inspected'.
+altListSpecificity :: [AltM] -> Specificity
+altListSpecificity []  = internalError "altListSpecificity: Empty list"
+altListSpecificity [a] = altSpecificity a
+altListSpecificity _   = Inspected
+
 -- | Do demand analysis on a case alternative.  Return the demand on the
 --   scrutinee.
 dmdAlt :: Specificity -> AltM -> Df (AltM, Specificity)
@@ -299,18 +319,12 @@ dmdAlt result_spc (AltM alt) = do
     withParams (altParams alt) $
     dmdExp result_spc (altBody alt)
 
-  let use_pattern =
-        -- How the alternative's value is demanded
-        Decond (altConstructor alt)
-        (map fromTypM $ altTyArgs alt)
-        [(v, t) | TyPatM (v ::: t) <- altExTypes alt]
-        (map (specificity . patMDmd) pats)
-      new_alt = AltM $ Alt { altConstructor = altConstructor alt
+  let new_alt = AltM $ Alt { altConstructor = altConstructor alt
                            , altTyArgs = altTyArgs alt
                            , altExTypes = typats
                            , altParams = pats
                            , altBody = body}
-  return (new_alt, use_pattern)
+  return (new_alt, altSpecificity new_alt)
 
 dmdFun :: DmdAnl FunM
 dmdFun (FunM f) = do

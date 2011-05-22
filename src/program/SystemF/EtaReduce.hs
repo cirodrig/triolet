@@ -1,7 +1,7 @@
 {-| A specialized eta reduction transformation, to undo superfluous parameters 
 inserted by the output-passing transformation.
 
-When we see a function of the form @\x. f x@, where @x@ has representation
+When we see a function of the form @\x. f x@, where @x@ is an application of
 @OutPT@, remove the function parameter.  If that's the only parameter, then 
 eliminate the function entirely.
 -}
@@ -12,9 +12,13 @@ module SystemF.EtaReduce(etaReduceModule,
 where
 
 import Common.Error
+import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.MemoryIR
 import Type.Type
+
+-------------------------------------------------------------------------------
+-- Entry points
 
 etaReduceModule :: Module Mem -> Module Mem
 etaReduceModule (Module mod_name defss exports) =
@@ -22,7 +26,7 @@ etaReduceModule (Module mod_name defss exports) =
       exports' = map (hrExport True) exports
   in Module mod_name defss' exports'
 
--- | Eta-reduce a function, if it's suitable for eta reduction.
+-- | Eta-reduce a function.
 --
 --   Functions found inside the function body are not eta-reduced.
 etaReduceSingleFunction :: FunM -> FunM
@@ -38,6 +42,17 @@ etaReduceSingleFunction f = hrFun False f
 etaReduceSingleLambdaFunction :: ExpInfo -> FunM -> ExpM
 etaReduceSingleLambdaFunction inf f = hrLambdaFun False inf f
 
+-------------------------------------------------------------------------------
+
+-- | Return True if this parameter is used for passing an output variable
+isOutputParameter :: PatM -> Bool
+isOutputParameter pat =
+  case fromVarApp (patMType pat)
+  of Just (op, [arg]) | op `isPyonBuiltin` the_OutPtr -> True
+     _ -> False
+
+isNotOutputParameter = not . isOutputParameter
+
 hrDef recurse def = def {definiens = hrFun recurse $ definiens def}
 
 hrExport recurse export =
@@ -52,7 +67,7 @@ hrFun recurse (FunM f) =
       other_params = init $ funParams f
   in if null (funParams f) ||                        -- No parameters
         null other_params && null (funTyParams f) || -- No non-output params
-        not (OutPT `sameParamRepr` patMRepr out_param) -- Not output parameter
+        isNotOutputParameter out_param -- Not output parameter
      then FunM (noEtaReduceFunction recurse f)
      else case etaReduceFunction recurse f out_param other_params
           of Just f -> FunM f
@@ -61,12 +76,12 @@ hrFun recurse (FunM f) =
 -- Eta-reduce a function that is suitable for eta reduction
 etaReduceFunction recurse f out_param params =
   let mbody = etaReduceExp recurse (patMVar out_param) $ funBody f
-      ret_type = FunT (patMParamType out_param) (fromRetM (funReturn f))
+      ret_type = patMType out_param `FunT` fromTypM (funReturn f)
   in case mbody
      of Just body ->
           Just $ f { funParams = params
                    , funBody = body
-                   , funReturn = RetM (BoxRT ::: ret_type)}
+                   , funReturn = TypM ret_type}
         Nothing -> Nothing
 
 -- | Don't eta-reduce a function.  If eta-reduction is being performed
@@ -82,7 +97,7 @@ noEtaReduceFunction False f = f
 hrLambdaFun :: Bool -> ExpInfo -> FunM -> ExpM
 hrLambdaFun recurse inf (FunM f)
   | null (funParams f) ||
-    not (OutPT `sameParamRepr` patMRepr out_param) =
+    isNotOutputParameter out_param =
       -- Can't eta-reduce
       ExpM $ LamE inf (FunM $ noEtaReduceFunction recurse f)
   | null other_params && null (funTyParams f) =
@@ -140,15 +155,6 @@ etaReduceExp recurse strip_arg (ExpM expression) =
                          _ -> Nothing
              return (ExpM (AppE inf op' ty_args stripped_args))
      LamE inf f -> return $ hrLambdaFun recurse inf f
-     LetE inf (LocalVarP pat_var pat_type pat_dict pat_dmd) val body ->
-       case strip_arg
-       of Just _ -> Nothing -- Can't eta-reduce
-          Nothing -> do
-            let val' = hrNonTail val
-                dict' = hrNonTail pat_dict
-                pat' = LocalVarP pat_var pat_type dict' pat_dmd
-            body' <- hrTail body
-            return $ ExpM (LetE inf pat' val' body')
      LetE inf binder val body -> do
        let val' = hrNonTail val
        body' <- hrTail body

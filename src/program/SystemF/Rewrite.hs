@@ -37,6 +37,18 @@ liftFreshVarM m = TypeEvalM $ \supply _ -> runFreshVarM supply m
 -------------------------------------------------------------------------------
 -- Helper functions for writing code
 
+-- | Load a value.
+--
+-- > case x of stored t (y : t). y
+load :: TypeEnv
+     -> TypM                    -- ^ Value type to load
+     -> TypeEvalM ExpM          -- ^ Expression to load
+     -> TypeEvalM ExpM
+load tenv ty val =
+  caseE val
+  [mkAlt liftFreshVarM tenv (pyonBuiltin the_stored) [ty] $
+   \ [] [val] -> varE val]
+
 -- | Create a case expression to inspect a list.
 --
 -- > case scrutinee
@@ -129,14 +141,13 @@ defineArray :: TypM             -- Array element type
             -> TypeEvalM ExpM
 defineArray elt_type size_ix size elt_repr writer =
   lamE $ mkFun []
-  (\ [] -> return ([OutPT ::: array_type], SideEffectRT ::: array_type))
+  (\ [] -> return ([outType array_type], initEffectType array_type))
   (\ [] [out_ptr] ->
     varAppE (pyonBuiltin the_doall)
     [size_ix, TypM array_type, elt_type]
     [size,
      lamE $ mkFun []
-     (\ [] -> return ([ValPT Nothing ::: intType],
-                      SideEffectRT ::: fromTypM elt_type))
+     (\ [] -> return ([intType], initEffectType $ fromTypM elt_type))
      (\ [] [index_var] ->
        let out_expr =
              varAppE (pyonBuiltin the_subscript_out) [size_ix, elt_type]
@@ -147,6 +158,7 @@ defineArray elt_type size_ix size elt_repr writer =
       varApp (pyonBuiltin the_array) [fromTypM size_ix, fromTypM elt_type]
 
 intType = VarT (pyonBuiltin the_int)
+storedIntType = storedType intType
 
 shapeOfType :: TypM -> TypM
 shapeOfType (TypM t) = TypM $ varApp (pyonBuiltin the_shape) [t]
@@ -223,19 +235,21 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
     -- asList (array_shape pos_infty)
     -- (generate_forever int repr_int (store int))
     count_expr =
-      ExpM $ AppE defaultExpInfo as_list [TypM array_shape, TypM intType]
+      ExpM $ AppE defaultExpInfo as_list [TypM array_shape, TypM storedIntType]
       [generate_expr]
       where
         as_list =
           ExpM $ VarE defaultExpInfo (pyonBuiltin the_fun_asList_Stream)
         generate_f =
           ExpM $ VarE defaultExpInfo (pyonBuiltin the_generate_forever)
+        store_f =
+          ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
 
         array_shape = varApp (pyonBuiltin the_array_shape) [posInftyT]
         generate_expr =
-          ExpM $ AppE defaultExpInfo generate_f [TypM intType]
+          ExpM $ AppE defaultExpInfo generate_f [TypM storedIntType]
           [ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int),
-           ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo (pyonBuiltin the_store)) [TypM intType] []]
+           ExpM $ AppE defaultExpInfo store_f [TypM storedIntType] []]
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.
@@ -381,7 +395,7 @@ rwRange inf [] [count] = do
     defineAndInspectIndexedInt tenv (return count)
     (\intindex intvalue ->
       varAppE (pyonBuiltin the_fun_asList_Stream)
-      [TypM $ varApp (pyonBuiltin the_array_shape) [VarT intindex], TypM intType]
+      [TypM $ varApp (pyonBuiltin the_array_shape) [VarT intindex], TypM storedIntType]
       [varAppE (pyonBuiltin the_rangeIndexed) [TypM $ VarT intindex] [varE intvalue]])
 
 rwRange _ _ _ = return Nothing
@@ -398,9 +412,8 @@ rwTraverseList inf [elt_type] [elt_repr, list] = do
      [varE size_var,
       return elt_repr,
       lamE $ mkFun []
-      (\ [] -> return ([ValPT Nothing ::: intType,
-                        OutPT ::: fromTypM elt_type],
-                       SideEffectRT ::: fromTypM elt_type))
+      (\ [] -> return ([intType, outType (fromTypM elt_type)],
+                       initEffectType (fromTypM elt_type)))
       (\ [] [index_var, ret_var] ->
           varAppE (pyonBuiltin the_copy)
           [elt_type]
@@ -681,34 +694,31 @@ rwHistogramArray inf [shape_type, size_ix] (size : input : other_args) =
          [size_ix]
          (return size :
           lamE (mkFun []
-          (\ [] -> return ([BoxPT ::: funType [ ValPT Nothing ::: intType
-                                              , OutPT ::: eff_type]
-                                              (SideEffectRT ::: eff_type),
-                            ReadPT ::: eff_type,
-                            OutPT ::: eff_type],
-                           SideEffectRT ::: eff_type))
+          (\ [] -> return ([funType [intType, outType eff_type]
+                            (initEffectType eff_type),
+                            eff_type,
+                            outType eff_type],
+                           initEffectType eff_type))
           (\ [] [writer, in_eff, out_eff] ->
             make_histogram_writer tenv s writer in_eff out_eff)) :
           map return other_args)
      Nothing -> return Nothing
   where
-    eff_type = VarT (pyonBuiltin the_EffTok)
+    eff_type = storedType $ VarT (pyonBuiltin the_EffTok)
     repr_int = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int)
     repr_eff = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_EffTok)
     
     make_histogram_writer tenv s writer in_eff out_eff = do
       accumulator_fn <-
         lamE $ mkFun []
-        (\ [] -> return ([ReadPT ::: eff_type, ReadPT ::: intType,
-                          OutPT ::: eff_type], SideEffectRT ::: eff_type))
+        (\ [] -> return ([eff_type, storedIntType, outType eff_type],
+                         initEffectType eff_type))
         (\ [] [in_eff2, index, out_eff2] -> do
             let fst_eff =
                   varAppE (pyonBuiltin the_propagateEffTok) []
                   [varE in_eff2]
                 snd_eff =
-                  varAppE writer [] [varAppE (pyonBuiltin the_load)
-                                     [TypM intType]
-                                     [varE index]]
+                  varAppE writer [] [load tenv (TypM intType) (varE index)]
             varAppE (pyonBuiltin the_seqEffTok) []
               [fst_eff, snd_eff, varE out_eff2])
       let in_eff_exp = ExpM $ VarE defaultExpInfo in_eff
@@ -780,17 +790,16 @@ rwParallelReduceStream inf
              return ws,
              varE worker_retvar]
           
-          let param1 = memVarP count_var $
-                       ValPT Nothing :::
-                       varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
-              param2 = memVarP base_var (ValPT Nothing ::: intType)
-              param3 = memVarP worker_retvar (OutPT ::: fromTypM elt)
+          let param1 = memVarP (count_var :::
+                       varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
+              param2 = memVarP (base_var ::: intType)
+              param3 = memVarP (worker_retvar ::: outType (fromTypM elt))
               worker_fn =
                 FunM $
                 Fun { funInfo = inf
-                    , funTyParams = [TyPatM size_var intindexT]
+                    , funTyParams = [TyPatM (size_var ::: intindexT)]
                     , funParams = [param1, param2, param3]
-                    , funReturn = RetM $ SideEffectRT ::: fromTypM elt
+                    , funReturn = TypM $ initEffectType (fromTypM elt)
                     , funBody = worker_body}
                 
           -- Create the blocked_reduce call
@@ -834,17 +843,16 @@ rwParallelReduce1Stream inf
              return ws,
              varE worker_retvar]
           
-          let param1 = memVarP count_var $
-                       ValPT Nothing :::
-                       varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
-              param2 = memVarP base_var (ValPT Nothing ::: intType)
-              param3 = memVarP worker_retvar (OutPT ::: fromTypM elt)
+          let param1 = memVarP (count_var :::
+                       varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
+              param2 = memVarP (base_var ::: intType)
+              param3 = memVarP (worker_retvar ::: outType (fromTypM elt))
               worker_fn =
                 FunM $
                 Fun { funInfo = inf
-                    , funTyParams = [TyPatM size_var intindexT]
+                    , funTyParams = [TyPatM (size_var ::: intindexT)]
                     , funParams = [param1, param2, param3]
-                    , funReturn = RetM $ SideEffectRT ::: fromTypM elt
+                    , funReturn = TypM $ initEffectType $ fromTypM elt
                     , funBody = worker_body}
                 
           -- Create the blocked_reduce call
@@ -867,7 +875,7 @@ rwParallelReduce1Stream _ _ _ = return Nothing
 rwParallelHistogramArray :: RewriteRule
 rwParallelHistogramArray inf
   [shape_type, size_ix] (size : input : other_args) = do
-  m_stream <- interpretAndBlockStream (fromTypM shape_type) intType int_repr input
+  m_stream <- interpretAndBlockStream (fromTypM shape_type) storedIntType int_repr input
   case m_stream of
     Nothing -> return Nothing
     Just (size_var, count_var, base_var, bs, bs_size, bs_count) -> do
@@ -883,34 +891,28 @@ rwParallelHistogramArray inf
       case worker_stream of
         Nothing -> return Nothing
         Just ws ->
-          let write_into return_arg = do
+          let write_into :: TypeEvalM ExpM -> TypeEvalM ExpM
+              write_into return_arg =
                 -- Define an empty histogram, i.e. a zero-filled array
-                empty_hist <- newAnonymousVar ObjectLevel
-                empty_hist_rhs <- appE zero_array [] [varE empty_hist]
-                array_repr_exp <- array_repr
-                let binder = localVarP empty_hist array_type array_repr_exp
-
-                -- Compute the histogram
-                compute_hist <-
-                  varAppE (pyonBuiltin the_blocked_reduce) 
-                  [TypM array_type, bs_size]
-                  [array_repr,
-                   return bs_count,
-                   litE (IntL 0 intType),
-                   elementwise_add,
-                   varE empty_hist,
-                   worker_fn size_var count_var base_var ws,
-                   return_arg]
-
-                return $ ExpM $
-                  LetE defaultExpInfo binder empty_hist_rhs compute_hist
+                localE (TypM array_type) zero_array
+                (\empty_hist ->
+                    -- Compute the histogram
+                    varAppE (pyonBuiltin the_blocked_reduce)
+                    [TypM array_type, bs_size]
+                    [array_repr,
+                     return bs_count,
+                     litE (IntL 0 intType),
+                     elementwise_add,
+                     varE empty_hist,
+                     worker_fn size_var count_var base_var ws,
+                     return_arg])
           in case other_args
              of [] ->
                   -- Return a writer funciton
                   fmap Just $
                   lamE $ mkFun []
-                  (\ [] -> return ([OutPT ::: array_type],
-                                   SideEffectRT ::: array_type))
+                  (\ [] -> return ([outType array_type],
+                                   initEffectType array_type))
                   (\ [] [ret_var] -> write_into (varE ret_var))
                 [ret_val] ->
                   -- Write into the return argument
@@ -919,10 +921,11 @@ rwParallelHistogramArray inf
                   internalError "rwParallelHistogramArray"
 
   where
-    array_type = varApp (pyonBuiltin the_array) [fromTypM size_ix, intType]
+    array_type = varApp (pyonBuiltin the_array) [fromTypM size_ix, storedIntType]
     array_shape = varApp (pyonBuiltin the_array_shape) [fromTypM size_ix]
     
     int_repr = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int)
+    array_repr :: TypeEvalM ExpM
     array_repr = varAppE (pyonBuiltin the_repr_array)
                  [size_ix, TypM intType] [return size, return int_repr]
 
@@ -935,43 +938,41 @@ rwParallelHistogramArray inf
       fn_body <- varAppE (pyonBuiltin the_histogramArray)
                  [TypM $ VarT (pyonBuiltin the_list_shape), size_ix]
                  [return size, return bs, varE retvar]
-      let param1 = memVarP count_var $
-                   ValPT Nothing :::
-                   varApp (pyonBuiltin the_IndexedInt) [VarT size_var]
-          param2 = memVarP base_var $ ValPT Nothing ::: intType
-          param3 = memVarP retvar $ OutPT ::: array_type
-          ret = RetM $ SideEffectRT ::: array_type
+      let param1 = memVarP (count_var :::
+                            varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
+          param2 = memVarP (base_var ::: intType)
+          param3 = memVarP (retvar ::: outType array_type)
+          ret = TypM $ initEffectType array_type
       return $ ExpM $ LamE defaultExpInfo $ FunM $
         Fun { funInfo = inf
-            , funTyParams = [TyPatM size_var intindexT]
+            , funTyParams = [TyPatM (size_var ::: intindexT)]
             , funParams = [param1, param2, param3]
             , funReturn = ret
             , funBody = fn_body}
   
     -- Initialize an array with all zeros
     zero_array =
-      defineArray (TypM intType) size_ix (return size) (return int_repr)
-      (\_ out_expr -> varAppE (pyonBuiltin the_store) [TypM intType]
+      defineArray (TypM storedIntType) size_ix (return size) (return int_repr)
+      (\_ out_expr -> varAppE (pyonBuiltin the_stored) [TypM intType]
                       [litE $ IntL 0 intType, out_expr])
     
     -- Add two arrays, elementwise
     elementwise_add =
       lamE $ mkFun []
-      (\ [] -> return ([ReadPT ::: array_type,
-                        ReadPT ::: array_type,
-                        OutPT ::: array_type],
-                       SideEffectRT ::: array_type))
+      (\ [] -> return ([array_type, array_type, outType array_type],
+                       initEffectType array_type))
       (\ [] [a, b, ret_ptr] ->
         appE
         (defineArray (TypM intType) size_ix (return size) (return int_repr)
          (\index_var out_expr ->
-           let load_element array_ptr_var =
+           let load_element array_ptr_var = do
                  -- Load an array element from array_ptr_var at index_var
-                 varAppE (pyonBuiltin the_load) [TypM intType]
-                 [varAppE (pyonBuiltin the_subscript)
-                  [size_ix, TypM intType]
-                  [return int_repr, varE array_ptr_var, varE index_var]]
-           in varAppE (pyonBuiltin the_store) [TypM intType]
+                 tenv <- getTypeEnv
+                 load tenv (TypM intType)
+                   (varAppE (pyonBuiltin the_subscript)
+                    [size_ix, TypM storedIntType]
+                    [return int_repr, varE array_ptr_var, varE index_var])
+           in varAppE (pyonBuiltin the_stored) [TypM intType]
               [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
                [load_element a, load_element b], out_expr]))
         []
@@ -990,16 +991,14 @@ rwParallelDoall inf [size_ix, result_eff, element_eff] [size, worker] =
   [return size,
    litE (IntL 0 intType),
    lamE $ mkFun [intindexT]
-   (\ [mindex] -> return ([ValPT Nothing :::
-                           varApp (pyonBuiltin the_IndexedInt) [VarT mindex],
-                           ValPT Nothing ::: intType],
-                          SideEffectRT ::: fromTypM element_eff))
+   (\ [mindex] -> return ([varApp (pyonBuiltin the_IndexedInt) [VarT mindex],
+                           intType],
+                          initEffectType (fromTypM element_eff)))
    (\ [mindex] [msize, offset] ->
      varAppE (pyonBuiltin the_doall) [TypM (VarT mindex), result_eff, element_eff]
      [varE msize,
       lamE $ mkFun []
-      (\ [] -> return ([ValPT Nothing ::: intType],
-                       SideEffectRT ::: fromTypM element_eff))
+      (\ [] -> return ([intType], initEffectType (fromTypM element_eff)))
       (\ [] [ix] ->
         appE (return worker) []
         [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
@@ -1043,17 +1042,13 @@ rwReduceGenerate inf element elt_repr reducer init other_args size count produce
    return count :
    return init :
    (lamE $ mkFun []
-   (\ [] -> return ([ValPT Nothing ::: intType, ReadPT ::: fromTypM element,
-                     OutPT ::: fromTypM element],
-                    SideEffectRT ::: fromTypM element))
-   (\ [] [ix, acc, ret] -> do
-       tmpvar <- newAnonymousVar ObjectLevel
-       let tmpvar_binder = localVarP tmpvar (fromTypM element) elt_repr
-       -- Produce a new value
-       rhs <- appE (producer (ExpM $ VarE defaultExpInfo ix)) [] [varE tmpvar]
-       -- Combine with accumulator
-       body <- appE (return reducer) [] [varE acc, varE tmpvar, varE ret]
-       return $ ExpM $ LetE defaultExpInfo tmpvar_binder rhs body)) :
+   (\ [] -> return ([intType, fromTypM element, outType (fromTypM element)],
+                    initEffectType (fromTypM element)))
+   (\ [] [ix, acc, ret] ->
+       localE element (producer (ExpM $ VarE defaultExpInfo ix))
+       (\tmpvar -> do
+           -- Combine with accumulator
+           appE (return reducer) [] [varE acc, varE tmpvar, varE ret]))) :
    map return other_args)
 
 rwReduce1Stream :: RewriteRule
@@ -1073,36 +1068,38 @@ rwReduce1Stream _ _ _ = return Nothing
 rwReduce1Generate inf element elt_repr reducer other_args size count producer = do
   producer_var <- newAnonymousVar ObjectLevel
   producer_fn <- mkFun []
-    (\ [] -> return ([ValPT Nothing ::: intType],
-                     BoxRT ::: FunT (OutPT ::: fromTypM element) (SideEffectRT ::: fromTypM element)))
+    (\ [] -> return ([intType],
+                     outType (fromTypM element) `FunT` initEffectType (fromTypM element)))
     (\ [] [index] -> producer $ ExpM $ VarE defaultExpInfo index)
 
-  -- Get the first value.
-  -- The code may crash at runtime if there aren't any values.
-  tmpvar <- newAnonymousVar ObjectLevel
-  let tmpvar_binder = localVarP tmpvar (fromTypM element) elt_repr
-  rhs <- liftFreshVarM $ varAppE producer_var [] [litE (IntL 0 intType), varE tmpvar]
+  reduce1_expr <-
+    -- Get the first value.
+    -- The code may crash at runtime if there aren't any values.
+    localE element (varAppE producer_var [] [litE (IntL 0 intType)]) $ \var1 -> do
   
-  -- Loop over the remaining values
-  let producer_plus_1 index =
-        varAppE producer_var []
-        [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
-         [return index, litE (IntL 1 intType)]]
+    -- Loop over the remaining values
+    let producer_plus_1 index =
+          varAppE producer_var []
+          [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
+           [return index, litE (IntL 1 intType)]]
   
-  let size_minus_1 = TypM $ varApp (pyonBuiltin the_minus_i)
-                     [fromTypM size, IntT 1]
-  count_minus_1 <-
-    liftFreshVarM $ 
-    varAppE (pyonBuiltin the_minus_ii)
-    [size, TypM $ IntT 1]
-    [return count, varE (pyonBuiltin the_one_ii)]
+    let size_minus_1 = TypM $ varApp (pyonBuiltin the_minus_i)
+                       [fromTypM size, IntT 1]
 
-  body <- rwReduceGenerate inf element elt_repr reducer
-          (ExpM $ VarE defaultExpInfo tmpvar) other_args size_minus_1 count_minus_1 producer_plus_1
+    -- The number of loop iterations is (size - 1)
+    count_minus_1 <-
+      varAppE (pyonBuiltin the_minus_ii)
+      [size, TypM $ IntT 1]
+      [return count, varE (pyonBuiltin the_one_ii)]
+
+    -- The main loop
+    rwReduceGenerate inf element elt_repr reducer
+      (ExpM $ VarE defaultExpInfo var1) other_args
+      size_minus_1 count_minus_1 producer_plus_1
           
   -- Build a let expression
-  return $ ExpM $ LetfunE defaultExpInfo (NonRec (mkDef producer_var producer_fn)) $
-           ExpM $ LetE defaultExpInfo tmpvar_binder rhs body
+  let producer_group = NonRec (mkDef producer_var producer_fn)
+  return $ ExpM $ LetfunE defaultExpInfo producer_group reduce1_expr
 
 -- | Inline a call of \'for\'.
 --
@@ -1135,21 +1132,19 @@ rwFor inf [TypM size_ix, TypM acc_type] args =
         loop_var <- newAnonymousVar ObjectLevel
         loop_fun <-
           mkFun []
-          (\ [] -> return ([ ValPT Nothing ::: intType
-                           , ReadPT ::: acc_type
-                           , OutPT ::: acc_type],
-                           SideEffectRT ::: acc_type))
+          (\ [] -> return ([intType, acc_type, outType acc_type],
+                           initEffectType acc_type))
           (\ [] [i, acc, retvar] -> do
               ifE (varAppE (pyonBuiltin the_EqDict_int_eq) []
                    [varE i, varE bound])
                 (varAppE (pyonBuiltin the_copy) [TypM acc_type]
                  [return acc_repr, varE acc, varE retvar])
-                (localE (TypM acc_type) acc_repr
-                 (\lv -> appE (return fun) [] [varE i, varE acc, return lv])
+                (localE (TypM acc_type)
+                 (appE (return fun) [] [varE i, varE acc])
                  (\lv -> varAppE loop_var []
                          [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
                           [varE i, litE $ IntL 1 intType],
-                          return lv,
+                          varE lv,
                           varE retvar])))
         let loop_arguments = litE (IntL 0 intType) :
                              return init :
@@ -1168,8 +1163,8 @@ rwSafeSubscript inf [elt_type] [elt_repr, list, ix] = do
   tenv <- getTypeEnv
   fmap Just $
     lamE $ mkFun []
-    (\ [] -> return ([OutPT ::: fromTypM elt_type],
-                     SideEffectRT ::: fromTypM elt_type))
+    (\ [] -> return ([outType $ fromTypM elt_type],
+                     initEffectType $ fromTypM elt_type))
     (\ [] [out_ptr] ->
       rwSafeSubscriptBody tenv inf elt_type elt_repr list ix (varE out_ptr))
  
@@ -1192,15 +1187,14 @@ rwSafeSubscriptBody tenv inf elt_type elt_repr list ix ret =
             [varE ix_var, litE (IntL 0 intType)],
             varAppE (pyonBuiltin the_OrdDict_int_ge) []
             [varE ix_var, varE size_int]])
-      (exceptE (SideEffectRT ::: fromTypM elt_type))
+      (exceptE (initEffectType $ fromTypM elt_type))
       (varAppE (pyonBuiltin the_copy) [elt_type]
        [return elt_repr,
         varAppE (pyonBuiltin the_subscript) [TypM (VarT size_ix), elt_type]
         [return elt_repr, varE array, varE ix_var],
         ret])
       
-    return $
-      letE (memVarP ix_var (ValPT Nothing ::: intType)) ix subscript_expr
+    return $ letE (memVarP (ix_var ::: intType)) ix subscript_expr
 
 -------------------------------------------------------------------------------
 
@@ -1480,7 +1474,7 @@ interpretStream2' shape_type elt_type repr expression =
 
     -- A generator for the sequence [0, 1, 2, ...]
     counting_generator ix =
-      varAppE (pyonBuiltin the_store) [TypM intType] [return ix]
+      varAppE (pyonBuiltin the_stored) [TypM intType] [return ix]
 
     no_interpretation =
       UnknownStream (typeShape shape_type) elt_type repr expression
@@ -1528,18 +1522,11 @@ mapStream out_type out_repr transformer producer = transform producer
     apply_transformer :: Type -> ExpM -> TypeEvalM ExpM -> TypeEvalM ExpM
     apply_transformer producer_ty producer_repr producer_expr =
       lamE $ mkFun []
-      (\ [] -> return ([OutPT ::: out_type], SideEffectRT ::: out_type))
-      (\ [] [outvar] -> do
-          tmpvar <- newAnonymousVar ObjectLevel
-
-          -- Compute the input to 'map'
-          rhs <- appE producer_expr [] [varE tmpvar]
-
-          -- Compute the output of 'map'
-          body <- appE (return transformer) [] [varE tmpvar, varE outvar]
-          let binder = localVarP tmpvar producer_ty producer_repr
-              let_expr = ExpM $ LetE defaultExpInfo binder rhs body
-          return let_expr)
+      (\ [] -> return ([outType out_type], initEffectType out_type))
+      (\ [] [outvar] ->
+          -- Run the producer, then pass its results to the consumer
+          localE (TypM producer_ty) producer_expr $ \tmpvar ->
+          appE (return transformer) [] [varE tmpvar, varE outvar])
 
 interpretStreamAlt :: Type -> Type -> ExpM -> AltM -> AltS
 interpretStreamAlt shape_type elt_type repr (AltM alt) =
@@ -1566,9 +1553,7 @@ encodeStream2 expected_shape stream = runMaybeT $ do
               [return size_val,
                return elt_repr,
                lamE $ mkFun []
-               (\ [] -> return ([ValPT Nothing ::: intType],
-                                BoxRT ::: FunT (OutPT ::: elt_type)
-                                               (SideEffectRT ::: elt_type)))
+               (\ [] -> return ([intType], writerType elt_type))
                (\ [] [index_var] ->
                  gen (ExpM $ VarE defaultExpInfo index_var))]
 
@@ -1586,8 +1571,7 @@ encodeStream2 expected_shape stream = runMaybeT $ do
                        , funTyParams = []
                        , funParams = [pat]
                        , funReturn =
-                         RetM $ BoxRT :::
-                         varApp (pyonBuiltin the_Stream)
+                         TypM $ varApp (pyonBuiltin the_Stream)
                          [list_shape, sexpElementType dst]
                        , funBody = dst'}]
 
@@ -1756,7 +1740,7 @@ translateStreamToFoldWithExtraArgs
 translateStreamToFoldWithExtraArgs
   tenv acc_ty acc_repr init acc_f stream [] =
     lamE $ mkFun []
-    (\ [] -> return ([OutPT ::: acc_ty], SideEffectRT ::: acc_ty))
+    (\ [] -> return ([outType acc_ty], initEffectType acc_ty))
     (\ [] [out_ptr] ->
       let out_arg = ExpM $ VarE defaultExpInfo out_ptr
       in translateStreamToFold tenv acc_ty acc_repr init acc_f out_arg stream)
@@ -1794,18 +1778,16 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
              return size_val,
              return init,
              lamE $ mkFun []
-             (\ [] -> return ([ValPT Nothing ::: intType,
-                               ReadPT ::: acc_ty,
-                               OutPT ::: acc_ty],
-                              SideEffectRT ::: acc_ty))
+             (\ [] -> return ([intType, acc_ty, outType acc_ty],
+                              initEffectType acc_ty))
              (\ [] [index_var, acc_in, acc_out] ->
                -- Call the generator function,
                -- bind its result to a local variable
                let ix = ExpM $ VarE defaultExpInfo index_var
-               in localE (TypM $ sexpElementType stream) (sexpElementRepr stream)
-                  (\lv -> appE (_sexpGenerator stream ix) [] [return lv])
+               in localE (TypM $ sexpElementType stream)
+                  (_sexpGenerator stream ix)
                   (\lv -> appE (return acc_f) []
-                          [varE acc_in, return lv, varE acc_out])),
+                          [varE acc_in, varE lv, varE acc_out])),
              return out_ptr]
 
      BindStream src (binder, trans) -> do
@@ -1819,10 +1801,10 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
          acc_in_var <- newAnonymousVar ObjectLevel
          let m_producer_var = patMVar binder
          acc_out_var <- newAnonymousVar ObjectLevel
-         let params = [memVarP acc_in_var (ReadPT ::: acc_ty),
+         let params = [memVarP (acc_in_var ::: acc_ty),
                        binder,
-                       memVarP acc_out_var (OutPT ::: acc_ty)]
-             retn = RetM (SideEffectRT ::: acc_ty)
+                       memVarP (acc_out_var ::: outType acc_ty)]
+             retn = TypM $ initEffectType acc_ty
          let local_init = ExpM $ VarE defaultExpInfo acc_in_var
          let local_out = ExpM $ VarE defaultExpInfo acc_out_var
          body <- translateStreamToFold tenv acc_ty acc_repr local_init acc_f local_out trans
@@ -1852,10 +1834,9 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
 
      ReturnStream ty repr writer -> do
        -- Run the writer, bind its result to a local variable
-       localE (TypM ty) repr
-         (\lv -> appE writer [] [return lv])
+       localE (TypM ty) writer
          (\lv -> appE (return acc_f) []
-                 [return init, return lv, return out_ptr])
+                 [return init, varE lv, return out_ptr])
 
      EmptyStream ty repr -> do
        -- Just return the initial value of the accumulator

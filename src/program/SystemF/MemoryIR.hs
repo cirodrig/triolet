@@ -23,7 +23,7 @@ module SystemF.MemoryIR
         Alt(..),
         Fun(..),
         TypM, PatM, TyPatM, ExpM, AltM, FunM,
-        unpackVarAppM, unpackDataConAppM
+        unpackVarAppM, unpackDataConAppM, isDataConAppM
        )
 where
 
@@ -169,16 +169,32 @@ unpackVarAppM (ExpM (VarE { expVar = op })) =
 unpackVarAppM _ = Nothing
 
 -- | If the expression is a data constructor application, return the data
---   constructor and arguments
-unpackDataConAppM :: TypeEnv -> ExpM -> Maybe (DataConType, [Type], [ExpM])
+--   constructor, type arguments, existential types, and field arguments
+unpackDataConAppM :: TypeEnv -> ExpM
+                  -> Maybe (DataConType, [Type], [Type], [ExpM])
 unpackDataConAppM tenv (ExpM (AppE { expOper = ExpM (VarE _ op)
                                    , expTyArgs = ts
                                    , expArgs = xs}))
   | Just dcon <- lookupDataCon op tenv =
-      Just (dcon, map fromTypM ts, xs)
+      let num_tyargs = length (dataConPatternParams dcon)
+          types = map fromTypM ts
+          ty_args = take num_tyargs types
+          ex_types = drop num_tyargs types
+      in Just (dcon, ty_args, ex_types, xs)
 
 unpackDataConAppM tenv (ExpM (VarE { expVar = op }))
   | Just dcon <- lookupDataCon op tenv =
-      Just (dcon, [], [])
+      Just (dcon, [], [], [])
 
 unpackDataConAppM _ _ = Nothing
+
+-- | Return True if the expression is a data constructor or data constructor
+--   application.
+--
+--   The type environment is only used for looking up potential data
+--   constructors.
+isDataConAppM :: TypeEnv -> ExpM -> Bool
+isDataConAppM tenv e = case unpackDataConAppM tenv e
+                       of Just _ -> True
+                          _ -> False
+
