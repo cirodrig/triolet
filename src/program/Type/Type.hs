@@ -3,14 +3,7 @@
 module Type.Type(module Type.Var,
                  module Type.Level,
                  Type(..),
-                 Repr(..),
                  Binder(..),
-                 sameParamRepr,
-                 sameReturnRepr,
-                 paramReprToRepr,
-                 returnReprToRepr,
-                 paramReprToReturnRepr,
-                 returnReprToParamRepr,
 
                  -- * Construction and deconstruction helper routines
                  typeApp, varApp,
@@ -32,8 +25,7 @@ module Type.Type(module Type.Var,
                  toBaseKind, fromBaseKind,
 
                  -- * Pretty-printing
-                 pprType, pprTypePrec, pprReprType,
-                 pprParamReprWord, pprReturnRepr)
+                 pprType, pprTypePrec)
 where
 
 import Text.PrettyPrint.HughesPJ
@@ -109,108 +101,6 @@ fromForallFunType t =
   in (qvars, dom, rng)
 
 data Binder = Var ::: Type
-
--- | A representation.
-data Repr = Value               -- ^ Represented as a value.  Variables hold
-                                --   the actual data
-          | Boxed               -- ^ Boxed.  Variables hold a pointer to
-                                --   memory-managed data.
-          | Referenced          -- ^ Referenced.  Variables hold a pointer to
-                                --   non-memory-managed data.
-            deriving (Eq, Ord, Show)
-
--- | A function parameter representation.
---
--- A value parameter means that the data is actually passed to the function.
--- A boxed or read reference means that a pointer is passed to the function.
--- A write reference means that the /function/ passes a pointer to its
--- /argument/, which writes its data at the given address.
-data ParamRepr =
-    ValPT !(Maybe Var)       -- ^ Pass as a (possibly dependent) value
-  | BoxPT                    -- ^ Pass a boxed reference
-  | ReadPT                   -- ^ Pass a readable reference
-  | WritePT                  -- ^ Pass a written reference
-  | OutPT                    -- ^ Pass an output reference
-  | SideEffectPT             -- ^ A dummy parameter representing a dependence
-
--- | A return parameter representation.
---
--- A value return means that the data is returned.  A boxed, or read return
--- means that a pointer to the data is returned.  A write return means that
--- the return address is taken as a parameter, and will be written in the
--- function.
---
--- The three representations 'ReadRT', 'WriteRT', and 'OutRT' all pertain to
--- referenced objects.
--- 'ReadRT' is used for reading an object that was already created.  We can't
--- decide where we want the data, but we take whatever address we find it at.
--- 'WriteRT' is used for creating an object.  We decide where we want
--- the data to go before it's even created, and we tell the creator where to
--- put its output.
--- 'OutRT' is a write-only pointer.  Whereas a 'WriteRT' value is passed in
--- the direction that data flows, an 'OutRT' value
--- is passed in the opposite direction.  It's the consumer of a value telling
--- the producer where to put it.
---
--- 'SideEffectRT' is for dummy values that are passed around to keep track of
--- dependences.  Functions that store into memory return this.  Without it,
--- the functions would look like dead code because they don't return anything.
-data ReturnRepr =
-    ValRT                       -- ^ A value
-  | BoxRT                       -- ^ A boxed object reference
-  | ReadRT                      -- ^ A reference chosen by the producer
-  | WriteRT                     -- ^ A reference chosen by the consumer
-  | OutRT                       -- ^ A pointer to write-only data
-  | SideEffectRT                -- ^ A dummy value to track dependences
-
-returnReprToRepr :: ReturnRepr -> Repr
-returnReprToRepr ValRT   = Value
-returnReprToRepr BoxRT   = Boxed
-returnReprToRepr ReadRT  = Referenced
-returnReprToRepr WriteRT = Referenced
-
-paramReprToRepr :: ParamRepr -> Repr
-paramReprToRepr (ValPT _) = Value
-paramReprToRepr BoxPT     = Boxed
-paramReprToRepr ReadPT    = Referenced
-paramReprToRepr WritePT   = Referenced
-
-paramReprToReturnRepr :: ParamRepr -> ReturnRepr
-paramReprToReturnRepr (ValPT _) = ValRT
-paramReprToReturnRepr BoxPT = BoxRT
-paramReprToReturnRepr ReadPT = ReadRT
-paramReprToReturnRepr WritePT = WriteRT
-paramReprToReturnRepr OutPT = OutRT
-paramReprToReturnRepr SideEffectPT = SideEffectRT
-
-returnReprToParamRepr :: ReturnRepr -> ParamRepr
-returnReprToParamRepr ValRT = ValPT Nothing
-returnReprToParamRepr BoxRT = BoxPT
-returnReprToParamRepr ReadRT = ReadPT
-returnReprToParamRepr WriteRT = WritePT
-returnReprToParamRepr OutRT = OutPT
-returnReprToParamRepr SideEffectRT = SideEffectPT
-
--- | True if the given representations are the same, False otherwise.
---   Parameter variables are ignored.
-sameParamRepr :: ParamRepr -> ParamRepr -> Bool
-sameParamRepr (ValPT _) (ValPT _) = True
-sameParamRepr BoxPT     BoxPT     = True
-sameParamRepr ReadPT    ReadPT    = True
-sameParamRepr WritePT   WritePT   = True
-sameParamRepr OutPT     OutPT     = True
-sameParamRepr SideEffectPT SideEffectPT = True
-sameParamRepr _         _         = False
-
--- | True if the given representations are the same, False otherwise.
-sameReturnRepr :: ReturnRepr -> ReturnRepr -> Bool
-sameReturnRepr ValRT     ValRT     = True
-sameReturnRepr BoxRT     BoxRT     = True
-sameReturnRepr ReadRT    ReadRT    = True
-sameReturnRepr WriteRT   WriteRT   = True
-sameReturnRepr OutRT     OutRT     = True
-sameReturnRepr SideEffectRT SideEffectRT = True
-sameReturnRepr _         _         = False
 
 instance HasLevel Var => HasLevel Type where
   getLevel (VarT v) = getLevel v
@@ -304,29 +194,6 @@ fromBaseKind k =
 -------------------------------------------------------------------------------
 -- Pretty-printing
 
--- | Pretty-print the name of a 'ParamRepr'.  The parameter variable (if any)
---   is ignored.
-pprParamReprWord :: ParamRepr -> Doc
-pprParamReprWord prepr =
-  text $ case prepr
-         of ValPT _      -> "val"
-            BoxPT        -> "box"
-            ReadPT       -> "read"
-            WritePT      -> "write"
-            OutPT        -> "out"
-            SideEffectPT -> "sideeffect"
-
--- | Pretty-print a 'ReturnRepr'.
-pprReturnRepr :: ReturnRepr -> Doc
-pprReturnRepr rrepr =
-  text $ case rrepr
-         of ValRT        -> "val"
-            BoxRT        -> "box"
-            ReadRT       -> "read"
-            WriteRT      -> "write"
-            OutRT        -> "out"
-            SideEffectRT -> "sideeffect"
-
 {-
 pprTypeParen :: Type -> Doc
 pprTypeParen t = parens $ pprType t
@@ -374,14 +241,6 @@ pprTypePrec ty =
     ppr_all params e =
       hang (text "forall" <+> sep (map ppr_binder $ reverse params) <> text ".") 4
       (pprTypePrec e ? lamPrec)
-
--- | Pretty-print a type with an implicit representation.  The implicit
---   representation is used when printing function types.
-pprReprType :: ReturnRepr -> Type -> PrecDoc
-pprReprType rrepr ty =
-  case ty
-  of FunT {} -> pprFunType ty
-     _ -> pprTypePrec ty
 
 -- | Pretty-print a function type.
 pprFunType :: Type -> PrecDoc

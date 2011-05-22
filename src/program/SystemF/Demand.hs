@@ -127,9 +127,6 @@ data Specificity =
     --
     --   Includes a list describing how each field is used.  There is one list
     --   member for each value field.
-  | Loaded !Repr Type Specificity
-    -- ^ Loaded at the given type and representation.  The representation
-    --   is either 'Value' or 'Boxed'.
   | Unused            -- ^ Not used at all.  This is the bottom value.
 
 instance Renameable Specificity where
@@ -138,8 +135,6 @@ instance Renameable Specificity where
     of Decond con ty_args ex_types spcs ->
          Decond con (rename rn ty_args) [(v, rename rn t) | (v, t) <- ex_types]
          (rename rn spcs)
-       Loaded repr ty spc ->
-         Loaded repr (rename rn ty) (rename rn spc)
        
        -- Other constructors don't mention variables
        _ -> spc
@@ -166,13 +161,7 @@ instance Renameable Specificity where
          in freeVariables tys `Set.union`
             freeVariables (map snd ex_var_bindings) `Set.union`
             field_fvs
-       Loaded _ ty spc -> freeVariables ty `Set.union` freeVariables spc
        Unused -> Set.empty
-
--- | Construct a 'Specificity' for a value used as the reference parameter of 
---   a load.  The 'Repr' argument indicates whether the loaded data is boxed.
-loadSpecificity :: Repr -> Type -> Specificity -> Specificity
-loadSpecificity repr ty spc = Loaded repr ty spc
 
 instance Dataflow Specificity where
   bottom = Unused
@@ -185,16 +174,8 @@ instance Dataflow Specificity where
          then mismatchedSpecificityDeconstructors
          else Decond decon1 t1 e1 $ zipWith joinPar specs1 specs2
     else Inspected
-  joinPar (Loaded r1 t1 s1) (Loaded r2 _ s2) =
-    if r1 /= r2
-    then mismatchedSpecificityDeconstructors
-    else Loaded r1 t1 (joinPar s1 s2)
-  joinPar (Decond {}) (Loaded {}) = mismatchedSpecificityDeconstructors
-  joinPar (Loaded {}) (Decond {}) = mismatchedSpecificityDeconstructors
   joinPar Inspected (Decond {}) = Inspected
-  joinPar Inspected (Loaded {}) = Inspected
   joinPar (Decond {}) Inspected = Inspected
-  joinPar (Loaded {}) Inspected = Inspected
   joinPar Inspected Inspected = Inspected
   joinPar Used _ = Used
   joinPar _ Used = Used
@@ -211,7 +192,6 @@ showSpecificity (Decond c tys ty_args spcs) =
   where
     showmv | null tys && null ty_args = show c ++ ":"
            | otherwise = "(" ++ show c ++ " ...):"
-showSpecificity (Loaded r _ spc) = "L{" ++ showSpecificity spc ++ "}"
 showSpecificity Inspected = "I"
 showSpecificity Used = "U"
 

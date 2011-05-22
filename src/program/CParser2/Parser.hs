@@ -17,7 +17,6 @@ import Text.ParserCombinators.Parsec((<|>), (<?>), unexpected, choice,
 import CParser2.AST
 import CParser2.Lexer
 import Common.SourcePos as PySrcPos
-import Type.Type(Repr(..))
 
 -- | The parser type
 type P a = PS.GenParser Token () a
