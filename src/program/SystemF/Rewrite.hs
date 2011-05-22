@@ -345,7 +345,8 @@ rwConvertToBare inf [TypM bare_type] [repr, arg]
         [mkAlt undefined tenv (pyonBuiltin the_boxed)
          [TypM whnf_type]
          (\ [] [unboxed_ref] ->
-           varAppE (pyonBuiltin the_copy) [TypM whnf_type] [varE unboxed_ref])]
+           varAppE (pyonBuiltin the_copy) [TypM whnf_type]
+           [return repr, varE unboxed_ref])]
 
 rwConvertToBare _ _ _ = return Nothing
 

@@ -457,7 +457,7 @@ fromStoredCoercion ty = Coercion $ \k e -> do
       cas = ExpM $ CaseE defaultExpInfo e [alt]
   return (cas, x)
 
--- | Coerce @bare -> box@ using the @convertToBoxed@ function.
+-- | Coerce @writer -> box@ using the @convertToBoxed@ function.
 --   The argument is the @bare@ type.
 toBoxedTypeCoercion :: Type -> Coercion
 toBoxedTypeCoercion ty = Coercion $ \k e -> do
@@ -466,7 +466,7 @@ toBoxedTypeCoercion ty = Coercion $ \k e -> do
   where
     box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_convertToBoxed)
 
--- | Coerce @box -> bare@ using the @convertToBare@ function.
+-- | Coerce @box -> writer@ using the @convertToBare@ function.
 --   The argument is the @bare@ type.
 toBareTypeCoercion :: Type -> Coercion
 toBareTypeCoercion ty = Coercion $ \k e -> do

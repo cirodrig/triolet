@@ -283,7 +283,7 @@ data array_shape : intindex -> bare {};
 -- Representation dictionaries
 
 copy : (a : bare) -> Repr a -> a -> Writer a;
-convertToBoxed : (a : bare) -> Repr a -> a -> BoxedType a;
+convertToBoxed : (a : bare) -> Repr a -> Writer a -> BoxedType a;
 convertToBare : (a : bare) -> Repr a -> BoxedType a -> Writer a;
 
 repr_int : Repr (Stored int);
