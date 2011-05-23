@@ -20,6 +20,7 @@ module Type.Environment
         TypeEnv,
         DataType(..),
         DataConType(..),
+        dataConPatternRange,
         DataTypeDescr(..),
         TypeFunction,
         typeFunction,
@@ -154,12 +155,15 @@ data DataType =
   , dataTypeDataConstructors :: [Var]
   }
 
--- | Describes how a data constructor behaves in a pattern matchi
+-- | Describes a data constructor.
+--
+--   The type of a constructed value is determined by its type parameters.
+--   If the type parameters are @a1 ... aN@ and the type constructor is @T@,
+--   then the type of the constructed value is @T a1 ... aN@.
 data DataConType =
   DataConType
   { -- | Type parameters.  Type parameters are passed as arguments when 
     --   constructing a value and when deconstructing it.
-    --   These must be value patterns (@ValPT _@).
     dataConPatternParams :: [Binder]
 
     -- | Existential types.  These are passed
@@ -172,13 +176,15 @@ data DataConType =
     -- and matched as parameters when deconstructing it.
   , dataConPatternArgs :: [Type]
 
-    -- | Type of the constructed value.
-    -- May mention the pattern parameters.
-  , dataConPatternRange :: Type
-
   , dataConCon :: Var           -- ^ This data constructor
   , dataConTyCon :: Var         -- ^ The type inhabited by constructed values
   }
+
+-- | The type of a 'DataConType' value.
+dataConPatternRange :: DataConType -> Type
+dataConPatternRange dcon_type =
+  let args = [VarT a | (a ::: _) <- dataConPatternParams dcon_type]
+  in varApp (dataConTyCon dcon_type) args
 
 -- | A function on types.  Type functions are evaluated during type checking.
 --   Type functions should /not/ operate on function types, because they are
@@ -477,12 +483,10 @@ specToPureDataConType dcon_type = do
   ty_params <- mapM type_param $ dataConPatternParams dcon_type
   ex_types <- mapM type_param $ dataConPatternExTypes dcon_type
   args <- mapM specToPureType $ dataConPatternArgs dcon_type
-  range <- specToPureType $ dataConPatternRange dcon_type
   return $ DataConType
            { dataConPatternParams  = ty_params
            , dataConPatternExTypes = ex_types
            , dataConPatternArgs    = args
-           , dataConPatternRange   = range
            , dataConCon            = dataConCon dcon_type
            , dataConTyCon          = dataConTyCon dcon_type
            }
@@ -531,7 +535,6 @@ specToMemDataConType dcon_type =
   { dataConPatternParams  = map type_param $ dataConPatternParams dcon_type
   , dataConPatternExTypes = map type_param $ dataConPatternExTypes dcon_type
   , dataConPatternArgs    = map specToMemType $ dataConPatternArgs dcon_type
-  , dataConPatternRange   = specToMemType $ dataConPatternRange dcon_type
   , dataConCon            = dataConCon dcon_type
   , dataConTyCon          = dataConTyCon dcon_type
   }

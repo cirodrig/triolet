@@ -238,16 +238,14 @@ resolveDomain' pos d k = do
 
 resolveDataConDecl :: SourcePos -> DataConDecl Parsed
                    -> NR (DataConDecl Resolved)
-resolveDataConDecl pos (DataConDecl v ty_params ex_types args rng) = do
+resolveDataConDecl pos (DataConDecl v ty_params ex_types args) = do
   v' <- globalDef ObjectLevel v pos
   enter $
     withMany (resolveDomain' pos) ty_params $ \ty_params' ->
     withMany (resolveDomain' pos) ex_types $ \ex_types' -> do
       (unzip -> (args', arg_levels)) <- mapM resolveLType args
       mapM_ check_arg_level arg_levels
-      (rng', rng_level) <- resolveLType rng
-      check_rng_level rng_level
-      return $ DataConDecl v' ty_params' ex_types' args' rng'
+      return $ DataConDecl v' ty_params' ex_types' args'
   where
     check_arg_level lv =
       logErrorIf (lv /= TypeLevel) $

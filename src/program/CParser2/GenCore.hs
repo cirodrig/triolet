@@ -56,10 +56,25 @@ translateDataConDecl tenv data_type_con decl =
   let params = map translateDomain $ dconParams decl
       ex_types = map translateDomain $ dconExTypes decl
       args = map translateType $ dconArgs decl
-      rng = translateType $ dconRng decl
-      ty = make_datacon_type params ex_types (dconArgs decl) (dconRng decl)
-  in (ty, DataConType params ex_types args rng (toVar $ dconVar decl) data_type_con)
+      ty = make_datacon_type params ex_types (dconArgs decl) (range_type params)
+  in (ty, DataConType params ex_types args (toVar $ dconVar decl) data_type_con)
   where
+    -- Get the type of a fully applied data constructor.
+    -- Create a writer type if appropriate.
+    range_type params =
+      let param_types = [Type.VarT v | v ::: _ <- params]
+          range_type = foldl Type.AppT (Type.VarT data_type_con) param_types
+          range_kind = Type.typeKind tenv range_type
+      in case range_kind
+         of Type.VarT kvar
+              | kvar == Type.bareV ->
+                  -- Convert to writer
+                  Type.varApp (pyonBuiltin the_Writer) [range_type]
+              | otherwise -> range_type
+
+            -- Other terms should not occur 
+            _ -> internalError "translateDataConDecl: Unexpected kind"
+
     -- Create the type of a data constructor, given the types used when
     -- pattern matching on the data constructor
     make_datacon_type params ex_types args rng =
@@ -67,8 +82,7 @@ translateDataConDecl tenv data_type_con decl =
           local_tenv = foldr insert_type tenv ty_params
             where insert_type (v ::: t) e = insertType v t e
           fields = map (translateDataConFieldArgument local_tenv) args
-          return = translateDataConFieldArgument local_tenv rng
-      in Type.forallType ty_params $ Type.funType fields return
+      in Type.forallType ty_params $ Type.funType fields rng
 
 -- | Translate a global declaration.  The completed type environment may be
 --   used lazily in the translation.

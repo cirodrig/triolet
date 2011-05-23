@@ -17,22 +17,22 @@ type OutT : bare -> out;
 
 data Stored : val -> bare
 {
-  stored (a : val) () (a) : Stored a;
+  stored (a : val) () (a);
 };
 
 data StoredBox : box -> bare
 {
-  storedBox (a : box) () (a) : StoredBox a;
+  storedBox (a : box) () (a);
 };
 
 data Boxed : bare -> box
 {
-  boxed (a : bare) () (a) : Boxed a;
+  boxed (a : bare) () (a);
 };
 
 data Referenced : bare -> bare
 {
-  referenced (a : bare) () (a) : Referenced a;
+  referenced (a : bare) () (a);
 };
 
 -- A pointer used for initializing data
@@ -52,8 +52,8 @@ type Writer : bare -> write;
 
 data bool : val
 {
-  True () () () : bool;
-  False () () () : bool;
+  True () () ();
+  False () () ();
 };
 
 data int : val {};		-- Opaque
@@ -61,21 +61,21 @@ data float : val {};		-- Opaque
 
 data NoneType : val
 {
-  None () () () : NoneType;
+  None () () ();
 };
 
 -- An indexed singleton integer type.
 -- Invariant: The type index gives up the integer value.
 data IndexedInt : intindex -> val
 {
-  indexedInt (n : intindex) () (int) : IndexedInt n;
+  indexedInt (n : intindex) () (int);
 };
 
 -- An existential indexed singleton integer type.
 -- We can convert int to this type.
 data SomeIndexedInt : val
 {
-  someIndexedInt () (n : intindex) (IndexedInt n) : SomeIndexedInt;
+  someIndexedInt () (n : intindex) (IndexedInt n);
 };
 
 -- A dummy token that we use to stand in for dependences due to
@@ -90,7 +90,7 @@ data EffTok : val
   -- optimized away.  We don't want the optimizer to mess with this data type
   -- because it stands in for real dependences.
   -- Instead, use 'emptyEffTok' to produce an EffTok value.
-  effTok () () () : EffTok;
+  effTok () () ();
 };
 
 emptyEffTok : Writer (Stored EffTok);
@@ -109,7 +109,7 @@ seqEffTok : Writer (Stored EffTok)
 
 data Complex : bare -> bare
 {
-  complex (a : bare) () (a, a) : Complex a;
+  complex (a : bare) () (a, a);
 };
 
 data array : intindex -> bare -> bare
@@ -123,58 +123,57 @@ data list : bare -> bare
 {
   make_list
   (a : bare) (n : intindex)
-  (IndexedInt n, Referenced (array n a)) : list a;
+  (IndexedInt n, Referenced (array n a));
 };
 
 data PyonTuple2 : bare -> bare -> bare
 {
   pyonTuple2
-  (a : bare, b : bare) () (a, b) : PyonTuple2 a b;
+  (a : bare, b : bare) () (a, b);
 };
 
 data PyonTuple3 : bare -> bare -> bare -> bare
 {
   pyonTuple3
-  (a : bare, b : bare, c : bare) () (a, b, c) : PyonTuple3 a b c;
+  (a : bare, b : bare, c : bare) () (a, b, c);
 };
 
 data PyonTuple4 : bare -> bare -> bare -> bare -> bare
 {
   pyonTuple4
-  (a : bare, b : bare, c : bare, d : bare) ()
-  (a, b, c, d) : PyonTuple4 a b c d;
+  (a : bare, b : bare, c : bare, d : bare) () (a, b, c, d);
 };
 
 data UnboxedTuple2 : val -> val -> val
 {
   unboxedTuple2
-  (a : val, b : val) () (a, b) : UnboxedTuple2 a b;
+  (a : val, b : val) () (a, b);
 };
 
 data UnboxedTuple3 : val -> val -> val -> val
 {
   unboxedTuple3
-  (a : val, b : val, c : val) () (a, b, c) : UnboxedTuple3 a b c;
+  (a : val, b : val, c : val) () (a, b, c);
 };
 
 data UnboxedTuple4 : val -> val -> val -> val -> val
 {
   unboxedTuple4
-  (a : val, b : val, c : val, d : val) () (a, b, c, d) : UnboxedTuple4 a b c d;
+  (a : val, b : val, c : val, d : val) () (a, b, c, d);
 };
 
 data UnboxedTuple5 : val -> val -> val -> val -> val -> val
 {
   unboxedTuple5
   (a : val, b : val, c : val, d : val, e : val) ()
-  (a, b, c, d, e) : UnboxedTuple5 a b c d e;
+  (a, b, c, d, e);
 };
 
 data UnboxedTuple6 : val -> val -> val -> val -> val -> val -> val
 {
   unboxedTuple6
   (a : val, b : val, c : val, d : val, e : val, f : val) ()
-  (a, b, c, d, e, f) : UnboxedTuple6 a b c d e f;
+  (a, b, c, d, e, f);
 };
 
 -- Dictionaries
@@ -185,7 +184,7 @@ data EqDict : bare -> box
 {
   eqDict
   (a : bare) ()
-  (a -> a -> bool, a -> a -> bool) : EqDict a;
+  (a -> a -> bool, a -> a -> bool);
 };
 
 data OrdDict : bare -> box
@@ -196,7 +195,7 @@ data OrdDict : bare -> box
    a -> a -> bool,
    a -> a -> bool,
    a -> a -> bool,
-   a -> a -> bool) : OrdDict a;
+   a -> a -> bool);
 };
 
 data AdditiveDict : bare -> box
@@ -206,7 +205,7 @@ data AdditiveDict : bare -> box
   (a -> a -> Writer a,
    a -> a -> Writer a,
    a -> Writer a,
-   a) : AdditiveDict a;
+   a);
 };
 
 data MultiplicativeDict : bare -> box
@@ -216,7 +215,7 @@ data MultiplicativeDict : bare -> box
   (AdditiveDict a,
    a -> a -> Writer a,
    int -> Writer a,
-   a) : MultiplicativeDict a;
+   a);
 };
 
 data RemainderDict : bare -> box
@@ -225,14 +224,14 @@ data RemainderDict : bare -> box
   (a : bare) ()
   (MultiplicativeDict a,
    a -> a -> int,
-   a -> a -> Writer a) : RemainderDict a;
+   a -> a -> Writer a);
 };
 
 data FractionalDict : bare -> box
 {
   fractionalDict
   (a : bare) ()
-  (MultiplicativeDict a, a -> a -> Writer a) : FractionalDict a;
+  (MultiplicativeDict a, a -> a -> Writer a);
 };
 
 data FloatingDict : bare -> box
@@ -247,7 +246,7 @@ data FloatingDict : bare -> box
    a -> Writer a,
    a -> Writer a,
    a -> Writer a,
-   a) : FloatingDict a;
+   a);
 };
 
 data VectorDict : bare -> box
@@ -257,14 +256,14 @@ data VectorDict : bare -> box
   (AdditiveDict a,
    a -> float -> Writer a,
    a -> float,
-   a -> a -> float) : VectorDict a;
+   a -> a -> float);
 };
 
 data TraversableDict : (bare -> bare) -> box
 {
   traversableDict (t : bare -> bare) ()
   ((a : bare) -> Repr a -> t a -> Stream (shape t) a,
-   (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)) : TraversableDict t;
+   (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a));
 };
 
 -------------------------------------------------------------------------------

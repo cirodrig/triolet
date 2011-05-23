@@ -185,9 +185,7 @@ pDataConDecl = located $ do
   params <- commaList pDomain
   ex_types <- commaList pDomain
   args <- commaList pType
-  match ColonTok
-  range <- pType
-  return $ DataConDecl datacon params ex_types args range
+  return $ DataConDecl datacon params ex_types args
 
 pTypeDecl :: P PLDecl
 pTypeDecl = located $ do

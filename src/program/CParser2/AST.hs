@@ -116,8 +116,6 @@ data DataConDecl ix =
   , dconExTypes :: [Domain ix]
     -- | Fields
   , dconArgs :: [LType ix]
-    -- | Type of the constructed value
-  , dconRng :: LType ix
   }
 
 type LDataConDecl ix = Located (DataConDecl ix)
