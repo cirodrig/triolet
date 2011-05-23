@@ -15,7 +15,7 @@ System F code after representation inference.
 module Type.Environment
        (TypeEnvMonad(..),
         assumeBinder,
-        EvalMonad,
+        EvalMonad(..),
         TypeEvalM(..),
         TypeEnv,
         DataType(..),
@@ -77,7 +77,8 @@ assumeBinder :: TypeEnvMonad m => Binder -> m a -> m a
 assumeBinder (v ::: t) m = assume v t m
 
 -- | A monad supporting type-level computation
-class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m
+class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m where
+  liftTypeEvalM :: TypeEvalM a -> m a
 
 -- | A simple monad supporting type-level computation
 newtype TypeEvalM a =
@@ -114,7 +115,8 @@ instance TypeEnvMonad TypeEvalM where
   assume v t m =
     TypeEvalM $ \supply tenv -> runTypeEvalM m supply (insertType v t tenv)
 
-instance EvalMonad TypeEvalM
+instance EvalMonad TypeEvalM where
+  liftTypeEvalM m = m
 
 -------------------------------------------------------------------------------
 

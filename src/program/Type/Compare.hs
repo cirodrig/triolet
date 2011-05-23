@@ -145,14 +145,13 @@ cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
 --   given type @t_g@, try to construct a unifying substitution
 --   @S : fv -> Type@ such that @S(t_e) = t_g@.  The substitution applied to
 --   the expected type makes it equal to the given type.
-unifyTypeWithPattern :: IdentSupply Var
-                     -> TypeEnv
-                     -> [Var]   -- ^ Free variables in expected type
+unifyTypeWithPattern :: EvalMonad m =>
+                        [Var]   -- ^ Free variables in expected type
                      -> Type    -- ^ Expected type
                      -> Type    -- ^ Given type
-                     -> IO (Maybe Substitution)
-unifyTypeWithPattern id_supply tenv free_vars expected given =
-  runTypeEvalM calculate_substitution id_supply tenv
+                     -> m (Maybe Substitution)
+unifyTypeWithPattern free_vars expected given =
+  liftTypeEvalM calculate_substitution
   where
     calculate_substitution = do
       result <- unify init_substitution expected given

@@ -179,10 +179,9 @@ lookupReprDict ty k = do
     Nothing -> internalError $ 
                "lookupReprDict: Dictionary not found for type:\n" ++ show (pprType ty)
   where
-    lookup_dict = Lower $ ReaderT $ \env -> do
-      let var_supply = varSupply env
-          tenv = typeEnvironment env
-      DictEnv.lookup var_supply tenv ty (reprDictEnvironment env)
+    lookup_dict = do
+      dict_env <- Lower $ asks reprDictEnvironment  
+      DictEnv.lookup ty dict_env
 
 -- | Add a Repr dictionary for this type to the environment
 assumeReprDict :: Type -> LL.Val -> Lower a -> Lower a
@@ -202,11 +201,9 @@ lookupIndexedInt ty = do
     Nothing -> internalError $ 
                "lookupIndexedInt: Not found for index:\n" ++ show (pprType ty)
   where
-    lookup_dict = Lower $ ReaderT $ \env -> do
-      let var_supply = varSupply env
-          tenv = typeEnvironment env
-      DictEnv.lookup var_supply tenv ty (intEnvironment env)
-
+    lookup_dict = do
+      dict_env <- Lower $ asks intEnvironment  
+      DictEnv.lookup ty dict_env
 
 -- | Add an indexed integer for this type index to the environment
 assumeIndexedInt :: Type -> LL.Val -> Lower a -> Lower a

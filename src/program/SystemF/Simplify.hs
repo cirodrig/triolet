@@ -95,7 +95,11 @@ instance TypeEnvMonad LR where
     let env' = env {lrTypeEnv = insertType v rt $ lrTypeEnv env}
     in runLR m env'
 
-instance EvalMonad LR
+instance EvalMonad LR where
+  liftTypeEvalM m = LR $ \env -> do
+    runTypeEvalM m (lrIdSupply env) (lrTypeEnv env)
+
+
 
 instance ReprDictMonad LR where
   withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply env) env
@@ -112,10 +116,6 @@ instance ReprDictMonad LR where
 liftFreshVarM :: FreshVarM a -> LR a
 liftFreshVarM m = LR $ \env -> do
   runFreshVarM (lrIdSupply env) m
-
-liftTypeEvalM :: TypeEvalM a -> LR a
-liftTypeEvalM m = LR $ \env -> do
-  runTypeEvalM m (lrIdSupply env) (lrTypeEnv env)
 
 getRewriteRules :: LR RewriteRuleSet
 getRewriteRules = LR $ \env -> return (lrRewriteRules env)

@@ -33,7 +33,7 @@ type MkDictEnv = DictEnv.DictEnv MkDict
 type IntIndexEnv = DictEnv.DictEnv MkDict
 
 -- | A monad that keeps track of representation dictionaries
-class (TypeEnvMonad m, MonadIO m, Supplies m VarID) => ReprDictMonad m where
+class EvalMonad m => ReprDictMonad m where
   getVarIDs :: m (Supply VarID)
   getVarIDs = withVarIDs return
   
@@ -59,6 +59,7 @@ instance Supplies m VarID => Supplies (MaybeT m) VarID where
 
 instance TypeEnvMonad m => TypeEnvMonad (MaybeT m) where
   getTypeEnv = lift getTypeEnv
+  assume v t (MaybeT m) = MaybeT $ assume v t m
 
 instance ReprDictMonad m => ReprDictMonad (MaybeT m) where
   getVarIDs = lift getVarIDs
@@ -69,6 +70,9 @@ instance ReprDictMonad m => ReprDictMonad (MaybeT m) where
   getIntIndexEnv = lift getIntIndexEnv
   localDictEnv f (MaybeT m) = MaybeT (localDictEnv f m)
   localIntIndexEnv f (MaybeT m) = MaybeT (localIntIndexEnv f m)
+
+instance EvalMonad m => EvalMonad (MaybeT m) where
+  liftTypeEvalM m = lift $ liftTypeEvalM m
 
 -- | Lookup the representation dictionary of a bare type
 lookupReprDict :: ReprDictMonad m => Type -> m (Maybe MkDict)
@@ -88,10 +92,8 @@ lookupReprDict ty =
          is_function_type arg ->
            return $ Just $ mk_fun_dict arg
      _ -> do
-       tenv <- getTypeEnv
-       id_supply <- getVarIDs
        denv <- getDictEnv
-       liftIO $ DictEnv.lookup id_supply tenv ty denv
+       DictEnv.lookup ty denv
   where
     is_function_type (FunT {}) = True
     is_function_type _ = False
@@ -106,10 +108,8 @@ lookupReprDict ty =
 --   have kind 'intindex'.
 lookupIndexedInt :: ReprDictMonad m => Type -> m (Maybe ExpM)
 lookupIndexedInt ty = do
-  tenv <- getTypeEnv
-  id_supply <- getVarIDs
   ienv <- getIntIndexEnv
-  mk <- liftIO $ DictEnv.lookup id_supply tenv ty ienv
+  mk <- DictEnv.lookup ty ienv
   mapM (\(MkDict m) -> m) mk
 
 lookupIndexedInt' :: ReprDictMonad m => Type -> m ExpM

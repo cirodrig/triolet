@@ -56,12 +56,12 @@ insert p (DictEnv ps) = DictEnv (p : ps)
 insertAtEnd :: TypePattern a -> DictEnv a -> DictEnv a
 insertAtEnd p (DictEnv ps) = DictEnv (ps ++ [p])
 
-lookup :: IdentSupply Var -> TypeEnv -> Type -> DictEnv a -> IO (Maybe a)
-lookup var_supply tenv key (DictEnv xs) = go xs
+lookup :: EvalMonad m => Type -> DictEnv a -> m (Maybe a)
+lookup key (DictEnv xs) = go xs
   where
     go (TypePattern qvars t mk_value : xs) = do
       -- Try to match 'key' against this pattenr
-      match <- unifyTypeWithPattern var_supply tenv qvars t key
+      match <- unifyTypeWithPattern qvars t key
       case match of
         Nothing     -> go xs
         Just subst -> return (Just $ mk_value subst)
