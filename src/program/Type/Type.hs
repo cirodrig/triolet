@@ -54,6 +54,13 @@ data Type =
     -- | An integer type index.  These inhabit kind 'intIndexT'.
   | IntT !Integer
 
+    -- | An unboxed tuple constructor.
+    --   The type parameters have the specified kinds, which must be either
+    --   'ValK' or 'BoxK'.
+    --
+    --   Unboxed tuples are introduced after representation inference.
+  | UTupleT ![BaseKind]
+
 infixr 4 `FunT`
 infixl 7 `AppT`
 
@@ -100,7 +107,7 @@ fromForallFunType t =
       (dom, rng) = fromFunType monotype
   in (qvars, dom, rng)
 
-data Binder = Var ::: Type
+data Binder = (:::) { binderVar :: Var, binderType :: Type}
 
 instance HasLevel Var => HasLevel Type where
   getLevel (VarT v) = getLevel v
@@ -221,7 +228,15 @@ pprTypePrec ty =
      AllT binder rng -> ppr_all [binder] rng `hasPrec` lamPrec
      AnyT k -> text "Any :" <+> pprTypePrec k ?+ typeAnnPrec `hasPrec` typeAnnPrec
      IntT n -> hasAtomicPrec $ text (show n)
+     UTupleT ks -> text "UTuple" <+> utuple_tags ks `hasPrec` appPrec
   where
+    utuple_tags ks =
+      text "<" <> hcat (punctuate (text ",") $ map ppr_k ks) <> text ">"
+      where
+        ppr_k ValK = text "val"
+        ppr_k BoxK = text "box"
+        ppr_k _    = text "ERROR"
+
     -- Uncurry the application
     ppr_app (AppT op' arg') args = ppr_app op' (arg':args)
     ppr_app op' args = sep [pprTypePrec t ?+ appPrec | t <- op' : args]

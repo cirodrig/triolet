@@ -172,12 +172,7 @@ withParam pat m =
      MemVarP {} -> do
        dfType $ patMType pat
        (x, dmd) <- getDemand (patMVar' pat) m
-
-       -- If not mentioned, replace this pattern with a wildcard
-       let new_pat =
-             case multiplicity dmd
-             of Dead -> memWildP (patMType pat)
-                _ -> setPatMDmd dmd pat
+       let new_pat = setPatMDmd dmd pat
        return (new_pat, x)
 
 withParams :: [PatM] -> Df a -> Df ([PatM], a)
@@ -194,6 +189,7 @@ dmdExp spc expressionM@(ExpM expression) =
   case expression
   of VarE _ v -> mentionSpecificity v spc >> return expressionM
      LitE _ _ -> return expressionM
+     UTupleE inf args -> dmdUTupleE inf args
      AppE inf op ts args -> dmdAppE inf op ts args
      LamE inf f -> do
        f' <- dmdFun f
@@ -214,6 +210,9 @@ dmdExp spc expressionM@(ExpM expression) =
                               | (v,d) <- IntMap.toList dmd])  $ return x
     -}
       
+dmdUTupleE inf args = do
+  args' <- mapM (dmdExp Used) args
+  return $ ExpM $ UTupleE inf args'
 
 -- | Dead code elimination for function application.
 --
@@ -282,24 +281,23 @@ dmdCaseE result_spc inf scrutinee alts = do
   -- If there's only one alternative and none of its fields are used, then
   -- eliminate the entire case statement
   case alts' of
-    [AltM alt'] | null (altExTypes alt') && all isWildPatM (altParams alt') ->
+    [AltM alt'] | null (getAltExTypes alt') &&
+                  all isDeadPattern (altParams alt') ->
       return $ altBody alt'
     _ -> do
       -- Process the scrutinee
       scrutinee' <- dmdExp alts_spc scrutinee
       return $ ExpM $ CaseE inf scrutinee' alts'
 
-isWildPatM (MemWildP {}) = True
-isWildPatM _ = False
+isDeadPattern pat = multiplicity (patMDmd pat) == Dead
 
 -- | Construct the specificity for a case scrutinee, based on how its value
 --   is bound by a case alternative
 altSpecificity :: AltM -> Specificity
-altSpecificity (AltM alt) =
-  Decond (altConstructor alt) (map fromTypM $ altTyArgs alt) ex_spcs fields
+altSpecificity alt = Decond mono_con fields
   where
-    ex_spcs = [(v, t) | TyPatM (v ::: t) <- altExTypes alt]
-    fields = map (specificity . patMDmd) $ altParams alt
+    (mono_con, params, _) = altToMonoCon alt
+    fields = map (specificity . patMDmd) params
 
 -- | Construct the specificity for a case scrutinee, based on how its value
 --   is bound by a list of alternatives.  If there's more than one alternative,
@@ -312,19 +310,25 @@ altListSpecificity _   = Inspected
 -- | Do demand analysis on a case alternative.  Return the demand on the
 --   scrutinee.
 dmdAlt :: Specificity -> AltM -> Df (AltM, Specificity)
-dmdAlt result_spc (AltM alt) = do
-  mapM_ (dfType . fromTypM) $ altTyArgs alt
-  (typats, (pats, body)) <-
-    withTyPats (altExTypes alt) $
-    withParams (altParams alt) $
-    dmdExp result_spc (altBody alt)
+dmdAlt result_spc (AltM (DeCon con ty_args ex_types params body)) = do
+  mapM_ (dfType . fromTypM) ty_args
+  (typats', (pats', body')) <-
+    withTyPats ex_types $ withParams params $ dmdExp result_spc body
 
-  let new_alt = AltM $ Alt { altConstructor = altConstructor alt
-                           , altTyArgs = altTyArgs alt
-                           , altExTypes = typats
-                           , altParams = pats
-                           , altBody = body}
+  let new_alt = AltM $ DeCon { altConstructor = con
+                             , altTyArgs = ty_args
+                             , altExTypes = typats'
+                             , altParams = pats'
+                             , altBody = body'}
   return (new_alt, altSpecificity new_alt)
+
+dmdAlt result_spc (AltM (DeTuple params body)) = do
+  (pats', body') <-
+    withParams params $ dmdExp result_spc body
+
+  let new_alt = AltM $ DeTuple { altParams = pats'
+                               , altBody = body'}
+  return (new_alt, altSpecificity new_alt)  
 
 dmdFun :: DmdAnl FunM
 dmdFun (FunM f) = do

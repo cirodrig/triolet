@@ -89,7 +89,7 @@ Executable pyon
     Untyped.TypeInference
     Untyped.TypeInferenceEval
     Untyped.Unification
-    --SystemF.ArgumentFlattening
+    SystemF.ArgumentFlattening
     SystemF.Build
     SystemF.Demand
     SystemF.DemandAnalysis

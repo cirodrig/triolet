@@ -15,6 +15,7 @@ module SystemF.MemoryIR
         patMVar,
         patMVar',
         patMType,
+        patMBinder,
         patMUses,
         setPatMUses,
         patMDmd,
@@ -23,6 +24,7 @@ module SystemF.MemoryIR
         Alt(..),
         Fun(..),
         TypM, PatM, TyPatM, ExpM, AltM, FunM,
+        altFromMonoCon, altToMonoCon,
         unpackVarAppM, unpackDataConAppM, isDataConAppM
        )
 where
@@ -88,6 +90,9 @@ patMVar' p = case patMVar p of Just v -> v
 patMType :: PatM -> Type
 patMType (MemVarP {_patMBinder = _ ::: ty}) = ty
 patMType (MemWildP {_patMType = ty}) = ty
+
+patMBinder :: PatM -> Binder
+patMBinder = _patMBinder
 
 {-
 -- | Get the representation of the value bound to this pattern.
@@ -156,6 +161,23 @@ type TyPatM = TyPat Mem
 type ExpM = Exp Mem
 type AltM = Alt Mem
 type FunM = Fun Mem
+
+-- | Construct a case alternative given a 'MonoCon' and the other required 
+--   fields
+altFromMonoCon :: MonoCon -> [PatM] -> ExpM -> AltM
+altFromMonoCon (MonoCon con ty_args ex_types) fields body =
+  let ex_patterns = map TyPatM ex_types
+  in AltM $ DeCon con (map TypM ty_args) ex_patterns fields body
+
+altFromMonoCon (MonoTuple _) fields body =
+  AltM $ DeTuple fields body
+
+altToMonoCon :: AltM -> (MonoCon, [PatM], ExpM)
+altToMonoCon (AltM (DeCon con ty_args ex_types fields body)) =
+  (MonoCon con (map fromTypM ty_args) [b | TyPatM b <- ex_types], fields, body)
+
+altToMonoCon (AltM (DeTuple fields body)) =
+  (MonoTuple (map patMType fields), fields, body)
 
 unpackVarAppM :: ExpM -> Maybe (Var, [Type], [ExpM])
 unpackVarAppM (ExpM (AppE { expOper = ExpM (VarE _ op)

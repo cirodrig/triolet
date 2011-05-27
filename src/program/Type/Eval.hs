@@ -7,6 +7,8 @@ module Type.Eval
         typeOfTypeApp,
         typeOfApp,
         dataConFieldKinds,
+        unboxedTupleTyCon,
+        unboxedTupleType,
         instantiateDataConType,
         instantiateDataConTypeWithFreshVariables,
         instantiateDataConTypeWithExistentials)
@@ -45,6 +47,7 @@ normalize t =
            AllT (x ::: k) `liftM` assume x k (normalize rng)
          AnyT {} -> return t
          IntT {} -> return t
+         UTupleT {} -> return t
 
 -- | Get the type of a type.
 --   Minimal error checking is performed.
@@ -74,6 +77,7 @@ typeKind tenv ty =
        case getLevel rng
        of TypeLevel -> boxT     -- Functions are always boxed
           KindLevel -> internalError "typeKind: Unexpected type"
+     UTupleT ks -> funType (map fromBaseKind ks) valT
      _ -> internalError "typeKind: Unrecognized type"
 
 -- | Typecheck a type or kind.  If the term is valid, return its type,
@@ -125,6 +129,14 @@ typeCheckType ty =
 
      AnyT k -> return k
      IntT _ -> return intindexT
+     UTupleT ks
+       | all valid_unboxed_tuple_field ks ->
+           return $ funType (map fromBaseKind ks) valT
+       | otherwise -> internalError "typeCheckType: Invalid unboxed tuple type"
+  where
+    valid_unboxed_tuple_field ValK = True
+    valid_unboxed_tuple_field BoxK = True
+    valid_unboxed_tuple_field _ = False
 
 -- | Compute the type produced by applying a value of type @op_type@ to
 --   the type argument @arg@.  Verify that the application is well-typed.
@@ -166,6 +178,28 @@ dataConFieldKinds tenv dcon_type =
         where
           insert_binder_type (v ::: t) e = insertType v t e
   in [toBaseKind $ typeKind local_tenv t | t <- dataConPatternArgs dcon_type]
+
+-- | Create an unboxed tuple type constructor that can hold 
+--   the given sequence of types.
+unboxedTupleTyCon :: TypeEnv -> [Type] -> Type
+unboxedTupleTyCon tenv ts =
+  -- Force kinds to be evaluated eagerly, so errors are detected sooner
+  UTupleT $! convert_types ts
+  where
+    convert_types (t:ts) = (convert_type t :) $! convert_types ts
+    convert_types []     = []
+    
+    convert_type t =
+      case toBaseKind $ typeKind tenv t
+      of ValK -> ValK
+         BoxK -> BoxK
+         _ -> internalError "unboxedTupleTyCon: Invalid kind for tuple"
+
+-- | Create the type of an unboxed tuple whose fields are the given types
+unboxedTupleType :: TypeEnv -> [Type] -> Type
+unboxedTupleType tenv ts =
+  let con = unboxedTupleTyCon tenv ts
+  in con `seq` typeApp con ts
 
 -- | Given a data constructor type and the type arguments at which it's used,
 --   get the instantiated type.

@@ -71,9 +71,7 @@ data ComplexValue =
     --   not a regular value.
   | DataValue
     { dataInfo        :: ExpInfo
-    , dataCon         :: !Var
-    , dataTyArgs      :: [TypM]
-    , dataExTypes     :: [TypM]
+    , dataValueType   :: !DataValueType
     , dataFields      :: [MaybeValue]
     }
 
@@ -85,6 +83,17 @@ data ComplexValue =
     --   that take an output pointer.  They are also produced by calls
     --   to \"copy\".
   | WriterValue !KnownValue
+
+data DataValueType =
+    -- | A data constructor type, along with its type arguments.
+    ConValueType
+    { dataCon         :: !Var
+    , dataTyArgs      :: [TypM]
+    , dataExTypes     :: [TypM]
+    }
+    -- | An unboxed tuple type.
+    --   It's not necessary to keep track of types.
+  | TupleValueType
 
 -- | Get a trivial expression (a variable or literal) equivalent to this
 --   known value, if possible.
@@ -144,6 +153,12 @@ resultOfWriterValue v =
 forgetVariables :: Set.Set Var -> KnownValue -> MaybeValue
 forgetVariables varset kv = forget kv
   where
+    data_type_mentions_vars (ConValueType _ tys1 tys2) =
+      any (`typeMentionsAny` varset) (map fromTypM tys1) ||
+      any (`typeMentionsAny` varset) (map fromTypM tys2)
+
+    data_type_mentions_vars TupleValueType = False
+
     forget kv =
       case kv
       of VarValue _ v
@@ -162,11 +177,9 @@ forgetVariables varset kv = forget kv
                  of FunValue _ f
                       | varset `intersects` freeVariables f -> Nothing
                       | otherwise -> Just cv
-                    DataValue { dataTyArgs = tys1
-                              , dataExTypes = tys2
+                    DataValue { dataValueType = value_type
                               , dataFields = fields}
-                      | any (`typeMentionsAny` varset) (map fromTypM tys1) ||
-                        any (`typeMentionsAny` varset) (map fromTypM tys2) ->
+                      | data_type_mentions_vars value_type ->
                           Nothing
                       | otherwise ->
                           let fields' = map (>>= forget) fields
@@ -200,12 +213,17 @@ pprComplexValue :: ComplexValue -> Doc
 pprComplexValue cv =
   case cv
   of FunValue _ f -> pprFun f
-     DataValue _ con ty_args ex_types fields ->
+     DataValue _ (ConValueType con ty_args ex_types) fields ->
        let type_docs =
              map (text "@" <>) $ map (pprType . fromTypM) (ty_args ++ ex_types)
            field_docs = map pprMaybeValue fields
        in pprVar con <>
           parens (sep $ punctuate (text ",") $ type_docs ++ field_docs)
+     
+     DataValue _ TupleValueType fields ->
+       let field_docs = map pprMaybeValue fields
+       in parens (sep $ punctuate (text ",") field_docs)
+
      WriterValue kv -> text "writer" <+> parens (pprKnownValue kv)
 
 pprMaybeValue :: MaybeValue -> Doc
@@ -266,6 +284,13 @@ dataConValue inf tenv d_type dcon_type ty_args val_args
         from_writer BareK (Just known_value) = resultOfWriterValue known_value
         from_writer _     mv                 = mv
 
+-- | Construct a known value for an unboxed tuple.
+--
+--   All fields of an unboxed tuple are value or boxed, so we don't need to
+--   deal with the writer/value distinction.
+tupleConValue :: ExpInfo -> [MaybeValue] -> MaybeValue
+tupleConValue inf val_args = Just $ tupleValue inf val_args
+
 -- | Construct a known value for an expression that was satisfied by a 
 --   pattern match, given the type arguments and matched fields.
 --
@@ -297,6 +322,11 @@ patternValue inf tenv d_type dcon_type ty_args ex_vars val_args
 
     data_con_ty_args = ty_args ++ [TypM (VarT v) | v <- ex_vars]
 
+tuplePatternValue :: ExpInfo
+                  -> [MaybeValue]
+                  -> MaybeValue
+tuplePatternValue inf val_args = Just $ tupleValue inf val_args
+
 -- | Construct a known value for a data constructor,
 --   given the values of its type arguments and fields.
 dataConstructorValue :: ExpInfo
@@ -307,13 +337,21 @@ dataConstructorValue :: ExpInfo
 dataConstructorValue inf dcon_type ty_args val_args =
   ComplexValue Nothing $
   DataValue { dataInfo = inf
-            , dataCon = dataConCon dcon_type
-            , dataTyArgs = forall_type_args
-            , dataExTypes = exists_type_args
+            , dataValueType = ConValueType
+                              { dataCon = dataConCon dcon_type
+                              , dataTyArgs = forall_type_args
+                              , dataExTypes = exists_type_args}
             , dataFields = val_args}
   where
     forall_type_args = take (length $ dataConPatternParams dcon_type) ty_args
     exists_type_args = drop (length $ dataConPatternParams dcon_type) ty_args
+
+tupleValue :: ExpInfo -> [MaybeValue] -> KnownValue
+tupleValue inf val_args =
+  ComplexValue Nothing $
+  DataValue { dataInfo = inf
+            , dataValueType = TupleValueType
+            , dataFields = val_args}
 
 -- | Create known values for data constructors in the global type environment.
 --   In particular, nullary data constructors get a 'DataValue'.
@@ -327,6 +365,6 @@ initializeKnownValues tenv =
          null (dataConPatternExTypes dcon) &&
          null (dataConPatternArgs dcon) =
            let con = dataConCon dcon
-               data_value = DataValue defaultExpInfo con [] [] []
+               data_value = DataValue defaultExpInfo (ConValueType con [] []) []
            in Just $ ComplexValue (Just con) data_value
        | otherwise = Nothing

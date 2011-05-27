@@ -82,7 +82,9 @@ instance ReprDictMonad RI where
     where
       f_intindex env = env {riIntIndexEnv = f $ riIntIndexEnv env}
 
-instance EvalMonad RI
+instance EvalMonad RI where
+  liftTypeEvalM m = RI $ ReaderT $ \env -> do
+    runTypeEvalM m (riVarSupply env) (riTypeEnv env)
 
 -- | Infer the type of a System F expression.  The inferred type
 --   is the System F type, not the specification type.
@@ -449,11 +451,11 @@ fromStoredCoercion ty = Coercion $ \k e -> do
   (expr, x) <- k (ExpM $ VarE defaultExpInfo val_var)
   
   -- Create a case statement
-  let alt = AltM $ Alt { altConstructor = pyonBuiltin the_stored
-                       , altTyArgs = [TypM ty]
-                       , altExTypes = []
-                       , altParams = [memVarP (val_var ::: ty)]
-                       , altBody = expr}
+  let alt = AltM $ DeCon { altConstructor = pyonBuiltin the_stored
+                         , altTyArgs = [TypM ty]
+                         , altExTypes = []
+                         , altParams = [memVarP (val_var ::: ty)]
+                         , altBody = expr}
       cas = ExpM $ CaseE defaultExpInfo e [alt]
   return (cas, x)
 
@@ -502,11 +504,11 @@ writeLocalCoercion ty = Coercion $ \k e -> do
   (expr, x) <- k (ExpM $ VarE defaultExpInfo read_var)
   
   let rhs = ExpM $ AppE defaultExpInfo box_op [TypM ty] [e]
-      expr_alt = AltM $ Alt { altConstructor = pyonBuiltin the_boxed
-                            , altTyArgs = [TypM ty]
-                            , altExTypes = []
-                            , altParams = [memVarP (read_var ::: ty)]
-                            , altBody = expr}
+      expr_alt = AltM $ DeCon { altConstructor = pyonBuiltin the_boxed
+                              , altTyArgs = [TypM ty]
+                              , altExTypes = []
+                              , altParams = [memVarP (read_var ::: ty)]
+                              , altBody = expr}
       body = ExpM $ CaseE defaultExpInfo
              (ExpM $ VarE defaultExpInfo boxed_var)
              [expr_alt]
@@ -957,11 +959,11 @@ reprAlt return_type (AltSF alt) = do
       -- Coerce the body's result
       co_body <- coerceExpToReturnType body_type return_type body
 
-      return $ AltM $ Alt { altConstructor = altConstructor alt
-                          , altTyArgs = map TypM ty_args
-                          , altExTypes = map TyPatM ex_types
-                          , altParams = map memVarP params
-                          , altBody = co_body}
+      return $ AltM $ DeCon { altConstructor = altConstructor alt
+                            , altTyArgs = map TypM ty_args
+                            , altExTypes = map TyPatM ex_types
+                            , altParams = map memVarP params
+                            , altBody = co_body}
   where
     -- Convert a System F type to the expected type
     convert_type_argument expected_kind original_type = do

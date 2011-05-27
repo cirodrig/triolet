@@ -282,11 +282,11 @@ typeInferCaseE inf scr alts = do
   return $! ExpTSF $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
 
 typeCheckAlternative :: SourcePos -> Type -> Alt SF -> TCM AltTSF
-typeCheckAlternative pos scr_type (AltSF (Alt { altConstructor = con
-                                              , altTyArgs = types
-                                              , altExTypes = ex_fields
-                                              , altParams = fields
-                                              , altBody = body})) = do
+typeCheckAlternative pos scr_type (AltSF (DeCon { altConstructor = con
+                                                , altTyArgs = types
+                                                , altExTypes = ex_fields
+                                                , altParams = fields
+                                                , altBody = body})) = do
   -- Process arguments
   arg_vals <- mapM typeInferType types
 
@@ -316,7 +316,7 @@ typeCheckAlternative pos scr_type (AltSF (Alt { altConstructor = con
     when (ret_type `typeMentionsAny` Set.fromList existential_vars) $
       typeError "Existential variable escapes"
 
-    let new_alt = Alt con arg_vals ex_fields' fields' ti_body
+    let new_alt = DeCon con arg_vals ex_fields' fields' ti_body
     return $ AltTSF $ TypeAnn ret_type new_alt
   where
     -- The existential variables bound by this pattern
@@ -328,6 +328,9 @@ typeCheckAlternative pos scr_type (AltSF (Alt { altConstructor = con
         show (length atypes) ++ ", got " ++ show (length fields) ++ ")"
       | otherwise = return ()
 
+typeCheckAlternative pos scr_type (AltSF (DeTuple {})) =
+  -- Should not appear in System F code
+  internalError "typeCheckAlternative: Unexpected unboxed tuple"
 
 bindParamTypes params m = foldr bind_param_type m params
   where

@@ -40,6 +40,14 @@ renameBinding rn (x ::: t) k =
   let rn' = R $ IntMap.delete (fromIdent $ varID x) (unR rn)
   in k rn' (x ::: rename rn t)
 
+renameBindings :: Renaming -> [Binder] -> (Renaming -> [Binder] -> a) -> a
+renameBindings rn (b:bs) k =
+  renameBinding rn b $ \rn' b' ->
+  renameBindings rn' bs $ \rn'' bs' ->
+  k rn'' (b':bs')
+
+renameBindings rn [] k = k rn []
+
 class Renameable a where
   -- | Rename an expression using the given renaming
   rename :: Renaming -> a -> a
@@ -82,6 +90,7 @@ instance Renameable Type where
          renameBinding rn binder $ \rn' binder' ->
          AllT binder' $ rename rn' rng
        AnyT _           -> ty    -- Kinds are not renameable
+       UTupleT _        -> ty
 
   freshen ty =
     case ty
@@ -114,6 +123,7 @@ instance Renameable Type where
              fv_rng = freeVariables rng
          in Set.union fv_dom (Set.delete v fv_rng)
        AnyT k -> freeVariables k
+       UTupleT _        -> Set.empty
 
 -- | Freshen variables bound in the types such that the same variable is 
 --   bound by the outermost term in both types.  The outermost term is always
@@ -242,4 +252,5 @@ instance Substitutable Type where
            return $ LamT binder' body'
        AnyT _ -> return ty             -- Kinds are not substitutable
        IntT _ -> return ty 
+       UTupleT _ -> return ty
 

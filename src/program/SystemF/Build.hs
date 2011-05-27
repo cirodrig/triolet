@@ -78,22 +78,37 @@ initLocalE ty mk_rhs mk_body = localE ty rhs mk_body
 localE :: (Supplies m VarID) =>
           TypM -> m ExpM -> (Var -> m ExpM) -> m ExpM
 localE ty mk_rhs mk_body = do
-  -- Apply the 'boxed' constructor to the RHS
-  rhs_initializer <- mk_rhs
-  let rhs = ExpM $ AppE defaultExpInfo boxed_con [ty] [rhs_initializer]
-  
-  -- Create the body
+  rhs <- mk_rhs
   tmpvar_body <- newAnonymousVar ObjectLevel
   body <- mk_body tmpvar_body
+  let binder = tmpvar_body ::: fromTypM ty
+  return $ letViaBoxed binder rhs body
+
+localE' :: (Supplies m VarID) =>
+          TypM -> m ExpM -> m (Var, ExpM -> ExpM)
+localE' ty mk_rhs = do
+  rhs <- mk_rhs
+  tmpvar_body <- newAnonymousVar ObjectLevel
+  let binder = tmpvar_body ::: fromTypM ty
+  return (tmpvar_body, \body -> letViaBoxed binder rhs body)
+
+-- | Construct what amounts to a 'let' expression for bare objects.
+--   Initialize a new boxed object, then read the boxed object.
+--
+--   TODO: Define localE in terms of this function.
+letViaBoxed :: Binder -> ExpM -> ExpM -> ExpM
+letViaBoxed (pat_var ::: ty) rhs body =
+  let -- Apply the 'boxed' constructor to the RHS
+      boxed_rhs = ExpM $ AppE defaultExpInfo boxed_con [TypM ty] [rhs]
   
-  -- Create a case statement that binds a temporary value for the body
-  let expr = ExpM $ CaseE defaultExpInfo rhs [alt]
-      alt = AltM $ Alt { altConstructor = pyonBuiltin the_boxed
-                       , altTyArgs = [ty]
-                       , altExTypes = []
-                       , altParams = [memVarP (tmpvar_body ::: fromTypM ty)]
-                       , altBody = body}
-  return expr
+      -- Create a case statement that binds a temporary value for the body
+      expr = ExpM $ CaseE defaultExpInfo boxed_rhs [alt]
+      alt = AltM $ DeCon { altConstructor = pyonBuiltin the_boxed
+                         , altTyArgs = [TypM ty]
+                         , altExTypes = []
+                         , altParams = [memVarP (pat_var ::: ty)]
+                         , altBody = body}
+  in expr
   where
     boxed_con = ExpM $ VarE defaultExpInfo (pyonBuiltin the_boxed)
 
@@ -114,8 +129,8 @@ ifE mk_cond mk_tr mk_fa = do
   cond <- mk_cond
   tr <- mk_tr
   fa <- mk_fa
-  let true  = AltM $ Alt (pyonBuiltin the_True) [] [] [] tr
-      false = AltM $ Alt (pyonBuiltin the_False) [] [] [] fa
+  let true  = AltM $ DeCon (pyonBuiltin the_True) [] [] [] tr
+      false = AltM $ DeCon (pyonBuiltin the_False) [] [] [] fa
   return $ ExpM $ CaseE defaultExpInfo cond [true, false]
 
 mkFun :: forall m. (Supplies m VarID) =>
@@ -157,7 +172,7 @@ mkAlt lift_FreshVarM tenv con ty_args mk_body =
                        | (v, _ ::: t) <- zip typat_vars ex_param_types]
            patterns = [memVarP (v ::: ty)
                       | (v, ty) <- zip pat_vars param_types]
-       return $ AltM $ Alt con ty_args ex_params patterns body
+       return $ AltM $ DeCon con ty_args ex_params patterns body
      _ -> internalError "mkAlt"
 
 outType t = varApp (pyonBuiltin the_OutPtr) [t]

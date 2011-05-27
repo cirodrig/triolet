@@ -235,21 +235,21 @@ mkUndefinedE pos ty =
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
   let true_alt = TIAlt $
-        SystemF.Alt { SystemF.altConstructor =
-                         SystemF.pyonBuiltin SystemF.the_True
-                    , SystemF.altTyArgs = []
-                    , SystemF.altExTypes = []
-                    , SystemF.altParams = []
-                    , SystemF.altBody = tr
-                    }
+        SystemF.DeCon { SystemF.altConstructor =
+                           SystemF.pyonBuiltin SystemF.the_True
+                      , SystemF.altTyArgs = []
+                      , SystemF.altExTypes = []
+                      , SystemF.altParams = []
+                      , SystemF.altBody = tr
+                      }
       false_alt = TIAlt $
-        SystemF.Alt { SystemF.altConstructor =
-                         SystemF.pyonBuiltin SystemF.the_False
-                    , SystemF.altTyArgs = []
-                    , SystemF.altExTypes = []
-                    , SystemF.altParams = []
-                    , SystemF.altBody = fa
-                    }
+        SystemF.DeCon { SystemF.altConstructor =
+                           SystemF.pyonBuiltin SystemF.the_False
+                      , SystemF.altTyArgs = []
+                      , SystemF.altExTypes = []
+                      , SystemF.altParams = []
+                      , SystemF.altBody = fa
+                      }
   in TIExp $ SystemF.CaseE (mkExpInfo pos) cond [true_alt, false_alt]
 
 -- | Create a call of a polymorphic function with no constraint arguments.
@@ -315,7 +315,7 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
     instanceExpression pos ty_params constraint method_var
       
   let alt = TIAlt $
-            SystemF.Alt (clsDictCon cls) [convertHMType inst_type] [] parameters alt_body
+            SystemF.DeCon (clsDictCon cls) [convertHMType inst_type] [] parameters alt_body
 
   return (placeholders, TIExp $ SystemF.CaseE (mkExpInfo pos) dict [alt])
 

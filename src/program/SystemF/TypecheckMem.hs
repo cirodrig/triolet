@@ -18,7 +18,8 @@ module SystemF.TypecheckMem
         functionType,
         typeCheckModule,
         inferExpType,
-        inferAppType)
+        inferAppType,
+        monoConType)
 where
 
 import Prelude hiding(mapM)
@@ -117,11 +118,16 @@ discardTypeAnnotationsExp (ExpTM (TypeAnn _ expression)) = ExpM $
      ExceptE inf rty -> ExceptE inf rty
   where
     discard_alt (AltTM (TypeAnn _ alt)) =
-      AltM $ Alt { altConstructor = altConstructor alt
-                 , altTyArgs = map (TypM . fromTypTM) $ altTyArgs alt
-                 , altExTypes = map fromTyPatTM $ altExTypes alt
-                 , altParams = map fromPatTM $ altParams alt
-                 , altBody = dtae $ altBody alt}
+      case alt
+      of DeCon con ty_args ex_types params body ->
+           AltM $ DeCon { altConstructor = con
+                        , altTyArgs = map (TypM . fromTypTM) ty_args
+                        , altExTypes = map fromTyPatTM ex_types
+                        , altParams = map fromPatTM params
+                        , altBody = dtae body}
+         DeTuple params body ->
+           AltM $ DeTuple { altParams = map fromPatTM params
+                          , altBody = dtae body}
 
 discardTypeAnnotationsFun :: FunTM -> FunM
 discardTypeAnnotationsFun (FunTM (TypeAnn _ f)) =
@@ -187,6 +193,8 @@ typeInferExp (ExpM expression) =
          typeInferVarE inf v
        LitE {expInfo = inf, expLit = l} ->
          typeInferLitE inf l
+       UTupleE {expInfo = inf, expArgs = args} ->
+         typeInferUTupleE inf args
        AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
          typeInferAppE (ExpM expression) inf op ts args
        LamE {expInfo = inf, expFun = f} -> do
@@ -216,6 +224,16 @@ typeInferLitE inf l = do
   checkLiteralType l
   return $ ExpTM $ TypeAnn literal_type (LitE inf l)
 
+typeInferUTupleE inf args = do
+  args' <- mapM typeInferExp args
+  
+  -- Determine tuple type
+  tenv <- getTypeEnv
+  let arg_types = map getExpType args'
+      arg_kinds = map (toBaseKind . typeKind tenv) arg_types
+      tuple_type = typeApp (UTupleT arg_kinds) arg_types
+  return $ ExpTM $ TypeAnn tuple_type (UTupleE inf args')
+
 typeInferAppE orig_expr inf op ty_args args = do
   let pos = getSourcePos inf
   ti_op <- typeInferExp op
@@ -226,7 +244,8 @@ typeInferAppE orig_expr inf op ty_args args = do
 
   -- Apply to other arguments
   ti_args <- mapM typeInferExp args
-  result_type <- computeAppliedType pos inst_type (map getExpType ti_args)
+  result_type <-
+    computeAppliedType pos inst_type (map getExpType ti_args)
   
   let new_exp = AppE inf ti_op ti_ty_args ti_args
   return $ ExpTM $ TypeAnn result_type new_exp
@@ -340,11 +359,11 @@ typeInferCaseE inf scr alts = do
   return $! ExpTM $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
 
 typeCheckAlternative :: SourcePos -> Type -> AltM -> TCM AltTM
-typeCheckAlternative pos scr_type (AltM (Alt { altConstructor = con
-                                             , altTyArgs = types
-                                             , altExTypes = ex_fields
-                                             , altParams = fields
-                                             , altBody = body})) = do
+typeCheckAlternative pos scr_type (AltM (DeCon { altConstructor = con
+                                               , altTyArgs = types
+                                               , altExTypes = ex_fields
+                                               , altParams = fields
+                                               , altBody = body})) = do
   -- Process arguments
   arg_vals <- mapM typeInferType types
 
@@ -377,7 +396,7 @@ typeCheckAlternative pos scr_type (AltM (Alt { altConstructor = con
       when (ret_type `typeMentionsAny` Set.fromList [v | TyPatTM v _ <- ex_fields']) $
         typeError "Existential type variable escapes"
 
-      let new_alt = Alt con arg_vals ex_fields' fields' ti_body
+      let new_alt = DeCon con arg_vals ex_fields' fields' ti_body
       return $ AltTM $ TypeAnn (getExpType ti_body) new_alt
   where
     check_number_of_fields atypes fs
@@ -389,6 +408,31 @@ typeCheckAlternative pos scr_type (AltM (Alt { altConstructor = con
     check_arg expected_rtype pat =
       let given_type = patMType pat
       in checkType pos expected_rtype given_type
+
+typeCheckAlternative pos scr_type (AltM (DeTuple { altParams = fields
+                                                 , altBody = body})) = do
+  -- Compute field kinds
+  field_types <- mapM (typeInferType . TypM . patMType) fields
+  let kinds = map getTypType field_types
+
+  -- All fields must have value or boxed type 
+  let valid_kind (VarT v) = v == valV || v == boxV
+      valid_kind _ = False
+  unless (all valid_kind kinds) $
+    typeError "typeCheckAlternative: Wrong kind in field of unboxed tuple"
+
+  -- Verify that the tuple type matches the scrutinee type
+  let tuple_type =
+        typeApp (UTupleT $ map toBaseKind kinds) (map patMType fields)
+  checkType pos scr_type tuple_type
+
+  -- Add fields to enironment
+  withMany assumePat fields $ \fields' -> do
+    -- Infer the body
+    ti_body <- typeInferExp body
+
+    let new_alt = DeTuple fields' ti_body
+    return $ AltTM $ TypeAnn (getExpType ti_body) new_alt
 
 bindParamTypes params m = foldr bind_param_type m params
   where
@@ -459,7 +503,7 @@ inferExpType id_supply tenv expression =
            fmap getExpType $ typeInferExp expression
 
     infer_alt (AltM alt) =
-      withMany assumeTyPat (altExTypes alt) $ \_ ->
+      withMany assumeTyPat (getAltExTypes alt) $ \_ ->
       withMany assumePat (altParams alt) $ \_ ->
       infer_exp $ altBody alt
 
@@ -478,3 +522,19 @@ inferAppType id_supply tenv op_type ty_args arg_types =
       ti_ty_args <- mapM typeInferType ty_args
       inst_type <- computeInstantiatedType noSourcePos op_type ti_ty_args
       computeAppliedType noSourcePos inst_type arg_types
+
+-- | Get the type described by a 'MonoCon'.
+monoConType :: EvalMonad m => MonoCon -> m Type
+monoConType mono_con =
+  liftTypeEvalM $
+  case mono_con
+  of MonoCon con ty_args ex_types -> do
+       op_type <- tcLookupDataCon con
+       let ex_args = [VarT a | a ::: _ <- ex_types]
+       (_, ret_type) <-
+         instantiateDataConTypeWithExistentials op_type (ty_args ++ ex_args)
+       return ret_type
+     MonoTuple field_types -> do
+       tenv <- getTypeEnv
+       let field_kinds = map (toBaseKind . typeKind tenv) field_types
+       return $ typeApp (UTupleT field_kinds) field_types

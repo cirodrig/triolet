@@ -38,7 +38,8 @@ typeMentions t target = search t
       | x == target = search dom
       | otherwise = search dom || search rng
     search (AnyT k) = search k
-    serach (IntT _) = False
+    search (IntT _) = False
+    search (UTupleT _) = False
 
 -- | Determine whether the type mentions a variable in the set.
 --   It's assumed that name shadowing does /not/ occur.  If a variable is
@@ -57,7 +58,8 @@ typeMentionsAny t target = search t
       | x `Set.member` target = search dom
       | otherwise = search dom || search rng
     search (AnyT k) = search k
-    serach (IntT _) = False
+    search (IntT _) = False
+    search (UTupleT _) = False
 
 -------------------------------------------------------------------------------
 
@@ -70,6 +72,7 @@ reduceToWhnf ty =
        case op_type
        of VarT op_var -> reduce_function_con op_var args
           LamT (v ::: dom) body -> reduce_lambda_fun v dom body args
+          UTupleT _ -> return ty
      _ -> return ty
   where
     -- If the operator is a type function, then evaluate it
@@ -127,6 +130,7 @@ cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
       compareTypes dom1 dom2 >&&> bindAndCompare a2 dom2 rng1 rng2
     cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
     cmp (IntT n1, IntT n2) = return $ n1 == n2
+    cmp (UTupleT a, UTupleT b) = return $ a == b
 
     -- Matching (\x. e1) with e2
     -- is the same as matching (\x. e1) with (\x. e2 x)
@@ -218,6 +222,10 @@ unify subst expected given = do
 
     match_unify (IntT n1) (IntT n2)
       | n1 == n2 = unified_by subst
+      | otherwise = no_unifier
+
+    match_unify (UTupleT x) (UTupleT y)
+      | x == y = unified_by subst
       | otherwise = no_unifier
 
     match_unify (LamT {}) _ = not_implemented

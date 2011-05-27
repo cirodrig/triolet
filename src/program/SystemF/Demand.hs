@@ -22,6 +22,7 @@ import Data.Maybe
 
 import Common.Error
 import Common.Identifier
+import SystemF.Syntax
 import Type.Environment
 import Type.Type
 import Type.Rename
@@ -118,7 +119,8 @@ data Specificity =
     Used              -- ^ Used in an unknown way.  This is the top value.
   | Inspected
     -- ^ Deconstructed by a case statement or read by 'copy'.
-  | Decond !Var [Type] [(Var, Type)] [Specificity]
+
+  | Decond !MonoCon [Specificity]
     -- ^ Deconstructed at a known constructor.
     --
     --   We save the type arguments and existential type parameters
@@ -132,35 +134,45 @@ data Specificity =
 instance Renameable Specificity where
   rename rn spc =
     case spc
-    of Decond con ty_args ex_types spcs ->
-         Decond con (rename rn ty_args) [(v, rename rn t) | (v, t) <- ex_types]
-         (rename rn spcs)
+    of Decond (MonoCon con ty_args ex_types) spcs ->
+         let mono_con =
+               MonoCon con (rename rn ty_args) [v ::: rename rn t | (v ::: t) <- ex_types]
+         in Decond mono_con (rename rn spcs)
+       
+       Decond (MonoTuple types) spcs ->
+         let types' = rename rn types
+         in Decond (MonoTuple types') (rename rn spcs)
        
        -- Other constructors don't mention variables
        _ -> spc
 
   freshen spc =
     case spc
-    of Decond con ty_args ex_types spcs -> do
+    of Decond (MonoCon con ty_args ex_types) spcs -> do
          -- Freshen the existential variables 
-         new_evars <- mapM newClonedVar $ map fst ex_types
+         new_evars <- mapM (newClonedVar . binderVar) ex_types
          let rn = renaming [(old_v, new_v)
-                           | ((old_v, _), new_v) <- zip ex_types new_evars]
-             ex_types' = [(new_v, k) | ((_, k), new_v) <- zip ex_types new_evars]
-         return $ Decond con ty_args ex_types' (rename rn spcs)
+                           | (old_v ::: _, new_v) <- zip ex_types new_evars]
+             ex_types' = [new_v ::: k | (_ ::: k, new_v) <- zip ex_types new_evars]
+         return $ Decond (MonoCon con ty_args ex_types') (rename rn spcs)
+
        -- Other constructors don't bind new variables
+       Decond (MonoTuple _) _ -> return spc
        _ -> return spc
 
   freeVariables spc =
     case spc
     of Used -> Set.empty
        Inspected -> Set.empty
-       Decond v tys ex_var_bindings spcs ->
-         let ex_vars = map fst ex_var_bindings
+       Decond (MonoCon v tys ex_var_bindings) spcs ->
+         let ex_vars = [v | v ::: _ <- ex_var_bindings]
+             ex_kinds = [k | _ ::: k <- ex_var_bindings]
              field_fvs = foldr Set.delete (freeVariables spcs) ex_vars
          in freeVariables tys `Set.union`
-            freeVariables (map snd ex_var_bindings) `Set.union`
+            freeVariables ex_kinds `Set.union`
             field_fvs
+       Decond (MonoTuple tys) spcs ->
+         freeVariables tys `Set.union` freeVariables spcs
        Unused -> Set.empty
 
 instance Dataflow Specificity where
@@ -168,12 +180,21 @@ instance Dataflow Specificity where
 
   joinPar Unused x = x
   joinPar x Unused = x
-  joinPar (Decond decon1 t1 e1 specs1) (Decond decon2 _ _ specs2) =
+  joinPar (Decond con1@(MonoCon decon1 _ _) specs1)
+          (Decond (MonoCon decon2 _ _) specs2) =
     if decon1 == decon2
     then if length specs1 /= length specs2
          then mismatchedSpecificityDeconstructors
-         else Decond decon1 t1 e1 $ zipWith joinPar specs1 specs2
+         else Decond con1 $ zipWith joinPar specs1 specs2
     else Inspected
+  joinPar (Decond con1@(MonoTuple _) specs1)
+          (Decond (MonoTuple _) specs2) =
+    if length specs1 /= length specs2
+    then mismatchedSpecificityDeconstructors
+    else Decond con1 $ zipWith joinPar specs1 specs2
+  joinPar (Decond _ _) (Decond _ _) =
+    -- This case indicates a type mismatch
+    internalError "Specificity.join: Type error detected"
   joinPar Inspected (Decond {}) = Inspected
   joinPar (Decond {}) Inspected = Inspected
   joinPar Inspected Inspected = Inspected
@@ -187,11 +208,15 @@ mismatchedSpecificityDeconstructors =
 
 showSpecificity :: Specificity -> String
 showSpecificity Unused = "0"
-showSpecificity (Decond c tys ty_args spcs) =
+showSpecificity (Decond mono_con spcs) =
   "D{" ++ showmv ++ concatMap showSpecificity spcs ++ "}"
   where
-    showmv | null tys && null ty_args = show c ++ ":"
-           | otherwise = "(" ++ show c ++ " ...):"
+    showmv =
+      case mono_con
+      of MonoCon c tys ty_args
+           | null tys && null ty_args -> show c ++ ":"
+           | otherwise -> "(" ++ show c ++ " ...):"
+         MonoTuple _ -> ""
 showSpecificity Inspected = "I"
 showSpecificity Used = "U"
 

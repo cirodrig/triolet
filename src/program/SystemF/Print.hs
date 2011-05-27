@@ -139,15 +139,23 @@ pprIf flags cond tr fa =
 
 
 pprAltFlags :: PrintFlags -> AltSF -> Doc
-pprAltFlags flags (AltSF (Alt { altConstructor = c
-                              , altTyArgs = ty_args
-                              , altParams = params
-                              , altBody = body
-                              })) =
+pprAltFlags flags (AltSF (DeCon { altConstructor = c
+                                , altTyArgs = ty_args
+                                , altParams = params
+                                , altBody = body
+                                })) =
   let ty_args_doc = map (text "@" <>) $ map pprTyp ty_args
       params_doc = [parens $ pprPatFlags flags p | p <- params]
       pattern = pprVar c <+> sep (ty_args_doc ++ params_doc)
       body_doc = pprExpFlagsPrec flags precOuter body 
+  in hang (pattern <> text ".") 2 body_doc
+
+pprAltFlags flags (AltSF (DeTuple { altParams = params
+                                  , altBody = body
+                                  })) =
+  let pattern =
+        parens $ sep $ punctuate (text ",") $ map (pprPatFlags flags) params
+      body_doc = pprExpFlagsPrec flags precOuter body         
   in hang (pattern <> text ".") 2 body_doc
 
 -- UTF-8 for lowercase lambda

@@ -155,6 +155,8 @@ instance Renameable (Exp Mem) where
          of Just v' -> VarE inf v'
             Nothing -> expression
        LitE {} -> expression
+       UTupleE inf fields ->
+         UTupleE inf (map (rename rn) fields)
        AppE inf op ts es ->
          AppE inf (rename rn op) (map (rename rn) ts) (map (rename rn) es)
        LamE inf f ->
@@ -201,6 +203,7 @@ instance Renameable (Exp Mem) where
     case expression
     of VarE _ v -> Set.singleton v
        LitE _ _ -> Set.empty
+       UTupleE _ es -> Set.unions $ map freeVariables es
        AppE _ op ty_args args -> Set.union (freeVariables op) $
                                  Set.union (freeVariables ty_args) $
                                  freeVariables args
@@ -228,46 +231,70 @@ instance Renameable (Exp Mem) where
 
 instance Renameable (Alt Mem) where
   rename rn (AltM alt) =
-    let ty_args = rename rn (altTyArgs alt)
-    in renameTyPatMs rn (altExTypes alt) $ \rn' ex_types ->
-       renamePatMs rn' (altParams alt) $ \rn'' params ->
-       AltM $ Alt { altConstructor = altConstructor alt
-                  , altTyArgs = ty_args
-                  , altExTypes = ex_types
-                  , altParams = params
-                  , altBody = rename rn'' $ altBody alt}
+    case alt
+    of DeCon con ty_args ex_types params body ->
+         let ty_args' = rename rn ty_args
+         in renameTyPatMs rn ex_types $ \rn' ex_types' ->
+            renamePatMs rn' params $ \rn'' params' ->
+            AltM $ DeCon { altConstructor = con
+                         , altTyArgs = ty_args'
+                         , altExTypes = ex_types'
+                         , altParams = params'
+                         , altBody = rename rn'' body}
+       DeTuple params body ->
+            renamePatMs rn params $ \rn' params' ->
+            AltM $ DeTuple { altParams = params'
+                           , altBody = rename rn' body}
+         
 
-  freshen (AltM alt) = do
-    (ex_types, ex_renaming) <- freshenTyPatMs $ altExTypes alt
-    renamePatMs ex_renaming (altParams alt) $ \ex_renaming' params -> do
-      (rn_params, param_renaming) <- freshenPatMs params
-      let renaming = param_renaming `mappend` ex_renaming'
-      let body = rename renaming $ altBody alt    
+  freshen (AltM alt) =
+    case alt
+    of DeCon con ty_args ex_types params body -> do
+         (ex_types', ex_renaming) <- freshenTyPatMs ex_types
+         renamePatMs ex_renaming params $ \ex_renaming' params' -> do
+           (rn_params, param_renaming) <- freshenPatMs params'
+           let renaming = param_renaming `mappend` ex_renaming'
+           let body' = rename renaming body
+           return $ AltM $ DeCon { altConstructor = con
+                                 , altTyArgs = ty_args
+                                 , altExTypes = ex_types'
+                                 , altParams = rn_params
+                                 , altBody = body'}
 
-      return $ AltM $ Alt { altConstructor = altConstructor alt
-                          , altTyArgs = altTyArgs alt
-                          , altExTypes = ex_types
-                          , altParams = rn_params
-                          , altBody = body}
+       DeTuple params body -> do
+           (rn_params, param_renaming) <- freshenPatMs params
+           let body' = rename param_renaming body
+           return $ AltM $ DeTuple { altParams = rn_params
+                                   , altBody = body'}
+         
 
   freeVariables (AltM alt) =
-    let ty_fv = Set.unions $ map freeVariables $ altTyArgs alt
-        typat_fv = Set.unions $
-                   map freeVariables [t | TyPatM (_ ::: t) <- altExTypes alt]
-        typat_vars = [v | TyPatM (v ::: _) <- altExTypes alt]
-          
-        -- Get free variables from patterns; remove existential variables
-        pat_fv1 = Set.unions $
-                  map (freeVariables . patMType) $ altParams alt
-        pat_fv = foldr Set.delete pat_fv1 typat_vars
+    case alt
+    of DeCon _ ty_args ex_types params body ->
+         let ty_fv = Set.unions $ map freeVariables ty_args
+             typat_fv = Set.unions $
+                        map freeVariables [t | TyPatM (_ ::: t) <- ex_types]
+             typat_vars = [v | TyPatM (v ::: _) <- ex_types]
 
-        pat_vars = mapMaybe patMVar $ altParams alt
+             -- Get free variables from patterns; remove existential variables
+             pat_fv1 = Set.unions $ map (freeVariables . patMType) params
+             pat_fv = foldr Set.delete pat_fv1 typat_vars
+
+             pat_vars = mapMaybe patMVar params
         
-        -- Get free variables from body;
-        -- remove existential variables and fields
-        body_fv = foldr Set.delete (freeVariables $ altBody alt)
-                  (typat_vars ++ pat_vars)
-    in ty_fv `Set.union` typat_fv `Set.union` pat_fv `Set.union` body_fv
+             -- Get free variables from body;
+             -- remove existential variables and fields
+             body_fv = foldr Set.delete (freeVariables body)
+                       (typat_vars ++ pat_vars)
+         in ty_fv `Set.union` typat_fv `Set.union` pat_fv `Set.union` body_fv
+       DeTuple params body ->
+         let pat_fv = Set.unions $ map (freeVariables . patMType) params
+             pat_vars = mapMaybe patMVar params
+
+             -- Get free variables from body;
+             -- remove existential variables and fields
+             body_fv = foldr Set.delete (freeVariables body) pat_vars
+         in pat_fv `Set.union` body_fv
 
 instance Renameable (Fun Mem) where
   rename rn (FunM fun) =
@@ -338,6 +365,9 @@ instance Substitutable (Exp Mem) where
               internalError "Exp Mem.substitute: type substituted for variable"
             Nothing -> return (ExpM expression)
        LitE {} -> return (ExpM expression)
+       UTupleE inf fields -> do
+         fields' <- mapM (substitute s) fields
+         return $ ExpM $ UTupleE inf fields
        AppE inf op ts es -> do
          op' <- substitute s op
          ts' <- mapM (substitute s) ts
@@ -366,16 +396,23 @@ instance Substitutable (Exp Mem) where
          return $ ExpM $ ExceptE inf ty
 
 instance Substitutable (Alt Mem) where
-  substitute s (AltM alt) = do
-    ty_args <- mapM (substitute s) $ altTyArgs alt
-    substituteTyPatMs s (altExTypes alt) $ \s' ex_types ->
-      substitutePatMs s' (altParams alt) $ \s'' params -> do
-        body <- substitute s'' $ altBody alt
-        return $ AltM $ Alt { altConstructor = altConstructor alt
-                            , altTyArgs = ty_args
-                            , altExTypes = ex_types
-                            , altParams = params
-                            , altBody = body}
+  substitute s (AltM alt) =
+    case alt
+    of DeCon con ty_args ex_types params body -> do
+         ty_args' <- mapM (substitute s) ty_args
+         substituteTyPatMs s ex_types $ \s' ex_types' ->
+           substitutePatMs s' params $ \s'' params' -> do
+             body' <- substitute s'' body
+             return $ AltM $ DeCon { altConstructor = con
+                                   , altTyArgs = ty_args'
+                                   , altExTypes = ex_types'
+                                   , altParams = params'
+                                   , altBody = body'}
+       DeTuple params body -> do
+         substitutePatMs s params $ \s' params' -> do
+           body' <- substitute s' body
+           return $ AltM $ DeTuple { altParams = params'
+                                   , altBody = body'}
 
 instance Substitutable (Fun Mem) where
   substitute s (FunM fun) =
@@ -426,6 +463,8 @@ freshenExp (ExpM expression) = ExpM <$>
   case expression
   of VarE inf v -> VarE inf <$> lookupVar v
      LitE _ _ -> return expression
+     UTupleE inf args ->
+       UTupleE inf <$> mapM freshenExp args
      AppE inf op ty_args args ->
        AppE inf <$>
        freshenExp op <*>
@@ -446,16 +485,23 @@ freshenExp (ExpM expression) = ExpM <$>
 
      ExceptE inf ty -> ExceptE inf <$> freshenType ty
 
-freshenAlt (AltM alt) = do
-  ty_args <- mapM freshenType $ altTyArgs alt
-  withMany freshenTyParam (altExTypes alt) $ \ex_types ->
-    withMany freshenParam (altParams alt) $ \params -> do
-      body <- freshenExp $ altBody alt
-      return $ AltM $ Alt { altConstructor = altConstructor alt
-                          , altTyArgs = ty_args
-                          , altExTypes = ex_types
-                          , altParams = params
-                          , altBody = body}
+freshenAlt (AltM alt) = 
+  case alt
+  of DeCon con ty_args ex_types params body -> do
+       ty_args' <- mapM freshenType ty_args
+       withMany freshenTyParam ex_types $ \ex_types' ->
+         withMany freshenParam params $ \params' -> do
+           body' <- freshenExp body
+           return $ AltM $ DeCon { altConstructor = con
+                                 , altTyArgs = ty_args'
+                                 , altExTypes = ex_types'
+                                 , altParams = params'
+                                 , altBody = body'}
+     DeTuple params body ->
+       withMany freshenParam params $ \params' -> do
+         body' <- freshenExp body
+         return $ AltM $ DeTuple { altParams = params'
+                                 , altBody = body'}
 
 freshenFun (FunM f) =
   withMany freshenTyParam (funTyParams f) $ \ty_params ->

@@ -54,6 +54,8 @@ pprExpPrec (ExpM expression) =
   case expression
   of VarE _ v -> hasAtomicPrec $ pprVar v
      LitE _ l -> hasAtomicPrec $ pprLit l
+     UTupleE _ es ->
+       hasAtomicPrec $ pprParenList (map pprExp es)
      AppE _ op ty_args args ->
        let op_doc = pprExpPrec op ?+ appPrec
            ty_args_doc = [pprTypePrec t ?+ outerPrec | TypM t <- ty_args]
@@ -77,14 +79,19 @@ pprExpPrec (ExpM expression) =
      ExceptE _ rt ->
        text "except" <+> pprType rt `hasPrec` stmtPrec
 
-pprAlt (AltM alt) =
-  let con_doc = pprVar $ altConstructor alt
-      args_doc = pprParenList [pprType t | TypM t <- altTyArgs alt]
-      ex_types_doc = map (parens . pprTyPat) $ altExTypes alt
-      params_doc = map (parens . pprPat) $ altParams alt
-      body_doc = pprExp $ altBody alt
+pprAlt (AltM (DeCon con ty_args ex_types params body)) =
+  let con_doc = pprVar con
+      args_doc = pprParenList [pprType t | TypM t <- ty_args]
+      ex_types_doc = map (parens . pprTyPat) ex_types
+      params_doc = map (parens . pprPat) params
+      body_doc = pprExp body
   in con_doc <+> sep (args_doc : ex_types_doc ++ params_doc) <> text "." $$
      nest 2 body_doc
+
+pprAlt (AltM (DeTuple params body)) =
+  let params_doc = pprParenList (map pprPat params)
+      body_doc = pprExp body
+  in params_doc <> text "." $$ nest 2 body_doc
 
 pprFun f = unparenthesized $ pprFunPrec f
 

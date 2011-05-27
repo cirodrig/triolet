@@ -15,6 +15,7 @@ System F code after representation inference.
 module Type.Environment
        (TypeEnvMonad(..),
         assumeBinder,
+        assumeBinders,
         EvalMonad(..),
         TypeEvalM(..),
         TypeEnv,
@@ -75,6 +76,9 @@ class Monad m => TypeEnvMonad m where
 
 assumeBinder :: TypeEnvMonad m => Binder -> m a -> m a
 assumeBinder (v ::: t) m = assume v t m
+
+assumeBinders :: TypeEnvMonad m => [Binder] -> m a -> m a
+assumeBinders bs m = foldr assumeBinder m bs
 
 -- | A monad supporting type-level computation
 class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m where
@@ -461,6 +465,7 @@ specToPureType ty =
                return $ AllT (x ::: dom') rng'
              AnyT _ -> pure ty
              IntT _ -> pure ty
+             UTupleT _ -> Nothing
 
 -- Every value is represented in boxed form, so they all have kind 'box'.
 -- Types that do not describe values (such as intindexT) can still have
@@ -531,6 +536,7 @@ specToMemType ty =
                LamT (x ::: specToMemType dom) (specToMemType body)
              AllT (x ::: dom) rng ->
                LamT (x ::: specToMemType dom) (specToMemType rng)
+             UTupleT ks -> UTupleT ks
 
 specToMemDataConType dcon_type =
   DataConType

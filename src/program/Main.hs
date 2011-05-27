@@ -21,7 +21,7 @@ import Parser.Driver
 import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
 import qualified Untyped.TypeInference as Untyped
--- import qualified SystemF.ArgumentFlattening as SystemF
+import qualified SystemF.ArgumentFlattening as SystemF
 import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
@@ -187,13 +187,19 @@ compilePyonToPyonAsm compile_flags path text = do
   repr_mod <- highLevelOptimizations True False repr_mod
   repr_mod <- highLevelOptimizations False False repr_mod
   repr_mod <- highLevelOptimizations False False repr_mod
+  repr_mod <- highLevelOptimizations False False repr_mod
+  putStrLn "After Simplifying"
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  repr_mod <- SystemF.flattenArguments repr_mod
+  repr_mod <- highLevelOptimizations False False repr_mod
   
-  -- debug rewriting
-  putStrLn "Before RW"
-  putStrLn "After RW"
+  putStrLn "After Flattening1"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
 
-  putStrLn "After DMD"
+  repr_mod <- SystemF.flattenLocals repr_mod
+  repr_mod <- highLevelOptimizations False False repr_mod
+
+  putStrLn "After Flattening2"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   SystemF.TypecheckMem.typeCheckModule repr_mod
   error "This stage of the compiler is not implemented"

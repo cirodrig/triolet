@@ -24,6 +24,8 @@ module SystemF.Syntax
      TypSF, PatSF, ExpSF, AltSF, FunSF,
      BaseExp(..),
      BaseAlt(..),
+     getAltExTypes,
+     MonoCon(..),
      BaseFun(..),
      Def(..), mkDef, mkWrapperDef,
      mapDefiniens,
@@ -150,6 +152,11 @@ data BaseExp s =
     { expInfo :: ExpInfo
     , expLit :: !Lit
     }
+    -- | An unboxed tuple expression
+  | UTupleE
+    { expInfo :: ExpInfo
+    , expArgs :: [Exp s]
+    }
     -- | Application
   | AppE
     { expInfo   :: ExpInfo
@@ -188,12 +195,33 @@ data BaseExp s =
     }
 
 data BaseAlt s =
-  Alt { altConstructor :: !Var
-      , altTyArgs      :: [Typ s]
-      , altExTypes     :: [TyPat s]
-      , altParams      :: [Pat s]
-      , altBody        :: Exp s
-      }
+    -- | Deconstruct a data constructor
+    DeCon { altConstructor :: !Var
+          , altTyArgs      :: [Typ s]
+          , altExTypes     :: [TyPat s]
+          , altParams      :: [Pat s]
+          , altBody        :: Exp s
+          }
+    -- | Deconstruct an unboxed tuple
+  | DeTuple { altParams :: [Pat s]
+            , altBody   :: Exp s
+            }
+
+getAltExTypes (DeCon {altExTypes = ts}) = ts
+getAltExTypes (DeTuple {}) = []
+
+isConAlt :: BaseAlt s -> Bool
+isConAlt (DeCon {}) = True
+isConAlt _ = False
+
+-- | A monomorphic data constructor.  A 'MonoCon' value specifies the type
+--   at which a pattern match occurs.
+data MonoCon =
+    -- | A constructor pattern match
+    MonoCon !Var [Type] [Binder]
+
+    -- | An unboxed tuple type pattern match
+  | MonoTuple [Type]
 
 instance HasSourcePos (BaseExp s) where
   getSourcePos e = getSourcePos (expInfo e)

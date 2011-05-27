@@ -1372,14 +1372,20 @@ pprExpS stream =
        text "unknown" <+> parens (pprType ty) $$
        nest 4 (braces $ pprExp exp)
 
-pprAltS (AltS alt) =
-  let con_doc = pprVar $ altConstructor alt
-      args_doc = pprParenList [pprType t | TypS t <- altTyArgs alt]
-      ex_types_doc = map (parens . pprTyPat . fromTyPatS) $ altExTypes alt
-      params_doc = map (parens . pprPat . fromPatS) $ altParams alt
-      body_doc = pprExpS $ altBody alt
+pprAltS (AltS (DeCon con ty_args ex_types params body)) =
+  let con_doc = pprVar con
+      args_doc = pprParenList [pprType t | TypS t <- ty_args]
+      ex_types_doc = map (parens . pprTyPat . fromTyPatS) ex_types
+      params_doc = map (parens . pprPat . fromPatS) params
+      body_doc = pprExpS body
   in con_doc <+> sep (args_doc : ex_types_doc ++ params_doc) <> text "." $$
      nest 2 body_doc
+
+pprAltS (AltS (DeTuple params body)) =
+  let params_doc =
+        parens $ sep $ punctuate (text ",") $ map (pprPat . fromPatS) params
+      body_doc = pprExpS body
+  in params_doc <> text "." $$ nest 2 body_doc
 
 -- | Given a stream and the type and repr of a stream element, get its shape.
 --
@@ -1532,7 +1538,7 @@ mapStream out_type out_repr transformer producer = transform producer
 interpretStreamAlt :: Type -> Type -> ExpM -> AltM -> AltS
 interpretStreamAlt shape_type elt_type repr (AltM alt) =
   let body = interpretStream2' shape_type elt_type repr $ altBody alt
-  in AltS $ Alt { altConstructor = altConstructor alt
+  in AltS $ DeCon { altConstructor = altConstructor alt
                 , altTyArgs = map (TypS . fromTypM) $ altTyArgs alt
                 , altExTypes = map TyPatS $ altExTypes alt
                 , altParams = map PatS $ altParams alt
@@ -1604,7 +1610,7 @@ encodeStream2 expected_shape stream = runMaybeT $ do
     
     encode_alt expected_shape (AltS alt) = do
       body <- MaybeT $ encodeStream2 expected_shape $ altBody alt
-      return $ AltM $ Alt { altConstructor = altConstructor alt
+      return $ AltM $ DeCon { altConstructor = altConstructor alt
                           , altTyArgs = map (TypM . fromTypS) $ altTyArgs alt
                           , altExTypes = map fromTyPatS $ altExTypes alt
                           , altParams = map fromPatS $ altParams alt
@@ -1824,7 +1830,7 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
        alts' <- forM alts $ \(AltS alt) -> do
          new_body <-
            translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr (altBody alt)
-         return $ AltM $ Alt { altConstructor = altConstructor alt
+         return $ AltM $ DeCon { altConstructor = altConstructor alt
                              , altTyArgs = 
                                  map (TypM . fromTypS) $ altTyArgs alt
                              , altExTypes = map fromTyPatS $ altExTypes alt

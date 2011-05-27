@@ -59,12 +59,12 @@ evExp expression =
                                     return $ CaseE info scr' alts'
      Untyped.TIRecExp e -> return e
 
-evAlt (Untyped.TIAlt (Alt c ty_params ex_types params body)) = do
+evAlt (Untyped.TIAlt (DeCon c ty_params ex_types params body)) = do
   ty_params' <- mapM evTypSF ty_params
   ex_types' <- mapM evTyParam ex_types
   body' <- evExp body
   params' <- mapM evPat params
-  return $ AltSF $ Alt c ty_params' ex_types' params' body'
+  return $ AltSF $ DeCon c ty_params' ex_types' params' body'
 
 -- | Get the expression that was stored for a placeholder, and evaluate it
 getPlaceholderElaboration ph = do

@@ -30,6 +30,7 @@ import Text.PrettyPrint.HughesPJ
 import System.IO
 
 import Builtins.Builtins
+import SystemF.Build
 import SystemF.Demand
 import SystemF.DemandAnalysis
 import SystemF.EtaReduce
@@ -406,7 +407,7 @@ inlckConstructor ck tenv dmd expression =
        -- Test its fields.
        let field_demands =
              case specificity dmd
-             of Decond _ _ _ spcs -> map (Dmd (multiplicity dmd)) spcs
+             of Decond _ spcs -> map (Dmd (multiplicity dmd)) spcs
                 _ -> replicate (length args) $ Dmd (multiplicity dmd) Used
        in and $ zipWith (ck tenv) field_demands args
      Nothing -> False
@@ -492,7 +493,9 @@ betaReduce inf (FunM fun) ty_args args
       foldr bind_parameter body $ zip params args
     
     bind_parameter (MemWildP {}, _) body = body
-    bind_parameter (param, arg) body = ExpM $ LetE inf param arg body
+    bind_parameter (param, arg) body 
+      | multiplicity (patMDmd param) == Dead = body
+      | otherwise = ExpM $ LetE inf param arg body
 
 -------------------------------------------------------------------------------
 -- Local restructuring
@@ -631,6 +634,7 @@ rwExp expression = debug "rwExp" expression $ do
   case fromExpM ex1 of
     VarE inf v -> rwVar ex1 inf v
     LitE inf l -> rwExpReturn (ex1, Just $ LitValue inf l)
+    UTupleE inf args -> rwUTuple inf args
     AppE inf op ty_args args -> rwApp inf op ty_args args
     LamE inf fun -> do
       fun' <- rwFun fun
@@ -670,6 +674,13 @@ rwVar original_expression inf v = lookupKnownValue v >>= rewrite
     rewrite Nothing =
       -- Set up for copy propagation
       rwExpReturn (original_expression, Just $ VarValue inf v)
+
+rwUTuple inf args = do
+  (args', arg_values) <- mapAndUnzipM rwExp args
+  
+  let ret_value = tupleConValue inf arg_values
+      ret_exp = ExpM $ UTupleE inf args'
+  return (ret_exp, ret_value)
 
 rwApp :: ExpInfo -> ExpM -> [TypM] -> [ExpM] -> LR (ExpM, MaybeValue)
 rwApp inf op ty_args args =
@@ -825,12 +836,12 @@ copyStoredValue inf val_type repr arg = do
   let stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
       make_value = ExpM $ AppE inf stored_op [TypM val_type]
                    [ExpM $ VarE inf tmpvar]
-      alt = AltM $ Alt { altConstructor = pyonBuiltin the_stored
-                       , altTyArgs = [TypM val_type]
-                       , altExTypes = []
-                       , altParams = [setPatMDmd (Dmd OnceSafe Used) $
-                                      memVarP (tmpvar ::: val_type)]
-                       , altBody = make_value}
+      alt = AltM $ DeCon { altConstructor = pyonBuiltin the_stored
+                         , altTyArgs = [TypM val_type]
+                         , altExTypes = []
+                         , altParams = [setPatMDmd (Dmd OnceSafe Used) $
+                                        memVarP (tmpvar ::: val_type)]
+                         , altBody = make_value}
       new_expr = ExpM $ CaseE inf arg [alt]
   rwExp new_expr
 
@@ -899,8 +910,9 @@ rwCase inf scrut alts = do
 -- Special-case handling of the 'boxed' constructor.  This constructor cannot
 -- be eliminated.  Instead, its value is propagated, and we hope that the case
 -- statement becomes dead code.
-rwCase1 _ inf scrut alts 
-  | [alt] <- alts, is_boxed_deconstructor alt = do
+rwCase1 _ inf scrut alts
+  | [alt@(AltM (DeCon {altConstructor = con}))] <- alts,
+    con `isPyonBuiltin` the_boxed = do
       -- Rewrite the scrutinee
       (scrut', scrut_val) <- rwExp scrut
 
@@ -911,7 +923,7 @@ rwCase1 _ inf scrut alts
                _ -> Nothing
       let field_val =
             case scrut_val
-            of Just (ComplexValue _ (DataValue { dataCon = c
+            of Just (ComplexValue _ (DataValue { dataValueType = ConValueType c _ _
                                                , dataFields = [f]}))
                  | c `isPyonBuiltin` the_boxed -> f
                _ -> Nothing
@@ -920,9 +932,6 @@ rwCase1 _ inf scrut alts
 
       -- Rebuild a new case expression
       return (ExpM $ CaseE inf scrut' [alt'], Nothing)
-  where
-    is_boxed_deconstructor (AltM alt) =
-      altConstructor alt `isPyonBuiltin` the_boxed
 
 -- If this is a case of data constructor, we can unpack the case expression
 -- before processing the scrutinee.
@@ -952,7 +961,7 @@ rwCase1 tenv inf scrut alts = do
       rebuild_case scrut' arg_con arg_ex_types arg_values 
   where
     -- Given the value of the scrutinee, try to get the fields' values
-    unpack_scrut_val (Just (ComplexValue _ (DataValue _ con _ ex_ts vs))) =
+    unpack_scrut_val (Just (ComplexValue _ (DataValue _ (ConValueType con _ ex_ts) vs))) =
       (Just con, Just ex_ts, vs)
     
     unpack_scrut_val _ =
@@ -1003,7 +1012,7 @@ eliminateCaseWithExp :: TypeEnv
                      -> LR (ExpM, MaybeValue)
 eliminateCaseWithExp
   tenv dcon_type ex_args initializers (AltM alt)
-  | length (altExTypes alt) /= length ex_args =
+  | length (getAltExTypes alt) /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
       internalError "rwCase: Wrong number of fields"
@@ -1023,7 +1032,7 @@ eliminateCaseWithExp
     ex_type_subst =
       substitution [(v, ex_type)
                    | (TyPatM (v ::: _), TypM ex_type) <-
-                       zip (altExTypes alt) ex_args]
+                       zip (getAltExTypes alt) ex_args]
 
 eliminateCaseWithSimplifiedExp :: TypeEnv
                                -> DataConType
@@ -1033,7 +1042,7 @@ eliminateCaseWithSimplifiedExp :: TypeEnv
                                -> LR (ExpM, MaybeValue)
 eliminateCaseWithSimplifiedExp
   tenv dcon_type ex_args initializers (AltM alt)
-  | length (altExTypes alt) /= length ex_args =
+  | length (getAltExTypes alt) /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
       internalError "rwCase: Wrong number of fields"
@@ -1063,7 +1072,7 @@ eliminateCaseWithSimplifiedExp
     ex_type_subst =
       substitution [(v, ex_type)
                    | (TyPatM (v ::: _), TypM ex_type) <-
-                       zip (altExTypes alt) ex_args]
+                       zip (getAltExTypes alt) ex_args]
 
 newtype CaseElimBinding = CaseElimBinding (ExpM -> ExpM)
 
@@ -1079,17 +1088,7 @@ makeCaseInitializerBinding BareK param initializer = do
   where
     -- Write into a box, then read the box's contents
     write_box tmpvar = CaseElimBinding $ \body ->
-      let data_type = TypM $ patMType param
-          rhs = ExpM $ AppE defaultExpInfo boxed_op [data_type] [initializer]
-          alt = AltM $ Alt { altConstructor = boxed_con
-                           , altTyArgs = [data_type]
-                           , altExTypes = []
-                           , altParams = [param]
-                           , altBody = body}
-      in ExpM $ CaseE defaultExpInfo rhs [alt]
-      where
-        boxed_con = pyonBuiltin the_boxed
-        boxed_op = ExpM $ VarE defaultExpInfo boxed_con
+      letViaBoxed (patMVar' param ::: patMType param) initializer body
 
 makeCaseInitializerBinding _ param initializer = return let_binding
   where
@@ -1097,48 +1096,63 @@ makeCaseInitializerBinding _ param initializer = return let_binding
       ExpM $ LetE defaultExpInfo param initializer body
 
 rwAlt :: Maybe Var -> Maybe ([TypM], [MaybeValue]) -> AltM -> LR AltM
-rwAlt scr m_values (AltM (Alt con tyArgs exTypes params body)) = do
-  -- DEBUG: Print known values
-  -- liftIO $ print $ text "rwAlt" <+>
-  --                  maybe empty (vcat . map pprMaybeValue . snd) m_values
+rwAlt scr m_values (AltM alt) = 
+  case alt
+  of DeCon con tyArgs exTypes params body -> do
+       -- DEBUG: Print known values
+       -- liftIO $ print $ text "rwAlt" <+>
+       --                  maybe empty (vcat . map pprMaybeValue . snd) m_values
+       
+       -- If the scrutinee is a variable,
+       -- add its known value to the environment
+       tenv <- getTypeEnv
+       let ex_args = [v | TyPatM (v ::: _) <- exTypes]
+           arg_values = zipWith mk_arg values params
+           Just (data_type, dcon_type) = lookupDataConWithType con tenv
+           data_value =
+             patternValue defaultExpInfo tenv data_type dcon_type tyArgs ex_args arg_values
+           
+           assume_scrutinee m =
+             case scr
+             of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m
+                Nothing -> m
 
-  -- If we're going to record a known value for the scrutinee, 
-  -- convert wildcard to non-wildcard patterns.  This increases the
-  -- usefulness of recording known values.
-  labeled_params <-
-    if isJust scr
-    then mapM labelParameter params
-    else return params
+       assume_scrutinee $ assume_params exTypes (zip values params) $ do
+         (body', _) <- rwExp body
+         return $ AltM $ DeCon con tyArgs exTypes params body'
 
-  -- Get the known values of the fields.  If values are given for the fields,
-  -- the number of fields must match.  If there are existential variables,
-  -- we must rename them.
-  let values = 
-        case m_values
-        of Just (ex_args, given_values)
-             | length given_values /= length params ||
-               length ex_args /= length exTypes ->
-                 internalError "rwAlt"
-             | not $ null exTypes ->
-                 -- Not implemented.
-                 -- To implement this, we need to unify existential
-                 -- variable names appearing in the values with
-                 -- existential variable names appearing in the
-                 -- pattern.
-                 repeat Nothing
-             | otherwise ->
-                 given_values
-           _ -> repeat Nothing
-
-  assume_params (zip values labeled_params) $ do
-    (body', _) <- rwExp body
-    return $ AltM $ Alt con tyArgs exTypes labeled_params body'
+     DeTuple params body -> do
+       -- If the scrutinee is a variable, add its known value to the environment
+       let arg_values = zipWith mk_arg values params
+           data_value = tuplePatternValue defaultExpInfo arg_values
+           assume_scrutinee m =
+             case scr
+             of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m
+                Nothing -> m
+       assume_scrutinee $ assume_params [] (zip values params) $ do
+         (body', _) <- rwExp body
+         return $ AltM $ DeTuple params body'
   where
-    assume_params labeled_params m = do
+    -- Get the known values of the fields
+    values = 
+      case m_values
+      of Just (ex_args, given_values)
+           | not $ null ex_args ->
+               -- Not implemented.
+               -- To implement this, we need to unify existential
+               -- variable names appearing in the values with
+               -- existential variable names appearing in the
+               -- pattern.
+               repeat Nothing
+           | otherwise ->
+               given_values
+         _ -> repeat Nothing
+
+    -- Add existential types, paramters, and known values to the environment
+    assume_params ex_types params_and_values m = do
       tenv <- getTypeEnv
-      let with_known_value = assume_scrutinee tenv labeled_params m
-          with_params = assume_parameters labeled_params with_known_value
-          with_ty_params = foldr assumeTyPatM with_params exTypes
+      let with_params = assume_parameters params_and_values m
+          with_ty_params = foldr assumeTyPatM with_params ex_types
       with_ty_params
       
     assume_parameters labeled_params m = foldr assume_param m labeled_params
@@ -1147,30 +1161,19 @@ rwAlt scr m_values (AltM (Alt con tyArgs exTypes params body)) = do
     assume_param (maybe_value, param) m =
       assumePattern param $ withMaybeValue (patMVar' param) maybe_value m
     
-    -- If the scrutinee is a variable, add its known value to the environment.
-    -- It will be used if the variable is inspected again. 
-    assume_scrutinee tenv labeled_params m =
-      case scr
-      of Just scrutinee_var ->
-           let ex_args = [v | TyPatM (v ::: _) <- exTypes]
-               arg_values = map mk_arg labeled_params
-               Just (data_type, dcon_type) = lookupDataConWithType con tenv
-               data_value =
-                 patternValue defaultExpInfo tenv data_type dcon_type tyArgs ex_args arg_values
-           in withMaybeValue scrutinee_var data_value m
-         Nothing -> m
-      where
-        mk_arg (maybe_val, pat) =
-          case patMVar pat
-          of Just var ->
-               case maybe_val
-               of Just val -> Just (setTrivialValue var val)
-                  Nothing  -> Just (VarValue defaultExpInfo var)
-             Nothing ->
-               -- It would be safe to return Nothing here.
-               -- However, we tried to give every parameter a variable name,
-               -- so this shouldn't be Nothing.
-               internalError "rwAlt"
+    -- Create a KnownValue argument for a data field.  Use the previous known
+    -- value if available, or the variable that the field is bound to otherwise
+    mk_arg maybe_val pat =
+      case patMVar pat
+      of Just var ->
+           case maybe_val
+           of Just val -> Just (setTrivialValue var val)
+              Nothing  -> Just (VarValue defaultExpInfo var)
+         Nothing ->
+           -- It would be safe to return Nothing here.
+           -- However, we tried to give every parameter a variable name,
+           -- so this shouldn't be Nothing.
+           internalError "rwAlt"
 
 -- | Ensure that the parameter binds a variable.
 labelParameter param = 
