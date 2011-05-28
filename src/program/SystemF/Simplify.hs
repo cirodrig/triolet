@@ -786,7 +786,9 @@ rwCopyApp inf copy_op ty args = do
       | op `isPyonBuiltin` the_Stored ->
           case args
           of [repr, src] ->
-               copyStoredValue inf val_type repr src
+               copyStoredValue inf val_type repr src Nothing
+             [repr, src, dst] ->
+               copyStoredValue inf val_type repr src (Just dst)
              _ ->
                internalError "rwCopyApp: Unexpected number of arguments"
     _ -> do
@@ -827,11 +829,11 @@ rwCopyApp inf copy_op ty args = do
     copy_expression args _ = ExpM $ AppE inf copy_op [ty] args
       
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation
-copyStoredValue inf val_type repr arg = do
+copyStoredValue inf val_type repr arg m_dst = do
   tmpvar <- newAnonymousVar ObjectLevel
   let stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
       make_value = ExpM $ AppE inf stored_op [TypM val_type]
-                   [ExpM $ VarE inf tmpvar]
+                   ([ExpM $ VarE inf tmpvar] ++ maybeToList m_dst)
       alt = AltM $ DeCon { altConstructor = pyonBuiltin the_stored
                          , altTyArgs = [TypM val_type]
                          , altExTypes = []
