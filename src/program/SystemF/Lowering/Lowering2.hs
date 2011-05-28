@@ -47,37 +47,45 @@ withMany f xs k = go xs k
     go (x:xs) k = f x $ \y -> go xs $ \ys -> k (y:ys)
     go []     k = k []
 
+instance TypeEnvMonad (Gen Lower) where
+  getTypeEnv = lift getTypeEnv
+  assume v t m = liftT (assume v t) m
+
 -- | Called by 'assumeVar' and related functions.  If the type is a
 --   Repr dictionary passed as a boxed pointer or an IndexedInt passed as
 --   a value, record the dictionary in the environment.
 --   Otherwise don't change the environment.
-assumeSingletonValue :: ReturnType -> LL.Var -> Lower a -> Lower a
-assumeSingletonValue (repr ::: ty) bound_var m =
-  case repr
-  of BoxRT
-       | Just (con, [arg]) <- fromVarApp ty,
-         con `isPyonBuiltin` the_Repr ->
+assumeSingletonValue :: Type -> LL.Var -> Lower a -> Lower a
+assumeSingletonValue ty bound_var m =
+  case fromVarApp ty
+  of Just (con, [arg])
+       | con `isPyonBuiltin` the_Repr ->
            assumeReprDict arg (LL.VarV bound_var) m
-     ValRT
-       | Just (con, [arg]) <- fromVarApp ty,
-         con `isPyonBuiltin` the_IndexedInt ->
+       | con `isPyonBuiltin` the_IndexedInt ->
            assumeIndexedInt arg (LL.VarV bound_var) m
      _ -> m
 
-assumeVarG :: Var -> ReturnType -> (LL.Var -> GenLower a) -> GenLower a
-assumeVarG v return_type k = liftT1 (assumeVar v return_type) k
+assumeVarG :: Var -> Type -> (LL.Var -> GenLower a) -> GenLower a
+assumeVarG v ty k = liftT1 (assumeVar v ty) k
 
 -- | Create a lowered variable corresponding to the given variable, and
 --   add it to the environment so it can be looked up.
 --   If it's a Repr dictionary, add that to the environment also.
-assumeVar :: Var -> ReturnType -> (LL.Var -> Lower a) -> Lower a
+assumeVar :: Var -> Type -> (LL.Var -> Lower a) -> Lower a
 assumeVar v rt k = do
-  rtype <- lowerReturnType rt 
+  tenv <- getTypeEnv
+  rtype <- lowerType tenv rt 
   case rtype of
     Just t -> assumeVariableWithType v t $ \ll_var ->
       assumeSingletonValue rt ll_var (k ll_var)
     Nothing -> internalError "assumeVar: Unexpected representation"
 
+assumeTyParam :: TypeEnvMonad m => TyPatTM -> m a -> m a
+assumeTyParam (TyPatTM a kind) m = assume a (fromTypTM kind) m
+
+assumeTyParams ps m = foldr assumeTyParam m ps
+
+{-
 -- | Create a local, dynamically allocated variable for a let expression.
 --   The variable points to some uninitialized memory of the correct type for
 --   its size.
@@ -91,15 +99,7 @@ assumeLocalVar v v_size is_pointerless k =
     allocateHeapMemAs v_size is_pointerless ll_var
     x <- k ll_var
     deallocateHeapMem (LL.VarV ll_var)
-    return x
-
--- | Create an anonymous variable for a wildcard pattern. 
-assumeWildVar :: ReturnType -> (LL.Var -> Lower a) -> Lower a
-assumeWildVar rt k = do
-  rtype <- lowerReturnType rt 
-  case rtype of
-    Just ty -> LL.newAnonymousVar ty >>= k
-    Nothing -> internalError "assumeWildVar: Unexpected representation"
+    return x-}
 
 -- | Code can return a value, or \"return\" by producing a side effect
 data RetVal = RetVal !LL.Val | NoVal
@@ -124,11 +124,13 @@ retValToList (RetVal val) = [val]
 --   is returned.  All type arguments must be provided.
 compileConstructor :: Var -> DataConType -> [Type] -> GenLower RetVal
 compileConstructor con con_type ty_args = lift $ do
-  let (field_types, result_type) =
-        instantiateDataConTypeWithExistentials con_type ty_args
-  layout <- getAlgLayout result_type
+  (field_types, result_type) <-
+    instantiateDataConTypeWithExistentials con_type ty_args
+  tenv <- getTypeEnv
+  layout <- getAlgLayout tenv result_type
   fmap RetVal $ algebraicIntro layout con
 
+{-
 compileStore store_type value address = do
   layout <- lift $ getLayout (ValRT ::: store_type)
   dat <- lowerExpToVal value
@@ -150,16 +152,18 @@ compileLoad load_type address = do
   layout <- lift $ getLayout (ValRT ::: load_type)
   ptr <- lowerExpToVal address
   fmap RetVal $ loadValue layout ptr
+-}
 
-compileCase :: ReturnType       -- ^ Case statement result type
-            -> ReturnType       -- ^ Scrutinee type
-            -> LL.Val
-            -> [(Var, [RetVal] -> GenLower RetVal)]
+compileCase :: Type             -- ^ Case statement result type
+            -> Type             -- ^ Scrutinee type
+            -> LL.Val           -- ^ Scrutinee value
+            -> [(LayoutCon, [RetVal] -> GenLower RetVal)]
             -> GenLower RetVal
 compileCase result_type scrutinee_type scrutinee_val branches = do
-  layout <- lift $ getAlgLayout scrutinee_type
-  rtypes <- lift $ lowerReturnTypeList result_type
-  rparams <- lift $ mapM LL.newAnonymousVar rtypes
+  tenv <- lift getTypeEnv
+  layout <- lift $ getAlgLayout tenv scrutinee_type
+  rtypes <- lift $ lowerType tenv result_type
+  rparams <- lift $ mapM LL.newAnonymousVar (maybeToList rtypes)
   getContinuation True rparams $ \cont ->
     algebraicElim layout scrutinee_val $
     map (elim_branch rparams cont) branches
@@ -190,17 +194,10 @@ bindPatterns pats m = foldr (uncurry bindPattern) m pats
 bindPattern :: PatM -> RetVal -> GenLower a -> GenLower a
 bindPattern _ NoVal _ = internalError "bindPattern: Nothing to bind"
 
-bindPattern (MemVarP v (repr ::: ty) _) (RetVal value) m = do
-  assumeVarG v (paramReprToReturnRepr repr ::: ty) $ \ll_var -> do
+bindPattern (PatM (v ::: ty) _) (RetVal value) m = do
+  assumeVarG v ty $ \ll_var -> do
     bindAtom1 ll_var (LL.ValA [value])
     m
-
-bindPattern (MemWildP _) value m = m
-
--- | Lower a type that is passed as an argument to an expression.
---   In most cases, the type becomes a unit value.
-lowerTypeToVal :: TypTM -> GenLower LL.Val
-lowerTypeToVal _ = return $ LL.LitV LL.UnitL
 
 lowerExpToVal :: ExpTM -> GenLower LL.Val
 lowerExpToVal expression = do
@@ -209,31 +206,17 @@ lowerExpToVal expression = do
              NoVal -> internalError "lowerExpToVal"
 
 lowerExp :: ExpTM -> GenLower RetVal
-lowerExp (ExpTM (RTypeAnn return_type expression)) =
+lowerExp (ExpTM (TypeAnn ty expression)) =
   case expression
-  of VarE _ v -> lowerVar return_type v
-     LitE _ l -> lowerLit return_type l
-     
-     -- Special-case handling of load and store functions
-     AppE _ (ExpTM (RTypeAnn _ (VarE _ op))) ty_args args 
-       | op `isPyonBuiltin` the_store ->
-           case (ty_args, args)
-           of ([TypTM (RTypeAnn _ store_type)], [value, address]) ->
-                compileStore store_type value address
-              ([TypTM (RTypeAnn _ store_type)], [value]) ->
-                lift $ compileStoreFunction store_type value
-              _ -> internalError "lowerExp: Wrong number of arguments to store"
-       | op `isPyonBuiltin` the_load ->
-           case (ty_args, args)
-           of ([TypTM (RTypeAnn _ load_type)], [address]) ->
-                compileLoad load_type address
-              _ -> internalError "loadExp: Wrong number of arguments to load"
-     AppE _ op ty_args args -> lowerApp return_type op ty_args args
-     LamE _ f -> lift $ lowerLam return_type f
-     LetE _ binder rhs body -> lowerLet return_type binder rhs body
-     LetfunE _ defs body -> lowerLetrec return_type defs body
-     CaseE _ scr alts -> lowerCase return_type scr alts
-     ExceptE _ _ -> lowerExcept return_type
+  of VarE _ v -> lowerVar ty v
+     LitE _ l -> lowerLit ty l
+     UTupleE _ args -> lowerUTuple ty args
+     AppE _ op ty_args args -> lowerApp ty op ty_args args
+     LamE _ f -> lift $ lowerLam ty f
+     LetE _ binder rhs body -> lowerLet ty binder rhs body
+     LetfunE _ defs body -> lowerLetrec ty defs body
+     CaseE _ scr alts -> lowerCase ty scr alts
+     ExceptE _ _ -> lowerExcept ty
 
 lowerVar _ v =
   case LL.lowerIntrinsicOp v
@@ -262,30 +245,51 @@ lowerLit _ lit =
             | con `isPyonBuiltin` the_float ->
               return $ RetVal (LL.LitV $ LL.FloatL LL.pyonFloatSize n)
 
+-- | Lower arguments, then pack the result values into a record value
+lowerUTuple _ args = do
+  arg_values <- mapM lowerExpToVal args
+  let record_type = LL.constStaticRecord $
+                    map (LL.valueToFieldType . LL.valType) arg_values
+  tuple_val <- emitAtom1 (LL.RecordType record_type) $
+               LL.PackA record_type arg_values
+  return $ RetVal tuple_val
+
+-- | Lower an application term.
+--
+--   Data constructor applications are lowered using 'compileConstructor'.
+--   Function applications (with value arguments)
+--   are lowered to a function call.
+--
+--   Type applications are erased, so if there are  with no arguments are 
+lowerApp :: Type -> ExpTM -> [TypTM] -> [ExpTM] -> GenLower RetVal
 lowerApp rt op ty_args args = do
   tenv <- lift getTypeEnv
   
   -- The operator is either a function or a data constructor
   case op of
-    ExpTM (RTypeAnn _ (VarE _ op_var)) 
+    ExpTM (TypeAnn _ (VarE _ op_var)) 
       | Just op_data_con <- lookupDataCon op_var tenv ->
           lower_data_constructor tenv op_var op_data_con
-    _ -> lower_function tenv
+    _ | null args -> lowerExp op
+      | otherwise -> lower_function tenv
   where
     lower_data_constructor tenv op_var op_data_con = do
-      let argument_types = [t | TypTM (RTypeAnn _ t) <- ty_args]
+      let argument_types = [t | TypTM (TypeAnn _ t) <- ty_args]
       op'     <- compileConstructor op_var op_data_con argument_types
       args'   <- mapM lowerExpToVal args
-      returns <- lift $ lowerReturnTypeList rt
-      retvals <- emitAtom returns $ LL.closureCallA (fromRetVal op') args'
+      tenv    <- lift getTypeEnv
+      returns <- lift $ lowerType tenv rt
+      retvals <- emitAtom (maybeToList returns) $
+                 LL.closureCallA (fromRetVal op') args'
       return $ listToRetVal retvals
 
     lower_function tenv = do
       op'      <- lowerExpToVal op
-      ty_args' <- mapM lowerTypeToVal ty_args
       args'    <- mapM lowerExpToVal args
-      returns  <- lift $ lowerReturnTypeList rt
-      retvals  <- emitAtom returns $ LL.closureCallA op' (ty_args' ++ args')
+      tenv     <- lift getTypeEnv
+      returns  <- lift $ lowerType tenv rt
+      retvals  <- emitAtom (maybeToList returns) $
+                  LL.closureCallA op' args'
       return $ listToRetVal retvals
 
 lowerLam _ f = do
@@ -298,47 +302,29 @@ lowerLet _ binder rhs body =
        rhs_code <- lowerExp rhs
        bindPattern (fromPatTM binder) rhs_code $ lowerExp body
 
-     TypedLocalVarP v ty repr_dict -> do
-       -- Get the size of the local variable's data
-       dict_val <- lowerExpToVal repr_dict
-       local_size <- selectPassConvSize dict_val
-       local_pointerless <- selectPassConvIsPointerless dict_val
-       
-       -- Allocate local memory, then generate the rhs and body code
-       assumeLocalVar v local_size local_pointerless $ \ll_var -> do
-         -- The lowered RHS should not return anything
-         result <- lowerExp rhs
-         let debug_rhs_type = case rhs of ExpTM (RTypeAnn rtype _) -> rtype
-         case result of NoVal -> return ()
-                        _ -> internalError "lowerLet"
-         
-         -- If it's a dictionary variable, add it to the environment while
-         -- generating code of the body.
-         -- Force all body code to be generated here.
-         liftT (assumeSingletonValue (ReadRT ::: ty) ll_var) $
-           lowerExp body
-
-     TypedMemWildP {} ->
-       internalError "lowerLet"
-
 lowerLetrec _ defs body =
   lowerDefGroupG defs $ \defs' -> do
     emitLetrec defs'
     lowerExp body
 
 lowerCase return_type scr alts = do
-  let ExpTM (RTypeAnn scrutinee_type _) = scr
+  let ExpTM (TypeAnn scrutinee_type _) = scr
   scr_val <- lowerExpToVal scr
   compileCase return_type scrutinee_type scr_val (map lowerAlt alts)
 
-lowerAlt (AltTM (RTypeAnn return_type alt)) =
-  (altConstructor alt, lowerAltBody return_type alt)
+lowerAlt (AltTM (TypeAnn return_type alt)) =
+  let con =
+        case alt
+        of DeCon {altConstructor = con} -> VarCon con
+           DeTuple {} -> TupleCon
+  in (con, lowerAltBody return_type alt)
 
 lowerAltBody return_type alt field_values =
-  -- Type arguments are ignored
   -- Bind the field values and generate the body
   let params = map fromPatTM $ altParams alt
-  in bindPatterns (zip params field_values) $ lowerExp $ altBody alt
+  in assumeTyParams (getAltExTypes alt) $
+     bindPatterns (zip params field_values) $
+     lowerExp $ altBody alt
 
 lowerExcept return_type = do
   -- Call exit() and return a value, which is never used
@@ -346,25 +332,12 @@ lowerExcept return_type = do
   -- Fix it!
   -- emitAtom0 $ LL.primCallA (LL.VarV (LL.llBuiltin LL.the_prim_exit))
   --  [nativeIntV (-1)]
-  return_value
+  tenv <- lift getTypeEnv
+  lowered_type <- lift $ lowerType tenv return_type
+  case lowered_type of
+    Nothing -> return NoVal
+    Just vt -> fmap RetVal $ return_ll_value vt
   where
-    -- Create a value of the correct low-level type.  Since this code is dead,
-    -- the value is never used.
-    return_value =
-      case return_type
-      of ReadRT ::: _ -> fmap RetVal $
-                         return_ll_value (LL.PrimType LL.PointerType)
-         OutRT ::: _ -> fmap RetVal $
-                        return_ll_value (LL.PrimType LL.PointerType)
-         BoxRT ::: _ -> fmap RetVal $
-                        return_ll_value (LL.PrimType LL.OwnedType)
-         ValRT ::: rtype -> do
-           layout <- lift $ getLayout return_type
-           case layout of
-             ValLayout vtype -> fmap RetVal $ return_ll_value vtype
-             MemLayout _ -> internalError "lowerExcept"
-         SideEffectRT ::: _ -> return NoVal
-
     -- Return a value of the desired type.  The actual value is unimportant
     -- because we're generating dead code.
     return_ll_value (LL.PrimType pt) =
@@ -386,25 +359,14 @@ lowerExcept return_type = do
         to_value_type (LL.RecordField rt) = LL.RecordType rt
 
 lowerFun :: FunTM -> Lower LL.Fun
-lowerFun (FunTM (RTypeAnn _ fun)) =
-  withMany lower_type_param (funTyParams fun) $ \ty_params ->
+lowerFun (FunTM (TypeAnn _ fun)) =
+  assumeTyParams (funTyParams fun) $
   withMany lower_param (funParams fun) $ \params -> do
-    returns <- lowerReturnTypeList $ fromRetTM $ funReturn fun
-    genClosureFun (ty_params ++ params) returns $ lower_body (funBody fun)
+    tenv <- getTypeEnv
+    returns <- lowerType tenv $ fromTypTM $ funReturn fun
+    genClosureFun params (maybeToList returns) $ lower_body (funBody fun)
   where
-    -- Types are passed, but not used.  Lower them to the unit value.
-    lower_type_param (TyPatTM a kind) k = do
-      param_var <- LL.newAnonymousVar (LL.PrimType LL.UnitType)
-      assumeType a (fromTypTM kind) $ k param_var 
-      
-    lower_param (TypedMemVarP v (param_repr ::: ty)) k =
-      assumeVar v (paramReprToReturnRepr param_repr ::: ty) k
-
-    lower_param (TypedMemWildP (param_repr ::: ty)) k =
-      assumeWildVar (paramReprToReturnRepr param_repr ::: ty) k
-
-    lower_param (TypedLocalVarP {}) _ =
-      internalError "lowerFun: Unexpected local variable"
+    lower_param (TypedMemVarP (v ::: ty)) k = assumeVar v ty k
     
     lower_body body = do
       ret_val <- lowerExp body
@@ -428,7 +390,7 @@ lowerDefGroup defgroup k =
   where
     assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (Def v _ (FunTM (RTypeAnn return_type _))) k =
+    assume_variable (Def v _ (FunTM (TypeAnn return_type _))) k =
       assumeVar v return_type k
 
 lowerDefGroupG :: DefGroup (Def (Typed Mem))
@@ -441,15 +403,16 @@ lowerExport :: ModuleName
             -> Lower (LL.FunDef, (LL.Var, ExportSig))
 lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
   fun' <- lowerFun fun
-  fun_def <- case lang of CCall -> define_c_fun fun'
-  return (fun_def, (LL.definiendum fun_def, export_sig))
+  tenv <- getTypeEnv
+  fun_def <- case lang of CCall -> define_c_fun tenv fun'
+  return (fun_def, (LL.definiendum fun_def, export_sig tenv))
   where
-    fun_type = case fun of FunTM (RTypeAnn (BoxRT ::: fun_type) _) -> fun_type
-    export_sig = getCExportSig fun_type
+    fun_type = case fun of FunTM (TypeAnn fun_type _) -> fun_type
+    export_sig tenv = getCExportSig tenv fun_type
 
-    define_c_fun fun = do
+    define_c_fun tenv fun = do
       -- Generate marshalling code
-      wrapped_fun <- createCMarshalingFunction export_sig fun
+      wrapped_fun <- createCMarshalingFunction (export_sig tenv) fun
 
       -- Create function name.  Function is exported with the given name.
       let label = externPyonLabel module_name exported_name (Just exported_name)

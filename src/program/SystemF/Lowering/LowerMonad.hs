@@ -60,52 +60,55 @@ initializeLowerEnv :: IdentSupply Var
                    -> Map.Map Var LL.Var
                    -> IO LowerEnv
 initializeLowerEnv var_supply ll_var_supply type_env var_map = do
-  repr_env <- runFreshVarM var_supply $ mk_repr_env
+  repr_env <- runFreshVarM var_supply mkGlobalReprEnv
   let global_map = IntMap.fromList [(fromIdent $ varID v, v')
                                    | (v, v') <- Map.toList var_map]
       int_env = DictEnv.empty
   return $ LowerEnv var_supply ll_var_supply type_env int_env repr_env global_map
-  where
-    -- Populate the environment with globally defined Repr instances
-    mk_repr_env = do 
-      repr_dict <- DictEnv.pattern1 $ \arg ->
-        (varApp (pyonBuiltin the_Repr) [VarT arg], mk_repr_dict arg)
-      let int_dict =
-            mono_dict (VarT $ pyonBuiltin the_int) LL.the_bivar_repr_int
-      let float_dict =
-            mono_dict (VarT $ pyonBuiltin the_float) LL.the_bivar_repr_float
-      additive_dict <- DictEnv.pattern1 $ \arg ->
-        (varApp (pyonBuiltin the_AdditiveDict) [VarT arg],
-         mk_additive_dict arg)
-      multiplicative_dict <- DictEnv.pattern1 $ \arg ->
-        (varApp (pyonBuiltin the_MultiplicativeDict) [VarT arg],
-         mk_multiplicative_dict arg)
-      (tuple2_dict, tuple3_dict, tuple4_dict) <- do
-        v1 <- newAnonymousVar TypeLevel
-        v2 <- newAnonymousVar TypeLevel
-        v3 <- newAnonymousVar TypeLevel
-        v4 <- newAnonymousVar TypeLevel
-        let ty2 = varApp (pyonBuiltin the_PyonTuple2)
-                  [VarT v1, VarT v2]
-        let ty3 = varApp (pyonBuiltin the_PyonTuple3)
-                  [VarT v1, VarT v2, VarT v3]
-        let ty4 = varApp (pyonBuiltin the_PyonTuple4)
-                  [VarT v1, VarT v2, VarT v3, VarT v4]
-        return (DictEnv.pattern [v1, v2] ty2 (mk_tuple_dict [v1, v2]),
-                DictEnv.pattern [v1, v2, v3] ty3 (mk_tuple_dict [v1, v2, v3]),
-                DictEnv.pattern [v1, v2, v3, v4] ty4 (mk_tuple_dict [v1, v2, v3]))
-      return $ DictEnv.DictEnv [float_dict, int_dict, repr_dict,
-                                additive_dict, multiplicative_dict,
-                                tuple2_dict, tuple3_dict, tuple4_dict]
 
+-- | Create the global representation dictionary environment
+mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
+mkGlobalReprEnv = do
+  repr_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_Repr) [VarT arg], mk_repr_dict arg)
+  let int_dict =
+        mono_dict (VarT $ pyonBuiltin the_int) LL.the_bivar_repr_int
+  let float_dict =
+        mono_dict (VarT $ pyonBuiltin the_float) LL.the_bivar_repr_float
+  additive_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_AdditiveDict) [VarT arg],
+     mk_additive_dict arg)
+  multiplicative_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_MultiplicativeDict) [VarT arg],
+     mk_multiplicative_dict arg)
+  (tuple2_dict, tuple3_dict, tuple4_dict) <- do
+    v1 <- newAnonymousVar TypeLevel
+    v2 <- newAnonymousVar TypeLevel
+    v3 <- newAnonymousVar TypeLevel
+    v4 <- newAnonymousVar TypeLevel
+    let ty2 = varApp (pyonBuiltin the_PyonTuple2)
+              [VarT v1, VarT v2]
+    let ty3 = varApp (pyonBuiltin the_PyonTuple3)
+              [VarT v1, VarT v2, VarT v3]
+    let ty4 = varApp (pyonBuiltin the_PyonTuple4)
+              [VarT v1, VarT v2, VarT v3, VarT v4]
+    return (DictEnv.pattern [v1, v2] ty2 (mk_tuple_dict [v1, v2]),
+            DictEnv.pattern [v1, v2, v3] ty3 (mk_tuple_dict [v1, v2, v3]),
+            DictEnv.pattern [v1, v2, v3, v4] ty4 (mk_tuple_dict [v1, v2, v3]))
+  return $ DictEnv.DictEnv [float_dict, int_dict, repr_dict,
+                            additive_dict, multiplicative_dict,
+                            tuple2_dict, tuple3_dict, tuple4_dict]
+  where
     mono_dict ty val =
       DictEnv.monoPattern ty (return (LL.VarV $ LL.llBuiltin val))
 
     -- Need a (Repr a) to create a (Repr (AdditiveDict a))
-    mk_additive_dict arg = \subst -> undefined
+    mk_additive_dict arg = \subst ->
+      internalError "mkGlobalReprEnv: Not implemented for AdditiveDict"
 
     -- Need a (Repr a) to create a (Repr (MultiplicativeDict a))
-    mk_multiplicative_dict arg = \subst -> undefined
+    mk_multiplicative_dict arg = \subst ->
+      internalError "mkGlobalReprEnv: Not implemented for MultiplicativeDict"
 
     -- Get a representation dictionary for (Repr a)
     mk_repr_dict _ _ = return repr_Box_value
@@ -167,7 +170,9 @@ instance TypeEnvMonad Lower where
       update env =
         env {typeEnvironment = insertType v t $ typeEnvironment env}
 
-instance EvalMonad Lower
+instance EvalMonad Lower where
+  liftTypeEvalM m = Lower $ ReaderT $ \env ->
+    runTypeEvalM m (varSupply env) (typeEnvironment env)
 
 -- | Find the Repr dictionary for the given type, which should be a type
 --   variable.  Fail if not found.
@@ -230,9 +235,11 @@ assumeVariableWithType v ty k = do
         update env = env {varMap = IntMap.insert (fromIdent $ varID v) new_v $ 
                                    varMap env}
 
+{-
 -- | Add a type variable to the type environment
 assumeType :: Var -> Type -> Lower a -> Lower a
 assumeType v kind m
   | getLevel v /= TypeLevel = internalError "assumeType: Not a type variable"
   | getLevel kind /= KindLevel = internalError "assumeType: Not a kind"
   | otherwise = assume v kind m
+-}

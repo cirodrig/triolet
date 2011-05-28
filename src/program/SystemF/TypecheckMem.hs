@@ -10,7 +10,7 @@ module SystemF.TypecheckMem
         Fun(..),
         Pat(..),
         TyPat(..),
-        TypTM, ExpTM, AltTM, FunTM, PatTM,
+        TypTM, ExpTM, AltTM, FunTM, PatTM, TyPatTM,
         discardTypeAnnotationsExp,
         discardTypeAnnotationsFun,
         fromTypTM,

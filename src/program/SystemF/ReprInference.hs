@@ -152,16 +152,7 @@ stripReprConversions t = strip False t
     strip changed t =
       case fromVarApp t
       of Just (op, [arg])
-           | -- Type functions
-             op `isPyonBuiltin` the_BoxedType ||
-             op `isPyonBuiltin` the_BareType ||
-             -- Special constructor
-             op `isPyonBuiltin` the_Writer ||
-             -- Adapter type constructors
-             op `isPyonBuiltin` the_Boxed ||
-             op `isPyonBuiltin` the_StoredBox ||
-             op `isPyonBuiltin` the_Stored ->
-               strip True arg
+           | isAdapterCon op -> strip True arg
          _ -> if changed
               then stripReprConversions =<< reduceToWhnf t
               else return t
@@ -530,7 +521,7 @@ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
   | length g_tydom /= length e_tydom ||
     length g_dom /= length e_dom =
       internalError "functionCoercion: Mismached function types"
-  | null g_tydom && null g_dom =
+  | null g_dom =
       internalError "functionCoercion: Not a function type"
   | otherwise = Coercion $ \k given_e -> make_wrapper_function given_e >>= k
   where

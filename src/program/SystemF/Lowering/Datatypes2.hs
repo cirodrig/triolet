@@ -38,6 +38,7 @@ module SystemF.Lowering.Datatypes2
         lowerFunctionType,
 
         -- * Creating layouts
+        LayoutCon(..),
         Layout(ValLayout, MemLayout),
         getLayout,
         AlgLayout,
@@ -111,6 +112,13 @@ TODO: Describe semantics of values in Mem and LowLevel.  Describe the idea of
 wrappers/adapters.  Describe algebraic data types.
 -}
 
+-- | A data constructor used for selecting the correct layout for a member of 
+--   a sum type.  Tuple types have only one constructor, so no further
+--   information is required.  Other algebraic data types are annotated with
+--   a constructor name.
+data LayoutCon = VarCon !Var | TupleCon
+               deriving(Eq)
+
 -- | An algebraic sum type.
 data AlgSum a =
     -- | A sum type.  Each member of the sum has a unique tag.  Given a value,
@@ -154,7 +162,7 @@ type AlgValLayout = AlgSum ValProd
 -- | An algebraic product type
 data ValProd =
     ValProd
-    { valConstructors :: [Var]
+    { valConstructor :: !LayoutCon
       
       -- | The low-level type of this layout
     , valType        :: ValLayout
@@ -198,7 +206,7 @@ type AlgMemLayout = AlgSum MemProd
 -- | An algebraic product type
 data MemProd =
     MemProd
-    { memConstructors :: [Var]
+    { memConstructor :: !LayoutCon
       
       -- | The layout details of this product type
     , memLayout       :: MemLayout
@@ -234,6 +242,9 @@ data MemLayout =
 data AlgLayout = AlgMemLayout !AlgMemLayout | AlgValLayout !AlgValLayout
 
 data Layout = MemLayout !MemLayout | ValLayout !ValLayout
+
+fromValLayout (ValLayout vl) = vl
+fromValLayout _ = internalError "fromValLayout"
 
 -- | Get the low-level type used to pass this data type as a
 --   constructor parameter
@@ -293,16 +304,16 @@ enumValLayout :: [(Var, LL.Lit)] -> AlgValLayout
 enumValLayout members = Sum (map make_layout members) return
   where
     tag_type = LL.litType $ snd $ head members
-    make_layout (con, tag) = (tag, ValProd [con] ty [] writer reader)
+    make_layout (con, tag) = (tag, ValProd (VarCon con) ty [] writer reader)
       where
         writer [] = return (LL.LitV tag)
         reader _ = return []
         ty = LL.PrimType tag_type
 
 -- | The layout of a product value type
-productValLayout :: Var -> [ValLayout] -> AlgValLayout
+productValLayout :: LayoutCon -> [ValLayout] -> AlgValLayout
 productValLayout con fields =
-  One $ ValProd [con] ltype (map ValLayout fields) writer reader
+  One $ ValProd con ltype (map ValLayout fields) writer reader
   where
     num_fields = length fields
     record_type =
@@ -318,8 +329,8 @@ productValLayout con fields =
     ltype = LL.RecordType record_type
     
 -- | The layout of a type isomorphic to the unit type
-unitValLayout :: Var -> AlgValLayout
-unitValLayout con = One $ ValProd [con] unit_type [] writer reader
+unitValLayout :: LayoutCon -> AlgValLayout
+unitValLayout con = One $ ValProd con unit_type [] writer reader
   where
     writer [] = return (LL.LitV LL.UnitL)
     reader _ = return []
@@ -348,8 +359,8 @@ boxedLayout (One m) = One (boxedLayout' m)
 -- | Helper function for 'boxedLayout'.  Construct the layout of a boxed
 --   sum type.
 boxedLayout' :: MemProd -> ValProd
-boxedLayout' (MemProd cons layout fields writer reader) =
-  ValProd { valConstructors = cons
+boxedLayout' (MemProd con layout fields writer reader) =
+  ValProd { valConstructor = con
         , valType = LL.PrimType LL.OwnedType
         , valFields = fields
         , valWriter = new_writer
@@ -441,7 +452,7 @@ memRecordLayout mk_record =
 --   any possible value of the referent type.
 referenceLayout :: MemLayout -> MemProd
 referenceLayout layout =
-  MemProd [pyonBuiltin the_referenced] reference_layout [MemLayout layout]
+  MemProd (VarCon $ pyonBuiltin the_referenced) reference_layout [MemLayout layout]
   writer reader
   where
     writer _ [init] dst = do
@@ -497,9 +508,9 @@ arrayLayout count element =
     return (array_uint_size, elt_align, is_pointerless)
 
 -- | The layout of a product type.
-productMemLayout :: Var -> [Layout] -> MemProd
+productMemLayout :: LayoutCon -> [Layout] -> MemProd
 productMemLayout con fields =
-  MemProd [con] layout fields writer reader
+  MemProd con layout fields writer reader
   where
     layout = memRecordLayout $ do
       (field_types, pointerlesss) <- mapAndUnzipM layoutFieldType fields
@@ -663,11 +674,11 @@ lowerFunctionType ll_var_supply var_supply tenv ty = do
 --   If the data constructor takes parameters or
 --   a return pointer, then a lambda function is generated.
 algebraicIntro :: AlgLayout -> Var -> Lower LL.Val
-algebraicIntro (AlgMemLayout ml) con = algMemIntro ml con
-algebraicIntro (AlgValLayout vl) con = algValIntro vl con
+algebraicIntro (AlgMemLayout ml) con = algMemIntro ml (VarCon con)
+algebraicIntro (AlgValLayout vl) con = algValIntro vl (VarCon con)
 
 algMemIntro ml con =
-  case findMember ((con `elem`) . memConstructors) ml
+  case findMember ((con ==) . memConstructor) ml
   of Just mb -> algMemIntro' mb
      Nothing -> internalError "algebraicIntro: Constructor not found"
 
@@ -692,7 +703,7 @@ algMemIntro' (MemProd { memLayout = layout
   return $ LL.LamV fun
 
 algValIntro vl con =
-  case findMember ((con `elem`) . valConstructors) vl
+  case findMember ((con ==) . valConstructor) vl
   of Just mb -> algValIntro' mb
      Nothing -> internalError "algebraicIntro: Constructor not found"
 
@@ -725,15 +736,18 @@ algInitializers params fs = zipWith mk_init params fs
     mk_init param (ValLayout _) =
       ValInit (return $ LL.VarV param)
 
-type Branch = (Var, [LL.Val] -> GenLower LL.Stm)
+type Branch = (LayoutCon, [LL.Val] -> GenLower LL.Stm)
 type Branches = [Branch]
 
 -- | Generate the low-level translation of a case statement.
-algebraicElim :: AlgLayout -> LL.Val -> Branches -> GenLower LL.Stm
+algebraicElim :: AlgLayout      -- ^ Scrutinee layout
+              -> LL.Val         -- ^ Scrutinee
+              -> Branches       -- ^ Case alternatives
+              -> GenLower LL.Stm
 algebraicElim (AlgValLayout layout) scr branches =
-  eliminateSum valConstructors algValElim layout scr branches
+  eliminateSum valConstructor algValElim layout scr branches
 algebraicElim (AlgMemLayout layout) scr branches =
-  eliminateSum memConstructors algMemElim layout scr branches
+  eliminateSum memConstructor algMemElim layout scr branches
 
 eliminateSum get_ctors elim (Sum members get_tag) scr branches = do
   ret_types <- getReturnTypes
@@ -749,10 +763,10 @@ eliminateSum get_ctors elim (Sum members get_tag) scr branches = do
       of Just mb -> mb
          Nothing -> internalError "algebraicElim: Constructor not found"
       where
-        has_con (_, layout) = con `elem` get_ctors layout
+        has_con (_, layout) = con == get_ctors layout
 
 eliminateSum get_ctors elim (One member) scr [(con, branch)]
-  | con `elem` get_ctors member = elim member scr branch
+  | con == get_ctors member = elim member scr branch
   | otherwise = internalError "algebraicElim: Constructor not found"
 
 eliminateSum _ _ _ _ _ =
@@ -815,8 +829,8 @@ getValAlgLayout :: Type -> Lower AlgValLayout
 getValAlgLayout ty =
   case getLevel ty
   of TypeLevel ->
-       case fromVarApp ty
-       of Just (op, args)
+       case fromTypeApp ty
+       of (VarT op, args)
             | op `isPyonBuiltin` the_bool  -> return boolLayout
             | op `isPyonBuiltin` the_int   -> not_algebraic
             | op `isPyonBuiltin` the_float -> not_algebraic
@@ -825,6 +839,9 @@ getValAlgLayout ty =
                 case lookupDataTypeForLayout tenv ty of
                   Just inst_type -> getValDataTypeLayout inst_type
                   Nothing -> not_algebraic
+          (UTupleT kinds, args) -> do
+            arg_layouts <- mapM getLayout args
+            return $ productValLayout TupleCon (map fromValLayout arg_layouts)
           _ -> internalError "getAlgLayout: Head is not a type application"
      _ -> not_algebraic
   where
@@ -842,7 +859,7 @@ getValDataTypeLayout (tycon, ty_args, datacons)
 
   | is_unboxed, all_nullary_constructors, [datacon] <- datacons =
       -- Unit type
-      return $ unitValLayout (dataConCon datacon)
+      return $ unitValLayout (VarCon $ dataConCon datacon)
 
   | is_unboxed, all_nullary_constructors =
       -- Enumerative type
@@ -862,7 +879,7 @@ getValDataTypeLayout (tycon, ty_args, datacons)
               from_val (MemLayout _) =
                 internalError "getAlgLayout: Invalid field type"
 
-      return $ productValLayout (dataConCon datacon) fields'
+      return $ productValLayout (VarCon $ dataConCon datacon) fields'
 
   | is_unboxed =
       internalError "valDataTypeLayout: Cannot construct values of this type"
@@ -871,13 +888,13 @@ getValDataTypeLayout (tycon, ty_args, datacons)
       -- Boxed product type
       fields <- instantiateDataCon ty_args datacon
       return $ boxedObjectLayout $ nonSumMemLayout $
-        productMemLayout (dataConCon datacon) fields
+        productMemLayout (VarCon $ dataConCon datacon) fields
       
   | not is_unboxed = do
       -- Boxed SOP type
       members <- forM datacons $ \datacon -> do
         fields <- instantiateDataCon ty_args datacon
-        return $ productMemLayout (dataConCon datacon) fields
+        return $ productMemLayout (VarCon $ dataConCon datacon) fields
       
       let (_, tags) = dataTags datacons
       return $ boxedObjectLayout $ taggedSumMemLayout $ zip tags members
@@ -919,13 +936,13 @@ getRefDataTypeLayout (_, ty_args, datacons)
   | [datacon] <- datacons = do
       -- Singleton object.  It's a product with no tag.
       fields <- instantiateDataCon ty_args datacon
-      return $ nonSumMemLayout $ productMemLayout (dataConCon datacon) fields
+      return $ nonSumMemLayout $ productMemLayout (VarCon $ dataConCon datacon) fields
 
   | otherwise = do
       -- Sum of products type
       members <- forM datacons $ \datacon -> do
         fields <- instantiateDataCon ty_args datacon
-        return $ productMemLayout (dataConCon datacon) fields
+        return $ productMemLayout (VarCon $ dataConCon datacon) fields
       
       let (_, tags) = dataTags datacons
       return $ taggedSumMemLayout $ zip tags members
@@ -947,8 +964,8 @@ getValLayout :: Type -> Lower ValLayout
 getValLayout ty =
   case getLevel ty
   of TypeLevel ->
-       case fromVarApp ty
-       of Just (op, args)
+       case fromTypeApp ty
+       of (VarT op, args)
             | op `isPyonBuiltin` the_bool ->
                 return (LL.PrimType LL.BoolType)
             | op `isPyonBuiltin` the_int ->
@@ -967,6 +984,13 @@ getValLayout ty =
                          return $ discardValStructure alg_layout
                        _ -> internalError "getValLayout"
                   Nothing -> internalError "getValLayout: Unexpected type"
+          (UTupleT kinds, args) -> do
+            -- Create a record containing a field for each argument.
+            -- Since arguments always have value or boxed kind, they always 
+            -- have a value layout.
+            arg_layouts <- mapM getLayout args
+            return $ LL.RecordType $ LL.constStaticRecord $
+              map (LL.valueToFieldType . fromValLayout) arg_layouts
           _ -> internalError "getLayout: Head is not a type application"
      KindLevel -> return (LL.PrimType LL.UnitType)
 
@@ -1007,12 +1031,9 @@ instantiateDataCon ty_args data_con = do
     instantiateDataConTypeWithFreshVariables data_con ty_args
 
   -- Add existential variables to the environment
-  insert_ex_vars ex_vars $
+  assumeBinders ex_vars $
     -- Get layouts of fields
     mapM getLayout field_reprs
-  where
-    insert_ex_vars params m = foldr ins m params
-    ins (v ::: ty) m = assumeType v ty m
 
 -- | Given a list of data constructors, create a list of tags. 
 --   The tag data type is chosen based on how many data constructors there are.

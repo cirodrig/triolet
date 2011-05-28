@@ -37,11 +37,8 @@ import qualified SystemF.ReprInference as SystemF
 import qualified SystemF.SpecToMem as SystemF
 import qualified SystemF.Floating as SystemF
 import qualified SystemF.Simplify as SystemF
-{-
-import qualified SystemF.LoopRewrite as SystemF
+-- import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
-import qualified SystemF.OutputPassing as SystemF
--}
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
 import qualified LowLevel.RecordFlattening as LowLevel
@@ -176,34 +173,39 @@ compilePyonToPyonAsm compile_flags path text = do
   -- Convert to explicit memory representation
   -- tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
   
-  print ""
-  print "Generating memory IR"
   spec_mod <- SystemF.representationInference sf_mod
   let repr_mod = SystemF.convertSpecToMemTypes spec_mod
   
-  -- Check for bugs after each pass by type checking
+  putStrLn ""
+  putStrLn "Memory IR"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  
+  -- General-purpose, high-level optimizations
   repr_mod <- highLevelOptimizations True False repr_mod
   repr_mod <- highLevelOptimizations True False repr_mod
   repr_mod <- highLevelOptimizations False False repr_mod
   repr_mod <- highLevelOptimizations False False repr_mod
   repr_mod <- highLevelOptimizations False False repr_mod
+
+  putStrLn ""
   putStrLn "After Simplifying"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
   repr_mod <- highLevelOptimizations False False repr_mod
-  
-  putStrLn "After Flattening1"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
 
   repr_mod <- SystemF.flattenLocals repr_mod
+  -- Reconstruct demand information after flattening local variables,
+  -- so that the next optimizations can do more work
+  repr_mod <- SystemF.localDemandAnalysis repr_mod
+  repr_mod <- highLevelOptimizations False False repr_mod
   repr_mod <- highLevelOptimizations False False repr_mod
 
-  putStrLn "After Flattening2"
+  putStrLn "After Flattening"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
-  SystemF.TypecheckMem.typeCheckModule repr_mod
-  error "This stage of the compiler is not implemented"
-  {-
+  tc_repr_mod <- SystemF.TypecheckMem.typeCheckModule repr_mod
+  ll_mod <- SystemF.lowerModule tc_repr_mod
+  
+  {- This is the old optimization sequence
   print "Generating memory IR"
   mem_mod <- SystemF.generateMemoryIR tc_mod
   
@@ -253,7 +255,7 @@ compilePyonToPyonAsm compile_flags path text = do
         -- may expose more opportunities for flattening.
         mod <- iterateM (highLevelOptimizations False True) 4 mod
         return mod
-  
+
   mem_mod <- iterateM flatten_variables 3 mem_mod
 
   putStrLn "Optimized Memory"
@@ -263,13 +265,13 @@ compilePyonToPyonAsm compile_flags path text = do
   tc_mem_mod <- SystemF.TypecheckMem.typeCheckModule mem_mod
   --SystemF.inferSideEffects tc_mod
   ll_mod <- SystemF.lowerModule tc_mem_mod
+  -}
 
   putStrLn ""
   putStrLn "Lowered"
   print $ LowLevel.pprModule ll_mod
   
   return ll_mod
-  -}
 
 parsePyonAsm input_path input_text = do
   (mod_name, externs, ast) <- LLParser.parseFile input_path input_text

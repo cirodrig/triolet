@@ -73,10 +73,9 @@ typeKind tenv ty =
        case getLevel rng
        of TypeLevel -> boxT     -- Functions are always boxed
           KindLevel -> kindT
-     AllT (_ ::: _) rng ->
-       case getLevel rng
-       of TypeLevel -> boxT     -- Functions are always boxed
-          KindLevel -> internalError "typeKind: Unexpected type"
+     AllT (x ::: param_k) rng ->
+       -- Kind of 'forall' is the kind of its range
+       typeKind (insertType x param_k tenv) rng
      UTupleT ks -> funType (map fromBaseKind ks) valT
      _ -> internalError "typeKind: Unrecognized type"
 
@@ -120,12 +119,11 @@ typeCheckType ty =
                     _ -> internalError "typeCheckType: Unexpected type"
 
      AllT (v ::: dom) rng -> do
-       -- Check that domain and range are valid
+       -- Check that domain is valid
        typeCheckType dom
+       -- Add domain to environment
+       -- Return the range's kind
        assume v dom $ typeCheckType rng
-       return $! case getLevel rng
-                 of TypeLevel -> boxT
-                    _ -> internalError "typeCheckType: Unexpected type"
 
      AnyT k -> return k
      IntT _ -> return intindexT

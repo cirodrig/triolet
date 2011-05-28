@@ -117,6 +117,7 @@ instance HasLevel Var => HasLevel Type where
   getLevel (AllT _ rng) = getLevel rng
   getLevel (AnyT _) = TypeLevel
   getLevel (IntT _) = TypeLevel
+  getLevel (UTupleT _) = TypeLevel
 
 kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, posInftyT :: Type
 kindT = VarT kindV

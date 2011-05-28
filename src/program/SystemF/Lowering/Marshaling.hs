@@ -20,6 +20,8 @@ import LowLevel.Records
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Lowering.LowerMonad
+import Type.Environment
+import Type.Eval
 import Type.Type
 import Export
 
@@ -284,48 +286,52 @@ createCMarshallingFunction _ _ =
 --   All elements of the type are assumed to be in their natural 
 --   representation.  Code that looks at 'ExportSig's assumes this and
 --   may break otherwise.
-getCExportSig :: Type -> ExportSig
-getCExportSig ty =
-  case getFunctionExportType ty
+getCExportSig :: TypeEnv -> Type -> ExportSig
+getCExportSig tenv ty =
+  case getFunctionExportType tenv ty
   of (param_types, return_type) -> CExportSig param_types return_type
 
-getFunctionExportType ty =
+getFunctionExportType tenv ty =
   case fromFunType ty
   of (params, return) ->
        let param_types = mapMaybe get_param_export_type params
            return_type = get_return_export_type params return
        in (param_types, return_type)
   where
-    get_param_export_type (prepr ::: ty) =
-      case prepr
-      of ValPT _ -> Just $ getCExportType ty
-         BoxPT -> Just $ getCExportType ty
-         ReadPT -> Just $ getCExportType ty
-         OutPT -> Nothing
+    kind t = toBaseKind $ typeKind tenv t
+
+    get_param_export_type ty = 
+      case kind ty
+      of ValK  -> Just $ getCExportType tenv ty
+         BoxK  -> Just $ getCExportType tenv ty
+         BareK -> Just $ getCExportType tenv ty
+         OutK  -> Nothing
          _ -> internalError "getCExportSig: Unexpected type"
 
     -- If the function returns a value, then return that value
     -- If it returns by writing a pointer, then return the output object
-    get_return_export_type params (rrepr ::: ty) =
+    get_return_export_type params rtype =
       let return_type =
-            case rrepr
-            of ValRT -> Just $ getCExportType ty
-               BoxRT -> Just $ getCExportType ty
-               SideEffectRT -> Nothing
+            case kind rtype
+            of ValK -> Just $ getCExportType tenv rtype
+               BoxK -> Just $ getCExportType tenv rtype
+               SideEffectK -> Nothing
                _ -> internalError "getCExportSig: Unexpected type"
           param_type =
             if null params
             then Nothing
-            else case last params
-                 of OutPT ::: pty -> Just $ getCExportType pty
+            else case fromVarApp $ last params
+                 of Just (con, [arg])
+                      | con `isPyonBuiltin` the_OutPtr ->
+                          Just $ getCExportType tenv arg
                     _ -> Nothing
       in case (param_type, return_type)
          of (Just t, Nothing) -> t
             (Nothing, Just t) -> t
             _ -> internalError "getCExportSig: Unexpected type"
 
-getCExportType :: Type -> ExportDataType
-getCExportType ty =
+getCExportType :: TypeEnv -> Type -> ExportDataType
+getCExportType tenv ty =
   case fromVarApp ty
   of Just (con, args)
        | con `isPyonBuiltin` the_int -> PyonIntET
@@ -342,7 +348,7 @@ getCExportType ty =
            case args
            of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
      _ | FunT {} <- ty ->
-       case getFunctionExportType ty
+       case getFunctionExportType tenv ty
        of (param_types, return_type) -> FunctionET param_types return_type
      _ -> unsupported
   where

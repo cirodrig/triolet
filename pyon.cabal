@@ -102,8 +102,8 @@ Executable pyon
     SystemF.KnownValue
     --SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2
-    --SystemF.Lowering.Marshaling
-    --SystemF.Lowering.Lowering2
+    SystemF.Lowering.Marshaling
+    SystemF.Lowering.Lowering2
     SystemF.Lowering.LowerMonad
     SystemF.MemoryIR
     --SystemF.OutputPassing

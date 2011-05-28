@@ -42,6 +42,7 @@ module Type.Environment
         insertTypeFunction,
        
         -- * New conversion routines
+        isAdapterCon,
         specToPureTypeEnv,
         specToMemTypeEnv,
        )
@@ -416,6 +417,20 @@ convertToMemDataConType (DataConType params eparams args range con ty_con) =
 -}              
 -------------------------------------------------------------------------------
 
+-- | True if the variable is an adapter type constructor or function.
+--
+--   Adapter types are inserted to convert data between representations
+--   without changing the values.
+isAdapterCon :: Var -> Bool
+isAdapterCon v = v `elem` adapters
+  where
+    adapters = [pyonBuiltin the_Writer,
+                pyonBuiltin the_Stored,
+                pyonBuiltin the_StoredBox,
+                pyonBuiltin the_Boxed,
+                pyonBuiltin the_BoxedType,
+                pyonBuiltin the_BareType]
+
 specToPureTypeEnv :: TypeEnv -> TypeEnv
 specToPureTypeEnv (TypeEnv m) =
   TypeEnv (IntMap.mapMaybe specToPureTypeAssignment m)
@@ -444,10 +459,7 @@ specToPureType ty =
   case fromVarApp ty
   of Just (con, [arg])
        -- Adapter types are ignored in the pure representation. 
-       -- Remove applications of 'Writer', 'Stored', and 'Boxed'.
-       | con `isPyonBuiltin` the_Writer || 
-         con `isPyonBuiltin` the_Stored ||
-         con `isPyonBuiltin` the_Boxed ->
+       | isAdapterCon con ->
            specToPureType arg
        
      -- Recurse on other types
@@ -528,14 +540,12 @@ specToMemType ty =
           of VarT _ -> ty
              AppT op arg -> AppT (specToMemType op) (specToMemType arg)
              FunT arg ret -> FunT (specToMemType arg) (specToMemType ret)
-             AllT (x ::: dom) rng ->
-               AllT (x ::: specToMemType dom) (specToMemType rng)
              AnyT _ -> ty
              IntT _ -> ty
+             AllT (x ::: dom) rng ->
+               AllT (x ::: specToMemType dom) (specToMemType rng)
              LamT (x ::: dom) body ->
                LamT (x ::: specToMemType dom) (specToMemType body)
-             AllT (x ::: dom) rng ->
-               LamT (x ::: specToMemType dom) (specToMemType rng)
              UTupleT ks -> UTupleT ks
 
 specToMemDataConType dcon_type =
