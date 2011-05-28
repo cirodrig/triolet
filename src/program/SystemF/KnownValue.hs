@@ -304,22 +304,15 @@ patternValue :: ExpInfo
              -> [MaybeValue]       -- ^ Fields of the constructor
              -> MaybeValue
 patternValue inf tenv d_type dcon_type ty_args ex_vars val_args
-  | num_ty_args /= num_expected_ty_args =
+  | length ty_args /= length (dataConPatternParams dcon_type) =
       internalError "patternValue: Wrong number of type arguments"
-  | num_val_args /= num_expected_val_args =
+  | length ex_vars /= length (dataConPatternExTypes dcon_type) =
+      internalError "patternValue: Wrong number of existential types"
+  | length val_args /= length (dataConPatternArgs dcon_type) =
       internalError "patternValue: Wrong number of fields"
   | otherwise =
       Just $ dataConstructorValue inf dcon_type data_con_ty_args val_args
   where
-    num_val_args = length val_args
-    num_ty_args = length ty_args
-    
-    num_expected_val_args = length (dataConPatternArgs dcon_type)
-    
-    num_expected_ty_args =
-      length (dataConPatternParams dcon_type) +
-      length (dataConPatternExTypes dcon_type)
-
     data_con_ty_args = ty_args ++ [TypM (VarT v) | v <- ex_vars]
 
 tuplePatternValue :: ExpInfo
