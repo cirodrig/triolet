@@ -18,7 +18,7 @@ instance Lift Kind where
 pyonSourceTypes :: [String] 
 pyonSourceTypes =
   ["int", "float", "Complex", "bool", "NoneType", "iter", "list", "Any",
-   "Boxed", "shape"]
+   "shape"]
 
 -- | All predefined global functions recognized by the Pyon parser
 pyonSourceGlobals :: [String]
@@ -33,7 +33,6 @@ pyonSourceGlobals =
   , "range"
   , "len"
   , "histogram"
-  , "boxed"
   , "listiter"
   , "floor"
   , "__undefined__"

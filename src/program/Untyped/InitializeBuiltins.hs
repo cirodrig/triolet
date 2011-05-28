@@ -581,7 +581,7 @@ mkPassableClass = do
                     , clsInstances = [int_instance, float_instance,
                                       bool_instance, none_instance,
                                       complex_instance,
-                                      any_instance, boxed_instance,
+                                      any_instance,
                                       list_instance, iter_instance,
                                       tuple2_instance, tuple3_instance,
                                       tuple4_instance]
@@ -635,15 +635,6 @@ mkPassableClass = do
           , insCon = Just $ pyonBuiltin SystemF.the_repr_Complex
           , insMethods = []
           }
-  ; let boxed_instance =
-          Instance
-          { insQVars = [b]
-          , insConstraint = []
-          , insClass = cls
-          , insType = ConTy (tiBuiltin the_con_Boxed) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_Boxed
-          , insMethods = []
-          }        
   ; c <- newTyVar Star Nothing
   ; let tuple2_instance =
           Instance
@@ -788,12 +779,6 @@ mkFloorType =
   return $ monomorphic $
   functionType [ConTy $ tiBuiltin the_con_float] (ConTy $ tiBuiltin the_con_int)
 
-mkBoxedType =
-  forallType [Star] $ \[a] ->
-  let aT = ConTy a
-      ty = functionType [aT] (ConTy (tiBuiltin the_con_Boxed) @@ aT)
-  in ([], ty)
-
 mkUndefinedType =
   forallType [Star] $ \[a] -> ([], ConTy a)
 
@@ -889,7 +874,6 @@ initializeTIBuiltins = do
                [| pyonBuiltin SystemF.the_Stream |])
             , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
-            , ("Boxed", Star :-> Star, [| pyonBuiltin SystemF.the_Boxed |])
             , ("shape", (Star :-> Star) :-> Star,
                [| pyonBuiltin SystemF.the_shape |])
             ]
@@ -945,9 +929,6 @@ initializeTIBuiltins = do
               ),
               ("floor", [| mkFloorType |]
               , [| pyonBuiltin SystemF.the_floor |]
-              ),
-              ("boxed", [| mkBoxedType |]
-              , [| pyonBuiltin SystemF.the_boxed |]
               ),
               ("listiter", [| mkListIterType |]
               , [| pyonBuiltin SystemF.the_fun_asList_Stream |]
