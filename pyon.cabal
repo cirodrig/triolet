@@ -106,11 +106,9 @@ Executable pyon
     SystemF.Lowering.Lowering2
     SystemF.Lowering.LowerMonad
     SystemF.MemoryIR
-    --SystemF.OutputPassing
     SystemF.PartialEval
     SystemF.Print
     SystemF.PrintMemoryIR
-    --SystemF.Representation
     SystemF.ReprInference
     SystemF.Rename
     SystemF.ReprDict
