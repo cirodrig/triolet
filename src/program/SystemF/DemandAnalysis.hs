@@ -163,17 +163,11 @@ withTyPats (pat:pats) m = do
 withTyPats [] m = fmap ((,) []) m
 
 withParam :: PatM -> Df a -> Df (PatM, a)
-withParam pat m =
-  case pat
-  of MemWildP {} -> do
-       dfType $ patMType pat
-       x <- m
-       return (pat, x)
-     MemVarP {} -> do
-       dfType $ patMType pat
-       (x, dmd) <- getDemand (patMVar' pat) m
-       let new_pat = setPatMDmd dmd pat
-       return (new_pat, x)
+withParam pat m = do
+  dfType $ patMType pat
+  (x, dmd) <- getDemand (patMVar pat) m
+  let new_pat = setPatMDmd dmd pat
+  return (new_pat, x)
 
 withParams :: [PatM] -> Df a -> Df ([PatM], a)
 withParams (pat : pats) m = do
@@ -255,23 +249,16 @@ dmdAppE inf op ty_args args = do
            [v | (ExpM (VarE _ v), True) <- zip edc_args floated_params]
 
 dmdLetE spc inf binder rhs body = do
-  (body', demand) <- getDemand (patMVar' binder) $ dmdExp spc body
+  (body', demand) <- getDemand (patMVar binder) $ dmdExp spc body
   case multiplicity demand of
     Dead -> return body'        -- RHS is eliminated
     _ -> do
       -- Must also mask the RHS, since it could mention the local variable.
       -- Mentions in the RHS only define the variable; we don't count them 
       -- as uses.
-      rhs' <- maskDemand (patMVar' binder) $ dmdExp Used rhs
-      binder' <- elim_dead_code_in_binder
-      return $ ExpM $ LetE inf (setPatMDmd demand binder') rhs' body'
-  where
-    elim_dead_code_in_binder =
-      case binder
-      of MemVarP {} -> do
-           dfType $ patMType binder
-           return binder
-         MemWildP {} -> internalError "edcLetE"
+      rhs' <- maskDemand (patMVar binder) $ dmdExp Used rhs
+      dfType (patMType binder)
+      return $ ExpM $ LetE inf (setPatMDmd demand binder) rhs' body'
 
 dmdCaseE result_spc inf scrutinee alts = do
   -- Get demanded values in each alternative
@@ -288,8 +275,6 @@ dmdCaseE result_spc inf scrutinee alts = do
       -- Process the scrutinee
       scrutinee' <- dmdExp alts_spc scrutinee
       return $ ExpM $ CaseE inf scrutinee' alts'
-
-isDeadPattern pat = multiplicity (patMDmd pat) == Dead
 
 -- | Construct the specificity for a case scrutinee, based on how its value
 --   is bound by a case alternative

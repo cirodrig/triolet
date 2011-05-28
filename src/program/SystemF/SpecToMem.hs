@@ -43,8 +43,8 @@ convertTyParam (TyPatM (v ::: k)) =
   TyPatM (v ::: convertKind k)
 
 convertParam :: PatM -> PatM
-convertParam (MemVarP (v ::: t) _) =
-  memVarP (v ::: convertType t)
+convertParam (PatM (v ::: t) _) =
+  patM (v ::: convertType t)
 
 convertExp :: ExpM -> ExpM
 convertExp (ExpM expression) =

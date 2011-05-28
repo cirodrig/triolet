@@ -58,7 +58,6 @@ newtype instance Alt (Typed Mem) = AltTM (TypeAnn (BaseAlt TM))
 newtype instance Fun (Typed Mem) = FunTM (TypeAnn (BaseFun TM))
 
 data instance Pat (Typed Mem) = TypedMemVarP Binder
-                              | TypedMemWildP Type
 data instance TyPat (Typed Mem) = TyPatTM Var TypTM
 
 type TM = Typed Mem
@@ -88,8 +87,7 @@ fromTyPatTM :: TyPatTM -> TyPatM
 fromTyPatTM (TyPatTM v t) = TyPatM (v ::: fromTypTM t)
 
 fromPatTM :: PatTM -> PatM
-fromPatTM (TypedMemVarP binder) = memVarP binder
-fromPatTM (TypedMemWildP pt) = memWildP pt
+fromPatTM (TypedMemVarP binder) = patM binder
 
 -- | Determine the type that a pattern-bound variable has after it's been 
 --   bound.
@@ -150,26 +148,9 @@ functionType (FunM (Fun { funTyParams = ty_params
 -------------------------------------------------------------------------------
 
 assumePat :: PatM -> (PatTM -> TCM b) -> TCM b
-assumePat (MemVarP (v ::: ty) _) k =
+assumePat (PatM (v ::: ty) _) k =
   assume v ty $ k (TypedMemVarP (v ::: ty))
 
-assumePat (MemWildP ty) k = k (TypedMemWildP ty)
-
--- | Add pattern-bound variables from a let statement to the environment 
---   while processing the definition of the local value
-assumeDefiningLetPattern :: PatM -> TCM a -> TCM a
-assumeDefiningLetPattern (MemVarP {}) m = m -- Not visible during definition
-assumeDefiningLetPattern (MemWildP {}) _ =
-  internalError "assumeDefiningLetPattern: Unexpected wildcard"
-
--- | Add pattern-bound variables from a let statement to the environment 
---   while processing the use of the local value
-assumeUsingLetPattern :: PatM -> TCM a -> TCM a
-assumeUsingLetPattern pattern k =
-  case pattern
-  of MemVarP {}         -> assumePat pattern $ \_ -> k
-     MemWildP {}        -> internalError "assumeUsingLetPattern: Unexpected wildcard"
-     
 assumeTyPat :: TyPat Mem -> (TyPat TM -> TCM b) -> TCM b
 assumeTyPat (TyPatM (v ::: t)) k = do
   t' <- typeInferType (TypM t)
@@ -262,8 +243,6 @@ computeInstantiatedType inf op_type args = go op_type args
         Nothing -> typeError "Error in type application"
 
     go op_type [] = return op_type
-    
-    go _ _ = typeError "Operator has wrong representation"
 
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
@@ -281,8 +260,6 @@ computeAppliedType pos op_type arg_types =
         Nothing -> typeError $ "Error in application at " ++ show pos
     
     apply op_type [] = return op_type
-
-    apply _ _ = typeError "Operator has wrong representation"
 
 typeInferFun :: FunM -> TCM FunTM
 typeInferFun fun@(FunM (Fun { funInfo = info
@@ -314,21 +291,17 @@ typeInferFun fun@(FunM (Fun { funInfo = info
 
 typeInferLetE :: ExpInfo -> PatM -> ExpM -> ExpM -> TCM ExpTM
 typeInferLetE inf pat expression body = do
-  ti_pat <- type_infer_pattern pat
-  ti_exp <- assumeDefiningLetPattern pat $ typeInferExp expression
+  ti_exp <- typeInferExp expression
 
   -- Expression type must match pattern type
   checkType noSourcePos (getExpType ti_exp) (patType pat)
 
   -- Assume the pattern while inferring the body; result is the body's type
-  ti_body <- assumeUsingLetPattern pat $ typeInferExp body
-  let return_type = getExpType ti_body
-      new_exp = LetE inf ti_pat ti_exp ti_body
-  return $ ExpTM $ TypeAnn return_type new_exp
-  where
-    type_infer_pattern (MemVarP binder _) = return $ TypedMemVarP binder
-    type_infer_pattern (MemWildP pt) =
-      internalError "typeInferLetE: Unexpected wildcard"
+  assumePat pat $ \ti_pat -> do
+    ti_body <- typeInferExp body
+    let return_type = getExpType ti_body
+        new_exp = LetE inf ti_pat ti_exp ti_body
+    return $ ExpTM $ TypeAnn return_type new_exp
 
 typeInferLetfunE :: ExpInfo -> DefGroup (Def Mem) -> ExpM -> TCM ExpTM
 typeInferLetfunE inf defs body =
@@ -439,15 +412,11 @@ bindParamTypes params m = foldr bind_param_type m params
     bind_param_type (TypedMemVarP (param ::: param_ty)) m =
       assume param param_ty m
 
-    bind_param_type (TypedMemWildP _) m = m
-
 -- | Verify that the given parameter matches the expected parameter
 checkAltParam pos expected_type pattern = do 
   let given_type = patMType pattern
   checkType pos expected_type given_type
-  return $ case pattern
-           of MemVarP binder _ -> TypedMemVarP binder
-              MemWildP ptype -> TypedMemWildP ptype
+  return $ patMBinder pattern
 
 typeCheckDefGroup :: DefGroup (Def Mem) -> (DefGroup (Def TM) -> TCM b) -> TCM b
 typeCheckDefGroup defgroup k = 
@@ -492,7 +461,7 @@ inferExpType id_supply tenv expression =
       case fromExpM expression
       of LamE _ f -> return $ functionType f
          LetE _ pat e body ->
-           assumeUsingLetPattern pat $ infer_exp body
+           assumePat pat $ \_ -> infer_exp body
          LetfunE _ defs body ->
            assumeDefs defs $ infer_exp body
          CaseE _ _ (alt : _) ->

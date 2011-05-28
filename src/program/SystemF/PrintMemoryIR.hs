@@ -40,12 +40,8 @@ pprTyPat :: TyPat Mem -> Doc
 pprTyPat (TyPatM (v ::: t)) = pprVar v <+> text ":" <+> pprType t
 
 pprPat :: PatM -> Doc
-pprPat pat =
-  case pat
-  of MemVarP (v ::: pt) uses -> 
-       text (showDmd uses) <+> pprVar v <+> text ":" <+> pprType pt
-     MemWildP pt -> 
-       text "_" <+> text ":" <+> pprType pt
+pprPat (PatM (v ::: pt) uses) =
+  text (showDmd uses) <+> pprVar v <+> text ":" <+> pprType pt
 
 pprExp :: ExpM -> Doc
 pprExp e = unparenthesized $ pprExpPrec e

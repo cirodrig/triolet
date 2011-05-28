@@ -454,7 +454,7 @@ fromStoredCoercion ty = Coercion $ \k e -> do
   let alt = AltM $ DeCon { altConstructor = pyonBuiltin the_stored
                          , altTyArgs = [TypM ty]
                          , altExTypes = []
-                         , altParams = [memVarP (val_var ::: ty)]
+                         , altParams = [patM (val_var ::: ty)]
                          , altBody = expr}
       cas = ExpM $ CaseE defaultExpInfo e [alt]
   return (cas, x)
@@ -507,12 +507,12 @@ writeLocalCoercion ty = Coercion $ \k e -> do
       expr_alt = AltM $ DeCon { altConstructor = pyonBuiltin the_boxed
                               , altTyArgs = [TypM ty]
                               , altExTypes = []
-                              , altParams = [memVarP (read_var ::: ty)]
+                              , altParams = [patM (read_var ::: ty)]
                               , altBody = expr}
       body = ExpM $ CaseE defaultExpInfo
              (ExpM $ VarE defaultExpInfo boxed_var)
              [expr_alt]
-      pattern = memVarP (boxed_var ::: box_type)
+      pattern = patM (boxed_var ::: box_type)
       local_expr = ExpM $ LetE defaultExpInfo pattern rhs body
   return (local_expr, x)
   where
@@ -543,7 +543,7 @@ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
           
         -- Expected parameters will be passed as type arguments
         let type_args = [(VarT a, k) | a ::: k <- e_tydom]
-            value_args = [(ExpM $ VarE defaultExpInfo (patMVar' p),
+            value_args = [(ExpM $ VarE defaultExpInfo (patMVar p),
                            patMType p)
                          | p <- e_params]
 
@@ -565,7 +565,7 @@ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
     -- Define a pattern for a value parameter
     define_param ty k = do
       v <- newAnonymousVar ObjectLevel
-      assume v ty $ k (memVarP (v ::: ty))
+      assume v ty $ k (patM (v ::: ty))
 
 -- | Apply a coercion to an expression.
 coerceExp :: Coercion -> ExpM -> (ExpM -> RI (ExpM, a)) -> RI (ExpM, a)
@@ -876,12 +876,12 @@ reprTyPat (TyPatSF (v ::: kind)) k =
 reprLocalPat :: PatSF -> (PatM -> RI a) -> RI a
 reprLocalPat (VarP v t) k = do
   (t', _) <- cvtNormalizeLocalType t
-  assumeValueTypes v t t' $ k (memVarP (v ::: t'))
+  assumeValueTypes v t t' $ k (patM (v ::: t'))
 
 reprParam :: PatSF -> (PatM -> RI a) -> RI a
 reprParam (VarP v t) k = do
   (t', _) <- cvtNormalizeParamType t
-  assumeReprDict v t' $ assumeValueTypes v t t' $ k (memVarP (v ::: t'))
+  assumeReprDict v t' $ assumeValueTypes v t t' $ k (patM (v ::: t'))
 
 reprRet :: TypSF -> RI TypM
 reprRet (TypSF t) = fmap (TypM . fst) $ cvtNormalizeReturnType t
@@ -962,7 +962,7 @@ reprAlt return_type (AltSF alt) = do
       return $ AltM $ DeCon { altConstructor = altConstructor alt
                             , altTyArgs = map TypM ty_args
                             , altExTypes = map TyPatM ex_types
-                            , altParams = map memVarP params
+                            , altParams = map patM params
                             , altBody = co_body}
   where
     -- Convert a System F type to the expected type

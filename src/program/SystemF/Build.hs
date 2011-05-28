@@ -70,7 +70,7 @@ initLocalE ty mk_rhs mk_body = localE ty rhs mk_body
       let out_type = outType (fromTypM ty)
           rhs_fun = FunM $ Fun { funInfo = defaultExpInfo 
                                , funTyParams = []
-                               , funParams = [memVarP (tmpvar_rhs ::: out_type)]
+                               , funParams = [patM (tmpvar_rhs ::: out_type)]
                                , funReturn = TypM $ initEffectType out_type
                                , funBody = rhs_body}
       return $ ExpM $ LamE defaultExpInfo rhs_fun
@@ -97,16 +97,17 @@ localE' ty mk_rhs = do
 --
 --   TODO: Define localE in terms of this function.
 letViaBoxed :: Binder -> ExpM -> ExpM -> ExpM
-letViaBoxed (pat_var ::: ty) rhs body =
+letViaBoxed binder rhs body =
   let -- Apply the 'boxed' constructor to the RHS
-      boxed_rhs = ExpM $ AppE defaultExpInfo boxed_con [TypM ty] [rhs]
+      ty = TypM $ binderType binder
+      boxed_rhs = ExpM $ AppE defaultExpInfo boxed_con [ty] [rhs]
   
       -- Create a case statement that binds a temporary value for the body
       expr = ExpM $ CaseE defaultExpInfo boxed_rhs [alt]
       alt = AltM $ DeCon { altConstructor = pyonBuiltin the_boxed
-                         , altTyArgs = [TypM ty]
+                         , altTyArgs = [ty]
                          , altExTypes = []
-                         , altParams = [memVarP (pat_var ::: ty)]
+                         , altParams = [patM binder]
                          , altBody = body}
   in expr
   where
@@ -144,7 +145,7 @@ mkFun typaram_kinds mk_params mk_body = do
   param_vars <- mapM (const $ newAnonymousVar ObjectLevel) param_types
   body <- mk_body typaram_vars param_vars
   let typarams = [TyPatM (v ::: k) | (v, k) <- zip typaram_vars typaram_kinds]
-      params = [memVarP (v ::: t) | (v, t) <- zip param_vars param_types]
+      params = [patM (v ::: t) | (v, t) <- zip param_vars param_types]
   return $ FunM $ Fun defaultExpInfo typarams params (TypM return_type) body
   where
     mk_typaram_var :: forall a. a -> m Var
@@ -170,7 +171,7 @@ mkAlt lift_FreshVarM tenv con ty_args mk_body =
        
        let ex_params = [TyPatM (v ::: t)
                        | (v, _ ::: t) <- zip typat_vars ex_param_types]
-           patterns = [memVarP (v ::: ty)
+           patterns = [patM (v ::: ty)
                       | (v, ty) <- zip pat_vars param_types]
        return $ AltM $ DeCon con ty_args ex_params patterns body
      _ -> internalError "mkAlt"

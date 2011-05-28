@@ -791,10 +791,10 @@ rwParallelReduceStream inf
              return ws,
              varE worker_retvar]
           
-          let param1 = memVarP (count_var :::
+          let param1 = patM (count_var :::
                        varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
-              param2 = memVarP (base_var ::: intType)
-              param3 = memVarP (worker_retvar ::: outType (fromTypM elt))
+              param2 = patM (base_var ::: intType)
+              param3 = patM (worker_retvar ::: outType (fromTypM elt))
               worker_fn =
                 FunM $
                 Fun { funInfo = inf
@@ -844,10 +844,10 @@ rwParallelReduce1Stream inf
              return ws,
              varE worker_retvar]
           
-          let param1 = memVarP (count_var :::
+          let param1 = patM (count_var :::
                        varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
-              param2 = memVarP (base_var ::: intType)
-              param3 = memVarP (worker_retvar ::: outType (fromTypM elt))
+              param2 = patM (base_var ::: intType)
+              param3 = patM (worker_retvar ::: outType (fromTypM elt))
               worker_fn =
                 FunM $
                 Fun { funInfo = inf
@@ -939,10 +939,10 @@ rwParallelHistogramArray inf
       fn_body <- varAppE (pyonBuiltin the_histogramArray)
                  [TypM $ VarT (pyonBuiltin the_list_shape), size_ix]
                  [return size, return bs, varE retvar]
-      let param1 = memVarP (count_var :::
+      let param1 = patM (count_var :::
                             varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
-          param2 = memVarP (base_var ::: intType)
-          param3 = memVarP (retvar ::: outType array_type)
+          param2 = patM (base_var ::: intType)
+          param3 = patM (retvar ::: outType array_type)
           ret = TypM $ initEffectType array_type
       return $ ExpM $ LamE defaultExpInfo $ FunM $
         Fun { funInfo = inf
@@ -1195,7 +1195,7 @@ rwSafeSubscriptBody tenv inf elt_type elt_repr list ix ret =
         [return elt_repr, varE array, varE ix_var],
         ret])
       
-    return $ letE (memVarP (ix_var ::: intType)) ix subscript_expr
+    return $ letE (patM (ix_var ::: intType)) ix subscript_expr
 
 -------------------------------------------------------------------------------
 
@@ -1808,9 +1808,9 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
          acc_in_var <- newAnonymousVar ObjectLevel
          let m_producer_var = patMVar binder
          acc_out_var <- newAnonymousVar ObjectLevel
-         let params = [memVarP (acc_in_var ::: acc_ty),
+         let params = [patM (acc_in_var ::: acc_ty),
                        binder,
-                       memVarP (acc_out_var ::: outType acc_ty)]
+                       patM (acc_out_var ::: outType acc_ty)]
              retn = TypM $ initEffectType acc_ty
          let local_init = ExpM $ VarE defaultExpInfo acc_in_var
          let local_out = ExpM $ VarE defaultExpInfo acc_out_var

@@ -82,8 +82,8 @@ bindVariable :: TypeEnv -> Binder -> ExpM -> ExpM -> ExpM
 bindVariable tenv binder rhs body =
   case toBaseKind $ typeKind tenv (binderType binder)
   of BareK -> letViaBoxed binder rhs body
-     ValK  -> ExpM $ LetE defaultExpInfo (memVarP binder) rhs body
-     BoxK  -> ExpM $ LetE defaultExpInfo (memVarP binder) rhs body
+     ValK  -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
+     BoxK  -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
 
 -------------------------------------------------------------------------------
 -- * The argument flattening monad
@@ -139,11 +139,7 @@ assumeTyPats typats m = foldr assumeTyPat m typats
 
 assumePat :: (EvalMonad m, ReprDictMonad m) =>
              PatM -> m a -> m a
-assumePat pat@(MemVarP binder _) m =
-  trace ("assumePat " ++ show (pprPat pat)) $
-  assumeBinder binder $ saveReprDictPattern pat m
-
-assumePat (MemWildP _) m = m
+assumePat pat m = assumeBinder (patMBinder pat) $ saveReprDictPattern pat m
 
 assumePats :: (EvalMonad m, ReprDictMonad m) =>
               [PatM] -> m a -> m a
@@ -265,7 +261,7 @@ type FlatArgs = [FlatArg]
 
 pprFlatArg (FlatArg pat decomp) = hang (brackets (pprDecomp decomp)) 8 pat_doc
   where
-    pat_doc = pprVar (patMVar' pat) <+> text ":" <+> pprType (patMType pat)
+    pat_doc = pprVar (patMVar pat) <+> text ":" <+> pprType (patMType pat)
 
 isIdArg a = isIdDecomp (faTransformation a)
 
@@ -318,7 +314,7 @@ flattenedParameterValues :: FlatArgs -> ([TypM], [ExpM])
 flattenedParameterValues xs =
   case flattenedParameters xs
   of (tps, ps) -> ([TypM (VarT a) | TyPatM (a ::: _) <- tps],
-                   [ExpM $ VarE defaultExpInfo (patMVar' p) | p <- ps])
+                   [ExpM $ VarE defaultExpInfo (patMVar p) | p <- ps])
 
 -- | Get the flattened return type.  Only valid if
 --   @flattenedReturnsBySideEffect flat_ret == False@.
@@ -349,7 +345,7 @@ flattenedReturnValue flat_ret =
      Just es  -> ExpM $ UTupleE defaultExpInfo es
      Nothing -> internalError "flattenedReturnValue"
   where
-    var_exp pat = ExpM $ VarE defaultExpInfo (patMVar' pat)
+    var_exp pat = ExpM $ VarE defaultExpInfo (patMVar pat)
 
 -- | Given the variable bindings returned by 'flattenedReturnParameters', 
 --   and a flattened return value, bind the flattened return variables.
@@ -375,7 +371,7 @@ flattenParameter (FlatArg pat decomp) body =
   case decomp
   of IdDecomp -> body
      DeconDecomp mono_con fields ->
-       let pattern_exp = ExpM $ VarE defaultExpInfo (patMVar' pat)
+       let pattern_exp = ExpM $ VarE defaultExpInfo (patMVar pat)
            body' = flattenParameters fields body
            alt = altFromMonoCon mono_con (map faPattern fields) body'
        in ExpM $ CaseE defaultExpInfo pattern_exp [alt]
@@ -401,7 +397,7 @@ packParameterWrite (FlatArg pat flat_arg) = packParameterWrite' pat flat_arg
   
 packParameterWrite' pat flat_arg =
   case flat_arg
-  of IdDecomp -> copy_expr (patMType pat) (var_exp $ patMVar' pat)
+  of IdDecomp -> copy_expr (patMType pat) (var_exp $ patMVar pat)
      DeconDecomp (MonoCon con types ex_types) fields ->
        assumeBinders ex_types $ do
          exps <- packParametersWrite fields
@@ -446,7 +442,7 @@ packParameterRead :: (ReprDictMonad m, EvalMonad m) =>
 packParameterRead (FlatArg pat flat_arg) =
   case flat_arg
   of IdDecomp ->
-       return (var_exp $ patMVar' pat, id)
+       return (var_exp $ patMVar pat, id)
      DeconDecomp (MonoCon con types ex_types) fields ->
        assumeBinders ex_types $ do
          exps <- packParametersWrite fields
@@ -457,12 +453,12 @@ packParameterRead (FlatArg pat flat_arg) =
          -- If this is a bare type, define a local variable with the
          -- packed parameter.  Otherwise, just assign a local variable.
          tenv <- getTypeEnv
-         return (var_exp $ patMVar' pat,
+         return (var_exp $ patMVar pat,
                  bindVariable tenv (patMBinder pat) packed)
 
      DeadDecomp e ->
        -- Assign the expression to a temporary variable
-       return (var_exp $ patMVar' pat,
+       return (var_exp $ patMVar pat,
                \body -> ExpM $ LetE defaultExpInfo pat e body)
   where
     var_exp v = ExpM $ VarE defaultExpInfo v
@@ -745,7 +741,7 @@ planDeconstructedValue con ty_args maybe_fields = do
                  of Unused -> Dead
                     _ -> ManyUnsafe
           field_pattern = setPatMDmd (Dmd uses f_specificity) $
-                          memVarP (v ::: f_type)
+                          patM (v ::: f_type)
 
       -- Decide how to deconstruct
       f_plan <- planParameter field_pattern
@@ -835,7 +831,7 @@ flattenBoxedValue :: Var -> FlatLocal -> FlatLocal
 flattenBoxedValue boxed_var (FlatLocal arg) =
   let arg_type = patMType $ faPattern arg
       boxed_type = varApp (pyonBuiltin the_Boxed) [arg_type]
-      boxed_param = memVarP (boxed_var ::: boxed_type)
+      boxed_param = patM (boxed_var ::: boxed_type)
       
       boxed_mono_con = MonoCon (pyonBuiltin the_boxed) [arg_type] []
       boxed_decomp = DeconDecomp boxed_mono_con [arg]
@@ -1210,7 +1206,7 @@ type LF = AFMonad LocalVarEnv
 --   let-bindings.
 withUnpackedLocalVariable :: FlatLocal -> LF a -> LF a
 withUnpackedLocalVariable fl@(FlatLocal (FlatArg pat _)) m =
-  let var_id = fromIdent $ varID $ patMVar' pat
+  let var_id = fromIdent $ varID $ patMVar pat
       ins env = env {afOther = IntMap.insert var_id fl $ afOther env}
   in AF $ local ins $ unAF m
 

@@ -75,7 +75,7 @@ hrFun recurse (FunM f) =
 
 -- Eta-reduce a function that is suitable for eta reduction
 etaReduceFunction recurse f out_param params =
-  let mbody = etaReduceExp recurse (patMVar out_param) $ funBody f
+  let mbody = etaReduceExp recurse (Just $ patMVar out_param) $ funBody f
       ret_type = patMType out_param `FunT` fromTypM (funReturn f)
   in case mbody
      of Just body ->

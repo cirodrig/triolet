@@ -10,16 +10,16 @@ module SystemF.MemoryIR
         Mentions(..),
         Typ(..),
         TyPat(..),
-        Pat(MemVarP, MemWildP),
-        memVarP, memWildP,
+        Pat(PatM),
+        patM,
         patMVar,
-        patMVar',
         patMType,
         patMBinder,
         patMUses,
         setPatMUses,
         patMDmd,
         setPatMDmd,
+        isDeadPattern,
         Exp(..),
         Alt(..),
         Fun(..),
@@ -41,86 +41,25 @@ data Mem
 
 newtype instance Typ Mem = TypM {fromTypM :: Type}
 
+-- | A variable binding in a program.
+--   Bindings are annotated with demand information.
 data instance Pat Mem =
-    -- | A variable binding.  This binds a value or a pointer, depending on
-    --   the representation being used.
-    --
-    --   * ValPT Nothing: bind a value
-    --   * BoxPT, ReadPT, OutPT: bind a pointer
-    --   * WritePT: not permitted
-    MemVarP
-    { _patMBinder :: {-#UNPACK#-}!Binder
-    , _patMUses :: {-#UNPACK#-}!Dmd
-    }
+  PatM
+  { _patMBinder :: {-#UNPACK#-}!Binder
+  , _patMUses :: {-#UNPACK#-}!Dmd
+  }
 
-{-
-    -- | A local, dynamically allocated variable.  The dynamically allocated
-    --   memory exists as long as the variable is in scope.  The pattern takes
-    --   a representation dictionary for this type as a parameter.
-    --
-    --   This pattern may only appear as the binder of a let expression.
-  | LocalVarP 
-    { _patMVar :: Var
-    , _patMType :: Type
-    , _patMDict :: ExpM
-    , _patMUses :: {-#UNPACK#-}!Dmd
-    } -}
-    
-    -- | A wildcard pattern.  No variable is bound to this value.
-    --
-    -- This pattern may only appear in a function parameter or case 
-    -- alternative.  It may not appear in a let expression.
-  | MemWildP 
-    { _patMType :: Type
-    }
+patM :: Binder -> PatM
+patM binder = PatM binder unknownDmd
 
-memVarP :: Binder -> PatM
-memVarP binder = MemVarP binder unknownDmd
-
-memWildP :: Type -> PatM
-memWildP pt = MemWildP pt
-
-patMVar :: PatM -> Maybe Var
-patMVar (MemVarP (v ::: _) _) = Just v
-patMVar (MemWildP {}) = Nothing
-
-patMVar' :: PatM -> Var
-patMVar' p = case patMVar p of Just v -> v
+patMVar :: PatM -> Var
+patMVar (PatM (v ::: _) _) = v
 
 patMType :: PatM -> Type
-patMType (MemVarP {_patMBinder = _ ::: ty}) = ty
-patMType (MemWildP {_patMType = ty}) = ty
+patMType (PatM (_ ::: t) _) = t
 
 patMBinder :: PatM -> Binder
 patMBinder = _patMBinder
-
-{-
--- | Get the representation of the value bound to this pattern.
---   It's an error to call this on a 'LocalVarP'.
-patMRepr :: PatM -> ParamRepr
-patMRepr (MemVarP {_patMParamType = prepr ::: _}) = prepr
-patMRepr (LocalVarP {}) = internalError "patMRepr"
-patMRepr (MemWildP {_patMParamType = prepr ::: _}) = prepr
-
--- | Get the representation of the value bound to this pattern.
-patMParamType :: PatM -> Type
-patMParamType (MemVarP {_patMParamType = pt}) = pt
-patMParamType (MemWildP {_patMParamType = pt}) = pt
-patMParamType (LocalVarP {}) = internalError "patMParamType"
-
--- | Get the representation of the value bound by this pattern.
---   For let expressions, this is the representation seen in the body
---   of the expression, not the representation seen in the RHS.
-patMReturnRepr :: PatM -> ReturnRepr
-patMReturnRepr (MemVarP {_patMParamType = prepr ::: _}) =
-  paramReprToReturnRepr prepr
-patMReturnRepr (LocalVarP {}) = ReadRT
-patMReturnRepr (MemWildP {_patMParamType = prepr ::: _}) =
-  paramReprToReturnRepr prepr
-
-patMReturnType :: PatM -> ReturnType
-patMReturnType pat = patMReturnRepr pat ::: patMType pat
--}
 
 -- | For compatibility with old code, we can convert between mentions and
 --   demand types.
@@ -144,11 +83,14 @@ setPatMUses :: Mentions -> PatM -> PatM
 setPatMUses m pat = pat {_patMUses = mentionToDmd m}
 
 patMDmd :: PatM -> Dmd
-patMDmd (MemVarP {_patMUses = u}) = u
-patMDmd (MemWildP {}) = bottom
+patMDmd (PatM {_patMUses = u}) = u
 
 setPatMDmd :: Dmd -> PatM -> PatM
 setPatMDmd m pat = pat {_patMUses = m}
+
+-- | Return True if the pattern is marked as dead.
+isDeadPattern :: PatM -> Bool
+isDeadPattern pat = multiplicity (patMDmd pat) == Dead
 
 newtype instance TyPat Mem  = TyPatM Binder
 newtype instance Exp Mem = ExpM {fromExpM :: BaseExp Mem}

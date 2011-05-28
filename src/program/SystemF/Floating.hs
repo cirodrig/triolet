@@ -493,11 +493,11 @@ freshenContextExp (LetfunCtx inf defs) =
 ctxDefs :: ContextItem -> [Var]
 ctxDefs item =
   case ctxExp item
-  of LetCtx _ pat _ -> [patMVar' pat]
+  of LetCtx _ pat _ -> [patMVar pat]
      CaseCtx _ _ (MonoCon _ _ ty_params) params _ ->
-       map binderVar ty_params ++ mapMaybe patMVar params
+       map binderVar ty_params ++ map patMVar params
      CaseCtx _ _ (MonoTuple _) params _ ->
-       mapMaybe patMVar params
+       map patMVar params
      LetfunCtx _ defs -> map definiendum $ defGroupMembers defs
 
 -- | Extract the part of the context that satisfies the predicate, 
@@ -542,16 +542,16 @@ nubContext id_supply tenv ctx =
     nub_r types rn new_ctx (c:cs) =
       let rn_c = renameContextItem rn c -- Rename before inspecting
       in case ctxExp rn_c
-         of LetCtx _ pat@(MemVarP {}) rhs
+         of LetCtx _ pat rhs
               | isSingletonType (patMType pat) -> do
                   -- This context can be eliminated
                   -- Is there already a definition of this variable?
                   defined_var <- findByType id_supply tenv (patMType pat) types
                   case defined_var of
-                    Just v -> eliminate_item (patMVar' pat) v
+                    Just v -> eliminate_item (patMVar pat) v
                     Nothing ->
                       -- Not eliminated; add to context
-                      let types' = (patMType pat, patMVar' pat) : types
+                      let types' = (patMType pat, patMVar pat) : types
                           new_ctx' = rn_c : new_ctx
                       in nub_r types' rn new_ctx' cs
             _ ->
@@ -856,9 +856,7 @@ addLocalVars vs m = Flt $ \ctx ->
 --   add the dictionary to the environment.
 addPatternVar :: (EvalMonad m, ReprDictMonad m) => PatM -> m a -> m a
 addPatternVar pat m =
-  case pat
-  of MemVarP binder uses -> assumeBinder binder $ saveReprDictPattern pat m
-     MemWildP _          -> m
+  assumeBinder (patMBinder pat) $ saveReprDictPattern pat m
 
 {-
 -- | Rename the pattern and then add it to the environment.
@@ -956,7 +954,7 @@ createFlattenedApp float_initializers spc inf op_var ty_args args = do
     case floated_expr_type
     of Just ptype -> do
          floated_var <- newAnonymousVar ObjectLevel
-         float (LetCtx inf (memVarP (floated_var ::: ptype)) new_expr)
+         float (LetCtx inf (patM (floated_var ::: ptype)) new_expr)
          return (ExpM $ VarE inf floated_var)
        Nothing ->
          return new_expr
@@ -993,7 +991,7 @@ createFlattenedApp float_initializers spc inf op_var ty_args args = do
     flatten_mem_arg rtype arg_expr subcontext param_type spc = do
       tmpvar <- newAnonymousVar ObjectLevel
       let binder = setPatMDmd (Dmd ManyUnsafe spc) $
-                   memVarP (tmpvar ::: param_type)
+                   patM (tmpvar ::: param_type)
           binding = contextItem $ LetCtx inf binder arg_expr
       return (ExpM $ VarE inf tmpvar, rtype, binding : subcontext)
 
@@ -1059,8 +1057,8 @@ floatInExpDmd dmd (ExpM expression) =
        return (ExpM $ LamE inf f', functionType f')
      
      -- Special case: let x = lambda (...) becomes a letfun
-     LetE inf pat@(MemVarP {}) (ExpM (LamE _ f)) body ->
-       floatInExp $ ExpM $ LetfunE inf (NonRec (mkDef (patMVar' pat) f)) body
+     LetE inf pat (ExpM (LamE _ f)) body ->
+       floatInExp $ ExpM $ LetfunE inf (NonRec (mkDef (patMVar pat) f)) body
 
      LetE inf pat rhs body ->
        floatInLet dmd inf pat rhs body
@@ -1117,35 +1115,20 @@ floatInApp float_initializers dmd expression = do
 
       return (result, check)
 
-floatInLet dmd inf pat rhs body =
-  case pat
-  of MemVarP (pat_var ::: pat_type) pat_dmd -> do
-       -- Float the RHS
-       (rhs', _, rhs_context) <- floatInExpRhs pat_dmd rhs
-       if isSingletonType pat_type
-         then do
-           -- Float this binding.  Since the binding may be combined with
-           -- other bindings, set the uses to 'many'.
-           (rn_ctx, rn) <-
-             floatAndRename $ LetCtx inf (setPatMUses Many pat) $
-             applyContext rhs_context rhs'
+floatInLet dmd inf pat rhs body = do
+  -- Float the RHS
+  (rhs', _, rhs_context) <- floatInExpRhs (patMDmd pat) rhs
+  if isSingletonType (patMType pat)
+    then do
+      -- Float this binding.  Since the binding may be combined with
+      -- other bindings, set the uses to 'many'.
+      (rn_ctx, rn) <-
+        floatAndRename $ LetCtx inf (setPatMUses Many pat) $
+        applyContext rhs_context rhs'
 
-           -- Rename and continue processing the body
-           assumeContext rn_ctx $ floatInExpDmd dmd $ rename rn body
-         else unfloated_rhs rhs_context pat rhs'
-
-     {-LocalVarP pat_var pat_type pat_dict pat_dmd -> do
-       -- Float the dictionary argument
-       (pat_dict', _) <- floatInExp pat_dict
-       let pat' = LocalVarP pat_var pat_type pat_dict' dmd
-       (rhs', _, rhs_context) <-
-         assume pat_var (OutRT ::: pat_type) $
-         anchorOnVar' pat_var $
-         floatInExpRhs pat_dmd rhs
-
-       unfloated_rhs rhs_context pat' rhs'-}
-
-     MemWildP {} -> internalError "floatInLet"
+      -- Rename and continue processing the body
+      assumeContext rn_ctx $ floatInExpDmd dmd $ rename rn body
+    else unfloated_rhs rhs_context pat rhs'
   where
     -- The let-bound variable was not floated.  Process the body and rebuild
     -- a let expression.
@@ -1153,7 +1136,7 @@ floatInLet dmd inf pat rhs body =
       -- Float in the body of the let statement
       (body', body_type) <-
         addPatternVar new_pat $
-        anchorOnVar (patMVar' new_pat) $ floatInExpDmd dmd body
+        anchorOnVar (patMVar new_pat) $ floatInExpDmd dmd body
 
       -- Floated bindings from RHS are applied to the entire let-expression
       let new_expression = ExpM $ LetE inf new_pat new_rhs body'
@@ -1232,7 +1215,7 @@ floatInAlt (AltM alt) = do
   where
     local_vars =
       [v | TyPatM (v ::: _) <- getAltExTypes alt] ++
-      mapMaybe patMVar (altParams alt)
+      map patMVar (altParams alt)
 
 -- | What needs to be anchored when floating in a function definition.
 data FunAnchor =
@@ -1261,7 +1244,7 @@ floatInFun m_local_vars (FunM fun) = do
            anchorOnVars (param_vars ++ extra_local_vars) m
 
     param_vars = [v | TyPatM (v ::: _) <- funTyParams fun] ++
-                 mapMaybe patMVar (funParams fun)
+                 map patMVar (funParams fun)
 
 -- | Perform floating on a top-level function definition.
 --   No bindings are floated out of the function.

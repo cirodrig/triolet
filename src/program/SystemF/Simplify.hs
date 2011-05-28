@@ -164,10 +164,7 @@ withDefValues (Rec _)      m = m
 --   The pattern must not be a local variable pattern.
 assumePattern :: PatM -> LR a -> LR a
 assumePattern pat m =
-  saveReprDictPattern pat $ 
-  case patMVar pat of
-    Just v -> assume v (patMType pat) m
-    Nothing -> m
+  saveReprDictPattern pat $ assumeBinder (patMBinder pat) m
 
 assumePatterns :: [PatM] -> LR a -> LR a
 assumePatterns pats m = foldr assumePattern m pats
@@ -492,9 +489,8 @@ betaReduce inf (FunM fun) ty_args args
     bind_parameters params args body =
       foldr bind_parameter body $ zip params args
     
-    bind_parameter (MemWildP {}, _) body = body
     bind_parameter (param, arg) body 
-      | multiplicity (patMDmd param) == Dead = body
+      | isDeadPattern param = body
       | otherwise = ExpM $ LetE inf param arg body
 
 -------------------------------------------------------------------------------
@@ -599,7 +595,7 @@ flattenCaseExp inf scr alts = do
       -- original scrutinee expression.  Demand information can be
       -- reconstructed from the bindings in the case statement.
       let demand = Dmd OnceSafe (altListSpecificity alts)
-          binder = setPatMDmd demand $ memVarP (scr_var ::: scr_type)
+          binder = setPatMDmd demand $ patM (scr_var ::: scr_type)
       return (contextItem (LetCtx inf binder flattened_scr) : scr_ctx,
               ExpM $ VarE inf scr_var)
 
@@ -840,45 +836,41 @@ copyStoredValue inf val_type repr arg = do
                          , altTyArgs = [TypM val_type]
                          , altExTypes = []
                          , altParams = [setPatMDmd (Dmd OnceSafe Used) $
-                                        memVarP (tmpvar ::: val_type)]
+                                        patM (tmpvar ::: val_type)]
                          , altBody = make_value}
       new_expr = ExpM $ CaseE inf arg [alt]
   rwExp new_expr
 
-rwLet inf bind val body =       
-  case bind
-  of MemVarP (bind_var ::: bind_rtype) uses -> do
-       tenv <- getTypeEnv
-       case worthPreInlining tenv uses val of
-         Just val -> do
-           -- The variable is used exactly once; inline it.
-           (body', body_val) <-
-             assumePattern bind $ withKnownValue bind_var val $ rwExp body
-           let ret_val = mask_local_variable bind_var body_val
-           rwExpReturn (body', ret_val)
+rwLet inf bind@(PatM (bind_var ::: bind_rtype) _) val body = do
+  tenv <- getTypeEnv
+  case worthPreInlining tenv (patMDmd bind) val of
+    Just val -> do
+      -- The variable is used exactly once; inline it.
+      (body', body_val) <-
+        assumePattern bind $ withKnownValue bind_var val $ rwExp body
+      let ret_val = mask_local_variable bind_var body_val
+      rwExpReturn (body', ret_val)
 
-         Nothing -> do
-           (val', val_value) <- rwExp val
+    Nothing -> do
+      (val', val_value) <- rwExp val
 
-           -- If the RHS expression raises an exception, then the entire
-           -- let-expression raises an exception.
-           glom_exceptions (assumePattern bind) val' $ do
-             -- Inline the RHS expression, if desirable.  If
-             -- inlining is not indicated, then propagate its known
-             -- value.
-             let local_val_value =
-                   fmap (setTrivialValue bind_var) $ val_value
+      -- If the RHS expression raises an exception, then the entire
+      -- let-expression raises an exception.
+      glom_exceptions (assumePattern bind) val' $ do
+        -- Inline the RHS expression, if desirable.  If
+        -- inlining is not indicated, then propagate its known
+        -- value.
+        let local_val_value =
+              fmap (setTrivialValue bind_var) $ val_value
 
-             -- Add local variable to the environment and rewrite the body
-             (body', body_val) <-
-               assumePattern bind $
-               withMaybeValue bind_var local_val_value $
-               rwExp body
-       
-             let ret_val = mask_local_variable bind_var body_val
-             rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
-
-     MemWildP {} -> internalError "rwLet"
+        -- Add local variable to the environment and rewrite the body
+        (body', body_val) <-
+          assumePattern bind $
+          withMaybeValue bind_var local_val_value $
+          rwExp body
+    
+        let ret_val = mask_local_variable bind_var body_val
+        rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
   where
     -- The computed value for this let expression cannot mention the locally 
     -- defined variable.  If it's in the body's
@@ -1056,10 +1048,8 @@ eliminateCaseWithSimplifiedExp
           in sequence [makeCaseInitializerBinding k p i 
                       | (k, p, (i, _)) <- zip3 field_kinds params initializers]
 
-        let values = [(v, mv)
-                     | (p, (_, mv)) <- zip params initializers,
-                       isJust $ patMVar p,
-                       let Just v = patMVar p]
+        let values = [(patMVar p, mv)
+                     | (p, (_, mv)) <- zip params initializers]
 
         -- Add known values to the environment.  Simplify the body expression.
         (body', _) <-
@@ -1088,7 +1078,7 @@ makeCaseInitializerBinding BareK param initializer = do
   where
     -- Write into a box, then read the box's contents
     write_box tmpvar = CaseElimBinding $ \body ->
-      letViaBoxed (patMVar' param ::: patMType param) initializer body
+      letViaBoxed (patMBinder param) initializer body
 
 makeCaseInitializerBinding _ param initializer = return let_binding
   where
@@ -1159,29 +1149,14 @@ rwAlt scr m_values (AltM alt) =
     
     -- Add a parameter and its value to the environment
     assume_param (maybe_value, param) m =
-      assumePattern param $ withMaybeValue (patMVar' param) maybe_value m
+      assumePattern param $ withMaybeValue (patMVar param) maybe_value m
     
     -- Create a KnownValue argument for a data field.  Use the previous known
     -- value if available, or the variable that the field is bound to otherwise
     mk_arg maybe_val pat =
-      case patMVar pat
-      of Just var ->
-           case maybe_val
-           of Just val -> Just (setTrivialValue var val)
-              Nothing  -> Just (VarValue defaultExpInfo var)
-         Nothing ->
-           -- It would be safe to return Nothing here.
-           -- However, we tried to give every parameter a variable name,
-           -- so this shouldn't be Nothing.
-           internalError "rwAlt"
-
--- | Ensure that the parameter binds a variable.
-labelParameter param = 
-  case param
-  of MemVarP {} -> return param
-     MemWildP pty -> do
-       pvar <- newAnonymousVar ObjectLevel
-       return (memVarP (pvar ::: pty))
+      case maybe_val
+      of Just val -> Just (setTrivialValue (patMVar pat) val)
+         Nothing  -> Just (VarValue defaultExpInfo $ patMVar pat)
 
 rwFun :: FunM -> LR FunM
 rwFun (FunM f) =

@@ -60,12 +60,9 @@ renameTyPatMs = renameMany renameTyPatM
 -- | Apply a renaming to a pattern.  If necessary, rename the pattern
 --   variable to avoid name shadowing.
 renamePatM :: Renaming -> PatM -> (Renaming -> PatM -> a) -> a
-renamePatM rn pattern k =
-  case pattern
-  of MemVarP binding uses ->
-       renameBinding rn binding $ \rn' binding' ->
-       k rn' (MemVarP binding' (rename rn uses))
-     MemWildP ty -> k rn (MemWildP (rename rn ty))
+renamePatM rn (PatM binding uses) k =
+  renameBinding rn binding $ \rn' binding' ->
+  k rn' (PatM binding' (rename rn uses))
 
 renamePatMs :: Renaming -> [PatM] -> (Renaming -> [PatM] -> a) -> a
 renamePatMs = renameMany renamePatM
@@ -103,12 +100,9 @@ freshenPatMs pats = do
   (pats', assocs) <- mapAndUnzipM freshenPattern pats
   return (pats', renaming $ catMaybes assocs)
 
-freshenPattern (MemVarP (v ::: param_ty) uses) = do
+freshenPattern (PatM (v ::: param_ty) uses) = do
   v' <- newClonedVar v
-  return (MemVarP (v' ::: param_ty) uses, Just (v, v'))
-
-freshenPattern (MemWildP param_ty) =
-  return (MemWildP param_ty, Nothing)
+  return (PatM (v' ::: param_ty) uses, Just (v, v'))
 
 -- | Apply a substitution to a type pattern
 substituteTyPatM :: EvalMonad m =>
@@ -127,14 +121,8 @@ substituteTyPatMs = renameMany substituteTyPatM
 -- | Apply a substitution to a pattern
 substitutePatM :: EvalMonad m =>
                   Substitution -> PatM -> (Substitution -> PatM -> m a) -> m a
-substitutePatM s pattern k =
-  case pattern
-  of MemVarP binder uses ->
-       substituteBinding s binder $ \s' binder' ->
-       k s' (MemVarP binder' uses)
-     MemWildP ty -> do
-       ty' <- substitute s ty
-       k s (MemWildP ty')
+substitutePatM s (PatM binder uses) k =
+  substituteBinding s binder $ \s' binder' -> k s' (PatM binder' uses)
      
 substitutePatMs :: EvalMonad m =>
                   Substitution -> [PatM]
@@ -211,9 +199,7 @@ instance Renameable (Exp Mem) where
        LetE _ pat rhs body ->
          let ty_fv = freeVariables $ patMType pat
              rhs_fv = freeVariables rhs
-             body_fv = case patMVar pat 
-                       of Nothing -> freeVariables body
-                          Just v -> Set.delete v $ freeVariables body
+             body_fv = Set.delete (patMVar pat) $ freeVariables body
          in ty_fv `Set.union` rhs_fv `Set.union` body_fv
        LetfunE _ (NonRec def) body ->
          let body_fv = freeVariables body
@@ -280,7 +266,7 @@ instance Renameable (Alt Mem) where
              pat_fv1 = Set.unions $ map (freeVariables . patMType) params
              pat_fv = foldr Set.delete pat_fv1 typat_vars
 
-             pat_vars = mapMaybe patMVar params
+             pat_vars = map patMVar params
         
              -- Get free variables from body;
              -- remove existential variables and fields
@@ -289,7 +275,7 @@ instance Renameable (Alt Mem) where
          in ty_fv `Set.union` typat_fv `Set.union` pat_fv `Set.union` body_fv
        DeTuple params body ->
          let pat_fv = Set.unions $ map (freeVariables . patMType) params
-             pat_vars = mapMaybe patMVar params
+             pat_vars = map patMVar params
 
              -- Get free variables from body;
              -- remove existential variables and fields
@@ -331,7 +317,7 @@ instance Renameable (Fun Mem) where
                   map (freeVariables . patMType) $ funParams fun
         pat_fv = foldr Set.delete pat_fv1 typat_vars
 
-        pat_vars = mapMaybe patMVar $ funParams fun
+        pat_vars = map patMVar $ funParams fun
         
         -- Get free variables from body and return type;
         -- remove existential variables and fields
@@ -450,14 +436,10 @@ freshenTyParam (TyPatM (v ::: ty)) k = do
   ty' <- freshenType ty
   freshenVar v $ \v' -> k (TyPatM (v' ::: ty'))
 
-freshenParam (MemVarP (v ::: ty) dmd) k = do
+freshenParam (PatM (v ::: ty) dmd) k = do
   ty' <- freshenType ty
   dmd' <- freshenDmd dmd
-  freshenVar v $ \v' -> k (MemVarP (v' ::: ty') dmd')
-
-freshenParam (MemWildP ty) k = do
-  ty' <- freshenType ty
-  k (MemWildP ty')
+  freshenVar v $ \v' -> k (PatM (v' ::: ty') dmd')
 
 freshenExp (ExpM expression) = ExpM <$>
   case expression

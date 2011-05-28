@@ -141,8 +141,8 @@ saveIndexedInt dict_type dict_exp m =
 --   in the environment so it can be looked up later.
 saveReprDictPattern :: ReprDictMonad m => PatM -> m a -> m a
 saveReprDictPattern pattern m =
-  case pattern
-  of MemVarP (pat_var ::: ty) _
+  case patMBinder pattern
+  of pat_var ::: ty
        | Just repr_type <- get_repr_type ty ->
            saveReprDict repr_type (ExpM $ VarE defaultExpInfo pat_var) m
        | Just index <- get_int_index ty ->
