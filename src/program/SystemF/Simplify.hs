@@ -823,7 +823,10 @@ rwCopyApp inf copy_op ty args = do
     -- Otherwise return a copy expression
     copy_expression args _ = ExpM $ AppE inf copy_op [ty] args
       
--- | Rewrite a copy of a Stored value to a deconstruct and construct operation
+-- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
+--
+--   Eventually, we should be able to inline the 'copy' method to avoid this
+--   special-case rewrite
 copyStoredValue inf val_type repr arg m_dst = do
   tmpvar <- newAnonymousVar ObjectLevel
   let stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
@@ -985,9 +988,15 @@ rwCase1 tenv inf scrut alts = do
 -- | Find the alternative matching constructor @con@
 findAlternative :: [AltM] -> Var -> AltM
 findAlternative alts con =
-  case find ((con ==) . altConstructor . fromAltM) alts
+  case find match_con alts
   of Just alt -> alt
      Nothing -> internalError "rwCase: Missing alternative"
+  where
+    match_con (AltM (DeCon {altConstructor = c})) = c == con
+    match_con (AltM (DeTuple {})) =
+      -- The given constructor doesn't build values of the same type as what
+      -- this alternative deconstructs
+      internalError "findAlternative: Type error detected"
 
 -- | Given the parts of a data constructor application and a list of case
 --   alternatives, eliminate the case statement.
