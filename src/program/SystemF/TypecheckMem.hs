@@ -240,7 +240,7 @@ computeInstantiatedType inf op_type args = go op_type args
       app_type <- typeOfTypeApp op_type arg_kind arg
       case app_type of
         Just result_type -> go result_type args
-        Nothing -> typeError "Error in type application"
+        Nothing -> typeError $ "Error in type application at " ++ show inf
 
     go op_type [] = return op_type
 
@@ -450,9 +450,9 @@ typeCheckModule (Module module_name defs exports) = do
 
 -- | Infer the type of an expression.  The expression is assumed to be
 --   well-typed; this function doesn't check for most errors.
-inferExpType :: IdentSupply Var -> TypeEnv -> ExpM -> IO Type
-inferExpType id_supply tenv expression =
-  runTypeEvalM (infer_exp expression) id_supply tenv
+inferExpType :: EvalMonad m => ExpM -> m Type
+inferExpType expression =
+  liftTypeEvalM $ infer_exp expression
   where
     -- Get the return type of an expression.  Skip parts that don't matter 
     -- to the return type.  Variable bindings are added to the environment,
@@ -478,19 +478,24 @@ inferExpType id_supply tenv expression =
 
 -- | Infer the type of an application, given the operator type and argument
 --   types.  If the application is not well-typed, an exception is raised.
-inferAppType :: IdentSupply Var
-             -> TypeEnv
-             -> Type            -- ^ Operator type
+inferAppType :: EvalMonad m =>
+                Type            -- ^ Operator type
              -> [TypM]          -- ^ Type arguments
              -> [Type]          -- ^ Operand types
-             -> IO Type
-inferAppType id_supply tenv op_type ty_args arg_types =
-  runTypeEvalM infer_type id_supply tenv
+             -> m Type
+inferAppType op_type ty_args arg_types =
+  debug $ liftTypeEvalM $ do
+    ti_ty_args <- mapM typeInferType ty_args
+    inst_type <- computeInstantiatedType noSourcePos op_type ti_ty_args
+    computeAppliedType noSourcePos inst_type arg_types
   where
-    infer_type = do
-      ti_ty_args <- mapM typeInferType ty_args
-      inst_type <- computeInstantiatedType noSourcePos op_type ti_ty_args
-      computeAppliedType noSourcePos inst_type arg_types
+
+    debug = traceShow (text "inferAppType" <+> types)
+      where
+        types = pprType op_type $$
+                vcat (map ((text "@" <+>) . pprType . fromTypM) ty_args) $$
+                vcat (map ((text ">" <+>) . pprType) arg_types)
+
 
 -- | Get the type described by a 'MonoCon'.
 monoConType :: EvalMonad m => MonoCon -> m Type

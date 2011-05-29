@@ -144,7 +144,7 @@ floatableAppParamType tenv op_var ty_args args
 
     -- The parameter type for a floated Repr expression
     repr_binding = do
-      app_type <- fltInferAppType op_type ty_args []
+      app_type <- inferAppType op_type ty_args []
       return $ Just $ drop_arg_types (length args) app_type
       where
         drop_arg_types 0 t = t
@@ -689,7 +689,10 @@ instance TypeEnvMonad Flt where
     let ctx' = ctx {fcTypeEnv = insertType v ty $ fcTypeEnv ctx}
     in runFlt m ctx'
 
-instance EvalMonad Flt
+instance EvalMonad Flt where
+  liftTypeEvalM m = Flt $ \ctx -> do
+    x <- runTypeEvalM m (fcVarSupply ctx) (fcTypeEnv ctx)
+    return (x, [])
 
 instance ReprDictMonad Flt where
   getVarIDs = Flt $ \ctx -> return (fcVarSupply ctx, [])
@@ -701,17 +704,6 @@ instance ReprDictMonad Flt where
   localIntIndexEnv f m = Flt $ \ctx ->
     let ctx' = ctx {fcIntEnv = f $ fcIntEnv ctx}
     in runFlt m ctx'
-
-fltInferExpType :: ExpM -> Flt Type
-fltInferExpType e = Flt $ \ctx -> do
-  return_type <- inferExpType (fcVarSupply ctx) (fcTypeEnv ctx) e
-  return (return_type, [])
-
-fltInferAppType :: Type -> [TypM] -> [Type] -> Flt Type
-fltInferAppType op_type ty_args arg_types = Flt $ \ctx -> do
-  return_type <-
-    inferAppType (fcVarSupply ctx) (fcTypeEnv ctx) op_type ty_args arg_types
-  return (return_type, [])
 
 -- | Add a variable from a type pattern to the type environment
 assumeTyPatM :: (EvalMonad m, ReprDictMonad m) => TyPatM -> m a -> m a
@@ -922,7 +914,7 @@ flattenApp float_initializers spc expression =
          mapM (flattenApp False Used) args
        let new_exp = ExpM $ AppE inf op' ty_args args'
 
-       return_type <- fltInferAppType op_type ty_args arg_types
+       return_type <- inferAppType op_type ty_args arg_types
 
        return (new_exp, return_type, concat (op_context : arg_contexts))
 
@@ -945,7 +937,7 @@ createFlattenedApp float_initializers spc inf op_var ty_args args = do
   
   -- Create the new expression
   let new_expr = ExpM $ AppE inf (ExpM $ VarE inf op_var) ty_args args'
-  return_type <- fltInferAppType op_type ty_args arg_types
+  return_type <- inferAppType op_type ty_args arg_types
 
   -- If this is a floatable expression, then float it and substitute a variable
   -- in its place.  Otherwise return it.
@@ -1072,7 +1064,7 @@ floatInExpDmd dmd (ExpM expression) =
      ExceptE {} -> unchanged
   where
     unchanged = do
-      ty <- fltInferExpType (ExpM expression)
+      ty <- inferExpType (ExpM expression)
       return (ExpM expression, ty)
 
 floatInTuple dmd inf args = do

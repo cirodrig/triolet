@@ -203,11 +203,6 @@ makeExpValue (ExpM expression) =
      LitE inf l -> return $ Just $ LitValue inf l
      _ -> return Nothing
 
--- | Run type inferernce on an expression
-rwInferExpType :: ExpM -> LR Type
-rwInferExpType expression = LR $ \env -> do
-  inferExpType (lrIdSupply env) (lrTypeEnv env) expression
-
 -------------------------------------------------------------------------------
 -- Inlining
 
@@ -588,7 +583,7 @@ flattenCaseExp inf scr alts = do
     float_scrutinee scr_ctx flattened_scr = assumeContext scr_ctx $ do
       -- Create a new variable that will bind the scrutinee
       scr_var <- newAnonymousVar ObjectLevel
-      scr_type <- rwInferExpType flattened_scr
+      scr_type <- inferExpType flattened_scr
 
       -- Construct demand information for the new scrutinee variable.
       -- The scrutinee variable is used exactly once, in place of the
@@ -612,7 +607,7 @@ restructureExp ex = do
   if null ctx then return ex' else do
     -- Use the original expression's type as the return type.  It's the same as
     -- the new expression's type.
-    e_type <- rwInferExpType ex
+    e_type <- inferExpType ex
     return $ applyContextWithType e_type ctx ex'
 
 -------------------------------------------------------------------------------
@@ -886,7 +881,7 @@ rwLet inf bind@(PatM (bind_var ::: bind_rtype) _) val body = do
     glom_exceptions assume_pattern rewritten_rhs normal_case =
       case rewritten_rhs
       of ExpM (ExceptE exc_inf _) -> do
-           return_type <- assume_pattern $ rwInferExpType body
+           return_type <- assume_pattern $ inferExpType body
            return (ExpM $ ExceptE exc_inf return_type, Nothing)
          _ -> normal_case       -- Otherwise, continue as normal
 
