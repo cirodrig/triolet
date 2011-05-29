@@ -20,6 +20,7 @@ import Control.Monad hiding(mapM)
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
+import Data.IORef
 import Data.List as List
 import Data.Maybe
 import Data.Monoid
@@ -72,6 +73,13 @@ data LREnv =
     
   , lrDictEnv :: MkDictEnv
   , lrIntEnv :: IntIndexEnv
+    
+    -- | Number of simplification steps to perform.  For debugging, we may
+    --   stop simplification after a given number of steps.
+    --
+    --   If value is negative, then fuel is unlimited.  If value is zero, then
+    --   further simplification is not performed.
+  , lrFuel :: {-#UNPACK#-}!(IORef Int)
   }
 
 newtype LR a = LR {runLR :: LREnv -> IO a}
@@ -99,8 +107,6 @@ instance TypeEnvMonad LR where
 instance EvalMonad LR where
   liftTypeEvalM m = LR $ \env -> do
     runTypeEvalM m (lrIdSupply env) (lrTypeEnv env)
-
-
 
 instance ReprDictMonad LR where
   withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply env) env
@@ -189,6 +195,42 @@ dumpKnownValues m = LR $ \env ->
                vcat [hang (text (show n)) 8 (pprKnownValue kv)
                     | (n, kv) <- IntMap.toList $ lrKnownValues env]
   in traceShow kv_doc $ runLR m env
+
+-- | Check whether there is fuel available.
+--   If True is returned, then it's okay to perform a task that consumes fuel.
+checkFuel :: LR Bool
+checkFuel = LR $ \env -> fmap (0 /=) $ readIORef $ lrFuel env
+
+-- | Perform an action only if there is fuel remaining
+ifFuel :: a -> LR a -> LR a
+ifFuel default_value action = checkFuel >>= choose
+  where
+    choose False = return default_value
+    choose True  = action
+
+ifElseFuel :: LR a -> LR a -> LR a
+ifElseFuel default_action action = checkFuel >>= choose
+  where
+    choose False = default_action
+    choose True  = action
+
+-- | Consume one unit of fuel.
+--   Don't consume fuel if fuel is empty (0),
+--   or if fuel is not in use (negative).
+consumeFuel :: LR ()
+consumeFuel = LR $ \env -> do
+  fuel <- readIORef $ lrFuel env
+  when (fuel > 0) $ writeIORef (lrFuel env) $! fuel - 1
+
+-- | Use fuel to perform an action.  If there's no fuel remaining,
+--   don't perform the action.
+useFuel :: a -> LR a -> LR a
+useFuel default_value action = ifFuel default_value (consumeFuel >> action)
+
+-- | Use fuel to perform an action.  If there's no fuel remaining,
+--   don't perform the action.
+useFuel' :: LR a -> LR a -> LR a
+useFuel' out_of_fuel action = ifElseFuel out_of_fuel (consumeFuel >> action)
 
 -- | Try to construct the value of an expression, if it's easy to get.
 --
@@ -605,6 +647,7 @@ restructureExp :: ExpM -> LR ExpM
 restructureExp ex = do
   (ctx, ex') <- flattenExp ex
   if null ctx then return ex' else do
+    consumeFuel                 -- An expression has been restructured
     -- Use the original expression's type as the return type.  It's the same as
     -- the new expression's type.
     e_type <- inferExpType ex
@@ -618,22 +661,29 @@ restructureExp ex = do
 --   Return the expression's value if it can be determined.
 rwExp :: ExpM -> LR (ExpM, MaybeValue)
 rwExp expression = debug "rwExp" expression $ do
-  -- Flatten nested let and case statements
-  ex1 <- restructureExp expression
+    -- Flatten nested let and case statements.  Consume fuel only if flattening
+    -- occurs.
+    ex1 <- ifFuel expression $ restructureExp expression
 
-  -- Simplify subexpressions
-  case fromExpM ex1 of
-    VarE inf v -> rwVar ex1 inf v
-    LitE inf l -> rwExpReturn (ex1, Just $ LitValue inf l)
-    UTupleE inf args -> rwUTuple inf args
-    AppE inf op ty_args args -> rwApp inf op ty_args args
-    LamE inf fun -> do
-      fun' <- rwFun fun
-      rwExpReturn (ExpM $ LamE inf fun', Just $ complexKnownValue $ FunValue inf fun')
-    LetE inf bind val body -> rwLet inf bind val body
-    LetfunE inf defs body -> rwLetrec inf defs body
-    CaseE inf scrut alts -> rwCase inf scrut alts
-    ExceptE _ _ -> rwExpReturn (ex1, Nothing)
+    -- Simplify subexpressions.
+    --
+    -- Even if we're out of fuel, we _still_ must perform some simplification
+    -- steps in order to propagate 'InlinedValue's.  If we fail to propagate
+    -- them, the output code will still contain references to variables that
+    -- were deleted.
+    case fromExpM ex1 of
+      VarE inf v -> rwVar ex1 inf v
+      LitE inf l -> rwExpReturn (ex1, Just $ LitValue inf l)
+      UTupleE inf args -> rwUTuple inf args
+      AppE inf op ty_args args -> rwApp ex1 inf op ty_args args
+      LamE inf fun -> do
+        fun' <- rwFun fun
+        rwExpReturn (ExpM $ LamE inf fun',
+                     Just $ complexKnownValue $ FunValue inf fun')
+      LetE inf bind val body -> rwLet inf bind val body
+      LetfunE inf defs body -> rwLetrec inf defs body
+      CaseE inf scrut alts -> rwCase inf scrut alts
+      ExceptE _ _ -> rwExpReturn (ex1, Nothing)
   where
     debug l e m = traceShow (text l <+> (pprExp e)) m
     {-
@@ -654,60 +704,75 @@ rwVar original_expression inf v = lookupKnownValue v >>= rewrite
   where
     rewrite (Just val)
         -- Replace with an inlined or trivial value
-      | Just inl_value <- asInlinedValue val =
+      | Just inl_value <- asInlinedValue val = do
+          -- This variable is inlined unconditionally.  This step does not
+          -- consume fuel; fuel was consumed when the variable was selected for
+          -- unconditional inlining.
           rwExp inl_value
 
       | Just cheap_value <- asTrivialValue val =
+          -- Use fuel to replace this variable
+          useFuel (original_expression, Nothing) $
           rwExpReturn (cheap_value, Just val)
 
         -- Otherwise, don't inline, but propagate the value
       | otherwise = rwExpReturn (original_expression, Just val)
     rewrite Nothing =
-      -- Set up for copy propagation
+      -- Give the variable a value, so that copy propagation may occur
       rwExpReturn (original_expression, Just $ VarValue inf v)
 
 rwUTuple inf args = do
+  -- Just rewrite subexpressions
   (args', arg_values) <- mapAndUnzipM rwExp args
   
   let ret_value = tupleConValue inf arg_values
       ret_exp = ExpM $ UTupleE inf args'
   return (ret_exp, ret_value)
 
-rwApp :: ExpInfo -> ExpM -> [TypM] -> [ExpM] -> LR (ExpM, MaybeValue)
-rwApp inf op ty_args args =
+rwApp :: ExpM -> ExpInfo -> ExpM -> [TypM] -> [ExpM] -> LR (ExpM, MaybeValue)
+rwApp original_expression inf op ty_args args =
   -- First try to uncurry this application
   case op
   of ExpM (AppE _ inner_op inner_ty_args inner_args)
        | null ty_args ->
-           rwApp inf inner_op inner_ty_args (inner_args ++ args)
+           use_fuel $ continue inner_op inner_ty_args (inner_args ++ args)
        | null inner_args ->
-           rwApp inf inner_op (inner_ty_args ++ ty_args) args
-     _ -> do
-       (op', op_val) <- rwExp op
-       rwAppWithOperator inf op' op_val ty_args args
+           use_fuel $ continue inner_op (inner_ty_args ++ ty_args) args
+     _ -> simplify_op
+  where
+    use_fuel m = useFuel' simplify_op m
+
+    continue op ty_args args =
+      rwApp (ExpM (AppE inf op ty_args args)) inf op ty_args args
+
+    simplify_op = do
+      (op', op_val) <- rwExp op
+      let modified_expression = ExpM (AppE inf op' ty_args args)
+      rwAppWithOperator modified_expression inf op' op_val ty_args args
+
 
 -- | Rewrite an application, depending on what the operator is.
 --   The operator has been simplified, but the arguments have not.
 --
 --   This function is usually called from 'rwApp'.  It calls itself 
 --   recursively to flatten out curried applications.
-rwAppWithOperator inf op' op_val ty_args args =
+rwAppWithOperator original_expression inf op' op_val ty_args args =
   -- First, try to uncurry this application.
   -- This happens if the operator was rewritten to an application;
   -- otherwise we would have uncurried it in 'rwApp'.
   case op'
   of ExpM (AppE _ inner_op inner_ty_args inner_args)
-       | null ty_args -> do
-         inner_op_value <- makeExpValue inner_op
-         rwAppWithOperator inf inner_op inner_op_value inner_ty_args (inner_args ++ args)
-       | null inner_args -> do
-         inner_op_value <- makeExpValue inner_op
-         rwAppWithOperator inf inner_op inner_op_value (inner_ty_args ++ ty_args) args
+       | null ty_args -> use_fuel $ do
+           inner_op_value <- makeExpValue inner_op
+           continue inner_op inner_op_value inner_ty_args (inner_args ++ args)
+       | null inner_args -> use_fuel $ do
+           inner_op_value <- makeExpValue inner_op
+           continue inner_op inner_op_value (inner_ty_args ++ ty_args) args
      _ ->
        -- Apply simplification tecnhiques specific to this operator
        case op_val
-       of Just (ComplexValue _ (FunValue _ funm@(FunM fun))) ->
-            inline_function_call funm
+       of Just (ComplexValue _ (FunValue _ funm)) ->
+            use_fuel $ inline_function_call funm
 
           -- Use special rewrite semantics for built-in functions
           Just (VarValue _ op_var)
@@ -715,30 +780,45 @@ rwAppWithOperator inf op' op_val ty_args args =
                 case ty_args
                 of [ty] -> rwCopyApp inf op' ty args
 
-          Just (VarValue _ op_var) -> do
-            tenv <- getTypeEnv
-            ruleset <- getRewriteRules
-                
-            -- Try to rewrite this application
-            rewritten <- liftTypeEvalM $
-                         rewriteApp ruleset inf op_var ty_args args
-            case rewritten of 
-              Just new_expr -> rwExp new_expr
-              Nothing ->
-                -- Try to construct a value for this application
-                case lookupDataConWithType op_var tenv  
-                of Just (type_con, data_con) ->
-                     data_con_app type_con data_con op'
-                   Nothing ->
-                     unknown_app op'
+          Just (VarValue _ op_var) ->
+            -- Try to rewrite this application.  If it was rewritten, then
+            -- consume fuel.
+            ifElseFuel unknown_app $ do
+              tenv <- getTypeEnv
+              ruleset <- getRewriteRules
+                  
+              rewritten <- liftTypeEvalM $
+                           rewriteApp ruleset inf op_var ty_args args
+              case rewritten of 
+                Just new_expr -> do
+                  consumeFuel     -- A term has been rewritten
+                  rwExp new_expr
+                Nothing ->
+                  -- Try to construct a value for this application
+                  case lookupDataConWithType op_var tenv  
+                  of Just (type_con, data_con) ->
+                       data_con_app type_con data_con op'
+                     Nothing ->
+                       unknown_app
 
-          _ -> unknown_app op'
+          _ -> unknown_app
   where
-    unknown_app op' = do
+    -- If out of fuel, then don't simplify this expression.  Process arguments.
+    -- Operator is already processed.
+    use_fuel m = useFuel' unknown_app m
+
+    continue op op_value ty_args args =
+      rwAppWithOperator original_expression inf op op_value ty_args args
+
+    unknown_app = do
       (args', _) <- rwExps args
       let new_exp = ExpM $ AppE inf op' ty_args args'
       return (new_exp, Nothing)
 
+    -- The term is a data constructor application.  Simplify subexpressions
+    -- and rebuild the expression.  Also construct a known value for the term.
+    --
+    -- Fuel is not consumed because this term isn't eliminated.
     data_con_app type_con data_con op' = do
       tenv <- getTypeEnv
 
@@ -781,18 +861,26 @@ rwCopyApp inf copy_op ty args = do
       | op `isPyonBuiltin` the_Stored ->
           case args
           of [repr, src] ->
+               use_fuel $       -- A 'copy' call has been replaced
                copyStoredValue inf val_type repr src Nothing
              [repr, src, dst] ->
+               use_fuel $       -- A 'copy' call has been replaced
                copyStoredValue inf val_type repr src (Just dst)
              _ ->
                internalError "rwCopyApp: Unexpected number of arguments"
-    _ -> do
+    _ -> unknown_source
+  where
+    -- If out of fuel, then don't simplify this expression.  Process arguments.
+    use_fuel m = useFuel' unknown_source m
+    
+    -- Cannot simplify
+    unknown_source = do
       (args', arg_values) <- rwExps args
   
-      let new_exp = copy_expression args' arg_values
+      let new_exp = ExpM $ AppE inf copy_op [ty] args'
           new_value = copied_value arg_values
       return (new_exp, new_value)
-  where
+
     -- Do we know what was stored here?
     copied_value [_, Just src_val, Just dst_val] =
       -- Reference the source value instead of the destination value
@@ -819,9 +907,6 @@ rwCopyApp inf copy_op ty args = do
               store_op = ExpM $ VarE inf (pyonBuiltin the_storeBox)
           in ExpM $ AppE inf store_op [store_type] (stored_exp : other_args)
     -}
-
-    -- Otherwise return a copy expression
-    copy_expression args _ = ExpM $ AppE inf copy_op [ty] args
       
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
 --
@@ -841,49 +926,57 @@ copyStoredValue inf val_type repr arg m_dst = do
       new_expr = ExpM $ CaseE inf arg [alt]
   rwExp new_expr
 
-rwLet inf bind@(PatM (bind_var ::: bind_rtype) _) val body = do
-  tenv <- getTypeEnv
-  case worthPreInlining tenv (patMDmd bind) val of
-    Just val -> do
-      -- The variable is used exactly once; inline it.
-      (body', body_val) <-
-        assumePattern bind $ withKnownValue bind_var val $ rwExp body
-      let ret_val = mask_local_variable bind_var body_val
-      rwExpReturn (body', ret_val)
-
-    Nothing -> do
-      (val', val_value) <- rwExp val
-
-      -- If the RHS expression raises an exception, then the entire
-      -- let-expression raises an exception.
-      glom_exceptions (assumePattern bind) val' $ do
-        -- Inline the RHS expression, if desirable.  If
-        -- inlining is not indicated, then propagate its known
-        -- value.
-        let local_val_value =
-              fmap (setTrivialValue bind_var) $ val_value
-
-        -- Add local variable to the environment and rewrite the body
-        (body', body_val) <-
-          assumePattern bind $
-          withMaybeValue bind_var local_val_value $
-          rwExp body
-    
-        let ret_val = mask_local_variable bind_var body_val
-        rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
+rwLet inf bind@(PatM (bind_var ::: bind_rtype) _) val body =
+  ifElseFuel rw_recursive_let try_pre_inline
   where
-    -- The computed value for this let expression cannot mention the locally 
-    -- defined variable.  If it's in the body's
-    -- value, we have to forget about it.
-    mask_local_variable bind_var ret_val =
-      forgetVariables (Set.singleton bind_var) =<< ret_val
+    -- Check if we should inline the RHS _before_ rewriting it
+    try_pre_inline = do
+      tenv <- getTypeEnv
+      case worthPreInlining tenv (patMDmd bind) val of
+        Just val -> do
+          -- The variable is used exactly once; inline it
+          consumeFuel
+          (body', body_val) <-
+            assumePattern bind $ withKnownValue bind_var val $ rwExp body
+          
+          -- The local variable goes out of scope, so it must not be mentioned 
+          -- by the known value
+          let ret_val = forgetVariable bind_var =<< body_val
+          rwExpReturn (body', ret_val)
+        Nothing -> rw_recursive_let
 
+    rw_recursive_let = rwLetNormal inf bind val body
+
+rwLetNormal inf bind val body = do
+  let bind_var = patMVar bind
+  (val', val_value) <- rwExp val
+
+  -- If the RHS expression raises an exception, then the entire
+  -- let-expression raises an exception.
+  glom_exceptions (assumePattern bind) val' $ do
+    -- Inline the RHS expression, if desirable.  If
+    -- inlining is not indicated, then propagate its known
+    -- value.
+    let local_val_value = fmap (setTrivialValue bind_var) $ val_value
+
+    -- Add local variable to the environment and rewrite the body
+    (body', body_val) <-
+      assumePattern bind $
+      withMaybeValue bind_var local_val_value $
+      rwExp body
+
+    -- The local variable goes out of scope, so it must not be mentioned 
+    -- by the known value
+    let ret_val = forgetVariable bind_var =<< body_val
+    rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
+  where
     -- If the given value is an exception-raising expression, then we should
     -- convert the entire let-expression to an exception-raising expression
     -- with the same type as the body expression.
     glom_exceptions assume_pattern rewritten_rhs normal_case =
       case rewritten_rhs
       of ExpM (ExceptE exc_inf _) -> do
+           consumeFuel          -- Body of let was eliminated
            return_type <- assume_pattern $ inferExpType body
            return (ExpM $ ExceptE exc_inf return_type, Nothing)
          _ -> normal_case       -- Otherwise, continue as normal
@@ -897,12 +990,15 @@ rwLetrec inf defs body = withDefs defs $ \defs' -> do
 
 rwCase inf scrut alts = do
   tenv <- getTypeEnv
-  rwCase1 tenv inf scrut alts
+  have_fuel <- checkFuel
+  rwCase1 have_fuel tenv inf scrut alts
 
 -- Special-case handling of the 'boxed' constructor.  This constructor cannot
 -- be eliminated.  Instead, its value is propagated, and we hope that the case
 -- statement becomes dead code.
-rwCase1 _ inf scrut alts
+--
+-- The case statement isn't eliminated, so this step doesn't consume fuel.
+rwCase1 _ _ inf scrut alts
   | [alt@(AltM (DeCon {altConstructor = con}))] <- alts,
     con `isPyonBuiltin` the_boxed = do
       -- Rewrite the scrutinee
@@ -927,38 +1023,45 @@ rwCase1 _ inf scrut alts
 
 -- If this is a case of data constructor, we can unpack the case expression
 -- before processing the scrutinee.
-rwCase1 tenv inf scrut alts
-  | Just (dcon, ty_args, ex_args, args) <- unpackDataConAppM tenv scrut =
+--
+-- Unpacking consumes fuel
+rwCase1 have_fuel tenv inf scrut alts
+  | have_fuel,
+    Just (dcon, ty_args, ex_args, args) <- unpackDataConAppM tenv scrut = do
+      consumeFuel
       let alt = findAlternative alts $ dataConCon dcon
-      in eliminateCaseWithExp tenv dcon (map TypM ex_args) args alt
+      eliminateCaseWithExp tenv dcon (map TypM ex_args) args alt
 
 -- Simplify the scrutinee, then try to simplify the case statement.
-rwCase1 tenv inf scrut alts = do
+rwCase1 _ tenv inf scrut alts = do
   -- Simplify scrutinee
   (scrut', scrut_val) <- rwExp scrut
   let (arg_con, arg_ex_types, arg_values) = unpack_scrut_val scrut_val
 
   -- Try to deconstruct the new scrutinee
-  case unpackDataConAppM tenv scrut' of
-    Just (data_con, ty_args, ex_args, args) 
-      | isJust arg_con && arg_con /= Just (dataConCon data_con) ->
-          internalError "rwCase: Inconsistent constructor value"
-      | otherwise ->
-          let args_and_values = zip args arg_values
-              alt = findAlternative alts $ dataConCon data_con
-          in eliminateCaseWithSimplifiedExp
-             tenv data_con (map TypM ex_args) args_and_values alt
-    _ ->
-      -- Can't deconstruct.  Propagate values and rebuild the case statement.
-      rebuild_case scrut' arg_con arg_ex_types arg_values 
+  ifElseFuel (rebuild_case scrut' arg_con arg_ex_types arg_values) $ 
+    case unpackDataConAppM tenv scrut'
+    of Just (data_con, ty_args, ex_args, args)
+         | isJust arg_con && arg_con /= Just (dataConCon data_con) ->
+             internalError "rwCase: Inconsistent constructor value"
+         | otherwise -> do
+             consumeFuel
+             let args_and_values = zip args arg_values
+                 alt = findAlternative alts $ dataConCon data_con
+             eliminateCaseWithSimplifiedExp
+               tenv data_con (map TypM ex_args) args_and_values alt
+       _ ->
+         -- Can't deconstruct.  Propagate values and rebuild the case
+         -- statement.
+         rebuild_case scrut' arg_con arg_ex_types arg_values 
   where
     -- Given the value of the scrutinee, try to get the fields' values
     unpack_scrut_val (Just (ComplexValue _ (DataValue _ (ConValueType con _ ex_ts) vs))) =
       (Just con, Just ex_ts, vs)
-    
+
     unpack_scrut_val _ =
       (Nothing, Nothing, repeat Nothing)
-    
+
     rebuild_case scrut' arg_con arg_ex_types arg_values = do
       let new_alts =
             -- If the scrutinee has a known constructor,
@@ -999,9 +1102,12 @@ findAlternative alts con =
       internalError "findAlternative: Type error detected"
 
 -- | Given the parts of a data constructor application and a list of case
---   alternatives, eliminate the case statement.
+--   alternatives, eliminate the case statement.  None of the given expressions
+--   have been simplified yet.
 --
 --   This creates a new expression, then simplifies it.
+--
+--   Fuel should be consumed prior to calling this function.
 eliminateCaseWithExp :: TypeEnv
                      -> DataConType
                      -> [TypM]
@@ -1032,6 +1138,12 @@ eliminateCaseWithExp
                    | (TyPatM (v ::: _), TypM ex_type) <-
                        zip (getAltExTypes alt) ex_args]
 
+-- | Given a data value and a list of case
+--   alternatives, eliminate the case statement.
+--
+--   This creates a new expression, then simplifies it.
+--
+--   Fuel should be consumed prior to calling this function.
 eliminateCaseWithSimplifiedExp :: TypeEnv
                                -> DataConType
                                -> [TypM]
@@ -1213,12 +1325,14 @@ rwModule (Module mod_name defss exports) = rw_top_level id defss
       exports' <- mapM rwExport exports
       return $ Module mod_name (defss' []) exports'
 
+-- | The main entry point for the simplifier
 rewriteLocalExpr :: RewriteRuleSet -> Module Mem -> IO (Module Mem)
 rewriteLocalExpr ruleset mod =
   withTheNewVarIdentSupply $ \var_supply -> do
+    fuel <- readInitGlobalVarIO the_fuel
     tenv <- readInitGlobalVarIO the_memTypes
     (denv, ienv) <- runFreshVarM var_supply createDictEnv
-    
+
     -- Take known data constructors from the type environment
     let global_known_values = initializeKnownValues tenv
     
@@ -1236,6 +1350,7 @@ rewriteLocalExpr ruleset mod =
                     , lrTypeEnv = tenv
                     , lrDictEnv = denv
                     , lrIntEnv = ienv
+                    , lrFuel = fuel
                     }
     runLR (rwModule mod) env
 

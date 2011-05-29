@@ -10,6 +10,7 @@ import Control.Concurrent.MVar
 -- This group of imports is for debugging
 import Common.PrecDoc
 import qualified Data.IntMap as IntMap
+import Data.IORef
 import Text.PrettyPrint.HughesPJ
 import Type.Type
 
@@ -20,11 +21,16 @@ import qualified CParser2.Driver
 import LowLevel.InitializeBuiltins
 import Builtins.Builtins
 import Type.Environment
+import CommandLine
 import Globals
 import GlobalVar
 
-loadBuiltins :: IO ()
-loadBuiltins = do
+-- | Initialization is performed here
+loadBuiltins :: CommandLineGlobals -> IO ()
+loadBuiltins cl_globals = do
+  -- Initialize globals from command_line
+  initializeGlobalVar the_fuel (newIORef $ initValueForFuel cl_globals)
+
   -- Initialize the Core builtins
   withTheNewVarIdentSupply Builtins.Builtins.initializeBuiltins
 

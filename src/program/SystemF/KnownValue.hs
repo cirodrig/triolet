@@ -148,6 +148,9 @@ resultOfWriterValue v =
   -- Other values are not valid
   internalError $ "resultOfWriterValue " ++ show (pprKnownValue v)
 
+forgetVariable :: Var -> KnownValue -> MaybeValue
+forgetVariable v kv = forgetVariables (Set.singleton v) kv
+
 -- | Remove references to any of the given variables in the known value.
 --   The given variables may not include data constructors.
 forgetVariables :: Set.Set Var -> KnownValue -> MaybeValue

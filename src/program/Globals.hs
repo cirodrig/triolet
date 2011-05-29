@@ -2,6 +2,8 @@
 module Globals where
 
 import qualified Data.Map as Map
+import Data.IORef
+
 import Common.Supply
 import Common.Identifier
 import qualified SystemF.Syntax as SystemF
@@ -54,6 +56,15 @@ the_specTypes = defineInitGlobalVar ()
 the_loweringMap :: InitGlobalVar (Map.Map Var LowLevel.Var)
 {-# NOINLINE the_loweringMap #-}
 the_loweringMap = defineInitGlobalVar ()
+
+-- | Fuel, which controls how many transformations the optimizer performs.
+--   Some transformations consume fuel.  When the fuel is decreased to zero,
+--   transformations that would consume fuel are disabled.
+--
+--   A negative value represents unlimited fuel.
+the_fuel :: InitGlobalVar (IORef Int)
+{-# NOINLINE the_fuel #-}
+the_fuel = defineInitGlobalVar ()
 
 withTheNewVarIdentSupply :: (Supply (Ident Var) -> IO a) -> IO a
 withTheNewVarIdentSupply f = withStaticGlobalVar the_newVarIdentSupply f

@@ -57,12 +57,12 @@ import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
 
 main = do
-  -- Initialiation
-  loadBuiltins
-  initializeTIBuiltins
-
   -- Parse arguments
-  job <- parseCommandLineArguments
+  (global_values, job) <- parseCommandLineArguments
+
+  -- Initialiation
+  loadBuiltins global_values
+  initializeTIBuiltins
   
   -- Do work
   runJob runTask job

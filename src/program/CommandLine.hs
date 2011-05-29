@@ -9,7 +9,7 @@ The command line is first parsed into individual options with 'getOpt'.  Then
 the options are processed one at a time, and the result is turned into a 'Job'.
 -}
 
-module CommandLine(parseCommandLineArguments)
+module CommandLine(CommandLineGlobals(..), parseCommandLineArguments)
 where
 
 import Control.Monad
@@ -69,11 +69,15 @@ optionDescrs =
     "add a path to the include search path; ignored when compiling pyon files"
   , Option "f" [] (ReqArg (Opt . addFlag) "FLAG")
     "enable/disable a compiler flag"
+  , Option "" ["fuel"] (ReqArg (\fuel -> Opt $ setFuel fuel) "FUEL")
+    "limit the number of optimizations applied"
   ]
 
--- | Parse command-line arguments.  If they specify a job to perform, return
--- the job.
-parseCommandLineArguments :: IO (Job ())
+-- | Parse command-line arguments.  Return some global variable values and 
+--   a job to perform.
+--
+--   If parsing encounters an error, the do-nothing job is returned.
+parseCommandLineArguments :: IO (CommandLineGlobals, Job ())
 parseCommandLineArguments = do
   raw_args <- getArgs
   let args = snd $ splitDataFilePath raw_args
@@ -83,7 +87,7 @@ parseCommandLineArguments = do
   -- Print errors or create a job
   if not $ null errors
     then do mapM_ putStrLn errors
-            return pass
+            return (defaultCommandLineGlobals, pass)
     else interpretOptions options
 
 usageHeader = do
@@ -94,12 +98,12 @@ usageHeader = do
 -------------------------------------------------------------------------------
 -- Interpret command-line options
 
-interpretOptions :: [Opt] -> IO (Job ())
+interpretOptions :: [Opt] -> IO (CommandLineGlobals, Job ())
 interpretOptions opts =
   let commands = case mconcat opts of Opt f -> f initialState
   in case reverse $ interpreterErrors commands
      of xs@(_:_) -> do mapM_ (hPutStrLn stderr) xs
-                       return pass
+                       return (defaultCommandLineGlobals, pass)
         [] ->
           case currentAction commands
           of GetUsage -> do
@@ -107,20 +111,40 @@ interpretOptions opts =
                header <- usageHeader
                putStrLn header
                putStrLn "For usage information, invoke with --help"
-               return pass
+               return (defaultCommandLineGlobals, pass)
              GetHelp -> do
                -- Print usage info and exist
                header <- usageHeader
                putStrLn $ usageInfo header optionDescrs
-               return pass
-             CompileObject ->
+               return (defaultCommandLineGlobals, pass)
+             CompileObject -> do
                let inputs = reverse $ inputFiles commands
                    output = outputFile commands
-               in compileObjectsJob commands inputs output
+               job <- compileObjectsJob commands inputs output
+               return (mkCommandLineGlobals commands, job)
              ConflictingAction -> do
                hPutStrLn stderr "Conflicting commands given on command line"
                hPutStrLn stderr "For usage information, invoke with --help"
-               return pass
+               return (defaultCommandLineGlobals, pass)
+
+-- | Global variable values that were given on the command line.
+--   These are returned
+data CommandLineGlobals =
+  CommandLineGlobals
+  { initValueForFuel :: !Int
+  }
+
+defaultCommandLineGlobals =
+  CommandLineGlobals
+  { initValueForFuel = -1
+  }
+
+mkCommandLineGlobals :: InterpretOptsState -> CommandLineGlobals
+mkCommandLineGlobals st =
+  CommandLineGlobals
+  { initValueForFuel = fromMaybe (-1) $ currentFuel st
+  }
+
 
 data InterpretOptsState =
   InterpretOptsState
@@ -128,7 +152,7 @@ data InterpretOptsState =
   , currentLanguage :: !Language
   , outputFile :: Maybe String
     -- | Do we save temporary C files?
-  , keepCFiles :: {-# UNPACK #-} !Bool
+  , keepCFiles :: !Bool
     -- | List of input files and languages, in /reverse/ order
   , inputFiles :: [(String, Language)]
     -- | List of error messages, in /reverse/ order
@@ -139,6 +163,8 @@ data InterpretOptsState =
   , includeSearchPaths :: [String]
     -- | Set of boolean compilation settings chosen with \"-f\"
   , commandLineFlags :: CompileFlags
+    -- | Amount of fuel
+  , currentFuel :: !(Maybe Int)
   }
 
 initialState = InterpretOptsState { currentAction = CompileObject
@@ -152,6 +178,7 @@ initialState = InterpretOptsState { currentAction = CompileObject
                                   , commandLineFlags =
                                       -- Some flags are enabled by default 
                                       Set.fromList [DoParallelization]
+                                  , currentFuel = Nothing
                                   }
 
 putError st e = st {interpreterErrors = e : interpreterErrors st}
@@ -178,6 +205,11 @@ setLanguage lang_string st =
                , ("pyon", PyonLanguage)
                , ("pyonasm", PyonAsmLanguage)
                ]
+
+setFuel fuel_string st =
+  case reads fuel_string
+  of (f, "") : _ | f >= 0 -> st {currentFuel = Just f}
+     _ -> putError st "Fuel must be a positive integer"
 
 addMacro mac st =
   let macro =
