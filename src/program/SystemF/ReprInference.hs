@@ -905,14 +905,7 @@ reprExp expression = traceShow (text "reprExp" <+> pprExp expression) $
        withDefs defs $ \defs' -> do
          (body', body_type) <- reprExp body
          return (ExpM $ LetfunE inf defs' body', body_type)
-     CaseE inf scr alts -> do 
-       (scr', scr_type) <- reprExp scr
-       -- TODO: coerce scrutinee
-       
-       -- Convert case alternatives.  Coerce them all to the same return type.
-       (return_type, _) <- cvtNormalizeReturnType =<< riInferExpType expression
-       alts' <- mapM (reprAlt return_type) alts
-       return (ExpM $ CaseE inf scr' alts', return_type)
+     CaseE inf scr alts -> reprCase expression inf scr alts
      ExceptE inf t -> do
        (t', _) <- cvtNormalizeNaturalType t
        return (ExpM $ ExceptE inf t', t')
@@ -924,6 +917,18 @@ reprApp inf op ty_args args = do
 
   -- Compute result type and coerce arguments
   reprApply op' op_type repr_ty_args args'
+
+reprCase original_exp inf scr alts = do
+  -- Produce a scrutinee in the natural representation
+  (scr', scr_type) <- reprExp scr
+  (natural_scr_type, _) <- cvtNormalizeNaturalType =<< riInferExpType scr
+  coerceExpAtType scr_type natural_scr_type scr' $ \natural_scr -> do
+
+    -- Convert case alternatives.  Coerce them all to the same return type.
+    (return_type, _) <- cvtNormalizeReturnType =<< riInferExpType original_exp
+    alts' <- mapM (reprAlt return_type) alts
+
+    return (ExpM $ CaseE inf natural_scr alts', return_type)
 
 -- | Convert a case alternative's representation, using the given type as
 --   the return type.
