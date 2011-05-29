@@ -16,6 +16,26 @@ pprLit :: Lit -> Doc
 pprLit (IntL n _) = text (show n)
 pprLit (FloatL n _) = text (show n)
 
+pprDmd :: Dmd -> Doc
+pprDmd (Dmd m s) =
+  text (showMultiplicity m) <> text ":" <> pprSpecificity s
+
+pprSpecificity Used = text "U"
+pprSpecificity Inspected = text "I"
+pprSpecificity (Decond mono_type spcs) = 
+  let type_doc =
+        case mono_type
+        of MonoCon con ty_args ex_types ->
+             let types_doc = [pprTypePrec t ?+ appPrec | t <- ty_args]
+                 ex_doc    = [ parens $ pprVar v <+> text ":" <+> pprType t
+                             | (v ::: t) <- ex_types]
+             in parens $ sep (pprVar con : types_doc ++ ex_doc)
+           MonoTuple ty_args ->
+             let types_doc = [pprTypePrec t ?+ appPrec | t <- ty_args]
+             in parens $ sep $ punctuate (text ",") types_doc
+  in text "D" <> braces (type_doc <> text ":" <> cat (map pprSpecificity spcs))
+
+pprSpecificity Unused = text "0"
 {-
 pprParamRepr repr =
   let repr_word = pprParamReprWord repr
@@ -36,12 +56,14 @@ pprReturnTypePrec (repr ::: ty) =
   pprReturnRepr repr <+> pprType ty `hasPrec` appPrec
 -}
 
+pprTypM (TypM t) = pprType t
+
 pprTyPat :: TyPat Mem -> Doc
 pprTyPat (TyPatM (v ::: t)) = pprVar v <+> text ":" <+> pprType t
 
 pprPat :: PatM -> Doc
 pprPat (PatM (v ::: pt) uses) =
-  text (showDmd uses) <+> pprVar v <+> text ":" <+> pprType pt
+  brackets (pprDmd uses) <+> pprVar v <+> text ":" <+> pprType pt
 
 pprExp :: ExpM -> Doc
 pprExp e = unparenthesized $ pprExpPrec e

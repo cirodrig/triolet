@@ -135,9 +135,10 @@ instance Renameable Specificity where
   rename rn spc =
     case spc
     of Decond (MonoCon con ty_args ex_types) spcs ->
-         let mono_con =
-               MonoCon con (rename rn ty_args) [v ::: rename rn t | (v ::: t) <- ex_types]
-         in Decond mono_con (rename rn spcs)
+         let ty_args' = rename rn ty_args
+         in renameBindings rn ex_types $ \rn' ex_types' ->
+            let mono_con = MonoCon con ty_args' ex_types'
+            in Decond mono_con (rename rn' spcs)
        
        Decond (MonoTuple types) spcs ->
          let types' = rename rn types
@@ -215,7 +216,7 @@ showSpecificity (Decond mono_con spcs) =
       case mono_con
       of MonoCon c tys ty_args
            | null tys && null ty_args -> show c ++ ":"
-           | otherwise -> "(" ++ show c ++ " ...):"
+           | otherwise -> "(" ++ show c ++  " ...):"
          MonoTuple _ -> ""
 showSpecificity Inspected = "I"
 showSpecificity Used = "U"

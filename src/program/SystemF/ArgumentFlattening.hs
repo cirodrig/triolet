@@ -653,10 +653,17 @@ planParameters :: (ReprDictMonad m, EvalMonad m) =>
                   [PatM] -> m [FlatArg]
 planParameters pats = mapM planParameter pats
 
--- | Decide how to flatten a function argument
+-- | Decide how to flatten a function argument.
 planParameter :: (ReprDictMonad m, EvalMonad m) => PatM -> m FlatArg
-planParameter pat =
-  case specificity $ patMDmd pat
+planParameter pat = planParameter' (patMBinder pat) (specificity $ patMDmd pat)
+
+-- | Decide how to flatten a function argument.
+--
+--   Types inside the specificity may be invalid, and will be ignored.
+planParameter' :: (ReprDictMonad m, EvalMonad m) =>
+                  Binder -> Specificity -> m FlatArg
+planParameter' (pat_var ::: pat_type) spc =
+  case spc
   of Used -> used_parameter
 
      -- Don't remove or flatten dictionary parameters
@@ -665,42 +672,49 @@ planParameter pat =
      Inspected -> do
        -- If data type has a single constructor, then deconstruct it.
        tenv <- getTypeEnv
-       whnf_type <- reduceToWhnf (patMType pat)
+       whnf_type <- reduceToWhnf pat_type
        case fromVarApp whnf_type of
          Just (op, args)
            | Just data_con <- fromProductTyCon tenv op ->
                decon_decomp (dataConCon data_con) args Nothing
          _ -> id_decomp
 
-     Decond (MonoCon op ty_args ex_types) spcs ->
-       decon_decomp op ty_args (Just spcs)
+     Decond (MonoCon spc_con _ _) spcs -> do
+       -- Data type must be a constructor application.
+       -- Get its type arguments from the pattern type.
+       -- Don't use type arguments from the specificity.
+       tenv <- getTypeEnv
+       whnf_type <- reduceToWhnf pat_type
+       case fromVarApp whnf_type of
+         Just (op, args) -> decon_decomp spc_con args (Just spcs) 
+         Nothing -> internalError "planParameter': Type mismatch"
 
      Decond (MonoTuple _) spcs ->
        -- Currently don't know how to unpack unboxed tuples
        used_parameter
 
      Unused -> do
-       dead_expr <- deadValue (patMType pat)
+       dead_expr <- deadValue pat_type
        return $ FlatArg new_pat (DeadDecomp dead_expr)
   where
     used_parameter = do
       -- if pattern is a Stored type, then deconstruct it.
       -- Otherwise leave it unchanged.
-      whnf_type <- reduceToWhnf (patMType pat)
+      whnf_type <- reduceToWhnf pat_type
       case fromVarApp whnf_type of
         Just (op, [arg])
           | op `isPyonBuiltin` the_Stored ->
               decon_decomp (pyonBuiltin the_stored) [arg] Nothing
         _ -> id_decomp
-    
+
     is_dictionary_pattern =
-      case fromVarApp $ patMType pat
+      case fromVarApp pat_type
       of Just (op, _) -> isDictionaryTypeCon op
          _ -> False
 
     -- Flattening alters the way that variables are demanded, so
     -- clear the demand information
-    new_pat = setPatMDmd unknownDmd pat
+    new_pat = patM (pat_var ::: pat_type)
 
     id_decomp = return $ FlatArg new_pat IdDecomp
 
@@ -737,14 +751,9 @@ planDeconstructedValue con ty_args maybe_fields = do
     plan_fields ((f_type, f_specificity):fs) = do
       -- Create a new pattern for this field
       v <- newAnonymousVar ObjectLevel
-      let uses = case f_specificity
-                 of Unused -> Dead
-                    _ -> ManyUnsafe
-          field_pattern = setPatMDmd (Dmd uses f_specificity) $
-                          patM (v ::: f_type)
 
       -- Decide how to deconstruct
-      f_plan <- planParameter field_pattern
+      f_plan <- planParameter' (v ::: f_type) f_specificity
       
       -- Process remaining fields
       fs_plans <- assume v f_type $ plan_fields fs
