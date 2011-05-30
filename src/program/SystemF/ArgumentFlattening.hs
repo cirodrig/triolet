@@ -636,10 +636,11 @@ flattenLocalRead flat_local@(FlatLocal flat_arg) expr consumer = do
   where
     arg_type = patMType $ faPattern flat_arg
 
-    -- Bind the value, then deconstruct it
+    -- Bind the value to the original pattern, deconstruct it,
+    -- and finally consume it
     decon_value =
       let decon_expr = flattenParameter flat_arg consumer
-      in ExpM $ LetE defaultExpInfo (faPattern flat_arg) expr decon_value
+      in ExpM $ LetE defaultExpInfo (faPattern flat_arg) expr decon_expr
 
 -- | Transform a flattened return value to packed form
 packReturn :: (EvalMonad m, ReprDictMonad m) =>
@@ -669,79 +670,110 @@ packReturn flat_ret orig_exp =
 -------------------------------------------------------------------------------
 -- * Decisions on how to flatten
 
+-- | Flattening decisions are made differently for parameter types,
+--   return types, and local variables.
+--       
+--   It is always possible to undo flattening for parameter and return values.
+--   However, local variables can only be unflattened around function calls and
+--   case statements; these are also the only kinds of uses that may produce a
+--   demand other than 'Used'.  Local variables are flattened parsimoniously,
+--   guaranteeing that they can be unflattened where necessary.  Parameters and
+--   returns are flattened liberally.
+data PlanMode = Parsimonious    -- ^ Don't flatten unless it's determined to
+                                --   be beneficial
+              | LiberalStored   -- ^ Flatten @Stored@ types even if it doesn't
+                                --   seem to be beneficial
+              | Liberal         -- ^ Flatten singleton data types
+                                --   (including @Stored@) even if it
+                                --   doesn't seem to be beneficial
+                deriving(Eq)
+
 -- | Decide how to flatten a function arguments
 planParameters :: (ReprDictMonad m, EvalMonad m) =>
-                  [PatM] -> m [FlatArg]
-planParameters pats = mapM planParameter pats
+                  PlanMode -> [PatM] -> m [FlatArg]
+planParameters mode pats = mapM (planParameter mode) pats
 
 -- | Decide how to flatten a function argument.
-planParameter :: (ReprDictMonad m, EvalMonad m) => PatM -> m FlatArg
-planParameter pat = planParameter' (patMBinder pat) (specificity $ patMDmd pat)
+planParameter :: (ReprDictMonad m, EvalMonad m) =>
+                 PlanMode -> PatM -> m FlatArg
+planParameter mode pat = do
+  (whnf_type, decomp) <-
+    planFlattening mode (patMType pat) (specificity $ patMDmd pat)
 
--- | Decide how to flatten a function argument.
---
---   Types inside the specificity may be invalid, and will be ignored.
-planParameter' :: (ReprDictMonad m, EvalMonad m) =>
-                  Binder -> Specificity -> m FlatArg
-planParameter' (pat_var ::: pat_type) spc =
-  case spc
-  of Used -> used_parameter
+  -- Create a new pattern with unknown demand information
+  return $ FlatArg (patM (patMVar pat ::: whnf_type)) decomp
 
-     -- Don't remove or flatten dictionary parameters
-     _ | is_dictionary_pattern -> used_parameter
+planFlattening :: (ReprDictMonad m, EvalMonad m) =>
+                  PlanMode -> Type -> Specificity -> m (Type, Decomp)
+planFlattening mode ty spc = do
+  tenv <- getTypeEnv
+  whnf_type <- reduceToWhnf ty
+  
+  let
+    -- The return value will have of these decompositions 
+    id_decomp = return (whnf_type, IdDecomp)
 
-     Inspected -> do
-       -- If data type has a single constructor, then deconstruct it.
-       tenv <- getTypeEnv
-       whnf_type <- reduceToWhnf pat_type
-       case fromVarApp whnf_type of
-         Just (op, args)
-           | Just data_con <- fromProductTyCon tenv op ->
-               decon_decomp (dataConCon data_con) args Nothing
-         _ -> id_decomp
-
-     Decond (MonoCon spc_con _ _) spcs -> do
-       -- Data type must be a constructor application.
-       -- Get its type arguments from the pattern type.
-       -- Don't use type arguments from the specificity.
-       tenv <- getTypeEnv
-       whnf_type <- reduceToWhnf pat_type
-       case fromVarApp whnf_type of
-         Just (op, args) -> decon_decomp spc_con args (Just spcs) 
+    dead_decomp = do
+      dead_expr <- deadValue whnf_type
+      return (whnf_type, DeadDecomp dead_expr)
+      
+    decon_decomp con spcs =
+      -- Data type must be a constructor application.
+      -- Get its type arguments from the pattern type.
+      case fromVarApp whnf_type
+      of Just (op, args) -> do
+           decomp <- planDeconstructedValue mode con args spcs
+           return (whnf_type, decomp)
          Nothing -> internalError "planParameter': Type mismatch"
 
-     Decond (MonoTuple _) spcs ->
-       -- Currently don't know how to unpack unboxed tuples
-       used_parameter
+    -- If data type has a singleton constructor, then deconstruct it.
+    singleton_decomp =
+      case fromVarApp whnf_type
+      of Just (op, _) | Just data_con <- fromProductTyCon tenv op ->
+           decon_decomp (dataConCon data_con) Nothing
+         _ -> id_decomp
 
-     Unused -> do
-       dead_expr <- deadValue pat_type
-       return $ FlatArg new_pat (DeadDecomp dead_expr)
+    -- If data type is a Stored type, then deconstruct it.
+    stored_decomp =
+      case fromVarApp whnf_type
+      of Just (op, [arg]) | op `isPyonBuiltin` the_Stored ->
+           decon_decomp (pyonBuiltin the_stored) Nothing
+         _ -> id_decomp
+
+  case spc of
+    -- Don't flatten or remove Repr parameters, because later stages of the
+    -- compiler might want to access them. 
+    _ | is_repr_pattern whnf_type -> id_decomp
+
+    -- Remove dead fields
+    Unused -> dead_decomp
+
+    -- Don't flatten dictionary parameters.  Removing dead dictionaries is OK.
+    _ | is_dictionary_pattern whnf_type -> id_decomp
+
+    Decond (MonoCon spc_con _ _) spcs -> decon_decomp spc_con (Just spcs)
+
+    -- Unpacking is not implemented for unboxed tuples
+    Decond (MonoTuple _) spcs -> id_decomp
+
+    Inspected -> singleton_decomp
+
+    Used -> 
+      case mode 
+      of Parsimonious -> id_decomp
+         LiberalStored -> stored_decomp
+         Liberal -> singleton_decomp
+           
   where
-    used_parameter = do
-      -- if pattern is a Stored type, then deconstruct it.
-      -- Otherwise leave it unchanged.
-      whnf_type <- reduceToWhnf pat_type
-      case fromVarApp whnf_type of
-        Just (op, [arg])
-          | op `isPyonBuiltin` the_Stored ->
-              decon_decomp (pyonBuiltin the_stored) [arg] Nothing
-        _ -> id_decomp
-
-    is_dictionary_pattern =
-      case fromVarApp pat_type
-      of Just (op, _) -> isDictionaryTypeCon op
+    is_repr_pattern t =
+      case fromVarApp t
+      of Just (op, _) -> op == pyonBuiltin the_Repr
          _ -> False
 
-    -- Flattening alters the way that variables are demanded, so
-    -- clear the demand information
-    new_pat = patM (pat_var ::: pat_type)
-
-    id_decomp = return $ FlatArg new_pat IdDecomp
-
-    decon_decomp data_con args spcs = do
-      d <- planDeconstructedValue data_con args spcs
-      return $ FlatArg new_pat d
+    is_dictionary_pattern t =
+      case fromVarApp t
+      of Just (op, _) -> isDictionaryTypeCon op
+         _ -> False
 
 -- | Deconstruct a parameter into its component fields.
 --
@@ -749,9 +781,9 @@ planParameter' (pat_var ::: pat_type) spc =
 --   to direct the deconstruction plan.  Types inside the specificity are
 --   ignored.
 planDeconstructedValue :: (ReprDictMonad m, EvalMonad m) =>
-                          Var -> [Type] -> Maybe [Specificity]
+                          PlanMode -> Var -> [Type] -> Maybe [Specificity]
                        -> m Decomp
-planDeconstructedValue con ty_args maybe_fields = do
+planDeconstructedValue mode con ty_args maybe_fields = do
   tenv <- getTypeEnv
   case lookupDataCon con tenv of
     Just datacon_type -> do
@@ -770,31 +802,31 @@ planDeconstructedValue con ty_args maybe_fields = do
     _ -> internalError "planDeconstructedValue: Unknown data constructor"
   where
     plan_fields ((f_type, f_specificity):fs) = do
+      -- Decide how to deconstruct
+      (whnf_f_type, f_decomp) <- planFlattening mode f_type f_specificity
+      
       -- Create a new pattern for this field
       v <- newAnonymousVar ObjectLevel
+      let f_plan = FlatArg (patM (v ::: whnf_f_type)) f_decomp
 
-      -- Decide how to deconstruct
-      f_plan <- planParameter' (v ::: f_type) f_specificity
-      
       -- Process remaining fields
       fs_plans <- assume v f_type $ plan_fields fs
       return (f_plan : fs_plans)
     
     plan_fields [] = return []
 
--- | Construct an arbitrary value of the given type.  The value will not be
---   used in the program.
+-- | Construct an arbitrary value of the given type to replace an expression 
+--   whose value is dead.  The argument should be in WHNF.
 deadValue t = do
   tenv <- getTypeEnv
   case toBaseKind $ typeKind tenv t of
-    ValK -> do
-      whnf_t <- reduceToWhnf t
-      case whnf_t of
+    ValK ->
+      case t of
         VarT v
           | v `isPyonBuiltin` the_int ->
-              return $ ExpM $ LitE defaultExpInfo $ IntL 0 whnf_t
+              return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
           | v `isPyonBuiltin` the_float ->
-              return $ ExpM $ LitE defaultExpInfo $ FloatL 0 whnf_t
+              return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
         _ -> internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box
@@ -808,22 +840,17 @@ deadValue t = do
     dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadRef)
 
 
-planReturn :: (ReprDictMonad m, EvalMonad m) => TypM -> m FlatRet
-planReturn (TypM ty) = do
-  tenv <- getTypeEnv
-  ty' <- reduceToWhnf ty
-  case fromVarApp ty' of
-    Just (op, args)
-      | Just dcon_type <- fromProductTyCon tenv op -> do
-          decon <- planDeconstructedValue (dataConCon dcon_type) args Nothing
-          return $ FlatRet ty' decon
-    _ -> return $ FlatRet ty' IdDecomp
+planReturn :: (ReprDictMonad m, EvalMonad m) =>
+              PlanMode -> Specificity -> TypM -> m FlatRet
+planReturn mode spc (TypM ty) = do
+  (whnf_type, decomp) <- planFlattening mode ty spc
+  return $ FlatRet whnf_type decomp
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming a return-by-value function only.
 planValueReturn :: (ReprDictMonad m, EvalMonad m) =>
                    TypM -> m PlanRet
-planValueReturn ty = liftM PlanRetValue $ planReturn ty
+planValueReturn ty = liftM PlanRetValue $ planReturn Liberal Used ty
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming an initializer function only.
@@ -831,7 +858,7 @@ planOutputReturn :: (ReprDictMonad m, EvalMonad m) =>
                     PatM -> m PlanRet
 planOutputReturn pat = do
   tenv <- getTypeEnv
-  flat_ret <- planReturn $ TypM $ patMType pat
+  flat_ret <- planReturn Liberal Used $ TypM $ patMType pat
 
   -- Only perform decomposition if everything was converted to a value
   let real_ret =
@@ -884,19 +911,17 @@ packLocal (FlatLocal flat_arg) consumer
 --   The decomposition strategy is the same as for decomposing a return value.
 planLocal :: (ReprDictMonad m, EvalMonad m) => PatM -> m FlatLocal
 planLocal pat = do
+  flat_arg <- planParameter Parsimonious pat
   tenv <- getTypeEnv
-  choose_flattening tenv =<< planReturn (TypM $ patMType pat)
+  choose_flattening tenv flat_arg
   where
-    id_plan = FlatLocal (FlatArg pat IdDecomp)
-
-    choose_flattening tenv flat_ret = 
-      case frDecomp flat_ret
-      of IdDecomp -> return id_plan
-         DeadDecomp _ -> return id_plan
-         decomp@(DeconDecomp {})
+    choose_flattening tenv flat_arg@(FlatArg pat decomp) = 
+      case decomp
+      of DeconDecomp {}
            -- Don't decompose if some fields are bare references
-           | not $ unpacksToAValue tenv flat_ret -> return id_plan
-           | otherwise -> return $ FlatLocal (FlatArg pat decomp)
+           | not $ unpacksToAValue tenv $ flatArgReturn flat_arg ->
+               return $ FlatLocal (FlatArg pat IdDecomp)
+         _ -> return $ FlatLocal flat_arg
 
 -------------------------------------------------------------------------------
 -- * The argument flattening transformation on a function
@@ -985,7 +1010,7 @@ planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
   tenv <- getTypeEnv
   let (input_params, output_params) = partition_parameters tenv $ funParams f
 
-  params <- planParameters input_params
+  params <- planParameters LiberalStored input_params
 
   -- There should be either one or zero output parameters
   ret <- case output_params
@@ -1333,7 +1358,7 @@ lvLet inf binder rhs body = do
 lvCase inf scr alts =
   lvRepackIfUnpacked scr $ do
     scr' <- lvExp scr
-    lvTransformCase inf scr alts
+    lvTransformCase inf scr' alts
 
 -- | Transform case bindings of @boxed@ type.
 --
@@ -1383,7 +1408,7 @@ lvFlattenBinding is_write inf flat_local@(FlatLocal (FlatArg pat decomp)) rhs bo
       tenv <- getTypeEnv
       return $ if is_write
                then bindVariable tenv (patMBinder pat) rhs body'
-               else ExpM $ LetE inf pat rhs body'
+               else ExpM $ LetE inf (setPatMDmd unknownDmd pat) rhs body'
 
   | otherwise = do
       -- Flatten the source value

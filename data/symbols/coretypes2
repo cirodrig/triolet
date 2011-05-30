@@ -592,7 +592,7 @@ min_ii : (m n : intindex)
 deadBox : (a : box) -> a;
 
 -- A dummy referenced object that is used as a placeholder for a dead value.
-deadRef : (a : bare) -> a;
+deadRef : (a : bare) -> Writer a;
 
 oper_DO : (a : bare) -> Repr a -> Writer a -> Stream list_shape a;
 
