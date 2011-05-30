@@ -223,7 +223,8 @@ typeInferFun fun@(FunSF (Fun { funInfo = info
     ti_return_type <- typeInferType return_type
     
     -- Inferred type must match return type
-    checkType noSourcePos (fromTypSF return_type) (getTypeAnn ti_body)
+    checkType (text "Return type mismatch") (getSourcePos info)
+      (fromTypSF return_type) (getTypeAnn ti_body)
     
     -- Create the function's type
     let ty = functionType fun
@@ -245,7 +246,8 @@ typeInferLetE inf pat expression body = do
   ti_exp <- typeInferExp expression
   
   -- Expression type must match pattern type
-  checkType noSourcePos (getTypeAnn ti_exp) (patType pat)
+  checkType (text "Let binder doesn't match type of right-hand side") (getSourcePos inf)
+    (getTypeAnn ti_exp) (patType pat)
 
   -- Assume the pattern while inferring the body; result is the body's type
   assumePat pat $ \pat' -> do
@@ -275,7 +277,8 @@ typeInferCaseE inf scr alts = do
 
   -- All alternatives must match
   let alt_subst_types = map getTypeAnn ti_alts
-  zipWithM (checkType pos) alt_subst_types (tail alt_subst_types)
+      msg = text "Case alternatives return different types"
+  zipWithM (checkType msg pos) alt_subst_types (tail alt_subst_types)
 
   -- The expression's type is the type of an alternative
   let result_type = getTypeAnn $ head ti_alts
@@ -298,7 +301,8 @@ typeCheckAlternative pos scr_type (AltSF (DeCon { altConstructor = con
     in instantiatePatternType pos con_ty argument_types existential_types
 
   -- Verify that applied type matches constructor type
-  checkType pos scr_type con_scr_type
+  checkType (text "Case alternative doesn't match scrutinee type") pos
+    scr_type con_scr_type
   
   -- Add existential types to environment
   withMany assumeTyPat ex_fields $ \ex_fields' -> do
@@ -338,9 +342,10 @@ bindParamTypes params m = foldr bind_param_type m params
       assume param (fromTypTSF param_ty) m
 
 -- | Verify that the given paramater matches the expected parameter
-checkAltParam pos expected_type (VarP field_var given_type) = do 
+checkAltParam pos expected_type (VarP field_var given_type) = do
   gt <- typeInferType (TypSF given_type)
-  checkType pos expected_type (fromTypTSF gt)
+  let msg = text "Wrong type in field of pattern"
+  checkType msg pos expected_type (fromTypTSF gt)
   return (TypedVarP field_var gt)
 
 typeCheckDefGroup :: DefGroup (Def SF) -> (DefGroup (Def TSF) -> TCM b) -> TCM b

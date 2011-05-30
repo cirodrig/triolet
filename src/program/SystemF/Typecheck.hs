@@ -73,8 +73,14 @@ tcLookupDataCon v = do
     Just dct -> return dct
     Nothing -> internalError $ "lookupVar: No type for data constructor: " ++ show v
 
-checkType :: SourcePos -> Type -> Type -> TCM Bool
-checkType pos expected given = compareTypes expected given
+-- | Throw an error if the given types do not match
+checkType :: Doc -> SourcePos -> Type -> Type -> TCM ()
+checkType message pos expected given = compareTypes expected given >>= ck
+  where
+    error_message = "Type error at " ++ show pos ++ ":\n" ++ show message
+
+    ck True  = return ()
+    ck False = typeError error_message
 
 checkLiteralType :: Lit -> TCM ()
 checkLiteralType l =
@@ -120,7 +126,7 @@ instantiatePatternType pos con_ty arg_vals ex_vars
       instantiateDataConType con_ty (map fst arg_vals) (map fst ex_vars)
   where
     check_argument_type (_ ::: expected_type) (_, given_type) =
-      checkType pos expected_type given_type
+      checkType (text "Error in type application") pos expected_type given_type
       
     check_ex_pattern (_ ::: expected_type) (_, given_type) =
-      checkType pos expected_type given_type
+      checkType (text "Error in type application") pos expected_type given_type

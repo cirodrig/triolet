@@ -272,7 +272,8 @@ typeInferFun fun@(FunM (Fun { funInfo = info
 
     -- Inferred type must match return type
     new_ret_type <- typeInferType return_type
-    checkType noSourcePos (fromTypM return_type) (getExpType ti_body)
+    checkType (text "Return type mismatch") (getSourcePos info)
+      (fromTypM return_type) (getExpType ti_body)
     
     -- Create the function's type
     let ty = functionType fun
@@ -294,7 +295,8 @@ typeInferLetE inf pat expression body = do
   ti_exp <- typeInferExp expression
 
   -- Expression type must match pattern type
-  checkType noSourcePos (getExpType ti_exp) (patType pat)
+  checkType (text "Let binder doesn't match type of right-hand side") (getSourcePos inf)
+    (getExpType ti_exp) (patType pat)
 
   -- Assume the pattern while inferring the body; result is the body's type
   assumePat pat $ \ti_pat -> do
@@ -325,8 +327,9 @@ typeInferCaseE inf scr alts = do
 
   -- All alternatives must match
   let alt_subst_types = [rt | AltTM (TypeAnn rt _) <- ti_alts]
-  zipWithM (checkType pos) alt_subst_types (tail alt_subst_types)
-
+      msg = text "Case alternatives return different types"
+  zipWithM (checkType msg pos) alt_subst_types (tail alt_subst_types)
+  
   -- The expression's type is the type of an alternative
   let result_type = case head ti_alts of AltTM (TypeAnn rt _) -> rt
   return $! ExpTM $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
@@ -347,9 +350,19 @@ typeCheckAlternative pos scr_type (AltM (DeCon { altConstructor = con
           [(ty, kind) | TypTM (TypeAnn kind ty) <- arg_vals]
         existential_vars = [(v, k) | TyPatM (v ::: k) <- ex_fields]
     in instantiatePatternType pos con_ty argument_types existential_vars
+  
+  -- Sanity check.  These types cannot be pattern-matched.
+  let invalid_type =
+        case con_scr_type
+        of FunT {} -> True
+           AppT (VarT v) _ | v `isPyonBuiltin` the_OutPtr -> True
+                           | v `isPyonBuiltin` the_IEffect -> True
+           _ -> False
+  when invalid_type $ internalError "typeCheckAlternative: Invalid pattern"
 
   -- Verify that applied type matches constructor type
-  checkType pos scr_type con_scr_type
+  checkType (text "Case alternative doesn't match scrutinee type") pos
+    scr_type con_scr_type
 
   -- Add existential variables to environment
   withMany assumeTyPat ex_fields $ \ex_fields' -> do
@@ -380,7 +393,8 @@ typeCheckAlternative pos scr_type (AltM (DeCon { altConstructor = con
 
     check_arg expected_rtype pat =
       let given_type = patMType pat
-      in checkType pos expected_rtype given_type
+          msg = text "Wrong type in field of pattern"
+      in checkType msg pos expected_rtype given_type
 
 typeCheckAlternative pos scr_type (AltM (DeTuple { altParams = fields
                                                  , altBody = body})) = do
@@ -397,7 +411,7 @@ typeCheckAlternative pos scr_type (AltM (DeTuple { altParams = fields
   -- Verify that the tuple type matches the scrutinee type
   let tuple_type =
         typeApp (UTupleT $ map toBaseKind kinds) (map patMType fields)
-  checkType pos scr_type tuple_type
+  checkType (text "Wrong type in field of pattern") pos scr_type tuple_type
 
   -- Add fields to enironment
   withMany assumePat fields $ \fields' -> do
