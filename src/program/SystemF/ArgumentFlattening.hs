@@ -588,7 +588,7 @@ flattenReturnFields :: (EvalMonad m, ReprDictMonad m) =>
 flattenReturnFields fields e = foldM flatten_field e fields
   where
     flatten_field consumer (exp, arg) =
-      flattenLocal (FlatLocal arg) exp consumer
+      flattenLocalWrite (FlatLocal arg) exp consumer
 
 -- | Flatten a local value.  The flattened values are bound to variables
 --   in the context of a consumer expression.
@@ -598,9 +598,9 @@ flattenReturnFields fields e = foldM flatten_field e fields
 --
 --   The return value is flattened to a value or tuple using 'flattenReturn', 
 --   then the result is bound to variables.
-flattenLocal :: (EvalMonad m, ReprDictMonad m) =>
-                FlatLocal -> ExpM -> ExpM -> m ExpM
-flattenLocal (FlatLocal (FlatArg old_binder decomp)) expr consumer =
+flattenLocalWrite :: (EvalMonad m, ReprDictMonad m) =>
+                     FlatLocal -> ExpM -> ExpM -> m ExpM
+flattenLocalWrite (FlatLocal (FlatArg old_binder decomp)) expr consumer =
   case decomp
   of IdDecomp ->
        -- Only allowed for value or boxed objects.
@@ -619,6 +619,27 @@ flattenLocal (FlatLocal (FlatArg old_binder decomp)) expr consumer =
     
     flatten_patterns flat_args =
       return $ flattenParameters flat_args consumer
+
+-- | Flatten a local read value.
+--
+--   For value or boxed types, this simply calls 'flattenLocalWrite'.
+--   For bare types, the value is bound to a variable, then deconstructed
+--   with 'flattenParameter'.
+flattenLocalRead :: (EvalMonad m, ReprDictMonad m) =>
+                    FlatLocal -> ExpM -> ExpM -> m ExpM
+flattenLocalRead flat_local@(FlatLocal flat_arg) expr consumer = do
+  tenv <- getTypeEnv
+  case toBaseKind $ typeKind tenv arg_type of
+    BareK -> return decon_value
+    ValK  -> flattenLocalWrite flat_local expr consumer
+    BoxK  -> flattenLocalWrite flat_local expr consumer
+  where
+    arg_type = patMType $ faPattern flat_arg
+
+    -- Bind the value, then deconstruct it
+    decon_value =
+      let decon_expr = flattenParameter flat_arg consumer
+      in ExpM $ LetE defaultExpInfo (faPattern flat_arg) expr decon_value
 
 -- | Transform a flattened return value to packed form
 packReturn :: (EvalMonad m, ReprDictMonad m) =>
@@ -1234,6 +1255,29 @@ deleteUnpackedLocalVariable v m = AF $ local delete_var $ unAF m
     delete_var env =
       env {afOther = IntMap.delete (fromIdent $ varID v) $ afOther env}
 
+-- | If the given expression is an unpacked variable, then repack it.
+--   Also, remove the unpacked variable from the local variable map.
+--
+--   Repacking generates the code:
+--
+-- > let original_variable = (recreate the original value)
+-- > in consumer_expression
+lvRepackIfUnpacked :: ExpM -> LF ExpM -> LF ExpM
+lvRepackIfUnpacked (ExpM (VarE _ v)) mk_consumer = do
+  m_unpacking <- lookupUnpackedLocalVariable v
+  case m_unpacking of
+    Just flattening -> do
+      -- The expression is a variable that has been unpacked.
+      -- Repack it in the context of the consumer.
+      consumer <- deleteUnpackedLocalVariable v mk_consumer
+      packLocal flattening consumer
+    Nothing -> do
+      mk_consumer
+
+lvRepackIfUnpacked _ mk_consumer =
+  -- Other expressions aren't deleted
+  mk_consumer
+
 -- | Perform local variable flattening on the body of a function
 lvInFun :: FunM -> LF FunM
 lvInFun (FunM f) =
@@ -1269,40 +1313,27 @@ lvExp expression =
      CaseE inf scr alts -> lvCase inf scr alts
      ExceptE _ _ -> return expression
 
-lvApp inf op ty_args args = do
+lvApp inf op ty_args args = repack_args $ do
   op' <- lvExp op
   args' <- mapM lvExp args
   return $ ExpM $ AppE inf op' ty_args args'
+  where
+    repack_args m = foldr lvRepackIfUnpacked m args
 
 lvLet :: ExpInfo -> PatM -> ExpM -> ExpM -> LF ExpM
 lvLet inf binder rhs body = do
   rhs' <- lvExp rhs
   binder_plan <- planLocal binder
-  lvFlattenBinding inf binder_plan rhs' body
+  lvFlattenBinding False inf binder_plan rhs' body
 
 -- | Transform local variables for a case statement.
 -- First, if the scrutinee was a transformed local variable, then insert code
 -- to repack the variable just before the case statement.
 --
--- > let original_variable = (recreate the original value)
--- > in case original_variable of ...
 lvCase inf scr alts =
-  case scr
-  of ExpM (VarE scr_info scr_var) -> do
-       m_unpacking <- lookupUnpackedLocalVariable scr_var
-       case m_unpacking of
-         Just flattening -> do
-           -- The scrutinee is a variable that has been unpacked.
-           -- Generate code to repack the scrutinee variable.  Process the
-           -- case statement as normal.
-           exp <- deleteUnpackedLocalVariable scr_var transform_case
-           packLocal flattening exp
-         Nothing -> transform_case
-     _ -> transform_case
-  where
-    transform_case = do
-      scr' <- lvExp scr
-      lvTransformCase inf scr alts
+  lvRepackIfUnpacked scr $ do
+    scr' <- lvExp scr
+    lvTransformCase inf scr alts
 
 -- | Transform case bindings of @boxed@ type.
 --
@@ -1333,7 +1364,7 @@ lvTransformCase inf scr [altm]
           -- 'lvFlattenBinding' only adds the newly created scrutinee variable,
           -- which isn't used by the program.
           assumePat param $ withUnpackedLocalVariable binder_plan $
-            lvFlattenBinding inf plan scr body
+            lvFlattenBinding True inf plan scr body
 
 lvTransformCase inf scr alts = lvRecurseCase inf scr alts
 
@@ -1344,18 +1375,23 @@ lvRecurseCase inf scr alts = do
   alts' <- mapM lvInAlt alts
   return $ ExpM $ CaseE inf scr alts'
 
-lvFlattenBinding :: ExpInfo -> FlatLocal -> ExpM -> ExpM -> LF ExpM
-lvFlattenBinding inf flat_local@(FlatLocal (FlatArg pat decomp)) rhs body
+lvFlattenBinding :: Bool -> ExpInfo -> FlatLocal -> ExpM -> ExpM -> LF ExpM
+lvFlattenBinding is_write inf flat_local@(FlatLocal (FlatArg pat decomp)) rhs body
   | isIdDecomp decomp = do
       -- Don't deconstruct the source expression
       body' <- assumePat pat $ lvExp body
       tenv <- getTypeEnv
-      return $ bindVariable tenv (patMBinder pat) rhs body'
+      return $ if is_write
+               then bindVariable tenv (patMBinder pat) rhs body'
+               else ExpM $ LetE inf pat rhs body'
 
   | otherwise = do
       -- Flatten the source value
       let ret = flatLocalReturn flat_local
-      flat_rhs <- flattenLocal flat_local rhs $ flattenedReturnValue ret
+      flat_rhs <-
+        if is_write
+        then flattenLocalWrite flat_local rhs $ flattenedReturnValue ret
+        else flattenLocalRead flat_local rhs $ flattenedReturnValue ret
 
       -- Transform the body   
       body' <- assumePat pat $
