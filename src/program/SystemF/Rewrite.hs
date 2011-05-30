@@ -371,12 +371,16 @@ rwConvertToBoxed inf [TypM bare_type] [repr, arg]
               -- Otherwise, cannot simplify
               return Nothing
   where
+    -- Argument is an initializer expression whose output has 'StoredBox' type.
+    -- Bind it to a temporary value, then deconstruct it.
     deconstruct_stored_box boxed_type = do
       tenv <- getTypeEnv
-      caseE (return arg)
-        [mkAlt undefined tenv (pyonBuiltin the_storedBox)
-         [TypM boxed_type]
-         (\ [] [boxed_ref] -> varE boxed_ref)]
+      localE (TypM bare_type) (return arg)
+        (\arg_val ->
+          caseE (varE arg_val) 
+          [mkAlt undefined tenv (pyonBuiltin the_storedBox)
+           [TypM boxed_type]
+           (\ [] [boxed_ref] -> varE boxed_ref)])
     
     construct_boxed whnf_type = do
       varAppE (pyonBuiltin the_boxed) [TypM whnf_type] [return arg]
