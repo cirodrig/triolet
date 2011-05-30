@@ -90,6 +90,11 @@ pprExpPrec (ExpM expression) =
            body_doc = pprExp body
        in text "letfun" <+> defs_doc $$ body_doc
           `hasPrec` stmtPrec
+     CaseE _ scr [altm@(AltM alt)] ->
+       let binder_doc = text "let" <+> pprPatternMatch altm <+> text "="
+           scr_doc = pprExp scr
+           body_doc = pprExp (altBody alt)
+       in hang binder_doc 8 scr_doc $$ body_doc `hasPrec` stmtPrec
      CaseE _ scr alts ->
        let case_doc = text "case" <+> pprExpPrec scr ? stmtPrec 
            of_doc = text "of" <+> vcat (map pprAlt alts)
@@ -97,19 +102,19 @@ pprExpPrec (ExpM expression) =
      ExceptE _ rt ->
        text "except" <+> pprType rt `hasPrec` stmtPrec
 
-pprAlt (AltM (DeCon con ty_args ex_types params body)) =
+pprPatternMatch (AltM (DeCon con ty_args ex_types params _)) =
   let con_doc = pprVar con
       args_doc = pprParenList [pprType t | TypM t <- ty_args]
       ex_types_doc = map (parens . pprTyPat) ex_types
       params_doc = map (parens . pprPat) params
-      body_doc = pprExp body
-  in con_doc <+> sep (args_doc : ex_types_doc ++ params_doc) <> text "." $$
-     nest 2 body_doc
+  in con_doc <+> sep (args_doc : ex_types_doc ++ params_doc)
 
-pprAlt (AltM (DeTuple params body)) =
-  let params_doc = pprParenList (map pprPat params)
-      body_doc = pprExp body
-  in params_doc <> text "." $$ nest 2 body_doc
+pprPatternMatch (AltM (DeTuple params _)) =
+  pprParenList (map pprPat params)
+
+pprAlt altm@(AltM alt) =
+  pprPatternMatch altm <> text "." $$ 
+  nest 2 (pprExp $ altBody alt)
 
 pprFun f = unparenthesized $ pprFunPrec f
 
