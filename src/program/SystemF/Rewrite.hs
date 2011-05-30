@@ -303,8 +303,8 @@ rwConvertToBare inf [TypM bare_type] [repr, arg]
   | Just (op, _, [_, arg']) <- unpackVarAppM arg,
     op `isPyonBuiltin` the_convertToBoxed =
       -- Cancel applications of these constructors 
-      -- convertToBare (repr, convertToBoxed (_, e)) = copy repr e
-      return $ Just $ copy_value arg'
+      -- convertToBare (repr, convertToBoxed (_, e)) = e
+      return $ Just arg'
   | otherwise = do
       -- If the bare type is "StoredBox t", then construct the value
       whnf_type <- reduceToWhnf bare_type
@@ -325,11 +325,6 @@ rwConvertToBare inf [TypM bare_type] [repr, arg]
               -- Otherwise, cannot simplify
               return Nothing
   where
-    copy_value e =
-      ExpM $ AppE inf copy_op [TypM bare_type] [repr, e]
-      where
-        copy_op = ExpM $ VarE inf (pyonBuiltin the_copy)
-
     -- Create the expression
     --
     -- > storedBox boxed_type arg
