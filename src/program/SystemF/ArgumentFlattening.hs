@@ -898,13 +898,9 @@ flattenBoxedValue boxed_var (FlatLocal arg) =
 -- | Create the original form of the local variable, using the flattened
 --   variables
 packLocal :: (ReprDictMonad m, EvalMonad m) => FlatLocal -> ExpM -> m ExpM
-packLocal (FlatLocal flat_arg) consumer
-  | isIdArg flat_arg =
-      return consumer -- Local variable is already in scope
-  | otherwise = do
-      repack_exp <- packParameterWrite flat_arg
-      return $
-        ExpM $ LetE defaultExpInfo (faPattern flat_arg) repack_exp consumer
+packLocal (FlatLocal flat_arg) consumer = do
+  (_, packing_context) <- packParameterRead flat_arg
+  return $ packing_context consumer
 
 -- | Determine how to decompose a let-bound value based on its type.
 --
