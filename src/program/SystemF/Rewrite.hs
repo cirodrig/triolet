@@ -1422,7 +1422,7 @@ interpretStream2' shape_type elt_type repr expression =
        | op_var `isPyonBuiltin` the_count ->
            GenerateStream
            { _sexpShape = UnboundedShape
-           , _sexpType = intType
+           , _sexpType = storedIntType
            , _sexpRepr = repr
            , _sexpGenerator = counting_generator}
        | op_var `isPyonBuiltin` the_rangeIndexed ->
@@ -1430,7 +1430,7 @@ interpretStream2' shape_type elt_type repr expression =
              [size_val] = args
          in GenerateStream
             { _sexpShape = Array1DShape (TypM size_index) size_val
-            , _sexpType = intType
+            , _sexpType = storedIntType
             , _sexpRepr = repr
             , _sexpGenerator = counting_generator}
        | op_var `isPyonBuiltin` the_oper_CAT_MAP ->
