@@ -941,14 +941,21 @@ planRetFlatRet (PlanRetWriter _ fr) = fr
 --   type of a return flattening plan.
 --   They are used in the wrapper function.
 planRetOriginalInterface :: PlanRet -> ([PatM], TypM)
-planRetOriginalInterface (PlanRetValue fr) = ([], TypM $ frType fr)
-planRetOriginalInterface (PlanRetWriter p _) = ([p], TypM $ patMType p)
+planRetOriginalInterface (PlanRetValue fr) =
+  ([], TypM $ frType fr)
+
+planRetOriginalInterface (PlanRetWriter p fr) =
+  -- The return type is an effect type
+  let ret_type = varApp (pyonBuiltin the_IEffect) [frType fr]
+  in ([p], TypM ret_type)
 
 -- | Get the flattened return parameter and return type
 --   of a return flattening plan.
 --   They are used in the worker function.
 planRetFlattenedInterface :: TypeEnv -> PlanRet -> ([PatM], TypM)
-planRetFlattenedInterface _ (PlanRetValue fr) = ([], TypM $ frType fr)
+planRetFlattenedInterface tenv (PlanRetValue fr) =
+  ([], flattenedReturnType tenv fr)
+
 planRetFlattenedInterface tenv (PlanRetWriter p fr) =
   case frDecomp fr
   of IdDecomp ->
@@ -1050,20 +1057,28 @@ mkWrapperFunction plan wrapper_name worker_name = do
   where
     make_wrapper_body = assumeTyPats (originalTyParams plan) $ do
       -- Call the worker function and re-pack its arguments
-      body <- packReturn (planRetFlatRet $ flatReturn plan) worker_call
+      tenv <- getTypeEnv
+      body <- packReturn (planRetFlatRet $ flatReturn plan) (worker_call tenv)
       
       -- Flatten function parameters
       return $ flattenParameters (flatParams plan) body
 
     -- A call to the worker function.  The worker function takes flattened 
     -- function arguments.
-    worker_call =
-      let orig_ty_params =
+    worker_call tenv =
+      let orig_ty_args =
             [TypM (VarT a) | TyPatM (a ::: _) <- originalTyParams plan]
-          (new_ty_params, params) = flattenedParameterValues (flatParams plan)
-          ty_params = orig_ty_params ++ new_ty_params
+          (new_ty_args, input_args) =
+            flattenedParameterValues (flatParams plan)
+          (output_params, _) =
+            planRetFlattenedInterface tenv $ flatReturn plan
+          output_args = [ExpM $ VarE defaultExpInfo (patMVar p)
+                        | p <- output_params]
+
+          ty_args = orig_ty_args ++ new_ty_args
+          args = input_args ++ output_args
           worker_e = ExpM $ VarE defaultExpInfo worker_name
-      in ExpM $ AppE defaultExpInfo worker_e ty_params params
+      in ExpM $ AppE defaultExpInfo worker_e ty_args args
 
 -- | Create a worker function.  The worker function takes unpacked arguments
 --   and returns an unpacked return value.  The worker function body repacks
