@@ -8,7 +8,8 @@ beta reduction (includes inlining), case-of-known-value elimination,
 and some local expression reordering.
 -}
 
-{-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types,
+    ViewPatterns #-}
 module SystemF.Simplify (rewriteLocalExpr,
                          rewriteWithGeneralRules,
                          rewriteWithParallelRules,
@@ -536,6 +537,102 @@ betaReduce inf (FunM fun) ty_args args
       | otherwise = ExpM $ LetE inf param arg body
 
 -------------------------------------------------------------------------------
+-- Converting known values to expressions
+
+-- | Attempt to construct a value from an expression.
+--   Prefer to create initializer values rather than data values.
+createValue :: BaseKind -> KnownValue -> LR (Maybe (ExpM, MaybeValue))
+createValue kind known_value =
+  -- There are two cases to deal with.  The simple case is that we can just
+  -- "use the value" as if inlining it.  The complex case is when the value   
+  -- is a bare value; then we want to construct a new value.
+  case known_value
+  of ComplexValue maybe_var (DataValue inf ty fs)
+       | kind == BareK -> do
+           -- Attempt to create a new data constructor application
+           data_app <- createDataConApp inf ty fs
+           case data_app of
+             Nothing -> try_trivial_values
+             Just ret -> return (Just ret)
+     _ -> try_trivial_values
+  where
+    -- Try to get a value out of the known value.  This code is
+    -- similar to the code for simplifying a VarE term.
+    try_trivial_values
+      | Just e <- asTrivialValue known_value = do
+          -- Copy the value
+          copy_e <- copy_expression e
+          let copy_v = copy_value known_value
+          return $ Just (copy_e, Just copy_v)
+
+      | Just e <- asInlinedValue known_value = liftM Just $ rwExp e
+
+      | otherwise = return Nothing
+
+    copy_value val =
+      case kind
+      of BareK -> writerValue val
+         _ -> val
+
+    copy_expression e =
+      case kind
+      of BareK -> mkCopyExp e
+         _     -> return e
+
+mkCopyExp e = do
+  e_type <- inferExpType e
+  e_dict <- getReprDict e_type
+  return $ ExpM $ AppE defaultExpInfo copy_op [TypM e_type] [e_dict, e]
+  where
+    copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
+
+-- | Attempt to construct a data initializer expression.
+--   The parameters are fields of a 'DataValue' representing a bare object.
+--
+--   This function handles data constructors whose result kind is \"bare\".
+--   Other known values are handled by 'createValue'.
+createDataConApp :: ExpInfo -> DataValueType -> [MaybeValue]
+                 -> LR (Maybe (ExpM, MaybeValue))
+createDataConApp inf val_type m_fields 
+  | Just fields <- sequence m_fields = createDataConApp' inf val_type fields
+  | otherwise = return Nothing
+      
+createDataConApp' :: ExpInfo -> DataValueType -> [KnownValue]
+                  -> LR (Maybe (ExpM, MaybeValue))
+createDataConApp' inf val_type fields = do
+  tenv <- getTypeEnv
+  -- Get the kind inhabited by each field.  The kind is used to decide
+  -- whether to copy the field or not.
+  let field_kinds =
+        case val_type of
+          ConValueType con _ _ ->
+            case lookupDataCon con tenv
+            of Just dcon_type -> dataConFieldKinds tenv dcon_type
+               Nothing -> internalError "createDataConApp"
+          TupleValueType field_types ->
+            map (toBaseKind . typeKind tenv . fromTypM) field_types
+
+  field_results <- zipWithM createValue field_kinds fields
+
+  case sequence field_results of
+    Just (unzip -> (field_exps, field_values)) ->
+      -- Apply the data constructor
+      let data_exp =
+            case val_type
+            of ConValueType con ty_args ex_args ->
+                 let con_exp = ExpM $ VarE defaultExpInfo con
+                 in ExpM $ AppE inf con_exp (ty_args ++ ex_args) field_exps
+               TupleValueType _ ->
+                 ExpM $ UTupleE inf field_exps
+          
+          -- This is an initializer expression, so it has a writer valeu
+          value = writerValue $
+                  complexKnownValue $ DataValue inf val_type field_values
+      in return $ Just (data_exp, Just value)
+    Nothing -> return Nothing
+      
+
+-------------------------------------------------------------------------------
 -- Local restructuring
     
 -- Before trying to simplify an expression, we restruture it to increase the 
@@ -729,8 +826,9 @@ rwVar original_expression inf v = lookupKnownValue v >>= rewrite
 rwUTuple inf args = do
   -- Just rewrite subexpressions
   (args', arg_values) <- mapAndUnzipM rwExp args
+  arg_types <- mapM inferExpType args'
   
-  let ret_value = tupleConValue inf arg_values
+  let ret_value = tupleConValue inf (map TypM arg_types) arg_values
       ret_exp = ExpM $ UTupleE inf args'
   return (ret_exp, ret_value)
 
@@ -878,41 +976,47 @@ rwCopyApp inf copy_op ty args = do
     -- If out of fuel, then don't simplify this expression.  Process arguments.
     use_fuel m = useFuel' unknown_source m
     
-    -- Cannot simplify
+    -- Failed to eliminate the case statement before inspecting subexpressions
     unknown_source = do
       (args', arg_values) <- rwExps args
   
+      -- Try to eliminate the statement based on values of subexpressions
+      have_fuel <- checkFuel
+      case arg_values of
+        (_ : src_value@(Just (ComplexValue _ (DataValue inf ty fs))) : _)
+          | have_fuel -> do
+              -- The source is a (partly) known value.  Try to replace the
+              -- copy expression by the known value.
+              m_new_exp <- createDataConApp inf ty fs
+              case m_new_exp of
+                Nothing -> rebuild_copy args' arg_values
+                Just (new_exp, new_val) -> do
+                  consumeFuel
+                  
+                  -- If an output parameter was given, then apply to the
+                  -- output parameter
+                  let retval =
+                        case args
+                        of [_, _]       -> (new_exp, new_val)
+                           [_, _, outp] -> (ExpM $ AppE defaultExpInfo new_exp [] [outp], Nothing)
+                  return retval
+
+        _ -> rebuild_copy args' arg_values
+
+    -- Could not simplify; rebuild expression
+    rebuild_copy args' arg_values =
       let new_exp = ExpM $ AppE inf copy_op [ty] args'
           new_value = copied_value arg_values
-      return (new_exp, new_value)
+      in return (new_exp, new_value)
 
     -- Do we know what was stored here?
-    copied_value [_, Just src_val, Just dst_val] =
-      -- Reference the source value instead of the destination value
-      Nothing
     copied_value [_, _, _] = Nothing
     copied_value [_, Just src_val] =
       Just $ complexKnownValue $ WriterValue src_val
     copied_value [_, _] = Nothing
     copied_value _ =
       internalError "rwCopyApp: Wrong number of arguments in call"
-    
-    -- Transform a copy into a store if the source value is known
-    {-
-    copy_expression (repr : src : other_args) (_ : Just src_value : _)
-      | ComplexValue _ (StoredValue Value stored_value) <- src_value,
-        Just stored_exp <- asTrivialValue stored_value =
-          let [store_type] = ty_args
-              store_op = ExpM $ VarE inf (pyonBuiltin the_store)
-          in ExpM $ AppE inf store_op [store_type] (stored_exp : other_args)
-    
-      | ComplexValue _ (StoredValue Boxed stored_value) <- src_value,
-        Just stored_exp <- asTrivialValue stored_value =
-          let [store_type] = ty_args
-              store_op = ExpM $ VarE inf (pyonBuiltin the_storeBox)
-          in ExpM $ AppE inf store_op [store_type] (stored_exp : other_args)
-    -}
-      
+
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
 --
 --   Eventually, we should be able to inline the 'copy' method to avoid this
@@ -929,6 +1033,8 @@ copyStoredValue inf val_type repr arg m_dst = do
                                         patM (tmpvar ::: val_type)]
                          , altBody = make_value}
       new_expr = ExpM $ CaseE inf arg [alt]
+  
+  -- Try to simplify the new expression further
   rwExp new_expr
 
 rwLet inf bind@(PatM (bind_var ::: bind_rtype) _) val body =
@@ -1239,7 +1345,8 @@ rwAlt scr m_values (AltM alt) =
      DeTuple params body -> do
        -- If the scrutinee is a variable, add its known value to the environment
        let arg_values = zipWith mk_arg values params
-           data_value = tuplePatternValue defaultExpInfo arg_values
+           arg_types = map (TypM . patMType) params
+           data_value = tuplePatternValue defaultExpInfo arg_types arg_values
            assume_scrutinee m =
              case scr
              of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m

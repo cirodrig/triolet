@@ -92,8 +92,12 @@ data DataValueType =
     , dataExTypes     :: [TypM]
     }
     -- | An unboxed tuple type.
-    --   It's not necessary to keep track of types.
   | TupleValueType
+    { dataTyArgs :: [TypM]
+    }
+
+writerValue :: KnownValue -> KnownValue
+writerValue kv = complexKnownValue (WriterValue kv)
 
 -- | Get a trivial expression (a variable or literal) equivalent to this
 --   known value, if possible.
@@ -160,7 +164,8 @@ forgetVariables varset kv = forget kv
       any (`typeMentionsAny` varset) (map fromTypM tys1) ||
       any (`typeMentionsAny` varset) (map fromTypM tys2)
 
-    data_type_mentions_vars TupleValueType = False
+    data_type_mentions_vars (TupleValueType tys) =
+      any (`typeMentionsAny` varset) (map fromTypM tys)
 
     forget kv =
       case kv
@@ -223,7 +228,7 @@ pprComplexValue cv =
        in pprVar con <>
           parens (sep $ punctuate (text ",") $ type_docs ++ field_docs)
      
-     DataValue _ TupleValueType fields ->
+     DataValue _ (TupleValueType _) fields ->
        let field_docs = map pprMaybeValue fields
        in parens (sep $ punctuate (text ",") field_docs)
 
@@ -291,8 +296,9 @@ dataConValue inf tenv d_type dcon_type ty_args val_args
 --
 --   All fields of an unboxed tuple are value or boxed, so we don't need to
 --   deal with the writer/value distinction.
-tupleConValue :: ExpInfo -> [MaybeValue] -> MaybeValue
-tupleConValue inf val_args = Just $ tupleValue inf val_args
+tupleConValue :: ExpInfo -> [TypM] -> [MaybeValue] -> MaybeValue
+tupleConValue inf types val_args =
+  Just $ tupleValue inf types val_args
 
 -- | Construct a known value for an expression that was satisfied by a 
 --   pattern match, given the type arguments and matched fields.
@@ -319,9 +325,11 @@ patternValue inf tenv d_type dcon_type ty_args ex_vars val_args
     data_con_ty_args = ty_args ++ [TypM (VarT v) | v <- ex_vars]
 
 tuplePatternValue :: ExpInfo
+                  -> [TypM]
                   -> [MaybeValue]
                   -> MaybeValue
-tuplePatternValue inf val_args = Just $ tupleValue inf val_args
+tuplePatternValue inf types val_args =
+  Just $ tupleValue inf types val_args
 
 -- | Construct a known value for a data constructor,
 --   given the values of its type arguments and fields.
@@ -342,11 +350,11 @@ dataConstructorValue inf dcon_type ty_args val_args =
     forall_type_args = take (length $ dataConPatternParams dcon_type) ty_args
     exists_type_args = drop (length $ dataConPatternParams dcon_type) ty_args
 
-tupleValue :: ExpInfo -> [MaybeValue] -> KnownValue
-tupleValue inf val_args =
+tupleValue :: ExpInfo -> [TypM] -> [MaybeValue] -> KnownValue
+tupleValue inf types val_args =
   ComplexValue Nothing $
   DataValue { dataInfo = inf
-            , dataValueType = TupleValueType
+            , dataValueType = TupleValueType types
             , dataFields = val_args}
 
 -- | Create known values for data constructors in the global type environment.
