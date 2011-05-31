@@ -103,6 +103,7 @@ discardTypeAnnotationsExp (ExpTM (TypeAnn _ expression)) = ExpM $
   case expression
   of VarE inf v -> VarE inf v
      LitE inf l -> LitE inf l
+     UTupleE inf es -> UTupleE inf $ map dtae es
      AppE inf op ty_args args ->
        AppE inf (dtae op) (map (TypM . fromTypTM) ty_args) (map dtae args)
      LamE inf f -> LamE inf $ discardTypeAnnotationsFun f
