@@ -140,26 +140,16 @@ saveIndexedInt dict_type dict_exp m =
 --   record the dictionary 
 --   in the environment so it can be looked up later.
 saveReprDictPattern :: ReprDictMonad m => PatM -> m a -> m a
-saveReprDictPattern pattern m =
-  case patMBinder pattern
-  of pat_var ::: ty
-       | Just repr_type <- get_repr_type ty ->
-           saveReprDict repr_type (ExpM $ VarE defaultExpInfo pat_var) m
-       | Just index <- get_int_index ty ->
-           saveIndexedInt index (ExpM $ VarE defaultExpInfo pat_var) m
+saveReprDictPattern (PatM (pat_var ::: ty) _) m =
+  case fromVarApp ty
+  of Just (op, [arg])
+       | op `isPyonBuiltin` the_Repr -> 
+           let repr_type = arg
+           in saveReprDict repr_type (ExpM $ VarE defaultExpInfo pat_var) m
+       | op `isPyonBuiltin` the_IndexedInt ->
+           let index = arg
+           in saveIndexedInt index (ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m
-  where
-    get_int_index ty =
-      case fromVarApp ty
-      of Just (op, [arg])
-           | op `isPyonBuiltin` the_IndexedInt -> Just arg
-         _ -> Nothing
-
-    get_repr_type ty = 
-      case fromVarApp ty 
-      of Just (op, [arg])
-           | op `isPyonBuiltin` the_Repr -> Just arg
-         _ -> Nothing
 
 -- | Find patterns that bind representation dictionaries, and record them
 --   in the environment.
