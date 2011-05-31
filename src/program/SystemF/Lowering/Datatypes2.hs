@@ -825,6 +825,7 @@ lookupDataTypeForLayout' tenv ty =
      Nothing -> internalError $
                 "getLayout: Unknown data type: " ++ show (pprType ty)
 
+-- | Get the algebraic data type layout of a boxed or value type
 getValAlgLayout :: Type -> Lower AlgValLayout
 getValAlgLayout ty =
   case getLevel ty
@@ -842,7 +843,9 @@ getValAlgLayout ty =
           (UTupleT kinds, args) -> do
             arg_layouts <- mapM getLayout args
             return $ productValLayout TupleCon (map fromValLayout arg_layouts)
-          _ -> internalError "getAlgLayout: Head is not a type application"
+          _ -> case ty 
+               of FunT {} -> not_algebraic
+                  _ -> internalError "getAlgLayout: Head is not a type application"
      _ -> not_algebraic
   where
     not_algebraic =
@@ -953,13 +956,14 @@ getLayout ty = do
   kind <- askTypeEnv (\tenv -> toBaseKind $ typeKind tenv ty)
   case kind of
     ValK  -> fmap ValLayout $ getValLayout ty
-    BoxK  -> return $ ValLayout (LL.PrimType LL.OwnedType)
+    BoxK  -> fmap ValLayout $ getValLayout ty
     BareK -> ref_layout
     OutK  -> ref_layout
     _     -> internalError "getLayout: Unexpected representation"
   where
     ref_layout = fmap MemLayout $ getRefLayout ty
 
+-- | Get the layout of a value or boxed type
 getValLayout :: Type -> Lower ValLayout
 getValLayout ty =
   case getLevel ty
@@ -991,6 +995,8 @@ getValLayout ty =
             arg_layouts <- mapM getLayout args
             return $ LL.RecordType $ LL.constStaticRecord $
               map (LL.valueToFieldType . fromValLayout) arg_layouts
+          (FunT {}, []) ->
+            return (LL.PrimType LL.OwnedType)
           _ -> internalError "getLayout: Head is not a type application"
      KindLevel -> return (LL.PrimType LL.UnitType)
 
