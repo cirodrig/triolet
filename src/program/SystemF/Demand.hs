@@ -66,6 +66,11 @@ instance Renameable Dmd where
                    return $ dmd {specificity = spc}
   freeVariables dmd = freeVariables $ specificity dmd
 
+instance Substitutable Dmd where
+  substitute s dmd = do
+    spc <- substitute s $ specificity dmd
+    return $ Dmd (multiplicity dmd) spc
+
 -- | The default demand value, 
 --   assigned to variables before demand analysis has run.
 unknownDmd :: Dmd
@@ -175,6 +180,24 @@ instance Renameable Specificity where
        Decond (MonoTuple tys) spcs ->
          freeVariables tys `Set.union` freeVariables spcs
        Unused -> Set.empty
+
+instance Substitutable Specificity where
+  substitute s spc =
+    case spc
+    of Decond (MonoCon v tys ex_var_bindings) spcs -> do
+         tys' <- mapM (substitute s) tys
+         substituteBindings s ex_var_bindings $ \s' ex_var_bindings' -> do 
+           spcs' <- mapM (substitute s') spcs
+           return $ Decond (MonoCon v tys' ex_var_bindings') spcs'
+       Decond (MonoTuple tys) spcs -> do
+         tys' <- mapM (substitute s) tys
+         spcs' <- mapM (substitute s) spcs
+         return $ Decond (MonoTuple tys') spcs'
+       
+       -- Other terms don't mention variables
+       Used -> return spc
+       Inspected -> return spc
+       Unused -> return spc
 
 instance Dataflow Specificity where
   bottom = Unused

@@ -252,6 +252,8 @@ flattenMonoDecomp field x decomp = flattenDecomp typaram field x decomp
 --   The flattened argument specifies the
 --   original variable binding, the flattened variable binding(s), and how 
 --   to convert from one to the other.
+--
+--   This data type is not used for representing output pointer arguments.
 data FlatArg =
   FlatArg { faPattern        :: !PatM   -- ^ The original function parameter
           , faTransformation :: !Decomp -- ^ How the parameter is decomposed
@@ -272,19 +274,23 @@ isIdArg a = isIdDecomp (faTransformation a)
 --   type is bare, then the return type describes an initializer function;
 --   otherwise, it describes a returned value or returned boxed object.
 --
+--   The 'frType' field holds the type of the returned data.  It is not the
+--   type of an output pointer or side effect.
+--
 --   A return value may be flattened to a sequence of values.
 --   Returned values containing existential types cannot be flattened.
 --   If flattening produces one value, its type is the flattened return type. 
 --   If it produces many values, they are aggregated into an unboxed tuple.
 --   The unboxed tuple type is the flattened return type.
 data FlatRet =
-  FlatRet { frType :: Type      -- ^ The original return type
+  FlatRet { frType :: Type      -- ^ Type of the returned data
           , frDecomp :: Decomp  -- ^ How the return value is decomposed
           }
 
 isIdRet (FlatRet _ IdDecomp) = True 
 isIdRet _ = False
 
+-- | Get the flattened return specification corresponding to a 'FlatArg'.
 flatArgReturn :: FlatArg -> FlatRet
 flatArgReturn (FlatArg pat decomp) = FlatRet (patMType pat) decomp
 
@@ -467,6 +473,11 @@ packParameterRead (FlatArg pat flat_arg) =
 --   the return value into its component fields, then pack the
 --   components into the correct form to return from the expression.
 --
+--   The expression should be a value or an initializer expression.  If the
+--   given expression came from a function that returns by initializing a
+--   variable, the caller should lambda-abstract over the output pointer
+--   using 'lambdaAbstractReturn'.
+--
 --   To deconstruct an expression, the expression and its decomposition are
 --   processed together, structurally.
 --
@@ -490,7 +501,7 @@ flattenReturnWrite flat_ret orig_exp =
      DeconDecomp mono_con flat_args ->
        -- Apply flattening transformation to all expressions in tail position
        deconReturn mono_con flat_args
-       (flatten_args flat_args) (return flattened_value) orig_exp
+       (flatten_args flat_args) (flatten_fields flat_args) orig_exp
   where
     err :: forall a. a
     err = internalError "flattenReturnWrite"
@@ -504,6 +515,11 @@ flattenReturnWrite flat_ret orig_exp =
     -- results
     flatten_args flat_fields initializers =
       flattenReturnFields (zip initializers flat_fields) flattened_value
+
+    -- If the return value was pattern-matched and deconstructed,
+    -- then read and flatten the individual field values
+    flatten_fields flat_fields =
+      return $ flattenParameters flat_fields flattened_value
 
     -- The 'FlatRet' parameter determines the flattened return value
     flattened_value = flattenedReturnValue flat_ret
@@ -529,7 +545,7 @@ deconReturn con_type dc_fields decon_initializers decon_patterns expression =
   where
     decon_tail tail_exp = do
       tenv <- getTypeEnv
-      
+
       -- Attempt to deconstruct the tail expression
       case con_type of
         MonoCon con decon_ty_args decon_ex_types ->
@@ -667,6 +683,24 @@ packReturn flat_ret orig_exp =
        let inf = case orig_exp of ExpM e -> expInfo e
        return $! bindFlattenedReturn inf patterns orig_exp repack_exp
 
+-- | Lambda-abstract the expression over the given parameter. 
+--
+--   We use this for abstracting over output pointers.
+lambdaAbstractReturn :: (ReprDictMonad m, TypeEnvMonad m) =>
+                        TypM    -- ^ Expression's return type
+                     -> PatM    -- ^ Parameter to abstract over
+                     -> ExpM    -- ^ Expression
+                     -> m ExpM  -- ^ Create a new expression
+lambdaAbstractReturn rtype pat exp = mapOverTailExps lambda_abstract exp
+  where
+    lambda_abstract e =
+      return $ ExpM $ LamE defaultExpInfo $
+               FunM $ Fun { funInfo = defaultExpInfo
+                          , funTyParams = []
+                          , funParams = [pat]
+                          , funReturn = rtype
+                          , funBody = e}
+
 -------------------------------------------------------------------------------
 -- * Decisions on how to flatten
 
@@ -708,7 +742,7 @@ planFlattening :: (ReprDictMonad m, EvalMonad m) =>
 planFlattening mode ty spc = do
   tenv <- getTypeEnv
   whnf_type <- reduceToWhnf ty
-  
+
   let
     -- The return value will have of these decompositions 
     id_decomp = return (whnf_type, IdDecomp)
@@ -858,7 +892,11 @@ planOutputReturn :: (ReprDictMonad m, EvalMonad m) =>
                     PatM -> m PlanRet
 planOutputReturn pat = do
   tenv <- getTypeEnv
-  flat_ret <- planReturn Liberal Used $ TypM $ patMType pat
+  let return_type =
+        case fromVarApp $ patMType pat
+        of Just (op, [arg]) | op `isPyonBuiltin` the_OutPtr -> arg
+           _ -> internalError "planOutputReturn: Expecting an output pointer"
+  flat_ret <- planReturn Liberal Used $ TypM return_type
 
   -- Only perform decomposition if everything was converted to a value
   let real_ret =
@@ -1060,8 +1098,15 @@ mkWrapperFunction plan wrapper_name worker_name = do
       tenv <- getTypeEnv
       body <- packReturn (planRetFlatRet $ flatReturn plan) (worker_call tenv)
       
+      -- Apply the return argument, if the original function had one
+      let ret_body =
+            case planRetOriginalInterface $ flatReturn plan
+            of ([], _) -> body
+               ([p], _) -> let pat_exp = ExpM $ VarE defaultExpInfo (patMVar p)
+                           in ExpM $ AppE defaultExpInfo body [] [pat_exp]
+      
       -- Flatten function parameters
-      return $ flattenParameters (flatParams plan) body
+      return $ flattenParameters (flatParams plan) ret_body
 
     -- A call to the worker function.  The worker function takes flattened 
     -- function arguments.
@@ -1070,7 +1115,7 @@ mkWrapperFunction plan wrapper_name worker_name = do
             [TypM (VarT a) | TyPatM (a ::: _) <- originalTyParams plan]
           (new_ty_args, input_args) =
             flattenedParameterValues (flatParams plan)
-          (output_params, _) =
+          (output_params, return_type) =
             planRetFlattenedInterface tenv $ flatReturn plan
           output_args = [ExpM $ VarE defaultExpInfo (patMVar p)
                         | p <- output_params]
@@ -1078,7 +1123,17 @@ mkWrapperFunction plan wrapper_name worker_name = do
           ty_args = orig_ty_args ++ new_ty_args
           args = input_args ++ output_args
           worker_e = ExpM $ VarE defaultExpInfo worker_name
-      in ExpM $ AppE defaultExpInfo worker_e ty_args args
+          worker_call = ExpM $ AppE defaultExpInfo worker_e ty_args args
+      in -- If the worker function returns by reference, then lambda-abstract
+         -- over its output parameter
+         case output_params
+         of [] -> worker_call
+            [p] -> ExpM $ LamE defaultExpInfo $
+                   FunM $ Fun { funInfo = defaultExpInfo
+                              , funTyParams = []
+                              , funParams = [p]
+                              , funReturn = return_type
+                              , funBody = worker_call}
 
 -- | Create a worker function.  The worker function takes unpacked arguments
 --   and returns an unpacked return value.  The worker function body repacks
@@ -1101,13 +1156,32 @@ mkWorkerFunction plan worker_name original_body = do
   return $ mkDef worker_name worker
   where
     create_worker_body = assumeTyPats (originalTyParams plan) $ do
+      -- If the function returned by reference, then lambda-abstract over 
+      -- the original return parameter
+      abstracted_body <-
+        case flatReturn plan
+        of PlanRetValue _ -> return original_body
+           PlanRetWriter p fr ->
+             let original_ret_type =
+                   TypM $ varApp (pyonBuiltin the_IEffect) [frType fr]
+             in lambdaAbstractReturn original_ret_type p original_body
+
       -- Repack the return value
       flat_body <-
-        flattenReturnWrite (planRetFlatRet $ flatReturn plan) original_body
+        flattenReturnWrite (planRetFlatRet $ flatReturn plan) abstracted_body
+      
+      -- If the new function returns by reference, then apply to the new
+      -- return parameter
+      tenv <- getTypeEnv
+      let worker_body =
+            case planRetFlattenedInterface tenv (flatReturn plan)
+            of ([], _) -> flat_body
+               ([p], _) -> let out_exp = ExpM $ VarE defaultExpInfo (patMVar p)
+                           in ExpM $ AppE defaultExpInfo flat_body [] [out_exp]
 
       -- Repack the parameters
       (_, param_context) <- packParametersRead $ flatParams plan
-      return $ param_context flat_body
+      return $ param_context worker_body
 
 -------------------------------------------------------------------------------
 -- * The argument flattening pass
@@ -1336,6 +1410,9 @@ lvExp expression =
          internalError "lvExp: Unexpected unpacked variable"
        return expression
      LitE {} -> return expression
+     UTupleE inf es -> do
+       es' <- mapM lvExp es
+       return $ ExpM $ UTupleE inf es'
      AppE inf op ty_args args ->
        lvApp inf op ty_args args
      LamE inf f -> do

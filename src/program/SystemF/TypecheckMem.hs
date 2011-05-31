@@ -499,7 +499,7 @@ inferAppType :: EvalMonad m =>
              -> [Type]          -- ^ Operand types
              -> m Type
 inferAppType op_type ty_args arg_types =
-  debug $ liftTypeEvalM $ do
+  liftTypeEvalM $ do
     ti_ty_args <- mapM typeInferType ty_args
     inst_type <- computeInstantiatedType noSourcePos op_type ti_ty_args
     computeAppliedType noSourcePos inst_type arg_types

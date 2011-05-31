@@ -22,6 +22,8 @@ instance Monoid Renaming where
   mempty = R mempty
   mappend x y = R (mappend (unR x) (unR y))
 
+isIdRenaming (R rn) = IntMap.null rn
+
 renaming :: [(Var, Var)] -> Renaming
 renaming xs = R $ IntMap.fromList [(fromIdent $ varID v1, v2) | (v1, v2) <- xs]
 

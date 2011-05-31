@@ -8,6 +8,7 @@ module SystemF.Rename
         substitutePatMs,
         freshenPatM,
         freshenPatMs,
+        freshenFunValueParams,
         renameTyPatM,
         renameTyPatMs,
         substituteTyPatM,
@@ -118,17 +119,34 @@ substituteTyPatMs :: EvalMonad m =>
                   -> m a
 substituteTyPatMs = renameMany substituteTyPatM
   
--- | Apply a substitution to a pattern
+-- | Apply a substitution to a pattern.
+--   Substitutions only operate on type variables, so the pattern-bound
+--   variable is unchanged.  Also, since no type variables are bound, the 
+--   substitution is unchanged.
 substitutePatM :: EvalMonad m =>
+                  Substitution -> PatM -> m PatM
+substitutePatM s (PatM (v ::: t) uses) = do
+  t' <- substitute s t
+  uses' <- substitute s uses
+  return $ PatM (v ::: t') uses'
+
+-- | An interface to 'substitutePatM' that resembles the interface to
+--   'renamePatM'.
+substitutePatM' :: EvalMonad m =>
                   Substitution -> PatM -> (Substitution -> PatM -> m a) -> m a
-substitutePatM s (PatM binder uses) k =
-  substituteBinding s binder $ \s' binder' -> k s' (PatM binder' uses)
-     
+substitutePatM' s p k = do  
+  p' <- substitutePatM s p
+  k s p'
+
 substitutePatMs :: EvalMonad m =>
-                  Substitution -> [PatM]
-                -> (Substitution -> [PatM] -> m a)
-                -> m a
-substitutePatMs = renameMany substitutePatM
+                   Substitution -> [PatM] -> m [PatM]
+substitutePatMs s ps = mapM (substitutePatM s) ps
+
+substitutePatMs' :: EvalMonad m =>
+                    Substitution -> [PatM]
+                 -> (Substitution -> [PatM] -> m a)
+                 -> m a
+substitutePatMs' = renameMany substitutePatM'
 
 instance Renameable (Typ Mem) where
   rename rn (TypM t) = TypM $ rename rn t
@@ -364,7 +382,7 @@ instance Substitutable (Exp Mem) where
          return $ ExpM $ LamE inf f'
        LetE inf p val body -> do
          val' <- substitute s val
-         substitutePatM s p $ \s' p' -> do
+         substitutePatM' s p $ \s' p' -> do
            body' <- substitute s' body
            return $ ExpM $ LetE inf p' val' body'
        LetfunE inf defs body -> do
@@ -387,7 +405,7 @@ instance Substitutable (Alt Mem) where
     of DeCon con ty_args ex_types params body -> do
          ty_args' <- mapM (substitute s) ty_args
          substituteTyPatMs s ex_types $ \s' ex_types' ->
-           substitutePatMs s' params $ \s'' params' -> do
+           substitutePatMs' s' params $ \s'' params' -> do
              body' <- substitute s'' body
              return $ AltM $ DeCon { altConstructor = con
                                    , altTyArgs = ty_args'
@@ -395,7 +413,7 @@ instance Substitutable (Alt Mem) where
                                    , altParams = params'
                                    , altBody = body'}
        DeTuple params body -> do
-         substitutePatMs s params $ \s' params' -> do
+         substitutePatMs' s params $ \s' params' -> do
            body' <- substitute s' body
            return $ AltM $ DeTuple { altParams = params'
                                    , altBody = body'}
@@ -403,7 +421,7 @@ instance Substitutable (Alt Mem) where
 instance Substitutable (Fun Mem) where
   substitute s (FunM fun) =
     substituteTyPatMs s (funTyParams fun) $ \s' ty_params ->
-    substitutePatMs s' (funParams fun) $ \s'' params -> do
+    substitutePatMs' s' (funParams fun) $ \s'' params -> do
       body <- substitute s'' $ funBody fun
       ret <- substitute s'' $ funReturn fun
       return $ FunM $ Fun { funInfo = funInfo fun
@@ -411,6 +429,30 @@ instance Substitutable (Fun Mem) where
                           , funParams = params
                           , funReturn = ret
                           , funBody = body}
+
+-- | Rename value-level function parameters if they conflict with names that 
+--   are already present in the environment.  Ignore type-level variables.
+freshenFunValueParams :: (Supplies m VarID, TypeEnvMonad m) => FunM -> m FunM
+freshenFunValueParams (FunM f) =
+  renameMany freshen_if_bound mempty (funParams f) $ \rn params ->
+  let (body, ret) =
+        if isIdRenaming rn
+        then (funBody f, funReturn f)
+        else (rename rn $ funBody f, rename rn $ funReturn f)
+  in return $ FunM $ Fun { funInfo     = funInfo f
+                         , funTyParams = funTyParams f
+                         , funParams   = params
+                         , funReturn   = ret
+                         , funBody     = body}
+  where
+    freshen_if_bound rn pat@(PatM (v ::: t) u) k = do
+      tenv <- getTypeEnv
+      case lookupType v tenv of
+        Nothing -> k rn pat
+        Just _ -> do
+          v' <- newClonedVar v
+          let rn' = insertRenaming v v' rn 
+          k rn' (PatM (v' ::: t) u)
 
 -------------------------------------------------------------------------------
 -- Recursive renaming.  All names bound in an expression are renamed to fresh

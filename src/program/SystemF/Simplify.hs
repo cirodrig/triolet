@@ -483,22 +483,27 @@ betaReduce inf (FunM fun) ty_args args
   | length ty_args /= length (funTyParams fun) =
       internalError "betaReduce: Not implemented for partial type application"
   | otherwise = do
+      -- Rename bound value parameters if they conflict with names in the
+      -- environment
+      FunM freshened_fun <- freshenFunValueParams (FunM fun)
+
       -- Substitute type arguments for type parameters
       let type_subst =
             substitution [(tv, t)
                          | (TyPatM (tv ::: _), TypM t) <-
-                             zip (funTyParams fun) ty_args]
+                             zip (funTyParams freshened_fun) ty_args]
 
       -- Apply substitution to parameters and body
-      substitutePatMs type_subst (funParams fun) $ \subst params -> do
-        body <- substitute subst $ funBody fun
-        ret <- substitute subst $ funReturn fun
+      params <- substitutePatMs type_subst (funParams freshened_fun)
+      let subst = type_subst
+      body <- substitute subst $ funBody freshened_fun
+      ret <- substitute subst $ funReturn freshened_fun
           
-        -- Is the function fully applied?
-        return $! case length args `compare` length params
-                  of LT -> undersaturated_app args params body ret
-                     EQ -> saturated_app args params body
-                     GT -> oversaturated_app args params body
+      -- Is the function fully applied?
+      return $! case length args `compare` length params
+                of LT -> undersaturated_app (funInfo freshened_fun) args params body ret
+                   EQ -> saturated_app args params body
+                   GT -> oversaturated_app args params body
   where
     oversaturated_app args params body =
       let applied_args = take (length params) args
@@ -513,10 +518,10 @@ betaReduce inf (FunM fun) ty_args args
     -- To process an undersaturated application,
     -- assign the parameters that have been applied and 
     -- create a new function that takes the remaining arguments.
-    undersaturated_app args params body return =
+    undersaturated_app inf args params body return =
       let applied_params = take (length args) params
           excess_params = drop (length args) params
-          new_fun = FunM $ Fun { funInfo = funInfo fun
+          new_fun = FunM $ Fun { funInfo = inf
                                , funTyParams = []
                                , funParams = excess_params
                                , funBody = body
@@ -1120,18 +1125,19 @@ eliminateCaseWithExp
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
       internalError "rwCase: Wrong number of fields"
-  | otherwise =
+  | otherwise = do
       -- Substitute known types for the existential type variables
-      substitutePatMs ex_type_subst (altParams alt) $ \subst params -> do
-        body <- substitute subst (altBody alt)
+      params <- substitutePatMs ex_type_subst (altParams alt)
+      let subst = ex_type_subst
+      body <- substitute subst (altBody alt)
 
-        binders <-
-          let field_kinds = dataConFieldKinds tenv dcon_type
-          in sequence [makeCaseInitializerBinding k p i 
-                      | (k, p, i) <- zip3 field_kinds params initializers]
+      binders <-
+        let field_kinds = dataConFieldKinds tenv dcon_type
+        in sequence [makeCaseInitializerBinding k p i 
+                    | (k, p, i) <- zip3 field_kinds params initializers]
 
-        -- Continue simplifying the new expression
-        rwExp $ applyCaseElimBindings binders body
+      -- Continue simplifying the new expression
+      rwExp $ applyCaseElimBindings binders body
   where
     ex_type_subst =
       substitution [(v, ex_type)
@@ -1156,25 +1162,26 @@ eliminateCaseWithSimplifiedExp
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
       internalError "rwCase: Wrong number of fields"
-  | otherwise =
+  | otherwise = do
       -- Substitute known types for the existential type variables
-      substitutePatMs ex_type_subst (altParams alt) $ \subst params -> do
-        body <- substitute subst (altBody alt)
+      params <- substitutePatMs ex_type_subst (altParams alt)
+      let subst = ex_type_subst
+      body <- substitute subst (altBody alt)
 
-        binders <-
-          let field_kinds = dataConFieldKinds tenv dcon_type
-          in sequence [makeCaseInitializerBinding k p i 
-                      | (k, p, (i, _)) <- zip3 field_kinds params initializers]
+      binders <-
+        let field_kinds = dataConFieldKinds tenv dcon_type
+        in sequence [makeCaseInitializerBinding k p i 
+                    | (k, p, (i, _)) <- zip3 field_kinds params initializers]
 
-        let values = [(patMVar p, mv)
-                     | (p, (_, mv)) <- zip params initializers]
+      let values = [(patMVar p, mv)
+                   | (p, (_, mv)) <- zip params initializers]
 
-        -- Add known values to the environment.  Simplify the body expression.
-        (body', _) <-
-          assumePatterns params $ with_values values $ rwExp body
-        
-        -- Bind local variables 
-        return (applyCaseElimBindings binders body', Nothing)
+      -- Add known values to the environment.  Simplify the body expression.
+      (body', _) <-
+        assumePatterns params $ with_values values $ rwExp body
+      
+      -- Bind local variables 
+      return (applyCaseElimBindings binders body', Nothing)
   where
     with_values vs e = foldr (uncurry withMaybeValue) e vs
     ex_type_subst =
