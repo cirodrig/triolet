@@ -660,14 +660,17 @@ lowerFunctionType ll_var_supply var_supply tenv ty = do
   -- FIXME: Don't recompute this every time the function is called!
   env <- initializeLowerEnv var_supply ll_var_supply tenv Map.empty
   runLowering env $ do
+    -- Deconstruct the type
     let (ty_params, monotype) = fromForallType ty
         (params, ret) = fromFunType monotype
-        ll_ty_params = replicate (length ty_params) $ LL.PrimType LL.UnitType
         local_tenv = foldr insert_type tenv ty_params
           where insert_type (a ::: k) e = insertType a k e
+    when (null params) $ internalError "lowerFunctionType: Not a function type"
+
+    -- Create a function type
     param_types <- lowerTypeList local_tenv params
     ret_type <- fmap maybeToList $ lowerType local_tenv ret
-    let ll_type = LL.closureFunctionType (ll_ty_params ++ param_types) ret_type
+    let ll_type = LL.closureFunctionType param_types ret_type
     return ll_type
 
 -- | Generate the low-level translation of a data constructor.

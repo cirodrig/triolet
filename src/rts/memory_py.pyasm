@@ -44,6 +44,6 @@ function inline copy8F (pointer src, pointer dst) -> () {
 };
 
 // Copy some bytes according to a PassConv object
-function inline copy (unit _, owned passconv, pointer src, pointer dst) -> () {
+function inline copy (owned passconv, pointer src, pointer dst) -> () {
   () call (passconv @! PassConv.copy) (src, dst);
 };

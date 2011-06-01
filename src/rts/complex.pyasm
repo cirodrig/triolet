@@ -11,7 +11,7 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
-function repr_Complex (unit _, owned repr_element) -> owned {
+function repr_Complex (owned repr_element) -> owned {
   elt_size = repr_element @! PassConv.size;
   elt_align = repr_element @! PassConv.align;
   typedef elt_type = bytes(value elt_size, value elt_align);
@@ -47,7 +47,7 @@ function repr_Complex (unit _, owned repr_element) -> owned {
 };
 
 function AdditiveDict_Complex_add
-  (unit _, owned repr_elt, owned additive_elt,
+  (owned repr_elt, owned additive_elt,
    pointer x, pointer y, pointer ret) -> () {
   elt_size = repr_elt @! PassConv.size;
   elt_align = repr_elt @! PassConv.align;
@@ -61,7 +61,7 @@ function AdditiveDict_Complex_add
 };
 
 function AdditiveDict_Complex_sub
-  (unit _, owned repr_elt, owned additive_elt,
+  (owned repr_elt, owned additive_elt,
    pointer x, pointer y, pointer ret) -> () {
   elt_size = repr_elt @! PassConv.size;
   elt_align = repr_elt @! PassConv.align;
@@ -75,7 +75,7 @@ function AdditiveDict_Complex_sub
 };
 
 function AdditiveDict_Complex_negate
-  (unit _, owned repr_elt, owned additive_elt,
+  (owned repr_elt, owned additive_elt,
    pointer x, pointer ret) -> () {
   elt_size = repr_elt @! PassConv.size;
   elt_align = repr_elt @! PassConv.align;
@@ -89,7 +89,7 @@ function AdditiveDict_Complex_negate
 };
 
 function AdditiveDict_Complex_zero
-  (unit _, owned repr_elt, owned additive_elt, pointer ret) -> () {
+  (owned repr_elt, owned additive_elt, pointer ret) -> () {
   elt_size = repr_elt @! PassConv.size;
   elt_align = repr_elt @! PassConv.align;
   typedef elt_type = bytes(value elt_size, value elt_align);
@@ -103,7 +103,7 @@ function AdditiveDict_Complex_zero
 };
 
 function MultiplicativeDict_Complex_mul
-  (unit _, owned repr_elt, owned multiplicative_elt,
+  (owned repr_elt, owned multiplicative_elt,
    pointer x, pointer y, pointer ret) -> () {
   elt_size = repr_elt @! PassConv.size;
   elt_align = repr_elt @! PassConv.align;
@@ -140,7 +140,7 @@ function MultiplicativeDict_Complex_mul
 };
 
 function MultiplicativeDict_Complex_fromInt
-  (unit _, owned repr_elt, owned multiplicative_elt,
+  (owned repr_elt, owned multiplicative_elt,
    int intval, pointer ret) -> () {
   elt_size = repr_elt @! PassConv.size;
   elt_align = repr_elt @! PassConv.align;
@@ -158,7 +158,7 @@ function MultiplicativeDict_Complex_fromInt
 };
 
 function MultiplicativeDict_Complex_one
-  (unit _, owned repr_elt, owned multiplicative_elt, pointer ret) -> () {
+  (owned repr_elt, owned multiplicative_elt, pointer ret) -> () {
   elt_size = repr_elt @! PassConv.size;
   elt_align = repr_elt @! PassConv.align;
   typedef elt_type = bytes(value elt_size, value elt_align);
@@ -176,7 +176,7 @@ function MultiplicativeDict_Complex_one
 };
 
 function FractionalDict_Complex_div
-  (unit _, owned repr_elt, owned multiplicative_elt,
+  (owned repr_elt, owned multiplicative_elt,
    pointer x, pointer y, pointer ret) -> () {
   // Not implemented
   () primcall exit(int -1);

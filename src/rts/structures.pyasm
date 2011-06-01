@@ -40,19 +40,42 @@ data owned repr_Box_value = PassConv {
   NOT_POINTERLESS
 };
 
-// Return the representation of a Boxed object.  The parameter is a type
-// parameter.
-function inline repr_Box (unit _) -> owned {
-  repr_Box_value;
+// Exactly the same as 'repr_Box_value'.  It's a separate definition because
+// it has a different type in the Mem stage.
+data owned repr_Box = PassConv {
+  ObjectHeader { int 1, repr_info },
+  sizeof owned,
+  alignof owned,
+#if WORD_SIZE == 4
+  copy4F,
+#elif WORD_SIZE == 8
+  copy8F,
+#else
+# error "Don't know how to copy Boxed values"
+#endif
+  dummy_finalizer,
+  NOT_POINTERLESS
+};
+
+// Exactly the same as 'repr_Box_value'.  It's a separate definition because
+// it has a different type in the Mem stage.
+data owned repr_Stream = PassConv {
+  ObjectHeader { int 1, repr_info },
+  sizeof owned,
+  alignof owned,
+#if WORD_SIZE == 4
+  copy4F,
+#elif WORD_SIZE == 8
+  copy8F,
+#else
+# error "Don't know how to copy Boxed values"
+#endif
+  dummy_finalizer,
+  NOT_POINTERLESS
 };
 
 // Exactly the same as repr_Box, but it has a different System F type
-function inline repr_Boxed (unit _) -> owned {
-  repr_Box_value;
-};
-
-// Exactly the same as repr_Box, but it has a different System F type
-function inline repr_Referenced (unit _, owned elt_repr) -> owned {
+function inline repr_Referenced (owned elt_repr) -> owned {
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   ret @! PassConv.size = sizeof pointer;
   ret @! PassConv.align = alignof pointer;
@@ -87,7 +110,7 @@ function inline repr_Referenced (unit _, owned elt_repr) -> owned {
 // The referenced object will never be accessed.  The reference does not
 // necessarily point to a valid address, depending on how the memory allocator
 // works.
-data owned repr_EmptyRef = PassConv {
+data owned repr_EmptyReference = PassConv {
   ObjectHeader { int 1, repr_info },
   word 0,
   word 1,
@@ -100,17 +123,8 @@ function inline dummy_copy (pointer src, pointer dst) -> () {
   (); // Do nothing
 };
 
-function inline repr_EmptyReference (unit _) -> owned {
-  repr_EmptyRef;
-};
-
-// Exactly the same as repr_Box, but it has a different System F type
-function inline repr_Stream (unit _, unit _) -> owned {
-  repr_Box_value;
-};
-
 function inline repr_array
-  (unit _, unit _, IndexedInt count, owned elt_repr) -> owned {
+  (IndexedInt count, owned elt_repr) -> owned {
   IndexedInt {size} = count;
   typedef elt_type = bytes(value elt_repr @! PassConv.size,
                            value elt_repr @! PassConv.align);
@@ -188,7 +202,7 @@ data owned repr_EffTok = PassConv {
   IS_POINTERLESS
 };
 
-function copy_Repr (unit _, pointer src, pointer dst) -> () {
+function copy_Repr (pointer src, pointer dst) -> () {
   dst @! PassConv.size = src @! PassConv.size;
   dst @! PassConv.align = src @! PassConv.align;
   dst @! PassConv.copy = src @! PassConv.copy;
@@ -197,8 +211,7 @@ function copy_Repr (unit _, pointer src, pointer dst) -> () {
   ();
 };
 
-function inline repr_PyonTuple2 (unit _, unit _,
-                                 owned repr1, owned repr2) -> owned {
+function inline repr_PyonTuple2 (owned repr1, owned repr2) -> owned {
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   size1 = repr1 @! PassConv.size;
   align1 = repr1 @! PassConv.align;
@@ -227,8 +240,7 @@ function inline copy_PyonTuple2(owned copy1, owned copy2,
   () call copy2 (src @ tuple.member2, dst @ tuple.member2);
 };
 
-function inline repr_PyonTuple3 (unit _, unit _, unit _,
-                                 owned repr1, owned repr2, owned repr3) -> owned {
+function inline repr_PyonTuple3 (owned repr1, owned repr2, owned repr3) -> owned {
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   size1 = repr1 @! PassConv.size;
   align1 = repr1 @! PassConv.align;
@@ -267,8 +279,7 @@ function inline copy_PyonTuple3(owned copy1, owned copy2, owned copy3,
 };
 
 function inline repr_PyonTuple4
-    (unit _, unit _, unit _, unit _,
-     owned repr1, owned repr2, owned repr3, owned repr4) -> owned {
+    (owned repr1, owned repr2, owned repr3, owned repr4) -> owned {
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   size1 = repr1 @! PassConv.size;
   align1 = repr1 @! PassConv.align;
@@ -327,7 +338,7 @@ data owned OpaqueTraversableDict_list = TraversableDict {
 #endif
 
 // Is this redundant with 'repr_Complex' in complex.pyasm?
-function inline complex_pass_conv (unit _, pointer repr, pointer ret) -> () {
+function inline complex_pass_conv (pointer repr, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
   typedef cpx = complex(bytes(value size, value align));
@@ -356,60 +367,10 @@ function finalize_complex
   ();
 };
 
-function inline repr_AdditiveDict (unit _, pointer repr, pointer ret) -> () {
-  size = repr @! PassConv.size;
-  align = repr @! PassConv.align;
-  copy = repr @! PassConv.copy;
-  typedef dictionary = AdditiveDict(bytes(value size, value align));
-
-  ret @! PassConv.size = sizeof dictionary;
-  ret @! PassConv.align = alignof dictionary;
-  ret @! PassConv.is_pointerless = NOT_POINTERLESS;
-  ret @! PassConv.copy = owned call AdditiveDict_copy (size, align, copy);
-  ret @! PassConv.finalize = dummy_finalizer;
-  ();
-};
-
-function AdditiveDict_copy
-  (uint size, uint align, owned copy_value, pointer src, pointer dst) -> () {
-  typedef dictionary = AdditiveDict(bytes(value size, value align));
-
-  dst @! dictionary.add = src @! dictionary.add;
-  dst @! dictionary.subtract = src @! dictionary.subtract;
-  dst @! dictionary.negate = src @! dictionary.negate;
-  () call (copy_value) (src @ dictionary.zero, dst @ dictionary.zero);  
-};
-
-function inline repr_MultiplicativeDict
-  (unit _, pointer value_repr, pointer ret) -> () {
-  size = value_repr @! PassConv.size;
-  align = value_repr @! PassConv.align;
-  copy = value_repr @! PassConv.copy;
-  typedef dictionary = MultiplicativeDict(bytes(value size, value align));
-
-  ret @! PassConv.size = sizeof dictionary;
-  ret @! PassConv.align = alignof dictionary;
-  ret @! PassConv.is_pointerless = NOT_POINTERLESS;
-  ret @! PassConv.copy = owned call MultiplicativeDict_copy (size, align, copy);
-  ret @! PassConv.finalize = dummy_finalizer;
-  ();
-};
-
-function MultiplicativeDict_copy
-  (uint size, uint align, owned copy_value, pointer src, pointer dst) -> () {
-  typedef dictionary = MultiplicativeDict(bytes(value size, value align));
-
-  () = () call AdditiveDict_copy(size, align, copy_value,
-                                 src @ dictionary.additive,
-                                 dst @ dictionary.additive);
-  dst @! dictionary.mul = src @! dictionary.mul;
-  dst @! dictionary.fromInt = src @! dictionary.fromInt;
-  () call (copy_value) (src @ dictionary.one, dst @ dictionary.one);
-};
-
+#if 0
 // Construct an Additive dictionary
 function inline additiveDict
-  (unit _, pointer repr,
+  (pointer repr,
    owned add, owned sub, owned negate, owned write_zero, pointer ret) -> () {
   size = repr @! PassConv.size;
   align = repr @! PassConv.align;
@@ -422,7 +383,7 @@ function inline additiveDict
 };
 
 function multiplicativeDict
-  (unit _, pointer repr,
+  (pointer repr,
    owned write_additive,
    owned mul, owned from_int, owned write_one, pointer ret) -> () {
   size = repr @! PassConv.size;
@@ -434,9 +395,10 @@ function multiplicativeDict
   ret @! dictionary.fromInt = from_int;
   () call write_one (ret @ dictionary.one);
 };
+#endif
 
 function inline additiveDict_complex
-  (unit type, pointer member_additive, pointer ret) -> ()
+  (pointer member_additive, pointer ret) -> ()
 {
   () primcall exit (int -1);
   // FIXME

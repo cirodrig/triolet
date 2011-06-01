@@ -1235,6 +1235,9 @@ checkExternalVar defs_map (edef, is_builtin, impent) = do
         then Nothing
         else incompatible_definition
 
+    compare_to_def _ =
+      throwErrorMaybe incompatible_definition
+
     incompatible_definition =
       Just $ "Incompatible definition of exported variable '" ++
       labelLocalNameAsString (fromJust $ LL.varName $ LL.importVar impent) ++ "'"

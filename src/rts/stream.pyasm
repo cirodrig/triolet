@@ -35,12 +35,12 @@ procedure inline Stream_alloc () -> owned {
 };
 
 // Traverse a stream.  Simply return the stream.
-function inline Stream_traverse (unit _, unit _, owned _, owned stream) -> owned {
+function inline Stream_traverse (owned _, owned stream) -> owned {
   stream;
 };
 
 // Build a stream.  Simply return the stream.
-function inline Stream_build (unit _, unit _, owned _, owned stream) -> owned {
+function inline Stream_build (owned _, owned stream) -> owned {
   stream;
 };
 
@@ -55,7 +55,7 @@ function inline Stream_build (unit _, unit _, owned _, owned stream) -> owned {
 //   false -> value is available
 
 // Create a stream that produces a single value
-function inline Stream_return (unit _,
+function inline Stream_return (
                         owned return_type_repr,
                         owned produce_value) -> owned {
   s = owned primcall Stream_alloc();
@@ -90,9 +90,9 @@ function inline Stream_return_initialize(pointer state) -> () {
 /* empty */
 
 // An empty stream contains nothing
-function inline Stream_empty (unit _, owned _) -> owned {
-  empty_stream;
-};
+//function inline Stream_empty (owned _) -> owned {
+//  empty_stream;
+//};
 
 function inline Stream_empty_next (pointer st, pointer ret) -> bool {
   // Return false to indicate that no data is available
@@ -138,7 +138,7 @@ record Stream_bind_state(pstateT, presultT) {
 };
 
 // Chain streams together.
-function inline Stream_bind (unit _, unit _,
+function inline Stream_bind (
                       owned pr_repr,   // Produced type representation
                       owned tf_repr,   // Transformed type representation
                       owned pr,        // Producer stream
@@ -239,7 +239,7 @@ function inline Stream_bind (unit _, unit _,
 /*****************************************************************************/
 /* reinterpret a stream's domain as the list domain */
 
-function inline Stream_asList (unit _, unit _, owned stream) -> owned {
+function inline Stream_asList (owned stream) -> owned {
   stream;
 };
 
@@ -247,14 +247,14 @@ function inline Stream_asList (unit _, unit _, owned stream) -> owned {
 /* guard */
 
 function inline Stream_guard
-  (unit _, owned elt_repr, bool guard_value, owned stream) -> owned {
+  (owned elt_repr, bool guard_value, owned stream) -> owned {
 
   if (guard_value) {
     // Return the argument stream
     stream;
   } else {
     // Return an empty stream
-    owned call Stream_empty (nil);
+    empty_stream;
   };
 };
 
@@ -264,7 +264,7 @@ function inline Stream_guard
 // A stream consisting of the sequence f(0), f(1), ... f(limit-1).
 // The stream state holds the next value to generate.
 function Stream_generate
-  (unit _, unit _, owned ret_repr, int limit, owned f) -> owned {
+  (owned ret_repr, int limit, owned f) -> owned {
   s = owned primcall Stream_alloc();
 
   s @! Stream.initialize = Stream_generate_initialize;
@@ -310,8 +310,7 @@ record Stream_map_state(pstateT, presultT) {
 };
 
 function Stream_map
-  (unit _, unit _, unit _,
-   owned pr_repr,               // Representation of a produced value
+  (owned pr_repr,               // Representation of a produced value
    owned tf_repr,               // Representation of a transformed value
    owned tf,                    // Transformer function
    owned pr)                    // Producer stream
@@ -366,8 +365,7 @@ function Stream_map
 /* reduce */
 
 function inline Stream_reduce
-  (unit _, unit _,
-   owned repr_element,
+  (owned repr_element,
    owned reducer,
    pointer init,
    owned stream,
@@ -421,8 +419,7 @@ function inline Stream_reduce
 };
 
 function inline reduce
-  (unit _, unit _,
-   owned traversable,
+  (owned traversable,
    owned elem_repr,
    owned reducer,
    pointer initial_value,
@@ -430,9 +427,9 @@ function inline reduce
    pointer ret) -> () {
   // Traverse the object and reduce the resulting stream
   stream = owned call (traversable @! TraversableDict.traverse)
-                      (nil, elem_repr, container);
+                      (elem_repr, container);
 
-  () = () call Stream_reduce (nil, nil, elem_repr, reducer,
+  () = () call Stream_reduce (elem_repr, reducer,
                               initial_value, stream, ret);
 
   // Clean up
@@ -445,8 +442,7 @@ function inline reduce
 // Like reduce, except that we take the first element from the stream.
 // Terminate with error if stream is empty.
 function inline Stream_reduce1
-  (unit _, unit _,
-   owned repr_element,
+  (owned repr_element,
    owned reducer,
    owned stream,
    pointer ret) -> () {
@@ -505,17 +501,16 @@ function inline Stream_reduce1
 };
 
 function inline reduce1
-  (unit _, unit _,
-   owned traversable,
+  (owned traversable,
    owned elem_repr,
    owned reducer,
    pointer container,
    pointer ret) -> () {
   // Traverse the object and reduce the resulting stream
   stream = owned call (traversable @! TraversableDict.traverse)
-                      (nil, elem_repr, container);
+                      (elem_repr, container);
 
-  () = () call Stream_reduce1 (nil, elem_repr, reducer, stream, ret);
+  () = () call Stream_reduce1 (elem_repr, reducer, stream, ret);
 
   // Clean up
   ();
@@ -525,7 +520,7 @@ function inline reduce1
 /* fold */
 
 function inline Stream_fold
-  (unit _, unit _, owned repr_element, owned repr_acc,
+  (owned repr_element, owned repr_acc,
    owned reducer, pointer init, owned stream, pointer ret) -> () {
   elem_size = repr_element @! PassConv.size;
   elem_align = repr_element @! PassConv.align;
@@ -588,7 +583,7 @@ function inline Stream_fold
 // Given a stream of integers, use the elements of the stream to compute a
 // histogram.
 function histogramArray
-  (unit _, unit _, IndexedInt size, owned stream, pointer ret) -> () {
+  (IndexedInt size, owned stream, pointer ret) -> () {
   data int stream_val;      // The current value taken from the stream
 
   IndexedInt {hist_size} = size;
@@ -627,12 +622,12 @@ function histogramArray
 };
 
 function histogram
-  (unit _, int hist_size, owned stream, pointer ret) -> () {
+  (int hist_size, owned stream, pointer ret) -> () {
   typedef array_type = array(value hist_size, int);
 
   // Compute the histogram
   ret_array = pointer primcall pyon_alloc_nopointers (sizeof array_type);
-  () = () call histogramArray(nil, nil, IndexedInt {hist_size}, stream, ret_array);
+  () = () call histogramArray(IndexedInt {hist_size}, stream, ret_array);
 
   // Initialize the list
   ret @! PyonList.nelems = hist_size;
@@ -643,7 +638,7 @@ function histogram
 // Initialize a histogram with zeros.
 // Call the given function to compute the histogram.
 function inline createHistogram
-  (unit _, IndexedInt size_ix, owned initializer, pointer ret) -> () {
+  (IndexedInt size_ix, owned initializer, pointer ret) -> () {
   IndexedInt {size} = size_ix;
   typedef array_type = array (value size, int);
 
@@ -673,8 +668,7 @@ record Stream_zip_state(p1stateT, p2stateT) {
 };
 
 function Stream_zip
-  (unit _, unit _, unit _,
-   owned repr_data1,            // Representation of p1's output
+  (owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned p1,
    owned p2) -> owned {
@@ -748,8 +742,7 @@ function Stream_zip
 };
 
 function zip
-  (unit _, unit _, unit _,
-   owned traversable,           // Container methods
+  (owned traversable,           // Container methods
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    pointer p1,
@@ -757,21 +750,21 @@ function zip
    pointer out)
    -> () {
    // Create a tuple representation object
-   repr_tuple = owned call repr_PyonTuple2 (nil, nil, repr_data1, repr_data2);
+   repr_tuple = owned call repr_PyonTuple2 (repr_data1, repr_data2);
 
    // Traverse input objects
    stream_p1 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data1, p1);
+     (repr_data1, p1);
    stream_p2 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data2, p2);
+     (repr_data2, p2);
 
    // Zip
    zip_stream = owned call Stream_zip
-     (nil, nil, repr_data1, repr_data2, stream_p1, stream_p2);
+     (repr_data1, repr_data2, stream_p1, stream_p2);
 
    // Create output data
    () call (traversable @! TraversableDict.build)
-     (nil, repr_tuple, zip_stream, out);
+     (repr_tuple, zip_stream, out);
 };
 
 /*****************************************************************************/
@@ -786,8 +779,7 @@ record Stream_zip3_state(p1stateT, p2stateT, p3stateT) {
 };
 
 function Stream_zip3
-  (unit _, unit _, unit _, unit _,
-   owned repr_data1,            // Representation of p1's output
+  (owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned repr_data3,            // Representation of p3's output
    owned p1,
@@ -886,8 +878,7 @@ function Stream_zip3
 };
 
 function zip3
-  (unit _, unit _, unit _, unit _,
-   owned traversable,           // Container methods
+  (owned traversable,           // Container methods
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned repr_data3,            // Representation of p3's output
@@ -897,23 +888,23 @@ function zip3
    pointer out)
    -> () {
    // Create a tuple representation object
-   repr_tuple = owned call repr_PyonTuple3 (nil, nil, nil, repr_data1, repr_data2, repr_data3);
+   repr_tuple = owned call repr_PyonTuple3 (repr_data1, repr_data2, repr_data3);
 
    // Traverse input objects
    stream_p1 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data1, p1);
+     (repr_data1, p1);
    stream_p2 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data2, p2);
+     (repr_data2, p2);
    stream_p3 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data3, p3);
+     (repr_data3, p3);
 
    // Zip
    zip_stream = owned call Stream_zip3
-     (nil, nil, nil, repr_data1, repr_data2, repr_data3, stream_p1, stream_p2, stream_p3);
+     (repr_data1, repr_data2, repr_data3, stream_p1, stream_p2, stream_p3);
 
    // Create output data
    () call (traversable @! TraversableDict.build)
-     (nil, repr_tuple, zip_stream, out);
+     (repr_tuple, zip_stream, out);
 };
 
 /*****************************************************************************/
@@ -929,8 +920,7 @@ record Stream_zip4_state(p1stateT, p2stateT, p3stateT, p4stateT) {
 };
 
 function Stream_zip4
-  (unit _, unit _, unit _, unit _, unit _,
-   owned repr_data1,            // Representation of p1's output
+  (owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned repr_data3,            // Representation of p3's output
    owned repr_data4,            // Representation of p4's output
@@ -1054,8 +1044,7 @@ function Stream_zip4
 };
 
 function zip4
-  (unit _, unit _, unit _, unit _, unit _,
-   owned traversable,           // Container methods
+  (owned traversable,           // Container methods
    owned repr_data1,            // Representation of p1's output
    owned repr_data2,            // Representation of p2's output
    owned repr_data3,            // Representation of p3's output
@@ -1068,27 +1057,26 @@ function zip4
    -> () {
    // Create a tuple representation object
    repr_tuple = owned call repr_PyonTuple4
-     (nil, nil, nil, nil, repr_data1, repr_data2, repr_data3, repr_data4);
+     (repr_data1, repr_data2, repr_data3, repr_data4);
 
    // Traverse input objects
    stream_p1 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data1, p1);
+     (repr_data1, p1);
    stream_p2 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data2, p2);
+     (repr_data2, p2);
    stream_p3 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data3, p3);
+     (repr_data3, p3);
    stream_p4 = owned call (traversable @! TraversableDict.traverse)
-     (nil, repr_data4, p4);
+     (repr_data4, p4);
 
    // Zip
    zip_stream = owned call Stream_zip4
-     (nil, nil, nil, nil,
-      repr_data1, repr_data2, repr_data3, repr_data4,
+     (repr_data1, repr_data2, repr_data3, repr_data4,
       stream_p1, stream_p2, stream_p3, stream_p4);
 
    // Create output data
    () call (traversable @! TraversableDict.build)
-     (nil, repr_tuple, zip_stream, out);
+     (repr_tuple, zip_stream, out);
 };
 
 /*****************************************************************************/
@@ -1119,12 +1107,12 @@ function inline Stream_count_next (pointer state, pointer out) -> bool {
 /* range */
 
 function inline Stream_range (int n) -> owned {
-  owned call Stream_rangeIndexed(nil, IndexedInt {n});
+  owned call Stream_rangeIndexed(IndexedInt {n});
 };
 
 // A type-indexed variant of 'range'
-function inline Stream_rangeIndexed (unit _, IndexedInt index) -> owned {
-  owned call generate(nil, nil, index, repr_int, range_get_value);
+function inline Stream_rangeIndexed (IndexedInt index) -> owned {
+  owned call generate(index, repr_int, range_get_value);
 };
 
 // Get the value of the current element of a 'range' stream.  This is just the
@@ -1140,7 +1128,7 @@ function range_get_value (int n, pointer out) -> () {
 // The stream state holds the next index to generate
 
 function inline generate
-  (unit _, unit _, IndexedInt indexed_count, owned elt_repr, owned generator)
+  (IndexedInt indexed_count, owned elt_repr, owned generator)
   -> owned {
   IndexedInt {count} = indexed_count;
   s = pointer primcall Stream_alloc();

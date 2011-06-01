@@ -105,7 +105,7 @@ mkGlobalReprEnv = do
     mk_boxed_dict _ _ = return repr_Box_value
 
     -- This is the representation dictionary for boxed objects
-    repr_Box_value = LL.VarV $ LL.llBuiltin LL.the_bivar_repr_Box_value
+    repr_Box_value = LL.VarV $ LL.llBuiltin LL.the_bivar_repr_Box
     
     mk_tuple_dict :: [Var] -> Substitution -> GenLower LL.Val
     mk_tuple_dict args = \subst -> do

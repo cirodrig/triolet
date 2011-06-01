@@ -241,14 +241,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_seqEffTok) |])
   , (PyonName module_structures "repr_array",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_array |])
-  , (PyonName module_structures "repr_Box",
-     Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
-  , (PyonName module_structures "repr_Stream",
-     Right [| SystemF.pyonBuiltin SystemF.the_repr_Stream |])
   , (PyonName module_structures "repr_Referenced",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Referenced |])
-  , (PyonName module_structures "repr_EmptyReference",
-     Right [| SystemF.pyonBuiltin SystemF.the_repr_EmptyReference |])
   {-, (PyonName module_structures "complex_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,
@@ -376,8 +370,12 @@ builtinGlobals =
   , (PyonName module_structures "OpaqueTraversableDict_list",
      Right [| pyonBuiltin SystemF.the_OpaqueTraversableDict_list |])
     -- Physical representations of data types
-  , (PyonName module_structures "repr_Box_value",
-     Left $ PrimType OwnedType)
+  , (PyonName module_structures "repr_Box",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
+  , (PyonName module_structures "repr_Stream",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_Stream |])
+  , (PyonName module_structures "repr_EmptyReference",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_EmptyReference |])
   , (PyonName module_structures "repr_EffTok",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_EffTok |])
   , (PyonName module_structures "repr_int",

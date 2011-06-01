@@ -20,20 +20,20 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   };
 };
 
-function inline storeBox (unit _, owned arg, pointer dst) -> () {
+function inline storeBox (owned arg, pointer dst) -> () {
   !dst = arg;
   ();
 };
 
-function inline loadBox (unit _, pointer src) -> owned {
+function inline loadBox (pointer src) -> owned {
   owned load src;
 };
 
-function inline ptrToBox (unit _, pointer ptr) -> owned {
+function inline ptrToBox (pointer ptr) -> owned {
   ptr as owned;
 };
 
-function inline boxToPtr (unit _, owned box) -> pointer {
+function inline boxToPtr (owned box) -> pointer {
   box as pointer;
 };
 
@@ -124,7 +124,7 @@ function inline defineIntIndex (int n) -> SomeIndexedInt {
 
 // Get a pointer to an array element
 function inline subscript
- (unit _, unit _, owned repr, pointer base, int index) -> pointer {
+ (owned repr, pointer base, int index) -> pointer {
    typedef elt_type = bytes(value repr @! PassConv.size,
                             value repr @! PassConv.align);
    base @ const_array(value int 0, elt_type)[index];
@@ -132,13 +132,13 @@ function inline subscript
 
 // Get a pointer to an array element.  Exactly the same as 'subscript'.
 function inline subscript_out
- (unit _, unit _, owned repr, pointer base, int index) -> pointer {
+ (owned repr, pointer base, int index) -> pointer {
    typedef elt_type = bytes(value repr @! PassConv.size,
                             value repr @! PassConv.align);
    base @ const_array(value int 0, elt_type)[index];
 };
 
-function inline doall (unit _, unit _, unit _, IndexedInt ix, owned f) -> () {
+function inline doall (IndexedInt ix, owned f) -> () {
   IndexedInt {count} = ix;
   _ = while (int n = int 0) (n < count) {
     () = () call f (n);
@@ -148,8 +148,7 @@ function inline doall (unit _, unit _, unit _, IndexedInt ix, owned f) -> () {
 };
 
 function inline for
-  (unit _, unit _,
-   owned acc_repr, IndexedInt ix, pointer init, owned f, pointer ret) -> () {
+  (owned acc_repr, IndexedInt ix, pointer init, owned f, pointer ret) -> () {
   IndexedInt {count} = ix;
 
   // The for loop has an 'input' and an 'output' accumulator, and swaps
@@ -191,7 +190,7 @@ function inline for
 // A parallel reduction.  The iteration space is partitioned at run time
 // and 'generator' is called on a single member of the iteration space.
 function blocked_reduce
-  (unit _, unit _, owned acc_repr, IndexedInt size, int first,
+  (owned acc_repr, IndexedInt size, int first,
    owned reducer, pointer init, owned generator, pointer ret) -> ()
 {
   IndexedInt {count} = size;
@@ -206,7 +205,7 @@ function blocked_reduce
       // Reduce over this range
       local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
       lsize = IndexedInt {lcount};
-      () = () call generator (nil, lsize, lfirst, local_value);
+      () = () call generator (lsize, lfirst, local_value);
 
       // Accumulate with old value
       ret = pointer primcall allocate (acc_is_pointerless, acc_size);
@@ -242,7 +241,7 @@ function blocked_reduce
 //
 // TODO: Keep track of objects so we can deallocate them properly
 function blocked_reduce1
-  (unit _, unit _, owned acc_repr, IndexedInt size, int first,
+  (owned acc_repr, IndexedInt size, int first,
    owned reducer, owned generator, pointer ret) -> ()
 {
   // We use the address of this data as the neutral element of the reduction.
@@ -263,11 +262,11 @@ function blocked_reduce1
       if (old_value == uninitialized_value) {
         // Reduce over this range and return the output directly
         local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
-        () = () call generator (nil, lsize, lfirst, local_value);
+        () = () call generator (lsize, lfirst, local_value);
         local_value;
       } else {
         local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
-        () = () call generator (nil, lsize, lfirst, local_value);
+        () = () call generator (lsize, lfirst, local_value);
 
         // Accumulate into output
         ret_value = pointer primcall allocate (acc_is_pointerless, acc_size);
@@ -323,7 +322,7 @@ procedure blocked_reduce_reducer
 };
 
 function inline blocked_doall
-  (unit _, unit _, unit _, IndexedInt size, int first, owned worker) -> () {
+  (IndexedInt size, int first, owned worker) -> () {
   IndexedInt {count} = size;
 
   () primcall pyon_C_blocked_doall (worker, count, first);

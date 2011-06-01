@@ -15,7 +15,7 @@ function inline emptyEffTok (pointer _) -> () {
   ();
 };
 
-function inline toEffTok (unit _, pointer _) -> () {
+function inline toEffTok (pointer _) -> () {
   ();
 };
 

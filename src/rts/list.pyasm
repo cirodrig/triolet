@@ -13,7 +13,7 @@ import procedure exit "exit" (int) -> ();
 
 #include "new_pyasm_records.h"
 
-function repr_list (unit _, owned elem_repr) -> owned {
+function repr_list (owned elem_repr) -> owned {
   repr = pointer primcall pyon_alloc (sizeof PassConv);
   // FIXME: Initialize repr header
   repr @! PassConv.size = sizeof PyonList;
@@ -125,13 +125,13 @@ procedure list_grow (pointer elem_repr, pointer list, int old_size) -> int {
 };
 
 // Get the length of a list
-function inline list_len (unit _, pointer p) -> int {
+function inline list_len (pointer p) -> int {
   p @! PyonList.nelems;
 };
 
 // Create a list from a stream of unknown size
 function list_build
-    (unit _, owned elem_repr, owned stream, pointer ret) -> () {
+    (owned elem_repr, owned stream, pointer ret) -> () {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   typedef elem_type = bytes(value elem_size, value elem_align);
@@ -183,7 +183,7 @@ function list_build
 
 // Create a stream that traverses the list.
 // The stream state is an int, which is the index of the next value to return.
-function inline list_traverse (unit _, owned elem_repr, pointer list) -> owned {
+function inline list_traverse (owned elem_repr, pointer list) -> owned {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   copy_elem = elem_repr @! PassConv.copy;
@@ -228,7 +228,7 @@ function inline list_traverse (unit _, owned elem_repr, pointer list) -> owned {
 };
 
 function inline safeSubscript
-  (unit _, owned elt_repr, pointer list, int index, pointer ret) -> () {
+  (owned elt_repr, pointer list, int index, pointer ret) -> () {
   nelems = list @! PyonList.nelems;
   contents = list @! PyonList.contents;
   elt_size = elt_repr @! PassConv.size;
@@ -244,7 +244,7 @@ function inline safeSubscript
 };
 
 function inline list_generate
-  (unit _, unit _, owned elem_repr, IndexedInt count_n, owned f, pointer ret) -> () {
+  (owned elem_repr, IndexedInt count_n, owned f, pointer ret) -> () {
   IndexedInt {count} = count_n;
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
@@ -266,8 +266,8 @@ function inline list_generate
 #if 0
 // Vectorized variant
 function inline list_vGenerate
-  (unit x, unit y, pointer repr, int count, owned f, pointer ret) -> () {
-  () call list_generate(x, y, repr, count, f, ret);
+  (pointer repr, int count, owned f, pointer ret) -> () {
+  () call list_generate(repr, count, f, ret);
 };
 #endif
 

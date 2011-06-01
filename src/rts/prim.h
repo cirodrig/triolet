@@ -1,9 +1,9 @@
 
-extern function pyon.internal.prim.storeBox (unit, owned, pointer) -> ();
-extern function pyon.internal.prim.loadBox (unit, pointer) -> owned;
+extern function pyon.internal.prim.storeBox (owned, pointer) -> ();
+extern function pyon.internal.prim.loadBox (pointer) -> owned;
 
-extern function pyon.internal.prim.ptrToBox (unit, pointer) -> owned;
-extern function pyon.internal.prim.boxToPtr (unit, owned) -> pointer;
+extern function pyon.internal.prim.ptrToBox (pointer) -> owned;
+extern function pyon.internal.prim.boxToPtr (owned) -> pointer;
 
 extern function pyon.internal.prim.eq_int (int, int) -> bool;
 extern function pyon.internal.prim.ne_int (int, int) -> bool;
@@ -32,25 +32,25 @@ extern function pyon.internal.prim.div_float (float, float) -> float;
 extern function pyon.internal.prim.defineIntIndex (int) -> SomeIndexedInt;
 
 extern function pyon.internal.prim.subscript
-  (unit, unit, owned, pointer, int) -> pointer;
+  (owned, pointer, int) -> pointer;
 
 extern function pyon.internal.prim.subscript_out
-  (unit, unit, owned, pointer, int) -> pointer;
+  (owned, pointer, int) -> pointer;
 
 extern function pyon.internal.prim.min_ii
-  (unit, unit, IndexedInt, IndexedInt) -> IndexedInt;
+  (IndexedInt, IndexedInt) -> IndexedInt;
 
 extern function pyon.internal.prim.doall
-  (unit, unit, unit, IndexedInt, owned) -> ();
+  (IndexedInt, owned) -> ();
 
 extern function pyon.internal.prim.for
-  (unit, unit, owned, IndexedInt, pointer, owned, pointer) -> ();
+  (owned, IndexedInt, pointer, owned, pointer) -> ();
 
 extern function pyon.internal.prim.blocked_reduce
-  (unit, unit, owned, IndexedInt, int, owned, pointer, owned, pointer) -> ();
+  (owned, IndexedInt, int, owned, pointer, owned, pointer) -> ();
 
 extern function pyon.internal.prim.blocked_reduce1
-  (unit, unit, owned, IndexedInt, int, owned, owned, pointer) -> ();
+  (owned, IndexedInt, int, owned, owned, pointer) -> ();
 
 // C implementation of blocked_reduce
 import procedure pyon_C_blocked_reduce
@@ -65,7 +65,7 @@ extern procedure pyon.internal.prim.blocked_reduce_reducer
   "blocked_reduce_reducer" (owned, pointer, pointer) -> pointer;
 
 extern function pyon.internal.prim.blocked_doall
-  (unit, unit, unit, IndexedInt, int, owned) -> ();
+  (IndexedInt, int, owned) -> ();
 
 // C implementation of blocked_doall
 import procedure pyon_C_blocked_doall

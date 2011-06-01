@@ -109,7 +109,7 @@ lowerBuiltinObjType type_env var =
        case Type.Eval.typeKind type_env t
        of Type.Type.VarT kind
             | kind == Type.Type.boxV -> return $ PrimType OwnedType
-            | kind == Type.Type.bareV -> return $ PrimType OwnedType
+            | kind == Type.Type.bareV -> return $ PrimType PointerType
           _ -> internalError $
                "lowerBuiltinObjType: Incompatible representation for " ++ show var
      Nothing -> internalError $
