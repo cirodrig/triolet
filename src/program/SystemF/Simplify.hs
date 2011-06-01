@@ -787,11 +787,11 @@ rwExp expression = debug "rwExp" expression $ do
       CaseE inf scrut alts -> rwCase inf scrut alts
       ExceptE _ _ -> rwExpReturn (ex1, Nothing)
   where
-    debug l e m = traceShow (text l <+> (pprExp e)) m
-    {-
-    debug m = do
-      ret@(e, _) <- m
-      traceShow (text "rwExp" <+> (pprExp expression $$ text "----" $$ pprExp e)) $ return ret
+    debug _ _ = id
+    -- debug l e m = traceShow (text l <+> (pprExp e)) m
+    {-debug l e m = do
+      ret@(e', _) <- m
+      traceShow (text l <+> (pprExp e $$ text "----" $$ pprExp e')) $ return ret
     -}
 
 -- | Rewrite a list of expressions that are in the same scope,

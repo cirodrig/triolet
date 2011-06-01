@@ -693,7 +693,7 @@ valueCoercion kind g_type e_type = do
         (e_tydom, e_dom, e_rng) = fromForallFunType e_type
     in if not (null g_tydom) || not (null g_dom)
        then return $ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
-       else traceShow (pprType g_type $$ pprType e_type) $ internalError "valueCoercion: Not implemented for this type"
+       else internalError "valueCoercion: Not implemented for this type"
 
 coerceExpAtType :: Type -> Type -> ExpM -> (ExpM -> RI (ExpM, a))
                 -> RI (ExpM, a)
@@ -904,7 +904,7 @@ reprRet (TypSF t) = fmap (TypM . fst) $ cvtNormalizeReturnType t
 
 -- | Convert an expression's representation
 reprExp :: ExpSF -> RI (ExpM, Type)
-reprExp expression = traceShow (text "reprExp" <+> pprExp expression) $
+reprExp expression =
   case fromExpSF expression
   of VarE inf v -> do
        v_type <- riLookupType v
@@ -1022,7 +1022,7 @@ reprFun (FunSF f) =
 
 withDefs :: DefGroup (Def SF) -> (DefGroup (Def Mem) -> RI a) -> RI a
 withDefs (NonRec def) k = do
-  def' <- traceShow (pprDef def) $ mapMDefiniens reprFun def
+  def' <- mapMDefiniens reprFun def
   let sf_def_type = TypecheckSF.functionType $ definiens def
       def_type = TypecheckMem.functionType $ definiens def'
   assumeValueTypes (definiendum def') sf_def_type def_type $ k (NonRec def')

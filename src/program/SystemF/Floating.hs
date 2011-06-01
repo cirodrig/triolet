@@ -668,6 +668,8 @@ instance Monad Flt where
     (y, w2) <- runFlt (k x) ctx
     return (y, w2 ++ w1)
 
+traceFlt d (Flt f) = Flt (\ctx -> traceShow d (f ctx))
+
 instance Functor Flt where
   fmap f (Flt g) = Flt (\ctx -> do (x, context) <- g ctx 
                                    return (f x, context))

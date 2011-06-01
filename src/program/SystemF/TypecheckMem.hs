@@ -491,6 +491,8 @@ inferExpType expression =
       withMany assumePat (altParams alt) $ \_ ->
       infer_exp $ altBody alt
 
+    debug = traceShow (text "inferExpType" <+> pprExp expression)
+
 -- | Infer the type of an application, given the operator type and argument
 --   types.  If the application is not well-typed, an exception is raised.
 inferAppType :: EvalMonad m =>
