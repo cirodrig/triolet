@@ -6,6 +6,6 @@ import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
 import Type.Type
 import Type.Environment
+import SystemF.Lowering.LowerMonad
 
-lowerFunctionType :: IdentSupply LL.Var -> IdentSupply Var -> TypeEnv -> Type
-                  -> IO LL.FunctionType
+lowerFunctionType :: LowerEnv -> Type -> IO LL.FunctionType

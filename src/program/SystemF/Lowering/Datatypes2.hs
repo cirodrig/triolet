@@ -654,24 +654,20 @@ lowerTypeList tenv tys = liftM catMaybes $ mapM (lowerType tenv) tys
 
 -- | Compute the low-level function type corresponding to a Mem function.
 --   Uses the Mem type environment.
-lowerFunctionType :: IdentSupply LL.Var -> IdentSupply Var -> TypeEnv -> Type
-                  -> IO LL.FunctionType
-lowerFunctionType ll_var_supply var_supply tenv ty = do
-  -- FIXME: Don't recompute this every time the function is called!
-  env <- initializeLowerEnv var_supply ll_var_supply tenv Map.empty
-  runLowering env $ do
-    -- Deconstruct the type
-    let (ty_params, monotype) = fromForallType ty
-        (params, ret) = fromFunType monotype
-        local_tenv = foldr insert_type tenv ty_params
-          where insert_type (a ::: k) e = insertType a k e
-    when (null params) $ internalError "lowerFunctionType: Not a function type"
+lowerFunctionType :: LowerEnv -> Type -> IO LL.FunctionType
+lowerFunctionType env ty = runLowering env $ do
+  -- Deconstruct the type
+  let (ty_params, monotype) = fromForallType ty
+      (params, ret) = fromFunType monotype
+      local_tenv = foldr insert_type (typeEnvironment env) ty_params
+        where insert_type (a ::: k) e = insertType a k e
+  when (null params) $ internalError "lowerFunctionType: Not a function type"
 
-    -- Create a function type
-    param_types <- lowerTypeList local_tenv params
-    ret_type <- fmap maybeToList $ lowerType local_tenv ret
-    let ll_type = LL.closureFunctionType param_types ret_type
-    return ll_type
+  -- Create a function type
+  param_types <- lowerTypeList local_tenv params
+  ret_type <- fmap maybeToList $ lowerType local_tenv ret
+  let ll_type = LL.closureFunctionType param_types ret_type
+  return ll_type
 
 -- | Generate the low-level translation of a data constructor.
 --   If the data constructor takes parameters or

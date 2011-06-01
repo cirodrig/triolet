@@ -30,6 +30,7 @@ import qualified Type.Var
 
 -- This module helps us translate System F types into low-level types
 import {-# SOURCE #-} SystemF.Lowering.Datatypes2
+import SystemF.Lowering.LowerMonad(LowerEnv, initializeLowerEnv)
 
 fromBuiltinVarName :: BuiltinVarName -> (ModuleName, String, Maybe String)
 fromBuiltinVarName (CName mod nm) = (mod, nm, Just nm)
@@ -82,15 +83,14 @@ initializeGlobalField supply nm ty
     typeOk (PrimType OwnedType) = True
     typeOk _ = False-}
 
-lowerBuiltinFunType :: IdentSupply Type.Var.Var
-                    -> IdentSupply Var
+lowerBuiltinFunType :: LowerEnv
                     -> Type.Environment.TypeEnv
                     -> Type.Var.Var
                     -> IO FunctionType
-lowerBuiltinFunType type_v_ids v_ids type_env con =
+lowerBuiltinFunType lowering_env type_env con =
   case Type.Environment.lookupType con type_env
   of Just ty ->
-       lowerFunctionType v_ids type_v_ids type_env ty `catch`
+       lowerFunctionType lowering_env ty `catch`
        \(exc :: SomeException) -> do
          putStrLn $ "Error while processing builtin '" ++ show con ++ "'"
          throwIO exc
@@ -122,6 +122,9 @@ initializeLowLevelBuiltins :: IdentSupply Type.Var.Var
                            -> Type.Environment.TypeEnv 
                            -> IO ()
 initializeLowLevelBuiltins type_var_ids v_ids mem_type_env = do
+  -- Create the environment needed for lowering
+  lowering_env <- initializeLowerEnv type_var_ids v_ids mem_type_env Map.empty
+
   -- Create the record
   builtins_record <-
     $(
@@ -129,7 +132,7 @@ initializeLowLevelBuiltins type_var_ids v_ids mem_type_env = do
           -- Returns a quoted (IO FunctionType)
           closure_type (Left t) = [| return t |]
           closure_type (Right conQ) =
-            [| lowerBuiltinFunType type_var_ids v_ids mem_type_env $conQ |]
+            [| lowerBuiltinFunType lowering_env mem_type_env $conQ |]
 
           init_primitives =
             [("the_biprim_" ++ builtinVarUnqualifiedName nm,
