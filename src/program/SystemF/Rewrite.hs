@@ -673,10 +673,10 @@ rwHistogram inf [container] (size : input : other_args) = do
     defineAndInspectIndexedInt tenv (return size)
     (\n index ->
       varAppE (pyonBuiltin the_make_list)
-      [TypM intType, TypM $ VarT n]
+      [TypM storedIntType, TypM $ VarT n]
       (varE index :
        varAppE (pyonBuiltin the_referenced)
-       [TypM $ varApp (pyonBuiltin the_array) [VarT n, intType]]
+       [TypM $ varApp (pyonBuiltin the_array) [VarT n, storedIntType]]
        [varAppE (pyonBuiltin the_histogramArray)
         [shapeOfType container, TypM $ VarT n]
         [varE index, return input]] :

@@ -771,25 +771,25 @@ len : (a : bare) -> list a -> int;
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)
             -> IndexedInt n
-            -> Stream (array_shape n) int;
+            -> Stream (array_shape n) (Stored int);
 
 histogram : (t : bare -> bare)
          -> int
-         -> Stream (shape t) int
-         -> Writer (list int);
+         -> Stream (shape t) (Stored int)
+         -> Writer (list (Stored int));
 
 histogramArray : (sh : bare)
               -> (n : intindex)
               -> IndexedInt n
-              -> Stream sh int
-              -> Writer (array n int);
+              -> Stream sh (Stored int)
+              -> Writer (array n (Stored int));
 
 -- Low-level function for imperatively initializing an histogram
 createHistogram :
     (n : intindex)
  -> IndexedInt n
- -> ((int -> Writer EffTok) -> EffTok -> Writer EffTok)
- -> Writer (array n int);
+ -> ((int -> Writer (Stored EffTok)) -> Stored EffTok -> Writer (Stored EffTok))
+ -> Writer (array n (Stored int));
 
 generate : (n : intindex)
         -> (a : bare)
