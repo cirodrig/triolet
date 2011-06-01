@@ -308,9 +308,8 @@ repr_PyonTuple4 :
 -- Representation of any boxed object
 repr_Box : (a : box) -> Repr (BareType a);
 
-repr_Boxed : (a : bare) -> Repr (Boxed a);
 repr_Referenced : (a : bare) -> Repr a -> Repr (Referenced a);
-repr_Stream : (sh : bare) -> (a : bare) -> Repr (Stream sh a);
+repr_Stream : (sh : bare) -> (a : bare) -> Repr (BareType (Stream sh a));
 
 -- Representation of a referenced object that contains nothing and will
 -- never be accessed.  At runtime, the reference will be an arbitrary pointer,

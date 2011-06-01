@@ -383,6 +383,5 @@ isReprCon v =
            , pyonBuiltin the_repr_PyonTuple3
            , pyonBuiltin the_repr_PyonTuple4
            , pyonBuiltin the_repr_Box
-           , pyonBuiltin the_repr_Boxed
            , pyonBuiltin the_repr_Stream
            ]

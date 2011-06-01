@@ -243,8 +243,6 @@ builtinFunctions =
      Right [| SystemF.pyonBuiltin SystemF.the_repr_array |])
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])
-  , (PyonName module_structures "repr_Boxed",
-     Right [| SystemF.pyonBuiltin SystemF.the_repr_Boxed |])
   , (PyonName module_structures "repr_Stream",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Stream |])
   , (PyonName module_structures "repr_Referenced",

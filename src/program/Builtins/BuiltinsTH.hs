@@ -111,7 +111,6 @@ pyonBuiltinVariableNames =
   , "repr_Any"
   , "repr_Box"
   , "repr_Stream"
-  , "repr_Boxed"
   , "repr_Referenced"
   , "repr_EmptyReference"
   , "repr_array"
