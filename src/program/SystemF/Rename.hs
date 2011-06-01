@@ -397,7 +397,7 @@ instance Substitutable (Exp Mem) where
          return $ ExpM $ CaseE inf scr' alts'
        ExceptE inf ty -> do
          ty' <- substitute s ty
-         return $ ExpM $ ExceptE inf ty
+         return $ ExpM $ ExceptE inf ty'
 
 instance Substitutable (Alt Mem) where
   substitute s (AltM alt) =
