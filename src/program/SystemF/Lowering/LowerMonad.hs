@@ -69,18 +69,17 @@ initializeLowerEnv var_supply ll_var_supply type_env var_map = do
 -- | Create the global representation dictionary environment
 mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
 mkGlobalReprEnv = do
-  repr_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_Repr) [VarT arg], mk_repr_dict arg)
+  -- All boxed objects use the same representation
+  box_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_StoredBox) [VarT arg], mk_boxed_dict arg)
+
+  -- Value dictionaries
   let int_dict =
-        mono_dict (VarT $ pyonBuiltin the_int) LL.the_bivar_repr_int
+        mono_dict (stored_type $ VarT $ pyonBuiltin the_int) LL.the_bivar_repr_int
   let float_dict =
-        mono_dict (VarT $ pyonBuiltin the_float) LL.the_bivar_repr_float
-  additive_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_AdditiveDict) [VarT arg],
-     mk_additive_dict arg)
-  multiplicative_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_MultiplicativeDict) [VarT arg],
-     mk_multiplicative_dict arg)
+        mono_dict (stored_type $ VarT $ pyonBuiltin the_float) LL.the_bivar_repr_float
+
+  -- Bare object dictionaries
   (tuple2_dict, tuple3_dict, tuple4_dict) <- do
     v1 <- newAnonymousVar TypeLevel
     v2 <- newAnonymousVar TypeLevel
@@ -95,25 +94,17 @@ mkGlobalReprEnv = do
     return (DictEnv.pattern [v1, v2] ty2 (mk_tuple_dict [v1, v2]),
             DictEnv.pattern [v1, v2, v3] ty3 (mk_tuple_dict [v1, v2, v3]),
             DictEnv.pattern [v1, v2, v3, v4] ty4 (mk_tuple_dict [v1, v2, v3]))
-  return $ DictEnv.DictEnv [float_dict, int_dict, repr_dict,
-                            additive_dict, multiplicative_dict,
+  return $ DictEnv.DictEnv [float_dict, int_dict, box_dict,
                             tuple2_dict, tuple3_dict, tuple4_dict]
   where
+    stored_type t = varApp (pyonBuiltin the_Stored) [t]
     mono_dict ty val =
       DictEnv.monoPattern ty (return (LL.VarV $ LL.llBuiltin val))
 
-    -- Need a (Repr a) to create a (Repr (AdditiveDict a))
-    mk_additive_dict arg = \subst ->
-      internalError "mkGlobalReprEnv: Not implemented for AdditiveDict"
+    -- Get a representation dictionary for boxed objects
+    mk_boxed_dict _ _ = return repr_Box_value
 
-    -- Need a (Repr a) to create a (Repr (MultiplicativeDict a))
-    mk_multiplicative_dict arg = \subst ->
-      internalError "mkGlobalReprEnv: Not implemented for MultiplicativeDict"
-
-    -- Get a representation dictionary for (Repr a)
-    mk_repr_dict _ _ = return repr_Box_value
-
-    -- This is the representation dictionary for Repr objects
+    -- This is the representation dictionary for boxed objects
     repr_Box_value = LL.VarV $ LL.llBuiltin LL.the_bivar_repr_Box_value
     
     mk_tuple_dict :: [Var] -> Substitution -> GenLower LL.Val
