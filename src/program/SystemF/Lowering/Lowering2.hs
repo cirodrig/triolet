@@ -123,11 +123,11 @@ retValToList (RetVal val) = [val]
 --   arguments, the constructor value is returned; otherwise a function 
 --   is returned.  All type arguments must be provided.
 compileConstructor :: Var -> DataConType -> [Type] -> GenLower RetVal
-compileConstructor con con_type ty_args = lift $ do
-  (field_types, result_type) <-
-    instantiateDataConTypeWithExistentials con_type ty_args
-  tenv <- getTypeEnv
-  layout <- getAlgLayout tenv result_type
+compileConstructor con con_type ty_args = do
+  layout <- lift $ do
+    (_, result_type) <- instantiateDataConTypeWithExistentials con_type ty_args
+    tenv <- getTypeEnv
+    getAlgLayout tenv result_type
   fmap RetVal $ algebraicIntro layout con
 
 {-
@@ -265,32 +265,25 @@ lowerApp :: Type -> ExpTM -> [TypTM] -> [ExpTM] -> GenLower RetVal
 lowerApp rt op ty_args args = do
   tenv <- lift getTypeEnv
   
-  -- The operator is either a function or a data constructor
-  case op of
-    ExpTM (TypeAnn _ (VarE _ op_var)) 
-      | Just op_data_con <- lookupDataCon op_var tenv ->
-          lower_data_constructor tenv op_var op_data_con
-    _ | null args -> lowerExp op
-      | otherwise -> lower_function tenv
-  where
-    lower_data_constructor tenv op_var op_data_con = do
-      let argument_types = [t | TypTM (TypeAnn _ t) <- ty_args]
-      op'     <- compileConstructor op_var op_data_con argument_types
-      args'   <- mapM lowerExpToVal args
-      tenv    <- lift getTypeEnv
-      returns <- lift $ lowerType tenv rt
-      retvals <- emitAtom (maybeToList returns) $
-                 LL.closureCallA (fromRetVal op') args'
-      return $ listToRetVal retvals
+  -- If the operator is a data constructor, generate data constructor code;
+  -- otherwise, lower the expression
+  op' <-
+    case op
+    of ExpTM (TypeAnn _ (VarE _ op_var)) 
+         | Just op_data_con <- lookupDataCon op_var tenv ->
+             let argument_types = [t | TypTM (TypeAnn _ t) <- ty_args]
+             in compileConstructor op_var op_data_con argument_types
+       _ ->
+         lowerExp op
 
-    lower_function tenv = do
-      op'      <- lowerExpToVal op
-      args'    <- mapM lowerExpToVal args
-      tenv     <- lift getTypeEnv
-      returns  <- lift $ lowerType tenv rt
-      retvals  <- emitAtom (maybeToList returns) $
-                  LL.closureCallA op' args'
-      return $ listToRetVal retvals
+  -- If function arguments were given, then generate a function call
+  if null args then return op' else do
+    args'   <- mapM lowerExpToVal args
+    tenv    <- lift getTypeEnv
+    returns <- lift $ lowerType tenv rt
+    retvals <- emitAtom (maybeToList returns) $
+               LL.closureCallA (fromRetVal op') args'
+    return $ listToRetVal retvals
 
 lowerLam _ f = do
   f' <- lowerFun f

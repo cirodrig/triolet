@@ -671,9 +671,10 @@ lowerFunctionType env ty = runLowering env $ do
 
 -- | Generate the low-level translation of a data constructor.
 --   If the data constructor takes parameters or
---   a return pointer, then a lambda function is generated.
-algebraicIntro :: AlgLayout -> Var -> Lower LL.Val
-algebraicIntro (AlgMemLayout ml) con = algMemIntro ml (VarCon con)
+--   a return pointer, then a lambda function is generated.  Otherwise
+--   code is generated to compute the constructor's value.
+algebraicIntro :: AlgLayout -> Var -> GenLower LL.Val
+algebraicIntro (AlgMemLayout ml) con = lift $ algMemIntro ml (VarCon con)
 algebraicIntro (AlgValLayout vl) con = algValIntro vl (VarCon con)
 
 algMemIntro ml con =
@@ -707,8 +708,15 @@ algValIntro vl con =
      Nothing -> internalError "algebraicIntro: Constructor not found"
 
 algValIntro' (ValProd { valType = ty
-                    , valFields = fs
-                    , valWriter = writer}) = do
+                      , valFields = []
+                      , valWriter = writer}) = do
+  -- Since this constructor takes no parameters,
+  -- we generate the code for it directly.
+  writer []
+
+algValIntro' (ValProd { valType = ty
+                      , valFields = fs
+                      , valWriter = writer}) = lift $ do
   -- Create an initializer function.
   -- The function takes the parameters (which may be initializer functions)
   -- and return pointer, and writes into the return pointer.
