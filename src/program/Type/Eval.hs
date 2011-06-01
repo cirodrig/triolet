@@ -51,7 +51,7 @@ normalize t =
 
 -- | Get the type of a type.
 --   Minimal error checking is performed.
-typeKind :: TypeEnv -> Type -> Type
+typeKind :: TypeEnvBase type_function -> Type -> Type
 typeKind tenv ty =
   case ty
   of VarT v ->

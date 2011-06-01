@@ -47,7 +47,7 @@ the_memTypes = defineInitGlobalVar ()
 
 -- | The specification types of global variables.
 --   Replaces functionality formerly provided by 'the_newCoreTypes'.
-the_specTypes :: InitGlobalVar Type.Environment.TypeEnv
+the_specTypes :: InitGlobalVar Type.Environment.SpecTypeEnv
 {-# NOINLINE the_specTypes #-}
 the_specTypes = defineInitGlobalVar ()
 

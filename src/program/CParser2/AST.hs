@@ -16,7 +16,7 @@ import Common.SourcePos
 import Common.Label
 import Type.Var
 import Type.Type(Level(..), HasLevel(..))
-import Type.Environment(TypeFunction)
+import Type.Environment(BuiltinTypeFunction)
 
 -- | Details about an externally defined variable.
 --
@@ -29,7 +29,7 @@ import Type.Environment(TypeFunction)
 --   type function value is also included here.  Type functions must be
 --   type-level entities, and must not be data types.
 data VarDetails =
-  PredefinedVar !Var !(Maybe TypeFunction)
+  PredefinedVar !Var !(Maybe BuiltinTypeFunction)
 
 instance HasLevel VarDetails where
   getLevel (PredefinedVar v _) = getLevel v
@@ -129,7 +129,7 @@ data Decl ix = Decl (Identifier ix) !(Entity ix)
 
 data Entity ix = 
     VarEnt (LType ix) 
-  | TypeEnt (LType ix) (Maybe TypeFunction)
+  | TypeEnt (LType ix) (Maybe BuiltinTypeFunction)
   | DataEnt (LType ix) [LDataConDecl ix]
 
 type LDecl ix = Located (Decl ix)

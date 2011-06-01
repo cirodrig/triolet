@@ -38,7 +38,7 @@ translateType lty =
 
 -- | Translate a data constructor field to the type used for passing the 
 --   field as an argument to a constructor application.
-translateDataConFieldArgument :: TypeEnv -> RLType -> Type.Type
+translateDataConFieldArgument :: SpecTypeEnv -> RLType -> Type.Type
 translateDataConFieldArgument tenv lty =
   let translated_type = translateType lty
       translated_kind = Type.typeKind tenv translated_type
@@ -86,7 +86,7 @@ translateDataConDecl tenv data_type_con decl =
 
 -- | Translate a global declaration.  The completed type environment may be
 --   used lazily in the translation.
-translateDecl :: TypeEnv -> Decl Resolved -> (TypeEnv -> TypeEnv)
+translateDecl :: SpecTypeEnv -> Decl Resolved -> (SpecTypeEnv -> SpecTypeEnv)
 translateDecl tenv (Decl name ent) =
   case ent
   of VarEnt ty ->

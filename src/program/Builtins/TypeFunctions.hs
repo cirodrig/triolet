@@ -4,21 +4,51 @@ module Builtins.TypeFunctions(builtinTypeFunctions) where
 import qualified Data.Map as Map
 
 import Builtins.Builtins
+import Common.Error
 import Type.Type
 import Type.Environment
 import Type.Compare
 import Type.Eval
 
-builtinTypeFunctions :: Map.Map Var TypeFunction
+builtinTypeFunctions :: Map.Map Var BuiltinTypeFunction
 builtinTypeFunctions =
   Map.fromList
-  [ (pyonBuiltin the_shape, shapeTF)
-  , (pyonBuiltin the_BoxedType, boxedTF)
-  , (pyonBuiltin the_BareType, bareTF)
+  [ (pyonBuiltin the_shape, BuiltinTypeFunction shapePureTF shapeMemTF)
+  , (pyonBuiltin the_BoxedType, BuiltinTypeFunction boxedPureTF boxedMemTF)
+  , (pyonBuiltin the_BareType, BuiltinTypeFunction barePureTF bareMemTF)
   ]
 
--- | Compute the shape of a data type
-shapeTF = typeFunction 1 compute_shape
+-- | Compute the shape of a data type in the pure type system
+shapePureTF = typeFunction 1 compute_shape
+  where
+    compute_shape :: forall m. EvalMonad m => [Type] -> m Type
+    compute_shape [container_type] = do
+      -- Apply to produce a type of kind *, which can be fully evaluated
+      arg_type <- newAnonymousVar TypeLevel
+      app_container_type <- reduceToWhnf (AppT container_type (VarT arg_type)) 
+      simplify app_container_type container_type
+
+    -- Pattern match against 'app_container_type'.  If nothing matches, then
+    -- rebuild the original expression using 'container_type'.
+    simplify :: forall m. EvalMonad m => Type -> Type -> m Type
+    simplify app_container_type container_type = do
+      case fromVarApp app_container_type of
+        Just (op, args)
+          | op `isPyonBuiltin` the_Stream ->
+              case args of [arg, _] -> reduceToWhnf arg
+          | op `isPyonBuiltin` the_list ->
+              return $ VarT (pyonBuiltin the_list_shape)
+          | op `isPyonBuiltin` the_array ->
+              case args
+              of [arg, _] ->
+                   return $ varApp (pyonBuiltin the_array_shape) [arg]
+        _ -> cannot_reduce
+      where
+        cannot_reduce =
+          return $ varApp (pyonBuiltin the_shape) [container_type]
+
+-- | Compute the shape of a data type in the memory type system
+shapeMemTF = typeFunction 1 compute_shape
   where
     compute_shape :: forall m. EvalMonad m => [Type] -> m Type
     compute_shape [container_type] = do
@@ -52,8 +82,12 @@ shapeTF = typeFunction 1 compute_shape
         cannot_reduce =
           return $ varApp (pyonBuiltin the_shape) [container_type]
 
+-- | The 'BoxedType' data type should never appear in the pure type system
+boxedPureTF =
+  typeFunction 1 (\_ -> internalError "Unexpected occurrence of 'BoxedType'")
+
 -- | Compute the boxed representation corresponding to a bare type
-boxedTF = typeFunction 1 compute_boxed
+boxedMemTF = typeFunction 1 compute_boxed
   where
     compute_boxed :: forall m. EvalMonad m => [Type] -> m Type
     compute_boxed [arg_type] =
@@ -83,8 +117,12 @@ boxedTF = typeFunction 1 compute_boxed
         cannot_reduce =
           return $ varApp (pyonBuiltin the_BoxedType) [arg]
           
+-- | The 'BareType' data type should never appear in the pure type system
+barePureTF =
+  typeFunction 1 (\_ -> internalError "Unexpected occurrence of 'BareType'")
+
 -- | Compute the bare representation corresponding to a boxed type
-bareTF = typeFunction 1 compute_bare
+bareMemTF = typeFunction 1 compute_bare
   where
     compute_bare :: forall m. EvalMonad m => [Type] -> m Type
     compute_bare [arg_type] =

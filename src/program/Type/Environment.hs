@@ -18,12 +18,15 @@ module Type.Environment
         assumeBinders,
         EvalMonad(..),
         TypeEvalM(..),
+        TypeEnvBase,
         TypeEnv,
+        SpecTypeEnv,
         DataType(..),
         DataConType(..),
         dataConPatternRange,
         DataTypeDescr(..),
         TypeFunction,
+        BuiltinTypeFunction(..),
         typeFunction,
         typeFunctionArity,
         applyTypeFunction,
@@ -45,6 +48,7 @@ module Type.Environment
         isAdapterCon,
         specToPureTypeEnv,
         specToMemTypeEnv,
+        specToTypeEnv
        )
 where
 
@@ -125,8 +129,11 @@ instance EvalMonad TypeEvalM where
 
 -------------------------------------------------------------------------------
 
--- | A type assigned to a Var
-data TypeAssignment =
+-- | A type assigned to a 'Var'.
+--
+--   The type_function parameter is 'BuiltinTypeFunction' in the specification
+--   type environment and 'TypeFunction' in other type environments.
+data TypeAssignment type_function =
     -- | Type of a variable
     VarTypeAssignment
     { varType :: !Type
@@ -149,7 +156,7 @@ data TypeAssignment =
     -- | Type and definition of a type function
   | TyFunTypeAssignment
     { varType :: !Type
-    , tyFunType :: !TypeFunction
+    , tyFunType :: !type_function
     }
 
 data DataType =
@@ -207,6 +214,14 @@ data TypeFunction =
   , _tyfunReduction :: !(EvalMonad m => [Type] -> m Type)
   }
 
+-- | A built-in type function has two implementations, depending on whether
+--   it's being evaluated in the pure or mem variant of the type system
+data BuiltinTypeFunction =
+  BuiltinTypeFunction
+  { builtinPureTypeFunction :: !TypeFunction
+  , builtinMemTypeFunction :: !TypeFunction
+  }
+
 -- | Create a type function
 typeFunction :: Int -> (forall m. EvalMonad m => [Type] -> m Type) -> TypeFunction
 typeFunction = TypeFunction
@@ -218,13 +233,21 @@ applyTypeFunction :: EvalMonad m => TypeFunction -> [Type] -> m Type
 applyTypeFunction = _tyfunReduction
 
 -- | A type environment maps variables to types
-newtype TypeEnv = TypeEnv (IntMap.IntMap TypeAssignment)
+newtype TypeEnvBase type_function =
+  TypeEnv (IntMap.IntMap (TypeAssignment type_function))
 
-emptyTypeEnv :: TypeEnv
+type TypeEnv = TypeEnvBase TypeFunction
+type SpecTypeEnv = TypeEnvBase BuiltinTypeFunction
+
+type PureTypeAssignment = TypeAssignment TypeFunction
+type MemTypeAssignment = TypeAssignment TypeFunction
+type SpecTypeAssignment = TypeAssignment BuiltinTypeFunction
+
+emptyTypeEnv :: TypeEnvBase type_function
 emptyTypeEnv = TypeEnv IntMap.empty
 
 -- | A Type environment containing the variables defined in "Type.Type"
-wiredInTypeEnv :: TypeEnv
+wiredInTypeEnv :: TypeEnvBase type_function
 wiredInTypeEnv =
   TypeEnv $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- entries]
   where
@@ -238,7 +261,8 @@ wiredInTypeEnv =
                (posInftyV, VarTypeAssignment intindexT)]
 
 -- | Insert a variable type assignment
-insertType :: Var -> Type -> TypeEnv -> TypeEnv
+insertType :: Var -> Type
+           -> TypeEnvBase type_function -> TypeEnvBase type_function
 insertType v t (TypeEnv env) =
   TypeEnv (IntMap.insert (fromIdent $ varID v) (VarTypeAssignment t) env)
 
@@ -246,7 +270,8 @@ insertType v t (TypeEnv env) =
 data DataTypeDescr =
   DataTypeDescr Var Type [(Type, DataConType)]
 
-insertDataType :: DataTypeDescr -> TypeEnv -> TypeEnv
+insertDataType :: DataTypeDescr
+               -> TypeEnvBase type_function -> TypeEnvBase type_function
 insertDataType (DataTypeDescr ty_con kind ctors) (TypeEnv env) =
   TypeEnv $ foldr insert env (ty_con_assignment : data_con_assignments)
   where
@@ -263,25 +288,27 @@ insertDataType (DataTypeDescr ty_con kind ctors) (TypeEnv env) =
                     of FunT _ k2 -> result_kind k2
                        VarT {}   -> toBaseKind k
 
-insertTypeFunction :: Var -> Type -> TypeFunction -> TypeEnv -> TypeEnv
+insertTypeFunction :: Var -> Type -> type_function
+                   -> TypeEnvBase type_function -> TypeEnvBase type_function
 insertTypeFunction v ty f (TypeEnv env) =
   TypeEnv $ IntMap.insert (fromIdent $ varID v) (TyFunTypeAssignment ty f) env
 
-lookupDataCon :: Var -> TypeEnv -> Maybe DataConType
+lookupDataCon :: Var -> TypeEnvBase type_function -> Maybe DataConType
 {-# INLINE lookupDataCon #-}
 lookupDataCon v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Just (DataConTypeAssignment _ dtor) -> Just dtor
      _ -> Nothing
 
-lookupDataType :: Var -> TypeEnv -> Maybe DataType
+lookupDataType :: Var -> TypeEnvBase type_function -> Maybe DataType
 {-# INLINE lookupDataType #-}
 lookupDataType v (TypeEnv env) =
   case IntMap.lookup (fromIdent $ varID v) env
   of Just (TyConTypeAssignment _ tc) -> Just tc
      _ -> Nothing
 
-lookupDataConWithType :: Var -> TypeEnv -> Maybe (DataType, DataConType)
+lookupDataConWithType :: Var -> TypeEnvBase type_function
+                      -> Maybe (DataType, DataConType)
 {-# INLINE lookupDataConWithType #-}
 lookupDataConWithType v env = do
   dcon <- lookupDataCon v env
@@ -296,7 +323,7 @@ lookupTypeFunction v (TypeEnv env) =
      _ -> Nothing
 
 -- | Look up the type of a variable
-lookupType :: Var -> TypeEnv -> Maybe Type
+lookupType :: Var -> TypeEnvBase type_function -> Maybe Type
 {-# INLINE lookupType #-}
 lookupType v (TypeEnv env) =
   fmap varType $ IntMap.lookup (fromIdent $ varID v) env
@@ -309,11 +336,11 @@ getAllDataConstructors (TypeEnv env) = IntMap.mapMaybe get_data_con env
     get_data_con _ = Nothing
 
 -- | Get all types in the type environment
-getAllTypes :: TypeEnv -> IntMap.IntMap Type
+getAllTypes :: TypeEnvBase type_function -> IntMap.IntMap Type
 getAllTypes (TypeEnv env) = IntMap.map varType env
 
 -- | Create a docstring showing all types in the type environment
-pprTypeEnv :: TypeEnv -> Doc
+pprTypeEnv :: TypeEnvBase type_function -> Doc
 pprTypeEnv tenv =
   vcat [ hang (text (show n) <+> text "|->") 8 (pprType t)
        | (n, t) <- IntMap.toList $ getAllTypes tenv]
@@ -431,11 +458,11 @@ isAdapterCon v = v `elem` adapters
                 pyonBuiltin the_BoxedType,
                 pyonBuiltin the_BareType]
 
-specToPureTypeEnv :: TypeEnv -> TypeEnv
+specToPureTypeEnv :: SpecTypeEnv -> TypeEnv
 specToPureTypeEnv (TypeEnv m) =
   TypeEnv (IntMap.mapMaybe specToPureTypeAssignment m)
 
-specToPureTypeAssignment :: TypeAssignment -> Maybe TypeAssignment
+specToPureTypeAssignment :: SpecTypeAssignment -> Maybe PureTypeAssignment
 specToPureTypeAssignment ass =
   case ass
   of VarTypeAssignment rt ->
@@ -446,7 +473,9 @@ specToPureTypeAssignment ass =
        DataConTypeAssignment <$> specToPureType rt
                              <*> specToPureDataConType con_type
      TyFunTypeAssignment rt f ->
-       TyFunTypeAssignment <$> specToPureKind rt <*> pure f
+       TyFunTypeAssignment <$>
+       specToPureKind rt <*>
+       pure (builtinPureTypeFunction f)
 
 specToPureTypeOrKind e =
   case getLevel e
@@ -512,7 +541,7 @@ specToPureDataConType dcon_type = do
   where
     type_param (v ::: t) = fmap (v :::) $ specToPureKind t
 
-specToMemTypeEnv :: TypeEnv -> TypeEnv
+specToMemTypeEnv :: SpecTypeEnv -> TypeEnv
 specToMemTypeEnv (TypeEnv m) =
   TypeEnv (IntMap.map specToMemTypeAssignment m)
 
@@ -525,7 +554,7 @@ specToMemTypeAssignment ass =
      DataConTypeAssignment rt con_type ->
        DataConTypeAssignment (specToMemType rt) (specToMemDataConType con_type)
      TyFunTypeAssignment rt f ->
-       TyFunTypeAssignment (specToMemType rt) f
+       TyFunTypeAssignment (specToMemType rt) (builtinMemTypeFunction f)
 
 specToMemType ty =
   case fromVarApp ty
@@ -562,3 +591,19 @@ specToMemDataConType dcon_type =
 initializerType t =
   FunT (varApp (pyonBuiltin the_OutPtr) [t])
        (varApp (pyonBuiltin the_IEffect) [t])
+
+-------------------------------------------------------------------------------
+
+-- | Convert a specification type environment to one where types can be
+--   compared.  The 'mem' variant of type functions is selected.  All types
+--   remain unchanged.
+specToTypeEnv :: SpecTypeEnv -> TypeEnv
+specToTypeEnv (TypeEnv m) =
+  TypeEnv (IntMap.map specToTypeAssignment m)
+
+specToTypeAssignment ass =
+  case ass
+  of VarTypeAssignment t -> VarTypeAssignment t
+     TyConTypeAssignment t cons -> TyConTypeAssignment t cons
+     DataConTypeAssignment t con_type -> DataConTypeAssignment t con_type
+     TyFunTypeAssignment t f -> TyFunTypeAssignment t (builtinMemTypeFunction f)

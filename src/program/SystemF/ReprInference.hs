@@ -1046,5 +1046,5 @@ representationInference mod = do
     sf_type_env <- readInitGlobalVarIO the_systemFTypes
     type_env <- readInitGlobalVarIO the_specTypes
     (dict_env, int_env) <- runFreshVarM supply createDictEnv
-    let context = RIEnv supply type_env dict_env int_env sf_type_env
+    let context = RIEnv supply (specToTypeEnv type_env) dict_env int_env sf_type_env
     runReaderT (unRI (reprModule mod)) context

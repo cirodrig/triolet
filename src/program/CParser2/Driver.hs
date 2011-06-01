@@ -42,7 +42,7 @@ predefinedVarDetails =
         
         type_function = Map.lookup v builtinTypeFunctions
 
-parseCoreModule :: IdentSupply Var -> IO TypeEnv
+parseCoreModule :: IdentSupply Var -> IO SpecTypeEnv
 parseCoreModule ident_supply = do
   pathname <- getDataFileName ("symbols" </> "coretypes2")
   input_file <- readFile pathname
