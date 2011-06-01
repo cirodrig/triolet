@@ -161,18 +161,14 @@ compilePyonToPyonAsm compile_flags path text = do
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
   sf_mod <- SystemF.DeadCodeSF.eliminateDeadCode sf_mod
   sf_mod <- SystemF.eliminatePatternMatching sf_mod
-  -- sf_mod <- SystemF.doSpecialization sf_mod
 
   -- Re-run partial evaluation to simplify the specialized code.
-  -- In particular, we must put 'do' operators into standard form.
   sf_mod <- return $ SystemF.partialEvaluateModule sf_mod
   putStrLn ""
   putStrLn "System F"
   print $ SystemF.pprModule sf_mod
 
   -- Convert to explicit memory representation
-  -- tc_mod <- SystemF.TypecheckSF.typeCheckModule sf_mod
-  
   spec_mod <- SystemF.representationInference sf_mod
   let repr_mod = SystemF.convertSpecToMemTypes spec_mod
   
@@ -187,22 +183,37 @@ compilePyonToPyonAsm compile_flags path text = do
   repr_mod <- highLevelOptimizations False False repr_mod
   repr_mod <- highLevelOptimizations False False repr_mod
 
+  -- Convert remaining loops to sequential loops
+  repr_mod <- highLevelOptimizations False True repr_mod
+  repr_mod <- highLevelOptimizations False True repr_mod
+
   putStrLn ""
   putStrLn "After Simplifying"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
-  repr_mod <- highLevelOptimizations False False repr_mod
+  repr_mod <- highLevelOptimizations False True repr_mod
 
+  putStrLn ""
+  putStrLn "After ArgumentFlattening"
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
   repr_mod <- SystemF.flattenLocals repr_mod
   -- Reconstruct demand information after flattening local variables,
   -- so that the next optimizations can do more work
   repr_mod <- SystemF.localDemandAnalysis repr_mod
-  repr_mod <- highLevelOptimizations False False repr_mod
-  repr_mod <- highLevelOptimizations False False repr_mod
+  repr_mod <- highLevelOptimizations False True repr_mod
+  repr_mod <- highLevelOptimizations False True repr_mod
 
   putStrLn "After Flattening"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   tc_repr_mod <- SystemF.TypecheckMem.typeCheckModule repr_mod
+  
+  -- Convert remaining loops to sequential loops
+  repr_mod <- highLevelOptimizations False True repr_mod
+  repr_mod <- highLevelOptimizations False True repr_mod
+
+  putStrLn ""
+  putStrLn "Optimized"
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
   ll_mod <- SystemF.lowerModule tc_repr_mod
   
   {- This is the old optimization sequence
