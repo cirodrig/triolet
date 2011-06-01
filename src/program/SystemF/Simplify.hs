@@ -940,7 +940,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
               eta_reduce_arg arg _ = arg
 
               eta_reduce (ExpM (LamE inf f)) =
-                etaReduceSingleLambdaFunction inf f
+                etaReduceSingleLambdaFunction True inf f
               eta_reduce e = e
 
       -- Simplify arguments

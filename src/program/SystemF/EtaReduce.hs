@@ -11,6 +11,8 @@ module SystemF.EtaReduce(etaReduceModule,
                          etaReduceSingleLambdaFunction)
 where
 
+import Data.Maybe
+
 import Common.Error
 import Builtins.Builtins
 import SystemF.Syntax
@@ -30,7 +32,7 @@ etaReduceModule (Module mod_name defss exports) =
 --
 --   Functions found inside the function body are not eta-reduced.
 etaReduceSingleFunction :: FunM -> FunM
-etaReduceSingleFunction f = hrFun False f
+etaReduceSingleFunction f = hrFun False False f
 
 -- | Eta-reduce a function and return an expression,
 --   if it's suitable for eta reduction.
@@ -39,8 +41,9 @@ etaReduceSingleFunction f = hrFun False f
 --   is returned.
 --
 --   Functions found inside the function body are not eta-reduced.
-etaReduceSingleLambdaFunction :: ExpInfo -> FunM -> ExpM
-etaReduceSingleLambdaFunction inf f = hrLambdaFun False inf f
+etaReduceSingleLambdaFunction :: Bool -> ExpInfo -> FunM -> ExpM
+etaReduceSingleLambdaFunction allow_exceptions inf f =
+  hrLambdaFun False allow_exceptions inf f
 
 -------------------------------------------------------------------------------
 
@@ -53,29 +56,30 @@ isOutputParameter pat =
 
 isNotOutputParameter = not . isOutputParameter
 
-hrDef recurse def = def {definiens = hrFun recurse $ definiens def}
+hrDef recurse def =
+  def {definiens = hrFun recurse False $ definiens def}
 
 hrExport recurse export =
-  export {exportFunction = hrFun recurse $ exportFunction export}
+  export {exportFunction = hrFun recurse False $ exportFunction export}
 
 -- | Eta-reduce a function, if it's suitable for eta reduction.
 --   Ensure that the function retains at least one parameter or
 --   type parameter before we decide to eta-reduce it.
-hrFun :: Bool -> FunM -> FunM
-hrFun recurse (FunM f) =
+hrFun :: Bool -> Bool -> FunM -> FunM
+hrFun recurse allow_exceptions (FunM f) =
   let out_param    = last $ funParams f
       other_params = init $ funParams f
   in if null (funParams f) ||                        -- No parameters
         null other_params && null (funTyParams f) || -- No non-output params
         isNotOutputParameter out_param -- Not output parameter
-     then FunM (noEtaReduceFunction recurse f)
-     else case etaReduceFunction recurse f out_param other_params
+     then FunM (noEtaReduceFunction recurse allow_exceptions f)
+     else case etaReduceFunction recurse allow_exceptions f out_param other_params
           of Just f -> FunM f
-             Nothing -> FunM (noEtaReduceFunction recurse f)
+             Nothing -> FunM (noEtaReduceFunction recurse allow_exceptions f)
 
 -- Eta-reduce a function that is suitable for eta reduction
-etaReduceFunction recurse f out_param params =
-  let mbody = etaReduceExp recurse (Just $ patMVar out_param) $ funBody f
+etaReduceFunction recurse allow_exceptions f out_param params =
+  let mbody = etaReduceExp recurse allow_exceptions (Just $ patMVar out_param) $ funBody f
       ret_type = patMType out_param `FunT` fromTypM (funReturn f)
   in case mbody
      of Just body ->
@@ -86,32 +90,32 @@ etaReduceFunction recurse f out_param params =
 
 -- | Don't eta-reduce a function.  If eta-reduction is being performed
 --   recursively, then eta-reduce inside the function body.
-noEtaReduceFunction True f =
-  f {funBody = case etaReduceExp True Nothing $ funBody f
+noEtaReduceFunction True allow_exceptions f =
+  f {funBody = case etaReduceExp True allow_exceptions Nothing $ funBody f
                of Just e -> e}
 
-noEtaReduceFunction False f = f
+noEtaReduceFunction False _ f = f
 
 -- | Eta-reduce a lambda function, producing a new expression.  If the
 --   function was eliminated, the new expression is the reduced function body.
-hrLambdaFun :: Bool -> ExpInfo -> FunM -> ExpM
-hrLambdaFun recurse inf (FunM f)
+hrLambdaFun :: Bool -> Bool -> ExpInfo -> FunM -> ExpM
+hrLambdaFun recurse allow_exceptions inf (FunM f)
   | null (funParams f) ||
     isNotOutputParameter out_param =
       -- Can't eta-reduce
-      ExpM $ LamE inf (FunM $ noEtaReduceFunction recurse f)
+      ExpM $ LamE inf (FunM $ noEtaReduceFunction recurse allow_exceptions f)
   | null other_params && null (funTyParams f) =
       -- The output parameter is the only parameter.
       -- Eta-reduce and eliminate the function, returning the function body.
-      case etaReduceFunction recurse f out_param other_params
+      case etaReduceFunction recurse allow_exceptions f out_param other_params
       of Just f -> funBody f
-         Nothing -> ExpM $ LamE inf (FunM $ noEtaReduceFunction recurse f)
+         Nothing -> ExpM $ LamE inf (FunM $ noEtaReduceFunction recurse allow_exceptions f)
   | otherwise =
       -- Eta-reduce the function
       let new_f = 
-            case etaReduceFunction recurse f out_param other_params
+            case etaReduceFunction recurse allow_exceptions f out_param other_params
             of Just f -> f
-               Nothing -> noEtaReduceFunction recurse f
+               Nothing -> noEtaReduceFunction recurse allow_exceptions f
       in ExpM $! LamE inf $! FunM $! new_f
   where 
     out_param    = last $ funParams f
@@ -132,8 +136,8 @@ hrLambdaFun recurse inf (FunM f)
 --
 --   TODO: Refactor into a non-failing recursive transformer and a failing
 --   eta-reducer.
-etaReduceExp :: Bool -> Maybe Var -> ExpM -> Maybe ExpM
-etaReduceExp recurse strip_arg (ExpM expression) =
+etaReduceExp :: Bool -> Bool -> Maybe Var -> ExpM -> Maybe ExpM
+etaReduceExp recurse allow_exceptions strip_arg (ExpM expression) =
   case expression
   of VarE {} -> can't_strip
      LitE {} -> can't_strip
@@ -154,7 +158,7 @@ etaReduceExp recurse strip_arg (ExpM expression) =
                            | v == arg_v -> return $ init args'
                          _ -> Nothing
              return (ExpM (AppE inf op' ty_args stripped_args))
-     LamE inf f -> return $ hrLambdaFun recurse inf f
+     LamE inf f -> return $ hrLambdaFun recurse allow_exceptions inf f
      LetE inf binder val body -> do
        let val' = hrNonTail val
        body' <- hrTail body
@@ -165,24 +169,28 @@ etaReduceExp recurse strip_arg (ExpM expression) =
        return $ ExpM (LetfunE inf defs' body')
      CaseE inf scr alts -> do
        let scr' = hrNonTail scr
-       alts' <- mapM (etaReduceAlt recurse strip_arg) alts
+       alts' <- mapM (etaReduceAlt recurse allow_exceptions strip_arg) alts
        return $ ExpM (CaseE inf scr' alts')
      ExceptE {} ->
-       case strip_arg
-       of Just _ ->
-            -- Can't eta-reduce an exception, because it might cause
-            -- the exception to be raised sooner
-            Nothing
-          Nothing -> return $ ExpM expression
+       -- This expression raises an exception.  In general, it's not safe to
+       -- eta-reduce the enclosing function because that may cause the
+       -- exception to be raised sooner.  If @strip_arg@ is false, the
+       -- function isn't being eta-reduced so we don't care.
+       -- If @allow_exceptions@ is true, then we know this code will be
+       -- executed, so it's okay to raise the exception.
+       if isJust strip_arg && not allow_exceptions
+       then Nothing
+       else return $ ExpM expression
   where
     hrNonTail e =
       -- During recursive eta-reduction, transform all subexpressions
       -- During nonrecursive eta-reduction, leave non-tail expressions alone
+      -- Don't eta-reduce excepting statements in non-tail posiition
       if recurse
-      then case etaReduceExp recurse Nothing e of Just e' -> e'
+      then case etaReduceExp recurse False Nothing e of Just e' -> e'
       else e
 
-    hrTail e = etaReduceExp recurse strip_arg e
+    hrTail e = etaReduceExp recurse allow_exceptions strip_arg e
 
     failed = internalError "etaReduceExp"
 
@@ -191,6 +199,6 @@ etaReduceExp recurse strip_arg (ExpM expression) =
                   of Nothing -> return $ ExpM expression
                      Just _ -> Nothing
 
-etaReduceAlt recurse strip_arg (AltM alt) = do
-  body <- etaReduceExp recurse strip_arg $ altBody alt
+etaReduceAlt recurse allow_exceptions strip_arg (AltM alt) = do
+  body <- etaReduceExp recurse allow_exceptions strip_arg $ altBody alt
   return $ AltM $ alt {altBody = body}
