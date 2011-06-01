@@ -674,6 +674,10 @@ packReturn flat_ret orig_exp =
           DeadDecomp e -> -- FIXME: This eliminates the source value. 
                           -- What if the source raised an exception?
                           return e
+          DeconDecomp {} ->
+            -- This can occur when returning something isomorphic to the
+            -- unit value.  In this case, we should return a unit value.
+            internalError "packReturn: No return value"
      Just patterns -> do
        -- Return value was deconstructed (DeconDecomp).
        -- Rebuild the data structure.
@@ -742,7 +746,6 @@ planFlattening :: (ReprDictMonad m, EvalMonad m) =>
 planFlattening mode ty spc = do
   tenv <- getTypeEnv
   whnf_type <- reduceToWhnf ty
-
   let
     -- The return value will have of these decompositions 
     id_decomp = return (whnf_type, IdDecomp)
@@ -785,6 +788,10 @@ planFlattening mode ty spc = do
     -- Don't flatten dictionary parameters.  Removing dead dictionaries is OK.
     _ | is_dictionary_pattern whnf_type -> id_decomp
 
+    -- Side effect tokens are an abstract data structure that should not be
+    -- flattened.
+    _ | is_EffTok whnf_type -> id_decomp
+
     Decond (MonoCon spc_con _ _) spcs -> decon_decomp spc_con (Just spcs)
 
     -- Unpacking is not implemented for unboxed tuples
@@ -807,6 +814,11 @@ planFlattening mode ty spc = do
     is_dictionary_pattern t =
       case fromVarApp t
       of Just (op, _) -> isDictionaryTypeCon op
+         _ -> False
+    
+    is_EffTok t =
+      case fromVarApp t
+      of Just (op, _) -> op `isPyonBuiltin` the_EffTok
          _ -> False
 
 -- | Deconstruct a parameter into its component fields.
