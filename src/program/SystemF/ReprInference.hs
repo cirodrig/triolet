@@ -39,6 +39,31 @@ import qualified SystemF.TypecheckMem as TypecheckMem
 import Globals
 import GlobalVar
 
+-- | Check whether the @OutPtr@ or @IEffect@ constructors appear in a type.
+--   The constructors should never be seen.  This function is for debugging.
+checkForOutPtr :: Type -> Bool
+checkForOutPtr (VarT t)
+  | t `isPyonBuiltin` the_OutPtr = True
+  | t `isPyonBuiltin` the_IEffect = True
+  | otherwise = False
+checkForOutPtr (AppT op arg) =
+  checkForOutPtr op || checkForOutPtr arg
+checkForOutPtr (FunT dom rng) =
+  checkForOutPtr dom || checkForOutPtr rng
+checkForOutPtr (AllT (_ ::: dom) rng) =
+  checkForOutPtr dom || checkForOutPtr rng
+checkForOutPtr (LamT (_ ::: dom) body) =
+  checkForOutPtr dom || checkForOutPtr body
+checkForOutPtr (AnyT _) = False
+checkForOutPtr (IntT _) = False
+checkForOutPtr (UTupleT _) = False
+
+-- | Report an error if 'checkForOutPtr' returns 'True'.
+errorIfOutPtr :: Doc -> Type -> a -> a
+errorIfOutPtr msg ty x
+  | checkForOutPtr ty = internalError (show (msg <+> pprType ty))
+  | otherwise = x
+
 -- | The representation inference monad.
 --
 --   Specification types are tracked for variables that are in scope.
