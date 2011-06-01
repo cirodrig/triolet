@@ -1141,7 +1141,17 @@ rwCase1 have_fuel tenv inf scrut alts
     Just (dcon, ty_args, ex_args, args) <- unpackDataConAppM tenv scrut = do
       consumeFuel
       let alt = findAlternative alts $ dataConCon dcon
-      eliminateCaseWithExp tenv dcon (map TypM ex_args) args alt
+          field_kinds = dataConFieldKinds tenv dcon
+      eliminateCaseWithExp tenv field_kinds (map TypM ex_args) args alt
+  
+  | have_fuel,
+    ExpM (UTupleE _ fields) <- scrut = do
+      consumeFuel
+      case alts of
+        [alt@(AltM (DeTuple params body))] ->
+          let field_kinds = map (toBaseKind . typeKind tenv . patMType) params
+          in eliminateCaseWithExp tenv field_kinds [] fields alt
+        _ -> internalError "rwCase: Invalid case-of-tuple expression"
 
 -- Simplify the scrutinee, then try to simplify the case statement.
 rwCase1 _ tenv inf scrut alts = do
@@ -1153,22 +1163,40 @@ rwCase1 _ tenv inf scrut alts = do
   ifElseFuel (rebuild_case scrut' arg_con arg_ex_types arg_values) $ 
     case unpackDataConAppM tenv scrut'
     of Just (data_con, ty_args, ex_args, args)
-         | isJust arg_con && arg_con /= Just (dataConCon data_con) ->
+         | (case arg_con
+            of Just (ConValueType {dataCon = c}) -> c /= dataConCon data_con
+               Just (TupleValueType {}) -> True
+               Nothing -> False) ->
              internalError "rwCase: Inconsistent constructor value"
          | otherwise -> do
+             -- Deconstruct scrutinee result (data constructor)
              consumeFuel
              let args_and_values = zip args arg_values
+                 field_kinds = dataConFieldKinds tenv data_con
                  alt = findAlternative alts $ dataConCon data_con
              eliminateCaseWithSimplifiedExp
-               tenv data_con (map TypM ex_args) args_and_values alt
-       _ ->
-         -- Can't deconstruct.  Propagate values and rebuild the case
-         -- statement.
-         rebuild_case scrut' arg_con arg_ex_types arg_values 
+               tenv field_kinds (map TypM ex_args) args_and_values alt
+       _ -> case scrut'
+            of ExpM (UTupleE _ fields) -> do
+                 -- Deconstruct scrutinee result (tuple)
+                 consumeFuel
+                 let args_and_values = zip fields arg_values
+                     [alt@(AltM (DeTuple params body))] = alts
+                     field_types = map patMType params
+                     field_kinds = map (toBaseKind . typeKind tenv) field_types
+                 eliminateCaseWithSimplifiedExp
+                   tenv field_kinds [] args_and_values alt
+               _ ->
+                 -- Can't deconstruct.  Propagate values and rebuild the case
+                 -- statement.
+                 rebuild_case scrut' arg_con arg_ex_types arg_values
   where
     -- Given the value of the scrutinee, try to get the fields' values
-    unpack_scrut_val (Just (ComplexValue _ (DataValue _ (ConValueType con _ ex_ts) vs))) =
-      (Just con, Just ex_ts, vs)
+    unpack_scrut_val (Just (ComplexValue _ (DataValue _ dcon vs))) =
+      let ex_types = case dcon
+                     of ConValueType con _ ex_ts -> ex_ts
+                        TupleValueType _ -> []
+      in (Just dcon, Just ex_types, vs)
 
     unpack_scrut_val _ =
       (Nothing, Nothing, repeat Nothing)
@@ -1178,8 +1206,12 @@ rwCase1 _ tenv inf scrut alts = do
             -- If the scrutinee has a known constructor,
             -- drop non-matching case alternatives
             case arg_con
-            of Nothing -> alts
-               Just c  -> [findAlternative alts c]
+            of Nothing ->
+                 alts
+               Just (ConValueType {dataCon = c}) ->
+                 [findAlternative alts c]
+               Just (TupleValueType {}) ->
+                 alts           -- There's only one alternative
           scrut_var =
             -- If the scrutinee is a variable, it will be assigned a known
             -- value while processing each alternative
@@ -1220,13 +1252,13 @@ findAlternative alts con =
 --
 --   Fuel should be consumed prior to calling this function.
 eliminateCaseWithExp :: TypeEnv
-                     -> DataConType
+                     -> [BaseKind]
                      -> [TypM]
                      -> [ExpM]
                      -> AltM
                      -> LR (ExpM, MaybeValue)
 eliminateCaseWithExp
-  tenv dcon_type ex_args initializers (AltM alt)
+  tenv field_kinds ex_args initializers (AltM alt)
   | length (getAltExTypes alt) /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
@@ -1238,9 +1270,8 @@ eliminateCaseWithExp
       body <- substitute subst (altBody alt)
 
       binders <-
-        let field_kinds = dataConFieldKinds tenv dcon_type
-        in sequence [makeCaseInitializerBinding k p i 
-                    | (k, p, i) <- zip3 field_kinds params initializers]
+        sequence [makeCaseInitializerBinding k p i
+                 | (k, p, i) <- zip3 field_kinds params initializers]
 
       -- Continue simplifying the new expression
       rwExp $ applyCaseElimBindings binders body
@@ -1257,13 +1288,13 @@ eliminateCaseWithExp
 --
 --   Fuel should be consumed prior to calling this function.
 eliminateCaseWithSimplifiedExp :: TypeEnv
-                               -> DataConType
+                               -> [BaseKind]
                                -> [TypM]
                                -> [(ExpM, MaybeValue)]
                                -> AltM
                                -> LR (ExpM, MaybeValue)
 eliminateCaseWithSimplifiedExp
-  tenv dcon_type ex_args initializers (AltM alt)
+  tenv field_kinds ex_args initializers (AltM alt)
   | length (getAltExTypes alt) /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
@@ -1275,9 +1306,8 @@ eliminateCaseWithSimplifiedExp
       body <- substitute subst (altBody alt)
 
       binders <-
-        let field_kinds = dataConFieldKinds tenv dcon_type
-        in sequence [makeCaseInitializerBinding k p i 
-                    | (k, p, (i, _)) <- zip3 field_kinds params initializers]
+        sequence [makeCaseInitializerBinding k p i
+                 | (k, p, (i, _)) <- zip3 field_kinds params initializers]
 
       let values = [(patMVar p, mv)
                    | (p, (_, mv)) <- zip params initializers]
