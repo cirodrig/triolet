@@ -1032,6 +1032,20 @@ isIdPlan :: FunctionPlan -> Bool
 isIdPlan p = all isIdArg (flatParams p) &&
              isIdRet (planRetFlatRet $ flatReturn p)
 
+printPlan :: Var -> FunctionPlan -> IO ()
+printPlan f (FunctionPlan ty_params args ret) = do
+  putStrLn $ "Plan for function " ++ show f
+  print $ text "Parameters" <+> vcat (map pprFlatArg args)
+  flat_ret <-
+    case ret
+    of PlanRetValue r -> do
+         print $ text "Returns by value" <+> pprType (frType r)
+         return r
+       PlanRetWriter p r -> do
+         print $ text "Returns by output pointer" <+> pprPat p
+         return r
+  print $ nest 4 $ pprDecomp $ frDecomp flat_ret
+  
 originalFunctionInterface :: FunctionPlan -> ([TyPatM], [PatM], TypM)
 originalFunctionInterface p =
   let -- Output parameters and return types depend on whether the function
@@ -1228,6 +1242,9 @@ flattenFunctionArguments def = do
       FunM fun = definiens def
   plan <- planFunction (definiens def)
   
+  -- For debugging, print the flattening
+  when False $ liftIO $ printPlan fun_name plan
+
   -- Flatten inside the function body
   body <- assumeTyPats (funTyParams fun) $ assumePats (funParams fun) $ do
     flattenInExp $ funBody fun
