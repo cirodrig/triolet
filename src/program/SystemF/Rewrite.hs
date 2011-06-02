@@ -995,7 +995,11 @@ rwParallelDoall inf [size_ix, result_eff, element_eff] [size, worker] =
                            intType],
                           initEffectType (fromTypM element_eff)))
    (\ [mindex] [msize, offset] ->
-     varAppE (pyonBuiltin the_doall) [TypM (VarT mindex), result_eff, element_eff]
+     -- The outer loop body contains another loop that initializes some
+     -- part of the output array.  We use 'element_effect' as the effect label
+     -- for the inner loop.
+     varAppE (pyonBuiltin the_doall)
+     [TypM (VarT mindex), element_eff, element_eff]
      [varE msize,
       lamE $ mkFun []
       (\ [] -> return ([intType], initEffectType (fromTypM element_eff)))
