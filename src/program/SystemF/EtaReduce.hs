@@ -240,6 +240,9 @@ etaExpandExp (ExpM expression) = ExpM <$>
        LetfunE inf <$> mapM etaExpandDef defs <*> etaExpandExp body
      CaseE inf scr alts ->
        CaseE inf <$> etaExpandExp scr <*> mapM expand_alt alts
+     ExceptE {} ->
+       -- Eta expansion has to change the statement's return type
+       internalError "etaExpandExp: Not implemented for exception statements"
   where
     expand_alt (AltM alt) = do
       body <- etaExpandExp $ altBody alt
