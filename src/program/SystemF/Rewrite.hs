@@ -927,7 +927,7 @@ rwParallelHistogramArray inf
     int_repr = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int)
     array_repr :: TypeEvalM ExpM
     array_repr = varAppE (pyonBuiltin the_repr_array)
-                 [size_ix, TypM intType] [return size, return int_repr]
+                 [size_ix, TypM storedIntType] [return size, return int_repr]
 
     -- A single parallel task
     --    
@@ -963,7 +963,7 @@ rwParallelHistogramArray inf
                        initEffectType array_type))
       (\ [] [a, b, ret_ptr] ->
         appExp
-        (defineArray (TypM intType) size_ix (return size) (return int_repr)
+        (defineArray (TypM storedIntType) size_ix (return size) (return int_repr)
          (\index_var out_expr ->
            let load_element array_ptr_var = do
                  -- Load an array element from array_ptr_var at index_var
