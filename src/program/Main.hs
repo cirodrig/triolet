@@ -26,7 +26,6 @@ import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
--- import qualified SystemF.StreamSpecialize as SystemF
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
 import qualified SystemF.TypecheckSF
@@ -36,7 +35,7 @@ import qualified SystemF.PrintMemoryIR
 import qualified SystemF.ReprInference as SystemF
 import qualified SystemF.Floating as SystemF
 import qualified SystemF.Simplify as SystemF
--- import qualified SystemF.LoopRewrite as SystemF
+import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.Print as LowLevel
@@ -177,26 +176,34 @@ compilePyonToPyonAsm compile_flags path text = do
   -- General-purpose, high-level optimizations
   repr_mod <- highLevelOptimizations True False repr_mod
   repr_mod <- highLevelOptimizations True False repr_mod
-  repr_mod <- highLevelOptimizations False False repr_mod
-  repr_mod <- highLevelOptimizations False False repr_mod
-  repr_mod <- highLevelOptimizations False False repr_mod
+  repr_mod <- iterateM (highLevelOptimizations False False) 4 repr_mod
+  
+  -- Parallelize outer loops
+  repr_mod <-
+    if lookupCompileFlag DoParallelization compile_flags  
+    then do repr_mod <- SystemF.parallelLoopRewrite repr_mod
+            highLevelOptimizations False False repr_mod
+    else return repr_mod
 
-  -- Convert remaining loops to sequential loops
-  repr_mod <- highLevelOptimizations False True repr_mod
-  repr_mod <- highLevelOptimizations False True repr_mod
+  -- Sequentialize remaining loops
+  repr_mod <- iterateM (highLevelOptimizations False True) 4 repr_mod
 
   putStrLn ""
   putStrLn "After Simplifying"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
+  --putStrLn ""
+  --putStrLn "After ArgumentFlattening"
+  --print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  
   repr_mod <- highLevelOptimizations False True repr_mod
-
-  putStrLn ""
-  putStrLn "After ArgumentFlattening"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
   repr_mod <- SystemF.flattenLocals repr_mod
+  --putStrLn ""
+  --putStrLn "After FlattenLocals"
+  --print $ SystemF.PrintMemoryIR.pprModule repr_mod
+
   -- Reconstruct demand information after flattening local variables,
-  -- so that the next optimizations can do more work
+  -- so that the next optimization pass can do more work
   repr_mod <- SystemF.localDemandAnalysis repr_mod
   repr_mod <- highLevelOptimizations False True repr_mod
   repr_mod <- highLevelOptimizations False True repr_mod
