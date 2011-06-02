@@ -84,7 +84,8 @@ hrFun recurse allow_exceptions (FunM f) =
 
 -- Eta-reduce a function that is suitable for eta reduction
 etaReduceFunction recurse allow_exceptions f out_param params =
-  let mbody = etaReduceExp recurse allow_exceptions (Just $ patMVar out_param) $ funBody f
+  let strip_arg = Just (patMVar out_param, patMType out_param)
+      mbody = etaReduceExp recurse allow_exceptions strip_arg $ funBody f
       ret_type = patMType out_param `FunT` fromTypM (funReturn f)
   in case mbody
      of Just body ->
@@ -141,7 +142,7 @@ hrLambdaFun recurse allow_exceptions inf (FunM f)
 --
 --   TODO: Refactor into a non-failing recursive transformer and a failing
 --   eta-reducer.
-etaReduceExp :: Bool -> Bool -> Maybe Var -> ExpM -> Maybe ExpM
+etaReduceExp :: Bool -> Bool -> Maybe (Var, Type) -> ExpM -> Maybe ExpM
 etaReduceExp recurse allow_exceptions strip_arg (ExpM expression) =
   case expression
   of VarE {} -> can't_strip
@@ -155,7 +156,7 @@ etaReduceExp recurse allow_exceptions strip_arg (ExpM expression) =
              stripped_args <-
                case strip_arg
                of Nothing -> return args'
-                  Just v
+                  Just (v, _)
                     | null args' -> Nothing
                     | otherwise ->
                       case last args'
@@ -178,16 +179,26 @@ etaReduceExp recurse allow_exceptions strip_arg (ExpM expression) =
        let scr' = hrNonTail scr
        alts' <- mapM (etaReduceAlt recurse allow_exceptions strip_arg) alts
        return $ ExpM (CaseE inf scr' alts')
-     ExceptE {} ->
+     ExceptE inf exc_ty ->
        -- This expression raises an exception.  In general, it's not safe to
        -- eta-reduce the enclosing function because that may cause the
-       -- exception to be raised sooner.  If @strip_arg@ is false, the
+       -- exception to be raised sooner.  If @strip_arg@ is Nothing, the
        -- function isn't being eta-reduced so we don't care.
-       -- If @allow_exceptions@ is true, then we know this code will be
-       -- executed, so it's okay to raise the exception.
-       if isJust strip_arg && not allow_exceptions
-       then Nothing
-       else return $ ExpM expression
+       case strip_arg
+       of Just (_, arg_type)
+            | allow_exceptions ->
+                -- This function is certain to be called, so it's okay to
+                -- raise the exception.
+                -- The return type of the excepting code changes to a function
+                -- type.
+                let eta_type = FunT arg_type exc_ty
+                in Just $ ExpM $ ExceptE inf eta_type
+            | otherwise ->
+                -- Not safe to promote the code
+                Nothing
+          Nothing ->
+            -- No change
+            return $ ExpM expression
   where
     hrNonTail e =
       -- During recursive eta-reduction, transform all subexpressions
