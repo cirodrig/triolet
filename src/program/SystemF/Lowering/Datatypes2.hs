@@ -642,7 +642,8 @@ objectLayout mem_layout =
 lowerType :: TypeEnv -> Type -> Lower (Maybe LL.ValueType)
 lowerType tenv ty = 
   case toBaseKind $ typeKind tenv ty
-  of ValK        -> fmap Just $ getValLayout ty
+  of ValK        -> do whnf_ty <- reduceToWhnf ty
+                       fmap Just $ getValLayout whnf_ty
      BoxK        -> return $ Just $ LL.PrimType LL.OwnedType
      BareK       -> return $ Just $ LL.PrimType LL.PointerType
      OutK        -> return $ Just $ LL.PrimType LL.PointerType
@@ -799,15 +800,16 @@ storeValue (MemLayout _) _ _ = internalError "storeValue: Not a value"
 -- | Compute the low-level representation of an algebraic data type.
 --   It's an error to call this on a non-algebraic data type.
 getAlgLayout :: TypeEnv -> Type -> Lower AlgLayout
-getAlgLayout tenv ty =
-  case toBaseKind $ typeKind tenv ty
-  of ValK  -> fmap AlgValLayout $ getValAlgLayout ty
-     BoxK  -> fmap AlgValLayout $ getValAlgLayout ty
-     BareK -> ref_layout
-     OutK  -> ref_layout
-     _     -> internalError "getAlgLayout: Unexpected representation"
+getAlgLayout tenv ty = do
+  whnf_ty <- reduceToWhnf ty
+  case toBaseKind $ typeKind tenv whnf_ty of
+    ValK  -> fmap AlgValLayout $ getValAlgLayout whnf_ty
+    BoxK  -> fmap AlgValLayout $ getValAlgLayout whnf_ty
+    BareK -> ref_layout whnf_ty
+    OutK  -> ref_layout whnf_ty
+    _     -> internalError "getAlgLayout: Unexpected representation"
   where
-    ref_layout = fmap AlgMemLayout $ getRefAlgLayout ty
+    ref_layout whnf_ty = fmap AlgMemLayout $ getRefAlgLayout whnf_ty
 
 -- | The type arguments and data constructors of a fully
 --   instantiated data type.  All data constructors take
@@ -832,7 +834,8 @@ lookupDataTypeForLayout' tenv ty =
      Nothing -> internalError $
                 "getLayout: Unknown data type: " ++ show (pprType ty)
 
--- | Get the algebraic data type layout of a boxed or value type
+-- | Get the algebraic data type layout of a boxed or value type.
+--   The type must be in WHNF.
 getValAlgLayout :: Type -> Lower AlgValLayout
 getValAlgLayout ty =
   case getLevel ty
@@ -918,12 +921,14 @@ getValDataTypeLayout (tycon, ty_args, datacons)
     -- True if no constructors have fields
     all_nullary_constructors = all (null . dataConPatternArgs) datacons
 
+-- | Get the algebraic layout of a bare type.
+--   The type must be in WHNF.
 getRefAlgLayout :: Type -> Lower AlgMemLayout
 getRefAlgLayout ty =
   case fromVarApp ty
   of Just (op, [arg])
        | op `isPyonBuiltin` the_Referenced -> do
-           arg_layout <- getRefLayout arg
+           arg_layout <- getRefLayout =<< reduceToWhnf arg
            return $ nonSumMemLayout $ referenceLayout arg_layout
      _ -> do
        tenv <- getTypeEnv
@@ -937,6 +942,8 @@ getRefAlgLayout ty =
            of BareK -> getRefDataTypeLayout inst_type
               _ -> internalError "getAlgLayout: Invalid representation"
 
+-- | Get the algebraic layout of a bare data type, based on an algebraic
+--   data type definition.
 getRefDataTypeLayout :: InstantiatedDataType -> Lower AlgMemLayout
 getRefDataTypeLayout (_, ty_args, datacons)
   | null datacons =
@@ -960,17 +967,18 @@ getRefDataTypeLayout (_, ty_args, datacons)
 -- | Compute the low-level representation of a data type
 getLayout :: Type -> Lower Layout
 getLayout ty = do
-  kind <- askTypeEnv (\tenv -> toBaseKind $ typeKind tenv ty)
+  whnf_ty <- reduceToWhnf ty
+  kind <- askTypeEnv (\tenv -> toBaseKind $ typeKind tenv whnf_ty)
   case kind of
-    ValK  -> fmap ValLayout $ getValLayout ty
-    BoxK  -> fmap ValLayout $ getValLayout ty
-    BareK -> ref_layout
-    OutK  -> ref_layout
+    ValK  -> fmap ValLayout $ getValLayout whnf_ty
+    BoxK  -> fmap ValLayout $ getValLayout whnf_ty
+    BareK -> ref_layout whnf_ty
+    OutK  -> ref_layout whnf_ty
     _     -> internalError "getLayout: Unexpected representation"
   where
-    ref_layout = fmap MemLayout $ getRefLayout ty
+    ref_layout whnf_ty = fmap MemLayout $ getRefLayout whnf_ty
 
--- | Get the layout of a value or boxed type
+-- | Get the layout of a value or boxed type.  The type should be in WHNF.
 getValLayout :: Type -> Lower ValLayout
 getValLayout ty =
   case getLevel ty
@@ -1007,6 +1015,7 @@ getValLayout ty =
           _ -> internalError "getLayout: Head is not a type application"
      KindLevel -> return (LL.PrimType LL.UnitType)
 
+-- | Get the layout of a bare type.  The type should be in WHNF.
 getRefLayout :: Type -> Lower MemLayout
 getRefLayout ty =
   case fromVarApp ty
@@ -1015,7 +1024,7 @@ getRefLayout ty =
            return $ memValueLayout (LL.PrimType LL.PointerType)
      Just (op, [arg1, arg2])
        | op `isPyonBuiltin` the_array -> do
-           field_layout <- getRefLayout arg2
+           field_layout <- getRefLayout =<< reduceToWhnf arg2
            size <- lookupIndexedInt arg1
            return $ arrayLayout size field_layout
      _ -> do
@@ -1029,9 +1038,7 @@ getRefLayout ty =
               _ -> internalError "getRefLayout: Unexpected type"
          Just inst_type@(data_type, _, _) ->
            case dataTypeKind data_type
-           of ValK -> fmap memValueLayout $ getValLayout ty
-              BoxK -> return $ memValueLayout (LL.PrimType LL.OwnedType)
-              BareK -> do
+           of BareK -> do
                 alg_layout <- getRefDataTypeLayout inst_type
                 return $ discardMemStructure alg_layout
               _ -> internalError "getAlgLayout: Invalid representation"
