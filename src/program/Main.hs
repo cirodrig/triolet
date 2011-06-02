@@ -34,7 +34,6 @@ import qualified SystemF.TypecheckMem
 import qualified SystemF.Print as SystemF
 import qualified SystemF.PrintMemoryIR
 import qualified SystemF.ReprInference as SystemF
-import qualified SystemF.SpecToMem as SystemF
 import qualified SystemF.Floating as SystemF
 import qualified SystemF.Simplify as SystemF
 -- import qualified SystemF.LoopRewrite as SystemF
@@ -169,9 +168,8 @@ compilePyonToPyonAsm compile_flags path text = do
   print $ SystemF.pprModule sf_mod
 
   -- Convert to explicit memory representation
-  spec_mod <- SystemF.representationInference sf_mod
-  let repr_mod = SystemF.convertSpecToMemTypes spec_mod
-  
+  repr_mod <- SystemF.representationInference sf_mod
+
   putStrLn ""
   putStrLn "Memory IR"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod

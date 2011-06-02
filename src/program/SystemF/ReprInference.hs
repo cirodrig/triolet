@@ -28,6 +28,8 @@ import Type.Environment
 import Type.Eval
 import Type.Rename
 import Type.Type
+import SystemF.EtaReduce
+import SystemF.SpecToMem
 import SystemF.ReprDict
 import SystemF.Syntax
 import SystemF.Print
@@ -1067,9 +1069,16 @@ reprModule (Module mod_name defs exports) = do
 --   The specification type environment is used for representation inference.
 representationInference :: Module SF -> IO (Module Mem)
 representationInference mod = do
-  withTheNewVarIdentSupply $ \supply -> do
+  -- Representation inference
+  repr_mod <- withTheNewVarIdentSupply $ \supply -> do
     sf_type_env <- readInitGlobalVarIO the_systemFTypes
     type_env <- readInitGlobalVarIO the_specTypes
     (dict_env, int_env) <- runFreshVarM supply createDictEnv
     let context = RIEnv supply (specToTypeEnv type_env) dict_env int_env sf_type_env
     runReaderT (unRI (reprModule mod)) context
+  
+  -- Convert from specification types to mem types
+  let mem_mod = convertSpecToMemTypes repr_mod
+
+  -- Eta-expand functions
+  etaExpandModule mem_mod
