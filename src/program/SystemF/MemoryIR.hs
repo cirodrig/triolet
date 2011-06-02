@@ -24,6 +24,7 @@ module SystemF.MemoryIR
         Alt(..),
         Fun(..),
         TypM, PatM, TyPatM, ExpM, AltM, FunM,
+        appE,
         altFromMonoCon, altToMonoCon,
         unpackVarAppM, unpackDataConAppM, isDataConAppM
        )
@@ -103,6 +104,10 @@ type TyPatM = TyPat Mem
 type ExpM = Exp Mem
 type AltM = Alt Mem
 type FunM = Fun Mem
+
+appE :: ExpInfo -> ExpM -> [TypM] -> [ExpM] -> ExpM
+appE _ op [] [] = op
+appE inf op type_args args = ExpM (AppE inf op type_args args)
 
 -- | Construct a case alternative given a 'MonoCon' and the other required 
 --   fields

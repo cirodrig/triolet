@@ -411,7 +411,7 @@ packParameterWrite' pat flat_arg =
          -- Construct/initialize a value
          let op = var_exp con
          let ty_args = map TypM (types ++ [VarT a | a ::: _ <- ex_types])
-         return $ ExpM $ AppE defaultExpInfo op ty_args exps
+         return $ appE defaultExpInfo op ty_args exps
 
      DeadDecomp e -> return e
   where
@@ -423,7 +423,7 @@ packParameterWrite' pat flat_arg =
          BareK -> do
            -- Insert a copy operation
            dict <- getReprDict ty
-           return $ ExpM $ AppE defaultExpInfo copy_op [TypM ty] [dict, src]
+           return $ appE defaultExpInfo copy_op [TypM ty] [dict, src]
          _ ->
            return src
     
@@ -454,7 +454,7 @@ packParameterRead (FlatArg pat flat_arg) =
          exps <- packParametersWrite fields
          let op = var_exp con
          let ty_args = map TypM (types ++ [VarT a | a ::: _ <- ex_types])
-         let packed = ExpM $ AppE defaultExpInfo op ty_args exps
+         let packed = appE defaultExpInfo op ty_args exps
          
          -- If this is a bare type, define a local variable with the
          -- packed parameter.  Otherwise, just assign a local variable.
@@ -1135,7 +1135,7 @@ mkWrapperFunction plan wrapper_name worker_name = do
           ty_args = orig_ty_args ++ new_ty_args
           args = input_args ++ output_args
           worker_e = ExpM $ VarE defaultExpInfo worker_name
-          worker_call = ExpM $ AppE defaultExpInfo worker_e ty_args args
+          worker_call = appE defaultExpInfo worker_e ty_args args
       in -- If the worker function returns by reference, then lambda-abstract
          -- over its output parameter
          case output_params
@@ -1189,7 +1189,7 @@ mkWorkerFunction plan worker_name original_body = do
             case planRetFlattenedInterface tenv (flatReturn plan)
             of ([], _) -> flat_body
                ([p], _) -> let out_exp = ExpM $ VarE defaultExpInfo (patMVar p)
-                           in ExpM $ AppE defaultExpInfo flat_body [] [out_exp]
+                           in appE defaultExpInfo flat_body [] [out_exp]
 
       -- Repack the parameters
       (_, param_context) <- packParametersRead $ flatParams plan

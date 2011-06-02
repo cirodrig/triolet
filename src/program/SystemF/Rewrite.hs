@@ -455,7 +455,7 @@ buildListDoall inf elt_type elt_repr other_args size count generator =
            []  -> Nothing
 
       write_array index mk_dst =
-        appE (generator (ExpM $ VarE defaultExpInfo index)) [] [mk_dst]
+        appExp (generator (ExpM $ VarE defaultExpInfo index)) [] [mk_dst]
 
   in defineList elt_type size
      (return count) (return elt_repr) return_ptr write_array
@@ -600,9 +600,9 @@ rwMapStream tenv inf
               (\ [] [outvar] -> do
                   tmpvar <- newAnonymousVar ObjectLevel
                   -- Compute the input to 'map'
-                  rhs <- appE (sGenerator shape ix) [] [varE tmpvar]
+                  rhs <- appExp (sGenerator shape ix) [] [varE tmpvar]
                   -- Compute the output of 'map'
-                  body <- appE (return transformer) [] [varE tmpvar, varE outvar]
+                  body <- appExp (return transformer) [] [varE tmpvar, varE outvar]
                   let binder = localVarP tmpvar (fromTypM elt1) repr1
                       let_expr = ExpM $ LetE inf binder rhs body
                   return let_expr)}
@@ -962,7 +962,7 @@ rwParallelHistogramArray inf
       (\ [] -> return ([array_type, array_type, outType array_type],
                        initEffectType array_type))
       (\ [] [a, b, ret_ptr] ->
-        appE
+        appExp
         (defineArray (TypM intType) size_ix (return size) (return int_repr)
          (\index_var out_expr ->
            let load_element array_ptr_var = do
@@ -1000,7 +1000,7 @@ rwParallelDoall inf [size_ix, result_eff, element_eff] [size, worker] =
       lamE $ mkFun []
       (\ [] -> return ([intType], initEffectType (fromTypM element_eff)))
       (\ [] [ix] ->
-        appE (return worker) []
+        appExp (return worker) []
         [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
          [varE offset, varE ix]])])]
   
@@ -1048,7 +1048,7 @@ rwReduceGenerate inf element elt_repr reducer init other_args size count produce
        localE element (producer (ExpM $ VarE defaultExpInfo ix))
        (\tmpvar -> do
            -- Combine with accumulator
-           appE (return reducer) [] [varE acc, varE tmpvar, varE ret]))) :
+           appExp (return reducer) [] [varE acc, varE tmpvar, varE ret]))) :
    map return other_args)
 
 rwReduce1Stream :: RewriteRule
@@ -1140,7 +1140,7 @@ rwFor inf [TypM size_ix, TypM acc_type] args =
                 (varAppE (pyonBuiltin the_copy) [TypM acc_type]
                  [return acc_repr, varE acc, varE retvar])
                 (localE (TypM acc_type)
-                 (appE (return fun) [] [varE i, varE acc])
+                 (appExp (return fun) [] [varE i, varE acc])
                  (\lv -> varAppE loop_var []
                          [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
                           [varE i, litE $ IntL 1 intType],
@@ -1418,7 +1418,7 @@ interpretStream2' shape_type elt_type repr expression =
             , _sexpType = type_arg
             , _sexpRepr = repr
             , _sexpGenerator = \ix ->
-                appE (return writer) [] [return ix]}
+                appExp (return writer) [] [return ix]}
        | op_var `isPyonBuiltin` the_count ->
            GenerateStream
            { _sexpShape = UnboundedShape
@@ -1532,7 +1532,7 @@ mapStream out_type out_repr transformer producer = transform producer
       (\ [] [outvar] ->
           -- Run the producer, then pass its results to the consumer
           localE (TypM producer_ty) producer_expr $ \tmpvar ->
-          appE (return transformer) [] [varE tmpvar, varE outvar])
+          appExp (return transformer) [] [varE tmpvar, varE outvar])
 
 interpretStreamAlt :: Type -> Type -> ExpM -> AltM -> AltS
 interpretStreamAlt shape_type elt_type repr (AltM alt) =
@@ -1792,7 +1792,7 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
                let ix = ExpM $ VarE defaultExpInfo index_var
                in localE (TypM $ sexpElementType stream)
                   (_sexpGenerator stream ix)
-                  (\lv -> appE (return acc_f) []
+                  (\lv -> appExp (return acc_f) []
                           [varE acc_in, varE lv, varE acc_out])),
              return out_ptr]
 
@@ -1841,7 +1841,7 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
      ReturnStream ty repr writer -> do
        -- Run the writer, bind its result to a local variable
        localE (TypM ty) writer
-         (\lv -> appE (return acc_f) []
+         (\lv -> appExp (return acc_f) []
                  [return init, varE lv, return out_ptr])
 
      EmptyStream ty repr -> do

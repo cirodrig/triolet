@@ -157,7 +157,7 @@ etaReduceExp recurse allow_exceptions strip_arg (ExpM expression) =
                       of ExpM (VarE _ arg_v)
                            | v == arg_v -> return $ init args'
                          _ -> Nothing
-             return (ExpM (AppE inf op' ty_args stripped_args))
+             return (appE inf op' ty_args stripped_args)
      LamE inf f -> return $ hrLambdaFun recurse allow_exceptions inf f
      LetE inf binder val body -> do
        let val' = hrNonTail val

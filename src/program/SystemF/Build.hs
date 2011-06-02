@@ -17,7 +17,7 @@ type MkExpM = FreshVarM ExpM
 type MkAltM = FreshVarM AltM
 type MkFunM = FreshVarM FunM
 
-{-# SPECIALIZE INLINE appE :: MkExpM -> [TypM] -> [MkExpM] -> MkExpM #-}
+{-# SPECIALIZE INLINE appExp :: MkExpM -> [TypM] -> [MkExpM] -> MkExpM #-}
 {-# SPECIALIZE INLINE varAppE :: Var -> [TypM] -> [MkExpM] -> MkExpM #-}
 
 varE :: (Supplies m VarID) => Var -> m ExpM
@@ -26,8 +26,8 @@ varE v = return $ ExpM $ VarE defaultExpInfo v
 litE :: (Supplies m VarID) => Lit -> m ExpM
 litE l = return $ ExpM $ LitE defaultExpInfo l
 
-appE :: (Supplies m VarID) => m ExpM -> [TypM] -> [m ExpM] -> m ExpM
-appE op t_args args = do
+appExp :: (Supplies m VarID) => m ExpM -> [TypM] -> [m ExpM] -> m ExpM
+appExp op t_args args = do
   op' <- op
   args' <- sequence args
   return $ mkAppE op' t_args args'

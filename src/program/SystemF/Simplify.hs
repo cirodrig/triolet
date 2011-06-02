@@ -582,7 +582,7 @@ createValue kind known_value =
 mkCopyExp e = do
   e_type <- inferExpType e
   e_dict <- getReprDict e_type
-  return $ ExpM $ AppE defaultExpInfo copy_op [TypM e_type] [e_dict, e]
+  return $ appE defaultExpInfo copy_op [TypM e_type] [e_dict, e]
   where
     copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
 
@@ -621,7 +621,7 @@ createDataConApp' inf val_type fields = do
             case val_type
             of ConValueType con ty_args ex_args ->
                  let con_exp = ExpM $ VarE defaultExpInfo con
-                 in ExpM $ AppE inf con_exp (ty_args ++ ex_args) field_exps
+                 in appE inf con_exp (ty_args ++ ex_args) field_exps
                TupleValueType _ ->
                  ExpM $ UTupleE inf field_exps
           
@@ -742,7 +742,7 @@ flattenCaseExp inf scr alts = do
 flattenAppExp inf op ty_args args = do
   (ctx1, oper') <- flattenExp op
   (ctx2, args') <- flattenExps args
-  let replaced_app = ExpM $ AppE inf oper' ty_args args'
+  let replaced_app = appE inf oper' ty_args args'
   return (ctx2 ++ ctx1, replaced_app)
 
 restructureExp :: ExpM -> LR ExpM
@@ -846,11 +846,11 @@ rwApp original_expression inf op ty_args args =
     use_fuel m = useFuel' simplify_op m
 
     continue op ty_args args =
-      rwApp (ExpM (AppE inf op ty_args args)) inf op ty_args args
+      rwApp (appE inf op ty_args args) inf op ty_args args
 
     simplify_op = do
       (op', op_val) <- rwExp op
-      let modified_expression = ExpM (AppE inf op' ty_args args)
+      let modified_expression = appE inf op' ty_args args
       rwAppWithOperator modified_expression inf op' op_val ty_args args
 
 
@@ -915,7 +915,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
 
     unknown_app = do
       (args', _) <- rwExps args
-      let new_exp = ExpM $ AppE inf op' ty_args args'
+      let new_exp = appE inf op' ty_args args'
       return (new_exp, Nothing)
 
     -- The term is a data constructor application.  Simplify subexpressions
@@ -947,7 +947,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
       (args', arg_values) <- rwExps eta_reduced_args
       
       -- Construct a value from this expression
-      let new_exp = ExpM $ AppE inf op' ty_args args'
+      let new_exp = appE inf op' ty_args args'
           new_value = dataConValue inf tenv type_con data_con ty_args arg_values
       return (new_exp, new_value)
 
@@ -998,14 +998,14 @@ rwCopyApp inf copy_op ty args = do
                   let retval =
                         case args
                         of [_, _]       -> (new_exp, new_val)
-                           [_, _, outp] -> (ExpM $ AppE defaultExpInfo new_exp [] [outp], Nothing)
+                           [_, _, outp] -> (appE defaultExpInfo new_exp [] [outp], Nothing)
                   return retval
 
         _ -> rebuild_copy args' arg_values
 
     -- Could not simplify; rebuild expression
     rebuild_copy args' arg_values =
-      let new_exp = ExpM $ AppE inf copy_op [ty] args'
+      let new_exp = appE inf copy_op [ty] args'
           new_value = copied_value arg_values
       in return (new_exp, new_value)
 
@@ -1024,7 +1024,7 @@ rwCopyApp inf copy_op ty args = do
 copyStoredValue inf val_type repr arg m_dst = do
   tmpvar <- newAnonymousVar ObjectLevel
   let stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
-      make_value = ExpM $ AppE inf stored_op [TypM val_type]
+      make_value = appE inf stored_op [TypM val_type]
                    ([ExpM $ VarE inf tmpvar] ++ maybeToList m_dst)
       alt = AltM $ DeCon { altConstructor = pyonBuiltin the_stored
                          , altTyArgs = [TypM val_type]
