@@ -238,12 +238,6 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_histogramArray) |])
   , (PyonName module_stream "createHistogram",
      Right [| pyonBuiltin (SystemF.the_createHistogram) |])
-  , (PyonName module_effects "emptyEffTok",
-     Right [| pyonBuiltin (SystemF.the_emptyEffTok) |])
-  , (PyonName module_effects "toEffTok",
-     Right [| pyonBuiltin (SystemF.the_toEffTok) |])
-  , (PyonName module_effects "propagateEffTok",
-     Right [| pyonBuiltin (SystemF.the_propagateEffTok) |])
   , (PyonName module_effects "seqEffTok",
      Right [| pyonBuiltin (SystemF.the_seqEffTok) |])
   , (PyonName module_structures "repr_array",
@@ -376,6 +370,7 @@ builtinGlobals =
     -- Dictionaries
   , (PyonName module_structures "OpaqueTraversableDict_list",
      Right [| pyonBuiltin SystemF.the_OpaqueTraversableDict_list |])
+
     -- Physical representations of data types
   , (PyonName module_structures "repr_Box",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Box |])

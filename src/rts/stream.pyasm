@@ -649,12 +649,13 @@ function inline createHistogram
   };
 
   letrec {
-    function write_histogram (int index, pointer dummy_out) -> () {
+    function write_histogram (int index) -> unit {
       ret @! array_type[index] = ret @! array_type[index] + int 1;
-      ();
+      nil;
     }
   };
-  () call initializer(write_histogram, null, null);
+  _ = unit call initializer(write_histogram, nil);
+  ();
 };
 
 /*****************************************************************************/

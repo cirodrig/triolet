@@ -82,6 +82,8 @@ lowerIntrinsicOp v
          binary_indexed_int (PrimMinZ Signed S32))
       , (pyonBuiltin the_minus_ii,
          binary_indexed_int (PrimSubZ Signed S32))
+      , (pyonBuiltin the_emptyEffTok,
+         empty_eff_tok)
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
@@ -156,3 +158,7 @@ binary_indexed_int op = do
         LetE [tmp_var3] (PrimA op [VarV tmp_var1, VarV tmp_var2]) $
         ReturnE (PackA indexedIntRecord [VarV tmp_var3])
   return $ LamV $ closureFun [param_var1, param_var2] [indexedIntType] stm
+
+-- | Create an effect token.
+empty_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
+empty_eff_tok = return (LitV UnitL)

@@ -94,19 +94,16 @@ data EffTok : val
   effTok () () ();
 };
 
-emptyEffTok : Writer (Stored EffTok);
+-- An empty side effect.
+-- This function is translated specially when converting from Core to LowLevel.
+emptyEffTok : EffTok;
 
 -- Translate to a side effect.
 -- This function is translated specially when converting from Core to LowLevel.
-toEffTok : (a : bare) -> IEffect a -> Writer (Stored EffTok);
-
--- Propagate a side effect.
-propagateEffTok : Stored EffTok -> Writer (Stored EffTok);
+toEffTok : (a : bare) -> IEffect a -> EffTok;
 
 -- Perform two side-effecting operations in sequence.
-seqEffTok : Writer (Stored EffTok)
-         -> Writer (Stored EffTok)
-	 -> Writer (Stored EffTok);
+seqEffTok : EffTok -> EffTok -> EffTok;
 
 data Complex : bare -> bare
 {
@@ -793,7 +790,7 @@ histogramArray : (sh : bare)
 createHistogram :
     (n : intindex)
  -> IndexedInt n
- -> ((int -> Writer (Stored EffTok)) -> Stored EffTok -> Writer (Stored EffTok))
+ -> ((int -> EffTok) -> EffTok -> EffTok)
  -> Writer (array n (Stored int));
 
 generate : (n : intindex)

@@ -694,36 +694,62 @@ rwHistogramArray inf [shape_type, size_ix] (size : input : other_args) =
          [size_ix]
          (return size :
           lamE (mkFun []
-          (\ [] -> return ([funType [intType, outType eff_type]
-                            (initEffectType eff_type),
-                            eff_type,
-                            outType eff_type],
-                           initEffectType eff_type))
-          (\ [] [writer, in_eff, out_eff] ->
-            make_histogram_writer tenv s writer in_eff out_eff)) :
+          (\ [] -> return ([funType [intType] eff_type, eff_type], eff_type))
+          (\ [] [writer, in_eff] ->
+            make_histogram_writer tenv s writer in_eff)) :
           map return other_args)
      Nothing -> return Nothing
   where
-    eff_type = storedType $ VarT (pyonBuiltin the_EffTok)
+    eff_type = VarT (pyonBuiltin the_EffTok)
+    stored_eff_type = storedType $ VarT (pyonBuiltin the_EffTok)
     repr_int = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int)
     repr_eff = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_EffTok)
     
-    make_histogram_writer tenv s writer in_eff out_eff = do
+    -- The argument to createHistogram is a fold operation.
+    --
+    -- > lambda f z.
+    -- >   case case boxed (stored z)
+    -- >        of boxed (initval).
+    -- >             boxed (fun_fold_stream (Stored EffTok, Stored int)
+    -- >                     (repr_EffTok, repr_int,
+    -- >                      (lambda acc intval.
+    -- >                         case intval
+    -- >                         of stored (n).
+    -- >                             case acc
+    -- >                             of stored (etok).
+    -- >                                  stored (seqEffTok (etok, f (n)))),
+    -- >                      initval, s))
+    -- >   of boxed (stored_out_tok).
+    -- >        case stored_out_tok of stored (out_tok) -> out_tok
+    make_histogram_writer :: TypeEnv -> ExpS -> Var -> Var
+                          -> TypeEvalM ExpM
+    make_histogram_writer tenv s writer initial_eff = do
+      -- The accumulator function passes an integer value to the
+      -- histogram writer function
       accumulator_fn <-
         lamE $ mkFun []
-        (\ [] -> return ([eff_type, storedIntType, outType eff_type],
-                         initEffectType eff_type))
-        (\ [] [in_eff2, index, out_eff2] -> do
-            let fst_eff =
-                  varAppE (pyonBuiltin the_propagateEffTok) []
-                  [varE in_eff2]
-                snd_eff =
-                  varAppE writer [] [load tenv (TypM intType) (varE index)]
-            varAppE (pyonBuiltin the_seqEffTok) []
-              [fst_eff, snd_eff, varE out_eff2])
-      let in_eff_exp = ExpM $ VarE defaultExpInfo in_eff
-      let out_eff_exp = ExpM $ VarE defaultExpInfo out_eff
-      translateStreamToFold tenv eff_type repr_eff in_eff_exp accumulator_fn out_eff_exp s
+        (\ [] -> return ([stored_eff_type, storedIntType],
+                         writerType stored_eff_type))
+        (\ [] [in_eff_ptr, index_ptr] ->
+            -- Call function and return a new effect token
+            varAppE (pyonBuiltin the_stored) [TypM eff_type]
+              [varAppE (pyonBuiltin the_seqEffTok) []
+               [load tenv (TypM eff_type) (varE in_eff_ptr),
+                varAppE writer []
+                [load tenv (TypM intType) (varE index_ptr)]]])
+
+      -- Store the input effect token in a temporary variable
+      localE (TypM $ stored_eff_type)
+        (varAppE (pyonBuiltin the_stored) [TypM eff_type] [varE initial_eff])
+        (\initial_eff_ptr ->
+          -- Generate the main loop here and load the effect token that's
+          -- generated
+          let initial_eff_exp = ExpM $ VarE defaultExpInfo initial_eff_ptr
+          in localE (TypM $ stored_eff_type)
+             (translateStreamToFoldWithExtraArgs
+              tenv stored_eff_type repr_eff initial_eff_exp
+              accumulator_fn s [])
+             (\out_eff_ptr -> load tenv (TypM eff_type) (varE out_eff_ptr)))
       
 rwHistogramArray _ _ _ = return Nothing
 

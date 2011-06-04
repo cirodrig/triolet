@@ -278,7 +278,6 @@ pyonBuiltinVariableNames =
     
   , "emptyEffTok"
   , "toEffTok"
-  , "propagateEffTok"
   , "seqEffTok"
   ]
 
