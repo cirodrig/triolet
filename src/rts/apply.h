@@ -17,3 +17,8 @@ PyonPtr
 apply_f32_f(PyonPtr obj, float arg);
 void
 apply_f32(PyonPtr obj, float arg, PyonPtr return_struct);
+
+PyonPtr
+apply_u_f(PyonPtr obj, int arg);
+void
+apply_u(PyonPtr obj, int arg, PyonPtr return_struct);

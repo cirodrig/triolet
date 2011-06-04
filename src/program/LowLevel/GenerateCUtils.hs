@@ -83,6 +83,7 @@ primTypeDeclSpecs :: PrimType -> DeclSpecs
 primTypeDeclSpecs pt =
   case pt
   of BoolType -> typeDeclSpecs (CIntType internalNode)
+     UnitType -> typeDeclSpecs (CIntType internalNode)
      IntType Signed S8 -> nameDeclSpecs "int8_t"
      IntType Signed S16 -> nameDeclSpecs "int16_t"
      IntType Signed S32 -> nameDeclSpecs "int32_t"

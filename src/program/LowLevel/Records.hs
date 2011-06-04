@@ -17,7 +17,8 @@ import LowLevel.Record
 -- distinction between pointer and integer is not retained, and neither is
 -- the distinction between signed and unsigned.
 data TypeTag =
-    Int8Tag | Int16Tag | Int32Tag | Int64Tag
+    UnitTag
+  | Int8Tag | Int16Tag | Int32Tag | Int64Tag
   | Float32Tag | Float64Tag
   deriving(Eq, Ord, Enum, Show)
 
@@ -29,13 +30,14 @@ intSizeTypeTag S64 = Int64Tag
 -- | A bits tag, representing the physical representation of a value in memory.
 -- Bits-tagged data are always promoted to a value at least as big as the 
 -- 'dynamicScalarAlignment'.
-data BitsTag = Bits32Tag | Bits64Tag
+data BitsTag = Bits0Tag | Bits32Tag | Bits64Tag
              deriving(Eq, Ord, Enum, Show)
 
 -- | Get the bits tag of a primitive type.  The primitive type must be a
 -- suitable size, perhaps by being promoted.
 toBitsTag :: PrimType -> BitsTag
 toBitsTag ty
+  | sizeOf ty == 0 = Bits0Tag
   | sizeOf ty == 4 = Bits32Tag
   | sizeOf ty == 8 = Bits64Tag
   | otherwise =
@@ -48,6 +50,7 @@ data InfoTag = FunTag | PAPTag | ConTag
 -- | Get the type tag of a primitive type
 toTypeTag :: PrimType -> TypeTag
 toTypeTag BoolType = Int8Tag
+toTypeTag UnitType = UnitTag
 toTypeTag (IntType _ sz)  = intSizeTypeTag sz
 toTypeTag (FloatType S32) = Float32Tag
 toTypeTag (FloatType S64) = Float64Tag

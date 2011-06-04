@@ -104,6 +104,13 @@ builtinPrimitives =
   , (biName "pyon_dealloc",
      primFunctionType [PrimType PointerType] [])
     -- apply.c
+  , (applyName "apply_u_f",
+     primFunctionType [ PrimType OwnedType
+                      , PrimType UnitType] [PrimType OwnedType])
+  , (applyName "apply_u",
+     primFunctionType [PrimType OwnedType
+                      , PrimType UnitType
+                      , PrimType PointerType] [])
   , (applyName "apply_i32_f",
      primFunctionType [ PrimType OwnedType
                       , PrimType (IntType Signed S32)] [PrimType OwnedType])

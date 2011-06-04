@@ -101,3 +101,49 @@ procedure apply_word (owned obj, pointer arg_ref, pointer ret) -> () {
     () primcall exit (int -1);
   };
 };
+
+// Apply a function to the unit value.
+procedure apply_unit (owned obj, pointer ret) -> () {
+  obj_info = obj @! ObjectHeader.info;
+  obj_tag = obj_info @! InfoTableHeader.tag;
+
+  if (obj_tag == TAG_FUN) {
+    arity = uint16 primcall fun_arity(obj);
+    if (arity == uint16 1) {
+      // Calling a function with one argument.  Call the function now.
+      () primcall (obj_info @! FunInfo(value int 0).inexact) (obj, null, ret);
+    }
+    else if (arity == uint16 0) {
+      // TODO: Handle nullary functions
+      () primcall exit (int -1);
+    }
+    else {
+      // Undersaturated application
+      // Create a PAP
+      typedef my_pap = PAP(value int 0);
+      new_pap = owned primcall pap_new (obj, uint16 1, uint16 0);
+      !ret = new_pap;
+      ();
+    };
+  } else if (obj_tag == TAG_PAP) {
+    // Determine PAP's arity
+    arity = uint16 primcall pap_arity(obj);
+    typedef my_pap = PAP(value int 0);
+
+    // Add argument to PAP
+    new_pap = owned primcall pap_grow(obj, uint16 1);
+
+    if (new_pap @! my_pap.nargs == arity) {
+      // Function is fully applied
+      () primcall pap_call (new_pap, ret);
+    } else {
+      // Return the new PAP
+      !ret = new_pap;
+      ();
+    };
+  }
+  else {
+    // Invalid tag
+    () primcall exit (int -1);
+  };
+};

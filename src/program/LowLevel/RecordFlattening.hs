@@ -95,8 +95,7 @@ expandVar v = RF $ asks get_expansion
 defineParam :: ParamVar -> ([ParamVar] -> RF a) -> RF a
 defineParam v k =
   case varType v
-  of PrimType UnitType -> assign_to []
-     PrimType t        -> assign_to [v] -- No change
+  of PrimType t        -> assign_to [v] -- No change
      RecordType rec    -> defineRecord rec assign_to
   where
     assign_to expanded_list =
@@ -133,7 +132,6 @@ flattenFunctionType ft =
   (flattenValueTypeList $ ftReturnTypes ft)
 
 flattenType :: ValueType -> [PrimType]
-flattenType (PrimType UnitType) = []
 flattenType (PrimType pt) = [pt]
 flattenType (RecordType rt) = flattenRecordType rt
 
@@ -141,7 +139,6 @@ flattenRecordType :: StaticRecord -> [PrimType]
 flattenRecordType rt =
   concatMap flattenFieldType $ map fieldType $ recordFields rt
 
-flattenFieldType (PrimField UnitType) = []
 flattenFieldType (PrimField pt) = [pt]
 flattenFieldType (RecordField record_type) = flattenRecordType record_type
 
@@ -153,7 +150,6 @@ flattenVal value =
   case value
   of VarV v -> expandVar v
      RecV _ vals -> liftM concat $ mapM flattenVal vals
-     LitV UnitL -> return []
      LitV _ -> return [value]
      LamV f -> do f' <- flattenFun f
                   return [LamV f']
@@ -180,7 +176,7 @@ flattenAtom atom =
        CallA conv `liftM` flattenSingleVal op `ap` flattenValList vs
      -- Eliminate a load of a unit value
      PrimA (PrimLoad m (PrimType UnitType)) _ ->
-       return (id, ValA [])
+       return (id, ValA [LitV UnitL])
      -- If loading a record, load its parts individually
      PrimA (PrimLoad m (RecordType rec_type)) vs -> do
        [ptr, off] <- flattenValList vs
@@ -524,6 +520,5 @@ flattenGlobalValue value =
   case value
   of VarV v -> [value]
      RecV _ vals -> flattenGlobalValues vals
-     LitV UnitL -> []
      LitV _ -> [value]
      LamV f -> internalError "flattenGlobalValue: Unexpected lambda function"

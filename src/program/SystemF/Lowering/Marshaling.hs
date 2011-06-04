@@ -37,7 +37,7 @@ computeReprDict ty =
            let list_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_list)
            element_dict <- computeReprDict element_type
            emitAtom1 owned_type $
-             LL.closureCallA list_repr_ctor [LL.LitV LL.UnitL, element_dict]
+             LL.closureCallA list_repr_ctor [element_dict]
        | op `isPyonBuiltin` the_int ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_int
        | op `isPyonBuiltin` the_float ->

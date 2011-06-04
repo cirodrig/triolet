@@ -142,20 +142,17 @@ indexedIntType = RecordType indexedIntRecord
 indexed_int_constant :: (Monad m, Supplies m (Ident Var)) => Integer -> m Val
 indexed_int_constant n = return $ RecV indexedIntRecord [nativeIntV n]
 
--- | A binary operation on indexed ints.  It takes two unit parameters
---   and two records.
+-- | A binary operation on indexed ints.  It takes two record parameters.
 binary_indexed_int :: (Monad m, Supplies m (Ident Var)) => Prim -> m Val
 binary_indexed_int op = do
-  param_var1 <- newAnonymousVar (PrimType UnitType)
-  param_var2 <- newAnonymousVar (PrimType UnitType)
-  param_var3 <- newAnonymousVar indexedIntType
-  param_var4 <- newAnonymousVar indexedIntType
+  param_var1 <- newAnonymousVar indexedIntType
+  param_var2 <- newAnonymousVar indexedIntType
   tmp_var1 <- newAnonymousVar (PrimType nativeIntType)
   tmp_var2 <- newAnonymousVar (PrimType nativeIntType)
   tmp_var3 <- newAnonymousVar (PrimType nativeIntType)
   let stm =
-        LetE [tmp_var1] (UnpackA indexedIntRecord (VarV param_var3)) $ 
-        LetE [tmp_var2] (UnpackA indexedIntRecord (VarV param_var4)) $
+        LetE [tmp_var1] (UnpackA indexedIntRecord (VarV param_var1)) $
+        LetE [tmp_var2] (UnpackA indexedIntRecord (VarV param_var2)) $
         LetE [tmp_var3] (PrimA op [VarV tmp_var1, VarV tmp_var2]) $
         ReturnE (PackA indexedIntRecord [VarV tmp_var3])
-  return $ LamV $ closureFun [param_var1, param_var2, param_var3, param_var4] [indexedIntType] stm
+  return $ LamV $ closureFun [param_var1, param_var2] [indexedIntType] stm

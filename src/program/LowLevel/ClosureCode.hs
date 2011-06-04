@@ -1081,11 +1081,16 @@ pickApplyFun tags =
 
 -- | The available 'apply' functions
 applyFunctions :: ApplyTrie
-applyFunctions = [ (Int32Tag, i32_node)
+applyFunctions = [ (UnitTag, u_node)
+                 , (Int32Tag, i32_node)
                  , (Float32Tag, f_node)
                  , (Int64Tag, i64_node)]
   where
-    i32_node = ApplyTrieNode 
+    u_node = ApplyTrieNode
+             (llBuiltin the_prim_apply_u_f)
+             (llBuiltin the_prim_apply_u)
+             []
+    i32_node = ApplyTrieNode
              (llBuiltin the_prim_apply_i32_f) 
              (llBuiltin the_prim_apply_i32)
              []

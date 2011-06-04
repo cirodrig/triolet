@@ -261,6 +261,7 @@ mangledVarName is_local v
       of PointerType -> "v_"
          OwnedType -> "v_"
          BoolType -> "b_"
+         UnitType -> "u_"
          IntType Signed _ -> "i_"
          IntType Unsigned _ -> "u_"
          FloatType _ -> "f_"
