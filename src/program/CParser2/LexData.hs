@@ -28,6 +28,7 @@ data Tok =
   | SemiTok
   | ColonTok
   | ArrowTok
+  | AttributeTok
   | DataTok
   | TypeTok
   | WildTok
@@ -50,6 +51,7 @@ showTok t =
        SemiTok      -> "semicolon"
        ColonTok     -> "colon"
        ArrowTok     -> "arrow"
+       AttributeTok -> "'attribute'"
        DataTok      -> "'data'"
        TypeTok      -> "'type'"
        WildTok      -> "underscore"

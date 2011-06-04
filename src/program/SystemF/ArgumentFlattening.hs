@@ -741,6 +741,10 @@ planParameter mode pat = do
   -- Create a new pattern with unknown demand information
   return $ FlatArg (patM (patMVar pat ::: whnf_type)) decomp
 
+-- | Decide how to decompose a data structure.
+--
+--   This function does the real work of 'planParameter', 'planReturn', and 
+--   'planLocal'.
 planFlattening :: (ReprDictMonad m, EvalMonad m) =>
                   PlanMode -> Type -> Specificity -> m (Type, Decomp)
 planFlattening mode ty spc = do
@@ -785,12 +789,10 @@ planFlattening mode ty spc = do
     -- Remove dead fields
     Unused -> dead_decomp
 
-    -- Don't flatten dictionary parameters.  Removing dead dictionaries is OK.
-    _ | is_dictionary_pattern whnf_type -> id_decomp
-
-    -- Side effect tokens are an abstract data structure that should not be
-    -- flattened.
-    _ | is_EffTok whnf_type -> id_decomp
+    -- Don't flatten dictionary parameters or abstract data types.
+    -- They can be removed if dead.
+    _ | is_dictionary_pattern whnf_type || is_abstract tenv whnf_type ->
+      id_decomp
 
     Decond (MonoCon spc_con _ _) spcs -> decon_decomp spc_con (Just spcs)
 
@@ -816,9 +818,10 @@ planFlattening mode ty spc = do
       of Just (op, _) -> isDictionaryTypeCon op
          _ -> False
     
-    is_EffTok t =
+    is_abstract tenv t =
       case fromVarApp t
-      of Just (op, _) -> op `isPyonBuiltin` the_EffTok
+      of Just (op, _) | Just dtype <- lookupDataType op tenv ->
+           dataTypeIsAbstract dtype
          _ -> False
 
 -- | Deconstruct a parameter into its component fields.

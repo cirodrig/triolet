@@ -273,12 +273,12 @@ resolveEntity _ (TypeEnt ty (Just _)) =
   -- Type functions should be 'Nothing' up to now 
   internalError "resolveEntity"
 
-resolveEntity _ (DataEnt ty cons) = do
+resolveEntity _ (DataEnt ty cons attrs) = do
   (ty', lv) <- resolveLType ty
   logErrorIf (lv /= KindLevel) $
     "Expecting a kind (" ++ show (getSourcePos ty) ++ ")"
   cons' <- mapM (resolveL resolveDataConDecl) cons
-  return $ DataEnt ty' cons'
+  return $ DataEnt ty' cons' attrs
 
 -- | Resolve a global declaration.  The declared variable should be in the
 --   environment already.

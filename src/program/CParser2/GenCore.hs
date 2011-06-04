@@ -95,10 +95,12 @@ translateDecl tenv (Decl name ent) =
        insertTypeFunction core_name (translateType ty) type_function
      TypeEnt ty Nothing ->
        insertType core_name (translateType ty)
-     DataEnt ty data_cons ->
+     DataEnt ty data_cons attrs ->
        let kind = translateType ty
-           descr = DataTypeDescr core_name kind
-                   (map (translateDataConDecl tenv core_name . unLoc) data_cons)
+           abstract = AbstractAttr `elem` attrs
+           data_con_descrs =
+             map (translateDataConDecl tenv core_name . unLoc) data_cons
+           descr = DataTypeDescr core_name kind data_con_descrs abstract
        in insertDataType descr
   where
     core_name = toVar name

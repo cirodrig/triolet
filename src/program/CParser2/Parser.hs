@@ -2,6 +2,7 @@
 module CParser2.Parser(parseFile)
 where
 
+import Data.Maybe
 import qualified Text.ParserCombinators.Parsec as PS
 import qualified Text.ParserCombinators.Parsec.Prim as PS
 
@@ -112,6 +113,20 @@ commaList :: P a -> P [a]
 commaList p = parens $ p `sepBy` match CommaTok
 
 -------------------------------------------------------------------------------
+-- * Attributes
+
+attributeList :: P [Attribute]
+attributeList = option [] (match AttributeTok >> commaList attr)
+
+attr :: P Attribute
+attr = do
+  name <- identifier
+  fromMaybe (fail "Unrecognized attribute") $ lookup name attr_table
+  where
+    attr_table =
+      [("abstract", return AbstractAttr)]
+
+-------------------------------------------------------------------------------
 -- * Type parsing
 
 -- | Parse a type
@@ -176,8 +191,9 @@ pDataDecl = located $ do
   tycon <- identifier
   match ColonTok
   kind <- pType
+  attrs <- attributeList
   datacons <- braces $ pDataConDecl `sepEndBy` match SemiTok
-  return $ Decl tycon $ DataEnt kind datacons 
+  return $ Decl tycon $ DataEnt kind datacons attrs
   
 pDataConDecl :: P (LDataConDecl Parsed)
 pDataConDecl = located $ do

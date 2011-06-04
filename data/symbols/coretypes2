@@ -6,10 +6,8 @@ kind val;
 kind box;
 kind bare;
 kind out;
-
-type BoxedT : bare -> box;
-type BareT : box -> bare;
-type OutT : bare -> out;
+kind write;
+kind sideeffect;
 
 -}
 
@@ -36,10 +34,12 @@ data Referenced : bare -> bare
 };
 
 -- A pointer used for initializing data
-data OutPtr : bare -> out {};
+data OutPtr : bare -> out
+  attribute(abstract) {};
 
 -- A dummy value representing the effect of initializing an object
-data IEffect : bare -> sideeffect {};
+data IEffect : bare -> sideeffect
+  attribute(abstract) {};
 
 -- Type functions to convert between representations
 type BoxedType : bare -> box;
@@ -56,8 +56,8 @@ data bool : val
   False () () ();
 };
 
-data int : val {};		-- Opaque
-data float : val {};		-- Opaque
+data int : val attribute(abstract) {};
+data float : val attribute(abstract) {};
 
 data NoneType : val
 {
@@ -85,6 +85,7 @@ data SomeIndexedInt : val
 -- it is not accessed by load or store instructions when reading or writing it,
 -- and therefore we can safely masquerade NULL pointers as EffTok references.
 data EffTok : val
+  attribute(abstract)
 {
   -- We never use the constructor 'effTok' in code, because it could be
   -- optimized away.  We don't want the optimizer to mess with this data type
@@ -113,11 +114,14 @@ data Complex : bare -> bare
 };
 
 data array : intindex -> bare -> bare
+  attribute(abstract)
 {};
 
 -- A stream is indexed by a shape and an element type.
 -- Container types are punned as shapes.
-data Stream : bare -> bare -> box {};
+data Stream : bare -> bare -> box
+  attribute(abstract)
+{};
 
 data list : bare -> bare
 {
@@ -178,7 +182,9 @@ data UnboxedTuple6 : val -> val -> val -> val -> val -> val -> val
 
 -- Dictionaries
 
-data Repr : bare -> box {};
+data Repr : bare -> box
+  attribute(abstract)
+{};
 
 data EqDict : bare -> box
 {

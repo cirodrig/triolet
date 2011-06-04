@@ -338,11 +338,9 @@ worthPostInlining tenv is_writer dmd expr =
                -- When using the value, read the source value directly
                let [_, source] = args
                in Just $ complexKnownValue $ WriterValue $ InlinedValue source
-           | Just dcon <- lookupDataCon op tenv ->
+           | Just (tycon, dcon) <- lookupDataConWithType op tenv ->
                let (field_types, _) =
                      instantiateDataConTypeWithExistentials dcon ty_args
-                   
-                   Just tycon = lookupDataType (dataConTyCon dcon) tenv
 
                    is_writer_field (ValRT ::: _) = False
                    is_writer_field (BoxRT ::: _) = False

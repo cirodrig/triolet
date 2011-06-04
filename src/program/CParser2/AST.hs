@@ -60,6 +60,11 @@ instance HasSourcePos (Located a) where
 unLoc :: Located a -> a
 unLoc (L _ x) = x
 
+-- | Attribute annotations from the source code
+data Attribute =
+  AbstractAttr                    -- ^ Data type is abstract
+  deriving (Eq, Ord)
+
 -------------------------------------------------------------------------------
 -- * Abstract Syntax Trees
 -- $ast
@@ -130,7 +135,7 @@ data Decl ix = Decl (Identifier ix) !(Entity ix)
 data Entity ix = 
     VarEnt (LType ix) 
   | TypeEnt (LType ix) (Maybe BuiltinTypeFunction)
-  | DataEnt (LType ix) [LDataConDecl ix]
+  | DataEnt (LType ix) [LDataConDecl ix] [Attribute]
 
 type LDecl ix = Located (Decl ix)
 

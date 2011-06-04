@@ -165,6 +165,13 @@ data DataType =
     --   fully applied instance of this data type.
     dataTypeKind :: BaseKind
     
+    -- | Abstractness of the data type.
+    --   If a data type is abstract, then the compiler should not introduce
+    --   data constructor expressions or case expressions for this type.
+    --   It is still permissible to optimize such expressions if they are
+    --   already present in the code.
+  , dataTypeIsAbstract :: !Bool
+    
     -- | Data constructors of this data type
   , dataTypeDataConstructors :: [Var]
   }
@@ -268,20 +275,20 @@ insertType v t (TypeEnv env) =
 
 -- | A description of a data type that will be added to a type environment.
 data DataTypeDescr =
-  DataTypeDescr Var Type [(Type, DataConType)]
+  DataTypeDescr Var Type [(Type, DataConType)] Bool
 
 insertDataType :: DataTypeDescr
                -> TypeEnvBase type_function -> TypeEnvBase type_function
-insertDataType (DataTypeDescr ty_con kind ctors) (TypeEnv env) =
+insertDataType (DataTypeDescr ty_con kind ctors abstract) (TypeEnv env) =
   TypeEnv $ foldr insert env (ty_con_assignment : data_con_assignments)
   where
     insert (v, a) env = IntMap.insert (fromIdent $ varID v) a env
-    ty_con_assignment =
-      (ty_con, TyConTypeAssignment kind (DataType (result_kind kind) data_cons))
+    data_cons = [dataConCon dtor | (_, dtor) <- ctors]
     data_con_assignments =
       [(dataConCon dtor, DataConTypeAssignment ty dtor)
       | (ty, dtor) <- ctors]
-    data_cons = [dataConCon dtor | (_, dtor) <- ctors]
+    data_type = DataType (result_kind kind) abstract data_cons
+    ty_con_assignment = (ty_con, TyConTypeAssignment kind data_type)
     
     -- The kind of a fully applied instance of the data constructor
     result_kind k = case k

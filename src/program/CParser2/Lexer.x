@@ -65,6 +65,7 @@ rules :- ----------------------------------------------------------------------
 
 -- Identifiers
 
+<0>     "attribute" / @eow	{ posnTok AttributeTok }
 <0>     "data" / @eow		{ posnTok DataTok }
 <0>     "type" / @eow		{ posnTok TypeTok }
 <0>	"_" / @eow		{ posnTok WildTok }
