@@ -235,13 +235,14 @@ typeInferAppE orig_expr inf op ty_args args = do
 -- | Compute the type of the result of applying an operator to some
 --   type arguments.
 computeInstantiatedType :: SourcePos -> Type -> [TypTM] -> TCM Type
-computeInstantiatedType inf op_type args = go op_type args
+computeInstantiatedType inf op_type args_ = go op_type args_
   where
     go op_type (TypTM (TypeAnn arg_kind arg) : args) = do
       app_type <- typeOfTypeApp op_type arg_kind arg
       case app_type of
         Just result_type -> go result_type args
-        Nothing -> typeError $ "Error in type application at " ++ show inf
+        Nothing -> -- traceShow (text "CIT" <+> (pprType op_type $$ vcat (map (pprType . fromTypM) args_))) $
+                   typeError $ "Error in type application at " ++ show inf
 
     go op_type [] = return op_type
 
@@ -258,7 +259,8 @@ computeAppliedType pos op_type arg_types =
       result <- typeOfApp op_type arg_t
       case result of
         Just op_type' -> apply op_type' arg_ts
-        Nothing -> typeError $ "Error in application at " ++ show pos
+        Nothing -> -- traceShow (text "CAT" <+> (pprType op_type $$ vcat (map pprType arg_types))) $
+                   typeError $ "Error in application at " ++ show pos
     
     apply op_type [] = return op_type
 
