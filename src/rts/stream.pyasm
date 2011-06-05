@@ -23,7 +23,6 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
 
 // The info table of a stream
 data pointer Stream_info = InfoTableHeader {
-  dummy_finalizer,
   TAG_CON
 };
 
@@ -104,7 +103,7 @@ function inline Stream_empty_initialize ( pointer st) -> () {
 };
 
 data owned empty_stream = Stream {
-  INIT_OBJECT_HEADER,
+  ObjectHeader { Stream_info },
   Stream_empty_next,
   Stream_empty_initialize,
   uint 0,
@@ -1084,7 +1083,7 @@ function zip4
 /* count */
 
 data owned Stream_counter = Stream {
-  INIT_OBJECT_HEADER,
+  ObjectHeader { Stream_info },
   Stream_count_next,
   Stream_count_initialize,
   sizeof int,

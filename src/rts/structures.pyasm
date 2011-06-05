@@ -21,12 +21,11 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
 };
 
 data pointer repr_info = InfoTableHeader {
-  dummy_finalizer,
   TAG_CON
 };
 
 data owned repr_Box_value = PassConv {
-  ObjectHeader { int 1, repr_info },
+  ObjectHeader { repr_info },
   sizeof owned,
   alignof owned,
 #if WORD_SIZE == 4
@@ -43,7 +42,7 @@ data owned repr_Box_value = PassConv {
 // Exactly the same as 'repr_Box_value'.  It's a separate definition because
 // it has a different type in the Mem stage.
 data owned repr_Box = PassConv {
-  ObjectHeader { int 1, repr_info },
+  ObjectHeader { repr_info },
   sizeof owned,
   alignof owned,
 #if WORD_SIZE == 4
@@ -60,7 +59,7 @@ data owned repr_Box = PassConv {
 // Exactly the same as 'repr_Box_value'.  It's a separate definition because
 // it has a different type in the Mem stage.
 data owned repr_Stream = PassConv {
-  ObjectHeader { int 1, repr_info },
+  ObjectHeader { repr_info },
   sizeof owned,
   alignof owned,
 #if WORD_SIZE == 4
@@ -111,7 +110,7 @@ function inline repr_Referenced (owned elt_repr) -> owned {
 // necessarily point to a valid address, depending on how the memory allocator
 // works.
 data owned repr_EmptyReference = PassConv {
-  ObjectHeader { int 1, repr_info },
+  ObjectHeader { repr_info },
   word 0,
   word 1,
   dummy_copy,
@@ -163,7 +162,7 @@ function inline repr_array
 
 // Parameter-passing convention dictionary of ints
 data owned repr_int = PassConv {
-  ObjectHeader { int 1, repr_info },
+  ObjectHeader { repr_info },
   sizeof int32,
   alignof int32,
   copy4F,
@@ -173,7 +172,7 @@ data owned repr_int = PassConv {
 
 // Parameter-passing convention dictionary of floats
 data owned repr_float = PassConv {
-  ObjectHeader { int 1, repr_info },
+  ObjectHeader { repr_info },
   sizeof float,
   alignof float,
   copy4F,
@@ -183,7 +182,7 @@ data owned repr_float = PassConv {
 
 // Parameter-passing convention dictionary of bool
 data owned repr_bool = PassConv {
-  ObjectHeader { int 1, repr_info },
+  ObjectHeader { repr_info },
   sizeof bool,
   alignof bool,
   copy1F,
@@ -194,7 +193,7 @@ data owned repr_bool = PassConv {
 // Parameter-passing convention dictionary of EffTok,
 // which contains no data
 data owned repr_EffTok = PassConv {
-  ObjectHeader { int 1, repr_info },
+  ObjectHeader { repr_info },
   word 0,
   word 1,
   dummy_copy,
@@ -326,12 +325,11 @@ function inline copy_PyonTuple4(owned copy1, owned copy2, owned copy3,
 
 #if 0
 data pointer TraversableDict_info = InfoTableHeader {
-  dummy_finalizer,
   TAG_CON
 };
 
 data owned OpaqueTraversableDict_list = TraversableDict {
-  ObjectHeader { int 1, TraversableDict_info },
+  ObjectHeader { TraversableDict_info },
   list_traverse,
   list_build
 };

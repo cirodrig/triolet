@@ -732,7 +732,7 @@ objectHeaderRecord' :: DynamicRecord
 objectHeaderRecord' = toDynamicRecord objectHeaderRecord
 
 objectHeaderData :: Val -> [Val]
-objectHeaderData info_ptr = [nativeWordV 1, info_ptr]
+objectHeaderData info_ptr = [info_ptr]
 
 infoTableHeaderRecord' :: DynamicRecord
 infoTableHeaderRecord' = toDynamicRecord infoTableHeaderRecord
@@ -747,79 +747,7 @@ initializeObject :: (Monad m, Supplies m (Ident Var)) =>
                  -> Val         -- ^ Info table pointer
                  -> Gen m ()
 initializeObject ptr info_ptr = do
-  storeField (objectHeaderRecord' !!: 0) ptr (nativeWordV 1)
-  storeField (objectHeaderRecord' !!: 1) ptr info_ptr
-
--- | Generate code that frees an object.
-freeObject :: (Monad m, Supplies m (Ident Var)) =>
-              Val               -- ^ Pointer to object
-           -> Gen m ()
-freeObject ptr = do
-  info_ptr <- loadField (objectHeaderRecord' !!: 1) ptr
-  free_func <- loadField (infoTableHeaderRecord' !!: 0) info_ptr
-  emitAtom0 $ primCallA free_func [ptr]  
-
--- | Generate code to increment an object header's reference count.
-increfObject :: (Monad m, Supplies m (Ident Var)) => Val -> Gen m ()
-increfObject ptr = increfObjectBy 1 ptr
-
--- | Generate code to increment an object header's reference count by some
--- non-negative amount.
-increfObjectBy :: (Monad m, Supplies m (Ident Var)) => Int -> Val -> Gen m ()
-increfObjectBy n ptr
-  | n < 0 = internalError "increfHeaderBy: Negative increment"
-  | n == 0 = return ()
-  | otherwise = do
-      let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
-      field_ptr <- primAddP ptr off
-      _ <- primAAddZ (PrimType nativeIntType) field_ptr (nativeIntV n)
-      return ()
-
--- | Generate code to decrease an object's reference count, and free it
--- if the reference count is zero.  The parameter variable is an owned
--- reference or a non-owned pointer.
-decrefObject :: (Monad m, Supplies m (Ident Var)) => Bool -> Val -> Gen m ()
-decrefObject make_primcall ptr = getContinuation make_primcall [] $ \cont -> do
-  let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
-  field_ptr <- primAddP ptr off
-  
-  -- Decrement the value, get the old reference count
-  old_rc <- primAAddZ (PrimType nativeIntType) field_ptr (nativeIntV (-1))
-  
-  -- If old reference count was 1, free the pointer
-  rc_test <- primCmpZ (PrimType nativeIntType) CmpEQ old_rc (nativeIntV 1)
-  genIf rc_test (freeObject ptr >> return cont) (return cont)
-
--- | Generate code to decrease an object's reference count, and free it
--- if the reference count is zero.  The parameter variable is an owned
--- reference.
-decrefObjectBy :: (Monad m, Supplies m (Ident Var)) =>
-                  Bool -> Int -> Val -> Gen m ()
-decrefObjectBy make_primcall n ptr
-  | n < 0 = internalError "decrefHeaderBy"
-  | n == 0 = return ()
-  | otherwise = getContinuation make_primcall [] $ \cont -> do
-      let off = fieldOffset $ recordFields objectHeaderRecord' !! 0
-      field_ptr <- primAddP ptr off
-  
-      -- Subtract the value, get the old reference count
-      old_rc <- primAAddZ (PrimType nativeIntType) field_ptr $
-                nativeIntV (negate n)
-  
-      -- If old reference count was less than or equal to n, free the pointer
-      rc_test <- primCmpZ (PrimType nativeIntType) CmpLE old_rc $
-                 nativeIntV n
-      genIf rc_test (freeObject ptr >> return cont) (return cont)
-
--- | Add the given number (which may be negative) to an object's reference  
--- count.  If positive, 'increfObjectBy' is called; if negative,
--- 'decrefObjectBy' is called.
-adjustObjectBy :: (Monad m, Supplies m (Ident Var)) =>
-                  Bool -> Int -> Val -> Gen m ()
-adjustObjectBy make_primcall n ptr
-  | n > 0     = increfObjectBy n ptr
-  | n < 0     = decrefObjectBy make_primcall (negate n) ptr
-  | otherwise = return ()
+  storeField (objectHeaderRecord' !!: 0) ptr info_ptr
 
 selectPassConvSize, selectPassConvAlignment,
   selectPassConvCopy,

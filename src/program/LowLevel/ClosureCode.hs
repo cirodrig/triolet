@@ -516,18 +516,6 @@ initializeCapturedVariables captured_ptr clo =
   where
     init_var field var = storeField field captured_ptr (VarV var)
 
--- | Finalize a captured variables record by explicitly decrementing
--- members' reference counts.
-finalizeCapturedVariables :: Val -> Closure -> Gen FreshVarM ()
-finalizeCapturedVariables captured_ptr clo =
-  mapM_ finalize_field (recordFields $ closureCapturedRecord clo)
-  where
-    finalize_field field 
-      | fieldType field == PrimField OwnedType = do
-          decrefObject True =<< loadFieldWithoutOwnership field captured_ptr
-      | PrimField _ <- fieldType field = return ()
-      | otherwise = internalError "finalizeCapturedVariables"
-
 -- | Allocate, but do not initialize, a closure.
 -- The created closure is returned.
 allocateClosure :: Closure -> GenM Val
@@ -559,37 +547,6 @@ initializeClosure group_record (var, clo) clo_ptr = do
       | otherwise = do
           captured_ptr <- referenceField (closureRecord clo !!: 1) clo_ptr
           initializeCapturedVariables captured_ptr clo
-
--- | Generate a free function for a non-recursive, non-top-level closure.
--- The free function is added to the set of top-level definitions.
-generateClosureFree :: Closure -> FreshVarM [GlobalDef]
-generateClosureFree clo 
-  | not $ closureIsLocal clo =
-      internalError "generateClosureFree: Not a local closure"
-
-  | Just dealloc_fun <- closureDeallocEntry clo,
-    isDefaultDeallocator dealloc_fun =
-      -- Using the default deallocator.  Don't define anything.
-      return []
-
-  | Nothing <- closureDeallocEntry clo =
-      -- Local closures must have a dealloc entry
-      internalError "generateClosureFree"
-
-  | Just dealloc_fun <- closureDeallocEntry clo = do
-  param <- newAnonymousVar (PrimType PointerType)
-  fun_body <- execBuild [] $ do
-    -- Free the captured variables
-    captured_vars <- referenceField (closureRecord clo !!: 1) (VarV param)
-    finalizeCapturedVariables captured_vars clo
-    
-    -- Deallocate the closure
-    deallocateHeapMem (VarV param)
-    gen0
-  
-  -- Write this to the closure's deallocation function entry
-  let fun = primFun [param] [] fun_body
-  return [GlobalFunDef $ Def dealloc_fun fun]
 
 -- | Generate a shared closure record value and a function that frees the
 -- entire recursive function group.
@@ -814,8 +771,7 @@ emitInfoTable clo =
   where
     -- see 'funInfoHeader'
     info_header =
-      [ LitV NullL                                   -- Deallocator (always NULL)
-      , uint8V $ fromEnum FunTag                     -- object type tag
+      [ uint8V $ fromEnum FunTag                     -- object type tag
       ]
     fun_info_header =
       [ RecV infoTableHeaderRecord info_header
@@ -954,11 +910,11 @@ genIndirectCall return_types op [] = return $ ValA [op]
 
 genIndirectCall return_types op args = do
   -- Get the function info table and captured variables
-  inf_ptr <- loadField (objectHeaderRecord !!: 1) op
+  inf_ptr <- loadField (objectHeaderRecord !!: 0) op
 
   -- Can make an exact call if the callee is a function and
   -- the number of arguments matches the function's arity
-  inf_tag <- loadField (infoTableHeaderRecord !!: 1) inf_ptr
+  inf_tag <- loadField (infoTableHeaderRecord !!: 0) inf_ptr
   inf_tag_test <- primCmpZ (PrimType (IntType Unsigned S8)) CmpEQ inf_tag $
                   uint8V $ fromEnum FunTag
 

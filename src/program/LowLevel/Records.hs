@@ -105,15 +105,13 @@ traversableDictRecord =
                     , PrimField OwnedType]
 
 -- | An info table is a piece of statically defined global data.  Every 
--- reference-counted, dynamically allocated object contains a pointer to an 
--- info table.  The info table describes the object's data representation.
+--   boxed object contains a pointer to an info table.
+--   The info table describes the object's data representation.
 --
--- All info tables start with a \"free\" function that can be called to
--- deallocate the associated object, followed by a type tag. 
--- The type tag indicates the layout of the remaining fields.
+--   Info tables contain a tag that indicates the layout of the
+--   remaining fields.  The tag is the 'fromEnum' value of an 'InfoTag'.
 infoTableHeader :: [StaticFieldType]
-infoTableHeader = [ PrimField PointerType
-                  , PrimField (IntType Unsigned S8)
+infoTableHeader = [ PrimField (IntType Unsigned S8)
                   ]
 
 infoTableHeaderRecord :: StaticRecord
@@ -148,8 +146,7 @@ funInfoHeaderRecord = constStaticRecord funInfoHeader
 -- The header consists of a reference count and a pointer to the object's 
 -- info table.
 objectHeader :: [(Mutability, StaticFieldType)]
-objectHeader = [ (Mutable, PrimField nativeWordType)
-               , (Constant, PrimField PointerType)
+objectHeader = [ (Constant, PrimField PointerType)
                ]
 
 objectHeaderRecord :: StaticRecord
@@ -209,11 +206,11 @@ complexRecord ftype = constStaticRecord [ftype, ftype]
 --    Returns: void
 streamRecord :: StaticRecord
 streamRecord =
-  staticRecord $
-  objectHeader ++
-  [ (Constant, PrimField OwnedType) -- Function (closure)
-  , (Constant, PrimField OwnedType) -- Initializer (closure)
-  , (Constant, RecordField passConvRecord) -- Stream data properties
+  constStaticRecord $
+  [ RecordField objectHeaderRecord
+  , PrimField OwnedType -- Function (closure)
+  , PrimField OwnedType -- Initializer (closure)
+  , RecordField passConvRecord -- Stream data properties
   ]
 
 -- | A Pyon list.
@@ -222,27 +219,3 @@ listRecord = constStaticRecord
              [ PrimField nativeWordType -- Size
              , PrimField PointerType    -- Pointer to contents
              ]
-
-{-
--- The stream return creator and stream return initializer have nothing
--- in their closures
-
-streamReturnNextClosureRecord :: StaticRecord
-streamReturnNextClosureRecord =
-  staticRecord $
-  closureHeader ++
-  [ PrimField OwnedType -- Actual producer function
-  , RecordField passConvRecord -- Return data properties
-  ]
-
--- | Closure for the stream bind's producer function
-streamBindClosureRecord :: StaticRecord
-streamBindClosureRecord =
-  staticRecord $
-  closureHeader ++ 
-  [ PrimField OwnedType -- Producer stream
-  , PrimField OwnedType -- Consumer/producer function
-  , RecordField passConvRecord -- Return data properties
-  ]
-
--}

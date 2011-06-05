@@ -7,9 +7,6 @@
 #define TAG_PAP (uint8 1)
 #define TAG_CON (uint8 2)
 
-// Object header for global objects
-#define INIT_OBJECT_HEADER (ObjectHeader { word 1, dummy_finalizer })
-
 #if WORD_SIZE == 4
 # define word uint32
 # define intptr int32

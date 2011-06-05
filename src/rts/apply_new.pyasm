@@ -37,7 +37,7 @@ record PAP(argsz) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-data pointer PAP_info = InfoTableHeader {dummy_finalizer, TAG_PAP};
+data pointer PAP_info = InfoTableHeader {TAG_PAP};
 
 // Look up the size (in words) of one of a PAP's arguments.
 procedure pap_argument_size(int index, pointer type_tags) -> uint16 {
@@ -75,7 +75,6 @@ procedure pap_arguments_size (uint16 nargs, pointer type_tags) -> uint16 {
 procedure pap_new (owned fun, uint16 nargs, uint16 arg_size) -> owned {
   typedef my_pap = PAP(value arg_size as uint * PAP_WORDSIZE);
   obj = pointer primcall pyon_alloc(sizeof my_pap);
-  obj @! my_pap.header.refct = int 1;
   obj @! my_pap.header.info = PAP_info;
   obj @! my_pap.fun = fun;
   obj @! my_pap.nargs = nargs;

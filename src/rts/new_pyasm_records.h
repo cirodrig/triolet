@@ -2,13 +2,11 @@
 
 // Header fields of an info table
 record InfoTableHeader {
-  const pointer dealloc;              // How to deallocate an object
   const uint8 tag;                    // What kind of object this is
 };
 
 // Header fields of an object
 record ObjectHeader {
-  int refct;                    // Reference count
   const pointer info;                 // Info table
 };
 
