@@ -72,15 +72,16 @@ exprToCSEVal _           = Nothing
 -- | A commutative and associative operator.
 data CAOp =
     AddZOp !Signedness !Size
+  | MaxZOp !Signedness !Size
+  | AndOp
+  | OrOp
     deriving(Eq, Ord)
 
 -- | A binary operator.
 data BinOp =
     ModZOp !Signedness !Size
-  | MaxZOp !Signedness !Size
   | CmpZOp !Signedness !Size !CmpOp
   | AddPOp
-  | AndOp
     deriving(Eq, Ord)
 
 -- | A unary operator.
@@ -139,9 +140,11 @@ unpackLoadExpr (UnExpr (LoadOp ty) arg) =
 unpackLoadExpr _ = Nothing
 
 pprInfixCAOp (AddZOp _ _) = text "+"
+pprInfixCAOp (MaxZOp _ _) = text "`max`"
+pprInfixCAOp AndOp = text "&&"
+pprInfixCAOp OrOp = text "||"
 
 pprBinOp (ModZOp _ _) = text "mod"
-pprBinOp (MaxZOp _ _) = text "max"
 pprBinOp (CmpZOp _ _ cmp) =
   text $ case cmp
          of CmpEQ -> "cmp_eq"
@@ -151,7 +154,6 @@ pprBinOp (CmpZOp _ _ cmp) =
             CmpGT -> "cmp_gt"
             CmpGE -> "cmp_ge"
 pprBinOp AddPOp = text "addp"
-pprBinOp AndOp = text "and"
 
 pprUnOp (LoadOp t) = text "load" <+> pprValueType t
 pprUnOp (CastZOp _ _ _) = text "cast"
@@ -430,12 +432,13 @@ isReducible expression =
      AppExpr {}     -> True
      CAExpr op _    -> case op
                        of AddZOp {} -> True
+                          MaxZOp {} -> True
+                          AndOp {} -> True
+                          OrOp {} -> True
      BinExpr op _ _ -> case op
                        of ModZOp {} -> True
-                          MaxZOp {} -> True
                           CmpZOp {} -> False
                           AddPOp {} -> True
-                          AndOp {} -> True
      UnExpr op _    -> case op
                        of LoadOp {} -> False
                           CastZOp {} -> False
@@ -480,10 +483,11 @@ interpretPrim env op args = fmap (simplify env) $
   of PrimAddZ sgn sz -> Just $ ca (AddZOp sgn sz)
      PrimSubZ sgn sz -> Just $ subtract_op sgn sz
      PrimModZ sgn sz -> Just $ binary (ModZOp sgn sz)
-     PrimMaxZ sgn sz -> Just $ binary (MaxZOp sgn sz)
+     PrimMaxZ sgn sz -> Just $ ca (MaxZOp sgn sz)
      PrimCmpZ sgn sz op -> Just $ binary (CmpZOp sgn sz op)
      PrimAddP        -> Just $ binary AddPOp
-     PrimAnd         -> Just $ binary AndOp
+     PrimAnd         -> Just $ ca AndOp
+     PrimOr          -> Just $ ca OrOp
      PrimCastZ ss ds sz -> Just $ unary (CastZOp ss ds sz)
      -- Only constant loads can become expressions
      PrimLoad Constant ty -> Just $ load_op ty
@@ -677,7 +681,13 @@ simplify' expression =
      UnExpr op e      -> simplifyUnary op e
      GetFramePExpr    -> GetFramePExpr
 
-simplifyCA op es = zusSum op $ partialEvalSum $ flatten op es
+simplifyCA op es =
+  let flat_es = flatten op es
+  in case op
+     of AddZOp _ _ -> zusSum op $ partialEvalSum flat_es
+        MaxZOp _ _ -> partialEvalMax op flat_es
+        AndOp      -> partialEvalBool True flat_es
+        OrOp       -> partialEvalBool False flat_es
 
 flatten op es = go es 
   where
@@ -700,6 +710,45 @@ zusSum op@(AddZOp sgn sz) values =
      (0, es)  -> CAExpr op es
      (n, es)  -> CAExpr op (LitExpr (intL sgn sz n) : es)
 
+partialEvalMax op@(MaxZOp sgn sz) es = rebuild $ peval smallest id es
+  where
+    peval acc hd (LitExpr (IntL _ _ n) : es)
+      | n == largest  = (n, [])         -- Zero value
+      | otherwise     = peval (acc `max` n) hd es
+
+    peval acc hd (e : es) = peval acc (hd . (e:)) es
+    peval acc hd [] = (acc, hd [])
+
+    rebuild (n, [])  = LitExpr (IntL sgn sz n)
+    rebuild (n, es)
+      | n == smallest = rebuild' es
+      | otherwise     = rebuild' (LitExpr (IntL sgn sz n) : es)
+
+    rebuild' [e] = e
+    rebuild' es  = CAExpr op es
+
+    smallest = smallestRepresentableInt sgn sz
+    largest = largestRepresentableInt sgn sz
+
+-- | Boolean operator partial evaluation.
+--   If @oper == True@, compute the \"And\" operation.
+--   If @oper == False@, compute the \"Or\" operation.
+partialEvalBool oper es = rebuild $ peval id es
+  where
+    -- Partial evaluation
+    peval acc (LitExpr (BoolL b) : es) =
+      if b == oper
+      then peval acc es         -- Unit rule (And-of-True, Or-of-False)
+      else [LitExpr (BoolL b)]  -- Zero rule (And-of-False, Or-of-True)
+    peval acc (e : es) = peval (acc . (e:)) es
+    peval acc [] = acc []
+
+    rebuild []  = LitExpr (BoolL oper) -- Unit value
+    rebuild [e] = e
+    rebuild es  =
+      let op = if oper then AndOp else OrOp
+      in CAExpr AndOp es
+
 simplifyBinary op@(ModZOp sgn sz) larg rarg
   -- Evaluate if both operands are known, or if one operand is an identity
   | isIntLitExpr 0 larg = larg
@@ -708,21 +757,6 @@ simplifyBinary op@(ModZOp sgn sz) larg rarg
     LitExpr (IntL _ _ rnum) <- rarg =
       LitExpr (intL sgn sz (lnum `mod` rnum))
   | otherwise = BinExpr op larg rarg
-
-simplifyBinary op@(MaxZOp sgn sz) larg rarg
-  -- Evaluate if both operands are known,
-  -- or if one operand is a zero or identity
-  | isIntLitExpr smallest larg = rarg
-  | isIntLitExpr smallest rarg = larg
-  | isIntLitExpr largest larg = larg
-  | isIntLitExpr largest rarg = rarg
-  | LitExpr (IntL _ _ lnum) <- larg,
-    LitExpr (IntL _ _ rnum) <- rarg =
-      LitExpr (intL sgn sz (lnum `max` rnum))
-  | otherwise = BinExpr op larg rarg
-  where
-    smallest = smallestRepresentableInt sgn sz
-    largest = largestRepresentableInt sgn sz
 
 -- Simplify an integer comparison operation.
 -- If an inequality cannot be determined, it is converted to a 
@@ -778,13 +812,6 @@ simplifyBinary AddPOp larg rarg
                   CAExpr (AddZOp Signed nativeIntSize) [larg2, rarg]
       in simplifyBinary AddPOp larg' rarg'
   | otherwise = BinExpr AddPOp larg rarg
-
-simplifyBinary AndOp larg rarg
-  | LitExpr (BoolL True) <- larg = rarg
-  | LitExpr (BoolL False) <- larg = LitExpr (BoolL False)
-  | LitExpr (BoolL True) <- rarg = larg
-  | LitExpr (BoolL False) <- rarg = LitExpr (BoolL False)
-  | otherwise = BinExpr AndOp larg rarg
 
 simplifyUnary op arg =
   case op
