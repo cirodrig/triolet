@@ -87,6 +87,8 @@ passConvRecord = constStaticRecord
                  , PrimField nativeWordType -- Size
                  , PrimField nativeWordType -- Alignment
                  , PrimField OwnedType      -- Copy function
+                 , PrimField OwnedType      -- Convert to boxed function
+                 , PrimField OwnedType      -- Convert to bare function
                  , PrimField OwnedType      -- Finalize function
                  , PrimField BoolType       -- Is pointerless?
                  ]

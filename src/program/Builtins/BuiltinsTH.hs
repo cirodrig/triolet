@@ -91,6 +91,7 @@ pyonBuiltinVariableNames =
   , "effTok"
 
     -- Class constructors
+  , "repr"
   , "traversableDict"
   , "eqDict"
   , "ordDict"

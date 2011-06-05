@@ -1,4 +1,21 @@
 
+extern function pyon.internal.prim.convertToBoxed
+  (owned, owned) -> owned;
+
+extern function pyon.internal.prim.convertToBare
+  (owned, owned, pointer) -> ();
+
+extern function pyon.internal.prim.make_Boxed (uint, uint, owned) -> owned;
+extern function pyon.internal.prim.from_Boxed (uint, uint, owned, owned, pointer) -> ();
+
+extern function pyon.internal.prim.make_Boxed_0 (owned) -> owned;
+extern function pyon.internal.prim.make_Boxed_1 (owned) -> owned;
+extern function pyon.internal.prim.make_Boxed_4 (owned) -> owned;
+
+extern function pyon.internal.prim.from_Boxed_0 (owned, pointer) -> ();
+extern function pyon.internal.prim.from_Boxed_1 (owned, pointer) -> ();
+extern function pyon.internal.prim.from_Boxed_4 (owned, pointer) -> ();
+
 extern function pyon.internal.prim.storeBox (owned, pointer) -> ();
 extern function pyon.internal.prim.loadBox (pointer) -> owned;
 

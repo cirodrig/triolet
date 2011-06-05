@@ -20,6 +20,77 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   };
 };
 
+function inline convertToBoxed (owned repr, owned writer) -> owned {
+  owned call (repr @! PassConv.convert_to_boxed) (writer);
+};
+
+function inline convertToBare (owned repr, owned src, pointer dst) -> () {
+  () call (repr @! PassConv.convert_to_bare) (src, dst);
+};
+
+// Since a partially applied instance of this function may be used to
+// initialize a Repr object, we pass the fields of the Repr instead of passing
+// the Repr.
+function inline make_Boxed (uint size, uint align, owned writer) -> owned {
+  typedef elt_type = bytes(value size, value align);
+  typedef boxed_type = Boxed(elt_type);
+
+  p = pointer primcall pyon_alloc (sizeof boxed_type);
+
+  // TODO: initialize object Header
+  () = () primcall pyon_db_pointer (writer as pointer);
+  () = () call writer (p @ boxed_type.member);
+  p as owned;
+};
+
+// Since a partially applied instance of this function may be used to
+// initialize a Repr object, we pass the fields of the Repr instead of passing
+// the Repr.
+function inline from_Boxed (uint size, uint align, owned copy, owned boxed, pointer dst) -> () {
+  typedef elt_type = bytes(value size, value align);
+  typedef boxed_type = Boxed(elt_type);
+
+  () call (copy) (boxed @ boxed_type.member, dst);
+};
+
+function inline make_Boxed_0 (owned writer) -> owned {
+  p = pointer primcall pyon_alloc (sizeof Boxed(unit));
+
+  // FIXME: initialize object header
+  () = () call writer (p @ Boxed(unit).member);
+  p as owned;
+};
+
+function inline make_Boxed_1 (owned writer) -> owned {
+  p = pointer primcall pyon_alloc (sizeof Boxed(bytes(value uint 1, value uint 1)));
+
+  // FIXME: initialize object header
+  () = () call writer (p @ Boxed(unit).member);
+  p as owned;
+};
+
+function inline make_Boxed_4 (owned writer) -> owned {
+  p = pointer primcall pyon_alloc (sizeof Boxed(bytes(value uint 4, value uint 4)));
+
+  // FIXME: initialize object header
+  () = () call writer (p @ Boxed(unit).member);
+  p as owned;
+};
+
+function inline from_Boxed_0 (owned src, pointer dst) -> () {
+  (); // Do nothing
+};
+
+function inline from_Boxed_1 (owned src, pointer dst) -> () {
+  !dst = src @! Boxed(uint8).member;
+  ();
+};
+
+function inline from_Boxed_4 (owned src, pointer dst) -> () {
+  !dst = src @! Boxed(uint32).member;
+  ();
+};
+
 function inline storeBox (owned arg, pointer dst) -> () {
   !dst = arg;
   ();

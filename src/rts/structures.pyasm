@@ -24,23 +24,6 @@ data pointer repr_info = InfoTableHeader {
   TAG_CON
 };
 
-data owned repr_Box_value = PassConv {
-  ObjectHeader { repr_info },
-  sizeof owned,
-  alignof owned,
-#if WORD_SIZE == 4
-  copy4F,
-#elif WORD_SIZE == 8
-  copy8F,
-#else
-# error "Don't know how to copy Boxed values"
-#endif
-  dummy_finalizer,
-  NOT_POINTERLESS
-};
-
-// Exactly the same as 'repr_Box_value'.  It's a separate definition because
-// it has a different type in the Mem stage.
 data owned repr_Box = PassConv {
   ObjectHeader { repr_info },
   sizeof owned,
@@ -52,11 +35,13 @@ data owned repr_Box = PassConv {
 #else
 # error "Don't know how to copy Boxed values"
 #endif
+  Box_convert_to_boxed,
+  Box_convert_to_bare,
   dummy_finalizer,
   NOT_POINTERLESS
 };
 
-// Exactly the same as 'repr_Box_value'.  It's a separate definition because
+// Exactly the same as 'repr_Box'.  It's a separate definition because
 // it has a different type in the Mem stage.
 data owned repr_Stream = PassConv {
   ObjectHeader { repr_info },
@@ -69,11 +54,26 @@ data owned repr_Stream = PassConv {
 #else
 # error "Don't know how to copy Boxed values"
 #endif
+  Box_convert_to_boxed,
+  Box_convert_to_bare,
   dummy_finalizer,
   NOT_POINTERLESS
 };
 
-// Exactly the same as repr_Box, but it has a different System F type
+// Argument writes a single pointer.  Load the result.
+function Box_convert_to_boxed (owned writer) -> owned {
+  data owned result;
+  () = () call writer(result);
+  owned load result;
+};
+
+// Write the object's address to the destination
+function inline Box_convert_to_bare (owned src, pointer dst) -> () {
+  !dst = src;
+  ();
+};
+
+// A referenced object is just a pointer to the object
 function inline repr_Referenced (owned elt_repr) -> owned {
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   ret @! PassConv.size = sizeof pointer;
@@ -93,6 +93,10 @@ function inline repr_Referenced (owned elt_repr) -> owned {
     }
   };
   ret @! PassConv.copy = copy;
+  ret @! PassConv.convert_to_boxed =
+    owned call make_Boxed (sizeof pointer, alignof pointer);
+  ret @! PassConv.convert_to_bare =
+    owned call from_Boxed (sizeof pointer, alignof pointer, copy);
 
   letrec {
     function finalize (pointer self) -> () {
@@ -114,6 +118,8 @@ data owned repr_EmptyReference = PassConv {
   word 0,
   word 1,
   dummy_copy,
+  make_Boxed_0,
+  from_Boxed_0,
   dummy_finalizer,
   IS_POINTERLESS
 };
@@ -145,6 +151,10 @@ function inline repr_array
     }
   };
   ret @! PassConv.copy = copy;
+  ret @! PassConv.convert_to_boxed =
+    owned call make_Boxed (sizeof array_type, alignof array_type);
+  ret @! PassConv.convert_to_bare =
+    owned call from_Boxed (sizeof array_type, alignof array_type, copy);
 
   elt_finalize = elt_repr @! PassConv.finalize;
   letrec {
@@ -166,6 +176,8 @@ data owned repr_int = PassConv {
   sizeof int32,
   alignof int32,
   copy4F,
+  make_Boxed_4,
+  from_Boxed_4,
   dummy_finalizer,
   IS_POINTERLESS
 };
@@ -176,6 +188,8 @@ data owned repr_float = PassConv {
   sizeof float,
   alignof float,
   copy4F,
+  make_Boxed_4,
+  from_Boxed_4,
   dummy_finalizer,
   IS_POINTERLESS
 };
@@ -186,6 +200,8 @@ data owned repr_bool = PassConv {
   sizeof bool,
   alignof bool,
   copy1F,
+  make_Boxed_1,
+  from_Boxed_1,
   dummy_finalizer,
   IS_POINTERLESS
 };
@@ -197,6 +213,8 @@ data owned repr_EffTok = PassConv {
   word 0,
   word 1,
   dummy_copy,
+  make_Boxed_0,
+  from_Boxed_0,
   dummy_finalizer,
   IS_POINTERLESS
 };
@@ -205,6 +223,8 @@ function copy_Repr (pointer src, pointer dst) -> () {
   dst @! PassConv.size = src @! PassConv.size;
   dst @! PassConv.align = src @! PassConv.align;
   dst @! PassConv.copy = src @! PassConv.copy;
+  dst @! PassConv.convert_to_boxed = src @! PassConv.convert_to_boxed;
+  dst @! PassConv.convert_to_bare = src @! PassConv.convert_to_bare;
   dst @! PassConv.finalize = src @! PassConv.finalize;
   dst @! PassConv.is_pointerless = src @! PassConv.is_pointerless;
   ();
@@ -224,9 +244,16 @@ function inline repr_PyonTuple2 (owned repr1, owned repr2) -> owned {
   ret @! PassConv.is_pointerless =
     repr1 @! PassConv.is_pointerless &&
     repr2 @! PassConv.is_pointerless;
-  ret @! PassConv.copy = owned call copy_PyonTuple2
+  copy = owned call copy_PyonTuple2
     (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
      size1, align1, size2, align2);
+  ret @! PassConv.copy = copy;
+
+  ret @! PassConv.convert_to_boxed =
+    owned call make_Boxed (sizeof tuple, alignof tuple);
+  ret @! PassConv.convert_to_bare =
+    owned call from_Boxed (sizeof tuple, alignof tuple, copy);
+
   ret @! PassConv.finalize = dummy_finalizer;
   ret;
 };
@@ -257,10 +284,16 @@ function inline repr_PyonTuple3 (owned repr1, owned repr2, owned repr3) -> owned
     repr1 @! PassConv.is_pointerless &&
     repr2 @! PassConv.is_pointerless &&
     repr3 @! PassConv.is_pointerless;
-  ret @! PassConv.copy = owned call copy_PyonTuple3
+  copy = owned call copy_PyonTuple3
     (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
      repr3 @! PassConv.copy,
      size1, align1, size2, align2, size3, align3);
+  ret @! PassConv.copy = copy;
+  ret @! PassConv.convert_to_boxed =
+    owned call make_Boxed (sizeof tuple, alignof tuple);
+  ret @! PassConv.convert_to_bare =
+    owned call from_Boxed (sizeof tuple, alignof tuple, copy);
+
   ret @! PassConv.finalize = dummy_finalizer;
   ret;
 };
@@ -300,10 +333,15 @@ function inline repr_PyonTuple4
     repr2 @! PassConv.is_pointerless &&
     repr3 @! PassConv.is_pointerless &&
     repr4 @! PassConv.is_pointerless;
-  ret @! PassConv.copy = owned call copy_PyonTuple4
+  copy = owned call copy_PyonTuple4
     (repr1 @! PassConv.copy, repr2 @! PassConv.copy,
      repr3 @! PassConv.copy, repr4 @! PassConv.copy,
      size1, align1, size2, align2, size3, align3, size4, align4);
+  ret @! PassConv.copy = copy;
+  ret @! PassConv.convert_to_boxed =
+    owned call make_Boxed (sizeof tuple, alignof tuple);
+  ret @! PassConv.convert_to_bare =
+    owned call from_Boxed (sizeof tuple, alignof tuple, copy);
   ret @! PassConv.finalize = dummy_finalizer;
   ret;
 };
@@ -344,8 +382,13 @@ function inline complex_pass_conv (pointer repr, pointer ret) -> () {
   ret @! PassConv.size = sizeof cpx;
   ret @! PassConv.align = alignof cpx;
   ret @! PassConv.is_pointerless = repr @! PassConv.is_pointerless;
-  ret @! PassConv.copy =
+  copy =
       owned call copy_complex (size, align, repr @! PassConv.copy);
+  ret @! PassConv.copy = copy;
+  ret @! PassConv.convert_to_boxed =
+      owned call make_Boxed (sizeof cpx, alignof cpx);
+  ret @! PassConv.convert_to_bare =
+      owned call from_Boxed (sizeof cpx, alignof cpx, copy);
   ret @! PassConv.finalize =
       owned call finalize_complex (size, align, repr @! PassConv.finalize);
   ();

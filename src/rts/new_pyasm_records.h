@@ -16,6 +16,8 @@ record PassConv {
   const uint size;                    // Size in bytes
   const uint align;                   // Alignment in bytes
   const owned copy;                   // Duplicate a value
+  const owned convert_to_boxed;	      // Convert a value to boxed type
+  const owned convert_to_bare;	      // Convert a value to bare type
   const owned finalize;               // Finalize a value
   const bool is_pointerless;	      // Is pointerless?
 };
@@ -112,6 +114,12 @@ record MPyonTuple4(a, b, c, d) {
   b member2;
   c member3;
   d member4;
+};
+
+// A boxed object
+record Boxed(a) {
+  const ObjectHeader header;
+  const a member;
 };
 
 // Pairs of mutable objects

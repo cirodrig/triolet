@@ -17,6 +17,9 @@ function repr_Complex (owned repr_element) -> owned {
   typedef elt_type = bytes(value elt_size, value elt_align);
   typedef cpx = complex(elt_type);
 
+  // FIXME: convert to bare / convert to boxed members
+  () = () primcall exit (int -1);
+
   repr = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   // FIXME: Initialize object header
 

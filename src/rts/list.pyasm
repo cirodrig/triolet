@@ -3,6 +3,7 @@ module pyon.internal.list;
 
 #include "rts.h"
 #include "debug.h"
+#include "prim.h"
 #include "memory_py.h"
 #include "apply_py.h"
 #include "stream.h"
@@ -15,13 +16,19 @@ import procedure exit "exit" (int) -> ();
 
 function repr_list (owned elem_repr) -> owned {
   repr = pointer primcall pyon_alloc (sizeof PassConv);
+
   // FIXME: Initialize repr header
   repr @! PassConv.size = sizeof PyonList;
   repr @! PassConv.align = alignof PyonList;
   repr @! PassConv.is_pointerless = NOT_POINTERLESS;
-  repr @! PassConv.copy = owned call list_copy (elem_repr);
+  copy_function = owned call list_copy (elem_repr);
+  repr @! PassConv.copy = copy_function;
+  repr @! PassConv.convert_to_boxed =
+    owned call make_Boxed (sizeof PyonList, alignof PyonList);
+  repr @! PassConv.convert_to_bare =
+    owned call from_Boxed (sizeof PyonList, alignof PyonList, copy_function);
   repr @! PassConv.finalize = owned call list_finalize (elem_repr);
-  repr;
+  repr as owned;
 };
 
 function list_copy (owned elem_repr, pointer src, pointer dst) -> () {

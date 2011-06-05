@@ -741,7 +741,6 @@ passConvRecord' :: DynamicRecord
 passConvRecord' = toDynamicRecord passConvRecord
 
 -- | Generate code that initializes an object header.
--- The reference count is initialized to 1.
 initializeObject :: (Monad m, Supplies m (Ident Var)) =>
                     Val         -- ^ Pointer to object
                  -> Val         -- ^ Info table pointer
@@ -751,14 +750,19 @@ initializeObject ptr info_ptr = do
 
 selectPassConvSize, selectPassConvAlignment,
   selectPassConvCopy,
+  selectPassConvConvertToBoxed,
+  selectPassConvConvertToBare,
   selectPassConvFinalize,
   selectPassConvIsPointerless :: (Monad m, Supplies m (Ident Var)) =>
                                  Val -> Gen m Val
-selectPassConvSize = loadField (passConvRecord' !!: 1)
-selectPassConvAlignment = loadField (passConvRecord' !!: 2)
-selectPassConvCopy = loadField (passConvRecord' !!: 3)
-selectPassConvFinalize = loadField (passConvRecord' !!: 4)
-selectPassConvIsPointerless = loadField (passConvRecord' !!: 5)
+-- (Field 0 is the object header)
+selectPassConvSize           = loadField (passConvRecord' !!: 1)
+selectPassConvAlignment      = loadField (passConvRecord' !!: 2)
+selectPassConvCopy           = loadField (passConvRecord' !!: 3)
+selectPassConvConvertToBoxed = loadField (passConvRecord' !!: 4)
+selectPassConvConvertToBare  = loadField (passConvRecord' !!: 5)
+selectPassConvFinalize       = loadField (passConvRecord' !!: 6)
+selectPassConvIsPointerless  = loadField (passConvRecord' !!: 7)
 
 -------------------------------------------------------------------------------
 -- Dictionaries

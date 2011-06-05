@@ -168,6 +168,10 @@ builtinFunctions =
     -- Functions translated from Core
   , (PyonName module_memory_py "copy",
      Right [| pyonBuiltin (SystemF.the_copy) |])
+  , (PyonName module_prim "convertToBoxed",
+     Right [| pyonBuiltin (SystemF.the_convertToBoxed) |])
+  , (PyonName module_prim "convertToBare",
+     Right [| pyonBuiltin (SystemF.the_convertToBare) |])
 {-  , (PyonName module_structures "makeComplex",
      Right [| pyonBuiltin (SystemF.the_makeComplex) |]) -}
   , (PyonName module_list "repr_list",

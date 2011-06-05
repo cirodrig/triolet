@@ -179,9 +179,20 @@ data UnboxedTuple6 : val -> val -> val -> val -> val -> val -> val
 
 -- Dictionaries
 
+-- This data declaration is not precisely correct:
+-- Size and alignment are not int, but rather unsigned int.
+-- The finalize function has a slightly different type.
 data Repr : bare -> box
   attribute(abstract)
-{};
+{
+  repr (a : bare) ()
+  (int, int,			-- Size and alignment
+   a -> Writer a,		-- Copy
+   Writer a -> BoxedType a,	-- Convert to boxed
+   BoxedType a -> Writer a,     -- Convert to bare
+   a -> EffTok,			-- Finalize
+   bool);
+};
 
 data EqDict : bare -> box
 {
