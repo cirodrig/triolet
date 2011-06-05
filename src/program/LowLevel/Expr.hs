@@ -166,7 +166,7 @@ pprExprParens e = parens $ pprExpr e
 pprExpr (VarExpr v) = pprVar v
 pprExpr (LitExpr l) = pprLit l
 pprExpr (AppExpr arity op args) = parens $
-                                  text "app" <> parens (text $ show arity) <+> 
+                                  text "app" <> parens (text $ show arity) <+>
                                   sep (map pprExprParens (op:args))
 pprExpr (CAExpr op []) = parens $ text "unit" <+> pprInfixCAOp op
 pprExpr (CAExpr op args) = foldr1 (\x y -> x <+> pprInfixCAOp op <+> y) $
@@ -253,7 +253,7 @@ instance Trie IntMap.IntMap where
 instance Trie t => Trie (ListTrie t) where
   type Key (ListTrie t) = [Key t]
   empty = ListTrie Nothing empty
-  
+
   toList (ListTrie elem subtrie) =
     let elem_list = case elem
                     of Nothing -> []
@@ -276,7 +276,7 @@ instance Trie t => Trie (ListTrie t) where
     case ks
     of []    -> elem
        k:ks' -> lookup ks' =<< lookup k subtrie
-  
+
   mapMaybeWithKey f (ListTrie elem subtrie) =
     let elem'    = f [] =<< elem
         subtrie' = mapMaybeSub f (:) subtrie
@@ -284,7 +284,7 @@ instance Trie t => Trie (ListTrie t) where
 
 instance Trie TrieNode where
   type Key TrieNode = Expr
-  empty = 
+  empty =
     TrieNode
     { tVar = empty
     , tLit = empty
@@ -304,7 +304,7 @@ instance Trie TrieNode where
                          , (r, v) <- toList m2] ++
     [(UnExpr op e, v) | (op, m) <- toList un_t
                       , (e, v) <- toList m] ++
-    [(GetFramePExpr, v) | v <- maybeToList $ get_frame_p_t] 
+    [(GetFramePExpr, v) | v <- maybeToList $ get_frame_p_t]
   alter f k tr = updateTrieNode (alter f) k tr
   insert k v tr = updateTrieNode (\k -> insert k v) k tr
   lookup k tr =
@@ -359,7 +359,7 @@ updateTrieNode f k tr =
 
 -- | A CSE environment maps expressions to simpler expressions, usually values.
 --
---   The environment contains mappings from program values to expressions and 
+--   The environment contains mappings from program values to expressions and
 --   vice versa.
 --   The 'available' values are the set of program values that can be
 --   substituted for a given, simplified expression.  A successful lookup in
@@ -383,9 +383,9 @@ pprCSEEnv :: CSEEnv -> Doc
 pprCSEEnv env =
   text "available:" <+> vcat [pprExpr e <+> text "->" <+> pprVal (fromCSEVal v)
                              | (e, v) <- toList $ available env] $$
-  text "valuation:" <+> vcat [text (show n) <+> text "->" <+> pprExpr e 
+  text "valuation:" <+> vcat [text (show n) <+> text "->" <+> pprExpr e
                              | (n, e) <- IntMap.toList $ valuation env]
-  
+
 
 emptyCSEEnv :: CSEEnv
 emptyCSEEnv = CSEEnv empty IntMap.empty
@@ -421,7 +421,7 @@ updateCSEEnv v expr env =
 
   in env {available = avail, valuation = valua}
 
--- | Determine whether a simplified expression, after being put into the  
+-- | Determine whether a simplified expression, after being put into the
 --   operand of some other expression, could result in further simplification.
 --   The decision is made based on the expression's head term.
 isReducible :: Expr -> Bool
@@ -496,7 +496,7 @@ interpretPrim env op args = fmap (simplify env) $
   where
     -- Print a debug message
     debug Nothing = Nothing
-    debug (Just e) = traceShow msg $ Just e 
+    debug (Just e) = traceShow msg $ Just e
       where
         msg = pprPrim op <+> hsep (map (parens . pprExpr) args) $$ pprExpr e
 
@@ -509,7 +509,7 @@ interpretPrim env op args = fmap (simplify env) $
       case args
       of [a1, a2] -> BinExpr binop a1 a2
          _ -> internalError "interpretPrim"
-         
+
     unary unop =
       case args
       of [a] -> UnExpr unop a
@@ -542,9 +542,9 @@ interpretStore env ty base off val =
 -- | Return True if the expression can be converted to a value.
 --   The expression should be a simplified expression.
 isZeroAtomExpr :: Expr -> Bool
-isZeroAtomExpr expr = 
+isZeroAtomExpr expr =
   case expr
-  of VarExpr _ -> True 
+  of VarExpr _ -> True
      LitExpr _ -> True
      _ -> False
 
@@ -554,7 +554,7 @@ isZeroAtomExpr expr =
 isOneAtomExpr :: Expr -> Bool
 isOneAtomExpr expr =
   case expr
-  of VarExpr _ -> True 
+  of VarExpr _ -> True
      LitExpr _ -> True
      CAExpr _ [e1, e2] -> isZeroAtomExpr e1 && isZeroAtomExpr e2
      CAExpr _ _        -> False
@@ -565,7 +565,7 @@ isOneAtomExpr expr =
      UnExpr _ arg -> isZeroAtomExpr arg
 
 generateExprAtom :: forall m. Supplies m (Ident Var) => Expr -> Gen m Atom
-generateExprAtom expression = 
+generateExprAtom expression =
   case expression
   of VarExpr _ -> value_atom
      LitExpr _ -> value_atom
@@ -632,7 +632,7 @@ generateExprCode expression =
 generateSum sgn sz [] = return $ LitV (IntL sgn sz 0)
 generateSum sgn sz [e] = generateExprCode e
 generateSum sgn sz es =
-  -- Get the terms that are added and the terms that are subtracted 
+  -- Get the terms that are added and the terms that are subtracted
   let (positives, negatives) = List.partition is_negated es
       subtracted = [e | UnExpr (NegateOp _ _) e <- negatives]
       (first_expr, positives') =
@@ -648,7 +648,7 @@ generateSum sgn sz es =
 
     generate_and_add acc expr =
       primAddZ (PrimType $ IntType sgn sz) acc =<< generateExprCode expr
-    
+
     generate_and_sub acc expr =
       primSubZ (PrimType $ IntType sgn sz) acc =<< generateExprCode expr
 -}
@@ -657,7 +657,7 @@ generateSum sgn sz es =
 
 -- | Convert an expression to a semi-canonical form and check whether the
 --   expression is already in the environment.  If the expression can be
---   simplified to a literal or it is already in the environment, then  
+--   simplified to a literal or it is already in the environment, then
 --   a 'Simplified' term is returned.  Otherwise a 'Translated' term is
 --   returned.
 simplify :: CSEEnv -> Expr -> Expr
@@ -689,7 +689,7 @@ simplifyCA op es =
         AndOp      -> partialEvalBool True flat_es
         OrOp       -> partialEvalBool False flat_es
 
-flatten op es = go es 
+flatten op es = go es
   where
     go (e:es) =
       case e
@@ -703,7 +703,7 @@ partialEvalSum es = peval 0 id es
     peval acc hd (e : es) = peval acc (hd . (e:)) es
     peval acc hd [] = (acc, hd [])
 
-zusSum op@(AddZOp sgn sz) values = 
+zusSum op@(AddZOp sgn sz) values =
   case values
   of (0, [e]) -> e
      (n, [])  -> LitExpr (intL sgn sz n)
@@ -759,7 +759,7 @@ simplifyBinary op@(ModZOp sgn sz) larg rarg
   | otherwise = BinExpr op larg rarg
 
 -- Simplify an integer comparison operation.
--- If an inequality cannot be determined, it is converted to a 
+-- If an inequality cannot be determined, it is converted to a
 -- less-than, less-or-equal, equality, or inequality test.
 simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
   case comparison
@@ -778,7 +778,7 @@ simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
       | otherwise =
           let op = if sense then CmpEQ else CmpNE
           in BinExpr (CmpZOp sgn sz op) larg rarg
-    
+
     less_than larg rarg
       | LitExpr (IntL _ _ m) <- larg,
         LitExpr (IntL _ _ n) <- rarg =
@@ -791,7 +791,7 @@ simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
           LitExpr (BoolL False)
       | otherwise =
           BinExpr (CmpZOp sgn sz CmpLT) larg rarg
-    
+
     less_eq larg rarg
       | LitExpr (IntL _ _ m) <- larg,
         LitExpr (IntL _ _ n) <- rarg =
