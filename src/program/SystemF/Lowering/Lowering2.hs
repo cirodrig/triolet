@@ -130,30 +130,6 @@ compileConstructor con con_type ty_args = do
     getAlgLayout tenv result_type
   fmap RetVal $ algebraicIntro layout con
 
-{-
-compileStore store_type value address = do
-  layout <- lift $ getLayout (ValRT ::: store_type)
-  dat <- lowerExpToVal value
-  ptr <- lowerExpToVal address
-  storeValue layout dat ptr
-  return NoVal
-
-compileStoreFunction store_type value = do
-  addr_param <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
-  body <- execBuild [] $ do
-    layout <- lift $ getLayout (ValRT ::: store_type)
-    dat <- lowerExpToVal value
-    storeValue layout dat (LL.VarV addr_param)
-    return $ LL.ReturnE $ LL.ValA []
-  let fun = LL.closureFun [addr_param] [] body
-  return $ RetVal $ LL.LamV fun
-
-compileLoad load_type address = do
-  layout <- lift $ getLayout (ValRT ::: load_type)
-  ptr <- lowerExpToVal address
-  fmap RetVal $ loadValue layout ptr
--}
-
 compileCase :: Type             -- ^ Case statement result type
             -> Type             -- ^ Scrutinee type
             -> LL.Val           -- ^ Scrutinee value

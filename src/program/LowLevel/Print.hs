@@ -254,6 +254,7 @@ pprLit literal =
   case literal
   of UnitL -> text "unit"
      NullL -> text "null"
+     NullRefL -> text "nullref"
      BoolL True -> text "true"
      BoolL False -> text "false"
      IntL sgn sz n -> parens $ pprPrimType (IntType sgn sz) <+> text (show n)

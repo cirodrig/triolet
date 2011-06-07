@@ -176,6 +176,7 @@ declareUndefLocalVariable v = declareLocalVariable v Nothing
 
 genLit :: Lit -> CExpr
 genLit NullL           = nullPtr
+genLit NullRefL        = nullPtr
 genLit UnitL           = smallIntConst 0
 genLit (BoolL True)    = smallIntConst 1
 genLit (BoolL False)   = smallIntConst 0

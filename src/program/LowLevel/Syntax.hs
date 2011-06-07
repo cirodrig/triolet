@@ -190,6 +190,7 @@ primReturnType prim =
 data Lit =
     UnitL                       -- ^ The unit value
   | NullL                       -- ^ The NULL non-owned pointer
+  | NullRefL                    -- ^ The NULL owned pointer
   | BoolL !Bool                 -- ^ A boolean
   | IntL !Signedness !Size !Integer -- ^ An integer
   | FloatL !Size !Double        -- ^ A floating-point number

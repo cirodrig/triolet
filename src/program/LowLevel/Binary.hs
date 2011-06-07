@@ -118,18 +118,20 @@ instance Binary Prim where
 instance Binary Lit where
   put UnitL = putWord8 0
   put NullL = putWord8 1
-  put (BoolL True) = putWord8 2
-  put (BoolL False) = putWord8 3
-  put (IntL x y n) = putWord8 4 >> put x >> put y >> put n
-  put (FloatL x n) = putWord8 5 >> put x >> put n
+  put NullRefL = putWord8 2
+  put (BoolL True) = putWord8 3
+  put (BoolL False) = putWord8 4
+  put (IntL x y n) = putWord8 5 >> put x >> put y >> put n
+  put (FloatL x n) = putWord8 6 >> put x >> put n
   get = getWord8 >>= pick
     where
       pick 0 = pure UnitL
       pick 1 = pure NullL
-      pick 2 = pure (BoolL True)
-      pick 3 = pure (BoolL False)
-      pick 4 = intL <$> get <*> get <*> get
-      pick 5 = FloatL <$> get <*> get
+      pick 2 = pure NullRefL
+      pick 3 = pure (BoolL True)
+      pick 4 = pure (BoolL False)
+      pick 5 = intL <$> get <*> get <*> get
+      pick 6 = FloatL <$> get <*> get
       pick _ = readError "Lit.get"
 
 instance Binary ModuleName where
