@@ -176,6 +176,7 @@ primHasSideEffect prim =
      PrimMinZ {}          -> False
      PrimCmpZ {}          -> False
      PrimCmpP {}          -> False
+     PrimSelect {}        -> False
      PrimAnd {}           -> False
      PrimOr {}            -> False
      PrimNot {}           -> False

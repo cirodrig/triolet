@@ -88,6 +88,7 @@ data Prim =
   | PrimMinZ !Signedness !Size  -- ^ Compute minimum
   | PrimCmpZ !Signedness !Size !CmpOp -- ^ Boolean compare integers
   | PrimCmpP !CmpOp                   -- ^ Boolean compare pointers
+  | PrimSelect !ValueType             -- ^ Boolean value select
   | PrimAnd                           -- ^ Boolean and
   | PrimOr                            -- ^ Boolean or
   | PrimNot                           -- ^ Boolean negation
@@ -161,6 +162,7 @@ primReturnType prim =
      PrimMinZ sgn sz          -> int sgn sz
      PrimCmpZ _ _ _           -> bool
      PrimCmpP _               -> bool
+     PrimSelect t             -> [t]
      PrimAnd                  -> bool
      PrimOr                   -> bool
      PrimNot                  -> bool

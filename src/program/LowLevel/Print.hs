@@ -194,6 +194,7 @@ pprPrim prim =
            PrimMinZ _ _ -> "min"
            PrimCmpZ _ _ c -> comparison c
            PrimCmpP c -> comparison c
+           PrimSelect _ -> "select"
            PrimAnd -> "and"
            PrimOr -> "or"
            PrimNot -> "not"

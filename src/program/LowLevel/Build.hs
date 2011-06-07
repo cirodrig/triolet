@@ -4,6 +4,7 @@ module LowLevel.Build where
 
 import Control.Monad
 import Control.Monad.Writer
+import Data.Bits
 import qualified Data.Set as Set
 import Data.Set(Set)
 import Debug.Trace
@@ -286,6 +287,32 @@ primCastZ ty src
            in return $! LitV $! IntL dst_sgn dst_sz n'
   | otherwise =
       emitAtom1 ty $ PrimA (PrimCastZ src_sgn dst_sgn dst_sz) [src]
+  where
+    PrimType (IntType dst_sgn dst_sz) = ty
+    PrimType (IntType src_sgn src_sz) = valType src
+
+primExtendZ ty src
+  | dst_sgn /= src_sgn = internalError "primExtendZ"
+  | dst_sz == src_sz = return src
+  | LitV (IntL _ _ n) <- src =
+      if n < smallestRepresentableInt src_sgn src_sz ||
+         n > largestRepresentableInt src_sgn src_sz
+      then internalError "primCastZ: Integer out of bounds"
+      else let n' = if dst_sz > src_sz then n
+                    else case dst_sgn
+                         of Unsigned ->
+                              -- Truncate
+                              n .&. (intCardinality dst_sz - 1)
+                            Signed ->
+                              -- Signed truncate
+                              let card = intCardinality dst_sz
+                                  shifted_n =
+                                    n + (card `shiftR` 1)
+                                  shifted_n' = shifted_n .&. (card - 1)
+                              in shifted_n' - (card `shiftR` 1)
+           in return $! LitV $! IntL dst_sgn dst_sz n'
+  | otherwise =
+      emitAtom1 ty $ PrimA (PrimExtendZ src_sgn src_sz dst_sz) [src]
   where
     PrimType (IntType dst_sgn dst_sz) = ty
     PrimType (IntType src_sgn src_sz) = valType src
@@ -646,6 +673,47 @@ storeField (toDynamicField -> field) ptr value =
 referenceField :: (Monad m, Supplies m (Ident Var), ToDynamicRecordData a) =>
                   Field a -> Val -> Gen m Val
 referenceField (toDynamicField -> field) ptr = primAddP ptr $ fieldOffset field
+
+-- | Convert a value to its promoted form.
+--   The value must be a primitive type, not a record type.
+promoteVal :: (Monad m, Supplies m (Ident Var)) =>
+              Val -> Gen m Val
+promoteVal v
+  | original_type == promoted_type = return v
+  | otherwise =
+    case original_type
+    of BoolType ->
+         -- Promote to native int
+         emitAtom1 (PrimType nativeIntType) $
+         PrimA (PrimSelect (PrimType nativeIntType))
+         [v, nativeIntV 0, nativeIntV 1]
+       IntType _ _ ->
+         primExtendZ (PrimType promoted_type) v
+       _ -> internalError "promoteVal: Not implemented for this type"
+  where
+    original_type =
+      case valType v
+      of PrimType pt -> pt
+         RecordType _ -> internalError "promoteVal: Not a primtype"
+
+    promoted_type = promoteType original_type
+
+-- | Convert a value from its promoted form to its demoted form.
+--   The value must be a primitive type, not a record type.
+demoteVal :: (Monad m, Supplies m (Ident Var)) =>
+             PrimType -> Val -> Gen m Val
+demoteVal original_type v
+  | original_type == promoted_type = return v
+  | otherwise =
+    case original_type
+    of BoolType ->
+         -- Demote native int to boolean
+         primCmpZ (PrimType promoted_type) CmpNE v (nativeIntV 0)
+       IntType _ _ ->
+         primExtendZ (PrimType original_type) v
+       _ -> internalError "demoteVal: Not implemented for this type"
+  where
+    promoted_type = promoteType original_type
 
 -------------------------------------------------------------------------------
 -- Other operations

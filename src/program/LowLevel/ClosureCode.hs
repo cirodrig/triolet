@@ -685,8 +685,11 @@ emitExactEntry clo = do
   params <- mapM newAnonymousVar $ ftParamTypes $ closureType clo
   let return_types = ftReturnTypes $ closureType clo
   fun_body <- execBuild return_types $ do
-    -- Load each captured variable
+
+    -- Load each captured variable.  Convert from the promoted argument
+    -- type to the actual argument type.
     cap_vars <- load_captured_vars (VarV clo_ptr)
+
     -- Call the direct entry point
     let direct_entry = VarV $ closureDirectEntry clo
     return $ ReturnE $ primCallA direct_entry (cap_vars ++ map VarV params)
@@ -741,12 +744,16 @@ emitInexactEntry clo = do
   writeFun $ Def (closureInexactEntry clo) fun
   where
     load_parameters params_ptr =
-      sequence [loadField fld params_ptr
-               | fld <- recordFields param_record]    
+      sequence [demoteVal param_type =<< loadField fld params_ptr
+               | (fld, param_type) <-
+                   zip (recordFields param_record) param_types]
 
     store_parameters returns_ptr return_vals =
-      sequence [storeField fld returns_ptr val
+      sequence [storeField fld returns_ptr =<< promoteVal val
                | (fld, val) <- zip (recordFields return_record) return_vals]
+
+    -- Actual types of parameters
+    param_types = map valueToPrimType $ ftParamTypes $ closureType clo
 
     -- Record type of parameters
     param_record = papArgsRecord Constant $

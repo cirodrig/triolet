@@ -437,6 +437,8 @@ genPrimCall prim args =
      PrimCmpP CmpLE -> binary CLeqOp args
      PrimCmpP CmpGT -> binary CGrOp args
      PrimCmpP CmpGE -> binary CGeqOp args
+     PrimSelect _ ->
+       case args of [b, x, y] -> cCond b x y
      PrimAnd -> binary CLndOp args
      PrimOr -> binary CLorOp args
      PrimNot -> case args of [arg] -> CUnary CNegOp arg internalNode
