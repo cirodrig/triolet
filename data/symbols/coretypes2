@@ -599,6 +599,20 @@ min_ii : (m n : intindex)
       -> IndexedInt (min_i m n);
 
 -------------------------------------------------------------------------------
+-- propositions
+
+-- Proof objects
+data Pf : prop -> val
+  attribute(abstract)
+{
+  pf (p : prop) () ();
+};
+
+type eqZ : intindex -> intindex -> prop;
+type neZ : intindex -> intindex -> prop;
+type trueP : prop;
+
+-------------------------------------------------------------------------------
 -- Other functions
 
 -- A dummy boxed object that is used as a placeholder for a dead value.

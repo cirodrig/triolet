@@ -30,7 +30,8 @@ pyonBuiltinTypeNames =
   , "SomeIndexedInt"
   , "array"
   , "EffTok"
-    
+  , "Pf"
+
     -- Representation coercions
   , "Stored"
   , "StoredBox"
@@ -51,6 +52,11 @@ pyonBuiltinTypeNames =
   , "plus_i"
   , "minus_i"
   , "min_i"
+    
+    -- Propositions
+  , "eqZ"
+  , "neZ"
+  , "trueP"
 
     -- Dictionary types
   , "Repr"
@@ -89,6 +95,7 @@ pyonBuiltinVariableNames =
   , "someIndexedInt"
   , "make_list"
   , "effTok"
+  , "pf"
 
     -- Class constructors
   , "repr"

@@ -13,9 +13,9 @@ module Type.Type(module Type.Var,
                  fromForallFunType,
 
                  -- * Predefined types
-                 kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT,
+                 kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, propT,
                  posInftyT,
-                 kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV,
+                 kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, propV,
                  posInftyV,
                  firstAvailableVarID,
 
@@ -119,7 +119,7 @@ instance HasLevel Var => HasLevel Type where
   getLevel (IntT _) = TypeLevel
   getLevel (UTupleT _) = TypeLevel
 
-kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, posInftyT :: Type
+kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, propT, posInftyT :: Type
 kindT = VarT kindV
 intindexT = VarT intindexV
 valT = VarT valV
@@ -128,9 +128,10 @@ bareT = VarT bareV
 outT = VarT outV
 writeT = VarT writeV
 sideeffectT = VarT sideeffectV
+propT = VarT propV
 posInftyT = VarT posInftyV      -- Positive infinity
 
-kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, posInftyV :: Var
+kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, propV, posInftyV :: Var
 
 kindV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "kind") SortLevel
 intindexV = mkVar intindexVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
@@ -140,6 +141,7 @@ bareV = mkVar bareVarID (Just $ pyonLabel builtinModuleName "bare") KindLevel
 outV = mkVar outVarID (Just $ pyonLabel builtinModuleName "out") KindLevel
 writeV = mkVar writeVarID (Just $ pyonLabel builtinModuleName "write") KindLevel
 sideeffectV = mkVar sideeffectVarID (Just $ pyonLabel builtinModuleName "sideeffect") KindLevel
+propV = mkVar propVarID (Just $ pyonLabel builtinModuleName "prop") KindLevel
 posInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "pos_infty") TypeLevel
 
 kindVarID = toIdent 1
@@ -150,11 +152,12 @@ bareVarID = toIdent 5
 outVarID = toIdent 6
 writeVarID = toIdent 7
 sideeffectVarID = toIdent 8
-posInftyVarID = toIdent 9
+propVarID = toIdent 9
+posInftyVarID = toIdent 10
 
 -- | The first variable ID that's not reserved for predefined variables
 firstAvailableVarID :: VarID
-firstAvailableVarID = toIdent 10
+firstAvailableVarID = toIdent 11
 
 -------------------------------------------------------------------------------
 -- Convenience functions for kinds
@@ -172,6 +175,7 @@ data BaseKind =
   | WriteK
   | IntIndexK
   | SideEffectK
+  | PropK
     deriving(Eq, Ord, Show)
 
 -- | Convert a kind to a base kind.  Raises an error if the argument is not a
@@ -184,7 +188,8 @@ toBaseKind (VarT kind_var) =
   where
     table = [(valV, ValK), (boxV, BoxK), (bareV, BareK), (outV, OutK),
              (writeV, WriteK),
-             (intindexV, IntIndexK), (sideeffectV, SideEffectK)]
+             (intindexV, IntIndexK), (sideeffectV, SideEffectK),
+             (propV, PropK)]
 
 toBaseKind _ = internalError "toBaseKind: Unrecognized type"
 
@@ -198,6 +203,7 @@ fromBaseKind k =
      WriteK -> writeT
      IntIndexK -> intindexT
      SideEffectK -> sideeffectT
+     PropK -> propT
 
 -------------------------------------------------------------------------------
 -- Pretty-printing
