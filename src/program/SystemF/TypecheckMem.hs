@@ -227,7 +227,7 @@ typeInferAppE orig_expr inf op ty_args args = do
   -- Apply to other arguments
   ti_args <- mapM typeInferExp args
   result_type <-
-    computeAppliedType pos inst_type (map getExpType ti_args)
+    computeAppliedType (Just orig_expr) pos inst_type (map getExpType ti_args)
   
   let new_exp = AppE inf ti_op ti_ty_args ti_args
   return $ ExpTM $ TypeAnn result_type new_exp
@@ -248,21 +248,27 @@ computeInstantiatedType inf op_type args_ = go op_type args_
 
 -- | Given a function type and a list of argument types, compute the result of
 -- applying the function to the arguments.
-computeAppliedType :: SourcePos 
+computeAppliedType :: Maybe ExpM
+                   -> SourcePos
                    -> Type
                    -> [Type]
                    -> TCM Type
-computeAppliedType pos op_type arg_types =
-  apply op_type arg_types
+computeAppliedType orig_expr pos op_type_ arg_types =
+  apply op_type_ arg_types
   where
     apply op_type (arg_t:arg_ts) = do
       result <- typeOfApp op_type arg_t
       case result of
         Just op_type' -> apply op_type' arg_ts
-        Nothing -> -- traceShow (text "CAT" <+> (pprType op_type $$ vcat (map pprType arg_types))) $
+        Nothing -> -- traceShow debug_message $
                    typeError $ "Error in application at " ++ show pos
     
     apply op_type [] = return op_type
+    
+    debug_message = text "CAT" <+>
+                    (maybe empty pprExp orig_expr $$
+                     pprType op_type_ $$
+                     vcat [text ">" <+> pprType t | t <- arg_types])
 
 typeInferFun :: FunM -> TCM FunTM
 typeInferFun fun@(FunM (Fun { funInfo = info
@@ -506,7 +512,7 @@ inferAppType op_type ty_args arg_types =
   liftTypeEvalM $ do
     ti_ty_args <- mapM typeInferType ty_args
     inst_type <- computeInstantiatedType noSourcePos op_type ti_ty_args
-    computeAppliedType noSourcePos inst_type arg_types
+    computeAppliedType Nothing noSourcePos inst_type arg_types
   where
 
     debug = traceShow (text "inferAppType" <+> types)
