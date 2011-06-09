@@ -160,10 +160,12 @@ data ValProd =
       -- | Fields of the product type
     , valFields      :: ![Layout]
 
-      -- | Create a value, given the fields of the product type
+      -- | Create a value, given the fields of the product type.
+      --   All fields including erased fields are passed.
     , valWriter      :: !([Initializer] -> Producer)
 
-      -- | Extract the fields of the product type
+      -- | Extract the fields of the product type.
+      --   All fields including erased fields are returned.
     , valReader      :: !(LL.Val -> GenLower [LL.Val])
     }
 
@@ -242,6 +244,10 @@ data AlgLayout = AlgMemLayout !AlgMemLayout | AlgValLayout !AlgValLayout
 
 data Layout = MemLayout !MemLayout | ValLayout !ValLayout
 
+isErasedLayout :: Layout -> Bool
+isErasedLayout (ValLayout VErased) = True
+isErasedLayout _ = False
+
 fromValLayout (ValLayout vl) = vl
 fromValLayout _ = internalError "fromValLayout"
 
@@ -305,19 +311,22 @@ discardValStructure (AVLayout layout) = valType $ anyMember layout
 discardValStructure AVErased = VErased
 
 -- | The layout of an enumerative type
-enumValLayout :: [(Var, LL.Lit)] -> AlgValLayout
+enumValLayout :: [(Var, LL.Lit, [Layout])] -> AlgValLayout
 enumValLayout members = AVLayout $ Sum (map make_layout members) return
   where
-    tag_type = LL.litType $ snd $ head members
-    make_layout (con, tag) = (tag, ValProd (VarCon con) ty [] writer reader)
+    tag_type = case members of (_, lit, _) : _ -> LL.litType lit
+
+    make_layout (con, tag, fields) =
+      (tag, ValProd (VarCon con) ty fields writer reader)
       where
-        writer [] = return (LL.LitV tag)
-        reader _ = return []
+        (writer, reader) = nullaryValueConCode (LL.LitV tag) fields
         ty = VLayout $ LL.PrimType tag_type
 
 -- | The layout of an (enumerative + product) type.
 --   One member has fields, the others do not.
-enumProdLayout :: [(Var, LL.Lit)] -> (Var, LL.Lit, ValProd) -> AlgValLayout
+enumProdLayout :: [(Var, LL.Lit, [Layout])]
+               -> (Var, LL.Lit, ValProd)
+               -> AlgValLayout
 enumProdLayout e_members (p_con, p_tag, p_prod) =
   AVLayout $ Sum (p_layout : map make_layout e_members) get_tag
   where
@@ -326,20 +335,25 @@ enumProdLayout e_members (p_con, p_tag, p_prod) =
       case valType p_prod
       of VLayout vt -> vt
          VErased -> internalError "enumValLayout: Not a product type"
+    
+    -- The low-level type of this algebraic data type
     record_type = LL.constStaticRecord [LL.PrimField tag_type,
                                         LL.valueToFieldType payload_type]
     ty = VLayout $ LL.RecordType record_type
+
+    -- A dummy value to put in the payload field of enum types
+    dummy_payload_value = dummyValue payload_type
 
     get_tag x = do
       [tag, _] <- unpackRecord record_type x
       return (LL.VarV tag)
 
     -- Construct the layout for an enum member
-    make_layout (con, tag) = (tag, ValProd (VarCon con) ty [] writer reader)
+    make_layout (con, tag, fields) =
+      (tag, ValProd (VarCon con) ty fields writer reader)
       where
-        dummy_value = dummyRecordValue record_type
-        writer [] = return $ LL.RecV record_type [LL.LitV tag, dummy_value]
-        reader _ = return []
+        value = LL.RecV record_type [LL.LitV tag, dummy_payload_value]
+        (writer, reader) = nullaryValueConCode value fields
     
     -- The layout for the product member
     p_layout =
@@ -356,20 +370,24 @@ enumProdLayout e_members (p_con, p_tag, p_prod) =
           [_, prod_value] <- unpackRecord record_type x
           valReader p_prod (LL.VarV prod_value)
 
+dummyValue :: LL.ValueType -> LL.Val
+dummyValue (LL.PrimType pt) =
+  LL.LitV $ case pt
+            of LL.UnitType       -> LL.UnitL
+               LL.BoolType       -> LL.BoolL False
+               LL.IntType sgn sz -> LL.IntL sgn sz 0
+               LL.FloatType sz   -> LL.FloatL sz 0
+               LL.PointerType    -> LL.NullL
+               LL.OwnedType      -> LL.NullRefL
+
+dummyValue (LL.RecordType rt) = dummyRecordValue rt
+
 dummyRecordValue :: LL.StaticRecord -> LL.Val
 dummyRecordValue record_type = LL.RecV record_type field_types
   where
     field_types = map (field_type . LL.fieldType) $ LL.recordFields record_type
-    field_type (LL.PrimField pt) =
-      LL.LitV $ case pt
-                of LL.UnitType -> LL.UnitL
-                   LL.BoolType -> LL.BoolL False
-                   LL.IntType sgn sz -> LL.IntL sgn sz 0
-                   LL.FloatType sz -> LL.FloatL sz 0
-                   LL.PointerType -> LL.NullL
-                   LL.OwnedType -> LL.NullRefL
-    field_type (LL.RecordField r) =
-      dummyRecordValue r
+    field_type (LL.PrimField pt) = dummyValue (LL.PrimType pt)
+    field_type (LL.RecordField rt) = dummyValue (LL.RecordType rt)
 
 -- | The layout of a product value type
 productValLayout :: LayoutCon -> [ValLayout] -> ValProd
@@ -408,18 +426,40 @@ productValLayout con fields =
 nonSumValLayout :: ValProd -> AlgValLayout
 nonSumValLayout = AVLayout . One
 
--- | The layout of a type isomorphic to the unit type
-unitValLayout :: LayoutCon -> AlgValLayout
-unitValLayout con = nonSumValLayout $ ValProd con unit_type [] writer reader
+-- | The layout of a type isomorphic to the unit type.
+--
+--   The data type may have fields; the fields must all be erased.
+unitValLayout :: LayoutCon -> [Layout] -> AlgValLayout
+unitValLayout con fields =
+  nonSumValLayout $ ValProd con unit_type fields writer reader
   where
-    writer [] = return (LL.LitV LL.UnitL)
-    reader _ = return []
+    (writer, reader) = nullaryValueConCode (LL.LitV LL.UnitL) fields
     unit_type = VLayout (LL.PrimType LL.UnitType)
+
+-- | Generate the code to construct or deconstruct a nullary value.
+--
+--   The nullary value may have erased fields.  The constructor takes 
+--   field values as arguments and ignores them.  The destructor 
+--   returns field values.
+nullaryValueConCode :: LL.Val -> [Layout]
+                    -> (([Initializer] -> Producer),
+                        (LL.Val -> GenLower [LL.Val]))
+nullaryValueConCode value fields
+  | all isErasedLayout fields = num_fields `seq` (writer, reader)
+  | otherwise = internalError "unitValueLayout: Data type has fields"
+  where
+    num_fields = length fields
+
+    writer fs 
+      | length fs == num_fields = return value
+      | otherwise = internalError "unitValLayout: Wrong number of fields"
+
+    reader _ = return (replicate num_fields (LL.LitV LL.UnitL))
 
 boolLayout :: AlgValLayout
 boolLayout = enumValLayout
-             [ (pyonBuiltin the_False, LL.BoolL False)
-             , (pyonBuiltin the_True, LL.BoolL True)]
+             [ (pyonBuiltin the_False, LL.BoolL False, [])
+             , (pyonBuiltin the_True, LL.BoolL True, [])]
 
 -- | Create the layout of a boxed reference, given the layout of the referent.
 --
@@ -956,10 +996,9 @@ getValDataTypeLayout (tycon, ty_args, datacons)
 getValueDataTypeLayout ty_args datacons = do
   ctor_fields <- mapM (instantiateDataCon ty_args) datacons
   case partition (nullaryValueCon . fst) (zip ctor_fields datacons) of
-    ([_], []) ->
+    ([(fields, c)], []) ->
       -- Unit type
-      let [c] = datacons
-      in return $ unitValLayout (VarCon $ dataConCon c)
+      return $ unitValLayout (VarCon $ dataConCon c) fields
 
     ([], [(fields, c)]) ->
       -- Product type
@@ -973,7 +1012,7 @@ getValueDataTypeLayout ty_args datacons = do
       in return $ nonSumValLayout $
          productValLayout (VarCon $ dataConCon c) fields'
 
-    (map snd -> cs, [(fields, c)]) ->
+    (nullary_cons, [(fields, c)]) ->
       -- Enum + product type
       let fields' = map from_val fields
             where
@@ -984,26 +1023,26 @@ getValueDataTypeLayout ty_args datacons = do
           fields_layout = productValLayout (VarCon $ dataConCon c) fields'
           
           -- Tags
-          (_, tags) = dataTags cs
-          tag_table = [(dataConCon c1, t) | (c1, t) <- zip cs tags]
+          (_, tags) = dataTags datacons
+          tag_table = [(dataConCon c1, t) | (c1, t) <- zip datacons tags]
           
           -- Product member
           p_con = dataConCon c
           Just p_tag = lookup p_con tag_table
 
           -- Enum members
-          disjuncts = [let con = dataConCon c1
+          disjuncts = [let con = dataConCon n_c
                            Just tag = lookup con tag_table
-                       in (con, tag)
-                      | c1 <- cs]
+                       in (con, tag, n_fields)
+                      | (n_fields, n_c) <- nullary_cons]
 
       in return $ enumProdLayout disjuncts (p_con, p_tag, fields_layout)
 
-    (_, []) ->
+    (nullary_cons, []) ->
       -- Enumerative type
       let (_, tags) = dataTags datacons
-          cons = map dataConCon datacons
-          disjuncts = zip cons tags
+          disjuncts = [(dataConCon c, tag, fields)
+                      | ((fields, c), tag) <- zip nullary_cons tags]
       in return $ enumValLayout disjuncts
     
     _ ->
