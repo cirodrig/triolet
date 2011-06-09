@@ -870,13 +870,16 @@ deadValue t = do
   tenv <- getTypeEnv
   case toBaseKind $ typeKind tenv t of
     ValK ->
-      case t of
-        VarT v
-          | v `isPyonBuiltin` the_int ->
-              return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
-          | v `isPyonBuiltin` the_float ->
-              return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
-        _ -> internalError "deadValue: Not implemented for this type"
+      case fromVarApp t
+      of Just (con, [])
+           | con `isPyonBuiltin` the_int ->
+               return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
+           | con `isPyonBuiltin` the_float ->
+               return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
+         Just (con, [p])
+           | con `isPyonBuiltin` the_Pf ->
+               return $ ExpM $ AppE defaultExpInfo dead_proof_op [TypM p] [] 
+         _ -> internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box
     BareK ->
@@ -887,6 +890,7 @@ deadValue t = do
     dead_bare = ExpM $ AppE defaultExpInfo dead_bare_op [TypM t] []
     dead_box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadBox)
     dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadRef)
+    dead_proof_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadProof)
 
 
 planReturn :: (ReprDictMonad m, EvalMonad m) =>

@@ -187,7 +187,7 @@ assumeReprDict ty val (Lower m) = Lower $ local update m
                          DictEnv.insert (DictEnv.monoPattern ty (return val)) $
                          reprDictEnvironment env}
 
--- | Find an integer indexed by the given index, which should be a type
+-- | Find a finite integer indexed by the given index, which should be a type
 --   of kind @intindex@.  Fail if not found.
 lookupIndexedInt :: Type -> Lower LL.Val
 lookupIndexedInt ty = do
@@ -201,7 +201,7 @@ lookupIndexedInt ty = do
       dict_env <- Lower $ asks intEnvironment  
       DictEnv.lookup ty dict_env
 
--- | Add an indexed integer for this type index to the environment
+-- | Add a finite indexed integer for this type index to the environment
 assumeIndexedInt :: Type -> LL.Val -> Lower a -> Lower a
 assumeIndexedInt ty val (Lower m) = Lower $ local update m
   where

@@ -18,7 +18,7 @@ extern function pyon.internal.structures.repr_Referenced
   (owned) -> owned;
 
 extern function pyon.internal.structures.repr_array
-  (IndexedInt, owned) -> owned;
+  (FinIndInt, owned) -> owned;
 
 extern function pyon.internal.structures.repr_PyonTuple2
   (owned, owned) -> owned;

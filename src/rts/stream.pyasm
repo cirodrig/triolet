@@ -3,6 +3,7 @@ module pyon.internal.stream;
 
 #include "rts.h"
 #include "debug.h"
+#include "prim.h"
 #include "apply_py.h"
 #include "memory_py.h"
 #include "structures.h"
@@ -582,10 +583,10 @@ function inline Stream_fold
 // Given a stream of integers, use the elements of the stream to compute a
 // histogram.
 function histogramArray
-  (IndexedInt size, owned stream, pointer ret) -> () {
+  (FinIndInt size, owned stream, pointer ret) -> () {
   data int stream_val;      // The current value taken from the stream
 
-  IndexedInt {hist_size} = size;
+  FinIndInt {hist_size} = size;
   typedef arrayT = array(value hist_size, int);
 
   // Initialize histogram to zeros
@@ -626,10 +627,10 @@ function histogram
 
   // Compute the histogram
   ret_array = pointer primcall pyon_alloc_nopointers (sizeof array_type);
-  () = () call histogramArray(IndexedInt {hist_size}, stream, ret_array);
+  () = () call histogramArray(FinIndInt {hist_size}, stream, ret_array);
 
   // Initialize the list
-  ret @! PyonList.nelems = hist_size;
+  ret @! PyonList.nelems = FinIndInt {hist_size};
   ret @! PyonList.contents = ret_array;
   ();
 };
@@ -637,8 +638,8 @@ function histogram
 // Initialize a histogram with zeros.
 // Call the given function to compute the histogram.
 function inline createHistogram
-  (IndexedInt size_ix, owned initializer, pointer ret) -> () {
-  IndexedInt {size} = size_ix;
+  (FinIndInt size_ix, owned initializer, pointer ret) -> () {
+  FinIndInt {size} = size_ix;
   typedef array_type = array (value size, int);
 
   // Fill the array with zeros 
@@ -1107,11 +1108,11 @@ function inline Stream_count_next (pointer state, pointer out) -> bool {
 /* range */
 
 function inline Stream_range (int n) -> owned {
-  owned call Stream_rangeIndexed(IndexedInt {n});
+  owned call Stream_rangeIndexed(IndInt primcall finite_IndInt(n));
 };
 
 // A type-indexed variant of 'range'
-function inline Stream_rangeIndexed (IndexedInt index) -> owned {
+function inline Stream_rangeIndexed (IndInt index) -> owned {
   owned call generate(index, repr_int, range_get_value);
 };
 
@@ -1128,9 +1129,9 @@ function range_get_value (int n, pointer out) -> () {
 // The stream state holds the next index to generate
 
 function inline generate
-  (IndexedInt indexed_count, owned elt_repr, owned generator)
+  (IndInt indexed_count, owned elt_repr, owned generator)
   -> owned {
-  IndexedInt {count} = indexed_count;
+  count = int primcall from_finite_IndInt (indexed_count);
   s = pointer primcall Stream_alloc();
 
   letrec {

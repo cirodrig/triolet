@@ -78,12 +78,12 @@ lowerIntrinsicOp v
          indexed_int_constant 0)
       , (pyonBuiltin the_one_ii,
          indexed_int_constant 1)
-      , (pyonBuiltin the_min_ii,
-         binary_indexed_int (PrimMinZ Signed S32))
-      , (pyonBuiltin the_minus_ii,
-         binary_indexed_int (PrimSubZ Signed S32))
       , (pyonBuiltin the_emptyEffTok,
          empty_eff_tok)
+      , (pyonBuiltin the_eqZ_refl,
+         proof_object)
+      , (pyonBuiltin the_deadProof,
+         proof_object)
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
@@ -142,23 +142,14 @@ id_int = do
 indexedIntType = RecordType indexedIntRecord
 
 indexed_int_constant :: (Monad m, Supplies m (Ident Var)) => Integer -> m Val
-indexed_int_constant n = return $ RecV indexedIntRecord [nativeIntV n]
-
--- | A binary operation on indexed ints.  It takes two record parameters.
-binary_indexed_int :: (Monad m, Supplies m (Ident Var)) => Prim -> m Val
-binary_indexed_int op = do
-  param_var1 <- newAnonymousVar indexedIntType
-  param_var2 <- newAnonymousVar indexedIntType
-  tmp_var1 <- newAnonymousVar (PrimType nativeIntType)
-  tmp_var2 <- newAnonymousVar (PrimType nativeIntType)
-  tmp_var3 <- newAnonymousVar (PrimType nativeIntType)
-  let stm =
-        LetE [tmp_var1] (UnpackA indexedIntRecord (VarV param_var1)) $
-        LetE [tmp_var2] (UnpackA indexedIntRecord (VarV param_var2)) $
-        LetE [tmp_var3] (PrimA op [VarV tmp_var1, VarV tmp_var2]) $
-        ReturnE (PackA indexedIntRecord [VarV tmp_var3])
-  return $ LamV $ closureFun [param_var1, param_var2] [indexedIntType] stm
+indexed_int_constant n =
+  return $ RecV indexedIntRecord [uint8V 0,
+                                  RecV indexedIntDataRecord [nativeIntV n]]
 
 -- | Create an effect token.
 empty_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
 empty_eff_tok = return (LitV UnitL)
+
+-- | Create a proof object.
+proof_object :: (Monad m, Supplies m (Ident Var)) => m Val
+proof_object = return (LitV UnitL)

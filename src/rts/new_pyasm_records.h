@@ -22,12 +22,24 @@ record PassConv {
   const bool is_pointerless;	      // Is pointerless?
 };
 
-record IndexedInt {
-  const int n;
+record FinIndInt {
+  const int n;			// Finite value
 };
 
-record SomeIndexedInt {
-  const IndexedInt index;
+#define FINITE uint8 0
+#define INFINITE uint8 1
+
+record IndInt {
+  const uint8 tag;		// {FINITE, INFINITE}
+  const IndIntData val;		// if FINITE
+};
+
+record IndIntData {
+  const FinIndInt val;
+};
+
+record SomeIndInt {
+  const FinIndInt index;
 };
 
 // Function info table
@@ -136,7 +148,7 @@ record Pair(a) {
  * list, but rather passed to functions that operate on the list.
  */
 record PyonList {
-  int nelems;			// Number of elements in the list.
+  FinIndInt nelems;		// Number of elements in the list.
                                 // Actual allocated size may be larger.
   pointer contents;		// Pointer to list contents
 };

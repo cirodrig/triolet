@@ -64,18 +64,28 @@ data NoneType : val
   None () () ();
 };
 
+-- A finite indexed integer 
+data FinIndInt : intindex -> val
+{
+  finIndInt (n : intindex) () (Pf (neZ n pos_infty), int);
+};
+
 -- An indexed singleton integer type.
 -- Invariant: The type index gives up the integer value.
-data IndexedInt : intindex -> val
+data IndInt : intindex -> val
 {
-  indexedInt (n : intindex) () (int);
+  -- Finite value
+  indInt (n : intindex) () (FinIndInt n);
+
+  -- Infinite value
+  indOmega (n : intindex) () (Pf (eqZ n pos_infty));
 };
 
 -- An existential indexed singleton integer type.
 -- We can convert int to this type.
-data SomeIndexedInt : val
+data SomeIndInt : val
 {
-  someIndexedInt () (n : intindex) (IndexedInt n);
+  someIndInt () (n : intindex) (FinIndInt n);
 };
 
 -- A dummy token that we use to stand in for dependences due to
@@ -124,7 +134,7 @@ data list : bare -> bare
 {
   make_list
   (a : bare) (n : intindex)
-  (IndexedInt n, Referenced (array n a));
+  (FinIndInt n, Referenced (array n a));
 };
 
 data PyonTuple2 : bare -> bare -> bare
@@ -331,7 +341,7 @@ repr_Stream : (sh : bare) -> (a : bare) -> Repr (BareType (Stream sh a));
 repr_EmptyReference : (a : bare) -> Repr a;
 
 repr_array : (n : intindex) -> (e : bare)
-          -> IndexedInt n -> Repr e -> Repr (array n e);
+          -> FinIndInt n -> Repr e -> Repr (array n e);
 
 repr_EffTok : Repr (Stored EffTok);
 
@@ -574,29 +584,29 @@ and : bool -> bool -> bool;
 -- integer index arithmetic
 
 -- Promote an integer to a type index
-defineIntIndex : int -> SomeIndexedInt;
+defineIntIndex : int -> SomeIndInt;
 
 type pos_infty : intindex;
 type plus_i : intindex -> intindex -> intindex;
 type minus_i : intindex -> intindex -> intindex;
 type min_i : intindex -> intindex -> intindex;
 
-zero_ii : IndexedInt 0;
-one_ii : IndexedInt 1;
+zero_ii : IndInt 0;
+one_ii : IndInt 1;
 plus_ii : (m n : intindex)
-       -> IndexedInt m
-       -> IndexedInt n
-       -> IndexedInt (plus_i m n);
+       -> IndInt m
+       -> IndInt n
+       -> IndInt (plus_i m n);
 
 minus_ii : (m n : intindex)
-        -> IndexedInt m
-        -> IndexedInt n
-        -> IndexedInt (minus_i m n);
+        -> IndInt m
+        -> IndInt n
+        -> IndInt (minus_i m n);
 
 min_ii : (m n : intindex)
-      -> IndexedInt m
-      -> IndexedInt n
-      -> IndexedInt (min_i m n);
+      -> IndInt m
+      -> IndInt n
+      -> IndInt (min_i m n);
 
 -------------------------------------------------------------------------------
 -- propositions
@@ -611,6 +621,13 @@ data Pf : prop -> val
 type eqZ : intindex -> intindex -> prop;
 type neZ : intindex -> intindex -> prop;
 type trueP : prop;
+
+eqZ_refl : (n : intindex) -> Pf (eqZ n n);
+
+-- Construct an arbitrary proof value.  This function is only called to
+-- construct proofs that are never used.  Since the value is not used, it is
+-- safe to construct such a value.
+deadProof : (p : prop) -> Pf p;
 
 -------------------------------------------------------------------------------
 -- Other functions
@@ -797,7 +814,7 @@ len : (a : bare) -> list a -> int;
 
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)
-            -> IndexedInt n
+            -> IndInt n
             -> Stream (array_shape n) (Stored int);
 
 histogram : (t : bare -> bare)
@@ -807,20 +824,20 @@ histogram : (t : bare -> bare)
 
 histogramArray : (sh : bare)
               -> (n : intindex)
-              -> IndexedInt n
+              -> FinIndInt n
               -> Stream sh (Stored int)
               -> Writer (array n (Stored int));
 
 -- Low-level function for imperatively initializing an histogram
 createHistogram :
     (n : intindex)
- -> IndexedInt n
+ -> FinIndInt n
  -> ((int -> EffTok) -> EffTok -> EffTok)
  -> Writer (array n (Stored int));
 
 generate : (n : intindex)
         -> (a : bare)
-        -> IndexedInt n
+        -> IndInt n
         -> Repr a
         -> (int -> Writer a)
         -> Stream (array_shape n) a;
@@ -854,7 +871,7 @@ subscript_out : (n : intindex)
 -- Parallelizable loop
 doall : (n : intindex)
      -> (a b : bare)
-     -> IndexedInt n
+     -> FinIndInt n
      -> (int -> IEffect b)
      -> IEffect a;
 
@@ -862,7 +879,7 @@ doall : (n : intindex)
 for : (n : intindex)
    -> (acc : bare)
    -> Repr acc
-   -> IndexedInt n
+   -> IndInt n
    -> acc
    -> (int -> acc -> Writer acc)
    -> Writer acc;
@@ -872,11 +889,11 @@ blocked_reduce :
     (acc : bare)
  -> (n : intindex)
  -> Repr acc
- -> IndexedInt n		-- Size of range
+ -> FinIndInt n		-- Size of range
  -> int	       			-- First member of range
  -> (acc -> acc -> Writer acc) -- Reducer
  -> acc			-- Initial value
- -> ((n : intindex) -> IndexedInt n -> int -> Writer acc)
+ -> ((n : intindex) -> FinIndInt n -> int -> Writer acc)
     -- ^ Generate value given range
  -> Writer acc;
 
@@ -885,10 +902,10 @@ blocked_reduce1 :
     (acc : bare)
  -> (n : intindex)
  -> Repr acc
- -> IndexedInt n		-- Size of range
+ -> FinIndInt n		-- Size of range
  -> int			-- First member of range
  -> (acc -> acc -> Writer acc) -- Reducer
- -> ((n : intindex) -> IndexedInt n -> int -> Writer acc)
+ -> ((n : intindex) -> FinIndInt n -> int -> Writer acc)
     -- ^ Generate value given range
  -> Writer acc;
 
@@ -896,7 +913,7 @@ blocked_reduce1 :
 blocked_doall :
     (n : intindex)
  -> (a b : bare)
- -> IndexedInt n
+ -> FinIndInt n
  -> int
- -> ((n : intindex) -> IndexedInt n -> int -> IEffect b)
+ -> ((n : intindex) -> FinIndInt n -> int -> IEffect b)
  -> IEffect a;

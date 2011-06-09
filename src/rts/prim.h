@@ -1,4 +1,7 @@
 
+extern procedure pyon.internal.prim.finite_IndInt (int) -> IndInt;
+extern procedure pyon.internal.prim.from_finite_IndInt (IndInt) -> int;
+
 extern function pyon.internal.prim.convertToBoxed
   (owned, owned) -> owned;
 
@@ -46,7 +49,7 @@ extern function pyon.internal.prim.floordiv_float (float, float) -> int;
 extern function pyon.internal.prim.mod_float (float, float) -> float;
 extern function pyon.internal.prim.div_float (float, float) -> float;
 
-extern function pyon.internal.prim.defineIntIndex (int) -> SomeIndexedInt;
+extern function pyon.internal.prim.defineIntIndex (int) -> SomeIndInt;
 
 extern function pyon.internal.prim.subscript
   (owned, pointer, int) -> pointer;
@@ -55,19 +58,22 @@ extern function pyon.internal.prim.subscript_out
   (owned, pointer, int) -> pointer;
 
 extern function pyon.internal.prim.min_ii
-  (IndexedInt, IndexedInt) -> IndexedInt;
+  (IndInt, IndInt) -> IndInt;
+
+extern function pyon.internal.prim.minus_ii
+  (IndInt, IndInt) -> IndInt;
 
 extern function pyon.internal.prim.doall
-  (IndexedInt, owned) -> ();
+  (FinIndInt, owned) -> ();
 
 extern function pyon.internal.prim.for
-  (owned, IndexedInt, pointer, owned, pointer) -> ();
+  (owned, IndInt, pointer, owned, pointer) -> ();
 
 extern function pyon.internal.prim.blocked_reduce
-  (owned, IndexedInt, int, owned, pointer, owned, pointer) -> ();
+  (owned, FinIndInt, int, owned, pointer, owned, pointer) -> ();
 
 extern function pyon.internal.prim.blocked_reduce1
-  (owned, IndexedInt, int, owned, owned, pointer) -> ();
+  (owned, FinIndInt, int, owned, owned, pointer) -> ();
 
 // C implementation of blocked_reduce
 import procedure pyon_C_blocked_reduce
@@ -82,7 +88,7 @@ extern procedure pyon.internal.prim.blocked_reduce_reducer
   "blocked_reduce_reducer" (owned, pointer, pointer) -> pointer;
 
 extern function pyon.internal.prim.blocked_doall
-  (IndexedInt, int, owned) -> ();
+  (FinIndInt, int, owned) -> ();
 
 // C implementation of blocked_doall
 import procedure pyon_C_blocked_doall

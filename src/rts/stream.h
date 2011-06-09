@@ -52,10 +52,10 @@ extern function pyon.internal.stream.histogram
   (int, owned, pointer) -> ();
 
 extern function pyon.internal.stream.histogramArray
-  (IndexedInt, owned, pointer) -> ();
+  (FinIndInt, owned, pointer) -> ();
 
 extern function pyon.internal.stream.createHistogram
-  (IndexedInt, owned, pointer) -> ();
+  (FinIndInt, owned, pointer) -> ();
 
 extern function pyon.internal.stream.Stream_zip
   (owned, owned, owned, owned) -> owned;
@@ -83,7 +83,7 @@ extern data owned pyon.internal.stream.Stream_count;
 extern function pyon.internal.stream.Stream_range (int) -> owned;
 
 extern function pyon.internal.stream.Stream_rangeIndexed
-  (IndexedInt) -> owned;
+  (IndInt) -> owned;
 
 extern function pyon.internal.stream.generate
-  (IndexedInt, owned, owned) -> owned;
+  (IndInt, owned, owned) -> owned;

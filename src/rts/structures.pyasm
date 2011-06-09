@@ -129,11 +129,12 @@ function inline dummy_copy (pointer src, pointer dst) -> () {
 };
 
 function inline repr_array
-  (IndexedInt count, owned elt_repr) -> owned {
-  IndexedInt {size} = count;
+  (FinIndInt count, owned elt_repr) -> owned {
+  FinIndInt {size} = count;
+
   typedef elt_type = bytes(value elt_repr @! PassConv.size,
                            value elt_repr @! PassConv.align);
-  typedef array_type = const_array(value count, elt_type);
+  typedef array_type = const_array(value size, elt_type);
 
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   ret @! PassConv.size = sizeof array_type;

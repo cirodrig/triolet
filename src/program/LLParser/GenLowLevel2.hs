@@ -285,7 +285,10 @@ dynamicToStaticFieldType (RecordField r) =
 -- | Convert to a static record type.  The type must not contain non-constant
 --   expressions.  Throw an error if it doesn't satisfy these conditions.
 dynamicToStaticRecordType :: DynamicRecord -> StaticRecord
-dynamicToStaticRecordType = internalError "dynamicToStaticRecordType: not implemented"
+dynamicToStaticRecordType r =
+  constStaticRecord $ map to_field $ LowLevel.CodeTypes.recordFields r
+  where
+    to_field f = valueToFieldType $ dynamicToStaticFieldType $ fieldType f
 
 -- | Create a record type corresponding to a set of local variables.
 localsRecord :: Locals Typed -> StaticRecord

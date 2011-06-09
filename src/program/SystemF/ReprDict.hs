@@ -29,7 +29,7 @@ newtype MkDict =
 -- | A 'DictEnv' containing dictionary values
 type MkDictEnv = DictEnv.DictEnv MkDict
 
--- | A 'DictEnv' containing indexed integer values
+-- | A 'DictEnv' containing finite indexed integer values
 type IntIndexEnv = DictEnv.DictEnv MkDict
 
 -- | A monad that keeps track of representation dictionaries
@@ -128,7 +128,7 @@ saveReprDict dict_type dict_exp m =
   where
     dict_pattern = DictEnv.monoPattern dict_type (MkDict (return dict_exp))
 
--- | Add an indexed int to the environment.  It will be used if it is 
+-- | Add a finite indexed int to the environment.  It will be used if it is 
 --   needed in the remainder of the computation.
 saveIndexedInt :: ReprDictMonad m => Type -> ExpM -> m a -> m a
 saveIndexedInt dict_type dict_exp m =
@@ -146,7 +146,7 @@ saveReprDictPattern (PatM (pat_var ::: ty) _) m =
        | op `isPyonBuiltin` the_Repr -> 
            let repr_type = arg
            in saveReprDict repr_type (ExpM $ VarE defaultExpInfo pat_var) m
-       | op `isPyonBuiltin` the_IndexedInt ->
+       | op `isPyonBuiltin` the_FinIndInt ->
            let index = arg
            in saveIndexedInt index (ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m

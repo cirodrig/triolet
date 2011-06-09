@@ -53,7 +53,7 @@ load tenv ty val =
 --
 -- > case scrutinee
 -- > of make_list list_type (n : intindex)
--- >                        (sz : IndexedInt n) 
+-- >                        (sz : FinIndInt n) 
 -- >                        (p : Referenced (array n list_type)).
 -- >      case p
 -- >      of referenced ay. $(make_body n sz ay)
@@ -86,29 +86,55 @@ caseOfTraversableDict tenv scrutinee container_type mk_body =
   [mkAlt liftFreshVarM tenv (pyonBuiltin the_traversableDict) [container_type] $
    \ [] [trv, bld] -> mk_body trv bld]
 
-caseOfSomeIndexedInt :: TypeEnv
-                     -> TypeEvalM ExpM
-                     -> (Var -> Var -> TypeEvalM ExpM)
-                     -> TypeEvalM ExpM
-caseOfSomeIndexedInt tenv scrutinee mk_body =
+caseOfSomeIndInt :: TypeEnv
+                 -> TypeEvalM ExpM
+                 -> (Var -> Var -> TypeEvalM ExpM)
+                 -> TypeEvalM ExpM
+caseOfSomeIndInt tenv scrutinee mk_body =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_someIndexedInt) [] $
+  [mkAlt liftFreshVarM tenv (pyonBuiltin the_someIndInt) [] $
    \ [intindex] [intvalue] -> mk_body intindex intvalue]
 
-defineAndInspectIndexedInt tenv int_value mk_body =
+defineAndInspectIndInt tenv int_value mk_body =
   let define_indexed_int =
         varAppE (pyonBuiltin the_defineIntIndex) [] [int_value]
-  in caseOfSomeIndexedInt tenv define_indexed_int mk_body
+  in caseOfSomeIndInt tenv define_indexed_int mk_body
 
-caseOfIndexedInt :: TypeEnv
-                 -> TypeEvalM ExpM
-                 -> Type
-                 -> (Var -> TypeEvalM ExpM)
-                 -> TypeEvalM ExpM
-caseOfIndexedInt tenv scrutinee int_index mk_body =
+caseOfFinIndInt :: TypeEnv
+                -> TypeEvalM ExpM
+                -> Type
+                -> (Var -> Var -> TypeEvalM ExpM)
+                -> TypeEvalM ExpM
+caseOfFinIndInt tenv scrutinee int_index mk_body =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_indexedInt) [TypM int_index] $
-   \ [] [intvalue] -> mk_body intvalue]
+  [mkAlt liftFreshVarM tenv (pyonBuiltin the_finIndInt) [TypM int_index] $
+   \ [] [pf, intvalue] -> mk_body pf intvalue]
+
+caseOfIndInt :: TypeEnv
+             -> TypeEvalM ExpM
+             -> Type
+             -> (Var -> TypeEvalM ExpM)
+             -> (Var -> TypeEvalM ExpM)
+             -> TypeEvalM ExpM
+caseOfIndInt tenv scrutinee int_index mk_finite mk_infinite =
+  caseE scrutinee
+  [mkAlt liftFreshVarM tenv (pyonBuiltin the_indInt) [TypM int_index] $
+   \ [] [fin] -> mk_finite fin,
+   mkAlt liftFreshVarM tenv (pyonBuiltin the_indOmega) [TypM int_index] $
+   \ [] [pf] -> mk_infinite pf]
+
+caseOfIndInt' :: TypeEnv
+              -> TypeEvalM ExpM
+              -> Type
+              -> (Var -> Var -> TypeEvalM ExpM)
+              -> (Var -> TypeEvalM ExpM)
+              -> TypeEvalM ExpM
+caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
+  caseE scrutinee
+  [mkAlt liftFreshVarM tenv (pyonBuiltin the_indInt) [TypM int_index] $
+   \ [] [fin] -> caseOfFinIndInt tenv (varE fin) int_index mk_finite,
+   mkAlt liftFreshVarM tenv (pyonBuiltin the_indOmega) [TypM int_index] $
+   \ [] [pf] -> mk_infinite pf]
 
 -- | Create a list where each array element is a function of its index only
 --
@@ -134,7 +160,7 @@ defineList elt_type size_ix size elt_repr rptr writer =
 -- | Create a writer function for an array where each array element
 --   is a function of its index only.
 defineArray :: TypM             -- Array element type
-            -> TypM             -- Array size type index
+            -> TypM             -- Array size type index (FinIntIndex)
             -> TypeEvalM ExpM   -- Array size
             -> TypeEvalM ExpM   -- Array element representation
             -> (Var -> TypeEvalM ExpM -> TypeEvalM ExpM) -- Element writer code
@@ -392,11 +418,13 @@ rwRange :: RewriteRule
 rwRange inf [] [count] = do
   tenv <- getTypeEnv
   fmap Just $
-    defineAndInspectIndexedInt tenv (return count)
+    defineAndInspectIndInt tenv (return count)
     (\intindex intvalue ->
       varAppE (pyonBuiltin the_fun_asList_Stream)
       [TypM $ varApp (pyonBuiltin the_array_shape) [VarT intindex], TypM storedIntType]
-      [varAppE (pyonBuiltin the_rangeIndexed) [TypM $ VarT intindex] [varE intvalue]])
+      [varAppE (pyonBuiltin the_rangeIndexed) [TypM $ VarT intindex]
+       [varAppE (pyonBuiltin the_indInt) [TypM $ VarT intindex]
+        [varE intvalue]]])
 
 rwRange _ _ _ = return Nothing
 
@@ -409,7 +437,7 @@ rwTraverseList inf [elt_type] [elt_repr, list] = do
     [TypM $ varApp (pyonBuiltin the_array_shape) [VarT size_index], elt_type]
     [varAppE (pyonBuiltin the_generate)
      [TypM (VarT size_index), elt_type]
-     [varE size_var,
+     [varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_index] [varE size_var],
       return elt_repr,
       lamE $ mkFun []
       (\ [] -> return ([intType, outType (fromTypM elt_type)],
@@ -448,17 +476,31 @@ rwBuildStream :: RewriteRule
 rwBuildStream inf _ [_, stream] = return (Just stream)
 rwBuildStream _ _ _ = return Nothing
 
-buildListDoall inf elt_type elt_repr other_args size count generator =
+buildListDoall inf elt_type elt_repr other_args size count generator = do
   let return_ptr =
         case other_args
         of [x] -> Just (return x)
            []  -> Nothing
+      
+      return_type =
+        case other_args
+        of [x] -> initEffectType list_type
+           [] -> writerType list_type
+        where
+          list_type = varApp (pyonBuiltin the_list) [fromTypM elt_type]
 
       write_array index mk_dst =
         appExp (generator (ExpM $ VarE defaultExpInfo index)) [] [mk_dst]
 
-  in defineList elt_type size
-     (return count) (return elt_repr) return_ptr write_array
+      define_list finite_size =
+        defineList elt_type size
+        (varE finite_size) (return elt_repr) return_ptr write_array
+      
+      undef_list _ =
+        exceptE return_type
+
+  tenv <- getTypeEnv 
+  caseOfIndInt tenv (return count) (fromTypM size) define_list undef_list
 
 {- Disabled while we change types
 
@@ -651,10 +693,11 @@ rwZip4Stream inf
 rwZip4Stream _ _ _ = return Nothing
 
 generalizedZipStream2 :: TypM -> [ExpS] -> TypeEvalM (Maybe ExpM)
-generalizedZipStream2 shape_type streams =
-  case zipStreams2 streams -- Zip the streams
-  of Just s -> encodeStream2 shape_type s
-     Nothing -> return Nothing
+generalizedZipStream2 shape_type streams = do
+  zipped <- zipStreams2 streams
+  case zipped of
+    Just s -> encodeStream2 shape_type s
+    Nothing -> return Nothing
 
 -- | Turn a list-building histogram into an array-building histogram
 --
@@ -670,7 +713,7 @@ rwHistogram :: RewriteRule
 rwHistogram inf [container] (size : input : other_args) = do
   tenv <- getTypeEnv
   fmap Just $
-    defineAndInspectIndexedInt tenv (return size)
+    defineAndInspectIndInt tenv (return size)
     (\n index ->
       varAppE (pyonBuiltin the_make_list)
       [TypM storedIntType, TypM $ VarT n]
@@ -792,7 +835,8 @@ rwParallelReduceStream :: RewriteRule
 rwParallelReduceStream inf
   [shape_type, elt]
   (elt_repr : reducer : init : stream : other_args) = do
-  m_stream <- interpretAndBlockStream (fromTypM shape_type) (fromTypM elt) elt_repr stream
+  m_stream <- interpretAndBlockStream (fromTypM shape_type) (fromTypM elt)
+              elt_repr stream
   case m_stream of
     Nothing -> return Nothing
     Just (size_var, count_var, base_var, bs, bs_size, bs_count) -> do
@@ -806,7 +850,7 @@ rwParallelReduceStream inf
       worker_retvar <- newAnonymousVar ObjectLevel
       case worker_stream of
         Nothing -> return Nothing
-        Just ws -> liftFreshVarM $ do
+        Just ws -> do
           worker_body <-
             varAppE (pyonBuiltin the_fun_reduce_Stream)
             [TypM $ VarT (pyonBuiltin the_list_shape), elt]
@@ -817,7 +861,7 @@ rwParallelReduceStream inf
              varE worker_retvar]
           
           let param1 = patM (count_var :::
-                       varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
+                       varApp (pyonBuiltin the_FinIndInt) [VarT size_var])
               param2 = patM (base_var ::: intType)
               param3 = patM (worker_retvar ::: outType (fromTypM elt))
               worker_fn =
@@ -829,12 +873,23 @@ rwParallelReduceStream inf
                     , funBody = worker_body}
                 
           -- Create the blocked_reduce call
+          tenv <- getTypeEnv
           call <-
-            varAppE (pyonBuiltin the_blocked_reduce) [elt, bs_size]
-            (return elt_repr : return bs_count : litE (IntL 0 intType) :
-             return reducer : return init :
-             return (ExpM $ LamE defaultExpInfo worker_fn) :
-             map return other_args)
+            -- Check whether stream is finite
+            caseOfIndInt tenv (return bs_count) (fromTypM bs_size)
+            (\fin_count ->
+                -- Finite case
+                varAppE (pyonBuiltin the_blocked_reduce) [elt, bs_size]
+                (return elt_repr : varE fin_count : litE (IntL 0 intType) :
+                 return reducer : return init :
+                 return (ExpM $ LamE defaultExpInfo worker_fn) :
+                 map return other_args))
+            (\_ ->
+                -- Infinite case
+              let exc_type = case other_args
+                             of [t] -> initEffectType $ fromTypM elt
+                                [] -> writerType $ fromTypM elt
+              in exceptE exc_type)
           return $ Just call
 
 rwParallelReduceStream _ _ _ = return Nothing
@@ -861,7 +916,6 @@ rwParallelReduce1Stream inf
         Nothing -> return Nothing
         Just ws -> do
           worker_body <-
-            liftFreshVarM $
             varAppE (pyonBuiltin the_fun_reduce1_Stream)
             [TypM $ VarT (pyonBuiltin the_list_shape), elt]
             [return elt_repr,
@@ -870,7 +924,7 @@ rwParallelReduce1Stream inf
              varE worker_retvar]
           
           let param1 = patM (count_var :::
-                       varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
+                       varApp (pyonBuiltin the_FinIndInt) [VarT size_var])
               param2 = patM (base_var ::: intType)
               param3 = patM (worker_retvar ::: outType (fromTypM elt))
               worker_fn =
@@ -882,13 +936,23 @@ rwParallelReduce1Stream inf
                     , funBody = worker_body}
                 
           -- Create the blocked_reduce call
+          tenv <- getTypeEnv
           call <-
-            liftFreshVarM $
-            varAppE (pyonBuiltin the_blocked_reduce1) [elt, bs_size]
-            (return elt_repr : return bs_count : litE (IntL 0 intType) :
-             return reducer :
-             return (ExpM $ LamE defaultExpInfo worker_fn) :
-             map return other_args)
+            -- Check whether stream is finite
+            caseOfIndInt tenv (return bs_count) (fromTypM bs_size)
+            (\fin_count ->
+                -- Finite case
+                varAppE (pyonBuiltin the_blocked_reduce1) [elt, bs_size]
+                (return elt_repr : varE fin_count : litE (IntL 0 intType) :
+                 return reducer :
+                 return (ExpM $ LamE defaultExpInfo worker_fn) :
+                 map return other_args))
+            (\_ ->
+                -- Infinite case
+              let exc_type = case other_args
+                             of [t] -> initEffectType $ fromTypM elt
+                                [] -> writerType $ fromTypM elt
+              in exceptE exc_type)
           return $ Just call
 
 rwParallelReduce1Stream _ _ _ = return Nothing
@@ -916,37 +980,54 @@ rwParallelHistogramArray inf
         encodeStream2 (TypM $ VarT $ pyonBuiltin the_list_shape) bs
       case worker_stream of
         Nothing -> return Nothing
-        Just ws ->
-          let write_into :: TypeEvalM ExpM -> TypeEvalM ExpM
-              write_into return_arg =
-                -- Define an empty histogram, i.e. a zero-filled array
-                localE (TypM array_type) zero_array
-                (\empty_hist ->
-                    -- Compute the histogram
-                    varAppE (pyonBuiltin the_blocked_reduce)
-                    [TypM array_type, bs_size]
-                    [array_repr,
-                     return bs_count,
-                     litE (IntL 0 intType),
-                     elementwise_add,
-                     varE empty_hist,
-                     worker_fn size_var count_var base_var ws,
-                     return_arg])
-          in case other_args
-             of [] ->
-                  -- Return a writer funciton
-                  fmap Just $
-                  lamE $ mkFun []
-                  (\ [] -> return ([outType array_type],
-                                   initEffectType array_type))
-                  (\ [] [ret_var] -> write_into (varE ret_var))
-                [ret_val] ->
-                  -- Write into the return argument
-                  fmap Just $ write_into (return ret_val)
-                _ ->
-                  internalError "rwParallelHistogramArray"
+        Just ws -> do
+          tenv <- getTypeEnv
+          code <-
+            -- Get the finite stream size 
+            caseOfIndInt tenv (return bs_count) (fromTypM bs_size)
+            (\finite ->
+                make_parallel_histogram
+                size_var count_var base_var bs bs_size finite ws)
+            (\_ -> 
+              let exc_type = case other_args
+                             of [t] -> initEffectType array_type
+                                [] -> writerType array_type
+              in exceptE exc_type)
 
+          return $ Just code
   where
+    -- Create a parallel loop that initializes a histogram
+    make_parallel_histogram
+      size_var count_var base_var bs orig_size orig_count ws =
+        case other_args
+        of [] ->
+             -- Return a writer funciton
+             lamE $ mkFun []
+             (\ [] -> return ([outType array_type],
+                              initEffectType array_type))
+             (\ [] [ret_var] -> write_into (varE ret_var))
+           [ret_val] ->
+             -- Write into the return argument
+             write_into (return ret_val)
+           _ ->
+             internalError "rwParallelHistogramArray"
+        where 
+          write_into :: TypeEvalM ExpM -> TypeEvalM ExpM
+          write_into return_arg =
+            -- Define an empty histogram, i.e. a zero-filled array
+            localE (TypM array_type) zero_array
+            (\empty_hist ->
+                -- Compute the histogram
+                varAppE (pyonBuiltin the_blocked_reduce)
+                [TypM array_type, orig_size]
+                [array_repr,
+                 varE orig_count,
+                 litE (IntL 0 intType),
+                 elementwise_add,
+                 varE empty_hist,
+                 worker_fn size_var count_var base_var ws,
+                 return_arg])
+
     array_type = varApp (pyonBuiltin the_array) [fromTypM size_ix, storedIntType]
     array_shape = varApp (pyonBuiltin the_array_shape) [fromTypM size_ix]
     
@@ -965,7 +1046,7 @@ rwParallelHistogramArray inf
                  [TypM $ VarT (pyonBuiltin the_list_shape), size_ix]
                  [return size, return bs, varE retvar]
       let param1 = patM (count_var :::
-                            varApp (pyonBuiltin the_IndexedInt) [VarT size_var])
+                            varApp (pyonBuiltin the_FinIndInt) [VarT size_var])
           param2 = patM (base_var ::: intType)
           param3 = patM (retvar ::: outType array_type)
           ret = TypM $ initEffectType array_type
@@ -1017,7 +1098,7 @@ rwParallelDoall inf [size_ix, result_eff, element_eff] [size, worker] =
   [return size,
    litE (IntL 0 intType),
    lamE $ mkFun [intindexT]
-   (\ [mindex] -> return ([varApp (pyonBuiltin the_IndexedInt) [VarT mindex],
+   (\ [mindex] -> return ([varApp (pyonBuiltin the_FinIndInt) [VarT mindex],
                            intType],
                           initEffectType (fromTypM element_eff)))
    (\ [mindex] [msize, offset] ->
@@ -1158,29 +1239,36 @@ rwFor inf [TypM size_ix, TypM acc_type] args =
      _ -> return Nothing
   where
     rewrite_for_loop tenv acc_repr size init fun maybe_ret =
-      caseOfIndexedInt tenv (return size) size_ix $ \bound -> do
-        loop_var <- newAnonymousVar ObjectLevel
-        loop_fun <-
-          mkFun []
-          (\ [] -> return ([intType, acc_type, outType acc_type],
-                           initEffectType acc_type))
-          (\ [] [i, acc, retvar] -> do
-              ifE (varAppE (pyonBuiltin the_EqDict_int_eq) []
-                   [varE i, varE bound])
-                (varAppE (pyonBuiltin the_copy) [TypM acc_type]
-                 [return acc_repr, varE acc, varE retvar])
-                (localE (TypM acc_type)
-                 (appExp (return fun) [] [varE i, varE acc])
-                 (\lv -> varAppE loop_var []
-                         [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
-                          [varE i, litE $ IntL 1 intType],
-                          varE lv,
-                          varE retvar])))
-        let loop_arguments = litE (IntL 0 intType) :
-                             return init :
-                             maybeToList (fmap return maybe_ret)
-        loop_call <- varAppE loop_var [] loop_arguments
-        return $ letfunE (Rec [mkDef loop_var loop_fun]) loop_call
+      caseOfIndInt' tenv (return size) size_ix finite_case infinite_case
+      where
+        infinite_case _ =
+          case maybe_ret
+          of Just _  -> exceptE (initEffectType acc_type)
+             Nothing -> exceptE (writerType acc_type)
+
+        finite_case _ bound = do
+          loop_var <- newAnonymousVar ObjectLevel
+          loop_fun <-
+            mkFun []
+            (\ [] -> return ([intType, acc_type, outType acc_type],
+                             initEffectType acc_type))
+            (\ [] [i, acc, retvar] -> do
+                ifE (varAppE (pyonBuiltin the_EqDict_int_eq) []
+                     [varE i, varE bound])
+                  (varAppE (pyonBuiltin the_copy) [TypM acc_type]
+                   [return acc_repr, varE acc, varE retvar])
+                  (localE (TypM acc_type)
+                   (appExp (return fun) [] [varE i, varE acc])
+                   (\lv -> varAppE loop_var []
+                           [varAppE (pyonBuiltin the_AdditiveDict_int_add) []
+                            [varE i, litE $ IntL 1 intType],
+                            varE lv,
+                            varE retvar])))
+          let loop_arguments = litE (IntL 0 intType) :
+                               return init :
+                               maybeToList (fmap return maybe_ret)
+          loop_call <- varAppE loop_var [] loop_arguments
+          return $ letfunE (Rec [mkDef loop_var loop_fun]) loop_call
 
 -- | Inline a definition of the safeSubscript function
 --
@@ -1209,22 +1297,22 @@ rwSafeSubscriptBody :: TypeEnv -> ExpInfo -> TypM -> ExpM
                     -> ExpM -> ExpM -> TypeEvalM ExpM -> TypeEvalM ExpM
 rwSafeSubscriptBody tenv inf elt_type elt_repr list ix ret =
   caseOfList tenv (return list) elt_type $ \size_ix size array ->
-  caseOfIndexedInt tenv (varE size) (VarT size_ix) $ \size_int -> do
-    ix_var <- newAnonymousVar ObjectLevel
-    subscript_expr <-
-      ifE (varAppE (pyonBuiltin the_or) []
-           [varAppE (pyonBuiltin the_OrdDict_int_lt) []
-            [varE ix_var, litE (IntL 0 intType)],
-            varAppE (pyonBuiltin the_OrdDict_int_ge) []
-            [varE ix_var, varE size_int]])
-      (exceptE (initEffectType $ fromTypM elt_type))
-      (varAppE (pyonBuiltin the_copy) [elt_type]
-       [return elt_repr,
-        varAppE (pyonBuiltin the_subscript) [TypM (VarT size_ix), elt_type]
-        [return elt_repr, varE array, varE ix_var],
-        ret])
-      
-    return $ letE (patM (ix_var ::: intType)) ix subscript_expr
+  caseOfFinIndInt tenv (varE size) (VarT size_ix) $ \_ size_int -> do
+      ix_var <- newAnonymousVar ObjectLevel
+      subscript_expr <-
+        ifE (varAppE (pyonBuiltin the_or) []
+             [varAppE (pyonBuiltin the_OrdDict_int_lt) []
+              [varE ix_var, litE (IntL 0 intType)],
+              varAppE (pyonBuiltin the_OrdDict_int_ge) []
+              [varE ix_var, varE size_int]])
+        (exceptE (initEffectType $ fromTypM elt_type))
+        (varAppE (pyonBuiltin the_copy) [elt_type]
+         [return elt_repr,
+          varAppE (pyonBuiltin the_subscript) [TypM (VarT size_ix), elt_type]
+          [return elt_repr, varE array, varE ix_var],
+          ret])
+        
+      return $ letE (patM (ix_var ::: intType)) ix subscript_expr
 
 -------------------------------------------------------------------------------
 
@@ -1265,9 +1353,11 @@ zipper n = internalError $ "zipper: Cannot zip " ++ show n ++ " streams"
 
 -- | The iteration domain of a stream
 data Shape =
-    -- | An unbounded stream
-    UnboundedShape
-    -- | A 1D array stream with a type index and size expression
+    -- | A list stream, corresponding to @list_shape@.  The size is unknown.
+    ListShape
+    -- | A 1D statically sized stream, corresponding to @array_shape n@.
+    --   The size index has kind @intindex@.
+    --   The expression has type @IndInt n@ where @n@ is the type index.
   | Array1DShape TypM ExpM
     -- | An unknown iteration domain that has the given shape index
   | UnknownShape TypM
@@ -1276,21 +1366,27 @@ data Shape =
 shapeType :: Shape -> Type
 shapeType shp = 
   case shp
-  of UnboundedShape              -> VarT $ pyonBuiltin the_list_shape
-     Array1DShape (TypM index) _ -> varApp (pyonBuiltin the_array_shape) [index]
-     UnknownShape (TypM s_index) -> s_index
+  of ListShape                 -> VarT $ pyonBuiltin the_list_shape
+     Array1DShape (TypM i) _   -> varApp (pyonBuiltin the_array_shape) [i]
+     UnknownShape (TypM shape) -> shape
   
 -- | Get the shape encoded in a type.
 typeShape :: Type -> Shape
-typeShape ty = UnknownShape (TypM ty)
+typeShape ty =
+  case fromVarApp ty
+  of Just (v, []) | v `isPyonBuiltin` the_list_shape -> ListShape
+     _ -> UnknownShape (TypM ty)
 
-listShape = UnknownShape (TypM (VarT $ pyonBuiltin the_list_shape))
+listShape = ListShape
 
 -- | The interpreted value of a stream.
 data instance Exp Stream =
     GenerateStream
-    { -- | The stream's shape
-      _sexpShape :: !Shape
+    { -- | The stream's length; an integer index
+      _sexpSize :: Type
+      
+      -- | The stream's length as a value
+    , _sexpCount :: ExpM
 
       -- | The type of a stream element
     , _sexpType :: Type
@@ -1341,11 +1437,12 @@ data instance Exp Stream =
 
 -- | Get the shape of a stream
 sexpShape :: ExpS -> Shape
-sexpShape (GenerateStream {_sexpShape = s}) = s
-sexpShape (BindStream _ _) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list_shape)
+sexpShape (GenerateStream {_sexpSize = t, _sexpCount = n}) =
+  Array1DShape (TypM t) n
+sexpShape (BindStream _ _) = ListShape
 sexpShape (CaseStream {_sexpShape = s}) = s
-sexpShape (ReturnStream {}) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list_shape)
-sexpShape (EmptyStream {}) = UnknownShape (TypM $ VarT $ pyonBuiltin the_list_shape)
+sexpShape (ReturnStream {}) = ListShape
+sexpShape (EmptyStream {}) = ListShape
 sexpShape (UnknownStream {_sexpShape = s}) = s
 
 -- | Get the type of a stream element
@@ -1383,8 +1480,9 @@ type AltS = Alt Stream
 pprExpS :: ExpS -> Doc
 pprExpS stream =
   case stream
-  of GenerateStream shp ty repr gen ->
-       text "generate" <+> parens (pprType ty) <+> text "(...)"
+  of GenerateStream sz ct ty repr gen ->
+       text "generate" <+> parens (pprType sz) <+> parens (pprExp ct) <+>
+       text "(...)"
      BindStream src (pat, trans) ->
        text "bind" $$
        pprPat pat <+> text "<-" $$
@@ -1444,14 +1542,16 @@ interpretStream2' shape_type elt_type repr expression =
          let [size_arg, type_arg] = ty_args
              [size_val, repr, writer] = args
          in GenerateStream
-            { _sexpShape = Array1DShape (TypM size_arg) size_val
+            { _sexpSize = size_arg
+            , _sexpCount = size_val
             , _sexpType = type_arg
             , _sexpRepr = repr
             , _sexpGenerator = \ix ->
                 appExp (return writer) [] [return ix]}
        | op_var `isPyonBuiltin` the_count ->
            GenerateStream
-           { _sexpShape = UnboundedShape
+           { _sexpSize = posInftyT
+           , _sexpCount = omega_count
            , _sexpType = storedIntType
            , _sexpRepr = repr
            , _sexpGenerator = counting_generator}
@@ -1459,7 +1559,8 @@ interpretStream2' shape_type elt_type repr expression =
          let [size_index] = ty_args
              [size_val] = args
          in GenerateStream
-            { _sexpShape = Array1DShape (TypM size_index) size_val
+            { _sexpSize = size_index 
+            , _sexpCount = size_val
             , _sexpType = storedIntType
             , _sexpRepr = repr
             , _sexpGenerator = counting_generator}
@@ -1508,6 +1609,14 @@ interpretStream2' shape_type elt_type repr expression =
   where
     list_shape = VarT $ pyonBuiltin the_list_shape
 
+    -- | The value \omega.
+    omega_count =
+      ExpM $ AppE defaultExpInfo
+      (ExpM $ VarE defaultExpInfo (pyonBuiltin the_indOmega))
+      [TypM posInftyT]
+      [ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo (pyonBuiltin the_eqZ_refl))
+       [TypM posInftyT] []]
+
     -- A generator for the sequence [0, 1, 2, ...]
     counting_generator ix =
       varAppE (pyonBuiltin the_stored) [TypM intType] [return ix]
@@ -1523,10 +1632,10 @@ mapStream :: Type               -- ^ Transformed type
           -> ExpS               -- ^ Transformed stream
 mapStream out_type out_repr transformer producer = transform producer
   where
-    transform (GenerateStream shape ty repr gen) =
+    transform (GenerateStream sz ct ty repr gen) =
       -- Fuse the transformer into the generator expression
       let gen' ix = apply_transformer ty repr (gen ix)
-      in GenerateStream shape out_type out_repr gen'
+      in GenerateStream sz ct out_type out_repr gen'
 
     transform (BindStream src (binder, body)) =
       BindStream src (binder, transform body)
@@ -1580,18 +1689,18 @@ encodeStream2 :: TypM -> ExpS -> TypeEvalM (Maybe ExpM)
 encodeStream2 expected_shape stream = runMaybeT $ do
   encoded <-
     case stream
-    of GenerateStream {_sexpGenerator = gen} ->
-         case sexpShape stream
-         of Array1DShape size_ix size_val ->
-              lift $
-              varAppE (pyonBuiltin the_generate)
-              [size_ix, TypM elt_type]
-              [return size_val,
-               return elt_repr,
-               lamE $ mkFun []
-               (\ [] -> return ([intType], writerType elt_type))
-               (\ [] [index_var] ->
-                 gen (ExpM $ VarE defaultExpInfo index_var))]
+    of GenerateStream { _sexpSize = size_ix
+                      , _sexpCount = size_val
+                      , _sexpGenerator = gen} ->
+         lift $
+         varAppE (pyonBuiltin the_generate)
+         [TypM size_ix, TypM elt_type]
+         [return size_val,
+          return elt_repr,
+          lamE $ mkFun []
+          (\ [] -> return ([intType], writerType elt_type))
+          (\ [] [index_var] ->
+            gen (ExpM $ VarE defaultExpInfo index_var))]
 
        BindStream src (pat, dst) -> do
          src' <- MaybeT $ encodeStream2 (TypM list_shape) src
@@ -1650,14 +1759,14 @@ encodeStream2 expected_shape stream = runMaybeT $ do
 --   Return the new stream and the size (type index and value)
 --   of the original domain.
 --   The variables are the size of the subset (a type index),
---   the size of the subset (an indexed int), and the first element of the
---   subset (an ordinary int).
+--   the size of the subset (a finite indexed int),
+--   and the first element of the subset (an ordinary int).
 --
 --   The returned stream will have an array shape.
 blockStream :: Var -> Var -> Var -> ExpS -> Maybe (ExpS, TypM, ExpM)
 blockStream size_var count_var base_var stream =
   case stream
-  of GenerateStream (Array1DShape orig_size orig_count) ty repr gen ->
+  of GenerateStream orig_size orig_count ty repr gen ->
        -- We don't generate values starting from zero, but rather starting
        -- from the given base.  Add the base to the index.
        let gen' ix = do
@@ -1665,9 +1774,8 @@ blockStream size_var count_var base_var stream =
                     [return ix, varE base_var]
              gen ix'
        
-           shape = Array1DShape (TypM (VarT size_var))
-                   (ExpM $ VarE defaultExpInfo count_var)
-       in return (GenerateStream shape ty repr gen', orig_size, orig_count)
+       in return (GenerateStream (VarT size_var) block_size ty repr gen',
+                  TypM orig_size, orig_count)
 
      BindStream src tf -> do
        -- block the source stream
@@ -1689,15 +1797,39 @@ blockStream size_var count_var base_var stream =
        alts' <- forM alts $ \ (AltS alt) -> do 
          (body, _, _) <- blockStream size_var count_var base_var $ altBody alt
          return $ AltS $ alt {altBody = body}
-       let shp = Array1DShape (TypM (VarT size_var))
-                 (ExpM $ VarE defaultExpInfo count_var)
-       return (CaseStream shp scr alts', orig_size, orig_count)
+       return (CaseStream block_shape scr alts', orig_size, orig_count)
 
      _ ->
        -- The stream's shape is unknown, so we can't decompose it into blocks
        Nothing
+  where
+    -- The shape of a blocked stream.
+    -- The stream has a known, 1D shape.
+    block_shape = Array1DShape (TypM (VarT size_var)) block_size
+
+    block_size =
+      ExpM $ AppE defaultExpInfo
+      (ExpM $ VarE defaultExpInfo (pyonBuiltin the_indInt))
+      [TypM (VarT size_var)]
+      [ExpM $ VarE defaultExpInfo count_var]
 
 -- | Interpret a stream and attempt to create a blocked version of it.
+--
+--   The blocked stream is returned along with the original stream's shape.
+--   Variables holding the blocked stream's size index, size, and starting
+--   counter value are returned.  These are new variables that aren't defined 
+--   in the program.  The caller should generate definitions of these
+--   variables.  By choosing the definitions of these variables, the caller
+--   controls how the stream is blocked.
+--
+--   The return values are:
+--
+--   * block_size : intindex
+--   * block_count : FinIndInt block_size
+--   * start_index : int
+--   * bs : Stream (array_shape block_size) elt_type
+--   * full_size : intindex
+--   * full_count : IndInt full_size
 interpretAndBlockStream :: Type -> Type -> ExpM -> ExpM
                         -> TypeEvalM (Maybe (Var, Var, Var, ExpS, TypM, ExpM))
 interpretAndBlockStream shape_type elt_type elt_repr stream_exp =  
@@ -1716,11 +1848,11 @@ interpretAndBlockStream shape_type elt_type elt_repr stream_exp =
      Nothing -> return Nothing
 
 -- | Zip together a list of two or more streams
-zipStreams2 :: [ExpS] -> Maybe ExpS
+zipStreams2 :: [ExpS] -> TypeEvalM (Maybe ExpS)
 zipStreams2 [] = internalError "zipStreams: Need at least one stream"
-zipStreams2 [s] = Just s
+zipStreams2 [s] = return (Just s)
 zipStreams2 ss
-  | Just shape <- zipped_shape =
+  | Just (zipped_size, zipped_count) <- zipped_shape =
       let elt_types = map sexpElementType ss
           typ = varApp (pyonTupleTypeCon num_streams) elt_types
           repr = ExpM $ AppE defaultExpInfo
@@ -1730,31 +1862,26 @@ zipStreams2 ss
           gen ix = varAppE (pyonTupleCon num_streams)
                    (map TypM elt_types)
                    [_sexpGenerator stream ix | stream <- ss] -- FIXME: Handle other stream types
-      in Just $ GenerateStream shape typ repr gen
-  | otherwise = Nothing         -- Can't determine length of stream
+      in return $ Just $ GenerateStream zipped_size zipped_count typ repr gen
+  | otherwise = return Nothing
   where
     num_streams = length ss
 
-    zipped_shape = foldr combine_shapes (Just UnboundedShape) $ map sexpShape ss
-          
-    -- Combine shapes if possible. 
-    -- Array shapes are combined using the "min" operator to get the
-    -- minimum value.
-    combine_shapes _              Nothing = Nothing 
-    combine_shapes shp'           (Just UnboundedShape) = Just shp'
-    combine_shapes UnboundedShape (Just shp) = Just shp
-    combine_shapes shp'           (Just (Array1DShape typ1 val1)) =
-      case shp'
-      of Array1DShape typ2 val2 ->
-           let typ = TypM $
-                     varApp (pyonBuiltin the_min_i) [fromTypM typ1, fromTypM typ2]
-               val = ExpM $ AppE defaultExpInfo min_ii [typ1, typ2] [val1, val2] 
-           in Just $ Array1DShape typ val
-         _ -> Nothing
-    combine_shapes shp'           mshp@(Just (UnknownShape _)) =
-      case shp'
-      of UnknownShape _ -> mshp
-         _ -> Nothing
+    zipped_shape =
+      case sequence $ map (from_array_shape . sexpShape) ss
+      of Just shapes -> Just $ foldr1 zip_array_shapes shapes 
+         Nothing -> Nothing
+      where
+        from_array_shape (Array1DShape ix sz) = Just (fromTypM ix, sz)
+        from_array_shape _ = Nothing
+        
+        -- Compute the shape of zipped arrays.
+        -- Use the "min" operator to get the minimum length.
+        zip_array_shapes (ix1, sz1) (ix2, sz2) =
+          let typ = varApp (pyonBuiltin the_min_i) [ix1, ix2]
+              val = ExpM $ AppE defaultExpInfo min_ii [TypM ix1, TypM ix2]
+                    [sz1, sz2] 
+          in (typ, val)
     
     min_ii = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
 

@@ -11,6 +11,15 @@ import procedure exit (int) -> ();
 
 #include "new_pyasm_records.h"
 
+procedure inline finite_IndInt (int n) -> IndInt {
+  IndInt {FINITE, IndIntData {FinIndInt {n}}};
+};
+
+procedure inline from_finite_IndInt (IndInt ii) -> int {
+  IndInt {tag, IndIntData {FinIndInt {n}}} = ii;
+  if (tag == FINITE) { n; } else { () = () primcall exit (int -1); int 0; };
+};
+
 // Allocate some memory.  Use the flag to determine what kind of allocation.
 procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   if (is_pointerless) {
@@ -189,8 +198,8 @@ function div_float(float x, float y) -> float {
 };
 
 // Interpret an int as a size index
-function inline defineIntIndex (int n) -> SomeIndexedInt {
-  SomeIndexedInt {IndexedInt {n}};
+function inline defineIntIndex (int n) -> SomeIndInt {
+  SomeIndInt {FinIndInt {n}};
 };
 
 // Get a pointer to an array element
@@ -209,8 +218,26 @@ function inline subscript_out
    base @ const_array(value int 0, elt_type)[index];
 };
 
-function inline doall (IndexedInt ix, owned f) -> () {
-  IndexedInt {count} = ix;
+function inline min_ii (IndInt x, IndInt y) -> IndInt {
+  IndInt {x_fin, IndIntData {FinIndInt {x_data}}} = x;
+  IndInt {y_fin, IndIntData {FinIndInt {y_data}}} = y;
+
+  if (x_fin == INFINITE) { y; }
+  else if (y_fin == INFINITE) { x; }
+  else if (x_data < y_data) { IndInt primcall finite_IndInt(x_data); }
+  else { IndInt primcall finite_IndInt(y_data); };
+};
+
+function inline minus_ii (IndInt x, IndInt y) -> IndInt {
+  IndInt {x_fin, IndIntData {FinIndInt {x_data}}} = x;
+  IndInt {y_fin, IndIntData {FinIndInt {y_data}}} = y;
+
+  if (x_fin == INFINITE) { x; }
+  else { IndInt primcall finite_IndInt(x_data - y_data); };
+};
+
+function inline doall (FinIndInt ix, owned f) -> () {
+  FinIndInt {count} = ix;
   _ = while (int n = int 0) (n < count) {
     () = () call f (n);
     n + int 1;
@@ -219,9 +246,8 @@ function inline doall (IndexedInt ix, owned f) -> () {
 };
 
 function inline for
-  (owned acc_repr, IndexedInt ix, pointer init, owned f, pointer ret) -> () {
-  IndexedInt {count} = ix;
-
+  (owned acc_repr, IndInt ix, pointer init, owned f, pointer ret) -> () {
+  count = int primcall from_finite_IndInt(ix);
   // The for loop has an 'input' and an 'output' accumulator, and swaps
   // between them.
   acc_size = acc_repr @! PassConv.size;
@@ -261,10 +287,10 @@ function inline for
 // A parallel reduction.  The iteration space is partitioned at run time
 // and 'generator' is called on a single member of the iteration space.
 function blocked_reduce
-  (owned acc_repr, IndexedInt size, int first,
+  (owned acc_repr, FinIndInt size, int first,
    owned reducer, pointer init, owned generator, pointer ret) -> ()
 {
-  IndexedInt {count} = size;
+  FinIndInt {count} = size;
   acc_size = acc_repr @! PassConv.size;
   acc_is_pointerless = acc_repr @! PassConv.is_pointerless;
 
@@ -275,7 +301,7 @@ function blocked_reduce
       (pointer old_value, int lcount, int lfirst) -> pointer {
       // Reduce over this range
       local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
-      lsize = IndexedInt {lcount};
+      lsize = FinIndInt {lcount};
       () = () call generator (lsize, lfirst, local_value);
 
       // Accumulate with old value
@@ -312,14 +338,14 @@ function blocked_reduce
 //
 // TODO: Keep track of objects so we can deallocate them properly
 function blocked_reduce1
-  (owned acc_repr, IndexedInt size, int first,
+  (owned acc_repr, FinIndInt size, int first,
    owned reducer, owned generator, pointer ret) -> ()
 {
   // We use the address of this data as the neutral element of the reduction.
   // The data is never accessed.
-  data int8 uninitialized_value;
+  data int64 uninitialized_value;
  
-  IndexedInt {count} = size;
+  FinIndInt {count} = size;
   acc_size = acc_repr @! PassConv.size;
   acc_is_pointerless = acc_repr @! PassConv.is_pointerless;
 
@@ -328,7 +354,7 @@ function blocked_reduce1
     // compute and accumulate the reduction value over this range.
     function accumulate_range
         (pointer old_value, int lcount, int lfirst) -> pointer {
-      lsize = IndexedInt {lcount};
+      lsize = FinIndInt {lcount};
 
       if (old_value == uninitialized_value) {
         // Reduce over this range and return the output directly
@@ -393,12 +419,12 @@ procedure blocked_reduce_reducer
 };
 
 function inline blocked_doall
-  (IndexedInt size, int first, owned worker) -> () {
-  IndexedInt {count} = size;
+  (FinIndInt size, int first, owned worker) -> () {
+  FinIndInt {count} = size;
 
   () primcall pyon_C_blocked_doall (worker, count, first);
 };
 
 procedure blocked_doall_worker (owned f, int count, int first) -> () {
-  () call f (count, first);
+  () call f (FinIndInt {count}, first);
 };

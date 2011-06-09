@@ -79,7 +79,7 @@ isSingletonType ty =
 isFloatableCaseDataCon :: Var -> Bool
 isFloatableCaseDataCon con =
   isDictionaryDataCon con ||
-  con `isPyonBuiltin` the_someIndexedInt ||
+  con `isPyonBuiltin` the_someIndInt ||
   isUnboxedTupleCon con
 
 -- | Return True if the expression ends with an exception-raising statement 
@@ -151,8 +151,8 @@ floatableAppParamType tenv op_var ty_args args
         drop_arg_types n (FunT _ rt) = drop_arg_types (n - 1) rt
 
     intindex_binding =
-      -- Return value has type SomeIndexedInt
-      VarT (pyonBuiltin the_SomeIndexedInt)
+      -- Return value has type SomeIndInt
+      VarT (pyonBuiltin the_SomeIndInt)
 
 -- | Return True if the expression is a variable or literal, False otherwise.
 isTrivialExp :: ExpM -> Bool

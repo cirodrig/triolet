@@ -717,7 +717,7 @@ assumeReprDict v ty m =
   of Just (op, [arg])
        | op `isPyonBuiltin` the_Repr ->
            saveReprDict arg (ExpM $ VarE defaultExpInfo v) m
-       | op `isPyonBuiltin` the_IndexedInt ->
+       | op `isPyonBuiltin` the_FinIndInt ->
            saveIndexedInt arg (ExpM $ VarE defaultExpInfo v) m
      _ -> m
 

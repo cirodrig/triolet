@@ -61,7 +61,7 @@ assumeSingletonValue ty bound_var m =
   of Just (con, [arg])
        | con `isPyonBuiltin` the_Repr ->
            assumeReprDict arg (LL.VarV bound_var) m
-       | con `isPyonBuiltin` the_IndexedInt ->
+       | con `isPyonBuiltin` the_FinIndInt ->
            assumeIndexedInt arg (LL.VarV bound_var) m
      _ -> m
 
@@ -201,8 +201,8 @@ lowerVar _ v =
        tenv <- lift getTypeEnv
        case lookupDataCon v tenv of
          Just data_con ->
-           -- A constructor with no type arguments.
-           -- Constructors taking type arguments should be
+           -- A constructor with no arguments.
+           -- Constructors taking arguments should be
            -- processed by 'lowerApp'.
            compileConstructor v data_con []
          Nothing -> lift $ do ll_v <- lookupVar v
