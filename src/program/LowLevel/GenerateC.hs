@@ -608,11 +608,36 @@ genStatement returns stm =
          genIf returns cond block1 block2
        | c1 == BoolL False && c2 == BoolL True ->
          genIf returns cond block2 block1
-       | otherwise ->
-         internalError "genStatement: Unexpected branching control flow"
+     SwitchE cond cases ->
+       genSwitch returns cond cases
      ReturnE atom -> do
        (block_items, fallthrough) <- genAtom returns atom
        return ([CCode block_items], fallthrough)
+
+genSwitch returns cond cases = do
+  cond_exp <- genVal cond
+  case_codes1 <- mapM (mk_case False) (init cases)
+  last_case_code <- mk_case True (last cases)
+
+  let switch_statements = map fst (case_codes1 ++ [last_case_code])
+      fallthrough = any snd (case_codes1 ++ [last_case_code])
+      switch_body = cCompoundStat switch_statements
+      switch = CSwitch cond_exp switch_body internalNode
+  return ([CCode [CBlockStmt switch]], fallthrough)
+  where
+    -- Create a switch case.
+    -- > case TAG: { code; break; }
+    -- or
+    -- > default: { code; }
+    mk_case :: Bool -> Alt -> GenC (CBlockItem, Bool)
+    mk_case is_last (tag, stm) = do
+      (code, fallthrough) <- genStatement returns stm
+      stmtss <- mapM codeItemStatements code
+      let case_code =
+            if is_last
+            then CDefault (cCompoundStat (concat stmtss)) internalNode
+            else CCase (genLit tag) (cCompoundStat (concat stmtss ++ [CBlockStmt $ CBreak internalNode])) internalNode
+      return (CBlockStmt case_code, fallthrough)
 {-
 genStatement gvars (LetE params atom) =
   genAtom gvars (DefineValues params) atom
@@ -697,7 +722,7 @@ makeBlock (code, is_tail) = do
   where 
     make_statement code = do
       statements <- mapM codeItemStatements code
-      return $ CCompound [] (concat statements) internalNode
+      return $ cCompoundStat (concat statements)
 
 codeItemStatements :: CodeItem -> GenC [CBlockItem]
 codeItemStatements (CCode items) = return items
@@ -737,7 +762,7 @@ makeFunctionGroupCode lfg = do
                     entry_ft ++
                     functions ++
                     [CBlockStmt fallthrough_stmt]
-      compound = CCompound [] block_items internalNode
+      compound = cCompoundStat block_items
   return $ CBlockStmt $ CLabel (lfgLabel lfg) compound [] internalNode
 
 
@@ -749,7 +774,7 @@ makeFunctionCode fallthrough local_function = do
         else []
   (concat -> body) <- mapM codeItemStatements (lfunBody local_function)
   let statements = body ++ fallthrough_stmt
-      compound = CCompound [] statements internalNode
+      compound = cCompoundStat statements
   return $ CBlockStmt $ CLabel (lfunLabel local_function) compound [] internalNode
 
 -- | Generate a forward declaration and definition of a function
@@ -852,7 +877,7 @@ initializeBytes gvars v record_type values =
       stmts =
         map mk_stmt $
         zipWith (initializeField gvars base) (recordFields record_type) values
-  in CCompound [] stmts internalNode
+  in cCompoundStat stmts
   where
     mk_stmt e = CBlockStmt $ CExpr (Just e) internalNode
 
@@ -878,7 +903,7 @@ initializationFunction stmts =
         CFunDeclr (Right ([], False)) [constructor_attr] internalNode
       fun_decl = CDeclr (Just (internalIdent "initialize_module"))
                  [fun_declr] Nothing [] internalNode
-      body = CCompound [] (map CBlockStmt stmts) internalNode
+      body = cCompoundStat (map CBlockStmt stmts)
   in CFunDef [static, return_type] fun_decl [] body internalNode
 
 generateCFile :: Module -> IO String

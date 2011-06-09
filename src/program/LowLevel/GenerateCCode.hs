@@ -147,6 +147,9 @@ cCompoundLit decl inits = CCompoundLit decl inits internalNode
 cEmptyStat :: CStat
 cEmptyStat = CExpr Nothing internalNode
 
+cCompoundStat :: [CBlockItem] -> CStat
+cCompoundStat items = CCompound [] items internalNode
+
 cExprStat :: CExpr -> CStat
 cExprStat e = CExpr (Just e) internalNode
 
