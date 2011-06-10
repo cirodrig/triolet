@@ -25,6 +25,7 @@ import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
 import Type.Environment
+import Type.Compare
 import Type.Eval
 import Type.Type
 
@@ -454,17 +455,18 @@ rwTraverseList inf [elt_type] [elt_repr, list] = do
 rwTraverseList _ _ _ = return Nothing
 
 rwBuildList :: RewriteRule
-rwBuildList inf [elt_type] (elt_repr : stream : other_args) =
-  case interpretStream2 (VarT (pyonBuiltin the_list_shape))
-       (fromTypM elt_type) elt_repr stream
-  of Just s@(GenerateStream {})
-       | Array1DShape size_arg size_val <- sexpShape s ->
-           -- Statically known stream size.
-           -- TODO: generalize to more stream constructors
-           fmap Just $
-           buildListDoall inf elt_type elt_repr other_args size_arg size_val
-           (_sexpGenerator s)
-     _ -> return Nothing
+rwBuildList inf [elt_type] (elt_repr : stream : other_args) = do
+  m_stream <- interpretStream2 (VarT (pyonBuiltin the_list_shape))
+              (fromTypM elt_type) elt_repr stream
+  case m_stream of
+    Just (GenerateStream { _sexpSize = size_arg
+                         , _sexpCount = size_val
+                         , _sexpGenerator = g}) ->
+      -- Statically known stream size.
+      -- TODO: generalize to more stream constructors
+      fmap Just $
+      buildListDoall inf elt_type elt_repr other_args (TypM size_arg) size_val g
+    _ -> return Nothing
 
 rwBuildList _ _ _ = return Nothing
 
@@ -615,41 +617,15 @@ rwZip4 _ _ _ = return Nothing
 rwMapStream :: RewriteRule
 rwMapStream inf
   ty_args@[shape_type, elt1, elt2]
-  args@[repr1, repr2, transformer, producer]
-  | Just s <- interpretStream2 (fromTypM shape_type) (fromTypM elt2) repr2 map_expr = do
-      encodeStream2 shape_type s
+  args@[repr1, repr2, transformer, producer] = do
+    m_stream <- interpretStream2 (fromTypM shape_type) (fromTypM elt2) repr2 map_expr
+    case m_stream of
+      Just s -> encodeStream2 shape_type s
+      Nothing -> return Nothing
   where
     map_op = ExpM $ VarE inf (pyonBuiltin the_fun_map_Stream)
     map_expr =
       ExpM $ AppE inf map_op ty_args args
-              
-{- Obsoleted by the new interpretStream function
-rwMapStream tenv inf
-  ty_args@[shape_type, elt1, elt2]
-  args@[repr1, repr2, transformer, producer]
-  | Just shape <- interpretStream repr1 producer =
-    let new_shape =
-          -- Fuse the transformer into the generator expression
-          InterpretedStream
-          { sShape = sShape shape
-          , sType = fromTypM elt2
-          , sRepr = repr2
-          , sGenerator = \ix ->
-              -- The generator takes an output pointer as a parameter
-              lamE $ mkFun []
-              (\ [] -> return ([OutPT ::: fromTypM elt2],
-                               SideEffectRT ::: fromTypM elt2))
-              (\ [] [outvar] -> do
-                  tmpvar <- newAnonymousVar ObjectLevel
-                  -- Compute the input to 'map'
-                  rhs <- appExp (sGenerator shape ix) [] [varE tmpvar]
-                  -- Compute the output of 'map'
-                  body <- appExp (return transformer) [] [varE tmpvar, varE outvar]
-                  let binder = localVarP tmpvar (fromTypM elt1) repr1
-                      let_expr = ExpM $ LetE inf binder rhs body
-                  return let_expr)}
-    in traceShow (text "rwMapStream NO" <+> pprType (shapeType $ sShape shape)) $ encodeStream shape_type new_shape
--}
 
 rwMapStream _ _ _ = return Nothing
 
@@ -662,33 +638,33 @@ rwMapStream _ _ _ = return Nothing
 rwZipStream :: RewriteRule
 rwZipStream inf
   [TypM shape_type, TypM elt1, TypM elt2]
-  [repr1, repr2, stream1, stream2]
-  | Just s1 <- interpretStream2 shape_type elt1 repr1 stream1,
-    Just s2 <- interpretStream2 shape_type elt2 repr2 stream2 =
-      generalizedZipStream2 (TypM shape_type) [s1, s2]
+  [repr1, repr2, stream1, stream2] = runMaybeT $ do
+    s1 <- MaybeT $ interpretStream2 shape_type elt1 repr1 stream1
+    s2 <- MaybeT $ interpretStream2 shape_type elt2 repr2 stream2
+    MaybeT $ generalizedZipStream2 (TypM shape_type) [s1, s2]
 
 rwZipStream _ _ _ = return Nothing
 
 rwZip3Stream :: RewriteRule
 rwZip3Stream inf
   [TypM shape_type, TypM elt1, TypM elt2, TypM elt3]
-  [repr1, repr2, repr3, stream1, stream2, stream3]
-  | Just s1 <- interpretStream2 shape_type elt1 repr1 stream1,
-    Just s2 <- interpretStream2 shape_type elt2 repr2 stream2,
-    Just s3 <- interpretStream2 shape_type elt3 repr3 stream3 =
-      generalizedZipStream2 (TypM shape_type) [s1, s2, s3]
+  [repr1, repr2, repr3, stream1, stream2, stream3] = runMaybeT $ do
+    s1 <- MaybeT $ interpretStream2 shape_type elt1 repr1 stream1
+    s2 <- MaybeT $ interpretStream2 shape_type elt2 repr2 stream2
+    s3 <- MaybeT $ interpretStream2 shape_type elt3 repr3 stream3
+    MaybeT $ generalizedZipStream2 (TypM shape_type) [s1, s2, s3]
 
 rwZip3Stream _ _ _ = return Nothing
 
 rwZip4Stream :: RewriteRule
 rwZip4Stream inf
   [TypM shape_type, TypM elt1, TypM elt2, TypM elt3, TypM elt4]
-  [repr1, repr2, repr3, repr4, stream1, stream2, stream3, stream4]
-  | Just s1 <- interpretStream2 shape_type elt1 repr1 stream1,
-    Just s2 <- interpretStream2 shape_type elt2 repr2 stream2,
-    Just s3 <- interpretStream2 shape_type elt3 repr3 stream3,
-    Just s4 <- interpretStream2 shape_type elt4 repr4 stream4 =
-      generalizedZipStream2 (TypM shape_type) [s1, s2, s3, s4]
+  [repr1, repr2, repr3, repr4, stream1, stream2, stream3, stream4] = runMaybeT $ do
+    s1 <- MaybeT $ interpretStream2 shape_type elt1 repr1 stream1
+    s2 <- MaybeT $ interpretStream2 shape_type elt2 repr2 stream2
+    s3 <- MaybeT $ interpretStream2 shape_type elt3 repr3 stream3
+    s4 <- MaybeT $ interpretStream2 shape_type elt4 repr4 stream4
+    MaybeT $ generalizedZipStream2 (TypM shape_type) [s1, s2, s3, s4]
 
 rwZip4Stream _ _ _ = return Nothing
 
@@ -728,20 +704,21 @@ rwHistogram inf [container] (size : input : other_args) = do
 rwHistogram _ _ _ = return Nothing
 
 rwHistogramArray :: RewriteRule
-rwHistogramArray inf [shape_type, size_ix] (size : input : other_args) =
-  case interpretStream2 (fromTypM shape_type) intType repr_int input
-  of Just s -> do
-       tenv <- getTypeEnv
-       fmap Just $
-         varAppE (pyonBuiltin the_createHistogram)
-         [size_ix]
-         (return size :
-          lamE (mkFun []
-          (\ [] -> return ([funType [intType] eff_type, eff_type], eff_type))
-          (\ [] [writer, in_eff] ->
-            make_histogram_writer tenv s writer in_eff)) :
-          map return other_args)
-     Nothing -> return Nothing
+rwHistogramArray inf [shape_type, size_ix] (size : input : other_args) = do
+  m_stream <- interpretStream2 (fromTypM shape_type) intType repr_int input
+  case m_stream of
+    Just s -> do
+      tenv <- getTypeEnv
+      fmap Just $
+        varAppE (pyonBuiltin the_createHistogram)
+        [size_ix]
+        (return size :
+         lamE (mkFun []
+         (\ [] -> return ([funType [intType] eff_type, eff_type], eff_type))
+         (\ [] [writer, in_eff] ->
+           make_histogram_writer tenv s writer in_eff)) :
+         map return other_args)
+    Nothing -> return Nothing
   where
     eff_type = VarT (pyonBuiltin the_EffTok)
     stored_eff_type = storedType $ VarT (pyonBuiltin the_EffTok)
@@ -1119,26 +1096,29 @@ rwParallelDoall _ _ _ = return Nothing
 
 rwReduceStream :: RewriteRule
 rwReduceStream inf [shape_type, element]
-  (elt_repr : reducer : init : stream : other_args) =
-  case interpretStream2 (fromTypM shape_type) (fromTypM element) elt_repr stream
-  of Just s -> do
-       tenv <- getTypeEnv
-       fmap Just $
-         translateStreamToFoldWithExtraArgs tenv (fromTypM element) elt_repr init reducer s other_args
-     Nothing -> return Nothing
+  (elt_repr : reducer : init : stream : other_args) = do
+  m_stream <- interpretStream2 (fromTypM shape_type) (fromTypM element)
+              elt_repr stream
+  case m_stream of
+    Just s -> do
+      tenv <- getTypeEnv
+      fmap Just $
+        translateStreamToFoldWithExtraArgs tenv (fromTypM element) elt_repr init reducer s other_args
+    Nothing -> return Nothing
   
 rwReduceStream _ _ _ = return Nothing
 
 rwFoldStream :: RewriteRule
 rwFoldStream inf [elt_type, acc_type]
-  (elt_repr : acc_repr : reducer : init : stream : other_args) =
-  case interpretStream2 (VarT (pyonBuiltin the_list_shape)) (fromTypM elt_type)
-       elt_repr stream
-  of Just s -> do
-       tenv <- getTypeEnv
-       fmap Just $
-         translateStreamToFoldWithExtraArgs tenv (fromTypM acc_type) acc_repr init reducer s other_args
-     Nothing -> return Nothing
+  (elt_repr : acc_repr : reducer : init : stream : other_args) = do
+  m_stream <- interpretStream2 (VarT (pyonBuiltin the_list_shape)) (fromTypM elt_type)
+              elt_repr stream
+  case m_stream of
+    Just s -> do
+      tenv <- getTypeEnv
+      fmap Just $
+        translateStreamToFoldWithExtraArgs tenv (fromTypM acc_type) acc_repr init reducer s other_args
+    Nothing -> return Nothing
 
 rwFoldStream _ _ _ = return Nothing
 
@@ -1164,15 +1144,17 @@ rwReduceGenerate inf element elt_repr reducer init other_args size count produce
 
 rwReduce1Stream :: RewriteRule
 rwReduce1Stream inf [shape_type, element]
-  (elt_repr : reducer : stream : other_args) =
-  case interpretStream2 (fromTypM shape_type) (fromTypM element)
-       elt_repr stream
-  of Just s@(GenerateStream {})
-       | Array1DShape size_arg size_val <- sexpShape s ->
-           fmap Just $
-           rwReduce1Generate inf element elt_repr reducer other_args
-           size_arg size_val (_sexpGenerator s)
-     _ -> return Nothing
+  (elt_repr : reducer : stream : other_args) = do
+  m_stream <- interpretStream2 (fromTypM shape_type) (fromTypM element)
+              elt_repr stream
+  case m_stream of
+    Just (GenerateStream { _sexpSize = size_arg
+                         , _sexpCount = size_val
+                         , _sexpGenerator = g}) ->
+      fmap Just $
+      rwReduce1Generate inf element elt_repr reducer other_args
+      (TypM size_arg) size_val g
+    _ -> return Nothing
 
 rwReduce1Stream _ _ _ = return Nothing
 
@@ -1371,6 +1353,9 @@ shapeType shp =
      UnknownShape (TypM shape) -> shape
   
 -- | Get the shape encoded in a type.
+--
+--   An array shape is never returned because this function cannot find
+--   the integer variable that holds the array size.
 typeShape :: Type -> Shape
 typeShape ty =
   case fromVarApp ty
@@ -1378,6 +1363,16 @@ typeShape ty =
      _ -> UnknownShape (TypM ty)
 
 listShape = ListShape
+
+-- | Decide whether the given shapes are equal
+compareShapes :: Shape -> Shape -> TypeEvalM Bool
+compareShapes ListShape ListShape = return True
+compareShapes (Array1DShape (TypM t1) _) (Array1DShape (TypM t2) _) = 
+  compareTypes t1 t2
+compareShapes (UnknownShape (TypM t1)) (UnknownShape (TypM t2)) =
+  compareTypes t1 t2
+
+compareShapes _ _ = return False
 
 -- | The interpreted value of a stream.
 data instance Exp Stream =
@@ -1518,12 +1513,12 @@ pprAltS (AltS (DeTuple params body)) =
 --
 --   We may change the stream's type by ignoring functions that only
 --   affect the advertised stream shape.
-interpretStream2 :: Type -> Type -> ExpM -> ExpM -> Maybe ExpS
-interpretStream2 shape_type elt_type repr expression =
-  -- If we didn't interpret anything useful, then return Nothing
-  case interpretStream2' shape_type elt_type repr expression
-  of s@(UnknownStream {}) -> Nothing
-     s -> Just s
+interpretStream2 :: Type -> Type -> ExpM -> ExpM -> TypeEvalM (Maybe ExpS)
+interpretStream2 shape_type elt_type repr expression = do
+  s <- interpretStream2' shape_type elt_type repr expression
+
+  -- If interpretation produced nothing useful, then return Nothing
+  return $! case s of {UnknownStream {} -> Nothing; _ -> Just s}
 
 interpretStream2' shape_type elt_type repr expression =
   case unpackVarAppM expression
@@ -1541,7 +1536,7 @@ interpretStream2' shape_type elt_type repr expression =
        | op_var `isPyonBuiltin` the_generate ->
          let [size_arg, type_arg] = ty_args
              [size_val, repr, writer] = args
-         in GenerateStream
+         in return $ GenerateStream
             { _sexpSize = size_arg
             , _sexpCount = size_val
             , _sexpType = type_arg
@@ -1549,7 +1544,7 @@ interpretStream2' shape_type elt_type repr expression =
             , _sexpGenerator = \ix ->
                 appExp (return writer) [] [return ix]}
        | op_var `isPyonBuiltin` the_count ->
-           GenerateStream
+           return $ GenerateStream
            { _sexpSize = posInftyT
            , _sexpCount = omega_count
            , _sexpType = storedIntType
@@ -1558,7 +1553,7 @@ interpretStream2' shape_type elt_type repr expression =
        | op_var `isPyonBuiltin` the_rangeIndexed ->
          let [size_index] = ty_args
              [size_val] = args
-         in GenerateStream
+         in return $ GenerateStream
             { _sexpSize = size_index 
             , _sexpCount = size_val
             , _sexpType = storedIntType
@@ -1572,39 +1567,45 @@ interpretStream2' shape_type elt_type repr expression =
                  case transformer
                  of ExpM (LamE _ (FunM (Fun { funTyParams = []
                                             , funParams = [param]
-                                            , funBody = body}))) ->
-                      let src_stream =
-                            interpretStream2' list_shape src_type src_repr src
-                          body_stream =
-                            interpretStream2' list_shape tr_type repr body
-                      in BindStream src_stream (param, body_stream)
+                                            , funBody = body}))) -> do
+                      src_stream <-
+                        interpretStream2' list_shape src_type src_repr src
+                      body_stream <-
+                        interpretStream2' list_shape tr_type repr body
+                      return $ BindStream src_stream (param, body_stream)
                     _ -> no_interpretation
                _ -> no_interpretation
        | op_var `isPyonBuiltin` the_oper_DO ->
          let [type_arg] = ty_args
          in case args
             of [repr, writer] ->
-                 ReturnStream type_arg repr (return writer)
+                 return $ ReturnStream type_arg repr (return writer)
                _ -> no_interpretation
        | op_var `isPyonBuiltin` the_oper_EMPTY ->
          let [type_arg] = ty_args
          in case args
-            of [repr] -> EmptyStream type_arg repr
+            of [repr] -> return $ EmptyStream type_arg repr
                _ -> no_interpretation
        | op_var `isPyonBuiltin` the_fun_map_Stream ->
          let [_, src_type, out_type] = ty_args
          in case args
             of [src_repr, out_repr, transformer, producer] ->
-                 mapStream out_type out_repr transformer $
+                 liftM (mapStream out_type out_repr transformer) $
                  interpretStream2' shape_type src_type src_repr producer
                _ -> no_interpretation
      _ -> case fromExpM expression
-          of CaseE _ scr alts ->
-               let alts' = map (interpretStreamAlt shape_type elt_type repr) alts
-                   shape = case alts'
-                           of [alt] -> sexpShape $ altBody $ fromAltS alt
-                              _ -> typeShape shape_type
-               in CaseStream shape scr alts'
+          of CaseE _ scr alts -> do
+               alts' <- mapM (interpretStreamAlt shape_type elt_type repr) alts
+               let alt_shapes = map (sexpShape . altBody . fromAltS) alts'
+
+               -- If all case alternatives have the same shape, then use
+               -- the shape.  Otherwise use the original shape type assigned 
+               -- to this expression.
+               shapes_equal <- all_types_equal alt_shapes
+               shape <- if shapes_equal
+                        then return $ head alt_shapes
+                        else liftM typeShape $ reduceToWhnf shape_type
+               return $ CaseStream shape scr alts'
              _ -> no_interpretation
   where
     list_shape = VarT $ pyonBuiltin the_list_shape
@@ -1621,8 +1622,13 @@ interpretStream2' shape_type elt_type repr expression =
     counting_generator ix =
       varAppE (pyonBuiltin the_stored) [TypM intType] [return ix]
 
-    no_interpretation =
-      UnknownStream (typeShape shape_type) elt_type repr expression
+    no_interpretation = do
+      whnf_st <- reduceToWhnf shape_type
+      return $ UnknownStream (typeShape whnf_st) elt_type repr expression
+
+    all_types_equal [s] = return True
+    all_types_equal (s:s':ss) =
+      ifM (compareShapes s s') (all_types_equal (s':ss)) (return False)
 
 -- | Map a function over the interpreted stream
 mapStream :: Type               -- ^ Transformed type
@@ -1673,14 +1679,14 @@ mapStream out_type out_repr transformer producer = transform producer
           localE (TypM producer_ty) producer_expr $ \tmpvar ->
           appExp (return transformer) [] [varE tmpvar, varE outvar])
 
-interpretStreamAlt :: Type -> Type -> ExpM -> AltM -> AltS
-interpretStreamAlt shape_type elt_type repr (AltM alt) =
-  let body = interpretStream2' shape_type elt_type repr $ altBody alt
-  in AltS $ DeCon { altConstructor = altConstructor alt
-                , altTyArgs = map (TypS . fromTypM) $ altTyArgs alt
-                , altExTypes = map TyPatS $ altExTypes alt
-                , altParams = map PatS $ altParams alt
-                , altBody = body}
+interpretStreamAlt :: Type -> Type -> ExpM -> AltM -> TypeEvalM AltS
+interpretStreamAlt shape_type elt_type repr (AltM alt) = do
+  body <- interpretStream2' shape_type elt_type repr $ altBody alt
+  return $ AltS $ DeCon { altConstructor = altConstructor alt
+                        , altTyArgs = map (TypS . fromTypM) $ altTyArgs alt
+                        , altExTypes = map TyPatS $ altExTypes alt
+                        , altParams = map PatS $ altParams alt
+                        , altBody = body}
 
 -- | Produce program code of an interpreted stream.  The generated code
 --   will have the specified shape.  If code cannot be generated,
@@ -1832,20 +1838,21 @@ blockStream size_var count_var base_var stream =
 --   * full_count : IndInt full_size
 interpretAndBlockStream :: Type -> Type -> ExpM -> ExpM
                         -> TypeEvalM (Maybe (Var, Var, Var, ExpS, TypM, ExpM))
-interpretAndBlockStream shape_type elt_type elt_repr stream_exp =  
-  case interpretStream2 shape_type elt_type elt_repr stream_exp
-  of Just s -> do
-       -- Create a block-wise version of the stream
-       size_var <- newAnonymousVar TypeLevel
-       count_var <- newAnonymousVar ObjectLevel
-       base_var <- newAnonymousVar ObjectLevel
+interpretAndBlockStream shape_type elt_type elt_repr stream_exp = do
+  m_stream <- interpretStream2 shape_type elt_type elt_repr stream_exp
+  case m_stream of
+    Just s -> do
+      -- Create a block-wise version of the stream
+      size_var <- newAnonymousVar TypeLevel
+      count_var <- newAnonymousVar ObjectLevel
+      base_var <- newAnonymousVar ObjectLevel
        
-       case blockStream size_var count_var base_var s of
-         Nothing ->
-           return Nothing
-         Just (bs, bs_size, bs_count) ->
-           return $ Just (size_var, count_var, base_var, bs, bs_size, bs_count)
-     Nothing -> return Nothing
+      case blockStream size_var count_var base_var s of
+        Nothing ->
+          return Nothing
+        Just (bs, bs_size, bs_count) ->
+          return $ Just (size_var, count_var, base_var, bs, bs_size, bs_count)
+    Nothing -> return Nothing
 
 -- | Zip together a list of two or more streams
 zipStreams2 :: [ExpS] -> TypeEvalM (Maybe ExpS)
