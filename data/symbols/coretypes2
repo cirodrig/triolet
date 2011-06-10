@@ -155,38 +155,6 @@ data PyonTuple4 : bare -> bare -> bare -> bare -> bare
   (a : bare, b : bare, c : bare, d : bare) () (a, b, c, d);
 };
 
-data UnboxedTuple2 : val -> val -> val
-{
-  unboxedTuple2
-  (a : val, b : val) () (a, b);
-};
-
-data UnboxedTuple3 : val -> val -> val -> val
-{
-  unboxedTuple3
-  (a : val, b : val, c : val) () (a, b, c);
-};
-
-data UnboxedTuple4 : val -> val -> val -> val -> val
-{
-  unboxedTuple4
-  (a : val, b : val, c : val, d : val) () (a, b, c, d);
-};
-
-data UnboxedTuple5 : val -> val -> val -> val -> val -> val
-{
-  unboxedTuple5
-  (a : val, b : val, c : val, d : val, e : val) ()
-  (a, b, c, d, e);
-};
-
-data UnboxedTuple6 : val -> val -> val -> val -> val -> val -> val
-{
-  unboxedTuple6
-  (a : val, b : val, c : val, d : val, e : val, f : val) ()
-  (a, b, c, d, e, f);
-};
-
 -- Dictionaries
 
 -- This data declaration is not precisely correct:

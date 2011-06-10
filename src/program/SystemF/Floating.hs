@@ -79,8 +79,7 @@ isSingletonType ty =
 isFloatableCaseDataCon :: Var -> Bool
 isFloatableCaseDataCon con =
   isDictionaryDataCon con ||
-  con `isPyonBuiltin` the_someIndInt ||
-  isUnboxedTupleCon con
+  con `isPyonBuiltin` the_someIndInt
 
 -- | Return True if the expression ends with an exception-raising statement 
 --   and does not return normally.

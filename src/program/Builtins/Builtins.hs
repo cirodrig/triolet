@@ -93,39 +93,6 @@ pyonTupleReprCon n | n < 0 = internalError "pyonTupleReprCon"
            , pyonBuiltin the_repr_PyonTuple4
            ]
 
-unboxedTupleTypeCon :: Int -> Var
-unboxedTupleTypeCon n
-  | n < 2 || n >= 7 = internalError $ "unboxedTupleTypeCon: Unsupported size: " ++ show n
-  | otherwise = cons !! (n - 2)
-  where
-    cons = [ pyonBuiltin the_UnboxedTuple2
-           , pyonBuiltin the_UnboxedTuple3
-           , pyonBuiltin the_UnboxedTuple4
-           , pyonBuiltin the_UnboxedTuple5
-           , pyonBuiltin the_UnboxedTuple6
-           ]
-
-unboxedTupleCon :: Int -> Var
-unboxedTupleCon n
-  | n < 2 || n >= 7 = internalError $ "unboxedTupleCon: Unsupported size: " ++ show n
-  | otherwise = cons !! (n - 2)
-  where
-    cons = [ pyonBuiltin the_unboxedTuple2
-           , pyonBuiltin the_unboxedTuple3
-           , pyonBuiltin the_unboxedTuple4
-           , pyonBuiltin the_unboxedTuple5
-           , pyonBuiltin the_unboxedTuple6
-           ]
-
-isUnboxedTupleCon :: Var -> Bool
-isUnboxedTupleCon c =
-  c `elem` [ pyonBuiltin the_unboxedTuple2
-           , pyonBuiltin the_unboxedTuple3
-           , pyonBuiltin the_unboxedTuple4
-           , pyonBuiltin the_unboxedTuple5
-           , pyonBuiltin the_unboxedTuple6
-           ]
-
 -------------------------------------------------------------------------------
 -- Initializing the builtins
 
