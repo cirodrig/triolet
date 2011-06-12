@@ -144,7 +144,7 @@ indexedIntType = RecordType indexedIntRecord
 indexed_int_constant :: (Monad m, Supplies m (Ident Var)) => Integer -> m Val
 indexed_int_constant n =
   return $ RecV indexedIntRecord [uint8V 0,
-                                  RecV indexedIntDataRecord [nativeIntV n]]
+                                  RecV indexedIntDataRecord [RecV finIndexedIntRecord [nativeIntV n]]]
 
 -- | Create an effect token.
 empty_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
