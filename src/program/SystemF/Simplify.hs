@@ -67,7 +67,7 @@ data LREnv =
   , lrRewriteRules :: !RewriteRuleSet
 
     -- | Information about the values stored in variables
-  , lrKnownValues :: IntMap.IntMap KnownValue
+  , lrKnownValues :: IntMap.IntMap AbsValue
     
     -- | Types of variables
   , lrTypeEnv :: TypeEnv
@@ -134,7 +134,7 @@ lookupKnownValue v = LR $ \env ->
   in return val
 
 -- | Add a variable's known value to the environment 
-withKnownValue :: Var -> KnownValue -> LR a -> LR a
+withKnownValue :: Var -> AbsValue -> LR a -> LR a
 withKnownValue v val m = LR $ \env ->
   let insert_assignment mapping =
         IntMap.insert (fromIdent $ varID v) val mapping
@@ -143,7 +143,7 @@ withKnownValue v val m = LR $ \env ->
   where
     -- Debugging: Show the known value for this variable
     trace_assignment =
-      traceShow (text "Simpl" <+> pprVar v <+> text "=" <+> pprKnownValue val)
+      traceShow (text "Simpl" <+> pprVar v <+> text "=" <+> pprAbsValue val)
 
 -- | Add a variable's value to the environment, if known
 withMaybeValue :: Var -> MaybeValue -> LR a -> LR a
@@ -154,7 +154,8 @@ withMaybeValue v (Just val) m = withKnownValue v val m
 withDefValue :: Def Mem -> LR a -> LR a
 withDefValue (Def v _ f) m =
   let fun_info = funInfo $ fromFunM f
-  in withKnownValue v (ComplexValue (Just v) $ FunValue fun_info f) m
+      fun_val = setTrivialValue v $ funAV fun_info f
+  in withKnownValue v fun_val m
 
 -- | Add a function definition to the environment, but don't inline it
 withUninlinedDefValue :: Def Mem -> LR a -> LR a
@@ -193,7 +194,7 @@ assumeDef (Def v _ f) m = assume v (functionType f) m
 dumpKnownValues :: LR a -> LR a
 dumpKnownValues m = LR $ \env ->
   let kv_doc = hang (text "dumpKnownValues") 2 $
-               vcat [hang (text (show n)) 8 (pprKnownValue kv)
+               vcat [hang (text (show n)) 8 (pprAbsValue kv)
                     | (n, kv) <- IntMap.toList $ lrKnownValues env]
   in traceShow kv_doc $ runLR m env
 
@@ -242,8 +243,8 @@ makeExpValue (ExpM expression) =
   case expression
   of VarE inf v -> do
        mvalue <- lookupKnownValue v
-       return $ mvalue `mplus` Just (VarValue inf v)
-     LitE inf l -> return $ Just $ LitValue inf l
+       return $ mvalue `mplus` Just (VarAV inf v)
+     LitE inf l -> return $ Just $ LitAV inf l
      _ -> return Nothing
 
 -------------------------------------------------------------------------------
@@ -256,11 +257,11 @@ makeExpValue (ExpM expression) =
 --   pre-inlined.  Pre-inlining is performed only if it does not duplicate
 --   code or work.
 --
---   If the expression should be inlined, return a 'KnownValue' holding
+--   If the expression should be inlined, return a 'AbsValue' holding
 --   the equivalent value.  Non-writer expressions become an
---   'InlinedValue'.  Writer expressions become a 'DataValue' containing
---   'InlinedValue's.
-worthPreInlining :: TypeEnv -> Dmd -> ExpM -> Maybe KnownValue
+--   'InlAV'.  Writer expressions become a 'DataAV' containing
+--   'InlAV's.
+worthPreInlining :: TypeEnv -> Dmd -> ExpM -> Maybe AbsValue
 worthPreInlining tenv dmd expr =
   let should_inline =
         case multiplicity dmd
@@ -269,7 +270,7 @@ worthPreInlining tenv dmd expr =
            OnceUnsafe -> inlckTrivial `inlckOr` inlckFunction
            _ -> inlckFalse
   in if should_inline tenv dmd expr
-     then Just (InlinedValue expr)
+     then Just (InlAV expr)
      else Nothing
 
 {- Value inlining (below) is disabled; it currently
@@ -282,11 +283,11 @@ worthPreInlining tenv dmd expr =
 --
 --   The expression is a value, boxed, or writer expression.
 --
---   If the expression should be inlined, return a 'KnownValue' holding
+--   If the expression should be inlined, return a 'AbsValue' holding
 --   the equivalent value.  Non-writer expressions become an
---   'InlinedValue'.  Writer expressions become a 'DataValue' containing
---   'InlinedValue's.
-worthPostInlining :: TypeEnv -> Bool -> Dmd -> ExpM -> Maybe KnownValue
+--   'InlAV'.  Writer expressions become a 'DataAV' containing
+--   'InlAV's.
+worthPostInlining :: TypeEnv -> Bool -> Dmd -> ExpM -> Maybe AbsValue
 worthPostInlining tenv is_writer dmd expr =
   let should_inline =
         case multiplicity dmd
@@ -312,7 +313,7 @@ worthPostInlining tenv is_writer dmd expr =
   where
     -- The expression will be inlined; convert it into a known value.
     -- Non-writer fields are simply inlined.
-    data_value False expr = Just $ InlinedValue expr
+    data_value False expr = Just $ InlAV expr
     
     -- Writer fields are converted to readable data constructor values
     data_value True expr =
@@ -322,22 +323,22 @@ worthPostInlining tenv is_writer dmd expr =
                -- Behave like 'rwStoreApp'.
                -- Allow the store to cancel with a later load.
                let [source] = args
-               in Just $ complexKnownValue $
-                  WriterValue $ complexKnownValue $
-                  StoredValue Value $ InlinedValue source
+               in Just $ bigAV $
+                  WriterAV $ bigAV $
+                  StoredValue Value $ InlAV source
 
            | op `isPyonBuiltin` the_storeBox ->
                -- Behave like 'rwStoreBoxApp'.
                -- Allow the store to cancel with a later load.
                let [source] = args
-               in Just $ complexKnownValue $
-                  WriterValue $ complexKnownValue $
-                  StoredValue Boxed $ InlinedValue source
+               in Just $ bigAV $
+                  WriterAV $ bigAV $
+                  StoredValue Boxed $ InlAV source
 
            | op `isPyonBuiltin` the_copy ->
                -- When using the value, read the source value directly
                let [_, source] = args
-               in Just $ complexKnownValue $ WriterValue $ InlinedValue source
+               in Just $ bigAV $ WriterAV $ InlAV source
            | Just (tycon, dcon) <- lookupDataConWithType op tenv ->
                let (field_types, _) =
                      instantiateDataConTypeWithExistentials dcon ty_args
@@ -539,13 +540,13 @@ betaReduce inf (FunM fun) ty_args args
 
 -- | Attempt to construct a value from an expression.
 --   Prefer to create initializer values rather than data values.
-createValue :: BaseKind -> KnownValue -> LR (Maybe (ExpM, MaybeValue))
+createValue :: BaseKind -> AbsValue -> LR (Maybe (ExpM, MaybeValue))
 createValue kind known_value =
   -- There are two cases to deal with.  The simple case is that we can just
   -- "use the value" as if inlining it.  The complex case is when the value   
   -- is a bare value; then we want to construct a new value.
-  case known_value
-  of ComplexValue maybe_var (DataValue inf ty fs)
+  case fromDataAV known_value
+  of Just (DataValue inf ty fs)
        | kind == BareK -> do
            -- Attempt to create a new data constructor application
            data_app <- createDataConApp inf ty fs
@@ -569,7 +570,7 @@ createValue kind known_value =
 
     copy_value val =
       case kind
-      of BareK -> writerValue val
+      of BareK -> writerAV val
          _ -> val
 
     copy_expression e =
@@ -585,7 +586,7 @@ mkCopyExp e = do
     copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
 
 -- | Attempt to construct a data initializer expression.
---   The parameters are fields of a 'DataValue' representing a bare object.
+--   The parameters are fields of a 'DataAV' representing a bare object.
 --
 --   This function handles data constructors whose result kind is \"bare\".
 --   Other known values are handled by 'createValue'.
@@ -595,7 +596,7 @@ createDataConApp inf val_type m_fields
   | Just fields <- sequence m_fields = createDataConApp' inf val_type fields
   | otherwise = return Nothing
       
-createDataConApp' :: ExpInfo -> DataValueType -> [KnownValue]
+createDataConApp' :: ExpInfo -> DataValueType -> [AbsValue]
                   -> LR (Maybe (ExpM, MaybeValue))
 createDataConApp' inf val_type fields = do
   tenv <- getTypeEnv
@@ -624,8 +625,7 @@ createDataConApp' inf val_type fields = do
                  ExpM $ UTupleE inf field_exps
           
           -- This is an initializer expression, so it has a writer valeu
-          value = writerValue $
-                  complexKnownValue $ DataValue inf val_type field_values
+          value = writerAV $ dataAV $ DataValue inf val_type field_values
       in return $ Just (data_exp, Just value)
     Nothing -> return Nothing
       
@@ -835,18 +835,18 @@ rwExp expression = debug "rwExp" expression $ do
     -- Simplify subexpressions.
     --
     -- Even if we're out of fuel, we _still_ must perform some simplification
-    -- steps in order to propagate 'InlinedValue's.  If we fail to propagate
+    -- steps in order to propagate 'InlAV's.  If we fail to propagate
     -- them, the output code will still contain references to variables that
     -- were deleted.
     case fromExpM ex1 of
       VarE inf v -> rwVar ex1 inf v
-      LitE inf l -> rwExpReturn (ex1, Just $ LitValue inf l)
+      LitE inf l -> rwExpReturn (ex1, Just $ LitAV inf l)
       UTupleE inf args -> rwUTuple inf args
       AppE inf op ty_args args -> rwApp ex1 inf op ty_args args
       LamE inf fun -> do
         fun' <- rwFun fun
         rwExpReturn (ExpM $ LamE inf fun',
-                     Just $ complexKnownValue $ FunValue inf fun')
+                     Just $ funAV inf fun')
       LetE inf bind val body -> rwLet inf bind val body
       LetfunE inf defs body -> rwLetrec inf defs body
       CaseE inf scrut alts -> rwCase inf scrut alts
@@ -886,7 +886,7 @@ rwVar original_expression inf v = lookupKnownValue v >>= rewrite
       | otherwise = rwExpReturn (original_expression, Just val)
     rewrite Nothing =
       -- Give the variable a value, so that copy propagation may occur
-      rwExpReturn (original_expression, Just $ VarValue inf v)
+      rwExpReturn (original_expression, Just $ VarAV inf v)
 
 rwUTuple inf args = do
   -- Just rewrite subexpressions
@@ -939,16 +939,16 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
      _ ->
        -- Apply simplification tecnhiques specific to this operator
        case op_val
-       of Just (ComplexValue _ (FunValue _ funm)) ->
+       of Just (fromFunAV -> Just funm) ->
             use_fuel $ inline_function_call funm
 
           -- Use special rewrite semantics for built-in functions
-          Just (VarValue _ op_var)
+          Just (VarAV _ op_var)
             | op_var `isPyonBuiltin` the_copy ->
                 case ty_args
                 of [ty] -> rwCopyApp inf op' ty args
 
-          Just (VarValue _ op_var) ->
+          Just (VarAV _ op_var) ->
             -- Try to rewrite this application.  If it was rewritten, then
             -- consume fuel.
             ifElseFuel unknown_app $ do
@@ -1048,7 +1048,7 @@ rwCopyApp inf copy_op ty args = do
       -- Try to eliminate the statement based on values of subexpressions
       have_fuel <- checkFuel
       case arg_values of
-        (_ : src_value@(Just (ComplexValue _ (DataValue inf ty fs))) : _)
+        (_ : src_value@(Just (fromDataAV -> Just (DataValue inf ty fs))) : _)
           | have_fuel -> do
               -- The source is a (partly) known value.  Try to replace the
               -- copy expression by the known value.
@@ -1077,7 +1077,7 @@ rwCopyApp inf copy_op ty args = do
     -- Do we know what was stored here?
     copied_value [_, _, _] = Nothing
     copied_value [_, Just src_val] =
-      Just $ complexKnownValue $ WriterValue src_val
+      Just $ bigAV $ WriterAV src_val
     copied_value [_, _] = Nothing
     copied_value _ =
       internalError "rwCopyApp: Wrong number of arguments in call"
@@ -1172,9 +1172,9 @@ rwCase1 _ _ inf scrut alts
             of ExpM (VarE _ scrut_var) -> Just scrut_var
                _ -> Nothing
       let field_val =
-            case scrut_val
-            of Just (ComplexValue _ (DataValue { dataValueType = ConValueType c _ _
-                                               , dataFields = [f]}))
+            case scrut_val >>= fromDataAV
+            of Just (DataValue { dataValueType = ConValueType c _ _
+                               , dataFields = [f]})
                  | c `isPyonBuiltin` the_boxed -> f
                _ -> Nothing
 
@@ -1243,7 +1243,7 @@ rwCase1 _ tenv inf scrut alts = do
                  rebuild_case scrut' arg_con arg_ex_types arg_values
   where
     -- Given the value of the scrutinee, try to get the fields' values
-    unpack_scrut_val (Just (ComplexValue _ (DataValue _ dcon vs))) =
+    unpack_scrut_val (Just (fromDataAV -> Just (DataValue _ dcon vs))) =
       let ex_types = case dcon
                      of ConValueType con _ ex_ts -> ex_ts
                         TupleValueType _ -> []
@@ -1464,12 +1464,12 @@ rwAlt scr m_values (AltM alt) =
     assume_param (maybe_value, param) m =
       assumePattern param $ withMaybeValue (patMVar param) maybe_value m
     
-    -- Create a KnownValue argument for a data field.  Use the previous known
+    -- Create a AbsValue argument for a data field.  Use the previous known
     -- value if available, or the variable that the field is bound to otherwise
     mk_arg maybe_val pat =
       case maybe_val
       of Just val -> Just (setTrivialValue (patMVar pat) val)
-         Nothing  -> Just (VarValue defaultExpInfo $ patMVar pat)
+         Nothing  -> Just (VarAV defaultExpInfo $ patMVar pat)
 
 rwFun :: FunM -> LR FunM
 rwFun (FunM f) =
@@ -1537,7 +1537,7 @@ rewriteLocalExpr ruleset mod =
                        getVariableReplacements ruleset
           where
             insert_rewrite_rule (v, e) m =
-              IntMap.insert (fromIdent $ varID v) (InlinedValue e) m
+              IntMap.insert (fromIdent $ varID v) (InlAV e) m
 
     let env = LREnv { lrIdSupply = var_supply
                     , lrRewriteRules = ruleset
