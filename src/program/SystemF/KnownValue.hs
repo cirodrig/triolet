@@ -54,10 +54,6 @@ data AbsValue =
     --   real value.
   | VarAV ExpInfo !Var
 
-    -- | A variable's abstract value.
-    --   The variable is bound by an 'AbsFunValue'.
-  | AbsVarAV !Var
-
     -- | A variable's inlined value.  The expression should be inlined
     --   wherever the variable is used.  This abstract value may not appear
     --   inside another abstract value.
@@ -72,7 +68,7 @@ data AbsValue =
 --   optimizer.
 data BigAbsValue =
     -- | An expression that may be inlined
-    ExpAV !ExpM
+    ExpAV !(Maybe AbsFunValue) !ExpM
     
     -- | An abstract function value.
     --
@@ -124,11 +120,9 @@ data DataValueType =
 data RefValue = RefValue !RefBase [FieldSelector]
 
 -- | An abstraction of a base address
-data RefBase =
+newtype RefBase =
     -- | A variable bound in the program 
-    VarBase !Var
-    -- | A variable bound in an abstract function
-  | AbsVarBase !Var
+    VarBase Var
     deriving(Eq, Ord)
 
 -- | A field name.  Currently uninhabited.
@@ -143,6 +137,19 @@ heapState :: [(RefValue, AbsValue)] -> Maybe HeapState
 heapState [] = Nothing
 heapState xs = Just $ HeapState xs
 
+-- | Find the heap state entry at the given address
+lookupHeapState :: RefValue -> HeapState -> Maybe AbsValue
+lookupHeapState ref (HeapState bindings) = find_binding bindings
+  where
+    find_binding ((addr, val):bs)
+      | match addr = Just val
+      | otherwise = find_binding bs
+    find_binding [] = Nothing
+
+    RefValue ref_base [] = ref
+
+    match (RefValue base []) = base == ref_base
+
 -- | The abstract value of a monomorphic function.
 data AbsFunValue =
   AbsFunValue
@@ -150,6 +157,10 @@ data AbsFunValue =
   , afunParams :: [PatM]
   , afunValue :: AbsValue
   }
+
+abstractFunction :: ExpInfo -> [PatM] -> AbsValue -> AbsFunValue
+abstractFunction inf params body =
+  AbsFunValue inf params body
 
 -- | A mapping from variables to their approximate value
 type AbsValues = IntMap.IntMap AbsValue
@@ -159,8 +170,8 @@ type MaybeValue = Maybe AbsValue
 bigAV :: BigAbsValue -> AbsValue
 bigAV = BigAV Nothing
 
-funAV :: ExpInfo -> FunM -> AbsValue
-funAV inf f = bigAV $ ExpAV (ExpM (LamE inf f))
+funAV :: ExpInfo -> Maybe AbsFunValue -> FunM -> AbsValue
+funAV inf val f = bigAV $ ExpAV val (ExpM (LamE inf f))
 
 absFunAV :: AbsFunValue -> AbsValue
 absFunAV f = bigAV $ AbsFunAV f
@@ -179,8 +190,13 @@ fromBigAV (BigAV _ v) = Just v
 fromBigAV _ = Nothing
 
 fromFunAV :: AbsValue -> Maybe FunM
-fromFunAV (BigAV _ (ExpAV (ExpM (LamE _ f)))) = Just f
+fromFunAV (BigAV _ (ExpAV _ (ExpM (LamE _ f)))) = Just f
 fromFunAV _ = Nothing
+
+
+fromHeapAV :: AbsValue -> Maybe HeapState
+fromHeapAV (BigAV _ (HeapAV hs)) = Just hs
+fromHeapAV _ = Nothing
 
 fromDataAV :: AbsValue -> Maybe DataValue
 fromDataAV (BigAV _ (DataAV x)) = Just x
@@ -228,16 +244,24 @@ assertNotInlinedValue' _ x = x
 --   Function-valued terms are valid writers, but we don't know what
 --   they write.
 resultOfWriterValue :: AbsValue -> MaybeValue
-resultOfWriterValue (VarAV _ _)                    = Nothing 
-resultOfWriterValue (InlAV _)                  = Nothing
-resultOfWriterValue (BigAV _ (WriterAV kv)) = Just kv
-resultOfWriterValue (BigAV _ (ExpAV _))   = Nothing
-resultOfWriterValue (BigAV _ (AbsFunAV av))
-  | length (afunParams av) == 1 = Just $ afunValue av
-
-resultOfWriterValue v =
-  -- Other values are not valid
-  internalError $ "resultOfWriterValue " ++ show (pprAbsValue v)
+resultOfWriterValue av = 
+  case av
+  of BigAV _ (WriterAV kv)        -> Just kv
+     BigAV _ (ExpAV (Just afv) _) -> abs_fun_value afv
+     BigAV _ (AbsFunAV afv)       -> abs_fun_value afv
+     VarAV {}                     -> Nothing
+     InlAV {}                     -> Nothing
+     BigAV _ (ExpAV Nothing _)    -> Nothing
+     _ ->
+       -- Other values are not valid
+       internalError $ "resultOfWriterValue " ++ show (pprAbsValue av)
+  where
+    abs_fun_value afv
+      | [param] <- afunParams afv =
+        case fromHeapAV $ afunValue afv
+        of Just heap_state ->
+             lookupHeapState (RefValue (VarBase (patMVar param)) []) heap_state
+           _ -> Nothing
 
 forgetVariable :: Var -> AbsValue -> MaybeValue
 forgetVariable v kv = forgetVariables (Set.singleton v) kv
@@ -279,19 +303,11 @@ forgetVariables varset kv = forget kv
                  Just complex_value ->
                    Just $ BigAV stored_name' complex_value
 
-    forget_big_value cv@(ExpAV e)
+    forget_big_value cv@(ExpAV mval e)
       | varset `intersects` freeVariables e = Nothing
-      | otherwise = Just cv
+      | otherwise = Just $ ExpAV (mval >>= forget_abs_fun) e
 
-    forget_big_value (AbsFunAV (AbsFunValue { afunInfo = inf
-                                            , afunParams = params
-                                            , afunValue = ret_val}))
-      | any (`typeMentionsAny` varset) (map patMType params) = Nothing
-      | otherwise =
-        case forget ret_val
-        of Nothing -> Nothing
-           Just ret_val' ->
-             Just $ AbsFunAV (AbsFunValue inf params ret_val')
+    forget_big_value (AbsFunAV afv) = fmap AbsFunAV (forget_abs_fun afv) 
 
     forget_big_value (HeapAV (HeapState states)) =
       let new_states = [(k', v') | (k, v) <- states,
@@ -309,13 +325,21 @@ forgetVariables varset kv = forget kv
     forget_big_value (WriterAV kv) =
       fmap WriterAV $ forget kv
     
+    forget_abs_fun (AbsFunValue { afunInfo = inf
+                                , afunParams = params
+                                , afunValue = ret_val})
+      | any (`typeMentionsAny` varset) (map patMType params) = Nothing
+      | otherwise =
+        case forget ret_val
+        of Nothing -> Nothing
+           Just ret_val' -> Just $ AbsFunValue inf params ret_val'
+
     forget_ref cv@(RefValue base fss)
       | in_varset base = Nothing
       | any field_mentions fss = Nothing
       | otherwise = Just cv
       where
         in_varset (VarBase v) = v `Set.member` varset
-        in_varset (AbsVarBase v) = v `Set.member` varset
     
     -- Does this field mention one of the variables that should be forgotten?
     field_mentions _ = internalError "forgetValue: Unexpected field selector"
@@ -325,7 +349,6 @@ pprAbsValue :: AbsValue -> Doc
 pprAbsValue kv =
   case kv
   of VarAV _ v -> pprVar v
-     AbsVarAV v -> braces $ pprVar v
      LitAV _ l -> pprLit l
      InlAV exp -> parens $ pprExp exp
      BigAV Nothing cv -> pprBigAbsValue cv
@@ -335,7 +358,8 @@ pprAbsValue kv =
 pprBigAbsValue :: BigAbsValue -> Doc
 pprBigAbsValue cv =
   case cv
-  of ExpAV e -> pprExp e
+  of ExpAV Nothing e -> pprExp e
+     ExpAV (Just afv) e -> parens (pprExp e <+> text "=" <+> pprAbsFun afv)
      AbsFunAV av -> pprAbsFun av
      HeapAV hs -> pprHeapState hs
      DataAV dv -> pprDataValue dv
@@ -368,7 +392,6 @@ pprDataValue (DataValue _ d_type fields) =
           in parens (sep $ punctuate (text ",") field_docs)
 
 pprRefValue (RefValue (VarBase v) []) = pprVar v
-pprRefValue (RefValue (AbsVarBase v) []) = braces $ pprVar v
 
 pprMaybeValue :: MaybeValue -> Doc
 pprMaybeValue Nothing = text "_"
@@ -503,7 +526,7 @@ lookupVarAbs v e = IntMap.lookup (fromIdent $ varID v) e
 substituteAbsValue :: AbsEnv -> AbsValue -> MaybeValue
 substituteAbsValue env value =
   case value
-  of AbsVarAV v ->
+  of VarAV _ v ->
        case lookupVarAbs v env
        of Nothing -> Just value
           Just mv -> mv
@@ -551,8 +574,7 @@ substituteRefValue env (RefValue base fs) = do
   -- new base address
   RefValue new_base base_fs <-
     case base
-    of VarBase v -> return (RefValue base [])
-       AbsVarBase v ->
+    of VarBase v ->
          case lookupVarAbs v env
          of Nothing -> return (RefValue base [])
             Just mv -> mv >>= convertAbsValueToRefValue
@@ -564,7 +586,6 @@ substituteRefValue env (RefValue base fs) = do
 -- | Create a reference to an object field, given an abstract value.
 --   We can translate variables and built-in functions.
 convertAbsValueToRefValue :: AbsValue -> Maybe RefValue
-convertAbsValueToRefValue (AbsVarAV v) = Just (RefValue (AbsVarBase v) [])
 convertAbsValueToRefValue (VarAV _ v) = Just (RefValue (VarBase v) [])
 convertAbsValueToRefValue _ = internalError "convertAbsValueToRefValue: Not implemented"
 
@@ -581,13 +602,12 @@ applyAbsValue av [] = Just av
 applyAbsValue av args = 
   case av
   of LitAV {} -> bad_operator
-     VarAV {} -> cannot_evaluate
 
      -- TODO: Create an 'app' term that can be evaluated when a value is
      -- substituted in place of the variable
-     AbsVarAV {} -> cannot_evaluate
+     VarAV {} -> cannot_evaluate
      InlAV {} -> cannot_evaluate
-     BigAV _ (ExpAV _) -> cannot_evaluate
+     BigAV _ (ExpAV _ _) -> cannot_evaluate
      BigAV _ (AbsFunAV afun) -> applyAbsFun afun args
      BigAV _ (WriterAV written_value) -> apply_writer written_value
      BigAV _ _ -> bad_operator

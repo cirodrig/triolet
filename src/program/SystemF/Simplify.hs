@@ -154,7 +154,7 @@ withMaybeValue v (Just val) m = withKnownValue v val m
 withDefValue :: Def Mem -> LR a -> LR a
 withDefValue (Def v _ f) m =
   let fun_info = funInfo $ fromFunM f
-      fun_val = setTrivialValue v $ funAV fun_info f
+      fun_val = setTrivialValue v $ funAV fun_info Nothing f
   in withKnownValue v fun_val m
 
 -- | Add a function definition to the environment, but don't inline it
@@ -844,9 +844,9 @@ rwExp expression = debug "rwExp" expression $ do
       UTupleE inf args -> rwUTuple inf args
       AppE inf op ty_args args -> rwApp ex1 inf op ty_args args
       LamE inf fun -> do
-        fun' <- rwFun fun
+        (fun', fun_val) <- rwFun fun
         rwExpReturn (ExpM $ LamE inf fun',
-                     Just $ funAV inf fun')
+                     Just $ funAV inf fun_val fun')
       LetE inf bind val body -> rwLet inf bind val body
       LetfunE inf defs body -> rwLetrec inf defs body
       CaseE inf scrut alts -> rwCase inf scrut alts
@@ -1471,19 +1471,28 @@ rwAlt scr m_values (AltM alt) =
       of Just val -> Just (setTrivialValue (patMVar pat) val)
          Nothing  -> Just (VarAV defaultExpInfo $ patMVar pat)
 
-rwFun :: FunM -> LR FunM
+rwFun :: FunM -> LR (FunM, Maybe AbsFunValue)
 rwFun (FunM f) =
   assumeTyPatMs (funTyParams f) $
   assumePatterns (funParams f) $ do
-    (body', _) <- rwExp (funBody f)
-    return $ FunM $ f {funBody = body'}
+    (body', body_value) <- rwExp (funBody f)
+    let aval = abstract_value body_value
+    trace_aval aval $ return (FunM $ f {funBody = body'}, aval)
+  where
+    abstract_value Nothing = Nothing 
+    abstract_value (Just val)
+      | not (null $ funTyParams f) = Nothing -- Cannot abstract polymorphic functions
+      | otherwise = Just $ abstractFunction (funInfo f) (funParams f) val
+                    
+    trace_aval Nothing x = x
+    trace_aval (Just v) x = traceShow (text "DEBUG: Abstracted function:" $$ pprAbsFun v) x
 
 rwDef :: Def Mem -> LR (Def Mem)
-rwDef def = mapMDefiniens rwFun def
+rwDef def = mapMDefiniens (liftM fst . rwFun) def
 
 rwExport :: Export Mem -> LR (Export Mem)
 rwExport (Export pos spec f) = do
-  f' <- rwFun f
+  (f', _) <- rwFun f
   return (Export pos spec f')
 
 -- | Rewrite a definition group.  Then, add the defined functions to the
