@@ -195,6 +195,13 @@ array1Shape size =
   varApp (pyonBuiltin the_array_shape)
   [size, VarT $ pyonBuiltin the_unit_shape]
 
+arrayShape :: [Type] -> Type
+arrayShape (size : sizes) =
+  varApp (pyonBuiltin the_array_shape)
+  [size, arrayShape sizes]
+
+arrayShape [] = VarT (pyonBuiltin the_unit_shape)
+
 -------------------------------------------------------------------------------
 -- Rewrite rules
 
@@ -253,8 +260,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin the_histogram, rwHistogram)
             , (pyonBuiltin the_fun_reduce, rwReduce)
             , (pyonBuiltin the_fun_reduce1, rwReduce1)
-              {- Rewrites temporarily disabled while we change Stream types
-            , (pyonBuiltin the_oper_CAT_MAP, rwBindStream) -}
+            {- , (pyonBuiltin the_oper_CAT_MAP, rwCatMap) -}
             , (pyonBuiltin the_for, rwFor)
             , (pyonBuiltin the_safeSubscript, rwSafeSubscript)
             ]
@@ -510,14 +516,7 @@ buildListDoall inf elt_type elt_repr other_args size count generator = do
   tenv <- getTypeEnv 
   caseOfIndInt tenv (return count) (fromTypM size) define_list undef_list
 
-{- Disabled while we change types
-
--- | Rewrite applications of the stream @bind@ operator when the producer
---   or transformer has a well-behaved data flow pattern.
---
---   * Transformer is rewritable to @\x -> return f(x)@: rewrite to a
---     mapStream
-rwBindStream :: RewriteRule
+{-
 rwBindStream tenv inf
   [elt1, elt2]
   [repr1, repr2, producer, transformer] =
@@ -1343,10 +1342,11 @@ zipper n = internalError $ "zipper: Cannot zip " ++ show n ++ " streams"
 data Shape =
     -- | A list stream, corresponding to @list_shape@.  The size is unknown.
     ListShape
-    -- | A 1D statically sized stream, corresponding to @array_shape n@.
-    --   The size index has kind @intindex@.
-    --   The expression has type @IndInt n@ where @n@ is the type index.
-  | Array1DShape TypM ExpM
+    -- | A statically sized stream, corresponding to nested applications of
+    --   @array_shape@.  The first term is the outermost application.
+    --   Each size index has kind @intindex@.
+    --   Each expression has type @IndInt n@ where @n@ is the type index.
+  | ArrayShape [(TypM, ExpM)]
     -- | An unknown iteration domain that has the given shape index
   | UnknownShape TypM
 
@@ -1355,7 +1355,7 @@ shapeType :: Shape -> Type
 shapeType shp = 
   case shp
   of ListShape                 -> VarT $ pyonBuiltin the_list_shape
-     Array1DShape (TypM i) _   -> array1Shape i
+     ArrayShape dim            -> arrayShape [i | (TypM i, _) <- dim]
      UnknownShape (TypM shape) -> shape
   
 -- | Get the shape encoded in a type.
@@ -1373,8 +1373,14 @@ listShape = ListShape
 -- | Decide whether the given shapes are equal
 compareShapes :: Shape -> Shape -> TypeEvalM Bool
 compareShapes ListShape ListShape = return True
-compareShapes (Array1DShape (TypM t1) _) (Array1DShape (TypM t2) _) = 
-  compareTypes t1 t2
+compareShapes (ArrayShape dim1) (ArrayShape dim2) =
+  compare_dimensions dim1 dim2
+  where
+    compare_dimensions ((TypM t1, _) : dim1') ((TypM t2, _) : dim2') =
+      compareTypes t1 t2 >&&> compare_dimensions dim1' dim2'
+    compare_dimensions [] [] = return True
+    compare_dimensions _ _ = return False
+
 compareShapes (UnknownShape (TypM t1)) (UnknownShape (TypM t2)) =
   compareTypes t1 t2
 
@@ -1400,7 +1406,17 @@ data instance Exp Stream =
       --   evaluates to the desired stream element, as a write reference. 
     , _sexpGenerator :: ExpM -> TypeEvalM ExpM
     }
+    -- | List 'bind' operator
   | BindStream
+    { -- | The source stream
+      _sexpSrcStream :: ExpS
+
+      -- | The transformer,
+      --   which is a one-parameter function returning a stream
+    , _sexpTransStream :: (PatM, ExpS)
+    }
+    -- | Counted loop 'bind' operator
+  | NestedLoopStream
     { -- | The source stream
       _sexpSrcStream :: ExpS
 
@@ -1439,8 +1455,13 @@ data instance Exp Stream =
 -- | Get the shape of a stream
 sexpShape :: ExpS -> Shape
 sexpShape (GenerateStream {_sexpSize = t, _sexpCount = n}) =
-  Array1DShape (TypM t) n
+  ArrayShape [(TypM t, n)]
 sexpShape (BindStream _ _) = ListShape
+sexpShape (NestedLoopStream src (_, dst)) =
+  case sexpShape src
+  of ArrayShape [dim1] ->
+       case sexpShape dst
+       of ArrayShape dims -> ArrayShape (dim1 : dims)
 sexpShape (CaseStream {_sexpShape = s}) = s
 sexpShape (ReturnStream {}) = ListShape
 sexpShape (EmptyStream {}) = ListShape
@@ -1450,6 +1471,7 @@ sexpShape (UnknownStream {_sexpShape = s}) = s
 sexpElementType :: ExpS -> Type
 sexpElementType (GenerateStream {_sexpType = t}) = t
 sexpElementType (BindStream _ (_, s)) = sexpElementType s
+sexpElementType (NestedLoopStream _ (_, s)) = sexpElementType s
 sexpElementType (CaseStream {_sexpAlternatives = alt:_}) =
   sexpElementType $ altBody $ fromAltS alt
 sexpElementType (ReturnStream {_sexpType = t}) = t
@@ -1460,6 +1482,7 @@ sexpElementType (UnknownStream {_sexpType = t}) = t
 sexpElementRepr :: ExpS -> ExpM
 sexpElementRepr (GenerateStream {_sexpRepr = e}) = e
 sexpElementRepr (BindStream _ (_, s)) = sexpElementRepr s
+sexpElementRepr (NestedLoopStream _ (_, s)) = sexpElementRepr s
 sexpElementRepr (CaseStream {_sexpAlternatives = alt:_}) =
   sexpElementRepr $ altBody $ fromAltS alt
 sexpElementRepr (ReturnStream {_sexpRepr = e}) = e
@@ -1486,6 +1509,11 @@ pprExpS stream =
        text "(...)"
      BindStream src (pat, trans) ->
        text "bind" $$
+       pprPat pat <+> text "<-" $$
+       nest 4 (pprExpS src) $$
+       pprExpS trans
+     NestedLoopStream src (pat, trans) ->
+       text "bindarray" $$
        pprPat pat <+> text "<-" $$
        nest 4 (pprExpS src) $$
        pprExpS trans
@@ -1578,7 +1606,13 @@ interpretStream2' shape_type elt_type repr expression =
                         interpretStream2' list_shape src_type src_repr src
                       body_stream <-
                         interpretStream2' list_shape tr_type repr body
-                      return $ BindStream src_stream (param, body_stream)
+                      
+                      -- Convert to a nested loop stream if it has suitable
+                      -- shape
+                      case (sexpShape src_stream, sexpShape body_stream) of
+                        (ArrayShape [dim1], ArrayShape dims) ->
+                          return $ NestedLoopStream src_stream (param, body_stream)
+                        _ -> return $ BindStream src_stream (param, body_stream)
                     _ -> no_interpretation
                _ -> no_interpretation
        | op_var `isPyonBuiltin` the_oper_DO ->
@@ -1652,6 +1686,9 @@ mapStream out_type out_repr transformer producer = transform producer
     transform (BindStream src (binder, body)) =
       BindStream src (binder, transform body)
 
+    transform (NestedLoopStream src (binder, body)) =
+      NestedLoopStream src (binder, transform body)
+
     transform (CaseStream shp scr alts) =
       CaseStream shp scr (map transform_alt alts)
         
@@ -1714,23 +1751,49 @@ encodeStream2 expected_shape stream = runMaybeT $ do
           (\ [] [index_var] ->
             gen (ExpM $ VarE defaultExpInfo index_var))]
 
+       NestedLoopStream src (pat, dst) ->
+         case (sexpShape src, sexpShape dst)
+         of (src_shape@(ArrayShape [dim1]), dst_shape@(ArrayShape dims)) -> do
+              -- This is a nested counted loop
+              let dst_shape_type = shapeType dst_shape
+              src' <- MaybeT $ encodeStream2 (TypM $ shapeType src_shape) src
+              dst' <- MaybeT $ encodeStream2 (TypM dst_shape_type) dst
+              let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_bind)
+                  (outer_size, outer_count) = dim1
+              return $
+                ExpM $ AppE defaultExpInfo oper
+                [outer_size,
+                 TypM dst_shape_type,
+                 TypM $ sexpElementType src,
+                 TypM $ sexpElementType dst]
+                [sexpElementRepr src, sexpElementRepr dst,
+                 src',
+                 ExpM $ LamE defaultExpInfo $
+                 FunM $ Fun { funInfo = defaultExpInfo
+                            , funTyParams = []
+                            , funParams = [pat]
+                            , funReturn =
+                              TypM $ varApp (pyonBuiltin the_Stream)
+                              [dst_shape_type, sexpElementType dst]
+                            , funBody = dst'}]
+
        BindStream src (pat, dst) -> do
-         src' <- MaybeT $ encodeStream2 (TypM list_shape) src
-         dst' <- MaybeT $ encodeStream2 (TypM list_shape) dst
-         let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_oper_CAT_MAP)
-         return $
-           ExpM $ AppE defaultExpInfo oper
-           [TypM $ sexpElementType src, TypM $ sexpElementType dst]
-           [sexpElementRepr src, sexpElementRepr dst,
-            src',
-            ExpM $ LamE defaultExpInfo $
-            FunM $ Fun { funInfo = defaultExpInfo
-                       , funTyParams = []
-                       , funParams = [pat]
-                       , funReturn =
-                         TypM $ varApp (pyonBuiltin the_Stream)
-                         [list_shape, sexpElementType dst]
-                       , funBody = dst'}]
+              src' <- MaybeT $ encodeStream2 (TypM list_shape) src
+              dst' <- MaybeT $ encodeStream2 (TypM list_shape) dst
+              let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_oper_CAT_MAP)
+              return $
+                ExpM $ AppE defaultExpInfo oper
+                [TypM $ sexpElementType src, TypM $ sexpElementType dst]
+                [sexpElementRepr src, sexpElementRepr dst,
+                 src',
+                 ExpM $ LamE defaultExpInfo $
+                 FunM $ Fun { funInfo = defaultExpInfo
+                            , funTyParams = []
+                            , funParams = [pat]
+                            , funReturn =
+                              TypM $ varApp (pyonBuiltin the_Stream)
+                              [list_shape, sexpElementType dst]
+                            , funBody = dst'}]
 
        CaseStream shp scr alts -> do
          alts' <- mapM (encode_alt (TypM $ shapeType shp)) alts
@@ -1803,13 +1866,13 @@ blockStream size_var count_var base_var stream =
            shp = sexpShape body
        return (CaseStream shp scr [AltS alt'], orig_size, orig_count)
      
-     CaseStream (Array1DShape orig_size orig_count) scr alts -> do
+     CaseStream (ArrayShape ((orig_size, orig_count):sizes)) scr alts -> do
        -- Block each branch of the case statement.  All branches must 
        -- have the same shape. 
-       alts' <- forM alts $ \ (AltS alt) -> do 
+       alts' <- forM alts $ \ (AltS alt) -> do
          (body, _, _) <- blockStream size_var count_var base_var $ altBody alt
          return $ AltS $ alt {altBody = body}
-       return (CaseStream block_shape scr alts', orig_size, orig_count)
+       return (CaseStream (block_shape sizes) scr alts', orig_size, orig_count)
 
      _ ->
        -- The stream's shape is unknown, so we can't decompose it into blocks
@@ -1817,7 +1880,7 @@ blockStream size_var count_var base_var stream =
   where
     -- The shape of a blocked stream.
     -- The stream has a known, 1D shape.
-    block_shape = Array1DShape (TypM (VarT size_var)) block_size
+    block_shape sizes = ArrayShape ((TypM (VarT size_var), block_size) : sizes)
 
     block_size =
       ExpM $ AppE defaultExpInfo
@@ -1885,7 +1948,8 @@ zipStreams2 ss
       of Just shapes -> Just $ foldr1 zip_array_shapes shapes 
          Nothing -> Nothing
       where
-        from_array_shape (Array1DShape ix sz) = Just (fromTypM ix, sz)
+        -- We can only simplify 1D array zip
+        from_array_shape (ArrayShape [(ix, sz)]) = Just (fromTypM ix, sz)
         from_array_shape _ = Nothing
         
         -- Compute the shape of zipped arrays.
@@ -1947,7 +2011,7 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
   case stream
   of GenerateStream {} ->
        case sexpShape stream
-       of Array1DShape size_ix size_val ->
+       of ArrayShape [(size_ix, size_val)] ->
             varAppE (pyonBuiltin the_for)
             [size_ix, TypM acc_ty]
             [return acc_repr,
@@ -1966,33 +2030,11 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
                           [varE acc_in, varE lv, varE acc_out])),
              return out_ptr]
 
-     BindStream src (binder, trans) -> do
-       let src_out_ty = sexpElementType src
-
-       -- Create a new accumulator function that runs the transformer stream 
-       -- and folds over it.  It will be used as the source stream's  
-       -- accumulator.  The accumulator function has 'binder' as one of
-       -- its parameters.
-       consumer <- do
-         acc_in_var <- newAnonymousVar ObjectLevel
-         let m_producer_var = patMVar binder
-         acc_out_var <- newAnonymousVar ObjectLevel
-         let params = [patM (acc_in_var ::: acc_ty),
-                       binder,
-                       patM (acc_out_var ::: outType acc_ty)]
-             retn = TypM $ initEffectType acc_ty
-         let local_init = ExpM $ VarE defaultExpInfo acc_in_var
-         let local_out = ExpM $ VarE defaultExpInfo acc_out_var
-         body <- translateStreamToFold tenv acc_ty acc_repr local_init acc_f local_out trans
-         return $ ExpM $ LamE defaultExpInfo $
-           FunM $ Fun { funInfo = defaultExpInfo
-                      , funTyParams = []
-                      , funParams = params
-                      , funReturn = retn
-                      , funBody = body}
-
-       -- Fold over the source stream
-       translateStreamToFold tenv acc_ty acc_repr init consumer out_ptr src
+     BindStream src (binder, trans) ->
+       translate_nested_loop src binder trans
+       
+     NestedLoopStream src (binder, trans) ->
+       translate_nested_loop src binder trans
 
      CaseStream shp scr alts -> do
        -- Translate each case alternative
@@ -2029,6 +2071,37 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
          castStreamExpressionShape (VarT $ pyonBuiltin the_list_shape) (shapeType shp) ty repr expr
        return $ ExpM $ AppE defaultExpInfo op [TypM ty, TypM acc_ty]
           [repr, acc_repr, acc_f, init, list_stream, out_ptr]       
+  where
+    -- Create a loop that takes values from 'src' and passes them to 'trans'. 
+    -- The loop implements 'bind'.
+    translate_nested_loop src binder trans = do
+      let src_out_ty = sexpElementType src
+
+      -- Create a new accumulator function that runs the transformer stream 
+      -- and folds over it.  It will be used as the source stream's  
+      -- accumulator.  The accumulator function has 'binder' as one of
+      -- its parameters.
+      consumer <- do
+        acc_in_var <- newAnonymousVar ObjectLevel
+        let m_producer_var = patMVar binder
+        acc_out_var <- newAnonymousVar ObjectLevel
+        let params = [patM (acc_in_var ::: acc_ty),
+                      binder,
+                      patM (acc_out_var ::: outType acc_ty)]
+            retn = TypM $ initEffectType acc_ty
+        let local_init = ExpM $ VarE defaultExpInfo acc_in_var
+        let local_out = ExpM $ VarE defaultExpInfo acc_out_var
+        body <- translateStreamToFold tenv acc_ty acc_repr local_init acc_f local_out trans
+        return $ ExpM $ LamE defaultExpInfo $
+          FunM $ Fun { funInfo = defaultExpInfo
+                     , funTyParams = []
+                     , funParams = params
+                     , funReturn = retn
+                     , funBody = body}
+
+      -- Fold over the source stream
+      translateStreamToFold tenv acc_ty acc_repr init consumer out_ptr src
+
          
 -- | Cast a stream of type @Stream given elt@ to a stream of type
 --   @Stream expected elt@.
