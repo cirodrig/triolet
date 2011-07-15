@@ -13,6 +13,7 @@ pyonBuiltinTypeNames =
   , "float"
   , "Complex"
   , "list"
+  , "matrix"
   , "NoneType"
   , "Any"
   , "PyonTuple0"
@@ -43,6 +44,7 @@ pyonBuiltinTypeNames =
   , "shape"
   , "list_shape"
   , "array_shape"
+  , "unit_shape"
 
     -- Integer type indices
   , "plus_i"
@@ -87,6 +89,7 @@ pyonBuiltinVariableNames =
   , "indOmega"
   , "someIndInt"
   , "make_list"
+  , "make_matrix"
   , "effTok"
   , "pf"
 
@@ -222,8 +225,10 @@ pyonBuiltinVariableNames =
   , "or"
   , "and"
   , "oper_DO"
+  , "return"
   , "oper_GUARD"
   , "oper_CAT_MAP"
+  , "bind"
   , "oper_EMPTY"
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"
@@ -250,9 +255,6 @@ pyonBuiltinVariableNames =
   , "fun_zip_Stream"
   , "fun_zip3_Stream"
   , "fun_zip4_Stream"
-  , "zip_StreamArray"
-  , "zip3_StreamArray"
-  , "zip4_StreamArray"
   , "fun_asList_Stream"
   , "histogramArray"
     

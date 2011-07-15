@@ -267,8 +267,11 @@ type shape : (bare -> bare) -> bare;
 -- The shape of a list stream
 data list_shape : bare {};
 
+-- The shape of a singleton stream
+data unit_shape : bare {};
+
 -- The shape of an array stream
-data array_shape : intindex -> bare {};
+data array_shape : intindex -> bare -> bare {};
 
 -------------------------------------------------------------------------------
 -- Representation dictionaries
@@ -608,6 +611,9 @@ deadRef : (a : bare) -> Writer a;
 
 oper_DO : (a : bare) -> Repr a -> Writer a -> Stream list_shape a;
 
+-- Explicit-shape version of oper_DO
+return : (a : bare) -> Repr a -> Writer a -> Stream unit_shape a;
+
 oper_GUARD : (a : bare)
           -> Repr a -> bool
 	  -> Stream list_shape a
@@ -621,6 +627,14 @@ oper_CAT_MAP :
  -> Stream list_shape a
  -> (a -> Stream list_shape b)
  -> Stream list_shape b;
+
+-- Explicit-shape version of oper_CAT_MAP
+bind :
+    (n : intindex)
+ -> (sh a b : bare)
+ -> Stream (array_shape n unit_shape) a
+ -> (a -> Stream sh b)
+ -> Stream (array_shape n sh) b;
 
 -- Sequential fold over a stream
 fun_fold_Stream : (a acc : bare)
@@ -709,6 +723,7 @@ fun_zip4_Stream : (sh a b c d : bare)
                -> Stream sh d
                -> Stream sh (PyonTuple4 a b c d);
 
+{-
 zip_StreamArray : (sizeA sizeB : intindex)
 	       -> (a b : bare)
                -> Repr a
@@ -740,6 +755,7 @@ zip4_StreamArray :
  -> Stream (array_shape sizeC) c
  -> Stream (array_shape sizeD) d
  -> Stream (array_shape (min_i (min_i (min_i sizeA sizeB) sizeC) sizeD)) (PyonTuple4 a b c d);
+-}
 
 fun_zip : (t : bare -> bare)
        -> (a b : bare)
@@ -783,7 +799,7 @@ len : (a : bare) -> list a -> int;
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)
             -> IndInt n
-            -> Stream (array_shape n) (Stored int);
+            -> Stream (array_shape n unit_shape) (Stored int);
 
 histogram : (t : bare -> bare)
          -> int
@@ -808,12 +824,12 @@ generate : (n : intindex)
         -> IndInt n
         -> Repr a
         -> (int -> Writer a)
-        -> Stream (array_shape n) a;
+        -> Stream (array_shape n unit_shape) a;
 
 generate_forever : (a : bare)
                 -> Repr a
                 -> (int -> Writer a)
-                -> Stream (array_shape pos_infty) a;
+                -> Stream (array_shape pos_infty unit_shape) a;
 
 safeSubscript : (a : bare)
              -> Repr a

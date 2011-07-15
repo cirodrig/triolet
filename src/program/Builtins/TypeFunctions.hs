@@ -10,6 +10,10 @@ import Type.Environment
 import Type.Compare
 import Type.Eval
 
+-- Create a 1D array shape expression
+array_shape sh =
+  varApp (pyonBuiltin the_array_shape) [sh, VarT $ pyonBuiltin the_unit_shape]
+
 builtinTypeFunctions :: Map.Map Var BuiltinTypeFunction
 builtinTypeFunctions =
   Map.fromList
@@ -40,8 +44,7 @@ shapePureTF = typeFunction 1 compute_shape
               return $ VarT (pyonBuiltin the_list_shape)
           | op `isPyonBuiltin` the_array ->
               case args
-              of [arg, _] ->
-                   return $ varApp (pyonBuiltin the_array_shape) [arg]
+              of [arg, _] -> return $ array_shape arg
         _ -> cannot_reduce
       where
         cannot_reduce =
@@ -75,8 +78,7 @@ shapeMemTF = typeFunction 1 compute_shape
               return $ VarT (pyonBuiltin the_list_shape)
           | op `isPyonBuiltin` the_array ->
               case args
-              of [arg, _] ->
-                   return $ varApp (pyonBuiltin the_array_shape) [arg]
+              of [arg, _] -> return $ array_shape arg
         _ -> cannot_reduce
       where
         cannot_reduce =

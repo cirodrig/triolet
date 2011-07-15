@@ -190,6 +190,11 @@ storedIntType = storedType intType
 shapeOfType :: TypM -> TypM
 shapeOfType (TypM t) = TypM $ varApp (pyonBuiltin the_shape) [t]
 
+array1Shape :: Type -> Type
+array1Shape size =
+  varApp (pyonBuiltin the_array_shape)
+  [size, VarT $ pyonBuiltin the_unit_shape]
+
 -------------------------------------------------------------------------------
 -- Rewrite rules
 
@@ -272,7 +277,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
         store_f =
           ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
 
-        array_shape = varApp (pyonBuiltin the_array_shape) [posInftyT]
+        array_shape = array1Shape posInftyT
         generate_expr =
           ExpM $ AppE defaultExpInfo generate_f [TypM storedIntType]
           [ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int),
@@ -422,7 +427,8 @@ rwRange inf [] [count] = do
     defineAndInspectIndInt tenv (return count)
     (\intindex intvalue ->
       varAppE (pyonBuiltin the_fun_asList_Stream)
-      [TypM $ varApp (pyonBuiltin the_array_shape) [VarT intindex], TypM storedIntType]
+      [TypM $ array1Shape (VarT intindex),
+       TypM storedIntType]
       [varAppE (pyonBuiltin the_rangeIndexed) [TypM $ VarT intindex]
        [varAppE (pyonBuiltin the_indInt) [TypM $ VarT intindex]
         [varE intvalue]]])
@@ -435,7 +441,7 @@ rwTraverseList inf [elt_type] [elt_repr, list] = do
   fmap Just $
     caseOfList tenv (return list) elt_type $ \size_index size_var array ->
     varAppE (pyonBuiltin the_fun_asList_Stream) 
-    [TypM $ varApp (pyonBuiltin the_array_shape) [VarT size_index], elt_type]
+    [TypM $ array1Shape (VarT size_index), elt_type]
     [varAppE (pyonBuiltin the_generate)
      [TypM (VarT size_index), elt_type]
      [varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_index] [varE size_var],
@@ -1006,7 +1012,7 @@ rwParallelHistogramArray inf
                  return_arg])
 
     array_type = varApp (pyonBuiltin the_array) [fromTypM size_ix, storedIntType]
-    array_shape = varApp (pyonBuiltin the_array_shape) [fromTypM size_ix]
+    array_shape = array1Shape (fromTypM size_ix)
     
     int_repr = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int)
     array_repr :: TypeEvalM ExpM
@@ -1349,7 +1355,7 @@ shapeType :: Shape -> Type
 shapeType shp = 
   case shp
   of ListShape                 -> VarT $ pyonBuiltin the_list_shape
-     Array1DShape (TypM i) _   -> varApp (pyonBuiltin the_array_shape) [i]
+     Array1DShape (TypM i) _   -> array1Shape i
      UnknownShape (TypM shape) -> shape
   
 -- | Get the shape encoded in a type.
@@ -2052,7 +2058,7 @@ castStreamExpressionShape expected_shape given_shape elt_type elt_repr expr = do
                         -- Should verify that array size matches here.
                         -- Since the input program was well-typed, array size
                         -- /should/ match.
-                        Just expr
+                        trace "castStreamExpressionShape: Unsafe shape assumption" $ Just expr
                   _ -> Nothing
          _ -> Nothing
                   
