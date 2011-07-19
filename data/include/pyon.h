@@ -25,6 +25,7 @@ typedef struct {
 
 /* Pyon data structure interfaces */
 #include "pyon_list.h"
+#include "pyon_matrix.h"
 
 static inline void Pyon_init(void) {
   /* N.B. the GC must be initialized from the main program, not from a library.

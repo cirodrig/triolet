@@ -45,6 +45,7 @@ iterType shp ty =
   in ConTy (tiBuiltin the_con_iter) @@ shape_type @@ ty
 
 listIterType = iterType (ConTy (tiBuiltin the_con_list))
+matrixIterType = iterType (ConTy (tiBuiltin the_con_matrix))
 
 -------------------------------------------------------------------------------
 -- Class initialization
@@ -221,7 +222,7 @@ mkTraversableClass = do
                         , clsConstraint = []
                         , clsMethods = [iter, build]
                         , clsName = "Traversable"
-                        , clsInstances = [list_instance, iter_instance]
+                        , clsInstances = [list_instance, matrix_instance, iter_instance]
                         , clsTypeCon = pyonBuiltin SystemF.the_TraversableDict
                         , clsDictCon = pyonBuiltin SystemF.the_traversableDict
                         }
@@ -239,6 +240,15 @@ mkTraversableClass = do
                   pyonBuiltin SystemF.the_TraversableDict_list_traverse
                 , InstanceMethod $
                   pyonBuiltin SystemF.the_TraversableDict_list_build]
+
+            matrix_instance =
+                monomorphicInstance cls
+                (ConTy $ tiBuiltin the_con_matrix)
+                Nothing
+                [ InstanceMethod $
+                  pyonBuiltin SystemF.the_TraversableDict_matrix_traverse
+                , InstanceMethod $
+                  pyonBuiltin SystemF.the_TraversableDict_matrix_build]
 
             iter_instance =
               -- A stream of anything is iterable
@@ -582,7 +592,8 @@ mkPassableClass = do
                                       bool_instance, none_instance,
                                       complex_instance,
                                       any_instance,
-                                      list_instance, iter_instance,
+                                      list_instance, matrix_instance,
+                                      iter_instance,
                                       tuple2_instance, tuple3_instance,
                                       tuple4_instance]
                     , clsTypeCon = pyonBuiltin SystemF.the_Repr
@@ -615,6 +626,15 @@ mkPassableClass = do
           , insClass = cls
           , insType = ConTy (tiBuiltin the_con_list) @@ ConTy b
           , insCon = Just $ pyonBuiltin SystemF.the_repr_list
+          , insMethods = []
+          }
+  ; let matrix_instance =
+          Instance
+          { insQVars = [b]
+          , insConstraint = [passable $ ConTy b]
+          , insClass = cls
+          , insType = ConTy (tiBuiltin the_con_matrix) @@ ConTy b
+          , insCon = Just $ pyonBuiltin SystemF.the_repr_matrix
           , insMethods = []
           }
   ; let iter_instance =
@@ -873,6 +893,7 @@ initializeTIBuiltins = do
             , ("iter", Star :-> Star :-> Star,
                [| pyonBuiltin SystemF.the_Stream |])
             , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |])
+            , ("matrix", Star :-> Star, [| pyonBuiltin SystemF.the_matrix |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
             , ("shape", (Star :-> Star) :-> Star,
                [| pyonBuiltin SystemF.the_shape |])

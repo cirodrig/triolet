@@ -378,6 +378,8 @@ isReprCon v =
            , pyonBuiltin the_repr_float
            , pyonBuiltin the_repr_bool
            , pyonBuiltin the_repr_list
+           , pyonBuiltin the_repr_array
+           , pyonBuiltin the_repr_matrix
            , pyonBuiltin the_repr_Complex
            , pyonBuiltin the_repr_PyonTuple2
            , pyonBuiltin the_repr_PyonTuple3

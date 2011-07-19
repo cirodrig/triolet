@@ -38,6 +38,12 @@ computeReprDict ty =
            element_dict <- computeReprDict element_type
            emitAtom1 owned_type $
              LL.closureCallA list_repr_ctor [element_dict]
+       | op `isPyonBuiltin` the_matrix -> do
+           let [element_type] = args
+           let mat_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_matrix)
+           element_dict <- computeReprDict element_type
+           emitAtom1 owned_type $
+             LL.closureCallA mat_repr_ctor [element_dict]
        | op `isPyonBuiltin` the_int ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_int
        | op `isPyonBuiltin` the_float ->
@@ -75,6 +81,7 @@ marshalCParameter :: ExportDataType -> Lower ParameterMarshaler
 marshalCParameter ty =
   case ty
   of ListET _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     MatrixET _ -> passParameterWithType (LL.PrimType LL.PointerType)
      PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonComplexFloatET ->
@@ -90,6 +97,7 @@ demarshalCParameter :: ExportDataType -> Lower ParameterMarshaler
 demarshalCParameter ty =
   case ty
   of ListET _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     MatrixET _ -> passParameterWithType (LL.PrimType LL.PointerType)
      PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
@@ -178,6 +186,7 @@ marshalCReturn :: ExportDataType -> Lower ReturnMarshaler
 marshalCReturn ty =
   case ty
   of ListET _ -> return_new_reference (LL.RecordType listRecord)
+     MatrixET _ -> return_new_reference (LL.RecordType matrixRecord)
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
      PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
@@ -208,6 +217,9 @@ demarshalCReturn ty =
   of ListET element_type ->
        let list_type = varApp (pyonBuiltin the_list) [element_type]
        in demarshal_reference list_type
+     MatrixET element_type ->
+       let mat_type = varApp (pyonBuiltin the_matrix) [element_type]
+       in demarshal_reference mat_type
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
      PyonComplexFloatET -> passReturnWithType (LL.RecordType complex_float_type)
@@ -347,6 +359,9 @@ getCExportType tenv ty =
        | con `isPyonBuiltin` the_list ->
            case args
            of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
+       | con `isPyonBuiltin` the_matrix ->
+           case args
+           of [arg] -> MatrixET arg -- FIXME: verify that 'arg' is monomorphic
      _ | FunT {} <- ty ->
        case getFunctionExportType tenv ty
        of (param_types, return_type) -> FunctionET param_types return_type

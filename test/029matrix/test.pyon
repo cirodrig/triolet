@@ -1,0 +1,5 @@
+
+def test(m):
+  return __build__([x + 1 for x in __iter__(m)])
+
+export ccall test : matrix(float) -> matrix(float)

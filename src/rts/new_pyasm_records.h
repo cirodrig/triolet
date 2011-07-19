@@ -153,6 +153,18 @@ record PyonList {
   pointer contents;		// Pointer to list contents
 };
 
+/* 2D arrays (called "matrices")
+ *
+ * A matrix consists of its dimensions and a pointer to an array of elements.
+ * The dimensions are (y, x).  Array elements are consecutive in the X
+ * dimension.
+ */
+record PyonMatrix {
+  FinIndInt size_y;
+  FinIndInt size_x;
+  pointer contents;		// Pointer to matrix contents
+};
+
 /* A stream of values.  Stream elements are computed on demand.
  *
  * next : (pointer to state, pointer to output) -> bool

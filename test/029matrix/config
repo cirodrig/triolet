@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Mapping over a matrix",
+  pyonSources	 = ["test.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "yes"
+}

@@ -29,8 +29,13 @@ data ExportSpec =
 data ExportDataType =
     -- | A Pyon list.
     --   The list contents can have any monomorphic type.  It's an error
-    --   for the list to mention type variables other than constructors.
+    --   for the type to mention type variables other than constructors.
     ListET Type
+
+    -- | A Pyon matrix.
+    --   The matrix contents can have any monomorphic type.  It's an error
+    --   for the type to mention type variables other than constructors.
+  | MatrixET Type
 
     -- | A C array.  The array is passed as a pointer.  The array
     -- size is passed as an additional parameter.

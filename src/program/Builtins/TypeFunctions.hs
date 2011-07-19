@@ -40,7 +40,7 @@ shapePureTF = typeFunction 1 compute_shape
         Just (op, args)
           | op `isPyonBuiltin` the_Stream ->
               case args of [arg, _] -> reduceToWhnf arg
-          | op `isPyonBuiltin` the_list ->
+          | op `isPyonBuiltin` the_list || op `isPyonBuiltin` the_matrix ->
               return $ VarT (pyonBuiltin the_list_shape)
           | op `isPyonBuiltin` the_array ->
               case args
@@ -74,7 +74,7 @@ shapeMemTF = typeFunction 1 compute_shape
                         | op `isPyonBuiltin` the_Stream ->
                             reduceToWhnf arg2
                       _ -> cannot_reduce
-          | op `isPyonBuiltin` the_list ->
+          | op `isPyonBuiltin` the_list || op `isPyonBuiltin` the_matrix ->
               return $ VarT (pyonBuiltin the_list_shape)
           | op `isPyonBuiltin` the_array ->
               case args

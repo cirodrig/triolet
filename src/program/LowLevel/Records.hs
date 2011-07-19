@@ -225,6 +225,14 @@ streamRecord =
 -- | A Pyon list.
 listRecord :: StaticRecord
 listRecord = constStaticRecord
-             [ PrimField nativeWordType -- Size
+             [ RecordField finIndexedIntRecord -- Size
+             , PrimField PointerType    -- Pointer to contents
+             ]
+
+-- | A Pyon matrix.
+matrixRecord :: StaticRecord
+matrixRecord = constStaticRecord
+             [ RecordField finIndexedIntRecord -- Size (y)
+             , RecordField finIndexedIntRecord -- Size (x)
              , PrimField PointerType    -- Pointer to contents
              ]

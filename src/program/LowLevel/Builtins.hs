@@ -32,6 +32,7 @@ module LowLevel.Builtins
         the_prim_apply_i64_f,
         the_prim_apply_i64,
         the_fun_repr_list,
+        the_fun_repr_matrix,
         the_fun_repr_PyonTuple2,
         the_fun_repr_PyonTuple3,
         the_fun_repr_PyonTuple4,

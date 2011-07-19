@@ -22,6 +22,7 @@ exportParamDeclSpecs :: ExportDataType -> [DeclSpecs]
 exportParamDeclSpecs export_type =
   case export_type
   of ListET _ -> [ptrDeclSpecs $ nameDeclSpecs "PyonList"]
+     MatrixET _ -> [ptrDeclSpecs $ nameDeclSpecs "PyonMatrix"]
      CSizeArrayET et ->
        case exportParamDeclSpecs et
        of [spec] -> [nameDeclSpecs "PyonInt", ptrDeclSpecs spec]
@@ -41,6 +42,7 @@ exportReturnDeclSpecs :: ExportDataType -> ([DeclSpecs], DeclSpecs)
 exportReturnDeclSpecs export_type =
   case export_type
   of ListET _ -> ([], ptrDeclSpecs $ nameDeclSpecs "PyonList")
+     MatrixET _ -> ([], ptrDeclSpecs $ nameDeclSpecs "PyonMatrix")
      CSizeArrayET et -> 
        case exportParamDeclSpecs et
        of [spec] -> ([nameDeclSpecs "PyonInt"], ptrDeclSpecs spec)

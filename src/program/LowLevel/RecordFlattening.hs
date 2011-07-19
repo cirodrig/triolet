@@ -398,6 +398,7 @@ flattenExportedParam etype original_param = do
   let no_change' = no_change xparams
   case etype of
     ListET _ -> no_change'
+    MatrixET _ -> no_change'
     PyonIntET -> no_change'
     PyonFloatET -> no_change'
     PyonComplexFloatET ->

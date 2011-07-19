@@ -137,6 +137,13 @@ data list : bare -> bare
   (FinIndInt n, Referenced (array n a));
 };
 
+data matrix : bare -> bare
+{
+  make_matrix
+  (a : bare) (m : intindex, n : intindex)
+  (FinIndInt m, FinIndInt n, Referenced (array m (array n a)));
+};
+
 data PyonTuple2 : bare -> bare -> bare
 {
   pyonTuple2
@@ -285,6 +292,7 @@ repr_float : Repr (Stored float);
 repr_bool : Repr (Stored bool);
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
+repr_matrix : (a : bare) -> Repr a -> Repr (matrix a);
 repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
 
 repr_PyonTuple2 :
@@ -331,6 +339,12 @@ TraversableDict_list_build :
 
 TraversableDict_list_traverse :
   (a : bare) -> Repr a -> list a -> Stream list_shape a;
+
+TraversableDict_matrix_build :
+  (a : bare) -> Repr a -> Stream list_shape a -> Writer (matrix a);
+
+TraversableDict_matrix_traverse :
+  (a : bare) -> Repr a -> matrix a -> Stream list_shape a;
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
@@ -632,9 +646,23 @@ oper_CAT_MAP :
 bind :
     (n : intindex)
  -> (sh a b : bare)
+ -> Repr a
+ -> Repr b
  -> Stream (array_shape n unit_shape) a
  -> (a -> Stream sh b)
  -> Stream (array_shape n sh) b;
+
+-- Strip-mine a stream with array shape.  This is, roughly, an
+-- eliminator for 'bind'.  Note that the last 2 arguments and return type
+-- are similar to those of 'bind', but in a different order.
+chunk :
+    (n : intindex)
+ -> (sh a b : bare)
+ -> Repr a
+ -> Repr b
+ -> Stream (array_shape n sh) a
+ -> (Stream sh a -> Writer b)
+ -> Stream (array_shape n unit_shape) b;
 
 -- Sequential fold over a stream
 fun_fold_Stream : (a acc : bare)
@@ -830,6 +858,13 @@ generate_forever : (a : bare)
                 -> Repr a
                 -> (int -> Writer a)
                 -> Stream (array_shape pos_infty unit_shape) a;
+
+build_array : (n : intindex)
+           -> (a : bare)
+           -> FinIndInt n
+           -> Repr a
+           -> Stream (array_shape n unit_shape) a
+           -> Writer (array n a);
 
 safeSubscript : (a : bare)
              -> Repr a
