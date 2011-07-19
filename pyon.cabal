@@ -119,16 +119,6 @@ Executable pyon
     SystemF.Typecheck
     SystemF.TypecheckSF
     SystemF.TypecheckMem
-    -- CParser.AST
-    -- CParser.Driver
-    -- CParser.GenCore
-    -- CParser.LevelInference
-    -- CParser.LexData
-    -- CParser.Lexer
-    -- CParser.Parser
-    -- CParser.Pretty
-    -- CParser.PrettyAST
-    -- CParser.Resolve
     CParser2.AST
     CParser2.Driver
     CParser2.GenCore

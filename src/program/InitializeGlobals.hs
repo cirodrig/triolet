@@ -16,7 +16,6 @@ import Type.Type
 
 import Parser.Driver
 import Parser.ParserSyntax(createParserGlobals)
--- import qualified CParser.Driver
 import qualified CParser2.Driver
 import LowLevel.InitializeBuiltins
 import Builtins.Builtins
@@ -41,17 +40,10 @@ loadBuiltins cl_globals = do
     in return (n + length vars, vars)
   
   withTheNewVarIdentSupply $ \supply -> do
-    -- core_types <- CParser.Driver.parseCoreModule supply
-    -- initializeGlobalVar the_newCoreTypes (return core_types)
-    -- initializeGlobalVar the_systemFTypes (return $ convertToPureTypeEnv core_types)
-    -- initializeGlobalVar the_memTypes (return $ convertToMemTypeEnv core_types)
-
-    -- This will eventually replace the old core types
-    core2_types <- CParser2.Driver.parseCoreModule supply
-    initializeGlobalVar the_specTypes (return core2_types)
-    initializeGlobalVar the_systemFTypes (return $ specToPureTypeEnv core2_types)
-    initializeGlobalVar the_memTypes (return $ specToMemTypeEnv core2_types)
-    -- print $ vcat [hang (text $ show n) 6 (unparenthesized $ pprReturn t) | (n, t) <- IntMap.toList $ getAllTypes core2_types]
+    core_types <- CParser2.Driver.parseCoreModule supply
+    initializeGlobalVar the_specTypes (return core_types)
+    initializeGlobalVar the_systemFTypes (return $ specToPureTypeEnv core_types)
+    initializeGlobalVar the_memTypes (return $ specToMemTypeEnv core_types)
 
   -- Initialize the low-level builtins
   withTheLLVarIdentSupply $ \ll_supply -> do
