@@ -35,6 +35,7 @@ import qualified SystemF.PrintMemoryIR
 import qualified SystemF.ReprInference as SystemF
 import qualified SystemF.Floating as SystemF
 import qualified SystemF.Simplify as SystemF
+import qualified SystemF.Rewrite as SystemF
 import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified LowLevel.Syntax as LowLevel
@@ -168,6 +169,9 @@ compilePyonToPyonAsm compile_flags path text = do
 
   -- Convert to explicit memory representation
   repr_mod <- SystemF.representationInference sf_mod
+  
+  -- Add predefined functions to the module
+  repr_mod <- SystemF.insertGlobalSystemFFunctions repr_mod
 
   putStrLn ""
   putStrLn "Memory IR"

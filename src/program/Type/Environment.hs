@@ -48,6 +48,7 @@ module Type.Environment
         isAdapterCon,
         specToPureTypeEnv,
         specToMemTypeEnv,
+        specToMemType,
         specToTypeEnv
        )
 where

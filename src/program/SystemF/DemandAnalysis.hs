@@ -8,7 +8,7 @@ Simon Peyton Jones and Simon Marlow, \"Secrets of the Glasgow Haskell
 Compiler inliner\", and use information described in Simon Peyton Jones and
 Will Partain, \"Measuring the Effectiveness of a Simple Strictness Analyzer.\"
 We do not use strictness information as in the latter paper, but we do use
-information about how a value is demanded.
+information about how a value is deconstructed.
 -}
 
 {-# LANGUAGE TypeSynonymInstances, ViewPatterns #-}
@@ -82,17 +82,28 @@ parallel dfs = Df $ \tenv ->
 underLambda :: Df a -> Df a
 underLambda m = censor lambdaAbstracted m
 
+-- | Demand analysis only deals with variables that can be removed from the 
+--   program.  Global type variables (type functions and constructors) and
+--   data constructor definitions cannot be removed, so they are ignored.
+--   To decide whether a variable is ignored, look it up in the type
+--   environment.
+isDeletable :: TypeEnv -> Var -> Bool
+isDeletable tenv v =
+  isNothing (lookupDataType v tenv) &&
+  isNothing (lookupDataCon v tenv) &&
+  isNothing (lookupTypeFunction v tenv)
+
 -- | A helper function for 'mention'.  If the variable is a global type or 
 --   data constructor, then ignore it.
 mentionHelper v dmd = do
-  type_entry <- asks (lookupType v)
-  if isJust type_entry
-    then return ()
-    else tell $ useVariable v dmd
+  tenv <- ask
+  if isDeletable tenv v
+    then tell $ useVariable v dmd
+    else return ()
 
 mentionHelperList vs dmd = do
   tenv <- ask
-  let used_variables = [v | v <- vs, isJust $ lookupType v tenv]
+  let used_variables = [v | v <- vs, isDeletable tenv v]
   tell $ useVariables used_variables dmd
 
 -- | A variable was used somehow.  This is the most general case.

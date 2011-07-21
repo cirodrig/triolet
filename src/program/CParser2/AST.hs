@@ -110,6 +110,45 @@ type LType ix = Located (Type ix)
 -- | A variable binder, binding a type or a value depending on how it's used.
 data Domain ix = Domain (Identifier ix) (LType ix)
 
+-- | An expression
+data Exp a =
+    VarE (Identifier a)
+  | IntE !Integer
+  | TAppE (LExp a) (LType a)    
+  | AppE (LExp a) (LExp a)
+  | CaseE (LExp a) [LAlt a]
+
+type LExp ix = Located (Exp ix)
+
+data Alt a =
+  Alt 
+  { altCon :: Identifier a
+  , altTyArgs :: [LType a] 
+  , altExTypes :: [Domain a]
+  , altFields :: [Domain a]
+  , altBody :: LExp a
+  }
+
+type LAlt ix = Located (Alt ix)
+
+-- | A function that was specified in source code
+data Fun ix =
+  Fun
+  { fTyParams :: [Domain ix]
+  , fParams :: [Domain ix]
+  , fRange :: LType ix
+  , fBody :: LExp ix
+  }
+
+funType :: SourcePos -> Fun ix -> LType ix
+funType pos f =
+  let monotype = Prelude.foldr fun_type (fRange f) [t | Domain _ t <- fParams f]
+      polytype = Prelude.foldr forall_type monotype (fTyParams f)
+  in polytype
+  where
+    fun_type d r = L pos (FunT d r)
+    forall_type d r = L pos (AllT d r)
+
 -- | A data constructor declaration.
 --   Corresponds to @Type.Environment.DataConType@.
 data DataConDecl ix =
@@ -136,6 +175,7 @@ data Entity ix =
     VarEnt (LType ix) 
   | TypeEnt (LType ix) (Maybe BuiltinTypeFunction)
   | DataEnt (LType ix) [LDataConDecl ix] [Attribute]
+  | FunEnt (Located (Fun ix))
 
 type LDecl ix = Located (Decl ix)
 
@@ -151,6 +191,9 @@ data Parsed
 type PType = Type Parsed
 type PLType = LType Parsed
 type PDomain = Domain Parsed
+type PLExp = LExp Parsed
+type PLAlt = LAlt Parsed
+type PFun = Fun Parsed
 type PDecl = Decl Parsed
 type PLDecl = LDecl Parsed
 type PModule = Module Parsed
@@ -166,6 +209,8 @@ data Resolved
 
 type RType = Type Resolved
 type RLType = LType Resolved
+type RLExp = LExp Resolved
+type RFun = Fun Resolved
 type RDecl = Decl Resolved
 type RLDecl = LDecl Resolved
 type RModule = Module Resolved

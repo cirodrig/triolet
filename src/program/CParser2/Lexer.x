@@ -66,7 +66,9 @@ rules :- ----------------------------------------------------------------------
 -- Identifiers
 
 <0>     "attribute" / @eow	{ posnTok AttributeTok }
+<0>     "case" / @eow		{ posnTok CaseTok }
 <0>     "data" / @eow		{ posnTok DataTok }
+<0>     "of" / @eow		{ posnTok OfTok }
 <0>     "type" / @eow		{ posnTok TypeTok }
 <0>	"_" / @eow		{ posnTok WildTok }
 <0>	@word			{ posn mkIdent }
@@ -80,8 +82,10 @@ rules :- ----------------------------------------------------------------------
 <0>	\(			{ posnTok LParenTok }
 <0>	\)			{ posnTok RParenTok }
 <0>	\,			{ posnTok CommaTok }
+<0>	\.			{ posnTok DotTok }
 <0>	\;			{ posnTok SemiTok }
 
+<0>	\@			{ posnTok AtTok }
 <0>	\-\> / @eoo		{ posnTok ArrowTok }
 <0>	\= / @eoo		{ posnTok EqualTok }
 <0>	\| / @eoo		{ posnTok PipeTok }

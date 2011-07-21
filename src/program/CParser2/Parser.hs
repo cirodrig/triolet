@@ -1,4 +1,5 @@
 
+{-# LANGUAGE ViewPatterns #-}
 module CParser2.Parser(parseFile)
 where
 
@@ -183,6 +184,82 @@ pDomains = do
   return [Domain v ty | v <- vs]
 
 -------------------------------------------------------------------------------
+-- * Expressions
+  
+pExp :: P PLExp
+pExp = caseE <|> appExp <?> "expression"
+
+caseE :: P PLExp
+caseE = located $ do
+  match CaseTok
+  scrutinee <- pExp
+  match OfTok
+  alts <- alt_list <|> one_alt
+  return $ CaseE scrutinee alts
+  where
+    one_alt = (:[]) <$> pAlt
+    alt_list = braces $ pAlt `sepBy` match SemiTok
+
+-- | An expression involving application or something with higher precedence
+appExp :: P PLExp
+appExp = do
+  loc <- locatePosition
+  operator <- atomicExp 
+  apply loc operator
+  where
+    -- Apply to any operands we can find.
+    -- This function is recursive to handle multiple (left-associative)
+    -- applications.
+    apply loc f = type_app <|> app <|> return f
+      where
+        type_app = do
+          match AtTok
+          operand <- pTypeAtom  -- Non-atomic types must be parenthesized
+
+          -- Parse additional operands
+          apply loc (L loc $ TAppE f operand)
+        
+        app = do
+          operand <- pExp
+          apply loc (L loc $ AppE f operand)
+
+atomicExp = varE <|> intE <|> parens pExp
+
+varE :: P PLExp
+varE = located (VarE <$> identifier) <?> "variable"
+
+intE :: P PLExp
+intE = located (IntE <$> int) <?> "integer"
+
+-- | Parse a case alternative
+pAlt :: P PLAlt
+pAlt = located $ do
+  con <- identifier
+  targs <- many type_arg
+  (concat -> tparams) <- many type_param
+  (concat -> params) <- many (parens pDomains)
+  match DotTok
+  body <- pExp
+  return $ Alt con targs tparams params body
+  where
+    type_arg = PS.try (match AtTok >> pTypeAtom)
+    type_param = match AtTok >> parens pDomains
+
+-- | Parse a function signature.
+--
+-- > @(t1 : k1) @(t2 : k2) ... (x1 : T1) (x2 : T2) ... -> T
+funSignature :: P ([PDomain], [PDomain], PLType)
+funSignature = do
+  (concat -> tparams) <- many type_param
+  (concat -> params) <- many param
+  match ArrowTok
+  range <- pType
+  return (tparams, params, range)
+  where
+    type_param = match AtTok >> parens pDomains
+    param = parens pDomains
+
+-------------------------------------------------------------------------------
 -- * Declarations
 
 pDataDecl :: P PLDecl
@@ -213,13 +290,23 @@ pTypeDecl = located $ do
 
 pVarDecl :: P PLDecl
 pVarDecl = located $ do
-  v <- identifier
-  match ColonTok
+  -- If the second token is a colon, then this is a variable declaration 
+  -- Otherwise it might be some other kind of declaration
+  v <- PS.try (identifier <* match ColonTok)
   kind <- pType
   return $ Decl v $ VarEnt kind
 
-pDecl = pDataDecl <|> pTypeDecl <|> pVarDecl <?>
-        "type, data, or variable declaration"
+pFunDecl :: P PLDecl
+pFunDecl = do
+  pos <- locatePosition
+  v <- identifier
+  (ty_params, params, range) <- funSignature
+  match EqualTok
+  body <- pExp
+  return $ L pos $ Decl v $ FunEnt (L pos (Fun ty_params params range body))
+
+pDecl = pDataDecl <|> pTypeDecl <|> pVarDecl <|> pFunDecl <?>
+        "type, data, variable, or function declaration"
 
 pModule :: P PModule
 pModule = Module <$> pDecl `sepEndBy` match SemiTok <* eof

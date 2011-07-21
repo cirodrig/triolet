@@ -7,6 +7,7 @@ import Data.IORef
 import Common.Supply
 import Common.Identifier
 import qualified SystemF.Syntax as SystemF
+import qualified SystemF.MemoryIR as SystemF
 import qualified LowLevel.Syntax as LowLevel
 import GlobalVar
 import Type.Environment
@@ -50,6 +51,11 @@ the_memTypes = defineInitGlobalVar ()
 the_specTypes :: InitGlobalVar Type.Environment.SpecTypeEnv
 {-# NOINLINE the_specTypes #-}
 the_specTypes = defineInitGlobalVar ()
+
+-- | Definitions of some built-in functions.
+the_coreModule :: InitGlobalVar (SystemF.Module SystemF.Mem)
+{-# NOINLINE the_coreModule #-}
+the_coreModule = defineInitGlobalVar ()
 
 -- | A map from builtin System F function variables 
 --   to builtin low-level function variables

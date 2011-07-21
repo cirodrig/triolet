@@ -1,3 +1,6 @@
+{-| This module translates core type declarations in AST form to
+--  specification types.  It's used during initialization.
+-}
 
 {-# LANGUAGE ViewPatterns #-}
 module CParser2.GenCore (createCoreTable) where
@@ -16,6 +19,20 @@ import qualified Type.Type as Type
 import Type.Environment
 import qualified Type.Eval as Type
 import Type.Var
+
+-- | Verify that the module contains no function definitions.
+--   This function throws an error if the check fails.  Its result should
+--   be evaluated strictly.
+checkModule :: Module Resolved -> Module Resolved
+checkModule mod@(Module decls)
+  | any is_fun_decl decls =
+      internalError "Unexpected function declaration"
+  | otherwise = mod
+  where
+    is_fun_decl ldecl =
+      case unLoc ldecl
+      of Decl _ (FunEnt _) -> True
+         _                 -> False
 
 -------------------------------------------------------------------------------
 
@@ -105,7 +122,11 @@ translateDecl tenv (Decl name ent) =
   where
     core_name = toVar name
 
-createCoreTable (Module decls) =
-  let tenv = foldr ($) wiredInTypeEnv $ map translate decls
-      translate ldecl = translateDecl tenv (unLoc ldecl)
-  in tenv
+-- | Create a type environment from the given module AST
+createCoreTable mod =
+  case checkModule mod
+  of Module decls ->
+       let tenv = foldr ($) wiredInTypeEnv $ map translate decls
+           translate ldecl = translateDecl tenv (unLoc ldecl)
+       in tenv
+

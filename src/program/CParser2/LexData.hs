@@ -22,14 +22,18 @@ data Tok =
   | RBracketTok
   | LParenTok
   | RParenTok
+  | AtTok
   | CommaTok
+  | DotTok
   | EqualTok
   | PipeTok
   | SemiTok
   | ColonTok
   | ArrowTok
   | AttributeTok
+  | CaseTok
   | DataTok
+  | OfTok
   | TypeTok
   | WildTok
     deriving(Eq)
@@ -45,14 +49,18 @@ showTok t =
        RBracketTok  -> "right bracket"
        LParenTok    -> "left parenthesis"
        RParenTok    -> "right parenthesis"
+       AtTok        -> "at sign"
        CommaTok     -> "comma"
+       DotTok       -> "period"
        EqualTok     -> "equal"
        PipeTok      -> "vertical bar"
        SemiTok      -> "semicolon"
        ColonTok     -> "colon"
        ArrowTok     -> "arrow"
        AttributeTok -> "'attribute'"
+       CaseTok      -> "'case'"
        DataTok      -> "'data'"
+       OfTok        -> "'of'"
        TypeTok      -> "'type'"
        WildTok      -> "underscore"
 

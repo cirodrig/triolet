@@ -11,7 +11,7 @@ Tested-With:	GHC == 6.12.1, GHC == 6.12.3
 
 Data-Dir:	dist/build/data
 Data-Files:
-  symbols/coretypes
+  symbols/corecode
   symbols/coretypes2
   include/pyon.h
   include/pyon_list.h
@@ -121,6 +121,7 @@ Executable pyon
     SystemF.TypecheckMem
     CParser2.AST
     CParser2.Driver
+    CParser2.GenCode
     CParser2.GenCore
     CParser2.LexData
     CParser2.Lexer

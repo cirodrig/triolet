@@ -1,6 +1,7 @@
 
 module SystemF.Rewrite
-       (RewriteRuleSet,
+       (insertGlobalSystemFFunctions,
+        RewriteRuleSet,
         getVariableReplacements,
         generalRewrites,
         parallelizingRewrites,
@@ -28,6 +29,16 @@ import Type.Environment
 import Type.Compare
 import Type.Eval
 import Type.Type
+import GlobalVar
+import Globals
+
+-- | Insert the global, predefined function definitions into the module
+insertGlobalSystemFFunctions :: Module Mem -> IO (Module Mem)
+insertGlobalSystemFFunctions mod = do
+  core_mod <- readInitGlobalVarIO the_coreModule
+  let Module _ core_defs _ = core_mod
+  let Module mod_name defs exports = mod
+  return $ Module mod_name (core_defs ++ defs) exports
 
 -- | Type index for stream expressions 
 data Stream
@@ -265,7 +276,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
   where
     table = [ (pyonBuiltin the_convertToBare, rwConvertToBare)
             , (pyonBuiltin the_convertToBoxed, rwConvertToBoxed)
-            , (pyonBuiltin the_range, rwRange)
+            -- , (pyonBuiltin the_range, rwRange)
             , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
             , (pyonBuiltin the_TraversableDict_list_build, rwBuildList)
             , (pyonBuiltin the_TraversableDict_matrix_traverse, rwTraverseMatrix)
@@ -451,6 +462,7 @@ rwConvertToBoxed inf [TypM bare_type] [repr, arg]
 
 rwConvertToBoxed _ _ _ = return Nothing
 
+{-
 -- | Convert 'range' into an explicitly indexed variant
 rwRange :: RewriteRule
 rwRange inf [] [count] = do
@@ -465,7 +477,7 @@ rwRange inf [] [count] = do
        [varAppE (pyonBuiltin the_indInt) [TypM $ VarT intindex]
         [varE intvalue]]])
 
-rwRange _ _ _ = return Nothing
+rwRange _ _ _ = return Nothing-}
 
 rwTraverseList :: RewriteRule
 rwTraverseList inf [elt_type] [elt_repr, list] = do

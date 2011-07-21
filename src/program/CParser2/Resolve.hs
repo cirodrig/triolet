@@ -229,20 +229,67 @@ resolveDomain (Domain binder t) k = do
   return (x, lv)
 
 -- | Resolve a variable binding, and also check its level.
-resolveDomain' :: SourcePos -> Domain Parsed -> (Domain Resolved -> NR a) -> NR a
-resolveDomain' pos d k = do
+resolveDomain' :: Level
+               -> String
+               -> SourcePos
+               -> Domain Parsed
+               -> (Domain Resolved -> NR a)
+               -> NR a
+resolveDomain' expected_level error_message pos d k = do
   (x, lv) <- resolveDomain d k
-  logErrorIf (lv /= KindLevel) $
-    "Bad level in type parameter of data constructor (" ++ show pos ++ ")"
+  logErrorIf (lv /= expected_level) $
+    error_message ++ " (" ++ show pos ++ ")"
   return x
+
+resolveDomainT = resolveDomain' KindLevel 
+                 "Bad level in type parameter of data constructor"
+
+resolveDomainV = resolveDomain' TypeLevel
+                 "Bad level in field of data constructor" 
+
+resolveExp :: SourcePos -> Exp Parsed -> NR (Exp Resolved)
+resolveExp pos expression = 
+  case expression
+  of VarE v -> VarE <$> use v pos
+     IntE n -> pure $ IntE n
+     TAppE e t -> do
+       e' <- resolveL resolveExp e 
+       (t', t_lv) <- resolveLType t
+       logErrorIf (t_lv /= TypeLevel) $
+         "Parameter of type application is not a type (" ++ show pos ++ ")"
+       return $ TAppE e' t'
+     AppE e1 e2 -> AppE <$> resolveL resolveExp e1 <*> resolveL resolveExp e2
+     CaseE scr alts -> CaseE <$> resolveL resolveExp scr <*>
+                       mapM (resolveL resolveAlt) alts
+
+resolveAlt :: SourcePos -> Alt Parsed -> NR (Alt Resolved)
+resolveAlt pos alt = do
+  con <- use (altCon alt) pos
+  (ty_args, ty_lvs) <- mapAndUnzipM resolveLType $ altTyArgs alt
+  logErrorIf (any (TypeLevel /=) ty_lvs) $
+    "Type parameter is not a type (" ++ show pos ++ ")"
+  withMany (resolveDomainT pos) (altExTypes alt) $ \ex_types ->
+    withMany (resolveDomainV pos) (altFields alt) $ \fields -> do
+      body <- resolveL resolveExp $ altBody alt
+      return $ Alt con ty_args ex_types fields body
+
+resolveFun :: SourcePos -> PFun -> NR RFun
+resolveFun pos f =
+  withMany (resolveDomainT pos) (fTyParams f) $ \tparams ->
+  withMany (resolveDomainV pos) (fParams f) $ \params -> do
+    (range, range_lv) <- resolveLType $ fRange f
+    logErrorIf (range_lv /= TypeLevel) $
+      "Function range is not a type"
+    body <- resolveL resolveExp $ fBody f
+    return $ Fun tparams params range body  
 
 resolveDataConDecl :: SourcePos -> DataConDecl Parsed
                    -> NR (DataConDecl Resolved)
 resolveDataConDecl pos (DataConDecl v ty_params ex_types args) = do
   v' <- globalDef ObjectLevel v pos
   enter $
-    withMany (resolveDomain' pos) ty_params $ \ty_params' ->
-    withMany (resolveDomain' pos) ex_types $ \ex_types' -> do
+    withMany (resolveDomainT pos) ty_params $ \ty_params' ->
+    withMany (resolveDomainT pos) ex_types $ \ex_types' -> do
       (unzip -> (args', arg_levels)) <- mapM resolveLType args
       mapM_ check_arg_level arg_levels
       return $ DataConDecl v' ty_params' ex_types' args'
@@ -280,6 +327,10 @@ resolveEntity _ (DataEnt ty cons attrs) = do
   cons' <- mapM (resolveL resolveDataConDecl) cons
   return $ DataEnt ty' cons' attrs
 
+resolveEntity _ (FunEnt f) = do
+  f' <- resolveL resolveFun f
+  return $ FunEnt f'
+
 -- | Resolve a global declaration.  The declared variable should be in the
 --   environment already.
 resolveDecl :: PLDecl -> NR RLDecl
@@ -292,6 +343,7 @@ resolveDecl (L pos (Decl name ent)) = do
                      of VarEnt {} -> ObjectLevel
                         TypeEnt {} -> TypeLevel
                         DataEnt {} -> TypeLevel
+                        FunEnt {} -> ObjectLevel
 
 -- | Resolve top-level declarations, with limited error recovery
 resolveDecls decls = go id decls
