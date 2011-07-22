@@ -1060,9 +1060,9 @@ reprTopLevelDefs defgroups exports = go id defgroups
                   return (hd [], es)
 
 reprModule :: Module SF -> RI (Module Mem)
-reprModule (Module mod_name defs exports) = do
+reprModule (Module mod_name [] defs exports) = do
   (defs', exports') <- reprTopLevelDefs defs exports
-  return (Module mod_name defs' exports')
+  return (Module mod_name [] defs' exports')
 
 -- | Perform representation inference.
 --

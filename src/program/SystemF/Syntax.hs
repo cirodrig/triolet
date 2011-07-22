@@ -304,8 +304,18 @@ data Export s =
   , exportFunction :: Fun s
   }
 
-data Module s = Module !ModuleName [DefGroup (Def s)] [Export s]
-            deriving(Typeable)
+data Module s =
+  Module 
+  { modName :: !ModuleName 
+
+    -- | Definitions of functions that were imported from other modules.
+    --   The optimizer may inline these definitions.
+    --   Before representation inference, the imports should be empty.
+  , modImports :: [Def s]
+  , modDefs :: [DefGroup (Def s)]
+  , modExports :: [Export s]
+  }
+  deriving(Typeable)
 
 -- | Return True only if the given expression has no side effects.
 -- This function examines only expression constructors, and avoids inspecting

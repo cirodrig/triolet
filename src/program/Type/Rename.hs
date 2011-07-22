@@ -55,25 +55,30 @@ class Renameable a where
   rename :: Renaming -> a -> a
   
   -- | Rename variables bound in the outermost term to new, fresh names
-  freshen :: (Monad m, Supplies m VarID) => a -> m a
+  --   if they satisfy the predicate.
+  freshen :: (Monad m, Supplies m VarID) => (Var -> m Bool) -> a -> m a
   
   -- | Find the variables that are used in, but not defined in, the expression
   freeVariables :: a -> Set.Set Var
 
+freshenPure :: (Monad m, Supplies m VarID, Renameable a) =>
+               (Var -> Bool) -> a -> m a
+freshenPure f x = freshen (return . f) x
+
 instance Renameable a => Renameable (Maybe a) where
   rename rn x = fmap (rename rn) x
-  freshen Nothing  = return Nothing
-  freshen (Just x) = liftM Just $ freshen x
+  freshen _ Nothing  = return Nothing
+  freshen f (Just x) = liftM Just $ freshen f x
   freeVariables x = maybe Set.empty freeVariables x
 
 instance Renameable a => Renameable [a] where
   rename rn xs = map (rename rn) xs
-  freshen xs = mapM freshen xs
+  freshen f xs = mapM (freshen f) xs
   freeVariables xs = Set.unions $ map freeVariables xs
 
 instance Renameable Var where
   rename rn v = fromMaybe v $ renameVar v rn
-  freshen v = return v
+  freshen _ v = return v
   freeVariables v = Set.singleton v
 
 instance Renameable Type where
@@ -94,7 +99,7 @@ instance Renameable Type where
        AnyT _           -> ty    -- Kinds are not renameable
        UTupleT _        -> ty
 
-  freshen ty =
+  freshen f ty =
     case ty
     of LamT (v ::: dom) body -> do
          v' <- newClonedVar v

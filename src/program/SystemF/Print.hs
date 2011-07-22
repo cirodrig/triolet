@@ -36,7 +36,7 @@ pprExport (Export pos spec f) =
   text "export" <+> pprExportSpec spec $$ nest 2 (pprFun f)
 
 pprModule :: Module SF -> Doc
-pprModule (Module module_name defs exports) =
+pprModule (Module module_name [] defs exports) =
   text "module" <+> text (showModuleName module_name) $$
   vcat (map (braces . vcat . map pprDef . defGroupMembers) defs) $$
   vcat (map pprExport exports)

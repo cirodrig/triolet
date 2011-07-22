@@ -86,5 +86,5 @@ convertExport :: Export Mem -> Export Mem
 convertExport e = e {exportFunction = convertFun $ exportFunction e}
 
 convertSpecToMemTypes :: Module Mem -> Module Mem
-convertSpecToMemTypes (Module mod_name defss exports) =
-  Module mod_name (map (fmap convertDef) defss) (map convertExport exports)
+convertSpecToMemTypes (Module mod_name [] defss exports) =
+  Module mod_name [] (map (fmap convertDef) defss) (map convertExport exports)

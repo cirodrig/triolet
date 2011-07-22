@@ -125,5 +125,5 @@ createCoreFunctions tenv mod =
   case checkModule mod
   of Module decls ->
        let defs = map (translateDecl tenv) decls
-       in SystemF.Module builtinModuleName [SystemF.Rec defs] []
+       in SystemF.Module builtinModuleName [] [SystemF.Rec defs] []
       

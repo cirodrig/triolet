@@ -36,9 +36,15 @@ import Globals
 insertGlobalSystemFFunctions :: Module Mem -> IO (Module Mem)
 insertGlobalSystemFFunctions mod = do
   core_mod <- readInitGlobalVarIO the_coreModule
-  let Module _ core_defs _ = core_mod
-  let Module mod_name defs exports = mod
-  return $ Module mod_name (core_defs ++ defs) exports
+  
+  -- FIXME: avoid redundant imports
+  let Module {modDefs = core_defs} = core_mod
+      Module { modName = mod_name
+             , modImports = imports
+             , modDefs = defs
+             , modExports = exports} = mod
+      new_imports = imports ++ concatMap defGroupMembers core_defs
+  return $ Module mod_name new_imports (core_defs ++ defs) exports
 
 -- | Type index for stream expressions 
 data Stream

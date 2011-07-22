@@ -1326,10 +1326,10 @@ flattenInExport export = do
   return $ export {exportFunction = f}
 
 flattenModuleContents :: (Module Mem) -> AF (Module Mem)
-flattenModuleContents (Module mod_name defss exports) = do
+flattenModuleContents (Module mod_name imports defss exports) = do
   defss' <- mapM flattenInGroup defss
   exports' <- mapM flattenInExport exports
-  return $ Module mod_name (concat defss') exports'
+  return $ Module mod_name imports (concat defss') exports'
 
 flattenArguments :: Module Mem -> IO (Module Mem)
 flattenArguments mod =
@@ -1564,10 +1564,10 @@ lvInExport export = do
   return $ export {exportFunction = f}
 
 lvModuleContents :: (Module Mem) -> LF (Module Mem)
-lvModuleContents (Module mod_name defss exports) = do
+lvModuleContents (Module mod_name imports defss exports) = do
   defss' <- mapM (mapM lvDef) defss
   exports' <- mapM lvInExport exports
-  return $ Module mod_name defss' exports'
+  return $ Module mod_name imports defss' exports'
 
 flattenLocals :: Module Mem -> IO (Module Mem)
 flattenLocals mod =

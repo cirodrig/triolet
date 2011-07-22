@@ -662,7 +662,7 @@ inferExportType (Export { exportAnnotation = ann
 inferModuleTypes :: Module -> Inf (SystemF.Module TI)
 inferModuleTypes (Module module_name defss exports) = do
   (defss', exports') <- inferDefGroups defss
-  return $ SystemF.Module module_name defss' exports'
+  return $ SystemF.Module module_name [] defss' exports'
   where
     inferDefGroups (defs:defss) =
       inferDefGroup True defs $ \defs' -> do

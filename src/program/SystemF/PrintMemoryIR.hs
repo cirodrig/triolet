@@ -141,7 +141,10 @@ pprDefGroup dg =
 pprExport (Export _ _ f) =
   text "export" <+> pprFun f
 
-pprModule (Module modname defs exports) =
+pprModule (Module modname imports defs exports) =
   text "module" <+> text (showModuleName modname) $$
+  {-text "imports {" $$
+  nest 2 (vcat (map pprDef imports)) $$
+  text "}" $$-}
   vcat (map pprDefGroup defs) $$
   vcat (map pprExport exports)

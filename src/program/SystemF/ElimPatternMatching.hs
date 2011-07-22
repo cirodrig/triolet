@@ -28,10 +28,10 @@ catEndo fs x = foldr ($) x fs
 -- | Convert all pattern matching to @case@ statements.  After conversion, 
 -- the only patterns that remain are 'VarP' patterns.
 eliminatePatternMatching :: Module SF -> IO (Module SF)
-eliminatePatternMatching (Module module_name ds exports) =
+eliminatePatternMatching (Module module_name [] ds exports) =
   withTheNewVarIdentSupply $ \id_supply -> runPM id_supply $ do
     ds' <- mapM (mapM elimPMDef) ds
-    return $ Module module_name ds' exports
+    return $ Module module_name [] ds' exports
 
 -- | Get the type of a pattern
 patternType :: PatSF -> Type

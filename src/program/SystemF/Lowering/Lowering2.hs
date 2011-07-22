@@ -405,7 +405,9 @@ lowerModuleCode module_name defss exports = lower_definitions defss
       return ([LL.Rec functions], signatures)
 
 lowerModule :: Module (Typed Mem) -> IO LL.Module
-lowerModule (Module mod_name globals exports) = do
+lowerModule (Module { modName = mod_name 
+                    , modDefs = globals 
+                    , modExports = exports}) = do
   (ll_functions, ll_export_sigs) <-
     withTheNewVarIdentSupply $ \var_supply ->
     withTheLLVarIdentSupply $ \ll_var_supply -> do

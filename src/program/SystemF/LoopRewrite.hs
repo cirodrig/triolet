@@ -132,11 +132,11 @@ rwTopLevel defss exports = do
   exports' <- mapM rwExport exports
   return (defss', exports')
 
-parallelLoopRewrite (Module modname defss exports) =
+parallelLoopRewrite (Module modname imports defss exports) =
   withTheNewVarIdentSupply $ \var_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
     let global_context = LoopNesting 0 0
         rewrite = rwTopLevel defss exports
     (defss', exports') <-
       runTypeEvalM (runReaderT rewrite global_context) var_supply tenv
-    return $ Module modname defss' exports'
+    return $ Module modname imports defss' exports'

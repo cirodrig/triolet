@@ -1472,7 +1472,15 @@ rwAlt scr m_values (AltM alt) =
          Nothing  -> Just (VarAV defaultExpInfo $ patMVar pat)
 
 rwFun :: FunM -> LR (FunM, Maybe AbsFunValue)
-rwFun (FunM f) =
+
+-- Freshen bound variables to avoid name shadowing, then rename 
+rwFun f = rwFun' =<< freshen in_type_env f
+  where
+    -- If a variable is in scope, it's in the type environment
+    in_type_env v =
+      withTypeEnv $ \tenv -> return $ isJust $ lookupType v tenv
+
+rwFun' (FunM f) =
   assumeTyPatMs (funTyParams f) $
   assumePatterns (funParams f) $ do
     (body', body_value) <- rwExp (funBody f)
@@ -1517,7 +1525,11 @@ withDefs defgroup@(Rec defs) k = assumeDefs defgroup $ do
     with_wrappers wrs m = foldr withDefValue m wrs
 
 rwModule :: Module Mem -> LR (Module Mem)
-rwModule (Module mod_name defss exports) = rw_top_level id defss
+rwModule (Module mod_name imports defss exports) =
+  -- Add imported functions to the environment.
+  -- Note that all imported functions are added--recursive functions should
+  -- not be in the import list, or they will be expanded repeatedly
+  foldr withDefValue (rw_top_level id defss) imports
   where
     -- First, rewrite the top-level definitions.
     -- Add defintion groups to the environment as we go along.
@@ -1527,7 +1539,7 @@ rwModule (Module mod_name defss exports) = rw_top_level id defss
     -- Then rewrite the exported functions
     rw_top_level defss' [] = do
       exports' <- mapM rwExport exports
-      return $ Module mod_name (defss' []) exports'
+      return $ Module mod_name imports (defss' []) exports'
 
 -- | The main entry point for the simplifier
 rewriteLocalExpr :: RewriteRuleSet -> Module Mem -> IO (Module Mem)

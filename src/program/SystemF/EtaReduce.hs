@@ -28,10 +28,10 @@ import Globals
 -- Entry points
 
 etaReduceModule :: Module Mem -> Module Mem
-etaReduceModule (Module mod_name defss exports) =
+etaReduceModule (Module mod_name imports defss exports) =
   let defss' = map (fmap (hrDef True)) defss
       exports' = map (hrExport True) exports
-  in Module mod_name defss' exports'
+  in Module mod_name imports defss' exports'
 
 -- | Eta-reduce a function.
 --
@@ -289,10 +289,10 @@ etaExpandExport e = do
 --   This transformation is performed once, immediately after representation
 --   inference.  Eta-reduction may reverse some eta expansions later.
 etaExpandModule :: Module Mem -> IO (Module Mem)
-etaExpandModule (Module modname defss exports) =
+etaExpandModule (Module modname imports defss exports) =
   withTheNewVarIdentSupply $ \id_supply -> runFreshVarM id_supply make_module
   where 
     make_module = do
       defss' <- mapM (mapM etaExpandDef) defss
       exports' <- mapM etaExpandExport exports
-      return $ Module modname defss' exports'
+      return $ Module modname imports defss' exports'

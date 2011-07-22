@@ -364,14 +364,14 @@ typeCheckExport (Export pos spec f) = do
   f' <- typeInferFun f
   return $ Export pos spec f'
 
-typeCheckModule (Module module_name defs exports) = do
+typeCheckModule (Module module_name [] defs exports) = do
   global_type_env <- readInitGlobalVarIO the_systemFTypes
   putStrLn "TypeCheckSF"
   print $ pprTypeEnv global_type_env
   withTheNewVarIdentSupply $ \varIDs -> do
     let typecheck = typeCheckDefGroups defs exports
     (defs', exports') <- runTypeEvalM typecheck varIDs global_type_env
-    return $ Module module_name defs' exports'
+    return $ Module module_name [] defs' exports'
   where
     typeCheckDefGroups (defs:defss) exports = 
       typeCheckDefGroup defs $ \defs' -> do
@@ -381,6 +381,9 @@ typeCheckModule (Module module_name defs exports) = do
     typeCheckDefGroups [] exports = do 
       exports' <- mapM typeCheckExport exports
       return ([], exports')
+
+typeCheckModule (Module {modImports = _:_}) =
+  internalError "typeCheckModule: Import list is not empty"
 
 -- | Infer the type of an expression.  The expression is assumed to be
 --   well-typed; this function doesn't check for most errors.

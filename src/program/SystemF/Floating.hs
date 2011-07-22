@@ -1298,7 +1298,7 @@ floatTopLevel [] exports = do
   return (concat export_defs, exports')
 
 floatModule :: Module Mem -> IO (Module Mem)
-floatModule (Module mod_name defss exports) =
+floatModule (Module mod_name imports defss exports) =
   withTheNewVarIdentSupply $ \id_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
     (dict_env, int_env) <- runFreshVarM id_supply createDictEnv
@@ -1308,5 +1308,5 @@ floatModule (Module mod_name defss exports) =
                             fcIntEnv = int_env,
                             fcReadVars = IntSet.empty}
     (defss', exports') <- runTopLevelFlt (floatTopLevel defss exports) flt_env
-    return $ Module mod_name defss' exports'
+    return $ Module mod_name imports defss' exports'
 

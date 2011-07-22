@@ -92,7 +92,7 @@ evExport :: Export Untyped.TI -> IO (Export SF)
 evExport (Export pos spec f) = Export pos spec `liftM` evFun f
 
 evalTypeInferenceResult :: Module Untyped.TI -> IO (Module SF)
-evalTypeInferenceResult (Module module_name defs exports) = do
+evalTypeInferenceResult (Module module_name [] defs exports) = do
   defs' <- mapM (mapM evDef) defs
   exports' <- mapM evExport exports
-  return $ Module module_name defs' exports'
+  return $ Module module_name [] defs' exports'

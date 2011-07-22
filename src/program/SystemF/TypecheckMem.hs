@@ -455,19 +455,25 @@ typeCheckExport (Export pos spec f) = do
   f' <- typeInferFun f
   return $ Export pos spec f'
 
-typeCheckModule (Module module_name defs exports) = do
+typeCheckModule (Module module_name imports defs exports) = do
   global_type_env <- readInitGlobalVarIO the_memTypes
   withTheNewVarIdentSupply $ \varIDs -> do
-    let do_typecheck = typeCheckDefGroups defs exports
-    (defs', exports') <- runTypeEvalM do_typecheck varIDs global_type_env
-    return $ Module module_name defs' exports'
+    let do_typecheck = typeCheckTopLevel imports defs exports
+    (imports', defs', exports') <-
+      runTypeEvalM do_typecheck varIDs global_type_env
+    return $ Module module_name imports' defs' exports'
+
+typeCheckTopLevel imports defss exports =
+  typeCheckDefGroup (Rec imports) $ \(Rec imports') -> do
+    (defss', exports') <- typecheck_contents defss
+    return (imports', defss', exports')
   where
-    typeCheckDefGroups (defs:defss) exports = 
+    typecheck_contents (defs:defss) = 
       typeCheckDefGroup defs $ \defs' -> do
-        (defss', exports') <- typeCheckDefGroups defss exports
+        (defss', exports') <- typecheck_contents defss
         return (defs' : defss', exports')
-      
-    typeCheckDefGroups [] exports = do 
+
+    typecheck_contents [] = do
       exports' <- mapM typeCheckExport exports
       return ([], exports')
 

@@ -438,15 +438,15 @@ dmdTopLevelGroup [] exports = do
 -- | Perform local demand analysis and dead code elimination.
 --   Top-level definitions are not removed or regrouped.
 localDemandAnalysis :: Module Mem -> IO (Module Mem)
-localDemandAnalysis (Module modname defss exports) = do
+localDemandAnalysis (Module modname imports defss exports) = do
   tenv <- readInitGlobalVarIO the_memTypes
   let defss' = map (fmap (\d -> evalDf (dmdDef d) tenv)) defss
       exports' = map (\e -> evalDf (dmdExport e) tenv) exports
-  return $ Module modname defss' exports'
+  return $ Module modname imports defss' exports'
 
 -- | Perform demand analysis and dead code elimination.
 demandAnalysis :: Module Mem -> IO (Module Mem)
-demandAnalysis (Module modname defss exports) = do
+demandAnalysis (Module modname imports defss exports) = do
   tenv <- readInitGlobalVarIO the_memTypes
   let (defss', exports') = evalDf (dmdTopLevelGroup defss exports) tenv
-  return $ Module modname defss' exports'
+  return $ Module modname imports defss' exports'
