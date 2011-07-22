@@ -84,6 +84,8 @@ translateExp (L pos expression) =
        SystemF.LamE inf (translateFun pos f)
      CaseE s alts ->
        SystemF.CaseE inf (translateExp s) (map (translateAlt . unLoc) alts)
+     LetE binder rhs body ->
+       SystemF.LetE inf (SystemF.patM $ translateDomain binder) (translateExp rhs) (translateExp body)
      LetfunE defs body ->
        let defgroup = SystemF.Rec [SystemF.mkDef (toVar v) (translateFun pos f)
                                   | L pos (Def v f) <- defs]

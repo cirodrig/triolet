@@ -187,7 +187,8 @@ pDomains = do
 -- * Expressions
   
 pExp :: P PLExp
-pExp = caseE <|> ifE <|> lamE <|> letfunE <|> exceptE <|> appExp <?> "expression"
+pExp = caseE <|> ifE <|> lamE <|> letE <|> letfunE <|> exceptE <|> appExp
+       <?> "expression"
 
 caseE :: P PLExp
 caseE = located $ do
@@ -224,6 +225,16 @@ lamE = located $ do
   body <- pExp
   return $ LamE (Fun tparams params range body)
 
+letE :: P PLExp
+letE = located $ do
+  match LetTok
+  binder <- pDomain
+  match EqualTok
+  rhs <- pExp
+  match InTok
+  body <- pExp
+  return $ LetE binder rhs body
+  
 letfunE :: P PLExp
 letfunE = located $ do
   match LetfunTok

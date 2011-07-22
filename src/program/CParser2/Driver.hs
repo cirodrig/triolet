@@ -88,4 +88,3 @@ parseCoreFunctions ident_supply mem_types = do
 
   -- Convert to core expressions
   return $ createCoreFunctions mem_types resolved_ast
-

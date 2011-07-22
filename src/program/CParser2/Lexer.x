@@ -72,6 +72,7 @@ rules :- ----------------------------------------------------------------------
 <0>	"except" / @eow		{ posnTok ExceptTok }
 <0>	"if" / @eow		{ posnTok IfTok }
 <0>	"in" / @eow		{ posnTok InTok }
+<0>	"let" / @eow		{ posnTok LetTok }
 <0>	"letfun" / @eow		{ posnTok LetfunTok }
 <0>     "of" / @eow		{ posnTok OfTok }
 <0>	"then" / @eow		{ posnTok ThenTok }

@@ -260,6 +260,11 @@ resolveExp pos expression =
        return $ TAppE e' t'
      AppE e1 e2 -> AppE <$> resolveL resolveExp e1 <*> resolveL resolveExp e2
      LamE f -> LamE <$> resolveFun pos f
+     LetE binder rhs body -> do
+       rhs' <- resolveL resolveExp rhs
+       resolveDomain' TypeLevel "Bad level in let binding" pos binder $ \binder' -> do
+         body' <- resolveL resolveExp body
+         return $ LetE binder' rhs' body'
      LetfunE defs e ->
        resolveDefGroup defs $ \defs' -> LetfunE defs' <$> resolveL resolveExp e
      CaseE scr alts -> CaseE <$> resolveL resolveExp scr <*>

@@ -20,6 +20,7 @@ import qualified CParser2.Driver
 import LowLevel.InitializeBuiltins
 import Builtins.Builtins
 import Type.Environment
+import qualified SystemF.TypecheckMem
 import CommandLine
 import Globals
 import GlobalVar
@@ -46,8 +47,11 @@ loadBuiltins cl_globals = do
     let mem_types = specToMemTypeEnv core_types
     initializeGlobalVar the_memTypes (return mem_types)
     
-    initializeGlobalVar the_coreModule $
+    initializeGlobalVar the_coreModule $ 
       CParser2.Driver.parseCoreFunctions supply mem_types
+  
+  -- Typecheck the core module to detect errors
+  SystemF.TypecheckMem.typeCheckModule =<< readInitGlobalVarIO the_coreModule
 
   -- Initialize the low-level builtins
   withTheLLVarIdentSupply $ \ll_supply -> do

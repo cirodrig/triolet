@@ -38,6 +38,7 @@ data Tok =
   | ExceptTok
   | IfTok
   | InTok
+  | LetTok
   | LetfunTok
   | OfTok
   | ThenTok
@@ -72,6 +73,7 @@ showTok t =
        ExceptTok    -> "'except'"
        IfTok        -> "'if'"
        InTok        -> "'in'"
+       LetTok       -> "'let'"
        LetfunTok    -> "'letfun'"
        OfTok        -> "'of'"
        ThenTok      -> "'then'"

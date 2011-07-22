@@ -118,6 +118,7 @@ data Exp a =
   | AppE (LExp a) (LExp a)
   | LamE (Fun a)
   | CaseE (LExp a) [LAlt a]
+  | LetE (Domain a) (LExp a) (LExp a)
   | LetfunE [LDef a] (LExp a)
   | ExceptE (LType a)
 
