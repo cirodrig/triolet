@@ -68,7 +68,13 @@ rules :- ----------------------------------------------------------------------
 <0>     "attribute" / @eow	{ posnTok AttributeTok }
 <0>     "case" / @eow		{ posnTok CaseTok }
 <0>     "data" / @eow		{ posnTok DataTok }
+<0>	"else" / @eow		{ posnTok ElseTok }
+<0>	"except" / @eow		{ posnTok ExceptTok }
+<0>	"if" / @eow		{ posnTok IfTok }
+<0>	"in" / @eow		{ posnTok InTok }
+<0>	"letfun" / @eow		{ posnTok LetfunTok }
 <0>     "of" / @eow		{ posnTok OfTok }
+<0>	"then" / @eow		{ posnTok ThenTok }
 <0>     "type" / @eow		{ posnTok TypeTok }
 <0>	"_" / @eow		{ posnTok WildTok }
 <0>	@word			{ posn mkIdent }
@@ -84,6 +90,7 @@ rules :- ----------------------------------------------------------------------
 <0>	\,			{ posnTok CommaTok }
 <0>	\.			{ posnTok DotTok }
 <0>	\;			{ posnTok SemiTok }
+<0>	\\			{ posnTok BackslashTok }
 
 <0>	\@			{ posnTok AtTok }
 <0>	\-\> / @eoo		{ posnTok ArrowTok }

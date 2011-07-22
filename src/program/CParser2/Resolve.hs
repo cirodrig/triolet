@@ -259,8 +259,29 @@ resolveExp pos expression =
          "Parameter of type application is not a type (" ++ show pos ++ ")"
        return $ TAppE e' t'
      AppE e1 e2 -> AppE <$> resolveL resolveExp e1 <*> resolveL resolveExp e2
+     LamE f -> LamE <$> resolveFun pos f
+     LetfunE defs e ->
+       resolveDefGroup defs $ \defs' -> LetfunE defs' <$> resolveL resolveExp e
      CaseE scr alts -> CaseE <$> resolveL resolveExp scr <*>
                        mapM (resolveL resolveAlt) alts
+     ExceptE t -> do
+       (t', t_lv) <- resolveLType t
+       logErrorIf (t_lv /= TypeLevel) $
+         "Result type of exception is not a type"
+       return $ ExceptE t'
+
+resolveDefGroup :: [LDef Parsed] -> ([LDef Resolved] -> NR a) -> NR a
+resolveDefGroup defs k = enter $ do
+  -- Create a new variable for each local variable
+  let variables = [case unLoc d of Def v _ -> v | d <- defs]
+  resolved <- mapM (newRVar ObjectLevel) variables
+  
+  -- Process local functions and pass them to the continuation
+  k =<< zipWithM resolve_def resolved defs
+  where
+    resolve_def new_var (L pos (Def _ f)) = do
+      f' <- resolveFun pos f
+      return $ L pos (Def new_var f')
 
 resolveAlt :: SourcePos -> Alt Parsed -> NR (Alt Resolved)
 resolveAlt pos alt = do

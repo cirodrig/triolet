@@ -1,0 +1,184 @@
+
+range (n : int) -> Stream list_shape (Stored int) =
+  case defineIntIndex n of someIndInt @(ix : intindex) (val : FinIndInt ix).
+    fun_asList_Stream @(array_shape ix unit_shape) @(Stored int)
+    (rangeIndexed @ix (indInt @ix val));
+
+-- List traversal.
+-- Loop over all list indices and return the corresponding array element.
+TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
+  -> Stream list_shape a =
+  case ls of make_list @a @(N : intindex)
+                       (size : FinIndInt N) (aref : Referenced (array N a)).
+  case aref of referenced @(array N a) (ay : array N a).
+  fun_asList_Stream @(array_shape N unit_shape) @a
+  (generate @N @a (indInt @N size) repr
+   (\ (i : int) (ret : OutPtr a) -> IEffect a.
+      copy @a repr (subscript @N @a repr ay i) ret));
+
+{-
+-- List construction.
+-- If the stream has a known size, allocate and initialize an array.
+TraversableDict_list_build @(a : bare)
+  (repr : Repr a) (s : Stream list_shape a) (o : OutPtr (list a))
+  -> IEffect (list a) =
+
+-}
+
+-- Stream traversal and building.
+-- These functions are trivial.
+TraversableDict_Stream_build @(t : bare -> bare) @(a : bare)
+  (repr : Repr a) (s : Stream (shape t) a)
+  -> Stream (shape t) a = s;
+
+TraversableDict_Stream_traverse @(t : bare -> bare) @(a : bare)
+  (repr : Repr a) (s : Stream (shape t) a)
+  -> Stream (shape t) a = s;
+
+oper_GUARD @(a : bare) (repr : Repr a) (arg : bool) (s : Stream list_shape a)
+  -> Stream list_shape a =
+  if arg then s else oper_EMPTY @a repr;
+
+fun_map @(t : bare -> bare) @(a : bare) @(b : bare)
+        (traversable : TraversableDict t)
+        (reprA : Repr a) (reprB : Repr b)
+        (transformer : a -> Writer b)
+        (input : t a)
+        (ret : OutPtr (t b))
+  -> IEffect (t b) =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  build @b reprB (fun_map_Stream @(shape t) @a @b reprA reprB transformer
+                  (traverse @a reprA input)) ret;
+
+fun_zip @(t : bare -> bare) @(a : bare) @(b : bare)
+        (traversable : TraversableDict t)
+        (reprA : Repr a) (reprB : Repr b)
+        (inputA : t a) (inputB : t b)
+        (ret : OutPtr (t (PyonTuple2 a b)))
+  -> IEffect (t (PyonTuple2 a b)) =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  build @(PyonTuple2 a b)
+  (repr_PyonTuple2 @a @b reprA reprB)
+  (fun_zip_Stream @(shape t) @a @b reprA reprB
+   (traverse @a reprA inputA) (traverse @b reprB inputB))
+  ret;
+
+fun_zip3 @(t : bare -> bare) @(a : bare) @(b : bare) @(c : bare)
+        (traversable : TraversableDict t)
+        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c)
+        (inputA : t a) (inputB : t b) (inputC : t c)
+        (ret : OutPtr (t (PyonTuple3 a b c)))
+  -> IEffect (t (PyonTuple3 a b c)) =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  build @(PyonTuple3 a b c)
+  (repr_PyonTuple3 @a @b @c reprA reprB reprC)
+  (fun_zip3_Stream @(shape t) @a @b @c reprA reprB reprC
+   (traverse @a reprA inputA)
+   (traverse @b reprB inputB)
+   (traverse @c reprC inputC))
+  ret;
+
+fun_zip4 @(t : bare -> bare) @(a : bare) @(b : bare) @(c : bare) @(d : bare)
+        (traversable : TraversableDict t)
+        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c) (reprD : Repr d)
+        (inputA : t a) (inputB : t b) (inputC : t c) (inputD : t d)
+        (ret : OutPtr (t (PyonTuple4 a b c d)))
+  -> IEffect (t (PyonTuple4 a b c d)) =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  build @(PyonTuple4 a b c d)
+  (repr_PyonTuple4 @a @b @c @d reprA reprB reprC reprD)
+  (fun_zip4_Stream @(shape t) @a @b @c @d reprA reprB reprC reprD
+   (traverse @a reprA inputA)
+   (traverse @b reprB inputB)
+   (traverse @c reprC inputC)
+   (traverse @d reprD inputD))
+  ret;
+
+histogram @(t : bare -> bare)
+  (size : int)
+  (input : Stream (shape t) (Stored int))
+  (ret : OutPtr (list (Stored int)))
+  -> IEffect (list (Stored int)) =
+  case defineIntIndex size of someIndInt @(N : intindex) (index : FinIndInt N).
+  make_list @(Stored int) @N index
+  (referenced @(array N (Stored int))
+   (histogramArray @(shape t) @N index input))
+  ret;
+
+fun_reduce @(t : bare -> bare) @(a : bare)
+  (traversable : TraversableDict t)
+  (repr : Repr a)
+  (reducer : a -> a -> Writer a)
+  (init : a)
+  (input : t a)
+  (ret : OutPtr a)
+  -> IEffect a =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  fun_reduce_Stream @(shape t) @a
+  repr reducer init (traverse @a repr input) ret;
+
+fun_reduce1 @(t : bare -> bare) @(a : bare)
+  (traversable : TraversableDict t)
+  (repr : Repr a)
+  (reducer : a -> a -> Writer a)
+  (input : t a)
+  (ret : OutPtr a)
+  -> IEffect a =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  fun_reduce1_Stream @(shape t) @a
+  repr reducer (traverse @a repr input) ret;
+
+for @(N : intindex) @(acc : bare)
+  (repr : Repr acc) (count : IndInt N) (init : acc)
+  (f : int -> acc -> Writer acc) (ret : OutPtr acc)
+  -> IEffect acc =
+
+  -- Unpack the indexed int
+  case count of {
+    indInt @N (fin : FinIndInt N).
+      case fin of finIndInt @N (pf : Pf (neZ N pos_infty)) (bound : int).
+
+      -- Main loop
+      letfun
+        loop (i : int) (x : acc) (r : OutPtr acc) -> IEffect acc =
+          if EqDict_int_eq i bound
+          then copy @acc repr x r
+          else case boxed @acc (f i x) of boxed @acc (y : acc).
+               loop (AdditiveDict_int_add i 1) y r
+      in loop 0 init ret;
+
+    -- An infinite loop will fail
+    indOmega @N (pf : Pf (eqZ N pos_infty)).
+      except @(IEffect acc)
+  };
+  
+safeSubscript @(a : bare)
+  (repr : Repr a) (ls : list a) (ix : int) (ret : OutPtr a) -> IEffect a =
+
+  -- Deconstruct data structures
+  case ls of make_list @a @(N : intindex)
+             (size : FinIndInt N) (ayref : Referenced (array N a)).
+  case ayref of referenced @(array N a) (ay : array N a).
+  case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (size_int : int).
+
+  if or (OrdDict_int_lt ix 0) (OrdDict_int_ge ix size_int)
+  then except @(IEffect a)
+  else copy @a repr (subscript @N @a repr ay ix) ret;

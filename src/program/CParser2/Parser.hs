@@ -187,7 +187,7 @@ pDomains = do
 -- * Expressions
   
 pExp :: P PLExp
-pExp = caseE <|> appExp <?> "expression"
+pExp = caseE <|> ifE <|> lamE <|> letfunE <|> exceptE <|> appExp <?> "expression"
 
 caseE :: P PLExp
 caseE = located $ do
@@ -199,6 +199,56 @@ caseE = located $ do
   where
     one_alt = (:[]) <$> pAlt
     alt_list = braces $ pAlt `sepBy` match SemiTok
+
+ifE :: P PLExp
+ifE = located $ do
+  match IfTok
+  scrutinee <- pExp
+  then_pos <- locatePosition
+  match ThenTok
+  x <- pExp
+  else_pos <- locatePosition
+  match ElseTok
+  y <- pExp
+  return $ CaseE scrutinee [ L then_pos $ Alt "True" [] [] [] x
+                           , L else_pos $ Alt "False" [] [] [] y]
+
+lamE :: P PLExp
+lamE = located $ do
+  match BackslashTok
+  tparams <- typeParameters
+  params <- parameters
+  match ArrowTok
+  range <- pType 
+  match DotTok
+  body <- pExp
+  return $ LamE (Fun tparams params range body)
+
+letfunE :: P PLExp
+letfunE = located $ do
+  match LetfunTok
+  defs <- def_list <|> one_def
+  match InTok
+  body <- pExp
+  return $ LetfunE defs body
+  where
+    one_def = (:[]) <$> def
+    def_list = braces $ def `sepBy` match SemiTok
+
+exceptE :: P PLExp
+exceptE = located $ do
+  match ExceptTok
+  match AtTok
+  t <- pTypeAtom
+  return $ ExceptE t
+
+def :: P (LDef Parsed)
+def = located $ do
+  v <- identifier
+  (ty_params, params, range) <- funSignature
+  match EqualTok
+  body <- pExp
+  return $ Def v (Fun ty_params params range body)
 
 -- | An expression involving application or something with higher precedence
 appExp :: P PLExp
@@ -220,7 +270,7 @@ appExp = do
           apply loc (L loc $ TAppE f operand)
         
         app = do
-          operand <- pExp
+          operand <- atomicExp  -- Non-atomic expressions must be parenthesized
           apply loc (L loc $ AppE f operand)
 
 atomicExp = varE <|> intE <|> parens pExp
@@ -236,28 +286,30 @@ pAlt :: P PLAlt
 pAlt = located $ do
   con <- identifier
   targs <- many type_arg
-  (concat -> tparams) <- many type_param
-  (concat -> params) <- many (parens pDomains)
+  tparams <- typeParameters
+  params <- parameters
   match DotTok
   body <- pExp
   return $ Alt con targs tparams params body
   where
     type_arg = PS.try (match AtTok >> pTypeAtom)
-    type_param = match AtTok >> parens pDomains
+
+typeParameters :: P [PDomain]
+typeParameters = fmap concat $ many (match AtTok >> parens pDomains)
+
+parameters :: P [PDomain]
+parameters = fmap concat $ many (parens pDomains)
 
 -- | Parse a function signature.
 --
 -- > @(t1 : k1) @(t2 : k2) ... (x1 : T1) (x2 : T2) ... -> T
 funSignature :: P ([PDomain], [PDomain], PLType)
 funSignature = do
-  (concat -> tparams) <- many type_param
-  (concat -> params) <- many param
+  tparams <- typeParameters
+  params <- parameters
   match ArrowTok
   range <- pType
   return (tparams, params, range)
-  where
-    type_param = match AtTok >> parens pDomains
-    param = parens pDomains
 
 -------------------------------------------------------------------------------
 -- * Declarations

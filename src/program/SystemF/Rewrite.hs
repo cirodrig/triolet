@@ -277,29 +277,29 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
     table = [ (pyonBuiltin the_convertToBare, rwConvertToBare)
             , (pyonBuiltin the_convertToBoxed, rwConvertToBoxed)
             -- , (pyonBuiltin the_range, rwRange)
-            , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
+            -- , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
             , (pyonBuiltin the_TraversableDict_list_build, rwBuildList)
             , (pyonBuiltin the_TraversableDict_matrix_traverse, rwTraverseMatrix)
             , (pyonBuiltin the_TraversableDict_matrix_build, rwBuildMatrix)
-            , (pyonBuiltin the_TraversableDict_Stream_traverse, rwTraverseStream)
-            , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildStream)
+            -- , (pyonBuiltin the_TraversableDict_Stream_traverse, rwTraverseStream)
+            -- , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildStream)
             , (pyonBuiltin the_build_array, rwBuildArray)
-            , (pyonBuiltin the_oper_GUARD, rwGuard)
+            -- , (pyonBuiltin the_oper_GUARD, rwGuard)
             , (pyonBuiltin the_chunk, rwChunk)
-            , (pyonBuiltin the_fun_map, rwMap)
-            , (pyonBuiltin the_fun_zip, rwZip)
-            , (pyonBuiltin the_fun_zip3, rwZip3)
-            , (pyonBuiltin the_fun_zip4, rwZip4)
+            -- , (pyonBuiltin the_fun_map, rwMap)
+            -- , (pyonBuiltin the_fun_zip, rwZip)
+            -- , (pyonBuiltin the_fun_zip3, rwZip3)
+            -- , (pyonBuiltin the_fun_zip4, rwZip4)
             , (pyonBuiltin the_fun_map_Stream, rwMapStream)
             , (pyonBuiltin the_fun_zip_Stream, rwZipStream) 
             , (pyonBuiltin the_fun_zip3_Stream, rwZip3Stream)
             , (pyonBuiltin the_fun_zip4_Stream, rwZip4Stream)
-            , (pyonBuiltin the_histogram, rwHistogram)
-            , (pyonBuiltin the_fun_reduce, rwReduce)
-            , (pyonBuiltin the_fun_reduce1, rwReduce1)
+            -- , (pyonBuiltin the_histogram, rwHistogram)
+            -- , (pyonBuiltin the_fun_reduce, rwReduce)
+            -- , (pyonBuiltin the_fun_reduce1, rwReduce1)
             {- , (pyonBuiltin the_oper_CAT_MAP, rwCatMap) -}
-            , (pyonBuiltin the_for, rwFor)
-            , (pyonBuiltin the_safeSubscript, rwSafeSubscript)
+            -- , (pyonBuiltin the_for, rwFor)
+            -- , (pyonBuiltin the_safeSubscript, rwSafeSubscript)
             ]
 
     exprs = [ {- Disabled because the new function, 'generate_forever', 
@@ -479,7 +479,7 @@ rwRange inf [] [count] = do
 
 rwRange _ _ _ = return Nothing-}
 
-rwTraverseList :: RewriteRule
+{- rwTraverseList :: RewriteRule
 rwTraverseList inf [elt_type] [elt_repr, list] = do
   tenv <- getTypeEnv
   fmap Just $
@@ -502,7 +502,7 @@ rwTraverseList inf [elt_type] [elt_repr, list] = do
            [return elt_repr, varE array, varE index_var],
            varE ret_var])]]
   
-rwTraverseList _ _ _ = return Nothing
+rwTraverseList _ _ _ = return Nothing -}
 
 rwBuildList :: RewriteRule
 rwBuildList inf [elt_type] (elt_repr : stream : other_args) = do
@@ -756,6 +756,7 @@ rwBindStream _ _ _ _ = return Nothing
 
 -}
 
+{-
 -- > guard t r b s
 --
 -- becomes
@@ -768,7 +769,7 @@ rwGuard inf [elt_ty] [elt_repr, arg, stream] =
   (return stream)
   (varAppE (pyonBuiltin the_oper_EMPTY) [elt_ty] [return elt_repr])
 
-rwGuard _ _ _ = return Nothing
+rwGuard _ _ _ = return Nothing-}
 
 -- Try to simplify applications of 'chunk'.
 --
@@ -809,6 +810,7 @@ rwChunk inf [n_chunks, chunk_shape, elt_ty, result_ty]
 
 rwChunk _ _ _ = return Nothing
 
+{-
 rwMap :: RewriteRule
 rwMap inf
   [container, element1, element2]
@@ -880,7 +882,7 @@ rwZip4 inf
   fmap Just $
     generalizedRewriteZip tenv inf zip_args container traversable other_args
 
-rwZip4 _ _ _ = return Nothing
+rwZip4 _ _ _ = return Nothing-}
 
 rwMapStream :: RewriteRule
 rwMapStream inf
@@ -888,7 +890,7 @@ rwMapStream inf
   args@[repr1, repr2, transformer, producer] = do
     m_stream <- interpretStream2 (fromTypM shape_type) (fromTypM elt2) repr2 map_expr
     case m_stream of
-      Just s -> encodeStream2 shape_type s
+      Just s -> traceShow (text "rwMapStream" <+> pprExpS s) $ encodeStream2 shape_type s
       Nothing -> return Nothing
   where
     map_op = ExpM $ VarE inf (pyonBuiltin the_fun_map_Stream)
@@ -943,6 +945,7 @@ generalizedZipStream2 shape_type streams = do
     Just s -> encodeStream2 shape_type s
     Nothing -> return Nothing
 
+{-
 -- | Turn a list-building histogram into an array-building histogram
 --
 -- > rwHistogram t size input
@@ -969,7 +972,7 @@ rwHistogram inf [container] (size : input : other_args) = do
         [varE index, return input]] :
        map return other_args))
 
-rwHistogram _ _ _ = return Nothing
+rwHistogram _ _ _ = return Nothing -}
 
 rwHistogramArray :: RewriteRule
 rwHistogramArray inf [shape_type, size_ix] (size : input : other_args) = do
@@ -1041,6 +1044,7 @@ rwHistogramArray inf [shape_type, size_ix] (size : input : other_args) = do
       
 rwHistogramArray _ _ _ = return Nothing
 
+{-
 rwReduce :: RewriteRule
 rwReduce inf
   [container, element]
@@ -1072,7 +1076,7 @@ rwReduce1 inf
          varAppE trv [element] [return repr, return input]] ++
         app_other_args)
 
-rwReduce1 _ _ _ = return Nothing
+rwReduce1 _ _ _ = return Nothing -}
 
 -- | Parallelize a reduction.
 --   This rewrite is nonterminating, so we must limit how often it's performed.
@@ -1462,6 +1466,7 @@ rwReduce1Generate inf element elt_repr reducer other_args size count producer = 
   let producer_group = NonRec (mkDef producer_var producer_fn)
   return $ ExpM $ LetfunE defaultExpInfo producer_group reduce1_expr
 
+{-
 -- | Inline a call of \'for\'.
 --
 -- > for (n, a, repr, count, init, f, ret)
@@ -1563,9 +1568,10 @@ rwSafeSubscriptBody tenv inf elt_type elt_repr list ix ret =
           ret])
         
       return $ letE (patM (ix_var ::: intType)) ix subscript_expr
+-}
 
 -------------------------------------------------------------------------------
-
+{-
 -- | An argument to one of the 'zip' family of functions.
 data ZipArg =
   ZipArg
@@ -1600,6 +1606,7 @@ zipper 2 = pyonBuiltin the_fun_zip_Stream
 zipper 3 = pyonBuiltin the_fun_zip3_Stream
 zipper 4 = pyonBuiltin the_fun_zip4_Stream
 zipper n = internalError $ "zipper: Cannot zip " ++ show n ++ " streams"
+-}
 
 -- | The iteration domain of a stream
 data Shape =
@@ -1831,6 +1838,7 @@ interpretStream2 shape_type elt_type repr expression = do
   return $! case s of {UnknownStream {} -> Nothing; _ -> Just s}
 
 interpretStream2' shape_type elt_type repr expression =
+  traceShow (text "IS2" <+> pprExp expression) $
   case unpackVarAppM expression
   of Just (op_var, ty_args, args)
        | op_var `isPyonBuiltin` the_TraversableDict_Stream_traverse ||

@@ -23,6 +23,7 @@ data Tok =
   | LParenTok
   | RParenTok
   | AtTok
+  | BackslashTok
   | CommaTok
   | DotTok
   | EqualTok
@@ -33,7 +34,13 @@ data Tok =
   | AttributeTok
   | CaseTok
   | DataTok
+  | ElseTok
+  | ExceptTok
+  | IfTok
+  | InTok
+  | LetfunTok
   | OfTok
+  | ThenTok
   | TypeTok
   | WildTok
     deriving(Eq)
@@ -50,6 +57,7 @@ showTok t =
        LParenTok    -> "left parenthesis"
        RParenTok    -> "right parenthesis"
        AtTok        -> "at sign"
+       BackslashTok -> "backslash"
        CommaTok     -> "comma"
        DotTok       -> "period"
        EqualTok     -> "equal"
@@ -60,7 +68,13 @@ showTok t =
        AttributeTok -> "'attribute'"
        CaseTok      -> "'case'"
        DataTok      -> "'data'"
+       ElseTok      -> "'else'"
+       ExceptTok    -> "'except'"
+       IfTok        -> "'if'"
+       InTok        -> "'in'"
+       LetfunTok    -> "'letfun'"
        OfTok        -> "'of'"
+       ThenTok      -> "'then'"
        TypeTok      -> "'type'"
        WildTok      -> "underscore"
 

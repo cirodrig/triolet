@@ -80,8 +80,16 @@ translateExp (L pos expression) =
            arg_types = map (SystemF.TypM . translateType) ty_args
            arg_exps = map translateExp args
        in SystemF.AppE inf op_exp arg_types arg_exps
+     LamE f ->
+       SystemF.LamE inf (translateFun pos f)
      CaseE s alts ->
        SystemF.CaseE inf (translateExp s) (map (translateAlt . unLoc) alts)
+     LetfunE defs body ->
+       let defgroup = SystemF.Rec [SystemF.mkDef (toVar v) (translateFun pos f)
+                                  | L pos (Def v f) <- defs]
+       in SystemF.LetfunE inf defgroup (translateExp body)
+     ExceptE t ->
+       SystemF.ExceptE inf (translateType t)
   where
     inf = SystemF.mkExpInfo pos
 

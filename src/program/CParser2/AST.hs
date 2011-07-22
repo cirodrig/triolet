@@ -114,9 +114,12 @@ data Domain ix = Domain (Identifier ix) (LType ix)
 data Exp a =
     VarE (Identifier a)
   | IntE !Integer
-  | TAppE (LExp a) (LType a)    
+  | TAppE (LExp a) (LType a)
   | AppE (LExp a) (LExp a)
+  | LamE (Fun a)
   | CaseE (LExp a) [LAlt a]
+  | LetfunE [LDef a] (LExp a)
+  | ExceptE (LType a)
 
 type LExp ix = Located (Exp ix)
 
@@ -130,6 +133,10 @@ data Alt a =
   }
 
 type LAlt ix = Located (Alt ix)
+
+data Def ix = Def (Identifier ix) (Fun ix)
+
+type LDef ix = Located (Def ix)
 
 -- | A function that was specified in source code
 data Fun ix =
