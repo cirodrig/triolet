@@ -42,6 +42,8 @@ import Type.Environment
 import Type.Type
 import Type.Rename
 
+type VarPredicate m = Var -> m Bool
+
 renameMany :: (st -> a -> (st -> a -> b) -> b)
            -> st -> [a] -> (st -> [a] -> b) -> b
 renameMany f rn (x:xs) k =
@@ -69,41 +71,56 @@ renamePatMs :: Renaming -> [PatM] -> (Renaming -> [PatM] -> a) -> a
 renamePatMs = renameMany renamePatM
 
 -- | Freshen a type variable binding
-freshenTyPatM :: (Monad m, Supplies m VarID) => TyPatM -> m (TyPatM, Renaming)
-freshenTyPatM (TyPatM (v ::: ty)) = do
-  v' <- newClonedVar v
-  return (TyPatM (v' ::: ty), singletonRenaming v v')
+freshenTyPatM :: (Monad m, Supplies m VarID) =>
+                 VarPredicate m -> TyPatM -> m (TyPatM, Renaming)
+freshenTyPatM p pat@(TyPatM (v ::: ty)) = do
+  should_freshen <- p v
+  if should_freshen
+    then do
+      v' <- newClonedVar v
+      return (TyPatM (v' ::: ty), singletonRenaming v v')
+    else return (pat, mempty)
 
 -- | Freshen a list of type variable bindings.  None of the bindings refer to
 --   a variable bound by another member of the list.
-freshenTyPatMs :: (Monad m, Supplies m VarID) => [TyPatM]
-               -> m ([TyPatM], Renaming)
-freshenTyPatMs pats = do
+freshenTyPatMs :: (Monad m, Supplies m VarID) =>
+                  VarPredicate m -> [TyPatM] -> m ([TyPatM], Renaming)
+freshenTyPatMs p pats = do
   (pats', assocs) <- mapAndUnzipM freshen_pattern pats
-  return (pats', renaming assocs)
+  return (pats', renaming $ catMaybes assocs)
   where
-    freshen_pattern (TyPatM (v ::: ty)) = do
-      v' <- newClonedVar v
-      return (TyPatM (v' ::: ty), (v, v'))
+    freshen_pattern pat@(TyPatM (v ::: ty)) = do
+      should_freshen <- p v
+      if should_freshen
+        then do
+          v' <- newClonedVar v
+          return (TyPatM (v' ::: ty), Just (v, v'))
+        else return (pat, Nothing)
 
 -- | Freshen a variable binding that is /not/ a local variable binding.
-freshenPatM :: (Monad m, Supplies m VarID) => PatM -> m (PatM, Renaming)
-freshenPatM pat = do 
-  (pat', assocs) <- freshenPattern pat
+freshenPatM :: (Monad m, Supplies m VarID) =>
+               VarPredicate m -> PatM -> m (PatM, Renaming)
+freshenPatM p pat = do 
+  (pat', assocs) <- freshenPattern p pat
   return (pat', maybe mempty (uncurry singletonRenaming) assocs)
 
 -- | Freshen a list of variable bindings. 
 --   There must not be any local variable bindings in the list.
 --   None of the bindings may refer to a variable bound by another member of
 --   the list. 
-freshenPatMs :: (Monad m, Supplies m VarID) => [PatM] -> m ([PatM], Renaming)
-freshenPatMs pats = do
-  (pats', assocs) <- mapAndUnzipM freshenPattern pats
+freshenPatMs :: (Monad m, Supplies m VarID) =>
+                VarPredicate m -> [PatM] -> m ([PatM], Renaming)
+freshenPatMs p pats = do
+  (pats', assocs) <- mapAndUnzipM (freshenPattern p) pats
   return (pats', renaming $ catMaybes assocs)
 
-freshenPattern (PatM (v ::: param_ty) uses) = do
-  v' <- newClonedVar v
-  return (PatM (v' ::: param_ty) uses, Just (v, v'))
+freshenPattern p pat@(PatM (v ::: param_ty) uses) = do
+  should_freshen <- p v
+  if should_freshen
+    then do
+      v' <- newClonedVar v
+      return (PatM (v' ::: param_ty) uses, Just (v, v'))
+    else return (pat, Nothing)
 
 -- | Apply a substitution to a type pattern
 substituteTyPatM :: EvalMonad m =>
@@ -150,7 +167,7 @@ substitutePatMs' = renameMany substitutePatM'
 
 instance Renameable (Typ Mem) where
   rename rn (TypM t) = TypM $ rename rn t
-  freshen (TypM t) = liftM TypM $ freshen t
+  freshen p (TypM t) = liftM TypM $ freshen p t
   freeVariables (TypM t) = freeVariables t
 
 instance Renameable (Exp Mem) where
@@ -178,18 +195,23 @@ instance Renameable (Exp Mem) where
        ExceptE inf rty ->
          ExceptE inf (rename rn rty)
 
-  freshen (ExpM expression) =
+  freshen p (ExpM expression) =
     case expression
     of LetE inf pat rhs body -> do
-         (pat', rn) <- freshenPatM pat
+         (pat', rn) <- freshenPatM p pat
          let body' = rename rn body
          return $ ExpM $ LetE inf pat' rhs body'
 
        LetfunE inf (NonRec def) body -> do
          let v = definiendum def
-         v' <- newClonedVar v
-         let body' = rename (singletonRenaming v v') body
-             def' = def {definiendum = v'}
+         should_freshen <- p v
+         (body', def') <-
+           if should_freshen
+           then do
+             v' <- newClonedVar v
+             return (rename (singletonRenaming v v') body,
+                     def {definiendum = v'})
+           else return (body, def)
          return $ ExpM $ LetfunE inf (NonRec def') body'
 
        LetfunE inf (Rec defs) body -> do
@@ -251,12 +273,12 @@ instance Renameable (Alt Mem) where
                            , altBody = rename rn' body}
          
 
-  freshen (AltM alt) =
+  freshen p (AltM alt) =
     case alt
     of DeCon con ty_args ex_types params body -> do
-         (ex_types', ex_renaming) <- freshenTyPatMs ex_types
+         (ex_types', ex_renaming) <- freshenTyPatMs p ex_types
          renamePatMs ex_renaming params $ \ex_renaming' params' -> do
-           (rn_params, param_renaming) <- freshenPatMs params'
+           (rn_params, param_renaming) <- freshenPatMs p params'
            let renaming = param_renaming `mappend` ex_renaming'
            let body' = rename renaming body
            return $ AltM $ DeCon { altConstructor = con
@@ -266,7 +288,7 @@ instance Renameable (Alt Mem) where
                                  , altBody = body'}
 
        DeTuple params body -> do
-           (rn_params, param_renaming) <- freshenPatMs params
+           (rn_params, param_renaming) <- freshenPatMs p params
            let body' = rename param_renaming body
            return $ AltM $ DeTuple { altParams = rn_params
                                    , altBody = body'}
@@ -312,10 +334,10 @@ instance Renameable (Fun Mem) where
                   , funReturn = ret
                   , funBody = body}
   
-  freshen (FunM fun) = do
-    (ty_params, ty_renaming) <- freshenTyPatMs $ funTyParams fun
+  freshen p (FunM fun) = do
+    (ty_params, ty_renaming) <- freshenTyPatMs p $ funTyParams fun
     renamePatMs ty_renaming (funParams fun) $ \ty_renaming' params -> do
-      (rn_params, param_renaming) <- freshenPatMs params
+      (rn_params, param_renaming) <- freshenPatMs p params
       let renaming = param_renaming `mappend` ty_renaming'
       let ret = rename renaming $ funReturn fun
           body = rename renaming $ funBody fun
@@ -387,7 +409,8 @@ instance Substitutable (Exp Mem) where
            return $ ExpM $ LetE inf p' val' body'
        LetfunE inf defs body -> do
          -- For simplicity, always rename the definition group 
-         ExpM (LetfunE inf defs' body') <- freshen (ExpM expression)
+         ExpM (LetfunE inf defs' body') <-
+           freshenPure (const True) (ExpM expression)
          defs'' <- mapM (mapMDefiniens (substitute s)) defs'
          body'' <- substitute s body'
          return $ ExpM $ LetfunE inf defs'' body''
@@ -557,12 +580,12 @@ freshenDefGroup (Rec defs) k = do
 -- | Rename all bound variables in a module
 --   (except those bound inside types or demand annotations).
 freshenModuleFully :: Module Mem -> FreshVarM (Module Mem)
-freshenModuleFully (Module modname groups exports) =
+freshenModuleFully (Module modname imports groups exports) =
   runReaderT freshen_module mempty
   where
     freshen_module = do
       (groups', exports') <- freshen_defs id groups
-      return $ Module modname groups' exports'
+      return $ Module modname imports groups' exports'
 
     freshen_defs hd (g:gs) =
       freshenDefGroup g $ \g' -> freshen_defs (hd . (g':)) gs

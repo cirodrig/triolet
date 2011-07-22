@@ -102,13 +102,22 @@ instance Renameable Type where
   freshen f ty =
     case ty
     of LamT (v ::: dom) body -> do
-         v' <- newClonedVar v
-         let rn = singletonRenaming v v'
-         return $ LamT (v' ::: dom) (rename rn body)
+         should_freshen <- f v
+         if should_freshen
+           then do
+             v' <- newClonedVar v
+             let rn = singletonRenaming v v'
+             return $ LamT (v' ::: dom) (rename rn body)
+           else return ty
+           
        AllT (v ::: dom) rng -> do
-         v' <- newClonedVar v
-         let rn = singletonRenaming v v'
-         return $ AllT (v' ::: dom) (rename rn rng)
+         should_freshen <- f v
+         if should_freshen
+           then do
+             v' <- newClonedVar v
+             let rn = singletonRenaming v v'
+             return $ AllT (v' ::: dom) (rename rn rng)
+           else return ty
        -- Other terms don't bind variables
        _ -> return ty
 
@@ -155,8 +164,8 @@ unifyBoundVariables (AllT (v1 ::: dom1) rng1) (AllT (v2 ::: dom2) rng2) = do
 
 -- Otherwise, they don't bind a common variable
 unifyBoundVariables t1 t2 = do
-  t1' <- freshen t1
-  t2' <- freshen t2
+  t1' <- freshenPure (const True) t1
+  t2' <- freshenPure (const True) t2
   return (t1', t2')
 
 -- | Like 'unifyBoundVariables', but variables from the first type are not
@@ -176,7 +185,7 @@ leftUnifyBoundVariables t1@(AllT (v1 ::: _) _) (AllT (v2 ::: dom2) rng2) =
 
 -- Otherwise, they don't bind a common variable
 leftUnifyBoundVariables t1 t2 = do
-  t2' <- freshen t2
+  t2' <- freshenPure (const True) t2
   return (t1, t2')
 
 -------------------------------------------------------------------------------

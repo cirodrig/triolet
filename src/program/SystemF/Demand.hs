@@ -62,8 +62,8 @@ data Dmd = Dmd { multiplicity :: !Multiplicity
 --   The 'multiplicity' field does not mention variable names.
 instance Renameable Dmd where
   rename rn dmd = dmd {specificity = rename rn $ specificity dmd}
-  freshen dmd = do spc <- freshen $ specificity dmd
-                   return $ dmd {specificity = spc}
+  freshen f dmd = do spc <- freshen f $ specificity dmd
+                     return $ dmd {specificity = spc}
   freeVariables dmd = freeVariables $ specificity dmd
 
 instance Substitutable Dmd where
@@ -152,7 +152,7 @@ instance Renameable Specificity where
        -- Other constructors don't mention variables
        _ -> spc
 
-  freshen spc =
+  freshen f spc =
     case spc
     of Decond (MonoCon con ty_args ex_types) spcs -> do
          -- Freshen the existential variables 

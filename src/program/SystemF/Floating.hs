@@ -453,21 +453,21 @@ renameContextExp rn cexp =
 freshenContextExp :: (Monad m, Supplies m VarID) =>
                      ContextExp -> m (ContextExp, Renaming)
 freshenContextExp (LetCtx inf pat body) = do
-  (pat', rn) <- freshenPatM pat
+  (pat', rn) <- freshenPatM (const $ return True) pat
   return (LetCtx inf pat' (rename rn body), rn)
 
 freshenContextExp (CaseCtx inf scr (MonoCon alt_con ty_args ty_params) params exc_alts) = do
-  (ty_params', ty_renaming) <- freshenTyPatMs (map TyPatM ty_params)
+  (ty_params', ty_renaming) <- freshenTyPatMs (const $ return True) (map TyPatM ty_params)
   renamePatMs ty_renaming params $ \ty_renaming2 params' -> do
-    (params'', param_renaming) <- freshenPatMs params'
+    (params'', param_renaming) <- freshenPatMs (const $ return True) params'
     let rn = param_renaming `mappend` ty_renaming
-    exc_alts' <- freshen $ rename rn exc_alts
+    exc_alts' <- freshen (const $ return True) $ rename rn exc_alts
     let mono_con = MonoCon alt_con ty_args [b | TyPatM b <- ty_params']
     return (CaseCtx inf scr mono_con params'' exc_alts', rn)
 
 freshenContextExp (CaseCtx inf scr mono_con@(MonoTuple _) params exc_alts) = do
-  (params', param_renaming) <- freshenPatMs params
-  exc_alts' <- freshen $ rename param_renaming exc_alts
+  (params', param_renaming) <- freshenPatMs (const $ return True) params
+  exc_alts' <- freshen (const $ return True) $ rename param_renaming exc_alts
   return (CaseCtx inf scr mono_con params' exc_alts', param_renaming)
 
 freshenContextExp (LetfunCtx inf defs) =
@@ -906,7 +906,7 @@ flattenApp float_initializers spc expression =
   case fromExpM expression
   of AppE inf (ExpM (VarE _ op_var)) ty_args args ->
        -- Convert this expression to direct style
-       createFlattenedApp float_initializers spc inf op_var ty_args args
+       createFlattenedApp expression float_initializers spc inf op_var ty_args args
 
      AppE inf op ty_args args -> do
        -- Don't flatten this expresion.  Flatten subexpressions.
@@ -924,7 +924,7 @@ flattenApp float_initializers spc expression =
        (new_exp, rt) <- floatInExp expression
        return (new_exp, rt, [])
 
-createFlattenedApp float_initializers spc inf op_var ty_args args = do
+createFlattenedApp expression float_initializers spc inf op_var ty_args args = do
   -- Determine which parameters should be moved
   tenv <- getTypeEnv
   let op_type = case lookupType op_var tenv
