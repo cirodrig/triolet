@@ -113,6 +113,23 @@ p <*# t = p <* match t
 commaList :: P a -> P [a]
 commaList p = parens $ p `sepBy` match CommaTok
 
+-- A parenthesized thing or tuple of things
+-- > ( x )     --> Left x
+-- > ( x , )   --> Right [x]
+-- > ( x , y ) --> Right [x, y]
+parenOrTuple :: P a -> P (Either a [a])
+parenOrTuple p = do
+  match LParenTok
+  x <- p
+  end_parentheses x <|> tuple x
+  where
+    end_parentheses x = match RParenTok >> return (Left x) 
+    tuple x = do
+      match CommaTok 
+      xs <- p `sepBy` match CommaTok
+      match RParenTok
+      return $ Right (x : xs)
+
 -------------------------------------------------------------------------------
 -- * Attributes
 
@@ -159,12 +176,19 @@ pAppType = fmap mk_apps $ many1 pTypeAtom
     mk_apps (t:ts) = foldl mk_app t ts
     mk_app t1 t2 = L (getSourcePos t1) (AppT t1 t2)
 
--- | Parse an atomic type: an int, variable, or parenthesized expression
+-- | Parse an atomic type: an int, variable, parenthesized expression, or
+--   tuple type
 pTypeAtom :: P PLType
-pTypeAtom = int_type <|> var_type <|> parens pType
+pTypeAtom = int_type <|> var_type <|> pParenType
   where
     int_type = located $ IntIndexT <$> int
     var_type = located $ VarT <$> identifier
+
+-- | Parse a type with parentheses.  It may be a tuple type.
+pParenType :: P PLType
+pParenType = do
+  pos <- locatePosition
+  either id (\ts -> L pos (TupleT ts)) `liftM` parenOrTuple pType
 
 pDomain :: P PDomain
 pDomain = do
@@ -211,8 +235,8 @@ ifE = located $ do
   else_pos <- locatePosition
   match ElseTok
   y <- pExp
-  return $ CaseE scrutinee [ L then_pos $ Alt "True" [] [] [] x
-                           , L else_pos $ Alt "False" [] [] [] y]
+  return $ CaseE scrutinee [ L then_pos $ Alt (ConPattern "True" [] [] []) x
+                           , L else_pos $ Alt (ConPattern "False" [] [] []) y]
 
 lamE :: P PLExp
 lamE = located $ do
@@ -284,7 +308,12 @@ appExp = do
           operand <- atomicExp  -- Non-atomic expressions must be parenthesized
           apply loc (L loc $ AppE f operand)
 
-atomicExp = varE <|> intE <|> parens pExp
+atomicExp = varE <|> intE <|> parenExp
+
+-- An expression in parentheses
+parenExp = do
+  pos <- locatePosition
+  either id (\es -> L pos (TupleE es)) `liftM` parenOrTuple pExp
 
 varE :: P PLExp
 varE = located (VarE <$> identifier) <?> "variable"
@@ -292,18 +321,31 @@ varE = located (VarE <$> identifier) <?> "variable"
 intE :: P PLExp
 intE = located (IntE <$> int) <?> "integer"
 
--- | Parse a case alternative
+-- | Parse a case alternative.  The alternative is either a constructor
+--   application or a tuple application.
 pAlt :: P PLAlt
 pAlt = located $ do
-  con <- identifier
-  targs <- many type_arg
-  tparams <- typeParameters
-  params <- parameters
+  pat <- pattern
   match DotTok
   body <- pExp
-  return $ Alt con targs tparams params body
+  return $ Alt pat body
+
+pattern :: P (Pattern Parsed)
+pattern = con_pattern <|> tuple_pattern
   where
+    -- A constructor pattern starts with an identifier
+    con_pattern =
+      ConPattern <$>
+      identifier <*> many type_arg <*> typeParameters <*> parameters
+
     type_arg = PS.try (match AtTok >> pTypeAtom)
+
+    -- A tuple pattern starts with a parenthesis
+    tuple_pattern = parens $ do
+      x <- pDomain
+      match CommaTok
+      xs <- pDomain `sepBy` match CommaTok
+      return $ TuplePattern (x : xs)
 
 typeParameters :: P [PDomain]
 typeParameters = fmap concat $ many (match AtTok >> parens pDomains)

@@ -86,6 +86,9 @@ data Type ix =
   | IntIndexT
     { tInt :: !Integer
     }
+    
+    -- | An N-ary unboxed tuple, N > 0.
+  | TupleT [LType ix]
 
     -- | An application
   | AppT 
@@ -114,6 +117,7 @@ data Domain ix = Domain (Identifier ix) (LType ix)
 data Exp a =
     VarE (Identifier a)
   | IntE !Integer
+  | TupleE [LExp a]
   | TAppE (LExp a) (LType a)
   | AppE (LExp a) (LExp a)
   | LamE (Fun a)
@@ -126,12 +130,23 @@ type LExp ix = Located (Exp ix)
 
 data Alt a =
   Alt 
-  { altCon :: Identifier a
-  , altTyArgs :: [LType a] 
-  , altExTypes :: [Domain a]
-  , altFields :: [Domain a]
+  { altPattern :: !(Pattern a)
   , altBody :: LExp a
   }
+
+data Pattern a =
+    ConPattern
+    { altCon :: Identifier a
+    , altTyArgs :: [LType a] 
+    , _altExTypes :: [Domain a]
+    , altFields :: [Domain a]
+    }
+  | TuplePattern
+    { altFields :: [Domain a]
+    }
+
+altExTypes (ConPattern {_altExTypes = ts}) = ts
+altExTypes (TuplePattern {}) = []
 
 type LAlt ix = Located (Alt ix)
 

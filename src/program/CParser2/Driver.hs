@@ -87,4 +87,4 @@ parseCoreFunctions ident_supply mem_types = do
   resolved_ast <- resolveModule ident_supply resolve_env modname parsed_ast
 
   -- Convert to core expressions
-  return $ createCoreFunctions mem_types resolved_ast
+  createCoreFunctions ident_supply mem_types resolved_ast

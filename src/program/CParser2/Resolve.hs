@@ -204,6 +204,10 @@ resolveType pos ty =
                        check_level (getLevel v')
                        return (VarT v', getLevel v')
      IntIndexT n -> return (IntIndexT n, TypeLevel)
+     TupleT ts -> do (args, arg_lvs) <- mapAndUnzipM resolveLType ts
+                     logErrorIf (any (TypeLevel /=) arg_lvs) $
+                       "Arguments of tuple type must be types"
+                     return (TupleT args, TypeLevel)
      AppT op arg -> do (op', op_lv) <- resolveLType op
                        (arg', _) <- resolveLType arg
                        return (AppT op' arg', op_lv)
@@ -252,6 +256,7 @@ resolveExp pos expression =
   case expression
   of VarE v -> VarE <$> use v pos
      IntE n -> pure $ IntE n
+     TupleE ts -> TupleE <$> mapM (resolveL resolveExp) ts
      TAppE e t -> do
        e' <- resolveL resolveExp e 
        (t', t_lv) <- resolveLType t
@@ -289,15 +294,23 @@ resolveDefGroup defs k = enter $ do
       return $ L pos (Def new_var f')
 
 resolveAlt :: SourcePos -> Alt Parsed -> NR (Alt Resolved)
-resolveAlt pos alt = do
-  con <- use (altCon alt) pos
-  (ty_args, ty_lvs) <- mapAndUnzipM resolveLType $ altTyArgs alt
+resolveAlt pos (Alt pattern body) = do
+  resolvePattern pos pattern $ \pattern' -> do
+    body' <- resolveL resolveExp body
+    return $ Alt pattern' body'
+
+resolvePattern pos (ConPattern con ty_args ex_types fields) k = do
+  con' <- use con pos
+  (ty_args', ty_lvs) <- mapAndUnzipM resolveLType ty_args
   logErrorIf (any (TypeLevel /=) ty_lvs) $
     "Type parameter is not a type (" ++ show pos ++ ")"
-  withMany (resolveDomainT pos) (altExTypes alt) $ \ex_types ->
-    withMany (resolveDomainV pos) (altFields alt) $ \fields -> do
-      body <- resolveL resolveExp $ altBody alt
-      return $ Alt con ty_args ex_types fields body
+  withMany (resolveDomainT pos) ex_types $ \ex_types' ->
+    withMany (resolveDomainV pos) fields $ \fields' ->
+    k (ConPattern con' ty_args' ex_types' fields')
+
+resolvePattern pos (TuplePattern fields) k =
+    withMany (resolveDomainV pos) fields $ \fields' ->
+    k (TuplePattern fields')
 
 resolveFun :: SourcePos -> PFun -> NR RFun
 resolveFun pos f =
