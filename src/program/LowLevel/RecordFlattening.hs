@@ -451,17 +451,9 @@ flattenTopLevel exports defs = do
     flatten (GlobalDataDef d) = fmap GlobalDataDef $ flattenDataDef d
 
 flattenStaticData :: StaticData -> RF StaticData
-flattenStaticData (StaticData rec vals) = do
+flattenStaticData (StaticData recd vals) = do
   vals' <- flattenValList vals
-  let record' = record (flatten_record_fields rec) (sizeOf rec) (alignOf rec)
-  return $ StaticData record' vals'
-  where
-    flatten_record_fields rec = concatMap flattened_fields $ recordFields rec
-
-    flattened_fields fld =
-      case fieldType fld
-      of RecordField rec -> flatten_record_fields rec
-         _ -> [fld]
+  return $ StaticData (flattenStaticRecord recd) vals'
 
 -- | Change a data definition to a flat structure type
 flattenDataDef :: DataDef -> RF DataDef
