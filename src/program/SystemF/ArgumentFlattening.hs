@@ -1292,6 +1292,9 @@ flattenInExp expression =
   case fromExpM expression
   of VarE {} -> return expression
      LitE {} -> return expression
+     UTupleE inf args -> do
+       args' <- mapM flattenInExp args
+       return $ ExpM $ UTupleE inf args'
      AppE inf op ty_args args -> do
        op' <- flattenInExp op
        args' <- mapM flattenInExp args
