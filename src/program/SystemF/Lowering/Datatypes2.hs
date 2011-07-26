@@ -1129,16 +1129,21 @@ getValLayout ty
            | op `isPyonBuiltin` the_Pf    -> return VErased
            | otherwise -> do
                tenv <- getTypeEnv
-               case lookupDataTypeForLayout tenv ty of
-                 Just inst_type@(tycon, _, _) ->
-                   case dataTypeKind tycon
-                   of BoxK -> prim_layout LL.OwnedType
-                      ValK -> do
+               case toBaseKind $ typeKind tenv ty of
+                 BoxK ->
+                   -- All boxed types have the same layout
+                   prim_layout LL.OwnedType
+                 ValK ->
+                   -- Layout of a value type depends on the data constructor, 
+                   -- which must be known (i.e. not a variable or function)
+                   case lookupDataTypeForLayout tenv ty
+                   of Just inst_type@(tycon, _, _) -> do
                         -- Use the algebraic data type layout
                         alg_layout <- getValDataTypeLayout inst_type
                         return $ discardValStructure alg_layout
                       _ -> internalError "getValLayout"
-                 Nothing -> internalError "getValLayout: Unexpected type"
+                 _ ->
+                   internalError "getValLayout: Unexpected kind"
          (UTupleT kinds, args) -> do
            -- Create a record containing a field for each argument.
            -- Since arguments always have value or boxed kind, they always 
