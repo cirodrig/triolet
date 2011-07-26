@@ -283,15 +283,15 @@ resolveExp pos expression =
 resolveDefGroup :: [LDef Parsed] -> ([LDef Resolved] -> NR a) -> NR a
 resolveDefGroup defs k = enter $ do
   -- Create a new variable for each local variable
-  let variables = [case unLoc d of Def v _ -> v | d <- defs]
+  let variables = map (dName . unLoc) defs
   resolved <- mapM (newRVar ObjectLevel) variables
   
   -- Process local functions and pass them to the continuation
   k =<< zipWithM resolve_def resolved defs
   where
-    resolve_def new_var (L pos (Def _ f)) = do
+    resolve_def new_var (L pos (Def _ f attrs)) = do
       f' <- resolveFun pos f
-      return $ L pos (Def new_var f')
+      return $ L pos (Def new_var f' attrs)
 
 resolveAlt :: SourcePos -> Alt Parsed -> NR (Alt Resolved)
 resolveAlt pos (Alt pattern body) = do
@@ -366,9 +366,9 @@ resolveEntity _ (DataEnt ty cons attrs) = do
   cons' <- mapM (resolveL resolveDataConDecl) cons
   return $ DataEnt ty' cons' attrs
 
-resolveEntity _ (FunEnt f) = do
+resolveEntity _ (FunEnt f attrs) = do
   f' <- resolveL resolveFun f
-  return $ FunEnt f'
+  return $ FunEnt f' attrs
 
 -- | Resolve a global declaration.  The declared variable should be in the
 --   environment already.

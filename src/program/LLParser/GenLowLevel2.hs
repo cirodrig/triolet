@@ -123,6 +123,8 @@ genDynamicType tenv ty =
      NamedT (RecordT rec) -> do
        dynamic_rec <- convertToDynamicRecord tenv rec
        return $ DynamicType (recordSize dynamic_rec) (recordAlignment dynamic_rec) (Just dynamic_rec)
+     NamedT (TemplateT {}) ->
+       internalError "genDynamicType: Underapplied type"
      BytesT size align -> do
        size_val <- asVal =<< genExpr tenv size
        align_val <- asVal =<< genExpr tenv align

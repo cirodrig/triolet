@@ -59,6 +59,12 @@ import Type.Environment
 import Globals
 import GlobalVar
 
+-- | Different features of the simplifier are enabled
+--   depending on the stage of compilation.
+data SimplifierPhase =
+    GeneralSimplifierPhase
+  | SequentialSimplifierPhase
+
 data LREnv =
   LREnv
   { lrIdSupply :: {-# UNPACK #-}!(Supply VarID)
@@ -81,6 +87,10 @@ data LREnv =
     --   If value is negative, then fuel is unlimited.  If value is zero, then
     --   further simplification is not performed.
   , lrFuel :: {-#UNPACK#-}!(IORef Int)
+
+    -- | The current phase.  The phase is constant during a pass of the
+    --   simplifier.
+  , lrPhase :: !SimplifierPhase
   }
 
 newtype LR a = LR {runLR :: LREnv -> IO a}
@@ -128,6 +138,9 @@ liftFreshVarM m = LR $ \env -> do
 getRewriteRules :: LR RewriteRuleSet
 getRewriteRules = LR $ \env -> return (lrRewriteRules env)
 
+getPhase :: LR SimplifierPhase
+getPhase = LR $ \env -> return (lrPhase env)
+
 lookupKnownValue :: Var -> LR MaybeValue
 lookupKnownValue v = LR $ \env ->
   let val = IntMap.lookup (fromIdent $ varID v) $ lrKnownValues env
@@ -150,21 +163,61 @@ withMaybeValue :: Var -> MaybeValue -> LR a -> LR a
 withMaybeValue _ Nothing m = m
 withMaybeValue v (Just val) m = withKnownValue v val m
 
--- | Add a function definition's value to the environment
-withDefValue :: Def Mem -> LR a -> LR a
-withDefValue (Def v _ f) m =
+-- | Add a function definition's value to the environment.
+--
+--   The function may or may not be added, depending on its attributes and
+--   whether the function is part of a recursive group.
+withDefValue :: Bool -> Def Mem -> LR a -> LR a
+withDefValue is_rec def@(Def v _ f) m = do
+  phase <- getPhase
   let fun_info = funInfo $ fromFunM f
       fun_val = setTrivialValue v $ funAV fun_info Nothing f
-  in withKnownValue v fun_val m
+      can_inline = if is_rec
+                   then isRecInliningCandidate phase def 
+                   else isInliningCandidate phase def
+  if can_inline then withKnownValue v fun_val m else m
 
 -- | Add a function definition to the environment, but don't inline it
 withUninlinedDefValue :: Def Mem -> LR a -> LR a
-withUninlinedDefValue (Def v _ f) m =
-  withMaybeValue v Nothing m
+withUninlinedDefValue (Def v _ f) m = m
 
-withDefValues :: DefGroup (Def Mem) -> LR a -> LR a
-withDefValues (NonRec def) m = withDefValue def m
-withDefValues (Rec _)      m = m
+withDefValues :: Bool -> DefGroup (Def Mem) -> LR a -> LR a
+withDefValues False  (NonRec def) m = withDefValue False def m
+
+-- Nonrecursive groups are not recursive
+withDefValues True   (NonRec _)   m = internalError "withDefValues"
+
+withDefValues is_rec (Rec defs)   m = foldr (withDefValue is_rec) m defs
+
+-- | Decide whether a function may be inlined within its own recursive
+--   definition group.  The function's attributes are used for the decision.
+--
+--   We do not take into account here whether it's /beneficial/ to inline the
+--   function.
+isRecInliningCandidate :: SimplifierPhase -> Def Mem -> Bool
+isRecInliningCandidate _ def =
+  let ann = defAnnotation def
+  in -- It's inlinable only if it's a wrapper function
+     defAnnWrapper ann
+
+-- | Decide whether a function may be inlined (outside of its own definition
+--   group).  The function's attributes are used for the decision.
+--
+--   We do not take into account here whether it's /beneficial/ to inline the
+--   function.
+isInliningCandidate :: SimplifierPhase -> Def Mem -> Bool
+isInliningCandidate phase def =
+  let ann = defAnnotation def
+  in case phase
+     of GeneralSimplifierPhase ->
+          if defAnnInlineSequential ann
+          then False
+          else True
+        SequentialSimplifierPhase ->
+--          True
+          if defAnnInlineSequential ann
+          then False
+          else True
 
 -- | Add a pattern-bound variable to the environment.  
 --   This adds the variable's type to the environment and
@@ -1508,7 +1561,7 @@ rwExport (Export pos spec f) = do
 withDefs :: DefGroup (Def Mem) -> (DefGroup (Def Mem) -> LR a) -> LR a
 withDefs (NonRec def) k = do
   def' <- rwDef def
-  assumeDef def' $ withDefValue def' $ k (NonRec def')
+  assumeDef def' $ withDefValue False def' $ k (NonRec def')
 
 withDefs defgroup@(Rec defs) k = assumeDefs defgroup $ do
   -- Don't inline recursive functions in general.  However, we _do_ want to
@@ -1520,16 +1573,16 @@ withDefs defgroup@(Rec defs) k = assumeDefs defgroup $ do
   with_wrappers wrappers' $ do
     others' <- mapM rwDef others
     let defgroup' = Rec (wrappers' ++ others')
-    withDefValues defgroup' $ k defgroup'
+    withDefValues True defgroup' $ k defgroup'
   where
-    with_wrappers wrs m = foldr withDefValue m wrs
+    with_wrappers wrs m = foldr (withDefValue True) m wrs
 
 rwModule :: Module Mem -> LR (Module Mem)
 rwModule (Module mod_name imports defss exports) =
   -- Add imported functions to the environment.
   -- Note that all imported functions are added--recursive functions should
   -- not be in the import list, or they will be expanded repeatedly
-  foldr withDefValue (rw_top_level id defss) imports
+  foldr (withDefValue False) (rw_top_level id defss) imports
   where
     -- First, rewrite the top-level definitions.
     -- Add defintion groups to the environment as we go along.
@@ -1542,8 +1595,11 @@ rwModule (Module mod_name imports defss exports) =
       return $ Module mod_name imports (defss' []) exports'
 
 -- | The main entry point for the simplifier
-rewriteLocalExpr :: RewriteRuleSet -> Module Mem -> IO (Module Mem)
-rewriteLocalExpr ruleset mod =
+rewriteLocalExpr :: SimplifierPhase
+                 -> RewriteRuleSet
+                 -> Module Mem
+                 -> IO (Module Mem)
+rewriteLocalExpr phase ruleset mod =
   withTheNewVarIdentSupply $ \var_supply -> do
     fuel <- readInitGlobalVarIO the_fuel
     tenv <- readInitGlobalVarIO the_memTypes
@@ -1567,18 +1623,19 @@ rewriteLocalExpr ruleset mod =
                     , lrDictEnv = denv
                     , lrIntEnv = ienv
                     , lrFuel = fuel
+                    , lrPhase = phase
                     }
     runLR (rwModule mod) env
 
 rewriteWithGeneralRules, rewriteWithParallelRules, rewriteWithSequentialRules
   :: Module Mem -> IO (Module Mem)
 
-rewriteWithGeneralRules = rewriteLocalExpr generalRewrites
+rewriteWithGeneralRules = rewriteLocalExpr GeneralSimplifierPhase generalRewrites
 
-rewriteWithParallelRules = rewriteLocalExpr rules 
+rewriteWithParallelRules = rewriteLocalExpr GeneralSimplifierPhase rules 
   where
     rules = combineRuleSets [generalRewrites, parallelizingRewrites]
 
-rewriteWithSequentialRules = rewriteLocalExpr rules 
+rewriteWithSequentialRules = rewriteLocalExpr SequentialSimplifierPhase rules 
   where
     rules = combineRuleSets [generalRewrites, sequentializingRewrites]

@@ -142,7 +142,8 @@ attr = do
   fromMaybe (fail "Unrecognized attribute") $ lookup name attr_table
   where
     attr_table =
-      [("abstract", return AbstractAttr)]
+      [("abstract", return AbstractAttr),
+       ("inline_sequential", return InlineSequentialAttr)]
 
 -------------------------------------------------------------------------------
 -- * Type parsing
@@ -281,9 +282,10 @@ def :: P (LDef Parsed)
 def = located $ do
   v <- identifier
   (ty_params, params, range) <- funSignature
+  attrs <- attributeList
   match EqualTok
   body <- pExp
-  return $ Def v (Fun ty_params params range body)
+  return $ Def v (Fun ty_params params range body) attrs
 
 -- | An expression involving application or something with higher precedence
 appExp :: P PLExp
@@ -406,9 +408,10 @@ pFunDecl = do
   pos <- locatePosition
   v <- identifier
   (ty_params, params, range) <- funSignature
+  attrs <- attributeList
   match EqualTok
   body <- pExp
-  return $ L pos $ Decl v $ FunEnt (L pos (Fun ty_params params range body))
+  return $ L pos $ Decl v $ FunEnt (L pos (Fun ty_params params range body)) attrs
 
 pDecl = pDataDecl <|> pTypeDecl <|> pVarDecl <|> pFunDecl <?>
         "type, data, variable, or function declaration"

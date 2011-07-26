@@ -247,7 +247,7 @@ mkDef :: Var -> Fun s -> Def s
 mkDef v f = Def v defaultDefAnn f
 
 mkWrapperDef :: Var -> Fun s -> Def s
-mkWrapperDef v f = Def v (DefAnn True) f
+mkWrapperDef v f = Def v (defaultDefAnn {defAnnWrapper = True}) f
 
 mapDefiniens :: (Fun s -> Fun s') -> Def s -> Def s'
 mapDefiniens f def = def {definiens = f $ definiens def}
@@ -266,11 +266,15 @@ defIsWrapper def = defAnnWrapper $ defAnnotation def
 data DefAnn =
   DefAnn
   { -- | True if the definition is a wrapper function.
-    defAnnWrapper :: {-#UNPACK#-}!Bool
+    defAnnWrapper :: !Bool
+    
+    -- | True if the definition should not be inlined until the sequential
+    --   phase.
+  , defAnnInlineSequential :: !Bool
   }
 
 defaultDefAnn :: DefAnn
-defaultDefAnn = DefAnn False
+defaultDefAnn = DefAnn False False
 
 -- | A definition group consists of either a single non-recursive definition
 --   or a list of recursive definitions.  The list must not be empty.

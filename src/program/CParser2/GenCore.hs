@@ -31,8 +31,8 @@ checkModule mod@(Module decls)
   where
     is_fun_decl ldecl =
       case unLoc ldecl
-      of Decl _ (FunEnt _) -> True
-         _                 -> False
+      of Decl _ (FunEnt _ _) -> True
+         _                   -> False
 
 -------------------------------------------------------------------------------
 

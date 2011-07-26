@@ -25,10 +25,23 @@ checkModule mod@(Module decls)
   where
     is_fun_decl ldecl =
       case unLoc ldecl
-      of Decl _ (FunEnt _) -> True
-         _                 -> False
+      of Decl _ (FunEnt _ _) -> True
+         _                   -> False
 
 -------------------------------------------------------------------------------
+
+-- | Convert function definition attributes
+defAttributes :: [Attribute] -> (SystemF.DefAnn -> SystemF.DefAnn)
+defAttributes attrs ann = foldr insert_attribute ann attrs
+  where
+    insert_attribute InlineSequentialAttr ann =
+      ann {SystemF.defAnnInlineSequential = True}
+    
+    insert_attribute _ _ =
+      internalError "Unexpected function attribute"
+
+applyDefAttributes :: [Attribute] -> (SystemF.Def SystemF.Mem -> SystemF.Def SystemF.Mem)
+applyDefAttributes attrs = SystemF.modifyDefAnnotation (defAttributes attrs)
 
 -- | Determine the type of an expression.
 expType :: RLExp -> TypeEvalM Type.Type
@@ -97,9 +110,9 @@ typeKind t =
 assumeDefGroup :: [LDef Resolved] -> TypeEvalM b -> TypeEvalM b
 assumeDefGroup defs m = do
   -- Add function types to environment
-  let vars = [toVar v | L _ (Def v _) <- defs]
-  fun_types <- sequence [translateType $ funType pos f
-                        | L pos (Def _ f) <- defs]
+  let vars = [toVar $ dName d | L _ d <- defs]
+  fun_types <- sequence [translateType $ funType pos (dFun d)
+                        | L pos d <- defs]
   assumeBinders (zipWith (:::) vars fun_types) $ m
 
 -------------------------------------------------------------------------------
@@ -194,9 +207,11 @@ translateExp (L pos expression) =
        body' <- assumeBinder binder' $ translateExp body
        return $ SystemF.ExpM $ SystemF.LetE inf (SystemF.patM binder') rhs' body'
      LetfunE defs body -> assumeDefGroup defs $ do
-       functions <- sequence [translateFun pos f | L pos (Def _ f) <- defs]
-       let vars = [toVar v | L _ (Def v _) <- defs]
-       let defgroup = SystemF.Rec $ zipWith SystemF.mkDef vars functions
+       functions <- sequence [translateFun pos (dFun d) | L pos d <- defs]
+       let systemf_defs = [applyDefAttributes (dAttributes d) $
+                           SystemF.mkDef (toVar $ dName d) f
+                          | (L _ d, f) <- zip defs functions]
+       let defgroup = SystemF.Rec systemf_defs
        body' <- translateExp body
        return $ SystemF.ExpM $ SystemF.LetfunE inf defgroup body'
      ExceptE t ->
@@ -238,9 +253,9 @@ translateAlt (Alt (TuplePattern fields) body) = do
       SystemF.DeTuple { SystemF.altParams = map SystemF.patM val_binders
                       , SystemF.altBody = body'}
 
-translateDecl (L pos (Decl name (FunEnt (L fun_pos f)))) =
+translateDecl (L pos (Decl name (FunEnt (L fun_pos f) attrs))) =
   let ResolvedVar v _ = name
-  in liftM (SystemF.mkDef v) $ translateFun fun_pos f
+  in liftM (applyDefAttributes attrs . SystemF.mkDef v) $ translateFun fun_pos f
 
 translateDecl _ =
   internalError "translateDecl"

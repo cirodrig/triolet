@@ -62,7 +62,9 @@ unLoc (L _ x) = x
 
 -- | Attribute annotations from the source code
 data Attribute =
-  AbstractAttr                    -- ^ Data type is abstract
+    AbstractAttr                    -- ^ Data type is abstract
+  | InlineSequentialAttr            -- ^ Definition should not be inlined until
+                                    --   the sequential compilation phase
   deriving (Eq, Ord)
 
 -------------------------------------------------------------------------------
@@ -150,7 +152,12 @@ altExTypes (TuplePattern {}) = []
 
 type LAlt ix = Located (Alt ix)
 
-data Def ix = Def (Identifier ix) (Fun ix)
+data Def ix =
+  Def 
+  { dName :: Identifier ix
+  , dFun :: Fun ix
+  , dAttributes :: [Attribute]
+  }
 
 type LDef ix = Located (Def ix)
 
@@ -198,7 +205,7 @@ data Entity ix =
     VarEnt (LType ix) 
   | TypeEnt (LType ix) (Maybe BuiltinTypeFunction)
   | DataEnt (LType ix) [LDataConDecl ix] [Attribute]
-  | FunEnt (Located (Fun ix))
+  | FunEnt (Located (Fun ix)) [Attribute]
 
 type LDecl ix = Located (Decl ix)
 
