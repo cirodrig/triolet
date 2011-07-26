@@ -152,11 +152,10 @@ mkFun typaram_kinds mk_params mk_body = do
     mk_typaram_var _ = newAnonymousVar TypeLevel
 
 mkAlt :: EvalMonad m =>
-         (forall a. FreshVarM a -> m a)
-      -> TypeEnv -> Var -> [TypM]
+         TypeEnv -> Var -> [TypM]
       -> ([Var] -> [Var] -> m ExpM)
       -> m AltM
-mkAlt lift_FreshVarM tenv con ty_args mk_body =
+mkAlt tenv con ty_args mk_body =
   case lookupDataCon con tenv
   of Just dcon_type -> do
        -- Get the types of the alternative patterns

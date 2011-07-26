@@ -64,7 +64,7 @@ load :: TypeEnv
      -> TypeEvalM ExpM
 load tenv ty val =
   caseE val
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_stored) [ty] $
+  [mkAlt tenv (pyonBuiltin the_stored) [ty] $
    \ [] [val] -> varE val]
 
 -- | Create a case expression to inspect a list.
@@ -84,10 +84,10 @@ caseOfList :: TypeEnv
            -> TypeEvalM ExpM
 caseOfList tenv scrutinee list_type mk_body =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_make_list) [list_type] $
+  [mkAlt tenv (pyonBuiltin the_make_list) [list_type] $
    \ [size_index] [size, array_ref] ->
    caseE (varE array_ref)
-   [mkAlt liftFreshVarM tenv (pyonBuiltin the_referenced) [array_type size_index] $
+   [mkAlt tenv (pyonBuiltin the_referenced) [array_type size_index] $
     \ [] [ay] -> mk_body size_index size ay]]
   where
     -- Create the type (array n list_type)
@@ -105,10 +105,10 @@ caseOfList tenv scrutinee list_type mk_body =
 -- >      of referenced ay. $(make_body m n s t ay)
 caseOfMatrix tenv scrutinee elt_type mk_body =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_make_matrix) [elt_type] $
+  [mkAlt tenv (pyonBuiltin the_make_matrix) [elt_type] $
    \ [size_y_index, size_x_index] [size_y, size_x, array_ref] ->
    caseE (varE array_ref)
-   [mkAlt liftFreshVarM tenv (pyonBuiltin the_referenced) [array_type size_y_index size_x_index] $
+   [mkAlt tenv (pyonBuiltin the_referenced) [array_type size_y_index size_x_index] $
     \ [] [ay] -> mk_body size_y_index size_x_index size_y size_x ay]]
   where
     -- Create the type (array m (array n elt_type))
@@ -123,7 +123,7 @@ caseOfTraversableDict :: TypeEnv
                       -> TypeEvalM ExpM
 caseOfTraversableDict tenv scrutinee container_type mk_body =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_traversableDict) [container_type] $
+  [mkAlt tenv (pyonBuiltin the_traversableDict) [container_type] $
    \ [] [trv, bld] -> mk_body trv bld]
 
 caseOfSomeIndInt :: TypeEnv
@@ -132,7 +132,7 @@ caseOfSomeIndInt :: TypeEnv
                  -> TypeEvalM ExpM
 caseOfSomeIndInt tenv scrutinee mk_body =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_someIndInt) [] $
+  [mkAlt tenv (pyonBuiltin the_someIndInt) [] $
    \ [intindex] [intvalue] -> mk_body intindex intvalue]
 
 defineAndInspectIndInt tenv int_value mk_body =
@@ -147,7 +147,7 @@ caseOfFinIndInt :: TypeEnv
                 -> TypeEvalM ExpM
 caseOfFinIndInt tenv scrutinee int_index mk_body =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_finIndInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin the_finIndInt) [TypM int_index] $
    \ [] [pf, intvalue] -> mk_body pf intvalue]
 
 caseOfIndInt :: TypeEnv
@@ -158,9 +158,9 @@ caseOfIndInt :: TypeEnv
              -> TypeEvalM ExpM
 caseOfIndInt tenv scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_indInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin the_indInt) [TypM int_index] $
    \ [] [fin] -> mk_finite fin,
-   mkAlt liftFreshVarM tenv (pyonBuiltin the_indOmega) [TypM int_index] $
+   mkAlt tenv (pyonBuiltin the_indOmega) [TypM int_index] $
    \ [] [pf] -> mk_infinite pf]
 
 caseOfIndInt' :: TypeEnv
@@ -171,9 +171,9 @@ caseOfIndInt' :: TypeEnv
               -> TypeEvalM ExpM
 caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
-  [mkAlt liftFreshVarM tenv (pyonBuiltin the_indInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin the_indInt) [TypM int_index] $
    \ [] [fin] -> caseOfFinIndInt tenv (varE fin) int_index mk_finite,
-   mkAlt liftFreshVarM tenv (pyonBuiltin the_indOmega) [TypM int_index] $
+   mkAlt tenv (pyonBuiltin the_indOmega) [TypM int_index] $
    \ [] [pf] -> mk_infinite pf]
 
 -- | Create a list where each array element is a function of its index only
@@ -418,7 +418,7 @@ rwConvertToBare inf [TypM bare_type] [repr, arg]
     deconstruct_boxed whnf_type = do
       tenv <- getTypeEnv
       caseE (return arg)
-        [mkAlt undefined tenv (pyonBuiltin the_boxed)
+        [mkAlt tenv (pyonBuiltin the_boxed)
          [TypM whnf_type]
          (\ [] [unboxed_ref] ->
            varAppE (pyonBuiltin the_copy) [TypM whnf_type]
@@ -459,7 +459,7 @@ rwConvertToBoxed inf [TypM bare_type] [repr, arg]
       localE (TypM bare_type) (return arg)
         (\arg_val ->
           caseE (varE arg_val) 
-          [mkAlt undefined tenv (pyonBuiltin the_storedBox)
+          [mkAlt tenv (pyonBuiltin the_storedBox)
            [TypM boxed_type]
            (\ [] [boxed_ref] -> varE boxed_ref)])
     
