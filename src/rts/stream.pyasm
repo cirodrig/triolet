@@ -22,6 +22,18 @@ procedure inline allocate (bool is_pointerless, uint size) -> pointer {
   };
 };
 
+#if 0
+// A dynamic shape value with no further information
+data owned DynShapeUnit_value = Obj(unit) {
+  ObjectHeader {DynShapeUnit_info},
+  nil
+};
+
+data pointer DynShapeUnit_info = InfoTableHeader {
+  TAG_CON
+};
+#endif
+
 // The info table of a stream
 data pointer Stream_info = InfoTableHeader {
   TAG_CON

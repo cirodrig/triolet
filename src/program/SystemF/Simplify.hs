@@ -309,6 +309,10 @@ makeExpValue (ExpM expression) =
      LitE inf l -> return $ Just $ LitAV inf l
      _ -> return Nothing
 
+rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
+  rewriteApp (lrRewriteRules env) (lrIntEnv env) (lrIdSupply env) (lrTypeEnv env)
+    inf operator ty_args args
+
 -------------------------------------------------------------------------------
 -- Inlining
 
@@ -892,6 +896,7 @@ rwExp :: ExpM -> LR (ExpM, MaybeValue)
 rwExp expression = debug "rwExp" expression $ do
     -- Flatten nested let and case statements.  Consume fuel only if flattening
     -- occurs.
+    -- DEBUG: rename variables
     ex1 <- ifFuel expression $ restructureExp expression
 
     -- Simplify subexpressions.
@@ -1014,11 +1019,8 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
             -- Try to rewrite this application.  If it was rewritten, then
             -- consume fuel.
             ifElseFuel unknown_app $ do
-              tenv <- getTypeEnv
-              ruleset <- getRewriteRules
-                  
-              rewritten <- liftTypeEvalM $
-                           rewriteApp ruleset inf op_var ty_args args
+              tenv <- getTypeEnv                  
+              rewritten <- rewriteAppInSimplifier inf op_var ty_args args
               case rewritten of 
                 Just new_expr -> do
                   consumeFuel     -- A term has been rewritten

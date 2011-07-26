@@ -18,6 +18,7 @@ builtinTypeFunctions :: Map.Map Var BuiltinTypeFunction
 builtinTypeFunctions =
   Map.fromList
   [ (pyonBuiltin the_shape, BuiltinTypeFunction shapePureTF shapeMemTF)
+  , (pyonBuiltin the_dynshape, BuiltinTypeFunction dynShapePureTF dynShapeMemTF)
   , (pyonBuiltin the_BoxedType, BuiltinTypeFunction boxedPureTF boxedMemTF)
   , (pyonBuiltin the_BareType, BuiltinTypeFunction barePureTF bareMemTF)
   ]
@@ -40,8 +41,10 @@ shapePureTF = typeFunction 1 compute_shape
         Just (op, args)
           | op `isPyonBuiltin` the_Stream ->
               case args of [arg, _] -> reduceToWhnf arg
-          | op `isPyonBuiltin` the_list || op `isPyonBuiltin` the_matrix ->
+          | op `isPyonBuiltin` the_list ->
               return $ VarT (pyonBuiltin the_list_shape)
+          | op `isPyonBuiltin` the_matrix ->
+              return $ VarT (pyonBuiltin the_matrix_shape)
           | op `isPyonBuiltin` the_array ->
               case args
               of [arg, _] -> return $ array_shape arg
@@ -74,8 +77,10 @@ shapeMemTF = typeFunction 1 compute_shape
                         | op `isPyonBuiltin` the_Stream ->
                             reduceToWhnf arg2
                       _ -> cannot_reduce
-          | op `isPyonBuiltin` the_list || op `isPyonBuiltin` the_matrix ->
+          | op `isPyonBuiltin` the_list ->
               return $ VarT (pyonBuiltin the_list_shape)
+          | op `isPyonBuiltin` the_matrix ->
+              return $ VarT (pyonBuiltin the_matrix_shape)
           | op `isPyonBuiltin` the_array ->
               case args
               of [arg, _] -> return $ array_shape arg
@@ -83,6 +88,30 @@ shapeMemTF = typeFunction 1 compute_shape
       where
         cannot_reduce =
           return $ varApp (pyonBuiltin the_shape) [container_type]
+
+-- | The 'dynshape' type function should never appear in the pure type system
+dynShapePureTF =
+  typeFunction 1 (\_ -> internalError "Unexpected occurence of 'dynshape'") 
+
+dynShapeMemTF = typeFunction 1 compute_dyn_shape 
+  where
+    compute_dyn_shape :: forall m. EvalMonad m => [Type] -> m Type
+    compute_dyn_shape [arg_type] =
+      -- Evaluate and inspect the argument
+      eval =<< reduceToWhnf arg_type
+
+    eval :: forall m. EvalMonad m => Type -> m Type
+    eval arg =
+      case fromVarApp arg
+      of Just (op, args')
+           | op `isPyonBuiltin` the_list_shape ||
+             op `isPyonBuiltin` the_array_shape ||
+             op `isPyonBuiltin` the_unit_shape ->
+               -- These shapes have no dynamic shape information
+               return $ VarT (pyonBuiltin the_dynShapeUnit)
+           | op `isPyonBuiltin` the_matrix_shape ->
+               return $ VarT (pyonBuiltin the_dynShapeMatrix)
+         _ -> return $ varApp (pyonBuiltin the_dynshape) [arg]
 
 -- | The 'BoxedType' data type should never appear in the pure type system
 boxedPureTF =

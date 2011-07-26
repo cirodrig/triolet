@@ -10,6 +10,8 @@ import Control.Monad.Trans.Reader
 import Data.Traversable
 
 import Builtins.Builtins
+import Common.Identifier
+import SystemF.ReprDict
 import SystemF.MemoryIR
 import SystemF.Syntax
 import SystemF.Rewrite
@@ -33,14 +35,24 @@ data LoopNesting =
   , otherLoops :: {-#UNPACK#-}!Int
   }
 
--- | During loop rewriting, keep track of the current loop nesting
-type LRW a = ReaderT LoopNesting TypeEvalM a
+data LREnv =
+  LREnv
+  { loopNesting :: {-#UNPACK#-}!LoopNesting
+  , typeEnv :: TypeEnv
+  , intEnv :: IntIndexEnv
+  , varSupply :: !(IdentSupply Var)
+  }
 
-incParLoopCount m = local inc_count m 
+modifyLoopNesting f env = env {loopNesting = f $ loopNesting env}
+
+-- | During loop rewriting, keep track of the current loop nesting
+type LRW a = ReaderT LREnv IO a
+
+incParLoopCount m = local (modifyLoopNesting inc_count) m 
   where
     inc_count n = n {parLoops = 1 + parLoops n}
 
-incOtherLoopCount m = local inc_count m 
+incOtherLoopCount m = local (modifyLoopNesting inc_count) m
   where
     inc_count n = n {otherLoops = 1 + otherLoops n}
 
@@ -63,8 +75,9 @@ otherLoopOperator v =
 
 -- | Use rewrite rules on an application
 useRewriteRules :: ExpInfo -> Var -> [TypM] -> [ExpM] -> LRW (Maybe ExpM)
-useRewriteRules inf op_var ty_args args =
-  lift $ rewriteApp parallelizingRewrites inf op_var ty_args args
+useRewriteRules inf op_var ty_args args = ReaderT $ \env ->
+  rewriteApp parallelizingRewrites (intEnv env) (varSupply env) (typeEnv env)
+  inf op_var ty_args args
 
 -------------------------------------------------------------------------------
 -- Traversal
@@ -98,7 +111,7 @@ rwApp inf op ty_args args = do
   return $ ExpM $ AppE inf op' ty_args args'
 
 rwAppOper subexpr_context inf op_inf op_var ty_args args = do
-  loop_nesting <- ask
+  loop_nesting <- asks loopNesting
   case parLoops loop_nesting of
     0 -> do
       rewritten <- useRewriteRules inf op_var ty_args args
@@ -135,9 +148,12 @@ rwTopLevel defss exports = do
 
 parallelLoopRewrite (Module modname imports defss exports) =
   withTheNewVarIdentSupply $ \var_supply -> do
+
+    -- Set up globals
     tenv <- readInitGlobalVarIO the_memTypes
-    let global_context = LoopNesting 0 0
+    (_, int_env) <- runFreshVarM var_supply createDictEnv
+    let global_context = LREnv (LoopNesting 0 0) tenv int_env var_supply
         rewrite = rwTopLevel defss exports
-    (defss', exports') <-
-      runTypeEvalM (runReaderT rewrite global_context) var_supply tenv
+
+    (defss', exports') <- runReaderT rewrite global_context
     return $ Module modname imports defss' exports'

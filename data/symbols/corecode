@@ -440,6 +440,15 @@ fun_asList_Stream @(sh a : bare) (src : Stream sh a) -> Stream list_shape a
     (state : st) (next : st -> StreamNext st (BoxedType a)).
     stream @list_shape @a @st state next;
 
+{-
+fun_asMatrix_Stream @(M N : intindex) @(a : bare)
+  (size_y : IndInt M)
+  (size_x : IndInt N)
+  (src : Stream (array_shape M (array_shape N unit_shape)) a)
+  -> Stream matrix_shape a
+  attribute(inline_final) =
+  case src of stsize_y ; -}
+
 fun_map_Stream @(sh a b : bare) (repr_a : Repr a) (repr_b : Repr b)
   (f : a -> Writer b)
   (src : Stream sh a)

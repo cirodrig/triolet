@@ -260,7 +260,7 @@ computeAppliedType orig_expr pos op_type_ arg_types =
       result <- typeOfApp op_type arg_t
       case result of
         Just op_type' -> apply op_type' arg_ts
-        Nothing -> -- traceShow debug_message $
+        Nothing -> traceShow debug_message $
                    typeError $ "Error in application at " ++ show pos
     
     apply op_type [] = return op_type

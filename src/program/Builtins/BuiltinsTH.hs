@@ -47,6 +47,10 @@ pyonBuiltinTypeNames =
   , "list_shape"
   , "array_shape"
   , "unit_shape"
+  , "matrix_shape"
+  , "dynshape"
+  , "DynShapeUnit"
+  , "DynShapeMatrix"
 
     -- Integer type indices
   , "plus_i"
@@ -99,6 +103,8 @@ pyonBuiltinVariableNames =
   , "pf"
   , "bindFromSource"
   , "bindFromTrans"
+  , "dynShapeUnit"
+  , "dynShapeMatrix"
 
     -- Class constructors
   , "repr"
@@ -267,6 +273,8 @@ pyonBuiltinVariableNames =
   , "fun_zip3_Stream"
   , "fun_zip4_Stream"
   , "fun_asList_Stream"
+  , "fun_asMatrix_Stream"
+  , "fun_asArray2_Stream"
   , "histogramArray"
     
     -- Inserted by representation inference

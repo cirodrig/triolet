@@ -125,7 +125,8 @@ data array : intindex -> bare -> bare
 {};
 
 -- A stream is indexed by a shape and an element type.
--- Container types are punned as shapes.
+-- A stream contains a state, a function to produce a new value, and a
+-- shape.
 data Stream : bare -> bare -> box
   attribute(abstract)
 {
@@ -302,11 +303,30 @@ type shape : (bare -> bare) -> bare;
 -- The shape of a list stream
 data list_shape : bare {};
 
+-- The shape of a matrix stream
+data matrix_shape : bare {};
+
 -- The shape of a singleton stream
 data unit_shape : bare {};
 
 -- The shape of an array stream
 data array_shape : intindex -> bare -> bare {};
+
+-- Get the run-time shape type of a shape index
+type dynshape : bare -> box;
+
+-- Empty run-time shape information, for streams with no run-time shape info
+data DynShapeUnit : box
+{
+  dynShapeUnit () () ();
+};
+
+-- The run-time shape of a matrix stream
+data DynShapeMatrix : box
+{
+  dynShapeMatrix () (y : intindex, x : intindex) (IndInt y, IndInt x);
+};
+
 
 -------------------------------------------------------------------------------
 -- Representation dictionaries
@@ -367,10 +387,10 @@ TraversableDict_list_traverse :
   (a : bare) -> Repr a -> list a -> Stream list_shape a;
 
 TraversableDict_matrix_build :
-  (a : bare) -> Repr a -> Stream list_shape a -> Writer (matrix a);
+  (a : bare) -> Repr a -> Stream matrix_shape a -> Writer (matrix a);
 
 TraversableDict_matrix_traverse :
-  (a : bare) -> Repr a -> matrix a -> Stream list_shape a;
+  (a : bare) -> Repr a -> matrix a -> Stream matrix_shape a;
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
@@ -703,6 +723,23 @@ fun_fold_Stream : (a acc : bare)
 fun_asList_Stream : (sh a : bare)
                  -> Stream sh a
                  -> Stream list_shape a;
+
+-- Reinterpret an array stream as having matrix shape
+fun_asMatrix_Stream : (M N : intindex)
+		   -> (a : bare)
+		   -> IndInt M
+		   -> IndInt N
+		   -> Stream (array_shape M (array_shape N unit_shape)) a
+		   -> Stream matrix_shape a;
+
+-- Reinterpret a matrix stream as having array shape
+fun_asArray2_Stream : (a b : bare)
+		   -> Stream matrix_shape a
+		   -> ((M N : intindex)
+		       -> IndInt M -> IndInt N
+		       -> Stream (array_shape M (array_shape N unit_shape))
+		       -> Writer b)
+		   -> Writer b;
 
 fun_map_Stream : (sh a b : bare)
        	      -> Repr a

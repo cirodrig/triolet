@@ -1,4 +1,5 @@
 
+{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
 module SystemF.Rewrite
        (insertGlobalSystemFFunctions,
         RewriteRuleSet,
@@ -11,6 +12,7 @@ module SystemF.Rewrite
 where
 
 import Control.Monad
+import Control.Monad.Reader
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.Map as Map
@@ -19,9 +21,12 @@ import Debug.Trace
 import Text.PrettyPrint.HughesPJ
 
 import Common.Error
+import Common.Identifier
+import Common.Supply
 import Common.MonadLogic
 import Builtins.Builtins
 import SystemF.Build
+import SystemF.ReprDict
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
@@ -49,8 +54,39 @@ insertGlobalSystemFFunctions mod = do
 -- | Type index for stream expressions 
 data Stream
 
-liftFreshVarM :: FreshVarM a -> TypeEvalM a
-liftFreshVarM m = TypeEvalM $ \supply _ -> runFreshVarM supply m
+-------------------------------------------------------------------------------
+-- The rewrite monad maintains type and integer index information
+
+data RWEnv =
+  RWEnv
+  { rwIntDict     :: IntIndexEnv
+  , rwIdentSupply :: {-#UNPACK#-}!(IdentSupply Var)
+  , rwTypeEnv     :: TypeEnv
+  }
+
+newtype RW a = RW {unRW :: ReaderT RWEnv IO a}
+             deriving(Functor, Monad, MonadIO)
+
+runRW :: RW a -> IdentSupply Var -> IntIndexEnv -> TypeEnv -> IO a
+runRW (RW (ReaderT f)) var_supply ienv tenv =
+  f (RWEnv ienv var_supply tenv)
+
+instance Supplies RW (Ident Var) where
+  fresh = RW (ReaderT (\env -> supplyValue (rwIdentSupply env)))
+
+instance TypeEnvMonad RW where
+  getTypeEnv = RW (ReaderT (\env -> return $ rwTypeEnv env))
+
+  assume v t (RW m) = RW (local assume_type m)
+    where
+      assume_type env = env {rwTypeEnv = insertType v t $ rwTypeEnv env}
+
+instance EvalMonad RW where
+  liftTypeEvalM m = RW $ ReaderT $ \env ->
+    runTypeEvalM m (rwIdentSupply env) (rwTypeEnv env)
+
+liftFreshVarM :: FreshVarM a -> RW a
+liftFreshVarM m = RW $ ReaderT $ \env -> runFreshVarM (rwIdentSupply env) m
 
 -------------------------------------------------------------------------------
 -- Helper functions for writing code
@@ -60,8 +96,8 @@ liftFreshVarM m = TypeEvalM $ \supply _ -> runFreshVarM supply m
 -- > case x of stored t (y : t). y
 load :: TypeEnv
      -> TypM                    -- ^ Value type to load
-     -> TypeEvalM ExpM          -- ^ Expression to load
-     -> TypeEvalM ExpM
+     -> RW ExpM                 -- ^ Expression to load
+     -> RW ExpM
 load tenv ty val =
   caseE val
   [mkAlt tenv (pyonBuiltin the_stored) [ty] $
@@ -76,12 +112,12 @@ load tenv ty val =
 -- >      case p
 -- >      of referenced ay. $(make_body n sz ay)
 caseOfList :: TypeEnv
-           -> TypeEvalM ExpM    -- ^ List to inspect
+           -> RW ExpM           -- ^ List to inspect
            -> TypM              -- ^ Type of list element
-           -> (Var -> Var -> Var -> TypeEvalM ExpM)
+           -> (Var -> Var -> Var -> RW ExpM)
               -- ^ Function from (list size index, list size, array reference)
               --   to expression
-           -> TypeEvalM ExpM
+           -> RW ExpM
 caseOfList tenv scrutinee list_type mk_body =
   caseE scrutinee
   [mkAlt tenv (pyonBuiltin the_make_list) [list_type] $
@@ -117,19 +153,19 @@ caseOfMatrix tenv scrutinee elt_type mk_body =
                                              varApp (pyonBuiltin the_array) [VarT size_x_index, fromTypM elt_type]]
 
 caseOfTraversableDict :: TypeEnv
-                      -> TypeEvalM ExpM
+                      -> RW ExpM
                       -> TypM
-                      -> (Var -> Var -> TypeEvalM ExpM)
-                      -> TypeEvalM ExpM
+                      -> (Var -> Var -> RW ExpM)
+                      -> RW ExpM
 caseOfTraversableDict tenv scrutinee container_type mk_body =
   caseE scrutinee
   [mkAlt tenv (pyonBuiltin the_traversableDict) [container_type] $
    \ [] [trv, bld] -> mk_body trv bld]
 
 caseOfSomeIndInt :: TypeEnv
-                 -> TypeEvalM ExpM
-                 -> (Var -> Var -> TypeEvalM ExpM)
-                 -> TypeEvalM ExpM
+                 -> RW ExpM
+                 -> (Var -> Var -> RW ExpM)
+                 -> RW ExpM
 caseOfSomeIndInt tenv scrutinee mk_body =
   caseE scrutinee
   [mkAlt tenv (pyonBuiltin the_someIndInt) [] $
@@ -141,21 +177,21 @@ defineAndInspectIndInt tenv int_value mk_body =
   in caseOfSomeIndInt tenv define_indexed_int mk_body
 
 caseOfFinIndInt :: TypeEnv
-                -> TypeEvalM ExpM
+                -> RW ExpM
                 -> Type
-                -> (Var -> Var -> TypeEvalM ExpM)
-                -> TypeEvalM ExpM
+                -> (Var -> Var -> RW ExpM)
+                -> RW ExpM
 caseOfFinIndInt tenv scrutinee int_index mk_body =
   caseE scrutinee
   [mkAlt tenv (pyonBuiltin the_finIndInt) [TypM int_index] $
    \ [] [pf, intvalue] -> mk_body pf intvalue]
 
 caseOfIndInt :: TypeEnv
-             -> TypeEvalM ExpM
+             -> RW ExpM
              -> Type
-             -> (Var -> TypeEvalM ExpM)
-             -> (Var -> TypeEvalM ExpM)
-             -> TypeEvalM ExpM
+             -> (Var -> RW ExpM)
+             -> (Var -> RW ExpM)
+             -> RW ExpM
 caseOfIndInt tenv scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
   [mkAlt tenv (pyonBuiltin the_indInt) [TypM int_index] $
@@ -164,11 +200,11 @@ caseOfIndInt tenv scrutinee int_index mk_finite mk_infinite =
    \ [] [pf] -> mk_infinite pf]
 
 caseOfIndInt' :: TypeEnv
-              -> TypeEvalM ExpM
+              -> RW ExpM
               -> Type
-              -> (Var -> Var -> TypeEvalM ExpM)
-              -> (Var -> TypeEvalM ExpM)
-              -> TypeEvalM ExpM
+              -> (Var -> Var -> RW ExpM)
+              -> (Var -> RW ExpM)
+              -> RW ExpM
 caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
   [mkAlt tenv (pyonBuiltin the_indInt) [TypM int_index] $
@@ -181,11 +217,11 @@ caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
 --   If no return pointer is given, a writer function is generated.
 defineList :: TypM             -- Array element type
            -> TypM             -- Array size type index
-           -> TypeEvalM ExpM    -- Array size
-           -> TypeEvalM ExpM    -- Array element representation
-           -> Maybe (TypeEvalM ExpM)     -- Optional return pointer
-           -> (Var -> TypeEvalM ExpM -> TypeEvalM ExpM) -- Element writer code
-           -> TypeEvalM ExpM
+           -> RW ExpM    -- Array size
+           -> RW ExpM    -- Array element representation
+           -> Maybe (RW ExpM)     -- Optional return pointer
+           -> (Var -> RW ExpM -> RW ExpM) -- Element writer code
+           -> RW ExpM
 defineList elt_type size_ix size elt_repr rptr writer =
   varAppE (pyonBuiltin the_make_list)
   [elt_type, size_ix]
@@ -201,10 +237,10 @@ defineList elt_type size_ix size elt_repr rptr writer =
 --   is a function of its index only.
 defineArray :: TypM             -- Array element type
             -> TypM             -- Array size type index (FinIntIndex)
-            -> TypeEvalM ExpM   -- Array size
-            -> TypeEvalM ExpM   -- Array element representation
-            -> (Var -> TypeEvalM ExpM -> TypeEvalM ExpM) -- Element writer code
-            -> TypeEvalM ExpM
+            -> RW ExpM   -- Array size
+            -> RW ExpM   -- Array element representation
+            -> (Var -> RW ExpM -> RW ExpM) -- Element writer code
+            -> RW ExpM
 defineArray elt_type size_ix size elt_repr writer =
   lamE $ mkFun []
   (\ [] -> return ([outType array_type], initEffectType array_type))
@@ -245,7 +281,7 @@ arrayShape [] = VarT (pyonBuiltin the_unit_shape)
 -- Rewrite rules
 
 -- Given the arguments to an application, try to create a rewritten term
-type RewriteRule = ExpInfo -> [TypM] -> [ExpM] -> TypeEvalM (Maybe ExpM)
+type RewriteRule = ExpInfo -> [TypM] -> [ExpM] -> RW (Maybe ExpM)
 
 -- | A set of rewrite rules
 data RewriteRuleSet =
@@ -286,7 +322,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             -- , (pyonBuiltin the_TraversableDict_list_traverse, rwTraverseList)
             , (pyonBuiltin the_TraversableDict_list_build, rwBuildList)
             , (pyonBuiltin the_TraversableDict_matrix_traverse, rwTraverseMatrix)
-            , (pyonBuiltin the_TraversableDict_matrix_build, rwBuildMatrix)
+            -- , (pyonBuiltin the_TraversableDict_matrix_build, rwBuildMatrix)
             -- , (pyonBuiltin the_TraversableDict_Stream_traverse, rwTraverseStream)
             -- , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildStream)
             , (pyonBuiltin the_build_array, rwBuildArray)
@@ -361,11 +397,15 @@ sequentializingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
 --   The type environment is only used for looking up data types and
 --   constructors.
 rewriteApp :: RewriteRuleSet
+           -> IntIndexEnv
+           -> IdentSupply Var
+           -> TypeEnv
            -> ExpInfo -> Var -> [TypM] -> [ExpM]
-           -> TypeEvalM (Maybe ExpM)
-rewriteApp ruleset inf op_var ty_args args =
+           -> IO (Maybe ExpM)
+rewriteApp ruleset int_env id_supply tenv inf op_var ty_args args =
   case Map.lookup op_var $ rewriteRules ruleset
-  of Just rw -> trace_rewrite $ rw inf ty_args args
+  of Just rw -> let do_rewrite = rw inf ty_args args
+                in trace_rewrite (runRW do_rewrite id_supply int_env tenv)
      Nothing -> return Nothing
   where
     trace_rewrite m = do 
@@ -540,10 +580,13 @@ rwTraverseMatrix :: RewriteRule
 rwTraverseMatrix inf [elt_type] [elt_repr, matrix] = do
   tenv <- getTypeEnv
   fmap Just $
-    caseOfMatrix tenv (return matrix) elt_type $ \size_y_index size_x_index size_y_var size_x_var array ->
-    varAppE (pyonBuiltin the_fun_asList_Stream) 
-    [TypM $ arrayShape [VarT size_y_index, VarT size_x_index], elt_type]
-    [varAppE (pyonBuiltin the_bind)
+    caseOfMatrix tenv (return matrix) elt_type $
+    \size_y_index size_x_index size_y_var size_x_var array ->
+    varAppE (pyonBuiltin the_fun_asMatrix_Stream)
+    [TypM $ VarT size_y_index, TypM $ VarT size_x_index, elt_type]
+    [varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_y_index] [varE size_y_var],
+     varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_x_index] [varE size_x_var],
+     varAppE (pyonBuiltin the_bind)
      [TypM $ VarT size_y_index, TypM $ array1Shape (VarT size_x_index),
       TypM storedIntType, elt_type]
      [return int_repr,
@@ -585,8 +628,8 @@ rwTraverseMatrix inf [elt_type] [elt_repr, matrix] = do
   where
     int_repr = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int) 
     
-    subscript2D :: Type -> Type -> Var -> Var -> TypeEvalM ExpM -> TypeEvalM ExpM -> TypeEvalM ExpM
-                -> TypeEvalM ExpM
+    subscript2D :: Type -> Type -> Var -> Var -> RW ExpM -> RW ExpM -> RW ExpM
+                -> RW ExpM
     subscript2D y_ix x_ix y_var x_var ay y x =
       varAppE (pyonBuiltin the_subscript)
       [TypM x_ix, elt_type]
@@ -602,25 +645,24 @@ rwTraverseMatrix inf [elt_type] [elt_repr, matrix] = do
   
 rwTraverseMatrix _ _ _ = return Nothing
 
+{-
 rwBuildMatrix :: RewriteRule
 rwBuildMatrix inf [elt_type] (elt_repr : stream : other_args) = do
   m_stream <- interpretStream2 (VarT (pyonBuiltin the_list_shape))
               (fromTypM elt_type) elt_repr stream
   case m_stream of
     Just stream ->
-      -- Shape should be a 2D array shape
+      -- Shape should be a matrix shape
       case sexpShape stream
-      of sh@(ArrayShape [(y_t, y_v), (x_t, x_v)]) -> do
-           m_stream' <- encodeStream2 (TypM $ shapeType sh) stream
+      of MatrixShape -> do
+           m_stream' <- encodeStream2 (TypM $ VarT $ pyonBuiltin the_matrix_shape) stream
            case m_stream' of
              Just stream' -> do
                tenv <- getTypeEnv
                fmap Just $ build_matrix_expr tenv y_t y_v x_t x_v stream' other_args
              Nothing -> return Nothing
-         ArrayShape _ ->
-           -- Array shape, but not 2D
+         _ ->
            internalError "rwBuildMatrix: Stream has wrong dimensionality"
-         _ -> return Nothing    -- Unknown shape
     _ -> return Nothing         -- Cannot interpret stream
     where
       build_matrix_expr tenv y_t y_v x_t x_v stream other_args =
@@ -678,6 +720,7 @@ rwBuildMatrix inf [elt_type] (elt_repr : stream : other_args) = do
                           [x_t, elt_type] [varE x_fv, return elt_repr]
 
 rwBuildMatrix _ _ _ = return Nothing
+-}
 
 rwTraverseStream :: RewriteRule
 rwTraverseStream inf _ [_, stream] = return (Just stream)
@@ -944,7 +987,7 @@ rwZip4Stream inf
 
 rwZip4Stream _ _ _ = return Nothing
 
-generalizedZipStream2 :: TypM -> [ExpS] -> TypeEvalM (Maybe ExpM)
+generalizedZipStream2 :: TypM -> [ExpS] -> RW (Maybe ExpM)
 generalizedZipStream2 shape_type streams = do
   zipped <- zipStreams2 streams
   case zipped of
@@ -1019,7 +1062,7 @@ rwHistogramArray inf [shape_type, size_ix] (size : input : other_args) = do
     -- >   of boxed (stored_out_tok).
     -- >        case stored_out_tok of stored (out_tok) -> out_tok
     make_histogram_writer :: TypeEnv -> ExpS -> Var -> Var
-                          -> TypeEvalM ExpM
+                          -> RW ExpM
     make_histogram_writer tenv s writer initial_eff = do
       -- The accumulator function passes an integer value to the
       -- histogram writer function
@@ -1267,7 +1310,7 @@ rwParallelHistogramArray inf
            _ ->
              internalError "rwParallelHistogramArray"
         where 
-          write_into :: TypeEvalM ExpM -> TypeEvalM ExpM
+          write_into :: RW ExpM -> RW ExpM
           write_into return_arg =
             -- Define an empty histogram, i.e. a zero-filled array
             localE (TypM array_type) zero_array
@@ -1287,7 +1330,7 @@ rwParallelHistogramArray inf
     array_shape = array1Shape (fromTypM size_ix)
     
     int_repr = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int)
-    array_repr :: TypeEvalM ExpM
+    array_repr :: RW ExpM
     array_repr = varAppE (pyonBuiltin the_repr_array)
                  [size_ix, TypM storedIntType] [return size, return int_repr]
 
@@ -1401,7 +1444,7 @@ rwFoldStream inf [elt_type, acc_type]
 rwFoldStream _ _ _ = return Nothing
 
 rwReduceGenerate :: ExpInfo -> TypM -> ExpM -> ExpM -> ExpM -> [ExpM]
-                 -> TypM -> ExpM -> (ExpM -> MkExpM) -> TypeEvalM ExpM
+                 -> TypM -> ExpM -> (ExpM -> MkExpM) -> RW ExpM
 rwReduceGenerate inf element elt_repr reducer init other_args size count producer =
   -- Create a sequential loop.
   -- In each loop iteration, generate a value and combine it with the accumulator.
@@ -1555,7 +1598,7 @@ rwSafeSubscript inf [elt_type] [elt_repr, list, ix, dst] = do
 rwSafeSubscript _ _ _ = return Nothing
 
 rwSafeSubscriptBody :: TypeEnv -> ExpInfo -> TypM -> ExpM
-                    -> ExpM -> ExpM -> TypeEvalM ExpM -> TypeEvalM ExpM
+                    -> ExpM -> ExpM -> RW ExpM -> RW ExpM
 rwSafeSubscriptBody tenv inf elt_type elt_repr list ix ret =
   caseOfList tenv (return list) elt_type $ \size_ix size array ->
   caseOfFinIndInt tenv (varE size) (VarT size_ix) $ \_ size_int -> do
@@ -1590,7 +1633,7 @@ data ZipArg =
 --   and the output as parameters.
 generalizedRewriteZip :: TypeEnv -> ExpInfo -> [ZipArg] -> TypM -> ExpM
                       -> [ExpM]
-                      -> TypeEvalM ExpM
+                      -> RW ExpM
 generalizedRewriteZip tenv inf inputs container traversable other_args =
   caseOfTraversableDict tenv (return traversable) container $ \trv bld ->
   let tuple_size = length inputs
@@ -1618,6 +1661,9 @@ zipper n = internalError $ "zipper: Cannot zip " ++ show n ++ " streams"
 data Shape =
     -- | A list stream, corresponding to @list_shape@.  The size is unknown.
     ListShape
+    -- | A matrix stream, corresponding to @matrix_shape@.
+    -- The size is computed dynamically.
+  | MatrixShape
     -- | A statically sized stream, corresponding to nested applications of
     --   @array_shape@.  The first term is the outermost application.
     --   Each size index has kind @intindex@.
@@ -1631,6 +1677,7 @@ shapeType :: Shape -> Type
 shapeType shp = 
   case shp
   of ListShape                 -> VarT $ pyonBuiltin the_list_shape
+     MatrixShape               -> VarT $ pyonBuiltin the_matrix_shape
      ArrayShape dim            -> arrayShape [i | (TypM i, _) <- dim]
      UnknownShape (TypM shape) -> shape
   
@@ -1642,13 +1689,14 @@ typeShape :: Type -> Shape
 typeShape ty =
   case fromVarApp ty
   of Just (v, []) | v `isPyonBuiltin` the_list_shape -> ListShape
+                  | v `isPyonBuiltin` the_matrix_shape -> MatrixShape
                   | v `isPyonBuiltin` the_unit_shape -> ArrayShape []
      _ -> UnknownShape (TypM ty)
 
 listShape = ListShape
 
 -- | Decide whether the given shapes are equal
-compareShapes :: Shape -> Shape -> TypeEvalM Bool
+compareShapes :: Shape -> Shape -> RW Bool
 compareShapes ListShape ListShape = return True
 compareShapes (ArrayShape dim1) (ArrayShape dim2) =
   compare_dimensions dim1 dim2
@@ -1681,7 +1729,7 @@ data instance Exp Stream =
       -- | Given an expression that evaluates to the index of the desired
       --   stream element (with type @val int@), produce an expression that
       --   evaluates to the desired stream element, as a write reference. 
-    , _sexpGenerator :: ExpM -> TypeEvalM ExpM
+    , _sexpGenerator :: ExpM -> RW ExpM
     }
     -- | List 'bind' operator
   | BindStream
@@ -1718,12 +1766,21 @@ data instance Exp Stream =
   | ReturnStream
     { _sexpType :: Type
     , _sexpRepr :: ExpM
-    , _sexpWriter :: TypeEvalM ExpM
+    , _sexpWriter :: RW ExpM
     }
     -- | An empty stream.  The stream has list shape.
   | EmptyStream
     { _sexpType :: Type
     , _sexpRepr :: ExpM
+    }
+    -- | A creation of a matrix stream.  The matrix shape is embedded into
+    --   the stream as additional run-time data.
+    --
+    --   The argument is a 2D array stream.
+  | MatrixStream
+    { _sexpSizeY :: !(TypM, ExpM)
+    , _sexpSizeX :: !(TypM, ExpM)
+    , _sexpStream :: ExpS
     }
     -- | An unrecognized stream expression.  We can't transform the expression,
     --   but if it occurs inside a larger stream expression we may still be
@@ -1749,6 +1806,7 @@ sexpShape (LetStream {_sexpStream = s}) = sexpShape s
 sexpShape (CaseStream {_sexpShape = s}) = s
 sexpShape (ReturnStream {}) = ListShape
 sexpShape (EmptyStream {}) = ListShape
+sexpShape (MatrixStream {}) = MatrixShape
 sexpShape (UnknownStream {_sexpShape = s}) = s
 
 -- | Get the type of a stream element
@@ -1761,6 +1819,7 @@ sexpElementType (CaseStream {_sexpAlternatives = alt:_}) =
   sexpElementType $ altBody $ fromAltS alt
 sexpElementType (ReturnStream {_sexpType = t}) = t
 sexpElementType (EmptyStream {_sexpType = t}) = t
+sexpElementType (MatrixStream {_sexpStream = s}) = sexpElementType s
 sexpElementType (UnknownStream {_sexpType = t}) = t
 
 -- | Get the representation dictionary of a stream element
@@ -1773,6 +1832,7 @@ sexpElementRepr (CaseStream {_sexpAlternatives = alt:_}) =
   sexpElementRepr $ altBody $ fromAltS alt
 sexpElementRepr (ReturnStream {_sexpRepr = e}) = e
 sexpElementRepr (EmptyStream {_sexpRepr = e}) = e
+sexpElementRepr (MatrixStream {_sexpStream = s}) = sexpElementRepr s
 sexpElementRepr (UnknownStream {_sexpRepr = e}) = e
 
 newtype instance Alt Stream = AltS {fromAltS :: BaseAlt Stream}
@@ -1813,6 +1873,12 @@ pprExpS stream =
        text "return" <+> parens (pprType ty) <+> text "(...)"
      EmptyStream ty repr ->
        text "empty" <+> parens (pprType ty)
+     MatrixStream (y_index, y_size) (x_index, x_size) body ->
+       text "asmatrix" <+>
+       parens (pprType (fromTypM y_index) <> text "," <+>
+               pprType (fromTypM x_index)) <+>
+       parens (pprExp y_size <> text "," <+> pprExp x_size) $$
+       pprExpS body
      UnknownStream shp ty repr exp ->
        text "unknown" <+> parens (pprType ty) $$
        nest 4 (braces $ pprExp exp)
@@ -1836,7 +1902,7 @@ pprAltS (AltS (DeTuple params body)) =
 --
 --   We may change the stream's type by ignoring functions that only
 --   affect the advertised stream shape.
-interpretStream2 :: Type -> Type -> ExpM -> ExpM -> TypeEvalM (Maybe ExpS)
+interpretStream2 :: Type -> Type -> ExpM -> ExpM -> RW (Maybe ExpS)
 interpretStream2 shape_type elt_type repr expression = do
   s <- interpretStream2' shape_type elt_type repr expression
 
@@ -1856,6 +1922,18 @@ interpretStream2' shape_type elt_type repr expression =
          case (ty_args, args)
          of ([shape_type2, _], [stream_arg]) ->
               interpretStream2' shape_type2 elt_type repr stream_arg
+       | op_var `isPyonBuiltin` the_fun_asMatrix_Stream ->
+         case (ty_args, args)
+         of ([size_y_index, size_x_index, _], [size_y, size_x, stream_arg]) -> do
+              -- Determine the shape of the sub-stream
+              let shape = arrayShape [size_y_index, size_x_index]
+              -- Interpret the sub-stream
+              stream <- interpretStream2' shape elt_type repr stream_arg
+              -- Create a cast to matrix stream
+              return $ MatrixStream
+                 { _sexpSizeY = (TypM size_y_index, size_y)
+                 , _sexpSizeX = (TypM size_x_index, size_x)
+                 , _sexpStream = stream}
        | op_var `isPyonBuiltin` the_generate ->
          let [size_arg, type_arg] = ty_args
              [size_val, repr, writer] = args
@@ -2013,6 +2091,9 @@ mapStream out_type out_repr transformer producer = transform producer
 
     transform (EmptyStream _ _) =
       EmptyStream out_type out_repr
+    
+    transform (MatrixStream size_y size_x stream) =
+      MatrixStream size_y size_x (transform stream)
 
     transform (UnknownStream shp in_type in_repr expr) =
       -- Can't simplify; build a "map" expression
@@ -2028,7 +2109,7 @@ mapStream out_type out_repr transformer producer = transform producer
     -- Apply the transformer function to the given expression's result.
     -- The given expression and the returned expression are both writer
     -- functions.
-    apply_transformer :: Type -> ExpM -> TypeEvalM ExpM -> TypeEvalM ExpM
+    apply_transformer :: Type -> ExpM -> RW ExpM -> RW ExpM
     apply_transformer producer_ty producer_repr producer_expr =
       lamE $ mkFun []
       (\ [] -> return ([outType out_type], initEffectType out_type))
@@ -2037,7 +2118,7 @@ mapStream out_type out_repr transformer producer = transform producer
           localE (TypM producer_ty) producer_expr $ \tmpvar ->
           appExp (return transformer) [] [varE tmpvar, varE outvar])
 
-interpretStreamAlt :: Type -> Type -> ExpM -> AltM -> TypeEvalM AltS
+interpretStreamAlt :: Type -> Type -> ExpM -> AltM -> RW AltS
 interpretStreamAlt shape_type elt_type repr (AltM alt) = do
   body <- interpretStream2' shape_type elt_type repr $ altBody alt
   return $ AltS $ DeCon { altConstructor = altConstructor alt
@@ -2049,7 +2130,7 @@ interpretStreamAlt shape_type elt_type repr (AltM alt) = do
 -- | Produce program code of an interpreted stream.  The generated code
 --   will have the specified shape.  If code cannot be generated,
 --   return Nothing.
-encodeStream2 :: TypM -> ExpS -> TypeEvalM (Maybe ExpM)
+encodeStream2 :: TypM -> ExpS -> RW (Maybe ExpM)
 encodeStream2 expected_shape stream = runMaybeT $ do
   encoded <-
     case stream
@@ -2126,6 +2207,15 @@ encodeStream2 expected_shape stream = runMaybeT $ do
        EmptyStream ty repr -> do
          let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_oper_EMPTY)
          return $ ExpM $ AppE defaultExpInfo oper [TypM ty] [repr]
+
+       MatrixStream (size_y_index, size_y) (size_x_index, size_x) body -> do
+         let expected_shape = TypM $ arrayShape [fromTypM size_y_index, fromTypM size_x_index]
+         body' <- MaybeT $ encodeStream2 expected_shape body
+         
+         let oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_fun_asMatrix_Stream)
+         return $ ExpM $ AppE defaultExpInfo oper
+           [size_y_index, size_x_index, TypM $ sexpElementType body]
+           [size_y, size_x, body']
 
        UnknownStream _ _ _ expr -> return expr
 
@@ -2231,7 +2321,7 @@ blockStream size_var count_var base_var stream =
 --   * full_size : intindex
 --   * full_count : IndInt full_size
 interpretAndBlockStream :: Type -> Type -> ExpM -> ExpM
-                        -> TypeEvalM (Maybe (Var, Var, Var, ExpS, TypM, ExpM))
+                        -> RW (Maybe (Var, Var, Var, ExpS, TypM, ExpM))
 interpretAndBlockStream shape_type elt_type elt_repr stream_exp = do
   m_stream <- interpretStream2 shape_type elt_type elt_repr stream_exp
   case m_stream of
@@ -2249,7 +2339,7 @@ interpretAndBlockStream shape_type elt_type elt_repr stream_exp = do
     Nothing -> return Nothing
 
 -- | Zip together a list of two or more streams
-zipStreams2 :: [ExpS] -> TypeEvalM (Maybe ExpS)
+zipStreams2 :: [ExpS] -> RW (Maybe ExpS)
 zipStreams2 [] = internalError "zipStreams: Need at least one stream"
 zipStreams2 [s] = return (Just s)
 zipStreams2 ss
@@ -2297,7 +2387,7 @@ translateStreamToFoldWithExtraArgs ::
  -> ExpM   -- ^ Accumulator function
  -> ExpS   -- ^ Stream to be translated
  -> [ExpM]                      -- ^ Zero or one extra arguments
- -> TypeEvalM ExpM -- ^ Translated expression
+ -> RW ExpM -- ^ Translated expression
 translateStreamToFoldWithExtraArgs
   tenv acc_ty acc_repr init acc_f stream [out_ptr] =
     translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream
@@ -2331,7 +2421,7 @@ translateStreamToFold :: TypeEnv
                       -> ExpM   -- ^ Accumulator function
                       -> ExpM   -- ^ Output pointer
                       -> ExpS   -- ^ Stream to be translated
-                      -> TypeEvalM ExpM -- ^ Translated expression
+                      -> RW ExpM -- ^ Translated expression
 translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
   case stream
   of GenerateStream {} ->
@@ -2392,7 +2482,10 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
        let copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
        return $ ExpM $
          AppE defaultExpInfo copy_op [TypM acc_ty] [acc_repr, init, out_ptr]
-         
+
+     MatrixStream _ _ body ->
+       translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr body
+
      UnknownStream shp ty repr expr -> do
        -- Fold over this uninterpreted stream
        let op = ExpM $ VarE defaultExpInfo $ pyonBuiltin the_fun_fold_Stream
@@ -2436,7 +2529,7 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
          
 -- | Cast a stream of type @Stream given elt@ to a stream of type
 --   @Stream expected elt@.
-castStreamExpressionShape :: Type -> Type -> Type -> ExpM -> ExpM -> TypeEvalM (Maybe ExpM)
+castStreamExpressionShape :: Type -> Type -> Type -> ExpM -> ExpM -> RW (Maybe ExpM)
 castStreamExpressionShape expected_shape given_shape elt_type elt_repr expr = do
   e_whnf <- reduceToWhnf expected_shape
   g_whnf <- reduceToWhnf given_shape

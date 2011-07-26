@@ -366,8 +366,6 @@ typeCheckExport (Export pos spec f) = do
 
 typeCheckModule (Module module_name [] defs exports) = do
   global_type_env <- readInitGlobalVarIO the_systemFTypes
-  putStrLn "TypeCheckSF"
-  print $ pprTypeEnv global_type_env
   withTheNewVarIdentSupply $ \varIDs -> do
     let typecheck = typeCheckDefGroups defs exports
     (defs', exports') <- runTypeEvalM typecheck varIDs global_type_env
