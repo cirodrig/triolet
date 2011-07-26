@@ -143,7 +143,8 @@ attr = do
   where
     attr_table =
       [("abstract", return AbstractAttr),
-       ("inline_sequential", return InlineSequentialAttr)]
+       ("inline_sequential", return InlineSequentialAttr),
+       ("inline_final", return InlineFinalAttr)]
 
 -------------------------------------------------------------------------------
 -- * Type parsing

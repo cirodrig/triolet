@@ -65,6 +65,8 @@ data Attribute =
     AbstractAttr                    -- ^ Data type is abstract
   | InlineSequentialAttr            -- ^ Definition should not be inlined until
                                     --   the sequential compilation phase
+  | InlineFinalAttr                 -- ^ Definition should not be inlined until
+                                    --   the final optimization phase
   deriving (Eq, Ord)
 
 -------------------------------------------------------------------------------

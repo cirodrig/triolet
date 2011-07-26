@@ -132,12 +132,12 @@ invokeCPP macros include_paths inpath outpath = do
     include_path_opts = ["-I" ++ path | path <- include_paths]
 
 -- | General-purpose high-level optimizations
-highLevelOptimizations :: Bool -> Bool -> SystemF.Module SystemF.Mem
+highLevelOptimizations :: Bool
+                       -> SystemF.SimplifierPhase
+                       -> SystemF.Module SystemF.Mem
                        -> IO (SystemF.Module SystemF.Mem)
-highLevelOptimizations global_demand_analysis use_sequential_rules mod = do
-  mod <- if use_sequential_rules
-         then SystemF.rewriteWithSequentialRules mod
-         else SystemF.rewriteWithGeneralRules mod
+highLevelOptimizations global_demand_analysis simplifier_phase mod = do
+  mod <- SystemF.rewriteAtPhase simplifier_phase mod
   mod <- SystemF.floatModule mod
   mod <- if global_demand_analysis
          then SystemF.demandAnalysis mod
@@ -178,51 +178,46 @@ compilePyonToPyonAsm compile_flags path text = do
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   
   -- General-purpose, high-level optimizations
-  repr_mod <- highLevelOptimizations True False repr_mod
-  repr_mod <- highLevelOptimizations True False repr_mod
-  repr_mod <- iterateM (highLevelOptimizations False False) 4 repr_mod
+  repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
+  repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
+  repr_mod <- iterateM (highLevelOptimizations False SystemF.GeneralSimplifierPhase) 4 repr_mod
   
   -- Parallelize outer loops
   repr_mod <-
     if lookupCompileFlag DoParallelization compile_flags  
     then do repr_mod <- SystemF.parallelLoopRewrite repr_mod
-            highLevelOptimizations False False repr_mod
+            highLevelOptimizations False SystemF.GeneralSimplifierPhase repr_mod
     else return repr_mod
 
   -- Sequentialize remaining loops
-  repr_mod <- iterateM (highLevelOptimizations False True) 4 repr_mod
+  repr_mod <- iterateM (highLevelOptimizations False SystemF.SequentialSimplifierPhase) 4 repr_mod
 
   putStrLn ""
   putStrLn "After Simplifying"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
+
   repr_mod <- SystemF.flattenArguments repr_mod
-  --putStrLn ""
-  --putStrLn "After ArgumentFlattening"
-  --print $ SystemF.PrintMemoryIR.pprModule repr_mod
-  
-  repr_mod <- highLevelOptimizations False True repr_mod
+  repr_mod <- highLevelOptimizations False SystemF.SequentialSimplifierPhase repr_mod
   repr_mod <- SystemF.flattenLocals repr_mod
-  --putStrLn ""
-  --putStrLn "After FlattenLocals"
-  --print $ SystemF.PrintMemoryIR.pprModule repr_mod
 
   -- Reconstruct demand information after flattening local variables,
   -- so that the next optimization pass can do more work
   repr_mod <- SystemF.localDemandAnalysis repr_mod
-  repr_mod <- highLevelOptimizations False True repr_mod
-  repr_mod <- highLevelOptimizations False True repr_mod
+  repr_mod <- highLevelOptimizations False SystemF.SequentialSimplifierPhase repr_mod
+  repr_mod <- highLevelOptimizations False SystemF.SequentialSimplifierPhase repr_mod
 
   putStrLn "After Flattening"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
-  tc_repr_mod <- SystemF.TypecheckMem.typeCheckModule repr_mod
   
   -- Convert remaining loops to sequential loops
-  repr_mod <- highLevelOptimizations False True repr_mod
-  repr_mod <- highLevelOptimizations False True repr_mod
+  repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
+  repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
 
   putStrLn ""
   putStrLn "Optimized"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
+
+  tc_repr_mod <- SystemF.TypecheckMem.typeCheckModule repr_mod
   ll_mod <- SystemF.lowerModule tc_repr_mod
   
   {- This is the old optimization sequence

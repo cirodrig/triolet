@@ -22,12 +22,14 @@ pyonBuiltinTypeNames =
   , "PyonTuple3"
   , "PyonTuple4"
   , "Stream"
+  , "StreamNext"
   , "FinIndInt"
   , "IndInt"
   , "SomeIndInt"
   , "array"
   , "EffTok"
   , "Pf"
+  , "BindState"
 
     -- Representation coercions
   , "Stored"
@@ -88,10 +90,15 @@ pyonBuiltinVariableNames =
   , "indInt"
   , "indOmega"
   , "someIndInt"
+  , "stream"
+  , "streamEmpty"
+  , "streamValue"
   , "make_list"
   , "make_matrix"
   , "effTok"
   , "pf"
+  , "bindFromSource"
+  , "bindFromTrans"
 
     -- Class constructors
   , "repr"
@@ -157,7 +164,6 @@ pyonBuiltinVariableNames =
   , "OrdDict_Tuple2_le"
   , "OrdDict_Tuple2_gt"
   , "OrdDict_Tuple2_ge"
-  , "OpaqueTraversableDict_list"
   , "AdditiveDict_int"
   , "AdditiveDict_int_add"
   , "AdditiveDict_int_sub"
@@ -285,7 +291,6 @@ pyonBuiltinVariableNames =
   , "blocked_reduce1"
   , "blocked_doall"
   , "createHistogram"
-    
   , "emptyEffTok"
   , "toEffTok"
   , "seqEffTok"

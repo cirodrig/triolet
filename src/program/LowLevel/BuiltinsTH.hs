@@ -178,20 +178,20 @@ builtinFunctions =
      Right [| pyonBuiltin SystemF.the_repr_list |])
   , (PyonName module_list "repr_matrix",
      Right [| pyonBuiltin SystemF.the_repr_matrix |])
-  , (PyonName module_list "list_len",
-     Right [| pyonBuiltin SystemF.the_len |])
+  --, (PyonName module_list "list_len",
+  --   Right [| pyonBuiltin SystemF.the_len |])
   , (PyonName module_list "list_build",
      Right [| pyonBuiltin SystemF.the_TraversableDict_list_build |])
-  , (PyonName module_list "list_traverse",
-     Right [| pyonBuiltin SystemF.the_TraversableDict_list_traverse |])
-  , (PyonName module_list "safeSubscript",
-     Right [| pyonBuiltin (SystemF.the_safeSubscript) |]) {-
+  -- , (PyonName module_list "list_traverse",
+  --   Right [| pyonBuiltin SystemF.the_TraversableDict_list_traverse |])
+  {- , (PyonName module_list "safeSubscript",
+     Right [| pyonBuiltin (SystemF.the_safeSubscript) |])
   , (PyonName module_list "list_generate",
      Right [| pyonBuiltin (SystemF.the_fun_generateList) |])
   , (PyonName module_list "list_vGenerate",
      Right [| pyonBuiltin (SystemF.the_fun_vectorGenerateList) |])
   , (PyonName module_stream "passConv_iter",
-     Right [| pyonBuiltin (SystemF.the_passConv_iter) |]) -}
+     Right [| pyonBuiltin (SystemF.the_passConv_iter) |])
   , (PyonName module_stream "Stream_bind",
      Right [| pyonBuiltin (SystemF.the_oper_CAT_MAP) |])
   , (PyonName module_stream "Stream_guard",
@@ -239,7 +239,7 @@ builtinFunctions =
   , (PyonName module_stream "Stream_rangeIndexed",
      Right [| pyonBuiltin (SystemF.the_rangeIndexed) |])
   , (PyonName module_stream "histogram",
-     Right [| pyonBuiltin (SystemF.the_histogram) |])
+     Right [| pyonBuiltin (SystemF.the_histogram) |])-}
   , (PyonName module_stream "histogramArray",
      Right [| pyonBuiltin (SystemF.the_histogramArray) |])
   , (PyonName module_stream "createHistogram",
@@ -375,9 +375,6 @@ builtinGlobals =
      Left $ PrimType PointerType)
   , (biName "global_closure_info",
      Left $ PrimType PointerType)
-    -- Dictionaries
-  , (PyonName module_structures "OpaqueTraversableDict_list",
-     Right [| pyonBuiltin SystemF.the_OpaqueTraversableDict_list |])
 
     -- Physical representations of data types
   , (PyonName module_structures "repr_Box",

@@ -128,7 +128,35 @@ data array : intindex -> bare -> bare
 -- Container types are punned as shapes.
 data Stream : bare -> bare -> box
   attribute(abstract)
-{};
+{
+  -- A stream is a (state, generator) pair.
+  stream (sh : bare, a : bare) (st : box)
+    (st, st -> StreamNext st (BoxedType a));
+};
+
+-- The result of attempting to pull a value from a stream.
+data StreamNext : box -> box -> val
+{
+  streamEmpty (st : box, a : box) () ();
+  streamValue (st : box, a : box) () (st, a);
+};
+
+-- The state of the stream 'bind' operator
+data BindState : box -> bare -> bare -> box
+{
+  -- Pull the next value from the source stream
+  -- (Also represents a depleted stream)
+  bindFromSource (src_st : box, src_elt : bare, trans_elt : bare)
+    ()
+    (src_st);
+
+  -- Pull the next value from the stream transformer
+  bindFromTrans (src_st : box, src_elt : bare, trans_elt : bare)
+    (trans_st : box)
+    (src_st,
+     trans_st,
+     trans_st -> StreamNext trans_st (BoxedType trans_elt));
+};
 
 data list : bare -> bare
 {
@@ -323,8 +351,6 @@ repr_array : (n : intindex) -> (e : bare)
           -> FinIndInt n -> Repr e -> Repr (array n e);
 
 repr_EffTok : Repr (Stored EffTok);
-
-OpaqueTraversableDict_list : TraversableDict list;
 
 TraversableDict_Stream_build :
     (t : bare -> bare) -> (a : bare)
@@ -853,11 +879,6 @@ generate : (n : intindex)
         -> Repr a
         -> (int -> Writer a)
         -> Stream (array_shape n unit_shape) a;
-
-generate_forever : (a : bare)
-                -> Repr a
-                -> (int -> Writer a)
-                -> Stream (array_shape pos_infty unit_shape) a;
 
 build_array : (n : intindex)
            -> (a : bare)

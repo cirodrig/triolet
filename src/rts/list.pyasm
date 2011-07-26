@@ -141,6 +141,8 @@ function inline list_len (pointer p) -> int {
 // Create a list from a stream of unknown size
 function list_build
     (owned elem_repr, owned stream, pointer ret) -> () {
+  typedef Stream = Obj(StreamData);
+
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   typedef elem_type = bytes(value elem_size, value elem_align);
@@ -151,26 +153,31 @@ function list_build
   () = () primcall list_create_uninitialized (elem_repr, list_size, ret);
 
   // Set up stream
-  stream_next = stream @! Stream.next;
-  stream_state = pointer primcall pyon_alloc (stream @! Stream.state_size);
-  () = () call (stream @! Stream.initialize) (stream_state);
+  stream_init_state = stream @! Stream.payload.state;
+  stream_next = stream @! Stream.payload.next;
 
   // Populate the list contents (pull_values); then finish building the list.
   letrec {
-    procedure pull_values (int n_elems, int list_size) -> () {
+    procedure pull_values (int n_elems, int list_size, owned stream_state) -> () {
       // Make sure list can hold another element
       new_list_size = if (n_elems == list_size) {
         int primcall list_grow (elem_repr, ret, list_size);
       } else {
         list_size;
       };
-      
+
       // Pull from the stream
-      current_elem = (ret @! PyonList.contents) @ array_type[n_elems];
-      has_data = bool call stream_next (stream_state, current_elem);
-      if (has_data) {
+      StreamNext {result_tag, StreamNextData {next_state, result_val}} =
+        StreamNext call stream_next (stream_state);
+
+      if (result_tag == STREAM_VALUE) {
+        // Copy this value to the destination.
+        // The value was stored as a boxed object; convert it to a bare object.
+        current_elem = (ret @! PyonList.contents) @ array_type[n_elems];
+        () = () call (elem_repr @! PassConv.convert_to_bare) (result_val, current_elem);
+
         // Continue pulling
-        () primcall pull_values (n_elems + int 1, new_list_size);
+        () primcall pull_values (n_elems + int 1, new_list_size, next_state);
       } else {
         // Stream is depleted.  Finish constructing list.
         () primcall finish (n_elems);
@@ -180,106 +187,11 @@ function list_build
     procedure finish (int n_elems) -> () {
       // Save the number of list elements that was created
       ret @! PyonList.nelems = FinIndInt {n_elems};
-
-      // Finalize the stream
-      () = () call (stream @! Stream.state_finalize) (stream_state);
-      () = () primcall pyon_dealloc (stream_state);
       ();   
     }
   };
-  () primcall pull_values (int 0, list_size);
+  () primcall pull_values (int 0, list_size, stream_init_state);
 };
-
-// Create a stream that traverses the list.
-// The stream state is an int, which is the index of the next value to return.
-function inline list_traverse (owned elem_repr, pointer list) -> owned {
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  copy_elem = elem_repr @! PassConv.copy;
-  typedef elem_type = bytes(value elem_size, value elem_align);
-
-  s = owned primcall Stream_alloc();
-
-  letrec {
-    function initialize (pointer state) -> () {
-      !state = int 0;
-      ();
-    }
-  };
-
-  s @! Stream.initialize = initialize;
-
-  FinIndInt {nelems} = list @! PyonList.nelems;
-  contents = list @! PyonList.contents;
-  typedef array_type = const_array(value nelems, elem_type);
-
-  letrec {
-    function next (pointer state, pointer ret) -> bool {
-      index = int load state;
-      if (index >= nelems) {
-        false;
-      } else {
-        // Increment the counter
-        !state = index + int 1;
-        // Return a value
-        () = () call copy_elem (contents @ array_type[index], ret);
-        true;
-      };
-    }
-  };
-
-  s @! Stream.next = next;
-
-  s @! Stream.state_size = sizeof int;
-  s @! Stream.state_align = alignof int;
-  s @! Stream.state_finalize = dummy_finalizer;
-  s;
-};
-
-function inline safeSubscript
-  (owned elt_repr, pointer list, int index, pointer ret) -> () {
-  FinIndInt {nelems} = list @! PyonList.nelems;
-  contents = list @! PyonList.contents;
-  elt_size = elt_repr @! PassConv.size;
-  elt_align = elt_repr @! PassConv.align;
-
-  if (index < int 0 || index >= nelems) {
-    () primcall exit (int -1);
-  } else {
-    typedef ary = const_array(value nelems,
-                              bytes(value elt_size, value elt_align));
-    () call (elt_repr @! PassConv.copy)(contents @ ary[index], ret);
-  };
-};
-
-function inline list_generate
-  (owned elem_repr, IndInt count_n, owned f, pointer ret) -> () {
-  count = int primcall from_finite_IndInt (count_n);
-
-  elem_size = elem_repr @! PassConv.size;
-  elem_align = elem_repr @! PassConv.align;
-  typedef elem_type = bytes(value elem_size, value elem_align);
-  typedef contents_type = array(value count, elem_type);
-
-  // Create list
-  () = () primcall list_create_uninitialized (elem_repr, count, ret);
-
-  // Write list contents
-  contents = ret @! PyonList.contents;
-  _ = while (int index = int 0) (index != count) {
-    () = () call f (index, contents @ contents_type[index]);
-    index + int 1;
-  };
-  ();
-};
-
-#if 0
-// Vectorized variant
-function inline list_vGenerate
-  (pointer repr, int count, owned f, pointer ret) -> () {
-  () call list_generate(repr, count, f, ret);
-};
-#endif
 
 // Allocate and construct a list, given a suitably initialized data array.
 // The data array is stolen by the list.

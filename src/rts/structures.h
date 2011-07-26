@@ -37,3 +37,5 @@ extern data owned pyon.internal.structures.repr_int;
 extern data owned pyon.internal.structures.repr_float;
 extern data owned pyon.internal.structures.repr_bool;
 extern data owned pyon.internal.structures.OpaqueTraversableDict_list;
+
+extern data pointer pyon.internal.structures.int_info;

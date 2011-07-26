@@ -10,10 +10,9 @@ and some local expression reordering.
 
 {-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types,
     ViewPatterns #-}
-module SystemF.Simplify (rewriteLocalExpr,
-                         rewriteWithGeneralRules,
-                         rewriteWithParallelRules,
-                         rewriteWithSequentialRules)
+module SystemF.Simplify (SimplifierPhase(..),
+                         rewriteLocalExpr,
+                         rewriteAtPhase)
 where
 
 import Prelude hiding(mapM)
@@ -63,7 +62,13 @@ import GlobalVar
 --   depending on the stage of compilation.
 data SimplifierPhase =
     GeneralSimplifierPhase
+
+    -- | After parallelization, the sequential phase
+    --   converts loops to sequential form
   | SequentialSimplifierPhase
+  
+    -- | Finally, functions are inlined without regard to rewrite rules. 
+  | FinalSimplifierPhase
 
 data LREnv =
   LREnv
@@ -196,9 +201,8 @@ withDefValues is_rec (Rec defs)   m = foldr (withDefValue is_rec) m defs
 --   function.
 isRecInliningCandidate :: SimplifierPhase -> Def Mem -> Bool
 isRecInliningCandidate _ def =
-  let ann = defAnnotation def
-  in -- It's inlinable only if it's a wrapper function
-     defAnnWrapper ann
+  -- It's inlinable only if it's a wrapper function
+  defIsWrapper def
 
 -- | Decide whether a function may be inlined (outside of its own definition
 --   group).  The function's attributes are used for the decision.
@@ -207,17 +211,22 @@ isRecInliningCandidate _ def =
 --   function.
 isInliningCandidate :: SimplifierPhase -> Def Mem -> Bool
 isInliningCandidate phase def =
-  let ann = defAnnotation def
+  let ann = defAnnInlining $ defAnnotation def
   in case phase
      of GeneralSimplifierPhase ->
-          if defAnnInlineSequential ann
-          then False
-          else True
+          case ann
+          of InlNormal     -> True 
+             InlWrapper    -> True
+             InlSequential -> False
+             InlFinal      -> False
         SequentialSimplifierPhase ->
---          True
-          if defAnnInlineSequential ann
-          then False
-          else True
+          case ann
+          of InlNormal     -> True 
+             InlWrapper    -> True
+             InlSequential -> True
+             InlFinal      -> False
+        FinalSimplifierPhase ->
+          True
 
 -- | Add a pattern-bound variable to the environment.  
 --   This adds the variable's type to the environment and
@@ -1627,15 +1636,14 @@ rewriteLocalExpr phase ruleset mod =
                     }
     runLR (rwModule mod) env
 
-rewriteWithGeneralRules, rewriteWithParallelRules, rewriteWithSequentialRules
-  :: Module Mem -> IO (Module Mem)
-
-rewriteWithGeneralRules = rewriteLocalExpr GeneralSimplifierPhase generalRewrites
-
-rewriteWithParallelRules = rewriteLocalExpr GeneralSimplifierPhase rules 
+rewriteAtPhase :: SimplifierPhase -> Module Mem -> IO (Module Mem)
+rewriteAtPhase phase mod = rewriteLocalExpr phase rules mod
   where
-    rules = combineRuleSets [generalRewrites, parallelizingRewrites]
-
-rewriteWithSequentialRules = rewriteLocalExpr SequentialSimplifierPhase rules 
-  where
-    rules = combineRuleSets [generalRewrites, sequentializingRewrites]
+    rules =
+      case phase
+      of GeneralSimplifierPhase -> generalRewrites
+         SequentialSimplifierPhase -> sequential_rewrites
+         FinalSimplifierPhase -> sequential_rewrites
+      where
+        sequential_rewrites =
+          combineRuleSets [generalRewrites, sequentializingRewrites]

@@ -44,7 +44,7 @@ insertGlobalSystemFFunctions mod = do
              , modDefs = defs
              , modExports = exports} = mod
       new_imports = imports ++ concatMap defGroupMembers core_defs
-  return $ Module mod_name new_imports (core_defs ++ defs) exports
+  return $ Module mod_name new_imports defs exports
 
 -- | Type index for stream expressions 
 data Stream
@@ -1844,7 +1844,6 @@ interpretStream2 shape_type elt_type repr expression = do
   return $! case s of {UnknownStream {} -> Nothing; _ -> Just s}
 
 interpretStream2' shape_type elt_type repr expression =
-  traceShow (text "IS2" <+> pprExp expression) $
   case unpackVarAppM expression
   of Just (op_var, ty_args, args)
        | op_var `isPyonBuiltin` the_TraversableDict_Stream_traverse ||

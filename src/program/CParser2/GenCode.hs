@@ -32,11 +32,28 @@ checkModule mod@(Module decls)
 
 -- | Convert function definition attributes
 defAttributes :: [Attribute] -> (SystemF.DefAnn -> SystemF.DefAnn)
-defAttributes attrs ann = foldr insert_attribute ann attrs
+defAttributes attrs ann =
+  case check_attrs 
+  of () -> foldr insert_attribute ann attrs
   where
+    -- Verify that the attribute list doesn't contain conflicting
+    -- attributes; throw an exception on error.
+    -- Invalid attributes are checked when inserting.
+    check_attrs = check_inlining_attrs
+
+    -- There should be at most one inlining-related attribute
+    check_inlining_attrs =
+      case filter (`elem` [InlineSequentialAttr, InlineFinalAttr]) attrs
+      of []  -> ()
+         [_] -> ()
+         _   -> internalError "Functions may not have more than one inlining attribute"
+
     insert_attribute InlineSequentialAttr ann =
-      ann {SystemF.defAnnInlineSequential = True}
+      ann {SystemF.defAnnInlining = SystemF.InlSequential}
     
+    insert_attribute InlineFinalAttr ann =
+      ann {SystemF.defAnnInlining = SystemF.InlFinal}
+
     insert_attribute _ _ =
       internalError "Unexpected function attribute"
 

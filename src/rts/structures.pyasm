@@ -500,3 +500,7 @@ function inline complex_negate(uint size, uint align, owned member_negate,
   () = () call member_negate (x @ cpx.real, ret @ cpx.real);
   () call member_negate (x @ cpx.imag, ret @ cpx.imag);
 };
+
+data pointer int_info = InfoTableHeader {
+  TAG_CON
+};

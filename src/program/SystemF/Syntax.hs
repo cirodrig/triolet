@@ -34,6 +34,7 @@ module SystemF.Syntax
      defIsWrapper,
      DefAnn(..),
      defaultDefAnn,
+     InliningAnnotation(..),
      DefGroup(..), defGroupMembers,
      Export(..),
      Module(..),
@@ -247,7 +248,7 @@ mkDef :: Var -> Fun s -> Def s
 mkDef v f = Def v defaultDefAnn f
 
 mkWrapperDef :: Var -> Fun s -> Def s
-mkWrapperDef v f = Def v (defaultDefAnn {defAnnWrapper = True}) f
+mkWrapperDef v f = Def v (defaultDefAnn {defAnnInlining = InlWrapper}) f
 
 mapDefiniens :: (Fun s -> Fun s') -> Def s -> Def s'
 mapDefiniens f def = def {definiens = f $ definiens def}
@@ -260,21 +261,39 @@ modifyDefAnnotation :: (DefAnn -> DefAnn) -> Def s -> Def s
 modifyDefAnnotation f d = d {defAnnotation = f (defAnnotation d)}
 
 defIsWrapper :: Def s -> Bool
-defIsWrapper def = defAnnWrapper $ defAnnotation def
+defIsWrapper def = defAnnInlining (defAnnotation def) == InlWrapper
 
 -- | Annotations on a function definition
 data DefAnn =
   DefAnn
-  { -- | True if the definition is a wrapper function.
-    defAnnWrapper :: !Bool
-    
-    -- | True if the definition should not be inlined until the sequential
-    --   phase.
-  , defAnnInlineSequential :: !Bool
+  { -- | A tag controlling inlining.
+    defAnnInlining :: !InliningAnnotation
   }
 
 defaultDefAnn :: DefAnn
-defaultDefAnn = DefAnn False False
+defaultDefAnn = DefAnn InlNormal
+
+-- | An annotation controlling when a function may be inlined.
+--
+--   A function that's part of a recursive definition group cannot be inlined 
+--   unless its annotation is 'InlWrapper'.
+--
+--   Functions that have rewrite rules should not be inlined during the first
+--   few phases of compilation, so that rewrites can match the function name.
+--   The annotations 'InlSequential' and 'InlFinal' control this kind of
+--   inlining.
+data InliningAnnotation =
+    InlNormal                   -- ^ A normal function.
+  | InlWrapper                  -- ^ A wrapper function; may be inlined even
+                                --   in a recursive definition group.
+  | InlSequential               -- ^ A parallelizable function whose definition
+                                --   consists of sequential loops.  The
+                                --   function should be inlined if it still
+                                --   exists after parallelization.
+  | InlFinal                    -- ^ A sequential loop function.  The function
+                                --   should be inlined after rewriting
+                                --   sequential loops.
+    deriving (Eq, Enum)
 
 -- | A definition group consists of either a single non-recursive definition
 --   or a list of recursive definitions.  The list must not be empty.

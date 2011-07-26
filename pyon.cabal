@@ -15,6 +15,7 @@ Data-Files:
   symbols/coretypes2
   include/pyon.h
   include/pyon_list.h
+  include/pyon_matrix.h
   interfaces/memory_py.pi
   interfaces/effects.pi
   interfaces/prim.pi

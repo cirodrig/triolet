@@ -10,6 +10,11 @@ record ObjectHeader {
   const pointer info;                 // Info table
 };
 
+record Obj(a) {
+  const ObjectHeader header;
+  const a payload;
+};
+
 // Objet layout information
 record PassConv {
   const ObjectHeader header;
@@ -167,21 +172,24 @@ record PyonMatrix {
 
 /* A stream of values.  Stream elements are computed on demand.
  *
- * next : (pointer to state, pointer to output) -> bool
+ * next : state -> StreamNext
  *   Get the next stream element.
- *   Return True if an element is available, False otherwise.
- *
- * initialize : pointer to state -> ()
- *   Initialize the stream state.
- *
- * finalize : pointer to state -> ()
- *   Finalize the stream state.
  */
-record Stream {
-  const ObjectHeader header;
-  const owned next;                   // How to get the next stream element
-  const owned initialize;             // How to initialize the stream state
-  const uint state_size;	      // Size of state
-  const uint state_align;	      // Alignment of state
-  const owned state_finalize;		// How to finalize the stream state
+record StreamData {
+  const owned state;                  // Initial state of stream
+  const owned next;                   // Function to get next stream value
+};
+
+#define STREAM_EMPTY (uint8 0)
+#define STREAM_VALUE (uint8 1)
+
+/* The result of pulling a value from a stream */
+record StreamNext {
+  const uint8 tag;		// {STREAM_EMPTY, STREAM_VALUE}
+  const StreamNextData val;	// if STREAM_VALUE
+};
+
+record StreamNextData {
+  const owned state;		// Next stream state
+  const owned ret;		// Returned value
 };
