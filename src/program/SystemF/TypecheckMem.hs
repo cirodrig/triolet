@@ -378,7 +378,7 @@ typeCheckAlternative pos scr_type (AltM (DeCon { altConstructor = con
 
     -- Verify that fields have the expected types
     check_number_of_fields inst_arg_types fields
-    zipWithM_ check_arg inst_arg_types fields
+    zipWithM_ check_arg inst_arg_types (zip [1..] fields)
   
     -- Add fields to enironment
     withMany assumePat fields $ \fields' -> do
@@ -400,9 +400,9 @@ typeCheckAlternative pos scr_type (AltM (DeCon { altConstructor = con
         show (length atypes) ++ ", got " ++ show (length fields) ++ ")"
       | otherwise = return ()
 
-    check_arg expected_rtype pat =
+    check_arg expected_rtype (pat_index, pat) =
       let given_type = patMType pat
-          msg = text "Wrong type in field of pattern"
+          msg = text "Wrong type in field" <+> int pat_index <+> text "of pattern"
       in checkType msg pos expected_rtype given_type
 
 typeCheckAlternative pos scr_type (AltM (DeTuple { altParams = fields
