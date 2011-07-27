@@ -15,12 +15,15 @@ where
 import Prelude hiding(mapM)
 import Control.Applicative
 import Data.Maybe
+import qualified Data.Set as Set
 import Data.Traversable
 
 import Common.Error
 import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.MemoryIR
+import SystemF.Rename
+import Type.Rename
 import Type.Type
 import Globals
 
@@ -89,9 +92,13 @@ etaReduceFunction recurse allow_exceptions f out_param params =
       ret_type = patMType out_param `FunT` fromTypM (funReturn f)
   in case mbody
      of Just body ->
-          Just $ f { funParams = params
-                   , funBody = body
-                   , funReturn = TypM ret_type}
+          -- If any references to the parameter variable remain, then
+          -- we cannot eliminate the parameter.
+          if patMVar out_param `Set.member` freeVariables body
+          then Nothing
+          else Just $ f { funParams = params
+                        , funBody = body
+                        , funReturn = TypM ret_type}
         Nothing -> Nothing
 
 -- | Don't eta-reduce a function.  If eta-reduction is being performed
