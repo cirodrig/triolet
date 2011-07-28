@@ -11,10 +11,6 @@ TraversableDict_list_build @(a : bare)
   -> IEffect (list a) =
 -}
 
-oper_GUARD @(a : bare) (repr : Repr a) (arg : bool) (s : Stream list_shape a)
-  -> Stream list_shape a =
-  if arg then s else oper_EMPTY @a repr;
-
 oper_DO @(a : bare) (repr : Repr a) (f : Writer a) -> Stream list_shape a
   attribute(inline_final) =
 
@@ -125,20 +121,19 @@ bind @(N : intindex) @(sh a b : bare)
 
 
 
+-} -- END
 
-histogram @(t : bare -> bare)
-  (size : int)
-  (input : Stream (shape t) (Stored int))
-  (ret : OutPtr (list (Stored int)))
-  -> IEffect (list (Stored int)) =
-  case defineIntIndex size of someIndInt @(N : intindex) (index : FinIndInt N).
-  make_list @(Stored int) @N index
-  (referenced @(array N (Stored int))
-   (histogramArray @(shape t) @N index input))
-  ret;
+-------------------------------------------------------------------------------
+-- List functions
+
+len @(a : bare) (ls : list a) -> int =
+  -- Extract the list's length value
+  case ls of make_list @a @(N : intindex)
+    (size : FinIndInt N) (aref : Referenced (array N a)).
+  case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (x : int).
+  x;
 
 
-  
 safeSubscript @(a : bare)
   (repr : Repr a) (ls : list a) (ix : int) (ret : OutPtr a) -> IEffect a =
 
@@ -153,43 +148,6 @@ safeSubscript @(a : bare)
   else copy @a repr (subscript @N @a repr ay ix) ret;
 
 
-
-
-fun_asList_Stream @(sh a : bare)
-  (shape_dict : ShapeDict sh) (src : Stream sh a) -> Stream list_shape a
-  attribute(inline_final) =
-
-  -- Reinterpret the stream as another type
-  case shape_dict of shapeDict @sh 
-    (shape_map : (a b : bare) -> Repr a -> Repr b -> (a -> Writer b) -> Stream sh a -> Stream sh b)
-    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a).
-  case shape_flatten @a src of linStream @list_shape @a @(st : box)
-    (state : st) (next : st -> StreamNext st (BoxedType a)).
-    stream @list_shape @a @st state next;
-
-{-
-fun_asMatrix_Stream @(M N : intindex) @(a : bare)
-  (size_y : IndInt M)
-  (size_x : IndInt N)
-  (src : Stream (array_shape M (array_shape N unit_shape)) a)
-  -> Stream matrix_shape a
-  attribute(inline_final) =
-  case src of stsize_y ; -}
-
-
-
--} -- END
-
--------------------------------------------------------------------------------
--- List functions
-
-len @(a : bare) (ls : list a) -> int =
-  -- Extract the list's length value
-  case ls of make_list @a @(N : intindex)
-    (size : FinIndInt N) (aref : Referenced (array N a)).
-  case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (x : int).
-  x;
-
 -- List traversal.
 -- Loop over all list indices and return the corresponding array element.
 TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
@@ -201,6 +159,18 @@ TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
   (generate @N @a (indInt @N size) repr
    (\ (i : int) (ret : OutPtr a) -> IEffect a.
       copy @a repr (subscript @N @a repr ay i) ret));
+
+
+histogram @(t : bare -> bare)
+  (size : int)
+  (input : Stream (shape t) (Stored int))
+  (ret : OutPtr (list (Stored int)))
+  -> IEffect (list (Stored int)) =
+  case defineIntIndex size of someIndInt @(N : intindex) (index : FinIndInt N).
+  make_list @(Stored int) @N index
+  (referenced @(array N (Stored int))
+   (histogramArray @(shape t) @N index input))
+  ret;
 
 -------------------------------------------------------------------------------
 -- Stream Traversable functions
@@ -215,7 +185,29 @@ TraversableDict_Stream_traverse @(t : bare -> bare) @(a : bare)
 
 
 -------------------------------------------------------------------------------
--- Shape-specific stream functions
+-- List-specific stream functions
+
+fun_asList_Stream @(sh a : bare)
+  (shape_dict : ShapeDict sh) (src : Stream sh a) -> Stream list_shape a =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_flatten @a src;
+
 
 range (n : int) -> Stream list_shape (Stored int) =
   case defineIntIndex n of someIndInt @(ix : intindex) (val : FinIndInt ix).
@@ -227,6 +219,19 @@ rangeIndexed @(N : intindex) (count : IndInt N)
   -> Stream (array_shape N unit_shape) (Stored int) =
   generate @N @(Stored int) count repr_int
   (\ (i : int) -> Writer (Stored int). stored @int i);
+
+
+oper_GUARD @(a : bare) (repr : Repr a) (arg : bool) (s : Stream list_shape a)
+  -> Stream list_shape a =
+  if arg then s else oper_EMPTY @a repr;
+
+
+oper_EMPTY @(a : bare) (repr : Repr a) -> Stream list_shape a
+  attribute(inline_final) =
+  linStream @list_shape @a @(Boxed (Stored NoneType))
+  (boxed @(Stored NoneType) (stored @NoneType None))
+  (\ (state : Boxed (Stored NoneType)) -> StreamNext (Boxed (Stored NoneType)) (BoxedType a).
+    streamEmpty @(Boxed (Stored NoneType)) @(BoxedType a));
 
 
 generate @(N : intindex) @(a : bare)
@@ -284,6 +289,15 @@ generate @(N : intindex) @(a : bare)
          (boxed @(Stored int) (stored @int 0)) next
   };
 
+-------------------------------------------------------------------------------
+-- Matrix-specific container methods
+
+fun_asMatrix_Stream @(M N : intindex) @(a : bare)
+  (size_y : IndInt M)
+  (size_x : IndInt N)
+  (src : Stream (array_shape M (array_shape N unit_shape)) a)
+  -> Stream matrix_shape a =
+  matrixStream @a @M @N size_y size_x src;
 
 -------------------------------------------------------------------------------
 -- Generic container methods

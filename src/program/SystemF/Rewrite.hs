@@ -332,10 +332,10 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             -- , (pyonBuiltin the_fun_zip, rwZip)
             -- , (pyonBuiltin the_fun_zip3, rwZip3)
             -- , (pyonBuiltin the_fun_zip4, rwZip4)
-            , (pyonBuiltin the_fun_map_Stream, rwMapStream)
-            , (pyonBuiltin the_fun_zip_Stream, rwZipStream) 
-            , (pyonBuiltin the_fun_zip3_Stream, rwZip3Stream)
-            , (pyonBuiltin the_fun_zip4_Stream, rwZip4Stream)
+            , (pyonBuiltin the_LinStream_map, rwMapStream)
+            , (pyonBuiltin the_LinStream_zipWith, rwZipStream) 
+            , (pyonBuiltin the_LinStream_zipWith3, rwZip3Stream)
+            , (pyonBuiltin the_LinStream_zipWith4, rwZip4Stream)
             -- , (pyonBuiltin the_histogram, rwHistogram)
             -- , (pyonBuiltin the_fun_reduce, rwReduce)
             -- , (pyonBuiltin the_fun_reduce1, rwReduce1)
@@ -356,7 +356,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
       [generate_expr]
       where
         as_list =
-          ExpM $ VarE defaultExpInfo (pyonBuiltin the_fun_asList_Stream)
+          ExpM $ VarE defaultExpInfo (pyonBuiltin the_LinStream_flatten)
         generate_f =
           ExpM $ VarE defaultExpInfo (pyonBuiltin the_generate_forever)
         store_f =
@@ -386,9 +386,9 @@ sequentializingRewrites :: RewriteRuleSet
 sequentializingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
   where
     table = [ (pyonBuiltin the_histogramArray, rwHistogramArray)
-            , (pyonBuiltin the_fun_reduce_Stream, rwReduceStream)
-            , (pyonBuiltin the_fun_reduce1_Stream, rwReduce1Stream)
-            , (pyonBuiltin the_fun_fold_Stream, rwFoldStream)
+            , (pyonBuiltin the_LinStream_reduce, rwReduceStream)
+            , (pyonBuiltin the_LinStream_reduce1, rwReduce1Stream)
+            , (pyonBuiltin the_LinStream_fold, rwFoldStream)
             ]
 
 -- | Attempt to rewrite an application term.
@@ -935,16 +935,10 @@ rwZip4 _ _ _ = return Nothing-}
 
 rwMapStream :: RewriteRule
 rwMapStream inf
-  ty_args@[shape_type, elt1, elt2]
-  args@[repr1, repr2, transformer, producer] = do
-    m_stream <- interpretStream2 (fromTypM shape_type) (fromTypM elt2) repr2 map_expr
-    case m_stream of
-      Just s -> traceShow (text "rwMapStream" <+> pprExpS s) $ encodeStream2 shape_type s
-      Nothing -> return Nothing
-  where
-    map_op = ExpM $ VarE inf (pyonBuiltin the_fun_map_Stream)
-    map_expr =
-      ExpM $ AppE inf map_op ty_args args
+  [TypM shape_type, TypM elt1, TypM elt2]
+  [repr1, repr2, transformer, producer] = runMaybeT $ do
+    s <- MaybeT $ interpretStream2 shape_type elt1 repr1 producer
+    MaybeT $ generalizedZipStream2 elt2 repr2 transformer shape_type [s]
 
 rwMapStream _ _ _ = return Nothing
 
@@ -956,42 +950,43 @@ rwMapStream _ _ _ = return Nothing
 --     generate(min(n1, n2), \i -> (f1 i, f2 i))
 rwZipStream :: RewriteRule
 rwZipStream inf
-  [TypM shape_type, TypM elt1, TypM elt2]
-  [repr1, repr2, stream1, stream2] = runMaybeT $ do
+  [TypM shape_type, TypM elt1, TypM elt2, TypM ret]
+  [repr1, repr2, repr_ret, transformer, stream1, stream2] = runMaybeT $ do
     s1 <- MaybeT $ interpretStream2 shape_type elt1 repr1 stream1
     s2 <- MaybeT $ interpretStream2 shape_type elt2 repr2 stream2
-    MaybeT $ generalizedZipStream2 (TypM shape_type) [s1, s2]
+    MaybeT $ generalizedZipStream2 ret repr_ret transformer shape_type [s1, s2]
 
 rwZipStream _ _ _ = return Nothing
 
 rwZip3Stream :: RewriteRule
 rwZip3Stream inf
-  [TypM shape_type, TypM elt1, TypM elt2, TypM elt3]
-  [repr1, repr2, repr3, stream1, stream2, stream3] = runMaybeT $ do
+  [TypM shape_type, TypM elt1, TypM elt2, TypM elt3, TypM ret]
+  [repr1, repr2, repr3, repr_ret, transformer, stream1, stream2, stream3] = runMaybeT $ do
     s1 <- MaybeT $ interpretStream2 shape_type elt1 repr1 stream1
     s2 <- MaybeT $ interpretStream2 shape_type elt2 repr2 stream2
     s3 <- MaybeT $ interpretStream2 shape_type elt3 repr3 stream3
-    MaybeT $ generalizedZipStream2 (TypM shape_type) [s1, s2, s3]
+    MaybeT $ generalizedZipStream2 ret repr_ret transformer shape_type [s1, s2, s3]
 
 rwZip3Stream _ _ _ = return Nothing
 
 rwZip4Stream :: RewriteRule
 rwZip4Stream inf
-  [TypM shape_type, TypM elt1, TypM elt2, TypM elt3, TypM elt4]
-  [repr1, repr2, repr3, repr4, stream1, stream2, stream3, stream4] = runMaybeT $ do
+  [TypM shape_type, TypM elt1, TypM elt2, TypM elt3, TypM elt4, TypM ret]
+  [repr1, repr2, repr3, repr4, repr_ret, transformer, stream1, stream2, stream3, stream4] = runMaybeT $ do
     s1 <- MaybeT $ interpretStream2 shape_type elt1 repr1 stream1
     s2 <- MaybeT $ interpretStream2 shape_type elt2 repr2 stream2
     s3 <- MaybeT $ interpretStream2 shape_type elt3 repr3 stream3
     s4 <- MaybeT $ interpretStream2 shape_type elt4 repr4 stream4
-    MaybeT $ generalizedZipStream2 (TypM shape_type) [s1, s2, s3, s4]
+    MaybeT $ generalizedZipStream2 ret repr_ret transformer shape_type [s1, s2, s3, s4]
 
 rwZip4Stream _ _ _ = return Nothing
 
-generalizedZipStream2 :: TypM -> [ExpS] -> RW (Maybe ExpM)
-generalizedZipStream2 shape_type streams = do
-  zipped <- zipStreams2 streams
+generalizedZipStream2 :: Type -> ExpM -> ExpM -> Type -> [ExpS]
+                      -> RW (Maybe ExpM)
+generalizedZipStream2 out_type out_repr transformer shape_type streams = do
+  zipped <- zipStreams2 out_type out_repr transformer streams
   case zipped of
-    Just s -> encodeStream2 shape_type s
+    Just s -> encodeStream2 (TypM shape_type) s
     Nothing -> return Nothing
 
 {-
@@ -1912,13 +1907,9 @@ interpretStream2 shape_type elt_type repr expression = do
 interpretStream2' shape_type elt_type repr expression =
   case unpackVarAppM expression
   of Just (op_var, ty_args, args)
-       | op_var `isPyonBuiltin` the_TraversableDict_Stream_traverse ||
-         op_var `isPyonBuiltin` the_TraversableDict_Stream_build ->
-         -- These are identity functions
-         case args
-         of [_, stream_arg] ->
-              interpretStream2' shape_type elt_type repr stream_arg
-       | op_var `isPyonBuiltin` the_fun_asList_Stream ->
+       | op_var `isPyonBuiltin` the_LinStream_flatten ->
+         -- This is a shape cast.  Interpret the stream with the more precise
+         -- shape.  This may result in more refined shape information.
          case (ty_args, args)
          of ([shape_type2, _], [stream_arg]) ->
               interpretStream2' shape_type2 elt_type repr stream_arg
@@ -2013,7 +2004,7 @@ interpretStream2' shape_type elt_type repr expression =
          in case args
             of [repr] -> return $ EmptyStream type_arg repr
                _ -> no_interpretation
-       | op_var `isPyonBuiltin` the_fun_map_Stream ->
+       | op_var `isPyonBuiltin` the_LinStream_map ->
          let [_, src_type, out_type] = ty_args
          in case args
             of [src_repr, out_repr, transformer, producer] ->
@@ -2098,7 +2089,7 @@ mapStream out_type out_repr transformer producer = transform producer
     transform (UnknownStream shp in_type in_repr expr) =
       -- Can't simplify; build a "map" expression
       UnknownStream shp out_type out_repr $
-      ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo (pyonBuiltin the_fun_map_Stream))
+      ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo (pyonBuiltin the_LinStream_map))
       [TypM (shapeType shp), TypM in_type, TypM out_type]
       [in_repr, out_repr, transformer, expr]
 
@@ -2338,22 +2329,20 @@ interpretAndBlockStream shape_type elt_type elt_repr stream_exp = do
           return $ Just (size_var, count_var, base_var, bs, bs_size, bs_count)
     Nothing -> return Nothing
 
--- | Zip together a list of two or more streams
-zipStreams2 :: [ExpS] -> RW (Maybe ExpS)
-zipStreams2 [] = internalError "zipStreams: Need at least one stream"
-zipStreams2 [s] = return (Just s)
-zipStreams2 ss
+-- | Combine a list of two or more streams using a combining function
+zipStreams2 :: Type             -- ^ Transformed type
+            -> ExpM             -- ^ Transformed repr
+            -> ExpM             -- ^ Transformer function
+            -> [ExpS]           -- ^ Producer streams
+            -> RW (Maybe ExpS)  -- ^ Transformed stream
+zipStreams2 _ _ _ [] = internalError "zipStreams: Need at least one stream"
+
+zipStreams2 out_type out_repr transformer [s] =
+  return (Just $ mapStream out_type out_repr transformer s)
+
+zipStreams2 out_type out_repr transformer ss
   | Just (zipped_size, zipped_count) <- zipped_shape =
-      let elt_types = map sexpElementType ss
-          typ = varApp (pyonTupleTypeCon num_streams) elt_types
-          repr = ExpM $ AppE defaultExpInfo
-                 (ExpM $ VarE defaultExpInfo (pyonTupleReprCon num_streams))
-                 (map TypM elt_types)
-                 (map sexpElementRepr ss)
-          gen ix = varAppE (pyonTupleCon num_streams)
-                   (map TypM elt_types)
-                   [_sexpGenerator stream ix | stream <- ss] -- FIXME: Handle other stream types
-      in return $ Just $ GenerateStream zipped_size zipped_count typ repr gen
+    return $ Just $ GenerateStream zipped_size zipped_count out_type out_repr gen
   | otherwise = return Nothing
   where
     num_streams = length ss
@@ -2377,6 +2366,20 @@ zipStreams2 ss
     
     min_ii = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
 
+    -- Bind each value to a temporary variable.  Call the transformer function
+    -- on the results.
+    gen ix = with_locals ix ss $ \local_vars ->
+      return $ appE defaultExpInfo transformer [] [ExpM $ VarE defaultExpInfo v | v <- local_vars]
+    
+    with_locals ix (s:ss) k =
+      with_local ix s $ \v -> with_locals ix ss $ \vs -> k (v:vs)
+    with_locals _ [] k = k []
+
+    -- Bind one stream result to a temporary variable.
+    -- FIXME: Handle other kinds of streams, besides generators 
+    with_local ix stream k =
+      localE (TypM $ sexpElementType stream) (_sexpGenerator stream ix) k
+                          
 -- | Translate a stream to a sequential \'fold\' operation.
 --   This function deals with variability in the number of given arguments. 
 translateStreamToFoldWithExtraArgs ::
@@ -2488,13 +2491,9 @@ translateStreamToFold tenv acc_ty acc_repr init acc_f out_ptr stream =
 
      UnknownStream shp ty repr expr -> do
        -- Fold over this uninterpreted stream
-       let op = ExpM $ VarE defaultExpInfo $ pyonBuiltin the_fun_fold_Stream
-           
-       -- Cast to list shape, which always succeeds
-       Just list_stream <-
-         castStreamExpressionShape (VarT $ pyonBuiltin the_list_shape) (shapeType shp) ty repr expr
-       return $ ExpM $ AppE defaultExpInfo op [TypM ty, TypM acc_ty]
-          [repr, acc_repr, acc_f, init, list_stream, out_ptr]       
+       let op = ExpM $ VarE defaultExpInfo $ pyonBuiltin the_LinStream_fold
+       return $ ExpM $ AppE defaultExpInfo op [TypM $ shapeType shp, TypM ty, TypM acc_ty]
+          [repr, acc_repr, acc_f, init, expr, out_ptr]
   where
     -- Create a loop that takes values from 'src' and passes them to 'trans'. 
     -- The loop implements 'bind'.
@@ -2544,7 +2543,7 @@ castStreamExpressionShape expected_shape given_shape elt_type elt_repr expr = do
                   | g_op `isPyonBuiltin` the_list_shape -> Just expr
                   | otherwise ->
                       -- Reinterpret as a list
-                      Just $ cast (pyonBuiltin the_fun_asList_Stream)
+                      Just $ cast (pyonBuiltin the_LinStream_flatten)
                              [TypM g_shape, TypM elt_type] [expr]
                 _ -> Nothing
 
