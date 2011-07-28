@@ -115,6 +115,8 @@ toEffTok : (a : bare) -> IEffect a -> EffTok;
 -- Perform two side-effecting operations in sequence.
 seqEffTok : EffTok -> EffTok -> EffTok;
 
+fromEffTok : (a : bare) -> EffTok -> IEffect a;
+
 data Complex : bare -> bare
 {
   complex (a : bare) () (a, a);
@@ -778,6 +780,12 @@ deadBox : (a : box) -> a;
 -- A dummy referenced object that is used as a placeholder for a dead value.
 deadRef : (a : bare) -> Writer a;
 
+array_traverse : (N : intindex) -> (a : bare) -> Repr a -> FinIndInt N
+	      -> array N a -> Stream (array_shape N unit_shape) a;
+
+array_build : (N : intindex) -> (a : bare) -> Repr a -> FinIndInt N
+	   -> Stream (array_shape N unit_shape) a -> Writer (array N a);
+
 oper_DO : (a : bare) -> Repr a -> Writer a -> Stream list_shape a;
 
 -- Explicit-shape version of oper_DO
@@ -811,13 +819,14 @@ bind :
 -- eliminator for 'bind'.  Note that the last 2 arguments and return type
 -- are similar to those of 'bind', but in a different order.
 chunk :
-    (n : intindex)
- -> (sh a b : bare)
+    (M N : intindex)
+ -> (a b : bare)
  -> Repr a
  -> Repr b
- -> Stream (array_shape n sh) a
- -> (Stream sh a -> Writer b)
- -> Stream (array_shape n unit_shape) b;
+ -> IndInt N
+ -> Stream (array_shape M (array_shape N unit_shape)) a
+ -> (Stream (array_shape N unit_shape) a -> Writer b)
+ -> Stream (array_shape M unit_shape) b;
 
 -- Sequential fold over a stream
 fun_fold_Stream : (a acc : bare)
@@ -1038,13 +1047,6 @@ generate : (n : intindex)
         -> Repr a
         -> (int -> Writer a)
         -> Stream (array_shape n unit_shape) a;
-
-build_array : (n : intindex)
-           -> (a : bare)
-           -> FinIndInt n
-           -> Repr a
-           -> Stream (array_shape n unit_shape) a
-           -> Writer (array n a);
 
 safeSubscript : (a : bare)
              -> Repr a

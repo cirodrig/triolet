@@ -259,7 +259,6 @@ pyonBuiltinVariableNames =
   , "oper_CAT_MAP"
   , "bind"
   , "chunk"
-  , "build_array"
   , "oper_EMPTY"
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"
@@ -309,6 +308,8 @@ pyonBuiltinVariableNames =
   , "deadRef"
   
     -- Inserted by rewrite rules
+  , "array_build"
+  , "array_traverse"
   , "defineIntIndex"
   , "rangeIndexed"
   , "generate"
@@ -324,6 +325,7 @@ pyonBuiltinVariableNames =
   , "emptyEffTok"
   , "toEffTok"
   , "seqEffTok"
+  , "fromEffTok"
   ]
 
 pyonBuiltinsSpecification =

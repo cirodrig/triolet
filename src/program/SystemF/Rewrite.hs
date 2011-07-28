@@ -325,7 +325,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             -- , (pyonBuiltin the_TraversableDict_matrix_build, rwBuildMatrix)
             -- , (pyonBuiltin the_TraversableDict_Stream_traverse, rwTraverseStream)
             -- , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildStream)
-            , (pyonBuiltin the_build_array, rwBuildArray)
+            , (pyonBuiltin the_array_build, rwBuildArray)
             -- , (pyonBuiltin the_oper_GUARD, rwGuard)
             , (pyonBuiltin the_chunk, rwChunk)
             -- , (pyonBuiltin the_fun_map, rwMap)
@@ -731,7 +731,7 @@ rwBuildStream inf _ [_, stream] = return (Just stream)
 rwBuildStream _ _ _ = return Nothing
 
 rwBuildArray :: RewriteRule
-rwBuildArray inf [size, elt_type] (count : elt_repr : stream : other_args) = do
+rwBuildArray inf [size, elt_type] (elt_repr : count : stream : other_args) = do
   m_stream <- interpretStream2 (VarT $ pyonBuiltin the_list_shape) (fromTypM elt_type) elt_repr stream
   case m_stream of
     Just (GenerateStream { _sexpSize = size_arg
@@ -745,6 +745,8 @@ rwBuildArray inf [size, elt_type] (count : elt_repr : stream : other_args) = do
       return $ Just retval
 
     _ -> return Nothing
+
+rwBuildArray _ _ _ = return Nothing
 
 buildListDoall inf elt_type elt_repr other_args size count generator = do
   let return_ptr =
@@ -824,19 +826,17 @@ rwGuard _ _ _ = return Nothing-}
 --
 -- 'Chunk' can create nested loops.
 rwChunk :: RewriteRule
-rwChunk inf [n_chunks, chunk_shape, elt_ty, result_ty]
-  [elt_repr, result_repr, stream, consumer] = do
+rwChunk inf [dim_y, dim_x, elt_ty, result_ty]
+  [elt_repr, result_repr, size_x, stream, consumer] = do
   -- The source stream is expected to be a multidimensional array stream
-  let shape = varApp (pyonBuiltin the_array_shape)
-              [fromTypM n_chunks, fromTypM chunk_shape]
-      shape_1d = varApp (pyonBuiltin the_array_shape)
-                 [fromTypM n_chunks, VarT (pyonBuiltin the_unit_shape)]
+  let shape = arrayShape [fromTypM dim_y, fromTypM dim_x]
+      shape_1d = arrayShape [fromTypM dim_x]
   m_stream <- interpretStream2 shape (fromTypM elt_ty) elt_repr stream
   case m_stream of
     Just (NestedLoopStream src_stream (binder, producer_stream)) -> do
       -- Map over the source stream
       -- mapStream (\x. consumer (producer x)) stream
-      producer_exp <- encodeStream2 chunk_shape producer_stream
+      producer_exp <- encodeStream2 (TypM shape_1d) producer_stream
       case producer_exp of
         Nothing -> return Nothing
         Just pe ->
