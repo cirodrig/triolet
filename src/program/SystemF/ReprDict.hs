@@ -18,6 +18,7 @@ import qualified SystemF.DictEnv as DictEnv
 import SystemF.Syntax
 import SystemF.MemoryIR
 import Type.Environment
+import Type.Eval
 import Type.Rename
 import Type.Type
 
@@ -76,7 +77,9 @@ instance EvalMonad m => EvalMonad (MaybeT m) where
 
 -- | Lookup the representation dictionary of a bare type
 lookupReprDict :: ReprDictMonad m => Type -> m (Maybe MkDict)
-lookupReprDict ty@(AnyT {}) =
+lookupReprDict t = lookupReprDict' =<< reduceToWhnf t
+
+lookupReprDict' ty@(AnyT {}) =
   -- These values act like referenced objects, but contain nothing
   return $ Just $ mk_any_dict ty
   where
@@ -85,24 +88,9 @@ lookupReprDict ty@(AnyT {}) =
           call = ExpM $ AppE defaultExpInfo op [TypM ty] []
       in MkDict (return call)
      
-lookupReprDict ty =
-  case fromVarApp ty
-  of Just (op, [arg]) 
-       | op `isPyonBuiltin` the_BareType &&
-         is_function_type arg ->
-           return $ Just $ mk_fun_dict arg
-     _ -> do
-       denv <- getDictEnv
-       DictEnv.lookup ty denv
-  where
-    is_function_type (FunT {}) = True
-    is_function_type _ = False
-
-    mk_fun_dict ty =
-      -- Create a boxed representation object, and pass it to the continuation 
-      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
-          call = ExpM $ AppE defaultExpInfo op [TypM ty] []
-      in MkDict (return call)
+lookupReprDict' ty = do
+    denv <- getDictEnv
+    DictEnv.lookup ty denv
 
 -- | Look up the integer value indexed by the given index.  The index must
 --   have kind 'intindex'.
@@ -180,7 +168,6 @@ createDictEnv = do
   let efftok_dict =
         valueDict (pyonBuiltin the_EffTok) (pyonBuiltin the_repr_EffTok)
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
-  boxed_dict <- createBoxedDictPattern (pyonBuiltin the_BoxedType) 1
   stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 2
   eq_dict <- createBoxedDictPattern (pyonBuiltin the_EqDict) 1
   ord_dict <- createBoxedDictPattern (pyonBuiltin the_OrdDict) 1
@@ -216,8 +203,11 @@ createDictEnv = do
   array_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin the_array) [VarT arg1, VarT arg2],
      createDict_array arg1 arg2)
+  storedBox_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_StoredBox) [VarT arg],
+     createDict_storedBox arg)
 
-  let dict_env = DictEnv.DictEnv [repr_dict, boxed_dict,
+  let dict_env = DictEnv.DictEnv [repr_dict, storedBox_dict,
                                   stream_dict,
                                   float_dict, int_dict, efftok_dict,
                                   list_dict, complex_dict, array_dict,
@@ -332,6 +322,13 @@ createDict_array param_var1 param_var2 subst = MkDict $
     data_type = varApp (pyonBuiltin the_array) [param1, param2]
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_array)
+
+createDict_storedBox :: Var -> Substitution -> MkDict
+createDict_storedBox param_var subst = MkDict $ do
+  return $ ExpM $ AppE defaultExpInfo oper [TypM param] []
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
 
 -- | Get the representation dictionary for a boxed data type.
 --   

@@ -1,27 +1,7 @@
 
-range (n : int) -> Stream list_shape (Stored int) =
-  case defineIntIndex n of someIndInt @(ix : intindex) (val : FinIndInt ix).
-    fun_asList_Stream @(array_shape ix unit_shape) @(Stored int)
-    (rangeIndexed @ix (indInt @ix val));
+{-
 
--- List traversal.
--- Loop over all list indices and return the corresponding array element.
-TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
-  -> Stream list_shape a =
-  case ls of make_list @a @(N : intindex)
-                       (size : FinIndInt N) (aref : Referenced (array N a)).
-  case aref of referenced @(array N a) (ay : array N a).
-  fun_asList_Stream @(array_shape N unit_shape) @a
-  (generate @N @a (indInt @N size) repr
-   (\ (i : int) (ret : OutPtr a) -> IEffect a.
-      copy @a repr (subscript @N @a repr ay i) ret));
 
-len @(a : bare) (ls : list a) -> int =
-  -- Extract the list's length value
-  case ls of make_list @a @(N : intindex)
-    (size : FinIndInt N) (aref : Referenced (array N a)).
-  case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (x : int).
-  x;
 
 {-
 -- List construction.
@@ -30,16 +10,6 @@ TraversableDict_list_build @(a : bare)
   (repr : Repr a) (s : Stream list_shape a) (o : OutPtr (list a))
   -> IEffect (list a) =
 -}
-
--- Stream traversal and building.
--- These functions are trivial.
-TraversableDict_Stream_build @(t : bare -> bare) @(a : bare)
-  (repr : Repr a) (s : Stream (shape t) a)
-  -> Stream (shape t) a = s;
-
-TraversableDict_Stream_traverse @(t : bare -> bare) @(a : bare)
-  (repr : Repr a) (s : Stream (shape t) a)
-  -> Stream (shape t) a = s;
 
 oper_GUARD @(a : bare) (repr : Repr a) (arg : bool) (s : Stream list_shape a)
   -> Stream list_shape a =
@@ -65,14 +35,14 @@ oper_DO @(a : bare) (repr : Repr a) (f : Writer a) -> Stream list_shape a
   in
     let initial_state : Boxed (Stored bool) =
           boxed @(Stored bool) (stored @bool True) in
-    stream @list_shape @a @(Boxed (Stored bool)) initial_state get_value;
+    linStream @list_shape @a @(Boxed (Stored bool)) initial_state get_value;
 
 oper_CAT_MAP @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
   (src : Stream list_shape a)
   (trans : a -> Stream list_shape b)
   -> Stream list_shape b
   attribute(inline_final) =
-  case src of stream @list_shape @a @(src_st : box)
+  case src of linStream @list_shape @a @(src_st : box)
                 (src_state : src_st)
 		(src_next : src_st -> StreamNext src_st (BoxedType a)).
   letfun {
@@ -102,7 +72,7 @@ oper_CAT_MAP @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
 	  case boxed @a (convertToBare @a repr_a src_value)
 	  of boxed @a (src_uvalue : a).
 
-	  case trans src_uvalue of stream @list_shape @b @(trans_st : box)
+	  case trans src_uvalue of linStream @list_shape @b @(trans_st : box)
 	                             (trans_state : trans_st)
 				     (trans_next : trans_st -> StreamNext trans_st (BoxedType b)).
 
@@ -134,7 +104,7 @@ oper_CAT_MAP @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
 	  -- Pull a new value from the source stream
 	  next_from_source src_state
       }
-  } in stream @list_shape @b @(BindState src_st a b)
+  } in linStream @list_shape @b @(BindState src_st a b)
          (bindFromSource @src_st @a @b src_state)
 	 next;
 
@@ -150,75 +120,11 @@ bind @(N : intindex) @(sh a b : bare)
   case oper_CAT_MAP @a @b repr_a repr_b
        (fun_asList_Stream @(array_shape N unit_shape) @a src)
        (\ (x : a) -> Stream list_shape b. fun_asList_Stream @sh @b (trans x))
-  of stream @list_shape @b @(st : box) (state : st) (next : st -> StreamNext st (BoxedType b)).
-  stream @(array_shape N sh) @b @st state next;
+  of linStream @list_shape @b @(st : box) (state : st) (next : st -> StreamNext st (BoxedType b)).
+  linStream @(array_shape N sh) @b @st state next;
 
-fun_map @(t : bare -> bare) @(a : bare) @(b : bare)
-        (traversable : TraversableDict t)
-        (reprA : Repr a) (reprB : Repr b)
-        (transformer : a -> Writer b)
-        (input : t a)
-        (ret : OutPtr (t b))
-  -> IEffect (t b) =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  build @b reprB (fun_map_Stream @(shape t) @a @b reprA reprB transformer
-                  (traverse @a reprA input)) ret;
 
-fun_zip @(t : bare -> bare) @(a : bare) @(b : bare)
-        (traversable : TraversableDict t)
-        (reprA : Repr a) (reprB : Repr b)
-        (inputA : t a) (inputB : t b)
-        (ret : OutPtr (t (PyonTuple2 a b)))
-  -> IEffect (t (PyonTuple2 a b)) =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  build @(PyonTuple2 a b)
-  (repr_PyonTuple2 @a @b reprA reprB)
-  (fun_zip_Stream @(shape t) @a @b reprA reprB
-   (traverse @a reprA inputA) (traverse @b reprB inputB))
-  ret;
 
-fun_zip3 @(t : bare -> bare) @(a : bare) @(b : bare) @(c : bare)
-        (traversable : TraversableDict t)
-        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c)
-        (inputA : t a) (inputB : t b) (inputC : t c)
-        (ret : OutPtr (t (PyonTuple3 a b c)))
-  -> IEffect (t (PyonTuple3 a b c)) =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  build @(PyonTuple3 a b c)
-  (repr_PyonTuple3 @a @b @c reprA reprB reprC)
-  (fun_zip3_Stream @(shape t) @a @b @c reprA reprB reprC
-   (traverse @a reprA inputA)
-   (traverse @b reprB inputB)
-   (traverse @c reprC inputC))
-  ret;
-
-fun_zip4 @(t : bare -> bare) @(a : bare) @(b : bare) @(c : bare) @(d : bare)
-        (traversable : TraversableDict t)
-        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c) (reprD : Repr d)
-        (inputA : t a) (inputB : t b) (inputC : t c) (inputD : t d)
-        (ret : OutPtr (t (PyonTuple4 a b c d)))
-  -> IEffect (t (PyonTuple4 a b c d)) =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  build @(PyonTuple4 a b c d)
-  (repr_PyonTuple4 @a @b @c @d reprA reprB reprC reprD)
-  (fun_zip4_Stream @(shape t) @a @b @c @d reprA reprB reprC reprD
-   (traverse @a reprA inputA)
-   (traverse @b reprB inputB)
-   (traverse @c reprC inputC)
-   (traverse @d reprD inputD))
-  ret;
 
 histogram @(t : bare -> bare)
   (size : int)
@@ -231,58 +137,7 @@ histogram @(t : bare -> bare)
    (histogramArray @(shape t) @N index input))
   ret;
 
-fun_reduce @(t : bare -> bare) @(a : bare)
-  (traversable : TraversableDict t)
-  (repr : Repr a)
-  (reducer : a -> a -> Writer a)
-  (init : a)
-  (input : t a)
-  (ret : OutPtr a)
-  -> IEffect a =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  fun_reduce_Stream @(shape t) @a
-  repr reducer init (traverse @a repr input) ret;
 
-fun_reduce1 @(t : bare -> bare) @(a : bare)
-  (traversable : TraversableDict t)
-  (repr : Repr a)
-  (reducer : a -> a -> Writer a)
-  (input : t a)
-  (ret : OutPtr a)
-  -> IEffect a =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  fun_reduce1_Stream @(shape t) @a
-  repr reducer (traverse @a repr input) ret;
-
-for @(N : intindex) @(acc : bare)
-  (repr : Repr acc) (count : IndInt N) (init : acc)
-  (f : int -> acc -> Writer acc) (ret : OutPtr acc)
-  -> IEffect acc =
-
-  -- Unpack the indexed int
-  case count of {
-    indInt @N (fin : FinIndInt N).
-      case fin of finIndInt @N (pf : Pf (neZ N pos_infty)) (bound : int).
-
-      -- Main loop
-      letfun
-        loop (i : int) (x : acc) (r : OutPtr acc) -> IEffect acc =
-          if EqDict_int_eq i bound
-          then copy @acc repr x r
-          else case boxed @acc (f i x) of boxed @acc (y : acc).
-               loop (AdditiveDict_int_add i 1) y r
-      in loop 0 init ret;
-
-    -- An infinite loop will fail
-    indOmega @N (pf : Pf (eqZ N pos_infty)).
-      except @(IEffect acc)
-  };
   
 safeSubscript @(a : bare)
   (repr : Repr a) (ls : list a) (ix : int) (ret : OutPtr a) -> IEffect a =
@@ -298,8 +153,81 @@ safeSubscript @(a : bare)
   else copy @a repr (subscript @N @a repr ay ix) ret;
 
 
+
+
+fun_asList_Stream @(sh a : bare)
+  (shape_dict : ShapeDict sh) (src : Stream sh a) -> Stream list_shape a
+  attribute(inline_final) =
+
+  -- Reinterpret the stream as another type
+  case shape_dict of shapeDict @sh 
+    (shape_map : (a b : bare) -> Repr a -> Repr b -> (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a).
+  case shape_flatten @a src of linStream @list_shape @a @(st : box)
+    (state : st) (next : st -> StreamNext st (BoxedType a)).
+    stream @list_shape @a @st state next;
+
+{-
+fun_asMatrix_Stream @(M N : intindex) @(a : bare)
+  (size_y : IndInt M)
+  (size_x : IndInt N)
+  (src : Stream (array_shape M (array_shape N unit_shape)) a)
+  -> Stream matrix_shape a
+  attribute(inline_final) =
+  case src of stsize_y ; -}
+
+
+
+-} -- END
+
 -------------------------------------------------------------------------------
--- Stream functions
+-- List functions
+
+len @(a : bare) (ls : list a) -> int =
+  -- Extract the list's length value
+  case ls of make_list @a @(N : intindex)
+    (size : FinIndInt N) (aref : Referenced (array N a)).
+  case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (x : int).
+  x;
+
+-- List traversal.
+-- Loop over all list indices and return the corresponding array element.
+TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
+  -> Stream list_shape a =
+  case ls of make_list @a @(N : intindex)
+                       (size : FinIndInt N) (aref : Referenced (array N a)).
+  case aref of referenced @(array N a) (ay : array N a).
+  LinStream_flatten @(array_shape N unit_shape) @a
+  (generate @N @a (indInt @N size) repr
+   (\ (i : int) (ret : OutPtr a) -> IEffect a.
+      copy @a repr (subscript @N @a repr ay i) ret));
+
+-------------------------------------------------------------------------------
+-- Stream Traversable functions
+
+TraversableDict_Stream_build @(t : bare -> bare) @(a : bare)
+  (repr : Repr a) (s : Stream (shape t) a)
+  -> Stream (shape t) a = s;
+
+TraversableDict_Stream_traverse @(t : bare -> bare) @(a : bare)
+  (repr : Repr a) (s : Stream (shape t) a)
+  -> Stream (shape t) a = s;
+
+
+-------------------------------------------------------------------------------
+-- Shape-specific stream functions
+
+range (n : int) -> Stream list_shape (Stored int) =
+  case defineIntIndex n of someIndInt @(ix : intindex) (val : FinIndInt ix).
+    LinStream_flatten @(array_shape ix unit_shape) @(Stored int)
+    (rangeIndexed @ix (indInt @ix val));
+
+
+rangeIndexed @(N : intindex) (count : IndInt N)
+  -> Stream (array_shape N unit_shape) (Stored int) =
+  generate @N @(Stored int) count repr_int
+  (\ (i : int) -> Writer (Stored int). stored @int i);
+
 
 generate @(N : intindex) @(a : bare)
          (count : IndInt N) (repr : Repr a) (f : int -> Writer a)
@@ -330,7 +258,7 @@ generate @(N : intindex) @(a : bare)
                -- Apply the generator function
                streamValue @(Boxed (Stored int)) @(BoxedType a) new_st retval
 
-      in stream @(array_shape N unit_shape) @a @(Boxed (Stored int))
+      in linStream @(array_shape N unit_shape) @a @(Boxed (Stored int))
          (boxed @(Stored int) (stored @int 0)) next;
 
     indOmega @N (pf : Pf (eqZ N pos_infty)).
@@ -352,110 +280,487 @@ generate @(N : intindex) @(a : bare)
           -- Apply the generator function
           streamValue @(Boxed (Stored int)) @(BoxedType a) new_st retval
 
-      in stream @(array_shape N unit_shape) @a @(Boxed (Stored int))
+      in linStream @(array_shape N unit_shape) @a @(Boxed (Stored int))
          (boxed @(Stored int) (stored @int 0)) next
   };
 
 
-rangeIndexed @(N : intindex) (count : IndInt N)
-  -> Stream (array_shape N unit_shape) (Stored int) =
+-------------------------------------------------------------------------------
+-- Generic container methods
 
-  generate @N @(Stored int) count repr_int
-  (\ (i : int) -> Writer (Stored int). stored @int i);
-
-
-fun_fold_Stream @(a acc : bare) (repr_a : Repr a) (repr_acc : Repr acc)
-  (f : acc -> a -> Writer acc)
-  (init : acc)
-  (s : Stream list_shape a)
-  (ret : OutPtr acc)
-  -> IEffect acc
-  attribute(inline_final) =
-
-  case s of stream @list_shape @a @(st : box)
-    (stream_state : st) (stream_next : st -> StreamNext st (BoxedType a)).
-
-  letfun
-    go (state : st) (accumulator : BoxedType acc) (ret : OutPtr acc)
-      -> IEffect acc =
-      case stream_next state of {
-
-        -- Obtain value from stream
-        streamValue @st @(BoxedType a) (next_state : st) (result : BoxedType a).
-          -- Compute the new value
-          let new_accumulator : BoxedType acc =
-                case boxed @a (convertToBare @a repr_a result)
-                of boxed @a (y : a).
-                case boxed @acc (convertToBare @acc repr_acc accumulator)
-                of boxed @acc (x : acc).
-                convertToBoxed @acc repr_acc (f x y)
-
-          in go next_state new_accumulator ret;
-
-	-- Stream is depleted
-	streamEmpty @st @(BoxedType a).
-	  convertToBare @acc repr_acc accumulator ret
-      }
-  in go stream_state (convertToBoxed @acc repr_acc (copy @acc repr_acc init)) ret;
+fun_reduce @(t : bare -> bare) @(a : bare)
+  (traversable : TraversableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (repr : Repr a)
+  (reducer : a -> a -> Writer a)
+  (init : a)
+  (input : t a)
+  (ret : OutPtr a)
+  -> IEffect a =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  fun_reduce_Stream @(shape t) @a shape_dict
+  repr reducer init (traverse @a repr input) ret;
 
 
-fun_reduce_Stream @(sh a : bare)
-  (repr : Repr a) (f : a -> a -> Writer a) (init : a) (src : Stream sh a) (ret : OutPtr a)
-  -> IEffect a
-  attribute(inline_final) =
-  fun_fold_Stream @a @a repr repr f init (fun_asList_Stream @sh @a src) ret;
+fun_reduce1 @(t : bare -> bare) @(a : bare)
+  (traversable : TraversableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (repr : Repr a)
+  (reducer : a -> a -> Writer a)
+  (input : t a)
+  (ret : OutPtr a)
+  -> IEffect a =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  fun_reduce1_Stream @(shape t) @a shape_dict
+  repr reducer (traverse @a repr input) ret;
+
+
+fun_map @(t : bare -> bare) @(a : bare) @(b : bare)
+        (traversable : TraversableDict t)
+	(shape_dict : ShapeDict (shape t))
+        (reprA : Repr a) (reprB : Repr b)
+        (transformer : a -> Writer b)
+        (input : t a)
+        (ret : OutPtr (t b))
+  -> IEffect (t b) =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  build @b reprB (fun_map_Stream @(shape t) @a @b shape_dict
+                  reprA reprB transformer
+                  (traverse @a reprA input)) ret;
+
+fun_zip @(t : bare -> bare) @(a : bare) @(b : bare)
+        (traversable : TraversableDict t)
+	(shape_dict : ShapeDict (shape t))
+        (reprA : Repr a) (reprB : Repr b)
+        (inputA : t a) (inputB : t b)
+        (ret : OutPtr (t (PyonTuple2 a b)))
+  -> IEffect (t (PyonTuple2 a b)) =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  build @(PyonTuple2 a b)
+  (repr_PyonTuple2 @a @b reprA reprB)
+  (fun_zip_Stream @(shape t) @a @b shape_dict reprA reprB
+   (traverse @a reprA inputA) (traverse @b reprB inputB))
+  ret;
+
+fun_zip3 @(t : bare -> bare) @(a : bare) @(b : bare) @(c : bare)
+        (traversable : TraversableDict t)
+	(shape_dict : ShapeDict (shape t))
+        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c)
+        (inputA : t a) (inputB : t b) (inputC : t c)
+        (ret : OutPtr (t (PyonTuple3 a b c)))
+  -> IEffect (t (PyonTuple3 a b c)) =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  build @(PyonTuple3 a b c)
+  (repr_PyonTuple3 @a @b @c reprA reprB reprC)
+  (fun_zip3_Stream @(shape t) @a @b @c shape_dict reprA reprB reprC
+   (traverse @a reprA inputA)
+   (traverse @b reprB inputB)
+   (traverse @c reprC inputC))
+  ret;
+
+
+fun_zip4 @(t : bare -> bare) @(a : bare) @(b : bare) @(c : bare) @(d : bare)
+        (traversable : TraversableDict t)
+	(shape_dict : ShapeDict (shape t))
+        (reprA : Repr a) (reprB : Repr b) (reprC : Repr c) (reprD : Repr d)
+        (inputA : t a) (inputB : t b) (inputC : t c) (inputD : t d)
+        (ret : OutPtr (t (PyonTuple4 a b c d)))
+  -> IEffect (t (PyonTuple4 a b c d)) =
+  case traversable
+  of traversableDict @t
+       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
+       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
+  build @(PyonTuple4 a b c d)
+  (repr_PyonTuple4 @a @b @c @d reprA reprB reprC reprD)
+  (fun_zip4_Stream @(shape t) @a @b @c @d shape_dict reprA reprB reprC reprD
+   (traverse @a reprA inputA)
+   (traverse @b reprB inputB)
+   (traverse @c reprC inputC)
+   (traverse @d reprD inputD))
+  ret;
+
+-------------------------------------------------------------------------------
+-- Generic stream methods
+
+fun_reduce_Stream @(sh a : bare) (shape_dict : ShapeDict sh) (repr_a : Repr a)
+  (f : a -> a -> Writer a) (init : a) (s : Stream sh a) (ret : OutPtr a)
+  -> IEffect a =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  LinStream_reduce @list_shape @a repr_a f init (shape_flatten @a s) ret;
 
 
 -- reduce1 extracts the first value from the stream, then calls 'fold'
 -- for the remaining values
 fun_reduce1_Stream @(sh a : bare)
+  (shape_dict : ShapeDict sh)
   (repr : Repr a)
   (f : a -> a -> Writer a)
   (s : Stream sh a)
   (ret : OutPtr a)
-  -> IEffect a
-  attribute(inline_final) =
+  -> IEffect a =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  LinStream_reduce1 @list_shape @a repr f (shape_flatten @a s) ret;
 
-  -- Use the stream's first element as the initial value
-  case s of stream @sh @a @(st : box)
-    (stream_state : st) (stream_next : st -> StreamNext st (BoxedType a)).
 
-  case stream_next stream_state of {
-    streamValue @st @(BoxedType a) (next_state : st) (init : BoxedType a).
-      case boxed @a (convertToBare @a repr init) of boxed @a (u_init : a).
-      let new_stream : Stream list_shape a =
-            stream @list_shape @a @st next_state stream_next in
-      fun_fold_Stream @a @a repr repr f u_init new_stream ret;
-
-    streamEmpty @st @(BoxedType a).
-      except @(IEffect a)
-  };
-
-
-fun_asList_Stream @(sh a : bare) (src : Stream sh a) -> Stream list_shape a
-  attribute(inline_final) =
-
-  -- Reinterpret the stream as another type
-  case src of stream @sh @a @(st : box)
-    (state : st) (next : st -> StreamNext st (BoxedType a)).
-    stream @list_shape @a @st state next;
-
-{-
-fun_asMatrix_Stream @(M N : intindex) @(a : bare)
-  (size_y : IndInt M)
-  (size_x : IndInt N)
-  (src : Stream (array_shape M (array_shape N unit_shape)) a)
-  -> Stream matrix_shape a
-  attribute(inline_final) =
-  case src of stsize_y ; -}
-
-fun_map_Stream @(sh a b : bare) (repr_a : Repr a) (repr_b : Repr b)
+fun_map_Stream @(sh a b : bare)
+  (shape_dict : ShapeDict sh) (repr_a : Repr a) (repr_b : Repr b)
   (f : a -> Writer b)
   (src : Stream sh a)
-  -> Stream sh b
+  -> Stream sh b =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_map @a @b repr_a repr_b f src;
+
+
+fun_zip_Stream @(sh a b : bare) (shape_dict : ShapeDict sh)
+  (repr_a : Repr a) (repr_b : Repr b)
+  (src_a : Stream sh a) (src_b : Stream sh b) -> Stream sh (PyonTuple2 a b) =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_zipWith @a @b @(PyonTuple2 a b)
+  repr_a repr_b (repr_PyonTuple2 @a @b repr_a repr_b)
+  (\ (x : a) (y : b) -> Writer (PyonTuple2 a b).
+    pyonTuple2 @a @b (copy @a repr_a x) (copy @b repr_b y))
+  src_a src_b;
+
+
+fun_zip3_Stream @(sh a b c : bare) (shape_dict : ShapeDict sh)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (src_a : Stream sh a) (src_b : Stream sh b) (src_c : Stream sh c)
+  -> Stream sh (PyonTuple3 a b c) =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_zipWith3 @a @b @c @(PyonTuple3 a b c)
+  repr_a repr_b repr_c (repr_PyonTuple3 @a @b @c repr_a repr_b repr_c)
+  (\ (x : a) (y : b) (z : c) -> Writer (PyonTuple3 a b c).
+    pyonTuple3 @a @b @c (copy @a repr_a x) (copy @b repr_b y) (copy @c repr_c z))
+  src_a src_b src_c;
+
+
+fun_zip4_Stream @(sh a b c d : bare) (shape_dict : ShapeDict sh)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (src_a : Stream sh a) (src_b : Stream sh b) (src_c : Stream sh c) (src_d : Stream sh d)
+  -> Stream sh (PyonTuple4 a b c d) =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_zipWith4 @a @b @c @d @(PyonTuple4 a b c d)
+  repr_a repr_b repr_c repr_d (repr_PyonTuple4 @a @b @c @d repr_a repr_b repr_c repr_d)
+  (\ (x : a) (y : b) (z : c) (w : d) -> Writer (PyonTuple4 a b c d).
+    pyonTuple4 @a @b @c @d (copy @a repr_a x) (copy @b repr_b y) (copy @c repr_c z) (copy @d repr_d w))
+  src_a src_b src_c src_d;
+
+-------------------------------------------------------------------------------
+-- Other shape methods
+
+ShapeDict_matrix_flatten @(a : bare) (s : Stream matrix_shape a)
+  -> Stream list_shape a =
+  case s of matrixStream @a @(M : intindex) @(N : intindex)
+       	                 (size_y : IndInt M) (size_x : IndInt N)
+			 (ls : LinStream (array_shape M (array_shape N unit_shape)) a).
+  LinStream_flatten @(array_shape M (array_shape N unit_shape)) @a ls;
+
+
+ShapeDict_matrix_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
+  (f : a -> Writer b)
+  (s : Stream matrix_shape a) -> Stream matrix_shape b =
+  case s of matrixStream @a @(M : intindex) @(N : intindex)
+       	                 (size_y : IndInt M) (size_x : IndInt N)
+			 (ls : LinStream (array_shape M (array_shape N unit_shape)) a).
+  matrixStream @b @M @N size_y size_x
+  (LinStream_map @(array_shape M (array_shape N unit_shape)) @a @b repr_a repr_b f ls);
+
+{-
+ShapeDict_matrix_zipWith @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (f : a -> b -> Writer c)
+  (src_a : Stream matrix_shape a) (src_b : Stream matrix_shape b)
+  -> Stream matrix_shape c =
+  case s of matrixStream @a @(M : intindex) @(N : intindex)
+       	                 (size_y : IndInt M) (size_x : IndInt N)
+			 (ls : LinStream (array_shape M (array_shape N unit_shape)) a).
+
+  Chunk the streams, then do a 1D zip in each dimension
+-}
+
+
+ShapeDict_Stream_flatten @(sh : bare) (shape_dict : ShapeDict sh)
+  -> (a : bare) -> Stream sh a -> Stream list_shape a =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_flatten;
+
+
+ShapeDict_Stream_map @(sh : bare) (shape_dict : ShapeDict sh)
+  -> (a b : bare) -> Repr a -> Repr b -> (a -> Writer b) -> Stream sh a -> Stream sh b =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_map;
+
+
+ShapeDict_Stream_zipWith @(sh : bare) (shape_dict : ShapeDict sh)
+  -> (a b c : bare) -> Repr a -> Repr b -> Repr c ->
+     (a -> b -> Writer c) ->
+     Stream sh a -> Stream sh b -> Stream sh c =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_zipWith;
+
+
+ShapeDict_Stream_zipWith3 @(sh : bare) (shape_dict : ShapeDict sh)
+  -> (a b c d : bare) -> Repr a -> Repr b -> Repr c -> Repr d ->
+     (a -> b -> c -> Writer d) ->
+     Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_zipWith3;
+
+
+ShapeDict_Stream_zipWith4 @(sh : bare) (shape_dict : ShapeDict sh)
+  -> (a b c d e : bare) -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+     (a -> b -> c -> d -> Writer e) ->
+     Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e =
+  case shape_dict of shapeDict @sh 
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream list_shape a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e).
+  shape_zipWith4;
+
+-------------------------------------------------------------------------------
+-- List shape methods
+
+ShapeDict_list_flatten @(a : bare) (s : Stream list_shape a)
+  -> Stream list_shape a =
+  s;
+
+
+ShapeDict_list_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
+  (f : a -> Writer b)
+  (src : Stream list_shape a) -> Stream list_shape b =
+  LinStream_map @list_shape @a @b repr_a repr_b f src;
+
+
+ShapeDict_list_zipWith @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (f : a -> b -> Writer c)
+  (src_a : Stream list_shape a) (src_b : Stream list_shape b)
+  -> Stream list_shape c =
+  LinStream_zipWith @list_shape @a @b @c repr_a repr_b repr_c f src_a src_b;
+
+
+ShapeDict_list_zipWith3 @(a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (f : a -> b -> c -> Writer d)
+  (src_a : Stream list_shape a) (src_b : Stream list_shape b) (src_c : Stream list_shape c)
+  -> Stream list_shape d =
+  LinStream_zipWith3 @list_shape @a @b @c @d repr_a repr_b repr_c repr_d
+  f src_a src_b src_c;
+
+
+ShapeDict_list_zipWith4 @(a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
+  (f : a -> b -> c -> d -> Writer e)
+  (src_a : Stream list_shape a) (src_b : Stream list_shape b) (src_c : Stream list_shape c) (src_d : Stream list_shape d)
+  -> Stream list_shape e =
+  LinStream_zipWith4 @list_shape @a @b @c @d @e repr_a repr_b repr_c repr_d repr_e
+  f src_a src_b src_c src_d;
+
+-------------------------------------------------------------------------------
+-- Linear stream methods
+
+LinStream_flatten @(sh a : bare) (s : LinStream sh a)
+  -> LinStream list_shape a
+  attribute(inline_final) =
+  case s of linStream @sh @a @(st : box)
+                       (state : st) (next : st -> StreamNext st (BoxedType a)).
+  linStream @list_shape @a @st state next;
+
+
+LinStream_map @(sh a b : bare) (repr_a : Repr a) (repr_b : Repr b)
+  (f : a -> Writer b)
+  (src : LinStream sh a) -> LinStream sh b
   attribute(inline_final) =
   case src
-  of stream @sh @a @(src_st : box)
+  of linStream @sh @a @(src_st : box)
      (st : src_st) (next : src_st -> StreamNext src_st (BoxedType a)).
 
   letfun
@@ -472,22 +777,26 @@ fun_map_Stream @(sh a b : bare) (repr_a : Repr a) (repr_b : Repr b)
         streamEmpty @src_st @(BoxedType a).
           streamEmpty @src_st @(BoxedType b)
       }
-  in stream @sh @b @src_st st go;
+  in linStream @sh @b @src_st st go;
 
-fun_zip_Stream @(sh a b : bare) (repr_a : Repr a) (repr_b : Repr b)
-  (src_a : Stream sh a) (src_b : Stream sh b) -> Stream sh (PyonTuple2 a b)
+
+LinStream_zipWith @(sh a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (f : a -> b -> Writer c)
+  (src_a : LinStream sh a) (src_b : LinStream sh b)
+  -> LinStream sh c
   attribute(inline_final) =
 
   case src_a
-  of stream @sh @a @(st_a : box)
+  of linStream @sh @a @(st_a : box)
      (state_a : st_a) (next_a : st_a -> StreamNext st_a (BoxedType a)).
   case src_b
-  of stream @sh @b @(st_b : box)
+  of linStream @sh @b @(st_b : box)
      (state_b : st_b) (next_b : st_b -> StreamNext st_b (BoxedType b)).
   
   letfun
     go (state : Boxed (Stored (st_a, st_b)))
-      -> StreamNext (Boxed (Stored (st_a, st_b))) (Boxed (PyonTuple2 a b)) =
+      -> StreamNext (Boxed (Stored (st_a, st_b))) (BoxedType c) =
       -- Unpack the state
       case state of boxed @(Stored (st_a, st_b)) (u_state : Stored (st_a, st_b)).
       case u_state of stored @(st_a, st_b) (i_state : (st_a, st_b)).
@@ -504,44 +813,46 @@ fun_zip_Stream @(sh a b : bare) (repr_a : Repr a) (repr_b : Repr b)
 	      (next_state_b : st_b) (value_b : BoxedType b).
 
 	      -- Create output value
-	      let value : Boxed (PyonTuple2 a b) =
+	      let value : BoxedType c =
 	            case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
 	            case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
-		    boxed @(PyonTuple2 a b) (pyonTuple2 @a @b (copy @a repr_a x) (copy @b repr_b y)) in
+		    convertToBoxed @c repr_c (f x y) in
 	      let next_state : Boxed (Stored (st_a, st_b)) =
 	            boxed @(Stored (st_a, st_b)) (stored @(st_a, st_b) (next_state_a, next_state_b)) in
-	      streamValue @(Boxed (Stored (st_a, st_b))) @(Boxed (PyonTuple2 a b)) next_state value;
+	      streamValue @(Boxed (Stored (st_a, st_b))) @(BoxedType c) next_state value;
 
 	    streamEmpty @st_b @(BoxedType b).
-	      streamEmpty @(Boxed (Stored (st_a, st_b))) @(Boxed (PyonTuple2 a b))
+	      streamEmpty @(Boxed (Stored (st_a, st_b))) @(BoxedType c)
           };
 
 	streamEmpty @st_a @(BoxedType a).
-	  streamEmpty @(Boxed (Stored (st_a, st_b))) @(Boxed (PyonTuple2 a b))
+	  streamEmpty @(Boxed (Stored (st_a, st_b))) @(BoxedType c)
       }
-  in stream @sh @(PyonTuple2 a b) @(Boxed (Stored (st_a, st_b)))
+  in linStream @sh @c @(Boxed (Stored (st_a, st_b)))
        (boxed @(Stored (st_a, st_b)) (stored @(st_a, st_b) (state_a, state_b)))
        go;
 
-fun_zip3_Stream @(sh a b c : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
-  (src_a : Stream sh a) (src_b : Stream sh b) (src_c : Stream sh c)
-  -> Stream sh (PyonTuple3 a b c)
+
+LinStream_zipWith3 @(sh a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (f : a -> b -> c -> Writer d)
+  (src_a : LinStream sh a) (src_b : LinStream sh b) (src_c : LinStream sh c)
+  -> LinStream sh d
   attribute(inline_final) =
 
   case src_a
-  of stream @sh @a @(st_a : box)
+  of linStream @sh @a @(st_a : box)
      (state_a : st_a) (next_a : st_a -> StreamNext st_a (BoxedType a)).
   case src_b
-  of stream @sh @b @(st_b : box)
+  of linStream @sh @b @(st_b : box)
      (state_b : st_b) (next_b : st_b -> StreamNext st_b (BoxedType b)).
   case src_c
-  of stream @sh @c @(st_c : box)
+  of linStream @sh @c @(st_c : box)
      (state_c : st_c) (next_c : st_c -> StreamNext st_c (BoxedType c)).
   
   letfun
     go (state : Boxed (Stored (st_a, st_b, st_c)))
-      -> StreamNext (Boxed (Stored (st_a, st_b, st_c))) (Boxed (PyonTuple3 a b c)) =
+      -> StreamNext (Boxed (Stored (st_a, st_b, st_c))) (BoxedType d) =
       -- Unpack the state
       case state of boxed @(Stored (st_a, st_b, st_c)) (u_state : Stored (st_a, st_b, st_c)).
       case u_state of stored @(st_a, st_b, st_c) (i_state : (st_a, st_b, st_c)).
@@ -563,52 +874,54 @@ fun_zip3_Stream @(sh a b c : bare)
                   (next_state_c : st_c) (value_c : BoxedType c).
 
                   -- Create output value
-                  let value : Boxed (PyonTuple3 a b c) =
+                  let value : BoxedType d =
                         case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
                         case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
                         case boxed @c (convertToBare @c repr_c value_c) of boxed @c (z : c).
-                        boxed @(PyonTuple3 a b c) (pyonTuple3 @a @b @c (copy @a repr_a x) (copy @b repr_b y) (copy @c repr_c z)) in
+                        convertToBoxed @d repr_d (f x y z) in
                   let next_state : Boxed (Stored (st_a, st_b, st_c)) =
                         boxed @(Stored (st_a, st_b, st_c)) (stored @(st_a, st_b, st_c) (next_state_a, next_state_b, next_state_c)) in
-                  streamValue @(Boxed (Stored (st_a, st_b, st_c))) @(Boxed (PyonTuple3 a b c)) next_state value;
+                  streamValue @(Boxed (Stored (st_a, st_b, st_c))) @(BoxedType d) next_state value;
 
                 streamEmpty @st_c @(BoxedType c).
-                  streamEmpty @(Boxed (Stored (st_a, st_b, st_c))) @(Boxed (PyonTuple3 a b c))
+                  streamEmpty @(Boxed (Stored (st_a, st_b, st_c))) @(BoxedType d)
               };
 
             streamEmpty @st_b @(BoxedType b).
-              streamEmpty @(Boxed (Stored (st_a, st_b, st_c))) @(Boxed (PyonTuple3 a b c))
+              streamEmpty @(Boxed (Stored (st_a, st_b, st_c))) @(BoxedType d)
           };
 
 	streamEmpty @st_a @(BoxedType a).
-	  streamEmpty @(Boxed (Stored (st_a, st_b, st_c))) @(Boxed (PyonTuple3 a b c))
+	  streamEmpty @(Boxed (Stored (st_a, st_b, st_c))) @(BoxedType d)
       }
-  in stream @sh @(PyonTuple3 a b c) @(Boxed (Stored (st_a, st_b, st_c)))
+  in linStream @sh @d @(Boxed (Stored (st_a, st_b, st_c)))
        (boxed @(Stored (st_a, st_b, st_c)) (stored @(st_a, st_b, st_c) (state_a, state_b, state_c)))
        go;
 
-fun_zip4_Stream @(sh a b c d : bare)
-  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
-  (src_a : Stream sh a) (src_b : Stream sh b) (src_c : Stream sh c) (src_d : Stream sh d)
-  -> Stream sh (PyonTuple4 a b c d)
+
+LinStream_zipWith4 @(sh a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
+  (f : a -> b -> c -> d -> Writer e)
+  (src_a : LinStream sh a) (src_b : LinStream sh b) (src_c : LinStream sh c) (src_d : LinStream sh d)
+  -> LinStream sh e
   attribute(inline_final) =
 
   case src_a
-  of stream @sh @a @(st_a : box)
+  of linStream @sh @a @(st_a : box)
      (state_a : st_a) (next_a : st_a -> StreamNext st_a (BoxedType a)).
   case src_b
-  of stream @sh @b @(st_b : box)
+  of linStream @sh @b @(st_b : box)
      (state_b : st_b) (next_b : st_b -> StreamNext st_b (BoxedType b)).
   case src_c
-  of stream @sh @c @(st_c : box)
+  of linStream @sh @c @(st_c : box)
      (state_c : st_c) (next_c : st_c -> StreamNext st_c (BoxedType c)).
   case src_d
-  of stream @sh @d @(st_d : box)
+  of linStream @sh @d @(st_d : box)
      (state_d : st_d) (next_d : st_d -> StreamNext st_d (BoxedType d)).
 
   letfun
     go (state : Boxed (Stored (st_a, st_b, st_c, st_d)))
-      -> StreamNext (Boxed (Stored (st_a, st_b, st_c, st_d))) (Boxed (PyonTuple4 a b c d)) =
+      -> StreamNext (Boxed (Stored (st_a, st_b, st_c, st_d))) (BoxedType e) =
       -- Unpack the state
       case state of boxed @(Stored (st_a, st_b, st_c, st_d)) (u_state : Stored (st_a, st_b, st_c, st_d)).
       case u_state of stored @(st_a, st_b, st_c, st_d) (i_state : (st_a, st_b, st_c, st_d)).
@@ -635,32 +948,126 @@ fun_zip4_Stream @(sh a b c d : bare)
                       (next_state_d : st_d) (value_d : BoxedType d).
 
                       -- Create output value
-                      let value : Boxed (PyonTuple4 a b c d) =
+                      let value : BoxedType e =
                             case boxed @a (convertToBare @a repr_a value_a) of boxed @a (x : a).
                             case boxed @b (convertToBare @b repr_b value_b) of boxed @b (y : b).
                             case boxed @c (convertToBare @c repr_c value_c) of boxed @c (z : c).
                             case boxed @d (convertToBare @d repr_d value_d) of boxed @d (w : d).
-                            boxed @(PyonTuple4 a b c d) (pyonTuple4 @a @b @c @d (copy @a repr_a x) (copy @b repr_b y) (copy @c repr_c z) (copy @d repr_d w)) in
+                            convertToBoxed @e repr_e (f x y z w) in
                       let next_state : Boxed (Stored (st_a, st_b, st_c, st_d)) =
                             boxed @(Stored (st_a, st_b, st_c, st_d)) (stored @(st_a, st_b, st_c, st_d) (next_state_a, next_state_b, next_state_c, next_state_d)) in
-                      streamValue @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(Boxed (PyonTuple4 a b c d)) next_state value;
+                      streamValue @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(BoxedType e) next_state value;
 
                     streamEmpty @st_d @(BoxedType d).
-                      streamEmpty @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(Boxed (PyonTuple4 a b c d))
+                      streamEmpty @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(BoxedType e)
                   };
 
                 streamEmpty @st_c @(BoxedType c).
-                  streamEmpty @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(Boxed (PyonTuple4 a b c d))
+                  streamEmpty @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(BoxedType e)
               };
 
             streamEmpty @st_b @(BoxedType b).
-              streamEmpty @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(Boxed (PyonTuple4 a b c d))
+              streamEmpty @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(BoxedType e)
           };
 
 	streamEmpty @st_a @(BoxedType a).
-	  streamEmpty @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(Boxed (PyonTuple4 a b c d))
+	  streamEmpty @(Boxed (Stored (st_a, st_b, st_c, st_d))) @(BoxedType e)
       }
-  in stream @sh @(PyonTuple4 a b c d) @(Boxed (Stored (st_a, st_b, st_c, st_d)))
+  in linStream @sh @e @(Boxed (Stored (st_a, st_b, st_c, st_d)))
        (boxed @(Stored (st_a, st_b, st_c, st_d)) (stored @(st_a, st_b, st_c, st_d) (state_a, state_b, state_c, state_d)))
        go;
 
+-------------------------------------------------------------------------------
+-- Other rewritable functions
+
+LinStream_reduce @(sh a : bare) (repr_a : Repr a)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (s : LinStream sh a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline_final) =
+  LinStream_fold @sh @a @a repr_a repr_a f init s ret;
+
+
+LinStream_reduce1 @(sh a : bare) (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (s : LinStream sh a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline_final) =
+  -- Use the stream's first element as the initial value
+  case s of linStream @sh @a @(st : box)
+    (stream_state : st) (stream_next : st -> StreamNext st (BoxedType a)).
+
+  case stream_next stream_state of {
+    streamValue @st @(BoxedType a) (next_state : st) (init : BoxedType a).
+      case boxed @a (convertToBare @a repr init) of boxed @a (u_init : a).
+      let new_stream : Stream list_shape a =
+            linStream @list_shape @a @st next_state stream_next in
+      LinStream_fold @list_shape @a @a repr repr f u_init new_stream ret;
+
+    streamEmpty @st @(BoxedType a).
+      except @(IEffect a)
+  };
+
+
+LinStream_fold @(sh a acc : bare) (repr_a : Repr a) (repr_acc : Repr acc)
+  (f : acc -> a -> Writer acc)
+  (init : acc)
+  (s : LinStream sh a)
+  (ret : OutPtr acc)
+  -> IEffect acc
+  attribute(inline_final) =
+  case s of linStream @sh @a @(st : box)
+    (stream_state : st) (stream_next : st -> StreamNext st (BoxedType a)).
+
+  letfun
+    go (state : st) (accumulator : BoxedType acc) (ret : OutPtr acc)
+      -> IEffect acc =
+      case stream_next state of {
+
+        -- Obtain value from stream
+        streamValue @st @(BoxedType a) (next_state : st) (result : BoxedType a).
+          -- Compute the new value
+          let new_accumulator : BoxedType acc =
+                case boxed @a (convertToBare @a repr_a result)
+                of boxed @a (y : a).
+                case boxed @acc (convertToBare @acc repr_acc accumulator)
+                of boxed @acc (x : acc).
+                convertToBoxed @acc repr_acc (f x y)
+
+          in go next_state new_accumulator ret;
+
+	-- Stream is depleted
+	streamEmpty @st @(BoxedType a).
+	  convertToBare @acc repr_acc accumulator ret
+      }
+  in go stream_state (convertToBoxed @acc repr_acc (copy @acc repr_acc init)) ret;
+
+-------------------------------------------------------------------------------
+-- Loops
+
+for @(N : intindex) @(acc : bare)
+  (repr : Repr acc) (count : IndInt N) (init : acc)
+  (f : int -> acc -> Writer acc) (ret : OutPtr acc)
+  -> IEffect acc =
+
+  -- Unpack the indexed int
+  case count of {
+    indInt @N (fin : FinIndInt N).
+      case fin of finIndInt @N (pf : Pf (neZ N pos_infty)) (bound : int).
+
+      -- Main loop
+      letfun
+        loop (i : int) (x : acc) (r : OutPtr acc) -> IEffect acc =
+          if EqDict_int_eq i bound
+          then copy @acc repr x r
+          else case boxed @acc (f i x) of boxed @acc (y : acc).
+               loop (AdditiveDict_int_add i 1) y r
+      in loop 0 init ret;
+
+    -- An infinite loop will fail
+    indOmega @N (pf : Pf (eqZ N pos_infty)).
+      except @(IEffect acc)
+  };

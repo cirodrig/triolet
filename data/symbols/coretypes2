@@ -124,15 +124,25 @@ data array : intindex -> bare -> bare
   attribute(abstract)
 {};
 
--- A stream is indexed by a shape and an element type.
--- A stream contains a state, a function to produce a new value, and a
--- shape.
-data Stream : bare -> bare -> box
+-- A dynamically computed sequence of values, possibly with run-time
+-- shape information.
+type Stream : bare -> bare -> box;
+
+-- A dynamically computed sequence of values.
+data LinStream : bare -> bare -> box
   attribute(abstract)
 {
   -- A stream is a (state, generator) pair.
-  stream (sh : bare, a : bare) (st : box)
+  linStream (sh : bare, a : bare) (st : box)
     (st, st -> StreamNext st (BoxedType a));
+};
+
+data MatrixStream : bare -> box
+{
+  matrixStream (a : bare) (M : intindex, N : intindex)
+    (IndInt M,
+     IndInt N,
+     LinStream (array_shape M (array_shape N unit_shape)) a);
 };
 
 -- The result of attempting to pull a value from a stream.
@@ -294,6 +304,33 @@ data TraversableDict : (bare -> bare) -> box
    (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a));
 };
 
+-- How to perform generalized stream operations that depend on shape.
+-- The operations are flatten-to-list, map, and zipWith{2..4}.
+data ShapeDict : bare -> box
+{
+  shapeDict (sh : bare) ()
+  ((a : bare) -> Stream sh a -> Stream list_shape a,
+
+   (a b : bare) ->
+   Repr a -> Repr b ->
+   (a -> Writer b) -> Stream sh a -> Stream sh b,
+
+   (a b c : bare) ->
+   Repr a -> Repr b -> Repr c ->
+   (a -> b -> Writer c) -> Stream sh a -> Stream sh b -> Stream sh c,
+
+   (a b c d : bare) ->
+   Repr a -> Repr b -> Repr c -> Repr d ->
+   (a -> b -> c -> Writer d) ->
+   Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d,
+
+   (a b c d e : bare) ->
+   Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+   (a -> b -> c -> d -> Writer e) ->
+   Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e
+   );
+};
+
 -------------------------------------------------------------------------------
 -- Shapes
 
@@ -311,22 +348,6 @@ data unit_shape : bare {};
 
 -- The shape of an array stream
 data array_shape : intindex -> bare -> bare {};
-
--- Get the run-time shape type of a shape index
-type dynshape : bare -> box;
-
--- Empty run-time shape information, for streams with no run-time shape info
-data DynShapeUnit : box
-{
-  dynShapeUnit () () ();
-};
-
--- The run-time shape of a matrix stream
-data DynShapeMatrix : box
-{
-  dynShapeMatrix () (y : intindex, x : intindex) (IndInt y, IndInt x);
-};
-
 
 -------------------------------------------------------------------------------
 -- Representation dictionaries
@@ -372,6 +393,9 @@ repr_array : (n : intindex) -> (e : bare)
 
 repr_EffTok : Repr (Stored EffTok);
 
+-------------------------------------------------------------------------------
+-- Stream and Traversable dictionaries
+
 TraversableDict_Stream_build :
     (t : bare -> bare) -> (a : bare)
  -> Repr a -> Stream (shape t) a -> Stream (shape t) a;
@@ -391,6 +415,91 @@ TraversableDict_matrix_build :
 
 TraversableDict_matrix_traverse :
   (a : bare) -> Repr a -> matrix a -> Stream matrix_shape a;
+
+ShapeDict_list_flatten :
+  (a : bare) -> Stream list_shape a -> Stream list_shape a;
+
+ShapeDict_list_map :
+  (a b : bare) ->
+  Repr a -> Repr b ->
+  (a -> Writer b) ->
+  Stream list_shape a -> Stream list_shape b;
+
+ShapeDict_list_zipWith :
+  (a b c : bare) ->
+  Repr a -> Repr b -> Repr c ->
+  (a -> b -> Writer c) ->
+  Stream list_shape a -> Stream list_shape b -> Stream list_shape c;
+
+ShapeDict_list_zipWith3 :
+  (a b c d : bare) ->
+  Repr a -> Repr b -> Repr c -> Repr d ->
+  (a -> b -> c -> Writer d) ->
+  Stream list_shape a -> Stream list_shape b -> Stream list_shape c -> Stream list_shape d;
+
+ShapeDict_list_zipWith4 :
+  (a b c d e : bare) ->
+  Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+  (a -> b -> c -> d -> Writer e) ->
+  Stream list_shape a -> Stream list_shape b -> Stream list_shape c -> Stream list_shape d -> Stream list_shape e;
+
+ShapeDict_matrix_flatten :
+  (a : bare) -> Stream matrix_shape a -> Stream list_shape a;
+
+ShapeDict_matrix_map :
+  (a b : bare) ->
+  Repr a -> Repr b ->
+  (a -> Writer b) ->
+  Stream matrix_shape a -> Stream matrix_shape b;
+
+ShapeDict_matrix_zipWith :
+  (a b c : bare) ->
+  Repr a -> Repr b -> Repr c ->
+  (a -> b -> Writer c) ->
+  Stream matrix_shape a -> Stream matrix_shape b -> Stream matrix_shape c;
+
+ShapeDict_matrix_zipWith3 :
+  (a b c d : bare) ->
+  Repr a -> Repr b -> Repr c -> Repr d ->
+  (a -> b -> c -> Writer d) ->
+  Stream matrix_shape a -> Stream matrix_shape b -> Stream matrix_shape c -> Stream matrix_shape d;
+
+ShapeDict_matrix_zipWith4 :
+  (a b c d e : bare) ->
+  Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+  (a -> b -> c -> d -> Writer e) ->
+  Stream matrix_shape a -> Stream matrix_shape b -> Stream matrix_shape c -> Stream matrix_shape d -> Stream matrix_shape e;
+
+ShapeDict_Stream_flatten :
+  (sh : bare) -> ShapeDict sh ->
+  (a : bare) ->
+  Stream sh a -> Stream list_shape a;
+
+ShapeDict_Stream_map :
+  (sh : bare) -> ShapeDict sh ->
+  (a b : bare) ->
+  Repr a -> Repr b -> (a -> Writer b) -> Stream sh a -> Stream sh b;
+
+ShapeDict_Stream_zipWith :
+  (sh : bare) -> ShapeDict sh ->
+  (a b c : bare) ->
+  Repr a -> Repr b -> Repr c ->
+  (a -> b -> Writer c) ->
+  Stream sh a -> Stream sh b -> Stream sh c;
+
+ShapeDict_Stream_zipWith3 :
+  (sh : bare) -> ShapeDict sh ->
+  (a b c d : bare) ->
+  Repr a -> Repr b -> Repr c -> Repr d ->
+  (a -> b -> c -> Writer d) ->
+  Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d;
+
+ShapeDict_Stream_zipWith4 :
+  (sh : bare) -> ShapeDict sh ->
+  (a b c d e : bare) ->
+  Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+  (a -> b -> c -> d -> Writer e) ->
+  Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e;
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
@@ -721,6 +830,7 @@ fun_fold_Stream : (a acc : bare)
 
 -- Reinterpret a stream as having list shape
 fun_asList_Stream : (sh a : bare)
+                 -> ShapeDict sh
                  -> Stream sh a
                  -> Stream list_shape a;
 
@@ -742,6 +852,7 @@ fun_asArray2_Stream : (a b : bare)
 		   -> Writer b;
 
 fun_map_Stream : (sh a b : bare)
+	      -> ShapeDict sh
        	      -> Repr a
        	      -> Repr b
        	      -> (a -> Writer b)
@@ -751,6 +862,7 @@ fun_map_Stream : (sh a b : bare)
 fun_map : (t : bare -> bare)
        -> (a b : bare)
        -> TraversableDict t
+       -> ShapeDict (shape t)
        -> Repr a
        -> Repr b
        -> (a -> Writer b)
@@ -758,6 +870,7 @@ fun_map : (t : bare -> bare)
        -> Writer (t b);
 
 fun_reduce_Stream : (sh a : bare)
+		 -> ShapeDict sh
           	 -> Repr a
           	 -> (a -> a -> Writer a)
 	  	 -> a
@@ -767,6 +880,7 @@ fun_reduce_Stream : (sh a : bare)
 fun_reduce : (t : bare -> bare)
           -> (a : bare)
           -> TraversableDict t
+	  -> ShapeDict (shape t)
           -> Repr a
           -> (a -> a -> Writer a)
 	  -> a
@@ -774,6 +888,7 @@ fun_reduce : (t : bare -> bare)
           -> Writer a;
 
 fun_reduce1_Stream : (sh a : bare)
+		 -> ShapeDict sh
           	  -> Repr a
           	  -> (a -> a -> Writer a)
           	  -> Stream sh a
@@ -782,12 +897,14 @@ fun_reduce1_Stream : (sh a : bare)
 fun_reduce1 : (t : bare -> bare)
            -> (a : bare)
            -> TraversableDict t
+	   -> ShapeDict (shape t)
            -> Repr a
            -> (a -> a -> Writer a)
            -> t a
            -> Writer a;
 
 fun_zip_Stream : (sh a b : bare)
+	      -> ShapeDict sh
        	      -> Repr a
        	      -> Repr b
        	      -> Stream sh a
@@ -795,6 +912,7 @@ fun_zip_Stream : (sh a b : bare)
        	      -> Stream sh (PyonTuple2 a b);
 
 fun_zip3_Stream : (sh a b c : bare)
+	       -> ShapeDict sh
                -> Repr a
                -> Repr b
                -> Repr c
@@ -804,6 +922,7 @@ fun_zip3_Stream : (sh a b c : bare)
                -> Stream sh (PyonTuple3 a b c);
 
 fun_zip4_Stream : (sh a b c d : bare)
+	       -> ShapeDict sh
                -> Repr a
                -> Repr b
                -> Repr c
@@ -851,6 +970,7 @@ zip4_StreamArray :
 fun_zip : (t : bare -> bare)
        -> (a b : bare)
        -> TraversableDict t
+       -> ShapeDict (shape t)
        -> Repr a
        -> Repr b
        -> t a
@@ -860,6 +980,7 @@ fun_zip : (t : bare -> bare)
 fun_zip3 : (t : bare -> bare)
         -> (a b c : bare)
         -> TraversableDict t
+        -> ShapeDict (shape t)
         -> Repr a
         -> Repr b
         -> Repr c
@@ -871,6 +992,7 @@ fun_zip3 : (t : bare -> bare)
 fun_zip4 : (t : bare -> bare)
         -> (a b c d : bare)
         -> TraversableDict t
+        -> ShapeDict (shape t)
         -> Repr a
         -> Repr b
         -> Repr c
@@ -944,6 +1066,63 @@ subscript_out : (n : intindex)
              -> OutPtr (array n a)
              -> int
              -> OutPtr a;
+
+-------------------------------------------------------------------------------
+-- Linear stream methods
+
+LinStream_flatten : (sh a : bare) -> LinStream sh a -> LinStream list_shape a;
+
+LinStream_map : (sh a b : bare)
+	     -> Repr a
+	     -> Repr b
+	     -> (a -> Writer b)
+	     -> LinStream sh a
+	     -> LinStream sh b;
+
+LinStream_zipWith : (sh a b c : bare)
+		 -> Repr a -> Repr b -> Repr c
+		 -> (a -> b -> Writer c)
+		 -> LinStream sh a -> LinStream sh b
+		 -> LinStream sh c;
+
+LinStream_zipWith3 : (sh a b c d : bare)
+		 -> Repr a -> Repr b -> Repr c -> Repr d
+		 -> (a -> b -> c -> Writer d)
+		 -> LinStream sh a -> LinStream sh b -> LinStream sh c
+		 -> LinStream sh d;
+
+LinStream_zipWith4 : (sh a b c d e : bare)
+		 -> Repr a -> Repr b -> Repr c -> Repr d -> Repr e
+		 -> (a -> b -> c -> d -> Writer e)
+		 -> LinStream sh a -> LinStream sh b -> LinStream sh c -> LinStream sh d
+		 -> LinStream sh e;
+
+-------------------------------------------------------------------------------
+-- Other rewritable functions
+
+LinStream_reduce : (sh a : bare)
+		-> Repr a
+		-> (a -> a -> Writer a)
+		-> a
+		-> LinStream sh a
+		-> Writer a;
+
+LinStream_reduce1 : (sh a : bare)
+		 -> Repr a
+		 -> (a -> a -> Writer a)
+		 -> LinStream sh a
+		 -> Writer a;
+
+LinStream_fold : (sh a acc : bare)
+	      -> Repr a
+	      -> Repr acc
+	      -> (acc -> a -> Writer acc)
+	      -> acc
+	      -> LinStream sh a
+	      -> Writer acc;
+
+-------------------------------------------------------------------------------
+-- Loops
 
 -- Parallelizable loop
 doall : (n : intindex)

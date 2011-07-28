@@ -178,7 +178,6 @@ record PyonMatrix {
 record StreamData {
   const owned state;                  // Initial state of stream
   const owned next;                   // Function to get next stream value
-  // const owned shape;		      // The stream's dynamic shape
 };
 
 #define STREAM_EMPTY (uint8 0)

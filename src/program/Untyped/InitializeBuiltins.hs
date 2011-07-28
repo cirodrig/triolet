@@ -267,6 +267,82 @@ mkTraversableClass = do
 
   return cls
 
+mkShapeClass = do
+  sh <- newTyVar Star Nothing
+  flattenStreamScheme <- forallType [Star] $ \[a] ->
+    let aT = ConTy a
+        shT = ConTy sh
+    in ([], functionType [iterType shT aT]
+            (iterType (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_list)) aT))
+
+  map_scheme <- zipWithN_scheme (ConTy sh) 1
+  zip_scheme <- zipWithN_scheme (ConTy sh) 2
+  zip3_scheme <- zipWithN_scheme (ConTy sh) 3
+  zip4_scheme <- zipWithN_scheme (ConTy sh) 4
+
+  rec let cls = Class { clsParam = sh
+                      , clsConstraint = []
+                      , clsMethods = [flattenStream, mapStream,
+                                      zipWithStream, zipWith3Stream, zipWith4Stream]
+                      , clsName = "Shape"
+                      , clsInstances = [list_instance, matrix_instance,
+                                        stream_instance]
+                      , clsTypeCon = pyonBuiltin SystemF.the_ShapeDict
+                      , clsDictCon = pyonBuiltin SystemF.the_shapeDict
+                      }
+      flattenStream <- mkClassMethod cls 0 "flattenStream" flattenStreamScheme
+      mapStream <- mkClassMethod cls 1 "mapStream" map_scheme
+      zipWithStream <- mkClassMethod cls 2 "zipWithStream" zip_scheme
+      zipWith3Stream <- mkClassMethod cls 3 "zipWith3Stream" zip3_scheme
+      zipWith4Stream <- mkClassMethod cls 4 "zipWith4Stream" zip4_scheme
+
+      let list_instance =
+            monomorphicInstance cls
+            (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_list))
+            Nothing
+            [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_flatten,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_map,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith3,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith4]
+          matrix_instance =
+            monomorphicInstance cls
+            (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_matrix))
+            Nothing
+            [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_flatten,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_map,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith3,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith4]
+      t <- newTyVar (Star :-> Star) Nothing
+      let stream_instance =
+            Instance { insQVars = [sh]
+                     , insConstraint = [ConTy sh `IsInst` cls]
+                     , insClass = cls
+                     , insType = ConTy (tiBuiltin the_con_shape) @@ (ConTy (tiBuiltin the_con_iter) @@ ConTy sh)
+                     , insCon = Nothing
+                     , insMethods =
+                       [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_flatten,
+                         InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_map,
+                         InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_zipWith,
+                         InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_zipWith3,
+                         InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_zipWith4
+                       ] }
+  return cls
+  where
+    -- Generalized map/zipWith
+    --
+    -- forall (a ... z). (Repr a, ..., Repr z) =>
+    -- (a -> ... -> z) -> iter sh a -> ... -> iter sh z
+    zipWithN_scheme sh n =
+      forallType (replicate (n+1) Star) $ \(range : domain) ->
+      let constraint = [passable (ConTy tv) | tv <- range : domain]
+          transform = functionType (map ConTy domain) (ConTy range)
+          fun_type = functionType
+                     (transform : [iterType sh (ConTy tv) | tv <- domain])
+                     (iterType sh (ConTy range))
+      in (constraint, fun_type)
+
 mkAdditiveClass = do 
   rec {
   a <- newTyVar Star Nothing
@@ -701,6 +777,7 @@ mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
       aT = ConTy a
       bT = ConTy b
   in ([ tT `IsInst` tiBuiltin the_Traversable
+      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT
       ],
@@ -709,15 +786,17 @@ mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
 mkReduceType = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
-  in ([tT `IsInst` tiBuiltin the_Traversable,
-       passable aT],
+  in ([tT `IsInst` tiBuiltin the_Traversable
+      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
+      , passable aT],
       functionType [functionType [aT, aT] aT, aT, tT @@ aT] aT)
 
 mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
-  in ([tT `IsInst` tiBuiltin the_Traversable,
-       passable aT],
+  in ([tT `IsInst` tiBuiltin the_Traversable
+      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
+      , passable aT],
       functionType [functionType [aT, aT] aT, tT @@ aT] aT)
 
 mkZipType =
@@ -728,6 +807,7 @@ mkZipType =
       aT = ConTy a
       bT = ConTy b
   in ([ tT `IsInst` tiBuiltin the_Traversable
+      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT]
      , functionType [tT @@ aT, tT @@ bT]
@@ -743,6 +823,7 @@ mkZip3Type =
       bT = ConTy b
       cT = ConTy c
   in ([ tT `IsInst` tiBuiltin the_Traversable
+      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT
       , passable cT]
@@ -761,6 +842,7 @@ mkZip4Type =
       cT = ConTy c
       dT = ConTy d
   in ([ tT `IsInst` tiBuiltin the_Traversable
+      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT
       , passable cT
@@ -826,14 +908,15 @@ mkMapStreamType =
   let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
-  in ([passable aT, passable bT],
+  in ([ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape,
+       passable aT, passable bT],
       functionType [functionType [aT] bT, iterType tT aT] (iterType tT bT))
 
 mkListIterType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
   let tT = ConTy t
       aT = ConTy a
-  in ([],
+  in ([ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape],
       functionType [iterType tT aT] (iterType (ConTy $ tiBuiltin the_con_list) aT))
 
 mkIterBindType =
@@ -903,6 +986,7 @@ initializeTIBuiltins = do
             [ ("Eq", [| mkEqClass |])
             , ("Ord", [| mkOrdClass |])
             , ("Traversable", [| mkTraversableClass |])
+            , ("Shape", [| mkShapeClass |])
             , ("Additive", [| mkAdditiveClass |])
             , ("Multiplicative", [| mkMultiplicativeClass |])
             , ("Remainder", [| mkRemainderClass |])

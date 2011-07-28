@@ -82,6 +82,8 @@ lowerIntrinsicOp v
          empty_eff_tok)
       , (pyonBuiltin the_eqZ_refl,
          proof_object)
+      , (pyonBuiltin the_deadRef,
+         dead_reference)
       , (pyonBuiltin the_deadProof,
          proof_object)
       ]
@@ -149,6 +151,13 @@ indexed_int_constant n =
 -- | Create an effect token.
 empty_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
 empty_eff_tok = return (LitV UnitL)
+
+-- | Initialize an object that's dead.  Since it's dead, we don't have to  
+--   initialize it.
+dead_reference :: (Monad m, Supplies m (Ident Var)) => m Val
+dead_reference = do
+  param_var <- newAnonymousVar (PrimType PointerType)
+  return $ LamV $ closureFun [param_var] [] $ ReturnE (ValA [])
 
 -- | Create a proof object.
 proof_object :: (Monad m, Supplies m (Ident Var)) => m Val

@@ -196,6 +196,9 @@ coercionKind tenv natural_t =
   of Just (op, args)
        | Just dtype <- lookupDataType op tenv ->
            Just $ dataTypeKind dtype
+       | Just _ <- lookupTypeFunction op tenv ->
+           -- Use the type function's return kind
+           Just $ toBaseKind $ typeKind tenv natural_t
        | otherwise -> Nothing
      Nothing ->
        case natural_t

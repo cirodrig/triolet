@@ -82,7 +82,7 @@ pyonOtherGlobals =
 -- | All predefined class names
 pyonClasses :: [String]
 pyonClasses =
-  ["Repr", "Traversable",
+  ["Repr", "Traversable", "Shape",
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Remainder", "Fractional",

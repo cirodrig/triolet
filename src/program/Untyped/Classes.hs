@@ -100,12 +100,23 @@ ps `entailsEqualityPredicate` p =
   let context = ps
   in anyM (p `uEqual`) context
 
--- | Determine whether a class instance predicate is in head-normal form.
+-- | Determine whether a class instance predicate is in H98-style
+--   head-normal form.
 --
--- If the predicate's head is a variable, it is in head-normal form.
--- Otherwise, it is a type constructor and it should be possible to reduce it.
-isHnf :: Predicate -> IO Bool
-isHnf (IsInst t c) = checkTypeHead t
+-- A predicate is in head-normal form if its head is a variable.
+-- A predicate in head-normal form cannot be reduced.
+--
+-- A predicate that's not in head-normal form has a type constructor as
+-- its head.  When instances are restricted to be H98-compatible, the
+-- predicate can be reduced.  H98 limits all class instance heads to the
+-- form (C a b ...) for some constructor C and variables a, b, ..., and
+-- a non-HNF instance will always unify with such a term.
+--
+-- Pyon allows non-H98 instances, so if a predicate is not in HNF,
+-- an attempt will be made to reduce it, but failure to reduce does not
+-- necessarily indicate an error.
+isH98Hnf :: Predicate -> IO Bool
+isH98Hnf (IsInst t c) = checkTypeHead t
   where
     checkTypeHead t = do
       t' <- canonicalizeHead t
@@ -115,7 +126,7 @@ isHnf (IsInst t c) = checkTypeHead t
         TupleTy _   -> return False
         AppTy t'' _ -> checkTypeHead t''
 
-isHnf _ = internalError "isHnf: Not an instance constraint"
+isH98Hnf _ = internalError "isH98Hnf: Not an instance constraint"
 
 -- | Convert a predicate to a conjunction of logically equivalent predicates
 -- in head-normal form.  The list may contain duplicates.
@@ -128,7 +139,7 @@ toHnf pos pred =
   case pred
   of IsInst _ _ -> do
        -- If already in HNF, derivation is trivial
-       is_hnf <- isHnf pred
+       is_hnf <- isH98Hnf pred
        if is_hnf then return (IdDerivation pred, [pred]) else do
          -- Otherwise, perform reduction based on class instances
          instanceReduction pos pred
@@ -145,12 +156,13 @@ instanceReduction :: SourcePos -> Predicate -> IO (Derivation, Constraint)
 instanceReduction pos pred = do
     ip <- instancePredicates pred
     case ip of
-      NotReduced -> do
+      NotReduced -> do {-
         -- Can't derive a class dictionary for this type
         prdDoc <- runPpr $ uShow pred
         let msg = text (show pos) <> text ":" <+>
                   text "No instance for" <+> prdDoc
-        fail (show msg)
+        fail (show msg) -}
+        return (IdDerivation pred, [pred])
 
       InstanceReduced cls_cst inst inst_cst -> do
         -- Reduce all superclasses to HNF
