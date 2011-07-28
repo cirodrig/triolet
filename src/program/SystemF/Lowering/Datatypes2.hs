@@ -1120,7 +1120,8 @@ getLayout ty = do
 -- | Get the layout of a value or boxed type.  The type should be in WHNF.
 getValLayout :: Type -> Lower ValLayout
 getValLayout ty
-  | TypeLevel <- getLevel ty =
+  | getLevel ty /= TypeLevel = internalError "getValLayout"
+  | otherwise =
       case fromTypeApp ty
       of (VarT op, args)
            | op `isPyonBuiltin` the_bool  -> prim_layout LL.BoolType
@@ -1154,23 +1155,29 @@ getValLayout ty
              arg_layouts
          (FunT {}, []) ->
            prim_layout LL.OwnedType
-         _ -> internalError "getLayout: Head is not a type application"
-  | otherwise = internalError "getValLayout"
+         (AllT (v ::: k) ty', []) ->
+           -- Look through the 'forall' type
+           assume v k $ getValLayout ty'
+
+         _ -> traceShow (pprType ty) $ internalError "getLayout: Head is not a type application"
   where
     prim_layout t = return $ VLayout $ LL.PrimType t
 
 -- | Get the layout of a bare type.  The type should be in WHNF.
 getRefLayout :: Type -> Lower MemLayout
 getRefLayout ty =
-  case fromVarApp ty
-  of Just (op, [arg])
+  case fromTypeApp ty
+  of (VarT op, [arg])
        | op `isPyonBuiltin` the_Referenced ->
            return $ memValueLayout $ VLayout (LL.PrimType LL.PointerType)
-     Just (op, [arg1, arg2])
+     (VarT op, [arg1, arg2])
        | op `isPyonBuiltin` the_array -> do
            field_layout <- getRefLayout =<< reduceToWhnf arg2
            size <- lookupIndexedInt arg1
            return $ arrayLayout size field_layout
+     (AllT (v ::: k) ty', []) ->      
+       -- Look through the 'forall' type
+       assume v k $ getRefLayout ty'
      _ -> do
        tenv <- getTypeEnv
        case lookupDataTypeForLayout tenv ty of
