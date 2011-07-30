@@ -287,6 +287,7 @@ coerceType g_k e_k g_t =
            coerced_param <- coerceType e_dom g_dom (VarT param)
            coerced_result <- coerceType g_rng e_rng $ AppT g_t coerced_param
            return $ LamT (param ::: e_dom) coerced_result
+     _ -> internalError $ "coerceType: Cannot coerce " ++ show (pprType g_k) ++ " to " ++ show (pprType e_k)
 
 sameKind (VarT k1) (VarT k2) = k1 == k2
 sameKind (k1 `FunT` k2) (k3 `FunT` k4) =
@@ -832,6 +833,8 @@ reprTypeOfApp :: ExpM           -- ^ Operator
 reprTypeOfApp op op_type ty_args arg_types = do
   instantiated_result <- foldM applyToTypeArg (appResult op op_type) ty_args
   foldM applyToArg instantiated_result arg_types
+  where
+    debug x = traceShow (text "reprTypeOfApp" <+> PrintMemoryIR.pprExp op) x
 
 reprApply :: ExpM               -- ^ Operator
           -> Type               -- ^ Operator type
