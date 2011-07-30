@@ -175,7 +175,32 @@ len @(a : bare) (ls : list a) -> int =
   x;
 
 
-safeSubscript @(a : bare)
+histogram @(t : bare -> bare)
+  (size : int)
+  (input : Stream (shape t) (Stored int))
+  (ret : OutPtr (list (Stored int)))
+  -> IEffect (list (Stored int)) =
+  case defineIntIndex size of someIndInt @(N : intindex) (index : FinIndInt N).
+  make_list @(Stored int) @N index
+  (referenced @(array N (Stored int))
+   (histogramArray @(shape t) @N index input))
+  ret;
+
+-------------------------------------------------------------------------------
+-- List container class functions
+
+-- List traversal.
+-- Loop over all list indices and return the corresponding array element.
+TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
+  -> Stream list_shape a =
+  case ls of make_list @a @(N : intindex)
+                       (size : FinIndInt N) (aref : Referenced (array N a)).
+  case aref of referenced @(array N a) (ay : array N a).
+  LinStream_flatten @(array_shape N unit_shape) @a
+  (array_traverse @N @a repr size ay);
+
+
+IndexableDict_list_at_point @(a : bare)
   (repr : Repr a) (ls : list a) (ix : int) (ret : OutPtr a) -> IEffect a =
 
   -- Deconstruct data structures
@@ -189,26 +214,115 @@ safeSubscript @(a : bare)
   else copy @a repr (subscript @N @a repr ay ix) ret;
 
 
--- List traversal.
--- Loop over all list indices and return the corresponding array element.
-TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
-  -> Stream list_shape a =
+IndexableDict_list_at_slice @(a : bare)
+  (repr : Repr a) (ls : list a)
+  (start : int) (stop : int) (stride : int)
+  (ret : OutPtr (ListView a)) -> IEffect (ListView a) =
+
   case ls of make_list @a @(N : intindex)
-                       (size : FinIndInt N) (aref : Referenced (array N a)).
-  case aref of referenced @(array N a) (ay : array N a).
+       	     (list_size : FinIndInt N) (ayref : Referenced (array N a)).
+  case list_size of finIndInt @N (pf : Pf (neZ N pos_infty)) (list_size_i : int).
+  case ayref of referenced @(array N a) (ay : array N a).
+
+  -- If slice is out of bounds, coerce to the list bounds
+  let real_start : int =
+        if OrdDict_int_lt start 0 then 0 else start in
+  let real_end : int =
+        if OrdDict_int_gt stop list_size_i then list_size_i else stop in
+
+  -- Stride must be positive
+  if OrdDict_int_le stride 0 then except @(IEffect (ListView a)) else
+
+  -- Compute size of slice.  If size is negative, coerce it to zero.
+  let interval : int =
+        let iv : int = AdditiveDict_int_sub real_end real_start
+        in if OrdDict_int_lt iv 0 then 0 else iv in
+
+  let count : int =
+        -- Ceiling division
+	let interval_rounded : int =
+	      AdditiveDict_int_sub (AdditiveDict_int_add interval stride) 1 in
+	RemainderDict_int_floordiv interval_rounded stride in
+  case defineIntIndex count of someIndInt @(L : intindex) (count_i : FinIndInt L).
+  listView @a @L count_i
+  (\ (i : int) (ret : OutPtr a) -> IEffect a.
+     let index : int =
+           AdditiveDict_int_add start (MultiplicativeDict_int_mul i stride) in
+     copy @a repr (subscript @N @a repr ay index) ret)
+  ret;
+
+-------------------------------------------------------------------------------
+-- ListView container class functions
+
+TraversableDict_ListView_traverse @(a : bare)
+  (repr : Repr a) (ls : ListView a) -> Stream list_shape a =
+  case ls of listView @a @(N : intindex)
+       	     (size : FinIndInt N) (f : int -> Writer a).
   LinStream_flatten @(array_shape N unit_shape) @a
-  (array_traverse @N @a repr size ay);
+  (generate @N @a (indInt @N size) repr f);
 
 
-histogram @(t : bare -> bare)
-  (size : int)
-  (input : Stream (shape t) (Stored int))
-  (ret : OutPtr (list (Stored int)))
-  -> IEffect (list (Stored int)) =
-  case defineIntIndex size of someIndInt @(N : intindex) (index : FinIndInt N).
-  make_list @(Stored int) @N index
-  (referenced @(array N (Stored int))
-   (histogramArray @(shape t) @N index input))
+TraversableDict_ListView_build @(a : bare)
+  (repr : Repr a) (s : Stream list_shape a) (ret : OutPtr (ListView a))
+  -> IEffect (ListView a) =
+
+  -- Build a list, then create a list view from it
+  case boxed @(list a) (TraversableDict_list_build @a repr s) of boxed @(list a) (ls : list a).
+  case ls of make_list @a @(N : intindex) (list_size : FinIndInt N) (ayref : Referenced (array N a)).
+  case ayref of referenced @(array N a) (ay : array N a).
+
+  listView @a @N list_size
+  (\ (i : int) (ret : OutPtr a) -> IEffect a.
+    copy @a repr (subscript @N @a repr ay i) ret)
+  ret;
+
+
+IndexableDict_ListView_at_point @(a : bare)
+  (repr : Repr a) (ls : ListView a) (ix : int) (ret : OutPtr a) -> IEffect a =
+
+  case ls of listView @a @(N : intindex)
+             (size : FinIndInt N) (generator : int -> Writer a).
+  case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (size_int : int).
+
+  if or (OrdDict_int_lt ix 0) (OrdDict_int_ge ix size_int)
+  then except @(IEffect a)
+  else generator ix ret;
+
+
+IndexableDict_ListView_at_slice @(a : bare)
+  (repr : Repr a) (ls : ListView a)
+  (start : int) (stop : int) (stride : int)
+  (ret : OutPtr (ListView a)) -> IEffect (ListView a) =
+
+  case ls of listView @a @(N : intindex)
+       	     (list_size : FinIndInt N) (generator : int -> Writer a).
+  case list_size of finIndInt @N (pf : Pf (neZ N pos_infty)) (list_size_i : int).
+  
+  -- If slice is out of bounds, coerce to the list bounds
+  let real_start : int =
+        if OrdDict_int_lt start 0 then 0 else start in
+  let real_end : int =
+        if OrdDict_int_gt stop list_size_i then list_size_i else stop in
+
+  -- Stride must be positive
+  if OrdDict_int_le stride 0 then except @(IEffect (ListView a)) else
+
+  -- Compute size of slice.  If size is negative, coerce it to zero.
+  let interval : int =
+        let iv : int = AdditiveDict_int_sub real_end real_start
+        in if OrdDict_int_lt iv 0 then 0 else iv in
+
+  let count : int =
+        -- Ceiling division
+	let interval_rounded : int =
+	      AdditiveDict_int_sub (AdditiveDict_int_add interval stride) 1 in
+	RemainderDict_int_floordiv interval_rounded stride in
+  case defineIntIndex count of someIndInt @(L : intindex) (count_i : FinIndInt L).
+  listView @a @L count_i
+  (\ (i : int) (ret : OutPtr a) -> IEffect a.
+     let index : int =
+           AdditiveDict_int_add start (MultiplicativeDict_int_mul i stride) in
+     generator index ret)
   ret;
 
 -------------------------------------------------------------------------------

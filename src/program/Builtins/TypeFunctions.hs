@@ -48,6 +48,10 @@ shapePureTF = typeFunction 1 compute_shape
               return $ VarT (pyonBuiltin the_list_shape)
           | op `isPyonBuiltin` the_matrix ->
               return $ VarT (pyonBuiltin the_matrix_shape)
+          | op `isPyonBuiltin` the_ListView ->
+              return $ VarT (pyonBuiltin the_list_shape)
+          | op `isPyonBuiltin` the_MatrixView ->
+              return $ VarT (pyonBuiltin the_matrix_shape)
           | op `isPyonBuiltin` the_array ->
               case args
               of [arg, _] -> return $ array_shape arg
@@ -87,6 +91,10 @@ shapeMemTF = typeFunction 1 compute_shape
           | op `isPyonBuiltin` the_list ->
               return $ VarT (pyonBuiltin the_list_shape)
           | op `isPyonBuiltin` the_matrix ->
+              return $ VarT (pyonBuiltin the_matrix_shape)
+          | op `isPyonBuiltin` the_ListView ->
+              return $ VarT (pyonBuiltin the_list_shape)
+          | op `isPyonBuiltin` the_MatrixView ->
               return $ VarT (pyonBuiltin the_matrix_shape)
           | op `isPyonBuiltin` the_array ->
               case args

@@ -222,7 +222,9 @@ mkTraversableClass = do
                         , clsConstraint = []
                         , clsMethods = [iter, build]
                         , clsName = "Traversable"
-                        , clsInstances = [list_instance, matrix_instance, iter_instance]
+                        , clsInstances = [list_instance, matrix_instance,
+                                          listView_instance,
+                                          iter_instance]
                         , clsTypeCon = pyonBuiltin SystemF.the_TraversableDict
                         , clsDictCon = pyonBuiltin SystemF.the_traversableDict
                         }
@@ -250,6 +252,15 @@ mkTraversableClass = do
                 , InstanceMethod $
                   pyonBuiltin SystemF.the_TraversableDict_matrix_build]
 
+            listView_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_ListView)
+              Nothing
+              [ InstanceMethod $
+                pyonBuiltin SystemF.the_TraversableDict_ListView_traverse
+              , InstanceMethod $
+                pyonBuiltin SystemF.the_TraversableDict_ListView_build]
+
             iter_instance =
               -- A stream of anything is iterable
               Instance
@@ -272,8 +283,8 @@ mkShapeClass = do
   flattenStreamScheme <- forallType [Star] $ \[a] ->
     let aT = ConTy a
         shT = ConTy sh
-    in ([], functionType [iterType shT aT]
-            (iterType (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_list)) aT))
+    in ([], functionType [ConTy (tiBuiltin the_con_iter) @@ shT @@ aT]
+            (iterType (ConTy $ tiBuiltin the_con_list) aT))
 
   map_scheme <- zipWithN_scheme (ConTy sh) 1
   zip_scheme <- zipWithN_scheme (ConTy sh) 2
@@ -286,6 +297,7 @@ mkShapeClass = do
                                       zipWithStream, zipWith3Stream, zipWith4Stream]
                       , clsName = "Shape"
                       , clsInstances = [list_instance, matrix_instance,
+                                        listView_instance, matrixView_instance,
                                         stream_instance]
                       , clsTypeCon = pyonBuiltin SystemF.the_ShapeDict
                       , clsDictCon = pyonBuiltin SystemF.the_shapeDict
@@ -308,6 +320,28 @@ mkShapeClass = do
           matrix_instance =
             monomorphicInstance cls
             (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_matrix))
+            Nothing
+            [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_flatten,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_map,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith3,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith4]
+          -- These methods are exactly the same as for list.
+          -- It's actually the same instance: shape list == shape ListView.
+          listView_instance =
+            monomorphicInstance cls
+            (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_ListView))
+            Nothing
+            [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_flatten,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_map,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith3,
+              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith4]
+          -- These methods are exactly the same as for matrix.
+          -- It's actually the same instance: shape matrix == shape MatrixView.
+          matrixView_instance =
+            monomorphicInstance cls
+            (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_MatrixView))
             Nothing
             [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_flatten,
               InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_map,
@@ -338,10 +372,45 @@ mkShapeClass = do
       forallType (replicate (n+1) Star) $ \(range : domain) ->
       let constraint = [passable (ConTy tv) | tv <- range : domain]
           transform = functionType (map ConTy domain) (ConTy range)
+          iter t = ConTy (tiBuiltin the_con_iter) @@ sh @@ t
           fun_type = functionType
-                     (transform : [iterType sh (ConTy tv) | tv <- domain])
-                     (iterType sh (ConTy range))
+                     (transform : [iter $ ConTy tv | tv <- domain])
+                     (iter $ ConTy range)
       in (constraint, fun_type)
+
+mkIndexableClass = do
+  t <- newTyVar (Star :-> Star) Nothing
+  let int_type = ConTy $ tiBuiltin the_con_int
+  at_scheme <- forallType [Star] $ \[a] ->
+    ([passable (ConTy a)],
+     functionType [ConTy t @@ ConTy a, int_type] (ConTy a))
+  slice_scheme <- forallType [Star] $ \[a] ->
+    ([passable (ConTy a)],
+     functionType [ConTy t @@ ConTy a, int_type, int_type, int_type]
+     (ConTy (tiBuiltin the_con_ListView) @@ ConTy a))
+  rec { let cls = Class { clsParam = t
+                        , clsConstraint = []
+                        , clsMethods = [at, slice]
+                        , clsName = "Indexable"
+                        , clsInstances = [list_instance, listview_instance]
+                        , clsTypeCon = pyonBuiltin SystemF.the_IndexableDict
+                        , clsDictCon = pyonBuiltin SystemF.the_indexableDict
+                        }
+      ; at <- mkClassMethod cls 0 "at_point" at_scheme
+      ; slice <- mkClassMethod cls 1 "at_slice" slice_scheme
+      ; let list_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_list)
+              Nothing
+              [ InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_at_point
+              , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_at_slice]
+      ; let listview_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_ListView)
+              Nothing
+              [ InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_at_point
+              , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_at_slice] }
+  return cls
 
 mkAdditiveClass = do 
   rec {
@@ -669,6 +738,7 @@ mkPassableClass = do
                                       complex_instance,
                                       any_instance,
                                       list_instance, matrix_instance,
+                                      listView_instance,
                                       iter_instance,
                                       tuple2_instance, tuple3_instance,
                                       tuple4_instance]
@@ -711,6 +781,15 @@ mkPassableClass = do
           , insClass = cls
           , insType = ConTy (tiBuiltin the_con_matrix) @@ ConTy b
           , insCon = Just $ pyonBuiltin SystemF.the_repr_matrix
+          , insMethods = []
+          }
+  ; let listView_instance =
+          Instance
+          { insQVars = [b]
+          , insConstraint = []
+          , insClass = cls
+          , insType = ConTy (tiBuiltin the_con_ListView) @@ ConTy b
+          , insCon = Just $ pyonBuiltin SystemF.the_repr_ListView
           , insMethods = []
           }
   ; let iter_instance =
@@ -870,13 +949,6 @@ mkHistogramType =
   in ([], functionType [int_type, iterType (ConTy t) int_type]
           (ConTy (tiBuiltin the_con_list) @@ int_type))
 
-mkSafeSubscriptType =
-  forallType [Star] $ \[a] ->
-  let aT = ConTy a
-      listT = ConTy (tiBuiltin the_con_list) @@ aT
-      int_type = ConTy $ tiBuiltin the_con_int
-  in ([passable aT], functionType [listT, int_type] aT)
-
 mkFloorType =
   return $ monomorphic $
   functionType [ConTy $ tiBuiltin the_con_float] (ConTy $ tiBuiltin the_con_int)
@@ -913,11 +985,12 @@ mkMapStreamType =
       functionType [functionType [aT] bT, iterType tT aT] (iterType tT bT))
 
 mkListIterType =
-  forallType [Star :-> Star, Star] $ \[t, a] ->
-  let tT = ConTy t
+  forallType [Star, Star] $ \[sh, a] ->
+  let shT = ConTy sh
       aT = ConTy a
-  in ([ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape],
-      functionType [iterType tT aT] (iterType (ConTy $ tiBuiltin the_con_list) aT))
+  in ([shT `IsInst` tiBuiltin the_Shape],
+      functionType [ConTy (tiBuiltin the_con_iter) @@ shT @@ aT]
+      (iterType (ConTy $ tiBuiltin the_con_list) aT))
 
 mkIterBindType =
   forallType [Star, Star] $ \[a, b] ->
@@ -965,7 +1038,7 @@ initializeTIBuiltins = do
     $(let types =
             -- All types that can be referred to by name in source code.
             -- The tuple structure contains:
-            -- 1. Gluon name
+            -- 1. Source code name
             -- 2. kind
             -- 3. system F constructor
             [ ("int", Star, [| pyonBuiltin SystemF.the_int |])
@@ -977,6 +1050,8 @@ initializeTIBuiltins = do
                [| pyonBuiltin SystemF.the_Stream |])
             , ("list", Star :-> Star, [| pyonBuiltin SystemF.the_list |])
             , ("matrix", Star :-> Star, [| pyonBuiltin SystemF.the_matrix |])
+            , ("ListView", Star :-> Star, [| pyonBuiltin SystemF.the_ListView |])
+            , ("MatrixView", Star :-> Star, [| pyonBuiltin SystemF.the_MatrixView |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
             , ("shape", (Star :-> Star) :-> Star,
                [| pyonBuiltin SystemF.the_shape |])
@@ -987,6 +1062,7 @@ initializeTIBuiltins = do
             , ("Ord", [| mkOrdClass |])
             , ("Traversable", [| mkTraversableClass |])
             , ("Shape", [| mkShapeClass |])
+            , ("Indexable", [| mkIndexableClass |])
             , ("Additive", [| mkAdditiveClass |])
             , ("Multiplicative", [| mkMultiplicativeClass |])
             , ("Remainder", [| mkRemainderClass |])
@@ -1029,9 +1105,6 @@ initializeTIBuiltins = do
               ("histogram", [| mkHistogramType |]
               , [| pyonBuiltin SystemF.the_histogram |]
               ),
-              ("safeSubscript", [| mkSafeSubscriptType |]
-              , [| pyonBuiltin SystemF.the_safeSubscript |]
-              ),
               ("floor", [| mkFloorType |]
               , [| pyonBuiltin SystemF.the_floor |]
               ),
@@ -1050,9 +1123,9 @@ initializeTIBuiltins = do
               ("iterBind", [| mkIterBindType |]
               , [| pyonBuiltin SystemF.the_oper_CAT_MAP |]
               ),
-              ("mapStream", [| mkMapStreamType |]
+              {-("mapStream", [| mkMapStreamType |]
               , [| pyonBuiltin SystemF.the_fun_map_Stream |]
-              ),
+              ),-}
               ("complex", [| mkMakeComplexType |]
               , [| pyonBuiltin SystemF.the_complex |]
               ),
@@ -1070,6 +1143,8 @@ initializeTIBuiltins = do
             [ ([| the_Eq |], ["__eq__", "__ne__"])
             , ([| the_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
             , ([| the_Traversable |], ["__iter__", "__build__"])
+            , ([| the_Shape |], ["flattenStream", "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream"])
+            , ([| the_Indexable |], ["at_point", "at_slice"])
             , ([| the_Additive |], ["__add__", "__sub__", "__negate__", "zero"])
             , ([| the_Multiplicative |], ["__mul__", "__fromint__", "one"])
             , ([| the_Remainder |], ["__floordiv__", "__mod__"])

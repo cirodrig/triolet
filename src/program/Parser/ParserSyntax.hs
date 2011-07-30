@@ -67,13 +67,19 @@ data Expr id =
   | Tuple SourcePos [Expr id]
   | Unary SourcePos !Python.OpSpan (Expr id)
   | Binary SourcePos !Python.OpSpan (Expr id) (Expr id)
-  | Subscript SourcePos (Expr id) (Expr id) -- referent, index
+  | Subscript SourcePos (Expr id) (Expr id)
+  | Slicing SourcePos (Expr id) [Slice id]
   | ListComp SourcePos (IterFor id Expr)
   | Generator SourcePos (IterFor id Expr)
   | Call SourcePos (Expr id) [(Expr id)]
   | Cond SourcePos (Expr id) (Expr id) (Expr id) -- condition, true, false
   | Lambda SourcePos [Parameter id] (Expr id)
   | Let SourcePos (Parameter id) (Expr id) (Expr id)
+
+-- | A component of a slice expression
+data Slice id =
+    SliceSlice SourcePos (Expr id) (Expr id) (Maybe (Expr id)) 
+  | ExprSlice (Expr id)
 
 type Annotation id = Maybe (Expr id)
 

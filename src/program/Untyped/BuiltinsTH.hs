@@ -18,6 +18,7 @@ instance Lift Kind where
 pyonSourceTypes :: [String] 
 pyonSourceTypes =
   ["int", "float", "Complex", "bool", "NoneType", "iter", "list", "matrix",
+   "ListView", "MatrixView",
    "Any", "shape"]
 
 -- | All predefined global functions recognized by the Pyon parser
@@ -71,18 +72,21 @@ pyonSourceGlobals =
   , "cos"
   , "tan"
   , "pi"
+  , "at_point"
+  , "at_slice"
   ]
 
 -- | Global variables that can't be referred to by name 
 pyonOtherGlobals :: [String]
 pyonOtherGlobals =
-  [ "do", "guard", "iterBind", "mapStream", "safeSubscript"
+  [ "do", "guard", "iterBind",
+    "flattenStream", "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream"
   ]
 
 -- | All predefined class names
 pyonClasses :: [String]
 pyonClasses =
-  ["Repr", "Traversable", "Shape",
+  ["Repr", "Traversable", "Shape", "Indexable",
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Remainder", "Fractional",

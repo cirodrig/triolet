@@ -286,6 +286,7 @@ ssaExpr expression =
      Unary pos op x    -> Unary pos op <$> ssaExpr x
      Binary pos op x y -> Binary pos op <$> ssaExpr x <*> ssaExpr y
      Subscript pos x y -> Subscript pos <$> ssaExpr x <*> ssaExpr y
+     Slicing pos e ss  -> Slicing pos <$> ssaExpr e <*> traverse ssaSlice ss
      ListComp pos it   -> ListComp pos <$> ssaIterFor it
      Generator pos it  -> Generator pos <$> ssaIterFor it
      Call pos op args  -> Call pos <$> ssaExpr op <*> traverse ssaExpr args
@@ -299,6 +300,13 @@ ssaExpr expression =
     lambda pos ps body =
       fmap fst $ enterScope $
       Lambda pos <$> traverse defineParam ps <*> ssaExpr body
+
+ssaSlice :: Slice Int -> SSA (Slice SSAID)
+ssaSlice (SliceSlice pos l u ms) =
+  SliceSlice pos <$> ssaExpr l <*> ssaExpr u <*> traverse ssaExpr ms
+
+ssaSlice (ExprSlice e) =
+  ExprSlice <$> ssaExpr e
 
 ssaIterFor :: PIterFor Expr -> SSA (SSAIterFor Expr)
 ssaIterFor (IterFor pos params dom body) =

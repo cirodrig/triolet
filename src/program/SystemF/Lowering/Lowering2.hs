@@ -405,8 +405,9 @@ lowerModuleCode module_name defss exports = lower_definitions defss
       return ([LL.Rec functions], signatures)
 
 lowerModule :: Module (Typed Mem) -> IO LL.Module
-lowerModule (Module { modName = mod_name 
-                    , modDefs = globals 
+lowerModule (Module { modName = mod_name
+                    , modImports = imports
+                    , modDefs = globals
                     , modExports = exports}) = do
   (ll_functions, ll_export_sigs) <-
     withTheNewVarIdentSupply $ \var_supply ->
@@ -414,7 +415,11 @@ lowerModule (Module { modName = mod_name
       global_types <- readInitGlobalVarIO the_memTypes
       global_map <- readInitGlobalVarIO the_loweringMap
       env <- initializeLowerEnv var_supply ll_var_supply global_types global_map
-      runLowering env $ lowerModuleCode mod_name globals exports
+      
+      let all_defs = if False
+                     then Rec imports : globals -- DEBUG: also lower imports
+                     else globals
+      runLowering env $ lowerModuleCode mod_name all_defs exports
 
   ll_name_supply <- newLocalIDSupply  
 

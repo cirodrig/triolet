@@ -448,6 +448,7 @@ use name = do
 -- Conversions for Python 3 Syntax
 
 type PyExpr = Py.ExprSpan
+type PySlice = Py.SliceSpan
 type PyStmt = Py.StatementSpan
 type PyComp a = Py.ComprehensionSpan a
 
@@ -492,6 +493,8 @@ expression expr =
          Binary source_pos op <$> expression l <*> expression r
        Py.Subscript {Py.subscriptee = base, Py.subscript_exprs = [index]} ->
          Subscript source_pos <$> expression base <*> expression index
+       Py.SlicedExpr {Py.slicee = base, Py.slices = slices} ->
+         Slicing source_pos <$> expression base <*> traverse slice slices
        Py.UnaryOp {Py.operator = op, Py.op_arg = arg} -> 
          Unary source_pos op <$> expression arg
        Py.Lambda {Py.lambda_args = args, Py.lambda_body = body} -> 
@@ -513,6 +516,18 @@ expression expr =
 maybeExpression :: SourcePos -> Maybe PyExpr -> Cvt (Expr Int)
 maybeExpression _   (Just e) = expression e
 maybeExpression pos Nothing  = pure (noneExpr pos)
+
+slice :: PySlice -> Cvt (Slice Int)
+slice sl =
+  case sl
+  of Py.SliceProper (Just l) (Just u) Nothing _ ->
+       SliceSlice source_pos <$> expression l <*> expression u <*> pure Nothing
+     Py.SliceProper (Just l) (Just u) (Just (Just s)) _ ->
+       SliceSlice source_pos <$> expression l <*> expression u <*> (Just <$> expression s)
+     Py.SliceExpr e _ ->
+       ExprSlice <$> expression e
+  where
+    source_pos = toSourcePos $ Py.slice_annot sl
 
 comprehension :: (a -> Cvt (b Int)) -> PyComp a -> Cvt (IterFor Int b)
 comprehension convertBody comprehension =
@@ -818,12 +833,17 @@ instance MentionsVars (Expr Int) where
            Unary _ _ e -> mentionedVars e
            Binary _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
            Subscript _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
+           Slicing _ e ss -> mentionedVars e `Set.union` mentionedVars ss
            ListComp _ it -> mentionedVars it
            Generator _ it -> mentionedVars it
            Call _ e es -> mentionedVars (e:es)
            Cond _ e1 e2 e3 -> mentionedVars [e1, e2, e3]
            Lambda _ _ e -> mentionedVars e
            Let _ _ e1 e2 -> mentionedVars e1 `Set.union` mentionedVars e2
+
+instance MentionsVars (Slice Int) where
+  mentionedVars (SliceSlice _ e1 e2 e3) =
+    Set.unions [mentionedVars e1, mentionedVars e2, maybe Set.empty mentionedVars e3]
 
 instance MentionsVars (IterFor Int Expr) where
     mentionedVars (IterFor _ _ e c) =

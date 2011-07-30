@@ -185,6 +185,21 @@ data matrix : bare -> bare
   (FinIndInt m, FinIndInt n, Referenced (array m (array n a)));
 };
 
+-- A list-like, indexable object that computes values when they are retrieved
+data ListView : bare -> bare
+{
+  listView
+  (a : bare) (n : intindex)
+  (FinIndInt n, int -> Writer a);
+};
+
+data MatrixView : bare -> bare
+{
+  matrixView
+  (a : bare) (m : intindex, n : intindex)
+  (FinIndInt m, FinIndInt n, int -> int -> Writer a);
+};
+
 data PyonTuple2 : bare -> bare -> bare
 {
   pyonTuple2
@@ -231,11 +246,7 @@ data OrdDict : bare -> box
 {
   ordDict
   (a : bare) ()
-  (EqDict a,
-   a -> a -> bool,
-   a -> a -> bool,
-   a -> a -> bool,
-   a -> a -> bool);
+  (EqDict a, a -> a -> bool, a -> a -> bool, a -> a -> bool, a -> a -> bool);
 };
 
 data AdditiveDict : bare -> box
@@ -333,6 +344,17 @@ data ShapeDict : bare -> box
    );
 };
 
+data IndexableDict : (bare -> bare) -> box
+{
+  indexableDict
+  (t : bare -> bare) ()
+  ((a : bare) -> Repr a -> t a -> int -> Writer a,
+   (a : bare) -> Repr a -> t a -> int -> int -> int -> Writer (ListView a));
+};
+
+
+
+
 -------------------------------------------------------------------------------
 -- Shapes
 
@@ -364,6 +386,7 @@ repr_bool : Repr (Stored bool);
 
 repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_matrix : (a : bare) -> Repr a -> Repr (matrix a);
+repr_ListView : (a : bare) -> Repr (ListView a);
 repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
 
 repr_PyonTuple2 :
@@ -417,6 +440,12 @@ TraversableDict_matrix_build :
 
 TraversableDict_matrix_traverse :
   (a : bare) -> Repr a -> matrix a -> Stream matrix_shape a;
+
+TraversableDict_ListView_build :
+  (a : bare) -> Repr a -> Stream list_shape a -> Writer (ListView a);
+
+TraversableDict_ListView_traverse :
+  (a : bare) -> Repr a -> ListView a -> Stream list_shape a;
 
 ShapeDict_list_flatten :
   (a : bare) -> Stream list_shape a -> Stream list_shape a;
@@ -502,6 +531,18 @@ ShapeDict_Stream_zipWith4 :
   Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
   (a -> b -> c -> d -> Writer e) ->
   Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e;
+
+IndexableDict_list_at_point :
+  (a : bare) -> Repr a -> list a -> int -> Writer a;
+
+IndexableDict_list_at_slice :
+  (a : bare) -> Repr a -> list a -> int -> int -> int -> Writer (ListView a);
+
+IndexableDict_ListView_at_point :
+  (a : bare) -> Repr a -> ListView a -> int -> Writer a;
+
+IndexableDict_ListView_at_slice :
+  (a : bare) -> Repr a -> ListView a -> int -> int -> int -> Writer (ListView a);
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
@@ -1047,12 +1088,6 @@ generate : (n : intindex)
         -> Repr a
         -> (int -> Writer a)
         -> Stream (array_shape n unit_shape) a;
-
-safeSubscript : (a : bare)
-             -> Repr a
-             -> list a
-             -> int
-             -> Writer a;
 
 subscript : (n : intindex)
          -> (a : bare)

@@ -234,7 +234,9 @@ doExpr expr =
      Subscript pos base index -> do
        base' <- doExpr base
        index' <- doExpr index
-       return $ callVariable pos (tiBuiltin the_safeSubscript) [base', index']
+       return $ callVariable pos (tiBuiltin the_at_point) [base', index']
+     Slicing pos base slices ->
+       doSlicing pos base slices
      ListComp pos iter -> do
        iter' <- doIterator iter
        -- Currently we have to explicitly insert __build__ where we want it 
@@ -260,6 +262,26 @@ doExpr expr =
          body' <- doExpr body
          let fun = U.Function (U.Ann pos) Nothing params' Nothing body'
          return $ U.FunE (U.Ann pos) fun
+
+doSlicing pos base [slice] = do
+  base' <- doExpr base
+  (slice_l, slice_u, slice_s) <- doSlice slice
+  return $ callVariable pos (tiBuiltin the_at_slice)
+    [base', slice_l, slice_u, slice_s]
+
+doSlice (SliceSlice pos l u s) = do
+  l' <- doExpr l
+  u' <- doExpr u
+  s' <- case s
+        of Nothing -> return $ U.LiteralE (U.Ann pos) (U.IntL 1)
+           Just n  -> doExpr n
+  return (l', u', s')
+
+doSlice (ExprSlice e) = do
+  e' <- doExpr e
+  let one = U.LiteralE (U.Ann noSourcePos) (U.IntL 1)
+      u = callVariable (noSourcePos) (tiBuiltin the___add__) [e', one]
+  return (e', u, one)
 
 doIterator :: SSAIterFor Expr -> Cvt U.Expression
 doIterator (IterFor pos params dom body) = do
