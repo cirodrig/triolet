@@ -1,0 +1,10 @@
+
+def sum(xs): return reduce(lambda x, y: x + y, 0, xs)
+
+def parity(xs):
+    evens = sum(xs[0:len(xs):2])
+    odds = sum(xs[1:len(xs):2])
+    return evens - odds
+
+export ccall parity : list(int) -> int
+

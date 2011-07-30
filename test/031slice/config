@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "List slicing",
+  pyonSources	 = ["slice.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "-33"
+}
