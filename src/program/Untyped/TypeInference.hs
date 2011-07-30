@@ -255,8 +255,9 @@ generalizeDefGroup is_top_level
 
   -- If this is a top-level definition group,
   -- deferred constraints aren't allowed
-  when (is_top_level && not (null deferred)) $
-    fail "Unresolved constraints in top-level binding"
+  when (is_top_level && not (null deferred)) $ do
+    pred_text <- runPpr $ pprContext deferred
+    fail $ "Unresolved constraints in top-level binding:\n" ++ show pred_text
 
   -- Create proof objects
   (proof_env, proof_params) <- constraintToProofEnvironment retained

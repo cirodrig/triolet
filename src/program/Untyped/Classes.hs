@@ -3,7 +3,8 @@
 
 {-# LANGUAGE TypeFamilies #-}
 module Untyped.Classes
-       (toHnf,
+       (pprPredicate, pprContext,
+        toHnf,
         reduceContext,
         splitConstraint,
         defaultConstraint,
@@ -37,6 +38,17 @@ import Globals
 
 pprList :: [Doc] -> Doc
 pprList xs = brackets $ sep $ punctuate (text ",") xs
+
+pprPredicate :: Predicate -> Ppr Doc
+pprPredicate (t `IsInst` cls) = do
+  t_doc <- uShow t
+  return $ text (clsName cls) <+> parens t_doc
+
+pprContext :: [Predicate] -> Ppr Doc
+pprContext []  = return (parens Text.PrettyPrint.HughesPJ.empty)
+pprContext [p] = pprPredicate p
+pprContext ps  = do docs <- mapM pprPredicate ps
+                    return $ parens $ fsep $ punctuate (text ",") docs
 
 newtype MaybeT m a = MaybeT {runMaybeT :: m (Maybe a)}
 

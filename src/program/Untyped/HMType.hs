@@ -28,9 +28,9 @@ module Untyped.HMType
        )
 where
 
-import Prelude hiding(sequence)
+import Prelude hiding(mapM, sequence)
 import Control.Applicative
-import Control.Monad hiding(sequence)
+import Control.Monad hiding(mapM, sequence)
 import Control.Monad.Trans
 import Data.Function
 import Data.IORef
