@@ -1272,79 +1272,111 @@ rwCase1 have_fuel tenv inf scrut alts
 rwCase1 _ tenv inf scrut alts = do
   -- Simplify scrutinee
   (scrut', scrut_val) <- rwExp scrut
-  let (arg_con, arg_ex_types, arg_values) = unpack_scrut_val scrut_val
 
-  -- Try to deconstruct the new scrutinee
-  ifElseFuel (rebuild_case scrut' arg_con arg_ex_types arg_values) $ 
-    case unpackDataConAppM tenv scrut'
-    of Just (data_con, ty_args, ex_args, args)
-         | (case arg_con
-            of Just (ConValueType {dataCon = c}) -> c /= dataConCon data_con
-               Just (TupleValueType {}) -> True
-               Nothing -> False) ->
-             internalError "rwCase: Inconsistent constructor value"
-         | otherwise -> do
-             -- Deconstruct scrutinee result (data constructor)
-             consumeFuel
-             let args_and_values = zip args arg_values
-                 field_kinds = dataConFieldKinds tenv data_con
-                 alt = findAlternative alts $ dataConCon data_con
-             eliminateCaseWithSimplifiedExp
-               tenv field_kinds (map TypM ex_args) args_and_values alt
-       _ -> case scrut'
-            of ExpM (UTupleE _ fields) -> do
-                 -- Deconstruct scrutinee result (tuple)
-                 consumeFuel
-                 let args_and_values = zip fields arg_values
-                     [alt@(AltM (DeTuple params body))] = alts
-                     field_types = map patMType params
-                     field_kinds = map (toBaseKind . typeKind tenv) field_types
-                 eliminateCaseWithSimplifiedExp
-                   tenv field_kinds [] args_and_values alt
-               _ ->
-                 -- Can't deconstruct.  Propagate values and rebuild the case
-                 -- statement.
-                 rebuild_case scrut' arg_con arg_ex_types arg_values
+  -- Try to deconstruct the new scrutinee expression
+  ifElseFuel (can't_deconstruct scrut' scrut_val) $
+    case makeDataExpWithAbsValue tenv scrut' scrut_val alts
+    of Just (ConAppAndValue con_type args_and_values) ->
+         -- Scrutinee was deconstructed
+         let (field_kinds, ex_args, alt) =
+               case con_type
+               of ConValueType {dataCon = dcon, dataExTypes = ts} ->
+                    (case lookupDataCon dcon tenv
+                     of Just dc -> dataConFieldKinds tenv dc,
+                     ts,
+                     findAlternative alts dcon)
+                  TupleValueType ty_args ->
+                    (map (toBaseKind . typeKind tenv . fromTypM) ty_args,
+                     [],
+                     case alts of [alt] -> alt)
+         in consumeFuel >>
+            eliminateCaseWithSimplifiedExp
+            tenv field_kinds ex_args args_and_values alt
+       _ ->
+         -- Can't deconstruct.  Propagate values and rebuild the case
+         -- statement.
+         can't_deconstruct scrut' scrut_val
   where
-    -- Given the value of the scrutinee, try to get the fields' values
-    unpack_scrut_val (Just (fromDataAV -> Just (DataValue _ dcon vs))) =
-      let ex_types = case dcon
-                     of ConValueType con _ ex_ts -> ex_ts
-                        TupleValueType _ -> []
-      in (Just dcon, Just ex_types, vs)
+    can't_deconstruct scrut' scrut_val = rwCase2 inf alts scrut' scrut_val
 
-    unpack_scrut_val _ =
-      (Nothing, Nothing, repeat Nothing)
+-- | A data constructor expression 
+data DataExpAndValue =
+    -- | A data or tuple constructor application with arguments
+    ConAppAndValue !DataValueType [(ExpM, MaybeValue)]
 
-    rebuild_case scrut' arg_con arg_ex_types arg_values = do
-      let new_alts =
-            -- If the scrutinee has a known constructor,
-            -- drop non-matching case alternatives
-            case arg_con
-            of Nothing ->
-                 alts
-               Just (ConValueType {dataCon = c}) ->
-                 [findAlternative alts c]
-               Just (TupleValueType {}) ->
-                 alts           -- There's only one alternative
-          scrut_var =
-            -- If the scrutinee is a variable, it will be assigned a known
-            -- value while processing each alternative
-            case scrut'
-            of ExpM (VarE _ v) -> Just v
-               _               -> Nothing
-          known_values =
-            case arg_ex_types
-            of Nothing -> Nothing
-               Just [] -> Just ([], arg_values)
+-- | Given an expression and its abstract value, deconstruct the
+--   expression as if it were a data constructor application.
+--
+--   Return the components of the expression and the abstract values of
+--   its fields.
+makeDataExpWithAbsValue :: TypeEnv -> ExpM -> MaybeValue -> [AltM]
+                        -> Maybe DataExpAndValue
+makeDataExpWithAbsValue tenv expression expression_value alts =
+  case unpackDataConAppM tenv expression
+  of Just (data_con, ty_args, ex_args, args) ->
+       -- This is a data constructor application
+       case expression_value
+       of Just (fromDataAV -> Just (DataValue _ dcon vs)) ->
+            case dcon
+            of ConValueType con _ ex_ts
+                 | con == dataConCon data_con ->
+                   Just $ ConAppAndValue dcon (zip args vs)
+               _ ->
+                   internalError "rwCase: Inconsistent constructor value"
+          _ ->
+            let dcon = ConValueType { dataCon = dataConCon data_con
+                                    , dataTyArgs = map TypM ty_args
+                                    , dataExTypes = map TypM ex_args}
+            in Just $ ConAppAndValue dcon [(arg, Nothing) | arg <- args]
+     _ ->
+       case expression
+       of ExpM (UTupleE _ fields) ->
+            -- This is a tuple constructor term
+            case alts
+            of [AltM (DeTuple params _)] ->
+                 let dcon = TupleValueType (map (TypM . patMType) params)
+                 in Just $ ConAppAndValue dcon [(arg, Nothing) | arg <- fields]
+               _ ->
+                 internalError "rwCase: Inconsistent constructor value"
+          _ -> Nothing
 
-               -- The case alternative will bind existential types to
-               -- fresh variables.  If there are existential types, then field
-               -- values cannot be propagated because they'll have their
-               -- original types, not the fresh type names.
-               Just _  -> Nothing
-      alts' <- mapM (rwAlt scrut_var known_values) new_alts
-      rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
+-- | Rewrite a case statement after rewriting the scrutinee.
+--   The case statement cannot be eliminated by deconstructing the scrutinee
+--   expression, because the scrutineee expression is not a data constructor
+--   application.
+--   If the scrutinee has a known value, it may still be possible to eliminate
+--   the case statement.
+rwCase2 inf alts scrut' scrut_val =
+  case scrut_val
+  of Just (fromDataAV -> Just (DataValue _ dcon field_values)) -> do
+       let alt =
+             -- The scrutinee has a known constructor
+             -- discard non-matching case alternatives
+             case dcon
+             of ConValueType {dataCon = c} -> findAlternative alts c
+                TupleValueType {} -> case alts of [a] -> a
+           known_values =
+             case dcon 
+             of ConValueType {dataExTypes = []} -> Just ([], field_values)
+                -- The case alternative will bind existential types
+                -- to fresh variables.  If there are existential
+                -- types, then field values cannot be propagated
+                -- because they'll have their original types, not
+                -- the fresh type names.
+                ConValueType {} -> Nothing
+                TupleValueType {} -> Just ([], field_values)
+       alt' <- rwAlt scrut_var known_values alt
+       rwExpReturn (ExpM $ CaseE inf scrut' [alt'], Nothing)
+     _ -> do
+       alts' <- mapM (rwAlt scrut_var Nothing) alts
+       rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
+  where
+    scrut_var =
+      -- If the scrutinee is a variable, it will be assigned a known
+      -- value while processing each alternative
+      case scrut'
+      of ExpM (VarE _ v) -> Just v
+         _               -> Nothing
 
 -- | Find the alternative matching constructor @con@
 findAlternative :: [AltM] -> Var -> AltM
