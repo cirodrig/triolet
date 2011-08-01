@@ -1205,7 +1205,10 @@ rwLetNormal inf bind val body = do
   -- The local variable goes out of scope, so it must not be mentioned 
   -- by the known value
   let ret_val = forgetVariable bind_var =<< body_val
-  rwExpReturn (ExpM $ LetE inf bind val' body', ret_val)
+  
+  -- Number of uses may change after simplifying
+  let bind' = setPatMDmd unknownDmd bind
+  rwExpReturn (ExpM $ LetE inf bind' val' body', ret_val)
 
 rwLetrec inf defs body = withDefs defs $ \defs' -> do
   (body', body_value) <- rwExp body
@@ -1520,7 +1523,7 @@ makeCaseInitializerBinding BareK param initializer = do
 makeCaseInitializerBinding _ param initializer = return let_binding
   where
     let_binding = CaseElimBinding $ \body ->
-      ExpM $ LetE defaultExpInfo param initializer body
+      ExpM $ LetE defaultExpInfo (setPatMDmd unknownDmd param) initializer body
 
 -- | Given an expression that represents a field of a data constructor,
 --   bind the field value to a variable.  This is similar to
@@ -1529,7 +1532,7 @@ makeCaseInspectorBinding :: PatM -> ExpM -> LR CaseElimBinding
 makeCaseInspectorBinding param initializer = return let_binding
   where
     let_binding = CaseElimBinding $ \body ->
-      ExpM $ LetE defaultExpInfo param initializer body
+      ExpM $ LetE defaultExpInfo (setPatMDmd unknownDmd param) initializer body
 
 rwAlt :: Maybe Var -> Maybe ([TypM], [MaybeValue]) -> AltM -> LR AltM
 rwAlt scr m_values (AltM alt) = 
@@ -1553,9 +1556,11 @@ rwAlt scr m_values (AltM alt) =
              of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m
                 Nothing -> m
 
+           -- Number of uses may increase or decrease after simplifying
+           params' = map (setPatMDmd unknownDmd) params
        assume_scrutinee $ assume_params exTypes (zip values params) $ do
          (body', _) <- rwExp body
-         return $ AltM $ DeCon con tyArgs exTypes params body'
+         return $ AltM $ DeCon con tyArgs exTypes params' body'
 
      DeTuple params body -> do
        -- If the scrutinee is a variable, add its known value to the environment
@@ -1566,9 +1571,11 @@ rwAlt scr m_values (AltM alt) =
              case scr
              of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m
                 Nothing -> m
+           -- Number of uses may increase or decrease after simplifying
+           params' = map (setPatMDmd unknownDmd) params
        assume_scrutinee $ assume_params [] (zip values params) $ do
          (body', _) <- rwExp body
-         return $ AltM $ DeTuple params body'
+         return $ AltM $ DeTuple params' body'
   where
     -- Get the known values of the fields
     values = 
@@ -1619,8 +1626,16 @@ rwFun' (FunM f) =
   assumePatterns (funParams f) $ do
     (body', body_value) <- rwExp (funBody f)
     let aval = abstract_value body_value
-    trace_aval aval $ return (FunM $ f {funBody = body'}, aval)
+    trace_aval aval $ return (FunM $ f {funParams = params', funBody = body'}, aval)
   where
+    -- If a parameter isn't dead, its uses may be changed by simplification
+    params' = map update_param $ funParams f
+      where
+        update_param p =
+          case multiplicity $ patMDmd p
+          of Dead -> p
+             _ -> setPatMDmd unknownDmd p
+
     abstract_value Nothing = Nothing 
     abstract_value (Just val)
       | not (null $ funTyParams f) = Nothing -- Cannot abstract polymorphic functions
