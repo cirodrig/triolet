@@ -1276,22 +1276,10 @@ rwCase1 _ tenv inf scrut alts = do
   -- Try to deconstruct the new scrutinee expression
   ifElseFuel (can't_deconstruct scrut' scrut_val) $
     case makeDataExpWithAbsValue tenv scrut' scrut_val alts
-    of Just (ConAppAndValue con_type args_and_values) ->
-         -- Scrutinee was deconstructed
-         let (field_kinds, ex_args, alt) =
-               case con_type
-               of ConValueType {dataCon = dcon, dataExTypes = ts} ->
-                    (case lookupDataCon dcon tenv
-                     of Just dc -> dataConFieldKinds tenv dc,
-                     ts,
-                     findAlternative alts dcon)
-                  TupleValueType ty_args ->
-                    (map (toBaseKind . typeKind tenv . fromTypM) ty_args,
-                     [],
-                     case alts of [alt] -> alt)
-         in consumeFuel >>
-            eliminateCaseWithSimplifiedExp
-            tenv field_kinds ex_args args_and_values alt
+    of Just app_with_value -> do
+         -- Scrutinee is a constructor application that can be eliminated
+         consumeFuel
+         eliminateCaseWithAppAndValue False tenv app_with_value alts
        _ ->
          -- Can't deconstruct.  Propagate values and rebuild the case
          -- statement.
@@ -1340,6 +1328,24 @@ makeDataExpWithAbsValue tenv expression expression_value alts =
                  internalError "rwCase: Inconsistent constructor value"
           _ -> Nothing
 
+-- | Eliminate a case statement whose scrutinee was determined to be a
+--   data constructor application.
+eliminateCaseWithAppAndValue
+  is_inspector tenv (ConAppAndValue con_type args_and_values) alts =
+  let (field_kinds, ex_args, alt) =
+        case con_type
+        of ConValueType {dataCon = dcon, dataExTypes = ts} ->
+             (case lookupDataCon dcon tenv
+              of Just dc -> dataConFieldKinds tenv dc,
+              ts,
+              findAlternative alts dcon)
+           TupleValueType ty_args ->
+             (map (toBaseKind . typeKind tenv . fromTypM) ty_args,
+              [],
+              case alts of [alt] -> alt)
+  in eliminateCaseWithSimplifiedExp
+     is_inspector tenv field_kinds ex_args args_and_values alt
+
 -- | Rewrite a case statement after rewriting the scrutinee.
 --   The case statement cannot be eliminated by deconstructing the scrutinee
 --   expression, because the scrutineee expression is not a data constructor
@@ -1349,24 +1355,37 @@ makeDataExpWithAbsValue tenv expression expression_value alts =
 rwCase2 inf alts scrut' scrut_val =
   case scrut_val
   of Just (fromDataAV -> Just (DataValue _ dcon field_values)) -> do
-       let alt =
-             -- The scrutinee has a known constructor
-             -- discard non-matching case alternatives
-             case dcon
-             of ConValueType {dataCon = c} -> findAlternative alts c
-                TupleValueType {} -> case alts of [a] -> a
-           known_values =
-             case dcon 
-             of ConValueType {dataExTypes = []} -> Just ([], field_values)
-                -- The case alternative will bind existential types
-                -- to fresh variables.  If there are existential
-                -- types, then field values cannot be propagated
-                -- because they'll have their original types, not
-                -- the fresh type names.
-                ConValueType {} -> Nothing
-                TupleValueType {} -> Just ([], field_values)
-       alt' <- rwAlt scrut_var known_values alt
-       rwExpReturn (ExpM $ CaseE inf scrut' [alt'], Nothing)
+       have_fuel <- checkFuel
+       case mapM (>>= asTrivialValue) field_values of
+         Just field_exps | have_fuel -> do
+           -- All fields can be represented as expressions. 
+           -- The case statement can be eliminated.
+           consumeFuel
+           tenv <- getTypeEnv
+           let data_value = ConAppAndValue dcon (zip field_exps field_values)
+           eliminateCaseWithAppAndValue True tenv data_value alts
+         Nothing -> do
+           -- Cannot eliminate the case statement. 
+           -- However, we may have eliminated some case alternatives. 
+           let known_values =
+                 case dcon 
+                 of ConValueType {dataExTypes = []} -> Just ([], field_values)
+                    -- The case alternative will bind existential types
+                    -- to fresh variables.  If there are existential
+                    -- types, then field values cannot be propagated
+                    -- because they'll have their original types, not
+                    -- the fresh type names.
+                    ConValueType {} -> Nothing
+                    TupleValueType {} -> Just ([], field_values)
+           let alt =
+                 -- The scrutinee has a known constructor
+                 -- discard non-matching case alternatives
+                 case dcon
+                 of ConValueType {dataCon = c} -> findAlternative alts c
+                    TupleValueType {} -> case alts of [a] -> a
+
+           alt' <- rwAlt scrut_var known_values alt
+           rwExpReturn (ExpM $ CaseE inf scrut' [alt'], Nothing)
      _ -> do
        alts' <- mapM (rwAlt scrut_var Nothing) alts
        rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
@@ -1434,14 +1453,18 @@ eliminateCaseWithExp
 --   This creates a new expression, then simplifies it.
 --
 --   Fuel should be consumed prior to calling this function.
-eliminateCaseWithSimplifiedExp :: TypeEnv
-                               -> [BaseKind]
-                               -> [TypM]
-                               -> [(ExpM, MaybeValue)]
-                               -> AltM
-                               -> LR (ExpM, MaybeValue)
+--
+--   This function generates code in two ways, depending on
+--   whether the arguments are initializer expressions or not.
+eliminateCaseWithSimplifiedExp :: Bool -- ^ Whether fields are given as field values or initializers
+                               -> TypeEnv
+                               -> [BaseKind] -- ^ Field kinds
+                               -> [TypM]     -- ^ Existential type parameters
+                               -> [(ExpM, MaybeValue)] -- ^ Initializers or field values, together with their abstract value
+                               -> AltM                 -- ^ Case alternative to eliminate
+                               -> LR (ExpM, MaybeValue) -- ^ Simplified case alternative and its abstract value
 eliminateCaseWithSimplifiedExp
-  tenv field_kinds ex_args initializers (AltM alt)
+  is_inspector tenv field_kinds ex_args initializers (AltM alt)
   | length (getAltExTypes alt) /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
@@ -1453,7 +1476,9 @@ eliminateCaseWithSimplifiedExp
       body <- substitute subst (altBody alt)
 
       binders <-
-        sequence [makeCaseInitializerBinding k p i
+        sequence [if is_inspector
+                  then makeCaseInspectorBinding p i
+                  else makeCaseInitializerBinding k p i
                  | (k, p, (i, _)) <- zip3 field_kinds params initializers]
 
       let values = [(patMVar p, mv)
@@ -1479,6 +1504,10 @@ applyCaseElimBindings bs e = foldr apply_binding e bs
   where
     apply_binding (CaseElimBinding f) e = f e
 
+-- | Given an expression that was a parameter of a data constructor,
+--   bind the field value to a variable.  If the expression was an initializer
+--   expression, then a new object must be created and inspected with a case
+--   statement.  Otherwise, the value is just assigned to a variable.
 makeCaseInitializerBinding :: BaseKind -> PatM -> ExpM -> LR CaseElimBinding
 makeCaseInitializerBinding BareK param initializer = do
   tmpvar <- newAnonymousVar ObjectLevel
@@ -1489,6 +1518,15 @@ makeCaseInitializerBinding BareK param initializer = do
       letViaBoxed (patMBinder param) initializer body
 
 makeCaseInitializerBinding _ param initializer = return let_binding
+  where
+    let_binding = CaseElimBinding $ \body ->
+      ExpM $ LetE defaultExpInfo param initializer body
+
+-- | Given an expression that represents a field of a data constructor,
+--   bind the field value to a variable.  This is similar to
+--   'makeCaseInitializerBinding', except the binding is always a let-binding.
+makeCaseInspectorBinding :: PatM -> ExpM -> LR CaseElimBinding
+makeCaseInspectorBinding param initializer = return let_binding
   where
     let_binding = CaseElimBinding $ \body ->
       ExpM $ LetE defaultExpInfo param initializer body
