@@ -775,6 +775,9 @@ simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
       | LitExpr (IntL _ _ m) <- larg,
         LitExpr (IntL _ _ n) <- rarg =
           LitExpr (BoolL (sense == (m == n)))
+      | VarExpr lvar <- larg, VarExpr rvar <- rarg, lvar == rvar =
+          -- Comparing a variable to itself
+          LitExpr (BoolL sense)
       | otherwise =
           let op = if sense then CmpEQ else CmpNE
           in BinExpr (CmpZOp sgn sz op) larg rarg
@@ -789,6 +792,8 @@ simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
       | LitExpr (IntL _ _ n) <- rarg,
         n == smallestRepresentableInt sgn sz =
           LitExpr (BoolL False)
+      | VarExpr lvar <- larg, VarExpr rvar <- rarg, lvar == rvar =
+          LitExpr (BoolL False)
       | otherwise =
           BinExpr (CmpZOp sgn sz CmpLT) larg rarg
 
@@ -801,6 +806,8 @@ simplifyBinary op@(CmpZOp sgn sz comparison) larg rarg =
           LitExpr (BoolL True)
       | LitExpr (IntL _ _ n) <- rarg,
         n == largestRepresentableInt sgn sz =
+          LitExpr (BoolL True)
+      | VarExpr lvar <- larg, VarExpr rvar <- rarg, lvar == rvar =
           LitExpr (BoolL True)
       | otherwise =
           BinExpr (CmpZOp sgn sz CmpLE) larg rarg
