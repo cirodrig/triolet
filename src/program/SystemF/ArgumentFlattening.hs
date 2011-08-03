@@ -879,7 +879,20 @@ deadValue t = do
          Just (con, [p])
            | con `isPyonBuiltin` the_Pf ->
                return $ ExpM $ AppE defaultExpInfo dead_proof_op [TypM p] [] 
-         _ -> internalError "deadValue: Not implemented for this type"
+           | con `isPyonBuiltin` the_FinIndInt -> do
+               -- Use 'finIndInt' as the data constructor
+               -- Get types of data constructor parameters
+               let Just datacon_type =
+                     lookupType (pyonBuiltin the_finIndInt) tenv
+               Just monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
+               let (dom, _) = fromFunType monotype
+
+               -- Create arguments to data constructor
+               args <- mapM deadValue dom
+               let expr = ExpM $ AppE defaultExpInfo dead_finindint_op
+                          [TypM p] args
+               return expr
+         _ -> traceShow (pprType t) $ internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box
     BareK ->
@@ -891,7 +904,7 @@ deadValue t = do
     dead_box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadBox)
     dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadRef)
     dead_proof_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadProof)
-
+    dead_finindint_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_finIndInt)
 
 planReturn :: (ReprDictMonad m, EvalMonad m) =>
               PlanMode -> Specificity -> TypM -> m FlatRet
