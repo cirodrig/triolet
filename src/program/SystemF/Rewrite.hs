@@ -336,6 +336,12 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin the_LinStream_zipWith, rwZipStream) 
             , (pyonBuiltin the_LinStream_zipWith3, rwZip3Stream)
             , (pyonBuiltin the_LinStream_zipWith4, rwZip4Stream)
+            , (pyonBuiltin the_EqDict_int_eq, rwIntComparison (==))
+            , (pyonBuiltin the_EqDict_int_ne, rwIntComparison (/=))
+            , (pyonBuiltin the_OrdDict_int_lt, rwIntComparison (<))
+            , (pyonBuiltin the_OrdDict_int_le, rwIntComparison (<=))
+            , (pyonBuiltin the_OrdDict_int_gt, rwIntComparison (>))
+            , (pyonBuiltin the_OrdDict_int_ge, rwIntComparison (>=))
             -- , (pyonBuiltin the_histogram, rwHistogram)
             -- , (pyonBuiltin the_fun_reduce, rwReduce)
             -- , (pyonBuiltin the_fun_reduce1, rwReduce1)
@@ -988,6 +994,21 @@ generalizedZipStream2 out_type out_repr transformer shape_type streams = do
   case zipped of
     Just s -> encodeStream2 (TypM shape_type) s
     Nothing -> return Nothing
+
+-- | If comparing two integer literals, replace it with constant True or False
+rwIntComparison :: (Integer -> Integer -> Bool) -> RewriteRule
+rwIntComparison op inf [] [arg1, arg2]
+  | ExpM (LitE _ lit1) <- arg1, ExpM (LitE _ lit2) <- arg2 =
+    let IntL m _ = lit1
+        IntL n _ = lit2
+    in return $! Just $! case op m n
+                         of True -> true_value
+                            False -> false_value
+  | otherwise = return Nothing
+  where
+    true_value = ExpM (VarE inf (pyonBuiltin the_True))
+    false_value = ExpM (VarE inf (pyonBuiltin the_False))
+  
 
 {-
 -- | Turn a list-building histogram into an array-building histogram
