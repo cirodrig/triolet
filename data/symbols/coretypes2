@@ -344,15 +344,42 @@ data ShapeDict : bare -> box
    );
 };
 
+data ListShapeEliminator : bare -> box
+{
+  listShapeEliminator (a : bare) ()
+    ((N : intindex) -> FinIndInt N -> Writer a);
+};
+
+-- Class methods for one-dimensional, array-like container types
+-- that can be indexed into.
+-- Methods should not perform bounds checking.
 data IndexableDict : (bare -> bare) -> box
 {
   indexableDict
   (t : bare -> bare) ()
   ((a : bare) -> Repr a -> t a -> int -> Writer a,
-   (a : bare) -> Repr a -> t a -> int -> int -> int -> Writer (ListView a));
+   (a : bare) -> Repr a -> t a -> int -> int -> int -> Writer (ListView a),
+   (a b : bare) -> t a -> ListShapeEliminator b -> Writer b);
 };
 
+data MatrixShapeEliminator : bare -> box
+{
+  matrixShapeEliminator (a : bare) ()
+    ((M N : intindex) -> FinIndInt M -> FinIndInt N -> Writer a);
+};
 
+-- Class methods for two-dimensional, array-like container types
+-- that can be indexed into.
+-- Methods should not perform bounds checking.
+data Indexable2Dict : (bare -> bare) -> box
+{
+  indexable2Dict
+  (t : bare -> bare) ()
+  ((a : bare) -> Repr a -> t a -> int -> int -> Writer a,
+   (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int ->
+     Writer (MatrixView a),
+   (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b);
+};
 
 
 -------------------------------------------------------------------------------
@@ -447,6 +474,12 @@ TraversableDict_ListView_build :
 TraversableDict_ListView_traverse :
   (a : bare) -> Repr a -> ListView a -> Stream list_shape a;
 
+TraversableDict_MatrixView_build :
+  (a : bare) -> Repr a -> Stream matrix_shape a -> Writer (MatrixView a);
+
+TraversableDict_MatrixView_traverse :
+  (a : bare) -> Repr a -> MatrixView a -> Stream matrix_shape a;
+
 ShapeDict_list_flatten :
   (a : bare) -> Stream list_shape a -> Stream list_shape a;
 
@@ -538,11 +571,35 @@ IndexableDict_list_at_point :
 IndexableDict_list_at_slice :
   (a : bare) -> Repr a -> list a -> int -> int -> int -> Writer (ListView a);
 
+IndexableDict_list_with_shape :
+  (a b : bare) -> list a -> ListShapeEliminator b -> Writer b;
+
 IndexableDict_ListView_at_point :
   (a : bare) -> Repr a -> ListView a -> int -> Writer a;
 
 IndexableDict_ListView_at_slice :
   (a : bare) -> Repr a -> ListView a -> int -> int -> int -> Writer (ListView a);
+
+IndexableDict_ListView_with_shape :
+  (a b : bare) -> ListView a -> ListShapeEliminator b -> Writer b;
+
+Indexable2Dict_matrix_at_point2 :
+  (a : bare) -> Repr a -> matrix a -> int -> int -> Writer a;
+
+Indexable2Dict_matrix_at_slice2 :
+  (a : bare) -> Repr a -> matrix a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a);
+
+Indexable2Dict_matrix_with_shape2 :
+  (a b : bare) -> matrix a -> MatrixShapeEliminator b -> Writer b;
+
+Indexable2Dict_MatrixView_at_point2 :
+  (a : bare) -> Repr a -> MatrixView a -> int -> int -> Writer a;
+
+Indexable2Dict_MatrixView_at_slice2 :
+  (a : bare) -> Repr a -> MatrixView a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a);
+
+Indexable2Dict_MatrixView_with_shape2 :
+  (a b : bare) -> MatrixView a -> MatrixShapeEliminator b -> Writer b;
 
 -------------------------------------------------------------------------------
 -- Comparison dictionaries
@@ -869,6 +926,14 @@ chunk :
  -> (Stream (array_shape N unit_shape) a -> Writer b)
  -> Stream (array_shape M unit_shape) b;
 
+chunk_id : 
+    (M N : intindex)
+ -> (a : bare)
+ -> Repr a
+ -> IndInt N
+ -> Stream (array_shape M (array_shape N unit_shape)) a
+ -> Stream (array_shape M unit_shape) (StoredBox (Stream (array_shape N unit_shape) a));
+
 -- Sequential fold over a stream
 fun_fold_Stream : (a acc : bare)
                -> Repr a
@@ -883,6 +948,11 @@ fun_asList_Stream : (sh a : bare)
                  -> ShapeDict sh
                  -> Stream sh a
                  -> Stream list_shape a;
+
+-- An identity function needed in the frontend
+fun_from_MatrixView_Stream : (a : bare)
+			  -> Stream matrix_shape a
+			  -> Stream matrix_shape a;
 
 -- Reinterpret an array stream as having matrix shape
 fun_asMatrix_Stream : (M N : intindex)
@@ -983,39 +1053,41 @@ fun_zip4_Stream : (sh a b c d : bare)
                -> Stream sh d
                -> Stream sh (PyonTuple4 a b c d);
 
-{-
-zip_StreamArray : (sizeA sizeB : intindex)
-	       -> (a b : bare)
-               -> Repr a
-               -> Repr b
-               -> Stream (array_shape sizeA) a
-               -> Stream (array_shape sizeB) b
-               -> Stream (array_shape (min_i sizeA sizeB)) (PyonTuple2 a b);
+LinStream_zipWith_array : (a b c : bare)
+		       -> (Na Nb : intindex)
+                       -> Repr a
+    		       -> Repr b
+    		       -> Repr c
+		       -> (a -> b -> Writer c)
+    	               -> LinStream (array_shape Na unit_shape) a
+    	               -> LinStream (array_shape Nb unit_shape) b
+    	               -> LinStream (array_shape (min_i Na Nb) unit_shape) c;
 
-zip3_StreamArray :
-    (sizeA sizeB sizeC : intindex)
- -> (a b c : bare)
- -> Repr a
- -> Repr b
- -> Repr c
- -> Stream (array_shape sizeA) a
- -> Stream (array_shape sizeB) b
- -> Stream (array_shape sizeC) c
- -> Stream (array_shape (min_i (min_i sizeA sizeB) sizeC)) (PyonTuple3 a b c);
+LinStream_zipWith3_array : (a b c d : bare)
+		       -> (Na Nb Nc : intindex)
+                       -> Repr a
+    		       -> Repr b
+    		       -> Repr c
+		       -> Repr d
+		       -> (a -> b -> c -> Writer d)
+    	               -> LinStream (array_shape Na unit_shape) a
+    	               -> LinStream (array_shape Nb unit_shape) b
+    	               -> LinStream (array_shape Nc unit_shape) c
+    	               -> LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d;
 
-zip4_StreamArray :
-    (sizeA sizeB sizeC sizeD : intindex)
- -> (a b c d : bare)
- -> Repr a
- -> Repr b
- -> Repr c
- -> Repr d
- -> Stream (array_shape sizeA) a
- -> Stream (array_shape sizeB) b
- -> Stream (array_shape sizeC) c
- -> Stream (array_shape sizeD) d
- -> Stream (array_shape (min_i (min_i (min_i sizeA sizeB) sizeC) sizeD)) (PyonTuple4 a b c d);
--}
+LinStream_zipWith4_array : (a b c d e : bare)
+		       -> (Na Nb Nc Nd : intindex)
+                       -> Repr a
+    		       -> Repr b
+    		       -> Repr c
+    		       -> Repr d
+		       -> Repr e
+		       -> (a -> b -> c -> d -> Writer e)
+    	               -> LinStream (array_shape Na unit_shape) a
+    	               -> LinStream (array_shape Nb unit_shape) b
+    	               -> LinStream (array_shape Nc unit_shape) c
+    	               -> LinStream (array_shape Nd unit_shape) d
+    	               -> LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e;
 
 fun_zip : (t : bare -> bare)
        -> (a b : bare)
@@ -1057,7 +1129,39 @@ count : Stream list_shape (Stored int);
 
 range : int -> Stream list_shape (Stored int);
 
-len : (a : bare) -> list a -> int;
+len : (t : bare -> bare) -> (a : bare) -> IndexableDict t -> t a -> int;
+
+safeIndex : (t : bare -> bare) -> (a : bare)
+         -> IndexableDict t -> Repr a -> t a -> int -> Writer a;
+
+safeSlice : (t : bare -> bare) -> (a : bare)
+         -> IndexableDict t -> Repr a
+	 -> t a -> int -> int -> int
+	 -> Writer (ListView a);
+
+width : (t : bare -> bare) -> (a : bare)
+     -> Indexable2Dict t -> t a -> int;
+height : (t : bare -> bare) -> (a : bare)
+      -> Indexable2Dict t -> t a -> int;
+
+safeIndex2 : (t : bare -> bare) -> (a : bare)
+          -> Indexable2Dict t -> Repr a -> t a -> int -> int -> Writer a;
+
+safeSlice2 : (t : bare -> bare) -> (a : bare)
+         -> Indexable2Dict t -> Repr a
+	 -> t a -> int -> int -> int -> int -> int -> int
+	 -> Writer (MatrixView a);
+
+rows : (t : bare -> bare) -> (a : bare)
+    -> Indexable2Dict t -> Repr a
+    -> t a -> ListView (ListView a);
+
+cols : (t : bare -> bare) -> (a : bare)
+    -> Indexable2Dict t -> Repr a
+    -> t a -> ListView (ListView a);
+
+transpose : (t : bare -> bare) -> (a : bare)
+         -> Indexable2Dict t -> Repr a -> t a -> MatrixView a;
 
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)

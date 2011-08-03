@@ -167,14 +167,6 @@ array_build @(N : intindex) @(a : bare)
 -------------------------------------------------------------------------------
 -- List functions
 
-len @(a : bare) (ls : list a) -> int =
-  -- Extract the list's length value
-  case ls of make_list @a @(N : intindex)
-    (size : FinIndInt N) (aref : Referenced (array N a)).
-  case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (x : int).
-  x;
-
-
 histogram @(t : bare -> bare)
   (size : int)
   (input : Stream (shape t) (Stored int))
@@ -185,6 +177,82 @@ histogram @(t : bare -> bare)
   (referenced @(array N (Stored int))
    (histogramArray @(shape t) @N index input))
   ret;
+
+-------------------------------------------------------------------------------
+-- Matrix functions
+
+{-
+rows @(a : bare)
+  (repr : Repr a) (mat : matrix a) (ret : OutPtr (ListView (ListView a)))
+  -> IEffect (ListView (ListView a)) =
+  case mat of make_matrix @a @(M : intindex) @(N : intindex)
+       	      (height : FinIndInt M) (width : FinIndInt N)
+      	      (aref : Referenced (array M (array N a))).
+  case aref of referenced @(array M (array N a)) (ay : array M (array N a)).
+  listView @(ListView a) @M height
+  (\ (y : int) (ret : OutPtr (ListView a)) -> IEffect (ListView a).
+    let row : array N a =
+          subscript @M @(array N a) (repr_array @N @a width repr) ay y in
+    listView @a @N width
+    (\ (x : int) (ret : OutPtr a) -> IEffect a.
+      copy @a repr (subscript @N @a repr row x) ret)
+    ret)
+  ret; -}
+
+
+rows @(t : bare -> bare) @(a : bare)
+  (indexable : Indexable2Dict t) (repr : Repr a)
+  (container : t a)
+  -> Writer (ListView (ListView a)) =
+  case indexable of
+    indexable2Dict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
+    (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
+
+  with_shape @a @(ListView (ListView a)) container
+  (matrixShapeEliminator @(ListView (ListView a))
+   (\ @(M N : intindex) (height : FinIndInt M) (width : FinIndInt N)
+      -> Writer (ListView (ListView a)).
+
+      listView @(ListView a) @M height
+      (\ (y : int) -> Writer (ListView a).
+        listView @a @N width
+        (\ (x : int) (ret : OutPtr a) -> IEffect a.
+          at_point @a repr container y x ret))));
+
+{-
+cols @(a : bare)
+  (repr : Repr a) (mat : matrix a) (ret : OutPtr (ListView (ListView a)))
+  -> IEffect (ListView (ListView a)) =
+  case mat of make_matrix @a @(M : intindex) @(N : intindex)
+       	      (height : FinIndInt M) (width : FinIndInt N)
+      	      (aref : Referenced (array M (array N a))).
+  case aref of referenced @(array M (array N a)) (ay : array M (array N a)).
+  listView @(ListView a) @N width
+  (\ (x : int) (ret : OutPtr (ListView a)) -> IEffect (ListView a).
+    listView @a @M height
+    (\ (y : int) (ret : OutPtr a) -> IEffect a.
+      let row : array N a =
+            subscript @M @(array N a) (repr_array @N @a width repr) ay y in
+      copy @a repr (subscript @N @a repr row x) ret)
+    ret)
+  ret;
+
+
+transpose @(a : bare)
+  (repr : Repr a) (mat : matrix a) (ret : OutPtr (MatrixView a))
+  -> IEffect (MatrixView a) =
+  case mat of make_matrix @a @(M : intindex) @(N : intindex)
+       	      (height : FinIndInt M) (width : FinIndInt N)
+      	      (aref : Referenced (array M (array N a))).
+  case aref of referenced @(array M (array N a)) (ay : array M (array N a)).
+  let row_repr : Repr (array N a) = repr_array @N @a width repr in
+
+  matrixView @a @N @M width height
+  (\ (y : int) (x : int) -> Writer a.
+    copy @a repr (subscript @N @a repr (subscript @M @(array N a) row_repr ay x) y))
+  ret;-}
 
 -------------------------------------------------------------------------------
 -- List container class functions
@@ -209,14 +277,12 @@ IndexableDict_list_at_point @(a : bare)
   case ayref of referenced @(array N a) (ay : array N a).
   case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (size_int : int).
 
-  if or (OrdDict_int_lt ix 0) (OrdDict_int_ge ix size_int)
-  then except @(IEffect a)
-  else copy @a repr (subscript @N @a repr ay ix) ret;
+  copy @a repr (subscript @N @a repr ay ix) ret;
 
 
 IndexableDict_list_at_slice @(a : bare)
   (repr : Repr a) (ls : list a)
-  (start : int) (stop : int) (stride : int)
+  (start : int) (delta : int) (stride : int)
   (ret : OutPtr (ListView a)) -> IEffect (ListView a) =
 
   case ls of make_list @a @(N : intindex)
@@ -224,24 +290,10 @@ IndexableDict_list_at_slice @(a : bare)
   case list_size of finIndInt @N (pf : Pf (neZ N pos_infty)) (list_size_i : int).
   case ayref of referenced @(array N a) (ay : array N a).
 
-  -- If slice is out of bounds, coerce to the list bounds
-  let real_start : int =
-        if OrdDict_int_lt start 0 then 0 else start in
-  let real_end : int =
-        if OrdDict_int_gt stop list_size_i then list_size_i else stop in
-
-  -- Stride must be positive
-  if OrdDict_int_le stride 0 then except @(IEffect (ListView a)) else
-
-  -- Compute size of slice.  If size is negative, coerce it to zero.
-  let interval : int =
-        let iv : int = AdditiveDict_int_sub real_end real_start
-        in if OrdDict_int_lt iv 0 then 0 else iv in
-
   let count : int =
         -- Ceiling division
 	let interval_rounded : int =
-	      AdditiveDict_int_sub (AdditiveDict_int_add interval stride) 1 in
+	      AdditiveDict_int_sub (AdditiveDict_int_add delta stride) 1 in
 	RemainderDict_int_floordiv interval_rounded stride in
   case defineIntIndex count of someIndInt @(L : intindex) (count_i : FinIndInt L).
   listView @a @L count_i
@@ -250,6 +302,17 @@ IndexableDict_list_at_slice @(a : bare)
            AdditiveDict_int_add start (MultiplicativeDict_int_mul i stride) in
      copy @a repr (subscript @N @a repr ay index) ret)
   ret;
+
+
+IndexableDict_list_with_shape @(a b : bare)
+  (ls : list a) (elim : ListShapeEliminator b) -> Writer b =
+
+  case ls of make_list @a @(N : intindex)
+    (size : FinIndInt N) (aref : Referenced (array N a)).
+  case elim of listShapeEliminator @b
+       	       (f : (index : intindex) -> FinIndInt index -> Writer b).
+  f @N size;
+
 
 -------------------------------------------------------------------------------
 -- ListView container class functions
@@ -291,31 +354,17 @@ IndexableDict_ListView_at_point @(a : bare)
 
 IndexableDict_ListView_at_slice @(a : bare)
   (repr : Repr a) (ls : ListView a)
-  (start : int) (stop : int) (stride : int)
+  (start : int) (delta : int) (stride : int)
   (ret : OutPtr (ListView a)) -> IEffect (ListView a) =
 
   case ls of listView @a @(N : intindex)
        	     (list_size : FinIndInt N) (generator : int -> Writer a).
   case list_size of finIndInt @N (pf : Pf (neZ N pos_infty)) (list_size_i : int).
   
-  -- If slice is out of bounds, coerce to the list bounds
-  let real_start : int =
-        if OrdDict_int_lt start 0 then 0 else start in
-  let real_end : int =
-        if OrdDict_int_gt stop list_size_i then list_size_i else stop in
-
-  -- Stride must be positive
-  if OrdDict_int_le stride 0 then except @(IEffect (ListView a)) else
-
-  -- Compute size of slice.  If size is negative, coerce it to zero.
-  let interval : int =
-        let iv : int = AdditiveDict_int_sub real_end real_start
-        in if OrdDict_int_lt iv 0 then 0 else iv in
-
   let count : int =
         -- Ceiling division
 	let interval_rounded : int =
-	      AdditiveDict_int_sub (AdditiveDict_int_add interval stride) 1 in
+	      AdditiveDict_int_sub (AdditiveDict_int_add delta stride) 1 in
 	RemainderDict_int_floordiv interval_rounded stride in
   case defineIntIndex count of someIndInt @(L : intindex) (count_i : FinIndInt L).
   listView @a @L count_i
@@ -443,7 +492,10 @@ generate @(N : intindex) @(a : bare)
   };
 
 -------------------------------------------------------------------------------
--- Matrix-specific container methods
+-- Matrix-specific stream methods
+
+fun_from_MatrixView_Stream @(a : bare)
+  (s : Stream matrix_shape a) -> Stream matrix_shape a = s;
 
 fun_asMatrix_Stream @(M N : intindex) @(a : bare)
   (size_y : IndInt M)
@@ -452,6 +504,24 @@ fun_asMatrix_Stream @(M N : intindex) @(a : bare)
   -> Stream matrix_shape a =
   matrixStream @a @M @N size_y size_x src;
 
+
+chunk_id @(M N : intindex) @(a : bare)
+  (repr : Repr a)
+  (size : IndInt N)
+  (s : Stream (array_shape M (array_shape N unit_shape)) a)
+  -> Stream (array_shape M unit_shape) (StoredBox (Stream (array_shape N unit_shape) a)) =
+
+  chunk @M @N @a @(StoredBox (Stream (array_shape N unit_shape) a))
+  repr
+  (repr_Box @(Stream (array_shape N unit_shape) a))
+  size
+  s
+  (\ (x : (Stream (array_shape N unit_shape) a))
+     -> Writer (StoredBox (Stream (array_shape N unit_shape) a)).
+     storedBox @(Stream (array_shape N unit_shape) a) x);
+
+-------------------------------------------------------------------------------
+-- Matrix container class functions
 
 TraversableDict_matrix_traverse @(a : bare)
   (repr : Repr a) (m : matrix a) -> Stream matrix_shape a =
@@ -494,8 +564,292 @@ TraversableDict_matrix_build @(a : bare)
       except @(IEffect (matrix a))
   };
 
+
+Indexable2Dict_matrix_at_point2 @(a : bare)
+  (repr : Repr a)
+  (mat : matrix a)
+  (y : int)
+  (x : int)
+  (ret : OutPtr a)
+  -> IEffect a =
+  case mat of make_matrix @a @(M : intindex) @(N : intindex)
+       	      (size_y : FinIndInt M) (size_x : FinIndInt N)
+	      (ayptr : Referenced (array M (array N a))).
+  case ayptr of referenced @(array M (array N a)) (ay : array M (array N a)).
+  let array_repr : Repr (array N a) = repr_array @N @a size_x repr in
+  let value : a =
+        subscript @N @a repr (subscript @M @(array N a) array_repr ay y) x in
+  copy @a repr value ret;
+
+
+Indexable2Dict_matrix_at_slice2 @(a : bare)
+  (repr : Repr a)
+  (mat : matrix a)
+  (start_y : int) (delta_y : int) (stride_y : int)
+  (start_x : int) (delta_x : int) (stride_x : int)
+  (ret : OutPtr (MatrixView a))
+  -> IEffect (MatrixView a) =
+
+  case mat of make_matrix @a @(M : intindex) @(N : intindex)
+       	      (size_y : FinIndInt M) (size_x : FinIndInt N)
+	      (ayptr : Referenced (array M (array N a))).
+  case ayptr of referenced @(array M (array N a)) (ay : array M (array N a)).
+
+  let count_y : int =
+        -- Ceiling division
+	let interval_y_rounded : int =
+	      AdditiveDict_int_sub (AdditiveDict_int_add delta_y stride_y) 1 in
+	RemainderDict_int_floordiv interval_y_rounded stride_y in
+  case defineIntIndex count_y of someIndInt @(K : intindex) (count_y_i : FinIndInt K).
+
+  let count_x : int =
+        -- Ceiling division
+	let interval_x_rounded : int =
+	      AdditiveDict_int_sub (AdditiveDict_int_add delta_x stride_x) 1 in
+	RemainderDict_int_floordiv interval_x_rounded stride_x in
+  case defineIntIndex count_x of someIndInt @(L : intindex) (count_x_i : FinIndInt L).
+
+  matrixView @a @K @L count_y_i count_x_i
+  (\ (j : int) (i : int) (ret : OutPtr a) -> IEffect a.
+     let y : int =
+           AdditiveDict_int_add start_y (MultiplicativeDict_int_mul j stride_y) in
+     let x : int =
+           AdditiveDict_int_add start_x (MultiplicativeDict_int_mul i stride_x) in
+     let array_repr : Repr (array N a) = repr_array @N @a size_x repr in
+     let value : a =
+           subscript @N @a repr (subscript @M @(array N a) array_repr ay y) x in
+     copy @a repr value ret) ret;
+
+
+Indexable2Dict_matrix_with_shape2 @(a b : bare)
+  (mat : matrix a)
+  (eliminator : MatrixShapeEliminator b)
+  -> Writer b =
+  case mat of make_matrix @a @(M : intindex) @(N : intindex)
+       	      (size_y : FinIndInt M) (size_x : FinIndInt N)
+	      (ayptr : Referenced (array M (array N a))).
+  case eliminator of
+    matrixShapeEliminator @b
+    (f : (K L : intindex) -> FinIndInt K -> FinIndInt L -> Writer b).
+
+  f @M @N size_y size_x;
+
+-------------------------------------------------------------------------------
+-- MatrixView container class functions
+
+TraversableDict_MatrixView_traverse @(a : bare)
+  (repr : Repr a) (mat : MatrixView a) -> Stream matrix_shape a =
+
+  case mat of matrixView @a @(M : intindex) @(N : intindex)
+       	      (size_y : FinIndInt M) (size_x : FinIndInt N)
+	      (f : int -> int -> Writer a).
+  matrixStream @a @M @N (indInt @M size_y) (indInt @N size_x)
+  (bind @M @(array_shape N unit_shape) @(Stored int) @a repr_int repr
+   (generate @M @(Stored int) (indInt @M size_y) repr_int (stored @int))
+   (\ (y_stored : Stored int) -> Stream (array_shape N unit_shape) a.
+      case y_stored of stored @int (y : int).
+      generate @N @a (indInt @N size_x) repr
+      (\ (x : int) -> Writer a. f y x)));
+
 -------------------------------------------------------------------------------
 -- Generic container methods
+
+len @(t : bare -> bare) @(a : bare) (indexable : IndexableDict t)
+  (x : t a) -> int =
+  case indexable of indexableDict @t
+       		    (at_point : (a : bare) -> Repr a -> t a -> int -> Writer a)
+       		    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> Writer (ListView a))
+       		    (with_shape : (a b : bare) -> t a -> ListShapeEliminator b -> Writer b).
+
+  letfun
+    get_len @(N : intindex) (fii : FinIndInt N) -> Writer (Stored int) =
+    case fii of finIndInt @N (pf : Pf (neZ N pos_infty)) (x : int).
+    stored @int x
+  in
+
+  case boxed @(Stored int)
+       (with_shape @a @(Stored int) x
+        (listShapeEliminator @(Stored int) get_len))
+  of boxed @(Stored int) (si : Stored int).
+  case si of stored @int (n : int).
+  n;
+
+
+safeIndex @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t) (repr : Repr a)
+  (container : t a) (ix : int) -> Writer a =
+  case indexable of
+    indexableDict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> Writer (ListView a))
+    (with_shape : (a b : bare) -> t a -> ListShapeEliminator b -> Writer b).
+  letfun
+    get_member @(N : intindex) (fii : FinIndInt N) (ret : OutPtr a) -> IEffect a =
+      case fii of finIndInt @N (pf : Pf (neZ N pos_infty)) (size_int : int).
+
+      -- Bounds checking
+      if or (OrdDict_int_lt ix 0) (OrdDict_int_ge ix size_int)
+      then except @(IEffect a)
+      else at_point @a repr container ix ret
+
+  in with_shape @a @a container (listShapeEliminator @a get_member);
+
+
+safeSlice @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t) (repr : Repr a)
+  (container : t a)
+  (start : int) (stop : int) (stride : int) -> Writer (ListView a) =
+  case indexable of
+    indexableDict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> Writer (ListView a))
+    (with_shape : (a b : bare) -> t a -> ListShapeEliminator b -> Writer b).
+  letfun
+    get_slice @(N : intindex)
+      (fii : FinIndInt N) (ret : OutPtr (ListView a))
+      -> IEffect (ListView a) =
+
+      case fii of finIndInt @N (pf : Pf (neZ N pos_infty)) (size_i : int).
+
+      -- If slice is out of bounds, coerce to bounds
+      let real_start : int =
+            if OrdDict_int_lt start 0 then 0 else start in
+      let real_end : int =
+            if OrdDict_int_gt stop size_i then size_i else stop in
+
+      -- Stride must be positive
+      if OrdDict_int_le stride 0 then except @(IEffect (ListView a)) else
+
+      -- Compute interval spanned by slice.  If negative, coerce to zero.
+      let delta : int =
+            let iv : int = AdditiveDict_int_sub real_end real_start
+            in if OrdDict_int_lt iv 0 then 0 else iv in
+
+      -- Get the slice
+      at_slice @a repr container real_start delta stride ret
+
+  in with_shape @a @(ListView a) container
+     (listShapeEliminator @(ListView a) get_slice);
+
+
+width @(t : bare -> bare) @(a : bare)
+  (indexable : Indexable2Dict t) (container : t a) -> int =
+
+  case indexable of
+    indexable2Dict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
+    (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
+
+  letfun
+    get_width @(M N : intindex)
+      (height_fii : FinIndInt M) (width_fii : FinIndInt N)
+      (ret : OutPtr (Stored int)) -> IEffect (Stored int) =
+      case width_fii of finIndInt @N (pf : Pf (neZ N pos_infty)) (w : int).
+      stored @int w ret
+  in
+
+  case boxed @(Stored int) (with_shape @a @(Stored int) container
+       	     	      	    (matrixShapeEliminator @(Stored int) get_width))
+  of boxed @(Stored int) (width_s : Stored int).
+    case width_s of stored @int (n : int). n;
+
+
+height @(t : bare -> bare) @(a : bare)
+  (indexable : Indexable2Dict t) (container : t a) -> int =
+
+  case indexable of
+    indexable2Dict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
+    (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
+
+  letfun
+    get_height @(M N : intindex)
+      (height_fii : FinIndInt M) (width_fii : FinIndInt N)
+      (ret : OutPtr (Stored int)) -> IEffect (Stored int) =
+      case height_fii of finIndInt @M (pf : Pf (neZ M pos_infty)) (h : int).
+      stored @int h ret
+  in
+
+  case boxed @(Stored int) (with_shape @a @(Stored int) container
+       	     	      	    (matrixShapeEliminator @(Stored int) get_height))
+  of boxed @(Stored int) (height_s : Stored int).
+    case height_s of stored @int (n : int). n;
+
+
+safeIndex2 @(t : bare -> bare) @(a : bare)
+  (indexable : Indexable2Dict t) (repr : Repr a)
+  (container : t a) (yix : int) (xix : int) -> Writer a =
+  case indexable of
+    indexable2Dict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
+    (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
+  letfun
+    get_member @(M N : intindex)
+      (ysize : FinIndInt M) (xsize : FinIndInt N)
+      (ret : OutPtr a) -> IEffect a =
+      case ysize of finIndInt @M (pf : Pf (neZ M pos_infty)) (ysize_i : int).
+      case xsize of finIndInt @N (pf : Pf (neZ N pos_infty)) (xsize_i : int).
+
+      -- Bounds checking
+      if or (or (OrdDict_int_lt xix 0) (OrdDict_int_ge xix xsize_i))
+       	    (or (OrdDict_int_lt yix 0) (OrdDict_int_ge yix ysize_i))
+      then except @(IEffect a)
+      else at_point @a repr container yix xix ret
+
+  in with_shape @a @a container (matrixShapeEliminator @a get_member);
+
+
+safeSlice2 @(t : bare -> bare) @(a : bare)
+  (indexable : Indexable2Dict t) (repr : Repr a)
+  (container : t a)
+  (start_y : int) (stop_y : int) (stride_y : int)
+  (start_x : int) (stop_x : int) (stride_x : int)
+   -> Writer (MatrixView a) =
+  case indexable of
+    indexable2Dict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
+    (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
+  letfun
+    get_slice @(M N : intindex)
+      (ysize : FinIndInt M) (xsize : FinIndInt N)
+      (ret : OutPtr (MatrixView a))
+      -> IEffect (MatrixView a) =
+
+      case ysize of finIndInt @M (pf : Pf (neZ M pos_infty)) (ysize_i : int).
+      case xsize of finIndInt @N (pf : Pf (neZ N pos_infty)) (xsize_i : int).
+
+      -- If slice is out of bounds, coerce to bounds
+      let real_start_y : int =
+            if OrdDict_int_lt start_y 0 then 0 else start_y in
+      let real_end_y : int =
+            if OrdDict_int_gt stop_y ysize_i then ysize_i else stop_y in
+      let real_start_x : int =
+            if OrdDict_int_lt start_x 0 then 0 else start_x in
+      let real_end_x : int =
+            if OrdDict_int_gt stop_x xsize_i then xsize_i else stop_x in
+
+      -- Stride must be positive
+      if OrdDict_int_le stride_y 0 then except @(IEffect (MatrixView a)) else
+      if OrdDict_int_le stride_x 0 then except @(IEffect (MatrixView a)) else
+
+      -- Compute interval spanned by slice.  If negative, coerce to zero.
+      let delta_y : int =
+            let iv : int = AdditiveDict_int_sub real_end_y real_start_y
+            in if OrdDict_int_lt iv 0 then 0 else iv in
+      let delta_x : int =
+            let iv : int = AdditiveDict_int_sub real_end_x real_start_x
+            in if OrdDict_int_lt iv 0 then 0 else iv in
+
+      -- Get the slice
+      at_slice @a repr container real_start_y delta_y stride_y real_start_x delta_x stride_x ret
+
+  in with_shape @a @(MatrixView a) container
+     (matrixShapeEliminator @(MatrixView a) get_slice);
+
 
 fun_reduce @(t : bare -> bare) @(a : bare)
   (traversable : TraversableDict t)
@@ -785,18 +1139,241 @@ ShapeDict_matrix_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
   matrixStream @b @M @N size_y size_x
   (LinStream_map @(array_shape M (array_shape N unit_shape)) @a @b repr_a repr_b f ls);
 
-{-
+
 ShapeDict_matrix_zipWith @(a b c : bare)
   (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
   (f : a -> b -> Writer c)
   (src_a : Stream matrix_shape a) (src_b : Stream matrix_shape b)
   -> Stream matrix_shape c =
-  case s of matrixStream @a @(M : intindex) @(N : intindex)
-       	                 (size_y : IndInt M) (size_x : IndInt N)
-			 (ls : LinStream (array_shape M (array_shape N unit_shape)) a).
+  case src_a of
+    matrixStream @a @(Ma : intindex) @(Na : intindex)
+    (size_a_y : IndInt Ma) (size_a_x : IndInt Na)
+    (ls_a : LinStream (array_shape Ma (array_shape Na unit_shape)) a).
 
-  Chunk the streams, then do a 1D zip in each dimension
--}
+  case src_b of
+    matrixStream @b @(Mb : intindex) @(Nb : intindex)
+    (size_b_y : IndInt Mb) (size_b_x : IndInt Nb)
+    (ls_b : LinStream (array_shape Mb (array_shape Nb unit_shape)) b).
+
+  let size_y : IndInt (min_i Ma Mb) = min_ii @Ma @Mb size_a_y size_b_y in
+  let size_x : IndInt (min_i Na Nb) = min_ii @Na @Nb size_a_x size_b_x in
+
+  -- Chunk the streams, zip them in each dimension, then flatten
+  matrixStream @c @(min_i Ma Mb) @(min_i Na Nb) size_y size_x
+  (bind
+   @(min_i Ma Mb)
+   @(array_shape (min_i Na Nb) unit_shape)
+   @(StoredBox (LinStream (array_shape (min_i Na Nb) unit_shape) c))
+   @c
+   (repr_Box @(LinStream (array_shape (min_i Na Nb) unit_shape) c))
+   repr_c
+
+   -- Zip in Y dimension
+   (LinStream_zipWith_array
+    @(StoredBox (LinStream (array_shape Na unit_shape) a))
+    @(StoredBox (LinStream (array_shape Nb unit_shape) b))
+    @(StoredBox (LinStream (array_shape (min_i Na Nb) unit_shape) c))
+    @Ma
+    @Mb
+    (repr_Box @(LinStream (array_shape Na unit_shape) a))
+    (repr_Box @(LinStream (array_shape Nb unit_shape) b))
+    (repr_Box @(LinStream (array_shape (min_i Na Nb) unit_shape) c))
+    (\ (inner_stream_a : StoredBox (LinStream (array_shape Na unit_shape) a))
+       (inner_stream_b : StoredBox (LinStream (array_shape Nb unit_shape) b))
+       -> Writer (StoredBox (LinStream (array_shape (min_i Na Nb) unit_shape) c)).
+       case inner_stream_a of
+         storedBox @(LinStream (array_shape Na unit_shape) a)
+ 	(sa : LinStream (array_shape Na unit_shape) a).
+       case inner_stream_b of
+         storedBox @(LinStream (array_shape Nb unit_shape) b)
+ 	(sb : LinStream (array_shape Nb unit_shape) b).
+       storedBox @(LinStream (array_shape (min_i Na Nb) unit_shape) c)
+
+         -- Zip in X dimension
+         (LinStream_zipWith_array @a @b @c @Na @Nb repr_a repr_b repr_c f sa sb))
+
+    (chunk_id @Ma @Na @a repr_a size_a_x ls_a)
+    (chunk_id @Mb @Nb @b repr_b size_b_x ls_b))
+
+   (\ (x : StoredBox (LinStream (array_shape (min_i Na Nb) unit_shape) c))
+      -> LinStream (array_shape (min_i Na Nb) unit_shape) c.
+      case x of storedBox @(LinStream (array_shape (min_i Na Nb) unit_shape) c)
+      	        (y : LinStream (array_shape (min_i Na Nb) unit_shape) c).
+      y));
+
+    
+ShapeDict_matrix_zipWith3 @(a b c d : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (f : a -> b -> c -> Writer d)
+  (src_a : Stream matrix_shape a) (src_b : Stream matrix_shape b)
+  (src_c : Stream matrix_shape c)
+  -> Stream matrix_shape d =
+  case src_a of
+    matrixStream @a @(Ma : intindex) @(Na : intindex)
+    (size_a_y : IndInt Ma) (size_a_x : IndInt Na)
+    (ls_a : LinStream (array_shape Ma (array_shape Na unit_shape)) a).
+
+  case src_b of
+    matrixStream @b @(Mb : intindex) @(Nb : intindex)
+    (size_b_y : IndInt Mb) (size_b_x : IndInt Nb)
+    (ls_b : LinStream (array_shape Mb (array_shape Nb unit_shape)) b).
+
+  case src_c of
+    matrixStream @c @(Mc : intindex) @(Nc : intindex)
+    (size_c_y : IndInt Mc) (size_c_x : IndInt Nc)
+    (ls_c : LinStream (array_shape Mc (array_shape Nc unit_shape)) c).
+
+  let size_y : IndInt (min_i (min_i Ma Mb) Mc) =
+        min_ii @(min_i Ma Mb) @Mc (min_ii @Ma @Mb size_a_y size_b_y) size_c_y in
+  let size_x : IndInt (min_i (min_i Na Nb) Nc) =
+        min_ii @(min_i Na Nb) @Nc (min_ii @Na @Nb size_a_x size_b_x) size_c_x in
+
+  -- Chunk the streams, zip them in each dimension, then flatten
+  matrixStream @d @(min_i (min_i Ma Mb) Mc) @(min_i (min_i Na Nb) Nc) size_y size_x
+  (bind
+   @(min_i (min_i Ma Mb) Mc)
+   @(array_shape (min_i (min_i Na Nb) Nc) unit_shape)
+   @(StoredBox (LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d))
+   @d
+   (repr_Box @(LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d))
+   repr_d
+
+   -- Zip in Y dimension
+   (LinStream_zipWith3_array
+    @(StoredBox (LinStream (array_shape Na unit_shape) a))
+    @(StoredBox (LinStream (array_shape Nb unit_shape) b))
+    @(StoredBox (LinStream (array_shape Nc unit_shape) c))
+    @(StoredBox (LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d))
+    @Ma
+    @Mb
+    @Mc
+    (repr_Box @(LinStream (array_shape Na unit_shape) a))
+    (repr_Box @(LinStream (array_shape Nb unit_shape) b))
+    (repr_Box @(LinStream (array_shape Nc unit_shape) c))
+    (repr_Box @(LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d))
+    (\ (inner_stream_a : StoredBox (LinStream (array_shape Na unit_shape) a))
+       (inner_stream_b : StoredBox (LinStream (array_shape Nb unit_shape) b))
+       (inner_stream_c : StoredBox (LinStream (array_shape Nc unit_shape) c))
+       -> Writer (StoredBox (LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d)).
+       case inner_stream_a of
+         storedBox @(LinStream (array_shape Na unit_shape) a)
+ 	(sa : LinStream (array_shape Na unit_shape) a).
+       case inner_stream_b of
+         storedBox @(LinStream (array_shape Nb unit_shape) b)
+ 	(sb : LinStream (array_shape Nb unit_shape) b).
+       case inner_stream_c of
+         storedBox @(LinStream (array_shape Nc unit_shape) c)
+ 	(sc : LinStream (array_shape Nc unit_shape) c).
+       storedBox @(LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d)
+
+         -- Zip in X dimension
+         (LinStream_zipWith3_array @a @b @c @d @Na @Nb @Nc repr_a repr_b repr_c repr_d f sa sb sc))
+
+    (chunk_id @Ma @Na @a repr_a size_a_x ls_a)
+    (chunk_id @Mb @Nb @b repr_b size_b_x ls_b)
+    (chunk_id @Mc @Nc @c repr_c size_c_x ls_c))
+
+   (\ (x : StoredBox (LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d))
+      -> LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d.
+      case x of storedBox @(LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d)
+      	        (y : LinStream (array_shape (min_i (min_i Na Nb) Nc) unit_shape) d).
+      y));
+
+
+ShapeDict_matrix_zipWith4 @(a b c d e : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d)
+  (repr_e : Repr e)
+  (f : a -> b -> c -> d -> Writer e)
+  (src_a : Stream matrix_shape a) (src_b : Stream matrix_shape b)
+  (src_c : Stream matrix_shape c) (src_d : Stream matrix_shape d)
+  -> Stream matrix_shape e =
+  case src_a of
+    matrixStream @a @(Ma : intindex) @(Na : intindex)
+    (size_a_y : IndInt Ma) (size_a_x : IndInt Na)
+    (ls_a : LinStream (array_shape Ma (array_shape Na unit_shape)) a).
+
+  case src_b of
+    matrixStream @b @(Mb : intindex) @(Nb : intindex)
+    (size_b_y : IndInt Mb) (size_b_x : IndInt Nb)
+    (ls_b : LinStream (array_shape Mb (array_shape Nb unit_shape)) b).
+
+  case src_c of
+    matrixStream @c @(Mc : intindex) @(Nc : intindex)
+    (size_c_y : IndInt Mc) (size_c_x : IndInt Nc)
+    (ls_c : LinStream (array_shape Mc (array_shape Nc unit_shape)) c).
+
+  case src_d of
+    matrixStream @d @(Md : intindex) @(Nd : intindex)
+    (size_d_y : IndInt Md) (size_d_x : IndInt Nd)
+    (ls_d : LinStream (array_shape Md (array_shape Nd unit_shape)) d).
+
+  let size_y : IndInt (min_i (min_i (min_i Ma Mb) Mc) Md) =
+        min_ii @(min_i (min_i Ma Mb) Mc) @Md
+	(min_ii @(min_i Ma Mb) @Mc
+	 (min_ii @Ma @Mb size_a_y size_b_y) size_c_y) size_d_y in
+  let size_x : IndInt (min_i (min_i (min_i Na Nb) Nc) Nd) =
+        min_ii @(min_i (min_i Na Nb) Nc) @Nd
+	(min_ii @(min_i Na Nb) @Nc
+	 (min_ii @Na @Nb size_a_x size_b_x) size_c_x) size_d_x in
+
+  -- Chunk the streams, zip them in each dimension, then flatten
+  matrixStream @e @(min_i (min_i (min_i Ma Mb) Mc) Md) @(min_i (min_i (min_i Na Nb) Nc) Nd) size_y size_x
+  (bind
+   @(min_i (min_i (min_i Ma Mb) Mc) Md)
+   @(array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape)
+   @(StoredBox (LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e))
+   @e
+   (repr_Box @(LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e))
+   repr_e
+
+   -- Zip in Y dimension
+   (LinStream_zipWith4_array
+    @(StoredBox (LinStream (array_shape Na unit_shape) a))
+    @(StoredBox (LinStream (array_shape Nb unit_shape) b))
+    @(StoredBox (LinStream (array_shape Nc unit_shape) c))
+    @(StoredBox (LinStream (array_shape Nd unit_shape) d))
+    @(StoredBox (LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e))
+    @Ma
+    @Mb
+    @Mc
+    @Md
+    (repr_Box @(LinStream (array_shape Na unit_shape) a))
+    (repr_Box @(LinStream (array_shape Nb unit_shape) b))
+    (repr_Box @(LinStream (array_shape Nc unit_shape) c))
+    (repr_Box @(LinStream (array_shape Nd unit_shape) d))
+    (repr_Box @(LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e))
+    (\ (inner_stream_a : StoredBox (LinStream (array_shape Na unit_shape) a))
+       (inner_stream_b : StoredBox (LinStream (array_shape Nb unit_shape) b))
+       (inner_stream_c : StoredBox (LinStream (array_shape Nc unit_shape) c))
+       (inner_stream_d : StoredBox (LinStream (array_shape Nd unit_shape) d))
+       -> Writer (StoredBox (LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e)).
+       case inner_stream_a of
+         storedBox @(LinStream (array_shape Na unit_shape) a)
+ 	(sa : LinStream (array_shape Na unit_shape) a).
+       case inner_stream_b of
+         storedBox @(LinStream (array_shape Nb unit_shape) b)
+ 	(sb : LinStream (array_shape Nb unit_shape) b).
+       case inner_stream_c of
+         storedBox @(LinStream (array_shape Nc unit_shape) c)
+ 	(sc : LinStream (array_shape Nc unit_shape) c).
+       case inner_stream_d of
+         storedBox @(LinStream (array_shape Nd unit_shape) d)
+ 	(sd : LinStream (array_shape Nd unit_shape) d).
+       storedBox @(LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e)
+
+         -- Zip in X dimension
+         (LinStream_zipWith4_array @a @b @c @d @e @Na @Nb @Nc @Nd repr_a repr_b repr_c repr_d repr_e f sa sb sc sd))
+
+    (chunk_id @Ma @Na @a repr_a size_a_x ls_a)
+    (chunk_id @Mb @Nb @b repr_b size_b_x ls_b)
+    (chunk_id @Mc @Nc @c repr_c size_c_x ls_c)
+    (chunk_id @Md @Nd @d repr_d size_d_x ls_d))
+
+   (\ (x : StoredBox (LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e))
+      -> LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e.
+      case x of storedBox @(LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e)
+      	        (y : LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e).
+      y));
 
 
 ShapeDict_Stream_flatten @(sh : bare) (shape_dict : ShapeDict sh)

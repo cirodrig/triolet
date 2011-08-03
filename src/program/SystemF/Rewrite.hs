@@ -277,6 +277,8 @@ arrayShape (size : sizes) =
 
 arrayShape [] = VarT (pyonBuiltin the_unit_shape)
 
+minIntIndex a b = varApp (pyonBuiltin the_min_i) [a, b]
+
 -------------------------------------------------------------------------------
 -- Rewrite rules
 
@@ -336,6 +338,9 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin the_LinStream_zipWith, rwZipStream) 
             , (pyonBuiltin the_LinStream_zipWith3, rwZip3Stream)
             , (pyonBuiltin the_LinStream_zipWith4, rwZip4Stream)
+            , (pyonBuiltin the_LinStream_zipWith_array, rwZipArrayStream) 
+            , (pyonBuiltin the_LinStream_zipWith3_array, rwZip3ArrayStream)
+            , (pyonBuiltin the_LinStream_zipWith4_array, rwZip4ArrayStream)
             , (pyonBuiltin the_EqDict_int_eq, rwIntComparison (==))
             , (pyonBuiltin the_EqDict_int_ne, rwIntComparison (/=))
             , (pyonBuiltin the_OrdDict_int_lt, rwIntComparison (<))
@@ -759,7 +764,7 @@ buildListDoall inf elt_type elt_repr other_args size count generator = do
         case other_args
         of [x] -> Just (return x)
            []  -> Nothing
-      
+
       return_type =
         case other_args
         of [x] -> initEffectType list_type
@@ -773,7 +778,7 @@ buildListDoall inf elt_type elt_repr other_args size count generator = do
       define_list finite_size =
         defineList elt_type size
         (varE finite_size) (return elt_repr) return_ptr write_array
-      
+
       undef_list _ =
         exceptE return_type
 
@@ -986,6 +991,42 @@ rwZip4Stream inf
     MaybeT $ generalizedZipStream2 ret repr_ret transformer shape_type [s1, s2, s3, s4]
 
 rwZip4Stream _ _ _ = return Nothing
+
+rwZipArrayStream :: RewriteRule
+rwZipArrayStream inf
+  [TypM elt1, TypM elt2, TypM ret, TypM size1, TypM size2]
+  [repr1, repr2, repr_ret, transformer, stream1, stream2] = runMaybeT $ do
+    s1 <- MaybeT $ interpretStream2 (array1Shape size1) elt1 repr1 stream1
+    s2 <- MaybeT $ interpretStream2 (array1Shape size2) elt2 repr2 stream2
+    let size3 = array1Shape (minIntIndex size1 size2)
+    MaybeT $ generalizedZipStream2 ret repr_ret transformer size3 [s1, s2]
+
+rwZipArrayStream _ _ _ = return Nothing
+
+rwZip3ArrayStream :: RewriteRule
+rwZip3ArrayStream inf
+  [TypM elt1, TypM elt2, TypM elt3, TypM ret, TypM size1, TypM size2, TypM size3]
+  [repr1, repr2, repr3, repr_ret, transformer, stream1, stream2, stream3] = runMaybeT $ do
+    s1 <- MaybeT $ interpretStream2 (array1Shape size1) elt1 repr1 stream1
+    s2 <- MaybeT $ interpretStream2 (array1Shape size2) elt2 repr2 stream2
+    s3 <- MaybeT $ interpretStream2 (array1Shape size3) elt3 repr3 stream3
+    let size4 = array1Shape (minIntIndex (minIntIndex size1 size2) size3)
+    MaybeT $ generalizedZipStream2 ret repr_ret transformer size4 [s1, s2, s3]
+
+rwZip3ArrayStream _ _ _ = return Nothing
+
+rwZip4ArrayStream :: RewriteRule
+rwZip4ArrayStream inf
+  [TypM elt1, TypM elt2, TypM elt3, TypM elt4, TypM ret, TypM size1, TypM size2, TypM size3, TypM size4]
+  [repr1, repr2, repr3, repr4, repr_ret, transformer, stream1, stream2, stream3, stream4] = runMaybeT $ do
+    s1 <- MaybeT $ interpretStream2 (array1Shape size1) elt1 repr1 stream1
+    s2 <- MaybeT $ interpretStream2 (array1Shape size2) elt2 repr2 stream2
+    s3 <- MaybeT $ interpretStream2 (array1Shape size3) elt3 repr3 stream3
+    s4 <- MaybeT $ interpretStream2 (array1Shape size4) elt4 repr4 stream4
+    let size5 = array1Shape (minIntIndex (minIntIndex (minIntIndex size1 size2) size3) size4)
+    MaybeT $ generalizedZipStream2 ret repr_ret transformer size5 [s1, s2, s3, s4]
+
+rwZip4ArrayStream _ _ _ = return Nothing
 
 generalizedZipStream2 :: Type -> ExpM -> ExpM -> Type -> [ExpS]
                       -> RW (Maybe ExpM)
@@ -2370,9 +2411,11 @@ zipStreams2 out_type out_repr transformer ss
 
     zipped_shape =
       case sequence $ map (from_array_shape . sexpShape) ss
-      of Just shapes -> Just $ foldr1 zip_array_shapes shapes 
+      of Just shapes -> Just $ foldl1 zip_array_shapes shapes 
          Nothing -> Nothing
       where
+        foldl1 f (x:xs) = foldl f x xs
+
         -- We can only simplify 1D array zip
         from_array_shape (ArrayShape [(ix, sz)]) = Just (fromTypM ix, sz)
         from_array_shape _ = Nothing
@@ -2380,7 +2423,7 @@ zipStreams2 out_type out_repr transformer ss
         -- Compute the shape of zipped arrays.
         -- Use the "min" operator to get the minimum length.
         zip_array_shapes (ix1, sz1) (ix2, sz2) =
-          let typ = varApp (pyonBuiltin the_min_i) [ix1, ix2]
+          let typ = minIntIndex ix1 ix2
               val = ExpM $ AppE defaultExpInfo min_ii [TypM ix1, TypM ix2]
                     [sz1, sz2] 
           in (typ, val)

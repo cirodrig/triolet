@@ -67,7 +67,7 @@ data Expr id =
   | Tuple SourcePos [Expr id]
   | Unary SourcePos !Python.OpSpan (Expr id)
   | Binary SourcePos !Python.OpSpan (Expr id) (Expr id)
-  | Subscript SourcePos (Expr id) (Expr id)
+  | Subscript SourcePos (Expr id) [Expr id]
   | Slicing SourcePos (Expr id) [Slice id]
   | ListComp SourcePos (IterFor id Expr)
   | Generator SourcePos (IterFor id Expr)

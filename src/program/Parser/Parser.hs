@@ -491,8 +491,9 @@ expression expr =
                    , Py.left_op_arg = l
                    , Py.right_op_arg = r} -> 
          Binary source_pos op <$> expression l <*> expression r
-       Py.Subscript {Py.subscriptee = base, Py.subscript_exprs = [index]} ->
-         Subscript source_pos <$> expression base <*> expression index
+       Py.Subscript {Py.subscriptee = base, Py.subscript_exprs = indices} ->
+         Subscript source_pos <$> expression base <*>
+         traverse expression indices
        Py.SlicedExpr {Py.slicee = base, Py.slices = slices} ->
          Slicing source_pos <$> expression base <*> traverse slice slices
        Py.UnaryOp {Py.operator = op, Py.op_arg = arg} -> 

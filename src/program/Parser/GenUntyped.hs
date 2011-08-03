@@ -231,10 +231,8 @@ doExpr expr =
        l' <- doExpr l
        r' <- doExpr r
        return $ callVariable pos (convertBinaryOperator op) [l', r']
-     Subscript pos base index -> do
-       base' <- doExpr base
-       index' <- doExpr index
-       return $ callVariable pos (tiBuiltin the_at_point) [base', index']
+     Subscript pos base indices ->
+       doSubscripting pos base indices
      Slicing pos base slices ->
        doSlicing pos base slices
      ListComp pos iter -> do
@@ -263,11 +261,26 @@ doExpr expr =
          let fun = U.Function (U.Ann pos) Nothing params' Nothing body'
          return $ U.FunE (U.Ann pos) fun
 
-doSlicing pos base [slice] = do
+doSubscripting pos base indices = do
   base' <- doExpr base
-  (slice_l, slice_u, slice_s) <- doSlice slice
-  return $ callVariable pos (tiBuiltin the_at_slice)
-    [base', slice_l, slice_u, slice_s]
+  indices' <- mapM doExpr indices
+  case indices' of
+    [i] ->
+      return $ callVariable pos (tiBuiltin the_safeIndex) [base', i]
+    [i, j] ->
+      return $ callVariable pos (tiBuiltin the_safeIndex2) [base', i, j]
+    _ -> error "Only 1- or 2-dimensional array subscripts are allowed"
+
+doSlicing pos base slices = do
+  base' <- doExpr base
+  slice_triples <- mapM doSlice slices
+  case slice_triples of
+    [(slice_l, slice_u, slice_s)] ->
+      return $ callVariable pos (tiBuiltin the_safeSlice)
+      [base', slice_l, slice_u, slice_s]
+    [(l1, u1, s1), (l2, u2, s2)] ->
+      return $ callVariable pos (tiBuiltin the_safeSlice2)
+      [base', l1, u1, s1, l2, u2, s2]
 
 doSlice (SliceSlice pos l u s) = do
   l' <- doExpr l

@@ -223,7 +223,7 @@ mkTraversableClass = do
                         , clsMethods = [iter, build]
                         , clsName = "Traversable"
                         , clsInstances = [list_instance, matrix_instance,
-                                          listView_instance,
+                                          listView_instance, matrixView_instance,
                                           iter_instance]
                         , clsTypeCon = pyonBuiltin SystemF.the_TraversableDict
                         , clsDictCon = pyonBuiltin SystemF.the_traversableDict
@@ -260,6 +260,15 @@ mkTraversableClass = do
                 pyonBuiltin SystemF.the_TraversableDict_ListView_traverse
               , InstanceMethod $
                 pyonBuiltin SystemF.the_TraversableDict_ListView_build]
+
+            matrixView_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_MatrixView)
+              Nothing
+              [ InstanceMethod $
+                pyonBuiltin SystemF.the_TraversableDict_MatrixView_traverse
+              , InstanceMethod $
+                pyonBuiltin SystemF.the_TraversableDict_MatrixView_build]
 
             iter_instance =
               -- A stream of anything is iterable
@@ -388,9 +397,12 @@ mkIndexableClass = do
     ([passable (ConTy a)],
      functionType [ConTy t @@ ConTy a, int_type, int_type, int_type]
      (ConTy (tiBuiltin the_con_ListView) @@ ConTy a))
+  with_shape_scheme <- forallType [Star, Star] $ \[a, b] ->
+    ([], functionType [ConTy t @@ ConTy a,
+                       ConTy (tiBuiltin the_con_ListShapeEliminator) @@ ConTy b] (ConTy b))
   rec { let cls = Class { clsParam = t
                         , clsConstraint = []
-                        , clsMethods = [at, slice]
+                        , clsMethods = [at, slice, with_shape]
                         , clsName = "Indexable"
                         , clsInstances = [list_instance, listview_instance]
                         , clsTypeCon = pyonBuiltin SystemF.the_IndexableDict
@@ -398,18 +410,64 @@ mkIndexableClass = do
                         }
       ; at <- mkClassMethod cls 0 "at_point" at_scheme
       ; slice <- mkClassMethod cls 1 "at_slice" slice_scheme
+      ; with_shape <- mkClassMethod cls 2 "with_shape" with_shape_scheme
       ; let list_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_list)
               Nothing
               [ InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_at_slice]
+              , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_at_slice
+              , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_with_shape]
       ; let listview_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_ListView)
               Nothing
               [ InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_at_point
-              , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_at_slice] }
+              , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_at_slice
+              , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_with_shape]
+      }
+  return cls
+
+mkIndexable2Class = do
+  t <- newTyVar (Star :-> Star) Nothing
+  let int_type = ConTy $ tiBuiltin the_con_int
+  at_scheme <- forallType [Star] $ \[a] ->
+    ([passable (ConTy a)],
+     functionType [ConTy t @@ ConTy a, int_type, int_type] (ConTy a))
+  -- slice takes 6 int parameters
+  slice_scheme <- forallType [Star] $ \[a] ->
+    ([passable (ConTy a)],
+     functionType [ConTy t @@ ConTy a, int_type, int_type, int_type, int_type, int_type, int_type]
+     (ConTy (tiBuiltin the_con_ListView) @@ ConTy a))
+  with_shape_scheme <- forallType [Star, Star] $ \[a, b] ->
+    ([], functionType [ConTy t @@ ConTy a,
+                       ConTy (tiBuiltin the_con_MatrixShapeEliminator) @@ ConTy b] (ConTy b))
+  rec { let cls = Class { clsParam = t
+                        , clsConstraint = []
+                        , clsMethods = [at, slice, with_shape]
+                        , clsName = "Indexable2"
+                        , clsInstances = [matrix_instance, matrixview_instance]
+                        , clsTypeCon = pyonBuiltin SystemF.the_Indexable2Dict
+                        , clsDictCon = pyonBuiltin SystemF.the_indexable2Dict
+                        }
+      ; at <- mkClassMethod cls 0 "at_point2" at_scheme
+      ; slice <- mkClassMethod cls 1 "at_slice2" slice_scheme
+      ; with_shape <- mkClassMethod cls 2 "with_shape2" with_shape_scheme
+      ; let matrix_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_matrix)
+              Nothing
+              [ InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_matrix_at_point2
+              , InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_matrix_at_slice2
+              , InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_matrix_with_shape2]
+      ; let matrixview_instance =
+              monomorphicInstance cls
+              (ConTy $ tiBuiltin the_con_MatrixView)
+              Nothing
+              [ InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_MatrixView_at_point2
+              , InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_MatrixView_at_slice2
+              , InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_MatrixView_with_shape2]
+      }
   return cls
 
 mkAdditiveClass = do 
@@ -738,7 +796,7 @@ mkPassableClass = do
                                       complex_instance,
                                       any_instance,
                                       list_instance, matrix_instance,
-                                      listView_instance,
+                                      listView_instance, matrixView_instance,
                                       iter_instance,
                                       tuple2_instance, tuple3_instance,
                                       tuple4_instance]
@@ -790,6 +848,15 @@ mkPassableClass = do
           , insClass = cls
           , insType = ConTy (tiBuiltin the_con_ListView) @@ ConTy b
           , insCon = Just $ pyonBuiltin SystemF.the_repr_ListView
+          , insMethods = []
+          }
+  ; let matrixView_instance =
+          Instance
+          { insQVars = [b]
+          , insConstraint = []
+          , insClass = cls
+          , insType = ConTy (tiBuiltin the_con_MatrixView) @@ ConTy b
+          , insCon = Just $ pyonBuiltin SystemF.the_repr_MatrixView
           , insMethods = []
           }
   ; let iter_instance =
@@ -939,9 +1006,52 @@ mkRangeType =
      functionType [int_type] (iterType (ConTy $ tiBuiltin the_con_list) int_type)
 
 mkLenType =
-  forallType [Star] $ \[a] ->
-  ([], functionType [ConTy (tiBuiltin the_con_list) @@ ConTy a]
-       (ConTy $ tiBuiltin the_con_int))
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([tT `IsInst` tiBuiltin the_Indexable], functionType [tT @@ aT] int_type)
+
+mkWidthHeightType =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([tT `IsInst` tiBuiltin the_Indexable2], functionType [tT @@ aT] int_type)
+
+mkSafeIndexType =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([tT `IsInst` tiBuiltin the_Indexable,
+       passable aT], functionType [tT @@ aT, int_type] aT)
+
+mkSafeSliceType =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([tT `IsInst` tiBuiltin the_Indexable,
+       passable aT], functionType [tT @@ aT, int_type, int_type, int_type]
+                     (ConTy (tiBuiltin the_con_ListView) @@ aT))
+
+mkSafeIndex2Type =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([tT `IsInst` tiBuiltin the_Indexable2,
+       passable aT], functionType [tT @@ aT, int_type, int_type] aT)
+
+mkSafeSlice2Type =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([tT `IsInst` tiBuiltin the_Indexable2,
+       passable aT], functionType [tT @@ aT, int_type, int_type, int_type, int_type, int_type, int_type]
+                     (ConTy (tiBuiltin the_con_MatrixView) @@ aT))
 
 mkHistogramType =
   forallType [Star :-> Star] $ \[t] ->
@@ -991,6 +1101,13 @@ mkListIterType =
   in ([shT `IsInst` tiBuiltin the_Shape],
       functionType [ConTy (tiBuiltin the_con_iter) @@ shT @@ aT]
       (iterType (ConTy $ tiBuiltin the_con_list) aT))
+
+mkMatrixIterType =
+  forallType [Star] $ \[a] ->
+  let aT = ConTy a
+  in ([],
+      functionType [iterType (ConTy $ tiBuiltin the_con_MatrixView) aT]
+      (iterType (ConTy $ tiBuiltin the_con_matrix) aT))
 
 mkIterBindType =
   forallType [Star, Star] $ \[a, b] ->
@@ -1052,6 +1169,8 @@ initializeTIBuiltins = do
             , ("matrix", Star :-> Star, [| pyonBuiltin SystemF.the_matrix |])
             , ("ListView", Star :-> Star, [| pyonBuiltin SystemF.the_ListView |])
             , ("MatrixView", Star :-> Star, [| pyonBuiltin SystemF.the_MatrixView |])
+            , ("ListShapeEliminator", Star :-> Star, [| pyonBuiltin SystemF.the_ListShapeEliminator |])
+            , ("MatrixShapeEliminator", Star :-> Star, [| pyonBuiltin SystemF.the_MatrixShapeEliminator |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
             , ("shape", (Star :-> Star) :-> Star,
                [| pyonBuiltin SystemF.the_shape |])
@@ -1063,6 +1182,7 @@ initializeTIBuiltins = do
             , ("Traversable", [| mkTraversableClass |])
             , ("Shape", [| mkShapeClass |])
             , ("Indexable", [| mkIndexableClass |])
+            , ("Indexable2", [| mkIndexable2Class |])
             , ("Additive", [| mkAdditiveClass |])
             , ("Multiplicative", [| mkMultiplicativeClass |])
             , ("Remainder", [| mkRemainderClass |])
@@ -1102,6 +1222,24 @@ initializeTIBuiltins = do
               ("len", [| mkLenType |]
               , [| pyonBuiltin SystemF.the_len |]
               ),
+              ("width", [| mkWidthHeightType |]
+              , [| pyonBuiltin SystemF.the_width |]
+              ),
+              ("height", [| mkWidthHeightType |]
+              , [| pyonBuiltin SystemF.the_height |]
+              ),
+              ("safeIndex", [| mkSafeIndexType |]
+              , [| pyonBuiltin SystemF.the_safeIndex |]
+              ),
+              ("safeSlice", [| mkSafeSliceType |]
+              , [| pyonBuiltin SystemF.the_safeSlice |]
+              ),
+              ("safeIndex2", [| mkSafeIndex2Type |]
+              , [| pyonBuiltin SystemF.the_safeIndex2 |]
+              ),
+              ("safeSlice2", [| mkSafeSlice2Type |]
+              , [| pyonBuiltin SystemF.the_safeSlice2 |]
+              ),
               ("histogram", [| mkHistogramType |]
               , [| pyonBuiltin SystemF.the_histogram |]
               ),
@@ -1110,6 +1248,9 @@ initializeTIBuiltins = do
               ),
               ("listiter", [| mkListIterType |]
               , [| pyonBuiltin SystemF.the_fun_asList_Stream |]
+              ),
+              ("matrixiter", [| mkMatrixIterType |]
+              , [| pyonBuiltin SystemF.the_fun_from_MatrixView_Stream |]
               ),
               ("__undefined__", [| mkUndefinedType |]
               , [| pyonBuiltin SystemF.the_fun_undefined |]
@@ -1123,9 +1264,6 @@ initializeTIBuiltins = do
               ("iterBind", [| mkIterBindType |]
               , [| pyonBuiltin SystemF.the_oper_CAT_MAP |]
               ),
-              {-("mapStream", [| mkMapStreamType |]
-              , [| pyonBuiltin SystemF.the_fun_map_Stream |]
-              ),-}
               ("complex", [| mkMakeComplexType |]
               , [| pyonBuiltin SystemF.the_complex |]
               ),
@@ -1144,7 +1282,8 @@ initializeTIBuiltins = do
             , ([| the_Ord |], ["__lt__", "__le__", "__gt__", "__ge__"])
             , ([| the_Traversable |], ["__iter__", "__build__"])
             , ([| the_Shape |], ["flattenStream", "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream"])
-            , ([| the_Indexable |], ["at_point", "at_slice"])
+            , ([| the_Indexable |], ["at_point", "at_slice", "with_shape"])
+            , ([| the_Indexable2 |], ["at_point2", "at_slice2", "with_shape2"])
             , ([| the_Additive |], ["__add__", "__sub__", "__negate__", "zero"])
             , ([| the_Multiplicative |], ["__mul__", "__fromint__", "one"])
             , ([| the_Remainder |], ["__floordiv__", "__mod__"])

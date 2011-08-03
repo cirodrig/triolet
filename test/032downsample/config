@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Matrix slicing",
+  pyonSources	 = ["downsample.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "243 100 92 245 149 89 "
+}

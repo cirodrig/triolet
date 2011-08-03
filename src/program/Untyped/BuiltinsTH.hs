@@ -18,7 +18,7 @@ instance Lift Kind where
 pyonSourceTypes :: [String] 
 pyonSourceTypes =
   ["int", "float", "Complex", "bool", "NoneType", "iter", "list", "matrix",
-   "ListView", "MatrixView",
+   "ListView", "MatrixView", "ListShapeEliminator", "MatrixShapeEliminator",
    "Any", "shape"]
 
 -- | All predefined global functions recognized by the Pyon parser
@@ -33,8 +33,11 @@ pyonSourceGlobals =
   , "count"
   , "range"
   , "len"
+  , "width"
+  , "height"
   , "histogram"
   , "listiter"
+  , "matrixiter"
   , "floor"
   , "__undefined__"
   , "__and__"
@@ -72,21 +75,23 @@ pyonSourceGlobals =
   , "cos"
   , "tan"
   , "pi"
-  , "at_point"
-  , "at_slice"
   ]
 
 -- | Global variables that can't be referred to by name 
 pyonOtherGlobals :: [String]
 pyonOtherGlobals =
   [ "do", "guard", "iterBind",
-    "flattenStream", "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream"
+    "safeIndex", "safeSlice",
+    "safeIndex2", "safeSlice2",
+    "flattenStream", "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
+    "at_point", "at_slice", "with_shape",
+    "at_point2", "at_slice2", "with_shape2"
   ]
 
 -- | All predefined class names
 pyonClasses :: [String]
 pyonClasses =
-  ["Repr", "Traversable", "Shape", "Indexable",
+  ["Repr", "Traversable", "Shape", "Indexable", "Indexable2",
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Remainder", "Fractional",
