@@ -792,7 +792,7 @@ buildArrayDoall inf elt_type elt_repr size count generator = do
         (varE finite_size) (return elt_repr) write_array
       
       undef_array _ =
-        exceptE array_type
+        exceptE (writerType array_type)
 
   tenv <- getTypeEnv
   caseOfIndInt tenv (return count) (fromTypM size) define_array undef_array
