@@ -45,6 +45,17 @@ mapAndUnzip3M f xs = do
   ys <- mapM f xs
   return (unzip3 ys)
 
+        
+
+printUnresolvedPlaceholders ps = mapM print_placeholder ps
+  where
+    print_placeholder (DictPH {phExpPredicate = pred}) = do
+      pred_name <- runPpr (pprPredicate pred)
+      print (text "Unresolved dictionary placeholder" <+> pred_name)
+        
+    print_placeholder _ =
+      putStrLn "Unknown non-dictionary placeholder"
+
 -------------------------------------------------------------------------------
 -- The type inference monad
 
@@ -288,7 +299,8 @@ generalizeDefGroup is_top_level
 
   -- If this is a top-level definition group,
   -- all placeholders must be resolved
-  when (is_top_level && not (null unresolved_placeholders)) $
+  when (is_top_level && not (null unresolved_placeholders)) $ do
+    printUnresolvedPlaceholders unresolved_placeholders
     fail "Unresolved placeholders in top-level binding"
 
   -- Run body of computation in the extended environment
@@ -650,7 +662,8 @@ inferExportType (Export { exportAnnotation = ann
       
       -- Resolve placeholders.  All placeholders should be resolved.
       unresolved_placeholders <- resolvePlaceholders [] env placeholders
-      unless (null unresolved_placeholders) $
+      unless (null unresolved_placeholders) $ do
+        printUnresolvedPlaceholders unresolved_placeholders
         internalError "Unresolved placeholders in export expression"
       
       return ([], tyvars, [], x)
