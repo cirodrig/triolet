@@ -196,20 +196,17 @@ compilePyonToPyonAsm compile_flags path text = do
   putStrLn "After Simplifying"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
 
+  -- Inline loops
+  repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
+
+  -- Argument flattening
   repr_mod <- SystemF.flattenArguments repr_mod
-  repr_mod <- highLevelOptimizations False SystemF.SequentialSimplifierPhase repr_mod
+  repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
   repr_mod <- SystemF.flattenLocals repr_mod
 
   -- Reconstruct demand information after flattening local variables,
   -- so that the next optimization pass can do more work
   repr_mod <- SystemF.localDemandAnalysis repr_mod
-  repr_mod <- highLevelOptimizations False SystemF.SequentialSimplifierPhase repr_mod
-  repr_mod <- highLevelOptimizations False SystemF.SequentialSimplifierPhase repr_mod
-
-  putStrLn "After Flattening"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
-  
-  -- Convert remaining loops to sequential loops
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
 
