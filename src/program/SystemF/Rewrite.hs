@@ -342,6 +342,8 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin the_LinStream_zipWith_array, rwZipArrayStream) 
             , (pyonBuiltin the_LinStream_zipWith3_array, rwZip3ArrayStream)
             , (pyonBuiltin the_LinStream_zipWith4_array, rwZip4ArrayStream)
+            , (pyonBuiltin the_defineIntIndex, rwDefineIntIndex)
+            , (pyonBuiltin the_AdditiveDict_int_negate, rwNegateInt)
             , (pyonBuiltin the_EqDict_int_eq, rwIntComparison (==))
             , (pyonBuiltin the_EqDict_int_ne, rwIntComparison (/=))
             , (pyonBuiltin the_OrdDict_int_lt, rwIntComparison (<))
@@ -1069,6 +1071,27 @@ generalizedZipStream2 out_type out_repr transformer shape_type streams = do
   case zipped of
     Just s -> encodeStream2 (TypM shape_type) s
     Nothing -> return Nothing
+
+-- | If defining a fixed-size integer index, create the integer value
+rwDefineIntIndex :: RewriteRule
+rwDefineIntIndex inf [] [integer_value@(ExpM (LitE _ lit))] =
+  let IntL m _ = lit
+      finite = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_deadProof))
+               [TypM $ varApp (pyonBuiltin the_neZ) [IntT m, posInftyT]] []
+      fin_int = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_finIndInt))
+                [TypM $ IntT m] [finite, integer_value]
+      package = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_someIndInt))
+                [TypM $ IntT m] [fin_int]
+  in return $! Just $! package
+
+rwDefineIntIndex _ _ _ = return Nothing
+
+rwNegateInt :: RewriteRule
+rwNegateInt inf [] [ExpM (LitE _ lit)] =
+  let IntL m t = lit
+  in return $! Just $! ExpM (LitE inf (IntL (negate m) t))
+
+rwNegateInt _ _ _ = return Nothing
 
 -- | If comparing two integer literals, replace it with constant True or False
 rwIntComparison :: (Integer -> Integer -> Bool) -> RewriteRule
