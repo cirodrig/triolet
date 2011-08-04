@@ -1160,6 +1160,12 @@ cols : (t : bare -> bare) -> (a : bare)
     -> Indexable2Dict t -> Repr a
     -> t a -> ListView (ListView a);
 
+outerproduct : (a b c : bare) -> Repr a -> Repr b -> Repr c
+	    -> (a -> b -> Writer c)
+	    -> Stream list_shape a
+	    -> Stream list_shape b
+	    -> Stream matrix_shape c;
+
 transpose : (t : bare -> bare) -> (a : bare)
          -> Indexable2Dict t -> Repr a -> t a -> MatrixView a;
 

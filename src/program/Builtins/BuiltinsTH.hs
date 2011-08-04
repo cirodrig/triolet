@@ -315,6 +315,7 @@ pyonBuiltinVariableNames =
   , "makeComplex"
   , "rows"
   , "cols"
+  , "outerproduct"
   , "transpose"
     
     -- Inserted by stream specialization

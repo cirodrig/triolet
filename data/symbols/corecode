@@ -181,25 +181,6 @@ histogram @(t : bare -> bare)
 -------------------------------------------------------------------------------
 -- Matrix functions
 
-{-
-rows @(a : bare)
-  (repr : Repr a) (mat : matrix a) (ret : OutPtr (ListView (ListView a)))
-  -> IEffect (ListView (ListView a)) =
-  case mat of make_matrix @a @(M : intindex) @(N : intindex)
-       	      (height : FinIndInt M) (width : FinIndInt N)
-      	      (aref : Referenced (array M (array N a))).
-  case aref of referenced @(array M (array N a)) (ay : array M (array N a)).
-  listView @(ListView a) @M height
-  (\ (y : int) (ret : OutPtr (ListView a)) -> IEffect (ListView a).
-    let row : array N a =
-          subscript @M @(array N a) (repr_array @N @a width repr) ay y in
-    listView @a @N width
-    (\ (x : int) (ret : OutPtr a) -> IEffect a.
-      copy @a repr (subscript @N @a repr row x) ret)
-    ret)
-  ret; -}
-
-
 rows @(t : bare -> bare) @(a : bare)
   (indexable : Indexable2Dict t) (repr : Repr a)
   (container : t a)
@@ -221,25 +202,59 @@ rows @(t : bare -> bare) @(a : bare)
         (\ (x : int) (ret : OutPtr a) -> IEffect a.
           at_point @a repr container y x ret))));
 
+cols @(t : bare -> bare) @(a : bare)
+  (indexable : Indexable2Dict t) (repr : Repr a)
+  (container : t a)
+  -> Writer (ListView (ListView a)) =
+  case indexable of
+    indexable2Dict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
+    (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
+
+  with_shape @a @(ListView (ListView a)) container
+  (matrixShapeEliminator @(ListView (ListView a))
+   (\ @(M N : intindex) (height : FinIndInt M) (width : FinIndInt N)
+      -> Writer (ListView (ListView a)).
+
+      listView @(ListView a) @N width
+      (\ (x : int) -> Writer (ListView a).
+        listView @a @M height
+        (\ (y : int) (ret : OutPtr a) -> IEffect a.
+          at_point @a repr container y x ret))));
+
+outerproduct @(a b c : bare)
+  (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
+  (f : a -> b -> Writer c)
+  (sa : Stream list_shape a)
+  (sb : Stream list_shape b)
+  -> Stream matrix_shape c
+  attribute (inline_final) =
+
+  -- Convert arguments to lists
+  case boxed @(list a) (TraversableDict_list_build @a repr_a sa) of
+    boxed @(list a) (la : list a).
+  case la of make_list @a @(M : intindex)
+       	     (size_y : FinIndInt M) (ayref_a : Referenced (array M a)).
+  case ayref_a of referenced @(array M a) (ay_a : array M a).
+
+  case boxed @(list b) (TraversableDict_list_build @b repr_b sb) of
+    boxed @(list b) (lb : list b).
+  case lb of make_list @b @(N : intindex)
+       	     (size_x : FinIndInt N) (ayref_b : Referenced (array N b)).
+  case ayref_b of referenced @(array N b) (ay_b : array N b).
+
+  -- Create a matrix stream
+  matrixStream @c @M @N (indInt @M size_y) (indInt @N size_x)
+  (bind @M @(array_shape N unit_shape) @a @c repr_a repr_c
+  (array_traverse @M @a repr_a size_y ay_a)
+  (\ (x : a) -> Stream (array_shape N unit_shape) c.
+    generate @N @c (indInt @N size_x) repr_c
+    (\ (index : int) -> Writer c.
+       let y : b = subscript @N @b repr_b ay_b index in
+       f x y)));
+
 {-
-cols @(a : bare)
-  (repr : Repr a) (mat : matrix a) (ret : OutPtr (ListView (ListView a)))
-  -> IEffect (ListView (ListView a)) =
-  case mat of make_matrix @a @(M : intindex) @(N : intindex)
-       	      (height : FinIndInt M) (width : FinIndInt N)
-      	      (aref : Referenced (array M (array N a))).
-  case aref of referenced @(array M (array N a)) (ay : array M (array N a)).
-  listView @(ListView a) @N width
-  (\ (x : int) (ret : OutPtr (ListView a)) -> IEffect (ListView a).
-    listView @a @M height
-    (\ (y : int) (ret : OutPtr a) -> IEffect a.
-      let row : array N a =
-            subscript @M @(array N a) (repr_array @N @a width repr) ay y in
-      copy @a repr (subscript @N @a repr row x) ret)
-    ret)
-  ret;
-
-
 transpose @(a : bare)
   (repr : Repr a) (mat : matrix a) (ret : OutPtr (MatrixView a))
   -> IEffect (MatrixView a) =

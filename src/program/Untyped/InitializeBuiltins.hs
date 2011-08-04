@@ -1019,6 +1019,25 @@ mkWidthHeightType =
       int_type = ConTy $ tiBuiltin the_con_int
   in ([tT `IsInst` tiBuiltin the_Indexable2], functionType [tT @@ aT] int_type)
 
+mkOuterProductType =
+  forallType [Star, Star, Star] $ \[a, b, c] ->
+  let aT = ConTy a
+      bT = ConTy b
+      cT = ConTy c
+  in ([passable aT, passable bT, passable cT],
+      functionType [functionType [aT, bT] cT,
+                    iterType (ConTy $ tiBuiltin the_con_list) aT,
+                    iterType (ConTy $ tiBuiltin the_con_list) bT]
+      (iterType (ConTy $ tiBuiltin the_con_matrix) cT))
+
+mkRowsColsType =
+  forallType [Star :-> Star, Star] $ \[t, a] ->
+  let tT = ConTy t
+      aT = ConTy a
+      listview a = ConTy (tiBuiltin the_con_ListView) @@ a
+  in ([tT `IsInst` tiBuiltin the_Indexable2, passable aT],
+      functionType [tT @@ aT] (listview $ listview aT))
+
 mkSafeIndexType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
   let tT = ConTy t
@@ -1227,6 +1246,15 @@ initializeTIBuiltins = do
               ),
               ("height", [| mkWidthHeightType |]
               , [| pyonBuiltin SystemF.the_height |]
+              ),
+              ("outerproduct", [| mkOuterProductType |]
+              , [| pyonBuiltin SystemF.the_outerproduct |]
+              ),              
+              ("rows", [| mkRowsColsType |]
+              , [| pyonBuiltin SystemF.the_rows |]
+              ),
+              ("cols", [| mkRowsColsType |]
+              , [| pyonBuiltin SystemF.the_cols |]
               ),
               ("safeIndex", [| mkSafeIndexType |]
               , [| pyonBuiltin SystemF.the_safeIndex |]

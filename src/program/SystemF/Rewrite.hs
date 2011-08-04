@@ -330,6 +330,7 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin the_array_build, rwBuildArray)
             -- , (pyonBuiltin the_oper_GUARD, rwGuard)
             , (pyonBuiltin the_chunk, rwChunk)
+            , (pyonBuiltin the_outerproduct, rwOuterProduct)
             -- , (pyonBuiltin the_fun_map, rwMap)
             -- , (pyonBuiltin the_fun_zip, rwZip)
             -- , (pyonBuiltin the_fun_zip3, rwZip3)
@@ -869,6 +870,39 @@ rwChunk inf [dim_y, dim_x, elt_ty, result_ty]
    
 
 rwChunk _ _ _ = return Nothing
+
+rwOuterProduct :: RewriteRule
+rwOuterProduct inf
+  [TypM elt1, TypM elt2, TypM elt3]
+  [repr1, repr2, repr3, transformer, src1, src2] = runMaybeT $ do
+    let list_shape = VarT $ pyonBuiltin the_list_shape
+    s1 <- MaybeT $ interpretStream2 list_shape elt1 repr1 src1
+    (size_y, count_y) <- from_1d_array s1
+    s2 <- MaybeT $ interpretStream2 list_shape elt2 repr2 src2
+    (size_x, count_x) <- from_1d_array s2
+    
+    -- Create a matrix stream
+    -- matrixStream (bind s1 (\x -> map (\y -> transformer x y) s2))
+    var_x <- newAnonymousVar ObjectLevel
+    let pattern_x = patM (var_x ::: elt1)
+    transformer_function <- lift $
+      lamE $ mkFun []
+      (\ [] -> return ([elt2], writerType elt3))
+      (\ [] [var_y] -> appExp (return transformer) [] [varE var_x, varE var_y])
+    
+    let s2' = mapStream elt3 repr3 transformer_function s2
+        new_stream = MatrixStream (size_y, count_y) (size_x, count_x) $
+                     NestedLoopStream s1 (pattern_x, s2')
+
+    MaybeT $
+      encodeStream2 (TypM (VarT $ pyonBuiltin the_matrix_shape)) new_stream
+  where
+    from_1d_array s = 
+      case sexpShape s
+      of ArrayShape [size] -> return size
+         _                 -> mzero
+
+rwOuterProduct _ _ _ = return Nothing
 
 {-
 rwMap :: RewriteRule
@@ -2612,14 +2646,20 @@ castStreamExpressionShape expected_shape given_shape elt_type elt_repr expr = do
                 _ -> Nothing
 
            | e_op `isPyonBuiltin` the_array_shape ->
-               case fromVarApp g_shape
-               of Just (g_op, g_args)
-                    | g_op `isPyonBuiltin` the_array_shape ->
-                        -- Should verify that array size matches here.
-                        -- Since the input program was well-typed, array size
-                        -- /should/ match.
-                        trace "castStreamExpressionShape: Unsafe shape assumption" $ Just expr
-                  _ -> Nothing
+             case fromVarApp g_shape
+             of Just (g_op, g_args)
+                  | g_op `isPyonBuiltin` the_array_shape ->
+                    -- Should verify that array size matches here.
+                    -- Since the input program was well-typed, array size
+                    -- /should/ match.
+                    trace "castStreamExpressionShape: Unsafe shape assumption" $ Just expr
+                _ -> Nothing
+           | e_op `isPyonBuiltin` the_matrix_shape ->
+             case fromVarApp g_shape
+             of Just (g_op, g_args)
+                  | g_op `isPyonBuiltin` the_matrix_shape ->
+                    Just expr
+                _ -> Nothing
          _ -> Nothing
                   
     cast op ty_args args =
