@@ -269,6 +269,62 @@ transpose @(a : bare)
     copy @a repr (subscript @N @a repr (subscript @M @(array N a) row_repr ay x) y))
   ret;-}
 
+stencil2D @(t : bare -> bare) @(a b : bare)
+  (indexable : Indexable2Dict t) (repr_a : Repr a) (repr_b : Repr b)
+  (ymin : int) (ymax : int) (xmin : int) (xmax : int)
+  (stencilfn : MatrixView a -> Writer b)
+  (inp : t a)
+  -> Writer (matrix b) =
+
+  case indexable of
+    indexable2Dict @t
+    (at_point : (a : bare) -> Repr a -> t a -> int -> int -> Writer a)
+    (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
+    (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
+
+  with_shape @a @(matrix b) inp
+  (matrixShapeEliminator @(matrix b)
+   (\ @(M : intindex) @(N : intindex)
+       (inp_height : FinIndInt M) (inp_width : FinIndInt N)
+       -> Writer (matrix b).
+      case inp_height of
+        finIndInt @M (pf : Pf (neZ M pos_infty)) (inp_height_i : int).
+      case inp_width of
+        finIndInt @N (pf : Pf (neZ N pos_infty)) (inp_width_i : int).
+
+      letfun
+        safe_get (pty : int) (ptx : int) (yoff : int) (xoff : int)
+	  -> Writer a =
+          -- Read one element from the input for a stencil at point (pty, ptx).
+          -- The coordinate to read is (pty + yoff, ptx + xoff).
+          -- The image is padded at the edges.
+          let yindex : int = AdditiveDict_int_add pty yoff in
+	  let xindex : int = AdditiveDict_int_add ptx xoff in
+	  let bounded_yindex : int =
+	        if OrdDict_int_lt yindex 0
+		then 0 else if OrdDict_int_ge yindex inp_height_i
+		       	    then AdditiveDict_int_sub inp_height_i 1
+			    else yindex in
+	  let bounded_xindex : int =
+	        if OrdDict_int_lt xindex 0
+		then 0 else if OrdDict_int_ge xindex inp_width_i
+		       	    then AdditiveDict_int_sub inp_width_i 1
+			    else xindex in
+	  at_point @a repr_a inp bounded_yindex bounded_xindex
+       in
+
+       make_matrix @b @M @N inp_height inp_width
+       (referenced @(array M (array N b))
+        (\ (array_ret : OutPtr (array M (array N b)))
+	   -> IEffect (array M (array N b)).
+           (doall @M @(array M (array N b)) @(array N b) inp_height
+            (\ (y : int) -> IEffect (array N b).
+               doall @N @(array N b) @b inp_width
+               (\ (x : int) -> IEffect b.
+                  -- TODO: Allow matrix views to have arbitrary lower bounds
+                  except @(IEffect b))))))));
+
+
 -------------------------------------------------------------------------------
 -- List container class functions
 

@@ -317,6 +317,7 @@ pyonBuiltinVariableNames =
   , "cols"
   , "outerproduct"
   , "transpose"
+  , "stencil2D"
     
     -- Inserted by stream specialization
   , "chunk_id"

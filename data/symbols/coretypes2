@@ -1169,6 +1169,13 @@ outerproduct : (a b c : bare) -> Repr a -> Repr b -> Repr c
 transpose : (t : bare -> bare) -> (a : bare)
          -> Indexable2Dict t -> Repr a -> t a -> MatrixView a;
 
+stencil2D : (t : bare -> bare) -> (a b : bare)
+	 -> Indexable2Dict t -> Repr a -> Repr b
+	 -> int -> int -> int -> int
+	 -> (MatrixView a -> Writer b)
+	 -> t a
+	 -> Writer (matrix b);
+
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)
             -> IndInt n
