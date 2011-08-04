@@ -193,12 +193,16 @@ rows @(t : bare -> bare) @(a : bare)
 
   with_shape @a @(ListView (ListView a)) container
   (matrixShapeEliminator @(ListView (ListView a))
-   (\ @(M N : intindex) (height : FinIndInt M) (width : FinIndInt N)
+   (\ @(Mlo M Nlo N : intindex)
+      (ymin : FinIndInt Mlo)
+      (height : FinIndInt M)
+      (xmin : FinIndInt Nlo)
+      (width : FinIndInt N)
       -> Writer (ListView (ListView a)).
 
-      listView @(ListView a) @M height
+      listView @(ListView a) @Mlo @M ymin height
       (\ (y : int) -> Writer (ListView a).
-        listView @a @N width
+        listView @a @Nlo @N xmin width
         (\ (x : int) (ret : OutPtr a) -> IEffect a.
           at_point @a repr container y x ret))));
 
@@ -214,12 +218,16 @@ cols @(t : bare -> bare) @(a : bare)
 
   with_shape @a @(ListView (ListView a)) container
   (matrixShapeEliminator @(ListView (ListView a))
-   (\ @(M N : intindex) (height : FinIndInt M) (width : FinIndInt N)
+   (\ @(Mlo M Nlo N : intindex)
+      (ymin : FinIndInt Mlo)
+      (height : FinIndInt M)
+      (xmin : FinIndInt Nlo)
+      (width : FinIndInt N)
       -> Writer (ListView (ListView a)).
 
-      listView @(ListView a) @N width
+      listView @(ListView a) @Nlo @N xmin width
       (\ (x : int) -> Writer (ListView a).
-        listView @a @M height
+        listView @a @Mlo @M ymin height
         (\ (y : int) (ret : OutPtr a) -> IEffect a.
           at_point @a repr container y x ret))));
 
@@ -282,17 +290,50 @@ stencil2D @(t : bare -> bare) @(a b : bare)
     (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
     (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
 
+  -- Stencil must span at least one element
+  let stencil_size_y : int =
+       AdditiveDict_int_add (AdditiveDict_int_sub ymax ymin) 1 in
+  let stencil_size_x : int =
+       AdditiveDict_int_add (AdditiveDict_int_sub xmax xmin) 1 in
+  if or (OrdDict_int_le stencil_size_y 0) (OrdDict_int_le stencil_size_x 0)
+  then except @(Writer (matrix b)) else
+
+  -- Create stencil dimensions
+  case defineIntIndex ymin of
+    someIndInt @(stencil_Mlo : intindex) (stencil_ymin : FinIndInt stencil_Mlo).
+  case defineIntIndex xmin of
+    someIndInt @(stencil_Nlo : intindex) (stencil_xmin : FinIndInt stencil_Nlo).
+  case defineIntIndex stencil_size_y of
+    someIndInt @(stencil_M : intindex) (stencil_height : FinIndInt stencil_M).
+  case defineIntIndex stencil_size_x of
+    someIndInt @(stencil_N : intindex) (stencil_width : FinIndInt stencil_N).
+
+  -- Inspect the input data
   with_shape @a @(matrix b) inp
   (matrixShapeEliminator @(matrix b)
-   (\ @(M : intindex) @(N : intindex)
-       (inp_height : FinIndInt M) (inp_width : FinIndInt N)
+   (\ @(Mlo M Nlo N : intindex)
+       (inp_ymin : FinIndInt Mlo)
+       (inp_height : FinIndInt M)
+       (inp_xmin : FinIndInt Nlo)
+       (inp_width : FinIndInt N)
        -> Writer (matrix b).
+      case inp_ymin of
+        finIndInt @Mlo (pf : Pf (neZ Mlo pos_infty)) (inp_ymin_i : int).
+      case inp_xmin of
+        finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (inp_xmin_i : int).
       case inp_height of
         finIndInt @M (pf : Pf (neZ M pos_infty)) (inp_height_i : int).
       case inp_width of
         finIndInt @N (pf : Pf (neZ N pos_infty)) (inp_width_i : int).
 
+      let inp_ymax_i : int =
+      	    AdditiveDict_int_sub (AdditiveDict_int_add inp_ymin_i inp_height_i) 1 in
+      let inp_xmax_i : int =
+      	    AdditiveDict_int_sub (AdditiveDict_int_add inp_xmin_i inp_width_i) 1 in
+
       letfun
+        -- Read from the input matrix view.  Ensure that accesses do not go
+	-- outside array bounds.
         safe_get (pty : int) (ptx : int) (yoff : int) (xoff : int)
 	  -> Writer a =
           -- Read one element from the input for a stencil at point (pty, ptx).
@@ -301,18 +342,21 @@ stencil2D @(t : bare -> bare) @(a b : bare)
           let yindex : int = AdditiveDict_int_add pty yoff in
 	  let xindex : int = AdditiveDict_int_add ptx xoff in
 	  let bounded_yindex : int =
-	        if OrdDict_int_lt yindex 0
-		then 0 else if OrdDict_int_ge yindex inp_height_i
-		       	    then AdditiveDict_int_sub inp_height_i 1
-			    else yindex in
+	        if OrdDict_int_lt yindex inp_ymin_i
+		then inp_ymin_i
+		else if OrdDict_int_gt yindex inp_ymax_i
+		     then inp_ymax_i
+		     else yindex in
 	  let bounded_xindex : int =
-	        if OrdDict_int_lt xindex 0
-		then 0 else if OrdDict_int_ge xindex inp_width_i
-		       	    then AdditiveDict_int_sub inp_width_i 1
-			    else xindex in
+	        if OrdDict_int_lt xindex inp_xmin_i
+		then inp_xmin_i
+		else if OrdDict_int_gt xindex inp_xmax_i
+		     then inp_xmax_i
+		     else xindex in
 	  at_point @a repr_a inp bounded_yindex bounded_xindex
        in
 
+       -- Create return value
        make_matrix @b @M @N inp_height inp_width
        (referenced @(array M (array N b))
         (\ (array_ret : OutPtr (array M (array N b)))
@@ -321,9 +365,15 @@ stencil2D @(t : bare -> bare) @(a b : bare)
             (\ (y : int) -> IEffect (array N b).
                doall @N @(array N b) @b inp_width
                (\ (x : int) -> IEffect b.
-                  -- TODO: Allow matrix views to have arbitrary lower bounds
-                  except @(IEffect b))))))));
-
+	          case boxed @(MatrixView a)
+		       (matrixView @a
+		  	@stencil_Mlo @stencil_M @stencil_Nlo @stencil_N
+			stencil_ymin stencil_height stencil_xmin stencil_width
+			(safe_get y x))
+		  of boxed @(MatrixView a) (mv : MatrixView a).
+		  stencilfn mv (subscript_out @N @b repr_b
+		  	        (subscript_out @M @(array N b)
+				 (repr_array @N @b inp_width repr_b) array_ret y) x))))))));
 
 -------------------------------------------------------------------------------
 -- List container class functions
@@ -367,7 +417,7 @@ IndexableDict_list_at_slice @(a : bare)
 	      AdditiveDict_int_sub (AdditiveDict_int_add delta stride) 1 in
 	RemainderDict_int_floordiv interval_rounded stride in
   case defineIntIndex count of someIndInt @(L : intindex) (count_i : FinIndInt L).
-  listView @a @L count_i
+  listView @a @0 @L (finIndInt @0 (deadProof @(neZ 0 pos_infty)) 0) count_i
   (\ (i : int) (ret : OutPtr a) -> IEffect a.
      let index : int =
            AdditiveDict_int_add start (MultiplicativeDict_int_mul i stride) in
@@ -381,8 +431,8 @@ IndexableDict_list_with_shape @(a b : bare)
   case ls of make_list @a @(N : intindex)
     (size : FinIndInt N) (aref : Referenced (array N a)).
   case elim of listShapeEliminator @b
-       	       (f : (index : intindex) -> FinIndInt index -> Writer b).
-  f @N size;
+       	       (f : (Nlo N : intindex) -> FinIndInt Nlo -> FinIndInt N -> Writer b).
+  f @0 @N (finIndInt @0 (deadProof @(neZ 0 pos_infty)) 0) size;
 
 
 -------------------------------------------------------------------------------
@@ -390,8 +440,8 @@ IndexableDict_list_with_shape @(a b : bare)
 
 TraversableDict_ListView_traverse @(a : bare)
   (repr : Repr a) (ls : ListView a) -> Stream list_shape a =
-  case ls of listView @a @(N : intindex)
-       	     (size : FinIndInt N) (f : int -> Writer a).
+  case ls of listView @a @(Nlo N : intindex)
+       	     (xmin : FinIndInt Nlo) (size : FinIndInt N) (f : int -> Writer a).
   LinStream_flatten @(array_shape N unit_shape) @a
   (generate @N @a (indInt @N size) repr f);
 
@@ -405,7 +455,7 @@ TraversableDict_ListView_build @(a : bare)
   case ls of make_list @a @(N : intindex) (list_size : FinIndInt N) (ayref : Referenced (array N a)).
   case ayref of referenced @(array N a) (ay : array N a).
 
-  listView @a @N list_size
+  listView @a @0 @N  (finIndInt @0 (deadProof @(neZ 0 pos_infty)) 0) list_size
   (\ (i : int) (ret : OutPtr a) -> IEffect a.
     copy @a repr (subscript @N @a repr ay i) ret)
   ret;
@@ -414,11 +464,14 @@ TraversableDict_ListView_build @(a : bare)
 IndexableDict_ListView_at_point @(a : bare)
   (repr : Repr a) (ls : ListView a) (ix : int) (ret : OutPtr a) -> IEffect a =
 
-  case ls of listView @a @(N : intindex)
-             (size : FinIndInt N) (generator : int -> Writer a).
+  case ls of listView @a @(Nlo N : intindex)
+             (xmin : FinIndInt Nlo) (size : FinIndInt N) (generator : int -> Writer a).
+  case xmin of finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (xmin_i : int).
   case size of finIndInt @N (pf : Pf (neZ N pos_infty)) (size_int : int).
+  let xmax_i : int =
+        AdditiveDict_int_sub (AdditiveDict_int_add xmin_i size_int) 1 in
 
-  if or (OrdDict_int_lt ix 0) (OrdDict_int_ge ix size_int)
+  if or (OrdDict_int_lt ix xmin_i) (OrdDict_int_gt ix xmax_i)
   then except @(IEffect a)
   else generator ix ret;
 
@@ -428,9 +481,14 @@ IndexableDict_ListView_at_slice @(a : bare)
   (start : int) (delta : int) (stride : int)
   (ret : OutPtr (ListView a)) -> IEffect (ListView a) =
 
-  case ls of listView @a @(N : intindex)
-       	     (list_size : FinIndInt N) (generator : int -> Writer a).
+  case ls of listView @a @(Nlo N : intindex)
+       	     (xmin : FinIndInt Nlo)
+	     (list_size : FinIndInt N)
+	     (generator : int -> Writer a).
+  case xmin of finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (xmin_i : int).
   case list_size of finIndInt @N (pf : Pf (neZ N pos_infty)) (list_size_i : int).
+  let xmax_i : int =
+        AdditiveDict_int_sub (AdditiveDict_int_add xmin_i list_size_i) 1 in
   
   let count : int =
         -- Ceiling division
@@ -438,7 +496,7 @@ IndexableDict_ListView_at_slice @(a : bare)
 	      AdditiveDict_int_sub (AdditiveDict_int_add delta stride) 1 in
 	RemainderDict_int_floordiv interval_rounded stride in
   case defineIntIndex count of someIndInt @(L : intindex) (count_i : FinIndInt L).
-  listView @a @L count_i
+  listView @a @0 @L  (finIndInt @0 (deadProof @(neZ 0 pos_infty)) 0) count_i
   (\ (i : int) (ret : OutPtr a) -> IEffect a.
      let index : int =
            AdditiveDict_int_add start (MultiplicativeDict_int_mul i stride) in
@@ -680,7 +738,11 @@ Indexable2Dict_matrix_at_slice2 @(a : bare)
 	RemainderDict_int_floordiv interval_x_rounded stride_x in
   case defineIntIndex count_x of someIndInt @(L : intindex) (count_x_i : FinIndInt L).
 
-  matrixView @a @K @L count_y_i count_x_i
+  matrixView @a @0 @K @0 @L
+  (finIndInt @0 (deadProof @(neZ 0 pos_infty)) 0)
+  count_y_i
+  (finIndInt @0 (deadProof @(neZ 0 pos_infty)) 0)
+  count_x_i
   (\ (j : int) (i : int) (ret : OutPtr a) -> IEffect a.
      let y : int =
            AdditiveDict_int_add start_y (MultiplicativeDict_int_mul j stride_y) in
@@ -696,14 +758,14 @@ Indexable2Dict_matrix_with_shape2 @(a b : bare)
   (mat : matrix a)
   (eliminator : MatrixShapeEliminator b)
   -> Writer b =
-  case mat of make_matrix @a @(M : intindex) @(N : intindex)
+  case mat of make_matrix @a @(M N : intindex)
        	      (size_y : FinIndInt M) (size_x : FinIndInt N)
 	      (ayptr : Referenced (array M (array N a))).
   case eliminator of
     matrixShapeEliminator @b
-    (f : (K L : intindex) -> FinIndInt K -> FinIndInt L -> Writer b).
+    (f : (Klo K Llo L : intindex) -> FinIndInt Klo -> FinIndInt K -> FinIndInt Llo -> FinIndInt L -> Writer b).
 
-  f @M @N size_y size_x;
+  f @0 @M @0 @N (finIndInt @0 (deadProof @(neZ 0 pos_infty)) 0) size_y (finIndInt @0 (deadProof @(neZ 0 pos_infty)) 0) size_x;
 
 -------------------------------------------------------------------------------
 -- MatrixView container class functions
@@ -711,8 +773,11 @@ Indexable2Dict_matrix_with_shape2 @(a b : bare)
 TraversableDict_MatrixView_traverse @(a : bare)
   (repr : Repr a) (mat : MatrixView a) -> Stream matrix_shape a =
 
-  case mat of matrixView @a @(M : intindex) @(N : intindex)
-       	      (size_y : FinIndInt M) (size_x : FinIndInt N)
+  case mat of matrixView @a @(Mlo M Nlo N : intindex)
+       	      (ymin : FinIndInt Mlo)
+	      (size_y : FinIndInt M)
+	      (xmin : FinIndInt Nlo)
+	      (size_x : FinIndInt N)
 	      (f : int -> int -> Writer a).
   matrixStream @a @M @N (indInt @M size_y) (indInt @N size_x)
   (bind @M @(array_shape N unit_shape) @(Stored int) @a repr_int repr
@@ -721,6 +786,34 @@ TraversableDict_MatrixView_traverse @(a : bare)
       case y_stored of stored @int (y : int).
       generate @N @a (indInt @N size_x) repr
       (\ (x : int) -> Writer a. f y x)));
+
+Indexable2Dict_MatrixView_at_point2 @(a : bare)
+  (repr : Repr a)
+  (mat : MatrixView a)
+  (y : int)
+  (x : int)
+  (ret : OutPtr a)
+  -> IEffect a =
+  case mat of matrixView @a @(Mlo M Nlo N : intindex)
+       	      (ymin : FinIndInt Mlo) (height : FinIndInt M)
+       	      (xmin : FinIndInt Nlo) (width : FinIndInt N)
+	      (get : int -> int -> Writer a).
+  get y x ret;
+
+Indexable2Dict_MatrixView_with_shape2 @(a b : bare)
+  (mat : MatrixView a)
+  (eliminator : MatrixShapeEliminator b)
+  -> Writer b =
+  case mat of matrixView @a @(Mlo M Nlo N : intindex)
+       	      (ymin : FinIndInt Mlo) (height : FinIndInt M)
+       	      (xmin : FinIndInt Nlo) (width : FinIndInt N)
+	      (get : int -> int -> Writer a).
+  case eliminator of matrixShapeEliminator @b
+       		     (f : (Mlo M Nlo N : intindex)
+                       -> FinIndInt Mlo -> FinIndInt M
+                       -> FinIndInt Nlo -> FinIndInt N
+                       -> Writer b).
+  f @Mlo @M @Nlo @N ymin height xmin width;
 
 -------------------------------------------------------------------------------
 -- Generic container methods
@@ -733,7 +826,10 @@ len @(t : bare -> bare) @(a : bare) (indexable : IndexableDict t)
        		    (with_shape : (a b : bare) -> t a -> ListShapeEliminator b -> Writer b).
 
   letfun
-    get_len @(N : intindex) (fii : FinIndInt N) -> Writer (Stored int) =
+    get_len @(Nlo N : intindex)
+    	    (minix : FinIndInt Nlo)
+	    (fii : FinIndInt N)
+	    -> Writer (Stored int) =
     case fii of finIndInt @N (pf : Pf (neZ N pos_infty)) (x : int).
     stored @int x
   in
@@ -755,11 +851,18 @@ safeIndex @(t : bare -> bare) @(a : bare)
     (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> Writer (ListView a))
     (with_shape : (a b : bare) -> t a -> ListShapeEliminator b -> Writer b).
   letfun
-    get_member @(N : intindex) (fii : FinIndInt N) (ret : OutPtr a) -> IEffect a =
+    get_member @(Nlo N : intindex)
+    	       (minindex : FinIndInt Nlo)
+	       (fii : FinIndInt N)
+	       (ret : OutPtr a)
+	       -> IEffect a =
+      case minindex of finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (minindex_i : int).
       case fii of finIndInt @N (pf : Pf (neZ N pos_infty)) (size_int : int).
+      let maxindex_i : int =
+            AdditiveDict_int_sub (AdditiveDict_int_add minindex_i size_int) 1 in
 
       -- Bounds checking
-      if or (OrdDict_int_lt ix 0) (OrdDict_int_ge ix size_int)
+      if or (OrdDict_int_lt ix minindex_i) (OrdDict_int_gt ix maxindex_i)
       then except @(IEffect a)
       else at_point @a repr container ix ret
 
@@ -776,17 +879,24 @@ safeSlice @(t : bare -> bare) @(a : bare)
     (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> Writer (ListView a))
     (with_shape : (a b : bare) -> t a -> ListShapeEliminator b -> Writer b).
   letfun
-    get_slice @(N : intindex)
-      (fii : FinIndInt N) (ret : OutPtr (ListView a))
+    get_slice @(Nlo N : intindex)
+      (minindex : FinIndInt Nlo)
+      (fii : FinIndInt N)
+      (ret : OutPtr (ListView a))
       -> IEffect (ListView a) =
 
+      case minindex of finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (minindex_i : int).
       case fii of finIndInt @N (pf : Pf (neZ N pos_infty)) (size_i : int).
+
+      -- The slice comprises [start, end).  The end can be 1 + the last
+      -- element's index.
+      let maxend_i : int = AdditiveDict_int_add minindex_i size_i in
 
       -- If slice is out of bounds, coerce to bounds
       let real_start : int =
-            if OrdDict_int_lt start 0 then 0 else start in
+            if OrdDict_int_lt start minindex_i then minindex_i else start in
       let real_end : int =
-            if OrdDict_int_gt stop size_i then size_i else stop in
+            if OrdDict_int_gt stop maxend_i then maxend_i else stop in
 
       -- Stride must be positive
       if OrdDict_int_le stride 0 then except @(IEffect (ListView a)) else
@@ -813,8 +923,9 @@ width @(t : bare -> bare) @(a : bare)
     (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
 
   letfun
-    get_width @(M N : intindex)
-      (height_fii : FinIndInt M) (width_fii : FinIndInt N)
+    get_width @(Mlo M Nlo N : intindex)
+      (miny : FinIndInt Mlo) (height_fii : FinIndInt M)
+      (minx : FinIndInt Nlo) (width_fii : FinIndInt N)
       (ret : OutPtr (Stored int)) -> IEffect (Stored int) =
       case width_fii of finIndInt @N (pf : Pf (neZ N pos_infty)) (w : int).
       stored @int w ret
@@ -836,8 +947,9 @@ height @(t : bare -> bare) @(a : bare)
     (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
 
   letfun
-    get_height @(M N : intindex)
-      (height_fii : FinIndInt M) (width_fii : FinIndInt N)
+    get_height @(Mlo M Nlo N : intindex)
+      (miny : FinIndInt Mlo) (height_fii : FinIndInt M)
+      (minx : FinIndInt Nlo) (width_fii : FinIndInt N)
       (ret : OutPtr (Stored int)) -> IEffect (Stored int) =
       case height_fii of finIndInt @M (pf : Pf (neZ M pos_infty)) (h : int).
       stored @int h ret
@@ -858,15 +970,22 @@ safeIndex2 @(t : bare -> bare) @(a : bare)
     (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
     (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
   letfun
-    get_member @(M N : intindex)
-      (ysize : FinIndInt M) (xsize : FinIndInt N)
+    get_member @(Mlo M Nlo N : intindex)
+      (miny : FinIndInt Mlo) (ysize : FinIndInt M)
+      (minx : FinIndInt Nlo) (xsize : FinIndInt N)
       (ret : OutPtr a) -> IEffect a =
+      case miny of finIndInt @Mlo (pf : Pf (neZ Mlo pos_infty)) (miny_i : int).
+      case minx of finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (minx_i : int).
       case ysize of finIndInt @M (pf : Pf (neZ M pos_infty)) (ysize_i : int).
       case xsize of finIndInt @N (pf : Pf (neZ N pos_infty)) (xsize_i : int).
+      let maxy_i : int =
+           AdditiveDict_int_sub (AdditiveDict_int_add miny_i ysize_i) 1 in
+      let maxx_i : int =
+           AdditiveDict_int_sub (AdditiveDict_int_add minx_i xsize_i) 1 in
 
       -- Bounds checking
-      if or (or (OrdDict_int_lt xix 0) (OrdDict_int_ge xix xsize_i))
-       	    (or (OrdDict_int_lt yix 0) (OrdDict_int_ge yix ysize_i))
+      if or (or (OrdDict_int_lt xix minx_i) (OrdDict_int_gt xix maxx_i))
+       	    (or (OrdDict_int_lt yix miny_i) (OrdDict_int_gt yix maxy_i))
       then except @(IEffect a)
       else at_point @a repr container yix xix ret
 
@@ -885,23 +1004,31 @@ safeSlice2 @(t : bare -> bare) @(a : bare)
     (at_slice : (a : bare) -> Repr a -> t a -> int -> int -> int -> int -> int -> int -> Writer (MatrixView a))
     (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
   letfun
-    get_slice @(M N : intindex)
-      (ysize : FinIndInt M) (xsize : FinIndInt N)
+    get_slice @(Mlo M Nlo N : intindex)
+      (miny : FinIndInt Mlo) (ysize : FinIndInt M)
+      (minx : FinIndInt Nlo) (xsize : FinIndInt N)
       (ret : OutPtr (MatrixView a))
       -> IEffect (MatrixView a) =
 
+      case miny of finIndInt @Mlo (pf : Pf (neZ Mlo pos_infty)) (miny_i : int).
+      case minx of finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (minx_i : int).
       case ysize of finIndInt @M (pf : Pf (neZ M pos_infty)) (ysize_i : int).
       case xsize of finIndInt @N (pf : Pf (neZ N pos_infty)) (xsize_i : int).
 
+      -- Slice does not include endpoint.  So the endpoint can be up to
+      -- 1 + end of list.
+      let endy : int = AdditiveDict_int_add miny_i ysize_i in
+      let endx : int = AdditiveDict_int_add minx_i xsize_i in
+
       -- If slice is out of bounds, coerce to bounds
       let real_start_y : int =
-            if OrdDict_int_lt start_y 0 then 0 else start_y in
+            if OrdDict_int_lt start_y miny_i then miny_i else start_y in
       let real_end_y : int =
-            if OrdDict_int_gt stop_y ysize_i then ysize_i else stop_y in
+            if OrdDict_int_gt stop_y endy then endy else stop_y in
       let real_start_x : int =
-            if OrdDict_int_lt start_x 0 then 0 else start_x in
+            if OrdDict_int_lt start_x minx_i then minx_i else start_x in
       let real_end_x : int =
-            if OrdDict_int_gt stop_x xsize_i then xsize_i else stop_x in
+            if OrdDict_int_gt stop_x endx then endx else stop_x in
 
       -- Stride must be positive
       if OrdDict_int_le stride_y 0 then except @(IEffect (MatrixView a)) else

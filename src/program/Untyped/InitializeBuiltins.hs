@@ -1030,6 +1030,18 @@ mkOuterProductType =
                     iterType (ConTy $ tiBuiltin the_con_list) bT]
       (iterType (ConTy $ tiBuiltin the_con_matrix) cT))
 
+mkStencil2DType =
+  forallType [Star :-> Star, Star, Star] $ \[t, a, b] ->
+  let tT = ConTy t
+      aT = ConTy a
+      bT = ConTy b
+      int_type = ConTy $ tiBuiltin the_con_int
+  in ([tT `IsInst` tiBuiltin the_Indexable2, passable aT, passable bT],
+      functionType [int_type, int_type, int_type, int_type,
+                    functionType [ConTy (tiBuiltin the_con_MatrixView) @@ aT] bT,
+                    tT @@ aT]
+      (ConTy (tiBuiltin the_con_matrix) @@ bT))
+
 mkRowsColsType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
   let tT = ConTy t
@@ -1249,6 +1261,9 @@ initializeTIBuiltins = do
               ),
               ("outerproduct", [| mkOuterProductType |]
               , [| pyonBuiltin SystemF.the_outerproduct |]
+              ),              
+              ("stencil2D", [| mkStencil2DType |]
+              , [| pyonBuiltin SystemF.the_stencil2D |]
               ),              
               ("rows", [| mkRowsColsType |]
               , [| pyonBuiltin SystemF.the_rows |]

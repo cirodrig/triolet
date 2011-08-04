@@ -189,15 +189,17 @@ data matrix : bare -> bare
 data ListView : bare -> bare
 {
   listView
-  (a : bare) (n : intindex)
-  (FinIndInt n, int -> Writer a);
+  (a : bare) (nlo : intindex, n : intindex)
+  (FinIndInt nlo, FinIndInt n, int -> Writer a);
 };
 
 data MatrixView : bare -> bare
 {
   matrixView
-  (a : bare) (m : intindex, n : intindex)
-  (FinIndInt m, FinIndInt n, int -> int -> Writer a);
+  (a : bare) (mlo : intindex, m : intindex, nlo : intindex, n : intindex)
+  (FinIndInt mlo, FinIndInt m,
+   FinIndInt nlo, FinIndInt n,
+   int -> int -> Writer a);
 };
 
 data PyonTuple2 : bare -> bare -> bare
@@ -347,7 +349,7 @@ data ShapeDict : bare -> box
 data ListShapeEliminator : bare -> box
 {
   listShapeEliminator (a : bare) ()
-    ((N : intindex) -> FinIndInt N -> Writer a);
+    ((Nlo N : intindex) -> FinIndInt Nlo -> FinIndInt N -> Writer a);
 };
 
 -- Class methods for one-dimensional, array-like container types
@@ -365,7 +367,10 @@ data IndexableDict : (bare -> bare) -> box
 data MatrixShapeEliminator : bare -> box
 {
   matrixShapeEliminator (a : bare) ()
-    ((M N : intindex) -> FinIndInt M -> FinIndInt N -> Writer a);
+    ((Mlo M Nlo N : intindex)
+     -> FinIndInt Mlo -> FinIndInt M
+     -> FinIndInt Nlo -> FinIndInt N
+     -> Writer a);
 };
 
 -- Class methods for two-dimensional, array-like container types
@@ -414,6 +419,7 @@ repr_bool : Repr (Stored bool);
 repr_list : (a : bare) -> Repr a -> Repr (list a);
 repr_matrix : (a : bare) -> Repr a -> Repr (matrix a);
 repr_ListView : (a : bare) -> Repr (ListView a);
+repr_MatrixView : (a : bare) -> Repr (MatrixView a);
 repr_Complex : (a : bare) -> Repr a -> Repr (Complex a);
 
 repr_PyonTuple2 :

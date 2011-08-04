@@ -38,6 +38,7 @@ pyonSourceGlobals =
   , "rows"
   , "cols"
   , "outerproduct"
+  , "stencil2D"
   , "histogram"
   , "listiter"
   , "matrixiter"
