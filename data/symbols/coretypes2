@@ -823,6 +823,9 @@ VectorDict_Complex_dot :
 -------------------------------------------------------------------------------
 -- other arithmetic
 
+min_int : int -> int -> int;
+max_int : int -> int -> int;
+
 or : bool -> bool -> bool;
 and : bool -> bool -> bool;
 

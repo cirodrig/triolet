@@ -277,6 +277,7 @@ transpose @(a : bare)
     copy @a repr (subscript @N @a repr (subscript @M @(array N a) row_repr ay x) y))
   ret;-}
 
+
 stencil2D @(t : bare -> bare) @(a b : bare)
   (indexable : Indexable2Dict t) (repr_a : Repr a) (repr_b : Repr b)
   (ymin : int) (ymax : int) (xmin : int) (xmax : int)
@@ -331,7 +332,9 @@ stencil2D @(t : bare -> bare) @(a b : bare)
       let inp_xmax_i : int =
       	    AdditiveDict_int_sub (AdditiveDict_int_add inp_xmin_i inp_width_i) 1 in
 
-      letfun
+      let row_repr : Repr (array N b) = repr_array @N @b inp_width repr_b in
+
+      letfun {
         -- Read from the input matrix view.  Ensure that accesses do not go
 	-- outside array bounds.
         safe_get (pty : int) (ptx : int) (yoff : int) (xoff : int)
@@ -342,38 +345,112 @@ stencil2D @(t : bare -> bare) @(a b : bare)
           let yindex : int = AdditiveDict_int_add pty yoff in
 	  let xindex : int = AdditiveDict_int_add ptx xoff in
 	  let bounded_yindex : int =
-	        if OrdDict_int_lt yindex inp_ymin_i
-		then inp_ymin_i
-		else if OrdDict_int_gt yindex inp_ymax_i
-		     then inp_ymax_i
-		     else yindex in
+	        max_int inp_ymin_i (min_int yindex inp_ymax_i) in
 	  let bounded_xindex : int =
-	        if OrdDict_int_lt xindex inp_xmin_i
-		then inp_xmin_i
-		else if OrdDict_int_gt xindex inp_xmax_i
-		     then inp_xmax_i
-		     else xindex in
-	  at_point @a repr_a inp bounded_yindex bounded_xindex
-       in
+	        max_int inp_xmin_i (min_int xindex inp_xmax_i) in
+	  at_point @a repr_a inp bounded_yindex bounded_xindex;
 
-       -- Create return value
-       make_matrix @b @M @N inp_height inp_width
-       (referenced @(array M (array N b))
-        (\ (array_ret : OutPtr (array M (array N b)))
-	   -> IEffect (array M (array N b)).
-           (doall @M @(array M (array N b)) @(array N b) inp_height
-            (\ (y : int) -> IEffect (array N b).
-               doall @N @(array N b) @b inp_width
-               (\ (x : int) -> IEffect b.
-	          case boxed @(MatrixView a)
-		       (matrixView @a
-		  	@stencil_Mlo @stencil_M @stencil_Nlo @stencil_N
-			stencil_ymin stencil_height stencil_xmin stencil_width
-			(safe_get y x))
-		  of boxed @(MatrixView a) (mv : MatrixView a).
-		  stencilfn mv (subscript_out @N @b repr_b
-		  	        (subscript_out @M @(array N b)
-				 (repr_array @N @b inp_width repr_b) array_ret y) x))))))));
+        -- Read from the input matrix view.  Assume that the given
+	-- offsets do not produce out-of-bounds array accesses.
+        unsafe_get (pty : int) (ptx : int) (yoff : int) (xoff : int)
+	  -> Writer a =
+          -- Read one element from the input for a stencil at point (pty, ptx).
+          -- The coordinate to read is (pty + yoff, ptx + xoff).
+          -- The image is padded at the edges.
+          let yindex : int = AdditiveDict_int_add pty yoff in
+	  let xindex : int = AdditiveDict_int_add ptx xoff in
+	  at_point @a repr_a inp yindex xindex;
+
+	-- Initialize a region of the output array.
+	-- The region is given as an origin (y, x) and
+	-- extent (delta y, delta x).
+	initialize_array
+	  (origin_y : int) (origin_x : int) (delta_y : int) (delta_x : int)
+	  (getter : int -> int -> int -> int -> Writer a)
+	  (ret : OutPtr (array M (array N b)))
+	  -> IEffect (array M (array N b)) =
+          case defineIntIndex delta_y of
+            someIndInt @(Minit : intindex) (rgn_height : FinIndInt Minit).
+          case defineIntIndex delta_x of
+            someIndInt @(Ninit : intindex) (rgn_width : FinIndInt Ninit).
+
+	  -- Loop over region
+          doall @Minit @(array M (array N b)) @(array N b) rgn_height
+          (\ (loop_y : int) -> IEffect (array N b).
+            doall @Ninit @(array N b) @b rgn_width
+            (\ (loop_x : int) -> IEffect b.
+	       let y : int = AdditiveDict_int_add origin_y loop_y in
+	       let x : int = AdditiveDict_int_add origin_x loop_x in
+               case boxed @(MatrixView a)
+                    (matrixView @a
+                     @stencil_Mlo @stencil_M @stencil_Nlo @stencil_N
+                     stencil_ymin stencil_height stencil_xmin stencil_width
+                     (getter y x))
+               of boxed @(MatrixView a) (mv : MatrixView a).
+	       -- Pass the matrix view to the stencil function
+               stencilfn mv (subscript_out @N @b repr_b
+                             (subscript_out @M @(array N b)
+                              row_repr ret y) x)))
+      } in
+
+      -- Bounds checking is needed around the edges of the array, but not in
+      -- the interior.  Compute the size of the edges and the interior.
+      let left_boundary_size : int =
+      	    max_int 0 (AdditiveDict_int_negate xmin) in
+      let right_boundary_size : int =
+      	    max_int 0 xmax in
+      let top_boundary_size : int =
+      	    max_int 0 (AdditiveDict_int_negate ymin) in
+      let bottom_boundary_size : int =
+      	    max_int 0 ymax in
+      let center_width : int =
+            AdditiveDict_int_sub inp_width_i
+	    (AdditiveDict_int_add left_boundary_size right_boundary_size) in
+      let center_height : int =
+            AdditiveDict_int_sub inp_height_i
+	    (AdditiveDict_int_add top_boundary_size bottom_boundary_size) in
+
+      -- Origin of center, left, and right regions
+      let center_origin_y : int = top_boundary_size in
+
+      -- Origin of center region
+      let center_origin_x : int = left_boundary_size in
+
+      let right_origin_x : int =
+      	    AdditiveDict_int_sub inp_width_i right_boundary_size in
+
+      let bottom_origin_y : int =
+      	    AdditiveDict_int_sub inp_height_i bottom_boundary_size in
+
+      -- Create return value
+      make_matrix @b @M @N inp_height inp_width
+      (referenced @(array M (array N b))
+       (if or (OrdDict_int_lt center_width 1) (OrdDict_int_lt center_height 1)
+       then
+         -- Input matrix is smaller than stencil.  Use one loop for the
+	 -- entire output array.
+         initialize_array 0 0 inp_height_i inp_width_i safe_get
+       else
+         -- Use one loop each for the left, right, top, bottom, and center of
+	 -- the output.  The corners of the output array are part of the top
+	 -- and bottom strips.
+	 (\ (ret_array : OutPtr (array M (array N b)))
+	    -> IEffect (array M (array N b)).
+            fromEffTok @(array M (array N b))
+            (seqEffTok
+             (seqEffTok
+              (toEffTok @(array M (array N b)) -- Top strip
+               (initialize_array 0 0 top_boundary_size inp_width_i safe_get ret_array))
+              (toEffTok @(array M (array N b)) -- Bottom strip
+               (initialize_array bottom_origin_y 0 bottom_boundary_size inp_width_i safe_get ret_array)))
+             (seqEffTok
+              (seqEffTok
+               (toEffTok @(array M (array N b)) -- Left strip
+                (initialize_array center_origin_y 0 center_height left_boundary_size safe_get ret_array))
+               (toEffTok @(array M (array N b)) -- Right strip
+                (initialize_array center_origin_y right_origin_x center_height right_boundary_size safe_get ret_array)))
+              (toEffTok @(array M (array N b)) -- Center region
+               (initialize_array center_origin_y center_origin_x center_height center_width unsafe_get ret_array)))))))));
 
 -------------------------------------------------------------------------------
 -- List container class functions
@@ -893,10 +970,8 @@ safeSlice @(t : bare -> bare) @(a : bare)
       let maxend_i : int = AdditiveDict_int_add minindex_i size_i in
 
       -- If slice is out of bounds, coerce to bounds
-      let real_start : int =
-            if OrdDict_int_lt start minindex_i then minindex_i else start in
-      let real_end : int =
-            if OrdDict_int_gt stop maxend_i then maxend_i else stop in
+      let real_start : int = max_int start minindex_i in
+      let real_end : int = min_int stop maxend_i in
 
       -- Stride must be positive
       if OrdDict_int_le stride 0 then except @(IEffect (ListView a)) else
@@ -904,7 +979,7 @@ safeSlice @(t : bare -> bare) @(a : bare)
       -- Compute interval spanned by slice.  If negative, coerce to zero.
       let delta : int =
             let iv : int = AdditiveDict_int_sub real_end real_start
-            in if OrdDict_int_lt iv 0 then 0 else iv in
+            in max_int iv 0 in
 
       -- Get the slice
       at_slice @a repr container real_start delta stride ret
@@ -1021,14 +1096,10 @@ safeSlice2 @(t : bare -> bare) @(a : bare)
       let endx : int = AdditiveDict_int_add minx_i xsize_i in
 
       -- If slice is out of bounds, coerce to bounds
-      let real_start_y : int =
-            if OrdDict_int_lt start_y miny_i then miny_i else start_y in
-      let real_end_y : int =
-            if OrdDict_int_gt stop_y endy then endy else stop_y in
-      let real_start_x : int =
-            if OrdDict_int_lt start_x minx_i then minx_i else start_x in
-      let real_end_x : int =
-            if OrdDict_int_gt stop_x endx then endx else stop_x in
+      let real_start_y : int = max_int start_y miny_i in
+      let real_end_y : int = min_int stop_y endy in
+      let real_start_x : int = max_int start_x minx_i in
+      let real_end_x : int = min_int stop_x endx in
 
       -- Stride must be positive
       if OrdDict_int_le stride_y 0 then except @(IEffect (MatrixView a)) else
@@ -1037,10 +1108,10 @@ safeSlice2 @(t : bare -> bare) @(a : bare)
       -- Compute interval spanned by slice.  If negative, coerce to zero.
       let delta_y : int =
             let iv : int = AdditiveDict_int_sub real_end_y real_start_y
-            in if OrdDict_int_lt iv 0 then 0 else iv in
+            in max_int iv 0 in
       let delta_x : int =
             let iv : int = AdditiveDict_int_sub real_end_x real_start_x
-            in if OrdDict_int_lt iv 0 then 0 else iv in
+            in max_int iv 0 in
 
       -- Get the slice
       at_slice @a repr container real_start_y delta_y stride_y real_start_x delta_x stride_x ret
