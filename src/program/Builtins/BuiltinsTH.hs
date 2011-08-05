@@ -283,6 +283,8 @@ pyonBuiltinVariableNames =
 
     -- Built-in functions
   , "floor"
+  , "min_int"
+  , "max_int"
   , "or"
   , "and"
   , "oper_DO"

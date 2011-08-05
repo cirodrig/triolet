@@ -44,6 +44,10 @@ lowerIntrinsicOp v
          binary_int (PrimMulZ Signed S32))
       , (pyonBuiltin the_MultiplicativeDict_int_fromInt,
          id_int)
+      , (pyonBuiltin the_min_int,
+         binary_int (PrimMinZ Signed S32))
+      , (pyonBuiltin the_max_int,
+         binary_int (PrimMaxZ Signed S32))
       , (pyonBuiltin the_AdditiveDict_float_add,
          binary_float (PrimAddF S32))
       , (pyonBuiltin the_AdditiveDict_float_sub,
