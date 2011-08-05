@@ -238,6 +238,15 @@ lowerUTuple _ args = do
 --
 --   Type applications are erased, so if there are  with no arguments are 
 lowerApp :: Type -> ExpTM -> [TypTM] -> [ExpTM] -> GenLower RetVal
+lowerApp rt (ExpTM (TypeAnn _ (VarE _ op_var))) ty_args args
+  | op_var `isPyonBuiltin` the_toEffTok =
+    -- The function 'toEffTok' is handled specially because its argument
+    -- expression doesn't yield a value.
+    -- Run the argument, then return a unit value.
+    let [arg] = args
+    in do NoVal <- lowerExp arg
+          return $ RetVal (LL.LitV LL.UnitL)
+
 lowerApp rt op ty_args args = do
   tenv <- lift getTypeEnv
   

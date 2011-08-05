@@ -84,6 +84,8 @@ lowerIntrinsicOp v
          indexed_int_constant 1)
       , (pyonBuiltin the_emptyEffTok,
          empty_eff_tok)
+      , (pyonBuiltin the_fromEffTok,
+         from_eff_tok)
       , (pyonBuiltin the_eqZ_refl,
          proof_object)
       , (pyonBuiltin the_deadRef,
@@ -155,6 +157,13 @@ indexed_int_constant n =
 -- | Create an effect token.
 empty_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
 empty_eff_tok = return (LitV UnitL)
+
+-- | Convert an effect token to a side effect.  The effect token is simply
+--   discarded.
+from_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
+from_eff_tok = do
+  param_var <- newAnonymousVar (PrimType UnitType)
+  return $ LamV $ closureFun [param_var] [] $ ReturnE (ValA [])
 
 -- | Initialize an object that's dead.  Since it's dead, we don't have to  
 --   initialize it.
