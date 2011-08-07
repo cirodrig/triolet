@@ -270,55 +270,58 @@ function repr_matrix (owned elem_repr) -> owned {
 };
 
 function matrix_copy (owned elem_repr, pointer src, pointer dst) -> () {
-  size_y = src @! PyonMatrix.size_y;
-  size_x = src @! PyonMatrix.size_x;
-  dst @! PyonMatrix.size_y = size_y;
-  dst @! PyonMatrix.size_x = size_x;
-  FinIndInt {n_x} = size_x;
-  FinIndInt {n_y} = size_y;
-  nelems = n_x * n_y;
+  FinIndInt {size_y} = src @! PyonMatrix.size_y;
+  FinIndInt {size_x} = src @! PyonMatrix.size_x;
+  src_contents = src @! PyonMatrix.contents;
+
+  dst @! PyonMatrix.size_y = FinIndInt {size_y};
+  dst @! PyonMatrix.size_x = FinIndInt {size_x};
 
   // Copy list elements
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   copy_elem = elem_repr @! PassConv.copy;
   typedef elem_type = bytes(value elem_size, value elem_align);
-  typedef src_contents_type = const_array(value nelems, elem_type);
-  typedef dst_contents_type = array(value nelems, elem_type);
+  typedef src_contents_type =
+    const_array (value size_y, const_array(value size_x, elem_type));
+  typedef dst_contents_type =
+    array(value size_y, array(value size_x, elem_type));
 
-  src_contents = src @! PyonList.contents;
   dst_contents = if (elem_repr @! PassConv.is_pointerless) {
     pointer primcall pyon_alloc_nopointers (sizeof dst_contents_type);
   } else {
     pointer primcall pyon_alloc (sizeof dst_contents_type);
   };
-  dst @! PyonList.contents = dst_contents;
+  dst @! PyonMatrix.contents = dst_contents;
 
-  _ = while (int index = int 0) (index < nelems) {
-    () = () call copy_elem (src_contents @ src_contents_type[index],
-                            dst_contents @ dst_contents_type[index]);
-    index + int 1;
+  _ = while (int yindex = int 0) (yindex < size_y) {
+    _ = while (int xindex = int 0) (xindex < size_x) {
+      () = () call copy_elem (src_contents @ src_contents_type[yindex][xindex],
+                              dst_contents @ dst_contents_type[yindex][xindex]);
+      xindex + int 1;
+    };
+    yindex + int 1;
   };
   ();
 };
 
-function matrix_finalize(owned elem_repr, pointer src) -> () {
-  size_y = src @! PyonMatrix.size_y;
-  FinIndInt {n_y} = size_y;
-  size_x = src @! PyonMatrix.size_x;
-  FinIndInt {n_x} = size_x;
-  nelems = n_x * n_y;
-  contents = src @! PyonMatrix.contents;
+function matrix_finalize (owned elem_repr, pointer matrix) -> () {
+  FinIndInt {size_y} = matrix @! PyonMatrix.size_y;
+  FinIndInt {size_x} = matrix @! PyonMatrix.size_x;
+  contents = matrix @! PyonMatrix.contents;
 
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   finalize_elem = elem_repr @! PassConv.finalize;
   typedef elem_type = bytes(value elem_size, value elem_align);
-  typedef contents_type = array(value nelems, elem_type);
+  typedef contents_type = array(value size_y, array(value size_x, elem_type));
 
-  _ = while (int index = int 0) (index < nelems) {
-    () = () call finalize_elem (contents @ contents_type[index]);
-    index + int 1;
+  _ = while (int yindex = int 0) (yindex < size_y) {
+    _ = while (int xindex = int 0) (xindex < size_x) {
+      () = () call finalize_elem (contents @ contents_type[yindex][xindex]);
+      xindex + int 1;
+    };
+    yindex + int 1;
   };
   ();
 };

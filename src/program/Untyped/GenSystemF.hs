@@ -115,7 +115,7 @@ insSigScheme i = TyScheme (insQVars i) (insConstraint i) (insType i)
 
 instance Type Predicate where
   freeTypeVariables (IsInst t _) = freeTypeVariables t
-  freeTypeVariables (IsFamily _ t1 t2) =
+  freeTypeVariables (IsEqual t1 t2) =
     liftM2 Set.union (freeTypeVariables t1) (freeTypeVariables t2)
 
 instance Type [Predicate] where
@@ -129,20 +129,19 @@ instance Unifiable Predicate where
     where
       display doc = text (clsName $ clsSignature c) <+> parens doc
 
-  uShow (IsFamily fam arg t) = do 
-    arg_doc <- uShow arg
-    t_doc <- uShow t
-    return $ text (clsName $ tfSignature fam) <+> parens arg_doc <+>
-      text "~" <+> t_doc
+  uShow (IsEqual t1 t2) = do 
+    t1_doc <- uShow t1
+    t2_doc <- uShow t2
+    return $ t1_doc <+> text "~" <+> t2_doc
 
   rename s (IsInst t c) = do 
     t' <- rename s t
     return $ IsInst t' c
 
-  rename s (IsFamily f t1 t2) = do
+  rename s (IsEqual t1 t2) = do
     t1' <- rename s t1
     t2' <- rename s t2
-    return $ IsFamily f t1' t2'
+    return $ IsEqual t1' t2'
 
   unify pos p1 p2 =
     case (p1, p2)
@@ -151,13 +150,13 @@ instance Unifiable Predicate where
   
        _ -> fail "Cannot unify predicates"
   
-  match p1 p2 =
+  matchSubst subst p1 p2 =
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
-         | c1 == c2 -> match t1 t2
+         | c1 == c2 -> matchSubst subst t1 t2
 
-       (IsFamily f1 _ _, IsFamily f2 _ _)
-         | f1 == f2 -> internalError "match: Not implemented for type families"
+       (IsEqual _ _, IsEqual _ _) ->
+         internalError "match: Not implemented for type families"
        
        _ -> return Nothing
   
@@ -165,18 +164,8 @@ instance Unifiable Predicate where
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> uEqual t1 t2
-       (IsFamily fam1 arg1 result1, IsFamily fam2 arg2 result2)
-         | fam1 == fam2 -> do
-           is_equal <- uEqual arg1 arg2
-           -- DEBUG
-           when is_equal $ do
-             (r1, r2) <- runPpr $ do r1 <- uShow result1
-                                     r2 <- uShow result2
-                                     return (r1, r2)
-             putStrLn "uEqual on type families"
-             print r1
-             print r2
-           return is_equal
+       (IsEqual s1 t1, IsEqual s2 t2) ->
+         uEqual s1 s2 >&&> uEqual t1 t2
        _ -> return False
 
 isIdDerivation :: Derivation -> Bool
@@ -264,6 +253,10 @@ mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
   let con = mkConE pos (SystemF.pyonBuiltin SystemF.the_fun_undefined)
   in mkAppE pos con [ty] []
+
+mkCoerceE :: SourcePos -> TIType -> TIType -> TIExp -> TIExp
+mkCoerceE pos from_ty to_ty e =
+  TIExp $ SystemF.CoerceE (mkExpInfo pos) from_ty to_ty e
 
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
@@ -465,8 +458,8 @@ convertPredicate' (IsInst ty cls) = do
   ty' <- convertHMType' ty
   return $ Type.Type.varApp (clsTypeCon $ clsSignature cls) [ty']
 
-convertPredicate' (IsFamily fam arg result) =
-  -- No evidence required for type families
+convertPredicate' (IsEqual _ _) =
+  -- No evidence required for type equality
   return $ Type.Type.VarT (SystemF.pyonBuiltin SystemF.the_NoneType)
 
 -- | Convert a type scheme to a function type.  Each quantified variable

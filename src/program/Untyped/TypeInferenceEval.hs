@@ -57,6 +57,10 @@ evExp expression =
           CaseE info scr alts -> do scr' <- evExp scr
                                     alts' <- mapM evAlt alts
                                     return $ CaseE info scr' alts'
+          CoerceE info from_t to_t b -> do from_t' <- evTypSF from_t
+                                           to_t' <- evTypSF to_t
+                                           b' <- evExp b
+                                           return $ CoerceE info from_t' to_t' b'
      Untyped.TIRecExp e -> return e
 
 evAlt (Untyped.TIAlt (DeCon c ty_params ex_types params body)) = do

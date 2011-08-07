@@ -1188,9 +1188,9 @@ rangeIndexed : (n : intindex)
             -> IndInt n
             -> Stream (array_shape n unit_shape) (Stored int);
 
-histogram : (t : bare -> bare)
+histogram : (sh : bare)
          -> int
-         -> Stream (shape t) (Stored int)
+         -> Stream sh (Stored int)
          -> Writer (list (Stored int));
 
 histogramArray : (sh : bare)

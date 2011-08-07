@@ -194,6 +194,13 @@ data BaseExp s =
     { expInfo :: ExpInfo
     , expType :: Type
     }
+    -- | A type coercion
+  | CoerceE
+    { expInfo :: ExpInfo
+    , expArgType :: Typ s       -- ^ Type of body
+    , expRetType :: Typ s       -- ^ Type of coerced result
+    , expBody :: Exp s
+    }
 
 data BaseAlt s =
     -- | Deconstruct a data constructor

@@ -53,9 +53,9 @@ data PprContext =
 data Predicate =
     -- | Class membership.  This predicate translates to a class dictionary.
     IsInst HMType !Class
-    -- | A type family constraint.  This predicate declares that F(t1) = t2 
-    --   for family F and types t1, t2.
-  | IsFamily !TyFamily HMType HMType
+    -- | A type equality constraint.  This predicate declares that the two
+    --   given types are equal.
+  | IsEqual HMType HMType
 
 type Constraint = [Predicate]
 
@@ -78,11 +78,14 @@ class Unifiable a where
   --
   -- @match x y@ finds a substitution that unifies @x@ with @y@, if one exists.
   -- If no substitution can be found, return None.  The terms are not modified.
-  match :: a -> a -> IO (Maybe Substitution)
+  matchSubst :: Substitution -> a -> a -> IO (Maybe Substitution)
 
   -- | Decide whether two unifiable terms are equal.
   -- The terms are not modified.
   uEqual :: a -> a -> IO Bool
+
+match :: Unifiable a => a -> a -> IO (Maybe Substitution)
+match = matchSubst (Substitution Map.empty)
 
 -- | An entity that may contain type variables
 class Type a where
@@ -276,8 +279,8 @@ data Derivation =
     FunPassConvDerivation
     { conclusion :: Predicate
     }
-    -- | A derivation of a type family constraint
-  | TyFamilyDerivation
+    -- | A derivation of an equality constraint
+  | EqualityDerivation
     { conclusion :: Predicate
     }
     -- | A derivation without evidence

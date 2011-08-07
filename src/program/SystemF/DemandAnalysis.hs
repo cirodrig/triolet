@@ -206,6 +206,11 @@ dmdExp spc expressionM@(ExpM expression) =
        return $ foldr mk_let body' dg'
      CaseE inf scr alts -> dmdCaseE spc inf scr alts
      ExceptE _ ty -> dfType ty >> return expressionM
+     CoerceE inf t1 t2 e -> do
+       dfType $ fromTypM t1
+       dfType $ fromTypM t2
+       e' <- dmdExp spc e
+       return $ ExpM $ CoerceE inf t1 t2 e'
   where
     {- -- Debugging output, show what was demanded in this expression
     trace_dmd m = do

@@ -64,6 +64,9 @@ convertExp (ExpM expression) =
        ExpM $ CaseE inf (convertExp scr) (map convertAlt alts)
      ExceptE inf ty ->
        ExpM $ ExceptE inf (convertType ty)
+     CoerceE inf (TypM from_t) (TypM to_t) b ->
+       ExpM $ CoerceE inf (TypM $ convertType from_t) (TypM $ convertType to_t)
+       (convertExp b)
 
 convertAlt :: AltM -> AltM
 convertAlt (AltM alt) =

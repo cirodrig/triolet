@@ -191,6 +191,8 @@ typeInferExp (ExpM expression) =
          typeInferCaseE inf scr alts
        ExceptE {expInfo = inf, expType = rt} ->
          return $ ExpTM $ TypeAnn rt (ExceptE inf rt)
+       CoerceE inf from_t to_t body ->
+         typeInferCoerceE inf from_t to_t body
 
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCM ExpTM
@@ -441,6 +443,17 @@ checkAltParam pos expected_type pattern = do
   checkType pos expected_type given_type
   return $ patMBinder pattern
 
+typeInferCoerceE inf from_t to_t body = do
+  from_t' <- typeInferType from_t
+  to_t' <- typeInferType to_t
+  body' <- typeInferExp body
+  
+  -- Body type must match the coercion's input type
+  checkType (text "Argument of coercion has wrong type") (getSourcePos inf) (fromTypM from_t) (getExpType body')
+  
+  let new_exp = CoerceE inf from_t' to_t' body'
+  return $ ExpTM $ TypeAnn (fromTypM to_t) new_exp
+  
 typeCheckDefGroup :: DefGroup (Def Mem) -> (DefGroup (Def TM) -> TCM b) -> TCM b
 typeCheckDefGroup defgroup k = 
   case defgroup
@@ -496,6 +509,8 @@ inferExpType expression =
          CaseE _ _ (alt : _) ->
            infer_alt alt
          ExceptE _ rt ->
+           return rt
+         CoerceE {expRetType = TypM rt} ->
            return rt
          _ ->
            fmap getExpType $ typeInferExp expression

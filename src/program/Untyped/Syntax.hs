@@ -13,7 +13,6 @@ import Common.Identifier
 import Common.Label
 import Export
 import qualified SystemF.Syntax as SystemF
-import Untyped.HMType
 import Untyped.Data
 import Type.Var(Var)
 

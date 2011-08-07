@@ -101,6 +101,11 @@ pprExpPrec (ExpM expression) =
        in case_doc $$ of_doc `hasPrec` stmtPrec
      ExceptE _ rt ->
        text "except" <+> pprType rt `hasPrec` stmtPrec
+     CoerceE _ from_t to_t body ->
+       let coercion_doc = pprType (fromTypM from_t) <+> text "=>" <+> pprType (fromTypM to_t)
+           b_doc = pprExp body
+       in hang (text "coerce" <+> parens coercion_doc) 4 b_doc `hasPrec` appPrec
+
 
 pprPatternMatch (AltM (DeCon con ty_args ex_types params _)) =
   let con_doc = pprVar con

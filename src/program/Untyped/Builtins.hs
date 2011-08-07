@@ -11,7 +11,6 @@ import Common.THRecord
 import Untyped.BuiltinsTH
 import Untyped.Kind
 import Untyped.Data
-import Untyped.HMType
 import Untyped.Syntax
 
 $(do d <- declareRecord tiBuiltinSpecification

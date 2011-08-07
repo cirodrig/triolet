@@ -194,6 +194,8 @@ instance Renameable (Exp Mem) where
          CaseE inf (rename rn scr) (map (rename rn) alts)
        ExceptE inf rty ->
          ExceptE inf (rename rn rty)
+       CoerceE inf t1 t2 e ->
+         CoerceE inf (rename rn t1) (rename rn t2) (rename rn e)
 
   freshen p (ExpM expression) =
     case expression
@@ -254,6 +256,8 @@ instance Renameable (Exp Mem) where
          freeVariables scr `Set.union` freeVariables alts
        ExceptE _ rty ->
          freeVariables rty
+       CoerceE _ t1 t2 e ->
+         freeVariables t1 `Set.union` freeVariables t2 `Set.union` freeVariables e
 
 instance Renameable (Alt Mem) where
   rename rn (AltM alt) =
@@ -421,6 +425,11 @@ instance Substitutable (Exp Mem) where
        ExceptE inf ty -> do
          ty' <- substitute s ty
          return $ ExpM $ ExceptE inf ty'
+       CoerceE inf (TypM t1) (TypM t2) e -> do
+         t1' <- substitute s t1
+         t2' <- substitute s t2
+         e' <- substitute s e
+         return $ ExpM $ CoerceE inf (TypM t1') (TypM t2') e'
 
 instance Substitutable (Alt Mem) where
   substitute s (AltM alt) =
@@ -531,6 +540,9 @@ freshenExp (ExpM expression) = ExpM <$>
        CaseE inf <$> freshenExp scr <*> mapM freshenAlt alts
 
      ExceptE inf ty -> ExceptE inf <$> freshenType ty
+     
+     CoerceE inf t1 t2 e ->
+       CoerceE inf <$> freshenType t1 <*> freshenType t2 <*> freshenExp e
 
 freshenAlt (AltM alt) = 
   case alt

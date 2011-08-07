@@ -128,6 +128,10 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
        let doc = text "case" <+> pprExpFlagsPrec flags precOuter e $$
                  text "of" <+> vcat (map (pprAltFlags flags) alts)
        in parenthesize precOuter doc prec
+     CoerceE inf (TypSF from_t) (TypSF to_t) b ->
+       let coercion_doc = pprType from_t <+> text "=>" <+> pprType to_t
+           b_doc = pprExpFlagsPrec flags precOuter b 
+       in hang (text "coerce" <+> parens coercion_doc) 4 b_doc
 
 pprIf flags cond tr fa =
   let condText = pprExpFlags flags cond

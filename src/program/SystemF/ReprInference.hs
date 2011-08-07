@@ -943,6 +943,21 @@ reprExp expression =
        (t', _) <- cvtNormalizeNaturalType t
        return (ExpM $ ExceptE inf t', t')
 
+     CoerceE inf (TypSF from_t) (TypSF to_t) body -> do
+       -- The two types involved in the coercion may have different
+       -- natural kinds.  Ensure that the types are converted to the _same_
+       -- canonical kind.
+       (body', body_type) <- reprExp body
+       
+       -- Determine the boxed form of from_t
+       tenv <- getTypeEnv
+       from_t' <- cvtCanonicalReturnType from_t 
+       co_body <- coerceExpToReturnType body_type from_t' body'
+       
+       -- The new return type is the boxed version of to_t
+       to_t' <- cvtCanonicalReturnType to_t
+       return (ExpM $ CoerceE inf (TypM from_t') (TypM to_t') co_body, to_t')
+
 reprApp inf op ty_args args = do
   (op', op_type) <- reprExp op
   repr_ty_args <- mapM (cvtNormalizeCanonicalType . fromTypSF) ty_args

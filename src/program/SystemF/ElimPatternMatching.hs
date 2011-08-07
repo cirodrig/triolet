@@ -112,6 +112,9 @@ elimPMExp expression =
        scr' <- elimPMExp scr 
        alts' <- traverse elimPMAlt alts
        return $ ExpSF $ CaseE inf scr' alts'
+     CoerceE inf from_t to_t body -> do
+       body' <- elimPMExp body
+       return $ ExpSF $ CoerceE inf from_t to_t body'
 
 elimPMAlt :: AltSF -> PM AltSF
 elimPMAlt (AltSF alt) = do

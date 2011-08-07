@@ -918,6 +918,7 @@ rwExp expression = debug "rwExp" expression $ do
       LetfunE inf defs body -> rwLetrec inf defs body
       CaseE inf scrut alts -> rwCase inf scrut alts
       ExceptE _ _ -> rwExpReturn (ex1, Nothing)
+      CoerceE inf from_t to_t body -> rwCoerce inf from_t to_t body
   where
     debug _ _ = id
     -- debug l e m = traceShow (text l <+> (pprExp e)) m
@@ -1611,6 +1612,15 @@ rwAlt scr m_values (AltM alt) =
       case maybe_val
       of Just val -> Just (setTrivialValue (patMVar pat) val)
          Nothing  -> Just (VarAV defaultExpInfo $ patMVar pat)
+
+rwCoerce inf from_t to_t body = do
+  -- Are the types equal in this context?
+  types_equal <- compareTypes (fromTypM from_t) (fromTypM to_t)
+  if types_equal
+    then rwExp body             -- Coercion is not necessary
+    else do
+      (body', _) <- rwExp body
+      return (ExpM $ CoerceE inf from_t to_t body', Nothing)
 
 rwFun :: FunM -> LR (FunM, Maybe AbsFunValue)
 

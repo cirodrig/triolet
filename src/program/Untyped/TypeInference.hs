@@ -45,7 +45,6 @@ mapAndUnzip3M f xs = do
   ys <- mapM f xs
   return (unzip3 ys)
 
-        
 
 printUnresolvedPlaceholders ps = mapM print_placeholder ps
   where
@@ -55,6 +54,26 @@ printUnresolvedPlaceholders ps = mapM print_placeholder ps
         
     print_placeholder _ =
       putStrLn "Unknown non-dictionary placeholder"
+
+-------------------------------------------------------------------------------
+-- Coercions
+
+-- | A type coercion.  Type coercions modify a value's data type without
+--   changing its underlying representation.  Coercions are needed for some 
+--   uses of type functions.
+data Coercion =
+    -- | The identity coercion, which does nothing.
+    NoCoercion HMType
+    -- | @Coercion t1 t2@ is a coercion from type t1 to type t2.
+  | Coercion HMType HMType
+
+-- | Apply a coercion to an expression
+applyCoercion :: Coercion -> TIExp -> IO TIExp
+applyCoercion (NoCoercion _) e =
+  return e
+
+applyCoercion (Coercion from_t to_t) e = do
+  return $ mkCoerceE noSourcePos (convertHMType from_t) (convertHMType to_t) e
 
 -------------------------------------------------------------------------------
 -- The type inference monad
@@ -91,11 +110,29 @@ assume :: Variable -> TypeAssignment -> Inf a -> Inf a
 assume v assignment (Inf f) = Inf $ \env ->
   f (Map.insert v assignment env)
 
--- | Unify in the Inf monad.  Generated constraints are added to the context.
-unifyInf :: Unifiable a => SourcePos -> a -> a -> Inf ()
-unifyInf pos x y = Inf $ \_ -> do
-  c <- unify pos x y
-  return (c, Set.empty, [], ())
+-- | Unify types in the Inf monad.  The first parameter is the expected type,
+--   the second is the given type.
+--
+--   Generated constraints are added to the context.
+--
+--   A coercion from given type to expected type is returned.
+unifyInf :: SourcePos -> HMType -> HMType -> Inf Coercion
+unifyInf pos expect given = Inf $ \_ -> do
+  c <- unify pos expect given
+  -- If unification produced equality constraints, the type must be coerced
+  let coercion = if any isEqualityPredicate c
+                 then Coercion given expect
+                 else NoCoercion expect
+  return (c, Set.empty, [], coercion)
+
+unifyAndCoerceInf :: SourcePos
+                  -> TIExp      -- ^ Expression with given type
+                  -> HMType     -- ^ Expected type
+                  -> HMType     -- ^ Given type
+                  -> Inf TIExp  -- ^ Returns expression with expected type
+unifyAndCoerceInf pos e expected given = do
+  co <- unifyInf pos expected given
+  liftIO $ applyCoercion co e
 
 -- | Add a predicate to the context
 requirePredicate :: Predicate -> Inf ()
@@ -105,6 +142,11 @@ requirePredicate p = require [p]
 requirePassable :: HMType -> Inf ()
 requirePassable ty = do 
   require [ty `IsInst` tiBuiltin the_Repr]
+
+-- | For debugging, print a constraint
+printContext s c | null c = return ()
+                 | otherwise = do doc <- runPpr $ pprContext c
+                                  print (text s <+> doc)
 
 -- | Add a constraint to the context
 require :: Constraint -> Inf ()
@@ -148,6 +190,8 @@ instantiateVariable pos v = Inf $ \env ->
        -- There must be a parameter passing convention for this type
        let cst = ty `IsInst` tiBuiltin the_Repr
 
+       -- For debugging, show the instantiation that occurred
+       -- printContext ("instantiate " ++ maybe "" showLabel (varName v)) (cst : constraint)
        return (cst:constraint, vars, placeholders, (val, ty))
 
 lookupTyScheme :: Variable -> Inf TyScheme
@@ -184,7 +228,7 @@ generalize env constraint inferred_types = do
   putStrLn "Retained"
   print =<< runPpr (pprContext retained)
   let ok_constraint (IsInst {}) = True
-      ok_constraint (IsFamily {}) = True
+      ok_constraint (IsEqual {}) = True
       ok_constraint _ = False
   when (not $ all ok_constraint retained) $
     internalError "generalize: Unexpected constraints"
@@ -521,21 +565,23 @@ inferExpressionType expression =
        requirePassable result_type
        
        -- Unify expected function type with actual function type
-       unifyInf pos function_type op_ty
+       co_op_exp <- unifyAndCoerceInf pos op_exp function_type op_ty
        
-       return (mkPolyCallE pos op_exp [] arg_exps, result_type)
+       return (mkPolyCallE pos co_op_exp [] arg_exps, result_type)
      IfE {expCondition = cond, expIfTrue = tr, expIfFalse = fa} -> do
        (cond_exp, cond_ty) <- inferExpressionType cond
        
-       -- Check that condition has type 'bool'       
-       unifyInf pos (ConTy $ tiBuiltin the_con_bool) cond_ty
+       -- Check that condition has type 'bool'
+       co_cond_exp <-
+         unifyAndCoerceInf pos cond_exp (ConTy $ tiBuiltin the_con_bool) cond_ty
               
        (tr_exp, tr_ty) <- inferExpressionType tr
        (fa_exp, fa_ty) <- inferExpressionType fa
        
        -- True and false paths must have same type and passing convention
-       unifyInf pos tr_ty fa_ty
-       return (mkIfE pos cond_exp tr_exp fa_exp, tr_ty)
+       co <- unifyInf pos tr_ty fa_ty
+       co_fa_exp <- liftIO $ applyCoercion co fa_exp
+       return (mkIfE pos co_cond_exp tr_exp co_fa_exp, tr_ty)
      FunE {expFunction = f} -> do
        (fun_exp, fun_ty) <- inferLambdaType f
        return (mkFunE pos fun_exp, fun_ty)
@@ -543,11 +589,11 @@ inferExpressionType expression =
        (rhs_exp, rhs_ty) <- inferExpressionType rhs
        addParameterToEnvironment p $ \pat param_ty -> do
          -- Unify parameter type with RHS type
-         unifyInf pos param_ty rhs_ty
+         co_rhs_exp <- unifyAndCoerceInf pos rhs_exp param_ty rhs_ty
 
          -- Scan body
          (body_exp, body_ty) <- inferExpressionType body
-         return (mkLetE pos pat rhs_exp body_exp, body_ty)
+         return (mkLetE pos pat co_rhs_exp body_exp, body_ty)
      LetrecE {expDefinitions = defs, expBody = body} ->
        inferDefGroup False defs $ \defs' -> do
          (body_exp, body_ty) <- inferExpressionType body
@@ -575,15 +621,18 @@ inferFunctionFirstOrderType :: SourcePos
                             -> Inf (SystemF.Fun TI, HMType)
 inferFunctionFirstOrderType pos params body annotated_return_type =
   addParametersToEnvironment params $ \sf_params param_types -> do
-    (body, body_type) <- inferExpressionType body
     
-    -- If a return type was annotated, check against the return type
-    case annotated_return_type of
-      Nothing -> return ()
-      Just t  -> unifyInf pos body_type t
-      
-    let f_type = functionType param_types body_type
-    f <- liftIO $ mkFunction pos [] sf_params (convertHMType body_type) body
+    (co_body, rtype) <- do
+      (body, body_type) <- inferExpressionType body
+
+      -- If a return type was annotated, coerce to the return type
+      case annotated_return_type of
+        Nothing -> return (body, body_type)
+        Just t  -> do co_body <- unifyAndCoerceInf pos body t body_type
+                      return (co_body, t)
+
+    let f_type = functionType param_types rtype
+    f <- liftIO $ mkFunction pos [] sf_params (convertHMType rtype) co_body
     return (f, f_type)
 
 -- | Bind a list of parameters with first-order types over a local scope.
@@ -675,7 +724,13 @@ inferExportType (Export { exportAnnotation = ann
       where 
         instantiate_and_unify = do
           (inst_exp, var_type) <- instantiateVariable pos var
-          unifyInf pos var_type ty
+          co <- unifyInf pos var_type ty
+          
+          -- Since exported types are monomorphic, coercions should never
+          -- occur here
+          case co of
+            NoCoercion _ -> return ()
+            _ -> internalError "Unexpected type coercion in export expression"
           return inst_exp
 
 inferModuleTypes :: Module -> Inf (SystemF.Module TI)
@@ -714,6 +769,8 @@ doTypeInference m = do
 
   return x
   where
+    -- Free variables default to 'any'.
+    -- Defaulting does not produce constraints.
     defaultFreeVariable v = do
       b <- isCanonicalTyVar v
       if b

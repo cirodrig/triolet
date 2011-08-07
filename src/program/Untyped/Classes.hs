@@ -4,6 +4,7 @@
 {-# LANGUAGE TypeFamilies #-}
 module Untyped.Classes
        (pprPredicate, pprContext,
+        isInstancePredicate, isEqualityPredicate,
         reduceTypeFunction,
         toHnf,
         reduceContext,
@@ -65,8 +66,8 @@ mapAndUnzip3M f xs = liftM unzip3 $ mapM f xs
 isInstancePredicate (IsInst _ _) = True
 isInstancePredicate _ = False
 
-isFamilyPredicate (IsFamily _ _ _) = True
-isFamilyPredicate _ = False
+isEqualityPredicate (IsEqual _ _) = True
+isEqualityPredicate _ = False
 
 -- | Somewhat of a hack.  Decide whether this is the distinguished type class
 -- for object layout information. 
@@ -99,7 +100,6 @@ reduceTypeFunction family [arg] = runMaybeT $ do
 
 prdSignature :: Predicate -> ClassSig
 prdSignature (IsInst _ cls) = clsSignature cls
-prdSignature (IsFamily fam _ _) = tfSignature fam
 
 -- | Get all superclass predicates of a given class predicate
 superclassPredicates :: Predicate -> [Predicate]
@@ -110,7 +110,9 @@ superclassPredicates _ = internalError "Not an instance predicate"
 
 -- | Get a class and its superclass predicates
 andSuperclassPredicates :: Predicate -> [Predicate]
-andSuperclassPredicates p = p : superclassPredicates p
+andSuperclassPredicates p@(IsInst {}) = p : superclassPredicates p
+andSuperclassPredicates _ =
+  internalError "andSuperclassPredicates: Not an instance predicate"
 
 -- | Decide whether the constraint entails the predicate, which must be a class
 --   instance predicate.
@@ -120,35 +122,24 @@ andSuperclassPredicates p = p : superclassPredicates p
 entailsInstancePredicate :: Constraint -> Predicate -> IO (Maybe Constraint)
 ps `entailsInstancePredicate` p@(IsInst _ _) =
   -- True if the predicate is in the context, including superclasses
-  let context = concatMap andSuperclassPredicates ps
+  let inst_ps = filter isInstancePredicate ps
+      context = concatMap andSuperclassPredicates inst_ps
   in do b <- anyM (p `uEqual`) context
         return $! if b then Just [] else Nothing
 
-ps `entailsInstancePredicate` p@(IsFamily fam arg result) =
-  -- True if a matching predicate is in the context, including superclasses
-  let context = concatMap andSuperclassPredicates ps
-  in match_any context
-  where
-    -- Try predicates one at a time until a Just value is returned
-    match_any (c:cs) = do
-      result1 <- match_and_unify c
-      case result1 of {Nothing -> match_any cs; Just _ -> return result1}
-    
-    match_any [] = return Nothing
+_ `entailsInstancePredicate` _ =
+  internalError "entailsInstancePredicate: Not an instance predicate"
 
-    -- Match the predicate to one on the context.  On match, unify their
-    -- result types.
-    match_and_unify (IsFamily fam2 arg2 result2)
-      | fam == fam2 = do
-        m_subst <- match arg2 arg
-        case m_subst of
-          Nothing -> return Nothing
-          Just _  -> do
-            -- Unify result types
-            cst <- unify noSourcePos result result2
-            return (Just cst)
-
-    match_and_unify _ = return Nothing
+-- | Decide whether the constraint entails the predicate, which must be a class
+--   instance predicate.
+--   If the constraint entails the predicate, then eliminate the predicate and
+--   return new, derived predicates.
+--   Otherwise, return Nothing.
+entailsEqualityPredicate :: Constraint -> Predicate -> IO (Maybe Constraint)
+ps `entailsEqualityPredicate` p@(IsEqual s1 t1) = do
+  -- Check both the predicate and its mirrored equivalent
+  b <- anyM (p `uEqual`) ps >||> anyM (IsEqual t1 s1 `uEqual`) ps
+  return $! if b then Just [] else Nothing
 
 -- | Determine whether a class instance predicate is in H98-style
 --   head-normal form.
@@ -167,8 +158,8 @@ ps `entailsInstancePredicate` p@(IsFamily fam arg result) =
 -- necessarily indicate an error.
 isH98Hnf :: Predicate -> IO Bool
 isH98Hnf predicate = case predicate 
-                     of IsInst t _     -> checkTypeHead t
-                        IsFamily _ t _ -> checkTypeHead t
+                     of IsInst t _    -> checkTypeHead t
+                        IsEqual t1 t2 -> return False
   where
     checkTypeHead t = do
       t' <- canonicalizeHead t
@@ -196,9 +187,9 @@ toHnf pos pred = do
     of IsInst {} ->
          -- Perform reduction based on the set of known class instances
          instanceReduction pos pred
-       IsFamily {} ->
+       IsEqual {} ->
          -- Perform reduction based on the set of known family instances
-         familyReduction pos pred
+         equalityReduction pos pred
 
 -- | Convert a constraint to HNF and ignore how it was derived
 toHnfConstraint :: Predicate -> IO Constraint
@@ -243,18 +234,40 @@ instanceReduction pos pred = do
         let derivation = FunPassConvDerivation { conclusion = pred }
         in return (derivation, [])
 
-familyReduction :: SourcePos -> Predicate -> IO (Derivation, Constraint)
-familyReduction pos pred = do
-  ip <- instancePredicates pred
-  case ip of
-    NotReduced -> do
-      return (IdDerivation pred, [pred])
+equalityReduction :: SourcePos -> Predicate -> IO (Derivation, Constraint)
+equalityReduction pos pred@(IsEqual t1 t2) = do
+  -- Try to decompose this predicate and eliminate trivial predicates
+  result <- runMaybeT $ recursive_reduce $ do
+    equalityTrivial (t1, t2) `mplus` equalityDecomp (t1, t2)
 
-    TyFamilyReduced [] family [] ->
-      -- TODO: Actually handle generated constraints
-      let derivation = TyFamilyDerivation {conclusion = pred}
-      in return (derivation, [])
+  return $ fromMaybe (IdDerivation pred, [pred]) result
+  where
+    recursive_reduce m = do
+      (deriv, csts) <- m
+      (_, csts') <- mapAndUnzipM (lift . equalityReduction pos) csts
+      return (deriv, concat csts')
 
+-- | If LHS and RHS of an equality constraint are equal, discard it
+equalityTrivial :: (HMType, HMType) -> MaybeT IO (Derivation, Constraint)
+equalityTrivial (t1, t2) = do
+  b <- lift $ uEqual t1 t2
+  if b then return (EqualityDerivation (IsEqual t1 t2), []) else mzero
+
+-- | If the LHS and RHS are equal data constructors, decompose the
+--   constraint
+equalityDecomp :: (HMType, HMType) -> MaybeT IO (Derivation, Constraint)
+equalityDecomp (t1, t2) = do
+  (t1_head, t1_args) <- lift $ inspectTypeApplication t1
+  (t2_head, t2_args) <- lift $ inspectTypeApplication t2
+  case (t1_head, t2_head) of
+    (ConTy c1, ConTy c2) 
+      | isDataCon c1 && isDataCon c2 && c1 == c2 ->
+          -- Equality of matching data constructors: C a b = C c d.
+          -- Decompose into equality of arguments: a = c, b = d.
+          let new_constraints = zipWith IsEqual t1_args t2_args
+          in return (EqualityDerivation (IsEqual t1 t2), new_constraints)
+    _ -> mzero
+  
 -------------------------------------------------------------------------------
 -- Context reduction
 
@@ -279,7 +292,9 @@ addToContext ctx pred = foldM addToContextHNF ctx =<< toHnfConstraint pred
 -- context and predicate must be in head-normal form.
 addToContextHNF :: Constraint -> Predicate -> IO Constraint
 addToContextHNF ctx pred = do
-  new_cst <- entailsInstancePredicate ctx pred
+  new_cst <- case pred
+             of IsInst {} -> entailsInstancePredicate ctx pred
+                IsEqual {} -> entailsEqualityPredicate ctx pred
   case new_cst of
     Nothing ->
       -- Not a redundant predicate
@@ -291,7 +306,8 @@ addToContextHNF ctx pred = do
 data InstanceReductionStep =
     NotReduced
   | InstanceReduced Constraint Instance Constraint
-  | TyFamilyReduced Constraint TyFamilyInstance Constraint
+    -- | Reduction of an equality constraint to simpler constraints
+  | EqualityReduced Constraint
   | FunctionPassableReduced HMType
 
 -- | Try to satisfy a predicate with one of the known class instances.
@@ -337,39 +353,6 @@ instancePredicates (IsInst t cls) = do
            rename subst pred
          _ -> internalError "Not an instance predicate"
 
-instancePredicates (IsFamily fam t result) = do
-  (head, _) <- uncurryTypeApplication t
-  case head of
-    ConTy con | isTyVar con -> 
-      -- If the head is a type variable, we won't find any instances
-      return NotReduced
-
-    FunTy _ -> return NotReduced
-
-    _ -> fmap to_reduction_step $ runMaybeT $ do
-      -- Match against all instances until one succeeds 
-      (inst, inst_cst) <-
-        msum $ map (matchTyFamilyPredicate t result) $ tfInstances fam
-    
-      -- Get the class constraints
-      -- If an instance matched, then the class must match also
-      cls_cst <-
-        lift $ mapM (instantiatePredicate t) $ clsConstraint $ tfSignature fam
-
-      return (cls_cst, inst, inst_cst)
-  where
-    to_reduction_step Nothing = NotReduced
-    to_reduction_step (Just (x, y, z)) = TyFamilyReduced x y z
-
-    -- Instantiate a superclass predicate
-    instantiatePredicate inst_type pred =
-      case pred
-      of IsInst ty' _ -> do
-           -- Predicate type must match, because the instance matched
-           Just subst <- match ty' inst_type
-           rename subst pred
-         _ -> internalError "Not an instance predicate"
-
 instancePredicates _ = internalError "Not an instance predicate"
 
 -- | Attempt to match a type against a class instance
@@ -379,21 +362,6 @@ matchInstancePredicate inst_type inst = do
   (_, inst_cst) <- matchInstanceSignature inst_type (insSignature inst)
   return (inst, inst_cst)
 
--- | Attempt to match a type against a type family instance.
-matchTyFamilyPredicate :: HMType -> HMType -> TyFamilyInstance
-                       -> MaybeT IO (TyFamilyInstance, Constraint)
-matchTyFamilyPredicate inst_type result_type inst = do
-  (subst, inst_cst) <- matchInstanceSignature inst_type (tinsSignature inst)
-  
-  -- Refine the result type of the type application.
-  -- The refinement should produce no constraints.
-  inst_result_type <- lift $ rename subst $ tinsType inst
-  csts <- lift $ unify noSourcePos inst_result_type result_type
-  lift $ when (not $ null csts) $
-    fail "Type refinement produced unexpected constraints"
-
-  return (inst, inst_cst)
-  
 matchInstanceSignature :: HMType -> InstanceSig
                        -> MaybeT IO (Substitution, Constraint)
 matchInstanceSignature inst_type sig = do
@@ -426,7 +394,8 @@ splitConstraint cst fvars qvars = do
   if null defaulted
     then if null ambiguous 
          then return (retained, deferred)
-         else fail "Ambiguous constraint"
+         else do cst_doc <- runPpr $ pprContext ambiguous
+                 fail ("Ambiguous constraint:\n" ++ show cst_doc)
     else do
     -- Apply defaulting rules, then retry
     new_csts <- mapM defaultConstraint defaulted
@@ -450,7 +419,7 @@ splitConstraint cst fvars qvars = do
     isDefaultable (IsInst head cls) =
       cls == tiBuiltin the_Traversable
     
-    isDefaultable (IsFamily _ _ _) = False
+    isDefaultable (IsEqual _ _) = False
 
     partitionM f xs = go xs [] [] [] []
       where
@@ -539,7 +508,7 @@ toProof pos env derivation =
            prf = mkPolyCallE pos (mkVarE pos con) [convertHMType ty] []
        return (True, [], prf)
      
-     TyFamilyDerivation { conclusion = prd@(IsFamily _ _ _) } -> do
+     EqualityDerivation { conclusion = prd@(IsEqual _ _) } -> do
        -- No evidence is needed
        let prf = mkVarE pos (SystemF.pyonBuiltin SystemF.the_None)
        return (True, [], prf)

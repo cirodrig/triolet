@@ -8,7 +8,7 @@ module Untyped.HMType
         TyVars, TyVarSet, TyCon,
         tyConKind,
         tcConTypeFunction,
-        isTyVar, isTyFun, isRigidTyVar, isFlexibleTyVar,
+        isTyVar, isTyFun, isRigidTyVar, isFlexibleTyVar, isDataCon,
         isCanonicalTyVar, 
         newTyVar, newRigidTyVar, mkTyCon, newTyFun, duplicateTyVar,
         HMType(..),
@@ -123,6 +123,13 @@ isRigidTyVar c = isTyVar c && isNothing (tcRep c)
 
 isFlexibleTyVar :: TyCon -> Bool
 isFlexibleTyVar c = isTyVar c && isJust (tcRep c)
+
+isDataCon :: TyCon -> Bool
+isDataCon c =
+  -- It's a data constructor if it's a constructor, but not a type function
+  case tcConInfo c
+  of Just ci -> isNothing $ tcConTypeFunction c
+     Nothing -> False
 
 -- | Create a new flexible type variable
 newTyVar :: Kind -> Maybe Label -> IO TyCon
@@ -396,93 +403,43 @@ instance Unifiable HMType where
         return $ Map.findWithDefault t v (substTc substitution)
       ren t = return t
 
-  -- Unify types.  Unification on types never produces constraints.
-  unify pos t1 t2 = do
+  unify = unifyTypes
+
+  matchSubst subst t1 t2 = do
     t1_c <- canonicalizeHead t1
     t2_c <- canonicalizeHead t2
-
-    -- Unify if either term contains a type variable.
+        
     case (t1_c, t2_c) of
-      (ConTy c1, ConTy c2)   
-        | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> do unifyTyVars c1 c2
-                                                         success
-      (ConTy c1, _)
-        | isFlexibleTyVar c1 -> do unifyTyVar c1 t2_c
-                                   success
-      (_, ConTy c2)
-        | isFlexibleTyVar c2 -> do unifyTyVar c2 t1_c
-                                   success
-
-      -- Currently, only support single-argument type families
-      (TFunAppTy f1 [t1'], TFunAppTy f2 [t2'])
-        | f1 == f2             -> unify pos t1' t2'
-        | otherwise -> do -- Create a new type variable to stand for these two types
-                          a <- newTyVar (hmTypeKind t1_c) Nothing
-                          let Just fam1 = tcConTypeFunction f1
-                              Just fam2 = tcConTypeFunction f2
-                          return [IsFamily fam1 t1' (ConTy a),
-                                  IsFamily fam2 t2' (ConTy a)]
-      (TFunAppTy f1 [t1'], _)  -> let Just fam1 = tcConTypeFunction f1
-                                  in return [IsFamily fam1 t1' t2_c]
-      (_, TFunAppTy f2 [t2'])  -> let Just fam2 = tcConTypeFunction f2
-                                  in return [IsFamily fam2 t2' t1_c]
-
-      (ConTy c1, ConTy c2)     -> require $ c1 == c2
-      (FunTy n1,   FunTy n2)   -> require $ n1 == n2
+      (ConTy v, _) | isFlexibleTyVar v ->
+        -- Semi-unification of a variable with t2_c
+        -- Look for this variable's value in the map
+        case Map.lookup v (substTc subst)
+        of Just substituted_t1 -> do
+             -- Match terms without further substitution
+             require =<< uEqual substituted_t1 t2_c
+           Nothing ->
+             -- Add the mapping v |-> t2_c and succeed
+             let subst' = updateTc (Map.insert v t2_c) subst
+             in return (Just subst')
+      
+      -- Non-variable terms must match exactly
+      (ConTy c1, ConTy c2) -> require $ c1 == c2
+      (FunTy n1, FunTy n2) -> require $ n1 == n2
       (TupleTy t1, TupleTy t2) -> require $ t1 == t2
-      (AppTy a b,  AppTy c d)  -> do c1 <- unify pos a c
-                                     c2 <- unify pos b d
-                                     return $ c1 ++ c2
-      (AnyTy k1, AnyTy k2)     -> require $ k1 == k2
+      (AnyTy k1, AnyTy k2) -> require $ k1 == k2
+      -- Recurse on app terms
+      (AppTy a b,  AppTy c d) -> do result1 <- matchSubst subst a c
+                                    case result1 of
+                                      Nothing -> return Nothing
+                                      Just subst' -> matchSubst subst' b d
+      (TFunAppTy _ _, _) ->
+        internalError "match: Unexpected type function in pattern"
       _ -> failure
     where
-      success = return []
-      failure = do
-        (t1_doc, t2_doc) <- runPpr $ (,) <$> uShow t1 <*> uShow t2
-        fail $ show (text (show pos) <> text ":" <+> text "Cannot unify" $$
-                     nest 4 t1_doc $$
-                     text "with" $$
-                     nest 4 t2_doc)
+      success = return (Just subst)
+      failure = return Nothing
       require True  = success
       require False = failure
-
-  match t1 t2 = match_ emptySubstitution t1 t2
-    where
-      match_ subst t1 t2 = do
-        t1_c <- canonicalizeHead t1
-        t2_c <- canonicalizeHead t2
-        
-        case (t1_c, t2_c) of
-          (ConTy v, _) | isFlexibleTyVar v ->
-            -- Semi-unification of a variable with t2_c
-            -- Look for this variable's value in the map
-            case Map.lookup v (substTc subst)
-            of Just substituted_t1 -> do
-                 -- Match terms without further substitution
-                 require =<< uEqual substituted_t1 t2_c
-               Nothing ->
-                 -- Add the mapping v |-> t2_c and succeed
-                 let subst' = updateTc (Map.insert v t2_c) subst
-                 in return (Just subst')
-          
-          -- Non-variable terms must match exactly
-          (ConTy c1, ConTy c2) -> require $ c1 == c2
-          (FunTy n1, FunTy n2) -> require $ n1 == n2
-          (TupleTy t1, TupleTy t2) -> require $ t1 == t2
-          (AnyTy k1, AnyTy k2) -> require $ k1 == k2
-          -- Recurse on app terms
-          (AppTy a b,  AppTy c d) -> do result1 <- match_ subst a c
-                                        case result1 of
-                                          Nothing -> return Nothing
-                                          Just subst' -> match_ subst' b d
-          (TFunAppTy _ _, _) ->
-            internalError "match: Unexpected type function in pattern"
-          _ -> failure
-        where
-          success = return (Just subst)
-          failure = return Nothing
-          require True  = success
-          require False = failure
         
   uEqual t1 t2 = do
     t1_c <- canonicalizeHead t1
@@ -498,6 +455,59 @@ instance Unifiable HMType where
         | f1 == f2 -> andM $ zipWith uEqual ts1 ts2
       _ -> return False
     
+unifyTypes pos t1 t2 = do
+  t1_c <- canonicalizeHead t1
+  t2_c <- canonicalizeHead t2
+
+  -- Unify if either term contains a type variable.
+  case (t1_c, t2_c) of
+    (ConTy c1, ConTy c2)   
+      | isFlexibleTyVar c1 && isFlexibleTyVar c2 ->
+        unifyTyVars c1 c2 >> success
+    (ConTy c1, _)
+      | isFlexibleTyVar c1 ->
+        unifyTyVar c1 t2_c >> success
+    (_, ConTy c2)
+      | isFlexibleTyVar c2 ->
+        unifyTyVar c2 t1_c >> success
+
+    -- Currently, only support single-argument type families
+    (TFunAppTy f1 [t1'], TFunAppTy f2 [t2'])
+      | f1 == f2 -> unify pos t1' t2'
+      | otherwise -> do
+        -- Create a new, rigid type variable to stand for the reduced type
+        a <- newRigidTyVar (hmTypeKind t1_c) Nothing
+        let Just fam1 = tcConTypeFunction f1
+            Just fam2 = tcConTypeFunction f2
+        return [IsEqual t1_c (ConTy a), IsEqual t2_c (ConTy a)]
+
+    (TFunAppTy f1 [t1'], _)  ->
+      let Just fam1 = tcConTypeFunction f1
+      in return [IsEqual t1_c t2_c]
+
+    (_, TFunAppTy f2 [t2'])  ->
+      let Just fam2 = tcConTypeFunction f2
+      in return [IsEqual t2_c t1_c]
+
+    (ConTy c1, ConTy c2)     -> require $ c1 == c2
+    (FunTy n1,   FunTy n2)   -> require $ n1 == n2
+    (TupleTy t1, TupleTy t2) -> require $ t1 == t2
+    (AppTy a b,  AppTy c d)  -> do c1 <- unify pos a c
+                                   c2 <- unify pos b d
+                                   return $ c1 ++ c2
+    (AnyTy k1, AnyTy k2)     -> require $ k1 == k2
+    _ -> failure
+  where
+    success = return []
+    failure = do
+      (t1_doc, t2_doc) <- runPpr $ (,) <$> uShow t1 <*> uShow t2
+      fail $ show (text (show pos) <> text ":" <+> text "Cannot unify" $$
+                   nest 4 t1_doc $$
+                   text "with" $$
+                   nest 4 t2_doc)
+    require True  = success
+    require False = failure
+
 -------------------------------------------------------------------------------
 -- Pretty-printing
 

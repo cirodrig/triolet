@@ -1,6 +1,8 @@
 
 extern function pyon.internal.list.repr_list (owned) -> owned;
 
+extern function pyon.internal.list.repr_matrix (owned) -> owned;
+
 extern function pyon.internal.list.list_build
   (owned, owned, pointer) -> ();
 

@@ -224,6 +224,10 @@ pevalExp expression =
          Nothing -> do
            alts' <- mapM pevalAlt alts
            return $ ExpSF $ CaseE inf scr' alts'
+     
+     CoerceE inf from_t to_t body -> do
+       body' <- pevalExp body
+       return $ ExpSF $ CoerceE inf from_t to_t body'
   where
     return_lit inf l = return $ ExpSF $ LitE inf l
     int_type = VarT $ pyonBuiltin the_int

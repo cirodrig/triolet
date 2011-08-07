@@ -167,15 +167,15 @@ array_build @(N : intindex) @(a : bare)
 -------------------------------------------------------------------------------
 -- List functions
 
-histogram @(t : bare -> bare)
+histogram @(sh : bare)
   (size : int)
-  (input : Stream (shape t) (Stored int))
+  (input : Stream sh (Stored int))
   (ret : OutPtr (list (Stored int)))
   -> IEffect (list (Stored int)) =
   case defineIntIndex size of someIndInt @(N : intindex) (index : FinIndInt N).
   make_list @(Stored int) @N index
   (referenced @(array N (Stored int))
-   (histogramArray @(shape t) @N index input))
+   (histogramArray @sh @N index input))
   ret;
 
 -------------------------------------------------------------------------------

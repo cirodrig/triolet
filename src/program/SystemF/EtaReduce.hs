@@ -231,6 +231,8 @@ etaReduceAlt recurse allow_exceptions strip_arg (AltM alt) = do
 -------------------------------------------------------------------------------
 -- Eta expansion
 
+-- | Perform eta expansion within an expression.
+--   Find functions that can be eta expanded, and expand them.
 etaExpandExp (ExpM expression) = ExpM <$>
   case expression
   of VarE {} -> return expression
@@ -250,6 +252,8 @@ etaExpandExp (ExpM expression) = ExpM <$>
      ExceptE {} ->
        -- Eta expansion has to change the statement's return type
        internalError "etaExpandExp: Not implemented for exception statements"
+     CoerceE inf from_t to_t b ->
+       CoerceE inf from_t to_t <$> etaExpandExp b
   where
     expand_alt (AltM alt) = do
       body <- etaExpandExp $ altBody alt

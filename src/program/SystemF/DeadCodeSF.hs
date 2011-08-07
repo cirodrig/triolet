@@ -165,6 +165,9 @@ edcExp expression@(ExpSF base_expression) =
        alts' <- mapM edcAlt alts
        return $ ExpSF $ base_expression {expScrutinee = scr',
                                          expAlternatives = alts'}
+     CoerceE inf from_t to_t body -> do
+       body' <- edcExp body
+       return $ ExpSF $ CoerceE inf from_t to_t body'
 
 -- | Dead code elimination for a case alternative
 edcAlt (AltSF alt) = do

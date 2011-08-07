@@ -951,9 +951,9 @@ mkSafeSlice2Type =
                      (ConTy (tiBuiltin the_con_MatrixView) @@ aT))
 
 mkHistogramType =
-  forallType [Star :-> Star] $ \[t] ->
+  forallType [Star] $ \[sh] ->
   let int_type = ConTy $ tiBuiltin the_con_int
-  in ([], functionType [int_type, iterType (ConTy t) int_type]
+  in ([], functionType [int_type, ConTy (tiBuiltin the_con_iter) @@ ConTy sh @@ int_type]
           (ConTy (tiBuiltin the_con_list) @@ int_type))
 
 mkFloorType =

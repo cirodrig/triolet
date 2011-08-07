@@ -1063,6 +1063,8 @@ floatInExpDmd dmd (ExpM expression) =
        floatInCase dmd inf scr alts
 
      ExceptE {} -> unchanged
+     
+     CoerceE {} -> unchanged
   where
     unchanged = do
       ty <- inferExpType (ExpM expression)
