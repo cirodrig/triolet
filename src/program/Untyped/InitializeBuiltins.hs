@@ -4,7 +4,7 @@
 
 {-# LANGUAGE TemplateHaskell, DoRec #-}
 module Untyped.InitializeBuiltins
-       (initializeTIBuiltins)
+       (initializeTIBuiltins, printTIBuiltinGlobals)
 where
 
 import Control.Concurrent.MVar
@@ -37,12 +37,13 @@ builtinTyCon name kind sf_con =
   let y = SystemF.TypSF (Type.Type.VarT sf_con)
   in mkTyCon (builtinLabel name) kind y
 
+shapeType ty = TFunAppTy (tiBuiltin the_con_shape) [ty]
+
 -- | Create the type of an iterator/stream.
 --   The first argument is the stream shape, the second is the element type.
 iterType :: HMType -> HMType -> HMType
 iterType shp ty =
-  let shape_type = ConTy (tiBuiltin the_con_shape) @@ shp
-  in ConTy (tiBuiltin the_con_iter) @@ shape_type @@ ty
+  ConTy (tiBuiltin the_con_iter) @@ (shapeType shp) @@ ty
 
 listIterType = iterType (ConTy (tiBuiltin the_con_list))
 matrixIterType = iterType (ConTy (tiBuiltin the_con_matrix))
@@ -54,8 +55,9 @@ matrixIterType = iterType (ConTy (tiBuiltin the_con_matrix))
 -- signature.
 mkMethodType :: Class -> TyScheme -> TyScheme
 mkMethodType cls (TyScheme qvars cst fot) =
-  let qvars' = clsParam cls : qvars
-      cst' = (ConTy (clsParam cls) `IsInst` cls) : cst
+  let cls_var = clsParam $ clsSignature cls
+      qvars' = cls_var : qvars
+      cst' = (ConTy cls_var `IsInst` cls) : cst
   in TyScheme qvars' cst' fot
 
 -- | Create a class method.
@@ -80,28 +82,69 @@ classMethodType cls_field index =
   let cls = tiBuiltin cls_field
   in mkMethodType cls (clmSignature $ getClassMethod cls index)
 
-monomorphicInstance cls ty mcon methods =
-  Instance { insQVars = []
-           , insConstraint = []
-           , insClass = cls
-           , insType = ty
-           , insCon = mcon
-           , insMethods = methods
-           }
+monomorphicInstance cls ty methods =
+  mkInstance [] [] (clsSignature cls) ty Nothing methods
+
+monomorphicExplicitInstance cls ty con methods =
+  mkInstance [] [] (clsSignature cls) ty (Just con) methods
+
+polyInstance qvars cst cls ty methods =
+  mkInstance qvars cst (clsSignature cls) ty Nothing methods
+
+polyExplicitInstance qvars cst cls ty con methods =
+  mkInstance qvars cst (clsSignature cls) ty (Just con) methods
+
+mkTyFunction :: String -> Kind -> Constraint -> Type.Type.Var
+             -> [TyFamilyInstance]
+             -> IO (TyCon, TyFamily)
+mkTyFunction name kind cst sf_var instances = do
+  rec { con <- newTyFun (builtinLabel name) kind family
+      ; let family = mkTyFamily name con cst sf_var instances
+      }
+  return (con, family)
+
+mkShapeTyFun = do
+  rec { (con, fam) <- mkTyFunction "shape" shape_kind []
+                      (pyonBuiltin SystemF.the_shape)
+                      [list_instance, matrix_instance,
+                       listView_instance, matrixView_instance,
+                       iter_instance]
+
+      ; let list_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_list)
+              (ConTy $ tiBuiltin the_con_list_shape)
+      ; let matrix_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_matrix)
+              (ConTy $ tiBuiltin the_con_matrix_shape)
+      ; let listView_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_ListView)
+              (ConTy $ tiBuiltin the_con_list_shape)
+      ; let matrixView_instance =
+              mkTyFamilyInstance [] [] (tfSignature fam)
+              (ConTy $ tiBuiltin the_con_MatrixView)
+              (ConTy $ tiBuiltin the_con_matrix_shape)
+      ; sh <- newTyVar Star Nothing
+      ; let iter_instance =
+              mkTyFamilyInstance [sh] [] (tfSignature fam)
+              (ConTy (tiBuiltin the_con_iter) @@ ConTy sh)
+              (ConTy sh)
+      }
+  return con
+  where
+    shape_kind = (Star :-> Star) :-> Star
 
 mkEqClass = do
   rec { a <- newTyVar Star Nothing
         ; let compareScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy $ tiBuiltin the_con_bool)
 
-        ; let cls = Class { clsParam = a
-                          , clsConstraint = []
-                          , clsMethods = [eq, ne]
-                          , clsName = "Eq"
-                          , clsInstances = [int_instance, float_instance,
-                                           tuple2_instance]
-                          , clsTypeCon = pyonBuiltin SystemF.the_EqDict
-                          , clsDictCon = pyonBuiltin SystemF.the_eqDict
-                          }
+        ; let cls = mkClass "Eq" a []
+                    (pyonBuiltin SystemF.the_EqDict)
+                    (pyonBuiltin SystemF.the_eqDict)
+                    [eq, ne]
+                    [int_instance, float_instance, tuple2_instance]
   
         ; eq <- mkClassMethod cls 0 "__eq__" compareScheme
         ; ne <- mkClassMethod cls 1 "__ne__" compareScheme
@@ -109,7 +152,6 @@ mkEqClass = do
         ; let int_instance =
                monomorphicInstance cls
                (ConTy $ tiBuiltin the_con_int)
-               Nothing
                [ InstanceMethod $
                  pyonBuiltin SystemF.the_EqDict_int_eq
                , InstanceMethod $
@@ -117,7 +159,6 @@ mkEqClass = do
               float_instance =
                monomorphicInstance cls
                (ConTy $ tiBuiltin the_con_float)
-               Nothing
                [ InstanceMethod $
                  pyonBuiltin SystemF.the_EqDict_float_eq
                , InstanceMethod $
@@ -125,33 +166,25 @@ mkEqClass = do
         ; tuple2_instance <- do
           a <- newTyVar Star Nothing
           b <- newTyVar Star Nothing
-          return $ Instance { insQVars = [a, b]
-                            , insConstraint = [ ConTy a `IsInst` cls
-                                              , ConTy b `IsInst` cls
-                                              ]
-                            , insClass = cls
-                            , insType = TupleTy 2 @@ ConTy a @@ ConTy b
-                            , insCon = Nothing
-                            , insMethods = [ InstanceMethod $
-                                             pyonBuiltin SystemF.the_EqDict_Tuple2_eq 
-                                           , InstanceMethod $
-                                             pyonBuiltin SystemF.the_EqDict_Tuple2_ne]
-                            } }
+          return $ polyInstance
+                   [a, b]
+                   [ConTy a `IsInst` cls, ConTy b `IsInst` cls]
+                   cls
+                   (TupleTy 2 @@ ConTy a @@ ConTy b)
+                   [ InstanceMethod $ pyonBuiltin SystemF.the_EqDict_Tuple2_eq,
+                     InstanceMethod $ pyonBuiltin SystemF.the_EqDict_Tuple2_ne]
+        }
   return cls
 
 mkOrdClass = do
   rec { a <- newTyVar Star Nothing
         ; let compareScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy $ tiBuiltin the_con_bool)
 
-        ; let cls = Class { clsParam = a
-                          , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Eq]
-                          , clsMethods = [lt, le, gt, ge]
-                          , clsName = "Ord"
-                          , clsInstances = [int_instance, float_instance,
-                                            tuple2_instance]
-                          , clsTypeCon = pyonBuiltin SystemF.the_OrdDict
-                          , clsDictCon = pyonBuiltin SystemF.the_ordDict
-                          }
+        ; let cls = mkClass "Ord" a [ConTy a `IsInst` tiBuiltin the_Eq]
+                    (pyonBuiltin SystemF.the_OrdDict)
+                    (pyonBuiltin SystemF.the_ordDict)
+                    [lt, le, gt, ge]
+                    [int_instance, float_instance, tuple2_instance]
 
         ; lt <- mkClassMethod cls 0 "__lt__" compareScheme
         ; le <- mkClassMethod cls 1 "__le__" compareScheme
@@ -161,7 +194,6 @@ mkOrdClass = do
         ; let int_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_int)
-                Nothing
                 [ InstanceMethod $
                   pyonBuiltin SystemF.the_OrdDict_int_lt
                 , InstanceMethod $
@@ -173,7 +205,6 @@ mkOrdClass = do
               float_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_float)
-                Nothing
                 [ InstanceMethod $
                   pyonBuiltin SystemF.the_OrdDict_float_lt
                 , InstanceMethod $
@@ -186,22 +217,15 @@ mkOrdClass = do
         ; tuple2_instance <- do
             a <- newTyVar Star Nothing
             b <- newTyVar Star Nothing
-            return $ Instance { insQVars = [a, b]
-                              , insConstraint = [ ConTy a `IsInst` cls
-                                                , ConTy b `IsInst` cls
-                                                ]
-                              , insClass = cls
-                              , insType = TupleTy 2 @@ ConTy a @@ ConTy b
-                              , insCon = Nothing
-                              , insMethods = [ InstanceMethod $
-                                               pyonBuiltin SystemF.the_OrdDict_Tuple2_lt
-                                             , InstanceMethod $
-                                               pyonBuiltin SystemF.the_OrdDict_Tuple2_le
-                                             , InstanceMethod $
-                                               pyonBuiltin SystemF.the_OrdDict_Tuple2_gt
-                                             , InstanceMethod $
-                                               pyonBuiltin SystemF.the_OrdDict_Tuple2_ge] 
-                              } }
+            return $ polyInstance [a, b]
+                     [ConTy a `IsInst` cls, ConTy b `IsInst` cls]
+                     cls
+                     (TupleTy 2 @@ ConTy a @@ ConTy b)
+                     [ InstanceMethod $ pyonBuiltin SystemF.the_OrdDict_Tuple2_lt
+                     , InstanceMethod $ pyonBuiltin SystemF.the_OrdDict_Tuple2_le
+                     , InstanceMethod $ pyonBuiltin SystemF.the_OrdDict_Tuple2_gt
+                     , InstanceMethod $ pyonBuiltin SystemF.the_OrdDict_Tuple2_ge]
+        }
   return cls
 
 mkTraversableClass = do
@@ -218,26 +242,22 @@ mkTraversableClass = do
         tT = ConTy t
     in ([passable aT], functionType [iterType tT aT] (tT @@ aT))
 
-  rec { let cls = Class { clsParam = t
-                        , clsConstraint = []
-                        , clsMethods = [iter, build]
-                        , clsName = "Traversable"
-                        , clsInstances = [list_instance, matrix_instance,
-                                          listView_instance, matrixView_instance,
-                                          iter_instance]
-                        , clsTypeCon = pyonBuiltin SystemF.the_TraversableDict
-                        , clsDictCon = pyonBuiltin SystemF.the_traversableDict
-                        }
+  rec { let cls = mkClass "Traversable" t []
+                  (pyonBuiltin SystemF.the_TraversableDict)
+                  (pyonBuiltin SystemF.the_traversableDict)
+                  [iter, build]
+                  [list_instance, matrix_instance,
+                   listView_instance, matrixView_instance,
+                   iter_instance]
 
       ; iter <- mkClassMethod cls 0 "__iter__" iter_scheme
       ; build <- mkClassMethod cls 1 "__build__" build_scheme
   
-      ; t2 <- newTyVar (Star :-> Star) Nothing
+      ; sh <- newTyVar Star Nothing
 
       ; let list_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_list)
-                Nothing
                 [ InstanceMethod $
                   pyonBuiltin SystemF.the_TraversableDict_list_traverse
                 , InstanceMethod $
@@ -246,7 +266,6 @@ mkTraversableClass = do
             matrix_instance =
                 monomorphicInstance cls
                 (ConTy $ tiBuiltin the_con_matrix)
-                Nothing
                 [ InstanceMethod $
                   pyonBuiltin SystemF.the_TraversableDict_matrix_traverse
                 , InstanceMethod $
@@ -255,7 +274,6 @@ mkTraversableClass = do
             listView_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_ListView)
-              Nothing
               [ InstanceMethod $
                 pyonBuiltin SystemF.the_TraversableDict_ListView_traverse
               , InstanceMethod $
@@ -264,7 +282,6 @@ mkTraversableClass = do
             matrixView_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_MatrixView)
-              Nothing
               [ InstanceMethod $
                 pyonBuiltin SystemF.the_TraversableDict_MatrixView_traverse
               , InstanceMethod $
@@ -272,18 +289,12 @@ mkTraversableClass = do
 
             iter_instance =
               -- A stream of anything is iterable
-              Instance
-              { insQVars = [t2]
-              , insConstraint = []
-              , insClass = cls
-              , insType = ConTy (tiBuiltin the_con_iter) @@
-                          (ConTy (tiBuiltin the_con_shape) @@ ConTy t2)
-              , insCon = Nothing
-              , insMethods =
-                [ InstanceMethod $
-                  pyonBuiltin SystemF.the_TraversableDict_Stream_traverse
-                , InstanceMethod $
-                  pyonBuiltin SystemF.the_TraversableDict_Stream_build] } }
+              polyInstance [sh] [] cls
+              (ConTy (tiBuiltin the_con_iter) @@ ConTy sh)
+              [ InstanceMethod $
+                pyonBuiltin SystemF.the_TraversableDict_Stream_traverse
+              , InstanceMethod $
+                pyonBuiltin SystemF.the_TraversableDict_Stream_build] }
 
   return cls
 
@@ -300,17 +311,13 @@ mkShapeClass = do
   zip3_scheme <- zipWithN_scheme (ConTy sh) 3
   zip4_scheme <- zipWithN_scheme (ConTy sh) 4
 
-  rec let cls = Class { clsParam = sh
-                      , clsConstraint = []
-                      , clsMethods = [flattenStream, mapStream,
-                                      zipWithStream, zipWith3Stream, zipWith4Stream]
-                      , clsName = "Shape"
-                      , clsInstances = [list_instance, matrix_instance,
-                                        listView_instance, matrixView_instance,
-                                        stream_instance]
-                      , clsTypeCon = pyonBuiltin SystemF.the_ShapeDict
-                      , clsDictCon = pyonBuiltin SystemF.the_shapeDict
-                      }
+  rec let cls = mkClass "Shape" sh []
+                (pyonBuiltin SystemF.the_ShapeDict)
+                (pyonBuiltin SystemF.the_shapeDict)
+                [flattenStream, mapStream,
+                 zipWithStream, zipWith3Stream, zipWith4Stream]
+                [list_instance, matrix_instance]
+
       flattenStream <- mkClassMethod cls 0 "flattenStream" flattenStreamScheme
       mapStream <- mkClassMethod cls 1 "mapStream" map_scheme
       zipWithStream <- mkClassMethod cls 2 "zipWithStream" zip_scheme
@@ -319,8 +326,7 @@ mkShapeClass = do
 
       let list_instance =
             monomorphicInstance cls
-            (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_list))
-            Nothing
+            (ConTy (tiBuiltin the_con_list_shape))
             [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_flatten,
               InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_map,
               InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith,
@@ -328,49 +334,13 @@ mkShapeClass = do
               InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith4]
           matrix_instance =
             monomorphicInstance cls
-            (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_matrix))
-            Nothing
+            (ConTy (tiBuiltin the_con_matrix_shape))
             [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_flatten,
               InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_map,
               InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith,
               InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith3,
               InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith4]
-          -- These methods are exactly the same as for list.
-          -- It's actually the same instance: shape list == shape ListView.
-          listView_instance =
-            monomorphicInstance cls
-            (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_ListView))
-            Nothing
-            [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_flatten,
-              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_map,
-              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith,
-              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith3,
-              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_list_zipWith4]
-          -- These methods are exactly the same as for matrix.
-          -- It's actually the same instance: shape matrix == shape MatrixView.
-          matrixView_instance =
-            monomorphicInstance cls
-            (ConTy (tiBuiltin the_con_shape) @@ ConTy (tiBuiltin the_con_MatrixView))
-            Nothing
-            [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_flatten,
-              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_map,
-              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith,
-              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith3,
-              InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_matrix_zipWith4]
-      t <- newTyVar (Star :-> Star) Nothing
-      let stream_instance =
-            Instance { insQVars = [sh]
-                     , insConstraint = [ConTy sh `IsInst` cls]
-                     , insClass = cls
-                     , insType = ConTy (tiBuiltin the_con_shape) @@ (ConTy (tiBuiltin the_con_iter) @@ ConTy sh)
-                     , insCon = Nothing
-                     , insMethods =
-                       [ InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_flatten,
-                         InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_map,
-                         InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_zipWith,
-                         InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_zipWith3,
-                         InstanceMethod $ pyonBuiltin SystemF.the_ShapeDict_Stream_zipWith4
-                       ] }
+
   return cls
   where
     -- Generalized map/zipWith
@@ -400,28 +370,24 @@ mkIndexableClass = do
   with_shape_scheme <- forallType [Star, Star] $ \[a, b] ->
     ([], functionType [ConTy t @@ ConTy a,
                        ConTy (tiBuiltin the_con_ListShapeEliminator) @@ ConTy b] (ConTy b))
-  rec { let cls = Class { clsParam = t
-                        , clsConstraint = []
-                        , clsMethods = [at, slice, with_shape]
-                        , clsName = "Indexable"
-                        , clsInstances = [list_instance, listview_instance]
-                        , clsTypeCon = pyonBuiltin SystemF.the_IndexableDict
-                        , clsDictCon = pyonBuiltin SystemF.the_indexableDict
-                        }
+  rec { let cls = mkClass "Indexable" t []
+                  (pyonBuiltin SystemF.the_IndexableDict)
+                  (pyonBuiltin SystemF.the_indexableDict)
+                  [at, slice, with_shape]
+                  [list_instance, listview_instance]
+
       ; at <- mkClassMethod cls 0 "at_point" at_scheme
       ; slice <- mkClassMethod cls 1 "at_slice" slice_scheme
       ; with_shape <- mkClassMethod cls 2 "with_shape" with_shape_scheme
       ; let list_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_list)
-              Nothing
               [ InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_at_point
               , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_at_slice
               , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_list_with_shape]
       ; let listview_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_ListView)
-              Nothing
               [ InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_at_point
               , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_at_slice
               , InstanceMethod $ pyonBuiltin SystemF.the_IndexableDict_ListView_with_shape]
@@ -442,28 +408,24 @@ mkIndexable2Class = do
   with_shape_scheme <- forallType [Star, Star] $ \[a, b] ->
     ([], functionType [ConTy t @@ ConTy a,
                        ConTy (tiBuiltin the_con_MatrixShapeEliminator) @@ ConTy b] (ConTy b))
-  rec { let cls = Class { clsParam = t
-                        , clsConstraint = []
-                        , clsMethods = [at, slice, with_shape]
-                        , clsName = "Indexable2"
-                        , clsInstances = [matrix_instance, matrixview_instance]
-                        , clsTypeCon = pyonBuiltin SystemF.the_Indexable2Dict
-                        , clsDictCon = pyonBuiltin SystemF.the_indexable2Dict
-                        }
+  rec { let cls = mkClass "Indexable2" t []
+                  (pyonBuiltin SystemF.the_Indexable2Dict)
+                  (pyonBuiltin SystemF.the_indexable2Dict)
+                  [at, slice, with_shape]
+                  [matrix_instance, matrixview_instance]
+
       ; at <- mkClassMethod cls 0 "at_point2" at_scheme
       ; slice <- mkClassMethod cls 1 "at_slice2" slice_scheme
       ; with_shape <- mkClassMethod cls 2 "with_shape2" with_shape_scheme
       ; let matrix_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_matrix)
-              Nothing
               [ InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_matrix_at_point2
               , InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_matrix_at_slice2
               , InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_matrix_with_shape2]
       ; let matrixview_instance =
               monomorphicInstance cls
               (ConTy $ tiBuiltin the_con_MatrixView)
-              Nothing
               [ InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_MatrixView_at_point2
               , InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_MatrixView_at_slice2
               , InstanceMethod $ pyonBuiltin SystemF.the_Indexable2Dict_MatrixView_with_shape2]
@@ -476,15 +438,11 @@ mkAdditiveClass = do
   ; let binScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy a)
         negScheme = monomorphic $ functionType [ConTy a] (ConTy a)
 
-  ; let cls = Class { clsParam = a
-                    , clsConstraint = []
-                    , clsMethods = [add, sub, negate, zero]
-                    , clsName = "Additive"
-                    , clsInstances = [int_instance, float_instance,
-                                      complex_instance]
-                    , clsTypeCon = pyonBuiltin SystemF.the_AdditiveDict
-                    , clsDictCon = pyonBuiltin SystemF.the_additiveDict
-                    }
+  ; let cls = mkClass "Additive" a []
+              (pyonBuiltin SystemF.the_AdditiveDict)
+              (pyonBuiltin SystemF.the_additiveDict)
+              [add, sub, negate, zero]
+              [int_instance, float_instance, complex_instance]
 
   ; add <- mkClassMethod cls 0 "__add__" binScheme
   ; sub <- mkClassMethod cls 1 "__sub__" binScheme
@@ -494,7 +452,6 @@ mkAdditiveClass = do
   ; let int_instance =
           monomorphicInstance cls
           (ConTy $ tiBuiltin the_con_int)
-          Nothing
           [ InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_int_add
           , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_int_sub
           , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_int_negate
@@ -502,7 +459,6 @@ mkAdditiveClass = do
         float_instance =
           monomorphicInstance cls
           (ConTy $ tiBuiltin the_con_float)
-          Nothing
           [ InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_float_add
           , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_float_sub
           , InstanceMethod $ pyonBuiltin SystemF.the_AdditiveDict_float_negate
@@ -510,18 +466,13 @@ mkAdditiveClass = do
   
   ; b <- newTyVar Star Nothing
   ; let complex_instance =
-          Instance { insQVars = [b]
-                   , insConstraint = [passable (ConTy b),
-                                      ConTy b `IsInst` cls]
-                   , insClass = cls
-                   , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
-                   , insCon = Nothing
-                   , insMethods =
-                     [ InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_add)
-                     , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_sub)
-                     , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_negate)
-                     , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_zero)]
-                   } }
+          polyInstance [b] [passable (ConTy b), ConTy b `IsInst` cls] cls
+          (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
+          [ InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_add)
+          , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_sub)
+          , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_negate)
+          , InstanceMethod (pyonBuiltin SystemF.the_AdditiveDict_Complex_zero)]
+  }
   return cls
 
 mkMultiplicativeClass = do
@@ -530,15 +481,11 @@ mkMultiplicativeClass = do
   ; let binScheme = monomorphic $ functionType [ConTy a, ConTy a] (ConTy a)
         fromIntScheme = monomorphic $
                         functionType [ConTy (tiBuiltin the_con_int)] (ConTy a)
-  ; let cls = Class { clsParam = a
-                    , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Additive]
-                    , clsMethods = [times, fromInt, one]
-                    , clsName = "Multiplicative"
-                    , clsInstances = [int_instance, float_instance,
-                                      complex_instance]
-                    , clsTypeCon = pyonBuiltin SystemF.the_MultiplicativeDict
-                    , clsDictCon = pyonBuiltin SystemF.the_multiplicativeDict
-                    }
+  ; let cls = mkClass "Multiplicative" a [ConTy a `IsInst` tiBuiltin the_Additive]
+              (pyonBuiltin SystemF.the_MultiplicativeDict)
+              (pyonBuiltin SystemF.the_multiplicativeDict)
+              [times, fromInt, one]
+              [int_instance, float_instance, complex_instance]
 
   ; times <- mkClassMethod cls 0 "__mul__" binScheme
   ; fromInt <- mkClassMethod cls 1 "__fromint__" fromIntScheme
@@ -547,7 +494,6 @@ mkMultiplicativeClass = do
   ; let int_instance =
           monomorphicInstance cls
           (ConTy $ tiBuiltin the_con_int)
-          Nothing
           [ InstanceMethod $
             pyonBuiltin $ SystemF.the_MultiplicativeDict_int_mul
           , InstanceMethod $
@@ -557,7 +503,6 @@ mkMultiplicativeClass = do
         float_instance =
           monomorphicInstance cls
           (ConTy $ tiBuiltin the_con_float)
-          Nothing
           [ InstanceMethod $
             pyonBuiltin $ SystemF.the_MultiplicativeDict_float_mul
           , InstanceMethod $
@@ -566,17 +511,12 @@ mkMultiplicativeClass = do
             pyonBuiltin $ SystemF.the_MultiplicativeDict_float_one]
   ; b <- newTyVar Star Nothing
   ; let complex_instance =
-          Instance { insQVars = [b]
-                   , insConstraint = [passable (ConTy b),
-                                      ConTy b `IsInst` cls]
-                   , insClass = cls
-                   , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
-                   , insCon = Nothing
-                   , insMethods =
-                     [ InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_mul)
-                     , InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_fromInt)
-                     , InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_one)]
-                   } }
+          polyInstance [b] [ConTy b `IsInst` cls] cls
+          (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
+          [ InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_mul)
+          , InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_fromInt)
+          , InstanceMethod (pyonBuiltin SystemF.the_MultiplicativeDict_Complex_one)]
+          }
   
   return cls
   
@@ -586,15 +526,12 @@ mkFloatingClass = do
           unScheme  = monomorphic $ functionType [ConTy a] (ConTy a)
           fromFloatScheme = monomorphic $
                             functionType [ConTy $ tiBuiltin the_con_float] (ConTy a)
-      let cls = Class { clsParam = a
-                      , clsConstraint = []
-                      , clsMethods = [fromfloat, power, expfn, logfn, sqrtfn,
-                                      sinfn, cosfn, tanfn, pi]
-                      , clsName = "Floating"
-                      , clsInstances = [float_instance, complex_instance]
-                      , clsTypeCon = pyonBuiltin SystemF.the_FloatingDict
-                      , clsDictCon = pyonBuiltin SystemF.the_floatingDict
-                      }
+      let cls = mkClass "Floating" a []
+                (pyonBuiltin SystemF.the_FloatingDict)
+                (pyonBuiltin SystemF.the_floatingDict)
+                [fromfloat, power, expfn, logfn, sqrtfn,
+                 sinfn, cosfn, tanfn, pi]
+                [float_instance, complex_instance]
 
       fromfloat <- mkClassMethod cls 0 "__fromfloat__" fromFloatScheme
       power <- mkClassMethod cls 1 "__power__" binScheme
@@ -609,7 +546,6 @@ mkFloatingClass = do
       let float_instance =
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_float)
-            Nothing
             [ InstanceMethod $
               pyonBuiltin $ SystemF.the_FloatingDict_float_fromfloat
             , InstanceMethod $
@@ -631,33 +567,30 @@ mkFloatingClass = do
 
       b <- newTyVar Star Nothing
       let complex_instance =
-             Instance { insQVars = [b]
-                      , insConstraint = [passable (ConTy b),
-                                         ConTy b `IsInst` tiBuiltin the_Multiplicative,
-                                         ConTy b `IsInst` tiBuiltin the_Fractional,
-                                         ConTy b `IsInst` cls]
-                      , insClass = cls
-                      , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
-                      , insCon = Nothing
-                      , insMethods =
-                        [ InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_fromfloat
-                        , InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_power
-                        , InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_exp
-                        , InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_log
-                        , InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_sqrt
-                        , InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_sin
-                        , InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_cos
-                        , InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_tan
-                        , InstanceMethod $
-                          pyonBuiltin SystemF.the_FloatingDict_Complex_pi]}
+             polyInstance [b]
+             [ConTy b `IsInst` tiBuiltin the_Multiplicative,
+              ConTy b `IsInst` tiBuiltin the_Fractional,
+              ConTy b `IsInst` cls]
+             cls
+             (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
+             [ InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_fromfloat
+             , InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_power
+             , InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_exp
+             , InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_log
+             , InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_sqrt
+             , InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_sin
+             , InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_cos
+             , InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_tan
+             , InstanceMethod $
+               pyonBuiltin SystemF.the_FloatingDict_Complex_pi]
   
   return cls
   
@@ -671,14 +604,11 @@ mkVectorClass = do
                       functionType [ConTy a, ConTy a] float_type
 
       let cls =
-            Class { clsParam = a
-                  , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Additive]
-                  , clsMethods = [scale, magnitude, dot]
-                  , clsName = "Vector"
-                  , clsInstances = [float_instance, complex_instance]
-                  , clsTypeCon = pyonBuiltin SystemF.the_VectorDict
-                  , clsDictCon = pyonBuiltin SystemF.the_vectorDict
-                  }
+            mkClass "Vector" a [ConTy a `IsInst` tiBuiltin the_Additive]
+            (pyonBuiltin SystemF.the_VectorDict)
+            (pyonBuiltin SystemF.the_vectorDict)
+            [scale, magnitude, dot]
+            [float_instance, complex_instance]
 
       scale <- mkClassMethod cls 0 "scale" scaleScheme
       magnitude <- mkClassMethod cls 1 "magnitude" normScheme
@@ -687,7 +617,6 @@ mkVectorClass = do
       let float_instance =
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_float)
-            Nothing
             [ InstanceMethod $
               pyonBuiltin SystemF.the_VectorDict_float_scale
             , InstanceMethod $
@@ -697,19 +626,14 @@ mkVectorClass = do
 
       b <- newTyVar Star Nothing
       let complex_instance =
-            Instance { insQVars = [b]
-                     , insConstraint = [passable (ConTy b),
-                                        ConTy b `IsInst` cls]
-                     , insClass = cls
-                     , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
-                     , insCon = Nothing
-                     , insMethods =
-                         [ InstanceMethod $
-                           pyonBuiltin SystemF.the_VectorDict_Complex_scale
-                         , InstanceMethod $
-                           pyonBuiltin SystemF.the_VectorDict_Complex_magnitude
-                         , InstanceMethod $
-                           pyonBuiltin SystemF.the_VectorDict_Complex_dot]}
+            polyInstance [b] [ConTy b `IsInst` cls] cls
+            (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
+            [ InstanceMethod $
+              pyonBuiltin SystemF.the_VectorDict_Complex_scale
+            , InstanceMethod $
+              pyonBuiltin SystemF.the_VectorDict_Complex_magnitude
+            , InstanceMethod $
+              pyonBuiltin SystemF.the_VectorDict_Complex_dot]
 
   return cls
 
@@ -720,20 +644,16 @@ mkRemainderClass = do
       remScheme = monomorphic $
                   functionType [ConTy a, ConTy a] (ConTy a)
   rec let cls =
-            Class { clsParam = a
-                  , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Multiplicative]
-                  , clsMethods = [divide, remainder]
-                  , clsName = "Remainder"
-                  , clsInstances = [int_instance, float_instance]
-                  , clsTypeCon = pyonBuiltin SystemF.the_RemainderDict
-                  , clsDictCon = pyonBuiltin SystemF.the_remainderDict
-                  }
+            mkClass "Remainder" a [ConTy a `IsInst` tiBuiltin the_Multiplicative]
+            (pyonBuiltin SystemF.the_RemainderDict)
+            (pyonBuiltin SystemF.the_remainderDict)
+            [divide, remainder]
+            [int_instance, float_instance]
       divide <- mkClassMethod cls 0 "__floordiv__" divScheme
       remainder <- mkClassMethod cls 1 "__mod__" remScheme
       let int_instance =
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_int)
-            Nothing
             [ InstanceMethod $
               pyonBuiltin $ SystemF.the_RemainderDict_int_floordiv
             , InstanceMethod $
@@ -741,7 +661,6 @@ mkRemainderClass = do
           float_instance =
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_float)
-            Nothing
             [ InstanceMethod $
               pyonBuiltin $ SystemF.the_RemainderDict_float_floordiv
             , InstanceMethod $
@@ -754,161 +673,108 @@ mkFractionalClass = do
   let divScheme = monomorphic $
                   functionType [ConTy a, ConTy a] (ConTy a)
   rec let cls =
-            Class { clsParam = a
-                  , clsConstraint = [ConTy a `IsInst` tiBuiltin the_Multiplicative]
-                  , clsMethods = [divide]
-                  , clsName = "Fractional"
-                  , clsInstances = [float_instance, complex_instance]
-                  , clsTypeCon = pyonBuiltin SystemF.the_FractionalDict
-                  , clsDictCon = pyonBuiltin SystemF.the_fractionalDict
-                  }
+            mkClass "Fractional" a [ConTy a `IsInst` tiBuiltin the_Multiplicative]
+            (pyonBuiltin SystemF.the_FractionalDict)
+            (pyonBuiltin SystemF.the_fractionalDict)
+            [divide]
+            [float_instance, complex_instance]
+
       divide <- mkClassMethod cls 0 "__div__" divScheme
       let float_instance =
             monomorphicInstance cls
             (ConTy $ tiBuiltin the_con_float)
-            Nothing
             [ InstanceMethod $
               pyonBuiltin $ SystemF.the_FractionalDict_float_div]
 
       b <- newTyVar Star Nothing
       let complex_instance =
-            Instance { insQVars = [b]
-                     , insConstraint = [passable (ConTy b),
-                                        ConTy b `IsInst` cls]
-                     , insClass = cls
-                     , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
-                     , insCon = Nothing
-                     , insMethods =
-                         [ InstanceMethod $
-                           pyonBuiltin SystemF.the_FractionalDict_Complex_div]}
+            polyInstance [b] [ConTy b `IsInst` cls] cls
+            (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
+            [ InstanceMethod $ pyonBuiltin SystemF.the_FractionalDict_Complex_div]
 
   return cls
 
 mkPassableClass = do
   rec {
   a <- newTyVar Star Nothing
-  ; let cls = Class { clsParam = a
-                    , clsConstraint = []
-                    , clsMethods = []
-                    , clsName = "Repr"
-                    , clsInstances = [int_instance, float_instance,
-                                      bool_instance, none_instance,
-                                      complex_instance,
-                                      any_instance,
-                                      list_instance, matrix_instance,
-                                      listView_instance, matrixView_instance,
-                                      iter_instance,
-                                      tuple2_instance, tuple3_instance,
-                                      tuple4_instance]
-                    , clsTypeCon = pyonBuiltin SystemF.the_Repr
-                    , clsDictCon =
-                      internalError "Class 'Repr' has no dictionary constructor"
-                    }
+  ; let cls = mkClass "Repr" a []
+              (pyonBuiltin SystemF.the_Repr)
+              (internalError "Class 'Repr' has no dictionary constructor")
+              []
+              [int_instance, float_instance, bool_instance, none_instance,
+               complex_instance,
+               any_instance,
+               list_instance, matrix_instance,
+               listView_instance, matrixView_instance,
+               iter_instance,
+               tuple2_instance, tuple3_instance,
+               tuple4_instance]
   
   ; let int_instance =
-          monomorphicInstance cls (ConTy $ tiBuiltin the_con_int)
-          (Just $ pyonBuiltin SystemF.the_repr_int) []
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_int)
+          (pyonBuiltin SystemF.the_repr_int) []
   ; let float_instance =
-          monomorphicInstance cls (ConTy $ tiBuiltin the_con_float)
-          (Just $ pyonBuiltin SystemF.the_repr_float) []
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_float)
+          (pyonBuiltin SystemF.the_repr_float) []
   ; let bool_instance =
-          monomorphicInstance cls (ConTy $ tiBuiltin the_con_bool)
-          (Just $ pyonBuiltin SystemF.the_repr_bool) []
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_bool)
+          (pyonBuiltin SystemF.the_repr_bool) []
   ; let none_instance =
-          monomorphicInstance cls (ConTy $ tiBuiltin the_con_NoneType)
-          (Just $ pyonBuiltin SystemF.the_repr_NoneType) []
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_NoneType)
+          (pyonBuiltin SystemF.the_repr_NoneType) []
   ; let any_instance =
-          monomorphicInstance cls (ConTy $ tiBuiltin the_con_Any)
-          (Just $ pyonBuiltin SystemF.the_repr_Any) []
+          monomorphicExplicitInstance cls (ConTy $ tiBuiltin the_con_Any)
+          (pyonBuiltin SystemF.the_repr_Any) []
         
   ; b <- newTyVar Star Nothing
-  ; t <- newTyVar (Star :-> Star) Nothing
-  ; let list_instance =
-          Instance
-          { insQVars = [b]
-          , insConstraint = [passable $ ConTy b]
-          , insClass = cls
-          , insType = ConTy (tiBuiltin the_con_list) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_list
-          , insMethods = []
-          }
-  ; let matrix_instance =
-          Instance
-          { insQVars = [b]
-          , insConstraint = [passable $ ConTy b]
-          , insClass = cls
-          , insType = ConTy (tiBuiltin the_con_matrix) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_matrix
-          , insMethods = []
-          }
-  ; let listView_instance =
-          Instance
-          { insQVars = [b]
-          , insConstraint = []
-          , insClass = cls
-          , insType = ConTy (tiBuiltin the_con_ListView) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_ListView
-          , insMethods = []
-          }
-  ; let matrixView_instance =
-          Instance
-          { insQVars = [b]
-          , insConstraint = []
-          , insClass = cls
-          , insType = ConTy (tiBuiltin the_con_MatrixView) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_MatrixView
-          , insMethods = []
-          }
-  ; let iter_instance =
-          Instance
-          { insQVars = [t, b]
-          , insConstraint = []
-          , insClass = cls
-          , insType = iterType (ConTy t) (ConTy b)
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_Stream
-          , insMethods = []
-          }
-  ; let complex_instance =
-          Instance
-          { insQVars = [b]
-          , insConstraint = [passable $ ConTy b]
-          , insClass = cls
-          , insType = ConTy (tiBuiltin the_con_Complex) @@ ConTy b
-          , insCon = Just $ pyonBuiltin SystemF.the_repr_Complex
-          , insMethods = []
-          }
   ; c <- newTyVar Star Nothing
+  ; let list_instance =
+          polyExplicitInstance [b] [passable $ ConTy b] cls
+          (ConTy (tiBuiltin the_con_list) @@ ConTy b)
+          (pyonBuiltin SystemF.the_repr_list)
+          []
+  ; let matrix_instance =
+          polyExplicitInstance [b] [passable $ ConTy b] cls
+          (ConTy (tiBuiltin the_con_matrix) @@ ConTy b)
+          (pyonBuiltin SystemF.the_repr_matrix)
+          []
+  ; let listView_instance =
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_ListView) @@ ConTy b)
+          (pyonBuiltin SystemF.the_repr_ListView)
+          []
+  ; let matrixView_instance =
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_MatrixView) @@ ConTy b)
+          (pyonBuiltin SystemF.the_repr_MatrixView)
+          []
+  ; let iter_instance =
+          polyExplicitInstance [b, c] [] cls
+          (ConTy (tiBuiltin the_con_iter) @@ ConTy b @@ ConTy c)
+          (pyonBuiltin SystemF.the_repr_Stream)
+          []
+  ; let complex_instance =
+          polyExplicitInstance [b] [passable $ ConTy b] cls
+          (ConTy (tiBuiltin the_con_Complex) @@ ConTy b)
+          (pyonBuiltin SystemF.the_repr_Complex)
+          []
   ; let tuple2_instance =
-          Instance
-          { insQVars = [b, c]
-          , insConstraint = [passable $ ConTy b, passable $ ConTy c]
-          , insClass = cls
-          , insType = TupleTy 2 @@ ConTy b @@ ConTy c
-          , insCon = Just $ SystemF.pyonTupleReprCon 2
-          , insMethods = []
-          }
+          polyExplicitInstance [b, c] [passable $ ConTy b, passable $ ConTy c] cls
+          (TupleTy 2 @@ ConTy b @@ ConTy c)
+          (SystemF.pyonTupleReprCon 2)
+          []
   ; d <- newTyVar Star Nothing
   ; let tuple3_instance =
-          Instance
-          { insQVars = [b, c, d]
-          , insConstraint = [passable $ ConTy b, passable $ ConTy c,
-                             passable $ ConTy d]
-          , insClass = cls
-          , insType = TupleTy 3 @@ ConTy b @@ ConTy c @@ ConTy d
-          , insCon = Just $ SystemF.pyonTupleReprCon 3
-          , insMethods = []
-          }
+          polyExplicitInstance [b, c, d] [passable $ ConTy b, passable $ ConTy c, passable $ ConTy d] cls
+          (TupleTy 3 @@ ConTy b @@ ConTy c @@ ConTy d)
+          (SystemF.pyonTupleReprCon 3)
+          []
   ; e <- newTyVar Star Nothing
   ; let tuple4_instance =
-          Instance
-          { insQVars = [b, c, d, e]
-          , insConstraint = [passable $ ConTy b, passable $ ConTy c,
-                             passable $ ConTy d, passable $ ConTy e]
-          , insClass = cls
-          , insType = TupleTy 4 @@ ConTy b @@ ConTy c @@ ConTy d @@ ConTy e
-          , insCon = Just $ SystemF.pyonTupleReprCon 4
-          , insMethods = []
-          }
+          polyExplicitInstance [b, c, d, e] [passable $ ConTy b, passable $ ConTy c, passable $ ConTy d, passable $ ConTy e] cls
+          (TupleTy 4 @@ ConTy b @@ ConTy c @@ ConTy d @@ ConTy e)
+          (SystemF.pyonTupleReprCon 4)
+          []
   }
   
   return cls
@@ -923,7 +789,7 @@ mkMapType = forallType [Star :-> Star, Star, Star] $ \ [t, a, b] ->
       aT = ConTy a
       bT = ConTy b
   in ([ tT `IsInst` tiBuiltin the_Traversable
-      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
+      , shapeType tT `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT
       ],
@@ -933,7 +799,7 @@ mkReduceType = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
   in ([tT `IsInst` tiBuiltin the_Traversable
-      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
+      , shapeType tT `IsInst` tiBuiltin the_Shape
       , passable aT],
       functionType [functionType [aT, aT] aT, aT, tT @@ aT] aT)
 
@@ -941,7 +807,7 @@ mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
   let tT = ConTy t
       aT = ConTy a
   in ([tT `IsInst` tiBuiltin the_Traversable
-      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
+      , shapeType tT `IsInst` tiBuiltin the_Shape
       , passable aT],
       functionType [functionType [aT, aT] aT, tT @@ aT] aT)
 
@@ -953,7 +819,7 @@ mkZipType =
       aT = ConTy a
       bT = ConTy b
   in ([ tT `IsInst` tiBuiltin the_Traversable
-      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
+      , shapeType tT `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT]
      , functionType [tT @@ aT, tT @@ bT]
@@ -969,7 +835,7 @@ mkZip3Type =
       bT = ConTy b
       cT = ConTy c
   in ([ tT `IsInst` tiBuiltin the_Traversable
-      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
+      , shapeType tT `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT
       , passable cT]
@@ -988,7 +854,7 @@ mkZip4Type =
       cT = ConTy c
       dT = ConTy d
   in ([ tT `IsInst` tiBuiltin the_Traversable
-      , ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape
+      , shapeType tT `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT
       , passable cT
@@ -1003,7 +869,7 @@ mkCountType =
 mkRangeType =
   let int_type = ConTy $ tiBuiltin the_con_int
   in return $ monomorphic $
-     functionType [int_type] (iterType (ConTy $ tiBuiltin the_con_list) int_type)
+     functionType [int_type] (listIterType int_type)
 
 mkLenType =
   forallType [Star :-> Star, Star] $ \[t, a] ->
@@ -1121,7 +987,7 @@ mkMapStreamType =
   let tT = ConTy t
       aT = ConTy a
       bT = ConTy b
-  in ([ConTy (tiBuiltin the_con_shape) @@ tT `IsInst` tiBuiltin the_Shape,
+  in ([shapeType tT `IsInst` tiBuiltin the_Shape,
        passable aT, passable bT],
       functionType [functionType [aT] bT, iterType tT aT] (iterType tT bT))
 
@@ -1185,6 +1051,7 @@ initializeTIBuiltins = do
   bi <-
     $(let types =
             -- All types that can be referred to by name in source code.
+            -- Type functions are initialized separately.
             -- The tuple structure contains:
             -- 1. Source code name
             -- 2. kind
@@ -1203,8 +1070,12 @@ initializeTIBuiltins = do
             , ("ListShapeEliminator", Star :-> Star, [| pyonBuiltin SystemF.the_ListShapeEliminator |])
             , ("MatrixShapeEliminator", Star :-> Star, [| pyonBuiltin SystemF.the_MatrixShapeEliminator |])
             , ("Any", Star, [| pyonBuiltin SystemF.the_Any |])
-            , ("shape", (Star :-> Star) :-> Star,
-               [| pyonBuiltin SystemF.the_shape |])
+            , ("list_shape", Star, [| pyonBuiltin SystemF.the_list_shape |])
+            , ("matrix_shape", Star, [| pyonBuiltin SystemF.the_matrix_shape |])
+            ]
+
+          type_functions =
+            [ ("shape", [| pyonBuiltin SystemF.the_shape |], [| mkShapeTyFun |])
             ]
             
           classes =
@@ -1342,6 +1213,10 @@ initializeTIBuiltins = do
             ('_':name, [| return $(con) |])
           tycon_initializer (name, kind, con) =
             ("_con_" ++ name, [| builtinTyCon name kind $(con) |])
+          tyfun_initializer (name, con, _) =
+            ('_':name, [| return $(con) |])
+          tyfun_con_initializer (name, _, mk_function) =
+            ("_con_" ++ name, mk_function)
           cls_initializer (name, mk) =
             ('_':name, mk)
           global_initializer (name, typ, con) =
@@ -1358,7 +1233,9 @@ initializeTIBuiltins = do
                                 else v |])
 
           initializers = map typ_initializer types ++
+                         map tyfun_initializer type_functions ++
                          map tycon_initializer types ++
+                         map tyfun_con_initializer type_functions ++
                          map cls_initializer classes ++
                          map global_initializer globals ++
                          concatMap cls_member_initializer cls_members
@@ -1367,3 +1244,10 @@ initializeTIBuiltins = do
   -- Save it
   putMVar the_TIBuiltins bi
 
+-- | Print the names and types of all built-in variables
+printTIBuiltinGlobals = do
+  forM_ $(TH.listE [TH.tupE [TH.varE $ TH.mkName $ '_':name, TH.litE (TH.stringL name)]
+                    | name <- pyonSourceGlobals]) $ \(x, name) -> do
+    ass <- readMVar $ varTranslation $ tiBuiltin x
+    putStrLn name
+    print =<< runPpr (pprTyScheme $ _typeAssignmentScheme ass)

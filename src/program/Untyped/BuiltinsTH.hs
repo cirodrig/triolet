@@ -19,7 +19,8 @@ pyonSourceTypes :: [String]
 pyonSourceTypes =
   ["int", "float", "Complex", "bool", "NoneType", "iter", "list", "matrix",
    "ListView", "MatrixView", "ListShapeEliminator", "MatrixShapeEliminator",
-   "Any", "shape"]
+   "Any",
+   "shape", "list_shape", "matrix_shape"]
 
 -- | All predefined global functions recognized by the Pyon parser
 pyonSourceGlobals :: [String]
@@ -109,7 +110,7 @@ tiBuiltinSpecification =
   recordDef "TIBuiltins" fields
   where
     fields = [('_':name, IsStrict, [t| Type.Var.Var |])
-             | name <- pyonSourceTypes ] ++ 
+             | name <- pyonSourceTypes] ++ 
              [("_con_" ++ name, IsStrict, [t| TyCon |])
              | name <- pyonSourceTypes] ++
              [('_':name, NotStrict, [t| Variable |])

@@ -87,8 +87,8 @@ instantiate (TyScheme qvars cst ty) = do
 instantiateAs :: SourcePos -> TyScheme -> HMType -> IO ([HMType], Constraint)
 instantiateAs pos scheme ty = do
   (qvars, cst, head) <- instantiate scheme
-  unify pos head ty
-  return (map ConTy qvars, cst)
+  cst2 <- unify pos head ty
+  return (map ConTy qvars, cst2 ++ cst)
 
 -- | Apply a substitution to a type scheme.  The substitution must only
 -- mention free variables of the type scheme.
@@ -102,14 +102,21 @@ renameTyScheme sub (TyScheme qvars cst fot) = do
 -- Type classes
 
 instance Eq Class where
-  (==) = (==) `on` clsName
+  (==) = (==) `on` (clsName . clsSignature)
+
+instance Eq TyFamily where
+  (==) = (==) `on` (clsName . tfSignature)
 
 -- | Construct a type scheme representing all types covered by this instance
 insScheme :: Instance -> TyScheme
-insScheme i = TyScheme (insQVars i) (insConstraint i) (insType i)
+insScheme i = insSigScheme (insSignature i)
+
+insSigScheme i = TyScheme (insQVars i) (insConstraint i) (insType i)
 
 instance Type Predicate where
   freeTypeVariables (IsInst t _) = freeTypeVariables t
+  freeTypeVariables (IsFamily _ t1 t2) =
+    liftM2 Set.union (freeTypeVariables t1) (freeTypeVariables t2)
 
 instance Type [Predicate] where
   freeTypeVariables xs = liftM Set.unions $ mapM freeTypeVariables xs
@@ -120,11 +127,22 @@ instance Type [Predicate] where
 instance Unifiable Predicate where
   uShow (t `IsInst` c) = display <$> uShow t
     where
-      display doc = text (clsName c) <+> parens doc
+      display doc = text (clsName $ clsSignature c) <+> parens doc
+
+  uShow (IsFamily fam arg t) = do 
+    arg_doc <- uShow arg
+    t_doc <- uShow t
+    return $ text (clsName $ tfSignature fam) <+> parens arg_doc <+>
+      text "~" <+> t_doc
 
   rename s (IsInst t c) = do 
     t' <- rename s t
     return $ IsInst t' c
+
+  rename s (IsFamily f t1 t2) = do
+    t1' <- rename s t1
+    t2' <- rename s t2
+    return $ IsFamily f t1' t2'
 
   unify pos p1 p2 =
     case (p1, p2)
@@ -137,6 +155,9 @@ instance Unifiable Predicate where
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> match t1 t2
+
+       (IsFamily f1 _ _, IsFamily f2 _ _)
+         | f1 == f2 -> internalError "match: Not implemented for type families"
        
        _ -> return Nothing
   
@@ -144,6 +165,18 @@ instance Unifiable Predicate where
     case (p1, p2)
     of (IsInst t1 c1, IsInst t2 c2)
          | c1 == c2 -> uEqual t1 t2
+       (IsFamily fam1 arg1 result1, IsFamily fam2 arg2 result2)
+         | fam1 == fam2 -> do
+           is_equal <- uEqual arg1 arg2
+           -- DEBUG
+           when is_equal $ do
+             (r1, r2) <- runPpr $ do r1 <- uShow result1
+                                     r2 <- uShow result2
+                                     return (r1, r2)
+             putStrLn "uEqual on type families"
+             print r1
+             print r2
+           return is_equal
        _ -> return False
 
 isIdDerivation :: Derivation -> Bool
@@ -284,7 +317,8 @@ mkMethodInstanceE :: SourcePos
                   -> IO (Placeholders, TIExp)
 mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
   -- The class dictionary has superclass and method fields. 
-  let num_superclasses = length $ clsConstraint cls
+  let cls_sig = clsSignature cls
+      num_superclasses = length $ clsConstraint cls_sig
       num_methods = length $ clsMethods cls
       
   when (index >= num_methods) $
@@ -292,9 +326,9 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
 
   -- Get the type of each field.  Rename the class variable to match
   -- this instance.
-  let instantiation = substitutionFromList [(clsParam cls, inst_type)]
+  let instantiation = substitutionFromList [(clsParam cls_sig, inst_type)]
   sc_types <- mapM (return . convertPredicate <=< rename instantiation) $
-              clsConstraint cls
+              clsConstraint cls_sig
   m_types <- mapM (return . convertTyScheme <=< renameTyScheme instantiation . clmSignature) $ clsMethods cls
 
   -- Create anonymous parameter variables
@@ -401,6 +435,11 @@ convertHMType' ty = do
           oper_type <- convertHMType' operator 
           return $ Type.Type.typeApp oper_type arg_types
 
+    TFunAppTy op ts -> do
+      sf_op <- tyConToSystemF op
+      sf_ts <- mapM convertHMType' ts
+      return $ Type.Type.typeApp (SystemF.fromTypSF sf_op) sf_ts
+
     AnyTy k -> return $ Type.Type.AnyT $ convertKind' k
 
 mkArrowType :: Type.Type.Type -> Type.Type.Type -> Type.Type.Type
@@ -424,7 +463,11 @@ convertPredicate prd = DelayedType $ fmap SystemF.TypSF $ convertPredicate' prd
 
 convertPredicate' (IsInst ty cls) = do
   ty' <- convertHMType' ty
-  return $ Type.Type.varApp (clsTypeCon cls) [ty']
+  return $ Type.Type.varApp (clsTypeCon $ clsSignature cls) [ty']
+
+convertPredicate' (IsFamily fam arg result) =
+  -- No evidence required for type families
+  return $ Type.Type.VarT (SystemF.pyonBuiltin SystemF.the_NoneType)
 
 -- | Convert a type scheme to a function type.  Each quantified variable
 -- becomes a parameter in the function type.

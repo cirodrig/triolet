@@ -105,10 +105,15 @@ doType expr =
        liftM2 U.functionType (doFunDomain l) (doType r)
      Tuple pos ts ->
        liftM U.tupleType $ mapM doType ts
+     Call pos (Variable pos2 op_v) args -> do
+       -- Special case handling of type functions
+       con <- lookupType op_v
+       args' <- mapM doType args
+       return $ U.appTyCon con args'
      Call pos op args -> do
        op' <- doType op
        args' <- mapM doType args
-       return $ foldl U.appTy op' args'
+       return $ U.appTys op' args'
 
 withForallAnnotation :: ForallAnnotation SSAID
                      -> ([U.TyCon] -> Cvt a) -> Cvt a

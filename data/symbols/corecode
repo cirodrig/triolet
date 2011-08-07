@@ -583,13 +583,13 @@ IndexableDict_ListView_at_slice @(a : bare)
 -------------------------------------------------------------------------------
 -- Stream Traversable functions
 
-TraversableDict_Stream_build @(t : bare -> bare) @(a : bare)
-  (repr : Repr a) (s : Stream (shape t) a)
-  -> Stream (shape t) a = s;
+TraversableDict_Stream_build @(sh : bare) @(a : bare)
+  (repr : Repr a) (s : Stream sh a)
+  -> Stream sh a = s;
 
-TraversableDict_Stream_traverse @(t : bare -> bare) @(a : bare)
-  (repr : Repr a) (s : Stream (shape t) a)
-  -> Stream (shape t) a = s;
+TraversableDict_Stream_traverse @(sh : bare) @(a : bare)
+  (repr : Repr a) (s : Stream sh a)
+  -> Stream sh a = s;
 
 
 -------------------------------------------------------------------------------

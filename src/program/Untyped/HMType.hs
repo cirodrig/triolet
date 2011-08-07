@@ -7,24 +7,26 @@ module Untyped.HMType
         substitutionFromList,
         TyVars, TyVarSet, TyCon,
         tyConKind,
-        isTyVar, isRigidTyVar, isFlexibleTyVar,
-        isCanonicalTyVar,
-        newTyVar, newRigidTyVar, mkTyCon, duplicateTyVar,
+        tcConTypeFunction,
+        isTyVar, isTyFun, isRigidTyVar, isFlexibleTyVar,
+        isCanonicalTyVar, 
+        newTyVar, newRigidTyVar, mkTyCon, newTyFun, duplicateTyVar,
         HMType(..),
-        appTy,
+        appTy, appTys, appTyCon,
         tupleType,
         functionType,
         anyType,
         uncurryTypeApplication,
         inspectTypeApplication,
         hmTypeKind,
-        hmTypeMap, hmTypeMapM,
+        -- hmTypeMap, hmTypeMapM,
         canonicalizeHead,
         Type(..),
         unifiableTypeVariables,
         Unifiable(..),
         tyVarToSystemF,
-        tyConToSystemF
+        tyConToSystemF,
+        pprTyScheme
        )
 where
 
@@ -32,6 +34,7 @@ import Prelude hiding(mapM, sequence)
 import Control.Applicative
 import Control.Monad hiding(mapM, sequence)
 import Control.Monad.Trans
+import Control.Monad.Trans.Maybe
 import Data.Function
 import Data.IORef
 import Data.List
@@ -52,10 +55,12 @@ import Common.Label
 
 import Globals
 import qualified SystemF.Syntax as SystemF
+import {-# SOURCE #-} Untyped.Classes
 import Untyped.Data
 import Untyped.Kind
 import Untyped.Unification
 import Type.Var
+import qualified Type.Type
 import Type.Level
 
 tyConIDSupply :: Supply (Ident TyCon)
@@ -101,8 +106,17 @@ newTyConID = supplyValue tyConIDSupply
 tyConKind :: TyCon -> Kind
 tyConKind = tcKind
 
+tcConTypeFunction :: TyCon -> Maybe TyFamily
+tcConTypeFunction v =
+  case tcConInfo v
+  of Just descr -> tcTypeFunction descr
+     Nothing -> internalError "tcConTypeFunction: Not a type function"
+
 isTyVar :: TyCon -> Bool
-isTyVar = tcIsVariable
+isTyVar = isNothing . tcConInfo
+
+isTyFun :: TyCon -> Bool
+isTyFun c = isJust $ tcConTypeFunction c
 
 isRigidTyVar :: TyCon -> Bool
 isRigidTyVar c = isTyVar c && isNothing (tcRep c)
@@ -116,18 +130,14 @@ newTyVar k lab = do
   id <- newTyConID
   rep <- newIORef NoRep
   sfvar <- newIORef Nothing
-  let con_descr = internalError 
-                  "Type variables do not have constructor information"
-  return $! TyCon id lab k True (Just rep) sfvar con_descr
+  return $! TyCon id lab k (Just rep) sfvar Nothing
 
 -- | Create a new rigid type variable
 newRigidTyVar :: Kind -> Maybe Label -> IO TyCon
 newRigidTyVar k lab = do
   id <- newTyConID
   sfvar <- newIORef Nothing
-  let con_descr = internalError
-                  "Type variables do not have constructor information"
-  return $! TyCon id lab k True Nothing sfvar con_descr
+  return $! TyCon id lab k Nothing sfvar Nothing
 
 -- | Create a type constructor
 mkTyCon :: Label -> Kind -> SystemF.TypSF -> IO TyCon
@@ -136,8 +146,20 @@ mkTyCon name kind value = do
   let var = error "Type constructor is not a variable"
       con_descr = TyConDescr
                   { tcSystemFValue = value
+                  , tcTypeFunction = Nothing
                   }
-  return $! TyCon id (Just name) kind False Nothing var con_descr
+  return $! TyCon id (Just name) kind Nothing var (Just con_descr)
+
+newTyFun :: Label -> Kind -> TyFamily -> IO TyCon
+newTyFun name kind value = do
+  id <- newTyConID
+  let var = error "Type function is not a variable"
+      con_descr = TyConDescr
+                  { tcSystemFValue = SystemF.TypSF $ Type.Type.VarT $
+                                     clsTypeCon $ tfSignature value
+                  , tcTypeFunction = Just value
+                  }
+  return $! TyCon id (Just name) kind Nothing var (Just con_descr)
 
 -- | Create a new type variable that is like the given one, but independent
 -- with respect to unification
@@ -167,16 +189,30 @@ s `appTy` t =
       print =<< runPpr (uShow (AppTy s t))
       return x
 
+appTys :: HMType -> [HMType] -> HMType
+appTys t ts = foldl AppTy t ts
+
+appTyCon :: TyCon -> [HMType] -> HMType
+appTyCon con ts =
+  case tcConTypeFunction con
+  of Just family ->
+       -- Apply the type function to its parameters. 
+       -- Any other paramters become a normal application term.
+       case ts
+       of tyfun_param : ts' -> appTys (TFunAppTy con [tyfun_param]) ts'
+          _ -> internalError "appTyCon: Not enough arguments"
+     _ -> appTys (ConTy con) ts
+
 tupleType :: [HMType] -> HMType
 tupleType ts 
   | any ((Star /=) . hmTypeKind) ts = kindError "tuple field type"
-  | otherwise = foldl AppTy (TupleTy $ length ts) ts
+  | otherwise = appTys (TupleTy $ length ts) ts
 
 functionType :: [HMType] -> HMType -> HMType
 functionType dom rng 
   | any ((Star /=) . hmTypeKind) dom = kindError "function parameter type"
   | Star /= hmTypeKind rng = kindError "function return type"
-  | otherwise = foldl AppTy (FunTy $ length dom) (dom ++ [rng])
+  | otherwise = appTys (FunTy $ length dom) (dom ++ [rng])
 
 anyType :: Kind -> HMType
 anyType = AnyTy
@@ -188,19 +224,24 @@ hmTypeKind (TupleTy n)   = nAryKind n
 hmTypeKind (AppTy t1 t2) = case hmTypeKind t1
                            of _ :-> k -> k
                               Star    -> kindError "type application"
+hmTypeKind (TFunAppTy f ts) = un_app (tcKind f) ts
+  where un_app k         []       = k
+        un_app (_ :-> k) (_ : ts) = un_app k ts
+        un_app _         (_ : _)  = kindError "type application"
 hmTypeKind (AnyTy k)     = k
 
-hmTypeMap :: (HMType -> HMType) -> HMType -> HMType
+{- hmTypeMap :: (HMType -> HMType) -> HMType -> HMType
 hmTypeMap f t =
   case f t
   of AppTy t1 t2 -> hmTypeMap f t1 `appTy` hmTypeMap f t2
-     t'          -> t'
+     t'          -> t' -}
 
 hmTypeMapM :: (HMType -> IO HMType) -> HMType -> IO HMType
 hmTypeMapM f t = do
   t' <- f t
   case t' of
     AppTy t1 t2 -> liftM2 appTy (hmTypeMapM f t1) (hmTypeMapM f t2)
+    TFunAppTy family ts -> liftM (TFunAppTy family) $ mapM (hmTypeMapM f) ts
     _ -> return t'
 
 -- | Uncurry type applications, returning an operator and all arguments that 
@@ -212,15 +253,13 @@ uncurryTypeApplication ty = unc ty []
       ty' <- canonicalizeHead ty
       case ty' of
         AppTy op arg -> unc op (arg:args)
+        TFunAppTy op args' -> return (ConTy op, args' ++ args)
         _ -> return (ty', args)
 
 -- | Get the head and operands of a type application.  The head constructor is
 -- canonicalized.
 inspectTypeApplication :: HMType -> IO (HMType, [HMType])
-inspectTypeApplication ty = do
-  (hd, operands) <- uncurryTypeApplication ty
-  hd' <- canonicalizeHead hd
-  return (hd', operands)
+inspectTypeApplication ty = uncurryTypeApplication ty
 
 -- | Get the set of free and unifiable type variables mentioned in the value
 unifiableTypeVariables :: Type a => a -> IO TyVarSet
@@ -236,6 +275,7 @@ instance Type HMType where
       AppTy t1 t2 -> do s1 <- freeTypeVariables t1 
                         s2 <- freeTypeVariables t2
                         return $ Set.union s1 s2
+      TFunAppTy _ ts -> liftM Set.unions $ mapM freeTypeVariables ts 
       _ -> return Set.empty
 
 -------------------------------------------------------------------------------
@@ -317,6 +357,21 @@ canonicalizeTyVarRep rep_ref = do
 canonicalizeHead :: HMType -> IO HMType 
 canonicalizeHead (ConTy v) 
   | isFlexibleTyVar v = canonicalizeTyVar v
+canonicalizeHead t@(TFunAppTy f ts) =
+  case tcConTypeFunction f
+  of Just family -> do
+       -- Reduce the type function, if possible
+       reduced <- reduceTypeFunction family ts
+       case reduced of
+         Just t' -> do putStrLn "canonicalizeHead"
+                       (d1, d2) <- runPpr $ do t1 <- pprType (foldl AppTy (ConTy f) ts)
+                                               t2 <- pprType t'
+                                               return (t1, t2)
+                       print d1
+                       print d2
+                       canonicalizeHead t'
+         Nothing -> return t
+     Nothing -> internalError "canonicalizeHead"
 canonicalizeHead t = return t
 
 -- | Check whether a variable (which should be in canonical form) appears
@@ -357,11 +412,27 @@ instance Unifiable HMType where
       (_, ConTy c2)
         | isFlexibleTyVar c2 -> do unifyTyVar c2 t1_c
                                    success
+
+      -- Currently, only support single-argument type families
+      (TFunAppTy f1 [t1'], TFunAppTy f2 [t2'])
+        | f1 == f2             -> unify pos t1' t2'
+        | otherwise -> do -- Create a new type variable to stand for these two types
+                          a <- newTyVar (hmTypeKind t1_c) Nothing
+                          let Just fam1 = tcConTypeFunction f1
+                              Just fam2 = tcConTypeFunction f2
+                          return [IsFamily fam1 t1' (ConTy a),
+                                  IsFamily fam2 t2' (ConTy a)]
+      (TFunAppTy f1 [t1'], _)  -> let Just fam1 = tcConTypeFunction f1
+                                  in return [IsFamily fam1 t1' t2_c]
+      (_, TFunAppTy f2 [t2'])  -> let Just fam2 = tcConTypeFunction f2
+                                  in return [IsFamily fam2 t2' t1_c]
+
       (ConTy c1, ConTy c2)     -> require $ c1 == c2
       (FunTy n1,   FunTy n2)   -> require $ n1 == n2
       (TupleTy t1, TupleTy t2) -> require $ t1 == t2
-      (AppTy a b,  AppTy c d)  -> do unify pos a c
-                                     unify pos b d
+      (AppTy a b,  AppTy c d)  -> do c1 <- unify pos a c
+                                     c2 <- unify pos b d
+                                     return $ c1 ++ c2
       (AnyTy k1, AnyTy k2)     -> require $ k1 == k2
       _ -> failure
     where
@@ -404,6 +475,8 @@ instance Unifiable HMType where
                                         case result1 of
                                           Nothing -> return Nothing
                                           Just subst' -> match_ subst' b d
+          (TFunAppTy _ _, _) ->
+            internalError "match: Unexpected type function in pattern"
           _ -> failure
         where
           success = return (Just subst)
@@ -414,13 +487,15 @@ instance Unifiable HMType where
   uEqual t1 t2 = do
     t1_c <- canonicalizeHead t1
     t2_c <- canonicalizeHead t2
-    
+
     case (t1_c, t2_c) of
       (ConTy c1,   ConTy c2)   -> return $ c1 == c2
       (FunTy n1,   FunTy n2)   -> return $ n1 == n2
       (TupleTy t1, TupleTy t2) -> return $ t1 == t2
       (AppTy a b,  AppTy c d)  -> uEqual a c >&&> uEqual b d
       (AnyTy k1,   AnyTy k2)   -> return $ k1 == k2
+      (TFunAppTy f1 ts1, TFunAppTy f2 ts2)
+        | f1 == f2 -> andM $ zipWith uEqual ts1 ts2
       _ -> return False
     
 -------------------------------------------------------------------------------
@@ -431,6 +506,20 @@ outer_prec = 0
 arrow_prec = 1
 prod_prec = 2
 app_prec = 4
+
+pprTyScheme :: TyScheme -> Ppr Doc
+pprTyScheme (TyScheme [] [] ty) = pprType ty
+pprTyScheme (TyScheme qvars cst ty) = do
+  qvars_doc <- mapM conName qvars
+  cst_doc <- pprContext cst
+  ty_doc <- pprType ty
+  return $ text "forall" <+> sep qvars_doc <> text "." <+> cst_doc <+>
+    text "=>" <+> ty_doc
+  where
+    conName c =
+      case tcName c
+      of Nothing    -> pprGetTyConName (tcID c)
+         Just label -> pure $ text $ showLabel label
 
 pprType :: HMType -> Ppr Doc
 pprType ty = prType 0 ty
@@ -460,6 +549,8 @@ prType prec t = do
     AppTy _ _ -> 
       -- Should not happen after uncurrying
       internalError "prType"
+    TFunAppTy _ _ ->
+      internalError "prType"
     AnyTy k ->
       return $ parens (text "AnyTy" <+> text (showKind k))
   where
@@ -468,7 +559,7 @@ prType prec t = do
       of Nothing    -> pprGetTyConName (tcID c)
          Just label -> pure $ text $ showLabel label
     parenthesize expr_prec doc
-      | prec > expr_prec = parens doc
+      | prec >= expr_prec = parens doc
       | otherwise = doc
     
     x `arrow` y = (\x_doc y_doc -> x_doc <+> text "->" <+> y_doc) <$> x <*> y
@@ -502,5 +593,7 @@ tyVarToSystemF c
 tyConToSystemF :: TyCon -> IO SystemF.TypSF
 tyConToSystemF c
   | isTyVar c = fail "Expecting a constructor"
-  | otherwise = return $ tcSystemFValue $ tcConInfo c
+  | otherwise = return $ case tcConInfo c
+                         of Just descr -> tcSystemFValue descr 
+                            Nothing -> internalError "tyConToSystemF: Not a type constructor"
 

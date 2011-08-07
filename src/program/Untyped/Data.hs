@@ -53,6 +53,9 @@ data PprContext =
 data Predicate =
     -- | Class membership.  This predicate translates to a class dictionary.
     IsInst HMType !Class
+    -- | A type family constraint.  This predicate declares that F(t1) = t2 
+    --   for family F and types t1, t2.
+  | IsFamily !TyFamily HMType HMType
 
 type Constraint = [Predicate]
 
@@ -97,6 +100,10 @@ data TyConDescr =
   TyConDescr
   { -- | The System F constructor
     tcSystemFValue :: SystemF.TypSF
+
+    -- | If the type constructor is a type function, this is a reference
+    --   to the function.
+  , tcTypeFunction :: !(Maybe TyFamily)
   }
 
 -- | An atomic type-level entity, such as a type variable or constructor
@@ -106,15 +113,14 @@ data TyCon =
     tcID :: {-# UNPACK #-} !(Ident TyCon)
   , tcName :: !(Maybe Label)
   , tcKind :: !Kind
-    -- | True if this is a type variable
-  , tcIsVariable :: {-# UNPACK #-} !Bool
     -- | For a flexible type variable, this is what the variable has been 
     -- unified with
-  , tcRep  :: {-# UNPACK #-} !(Maybe (IORef TyVarRep))
+  , tcRep  :: !(Maybe (IORef TyVarRep))
     -- | The System F equivalent of a type variable
   , tcSystemFVariable :: IORef (Maybe SystemF.Var)
-    -- | Information pertaining to type constructors; undefined for variables
-  , tcConInfo :: TyConDescr
+    -- | For type constructors, information about the type constructor; 
+    --   for variables, Nothing.
+  , tcConInfo :: !(Maybe TyConDescr)
   }
   deriving(Typeable)
 
@@ -132,7 +138,8 @@ data TyVarRep = NoRep | TyVarRep !TyCon | TypeRep !HMType
 
 -- | A first-order Hindley-Milner type
 data HMType =
-    -- | A type constructor or variable
+    -- | A type constructor or variable.
+    --   Type functions never appear in a 'ConTy' term.
     ConTy !TyCon
     -- | An N-ary function type
   | FunTy {-# UNPACK #-} !Int
@@ -140,6 +147,8 @@ data HMType =
   | TupleTy {-# UNPACK #-} !Int
     -- | A type application
   | AppTy HMType HMType
+    -- | A type function application.  Type functions are always fully applied.
+  | TFunAppTy !TyCon [HMType]
     -- | A distinct type with the specified kind.  This is used for data
     --   types that have no constraints on them.
   | AnyTy !Kind
@@ -147,6 +156,16 @@ data HMType =
 
 -- | A type scheme
 data TyScheme = TyScheme TyVars Constraint HMType
+
+-- | A type class or type family signature.  This is the part that directs
+--   constraint resolution.
+data ClassSig =
+  ClassSig
+  { clsParam :: TyCon
+  , clsConstraint :: Constraint
+  , clsName :: String
+  , clsTypeCon :: !SystemF.Var    -- ^ Dictionary or family type constructor
+  }
 
 -- | A type class.
 --
@@ -159,14 +178,22 @@ data TyScheme = TyScheme TyVars Constraint HMType
 -- Members of this class are only deconstructed in the backend.
 data Class =
   Class
-  { clsParam :: TyCon
-  , clsConstraint :: Constraint
-  , clsMethods :: [ClassMethod]
-  , clsName :: String
-  , clsInstances :: [Instance]
-  , clsTypeCon :: !SystemF.Var    -- ^ Class dictionary type constructor
+  { clsSignature :: !ClassSig
   , clsDictCon :: SystemF.Var     -- ^ Class dictionary constructor
+  , clsMethods :: [ClassMethod]
+  , clsInstances :: [Instance]
   }
+
+mkClass :: String -> TyCon -> Constraint -> SystemF.Var -> SystemF.Var
+        -> [ClassMethod] -> [Instance] -> Class
+mkClass name tc cst cls_con inst_con methods instances =
+  Class (ClassSig tc cst name cls_con) inst_con methods instances 
+
+mkTyFamily :: String -> TyCon -> Constraint -> SystemF.Var
+           -> [TyFamilyInstance]
+           -> TyFamily
+mkTyFamily name tc cst fun_con instances =
+  TyFamily (ClassSig tc cst name fun_con) instances
 
 -- | A class method interface declaration.  Information used for class
 -- type and constraint inference is here.  The method's implementation is in
@@ -182,13 +209,28 @@ data ClassMethod =
   , clmVariable :: Untyped.Variable
   }
 
+data TyFamily =
+  TyFamily
+  { tfSignature :: !ClassSig
+  , tfInstances :: [TyFamilyInstance]
+  }
+
+data InstanceSig =
+  InstanceSig
+  { -- | Type parameters of the instance, in addition to class type parameters 
+    insQVars :: TyVars
+    -- | Constraints of the instance, in addition to class constraints
+  , insConstraint :: Constraint
+    -- | The class that the instance is associated with
+  , insClass :: ClassSig
+    -- | The instance type
+  , insType :: HMType
+  }
+
 -- | A class instance
 data Instance =
   Instance
-  { insQVars :: TyVars
-  , insConstraint :: Constraint
-  , insClass :: Class
-  , insType :: HMType
+  { insSignature :: !InstanceSig
     -- | If given, this global constructor is the instance's predefined value.
     -- The constructor is parameterized over the qvars and constraint.
   , insCon :: !(Maybe SystemF.Var)
@@ -197,6 +239,24 @@ data Instance =
 
 -- | Each instance method is defined as some constructor in System F
 newtype InstanceMethod = InstanceMethod {inmName :: SystemF.Var}
+
+mkInstance :: TyVars -> Constraint -> ClassSig -> HMType -> Maybe SystemF.Var
+           -> [InstanceMethod]
+           -> Instance
+mkInstance qvars cst cls ty con methods =
+  Instance (InstanceSig qvars cst cls ty) con methods
+  
+-- | A type family instance
+data TyFamilyInstance =
+  TyFamilyInstance
+  { tinsSignature :: !InstanceSig
+  , tinsType :: HMType
+  }
+
+mkTyFamilyInstance :: TyVars -> Constraint -> ClassSig -> HMType -> HMType
+                   -> TyFamilyInstance
+mkTyFamilyInstance qvars cst cls ty result =
+  TyFamilyInstance (InstanceSig qvars cst cls ty) result
 
 -- | A derivation of a predicate, containing enough information to reconstruct
 -- the derivation steps in the form of a proof object
@@ -214,6 +274,10 @@ data Derivation =
     }
   | -- | Parameter-passing convention derivation for functions
     FunPassConvDerivation
+    { conclusion :: Predicate
+    }
+    -- | A derivation of a type family constraint
+  | TyFamilyDerivation
     { conclusion :: Predicate
     }
     -- | A derivation without evidence

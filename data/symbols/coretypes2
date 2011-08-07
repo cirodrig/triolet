@@ -454,14 +454,6 @@ repr_EffTok : Repr (Stored EffTok);
 -------------------------------------------------------------------------------
 -- Stream and Traversable dictionaries
 
-TraversableDict_Stream_build :
-    (t : bare -> bare) -> (a : bare)
- -> Repr a -> Stream (shape t) a -> Stream (shape t) a;
-
-TraversableDict_Stream_traverse :
-    (t : bare -> bare) -> (a : bare)
- -> Repr a -> Stream (shape t) a -> Stream (shape t) a;
-
 TraversableDict_list_build :
   (a : bare) -> Repr a -> Stream list_shape a -> Writer (list a);
 
@@ -485,6 +477,12 @@ TraversableDict_MatrixView_build :
 
 TraversableDict_MatrixView_traverse :
   (a : bare) -> Repr a -> MatrixView a -> Stream matrix_shape a;
+
+TraversableDict_Stream_build :
+  (sh : bare) -> (a : bare) -> Repr a -> Stream sh a -> Stream sh a;
+
+TraversableDict_Stream_traverse :
+  (sh : bare) -> (a : bare) -> Repr a -> Stream sh a -> Stream sh a;
 
 ShapeDict_list_flatten :
   (a : bare) -> Stream list_shape a -> Stream list_shape a;

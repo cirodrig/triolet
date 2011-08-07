@@ -180,8 +180,13 @@ generalize env constraint inferred_types = do
   -- Determine which constraints to generalize over
   (retained, deferred) <-
     splitConstraint constraint ftv_gamma local_tyvars
-  
-  when (any (\x -> case x of {IsInst {} -> False; _ -> True}) retained) $
+
+  putStrLn "Retained"
+  print =<< runPpr (pprContext retained)
+  let ok_constraint (IsInst {}) = True
+      ok_constraint (IsFamily {}) = True
+      ok_constraint _ = False
+  when (not $ all ok_constraint retained) $
     internalError "generalize: Unexpected constraints"
   
   -- Create type schemes
@@ -208,14 +213,14 @@ generalize env constraint inferred_types = do
           if ftv `Set.isSubsetOf` Set.fromList x_ftv
           then return ()
           else fail "Type is more polymorphic than expected"
-          
+
       -- Retained constraints must only mention these type variables
       r_ftv <- freeTypeVariables retained
       unless (r_ftv `Set.isSubsetOf` ftv) $
         fail "Ambiguous type variable in constraint"
-      
+
       return $ TyScheme (Set.toList ftv) retained fot
-  
+
 -- | Add some recursively defined variables to the environment.  The variables
 -- are assigned new type variables.  Each variable is associated with a 
 -- placeholder.
