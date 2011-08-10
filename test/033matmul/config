@@ -1,0 +1,6 @@
+TestConfig {
+  synopsis	 = "Matrix multiplication",
+  pyonSources	 = ["matmul.pyon"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldPrint "OK"
+}
