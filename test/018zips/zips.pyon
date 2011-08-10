@@ -1,11 +1,11 @@
 
 def zips3(xs, ys, zs):
-    return __build__([(x - z) // (y - z)
-            for (x, y, z) in zip3(__iter__(xs), __iter__(ys), __iter__(zs))])
+    return [(x - z) // (y - z)
+            for (x, y, z) in zip3(__iter__(xs), __iter__(ys), __iter__(zs))]
 
 def zips4(xs, ys, zs, ws) -> list(int):
-    return __build__([(x + y) // (z - w)
-            for (x, y, z, w) in zip4(__iter__(xs), __iter__(ys), __iter__(zs), __iter__(ws))])
+    return [(x + y) // (z - w)
+            for (x, y, z, w) in zip4(__iter__(xs), __iter__(ys), __iter__(zs), __iter__(ws))]
 
 export ccall zips3 : list(int) * list(int) * list(int) -> list(int)
 export ccall zips4 : list(int) * list(int) * list(int) * list(int) -> list(int)
