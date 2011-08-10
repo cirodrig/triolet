@@ -542,8 +542,20 @@ inlckDataMovement ptr_ck data_check tenv dmd expression =
 betaReduce :: EvalMonad m =>
               ExpInfo -> FunM -> [TypM] -> [ExpM] -> m ExpM
 betaReduce inf (FunM fun) ty_args args
-  | length ty_args /= length (funTyParams fun) =
-      internalError "betaReduce: Not implemented for partial type application"
+  | length ty_args < length (funTyParams fun) = do
+      -- Substitute some type parameters and create a new function
+      let type_subst =
+            substitution [(tv, t)
+                         | (TyPatM (tv ::: _), TypM t) <-
+                             zip (funTyParams fun) ty_args]
+          leftover_ty_args = drop (length ty_args) $ funTyParams fun
+
+      params <- substitutePatMs type_subst (funParams fun)
+      body <- substitute type_subst $ funBody fun
+      ret <- substitute type_subst $ funReturn fun
+      
+      return $! undersaturated_app (funInfo fun) leftover_ty_args args params body ret
+
   | otherwise = do
       -- Rename bound value parameters if they conflict with names in the
       -- environment
@@ -563,7 +575,7 @@ betaReduce inf (FunM fun) ty_args args
           
       -- Is the function fully applied?
       return $! case length args `compare` length params
-                of LT -> undersaturated_app (funInfo freshened_fun) args params body ret
+                of LT -> undersaturated_app (funInfo freshened_fun) [] args params body ret
                    EQ -> saturated_app args params body
                    GT -> oversaturated_app args params body
   where
@@ -580,11 +592,11 @@ betaReduce inf (FunM fun) ty_args args
     -- To process an undersaturated application,
     -- assign the parameters that have been applied and 
     -- create a new function that takes the remaining arguments.
-    undersaturated_app inf args params body return =
+    undersaturated_app inf ty_args args params body return =
       let applied_params = take (length args) params
           excess_params = drop (length args) params
           new_fun = FunM $ Fun { funInfo = inf
-                               , funTyParams = []
+                               , funTyParams = ty_args
                                , funParams = excess_params
                                , funBody = body
                                , funReturn = return}
