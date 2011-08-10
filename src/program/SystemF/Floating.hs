@@ -591,9 +591,9 @@ applyContextRT m_return_type (c:ctx) e =
 
 applyContextRT _ [] e = e
 
-applyContext = applyContextRT Nothing
+applyContext ctx e = applyContextRT Nothing ctx e
 
-applyContextWithType t = applyContextRT (Just t)
+applyContextWithType t ctx e = applyContextRT (Just t) ctx e
 
 -- | Extend the environment with types and dictionary assignments from 
 --   variables bound in a context.
@@ -779,8 +779,9 @@ anchor' predicate m = do
     x <- m
     return (x, predicate)
 
-  return (applyContext dep_context (rename rn exp),
-          rename rn return_type,
+  let rn_return_type = rename rn return_type
+  return (applyContextWithType rn_return_type dep_context (rename rn exp),
+          rn_return_type,
           other_data)
 
 -- | Put floated bindings here, if they depend on the specified variable
