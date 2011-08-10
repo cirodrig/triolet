@@ -39,7 +39,7 @@ data LREnv =
   LREnv
   { loopNesting :: {-#UNPACK#-}!LoopNesting
   , typeEnv :: TypeEnv
-  , intEnv :: IntIndexEnv
+  , dictEnv :: SingletonValueEnv
   , varSupply :: !(IdentSupply Var)
   }
 
@@ -76,7 +76,7 @@ otherLoopOperator v =
 -- | Use rewrite rules on an application
 useRewriteRules :: ExpInfo -> Var -> [TypM] -> [ExpM] -> LRW (Maybe ExpM)
 useRewriteRules inf op_var ty_args args = ReaderT $ \env ->
-  rewriteApp parallelizingRewrites (intEnv env) (varSupply env) (typeEnv env)
+  rewriteApp parallelizingRewrites (intIndexEnv (dictEnv env)) (varSupply env) (typeEnv env)
   inf op_var ty_args args
 
 -------------------------------------------------------------------------------
@@ -151,8 +151,8 @@ parallelLoopRewrite (Module modname imports defss exports) =
 
     -- Set up globals
     tenv <- readInitGlobalVarIO the_memTypes
-    (_, int_env) <- runFreshVarM var_supply createDictEnv
-    let global_context = LREnv (LoopNesting 0 0) tenv int_env var_supply
+    dict_env <- runFreshVarM var_supply createDictEnv
+    let global_context = LREnv (LoopNesting 0 0) tenv dict_env var_supply
         rewrite = rwTopLevel defss exports
 
     (defss', exports') <- runReaderT rewrite global_context

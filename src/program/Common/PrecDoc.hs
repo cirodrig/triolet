@@ -3,7 +3,8 @@
 
 module Common.PrecDoc
        (Prec(..),
-        outerPrec, stmtPrec, typeAnnPrec, lamPrec, funPrec, appPrec, atomicPrec,
+        outerPrec, stmtPrec, cmpPrec, addPrec, typeAnnPrec, lamPrec,
+        funPrec, appPrec, atomicPrec,
         PrecDoc,
         hasPrec, hasAtomicPrec,
         precedence,
@@ -29,6 +30,14 @@ outerPrec = Prec (-1)
 -- | The precedence of a statement-like expression, such as \"let\" or \"case\"
 stmtPrec :: Prec
 stmtPrec = Prec 0
+
+-- | The precedence of comparison operations
+cmpPrec :: Prec
+cmpPrec = Prec 1
+
+-- | The precedence of operations like addition and subtraction
+addPrec :: Prec
+addPrec = Prec 2
 
 -- | The precedence of a type annotation
 typeAnnPrec :: Prec

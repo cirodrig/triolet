@@ -83,8 +83,8 @@ data LREnv =
     -- | Types of variables
   , lrTypeEnv :: TypeEnv
     
-  , lrDictEnv :: MkDictEnv
-  , lrIntEnv :: IntIndexEnv
+    -- | Singleton values such as class dictionaries
+  , lrDictEnv :: SingletonValueEnv
     
     -- | Number of simplification steps to perform.  For debugging, we may
     --   stop simplification after a given number of steps.
@@ -128,12 +128,8 @@ instance ReprDictMonad LR where
   withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply env) env
   withTypeEnv f = LR $ \env -> runLR (f $ lrTypeEnv env) env
   withDictEnv f = LR $ \env -> runLR (f $ lrDictEnv env) env
-  getIntIndexEnv = LR $ \env -> return (lrIntEnv env)
   localDictEnv f m = LR $ \env ->
     let env' = env {lrDictEnv = f $ lrDictEnv env}
-    in runLR m env'
-  localIntIndexEnv f m = LR $ \env ->
-    let env' = env {lrIntEnv = f $ lrIntEnv env}
     in runLR m env'
 
 liftFreshVarM :: FreshVarM a -> LR a
@@ -310,7 +306,7 @@ makeExpValue (ExpM expression) =
      _ -> return Nothing
 
 rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
-  rewriteApp (lrRewriteRules env) (lrIntEnv env) (lrIdSupply env) (lrTypeEnv env)
+  rewriteApp (lrRewriteRules env) (intIndexEnv $ lrDictEnv env) (lrIdSupply env) (lrTypeEnv env)
     inf operator ty_args args
 
 -------------------------------------------------------------------------------
@@ -1716,7 +1712,7 @@ rewriteLocalExpr phase ruleset mod =
   withTheNewVarIdentSupply $ \var_supply -> do
     fuel <- readInitGlobalVarIO the_fuel
     tenv <- readInitGlobalVarIO the_memTypes
-    (denv, ienv) <- runFreshVarM var_supply createDictEnv
+    denv <- runFreshVarM var_supply createDictEnv
 
     -- Take known data constructors from the type environment
     let global_known_values = initializeKnownValues tenv
@@ -1734,7 +1730,6 @@ rewriteLocalExpr phase ruleset mod =
                     , lrKnownValues = known_values
                     , lrTypeEnv = tenv
                     , lrDictEnv = denv
-                    , lrIntEnv = ienv
                     , lrFuel = fuel
                     , lrPhase = phase
                     }

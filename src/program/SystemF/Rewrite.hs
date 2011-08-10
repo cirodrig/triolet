@@ -179,12 +179,12 @@ defineAndInspectIndInt tenv int_value mk_body =
 caseOfFinIndInt :: TypeEnv
                 -> RW ExpM
                 -> Type
-                -> (Var -> Var -> RW ExpM)
+                -> (Var -> RW ExpM)
                 -> RW ExpM
 caseOfFinIndInt tenv scrutinee int_index mk_body =
   caseE scrutinee
   [mkAlt tenv (pyonBuiltin the_finIndInt) [TypM int_index] $
-   \ [] [pf, intvalue] -> mk_body pf intvalue]
+   \ [] [intvalue] -> mk_body intvalue]
 
 caseOfIndInt :: TypeEnv
              -> RW ExpM
@@ -202,7 +202,7 @@ caseOfIndInt tenv scrutinee int_index mk_finite mk_infinite =
 caseOfIndInt' :: TypeEnv
               -> RW ExpM
               -> Type
-              -> (Var -> Var -> RW ExpM)
+              -> (Var -> RW ExpM)
               -> (Var -> RW ExpM)
               -> RW ExpM
 caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
@@ -1076,10 +1076,8 @@ generalizedZipStream2 out_type out_repr transformer shape_type streams = do
 rwDefineIntIndex :: RewriteRule
 rwDefineIntIndex inf [] [integer_value@(ExpM (LitE _ lit))] =
   let IntL m _ = lit
-      finite = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_deadProof))
-               [TypM $ varApp (pyonBuiltin the_neZ) [IntT m, posInftyT]] []
       fin_int = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_finIndInt))
-                [TypM $ IntT m] [finite, integer_value]
+                [TypM $ IntT m] [integer_value]
       package = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_someIndInt))
                 [TypM $ IntT m] [fin_int]
   in return $! Just $! package

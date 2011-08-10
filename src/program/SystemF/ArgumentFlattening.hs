@@ -94,8 +94,7 @@ data AFLVEnv a =
   AFLVEnv
   { afVarSupply :: {-# UNPACK #-}!(IdentSupply Var)
   , afTypeEnv :: TypeEnv
-  , afDictEnv :: MkDictEnv
-  , afIntIndexEnv :: IntIndexEnv
+  , afDictEnv :: SingletonValueEnv
   , afOther :: a
   }
 
@@ -121,11 +120,8 @@ instance TypeEnvMonad (AFMonad e) where
 instance ReprDictMonad (AFMonad e) where
   getVarIDs = AF $ asks afVarSupply
   getDictEnv = AF $ asks afDictEnv
-  getIntIndexEnv = AF $ asks afIntIndexEnv
   localDictEnv f m =
     AF $ local (\env -> env {afDictEnv = f $ afDictEnv env}) $ unAF m
-  localIntIndexEnv f m =
-    AF $ local (\env -> env {afIntIndexEnv = f $ afIntIndexEnv env}) $ unAF m
 
 instance EvalMonad (AFMonad e) where
   liftTypeEvalM m = AF $ ReaderT $ \env -> do
@@ -1350,9 +1346,9 @@ flattenModuleContents (Module mod_name imports defss exports) = do
 flattenArguments :: Module Mem -> IO (Module Mem)
 flattenArguments mod =
   withTheNewVarIdentSupply $ \id_supply -> do
-    (dict_env, intindex_env) <- runFreshVarM id_supply createDictEnv
+    dict_env <- runFreshVarM id_supply createDictEnv
     type_env <- readInitGlobalVarIO the_memTypes
-    let env = AFLVEnv id_supply type_env dict_env intindex_env ()
+    let env = AFLVEnv id_supply type_env dict_env ()
     runReaderT (unAF $ flattenModuleContents mod) env
 
 -------------------------------------------------------------------------------
@@ -1588,9 +1584,9 @@ lvModuleContents (Module mod_name imports defss exports) = do
 flattenLocals :: Module Mem -> IO (Module Mem)
 flattenLocals mod =
   withTheNewVarIdentSupply $ \id_supply -> do
-    (dict_env, intindex_env) <- runFreshVarM id_supply createDictEnv
+    dict_env <- runFreshVarM id_supply createDictEnv
     type_env <- readInitGlobalVarIO the_memTypes
-    let env = AFLVEnv id_supply type_env dict_env intindex_env IntMap.empty
+    let env = AFLVEnv id_supply type_env dict_env IntMap.empty
     mod' <- runReaderT (unAF $ lvModuleContents mod) env
     
     -- Flattening creates multiple local variables with the same name.

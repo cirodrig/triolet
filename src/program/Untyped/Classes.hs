@@ -7,6 +7,7 @@ module Untyped.Classes
         isInstancePredicate, isEqualityPredicate,
         reduceTypeFunction,
         toHnf,
+        dependentTypeVariables,
         reduceContext,
         splitConstraint,
         defaultConstraint,
@@ -90,8 +91,8 @@ reduceTypeFunction family [arg] = runMaybeT $ do
   where
     match_instance inst = do
       let sig = tinsSignature inst
-      subst <- MaybeT $ match (insType sig) arg
-      cst <- lift $ mapM (rename subst) $ insConstraint sig
+      (subst, match_cst) <- MaybeT $ match (insType sig) arg
+      cst <- lift $ mapM (rename subst) $ match_cst ++ insConstraint sig
       result_type <- lift $ rename subst $ tinsType inst
       return (result_type, cst)
 
@@ -234,18 +235,51 @@ instanceReduction pos pred = do
         let derivation = FunPassConvDerivation { conclusion = pred }
         in return (derivation, [])
 
+-- | Simplify a set of equality constraints as much as possible
+equalitySimplification :: SourcePos -> Constraint -> IO Constraint
+equalitySimplification pos csts =
+  -- Simplify constraints repeatedly until no further simplification is
+  -- possible
+  repeat_until_convergence csts
+  where
+    repeat_until_convergence csts = do
+      csts_doc <- runPpr (pprContext csts)
+      print $ hang (text "equalitySimplification") 8 csts_doc
+      (csts', progress) <- one_pass False id csts
+      if progress then repeat_until_convergence csts' else return csts'
+
+    -- Simplify all predicates once
+    one_pass progress new_cst (prd:cst) = do
+      (prd', prd_progress) <- try_reduce prd
+      one_pass (progress || prd_progress) (new_cst . (prd' ++)) cst
+    
+    one_pass progress new_cst [] = return (new_cst [], progress)
+
+    -- Try to simplify one predicate
+    try_reduce :: Predicate -> IO (Constraint, Bool)
+    try_reduce prd = runMaybeT (equalityReduction1 prd) >>= continue
+      where
+        continue Nothing         = return ([prd], False) -- No progress
+        continue (Just (_, cst)) = return (cst, True)    -- Progress
+
+-- | Attempt to derive a solution for a single equality constraint
 equalityReduction :: SourcePos -> Predicate -> IO (Derivation, Constraint)
-equalityReduction pos pred@(IsEqual t1 t2) = do
-  -- Try to decompose this predicate and eliminate trivial predicates
-  result <- runMaybeT $ recursive_reduce $ do
-    equalityTrivial (t1, t2) `mplus` equalityDecomp (t1, t2)
+equalityReduction pos pred@(IsEqual {}) = do
+  -- Try to decompose this predicate, eliminate trivial predicates,
+  -- and unify variables
+  result <- runMaybeT $ do
+    (deriv, csts) <- equalityReduction1 pred
+    csts' <- lift $ equalitySimplification pos csts
+    return (deriv, csts')
 
   return $ fromMaybe (IdDerivation pred, [pred]) result
-  where
-    recursive_reduce m = do
-      (deriv, csts) <- m
-      (_, csts') <- mapAndUnzipM (lift . equalityReduction pos) csts
-      return (deriv, concat csts')
+
+-- | Try to apply any single reduction rule to an equality predicate
+equalityReduction1 :: Predicate -> MaybeT IO (Derivation, Constraint)
+equalityReduction1 prd@(IsEqual t1 t2) =
+  equalityDecomp (t1, t2) `mplus`
+  equalityTrivial (t1, t2) `mplus`
+  equalityUnify (t1, t2)
 
 -- | If LHS and RHS of an equality constraint are equal, discard it
 equalityTrivial :: (HMType, HMType) -> MaybeT IO (Derivation, Constraint)
@@ -254,20 +288,73 @@ equalityTrivial (t1, t2) = do
   if b then return (EqualityDerivation (IsEqual t1 t2), []) else mzero
 
 -- | If the LHS and RHS are equal data constructors, decompose the
---   constraint
+--   constraint.
 equalityDecomp :: (HMType, HMType) -> MaybeT IO (Derivation, Constraint)
 equalityDecomp (t1, t2) = do
   (t1_head, t1_args) <- lift $ inspectTypeApplication t1
   (t2_head, t2_args) <- lift $ inspectTypeApplication t2
+  let decompose = do_decompose t1_args t2_args
   case (t1_head, t2_head) of
     (ConTy c1, ConTy c2) 
-      | isDataCon c1 && isDataCon c2 && c1 == c2 ->
-          -- Equality of matching data constructors: C a b = C c d.
-          -- Decompose into equality of arguments: a = c, b = d.
-          let new_constraints = zipWith IsEqual t1_args t2_args
-          in return (EqualityDerivation (IsEqual t1 t2), new_constraints)
-    _ -> mzero
+      | isDataCon c1 && isDataCon c2 && c1 == c2 -> decompose
+    (TupleTy n1, TupleTy n2)
+      | n1 == n2 -> decompose
+    (FunTy n1, FunTy n2)
+      | n1 == n2 -> decompose
+    (AnyTy k1, AnyTy k2) -> decompose
+      
+    -- If one of the parameters involves a type variable or type function,
+    -- we cannot decompose the equality constraint
+    (ConTy c1, _)
+      | not (isDataCon c1) -> mzero
+    (_, ConTy c2)
+      | not (isDataCon c2) -> mzero
+
+    -- Otherwise, we have two mismatched data or type constructors, which is
+    -- an error
+    _ -> contradiction
+  where
+    do_decompose t1_args t2_args =
+      -- Equality of matching data constructors: C a b = C c d.
+      -- Decompose into equality of arguments: a = c, b = d.
+      let new_constraints = zipWith IsEqual t1_args t2_args
+      in return (EqualityDerivation (IsEqual t1 t2), new_constraints)
+
+    contradiction =
+      -- Unsolvable constraint
+      lift $ fail "Unsolvable type equality constraint detected"
   
+-- | If the LHS or RHS is a flexible type variable, then unify it.
+--   If one side is a flexible type variable, unify it with the other side.
+equalityUnify :: (HMType, HMType) -> MaybeT IO (Derivation, Constraint)
+equalityUnify (t1, t2) = do
+  (t1_c) <- lift $ canonicalizeHead t1
+  (t2_c) <- lift $ canonicalizeHead t2
+  case (t1_c, t2_c) of
+    (ConTy c1, ConTy c2)
+      | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> do
+          debugPrintUnifyMessage t1_c t2_c
+          lift $ unifyTyVars c1 c2
+          return (EqualityDerivation (IsEqual t1_c t2_c), [])
+    (ConTy c1, _)
+      | isFlexibleTyVar c1 -> do
+          debugPrintUnifyMessage t1_c t2_c
+          lift $ unifyTyVar c1 t2
+          return (EqualityDerivation (IsEqual t1_c t2_c), [])
+    (_, ConTy c2)
+      | isFlexibleTyVar c2 -> do
+          debugPrintUnifyMessage t1_c t2_c
+          lift $ unifyTyVar c2 t1
+          return (EqualityDerivation (IsEqual t1_c t2_c), [])
+    _ -> mzero
+  where
+    debugPrintUnifyMessage t1_c t2_c = lift $ do
+      putStrLn "Equality constraint unifying"
+      print =<< runPpr (do
+        d1 <- uShow t1_c
+        d2 <- uShow t2_c
+        return $ nest 4 (d1 $$ d2))
+
 -------------------------------------------------------------------------------
 -- Context reduction
 
@@ -277,7 +364,14 @@ equalityDecomp (t1, t2) = do
 -- head-normal form with no redundant constraints.
 reduceContext :: Constraint -> IO Constraint
 reduceContext csts = do 
-  csts' <- foldM addToContext [] csts
+  -- Simplify equality constraints and other constraints using separate
+  -- procedures
+  let (equalities, others) = partition isEqualityPredicate csts
+  equalities' <- equalitySimplification noSourcePos equalities
+  others' <- foldM addToContext [] others
+  let csts' = equalities' ++ others'
+
+  -- DEBUG
   putStrLn "reduceContext"
   print =<< runPpr (pprContext csts)
   print =<< runPpr (pprContext csts')
@@ -330,47 +424,103 @@ instancePredicates (IsInst t cls) = do
       else return NotReduced
 
     _ -> fmap to_reduction_step $ runMaybeT $ do
-      -- Match against all instances until one succeeds 
-      (inst, inst_cst) <-
+      -- Match against all instances until one succeeds
+      (inst_subst, inst, inst_cst) <-
         msum $ map (matchInstancePredicate t) $ clsInstances cls
     
-      -- Get the class constraints
-      -- If an instance matched, then the class must match also
-      cls_cst <-
-        lift $ mapM (instantiatePredicate t) $ clsConstraint $ clsSignature cls
+      -- Get the class constraints.  Substitute the actual instance type
+      -- for the class variable.
+      let class_subst = substitutionFromList [(clsParam $ clsSignature cls, t)]
 
-      return (cls_cst, inst, inst_cst)
+      -- If an instance matched, then the class must match also
+      cls_csts <-
+        lift $ mapM (instantiatePredicate class_subst t) $
+        clsConstraint $ clsSignature cls
+
+      lift $ print "Class instance matched"
+      lift $ print =<< runPpr (do d1 <- uShow (insType $ insSignature inst)
+                                  d2 <- pprTyCon (clsParam $ insClass $ insSignature inst)
+                                  d3 <- pprContext inst_cst
+                                  d4 <- pprContext cls_csts
+                                  return $ d1 $$ d2 $$ d3 $$ d4)
+                           
+      return (cls_csts, inst, inst_cst)
   where
     to_reduction_step Nothing = NotReduced
     to_reduction_step (Just (x, y, z)) = InstanceReduced x y z
 
-    -- Instantiate a superclass predicate
-    instantiatePredicate inst_type pred =
+    -- Instantiate a superclass predicate.  Substitute the instance type  
+    -- for the class parameter
+    instantiatePredicate class_subst inst_type pred =
+      rename class_subst pred {-
       case pred
       of IsInst ty' _ -> do
            -- Predicate type must match, because the instance matched
-           Just subst <- match ty' inst_type
-           rename subst pred
-         _ -> internalError "Not an instance predicate"
+           Just (subst, match_cst) <- match ty' inst_type
+           renameList subst (match_cst ++ [pred])
+         _ -> internalError "Not an instance predicate" -}
 
 instancePredicates _ = internalError "Not an instance predicate"
 
 -- | Attempt to match a type against a class instance
 matchInstancePredicate :: HMType -> Instance
-                       -> MaybeT IO (Instance, Constraint)
+                       -> MaybeT IO (Substitution, Instance, Constraint)
 matchInstancePredicate inst_type inst = do
-  (_, inst_cst) <- matchInstanceSignature inst_type (insSignature inst)
-  return (inst, inst_cst)
+  (subst, inst_cst) <- matchInstanceSignature inst_type (insSignature inst)
+  return (subst, inst, inst_cst)
 
 matchInstanceSignature :: HMType -> InstanceSig
                        -> MaybeT IO (Substitution, Constraint)
 matchInstanceSignature inst_type sig = do
   -- Try to match this type against the instance's type
-  subst <- MaybeT $ match (insType sig) inst_type
+  (subst, match_cst) <- MaybeT $ match (insType sig) inst_type
   
   -- If successful, return the substituted constraints from the instance
-  inst_cst <- lift $ mapM (rename subst) $ insConstraint sig
+  inst_cst <- lift $ mapM (rename subst) $ match_cst ++ insConstraint sig
   return (subst, inst_cst)
+
+-------------------------------------------------------------------------------
+-- Generalization-related functions
+
+-- | Find variables that are dependent on a given set of variables subject to
+--   a constraint.  The constraint parameter should be reduced constraint
+--   returned by 'reduceContext'.
+--
+--   Dependent variables are those that will be resolved to ground types if
+--   types are assigned to all free type variables of the first-order type. 
+--
+--   All free variables of the first-order type are dependent.  Additionally,
+--   variables that are determined by a type equality constraint are
+--   dependent.
+dependentTypeVariables :: Constraint -> TyVarSet -> IO TyVarSet
+dependentTypeVariables cst initial_set = do
+  -- For each equality constraint, find the free variables of its LHS and RHS
+  equality_freevars <-
+    sequence [do fv1 <- freeTypeVariables t1
+                 fv2 <- freeTypeVariables t2
+                 return (fv1, fv2)
+             | IsEqual t1 t2 <- cst]
+
+  let extend_set s =
+        -- Look at each equality constraint and add dependent variables
+        let s' = foldl' extend_with_constraint s equality_freevars
+
+        -- If new variables were added, new equality constraints may become
+        -- relevant.  Repeat until convergence.
+        in if s' == s then s' else extend_set s'
+
+  return $ extend_set initial_set
+  where
+    -- Attempt to add type variables from the equality (t1 ~ t2) to the set.
+    -- If all variables on one side of the equality are dependent, then add
+    -- all variables on the other side.
+    extend_with_constraint s (fv1, fv2)
+      | fv1_subset && not fv2_subset = Set.union s fv2
+      | fv2_subset && not fv1_subset = Set.union s fv1
+      | otherwise                    = s
+      where
+        fv1_subset = fv1 `Set.isSubsetOf` s
+        fv2_subset = fv2 `Set.isSubsetOf` s
 
 -- | An action taken by splitConstraint
 data SplitAction = Retain | Defer | Default | Ambiguous
@@ -380,15 +530,16 @@ data SplitAction = Retain | Defer | Default | Ambiguous
 -- \"bound\" variables.
 --
 -- TODO: Apply defaulting rules when the constraint is ambiguous
-splitConstraint :: Constraint   -- ^ Constraint to partition
+splitConstraint :: Constraint   -- ^ Constraint to partition. 
+                                --   Must have been simplified
+                                --   by 'reduceContext'.
                 -> TyVarSet     -- ^ Free variables
                 -> TyVarSet     -- ^ Bound variables
                 -> IO (Constraint, Constraint)
                    -- ^ Returns (retained constraints,
                    -- deferred constraints)
 splitConstraint cst fvars qvars = do
-  cst' <- reduceContext cst
-  (retained, deferred, defaulted, ambiguous) <- partitionM isRetained cst'
+  (retained, deferred, defaulted, ambiguous) <- partitionM isRetained cst
   
   -- Need to default some constraints?
   if null defaulted
@@ -399,7 +550,8 @@ splitConstraint cst fvars qvars = do
     else do
     -- Apply defaulting rules, then retry
     new_csts <- mapM defaultConstraint defaulted
-    splitConstraint (concat new_csts ++ cst') fvars qvars
+    cst' <- reduceContext (concat new_csts ++ cst)
+    splitConstraint cst' fvars qvars
   where
     isRetained prd = do
       fv <- freeTypeVariables prd
@@ -508,9 +660,9 @@ toProof pos env derivation =
            prf = mkPolyCallE pos (mkVarE pos con) [convertHMType ty] []
        return (True, [], prf)
      
-     EqualityDerivation { conclusion = prd@(IsEqual _ _) } -> do
-       -- No evidence is needed
-       let prf = mkVarE pos (SystemF.pyonBuiltin SystemF.the_None)
+     EqualityDerivation { conclusion = prd@(IsEqual t1 t2) } -> do
+       -- No evidence is needed.  Create a coercion value
+       prf <- createCoercionValue pos t1 t2
        return (True, [], prf)
        
      MagicDerivation {} -> do
@@ -625,3 +777,13 @@ instantiateClassMethods pos inst inst_type env = do
   forM (insMethods inst) $ \method ->
     let method_exp = mkConE pos (inmName method)
     in instanceExpressionWithProofs env pos ty_params constraint method_exp
+
+-- | Create a System F value representing a coercion from t1 to t2.
+createCoercionValue :: SourcePos -> HMType -> HMType -> IO TIExp
+createCoercionValue pos t1 t2 = do
+  let t1' = convertHMType t1
+      t2' = convertHMType t2
+  let op = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos)
+           (SystemF.pyonBuiltin SystemF.the_unsafeMakeCoercion)
+  return $ mkPolyCallE pos op [t1', t2'] []
+

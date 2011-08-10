@@ -36,6 +36,7 @@ convertType ty
          LamT (a ::: k) rng -> LamT (a ::: convertKind k) (convertType rng)
          AllT (a ::: k) rng -> AllT (a ::: convertKind k) (convertType rng)
          AnyT k -> AnyT (convertKind k)
+         CoT k -> CoT k
 
 convertTypM (TypM t) = TypM (convertType t)
 

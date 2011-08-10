@@ -92,6 +92,8 @@ lowerIntrinsicOp v
          dead_reference)
       , (pyonBuiltin the_deadProof,
          proof_object)
+      , (pyonBuiltin the_unsafeMakeCoercion,
+         proof_object)
       ]
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
@@ -172,6 +174,6 @@ dead_reference = do
   param_var <- newAnonymousVar (PrimType PointerType)
   return $ LamV $ closureFun [param_var] [] $ ReturnE (ValA [])
 
--- | Create a proof object.
+-- | Create a proof object or coercion value.
 proof_object :: (Monad m, Supplies m (Ident Var)) => m Val
 proof_object = return (LitV UnitL)

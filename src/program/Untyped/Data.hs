@@ -76,15 +76,24 @@ class Unifiable a where
   
   -- | Match (semi-unify) two terms. 
   --
-  -- @match x y@ finds a substitution that unifies @x@ with @y@, if one exists.
-  -- If no substitution can be found, return None.  The terms are not modified.
-  matchSubst :: Substitution -> a -> a -> IO (Maybe Substitution)
+  -- @match x y@ finds a substitution and constraint that unifies
+  -- @x@ with @y@, if one exists.  The constraint consists of equality
+  -- constraints that assign types to type functions.
+  -- If no substitution can be found, return None.
+  --
+  -- After matching is complete, the returned substitution must be applied to
+  -- the constraint.
+  -- The terms are not modified.
+  matchSubst :: Substitution -> a -> a -> IO (Maybe (Substitution, Constraint))
 
   -- | Decide whether two unifiable terms are equal.
   -- The terms are not modified.
   uEqual :: a -> a -> IO Bool
 
-match :: Unifiable a => a -> a -> IO (Maybe Substitution)
+renameList :: Unifiable a => Substitution -> [a] -> IO [a]
+renameList s xs = mapM (rename s) xs
+
+match :: Unifiable a => a -> a -> IO (Maybe (Substitution, Constraint))
 match = matchSubst (Substitution Map.empty)
 
 -- | An entity that may contain type variables

@@ -231,6 +231,53 @@ function copy_Repr (pointer src, pointer dst) -> () {
   ();
 };
 
+function inline repr_Maybe (owned repr_arg) -> owned {
+  ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
+
+  typedef arg = bytes(value repr_arg @! PassConv.size,
+                      value repr_arg @! PassConv.align);
+
+  ret @! PassConv.size = sizeof Maybe(arg);
+  ret @! PassConv.align = alignof Maybe(arg);
+  ret @! PassConv.is_pointerless = repr_arg @! PassConv.is_pointerless;
+  copy = owned call copy_Maybe (repr_arg @! PassConv.copy,
+                                sizeof arg, alignof arg);
+  ret @! PassConv.convert_to_boxed =
+    owned call make_Boxed (sizeof Maybe(arg), alignof Maybe(arg));
+  ret @! PassConv.convert_to_bare =
+    owned call from_Boxed (sizeof Maybe(arg), alignof Maybe(arg), copy);
+  ret @! PassConv.finalize =
+    owned call finalize_Maybe(repr_arg @! PassConv.finalize,
+                              sizeof arg, alignof arg);
+  ret;
+};
+
+function copy_Maybe (owned copy_arg, uint arg_size, uint arg_align,
+                     pointer src, pointer dst) -> () {
+  typedef arg = bytes(value arg_size, value arg_align);
+  if (src @! Maybe(arg).isjust == uint8 0) {
+    // Nothing
+    dst @! Maybe(arg).isjust = uint8 0;
+    ();
+  } else {
+    dst @! Maybe(arg).isjust = uint8 1;
+    () call copy_arg (src @ Maybe(arg).member, dst @ Maybe(arg).member);
+  };
+};
+
+function finalize_Maybe (owned finalize_arg, uint arg_size, uint arg_align,
+                         pointer p) -> () {
+  typedef arg = bytes(value arg_size, value arg_align);
+  if (p @! Maybe(arg).isjust == uint8 0) {
+    // Nothing
+    ();
+  } else {
+    // Just
+    () call finalize_arg (p @ Maybe(arg).member);
+  };
+  
+};
+
 function inline repr_PyonTuple2 (owned repr1, owned repr2) -> owned {
   ret = (pointer primcall pyon_alloc (sizeof PassConv)) as owned;
   size1 = repr1 @! PassConv.size;

@@ -626,9 +626,7 @@ data FloatCtx =
              -- | The type environment
            , fcTypeEnv :: !TypeEnv
              -- | Representation dictionaries in scope
-           , fcDictEnv :: MkDictEnv
-             -- | Indexed integers in scope
-           , fcIntEnv :: IntIndexEnv
+           , fcDictEnv :: SingletonValueEnv
              -- | IDs of readable reference variables that are not in
              -- @fcTypeEnv@.
            , fcReadVars :: IntSet.IntSet
@@ -698,12 +696,8 @@ instance EvalMonad Flt where
 instance ReprDictMonad Flt where
   getVarIDs = Flt $ \ctx -> return (fcVarSupply ctx, [])
   getDictEnv = Flt $ \ctx -> return (fcDictEnv ctx, [])
-  getIntIndexEnv = Flt $ \ctx -> return (fcIntEnv ctx, [])
   localDictEnv f m = Flt $ \ctx ->
     let ctx' = ctx {fcDictEnv = f $ fcDictEnv ctx}
-    in runFlt m ctx'
-  localIntIndexEnv f m = Flt $ \ctx ->
-    let ctx' = ctx {fcIntEnv = f $ fcIntEnv ctx}
     in runFlt m ctx'
 
 -- | Add a variable from a type pattern to the type environment
@@ -1304,11 +1298,10 @@ floatModule :: Module Mem -> IO (Module Mem)
 floatModule mod@(Module mod_name imports defss exports) =
   withTheNewVarIdentSupply $ \id_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
-    (dict_env, int_env) <- runFreshVarM id_supply createDictEnv
+    dict_env <- runFreshVarM id_supply createDictEnv
     let flt_env = FloatCtx {fcVarSupply = id_supply,
                             fcTypeEnv = tenv,
                             fcDictEnv = dict_env,
-                            fcIntEnv = int_env,
                             fcReadVars = IntSet.empty}
     (defss', exports') <- runTopLevelFlt (floatTopLevel defss exports) flt_env
     return $ Module mod_name imports defss' exports'

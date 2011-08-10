@@ -1158,6 +1158,9 @@ getValLayout ty
          (AllT (v ::: k) ty', []) ->
            -- Look through the 'forall' type
            assume v k $ getValLayout ty'
+         (CoT {}, [_, _]) ->
+           -- Coercions are erased
+           return VErased
 
          _ -> traceShow (pprType ty) $ internalError "getLayout: Head is not a type application"
   where

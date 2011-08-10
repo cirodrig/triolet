@@ -20,6 +20,9 @@ extern function pyon.internal.structures.repr_Referenced
 extern function pyon.internal.structures.repr_array
   (FinIndInt, owned) -> owned;
 
+extern function pyon.internal.structures.repr_Maybe
+  (owned) -> owned;
+
 extern function pyon.internal.structures.repr_PyonTuple2
   (owned, owned) -> owned;
 

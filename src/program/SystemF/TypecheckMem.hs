@@ -263,7 +263,7 @@ computeAppliedType orig_expr pos op_type_ arg_types =
       case result of
         Just op_type' -> apply op_type' arg_ts
         Nothing -> traceShow debug_message $
-                   typeError $ "Error in application at " ++ show pos
+                      typeError $ "Error in application at " ++ show pos
     
     apply op_type [] = return op_type
     
@@ -398,8 +398,11 @@ typeCheckAlternative pos scr_type (AltM (DeCon { altConstructor = con
   where
     check_number_of_fields atypes fs
       | length atypes /= length fields =
-        internalError $ "typeCheckAlternative: Wrong number of fields in pattern (expected " ++
-        show (length atypes) ++ ", got " ++ show (length fields) ++ ")"
+        let expected = show (length atypes)
+            got = show (length fields)
+            location = show pos
+        in internalError $ location ++ ": Wrong number of fields in pattern (expected " ++ expected
+           ++ ", got " ++ got ++ ")"
       | otherwise = return ()
 
     check_arg expected_rtype (pat_index, pat) =

@@ -11,6 +11,7 @@ module Untyped.HMType
         isTyVar, isTyFun, isRigidTyVar, isFlexibleTyVar, isDataCon,
         isCanonicalTyVar, 
         newTyVar, newRigidTyVar, mkTyCon, newTyFun, duplicateTyVar,
+        unifyTyVar, unifyTyVars,
         HMType(..),
         appTy, appTys, appTyCon,
         tupleType,
@@ -26,6 +27,7 @@ module Untyped.HMType
         Unifiable(..),
         tyVarToSystemF,
         tyConToSystemF,
+        pprTyCon,
         pprTyScheme
        )
 where
@@ -370,13 +372,7 @@ canonicalizeHead t@(TFunAppTy f ts) =
        -- Reduce the type function, if possible
        reduced <- reduceTypeFunction family ts
        case reduced of
-         Just t' -> do putStrLn "canonicalizeHead"
-                       (d1, d2) <- runPpr $ do t1 <- pprType (foldl AppTy (ConTy f) ts)
-                                               t2 <- pprType t'
-                                               return (t1, t2)
-                       print d1
-                       print d2
-                       canonicalizeHead t'
+         Just t' -> canonicalizeHead t'
          Nothing -> return t
      Nothing -> internalError "canonicalizeHead"
 canonicalizeHead t = return t
@@ -420,7 +416,7 @@ instance Unifiable HMType where
            Nothing ->
              -- Add the mapping v |-> t2_c and succeed
              let subst' = updateTc (Map.insert v t2_c) subst
-             in return (Just subst')
+             in return $ Just (subst', [])
       
       -- Non-variable terms must match exactly
       (ConTy c1, ConTy c2) -> require $ c1 == c2
@@ -428,15 +424,23 @@ instance Unifiable HMType where
       (TupleTy t1, TupleTy t2) -> require $ t1 == t2
       (AnyTy k1, AnyTy k2) -> require $ k1 == k2
       -- Recurse on app terms
-      (AppTy a b,  AppTy c d) -> do result1 <- matchSubst subst a c
-                                    case result1 of
-                                      Nothing -> return Nothing
-                                      Just subst' -> matchSubst subst' b d
-      (TFunAppTy _ _, _) ->
-        internalError "match: Unexpected type function in pattern"
+      (AppTy a b,  AppTy c d) -> do
+        result1 <- matchSubst subst a c
+        case result1 of
+          Nothing -> return Nothing
+          Just (subst', cst1) -> do
+            result2 <- matchSubst subst' b d
+            case result2 of
+              Nothing -> return Nothing
+              Just (subst'', cst2) -> return (Just (subst'', cst1 ++ cst2))
+
+      (TFunAppTy {}, _) ->
+        -- Generate an equality constraint for this type function
+        return (Just (subst, [IsEqual t1_c t2_c]))
+
       _ -> failure
     where
-      success = return (Just subst)
+      success = return $ Just (subst, [])
       failure = return Nothing
       require True  = success
       require False = failure
@@ -517,19 +521,20 @@ arrow_prec = 1
 prod_prec = 2
 app_prec = 4
 
+pprTyCon :: TyCon -> Ppr Doc
+pprTyCon c =
+  case tcName c
+  of Nothing    -> pprGetTyConName (tcID c)
+     Just label -> pure $ text $ showLabel label
+
 pprTyScheme :: TyScheme -> Ppr Doc
 pprTyScheme (TyScheme [] [] ty) = pprType ty
 pprTyScheme (TyScheme qvars cst ty) = do
-  qvars_doc <- mapM conName qvars
+  qvars_doc <- mapM pprTyCon qvars
   cst_doc <- pprContext cst
   ty_doc <- pprType ty
   return $ text "forall" <+> sep qvars_doc <> text "." <+> cst_doc <+>
     text "=>" <+> ty_doc
-  where
-    conName c =
-      case tcName c
-      of Nothing    -> pprGetTyConName (tcID c)
-         Just label -> pure $ text $ showLabel label
 
 pprType :: HMType -> Ppr Doc
 pprType ty = prType 0 ty
@@ -539,7 +544,7 @@ prType prec t = do
   -- Uncurry the type application and put the head in canonical form
   (hd, params) <- liftIO $ inspectTypeApplication t
   case hd of
-    ConTy c -> application <$> conName c <*> traverse (prType app_prec) params
+    ConTy c -> application <$> pprTyCon c <*> traverse (prType app_prec) params
     FunTy n
       | n + 1 == length params ->
         let domain = sep . intersperse (text "*") <$>
@@ -564,10 +569,6 @@ prType prec t = do
     AnyTy k ->
       return $ parens (text "AnyTy" <+> text (showKind k))
   where
-    conName c =
-      case tcName c
-      of Nothing    -> pprGetTyConName (tcID c)
-         Just label -> pure $ text $ showLabel label
     parenthesize expr_prec doc
       | prec >= expr_prec = parens doc
       | otherwise = doc

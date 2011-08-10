@@ -250,6 +250,8 @@ builtinFunctions =
      Right [| SystemF.pyonBuiltin SystemF.the_repr_array |])
   , (PyonName module_structures "repr_Referenced",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Referenced |])
+  , (PyonName module_structures "repr_Maybe",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_Maybe |])
   {-, (PyonName module_structures "complex_pass_conv",
      Left $
      closureFunctionType [PrimType UnitType,

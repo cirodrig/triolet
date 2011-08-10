@@ -98,6 +98,7 @@ instance Renameable Type where
          AllT binder' $ rename rn' rng
        AnyT _           -> ty    -- Kinds are not renameable
        UTupleT _        -> ty
+       CoT _            -> ty
 
   freshen f ty =
     case ty
@@ -140,6 +141,7 @@ instance Renameable Type where
          in Set.union fv_dom (Set.delete v fv_rng)
        AnyT k -> freeVariables k
        UTupleT _        -> Set.empty
+       CoT _ -> Set.empty
 
 -- | Freshen variables bound in the types such that the same variable is 
 --   bound by the outermost term in both types.  The outermost term is always
@@ -269,4 +271,5 @@ instance Substitutable Type where
        AnyT _ -> return ty             -- Kinds are not substitutable
        IntT _ -> return ty 
        UTupleT _ -> return ty
+       CoT _ -> return ty
 

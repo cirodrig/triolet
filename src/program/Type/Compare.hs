@@ -39,6 +39,7 @@ typeMentions t target = search t
       | otherwise = search dom || search rng
     search (AnyT k) = search k
     search (IntT _) = False
+    search (CoT _) = False
     search (UTupleT _) = False
 
 -- | Determine whether the type mentions a variable in the set.
@@ -59,6 +60,7 @@ typeMentionsAny t target = search t
       | otherwise = search dom || search rng
     search (AnyT k) = search k
     search (IntT _) = False
+    search (CoT _) = False
     search (UTupleT _) = False
 
 -------------------------------------------------------------------------------
@@ -73,6 +75,7 @@ reduceToWhnf ty =
        of VarT op_var -> reduce_function_con op_var args
           LamT (v ::: dom) body -> reduce_lambda_fun v dom body args
           UTupleT _ -> return ty
+          CoT _ -> return ty
      _ -> return ty
   where
     -- If the operator is a type function, then evaluate it
@@ -130,6 +133,7 @@ cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
       compareTypes dom1 dom2 >&&> bindAndCompare a2 dom2 rng1 rng2
     cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
     cmp (IntT n1, IntT n2) = return $ n1 == n2
+    cmp (CoT k1, CoT k2) = return $ k1 == k2
     cmp (UTupleT a, UTupleT b) = return $ a == b
 
     -- Matching (\x. e1) with e2
@@ -217,6 +221,10 @@ unify subst expected given = do
       unify2 subst (dom1, rng1) (dom2, rng2)
 
     match_unify (AnyT _) (AnyT _) =
+      -- Assume the types have the same kind.  That means they're equal.
+      unified_by subst
+
+    match_unify (CoT _) (CoT _) =
       -- Assume the types have the same kind.  That means they're equal.
       unified_by subst
 

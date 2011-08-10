@@ -47,6 +47,7 @@ normalize t =
            AllT (x ::: k) `liftM` assume x k (normalize rng)
          AnyT {} -> return t
          IntT {} -> return t
+         CoT {} -> return t
          UTupleT {} -> return t
 
 -- | Get the type of a type.
@@ -76,6 +77,10 @@ typeKind tenv ty =
      AllT (x ::: param_k) rng ->
        -- Kind of 'forall' is the kind of its range
        typeKind (insertType x param_k tenv) rng
+     CoT k ->
+       -- Kind of a coercion is k -> k -> val
+       let kind = fromBaseKind k
+       in kind `FunT` kind `FunT` valT
      UTupleT ks -> funType (map fromBaseKind ks) valT
      _ -> internalError "typeKind: Unrecognized type"
 

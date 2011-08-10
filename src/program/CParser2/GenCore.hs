@@ -52,6 +52,9 @@ translateType lty =
        Type.FunT (translateType dom) (translateType rng)
      AllT (Domain param ty) rng ->
        Type.AllT (toVar param ::: translateType ty) (translateType rng)
+     CoT kind dom rng ->
+       Type.typeApp (Type.CoT (Type.toBaseKind $ translateType kind)) 
+       [translateType dom, translateType rng]
 
 -- | Translate a data constructor field to the type used for passing the 
 --   field as an argument to a constructor application.

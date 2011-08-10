@@ -27,6 +27,28 @@ import Type.Type
 newtype MkDict =
   MkDict {mkDict :: forall m. ReprDictMonad m => m ExpM}
 
+-- | A dictionary environment for several different data types
+data SingletonValueEnv =
+  SingletonValueEnv
+  { -- | A lookup table of 'Repr' dictionaries
+    reprDictEnv :: !(DictEnv.DictEnv MkDict)
+
+    -- | A lookup table of 'Shape' dictionaries
+  , shapeDictEnv :: !(DictEnv.DictEnv MkDict)
+
+    -- | A lookup table of 'intindex' dictionaries
+  , intIndexEnv :: !(DictEnv.DictEnv MkDict)
+  }
+
+modifyReprDictEnv f env@(SingletonValueEnv {reprDictEnv = e}) =
+  env {reprDictEnv = f e}
+
+modifyShapeDictEnv f env@(SingletonValueEnv {shapeDictEnv = e}) =
+  env {shapeDictEnv = f e}
+
+modifyIntIndexEnv f env@(SingletonValueEnv {intIndexEnv = e}) =
+  env {intIndexEnv = f e}
+
 -- | A 'DictEnv' containing dictionary values
 type MkDictEnv = DictEnv.DictEnv MkDict
 
@@ -44,16 +66,13 @@ class EvalMonad m => ReprDictMonad m where
   withTypeEnv :: (TypeEnv -> m a) -> m a
   withTypeEnv f = getTypeEnv >>= f
 
-  getDictEnv :: m MkDictEnv
+  getDictEnv :: m SingletonValueEnv
   getDictEnv = withDictEnv return
 
-  withDictEnv :: (MkDictEnv -> m a) -> m a
+  withDictEnv :: (SingletonValueEnv -> m a) -> m a
   withDictEnv f = getDictEnv >>= f
-  
-  getIntIndexEnv :: m IntIndexEnv
 
-  localDictEnv :: (MkDictEnv -> MkDictEnv) -> m a -> m a
-  localIntIndexEnv :: (IntIndexEnv -> IntIndexEnv) -> m a -> m a  
+  localDictEnv :: (SingletonValueEnv -> SingletonValueEnv) -> m a -> m a
 
 instance Supplies m VarID => Supplies (MaybeT m) VarID where
   fresh = lift fresh
@@ -68,9 +87,7 @@ instance ReprDictMonad m => ReprDictMonad (MaybeT m) where
   withTypeEnv f = MaybeT $ withTypeEnv (runMaybeT . f)
   getDictEnv = lift getDictEnv 
   withDictEnv f = MaybeT $ withDictEnv (runMaybeT . f)
-  getIntIndexEnv = lift getIntIndexEnv
   localDictEnv f (MaybeT m) = MaybeT (localDictEnv f m)
-  localIntIndexEnv f (MaybeT m) = MaybeT (localIntIndexEnv f m)
 
 instance EvalMonad m => EvalMonad (MaybeT m) where
   liftTypeEvalM m = lift $ liftTypeEvalM m
@@ -88,16 +105,13 @@ lookupReprDict' ty@(AnyT {}) =
           call = ExpM $ AppE defaultExpInfo op [TypM ty] []
       in MkDict (return call)
      
-lookupReprDict' ty = do
-    denv <- getDictEnv
-    DictEnv.lookup ty denv
+lookupReprDict' ty = withDictEnv (DictEnv.lookup ty . reprDictEnv)
 
 -- | Look up the integer value indexed by the given index.  The index must
 --   have kind 'intindex'.
 lookupIndexedInt :: ReprDictMonad m => Type -> m (Maybe ExpM)
 lookupIndexedInt ty = do
-  ienv <- getIntIndexEnv
-  mk <- DictEnv.lookup ty ienv
+  mk <- withDictEnv (DictEnv.lookup ty . intIndexEnv)
   mapM (\(MkDict m) -> m) mk
 
 lookupIndexedInt' :: ReprDictMonad m => Type -> m ExpM
@@ -108,11 +122,32 @@ lookupIndexedInt' ty = lookupIndexedInt ty >>= check
       internalError $
       "lookupIndexedInt: Cannot find integer value for " ++ show (pprType ty)
 
+lookupShapeDict :: ReprDictMonad m => Type -> m (Maybe ExpM)
+lookupShapeDict ty = do
+  mk <- withDictEnv (DictEnv.lookup ty . shapeDictEnv)
+  mapM (\(MkDict m) -> m) mk
+
+lookupShapeDict' :: ReprDictMonad m => Type -> m ExpM
+lookupShapeDict' ty = lookupShapeDict ty >>= check
+  where
+    check (Just x) = return x
+    check Nothing  =
+      internalError $
+      "lookupShapeDict: Cannot find shape dictionary for " ++ show (pprType ty)
+
 -- | Add a dictionary to the environment.  It will be used if it is 
 --   needed in the remainder of the computation.
 saveReprDict :: ReprDictMonad m => Type -> ExpM -> m a -> m a
 saveReprDict dict_type dict_exp m =
-  localDictEnv (DictEnv.insert dict_pattern) m
+  localDictEnv (modifyReprDictEnv $ DictEnv.insert dict_pattern) m
+  where
+    dict_pattern = DictEnv.monoPattern dict_type (MkDict (return dict_exp))
+
+-- | Add a dictionary to the environment.  It will be used if it is 
+--   needed in the remainder of the computation.
+saveShapeDict :: ReprDictMonad m => Type -> ExpM -> m a -> m a
+saveShapeDict dict_type dict_exp m =
+  localDictEnv (modifyShapeDictEnv $ DictEnv.insert dict_pattern) m
   where
     dict_pattern = DictEnv.monoPattern dict_type (MkDict (return dict_exp))
 
@@ -120,7 +155,7 @@ saveReprDict dict_type dict_exp m =
 --   needed in the remainder of the computation.
 saveIndexedInt :: ReprDictMonad m => Type -> ExpM -> m a -> m a
 saveIndexedInt dict_type dict_exp m =
-  localIntIndexEnv (DictEnv.insert dict_pattern) m
+  localDictEnv (modifyIntIndexEnv $ DictEnv.insert dict_pattern) m
   where
     dict_pattern = DictEnv.monoPattern dict_type (MkDict $ return dict_exp)
 
@@ -132,11 +167,11 @@ saveReprDictPattern (PatM (pat_var ::: ty) _) m =
   case fromVarApp ty
   of Just (op, [arg])
        | op `isPyonBuiltin` the_Repr -> 
-           let repr_type = arg
-           in saveReprDict repr_type (ExpM $ VarE defaultExpInfo pat_var) m
+           saveReprDict arg (ExpM $ VarE defaultExpInfo pat_var) m
+       | op `isPyonBuiltin` the_ShapeDict -> 
+           saveShapeDict arg (ExpM $ VarE defaultExpInfo pat_var) m
        | op `isPyonBuiltin` the_FinIndInt ->
-           let index = arg
-           in saveIndexedInt index (ExpM $ VarE defaultExpInfo pat_var) m
+           saveIndexedInt arg (ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m
 
 -- | Find patterns that bind representation dictionaries, and record them
@@ -159,7 +194,7 @@ withReprDict param_type k = do
   dict <- getReprDict param_type
   saveReprDict param_type dict (k dict)
 
-createDictEnv :: FreshVarM (MkDictEnv, IntIndexEnv)
+createDictEnv :: FreshVarM SingletonValueEnv
 createDictEnv = do
   let int_dict =
         valueDict (pyonBuiltin the_int) (pyonBuiltin the_repr_int)
@@ -176,6 +211,9 @@ createDictEnv = do
   referenced_dict <- DictEnv.pattern1 $ \arg -> 
     (varApp (pyonBuiltin the_Referenced) [VarT arg],
      createDict_referenced arg)
+  maybe_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_Maybe) [VarT arg],
+     createDict_Maybe arg)
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin the_PyonTuple2) [VarT arg1, VarT arg2],
      createDict_Tuple2 arg1 arg2)
@@ -206,21 +244,33 @@ createDictEnv = do
   storedBox_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_StoredBox) [VarT arg],
      createDict_storedBox arg)
+  
+  index_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_index) [VarT arg],
+     createDict_index arg)
+  slice_dict <- DictEnv.pattern1 $ \arg ->
+    (varApp (pyonBuiltin the_slice) [VarT arg],
+     createDict_slice arg)
 
   let dict_env = DictEnv.DictEnv [repr_dict, storedBox_dict,
                                   stream_dict,
                                   float_dict, int_dict, efftok_dict,
                                   list_dict, complex_dict, array_dict,
-                                  referenced_dict,
+                                  referenced_dict, maybe_dict,
                                   tuple2_dict, tuple3_dict, tuple4_dict,
                                   eq_dict, ord_dict,
-                                  additive_dict, multiplicative_dict]
+                                  additive_dict, multiplicative_dict,
+                                  index_dict, slice_dict]
       
   minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin the_min_i) [VarT arg1, VarT arg2],
      createInt_min arg1 arg2)
   let index_env = DictEnv.DictEnv [minimum_int]
-  return (dict_env, index_env)
+
+  return $ SingletonValueEnv { reprDictEnv = dict_env
+                             , shapeDictEnv = DictEnv.DictEnv []
+                             , intIndexEnv = index_env
+                             }
 
 getParamType v subst =
   case substituteVar v subst
@@ -301,6 +351,14 @@ createDict_referenced param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Referenced)
 
+createDict_Maybe :: Var -> Substitution -> MkDict
+createDict_Maybe param_var subst = MkDict $
+  withReprDict param $ \elt_dict ->
+  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Maybe)
+
 createDict_complex :: Var -> Substitution -> MkDict
 createDict_complex param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
@@ -353,6 +411,24 @@ createBoxedDictPattern con arity = do
         op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
         expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
 
+createDict_index param_var subst = MkDict $ do
+  -- The Repr object for an @index sh@ is stored in the @ShapeDict sh@.  
+  -- Look it up in the shape dictionary if it's not in the environment.
+  shape_dict <- lookupShapeDict' param
+  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [shape_dict]
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_shapeIndexRepr)
+  
+createDict_slice param_var subst = MkDict $ do
+  -- The Repr object for a @slice sh@ is stored in the @ShapeDict sh@.  
+  -- Look it up in the shape dictionary if it's not in the environment.
+  shape_dict <- lookupShapeDict' param
+  return $ ExpM $ AppE defaultExpInfo oper [TypM param] [shape_dict]
+  where
+    param = getParamType param_var subst
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_shapeSliceRepr)
+
 createInt_min param_var1 param_var2 subst = MkDict $ do
   int1 <- lookupIndexedInt' param1
   int2 <- lookupIndexedInt' param2
@@ -363,4 +439,3 @@ createInt_min param_var1 param_var2 subst = MkDict $ do
     param2 = getParamType param_var2 subst
 
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
-  

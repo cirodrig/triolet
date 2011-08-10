@@ -215,18 +215,23 @@ generalize :: Environment       -- ^ Environment to generalize in
 generalize env constraint inferred_types = do
   let types = map snd inferred_types 
   
-  -- Find free type variables.  Will generalize over type variables that are
-  -- free in the inferred types, but not in the environment.
-  ftv_types <- liftM Set.unions $ mapM freeTypeVariables types
+  -- Simplify the constraints
+  reduced_constraint <- reduceContext constraint
+  
+  -- Find type variables that are free in the definition group's types or
+  -- dependent on a free variable.
+  -- Will generalize over type variables that are dependent, but not
+  -- free in the environment.
   ftv_gamma <- ftvEnvironment env
-  let local_tyvars = ftv_types Set.\\ ftv_gamma
+  ftv_types <- liftM Set.unions $ mapM freeTypeVariables types
+  dtv_types <- dependentTypeVariables reduced_constraint ftv_types
+  let local_tyvars = dtv_types Set.\\ ftv_gamma
   
   -- Determine which constraints to generalize over
   (retained, deferred) <-
-    splitConstraint constraint ftv_gamma local_tyvars
+    splitConstraint reduced_constraint ftv_gamma local_tyvars
 
-  putStrLn "Retained"
-  print =<< runPpr (pprContext retained)
+  -- print_retained_constraints local_tyvars ftv_gamma retained -- DEBUG
   let ok_constraint (IsInst {}) = True
       ok_constraint (IsEqual {}) = True
       ok_constraint _ = False
@@ -243,27 +248,38 @@ generalize env constraint inferred_types = do
       -- Which type variables should be quantified over?  This will be a subset
       -- of 'local_tyvars'.
       ftv <- freeTypeVariables fot
+      dtv <- dependentTypeVariables retained ftv
 
       -- Ensure that we respect user-specified 'forall' annotations
       case explicit_qvars of
         Nothing ->
           -- If no explicit type variables are given, then do not parameterize
           -- over any rigid type variables
-          if any isRigidTyVar $ Set.toList ftv
+          if any isRigidTyVar $ Set.toList dtv
           then fail "Type is less polymorphic than expected"
           else return ()
-        Just x_ftv ->
+        Just x_dtv ->
           -- Parameterize over a subset of the explicit type variables
-          if ftv `Set.isSubsetOf` Set.fromList x_ftv
+          if dtv `Set.isSubsetOf` Set.fromList x_dtv
           then return ()
           else fail "Type is more polymorphic than expected"
 
       -- Retained constraints must only mention these type variables
       r_ftv <- freeTypeVariables retained
-      unless (r_ftv `Set.isSubsetOf` ftv) $
+      unless (r_ftv `Set.isSubsetOf` dtv) $
         fail "Ambiguous type variable in constraint"
 
-      return $ TyScheme (Set.toList ftv) retained fot
+      return $ TyScheme (Set.toList dtv) retained fot
+
+    -- Print some debugging information
+    print_retained_constraints local_tyvars ftv_gamma retained = do
+      doc <- runPpr $ do
+        dtvs <- mapM pprTyCon $ Set.toList local_tyvars
+        gamma <- mapM pprTyCon $ Set.toList ftv_gamma
+        ctx <- pprContext retained
+        return $ text "F" <+> sep dtvs $$ text "G" <+> sep gamma $$ ctx
+      putStrLn "Retained"
+      print doc
 
 -- | Add some recursively defined variables to the environment.  The variables
 -- are assigned new type variables.  Each variable is associated with a 
@@ -712,8 +728,12 @@ inferExportType (Export { exportAnnotation = ann
     instantiate_export_var pos var ty = Inf $ \env -> do
       (cst, tyvars, placeholders, x) <- runInf instantiate_and_unify env
       
-      -- Discard constraints, because the type is monomorphic
-      
+      -- Reduce the constraints, so that type variables get unified as a result
+      -- of equality constraints.
+      -- Afterward, discard the constraints.  We don't have constraints 
+      -- after reduction is complete because the type is monomorphic.
+      _ <- reduceContext cst
+
       -- Resolve placeholders.  All placeholders should be resolved.
       unresolved_placeholders <- resolvePlaceholders [] env placeholders
       unless (null unresolved_placeholders) $ do
@@ -721,7 +741,8 @@ inferExportType (Export { exportAnnotation = ann
         internalError "Unresolved placeholders in export expression"
       
       return ([], tyvars, [], x)
-      where 
+      where
+        debug x = x
         instantiate_and_unify = do
           (inst_exp, var_type) <- instantiateVariable pos var
           co <- unifyInf pos var_type ty

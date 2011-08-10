@@ -18,9 +18,10 @@ instance Lift Kind where
 pyonSourceTypes :: [String] 
 pyonSourceTypes =
   ["int", "float", "Complex", "bool", "NoneType", "iter", "list", "matrix",
-   "ListView", "MatrixView", "ListShapeEliminator", "MatrixShapeEliminator",
-   "Any",
-   "shape", "list_shape", "matrix_shape"]
+   "Maybe", "Any",
+   "shape", "list_shape", "matrix_shape",
+   "index", "slice",
+   "view", "ListView", "MatrixView"]
 
 -- | All predefined global functions recognized by the Pyon parser
 pyonSourceGlobals :: [String]
@@ -87,16 +88,15 @@ pyonOtherGlobals :: [String]
 pyonOtherGlobals =
   [ "do", "guard", "iterBind",
     "safeIndex", "safeSlice",
-    "safeIndex2", "safeSlice2",
     "flattenStream", "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
-    "at_point", "at_slice", "with_shape",
-    "at_point2", "at_slice2", "with_shape2"
+    "inRange", "coerceSlice",
+    "at_point", "at_slice", "get_shape"
   ]
 
 -- | All predefined class names
 pyonClasses :: [String]
 pyonClasses =
-  ["Repr", "Traversable", "Shape", "Indexable", "Indexable2",
+  ["Repr", "Traversable", "Shape", "Indexable",
    "Eq", "Ord",
    "Additive", "Multiplicative",
    "Remainder", "Fractional",

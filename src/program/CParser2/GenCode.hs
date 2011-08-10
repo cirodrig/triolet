@@ -174,6 +174,11 @@ translateType' lty =
        dom <- translateType' ty
        rng' <- assume v dom $ translateType' rng
        return $ Type.AllT (v ::: dom) rng'
+     CoT kind dom rng -> do
+       kind' <- translateType' kind
+       dom' <- translateType' dom
+       rng' <- translateType' rng
+       return $ Type.typeApp (Type.CoT (Type.toBaseKind kind')) [dom', rng']
 
 translateFun pos f = do
   ty_binders <- mapM translateDomain $ fTyParams f
@@ -233,6 +238,11 @@ translateExp (L pos expression) =
        return $ SystemF.ExpM $ SystemF.LetfunE inf defgroup body'
      ExceptE t ->
        liftM (SystemF.ExpM . SystemF.ExceptE inf) $ translateType t
+     CoerceE from_t to_t body -> do
+       ft <- translateType from_t
+       tt <- translateType to_t
+       body' <- translateExp body
+       return $ SystemF.ExpM $ SystemF.CoerceE inf (SystemF.TypM ft) (SystemF.TypM tt) body'
   where
     int_type = Type.VarT $ pyonBuiltin the_int
     inf = SystemF.mkExpInfo pos

@@ -269,23 +269,22 @@ doExpr expr =
 doSubscripting pos base indices = do
   base' <- doExpr base
   indices' <- mapM doExpr indices
-  case indices' of
-    [i] ->
-      return $ callVariable pos (tiBuiltin the_safeIndex) [base', i]
-    [i, j] ->
-      return $ callVariable pos (tiBuiltin the_safeIndex2) [base', i, j]
-    _ -> error "Only 1- or 2-dimensional array subscripts are allowed"
+  let index_value =
+        case indices'
+        of [i] -> i
+           [i, j] -> U.TupleE (U.Ann pos) [i, j]
+           _ -> error "Only 1- or 2-dimensional array subscripts are allowed"
+  return $ callVariable pos (tiBuiltin the_safeIndex) [base', index_value]
 
 doSlicing pos base slices = do
   base' <- doExpr base
   slice_triples <- mapM doSlice slices
-  case slice_triples of
-    [(slice_l, slice_u, slice_s)] ->
-      return $ callVariable pos (tiBuiltin the_safeSlice)
-      [base', slice_l, slice_u, slice_s]
-    [(l1, u1, s1), (l2, u2, s2)] ->
-      return $ callVariable pos (tiBuiltin the_safeSlice2)
-      [base', l1, u1, s1, l2, u2, s2]
+  let slice_value =
+        case slice_triples of
+          [s] -> s
+          [s1, s2] ->
+            U.TupleE (U.Ann pos) [s1, s2]
+  return $ callVariable pos (tiBuiltin the_safeSlice) [base', slice_value]
 
 doSlice (SliceSlice pos l u s) = do
   l' <- doExpr l
@@ -293,13 +292,13 @@ doSlice (SliceSlice pos l u s) = do
   s' <- case s
         of Nothing -> return $ U.LiteralE (U.Ann pos) (U.IntL 1)
            Just n  -> doExpr n
-  return (l', u', s')
+  return $ U.TupleE (U.Ann pos) [l', u', s']
 
 doSlice (ExprSlice e) = do
   e' <- doExpr e
   let one = U.LiteralE (U.Ann noSourcePos) (U.IntL 1)
       u = callVariable (noSourcePos) (tiBuiltin the___add__) [e', one]
-  return (e', u, one)
+  return $ U.TupleE (U.Ann noSourcePos) [e', u, one]
 
 doIterator :: SSAIterFor Expr -> Cvt U.Expression
 doIterator (IterFor pos params dom body) = do

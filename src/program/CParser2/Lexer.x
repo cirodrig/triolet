@@ -67,6 +67,7 @@ rules :- ----------------------------------------------------------------------
 
 <0>     "attribute" / @eow	{ posnTok AttributeTok }
 <0>     "case" / @eow		{ posnTok CaseTok }
+<0>     "coerce" / @eow		{ posnTok CoerceTok }
 <0>     "data" / @eow		{ posnTok DataTok }
 <0>	"else" / @eow		{ posnTok ElseTok }
 <0>	"except" / @eow		{ posnTok ExceptTok }

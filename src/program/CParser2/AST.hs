@@ -111,6 +111,13 @@ data Type ix =
     { tDomain :: Domain ix
     , tRng :: LType ix
     }
+    
+    -- | A coercion type
+  | CoT
+    { tKind :: LType ix
+    , tParam :: LType ix
+    , tRng :: LType ix
+    }
 
 type LType ix = Located (Type ix)
 
@@ -129,6 +136,7 @@ data Exp a =
   | LetE (Domain a) (LExp a) (LExp a)
   | LetfunE [LDef a] (LExp a)
   | ExceptE (LType a)
+  | CoerceE (LType a) (LType a) (LExp a)
 
 type LExp ix = Located (Exp ix)
 

@@ -1,6 +1,8 @@
 
+{-# LANGUAGE Rank2Types #-}
 module Builtins.TypeFunctions(builtinTypeFunctions) where
 
+import Control.Monad
 import qualified Data.Map as Map
 
 import Builtins.Builtins
@@ -10,6 +12,30 @@ import Type.Environment
 import Type.Compare
 import Type.Eval
 
+-- | A type function based on the shape of a container of type @(* -> *)@.
+--   Attempt to compute a shape based on the deconstructed, fully applied
+--   type.
+shapeLike :: (forall m. EvalMonad m => Var -> [Type] -> m (Maybe Type))
+          -> TypeFunction
+shapeLike f = typeFunction 1 compute_shape
+  where
+    compute_shape :: forall m. EvalMonad m => [Type] -> m Type
+    compute_shape (container_type : other_types) = do
+      -- Apply to produce a type of kind *, which can be fully evaluated
+      arg_type <- newAnonymousVar TypeLevel
+      app_container_type <- reduceToWhnf (AppT container_type (VarT arg_type)) 
+      case fromVarApp app_container_type of
+        Just (op, args) -> do
+          -- Try to evaluate by calling 'f'
+          m_type <- f op args
+          case m_type of
+            Nothing -> cannot_reduce container_type
+            Just t  -> return $ typeApp t other_types
+        Nothing -> cannot_reduce container_type
+      where
+        cannot_reduce container_type =
+          return $ varApp (pyonBuiltin the_shape) (container_type : other_types)
+
 -- Create a 1D array shape expression
 array_shape sh =
   varApp (pyonBuiltin the_array_shape) [sh, VarT $ pyonBuiltin the_unit_shape]
@@ -18,91 +44,165 @@ builtinTypeFunctions :: Map.Map Var BuiltinTypeFunction
 builtinTypeFunctions =
   Map.fromList
   [ (pyonBuiltin the_shape, BuiltinTypeFunction shapePureTF shapeMemTF)
+  , (pyonBuiltin the_index, BuiltinTypeFunction indexPureTF indexMemTF)
+  , (pyonBuiltin the_slice, BuiltinTypeFunction slicePureTF sliceMemTF)
+  , (pyonBuiltin the_view, BuiltinTypeFunction viewPureTF viewMemTF)
   , (pyonBuiltin the_Stream, BuiltinTypeFunction streamPureTF streamMemTF)
   , (pyonBuiltin the_BoxedType, BuiltinTypeFunction boxedPureTF boxedMemTF)
   , (pyonBuiltin the_BareType, BuiltinTypeFunction barePureTF bareMemTF)
   ]
 
 -- | Compute the shape of a data type in the pure type system
-shapePureTF = typeFunction 1 compute_shape
-  where
-    compute_shape :: forall m. EvalMonad m => [Type] -> m Type
-    compute_shape [container_type] = do
-      -- Apply to produce a type of kind *, which can be fully evaluated
-      arg_type <- newAnonymousVar TypeLevel
-      app_container_type <- reduceToWhnf (AppT container_type (VarT arg_type)) 
-      simplify app_container_type container_type
-
-    -- Pattern match against 'app_container_type'.  If nothing matches, then
-    -- rebuild the original expression using 'container_type'.
-    simplify :: forall m. EvalMonad m => Type -> Type -> m Type
-    simplify app_container_type container_type = do
-      case fromVarApp app_container_type of
-        Just (op, args)
-          | op `isPyonBuiltin` the_Stream || 
-            op `isPyonBuiltin` the_LinStream ->
-              case args of [arg, _] -> reduceToWhnf arg
-          | op `isPyonBuiltin` the_MatrixStream ->
-              case args of [_] -> return $ VarT (pyonBuiltin the_matrix_shape)
-          | op `isPyonBuiltin` the_list ->
-              return $ VarT (pyonBuiltin the_list_shape)
-          | op `isPyonBuiltin` the_matrix ->
-              return $ VarT (pyonBuiltin the_matrix_shape)
-          | op `isPyonBuiltin` the_ListView ->
-              return $ VarT (pyonBuiltin the_list_shape)
-          | op `isPyonBuiltin` the_MatrixView ->
-              return $ VarT (pyonBuiltin the_matrix_shape)
-          | op `isPyonBuiltin` the_array ->
-              case args
-              of [arg, _] -> return $ array_shape arg
-        _ -> cannot_reduce
-      where
-        cannot_reduce =
-          return $ varApp (pyonBuiltin the_shape) [container_type]
+shapePureTF = shapeLike $ \op args ->
+  case ()
+  of () | op `isPyonBuiltin` the_Stream || 
+          op `isPyonBuiltin` the_LinStream ->
+            case args of [arg, _] -> liftM Just $ reduceToWhnf arg
+        | op `isPyonBuiltin` the_MatrixStream ->
+            case args of [_] -> return $ Just $ VarT (pyonBuiltin the_matrix_shape)
+        | op `isPyonBuiltin` the_list ->
+            return $ Just $ VarT (pyonBuiltin the_list_shape)
+        | op `isPyonBuiltin` the_matrix ->
+            return $ Just $ VarT (pyonBuiltin the_matrix_shape)
+        | op `isPyonBuiltin` the_ListView ->
+            return $ Just $ VarT (pyonBuiltin the_list_shape)
+        | op `isPyonBuiltin` the_MatrixView ->
+            return $ Just $ VarT (pyonBuiltin the_matrix_shape)
+        | op `isPyonBuiltin` the_array ->
+            case args
+            of [arg, _] -> return $ Just $ array_shape arg
+     _ -> return Nothing
 
 -- | Compute the shape of a data type in the memory type system
-shapeMemTF = typeFunction 1 compute_shape
-  where
-    compute_shape :: forall m. EvalMonad m => [Type] -> m Type
-    compute_shape [container_type] = do
-      -- Apply to produce a type of kind *, which can be fully evaluated
-      arg_type <- newAnonymousVar TypeLevel
-      app_container_type <- reduceToWhnf (AppT container_type (VarT arg_type)) 
-      simplify app_container_type container_type
+shapeMemTF = shapeLike $ \op args ->
+  case ()
+  of () | op `isPyonBuiltin` the_StoredBox ->
+          case args
+          of [arg] ->
+               case fromVarApp arg 
+               of Just (op, [arg2, _]) 
+                    | op `isPyonBuiltin` the_Stream ||
+                      op `isPyonBuiltin` the_LinStream ->
+                        liftM Just $ reduceToWhnf arg2
+                  Just (op, [_])
+                    | op `isPyonBuiltin` the_MatrixStream ->
+                      return $ Just $ VarT (pyonBuiltin the_matrix_shape)
+                  _ -> return Nothing
+        | op `isPyonBuiltin` the_list ->
+            return $ Just $ VarT (pyonBuiltin the_list_shape)
+        | op `isPyonBuiltin` the_matrix ->
+            return $ Just $ VarT (pyonBuiltin the_matrix_shape)
+        | op `isPyonBuiltin` the_ListView ->
+            return $ Just $ VarT (pyonBuiltin the_list_shape)
+        | op `isPyonBuiltin` the_MatrixView ->
+            return $ Just $ VarT (pyonBuiltin the_matrix_shape)
+        | op `isPyonBuiltin` the_array ->
+            case args
+            of [arg, _] -> return $ Just $ array_shape arg
+     _ -> return Nothing
 
-    -- Pattern match against 'app_container_type'.  If nothing matches, then
-    -- rebuild the original expression using 'container_type'.
-    simplify :: forall m. EvalMonad m => Type -> Type -> m Type
-    simplify app_container_type container_type = do
-      case fromVarApp app_container_type of
-        Just (op, args)
-          | op `isPyonBuiltin` the_StoredBox ->
-              case args
-              of [arg] ->
-                   case fromVarApp arg 
-                   of Just (op, [arg2, _]) 
-                        | op `isPyonBuiltin` the_Stream ||
-                          op `isPyonBuiltin` the_LinStream ->
-                            reduceToWhnf arg2
-                      Just (op, [_])
-                        | op `isPyonBuiltin` the_MatrixStream ->
-                            return $ VarT (pyonBuiltin the_matrix_shape)
-                      _ -> cannot_reduce
-          | op `isPyonBuiltin` the_list ->
-              return $ VarT (pyonBuiltin the_list_shape)
-          | op `isPyonBuiltin` the_matrix ->
-              return $ VarT (pyonBuiltin the_matrix_shape)
-          | op `isPyonBuiltin` the_ListView ->
-              return $ VarT (pyonBuiltin the_list_shape)
-          | op `isPyonBuiltin` the_MatrixView ->
-              return $ VarT (pyonBuiltin the_matrix_shape)
-          | op `isPyonBuiltin` the_array ->
-              case args
-              of [arg, _] -> return $ array_shape arg
-        _ -> cannot_reduce
-      where
-        cannot_reduce =
-          return $ varApp (pyonBuiltin the_shape) [container_type]
+indexPureTF = typeFunction 1 compute_eliminator
+  where
+    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
+    compute_eliminator [shape_arg] = do
+      -- Evaluate and inspect the shape argument
+      shape_arg' <- reduceToWhnf shape_arg
+      case fromVarApp shape_arg' of
+        Just (op, args')
+           | op `isPyonBuiltin` the_list_shape ->
+               return int_type
+           | op `isPyonBuiltin` the_matrix_shape ->
+               return int2_type
+        _ -> return $ varApp (pyonBuiltin the_index) [shape_arg']
+
+    int_type = VarT (pyonBuiltin the_int)
+    int2_type = varApp (pyonBuiltin the_PyonTuple2) [int_type, int_type]
+
+indexMemTF = typeFunction 1 compute_eliminator
+  where
+    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
+    compute_eliminator [shape_arg] = do
+      -- Evaluate and inspect the shape argument
+      shape_arg' <- reduceToWhnf shape_arg
+      case fromVarApp shape_arg' of
+        Just (op, args')
+           | op `isPyonBuiltin` the_list_shape ->
+               return int_type
+           | op `isPyonBuiltin` the_matrix_shape ->
+               return int2_type
+        _ -> return $ varApp (pyonBuiltin the_index) [shape_arg']
+
+    int_type = varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_int)]
+    int2_type = varApp (pyonBuiltin the_PyonTuple2)
+                [int_type, int_type]
+
+slicePureTF = typeFunction 1 compute_eliminator
+  where
+    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
+    compute_eliminator [shape_arg] = do
+      -- Evaluate and inspect the shape argument
+      shape_arg' <- reduceToWhnf shape_arg
+      case fromVarApp shape_arg' of
+        Just (op, args')
+           | op `isPyonBuiltin` the_list_shape ->
+               return int3_type
+           | op `isPyonBuiltin` the_matrix_shape ->
+               return int6_type
+        _ -> return $ varApp (pyonBuiltin the_slice) [shape_arg']
+
+    int_type = VarT (pyonBuiltin the_int)
+    int3_type = varApp (pyonBuiltin the_PyonTuple3)
+                [int_type, int_type, int_type]
+    int6_type = varApp (pyonBuiltin the_PyonTuple2)
+                [int3_type, int3_type]
+
+sliceMemTF = typeFunction 1 compute_eliminator
+  where
+    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
+    compute_eliminator [shape_arg] = do
+      -- Evaluate and inspect the shape argument
+      shape_arg' <- reduceToWhnf shape_arg
+      case fromVarApp shape_arg' of
+        Just (op, args')
+           | op `isPyonBuiltin` the_list_shape ->
+               return int3_type
+           | op `isPyonBuiltin` the_matrix_shape ->
+               return int6_type
+        _ -> return $ varApp (pyonBuiltin the_slice) [shape_arg']
+
+    int_type = varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_int)]
+    int3_type = varApp (pyonBuiltin the_PyonTuple3)
+                [int_type, int_type, int_type]
+    int6_type = varApp (pyonBuiltin the_PyonTuple2)
+                [int3_type, int3_type]
+
+viewPureTF = typeFunction 1 compute_eliminator
+  where
+    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
+    compute_eliminator (shape_arg : other_args) = do
+      -- Evaluate and inspect the shape argument
+      shape_arg' <- reduceToWhnf shape_arg
+      case fromVarApp shape_arg' of
+        Just (op, args')
+           | op `isPyonBuiltin` the_list_shape ->
+             return $ varApp (pyonBuiltin the_ListView) other_args
+           | op `isPyonBuiltin` the_matrix_shape ->
+             return $ varApp (pyonBuiltin the_MatrixView) other_args
+        _ -> return $ varApp (pyonBuiltin the_view) (shape_arg' : other_args)
+
+viewMemTF = typeFunction 1 compute_eliminator
+  where
+    compute_eliminator :: forall m. EvalMonad m => [Type] -> m Type
+    compute_eliminator (shape_arg : other_args) = do
+      -- Evaluate and inspect the shape argument
+      shape_arg' <- reduceToWhnf shape_arg
+      case fromVarApp shape_arg' of
+        Just (op, args')
+           | op `isPyonBuiltin` the_list_shape ->
+             return $ varApp (pyonBuiltin the_ListView) other_args
+           | op `isPyonBuiltin` the_matrix_shape ->
+             return $ varApp (pyonBuiltin the_MatrixView) other_args
+        _ -> return $ varApp (pyonBuiltin the_view) (shape_arg' : other_args)
 
 streamPureTF = typeFunction 1 compute_stream
   where

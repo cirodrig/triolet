@@ -219,6 +219,14 @@ resolveType pos ty =
      AllT d r    -> fmap fst $ resolveDomain d $ \d' -> do
                       (r', lv) <- resolveLType r
                       return (AllT d' r', lv)
+     CoT k d r   -> do (k', k_lv) <- resolveLType k
+                       (d', d_lv) <- resolveLType d
+                       (r', r_lv) <- resolveLType r
+                       logErrorIf (k_lv /= KindLevel) $
+                         "First argument of coercion type must be a kind"
+                       logErrorIf (d_lv /= TypeLevel || r_lv /= TypeLevel) $
+                         "Arguments to coercion type must have same level"
+                       return (CoT k' d' r', TypeLevel)
   where
     check_level lv =
       logErrorIf (lv == ObjectLevel) $
@@ -279,6 +287,16 @@ resolveExp pos expression =
        logErrorIf (t_lv /= TypeLevel) $
          "Result type of exception is not a type"
        return $ ExceptE t'
+     
+     CoerceE from_t to_t body -> do
+       (from_t', from_t_lv) <- resolveLType from_t
+       (to_t', to_t_lv) <- resolveLType to_t
+       logErrorIf (from_t_lv /= TypeLevel) $
+         "Source type of coercion is not a type"
+       logErrorIf (to_t_lv /= TypeLevel) $
+         "Result type of coercion is not a type"
+       body' <- resolveL resolveExp body
+       return $ CoerceE from_t' to_t' body'
 
 resolveDefGroup :: [LDef Parsed] -> ([LDef Resolved] -> NR a) -> NR a
 resolveDefGroup defs k = enter $ do

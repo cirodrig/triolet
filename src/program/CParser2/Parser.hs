@@ -160,16 +160,27 @@ pType = dependent_function <|> function
       rng <- pType
       return $ foldr (\x y -> L pos (AllT x y)) rng dom
 
-    -- Parse a function or application
+    -- Parse a function type, coercion type, or type application
     function = do
       loc <- locatePosition
-      ty <- pAppType
+      ty <- pCoType
       function_rest loc ty <|> return ty
     
     function_rest pos domain = do
       match ArrowTok
       rng <- pType
       return $ L pos (FunT domain rng)
+
+pCoType :: P PLType
+pCoType = coercion <|> pAppType
+  where
+    coercion = located $ do
+      match CoerceTok
+      match AtTok
+      kind <- pTypeAtom
+      dom <- pTypeAtom
+      rng <- pTypeAtom
+      return $ CoT kind dom rng
 
 -- | Parse a type application
 pAppType :: P PLType
@@ -213,7 +224,8 @@ pDomains = do
 -- * Expressions
   
 pExp :: P PLExp
-pExp = caseE <|> ifE <|> lamE <|> letE <|> letfunE <|> exceptE <|> appExp
+pExp = caseE <|> ifE <|> lamE <|> letE <|> letfunE <|> exceptE <|> coerceE <|>
+       appExp
        <?> "expression"
 
 caseE :: P PLExp
@@ -278,6 +290,16 @@ exceptE = located $ do
   match AtTok
   t <- pTypeAtom
   return $ ExceptE t
+
+coerceE :: P PLExp
+coerceE = located $ do
+  match CoerceTok
+  match AtTok
+  from_t <- pTypeAtom
+  match AtTok
+  to_t <- pTypeAtom
+  body <- pExp
+  return $ CoerceE from_t to_t body
 
 def :: P (LDef Parsed)
 def = located $ do

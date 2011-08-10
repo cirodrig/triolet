@@ -79,8 +79,7 @@ data RIEnv =
 
     -- | The specification type environment
   , riTypeEnv :: TypeEnv
-  , riDictEnv :: MkDictEnv
-  , riIntIndexEnv :: IntIndexEnv
+  , riDictEnv :: SingletonValueEnv
 
     -- | The system F type environment
   , riSystemFTypeEnv :: TypeEnv
@@ -101,13 +100,9 @@ instance TypeEnvMonad RI where
 instance ReprDictMonad RI where
   getVarIDs = RI $ asks riVarSupply
   getDictEnv = RI $ asks riDictEnv
-  getIntIndexEnv = RI $ asks riIntIndexEnv
   localDictEnv f (RI m) = RI $ local f_dict m
     where
       f_dict env = env {riDictEnv = f $ riDictEnv env}
-  localIntIndexEnv f (RI m) = RI $ local f_intindex m
-    where
-      f_intindex env = env {riIntIndexEnv = f $ riIntIndexEnv env}
 
 instance EvalMonad RI where
   liftTypeEvalM m = RI $ ReaderT $ \env -> do
@@ -195,15 +190,16 @@ coercionKind tenv natural_t =
   case fromVarApp natural_t
   of Just (op, args)
        | Just dtype <- lookupDataType op tenv ->
-           Just $ dataTypeKind dtype
+           Just $! dataTypeKind dtype
        | Just _ <- lookupTypeFunction op tenv ->
            -- Use the type function's return kind
-           Just $ toBaseKind $ typeKind tenv natural_t
+           Just $! toBaseKind $ typeKind tenv natural_t
        | otherwise -> Nothing
      Nothing ->
        case natural_t
        of FunT {} -> Just BoxK
           AllT {} -> Just BoxK
+          AppT (AppT (CoT BoxK) _) _ -> Just ValK
           _ -> internalError "coercionKind: Not implemented for this type"
 
 -- | Given two types returned by 'stripReprConversions',
@@ -386,6 +382,14 @@ cvtType mode (AllT (a ::: t1) t2) = do
   let dom = cvtKind t1
   rng <- assume a dom $ fmap fst $ cvtType mode t2 
   return (AllT (a ::: dom) rng, boxT)
+
+cvtType mode (CoT BoxK) = do
+  -- Coercion type
+  -- Always generate coercions on boxed objects.
+  return (CoT BoxK, boxT `FunT` boxT `FunT` valT)
+  
+cvtType mode (CoT _) =
+  internalError "cvtType: Unexpected kind in coercion type"
 
 -- | Convert a System F type to its natural representation.
 --   Try to simplify the resulting type expression.
@@ -714,17 +718,6 @@ coerceExpToReturnType :: Type -> Type -> ExpM -> RI ExpM
 coerceExpToReturnType g_type e_type e =
   fmap fst $ coerceExpAtType g_type e_type e $ \e' -> return (e', ())
 
--- | Add a variable to the dictionary environment if its type indicates that
---   it's a dictionary.
-assumeReprDict v ty m =
-  case fromVarApp ty
-  of Just (op, [arg])
-       | op `isPyonBuiltin` the_Repr ->
-           saveReprDict arg (ExpM $ VarE defaultExpInfo v) m
-       | op `isPyonBuiltin` the_FinIndInt ->
-           saveIndexedInt arg (ExpM $ VarE defaultExpInfo v) m
-     _ -> m
-
 -------------------------------------------------------------------------------
 -- Function application
 
@@ -905,7 +898,8 @@ reprLocalPat (VarP v t) k = do
 reprParam :: PatSF -> (PatM -> RI a) -> RI a
 reprParam (VarP v t) k = do
   (t', _) <- cvtNormalizeParamType t
-  assumeReprDict v t' $ assumeValueTypes v t t' $ k (patM (v ::: t'))
+  let pattern = patM (v ::: t')
+  saveReprDictPattern pattern $ assumeValueTypes v t t' $ k pattern
 
 reprRet :: TypSF -> RI TypM
 reprRet (TypSF t) = fmap (TypM . fst) $ cvtNormalizeReturnType t
@@ -1094,8 +1088,8 @@ representationInference mod = do
   repr_mod <- withTheNewVarIdentSupply $ \supply -> do
     sf_type_env <- readInitGlobalVarIO the_systemFTypes
     type_env <- readInitGlobalVarIO the_specTypes
-    (dict_env, int_env) <- runFreshVarM supply createDictEnv
-    let context = RIEnv supply (specToTypeEnv type_env) dict_env int_env sf_type_env
+    dict_env <- runFreshVarM supply createDictEnv
+    let context = RIEnv supply (specToTypeEnv type_env) dict_env sf_type_env
     runReaderT (unRI (reprModule mod)) context
   
   -- Convert from specification types to mem types

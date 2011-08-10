@@ -33,6 +33,7 @@ data Tok =
   | ArrowTok
   | AttributeTok
   | CaseTok
+  | CoerceTok
   | DataTok
   | ElseTok
   | ExceptTok
@@ -68,6 +69,7 @@ showTok t =
        ArrowTok     -> "arrow"
        AttributeTok -> "'attribute'"
        CaseTok      -> "'case'"
+       CoerceTok    -> "'coerce'"
        DataTok      -> "'data'"
        ElseTok      -> "'else'"
        ExceptTok    -> "'except'"

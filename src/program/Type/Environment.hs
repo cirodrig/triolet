@@ -515,6 +515,7 @@ specToPureType ty =
              AnyT _ -> pure ty
              IntT _ -> pure ty
              UTupleT _ -> Nothing
+             CoT _ -> pure ty
 
 -- Every value is represented in boxed form, so they all have kind 'box'.
 -- Types that do not describe values (such as intindexT) can still have
@@ -584,6 +585,7 @@ specToMemType ty =
              LamT (x ::: dom) body ->
                LamT (x ::: specToMemType dom) (specToMemType body)
              UTupleT ks -> UTupleT ks
+             CoT _ -> ty
 
 specToMemDataConType dcon_type =
   DataConType

@@ -53,6 +53,12 @@ data Type =
   | AnyT Type
     -- | An integer type index.  These inhabit kind 'intIndexT'.
   | IntT !Integer
+    
+    -- | A coercion type constructor.
+    --
+    --   A coercion (s ~ t) carries the ability to coerce a value of type s
+    --   to a value of type t.
+  | CoT !BaseKind
 
     -- | An unboxed tuple constructor.
     --   The type parameters have the specified kinds, which must be either
@@ -117,6 +123,7 @@ instance HasLevel Var => HasLevel Type where
   getLevel (AllT _ rng) = getLevel rng
   getLevel (AnyT _) = TypeLevel
   getLevel (IntT _) = TypeLevel
+  getLevel (CoT _)  = TypeLevel
   getLevel (UTupleT _) = TypeLevel
 
 kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, propT, posInftyT :: Type
@@ -229,12 +236,16 @@ pprTypePrec :: Type -> PrecDoc
 pprTypePrec ty =
   case ty
   of VarT v -> hasAtomicPrec $ pprVar v
+     -- Special syntax for coercions
+     AppT (AppT (CoT _) arg1) arg2 ->
+       (pprTypePrec arg1 ?+ cmpPrec <+> text "~" <+> pprTypePrec arg2 ?+ cmpPrec) `hasPrec` cmpPrec
      AppT op arg -> ppr_app op [arg] `hasPrec` appPrec
      LamT param body -> ppr_lam [param] body `hasPrec` lamPrec
      FunT arg ret -> pprFunType ty
      AllT binder rng -> ppr_all [binder] rng `hasPrec` lamPrec
      AnyT k -> text "Any :" <+> pprTypePrec k ?+ typeAnnPrec `hasPrec` typeAnnPrec
      IntT n -> hasAtomicPrec $ text (show n)
+     CoT k -> text "Coercion :" <+> pprTypePrec (fromBaseKind k) ?+ typeAnnPrec `hasPrec` typeAnnPrec 
      UTupleT ks -> text "UTuple" <+> utuple_tags ks `hasPrec` appPrec
   where
     utuple_tags ks =
@@ -272,4 +283,3 @@ pprFunType t =
       return_doc = pprTypePrec return ?+ appPrec
   in sep (param_docs ++ [return_doc]) `hasPrec` funPrec
 
-pprFunType _ = internalError "pprFunType"

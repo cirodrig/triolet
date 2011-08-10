@@ -133,6 +133,12 @@ record MPyonTuple4(a, b, c, d) {
   d member4;
 };
 
+// A Maybe object
+record Maybe(a) {
+  uint8 isjust;			// 0 = Nothing; 1 = Just
+  a member;			// Valid if isjust
+};
+
 // A boxed object
 record Boxed(a) {
   const ObjectHeader header;
