@@ -1264,62 +1264,101 @@ fun_map @(t : bare -> bare) @(a : bare) @(b : bare)
                   reprA reprB transformer
                   (traverse @a reprA input)) ret;
 
-fun_zip @(t : bare -> bare) @(a : bare) @(b : bare)
-        (traversable : TraversableDict t)
-	(shape_dict : ShapeDict (shape t))
+fun_zip @(t1 t2 : bare -> bare) @(a : bare) @(b : bare)
+        (traversable1 : TraversableDict t1)
+        (traversable2 : TraversableDict t2)
+        (equal12 : coerce @box (BoxedType (shape t1)) (BoxedType (shape t2)))
+	(shape_dict : ShapeDict (shape t1))
         (reprA : Repr a) (reprB : Repr b)
-        (inputA : t a) (inputB : t b)
-        (ret : OutPtr (t (PyonTuple2 a b)))
-  -> IEffect (t (PyonTuple2 a b)) =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  build @(PyonTuple2 a b)
-  (repr_PyonTuple2 @a @b reprA reprB)
-  (fun_zip_Stream @(shape t) @a @b shape_dict reprA reprB
-   (traverse @a reprA inputA) (traverse @b reprB inputB))
-  ret;
+        (inputA : t1 a) (inputB : t2 b)
+  -> Stream (shape t1) (PyonTuple2 a b) =
+  case traversable1
+  of traversableDict @t1
+       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
+       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
+  case traversable2
+  of traversableDict @t2
+       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
+       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
+  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
+  let stream2 : Stream (shape t1) b =
+        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
+	(traverse2 @b reprB inputB) in
+  fun_zip_Stream @(shape t1) @a @b shape_dict reprA reprB stream1 stream2;
 
-fun_zip3 @(t : bare -> bare) @(a : bare) @(b : bare) @(c : bare)
-        (traversable : TraversableDict t)
-	(shape_dict : ShapeDict (shape t))
+fun_zip3 @(t1 t2 t3 : bare -> bare) @(a b c : bare)
+        (traversable1 : TraversableDict t1)
+        (traversable2 : TraversableDict t2)
+        (traversable3 : TraversableDict t3)
+        (equal12 : coerce @box (BoxedType (shape t1)) (BoxedType (shape t2)))
+        (equal23 : coerce @box (BoxedType (shape t2)) (BoxedType (shape t3)))
+	(shape_dict : ShapeDict (shape t1))
         (reprA : Repr a) (reprB : Repr b) (reprC : Repr c)
-        (inputA : t a) (inputB : t b) (inputC : t c)
-        (ret : OutPtr (t (PyonTuple3 a b c)))
-  -> IEffect (t (PyonTuple3 a b c)) =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  build @(PyonTuple3 a b c)
-  (repr_PyonTuple3 @a @b @c reprA reprB reprC)
-  (fun_zip3_Stream @(shape t) @a @b @c shape_dict reprA reprB reprC
-   (traverse @a reprA inputA)
-   (traverse @b reprB inputB)
-   (traverse @c reprC inputC))
-  ret;
+        (inputA : t1 a) (inputB : t2 b) (inputC : t3 c)
+  -> Stream (shape t1) (PyonTuple3 a b c) =
+  case traversable1
+  of traversableDict @t1
+       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
+       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
+  case traversable2
+  of traversableDict @t2
+       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
+       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
+  case traversable3
+  of traversableDict @t3
+       (traverse3 : (a : bare) -> Repr a -> t3 a -> Stream (shape t3) a)
+       (build3 : (a : bare) -> Repr a -> Stream (shape t3) a -> Writer (t3 a)).
+  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
+  let stream2 : Stream (shape t1) b =
+        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
+	(traverse2 @b reprB inputB) in
+  let stream3 : Stream (shape t1) c =
+        coerce @(Stream (shape t3) c) @(Stream (shape t1) c)
+	(traverse3 @c reprC inputC) in
+  fun_zip3_Stream @(shape t1) @a @b @c shape_dict reprA reprB reprC
+  stream1 stream2 stream3;
 
 
-fun_zip4 @(t : bare -> bare) @(a : bare) @(b : bare) @(c : bare) @(d : bare)
-        (traversable : TraversableDict t)
-	(shape_dict : ShapeDict (shape t))
+fun_zip4 @(t1 t2 t3 t4 : bare -> bare) @(a b c d : bare)
+        (traversable1 : TraversableDict t1)
+        (traversable2 : TraversableDict t2)
+        (traversable3 : TraversableDict t3)
+        (traversable4 : TraversableDict t4)
+        (equal12 : coerce @box (BoxedType (shape t1)) (BoxedType (shape t2)))
+        (equal23 : coerce @box (BoxedType (shape t2)) (BoxedType (shape t3)))
+        (equal34 : coerce @box (BoxedType (shape t3)) (BoxedType (shape t4)))
+	(shape_dict : ShapeDict (shape t1))
         (reprA : Repr a) (reprB : Repr b) (reprC : Repr c) (reprD : Repr d)
-        (inputA : t a) (inputB : t b) (inputC : t c) (inputD : t d)
-        (ret : OutPtr (t (PyonTuple4 a b c d)))
-  -> IEffect (t (PyonTuple4 a b c d)) =
-  case traversable
-  of traversableDict @t
-       (traverse : (a : bare) -> Repr a -> t a -> Stream (shape t) a)
-       (build : (a : bare) -> Repr a -> Stream (shape t) a -> Writer (t a)).
-  build @(PyonTuple4 a b c d)
-  (repr_PyonTuple4 @a @b @c @d reprA reprB reprC reprD)
-  (fun_zip4_Stream @(shape t) @a @b @c @d shape_dict reprA reprB reprC reprD
-   (traverse @a reprA inputA)
-   (traverse @b reprB inputB)
-   (traverse @c reprC inputC)
-   (traverse @d reprD inputD))
-  ret;
+        (inputA : t1 a) (inputB : t2 b) (inputC : t3 c) (inputD : t4 d)
+  -> Stream (shape t1) (PyonTuple4 a b c d) =
+  case traversable1
+  of traversableDict @t1
+       (traverse1 : (a : bare) -> Repr a -> t1 a -> Stream (shape t1) a)
+       (build1 : (a : bare) -> Repr a -> Stream (shape t1) a -> Writer (t1 a)).
+  case traversable2
+  of traversableDict @t2
+       (traverse2 : (a : bare) -> Repr a -> t2 a -> Stream (shape t2) a)
+       (build2 : (a : bare) -> Repr a -> Stream (shape t2) a -> Writer (t2 a)).
+  case traversable3
+  of traversableDict @t3
+       (traverse3 : (a : bare) -> Repr a -> t3 a -> Stream (shape t3) a)
+       (build3 : (a : bare) -> Repr a -> Stream (shape t3) a -> Writer (t3 a)).
+  case traversable4
+  of traversableDict @t4
+       (traverse4 : (a : bare) -> Repr a -> t4 a -> Stream (shape t4) a)
+       (build4 : (a : bare) -> Repr a -> Stream (shape t4) a -> Writer (t4 a)).
+  let stream1 : Stream (shape t1) a = traverse1 @a reprA inputA in
+  let stream2 : Stream (shape t1) b =
+        coerce @(Stream (shape t2) b) @(Stream (shape t1) b)
+	(traverse2 @b reprB inputB) in
+  let stream3 : Stream (shape t1) c =
+        coerce @(Stream (shape t3) c) @(Stream (shape t1) c)
+	(traverse3 @c reprC inputC) in
+  let stream4 : Stream (shape t1) d =
+        coerce @(Stream (shape t4) d) @(Stream (shape t1) d)
+	(traverse4 @d reprD inputD) in
+  fun_zip4_Stream @(shape t1) @a @b @c @d shape_dict reprA reprB reprC reprD
+  stream1 stream2 stream3 stream4;
 
 -------------------------------------------------------------------------------
 -- Generic stream methods

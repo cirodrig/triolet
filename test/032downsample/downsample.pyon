@@ -6,10 +6,8 @@
 def downsample(mat):
 	h = height(mat)
 	w = width(mat)
-	return __build__([(a + b + c + d) // 4 for (a,b,c,d)
-		          in matrixiter(zip4(__iter__(mat[0:h:2, 0:w:2]),
-					     __iter__(mat[1:h:2, 0:w:2]),
-					     __iter__(mat[0:h:2, 1:w:2]),
-					     __iter__(mat[1:h:2, 1:w:2])))])
+	return [(a + b + c + d) // 4 for (a,b,c,d)
+		          in zip4(mat[0:h:2, 0:w:2], mat[1:h:2, 0:w:2],
+			          mat[0:h:2, 1:w:2], mat[1:h:2, 1:w:2])]
 
 export ccall downsample : matrix(int) -> matrix(int)

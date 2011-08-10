@@ -243,8 +243,6 @@ equalitySimplification pos csts =
   repeat_until_convergence csts
   where
     repeat_until_convergence csts = do
-      csts_doc <- runPpr (pprContext csts)
-      print $ hang (text "equalitySimplification") 8 csts_doc
       (csts', progress) <- one_pass False id csts
       if progress then repeat_until_convergence csts' else return csts'
 
@@ -333,27 +331,17 @@ equalityUnify (t1, t2) = do
   case (t1_c, t2_c) of
     (ConTy c1, ConTy c2)
       | isFlexibleTyVar c1 && isFlexibleTyVar c2 -> do
-          debugPrintUnifyMessage t1_c t2_c
           lift $ unifyTyVars c1 c2
           return (EqualityDerivation (IsEqual t1_c t2_c), [])
     (ConTy c1, _)
       | isFlexibleTyVar c1 -> do
-          debugPrintUnifyMessage t1_c t2_c
           lift $ unifyTyVar c1 t2
           return (EqualityDerivation (IsEqual t1_c t2_c), [])
     (_, ConTy c2)
       | isFlexibleTyVar c2 -> do
-          debugPrintUnifyMessage t1_c t2_c
           lift $ unifyTyVar c2 t1
           return (EqualityDerivation (IsEqual t1_c t2_c), [])
     _ -> mzero
-  where
-    debugPrintUnifyMessage t1_c t2_c = lift $ do
-      putStrLn "Equality constraint unifying"
-      print =<< runPpr (do
-        d1 <- uShow t1_c
-        d2 <- uShow t2_c
-        return $ nest 4 (d1 $$ d2))
 
 -------------------------------------------------------------------------------
 -- Context reduction
@@ -372,9 +360,9 @@ reduceContext csts = do
   let csts' = equalities' ++ others'
 
   -- DEBUG
-  putStrLn "reduceContext"
-  print =<< runPpr (pprContext csts)
-  print =<< runPpr (pprContext csts')
+  -- putStrLn "reduceContext"
+  -- print =<< runPpr (pprContext csts)
+  -- print =<< runPpr (pprContext csts')
   return csts'
 
 -- | Add the extra information from a predicate to the context.  The 
@@ -427,7 +415,7 @@ instancePredicates (IsInst t cls) = do
       -- Match against all instances until one succeeds
       (inst_subst, inst, inst_cst) <-
         msum $ map (matchInstancePredicate t) $ clsInstances cls
-    
+
       -- Get the class constraints.  Substitute the actual instance type
       -- for the class variable.
       let class_subst = substitutionFromList [(clsParam $ clsSignature cls, t)]
@@ -437,28 +425,15 @@ instancePredicates (IsInst t cls) = do
         lift $ mapM (instantiatePredicate class_subst t) $
         clsConstraint $ clsSignature cls
 
-      lift $ print "Class instance matched"
-      lift $ print =<< runPpr (do d1 <- uShow (insType $ insSignature inst)
-                                  d2 <- pprTyCon (clsParam $ insClass $ insSignature inst)
-                                  d3 <- pprContext inst_cst
-                                  d4 <- pprContext cls_csts
-                                  return $ d1 $$ d2 $$ d3 $$ d4)
-                           
       return (cls_csts, inst, inst_cst)
   where
     to_reduction_step Nothing = NotReduced
     to_reduction_step (Just (x, y, z)) = InstanceReduced x y z
 
     -- Instantiate a superclass predicate.  Substitute the instance type  
-    -- for the class parameter
+    -- for the class parameter.
     instantiatePredicate class_subst inst_type pred =
-      rename class_subst pred {-
-      case pred
-      of IsInst ty' _ -> do
-           -- Predicate type must match, because the instance matched
-           Just (subst, match_cst) <- match ty' inst_type
-           renameList subst (match_cst ++ [pred])
-         _ -> internalError "Not an instance predicate" -}
+      rename class_subst pred
 
 instancePredicates _ = internalError "Not an instance predicate"
 

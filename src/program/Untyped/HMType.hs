@@ -117,20 +117,23 @@ tcConTypeFunction v =
 isTyVar :: TyCon -> Bool
 isTyVar = isNothing . tcConInfo
 
-isTyFun :: TyCon -> Bool
-isTyFun c = isJust $ tcConTypeFunction c
-
 isRigidTyVar :: TyCon -> Bool
 isRigidTyVar c = isTyVar c && isNothing (tcRep c)
 
 isFlexibleTyVar :: TyCon -> Bool
 isFlexibleTyVar c = isTyVar c && isJust (tcRep c)
 
+isTyFun :: TyCon -> Bool
+isTyFun c =
+  case tcConInfo c
+  of Just ci -> isJust $ tcTypeFunction ci
+     Nothing -> False
+
 isDataCon :: TyCon -> Bool
 isDataCon c =
   -- It's a data constructor if it's a constructor, but not a type function
   case tcConInfo c
-  of Just ci -> isNothing $ tcConTypeFunction c
+  of Just ci -> isNothing $ tcTypeFunction ci
      Nothing -> False
 
 -- | Create a new flexible type variable
@@ -475,23 +478,10 @@ unifyTypes pos t1 t2 = do
       | isFlexibleTyVar c2 ->
         unifyTyVar c2 t1_c >> success
 
-    -- Currently, only support single-argument type families
-    (TFunAppTy f1 [t1'], TFunAppTy f2 [t2'])
-      | f1 == f2 -> unify pos t1' t2'
-      | otherwise -> do
-        -- Create a new, rigid type variable to stand for the reduced type
-        a <- newRigidTyVar (hmTypeKind t1_c) Nothing
-        let Just fam1 = tcConTypeFunction f1
-            Just fam2 = tcConTypeFunction f2
-        return [IsEqual t1_c (ConTy a), IsEqual t2_c (ConTy a)]
-
-    (TFunAppTy f1 [t1'], _)  ->
-      let Just fam1 = tcConTypeFunction f1
-      in return [IsEqual t1_c t2_c]
-
-    (_, TFunAppTy f2 [t2'])  ->
-      let Just fam2 = tcConTypeFunction f2
-      in return [IsEqual t2_c t1_c]
+    -- Unifying type families produces equality constraints
+    -- to be solved later
+    (TFunAppTy {}, _) -> return [IsEqual t1_c t2_c]
+    (_, TFunAppTy {}) -> return [IsEqual t1_c t2_c]
 
     (ConTy c1, ConTy c2)     -> require $ c1 == c2
     (FunTy n1,   FunTy n2)   -> require $ n1 == n2

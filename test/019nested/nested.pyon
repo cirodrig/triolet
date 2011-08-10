@@ -2,6 +2,6 @@
 
 def nred(xs, ys):
 	return reduce(lambda x, y: x + y, 0, (sin(x) * sin(y)
-                                              for x in __iter__(xs) for y in __iter__(ys)))
+                                              for x in xs for y in ys))
 
 export ccall nred : list(float) * list(float) -> float

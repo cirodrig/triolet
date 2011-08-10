@@ -27,6 +27,7 @@ import Untyped.Kind
 import Untyped.GenSystemF
 import Untyped.Unification
 import Untyped.Classes
+import Untyped.Print
 import Untyped.TypeAssignment
 import Untyped.TypeInferenceEval
 import Type.Level
@@ -277,7 +278,11 @@ generalize env constraint inferred_types = do
         dtvs <- mapM pprTyCon $ Set.toList local_tyvars
         gamma <- mapM pprTyCon $ Set.toList ftv_gamma
         ctx <- pprContext retained
-        return $ text "F" <+> sep dtvs $$ text "G" <+> sep gamma $$ ctx
+        let rigids = fsep [parens $ dtv <+> if isRigidTyVar v
+                                            then text "rigid"
+                                            else text "flexible"
+                          | (dtv, v) <- zip dtvs (Set.toList local_tyvars)]
+        return $ text "F" <+> sep dtvs $$ rigids $$ text "G" <+> sep gamma $$ ctx
       putStrLn "Retained"
       print doc
 
@@ -546,7 +551,19 @@ inferDefGroup is_top_level defs k =
 
 -- | Infer an expression's type and parameter-passing convention
 inferExpressionType :: Expression -> Inf (TIExp, HMType)
-inferExpressionType expression =
+inferExpressionType expression 
+  | not debug_inference = inferExpressionType' expression
+  | otherwise = do
+    ret@(e', t) <- inferExpressionType' expression
+    t_doc <- liftIO $ runPpr $ uShow t
+    let message = text "Expression has type" <+> t_doc $$
+                  nest 4 (pprExpression expression)
+    liftIO $ print message
+    return ret
+  where
+    debug_inference = False
+
+inferExpressionType' expression =
   case expression
   of VariableE {expVar = v} ->
        instantiateVariable pos v

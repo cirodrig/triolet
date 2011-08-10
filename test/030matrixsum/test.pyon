@@ -1,5 +1,5 @@
 
 def test(m):
-  return reduce(lambda x, y: x + y, 0, __iter__(m))
+  return reduce(lambda x, y: x + y, 0, m)
 
 export ccall test : matrix(int) -> int

@@ -1160,41 +1160,53 @@ LinStream_zipWith4_array : (a b c d e : bare)
     	               -> LinStream (array_shape Nd unit_shape) d
     	               -> LinStream (array_shape (min_i (min_i (min_i Na Nb) Nc) Nd) unit_shape) e;
 
-fun_zip : (t : bare -> bare)
+fun_zip : (t1 t2 : bare -> bare)
        -> (a b : bare)
-       -> TraversableDict t
-       -> ShapeDict (shape t)
+       -> TraversableDict t1
+       -> TraversableDict t2
+       -> coerce @box (BoxedType (shape t1)) (BoxedType (shape t2)) 
+       -> ShapeDict (shape t1)
        -> Repr a
        -> Repr b
-       -> t a
-       -> t b
-       -> Writer (t (PyonTuple2 a b));
+       -> t1 a
+       -> t2 b
+       -> Stream (shape t1) (PyonTuple2 a b);
 
-fun_zip3 : (t : bare -> bare)
+fun_zip3 : (t1 t2 t3 : bare -> bare)
         -> (a b c : bare)
-        -> TraversableDict t
-        -> ShapeDict (shape t)
+        -> TraversableDict t1
+        -> TraversableDict t2
+        -> TraversableDict t3
+        -> coerce @box (BoxedType (shape t1)) (BoxedType (shape t2))
+        -> coerce @box (BoxedType (shape t2)) (BoxedType (shape t3))
+        -> ShapeDict (shape t1)
         -> Repr a
         -> Repr b
         -> Repr c
-        -> t a
-        -> t b
-        -> t c
-        -> Writer (t (PyonTuple3 a b c));
+        -> t1 a
+        -> t2 b
+        -> t3 c
+        -> Stream (shape t1) (PyonTuple3 a b c);
 
-fun_zip4 : (t : bare -> bare)
+fun_zip4 : (t1 t2 t3 t4 : bare -> bare)
         -> (a b c d : bare)
-        -> TraversableDict t
-        -> ShapeDict (shape t)
+        -> TraversableDict t1
+        -> TraversableDict t2
+        -> TraversableDict t3
+        -> TraversableDict t4
+        -> coerce @box (BoxedType (shape t1)) (BoxedType (shape t2))
+        -> coerce @box (BoxedType (shape t2)) (BoxedType (shape t3))
+        -> coerce @box (BoxedType (shape t3)) (BoxedType (shape t4))
+        -> ShapeDict (shape t1)
         -> Repr a
         -> Repr b
         -> Repr c
         -> Repr d
-        -> t a
-        -> t b
-        -> t c
-        -> t d
-        -> Writer (t (PyonTuple4 a b c d));
+        -> t1 a
+        -> t2 b
+        -> t3 c
+        -> t4 d
+        -> Stream (shape t1) (PyonTuple4 a b c d);
 
 count : Stream list_shape (Stored int);
 

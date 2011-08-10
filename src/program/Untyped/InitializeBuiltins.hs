@@ -911,54 +911,78 @@ mkReduce1Type = forallType [Star :-> Star, Star] $ \ [t, a] ->
 
 mkZipType =
   forallType [ Star :-> Star
+             , Star :-> Star
              , Star
-             , Star] $ \ [t, a, b] ->
-  let tT = ConTy t
+             , Star] $ \ [t1, t2, a, b] ->
+  let t1T = ConTy t1
+      t2T = ConTy t2
       aT = ConTy a
       bT = ConTy b
-  in ([ tT `IsInst` tiBuiltin the_Traversable
-      , shapeType tT `IsInst` tiBuiltin the_Shape
+  in ([ t1T `IsInst` tiBuiltin the_Traversable
+      , t2T `IsInst` tiBuiltin the_Traversable
+      , shapeType t1T `IsEqual` shapeType t2T
+      , shapeType t1T `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT]
-     , functionType [tT @@ aT, tT @@ bT]
-       (tT @@ (TupleTy 2 @@ aT @@ bT)))
+     , functionType [t1T @@ aT, t2T @@ bT]
+       (iterType t1T (TupleTy 2 @@ aT @@ bT)))
 
 mkZip3Type =
   forallType [ Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
              , Star
              , Star
-             , Star] $ \ [t, a, b, c] ->
-  let tT = ConTy t
+             , Star] $ \ [t1, t2, t3, a, b, c] ->
+  let t1T = ConTy t1
+      t2T = ConTy t2
+      t3T = ConTy t3
       aT = ConTy a
       bT = ConTy b
       cT = ConTy c
-  in ([ tT `IsInst` tiBuiltin the_Traversable
-      , shapeType tT `IsInst` tiBuiltin the_Shape
+  in ([ t1T `IsInst` tiBuiltin the_Traversable
+      , t2T `IsInst` tiBuiltin the_Traversable
+      , t3T `IsInst` tiBuiltin the_Traversable
+      , shapeType t1T `IsEqual` shapeType t2T
+      , shapeType t2T `IsEqual` shapeType t3T
+      , shapeType t1T `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT
       , passable cT]
-     , functionType [tT @@ aT, tT @@ bT, tT @@ cT]
-       (tT @@ (TupleTy 3 @@ aT @@ bT @@ cT)))
+     , functionType [t1T @@ aT, t2T @@ bT, t3T @@ cT]
+       (iterType t1T (TupleTy 3 @@ aT @@ bT @@ cT)))
 
 mkZip4Type =
   forallType [ Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
+             , Star :-> Star
              , Star
              , Star
              , Star
-             , Star] $ \ [t, a, b, c, d] ->
-  let tT = ConTy t
+             , Star] $ \ [t1, t2, t3, t4, a, b, c, d] ->
+  let t1T = ConTy t1
+      t2T = ConTy t2
+      t3T = ConTy t3
+      t4T = ConTy t4
       aT = ConTy a
       bT = ConTy b
       cT = ConTy c
       dT = ConTy d
-  in ([ tT `IsInst` tiBuiltin the_Traversable
-      , shapeType tT `IsInst` tiBuiltin the_Shape
+  in ([ t1T `IsInst` tiBuiltin the_Traversable
+      , t2T `IsInst` tiBuiltin the_Traversable
+      , t3T `IsInst` tiBuiltin the_Traversable
+      , t4T `IsInst` tiBuiltin the_Traversable
+      , shapeType t1T `IsEqual` shapeType t2T
+      , shapeType t2T `IsEqual` shapeType t3T
+      , shapeType t3T `IsEqual` shapeType t4T
+      , shapeType t1T `IsInst` tiBuiltin the_Shape
       , passable aT
       , passable bT
       , passable cT
       , passable dT]
-     , functionType [tT @@ aT, tT @@ bT, tT @@ cT, tT @@ dT]
-       (tT @@ (TupleTy 4 @@ aT @@ bT @@ cT @@ dT)))
+     , functionType [t1T @@ aT, t2T @@ bT, t3T @@ cT, t4T @@ dT]
+       (iterType t1T (TupleTy 4 @@ aT @@ bT @@ cT @@ dT)))
 
 mkCountType =
   return $ monomorphic $
