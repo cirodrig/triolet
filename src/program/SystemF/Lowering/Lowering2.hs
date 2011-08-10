@@ -306,10 +306,8 @@ lowerAltBody return_type alt field_values =
 
 lowerExcept return_type = do
   -- Call exit() and return a value, which is never used
-  -- The call is commented out because we perform unsafe code reordering.
-  -- Fix it!
-  -- emitAtom0 $ LL.primCallA (LL.VarV (LL.llBuiltin LL.the_prim_exit))
-  --  [nativeIntV (-1)]
+  emitAtom0 $ LL.primCallA (LL.VarV (LL.llBuiltin LL.the_prim_exit))
+    [nativeIntV (-1)]
   tenv <- lift getTypeEnv
   lowered_type <- lift $ lowerType tenv return_type
   case lowered_type of
