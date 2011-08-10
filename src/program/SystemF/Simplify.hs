@@ -781,6 +781,7 @@ flattenExp :: ExpM -> Restructure ExpM
 flattenExp (ExpM expression) =
   case expression
   of LetE inf pat rhs body -> flattenLetExp inf pat rhs body
+     LetfunE inf defs body -> flattenLetfunExp inf defs body
      CaseE inf scr alts -> flattenCaseExp inf scr alts
      AppE inf op ty_args args -> flattenAppExp inf op ty_args args
      ExceptE _ ty -> restructureZero
@@ -796,6 +797,12 @@ flattenLetExp inf pat rhs body = do
 
   -- Float this binding
   (floated, rn) <- liftR $ freshenContextExp $ LetCtx inf pat flat_rhs
+  floatItem floated
+  return (rename rn body)
+
+flattenLetfunExp inf defs body = do
+  -- Float this binding
+  (floated, rn) <- liftR $ freshenContextExp $ LetfunCtx inf defs
   floatItem floated
   return (rename rn body)
 
