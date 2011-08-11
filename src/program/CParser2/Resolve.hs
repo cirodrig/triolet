@@ -278,6 +278,13 @@ resolveExp pos expression =
        resolveDomain' TypeLevel "Bad level in let binding" pos binder $ \binder' -> do
          body' <- resolveL resolveExp body
          return $ LetE binder' rhs' body'
+     LetTypeE lhs rhs body -> do
+       (rhs', rhs_lv) <- resolveLType rhs 
+       logErrorIf (rhs_lv == ObjectLevel) $
+         "Bad level in right-hand side of type let"
+       enter $ do lhs' <- newRVar rhs_lv lhs
+                  body' <- resolveL resolveExp body
+                  return $ LetTypeE lhs' rhs' body'
      LetfunE defs e ->
        resolveDefGroup defs $ \defs' -> LetfunE defs' <$> resolveL resolveExp e
      CaseE scr alts -> CaseE <$> resolveL resolveExp scr <*>

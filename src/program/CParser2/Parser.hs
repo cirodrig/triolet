@@ -263,16 +263,30 @@ lamE = located $ do
   body <- pExp
   return $ LamE (Fun tparams params range body)
 
+-- | Parse an expression beginning with "let"
 letE :: P PLExp
 letE = located $ do
   match LetTok
-  binder <- pDomain
-  match EqualTok
-  rhs <- pExp
-  match InTok
-  body <- pExp
-  return $ LetE binder rhs body
-  
+  let_type_expr <|> let_expr
+  where
+    let_expr = do
+      binder <- pDomain
+      match EqualTok
+      rhs <- pExp
+      match InTok
+      body <- pExp
+      return $ LetE binder rhs body
+
+    -- "let type t = T"
+    let_type_expr = do
+      match TypeTok
+      typename <- identifier
+      match EqualTok
+      rhs <- pType
+      match InTok
+      body <- pExp
+      return $ LetTypeE typename rhs body
+
 letfunE :: P PLExp
 letfunE = located $ do
   match LetfunTok

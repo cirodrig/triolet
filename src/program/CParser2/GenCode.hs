@@ -1,13 +1,16 @@
 
+{-# LANGUAGE Rank2Types #-}
 module CParser2.GenCode (createCoreFunctions) where
 
 import Control.Monad
+import Control.Monad.Reader
 
 import Common.SourcePos
 import Common.Error
 import Common.Label
 import Builtins.Builtins
 import CParser2.AST
+import qualified Data.Map as Map
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
 import Type.Environment
@@ -27,6 +30,20 @@ checkModule mod@(Module decls)
       case unLoc ldecl
       of Decl _ (FunEnt _ _) -> True
          _                   -> False
+
+-- | During translation, keep a mapping from "let type"-bound identifiers
+--   to types.  If a type is found in the mapping, it's replaced by its
+--   assigned value.
+type TransM a = ReaderT (Map.Map ResolvedVar Type.Type) TypeEvalM a
+
+lookupLetTypeSynonym :: ResolvedVar -> TransM (Maybe Type.Type)
+lookupLetTypeSynonym rv = asks (Map.lookup rv)
+
+withLetTypeSynonym :: ResolvedVar -> Type.Type -> TransM a -> TransM a
+withLetTypeSynonym v t = local (Map.insert v t)
+
+liftT :: (forall a. TypeEvalM a -> TypeEvalM a) -> TransM a -> TransM a
+liftT t (ReaderT f) = ReaderT (\x -> t (f x))
 
 -------------------------------------------------------------------------------
 
@@ -61,52 +78,55 @@ applyDefAttributes :: [Attribute] -> (SystemF.Def SystemF.Mem -> SystemF.Def Sys
 applyDefAttributes attrs = SystemF.modifyDefAnnotation (defAttributes attrs)
 
 -- | Determine the type of an expression.
-expType :: RLExp -> TypeEvalM Type.Type
+expType :: RLExp -> TransM Type.Type
 expType (L pos expression) =
   case expression
   of VarE v -> do
-       Just ty <- askTypeEnv (lookupType (toVar v))
+       Just ty <- lift $ askTypeEnv (lookupType (toVar v))
        return ty
      IntE _ -> return $ Type.VarT $ pyonBuiltin the_int
      TAppE op arg -> do
        -- Compute the result of type application
        op_type <- expType op
        arg' <- translateType arg
-       tenv <- getTypeEnv
+       tenv <- lift getTypeEnv
        let arg_kind = Type.Eval.typeKind tenv arg'
-       Just rt <- Type.Eval.typeOfTypeApp op_type arg_kind arg'
+       Just rt <- lift $ Type.Eval.typeOfTypeApp op_type arg_kind arg'
        return rt
      AppE op arg -> do
        -- Compute the applied type
        op_type <- expType op
        arg_type <- expType arg
-       Just rt <- Type.Eval.typeOfApp op_type arg_type
+       Just rt <- lift $ Type.Eval.typeOfApp op_type arg_type
        return rt
      LamE f -> translateType $ funType pos f
      CaseE _ (L _ alt:_) -> do
        ty_binders <- mapM translateDomain $ altExTypes (altPattern alt)
-       assumeBinders ty_binders $ do
+       liftT (assumeBinders ty_binders) $ do
          val_binders <- mapM translateDomain $ altFields (altPattern alt)
-         assumeBinders val_binders $ do
+         liftT (assumeBinders val_binders) $ do
            expType (altBody alt)
      LetE dom _ body -> do
        binder <- translateDomain dom
-       assumeBinder binder $ expType body
+       liftT (assumeBinder binder) $ expType body
+     LetTypeE dom rhs body -> do
+       typ <- translateType rhs
+       withLetTypeSynonym dom typ $ expType body
      LetfunE defs body -> do
        assumeDefGroup defs $ expType body
      ExceptE t -> translateType t
 
-expKind :: RLExp -> TypeEvalM Type.Kind
+expKind :: RLExp -> TransM Type.Kind
 expKind e = do
   t <- expType e
-  tenv <- getTypeEnv
+  tenv <- lift getTypeEnv
   return $ Type.Eval.typeKind tenv t
 
-typeKind :: RType -> TypeEvalM Type.Kind
+typeKind :: RType -> TransM Type.Kind
 typeKind t =
   case t
   of VarT v -> do
-       Just k <- askTypeEnv (lookupType (toVar v))
+       Just k <- lift $ askTypeEnv (lookupType (toVar v))
        return k
      IntIndexT n -> return $ Type.intindexT
      TupleT _ ->
@@ -122,40 +142,45 @@ typeKind t =
      FunT _ _ -> return Type.boxT
      AllT (Domain v dom) rng -> do
        dom' <- translateType dom
-       assume (toVar v) dom' $ typeKind $ unLoc rng
+       liftT (assume (toVar v) dom') $ typeKind $ unLoc rng
 
-assumeDefGroup :: [LDef Resolved] -> TypeEvalM b -> TypeEvalM b
+assumeDefGroup :: [LDef Resolved] -> TransM b -> TransM b
 assumeDefGroup defs m = do
   -- Add function types to environment
   let vars = [toVar $ dName d | L _ d <- defs]
   fun_types <- sequence [translateType $ funType pos (dFun d)
                         | L pos d <- defs]
-  assumeBinders (zipWith (:::) vars fun_types) $ m
+  liftT (assumeBinders (zipWith (:::) vars fun_types)) m
 
 -------------------------------------------------------------------------------
 
 toVar (ResolvedVar v _) = v
 
-translateDomain :: Domain Resolved -> TypeEvalM Type.Binder
+translateDomain :: Domain Resolved -> TransM Type.Binder
 translateDomain (Domain param ty) =
   liftM (toVar param :::) $ translateType ty
 
 -- | Translate an AST type to a 'mem' type.
 --   First the type is translated to a 'spec' type, then 
 --   it's converted to 'mem'.
-translateType :: RLType -> TypeEvalM Type.Type
+translateType :: RLType -> TransM Type.Type
 translateType t = liftM specToMemType $ translateType' t
 
 -- | Translate an AST type to a specification type.  This function is
 --   only used by 'translateType'.
-translateType' :: RLType -> TypeEvalM Type.Type
+translateType' :: RLType -> TransM Type.Type
 translateType' lty =
   case unLoc lty
-  of VarT v -> return $ Type.VarT (toVar v)
+  of VarT v -> do
+       -- Look up this type, if it's a @let type@ synonym
+       mtype <- lookupLetTypeSynonym v
+       case mtype of 
+         Just t -> return t
+         Nothing -> return $ Type.VarT (toVar v)
      IntIndexT n -> return $ Type.IntT n
      TupleT tuple_args -> do
        -- Get kinds of type arguments
-       tenv <- getTypeEnv
+       tenv <- lift getTypeEnv
        tys <- mapM translateType' tuple_args
        let kinds = map get_kind tys
              where
@@ -172,7 +197,7 @@ translateType' lty =
      AllT (Domain param ty) rng -> do
        let v = toVar param
        dom <- translateType' ty
-       rng' <- assume v dom $ translateType' rng
+       rng' <- liftT (assume v dom) $ translateType' rng
        return $ Type.AllT (v ::: dom) rng'
      CoT kind dom rng -> do
        kind' <- translateType' kind
@@ -182,9 +207,9 @@ translateType' lty =
 
 translateFun pos f = do
   ty_binders <- mapM translateDomain $ fTyParams f
-  assumeBinders ty_binders $ do
+  liftT (assumeBinders ty_binders) $ do
     val_binders <- mapM translateDomain $ fParams f
-    assumeBinders val_binders $ do
+    liftT (assumeBinders val_binders) $ do
       range <- translateType $ fRange f
       body <- translateExp $ fBody f
       return $ SystemF.FunM $
@@ -226,8 +251,13 @@ translateExp (L pos expression) =
      LetE binder rhs body -> do
        rhs' <- translateExp rhs
        binder' <- translateDomain binder
-       body' <- assumeBinder binder' $ translateExp body
+       body' <- liftT (assumeBinder binder') $ translateExp body
        return $ SystemF.ExpM $ SystemF.LetE inf (SystemF.patM binder') rhs' body'
+     LetTypeE dom rhs body -> do
+       -- Define a type synonym.
+       -- No code is actually generated from this expression.
+       typ <- translateType rhs
+       withLetTypeSynonym dom typ $ translateExp body
      LetfunE defs body -> assumeDefGroup defs $ do
        functions <- sequence [translateFun pos (dFun d) | L pos d <- defs]
        let systemf_defs = [applyDefAttributes (dAttributes d) $
@@ -261,9 +291,9 @@ uncurryApp e args =
 translateAlt (Alt (ConPattern con ty_args ex_types fields) body) = do
   ty_args' <- mapM (liftM SystemF.TypM . translateType) ty_args
   ty_binders <- mapM translateDomain ex_types
-  assumeBinders ty_binders $ do
+  liftT (assumeBinders ty_binders) $ do
     val_binders <- mapM translateDomain fields
-    assumeBinders val_binders $ do
+    liftT (assumeBinders val_binders) $ do
       body' <- translateExp body
       return $ SystemF.AltM $
         SystemF.DeCon { SystemF.altConstructor = toVar con
@@ -274,7 +304,7 @@ translateAlt (Alt (ConPattern con ty_args ex_types fields) body) = do
 
 translateAlt (Alt (TuplePattern fields) body) = do
   val_binders <- mapM translateDomain fields
-  assumeBinders val_binders $ do
+  liftT (assumeBinders val_binders) $ do
     body' <- translateExp body
     return $ SystemF.AltM $
       SystemF.DeTuple { SystemF.altParams = map SystemF.patM val_binders
@@ -292,6 +322,6 @@ translateDecl _ =
 createCoreFunctions var_supply tenv mod =
   case checkModule mod
   of Module decls -> do
-       defs <- runTypeEvalM (mapM translateDecl decls) var_supply tenv
+       defs <- runTypeEvalM (runReaderT (mapM translateDecl decls) Map.empty) var_supply tenv
        return $ SystemF.Module builtinModuleName [] [SystemF.Rec defs] []
       

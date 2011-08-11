@@ -134,6 +134,9 @@ data Exp a =
   | LamE (Fun a)
   | CaseE (LExp a) [LAlt a]
   | LetE (Domain a) (LExp a) (LExp a)
+    -- | Define a local type synonym.  Type synonyms are substituted before
+    --   converting to Core.
+  | LetTypeE (Identifier a) (LType a) (LExp a)
   | LetfunE [LDef a] (LExp a)
   | ExceptE (LType a)
   | CoerceE (LType a) (LType a) (LExp a)
