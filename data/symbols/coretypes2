@@ -71,27 +71,28 @@ data Maybe : bare -> bare
 };
 
 -- A finite indexed integer 
-data FinIndInt : intindex -> val
+data FIInt : intindex -> val
 {
-  finIndInt (n : intindex) () (int);
+  fiInt (n : intindex) () (int);
 };
 
 -- An indexed singleton integer type.
 -- Invariant: The type index gives up the integer value.
-data IndInt : intindex -> val
+data IInt : intindex -> val
 {
   -- Finite value
-  indInt (n : intindex) () (FinIndInt n);
+  iInt (n : intindex) () (FIInt n);
 
-  -- Infinite value
-  indOmega (n : intindex) () (Pf (eqZ n pos_infty));
+  -- Positive and negative infinity
+  iPosInfty (n : intindex) () (Pf (eqZ n pos_infty));
+  iNegInfty (n : intindex) () (Pf (eqZ n neg_infty));
 };
 
 -- An existential indexed singleton integer type.
 -- We can convert int to this type.
-data SomeIndInt : val
+data SomeIInt : val
 {
-  someIndInt () (n : intindex) (FinIndInt n);
+  someIInt () (n : intindex) (FIInt n);
 };
 
 -- A dummy token that we use to stand in for dependences due to
@@ -148,8 +149,8 @@ data LinStream : bare -> bare -> box
 data MatrixStream : bare -> box
 {
   matrixStream (a : bare) (M : intindex, N : intindex)
-    (IndInt M,
-     IndInt N,
+    (IInt M,
+     IInt N,
      LinStream (arr_shape M (arr_shape N dim0)) a);
 };
 
@@ -181,14 +182,14 @@ data list : bare -> bare
 {
   make_list
   (a : bare) (n : intindex)
-  (FinIndInt n, Referenced (arr n a));
+  (FIInt n, Referenced (arr n a));
 };
 
 data array2 : bare -> bare
 {
   mk_array2
   (a : bare) (m : intindex, n : intindex)
-  (FinIndInt m, FinIndInt n, Referenced (arr m (arr n a)));
+  (FIInt m, FIInt n, Referenced (arr m (arr n a)));
 };
 
 -- A list-like, indexable object that computes values when they are retrieved
@@ -196,15 +197,15 @@ data view1 : bare -> bare
 {
   mk_view1
   (a : bare) (nlo : intindex, n : intindex)
-  (FinIndInt nlo, FinIndInt n, int -> Writer a);
+  (FIInt nlo, FIInt n, int -> Writer a);
 };
 
 data view2 : bare -> bare
 {
   mk_view2
   (a : bare) (mlo : intindex, m : intindex, nlo : intindex, n : intindex)
-  (FinIndInt mlo, FinIndInt m,
-   FinIndInt nlo, FinIndInt n,
+  (FIInt mlo, FIInt m,
+   FIInt nlo, FIInt n,
    int -> int -> Writer a);
 };
 
@@ -405,7 +406,7 @@ data dim1 : bare
 {
   mk_dim1 ()
     (Nlo : intindex, N : intindex)
-    (IndInt Nlo, IndInt N);
+    (IInt Nlo, IInt N);
 };
 
 -- A two-dimensional domain
@@ -414,7 +415,7 @@ data dim2 : bare
 {
   mk_dim2 ()
     (Mlo : intindex, M : intindex, Nlo : intindex, N : intindex)
-    (IndInt Mlo, IndInt M, IndInt Nlo, IndInt N);
+    (IInt Mlo, IInt M, IInt Nlo, IInt N);
 };
 
 -- The shape of a singleton stream
@@ -472,7 +473,7 @@ repr_Stream : (sh : bare) -> (a : bare) -> Repr (BareType (Stream sh a));
 repr_EmptyReference : (a : bare) -> Repr a;
 
 repr_arr : (n : intindex) -> (e : bare)
-        -> FinIndInt n -> Repr e -> Repr (arr n e);
+        -> FIInt n -> Repr e -> Repr (arr n e);
 
 repr_EffTok : Repr (Stored EffTok);
 
@@ -876,29 +877,29 @@ and : bool -> bool -> bool;
 -- integer index arithmetic
 
 -- Promote an integer to a type index
-defineIntIndex : int -> SomeIndInt;
+defineIntIndex : int -> SomeIInt;
 
 type pos_infty : intindex;
 type plus_i : intindex -> intindex -> intindex;
 type minus_i : intindex -> intindex -> intindex;
 type min_i : intindex -> intindex -> intindex;
 
-zero_ii : IndInt 0;
-one_ii : IndInt 1;
+zero_ii : IInt 0;
+one_ii : IInt 1;
 plus_ii : (m n : intindex)
-       -> IndInt m
-       -> IndInt n
-       -> IndInt (plus_i m n);
+       -> IInt m
+       -> IInt n
+       -> IInt (plus_i m n);
 
 minus_ii : (m n : intindex)
-        -> IndInt m
-        -> IndInt n
-        -> IndInt (minus_i m n);
+        -> IInt m
+        -> IInt n
+        -> IInt (minus_i m n);
 
 min_ii : (m n : intindex)
-      -> IndInt m
-      -> IndInt n
-      -> IndInt (min_i m n);
+      -> IInt m
+      -> IInt n
+      -> IInt (min_i m n);
 
 -------------------------------------------------------------------------------
 -- propositions
@@ -929,7 +930,7 @@ unsafeMakeCoercion : (a b : box) -> coerce @box a b;
 
 -- Convert an indexed int to a finite indexed int.  Raise an exception
 -- if not finite.
-fromIndInt : (N : intindex) -> IndInt N -> FinIndInt N;
+fromIndInt : (N : intindex) -> IInt N -> FIInt N;
 
 -- A dummy boxed object that is used as a placeholder for a dead value.
 deadBox : (a : box) -> a;
@@ -937,10 +938,10 @@ deadBox : (a : box) -> a;
 -- A dummy referenced object that is used as a placeholder for a dead value.
 deadRef : (a : bare) -> Writer a;
 
-array_traverse : (N : intindex) -> (a : bare) -> Repr a -> FinIndInt N
+array_traverse : (N : intindex) -> (a : bare) -> Repr a -> FIInt N
 	      -> arr N a -> Stream (arr_shape N dim0) a;
 
-array_build : (N : intindex) -> (a : bare) -> Repr a -> FinIndInt N
+array_build : (N : intindex) -> (a : bare) -> Repr a -> FIInt N
 	   -> Stream (arr_shape N dim0) a -> Writer (arr N a);
 
 oper_DO : (a : bare) -> Repr a -> Writer a -> Stream dim1 a;
@@ -980,7 +981,7 @@ chunk :
  -> (a b : bare)
  -> Repr a
  -> Repr b
- -> IndInt N
+ -> IInt N
  -> Stream (arr_shape M (arr_shape N dim0)) a
  -> (Stream (arr_shape N dim0) a -> Writer b)
  -> Stream (arr_shape M dim0) b;
@@ -989,7 +990,7 @@ chunk_id :
     (M N : intindex)
  -> (a : bare)
  -> Repr a
- -> IndInt N
+ -> IInt N
  -> Stream (arr_shape M (arr_shape N dim0)) a
  -> Stream (arr_shape M dim0) (StoredBox (Stream (arr_shape N dim0) a));
 
@@ -1016,8 +1017,8 @@ fun_from_MatrixView_Stream : (a : bare)
 -- Reinterpret an array stream as having array2 shape
 fun_asMatrix_Stream : (M N : intindex)
 		   -> (a : bare)
-		   -> IndInt M
-		   -> IndInt N
+		   -> IInt M
+		   -> IInt N
 		   -> Stream (arr_shape M (arr_shape N dim0)) a
 		   -> Stream dim2 a;
 
@@ -1025,7 +1026,7 @@ fun_asMatrix_Stream : (M N : intindex)
 fun_asArray2_Stream : (a b : bare)
 		   -> Stream dim2 a
 		   -> ((M N : intindex)
-		       -> IndInt M -> IndInt N
+		       -> IInt M -> IInt N
 		       -> Stream (arr_shape M (arr_shape N dim0))
 		       -> Writer b)
 		   -> Writer b;
@@ -1258,7 +1259,7 @@ stencil2D : (t : bare -> bare) -> (a b : bare)
 
 -- A type-indexed version of 'range'
 rangeIndexed : (n : intindex)
-            -> IndInt n
+            -> IInt n
             -> Stream (arr_shape n dim0) (Stored int);
 
 histogram : (sh : bare)
@@ -1268,20 +1269,20 @@ histogram : (sh : bare)
 
 histogramArray : (sh : bare)
               -> (n : intindex)
-              -> FinIndInt n
+              -> FIInt n
               -> Stream sh (Stored int)
               -> Writer (arr n (Stored int));
 
 -- Low-level function for imperatively initializing an histogram
 createHistogram :
     (n : intindex)
- -> FinIndInt n
+ -> FIInt n
  -> ((int -> EffTok) -> EffTok -> EffTok)
  -> Writer (arr n (Stored int));
 
 generate : (n : intindex)
         -> (a : bare)
-        -> IndInt n
+        -> IInt n
         -> Repr a
         -> (int -> Writer a)
         -> Stream (arr_shape n dim0) a;
@@ -1361,7 +1362,7 @@ LinStream_fold : (sh a acc : bare)
 -- Parallelizable loop
 doall : (n : intindex)
      -> (a b : bare)
-     -> FinIndInt n
+     -> FIInt n
      -> (int -> IEffect b)
      -> IEffect a;
 
@@ -1369,7 +1370,7 @@ doall : (n : intindex)
 for : (n : intindex)
    -> (acc : bare)
    -> Repr acc
-   -> IndInt n
+   -> IInt n
    -> acc
    -> (int -> acc -> Writer acc)
    -> Writer acc;
@@ -1379,11 +1380,11 @@ blocked_reduce :
     (acc : bare)
  -> (n : intindex)
  -> Repr acc
- -> FinIndInt n		-- Size of range
+ -> FIInt n		-- Size of range
  -> int	       			-- First member of range
  -> (acc -> acc -> Writer acc) -- Reducer
  -> acc			-- Initial value
- -> ((n : intindex) -> FinIndInt n -> int -> Writer acc)
+ -> ((n : intindex) -> FIInt n -> int -> Writer acc)
     -- ^ Generate value given range
  -> Writer acc;
 
@@ -1392,10 +1393,10 @@ blocked_reduce1 :
     (acc : bare)
  -> (n : intindex)
  -> Repr acc
- -> FinIndInt n		-- Size of range
+ -> FIInt n		-- Size of range
  -> int			-- First member of range
  -> (acc -> acc -> Writer acc) -- Reducer
- -> ((n : intindex) -> FinIndInt n -> int -> Writer acc)
+ -> ((n : intindex) -> FIInt n -> int -> Writer acc)
     -- ^ Generate value given range
  -> Writer acc;
 
@@ -1403,7 +1404,7 @@ blocked_reduce1 :
 blocked_doall :
     (n : intindex)
  -> (a b : bare)
- -> FinIndInt n
+ -> FIInt n
  -> int
- -> ((n : intindex) -> FinIndInt n -> int -> IEffect b)
+ -> ((n : intindex) -> FIInt n -> int -> IEffect b)
  -> IEffect a;

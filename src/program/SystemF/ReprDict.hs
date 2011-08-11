@@ -170,7 +170,7 @@ saveReprDictPattern (PatM (pat_var ::: ty) _) m =
            saveReprDict arg (ExpM $ VarE defaultExpInfo pat_var) m
        | op `isPyonBuiltin` the_ShapeDict -> 
            saveShapeDict arg (ExpM $ VarE defaultExpInfo pat_var) m
-       | op `isPyonBuiltin` the_FinIndInt ->
+       | op `isPyonBuiltin` the_FIInt ->
            saveIndexedInt arg (ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m
 

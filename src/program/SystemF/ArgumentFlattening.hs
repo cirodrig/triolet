@@ -921,11 +921,11 @@ deadValue t = do
          Just (con, [p])
            | con `isPyonBuiltin` the_Pf ->
                return $ ExpM $ AppE defaultExpInfo dead_proof_op [TypM p] [] 
-           | con `isPyonBuiltin` the_FinIndInt -> do
+           | con `isPyonBuiltin` the_FIInt -> do
                -- Use 'finIndInt' as the data constructor
                -- Get types of data constructor parameters
                let Just datacon_type =
-                     lookupType (pyonBuiltin the_finIndInt) tenv
+                     lookupType (pyonBuiltin the_fiInt) tenv
                Just monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
                let (dom, _) = fromFunType monotype
 
@@ -946,7 +946,7 @@ deadValue t = do
     dead_box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadBox)
     dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadRef)
     dead_proof_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadProof)
-    dead_finindint_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_finIndInt)
+    dead_finindint_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_fiInt)
 
 planReturn :: (ReprDictMonad m, EvalMonad m) =>
               PlanMode -> Specificity -> TypM -> m FlatRet

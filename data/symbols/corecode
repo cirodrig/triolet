@@ -123,24 +123,25 @@ bind @(N : intindex) @(sh a b : bare)
 
 -} -- END
 
-fromIndInt @(N : intindex) (ii : IndInt N) -> FinIndInt N =
+fromIndInt @(N : intindex) (ii : IInt N) -> FIInt N =
   case ii of {
-    indInt @N (fii : FinIndInt N). fii;
-    indOmega @N (pf : Pf (eqZ N pos_infty)). except @(FinIndInt N)
+    iInt @N (fii : FIInt N). fii;
+    iPosInfty @N (pf : Pf (eqZ N pos_infty)). except @(FIInt N);
+    iNegInfty @N (pf : Pf (eqZ N pos_infty)). except @(FIInt N)
   };
 
 -------------------------------------------------------------------------------
 -- Array functions
 
 array_traverse @(N : intindex) @(a : bare)
-  (repr : Repr a) (size : FinIndInt N) (ay : arr N a)
+  (repr : Repr a) (size : FIInt N) (ay : arr N a)
   -> Stream (arr_shape N dim0) a =
-  generate @N @a (indInt @N size) repr
+  generate @N @a (iInt @N size) repr
   (\ (i : int) (ret : OutPtr a) -> IEffect a.
      copy @a repr (subscript @N @a repr ay i) ret);
 
 array_build @(N : intindex) @(a : bare)
-  (repr : Repr a) (size : FinIndInt N)
+  (repr : Repr a) (size : FIInt N)
   (s : Stream (arr_shape N dim0) a)
   (ret : OutPtr (arr N a))
   -> IEffect (arr N a)
@@ -149,7 +150,7 @@ array_build @(N : intindex) @(a : bare)
   case s of linStream @(arr_shape N dim0) @a @(st : box)
     (stream_state : st) (stream_next : st -> StreamNext st (BoxedType a)).
 
-  case size of finIndInt @N (bound : int).
+  case size of fiInt @N (bound : int).
 
   letfun
     go (i : int) (state : st) -> EffTok =
@@ -178,7 +179,7 @@ histogram @(sh : bare)
   (input : Stream sh (Stored int))
   (ret : OutPtr (list (Stored int)))
   -> IEffect (list (Stored int)) =
-  case defineIntIndex size of someIndInt @(N : intindex) (index : FinIndInt N).
+  case defineIntIndex size of someIInt @(N : intindex) (index : FIInt N).
   make_list @(Stored int) @N index
   (referenced @(arr N (Stored int))
    (histogramArray @sh @N index input))
@@ -203,15 +204,15 @@ rows @(t : bare -> bare) @(a : bare)
   case coerce @(shape t) @dim2 shp of
     mk_dim2
    @(Mlo M Nlo N : intindex)
-    (ymin : IndInt Mlo)
-    (height : IndInt M)
-    (xmin : IndInt Nlo)
-    (width : IndInt N).
+    (ymin : IInt Mlo)
+    (height : IInt M)
+    (xmin : IInt Nlo)
+    (width : IInt N).
 
-  let fymin : FinIndInt Mlo = fromIndInt @Mlo ymin in
-  let fheight : FinIndInt M = fromIndInt @M height in
-  let fxmin : FinIndInt Nlo = fromIndInt @Nlo xmin in
-  let fwidth : FinIndInt N = fromIndInt @N width in
+  let fymin : FIInt Mlo = fromIndInt @Mlo ymin in
+  let fheight : FIInt M = fromIndInt @M height in
+  let fxmin : FIInt Nlo = fromIndInt @Nlo xmin in
+  let fwidth : FIInt N = fromIndInt @N width in
 
   mk_view1 @(view1 a) @Mlo @M fymin fheight
   (\ (y : int) -> Writer (view1 a).
@@ -241,15 +242,15 @@ cols @(t : bare -> bare) @(a : bare)
   case coerce @(shape t) @dim2 shp of
     mk_dim2
    @(Mlo M Nlo N : intindex)
-    (ymin : IndInt Mlo)
-    (height : IndInt M)
-    (xmin : IndInt Nlo)
-    (width : IndInt N).
+    (ymin : IInt Mlo)
+    (height : IInt M)
+    (xmin : IInt Nlo)
+    (width : IInt N).
 
-  let fymin : FinIndInt Mlo = fromIndInt @Mlo ymin in
-  let fheight : FinIndInt M = fromIndInt @M height in
-  let fxmin : FinIndInt Nlo = fromIndInt @Nlo xmin in
-  let fwidth : FinIndInt N = fromIndInt @N width in
+  let fymin : FIInt Mlo = fromIndInt @Mlo ymin in
+  let fheight : FIInt M = fromIndInt @M height in
+  let fxmin : FIInt Nlo = fromIndInt @Nlo xmin in
+  let fwidth : FIInt N = fromIndInt @N width in
 
   mk_view1 @(view1 a) @Nlo @N fxmin fwidth
   (\ (x : int) -> Writer (view1 a).
@@ -275,21 +276,21 @@ outerproduct @(a b c : bare)
   case boxed @(list a) (TraversableDict_list_build @a repr_a sa) of
     boxed @(list a) (la : list a).
   case la of make_list @a @(M : intindex)
-       	     (size_y : FinIndInt M) (ayref_a : Referenced (arr M a)).
+       	     (size_y : FIInt M) (ayref_a : Referenced (arr M a)).
   case ayref_a of referenced @(arr M a) (ay_a : arr M a).
 
   case boxed @(list b) (TraversableDict_list_build @b repr_b sb) of
     boxed @(list b) (lb : list b).
   case lb of make_list @b @(N : intindex)
-       	     (size_x : FinIndInt N) (ayref_b : Referenced (arr N b)).
+       	     (size_x : FIInt N) (ayref_b : Referenced (arr N b)).
   case ayref_b of referenced @(arr N b) (ay_b : arr N b).
 
   -- Create a array2 stream
-  matrixStream @c @M @N (indInt @M size_y) (indInt @N size_x)
+  matrixStream @c @M @N (iInt @M size_y) (iInt @N size_x)
   (bind @M @(arr_shape N dim0) @a @c repr_a repr_c
   (array_traverse @M @a repr_a size_y ay_a)
   (\ (x : a) -> Stream (arr_shape N dim0) c.
-    generate @N @c (indInt @N size_x) repr_c
+    generate @N @c (iInt @N size_x) repr_c
     (\ (index : int) -> Writer c.
        let y : b = subscript @N @b repr_b ay_b index in
        f x y)));
@@ -299,7 +300,7 @@ transpose @(a : bare)
   (repr : Repr a) (mat : array2 a) (ret : OutPtr (view2 a))
   -> IEffect (view2 a) =
   case mat of mk_array2 @a @(M : intindex) @(N : intindex)
-       	      (height : FinIndInt M) (width : FinIndInt N)
+       	      (height : FIInt M) (width : FIInt N)
       	      (aref : Referenced (arr M (arr N a))).
   case aref of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
   let row_repr : Repr (arr N a) = repr_arr @N @a width repr in
@@ -335,33 +336,33 @@ stencil2D @(t : bare -> bare) @(a b : bare)
 
   -- Create stencil dimensions
   case defineIntIndex ymin of
-    someIndInt @(stencil_Mlo : intindex) (stencil_ymin : FinIndInt stencil_Mlo).
+    someIInt @(stencil_Mlo : intindex) (stencil_ymin : FIInt stencil_Mlo).
   case defineIntIndex xmin of
-    someIndInt @(stencil_Nlo : intindex) (stencil_xmin : FinIndInt stencil_Nlo).
+    someIInt @(stencil_Nlo : intindex) (stencil_xmin : FIInt stencil_Nlo).
   case defineIntIndex stencil_size_y of
-    someIndInt @(stencil_M : intindex) (stencil_height : FinIndInt stencil_M).
+    someIInt @(stencil_M : intindex) (stencil_height : FIInt stencil_M).
   case defineIntIndex stencil_size_x of
-    someIndInt @(stencil_N : intindex) (stencil_width : FinIndInt stencil_N).
+    someIInt @(stencil_N : intindex) (stencil_width : FIInt stencil_N).
 
   -- Inspect the input data
   case boxed @(shape t) (get_shape @a inp) of boxed @(shape t) (shp : shape t).
   case coerce @(shape t) @dim2 shp of
     mk_dim2
     @(Mlo M Nlo N : intindex)
-    (inp_ymin : IndInt Mlo)
-    (inp_height : IndInt M)
-    (inp_xmin : IndInt Nlo)
-    (inp_width : IndInt N).
-    let f_inp_height : FinIndInt M = fromIndInt @M inp_height in
-    let f_inp_width : FinIndInt N = fromIndInt @N inp_width in
+    (inp_ymin : IInt Mlo)
+    (inp_height : IInt M)
+    (inp_xmin : IInt Nlo)
+    (inp_width : IInt N).
+    let f_inp_height : FIInt M = fromIndInt @M inp_height in
+    let f_inp_width : FIInt N = fromIndInt @N inp_width in
     case fromIndInt @Mlo inp_ymin of
-      finIndInt @Mlo (inp_ymin_i : int).
+      fiInt @Mlo (inp_ymin_i : int).
     case fromIndInt @Nlo inp_xmin of
-      finIndInt @Nlo (inp_xmin_i : int).
+      fiInt @Nlo (inp_xmin_i : int).
     case f_inp_height of
-      finIndInt @M (inp_height_i : int).
+      fiInt @M (inp_height_i : int).
     case f_inp_width of
-      finIndInt @N (inp_width_i : int).
+      fiInt @N (inp_width_i : int).
 
     let inp_ymax_i : int =
           AdditiveDict_int_sub (AdditiveDict_int_add inp_ymin_i inp_height_i) 1 in
@@ -414,9 +415,9 @@ stencil2D @(t : bare -> bare) @(a b : bare)
         (ret : OutPtr (arr M (arr N b)))
         -> IEffect (arr M (arr N b)) =
         case defineIntIndex delta_y of
-          someIndInt @(Minit : intindex) (rgn_height : FinIndInt Minit).
+          someIInt @(Minit : intindex) (rgn_height : FIInt Minit).
         case defineIntIndex delta_x of
-          someIndInt @(Ninit : intindex) (rgn_width : FinIndInt Ninit).
+          someIInt @(Ninit : intindex) (rgn_width : FIInt Ninit).
 
         -- Loop over region
         doall @Minit @(arr M (arr N b)) @(arr N b) rgn_height
@@ -504,7 +505,7 @@ stencil2D @(t : bare -> bare) @(a b : bare)
 TraversableDict_list_traverse @(a : bare) (repr : Repr a) (ls : list a)
   -> Stream dim1 a =
   case ls of make_list @a @(N : intindex)
-                       (size : FinIndInt N) (aref : Referenced (arr N a)).
+                       (size : FIInt N) (aref : Referenced (arr N a)).
   case aref of referenced @(arr N a) (ay : arr N a).
   LinStream_flatten @(arr_shape N dim0) @a
   (array_traverse @N @a repr size ay);
@@ -516,9 +517,9 @@ IndexableDict_list_at_point @(a : bare)
 
   -- Deconstruct data structures
   case ls of make_list @a @(N : intindex)
-             (size : FinIndInt N) (ayref : Referenced (arr N a)).
+             (size : FIInt N) (ayref : Referenced (arr N a)).
   case ayref of referenced @(arr N a) (ay : arr N a).
-  case size of finIndInt @N (size_int : int).
+  case size of fiInt @N (size_int : int).
   case ix of stored @int (ix_u : int).
 
   copy @a repr (subscript @N @a repr ay ix_u) ret;
@@ -536,8 +537,8 @@ IndexableDict_list_at_slice @(a : bare)
   case stride_s of stored @int (stride : int).
 
   case ls of make_list @a @(N : intindex)
-       	     (list_size : FinIndInt N) (ayref : Referenced (arr N a)).
-  case list_size of finIndInt @N (list_size_i : int).
+       	     (list_size : FIInt N) (ayref : Referenced (arr N a)).
+  case list_size of fiInt @N (list_size_i : int).
   case ayref of referenced @(arr N a) (ay : arr N a).
 
   let count : int =
@@ -545,8 +546,8 @@ IndexableDict_list_at_slice @(a : bare)
 	let interval_rounded : int =
 	      AdditiveDict_int_sub (AdditiveDict_int_add delta stride) 1 in
 	RemainderDict_int_floordiv interval_rounded stride in
-  case defineIntIndex count of someIndInt @(L : intindex) (count_i : FinIndInt L).
-  mk_view1 @a @0 @L (finIndInt @0 0) count_i
+  case defineIntIndex count of someIInt @(L : intindex) (count_i : FIInt L).
+  mk_view1 @a @0 @L (fiInt @0 0) count_i
   (\ (i : int) (ret : OutPtr a) -> IEffect a.
      let index : int =
            AdditiveDict_int_add start (MultiplicativeDict_int_mul i stride) in
@@ -558,10 +559,10 @@ IndexableDict_list_get_shape @(a : bare)
   (ls : list a) (ret : OutPtr dim1) -> IEffect dim1 =
 
   case ls of make_list @a @(N : intindex)
-       	     (length : FinIndInt N)
+       	     (length : FIInt N)
 	     (aptr : Referenced (arr N a)).
 
-  mk_dim1 @0 @N (indInt @0 (finIndInt @0 0)) (indInt @N length) ret;
+  mk_dim1 @0 @N (iInt @0 (fiInt @0 0)) (iInt @N length) ret;
 
 
 -------------------------------------------------------------------------------
@@ -570,9 +571,9 @@ IndexableDict_list_get_shape @(a : bare)
 TraversableDict_view1_traverse @(a : bare)
   (repr : Repr a) (ls : view1 a) -> Stream dim1 a =
   case ls of mk_view1 @a @(Nlo N : intindex)
-       	     (xmin : FinIndInt Nlo) (size : FinIndInt N) (f : int -> Writer a).
+       	     (xmin : FIInt Nlo) (size : FIInt N) (f : int -> Writer a).
   LinStream_flatten @(arr_shape N dim0) @a
-  (generate @N @a (indInt @N size) repr f);
+  (generate @N @a (iInt @N size) repr f);
 
 
 TraversableDict_view1_build @(a : bare)
@@ -581,10 +582,10 @@ TraversableDict_view1_build @(a : bare)
 
   -- Build a list, then create a list view from it
   case boxed @(list a) (TraversableDict_list_build @a repr s) of boxed @(list a) (ls : list a).
-  case ls of make_list @a @(N : intindex) (list_size : FinIndInt N) (ayref : Referenced (arr N a)).
+  case ls of make_list @a @(N : intindex) (list_size : FIInt N) (ayref : Referenced (arr N a)).
   case ayref of referenced @(arr N a) (ay : arr N a).
 
-  mk_view1 @a @0 @N  (finIndInt @0 0) list_size
+  mk_view1 @a @0 @N  (fiInt @0 0) list_size
   (\ (i : int) (ret : OutPtr a) -> IEffect a.
     copy @a repr (subscript @N @a repr ay i) ret)
   ret;
@@ -594,9 +595,9 @@ IndexableDict_ListView_at_point @(a : bare)
   (repr : Repr a) (ls : view1 a) (ix : int) (ret : OutPtr a) -> IEffect a =
 
   case ls of mk_view1 @a @(Nlo N : intindex)
-             (xmin : FinIndInt Nlo) (size : FinIndInt N) (generator : int -> Writer a).
-  case xmin of finIndInt @Nlo (xmin_i : int).
-  case size of finIndInt @N (size_int : int).
+             (xmin : FIInt Nlo) (size : FIInt N) (generator : int -> Writer a).
+  case xmin of fiInt @Nlo (xmin_i : int).
+  case size of fiInt @N (size_int : int).
   let xmax_i : int =
         AdditiveDict_int_sub (AdditiveDict_int_add xmin_i size_int) 1 in
 
@@ -611,11 +612,11 @@ IndexableDict_ListView_at_slice @(a : bare)
   (ret : OutPtr (view1 a)) -> IEffect (view1 a) =
 
   case ls of mk_view1 @a @(Nlo N : intindex)
-       	     (xmin : FinIndInt Nlo)
-	     (list_size : FinIndInt N)
+       	     (xmin : FIInt Nlo)
+	     (list_size : FIInt N)
 	     (generator : int -> Writer a).
-  case xmin of finIndInt @Nlo (xmin_i : int).
-  case list_size of finIndInt @N (list_size_i : int).
+  case xmin of fiInt @Nlo (xmin_i : int).
+  case list_size of fiInt @N (list_size_i : int).
   let xmax_i : int =
         AdditiveDict_int_sub (AdditiveDict_int_add xmin_i list_size_i) 1 in
   
@@ -624,8 +625,8 @@ IndexableDict_ListView_at_slice @(a : bare)
 	let interval_rounded : int =
 	      AdditiveDict_int_sub (AdditiveDict_int_add delta stride) 1 in
 	RemainderDict_int_floordiv interval_rounded stride in
-  case defineIntIndex count of someIndInt @(L : intindex) (count_i : FinIndInt L).
-  mk_view1 @a @0 @L  (finIndInt @0 0) count_i
+  case defineIntIndex count of someIInt @(L : intindex) (count_i : FIInt L).
+  mk_view1 @a @0 @L  (fiInt @0 0) count_i
   (\ (i : int) (ret : OutPtr a) -> IEffect a.
      let index : int =
            AdditiveDict_int_add start (MultiplicativeDict_int_mul i stride) in
@@ -674,12 +675,12 @@ fun_asList_Stream @(sh a : bare)
 
 
 range (n : int) -> Stream dim1 (Stored int) =
-  case defineIntIndex n of someIndInt @(ix : intindex) (val : FinIndInt ix).
+  case defineIntIndex n of someIInt @(ix : intindex) (val : FIInt ix).
     LinStream_flatten @(arr_shape ix dim0) @(Stored int)
-    (rangeIndexed @ix (indInt @ix val));
+    (rangeIndexed @ix (iInt @ix val));
 
 
-rangeIndexed @(N : intindex) (count : IndInt N)
+rangeIndexed @(N : intindex) (count : IInt N)
   -> Stream (arr_shape N dim0) (Stored int) =
   generate @N @(Stored int) count repr_int
   (\ (i : int) -> Writer (Stored int). stored @int i);
@@ -699,14 +700,14 @@ oper_EMPTY @(a : bare) (repr : Repr a) -> Stream dim1 a
 
 
 generate @(N : intindex) @(a : bare)
-         (count : IndInt N) (repr : Repr a) (f : int -> Writer a)
+         (count : IInt N) (repr : Repr a) (f : int -> Writer a)
  -> Stream (arr_shape N dim0) a
   attribute(inline_final) =
 
   case count of {
-    indInt @N (fin : FinIndInt N).
+    iInt @N (fin : FIInt N).
       -- Finite case
-      case fin of finIndInt @N (bound : int).
+      case fin of fiInt @N (bound : int).
       letfun
         next (st : Boxed (Stored int))
 	  -> StreamNext (Boxed (Stored int)) (BoxedType a) =
@@ -730,7 +731,7 @@ generate @(N : intindex) @(a : bare)
       in linStream @(arr_shape N dim0) @a @(Boxed (Stored int))
          (boxed @(Stored int) (stored @int 0)) next;
 
-    indOmega @N (pf : Pf (eqZ N pos_infty)).
+    iPosInfty @N (pf : Pf (eqZ N pos_infty)).
       -- Infinite case
       letfun
         next (st : Boxed (Stored int))
@@ -750,7 +751,10 @@ generate @(N : intindex) @(a : bare)
           streamValue @(Boxed (Stored int)) @(BoxedType a) new_st retval
 
       in linStream @(arr_shape N dim0) @a @(Boxed (Stored int))
-         (boxed @(Stored int) (stored @int 0)) next
+         (boxed @(Stored int) (stored @int 0)) next;
+
+    iNegInfty @N (pf : Pf (eqZ N neg_infty)).
+      except @(Stream (arr_shape N dim0) a)
   };
 
 -------------------------------------------------------------------------------
@@ -760,8 +764,8 @@ fun_from_MatrixView_Stream @(a : bare)
   (s : Stream dim2 a) -> Stream dim2 a = s;
 
 fun_asMatrix_Stream @(M N : intindex) @(a : bare)
-  (size_y : IndInt M)
-  (size_x : IndInt N)
+  (size_y : IInt M)
+  (size_x : IInt N)
   (src : Stream (arr_shape M (arr_shape N dim0)) a)
   -> Stream dim2 a =
   matrixStream @a @M @N size_y size_x src;
@@ -769,7 +773,7 @@ fun_asMatrix_Stream @(M N : intindex) @(a : bare)
 
 chunk_id @(M N : intindex) @(a : bare)
   (repr : Repr a)
-  (size : IndInt N)
+  (size : IInt N)
   (s : Stream (arr_shape M (arr_shape N dim0)) a)
   -> Stream (arr_shape M dim0) (StoredBox (Stream (arr_shape N dim0) a)) =
 
@@ -788,11 +792,11 @@ chunk_id @(M N : intindex) @(a : bare)
 TraversableDict_array2_traverse @(a : bare)
   (repr : Repr a) (m : array2 a) -> Stream dim2 a =
   case m of mk_array2 @a @(M : intindex) @(N : intindex)
-            (size_y : FinIndInt M) (size_x : FinIndInt N)
+            (size_y : FIInt M) (size_x : FIInt N)
 	    (ayref : Referenced (arr M (arr N a))).
   case ayref of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
 
-  matrixStream @a @M @N (indInt @M size_y) (indInt @N size_x)
+  matrixStream @a @M @N (iInt @M size_y) (iInt @N size_x)
   (bind @M @(arr_shape N dim0) @(arr N a) @a
    (repr_arr @N @a size_x repr)
    repr
@@ -804,13 +808,13 @@ TraversableDict_array2_build @(a : bare)
   (repr : Repr a) (s : Stream dim2 a) (ret : OutPtr (array2 a))
   -> IEffect (array2 a) =
   case s of matrixStream @a @(M : intindex) @(N : intindex)
-       	    (size_y : IndInt M) (size_x : IndInt N)
+       	    (size_y : IInt M) (size_x : IInt N)
 	    (ls : LinStream (arr_shape M (arr_shape N dim0)) a).
 
   case size_y of {
-    indInt @M (fsize_y : FinIndInt M).
+    iInt @M (fsize_y : FIInt M).
       case size_x of {
-        indInt @N (fsize_x : FinIndInt N).
+        iInt @N (fsize_x : FIInt N).
           mk_array2 @a @M @N fsize_y fsize_x
           (referenced @(arr M (arr N a))
            (array_build @M @(arr N a) (repr_arr @N @a fsize_x repr) fsize_y
@@ -818,11 +822,15 @@ TraversableDict_array2_build @(a : bare)
 	     size_x ls
              (array_build @N @a repr fsize_x)))) ret;
 
-        indOmega @N (pf : Pf (eqZ N pos_infty)).
+        iPosInfty @N (pf : Pf (eqZ N pos_infty)).
+	  except @(IEffect (array2 a));
+        iNegInfty @N (pf : Pf (eqZ N neg_infty)).
 	  except @(IEffect (array2 a))
       };
 
-    indOmega @M (pf : Pf (eqZ M pos_infty)).
+    iPosInfty @M (pf : Pf (eqZ M pos_infty)).
+      except @(IEffect (array2 a));
+    iNegInfty @M (pf : Pf (eqZ M pos_infty)).
       except @(IEffect (array2 a))
   };
 
@@ -834,7 +842,7 @@ IndexableDict_matrix_at_point @(a : bare)
   (ret : OutPtr a)
   -> IEffect a =
   case mat of mk_array2 @a @(M : intindex) @(N : intindex)
-       	      (size_y : FinIndInt M) (size_x : FinIndInt N)
+       	      (size_y : FIInt M) (size_x : FIInt N)
 	      (ayptr : Referenced (arr M (arr N a))).
   case ayptr of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
   case ix of pyonTuple2 @(Stored int) @(Stored int) (y_s : Stored int) (x_s : Stored int).
@@ -855,7 +863,7 @@ IndexableDict_matrix_at_slice @(a : bare)
   -> IEffect (view2 a) =
 
   case mat of mk_array2 @a @(M : intindex) @(N : intindex)
-       	      (size_y : FinIndInt M) (size_x : FinIndInt N)
+       	      (size_y : FIInt M) (size_x : FIInt N)
 	      (ayptr : Referenced (arr M (arr N a))).
   case ayptr of referenced @(arr M (arr N a)) (ay : arr M (arr N a)).
 
@@ -881,19 +889,19 @@ IndexableDict_matrix_at_slice @(a : bare)
 	let interval_y_rounded : int =
 	      AdditiveDict_int_sub (AdditiveDict_int_add delta_y stride_y) 1 in
 	RemainderDict_int_floordiv interval_y_rounded stride_y in
-  case defineIntIndex count_y of someIndInt @(K : intindex) (count_y_i : FinIndInt K).
+  case defineIntIndex count_y of someIInt @(K : intindex) (count_y_i : FIInt K).
 
   let count_x : int =
         -- Ceiling division
 	let interval_x_rounded : int =
 	      AdditiveDict_int_sub (AdditiveDict_int_add delta_x stride_x) 1 in
 	RemainderDict_int_floordiv interval_x_rounded stride_x in
-  case defineIntIndex count_x of someIndInt @(L : intindex) (count_x_i : FinIndInt L).
+  case defineIntIndex count_x of someIInt @(L : intindex) (count_x_i : FIInt L).
 
   mk_view2 @a @0 @K @0 @L
-  (finIndInt @0 0)
+  (fiInt @0 0)
   count_y_i
-  (finIndInt @0 0)
+  (fiInt @0 0)
   count_x_i
   (\ (j : int) (i : int) (ret : OutPtr a) -> IEffect a.
      let y : int =
@@ -911,11 +919,11 @@ IndexableDict_matrix_get_shape @(a : bare)
   (ret : OutPtr dim2)
   -> IEffect dim2 =
   case mat of mk_array2 @a @(M N : intindex)
-       	      (size_y : FinIndInt M) (size_x : FinIndInt N)
+       	      (size_y : FIInt M) (size_x : FIInt N)
 	      (ayptr : Referenced (arr M (arr N a))).
   mk_dim2 @0 @M @0 @N
-  (indInt @0 (finIndInt @0 0)) (indInt @M size_y)
-  (indInt @0 (finIndInt @0 0)) (indInt @N size_x) ret;
+  (iInt @0 (fiInt @0 0)) (iInt @M size_y)
+  (iInt @0 (fiInt @0 0)) (iInt @N size_x) ret;
 
 -------------------------------------------------------------------------------
 -- view2 container class functions
@@ -924,17 +932,17 @@ TraversableDict_view2_traverse @(a : bare)
   (repr : Repr a) (mat : view2 a) -> Stream dim2 a =
 
   case mat of mk_view2 @a @(Mlo M Nlo N : intindex)
-       	      (ymin : FinIndInt Mlo)
-	      (size_y : FinIndInt M)
-	      (xmin : FinIndInt Nlo)
-	      (size_x : FinIndInt N)
+       	      (ymin : FIInt Mlo)
+	      (size_y : FIInt M)
+	      (xmin : FIInt Nlo)
+	      (size_x : FIInt N)
 	      (f : int -> int -> Writer a).
-  matrixStream @a @M @N (indInt @M size_y) (indInt @N size_x)
+  matrixStream @a @M @N (iInt @M size_y) (iInt @N size_x)
   (bind @M @(arr_shape N dim0) @(Stored int) @a repr_int repr
-   (generate @M @(Stored int) (indInt @M size_y) repr_int (stored @int))
+   (generate @M @(Stored int) (iInt @M size_y) repr_int (stored @int))
    (\ (y_stored : Stored int) -> Stream (arr_shape N dim0) a.
       case y_stored of stored @int (y : int).
-      generate @N @a (indInt @N size_x) repr
+      generate @N @a (iInt @N size_x) repr
       (\ (x : int) -> Writer a. f y x)));
 
 IndexableDict_MatrixView_at_point @(a : bare)
@@ -944,8 +952,8 @@ IndexableDict_MatrixView_at_point @(a : bare)
   (ret : OutPtr a)
   -> IEffect a =
   case mat of mk_view2 @a @(Mlo M Nlo N : intindex)
-       	      (ymin : FinIndInt Mlo) (height : FinIndInt M)
-       	      (xmin : FinIndInt Nlo) (width : FinIndInt N)
+       	      (ymin : FIInt Mlo) (height : FIInt M)
+       	      (xmin : FIInt Nlo) (width : FIInt N)
 	      (get : int -> int -> Writer a).
   case ix of pyonTuple2 @(Stored int) @(Stored int) (y_s : Stored int) (x_s : Stored int).
   case y_s of stored @int (y : int).
@@ -957,11 +965,11 @@ IndexableDict_MatrixView_get_shape @(a : bare)
   (ret : OutPtr dim2)
   -> IEffect dim2 =
   case mat of mk_view2 @a @(Mlo M Nlo N : intindex)
-       	      (ymin : FinIndInt Mlo) (height : FinIndInt M)
-       	      (xmin : FinIndInt Nlo) (width : FinIndInt N)
+       	      (ymin : FIInt Mlo) (height : FIInt M)
+       	      (xmin : FIInt Nlo) (width : FIInt N)
 	      (get : int -> int -> Writer a).
   mk_dim2 @Mlo @M @Nlo @N
-  (indInt @Mlo ymin) (indInt @M height) (indInt @Nlo xmin) (indInt @N width)
+  (iInt @Mlo ymin) (iInt @M height) (iInt @Nlo xmin) (iInt @N width)
   ret;
 
 -------------------------------------------------------------------------------
@@ -980,9 +988,9 @@ len @(t : bare -> bare) @(a : bare)
   case boxed @(shape t) (get_shape @a x) of boxed @(shape t) (shp : shape t).
   case coerce @(shape t) @dim1 shp of
     mk_dim1 @(Nlo N : intindex)
-    	          (minix : IndInt Nlo)
-	          (fii : IndInt N).
-  case fromIndInt @N fii of finIndInt @N (x : int).
+    	          (minix : IInt Nlo)
+	          (fii : IInt N).
+  case fromIndInt @N fii of fiInt @N (x : int).
   x;
 
 
@@ -1098,12 +1106,12 @@ width @(t : bare -> bare) @(a : bare)
   case coerce @(shape t) @dim2 shp of
     mk_dim2
     @(Mlo M Nlo N : intindex)
-    (inp_ymin : IndInt Mlo)
-    (inp_height : IndInt M)
-    (inp_xmin : IndInt Nlo)
-    (inp_width : IndInt N).
+    (inp_ymin : IInt Mlo)
+    (inp_height : IInt M)
+    (inp_xmin : IInt Nlo)
+    (inp_width : IInt N).
 
-  case fromIndInt @N inp_width of finIndInt @N (w : int). w;
+  case fromIndInt @N inp_width of fiInt @N (w : int). w;
 
 
 height @(t : bare -> bare) @(a : bare)
@@ -1123,12 +1131,12 @@ height @(t : bare -> bare) @(a : bare)
   case coerce @(shape t) @dim2 shp of
     mk_dim2
     @(Mlo M Nlo N : intindex)
-    (inp_ymin : IndInt Mlo)
-    (inp_height : IndInt M)
-    (inp_xmin : IndInt Nlo)
-    (inp_width : IndInt N).
+    (inp_ymin : IInt Mlo)
+    (inp_height : IInt M)
+    (inp_xmin : IInt Nlo)
+    (inp_width : IInt N).
 
-  case fromIndInt @M inp_height of finIndInt @M (h : int). h;
+  case fromIndInt @M inp_height of fiInt @M (h : int). h;
 
 {-
 safeIndex2 @(t : bare -> bare) @(a : bare)
@@ -1141,13 +1149,13 @@ safeIndex2 @(t : bare -> bare) @(a : bare)
     (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
   letfun
     get_member @(Mlo M Nlo N : intindex)
-      (miny : FinIndInt Mlo) (ysize : FinIndInt M)
-      (minx : FinIndInt Nlo) (xsize : FinIndInt N)
+      (miny : FIInt Mlo) (ysize : FIInt M)
+      (minx : FIInt Nlo) (xsize : FIInt N)
       (ret : OutPtr a) -> IEffect a =
-      case miny of finIndInt @Mlo (pf : Pf (neZ Mlo pos_infty)) (miny_i : int).
-      case minx of finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (minx_i : int).
-      case ysize of finIndInt @M (pf : Pf (neZ M pos_infty)) (ysize_i : int).
-      case xsize of finIndInt @N (pf : Pf (neZ N pos_infty)) (xsize_i : int).
+      case miny of fiInt @Mlo (pf : Pf (neZ Mlo pos_infty)) (miny_i : int).
+      case minx of fiInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (minx_i : int).
+      case ysize of fiInt @M (pf : Pf (neZ M pos_infty)) (ysize_i : int).
+      case xsize of fiInt @N (pf : Pf (neZ N pos_infty)) (xsize_i : int).
       let maxy_i : int =
            AdditiveDict_int_sub (AdditiveDict_int_add miny_i ysize_i) 1 in
       let maxx_i : int =
@@ -1175,15 +1183,15 @@ safeSlice2 @(t : bare -> bare) @(a : bare)
     (with_shape : (a b : bare) -> t a -> MatrixShapeEliminator b -> Writer b).
   letfun
     get_slice @(Mlo M Nlo N : intindex)
-      (miny : FinIndInt Mlo) (ysize : FinIndInt M)
-      (minx : FinIndInt Nlo) (xsize : FinIndInt N)
+      (miny : FIInt Mlo) (ysize : FIInt M)
+      (minx : FIInt Nlo) (xsize : FIInt N)
       (ret : OutPtr (view2 a))
       -> IEffect (view2 a) =
 
-      case miny of finIndInt @Mlo (pf : Pf (neZ Mlo pos_infty)) (miny_i : int).
-      case minx of finIndInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (minx_i : int).
-      case ysize of finIndInt @M (pf : Pf (neZ M pos_infty)) (ysize_i : int).
-      case xsize of finIndInt @N (pf : Pf (neZ N pos_infty)) (xsize_i : int).
+      case miny of fiInt @Mlo (pf : Pf (neZ Mlo pos_infty)) (miny_i : int).
+      case minx of fiInt @Nlo (pf : Pf (neZ Nlo pos_infty)) (minx_i : int).
+      case ysize of fiInt @M (pf : Pf (neZ M pos_infty)) (ysize_i : int).
+      case xsize of fiInt @N (pf : Pf (neZ N pos_infty)) (xsize_i : int).
 
       -- Slice does not include endpoint.  So the endpoint can be up to
       -- 1 + end of list.
@@ -1552,7 +1560,7 @@ fun_zip4_Stream @(sh a b c d : bare) (shape_dict : ShapeDict sh)
 ShapeDict_matrix_flatten @(a : bare) (s : Stream dim2 a)
   -> Stream dim1 a =
   case s of matrixStream @a @(M : intindex) @(N : intindex)
-       	                 (size_y : IndInt M) (size_x : IndInt N)
+       	                 (size_y : IInt M) (size_x : IInt N)
 			 (ls : LinStream (arr_shape M (arr_shape N dim0)) a).
   LinStream_flatten @(arr_shape M (arr_shape N dim0)) @a ls;
 
@@ -1561,7 +1569,7 @@ ShapeDict_matrix_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
   (f : a -> Writer b)
   (s : Stream dim2 a) -> Stream dim2 b =
   case s of matrixStream @a @(M : intindex) @(N : intindex)
-       	                 (size_y : IndInt M) (size_x : IndInt N)
+       	                 (size_y : IInt M) (size_x : IInt N)
 			 (ls : LinStream (arr_shape M (arr_shape N dim0)) a).
   matrixStream @b @M @N size_y size_x
   (LinStream_map @(arr_shape M (arr_shape N dim0)) @a @b repr_a repr_b f ls);
@@ -1574,16 +1582,16 @@ ShapeDict_matrix_zipWith @(a b c : bare)
   -> Stream dim2 c =
   case src_a of
     matrixStream @a @(Ma : intindex) @(Na : intindex)
-    (size_a_y : IndInt Ma) (size_a_x : IndInt Na)
+    (size_a_y : IInt Ma) (size_a_x : IInt Na)
     (ls_a : LinStream (arr_shape Ma (arr_shape Na dim0)) a).
 
   case src_b of
     matrixStream @b @(Mb : intindex) @(Nb : intindex)
-    (size_b_y : IndInt Mb) (size_b_x : IndInt Nb)
+    (size_b_y : IInt Mb) (size_b_x : IInt Nb)
     (ls_b : LinStream (arr_shape Mb (arr_shape Nb dim0)) b).
 
-  let size_y : IndInt (min_i Ma Mb) = min_ii @Ma @Mb size_a_y size_b_y in
-  let size_x : IndInt (min_i Na Nb) = min_ii @Na @Nb size_a_x size_b_x in
+  let size_y : IInt (min_i Ma Mb) = min_ii @Ma @Mb size_a_y size_b_y in
+  let size_x : IInt (min_i Na Nb) = min_ii @Na @Nb size_a_x size_b_x in
 
   -- Chunk the streams, zip them in each dimension, then flatten
   matrixStream @c @(min_i Ma Mb) @(min_i Na Nb) size_y size_x
@@ -1637,22 +1645,22 @@ ShapeDict_matrix_zipWith3 @(a b c d : bare)
   -> Stream dim2 d =
   case src_a of
     matrixStream @a @(Ma : intindex) @(Na : intindex)
-    (size_a_y : IndInt Ma) (size_a_x : IndInt Na)
+    (size_a_y : IInt Ma) (size_a_x : IInt Na)
     (ls_a : LinStream (arr_shape Ma (arr_shape Na dim0)) a).
 
   case src_b of
     matrixStream @b @(Mb : intindex) @(Nb : intindex)
-    (size_b_y : IndInt Mb) (size_b_x : IndInt Nb)
+    (size_b_y : IInt Mb) (size_b_x : IInt Nb)
     (ls_b : LinStream (arr_shape Mb (arr_shape Nb dim0)) b).
 
   case src_c of
     matrixStream @c @(Mc : intindex) @(Nc : intindex)
-    (size_c_y : IndInt Mc) (size_c_x : IndInt Nc)
+    (size_c_y : IInt Mc) (size_c_x : IInt Nc)
     (ls_c : LinStream (arr_shape Mc (arr_shape Nc dim0)) c).
 
-  let size_y : IndInt (min_i (min_i Ma Mb) Mc) =
+  let size_y : IInt (min_i (min_i Ma Mb) Mc) =
         min_ii @(min_i Ma Mb) @Mc (min_ii @Ma @Mb size_a_y size_b_y) size_c_y in
-  let size_x : IndInt (min_i (min_i Na Nb) Nc) =
+  let size_x : IInt (min_i (min_i Na Nb) Nc) =
         min_ii @(min_i Na Nb) @Nc (min_ii @Na @Nb size_a_x size_b_x) size_c_x in
 
   -- Chunk the streams, zip them in each dimension, then flatten
@@ -1716,29 +1724,29 @@ ShapeDict_matrix_zipWith4 @(a b c d e : bare)
   -> Stream dim2 e =
   case src_a of
     matrixStream @a @(Ma : intindex) @(Na : intindex)
-    (size_a_y : IndInt Ma) (size_a_x : IndInt Na)
+    (size_a_y : IInt Ma) (size_a_x : IInt Na)
     (ls_a : LinStream (arr_shape Ma (arr_shape Na dim0)) a).
 
   case src_b of
     matrixStream @b @(Mb : intindex) @(Nb : intindex)
-    (size_b_y : IndInt Mb) (size_b_x : IndInt Nb)
+    (size_b_y : IInt Mb) (size_b_x : IInt Nb)
     (ls_b : LinStream (arr_shape Mb (arr_shape Nb dim0)) b).
 
   case src_c of
     matrixStream @c @(Mc : intindex) @(Nc : intindex)
-    (size_c_y : IndInt Mc) (size_c_x : IndInt Nc)
+    (size_c_y : IInt Mc) (size_c_x : IInt Nc)
     (ls_c : LinStream (arr_shape Mc (arr_shape Nc dim0)) c).
 
   case src_d of
     matrixStream @d @(Md : intindex) @(Nd : intindex)
-    (size_d_y : IndInt Md) (size_d_x : IndInt Nd)
+    (size_d_y : IInt Md) (size_d_x : IInt Nd)
     (ls_d : LinStream (arr_shape Md (arr_shape Nd dim0)) d).
 
-  let size_y : IndInt (min_i (min_i (min_i Ma Mb) Mc) Md) =
+  let size_y : IInt (min_i (min_i (min_i Ma Mb) Mc) Md) =
         min_ii @(min_i (min_i Ma Mb) Mc) @Md
 	(min_ii @(min_i Ma Mb) @Mc
 	 (min_ii @Ma @Mb size_a_y size_b_y) size_c_y) size_d_y in
-  let size_x : IndInt (min_i (min_i (min_i Na Nb) Nc) Nd) =
+  let size_x : IInt (min_i (min_i (min_i Na Nb) Nc) Nd) =
         min_ii @(min_i (min_i Na Nb) Nc) @Nd
 	(min_ii @(min_i Na Nb) @Nc
 	 (min_ii @Na @Nb size_a_x size_b_x) size_c_x) size_d_x in
@@ -1808,10 +1816,10 @@ ShapeDict_matrix_inRange
   -> bool =
   case shape_value of
     mk_dim2 @(Mlo : intindex) @(M : intindex) @(Nlo : intindex) @(N : intindex)
-    (ymin : IndInt Mlo)
-    (height : IndInt M)
-    (xmin : IndInt Nlo)
-    (width : IndInt N).
+    (ymin : IInt Mlo)
+    (height : IInt M)
+    (xmin : IInt Nlo)
+    (width : IInt N).
   case ix of
     pyonTuple2 @(Stored int) @(Stored int)
     (y_s : Stored int) (x_s : Stored int).
@@ -1820,41 +1828,49 @@ ShapeDict_matrix_inRange
 
   -- Check Y part of range
   if case ymin of {
-       indInt @Mlo (fymin : FinIndInt Mlo).
-         case fymin of finIndInt @Mlo (ymin_i : int).
+       iInt @Mlo (fymin : FIInt Mlo).
+         case fymin of fiInt @Mlo (ymin_i : int).
          case height of {
-           indInt @M (fheight : FinIndInt M).
+           iInt @M (fheight : FIInt M).
              -- Compare against lower and upper bounds
-             case fheight of finIndInt @M (height_i : int).
+             case fheight of fiInt @M (height_i : int).
 
              let maxy_plus_one : int = AdditiveDict_int_add ymin_i height_i in
              and (OrdDict_int_ge y ymin_i) (OrdDict_int_lt y maxy_plus_one);
 
-           indOmega @M (pf : Pf (eqZ M pos_infty)).
-   	  -- Compare against lower bound only
-   	  OrdDict_int_ge y ymin_i
+           iPosInfty @M (pf : Pf (eqZ M pos_infty)).
+             -- Compare against lower bound only
+             OrdDict_int_ge y ymin_i;
+
+           iNegInfty @M (pf : Pf (eqZ M pos_infty)).
+             except @bool
          };
 
-       indOmega @Mlo (pf : Pf (eqZ Mlo pos_infty)). False
+       iPosInfty @Mlo (pf : Pf (eqZ Mlo pos_infty)). False;
+       iNegInfty @Mlo (pf : Pf (eqZ Mlo neg_infty)). except @bool
      }
    then -- Check X part of range
         case xmin of {
-        indInt @Nlo (fxmin : FinIndInt Nlo).
-          case fxmin of finIndInt @Nlo (xmin_i : int).
+        iInt @Nlo (fxmin : FIInt Nlo).
+          case fxmin of fiInt @Nlo (xmin_i : int).
           case width of {
-            indInt @N (fwidth : FinIndInt N).
+            iInt @N (fwidth : FIInt N).
               -- Compare against lower and upper bounds
-              case fwidth of finIndInt @N (width_i : int).
+              case fwidth of fiInt @N (width_i : int).
 
               let maxx_plus_one : int = AdditiveDict_int_add xmin_i width_i in
               and (OrdDict_int_ge x xmin_i) (OrdDict_int_lt x maxx_plus_one);
 
-            indOmega @N (pf : Pf (eqZ N pos_infty)).
-          -- Compare against lower bound only
-          OrdDict_int_ge x xmin_i
+            iPosInfty @N (pf : Pf (eqZ N pos_infty)).
+              -- Compare against lower bound only
+              OrdDict_int_ge x xmin_i;
+
+            iNegInfty @N (pf : Pf (eqZ N neg_infty)).
+	      except @bool
           };
 
-        indOmega @Nlo (pf : Pf (eqZ Nlo pos_infty)). False
+	  iPosInfty @Nlo (pf : Pf (eqZ Nlo pos_infty)). False;
+	  iNegInfty @Nlo (pf : Pf (eqZ Nlo neg_infty)). except @bool
       }
 
    else False;
@@ -1868,10 +1884,10 @@ ShapeDict_matrix_coerceSlice
 
   case shape_value of
     mk_dim2 @(Mlo : intindex) @(M : intindex) @(Nlo : intindex) @(N : intindex)
-    (ymin : IndInt Mlo)
-    (height : IndInt M)
-    (xmin : IndInt Nlo)
-    (width : IndInt N).
+    (ymin : IInt Mlo)
+    (height : IInt M)
+    (xmin : IInt Nlo)
+    (width : IInt N).
 
   case slice_value of pyonTuple2
        		      @(PyonTuple3 (Stored int) (Stored int) (Stored int))
@@ -1883,8 +1899,8 @@ ShapeDict_matrix_coerceSlice
     -- Coercion in one dimension  
     coerce_slice
       @(Klo K : intindex)
-      (kmin : IndInt Klo)
-      (extent : IndInt K)
+      (kmin : IInt Klo)
+      (extent : IInt K)
       (slice_1d : PyonTuple3 (Stored int) (Stored int) (Stored int))
       (continuation : int -> int -> int -> Writer (Maybe (slice dim2)))
       (ret : OutPtr (Maybe (slice dim2)))
@@ -1898,8 +1914,8 @@ ShapeDict_matrix_coerceSlice
       case stride_s of stored @int (stride_i : int).
 
       case kmin of {
-        indInt @Klo (kmin_f : FinIndInt Klo).
-          case kmin_f of finIndInt @Klo (kmin_i : int).
+        iInt @Klo (kmin_f : FIInt Klo).
+          case kmin_f of fiInt @Klo (kmin_i : int).
 
 	  -- Start cannot be less than the minimum boundary
 	  let real_start : int = max_int start_i kmin_i in
@@ -1907,12 +1923,14 @@ ShapeDict_matrix_coerceSlice
 	  -- End cannot be greater than than minimum boundary + extent
 	  let real_end : int =
 	        case extent of {
-		  indInt @K (extent_f : FinIndInt K).
-		    case extent_f of finIndInt @K (extent_i : int).
+		  iInt @K (extent_f : FIInt K).
+		    case extent_f of fiInt @K (extent_i : int).
 		      let limit : int = AdditiveDict_int_add kmin_i extent_i in
 		      min_int stop_i limit;
-		  indOmega @K (pf : Pf (eqZ K pos_infty)).
-		    stop_i
+		  iPosInfty @K (pf : Pf (eqZ K pos_infty)).
+		    stop_i;
+		  iNegInfty @K (pf : Pf (eqZ K neg_infty)).
+		    except @int
                 } in
 
 	  -- Stride must be positive
@@ -1925,8 +1943,11 @@ ShapeDict_matrix_coerceSlice
 
 	  continuation real_start delta stride_i ret;
 
-	indOmega @Klo (pf : Pf (eqZ Klo pos_infty)).
-	  Nothing @(slice dim2) ret
+	iPosInfty @Klo (pf : Pf (eqZ Klo pos_infty)).
+	  Nothing @(slice dim2) ret;
+
+	iNegInfty @Klo (pf : Pf (eqZ Klo neg_infty)).
+	  except @(IEffect (Maybe (slice dim2)))
       }
   in
 
@@ -2119,27 +2140,31 @@ ShapeDict_list_zipWith4 @(a b c d e : bare)
 
 ShapeDict_list_inRange (shp : dim1) (ix : Stored int) -> bool =
   case shp of mk_dim1 @(Nlo N : intindex)
-       	      (lo : IndInt Nlo)
-	      (len : IndInt N).
+       	      (lo : IInt Nlo)
+	      (len : IInt N).
   case ix of stored @int (ix_i : int).
 
   case lo of {
-    indInt @Nlo (flo : FinIndInt Nlo).
-      case flo of finIndInt @Nlo (lo_i : int).
+    iInt @Nlo (flo : FIInt Nlo).
+      case flo of fiInt @Nlo (lo_i : int).
       case len of {
-        indInt @N (flen : FinIndInt N).
+        iInt @N (flen : FIInt N).
 	  -- Compare against lower and upper bounds
-          case flen of finIndInt @N (len_i : int).
+          case flen of fiInt @N (len_i : int).
 
           let maxindex_plus_one : int = AdditiveDict_int_add lo_i len_i in
 	  and (OrdDict_int_ge ix_i lo_i) (OrdDict_int_lt ix_i maxindex_plus_one);
 
-        indOmega @N (pf : Pf (eqZ N pos_infty)).
+        iPosInfty @N (pf : Pf (eqZ N pos_infty)).
 	  -- Compare against lower bound only
-	  OrdDict_int_ge ix_i lo_i
+	  OrdDict_int_ge ix_i lo_i;
+
+        iNegInfty @N (pf : Pf (eqZ N neg_infty)).
+	  except @bool
       };
 
-    indOmega @Nlo (pf : Pf (eqZ Nlo pos_infty)). False
+    iPosInfty @Nlo (pf : Pf (eqZ Nlo pos_infty)). False;
+    iNegInfty @Nlo (pf : Pf (eqZ Nlo neg_infty)). except @bool
   };
 
 
@@ -2150,7 +2175,7 @@ ShapeDict_list_coerceSlice
   -> IEffect (Maybe (slice dim1)) =
 
   case shape_value of
-    mk_dim1 @(Nlo N : intindex) (lo : IndInt Nlo) (len : IndInt N).
+    mk_dim1 @(Nlo N : intindex) (lo : IInt Nlo) (len : IInt N).
   case slice_value of
     pyonTuple3 @(Stored int) @(Stored int) @(Stored int)
                (start_s : Stored int) (stop_s : Stored int) (stride_s : Stored int).
@@ -2159,8 +2184,8 @@ ShapeDict_list_coerceSlice
   case stride_s of stored @int (stride_i : int).
 
   case lo of {
-    indInt @Nlo (flo : FinIndInt Nlo).
-      case flo of finIndInt @Nlo (lo_i : int).
+    iInt @Nlo (flo : FIInt Nlo).
+      case flo of fiInt @Nlo (lo_i : int).
 
       -- Start cannot be less than the minimum boundary
       let real_start : int = max_int start_i lo_i in
@@ -2168,12 +2193,14 @@ ShapeDict_list_coerceSlice
       -- End cannot be greater than than minimum boundary + extent
       let real_end : int =
             case len of {
-	      indInt @N (flen : FinIndInt N).
-	        case flen of finIndInt @N (len_i : int).
+	      iInt @N (flen : FIInt N).
+	        case flen of fiInt @N (len_i : int).
                 let limit : int = AdditiveDict_int_add lo_i len_i in
 		min_int stop_i limit;
-	      indOmega @N (pf : Pf (eqZ N pos_infty)).
-	        stop_i
+	      iPosInfty @N (pf : Pf (eqZ N pos_infty)).
+	        stop_i;
+	      iNegInfty @N (pf : Pf (eqZ N neg_infty)).
+	        except @int
               } in
 
       -- Stride must be positive
@@ -2191,8 +2218,11 @@ ShapeDict_list_coerceSlice
 	 (stored @int stride_i))
         ret;
 
-    indOmega @Nlo (pf : Pf (eqZ Nlo pos_infty)).
-      Nothing @(slice dim1) ret
+    iPosInfty @Nlo (pf : Pf (eqZ Nlo pos_infty)).
+      Nothing @(slice dim1) ret;
+
+    iNegInfty @Nlo (pf : Pf (eqZ Nlo pos_infty)).
+      except @(IEffect (Maybe (slice dim1)))
   };
 
 
@@ -2501,14 +2531,14 @@ LinStream_fold @(sh a acc : bare) (repr_a : Repr a) (repr_acc : Repr acc)
 -- Loops
 
 for @(N : intindex) @(acc : bare)
-  (repr : Repr acc) (count : IndInt N) (init : acc)
+  (repr : Repr acc) (count : IInt N) (init : acc)
   (f : int -> acc -> Writer acc) (ret : OutPtr acc)
   -> IEffect acc =
 
   -- Unpack the indexed int
   case count of {
-    indInt @N (fin : FinIndInt N).
-      case fin of finIndInt @N (bound : int).
+    iInt @N (fin : FIInt N).
+      case fin of fiInt @N (bound : int).
 
       -- Main loop
       letfun
@@ -2520,6 +2550,10 @@ for @(N : intindex) @(acc : bare)
       in loop 0 init ret;
 
     -- An infinite loop will fail
-    indOmega @N (pf : Pf (eqZ N pos_infty)).
+    iPosInfty @N (pf : Pf (eqZ N pos_infty)).
+      except @(IEffect acc);
+
+    -- Negative trip counts are not valid
+    iNegInfty @N (pf : Pf (eqZ N neg_infty)).
       except @(IEffect acc)
   };

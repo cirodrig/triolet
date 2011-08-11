@@ -168,7 +168,7 @@ caseOfSomeIndInt :: TypeEnv
                  -> RW ExpM
 caseOfSomeIndInt tenv scrutinee mk_body =
   caseE scrutinee
-  [mkAlt tenv (pyonBuiltin the_someIndInt) [] $
+  [mkAlt tenv (pyonBuiltin the_someIInt) [] $
    \ [intindex] [intvalue] -> mk_body intindex intvalue]
 
 defineAndInspectIndInt tenv int_value mk_body =
@@ -183,7 +183,7 @@ caseOfFinIndInt :: TypeEnv
                 -> RW ExpM
 caseOfFinIndInt tenv scrutinee int_index mk_body =
   caseE scrutinee
-  [mkAlt tenv (pyonBuiltin the_finIndInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin the_fiInt) [TypM int_index] $
    \ [] [intvalue] -> mk_body intvalue]
 
 caseOfIndInt :: TypeEnv
@@ -194,9 +194,11 @@ caseOfIndInt :: TypeEnv
              -> RW ExpM
 caseOfIndInt tenv scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
-  [mkAlt tenv (pyonBuiltin the_indInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin the_iInt) [TypM int_index] $
    \ [] [fin] -> mk_finite fin,
-   mkAlt tenv (pyonBuiltin the_indOmega) [TypM int_index] $
+   mkAlt tenv (pyonBuiltin the_iPosInfty) [TypM int_index] $
+   \ [] [pf] -> mk_infinite pf,
+   mkAlt tenv (pyonBuiltin the_iNegInfty) [TypM int_index] $
    \ [] [pf] -> mk_infinite pf]
 
 caseOfIndInt' :: TypeEnv
@@ -207,9 +209,11 @@ caseOfIndInt' :: TypeEnv
               -> RW ExpM
 caseOfIndInt' tenv scrutinee int_index mk_finite mk_infinite =
   caseE scrutinee
-  [mkAlt tenv (pyonBuiltin the_indInt) [TypM int_index] $
+  [mkAlt tenv (pyonBuiltin the_iInt) [TypM int_index] $
    \ [] [fin] -> caseOfFinIndInt tenv (varE fin) int_index mk_finite,
-   mkAlt tenv (pyonBuiltin the_indOmega) [TypM int_index] $
+   mkAlt tenv (pyonBuiltin the_iPosInfty) [TypM int_index] $
+   \ [] [pf] -> mk_infinite pf,
+   mkAlt tenv (pyonBuiltin the_iNegInfty) [TypM int_index] $
    \ [] [pf] -> mk_infinite pf]
 
 -- | Create a list where each array element is a function of its index only
@@ -534,7 +538,7 @@ rwRange inf [] [count] = do
       [TypM $ array1Shape (VarT intindex),
        TypM storedIntType]
       [varAppE (pyonBuiltin the_rangeIndexed) [TypM $ VarT intindex]
-       [varAppE (pyonBuiltin the_indInt) [TypM $ VarT intindex]
+       [varAppE (pyonBuiltin the_iInt) [TypM $ VarT intindex]
         [varE intvalue]]])
 
 rwRange _ _ _ = return Nothing-}
@@ -548,7 +552,7 @@ rwTraverseList inf [elt_type] [elt_repr, list] = do
     [TypM $ array1Shape (VarT size_index), elt_type]
     [varAppE (pyonBuiltin the_generate)
      [TypM (VarT size_index), elt_type]
-     [varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_index] [varE size_var],
+     [varAppE (pyonBuiltin the_iInt) [TypM $ VarT size_index] [varE size_var],
       return elt_repr,
       lamE $ mkFun []
       (\ [] -> return ([intType, outType (fromTypM elt_type)],
@@ -598,8 +602,8 @@ rwTraverseMatrix inf [elt_type] [elt_repr, matrix] = do
     \size_y_index size_x_index size_y_var size_x_var array ->
     varAppE (pyonBuiltin the_fun_asMatrix_Stream)
     [TypM $ VarT size_y_index, TypM $ VarT size_x_index, elt_type]
-    [varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_y_index] [varE size_y_var],
-     varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_x_index] [varE size_x_var],
+    [varAppE (pyonBuiltin the_iInt) [TypM $ VarT size_y_index] [varE size_y_var],
+     varAppE (pyonBuiltin the_iInt) [TypM $ VarT size_x_index] [varE size_x_var],
      varAppE (pyonBuiltin the_bind)
      [TypM $ VarT size_y_index, TypM $ array1Shape (VarT size_x_index),
       TypM storedIntType, elt_type]
@@ -608,7 +612,7 @@ rwTraverseMatrix inf [elt_type] [elt_repr, matrix] = do
       -- Generate array indices in the Y dimension
       varAppE (pyonBuiltin the_generate)
       [TypM (VarT size_y_index), TypM storedIntType]
-      [varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_y_index] [varE size_y_var],
+      [varAppE (pyonBuiltin the_iInt) [TypM $ VarT size_y_index] [varE size_y_var],
        return int_repr,
        lamE $ mkFun []
        (\ [] -> return ([intType, outType storedIntType],
@@ -624,7 +628,7 @@ rwTraverseMatrix inf [elt_type] [elt_repr, matrix] = do
       (\ [] [y_var] ->
         varAppE (pyonBuiltin the_generate)
         [TypM (VarT size_x_index), elt_type]
-        [varAppE (pyonBuiltin the_indInt) [TypM $ VarT size_x_index] [varE size_x_var],
+        [varAppE (pyonBuiltin the_iInt) [TypM $ VarT size_x_index] [varE size_x_var],
          return elt_repr,
          lamE $ mkFun []
          (\ [] -> return ([intType, outType (fromTypM elt_type)],
@@ -1076,9 +1080,9 @@ generalizedZipStream2 out_type out_repr transformer shape_type streams = do
 rwDefineIntIndex :: RewriteRule
 rwDefineIntIndex inf [] [integer_value@(ExpM (LitE _ lit))] =
   let IntL m _ = lit
-      fin_int = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_finIndInt))
+      fin_int = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_fiInt))
                 [TypM $ IntT m] [integer_value]
-      package = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_someIndInt))
+      package = ExpM $ AppE inf (ExpM $ VarE inf (pyonBuiltin the_someIInt))
                 [TypM $ IntT m] [fin_int]
   in return $! Just $! package
 
@@ -1271,7 +1275,7 @@ rwParallelReduceStream inf
              varE worker_retvar]
           
           let param1 = patM (count_var :::
-                       varApp (pyonBuiltin the_FinIndInt) [VarT size_var])
+                       varApp (pyonBuiltin the_FIInt) [VarT size_var])
               param2 = patM (base_var ::: intType)
               param3 = patM (worker_retvar ::: outType (fromTypM elt))
               worker_fn =
@@ -1334,7 +1338,7 @@ rwParallelReduce1Stream inf
              varE worker_retvar]
           
           let param1 = patM (count_var :::
-                       varApp (pyonBuiltin the_FinIndInt) [VarT size_var])
+                       varApp (pyonBuiltin the_FIInt) [VarT size_var])
               param2 = patM (base_var ::: intType)
               param3 = patM (worker_retvar ::: outType (fromTypM elt))
               worker_fn =
@@ -1456,7 +1460,7 @@ rwParallelHistogramArray inf
                  [TypM $ VarT (pyonBuiltin the_dim1), size_ix]
                  [return size, return bs, varE retvar]
       let param1 = patM (count_var :::
-                            varApp (pyonBuiltin the_FinIndInt) [VarT size_var])
+                            varApp (pyonBuiltin the_FIInt) [VarT size_var])
           param2 = patM (base_var ::: intType)
           param3 = patM (retvar ::: outType array_type)
           ret = TypM $ initEffectType array_type
@@ -1508,7 +1512,7 @@ rwParallelDoall inf [size_ix, result_eff, element_eff] [size, worker] =
   [return size,
    litE (IntL 0 intType),
    lamE $ mkFun [intindexT]
-   (\ [mindex] -> return ([varApp (pyonBuiltin the_FinIndInt) [VarT mindex],
+   (\ [mindex] -> return ([varApp (pyonBuiltin the_FIInt) [VarT mindex],
                            intType],
                           initEffectType (fromTypM element_eff)))
    (\ [mindex] [msize, offset] ->
@@ -2151,7 +2155,7 @@ interpretStream2' shape_type elt_type repr expression =
     -- | The value \omega.
     omega_count =
       ExpM $ AppE defaultExpInfo
-      (ExpM $ VarE defaultExpInfo (pyonBuiltin the_indOmega))
+      (ExpM $ VarE defaultExpInfo (pyonBuiltin the_iPosInfty))
       [TypM posInftyT]
       [ExpM $ AppE defaultExpInfo (ExpM $ VarE defaultExpInfo (pyonBuiltin the_eqZ_refl))
        [TypM posInftyT] []]
@@ -2410,7 +2414,7 @@ blockStream size_var count_var base_var stream =
 
     block_size =
       ExpM $ AppE defaultExpInfo
-      (ExpM $ VarE defaultExpInfo (pyonBuiltin the_indInt))
+      (ExpM $ VarE defaultExpInfo (pyonBuiltin the_iInt))
       [TypM (VarT size_var)]
       [ExpM $ VarE defaultExpInfo count_var]
 

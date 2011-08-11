@@ -61,7 +61,7 @@ assumeSingletonValue ty bound_var m =
   of Just (con, [arg])
        | con `isPyonBuiltin` the_Repr ->
            assumeReprDict arg (LL.VarV bound_var) m
-       | con `isPyonBuiltin` the_FinIndInt ->
+       | con `isPyonBuiltin` the_FIInt ->
            assumeIndexedInt arg (LL.VarV bound_var) m
      _ -> m
 

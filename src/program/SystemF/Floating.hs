@@ -81,7 +81,7 @@ isSingletonType ty =
 isFloatableCaseDataCon :: Var -> Bool
 isFloatableCaseDataCon con =
   isDictionaryDataCon con ||
-  con `isPyonBuiltin` the_someIndInt
+  con `isPyonBuiltin` the_someIInt
 
 -- | Return True if the expression ends with an exception-raising statement 
 --   and does not return normally.
@@ -153,7 +153,7 @@ floatableAppParamType tenv op_var ty_args args
 
     intindex_binding =
       -- Return value has type SomeIndInt
-      VarT (pyonBuiltin the_SomeIndInt)
+      VarT (pyonBuiltin the_SomeIInt)
 
 -- | Return True if the expression is a variable or literal, False otherwise.
 isTrivialExp :: ExpM -> Bool
