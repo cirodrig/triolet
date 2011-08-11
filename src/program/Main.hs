@@ -195,7 +195,7 @@ compilePyonToPyonAsm compile_flags path text = do
   putStrLn ""
   putStrLn "After Simplifying"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
-
+  
   -- Inline loops
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
 

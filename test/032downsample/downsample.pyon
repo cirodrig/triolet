@@ -10,4 +10,4 @@ def downsample(mat):
 		          in zip4(mat[0:h:2, 0:w:2], mat[1:h:2, 0:w:2],
 			          mat[0:h:2, 1:w:2], mat[1:h:2, 1:w:2])]
 
-export ccall downsample : matrix(int) -> matrix(int)
+export ccall downsample : array2(int) -> array2(int)

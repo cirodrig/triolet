@@ -2,4 +2,4 @@
 def test(m):
   return [x + 1 for x in m]
 
-export ccall test : matrix(float) -> matrix(float)
+export ccall test : array2(float) -> array2(float)

@@ -13,4 +13,4 @@ def mm(M, N):
 #   return matrix(outerproduct(dotprod, rows(M)), cols(N))
 
 
-export ccall mm : matrix(float) * matrix(float) -> matrix(float)
+export ccall mm : array2(float) * array2(float) -> array2(float)

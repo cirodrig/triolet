@@ -38,9 +38,9 @@ computeReprDict ty =
            element_dict <- computeReprDict element_type
            emitAtom1 owned_type $
              LL.closureCallA list_repr_ctor [element_dict]
-       | op `isPyonBuiltin` the_matrix -> do
+       | op `isPyonBuiltin` the_array2 -> do
            let [element_type] = args
-           let mat_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_matrix)
+           let mat_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_array2)
            element_dict <- computeReprDict element_type
            emitAtom1 owned_type $
              LL.closureCallA mat_repr_ctor [element_dict]
@@ -218,7 +218,7 @@ demarshalCReturn ty =
        let list_type = varApp (pyonBuiltin the_list) [element_type]
        in demarshal_reference list_type
      MatrixET element_type ->
-       let mat_type = varApp (pyonBuiltin the_matrix) [element_type]
+       let mat_type = varApp (pyonBuiltin the_array2) [element_type]
        in demarshal_reference mat_type
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
@@ -359,7 +359,7 @@ getCExportType tenv ty =
        | con `isPyonBuiltin` the_list ->
            case args
            of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
-       | con `isPyonBuiltin` the_matrix ->
+       | con `isPyonBuiltin` the_array2 ->
            case args
            of [arg] -> MatrixET arg -- FIXME: verify that 'arg' is monomorphic
      _ | FunT {} <- ty ->

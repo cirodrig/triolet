@@ -1,8 +1,8 @@
 
-def heat(m : matrix(float)):
-  def sten(x : MatrixView(float)):
+def heat(m : array2(float)):
+  def sten(x):
     return (x[-1, 0] + x[0, -1] + x[1, 0] + x[0, 1]) / 4
 
   return stencil2D(-1, 1, -1, 1, sten, m)
 
-export ccall heat : matrix(float) -> matrix(float)
+export ccall heat : array2(float) -> array2(float)

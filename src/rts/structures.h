@@ -17,7 +17,7 @@ extern function pyon.internal.structures.makeComplex
 extern function pyon.internal.structures.repr_Referenced
   (owned) -> owned;
 
-extern function pyon.internal.structures.repr_array
+extern function pyon.internal.structures.repr_arr
   (FinIndInt, owned) -> owned;
 
 extern function pyon.internal.structures.repr_Maybe

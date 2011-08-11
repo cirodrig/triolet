@@ -252,7 +252,7 @@ procedure pyon_list_free_POD (pointer list) -> () {
 ///////////////////////////////////////////////////////////////////////////////
 // Matrix functions
 
-function repr_matrix (owned elem_repr) -> owned {
+function repr_array2 (owned elem_repr) -> owned {
   repr = pointer primcall pyon_alloc (sizeof PassConv);
 
   // FIXME: initialize repr header

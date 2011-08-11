@@ -176,8 +176,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_makeComplex) |]) -}
   , (PyonName module_list "repr_list",
      Right [| pyonBuiltin SystemF.the_repr_list |])
-  , (PyonName module_list "repr_matrix",
-     Right [| pyonBuiltin SystemF.the_repr_matrix |])
+  , (PyonName module_list "repr_array2",
+     Right [| pyonBuiltin SystemF.the_repr_array2 |])
   --, (PyonName module_list "list_len",
   --   Right [| pyonBuiltin SystemF.the_len |])
   , (PyonName module_list "list_build",
@@ -246,8 +246,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_createHistogram) |])
   , (PyonName module_effects "seqEffTok",
      Right [| pyonBuiltin (SystemF.the_seqEffTok) |])
-  , (PyonName module_structures "repr_array",
-     Right [| SystemF.pyonBuiltin SystemF.the_repr_array |])
+  , (PyonName module_structures "repr_arr",
+     Right [| SystemF.pyonBuiltin SystemF.the_repr_arr |])
   , (PyonName module_structures "repr_Referenced",
      Right [| SystemF.pyonBuiltin SystemF.the_repr_Referenced |])
   , (PyonName module_structures "repr_Maybe",

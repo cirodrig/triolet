@@ -128,7 +128,7 @@ function inline dummy_copy (pointer src, pointer dst) -> () {
   (); // Do nothing
 };
 
-function inline repr_array
+function inline repr_arr
   (FinIndInt count, owned elt_repr) -> owned {
   FinIndInt {size} = count;
 

@@ -266,7 +266,8 @@ wiredInTypeEnv =
                (outV, VarTypeAssignment kindT),
                (sideeffectV, VarTypeAssignment kindT),
                (writeV, VarTypeAssignment kindT),
-               (posInftyV, VarTypeAssignment intindexT)]
+               (posInftyV, VarTypeAssignment intindexT),
+               (negInftyV, VarTypeAssignment intindexT)]
 
 -- | Insert a variable type assignment
 insertType :: Var -> Type

@@ -17,11 +17,12 @@ instance Lift Kind where
 -- | All predefined data type names recognized by the Pyon parser
 pyonSourceTypes :: [String] 
 pyonSourceTypes =
-  ["int", "float", "Complex", "bool", "NoneType", "iter", "list", "matrix",
+  ["int", "float", "Complex", "bool", "NoneType", "iter", "list",
+   "array", "array0", "array1", "array2",
    "Maybe", "Any",
-   "shape", "list_shape", "matrix_shape",
+   "shape", "dim0", "dim1", "dim2",
    "index", "slice",
-   "view", "ListView", "MatrixView"]
+   "view", "view0", "view1", "view2"]
 
 -- | All predefined global functions recognized by the Pyon parser
 pyonSourceGlobals :: [String]

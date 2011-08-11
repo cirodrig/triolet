@@ -239,7 +239,7 @@ createDictEnv = do
     (varApp (pyonBuiltin the_Complex) [VarT arg],
      createDict_complex arg)
   array_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (pyonBuiltin the_array) [VarT arg1, VarT arg2],
+    (varApp (pyonBuiltin the_arr) [VarT arg1, VarT arg2],
      createDict_array arg1 arg2)
   storedBox_dict <- DictEnv.pattern1 $ \arg ->
     (varApp (pyonBuiltin the_StoredBox) [VarT arg],
@@ -377,9 +377,9 @@ createDict_array param_var1 param_var2 subst = MkDict $
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
     
-    data_type = varApp (pyonBuiltin the_array) [param1, param2]
+    data_type = varApp (pyonBuiltin the_arr) [param1, param2]
     dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_array)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_arr)
 
 createDict_storedBox :: Var -> Substitution -> MkDict
 createDict_storedBox param_var subst = MkDict $ do

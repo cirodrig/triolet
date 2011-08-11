@@ -1174,7 +1174,7 @@ getRefLayout ty =
        | op `isPyonBuiltin` the_Referenced ->
            return $ memValueLayout $ VLayout (LL.PrimType LL.PointerType)
      (VarT op, [arg1, arg2])
-       | op `isPyonBuiltin` the_array -> do
+       | op `isPyonBuiltin` the_arr -> do
            field_layout <- getRefLayout =<< reduceToWhnf arg2
            size <- lookupIndexedInt arg1
            return $ arrayLayout size field_layout

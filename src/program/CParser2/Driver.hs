@@ -31,7 +31,7 @@ predefinedVarDetails :: [(String, VarDetails)]
 predefinedVarDetails =
   map mk_var_details (valV : boxV : bareV : outV : intindexV : sideeffectV :
                       writeV : propV :
-                      posInftyV : allBuiltinVars)
+                      posInftyV : negInftyV : allBuiltinVars)
   where
     mk_var_details v = (name, PredefinedVar v type_function)
       where

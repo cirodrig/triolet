@@ -14,9 +14,9 @@ module Type.Type(module Type.Var,
 
                  -- * Predefined types
                  kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, propT,
-                 posInftyT,
+                 posInftyT, negInftyT,
                  kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, propV,
-                 posInftyV,
+                 posInftyV, negInftyV,
                  firstAvailableVarID,
 
                  -- * Kinds
@@ -126,7 +126,7 @@ instance HasLevel Var => HasLevel Type where
   getLevel (CoT _)  = TypeLevel
   getLevel (UTupleT _) = TypeLevel
 
-kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, propT, posInftyT :: Type
+kindT, intindexT, valT, boxT, bareT, outT, writeT, sideeffectT, propT, posInftyT, negInftyT :: Type
 kindT = VarT kindV
 intindexT = VarT intindexV
 valT = VarT valV
@@ -137,8 +137,9 @@ writeT = VarT writeV
 sideeffectT = VarT sideeffectV
 propT = VarT propV
 posInftyT = VarT posInftyV      -- Positive infinity
+negInftyT = VarT negInftyV
 
-kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, propV, posInftyV :: Var
+kindV, intindexV, valV, boxV, bareV, outV, writeV, sideeffectV, propV, posInftyV, negInftyV :: Var
 
 kindV = mkVar kindVarID (Just $ pyonLabel builtinModuleName "kind") SortLevel
 intindexV = mkVar intindexVarID (Just $ pyonLabel builtinModuleName "intindex") KindLevel
@@ -150,6 +151,7 @@ writeV = mkVar writeVarID (Just $ pyonLabel builtinModuleName "write") KindLevel
 sideeffectV = mkVar sideeffectVarID (Just $ pyonLabel builtinModuleName "sideeffect") KindLevel
 propV = mkVar propVarID (Just $ pyonLabel builtinModuleName "prop") KindLevel
 posInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "pos_infty") TypeLevel
+negInftyV = mkVar posInftyVarID (Just $ pyonLabel builtinModuleName "neg_infty") TypeLevel
 
 kindVarID = toIdent 1
 intindexVarID = toIdent 2
@@ -161,10 +163,11 @@ writeVarID = toIdent 7
 sideeffectVarID = toIdent 8
 propVarID = toIdent 9
 posInftyVarID = toIdent 10
+negInftyVarID = toIdent 11
 
 -- | The first variable ID that's not reserved for predefined variables
 firstAvailableVarID :: VarID
-firstAvailableVarID = toIdent 11
+firstAvailableVarID = toIdent 12
 
 -------------------------------------------------------------------------------
 -- Convenience functions for kinds
