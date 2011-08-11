@@ -15,6 +15,8 @@ module SystemF.Floating
         contextItemUses,
         ContextExp(..),
         freshenContextExp,
+        isExceptingExp, isExceptingAlt,
+        isUnfloatableCase,
         asCaseCtx,
         applyContext,
         applyContextWithType,
@@ -1178,6 +1180,12 @@ floatInCase dmd inf scr alts = do
           isReadReference scr_var
       | otherwise =
           return False
+
+-- | Whether the argument is a case statement that has multiple non-excepting
+--   branches.
+isUnfloatableCase :: ExpM -> Bool
+isUnfloatableCase e@(ExpM (CaseE {})) = isNothing $ asCaseCtx e
+isUnfloatableCase _ = False
 
 -- | Decompose the expression into a case context and a body expression, if
 --   the expression can be decomposed this way.  There must be exactly one

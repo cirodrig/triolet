@@ -1243,12 +1243,35 @@ rwCase inf scrut alts = do
 -- statement becomes dead code.
 --
 -- The case statement isn't eliminated, so this step doesn't consume fuel.
-rwCase1 _ _ inf scrut alts
+rwCase1 _ tenv inf scrut alts
   | [alt@(AltM (DeCon {altConstructor = con}))] <- alts,
     con `isPyonBuiltin` the_boxed = do
       -- Rewrite the scrutinee
       (scrut', scrut_val) <- rwExp scrut
+      
+      -- If scrutinee is 'boxed' applied to a case statement,
+      -- apply case-of-case transformation to move the 'boxed' constructor
+      -- inwards
+      have_fuel <- checkFuel
+      case decon_scrutinee_case scrut' of
+        Just (scrut_type, inner_scrutinee, inner_alts) | have_fuel -> do
+          consumeFuel
+          rwCaseOfCase inf (Just scrut_type) inner_scrutinee inner_alts alts
+        Nothing ->
+          rewrite_alternative scrut' scrut_val alt
+  where
+    -- Attempt to deconstruct an expression of the form
+    -- @boxed (t) (case e of ...)@ where the case statement has multiple
+    -- branches
+    decon_scrutinee_case (ExpM (AppE _ (ExpM (VarE _ op)) [ty_arg] [arg]))
+      | op `isPyonBuiltin` the_boxed && isUnfloatableCase arg =
+          case arg of ExpM (CaseE _ scr alts) -> Just (ty_arg, scr, alts)
 
+    decon_scrutinee_case _ = Nothing
+
+    -- The scrutinee has been simplified.  Propagate its value into the case 
+    -- statement.
+    rewrite_alternative scrut' scrut_val alt = do
       -- Rewrite the case alternative
       let scrutinee_var =
             case scrut'
@@ -1371,44 +1394,69 @@ eliminateCaseWithAppAndValue
 --   application.
 --   If the scrutinee has a known value, it may still be possible to eliminate
 --   the case statement.
-rwCase2 inf alts scrut' scrut_val =
-  case scrut_val
-  of Just (fromDataAV -> Just (DataValue _ dcon field_values)) -> do
-       have_fuel <- checkFuel
-       case mapM (>>= asTrivialValue) field_values of
-         Just field_exps | have_fuel -> do
-           -- All fields can be represented as expressions. 
-           -- The case statement can be eliminated.
-           consumeFuel
-           tenv <- getTypeEnv
-           let data_value = ConAppAndValue dcon (zip field_exps field_values)
-           eliminateCaseWithAppAndValue True tenv data_value alts
-         Nothing -> do
-           -- Cannot eliminate the case statement. 
-           -- However, we may have eliminated some case alternatives. 
-           let known_values =
-                 case dcon 
-                 of ConValueType {dataExTypes = []} -> Just ([], field_values)
-                    -- The case alternative will bind existential types
-                    -- to fresh variables.  If there are existential
-                    -- types, then field values cannot be propagated
-                    -- because they'll have their original types, not
-                    -- the fresh type names.
-                    ConValueType {} -> Nothing
-                    TupleValueType {} -> Just ([], field_values)
-           let alt =
-                 -- The scrutinee has a known constructor
-                 -- discard non-matching case alternatives
-                 case dcon
-                 of ConValueType {dataCon = c} -> findAlternative alts c
-                    TupleValueType {} -> case alts of [a] -> a
+rwCase2 inf alts scrut' scrut_val = do
+  tenv <- getTypeEnv
+  have_fuel <- checkFuel
+  case scrut_val of
+    Just (fromDataAV -> Just (DataValue _ dcon field_values)) ->
+      case mapM (>>= asTrivialValue) field_values of
+        Just field_exps | have_fuel -> do
+          -- All fields can be represented as expressions. 
+          -- The case statement can be eliminated.
+          consumeFuel
+          tenv <- getTypeEnv
+          let data_value = ConAppAndValue dcon (zip field_exps field_values)
+          eliminateCaseWithAppAndValue True tenv data_value alts
+        Nothing -> do
+          -- Cannot eliminate the case statement. 
+          -- However, we may have eliminated some case alternatives. 
+          let known_values =
+                case dcon 
+                of ConValueType {dataExTypes = []} -> Just ([], field_values)
+                   -- The case alternative will bind existential types
+                   -- to fresh variables.  If there are existential
+                   -- types, then field values cannot be propagated
+                   -- because they'll have their original types, not
+                   -- the fresh type names.
+                   ConValueType {} -> Nothing
+                   TupleValueType {} -> Just ([], field_values)
+          let alt =
+                -- The scrutinee has a known constructor
+                -- discard non-matching case alternatives
+                case dcon
+                of ConValueType {dataCon = c} -> findAlternative alts c
+                   TupleValueType {} -> case alts of [a] -> a
 
-           alt' <- rwAlt scrut_var known_values alt
-           rwExpReturn (ExpM $ CaseE inf scrut' [alt'], Nothing)
-     _ -> do
-       alts' <- mapM (rwAlt scrut_var Nothing) alts
-       rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
+          alt' <- rwAlt scrut_var known_values alt
+          rwExpReturn (ExpM $ CaseE inf scrut' [alt'], Nothing)
+    _ ->
+      -- If scrutinee is a multi-branch case statement and the outer case
+      -- statement's scrutinee is not a product type, then use the
+      -- case-of-case transformation.
+      --
+      -- Product types are skipped because they are transformed by
+      -- argument flattening instead.
+      case scrut'
+      of ExpM (CaseE _ inner_scrut inner_alts)
+           | have_fuel &&
+             not (is_product_case tenv) &&
+             isUnfloatableCase scrut' -> do
+             -- Apply the case-of-case transformation
+             rwCaseOfCase inf Nothing inner_scrut inner_alts alts
+         _ -> do
+           -- Cannot transform; simplify the case alternatives
+           alts' <- mapM (rwAlt scrut_var Nothing) alts
+           rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
   where
+    is_product_case tenv =
+      case alts
+      of (AltM (DeTuple {}) : _) -> True
+         (AltM (DeCon {altConstructor = c}) : _) ->
+           case lookupDataConWithType c tenv
+           of Just (ty, _) -> length (dataTypeDataConstructors ty) == 1
+              Nothing -> internalError "rwCase: Invalid constructor"
+         [] -> internalError "rwCase: Empty case statement"
+
     scrut_var =
       -- If the scrutinee is a variable, it will be assigned a known
       -- value while processing each alternative
@@ -1627,6 +1675,84 @@ rwAlt scr m_values (AltM alt) =
       case maybe_val
       of Just val -> Just (setTrivialValue (patMVar pat) val)
          Nothing  -> Just (VarAV defaultExpInfo $ patMVar pat)
+
+-- | Apply the case-of-case transformation to a multi-branch case statement.
+--   The scrutinee and inner branches have been simplified; the outer branches
+--   have not been simplified.  They will be simplified during this
+--   transformation. 
+rwCaseOfCase :: ExpInfo
+             -> Maybe TypM      -- ^ If a 'boxed' constructor was
+                                --   applied to the inner case statement,
+                                --   this is the constructor's type argument.
+                                --   Otherwise this is Nothing.
+             -> ExpM            -- ^ Inner case statement's scrutinee
+             -> [AltM]          -- ^ Inner case statement's branches
+             -> [AltM]          -- ^ Outer case statement's branches
+             -> LR (ExpM, MaybeValue)
+rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
+  outer_defs <- mapM (makeBranchContinuation inf) outer_branches
+  let outer_ks = zip outer_branches $ map definiendum outer_defs
+
+  -- Put a new case statement into each branch of the inner case statement
+  new_branches <- mapM (invert_branch outer_ks) inner_branches
+
+  let new_case = ExpM $ CaseE inf scrutinee new_branches
+      new_expr = foldr bind_outer_def new_case outer_defs
+        where
+          bind_outer_def def e = ExpM $ LetfunE inf (NonRec def) e
+  return (new_expr, Nothing)
+  where
+    invert_branch outer_ks (AltM branch) =
+      let boxed_body =
+            case result_is_boxed
+            of Nothing -> altBody branch
+               Just t -> ExpM $ AppE inf boxed_op [t] [altBody branch]
+          body' = caseAnalyze inf outer_ks boxed_body
+      in return $ AltM (branch {altBody = body'})
+
+    boxed_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_boxed)
+
+-- | Create a function that is equivalent to a case alternative.
+--   The pattern-bound variables become function parameters.
+--   If the pattern does not bind any fields, then create a dummy parameter
+--   of type 'NoneType'.
+makeBranchContinuation :: ExpInfo -> AltM -> LR (Def Mem)
+makeBranchContinuation inf (AltM alt) = do
+  let ex_types = getAltExTypes alt
+  fields <-
+    if null $ altParams alt
+    then do field_var <- newAnonymousVar ObjectLevel
+            return [patM (field_var ::: VarT (pyonBuiltin the_NoneType))]
+    else return $ altParams alt
+  let body = altBody alt
+  return_type <-
+    assumeTyPatMs ex_types $ assumePatterns fields $ inferExpType body
+       
+  fun_name <- newAnonymousVar ObjectLevel
+  let fun = FunM $ Fun inf ex_types fields (TypM return_type) body
+
+  -- Simplify the function
+  (fun', _) <- rwFun fun
+  return $ mkDef fun_name fun'
+
+-- | Perform case analysis on the expression's result.  Use the @(AltM, Var)@
+--   pairs to dispatch each case.
+--
+--   Each alternative is converted to a function, so it must take at least one
+--   parameter.  If the original data constructor had no fields,
+--   create a dummy argument.
+caseAnalyze :: ExpInfo -> [(AltM, Var)] -> ExpM -> ExpM
+caseAnalyze inf branches scrutinee =
+  ExpM $ CaseE inf scrutinee (map dispatch branches)
+  where
+    dispatch (AltM alt, callee) =
+      let ty_args = [TypM $ VarT a | TyPatM (a ::: _) <- getAltExTypes alt]
+          args =
+            if null (altParams alt)
+            then [ExpM $ VarE inf (pyonBuiltin the_None)]
+            else [ExpM $ VarE inf (patMVar p) | p <- altParams alt]
+          call = ExpM $ AppE inf (ExpM $ VarE inf callee) ty_args args
+      in AltM (alt {altBody = call})
 
 rwCoerce inf from_t to_t body = do
   -- Are the types equal in this context?

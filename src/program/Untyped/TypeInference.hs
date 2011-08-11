@@ -328,7 +328,7 @@ generalizeDefGroup is_top_level
   -- Unify the assumed type of each function with its inferred type
   let inferred_fotypes = [ty | (_, _, _, ty) <- inferred_functions]
   constraint_1 <- unify_inferred_types inferred_fotypes new_tyvars
-  
+
   -- Generalize these types
   let inferred_types = [(qvars, ty) | (_, qvars, _, ty) <- inferred_functions]
   (deferred, bound_vars, retained, schemes) <- 
