@@ -176,8 +176,12 @@ mapOverTailExps f expression =
 data Decomp =
     -- | Value is unchanged
     IdDecomp
-    -- | Value is deconstructed
+
+    -- | Value is deconstructed.
+    --   The fields of the deconstructed value cannot contain a dummy
+    --   parameter.
   | DeconDecomp !MonoCon FlatArgs
+
     -- | Value is dead
     --
     --   An expression is provided to fabricate a value of the correct type.
@@ -202,6 +206,9 @@ pprDecomp (DeadDecomp e) = text "0" <+> braces (pprExp e)
 
 isIdDecomp IdDecomp = True
 isIdDecomp _ = False
+
+isDeadDecomp (DeadDecomp _) = True
+isDeadDecomp _ = False
 
 -- | Determine whether all decomposed items are values or boxed objects.
 --   If so, then it's possible to unpack a return value with this type.
@@ -231,7 +238,7 @@ flattenDecomp typaram field x decomp = go x decomp
     go x (DeadDecomp _) = mempty
     go x (DeconDecomp (MonoCon _ _ ex_types) fields) =
       mconcat $ map (typaram . TyPatM) ex_types ++
-                [go (field p) d | FlatArg p d <- fields]
+                [go (field p) d | (p, d) <- map fromFlatArg fields]
 
 -- | Flatten a decomposition that doesn't introduce type parameters
 flattenMonoDecomp :: Monoid a =>
@@ -251,9 +258,21 @@ flattenMonoDecomp field x decomp = flattenDecomp typaram field x decomp
 --
 --   This data type is not used for representing output pointer arguments.
 data FlatArg =
-  FlatArg { faPattern        :: !PatM   -- ^ The original function parameter
-          , faTransformation :: !Decomp -- ^ How the parameter is decomposed
-          }
+    FlatArg { faPattern        :: !PatM   -- ^ The original function parameter
+            , faTransformation :: !Decomp -- ^ How the parameter is decomposed
+            }
+    
+  | DummyArg { faDummyPattern :: !PatM} -- ^ A new parameter for which
+                                        -- there was no original
+                                        -- parameter.  The parameter
+                                        -- has type @NoneType@ and
+                                        -- value @None@.
+
+fromFlatArg (FlatArg p d) = (p, d)
+fromFlatArg (DummyArg _) = internalError "fromFlatArg: Unexpected dummy argument"
+
+assumePackedArg (FlatArg pat _) m = assumePat pat m
+assumePackedArg (DummyArg _)    m = m
 
 type FlatArgs = [FlatArg]
 
@@ -261,7 +280,13 @@ pprFlatArg (FlatArg pat decomp) = hang (brackets (pprDecomp decomp)) 8 pat_doc
   where
     pat_doc = pprVar (patMVar pat) <+> text ":" <+> pprType (patMType pat)
 
-isIdArg a = isIdDecomp (faTransformation a)
+pprFlatArg (DummyArg pat) = text "dummy"
+
+isIdArg (FlatArg _ trans) = isIdDecomp trans 
+isIdArg (DummyArg _) = False
+
+isDeadArg (FlatArg _ trans) = isDeadDecomp trans 
+isDeadArg (DummyArg _) = False
 
 -- | A flattened return.
 --
@@ -289,14 +314,16 @@ isIdRet _ = False
 -- | Get the flattened return specification corresponding to a 'FlatArg'.
 flatArgReturn :: FlatArg -> FlatRet
 flatArgReturn (FlatArg pat decomp) = FlatRet (patMType pat) decomp
+flatArgReturn (DummyArg _) = internalError "flatArgReturn: Unexpected dummy argument"
 
 -- | Get the packed argument list from a sequence of flattened parameters
 packedParameters :: FlatArgs -> [PatM]
-packedParameters xs = map packedParameter xs
+packedParameters xs = mapMaybe packedParameter xs
 
 -- | Get the packed argument from a flattened parameter
-packedParameter :: FlatArg -> PatM
-packedParameter = faPattern
+packedParameter :: FlatArg -> Maybe PatM
+packedParameter (FlatArg pat _) = Just pat
+packedParameter (DummyArg _)    = Nothing
 
 -- | Get the flattened argument list from a flattened parameter
 flattenedParameter :: FlatArg -> ([TyPatM], [PatM])
@@ -306,17 +333,26 @@ flattenedParameter (FlatArg pat decomp) =
     put_typat p = ([p], [])
     put_pat p = ([], [p])
 
+flattenedParameter (DummyArg pat) = ([], [pat])
+
 -- | Get the flattened argument list from a sequence of flattened parameters
 flattenedParameters :: FlatArgs -> ([TyPatM], [PatM])
 flattenedParameters xs = mconcat $ map flattenedParameter xs
 
--- | Get the flattened parameter values from from a sequence of flattened
+flattenedParameterValue :: FlatArg -> ([TypM], [ExpM])
+flattenedParameterValue (FlatArg pat decomp) =
+  flattenDecomp put_typat put_pat (put_pat pat) decomp
+  where
+    put_typat (TyPatM (a ::: _)) = ([TypM (VarT a)], [])
+    put_pat p = ([], [ExpM $ VarE defaultExpInfo (patMVar p)])
+
+flattenedParameterValue (DummyArg _) =
+  ([], [ExpM $ VarE defaultExpInfo (pyonBuiltin the_None)])
+
+-- | Get the flattened parameter values from a sequence of flattened
 --   parameters.  Each value is a type variable or variable expression.
 flattenedParameterValues :: FlatArgs -> ([TypM], [ExpM])
-flattenedParameterValues xs =
-  case flattenedParameters xs
-  of (tps, ps) -> ([TypM (VarT a) | TyPatM (a ::: _) <- tps],
-                   [ExpM $ VarE defaultExpInfo (patMVar p) | p <- ps])
+flattenedParameterValues xs = mconcat $ map flattenedParameterValue xs
 
 -- | Get the flattened return type.  Only valid if
 --   @flattenedReturnsBySideEffect flat_ret == False@.
@@ -379,14 +415,16 @@ flattenParameter (FlatArg pat decomp) body =
        in ExpM $ CaseE defaultExpInfo pattern_exp [alt]
      DeadDecomp _ -> body
 
+flattenParameter (DummyArg _) body = body
+
 flattenParameters :: [FlatArg] -> ExpM -> ExpM
 flattenParameters args e = foldr flattenParameter e args
 
 packParametersWrite :: (ReprDictMonad m, EvalMonad m) => FlatArgs -> m [ExpM]
 packParametersWrite (arg:args) = do
   e <- packParameterWrite arg
-  es <- assumePat (faPattern arg) $ packParametersWrite args
-  return (e : es)
+  es <- assumePackedArg arg $ packParametersWrite args
+  return (maybe id (:) e es)
 
 packParametersWrite [] = return []
 
@@ -394,8 +432,12 @@ packParametersWrite [] = return []
 --
 --   TODO: Don't return the parameter expression.  It's always just the
 --   pattern variable.
-packParameterWrite :: (ReprDictMonad m, EvalMonad m) => FlatArg -> m ExpM
-packParameterWrite (FlatArg pat flat_arg) = packParameterWrite' pat flat_arg
+packParameterWrite :: (ReprDictMonad m, EvalMonad m) =>
+                      FlatArg -> m (Maybe ExpM)
+packParameterWrite (FlatArg pat flat_arg) =
+  liftM Just $ packParameterWrite' pat flat_arg
+
+packParameterWrite (DummyArg _) = return Nothing
   
 packParameterWrite' pat flat_arg =
   case flat_arg
@@ -430,8 +472,8 @@ packParametersRead :: (ReprDictMonad m, EvalMonad m) =>
                       FlatArgs -> m ([ExpM], ExpM -> ExpM)
 packParametersRead (arg : args) = do
   (val, ctx) <- packParameterRead arg
-  (vals, ctxs) <- assumePat (faPattern arg) $ packParametersRead args
-  return (val : vals, ctx . ctxs)
+  (vals, ctxs) <- assumePackedArg arg $ packParametersRead args
+  return (maybe id (:) val vals, ctx . ctxs)
 
 packParametersRead [] = return ([], id)
 
@@ -440,11 +482,11 @@ packParametersRead [] = return ([], id)
 --   TODO: Don't return the parameter expression.  It's always just the
 --   pattern variable.
 packParameterRead :: (ReprDictMonad m, EvalMonad m) =>
-                     FlatArg -> m (ExpM, ExpM -> ExpM)
+                     FlatArg -> m (Maybe ExpM, ExpM -> ExpM)
 packParameterRead (FlatArg pat flat_arg) =
   case flat_arg
   of IdDecomp ->
-       return (var_exp $ patMVar pat, id)
+       return (Just (var_exp $ patMVar pat), id)
      DeconDecomp (MonoCon con types ex_types) fields ->
        assumeBinders ex_types $ do
          exps <- packParametersWrite fields
@@ -455,15 +497,17 @@ packParameterRead (FlatArg pat flat_arg) =
          -- If this is a bare type, define a local variable with the
          -- packed parameter.  Otherwise, just assign a local variable.
          tenv <- getTypeEnv
-         return (var_exp $ patMVar pat,
+         return (Just (var_exp $ patMVar pat),
                  bindVariable tenv (patMBinder pat) packed)
 
      DeadDecomp e ->
        -- Assign the expression to a temporary variable
-       return (var_exp $ patMVar pat,
+       return (Just (var_exp $ patMVar pat),
                \body -> ExpM $ LetE defaultExpInfo pat e body)
   where
     var_exp v = ExpM $ VarE defaultExpInfo v
+
+packParameterRead (DummyArg _) = return (Nothing, id)
 
 -- | Transform an expression's return value to flattened form.  Deconstruct
 --   the return value into its component fields, then pack the
@@ -725,7 +769,7 @@ data PlanMode = Parsimonious    -- ^ Don't flatten unless it's determined to
 -- | Decide how to flatten a function arguments
 planParameters :: (ReprDictMonad m, EvalMonad m) =>
                   PlanMode -> [PatM] -> m [FlatArg]
-planParameters mode pats = mapM (planParameter mode) pats
+planParameters mode pats = do mapM (planParameter mode) pats
 
 -- | Decide how to flatten a function argument.
 planParameter :: (ReprDictMonad m, EvalMonad m) =>
@@ -868,6 +912,8 @@ deadValue t = do
     ValK ->
       case fromVarApp t
       of Just (con, [])
+           | con `isPyonBuiltin` the_NoneType ->
+               return $ ExpM $ VarE defaultExpInfo (pyonBuiltin the_None)
            | con `isPyonBuiltin` the_int ->
                return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
            | con `isPyonBuiltin` the_float ->
@@ -1100,7 +1146,17 @@ planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
          of []  -> planValueReturn $ funReturn f
             [p] -> planOutputReturn p
 
-  return $ FunctionPlan (funTyParams f) params ret
+  -- If all parameters are dead and there's no output parameter, then add a
+  -- dummy parameter
+  x_params <-
+    if all isDeadArg params && null output_params
+    then do pat_var <- newAnonymousVar ObjectLevel
+            let dummy_pat = patM (pat_var ::: VarT (pyonBuiltin the_NoneType))
+                dummy = DummyArg dummy_pat
+            return (dummy : params)
+    else return params
+
+  return $ FunctionPlan (funTyParams f) x_params ret
   where
     -- Separate the function parameters into input and output parameters.
     -- Output parameters must follow input parameters.
