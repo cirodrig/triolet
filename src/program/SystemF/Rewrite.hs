@@ -1542,9 +1542,9 @@ rwReduceStream inf [shape_type, element]
 rwReduceStream _ _ _ = return Nothing
 
 rwFoldStream :: RewriteRule
-rwFoldStream inf [elt_type, acc_type]
+rwFoldStream inf [shape_type, elt_type, acc_type]
   (elt_repr : acc_repr : reducer : init : stream : other_args) = do
-  m_stream <- interpretStream2 (VarT (pyonBuiltin the_list_shape)) (fromTypM elt_type)
+  m_stream <- interpretStream2 (fromTypM shape_type) (fromTypM elt_type)
               elt_repr stream
   case m_stream of
     Just s -> do
