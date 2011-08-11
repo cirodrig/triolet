@@ -2280,6 +2280,9 @@ encodeStream2 expected_shape stream = runMaybeT $ do
                               TypM $ varApp (pyonBuiltin the_Stream)
                               [dst_shape_type, sexpElementType dst]
                             , funBody = dst'}]
+            _ ->
+              -- Cannot determine shape of source stream
+              mzero
 
        BindStream src (pat, dst) -> do
               src' <- MaybeT $ encodeStream2 (TypM list_shape) src
