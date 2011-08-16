@@ -107,6 +107,8 @@ toPointerStm statement =
        SwitchE (toPointerVal val) [(x, toPointerStm s) | (x, s) <- alts]
      ReturnE atom ->
        ReturnE (toPointerAtom atom)
+     ThrowE val ->
+       ThrowE (toPointerVal val)
 
 toPointerFun :: Fun -> Fun
 toPointerFun f =

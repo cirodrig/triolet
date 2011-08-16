@@ -77,6 +77,7 @@ ccStm returns stm =
          return (lit, stm')
        return $ SwitchE val alts'
      ReturnE atom -> ReturnE `liftM` ccAtom returns atom
+     ThrowE val -> return $ ThrowE val
 
 -- | Perform closure conversion on the body of a function.  Get the
 --   transformed function body.

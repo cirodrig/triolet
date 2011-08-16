@@ -613,6 +613,13 @@ genStatement returns stm =
      ReturnE atom -> do
        (block_items, fallthrough) <- genAtom returns atom
        return ([CCode block_items], fallthrough)
+     ThrowE val ->
+       genThrow val
+       
+genThrow val = do
+  signal_value <- genVal val
+  let code = cExprStat $ cCall (cVar (internalIdent "pyon_exit")) [signal_value]
+  return ([CCode [CBlockStmt code]], False)
 
 genSwitch returns cond cases = do
   cond_exp <- genVal cond
@@ -955,4 +962,5 @@ cModuleHeader =
   "#include <inttypes.h>\n\
   \#include <math.h>\n\
   \typedef void *PyonPtr;\n\
-  \#define PYON_OFF(base, offset) ((PyonPtr)((char *)(base) + (offset)))\n"
+  \#define PYON_OFF(base, offset) ((PyonPtr)((char *)(base) + (offset)))\n\
+  \extern void pyon_exit(int) __attribute__((noreturn));\n"

@@ -304,6 +304,8 @@ cseStm statement =
      ReturnE atom -> do
        (atom', _) <- cseAtom atom
        return (ReturnE atom')
+     ThrowE val -> do
+       liftM ThrowE (cseVal' val)
   where
     -- Scrutinee of switch statement is statically known.
     -- Replace the switch statement with the branch that will be executed.

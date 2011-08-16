@@ -83,6 +83,7 @@ data LStm =
   | LetrecLCPS !(Group LFunDef) LStm
   | SwitchLCPS Val [LAlt]
   | ReturnLCPS Atom
+  | ThrowLCPS Val
 
 type LAlt = (Lit, LStm)
 type LFunDef = Def LFun
@@ -97,6 +98,7 @@ stm `containsLetContinuation` search_v = search stm
     search (LetrecLCPS grp s) = any search_fun (groupMembers grp) || search s
     search (SwitchLCPS _ alts) = any (search . snd) alts
     search (ReturnLCPS _) = False
+    search (ThrowLCPS _) = False
     
     search_fun (Def _ f) = search $ funBody f
 
@@ -112,6 +114,7 @@ annotateStm statement =
      SwitchE scr alts ->
        SwitchLCPS scr <$> traverse do_alt alts
      ReturnE atom -> pure $ ReturnLCPS atom
+     ThrowE val -> pure $ ThrowLCPS val
   where
     do_fundef (Def v f) = Def v <$> annotateFun f
     do_alt (k, stm) = (,) k <$> annotateStm stm
@@ -126,6 +129,7 @@ unAnnotate statement =
      LetrecLCPS defs body -> LetrecE (fmap do_def defs) (unAnnotate body)
      SwitchLCPS scr alts -> SwitchE scr (map do_alt alts)
      ReturnLCPS atom -> ReturnE atom
+     ThrowLCPS val -> ThrowE val
   where
     do_def (Def v f) = Def v (unAnnotateFun f)
     do_alt (k, stm) = (k, unAnnotate stm)
@@ -156,6 +160,7 @@ pprLabeledLStm label stmt =
        label <+> text "switch" <> parens (pprVal val) $$
        nest 2 (vcat $ map print_alt alts)
      ReturnLCPS atom -> label <+> pprAtom atom
+     ThrowLCPS val -> label <+> text "throw" <+> pprVal val
   where
     print_alt (lit, body) = hang (pprLit lit <> text ":") 6 (pprLStm body)
 
@@ -289,6 +294,8 @@ scanStm statement =
        scanValue scr `mappend` mconcat [scanStm s | (_, s) <- alts]
      ReturnLCPS atom ->
        scanAtom atom
+     ThrowLCPS val ->
+       scanValue val
 
 -------------------------------------------------------------------------------
 -- The LCPS transformation.
@@ -506,6 +513,11 @@ lcpsStm ctx statement =
                  return $
                    LetE return_vars atom $
                    ReturnE (closureCallA (VarV rc) (map VarV return_vars))
+
+     ThrowLCPS val ->
+       -- Control does not flow to a continuation, so this statement isn't
+       -- transformed
+       return $ ThrowE val
 
 -------------------------------------------------------------------------------
 -- Entry point of module                   

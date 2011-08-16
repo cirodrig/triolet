@@ -340,6 +340,9 @@ data Stm =
   | SwitchE Val [Alt]
     -- | Produce a value
   | ReturnE Atom
+    -- | Raise an exception.
+    --   The argument is a native integer value.
+  | ThrowE Val
 
 -- | A function.  The parameter is the data type used for the function body,
 --   usually 'Stm'.

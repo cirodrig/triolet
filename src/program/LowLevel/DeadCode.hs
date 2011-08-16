@@ -222,6 +222,8 @@ dceStm statement =
        nudge 1 $ SwitchE <$> dceVal scrutinee <*> traverse dceAlt alts
      ReturnE atom ->
        ReturnE <$> dceAtom atom
+     ThrowE val ->
+       ThrowE <$> dceVal val
   where
     dceAlt (x, stm) = (,) x <$> dceStm stm
 

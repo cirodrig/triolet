@@ -210,6 +210,12 @@ bindAtom vars atom = emit $ LetE vars atom
 emitLetrec :: Monad m => Group FunDef -> Gen m ()
 emitLetrec defs = emit $ LetrecE defs
 
+-- | Generate a 'ThrowE' term.
+--   Any subsequently generated code on the same control flow path
+--   is discarded.
+emitThrow :: Monad m => Val -> Gen m ()
+emitThrow throw_value = emit $ \_ -> ThrowE throw_value
+
 -- | Generate a no-op
 gen0 :: Monad m => Gen m Stm
 gen0 = return $ ReturnE (ValA [])

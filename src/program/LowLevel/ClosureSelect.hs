@@ -298,6 +298,8 @@ scanStm statement =
        scanValue cond `mappend` mconcat [scanStm s | (_, s) <- alts] 
      ReturnE atom ->
        scanAtom True atom
+     ThrowE val ->
+       scanValue val
 
 scanFun :: Fun -> Scan
 scanFun f =

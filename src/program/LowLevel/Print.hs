@@ -300,6 +300,7 @@ pprStm stmt =
      SwitchE val alts -> text "switch" <> parens (pprVal val) $$
                          nest 2 (vcat $ map print_alt alts)
      ReturnE atom -> pprAtom atom
+     ThrowE val -> text "throw" <+> pprVal val
   where
     print_alt (lit, body) = hang (pprLit lit <> text ":") 6 (pprBlock body)
 

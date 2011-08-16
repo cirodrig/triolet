@@ -305,6 +305,9 @@ flattenStm statement =
      ReturnE atom -> do
        (atom_statements, atom') <- flattenAtom atom
        return (atom_statements $ ReturnE atom')
+     ThrowE val -> do
+       val' <- flattenSingleVal val
+       return $ ThrowE val'
   where
     flatten_def (Def v f) = do
       f' <- flattenFun f

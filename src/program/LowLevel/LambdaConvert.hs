@@ -79,6 +79,8 @@ cvtStm statement =
        emitLetrec $ SwitchE <$> cvtVal scr <*> lift (mapM cvtAlt alts)
      ReturnE atom ->
        emitLetrec $ ReturnE <$> cvtAtom atom
+     ThrowE val ->
+       emitLetrec $ ThrowE <$> cvtVal val
   where
     cvtAlt (lit, stm) = (,) lit <$> cvtStm stm
        

@@ -194,6 +194,8 @@ rnStm rn statement =
        return $ SwitchE scr' alts'
      ReturnE atom ->
        ReturnE `liftM` rnAtom rn atom
+     ThrowE val ->
+       ThrowE `liftM` rnVal rn val
   where
     rename_alt (tag, stm) = do
       stm' <- rnStm rn stm

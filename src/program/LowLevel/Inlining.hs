@@ -159,6 +159,8 @@ tailCallScanStm statement =
        useTailCall op (length args) `mappend` tailCallScanVals args
      ReturnE atom ->
        tailCallScanAtom atom
+     ThrowE val ->
+       tailCallScanVal val
 
 tailCallScanFun :: Fun -> TailCallScan
 tailCallScanFun f = tailCallScanStm (funBody f)
@@ -268,6 +270,9 @@ makeInlinableFunction endpoints (Def fun_name f)
          ReturnE atom ->
              -- Pass the atom's result to the continuation
              Inlinable OneUse $ \(retvars, cont) -> LetE retvars atom cont
+         ThrowE val ->
+           -- Since a 'throw' doesn't return, it isn't affected by inlining
+           pure (ThrowE val)
 
     inl_alt (tag, stm) = fmap ((,) tag) $ inl_stm stm
 
@@ -570,6 +575,9 @@ inlStatement rt statement =
          CallA cc (VarV op_var) args -> tryInlineTailCall cc op_var args
          CallA cc (LamV op_fun) args -> inlineTailLambda cc op_fun args
          _ -> return (ReturnE atom')
+     ThrowE val -> do
+       val' <- embedInlF $ inlVal val
+       return $ ThrowE val'
   where
     inl_alt (lit, stm) = do
       stm' <- embedInlF $ execInlG rt $ inlStatement rt stm
