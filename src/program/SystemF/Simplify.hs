@@ -1257,7 +1257,7 @@ rwCase1 _ tenv inf scrut alts
         Just (scrut_type, inner_scrutinee, inner_alts) | have_fuel -> do
           consumeFuel
           rwCaseOfCase inf (Just scrut_type) inner_scrutinee inner_alts alts
-        Nothing ->
+        _ ->
           rewrite_alternative scrut' scrut_val alt
   where
     -- Attempt to deconstruct an expression of the form
