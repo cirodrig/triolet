@@ -45,6 +45,7 @@ data Language =
     NoneLanguage                -- ^ Infer language based on file extension
   | PyonLanguage                -- ^ Pyon code
   | PyonAsmLanguage             -- ^ Low-level Pyon code
+    deriving(Eq)
 
 -- | A command-line option modifies the option interpreter state
 newtype Opt = Opt (InterpretOptsState -> InterpretOptsState)
@@ -104,45 +105,64 @@ interpretOptions opts =
   in case reverse $ interpreterErrors commands
      of xs@(_:_) -> do mapM_ (hPutStrLn stderr) xs
                        return (defaultCommandLineGlobals, pass)
-        [] ->
-          case currentAction commands
-          of GetUsage -> do
-               -- Print brief usage info and exit
-               header <- usageHeader
-               putStrLn header
-               putStrLn "For usage information, invoke with --help"
-               return (defaultCommandLineGlobals, pass)
-             GetHelp -> do
-               -- Print usage info and exist
-               header <- usageHeader
-               putStrLn $ usageInfo header optionDescrs
-               return (defaultCommandLineGlobals, pass)
-             CompileObject -> do
-               let inputs = reverse $ inputFiles commands
-                   output = outputFile commands
-               job <- compileObjectsJob commands inputs output
-               return (mkCommandLineGlobals commands, job)
-             ConflictingAction -> do
-               hPutStrLn stderr "Conflicting commands given on command line"
-               hPutStrLn stderr "For usage information, invoke with --help"
-               return (defaultCommandLineGlobals, pass)
+        [] -> do
+          commands' <- postProcessCommands commands
+          case currentAction commands' of
+            GetUsage -> do
+              -- Print brief usage info and exit
+              header <- usageHeader
+              putStrLn header
+              putStrLn "For usage information, invoke with --help"
+              return (defaultCommandLineGlobals, pass)
+            GetHelp -> do
+              -- Print usage info and exist
+              header <- usageHeader
+              putStrLn $ usageInfo header optionDescrs
+              return (defaultCommandLineGlobals, pass)
+            CompileObject -> do
+              let inputs = reverse $ inputFiles commands'
+                  output = outputFile commands'
+              
+              job <- compileObjectsJob commands' inputs output
+              return (mkCommandLineGlobals commands', job)
+            ConflictingAction -> do
+              hPutStrLn stderr "Conflicting commands given on command line"
+              hPutStrLn stderr "For usage information, invoke with --help"
+              return (defaultCommandLineGlobals, pass)
+
+-- | After reading all options, update some parts of the interpreted state
+--   based on the presence/absence of options
+postProcessCommands commands = do
+  input_languages <- mapM chooseLanguage $ inputFiles commands
+  let commands' =
+        commands {currentNeedCoreIR =
+                     currentNeedCoreIR commands ||
+                     any (PyonLanguage ==) input_languages}
+  return commands'
 
 -- | Global variable values that were given on the command line.
 --   These are returned
 data CommandLineGlobals =
   CommandLineGlobals
-  { initValueForFuel :: !Int
+  { -- | Initial value of fuel used by the simplifier
+    initValueForFuel :: !Int
+
+    -- | Whether the core IR is used in this execution of the compiler.
+    --   Backend-only compilation doesn't use the core IR.
+  , useCoreIR :: !Bool
   }
 
 defaultCommandLineGlobals =
   CommandLineGlobals
   { initValueForFuel = -1
+  , useCoreIR = False
   }
 
 mkCommandLineGlobals :: InterpretOptsState -> CommandLineGlobals
 mkCommandLineGlobals st =
   CommandLineGlobals
   { initValueForFuel = fromMaybe (-1) $ currentFuel st
+  , useCoreIR = currentNeedCoreIR st
   }
 
 
@@ -165,6 +185,8 @@ data InterpretOptsState =
   , commandLineFlags :: CompileFlags
     -- | Amount of fuel
   , currentFuel :: !(Maybe Int)
+    -- | Whether core IR is needed
+  , currentNeedCoreIR :: !Bool
   }
 
 initialState = InterpretOptsState { currentAction = CompileObject
@@ -179,6 +201,7 @@ initialState = InterpretOptsState { currentAction = CompileObject
                                       -- Some flags are enabled by default 
                                       Set.fromList [DoParallelization]
                                   , currentFuel = Nothing
+                                  , currentNeedCoreIR = False
                                   }
 
 putError st e = st {interpreterErrors = e : interpreterErrors st}
@@ -243,10 +266,21 @@ setOutput file st =
 
 addFile file st =
   let lang = currentLanguage st
-  in st {inputFiles = (file, lang) : inputFiles st}
+  in st { inputFiles = (file, lang) : inputFiles st}
 
 -------------------------------------------------------------------------------
 -- Job creation
+
+chooseLanguage :: (String, Language) -> IO Language
+chooseLanguage (file_path, NoneLanguage) = from_suffix file_path
+  where
+    from_suffix path
+      | takeExtension path == ".pyon" = return PyonLanguage
+      | takeExtension path == ".pyasm" = return PyonAsmLanguage
+      | otherwise = let msg = "Cannot determine language of '" ++ path ++ "'"
+                    in fail msg
+
+chooseLanguage (_, lang) = return lang
 
 -- | Compile one or many object files
 compileObjectsJob config [] output = do
@@ -268,10 +302,7 @@ compileObjectsJob config inputs output
 
 -- | Create a job to compile one input file to object code
 compileObjectJob config (file_path, language) moutput_path = do
-  input_language <-
-    case language
-    of NoneLanguage -> from_suffix file_path
-       _ -> return language
+  input_language <- chooseLanguage (file_path, language)
 
   -- Read and compile the file.  Decide where to put the temporary C file.
   case input_language of
@@ -296,12 +327,6 @@ compileObjectJob config (file_path, language) moutput_path = do
                             (reverse $ includeSearchPaths config)
                             infile cfile ifile outfile
   where
-    from_suffix path
-      | takeExtension path == ".pyon" = return PyonLanguage
-      | takeExtension path == ".pyasm" = return PyonAsmLanguage
-      | otherwise = let msg = "Cannot determine language of '" ++ path ++ "'"
-                    in fail msg
-    
     -- Exported C function declarations go here
     header_path = dropExtension output_path ++ "_interface.h"
     

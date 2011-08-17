@@ -39,19 +39,24 @@ loadBuiltins cl_globals = do
     modifyStaticGlobalVar the_nextParserVarID $ \n ->
     let vars = createParserGlobals n
     in return (n + length vars, vars)
-  
+
+  -- Initialize core IR data structures
   withTheNewVarIdentSupply $ \supply -> do
     core_types <- CParser2.Driver.parseCoreModule supply
     initializeGlobalVar the_specTypes (return core_types)
     initializeGlobalVar the_systemFTypes (return $ specToPureTypeEnv core_types)
     let mem_types = specToMemTypeEnv core_types
     initializeGlobalVar the_memTypes (return mem_types)
-    
-    initializeGlobalVar the_coreModule $ 
+
+  -- Initialize core functions if needed
+  when (useCoreIR cl_globals) $ do
+    mem_types <- readInitGlobalVarIO the_memTypes
+    core_module <- withTheNewVarIdentSupply $ \supply -> do
       CParser2.Driver.parseCoreFunctions supply mem_types
-  
-  -- Typecheck the core module to detect errors
-  SystemF.TypecheckMem.typeCheckModule =<< readInitGlobalVarIO the_coreModule
+      
+    -- Typecheck the module to detect errors
+    SystemF.TypecheckMem.typeCheckModule core_module
+    initializeGlobalVar the_coreModule (return core_module)
 
   -- Initialize the low-level builtins
   withTheLLVarIdentSupply $ \ll_supply -> do
