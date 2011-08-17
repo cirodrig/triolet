@@ -757,14 +757,25 @@ lambdaAbstractReturn rtype pat exp = mapOverTailExps lambda_abstract exp
 --   demand other than 'Used'.  Local variables are flattened parsimoniously,
 --   guaranteeing that they can be unflattened where necessary.  Parameters and
 --   returns are flattened liberally.
-data PlanMode = Parsimonious    -- ^ Don't flatten unless it's determined to
-                                --   be beneficial
-              | LiberalStored   -- ^ Flatten @Stored@ types even if it doesn't
-                                --   seem to be beneficial
-              | Liberal         -- ^ Flatten singleton data types
-                                --   (including @Stored@) even if it
-                                --   doesn't seem to be beneficial
-                deriving(Eq)
+--
+--   Return values with existential types cannot be flattened.
+data PlanMode = PlanMode { eagerness :: !Eagerness
+                         , existentialHandling :: !ExistentialHandling}
+              deriving(Eq)
+
+data Eagerness = Parsimonious    -- ^ Don't flatten unless it's determined to
+                                 --   be beneficial
+               | LiberalStored   -- ^ Flatten @Stored@ types even if it doesn't
+                                 --   seem to be beneficial
+               | Liberal         -- ^ Flatten singleton data types
+                                 --   (including @Stored@) even if it
+                                 --   doesn't seem to be beneficial
+                 deriving(Eq)
+
+data ExistentialHandling =
+    UnpackExistentials
+  | Don'tUnpackExistentials
+    deriving(Eq)
 
 -- | Decide how to flatten a function arguments
 planParameters :: (ReprDictMonad m, EvalMonad m) =>
@@ -808,10 +819,18 @@ planFlattening mode ty spc = do
          Nothing -> internalError "planParameter': Type mismatch"
 
     -- If data type has a singleton constructor, then deconstruct it.
+    -- However, deconstructing may not be allowed when the constructor has
+    -- existential types.
     singleton_decomp =
       case fromVarApp whnf_type
       of Just (op, _) | Just data_con <- fromProductTyCon tenv op ->
-           decon_decomp (dataConCon data_con) Nothing
+           -- Check for existential types
+           if (case existentialHandling mode
+               of UnpackExistentials -> True
+                  Don'tUnpackExistentials ->
+                    null $ dataConPatternExTypes data_con)
+           then decon_decomp (dataConCon data_con) Nothing
+           else id_decomp
          _ -> id_decomp
 
     -- If data type is a Stored type, then deconstruct it.
@@ -842,7 +861,7 @@ planFlattening mode ty spc = do
     Inspected -> singleton_decomp
 
     Used -> 
-      case mode 
+      case eagerness mode
       of Parsimonious -> id_decomp
          LiberalStored -> stored_decomp
          Liberal -> singleton_decomp
@@ -958,7 +977,9 @@ planReturn mode spc (TypM ty) = do
 --   The returned plan is for transforming a return-by-value function only.
 planValueReturn :: (ReprDictMonad m, EvalMonad m) =>
                    TypM -> m PlanRet
-planValueReturn ty = liftM PlanRetValue $ planReturn Liberal Used ty
+planValueReturn ty = liftM PlanRetValue $ planReturn mode Used ty
+  where
+    mode = PlanMode Liberal Don'tUnpackExistentials
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming an initializer function only.
@@ -970,7 +991,7 @@ planOutputReturn pat = do
         case fromVarApp $ patMType pat
         of Just (op, [arg]) | op `isPyonBuiltin` the_OutPtr -> arg
            _ -> internalError "planOutputReturn: Expecting an output pointer"
-  flat_ret <- planReturn Liberal Used $ TypM return_type
+  flat_ret <- planReturn mode Used $ TypM return_type
 
   -- Only perform decomposition if everything was converted to a value
   let real_ret =
@@ -978,6 +999,8 @@ planOutputReturn pat = do
         then flat_ret
         else FlatRet (frType flat_ret) IdDecomp
   return $ PlanRetWriter pat real_ret
+  where
+    mode = PlanMode Liberal Don'tUnpackExistentials
 
 -- | A flattened local variable.
 --
@@ -1019,10 +1042,11 @@ packLocal (FlatLocal flat_arg) consumer = do
 --   The decomposition strategy is the same as for decomposing a return value.
 planLocal :: (ReprDictMonad m, EvalMonad m) => PatM -> m FlatLocal
 planLocal pat = do
-  flat_arg <- planParameter Parsimonious pat
+  flat_arg <- planParameter mode pat
   tenv <- getTypeEnv
   choose_flattening tenv flat_arg
   where
+    mode = PlanMode Parsimonious UnpackExistentials
     choose_flattening tenv flat_arg@(FlatArg pat decomp) = 
       case decomp
       of DeconDecomp {}
@@ -1139,7 +1163,7 @@ planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
   tenv <- getTypeEnv
   let (input_params, output_params) = partition_parameters tenv $ funParams f
 
-  params <- planParameters LiberalStored input_params
+  params <- planParameters (PlanMode LiberalStored UnpackExistentials) input_params
 
   -- There should be either one or zero output parameters
   ret <- case output_params
