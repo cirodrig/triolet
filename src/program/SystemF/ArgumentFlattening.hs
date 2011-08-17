@@ -210,6 +210,30 @@ isIdDecomp _ = False
 isDeadDecomp (DeadDecomp _) = True
 isDeadDecomp _ = False
 
+-- | Decide whether the data produced by decomposition are all \"small\".   
+--   Data are deemed small if they are value or boxed types.
+--
+--   The significance of this test is that small data are probably cheap
+--   to copy, so it's probably cheap to decompose or rebuild a value if
+--   its results are small.
+isSmallDecomp :: TypeEnv -> (Type, Decomp) -> Bool
+isSmallDecomp tenv (ty, decomp) =
+  case decomp
+  of IdDecomp -> is_small_type ty
+     DeadDecomp {} -> True
+     DeconDecomp (MonoCon _ _ ex_types) fields ->
+       let local_tenv = foldr assume_binder tenv ex_types
+       in all (isSmallDecomp local_tenv)
+          [(patMType p, d) | FlatArg p d <- fields]
+  where
+    assume_binder (v ::: t) tenv = insertType v t tenv
+
+    is_small_type t =
+      case toBaseKind $ typeKind tenv ty
+      of ValK -> True
+         BoxK -> True
+         _    -> False
+
 -- | Determine whether all decomposed items are values or boxed objects.
 --   If so, then it's possible to unpack a return value with this type.
 unpacksToAValue :: TypeEnv -> FlatRet -> Bool
@@ -235,8 +259,8 @@ flattenDecomp :: Monoid a =>
 flattenDecomp typaram field x decomp = go x decomp
   where
     go x IdDecomp = x
-    go x (DeadDecomp _) = mempty
-    go x (DeconDecomp (MonoCon _ _ ex_types) fields) =
+    go _ (DeadDecomp _) = mempty
+    go _ (DeconDecomp (MonoCon _ _ ex_types) fields) =
       mconcat $ map (typaram . TyPatM) ex_types ++
                 [go (field p) d | (p, d) <- map fromFlatArg fields]
 
@@ -765,11 +789,12 @@ data PlanMode = PlanMode { eagerness :: !Eagerness
 
 data Eagerness = Parsimonious    -- ^ Don't flatten unless it's determined to
                                  --   be beneficial
-               | LiberalStored   -- ^ Flatten @Stored@ types even if it doesn't
-                                 --   seem to be beneficial
-               | Liberal         -- ^ Flatten singleton data types
-                                 --   (including @Stored@) even if it
-                                 --   doesn't seem to be beneficial
+               | LiberalStored   -- ^ Flatten @Stored@ data types even if it
+                                 --   doesn't appear to be beneficial
+               | LiberalSmall    -- ^ Flatten small data types even if it
+                                 --   doesn't seem to be beneficial.  A type
+                                 --   is small if it can be unpacked to
+                                 --   produce only value and boxed types.
                  deriving(Eq)
 
 data ExistentialHandling =
@@ -793,6 +818,8 @@ planParameter mode pat = do
   return $ FlatArg (patM (patMVar pat ::: whnf_type)) decomp
 
 -- | Decide how to decompose a data structure.
+--   Return the data type and its decomposition.  The data type is the
+--   parameter @ty@ reduced to HNF form.
 --
 --   This function does the real work of 'planParameter', 'planReturn', and 
 --   'planLocal'.
@@ -819,7 +846,7 @@ planFlattening mode ty spc = do
          Nothing -> internalError "planParameter': Type mismatch"
 
     -- If data type has a singleton constructor, then deconstruct it.
-    -- However, deconstructing may not be allowed when the constructor has
+    -- However, deconstructing may be disallowed when the constructor has
     -- existential types.
     singleton_decomp =
       case fromVarApp whnf_type
@@ -830,6 +857,27 @@ planFlattening mode ty spc = do
                   Don'tUnpackExistentials ->
                     null $ dataConPatternExTypes data_con)
            then decon_decomp (dataConCon data_con) Nothing
+           else id_decomp
+         _ -> id_decomp
+
+    -- Similar to singleton_decomp, except that decomposition only occurs if
+    -- the result of decomposition is small.
+    liberal_decomp =
+      case fromVarApp whnf_type
+      of Just (op, _) | Just data_con <- fromProductTyCon tenv op ->
+           -- Check for existential types
+           if (case existentialHandling mode
+               of UnpackExistentials -> True
+                  Don'tUnpackExistentials ->
+                    null $ dataConPatternExTypes data_con)
+           then do
+             -- Create a decomposition
+             ret <- decon_decomp (dataConCon data_con) Nothing
+
+             -- Ensure that the decomposed value is samll
+             if isSmallDecomp tenv ret
+               then return ret
+               else id_decomp
            else id_decomp
          _ -> id_decomp
 
@@ -864,7 +912,7 @@ planFlattening mode ty spc = do
       case eagerness mode
       of Parsimonious -> id_decomp
          LiberalStored -> stored_decomp
-         Liberal -> singleton_decomp
+         LiberalSmall -> liberal_decomp
            
   where
     is_repr_pattern t =
@@ -979,7 +1027,7 @@ planValueReturn :: (ReprDictMonad m, EvalMonad m) =>
                    TypM -> m PlanRet
 planValueReturn ty = liftM PlanRetValue $ planReturn mode Used ty
   where
-    mode = PlanMode Liberal Don'tUnpackExistentials
+    mode = PlanMode LiberalSmall Don'tUnpackExistentials
 
 -- | Determine how to decompose a return value based on its type.
 --   The returned plan is for transforming an initializer function only.
@@ -1000,7 +1048,7 @@ planOutputReturn pat = do
         else FlatRet (frType flat_ret) IdDecomp
   return $ PlanRetWriter pat real_ret
   where
-    mode = PlanMode Liberal Don'tUnpackExistentials
+    mode = PlanMode LiberalSmall Don'tUnpackExistentials
 
 -- | A flattened local variable.
 --
