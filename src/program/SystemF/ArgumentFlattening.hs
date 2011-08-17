@@ -977,15 +977,15 @@ deadValue t = do
   tenv <- getTypeEnv
   case toBaseKind $ typeKind tenv t of
     ValK ->
-      case fromVarApp t
-      of Just (con, [])
+      case fromTypeApp t
+      of (VarT con, [])
            | con `isPyonBuiltin` the_NoneType ->
                return $ ExpM $ VarE defaultExpInfo (pyonBuiltin the_None)
            | con `isPyonBuiltin` the_int ->
                return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
            | con `isPyonBuiltin` the_float ->
                return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
-         Just (con, [p])
+         (VarT con, [p])
            | con `isPyonBuiltin` the_Pf ->
                return $ ExpM $ AppE defaultExpInfo dead_proof_op [TypM p] [] 
            | con `isPyonBuiltin` the_FIInt -> do
@@ -1001,6 +1001,8 @@ deadValue t = do
                let expr = ExpM $ AppE defaultExpInfo dead_finindint_op
                           [TypM p] args
                return expr
+         (CoT BoxK, [t1, t2]) ->
+           return $ ExpM $ AppE defaultExpInfo make_coercion_op [TypM t1, TypM t2] []
          _ -> traceShow (pprType t) $ internalError "deadValue: Not implemented for this type"
     BoxK ->
       return dead_box
@@ -1014,6 +1016,7 @@ deadValue t = do
     dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadRef)
     dead_proof_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadProof)
     dead_finindint_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_fiInt)
+    make_coercion_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_unsafeMakeCoercion)
 
 planReturn :: (ReprDictMonad m, EvalMonad m) =>
               PlanMode -> Specificity -> TypM -> m FlatRet
@@ -1453,6 +1456,9 @@ flattenInExp expression =
        alts' <- mapM flattenInAlt alts
        return $ ExpM $ CaseE inf scr' alts'
      ExceptE {} -> return expression
+     CoerceE inf from_type to_type body -> do
+       body' <- flattenInExp body
+       return $ ExpM $ CoerceE inf from_type to_type body'
 
 flattenInAlt :: AltM -> AF AltM
 flattenInAlt (AltM alt) =
@@ -1601,6 +1607,9 @@ lvExp expression =
        return $ ExpM $ LetfunE inf new_defs body'
      CaseE inf scr alts -> lvCase inf scr alts
      ExceptE _ _ -> return expression
+     CoerceE inf from_type to_type body -> do
+       body' <- lvExp body
+       return $ ExpM $ CoerceE inf from_type to_type body'
 
 lvApp inf op ty_args args = repack_args $ do
   op' <- lvExp op
