@@ -75,13 +75,6 @@ data FunInfo =
             --
             --   A definition group is /not/ part of the context of its body.
           , useContext :: [GroupID]
-            -- | Scope in which a function is used.  The scope consists
-            --   of all function definitions that are in scope at the use but
-            --   not the definition.  If any of them are marked for
-            --   hoisting, then the function must be hoisted.
-            --
-            --   A definition group /is/ part of the scope of its body.
-          , useScope :: [GroupID]
           }
 
 -- | While generating constraints, a map is used to keep track of all
@@ -144,16 +137,14 @@ extendContext in_context gid defs si =
     insert_defs m = foldr insert_def m defs
 
     insert_def (Def v f) m =
-      let info = FunInfo (length $ funParams f) gid [] []
+      let info = FunInfo (length $ funParams f) gid []
       in Map.insert v info m
 
     add_to_context :: FunInfo -> FunInfo
     add_to_context finfo
       | in_context =
-          finfo {useContext = (gid:useContext finfo),
-                 useScope = (gid:useScope finfo)}
-      | otherwise =
-          finfo {useScope = (gid:useScope finfo)}
+          finfo {useContext = (gid:useContext finfo)}
+      | otherwise = finfo
 
 
 -- | A scan for computing hoisting and capture information.
