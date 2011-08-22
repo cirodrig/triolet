@@ -270,8 +270,6 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_subscript) |])
   , (PyonName module_prim "subscript_out",
      Right [| pyonBuiltin (SystemF.the_subscript_out) |])
-  , (PyonName module_prim "min_ii",
-     Right [| pyonBuiltin (SystemF.the_min_ii) |])
   , (PyonName module_prim "minus_ii",
      Right [| pyonBuiltin (SystemF.the_minus_ii) |])
 

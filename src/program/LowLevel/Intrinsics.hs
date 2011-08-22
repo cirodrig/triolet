@@ -82,6 +82,10 @@ lowerIntrinsicOp v
          indexed_int_constant 0)
       , (pyonBuiltin the_one_ii,
          indexed_int_constant 1)
+      , (pyonBuiltin the_zero_fii,
+         fin_indexed_int_constant 0)
+      , (pyonBuiltin the_one_fii,
+         fin_indexed_int_constant 1)
       , (pyonBuiltin the_emptyEffTok,
          empty_eff_tok)
       , (pyonBuiltin the_fromEffTok,
@@ -155,6 +159,11 @@ indexed_int_constant :: (Monad m, Supplies m (Ident Var)) => Integer -> m Val
 indexed_int_constant n =
   return $ RecV indexedIntRecord [uint8V 0,
                                   RecV indexedIntDataRecord [RecV finIndexedIntRecord [nativeIntV n]]]
+
+fin_indexed_int_constant :: (Monad m, Supplies m (Ident Var)) =>
+                            Integer -> m Val
+fin_indexed_int_constant n =
+  return $ RecV finIndexedIntRecord [nativeIntV n]
 
 -- | Create an effect token.
 empty_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
