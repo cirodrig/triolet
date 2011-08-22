@@ -83,6 +83,8 @@ pprFieldType ppr_val fld =
      RecordField rt -> pprRecordType ppr_val rt
      BytesField sz al ->
        text "bytes" <+> ppr_val sz <+> text "%" <+> ppr_val al
+     AlignField al ->
+       text "align" <+> ppr_val al
 
 pprFunctionType :: FunctionType -> Doc
 pprFunctionType ftype =
