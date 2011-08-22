@@ -70,7 +70,8 @@ data FunInfo =
           , defGroup :: !GroupID
             -- | Context in which a function is used.  The context consists
             --   of all function definitions that enclose the use but not
-            --   the definition.  If any of them are marked for
+            --   the definition.  In a recursive group, a function is part
+            --   of its own context.  If any of them are marked for
             --   hoisting, then the function must be hoisted.
             --
             --   A definition group is /not/ part of the context of its body.
@@ -129,9 +130,9 @@ pushContext context_fun si =
       finfo {useContext = (context_fun:useContext finfo)}
 
 -- | Add a group's local functions to the environment.
-extendContext :: Bool -> GroupID -> [FunDef] -> ScanInputs -> ScanInputs
-extendContext in_context gid defs si =
-  si {scanFunMap = insert_defs $ Map.map add_to_context $ scanFunMap si}
+extendContext :: GroupID -> [FunDef] -> ScanInputs -> ScanInputs
+extendContext gid defs si =
+  si {scanFunMap = insert_defs $ scanFunMap si}
   where
     insert_defs :: FunMap -> FunMap
     insert_defs m = foldr insert_def m defs
@@ -139,12 +140,6 @@ extendContext in_context gid defs si =
     insert_def (Def v f) m =
       let info = FunInfo (length $ funParams f) gid []
       in Map.insert v info m
-
-    add_to_context :: FunInfo -> FunInfo
-    add_to_context finfo
-      | in_context =
-          finfo {useContext = (gid:useContext finfo)}
-      | otherwise = finfo
 
 
 -- | A scan for computing hoisting and capture information.
@@ -165,13 +160,20 @@ instance Monoid Scan where
   mconcat xs = Scan (\i -> do ys <- sequence [f i | Scan f <- xs]
                               return $ mconcat ys)
 
--- | Enter a context in which a definition group has been defined, but is not
---   in scope.
+-- | Enter a member of a definition group.
+--
+--   This function updates the context when scanning traverses into a 
+--   @letfun@-bound function body.  At any time during scanning, the
+--   context for a function @f@ is the nesting of function definitions
+--   between the definition of @f@ and the use of @f@.  If @f@ is in a
+--   recursive group,
+--   the context includes the definition of @f@.
 enterGroup :: GroupID -> Scan -> Scan
 enterGroup gid (Scan f) =
   Scan $ \i -> f (pushContext gid i)
 
--- | Enter a context in which a definition group is in scope.
+-- | Enter a context in which variables defined by a definition group are 
+--   in scope.
 --
 --   Add the definition group to the environment, and remove the defined
 --   variables from the captured variable set.
@@ -179,11 +181,11 @@ enterGroup gid (Scan f) =
 --   If 'in_context' is True, then we're processing the function definitions
 --   and should add them to the context.  Otherwise we're processing the
 --   body of the definition group and we should not add them to the context.
-defineGroup :: Bool -> GroupID -> [FunDef] -> Scan -> Scan
-defineGroup in_context gid fdefs (Scan f) =
+defineGroup :: GroupID -> [FunDef] -> Scan -> Scan
+defineGroup gid fdefs (Scan f) =
   define_group $
   defines (map definiendum fdefs) $
-  Scan $ \i -> f (extendContext in_context gid fdefs i)
+  Scan $ \i -> f (extendContext gid fdefs i)
   where
     define_group (Scan f) = Scan $ \env -> do
       (c_csts, c, h_csts, h, groups) <- f env
@@ -310,7 +312,8 @@ scanGroup group scan_body = Scan $ \i -> do
     case group
     of Rec fs ->
          -- Scan all functions in the group.  Remove references to the group.
-         defineGroup True group_id (groupMembers group) $
+         defineGroup group_id (groupMembers group) $
+         enterGroup group_id  $
          mconcat $ map (scanFun . definiens) fs
 
        NonRec f -> do
@@ -323,7 +326,7 @@ scanGroup group scan_body = Scan $ \i -> do
 
   -- Process the body
   (body_c_csts, body_c, body_h_csts, body_h, body_groups) <-
-    flip runScan i $ defineGroup False group_id (groupMembers group) scan_body
+    flip runScan i $ defineGroup group_id (groupMembers group) scan_body
 
   return (captInheritUnion local_c_csts body_c_csts,
           Set.union body_c local_captured,
