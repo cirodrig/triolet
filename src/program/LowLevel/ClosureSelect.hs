@@ -143,22 +143,47 @@ extendContext gid defs si =
 
 
 -- | A scan for computing hoisting and capture information.
-newtype Scan = Scan {runScan :: ScanInputs -> IO ScanResult}
+newtype Scan a = Scan {runScan :: ScanInputs -> IO (ScanResult a)}
 
-type ScanResult = (CaptInherit, -- Variable capture constraints
-                   Capt, -- Captured variables
-                   HoistCsts, -- Hoisting constraints
-                   Set.Set GroupID, -- Hoisted groups
-                   [UnsolvedGroup] {- Groups -})
+data ScanResult a = ScanResult a !GlobalConstraints
 
-instance Monoid Scan where
-  mempty = Scan (\_ -> return mempty)
-  Scan f1 `mappend` Scan f2 =
-    Scan (\i -> do x <- f1 i
-                   y <- f2 i
-                   return (x `mappend` y))
-  mconcat xs = Scan (\i -> do ys <- sequence [f i | Scan f <- xs]
-                              return $ mconcat ys)
+-- | Global constraints are collected by scanning and processed after scanning
+--   is complete.
+data GlobalConstraints =
+  GlobalConstraints
+  { hoistedGroups :: Set.Set GroupID
+  , unsolvedGroups :: [UnsolvedGroup]
+  }
+
+instance Monoid GlobalConstraints where
+  mempty = GlobalConstraints mempty mempty
+  GlobalConstraints a b `mappend` GlobalConstraints c d =
+    GlobalConstraints (a `mappend` c) (b `mappend` d)
+
+-- | Scanning an expression produces a set of variable capture constraints
+--   and captured variables.
+type ScanExp = Scan (CaptInherit, Capt, HoistCsts)
+
+instance Monoid a => Monoid (Scan a) where
+  mempty = Scan (\_ -> return (ScanResult mempty mempty))
+
+  Scan f1 `mappend` Scan f2 = Scan $ \i -> do
+    ScanResult x csts1 <- f1 i
+    ScanResult y csts2 <- f2 i
+    return $ ScanResult (x `mappend` y) (csts1 `mappend` csts2)
+
+  mconcat xs = Scan $ \i -> do
+    ys <- sequence [f i | Scan f <- xs]
+    return $ foldr append (ScanResult mempty mempty) ys
+    where
+      append (ScanResult y d) (ScanResult x c) =
+        ScanResult (x `mappend` y) (c `mappend` d)
+
+instance Monad Scan where
+  return x = Scan (\_ -> return (ScanResult x mempty))
+  m >>= k = Scan (\i -> do ScanResult x c1 <- runScan m i
+                           ScanResult y c2 <- runScan (k x) i
+                           return $ ScanResult y (c1 `mappend` c2))
 
 -- | Enter a member of a definition group.
 --
@@ -168,7 +193,7 @@ instance Monoid Scan where
 --   between the definition of @f@ and the use of @f@.  If @f@ is in a
 --   recursive group,
 --   the context includes the definition of @f@.
-enterGroup :: GroupID -> Scan -> Scan
+enterGroup :: GroupID -> Scan a -> Scan a
 enterGroup gid (Scan f) =
   Scan $ \i -> f (pushContext gid i)
 
@@ -181,24 +206,24 @@ enterGroup gid (Scan f) =
 --   If 'in_context' is True, then we're processing the function definitions
 --   and should add them to the context.  Otherwise we're processing the
 --   body of the definition group and we should not add them to the context.
-defineGroup :: GroupID -> [FunDef] -> Scan -> Scan
+defineGroup :: GroupID -> [FunDef] -> ScanExp -> ScanExp
 defineGroup gid fdefs (Scan f) =
   define_group $
   defines (map definiendum fdefs) $
   Scan $ \i -> f (extendContext gid fdefs i)
   where
     define_group (Scan f) = Scan $ \env -> do
-      (c_csts, c, h_csts, h, groups) <- f env
+      ScanResult (c_csts, c, h_csts) global_csts <- f env
       let c_csts' = case c_csts
                     of CaptInherit gs -> CaptInherit (Set.delete gid gs)
-      return (c_csts', c, h_csts, h, groups)
+      return $ ScanResult (c_csts', c, h_csts) global_csts
 
 -- | Scan a reference to a variable, other than a tail call.
 --
 --   If it's a local variable, the variable will be added to the
 --   captured variable set.  If it's a local function, the function
 --   will be hoisted.
-capture :: Var -> Scan
+capture :: Var -> ScanExp
 capture v = Scan $ \env ->
   let (captured, hoisted) =
         if v `Set.member` scanGlobals env
@@ -206,18 +231,19 @@ capture v = Scan $ \env ->
         else case Map.lookup v $ scanFunMap env
              of Nothing -> (Set.singleton v, mempty)
                 Just finfo -> (Set.singleton v, Set.singleton (defGroup finfo))
-  in captured `seq` hoisted `seq`
-     return (mempty, captured, mempty, hoisted, mempty)
+      global_constraints = GlobalConstraints hoisted mempty
+      result = ScanResult (mempty, captured, mempty) global_constraints
+  in captured `seq` hoisted `seq` return result
 
-define :: Var -> Scan -> Scan
+define :: Var -> ScanExp -> ScanExp
 define v (Scan s) = Scan $ \i -> do
-  (c_csts, c, h_csts, h, groups) <- s i
-  return (c_csts, Set.delete v c, h_csts, h, groups)
+  ScanResult (c_csts, c, h_csts) global_constraints <- s i
+  return $ ScanResult (c_csts, Set.delete v c, h_csts) global_constraints
 
-defines :: [Var] -> Scan -> Scan
+defines :: [Var] -> ScanExp -> ScanExp
 defines vs (Scan s) = Scan $ \i -> do
-  (c_csts, c, h_csts, h, groups) <- s i
-  return (c_csts, foldr Set.delete c vs, h_csts, h, groups)
+  ScanResult (c_csts, c, h_csts) global_constraints <- s i
+  return $ ScanResult (c_csts, foldr Set.delete c vs, h_csts) global_constraints
 
 -- | Scan a call of a variable.
 --
@@ -228,10 +254,10 @@ defines vs (Scan s) = Scan $ \i -> do
 --
 --   Otherwise, if a function enclosing this call is hoisted, the callee
 --   must also be hoisted.
-called :: Bool -> Var -> Int -> Scan
+called :: Bool -> Var -> Int -> ScanExp
 called is_tail v num_args = Scan $ \env ->
   if v `Set.member` scanGlobals env
-  then return mempty
+  then return $ ScanResult mempty mempty
   else let m_finfo = Map.lookup v $ scanFunMap env
            captured = Set.singleton v
            c_cst =
@@ -248,13 +274,14 @@ called is_tail v num_args = Scan $ \env ->
                       -- Undersaturated or non-tail-call; must hoist
                       (mempty, Set.singleton (defGroup finfo))
                 _ -> mempty     -- Unknown function
-       in h_cst `seq` hoisted `seq` c_cst `seq`
-          return (c_cst, captured, h_cst, hoisted, mempty)
+           global_constraints = GlobalConstraints hoisted mempty
+           result = ScanResult (c_cst, captured, h_cst) global_constraints
+       in h_cst `seq` hoisted `seq` c_cst `seq` return result
 
 -------------------------------------------------------------------------------
 -- Scanning for constraint generation
 
-scanValue :: Val -> Scan
+scanValue :: Val -> ScanExp
 scanValue value =
   case value
   of VarV v    -> capture v
@@ -264,7 +291,7 @@ scanValue value =
 
 scanValues vals = mconcat (map scanValue vals)
 
-scanAtom :: Bool -> Atom -> Scan
+scanAtom :: Bool -> Atom -> ScanExp
 scanAtom is_tail atom =
   case atom
   of ValA vs         -> scanValues vs
@@ -280,7 +307,7 @@ scanAtom is_tail atom =
                _      -> scanValue op 
       in op_scan `mappend` scanValues args
 
-scanStm :: Stm -> Scan
+scanStm :: Stm -> ScanExp
 scanStm statement =
   case statement
   of LetE params rhs body ->
@@ -294,7 +321,7 @@ scanStm statement =
      ThrowE val ->
        scanValue val
 
-scanFun :: Fun -> Scan
+scanFun :: Fun -> ScanExp
 scanFun f =
   defines (funParams f) $ scanStm (funBody f)
 
@@ -302,12 +329,12 @@ scanFun f =
 --   The scan creates an 'UnsolvedGroup'.  Also, captured variable constraints
 --   are propagated in the scan.  The set of hoisted groups is propagated.
 --   Hoisting constraints in the body are propagated.
-scanGroup :: Group FunDef -> Scan -> Scan
+scanGroup :: Group FunDef -> ScanExp -> ScanExp
 scanGroup group scan_body = Scan $ \i -> do
   -- Create a descriptor for this group; add it to the descriptors taken from 
   -- the function bodies.  Do not propagate constraints.
   group_id <- supplyValue $ scanIdSupply i
-  (local_c_csts, local_captured, local_h_csts, local_hoisted, local_groups) <-
+  ScanResult (local_c_csts, local_captured, local_h_csts) local_global <-
     flip runScan i $
     case group
     of Rec fs ->
@@ -325,13 +352,16 @@ scanGroup group scan_body = Scan $ \i -> do
            local_c_csts local_captured local_h_csts
 
   -- Process the body
-  (body_c_csts, body_c, body_h_csts, body_h, body_groups) <-
+  ScanResult (body_c_csts, body_c, body_h_csts) body_global <-
     flip runScan i $ defineGroup group_id (groupMembers group) scan_body
 
-  return (captInheritUnion local_c_csts body_c_csts,
-          Set.union body_c local_captured,
-          body_h_csts, Set.union body_h local_hoisted,
-          descr : local_groups ++ body_groups)
+  -- Add the local group's descriptor to the global constraint set
+  let ret_global = GlobalConstraints mempty [descr] `mappend`
+                   local_global `mappend` body_global
+  let expr_constraints = (captInheritUnion local_c_csts body_c_csts,
+                          Set.union body_c local_captured,
+                          body_h_csts)
+  return $ ScanResult expr_constraints ret_global
 
 -- | Scan a top-level function, generating a set of constraints that determine
 --   hoisting and variable capture
@@ -341,7 +371,7 @@ scanTopLevelDef :: Set.Set Var
 scanTopLevelDef globals (Def v f) = do
   id_supply <- newIdentSupply
   let initial_context = ScanInputs Map.empty globals id_supply
-  (c_csts, captured, h_csts, hoisted, groups) <-
+  ScanResult (c_csts, captured, h_csts) (GlobalConstraints hoisted groups) <-
     runScan (scanFun f) initial_context
   id_bound <- supplyValue id_supply
 
