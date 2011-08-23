@@ -357,7 +357,10 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             -- , (pyonBuiltin the_safeSubscript, rwSafeSubscript)
             ]
 
-    exprs = [ (pyonBuiltin the_count, count_expr) ]
+    exprs = [ (pyonBuiltin the_count, count_expr) 
+            , (pyonBuiltin the_zero_ii, zero_ii_expr)
+            , (pyonBuiltin the_one_ii, one_ii_expr)
+            ]
     
     -- The following expression represents the "count" stream:
     --
@@ -380,6 +383,12 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
           ExpM $ VarE defaultExpInfo (pyonBuiltin the_iPosInfty)          
         stored =
           ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
+
+    zero_ii_expr =
+      ExpM $ AppE defaultExpInfo iInt [TypM $ IntT 0] [ExpM $ VarE defaultExpInfo (pyonBuiltin the_zero_fii)]
+    one_ii_expr =
+      ExpM $ AppE defaultExpInfo iInt [TypM $ IntT 1] [ExpM $ VarE defaultExpInfo (pyonBuiltin the_one_fii)]
+    iInt = ExpM $ VarE defaultExpInfo (pyonBuiltin the_iInt)
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.
