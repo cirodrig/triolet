@@ -7,7 +7,7 @@ import Data.Maybe
 import qualified Text.ParserCombinators.Parsec as PS
 import qualified Text.ParserCombinators.Parsec.Prim as PS
 
-import Text.Parsec.Expr
+import Text.ParserCombinators.Parsec.Expr
 
 import Control.Applicative(Applicative(..), (<*), (*>), (<$>), (<**>))
 import Control.Monad
@@ -66,6 +66,13 @@ match t = PS.tokenPrim showToken nextPosition matchAndReturn
       matchAndReturn (Token _ t')
           | t == t'   = Just ()
           | otherwise = Nothing
+
+matchOperator :: String -> P ()
+matchOperator name = PS.tokenPrim showToken nextPosition matchAndReturn
+  where
+    matchAndReturn (Token _ (OperTok s))
+      | name == s = Just ()
+    matchAndReturn _ = Nothing
 
 -- | Return the identifier name that appears next in the input stream; fail if
 -- not an identifier.
@@ -225,7 +232,7 @@ pDomains = do
   
 pExp :: P PLExp
 pExp = caseE <|> ifE <|> lamE <|> letE <|> letfunE <|> exceptE <|> coerceE <|>
-       appExp
+       operExp
        <?> "expression"
 
 caseE :: P PLExp
@@ -323,6 +330,37 @@ def = located $ do
   match EqualTok
   body <- pExp
   return $ Def v (Fun ty_params params range body) attrs
+
+-- | An expression involving operator applications
+operExp :: P PLExp
+operExp = buildExpressionParser operExpTable appExp
+
+operExpTable :: OperatorTable Token () PLExp
+operExpTable =
+  [ [ infix_op "//#" "RemainderDict_int_floordiv" AssocNone
+    , infix_op "%#" "RemainderDict_int_mod" AssocNone]
+  , [ infix_op "*#" "MultiplicativeDict_int_mul" AssocLeft]
+  , [ infix_op "+#" "AdditiveDict_int_add" AssocLeft
+    , infix_op "-#" "AdditiveDict_int_sub" AssocLeft]
+  , [ infix_op "<#" "OrdDict_int_lt" AssocNone
+    , infix_op ">#" "OrdDict_int_gt" AssocNone
+    , infix_op "<=#" "OrdDict_int_le" AssocNone
+    , infix_op ">=#" "OrdDict_int_ge" AssocNone
+    , infix_op "==#" "EqDict_int_eq" AssocNone
+    , infix_op "/=#" "EqDict_int_ne" AssocNone]
+  ]
+  where
+    infix_op operator_name function_name associativity =
+      Infix parser associativity
+      where
+        parser :: P (PLExp -> PLExp -> PLExp)
+        parser = do
+          loc <- locatePosition
+          matchOperator operator_name
+          return $ \e1 e2 ->
+            let operator = L loc (VarE function_name)
+                app1 = L (getSourcePos e1) (AppE operator e1)
+            in L (getSourcePos e1) (AppE app1 e2)
 
 -- | An expression involving application or something with higher precedence
 appExp :: P PLExp
