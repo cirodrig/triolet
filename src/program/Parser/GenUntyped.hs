@@ -286,18 +286,25 @@ doSlicing pos base slices = do
   return $ callVariable pos (tiBuiltin the_safeSlice) [base', slice_value]
 
 doSlice (SliceSlice pos l u s) = do
-  l' <- doExpr l
-  u' <- doExpr u
-  s' <- case s
-        of Nothing -> return $ U.LiteralE (U.Ann pos) (U.IntL 1)
-           Just n  -> doExpr n
-  return $ U.TupleE (U.Ann pos) [l', u', s']
+  l' <- translate_maybe doExpr l
+  u' <- translate_maybe doExpr u
+  s' <- translate_maybe (translate_maybe doExpr) s
+  return $ callVariable pos (tiBuiltin the_sliceObject) [l', u', s']
+  where
+    translate_maybe :: (a -> Cvt U.Expression) -> Maybe a -> Cvt U.Expression
+    translate_maybe do_just (Just x) = do
+      x' <- do_just x
+      return $ callVariable pos (tiBuiltin the_justVal) [x']
+    
+    translate_maybe _ Nothing =
+      return $ U.VariableE (U.Ann pos) (tiBuiltin the_nothingVal)
 
 doSlice (ExprSlice e) = do
   e' <- doExpr e
   let one = U.LiteralE (U.Ann noSourcePos) (U.IntL 1)
       u = callVariable (noSourcePos) (tiBuiltin the___add__) [e', one]
-  return $ U.TupleE (U.Ann noSourcePos) [e', u, one]
+      stride = U.VariableE (U.Ann noSourcePos) (tiBuiltin the_nothingVal)
+  return $ callVariable noSourcePos (tiBuiltin the_sliceObject) [e', u, stride]
 
 doIterator :: SSAIterFor Expr -> Cvt U.Expression
 doIterator (IterFor pos params dom body) = do

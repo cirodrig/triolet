@@ -24,6 +24,11 @@ pyonSourceTypes =
    "index", "slice",
    "view", "view0", "view1", "view2"]
 
+-- | Predefined data types not visible to the Pyon parser
+pyonOtherTypes :: [String]
+pyonOtherTypes =
+  ["SliceObject", "MaybeVal"]
+
 -- | All predefined global functions recognized by the Pyon parser
 pyonSourceGlobals :: [String]
 pyonSourceGlobals =
@@ -90,8 +95,9 @@ pyonOtherGlobals =
   [ "do", "guard", "iterBind",
     "safeIndex", "safeSlice",
     "flattenStream", "mapStream", "zipWithStream", "zipWith3Stream", "zipWith4Stream",
-    "inRange", "coerceSlice",
-    "at_point", "at_slice", "get_shape"
+    "inRange", "getSlice",
+    "at_point", "get_shape",
+    "sliceObject", "justVal", "nothingVal"
   ]
 
 -- | All predefined class names
@@ -111,9 +117,9 @@ tiBuiltinSpecification =
   recordDef "TIBuiltins" fields
   where
     fields = [('_':name, IsStrict, [t| Type.Var.Var |])
-             | name <- pyonSourceTypes] ++ 
+             | name <- pyonSourceTypes ++ pyonOtherTypes] ++ 
              [("_con_" ++ name, IsStrict, [t| TyCon |])
-             | name <- pyonSourceTypes] ++
+             | name <- pyonSourceTypes ++ pyonOtherTypes] ++
              [('_':name, NotStrict, [t| Variable |])
              | name <- pyonSourceGlobals ++ pyonOtherGlobals] ++
              [('_':name, IsStrict, [t| Class |])

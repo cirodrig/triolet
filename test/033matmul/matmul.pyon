@@ -3,9 +3,9 @@ def sum(xs):
   return reduce(lambda x, y: x + y, 0, xs)
 
 def mm(M, N):
-  def dotprod(r, c): return sum(x * y for (x, y) in zip(__iter__(r), __iter__(c)))
+  def dotprod(r, c): return sum(x * y for (x, y) in zip(r, c))
 
-  return __build__(outerproduct(dotprod, listiter(__iter__(rows(M))), listiter(__iter__(cols(N)))))
+  return __build__(outerproduct(dotprod, __iter__(rows(M)), __iter__(cols(N))))
 
 # def mm(M, N):
 #   def dotprod(r, c): return sum(x * y for (x, y) in zip(r, c))

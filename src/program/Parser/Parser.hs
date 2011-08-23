@@ -521,10 +521,11 @@ maybeExpression pos Nothing  = pure (noneExpr pos)
 slice :: PySlice -> Cvt (Slice Int)
 slice sl =
   case sl
-  of Py.SliceProper (Just l) (Just u) Nothing _ ->
-       SliceSlice source_pos <$> expression l <*> expression u <*> pure Nothing
-     Py.SliceProper (Just l) (Just u) (Just (Just s)) _ ->
-       SliceSlice source_pos <$> expression l <*> expression u <*> (Just <$> expression s)
+  of Py.SliceProper l u s _ ->
+       SliceSlice source_pos <$>
+       traverse expression l <*>
+       traverse expression u <*>
+       traverse (traverse expression) s
      Py.SliceExpr e _ ->
        ExprSlice <$> expression e
   where
@@ -844,7 +845,9 @@ instance MentionsVars (Expr Int) where
 
 instance MentionsVars (Slice Int) where
   mentionedVars (SliceSlice _ e1 e2 e3) =
-    Set.unions [mentionedVars e1, mentionedVars e2, maybe Set.empty mentionedVars e3]
+    Set.unions [maybe Set.empty mentionedVars e1,
+                maybe Set.empty mentionedVars e2,
+                maybe Set.empty mentionedVars (join e3)]
 
 instance MentionsVars (IterFor Int Expr) where
     mentionedVars (IterFor _ _ e c) =

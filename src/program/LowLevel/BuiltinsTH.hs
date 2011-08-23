@@ -181,7 +181,9 @@ builtinFunctions =
   --, (PyonName module_list "list_len",
   --   Right [| pyonBuiltin SystemF.the_len |])
   , (PyonName module_list "list_build",
-     Right [| pyonBuiltin SystemF.the_TraversableDict_list_build |])
+     Right [| pyonBuiltin SystemF.the_Sequence_list_build |])
+  , (PyonName module_list "array1_build",
+     Right [| pyonBuiltin SystemF.the_Sequence_array1_build |])
   -- , (PyonName module_list "list_traverse",
   --   Right [| pyonBuiltin SystemF.the_TraversableDict_list_traverse |])
   {- , (PyonName module_list "safeSubscript",
@@ -270,6 +272,8 @@ builtinFunctions =
      Right [| pyonBuiltin (SystemF.the_subscript) |])
   , (PyonName module_prim "subscript_out",
      Right [| pyonBuiltin (SystemF.the_subscript_out) |])
+  , (PyonName module_prim "min_ii",
+     Right [| pyonBuiltin (SystemF.the_min_ii) |])
   , (PyonName module_prim "minus_ii",
      Right [| pyonBuiltin (SystemF.the_minus_ii) |])
 

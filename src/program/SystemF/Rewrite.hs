@@ -332,13 +332,8 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             -- , (pyonBuiltin the_TraversableDict_Stream_traverse, rwTraverseStream)
             -- , (pyonBuiltin the_TraversableDict_Stream_build, rwBuildStream)
             , (pyonBuiltin the_array_build, rwBuildArray)
-            -- , (pyonBuiltin the_oper_GUARD, rwGuard)
             , (pyonBuiltin the_chunk, rwChunk)
             , (pyonBuiltin the_outerproduct, rwOuterProduct)
-            -- , (pyonBuiltin the_fun_map, rwMap)
-            -- , (pyonBuiltin the_fun_zip, rwZip)
-            -- , (pyonBuiltin the_fun_zip3, rwZip3)
-            -- , (pyonBuiltin the_fun_zip4, rwZip4)
             , (pyonBuiltin the_LinStream_map, rwMapStream)
             , (pyonBuiltin the_LinStream_zipWith, rwZipStream) 
             , (pyonBuiltin the_LinStream_zipWith3, rwZip3Stream)
@@ -362,29 +357,29 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             -- , (pyonBuiltin the_safeSubscript, rwSafeSubscript)
             ]
 
-    exprs = [ {- Disabled because the new function, 'generate_forever', 
-                 hasn't been written yet
-                 (pyonBuiltin the_count, count_expr) -} ]
+    exprs = [ (pyonBuiltin the_count, count_expr) ]
     
     -- The following expression represents the "count" stream:
-    -- asList (array_shape pos_infty)
-    -- (generate_forever int repr_int (store int))
+    --
+    -- > viewStream @(Stored int)
+    -- > (mk_view1 @(Stored int) @0 @pos_infty zero_ii (iPosInfty @pos_infty)
+    -- >  (stored @int))
     count_expr =
-      ExpM $ AppE defaultExpInfo as_list [TypM array_shape, TypM storedIntType]
-      [generate_expr]
+      ExpM $ AppE defaultExpInfo view_stream [TypM storedIntType]
+      [ExpM $ AppE defaultExpInfo mk_view1
+       [TypM storedIntType, TypM (IntT 0), TypM posInftyT]
+       [ExpM $ VarE defaultExpInfo (pyonBuiltin the_zero_ii),
+        ExpM $ AppE defaultExpInfo iPosInfty [TypM posInftyT] [],
+        ExpM $ AppE defaultExpInfo stored [TypM $ VarT (pyonBuiltin the_int)] []]]
       where
-        as_list =
-          ExpM $ VarE defaultExpInfo (pyonBuiltin the_LinStream_flatten)
-        generate_f =
-          ExpM $ VarE defaultExpInfo (pyonBuiltin the_generate_forever)
-        store_f =
+        view_stream =
+          ExpM $ VarE defaultExpInfo (pyonBuiltin the_viewStream)
+        mk_view1 =
+          ExpM $ VarE defaultExpInfo (pyonBuiltin the_mk_view1)
+        iPosInfty =
+          ExpM $ VarE defaultExpInfo (pyonBuiltin the_iPosInfty)          
+        stored =
           ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
-
-        array_shape = array1Shape posInftyT
-        generate_expr =
-          ExpM $ AppE defaultExpInfo generate_f [TypM storedIntType]
-          [ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_int),
-           ExpM $ AppE defaultExpInfo store_f [TypM storedIntType] []]
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.

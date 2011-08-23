@@ -36,6 +36,18 @@ shapeLike f = typeFunction 1 compute_shape
         cannot_reduce container_type =
           return $ varApp (pyonBuiltin the_shape) (container_type : other_types)
 
+unpackArrayShapeArgs :: EvalMonad m => [Type] -> m [Type]
+unpackArrayShapeArgs [size, next] = liftM (size :) $ unpackArrayShape next
+
+unpackArrayShape :: EvalMonad m => Type -> m [Type]
+unpackArrayShape ty = do
+  ty' <- reduceToWhnf ty
+  case fromVarApp ty' of
+    Just (op, args)
+      | op `isPyonBuiltin` the_arr_shape -> unpackArrayShapeArgs args
+      | op `isPyonBuiltin` the_dim0 -> return []
+    _ -> internalError "unpackArrayShape: Argument is not an array shape"
+
 -- Create a 1D array shape expression
 array_shape sh =
   varApp (pyonBuiltin the_arr_shape) [sh, VarT $ pyonBuiltin the_dim0]
@@ -55,10 +67,10 @@ builtinTypeFunctions =
 -- | Compute the shape of a data type in the pure type system
 shapePureTF = shapeLike $ \op args ->
   case ()
-  of () | op `isPyonBuiltin` the_Stream || 
-          op `isPyonBuiltin` the_LinStream ->
+  of () | op `isPyonBuiltin` the_Stream ->
             case args of [arg, _] -> liftM Just $ reduceToWhnf arg
-        | op `isPyonBuiltin` the_MatrixStream -> return_dim2
+        | op `isPyonBuiltin` the_Stream1 -> return_dim1
+        | op `isPyonBuiltin` the_Sequence -> return_dim1
         | op `isPyonBuiltin` the_list -> return_dim1
         | op `isPyonBuiltin` the_array0 -> return_dim0
         | op `isPyonBuiltin` the_array1 -> return_dim1
@@ -93,19 +105,19 @@ shapeMemTF = shapeLike $ \op args ->
           of [arg] ->
                case fromVarApp arg 
                of Just (op, [arg2, _]) 
-                    | op `isPyonBuiltin` the_Stream ||
-                      op `isPyonBuiltin` the_LinStream ->
+                    | op `isPyonBuiltin` the_Stream ->
                         liftM Just $ reduceToWhnf arg2
                   Just (op, [_])
-                    | op `isPyonBuiltin` the_MatrixStream -> return_dim2
+                    | op `isPyonBuiltin` the_Stream1 -> return_dim1
+                    | op `isPyonBuiltin` the_Sequence -> return_dim1
+                    | op `isPyonBuiltin` the_view0 -> return_dim0
+                    | op `isPyonBuiltin` the_view1 -> return_dim1
+                    | op `isPyonBuiltin` the_view2 -> return_dim2
                   _ -> return Nothing
         | op `isPyonBuiltin` the_list -> return_dim1
         | op `isPyonBuiltin` the_array0 -> return_dim0
         | op `isPyonBuiltin` the_array1 -> return_dim1
         | op `isPyonBuiltin` the_array2 -> return_dim2
-        | op `isPyonBuiltin` the_view0 -> return_dim0
-        | op `isPyonBuiltin` the_view1 -> return_dim1
-        | op `isPyonBuiltin` the_view2 -> return_dim2
         | op `isPyonBuiltin` the_array ->
             case args
             of [arg, _] -> return $ Just $ array_shape arg
@@ -180,16 +192,14 @@ sliceMemTF = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | op `isPyonBuiltin` the_dim0 -> return none_type
-           | op `isPyonBuiltin` the_dim1 -> return int3_type
-           | op `isPyonBuiltin` the_dim2 -> return int6_type
+           | op `isPyonBuiltin` the_dim1 -> return slice_type
+           | op `isPyonBuiltin` the_dim2 -> return slice2_type
         _ -> return $ varApp (pyonBuiltin the_slice) [shape_arg']
 
     none_type = VarT (pyonBuiltin the_NoneType)
-    int_type = varApp (pyonBuiltin the_Stored) [VarT (pyonBuiltin the_int)]
-    int3_type = varApp (pyonBuiltin the_PyonTuple3)
-                [int_type, int_type, int_type]
-    int6_type = varApp (pyonBuiltin the_PyonTuple2)
-                [int3_type, int3_type]
+    slice_type = VarT (pyonBuiltin the_SliceObject)
+    slice2_type = varApp (pyonBuiltin the_PyonTuple2)
+                  [slice_type, slice_type]
 
 viewPureTF = typeFunction 1 compute_eliminator
   where
@@ -231,13 +241,23 @@ streamPureTF = typeFunction 1 compute_stream
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isPyonBuiltin` the_dim1 ||
-             op `isPyonBuiltin` the_arr_shape ||
-             op `isPyonBuiltin` the_dim0 ->
-               return $ varApp (pyonBuiltin the_LinStream) (shape_arg' : other_args)
-           | op `isPyonBuiltin` the_dim2 ->
-               return $ varApp (pyonBuiltin the_MatrixStream) other_args
-        _ -> return $ varApp (pyonBuiltin the_Stream) (shape_arg' : other_args)
+          | op `isPyonBuiltin` the_dim0 ->
+              return_con the_view0 []
+          | op `isPyonBuiltin` the_dim1 ->
+              return_con the_Stream1 []
+          | op `isPyonBuiltin` the_dim2 ->
+              return_con the_view2 []
+          | op `isPyonBuiltin` the_arr_shape -> do
+              sizes <- unpackArrayShapeArgs args'
+              case sizes of
+                [size1] -> return_con the_darr1 [size1]
+                [size1, size2] -> return_con the_darr2 [size1, size2]
+        _ -> return_con the_Stream [shape_arg']
+      where
+        return_con :: forall m. EvalMonad m =>
+                      (PyonBuiltins -> Var) -> [Type] -> m Type
+        return_con con args =
+          return $ varApp (pyonBuiltin con) (args ++ other_args)
 
 streamMemTF = typeFunction 1 compute_stream
   where
@@ -247,13 +267,23 @@ streamMemTF = typeFunction 1 compute_stream
       shape_arg' <- reduceToWhnf shape_arg
       case fromVarApp shape_arg' of
         Just (op, args')
-           | op `isPyonBuiltin` the_dim1 ||
-             op `isPyonBuiltin` the_arr_shape ||
-             op `isPyonBuiltin` the_dim0 ->
-               return $ varApp (pyonBuiltin the_LinStream) (shape_arg' : other_args)
-           | op `isPyonBuiltin` the_dim2 ->
-               return $ varApp (pyonBuiltin the_MatrixStream) other_args
-        _ -> return $ varApp (pyonBuiltin the_Stream) (shape_arg' : other_args)
+          | op `isPyonBuiltin` the_dim0 ->
+              return_con the_view0 []
+          | op `isPyonBuiltin` the_dim1 ->
+              return_con the_Stream1 []
+          | op `isPyonBuiltin` the_dim2 ->
+              return_con the_view2 []
+          | op `isPyonBuiltin` the_arr_shape -> do
+              sizes <- unpackArrayShapeArgs args'
+              case sizes of
+                [size1] -> return_con the_darr1 [size1]
+                [size1, size2] -> return_con the_darr2 [size1, size2]
+        _ -> return_con the_Stream [shape_arg']
+      where
+        return_con :: forall m. EvalMonad m =>
+                      (PyonBuiltins -> Var) -> [Type] -> m Type
+        return_con con args =
+          return $ varApp (pyonBuiltin con) (args ++ other_args)
 
 -- | The 'BoxedType' data type should never appear in the pure type system
 boxedPureTF =

@@ -222,8 +222,8 @@ function inline min_ii (IndInt x, IndInt y) -> IndInt {
   IndInt {x_fin, IndIntData {FinIndInt {x_data}}} = x;
   IndInt {y_fin, IndIntData {FinIndInt {y_data}}} = y;
 
-  if (x_fin == INFINITE) { y; }
-  else if (y_fin == INFINITE) { x; }
+  if      (x_fin == POSINFTY || y_fin == NEGINFTY) { y; }
+  else if (x_fin == NEGINFTY || y_fin == POSINFTY) { x; }
   else if (x_data < y_data) { IndInt primcall finite_IndInt(x_data); }
   else { IndInt primcall finite_IndInt(y_data); };
 };
@@ -232,8 +232,26 @@ function inline minus_ii (IndInt x, IndInt y) -> IndInt {
   IndInt {x_fin, IndIntData {FinIndInt {x_data}}} = x;
   IndInt {y_fin, IndIntData {FinIndInt {y_data}}} = y;
 
-  if (x_fin == INFINITE) { x; }
-  else { IndInt primcall finite_IndInt(x_data - y_data); };
+  if (x_fin == POSINFTY) {
+    if (y_fin == POSINFTY) {
+      () = () primcall exit (int -1);
+      x;
+    } else {
+      x;
+    };
+  }
+  else if (x_fin == NEGINFTY) {
+    if (y_fin == NEGINFTY) {
+      () = () primcall exit (int -1);
+      x;
+    } else {
+      x;
+    };
+  }
+  else {
+    // Finite case
+    IndInt primcall finite_IndInt(x_data - y_data);
+  };
 };
 
 function inline doall (FinIndInt ix, owned f) -> () {

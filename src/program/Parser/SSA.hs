@@ -303,7 +303,8 @@ ssaExpr expression =
 
 ssaSlice :: Slice Int -> SSA (Slice SSAID)
 ssaSlice (SliceSlice pos l u ms) =
-  SliceSlice pos <$> ssaExpr l <*> ssaExpr u <*> traverse ssaExpr ms
+  SliceSlice pos <$> traverse ssaExpr l <*> traverse ssaExpr u <*>
+  traverse (traverse ssaExpr) ms
 
 ssaSlice (ExprSlice e) =
   ExprSlice <$> ssaExpr e

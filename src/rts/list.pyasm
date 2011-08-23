@@ -256,26 +256,32 @@ function repr_array2 (owned elem_repr) -> owned {
   repr = pointer primcall pyon_alloc (sizeof PassConv);
 
   // FIXME: initialize repr header
-  repr @! PassConv.size = sizeof PyonMatrix;
-  repr @! PassConv.align = alignof PyonMatrix;
+  repr @! PassConv.size = sizeof PyonArray2;
+  repr @! PassConv.align = alignof PyonArray2;
   repr @! PassConv.is_pointerless = NOT_POINTERLESS;
   copy_function = owned call matrix_copy (elem_repr);
   repr @! PassConv.copy = copy_function;
   repr @! PassConv.convert_to_boxed =
-    owned call make_Boxed (sizeof PyonMatrix, alignof PyonMatrix);
+    owned call make_Boxed (sizeof PyonArray2, alignof PyonArray2);
   repr @! PassConv.convert_to_bare =
-    owned call from_Boxed (sizeof PyonMatrix, alignof PyonMatrix, copy_function);
+    owned call from_Boxed (sizeof PyonArray2, alignof PyonArray2, copy_function);
   repr @! PassConv.finalize = owned call matrix_finalize (elem_repr);
   repr as owned;
 };
 
 function matrix_copy (owned elem_repr, pointer src, pointer dst) -> () {
-  FinIndInt {size_y} = src @! PyonMatrix.size_y;
-  FinIndInt {size_x} = src @! PyonMatrix.size_x;
-  src_contents = src @! PyonMatrix.contents;
+  FinIndInt {ymin} = src @! PyonArray2.bound_ymin;
+  FinIndInt {yend} = src @! PyonArray2.bound_yend;
+  FinIndInt {xmin} = src @! PyonArray2.bound_xmin;
+  FinIndInt {xend} = src @! PyonArray2.bound_xend;
+  size_y = yend - ymin;
+  size_x = xend - xmin;
+  src_contents = src @! PyonArray2.contents;
 
-  dst @! PyonMatrix.size_y = FinIndInt {size_y};
-  dst @! PyonMatrix.size_x = FinIndInt {size_x};
+  dst @! PyonArray2.bound_ymin = FinIndInt {ymin};
+  dst @! PyonArray2.bound_yend = FinIndInt {yend};
+  dst @! PyonArray2.bound_xmin = FinIndInt {xmin};
+  dst @! PyonArray2.bound_xend = FinIndInt {xend};
 
   // Copy list elements
   elem_size = elem_repr @! PassConv.size;
@@ -292,7 +298,7 @@ function matrix_copy (owned elem_repr, pointer src, pointer dst) -> () {
   } else {
     pointer primcall pyon_alloc (sizeof dst_contents_type);
   };
-  dst @! PyonMatrix.contents = dst_contents;
+  dst @! PyonArray2.contents = dst_contents;
 
   _ = while (int yindex = int 0) (yindex < size_y) {
     _ = while (int xindex = int 0) (xindex < size_x) {
@@ -306,9 +312,13 @@ function matrix_copy (owned elem_repr, pointer src, pointer dst) -> () {
 };
 
 function matrix_finalize (owned elem_repr, pointer matrix) -> () {
-  FinIndInt {size_y} = matrix @! PyonMatrix.size_y;
-  FinIndInt {size_x} = matrix @! PyonMatrix.size_x;
-  contents = matrix @! PyonMatrix.contents;
+  FinIndInt {ymin} = matrix @! PyonArray2.bound_ymin;
+  FinIndInt {yend} = matrix @! PyonArray2.bound_yend;
+  FinIndInt {xmin} = matrix @! PyonArray2.bound_xmin;
+  FinIndInt {xend} = matrix @! PyonArray2.bound_xend;
+  size_y = yend - ymin;
+  size_x = xend - xmin;
+  contents = matrix @! PyonArray2.contents;
 
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
@@ -329,11 +339,14 @@ function matrix_finalize (owned elem_repr, pointer matrix) -> () {
 // Allocate and construct a matrix, given a suitably initialized data array.
 // The data array is stolen by the matrix.
 // A pointer to the new matrix is returned.
-procedure pyon_matrix_from_array (int height, int width, pointer contents) -> pointer {
-  mat = pointer primcall pyon_alloc (sizeof PyonMatrix);
-  mat @! PyonMatrix.size_y = FinIndInt {height};
-  mat @! PyonMatrix.size_x = FinIndInt {width};
-  mat @! PyonMatrix.contents = contents;
+procedure pyon_matrix_from_array
+  (int ymin, int yend, int xmin, int xend, pointer contents) -> pointer {
+  mat = pointer primcall pyon_alloc (sizeof PyonArray2);
+  mat @! PyonArray2.bound_ymin = FinIndInt {ymin};
+  mat @! PyonArray2.bound_yend = FinIndInt {yend};
+  mat @! PyonArray2.bound_xmin = FinIndInt {xmin};
+  mat @! PyonArray2.bound_xend = FinIndInt {xend};
+  mat @! PyonArray2.contents = contents;
   mat;
 };
 
@@ -342,8 +355,12 @@ procedure pyon_matrix_from_array (int height, int width, pointer contents) -> po
 procedure pyon_matrix_to_array_POD (owned elem_repr,
                                     pointer mat,
                                     pointer arr) -> () {
-  FinIndInt {h} = mat @! PyonMatrix.size_y;
-  FinIndInt {w} = mat @! PyonMatrix.size_x;
+  FinIndInt {ymin} = mat @! PyonArray2.bound_ymin;
+  FinIndInt {yend} = mat @! PyonArray2.bound_yend;
+  FinIndInt {xmin} = mat @! PyonArray2.bound_xmin;
+  FinIndInt {xend} = mat @! PyonArray2.bound_xend;
+  h = yend - ymin;
+  w = xend - xmin;
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
   typedef elem_type = bytes(value elem_size, value elem_align);
@@ -351,7 +368,7 @@ procedure pyon_matrix_to_array_POD (owned elem_repr,
 
   () = () primcall memcpy
     (arr,
-     mat @! PyonMatrix.contents,
+     mat @! PyonArray2.contents,
      sizeof array_type);
   ();
 };
@@ -360,14 +377,18 @@ procedure pyon_matrix_to_array_POD (owned elem_repr,
 procedure pyon_matrix_copy_POD (owned elem_repr, pointer in_mat) -> pointer {
   elem_size = elem_repr @! PassConv.size;
   elem_align = elem_repr @! PassConv.align;
-  FinIndInt {h} = in_mat @! PyonMatrix.size_y;
-  FinIndInt {w} = in_mat @! PyonMatrix.size_x;
+  FinIndInt {ymin} = in_mat @! PyonArray2.bound_ymin;
+  FinIndInt {yend} = in_mat @! PyonArray2.bound_yend;
+  FinIndInt {xmin} = in_mat @! PyonArray2.bound_xmin;
+  FinIndInt {xend} = in_mat @! PyonArray2.bound_xend;
+  h = yend - ymin;
+  w = xend - xmin;
   typedef array_type = array(value h * w, bytes(value elem_size, value elem_align));
 
   // Create a copy of the data array
   contents = pointer primcall pyon_alloc(sizeof array_type);
   () = () primcall memcpy
-    (contents, in_mat @! PyonMatrix.contents, sizeof array_type);
+    (contents, in_mat @! PyonArray2.contents, sizeof array_type);
 
   // Create and return a new matrix object
   pointer primcall pyon_matrix_from_array (h, w, contents);
@@ -375,7 +396,7 @@ procedure pyon_matrix_copy_POD (owned elem_repr, pointer in_mat) -> pointer {
 
 // Free the POD matrix.
 procedure pyon_matrix_free_POD (pointer mat) -> () {
-  () = () primcall pyon_dealloc(mat @! PyonMatrix.contents);
+  () = () primcall pyon_dealloc(mat @! PyonArray2.contents);
   () primcall pyon_dealloc(mat);
 };
 
@@ -437,13 +458,16 @@ procedure pyon_List_PyonFloat_Free (pointer list) -> () {
   pointer primcall pyon_list_free_POD (list);
 };
 
-procedure pyon_Matrix_PyonInt_FromArray (int height, int width, pointer arr) -> pointer {
+procedure pyon_Matrix_PyonInt_FromArray
+  (int ymin, int yend, int xmin, int xend, pointer arr) -> pointer {
+  height = yend - ymin;
+  width = xend - xmin;
   n_elems = height * width;
   typedef array_type = array(value n_elems, int);
 
   new_arr = pointer primcall pyon_alloc_nopointers (sizeof array_type);
   () = () primcall memcpy(new_arr, arr, sizeof array_type);
-  pointer primcall pyon_matrix_from_array(height, width, new_arr);
+  pointer primcall pyon_matrix_from_array(ymin, yend, xmin, xend, new_arr);
 };
 
 procedure pyon_Matrix_PyonInt_ToArray(pointer mat, pointer dat) -> () {
@@ -451,13 +475,15 @@ procedure pyon_Matrix_PyonInt_ToArray(pointer mat, pointer dat) -> () {
 };
 
 procedure pyon_Matrix_PyonInt_Height (pointer mat) -> int {
-  FinIndInt {h} = mat @! PyonMatrix.size_y;
-  h as int;
+  FinIndInt {ymin} = mat @! PyonArray2.bound_ymin;
+  FinIndInt {yend} = mat @! PyonArray2.bound_yend;
+  yend - ymin as int;
 };
 
 procedure pyon_Matrix_PyonInt_Width (pointer mat) -> int {
-  FinIndInt {w} = mat @! PyonMatrix.size_x;
-  w as int;
+  FinIndInt {xmin} = mat @! PyonArray2.bound_xmin;
+  FinIndInt {xend} = mat @! PyonArray2.bound_xend;
+  xend - xmin as int;
 };
 
 procedure pyon_Matrix_PyonInt_Copy (pointer mat) -> pointer {
@@ -468,13 +494,16 @@ procedure pyon_Matrix_PyonInt_Free (pointer mat) -> () {
   pointer primcall pyon_matrix_free_POD (mat);
 };
 
-procedure pyon_Matrix_PyonFloat_FromArray (int height, int width, pointer arr) -> pointer {
+procedure pyon_Matrix_PyonFloat_FromArray
+  (int ymin, int yend, int xmin, int xend, pointer arr) -> pointer {
+  height = yend - ymin;
+  width = xend - xmin;
   n_elems = height * width;
   typedef array_type = array(value n_elems, float);
 
   new_arr = pointer primcall pyon_alloc_nopointers (sizeof array_type);
   () = () primcall memcpy(new_arr, arr, sizeof array_type);
-  pointer primcall pyon_matrix_from_array(height, width, new_arr);
+  pointer primcall pyon_matrix_from_array(ymin, yend, xmin, xend, new_arr);
 };
 
 procedure pyon_Matrix_PyonFloat_ToArray(pointer mat, pointer dat) -> () {
@@ -482,13 +511,15 @@ procedure pyon_Matrix_PyonFloat_ToArray(pointer mat, pointer dat) -> () {
 };
 
 procedure pyon_Matrix_PyonFloat_Height (pointer mat) -> int {
-  FinIndInt {h} = mat @! PyonMatrix.size_y;
-  h as int;
+  FinIndInt {ymin} = mat @! PyonArray2.bound_ymin;
+  FinIndInt {yend} = mat @! PyonArray2.bound_yend;
+  yend - ymin as int;
 };
 
 procedure pyon_Matrix_PyonFloat_Width (pointer mat) -> int {
-  FinIndInt {w} = mat @! PyonMatrix.size_x;
-  w as int;
+  FinIndInt {xmin} = mat @! PyonArray2.bound_xmin;
+  FinIndInt {xend} = mat @! PyonArray2.bound_xend;
+  xend - xmin as int;
 };
 
 procedure pyon_Matrix_PyonFloat_Copy (pointer mat) -> pointer {

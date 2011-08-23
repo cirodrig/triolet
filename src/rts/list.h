@@ -32,7 +32,7 @@ extern procedure pyon.internal.list.pyon_List_PyonFloat_Free "pyon_List_PyonFloa
   (pointer) -> ();
 
 extern procedure pyon.internal.list.pyon_Matrix_PyonInt_FromArray "pyon_Matrix_PyonInt_FromArray"
-  (int, int, pointer) -> pointer;
+  (int, int, int, int, pointer) -> pointer;
 extern procedure pyon.internal.list.pyon_Matrix_PyonInt_ToArray "pyon_Matrix_PyonInt_ToArray"
   (pointer, pointer) -> ();
 extern procedure pyon.internal.list.pyon_Matrix_PyonInt_Height "pyon_Matrix_PyonInt_Height"
@@ -45,7 +45,7 @@ extern procedure pyon.internal.list.pyon_Matrix_PyonInt_Free "pyon_Matrix_PyonIn
   (pointer) -> ();
 
 extern procedure pyon.internal.list.pyon_Matrix_PyonFloat_FromArray "pyon_Matrix_PyonFloat_FromArray"
-  (int, int, pointer) -> pointer;
+  (int, int, int, int, pointer) -> pointer;
 extern procedure pyon.internal.list.pyon_Matrix_PyonFloat_ToArray "pyon_Matrix_PyonFloat_ToArray"
   (pointer, pointer) -> ();
 extern procedure pyon.internal.list.pyon_Matrix_PyonFloat_Height "pyon_Matrix_PyonFloat_Height"

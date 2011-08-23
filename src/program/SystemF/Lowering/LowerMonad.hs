@@ -61,10 +61,19 @@ initializeLowerEnv :: IdentSupply Var
                    -> IO LowerEnv
 initializeLowerEnv var_supply ll_var_supply type_env var_map = do
   repr_env <- runFreshVarM var_supply mkGlobalReprEnv
+  int_env <- runFreshVarM var_supply mkGlobalIntEnv
   let global_map = IntMap.fromList [(fromIdent $ varID v, v')
                                    | (v, v') <- Map.toList var_map]
-      int_env = DictEnv.empty
   return $ LowerEnv var_supply ll_var_supply type_env int_env repr_env global_map
+
+mkGlobalIntEnv = do
+  minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
+    (varApp (pyonBuiltin the_min_i) [VarT arg1, VarT arg2],
+     return (LL.VarV $ LL.llBuiltin LL.the_fun_min_ii))
+  minus_int <- DictEnv.pattern2 $ \arg1 arg2 ->
+    (varApp (pyonBuiltin the_minus_i) [VarT arg1, VarT arg2],
+     return (LL.VarV $ LL.llBuiltin LL.the_fun_minus_ii))
+  return $ DictEnv.DictEnv [minimum_int, minus_int]
 
 -- | Create the global representation dictionary environment
 mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
@@ -198,7 +207,7 @@ lookupIndexedInt ty = do
                "lookupIndexedInt: Not found for index:\n" ++ show (pprType ty)
   where
     lookup_dict = do
-      dict_env <- Lower $ asks intEnvironment  
+      dict_env <- Lower $ asks intEnvironment 
       DictEnv.lookup ty dict_env
 
 -- | Add a finite indexed integer for this type index to the environment

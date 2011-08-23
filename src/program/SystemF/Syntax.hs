@@ -14,19 +14,29 @@ and case statements branch to alternatives ('Alt').
 
 {-# LANGUAGE DeriveDataTypeable, FlexibleInstances #-}
 module SystemF.Syntax
-    (Lit(..),
-     literalType,
+    (-- * Demand information
+     Dmd(..), Multiplicity(..), Specificity(..),
+     
+     -- * Representation of code
+     Typ(..), Pat(..), TyPat(..), Exp(..), Alt(..), Fun(..),
+
+     -- ** Annotations on expressions
      ExpInfo,
      defaultExpInfo,
      mkExpInfo,
-     Typ(..), Pat(..), TyPat(..), Exp(..), Alt(..), Fun(..),
-     SF,
-     TypSF, PatSF, ExpSF, AltSF, FunSF,
+     
+     -- ** Literals
+     Lit(..),
+     literalType,
+     
+     -- ** Expressions and functions
      BaseExp(..),
      BaseAlt(..),
      getAltExTypes,
      MonoCon(..),
      BaseFun(..),
+     
+     -- ** Function definitions
      Def(..), mkDef, mkWrapperDef,
      mapDefiniens,
      mapMDefiniens,
@@ -36,13 +46,18 @@ module SystemF.Syntax
      defaultDefAnn,
      InliningAnnotation(..),
      DefGroup(..), defGroupMembers,
+     
+     -- ** Top-level constructs
      Export(..),
      Module(..),
+     
+     -- ** System F types
+     SF,
+     TypSF, PatSF, ExpSF, AltSF, FunSF,
+
+     -- * Utility functions
      isValueExp,
      unpackPolymorphicCall,
-     {-
-     mapSFExp, mapAlt, mapPat,
-     traverseSFExp, traverseAlt, traversePat,-}
      isDictionaryTypeCon,
      isDictionaryDataCon,
      isSingletonCon,
@@ -62,6 +77,44 @@ import Common.SourcePos
 import Builtins.Builtins
 import Type.Type
 import Export
+
+-------------------------------------------------------------------------------
+-- Demand information
+
+-- Most demand-related functions are defined in Demand.hs.
+
+-- | Variables are assigned a demand in 'Dmd'
+data Dmd = Dmd { multiplicity :: !Multiplicity
+               , specificity :: !Specificity
+               }
+
+-- | How many times a variable is used.
+data Multiplicity =
+    Dead            -- ^ Not used
+  | OnceSafe        -- ^ Used once, not under lambda
+  | ManySafe        -- ^ Used in multiple mutually-exclusive locations
+  | OnceUnsafe      -- ^ Used once under a lambda
+  | ManyUnsafe      -- ^ Used many times
+  deriving(Eq)
+
+-- | What part of a value is used.
+data Specificity =
+    Used              -- ^ Used in an unknown way.  This is the top value.
+  | Inspected
+    -- ^ Deconstructed by a case statement or read by 'copy'.
+
+  | Decond !MonoCon [Specificity]
+    -- ^ Deconstructed at a known constructor.
+    --
+    --   We save the type arguments and existential type parameters
+    --   of the data constructor
+    --   so that we can create a @case@ statement from this info.
+    --
+    --   Includes a list describing how each field is used.  There is one list
+    --   member for each value field.
+  | Unused            -- ^ Not used at all.  This is the bottom value.
+
+-------------------------------------------------------------------------------
 
 -- | Literal values.
 --
@@ -255,7 +308,7 @@ mkDef :: Var -> Fun s -> Def s
 mkDef v f = Def v defaultDefAnn f
 
 mkWrapperDef :: Var -> Fun s -> Def s
-mkWrapperDef v f = Def v (defaultDefAnn {defAnnInlining = InlWrapper}) f
+mkWrapperDef v f = Def v (defaultDefAnn {defAnnInlinePhase = InlWrapper}) f
 
 mapDefiniens :: (Fun s -> Fun s') -> Def s -> Def s'
 mapDefiniens f def = def {definiens = f $ definiens def}
@@ -268,17 +321,25 @@ modifyDefAnnotation :: (DefAnn -> DefAnn) -> Def s -> Def s
 modifyDefAnnotation f d = d {defAnnotation = f (defAnnotation d)}
 
 defIsWrapper :: Def s -> Bool
-defIsWrapper def = defAnnInlining (defAnnotation def) == InlWrapper
+defIsWrapper def = defAnnInlinePhase (defAnnotation def) == InlWrapper
 
 -- | Annotations on a function definition
 data DefAnn =
   DefAnn
-  { -- | A tag controlling inlining.
-    defAnnInlining :: !InliningAnnotation
+  { -- | A tag controlling when inlining occurs
+    defAnnInlinePhase :: !InliningAnnotation
+    
+    -- | A tag controlling how aggressively to inline.  If 'True', the
+    --   function should be aggressively inlined.
+  , defAnnInlineRequest :: !Bool
+    
+    -- | The uses of this definition,
+    -- as determined by demand analysis
+  , defAnnUses :: !Multiplicity
   }
 
 defaultDefAnn :: DefAnn
-defaultDefAnn = DefAnn InlNormal
+defaultDefAnn = DefAnn InlNormal False ManyUnsafe
 
 -- | An annotation controlling when a function may be inlined.
 --
@@ -300,7 +361,7 @@ data InliningAnnotation =
   | InlFinal                    -- ^ A sequential loop function.  The function
                                 --   should be inlined after rewriting
                                 --   sequential loops.
-    deriving (Eq, Enum)
+    deriving (Eq, Enum, Show)
 
 -- | A definition group consists of either a single non-recursive definition
 --   or a list of recursive definitions.  The list must not be empty.
@@ -379,6 +440,8 @@ isDictionaryTypeCon :: Var -> Bool
 isDictionaryTypeCon v =
   v `elem` [ pyonBuiltin the_Repr
            , pyonBuiltin the_TraversableDict
+           , pyonBuiltin the_ShapeDict
+           , pyonBuiltin the_IndexableDict
            , pyonBuiltin the_EqDict
            , pyonBuiltin the_OrdDict
            , pyonBuiltin the_AdditiveDict
@@ -394,6 +457,8 @@ isDictionaryDataCon :: Var -> Bool
 isDictionaryDataCon v =
   v `elem` [ -- There's no data constructor for "Repr" in System F
              pyonBuiltin the_traversableDict
+           , pyonBuiltin the_shapeDict
+           , pyonBuiltin the_indexableDict
            , pyonBuiltin the_eqDict
            , pyonBuiltin the_ordDict
            , pyonBuiltin the_additiveDict

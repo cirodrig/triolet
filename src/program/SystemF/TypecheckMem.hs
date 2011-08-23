@@ -346,7 +346,7 @@ typeInferCaseE inf scr alts = do
   return $! ExpTM $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
 
 typeCheckAlternative :: SourcePos -> Type -> AltM -> TCM AltTM
-typeCheckAlternative pos scr_type (AltM (DeCon { altConstructor = con
+typeCheckAlternative pos scr_type alt@(AltM (DeCon { altConstructor = con
                                                , altTyArgs = types
                                                , altExTypes = ex_fields
                                                , altParams = fields

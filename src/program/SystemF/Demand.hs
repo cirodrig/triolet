@@ -53,11 +53,6 @@ instance Dataflow a => Dataflow (IntMap.IntMap a) where
   joinPar m1 m2 = IntMap.unionWith joinPar m1 m2
   joinSeq m1 m2 = IntMap.unionWith joinSeq m1 m2
 
--- | Variables are assigned a demand in 'Dmd'
-data Dmd = Dmd { multiplicity :: !Multiplicity
-               , specificity :: !Specificity
-               }
-
 -- | A 'Dmd' can be renamed by renaming its specificity.
 --   The 'multiplicity' field does not mention variable names.
 instance Renameable Dmd where
@@ -84,15 +79,6 @@ instance Dataflow Dmd where
   joinPar (Dmd m1 s1) (Dmd m2 s2) = Dmd (joinPar m1 m2) (joinPar s1 s2)
   joinSeq (Dmd m1 s1) (Dmd m2 s2) = Dmd (joinSeq m1 m2) (joinSeq s1 s2)
 
--- | How many times a variable is used.
-data Multiplicity =
-    Dead            -- ^ Not used
-  | OnceSafe        -- ^ Used once, not under lambda
-  | ManySafe        -- ^ Used in multiple mutually-exclusive locations
-  | OnceUnsafe      -- ^ Used once under a lambda
-  | ManyUnsafe      -- ^ Used many times
-  deriving(Eq)
-
 showMultiplicity :: Multiplicity -> String
 showMultiplicity Dead = "0"
 showMultiplicity OnceSafe = "1"
@@ -118,23 +104,6 @@ instance Dataflow Multiplicity where
   joinSeq Dead x = x
   joinSeq x Dead = x
   joinSeq _ _    = ManyUnsafe
-
--- | What part of a value is used.
-data Specificity =
-    Used              -- ^ Used in an unknown way.  This is the top value.
-  | Inspected
-    -- ^ Deconstructed by a case statement or read by 'copy'.
-
-  | Decond !MonoCon [Specificity]
-    -- ^ Deconstructed at a known constructor.
-    --
-    --   We save the type arguments and existential type parameters
-    --   of the data constructor
-    --   so that we can create a @case@ statement from this info.
-    --
-    --   Includes a list describing how each field is used.  There is one list
-    --   member for each value field.
-  | Unused            -- ^ Not used at all.  This is the bottom value.
 
 instance Renameable Specificity where
   rename rn spc =

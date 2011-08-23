@@ -355,7 +355,8 @@ dmdGroup defgroup do_body =
          Dead -> return ([], body)
          _ -> do
            def' <- dmdDef def
-           return ([NonRec def'], body)
+           let def'' = set_def_uses dmd def'
+           return ([NonRec def''], body)
 
      Rec defs ->
        let local_vars = map definiendum defs
@@ -371,10 +372,25 @@ dmdGroup defgroup do_body =
                       varID $ definiendum new_def,
                       uses)
                     | (new_def, uses) <- defs_and_uses]
+
+          new_defs_and_uses :: [DefGroup (Def Mem, Dmds)]
           new_defs_and_uses = partitionDefGroup members body_uses
-          new_defs = map (fmap fst) new_defs_and_uses
-          new_uses = joinSeqs $ map snd $ concatMap defGroupMembers new_defs_and_uses
-      in ((new_defs, body), new_uses `joinSeq` body_uses)
+
+          new_uses =
+            let local_function_uses =
+                  map snd $ concatMap defGroupMembers new_defs_and_uses
+            in joinSeqs (body_uses : local_function_uses)
+
+          new_defs = map (fmap (set_uses . fst)) new_defs_and_uses
+            where
+              -- Save the local function's demand information
+              set_uses def =
+                let dmd = lookupDmd (definiendum def) new_uses
+                in set_def_uses dmd def
+      in ((new_defs, body), new_uses)
+    
+    set_def_uses dmd def =
+      modifyDefAnnotation (\a -> a {defAnnUses = multiplicity dmd}) def
 
 -- | Given the members of a definition group, the variables mentioned by them, 
 --   and the set of members that are referenced by the rest of the program,

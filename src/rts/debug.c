@@ -20,3 +20,7 @@ void pyon_db_float(float f) {
 void pyon_db_pointer(void *p) {
   fprintf(stderr, "pyon_db: %p\n", p);
 }
+
+void pyon_exit(int arg) {
+  exit(arg);
+}

@@ -13,7 +13,9 @@ import CParser2.AST
 import qualified Data.Map as Map
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
+import qualified SystemF.TypecheckMem
 import Type.Environment
+import qualified Type.Compare
 import qualified Type.Eval
 import Type.Var
 import Type.Type(Binder(..), Level(..))
@@ -58,18 +60,21 @@ defAttributes attrs ann =
     -- Invalid attributes are checked when inserting.
     check_attrs = check_inlining_attrs
 
-    -- There should be at most one inlining-related attribute
+    -- There should be at most one inlining phase attribute
     check_inlining_attrs =
       case filter (`elem` [InlineSequentialAttr, InlineFinalAttr]) attrs
       of []  -> ()
          [_] -> ()
-         _   -> internalError "Functions may not have more than one inlining attribute"
+         _   -> internalError "Functions may not have more than one inlining phase attribute"
 
+    insert_attribute InlineAttr ann =
+      ann {SystemF.defAnnInlineRequest = True}
+    
     insert_attribute InlineSequentialAttr ann =
-      ann {SystemF.defAnnInlining = SystemF.InlSequential}
+      ann {SystemF.defAnnInlinePhase = SystemF.InlSequential}
     
     insert_attribute InlineFinalAttr ann =
-      ann {SystemF.defAnnInlining = SystemF.InlFinal}
+      ann {SystemF.defAnnInlinePhase = SystemF.InlFinal}
 
     insert_attribute _ _ =
       internalError "Unexpected function attribute"
@@ -323,5 +328,22 @@ createCoreFunctions var_supply tenv mod =
   case checkModule mod
   of Module decls -> do
        defs <- runTypeEvalM (runReaderT (mapM translateDecl decls) Map.empty) var_supply tenv
+       mapM_ check_def_type defs
        return $ SystemF.Module builtinModuleName [] [SystemF.Rec defs] []
-      
+  where
+    -- Given a function definition, ensure that the function's actual type
+    -- is consistent with the type found in the type environment.
+    check_def_type def = do
+      let fname = SystemF.definiendum def
+          declared_type =
+            case lookupType fname tenv
+            of Just t -> t
+               Nothing -> internalError $ "No type declared for function: " ++
+                          show (SystemF.definiendum def)
+          defined_type =
+            SystemF.TypecheckMem.functionType $ SystemF.definiens def
+      ok <- runTypeEvalM
+            (Type.Compare.compareTypes declared_type defined_type)
+            var_supply tenv
+      when (not ok) $ fail ("Definition of function '" ++ show fname ++ "' doesn't match declared type")
+           

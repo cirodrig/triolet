@@ -78,7 +78,7 @@ data Expr id =
 
 -- | A component of a slice expression
 data Slice id =
-    SliceSlice SourcePos (Expr id) (Expr id) (Maybe (Expr id)) 
+    SliceSlice SourcePos !(Maybe (Expr id)) !(Maybe (Expr id)) !(Maybe (Maybe (Expr id)))
   | ExprSlice (Expr id)
 
 type Annotation id = Maybe (Expr id)

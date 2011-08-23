@@ -5,7 +5,7 @@ typedef struct {} PyonMatrix;
 #define DECLARE_MATRIX(T)						\
 									\
   PyonMatrix *								\
-  pyon_Matrix_ ## T ## _FromArray(int height, int width, T *data);	\
+  pyon_Matrix_ ## T ## _FromArray(int ymin, int yend, int xmin, int xend, T *data); \
 									\
   void									\
   pyon_Matrix_ ## T ## _ToArray(PyonMatrix *list, T *data);		\

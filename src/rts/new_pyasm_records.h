@@ -32,10 +32,11 @@ record FinIndInt {
 };
 
 #define FINITE uint8 0
-#define INFINITE uint8 1
+#define POSINFTY uint8 1
+#define NEGINFTY uint8 2
 
 record IndInt {
-  const uint8 tag;		// {FINITE, INFINITE}
+  const uint8 tag;		// {FINITE, POSINFTY, NEGINFTY}
   const IndIntData val;		// if FINITE
 };
 
@@ -151,6 +152,12 @@ record Pair(a) {
   a snd;
 };
 
+record SliceObject {
+  Maybe(int) lo_bound;
+  Maybe(int) hi_bound;
+  Maybe(Maybe(int)) stride;
+};
+
 /* Arrays (called "lists")
  *
  * A list consists of a size and a pointer to an array of list elements.
@@ -164,15 +171,19 @@ record PyonList {
   pointer contents;		// Pointer to list contents
 };
 
-/* 2D arrays (called "matrices")
+/* 2D arrays
  *
- * A matrix consists of its dimensions and a pointer to an array of elements.
- * The dimensions are (y, x).  Array elements are consecutive in the X
- * dimension.
+ * An array has a lower and upper bound in each dimension.
+ * The lower bound is inclusive and the upper bound is not.
+ * The upper bound is greater than or equal to the lower bound.
+ * The dimensions are given in the order (y, x).
+ * Array elements are consecutive in the X dimension.
  */
-record PyonMatrix {
-  FinIndInt size_y;
-  FinIndInt size_x;
+record PyonArray2 {
+  FinIndInt bound_ymin;
+  FinIndInt bound_yend;
+  FinIndInt bound_xmin;
+  FinIndInt bound_xend;
   pointer contents;		// Pointer to matrix contents
 };
 

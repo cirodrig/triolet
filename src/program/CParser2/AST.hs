@@ -63,6 +63,8 @@ unLoc (L _ x) = x
 -- | Attribute annotations from the source code
 data Attribute =
     AbstractAttr                    -- ^ Data type is abstract
+  | InlineAttr                      -- ^ Definition should be aggressively
+                                    --   inlined
   | InlineSequentialAttr            -- ^ Definition should not be inlined until
                                     --   the sequential compilation phase
   | InlineFinalAttr                 -- ^ Definition should not be inlined until

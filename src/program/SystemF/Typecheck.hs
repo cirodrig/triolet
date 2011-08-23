@@ -112,9 +112,9 @@ instantiatePatternType :: SourcePos -- ^ Position where pattern was mentioned
                        -- ^ Compute field types and range type
 instantiatePatternType pos con_ty arg_vals ex_vars
   | length (dataConPatternParams con_ty) /= length arg_vals =
-      internalError "instantiatePatternType: Wrong number of type parameters"
+      internalError $ "instantiatePatternType: Wrong number of type parameters at " ++ show pos
   | length (dataConPatternExTypes con_ty) /= length ex_vars =
-      internalError "instantiatePatternType: Wrong number of existential variables"
+      internalError $ "instantiatePatternType: Wrong number of existential variables at " ++ show pos
   | otherwise = do
       -- Check argument types
       zipWithM_ check_argument_type (dataConPatternParams con_ty) arg_vals

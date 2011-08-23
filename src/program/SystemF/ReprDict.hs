@@ -202,6 +202,9 @@ createDictEnv = do
         valueDict (pyonBuiltin the_float) (pyonBuiltin the_repr_float)
   let efftok_dict =
         valueDict (pyonBuiltin the_EffTok) (pyonBuiltin the_repr_EffTok)
+      sliceobj_dict =
+        DictEnv.monoPattern (VarT $ pyonBuiltin the_SliceObject)
+        (MkDict $ return $ ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_SliceObject))
   repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
   stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 2
   eq_dict <- createBoxedDictPattern (pyonBuiltin the_EqDict) 1
@@ -255,6 +258,7 @@ createDictEnv = do
   let dict_env = DictEnv.DictEnv [repr_dict, storedBox_dict,
                                   stream_dict,
                                   float_dict, int_dict, efftok_dict,
+                                  sliceobj_dict,
                                   list_dict, complex_dict, array_dict,
                                   referenced_dict, maybe_dict,
                                   tuple2_dict, tuple3_dict, tuple4_dict,
@@ -265,7 +269,10 @@ createDictEnv = do
   minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin the_min_i) [VarT arg1, VarT arg2],
      createInt_min arg1 arg2)
-  let index_env = DictEnv.DictEnv [minimum_int]
+  minus_int <- DictEnv.pattern2 $ \arg1 arg2 ->
+    (varApp (pyonBuiltin the_minus_i) [VarT arg1, VarT arg2],
+     createInt_minus arg1 arg2)
+  let index_env = DictEnv.DictEnv [minimum_int, minus_int]
 
   return $ SingletonValueEnv { reprDictEnv = dict_env
                              , shapeDictEnv = DictEnv.DictEnv []
@@ -439,3 +446,14 @@ createInt_min param_var1 param_var2 subst = MkDict $ do
     param2 = getParamType param_var2 subst
 
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
+
+createInt_minus param_var1 param_var2 subst = MkDict $ do
+  int1 <- lookupIndexedInt' param1
+  int2 <- lookupIndexedInt' param2
+  return $ ExpM $
+    AppE defaultExpInfo oper [TypM param1, TypM param2] [int1, int2]
+  where
+    param1 = getParamType param_var1 subst
+    param2 = getParamType param_var2 subst
+
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_minus_ii)

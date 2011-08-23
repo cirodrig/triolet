@@ -368,7 +368,7 @@ lowerDefGroup defgroup k =
   where
     assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (Def v _ (FunTM (TypeAnn return_type _))) k =
+    assume_variable (Def v _ f@(FunTM (TypeAnn return_type _))) k =
       assumeVar v return_type k
 
 lowerDefGroupG :: DefGroup (Def (Typed Mem))

@@ -46,6 +46,7 @@ import SystemF.KnownValue
 
 import Common.Error
 import Common.Identifier
+import Common.MonadLogic
 import Common.Supply
 import qualified SystemF.DictEnv as DictEnv
 import SystemF.ReprDict
@@ -85,6 +86,9 @@ data LREnv =
     
     -- | Singleton values such as class dictionaries
   , lrDictEnv :: SingletonValueEnv
+    
+    -- | The return parameter of the current function, if there is one
+  , lrReturnParameter :: !(Maybe PatM)
     
     -- | Number of simplification steps to perform.  For debugging, we may
     --   stop simplification after a given number of steps.
@@ -141,6 +145,16 @@ getRewriteRules = LR $ \env -> return (lrRewriteRules env)
 
 getPhase :: LR SimplifierPhase
 getPhase = LR $ \env -> return (lrPhase env)
+
+getCurrentReturnParameter :: LR (Maybe PatM)
+getCurrentReturnParameter = LR $ \env -> return (lrReturnParameter env)
+
+setCurrentReturnParameter :: Maybe PatM -> LR a -> LR a
+setCurrentReturnParameter x m = LR $ \env ->
+  let env' = env {lrReturnParameter = x}
+  in runLR m env'
+
+clearCurrentReturnParameter = setCurrentReturnParameter Nothing
 
 lookupKnownValue :: Var -> LR MaybeValue
 lookupKnownValue v = LR $ \env ->
@@ -203,26 +217,57 @@ isRecInliningCandidate _ def =
 -- | Decide whether a function may be inlined (outside of its own definition
 --   group).  The function's attributes are used for the decision.
 --
---   We do not take into account here whether it's /beneficial/ to inline the
---   function.
+--   The inlining annotation must allow inlinng.  Furthermore, the function
+--   must either be used only once (to avoid code size explosion)
+--   or be marked for aggressive inlining.
 isInliningCandidate :: SimplifierPhase -> Def Mem -> Bool
-isInliningCandidate phase def =
-  let ann = defAnnInlining $ defAnnotation def
-  in case phase
-     of GeneralSimplifierPhase ->
-          case ann
-          of InlNormal     -> True 
-             InlWrapper    -> True
-             InlSequential -> False
-             InlFinal      -> False
-        SequentialSimplifierPhase ->
-          case ann
-          of InlNormal     -> True 
-             InlWrapper    -> True
-             InlSequential -> True
-             InlFinal      -> False
-        FinalSimplifierPhase ->
-          True
+isInliningCandidate phase def = phase_ok && code_growth_ok
+  where
+    ann = defAnnotation def
+      
+    -- Check whether inlining is allowed in the current phase
+    phase_ok =
+      case phase
+      of GeneralSimplifierPhase ->
+           case defAnnInlinePhase ann
+           of InlNormal     -> True 
+              InlWrapper    -> True
+              InlSequential -> False
+              InlFinal      -> False
+         SequentialSimplifierPhase ->
+           case defAnnInlinePhase ann
+           of InlNormal     -> True 
+              InlWrapper    -> True
+              InlSequential -> True
+              InlFinal      -> False
+         FinalSimplifierPhase ->
+           True
+
+    -- Decide whether code growth is reasonable
+    code_growth_ok =
+      is_wrapper || is_used_once || is_marked_inline || is_small
+      where
+        is_wrapper = defAnnInlinePhase ann == InlWrapper
+        is_marked_inline = defAnnInlineRequest ann
+        is_used_once =
+          case defAnnUses ann
+          of OnceSafe -> True
+             OnceUnsafe -> True
+             _ -> False
+
+        is_small =
+          -- The inlined function will consist of the function body,
+          -- and it will replace a function call.  Compare the function
+          -- body's size to the threshold plus the function call size.
+          let FunM function = definiens def
+              num_args = length (funParams function) +
+                         length (funTyParams function)
+              threshold = fun_size_threshold + num_args + 1
+          in expSize (funBody function) `compareCodeSize` threshold
+
+    -- An arbitrary function size threshold.  Functions smaller than this
+    -- will be inlined aggressively.
+    fun_size_threshold = 5
 
 -- | Add a pattern-bound variable to the environment.  
 --   This adds the variable's type to the environment and
@@ -310,6 +355,61 @@ rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
     inf operator ty_args args
 
 -------------------------------------------------------------------------------
+-- Estimating code size
+  
+-- | Decide whether some code is below a given size threshold.
+--   @checkCodeSize x n@ returns @n - sizeof x@ if @x@ is smaller than @n@,
+--   or a nonpositive number otherwise.
+newtype CodeSizeTest = CodeSizeTest {checkCodeSize :: Int -> Int}
+
+-- | Return 'True' if the code size turns out to be smaller than the threshold
+compareCodeSize :: CodeSizeTest -> Int -> Bool
+compareCodeSize t n = checkCodeSize t n > 0
+
+instance Monoid CodeSizeTest where
+  mempty = CodeSizeTest id
+  f1 `mappend` f2 = CodeSizeTest $ \space ->
+    let space' = checkCodeSize f1 space
+    in if space' <= 0 then 0 else checkCodeSize f2 space'
+
+codeSize :: Int -> CodeSizeTest
+codeSize n = CodeSizeTest (\space -> space - n)
+
+-- | Decide whether a function's code size is less than the given cutoff.
+expSize :: ExpM -> CodeSizeTest
+expSize (ExpM expression) =
+  case expression
+  of VarE {} -> codeSize 1
+     LitE {} -> codeSize 1
+     UTupleE _ es -> codeSize 1 `mappend` expSizes es
+     AppE _ op ts args -> codeSize (1 + length ts) `mappend` expSizes (op : args)
+     LamE _ f -> funSize f
+     LetE _ b rhs body -> codeSize 1 `mappend` expSize rhs `mappend` expSize body
+     LetfunE _ defs body ->
+       mconcat (expSize body : map (funSize . definiens) (defGroupMembers defs))
+     CaseE _ scr alts -> expSize scr `mappend` alt_sizes alts
+     ExceptE {} -> codeSize 1
+     CoerceE _ _ _ b -> codeSize 1 `mappend` expSize b
+  where
+    alt_sizes xs = mconcat $ map alt_size xs
+    alt_size (AltM (DeCon _ ty_args ex_types params body)) =
+      codeSize (length ty_args + length ex_types + length params) `mappend`
+      expSize body
+    alt_size (AltM (DeTuple tys body)) =
+      codeSize (length tys) `mappend` expSize body
+
+expSizes :: [ExpM] -> CodeSizeTest
+expSizes es = mconcat $ map expSize es
+
+funSize :: FunM -> CodeSizeTest
+funSize (FunM function) =
+  codeSize (length (funTyParams function) + length (funParams function))
+  `mappend` expSize (funBody function)
+
+funIsSmallerThan :: FunM -> Int -> Bool
+funIsSmallerThan f n = compareCodeSize (funSize f) n
+
+-------------------------------------------------------------------------------
 -- Inlining
 
 -- | Decide whether to inline the expression, which is the RHS of an
@@ -328,9 +428,8 @@ worthPreInlining tenv dmd expr =
   let should_inline =
         case multiplicity dmd
         of OnceSafe -> inlckTrue
-           ManySafe -> inlckTrivial
            OnceUnsafe -> inlckTrivial `inlckOr` inlckFunction
-           _ -> inlckFalse
+           _ -> inlckTrivial
   in if should_inline tenv dmd expr
      then Just (InlAV expr)
      else Nothing
@@ -745,6 +844,9 @@ liftR m = Restructure $ do
   x <- m
   return (Restructured [] x)
 
+liftRT :: (forall a. LR a -> LR a) -> Restructure a -> Restructure a
+liftRT t m = Restructure $ t $ restructure m
+
 -- | Add the context produced by @m@ to the environment in the continuation
 floatAndAssume :: Restructure a -> (a -> Restructure b) -> Restructure b
 floatAndAssume m k = Restructure $ restructure m >>= continue
@@ -814,7 +916,7 @@ flattenLetfunExp inf defs body = do
   floatItem floated
   return (rename rn body)
 
-flattenCaseExp inf scr alts = do
+flattenCaseExp inf scr alts = db_flatten_case $ do
   -- Perform floating in the scrutinee
   floated_scr <-
     -- Flatten the scrutinee
@@ -849,6 +951,20 @@ flattenCaseExp inf scr alts = do
       floatItem rn_case_ctx
       return $ rename rn case_body
   where
+    -- Run the computation, then print debugging otuput
+    db_flatten_case m = m
+    {-db_flatten_case m = Restructure $ do
+      x <- restructure m
+      case x of
+        Restructured [] _ -> return x
+        Excepting -> return x
+        Restructured ctx new_exp ->
+          -- Use a fake type when showing the result
+          traceShow (hang (text "Restructured case") 2
+                     (pprExp (ExpM $ CaseE inf scr alts) $$ text "----" $$
+                      pprExp (applyContextWithType (IntT 1) ctx new_exp))) $
+          return x-}
+
     -- Assign the scrutinee value to a new variable, and float the assignment.
     -- Return the new scrutinee (which is the newly created variable).
     float_scrutinee flattened_scr = do
@@ -866,9 +982,44 @@ flattenCaseExp inf scr alts = do
       return (ExpM $ VarE inf scr_var)
 
 flattenAppExp inf op ty_args args = do
+  tenv <- liftR getTypeEnv
   oper' <- flattenExp op
-  args' <- flattenExps args
+  args' <-
+    case oper'
+    of ExpM (VarE _ op_var)
+         | Just (data_type, dcon) <- lookupDataConWithType op_var tenv -> do
+             -- Flattening looks through initializer functions in
+             -- fully applied data constructors, since initializers are
+             -- guaranteed to be executed.
+             let field_kinds = dataConFieldKinds tenv dcon
+                 num_args = length args
+                 num_fields = length field_kinds
+                 is_fully_applied =
+                   case dataTypeKind data_type
+                   of BareK -> num_args == 1 + num_fields
+                      _     -> num_args == num_fields
+                 extra_args = drop num_fields args
+
+                 -- Flatten under lambda in initializer fields
+                 flatten_field BareK e = flattenUnderLambda e
+                 flatten_field _ e     = flattenExp e
+
+             if is_fully_applied
+               then do fields <- zipWithM flatten_field field_kinds args
+                       return (fields ++ extra_args)
+               else flattenExps args
+       _ -> flattenExps args
+
   return $ appE inf oper' ty_args args'
+
+flattenUnderLambda expression =
+  case fromExpM expression
+  of LamE inf (FunM f) ->
+       liftRT (assumeTyPatMs (funTyParams f) . assumePatterns (funParams f)) $
+       trace "FIXME: Anchor floats in flattenUnderLambda" $ do
+         body' <- flattenExp (funBody f)
+         return $ ExpM $ LamE inf $ FunM (f {funBody = body'})
+     _ -> flattenExp expression
 
 -- | Restructure an expression.  Find subexpressions that have local bindings
 --   and float those bindings outward.  Bindings are only floated out from 
@@ -902,6 +1053,165 @@ restructureExp ex = restructure (flattenExp ex) >>= rebuild
                      ExpM $ ExceptE defaultExpInfo e_type
 
 -------------------------------------------------------------------------------
+-- Useless copying
+
+-- | Detect and eliminate useless copying.
+--
+--   The following specific code patterns (and some minor variations) 
+--   are detected by this routine.  In each case, the pattern is simplified to
+--   just the expression @E@.
+--   The first pattern is let binding a value that could be returned 
+--   directly.
+--
+-- > let x = E in x
+--
+--   The next is deconstructing a value only to rebuild it.
+--
+-- > case E of C x y z. C x y z
+--
+--   The last is initializing a temporary variable, then copying it to another
+--   location.
+--
+-- > case boxed @t E of boxed @t x. copy t r x
+eliminateUselessCopying :: ExpM -> LR ExpM
+eliminateUselessCopying (ExpM expression) =
+  case expression
+  of LetE inf bind rhs body@(ExpM (VarE _ body_var))
+       | patMVar bind == body_var ->
+           -- Useless let expression
+           consumeFuel >> return rhs
+
+     CaseE inf scrutinee alts -> do
+       tenv <- getTypeEnv
+
+       -- First, try to detect the case where a value is deconstructed and
+       -- reconstructed
+       uses <- mapM (useless_alt tenv) alts
+       
+       -- Useless if all alternatives are useless.
+       -- In well-typed code, all return parameters must be the same.
+       case sequence uses of
+         Just (Nothing : _) ->
+           consumeFuel >> return scrutinee
+         {- TODO: Generate simplified code in this case.
+         -- We must get rid of the old return
+         -- argument by eta-reducing the scrutinee, then apply it to the new
+         -- return argument.
+
+         Just (Just p : _) -> undefined
+
+         -}
+
+         _ ->
+           -- Next, try to detect the case where a value is constructed and
+           -- then copied
+           case eliminate_unbox_and_copy tenv scrutinee alts
+           of Nothing ->
+                return (ExpM expression) -- Not useless
+              Just new_exp ->
+                consumeFuel >> return new_exp
+
+     _ -> return (ExpM expression)
+  where
+    -- Try to detect and simplify the pattern
+    -- @case boxed E of boxed x. copy x@
+    eliminate_unbox_and_copy tenv scrutinee alts =
+      case unpackDataConAppM tenv scrutinee
+      of Just (dcon, [ty_arg], [], [initializer])
+           | dataConCon dcon `isPyonBuiltin` the_boxed ->
+             case alts
+             of [AltM (DeCon _ _ _ [field] body)] ->
+                  -- Body should be @copy _ _ x@ or @copy _ _ x e@
+                  -- where @x@ is the bound variable
+                  case unpackVarAppM body
+                  of Just (op, ty_args, (_ : ExpM (VarE _ src) : body_args))
+                       | op `isPyonBuiltin` the_copy && src == patMVar field ->
+                         -- Match found
+                         Just $ appE defaultExpInfo initializer [] body_args
+                     _ -> Nothing
+         _ -> Nothing
+
+    -- Decide whether the alternative is useless.
+    -- Return @Nothing@ if not useless.
+    -- Return @Just Nothing@ if useless and there's no return parameter.
+    -- Return @Just (Just p)@ if useless and the return parameter is @p@.
+    useless_alt tenv (AltM (DeCon con alt_ty_args alt_ex_typarams alt_fields body)) =
+      case unpackDataConAppM tenv body
+      of Just (dcon, body_ty_args, body_ex_args, body_fields)
+           | dataConCon dcon == con ->
+             -- This alternative unpacks and repacks the same
+             -- data constructor.  Check whether all fields are equal.
+             let dtype = case lookupDataType (dataConTyCon dcon) tenv
+                         of Just t -> t
+                 need_return_parameter = dataTypeKind dtype == BareK
+             in compare_pattern_to_expression need_return_parameter
+                (map fromTypM alt_ty_args) alt_ex_typarams alt_fields
+                body_ty_args body_ex_args body_fields
+         _ ->
+           return Nothing
+
+    useless_alt tenv (AltM (DeTuple alt_fields body)) =
+      case body
+      of ExpM (UTupleE _ body_fields) ->
+           compare_pattern_to_expression False [] [] alt_fields [] [] body_fields
+         _ -> return Nothing
+
+    -- Compare fields of a pattern to fields of a data constructor expression
+    -- to determine whether they match.  The constructor part has already been
+    -- observed to match.
+    compare_pattern_to_expression
+      need_return_parameter
+      alt_ty_args alt_ex_typarams alt_fields
+      exp_ty_args exp_ex_args exp_fields =
+        -- Ensure that the data constructor is applied to
+        -- the correct number of arguments
+        if length alt_ty_args == length exp_ty_args && 
+           length alt_ex_typarams == length exp_ex_args &&
+           length alt_fields == length real_fields &&
+           (if need_return_parameter
+            then length excess_fields == 1
+            else null excess_fields)
+        then assumeTyPatMs alt_ex_typarams $
+             assumePatterns alt_fields $ do
+
+               match_confirmed <-
+                 -- Check type parameters
+                 andM (zipWith compareTypes alt_ty_args exp_ty_args) >&&>
+               
+                 -- Check existential types
+                 andM (zipWith compareTypes alt_ex_types exp_ex_args) >&&>
+                  
+                 -- Check fields
+                 return (and $ zipWith match_field alt_fields exp_fields)
+               return $! if match_confirmed
+                         then case excess_fields 
+                              of [] -> Just Nothing
+                                 [f] -> Just (Just f)
+                                 _ -> internalError "eliminateUselessCopying: Malformed data constructor application"
+                         else Nothing
+        else return Nothing
+      where
+        alt_ex_types = [VarT v | TyPatM (v ::: _) <- alt_ex_typarams]
+                 
+        -- The data constructor may have an extra argument for its
+        -- return pointer.  Separate out that extra argument.
+        real_fields = take (length alt_fields) exp_fields
+        excess_fields = drop (length alt_fields) exp_fields
+        
+        -- This field should either be @v@ (for a value) or
+        -- @copy _ v@ (for an initializer).  Only one possibility is
+        -- well-typed, so go ahead and check for both.
+        match_field pattern expr =
+          case expr
+          of ExpM (VarE _ v) ->
+               v == patMVar pattern
+             _ -> case unpackVarAppM expr
+                  of Just (op, [_], [_, ExpM (VarE _ v)]) ->
+                       op `isPyonBuiltin` the_copy && v == patMVar pattern
+                     _ -> False
+        
+       
+-------------------------------------------------------------------------------
 -- Traversing code
 
 -- | Rewrite an expression.
@@ -914,17 +1224,20 @@ rwExp expression = debug "rwExp" expression $ do
     -- DEBUG: rename variables
     ex1 <- ifFuel expression $ restructureExp expression
 
+    -- If this expression is uselessly copying a data structure, eliminate it
+    ex2 <- ifFuel ex1 $ eliminateUselessCopying ex1
+
     -- Simplify subexpressions.
     --
     -- Even if we're out of fuel, we _still_ must perform some simplification
     -- steps in order to propagate 'InlAV's.  If we fail to propagate
     -- them, the output code will still contain references to variables that
     -- were deleted.
-    case fromExpM ex1 of
-      VarE inf v -> rwVar ex1 inf v
-      LitE inf l -> rwExpReturn (ex1, Just $ LitAV inf l)
+    case fromExpM ex2 of
+      VarE inf v -> rwVar ex2 inf v
+      LitE inf l -> rwExpReturn (ex2, Just $ LitAV inf l)
       UTupleE inf args -> rwUTuple inf args
-      AppE inf op ty_args args -> rwApp ex1 inf op ty_args args
+      AppE inf op ty_args args -> rwApp ex2 inf op ty_args args
       LamE inf fun -> do
         (fun', fun_val) <- rwFun fun
         rwExpReturn (ExpM $ LamE inf fun',
@@ -932,7 +1245,7 @@ rwExp expression = debug "rwExp" expression $ do
       LetE inf bind val body -> rwLet inf bind val body
       LetfunE inf defs body -> rwLetrec inf defs body
       CaseE inf scrut alts -> rwCase inf scrut alts
-      ExceptE _ _ -> rwExpReturn (ex1, Nothing)
+      ExceptE _ _ -> rwExpReturn (ex2, Nothing)
       CoerceE inf from_t to_t body -> rwCoerce inf from_t to_t body
   where
     debug _ _ = id
@@ -973,7 +1286,7 @@ rwVar original_expression inf v = lookupKnownValue v >>= rewrite
 
 rwUTuple inf args = do
   -- Just rewrite subexpressions
-  (args', arg_values) <- mapAndUnzipM rwExp args
+  (args', arg_values) <- clearCurrentReturnParameter $ mapAndUnzipM rwExp args
   arg_types <- mapM inferExpType args'
   
   let ret_value = tupleConValue inf (map TypM arg_types) arg_values
@@ -996,7 +1309,7 @@ rwApp original_expression inf op ty_args args =
     continue op ty_args args =
       rwApp (appE inf op ty_args args) inf op ty_args args
 
-    simplify_op = do
+    simplify_op = clearCurrentReturnParameter $ do
       (op', op_val) <- rwExp op
       let modified_expression = appE inf op' ty_args args
       rwAppWithOperator modified_expression inf op' op_val ty_args args
@@ -1102,7 +1415,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
       rwExp =<< betaReduce inf funm ty_args args
 
 -- | Attempt to statically evaluate a copy
-rwCopyApp inf copy_op ty args = do
+rwCopyApp inf copy_op ty args = debug $ do
   whnf_type <- reduceToWhnf (fromTypM ty)
   case fromVarApp whnf_type of
     Just (op, [val_type])
@@ -1118,6 +1431,14 @@ rwCopyApp inf copy_op ty args = do
                internalError "rwCopyApp: Unexpected number of arguments"
     _ -> unknown_source
   where
+    debug m = m
+    {-
+    debug m = do
+      x@(e, _) <- m
+      traceShow (hang (text "rwCopyApp") 2 $
+             pprExp (appE inf copy_op [ty] args) $$ text "----" $$ pprExp e) $ return x
+    -}
+
     -- If out of fuel, then don't simplify this expression.  Process arguments.
     use_fuel m = useFuel' unknown_source m
     
@@ -1141,7 +1462,7 @@ rwCopyApp inf copy_op ty args = do
                   -- If an output parameter was given, then apply to the
                   -- output parameter
                   let retval =
-                        case args
+                        case args'
                         of [_, _]       -> (new_exp, new_val)
                            [_, _, outp] -> (appE defaultExpInfo new_exp [] [outp], Nothing)
                   return retval
@@ -1190,7 +1511,7 @@ rwLet inf bind@(PatM (bind_var ::: bind_rtype) _) val body =
       tenv <- getTypeEnv
       case worthPreInlining tenv (patMDmd bind) val of
         Just val -> do
-          -- The variable is used exactly once; inline it
+          -- The variable is used exactly once or is trivial; inline it
           consumeFuel
           (body', body_val) <-
             assumePattern bind $ withKnownValue bind_var val $ rwExp body
@@ -1205,7 +1526,7 @@ rwLet inf bind@(PatM (bind_var ::: bind_rtype) _) val body =
 
 rwLetNormal inf bind val body = do
   let bind_var = patMVar bind
-  (val', val_value) <- rwExp val
+  (val', val_value) <- clearCurrentReturnParameter $ rwExp val
 
   -- Inline the RHS expression, if desirable.  If
   -- inlining is not indicated, then propagate its known
@@ -1247,7 +1568,7 @@ rwCase1 _ tenv inf scrut alts
   | [alt@(AltM (DeCon {altConstructor = con}))] <- alts,
     con `isPyonBuiltin` the_boxed = do
       -- Rewrite the scrutinee
-      (scrut', scrut_val) <- rwExp scrut
+      (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp scrut
       
       -- If scrutinee is 'boxed' applied to a case statement,
       -- apply case-of-case transformation to move the 'boxed' constructor
@@ -1313,7 +1634,7 @@ rwCase1 have_fuel tenv inf scrut alts
 -- Simplify the scrutinee, then try to simplify the case statement.
 rwCase1 _ tenv inf scrut alts = do
   -- Simplify scrutinee
-  (scrut', scrut_val) <- rwExp scrut
+  (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp scrut
 
   -- Try to deconstruct the new scrutinee expression
   ifElseFuel (can't_deconstruct scrut' scrut_val) $
@@ -1407,7 +1728,7 @@ rwCase2 inf alts scrut' scrut_val = do
           tenv <- getTypeEnv
           let data_value = ConAppAndValue dcon (zip field_exps field_values)
           eliminateCaseWithAppAndValue True tenv data_value alts
-        Nothing -> do
+        _ -> do
           -- Cannot eliminate the case statement. 
           -- However, we may have eliminated some case alternatives. 
           let known_values =
@@ -1439,10 +1760,12 @@ rwCase2 inf alts scrut' scrut_val = do
       case scrut'
       of ExpM (CaseE _ inner_scrut inner_alts)
            | have_fuel &&
-             not (is_product_case tenv) &&
+             {- not (is_product_case tenv) && -}
              isUnfloatableCase scrut' -> do
              -- Apply the case-of-case transformation
-             rwCaseOfCase inf Nothing inner_scrut inner_alts alts
+             ret@(e', _) <- rwCaseOfCase inf Nothing inner_scrut inner_alts alts
+             debug_print_result e'
+             return ret
          _ -> do
            -- Cannot transform; simplify the case alternatives
            alts' <- mapM (rwAlt scrut_var Nothing) alts
@@ -1463,6 +1786,13 @@ rwCase2 inf alts scrut' scrut_val = do
       case scrut'
       of ExpM (VarE _ v) -> Just v
          _               -> Nothing
+
+    -- For printing the result of a case transformation
+    debug_print_result :: ExpM -> LR ()
+    debug_print_result new_exp =
+      let doc1 = pprExp (ExpM $ CaseE inf scrut' alts)
+          doc2 = pprExp new_exp
+      in liftIO $ hPrint stderr (hang (text "rwCaseOfCase") 2 (doc1 $$ text "----" $$ doc2))
 
 -- | Find the alternative matching constructor @con@
 findAlternative :: [AltM] -> Var -> AltM
@@ -1690,11 +2020,12 @@ rwCaseOfCase :: ExpInfo
              -> [AltM]          -- ^ Outer case statement's branches
              -> LR (ExpM, MaybeValue)
 rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
-  outer_defs <- mapM (makeBranchContinuation inf) outer_branches
+  m_return_param <- getCurrentReturnParameter
+  outer_defs <- mapM (makeBranchContinuation inf m_return_param) outer_branches
   let outer_ks = zip outer_branches $ map definiendum outer_defs
 
   -- Put a new case statement into each branch of the inner case statement
-  new_branches <- mapM (invert_branch outer_ks) inner_branches
+  new_branches <- mapM (invert_branch m_return_param outer_ks) inner_branches
 
   let new_case = ExpM $ CaseE inf scrutinee new_branches
       new_expr = foldr bind_outer_def new_case outer_defs
@@ -1702,12 +2033,12 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
           bind_outer_def def e = ExpM $ LetfunE inf (NonRec def) e
   return (new_expr, Nothing)
   where
-    invert_branch outer_ks (AltM branch) =
+    invert_branch m_return_param outer_ks (AltM branch) =
       let boxed_body =
             case result_is_boxed
             of Nothing -> altBody branch
                Just t -> ExpM $ AppE inf boxed_op [t] [altBody branch]
-          body' = caseAnalyze inf outer_ks boxed_body
+          body' = caseAnalyze inf m_return_param outer_ks boxed_body
       in return $ AltM (branch {altBody = body'})
 
     boxed_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_boxed)
@@ -1716,20 +2047,25 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
 --   The pattern-bound variables become function parameters.
 --   If the pattern does not bind any fields, then create a dummy parameter
 --   of type 'NoneType'.
-makeBranchContinuation :: ExpInfo -> AltM -> LR (Def Mem)
-makeBranchContinuation inf (AltM alt) = do
+makeBranchContinuation :: ExpInfo -> Maybe PatM -> AltM -> LR (Def Mem)
+makeBranchContinuation inf m_return_param (AltM alt) = do
   let ex_types = getAltExTypes alt
-  fields <-
-    if null $ altParams alt
+
+  -- If there's a current return parameter,
+  -- pass that to the branch continuation also.
+  -- It's expected by argument flattening.
+  let fun_params = altParams alt ++ maybeToList m_return_param
+  nonempty_params <-
+    if null fun_params
     then do field_var <- newAnonymousVar ObjectLevel
             return [patM (field_var ::: VarT (pyonBuiltin the_NoneType))]
-    else return $ altParams alt
+    else return fun_params
   let body = altBody alt
   return_type <-
-    assumeTyPatMs ex_types $ assumePatterns fields $ inferExpType body
+    assumeTyPatMs ex_types $ assumePatterns nonempty_params $ inferExpType body
        
   fun_name <- newAnonymousVar ObjectLevel
-  let fun = FunM $ Fun inf ex_types fields (TypM return_type) body
+  let fun = FunM $ Fun inf ex_types nonempty_params (TypM return_type) body
 
   -- Simplify the function
   (fun', _) <- rwFun fun
@@ -1741,17 +2077,23 @@ makeBranchContinuation inf (AltM alt) = do
 --   Each alternative is converted to a function, so it must take at least one
 --   parameter.  If the original data constructor had no fields,
 --   create a dummy argument.
-caseAnalyze :: ExpInfo -> [(AltM, Var)] -> ExpM -> ExpM
-caseAnalyze inf branches scrutinee =
+caseAnalyze :: ExpInfo -> Maybe PatM -> [(AltM, Var)] -> ExpM -> ExpM
+caseAnalyze inf m_return_parameter branches scrutinee =
   ExpM $ CaseE inf scrutinee (map dispatch branches)
   where
     dispatch (AltM alt, callee) =
       let ty_args = [TypM $ VarT a | TyPatM (a ::: _) <- getAltExTypes alt]
-          args =
-            if null (altParams alt)
+          return_arg =
+            case m_return_parameter
+            of Nothing -> Nothing
+               Just p -> Just $ ExpM $ VarE inf (patMVar p)
+          args = [ExpM $ VarE inf (patMVar p) | p <- altParams alt] ++
+                 maybeToList return_arg
+          nonempty_args =
+            if null args
             then [ExpM $ VarE inf (pyonBuiltin the_None)]
-            else [ExpM $ VarE inf (patMVar p) | p <- altParams alt]
-          call = ExpM $ AppE inf (ExpM $ VarE inf callee) ty_args args
+            else args
+          call = ExpM $ AppE inf (ExpM $ VarE inf callee) ty_args nonempty_args
       in AltM (alt {altBody = call})
 
 rwCoerce inf from_t to_t body = do
@@ -1774,11 +2116,28 @@ rwFun f = rwFun' =<< freshen in_type_env f
 
 rwFun' (FunM f) =
   assumeTyPatMs (funTyParams f) $
-  assumePatterns (funParams f) $ do
+  assumePatterns (funParams f) $ 
+  set_return_parameter $ do
     (body', body_value) <- rwExp (funBody f)
     let aval = abstract_value body_value
     trace_aval aval $ return (FunM $ f {funParams = params', funBody = body'}, aval)
   where
+    -- If the function has a return parameter, record that fact.
+    -- It has a return parameter if the function's type is
+    -- (... -> OutPtr a -> IEffect b) for some 'a' and 'b'.
+    set_return_parameter k 
+      | null (funParams f) =
+          -- No parameters
+          setCurrentReturnParameter Nothing k
+      | otherwise = do
+        tenv <- getTypeEnv
+        let last_param = last $ funParams f
+            last_param_kind = toBaseKind $ typeKind tenv $ patMType last_param
+            return_kind = toBaseKind $ typeKind tenv $ fromTypM $ funReturn f
+        if last_param_kind == OutK && return_kind == SideEffectK
+          then setCurrentReturnParameter (Just last_param) k
+          else setCurrentReturnParameter Nothing k
+
     -- If a parameter isn't dead, its uses may be changed by simplification
     params' = map update_param $ funParams f
       where
@@ -1866,6 +2225,7 @@ rewriteLocalExpr phase ruleset mod =
     let env = LREnv { lrIdSupply = var_supply
                     , lrRewriteRules = ruleset
                     , lrKnownValues = known_values
+                    , lrReturnParameter = Nothing
                     , lrTypeEnv = tenv
                     , lrDictEnv = denv
                     , lrFuel = fuel

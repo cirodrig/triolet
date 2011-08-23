@@ -133,7 +133,21 @@ pprFunPrec (FunM fun) =
   in text "lambda" <+> sig_doc <> text "." $$ nest 4 body_doc
      `hasPrec` stmtPrec
 
-pprDef (Def v _ f) = hang (pprVar v) 2 (pprFun f)
+pprDef (Def v ann f) = hang (pprVar v <+> ann_doc <+> text "=") 2 (pprFun f)
+  where
+    ann_doc =
+      let phase_doc =
+            case defAnnInlinePhase ann
+            of InlNormal -> empty
+               x -> text (show x)
+          inl_doc =
+            if defAnnInlineRequest ann
+            then text "inline"
+            else empty
+          uses_doc = text $ showMultiplicity (defAnnUses ann)
+      in brackets $ sep $
+         punctuate (text ",") $
+         filter (not . isEmpty) [inl_doc, phase_doc, uses_doc]
 
 pprDefGroup :: DefGroup (Def Mem) -> Doc
 pprDefGroup dg =

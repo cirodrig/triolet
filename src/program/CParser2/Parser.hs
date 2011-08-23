@@ -150,6 +150,7 @@ attr = do
   where
     attr_table =
       [("abstract", return AbstractAttr),
+       ("inline", return InlineAttr),
        ("inline_sequential", return InlineSequentialAttr),
        ("inline_final", return InlineFinalAttr)]
 
@@ -457,8 +458,8 @@ pDataDecl = located $ do
 pDataConDecl :: P (LDataConDecl Parsed)
 pDataConDecl = located $ do
   datacon <- identifier
-  params <- commaList pDomain
-  ex_types <- commaList pDomain
+  (concat -> params) <- commaList pDomains
+  (concat -> ex_types) <- commaList pDomains
   args <- commaList pType
   return $ DataConDecl datacon params ex_types args
 
