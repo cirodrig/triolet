@@ -309,7 +309,13 @@ pprFlatArg (DummyArg pat) = text "dummy"
 isIdArg (FlatArg _ trans) = isIdDecomp trans 
 isIdArg (DummyArg _) = False
 
-isDeadArg (FlatArg _ trans) = isDeadDecomp trans 
+isDeadArg (FlatArg _ trans) =
+  let true = Any True
+      -- The argument is dead if flattening produces no parameters or
+      -- type parameters.
+      not_dead = getAny $ flattenDecomp (const true) (const true) true trans
+  in not not_dead
+
 isDeadArg (DummyArg _) = False
 
 -- | A flattened return.
@@ -1206,7 +1212,10 @@ flattenedFunctionInterface tenv p =
       
       params = input_params ++ output_params
       ty_params = originalTyParams p ++ new_ty_params
-  in (ty_params, params, return_type)
+  in if null params && null ty_params
+     then -- If this happens, the 'FunctionPlan' value is wrong.
+          internalError "flattenedFunctionInterface: No parameters"
+     else (ty_params, params, return_type)
 
 planFunction :: FunM -> AF FunctionPlan
 planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
@@ -1223,8 +1232,12 @@ planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
 
   -- If all parameters are dead and there's no output parameter, then add a
   -- dummy parameter
+  let no_flattened_output_params =
+        case planRetFlattenedInterface tenv ret
+        of ([], _) -> True
+           _ -> False
   x_params <-
-    if all isDeadArg params && null output_params
+    if all isDeadArg params && no_flattened_output_params
     then do pat_var <- newAnonymousVar ObjectLevel
             let dummy_pat = patM (pat_var ::: VarT (pyonBuiltin the_NoneType))
                 dummy = DummyArg dummy_pat
