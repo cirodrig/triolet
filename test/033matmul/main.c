@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pyon.h>
+#include <math.h>
 #include "matmul_interface.h"
 
 #define DIM1 2
@@ -31,8 +32,8 @@ int main()
 {
   Pyon_init();
 
-  PyonMatrix *mat1 = pyon_Matrix_PyonFloat_FromArray(DIM1, DIM2, arr1);
-  PyonMatrix *mat2 = pyon_Matrix_PyonFloat_FromArray(DIM2, DIM3, arr2);
+  PyonMatrix *mat1 = pyon_Matrix_PyonFloat_FromArray(0, DIM1, 0, DIM2, arr1);
+  PyonMatrix *mat2 = pyon_Matrix_PyonFloat_FromArray(0, DIM2, 0, DIM3, arr2);
   PyonMatrix *mat3 = mm(mat1, mat2);
   pyon_Matrix_PyonFloat_Free(mat1);
   pyon_Matrix_PyonFloat_Free(mat2);
