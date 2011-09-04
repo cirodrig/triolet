@@ -1,9 +1,16 @@
-{-| This pass eliminates record value types from the IR by converting
---  record types to multiple-value-passing.  Also, record-valued constants
---  are inlined.
---
--- Record types in parameters or returns are unpacked to multiple parameters 
--- or return values.
+{-|
+
+This pass eliminates record value types from the IR by converting
+record types to multiple-value-passing.  Also, record-valued constants
+are inlined.
+
+After record flattening, records may only appear as
+parameters or return values of exported functions, and in @pack@ and
+@unpack@ statements.  Later stages of the compiler expect to never see a
+record as an argument or result of a function call.
+
+Record types in parameters or returns are unpacked to multiple parameters 
+or return values.
 -}
 
 {-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, ViewPatterns #-}
