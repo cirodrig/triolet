@@ -58,20 +58,20 @@ incOtherLoopCount m = local (modifyLoopNesting inc_count) m
 
 parLoopOperator, otherLoopOperator :: Var -> Bool
 parLoopOperator v =
-  v `elem` [pyonBuiltin the_blocked_reduce,
-            pyonBuiltin the_blocked_reduce1,
-            pyonBuiltin the_blocked_doall]
+  v `elem` [pyonBuiltin The_blocked_reduce,
+            pyonBuiltin The_blocked_reduce1,
+            pyonBuiltin The_blocked_doall]
 
 otherLoopOperator v =
-  v `elem` [pyonBuiltin the_for,
-            pyonBuiltin the_doall,
-            pyonBuiltin the_histogram,
-            pyonBuiltin the_histogramArray,
-            pyonBuiltin the_fun_reduce,
-            pyonBuiltin the_fun_reduce_Stream,
-            pyonBuiltin the_fun_reduce1,
-            pyonBuiltin the_fun_reduce1_Stream,
-            pyonBuiltin the_TraversableDict_list_build]
+  v `elem` [pyonBuiltin The_for,
+            pyonBuiltin The_doall,
+            pyonBuiltin The_histogram,
+            pyonBuiltin The_histogramArray,
+            pyonBuiltin The_fun_reduce,
+            pyonBuiltin The_fun_reduce_Stream,
+            pyonBuiltin The_fun_reduce1,
+            pyonBuiltin The_fun_reduce1_Stream,
+            pyonBuiltin The_TraversableDict_list_build]
 
 -- | Use rewrite rules on an application
 useRewriteRules :: ExpInfo -> Var -> [TypM] -> [ExpM] -> LRW (Maybe ExpM)

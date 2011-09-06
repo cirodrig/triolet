@@ -144,9 +144,12 @@ Executable pyon
     LowLevel.Inlining
     LowLevel.InterfaceFile
     LowLevel.Build
+    LowLevel.Closure.CCInfo
+    LowLevel.Closure.Capture
+    LowLevel.Closure.Code
+    LowLevel.Closure.Hoisting
     LowLevel.ClosureSelect
     LowLevel.Closures
-    LowLevel.ClosureCode
     LowLevel.DeadCode
     LowLevel.Expr
     LowLevel.FreshVar
@@ -157,6 +160,7 @@ Executable pyon
     LowLevel.Intrinsics
     LowLevel.LambdaConvert
     LowLevel.LocalCPS
+    LowLevel.LocalCPSAnn
     LowLevel.Syntax
     LowLevel.Print
     LowLevel.Record

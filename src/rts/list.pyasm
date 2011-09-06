@@ -391,7 +391,7 @@ procedure pyon_matrix_copy_POD (owned elem_repr, pointer in_mat) -> pointer {
     (contents, in_mat @! PyonArray2.contents, sizeof array_type);
 
   // Create and return a new matrix object
-  pointer primcall pyon_matrix_from_array (h, w, contents);
+  pointer primcall pyon_matrix_from_array (ymin, yend, xmin, xend, contents);
 };
 
 // Free the POD matrix.

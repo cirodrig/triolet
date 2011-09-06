@@ -2,11 +2,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Builtins.BuiltinsTH where
        
-import Language.Haskell.TH(Strict(..))
-import Common.THRecord
-import Common.Label
-import Type.Var
-
 pyonBuiltinTypeNames =
   [ "bool"
   , "int"
@@ -480,11 +475,3 @@ pyonBuiltinVariableNames =
   , "LinStream_zipWith3_array"
   , "LinStream_zipWith4_array"
   ]
-
-pyonBuiltinsSpecification =
-  recordDef "PyonBuiltins" variables
-  where
-    variables =
-      [('_' : n, IsStrict, [t| Var |])
-      | n <- pyonBuiltinTypeNames ++ pyonBuiltinVariableNames]
-

@@ -631,7 +631,7 @@ toProof pos env derivation =
 
      FunPassConvDerivation { conclusion = prd@(IsInst ty _)
                            } -> do
-       let con = SystemF.pyonBuiltin SystemF.the_repr_Box
+       let con = SystemF.pyonBuiltin SystemF.The_repr_Box
            prf = mkPolyCallE pos (mkVarE pos con) [convertHMType ty] []
        return (True, [], prf)
      
@@ -642,7 +642,7 @@ toProof pos env derivation =
        
      MagicDerivation {} -> do
        -- Create a magic proof value
-       return (True, [], mkPolyCallE pos (mkConE noSourcePos $ SystemF.pyonBuiltin SystemF.the_fun_undefined) [convertPredicate $ conclusion derivation] [])
+       return (True, [], mkPolyCallE pos (mkConE noSourcePos $ SystemF.pyonBuiltin SystemF.The_fun_undefined) [convertPredicate $ conclusion derivation] [])
   where
     returnIdProof prd (Just e) = return (True, [], e)
     returnIdProof prd Nothing  = do ph <- mkDictPlaceholder pos prd
@@ -759,6 +759,6 @@ createCoercionValue pos t1 t2 = do
   let t1' = convertHMType t1
       t2' = convertHMType t2
   let op = TIExp $ SystemF.VarE (SystemF.mkExpInfo pos)
-           (SystemF.pyonBuiltin SystemF.the_unsafeMakeCoercion)
+           (SystemF.pyonBuiltin SystemF.The_unsafeMakeCoercion)
   return $ mkPolyCallE pos op [t1', t2'] []
 

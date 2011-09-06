@@ -594,13 +594,17 @@ inlFun f = do
 -- TODO: Inlining in definition groups; find SCCs and choose loop breakers
 inlDefGroupF defs m = do
   defs' <- traverse inlDef defs
-  x <- withDefsF (groupMembers defs') m
+  x <- case defs'
+       of Rec xs -> m           -- Don't inline recursive functions
+          NonRec x -> withDefF x m
   return (defs', x)
 
 inlDefGroupG defs m = do 
   defs' <- embedInlF $ traverse inlDef defs
   lift $ emitLetrec defs'
-  withDefsG (groupMembers defs') m
+  case defs' of
+    Rec xs -> m                 -- Don't inline recursive functions
+    NonRec x -> withDefG x m
 
 inlDef (Def v f) = Def v <$> inlFun f
 

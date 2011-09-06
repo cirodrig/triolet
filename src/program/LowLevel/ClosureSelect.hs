@@ -3,17 +3,24 @@
 Based on which functions are 
 -}
 
-{-# Language FlexibleInstances, GeneralizedNewtypeDeriving #-}
+{-# Language FlexibleInstances, TypeSynonymInstances,
+             GeneralizedNewtypeDeriving #-}
 module LowLevel.ClosureSelect(Capt, findFunctionsToHoist) where
 
-import Control.Monad
-import Control.Monad.Identity
+import Prelude hiding(mapM)
+import Control.Applicative
+import Control.Monad hiding(mapM, forM)
+import Control.Monad.Identity hiding(mapM, forM)
+import Control.Monad.Reader hiding(mapM, forM)
+import Control.Monad.RWS hiding(mapM, forM)
 import Control.Monad.Trans
 import Data.Array.IO
 import Data.Function
 import qualified Data.Graph.Inductive as Graph
 import qualified Data.Graph.Inductive.Query.DFS as Graph
 import qualified Data.HashTable as HashTable
+import qualified Data.IntMap as IntMap
+import Data.Traversable
 import Data.IORef
 import Data.List
 import qualified Data.Map as Map
@@ -27,6 +34,7 @@ import Common.MonadLogic
 import Common.Error
 import Common.Identifier
 import Common.Supply
+import LowLevel.CodeTypes
 import LowLevel.FreshVar
 import LowLevel.LocalCPSAnn
 import qualified LowLevel.LocalCPS as LocalCPS
@@ -34,718 +42,393 @@ import LowLevel.Print
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Build
-import LowLevel.ClosureCode
+import LowLevel.Closure.CCInfo
+import LowLevel.Closure.Code
+import LowLevel.Closure.Capture
+import LowLevel.Closure.Hoisting
 import Globals
 
--------------------------------------------------------------------------------
--- Constraints
-
--- | A hoisting decision.  @True@ means hoist, @False@ means don't hoist.
-type Hoist = Bool
-
--- | An implication constraint used to identify definition groups that
---   should be hoisted.  @HoistCst g gs@ means that if any of @gs@ are
---   hoisted, then @g@ should be hoisted.
-data HoistCst = HoistCst !GroupID [GroupID] deriving(Show)
-
-type HoistCsts = [HoistCst]
-
--- | A variable capture set.
-type Capt = Set.Set Var
-
--- | An inherited capture set.
---
---   @CaptInherit (fromList [(v1, s1), ...]@ means that, for each function 
---   @v_i@ and set of variables @s_i@, the current function inherits the
---   captured variables of @v_i@ that are not in @s_i@.
---
---   A function can only inherit captured variables from functions defined
---   in lexically enclosing @letrec@ statements.
-newtype CaptInherit = CaptInherit (Map.Map Var [Var])
-                      deriving(Show, Monoid)
-
--- | The union of two captured variable sets. 
---
---   We arbitrarily retain one of the sets of variables that should not
---   be captured (implicit in the call to 'Map.union').
---   It does not matter which set is chosen.
---   There will never be an attempt to capture variables that are in
---   only one of the two sets.
-captInheritUnion (CaptInherit s1) (CaptInherit s2) =
-  CaptInherit (Map.union s1 s2)
-
-captInheritSetMask (CaptInherit s) mask =
-  CaptInherit (Map.map (const mask) s)
+debug = False
 
 -------------------------------------------------------------------------------
--- Constraint generation
+-- Continuation map construction
+
+-- | A map from letrec-bound function names to continuation function names.
+--   The map associates a function to its continuation only if the continuation
+--   should be moved to the function's @letrec@ statement.  Every continuation
+--   appears exactly once in the map.
+--   The map is injective.
+type ContMap = Map.Map Var Var
+
+-- | A map from continuation function name to letrec-bound function name.
+--   The continuation will be moved to the same group as the letrec-bound
+--   function.  The map is constructed by reversing the associations in
+--   a 'ContMap'.
+type CoContMap = Map.Map Var Var
+
+-- | Extract global information needed by other passes.
 --
-
--- | Information needed to make a hoisting decision about a function when 
---   a call to that function is encountered.
-data FunInfo =
-  FunInfo { -- | The function's arity.  The arity is used to decide whether
-            --   a given function call is saturated.
-            arity :: {-# UNPACK #-}!Int
-            -- | The group where the function is defined
-          , defGroup :: !GroupID
-            -- | Context in which a function is used.  The context consists
-            --   of all function definitions that enclose the use but not
-            --   the definition.  A function is not part
-            --   of its own context.  If any of them are marked for
-            --   hoisting, then the function must be hoisted.
-            --
-            --   A definition group is /not/ part of the context of its body.
-          , useContext :: [GroupID]
-          }
-
--- | While generating constraints, a map is used to keep track of all
---   in-scope local functions.
-type FunMap = Map.Map Var FunInfo
-
--- | A description of a local definition group or single top-level function.
---   The description is used to decide whether to hoist.
-data UnsolvedGroup =
-  UnsolvedGroup
-  { groupID :: {-# UNPACK #-}!GroupID
-    -- | Function definitions in this group
-  , groupDefs :: !(Group UnsolvedFunction)
-    -- | The hoisting decision for this group
-  , groupHoistedVal :: !(IORef Hoist)
-  }
-
-type GroupID = Ident UnsolvedGroup
-
-instance Eq UnsolvedGroup where
-  (==) = (==) `on` groupID
-  (/=) = (/=) `on` groupID
-
-instance Ord UnsolvedGroup where
-  compare = compare `on` groupID
-
-data UnsolvedFunction =
-  UnsolvedFunction
-  { funDef :: LFunDef
-    -- | Functions whose captured variables are inherited by this function
-  , funInheritedCaptures :: CaptInherit
-    -- | The set of variables captured by this function
-  , funCapturedSet :: !(IORef Capt)
-  }
-
-funID :: UnsolvedFunction -> Var
-funID f = definiendum $ funDef f
-
-instance Eq UnsolvedFunction where
-  (==) = (==) `on` funID
-  (/=) = (/=) `on` funID
-
-instance Ord UnsolvedFunction where
-  compare = compare `on` funID
-
-newGroupDescr :: GroupID -> Group UnsolvedFunction -> IO UnsolvedGroup
-newGroupDescr gid defs = do
-  -- Initially assume the group is not hoisted
-  hoisted_val <- newIORef False
-  return $ UnsolvedGroup { groupID = gid
-                         , groupDefs = defs
-                         , groupHoistedVal = hoisted_val}
-
-newFunctionDescr fdef csts captured = do
-  captured_set <- newIORef captured
-  return $ UnsolvedFunction fdef csts captured_set
-
-
-data ScanInputs =
-  ScanInputs
-  { -- | Information about arity and scope of local functions.
-    scanFunMap :: FunMap
-    -- | The set of global variables.  Globals are never captured.
-  , scanGlobals :: !(Set.Set Var)
-    -- | The variables that defined in the current function and are
-    --   in scope at the current program point.  Variables defined in an
-    --   enclosing function are not in this list.
-    --
-    --   A function never captures variables that are defined in its
-    --   own body.  We must remove those variables when computing the 
-    --   captured variable set.  To do this, the set of local variables
-    --   is saved in each capture constraint.
-  , scanLocals :: [Var]
-
-  , scanIdSupply :: {-# UNPACK #-}!(IdentSupply UnsolvedGroup)
-  }
-
--- | Add a definition group to the scope where a function is being used.
+--   The tuple members are:
 --
---   This puts a new group in between preexisting definitions and their uses.
---   It also clears the set of local variables, because the scan is about to
---   enter the body of a new function.
-pushContext :: GroupID -> ScanInputs -> ScanInputs
-pushContext context_fun si =
-  si {scanFunMap = Map.map add_to_context (scanFunMap si),
-      scanLocals = []}
-  where
-    add_to_context finfo =
-      finfo {useContext = (context_fun:useContext finfo)}
+--   1. The set of continuations in the program and their parameter variables.
+--   2. A map from continuation to its first caller.
+--   3. A map from caller to continuation.  For each continuation, only the 
+--      first caller is in the map.
+--   4. The set of local variables in scope at each definition group.
+mkContMap :: LocalCPS.RConts -> LFunDef -> (ContMap, CoContMap)
+mkContMap rconts def = let
+  -- Construct a map from continuation to caller
+  conts_set = Set.fromList [k | LocalCPS.RCont k <- IntMap.elems rconts]
+  caller_map = findOutermostCallerDef rconts conts_set def
 
--- | Add a group's local functions to the environment.
-extendContext :: GroupID -> [LFunDef] -> ScanInputs -> ScanInputs
-extendContext gid defs si =
-  si {scanFunMap = insert_defs $ scanFunMap si,
-      scanLocals = map definiendum defs ++ scanLocals si}
-  where
-    insert_defs :: FunMap -> FunMap
-    insert_defs m = foldr insert_def m defs
+  -- Reverse the map, producing a map from caller to continuation
+  cont_map = Map.fromList [(caller, cont)
+                          | (cont, caller) <- Map.toList caller_map]
+  in (cont_map, caller_map)
 
-    insert_def (Def v f) m =
-      let info = FunInfo (length $ funParams f) gid []
-      in Map.insert v info m
-
--------------------------------------------------------------------------------
-
--- | A scan for computing hoisting and capture information.
-newtype Scan a = Scan {runScan :: ScanInputs -> IO (ScanResult a)}
-
-data ScanResult a = ScanResult a !GlobalConstraints
-
--- | Global constraints are collected by scanning and processed after scanning
---   is complete.
-data GlobalConstraints =
-  GlobalConstraints
-  { hoistedGroups :: Set.Set GroupID
-  , unsolvedGroups :: [UnsolvedGroup]
-  }
-
-instance Monoid GlobalConstraints where
-  mempty = GlobalConstraints mempty mempty
-  GlobalConstraints a b `mappend` GlobalConstraints c d =
-    GlobalConstraints (a `mappend` c) (b `mappend` d)
-
--- | Scanning an expression produces a set of variable capture constraints,
---   captured variables, and hoisting constraints.
-type ScanExp = Scan (CaptInherit, Capt, HoistCsts)
-
-instance Supplies Scan (Ident UnsolvedGroup) where
-  fresh = Scan $ \inputs -> do
-    x <- supplyValue $ scanIdSupply inputs
-    return $ ScanResult x mempty
-
-instance Monoid a => Monoid (Scan a) where
-  mempty = Scan (\_ -> return (ScanResult mempty mempty))
-
-  Scan f1 `mappend` Scan f2 = Scan $ \i -> do
-    ScanResult x csts1 <- f1 i
-    ScanResult y csts2 <- f2 i
-    return $ ScanResult (x `mappend` y) (csts1 `mappend` csts2)
-
-  mconcat xs = Scan $ \i -> do
-    ys <- sequence [f i | Scan f <- xs]
-    return $ foldr append (ScanResult mempty mempty) ys
-    where
-      append (ScanResult y d) (ScanResult x c) =
-        ScanResult (x `mappend` y) (c `mappend` d)
-
-instance Monad Scan where
-  return x = Scan (\_ -> return (ScanResult x mempty))
-  m >>= k = Scan (\i -> do ScanResult x c1 <- runScan m i
-                           ScanResult y c2 <- runScan (k x) i
-                           return $ ScanResult y (c1 `mappend` c2))
-
-instance MonadIO Scan where
-  liftIO m = Scan $ \_ -> do x <- m
-                             return $ ScanResult x mempty
-
-putGroup :: UnsolvedGroup -> Scan ()
-putGroup g = Scan (\_ -> return (ScanResult () (GlobalConstraints mempty [g])))
-
--- | Enter a member of a definition group.
+-- | For each continuation called in this function definition, find
+--   the lexically outermost caller.
 --
---   This function updates the context when scanning traverses into a 
---   @letfun@-bound function body.  At any time during scanning, the
---   context for a function @f@ is the nesting of function definitions
---   between the definition of @f@ and the use of @f@.  If @f@ is in a
---   recursive group,
---   the context includes the definition of @f@.
-enterGroup :: GroupID
-           -> Scan (a, (CaptInherit, Capt, HoistCsts))
-           -> Scan (a, (CaptInherit, Capt, HoistCsts))
-enterGroup gid (Scan f) =
-  Scan $ \i -> do 
-    ScanResult (x, (inherits, captured, csts)) global_constraints <-
-      f (pushContext gid i)
-    
-    -- Propagate capture constraints, generated while processing 
-    -- the local definition group. 
-    -- Constraints don't inherit local variables of the current function.
-    inherits' <- return $! captInheritSetMask inherits $! scanLocals i
-    return $ ScanResult (x, (inherits', captured, csts)) global_constraints
+--   We rely on the monoid definition of maps to choose the outermost caller.
+--   In calls to 'mappend', entries in the left map take precedence.
+findOutermostCallerDef :: LocalCPS.RConts -> Set.Set Var -> LFunDef
+                       -> ContMap
+findOutermostCallerDef rconts conts_set (Def v f) =
+  findOutermostCallerFun rconts conts_set v f
 
--- | Enter a context in which variables defined by a definition group are 
---   in scope.
+findOutermostCallerFun rconts conts_set v f = 
+  findOutermostCaller rconts conts_set v (funBody f)
+
+-- | For each continuation called in this statement, find the lexically
+--   outermost caller.
 --
---   Add the definition group to the environment, and remove the defined
---   variables from the captured variable set.
-defineGroup :: GroupID -> [LFunDef] -> ScanExp -> ScanExp
-defineGroup gid fdefs (Scan f) =
-  define_group $
-  defines definienda $
-  Scan $ \i -> f (extendContext gid fdefs i)
-  where
-    definienda = map definiendum fdefs
+--   We rely on the monoid definition of maps to choose the outermost caller.
+--   In calls to 'mappend', entries in the left map take precedence.
+findOutermostCaller :: LocalCPS.RConts -- ^ Continuation of each function
+                    -> Set.Set Var     -- ^ The set of continuations
+                    -> Var             -- ^ The function containing the current
+                                       --   statement (may be a continuation)
+                    -> LStm            -- ^ Statement to scan
+                    -> ContMap
+                       -- ^ Outermost caller of each continuation that
+                       --   is called in the statement, parameters of
+                       --   continuations, and local variables at each
+                       --   definition group
+findOutermostCaller rconts conts_set current_fun stm =
+  case stm
+  of LetLCPS params rhs label body ->
+       if label `Set.member` conts_set
+       then
+         -- Body is a continuation function.
+         -- Use the label as the current function while processing the body.
+         findOutermostCaller rconts conts_set label body
+       else continue body
 
-    define_group (Scan f) = Scan $ \env -> do
-      ScanResult (c_csts, c, h_csts) global_csts <- f env
-      let c_csts' =
-            case c_csts
-            of CaptInherit s -> CaptInherit (foldr Map.delete s definienda)
-      return $ ScanResult (c_csts', c, h_csts) global_csts
+     LetrecLCPS defs group_id body ->
+       let defs_map = mconcat (map enter $ groupMembers defs)
+           body_map = continue body
+       in defs_map `mappend` body_map
 
--- | Scan a reference to a variable, other than a tail call.
---
---   If it's not a global variable, the variable will be added to the
---   captured variable set.  If it's a local function, the function
---   will be hoisted.
-capture :: Var -> ScanExp
-capture v = Scan $ \env ->
-  let (captured, hoisted) =
-        if v `Set.member` scanGlobals env
-        then (mempty, mempty) 
-        else case Map.lookup v $ scanFunMap env
-             of Nothing -> (Set.singleton v, mempty)
-                Just finfo -> (Set.singleton v, Set.singleton (defGroup finfo))
-      global_constraints = GlobalConstraints hoisted mempty
-      result = ScanResult (mempty, captured, mempty) global_constraints
-  in captured `seq` hoisted `seq` return result
-
-define :: Var -> ScanExp -> ScanExp
-define v (Scan s) = Scan $ \i -> do
-  let local_i = i {scanLocals = v : scanLocals i}
-  ScanResult (c_csts, c, h_csts) global_constraints <- s local_i
-  return $ ScanResult (c_csts, Set.delete v c, h_csts) global_constraints
-
-defines :: [Var] -> ScanExp -> ScanExp
-defines vs (Scan s) = Scan $ \i -> do
-  let local_i = i {scanLocals = vs ++ scanLocals i}
-  ScanResult (c_csts, c, h_csts) global_constraints <- s local_i
-  return $ ScanResult (c_csts, foldr Set.delete c vs, h_csts) global_constraints
-
--- | Scan a call of a variable.
---
---   The variable is captured.
---
---   If the callee is not fully applied, or if it's not a tail call, 
---   it must be hoisted.
---
---   Otherwise, if a function enclosing this call is hoisted, the callee
---   must also be hoisted.
-called :: Bool -> Var -> Int -> ScanExp
-called is_tail v num_args = Scan $ \env ->
-  if v `Set.member` scanGlobals env
-  then return $ ScanResult mempty mempty
-  else let locals = scanLocals env
-           m_finfo = Map.lookup v $ scanFunMap env
-           captured = Set.singleton v
-           c_cst =
-             case m_finfo
-             of Just finfo -> CaptInherit (Map.singleton v locals)
-                _ -> mempty
-           (h_cst, hoisted) =
-             case m_finfo
-             of Just finfo
-                  | is_tail && num_args >= arity finfo ->
-                      -- Saturated tail call.  Hoist the callee if this
-                      -- call is part of a hoisted function that doesn't
-                      -- contain the definition of the callee.
-                      ([HoistCst (defGroup finfo) (useContext finfo)], mempty)
-                  | otherwise ->
-                      -- Undersaturated or non-tail-call; must hoist
-                      (mempty, Set.singleton (defGroup finfo))
-                _ -> mempty     -- Unknown function
-           global_constraints = GlobalConstraints hoisted mempty
-           result = ScanResult (c_cst, captured, h_cst) global_constraints
-       in h_cst `seq` hoisted `seq` c_cst `seq` return result
-
--------------------------------------------------------------------------------
--- Scanning for constraint generation
-
-scanValue :: Val -> ScanExp
-scanValue value =
-  case value
-  of VarV v    -> capture v
-     LitV _    -> mempty
-     RecV _ xs -> scanValues xs
-     LamV _    -> internalError "scanValue"
-
-scanValues vals = mconcat (map scanValue vals)
-
-scanAtom :: Bool -> Atom -> ScanExp
-scanAtom is_tail atom =
-  case atom
-  of ValA vs         -> scanValues vs
-     CallA _ op args -> scan_call op args
-     PrimA _ args    -> scanValues args
-     UnpackA r arg   -> scanValue arg
-     _               -> internalError "scanAtom"
-  where
-    scan_call op args =
-      let op_scan =
-            case op
-            of VarV v -> called is_tail v (length args)
-               _      -> scanValue op 
-      in op_scan `mappend` scanValues args
-
-scanStm :: LStm -> ScanExp
-scanStm statement =
-  case statement
-  of LetLCPS params rhs _ body ->
-       scanAtom False rhs `mappend` defines params (scanStm body)
-     LetrecLCPS defs stm ->
-       scanGroup defs $ scanStm stm
      SwitchLCPS cond alts ->
-       scanValue cond `mappend` mconcat [scanStm s | (_, s) <- alts] 
+       mconcat $ map (continue . snd) alts
+
      ReturnLCPS atom ->
-       scanAtom True atom
-     ThrowLCPS val ->
-       scanValue val
+       -- If this function has a continuation, it will be called here
+       let current_cont =
+             case LocalCPS.lookupCont current_fun rconts
+             of Just c -> c
+                Nothing -> internalError $ "No continuation for " ++ show current_fun
+       in case LocalCPS.needsContinuationCall rconts current_cont atom
+          of Just current_cont ->
+               Map.singleton current_cont current_fun
+             Nothing ->
+               mempty
 
-scanFun :: LFun -> ScanExp
-scanFun f = defines (funParams f) $ scanStm (funBody f)
-
--- | Scan the functions in a definition group and create placeholders for
---   constraint solving.
-scanGroupFunctions :: GroupID -> Group LFunDef
-                   -> Scan (Group UnsolvedFunction, (CaptInherit, Capt, HoistCsts))
-scanGroupFunctions group_id g =
-  case g
-  of Rec group_members -> do
-       let setup_context = defineGroup group_id group_members
-       (fs, constraints) <- mapAndUnzipM (scan_def setup_context) group_members
-       return (Rec fs, mconcat constraints)
-     NonRec fdef -> do
-       (f, constraints) <- scan_def id fdef
-       return (NonRec f, constraints)
+     ThrowLCPS exc ->
+       mempty
   where
-    scan_def :: (ScanExp -> ScanExp) -> LFunDef
-             -> Scan (UnsolvedFunction, (CaptInherit, Capt, HoistCsts))
-    scan_def setup_context fdef = do
-      constraints@(local_c_csts, local_captured, _) <-
-        setup_context $ scanFun (definiens fdef)
-
-      -- Create an UnsolvedFunction
-      unsolved_function <-
-        liftIO $ newFunctionDescr fdef local_c_csts local_captured
-      return (unsolved_function, constraints)
-
--- | Scan a function definition group. 
---   The scan creates an 'UnsolvedGroup'.  Also, captured variable constraints
---   are propagated in the scan.  The set of hoisted groups is propagated.
---   Hoisting constraints in the body are propagated.
-scanGroup :: Group LFunDef -> ScanExp -> ScanExp
-scanGroup group scan_body = do
-  -- Create a descriptor for this group; add it to the descriptors taken from 
-  -- the function bodies.  Do not propagate constraints.
-  group_id <- fresh
-  (local_defs, local_constraints) <-
-    enterGroup group_id $ scanGroupFunctions group_id group
-
-  -- Create a descriptor for this group
-  putGroup =<< liftIO (newGroupDescr group_id local_defs)
-
-  -- Process the body
-  body_constraints <- defineGroup group_id (groupMembers group) scan_body
-
-  -- Propagate capture constraints from the defgroup,
-  -- but not hoisting constraints
-  return (local_constraints `mappend` body_constraints)
-
--- | Scan a top-level function, generating a set of constraints that determine
---   hoisting and variable capture
-scanTopLevelDef :: Set.Set Var
-                -> LFunDef
-                -> IO (HoistCsts, Set.Set GroupID, [UnsolvedGroup], GroupID)
-scanTopLevelDef globals (Def v f) = do
-  id_supply <- newIdentSupply
-  let initial_context = ScanInputs Map.empty globals [] id_supply
-  ScanResult (c_csts, captured, h_csts) (GlobalConstraints hoisted groups) <-
-    runScan (scanFun f) initial_context
-  id_bound <- supplyValue id_supply
-
-  unless (Map.null $ case c_csts of CaptInherit s -> s) $
-    internalError "scanTopLevelDef: Top-level function captures variables"
-  
-  unless (Set.null captured) $
-    internalError "scanTopLevelDef: Top-level function captures variables"
-
-  return (h_csts, hoisted, groups, id_bound)
+    enter def =
+      findOutermostCallerDef rconts conts_set def
+    continue stm =
+      findOutermostCaller rconts conts_set current_fun stm
 
 -------------------------------------------------------------------------------
--- Shared constraint solving code
+-- Computation of in-scope variables
+
+-- | Compute the set of variables that is in scope at the definition of each
+--   local function or procedure /after/ closure conversion.
 --
--- This code is used for solving both capture constraints and
--- hoisting constraints.
+--   The in-scope set is mostly the same before closure conversion as
+--   after closure conversion.  Variable capture, by itself, does not
+--   change the in-scope set.  However, continuations are moved to a
+--   new location in the source code.  This changes the in-scope set
+--   at the point where the continuation is defined.  It does not
+--   change the in-scope set in the body of the continuation.  This also
+--   puts the continuation into the scope of other variables. 
+mkInScopeSet :: ContMap -> LFunDef -> LocalsAtGroup
+mkInScopeSet cont_map def =
+  let local_list = mkInScopeSetFun cont_map [] (definiens def)
+  in IntMap.fromList local_list
 
-type Worklist a = IORef (Set.Set a)
+mkInScopeSetFun cont_map locals f =
+  mkInScopeSetStm cont_map (funParams f ++ locals) (funBody f)
 
-newWorklist :: Ord a => [a] -> IO (Worklist a)
-newWorklist contents = newIORef (Set.fromList contents)
+mkInScopeSetStm cont_map locals stm =
+  case stm
+  of LetLCPS params rhs label body -> continue params body
+     LetrecLCPS defs group_id body ->
+       let definienda = map definiendum $ groupMembers defs
 
-putWorklist :: Ord a => Worklist a -> a -> IO ()
-putWorklist wl x = modifyIORef wl $ Set.insert x
+           -- Find the continuations that will be moved to this group
+           continuations_here =
+             nub $ catMaybes [Map.lookup v cont_map | v <- definienda]
+           
+           -- Add letrec-bound functions to the in-scope set.
+           -- Continuations are always added to the scope.
+           -- (A nonrecursive let will be converted to a recursive one if
+           -- necessary so that the scoping rules work).
+           locals' = case defs
+                     of NonRec _ -> continuations_here ++ locals
+                        Rec _    -> continuations_here ++ definienda ++ locals
 
-readWorklist :: Ord a => Worklist a -> IO (Maybe a)
-readWorklist wl = do
-  s <- readIORef wl
-  case Set.minView s of
-    Just (x, s') -> do
-      writeIORef wl s'
-      return (Just x)
-    Nothing -> return Nothing
+           -- Record these definitions
+           local_defs = (fromIdent group_id, locals')
 
-isEmptyWorklist :: Ord a => Worklist a -> IO Bool
-isEmptyWorklist wl = do
-  s <- readIORef wl
-  return $ Set.null s
+           -- Continue processing local functions and body
+           defs_result =
+             concat [mkInScopeSetFun cont_map locals' (definiens d)
+                    | d <- groupMembers defs]
+           
+           body_result = continue (continuations_here ++ definienda) body
+       in local_defs : defs_result ++ body_result
 
-forWorklist :: Ord a => Worklist a -> (a -> IO ()) -> IO ()
-forWorklist wl f = readWorklist wl >>= continue
+     SwitchLCPS cond alts ->
+       concat [continue [] s | (_, s) <- alts]
+
+     ReturnLCPS atom -> []
+
+     ThrowLCPS exc -> []
   where
-    continue Nothing  = return ()
-    continue (Just x) = f x >> forWorklist wl f
-
--- | Modify the contents of an @IORef@, and test whether the value has
---   actually changed.
-modifyCheckIORef :: Eq a => (a -> a) -> IORef a -> IO Bool
-modifyCheckIORef f ref = do
-  x <- readIORef ref
-  let y = f x
-  let change = x /= y
-  when change $ writeIORef ref y
-  return change
+    continue new_locals stm =
+      mkInScopeSetStm cont_map (new_locals ++ locals) stm
 
 -------------------------------------------------------------------------------
--- Hoisting constraint solving
 
--- | An array where index @n@ has the group with ID @n@ in  
-type GroupArray = IOArray GroupID UnsolvedGroup
+-- | Convert all continuations to local functions in a function definition.
+--
+--   This allows closure conversion to hoist and insert captured variable
+--   parameters.
+reifyContinuations :: IdentSupply Var -> LocalCPS.RConts -> ContMap -> LFunDef
+                   -> IO FunDef
+reifyContinuations var_ids rconts cont_map ann_def = do
+  (cont_funs, def1) <- extractContinuations var_ids rconts ann_def
 
--- | Create a lookup table from ID to group.  The lookup table is used to
---   solve constraints.
-mkGroupArray :: [UnsolvedGroup] -> GroupID -> IO GroupArray
-mkGroupArray groups id_bound = do
-  ga <- newArray (toIdent 0, id_bound) undefined_group
-  forM_ groups $ \g -> writeArray ga (groupID g) g
-  return ga
-  where
-    undefined_group = internalError "mkGroupArray: Not a valid group"
+  return $ insertContinuations cont_map cont_funs def1
 
-forGroups_ :: GroupArray -> [GroupID] -> (UnsolvedGroup -> IO a) -> IO ()
-forGroups_ table gids f = mapM_ (f <=< readArray table) gids
-
--- | Determine which groups are hoisted.  The 'groupHoistedVal' field is
---   set to @True@ on hoisted groups.
-setupAndSolveHoistingConstraints :: HoistCsts
-                                 -> Set.Set GroupID
-                                 -> GroupArray
-                                 -> IO ()
-setupAndSolveHoistingConstraints h_csts initial_set table = do
-  -- Every group in initial_set is hoisted
-  initialize_hoisted_groups
-  
-  -- Create an array of hoisting implications.
-  -- if @g2 `elem` h_cst_array !! g@, and @g@ is hoisted, then @g2@ is hoisted.
-  table_bounds <- getBounds table
-  h_cst_array <- newArray table_bounds []
-  initialize_hoist_array h_cst_array
-  
-  solveHoistingConstraints table h_cst_array initial_set
-  where
-    -- Groups in the set are hoisted
-    initialize_hoisted_groups =
-      forGroups_ table (Set.toList initial_set) $ \grp ->
-      writeIORef (groupHoistedVal grp) True
-
-    initialize_hoist_array ay =
-      -- For each constraint (consequent <== antecedents),
-      forM_ h_csts $ \(HoistCst consequent antecedents) ->
-      -- for each antecedent,
-      forM_ antecedents $ \antecedent ->
-      -- add consequent to the antecedent's table entry
-      writeArray ay antecedent . (consequent :) =<< readArray ay antecedent
-
--- | The solving phase for hoisting constraints
-solveHoistingConstraints :: GroupArray
-                         -> IOArray GroupID [GroupID]
-                         -> Set.Set GroupID
-                         -> IO ()
-solveHoistingConstraints table h_csts initial_set = do
-  -- Process groups until no changes are made
-  workset <- newWorklist (Set.toList initial_set)
-
-  forWorklist workset $ \elt -> do
-    -- Find all groups that must be hoisted, given that 'elt' is hoisted
-    need_marking <- readArray h_csts elt
-    forM_ need_marking $ \gid -> do
-      -- Look up and mark this group
-      group <- readArray table gid
-      change <- modifyCheckIORef (const True) (groupHoistedVal group)
-      when change $ putWorklist workset gid
-
--------------------------------------------------------------------------------
--- Capture constraint solving
-
-type FHashTable a = HashTable.HashTable Var a
-
-fHashTable :: [(Var, a)] -> IO (FHashTable a)
-fHashTable xs = do
-  htab <- HashTable.new compare_var hash_var
-  forM_ xs $ \(k, v) -> HashTable.insert htab k v
-  return htab
-  where
-    compare_var = (==)
-    hash_var v = HashTable.hashInt $ fromIdent $ varID v
-
--- | Constant data used during capture constraint solving
-data CCSConstants =
-  CCSConstants 
-  { -- | Worklist of functions
-    functionWorklist :: {-#UNPACK#-} !(Worklist UnsolvedFunction)
-    -- | Lookup table from function name to UnsolvedFunction
-  , functionTable :: !(FHashTable UnsolvedFunction)
-    -- | For each function, this table records the functions
-    --   that inherit from it, and a set of variables that they can't inherit.
-    --   An absent entry means the same as the empty set.
-  , funInheritorTable :: !(FHashTable (Map.Map Var [Var]))
+data ECContext =
+  ECContext
+  { ecRConts     :: LocalCPS.RConts
+  , ecCurrentFun :: Var
+  , ecRType      :: [ValueType]
+  , ecIdentSupply :: {-# UNPACK #-}!(IdentSupply Var)
   }
 
-initializeCCSConstants :: [UnsolvedGroup] -> GroupID -> IO CCSConstants
-initializeCCSConstants groups id_bound = do
-  function_table <- fHashTable [(funID f, f) | f <- unsolved_functions]
-  
-  -- Create a table with one entry for each capture-inherit constraint
-  fun_inheritor_table <- fHashTable []
-  forM_ unsolved_functions $ \inheritor ->
-    case funInheritedCaptures inheritor
-    of CaptInherit funs -> forM_ (Map.toList funs) $ \(endower, mask) -> do
-         -- Insert a mapping (endower |-> inheritor * mask).
-         -- Each endower-inheritor pair occurs at most once,
-         -- so don't worry about overwriting the mask
-         m_old_value <- HashTable.lookup fun_inheritor_table endower
-         let old_value = fromMaybe Map.empty m_old_value
-         HashTable.update fun_inheritor_table endower
-           (Map.insert (funID inheritor) mask old_value)
+-- | Extract continuations from the code.
+--
+--   A function definition is created for each continuation, and the
+--   original continuation is removed from the code.  Tail-calls to
+--   continuations are inserted.
+--
+--   The first return value in the returned tuple is a mapping from
+--   each continuation to its syntactically first caller.  Because the
+--   continuation is a continuation, the first caller dominates all
+--   other callers.
+--
+--   The other return values are the continuation functions, and the
+--   modified top-level function definition.
+extractContinuations :: IdentSupply Var -> LocalCPS.RConts -> LFunDef
+                     -> IO ([FunDef], FunDef)
+extractContinuations supply rconts def = do
+  let no_fun = internalError "extractContinuations: No function" 
+      no_rettype = internalError "extractContinuations: No return type"
+  (def', (), cont_funs) <-
+    runRWST (extractContinuationsDef def) (ECContext rconts no_fun no_rettype supply) ()
+  return (cont_funs, def')
 
-  -- Initially, all functions are put onto the worklist
-  function_worklist <- newWorklist unsolved_functions
-  return $ CCSConstants function_worklist function_table fun_inheritor_table
+extractContinuationsDef (Def v f) =
+  local (\ctx -> ctx {ecRType = funReturnTypes f, ecCurrentFun = v}) $ do
+    body' <- extractContinuationsStm (funBody f)
+    let f' = mkFun (funConvention f) (funInlineRequest f) (funFrameSize f)
+             (funParams f) (funReturnTypes f) body'
+    return $ Def v f'
+
+extractContinuationsStm stm =
+  case stm
+  of LetLCPS params rhs label body -> do
+       rconts <- asks ecRConts
+       let is_cont = LocalCPS.RCont label `elem` IntMap.elems rconts
+       if is_cont
+         then do
+           -- Create continuation function
+           rtype <- asks ecRType
+           let fun = mkFun ClosureCall False 0 params rtype body
+           cont_def <- extractContinuationsDef (Def label fun)
+           tell [cont_def]
+
+           -- The RHS becomes a tail expression
+           return $ ReturnE rhs
+         else do
+           body' <- extractContinuationsStm body
+           return $ LetE params rhs body'
+
+     LetrecLCPS defs group_id body -> do
+       defs' <- mapM extractContinuationsDef defs
+       body' <- extractContinuationsStm body
+       return $ LetrecE defs' body'
+     
+     SwitchLCPS cond alts -> do
+       alts' <- mapM do_alt alts
+       return $ SwitchE cond alts'
+     
+     ReturnLCPS atom -> do
+       context <- ask
+       let rconts = ecRConts context
+           current_fun = ecCurrentFun context
+           rtype = ecRType context
+       let current_cont =
+             case LocalCPS.lookupCont current_fun rconts
+             of Just c -> c
+                Nothing -> internalError $ "No continuation for " ++ show current_fun
+       case LocalCPS.needsContinuationCall rconts current_cont atom of
+         Just current_cont -> do
+           -- This function has a continuation call.
+           -- Bind the atom's results to temporary variables, and
+           -- create a continuation call.
+           tmpvars <- mapM newAnonymousVar_ec rtype
+           return $ LetE tmpvars atom $
+             ReturnE (CallA ClosureCall (VarV current_cont) (map VarV tmpvars))
+         Nothing ->
+           return $ ReturnE atom
+     ThrowLCPS exc ->
+       return $ ThrowE exc
   where
-    unsolved_functions = concatMap (groupMembers . groupDefs) groups
+    do_alt (tag, s) = liftM ((,) tag) $ extractContinuationsStm s
+    
+    newAnonymousVar_ec t = do
+      id_supply <- asks ecIdentSupply
+      lift $ runFreshVarM id_supply $ newAnonymousVar t
 
--- | @funInheritors f@ is a set of functions that inherit some captured
---   variables of @f@, along with the variables that they don't inherit.
-funInheritors :: CCSConstants -> Var -> IO [(UnsolvedFunction, [Var])]
-funInheritors input fun_name = do
-  m_inheritors <- HashTable.lookup (funInheritorTable input) fun_name
-  let inheritors = maybe [] Map.toList m_inheritors
-  forM inheritors $ \(v, mask) -> do
-    Just inheritor <- HashTable.lookup (functionTable input) v
-    return (inheritor, mask)
+-- | Insert the continuation function definitions into the code.
+insertContinuations :: Map.Map Var Var
+                       -- ^ Map from function to its continuation
+                    -> [FunDef] -- ^ Continuation function definitions
+                    -> FunDef   -- ^ Top-level function definition
+                    -> FunDef
+insertContinuations cont_map cont_funs def =
+  runReader (insertContinuationsDef def) (cont_map, cont_funs)
 
--- | Solve a set of variable capture constraints by computing a set of
---   captured variables that satisfies all constraints.  The results of
---   the computation will be in the 'funCapturedSet'
---   fields of various objects.
-solveCaptureConstraints :: CCSConstants -> IO ()
-solveCaptureConstraints input =
-  forWorklist (functionWorklist input) (propagateFunctionCaptureConstraints input)
+insertContinuationsDef (Def v f) = do
+  body <- insertContinuationsStm $ funBody f
+  return $ Def v (f {funBody = body})
 
--- | Given a function whose captured variables have been updated,
---   update the captured variables of functions that inherit from this one.
-propagateFunctionCaptureConstraints ::
-  CCSConstants -> UnsolvedFunction -> IO ()
-propagateFunctionCaptureConstraints input fun = do
-  let fun_name = funID fun
-  captured_vars <- readIORef $ funCapturedSet fun
-  
-  -- Update any functions that inherit from this one
-  funInheritors input fun_name >>=
-    mapM_ (updateFunctionCaptureConstraints input captured_vars)
+insertContinuationsStm stm =
+  case stm
+  of LetE params rhs body ->
+       LetE params rhs <$> insertContinuationsStm body
+     LetrecE defs body -> do
+       -- Add continuations to this definition group
+       (cont_map, cont_funs) <- ask
+       let definienda = map definiendum $ groupMembers defs
+           continuations_here = nub $ mapMaybe lookup_cont definienda
+             where
+               lookup_cont v = Map.lookup v cont_map
+           continuation_defs = map lookup_def continuations_here
+             where
+               lookup_def v =
+                 case find ((v ==) . definiendum) cont_funs 
+                 of Just d -> d
+                    Nothing -> internalError "insertContinuations: Not found"
 
-updateFunctionCaptureConstraints :: CCSConstants -> Capt
-                                 -> (UnsolvedFunction, [Var]) -> IO ()
-updateFunctionCaptureConstraints input captured_vars (fun, mask) = do
-  change <- modifyCheckIORef update_captured_vars (funCapturedSet fun)
-  when change $ putWorklist (functionWorklist input) fun
-  where
-    -- Add @captured_vars \\ mask@ to set @s@
-    update_captured_vars s =
-      let masked_vars = foldr Set.delete captured_vars mask
-      in Set.union masked_vars s
+           defs' =
+             if null continuation_defs
+             then defs
+             else Rec (continuation_defs ++ groupMembers defs)
+         in LetrecE <$>
+            mapM insertContinuationsDef defs' <*>
+            insertContinuationsStm body
+     SwitchE cond alts ->
+       SwitchE cond <$> mapM do_alt alts
+     ReturnE _ -> pure stm
+     ThrowE _ -> pure stm
+     where
+       do_alt (tag, s) = do
+         s' <- insertContinuationsStm s
+         return (tag, s')
 
 -------------------------------------------------------------------------------
--- Reading results of constraint solving
 
-finalizeGroup :: IdentSupply Var -> UnsolvedGroup -> IO SolvedGroup
-finalizeGroup id_supply grp = do
-  hoisted <- readIORef $ groupHoistedVal grp
-  if not hoisted
-    then return $ UnhoistedGroup (map funID $ groupMembers $ groupDefs grp)
-    else do 
-      let members = groupMembers $ groupDefs grp
+-- A list of groups and the functions they contain
+type GroupMembership = [(GroupID, [Var])]
 
-      -- Get the captured variables of each function.
-      -- The group's shared captured variables is the intersection of the
-      -- per-function captured variables.
-      captureds <- mapM (readIORef . funCapturedSet) members
-      let shared_captured = foldr1 Set.intersection captureds
-      runFreshVarM id_supply $ make_closure (Set.toList shared_captured)
+stmGroupTable :: LocalCPS.RConts -> LStm -> GroupMembership
+stmGroupTable rconts stm =
+  case stm
+  of LetLCPS _ _ label body
+       | LocalCPS.RCont label `elem` IntMap.elems rconts ->
+           -- This is a continuation function
+           (ContID label, [label]) : stmGroupTable rconts body
+       | otherwise ->
+           -- This is an ordinary let expression
+           stmGroupTable rconts body
+     LetrecLCPS defs gid body ->
+       (GroupID gid, map definiendum $ groupMembers defs) :
+       concatMap (stmGroupTable rconts . funBody . definiens) (groupMembers defs) ++
+       stmGroupTable rconts body
+     SwitchLCPS _ alts ->
+       concat [stmGroupTable rconts s | (_, s) <- alts]
+     ReturnLCPS _ -> []
+     ThrowLCPS _ -> []
+
+createGroupTables :: LocalCPS.RConts -> LFunDef -> (Var -> GroupID, GroupID -> [Var])
+createGroupTables rconts fun_def =
+  let group_membership = stmGroupTable rconts $ funBody $ definiens fun_def
+      fun_group = Map.fromList [(v, g) | (g, vs) <- group_membership, v <- vs]
+      get_group_members gid =
+        case lookup gid group_membership
+        of Just vs -> vs
+           Nothing -> internalError "createGroupTables: lookup failed"
+      get_fun_group v =
+        case Map.lookup v fun_group
+        of Just gid -> gid
+           Nothing  -> internalError "createGroupTables: lookup failed"
+  in (get_fun_group, get_group_members)
+
+lookupDestinationLocals f caller_map fun_to_group locals_in_scope =
+  -- Look up the group of @f@ first.  If @f@ is not a continuation, this will
+  -- produce the answer.
+  from_group f $
+
+  -- If @f@ is a continuation, look up its non-continuation caller.
+  case Map.lookup f caller_map
+  of Just caller -> from_group caller invalid_destination
+     Nothing -> no_caller
   where
-    fundef_info ufun = (funID ufun, funType $ definiens $ funDef ufun)
-    make_closure captured =
-      case groupDefs grp
-      of NonRec ufun -> do
-           (_, closure) <- mkNonrecClosure (fundef_info ufun) captured
-           return $ HoistedGroup (NonRec (funID ufun, closure))
-         Rec ufuns -> do
-           closures <- mkRecClosures (map fundef_info ufuns) captured
-           return $ HoistedGroup (Rec $ zip (map funID ufuns) (map snd closures))
+    from_group f handle_continuation =
+      case fun_to_group f
+      of GroupID gid ->
+           -- Local functions are never moved to a new group
+           case IntMap.lookup (fromIdent gid) locals_in_scope
+           of Just xs -> Set.fromList xs
+              Nothing -> no_group
 
-printUnsolvedGroup :: UnsolvedGroup -> IO ()
-printUnsolvedGroup grp = do
-  fun_docs <- mapM prettyUnsolvedFun $ groupMembers $ groupDefs grp
-  print $ text "group" <+> text (show $ groupID grp) $$
-    braces (vcat fun_docs)
+         ContID _ -> handle_continuation
 
-prettyUnsolvedFun :: UnsolvedFunction -> IO Doc
-prettyUnsolvedFun f = do
-  captured <- readIORef $ funCapturedSet f
-  let cap_doc = fsep $ map pprVar $ Set.toList captured
-      inherit_doc =
-        case funInheritedCaptures f
-        of CaptInherit vs ->
-             fsep [parens $ pprVar v <+> braces (sep $ map pprVar vs)
-                  | (v, vs) <- Map.toList vs]
-  return $ hang (pprVar (funID f)) 4 (cap_doc $$ inherit_doc)
-
--- | A group whose constraints have been solved.
-data SolvedGroup =
-    HoistedGroup (Group (Var, Closure))
-  | UnhoistedGroup [Var]
-
-groupFunctions g =
-  case g
-  of HoistedGroup grp -> map fst $ groupMembers grp
-     UnhoistedGroup fs -> fs
-
-printGroup :: SolvedGroup -> IO ()
-printGroup grp =
-  case grp
-  of UnhoistedGroup fs ->
-       print $ text "unhoisted" <+> fsep (map pprVar fs)
-     HoistedGroup g ->
-       print $ text "hoisted" <+> fsep (map pprVar $ map fst $ groupMembers g) $$
-               nest 2 (text "captures" <+>
-                       fsep (map pprVar $ closureCapturedVariables $ snd $ head $ groupMembers g))
-
--------------------------------------------------------------------------------
+    no_group =
+      internalError "lookupDestinationLocals: Missing information for definition group"
+    no_caller =
+      internalError "lookupDestinationLocals: Continuation has no caller"
+    invalid_destination =
+      internalError "lookupDestinationLocals: Invalid destination group"
 
 -- | Find all functions that should be hoisted in a top-level
 --   function definition.  For each function, determine what
@@ -756,44 +439,65 @@ printGroup grp =
 findFunctionsToHoist :: IdentSupply Var
                      -> Set.Set Var
                      -> FunDef
-                     -> IO (Var -> Maybe (Maybe (Group (Var, Closure))))
+                     -> IO (FunDef, Map.Map Var CCInfo)
 findFunctionsToHoist var_ids global_vars def = do
   -- Label possible continuations
-  ann_def <- runFreshVarM var_ids $ annotateFunDef def
-  
+  (ann_fun, id_bound) <- labelFunction var_ids (definiens def)
+  let ann_def = Def (definiendum def) ann_fun
+
   -- Compute continuations
-  let return_continuations =
-        LocalCPS.identifyLocalContinuations (funBody $ definiens ann_def)
+  let rconts = LocalCPS.identifyLocalContinuations ann_def
+      conts_set = Set.fromList [v | LocalCPS.RCont v <- IntMap.elems rconts]
 
-  -- Generate constraints
-  (h_csts, hoisted, groups, id_bound) <- scanTopLevelDef global_vars ann_def
+  -- Compute lookup tables to associate functions to groups and vice versa
+  let (fun_to_group, group_to_fun) =
+        createGroupTables rconts ann_def
 
-  -- Debugging
-  when False $ do
-    let Def global_name _ = def
-    putStrLn $ "Hoisting in " ++ show global_name
-    mapM_ printUnsolvedGroup groups
-    putStrLn $ "Initial hoisted set: " ++ show hoisted
-    print h_csts
+  -- Find the first caller of each continuation
+  let (cont_map, caller_map) =
+        mkContMap rconts ann_def
 
-  -- Solve constraints
-  table <- mkGroupArray groups id_bound
-  setupAndSolveHoistingConstraints h_csts hoisted table
-  ccs_constraints <- initializeCCSConstants groups id_bound
-  solveCaptureConstraints ccs_constraints
-  final_groups <- mapM (finalizeGroup var_ids) groups
+  -- Find the set of variables that will be in scope at each definition group
+  -- after closure converison
+  let locals_in_scope =
+        mkInScopeSet cont_map ann_def 
+  
+  when debug $ do
+    putStrLn "Computing hoisting and variable capture for closure conversion"
+    print $ pprLFunDef ann_def
+    print $ text "Continuations:" <+>
+      fsep [parens $ int f <+> text "|->" <+> text (show k)
+           | (f, k) <- IntMap.toList rconts]
+    print $ text "Locals:" <+> vcat [int g <+> text "|->" <+> text (show l) 
+                                    | (g, l) <- IntMap.toList locals_in_scope]
+
+  -- Compute hoisting
+  hoisted_groups <- findHoistedGroups ann_def rconts
+
+  -- Compute free variables
+  captures <- findCapturedVariables rconts global_vars conts_set ann_def
   
   -- Debugging
-  when False $ do
-    mapM_ printGroup final_groups
+  when debug $ do
+    putStrLn $ "Hoisted set: " ++ show hoisted_groups
+    putStrLn "Captured variables:"
+    print captures
 
-  -- Look up results
-  let lookup_function v =
-        case find (\g -> v `elem` groupFunctions g) final_groups
-        of Just g -> 
-             case g
-             of UnhoistedGroup _ -> Just Nothing
-                HoistedGroup g -> Just (Just g)
-           Nothing -> Nothing
+  -- Reify continuations and remove annotations
+  cont_def <- reifyContinuations var_ids rconts cont_map ann_def
 
-  return lookup_function
+  -- Construct closure conversion info
+  let lookup_function f =
+        let grp = fun_to_group f
+        in FunAnalysisResults
+           { funHoisted  = grp `Set.member` hoisted_groups
+           , funGroup    = grp
+           , funCaptured = fromMaybe Set.empty $ Map.lookup f captures
+           }
+  cc_info <- runFreshVarM var_ids $ stmCCInfo lookup_function locals_in_scope (funBody $ definiens $ cont_def)
+  
+  when debug $ do
+    putStrLn "Results of analysis:"
+    print $ vcat[hang (pprVar v) 2 (pprCCInfo cc_info) | (v, cc_info) <- cc_info]
+
+  return (cont_def, Map.fromList cc_info)

@@ -45,8 +45,8 @@ import GlobalVar
 --   The constructors should never be seen.  This function is for debugging.
 checkForOutPtr :: Type -> Bool
 checkForOutPtr (VarT t)
-  | t `isPyonBuiltin` the_OutPtr = True
-  | t `isPyonBuiltin` the_IEffect = True
+  | t `isPyonBuiltin` The_OutPtr = True
+  | t `isPyonBuiltin` The_IEffect = True
   | otherwise = False
 checkForOutPtr (AppT op arg) =
   checkForOutPtr op || checkForOutPtr arg
@@ -256,23 +256,23 @@ coerceType g_k e_k g_t =
        | e_kv == g_kv -> return g_t -- No need to coerce
        | e_kv == valV && g_kv == bareV ->
            case fromVarApp g_t
-           of Just (op, [arg]) | op `isPyonBuiltin` the_Stored -> return arg
+           of Just (op, [arg]) | op `isPyonBuiltin` The_Stored -> return arg
               _ -> internalError "coerceType"
        | e_kv == valV && g_kv == boxV ->
            case fromVarApp g_t
-           of Just (op, [arg]) | op `isPyonBuiltin` the_BoxedType ->
+           of Just (op, [arg]) | op `isPyonBuiltin` The_BoxedType ->
                 case fromVarApp arg
-                of Just (op, [arg2]) | op `isPyonBuiltin` the_Stored -> return arg2
+                of Just (op, [arg2]) | op `isPyonBuiltin` The_Stored -> return arg2
                    _ -> internalError "coerceType"
               _ -> internalError "coerceType"
        | e_kv == boxV && g_kv == valV ->
            return $
-           varApp (pyonBuiltin the_BoxedType)
-           [varApp (pyonBuiltin the_Stored) [g_t]]
+           varApp (pyonBuiltin The_BoxedType)
+           [varApp (pyonBuiltin The_Stored) [g_t]]
        | e_kv == boxV && g_kv == bareV ->
            return $ boxedType g_t
        | e_kv == bareV && g_kv == valV ->
-           return $varApp (pyonBuiltin the_Stored) [g_t]
+           return $varApp (pyonBuiltin The_Stored) [g_t]
        | e_kv == bareV && g_kv == boxV ->
            return $ bareType g_t
      (e_dom `FunT` e_rng, g_dom `FunT` g_rng)
@@ -296,9 +296,9 @@ sameKind _ _ = False
 -- * boxedType : bare -> box
 -- * bareType  : box  -> bare
 writeType, boxedType, bareType :: Type -> Type
-writeType t = varApp (pyonBuiltin the_Writer) [t]
-boxedType t = varApp (pyonBuiltin the_BoxedType) [t]
-bareType t  = varApp (pyonBuiltin the_BareType) [t]
+writeType t = varApp (pyonBuiltin The_Writer) [t]
+boxedType t = varApp (pyonBuiltin The_BoxedType) [t]
+bareType t  = varApp (pyonBuiltin The_BareType) [t]
 
 -- | Convert a System F type to its natural representation
 cvtNaturalType :: Type -> RI (Type, Kind)
@@ -467,7 +467,7 @@ toStoredCoercion :: Type -> Coercion
 toStoredCoercion ty = Coercion $ \k e ->
   k (ExpM $ AppE defaultExpInfo stored_op [TypM ty] [e])
   where
-    stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
+    stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_stored)
 
 -- | Coerce @bare -> val@ using the @stored@ constructor.
 --   The argument is the @val@ type.
@@ -477,7 +477,7 @@ fromStoredCoercion ty = Coercion $ \k e -> do
   (expr, x) <- k (ExpM $ VarE defaultExpInfo val_var)
   
   -- Create a case statement
-  let alt = AltM $ DeCon { altConstructor = pyonBuiltin the_stored
+  let alt = AltM $ DeCon { altConstructor = pyonBuiltin The_stored
                          , altTyArgs = [TypM ty]
                          , altExTypes = []
                          , altParams = [patM (val_var ::: ty)]
@@ -492,7 +492,7 @@ toBoxedTypeCoercion ty = Coercion $ \k e -> do
   dict <- withReprDict ty return
   k (ExpM $ AppE defaultExpInfo box_op [TypM ty] [dict, e])
   where
-    box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_convertToBoxed)
+    box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_convertToBoxed)
 
 -- | Coerce @box -> writer@ using the @convertToBare@ function.
 --   The argument is the @bare@ type.
@@ -501,7 +501,7 @@ toBareTypeCoercion ty = Coercion $ \k e -> do
   dict <- withReprDict ty return
   k (ExpM $ AppE defaultExpInfo bare_op [TypM ty] [dict, e])
   where
-    bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_convertToBare)
+    bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_convertToBare)
 
 -- | Coerce @read -> write@ using the @copy@ function.
 --   The argument is the @bare@ type.
@@ -510,7 +510,7 @@ copyCoercion ty = Coercion $ \k e -> do
   dict <- withReprDict ty return
   k (ExpM $ AppE defaultExpInfo copy_op [TypM ty] [dict, e])
   where
-    copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
+    copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_copy)
 
 -- | Coerce @write -> bare@ by assigning to a temporary variable, then
 --   reading from the temporary variable.
@@ -530,7 +530,7 @@ writeLocalCoercion ty = Coercion $ \k e -> do
   (expr, x) <- k (ExpM $ VarE defaultExpInfo read_var)
   
   let rhs = ExpM $ AppE defaultExpInfo box_op [TypM ty] [e]
-      expr_alt = AltM $ DeCon { altConstructor = pyonBuiltin the_boxed
+      expr_alt = AltM $ DeCon { altConstructor = pyonBuiltin The_boxed
                               , altTyArgs = [TypM ty]
                               , altExTypes = []
                               , altParams = [patM (read_var ::: ty)]
@@ -542,8 +542,8 @@ writeLocalCoercion ty = Coercion $ \k e -> do
       local_expr = ExpM $ LetE defaultExpInfo pattern rhs body
   return (local_expr, x)
   where
-    box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_boxed)
-    box_type = varApp (pyonBuiltin the_Boxed) [ty]
+    box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_boxed)
+    box_type = varApp (pyonBuiltin The_Boxed) [ty]
 
 -- | Create a coercion that coerces from one specification function
 --   type to another specification function type.
@@ -679,9 +679,9 @@ representationCoercion natural_ty natural_kind g_kind e_kind =
     -- The bare object type corresponding to natural_ty
     bare_ty =
       case natural_kind
-      of ValK  -> varApp (pyonBuiltin the_Stored) [natural_ty]
+      of ValK  -> varApp (pyonBuiltin The_Stored) [natural_ty]
          BareK -> natural_ty
-         BoxK  -> varApp (pyonBuiltin the_BareType) [natural_ty]
+         BoxK  -> varApp (pyonBuiltin The_BareType) [natural_ty]
 
     -- Coerce to another kind, then coerce to final kind
     coerce_via k = do
@@ -703,7 +703,7 @@ valueCoercion kind g_type e_type = do
         (e_tydom, e_dom, e_rng) = fromForallFunType e_type
     in if not (null g_tydom) || not (null g_dom)
        then return $ functionCoercion g_tydom g_dom g_rng e_tydom e_dom e_rng
-       else internalError "valueCoercion: Not implemented for this type"
+       else traceShow (pprType g_type $$ pprType e_type) $ internalError "valueCoercion: Not implemented for this type"
 
 coerceExpAtType :: Type -> Type -> ExpM -> (ExpM -> RI (ExpM, a))
                 -> RI (ExpM, a)

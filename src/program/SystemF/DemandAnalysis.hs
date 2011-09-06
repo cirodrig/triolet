@@ -241,9 +241,9 @@ dmdAppE inf op ty_args args = do
     use_modes =
       case op
       of ExpM (VarE _ op_var)
-           | op_var `isPyonBuiltin` the_copy && length args == 2 ->
+           | op_var `isPyonBuiltin` The_copy && length args == 2 ->
                [Used, Inspected]
-           | op_var `isPyonBuiltin` the_copy && length args == 3 ->
+           | op_var `isPyonBuiltin` The_copy && length args == 3 ->
                [Used, Inspected, Used]
          _ -> repeat Used
 

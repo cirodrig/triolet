@@ -81,7 +81,7 @@ isSingletonType ty =
 isFloatableCaseDataCon :: Var -> Bool
 isFloatableCaseDataCon con =
   isDictionaryDataCon con ||
-  con `isPyonBuiltin` the_someIInt
+  con `isPyonBuiltin` The_someIInt
 
 -- | Return True if the expression ends with an exception-raising statement 
 --   and does not return normally.
@@ -119,7 +119,7 @@ floatableAppParamType :: TypeEnv -> Var -> [TypM] -> [ExpM] -> Flt (Maybe Type)
 floatableAppParamType tenv op_var ty_args args
   | isDictionaryDataCon op_var = dictionary_binding
   | isReprCon op_var           = repr_binding
-  | op_var `isPyonBuiltin` the_defineIntIndex &&
+  | op_var `isPyonBuiltin` The_defineIntIndex &&
     length args == 1           = return $ Just intindex_binding
   | otherwise                  = return Nothing
   where
@@ -153,7 +153,7 @@ floatableAppParamType tenv op_var ty_args args
 
     intindex_binding =
       -- Return value has type SomeIndInt
-      VarT (pyonBuiltin the_SomeIInt)
+      VarT (pyonBuiltin The_SomeIInt)
 
 -- | Return True if the expression is a variable or literal, False otherwise.
 isTrivialExp :: ExpM -> Bool
@@ -167,9 +167,9 @@ isDataMovementExp :: ExpM -> Bool
 isDataMovementExp expr =
   case unpackVarAppM expr
   of Just (op, _, _)
-       | op `isPyonBuiltin` the_convertToBoxed ||
-         op `isPyonBuiltin` the_copy ||
-         op `isPyonBuiltin` the_convertToBare -> True
+       | op `isPyonBuiltin` The_convertToBoxed ||
+         op `isPyonBuiltin` The_copy ||
+         op `isPyonBuiltin` The_convertToBare -> True
      _ -> False
 
 -- | Return True if the expression is worth floating out of a data constructor.
@@ -312,7 +312,7 @@ floatedParameters tenv spc op_var ty_args =
          directStyleAppParameters tenv dcon_type ty_args field_spcs 
        return (direct_params ++ repeat Don'tFloat)
      Nothing
-       | op_var `isPyonBuiltin` the_copy ->
+       | op_var `isPyonBuiltin` The_copy ->
            -- Move the source argument of 'copy' to increase the success rate
            -- of copy elimination
            let [TypM store_type] = ty_args
@@ -332,7 +332,7 @@ floatedParameters' tenv op_var ty_args =
        directStyleAppParameters' tenv dcon_type ty_args field_spcs ++
        repeat False
      Nothing
-       | op_var `isPyonBuiltin` the_copy ->
+       | op_var `isPyonBuiltin` The_copy ->
            -- Move the source argument of 'copy' to increase the success rate
            -- of copy elimination
            [False, True, False]

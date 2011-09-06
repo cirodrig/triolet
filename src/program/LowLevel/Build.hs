@@ -899,7 +899,7 @@ mkGlobalEntryPoints ftype label global_closure
       exa <- make_entry_point ExactEntryLabel
       ine <- make_entry_point InexactEntryLabel
       let arity = length $ ftParamTypes ftype
-      return $! EntryPoints ftype arity dir Nothing exa ine Nothing inf (Just global_closure)
+      return $! EntryPoints ftype arity dir Nothing exa ine inf (Just global_closure)
   where
     -- If the global closure is externally visible, the other entry points
     -- will also be externally visible
@@ -915,26 +915,17 @@ mkEntryPoints :: (Monad m, Supplies m (Ident Var)) =>
                  WantClosureDeallocator
               -> Bool           -- ^ If true, create a vector entry point
               -> FunctionType   -- ^ Function type
-              -> Maybe Label    -- ^ Function name
+              -> Var            -- ^ Global closure variable
               -> m EntryPoints  -- ^ Creates an EntryPoints structure
-mkEntryPoints want_dealloc want_vec ftype label
+mkEntryPoints NeverDeallocate False ftype global_closure
   | not $ ftIsClosure ftype =
     internalError "mkEntryPoints: Not a closure function"
   | otherwise = do
+      let label = varName global_closure
       [inf, dir, exa, ine] <-
         replicateM 4 $ newVar label (PrimType PointerType)
-      vec <- if want_vec 
-             then liftM Just $ newVar label (PrimType PointerType)
-             else return Nothing
-      dea <- case want_dealloc
-             of NeverDeallocate -> return Nothing
-                DefaultDeallocator ->
-                  -- The default deallocator simply calls pyon_dealloc 
-                  return $ Just $ llBuiltin the_prim_pyon_dealloc
-                CustomDeallocator f ->
-                  return $ Just f
       let arity = length $ ftParamTypes ftype
-      return $! EntryPoints ftype arity dir vec exa ine dea inf Nothing
+      return $! EntryPoints ftype arity dir Nothing exa ine inf (Just global_closure)
 {-
 passConvValue :: Int -> Int -> Var -> Var -> Val
 passConvValue size align copy finalize =

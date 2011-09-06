@@ -59,7 +59,7 @@ etaReduceSingleLambdaFunction allow_exceptions inf f =
 isOutputParameter :: PatM -> Bool
 isOutputParameter pat =
   case fromVarApp (patMType pat)
-  of Just (op, [arg]) | op `isPyonBuiltin` the_OutPtr -> True
+  of Just (op, [arg]) | op `isPyonBuiltin` The_OutPtr -> True
      _ -> False
 
 isNotOutputParameter = not . isOutputParameter
@@ -261,7 +261,7 @@ etaExpandFun (FunM f) =
   case fromTypM $ funReturn f
   of FunT ret_dom ret_rng ->
        case fromVarApp ret_dom
-       of Just (op, [arg]) | op `isPyonBuiltin` the_OutPtr ->
+       of Just (op, [arg]) | op `isPyonBuiltin` The_OutPtr ->
             eta_expand ret_dom ret_rng
           _ -> no_eta_expand
      _ -> no_eta_expand

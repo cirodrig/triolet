@@ -59,9 +59,9 @@ assumeSingletonValue :: Type -> LL.Var -> Lower a -> Lower a
 assumeSingletonValue ty bound_var m =
   case fromVarApp ty
   of Just (con, [arg])
-       | con `isPyonBuiltin` the_Repr ->
+       | con `isPyonBuiltin` The_Repr ->
            assumeReprDict arg (LL.VarV bound_var) m
-       | con `isPyonBuiltin` the_FIInt ->
+       | con `isPyonBuiltin` The_FIInt ->
            assumeIndexedInt arg (LL.VarV bound_var) m
      _ -> m
 
@@ -213,12 +213,12 @@ lowerLit _ lit =
   of IntL n ty ->
        case fromVarApp ty
        of Just (con, [])
-            | con `isPyonBuiltin` the_int ->
+            | con `isPyonBuiltin` The_int ->
               return $ RetVal (LL.LitV $ LL.IntL LL.Signed LL.pyonIntSize n)
      FloatL n ty ->
        case fromVarApp ty
        of Just (con, [])
-            | con `isPyonBuiltin` the_float ->
+            | con `isPyonBuiltin` The_float ->
               return $ RetVal (LL.LitV $ LL.FloatL LL.pyonFloatSize n)
 
 -- | Lower arguments, then pack the result values into a record value
@@ -239,7 +239,7 @@ lowerUTuple _ args = do
 --   Type applications are erased, so if there are  with no arguments are 
 lowerApp :: Type -> ExpTM -> [TypTM] -> [ExpTM] -> GenLower RetVal
 lowerApp rt (ExpTM (TypeAnn _ (VarE _ op_var))) ty_args args
-  | op_var `isPyonBuiltin` the_toEffTok =
+  | op_var `isPyonBuiltin` The_toEffTok =
     -- The function 'toEffTok' is handled specially because its argument
     -- expression doesn't yield a value.
     -- Run the argument, then return a unit value.

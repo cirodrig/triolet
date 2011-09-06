@@ -104,14 +104,14 @@ letViaBoxed binder rhs body =
   
       -- Create a case statement that binds a temporary value for the body
       expr = ExpM $ CaseE defaultExpInfo boxed_rhs [alt]
-      alt = AltM $ DeCon { altConstructor = pyonBuiltin the_boxed
+      alt = AltM $ DeCon { altConstructor = pyonBuiltin The_boxed
                          , altTyArgs = [ty]
                          , altExTypes = []
                          , altParams = [patM binder]
                          , altBody = body}
   in expr
   where
-    boxed_con = ExpM $ VarE defaultExpInfo (pyonBuiltin the_boxed)
+    boxed_con = ExpM $ VarE defaultExpInfo (pyonBuiltin The_boxed)
 
 letfunE :: DefGroup (Def Mem) -> ExpM -> ExpM
 letfunE defs body = ExpM $ LetfunE defaultExpInfo defs body
@@ -130,8 +130,8 @@ ifE mk_cond mk_tr mk_fa = do
   cond <- mk_cond
   tr <- mk_tr
   fa <- mk_fa
-  let true  = AltM $ DeCon (pyonBuiltin the_True) [] [] [] tr
-      false = AltM $ DeCon (pyonBuiltin the_False) [] [] [] fa
+  let true  = AltM $ DeCon (pyonBuiltin The_True) [] [] [] tr
+      false = AltM $ DeCon (pyonBuiltin The_False) [] [] [] fa
   return $ ExpM $ CaseE defaultExpInfo cond [true, false]
 
 mkFun :: forall m. (Supplies m VarID) =>
@@ -175,9 +175,9 @@ mkAlt tenv con ty_args mk_body =
        return $ AltM $ DeCon con ty_args ex_params patterns body
      _ -> internalError "mkAlt"
 
-outType t = varApp (pyonBuiltin the_OutPtr) [t]
-initEffectType t = varApp (pyonBuiltin the_IEffect) [t]
-storedType t = varApp (pyonBuiltin the_Stored) [t]
+outType t = varApp (pyonBuiltin The_OutPtr) [t]
+initEffectType t = varApp (pyonBuiltin The_IEffect) [t]
+storedType t = varApp (pyonBuiltin The_Stored) [t]
 
 writerType t = outType t `FunT` initEffectType t
 

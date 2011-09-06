@@ -118,11 +118,11 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
      CaseE {expScrutinee = e, expAlternatives = [AltSF alt1, AltSF alt2]} 
-         | altConstructor alt1 `isPyonBuiltin` the_True &&
-           altConstructor alt2 `isPyonBuiltin` the_False ->
+         | altConstructor alt1 `isPyonBuiltin` The_True &&
+           altConstructor alt2 `isPyonBuiltin` The_False ->
              pprIf flags e (altBody alt1) (altBody alt2)
-         | altConstructor alt2 `isPyonBuiltin` the_True &&
-           altConstructor alt1 `isPyonBuiltin` the_False ->
+         | altConstructor alt2 `isPyonBuiltin` The_True &&
+           altConstructor alt1 `isPyonBuiltin` The_False ->
              pprIf flags e (altBody alt2) (altBody alt1)
      CaseE {expScrutinee = e, expAlternatives = alts} ->
        let doc = text "case" <+> pprExpFlagsPrec flags precOuter e $$

@@ -366,8 +366,8 @@ typeCheckAlternative pos scr_type alt@(AltM (DeCon { altConstructor = con
   let invalid_type =
         case con_scr_type
         of FunT {} -> True
-           AppT (VarT v) _ | v `isPyonBuiltin` the_OutPtr -> True
-                           | v `isPyonBuiltin` the_IEffect -> True
+           AppT (VarT v) _ | v `isPyonBuiltin` The_OutPtr -> True
+                           | v `isPyonBuiltin` The_IEffect -> True
            _ -> False
   when invalid_type $ internalError "typeCheckAlternative: Invalid pattern"
 

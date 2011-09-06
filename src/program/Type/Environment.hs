@@ -460,12 +460,12 @@ convertToMemDataConType (DataConType params eparams args range con ty_con) =
 isAdapterCon :: Var -> Bool
 isAdapterCon v = v `elem` adapters
   where
-    adapters = [pyonBuiltin the_Writer,
-                pyonBuiltin the_Stored,
-                pyonBuiltin the_StoredBox,
-                pyonBuiltin the_Boxed,
-                pyonBuiltin the_BoxedType,
-                pyonBuiltin the_BareType]
+    adapters = [pyonBuiltin The_Writer,
+                pyonBuiltin The_Stored,
+                pyonBuiltin The_StoredBox,
+                pyonBuiltin The_Boxed,
+                pyonBuiltin The_BoxedType,
+                pyonBuiltin The_BareType]
 
 specToPureTypeEnv :: SpecTypeEnv -> TypeEnv
 specToPureTypeEnv (TypeEnv m) =
@@ -570,7 +570,7 @@ specToMemType ty =
   case fromVarApp ty
   of Just (con, [arg])
        -- Replace applications of 'Writer' by initializer functions.
-       | con `isPyonBuiltin` the_Writer ->
+       | con `isPyonBuiltin` The_Writer ->
            let mem_arg = specToMemType arg
            in initializerType mem_arg
        
@@ -600,8 +600,8 @@ specToMemDataConType dcon_type =
     type_param (v ::: t) = v ::: specToMemType t
 
 initializerType t =
-  FunT (varApp (pyonBuiltin the_OutPtr) [t])
-       (varApp (pyonBuiltin the_IEffect) [t])
+  FunT (varApp (pyonBuiltin The_OutPtr) [t])
+       (varApp (pyonBuiltin The_IEffect) [t])
 
 -------------------------------------------------------------------------------
 

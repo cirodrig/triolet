@@ -22,10 +22,10 @@ convertKind (VarT v)
 convertType :: Type -> Type
 convertType ty
   | Just (op, [arg]) <- fromVarApp ty,
-    op `isPyonBuiltin` the_Writer =
+    op `isPyonBuiltin` The_Writer =
       let arg' = convertType arg
-      in varApp (pyonBuiltin the_OutPtr) [arg'] `FunT`
-         varApp (pyonBuiltin the_IEffect) [arg']
+      in varApp (pyonBuiltin The_OutPtr) [arg'] `FunT`
+         varApp (pyonBuiltin The_IEffect) [arg']
 
   | otherwise =
       case ty

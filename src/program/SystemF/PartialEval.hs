@@ -179,15 +179,15 @@ pevalExp expression =
   of VarE {expInfo = inf, expVar = v}
        -- Replace constants with literal values.  This helps 
        -- representation selection represent these as values.
-       | v `isPyonBuiltin` the_AdditiveDict_int_zero ->
+       | v `isPyonBuiltin` The_AdditiveDict_int_zero ->
            return_lit inf $ IntL 0 int_type
-       | v `isPyonBuiltin` the_AdditiveDict_float_zero ->
+       | v `isPyonBuiltin` The_AdditiveDict_float_zero ->
            return_lit inf $ FloatL 0 float_type
-       | v `isPyonBuiltin` the_MultiplicativeDict_int_one ->
+       | v `isPyonBuiltin` The_MultiplicativeDict_int_one ->
            return_lit inf $ IntL 1 int_type
-       | v `isPyonBuiltin` the_MultiplicativeDict_float_one ->
+       | v `isPyonBuiltin` The_MultiplicativeDict_float_one ->
            return_lit inf $ FloatL 1 float_type
-       | v `isPyonBuiltin` the_FloatingDict_float_pi ->
+       | v `isPyonBuiltin` The_FloatingDict_float_pi ->
            return_lit inf $ FloatL pi float_type
        | otherwise -> lookupVarDefault expression v
      LitE {} -> return expression
@@ -230,21 +230,21 @@ pevalExp expression =
        return $ ExpSF $ CoerceE inf from_t to_t body'
   where
     return_lit inf l = return $ ExpSF $ LitE inf l
-    int_type = VarT $ pyonBuiltin the_int
-    float_type = VarT $ pyonBuiltin the_float
+    int_type = VarT $ pyonBuiltin The_int
+    float_type = VarT $ pyonBuiltin The_float
 
 -- | Attempt to statically evalaute a known function.  The operands have
 --   already been evaluated.
 pevalApp inf op tys args =
   case known_oper
   of Just con
-       | con `isPyonBuiltin` the_FloatingDict_float_fromfloat ->
+       | con `isPyonBuiltin` The_FloatingDict_float_fromfloat ->
            -- fromFloat (n :: Float) = n
            case args of [arg] -> arg
-       | con `isPyonBuiltin` the_MultiplicativeDict_int_fromInt ->
+       | con `isPyonBuiltin` The_MultiplicativeDict_int_fromInt ->
            -- fromInt (n :: Int) = n
            case args of [arg] -> arg
-       | con `isPyonBuiltin` the_MultiplicativeDict_float_fromInt ->
+       | con `isPyonBuiltin` The_MultiplicativeDict_float_fromInt ->
            -- fromInt (n :: Float) = n as a float
            case args
            of [ExpSF (LitE {expLit = IntL n _})] ->
@@ -270,7 +270,7 @@ pevalApp inf op tys args =
                       
     rebuild_call = ExpSF $ AppE inf op tys args
     
-    float_type = VarT $ pyonBuiltin the_float
+    float_type = VarT $ pyonBuiltin The_float
 
 -- | Attempt to eliminate a case statement.  If the scrutinee is a constructor
 -- application and it matches an alternative, replace the case statement

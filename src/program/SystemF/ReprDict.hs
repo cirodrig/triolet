@@ -101,7 +101,7 @@ lookupReprDict' ty@(AnyT {}) =
   return $ Just $ mk_any_dict ty
   where
     mk_any_dict ty =
-      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_EmptyReference)
+      let op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_EmptyReference)
           call = ExpM $ AppE defaultExpInfo op [TypM ty] []
       in MkDict (return call)
      
@@ -166,11 +166,11 @@ saveReprDictPattern :: ReprDictMonad m => PatM -> m a -> m a
 saveReprDictPattern (PatM (pat_var ::: ty) _) m =
   case fromVarApp ty
   of Just (op, [arg])
-       | op `isPyonBuiltin` the_Repr -> 
+       | op `isPyonBuiltin` The_Repr -> 
            saveReprDict arg (ExpM $ VarE defaultExpInfo pat_var) m
-       | op `isPyonBuiltin` the_ShapeDict -> 
+       | op `isPyonBuiltin` The_ShapeDict -> 
            saveShapeDict arg (ExpM $ VarE defaultExpInfo pat_var) m
-       | op `isPyonBuiltin` the_FIInt ->
+       | op `isPyonBuiltin` The_FIInt ->
            saveIndexedInt arg (ExpM $ VarE defaultExpInfo pat_var) m
      _ -> m
 
@@ -197,35 +197,35 @@ withReprDict param_type k = do
 createDictEnv :: FreshVarM SingletonValueEnv
 createDictEnv = do
   let int_dict =
-        valueDict (pyonBuiltin the_int) (pyonBuiltin the_repr_int)
+        valueDict (pyonBuiltin The_int) (pyonBuiltin The_repr_int)
   let float_dict =
-        valueDict (pyonBuiltin the_float) (pyonBuiltin the_repr_float)
+        valueDict (pyonBuiltin The_float) (pyonBuiltin The_repr_float)
   let efftok_dict =
-        valueDict (pyonBuiltin the_EffTok) (pyonBuiltin the_repr_EffTok)
+        valueDict (pyonBuiltin The_EffTok) (pyonBuiltin The_repr_EffTok)
       sliceobj_dict =
-        DictEnv.monoPattern (VarT $ pyonBuiltin the_SliceObject)
-        (MkDict $ return $ ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_SliceObject))
-  repr_dict <- createBoxedDictPattern (pyonBuiltin the_Repr) 1
-  stream_dict <- createBoxedDictPattern (pyonBuiltin the_Stream) 2
-  eq_dict <- createBoxedDictPattern (pyonBuiltin the_EqDict) 1
-  ord_dict <- createBoxedDictPattern (pyonBuiltin the_OrdDict) 1
-  additive_dict <- createBoxedDictPattern (pyonBuiltin the_AdditiveDict) 1
-  multiplicative_dict <- createBoxedDictPattern (pyonBuiltin the_MultiplicativeDict) 1
+        DictEnv.monoPattern (VarT $ pyonBuiltin The_SliceObject)
+        (MkDict $ return $ ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_SliceObject))
+  repr_dict <- createBoxedDictPattern (pyonBuiltin The_Repr) 1
+  stream_dict <- createBoxedDictPattern (pyonBuiltin The_Stream) 2
+  eq_dict <- createBoxedDictPattern (pyonBuiltin The_EqDict) 1
+  ord_dict <- createBoxedDictPattern (pyonBuiltin The_OrdDict) 1
+  additive_dict <- createBoxedDictPattern (pyonBuiltin The_AdditiveDict) 1
+  multiplicative_dict <- createBoxedDictPattern (pyonBuiltin The_MultiplicativeDict) 1
   referenced_dict <- DictEnv.pattern1 $ \arg -> 
-    (varApp (pyonBuiltin the_Referenced) [VarT arg],
+    (varApp (pyonBuiltin The_Referenced) [VarT arg],
      createDict_referenced arg)
   maybe_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_Maybe) [VarT arg],
+    (varApp (pyonBuiltin The_Maybe) [VarT arg],
      createDict_Maybe arg)
   tuple2_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (pyonBuiltin the_PyonTuple2) [VarT arg1, VarT arg2],
+    (varApp (pyonBuiltin The_PyonTuple2) [VarT arg1, VarT arg2],
      createDict_Tuple2 arg1 arg2)
   tuple3_dict <- do
     v1 <- newAnonymousVar TypeLevel
     v2 <- newAnonymousVar TypeLevel
     v3 <- newAnonymousVar TypeLevel
     return $ DictEnv.pattern [v1, v2, v3]
-      (varApp (pyonBuiltin the_PyonTuple3) [VarT v1, VarT v2, VarT v3])
+      (varApp (pyonBuiltin The_PyonTuple3) [VarT v1, VarT v2, VarT v3])
       (createDict_Tuple3 v1 v2 v3)
   tuple4_dict <- do
     v1 <- newAnonymousVar TypeLevel
@@ -233,26 +233,26 @@ createDictEnv = do
     v3 <- newAnonymousVar TypeLevel
     v4 <- newAnonymousVar TypeLevel
     return $ DictEnv.pattern [v1, v2, v3, v4]
-      (varApp (pyonBuiltin the_PyonTuple4) [VarT v1, VarT v2, VarT v3, VarT v4])
+      (varApp (pyonBuiltin The_PyonTuple4) [VarT v1, VarT v2, VarT v3, VarT v4])
       (createDict_Tuple4 v1 v2 v3 v4)
   list_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_list) [VarT arg],
+    (varApp (pyonBuiltin The_list) [VarT arg],
      createDict_list arg)
   complex_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_Complex) [VarT arg],
+    (varApp (pyonBuiltin The_Complex) [VarT arg],
      createDict_complex arg)
   array_dict <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (pyonBuiltin the_arr) [VarT arg1, VarT arg2],
+    (varApp (pyonBuiltin The_arr) [VarT arg1, VarT arg2],
      createDict_array arg1 arg2)
   storedBox_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_StoredBox) [VarT arg],
+    (varApp (pyonBuiltin The_StoredBox) [VarT arg],
      createDict_storedBox arg)
   
   index_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_index) [VarT arg],
+    (varApp (pyonBuiltin The_index) [VarT arg],
      createDict_index arg)
   slice_dict <- DictEnv.pattern1 $ \arg ->
-    (varApp (pyonBuiltin the_slice) [VarT arg],
+    (varApp (pyonBuiltin The_slice) [VarT arg],
      createDict_slice arg)
 
   let dict_env = DictEnv.DictEnv [repr_dict, storedBox_dict,
@@ -267,10 +267,10 @@ createDictEnv = do
                                   index_dict, slice_dict]
       
   minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (pyonBuiltin the_min_i) [VarT arg1, VarT arg2],
+    (varApp (pyonBuiltin The_min_i) [VarT arg1, VarT arg2],
      createInt_min arg1 arg2)
   minus_int <- DictEnv.pattern2 $ \arg1 arg2 ->
-    (varApp (pyonBuiltin the_minus_i) [VarT arg1, VarT arg2],
+    (varApp (pyonBuiltin The_minus_i) [VarT arg1, VarT arg2],
      createInt_minus arg1 arg2)
   let index_env = DictEnv.DictEnv [minimum_int, minus_int]
 
@@ -289,7 +289,7 @@ valueDict :: Var -> Var -> DictEnv.TypePattern MkDict
 valueDict value_var dict_var =
   DictEnv.monoPattern pattern_type expr
   where
-    pattern_type = varApp (pyonBuiltin the_Stored) [VarT value_var]
+    pattern_type = varApp (pyonBuiltin The_Stored) [VarT value_var]
     expr = MkDict $ return $ ExpM $ VarE defaultExpInfo dict_var
 
 createDict_Tuple2 :: Var -> Var -> Substitution -> MkDict
@@ -302,9 +302,9 @@ createDict_Tuple2 param_var1 param_var2 subst = MkDict $
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
     
-    data_type = varApp (pyonBuiltin the_PyonTuple2) [param1, param2]
-    dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple2)
+    data_type = varApp (pyonBuiltin The_PyonTuple2) [param1, param2]
+    dict_type = varApp (pyonBuiltin The_Repr) [data_type]
+    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple2)
 
 createDict_Tuple3 :: Var -> Var -> Var -> Substitution -> MkDict
 createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $
@@ -319,9 +319,9 @@ createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $
     param2 = getParamType pv2 subst
     param3 = getParamType pv3 subst
 
-    data_type = varApp (pyonBuiltin the_PyonTuple3) [param1, param2, param3]
-    dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple3)
+    data_type = varApp (pyonBuiltin The_PyonTuple3) [param1, param2, param3]
+    dict_type = varApp (pyonBuiltin The_Repr) [data_type]
+    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple3)
 
 createDict_Tuple4 :: Var -> Var -> Var -> Var -> Substitution -> MkDict
 createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
@@ -338,9 +338,9 @@ createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
     param3 = getParamType pv3 subst
     param4 = getParamType pv4 subst
 
-    data_type = varApp (pyonBuiltin the_PyonTuple4) [param1, param2, param3, param4]
-    dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_PyonTuple4)
+    data_type = varApp (pyonBuiltin The_PyonTuple4) [param1, param2, param3, param4]
+    dict_type = varApp (pyonBuiltin The_Repr) [data_type]
+    dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple4)
 
 createDict_list :: Var -> Substitution -> MkDict
 createDict_list param_var subst = MkDict $
@@ -348,7 +348,7 @@ createDict_list param_var subst = MkDict $
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_list)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_list)
 
 createDict_referenced :: Var -> Substitution -> MkDict
 createDict_referenced param_var subst = MkDict $
@@ -356,7 +356,7 @@ createDict_referenced param_var subst = MkDict $
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Referenced)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Referenced)
 
 createDict_Maybe :: Var -> Substitution -> MkDict
 createDict_Maybe param_var subst = MkDict $
@@ -364,7 +364,7 @@ createDict_Maybe param_var subst = MkDict $
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Maybe)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Maybe)
 
 createDict_complex :: Var -> Substitution -> MkDict
 createDict_complex param_var subst = MkDict $
@@ -372,7 +372,7 @@ createDict_complex param_var subst = MkDict $
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Complex)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Complex)
 
 createDict_array :: Var -> Var -> Substitution -> MkDict
 createDict_array param_var1 param_var2 subst = MkDict $
@@ -384,16 +384,16 @@ createDict_array param_var1 param_var2 subst = MkDict $
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
     
-    data_type = varApp (pyonBuiltin the_arr) [param1, param2]
-    dict_type = varApp (pyonBuiltin the_Repr) [data_type]
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_arr)
+    data_type = varApp (pyonBuiltin The_arr) [param1, param2]
+    dict_type = varApp (pyonBuiltin The_Repr) [data_type]
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_arr)
 
 createDict_storedBox :: Var -> Substitution -> MkDict
 createDict_storedBox param_var subst = MkDict $ do
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] []
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Box)
 
 -- | Get the representation dictionary for a boxed data type.
 --   
@@ -406,7 +406,7 @@ createBoxedDictPattern con arity = do
     DictEnv.pattern param_vars (match_type param_vars) (create_dict param_vars)
   where
     match_type param_vars =
-      varApp (pyonBuiltin the_StoredBox) [varApp con (map VarT param_vars)]
+      varApp (pyonBuiltin The_StoredBox) [varApp con (map VarT param_vars)]
 
     -- Create a function call expression
     --
@@ -415,7 +415,7 @@ createBoxedDictPattern con arity = do
       where
         param_types = [getParamType v subst | v <- param_vars]
         dict_type = varApp con param_types
-        op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_repr_Box)
+        op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Box)
         expr = ExpM $ AppE defaultExpInfo op [TypM dict_type] []
 
 createDict_index param_var subst = MkDict $ do
@@ -425,7 +425,7 @@ createDict_index param_var subst = MkDict $ do
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [shape_dict]
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_shapeIndexRepr)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_shapeIndexRepr)
   
 createDict_slice param_var subst = MkDict $ do
   -- The Repr object for a @slice sh@ is stored in the @ShapeDict sh@.  
@@ -434,7 +434,7 @@ createDict_slice param_var subst = MkDict $ do
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [shape_dict]
   where
     param = getParamType param_var subst
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_shapeSliceRepr)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_shapeSliceRepr)
 
 createInt_min param_var1 param_var2 subst = MkDict $ do
   int1 <- lookupIndexedInt' param1
@@ -445,7 +445,7 @@ createInt_min param_var1 param_var2 subst = MkDict $ do
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
 
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_min_ii)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_min_ii)
 
 createInt_minus param_var1 param_var2 subst = MkDict $ do
   int1 <- lookupIndexedInt' param1
@@ -456,4 +456,4 @@ createInt_minus param_var1 param_var2 subst = MkDict $ do
     param1 = getParamType param_var1 subst
     param2 = getParamType param_var2 subst
 
-    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin the_minus_ii)
+    oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_minus_ii)

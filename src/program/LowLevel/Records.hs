@@ -126,29 +126,40 @@ infoTableHeader = [ PrimField (IntType Unsigned S8)
 infoTableHeaderRecord :: StaticRecord
 infoTableHeaderRecord = constStaticRecord infoTableHeader
 
--- | A function info table describes a function. 
+-- | A function info table describes a function.
+--
+--   When reading an info table, we don't know how many type tags there are.
+--   Assume there are zero type tags, read the arity, then build the real
+--   info table record.
 -- 
 -- The fields are:
 --
---  0. Free function
+--  0. Info table header
 --
---  1. Info table type tag
+--  1. Arity (number of arguments; excludes closure)
 --
---  2. Arity (number of arguments; excludes closure)
+--  2. Exact entry point
 --
---  3. Exact entry point
+--  3. Inexact entry point
 --
---  4. Inexact entry point
---
---  These are followed by a list of argument type tags (length is arity).
-funInfoHeader :: [StaticFieldType]
-funInfoHeader = [ RecordField infoTableHeaderRecord
-                , PrimField (IntType Unsigned S16)
-                , PrimField PointerType
-                , PrimField PointerType]
+--  4. Argument type tags
+funInfoHeader :: StaticRecord -> [StaticFieldType]
+funInfoHeader type_tags = [ RecordField infoTableHeaderRecord
+                          , PrimField (IntType Unsigned S16)
+                          , PrimField PointerType
+                          , PrimField PointerType
+                          , RecordField type_tags]
 
-funInfoHeaderRecord :: StaticRecord
-funInfoHeaderRecord = constStaticRecord funInfoHeader
+funInfoHeaderRecord :: StaticRecord -> StaticRecord
+funInfoHeaderRecord tt = constStaticRecord (funInfoHeader tt)
+
+funInfoHeaderRecord0 :: StaticRecord
+funInfoHeaderRecord0 = funInfoHeaderRecord (constStaticRecord [])
+
+-- | A record containing @N@ type tags.
+typeTagsRecord :: Int -> StaticRecord
+typeTagsRecord n =
+  constStaticRecord (replicate n $ PrimField (IntType Unsigned S8))
 
 -- | All reference-counted objects have a common header format.
 --

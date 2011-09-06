@@ -496,7 +496,7 @@ worthPostInlining tenv is_writer dmd expr =
                   WriterAV $ bigAV $
                   StoredValue Boxed $ InlAV source
 
-           | op `isPyonBuiltin` the_copy ->
+           | op `isPyonBuiltin` The_copy ->
                -- When using the value, read the source value directly
                let [_, source] = args
                in Just $ bigAV $ WriterAV $ InlAV source
@@ -627,7 +627,7 @@ inlckDataMovement :: InlineCheck -- ^ Test other arguments
 inlckDataMovement ptr_ck data_check tenv dmd expression =
   case unpackVarAppM expression
   of Just (op, _, args)
-       | op `isPyonBuiltin` the_copy ->
+       | op `isPyonBuiltin` The_copy ->
            let [repr, src] = args
            in ptr_ck tenv (Dmd (multiplicity dmd) Used) repr &&
               ptr_ck tenv (Dmd (multiplicity dmd) Used) src
@@ -756,7 +756,7 @@ mkCopyExp e = do
   e_dict <- getReprDict e_type
   return $ appE defaultExpInfo copy_op [TypM e_type] [e_dict, e]
   where
-    copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
+    copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_copy)
 
 -- | Attempt to construct a data initializer expression.
 --   The parameters are fields of a 'DataAV' representing a bare object.
@@ -1118,14 +1118,14 @@ eliminateUselessCopying (ExpM expression) =
     eliminate_unbox_and_copy tenv scrutinee alts =
       case unpackDataConAppM tenv scrutinee
       of Just (dcon, [ty_arg], [], [initializer])
-           | dataConCon dcon `isPyonBuiltin` the_boxed ->
+           | dataConCon dcon `isPyonBuiltin` The_boxed ->
              case alts
              of [AltM (DeCon _ _ _ [field] body)] ->
                   -- Body should be @copy _ _ x@ or @copy _ _ x e@
                   -- where @x@ is the bound variable
                   case unpackVarAppM body
                   of Just (op, ty_args, (_ : ExpM (VarE _ src) : body_args))
-                       | op `isPyonBuiltin` the_copy && src == patMVar field ->
+                       | op `isPyonBuiltin` The_copy && src == patMVar field ->
                          -- Match found
                          Just $ appE defaultExpInfo initializer [] body_args
                      _ -> Nothing
@@ -1207,7 +1207,7 @@ eliminateUselessCopying (ExpM expression) =
                v == patMVar pattern
              _ -> case unpackVarAppM expr
                   of Just (op, [_], [_, ExpM (VarE _ v)]) ->
-                       op `isPyonBuiltin` the_copy && v == patMVar pattern
+                       op `isPyonBuiltin` The_copy && v == patMVar pattern
                      _ -> False
         
        
@@ -1340,7 +1340,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
 
           -- Use special rewrite semantics for built-in functions
           Just (VarAV _ op_var)
-            | op_var `isPyonBuiltin` the_copy ->
+            | op_var `isPyonBuiltin` The_copy ->
                 case ty_args
                 of [ty] -> rwCopyApp inf op' ty args
 
@@ -1419,7 +1419,7 @@ rwCopyApp inf copy_op ty args = debug $ do
   whnf_type <- reduceToWhnf (fromTypM ty)
   case fromVarApp whnf_type of
     Just (op, [val_type])
-      | op `isPyonBuiltin` the_Stored ->
+      | op `isPyonBuiltin` The_Stored ->
           case args
           of [repr, src] ->
                use_fuel $       -- A 'copy' call has been replaced
@@ -1489,10 +1489,10 @@ rwCopyApp inf copy_op ty args = debug $ do
 --   special-case rewrite
 copyStoredValue inf val_type repr arg m_dst = do
   tmpvar <- newAnonymousVar ObjectLevel
-  let stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_stored)
+  let stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_stored)
       make_value = appE inf stored_op [TypM val_type]
                    ([ExpM $ VarE inf tmpvar] ++ maybeToList m_dst)
-      alt = AltM $ DeCon { altConstructor = pyonBuiltin the_stored
+      alt = AltM $ DeCon { altConstructor = pyonBuiltin The_stored
                          , altTyArgs = [TypM val_type]
                          , altExTypes = []
                          , altParams = [setPatMDmd (Dmd OnceSafe Used) $
@@ -1566,7 +1566,7 @@ rwCase inf scrut alts = do
 -- The case statement isn't eliminated, so this step doesn't consume fuel.
 rwCase1 _ tenv inf scrut alts
   | [alt@(AltM (DeCon {altConstructor = con}))] <- alts,
-    con `isPyonBuiltin` the_boxed = do
+    con `isPyonBuiltin` The_boxed = do
       -- Rewrite the scrutinee
       (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp scrut
       
@@ -1585,7 +1585,7 @@ rwCase1 _ tenv inf scrut alts
     -- @boxed (t) (case e of ...)@ where the case statement has multiple
     -- branches
     decon_scrutinee_case (ExpM (AppE _ (ExpM (VarE _ op)) [ty_arg] [arg]))
-      | op `isPyonBuiltin` the_boxed && isUnfloatableCase arg =
+      | op `isPyonBuiltin` The_boxed && isUnfloatableCase arg =
           case arg of ExpM (CaseE _ scr alts) -> Just (ty_arg, scr, alts)
 
     decon_scrutinee_case _ = Nothing
@@ -1602,7 +1602,7 @@ rwCase1 _ tenv inf scrut alts
             case scrut_val >>= fromDataAV
             of Just (DataValue { dataValueType = ConValueType c _ _
                                , dataFields = [f]})
-                 | c `isPyonBuiltin` the_boxed -> f
+                 | c `isPyonBuiltin` The_boxed -> f
                _ -> Nothing
 
       alt' <- rwAlt scrutinee_var (Just ([], [field_val])) alt
@@ -2041,7 +2041,7 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
           body' = caseAnalyze inf m_return_param outer_ks boxed_body
       in return $ AltM (branch {altBody = body'})
 
-    boxed_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_boxed)
+    boxed_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_boxed)
 
 -- | Create a function that is equivalent to a case alternative.
 --   The pattern-bound variables become function parameters.
@@ -2058,7 +2058,7 @@ makeBranchContinuation inf m_return_param (AltM alt) = do
   nonempty_params <-
     if null fun_params
     then do field_var <- newAnonymousVar ObjectLevel
-            return [patM (field_var ::: VarT (pyonBuiltin the_NoneType))]
+            return [patM (field_var ::: VarT (pyonBuiltin The_NoneType))]
     else return fun_params
   let body = altBody alt
   return_type <-
@@ -2091,7 +2091,7 @@ caseAnalyze inf m_return_parameter branches scrutinee =
                  maybeToList return_arg
           nonempty_args =
             if null args
-            then [ExpM $ VarE inf (pyonBuiltin the_None)]
+            then [ExpM $ VarE inf (pyonBuiltin The_None)]
             else args
           call = ExpM $ AppE inf (ExpM $ VarE inf callee) ty_args nonempty_args
       in AltM (alt {altBody = call})

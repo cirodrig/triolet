@@ -234,24 +234,24 @@ mkLitE pos l =
   TIExp $ case l
           of Untyped.IntL n      -> sf_literal $ SystemF.IntL n sf_int_type
              Untyped.FloatL n    -> sf_literal $ SystemF.FloatL n sf_float_type
-             Untyped.BoolL True  -> sf_constructor SystemF.the_True
-             Untyped.BoolL False -> sf_constructor SystemF.the_False
-             Untyped.NoneL       -> sf_constructor SystemF.the_None
+             Untyped.BoolL True  -> sf_constructor SystemF.The_True
+             Untyped.BoolL False -> sf_constructor SystemF.The_False
+             Untyped.NoneL       -> sf_constructor SystemF.The_None
   where
     sf_literal l =
       SystemF.LitE (mkExpInfo pos) l
     sf_constructor c =
       SystemF.VarE (mkExpInfo pos) (SystemF.pyonBuiltin c)
 
-    sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.the_int)
-    sf_float_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.the_float)
+    sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_int)
+    sf_float_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_float)
 
 mkAppE :: SourcePos -> TIExp -> [TIType] -> [TIExp] -> TIExp
 mkAppE pos oper ts args = TIExp $ SystemF.AppE (mkExpInfo pos) oper ts args
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
-  let con = mkConE pos (SystemF.pyonBuiltin SystemF.the_fun_undefined)
+  let con = mkConE pos (SystemF.pyonBuiltin SystemF.The_fun_undefined)
   in mkAppE pos con [ty] []
 
 mkCoerceE :: SourcePos -> TIType -> TIType -> TIExp -> TIExp
@@ -262,7 +262,7 @@ mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
   let true_alt = TIAlt $
         SystemF.DeCon { SystemF.altConstructor =
-                           SystemF.pyonBuiltin SystemF.the_True
+                           SystemF.pyonBuiltin SystemF.The_True
                       , SystemF.altTyArgs = []
                       , SystemF.altExTypes = []
                       , SystemF.altParams = []
@@ -270,7 +270,7 @@ mkIfE pos cond tr fa =
                       }
       false_alt = TIAlt $
         SystemF.DeCon { SystemF.altConstructor =
-                           SystemF.pyonBuiltin SystemF.the_False
+                           SystemF.pyonBuiltin SystemF.The_False
                       , SystemF.altTyArgs = []
                       , SystemF.altExTypes = []
                       , SystemF.altParams = []

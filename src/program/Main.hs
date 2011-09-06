@@ -45,7 +45,6 @@ import qualified LowLevel.CSE as LowLevel
 import qualified LowLevel.Closures as LowLevel
 import qualified LowLevel.DeadCode as LowLevel
 import qualified LowLevel.LambdaConvert as LowLevel
-import qualified LowLevel.LocalCPS as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
@@ -199,6 +198,10 @@ compilePyonToPyonAsm compile_flags path text = do
   -- Inline loops
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
 
+  -- Restructure the code resulting from inlining, which may create new
+  -- local functions  
+  repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
+
   -- Argument flattening
   repr_mod <- SystemF.flattenArguments repr_mod
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
@@ -207,8 +210,7 @@ compilePyonToPyonAsm compile_flags path text = do
   -- Reconstruct demand information after flattening local variables,
   -- so that the next optimization pass can do more work
   repr_mod <- SystemF.localDemandAnalysis repr_mod
-  repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
-  repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
+  repr_mod <- iterateM (highLevelOptimizations True SystemF.FinalSimplifierPhase) 5 repr_mod
 
   putStrLn ""
   putStrLn "Optimized"
@@ -342,8 +344,9 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
   -- Closure conversion
   -- Remove any lambda values created by the last round of optimization
   ll_mod <- LowLevel.lambdaConvert ll_mod
-  ll_mod <- LowLevel.lcpsModule ll_mod
-  ll_mod <- return $ LowLevel.eliminateDeadCode ll_mod -- Minimize recursion groups
+  putStrLn ""
+  putStrLn "Before closure conversion"
+  print $ LowLevel.pprModule ll_mod
   ll_mod <- LowLevel.closureConvert ll_mod
   ll_mod <- LowLevel.insertReferenceCounting ll_mod
   

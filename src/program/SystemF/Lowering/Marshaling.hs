@@ -32,23 +32,23 @@ computeReprDict :: Type -> GenLower LL.Val
 computeReprDict ty =
   case fromVarApp ty
   of Just (op, args)
-       | op `isPyonBuiltin` the_list -> do
+       | op `isPyonBuiltin` The_list -> do
            let [element_type] = args
            let list_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_list)
            element_dict <- computeReprDict element_type
            emitAtom1 owned_type $
              LL.closureCallA list_repr_ctor [element_dict]
-       | op `isPyonBuiltin` the_array2 -> do
+       | op `isPyonBuiltin` The_array2 -> do
            let [element_type] = args
            let mat_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_array2)
            element_dict <- computeReprDict element_type
            emitAtom1 owned_type $
              LL.closureCallA mat_repr_ctor [element_dict]
-       | op `isPyonBuiltin` the_int ->
+       | op `isPyonBuiltin` The_int ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_int
-       | op `isPyonBuiltin` the_float ->
+       | op `isPyonBuiltin` The_float ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_float
-       | op `isPyonBuiltin` the_bool ->
+       | op `isPyonBuiltin` The_bool ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_bool
        | otherwise -> lookupReprDict ty return
   where
@@ -215,10 +215,10 @@ demarshalCReturn :: ExportDataType -> Lower ReturnMarshaler
 demarshalCReturn ty =
   case ty
   of ListET element_type ->
-       let list_type = varApp (pyonBuiltin the_list) [element_type]
+       let list_type = varApp (pyonBuiltin The_list) [element_type]
        in demarshal_reference list_type
      MatrixET element_type ->
-       let mat_type = varApp (pyonBuiltin the_array2) [element_type]
+       let mat_type = varApp (pyonBuiltin The_array2) [element_type]
        in demarshal_reference mat_type
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
@@ -334,7 +334,7 @@ getFunctionExportType tenv ty =
             then Nothing
             else case fromVarApp $ last params
                  of Just (con, [arg])
-                      | con `isPyonBuiltin` the_OutPtr ->
+                      | con `isPyonBuiltin` The_OutPtr ->
                           Just $ getCExportType tenv arg
                     _ -> Nothing
       in case (param_type, return_type)
@@ -346,20 +346,20 @@ getCExportType :: TypeEnv -> Type -> ExportDataType
 getCExportType tenv ty =
   case fromVarApp ty
   of Just (con, args)
-       | con `isPyonBuiltin` the_int -> PyonIntET
-       | con `isPyonBuiltin` the_float -> PyonFloatET
-       | con `isPyonBuiltin` the_bool -> PyonBoolET
-       | con `isPyonBuiltin` the_complex ->
+       | con `isPyonBuiltin` The_int -> PyonIntET
+       | con `isPyonBuiltin` The_float -> PyonFloatET
+       | con `isPyonBuiltin` The_bool -> PyonBoolET
+       | con `isPyonBuiltin` The_complex ->
            case args
            of [arg] ->
                 case fromVarApp arg
                 of Just (con, _)
-                     | con `isPyonBuiltin` the_float -> PyonComplexFloatET
+                     | con `isPyonBuiltin` The_float -> PyonComplexFloatET
                    _ -> unsupported
-       | con `isPyonBuiltin` the_list ->
+       | con `isPyonBuiltin` The_list ->
            case args
            of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
-       | con `isPyonBuiltin` the_array2 ->
+       | con `isPyonBuiltin` The_array2 ->
            case args
            of [arg] -> MatrixET arg -- FIXME: verify that 'arg' is monomorphic
      _ | FunT {} <- ty ->

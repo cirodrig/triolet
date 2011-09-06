@@ -529,9 +529,11 @@ clearImportedDefinitions mod =
 
 -------------------------------------------------------------------------------
 
--- | The global objects that make up a Pyon function.  Objects that can be
---   dynamically allocated (specifically, closure and captured variable
---   records) are not included here.
+-- | Names of the global objects that make up a Pyon function.
+--   Call 'mkEntryPoints' or 'mkGlobalEntryPoints' to create an 'EntryPoints'.
+--   The definitions of these variables are created during closure conversion.
+--
+--   Dynamically allocated data such as closure records are not included here.
 data EntryPoints =
   EntryPoints
   { _epType          :: {-# UNPACK #-} !FunctionType
@@ -540,7 +542,6 @@ data EntryPoints =
   , _epVectorEntry   :: !(Maybe Var) -- Only for vectorized functions
   , _epExactEntry    :: !Var
   , _epInexactEntry  :: !Var
-  , _epDeallocEntry  :: !(Maybe Var)      -- Nothing if never deallocated
   , _epInfoTable     :: !Var
   , _epGlobalClosure :: !(Maybe Var) -- Only for global functions
   }
@@ -570,13 +571,6 @@ exactEntry = _epExactEntry
 inexactEntry :: EntryPoints -> Var
 inexactEntry = _epInexactEntry
 
--- | Get the deallocation entry point of a function.
---
--- The deallocation entry point is Nothing if the function cannot be
--- deallocated, which is true for global functions.
-deallocEntry :: EntryPoints -> Maybe Var
-deallocEntry = _epDeallocEntry
-
 -- | Get the info table of a function
 infoTableEntry :: EntryPoints -> Var
 infoTableEntry = _epInfoTable
@@ -600,9 +594,9 @@ entryPointsVars ep =
   _epDirectEntry ep :
   _epExactEntry ep :
   _epInexactEntry ep :
-  maybe id (:) (_epDeallocEntry ep) (
   _epInfoTable ep :
-  maybeToList (_epGlobalClosure ep))
+  maybeToList (_epVectorEntry ep) ++
+  maybeToList (_epGlobalClosure ep)
 
 -- | Create a new internal variable
 newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var
@@ -637,7 +631,7 @@ litType (BoolL _) = BoolType
 litType (IntL sgn sz _) = IntType sgn sz
 litType (FloatL sz _) = FloatType sz
 
-funType :: Fun -> FunctionType
+funType :: FunBase a -> FunctionType
 funType f =
   mkFunctionType (funConvention f) (map varType $ funParams f) (funReturnTypes f)
   

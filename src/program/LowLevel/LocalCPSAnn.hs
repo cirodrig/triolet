@@ -12,12 +12,20 @@ The LCPS transformation is described in the paper
 in Proc. Higher-Order and Symbolic Computation 15, p. 161-180, 2002.
 -}
 
-module LowLevel.LocalCPSAnn where
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
+module LowLevel.LocalCPSAnn
+       (LStm(..), GroupLabel, GroupLabel, LAlt, LFunDef, LFun,
+        labelFunction,
+        pprLStm,
+        pprLFunDef
+        )
+where
 
 import Prelude hiding(mapM)
 
 import Control.Applicative hiding(empty)
 import Control.Monad hiding(mapM, forM, join)
+import Control.Monad.Reader
 import Data.Traversable
 import qualified Data.IntMap as IntMap
 import qualified Data.IntSet as IntSet
@@ -27,6 +35,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
+import Common.Supply
 import LowLevel.CodeTypes
 import LowLevel.FreshVar
 import LowLevel.Print
@@ -41,14 +50,26 @@ import Globals
 --   becomes the function's name.
 data LStm =
     LetLCPS [ParamVar] Atom !Var LStm
-  | LetrecLCPS !(Group LFunDef) LStm
+  | LetrecLCPS !(Group LFunDef) !(Ident GroupLabel) LStm
   | SwitchLCPS Val [LAlt]
   | ReturnLCPS Atom
   | ThrowLCPS Val
 
+-- | This uninhabited data type is used as the ID type for definition groups.  
+data GroupLabel
+
 type LAlt = (Lit, LStm)
 type LFunDef = Def LFun
 type LFun = FunBase LStm
+
+newtype Ann a = Ann (ReaderT (IdentSupply Var, IdentSupply GroupLabel) IO a)
+              deriving(Functor, Applicative, Monad)
+
+instance Supplies Ann (Ident Var) where
+  fresh = Ann $ ReaderT $ \(supply, _) -> supplyValue supply
+
+instance Supplies Ann (Ident GroupLabel) where
+  fresh = Ann $ ReaderT $ \(_, supply) -> supplyValue supply
 
 -- | Is the variable the name of a let-statement continuation from inside the
 --   given expression?
@@ -56,14 +77,14 @@ containsLetContinuation :: LStm -> Var -> Bool
 stm `containsLetContinuation` search_v = search stm
   where
     search (LetLCPS _ _ v s) = search_v == v || search s
-    search (LetrecLCPS grp s) = any search_fun (groupMembers grp) || search s
+    search (LetrecLCPS grp _ s) = any search_fun (groupMembers grp) || search s
     search (SwitchLCPS _ alts) = any (search . snd) alts
     search (ReturnLCPS _) = False
     search (ThrowLCPS _) = False
     
     search_fun (Def _ f) = search $ funBody f
 
-annotateStm :: Stm -> FreshVarM LStm
+annotateStm :: Stm -> Ann LStm
 annotateStm statement =
   case statement
   of LetE params rhs body -> do
@@ -71,7 +92,7 @@ annotateStm statement =
        body' <- annotateStm body
        return $ LetLCPS params rhs v body'
      LetrecE defs body ->
-       LetrecLCPS <$> traverse annotateFunDef defs <*> annotateStm body
+       LetrecLCPS <$> traverse annotateFunDef defs <*> fresh <*> annotateStm body
      SwitchE scr alts ->
        SwitchLCPS scr <$> traverse do_alt alts
      ReturnE atom -> pure $ ReturnLCPS atom
@@ -79,17 +100,24 @@ annotateStm statement =
   where
     do_alt (k, stm) = (,) k <$> annotateStm stm
 
-annotateFun :: Fun -> FreshVarM LFun
+annotateFun :: Fun -> Ann LFun
 annotateFun f = changeFunBodyM annotateStm f
 
-annotateFunDef :: FunDef -> FreshVarM LFunDef
+annotateFunDef :: FunDef -> Ann LFunDef
 annotateFunDef (Def v f) = Def v <$> annotateFun f
+
+labelFunction :: IdentSupply Var -> Fun -> IO (LFun, Ident GroupLabel)
+labelFunction var_supply f = do
+  group_supply <- newIdentSupply
+  lfun <- runReaderT (case annotateFun f of Ann x -> x) (var_supply, group_supply)
+  max_group_id <- supplyValue group_supply
+  return (lfun, max_group_id)
 
 unAnnotate :: LStm -> Stm
 unAnnotate statement =
   case statement
   of LetLCPS params rhs _ body -> LetE params rhs (unAnnotate body)
-     LetrecLCPS defs body -> LetrecE (fmap do_def defs) (unAnnotate body)
+     LetrecLCPS defs _ body -> LetrecE (fmap do_def defs) (unAnnotate body)
      SwitchLCPS scr alts -> SwitchE scr (map do_alt alts)
      ReturnLCPS atom -> ReturnE atom
      ThrowLCPS val -> ThrowE val
@@ -118,8 +146,8 @@ pprLabeledLStm label stmt =
            rhs = pprAtom atom
        in hang (label <+> binder <+> text "<-") 8 rhs $$
           pprLabeledLStm (pprVar v <+> text ":") body
-     LetrecLCPS defs body ->
-       label <+> text "let" <+> pprGroup pprLFunDef defs $$
+     LetrecLCPS defs lab body ->
+       label <+> text "let<" <> text (show lab) <> text ">" <+> pprGroup pprLFunDef defs $$
        pprLStm body
      SwitchLCPS val alts ->
        label <+> text "switch" <> parens (pprVal val) $$

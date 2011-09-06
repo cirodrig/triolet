@@ -263,7 +263,6 @@ instance Binary EntryPoints where
            put (vectorEntry ep) >>
            put (exactEntry ep) >>
            put (inexactEntry ep) >>
-           put (deallocEntry ep) >>
            put (infoTableEntry ep) >>
            put (globalClosure ep)
 
@@ -273,10 +272,9 @@ instance Binary EntryPoints where
            vec <- get
            exa <- get
            ine <- get
-           dea <- get
            inf <- get
            glo <- get
-           return $ EntryPoints ftype arity dir vec exa ine dea inf glo
+           return $ EntryPoints ftype arity dir vec exa ine inf glo
 
 instance Binary Import where
   put (ImportClosureFun ep f) =

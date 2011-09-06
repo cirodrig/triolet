@@ -458,8 +458,8 @@ nullaryValueConCode value fields
 
 boolLayout :: AlgValLayout
 boolLayout = enumValLayout
-             [ (pyonBuiltin the_False, LL.BoolL False, [])
-             , (pyonBuiltin the_True, LL.BoolL True, [])]
+             [ (pyonBuiltin The_False, LL.BoolL False, [])
+             , (pyonBuiltin The_True, LL.BoolL True, [])]
 
 -- | Create the layout of a boxed reference, given the layout of the referent.
 --
@@ -572,7 +572,7 @@ memRecordLayout mk_record =
 --   any possible value of the referent type.
 referenceLayout :: MemLayout -> MemProd
 referenceLayout layout =
-  MemProd (VarCon $ pyonBuiltin the_referenced) reference_layout [MemLayout layout]
+  MemProd (VarCon $ pyonBuiltin The_referenced) reference_layout [MemLayout layout]
   writer reader
   where
     writer _ [init] dst = do
@@ -957,10 +957,10 @@ getValAlgLayout ty =
   of TypeLevel ->
        case fromTypeApp ty
        of (VarT op, args)
-            | op `isPyonBuiltin` the_bool  -> return boolLayout
-            | op `isPyonBuiltin` the_int   -> not_algebraic
-            | op `isPyonBuiltin` the_float -> not_algebraic
-            | op `isPyonBuiltin` the_Pf    -> return AVErased
+            | op `isPyonBuiltin` The_bool  -> return boolLayout
+            | op `isPyonBuiltin` The_int   -> not_algebraic
+            | op `isPyonBuiltin` The_float -> not_algebraic
+            | op `isPyonBuiltin` The_Pf    -> return AVErased
             | otherwise -> do
                 tenv <- getTypeEnv
                 case lookupDataTypeForLayout tenv ty of
@@ -1066,7 +1066,7 @@ getRefAlgLayout :: Type -> Lower AlgMemLayout
 getRefAlgLayout ty =
   case fromVarApp ty
   of Just (op, [arg])
-       | op `isPyonBuiltin` the_Referenced -> do
+       | op `isPyonBuiltin` The_Referenced -> do
            arg_layout <- getRefLayout =<< reduceToWhnf arg
            return $ nonSumMemLayout $ referenceLayout arg_layout
      _ -> do
@@ -1124,10 +1124,10 @@ getValLayout ty
   | otherwise =
       case fromTypeApp ty
       of (VarT op, args)
-           | op `isPyonBuiltin` the_bool  -> prim_layout LL.BoolType
-           | op `isPyonBuiltin` the_int   -> prim_layout LL.pyonIntType
-           | op `isPyonBuiltin` the_float -> prim_layout LL.pyonFloatType
-           | op `isPyonBuiltin` the_Pf    -> return VErased
+           | op `isPyonBuiltin` The_bool  -> prim_layout LL.BoolType
+           | op `isPyonBuiltin` The_int   -> prim_layout LL.pyonIntType
+           | op `isPyonBuiltin` The_float -> prim_layout LL.pyonFloatType
+           | op `isPyonBuiltin` The_Pf    -> return VErased
            | otherwise -> do
                tenv <- getTypeEnv
                case toBaseKind $ typeKind tenv ty of
@@ -1171,10 +1171,10 @@ getRefLayout :: Type -> Lower MemLayout
 getRefLayout ty =
   case fromTypeApp ty
   of (VarT op, [arg])
-       | op `isPyonBuiltin` the_Referenced ->
+       | op `isPyonBuiltin` The_Referenced ->
            return $ memValueLayout $ VLayout (LL.PrimType LL.PointerType)
      (VarT op, [arg1, arg2])
-       | op `isPyonBuiltin` the_arr -> do
+       | op `isPyonBuiltin` The_arr -> do
            field_layout <- getRefLayout =<< reduceToWhnf arg2
            size <- lookupIndexedInt arg1
            return $ arrayLayout size field_layout

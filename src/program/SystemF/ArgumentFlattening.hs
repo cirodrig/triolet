@@ -71,7 +71,7 @@ fromProductTyCon tenv ty_op =
 fromOutPtrType :: Type -> Type
 fromOutPtrType t =
   case fromVarApp t
-  of Just (op, [arg]) | op `isPyonBuiltin` the_OutPtr -> arg
+  of Just (op, [arg]) | op `isPyonBuiltin` The_OutPtr -> arg
      _ -> internalError "fromOutPtrType: Not an output pointer"
 
 -- | Bind a variable to a value.
@@ -377,7 +377,7 @@ flattenedParameterValue (FlatArg pat decomp) =
     put_pat p = ([], [ExpM $ VarE defaultExpInfo (patMVar p)])
 
 flattenedParameterValue (DummyArg _) =
-  ([], [ExpM $ VarE defaultExpInfo (pyonBuiltin the_None)])
+  ([], [ExpM $ VarE defaultExpInfo (pyonBuiltin The_None)])
 
 -- | Get the flattened parameter values from a sequence of flattened
 --   parameters.  Each value is a type variable or variable expression.
@@ -495,7 +495,7 @@ packParameterWrite' pat flat_arg =
          _ ->
            return src
     
-    copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_copy)
+    copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_copy)
 
 -- | Pack a parameter, so that the result is readable
 packParametersRead :: (ReprDictMonad m, EvalMonad m) =>
@@ -890,8 +890,8 @@ planFlattening mode ty spc = do
     -- If data type is a Stored type, then deconstruct it.
     stored_decomp =
       case fromVarApp whnf_type
-      of Just (op, [arg]) | op `isPyonBuiltin` the_Stored ->
-           decon_decomp (pyonBuiltin the_stored) Nothing
+      of Just (op, [arg]) | op `isPyonBuiltin` The_Stored ->
+           decon_decomp (pyonBuiltin The_stored) Nothing
          _ -> id_decomp
 
   case spc of
@@ -923,7 +923,7 @@ planFlattening mode ty spc = do
   where
     is_repr_pattern t =
       case fromVarApp t
-      of Just (op, _) -> op == pyonBuiltin the_Repr
+      of Just (op, _) -> op == pyonBuiltin The_Repr
          _ -> False
 
     is_dictionary_pattern t =
@@ -985,20 +985,20 @@ deadValue t = do
     ValK ->
       case fromTypeApp t
       of (VarT con, [])
-           | con `isPyonBuiltin` the_NoneType ->
-               return $ ExpM $ VarE defaultExpInfo (pyonBuiltin the_None)
-           | con `isPyonBuiltin` the_int ->
+           | con `isPyonBuiltin` The_NoneType ->
+               return $ ExpM $ VarE defaultExpInfo (pyonBuiltin The_None)
+           | con `isPyonBuiltin` The_int ->
                return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
-           | con `isPyonBuiltin` the_float ->
+           | con `isPyonBuiltin` The_float ->
                return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
          (VarT con, [p])
-           | con `isPyonBuiltin` the_Pf ->
+           | con `isPyonBuiltin` The_Pf ->
                return $ ExpM $ AppE defaultExpInfo dead_proof_op [TypM p] [] 
-           | con `isPyonBuiltin` the_FIInt -> do
+           | con `isPyonBuiltin` The_FIInt -> do
                -- Use 'finIndInt' as the data constructor
                -- Get types of data constructor parameters
                let Just datacon_type =
-                     lookupType (pyonBuiltin the_fiInt) tenv
+                     lookupType (pyonBuiltin The_fiInt) tenv
                Just monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
                let (dom, _) = fromFunType monotype
 
@@ -1018,11 +1018,11 @@ deadValue t = do
   where
     dead_box = ExpM $ AppE defaultExpInfo dead_box_op [TypM t] []
     dead_bare = ExpM $ AppE defaultExpInfo dead_bare_op [TypM t] []
-    dead_box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadBox)
-    dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadRef)
-    dead_proof_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_deadProof)
-    dead_finindint_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_fiInt)
-    make_coercion_op = ExpM $ VarE defaultExpInfo (pyonBuiltin the_unsafeMakeCoercion)
+    dead_box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadBox)
+    dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadRef)
+    dead_proof_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadProof)
+    dead_finindint_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_fiInt)
+    make_coercion_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_unsafeMakeCoercion)
 
 planReturn :: (ReprDictMonad m, EvalMonad m) =>
               PlanMode -> Specificity -> TypM -> m FlatRet
@@ -1046,7 +1046,7 @@ planOutputReturn pat = do
   tenv <- getTypeEnv
   let return_type =
         case fromVarApp $ patMType pat
-        of Just (op, [arg]) | op `isPyonBuiltin` the_OutPtr -> arg
+        of Just (op, [arg]) | op `isPyonBuiltin` The_OutPtr -> arg
            _ -> internalError "planOutputReturn: Expecting an output pointer"
   flat_ret <- planReturn mode Used $ TypM return_type
 
@@ -1079,10 +1079,10 @@ flatLocalReturn (FlatLocal arg) = flatArgReturn arg
 flattenBoxedValue :: Var -> FlatLocal -> FlatLocal
 flattenBoxedValue boxed_var (FlatLocal arg) =
   let arg_type = patMType $ faPattern arg
-      boxed_type = varApp (pyonBuiltin the_Boxed) [arg_type]
+      boxed_type = varApp (pyonBuiltin The_Boxed) [arg_type]
       boxed_param = patM (boxed_var ::: boxed_type)
       
-      boxed_mono_con = MonoCon (pyonBuiltin the_boxed) [arg_type] []
+      boxed_mono_con = MonoCon (pyonBuiltin The_boxed) [arg_type] []
       boxed_decomp = DeconDecomp boxed_mono_con [arg]
 
   in FlatLocal (FlatArg boxed_param boxed_decomp)
@@ -1139,7 +1139,7 @@ planRetOriginalInterface (PlanRetValue fr) =
 
 planRetOriginalInterface (PlanRetWriter p fr) =
   -- The return type is an effect type
-  let ret_type = varApp (pyonBuiltin the_IEffect) [frType fr]
+  let ret_type = varApp (pyonBuiltin The_IEffect) [frType fr]
   in ([p], TypM ret_type)
 
 -- | Get the flattened return parameter and return type
@@ -1152,7 +1152,7 @@ planRetFlattenedInterface tenv (PlanRetValue fr) =
 planRetFlattenedInterface tenv (PlanRetWriter p fr) =
   case frDecomp fr
   of IdDecomp ->
-       ([p], TypM $ varApp (pyonBuiltin the_IEffect) [frType fr])
+       ([p], TypM $ varApp (pyonBuiltin The_IEffect) [frType fr])
      DeadDecomp {} ->
        -- Dead return values aren't handled currently
        internalError "planRetFlattenedInterface"
@@ -1239,7 +1239,7 @@ planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
   x_params <-
     if all isDeadArg params && no_flattened_output_params
     then do pat_var <- newAnonymousVar ObjectLevel
-            let dummy_pat = patM (pat_var ::: VarT (pyonBuiltin the_NoneType))
+            let dummy_pat = patM (pat_var ::: VarT (pyonBuiltin The_NoneType))
                 dummy = DummyArg dummy_pat
             return (dummy : params)
     else return params
@@ -1349,7 +1349,7 @@ mkWorkerFunction plan worker_name original_body = do
         of PlanRetValue _ -> return original_body
            PlanRetWriter p fr ->
              let original_ret_type =
-                   TypM $ varApp (pyonBuiltin the_IEffect) [frType fr]
+                   TypM $ varApp (pyonBuiltin The_IEffect) [frType fr]
              in lambdaAbstractReturn original_ret_type p original_body
 
       -- Repack the return value
@@ -1656,7 +1656,7 @@ lvCase inf scr alts =
 --   not been transformed.
 lvTransformCase inf scr [altm]
   | (mono_con@(MonoCon alt_con [ty] []), [param], body) <- altToMonoCon altm,
-    alt_con `isPyonBuiltin` the_boxed = do
+    alt_con `isPyonBuiltin` The_boxed = do
       binder_plan <- planLocal param
       case binder_plan of
         FlatLocal (FlatArg _ IdDecomp) ->

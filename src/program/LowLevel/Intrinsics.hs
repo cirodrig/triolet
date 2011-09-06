@@ -34,69 +34,69 @@ lowerIntrinsicOp v
       IntMap.fromList [(fromIdent $ Type.Var.varID v, f) | (v, f) <- assocs]
 
     assocs =
-      [ (pyonBuiltin the_or, binary_bool PrimOr)
-      , (pyonBuiltin the_and, binary_bool PrimAnd)
-      , (pyonBuiltin the_AdditiveDict_int_add,
+      [ (pyonBuiltin The_or, binary_bool PrimOr)
+      , (pyonBuiltin The_and, binary_bool PrimAnd)
+      , (pyonBuiltin The_AdditiveDict_int_add,
          binary_int (PrimAddZ Signed S32))
-      , (pyonBuiltin the_AdditiveDict_int_sub,
+      , (pyonBuiltin The_AdditiveDict_int_sub,
          binary_int (PrimSubZ Signed S32))
-      , (pyonBuiltin the_MultiplicativeDict_int_mul,
+      , (pyonBuiltin The_MultiplicativeDict_int_mul,
          binary_int (PrimMulZ Signed S32))
-      , (pyonBuiltin the_MultiplicativeDict_int_fromInt,
+      , (pyonBuiltin The_MultiplicativeDict_int_fromInt,
          id_int)
-      , (pyonBuiltin the_min_int,
+      , (pyonBuiltin The_min_int,
          binary_int (PrimMinZ Signed S32))
-      , (pyonBuiltin the_max_int,
+      , (pyonBuiltin The_max_int,
          binary_int (PrimMaxZ Signed S32))
-      , (pyonBuiltin the_AdditiveDict_float_add,
+      , (pyonBuiltin The_AdditiveDict_float_add,
          binary_float (PrimAddF S32))
-      , (pyonBuiltin the_AdditiveDict_float_sub,
+      , (pyonBuiltin The_AdditiveDict_float_sub,
          binary_float (PrimSubF S32))
-      , (pyonBuiltin the_MultiplicativeDict_float_mul,
+      , (pyonBuiltin The_MultiplicativeDict_float_mul,
          binary_float (PrimMulF S32))
-      , (pyonBuiltin the_FloatingDict_float_power,
+      , (pyonBuiltin The_FloatingDict_float_power,
          binary_float (PrimPowF S32))
-      , (pyonBuiltin the_FloatingDict_float_exp,
+      , (pyonBuiltin The_FloatingDict_float_exp,
          unary_float (PrimUnaryF ExpI S32))
-      , (pyonBuiltin the_FloatingDict_float_log,
+      , (pyonBuiltin The_FloatingDict_float_log,
          unary_float (PrimUnaryF LogI S32))
-      , (pyonBuiltin the_FloatingDict_float_sqrt,
+      , (pyonBuiltin The_FloatingDict_float_sqrt,
          unary_float (PrimUnaryF SqrtI S32))
-      , (pyonBuiltin the_FloatingDict_float_sin,
+      , (pyonBuiltin The_FloatingDict_float_sin,
          unary_float (PrimUnaryF SinI S32))
-      , (pyonBuiltin the_FloatingDict_float_cos,
+      , (pyonBuiltin The_FloatingDict_float_cos,
          unary_float (PrimUnaryF CosI S32))
-      , (pyonBuiltin the_FloatingDict_float_tan,
+      , (pyonBuiltin The_FloatingDict_float_tan,
          unary_float (PrimUnaryF TanI S32))
-      , (pyonBuiltin the_FloatingDict_float_fromfloat,
+      , (pyonBuiltin The_FloatingDict_float_fromfloat,
          id_float)
-      , (pyonBuiltin the_VectorDict_float_scale,
+      , (pyonBuiltin The_VectorDict_float_scale,
          binary_float (PrimMulF S32))
-      , (pyonBuiltin the_VectorDict_float_magnitude,
+      , (pyonBuiltin The_VectorDict_float_magnitude,
          id_float)
-      , (pyonBuiltin the_VectorDict_float_dot,
+      , (pyonBuiltin The_VectorDict_float_dot,
          binary_float (PrimMulF S32))
-      , (pyonBuiltin the_floor,
+      , (pyonBuiltin The_floor,
          float_to_int Floor)
-      , (pyonBuiltin the_zero_ii,
+      , (pyonBuiltin The_zero_ii,
          indexed_int_constant 0)
-      , (pyonBuiltin the_one_ii,
+      , (pyonBuiltin The_one_ii,
          indexed_int_constant 1)
-      , (pyonBuiltin the_zero_fii,
+      , (pyonBuiltin The_zero_fii,
          fin_indexed_int_constant 0)
-      , (pyonBuiltin the_one_fii,
+      , (pyonBuiltin The_one_fii,
          fin_indexed_int_constant 1)
-      , (pyonBuiltin the_emptyEffTok,
+      , (pyonBuiltin The_emptyEffTok,
          empty_eff_tok)
-      , (pyonBuiltin the_fromEffTok,
+      , (pyonBuiltin The_fromEffTok,
          from_eff_tok)
-      , (pyonBuiltin the_eqZ_refl,
+      , (pyonBuiltin The_eqZ_refl,
          proof_object)
-      , (pyonBuiltin the_deadRef,
+      , (pyonBuiltin The_deadRef,
          dead_reference)
-      , (pyonBuiltin the_deadProof,
+      , (pyonBuiltin The_deadProof,
          proof_object)
-      , (pyonBuiltin the_unsafeMakeCoercion,
+      , (pyonBuiltin The_unsafeMakeCoercion,
          proof_object)
       ]
 
