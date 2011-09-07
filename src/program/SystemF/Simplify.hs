@@ -1763,9 +1763,7 @@ rwCase2 inf alts scrut' scrut_val = do
              {- not (is_product_case tenv) && -}
              isUnfloatableCase scrut' -> do
              -- Apply the case-of-case transformation
-             ret@(e', _) <- rwCaseOfCase inf Nothing inner_scrut inner_alts alts
-             debug_print_result e'
-             return ret
+             rwCaseOfCase inf Nothing inner_scrut inner_alts alts
          _ -> do
            -- Cannot transform; simplify the case alternatives
            alts' <- mapM (rwAlt scrut_var Nothing) alts
