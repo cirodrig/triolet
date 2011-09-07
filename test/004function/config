@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Function parameter passing",
   pyonSources	 = ["function.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "42"
 }

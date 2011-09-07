@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Tuple construction and deconstruction",
   pyonSources	 = ["tuples.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "(11)(29)(47)(71)"
 }

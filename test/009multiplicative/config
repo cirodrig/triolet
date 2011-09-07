@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Multiplicative dictionary passing",
   pyonSources	 = ["mul.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "(44)(12.8125)"
 }

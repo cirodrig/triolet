@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Guarded streams",
   pyonSources	 = ["sumpos.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "47"
 }

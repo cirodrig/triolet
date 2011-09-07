@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Basic floating-point math",
   pyonSources	 = ["f.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "ok"
 }

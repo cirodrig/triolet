@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Functions inside data structures",
   pyonSources	 = ["tuples.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "(198)(44)"
 }

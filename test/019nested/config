@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Reduction on nested loops",
   pyonSources	 = ["nested.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "ok"
 }

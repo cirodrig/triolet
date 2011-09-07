@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Sample test case",
   pyonSources	 = [],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldCompile
 }

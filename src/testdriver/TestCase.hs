@@ -114,6 +114,7 @@ data TestConfig =
   TestConfig
   { synopsis :: !String
   , pyonSources :: ![FilePath]
+  , llpyonSources :: ![FilePath]
   , cSources :: ![FilePath]
   , expectedResult :: !ExpectedResult
   }
@@ -126,6 +127,9 @@ testName = takeFileName . testDirectory
 testPyonSources tc = 
   [testDirectory tc </> file | file <- pyonSources $ testConfig tc]
   
+testLLPyonSources tc = 
+  [testDirectory tc </> file | file <- llpyonSources $ testConfig tc]
+
 testCSources tc =
   [testDirectory tc </> file | file <- cSources $ testConfig tc]
 
@@ -245,6 +249,7 @@ runTest test_case = (return . TestFailed) `handleTester`
   where
     compile_and_link = do
       mapM_ (compilePyonFile test_case) $ testPyonSources test_case
+      mapM_ (compileLLPyonFile test_case) $ testLLPyonSources test_case
       mapM_ (compileCFile test_case) $ testCSources test_case
       linkTest test_case
 
@@ -273,18 +278,34 @@ runCompileCommand fail_message program opts stdin = do
   when (rc /= ExitSuccess) $
     liftIO $ throwIO $ CompileFailed (fail_message err)
 
-compilePyonFile test_case file_path = do
+-- | Compile a file using the 'pyon' compiler.  Used for both pyon and
+--   llpyon code.
+compileUsingPyonCompiler fail_message compile_flags = do
   build_dir <- asks buildDir
+  let pyon_program_path = build_dir </> "pyon" </> "pyon"
+      build_data_path = build_dir </> "data"
+      flags = ["-B", build_data_path] -- Link to the local library files
+              ++ compile_flags
+
+  runCompileCommand fail_message pyon_program_path flags ""
+
+compilePyonFile test_case file_path = do
   test_path <- asks temporaryPath
   let obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
-      pyon_program_path = build_dir </> "pyon" </> "pyon"
-      build_data_path = build_dir </> "data"
-      flags = ["-B", build_data_path, -- Link to the local library files
-               "-x", "pyon",    -- Compile in pyon mode
+      flags = ["-x", "pyon",    -- Compile in pyon mode
                file_path, "-o", obj_path]
       fail_message err = "File: " ++ file_path ++ "\n" ++ err
 
-  runCompileCommand fail_message pyon_program_path flags ""
+  compileUsingPyonCompiler fail_message flags
+
+compileLLPyonFile test_case file_path = do
+  test_path <- asks temporaryPath
+  let obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
+      flags = ["-x", "pyonasm",    -- Compile in low-level pyon mode
+               file_path, "-o", obj_path]
+      fail_message err = "File: " ++ file_path ++ "\n" ++ err
+
+  compileUsingPyonCompiler fail_message flags
 
 compileCFile test_case file_path = do
   build_dir <- asks buildDir
@@ -306,11 +327,13 @@ linkTest test_case = do
   platform_opts <- asks platformLinkOpts
   let c_file_paths = [test_path </> takeFileName file `replaceExtension` ".o"
                      | file <- testCSources test_case]
+      llpyon_file_paths = [test_path </> takeFileName file `replaceExtension` ".o"
+                        | file <- testLLPyonSources test_case]
       pyon_file_paths = [test_path </> takeFileName file `replaceExtension` ".o"
                         | file <- testPyonSources test_case]
       link_opts = platform_opts ++ 
                   ["-o", testExecutableName] ++
-                  c_file_paths ++ pyon_file_paths ++
+                  c_file_paths ++ llpyon_file_paths ++ pyon_file_paths ++
                   ["-L" ++ build_dir </> "rts",
                    "-lpyonrts", "-lgc", "-lm"]
       fail_message err = err

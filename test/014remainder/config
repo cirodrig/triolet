@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Remainder math",
   pyonSources	 = ["remainder.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "ok"
 }

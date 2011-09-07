@@ -1,6 +1,7 @@
 TestConfig {
   synopsis	 = "Find nearest neighbors",
   pyonSources	 = ["nearest.pyon"],
+  llpyonSources  = [],
   cSources	 = ["main.c"],
   expectedResult = ShouldPrint "1,2,0,1,4,3,"
 }
