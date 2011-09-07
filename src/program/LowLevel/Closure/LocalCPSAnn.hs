@@ -13,7 +13,7 @@ in Proc. Higher-Order and Symbolic Computation 15, p. 161-180, 2002.
 -}
 
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
-module LowLevel.LocalCPSAnn
+module LowLevel.Closure.LocalCPSAnn
        (LStm(..), GroupLabel, GroupLabel, LAlt, LFunDef, LFun,
         labelFunction,
         pprLStm,

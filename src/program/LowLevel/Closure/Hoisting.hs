@@ -26,8 +26,8 @@ import Common.Error
 import Common.Identifier
 import Common.Supply
 import LowLevel.FreshVar
-import LowLevel.LocalCPSAnn
-import qualified LowLevel.LocalCPS as LocalCPS
+import LowLevel.Closure.LocalCPSAnn
+import qualified LowLevel.Closure.LocalCPS as LocalCPS
 import LowLevel.Syntax
 import LowLevel.Types
 import LowLevel.Build
@@ -528,14 +528,68 @@ readHoistingResults groups = foldM insert_if_hoisted Set.empty groups
       is_hoisted <- readIORef $ groupHoistedVal grp
       return $ if is_hoisted then Set.insert (groupID grp) s else s
 
--- | Find defgroups that will be hoisted in a top-level function definition.
---   @id_bound@ is an ID larger than any group ID.
-findHoistedGroups :: LFunDef -> LocalCPS.RConts -> IO (Set.Set GroupID)
+-------------------------------------------------------------------------------
+-- Mapping group IDs back to functions
+
+-- A list of groups and the functions they contain
+type GroupMembership = [(GroupID, [Var])]
+
+-- | Find the functions in each group
+stmGroupTable :: LocalCPS.RConts -> LStm -> GroupMembership
+stmGroupTable rconts stm =
+  case stm
+  of LetLCPS _ _ label body
+       | LocalCPS.RCont label `elem` IntMap.elems rconts ->
+           -- This is a continuation function
+           (ContID label, [label]) : stmGroupTable rconts body
+       | otherwise ->
+           -- This is an ordinary let expression
+           stmGroupTable rconts body
+     LetrecLCPS defs gid body ->
+       (GroupID gid, map definiendum $ groupMembers defs) :
+       concatMap (stmGroupTable rconts . funBody . definiens) (groupMembers defs) ++
+       stmGroupTable rconts body
+     SwitchLCPS _ alts ->
+       concat [stmGroupTable rconts s | (_, s) <- alts]
+     ReturnLCPS _ -> []
+     ThrowLCPS _ -> []
+
+createGroupTable :: LocalCPS.RConts -> LFunDef
+                 -> (GroupID -> [Var], Var -> Maybe (Ident GroupLabel))
+createGroupTable rconts fun_def =
+  let group_membership = stmGroupTable rconts $ funBody $ definiens fun_def
+      group_table = Map.fromList group_membership
+      fun_table = Map.fromList [(f, gid)
+                               | (GroupID gid, fs) <- group_membership, f <- fs]
+      get_group_members gid =
+        case Map.lookup gid group_table
+        of Just vs -> vs
+           Nothing -> internalError "createGroupTables: lookup failed"
+      
+      get_fun_group f = Map.lookup f fun_table
+      
+  in (get_group_members, get_fun_group)
+
+-------------------------------------------------------------------------------
+-- Exported function
+
+-- | Compute the set of local functions that will be hoisted.
+--
+--   Also, associate each local function (but not continuations) with
+--   the group ID it belongs to.
+findHoistedGroups :: LFunDef
+                  -> LocalCPS.RConts
+                  -> IO (Set.Set Var, Var -> Maybe (Ident GroupLabel))
 findHoistedGroups fdef rconts = do
   -- Scan the function definition and generate constraints
   (h_csts, initial_hoisted, unsolved) <- scanTopLevelDef rconts fdef
+  let (group_members, fun_group) = createGroupTable rconts fdef
   
   -- Solve constraints
   table <- mkGroupTable unsolved
-  setupAndSolveHoistingConstraints h_csts unsolved initial_hoisted table
+  groups <-
+    setupAndSolveHoistingConstraints h_csts unsolved initial_hoisted table
+  
+  -- Return the hoisted functions
+  return (Set.fromList $ concatMap group_members $ Set.toList groups, fun_group)
 

@@ -19,7 +19,7 @@ import LowLevel.FreshVar
 import LowLevel.CodeTypes
 import LowLevel.Print
 import LowLevel.Syntax
-import LowLevel.Closure.Hoisting(GroupID(..))
+import LowLevel.Closure.LocalCPSAnn
 
 -- | Get the type of a variable; it must be a primitive type.
 varPrimType :: Var -> PrimType
@@ -274,8 +274,8 @@ groupCCInfo get_capture locals_at_group (NonRec def) =
     analysis_result = get_capture fun_name
     captured = funCaptured analysis_result
     group_id = case funGroup analysis_result
-               of GroupID id -> id
-                  ContID _ -> internalError "groupCCInfo"
+               of Just id -> id
+                  Nothing -> internalError "groupCCInfo"
 
 groupCCInfo get_capture locals_at_group (Rec grp_members) =
   let capture_info = do
@@ -290,13 +290,13 @@ groupCCInfo get_capture locals_at_group (Rec grp_members) =
       -- searching for the ID.
       group_id = get_id capture_info
         where
-          get_id ((_, (_, _, _, GroupID gid, _)) : _) = gid
+          get_id ((_, (_, _, _, Just gid, _)) : _) = gid
           get_id (_ : xs) = get_id xs
           get_id [] = internalError "groupCCInfo"
 
       -- Find the hoisted and unhoisted functions in the group
-      hoisted   :: [(Var, CallConvention, FunctionType, GroupID, Set.Set Var)]
-      unhoisted :: [(Var, CallConvention, FunctionType, GroupID, Set.Set Var)]
+      hoisted   :: [(Var, CallConvention, FunctionType, Maybe (Ident GroupLabel), Set.Set Var)]
+      unhoisted :: [(Var, CallConvention, FunctionType, Maybe (Ident GroupLabel), Set.Set Var)]
       (hoisted, unhoisted) = partition_h [] [] capture_info
         where
           partition_h h u ((True,  x):xs) = partition_h (x : h) u xs
@@ -344,8 +344,9 @@ data FunAnalysisResults =
   FunAnalysisResults
   { -- | Whether the function will be hoisted
     funHoisted :: !Bool
-    -- | The definition group this function belongs to
-  , funGroup :: !GroupID
+    -- | The definition group this function belongs to, for local functions;
+    --   @Nothing@ for continuations.
+  , funGroup :: !(Maybe (Ident GroupLabel))
     -- | The set of local variables used by the function but not defined in
     --   the function
   , funCaptured :: Set.Set Var

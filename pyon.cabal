@@ -148,6 +148,8 @@ Executable pyon
     LowLevel.Closure.Capture
     LowLevel.Closure.Code
     LowLevel.Closure.Hoisting
+    LowLevel.Closure.LocalCPS
+    LowLevel.Closure.LocalCPSAnn
     LowLevel.ClosureSelect
     LowLevel.Closures
     LowLevel.DeadCode
@@ -159,8 +161,6 @@ Executable pyon
     LowLevel.GenerateCUtils
     LowLevel.Intrinsics
     LowLevel.LambdaConvert
-    LowLevel.LocalCPS
-    LowLevel.LocalCPSAnn
     LowLevel.Syntax
     LowLevel.Print
     LowLevel.Record

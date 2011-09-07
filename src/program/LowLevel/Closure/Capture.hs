@@ -40,8 +40,6 @@ import Common.Identifier
 import Common.Supply
 import LowLevel.CodeTypes
 import LowLevel.FreshVar
-import LowLevel.LocalCPSAnn
-import qualified LowLevel.LocalCPS as LocalCPS
 import LowLevel.Print
 import LowLevel.Syntax
 import LowLevel.Types
@@ -49,6 +47,8 @@ import LowLevel.Build
 import LowLevel.Closure.CCInfo
 import LowLevel.Closure.Code
 import LowLevel.Closure.Hoisting
+import LowLevel.Closure.LocalCPSAnn
+import qualified LowLevel.Closure.LocalCPS as LocalCPS
 import Globals
 
 debug = True

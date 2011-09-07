@@ -36,8 +36,6 @@ import Common.Identifier
 import Common.Supply
 import LowLevel.CodeTypes
 import LowLevel.FreshVar
-import LowLevel.LocalCPSAnn
-import qualified LowLevel.LocalCPS as LocalCPS
 import LowLevel.Print
 import LowLevel.Syntax
 import LowLevel.Types
@@ -46,6 +44,8 @@ import LowLevel.Closure.CCInfo
 import LowLevel.Closure.Code
 import LowLevel.Closure.Capture
 import LowLevel.Closure.Hoisting
+import LowLevel.Closure.LocalCPSAnn
+import qualified LowLevel.Closure.LocalCPS as LocalCPS
 import Globals
 
 debug = False
@@ -367,42 +367,6 @@ insertContinuationsStm stm =
 
 -------------------------------------------------------------------------------
 
--- A list of groups and the functions they contain
-type GroupMembership = [(GroupID, [Var])]
-
-stmGroupTable :: LocalCPS.RConts -> LStm -> GroupMembership
-stmGroupTable rconts stm =
-  case stm
-  of LetLCPS _ _ label body
-       | LocalCPS.RCont label `elem` IntMap.elems rconts ->
-           -- This is a continuation function
-           (ContID label, [label]) : stmGroupTable rconts body
-       | otherwise ->
-           -- This is an ordinary let expression
-           stmGroupTable rconts body
-     LetrecLCPS defs gid body ->
-       (GroupID gid, map definiendum $ groupMembers defs) :
-       concatMap (stmGroupTable rconts . funBody . definiens) (groupMembers defs) ++
-       stmGroupTable rconts body
-     SwitchLCPS _ alts ->
-       concat [stmGroupTable rconts s | (_, s) <- alts]
-     ReturnLCPS _ -> []
-     ThrowLCPS _ -> []
-
-createGroupTables :: LocalCPS.RConts -> LFunDef -> (Var -> GroupID, GroupID -> [Var])
-createGroupTables rconts fun_def =
-  let group_membership = stmGroupTable rconts $ funBody $ definiens fun_def
-      fun_group = Map.fromList [(v, g) | (g, vs) <- group_membership, v <- vs]
-      get_group_members gid =
-        case lookup gid group_membership
-        of Just vs -> vs
-           Nothing -> internalError "createGroupTables: lookup failed"
-      get_fun_group v =
-        case Map.lookup v fun_group
-        of Just gid -> gid
-           Nothing  -> internalError "createGroupTables: lookup failed"
-  in (get_fun_group, get_group_members)
-
 lookupDestinationLocals f caller_map fun_to_group locals_in_scope =
   -- Look up the group of @f@ first.  If @f@ is not a continuation, this will
   -- produce the answer.
@@ -449,10 +413,6 @@ findFunctionsToHoist var_ids global_vars def = do
   let rconts = LocalCPS.identifyLocalContinuations ann_def
       conts_set = Set.fromList [v | LocalCPS.RCont v <- IntMap.elems rconts]
 
-  -- Compute lookup tables to associate functions to groups and vice versa
-  let (fun_to_group, group_to_fun) =
-        createGroupTables rconts ann_def
-
   -- Find the first caller of each continuation
   let (cont_map, caller_map) =
         mkContMap rconts ann_def
@@ -472,7 +432,7 @@ findFunctionsToHoist var_ids global_vars def = do
                                     | (g, l) <- IntMap.toList locals_in_scope]
 
   -- Compute hoisting
-  hoisted_groups <- findHoistedGroups ann_def rconts
+  (hoisted_groups, fun_to_group) <- findHoistedGroups ann_def rconts
 
   -- Compute free variables
   captures <- findCapturedVariables rconts global_vars conts_set ann_def
@@ -488,12 +448,11 @@ findFunctionsToHoist var_ids global_vars def = do
 
   -- Construct closure conversion info
   let lookup_function f =
-        let grp = fun_to_group f
-        in FunAnalysisResults
-           { funHoisted  = grp `Set.member` hoisted_groups
-           , funGroup    = grp
-           , funCaptured = fromMaybe Set.empty $ Map.lookup f captures
-           }
+        FunAnalysisResults
+        { funHoisted  = f `Set.member` hoisted_groups
+        , funGroup    = fun_to_group f
+        , funCaptured = fromMaybe Set.empty $ Map.lookup f captures
+        }
   cc_info <- runFreshVarM var_ids $ stmCCInfo lookup_function locals_in_scope (funBody $ definiens $ cont_def)
   
   when debug $ do

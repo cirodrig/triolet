@@ -13,10 +13,11 @@ The transformation is described in the paper
 in Proc. Higher-Order and Symbolic Computation 15, p. 161-180, 2002.
 -}
 
-module LowLevel.LocalCPS(RConts, RCont(..),
-                         lookupCont, needsContinuationCall,
-                         Lattice(..),
-                         identifyLocalContinuations)
+module LowLevel.Closure.LocalCPS
+       (RConts, RCont(..),
+        lookupCont, needsContinuationCall,
+        Lattice(..),
+        identifyLocalContinuations)
 where
 
 import Prelude hiding(mapM)
@@ -36,9 +37,9 @@ import Common.Error
 import Common.Identifier
 import LowLevel.CodeTypes
 import LowLevel.FreshVar
-import LowLevel.LocalCPSAnn
 import LowLevel.Print
 import LowLevel.Syntax
+import LowLevel.Closure.LocalCPSAnn
 import Globals
 
 -- | The set of return continuations of a function.
