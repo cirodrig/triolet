@@ -311,9 +311,11 @@ mkWrapperDef :: Var -> Fun s -> Def s
 mkWrapperDef v f = Def v (defaultDefAnn {defAnnInlinePhase = InlWrapper}) f
 
 mapDefiniens :: (Fun s -> Fun s') -> Def s -> Def s'
+{-# INLINE mapDefiniens #-}
 mapDefiniens f def = def {definiens = f $ definiens def}
 
 mapMDefiniens :: Monad m => (Fun s -> m (Fun s')) -> Def s -> m (Def s')
+{-# INLINE mapMDefiniens #-}
 mapMDefiniens f def = do fun <- f (definiens def)
                          return $ def {definiens = fun}
 
