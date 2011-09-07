@@ -1,0 +1,36 @@
+/* Test the local CPS transformation.
+   A part of function "g" will be converted to a new function during
+   closure conversion.
+ */
+
+module test.test;
+
+extern function test.test.testfoo "testfoo" (int32, int32, int32) -> int32;
+
+function testfoo (int32 z, int32 y, int32 x) -> int32 {
+  letrec {
+    function f (int32 f_x) -> int32 {
+      if (f_x > y) {
+        int32 call f (f_x - int32 1);
+      } else { int32 1; };
+    }
+  };
+  letrec {
+    function g (int32 g_x, float g_y) -> int32 {
+      // Create a big function body so it won't be inlined
+      y1 = g_y * float 3.14159;
+      y2 = y1 - float 8.0;
+      y3 = y2 * y2;
+      y4 = y3 / float 100.0;
+      y5 = if (y4 > float 0.0) { y4; } else { y4 * (int32 -1 as float); };
+      y = y5 as int32;
+      z = int32 call f (g_x);
+      z + y;
+    }
+  };
+  if (x % int32 2 == int32 1) {
+    int32 call g (int32 0, float 24.5);
+  } else {
+    int32 call g (z, float 24.5);
+  };
+};

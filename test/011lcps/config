@@ -1,0 +1,7 @@
+TestConfig {
+  synopsis	 = "Test local CPS transformation",
+  pyonSources	 = [],
+  llpyonSources  = ["test.pyasm"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldCompile
+}
