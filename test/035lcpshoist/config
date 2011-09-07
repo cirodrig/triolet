@@ -1,0 +1,7 @@
+TestConfig {
+  synopsis	 = "Test hoisting of local CPS continuations",
+  pyonSources	 = [],
+  llpyonSources  = ["test.pyasm"],
+  cSources	 = ["main.c"],
+  expectedResult = ShouldCompile
+}

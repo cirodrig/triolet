@@ -1,0 +1,26 @@
+
+module test.test;
+
+extern procedure pyon.internal.pyon_alloc "pyon_alloc" (uint32) -> pointer;
+extern function test.test.testfoo "testfoo" (int32, int32, int32) -> int32;
+
+/* Test hoisting of continuations created by local CPS transformation.
+ * During closure conversion, a continuation function will be
+ * created for 'f' and then hoisted. */
+
+function testfoo (int32 z, int32 y, int32 x) -> int32 {
+  letrec {
+    function f (int32 f_x) -> int32 {
+      int32 1 + int32 call g(f_x);
+    };
+    function g (int32 g_x) -> int32 {
+      w = g_x + z;
+      if (x > w) {
+        g_x;
+      } else {
+        w + int32 call f(g_x);
+      };
+    }
+  };
+  int32 call g(int32 2);
+};
