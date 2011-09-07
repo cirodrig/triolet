@@ -54,14 +54,22 @@ allBuiltinVars = elems builtins
       readMVar the_PyonBuiltins
 
 pyonBuiltin :: BuiltinThing -> Var
-pyonBuiltin field = unsafePerformIO $ do
-  -- Ensure that we've already initialized these
-  bi_is_empty <- isEmptyMVar the_PyonBuiltins
-  when bi_is_empty $ internalError "Pyon builtins are uninitialized"
-  
-  -- Load and return the desired field
-  bi <- readMVar the_PyonBuiltins
-  return $ bi ! fromEnum field
+
+-- Because 'pyonBuiltin' is normally called with a constant argument, it's 
+-- beneficial to inline it
+{-# INLINE pyonBuiltin #-}
+pyonBuiltin field = pyonBuiltin' (fromEnum field)
+
+pyonBuiltin' field_index = field_index `seq` unsafePerformIO get_value 
+  where
+    get_value = do
+      -- Ensure that we've already initialized these
+      bi_is_empty <- isEmptyMVar the_PyonBuiltins
+      when bi_is_empty $ internalError "Pyon builtins are uninitialized"
+      
+      -- Load and return the desired field
+      bi <- readMVar the_PyonBuiltins
+      return $! bi ! field_index
 
 infix 4 `isPyonBuiltin`
 isPyonBuiltin :: Var -> BuiltinThing -> Bool
