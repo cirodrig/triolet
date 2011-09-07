@@ -1,8 +1,14 @@
+{-|  Free variable analysis.
+
+The analysis in this module identifies the free variables of each local function
+and continuation in one top-level function definition.  The set of free
+variables is used for variable capture during closure conversion.
+-}
 
 {-# Language FlexibleInstances, TypeSynonymInstances,
              GeneralizedNewtypeDeriving #-}
 module LowLevel.Closure.Capture
-       (Capt, findCapturedVariables)
+       (Free, findCapturedVariables)
 where
 
 import Prelude hiding(mapM)
@@ -50,29 +56,28 @@ debug = True
 -------------------------------------------------------------------------------
 -- Constraints
 
--- | A variable capture set.
-type Capt = Set.Set Var
+-- | A set of free variables.
+type Free = Set.Set Var
 
--- | An inherited capture set.
+-- | An inherited free variable set.  If function F calls function G, and
+--   G has captured a variable, then F must be able to pass that variable to G.
+--   Unless the varible was defined by F, F must also capture the variable.
 --
---   @CaptInherit (fromList [(v1, s1), ...]@ means that, for each function 
+--   @FreeInherit (fromList [(v1, s1), ...]@ means that, for each function 
 --   @v_i@ and set of variables @s_i@, the current function inherits the
---   captured variables of @v_i@ that are not in @s_i@.
---
---   A function can only inherit captured variables from functions defined
---   in lexically enclosing @letrec@ statements.
-newtype CaptInherit = CaptInherit (Map.Map Var [Var])
+--   free variables of @v_i@ that are not in @s_i@.
+newtype FreeInherit = FreeInherit (Map.Map Var [Var])
                       deriving(Show, Monoid)
 
--- | The union of two captured variable sets. 
+-- | The union of two free variable sets. 
 --
---   We arbitrarily retain one of the sets of variables that should not
---   be captured (implicit in the call to 'Map.union').
---   It does not matter which set is chosen.
---   There will never be an attempt to capture variables that are in
+--   We arbitrarily retain one of the sets of excluded variables
+--   (implicit in the call to 'Map.union').
+--   It does not matter which set excluded.
+--   There will never be an attempt to propagate variables that are in
 --   only one of the two sets.
-captInheritUnion (CaptInherit s1) (CaptInherit s2) =
-  CaptInherit (Map.union s1 s2)
+captInheritUnion (FreeInherit s1) (FreeInherit s2) =
+  FreeInherit (Map.union s1 s2)
 
 -------------------------------------------------------------------------------
 -- Constraint generation
@@ -95,15 +100,15 @@ type FunMap = Map.Map Var FunInfo
 --   name.
 data UnsolvedFunction =
   UnsolvedFunction
-  { -- | Functions whose captured variables are inherited by this function
-    funInheritedCaptures :: CaptInherit
-    -- | The set of variables captured by this function
-  , funCapturedSet :: !(IORef Capt)
+  { -- | Functions whose free variables are inherited by this function
+    funInheritedCaptures :: FreeInherit
+    -- | The set of free variables of this function
+  , funCapturedSet :: {-# UNPACK #-}!(IORef Free)
   }
 
-newFunctionDescr csts captured = do
-  captured_set <- newIORef captured
-  return $ UnsolvedFunction csts captured_set
+newFunctionDescr csts free = do
+  free_set <- newIORef free
+  return $ UnsolvedFunction csts free_set
 
 data ScanInputs =
   ScanInputs
@@ -111,7 +116,7 @@ data ScanInputs =
     scanFunMap :: FunMap
 
     -- | Return continuations
-  , scanRConts :: LocalCPS.RConts
+  , scanRConts :: !LocalCPS.RConts
 
     -- | The set of all continuation functions.  Continuaions are only included
     --   in the set if they are actually the continuation of some function.
@@ -120,9 +125,10 @@ data ScanInputs =
     -- | The function being scanned
   , scanCurrentFun :: Var
 
-    -- | The set of global variables.  Globals are never captured.
+    -- | The set of global variables.  Globals are excluded from the analysis 
+    --   because they are never captured.
   , scanGlobals :: !(Set.Set Var)
-    -- | The variables that defined in the current function and are
+    -- | The variables that are defined in the current function and are
     --   in scope at the current program point.  Variables defined in an
     --   enclosing function are not in this list.
     --
@@ -156,14 +162,14 @@ extendContext defs si =
 
 -------------------------------------------------------------------------------
 
--- | A scan for computing hoisting and capture information.
+-- | A scan for computing free variables.
 newtype Scan a = Scan {runScan :: ScanInputs -> IO (ScanResult a)}
 
 data ScanResult a = ScanResult a !GlobalConstraints
 
 -- | Global constraints are collected by scanning and processed after scanning
 --   is complete.
-data GlobalConstraints =
+newtype GlobalConstraints =
   GlobalConstraints
   { unsolvedFunctions :: Map.Map Var UnsolvedFunction
   }
@@ -173,11 +179,9 @@ instance Monoid GlobalConstraints where
   GlobalConstraints a `mappend` GlobalConstraints b =
     GlobalConstraints (a `mappend` b)
 
--- | Scanning an expression produces a set of captured variables and
---   capture constraints required by the functions whose definitions contain
---   the expression.  In the case of nested function definitions, all functions
---   are affected.
-type ScanExp = Scan (Capt, CaptInherit)
+-- | Scanning an expression produces a set of free variables and inherited
+--   variable constraints.
+type ScanExp = Scan (Free, FreeInherit)
 
 instance Monoid ScanExp where
   mempty = Scan (\_ -> return (ScanResult mempty mempty))
@@ -188,12 +192,12 @@ instance Monoid ScanExp where
     return $ ScanResult (c1 `mappend` c2) (csts1 `mappend` csts2)
 
   mconcat xs = Scan $ \i -> do
-    (captures, globals) <-
+    (frees, globals) <-
       let run_scan a (Scan f) = do
             ScanResult c g <- f i
             return (a `mappend` (c, g))
       in foldM run_scan mempty xs
-    return $ ScanResult captures globals
+    return $ ScanResult frees globals
 
 instance Monad Scan where
   return x = Scan (\_ -> return (ScanResult x mempty))
@@ -237,7 +241,7 @@ enterGroup (Scan f) =
 --   in scope.
 --
 --   Add the definition group to the environment, and remove the defined
---   variables from the inherited capture set.
+--   variables from the inherited free-variable set.
 defineGroup :: [LFunDef] -> ScanExp -> ScanExp
 defineGroup fdefs (Scan f) =
   define_group $
@@ -248,10 +252,10 @@ defineGroup fdefs (Scan f) =
     
     -- Captured variables are not inherited by 
     define_group (Scan f) = Scan $ \i -> do
-      ScanResult (captured, CaptInherit inherits) global_csts <- f i
+      ScanResult (captured, FreeInherit inherits) global_csts <- f i
       let inherits' = foldr Map.delete inherits definienda
-      return $ ScanResult (captured, CaptInherit inherits') global_csts
-    
+      return $ ScanResult (captured, FreeInherit inherits') global_csts
+
 -- | Scan a reference to a variable, other than a tail call.
 --
 --   If it's not a global variable, the variable will be added to the
@@ -293,7 +297,7 @@ called' v = Scan $ \env ->
       m_finfo = Map.lookup v $ scanFunMap env
       c_cst =
         case m_finfo
-        of Just _ -> CaptInherit (Map.singleton v locals)
+        of Just _ -> FreeInherit (Map.singleton v locals)
            _ -> mempty
       global_constraints = GlobalConstraints mempty
       result = ScanResult (mempty, c_cst) global_constraints
@@ -356,6 +360,23 @@ scanDef :: LFunDef -> ScanExp
 scanDef d = Scan $ \i ->
   runScan (scanFun (definiens d)) (i {scanCurrentFun = definiendum d})
 
+-- | Using the results of scanning a function body, produce constraints
+--   to be solved later.
+generateConstraint :: Var -> Free -> FreeInherit -> Scan ()
+generateConstraint fun_name free inherits = do      
+  -- This function always inherits free variables from its continuation
+  -- as if there were a direct call to the continuation.
+  rconts <- getRConts
+  let (free_k, inherits_k) =
+        case LocalCPS.lookupCont fun_name rconts
+        of Just (LocalCPS.RCont k) ->
+             (Set.insert k free,
+              inherits `captInheritUnion` FreeInherit (Map.singleton k []))
+           _ -> (free, inherits)
+
+  -- Create an UnsolvedFunction
+  putFun fun_name =<< liftIO (newFunctionDescr inherits_k free_k)
+ 
 -- | Scan the functions in a definition group and create placeholders for
 --   constraint solving.
 scanGroupFunctions :: Group LFunDef -> ScanExp
@@ -367,36 +388,19 @@ scanGroupFunctions g =
   where
     scan_def :: LFunDef -> ScanExp
     scan_def fdef = do
-      (captured, inherits) <- scanDef fdef
-      
-      -- This function always inherits captured variables from its continuation
-      -- as if there were a direct call to the continuation.
-      rconts <- getRConts
-      let (captured_k, inherits_k) =
-            case LocalCPS.lookupCont (definiendum fdef) rconts
-            of Just (LocalCPS.RCont k) ->
-                 (Set.insert k captured,
-                  inherits `captInheritUnion` CaptInherit (Map.singleton k []))
-               _ -> (captured, inherits)
-
-      -- Create an UnsolvedFunction
-      putFun (definiendum fdef) =<< liftIO (newFunctionDescr inherits_k captured_k)
-      
-      return (captured, inherits)
+      (free, inherits) <- scanDef fdef
+      generateConstraint (definiendum fdef) free inherits
+      return (free, inherits)
 
 scanContinuationFunction :: [Var] -> Var -> LStm -> ScanExp
 scanContinuationFunction params fun_name body = enterGroup $ do
-  (captured, inherits) <- defines params $ scanStm body
-
-  -- Create an UnsolvedFunction
-  putFun fun_name =<< liftIO (newFunctionDescr inherits captured)
-
-  return (captured, inherits)
+  (free, inherits) <- defines params $ scanStm body
+  generateConstraint fun_name free inherits
+  return (free, inherits)
 
 -- | Scan a function definition group. 
 --   The scan creates an 'UnsolvedFunction' for each function in the group.  
---   Captured variable constraints for local functions are propagated.
---   Hoisting constraints in the body are propagated.
+--   Free variable constraints for local functions are propagated.
 scanGroup :: Group LFunDef -> ScanExp -> ScanExp
 scanGroup group scan_body =
   -- Create a descriptor for this group; add it to the descriptors taken from 
@@ -406,25 +410,23 @@ scanGroup group scan_body =
   -- Process the body
   defineGroup (groupMembers group) scan_body
 
--- | Scan a top-level function, generating a set of constraints that determine
---   hoisting and variable capture
-scanTopLevelDef :: LocalCPS.RConts
-                -> Set.Set Var
-                -> Set.Set Var
+-- | Scan a top-level function, generating a set of constraints
+scanTopLevelDef :: LocalCPS.RConts -- ^ Return continuations
+                -> Set.Set Var     -- ^ Global variables that are in scope
+                -> Set.Set Var     -- ^ Continuation funtions in the @LFunDef@
                 -> LFunDef
                 -> IO (Map.Map Var UnsolvedFunction)
 scanTopLevelDef rconts globals conts (Def v f) = do
   let initial_context =
         ScanInputs Map.empty rconts conts undefined globals []
-  ScanResult (captured, inherits) (GlobalConstraints ufuncs) <-
+  ScanResult (free, inherits) (GlobalConstraints ufuncs) <-
     runScan (scanDef (Def v f)) initial_context
 
-  unless (Set.null captured) $
-    traceShow captured $
-    internalError "scanTopLevelDef: Top-level function captures variables"
+  unless (Set.null free) $
+    internalError "scanTopLevelDef: Top-level function has free variables"
 
-  unless (Map.null (case inherits of CaptInherit m -> m)) $
-    internalError "scanTopLevelDef: Invalid variable captures constraints"
+  unless (Map.null (case inherits of FreeInherit m -> m)) $
+    internalError "scanTopLevelDef: Invalid free variable constraints"
 
   return ufuncs
 
@@ -473,19 +475,19 @@ modifyCheckIORef f ref = do
   return change
 
 -------------------------------------------------------------------------------
--- Capture constraint solving
+-- Free constraint solving
 
-data CCSEntry =
-  CCSEntry
-  { -- | The captured variables assigned to this function
-    ccsCaptured :: {-#UNPACK#-}!(IORef Capt)
-    -- | Propagation of captured variables.  For each @(f, s)@,
-    --   we have @captured(f) `isSupersetOf` (captured(this) \\ s)@.
+data FCSEntry =
+  FCSEntry
+  { -- | The free variables assigned to this function
+    ccsFree :: {-#UNPACK#-}!(IORef Free)
+    -- | Propagation of free variables.  For each @(f, s)@,
+    --   we have @free f `isSupersetOf` (free this \\ s)@.
   , ccsPropagate :: [(Var, [Var])]
   }
 
 -- | A hash table of functions being solved
-type FTable = HashTable.HashTable Var CCSEntry
+type FTable = HashTable.HashTable Var FCSEntry
 
 makeFTable :: [(Var, UnsolvedFunction)] -> IO FTable
 makeFTable xs = do
@@ -494,11 +496,11 @@ makeFTable xs = do
   -- Create an entry for each function
   mapM_ (create_entry htab) xs
 
-  -- Take captured variable propagation info from each UnsolvedFunction and 
+  -- Take free variable propagation info from each UnsolvedFunction and 
   -- distribute it to the function that's the source of each constraint
   forM_ xs $ \(target, f) ->
     forM_ (case funInheritedCaptures f
-           of CaptInherit m -> Map.toList m) $ \(source, mask) ->
+           of FreeInherit m -> Map.toList m) $ \(source, mask) ->
       add_propagation htab source target mask
 
   return htab
@@ -507,7 +509,7 @@ makeFTable xs = do
     hash_var v = HashTable.hashInt $ fromIdent $ varID v
     
     create_entry htab (v, f) =
-      let entry = CCSEntry (funCapturedSet f) []
+      let entry = FCSEntry (funCapturedSet f) []
       in HashTable.insert htab v entry
     
     add_propagation htab src tgt mask = do
@@ -516,42 +518,42 @@ makeFTable xs = do
       HashTable.update htab src entry'
 
 -- | Solve a set of variable capture constraints by computing a set of
---   captured variables that satisfies all constraints.  The results of
+--   free variables that satisfies all constraints.  The results of
 --   the computation will be in the 'funCapturedSet'
 --   fields of various objects.
 solveCaptureConstraints :: [(Var, UnsolvedFunction)]
-                        -> IO (Map.Map Var Capt)
+                        -> IO (Map.Map Var Free)
 solveCaptureConstraints funs = do
   -- Set up data structures
   htab <- makeFTable funs
   worklist <- newWorklist (map fst funs)
   
   -- Solve
-  forWorklist worklist $ propagateFunctionCaptureConstraints worklist htab
+  forWorklist worklist $ propagateFunctionFreeConstraints worklist htab
   
-  -- Read final value of captured variable sets
-  final_captured_variables <-
+  -- Read final value of free variable sets
+  final_free_variables <-
     forM funs $ \(v, uf) -> do
-      captured <- readIORef $ funCapturedSet uf
-      return (v, captured)
-  return $ Map.fromList final_captured_variables
+      free <- readIORef $ funCapturedSet uf
+      return (v, free)
+  return $ Map.fromList final_free_variables
 
--- | Given a function whose captured variables have been updated,
---   update the captured variables of functions that inherit from this one.
-propagateFunctionCaptureConstraints :: Worklist Var -> FTable -> Var -> IO ()
-propagateFunctionCaptureConstraints worklist htab fun_name = do
+-- | Given a function whose free variables have been updated,
+--   update the free variables of functions that inherit from this one.
+propagateFunctionFreeConstraints :: Worklist Var -> FTable -> Var -> IO ()
+propagateFunctionFreeConstraints worklist htab fun_name = do
   Just fun <- HashTable.lookup htab fun_name
-  captured_vars <- readIORef $ ccsCaptured fun
+  free_vars <- readIORef $ ccsFree fun
   
   -- Update any functions that inherit from this one
   forM_ (ccsPropagate fun) $ \(target, mask) ->
-    let propagated_vars = foldr Set.delete captured_vars mask
-    in updateFunctionCaptureConstraints worklist htab target propagated_vars
+    let propagated_vars = foldr Set.delete free_vars mask
+    in updateFunctionFreeConstraints worklist htab target propagated_vars
 
-updateFunctionCaptureConstraints :: Worklist Var -> FTable -> Var -> Capt -> IO ()
-updateFunctionCaptureConstraints worklist htab fun_name extra_vars = do
+updateFunctionFreeConstraints :: Worklist Var -> FTable -> Var -> Free -> IO ()
+updateFunctionFreeConstraints worklist htab fun_name extra_vars = do
   Just fun <- HashTable.lookup htab fun_name
-  change <- modifyCheckIORef (Set.union extra_vars) (ccsCaptured fun)
+  change <- modifyCheckIORef (Set.union extra_vars) (ccsFree fun)
   when change $ putWorklist worklist fun_name
 
 -------------------------------------------------------------------------------
@@ -559,17 +561,17 @@ updateFunctionCaptureConstraints worklist htab fun_name extra_vars = do
 
 printUnsolvedFunction :: (Var, UnsolvedFunction) -> IO ()
 printUnsolvedFunction (v, ufun) = do
-  captured_set <- readIORef $ funCapturedSet ufun
+  free_set <- readIORef $ funCapturedSet ufun
   
   print $ hang (pprVar v) 4 $
-    text "captured" <+> captured_doc (Set.elems captured_set) $$
+    text "free" <+> free_doc (Set.elems free_set) $$
     text "inherits" <+> inherit_doc (funInheritedCaptures ufun)
   where
-    inherit_doc (CaptInherit m) =
+    inherit_doc (FreeInherit m) =
       vcat [pprVar v <+> text "-" <+> braces (fsep (map pprVar vs))
            | (v, vs) <- Map.toList m]
 
-    captured_doc s = fsep $ punctuate (text ",") $ map pprVar s
+    free_doc s = fsep $ punctuate (text ",") $ map pprVar s
 
 -------------------------------------------------------------------------------
 
@@ -579,7 +581,7 @@ findCapturedVariables :: LocalCPS.RConts -- ^ Return continuations
                       -> Set.Set Var     -- ^ Global variables in scope here
                       -> Set.Set Var     -- ^ Continuations
                       -> LFunDef         -- ^ A global function definition
-                      -> IO (Map.Map Var Capt)
+                      -> IO (Map.Map Var Free)
                       -- ^ Computes the free variables of each local function
                       --   and continuation
 findCapturedVariables return_continuations global_vars conts ann_def = do

@@ -5,7 +5,7 @@ Based on which functions are
 
 {-# Language FlexibleInstances, TypeSynonymInstances,
              GeneralizedNewtypeDeriving #-}
-module LowLevel.ClosureSelect(Capt, findFunctionsToHoist) where
+module LowLevel.ClosureSelect(Free, findFunctionsToHoist) where
 
 import Prelude hiding(mapM)
 import Control.Applicative
