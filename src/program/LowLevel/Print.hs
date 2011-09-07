@@ -317,9 +317,7 @@ pprImport impent = text "extern" <+>
              pprFunSignature
              (map pprValueType $ ftParamTypes ftype)
              (map pprValueType $ ftReturnTypes ftype)
-           impvar = case globalClosure entry_points
-                    of Just v  -> pprVar v
-                       Nothing -> text "<ERROR>"
+           impvar = pprVar $ globalClosure entry_points
            value = case mfun
                    of Nothing -> empty
                       Just f  -> pprFun f

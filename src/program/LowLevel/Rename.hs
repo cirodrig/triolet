@@ -221,11 +221,10 @@ rnImport :: Rn -> Import -> FreshVarM Import
 rnImport rn impent =
   case impent
   of ImportClosureFun ep mf -> do
-       let ep' = case globalClosure ep  
-                 of Just v ->
-                      case IntMap.lookup (fromIdent $ varID v) $ rnRenaming rn
-                      of Nothing -> ep
-                         Just v' -> setGlobalClosure v' ep
+       let ep' = let v = globalClosure ep
+                 in case IntMap.lookup (fromIdent $ varID v) $ rnRenaming rn
+                    of Nothing -> ep
+                       Just v' -> setGlobalClosure v' ep
        mf' <- mapM (rnFun rn) mf
        return $ ImportClosureFun ep' mf'
      ImportPrimFun v ft mf -> do

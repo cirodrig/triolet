@@ -856,10 +856,7 @@ genImport :: Import -> [CDecl]
 genImport impent =
   case impent
   of ImportClosureFun entry_points _ ->
-       let clo =
-             case globalClosure entry_points
-             of Just x -> x
-                Nothing -> internalError "genImport: Missing global closure"
+       let clo = globalClosure entry_points
        in map genImportVar [ directEntry entry_points
                            , exactEntry entry_points
                            , inexactEntry entry_points

@@ -140,7 +140,7 @@ toPointerImport (ImportClosureFun ep mvalue) =
         (toPointerVar $ exactEntry ep)
         (toPointerVar $ inexactEntry ep)
         (toPointerVar $ infoTableEntry ep)
-        (fmap toPointerVar $ globalClosure ep)
+        (toPointerVar $ globalClosure ep)
       mvalue' = fmap toPointerFun mvalue
   in ImportClosureFun ep' mvalue'
 

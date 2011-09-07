@@ -253,10 +253,7 @@ mkGlobalClosure ep =
       static_value = StaticData
                      (flattenStaticRecord globalClosureRecord)
                      (flattenGlobalValues closure_values)
-      var = case globalClosure ep
-            of Just x -> x
-               Nothing -> internalError "mkGlobalClosure"
-  in writeData $ Def var static_value
+  in writeData $ Def (globalClosure ep) static_value
 
 -- | Create argument type tags for an info table entry.
 --   The type tags are a sequence of bytes describing the function's

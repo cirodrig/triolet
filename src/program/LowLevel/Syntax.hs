@@ -492,9 +492,7 @@ importVar :: Import -> Var
 importVar impent =
   case impent
   of ImportClosureFun {importEntryPoints = entry_points} ->
-       case globalClosure entry_points
-       of Just v -> v
-          Nothing -> internalError "importVar"
+       globalClosure entry_points
      ImportPrimFun {_importVar = v} -> v
      ImportData {_importVar = v} -> v
 
@@ -543,7 +541,7 @@ data EntryPoints =
   , _epExactEntry    :: !Var
   , _epInexactEntry  :: !Var
   , _epInfoTable     :: !Var
-  , _epGlobalClosure :: !(Maybe Var) -- Only for global functions
+  , _epGlobalClosure :: !Var
   }
 
 -- | Get the type of a function
@@ -577,16 +575,14 @@ infoTableEntry = _epInfoTable
 
 -- | Get the global closure of a function.
 -- Only global functions have a global closure.
-globalClosure :: EntryPoints -> Maybe Var
+globalClosure :: EntryPoints -> Var
 globalClosure = _epGlobalClosure
 
--- | Assign the global closure of a function.  This function is to assist in  
---   renaming entry points.  There must already be a global closure.
+-- | Assign the global closure of a function.
+--
+--   Reassigning the global closure may occur during renaming.
 setGlobalClosure :: Var -> EntryPoints -> EntryPoints
-setGlobalClosure new_c ep
-  | isNothing (globalClosure ep) =
-      internalError "setGlobalClosure: No global closure"
-  | otherwise = ep {_epGlobalClosure = Just new_c}
+setGlobalClosure new_c ep = ep {_epGlobalClosure = new_c}
 
 -- | All variables referenced by an 'EntryPoints'.
 entryPointsVars :: EntryPoints -> [Var]
@@ -595,8 +591,8 @@ entryPointsVars ep =
   _epExactEntry ep :
   _epInexactEntry ep :
   _epInfoTable ep :
-  maybeToList (_epVectorEntry ep) ++
-  maybeToList (_epGlobalClosure ep)
+  _epGlobalClosure ep :
+  maybeToList (_epVectorEntry ep)
 
 -- | Create a new internal variable
 newVar :: Supplies m (Ident Var) => Maybe Label -> ValueType -> m Var
