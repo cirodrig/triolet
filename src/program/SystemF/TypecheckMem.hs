@@ -148,12 +148,12 @@ functionType (FunM (Fun { funTyParams = ty_params
 
 -------------------------------------------------------------------------------
 
-assumePat :: PatM -> (PatTM -> TCM b) -> TCM b
-assumePat (PatM (v ::: ty) _) k =
+assumeAndAnnotatePat :: PatM -> (PatTM -> TCM b) -> TCM b
+assumeAndAnnotatePat (PatM (v ::: ty) _) k =
   assume v ty $ k (TypedMemVarP (v ::: ty))
 
-assumeTyPat :: TyPat Mem -> (TyPat TM -> TCM b) -> TCM b
-assumeTyPat (TyPatM (v ::: t)) k = do
+assumeAndAnnotateTyPat :: TyPat Mem -> (TyPat TM -> TCM b) -> TCM b
+assumeAndAnnotateTyPat (TyPatM (v ::: t)) k = do
   t' <- typeInferType (TypM t)
   assume v t $ k (TyPatTM v t')
 
@@ -298,8 +298,8 @@ typeInferFun fun@(FunM (Fun { funInfo = info
               }
     return $ FunTM $ TypeAnn ty new_fun
   where
-    assumeTyParams = withMany assumeTyPat ty_params
-    assumeParams = withMany assumePat params
+    assumeTyParams = withMany assumeAndAnnotateTyPat ty_params
+    assumeParams = withMany assumeAndAnnotatePat params
 
 typeInferLetE :: ExpInfo -> PatM -> ExpM -> ExpM -> TCM ExpTM
 typeInferLetE inf pat expression body = do
@@ -310,7 +310,7 @@ typeInferLetE inf pat expression body = do
     (getExpType ti_exp) (patType pat)
 
   -- Assume the pattern while inferring the body; result is the body's type
-  assumePat pat $ \ti_pat -> do
+  assumeAndAnnotatePat pat $ \ti_pat -> do
     ti_body <- typeInferExp body
     let return_type = getExpType ti_body
         new_exp = LetE inf ti_pat ti_exp ti_body
@@ -376,14 +376,14 @@ typeCheckAlternative pos scr_type alt@(AltM (DeCon { altConstructor = con
     scr_type con_scr_type
 
   -- Add existential variables to environment
-  withMany assumeTyPat ex_fields $ \ex_fields' -> do
+  withMany assumeAndAnnotateTyPat ex_fields $ \ex_fields' -> do
 
     -- Verify that fields have the expected types
     check_number_of_fields inst_arg_types fields
     zipWithM_ check_arg inst_arg_types (zip [1..] fields)
   
     -- Add fields to enironment
-    withMany assumePat fields $ \fields' -> do
+    withMany assumeAndAnnotatePat fields $ \fields' -> do
 
       -- Infer the body
       ti_body <- typeInferExp body
@@ -428,7 +428,7 @@ typeCheckAlternative pos scr_type (AltM (DeTuple { altParams = fields
   checkType (text "Wrong type in field of pattern") pos scr_type tuple_type
 
   -- Add fields to enironment
-  withMany assumePat fields $ \fields' -> do
+  withMany assumeAndAnnotatePat fields $ \fields' -> do
     -- Infer the body
     ti_body <- typeInferExp body
 
@@ -506,7 +506,7 @@ inferExpType expression =
       case fromExpM expression
       of LamE _ f -> return $ functionType f
          LetE _ pat e body ->
-           assumePat pat $ \_ -> infer_exp body
+           assumeAndAnnotatePat pat $ \_ -> infer_exp body
          LetfunE _ defs body ->
            assumeDefs defs $ infer_exp body
          CaseE _ _ (alt : _) ->
@@ -519,8 +519,8 @@ inferExpType expression =
            fmap getExpType $ typeInferExp expression
 
     infer_alt (AltM alt) =
-      withMany assumeTyPat (getAltExTypes alt) $ \_ ->
-      withMany assumePat (altParams alt) $ \_ ->
+      withMany assumeAndAnnotateTyPat (getAltExTypes alt) $ \_ ->
+      withMany assumeAndAnnotatePat (altParams alt) $ \_ ->
       infer_exp $ altBody alt
 
     debug = traceShow (text "inferExpType" <+> pprExp expression)

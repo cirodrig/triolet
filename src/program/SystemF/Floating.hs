@@ -702,12 +702,6 @@ instance ReprDictMonad Flt where
     let ctx' = ctx {fcDictEnv = f $ fcDictEnv ctx}
     in runFlt m ctx'
 
--- | Add a variable from a type pattern to the type environment
-assumeTyPatM :: (EvalMonad m, ReprDictMonad m) => TyPatM -> m a -> m a
-assumeTyPatM (TyPatM binder) m = assumeBinder binder m
-
-assumeTyParams ty_params m = foldr assumeTyPatM m ty_params
-
 -- | Add a definition group to the type environment,
 --   after renaming the function names.
 --
@@ -1205,7 +1199,7 @@ asCaseCtx _ = Nothing
 floatInAlt :: AltM -> Flt (AltM, Type)
 floatInAlt (AltM alt) = do
   (body', body_type) <-
-    assumeTyParams (getAltExTypes alt) $
+    assumeTyPatMs (getAltExTypes alt) $
     addPatternVars (altParams alt) $
     anchorOnVars local_vars $
     floatInExp (altBody alt)
@@ -1229,7 +1223,7 @@ data FunAnchor =
 --   regardless of the value given.
 floatInFun :: FunAnchor -> FunM -> Flt FunM
 floatInFun m_local_vars (FunM fun) = do
-  (body, _) <- assumeTyParams (funTyParams fun) $
+  (body, _) <- assumeTyPatMs (funTyParams fun) $
                addPatternVars (funParams fun) $
                anchor_local_vars $
                floatInExp (funBody fun)

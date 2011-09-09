@@ -275,16 +275,10 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
 --   The pattern must not be a local variable pattern.
 assumePattern :: PatM -> LR a -> LR a
 assumePattern pat m =
-  saveReprDictPattern pat $ assumeBinder (patMBinder pat) m
+  saveReprDictPattern pat $ assumePatM pat m
 
 assumePatterns :: [PatM] -> LR a -> LR a
 assumePatterns pats m = foldr assumePattern m pats
-
-assumeTyPatM :: TyPatM -> LR a -> LR a
-assumeTyPatM (TyPatM b) m = assumeBinder b m
-
-assumeTyPatMs :: [TyPatM] -> LR a -> LR a
-assumeTyPatMs typats m = foldr assumeTyPatM m typats
 
 -- | Add the function definition types to the environment
 assumeDefs :: DefGroup (Def Mem) -> LR a -> LR a

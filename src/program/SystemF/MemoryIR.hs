@@ -26,7 +26,10 @@ module SystemF.MemoryIR
         TypM, PatM, TyPatM, ExpM, AltM, FunM,
         appE,
         altFromMonoCon, altToMonoCon,
-        unpackVarAppM, unpackDataConAppM, isDataConAppM
+        unpackVarAppM, unpackDataConAppM, isDataConAppM,
+        assumePatM, assumePatMs,
+        assumeTyPatM, assumeTyPatMs,
+        partitionParameters
        )
 where
 
@@ -37,6 +40,7 @@ import SystemF.DeadCode(Mentions(..))
 import Type.Environment
 import Type.Type
 import Type.Var
+import Type.Eval
 
 data Mem
 
@@ -167,3 +171,34 @@ isDataConAppM tenv e = case unpackDataConAppM tenv e
                        of Just _ -> True
                           _ -> False
 
+assumePatM :: TypeEnvMonad m => PatM -> m a -> m a
+assumePatM pat m = assumeBinder (patMBinder pat) m
+
+assumePatMs :: TypeEnvMonad m => [PatM] -> m a -> m a
+assumePatMs pats m = foldr assumePatM m pats
+
+assumeTyPatM :: TypeEnvMonad m => TyPatM -> m a -> m a
+assumeTyPatM (TyPatM b) m = assumeBinder b m
+
+assumeTyPatMs :: TypeEnvMonad m => [TyPatM] -> m a -> m a
+assumeTyPatMs pats m = foldr assumeTyPatM m pats
+
+-- | Partition a list of parameters into input and output parameters.
+--   Output parameters must follow input parameters.
+partitionParameters :: TypeEnv -> [PatM] -> ([PatM], [PatM])
+partitionParameters tenv params = go id params 
+  where
+    -- Take parameters until the first output parameter is found
+    go hd (p:ps) =
+      case toBaseKind $ typeKind tenv (patMType p)
+      of OutK -> (hd [], check_out_kinds (p:ps))
+         _    -> go (hd . (p:)) ps
+
+    go hd [] = (hd [], [])
+        
+    -- Verify that all parameters in the list are output parameters
+    check_out_kinds ps
+      | and [OutK == toBaseKind (typeKind tenv (patMType p)) | p <- ps] = ps
+      | otherwise =
+        internalError "partitionParameters: Invalid parameter order"
+    

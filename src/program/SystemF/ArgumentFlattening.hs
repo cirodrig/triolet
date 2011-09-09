@@ -127,12 +127,6 @@ instance EvalMonad (AFMonad e) where
   liftTypeEvalM m = AF $ ReaderT $ \env -> do
     runTypeEvalM m (afVarSupply env) (afTypeEnv env)
 
-assumeTyPat :: EvalMonad m => TyPatM -> m a -> m a
-assumeTyPat (TyPatM binder) m = assumeBinder binder m
-
-assumeTyPats :: EvalMonad m => [TyPatM] -> m a -> m a
-assumeTyPats typats m = foldr assumeTyPat m typats
-
 assumePat :: (EvalMonad m, ReprDictMonad m) =>
              PatM -> m a -> m a
 assumePat pat m = assumeBinder (patMBinder pat) $ saveReprDictPattern pat m
@@ -165,7 +159,7 @@ mapOverTailExps f expression =
      _ -> f expression
   where
     map_alt (AltM alt) = do
-      assumeTyPats (getAltExTypes alt) $ assumePats (altParams alt) $ do
+      assumeTyPatMs (getAltExTypes alt) $ assumePats (altParams alt) $ do
         body <- mapOverTailExps f $ altBody alt
         return $ AltM (alt {altBody = body})
 
@@ -1218,10 +1212,10 @@ flattenedFunctionInterface tenv p =
      else (ty_params, params, return_type)
 
 planFunction :: FunM -> AF FunctionPlan
-planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
+planFunction (FunM f) = assumeTyPatMs (funTyParams f) $ do
   -- Partition parameters into input and output parameters
   tenv <- getTypeEnv
-  let (input_params, output_params) = partition_parameters tenv $ funParams f
+  let (input_params, output_params) = partitionParameters tenv $ funParams f
 
   params <- planParameters (PlanMode LiberalStored UnpackExistentials) input_params
 
@@ -1245,22 +1239,6 @@ planFunction (FunM f) = assumeTyPats (funTyParams f) $ do
     else return params
 
   return $ FunctionPlan (funTyParams f) x_params ret
-  where
-    -- Separate the function parameters into input and output parameters.
-    -- Output parameters must follow input parameters.
-    partition_parameters tenv params = go id params 
-      where
-        go hd (p:ps) =
-          case toBaseKind $ typeKind tenv (patMType p)
-          of OutK -> (hd [], check_out_kinds (p:ps))
-             _    -> go (hd . (p:)) ps
-
-        go hd [] = (hd [], [])
-        
-        check_out_kinds ps
-          | and [OutK == toBaseKind (typeKind tenv (patMType p)) | p <- ps] = ps
-          | otherwise =
-            internalError "planFunction: Cannot handle function parameters"
 
 -- | Create a wrapper function.  The wrapper function unpacks function
 --   parameters, calls the worker, an repacks the worker's results.
@@ -1279,7 +1257,7 @@ mkWrapperFunction plan wrapper_name worker_name = do
                            , funBody = wrapper_body}
   return $ mkWrapperDef wrapper_name wrapper
   where
-    make_wrapper_body = assumeTyPats (originalTyParams plan) $ do
+    make_wrapper_body = assumeTyPatMs (originalTyParams plan) $ do
       -- Call the worker function and re-pack its arguments
       tenv <- getTypeEnv
       body <- packReturn (planRetFlatRet $ flatReturn plan) (worker_call tenv)
@@ -1341,7 +1319,7 @@ mkWorkerFunction plan worker_name original_body = do
                           , funBody = worker_body}
   return $ mkDef worker_name worker
   where
-    create_worker_body = assumeTyPats (originalTyParams plan) $ do
+    create_worker_body = assumeTyPatMs (originalTyParams plan) $ do
       -- If the function returned by reference, then lambda-abstract over 
       -- the original return parameter
       abstracted_body <-
@@ -1406,7 +1384,7 @@ flattenFunctionArguments def = do
   when False $ liftIO $ printPlan fun_name plan
 
   -- Flatten inside the function body
-  body <- assumeTyPats (funTyParams fun) $ assumePats (funParams fun) $ do
+  body <- assumeTyPatMs (funTyParams fun) $ assumePats (funParams fun) $ do
     flattenInExp $ funBody fun
   
   -- Construct wrapper if it's beneficial
@@ -1423,7 +1401,7 @@ flattenFunctionArguments def = do
 --   function's arguments
 flattenInFun :: FunM -> AF FunM
 flattenInFun (FunM f) =
-  assumeTyPats (funTyParams f) $ assumePats (funParams f) $ do
+  assumeTyPatMs (funTyParams f) $ assumePats (funParams f) $ do
     fun_body <- flattenInExp $ funBody f
     return $ FunM $ f {funBody = fun_body}
 
@@ -1475,7 +1453,7 @@ flattenInExp expression =
 
 flattenInAlt :: AltM -> AF AltM
 flattenInAlt (AltM alt) =
-  assumeTyPats (getAltExTypes alt) $ assumePats (altParams alt) $ do
+  assumeTyPatMs (getAltExTypes alt) $ assumePats (altParams alt) $ do
     body' <- flattenInExp (altBody alt)
     return $ AltM $ alt {altBody = body'}
 
@@ -1586,7 +1564,7 @@ lvRepackIfUnpacked _ mk_consumer =
 -- | Perform local variable flattening on the body of a function
 lvInFun :: FunM -> LF FunM
 lvInFun (FunM f) =
-  assumeTyPats (funTyParams f) $ assumePats (funParams f) $ do
+  assumeTyPatMs (funTyParams f) $ assumePats (funParams f) $ do
     fun_body <- lvExp $ funBody f
     return $ FunM $ f {funBody = fun_body}
 
@@ -1716,7 +1694,7 @@ lvFlattenBinding is_write inf flat_local@(FlatLocal (FlatArg pat decomp)) rhs bo
 
 lvInAlt :: AltM -> LF AltM
 lvInAlt (AltM alt) =
-  assumeTyPats (getAltExTypes alt) $ assumePats (altParams alt) $ do
+  assumeTyPatMs (getAltExTypes alt) $ assumePats (altParams alt) $ do
     body' <- lvExp (altBody alt)
     return $ AltM $ alt {altBody = body'}
 
