@@ -35,6 +35,11 @@ pprSpecificity (Decond mono_type spcs) =
              in parens $ sep $ punctuate (text ",") types_doc
   in text "D" <> braces (type_doc <> text ":" <> cat (map pprSpecificity spcs))
 
+pprSpecificity (Written spc) = text "W" <> pprSpecificity spc
+pprSpecificity (Read (HeapMap m)) =
+  text "R" <> parens (cat $ punctuate (text ",") cells)
+  where
+    cells = [text "()" <+> text "|->" <+> pprSpecificity s | (v, s) <- m]
 pprSpecificity Unused = text "0"
 {-
 pprParamRepr repr =

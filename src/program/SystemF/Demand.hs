@@ -15,6 +15,7 @@ information about how a value is demanded.
 {-# LANGUAGE TypeSynonymInstances #-}
 module SystemF.Demand where
 
+import Control.Monad
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
 import Data.List
@@ -26,6 +27,7 @@ import SystemF.Syntax
 import Type.Environment
 import Type.Type
 import Type.Rename
+import Type.Eval
 
 -------------------------------------------------------------------------------
 -- The dataflow domain
@@ -117,6 +119,11 @@ instance Renameable Specificity where
        Decond (MonoTuple types) spcs ->
          let types' = rename rn types
          in Decond (MonoTuple types') (rename rn spcs)
+
+       Written spc -> Written (rename rn spc)
+
+       Read (HeapMap xs) ->
+         Read (HeapMap [((), rename rn val) | ((), val) <- xs])
        
        -- Other constructors don't mention variables
        _ -> spc
@@ -162,6 +169,10 @@ instance Substitutable Specificity where
          tys' <- mapM (substitute s) tys
          spcs' <- mapM (substitute s) spcs
          return $ Decond (MonoTuple tys') spcs'
+       
+       Written spc' -> liftM Written $ substitute s spc'
+
+       Read _ -> internalError "substitute: Not implemented"
        
        -- Other terms don't mention variables
        Used -> return spc
@@ -239,3 +250,63 @@ useVariable v dmd = IntMap.singleton (fromIdent $ varID v) dmd
 
 useVariables :: [Var] -> Dmd -> Dmds
 useVariables vs dmd = IntMap.fromList [(fromIdent $ varID v, dmd) | v <- vs]
+
+-- | Decide whether the arguments are equal, given that they describe
+--   values of the same type.  This function is undefined for
+--   specificity arguments of different types.
+sameSpecificity :: Specificity -> Specificity -> Bool
+sameSpecificity Used Used = True
+sameSpecificity Inspected Inspected = True
+sameSpecificity (Decond _ spcs1) (Decond _ spcs2) =
+  and $ zipWith sameSpecificity spcs1 spcs2
+sameSpecificity (Written s1) (Written s2) = sameSpecificity s1 s2
+
+sameSpecificity (Read m1) (Read m2) = 
+  let HeapMap assocs = outerJoinHeapMap check_pair m1 m2
+  in all snd assocs
+  where
+    check_pair (Just x) (Just y) = sameSpecificity x y
+    check_pair _ _ = False
+  
+sameSpecificity Unused Unused = True
+sameSpecificity _ _ = False
+
+
+-- | Given the specificity of a data constructor application, get the
+--   specificity of its individual fields as they appear in a constructor
+--   application
+deconstructSpecificity :: TypeEnv -> Int -> Specificity -> [Specificity]
+deconstructSpecificity tenv n_fields spc =
+  case spc
+  of Decond mono_con spcs
+       | length spcs /= n_fields ->
+         internalError "deconstructSpecficity: Wrong number of fields"
+       | otherwise ->
+           case mono_con
+           of MonoCon con _ _ ->
+                let Just dcon_type = lookupDataCon con tenv
+                    field_kinds = dataConFieldKinds tenv dcon_type
+                    from_field BareK spc = Written spc
+                    from_field _     spc = spc
+                in zipWith from_field field_kinds spcs
+              MonoTuple _ ->
+                -- Unboxed tuples have no bare fields
+                spcs
+
+     -- If the aggregate value is unused, all fields are unused
+     Unused -> replicate n_fields Unused
+
+     -- All other usages produce an unknown effect on fields 
+     _ -> replicate n_fields Used
+
+fromWrittenSpecificity spc =
+  case spc
+  of Written s -> s
+     Unused -> Unused
+     _ -> Used
+
+fromReadSpecificity spc i =
+  case spc
+  of Read (HeapMap xs) -> fromMaybe Unused $ lookup i xs
+     Unused -> Unused
+     _ -> Used

@@ -16,6 +16,8 @@ and case statements branch to alternatives ('Alt').
 module SystemF.Syntax
     (-- * Demand information
      Dmd(..), Multiplicity(..), Specificity(..),
+     HeapMap(..),
+     joinHeapMap, outerJoinHeapMap,
      
      -- * Representation of code
      Typ(..), Pat(..), TyPat(..), Exp(..), Alt(..), Fun(..),
@@ -68,6 +70,9 @@ where
 import Control.Monad
 import Data.Typeable
 import qualified Data.Foldable
+import Data.Function
+import qualified Data.List as List
+import Data.Maybe
 import Data.Monoid
 import qualified Data.Traversable
 
@@ -112,7 +117,46 @@ data Specificity =
     --
     --   Includes a list describing how each field is used.  There is one list
     --   member for each value field.
+
+  | Written Specificity
+    -- ^ An initializer function is executed, and its result is demanded.
+
+  | Read (HeapMap Specificity)
+    -- ^ Values are read out of memory and used at the given specificities.
+    --
+    --   Any heap location that is not in the map is 'Unused'.
+
   | Unused            -- ^ Not used at all.  This is the bottom value.
+
+-- | A map assigning properties to locations in the heap.  The key stands for
+--   the output pointer.
+newtype HeapMap a = HeapMap [((), a)]
+
+-- | Relational join on a HeapMap
+joinHeapMap :: (a -> b -> c) -> HeapMap a -> HeapMap b -> HeapMap c
+joinHeapMap f (HeapMap assocs1) (HeapMap assocs2) = HeapMap new_map
+  where
+    new_map = do
+      (v1, x) <- assocs1
+      y <- maybeToList $ List.lookup v1 assocs2
+      return (v1, f x y)
+
+-- | Relational outer join on a HeapMap
+outerJoinHeapMap :: (Maybe a -> Maybe b -> c)
+                 -> HeapMap a -> HeapMap b -> HeapMap c
+outerJoinHeapMap f (HeapMap assocs1) (HeapMap assocs2) = HeapMap new_map
+  where
+    a1 = List.sortBy (compare `on` fst) assocs1
+    a2 = List.sortBy (compare `on` fst) assocs2
+    new_map = join a1 a2
+
+    join xs@((v1, x):xs') ys@((v2, y):ys') =
+      case compare v1 v2
+      of LT -> (v1, f (Just x) Nothing)  : join xs' ys
+         EQ -> (v1, f (Just x) (Just y)) : join xs' ys'
+         GT -> (v2, f Nothing  (Just y)) : join xs ys'
+    join xs [] = [(v, f (Just x) Nothing) | (v, x) <- xs]
+    join [] ys = [(v, f Nothing (Just y)) | (v, y) <- ys]
 
 -------------------------------------------------------------------------------
 
