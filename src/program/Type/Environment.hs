@@ -72,6 +72,7 @@ import Type.Type
 class Monad m => TypeEnvMonad m where
   -- | Get the current type environment
   getTypeEnv :: m TypeEnv
+  getTypeEnv = askTypeEnv id
   
   -- | Query the current type environment
   askTypeEnv :: (TypeEnv -> a) -> m a
