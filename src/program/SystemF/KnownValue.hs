@@ -94,7 +94,7 @@ data BigAbsValue =
     --   to \"copy\".
     --
     --   Writer values have an equivalent 'AbsFunValue' value.
-  | WriterAV !AbsValue
+  | WriterAV !AbsComputation
 
 -- | An abstract data value.
 data DataValue =
@@ -151,14 +151,23 @@ lookupHeapState ref (HeapState bindings) = find_binding bindings
     match (RefValue base []) = base == ref_base
 
 -- | The abstract value of a monomorphic function.
+--
+--   Functions that return a value can be represented, as well as functions 
+--   that raise an exception.  Other functions must be approximated.
 data AbsFunValue =
   AbsFunValue
   { afunInfo :: ExpInfo
   , afunParams :: [PatM]
-  , afunValue :: AbsValue
+  , afunBody :: AbsComputation
   }
 
-abstractFunction :: ExpInfo -> [PatM] -> AbsValue -> AbsFunValue
+-- | An abstract computation result.  It either returns a value or raises
+--   an exception.
+data AbsComputation =
+    AbsReturn !AbsValue
+  | AbsException
+
+abstractFunction :: ExpInfo -> [PatM] -> AbsComputation -> AbsFunValue
 abstractFunction inf params body =
   AbsFunValue inf params body
 
@@ -166,6 +175,7 @@ abstractFunction inf params body =
 type AbsValues = IntMap.IntMap AbsValue
 
 type MaybeValue = Maybe AbsValue
+type MaybeComputation = Maybe AbsComputation
 
 bigAV :: BigAbsValue -> AbsValue
 bigAV = BigAV Nothing
@@ -182,7 +192,7 @@ heapAV x = bigAV $ HeapAV x
 dataAV :: DataValue -> AbsValue
 dataAV x = bigAV $ DataAV x
 
-writerAV :: AbsValue -> AbsValue
+writerAV :: AbsComputation -> AbsValue
 writerAV kv = bigAV (WriterAV kv)
 
 fromBigAV :: AbsValue -> Maybe BigAbsValue
@@ -193,6 +203,13 @@ fromFunAV :: AbsValue -> Maybe FunM
 fromFunAV (BigAV _ (ExpAV _ (ExpM (LamE _ f)))) = Just f
 fromFunAV _ = Nothing
 
+fromAbsFunAV :: AbsValue -> Maybe AbsFunValue
+fromAbsFunAV (BigAV _ (AbsFunAV v)) = Just v
+fromAbsFunAV _ = Nothing
+
+fromWriterAV :: AbsValue -> Maybe AbsComputation
+fromWriterAV (BigAV _ (WriterAV v)) = Just v
+fromWriterAV _ = Nothing
 
 fromHeapAV :: AbsValue -> Maybe HeapState
 fromHeapAV (BigAV _ (HeapAV hs)) = Just hs
@@ -243,7 +260,7 @@ assertNotInlinedValue' _ x = x
 --
 --   Function-valued terms are valid writers, but we don't know what
 --   they write.
-resultOfWriterValue :: AbsValue -> MaybeValue
+resultOfWriterValue :: AbsValue -> MaybeComputation
 resultOfWriterValue av = 
   case av
   of BigAV _ (WriterAV kv)        -> Just kv
@@ -256,12 +273,19 @@ resultOfWriterValue av =
        -- Other values are not valid
        internalError $ "resultOfWriterValue " ++ show (pprAbsValue av)
   where
-    abs_fun_value afv
-      | [param] <- afunParams afv =
-        case fromHeapAV $ afunValue afv
-        of Just heap_state ->
-             lookupHeapState (RefValue (VarBase (patMVar param)) []) heap_state
-           _ -> Nothing
+    abs_fun_value afv =
+      let [param] = afunParams afv
+      in case afunBody afv
+         of AbsReturn value ->
+              case fromHeapAV value
+              of Just heap_state ->
+                   let reference = RefValue (VarBase (patMVar param)) []
+                       heap_contents = lookupHeapState reference heap_state
+                   in fmap AbsReturn heap_contents
+                 _ -> Nothing
+            AbsException ->
+              -- Calling the function raises an exception
+              Just AbsException
 
 forgetVariable :: Var -> AbsValue -> MaybeValue
 forgetVariable v kv = forgetVariables (Set.singleton v) kv
@@ -323,16 +347,19 @@ forgetVariables varset kv = forget kv
           in Just $ DataAV $ dv {dataFields = fields'}
 
     forget_big_value (WriterAV kv) =
-      fmap WriterAV $ forget kv
+      fmap WriterAV $ forget_computation kv
     
-    forget_abs_fun (AbsFunValue { afunInfo = inf
-                                , afunParams = params
-                                , afunValue = ret_val})
+    forget_abs_fun fv@(AbsFunValue { afunInfo = inf
+                                   , afunParams = params
+                                   , afunBody = body})
       | any (`typeMentionsAny` varset) (map patMType params) = Nothing
       | otherwise =
-        case forget ret_val
+        case forget_computation body
         of Nothing -> Nothing
-           Just ret_val' -> Just $ AbsFunValue inf params ret_val'
+           Just body' -> Just $ AbsFunValue inf params body'
+
+    forget_computation (AbsReturn kv) = fmap AbsReturn $ forget kv
+    forget_computation AbsException = Just AbsException
 
     forget_ref cv@(RefValue base fss)
       | in_varset base = Nothing
@@ -354,7 +381,11 @@ pprAbsValue kv =
      BigAV Nothing cv -> pprBigAbsValue cv
      BigAV (Just v) cv ->
        parens $ pprVar v <+> text "=" <+> pprBigAbsValue cv
-                                 
+
+pprAbsComputation :: AbsComputation -> Doc
+pprAbsComputation (AbsReturn x) = pprAbsValue x
+pprAbsComputation AbsException = text "except"
+
 pprBigAbsValue :: BigAbsValue -> Doc
 pprBigAbsValue cv =
   case cv
@@ -363,13 +394,13 @@ pprBigAbsValue cv =
      AbsFunAV av -> pprAbsFun av
      HeapAV hs -> pprHeapState hs
      DataAV dv -> pprDataValue dv
-     WriterAV kv -> text "writer" <+> parens (pprAbsValue kv)
+     WriterAV kv -> text "writer" <+> parens (pprAbsComputation kv)
 
 pprAbsFun (AbsFunValue { afunInfo = inf
                        , afunParams = params
-                       , afunValue = val}) =
+                       , afunBody = val}) =
   let params_doc = sep $ map pprPat params
-      body_doc = pprAbsValue val
+      body_doc = pprAbsComputation val
   in text "lambda" <+> params_doc <> text "." $$ nest 4 body_doc
 
 pprHeapState :: HeapState -> Doc
@@ -404,7 +435,7 @@ dataConValue :: ExpInfo
              -> DataConType        -- ^ The data constructor being used
              -> [TypM]             -- ^ Type arguments to the constructor
              -> [MaybeValue]       -- ^ Value arguments to the constructor
-             -> MaybeValue
+             -> MaybeComputation
 dataConValue inf tenv d_type dcon_type ty_args val_args
   | num_ty_args /= num_expected_ty_args =
       internalError "dataConValue: Wrong number of type arguments"
@@ -413,7 +444,7 @@ dataConValue inf tenv d_type dcon_type ty_args val_args
   | num_val_args == num_expected_val_args && not is_writer =
       Just known_value
   | num_val_args == num_expected_val_args && is_writer =
-      Just $ bigAV $ WriterAV known_value
+      Just $ AbsReturn $ bigAV $ WriterAV known_value
   | num_val_args == num_expected_val_args + 1 && is_writer =
       Nothing
   | otherwise =
@@ -432,24 +463,41 @@ dataConValue inf tenv d_type dcon_type ty_args val_args
     -- then the data constructor is a writer
     is_writer = dataTypeKind d_type == BareK
 
-    -- This is the value created by the data constructor application,
+    -- This is the data constructor application computation,
     -- provided the data constructor is applied to all arguments.
     --
+    -- If an initializer raises an exception, the computation raises an
+    -- exception.
+    --
     -- The actual returned value might be a WriterAV of this.
+    known_value :: AbsComputation
     known_value =
-      dataConstructorValue inf dcon_type ty_args reader_val_args
+      case check_for_exceptions reader_val_args
+      of Nothing -> AbsException
+         Just field_values ->
+           AbsReturn $ dataConstructorValue inf dcon_type ty_args field_values
       where
         -- Convert arguments from writer values
+        reader_val_args :: [MaybeComputation]
         reader_val_args =
           zipWith from_writer (dataConFieldKinds tenv dcon_type) val_args
-        
+
+        -- Return Nothing if any computation raises an exception
+        check_for_exceptions :: [MaybeComputation] -> Maybe [MaybeValue]
+        check_for_exceptions xs = go id xs
+          where
+            go hd (Nothing : xs)            = go (hd . (Nothing :)) xs
+            go hd (Just (AbsReturn x) : xs) = go (hd . (Just x :)) xs
+            go _  (Just AbsException : _)   = Nothing
+            go hd []                        = Just (hd [])
+
         -- Convert a data constructor argument.
         -- If the type is bare, convert from a writer to a non-writer value.
         -- Otherwise, leave the argument alone.
-        from_writer :: BaseKind -> MaybeValue -> MaybeValue
+        from_writer :: BaseKind -> MaybeValue -> MaybeComputation
         from_writer _     Nothing            = Nothing
         from_writer BareK (Just known_value) = resultOfWriterValue known_value
-        from_writer _     mv                 = mv
+        from_writer _     mv                 = fmap AbsReturn mv
 
 -- | Construct a known value for an unboxed tuple.
 --
@@ -538,7 +586,7 @@ substituteBigAbsValue env value =
   of AbsFunAV f -> fmap AbsFunAV $ substituteAbsFunValue env f
      HeapAV st -> fmap HeapAV $ substituteHeapState env st
      DataAV dv -> fmap DataAV $ substituteDataValue env dv
-     WriterAV av -> fmap WriterAV $ substituteAbsValue env av
+     WriterAV av -> fmap WriterAV $ substituteAbsComputation env av
 
 substituteAbsFunValue env f
   | any (`IntMap.member` env) $ map (fromIdent . varID . patMVar) $ afunParams f =
@@ -548,9 +596,15 @@ substituteAbsFunValue env f
       internalError "substituteAbsFunValue"
   | otherwise =
       -- Substitute into the body of the function
-      case substituteAbsValue env (afunValue f)
-      of Just v -> Just (f {afunValue = v})
+      case substituteAbsComputation env (afunBody f)
+      of Just v -> Just (f {afunBody = v})
          Nothing -> Nothing
+
+substituteAbsComputation :: AbsEnv -> AbsComputation -> MaybeComputation
+substituteAbsComputation env (AbsReturn v) =
+  fmap AbsReturn $ substituteAbsValue env v
+  
+substituteAbsComputation env AbsException = Just AbsException
 
 substituteHeapState :: AbsEnv -> HeapState -> Maybe HeapState
 substituteHeapState env (HeapState bindings) =
@@ -597,8 +651,8 @@ convertAbsValueToRefValue _ = internalError "convertAbsValueToRefValue: Not impl
 --
 --   Only 'AbsFunAV' and 'WriterAV' values can actually be evaluated.  Other
 --   values result in a 'Nothing' result.
-applyAbsValue :: AbsValue -> [MaybeValue] -> MaybeValue
-applyAbsValue av [] = Just av
+applyAbsValue :: AbsValue -> [MaybeValue] -> MaybeComputation
+applyAbsValue av [] = Just (AbsReturn av)
 applyAbsValue av args = 
   case av
   of LitAV {} -> bad_operator
@@ -616,27 +670,30 @@ applyAbsValue av args =
     cannot_evaluate = Nothing
 
     -- A writer function puts its value onto the heap
-    apply_writer written_value =
+    apply_writer AbsException = return AbsException 
+    apply_writer (AbsReturn written_value) =
       case args
       of [marg] -> do
            arg <- marg
            addr <- convertAbsValueToRefValue arg -- Address to write
            hpval <- heapState [(addr, written_value)]
-           return $ heapAV hpval
+           return $ AbsReturn $ heapAV hpval
 
-applyAbsFun :: AbsFunValue -> [MaybeValue] -> MaybeValue
+applyAbsFun :: AbsFunValue -> [MaybeValue] -> MaybeComputation
 applyAbsFun av args
   | length (afunParams av) > length args = do
     -- Fewer parameters than arguments
     let extra_params = drop (length args) $ afunParams av
         substitution = mk_subst $ zip (afunParams av) args
-    new_body <- substituteAbsValue substitution (afunValue av)
-    return $ absFunAV $ AbsFunValue (afunInfo av) extra_params new_body
+    new_body <- substituteAbsComputation substitution (afunBody av)
+    return $ AbsReturn $ absFunAV $ AbsFunValue (afunInfo av) extra_params new_body
   | otherwise = do
     let extra_args = drop (length $ afunParams av) args
         substitution = mk_subst $ zip (afunParams av) args
-    new_value <- substituteAbsValue substitution (afunValue av)
-    applyAbsValue new_value extra_args
+    computation <- substituteAbsComputation substitution (afunBody av)
+    case computation of
+      AbsReturn new_value -> applyAbsValue new_value extra_args
+      AbsException -> return AbsException
   where
     -- Create a substitution from a list of (pattern, value) pairs
     mk_subst assocs =

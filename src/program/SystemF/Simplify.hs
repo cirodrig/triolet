@@ -102,19 +102,26 @@ data LREnv =
   , lrPhase :: !SimplifierPhase
   }
 
-newtype LR a = LR {runLR :: LREnv -> IO a}
+-- | Simplification either transforms some code, or detects that the code
+--   raises an exception and therefore can be replaced by an
+--   exception-raising statement.
+newtype LR a = LR {runLR :: LREnv -> IO (Maybe a)}
 
 instance Monad LR where
-  return x = LR (\_ -> return x)
+  {-# INLINE return #-}
+  {-# INLINE (>>=) #-}
+  return x = LR (\_ -> return (Just x))
   m >>= k = LR $ \env -> do
-    x <- runLR m env
-    runLR (k x) env
+    m_x <- runLR m env
+    case m_x of
+      Just x  -> runLR (k x) env
+      Nothing -> return Nothing
 
 instance MonadIO LR where
-  liftIO m = LR (\_ -> m)
-    
+  liftIO m = LR (\_ -> liftM Just m)
+
 instance Supplies LR VarID where
-  fresh = LR (\env -> supplyValue (lrIdSupply env))
+  fresh = LR (\env -> liftM Just $ supplyValue (lrIdSupply env))
   supplyToST = undefined
 
 instance TypeEnvMonad LR where
@@ -126,7 +133,7 @@ instance TypeEnvMonad LR where
 
 instance EvalMonad LR where
   liftTypeEvalM m = LR $ \env -> do
-    runTypeEvalM m (lrIdSupply env) (lrTypeEnv env)
+    liftM Just $ runTypeEvalM m (lrIdSupply env) (lrTypeEnv env)
 
 instance ReprDictMonad LR where
   withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply env) env
@@ -138,16 +145,16 @@ instance ReprDictMonad LR where
 
 liftFreshVarM :: FreshVarM a -> LR a
 liftFreshVarM m = LR $ \env -> do
-  runFreshVarM (lrIdSupply env) m
+  liftM Just $ runFreshVarM (lrIdSupply env) m
 
 getRewriteRules :: LR RewriteRuleSet
-getRewriteRules = LR $ \env -> return (lrRewriteRules env)
+getRewriteRules = LR $ \env -> return (Just $ lrRewriteRules env)
 
 getPhase :: LR SimplifierPhase
-getPhase = LR $ \env -> return (lrPhase env)
+getPhase = LR $ \env -> return (Just $ lrPhase env)
 
 getCurrentReturnParameter :: LR (Maybe PatM)
-getCurrentReturnParameter = LR $ \env -> return (lrReturnParameter env)
+getCurrentReturnParameter = LR $ \env -> return (Just $ lrReturnParameter env)
 
 setCurrentReturnParameter :: Maybe PatM -> LR a -> LR a
 setCurrentReturnParameter x m = LR $ \env ->
@@ -156,10 +163,23 @@ setCurrentReturnParameter x m = LR $ \env ->
 
 clearCurrentReturnParameter = setCurrentReturnParameter Nothing
 
+-- | Stop processing because the current expression will raise an exception.
+--   The expression will be replaced with an 'except' expression, up to the
+--   innermost enclosing multi-branch @case@ statement or function definition.
+propagateException :: LR a
+propagateException = LR $ \_ -> return Nothing
+
+-- | If the given computation calls 'propagateException', then return
+--   @Nothing@.  Otherwise return the result.
+catchException :: LR a -> LR (Maybe a) 
+catchException m = LR $ \env -> do
+  result <- runLR m env
+  return (Just result)
+
 lookupKnownValue :: Var -> LR MaybeValue
 lookupKnownValue v = LR $ \env ->
   let val = IntMap.lookup (fromIdent $ varID v) $ lrKnownValues env
-  in return val
+  in return (Just val)
 
 -- | Add a variable's known value to the environment 
 withKnownValue :: Var -> AbsValue -> LR a -> LR a
@@ -298,7 +318,7 @@ dumpKnownValues m = LR $ \env ->
 -- | Check whether there is fuel available.
 --   If True is returned, then it's okay to perform a task that consumes fuel.
 checkFuel :: LR Bool
-checkFuel = LR $ \env -> fmap (0 /=) $ readIORef $ lrFuel env
+checkFuel = LR $ \env -> fmap (Just . (0 /=)) $ readIORef $ lrFuel env
 
 -- | Perform an action only if there is fuel remaining
 ifFuel :: a -> LR a -> LR a
@@ -320,6 +340,7 @@ consumeFuel :: LR ()
 consumeFuel = LR $ \env -> do
   fuel <- readIORef $ lrFuel env
   when (fuel > 0) $ writeIORef (lrFuel env) $! fuel - 1
+  return (Just ())
 
 -- | Use fuel to perform an action.  If there's no fuel remaining,
 --   don't perform the action.
@@ -345,8 +366,10 @@ makeExpValue (ExpM expression) =
      _ -> return Nothing
 
 rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
-  rewriteApp (lrRewriteRules env) (intIndexEnv $ lrDictEnv env) (lrIdSupply env) (lrTypeEnv env)
-    inf operator ty_args args
+  x <- rewriteApp (lrRewriteRules env) (intIndexEnv $ lrDictEnv env)
+       (lrIdSupply env) (lrTypeEnv env)
+       inf operator ty_args args
+  return $ Just x
 
 -------------------------------------------------------------------------------
 -- Estimating code size
@@ -737,7 +760,7 @@ createValue kind known_value =
 
     copy_value val =
       case kind
-      of BareK -> writerAV val
+      of BareK -> writerAV $ AbsReturn val
          _ -> val
 
     copy_expression e =
@@ -791,8 +814,8 @@ createDataConApp' inf val_type fields = do
                TupleValueType _ ->
                  ExpM $ UTupleE inf field_exps
           
-          -- This is an initializer expression, so it has a writer valeu
-          value = writerAV $ dataAV $ DataValue inf val_type field_values
+          -- This is an initializer expression, so it has a writer value
+          value = writerAV $ AbsReturn $ dataAV $ DataValue inf val_type field_values
       in return $ Just (data_exp, Just value)
     Nothing -> return Nothing
       
@@ -888,6 +911,14 @@ flattenExp (ExpM expression) =
      LetfunE inf defs body -> flattenLetfunExp inf defs body
      CaseE inf scr alts -> flattenCaseExp inf scr alts
      AppE inf op ty_args args -> flattenAppExp inf op ty_args args
+     
+     -- NOTE: This elimination of exceptions is probably redundant
+     -- with the use of 'propagateException' later.  Consider merging
+     -- the two cases somehow.
+     --
+     -- They're not completely redundant with each other, because
+     -- the later cases can use 'KnownValue's to more accurately identify
+     -- excepting code.
      ExceptE _ ty -> restructureZero
      _ -> return (ExpM expression)
 
@@ -1239,7 +1270,7 @@ rwExp expression = debug "rwExp" expression $ do
       LetE inf bind val body -> rwLet inf bind val body
       LetfunE inf defs body -> rwLetrec inf defs body
       CaseE inf scrut alts -> rwCase inf scrut alts
-      ExceptE _ _ -> rwExpReturn (ex2, Nothing)
+      ExceptE _ _ -> propagateException -- rwExpReturn (ex2, Nothing)
       CoerceE inf from_t to_t body -> rwCoerce inf from_t to_t body
   where
     debug _ _ = id
@@ -1366,20 +1397,35 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
       rwAppWithOperator original_expression inf op op_value ty_args args
 
     unknown_app = do
-      (args', _) <- rwExps args
+      (args', arg_values) <- rwExps args
+
+      -- Compute the application's value, and detect if it raises an exception
+      new_value <-
+        ifFuel Nothing $
+        let fun_result = do
+              just_op_val <- op_val 
+              applyAbsValue just_op_val arg_values
+        in case fun_result
+           of Just AbsException -> propagateException
+
+              -- There appear to be bugs in the computed value;
+              -- disabling it for now
+              Just (AbsReturn v) -> return Nothing -- return (Just v)
+              Nothing -> return Nothing
+
       let new_exp = appE inf op' ty_args args'
-      return (new_exp, Nothing)
+      return (new_exp, new_value)
 
     -- The term is a data constructor application.  Simplify subexpressions
     -- and rebuild the expression.  Also construct a known value for the term.
     --
-    -- Fuel is not consumed because this term isn't eliminated.
+    -- If the term will raise an exception, replace it by an exception term.
     data_con_app type_con data_con op' = do
       tenv <- getTypeEnv
 
       -- Try to eta-reduce writer arguments, because this increases the
       -- likelihood that we can value-propagate them
-      (field_types, _) <-
+      (field_types, constructed_type) <-
         instantiateDataConTypeWithExistentials data_con (map fromTypM ty_args)
           
       -- Eta-reduce writer arguments, leave other arguments alone
@@ -1395,13 +1441,31 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
                 etaReduceSingleLambdaFunction True inf f
               eta_reduce e = e
 
+          -- Determine the type of the result of the type application.
+          -- This value is only used for a fully applied
+          -- (including the return pointer argument) data constructor.
+          result_type =
+            if dataTypeKind type_con == BareK
+            then if length args == 1 + length (dataConPatternArgs data_con)
+                 then initEffectType constructed_type
+                 else internalError "rwAppWithOperator"
+            else constructed_type
+
       -- Simplify arguments
       (args', arg_values) <- rwExps eta_reduced_args
       
       -- Construct a value from this expression
       let new_exp = appE inf op' ty_args args'
-          new_value = dataConValue inf tenv type_con data_con ty_args arg_values
-      return (new_exp, new_value)
+          new_computation =
+            dataConValue inf tenv type_con data_con ty_args arg_values
+      case new_computation of
+        Just (AbsReturn v) -> return (new_exp, Just v)
+        Nothing -> return (new_exp, Nothing)
+
+        -- If it will raise an exception, replace with an exception expression
+        Just AbsException -> do
+          consumeFuel
+          return (ExpM $ ExceptE inf result_type, Nothing)
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
@@ -1472,7 +1536,7 @@ rwCopyApp inf copy_op ty args = debug $ do
     -- Do we know what was stored here?
     copied_value [_, _, _] = Nothing
     copied_value [_, Just src_val] =
-      Just $ bigAV $ WriterAV src_val
+      Just $ bigAV $ WriterAV (AbsReturn src_val)
     copied_value [_, _] = Nothing
     copied_value _ =
       internalError "rwCopyApp: Wrong number of arguments in call"
@@ -1599,7 +1663,7 @@ rwCase1 _ tenv inf scrut alts
                  | c `isPyonBuiltin` The_boxed -> f
                _ -> Nothing
 
-      alt' <- rwAlt scrutinee_var (Just ([], [field_val])) alt
+      alt' <- rwAlt True scrutinee_var (Just ([], [field_val])) alt
 
       -- Rebuild a new case expression
       return (ExpM $ CaseE inf scrut' [alt'], Nothing)
@@ -1742,7 +1806,7 @@ rwCase2 inf alts scrut' scrut_val = do
                 of ConValueType {dataCon = c} -> findAlternative alts c
                    TupleValueType {} -> case alts of [a] -> a
 
-          alt' <- rwAlt scrut_var known_values alt
+          alt' <- rwAlt True scrut_var known_values alt
           rwExpReturn (ExpM $ CaseE inf scrut' [alt'], Nothing)
     _ ->
       -- If scrutinee is a multi-branch case statement and the outer case
@@ -1760,7 +1824,8 @@ rwCase2 inf alts scrut' scrut_val = do
              rwCaseOfCase inf Nothing inner_scrut inner_alts alts
          _ -> do
            -- Cannot transform; simplify the case alternatives
-           alts' <- mapM (rwAlt scrut_var Nothing) alts
+           let sole_alternative = length alts == 1
+           alts' <- mapM (rwAlt sole_alternative scrut_var Nothing) alts
            rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
   where
     is_product_case tenv =
@@ -1920,8 +1985,12 @@ makeCaseInspectorBinding param initializer = return let_binding
     let_binding = CaseElimBinding $ \body ->
       ExpM $ LetE defaultExpInfo (setPatMDmd unknownDmd param) initializer body
 
-rwAlt :: Maybe Var -> Maybe ([TypM], [MaybeValue]) -> AltM -> LR AltM
-rwAlt scr m_values (AltM alt) = 
+rwAlt :: Bool                   -- ^ Whether to propagate exceptions
+      -> Maybe Var              -- ^ Scrutinee, if it's just a variable
+      -> Maybe ([TypM], [MaybeValue]) -- ^ Deconstruted scrutinee value
+      -> AltM                         -- ^ Alternative to rewrite
+      -> LR AltM
+rwAlt propagate_exceptions scr m_values (AltM alt) = 
   case alt
   of DeCon con tyArgs exTypes params body -> do
        -- DEBUG: Print known values
@@ -1945,7 +2014,7 @@ rwAlt scr m_values (AltM alt) =
            -- Number of uses may increase or decrease after simplifying
            params' = map (setPatMDmd unknownDmd) params
        assume_scrutinee $ assume_params exTypes (zip values params) $ do
-         (body', _) <- rwExp body
+         (body', _) <- rewrite_expression body
          return $ AltM $ DeCon con tyArgs exTypes params' body'
 
      DeTuple params body -> do
@@ -1963,6 +2032,19 @@ rwAlt scr m_values (AltM alt) =
          (body', _) <- rwExp body
          return $ AltM $ DeTuple params' body'
   where
+    -- Rewrite the body expression.  If it will raise an exception,
+    -- generate an exception expression here.
+    rewrite_expression body
+      | propagate_exceptions =
+          rwExp body
+      | otherwise = do
+          body_result <- catchException $ rwExp body
+          case body_result of
+            Just x -> return x
+            Nothing -> do
+              body_type <- inferExpType body
+              return (ExpM $ ExceptE defaultExpInfo body_type, Nothing)
+
     -- Get the known values of the fields
     values = 
       case m_values
@@ -2110,7 +2192,16 @@ rwFun' (FunM f) =
   assumeTyPatMs (funTyParams f) $
   assumePatterns (funParams f) $ 
   set_return_parameter $ do
-    (body', body_value) <- rwExp (funBody f)
+    body_result <- catchException $ rwExp (funBody f)
+    
+    -- If the function body raises an exception,
+    -- replace it with an exception statement
+    let (body', body_value) =
+          case body_result
+          of Just (new_exp, m_value) ->
+               (new_exp, fmap AbsReturn m_value)
+             Nothing ->
+               (ExpM $ ExceptE defaultExpInfo (fromTypM $ funReturn f), Just AbsException)
     let aval = abstract_value body_value
     trace_aval aval $ return (FunM $ f {funParams = params', funBody = body'}, aval)
   where
@@ -2223,7 +2314,8 @@ rewriteLocalExpr phase ruleset mod =
                     , lrFuel = fuel
                     , lrPhase = phase
                     }
-    runLR (rwModule mod) env
+    Just result <- runLR (rwModule mod) env
+    return result
 
 rewriteAtPhase :: SimplifierPhase -> Module Mem -> IO (Module Mem)
 rewriteAtPhase phase mod = rewriteLocalExpr phase rules mod

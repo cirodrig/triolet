@@ -201,6 +201,7 @@ compilePyonToPyonAsm compile_flags path text = do
   -- Restructure the code resulting from inlining, which may create new
   -- local functions  
   repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
+  repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
 
   -- Argument flattening
   repr_mod <- SystemF.flattenArguments repr_mod
