@@ -14,7 +14,7 @@ int main()
   float data2[9];
   Pyon_init();
 
-  PyonMatrix *mat = pyon_Matrix_PyonFloat_FromArray(3, 3, data);
+  PyonMatrix *mat = pyon_Matrix_PyonFloat_FromArray(0, 3, 0, 3, data);
   PyonMatrix *mat2 = test(mat);
   pyon_Matrix_PyonFloat_ToArray(mat2, data2);
   pyon_Matrix_PyonFloat_Free(mat);
