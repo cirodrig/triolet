@@ -1488,7 +1488,7 @@ safeIndex : (t : bare -> bare) -> (a : bare)
 safeSlice : (t : bare -> bare) -> (a : bare)
          -> IndexableDict t -> ShapeDict (shape t) -> Repr a
 	 -> t a -> slice (shape t)
-	 -> Writer (view (shape t) a);
+	 -> view (shape t) a;
 
 width : (t : bare -> bare) -> (a : bare)
      -> coerce @box (BoxedType (shape t)) (Boxed dim2)
