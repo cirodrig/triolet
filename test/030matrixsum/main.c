@@ -13,7 +13,7 @@ int main()
 {
   Pyon_init();
 
-  PyonMatrix *mat = pyon_Matrix_PyonInt_FromArray(3, 3, data);
+  PyonMatrix *mat = pyon_Matrix_PyonInt_FromArray(0, 3, 0, 3, data);
   int sum = test(mat);
   pyon_Matrix_PyonInt_Free(mat);
 
