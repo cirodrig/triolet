@@ -236,11 +236,30 @@ unify subst expected given = do
       | x == y = unified_by subst
       | otherwise = no_unifier
 
-    match_unify (LamT {}) _ = not_implemented
-    match_unify _ (LamT {}) = not_implemented
+    match_unify (LamT (a ::: k) e_range) (LamT _ g_range) = do
+      -- Assume the types have the same kind; k1 and k2 are equal
+      -- Bound variables have been unified, so go ahead and compare the
+      -- function ranges.  The bound variable is rigid.
+      unify_lambdas a k e_range g_range
+
+    match_unify (LamT (a ::: k1) e_range) given = do
+      -- Eta-expand given; rename expected
+      b <- newAnonymousVar TypeLevel
+      let e_range' = rename (singletonRenaming a b) e_range
+      unify_lambdas b k1 e_range' (given `AppT` VarT b)
+      
+    match_unify expected (LamT (a ::: k1) g_range) = do
+      -- Eta-expand expected; rename given
+      b <- newAnonymousVar TypeLevel
+      let g_range' = rename (singletonRenaming a b) g_range
+      unify_lambdas b k1 (expected `AppT` VarT b) g_range'
+      
     match_unify (AllT {}) _ = not_implemented
     match_unify _ (AllT {}) = not_implemented
 
     match_unify _ _ = no_unifier
+
+    unify_lambdas a k e_range g_range = 
+      assume a k $ unify subst e_range g_range
 
     not_implemented = internalError "unify: Not implemented for this type"
