@@ -94,6 +94,8 @@ lowerIntrinsicOp v
          proof_object)
       , (pyonBuiltin The_deadRef,
          dead_reference)
+      , (pyonBuiltin The_deadBox,
+         dead_box)
       , (pyonBuiltin The_deadProof,
          proof_object)
       , (pyonBuiltin The_unsafeMakeCoercion,
@@ -180,6 +182,12 @@ from_eff_tok = do
 --   initialize it.
 dead_reference :: (Monad m, Supplies m (Ident Var)) => m Val
 dead_reference = do
+  param_var <- newAnonymousVar (PrimType PointerType)
+  return $ LamV $ closureFun [param_var] [] $ ReturnE (ValA [])
+
+-- | Create a dead boxed object.
+dead_box :: (Monad m, Supplies m (Ident Var)) => m Val
+dead_box = do
   param_var <- newAnonymousVar (PrimType PointerType)
   return $ LamV $ closureFun [param_var] [] $ ReturnE (ValA [])
 

@@ -363,13 +363,8 @@ pyonBuiltinVariableNames =
   , "max_int"
   , "or"
   , "and"
-  , "oper_DO"
-  , "return"
-  , "oper_GUARD"
-  , "oper_CAT_MAP"
   , "bind"
   , "chunk"
-  , "oper_EMPTY"
   , "oper_BITWISEAND"
   , "oper_BITWISEOR"
   , "oper_BITWISEXOR"
@@ -411,6 +406,16 @@ pyonBuiltinVariableNames =
   , "Sequence_reduce"
   , "Sequence_reduce1"
     
+    -- Sequence functions
+  , "Stream1_empty"
+  , "Stream1_return"
+  , "Stream1_guard"
+  , "Stream1_bind"
+  , "Sequence_empty"
+  , "Sequence_return"
+  , "Sequence_guard"
+  , "Sequence_bind"
+
     -- Fold-like functions
   , "fun_fold_Stream"
   , "fun_reduce_Stream"
@@ -455,6 +460,10 @@ pyonBuiltinVariableNames =
   , "fromEffTok"
   
     -- Obsolete, will be eliminated
+  , "oper_EMPTY"
+  , "oper_DO"
+  , "oper_GUARD"
+  , "oper_CAT_MAP"
   , "array_build"
   , "array_reduce"
   , "fun_map_Stream"

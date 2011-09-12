@@ -2387,9 +2387,187 @@ Sequence_fold @(a acc : bare)
 -------------------------------------------------------------------------------
 -- Methods specifically for 1D streams
 
--- Sequence_return
 
--- Sequence_bind
+Stream1_empty @(a : bare) -> Stream1 a
+  attribute(inline, inline_final) =
+  let zero : IInt 0 = iInt @0 (fiInt @0 0) in
+  viewStream @a
+  (mk_view1 @a @0 @0 zero zero
+   (\ (i : int) (ret : OutPtr a) -> IEffect a. except @(IEffect a)));
+
+
+Stream1_return @(a : bare) (repr : Repr a) (w : Writer a) -> Stream1 a
+  attribute(inline, inline_final) =
+  let zero : IInt 0 = iInt @0 (fiInt @0 0) in
+  let one : IInt 1 = iInt @1 (fiInt @1 1) in
+  viewStream @a
+  (mk_view1 @a @0 @1 zero one
+   (\ (i : int) (ret : OutPtr a) -> IEffect a. w ret));
+
+
+Stream1_guard @(a : bare) (repr : Repr a) (condition : bool) (s : Stream1 a)
+  -> Stream1 a
+  attribute(inline, inline_final) =
+  let sq : Sequence a =
+        case s of {
+	  viewStream @a (vw : view1 a). viewToSequence @a repr vw
+	; sequenceStream @a (sq : Sequence a). sq
+	} in
+  sequenceStream @a (Sequence_guard @a repr condition sq);
+
+
+Stream1_bind @(a b : bare)
+  (repr_a : Repr a)
+  (repr_b : Repr b)
+  (s : Stream1 a)
+  (t : a -> Stream1 b)
+  -> Stream1 b
+  attribute(inline, inline_final) =
+  let sq : Sequence a =
+        case s of {
+	  viewStream @a (vw : view1 a). viewToSequence @a repr_a vw
+	; sequenceStream @a (sq : Sequence a). sq
+	} in
+  letfun
+    sq_t (x : a) -> Sequence b =
+      case t x of {
+	  viewStream @b (vw : view1 b). viewToSequence @b repr_b vw
+	; sequenceStream @b (sq : Sequence b). sq
+      } in
+  
+  sequenceStream @b (Sequence_bind @a @b repr_a sq sq_t);
+
+
+Sequence_empty @(a : bare) -> Sequence a
+  attribute(inline, inline_final) =
+  let type st = Boxed (Stored NoneType) in
+  sequence @a @st
+  (boxed @(Stored NoneType) (stored @NoneType None))
+  (\ (x : st) -> StreamNext st a. streamEmpty @st @a);
+
+
+Sequence_return @(a : bare)
+  (repr : Repr a)
+  (ret : Writer a)
+  -> Sequence a
+  attribute(inline, inline_final) =
+  let type st = Boxed (Stored bool) in
+  sequence @a @st
+  (boxed @(Stored bool) (stored @bool False))
+  (\ (depleted : st) -> StreamNext st a.
+     case depleted of boxed @(Stored bool) (depleted_s : Stored bool).
+     case depleted_s of stored @bool (depleted_u : bool).
+     if depleted_u
+     then streamEmpty @st @a
+     else streamValue @st @a
+     	  (boxed @(Stored bool) (stored @bool True))
+	  (convertToBoxed @a repr ret));
+
+
+Sequence_guard @(a : bare)
+  (repr : Repr a) (condition : bool) (s : Sequence a) -> Sequence a
+  attribute(inline) =
+  if condition then s else Sequence_empty @a;
+
+
+Sequence_bind @(a b : bare)
+  (repr : Repr a)
+  (src : Sequence a)
+  (trans : a -> Sequence b)
+  -> Sequence b
+  attribute(inline, inline_final) =
+  case src of
+    sequence @a @(src_st : box)
+    (src_state : src_st)
+    (src_next : src_st -> StreamNext src_st a).
+
+  let type bind_state = BindState src_st a b in
+
+  letfun {
+    next_from_source (src_state : src_st) -> StreamNext bind_state b =
+      case src_next src_state of {
+        streamValue @src_st @a (src_next_state : src_st) (src_value : BoxedType a).
+          case boxed @a (convertToBare @a repr src_value) of boxed @a (x : a).
+	  case trans x of
+	    sequence @b @(trans_st : box)
+	    (trans_state : trans_st)
+	    (trans_next : trans_st -> StreamNext trans_st b).
+	  next_from_trans @trans_st src_next_state trans_state trans_next
+      ; streamEmpty @src_st @a.
+	  streamEmpty @bind_state @b
+      };
+
+    next_from_trans @(trans_st : box)
+      (src_state : src_st)
+      (trans_state : trans_st)
+      (trans_next : trans_st -> StreamNext trans_st b)
+      -> StreamNext bind_state b =
+      case trans_next trans_state of {
+        streamValue @trans_st @b (trans_next_state : trans_st) (trans_value : BoxedType b).
+          let next_state : bind_state =
+	        bindFromTrans @src_st @a @b @trans_st
+		src_state trans_next_state trans_next in
+          streamValue @bind_state @b next_state trans_value
+      ; streamEmpty @trans_st @b.
+	  next_from_source src_state
+      };
+
+    next (state : bind_state) -> StreamNext bind_state b =
+      case state of {
+        bindFromSource @src_st @a @b (src_state : src_st).
+	  next_from_source src_state
+      ; bindFromTrans @src_st @a @b @(trans_st : box)
+      	(src_state : src_st)
+	(trans_state : trans_st)
+	(trans_next : trans_st -> StreamNext trans_st b).
+	  next_from_trans @trans_st src_state trans_state trans_next
+      }
+  } in
+
+  sequence @b @bind_state (bindFromSource @src_st @a @b src_state) next;
+
+
+generate @(N : intindex) @(a : bare)
+  (size : IInt N) (repr : Repr a) (f : int -> Writer a)
+  -> Sequence a attribute(inline, inline_final) =
+  case size of {
+    iInt @N (fin_size : FIInt N).
+      case fin_size of fiInt @N (bound : int).
+      -- Finite stream
+      let type st = Boxed (Stored int) in
+      letfun
+        next (state : st) -> StreamNext st a =
+	  case state of boxed @(Stored int) (state_s : Stored int).
+	  case state_s of stored @int (state_u : int).
+	  if state_u <# bound
+	  then let next_value : BoxedType a =
+	             convertToBoxed @a repr (f state_u) in
+	       let next_state : st =
+	             boxed @(Stored int) (stored @int (state_u +# 1)) in
+	       streamValue @st @a next_state next_value
+	  else streamEmpty @st @a
+      in
+      sequence @a @st (boxed @(Stored int) (stored @int 0)) next
+      
+  ; iPosInfty @N.
+      -- Infinite stream
+      let type st = Boxed (Stored int) in
+      letfun
+        next (state : st) -> StreamNext st a =
+	  case state of boxed @(Stored int) (state_s : Stored int).
+	  case state_s of stored @int (state_u : int).
+	  let next_value : BoxedType a =
+	        convertToBoxed @a repr (f state_u) in
+	  let next_state : st =
+	        boxed @(Stored int) (stored @int (state_u +# 1)) in
+	  streamValue @st @a next_state next_value
+      in
+      sequence @a @st (boxed @(Stored int) (stored @int 0)) next
+
+  ; iNegInfty @N.
+      -- Error
+      except @(Sequence a)
+  };
 
 -------------------------------------------------------------------------------
 -- Loops
@@ -3098,7 +3276,7 @@ oper_EMPTY @(a : bare) (repr : Repr a) -> Stream dim1 a
 generate @(N : intindex) @(a : bare)
          (count : IInt N) (repr : Repr a) (f : int -> Writer a)
  -> Stream (arr_shape N dim0) a
-  attribute(inline_final) =
+  attribute(inline, inline_final) =
 
   case count of {
     iInt @N (fin : FIInt N).

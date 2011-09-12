@@ -1125,7 +1125,7 @@ mkMakelistType =
       lT = ConTy (tiBuiltin the_con_list) @@ aT
   in ([passable aT], functionType [sT] lT)
 
-mkDoType =
+mkReturnType =
   forallType [Star] $ \[a] ->
   ([passable (ConTy a)],
    functionType [ConTy a] (listIterType $ ConTy a))
@@ -1343,14 +1343,14 @@ initializeTIBuiltins = do
               ("__undefined__", [| mkUndefinedType |]
               , [| pyonBuiltin SystemF.The_fun_undefined |]
               ),
-              ("do", [| mkDoType |]
-              , [| pyonBuiltin SystemF.The_oper_DO |]
+              ("do", [| mkReturnType |]
+              , [| pyonBuiltin SystemF.The_Stream1_return |]
               ),
               ("guard", [| mkGuardType |]
-              , [| pyonBuiltin SystemF.The_oper_GUARD |]
+              , [| pyonBuiltin SystemF.The_Stream1_guard |]
               ),
               ("iterBind", [| mkIterBindType |]
-              , [| pyonBuiltin SystemF.The_oper_CAT_MAP |]
+              , [| pyonBuiltin SystemF.The_Stream1_bind |]
               ),
               ("complex", [| mkMakeComplexType |]
               , [| pyonBuiltin SystemF.The_complex |]

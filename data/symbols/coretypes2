@@ -364,7 +364,7 @@ data BindState : box -> bare -> bare -> box
     (trans_st : box)
     (src_st,
      trans_st,
-     trans_st -> StreamNext trans_st (BoxedType trans_elt));
+     trans_st -> StreamNext trans_st trans_elt);
 };
 
 -------------------------------------------------------------------------------
@@ -1261,9 +1261,6 @@ arr2D_build : (M N : intindex) -> (a : bare) -> Repr a -> FIInt M -> FIInt N
 
 oper_DO : (a : bare) -> Repr a -> Writer a -> Stream dim1 a;
 
--- Explicit-shape version of oper_DO
-return : (a : bare) -> Repr a -> Writer a -> Stream dim0 a;
-
 oper_GUARD : (a : bare)
           -> Repr a -> bool
 	  -> Stream dim1 a
@@ -1613,6 +1610,18 @@ LinStream_zipWith4 : (sh a b c d e : bare)
 -}
 -------------------------------------------------------------------------------
 -- Other rewritable functions
+
+Stream1_empty : (a : bare) -> Stream1 a;
+Stream1_return : (a : bare) -> Repr a -> Writer a -> Stream1 a;
+Stream1_guard : (a : bare) -> Repr a -> bool -> Stream1 a -> Stream1 a;
+Stream1_bind : (a b : bare)
+	    -> Repr a -> Repr b -> Stream1 a -> (a -> Stream1 b) -> Stream1 b;
+
+Sequence_empty : (a : bare) -> Sequence a;
+Sequence_return : (a : bare) -> Repr a -> Writer a -> Sequence a;
+Sequence_guard : (a : bare) -> Repr a -> bool -> Sequence a -> Sequence a;
+Sequence_bind : (a b : bare)
+	     -> Repr a -> Sequence a -> (a -> Sequence b) -> Sequence b;
 
 Sequence_list_build : (a : bare)
 		   -> Repr a
