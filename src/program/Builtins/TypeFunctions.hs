@@ -196,7 +196,8 @@ sliceMemTF = typeFunction 1 compute_eliminator
            | op `isPyonBuiltin` The_dim2 -> return slice2_type
         _ -> return $ varApp (pyonBuiltin The_slice) [shape_arg']
 
-    none_type = VarT (pyonBuiltin The_NoneType)
+    none_type = varApp (pyonBuiltin The_Stored)
+                [VarT (pyonBuiltin The_NoneType)]
     slice_type = VarT (pyonBuiltin The_SliceObject)
     slice2_type = varApp (pyonBuiltin The_PyonTuple2)
                   [slice_type, slice_type]
