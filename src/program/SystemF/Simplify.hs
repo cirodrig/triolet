@@ -1358,10 +1358,12 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
            inner_op_value <- makeExpValue inner_op
            continue inner_op inner_op_value (inner_ty_args ++ ty_args) args
      _ ->
-       -- Apply simplification tecnhiques specific to this operator
+       -- Apply simplification techniques specific to this operator.
+       -- Fuel must be available to simplify.
+       ifElseFuel unknown_app $
        case op_val
        of Just (fromFunAV -> Just funm) ->
-            use_fuel $ inline_function_call funm
+            consumeFuel >> inline_function_call funm
 
           -- Use special rewrite semantics for built-in functions
           Just (VarAV _ op_var)
@@ -1369,23 +1371,21 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
                 case ty_args
                 of [ty] -> rwCopyApp inf op' ty args
 
-          Just (VarAV _ op_var) ->
-            -- Try to rewrite this application.  If it was rewritten, then
-            -- consume fuel.
-            ifElseFuel unknown_app $ do
-              tenv <- getTypeEnv                  
-              rewritten <- rewriteAppInSimplifier inf op_var ty_args args
-              case rewritten of 
-                Just new_expr -> do
-                  consumeFuel     -- A term has been rewritten
-                  rwExp new_expr
-                Nothing ->
-                  -- Try to construct a value for this application
-                  case lookupDataConWithType op_var tenv  
-                  of Just (type_con, data_con) ->
-                       data_con_app type_con data_con op'
-                     Nothing ->
-                       unknown_app
+          Just (VarAV _ op_var) -> do
+            -- Try to apply a rewrite rule
+            tenv <- getTypeEnv
+            rewritten <- rewriteAppInSimplifier inf op_var ty_args args
+            case rewritten of
+              Just new_expr -> do
+                consumeFuel     -- A term has been rewritten
+                rwExp new_expr
+              Nothing ->
+                -- Try to construct a value for this application
+                case lookupDataConWithType op_var tenv
+                of Just (type_con, data_con) ->
+                     data_con_app type_con data_con op'
+                   Nothing ->
+                     unknown_app
 
           _ -> unknown_app
   where
@@ -1472,7 +1472,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
     inline_function_call funm =
       rwExp =<< betaReduce inf funm ty_args args
 
--- | Attempt to statically evaluate a copy
+-- | Attempt to statically evaluate a copy.
 rwCopyApp inf copy_op ty args = debug $ do
   whnf_type <- reduceToWhnf (fromTypM ty)
   case fromVarApp whnf_type of
