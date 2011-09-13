@@ -815,6 +815,7 @@ mkPassableClass = do
               (internalError "Class 'Repr' has no dictionary constructor")
               []
               [int_instance, float_instance, bool_instance, none_instance,
+               maybe_val_instance,
                complex_instance, sliceobject_instance,
                any_instance,
                list_instance, matrix_instance,
@@ -844,6 +845,13 @@ mkPassableClass = do
         
   ; b <- newTyVar Star Nothing
   ; c <- newTyVar Star Nothing
+  ; let maybe_val_instance =
+          -- We don't need a Repr instance for the contained type.  Since
+          -- it's a value, it can be computed on demand.
+          polyExplicitInstance [b] [] cls
+          (ConTy (tiBuiltin the_con_MaybeVal) @@ ConTy b)
+          (pyonBuiltin SystemF.The_repr_MaybeVal)
+          []
   ; let list_instance =
           polyExplicitInstance [b] [passable $ ConTy b] cls
           (ConTy (tiBuiltin the_con_list) @@ ConTy b)

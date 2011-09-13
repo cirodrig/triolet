@@ -156,6 +156,7 @@ pyonBuiltinVariableNames =
   , "repr_bool"
   , "repr_int"
   , "repr_float"
+  , "repr_MaybeVal"
   , "repr_Complex"
   , "repr_list"
   , "repr_array0"
