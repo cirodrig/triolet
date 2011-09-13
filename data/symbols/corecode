@@ -365,6 +365,95 @@ intersectStrideSliceWithRange
       k @size_index (iInt @size_index size_val)
   };
 
+
+safeIndex @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (repr : Repr a)
+  (container : t a)
+  (ix : index (shape t))
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+
+  let type sh = shape t in
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_in_range : sh -> index sh -> bool)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (BoxedType (shape t)) (BoxedType sh) ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+  
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index sh -> Writer a)
+    (get_shape : (a : bare) -> t a -> Writer sh).
+
+  case boxed @sh (get_shape @a container) of boxed @sh (container_shape : sh).
+
+  -- Check bounds, then return a value
+  if shape_in_range container_shape ix
+  then at_index @a repr container ix ret
+  else except @(IEffect a);
+
+
+safeSlice @(t : bare -> bare) @(a : bare)
+  (indexable : IndexableDict t)
+  (shape_dict : ShapeDict (shape t))
+  (repr : Repr a)
+  (container : t a)
+  (sl : slice (shape t))
+  -> view (shape t) a
+  attribute(inline) =
+
+  let type sh = shape t in
+
+  case shape_dict of shapeDict @sh
+    (index_repr : Repr (index sh))
+    (slice_repr : Repr (slice sh))
+    (shape_flatten : (a : bare) -> Stream sh a -> Stream dim1 a)
+    (shape_map : (a b : bare) ->
+                 Repr a -> Repr b ->
+		 (a -> Writer b) -> Stream sh a -> Stream sh b)
+    (shape_zipWith : (a b c : bare) ->
+    		     Repr a -> Repr b -> Repr c ->
+		     (a -> b -> Writer c) ->
+		     Stream sh a -> Stream sh b -> Stream sh c)
+    (shape_zipWith3 : (a b c d : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d ->
+		      (a -> b -> c -> Writer d) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d)
+    (shape_zipWith4 : (a b c d e : bare) ->
+    		      Repr a -> Repr b -> Repr c -> Repr d -> Repr e ->
+		      (a -> b -> c -> d -> Writer e) ->
+		      Stream sh a -> Stream sh b -> Stream sh c -> Stream sh d -> Stream sh e)
+    (shape_in_range : sh -> index sh -> bool)
+    (shape_slice : (t : bare -> bare) -> (a : bare) ->
+    		   coerce @box (BoxedType (shape t)) (BoxedType sh) ->
+		   IndexableDict t -> Repr a -> t a -> slice sh -> view sh a).
+
+  shape_slice @t @a
+  (unsafeMakeCoercion @(BoxedType sh) @(BoxedType sh))
+  indexable repr container sl;
+
 -------------------------------------------------------------------------------
 -- Conversions
 
@@ -2569,6 +2658,37 @@ generate @(N : intindex) @(a : bare)
       except @(Sequence a)
   };
 
+
+len @(t : bare -> bare) @(a : bare)
+  (is_linear : coerce @box (BoxedType (shape t)) (Boxed dim1))
+  (indexable : IndexableDict t)
+  (container : t a)
+  -> int
+  attribute(inline) =
+  case indexable of
+    indexableDict @t 
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> Writer (shape t)).
+
+  case boxed @dim1
+       (coerce @(Writer (shape t)) @(Writer dim1) (get_shape @a container)) of
+    boxed @dim1 (sh : dim1).
+
+  case sh of mk_dim1 @(Nlo Nhi : intindex) (ilo : IInt Nlo) (ihi : IInt Nhi).
+  case ilo of {
+    iInt @Nlo (flo : FIInt Nlo).
+      case ihi of {
+        iInt @Nhi (fhi : FIInt Nhi).
+	  case flo of fiInt @Nlo (lo : int).
+	  case fhi of fiInt @Nhi (hi : int).
+	  hi -# lo
+      ; iPosInfty @Nhi. except @int
+      ; iNegInfty @Nhi. except @int
+      }
+    ; iPosInfty @Nlo. except @int
+    ; iNegInfty @Nlo. except @int
+  };
+
 -------------------------------------------------------------------------------
 -- Loops
 
@@ -2600,6 +2720,12 @@ for @(N : intindex) @(acc : bare)
     iNegInfty @N.
       except @(IEffect acc)
   };
+
+
+
+
+
+
 
 {-
 
