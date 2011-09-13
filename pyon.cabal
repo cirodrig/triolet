@@ -104,6 +104,7 @@ Executable pyon
     SystemF.ElimPatternMatching
     SystemF.EtaReduce
     SystemF.Floating
+    SystemF.GlobalDemand
     SystemF.KnownValue
     SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2

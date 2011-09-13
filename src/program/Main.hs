@@ -25,6 +25,7 @@ import qualified SystemF.ArgumentFlattening as SystemF
 import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
+import qualified SystemF.GlobalDemand as SystemF
 import qualified SystemF.ElimPatternMatching as SystemF
 import qualified SystemF.Syntax as SystemF
 import qualified SystemF.MemoryIR as SystemF
@@ -204,6 +205,10 @@ compilePyonToPyonAsm compile_flags path text = do
   repr_mod <- highLevelOptimizations True SystemF.FinalSimplifierPhase repr_mod
 
   -- Argument flattening
+  putStrLn ""
+  putStrLn "Before Argument Flattening"
+  print $ SystemF.PrintMemoryIR.pprModule repr_mod
+  repr_mod <- SystemF.performGlobalDemandAnalysis repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
   repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
   repr_mod <- SystemF.flattenLocals repr_mod
