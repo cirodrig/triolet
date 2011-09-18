@@ -151,6 +151,7 @@ instance Renameable Type where
 --   freshened.
 unifyBoundVariables :: (Monad m, Supplies m VarID) =>
                        Type -> Type -> m (Type, Type)
+{-# SPECIALIZE unifyBoundVariables :: Type -> Type -> TypeEvalM (Type, Type) #-}
 unifyBoundVariables (LamT (v1 ::: dom1) body1) (LamT (v2 ::: dom2) body2) = do
   v' <- newClonedVar v1
   let rn1 = singletonRenaming v1 v'
@@ -178,6 +179,7 @@ unifyBoundVariables t1 t2 = do
 --   corresponding variables bound in the first type.
 leftUnifyBoundVariables :: (Monad m, Supplies m VarID) =>
                        Type -> Type -> m (Type, Type)
+{-# SPECIALIZE leftUnifyBoundVariables :: Type -> Type -> TypeEvalM (Type, Type) #-}
 leftUnifyBoundVariables t1@(LamT (v1 ::: _) _) (LamT (v2 ::: dom2) body2) =
   let rn2 = singletonRenaming v2 v1
       t2 = LamT (v1 ::: dom2) (rename rn2 body2)

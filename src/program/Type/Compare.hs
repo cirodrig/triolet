@@ -68,6 +68,7 @@ typeMentionsAny t target = search t
 -- | Reduce a type to weak head-normal form.  Evaluate type functions
 --   that are in head position.  The type is assumed to be well-kinded.
 reduceToWhnf :: EvalMonad m => Type -> m Type
+{-# SPECIALIZE reduceToWhnf :: Type -> TypeEvalM Type #-}
 reduceToWhnf ty =
   case fromTypeApp ty
   of (op_type, args) | not (null args) ->
@@ -102,7 +103,10 @@ compareTypes :: EvalMonad m =>
                 Type            -- ^ Expected type
              -> Type            -- ^ Given Type
              -> m Bool
-compareTypes t1 t2 = do
+compareTypes t1 t2 = liftTypeEvalM $ compareTypes' t1 t2
+
+compareTypes' :: Type -> Type -> TypeEvalM Bool
+compareTypes' t1 t2 = do
   -- Ensure that the types are in weak head-normal form, then
   -- compare them structurally
   t1' <- reduceToWhnf t1
@@ -113,7 +117,7 @@ compareTypes t1 t2 = do
 --
 --   Arguments are assumed to be in weak head-normal form and are assumed to
 --   inhabit the same kind.
-cmpType :: EvalMonad m => Type -> Type -> m Bool
+cmpType :: Type -> Type -> TypeEvalM Bool
 cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
   where
     -- For debugging, print the types being compared
@@ -124,13 +128,13 @@ cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
 
     cmp (VarT v1, VarT v2) = return $ v1 == v2
     cmp (AppT op1 arg1, AppT op2 arg2) =
-      compareTypes op1 op2 >&&> compareTypes arg1 arg2
+      compareTypes' op1 op2 >&&> compareTypes' arg1 arg2
     cmp (FunT dom1 rng1, FunT dom2 rng2) =
-      compareTypes dom1 dom2 >&&> compareTypes rng1 rng2
+      compareTypes' dom1 dom2 >&&> compareTypes' rng1 rng2
     cmp (LamT (a1 ::: dom1) body1, LamT (a2 ::: dom2) body2) =
-      compareTypes dom1 dom2 >&&> bindAndCompare a2 dom2 body1 body2
+      compareTypes' dom1 dom2 >&&> bindAndCompare a2 dom2 body1 body2
     cmp (AllT (a1 ::: dom1) rng1, AllT (a2 ::: dom2) rng2) =
-      compareTypes dom1 dom2 >&&> bindAndCompare a2 dom2 rng1 rng2
+      compareTypes' dom1 dom2 >&&> bindAndCompare a2 dom2 rng1 rng2
     cmp (AnyT k1, AnyT k2) = return True -- Same-kinded 'Any' types are equal
     cmp (IntT n1, IntT n2) = return $ n1 == n2
     cmp (CoT k1, CoT k2) = return $ k1 == k2
@@ -147,7 +151,7 @@ cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
     cmp (_, _) = return False
     
     bindAndCompare x dom expected given =
-      assume x dom $ compareTypes expected given
+      assume x dom $ compareTypes' expected given
 
 -- | Given an expected type @t_e@, a set of flexible variables @fv$, and a
 --   given type @t_g@, try to construct a unifying substitution

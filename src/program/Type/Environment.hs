@@ -100,6 +100,8 @@ instance Functor TypeEvalM where
   fmap f m = TypeEvalM $ \supply env -> fmap f (runTypeEvalM m supply env)
 
 instance Applicative TypeEvalM where
+  {-# INLINE pure #-}
+  {-# INLINE (<*>) #-}
   pure = return
   (<*>) = ap
 
