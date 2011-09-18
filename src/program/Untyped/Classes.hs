@@ -642,7 +642,7 @@ toProof pos env derivation =
        
      MagicDerivation {} -> do
        -- Create a magic proof value
-       return (True, [], mkPolyCallE pos (mkConE noSourcePos $ SystemF.pyonBuiltin SystemF.The_fun_undefined) [convertPredicate $ conclusion derivation] [])
+       return (True, [], mkPolyCallE pos (mkVarE noSourcePos $ SystemF.pyonBuiltin SystemF.The_fun_undefined) [convertPredicate $ conclusion derivation] [])
   where
     returnIdProof prd (Just e) = return (True, [], e)
     returnIdProof prd Nothing  = do ph <- mkDictPlaceholder pos prd
@@ -730,7 +730,7 @@ createClassInstance pos cls inst inst_type c_vars i_env i_vars =
        -- Apply the constructor to premise types and premises
        let premise_ts = map convertHMType premise_types
            premise_vs = map (mkVarE pos) i_vars
-       return $ mkPolyCallE pos (mkConE pos con) premise_ts premise_vs
+       return $ mkPolyCallE pos (mkVarE pos con) premise_ts premise_vs
   where
     hmtype = convertHMType inst_type
     superclasses = map (mkVarE pos) c_vars
@@ -750,7 +750,7 @@ instantiateClassMethods pos inst inst_type env = do
 
   -- Create instance methods
   forM (insMethods inst) $ \method ->
-    let method_exp = mkConE pos (inmName method)
+    let method_exp = mkVarE pos (inmName method)
     in instanceExpressionWithProofs env pos ty_params constraint method_exp
 
 -- | Create a System F value representing a coercion from t1 to t2.

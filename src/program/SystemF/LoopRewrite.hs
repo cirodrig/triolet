@@ -87,7 +87,7 @@ rwExp expression =
   case fromExpM expression
   of VarE {} -> return expression
      LitE {} -> return expression
-     UTupleE inf args -> ExpM <$> UTupleE inf <$> mapM rwExp args
+     ConE inf op args -> ExpM <$> ConE inf op <$> mapM rwExp args
      AppE inf op ty_args args -> rwApp inf op ty_args args 
      LamE inf f -> ExpM <$> LamE inf <$> rwFun f
      LetE inf b rhs body -> ExpM <$> (LetE inf b <$> rwExp rhs <*> rwExp body)

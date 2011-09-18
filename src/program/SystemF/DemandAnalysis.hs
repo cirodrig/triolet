@@ -11,7 +11,7 @@ We do not use strictness information as in the latter paper, but we do use
 information about how a value is deconstructed.
 -}
 
-{-# LANGUAGE TypeSynonymInstances, ViewPatterns #-}
+{-# LANGUAGE TypeSynonymInstances, ViewPatterns, Rank2Types #-}
 module SystemF.DemandAnalysis
        (altSpecificity,
         altListSpecificity,
@@ -161,17 +161,31 @@ type DmdAnl a = a -> Df a
 dfType :: Type -> Df ()
 dfType ty = mentionList $ Set.toList $ freeVariables ty
 
+withManyBinders :: (forall b. a -> Df b -> Df (a, b))
+                -> [a] -> Df c -> Df ([a], c)
+withManyBinders one xs m = go xs
+  where
+    go (x:xs) = do
+      (y, (ys, z)) <- one x $ go xs
+      return (y : ys, z)
+    
+    go [] = fmap ((,) []) m
+
+withBinder :: Binder -> Df a -> Df (Binder, a)
+withBinder pat@(v ::: ty) m = do
+  dfType ty
+  x <- maskDemand v m
+  return (pat, x)
+
+withBinders = withManyBinders withBinder
+
 withTyPat :: TyPatM -> Df a -> Df (TyPatM, a)
 withTyPat pat@(TyPatM (v ::: ty)) m = do
   dfType ty
   x <- maskDemand v m
   return (pat, x)
-  
-withTyPats (pat:pats) m = do
-  (p, (ps, x)) <- withTyPat pat $ withTyPats pats m
-  return (p : ps, x)
 
-withTyPats [] m = fmap ((,) []) m
+withTyPats = withManyBinders withTyPat
 
 withParam :: PatM -> Df a -> Df (PatM, a)
 withParam pat m = do
@@ -181,11 +195,7 @@ withParam pat m = do
   return (new_pat, x)
 
 withParams :: [PatM] -> Df a -> Df ([PatM], a)
-withParams (pat : pats) m = do
-  (p, (ps, x)) <- withParam pat $ withParams pats m
-  return (p : ps, x)
-
-withParams [] m = fmap ((,) []) m
+withParams = withManyBinders withParam
 
 -- | Do demand analysis on an expression, given how the expression's result
 --   is used.
@@ -194,7 +204,7 @@ dmdExp spc expressionM@(ExpM expression) =
   case expression
   of VarE _ v -> mentionSpecificity v spc >> return expressionM
      LitE _ _ -> return expressionM
-     UTupleE inf args -> dmdUTupleE inf args
+     ConE inf con args -> dmdConE inf con args
      AppE inf op ts args -> dmdAppE inf op ts args
      LamE inf f -> do
        f' <- dmdFun f
@@ -219,10 +229,10 @@ dmdExp spc expressionM@(ExpM expression) =
              intercalate "\n" [show v ++ " |-> " ++ showDmd d
                               | (v,d) <- IntMap.toList dmd])  $ return x
     -}
-      
-dmdUTupleE inf args = do
+
+dmdConE inf con args = do     
   args' <- mapM (dmdExp Used) args
-  return $ ExpM $ UTupleE inf args'
+  return $ ExpM $ ConE inf con args'
 
 -- | Dead code elimination for function application.
 --
@@ -232,12 +242,9 @@ dmdUTupleE inf args = do
 dmdAppE inf op ty_args args = do
   op' <- dmdExp Used op
   args' <- zipWithM dmdExp use_modes args
-  tenv <- ask
-  add_datacon_uses tenv op' args'
   return $ ExpM $ AppE inf op' ty_args args'
   where
     -- How the function arguments are used.
-    -- We special-case the 'load' function.
     use_modes =
       case op
       of ExpM (VarE _ op_var)
@@ -247,6 +254,7 @@ dmdAppE inf op ty_args args = do
                [Used, Inspected, Used]
          _ -> repeat Used
 
+    {-
     -- Determine which parameters should be floated.
     -- If a parameter should be floated, mark it as having multiple uses
     -- so it won't get inlined.
@@ -262,7 +270,7 @@ dmdAppE inf op ty_args args = do
       of Nothing -> return ()
          Just floated_params ->
            mapM_ mentionMany $
-           [v | (ExpM (VarE _ v), True) <- zip edc_args floated_params]
+           [v | (ExpM (VarE _ v), True) <- zip edc_args floated_params] -}
 
 dmdLetE spc inf binder rhs body = do
   (body', demand) <- getDemand (patMVar binder) $ dmdExp spc body
@@ -284,7 +292,7 @@ dmdCaseE result_spc inf scrutinee alts = do
   -- If there's only one alternative and none of its fields are used, then
   -- eliminate the entire case statement
   case alts' of
-    [AltM alt'] | null (getAltExTypes alt') &&
+    [AltM alt'] | null (deConExTypes $ fromDeCInstM $ altCon alt') &&
                   all isDeadPattern (altParams alt') ->
       return $ altBody alt'
     _ -> do
@@ -295,10 +303,9 @@ dmdCaseE result_spc inf scrutinee alts = do
 -- | Construct the specificity for a case scrutinee, based on how its value
 --   is bound by a case alternative
 altSpecificity :: AltM -> Specificity
-altSpecificity alt = Decond mono_con fields
+altSpecificity (AltM alt) = Decond (fromDeCInstM $ altCon alt) fields
   where
-    (mono_con, params, _) = altToMonoCon alt
-    fields = map (specificity . patMDmd) params
+    fields = map (specificity . patMDmd) $ altParams alt
 
 -- | Construct the specificity for a case scrutinee, based on how its value
 --   is bound by a list of alternatives.  If there's more than one alternative,
@@ -311,24 +318,19 @@ altListSpecificity _   = Inspected
 -- | Do demand analysis on a case alternative.  Return the demand on the
 --   scrutinee.
 dmdAlt :: Specificity -> AltM -> Df (AltM, Specificity)
-dmdAlt result_spc (AltM (DeCon con ty_args ex_types params body)) = do
-  mapM_ (dfType . fromTypM) ty_args
+dmdAlt result_spc (AltM (Alt (DeCInstM (VarDeCon con ty_args ex_types)) params body)) = do
+  mapM_ dfType ty_args
   (typats', (pats', body')) <-
-    withTyPats ex_types $ withParams params $ dmdExp result_spc body
+    withBinders ex_types $ withParams params $ dmdExp result_spc body
 
-  let new_alt = AltM $ DeCon { altConstructor = con
-                             , altTyArgs = ty_args
-                             , altExTypes = typats'
-                             , altParams = pats'
-                             , altBody = body'}
+  let new_alt = AltM $ Alt (DeCInstM (VarDeCon con ty_args typats')) pats' body'
   return (new_alt, altSpecificity new_alt)
 
-dmdAlt result_spc (AltM (DeTuple params body)) = do
+dmdAlt result_spc (AltM (Alt decon@(DeCInstM (TupleDeCon _)) params body)) = do
   (pats', body') <-
     withParams params $ dmdExp result_spc body
 
-  let new_alt = AltM $ DeTuple { altParams = pats'
-                               , altBody = body'}
+  let new_alt = AltM (Alt decon pats' body')
   return (new_alt, altSpecificity new_alt)  
 
 dmdFun :: DmdAnl FunM

@@ -172,16 +172,14 @@ slicePureTF = typeFunction 1 compute_eliminator
       case fromVarApp shape_arg' of
         Just (op, args')
            | op `isPyonBuiltin` The_dim0 -> return none_type
-           | op `isPyonBuiltin` The_dim1 -> return int3_type
-           | op `isPyonBuiltin` The_dim2 -> return int6_type
+           | op `isPyonBuiltin` The_dim1 -> return slice_type
+           | op `isPyonBuiltin` The_dim2 -> return slice2_type
         _ -> return $ varApp (pyonBuiltin The_slice) [shape_arg']
 
     none_type = VarT (pyonBuiltin The_NoneType)
-    int_type = VarT (pyonBuiltin The_int)
-    int3_type = varApp (pyonBuiltin The_PyonTuple3)
-                [int_type, int_type, int_type]
-    int6_type = varApp (pyonBuiltin The_PyonTuple2)
-                [int3_type, int3_type]
+    slice_type = VarT (pyonBuiltin The_SliceObject)
+    slice2_type = varApp (pyonBuiltin The_PyonTuple2)
+                  [slice_type, slice_type]
 
 sliceMemTF = typeFunction 1 compute_eliminator
   where

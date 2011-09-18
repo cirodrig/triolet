@@ -226,8 +226,10 @@ mkTupleP fs = TITupleP fs
 mkVarE :: SourcePos -> Var -> TIExp
 mkVarE pos v = TIExp $ SystemF.VarE (mkExpInfo pos) v
 
-mkConE :: SourcePos -> Var -> TIExp
-mkConE pos c = TIExp $ SystemF.VarE (mkExpInfo pos) c
+mkConE :: SourcePos -> Var -> [TIType] -> [TIType] -> [TIExp] -> TIExp
+mkConE pos c ty_args ex_types fields =
+  let con = TIConInst c ty_args ex_types
+  in TIExp $ SystemF.ConE (mkExpInfo pos) con fields
 
 mkLitE :: SourcePos -> Untyped.Lit -> TIExp
 mkLitE pos l =
@@ -241,7 +243,8 @@ mkLitE pos l =
     sf_literal l =
       SystemF.LitE (mkExpInfo pos) l
     sf_constructor c =
-      SystemF.VarE (mkExpInfo pos) (SystemF.pyonBuiltin c)
+      let con = TIConInst (SystemF.pyonBuiltin c) [] []
+      in SystemF.ConE (mkExpInfo pos) con []
 
     sf_int_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_int)
     sf_float_type = Type.Type.VarT (SystemF.pyonBuiltin SystemF.The_float)
@@ -251,8 +254,7 @@ mkAppE pos oper ts args = TIExp $ SystemF.AppE (mkExpInfo pos) oper ts args
 
 mkUndefinedE :: SourcePos -> TIType -> TIExp
 mkUndefinedE pos ty =
-  let con = mkConE pos (SystemF.pyonBuiltin SystemF.The_fun_undefined)
-  in mkAppE pos con [ty] []
+  mkConE pos (SystemF.pyonBuiltin SystemF.The_fun_undefined) [ty] [] []
 
 mkCoerceE :: SourcePos -> TIType -> TIType -> TIExp -> TIExp
 mkCoerceE pos from_ty to_ty e =
@@ -260,22 +262,12 @@ mkCoerceE pos from_ty to_ty e =
 
 mkIfE :: SourcePos -> TIExp -> TIExp -> TIExp -> TIExp
 mkIfE pos cond tr fa =
-  let true_alt = TIAlt $
-        SystemF.DeCon { SystemF.altConstructor =
-                           SystemF.pyonBuiltin SystemF.The_True
-                      , SystemF.altTyArgs = []
-                      , SystemF.altExTypes = []
-                      , SystemF.altParams = []
-                      , SystemF.altBody = tr
-                      }
-      false_alt = TIAlt $
-        SystemF.DeCon { SystemF.altConstructor =
-                           SystemF.pyonBuiltin SystemF.The_False
-                      , SystemF.altTyArgs = []
-                      , SystemF.altExTypes = []
-                      , SystemF.altParams = []
-                      , SystemF.altBody = fa
-                      }
+  let true_decon =
+        TIDeConInst (SystemF.pyonBuiltin SystemF.The_True) [] []
+      false_decon =
+        TIDeConInst (SystemF.pyonBuiltin SystemF.The_False) [] []
+      true_alt = TIAlt $ SystemF.Alt true_decon [] tr
+      false_alt = TIAlt $ SystemF.Alt false_decon [] fa
   in TIExp $ SystemF.CaseE (mkExpInfo pos) cond [true_alt, false_alt]
 
 -- | Create a call of a polymorphic function with no constraint arguments.
@@ -296,7 +288,7 @@ mkLetrecE pos defs body =
 mkDictE :: SourcePos -> Class -> TIType -> [TIExp] -> [TIExp] -> TIExp
 mkDictE pos cls inst_type scs methods =
   -- Apply the dictionary constructor to the instance type and all arguments
-  mkAppE pos (mkConE pos $ clsDictCon cls) [inst_type] (scs ++ methods)
+  mkConE pos (clsDictCon cls) [inst_type] [] (scs ++ methods)
 
 -- | Create an expression that selects and instantiates a class method.
 -- Return the expression and the placeholders produced by instantiation.
@@ -342,7 +334,7 @@ mkMethodInstanceE pos cls inst_type index ty_params constraint dict = do
     instanceExpression pos ty_params constraint method_var
       
   let alt = TIAlt $
-            SystemF.DeCon (clsDictCon cls) [convertHMType inst_type] [] parameters alt_body
+            SystemF.Alt (TIDeConInst (clsDictCon cls) [convertHMType inst_type] []) parameters alt_body
 
   return (placeholders, TIExp $ SystemF.CaseE (mkExpInfo pos) dict [alt])
 
@@ -478,7 +470,8 @@ convertTyScheme (TyScheme qvars cst ty) = DelayedType $ do
     mkFun (v, gluon_v) ty =
       mkForallType gluon_v (convertKind' (tyConKind v)) ty
 
--- | Create an instance expression with placeholders for all constraints
+-- | Create an instance of a polymorphic variable
+--   with placeholders for all constraints
 instanceExpression :: SourcePos
                    -> [HMType]   -- ^ Instantiated type parameters
                    -> Constraint -- ^ Instantiated constraint
@@ -489,6 +482,46 @@ instanceExpression pos ty_params constraint exp = do
   let types = map convertHMType ty_params
   placeholders <- mapM (mkDictPlaceholder pos) constraint
   return (placeholders, mkPolyCallE pos exp types placeholders)
+
+conInstanceExpression :: SourcePos
+                      -> [HMType]   -- ^ Instantiated type parameters
+                      -> Constraint -- ^ Instantiated constraint
+                      -> Var        -- ^ Constructor
+                      -> HMType      -- ^ Instantiated construtctor type
+                      -> IO (Placeholders, TIExp)
+                      -- ^ Dictionary placeholders and instance expression
+conInstanceExpression pos ty_params constraint con con_type = do
+  let types = map convertHMType ty_params
+  placeholders <- mapM (mkDictPlaceholder pos) constraint
+  exp <- eta_expand pos con types con_type
+  return (placeholders, exp)
+  where
+    -- Eta-expand a data constructor into a System F lambda function
+    eta_expand pos con types con_type = do
+      (domain, range) <- expand_type con_type
+
+      if null domain then return $ mkConE pos con types [] [] else do
+        -- Create lambda function parameters
+        parameter_vars <- replicateM (length domain) $ do
+          var_id <- withTheNewVarIdentSupply supplyValue
+          return $ mkAnonymousVar var_id ObjectLevel
+
+        -- Create a constructor application
+        let params = zipWith mkVarP parameter_vars $ map convertHMType domain
+        let body = mkConE pos con types [] (map (mkVarE pos) parameter_vars)
+        return $ mkFunE pos $ TIFun $
+          SystemF.Fun { SystemF.funInfo = mkExpInfo pos
+                      , SystemF.funTyParams = []
+                      , SystemF.funParams = params
+                      , SystemF.funReturn = convertHMType range
+                      , SystemF.funBody = body}
+
+    -- Expand a function type into domain and range
+    expand_type t = do
+      (head, operands) <- inspectTypeApplication t
+      return $! case head
+                of FunTy _ -> (init operands, last operands)
+                   _ -> ([], t)
 
 -- | Create an instance expression where all constraints are satisfied
 -- by a proof environment

@@ -109,18 +109,13 @@ isSimpleExp expression =
   case fromExpSF expression
   of VarE {} -> True
      LitE {} -> True
-     AppE {expOper = op} -> is_dictionary_operator (fromExpSF op)
+     ConE _ (CInstSF (VarCon v _ _)) _ -> isDictionaryDataCon v
+     ConE {} -> False
+     AppE {} -> False
      LamE {} -> False
      LetE {} -> False
      LetfunE {} -> False
      CaseE {} -> False
-  where
-    -- Dictionary constructor expressions are inlined to enable later
-    -- optimizations
-    is_dictionary_operator (VarE {expVar = c}) = isDictionaryTypeCon c
-    is_dictionary_operator (LetE {expBody = b}) =
-      is_dictionary_operator $ fromExpSF b
-    is_dictionary_operator _ = False
 
 -- | Given a value and the pattern it is bound to, add the bound value(s)
 -- to the environment.  The caller should verify that the value has no
@@ -190,6 +185,9 @@ pevalExp expression =
        | v `isPyonBuiltin` The_FloatingDict_float_pi ->
            return_lit inf $ FloatL pi float_type
        | otherwise -> lookupVarDefault expression v
+     ConE inf op args -> do
+       args' <- mapM pevalExp args
+       return $ ExpSF $ ConE inf op args'
      LitE {} -> return expression
      AppE {expInfo = inf, expOper = op, expTyArgs = tys, expArgs = args} -> do
        op' <- pevalExp op
@@ -281,20 +279,28 @@ eliminateCase pos scrutinee alternatives =
   case unpackPolymorphicCallAndBindings scrutinee
   of Just (bindings, ExpSF (VarE {expVar = scrutinee_con}), ty_args, args) ->
        -- Find a matching alternative
-       case find ((scrutinee_con ==) . altConstructor) $ map fromAltSF alternatives
-       of Just alt ->
-            -- Assume that type arguments match, because the code passed
-            -- type checking.
-            -- Bind parameters to the constructor's fields.
-            Just $
-            applyBindings bindings $
-            foldr make_let (altBody alt) $
-            zip args (altParams alt)
+       case find (match_alternative scrutinee_con) alternatives
+       of Just (AltSF alt)
+            | not $ null $ getAltExTypes alt ->
+              internalError "eliminateCase: Not implemented for existential types"
+            | otherwise ->
+              -- Assume that type arguments match, because the code passed
+              -- type checking.
+              -- Bind parameters to the constructor's fields.
+              Just $
+              applyBindings bindings $
+              foldr make_let (altBody alt) $
+              zip args (altParams alt)
           Nothing -> Nothing    -- No matching alternative
      _ -> Nothing               -- Cannot determine constructor of scrutinee
   where
     make_let (arg, pat) expr =
       ExpSF $ LetE (mkExpInfo pos) pat arg expr
+    
+    match_alternative scrutinee_con (AltSF alt) =
+      case altCon alt
+      of DeCInstSF (VarDeCon c _ _) -> c == scrutinee_con
+         _ -> False
 
 pevalAlt :: AltSF -> PE AltSF
 pevalAlt (AltSF alt) = do

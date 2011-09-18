@@ -122,7 +122,7 @@ instance MonadIO LR where
 
 instance Supplies LR VarID where
   fresh = LR (\env -> liftM Just $ supplyValue (lrIdSupply env))
-  supplyToST = undefined
+  supplyToST = internalError "supplyToST: Not implemented for LR"
 
 instance TypeEnvMonad LR where
   getTypeEnv = withTypeEnv return
@@ -398,7 +398,7 @@ expSize (ExpM expression) =
   case expression
   of VarE {} -> codeSize 1
      LitE {} -> codeSize 1
-     UTupleE _ es -> codeSize 1 `mappend` expSizes es
+     ConE _ con es -> codeSize 1 `mappend` expSizes es
      AppE _ op ts args -> codeSize (1 + length ts) `mappend` expSizes (op : args)
      LamE _ f -> funSize f
      LetE _ b rhs body -> codeSize 1 `mappend` expSize rhs `mappend` expSize body
@@ -409,11 +409,17 @@ expSize (ExpM expression) =
      CoerceE _ _ _ b -> codeSize 1 `mappend` expSize b
   where
     alt_sizes xs = mconcat $ map alt_size xs
-    alt_size (AltM (DeCon _ ty_args ex_types params body)) =
-      codeSize (length ty_args + length ex_types + length params) `mappend`
-      expSize body
-    alt_size (AltM (DeTuple tys body)) =
-      codeSize (length tys) `mappend` expSize body
+    alt_size (AltM (Alt decon params body)) =
+      decon_size decon `mappend` codeSize (length params) `mappend` expSize body
+    
+    con_size (CInstM con) = codeSize (length $ conTypes con)
+
+    decon_size (DeCInstM (VarDeCon _ ty_args ex_types)) =
+      codeSize (length ty_args + length ex_types)
+
+    decon_size (DeCInstM (TupleDeCon ty_args)) =
+      codeSize (length ty_args)
+
 
 expSizes :: [ExpM] -> CodeSizeTest
 expSizes es = mconcat $ map expSize es
@@ -780,42 +786,29 @@ mkCopyExp e = do
 --
 --   This function handles data constructors whose result kind is \"bare\".
 --   Other known values are handled by 'createValue'.
-createDataConApp :: ExpInfo -> DataValueType -> [MaybeValue]
+createDataConApp :: ExpInfo -> ConInst -> [MaybeValue]
                  -> LR (Maybe (ExpM, MaybeValue))
 createDataConApp inf val_type m_fields 
   | Just fields <- sequence m_fields = createDataConApp' inf val_type fields
   | otherwise = return Nothing
       
-createDataConApp' :: ExpInfo -> DataValueType -> [AbsValue]
+createDataConApp' :: ExpInfo -> ConInst -> [AbsValue]
                   -> LR (Maybe (ExpM, MaybeValue))
-createDataConApp' inf val_type fields = do
+createDataConApp' inf con fields = do
   tenv <- getTypeEnv
   -- Get the kind inhabited by each field.  The kind is used to decide
   -- whether to copy the field or not.
-  let field_kinds =
-        case val_type of
-          ConValueType con _ _ ->
-            case lookupDataCon con tenv
-            of Just dcon_type -> dataConFieldKinds tenv dcon_type
-               Nothing -> internalError "createDataConApp"
-          TupleValueType field_types ->
-            map (toBaseKind . typeKind tenv . fromTypM) field_types
+  let field_kinds = conFieldKinds tenv con
 
   field_results <- zipWithM createValue field_kinds fields
 
   case sequence field_results of
     Just (unzip -> (field_exps, field_values)) ->
       -- Apply the data constructor
-      let data_exp =
-            case val_type
-            of ConValueType con ty_args ex_args ->
-                 let con_exp = ExpM $ VarE defaultExpInfo con
-                 in appE inf con_exp (ty_args ++ ex_args) field_exps
-               TupleValueType _ ->
-                 ExpM $ UTupleE inf field_exps
+      let data_exp = conE inf con field_exps
           
           -- This is an initializer expression, so it has a writer value
-          value = writerAV $ AbsReturn $ dataAV $ DataValue inf val_type field_values
+          value = writerAV $ AbsReturn $ dataAV $ DataValue inf con field_values
       in return $ Just (data_exp, Just value)
     Nothing -> return Nothing
       
@@ -1110,14 +1103,19 @@ eliminateUselessCopying (ExpM expression) =
        tenv <- getTypeEnv
 
        -- First, try to detect the case where a value is deconstructed and
-       -- reconstructed
-       uses <- mapM (useless_alt tenv) alts
-       
+       -- reconstructed.
+       -- Skip this step for bare types, since we can't avoid copying.
+       uses <-
+         if BareK == alt_kind tenv (head alts)
+         then return Nothing
+         else liftM sequence $ mapM (useless_alt tenv) alts
+
        -- Useless if all alternatives are useless.
        -- In well-typed code, all return parameters must be the same.
-       case sequence uses of
+       case uses of
          Just (Nothing : _) ->
            consumeFuel >> return scrutinee
+
          {- TODO: Generate simplified code in this case.
          -- We must get rid of the old return
          -- argument by eta-reducing the scrutinee, then apply it to the new
@@ -1138,6 +1136,13 @@ eliminateUselessCopying (ExpM expression) =
 
      _ -> return (ExpM expression)
   where
+    -- Get the kind of the data type being matched
+    alt_kind tenv (AltM (Alt {altCon = DeCInstM (VarDeCon var _ _)})) =
+      case lookupDataConWithType var tenv
+      of Just (type_con, _) -> dataTypeKind type_con
+    
+    alt_kind _ (AltM (Alt {altCon = DeCInstM (TupleDeCon {})})) = ValK
+
     -- Try to detect and simplify the pattern
     -- @case boxed E of boxed x. copy x@
     eliminate_unbox_and_copy tenv scrutinee alts =
@@ -1145,7 +1150,7 @@ eliminateUselessCopying (ExpM expression) =
       of Just (dcon, [ty_arg], [], [initializer])
            | dataConCon dcon `isPyonBuiltin` The_boxed ->
              case alts
-             of [AltM (DeCon _ _ _ [field] body)] ->
+             of [AltM (Alt _ [field] body)] ->
                   -- Body should be @copy _ _ x@ or @copy _ _ x e@
                   -- where @x@ is the bound variable
                   case unpackVarAppM body
@@ -1160,69 +1165,49 @@ eliminateUselessCopying (ExpM expression) =
     -- Return @Nothing@ if not useless.
     -- Return @Just Nothing@ if useless and there's no return parameter.
     -- Return @Just (Just p)@ if useless and the return parameter is @p@.
-    useless_alt tenv (AltM (DeCon con alt_ty_args alt_ex_typarams alt_fields body)) =
-      case unpackDataConAppM tenv body
-      of Just (dcon, body_ty_args, body_ex_args, body_fields)
-           | dataConCon dcon == con ->
-             -- This alternative unpacks and repacks the same
-             -- data constructor.  Check whether all fields are equal.
-             let dtype = case lookupDataType (dataConTyCon dcon) tenv
-                         of Just t -> t
-                 need_return_parameter = dataTypeKind dtype == BareK
-             in compare_pattern_to_expression need_return_parameter
-                (map fromTypM alt_ty_args) alt_ex_typarams alt_fields
-                body_ty_args body_ex_args body_fields
-         _ ->
-           return Nothing
-
-    useless_alt tenv (AltM (DeTuple alt_fields body)) =
+    useless_alt tenv (AltM (Alt decon alt_fields body)) =
       case body
-      of ExpM (UTupleE _ body_fields) ->
-           compare_pattern_to_expression False [] [] alt_fields [] [] body_fields
+      of ExpM (ConE inf con fields) ->
+           compare_pattern_to_expression decon alt_fields con fields
+         
+         -- TODO: Also detect case where body is applied to a return parameter
+
          _ -> return Nothing
 
     -- Compare fields of a pattern to fields of a data constructor expression
     -- to determine whether they match.  The constructor part has already been
     -- observed to match.
-    compare_pattern_to_expression
-      need_return_parameter
-      alt_ty_args alt_ex_typarams alt_fields
-      exp_ty_args exp_ex_args exp_fields =
-        -- Ensure that the data constructor is applied to
-        -- the correct number of arguments
-        if length alt_ty_args == length exp_ty_args && 
-           length alt_ex_typarams == length exp_ex_args &&
-           length alt_fields == length real_fields &&
-           (if need_return_parameter
-            then length excess_fields == 1
-            else null excess_fields)
-        then assumeTyPatMs alt_ex_typarams $
-             assumePatterns alt_fields $ do
+    compare_pattern_to_expression (DeCInstM decon) alt_fields (CInstM con) exp_fields =
+      case (decon, con)
+      of (VarDeCon alt_op alt_ty_args alt_ex_types,
+          VarCon exp_op exp_ty_args exp_ex_types) -> do
+           types_match <-
+             -- Compare constructors
+             return (alt_op == exp_op) >&&>
 
-               match_confirmed <-
-                 -- Check type parameters
-                 andM (zipWith compareTypes alt_ty_args exp_ty_args) >&&>
-               
-                 -- Check existential types
-                 andM (zipWith compareTypes alt_ex_types exp_ex_args) >&&>
-                  
-                 -- Check fields
-                 return (and $ zipWith match_field alt_fields exp_fields)
-               return $! if match_confirmed
-                         then case excess_fields 
-                              of [] -> Just Nothing
-                                 [f] -> Just (Just f)
-                                 _ -> internalError "eliminateUselessCopying: Malformed data constructor application"
-                         else Nothing
-        else return Nothing
+             -- Compare type parameters
+             andM (zipWith compareTypes alt_ty_args exp_ty_args) >&&>
+             andM (zipWith compareTypes [t | _ ::: t <- alt_ex_types] exp_ex_types) >&&>
+
+             -- Compare fields
+             return (and $ zipWith match_field alt_fields exp_fields)
+
+           return $! if types_match then Just Nothing else Nothing
+
+         (TupleDeCon alt_types,
+          TupleCon exp_types) -> do
+           types_match <-
+             -- Compare type parameters
+             andM (zipWith compareTypes alt_types exp_types) >&&>
+             -- Compare fields
+             return (and $ zipWith match_field alt_fields exp_fields)
+
+           return $! if types_match then Just Nothing else Nothing
+
+         _ ->
+           -- Different constructors
+           return Nothing
       where
-        alt_ex_types = [VarT v | TyPatM (v ::: _) <- alt_ex_typarams]
-                 
-        -- The data constructor may have an extra argument for its
-        -- return pointer.  Separate out that extra argument.
-        real_fields = take (length alt_fields) exp_fields
-        excess_fields = drop (length alt_fields) exp_fields
-        
         -- This field should either be @v@ (for a value) or
         -- @copy _ v@ (for an initializer).  Only one possibility is
         -- well-typed, so go ahead and check for both.
@@ -1234,8 +1219,7 @@ eliminateUselessCopying (ExpM expression) =
                   of Just (op, [_], [_, ExpM (VarE _ v)]) ->
                        op `isPyonBuiltin` The_copy && v == patMVar pattern
                      _ -> False
-        
-       
+
 -------------------------------------------------------------------------------
 -- Traversing code
 
@@ -1261,7 +1245,7 @@ rwExp expression = debug "rwExp" expression $ do
     case fromExpM ex2 of
       VarE inf v -> rwVar ex2 inf v
       LitE inf l -> rwExpReturn (ex2, Just $ LitAV inf l)
-      UTupleE inf args -> rwUTuple inf args
+      ConE inf con args -> rwCon inf con args
       AppE inf op ty_args args -> rwApp ex2 inf op ty_args args
       LamE inf fun -> do
         (fun', fun_val) <- rwFun fun
@@ -1309,6 +1293,38 @@ rwVar original_expression inf v = lookupKnownValue v >>= rewrite
       -- Give the variable a value, so that copy propagation may occur
       rwExpReturn (original_expression, Just $ VarAV inf v)
 
+rwCon :: ExpInfo -> CInstM -> [ExpM] -> LR (ExpM, MaybeValue)
+rwCon inf con args = do
+  tenv <- getTypeEnv
+
+  -- Determine type of constructed value
+  (field_types, constructed_type) <- conType (fromCInstM con)
+
+  -- Simplify fields
+  (args', arg_values) <- clearCurrentReturnParameter $ mapAndUnzipM rwExp args
+
+  -- Construct a value
+  let new_exp = conE inf (fromCInstM con) args'
+      new_computation =
+        case fromCInstM con
+        of VarCon v ty_args ex_types ->
+             let Just (type_con, data_con) = lookupDataConWithType v tenv
+             in dataConValue inf tenv type_con data_con (map TypM $ ty_args ++ ex_types) arg_values
+           TupleCon ty_args ->
+             fmap AbsReturn $ tupleConValue inf (map TypM ty_args) arg_values
+  
+  have_fuel <- checkFuel
+  case new_computation of
+    Just (AbsReturn v) -> return (new_exp, Just v)
+  
+    -- If it will raise an exception, replace with an exception expression
+    Just AbsException | have_fuel -> do
+      consumeFuel
+      return (ExpM $ ExceptE inf constructed_type, Nothing)
+
+    _ -> return (new_exp, Nothing)
+
+{-
 rwUTuple inf args = do
   -- Just rewrite subexpressions
   (args', arg_values) <- clearCurrentReturnParameter $ mapAndUnzipM rwExp args
@@ -1316,7 +1332,7 @@ rwUTuple inf args = do
   
   let ret_value = tupleConValue inf (map TypM arg_types) arg_values
       ret_exp = ExpM $ UTupleE inf args'
-  return (ret_exp, ret_value)
+  return (ret_exp, ret_value)-}
 
 rwApp :: ExpM -> ExpInfo -> ExpM -> [TypM] -> [ExpM] -> LR (ExpM, MaybeValue)
 rwApp original_expression inf op ty_args args =
@@ -1379,12 +1395,12 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
               Just new_expr -> do
                 consumeFuel     -- A term has been rewritten
                 rwExp new_expr
-              Nothing ->
+              Nothing -> {-
                 -- Try to construct a value for this application
                 case lookupDataConWithType op_var tenv
                 of Just (type_con, data_con) ->
                      data_con_app type_con data_con op'
-                   Nothing ->
+                   Nothing -> -}
                      unknown_app
 
           _ -> unknown_app
@@ -1408,14 +1424,14 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
         in case fun_result
            of Just AbsException -> propagateException
 
-              -- There appear to be bugs in the computed value;
-              -- disabling it for now
+              -- There's a bug in abstract values, so this code is disabled
               Just (AbsReturn v) -> return Nothing -- return (Just v)
               Nothing -> return Nothing
 
       let new_exp = appE inf op' ty_args args'
       return (new_exp, new_value)
 
+    {-
     -- The term is a data constructor application.  Simplify subexpressions
     -- and rebuild the expression.  Also construct a known value for the term.
     --
@@ -1465,7 +1481,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
         -- If it will raise an exception, replace with an exception expression
         Just AbsException -> do
           consumeFuel
-          return (ExpM $ ExceptE inf result_type, Nothing)
+          return (ExpM $ ExceptE inf result_type, Nothing) -}
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
@@ -1547,15 +1563,19 @@ rwCopyApp inf copy_op ty args = debug $ do
 --   special-case rewrite
 copyStoredValue inf val_type repr arg m_dst = do
   tmpvar <- newAnonymousVar ObjectLevel
-  let stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_stored)
-      make_value = appE inf stored_op [TypM val_type]
-                   ([ExpM $ VarE inf tmpvar] ++ maybeToList m_dst)
-      alt = AltM $ DeCon { altConstructor = pyonBuiltin The_stored
-                         , altTyArgs = [TypM val_type]
-                         , altExTypes = []
-                         , altParams = [setPatMDmd (Dmd OnceSafe Used) $
-                                        patM (tmpvar ::: val_type)]
-                         , altBody = make_value}
+  let -- Construct a stored value
+      stored_con = VarCon (pyonBuiltin The_stored) [val_type] []
+      value = conE inf stored_con [ExpM $ VarE inf tmpvar]
+      result_value = case m_dst
+                     of Nothing  -> value
+                        Just dst -> appE inf value [] [dst]
+
+      -- Deconstruct the original value
+      stored_decon = VarDeCon (pyonBuiltin The_stored) [val_type] []
+      alt = AltM $ Alt { altCon = DeCInstM stored_decon
+                       , altParams = [setPatMDmd (Dmd OnceSafe Used) $
+                                      patM (tmpvar ::: val_type)]
+                       , altBody = result_value}
       new_expr = ExpM $ CaseE inf arg [alt]
   
   -- Try to simplify the new expression further
@@ -1623,8 +1643,8 @@ rwCase inf scrut alts = do
 --
 -- The case statement isn't eliminated, so this step doesn't consume fuel.
 rwCase1 _ tenv inf scrut alts
-  | [alt@(AltM (DeCon {altConstructor = con}))] <- alts,
-    con `isPyonBuiltin` The_boxed = do
+  | [alt@(AltM (Alt {altCon = DeCInstM (VarDeCon op _ _)}))] <- alts,
+    op `isPyonBuiltin` The_boxed = do
       -- Rewrite the scrutinee
       (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp scrut
       
@@ -1658,7 +1678,7 @@ rwCase1 _ tenv inf scrut alts
                _ -> Nothing
       let field_val =
             case scrut_val >>= fromDataAV
-            of Just (DataValue { dataValueType = ConValueType c _ _
+            of Just (DataValue { dataValueType = VarCon c _ _
                                , dataFields = [f]})
                  | c `isPyonBuiltin` The_boxed -> f
                _ -> Nothing
@@ -1673,22 +1693,13 @@ rwCase1 _ tenv inf scrut alts
 --
 -- Unpacking consumes fuel
 rwCase1 have_fuel tenv inf scrut alts
-  | have_fuel,
-    Just (dcon, ty_args, ex_args, args) <- unpackDataConAppM tenv scrut = do
+  | have_fuel, ExpM (ConE _ (CInstM scrut_con) scrut_args) <- scrut = do
       consumeFuel
-      let alt = findAlternative alts $ dataConCon dcon
-          field_kinds = dataConFieldKinds tenv dcon
-      eliminateCaseWithExp tenv field_kinds (map TypM ex_args) args alt
+      let alt = findAlternative alts scrut_con
+          field_kinds = conFieldKinds tenv scrut_con
+          ex_types = map TypM $ conExTypes scrut_con
+      eliminateCaseWithExp tenv field_kinds ex_types scrut_args alt
   
-  | have_fuel,
-    ExpM (UTupleE _ fields) <- scrut = do
-      consumeFuel
-      case alts of
-        [alt@(AltM (DeTuple params body))] ->
-          let field_kinds = map (toBaseKind . typeKind tenv . patMType) params
-          in eliminateCaseWithExp tenv field_kinds [] fields alt
-        _ -> internalError "rwCase: Invalid case-of-tuple expression"
-
 -- Simplify the scrutinee, then try to simplify the case statement.
 rwCase1 _ tenv inf scrut alts = do
   -- Simplify scrutinee
@@ -1711,7 +1722,7 @@ rwCase1 _ tenv inf scrut alts = do
 -- | A data constructor expression 
 data DataExpAndValue =
     -- | A data or tuple constructor application with arguments
-    ConAppAndValue !DataValueType [(ExpM, MaybeValue)]
+    ConAppAndValue !ConInst ![(ExpM, MaybeValue)]
 
 -- | Given an expression and its abstract value, deconstruct the
 --   expression as if it were a data constructor application.
@@ -1721,51 +1732,27 @@ data DataExpAndValue =
 makeDataExpWithAbsValue :: TypeEnv -> ExpM -> MaybeValue -> [AltM]
                         -> Maybe DataExpAndValue
 makeDataExpWithAbsValue tenv expression expression_value alts =
-  case unpackDataConAppM tenv expression
-  of Just (data_con, ty_args, ex_args, args) ->
-       -- This is a data constructor application
+  case expression
+  of ExpM (ConE inf con args) ->
        case expression_value
-       of Just (fromDataAV -> Just (DataValue _ dcon vs)) ->
-            case dcon
-            of ConValueType con _ ex_ts
-                 | con == dataConCon data_con ->
-                   Just $ ConAppAndValue dcon (zip args vs)
-               _ ->
-                   internalError "rwCase: Inconsistent constructor value"
+       of Just (fromDataAV -> Just (DataValue _ dcon field_values)) ->
+            -- 'con' and 'dcon' should be equal
+            Just $ ConAppAndValue dcon (zip args field_values)
           _ ->
-            let dcon = ConValueType { dataCon = dataConCon data_con
-                                    , dataTyArgs = map TypM ty_args
-                                    , dataExTypes = map TypM ex_args}
-            in Just $ ConAppAndValue dcon [(arg, Nothing) | arg <- args]
+            -- Unknown values
+            Just $ ConAppAndValue (fromCInstM con) [(arg, Nothing) | arg <- args]
      _ ->
-       case expression
-       of ExpM (UTupleE _ fields) ->
-            -- This is a tuple constructor term
-            case alts
-            of [AltM (DeTuple params _)] ->
-                 let dcon = TupleValueType (map (TypM . patMType) params)
-                 in Just $ ConAppAndValue dcon [(arg, Nothing) | arg <- fields]
-               _ ->
-                 internalError "rwCase: Inconsistent constructor value"
-          _ -> Nothing
+       Nothing
 
 -- | Eliminate a case statement whose scrutinee was determined to be a
 --   data constructor application.
 eliminateCaseWithAppAndValue
-  is_inspector tenv (ConAppAndValue con_type args_and_values) alts =
-  let (field_kinds, ex_args, alt) =
-        case con_type
-        of ConValueType {dataCon = dcon, dataExTypes = ts} ->
-             (case lookupDataCon dcon tenv
-              of Just dc -> dataConFieldKinds tenv dc,
-              ts,
-              findAlternative alts dcon)
-           TupleValueType ty_args ->
-             (map (toBaseKind . typeKind tenv . fromTypM) ty_args,
-              [],
-              case alts of [alt] -> alt)
+  is_inspector tenv (ConAppAndValue con args_and_values) alts =
+  let field_kinds = conFieldKinds tenv con
+      ex_args = conExTypes con
+      alt = findAlternative alts con
   in eliminateCaseWithSimplifiedExp
-     is_inspector tenv field_kinds ex_args args_and_values alt
+     is_inspector tenv field_kinds (map TypM ex_args) args_and_values alt
 
 -- | Rewrite a case statement after rewriting the scrutinee.
 --   The case statement cannot be eliminated by deconstructing the scrutinee
@@ -1790,21 +1777,15 @@ rwCase2 inf alts scrut' scrut_val = do
           -- Cannot eliminate the case statement. 
           -- However, we may have eliminated some case alternatives. 
           let known_values =
-                case dcon 
-                of ConValueType {dataExTypes = []} -> Just ([], field_values)
-                   -- The case alternative will bind existential types
-                   -- to fresh variables.  If there are existential
-                   -- types, then field values cannot be propagated
-                   -- because they'll have their original types, not
-                   -- the fresh type names.
-                   ConValueType {} -> Nothing
-                   TupleValueType {} -> Just ([], field_values)
-          let alt =
-                -- The scrutinee has a known constructor
-                -- discard non-matching case alternatives
-                case dcon
-                of ConValueType {dataCon = c} -> findAlternative alts c
-                   TupleValueType {} -> case alts of [a] -> a
+                -- The case alternative will bind existential types
+                -- to fresh variables.  If there are existential
+                -- types, then field values cannot be propagated
+                -- because they'll have their original types, not
+                -- the fresh type names.
+                if null $ conExTypes dcon
+                then Just ([], field_values)
+                else Nothing
+          let alt = findAlternative alts dcon
 
           alt' <- rwAlt True scrut_var known_values alt
           rwExpReturn (ExpM $ CaseE inf scrut' [alt'], Nothing)
@@ -1830,11 +1811,13 @@ rwCase2 inf alts scrut' scrut_val = do
   where
     is_product_case tenv =
       case alts
-      of (AltM (DeTuple {}) : _) -> True
-         (AltM (DeCon {altConstructor = c}) : _) ->
-           case lookupDataConWithType c tenv
-           of Just (ty, _) -> length (dataTypeDataConstructors ty) == 1
-              Nothing -> internalError "rwCase: Invalid constructor"
+      of (AltM (Alt {altCon = DeCInstM con}) : _) ->
+           case con
+           of TupleDeCon {} -> True
+              VarDeCon v _ _ ->
+                case lookupDataConWithType v tenv
+                of Just (ty, _) -> length (dataTypeDataConstructors ty) == 1
+                   Nothing -> internalError "rwCase: Invalid constructor"
          [] -> internalError "rwCase: Empty case statement"
 
     scrut_var =
@@ -1852,17 +1835,16 @@ rwCase2 inf alts scrut' scrut_val = do
       in liftIO $ hPrint stderr (hang (text "rwCaseOfCase") 2 (doc1 $$ text "----" $$ doc2))
 
 -- | Find the alternative matching constructor @con@
-findAlternative :: [AltM] -> Var -> AltM
+findAlternative :: [AltM] -> ConInst -> AltM
 findAlternative alts con =
   case find match_con alts
   of Just alt -> alt
      Nothing -> internalError "rwCase: Missing alternative"
   where
-    match_con (AltM (DeCon {altConstructor = c})) = c == con
-    match_con (AltM (DeTuple {})) =
-      -- The given constructor doesn't build values of the same type as what
-      -- this alternative deconstructs
-      internalError "findAlternative: Type error detected"
+    con_summary = summarizeConstructor con
+
+    match_con (AltM (Alt {altCon = DeCInstM c})) =
+      summarizeDeconstructor c == con_summary
 
 -- | Given the parts of a data constructor application and a list of case
 --   alternatives, eliminate the case statement.  None of the given expressions
@@ -1879,7 +1861,7 @@ eliminateCaseWithExp :: TypeEnv
                      -> LR (ExpM, MaybeValue)
 eliminateCaseWithExp
   tenv field_kinds ex_args initializers (AltM alt)
-  | length (getAltExTypes alt) /= length ex_args =
+  | length ex_types /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
       internalError "rwCase: Wrong number of fields"
@@ -1896,10 +1878,10 @@ eliminateCaseWithExp
       -- Continue simplifying the new expression
       rwExp $ applyCaseElimBindings binders body
   where
+    ex_types = deConExTypes $ fromDeCInstM $ altCon alt
     ex_type_subst =
       substitution [(v, ex_type)
-                   | (TyPatM (v ::: _), TypM ex_type) <-
-                       zip (getAltExTypes alt) ex_args]
+                   | (v ::: _, TypM ex_type) <- zip ex_types ex_args]
 
 -- | Given a data value and a list of case
 --   alternatives, eliminate the case statement.
@@ -1919,7 +1901,7 @@ eliminateCaseWithSimplifiedExp :: Bool -- ^ Whether fields are given as field va
                                -> LR (ExpM, MaybeValue) -- ^ Simplified case alternative and its abstract value
 eliminateCaseWithSimplifiedExp
   is_inspector tenv field_kinds ex_args initializers (AltM alt)
-  | length (getAltExTypes alt) /= length ex_args =
+  | length ex_types /= length ex_args =
       internalError "rwCase: Wrong number of type parameters"
   | length (altParams alt) /= length initializers =
       internalError "rwCase: Wrong number of fields"
@@ -1946,10 +1928,10 @@ eliminateCaseWithSimplifiedExp
       return (applyCaseElimBindings binders body', Nothing)
   where
     with_values vs e = foldr (uncurry withMaybeValue) e vs
+    ex_types = deConExTypes $ fromDeCInstM $ altCon alt
     ex_type_subst =
       substitution [(v, ex_type)
-                   | (TyPatM (v ::: _), TypM ex_type) <-
-                       zip (getAltExTypes alt) ex_args]
+                   | (v ::: _, TypM ex_type) <- zip ex_types ex_args]
 
 newtype CaseElimBinding = CaseElimBinding (ExpM -> ExpM)
 
@@ -1990,47 +1972,34 @@ rwAlt :: Bool                   -- ^ Whether to propagate exceptions
       -> Maybe ([TypM], [MaybeValue]) -- ^ Deconstruted scrutinee value
       -> AltM                         -- ^ Alternative to rewrite
       -> LR AltM
-rwAlt propagate_exceptions scr m_values (AltM alt) = 
-  case alt
-  of DeCon con tyArgs exTypes params body -> do
-       -- DEBUG: Print known values
-       -- liftIO $ print $ text "rwAlt" <+>
-       --                  maybe empty (vcat . map pprMaybeValue . snd) m_values
-       
-       -- If the scrutinee is a variable,
-       -- add its known value to the environment
-       tenv <- getTypeEnv
-       let ex_args = [v | TyPatM (v ::: _) <- exTypes]
-           arg_values = zipWith mk_arg values params
-           Just (data_type, dcon_type) = lookupDataConWithType con tenv
-           data_value =
-             patternValue defaultExpInfo tenv data_type dcon_type tyArgs ex_args arg_values
-           
-           assume_scrutinee m =
-             case scr
-             of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m
-                Nothing -> m
+rwAlt propagate_exceptions scr m_values (AltM alt) = do
+  tenv <- getTypeEnv
+  let decon = fromDeCInstM $ altCon alt
+  let arg_values = zipWith mk_arg values (altParams alt)
+  let data_value =
+        case decon
+        of VarDeCon v ty_args ex_types ->
+             let Just (data_type, dcon_type) = lookupDataConWithType v tenv
+                 ex_vars = [v | v ::: _ <- ex_types]
+             in patternValue defaultExpInfo tenv data_type dcon_type
+                (map TypM ty_args) ex_vars arg_values
+           TupleDeCon ty_args ->
+             tuplePatternValue defaultExpInfo (map TypM ty_args) arg_values
 
-           -- Number of uses may increase or decrease after simplifying
-           params' = map (setPatMDmd unknownDmd) params
-       assume_scrutinee $ assume_params exTypes (zip values params) $ do
-         (body', _) <- rewrite_expression body
-         return $ AltM $ DeCon con tyArgs exTypes params' body'
+  let assume_scrutinee m =
+        case scr
+        of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m
+           Nothing -> m
 
-     DeTuple params body -> do
-       -- If the scrutinee is a variable, add its known value to the environment
-       let arg_values = zipWith mk_arg values params
-           arg_types = map (TypM . patMType) params
-           data_value = tuplePatternValue defaultExpInfo arg_types arg_values
-           assume_scrutinee m =
-             case scr
-             of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m
-                Nothing -> m
-           -- Number of uses may increase or decrease after simplifying
-           params' = map (setPatMDmd unknownDmd) params
-       assume_scrutinee $ assume_params [] (zip values params) $ do
-         (body', _) <- rwExp body
-         return $ AltM $ DeTuple params' body'
+      -- Number of uses may increase or decrease after simplifying
+      params' = map (setPatMDmd unknownDmd) (altParams alt)
+
+  -- If scrutinee is a variable, add its known value to the environment
+  assume_scrutinee $
+    assume_params (deConExTypes decon) (zip values (altParams alt)) $ do
+    (body', _) <- rewrite_expression (altBody alt)
+    return $ AltM $ Alt (DeCInstM decon) params' body'
+  
   where
     -- Rewrite the body expression.  If it will raise an exception,
     -- generate an exception expression here.
@@ -2064,7 +2033,7 @@ rwAlt propagate_exceptions scr m_values (AltM alt) =
     assume_params ex_types params_and_values m = do
       tenv <- getTypeEnv
       let with_params = assume_parameters params_and_values m
-          with_ty_params = foldr assumeTyPatM with_params ex_types
+          with_ty_params = foldr assumeBinder with_params ex_types
       with_ty_params
       
     assume_parameters labeled_params m = foldr assume_param m labeled_params
@@ -2123,7 +2092,7 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
 --   of type 'NoneType'.
 makeBranchContinuation :: ExpInfo -> Maybe PatM -> AltM -> LR (Def Mem)
 makeBranchContinuation inf m_return_param (AltM alt) = do
-  let ex_types = getAltExTypes alt
+  let ex_types = deConExTypes $ fromDeCInstM $ altCon alt
 
   -- If there's a current return parameter,
   -- pass that to the branch continuation also.
@@ -2136,10 +2105,10 @@ makeBranchContinuation inf m_return_param (AltM alt) = do
     else return fun_params
   let body = altBody alt
   return_type <-
-    assumeTyPatMs ex_types $ assumePatterns nonempty_params $ inferExpType body
+    assumeBinders ex_types $ assumePatterns nonempty_params $ inferExpType body
        
   fun_name <- newAnonymousVar ObjectLevel
-  let fun = FunM $ Fun inf ex_types nonempty_params (TypM return_type) body
+  let fun = FunM $ Fun inf (map TyPatM ex_types) nonempty_params (TypM return_type) body
 
   -- Simplify the function
   (fun', _) <- rwFun fun
@@ -2156,7 +2125,7 @@ caseAnalyze inf m_return_parameter branches scrutinee =
   ExpM $ CaseE inf scrutinee (map dispatch branches)
   where
     dispatch (AltM alt, callee) =
-      let ty_args = [TypM $ VarT a | TyPatM (a ::: _) <- getAltExTypes alt]
+      let ty_args = [TypM $ VarT a | a ::: _ <- deConExTypes $ fromDeCInstM $ altCon alt]
           return_arg =
             case m_return_parameter
             of Nothing -> Nothing
@@ -2165,7 +2134,7 @@ caseAnalyze inf m_return_parameter branches scrutinee =
                  maybeToList return_arg
           nonempty_args =
             if null args
-            then [ExpM $ VarE inf (pyonBuiltin The_None)]
+            then [conE inf (VarCon (pyonBuiltin The_None) [] []) []]
             else args
           call = ExpM $ AppE inf (ExpM $ VarE inf callee) ty_args nonempty_args
       in AltM (alt {altBody = call})
@@ -2299,8 +2268,11 @@ rewriteLocalExpr phase ruleset mod =
     
     -- For each variable rewrite rule, create a known value that will be 
     -- inlined in place of the variable.
-    let known_values = foldr insert_rewrite_rule global_known_values $
-                       getVariableReplacements ruleset
+    known_value_list <-
+      runFreshVarM var_supply $ getVariableReplacements ruleset
+    let known_values =
+          foldr insert_rewrite_rule global_known_values known_value_list
+                       
           where
             insert_rewrite_rule (v, e) m =
               IntMap.insert (fromIdent $ varID v) (InlAV e) m

@@ -63,6 +63,12 @@ extern function pyon.internal.prim.min_ii
 extern function pyon.internal.prim.minus_ii
   (IndInt, IndInt) -> IndInt;
 
+extern procedure pyon.internal.prim.min_fii
+  (FinIndInt, FinIndInt) -> FinIndInt;
+
+extern procedure pyon.internal.prim.minus_fii
+  (FinIndInt, FinIndInt) -> FinIndInt;
+
 extern function pyon.internal.prim.doall
   (FinIndInt, owned) -> ();
 

@@ -6,6 +6,7 @@ module Untyped.TypeAssignment
         instantiateTypeAssignment,
         firstOrderAssignment,
         polymorphicAssignment,
+        constructorAssignment,
         recursiveAssignment,
         methodAssignment)
 where
@@ -19,6 +20,7 @@ import Untyped.HMType
 import Untyped.Kind
 import Untyped.Syntax
 import Untyped.Data
+import Type.Var
 
 assignedFreeVariables :: TypeAssignment -> IO TyVarSet
 assignedFreeVariables = _typeAssignmentFreeVariables
@@ -53,6 +55,19 @@ polymorphicAssignment ty mk_value =
       (ty_vars, constraint, fot) <- instantiate ty
       (placeholders, exp) <-
         instanceExpression pos (map ConTy ty_vars) constraint (mk_value pos)
+      free_vars <- unifiableTypeVariables fot
+      return (placeholders, free_vars, constraint, fot, exp)
+
+constructorAssignment :: TyScheme -- ^ Polymorphic type
+                      -> Var      -- ^ Data constructor
+                      -> TypeAssignment
+constructorAssignment ty con =
+  TypeAssignment (freeTypeVariables ty) ty instantiate_con
+  where
+    instantiate_con pos = do
+      (ty_vars, constraint, fot) <- instantiate ty
+      (placeholders, exp) <-
+        conInstanceExpression pos (map ConTy ty_vars) constraint con fot
       free_vars <- unifiableTypeVariables fot
       return (placeholders, free_vars, constraint, fot, exp)
 

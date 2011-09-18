@@ -7,6 +7,7 @@ expressions this way.
 -}
 
 {-# LANGUAGE FlexibleInstances, FlexibleContexts, ViewPatterns #-}
+{-# OPTIONS_GHC -auto-all #-}
 module SystemF.Floating
        (Context,
         assumeContext,
@@ -22,7 +23,6 @@ module SystemF.Floating
         applyContextWithType,
         splitContext,
         isTrivialExp,
-        floatedParameters',
         floatModule)
 where
 
@@ -60,6 +60,16 @@ import Type.Type
 import Globals
 import GlobalVar
 
+-- | Check if a let-bound variable is mentioned in its own RHS, with is not
+--   allowed.  Throw an error on error.
+checkLetExpression :: ExpM -> ()
+checkLetExpression (ExpM (LetE _ pat rhs _))
+  | patMVar pat `Set.member` freeVariables rhs =
+      internalError "Check failed"
+  | otherwise = ()
+
+checkLetExpression _ = ()
+     
 -- | Do s1 and s2 intersect?
 intersects :: Ord a => Set.Set a -> Set.Set a -> Bool
 s1 `intersects` s2 = not $ Set.null $ Set.intersection s1 s2
@@ -287,7 +297,8 @@ selectFloatableParameters tenv float don't_float field_types field_specificities
 --   Helper function for 'floatedParameters'.
 extractDataConTypeAndSpecificity :: TypeEnv -> Var -> Specificity
                                  -> Maybe (DataConType, [Maybe Specificity])
-extractDataConTypeAndSpecificity tenv op_var spc =
+extractDataConTypeAndSpecificity tenv op_var spc = 
+  internalError "extractDataConTypeAndSpecificity: This function is obsolete"{-
   case lookupDataCon op_var tenv
   of Just dcon_type ->
        let specificities =
@@ -301,12 +312,12 @@ extractDataConTypeAndSpecificity tenv op_var spc =
                   internalError "floatedParameters: Invalid demand"
                 _ -> repeat Nothing
        in Just (dcon_type, specificities)
-     Nothing -> Nothing
+     Nothing -> Nothing -}
 
 -- | Based on the operator variable, pick which arguments should be floated.
 floatedParameters :: TypeEnv -> Specificity -> Var -> [TypM] -> Flt [FltParamType]
 floatedParameters tenv spc op_var ty_args =
-  case extractDataConTypeAndSpecificity tenv op_var spc
+  case Nothing -- extractDataConTypeAndSpecificity tenv op_var spc
   of Just (dcon_type, field_spcs) -> do
        direct_params <-
          directStyleAppParameters tenv dcon_type ty_args field_spcs 
@@ -327,7 +338,7 @@ floatedParameters tenv spc op_var ty_args =
 --   unknown, False is returned.
 floatedParameters' :: TypeEnv -> Var -> [TypM] -> [Bool]
 floatedParameters' tenv op_var ty_args =
-  case extractDataConTypeAndSpecificity tenv op_var Used
+  case Nothing -- extractDataConTypeAndSpecificity tenv op_var Used
   of Just (dcon_type, field_spcs) ->
        directStyleAppParameters' tenv dcon_type ty_args field_spcs ++
        repeat False
@@ -367,27 +378,23 @@ contextItem e = ContextItem (freeVariablesContextExp e) e
     freeVariablesContextExp (LetCtx _ pat rhs) =
       freeVariables (patMType pat) `Set.union` freeVariables rhs
 
-    freeVariablesContextExp (CaseCtx _ scrutinee (MonoCon _ ty_args ty_pats) pats exc_alts) =
-      let scr_fv = freeVariables scrutinee
-          ty_fv = Set.unions $ map freeVariables ty_args
-          typat_fv = Set.unions $ map (freeVariables . binderType) ty_pats
+    freeVariablesContextExp (CaseCtx _ scrutinee decon pats exc_alts) =
+      let (decon_free, decon_bound) =
+            case decon
+            of DeCInstM (VarDeCon _ ty_args ex_types) ->
+                 (freeVariables (ty_args ++ [t | _ ::: t <- ex_types]),
+                  [v | v ::: _ <- ex_types])
+               DeCInstM (TupleDeCon ty_args) ->
+                 (freeVariables ty_args, mempty)
+          
+          scr_fv = freeVariables scrutinee
           
           -- Get free variables from patterns; remove existential variables
           pat_fv1 = Set.unions $ map (freeVariables . patMType) pats
-          pat_fv = foldr Set.delete pat_fv1 (map binderVar ty_pats)
+          pat_fv = foldr Set.delete pat_fv1 decon_bound
           
           alts_fv = freeVariables exc_alts
-      in Set.unions [scr_fv, ty_fv, typat_fv, pat_fv, alts_fv]
-   
-    freeVariablesContextExp (CaseCtx _ scrutinee (MonoTuple ty_args) pats exc_alts) =
-      let scr_fv = freeVariables scrutinee
-          ty_fv = Set.unions $ map freeVariables ty_args
-          
-          -- Get free variables from patterns
-          pat_fv = Set.unions $ map (freeVariables . patMType) pats
-          
-          alts_fv = freeVariables exc_alts
-      in Set.unions [scr_fv, ty_fv, pat_fv, alts_fv]
+      in Set.unions [scr_fv, decon_free, pat_fv, alts_fv]
 
     freeVariablesContextExp (LetfunCtx _ defgroup) =
       case defgroup
@@ -400,7 +407,7 @@ contextItem e = ContextItem (freeVariablesContextExp e) e
 
 -- | An expression sans body that can be floated outward.
 data ContextExp =
-    -- | A let expression that doesn't allocate local memory (not @LocalVarP@).
+    -- | A let expression that binds a variable.
     --
     --   @let <pattern> = <rhs> in (...)@
     LetCtx ExpInfo PatM ExpM
@@ -412,7 +419,7 @@ data ContextExp =
     --
     --   @case <scrutinee> 
     --    of { <alternative>. (...); <excepting alternatives>}@
-  | CaseCtx ExpInfo ExpM !MonoCon [PatM] [AltM]
+  | CaseCtx ExpInfo ExpM !DeCInstM [PatM] [AltM]
     -- | A letfun expression
   | LetfunCtx ExpInfo (DefGroup (Def Mem))
 
@@ -434,21 +441,15 @@ freshenContextItem item = do
 renameContextExp :: Renaming -> ContextExp -> ContextExp
 renameContextExp rn cexp = 
   case cexp
-  of LetCtx inf pat body ->
-       renamePatM rn pat $ \rn' pat' -> LetCtx inf pat' (rename rn' body)
-     CaseCtx inf scr (MonoCon con ty_args ty_params) params exc_alts ->
+  of LetCtx inf pat rhs ->
+       let rhs' = rename rn rhs
+       in renamePatM rn pat $ \_ pat' -> LetCtx inf pat' rhs'
+     CaseCtx inf scr decon params exc_alts ->
        let scr' = rename rn scr
-           ty_args' = rename rn ty_args
-       in renameBindings rn ty_params $ \rn1 ty_params' ->
-          renamePatMs rn1 params $ \rn2 params' ->
-          let mono_con = MonoCon con ty_args' ty_params'
-          in CaseCtx inf scr' mono_con params' (map (rename rn2) exc_alts)
-     CaseCtx inf scr (MonoTuple ty_args) params exc_alts ->
-       let scr' = rename rn scr
-           ty_args' = rename rn ty_args
-       in renamePatMs rn params $ \rn1 params' ->
-          let mono_con = MonoTuple ty_args'
-          in CaseCtx inf scr' mono_con params' (map (rename rn1) exc_alts)
+           exc_alts' = map (rename rn) exc_alts
+       in renameDeConInst rn decon $ \rn1 decon' ->
+          renamePatMs rn1 params $ \_ params' ->
+          CaseCtx inf scr' decon' params' exc_alts'
      LetfunCtx inf defs ->
        renameDefGroup rn defs $ \_ defs' -> LetfunCtx inf defs'
 
@@ -458,19 +459,16 @@ freshenContextExp (LetCtx inf pat body) = do
   (pat', rn) <- freshenPatM (const $ return True) pat
   return (LetCtx inf pat' (rename rn body), rn)
 
-freshenContextExp (CaseCtx inf scr (MonoCon alt_con ty_args ty_params) params exc_alts) = do
-  (ty_params', ty_renaming) <- freshenTyPatMs (const $ return True) (map TyPatM ty_params)
-  renamePatMs ty_renaming params $ \ty_renaming2 params' -> do
+freshenContextExp (CaseCtx inf scr decon params exc_alts) = do
+  (decon', decon_rn) <- freshenDeConInst (const $ return True) decon
+  renamePatMs decon_rn params $ \decon_rn2 params' -> do
     (params'', param_renaming) <- freshenPatMs (const $ return True) params'
-    let rn = param_renaming `mappend` ty_renaming
-    exc_alts' <- freshen (const $ return True) $ rename rn exc_alts
-    let mono_con = MonoCon alt_con ty_args [b | TyPatM b <- ty_params']
-    return (CaseCtx inf scr mono_con params'' exc_alts', rn)
-
-freshenContextExp (CaseCtx inf scr mono_con@(MonoTuple _) params exc_alts) = do
-  (params', param_renaming) <- freshenPatMs (const $ return True) params
-  exc_alts' <- freshen (const $ return True) $ rename param_renaming exc_alts
-  return (CaseCtx inf scr mono_con params' exc_alts', param_renaming)
+    let rn = param_renaming `mappend` decon_rn2
+        
+    -- The bound variables are not in scope over the excepting alternatives,
+    -- so we don't have to rename them
+    exc_alts' <- freshen (const $ return True) exc_alts
+    return (CaseCtx inf scr decon' params'' exc_alts', rn)
 
 freshenContextExp (LetfunCtx inf defs) =
   case defs
@@ -495,10 +493,8 @@ ctxDefs :: ContextItem -> [Var]
 ctxDefs item =
   case ctxExp item
   of LetCtx _ pat _ -> [patMVar pat]
-     CaseCtx _ _ (MonoCon _ _ ty_params) params _ ->
-       map binderVar ty_params ++ map patMVar params
-     CaseCtx _ _ (MonoTuple _) params _ ->
-       map patMVar params
+     CaseCtx _ _ (DeCInstM decon) params _ ->
+       [v | v ::: _ <- deConExTypes decon] ++ map patMVar params
      LetfunCtx _ defs -> map definiendum $ defGroupMembers defs
 
 -- | Extract the part of the context that satisfies the predicate, 
@@ -584,7 +580,7 @@ applyContextRT m_return_type (c:ctx) e =
         case ctxExp c
         of LetCtx inf pat rhs -> ExpM $ LetE inf pat rhs e
            CaseCtx inf scr mono_con params exc_alts ->
-             let alts = altFromMonoCon mono_con params e :
+             let alts = AltM (Alt mono_con params e) :
                         map (setExceptionReturnType return_type) exc_alts
              in ExpM $ CaseE inf scr alts
            LetfunCtx inf defs ->
@@ -611,14 +607,20 @@ assumeContextItem :: (EvalMonad m, ReprDictMonad m) =>
 assumeContextItem ci m =
   case ctxExp ci
   of LetCtx _ pat _ -> addPatternVar pat m
-     CaseCtx _ _ (MonoCon _ _ ex_types) fields _ ->
-       assumeBinders ex_types $ addPatternVars fields m
-     CaseCtx _ _ (MonoTuple _) fields _ ->
-       addPatternVars fields m
+     CaseCtx _ _ (DeCInstM decon) fields _ ->
+       assumeBinders (deConExTypes decon) $ addPatternVars fields m
      LetfunCtx _ grp ->
        let function_types = [(definiendum def, functionType (definiens def))
                             | def <- defGroupMembers grp]
        in foldr (uncurry assume) m function_types
+
+-- | Show a 'ContextExp' by first turning it into an expression, then
+--   printing it.  A dummy expression is used to fill in the context's hole. 
+pprContextItem :: ContextItem -> Doc
+pprContextItem ctx_item =
+  let placeholder_exp = ExpM $ ExceptE defaultExpInfo (IntT (-2))
+      exp = applyContextRT (Just (IntT (-2))) [ctx_item] placeholder_exp
+  in pprExp exp
 
 -------------------------------------------------------------------------------
 -- The floating monad
@@ -895,9 +897,9 @@ addPatternVars ps x = foldr addPatternVar x ps
 flattenApp :: Bool -> Specificity -> ExpM -> Flt (ExpM, Type, Context)
 flattenApp float_initializers spc expression =
   case fromExpM expression
-  of AppE inf (ExpM (VarE _ op_var)) ty_args args ->
+  of {-AppE inf (ExpM (VarE _ op_var)) ty_args args ->
        -- Convert this expression to direct style
-       createFlattenedApp expression float_initializers spc inf op_var ty_args args
+       createFlattenedApp expression float_initializers spc inf op_var ty_args args-}
 
      AppE inf op ty_args args -> do
        -- Don't flatten this expresion.  Flatten subexpressions.
@@ -1029,10 +1031,11 @@ floatInExpRhs dmd expressionM@(ExpM expression) =
 --   demand analysis.
 floatInExpDmd :: Dmd -> ExpM -> Flt (ExpM, Type)
 floatInExpDmd dmd (ExpM expression) =
+  -- traceShow (pprExp (ExpM expression)) $ checkLetExpression (ExpM expression) `seq`
   case expression
   of VarE {} -> unchanged
      LitE {} -> unchanged
-     UTupleE inf args -> floatInTuple dmd inf args
+     ConE inf con args -> floatInConApp dmd inf con args
      AppE {} -> do
        (new_expression, rt, ctx) <- floatInApp False dmd (ExpM expression)
        return (applyContext ctx new_expression, rt)
@@ -1061,19 +1064,22 @@ floatInExpDmd dmd (ExpM expression) =
       ty <- inferExpType (ExpM expression)
       return (ExpM expression, ty)
 
-floatInTuple dmd inf args = do
-  -- Determine the demand on each argument
-  let arg_demands =
-        case specificity dmd
-        of Decond (MonoTuple _) spcs -> [Dmd OnceSafe spc | spc <- spcs]
-           _ -> repeat (Dmd OnceSafe Used)
-  (unzip -> (args', arg_types)) <- zipWithM floatInExpDmd arg_demands args
-  
-  -- Determine tuple type
+floatInConApp dmd inf con@(CInstM con_inst) args = do
   tenv <- getTypeEnv
-  let arg_kinds = map (toBaseKind . typeKind tenv) arg_types
-      tuple_type = typeApp (UTupleT arg_kinds) arg_types
-  return (ExpM $ UTupleE inf args', tuple_type)
+  
+  -- Determine the demand on each argument
+  let arg_specificities =
+        deconstructSpecificity tenv (length args) (specificity dmd)
+      arg_demands = [Dmd OnceSafe spc | spc <- arg_specificities]
+
+  -- Perform floating in the constructor's fields
+  (unzip -> (args', arg_types)) <- zipWithM floatInExpDmd arg_demands args
+
+  -- Determine type of result
+  (_, result_type) <- conInstType con_inst
+  
+  let new_exp = ExpM (ConE inf con args')
+  return (new_exp, result_type)
   
 floatInApp :: Bool -> Dmd -> ExpM -> Flt (ExpM, Type, Context)
 floatInApp float_initializers dmd expression = do
@@ -1155,8 +1161,8 @@ floatInCase dmd inf scr alts = do
   -- Decide whether it's possible to float the case expression
   case asCaseCtx (ExpM (CaseE inf scr' alts)) of
     Nothing -> not_floatable scr'
-    Just ((CaseCtx _ _ (MonoTuple _) _ _), _) -> not_floatable scr'
-    Just (ctx@(CaseCtx _ _ (MonoCon con _ alt_tparams) alt_params _), alt_body) -> do
+    Just ((CaseCtx _ _ (DeCInstM (TupleDeCon _)) _ _), _) -> not_floatable scr'
+    Just (ctx@(CaseCtx _ _ (DeCInstM (VarDeCon con _ alt_tparams)) alt_params _), alt_body) -> do
       floatable <- is_floatable con scr'
       if not floatable then not_floatable scr'  else do
         (rn_ctx, rn) <- floatAndRename ctx
@@ -1188,9 +1194,8 @@ asCaseCtx :: ExpM -> Maybe (ContextExp, ExpM)
 asCaseCtx (ExpM (CaseE inf scr alts)) =
   let (exc_alts, normal_alts) = partition isExceptingAlt alts
   in case normal_alts
-     of [alt] -> 
-          let (mono_con, params, body) = altToMonoCon alt
-              ctx = CaseCtx inf scr mono_con params exc_alts
+     of [AltM (Alt con params body)] -> 
+          let ctx = CaseCtx inf scr con params exc_alts
           in Just (ctx, body)
         _ -> Nothing
 
@@ -1199,14 +1204,14 @@ asCaseCtx _ = Nothing
 floatInAlt :: AltM -> Flt (AltM, Type)
 floatInAlt (AltM alt) = do
   (body', body_type) <-
-    assumeTyPatMs (getAltExTypes alt) $
+    assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $
     addPatternVars (altParams alt) $
     anchorOnVars local_vars $
     floatInExp (altBody alt)
   return (AltM $ alt {altBody = body'}, body_type)
   where
     local_vars =
-      [v | TyPatM (v ::: _) <- getAltExTypes alt] ++
+      [v | v ::: _ <- deConExTypes $ fromDeCInstM $ altCon alt] ++
       map patMVar (altParams alt)
 
 -- | What needs to be anchored when floating in a function definition.
@@ -1297,8 +1302,8 @@ floatTopLevel [] exports = do
   return (concat export_defs, exports')
 
 floatModule :: Module Mem -> IO (Module Mem)
-floatModule mod@(Module mod_name imports defss exports) =
-  withTheNewVarIdentSupply $ \id_supply -> do
+floatModule mod@(Module mod_name imports defss exports) = do
+  ret <- withTheNewVarIdentSupply $ \id_supply -> do
     tenv <- readInitGlobalVarIO the_memTypes
     dict_env <- runFreshVarM id_supply createDictEnv
     let flt_env = FloatCtx {fcVarSupply = id_supply,
@@ -1307,4 +1312,8 @@ floatModule mod@(Module mod_name imports defss exports) =
                             fcReadVars = IntSet.empty}
     (defss', exports') <- runTopLevelFlt (floatTopLevel defss exports) flt_env
     return $ Module mod_name imports defss' exports'
+  -- DEBUG
+  -- typeCheckModule ret
+  return ret
+    
 

@@ -147,6 +147,9 @@ edcExp expression@(ExpSF base_expression) =
        mention v >> return expression
      LitE {} ->
        return expression
+     ConE {expArgs = args} -> do
+       args' <- mapM edcExp args
+       return $ ExpSF $ base_expression {expArgs = args'}
      AppE {expOper = op, expArgs = args} -> do
        -- Type arguments don't change
        op' <- edcExp op
@@ -171,10 +174,11 @@ edcExp expression@(ExpSF base_expression) =
 
 -- | Dead code elimination for a case alternative
 edcAlt (AltSF alt) = do
-  mapM_ edcScanType $ altTyArgs alt
+  let DeCInstSF con = altCon alt
+  mapM_ (edcScanType . TypSF) $ deConTyArgs con
   -- Mask out variables bound by the alternative and simplify the body
   let local_vars = [v | VarP v _ <- altParams alt] ++
-                   [v | TyPatSF (v ::: _) <- altExTypes alt]
+                   [v | v ::: _ <- deConExTypes con]
   body' <- masks (mentionsSet local_vars) $ do
     edcExp (altBody alt)
   return $ AltSF $ alt {altBody = body'} 

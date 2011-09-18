@@ -52,6 +52,8 @@ newtype instance Typ (Typed SF) = TypTSF (TypeAnn Type)
 newtype instance Exp (Typed SF) = ExpTSF (TypeAnn (BaseExp TSF))
 newtype instance Alt (Typed SF) = AltTSF (TypeAnn (BaseAlt TSF))
 newtype instance Fun (Typed SF) = FunTSF (TypeAnn (BaseFun TSF))
+newtype instance CInst (Typed SF) = CInstTSF ConInst
+newtype instance DeCInst (Typed SF) = DeCInstTSF DeConInst
 
 data instance Pat (Typed SF) =
     TypedWildP TypTSF
@@ -134,6 +136,8 @@ typeInferExp (ExpSF expression) =
     case expression
     of VarE {expInfo = inf, expVar = v} ->
          typeInferVarE inf v
+       ConE inf (CInstSF op) args ->
+         typeInferConE inf op args
        LitE {expInfo = inf, expLit = l} ->
          typeInferLitE inf l
        AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
@@ -151,6 +155,10 @@ typeInferExp (ExpSF expression) =
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCM ExpTSF
 typeInferVarE inf var = do
+  tenv <- getTypeEnv
+  when (isJust $ lookupDataCon var tenv) $
+    internalError $ "typeInferVarE: Data constructor used as variable: " ++ show var
+
   ty <- lookupVar var
   return $ ExpTSF $ TypeAnn ty (VarE inf var)
 
@@ -162,6 +170,23 @@ typeInferLitE inf l = do
   let literal_type = literalType l
   checkLiteralType l
   return $ ExpTSF $ TypeAnn literal_type (LitE inf l)
+
+typeInferConE inf con@(VarCon op ty_args ex_types) args = do
+  let pos = getSourcePos inf
+  -- Get constructor's type
+  op_type <- lookupVar op
+  
+  -- Apply to type arguments
+  ti_ty_args <- mapM (typeInferType . TypSF) ty_args
+  ti_ex_types <- mapM (typeInferType . TypSF) ex_types
+  inst_type <- computeInstantiatedType pos op_type (ti_ty_args ++ ti_ex_types)
+
+  -- Apply to other arguments
+  ti_args <- mapM typeInferExp args
+  result_type <- computeAppliedType pos inst_type (map getTypeAnn ti_args)
+  
+  let new_exp = ConE inf (CInstTSF con) ti_args
+  return $ ExpTSF $ TypeAnn result_type new_exp
 
 typeInferAppE orig_expr inf op ty_args args = do
   let pos = getSourcePos inf
@@ -209,8 +234,11 @@ computeAppliedType pos op_type arg_types =
     apply op_type [] = return op_type
     
     -- For debugging
-    trace_types = traceShow (hang (text "computeAppliedType") 4 $
-                             pprType op_type $$ vcat (map pprType arg_types))
+    trace_types arg_t =
+      traceShow
+      (hang (text "computeAppliedType") 4 $
+       parens (pprType arg_t) $$
+       pprType op_type $$ vcat [text ">" <+> pprType t | t <- arg_types])
 
 typeInferFun :: FunSF -> TCM FunTSF
 typeInferFun fun@(FunSF (Fun { funInfo = info
@@ -285,19 +313,19 @@ typeInferCaseE inf scr alts = do
   return $! ExpTSF $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
 
 typeCheckAlternative :: SourcePos -> Type -> Alt SF -> TCM AltTSF
-typeCheckAlternative pos scr_type (AltSF (DeCon { altConstructor = con
-                                                , altTyArgs = types
-                                                , altExTypes = ex_fields
-                                                , altParams = fields
-                                                , altBody = body})) = do
+typeCheckAlternative pos scr_type (AltSF (Alt (DeCInstSF con) fields body)) = do
+  -- Data constructors are always constructor variables
+  let VarDeCon con_var types ex_fields = con
+      existential_vars = [v | v ::: _ <- ex_fields]
+
   -- Process arguments
-  arg_vals <- mapM typeInferType types
+  arg_vals <- mapM (typeInferType . TypSF) types
 
   -- Apply constructor to type arguments
-  con_ty <- tcLookupDataCon con
+  con_ty <- tcLookupDataCon con_var
   (_, arg_types, con_scr_type) <-
     let argument_types = [(ty, kind) | TypTSF (TypeAnn kind ty) <- arg_vals]
-        existential_types = [(v, kind) | TyPatSF (v ::: kind) <- ex_fields]
+        existential_types = [(v, kind) | v ::: kind <- ex_fields]
     in instantiatePatternType pos con_ty argument_types existential_types
 
   -- Verify that applied type matches constructor type
@@ -305,7 +333,7 @@ typeCheckAlternative pos scr_type (AltSF (DeCon { altConstructor = con
     scr_type con_scr_type
   
   -- Add existential types to environment
-  withMany assumeTyPat ex_fields $ \ex_fields' -> do
+  assumeBinders ex_fields $ do
 
     -- Verify that fields have the expected types
     check_number_of_fields arg_types fields
@@ -320,21 +348,14 @@ typeCheckAlternative pos scr_type (AltSF (DeCon { altConstructor = con
     when (ret_type `typeMentionsAny` Set.fromList existential_vars) $
       typeError "Existential variable escapes"
 
-    let new_alt = DeCon con arg_vals ex_fields' fields' ti_body
+    let new_alt = Alt (DeCInstTSF con) fields' ti_body
     return $ AltTSF $ TypeAnn ret_type new_alt
   where
-    -- The existential variables bound by this pattern
-    existential_vars = [v | TyPatSF (v ::: _) <- ex_fields]
-
     check_number_of_fields atypes fs
       | length atypes /= length fields =
         internalError $ "typeCheckAlternative: Wrong number of fields in pattern (expected " ++
         show (length atypes) ++ ", got " ++ show (length fields) ++ ")"
       | otherwise = return ()
-
-typeCheckAlternative pos scr_type (AltSF (DeTuple {})) =
-  -- Should not appear in System F code
-  internalError "typeCheckAlternative: Unexpected unboxed tuple"
 
 bindParamTypes params m = foldr bind_param_type m params
   where
@@ -407,6 +428,6 @@ inferExpType id_supply tenv expression =
            fmap getTypeAnn $ typeInferExp expression
 
     infer_alt (AltSF alt) =
-      withMany assumeTyPat (altExTypes alt) $ \_ ->
+      assumeBinders (getAltExTypes alt) $
       withMany assumePat (altParams alt) $ \_ ->
       infer_exp $ altBody alt

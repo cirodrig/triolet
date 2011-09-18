@@ -101,6 +101,12 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
   of VarE {expVar = v} ->
          pprVarFlags flags v
      LitE {expLit = l} -> pprLit l
+     ConE _ (CInstSF (VarCon op ty_args ex_types)) args ->
+       let op_doc = pprVar op
+           tDoc = [text "@" <> pprType t | t <- ty_args]
+           eDoc = [text "&" <> pprType t | t <- ex_types]
+           aDoc = map (pprExpFlagsPrec flags precOuter) args
+       in hang op_doc 4 (tuple (tDoc ++ eDoc ++ aDoc))
      AppE {expOper = e, expTyArgs = ts, expArgs = es} ->
          let eDoc = pprExpFlagsPrec flags precTyApp e
              tDoc = [text "@" <> pprTyp t | t <- ts]
@@ -118,11 +124,9 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
              e = pprExpFlags flags body
          in text "letrec" $$ nest 2 defsText $$ text "in" <+> e
      CaseE {expScrutinee = e, expAlternatives = [AltSF alt1, AltSF alt2]} 
-         | altConstructor alt1 `isPyonBuiltin` The_True &&
-           altConstructor alt2 `isPyonBuiltin` The_False ->
+         | is_true (altCon alt1) && is_false (altCon alt2) ->
              pprIf flags e (altBody alt1) (altBody alt2)
-         | altConstructor alt2 `isPyonBuiltin` The_True &&
-           altConstructor alt1 `isPyonBuiltin` The_False ->
+         | is_true (altCon alt2) && is_false (altCon alt1) ->
              pprIf flags e (altBody alt2) (altBody alt1)
      CaseE {expScrutinee = e, expAlternatives = alts} ->
        let doc = text "case" <+> pprExpFlagsPrec flags precOuter e $$
@@ -132,6 +136,11 @@ pprExpFlagsPrec flags prec (ExpSF expression) =
        let coercion_doc = pprType from_t <+> text "=>" <+> pprType to_t
            b_doc = pprExpFlagsPrec flags precOuter b 
        in hang (text "coerce" <+> parens coercion_doc) 4 b_doc
+  where
+    is_true (DeCInstSF (VarDeCon op _ _)) = op `isPyonBuiltin` The_True
+    is_true _ = False
+    is_false (DeCInstSF (VarDeCon op _ _)) = op `isPyonBuiltin` The_False
+    is_false _ = False
 
 pprIf flags cond tr fa =
   let condText = pprExpFlags flags cond
@@ -143,22 +152,16 @@ pprIf flags cond tr fa =
 
 
 pprAltFlags :: PrintFlags -> AltSF -> Doc
-pprAltFlags flags (AltSF (DeCon { altConstructor = c
-                                , altTyArgs = ty_args
-                                , altParams = params
-                                , altBody = body
-                                })) =
-  let ty_args_doc = map (text "@" <>) $ map pprTyp ty_args
-      params_doc = [parens $ pprPatFlags flags p | p <- params]
-      pattern = pprVar c <+> sep (ty_args_doc ++ params_doc)
-      body_doc = pprExpFlagsPrec flags precOuter body 
-  in hang (pattern <> text ".") 2 body_doc
-
-pprAltFlags flags (AltSF (DeTuple { altParams = params
-                                  , altBody = body
-                                  })) =
+pprAltFlags flags (AltSF (Alt con params body)) = 
   let pattern =
-        parens $ sep $ punctuate (text ",") $ map (pprPatFlags flags) params
+        case fromDeCInstSF con
+        of VarDeCon op ty_args ex_types ->
+             let ty_args_doc = map (text "@" <>) $ map pprType ty_args
+                 params_doc = [parens $ pprPatFlags flags p | p <- params]
+             in pprVar op <+> sep (ty_args_doc ++ params_doc)
+           TupleDeCon _ ->
+             parens $ sep $ punctuate (text ",") $
+             map (pprPatFlags flags) params
       body_doc = pprExpFlagsPrec flags precOuter body         
   in hang (pattern <> text ".") 2 body_doc
 

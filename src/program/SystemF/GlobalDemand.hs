@@ -333,7 +333,7 @@ setupExp (ExpM expression) =
 
      LitE _ _ -> return $ const $ return ()
 
-     UTupleE _ xs -> setupConApp xs
+     ConE _ con args -> setupConApp args
 
      AppE _ op@(ExpM (VarE _ op_var)) ty_args args -> do
        tenv <- getTypeEnv
@@ -490,18 +490,12 @@ evalCase scr alts dmd = do
 --   value is the demand imposed on the scrutinee.
 setupAlt :: AltM -> Setup (Specificity -> Run Specificity)
 setupAlt (AltM alt) =
-  assumeTyPatMs (getAltExTypes alt) $ assumePatMs (altParams alt) $ do
+  assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $ assumePatMs (altParams alt) $ do
     eval_body <- setupExp $ altBody alt
-    let mono_con =
-          case alt
-          of DeCon con ty_args ex_types _ _ ->
-               MonoCon con (map fromTypM ty_args) [b | TyPatM b <- ex_types]
-             DeTuple params _ ->
-               MonoTuple (map patMType params)
 
-    return $ evalAlt mono_con (altParams alt) eval_body
+    return $ evalAlt (altCon alt) (altParams alt) eval_body
 
-evalAlt mono_con params eval_body dmd = do
+evalAlt (DeCInstM mono_con) params eval_body dmd = do
   ((), param_demands) <- getDemandPats params $ eval_body dmd
   return $ Decond mono_con param_demands
 

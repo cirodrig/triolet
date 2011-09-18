@@ -254,6 +254,18 @@ function inline minus_ii (IndInt x, IndInt y) -> IndInt {
   };
 };
 
+procedure inline min_fii (FinIndInt x, FinIndInt y) -> FinIndInt {
+  FinIndInt {x_data} = x;
+  FinIndInt {y_data} = y;
+  if (x_data < y_data) { x; } else { y; };
+};
+
+procedure inline minus_fii (FinIndInt x, FinIndInt y) -> FinIndInt {
+  FinIndInt {x_data} = x;
+  FinIndInt {y_data} = y;
+  FinIndInt {x_data - y_data};
+};
+
 function inline doall (FinIndInt ix, owned f) -> () {
   FinIndInt {count} = ix;
   _ = while (int n = int 0) (n < count) {

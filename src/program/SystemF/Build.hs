@@ -32,6 +32,11 @@ appExp op t_args args = do
   args' <- sequence args
   return $ mkAppE op' t_args args'
 
+mkConE :: Supplies m VarID => ExpInfo -> ConInst -> [m ExpM] -> m ExpM
+mkConE inf op args = do
+  args' <- sequence args
+  return $ conE inf op args'
+
 -- | Create an application term, uncurrying the operator if possible
 mkAppE :: ExpM -> [TypM] -> [ExpM] -> ExpM
 mkAppE op [] [] = op 
@@ -99,19 +104,17 @@ localE' ty mk_rhs = do
 letViaBoxed :: Binder -> ExpM -> ExpM -> ExpM
 letViaBoxed binder rhs body =
   let -- Apply the 'boxed' constructor to the RHS
-      ty = TypM $ binderType binder
-      boxed_rhs = ExpM $ AppE defaultExpInfo boxed_con [ty] [rhs]
+      ty = binderType binder
+      boxed_con = VarCon (pyonBuiltin The_boxed) [ty] []
+      boxed_rhs = conE defaultExpInfo boxed_con [rhs]
   
       -- Create a case statement that binds a temporary value for the body
       expr = ExpM $ CaseE defaultExpInfo boxed_rhs [alt]
-      alt = AltM $ DeCon { altConstructor = pyonBuiltin The_boxed
-                         , altTyArgs = [ty]
-                         , altExTypes = []
-                         , altParams = [patM binder]
-                         , altBody = body}
+      decon = VarDeCon (pyonBuiltin The_boxed) [ty] []
+      alt = AltM $ Alt { altCon = DeCInstM decon
+                       , altParams = [patM binder]
+                       , altBody = body}
   in expr
-  where
-    boxed_con = ExpM $ VarE defaultExpInfo (pyonBuiltin The_boxed)
 
 letfunE :: DefGroup (Def Mem) -> ExpM -> ExpM
 letfunE defs body = ExpM $ LetfunE defaultExpInfo defs body
@@ -130,8 +133,10 @@ ifE mk_cond mk_tr mk_fa = do
   cond <- mk_cond
   tr <- mk_tr
   fa <- mk_fa
-  let true  = AltM $ DeCon (pyonBuiltin The_True) [] [] [] tr
-      false = AltM $ DeCon (pyonBuiltin The_False) [] [] [] fa
+  let true_con = VarDeCon (pyonBuiltin The_True) [] []
+      false_con = VarDeCon (pyonBuiltin The_False) [] []
+      true  = AltM $ Alt (DeCInstM true_con) [] tr
+      false = AltM $ Alt (DeCInstM false_con) [] fa
   return $ ExpM $ CaseE defaultExpInfo cond [true, false]
 
 mkFun :: forall m. (Supplies m VarID) =>
@@ -168,11 +173,12 @@ mkAlt tenv con ty_args mk_body =
        pat_vars <- mapM (const $ newAnonymousVar ObjectLevel) param_types
        body <- mk_body typat_vars pat_vars
        
-       let ex_params = [TyPatM (v ::: t)
+       let ex_params = [v ::: t
                        | (v, _ ::: t) <- zip typat_vars ex_param_types]
            patterns = [patM (v ::: ty)
                       | (v, ty) <- zip pat_vars param_types]
-       return $ AltM $ DeCon con ty_args ex_params patterns body
+           decon = VarDeCon con (map fromTypM ty_args) ex_params
+       return $ AltM $ Alt (DeCInstM decon) patterns body
      _ -> internalError "mkAlt"
 
 outType t = varApp (pyonBuiltin The_OutPtr) [t]

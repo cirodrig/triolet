@@ -16,6 +16,7 @@ import Common.MonadLogic
 import Common.Supply
 import Builtins.Builtins
 import LowLevel.Build
+import qualified LowLevel.Records as LL
 import qualified LowLevel.Builtins as LL
 import qualified LowLevel.Syntax as LL
 import qualified LowLevel.CodeTypes as LL
@@ -42,8 +43,9 @@ data LowerEnv =
            , typeEnvironment :: !TypeEnv
              
              -- | The type-indexed integers in the environment.
+             --   Contains lowered 'FIInt' values.
              --   Indexed by the type index.
-           , intEnvironment :: DictEnv.DictEnv LL.Val
+           , intEnvironment :: DictEnv.DictEnv (GenLower LL.Val)
 
              -- | The 'Repr' dictionaries in the environment.  Indexed
              --   by the dictionary's type parameter.
@@ -69,11 +71,23 @@ initializeLowerEnv var_supply ll_var_supply type_env var_map = do
 mkGlobalIntEnv = do
   minimum_int <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin The_min_i) [VarT arg1, VarT arg2],
-     return (LL.VarV $ LL.llBuiltin LL.the_fun_min_ii))
+     binary_function arg1 arg2 (LL.llBuiltin LL.the_prim_min_fii))
   minus_int <- DictEnv.pattern2 $ \arg1 arg2 ->
     (varApp (pyonBuiltin The_minus_i) [VarT arg1, VarT arg2],
-     return (LL.VarV $ LL.llBuiltin LL.the_fun_minus_ii))
+     binary_function arg1 arg2 (LL.llBuiltin LL.the_prim_minus_fii))
   return $ DictEnv.DictEnv [minimum_int, minus_int]
+  where
+    binary_function :: Var -> Var -> LL.Var -> Substitution -> GenLower LL.Val
+    binary_function arg1 arg2 op_var subst = do
+      val1 <- lookupIndexedInt (get_arg arg1)
+      val2 <- lookupIndexedInt (get_arg arg2)
+      emitAtom1 (LL.RecordType LL.finIndexedIntRecord) $ 
+        LL.primCallA (LL.VarV op_var) [val1, val2]
+      where
+        get_arg a =
+          case substituteVar a subst
+          of Just t -> t
+             Nothing -> internalError "mkGlobalIntEnv"
 
 -- | Create the global representation dictionary environment
 mkGlobalReprEnv :: FreshVarM (DictEnv.DictEnv (GenLower LL.Val))
@@ -198,15 +212,15 @@ assumeReprDict ty val (Lower m) = Lower $ local update m
 
 -- | Find a finite integer indexed by the given index, which should be a type
 --   of kind @intindex@.  Fail if not found.
-lookupIndexedInt :: Type -> Lower LL.Val
+lookupIndexedInt :: Type -> GenLower LL.Val
 lookupIndexedInt ty = do
   match <- lookup_dict
   case match of
-    Just int_val -> return int_val
+    Just make_int_val -> make_int_val
     Nothing -> internalError $ 
                "lookupIndexedInt: Not found for index:\n" ++ show (pprType ty)
   where
-    lookup_dict = do
+    lookup_dict = lift $ do
       dict_env <- Lower $ asks intEnvironment 
       DictEnv.lookup ty dict_env
 
@@ -215,7 +229,7 @@ assumeIndexedInt :: Type -> LL.Val -> Lower a -> Lower a
 assumeIndexedInt ty val (Lower m) = Lower $ local update m
   where
     update env = env {intEnvironment =
-                         DictEnv.insert (DictEnv.monoPattern ty val) $
+                         DictEnv.insert (DictEnv.monoPattern ty (return val)) $
                          intEnvironment env}
 
 lookupVar :: Var -> Lower LL.Var

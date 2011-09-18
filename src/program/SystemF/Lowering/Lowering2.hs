@@ -122,13 +122,14 @@ retValToList (RetVal val) = [val]
 -- | Compile a data constructor.  If the data constructor takes no   
 --   arguments, the constructor value is returned; otherwise a function 
 --   is returned.  All type arguments must be provided.
-compileConstructor :: Var -> DataConType -> [Type] -> GenLower RetVal
-compileConstructor con con_type ty_args = do
+compileConstructor :: Var -> DataConType -> [Type] -> [Type] -> [LL.Val] -> GenLower RetVal
+compileConstructor con con_type ty_args ex_types args = do
   layout <- lift $ do
-    (_, result_type) <- instantiateDataConTypeWithExistentials con_type ty_args
+    (_, result_type) <-
+      instantiateDataConTypeWithExistentials con_type (ty_args ++ ex_types)
     tenv <- getTypeEnv
     getAlgLayout tenv result_type
-  fmap RetVal $ algebraicIntro layout con
+  fmap RetVal $ algebraicIntro layout con args
 
 compileCase :: Type             -- ^ Case statement result type
             -> Type             -- ^ Scrutinee type
@@ -186,7 +187,7 @@ lowerExp (ExpTM (TypeAnn ty expression)) =
   case expression
   of VarE _ v -> lowerVar ty v
      LitE _ l -> lowerLit ty l
-     UTupleE _ args -> lowerUTuple ty args
+     ConE _ con args -> lowerCon con args
      AppE _ op ty_args args -> lowerApp ty op ty_args args
      LamE _ f -> lift $ lowerLam ty f
      LetE _ binder rhs body -> lowerLet ty binder rhs body
@@ -194,19 +195,11 @@ lowerExp (ExpTM (TypeAnn ty expression)) =
      CaseE _ scr alts -> lowerCase ty scr alts
      ExceptE _ _ -> lowerExcept ty
 
-lowerVar _ v =
+lowerVar _ v = lift $
   case LL.lowerIntrinsicOp v
-  of Just lower_var -> lift $ fmap RetVal lower_var
-     Nothing -> do
-       tenv <- lift getTypeEnv
-       case lookupDataCon v tenv of
-         Just data_con ->
-           -- A constructor with no arguments.
-           -- Constructors taking arguments should be
-           -- processed by 'lowerApp'.
-           compileConstructor v data_con []
-         Nothing -> lift $ do ll_v <- lookupVar v
-                              return $ RetVal (LL.VarV ll_v)
+  of Just lower_var -> fmap RetVal lower_var
+     Nothing -> do ll_v <- lookupVar v
+                   return $ RetVal (LL.VarV ll_v)
 
 lowerLit _ lit =
   case lit
@@ -221,14 +214,22 @@ lowerLit _ lit =
             | con `isPyonBuiltin` The_float ->
               return $ RetVal (LL.LitV $ LL.FloatL LL.pyonFloatSize n)
 
--- | Lower arguments, then pack the result values into a record value
-lowerUTuple _ args = do
+-- | Lower a data constructor application.  Generate code to construct a value.
+
+-- Lower arguments, then pack the result values into a record value
+lowerCon (CInstTM (TupleCon _)) args = do
   arg_values <- mapM lowerExpToVal args
   let record_type = LL.constStaticRecord $
                     map (LL.valueToFieldType . LL.valType) arg_values
   tuple_val <- emitAtom1 (LL.RecordType record_type) $
                LL.PackA record_type arg_values
   return $ RetVal tuple_val
+
+lowerCon (CInstTM (VarCon op ty_args ex_types)) args = do
+  tenv <- lift getTypeEnv
+  let Just op_data_con = lookupDataCon op tenv
+  arg_vals <- mapM lowerExpToVal args
+  compileConstructor op op_data_con ty_args ex_types arg_vals
 
 -- | Lower an application term.
 --
@@ -248,18 +249,8 @@ lowerApp rt (ExpTM (TypeAnn _ (VarE _ op_var))) ty_args args
           return $ RetVal (LL.LitV LL.UnitL)
 
 lowerApp rt op ty_args args = do
-  tenv <- lift getTypeEnv
-  
-  -- If the operator is a data constructor, generate data constructor code;
-  -- otherwise, lower the expression
-  op' <-
-    case op
-    of ExpTM (TypeAnn _ (VarE _ op_var)) 
-         | Just op_data_con <- lookupDataCon op_var tenv ->
-             let argument_types = [t | TypTM (TypeAnn _ t) <- ty_args]
-             in compileConstructor op_var op_data_con argument_types
-       _ ->
-         lowerExp op
+  -- Lower the operator expression
+  op' <- lowerExp op
 
   -- If function arguments were given, then generate a function call
   if null args then return op' else do
@@ -291,16 +282,15 @@ lowerCase return_type scr alts = do
   compileCase return_type scrutinee_type scr_val (map lowerAlt alts)
 
 lowerAlt (AltTM (TypeAnn return_type alt)) =
-  let con =
-        case alt
-        of DeCon {altConstructor = con} -> VarCon con
-           DeTuple {} -> TupleCon
+  let con = case altCon alt
+            of DeCInstTM (VarDeCon v _ _) -> VarTag v
+               DeCInstTM (TupleDeCon _)   -> TupleTag
   in (con, lowerAltBody return_type alt)
 
 lowerAltBody return_type alt field_values =
   -- Bind the field values and generate the body
   let params = map fromPatTM $ altParams alt
-  in assumeTyParams (getAltExTypes alt) $
+  in assumeBinders (deConExTypes (case altCon alt of DeCInstTM x -> x)) $
      bindPatterns (zip params field_values) $
      lowerExp $ altBody alt
 

@@ -1214,6 +1214,11 @@ mkGlobalVar name typ con = do
   let ass = polymorphicAssignment scm exp
   predefinedVariable (Just $ builtinLabel name) ass
 
+mkGlobalCon name typ con = do
+  scm <- typ
+  let ass = constructorAssignment scm con
+  predefinedVariable (Just $ builtinLabel name) ass
+
 getClassVar name cls index = clmVariable $ getClassMethod cls index
 
 -------------------------------------------------------------------------------
@@ -1360,7 +1365,18 @@ initializeTIBuiltins = do
               ("iterBind", [| mkIterBindType |]
               , [| pyonBuiltin SystemF.The_Stream1_bind |]
               ),
-              ("complex", [| mkMakeComplexType |]
+              ("__and__", [| mkBinaryIntType |]
+              , [| pyonBuiltin SystemF.The_oper_BITWISEAND |]
+              ),
+              ("__or__", [| mkBinaryIntType |]
+              , [| pyonBuiltin SystemF.The_oper_BITWISEOR |]
+              ),
+              ("__xor__", [| mkBinaryIntType |]
+              , [| pyonBuiltin SystemF.The_oper_BITWISEXOR |]
+              )
+            ]
+          datacons =
+            [ ("complex", [| mkMakeComplexType |]
               , [| pyonBuiltin SystemF.The_complex |]
               ),
               ("justVal", [| mkJustValType |]
@@ -1371,15 +1387,6 @@ initializeTIBuiltins = do
               ),
               ("sliceObject", [| mkSliceObjectType |]
               , [| pyonBuiltin SystemF.The_sliceObject |]
-              ),
-              ("__and__", [| mkBinaryIntType |]
-              , [| pyonBuiltin SystemF.The_oper_BITWISEAND |]
-              ),
-              ("__or__", [| mkBinaryIntType |]
-              , [| pyonBuiltin SystemF.The_oper_BITWISEOR |]
-              ),
-              ("__xor__", [| mkBinaryIntType |]
-              , [| pyonBuiltin SystemF.The_oper_BITWISEXOR |]
               )
             ]
           cls_members =
@@ -1413,6 +1420,8 @@ initializeTIBuiltins = do
             ('_':name, mk)
           global_initializer (name, typ, con) =
             ('_':name, [| mkGlobalVar name $(typ) $(con) |])
+          datacon_initializer (name, typ, con) =
+            ('_':name, [| mkGlobalCon name $(typ) $(con) |])
           cls_member_initializer (cls, members) = zipWith mb members [0..]
             where
               mb member_name index =
@@ -1430,6 +1439,7 @@ initializeTIBuiltins = do
                          map tyfun_con_initializer type_functions ++
                          map cls_initializer classes ++
                          map global_initializer globals ++
+                         map datacon_initializer datacons ++
                          concatMap cls_member_initializer cls_members
       in initializeRecordM tiBuiltinSpecification initializers)
   

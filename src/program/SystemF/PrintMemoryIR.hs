@@ -25,12 +25,12 @@ pprSpecificity Inspected = text "I"
 pprSpecificity (Decond mono_type spcs) = 
   let type_doc =
         case mono_type
-        of MonoCon con ty_args ex_types ->
+        of VarDeCon con ty_args ex_types ->
              let types_doc = [pprTypePrec t ?+ appPrec | t <- ty_args]
                  ex_doc    = [ parens $ pprVar v <+> text ":" <+> pprType t
                              | (v ::: t) <- ex_types]
              in parens $ sep (pprVar con : types_doc ++ ex_doc)
-           MonoTuple ty_args ->
+           TupleDeCon ty_args ->
              let types_doc = [pprTypePrec t ?+ appPrec | t <- ty_args]
              in parens $ sep $ punctuate (text ",") types_doc
   in text "D" <> braces (type_doc <> text ":" <> cat (map pprSpecificity spcs))
@@ -77,13 +77,23 @@ pprExpPrec (ExpM expression) =
   case expression
   of VarE _ v -> hasAtomicPrec $ pprVar v
      LitE _ l -> hasAtomicPrec $ pprLit l
-     UTupleE _ es ->
-       hasAtomicPrec $ pprParenList (map pprExp es)
+     ConE _ (CInstM (VarCon op ty_args ex_types)) args ->
+       let op_doc = text "<" <> pprVar op <> text ">"
+           ty_args_doc = [text "@" <> pprTypePrec t ?+ appPrec | t <- ty_args]
+           ex_types_doc = [text "&" <> pprTypePrec t ?+ appPrec | t <- ex_types]
+           args_doc = [pprExpPrec arg ?+ appPrec | arg <- args]
+       in hang op_doc 6 (sep $ ty_args_doc ++ ex_types_doc ++ args_doc)
+          `hasPrec` appPrec
+
+     ConE _ (CInstM (TupleCon _)) args ->
+       hasAtomicPrec $ pprParenList (map pprExp args)
+
      AppE _ op ty_args args ->
        let op_doc = pprExpPrec op ?+ appPrec
-           ty_args_doc = [pprTypePrec t ?+ outerPrec | TypM t <- ty_args]
-           args_doc = [pprExpPrec arg ?+ outerPrec | arg <- args]
-       in hang op_doc 8 (pprParenList (ty_args_doc ++ args_doc)) `hasPrec` appPrec
+           ty_args_doc = [text "@" <> pprTypePrec t ?+ appPrec | TypM t <- ty_args]
+           args_doc = [pprExpPrec arg ?+ appPrec | arg <- args]
+       in hang op_doc 6 (sep $ ty_args_doc ++ args_doc) `hasPrec` appPrec
+
      LamE _ f -> pprFunPrec f
      LetE _ pat rhs body ->
        let pat_doc = pprPat pat
@@ -112,14 +122,15 @@ pprExpPrec (ExpM expression) =
        in hang (text "coerce" <+> parens coercion_doc) 4 b_doc `hasPrec` appPrec
 
 
-pprPatternMatch (AltM (DeCon con ty_args ex_types params _)) =
+pprPatternMatch (AltM (Alt (DeCInstM (VarDeCon con ty_args ex_types)) params _)) =
   let con_doc = pprVar con
-      args_doc = pprParenList [pprType t | TypM t <- ty_args]
-      ex_types_doc = map (parens . pprTyPat) ex_types
+      args_doc = pprParenList $ map pprType ty_args
+      ex_types_doc = [parens $ pprVar v <+> text ":" <+> pprType t
+                     | v ::: t <- ex_types]
       params_doc = map (parens . pprPat) params
   in con_doc <+> sep (args_doc : ex_types_doc ++ params_doc)
 
-pprPatternMatch (AltM (DeTuple params _)) =
+pprPatternMatch (AltM (Alt (DeCInstM (TupleDeCon _)) params _)) =
   pprParenList (map pprPat params)
 
 pprAlt altm@(AltM alt) =

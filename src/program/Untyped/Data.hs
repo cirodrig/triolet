@@ -345,6 +345,11 @@ data instance SystemF.TyPat TI = TITyPat SystemF.Var TIType
 
 newtype instance SystemF.Alt TI = TIAlt (SystemF.BaseAlt TI)
 newtype instance SystemF.Fun TI = TIFun (SystemF.BaseFun TI)
+data instance SystemF.CInst TI =
+  TIConInst SystemF.Var [TIType] [TIType]
+
+data instance SystemF.DeCInst TI =
+  TIDeConInst SystemF.Var [TIType] [SystemF.TyPat TI]
 
 -- | A type inference System F expression
 type TIExp = SystemF.Exp TI

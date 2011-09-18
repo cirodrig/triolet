@@ -23,9 +23,10 @@ module SystemF.MemoryIR
         Exp(..),
         Alt(..),
         Fun(..),
-        TypM, PatM, TyPatM, ExpM, AltM, FunM,
-        appE,
-        altFromMonoCon, altToMonoCon,
+        CInst(..),
+        DeCInst(..),
+        TypM, PatM, TyPatM, ExpM, AltM, FunM, CInstM, DeCInstM,
+        appE, conE,
         unpackVarAppM, unpackDataConAppM, isDataConAppM,
         assumePatM, assumePatMs,
         assumeTyPatM, assumeTyPatMs,
@@ -101,6 +102,8 @@ newtype instance TyPat Mem  = TyPatM Binder
 newtype instance Exp Mem = ExpM {fromExpM :: BaseExp Mem}
 newtype instance Alt Mem = AltM {fromAltM :: BaseAlt Mem}
 newtype instance Fun Mem = FunM {fromFunM :: BaseFun Mem}
+newtype instance CInst Mem = CInstM {fromCInstM :: ConInst}
+newtype instance DeCInst Mem = DeCInstM {fromDeCInstM :: DeConInst}
 
 type TypM = Typ Mem
 type PatM = Pat Mem
@@ -108,27 +111,34 @@ type TyPatM = TyPat Mem
 type ExpM = Exp Mem
 type AltM = Alt Mem
 type FunM = Fun Mem
+type CInstM = CInst Mem
+type DeCInstM = DeCInst Mem
 
 appE :: ExpInfo -> ExpM -> [TypM] -> [ExpM] -> ExpM
 appE _ op [] [] = op
 appE inf op type_args args = ExpM (AppE inf op type_args args)
 
+conE :: ExpInfo -> ConInst -> [ExpM] -> ExpM
+conE inf op args = ExpM (ConE inf (CInstM op) args)
+
+{- Obsolete; 'BaseAlt' is isomorphic to this tuple type now
 -- | Construct a case alternative given a 'MonoCon' and the other required 
 --   fields
-altFromMonoCon :: MonoCon -> [PatM] -> ExpM -> AltM
-altFromMonoCon (MonoCon con ty_args ex_types) fields body =
+altFromMonoCon :: DeConInst -> [PatM] -> ExpM -> AltM
+altFromMonoCon (VarDeCon con ty_args ex_types) fields body =
   let ex_patterns = map TyPatM ex_types
   in AltM $ DeCon con (map TypM ty_args) ex_patterns fields body
 
-altFromMonoCon (MonoTuple _) fields body =
+altFromMonoCon (TupleDeCon _) fields body =
   AltM $ DeTuple fields body
 
-altToMonoCon :: AltM -> (MonoCon, [PatM], ExpM)
-altToMonoCon (AltM (DeCon con ty_args ex_types fields body)) =
-  (MonoCon con (map fromTypM ty_args) [b | TyPatM b <- ex_types], fields, body)
+altToMonoCon :: AltM -> (DeConInst, [PatM], ExpM)
+altToMonoCon (AltM (VarDeCon con ty_args ex_types fields body)) =
+  (TupleDeCon con (map fromTypM ty_args) [b | TyPatM b <- ex_types], fields, body)
 
 altToMonoCon (AltM (DeTuple fields body)) =
   (MonoTuple (map patMType fields), fields, body)
+-}
 
 unpackVarAppM :: ExpM -> Maybe (Var, [Type], [ExpM])
 unpackVarAppM (ExpM (AppE { expOper = ExpM (VarE _ op)
@@ -141,23 +151,18 @@ unpackVarAppM (ExpM (VarE { expVar = op })) =
 
 unpackVarAppM _ = Nothing
 
--- | If the expression is a data constructor application, return the data
---   constructor, type arguments, existential types, and field arguments
+-- | If the expression is a data constructor (other than a tuple),
+--   return the data constructor, type arguments, existential types,
+--   and field arguments
 unpackDataConAppM :: TypeEnv -> ExpM
                   -> Maybe (DataConType, [Type], [Type], [ExpM])
-unpackDataConAppM tenv (ExpM (AppE { expOper = ExpM (VarE _ op)
-                                   , expTyArgs = ts
-                                   , expArgs = xs}))
-  | Just dcon <- lookupDataCon op tenv =
-      let num_tyargs = length (dataConPatternParams dcon)
-          types = map fromTypM ts
-          ty_args = take num_tyargs types
-          ex_types = drop num_tyargs types
-      in Just (dcon, ty_args, ex_types, xs)
-
-unpackDataConAppM tenv (ExpM (VarE { expVar = op }))
-  | Just dcon <- lookupDataCon op tenv =
-      Just (dcon, [], [], [])
+unpackDataConAppM tenv (ExpM (ConE inf con args)) =
+  case fromCInstM con of
+    VarCon op ty_args ex_types -> 
+      let Just dcon = lookupDataCon op tenv
+      in Just (dcon, ty_args, ex_types, args)
+    TupleCon types ->
+      Nothing
 
 unpackDataConAppM _ _ = Nothing
 

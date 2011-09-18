@@ -233,8 +233,8 @@ etaExpandExp (ExpM expression) = ExpM <$>
   case expression
   of VarE {} -> return expression
      LitE {} -> return expression
-     UTupleE inf fields ->
-       UTupleE inf <$> mapM etaExpandExp fields
+     ConE inf con fields ->
+       ConE inf con <$> mapM etaExpandExp fields
      AppE inf op ty_args args ->
        AppE inf <$>
        etaExpandExp op <*> pure ty_args <*> mapM etaExpandExp args

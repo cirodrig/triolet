@@ -95,7 +95,7 @@ data Expression =
     { expAnnotation :: Ann
     , expFields :: [Expression]
     }
-    -- | A function call
+    -- | A function or data constructor call
   | CallE
     { expAnnotation :: Ann
     , expOperator :: Expression

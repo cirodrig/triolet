@@ -84,6 +84,9 @@ elimPMExp expression =
   case fromExpSF expression
   of VarE {} -> return expression
      LitE {} -> return expression
+     ConE inf op args -> do
+       args' <- traverse elimPMExp args
+       return $ ExpSF $ ConE inf op args'
      AppE inf op ty_args args -> do
        op' <- elimPMExp op 
        args' <- traverse elimPMExp args
@@ -136,7 +139,7 @@ elimPMPat _ pat@(VarP _ _) =
 elimPMPat pos pat@(TupleP ps) = do
   -- Eliminate sub-patterns
   (fields, transformer) <- elimPMPats pos ps
-  let field_types = [TypSF t | VarP _ t <- fields]
+  let field_types = [t | VarP _ t <- fields]
   
   -- Create a new variable pattern to replace the tuple pattern 
   pat_var <- pmNewVar
@@ -148,7 +151,7 @@ elimPMPat pos pat@(TupleP ps) = do
   let transformer' code =
         let new_info = mkExpInfo pos
             body = transformer code
-            alt = DeCon (pyonTupleCon tuple_size) field_types [] fields body
+            alt = Alt (DeCInstSF (VarDeCon (pyonTupleCon tuple_size) field_types [])) fields body
         in ExpSF $ CaseE new_info (ExpSF $ VarE new_info pat_var) [AltSF alt]
 
   return (VarP pat_var new_pat_type, transformer')

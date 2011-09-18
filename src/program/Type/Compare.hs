@@ -147,7 +147,7 @@ cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
     cmp (_, _) = return False
     
     bindAndCompare x dom expected given =
-      assume x dom $ cmpType expected given
+      assume x dom $ compareTypes expected given
 
 -- | Given an expected type @t_e@, a set of flexible variables @fv$, and a
 --   given type @t_g@, try to construct a unifying substitution

@@ -40,18 +40,20 @@ convertType ty
 
 convertTypM (TypM t) = TypM (convertType t)
 
-convertTyParam (TyPatM (v ::: k)) =
-  TyPatM (v ::: convertKind k)
+convertBinder (v ::: k) = (v ::: convertKind k)
+
+convertTyParam (TyPatM (v ::: k)) = TyPatM (v ::: convertKind k)
 
 convertParam :: PatM -> PatM
-convertParam (PatM (v ::: t) _) =
-  patM (v ::: convertType t)
+convertParam (PatM (v ::: t) _) = patM (v ::: convertType t)
 
 convertExp :: ExpM -> ExpM
 convertExp (ExpM expression) =
   case expression
   of VarE {} -> ExpM expression
      LitE {} -> ExpM expression
+     ConE inf con args ->
+       ExpM $ ConE inf (convert_constructor con) (map convertExp args)
      AppE inf op ty_args args ->
        ExpM $ AppE inf
        (convertExp op) (map convertTypM ty_args) (map convertExp args)
@@ -68,13 +70,26 @@ convertExp (ExpM expression) =
      CoerceE inf (TypM from_t) (TypM to_t) b ->
        ExpM $ CoerceE inf (TypM $ convertType from_t) (TypM $ convertType to_t)
        (convertExp b)
+  where
+    convert_constructor (CInstM decon) = CInstM $
+      case decon
+      of VarCon con_var ty_args ex_types ->
+           VarCon con_var (map convertType ty_args) (map convertType ex_types)
+         TupleCon ty_args ->
+           TupleCon (map convertType ty_args)
 
 convertAlt :: AltM -> AltM
 convertAlt (AltM alt) =
-  AltM $ alt { altTyArgs = map convertTypM $ altTyArgs alt
-             , altExTypes = map convertTyParam $ altExTypes alt
+  AltM $ alt { altCon = convert_constructor $ altCon alt
              , altParams = map convertParam $ altParams alt
              , altBody = convertExp $ altBody alt}
+  where
+    convert_constructor (DeCInstM decon) = DeCInstM $
+      case decon
+      of VarDeCon con_var ty_args ex_types ->
+           VarDeCon con_var (map convertType ty_args) (map convertBinder ex_types)
+         TupleDeCon ty_args ->
+           TupleDeCon (map convertType ty_args)
 
 convertFun :: FunM -> FunM
 convertFun (FunM f) =

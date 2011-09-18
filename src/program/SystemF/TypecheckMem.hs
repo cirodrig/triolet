@@ -10,6 +10,8 @@ module SystemF.TypecheckMem
         Fun(..),
         Pat(..),
         TyPat(..),
+        CInst(..),
+        DeCInst(..),
         TypTM, ExpTM, AltTM, FunTM, PatTM, TyPatTM,
         discardTypeAnnotationsExp,
         discardTypeAnnotationsFun,
@@ -19,7 +21,8 @@ module SystemF.TypecheckMem
         typeCheckModule,
         inferExpType,
         inferAppType,
-        monoConType)
+        conInstType,
+        deConInstType)
 where
 
 import Prelude hiding(mapM)
@@ -56,6 +59,8 @@ newtype instance Typ (Typed Mem) = TypTM (TypeAnn Type)
 newtype instance Exp (Typed Mem) = ExpTM (TypeAnn (BaseExp TM))
 newtype instance Alt (Typed Mem) = AltTM (TypeAnn (BaseAlt TM))
 newtype instance Fun (Typed Mem) = FunTM (TypeAnn (BaseFun TM))
+newtype instance CInst (Typed Mem) = CInstTM ConInst
+newtype instance DeCInst (Typed Mem) = DeCInstTM DeConInst
 
 data instance Pat (Typed Mem) = TypedMemVarP Binder
 data instance TyPat (Typed Mem) = TyPatTM Var TypTM
@@ -103,7 +108,7 @@ discardTypeAnnotationsExp (ExpTM (TypeAnn _ expression)) = ExpM $
   case expression
   of VarE inf v -> VarE inf v
      LitE inf l -> LitE inf l
-     UTupleE inf es -> UTupleE inf $ map dtae es
+     ConE inf (CInstTM con) args -> ConE inf (CInstM con) $ map dtae args
      AppE inf op ty_args args ->
        AppE inf (dtae op) (map (TypM . fromTypTM) ty_args) (map dtae args)
      LamE inf f -> LamE inf $ discardTypeAnnotationsFun f
@@ -118,15 +123,8 @@ discardTypeAnnotationsExp (ExpTM (TypeAnn _ expression)) = ExpM $
   where
     discard_alt (AltTM (TypeAnn _ alt)) =
       case alt
-      of DeCon con ty_args ex_types params body ->
-           AltM $ DeCon { altConstructor = con
-                        , altTyArgs = map (TypM . fromTypTM) ty_args
-                        , altExTypes = map fromTyPatTM ex_types
-                        , altParams = map fromPatTM params
-                        , altBody = dtae body}
-         DeTuple params body ->
-           AltM $ DeTuple { altParams = map fromPatTM params
-                          , altBody = dtae body}
+      of Alt (DeCInstTM con) params body ->
+           AltM $ Alt (DeCInstM con) (map fromPatTM params) (dtae body)
 
 discardTypeAnnotationsFun :: FunTM -> FunM
 discardTypeAnnotationsFun (FunTM (TypeAnn _ f)) =
@@ -175,8 +173,8 @@ typeInferExp (ExpM expression) =
          typeInferVarE inf v
        LitE {expInfo = inf, expLit = l} ->
          typeInferLitE inf l
-       UTupleE {expInfo = inf, expArgs = args} ->
-         typeInferUTupleE inf args
+       ConE inf con args ->
+         typeInferConE (ExpM expression) inf con args
        AppE {expInfo = inf, expOper = op, expTyArgs = ts, expArgs = args} ->
          typeInferAppE (ExpM expression) inf op ts args
        LamE {expInfo = inf, expFun = f} -> do
@@ -197,6 +195,11 @@ typeInferExp (ExpM expression) =
 -- To infer a variable's type, just look it up in the environment
 typeInferVarE :: ExpInfo -> Var -> TCM ExpTM
 typeInferVarE inf var = do
+  -- It's an internal error if a data constructor appears here
+  tenv <- getTypeEnv
+  when (isJust $ lookupDataCon var tenv) $
+    internalError $ "typeInferVarE: Data constructor used as variable: " ++ show var
+
   ty <- lookupVar var
   return $ ExpTM $ TypeAnn ty (VarE inf var)
 
@@ -208,15 +211,53 @@ typeInferLitE inf l = do
   checkLiteralType l
   return $ ExpTM $ TypeAnn literal_type (LitE inf l)
 
-typeInferUTupleE inf args = do
-  args' <- mapM typeInferExp args
+typeInferConE :: ExpM -> ExpInfo -> CInstM -> [ExpM] -> TCM ExpTM
+typeInferConE orig_exp inf (CInstM con) args = do
+  (t_con, field_types, result_type) <- typeInferCon con
   
-  -- Determine tuple type
+  t_args <- forM (zip args field_types) $ \(arg, field_type) -> do
+    t_arg <- typeInferExp arg 
+    let message = text "Constructor field has wrong type"
+    checkType message (getSourcePos inf) field_type (getExpType t_arg)
+    return t_arg
+
+  return $ ExpTM $ TypeAnn result_type (ConE inf t_con t_args)
+
+-- | Infer the type of a constructor instance.  Return the parameter types
+--   and return type.
+typeInferCon :: EvalMonad m => ConInst -> m (CInst (Typed Mem), [Type], Type)
+typeInferCon con@(VarCon op ty_args ex_types) = do
+  env <- getTypeEnv
+  let Just data_con = lookupDataCon op env
+  let Just type_con = lookupDataType (dataConTyCon data_con) env
+  (field_types, result_type) <-
+    instantiateDataConTypeWithExistentials data_con (ty_args ++ ex_types)
+
+  -- Convert fields to initializers
   tenv <- getTypeEnv
-  let arg_types = map getExpType args'
-      arg_kinds = map (toBaseKind . typeKind tenv) arg_types
-      tuple_type = typeApp (UTupleT arg_kinds) arg_types
-  return $ ExpTM $ TypeAnn tuple_type (UTupleE inf args')
+  let field_kinds = dataConFieldKinds tenv data_con
+      con_field_types = zipWith make_initializer field_kinds field_types
+
+  -- Convert result type to initializer
+  let con_result_type = make_initializer (dataTypeKind type_con) result_type
+  return (CInstTM con, con_field_types, con_result_type)
+  where
+    make_initializer BareK ty =
+      FunT (varApp (pyonBuiltin The_OutPtr) [ty]) 
+      (varApp (pyonBuiltin The_IEffect) [ty])
+    make_initializer _ ty = ty
+
+typeInferCon con@(TupleCon types) = do
+  kinds <- liftTypeEvalM $ mapM typeCheckType types
+
+  -- All fields must have value or boxed type 
+  let valid_kind (VarT v) = v == valV || v == boxV
+      valid_kind _ = False
+  unless (all valid_kind kinds) $
+    typeError "typeInferCon: Wrong kind in field of unboxed tuple"
+
+  let tuple_type = typeApp (UTupleT $ map toBaseKind kinds) types
+  return (CInstTM con, types, tuple_type)
 
 typeInferAppE orig_expr inf op ty_args args = do
   let pos = getSourcePos inf
@@ -345,26 +386,44 @@ typeInferCaseE inf scr alts = do
   let result_type = case head ti_alts of AltTM (TypeAnn rt _) -> rt
   return $! ExpTM $! TypeAnn result_type $ CaseE inf ti_scr ti_alts
 
-typeCheckAlternative :: SourcePos -> Type -> AltM -> TCM AltTM
-typeCheckAlternative pos scr_type alt@(AltM (DeCon { altConstructor = con
-                                               , altTyArgs = types
-                                               , altExTypes = ex_fields
-                                               , altParams = fields
-                                               , altBody = body})) = do
-  -- Process arguments
-  arg_vals <- mapM typeInferType types
-
-  -- Apply constructor to type arguments
-  con_ty <- tcLookupDataCon con
+-- | Typecheck a pattern match.
+--   Return the field types that should be matched and the expected
+--   scrutinee type.
+typeInferDeCon :: SourcePos 
+               -> DeConInst
+               -> TCM (DeCInst (Typed Mem), [Type], Type)
+typeInferDeCon pos decon@(VarDeCon op ty_args ex_types) = do
+  env <- getTypeEnv
+  data_con <- tcLookupDataCon op
+  
+  t_ty_args <- mapM (typeInferType . TypM) ty_args
+  let argument_types =
+        [(ty, kind) | TypTM (TypeAnn kind ty) <- t_ty_args]
+      existential_vars = [(v, k) | v ::: k <- ex_types]
   (_, inst_arg_types, con_scr_type) <-
-    let argument_types =
-          [(ty, kind) | TypTM (TypeAnn kind ty) <- arg_vals]
-        existential_vars = [(v, k) | TyPatM (v ::: k) <- ex_fields]
-    in instantiatePatternType pos con_ty argument_types existential_vars
+    instantiatePatternType pos data_con argument_types existential_vars
+  return (DeCInstTM decon, inst_arg_types, con_scr_type)
+
+typeInferDeCon pos decon@(TupleDeCon types) = do
+  kinds <- mapM typeCheckType types
+
+  -- All fields must have value or boxed type 
+  let valid_kind (VarT v) = v == valV || v == boxV
+      valid_kind _ = False
+  unless (all valid_kind kinds) $
+    typeError "typeInferDeCon: Wrong kind in field of unboxed tuple"
+
+  let tuple_type = typeApp (UTupleT $ map toBaseKind kinds) types
+  return (DeCInstTM decon, types, tuple_type)
+
+typeCheckAlternative :: SourcePos -> Type -> AltM -> TCM AltTM
+typeCheckAlternative pos scr_type alt@(AltM (Alt (DeCInstM con) fields body)) = do
+  -- Check constructor type
+  (t_con, field_types, expected_scr_type) <- typeInferDeCon pos con
   
   -- Sanity check.  These types cannot be pattern-matched.
   let invalid_type =
-        case con_scr_type
+        case expected_scr_type
         of FunT {} -> True
            AppT (VarT v) _ | v `isPyonBuiltin` The_OutPtr -> True
                            | v `isPyonBuiltin` The_IEffect -> True
@@ -372,16 +431,19 @@ typeCheckAlternative pos scr_type alt@(AltM (DeCon { altConstructor = con
   when invalid_type $ internalError "typeCheckAlternative: Invalid pattern"
 
   -- Verify that applied type matches constructor type
-  checkType (text "Case alternative doesn't match scrutinee type") pos
-    scr_type con_scr_type
+  let mismatch_message =
+        hang (text "Pattern type doesn't match scrutinee type") 4
+        (text "Pattern type:" <+> pprType expected_scr_type $$
+         text "Scrutinee type:" <+> pprType scr_type)
+  checkType mismatch_message pos scr_type expected_scr_type
 
   -- Add existential variables to environment
-  withMany assumeAndAnnotateTyPat ex_fields $ \ex_fields' -> do
-
+  assumeBinders (deConExTypes con) $ do
+    
     -- Verify that fields have the expected types
-    check_number_of_fields inst_arg_types fields
-    zipWithM_ check_arg inst_arg_types (zip [1..] fields)
-  
+    check_number_of_fields field_types fields
+    zipWithM_ check_arg field_types (zip [1..] fields)
+
     -- Add fields to enironment
     withMany assumeAndAnnotatePat fields $ \fields' -> do
 
@@ -390,10 +452,11 @@ typeCheckAlternative pos scr_type alt@(AltM (DeCon { altConstructor = con
 
       -- Make sure existential types don't escape 
       let ret_type = getExpType ti_body
-      when (ret_type `typeMentionsAny` Set.fromList [v | TyPatTM v _ <- ex_fields']) $
+          ex_vars = [v | v ::: _ <- deConExTypes con]
+      when (ret_type `typeMentionsAny` Set.fromList ex_vars) $
         typeError "Existential type variable escapes"
 
-      let new_alt = DeCon con arg_vals ex_fields' fields' ti_body
+      let new_alt = Alt (DeCInstTM con) fields' ti_body
       return $ AltTM $ TypeAnn (getExpType ti_body) new_alt
   where
     check_number_of_fields atypes fs
@@ -409,31 +472,6 @@ typeCheckAlternative pos scr_type alt@(AltM (DeCon { altConstructor = con
       let given_type = patMType pat
           msg = text "Wrong type in field" <+> int pat_index <+> text "of pattern"
       in checkType msg pos expected_rtype given_type
-
-typeCheckAlternative pos scr_type (AltM (DeTuple { altParams = fields
-                                                 , altBody = body})) = do
-  -- Compute field kinds
-  field_types <- mapM (typeInferType . TypM . patMType) fields
-  let kinds = map getTypType field_types
-
-  -- All fields must have value or boxed type 
-  let valid_kind (VarT v) = v == valV || v == boxV
-      valid_kind _ = False
-  unless (all valid_kind kinds) $
-    typeError "typeCheckAlternative: Wrong kind in field of unboxed tuple"
-
-  -- Verify that the tuple type matches the scrutinee type
-  let tuple_type =
-        typeApp (UTupleT $ map toBaseKind kinds) (map patMType fields)
-  checkType (text "Wrong type in field of pattern") pos scr_type tuple_type
-
-  -- Add fields to enironment
-  withMany assumeAndAnnotatePat fields $ \fields' -> do
-    -- Infer the body
-    ti_body <- typeInferExp body
-
-    let new_alt = DeTuple fields' ti_body
-    return $ AltTM $ TypeAnn (getExpType ti_body) new_alt
 
 bindParamTypes params m = foldr bind_param_type m params
   where
@@ -518,10 +556,8 @@ inferExpType expression =
          _ ->
            fmap getExpType $ typeInferExp expression
 
-    infer_alt (AltM alt) =
-      withMany assumeAndAnnotateTyPat (getAltExTypes alt) $ \_ ->
-      withMany assumeAndAnnotatePat (altParams alt) $ \_ ->
-      infer_exp $ altBody alt
+    infer_alt (AltM (Alt (DeCInstM con) params body)) =
+      assumeBinders (deConExTypes con) $ assumePatMs params $ infer_exp body
 
     debug = traceShow (text "inferExpType" <+> pprExp expression)
 
@@ -545,19 +581,24 @@ inferAppType op_type ty_args arg_types =
                 vcat (map ((text "@" <+>) . pprType . fromTypM) ty_args) $$
                 vcat (map ((text ">" <+>) . pprType) arg_types)
 
+-- | Get the parameter types and result type of a data constructor application.
+conInstType :: EvalMonad m => ConInst -> m ([Type], Type)
+conInstType c = do
+  (_, arg_types, result_type) <- typeInferCon c
+  return (arg_types, result_type)
 
--- | Get the type described by a 'MonoCon'.
-monoConType :: EvalMonad m => MonoCon -> m Type
-monoConType mono_con =
+-- | Get the type described by a 'DeConInst'.
+deConInstType :: EvalMonad m => DeConInst -> m Type
+deConInstType mono_con =
   liftTypeEvalM $
   case mono_con
-  of MonoCon con ty_args ex_types -> do
+  of VarDeCon con ty_args ex_types -> do
        op_type <- tcLookupDataCon con
        let ex_args = [VarT a | a ::: _ <- ex_types]
        (_, ret_type) <-
          instantiateDataConTypeWithExistentials op_type (ty_args ++ ex_args)
        return ret_type
-     MonoTuple field_types -> do
+     TupleDeCon field_types -> do
        tenv <- getTypeEnv
        let field_kinds = map (toBaseKind . typeKind tenv) field_types
        return $ typeApp (UTupleT field_kinds) field_types

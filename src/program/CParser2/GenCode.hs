@@ -230,23 +230,26 @@ translateFun pos f = do
 --   as needed.
 translateExp (L pos expression) =
   case expression
-  of VarE v ->
-       return $ SystemF.ExpM $ SystemF.VarE inf (toVar v)
+  of VarE v -> do
+       tenv <- lift getTypeEnv
+       case lookupDataConWithType (toVar v) tenv of
+         Just (type_con, data_con) ->
+           translateCon inf type_con data_con (toVar v) [] []
+         Nothing ->
+           return $ SystemF.ExpM $ SystemF.VarE inf (toVar v)
      IntE n ->
        return $ SystemF.ExpM $ SystemF.LitE inf (SystemF.IntL n int_type)
-     TupleE es ->
-       liftM (SystemF.ExpM . SystemF.UTupleE inf) $ mapM translateExp es
-     TAppE op arg -> do
+     TupleE es -> do
+       es' <- mapM translateExp es
+       types <- lift $ mapM SystemF.TypecheckMem.inferExpType es'
+       let con = SystemF.TupleCon types
+       return $ SystemF.ExpM $ SystemF.ConE inf (SystemF.CInstM con) es'
+     TAppE op arg ->
        let (op', args) = uncurryTypeApp op [arg]
-       op_exp <- translateExp op'
-       arg_types <- mapM (liftM SystemF.TypM . translateType) args
-       return $ SystemF.ExpM $ SystemF.AppE inf op_exp arg_types []
-     AppE op arg -> do
+       in translateApp inf op' args []
+     AppE op arg ->
        let (op', ty_args, args) = uncurryApp op [arg]
-       op_exp <- translateExp op'
-       arg_types <- mapM (liftM SystemF.TypM . translateType) ty_args
-       arg_exps <- mapM translateExp args
-       return $ SystemF.ExpM $ SystemF.AppE inf op_exp arg_types arg_exps
+       in translateApp inf op' ty_args args
      LamE f ->
        liftM (SystemF.ExpM . SystemF.LamE inf) $ translateFun pos f
      CaseE s alts -> do
@@ -282,6 +285,54 @@ translateExp (L pos expression) =
     int_type = Type.VarT $ pyonBuiltin The_int
     inf = SystemF.mkExpInfo pos
 
+translateApp inf op ty_args args = do
+  -- Is the operator a data constructor?
+  tenv <- lift getTypeEnv
+  case unLoc op of
+    VarE v
+      | Just (type_con, data_con) <- lookupDataConWithType (toVar v) tenv ->
+          translateCon inf type_con data_con (toVar v) ty_args args
+    _ -> do
+      -- Create an application term
+      op_exp <- translateExp op
+      translateAppWithOperator inf op_exp ty_args args
+
+translateAppWithOperator inf op_exp ty_args args = do
+  arg_types <- mapM (liftM SystemF.TypM . translateType) ty_args
+  arg_exps <- mapM translateExp args
+  return $ SystemF.ExpM $ SystemF.AppE inf op_exp arg_types arg_exps
+
+translateCon :: SystemF.ExpInfo -> DataType -> DataConType
+             -> Var -> [RLType] -> [RLExp] -> TransM SystemF.ExpM
+translateCon inf type_con data_con op ty_args args
+  | length ty_args /= n_ty_args + n_ex_types =
+    error "Wrong number of type arguments to data constructor"
+  | length args < n_args =
+    -- Instead of producing an error, the constructor could be eta-expanded.
+    error "Too few arguments to data constructor"
+  | otherwise = do
+      -- Convert type arguments
+      arg_types <- mapM translateType ty_args
+      let con_ty_args = take n_ty_args arg_types
+          con_ex_args = drop n_ty_args arg_types
+
+      -- Convert constructor arguments
+      let con_args = take n_args args
+          other_args = drop n_args args
+      con_args' <- mapM translateExp con_args
+      let con = SystemF.VarCon op con_ty_args con_ex_args 
+          con_exp = SystemF.ExpM $ SystemF.ConE inf (SystemF.CInstM con) con_args'
+
+      -- If any arguments remain, apply them
+      if null other_args
+        then return con_exp
+        else translateAppWithOperator inf con_exp [] other_args
+    
+  where
+    n_ty_args = length $ dataConPatternParams data_con
+    n_ex_types = length $ dataConPatternExTypes data_con
+    n_args = length $ dataConPatternArgs data_con
+
 uncurryTypeApp e ty_args =
   case unLoc e
   of TAppE op arg -> uncurryTypeApp op (arg : ty_args)
@@ -294,26 +345,27 @@ uncurryApp e args =
           of (op, ty_args) -> (op, ty_args, args)
 
 translateAlt (Alt (ConPattern con ty_args ex_types fields) body) = do
-  ty_args' <- mapM (liftM SystemF.TypM . translateType) ty_args
+  ty_args' <- mapM translateType ty_args
   ty_binders <- mapM translateDomain ex_types
+  let new_con = SystemF.VarDeCon (toVar con) ty_args' ty_binders
   liftT (assumeBinders ty_binders) $ do
     val_binders <- mapM translateDomain fields
     liftT (assumeBinders val_binders) $ do
       body' <- translateExp body
       return $ SystemF.AltM $
-        SystemF.DeCon { SystemF.altConstructor = toVar con
-                      , SystemF.altTyArgs = ty_args'
-                      , SystemF.altExTypes = map SystemF.TyPatM ty_binders
-                      , SystemF.altParams = map SystemF.patM val_binders
-                      , SystemF.altBody = body'}
+        SystemF.Alt { SystemF.altCon = SystemF.DeCInstM new_con
+                    , SystemF.altParams = map SystemF.patM val_binders
+                    , SystemF.altBody = body'}
 
 translateAlt (Alt (TuplePattern fields) body) = do
   val_binders <- mapM translateDomain fields
+  let new_con = SystemF.TupleDeCon [t | _ ::: t <- val_binders]
   liftT (assumeBinders val_binders) $ do
     body' <- translateExp body
     return $ SystemF.AltM $
-      SystemF.DeTuple { SystemF.altParams = map SystemF.patM val_binders
-                      , SystemF.altBody = body'}
+      SystemF.Alt { SystemF.altCon = SystemF.DeCInstM new_con
+                  , SystemF.altParams = map SystemF.patM val_binders
+                  , SystemF.altBody = body'}
 
 translateDecl (L pos (Decl name (FunEnt (L fun_pos f) attrs))) =
   let ResolvedVar v _ = name

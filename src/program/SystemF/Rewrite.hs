@@ -301,7 +301,7 @@ data RewriteRuleSet =
     -- | Rewrite rules for variables.
     --   Whenever the variable is seen, it is unconditionally replaced by the
     --   expression.  These rules are processed by "SystemF.Simplify".
-  , rewriteVariables :: Map.Map Var ExpM
+  , rewriteVariables :: Map.Map Var MkExpM
   }
 
 -- | Combine multiple rule sets.  Rule sets earlier in the list take precedence
@@ -315,8 +315,11 @@ combineRuleSets rs =
 -- | Get unconditional variable replacement rules.  For each
 --   (variable, expression) pair in the list, any occurrence of the variable 
 --   should be replaced by the corresponding expression.
-getVariableReplacements :: RewriteRuleSet -> [(Var, ExpM)]
-getVariableReplacements rs = Map.toList $ rewriteVariables rs
+getVariableReplacements :: RewriteRuleSet -> FreshVarM [(Var, ExpM)]
+getVariableReplacements rs =
+  forM (Map.toList $ rewriteVariables rs) $ \(v, mk_e) -> do
+    e <- mk_e
+    return (v, e)
 
 -- | General-purpose rewrite rules that should always be applied
 generalRewrites :: RewriteRuleSet
@@ -326,21 +329,21 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
             , (pyonBuiltin The_convertToBoxed, rwConvertToBoxed)
             -- , (pyonBuiltin The_range, rwRange)
             -- , (pyonBuiltin The_TraversableDict_list_traverse, rwTraverseList)
-            , (pyonBuiltin The_TraversableDict_list_build, rwBuildList)
-            , (pyonBuiltin The_TraversableDict_array2_traverse, rwTraverseMatrix)
+            --, (pyonBuiltin The_TraversableDict_list_build, rwBuildList)
+            --, (pyonBuiltin The_TraversableDict_array2_traverse, rwTraverseMatrix)
             -- , (pyonBuiltin The_TraversableDict_matrix_build, rwBuildMatrix)
             -- , (pyonBuiltin The_TraversableDict_Stream_traverse, rwTraverseStream)
             -- , (pyonBuiltin The_TraversableDict_Stream_build, rwBuildStream)
-            , (pyonBuiltin The_array_build, rwBuildArray)
-            , (pyonBuiltin The_chunk, rwChunk)
-            , (pyonBuiltin The_outerproduct, rwOuterProduct)
-            , (pyonBuiltin The_LinStream_map, rwMapStream)
-            , (pyonBuiltin The_LinStream_zipWith, rwZipStream) 
-            , (pyonBuiltin The_LinStream_zipWith3, rwZip3Stream)
-            , (pyonBuiltin The_LinStream_zipWith4, rwZip4Stream)
-            , (pyonBuiltin The_LinStream_zipWith_array, rwZipArrayStream) 
-            , (pyonBuiltin The_LinStream_zipWith3_array, rwZip3ArrayStream)
-            , (pyonBuiltin The_LinStream_zipWith4_array, rwZip4ArrayStream)
+            --, (pyonBuiltin The_array_build, rwBuildArray)
+            --, (pyonBuiltin The_chunk, rwChunk)
+            --, (pyonBuiltin The_outerproduct, rwOuterProduct)
+            --, (pyonBuiltin The_LinStream_map, rwMapStream)
+            --, (pyonBuiltin The_LinStream_zipWith, rwZipStream) 
+            --, (pyonBuiltin The_LinStream_zipWith3, rwZip3Stream)
+            --, (pyonBuiltin The_LinStream_zipWith4, rwZip4Stream)
+            --, (pyonBuiltin The_LinStream_zipWith_array, rwZipArrayStream) 
+            --, (pyonBuiltin The_LinStream_zipWith3_array, rwZip3ArrayStream)
+            --, (pyonBuiltin The_LinStream_zipWith4_array, rwZip4ArrayStream)
             , (pyonBuiltin The_defineIntIndex, rwDefineIntIndex)
             , (pyonBuiltin The_AdditiveDict_int_negate, rwNegateInt)
             , (pyonBuiltin The_EqDict_int_eq, rwIntComparison (==))
@@ -366,39 +369,45 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
     --
     -- > viewStream @(Stored int)
     -- > (mk_view1 @(Stored int) @0 @pos_infty zero_ii (iPosInfty @pos_infty)
-    -- >  (stored @int))
-    count_expr =
-      ExpM $ AppE defaultExpInfo view_stream [TypM storedIntType]
-      [ExpM $ AppE defaultExpInfo mk_view1
-       [TypM storedIntType, TypM (IntT 0), TypM posInftyT]
-       [ExpM $ VarE defaultExpInfo (pyonBuiltin The_zero_ii),
-        ExpM $ AppE defaultExpInfo iPosInfty [TypM posInftyT] [],
-        ExpM $ AppE defaultExpInfo stored [TypM $ VarT (pyonBuiltin The_int)] []]]
+    -- >  (\ (x : int) -> (). stored @int x))
+    count_expr = do
+      fun <-
+        lamE $ mkFun []
+        (\ [] -> return ([intType], writerType storedIntType))
+        (\ [] [x] -> mkConE defaultExpInfo stored [varE x])
+      zero_ii <- zero_ii_expr
+      return $
+        conE defaultExpInfo view_stream
+        [conE defaultExpInfo mk_view1
+         [zero_ii, conE defaultExpInfo iPosInfty [], fun]]
       where
         view_stream =
-          ExpM $ VarE defaultExpInfo (pyonBuiltin The_viewStream)
+          VarCon (pyonBuiltin The_viewStream) [storedIntType] []
         mk_view1 =
-          ExpM $ VarE defaultExpInfo (pyonBuiltin The_mk_view1)
+          VarCon (pyonBuiltin The_mk_view1) [storedIntType]
+          [IntT 0, posInftyT]
         iPosInfty =
-          ExpM $ VarE defaultExpInfo (pyonBuiltin The_iPosInfty)          
+          VarCon (pyonBuiltin The_iPosInfty) [posInftyT] []
         stored =
-          ExpM $ VarE defaultExpInfo (pyonBuiltin The_stored)
+          VarCon (pyonBuiltin The_stored) [VarT $ pyonBuiltin The_int] []
 
     zero_ii_expr =
-      ExpM $ AppE defaultExpInfo iInt [TypM $ IntT 0] [ExpM $ VarE defaultExpInfo (pyonBuiltin The_zero_fii)]
+      return $
+      conE defaultExpInfo (iInt_con (IntT 0)) [ExpM $ VarE defaultExpInfo (pyonBuiltin The_zero_fii)]
     one_ii_expr =
-      ExpM $ AppE defaultExpInfo iInt [TypM $ IntT 1] [ExpM $ VarE defaultExpInfo (pyonBuiltin The_one_fii)]
-    iInt = ExpM $ VarE defaultExpInfo (pyonBuiltin The_iInt)
+      return $
+      conE defaultExpInfo (iInt_con (IntT 1)) [ExpM $ VarE defaultExpInfo (pyonBuiltin The_one_fii)]
+    iInt_con n = VarCon (pyonBuiltin The_iInt) [n] []
 
 -- | Rewrite rules that transform potentially parallel algorithms into
 --   explicitly parallel algorithms.
 parallelizingRewrites :: RewriteRuleSet
 parallelizingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
   where
-    table = [ (pyonBuiltin The_fun_reduce_Stream, rwParallelReduceStream)
-            , (pyonBuiltin The_fun_reduce1_Stream, rwParallelReduce1Stream)
-            , (pyonBuiltin The_histogramArray, rwParallelHistogramArray)
-            , (pyonBuiltin The_doall, rwParallelDoall)
+    table = [ --(pyonBuiltin The_fun_reduce_Stream, rwParallelReduceStream)
+            --, (pyonBuiltin The_fun_reduce1_Stream, rwParallelReduce1Stream)
+            --, (pyonBuiltin The_histogramArray, rwParallelHistogramArray)
+            --, (pyonBuiltin The_doall, rwParallelDoall)
             ]
 
 -- | Rewrite rules that transform potentially parallel algorithms into
@@ -407,10 +416,10 @@ parallelizingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
 sequentializingRewrites :: RewriteRuleSet
 sequentializingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
   where
-    table = [ (pyonBuiltin The_histogramArray, rwHistogramArray)
-            , (pyonBuiltin The_LinStream_reduce, rwReduceStream)
-            , (pyonBuiltin The_LinStream_reduce1, rwReduce1Stream)
-            , (pyonBuiltin The_LinStream_fold, rwFoldStream)
+    table = [ --(pyonBuiltin The_histogramArray, rwHistogramArray)
+            --, (pyonBuiltin The_LinStream_reduce, rwReduceStream)
+            --, (pyonBuiltin The_LinStream_reduce1, rwReduce1Stream)
+            --, (pyonBuiltin The_LinStream_fold, rwFoldStream)
             ]
 
 -- | Attempt to rewrite an application term.
@@ -454,7 +463,7 @@ rwConvertToBare inf [TypM bare_type] [repr, arg]
       case fromVarApp whnf_type of
         Just (ty_op, [boxed_type])
           | ty_op `isPyonBuiltin` The_StoredBox ->
-              fmap Just $ construct_stored_box boxed_type
+              return $ Just $ construct_stored_box boxed_type
         _ -> do
           -- If the boxed type is "Boxed t", then
           -- deconstruct and copy the value
@@ -472,7 +481,7 @@ rwConvertToBare inf [TypM bare_type] [repr, arg]
     --
     -- > storedBox boxed_type arg
     construct_stored_box boxed_type =
-      varAppE (pyonBuiltin The_storedBox) [TypM boxed_type] [return arg]
+      conE inf (VarCon (pyonBuiltin The_storedBox) [boxed_type] []) [arg]
 
     -- Create the expression
     --
@@ -509,7 +518,7 @@ rwConvertToBoxed inf [TypM bare_type] [repr, arg]
           case fromVarApp boxed_type of
             Just (ty_op, [_])
               | ty_op `isPyonBuiltin` The_Boxed ->
-                  fmap Just $ construct_boxed whnf_type
+                return $ Just $ construct_boxed whnf_type
             _ ->
               -- Otherwise, cannot simplify
               return Nothing
@@ -526,7 +535,7 @@ rwConvertToBoxed inf [TypM bare_type] [repr, arg]
            (\ [] [boxed_ref] -> varE boxed_ref)])
     
     construct_boxed whnf_type = do
-      varAppE (pyonBuiltin The_boxed) [TypM whnf_type] [return arg]
+      conE inf (VarCon (pyonBuiltin The_boxed) [whnf_type] []) [arg]
 
 rwConvertToBoxed _ _ _ = return Nothing
 
@@ -572,6 +581,7 @@ rwTraverseList inf [elt_type] [elt_repr, list] = do
   
 rwTraverseList _ _ _ = return Nothing -}
 
+{-
 rwBuildList :: RewriteRule
 rwBuildList inf [elt_type] (elt_repr : stream : other_args) = do
   m_stream <- interpretStream2 (VarT (pyonBuiltin The_dim1))
@@ -666,6 +676,7 @@ rwTraverseMatrix inf [elt_type] [elt_repr, matrix] = do
        x]
   
 rwTraverseMatrix _ _ _ = return Nothing
+-}
 
 {-
 rwBuildMatrix :: RewriteRule
@@ -744,6 +755,7 @@ rwBuildMatrix inf [elt_type] (elt_repr : stream : other_args) = do
 rwBuildMatrix _ _ _ = return Nothing
 -}
 
+{-
 rwTraverseStream :: RewriteRule
 rwTraverseStream inf _ [_, stream] = return (Just stream)
 rwTraverseStream _ _ _ = return Nothing
@@ -812,6 +824,7 @@ buildArrayDoall inf elt_type elt_repr size count generator = do
 
   tenv <- getTypeEnv
   caseOfIndInt tenv (return count) (fromTypM size) define_array undef_array
+  -}
 
 {-
 rwBindStream tenv inf
@@ -844,6 +857,7 @@ rwGuard inf [elt_ty] [elt_repr, arg, stream] =
 
 rwGuard _ _ _ = return Nothing-}
 
+{-
 -- Try to simplify applications of 'chunk'.
 --
 -- 'Chunk' can create nested loops.
@@ -913,6 +927,7 @@ rwOuterProduct inf
          _                 -> mzero
 
 rwOuterProduct _ _ _ = return Nothing
+-}
 
 {-
 rwMap :: RewriteRule
@@ -988,6 +1003,7 @@ rwZip4 inf
 
 rwZip4 _ _ _ = return Nothing-}
 
+{-
 rwMapStream :: RewriteRule
 rwMapStream inf
   [TypM shape_type, TypM elt1, TypM elt2]
@@ -1079,6 +1095,7 @@ generalizedZipStream2 out_type out_repr transformer shape_type streams = do
   case zipped of
     Just s -> encodeStream2 (TypM shape_type) s
     Nothing -> return Nothing
+-}
 
 -- | If defining a fixed-size integer index, create the integer value
 rwDefineIntIndex :: RewriteRule
@@ -1113,7 +1130,7 @@ rwIntComparison op inf [] [arg1, arg2]
     true_value = ExpM (VarE inf (pyonBuiltin The_True))
     false_value = ExpM (VarE inf (pyonBuiltin The_False))
   
-
+{-
 {-
 -- | Turn a list-building histogram into an array-building histogram
 --
@@ -2741,4 +2758,5 @@ unreturnAlt (AltM alt) = do
   body <- unreturnExp $ altBody alt
   return $ AltM (alt {altBody = body})
 
+-}
 -}

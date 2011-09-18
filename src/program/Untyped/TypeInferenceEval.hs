@@ -6,6 +6,7 @@ module Untyped.TypeInferenceEval
 where
 
 import Prelude hiding(mapM)
+import Control.Applicative
 import Control.Concurrent.MVar
 import Control.Monad hiding(mapM)
 import Data.Traversable(mapM)
@@ -31,6 +32,9 @@ evPat (Untyped.TIWildP t)   = WildP `liftM` evType t
 evPat (Untyped.TIVarP v t)  = VarP v `liftM` evType t
 evPat (Untyped.TITupleP ps) = TupleP `liftM` mapM evPat ps
 
+evCon :: CInst Untyped.TI -> IO (CInst SF)
+evCon (Untyped.TIConInst con ty_args ex_types) =
+  CInstSF <$> (VarCon con <$> mapM evType ty_args <*> mapM evType ex_types)
 
 evExp :: Untyped.TIExp -> IO ExpSF
 evExp expression =
@@ -39,36 +43,37 @@ evExp expression =
      Untyped.DictPH {} -> getPlaceholderElaboration expression
      Untyped.TIExp e -> fmap ExpSF $
        case e
-       of VarE info v   -> return $ VarE info v
-          LitE info l   -> return $ LitE info l
-          AppE info op ts args -> do op' <- evExp op
-                                     ts' <- mapM evTypSF ts
-                                     args' <- mapM evExp args
-                                     return $ AppE info op' ts' args'
-          LamE info f -> do f' <- evFun f
-                            return $ LamE info f'
-          LetE info p r b -> do p' <- evPat p
-                                r' <- evExp r
-                                b' <- evExp b
-                                return $ LetE info p' r' b'
-          LetfunE info defs b -> do defs' <- mapM evDef defs
-                                    b' <- evExp b
-                                    return $ LetfunE info defs' b'
-          CaseE info scr alts -> do scr' <- evExp scr
-                                    alts' <- mapM evAlt alts
-                                    return $ CaseE info scr' alts'
-          CoerceE info from_t to_t b -> do from_t' <- evTypSF from_t
-                                           to_t' <- evTypSF to_t
-                                           b' <- evExp b
-                                           return $ CoerceE info from_t' to_t' b'
-     Untyped.TIRecExp e -> return e
+       of VarE info v ->
+            return $ VarE info v
+          LitE info l ->
+            return $ LitE info l
+          ConE info con args ->
+            ConE info <$> evCon con <*> mapM evExp args
+          AppE info op ts args ->
+            AppE info <$> evExp op <*> mapM evTypSF ts <*> mapM evExp args
+          LamE info f -> 
+            LamE info <$> evFun f
+          LetE info p r b ->
+            LetE info <$> evPat p <*> evExp r <*> evExp b
+          LetfunE info defs b ->
+            LetfunE info <$> mapM evDef defs <*> evExp b
+          CaseE info scr alts ->
+            CaseE info <$> evExp scr <*> mapM evAlt alts
+          CoerceE info from_t to_t b ->
+            CoerceE info <$> evTypSF from_t <*> evTypSF to_t <*> evExp b
+     Untyped.TIRecExp e ->
+       return e
 
-evAlt (Untyped.TIAlt (DeCon c ty_params ex_types params body)) = do
-  ty_params' <- mapM evTypSF ty_params
-  ex_types' <- mapM evTyParam ex_types
+evAlt (Untyped.TIAlt (Alt decon params body)) = do
+  decon' <- evDecon decon
   body' <- evExp body
   params' <- mapM evPat params
-  return $ AltSF $ DeCon c ty_params' ex_types' params' body'
+  return $ AltSF $ Alt decon' params' body'
+
+evDecon (Untyped.TIDeConInst con ty_args ex_types) = do 
+  ty_args' <- mapM evType ty_args
+  ex_types' <- mapM evTyParam ex_types
+  return $ DeCInstSF $ VarDeCon con ty_args' [b | TyPatSF b <- ex_types']
 
 -- | Get the expression that was stored for a placeholder, and evaluate it
 getPlaceholderElaboration ph = do

@@ -19,6 +19,7 @@ import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
+import Common.PrecDoc
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
@@ -100,21 +101,9 @@ data BigAbsValue =
 data DataValue =
   DataValue
   { dataInfo        :: ExpInfo
-  , dataValueType   :: !DataValueType
+  , dataValueType   :: !ConInst
   , dataFields      :: [MaybeValue]
   }
-
-data DataValueType =
-    -- | A data constructor type, along with its type arguments.
-    ConValueType
-    { dataCon         :: !Var
-    , dataTyArgs      :: [TypM]
-    , dataExTypes     :: [TypM]
-    }
-    -- | An unboxed tuple type.
-  | TupleValueType
-    { dataTyArgs :: [TypM]
-    }
 
 -- | An abstraction of a reference to a field of an object
 data RefValue = RefValue !RefBase [FieldSelector]
@@ -295,12 +284,8 @@ forgetVariable v kv = forgetVariables (Set.singleton v) kv
 forgetVariables :: Set.Set Var -> AbsValue -> MaybeValue
 forgetVariables varset kv = forget kv
   where
-    data_type_mentions_vars (ConValueType _ tys1 tys2) =
-      any (`typeMentionsAny` varset) (map fromTypM tys1) ||
-      any (`typeMentionsAny` varset) (map fromTypM tys2)
-
-    data_type_mentions_vars (TupleValueType tys) =
-      any (`typeMentionsAny` varset) (map fromTypM tys)
+    data_type_mentions_vars con = 
+      not $ Set.null $ Set.intersection varset (freeVariables con)
 
     forget kv =
       case kv
@@ -413,14 +398,13 @@ pprDataValue :: DataValue -> Doc
 pprDataValue (DataValue _ d_type fields) =
   let field_docs = map pprMaybeValue fields
   in case d_type 
-     of ConValueType con ty_args ex_types ->
-          let type_docs =
-                map (text "@" <>) $ map (pprType . fromTypM) (ty_args ++ ex_types)
-          in pprVar con <>
-             parens (sep $ punctuate (text ",") $ type_docs ++ field_docs)
-        TupleValueType _ ->
-          let field_docs = map pprMaybeValue fields
-          in parens (sep $ punctuate (text ",") field_docs)
+     of VarCon con ty_args ex_types ->
+          let op_doc = pprVar con
+              ty_args_doc = [text "@" <> pprTypePrec t ?+ appPrec | t <- ty_args]
+              ex_types_doc = [text "&" <> pprTypePrec t ?+ appPrec | t <- ex_types]
+          in hang op_doc 6 (sep $ ty_args_doc ++ ex_types_doc ++ field_docs)
+        TupleCon _ ->
+          parens (sep $ punctuate (text ",") field_docs)
 
 pprRefValue (RefValue (VarBase v) []) = pprVar v
 
@@ -548,20 +532,22 @@ dataConstructorValue :: ExpInfo
 dataConstructorValue inf dcon_type ty_args val_args =
   bigAV $
   DataAV (DataValue { dataInfo = inf
-                    , dataValueType = ConValueType
-                              { dataCon = dataConCon dcon_type
-                              , dataTyArgs = forall_type_args
-                              , dataExTypes = exists_type_args}
+                    , dataValueType = VarCon
+                                      (dataConCon dcon_type)
+                                      forall_type_args
+                                      exists_type_args
                     , dataFields = val_args})
   where
-    forall_type_args = take (length $ dataConPatternParams dcon_type) ty_args
-    exists_type_args = drop (length $ dataConPatternParams dcon_type) ty_args
+    forall_type_args = map fromTypM $
+                       take (length $ dataConPatternParams dcon_type) ty_args
+    exists_type_args = map fromTypM $
+                       drop (length $ dataConPatternParams dcon_type) ty_args
 
 tupleValue :: ExpInfo -> [TypM] -> [MaybeValue] -> AbsValue
 tupleValue inf types val_args =
   bigAV $
   DataAV (DataValue { dataInfo = inf
-                    , dataValueType = TupleValueType types
+                    , dataValueType = TupleCon (map fromTypM types)
                     , dataFields = val_args})
 
 -- | An abstract environment, mapping value variables to known values.
@@ -711,6 +697,6 @@ initializeKnownValues tenv =
          null (dataConPatternExTypes dcon) &&
          null (dataConPatternArgs dcon) =
            let con = dataConCon dcon
-               data_value = DataAV (DataValue defaultExpInfo (ConValueType con [] []) [])
+               data_value = DataAV (DataValue defaultExpInfo (VarCon con [] []) [])
            in Just $ BigAV (Just con) data_value
        | otherwise = Nothing

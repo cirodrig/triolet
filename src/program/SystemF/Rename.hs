@@ -1,5 +1,5 @@
 
-{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
 module SystemF.Rename
        (freshen,
         renamePatM,
@@ -15,15 +15,23 @@ module SystemF.Rename
         substituteTyPatMs,
         freshenTyPatM,
         freshenTyPatMs,
+        renameDeConInst,
+        freshenDeConInst,
         renameDefM,
         renameDefGroup,
-        freshenModuleFully)
+        freshenModuleFully,
+        checkForShadowingExp,
+        checkForShadowingExpSet,
+        checkForShadowingExpHere,
+        checkForShadowingModule)
 where
 
 import Prelude hiding(mapM)
 import Control.Applicative
 import Control.Monad hiding(mapM)
 import Control.Monad.Reader hiding(mapM)
+import qualified Data.IntSet as IntSet
+import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.IntMap as IntMap
@@ -69,6 +77,17 @@ renamePatM rn (PatM binding uses) k =
 
 renamePatMs :: Renaming -> [PatM] -> (Renaming -> [PatM] -> a) -> a
 renamePatMs = renameMany renamePatM
+
+renameDeConInst :: Renaming -> DeCInstM -> (Renaming -> DeCInstM -> a) -> a
+renameDeConInst rn (DeCInstM decon) k =
+  case decon
+  of VarDeCon op ty_args ex_types ->
+       let ty_args' = rename rn ty_args
+       in renameBindings rn ex_types $ \rn' ex_types' ->
+          k rn' (DeCInstM (VarDeCon op ty_args' ex_types'))
+     TupleDeCon ty_args ->
+       let ty_args' = rename rn ty_args
+       in k rn (DeCInstM (TupleDeCon ty_args'))
 
 -- | Freshen a type variable binding
 freshenTyPatM :: (Monad m, Supplies m VarID) =>
@@ -122,6 +141,20 @@ freshenPattern p pat@(PatM (v ::: param_ty) uses) = do
       return (PatM (v' ::: param_ty) uses, Just (v, v'))
     else return (pat, Nothing)
 
+freshenDeConInst :: (Monad m, Supplies m VarID) =>
+                    VarPredicate m -> DeCInstM -> m (DeCInstM, Renaming)
+freshenDeConInst p (DeCInstM decon) =
+  case decon
+  of VarDeCon op ty_args ex_types -> do
+       let old_vars = [v | v ::: _ <- ex_types]
+       new_vars <- mapM newClonedVar old_vars
+       let new_ex_types = [v ::: t | (v, _ ::: t) <- zip new_vars ex_types]
+           rn = renaming $ zip old_vars new_vars
+       return (DeCInstM (VarDeCon op ty_args new_ex_types), rn)
+     TupleDeCon ty_args ->
+       -- No bound variables
+       return (DeCInstM decon, mempty)
+
 -- | Apply a substitution to a type pattern
 substituteTyPatM :: EvalMonad m =>
                     Substitution -> TyPatM
@@ -165,10 +198,44 @@ substitutePatMs' :: EvalMonad m =>
                  -> m a
 substitutePatMs' = renameMany substitutePatM'
 
+substituteDeConInst :: EvalMonad m =>
+                       Substitution -> DeCInstM
+                    -> (Substitution -> DeCInstM -> m a)
+                    -> m a 
+substituteDeConInst s (DeCInstM decon) k =
+  case decon
+  of VarDeCon con ty_args ex_types -> do
+       ty_args' <- mapM (substitute s) ty_args
+       renameMany substituteBinding s ex_types $ \s' ex_types' ->
+         k s' (DeCInstM $ VarDeCon con ty_args' ex_types')
+     TupleDeCon ty_args -> do
+       ty_args' <- mapM (substitute s) ty_args
+       k s (DeCInstM $ TupleDeCon ty_args')
+       
 instance Renameable (Typ Mem) where
   rename rn (TypM t) = TypM $ rename rn t
   freshen p (TypM t) = liftM TypM $ freshen p t
   freeVariables (TypM t) = freeVariables t
+
+deriving instance Renameable (CInst Mem)
+
+instance Renameable ConInst where
+  rename rn (VarCon con ty_args ex_types) =
+    let ty_args' = rename rn ty_args
+        ex_types' = rename rn ex_types
+    in VarCon con ty_args' ex_types'
+  rename rn (TupleCon ty_args) =
+    let ty_args' = rename rn ty_args
+    in TupleCon ty_args'
+
+  -- No variables bound here
+  freshen p e = return e
+  
+  freeVariables (VarCon _ ty_args ex_types) =
+    freeVariables (ty_args ++ ex_types)
+
+  freeVariables (TupleCon ty_args) =
+    freeVariables ty_args
 
 instance Renameable (Exp Mem) where
   rename rn (ExpM expression) = ExpM $
@@ -178,8 +245,8 @@ instance Renameable (Exp Mem) where
          of Just v' -> VarE inf v'
             Nothing -> expression
        LitE {} -> expression
-       UTupleE inf fields ->
-         UTupleE inf (map (rename rn) fields)
+       ConE inf op args ->
+         ConE inf (rename rn op) (rename rn args)
        AppE inf op ts es ->
          AppE inf (rename rn op) (map (rename rn) ts) (map (rename rn) es)
        LamE inf f ->
@@ -233,7 +300,7 @@ instance Renameable (Exp Mem) where
     case expression
     of VarE _ v -> Set.singleton v
        LitE _ _ -> Set.empty
-       UTupleE _ es -> Set.unions $ map freeVariables es
+       ConE _ op args -> freeVariables op `Set.union` freeVariables args
        AppE _ op ty_args args -> Set.union (freeVariables op) $
                                  Set.union (freeVariables ty_args) $
                                  freeVariables args
@@ -260,71 +327,32 @@ instance Renameable (Exp Mem) where
          freeVariables t1 `Set.union` freeVariables t2 `Set.union` freeVariables e
 
 instance Renameable (Alt Mem) where
-  rename rn (AltM alt) =
-    case alt
-    of DeCon con ty_args ex_types params body ->
-         let ty_args' = rename rn ty_args
-         in renameTyPatMs rn ex_types $ \rn' ex_types' ->
-            renamePatMs rn' params $ \rn'' params' ->
-            AltM $ DeCon { altConstructor = con
-                         , altTyArgs = ty_args'
-                         , altExTypes = ex_types'
-                         , altParams = params'
-                         , altBody = rename rn'' body}
-       DeTuple params body ->
-            renamePatMs rn params $ \rn' params' ->
-            AltM $ DeTuple { altParams = params'
-                           , altBody = rename rn' body}
-         
+  rename rn (AltM (Alt con params body)) =
+    renameDeConInst rn con $ \rn' con' ->
+    renamePatMs rn' params $ \rn'' params' ->
+    AltM $ Alt con' params' (rename rn'' body)
 
-  freshen p (AltM alt) =
-    case alt
-    of DeCon con ty_args ex_types params body -> do
-         (ex_types', ex_renaming) <- freshenTyPatMs p ex_types
-         renamePatMs ex_renaming params $ \ex_renaming' params' -> do
-           (rn_params, param_renaming) <- freshenPatMs p params'
-           let renaming = param_renaming `mappend` ex_renaming'
-           let body' = rename renaming body
-           return $ AltM $ DeCon { altConstructor = con
-                                 , altTyArgs = ty_args
-                                 , altExTypes = ex_types'
-                                 , altParams = rn_params
-                                 , altBody = body'}
+  freshen p (AltM (Alt con params body)) = do
+    (con', rn1) <- freshenDeConInst p con
+    renamePatMs rn1 params $ \rn2 params' -> do
+      (params'', params_renaming) <- freshenPatMs p params'
+      let rn3 = params_renaming `mappend` rn2
+      let body' = rename rn3 body
+      return $ AltM $ Alt con' params'' body'
 
-       DeTuple params body -> do
-           (rn_params, param_renaming) <- freshenPatMs p params
-           let body' = rename param_renaming body
-           return $ AltM $ DeTuple { altParams = rn_params
-                                   , altBody = body'}
-         
-
-  freeVariables (AltM alt) =
-    case alt
-    of DeCon _ ty_args ex_types params body ->
-         let ty_fv = Set.unions $ map freeVariables ty_args
-             typat_fv = Set.unions $
-                        map freeVariables [t | TyPatM (_ ::: t) <- ex_types]
-             typat_vars = [v | TyPatM (v ::: _) <- ex_types]
-
-             -- Get free variables from patterns; remove existential variables
-             pat_fv1 = Set.unions $ map (freeVariables . patMType) params
-             pat_fv = foldr Set.delete pat_fv1 typat_vars
-
-             pat_vars = map patMVar params
-        
-             -- Get free variables from body;
-             -- remove existential variables and fields
-             body_fv = foldr Set.delete (freeVariables body)
-                       (typat_vars ++ pat_vars)
-         in ty_fv `Set.union` typat_fv `Set.union` pat_fv `Set.union` body_fv
-       DeTuple params body ->
-         let pat_fv = Set.unions $ map (freeVariables . patMType) params
-             pat_vars = map patMVar params
-
-             -- Get free variables from body;
-             -- remove existential variables and fields
-             body_fv = foldr Set.delete (freeVariables body) pat_vars
-         in pat_fv `Set.union` body_fv
+  freeVariables (AltM (Alt (DeCInstM decon) params body)) = let
+    -- Get free variables from body; remove pattern variables
+    pattern_bound = map patMVar params
+    body_fv = foldr Set.delete (freeVariables body) pattern_bound
+    pattern_fv = freeVariables (map patMType params)
+    
+    -- Add free variables from pattern types; remove existential variables
+    exvars = [v | v ::: _ <- deConExTypes decon]
+    body_pattern_fv =
+      foldr Set.delete (Set.union body_fv pattern_fv) exvars
+    
+    -- Add free variables from type parameters
+    in freeVariables (deConTyArgs decon) `Set.union` body_pattern_fv
 
 instance Renameable (Fun Mem) where
   rename rn (FunM fun) =
@@ -386,6 +414,15 @@ renameDefGroup r (Rec defs) k =
 instance Substitutable (Typ Mem) where
   substitute s (TypM t) = TypM `liftM` substitute s t
 
+deriving instance Substitutable (CInst Mem)
+
+instance Substitutable ConInst where
+  substitute s (VarCon op ty_args ex_types) =
+    VarCon op `liftM` mapM (substitute s) ty_args `ap` mapM (substitute s) ex_types
+
+  substitute s (TupleCon ty_args) =
+    TupleCon `liftM` mapM (substitute s) ty_args
+
 instance Substitutable (Exp Mem) where
   substitute s (ExpM expression) =
     case expression
@@ -395,9 +432,10 @@ instance Substitutable (Exp Mem) where
               internalError "Exp Mem.substitute: type substituted for variable"
             Nothing -> return (ExpM expression)
        LitE {} -> return (ExpM expression)
-       UTupleE inf fields -> do
-         fields' <- mapM (substitute s) fields
-         return $ ExpM $ UTupleE inf fields
+       ConE inf con args -> do
+         con' <- substitute s con
+         args' <- mapM (substitute s) args
+         return $ ExpM $ ConE inf con' args'
        AppE inf op ts es -> do
          op' <- substitute s op
          ts' <- mapM (substitute s) ts
@@ -432,23 +470,11 @@ instance Substitutable (Exp Mem) where
          return $ ExpM $ CoerceE inf (TypM t1') (TypM t2') e'
 
 instance Substitutable (Alt Mem) where
-  substitute s (AltM alt) =
-    case alt
-    of DeCon con ty_args ex_types params body -> do
-         ty_args' <- mapM (substitute s) ty_args
-         substituteTyPatMs s ex_types $ \s' ex_types' ->
-           substitutePatMs' s' params $ \s'' params' -> do
-             body' <- substitute s'' body
-             return $ AltM $ DeCon { altConstructor = con
-                                   , altTyArgs = ty_args'
-                                   , altExTypes = ex_types'
-                                   , altParams = params'
-                                   , altBody = body'}
-       DeTuple params body -> do
-         substitutePatMs' s params $ \s' params' -> do
-           body' <- substitute s' body
-           return $ AltM $ DeTuple { altParams = params'
-                                   , altBody = body'}
+  substitute s (AltM (Alt con params body)) =
+    substituteDeConInst s con $ \s' con' ->
+    substitutePatMs' s' params $ \s'' params' -> do
+      body' <- substitute s'' body
+      return $ AltM $ Alt con' params' body'
 
 instance Substitutable (Fun Mem) where
   substitute s (FunM fun) =
@@ -506,21 +532,25 @@ freshenType ty = ReaderT $ \rn -> return $ rename rn ty
 
 freshenDmd dmd = ReaderT $ \rn -> return $ rename rn dmd
 
-freshenTyParam (TyPatM (v ::: ty)) k = do
+freshenBinder (v ::: ty) k = do
   ty' <- freshenType ty
-  freshenVar v $ \v' -> k (TyPatM (v' ::: ty'))
+  freshenVar v $ \v' -> k (v' ::: ty')
+
+freshenTyParam (TyPatM b) k = freshenBinder b $ \b' -> k (TyPatM b')
 
 freshenParam (PatM (v ::: ty) dmd) k = do
   ty' <- freshenType ty
   dmd' <- freshenDmd dmd
   freshenVar v $ \v' -> k (PatM (v' ::: ty') dmd')
 
+freshenConInst con = ReaderT $ \rn -> return $ rename rn con
+
 freshenExp (ExpM expression) = ExpM <$>
   case expression
   of VarE inf v -> VarE inf <$> lookupVar v
      LitE _ _ -> return expression
-     UTupleE inf args ->
-       UTupleE inf <$> mapM freshenExp args
+     ConE inf con args ->
+       ConE inf <$> freshenConInst con <*> mapM freshenExp args
      AppE inf op ty_args args ->
        AppE inf <$>
        freshenExp op <*>
@@ -544,33 +574,31 @@ freshenExp (ExpM expression) = ExpM <$>
      CoerceE inf t1 t2 e ->
        CoerceE inf <$> freshenType t1 <*> freshenType t2 <*> freshenExp e
 
-freshenAlt (AltM alt) = 
-  case alt
-  of DeCon con ty_args ex_types params body -> do
-       ty_args' <- mapM freshenType ty_args
-       withMany freshenTyParam ex_types $ \ex_types' ->
-         withMany freshenParam params $ \params' -> do
-           body' <- freshenExp body
-           return $ AltM $ DeCon { altConstructor = con
-                                 , altTyArgs = ty_args'
-                                 , altExTypes = ex_types'
-                                 , altParams = params'
-                                 , altBody = body'}
-     DeTuple params body ->
-       withMany freshenParam params $ \params' -> do
-         body' <- freshenExp body
-         return $ AltM $ DeTuple { altParams = params'
-                                 , altBody = body'}
+freshenAlt (AltM (Alt decon params body)) =
+  freshen_decon $ \decon' -> do
+    withMany freshenParam params $ \params' -> do
+      body' <- freshenExp body
+      return $ AltM (Alt decon' params' body')
+  where
+    freshen_decon k =
+      case decon
+      of DeCInstM (VarDeCon con ty_args ex_types) -> do
+           ty_args' <- mapM freshenType ty_args
+           withMany freshenBinder ex_types $ \ex_types' ->
+             k (DeCInstM (VarDeCon con ty_args' ex_types'))
+         DeCInstM (TupleDeCon ty_args) -> do
+           ty_args' <- mapM freshenType ty_args
+           k (DeCInstM (TupleDeCon ty_args'))
 
-freshenFun (FunM f) =
-  withMany freshenTyParam (funTyParams f) $ \ty_params ->
-  withMany freshenParam (funParams f) $ \params -> do
-    body <- freshenExp $ funBody f
-    ret <- freshenType $ funReturn f
-    return $ FunM $ f { funTyParams = ty_params
-                      , funParams = params
-                      , funReturn = ret
-                      , funBody = body}
+freshenFun (FunM fun) = do
+  withMany freshenTyParam (funTyParams fun) $ \ty_params ->
+    withMany freshenParam (funParams fun) $ \params -> do
+      body <- freshenExp $ funBody fun
+      ret <- freshenType $ funReturn fun
+      return $ FunM $ fun { funTyParams = ty_params
+                          , funParams = params
+                          , funReturn = ret
+                          , funBody = body}
 
 freshenDefGroup :: DefGroup (Def Mem)
                 -> (DefGroup (Def Mem) -> Freshen a) -> Freshen a
@@ -609,3 +637,129 @@ freshenModuleFully (Module modname imports groups exports) =
     freshen_export e = do
       f <- freshenFun $ exportFunction e
       return $ e {exportFunction = f}
+
+-------------------------------------------------------------------------------
+
+-- | Search for instances of name shadowing in the expression.
+--   If found, raise an exception.
+checkForShadowingExp :: TypeEnv -> ExpM -> ()
+checkForShadowingExp tenv e =
+  checkForShadowingExpSet (IntMap.keysSet $ getAllTypes tenv) e
+
+checkForShadowingExpSet :: CheckForShadowing ExpM
+checkForShadowingExpSet in_scope e =
+  case fromExpM e
+  of VarE {} -> ()
+     LitE {} -> ()
+     ConE _ (CInstM con) args ->
+       checkForShadowingConSet in_scope con `seq`
+       continues args
+     AppE _ op ty_args args ->
+       continue op `seq`
+       (foldr seq () $ map (checkForShadowingSet in_scope . fromTypM) ty_args) `seq`
+       continues args
+     LamE _ f ->
+       checkForShadowingFunSet in_scope f
+     LetE _ pat rhs body ->
+       assertVarIsUndefined in_scope (patMVar pat) `seq`
+       continue rhs `seq`
+       checkForShadowingSet in_scope (patMType pat) `seq`
+       checkForShadowingExpSet (insert (patMVar pat) in_scope) body
+     LetfunE _ defs body ->
+       checkForShadowingGroupSet checkForShadowingExpSet body in_scope defs
+     CaseE _ scr alts ->
+       continue scr `seq`
+       (foldr seq () $ map (checkForShadowingAltSet in_scope) alts)
+     ExceptE _ ty ->
+       checkForShadowingSet in_scope ty
+     CoerceE _ t1 t2 body ->
+       checkForShadowingSet in_scope (fromTypM t1) `seq`
+       checkForShadowingSet in_scope (fromTypM t2) `seq`
+       continue body
+  where
+    continue e = checkForShadowingExpSet in_scope e
+    continues es = foldr seq () $ map continue es
+    insert v scope = IntSet.insert (fromIdent $ varID v) scope
+
+checkForShadowingGroupSet :: CheckForShadowing a -> a
+                          -> CheckForShadowing (DefGroup (Def Mem))
+checkForShadowingGroupSet check body in_scope defs =
+  let definienda = map definiendum $ defGroupMembers defs
+      definientia = map definiens $ defGroupMembers defs
+      augmented_scope = inserts definienda in_scope
+      
+      -- Determine which variables are in scope over the function
+      -- definitions 
+      local_scope =
+        case defs
+        of NonRec _ -> in_scope
+           Rec _    -> augmented_scope
+  in assertVarsAreUndefined in_scope definienda `seq`
+     (foldr seq (check augmented_scope body) $
+      map (checkForShadowingFunSet local_scope) definientia)
+  where
+    insert v scope = IntSet.insert (fromIdent $ varID v) scope
+    inserts vs scope = foldr insert scope vs
+
+
+checkForShadowingConSet :: CheckForShadowing ConInst
+checkForShadowingConSet in_scope con =
+  foldr seq () $ map (checkForShadowingSet in_scope) (conTypes con)
+
+checkForShadowingDeConSet :: CheckForShadowing DeConInst
+checkForShadowingDeConSet in_scope con =
+  assertVarsAreUndefined in_scope [v | v ::: _ <- deConExTypes con] `seq`
+  (foldr seq () $ map (checkForShadowingSet in_scope) types)
+  where
+    types = deConTyArgs con ++ [k | _ ::: k <- deConExTypes con]
+
+checkForShadowingFunSet :: CheckForShadowing FunM
+checkForShadowingFunSet in_scope (FunM (Fun _ typarams params return body)) =
+  let ty_vars = [a | TyPatM (a ::: _) <- typarams]
+      kinds = [k | TyPatM (_ ::: k) <- typarams]
+      ty_scope = inserts ty_vars in_scope
+      param_vars = map patMVar params
+      param_types = map patMType params
+      body_scope = inserts param_vars ty_scope
+  in (foldr seq () $ map (checkForShadowingSet in_scope) kinds) `seq`
+     assertVarsAreUndefined in_scope ty_vars `seq`
+     (foldr seq () $ map (checkForShadowingSet ty_scope) param_types) `seq` 
+     assertVarsAreUndefined ty_scope param_vars `seq`
+     checkForShadowingSet body_scope (fromTypM return) `seq`
+     checkForShadowingExpSet body_scope body
+  where
+    insert v scope = IntSet.insert (fromIdent $ varID v) scope
+    inserts vs scope = foldr insert scope vs
+
+checkForShadowingAltSet :: CheckForShadowing AltM
+checkForShadowingAltSet in_scope (AltM (Alt (DeCInstM decon) params body)) =
+  let ex_vars = [a | a ::: _ <- deConExTypes decon]
+      kinds = deConTyArgs decon ++ [t | _ ::: t <- deConExTypes decon]
+      ty_scope = inserts ex_vars in_scope
+      param_vars = map patMVar params
+      param_types = map patMType params
+      body_scope = inserts param_vars ty_scope
+  in (foldr seq () $ map (checkForShadowingSet in_scope) kinds) `seq`
+     assertVarsAreUndefined in_scope ex_vars `seq`
+     (foldr seq () $ map (checkForShadowingSet ty_scope) param_types) `seq` 
+     assertVarsAreUndefined ty_scope param_vars `seq`
+     checkForShadowingExpSet body_scope body
+  where
+    insert v scope = IntSet.insert (fromIdent $ varID v) scope
+    inserts vs scope = foldr insert scope vs
+
+-- | Check whether any variables from the current type environment
+--   are shadowed in the expression
+checkForShadowingExpHere :: TypeEnvMonad m => ExpM -> m ()
+checkForShadowingExpHere e =
+  askTypeEnv (\tenv -> checkForShadowingExp tenv e)
+
+checkForShadowingModule :: Module Mem -> ()
+checkForShadowingModule (Module _ imports defss exports) =
+  checkForShadowingGroupSet check_globals defss IntSet.empty (Rec imports)
+  where
+    check_globals env (defs : defss) =
+      checkForShadowingGroupSet check_globals defss env defs
+    
+    check_globals env [] =
+      foldr seq () $ map (checkForShadowingFunSet env . exportFunction) exports

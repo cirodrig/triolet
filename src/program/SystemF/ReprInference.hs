@@ -12,6 +12,7 @@ module SystemF.ReprInference(representationInference)
 where
 
 import Control.Monad.Reader
+import Data.Maybe
 import Data.Monoid
 import qualified Data.IntMap as IntMap
 import Debug.Trace
@@ -465,9 +466,9 @@ instance Monoid Coercion where
 --   The argument is the @val@ type.
 toStoredCoercion :: Type -> Coercion
 toStoredCoercion ty = Coercion $ \k e ->
-  k (ExpM $ AppE defaultExpInfo stored_op [TypM ty] [e])
+  k (ExpM $ ConE defaultExpInfo (CInstM stored_con) [e])
   where
-    stored_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_stored)
+    stored_con = VarCon (pyonBuiltin The_stored) [ty] []
 
 -- | Coerce @bare -> val@ using the @stored@ constructor.
 --   The argument is the @val@ type.
@@ -477,11 +478,10 @@ fromStoredCoercion ty = Coercion $ \k e -> do
   (expr, x) <- k (ExpM $ VarE defaultExpInfo val_var)
   
   -- Create a case statement
-  let alt = AltM $ DeCon { altConstructor = pyonBuiltin The_stored
-                         , altTyArgs = [TypM ty]
-                         , altExTypes = []
-                         , altParams = [patM (val_var ::: ty)]
-                         , altBody = expr}
+  let decon = VarDeCon (pyonBuiltin The_stored) [ty] []
+  let alt = AltM $ Alt { altCon = DeCInstM decon
+                       , altParams = [patM (val_var ::: ty)]
+                       , altBody = expr}
       cas = ExpM $ CaseE defaultExpInfo e [alt]
   return (cas, x)
 
@@ -529,12 +529,10 @@ writeLocalCoercion ty = Coercion $ \k e -> do
   read_var <- newAnonymousVar ObjectLevel
   (expr, x) <- k (ExpM $ VarE defaultExpInfo read_var)
   
-  let rhs = ExpM $ AppE defaultExpInfo box_op [TypM ty] [e]
-      expr_alt = AltM $ DeCon { altConstructor = pyonBuiltin The_boxed
-                              , altTyArgs = [TypM ty]
-                              , altExTypes = []
-                              , altParams = [patM (read_var ::: ty)]
-                              , altBody = expr}
+  let rhs = ExpM $ ConE defaultExpInfo (CInstM box_con) [e]
+      expr_alt = AltM $ Alt { altCon = DeCInstM box_decon
+                            , altParams = [patM (read_var ::: ty)]
+                            , altBody = expr}
       body = ExpM $ CaseE defaultExpInfo
              (ExpM $ VarE defaultExpInfo boxed_var)
              [expr_alt]
@@ -542,7 +540,8 @@ writeLocalCoercion ty = Coercion $ \k e -> do
       local_expr = ExpM $ LetE defaultExpInfo pattern rhs body
   return (local_expr, x)
   where
-    box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_boxed)
+    box_con = VarCon (pyonBuiltin The_boxed) [ty] []
+    box_decon = VarDeCon (pyonBuiltin The_boxed) [ty] []
     box_type = varApp (pyonBuiltin The_Boxed) [ty]
 
 -- | Create a coercion that coerces from one specification function
@@ -732,27 +731,69 @@ type TypeArgument = (Type, Kind)
 --   Application of some arguments may fail because the function has to 
 --   be coerced.  Those arguments will be returned unmodified.
 data AppResult =
-  AppResult
-  { -- | The applied expression, except for value arguments which must be
-    --   supplied separately.  The /coerced/ arguments will be passed to this
-    --   function.
-    appliedExpr            :: [ExpM] -> RI ExpM
+    -- | An application of a function or data constructor to arguments 
+    FunAppResult
+    { -- | The applied expression, except for value arguments which must be
+      --   supplied separately.  The /coerced/ arguments will be passed to this
+      --   function.
+      appliedExpr            :: [ExpM] -> RI ExpM
 
-    -- | The result of the applied expression
-  , appliedReturnType      :: Type
+      -- | The result of the applied expression
+    , appliedReturnType      :: Type
 
-    -- | Coercions that should be applied to value arguments
-    --   (in reverse order, relative to arguments)
-  , appliedCoercions       :: [Coercion]
-  }
+      -- | Coercions that should be applied to value arguments
+      --   (in reverse order, relative to arguments)
+    , appliedCoercions       :: [Coercion]
+
+      -- | For constructors, the number of value arguments that must be
+      --   applied.  The number decreases toward zero as more arguments are
+      --   applied.  The count does not include an output pointer count.
+    , appliedArityRemaining  :: !(Maybe Int)
+    }
+    -- | A data constructor that requires type arguments.
+    --   Currently, existential types are not supported.
+    --
+    --   A 'FunAppResult' is produced once all type arguments have
+    --   been supplied.
+  | VarConExpectingTypes
+    { appliedConstructor     :: !Var
+    , appliedTypeArgs        :: [Type]
+    , appliedConstructorType :: !DataConType
+    , appliedReturnType      :: Type
+    }
 
 appResult :: ExpM -> Type -> AppResult
-appResult e ty = AppResult { appliedExpr       = mk_expr
-                           , appliedReturnType = ty
-                           , appliedCoercions  = []}
+appResult e ty = FunAppResult { appliedExpr           = mk_expr
+                              , appliedReturnType     = ty
+                              , appliedCoercions      = []
+                              , appliedArityRemaining = Nothing}
   where
     mk_expr [] = return e
     mk_expr _  = internalError "appResult: Wrong number of arguments"
+
+conAppResult :: Var -> DataConType -> Type -> AppResult
+conAppResult v data_type ty
+  | not $ null (dataConPatternExTypes data_type) =
+      internalError "conAppResult: Not implemented for existential types"
+  | null (dataConPatternParams data_type) =
+      -- No type parameters required
+      FunAppResult { appliedExpr = mk_expr
+                  , appliedReturnType = ty
+                  , appliedCoercions = []
+                  , appliedArityRemaining =
+                      case dataConPatternArgs data_type
+                      of [] -> Nothing
+                         xs -> Just $ length xs
+                  }
+  | otherwise =
+      VarConExpectingTypes { appliedConstructor = v
+                           , appliedTypeArgs    = []
+                           , appliedConstructorType = data_type
+                           , appliedReturnType = ty}
+  where
+    -- Create a constructor term with no type arguments
+    mk_expr [] = return $ conE defaultExpInfo (VarCon v [] []) []
+    mk_expr _  = internalError "conAppResult: Wrong number of arguments"
 
 -- | Coerce the result type of an 'AppResult'.
 --   The parameter @from_type@ must be the same as the return type of
@@ -760,19 +801,50 @@ appResult e ty = AppResult { appliedExpr       = mk_expr
 resultOfCoercion :: Type -> Type -> AppResult -> AppResult
 resultOfCoercion from_type to_type app_result =
   app_result { appliedExpr = coerce $ appliedExpr app_result
-             , appliedReturnType = to_type}
+             , appliedReturnType = to_type
+               -- Coercion never produces a partially applied constructor term
+             , appliedArityRemaining = Nothing}
   where
     coerce mk_expr args = do
       expr <- mk_expr args
+
+      -- Eta-expand the constructor if needed
+      expr2 <- case appliedArityRemaining app_result
+               of Nothing -> return expr
+                  Just n  -> eta_expand n from_type expr
       coerceExpToReturnType from_type to_type expr
+    
+    -- Eta-expand the expression by @n@ arguments
+    eta_expand n from_type expr = do
+      param_vars <- replicateM n $ newAnonymousVar ObjectLevel
+      let (param_types, result_type) = take_parameter_types n from_type
+      
+      let fun_params = map patM $ zipWith (:::) param_vars param_types
+          new_args = [ExpM (VarE defaultExpInfo v) | v <- param_vars]
+          fun_body = case expr
+                     of ExpM (ConE inf con args) ->
+                          ExpM (ConE inf con (args ++ new_args))
+      let fun = FunM $ Fun { funInfo = defaultExpInfo
+                           , funTyParams = []
+                           , funParams = fun_params
+                           , funReturn = TypM result_type
+                           , funBody = fun_body}
+      return $ ExpM $ LamE defaultExpInfo fun
+      where
+        take_parameter_types n ty = go id n ty
+          where
+            go hd 0 ty = (hd [], ty)
+            go hd n (FunT dom rng) = go (hd . (dom:)) (n-1) rng
+            
+            -- Should not happen in a well-typed program
+            go _ _ _ = internalError "resultOfCoercion"
 
 -- | Apply a type to an 'AppResult', producing a new 'AppResult'.
 --   Applying to @arg_type@ must produce a result with type @result_type@.
 --   Type correctness is not verified.
 resultOfTypeApp :: Type -> Type -> AppResult -> AppResult
-resultOfTypeApp result_type type_arg app_result =
-  app_result { appliedExpr = app $ appliedExpr app_result
-             , appliedReturnType = result_type}
+resultOfTypeApp result_type type_arg (FunAppResult base_exp _ co _) =
+  FunAppResult (app base_exp) result_type co Nothing
   where
     app mk_expr args = do
       expr <- mk_expr args
@@ -787,11 +859,34 @@ resultOfTypeApp result_type type_arg app_result =
         apply_type e =
           ExpM $ AppE defaultExpInfo e [TypM type_arg] []
 
+resultOfTypeApp result_type type_arg (VarConExpectingTypes con ty_args data_con _) =
+  -- Does the result of type application have all type arguments?
+  if 1 + length ty_args == num_ty_args
+  then FunAppResult mk_expr result_type [] (Just num_fields)
+  else VarConExpectingTypes con ty_args' data_con result_type
+  where
+    num_ty_args = length (dataConPatternParams data_con)
+    num_fields = length (dataConPatternArgs data_con)
+
+    ty_args' = ty_args ++ [type_arg]
+
+    mk_expr [] = return $ conE defaultExpInfo (VarCon con ty_args' []) []
+    mk_expr _  = internalError "resultOfTypeApp: Wrong number of arguments"
+
 resultOfApp :: Type -> Coercion -> AppResult -> AppResult
+resultOfApp _ _ (VarConExpectingTypes {}) = 
+  internalError "resultOfApp: Expecting type arguments"
+
 resultOfApp result_type co app_result =
   app_result { appliedExpr = app $ appliedExpr app_result
              , appliedCoercions = co : appliedCoercions app_result
-             , appliedReturnType = result_type}
+             , appliedReturnType = result_type
+             , appliedArityRemaining =
+                 case appliedArityRemaining app_result
+                 of Nothing -> Nothing
+                    Just 1  -> Nothing 
+                    Just n -> Just $! n - 1
+             }
   where
     app mk_expr [] = internalError "resultOfApp: Wrong number of arguments"
 
@@ -805,6 +900,11 @@ resultOfApp result_type co app_result =
         -- possible
         apply_expr arg (ExpM (AppE inf op ty_args args)) =
           ExpM (AppE inf op ty_args (args ++ [arg]))
+
+        -- Add to the existing term only if the constructor isn't saturated
+        apply_expr arg (ExpM (ConE inf con args)) 
+          | isJust $ appliedArityRemaining app_result =
+              ExpM (ConE inf con (args ++ [arg]))
 
         apply_expr arg e =
           ExpM (AppE defaultExpInfo e [] [arg])
@@ -836,6 +936,24 @@ reprApply :: ExpM               -- ^ Operator
           -> RI (ExpM, Type) -- ^ Computes the expression and return type
 reprApply op op_type ty_args args = do
   app_result <- reprTypeOfApp op op_type ty_args (map snd args)
+  applyResultToValues app_result (map fst args)
+
+reprApplyCon :: Var                -- ^ Constructor
+             -> [TypeArgument]     -- ^ Type arguments
+             -> [(ExpM, Type)]     -- ^ Arguments and their types
+             -> RI (ExpM, Type) -- ^ Computes the expression and return type
+reprApplyCon op ty_args args = do
+  -- Set up data for use by 'applyToTypeArg'
+  tenv <- getTypeEnv
+  let Just data_con = lookupDataCon op tenv
+      Just op_type = lookupType op tenv
+      constructor_app_result = conAppResult op data_con op_type
+  
+  -- Apply type arguments
+  instantiated_result <- foldM applyToTypeArg constructor_app_result ty_args
+
+  -- Apply values
+  app_result <- foldM applyToArg instantiated_result (map snd args)
   applyResultToValues app_result (map fst args)
 
 -- | Compute the result of a type application.
@@ -912,6 +1030,8 @@ reprExp expression =
        v_type <- riLookupType v
        return (ExpM (VarE inf v), v_type)
      LitE inf l -> return (ExpM (LitE inf l), literalType l)
+     ConE inf op args ->
+       reprCon inf op args
      AppE inf op ty_args args ->
        reprApp inf op ty_args args
      LamE inf f -> do
@@ -952,6 +1072,16 @@ reprExp expression =
        to_t' <- cvtCanonicalReturnType to_t
        return (ExpM $ CoerceE inf (TypM from_t') (TypM to_t') co_body, to_t')
 
+reprCon inf op args = do
+  let CInstSF (VarCon con ty_args []) = op
+
+  -- Compute representations of arguments
+  repr_ty_args <- mapM cvtNormalizeCanonicalType ty_args
+  args' <- mapM reprExp args
+  
+  -- Compute result type and coerce arguments
+  reprApplyCon con repr_ty_args args'
+
 reprApp inf op ty_args args = do
   (op', op_type) <- reprExp op
   repr_ty_args <- mapM (cvtNormalizeCanonicalType . fromTypSF) ty_args
@@ -976,15 +1106,16 @@ reprCase original_exp inf scr alts = do
 --   the return type.
 reprAlt :: Type -> AltSF -> RI AltM
 reprAlt return_type (AltSF alt) = do
-  con_type <- riLookupDataCon (altConstructor alt)
+  let DeCInstSF (VarDeCon op ty_args ex_types) = altCon alt 
+  con_type <- riLookupDataCon op
 
   -- Convert type arguments and coerce to match the data type
   let ty_arg_kinds = [k | _ ::: k <- dataConPatternParams con_type]
-  ty_args <- zipWithM convert_type_argument ty_arg_kinds (altTyArgs alt)
+  ty_args <- zipWithM convert_type_argument ty_arg_kinds ty_args
 
   -- Get kinds of existential types
-  let ex_vars = [a | TyPatSF (a ::: _) <- altExTypes alt]
-      sf_ex_types = [t | TyPatSF (_ ::: t) <- altExTypes alt]
+  let ex_vars = [a | a ::: _ <- ex_types]
+      sf_ex_types = [t | _ ::: t <- ex_types]
   (ex_types, arg_types, _) <- instantiateDataConType con_type ty_args ex_vars
 
   let params = [x ::: t
@@ -997,15 +1128,13 @@ reprAlt return_type (AltSF alt) = do
       -- Coerce the body's result
       co_body <- coerceExpToReturnType body_type return_type body
 
-      return $ AltM $ DeCon { altConstructor = altConstructor alt
-                            , altTyArgs = map TypM ty_args
-                            , altExTypes = map TyPatM ex_types
-                            , altParams = map patM params
-                            , altBody = co_body}
+      return $ AltM $ Alt { altCon = DeCInstM (VarDeCon op ty_args ex_types)
+                          , altParams = map patM params
+                          , altBody = co_body}
   where
     -- Convert a System F type to the expected type
     convert_type_argument expected_kind original_type = do
-      (ty, kind) <- cvtNormalizeCanonicalType $ fromTypSF original_type
+      (ty, kind) <- cvtNormalizeCanonicalType original_type
       coerceType kind expected_kind ty
       
     -- Add existential types to the type environments

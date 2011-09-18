@@ -13,7 +13,7 @@ to eliminate repacking inside workers.
 
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
-module SystemF.ArgumentFlattening(flattenArguments, flattenLocals)
+module SystemF.ArgumentFlattening(flattenArguments)
 where
 
 import Prelude hiding (mapM, sequence)
@@ -84,6 +84,9 @@ bindVariable tenv binder rhs body =
   of BareK -> letViaBoxed binder rhs body
      ValK  -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
      BoxK  -> ExpM $ LetE defaultExpInfo (patM binder) rhs body
+
+noneValue :: ExpM
+noneValue = conE defaultExpInfo (VarCon (pyonBuiltin The_None) [] []) []
 
 -------------------------------------------------------------------------------
 -- * The argument flattening monad
@@ -158,8 +161,9 @@ mapOverTailExps f expression =
        return $ ExpM $ CaseE inf scr alts'
      _ -> f expression
   where
-    map_alt (AltM alt) = do
-      assumeTyPatMs (getAltExTypes alt) $ assumePats (altParams alt) $ do
+    map_alt (AltM alt) =
+      assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $
+      assumePats (altParams alt) $ do
         body <- mapOverTailExps f $ altBody alt
         return $ AltM (alt {altBody = body})
 
@@ -174,7 +178,7 @@ data Decomp =
     -- | Value is deconstructed.
     --   The fields of the deconstructed value cannot contain a dummy
     --   parameter.
-  | DeconDecomp !MonoCon FlatArgs
+  | DeconDecomp !DeConInst FlatArgs
 
     -- | Value is dead
     --
@@ -184,15 +188,16 @@ data Decomp =
 
 pprDecomp :: Decomp -> Doc
 pprDecomp IdDecomp = text "U"
-pprDecomp (DeconDecomp (MonoCon con ty_args ex_types) fields) =
+pprDecomp (DeconDecomp (VarDeCon con ty_args ex_types) fields) =
   text "D{" <> app <> text "}"
   where
     ty_args_doc = [pprTypePrec t ?+ appPrec | t <- ty_args]
-    ex_types_doc = map (pprTyPat . TyPatM) ex_types
+    ex_types_doc = [parens (pprVar v <+> text ":" <+> pprType t)
+                   | (v ::: t) <- ex_types]
     fields_doc = map pprFlatArg fields
     app = sep (pprVar con : ty_args_doc ++ ex_types_doc ++ fields_doc)
 
-pprDecomp (DeconDecomp (MonoTuple _) fields) =
+pprDecomp (DeconDecomp (TupleDeCon _) fields) =
   -- Tuples should not be decomposed
   text "ERROR"
 
@@ -215,8 +220,8 @@ isSmallDecomp tenv (ty, decomp) =
   case decomp
   of IdDecomp -> is_small_type ty
      DeadDecomp {} -> True
-     DeconDecomp (MonoCon _ _ ex_types) fields ->
-       let local_tenv = foldr assume_binder tenv ex_types
+     DeconDecomp decon fields ->
+       let local_tenv = foldr assume_binder tenv $ deConExTypes decon
        in all (isSmallDecomp local_tenv)
           [(patMType p, d) | FlatArg p d <- fields]
   where
@@ -237,8 +242,9 @@ unpacksToAValue tenv (FlatRet ty IdDecomp) =
      BoxK -> True
      _    -> False
 
-unpacksToAValue tenv (FlatRet _ (DeconDecomp (MonoCon _ _ ex_types) fs)) =
-  null ex_types && and [unpacksToAValue tenv (flatArgReturn f) | f <- fs]
+unpacksToAValue tenv (FlatRet _ (DeconDecomp decon fs)) =
+  null (deConExTypes decon) &&
+  and [unpacksToAValue tenv (flatArgReturn f) | f <- fs]
 
 unpacksToAValue _ (FlatRet _ (DeadDecomp _)) = True
 
@@ -254,8 +260,8 @@ flattenDecomp typaram field x decomp = go x decomp
   where
     go x IdDecomp = x
     go _ (DeadDecomp _) = mempty
-    go _ (DeconDecomp (MonoCon _ _ ex_types) fields) =
-      mconcat $ map (typaram . TyPatM) ex_types ++
+    go _ (DeconDecomp decon fields) =
+      mconcat $ map (typaram . TyPatM) (deConExTypes decon) ++
                 [go (field p) d | (p, d) <- map fromFlatArg fields]
 
 -- | Flatten a decomposition that doesn't introduce type parameters
@@ -371,7 +377,7 @@ flattenedParameterValue (FlatArg pat decomp) =
     put_pat p = ([], [ExpM $ VarE defaultExpInfo (patMVar p)])
 
 flattenedParameterValue (DummyArg _) =
-  ([], [ExpM $ VarE defaultExpInfo (pyonBuiltin The_None)])
+  ([], [noneValue])
 
 -- | Get the flattened parameter values from a sequence of flattened
 --   parameters.  Each value is a type variable or variable expression.
@@ -403,11 +409,12 @@ flattenedReturnParameters flat_ret =
 flattenedReturnValue :: FlatRet -> ExpM
 flattenedReturnValue flat_ret = 
   case flattenMonoDecomp (\p -> Just [var_exp p]) Nothing $ frDecomp flat_ret
-  of Just [e] -> e
-     Just es  -> ExpM $ UTupleE defaultExpInfo es
+  of Just [e] -> fst e
+     Just es  -> let (values, types) = unzip es
+                 in ExpM $ ConE defaultExpInfo (CInstM (TupleCon types)) values
      Nothing -> internalError "flattenedReturnValue"
   where
-    var_exp pat = ExpM $ VarE defaultExpInfo (patMVar pat)
+    var_exp pat = (ExpM $ VarE defaultExpInfo (patMVar pat), patMType pat)
 
 -- | Given the variable bindings returned by 'flattenedReturnParameters', 
 --   and a flattened return value, bind the flattened return variables.
@@ -419,7 +426,10 @@ bindFlattenedReturn inf [p] source_exp body =
 bindFlattenedReturn inf patterns source_exp body =
   -- Multiple or zero return values.  Deconstruct the
   -- expression result with a case statement, then repack.
-  ExpM $ CaseE defaultExpInfo source_exp [AltM $ DeTuple patterns body]
+  let pattern_types = map patMType patterns
+      decon = TupleDeCon pattern_types
+  in ExpM $ CaseE defaultExpInfo source_exp
+     [AltM $ Alt (DeCInstM decon) patterns body]
 
 -------------------------------------------------------------------------------
 -- * Value packing and unpacking transformations
@@ -432,10 +442,10 @@ flattenParameter :: FlatArg -> ExpM -> ExpM
 flattenParameter (FlatArg pat decomp) body =
   case decomp
   of IdDecomp -> body
-     DeconDecomp mono_con fields ->
+     DeconDecomp decon fields ->
        let pattern_exp = ExpM $ VarE defaultExpInfo (patMVar pat)
            body' = flattenParameters fields body
-           alt = altFromMonoCon mono_con (map faPattern fields) body'
+           alt = AltM $ Alt (DeCInstM decon) (map faPattern fields) body'
        in ExpM $ CaseE defaultExpInfo pattern_exp [alt]
      DeadDecomp _ -> body
 
@@ -466,14 +476,13 @@ packParameterWrite (DummyArg _) = return Nothing
 packParameterWrite' pat flat_arg =
   case flat_arg
   of IdDecomp -> copy_expr (patMType pat) (var_exp $ patMVar pat)
-     DeconDecomp (MonoCon con types ex_types) fields ->
+     DeconDecomp (VarDeCon con_var types ex_types) fields ->
        assumeBinders ex_types $ do
          exps <- packParametersWrite fields
          
          -- Construct/initialize a value
-         let op = var_exp con
-         let ty_args = map TypM (types ++ [VarT a | a ::: _ <- ex_types])
-         return $ appE defaultExpInfo op ty_args exps
+         let con = VarCon con_var types [VarT a | a ::: _ <- ex_types]
+         return $ conE defaultExpInfo con exps
 
      DeadDecomp e -> return e
   where
@@ -511,12 +520,11 @@ packParameterRead (FlatArg pat flat_arg) =
   case flat_arg
   of IdDecomp ->
        return (Just (var_exp $ patMVar pat), id)
-     DeconDecomp (MonoCon con types ex_types) fields ->
+     DeconDecomp (VarDeCon con_var types ex_types) fields ->
        assumeBinders ex_types $ do
          exps <- packParametersWrite fields
-         let op = var_exp con
-         let ty_args = map TypM (types ++ [VarT a | a ::: _ <- ex_types])
-         let packed = appE defaultExpInfo op ty_args exps
+         let con = VarCon con_var types [VarT a | a ::: _ <- ex_types]
+         let packed = conE defaultExpInfo con exps
          
          -- If this is a bare type, define a local variable with the
          -- packed parameter.  Otherwise, just assign a local variable.
@@ -589,6 +597,8 @@ flattenReturnWrite flat_ret orig_exp =
     flattened_value = flattenedReturnValue flat_ret
  
 -- | Deconstruct a return value according to the given pattern.
+--   The given expression to deconstruct should be a value or initializer
+--   expression.
 --   The deconstruction code is moved to tail position and constructor
 --   applications are eliminated when possible.
 --
@@ -598,37 +608,29 @@ flattenReturnWrite flat_ret orig_exp =
 --   bound to the given 'FlatArgs' patterns, and code is generated to
 --   deconstruct those patterns.
 deconReturn :: (EvalMonad m, ReprDictMonad m) =>
-               MonoCon            -- ^ Constructor to match against
+               DeConInst          -- ^ Constructor to match against
             -> FlatArgs           -- ^ Fields to deconstruct
             -> ([ExpM] -> m ExpM) -- ^ Deconstruct initializers
             -> m ExpM             -- ^ Deconstruct values bound to patterns
             -> ExpM               -- ^ Expression to deconstruct
             -> m ExpM             -- ^ Deconstructor
-deconReturn con_type dc_fields decon_initializers decon_patterns expression =
+deconReturn decon dc_fields decon_initializers decon_patterns expression =
   mapOverTailExps decon_tail expression
   where
     decon_tail tail_exp = do
       tenv <- getTypeEnv
 
       -- Attempt to deconstruct the tail expression
-      case con_type of
-        MonoCon con decon_ty_args decon_ex_types ->
-          case unpackDataConAppM tenv tail_exp of
-            Just (dcon_type, ty_args, ex_args, fields) 
-              | dataConCon dcon_type /= con ->
-                  internalError "deconReturn: Unexpected data constructor"
-              | not (null ex_args && null decon_ex_types) ->
-                  internalError "deconReturn: Unexpected existential types"
-              | otherwise ->
-                  -- Eliminate the data constructor.
-                  -- Continue processing with the initializers.
-                  decon_initializers fields
-            Nothing -> bind_and_deconstruct tail_exp
-
-        MonoTuple _ ->
-          case tail_exp
-          of ExpM (UTupleE _ fields) -> decon_initializers fields
-             _ -> bind_and_deconstruct tail_exp
+      case tail_exp of
+        ExpM (ConE inf (CInstM con) fields)
+          | summarizeDeconstructor decon /= summarizeConstructor con ->
+            internalError "deconReturn: Unexpected data constructor"
+          | otherwise ->
+            -- Eliminate the data constructor.
+            -- Continue processing with the initializers.
+            decon_initializers fields
+        _ ->
+          bind_and_deconstruct tail_exp
           
     -- Unable to deconstruct the expression.  Bind the expression's result to 
     -- a variable, then deconstruct it.
@@ -636,12 +638,16 @@ deconReturn con_type dc_fields decon_initializers decon_patterns expression =
       consumer_exp <- decon_patterns
 
       -- Deconstruct the expression result
-      let match = altFromMonoCon con_type (map faPattern dc_fields)
-                  consumer_exp
+      let match = AltM $ Alt (DeCInstM decon) (map faPattern dc_fields) consumer_exp
           case_of scrutinee = ExpM $ CaseE defaultExpInfo scrutinee [match]
 
       -- Bind the expression result
-      data_type <- monoConType con_type
+      (_, data_type) <-
+        conType (case decon
+                 of VarDeCon v ty_args ex_types ->
+                      VarCon v ty_args [VarT v | v ::: _ <- ex_types]
+                    TupleDeCon ty_args ->
+                      TupleCon ty_args)
       tenv <- getTypeEnv
       case toBaseKind $ typeKind tenv data_type of
         BareK -> deconstruct_writer data_type tail_exp case_of
@@ -901,10 +907,10 @@ planFlattening mode ty spc = do
     _ | is_dictionary_pattern whnf_type || is_abstract tenv whnf_type ->
       id_decomp
 
-    Decond (MonoCon spc_con _ _) spcs -> decon_decomp spc_con (Just spcs)
+    Decond (VarDeCon spc_con _ _) spcs -> decon_decomp spc_con (Just spcs)
 
     -- Unpacking is not implemented for unboxed tuples
-    Decond (MonoTuple _) spcs -> id_decomp
+    Decond (TupleDeCon _) spcs -> id_decomp
 
     Inspected -> singleton_decomp
 
@@ -953,7 +959,7 @@ planDeconstructedValue mode con ty_args maybe_fields = do
       field_plans <- foldr assumeBinder (plan_fields field_info) ex_params
 
       -- Construct the deconstruction plan
-      return $ DeconDecomp (MonoCon con ty_args ex_params) field_plans
+      return $ DeconDecomp (VarDeCon con ty_args ex_params) field_plans
 
     _ -> internalError "planDeconstructedValue: Unknown data constructor"
   where
@@ -980,7 +986,7 @@ deadValue t = do
       case fromTypeApp t
       of (VarT con, [])
            | con `isPyonBuiltin` The_NoneType ->
-               return $ ExpM $ VarE defaultExpInfo (pyonBuiltin The_None)
+               return noneValue
            | con `isPyonBuiltin` The_int ->
                return $ ExpM $ LitE defaultExpInfo $ IntL 0 t
            | con `isPyonBuiltin` The_float ->
@@ -1076,7 +1082,7 @@ flattenBoxedValue boxed_var (FlatLocal arg) =
       boxed_type = varApp (pyonBuiltin The_Boxed) [arg_type]
       boxed_param = patM (boxed_var ::: boxed_type)
       
-      boxed_mono_con = MonoCon (pyonBuiltin The_boxed) [arg_type] []
+      boxed_mono_con = VarDeCon (pyonBuiltin The_boxed) [arg_type] []
       boxed_decomp = DeconDecomp boxed_mono_con [arg]
 
   in FlatLocal (FlatArg boxed_param boxed_decomp)
@@ -1423,9 +1429,9 @@ flattenInExp expression =
   case fromExpM expression
   of VarE {} -> return expression
      LitE {} -> return expression
-     UTupleE inf args -> do
+     ConE inf con args -> do
        args' <- mapM flattenInExp args
-       return $ ExpM $ UTupleE inf args'
+       return $ ExpM $ ConE inf con args'
      AppE inf op ty_args args -> do
        op' <- flattenInExp op
        args' <- mapM flattenInExp args
@@ -1453,7 +1459,8 @@ flattenInExp expression =
 
 flattenInAlt :: AltM -> AF AltM
 flattenInAlt (AltM alt) =
-  assumeTyPatMs (getAltExTypes alt) $ assumePats (altParams alt) $ do
+  assumeBinders (deConExTypes $ fromDeCInstM $ altCon alt) $
+  assumePats (altParams alt) $ do
     body' <- flattenInExp (altBody alt)
     return $ AltM $ alt {altBody = body'}
 
@@ -1475,249 +1482,3 @@ flattenArguments mod =
     type_env <- readInitGlobalVarIO the_memTypes
     let env = AFLVEnv id_supply type_env dict_env ()
     runReaderT (unAF $ flattenModuleContents mod) env
-
--------------------------------------------------------------------------------
--- * The local variable flattening pass
-
--- | Local variable flattening does something similar to argument flattening,
---   but for local variable definitions whose RHS is a complicated expression.
---   In this case, the benefit of the transformation is that it replaces 
---   expensive, large temporary variables by cheap, small ones.
---
---   Local variable flattening is applied to all @let@ expressions, and
---   @case@ expressions where the scrutinee is a boxed object.
---   For example:
---
---   > case boxed(case foo of {A. expr_1; B. expr_2})
---   > of boxed (t). case t
---   >               of (x, y, z). ... use y and z ...
---    
---   In this example, local variable flattening eliminates the storage of
---   the unused variable @x@.  Moreover, if @y@ and @z@ can be
---   register-allocated, we can replace the heap-allocated boxed tuple by a
---   register-allocated unboxed tuple.
---
---   A value is flattened if: 
---
---   * Its demand is @D{...}@.  A \"deconstructed\" demand indicates that the
---     value will only be deconstructed by a case statement.  This is good
---     because it means only the fields of the object are needed, not the
---     object itself.  We are free to replace the object with a cheaper object.
---
---   * Its type is @Stored a@ for some value type @a@.  We predict that
---     that value types are always cheaper than stored types, even if the
---     object will have to be reconstructed later.
-
--- | During local variable flattening, keep track of the mapping between
---   local variables and their unpacked form
-type LocalVarEnv = IntMap.IntMap FlatLocal
-
--- | The local variable flattening monad
-type LF = AFMonad LocalVarEnv
-
--- | Keep track of a variable that has been unpacked.  This is performed by
---   let-bindings.
-withUnpackedLocalVariable :: FlatLocal -> LF a -> LF a
-withUnpackedLocalVariable fl@(FlatLocal (FlatArg pat _)) m =
-  let var_id = fromIdent $ varID $ patMVar pat
-      ins env = env {afOther = IntMap.insert var_id fl $ afOther env}
-  in AF $ local ins $ unAF m
-
--- | Look up the unpacked version of a variable, given the original variable.
---   If 'Nothing' is returned, this variable will not be unpacked.
-lookupUnpackedLocalVariable :: Var -> LF (Maybe FlatLocal)
-lookupUnpackedLocalVariable v = AF $ asks (lookup_var . afOther)
-  where
-    lookup_var m = IntMap.lookup (fromIdent $ varID v) m
-
--- | Remove the unpacked version of a variable from the environment.
---   If the variable is seen during the execution of @m@,it won't be unpacked.
-deleteUnpackedLocalVariable :: Var -> LF a -> LF a
-deleteUnpackedLocalVariable v m = AF $ local delete_var $ unAF m
-  where
-    delete_var env =
-      env {afOther = IntMap.delete (fromIdent $ varID v) $ afOther env}
-
--- | If the given expression is an unpacked variable, then repack it.
---   Also, remove the unpacked variable from the local variable map.
---
---   Repacking generates the code:
---
--- > let original_variable = (recreate the original value)
--- > in consumer_expression
-lvRepackIfUnpacked :: ExpM -> LF ExpM -> LF ExpM
-lvRepackIfUnpacked (ExpM (VarE _ v)) mk_consumer = do
-  m_unpacking <- lookupUnpackedLocalVariable v
-  case m_unpacking of
-    Just flattening -> do
-      -- The expression is a variable that has been unpacked.
-      -- Repack it in the context of the consumer.
-      consumer <- deleteUnpackedLocalVariable v mk_consumer
-      packLocal flattening consumer
-    Nothing -> do
-      mk_consumer
-
-lvRepackIfUnpacked _ mk_consumer =
-  -- Other expressions aren't deleted
-  mk_consumer
-
--- | Perform local variable flattening on the body of a function
-lvInFun :: FunM -> LF FunM
-lvInFun (FunM f) =
-  assumeTyPatMs (funTyParams f) $ assumePats (funParams f) $ do
-    fun_body <- lvExp $ funBody f
-    return $ FunM $ f {funBody = fun_body}
-
-lvDef :: Def Mem -> LF (Def Mem)
-lvDef def = mapMDefiniens lvInFun def
-
-lvExp :: ExpM -> LF ExpM
-lvExp expression =
-  case fromExpM expression
-  of VarE _ v -> do
-       -- It's an error to see an unpacked local variable here.
-       -- Any appearances of an unpacked local variable should have been
-       -- transformed by the App or Case rules.
-       m_unpacking <- lookupUnpackedLocalVariable v
-       when (isJust m_unpacking) $
-         internalError "lvExp: Unexpected unpacked variable"
-       return expression
-     LitE {} -> return expression
-     UTupleE inf es -> do
-       es' <- mapM lvExp es
-       return $ ExpM $ UTupleE inf es'
-     AppE inf op ty_args args ->
-       lvApp inf op ty_args args
-     LamE inf f -> do
-       f' <- lvInFun f
-       return $ ExpM $ LamE inf f'
-     LetE inf pat rhs body -> lvLet inf pat rhs body
-     LetfunE inf defs body -> do
-       new_defs <- mapM lvDef defs
-       body' <- lvExp body
-       return $ ExpM $ LetfunE inf new_defs body'
-     CaseE inf scr alts -> lvCase inf scr alts
-     ExceptE _ _ -> return expression
-     CoerceE inf from_type to_type body -> do
-       body' <- lvExp body
-       return $ ExpM $ CoerceE inf from_type to_type body'
-
-lvApp inf op ty_args args = repack_args $ do
-  op' <- lvExp op
-  args' <- mapM lvExp args
-  return $ ExpM $ AppE inf op' ty_args args'
-  where
-    repack_args m = foldr lvRepackIfUnpacked m args
-
-lvLet :: ExpInfo -> PatM -> ExpM -> ExpM -> LF ExpM
-lvLet inf binder rhs body = do
-  rhs' <- lvExp rhs
-  binder_plan <- planLocal binder
-  lvFlattenBinding False inf binder_plan rhs' body
-
--- | Transform local variables for a case statement.
--- First, if the scrutinee was a transformed local variable, then insert code
--- to repack the variable just before the case statement.
---
-lvCase inf scr alts =
-  lvRepackIfUnpacked scr $ do
-    scr' <- lvExp scr
-    lvTransformCase inf scr' alts
-
--- | Transform case bindings of @boxed@ type.
---
---   A case whose scrutinee has type @Boxed a@ is essentially a let-binding
---   for a bare value.  Try to flatten the local variable as if it were a
---   let binding.
---      
---   The scrutinee has already been transformed; the case alternatives have
---   not been transformed.
-lvTransformCase inf scr [altm]
-  | (mono_con@(MonoCon alt_con [ty] []), [param], body) <- altToMonoCon altm,
-    alt_con `isPyonBuiltin` The_boxed = do
-      binder_plan <- planLocal param
-      case binder_plan of
-        FlatLocal (FlatArg _ IdDecomp) ->
-          -- The scrutinee isn't deconstructed except for the outermost
-          -- 'boxed' constructor.  Don't transform this case statement.
-          lvRecurseCase inf scr [altm]
-
-        FlatLocal (FlatArg _ decomp) -> do
-          -- Will deconstruct the bare value.
-          -- To get to the bare value, the scrutinee must be deconstructed.
-          scrutinee_var <- newAnonymousVar ObjectLevel
-          let plan = flattenBoxedValue scrutinee_var binder_plan
-
-          -- Add the case alternative's variable bindings and
-          -- unpacked variable to the environment.
-          -- 'lvFlattenBinding' only adds the newly created scrutinee variable,
-          -- which isn't used by the program.
-          assumePat param $ withUnpackedLocalVariable binder_plan $
-            lvFlattenBinding True inf plan scr body
-
-lvTransformCase inf scr alts = lvRecurseCase inf scr alts
-
--- | Perform local variable flattening inside a case statement.
---   The scrutinee has already been transformed; the case alternatives have
---   not been transformed.
-lvRecurseCase inf scr alts = do
-  alts' <- mapM lvInAlt alts
-  return $ ExpM $ CaseE inf scr alts'
-
-lvFlattenBinding :: Bool -> ExpInfo -> FlatLocal -> ExpM -> ExpM -> LF ExpM
-lvFlattenBinding is_write inf flat_local@(FlatLocal (FlatArg pat decomp)) rhs body
-  | isIdDecomp decomp = do
-      -- Don't deconstruct the source expression
-      body' <- assumePat pat $ lvExp body
-      tenv <- getTypeEnv
-      return $ if is_write
-               then bindVariable tenv (patMBinder pat) rhs body'
-               else ExpM $ LetE inf (setPatMDmd unknownDmd pat) rhs body'
-
-  | otherwise = do
-      -- Flatten the source value
-      let ret = flatLocalReturn flat_local
-      flat_rhs <-
-        if is_write
-        then flattenLocalWrite flat_local rhs $ flattenedReturnValue ret
-        else flattenLocalRead flat_local rhs $ flattenedReturnValue ret
-
-      -- Transform the body   
-      body' <- assumePat pat $
-               withUnpackedLocalVariable flat_local $
-               lvExp body
-      
-      -- Bind the flattened value
-      let flattened_params =
-            case flattenedReturnParameters ret of Just ps -> ps
-      return $ bindFlattenedReturn inf flattened_params flat_rhs body'
-
-lvInAlt :: AltM -> LF AltM
-lvInAlt (AltM alt) =
-  assumeTyPatMs (getAltExTypes alt) $ assumePats (altParams alt) $ do
-    body' <- lvExp (altBody alt)
-    return $ AltM $ alt {altBody = body'}
-
-lvInExport :: Export Mem -> LF (Export Mem)
-lvInExport export = do
-  f <- lvInFun $ exportFunction export
-  return $ export {exportFunction = f}
-
-lvModuleContents :: (Module Mem) -> LF (Module Mem)
-lvModuleContents (Module mod_name imports defss exports) = do
-  defss' <- mapM (mapM lvDef) defss
-  exports' <- mapM lvInExport exports
-  return $ Module mod_name imports defss' exports'
-
-flattenLocals :: Module Mem -> IO (Module Mem)
-flattenLocals mod =
-  withTheNewVarIdentSupply $ \id_supply -> do
-    dict_env <- runFreshVarM id_supply createDictEnv
-    type_env <- readInitGlobalVarIO the_memTypes
-    let env = AFLVEnv id_supply type_env dict_env IntMap.empty
-    mod' <- runReaderT (unAF $ lvModuleContents mod) env
-    
-    -- Flattening creates multiple local variables with the same name.
-    -- Rename them.
-    runFreshVarM id_supply $ freshenModuleFully mod'
-

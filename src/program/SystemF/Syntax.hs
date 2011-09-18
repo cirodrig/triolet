@@ -21,6 +21,7 @@ module SystemF.Syntax
      
      -- * Representation of code
      Typ(..), Pat(..), TyPat(..), Exp(..), Alt(..), Fun(..),
+     CInst(..), DeCInst(..),
 
      -- ** Annotations on expressions
      ExpInfo,
@@ -31,11 +32,18 @@ module SystemF.Syntax
      Lit(..),
      literalType,
      
+     -- ** Data types
+     ConInst(..),
+     summarizeConstructor,
+     conTyArgs, conExTypes, conTypes, conFieldKinds, conType, isVarCon,
+     DeConInst(..),
+     summarizeDeconstructor,
+     deConTyArgs, deConExTypes, deConFieldKinds, isVarDeCon,
+
      -- ** Expressions and functions
      BaseExp(..),
      BaseAlt(..),
      getAltExTypes,
-     MonoCon(..),
      BaseFun(..),
      
      -- ** Function definitions
@@ -55,7 +63,7 @@ module SystemF.Syntax
      
      -- ** System F types
      SF,
-     TypSF, PatSF, ExpSF, AltSF, FunSF,
+     TypSF, PatSF, ExpSF, AltSF, FunSF, CInst, DeCInstSF,
 
      -- * Utility functions
      isValueExp,
@@ -81,6 +89,8 @@ import Common.Label
 import Common.SourcePos
 import Builtins.Builtins
 import Type.Type
+import Type.Environment
+import Type.Eval
 import Export
 
 -------------------------------------------------------------------------------
@@ -108,7 +118,7 @@ data Specificity =
   | Inspected
     -- ^ Deconstructed by a case statement or read by 'copy'.
 
-  | Decond !MonoCon [Specificity]
+  | Decond !DeConInst [Specificity]
     -- ^ Deconstructed at a known constructor.
     --
     --   We save the type arguments and existential type parameters
@@ -195,6 +205,8 @@ data family TyPat a             -- A pattern binding for types
 data family Exp a               -- An expression
 data family Alt a               -- A case alternative
 data family Fun a               -- A function
+data family CInst a             -- A constructor instantiated to a type
+data family DeCInst a           -- A constructor pattern instantiated to a type
 
 instance Typeable1 Typ where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Typ") []
@@ -214,6 +226,12 @@ instance Typeable1 Alt where
 instance Typeable1 Fun where
   typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.Fun") []
 
+instance Typeable1 CInst where
+  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.CInst") []
+
+instance Typeable1 DeCInst where
+  typeOf1 x = mkTyConApp (mkTyCon "SystemF.Syntax.DeCInst") []
+
 -- | The System F code representation
 data SF
 
@@ -222,12 +240,16 @@ type PatSF = Pat SF
 type ExpSF = Exp SF
 type AltSF = Alt SF
 type FunSF = Fun SF
+type CInstSF = CInst SF
+type DeCInstSF = DeCInst SF
 
 newtype instance Typ SF = TypSF {fromTypSF :: Type}
 -- Pat SF is a data type
 newtype instance Exp SF = ExpSF {fromExpSF :: BaseExp SF}
 newtype instance Alt SF = AltSF {fromAltSF :: BaseAlt SF}
 newtype instance Fun SF = FunSF {fromFunSF :: BaseFun SF}
+newtype instance CInst SF = CInstSF {fromCInstSF :: ConInst}
+newtype instance DeCInst SF = DeCInstSF {fromDeCInstSF :: DeConInst}
 
 -- | Patterns
 data instance Pat SF =
@@ -250,12 +272,21 @@ data BaseExp s =
     { expInfo :: ExpInfo
     , expLit :: !Lit
     }
+    -- | A data constructor application.
+    --   Data constructor applications produce a value or initializer function.
+  | ConE
+    { expInfo      :: ExpInfo
+    , expCon       :: !(CInst s)
+    , expArgs      :: [Exp s]
+    }
+    {- Subsumed by ConE
     -- | An unboxed tuple expression
   | UTupleE
     { expInfo :: ExpInfo
     , expArgs :: [Exp s]
-    }
-    -- | Application
+    } -}
+    -- | Function application.
+    --   Data constructor applications are represented by 'ConE' instead.
   | AppE
     { expInfo   :: ExpInfo
     , expOper   :: Exp s
@@ -300,33 +331,89 @@ data BaseExp s =
     }
 
 data BaseAlt s =
-    -- | Deconstruct a data constructor
-    DeCon { altConstructor :: !Var
-          , altTyArgs      :: [Typ s]
-          , altExTypes     :: [TyPat s]
-          , altParams      :: [Pat s]
-          , altBody        :: Exp s
-          }
-    -- | Deconstruct an unboxed tuple
-  | DeTuple { altParams :: [Pat s]
-            , altBody   :: Exp s
-            }
+  Alt { altCon :: !(DeCInst s)
+      , altParams :: [Pat s]
+      , altBody :: Exp s
+      }
 
-getAltExTypes (DeCon {altExTypes = ts}) = ts
-getAltExTypes (DeTuple {}) = []
+getAltExTypes alt = deConExTypes $ fromDeCInstSF $ altCon alt
 
-isConAlt :: BaseAlt s -> Bool
-isConAlt (DeCon {}) = True
-isConAlt _ = False
+-- | A summary of a data constructor.  For constructors of the same data type,
+--   two summaries are equal iff they were created from the same constructor
+--   or deconstrutor.
+type ConInstSummary = Maybe Var
 
--- | A monomorphic data constructor.  A 'MonoCon' value specifies the type
---   at which a pattern match occurs.
-data MonoCon =
-    -- | A constructor pattern match
-    MonoCon !Var [Type] [Binder]
+-- | A constructor instance appearing in a data constructor application
+data ConInst =
+    VarCon !Var [Type] [Type]
+  | TupleCon [Type]
 
-    -- | An unboxed tuple type pattern match
-  | MonoTuple [Type]
+-- | Get a summary of the constructor.
+summarizeConstructor :: ConInst -> ConInstSummary
+summarizeConstructor (VarCon v _ _) = Just v
+summarizeConstructor (TupleCon _)   = Nothing
+
+conTyArgs :: ConInst -> [Type]
+conTyArgs (VarCon _ ts _) = ts
+conTyArgs (TupleCon ts)   = ts
+
+conExTypes :: ConInst -> [Type]
+conExTypes (VarCon _ _ ts) = ts
+conExTypes (TupleCon _)    = []
+
+conTypes :: ConInst -> [Type]
+conTypes t = conTyArgs t ++ conExTypes t
+
+conFieldKinds :: TypeEnv -> ConInst -> [BaseKind]
+conFieldKinds tenv (VarCon op _ _) =
+  let Just data_con = lookupDataCon op tenv
+  in dataConFieldKinds tenv data_con
+
+conFieldKinds tenv (TupleCon types) =
+  map (toBaseKind . typeKind tenv) types
+
+conType :: EvalMonad m => ConInst -> m ([Type], Type)
+conType (VarCon v ty_args ex_types) = do
+  tenv <- getTypeEnv
+  let Just data_con = lookupDataCon v tenv
+  instantiateDataConTypeWithExistentials data_con (ty_args ++ ex_types)
+
+conType (TupleCon ty_args) = do
+  tenv <- getTypeEnv
+  let kinds = map (toBaseKind . typeKind tenv) ty_args
+  return (ty_args, UTupleT kinds `typeApp` ty_args)
+
+isVarCon (VarCon {}) = True
+isVarCon _           = False
+
+-- | A constructor instance appearing in a pattern match
+data DeConInst =
+    VarDeCon !Var [Type] [Binder]
+  | TupleDeCon [Type]
+
+-- | Get a summary of the deconstructor.
+summarizeDeconstructor :: DeConInst -> ConInstSummary
+summarizeDeconstructor (VarDeCon v _ _) = Just v
+summarizeDeconstructor (TupleDeCon _)   = Nothing
+
+deConTyArgs :: DeConInst -> [Type]
+deConTyArgs (VarDeCon _ ts _) = ts
+deConTyArgs (TupleDeCon ts)   = ts
+
+deConExTypes :: DeConInst -> [Binder]
+deConExTypes (VarDeCon _ _ ts) = ts
+deConExTypes (TupleDeCon _)    = []
+
+deConFieldKinds :: TypeEnv -> DeConInst -> [BaseKind]
+deConFieldKinds tenv (VarDeCon op _ _) =
+  let Just data_con = lookupDataCon op tenv
+  in dataConFieldKinds tenv data_con
+
+deConFieldKinds tenv (TupleDeCon types) =
+  map (toBaseKind . typeKind tenv) types
+
+isVarDeCon (VarDeCon {}) = True
+isVarDeCon _             = False
 
 instance HasSourcePos (BaseExp s) where
   getSourcePos e = getSourcePos (expInfo e)
@@ -442,7 +529,7 @@ data Export s =
   }
 
 data Module s =
-  Module 
+  Module
   { modName :: !ModuleName 
 
     -- | Definitions of functions that were imported from other modules.

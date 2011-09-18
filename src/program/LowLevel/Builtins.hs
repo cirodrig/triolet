@@ -23,6 +23,8 @@ module LowLevel.Builtins
         the_prim_pyon_alloc,
         the_prim_pyon_alloc_nopointers,
         the_prim_pyon_dealloc,
+        the_prim_min_fii,
+        the_prim_minus_fii,
         the_prim_apply_u_f,
         the_prim_apply_u,
         the_prim_apply_i32_f,

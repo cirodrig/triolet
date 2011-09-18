@@ -110,15 +110,15 @@ instance Dataflow Multiplicity where
 instance Renameable Specificity where
   rename rn spc =
     case spc
-    of Decond (MonoCon con ty_args ex_types) spcs ->
+    of Decond (VarDeCon con ty_args ex_types) spcs ->
          let ty_args' = rename rn ty_args
          in renameBindings rn ex_types $ \rn' ex_types' ->
-            let mono_con = MonoCon con ty_args' ex_types'
+            let mono_con = VarDeCon con ty_args' ex_types'
             in Decond mono_con (rename rn' spcs)
        
-       Decond (MonoTuple types) spcs ->
+       Decond (TupleDeCon types) spcs ->
          let types' = rename rn types
-         in Decond (MonoTuple types') (rename rn spcs)
+         in Decond (TupleDeCon types') (rename rn spcs)
 
        Written spc -> Written (rename rn spc)
 
@@ -130,45 +130,45 @@ instance Renameable Specificity where
 
   freshen f spc =
     case spc
-    of Decond (MonoCon con ty_args ex_types) spcs -> do
+    of Decond (VarDeCon con ty_args ex_types) spcs -> do
          -- Freshen the existential variables 
          new_evars <- mapM (newClonedVar . binderVar) ex_types
          let rn = renaming [(old_v, new_v)
                            | (old_v ::: _, new_v) <- zip ex_types new_evars]
              ex_types' = [new_v ::: k | (_ ::: k, new_v) <- zip ex_types new_evars]
-         return $ Decond (MonoCon con ty_args ex_types') (rename rn spcs)
+         return $ Decond (VarDeCon con ty_args ex_types') (rename rn spcs)
 
        -- Other constructors don't bind new variables
-       Decond (MonoTuple _) _ -> return spc
+       Decond (TupleDeCon _) _ -> return spc
        _ -> return spc
 
   freeVariables spc =
     case spc
     of Used -> Set.empty
        Inspected -> Set.empty
-       Decond (MonoCon v tys ex_var_bindings) spcs ->
+       Decond (VarDeCon v tys ex_var_bindings) spcs ->
          let ex_vars = [v | v ::: _ <- ex_var_bindings]
              ex_kinds = [k | _ ::: k <- ex_var_bindings]
              field_fvs = foldr Set.delete (freeVariables spcs) ex_vars
          in freeVariables tys `Set.union`
             freeVariables ex_kinds `Set.union`
             field_fvs
-       Decond (MonoTuple tys) spcs ->
+       Decond (TupleDeCon tys) spcs ->
          freeVariables tys `Set.union` freeVariables spcs
        Unused -> Set.empty
 
 instance Substitutable Specificity where
   substitute s spc =
     case spc
-    of Decond (MonoCon v tys ex_var_bindings) spcs -> do
+    of Decond (VarDeCon v tys ex_var_bindings) spcs -> do
          tys' <- mapM (substitute s) tys
          substituteBindings s ex_var_bindings $ \s' ex_var_bindings' -> do 
            spcs' <- mapM (substitute s') spcs
-           return $ Decond (MonoCon v tys' ex_var_bindings') spcs'
-       Decond (MonoTuple tys) spcs -> do
+           return $ Decond (VarDeCon v tys' ex_var_bindings') spcs'
+       Decond (TupleDeCon tys) spcs -> do
          tys' <- mapM (substitute s) tys
          spcs' <- mapM (substitute s) spcs
-         return $ Decond (MonoTuple tys') spcs'
+         return $ Decond (TupleDeCon tys') spcs'
        
        Written spc' -> liftM Written $ substitute s spc'
 
@@ -184,15 +184,15 @@ instance Dataflow Specificity where
 
   joinPar Unused x = x
   joinPar x Unused = x
-  joinPar (Decond con1@(MonoCon decon1 _ _) specs1)
-          (Decond (MonoCon decon2 _ _) specs2) =
+  joinPar (Decond con1@(VarDeCon decon1 _ _) specs1)
+          (Decond (VarDeCon decon2 _ _) specs2) =
     if decon1 == decon2
     then if length specs1 /= length specs2
          then mismatchedSpecificityDeconstructors
          else Decond con1 $ zipWith joinPar specs1 specs2
     else Inspected
-  joinPar (Decond con1@(MonoTuple _) specs1)
-          (Decond (MonoTuple _) specs2) =
+  joinPar (Decond con1@(TupleDeCon _) specs1)
+          (Decond (TupleDeCon _) specs2) =
     if length specs1 /= length specs2
     then mismatchedSpecificityDeconstructors
     else Decond con1 $ zipWith joinPar specs1 specs2
@@ -217,10 +217,10 @@ showSpecificity (Decond mono_con spcs) =
   where
     showmv =
       case mono_con
-      of MonoCon c tys ty_args
+      of VarDeCon c tys ty_args
            | null tys && null ty_args -> show c ++ ":"
            | otherwise -> "(" ++ show c ++  " ...):"
-         MonoTuple _ -> ""
+         TupleDeCon _ -> ""
 showSpecificity Inspected = "I"
 showSpecificity Used = "U"
 
@@ -283,13 +283,13 @@ deconstructSpecificity tenv n_fields spc =
          internalError "deconstructSpecficity: Wrong number of fields"
        | otherwise ->
            case mono_con
-           of MonoCon con _ _ ->
+           of VarDeCon con _ _ ->
                 let Just dcon_type = lookupDataCon con tenv
                     field_kinds = dataConFieldKinds tenv dcon_type
                     from_field BareK spc = Written spc
                     from_field _     spc = spc
                 in zipWith from_field field_kinds spcs
-              MonoTuple _ ->
+              TupleDeCon _ ->
                 -- Unboxed tuples have no bare fields
                 spcs
 

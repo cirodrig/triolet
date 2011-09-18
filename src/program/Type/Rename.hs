@@ -4,10 +4,13 @@ module Type.Rename where
 
 import Prelude hiding(mapM)
 import Control.Monad hiding(mapM)
+import qualified Data.IntSet as IntSet
+import Data.List
 import Data.Maybe
 import Data.Monoid
 import Data.Traversable(traverse, mapM)
 
+import Common.Error
 import Common.Identifier
 import Common.Supply
 import Type.Type
@@ -273,3 +276,60 @@ instance Substitutable Type where
        UTupleT _ -> return ty
        CoT _ -> return ty
 
+-------------------------------------------------------------------------------
+
+-- | Check for name shadowing in the type.  If any in-scope variables
+--   are redefined, raise an error.
+checkForShadowing :: TypeEnv -> Type -> ()
+checkForShadowing tenv ty =
+  checkForShadowingSet (IntMap.keysSet $ getAllTypes tenv) ty
+
+type CheckForShadowing a = IntSet.IntSet -> a -> ()
+
+-- | Check whether a variable has been defined
+assertVarIsUndefined :: CheckForShadowing Var
+assertVarIsUndefined in_scope v
+  | fromIdent (varID v) `IntSet.member` in_scope =
+      internalError $ "Variable is shadowed: " ++ show v
+  | otherwise = ()
+
+-- | Check whether a list of variables has been defined or whether any two
+--   variables in the list are equal.
+assertVarsAreUndefined :: CheckForShadowing [Var]
+assertVarsAreUndefined in_scope vs =
+  -- Find variables that are repeated in the list.
+  -- Error if any such variable is found.
+  case [x | x : xs <- tails vs, y <- xs, x == y]
+  of x : _ ->
+       internalError $ "Conflicting definitions of variable: " ++ show x
+     [] ->
+       -- Error if any existential variable shadows a name 
+       foldr seq () $ map (assertVarIsUndefined in_scope) vs
+
+checkForShadowingSet :: CheckForShadowing Type
+checkForShadowingSet in_scope ty =
+  case ty
+  of VarT _ -> ()
+     AppT t1 t2 -> continue t1 `seq` continue t2
+     LamT (a ::: k) t1 ->
+       check_in_scope a $
+       continue k `seq`
+       checkForShadowingSet (insert a in_scope) t1
+     FunT t1 t2 -> continue t1 `seq` continue t2
+     AllT (a ::: k) t1 ->
+       check_in_scope a $
+       continue k `seq`
+       checkForShadowingSet (insert a in_scope) t1
+     AnyT k -> continue k
+     IntT _ -> ()
+     CoT _ -> ()
+     UTupleT _ -> ()
+  where
+    check_in_scope a k = assertVarIsUndefined in_scope a `seq` k
+    continue t = checkForShadowingSet in_scope t
+    insert v scope = IntSet.insert (fromIdent $ varID v) scope
+
+-- | Check for name shadowing using the current type environment.
+--   The caller must force evaluation of the return value.
+checkForShadowingHere :: TypeEnvMonad m => Type -> m ()
+checkForShadowingHere ty = askTypeEnv (\tenv -> checkForShadowing tenv ty)

@@ -103,6 +103,15 @@ builtinPrimitives =
      primFunctionType [PrimType nativeWordType] [PrimType PointerType])
   , (biName "pyon_dealloc",
      primFunctionType [PrimType PointerType] [])
+    -- prim.pyasm
+  , (PyonName module_prim "min_fii",
+     primFunctionType
+     [RecordType finIndexedIntRecord, RecordType finIndexedIntRecord]
+     [RecordType finIndexedIntRecord])
+  , (PyonName module_prim "minus_fii",
+     primFunctionType
+     [RecordType finIndexedIntRecord, RecordType finIndexedIntRecord]
+     [RecordType finIndexedIntRecord])
     -- apply.c
   , (applyName "apply_u_f",
      primFunctionType [ PrimType OwnedType

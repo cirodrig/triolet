@@ -584,7 +584,7 @@ inferExpressionType' expression =
        let -- Create the tuple expression
            tuple_con = SystemF.pyonTupleCon $ length f_tys
            f_tys' = map convertHMType f_tys
-           tuple_expr = mkPolyCallE pos (mkConE pos tuple_con) f_tys' f_exps
+           tuple_expr = mkConE pos tuple_con f_tys' [] f_exps
        return (tuple_expr, tupleType f_tys)
      CallE {expOperator = op, expOperands = args} -> do
        (op_exp, op_ty) <- inferExpressionType op

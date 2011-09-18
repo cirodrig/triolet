@@ -210,10 +210,10 @@ compilePyonToPyonAsm compile_flags path text = do
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   repr_mod <- SystemF.performGlobalDemandAnalysis repr_mod
   repr_mod <- SystemF.flattenArguments repr_mod
-  repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
-  repr_mod <- SystemF.flattenLocals repr_mod
+  -- repr_mod <- highLevelOptimizations False SystemF.FinalSimplifierPhase repr_mod
+  -- repr_mod <- SystemF.flattenLocals repr_mod
 
-  -- Reconstruct demand information after flattening local variables,
+  -- Reconstruct demand information after flattening variables,
   -- so that the next optimization pass can do more work
   repr_mod <- SystemF.localDemandAnalysis repr_mod
   repr_mod <- iterateM (highLevelOptimizations True SystemF.FinalSimplifierPhase) 5 repr_mod
