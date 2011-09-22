@@ -49,6 +49,8 @@ Executable pyon
     ScopedTypeVariables, MultiParamTypeClasses, PatternGuards, GADTs,
     EmptyDataDecls, TypeOperators, TypeFamilies, DeriveDataTypeable
   Ghc-Options: -auto
+  Include-Dirs:
+    src/program
   Main-Is:	Main.hs
   Other-Modules:
     Paths_pyon

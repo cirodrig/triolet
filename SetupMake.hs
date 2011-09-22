@@ -131,6 +131,19 @@ generateBuildRulesWhenFound template target_dir source_dirs source_files = do
 
 -------------------------------------------------------------------------------
 
+-- | Generate a rule to compile a .c file
+--
+-- > build_path/A.o : src_path/A.c
+-- > 	mkdir -p build_path
+-- > 	$(CC) -c $< $(PYON_C_C_OPTS)
+pyonCFileTemplate :: MakeRuleTemplate
+pyonCFileTemplate build_path src_path file =
+  let o_file = build_path </> file `replaceExtension` ".o"
+      src_file = src_path </> file `replaceExtension` ".c"
+  in MakeRule [o_file] [src_file] $
+     "mkdir -p " ++ takeDirectory o_file ++ "\n\
+     \$(CC) -c $< -o $@ $(PYON_C_C_OPTS)\n"
+
 -- | Generate a rule to compile a .hs file
 --
 -- > build_path/A.o : src_path/A.hs
@@ -389,6 +402,12 @@ pyonGhcOpts econfig exe lbi =
   packageFlags exe lbi ++
   pyonExtensionFlags exe -}
 
+pyonCOpts econfig exe lbi =
+  let build_info = buildInfo exe
+      includes = ["-I" ++ path | path <- Distribution.PackageDescription.includeDirs build_info]
+      -- TODO: Actually determine whether m32 flag is needed
+  in "-m32" : includes
+
 -- | Get the options for linking the \'pyon\' binary.
 pyonLinkOpts econfig exe lbi = ["-rtsopts"] ++ pyonGhcOpts econfig exe lbi
 
@@ -476,6 +495,7 @@ generateVariables econfig exe lbi pyon_rules rts_rules data_rules
          , ("RTS_PYASM_C_OPTS", intercalate " " (rtsPyasmCompileFlags lbi econfig))
          , ("RTS_LINK_OPTS", intercalate " " (targetLinkFlags econfig))
            -- flags: pyon program
+         , ("PYON_C_C_OPTS", intercalate " " $ pyonCOpts econfig exe lbi)
          , ("PYON_HS_C_OPTS", intercalate " " $ pyonGhcOpts econfig exe (lbi {withProfExe = False}))
          , ("PYON_HS_PC_OPTS", intercalate " " $ pyonGhcOpts econfig exe (lbi {withProfExe = True}))
          , ("PYON_L_OPTS", intercalate " " $ pyonLinkOpts econfig exe lbi)
@@ -511,6 +531,8 @@ generatePyonRules :: Verbosity
                   -> IO ([MakeRule], [FilePath], [FilePath])
 generatePyonRules verb lbi exe = do
   info verb "Locating source code files for 'pyon'"
+  c_rules <- generateBuildRules pyonCFileTemplate pyon_build_dir
+             pyon_source_paths c_files
   hs_rules <- generateBuildRules pyonHsFileTemplate pyon_build_dir
               pyon_source_paths pyon_modules
   hs_p_rules <- generateBuildRules pyonHsProfFileTemplate pyon_build_dir
@@ -520,14 +542,16 @@ generatePyonRules verb lbi exe = do
   boot_p_rules <- generateBuildRulesWhenFound compileHsProfBootFile pyon_build_dir
                   pyon_source_paths boot_modules
 
-  let rules = hs_rules ++ hs_p_rules ++ boot_rules ++ boot_p_rules
+  let rules = c_rules ++ hs_rules ++ hs_p_rules ++ boot_rules ++ boot_p_rules
       -- The profiling and non-profiling rules have the same sources, so
       -- just look at the non-profiling rules.
       source_files = concatMap makePrerequisites (hs_rules ++ boot_rules)
       
-      -- The object files depend on whether we're doing profiling.
+      object_files = concatMap makeTargets c_rules ++ hs_object_files
+
+      -- The Haskell object files depend on whether we're doing profiling.
       -- Ignore o-boot files, they are not real object files.
-      object_files =
+      hs_object_files =
         if withProfExe lbi
         then filter ((".p_o" `isPrefixOf`) . takeExtension) $ 
              concatMap makeTargets hs_p_rules
@@ -542,6 +566,8 @@ generatePyonRules verb lbi exe = do
   
     boot_modules = [toFilePath m `addExtension` ".hs-boot"
                    | m <- fromString "Main" : exeModules exe]
+
+    c_files = cSources $ buildInfo exe
 
 -- | Create Makefile rules for all object files in the RTS.
 generateRtsRules :: Verbosity -> ExtraConfigFlags -> LocalBuildInfo
