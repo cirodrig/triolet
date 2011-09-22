@@ -2,7 +2,9 @@
 -}
 
 {-# LANGUAGE MultiParamTypeClasses, DeriveDataTypeable #-}
-module TestCase where
+module TestCase(TestSpec, mkSourceTest, SourceTest,
+                loadTestSpec, runSourceTest)
+where
 
 import Prelude hiding(catch)
 
@@ -21,6 +23,8 @@ import System.IO
 import System.Process
 import System.Posix.Env
 
+import Statistics
+
 -- | Print a command before running it
 dbReadProcessWithExitCode prog args stdin = do
   when debug $ liftIO $ putStrLn $ intercalate " " (prog : args)
@@ -28,27 +32,55 @@ dbReadProcessWithExitCode prog args stdin = do
   where
     debug = False
 
-data TesterConfig =
-  TesterConfig
-  { -- | Directory for temporary files
-    temporaryPath :: !FilePath
-    -- | Directory holding Pyon's build files
-  , buildDir :: !FilePath
-    -- | Platform-specific options for the C compiler
-  , platformCOpts :: [String]
-    -- | Platform-specific options for the linker
-  , platformLinkOpts :: [String]
+-------------------------------------------------------------------------------
+
+-- | A specification of a test case
+data TestSpec =
+  TestSpec
+  { testDirectory :: FilePath   -- ^ Absolute path of test case's directory
+  , testConfig :: !TestConfig
   }
 
-newtype Tester a = Tester {runTester :: TesterConfig -> IO a}
+-- | The contents of a configuration file.  This data is part of the 
+--   specificaiton of a test case.
+data TestConfig =
+  TestConfig
+  { synopsis :: !String
+  , pyonSources :: ![FilePath]
+  , llpyonSources :: ![FilePath]
+  , cSources :: ![FilePath]
+  , expectedResult :: !ExpectedResult
+  }
+  deriving(Read, Show)
 
--- | Run a tester.  The tester's working directory is its designated
---   temporary path.
-launchTester :: TesterConfig -> Tester a -> IO a
-launchTester cfg m =
-  bracket getCurrentDirectory setCurrentDirectory $ \_ -> do 
-    setCurrentDirectory (temporaryPath cfg)
-    runTester m cfg
+testSynopsis = synopsis . testConfig
+
+testConfigName = takeFileName . testDirectory
+
+testPyonSources tc = 
+  [testDirectory tc </> file | file <- pyonSources $ testConfig tc]
+  
+testLLPyonSources tc = 
+  [testDirectory tc </> file | file <- llpyonSources $ testConfig tc]
+
+testCSources tc =
+  [testDirectory tc </> file | file <- cSources $ testConfig tc]
+
+testExpectedResult = expectedResult . testConfig
+
+mkSourceTest :: TestSpec -> TesterConfig -> SourceTest
+mkSourceTest = SourceTest
+
+-- | A testable test
+data SourceTest = SourceTest TestSpec TesterConfig
+
+instance Testable SourceTest where
+  testName (SourceTest spec _) = testConfigName spec
+  runTest st = runSourceTest st
+
+-------------------------------------------------------------------------------
+
+newtype Tester a = Tester {runTester :: TesterConfig -> IO a}
 
 instance Monad Tester where
   return x = Tester $ \_ -> return x
@@ -101,52 +133,6 @@ withLdPath m = do
                     _ -> error "Unrecognized OS; don't know how to set up environment"
 
   withEnv var_name insert_lib_path m
-
--------------------------------------------------------------------------------
-                        
-data TestCase =
-  TestCase
-  { testDirectory :: FilePath   -- ^ Absolute path of test case's directory
-  , testConfig :: !TestConfig
-  }
-
-data TestConfig =
-  TestConfig
-  { synopsis :: !String
-  , pyonSources :: ![FilePath]
-  , llpyonSources :: ![FilePath]
-  , cSources :: ![FilePath]
-  , expectedResult :: !ExpectedResult
-  }
-  deriving(Read, Show)
-
-testSynopsis = synopsis . testConfig
-
-testName = takeFileName . testDirectory
-
-testPyonSources tc = 
-  [testDirectory tc </> file | file <- pyonSources $ testConfig tc]
-  
-testLLPyonSources tc = 
-  [testDirectory tc </> file | file <- llpyonSources $ testConfig tc]
-
-testCSources tc =
-  [testDirectory tc </> file | file <- cSources $ testConfig tc]
-
-testExpectedResult = expectedResult . testConfig
-
--- | Read a test case, given test case directory.
---   The information is read from a file called \"config\" in the directory.
---   If the file cannot be read, an exception is thrown.
-loadTestCase :: FilePath -> IO TestCase
-loadTestCase path = do
-  config_text <- readFile (path </> "config")
-  config <-
-    case reads config_text
-    of (test_case, rest):_ 
-         | all isSpace rest -> return test_case
-       _ -> fail $ "Malformed configuration file: " ++ (path </> "config")
-  return $ TestCase path config
 
 data ExpectedResult =
     ShouldNotCompile
@@ -211,13 +197,33 @@ instance Show TestResult where
 -- | Name of a compiled test case
 testExecutableName = "testprogram"
 
+-- | Read a test case, given test case directory.
+--   The information is read from a file called \"config\" in the directory.
+--   If the file cannot be read, an exception is thrown.
+loadTestSpec :: TesterConfig -> FilePath -> IO SourceTest
+loadTestSpec tester_config path = do
+  config_text <- readFile (path </> "config")
+  config <-
+    case reads config_text
+    of (test_case, rest):_ 
+         | all isSpace rest -> return test_case
+       _ -> fail $ "Malformed configuration file: " ++ (path </> "config")
+  return $ mkSourceTest (TestSpec path config) tester_config
+
 -- | Run a test and determine its result.
 --
 --   The test is run with the given path as its working directory.
 --   The working directory is cleared after finishing the test case.
-runTest :: TestCase             -- ^ Test case to run
-        -> Tester TestResult
-runTest test_case = (return . TestFailed) `handleTester`
+runSourceTest :: SourceTest -> FilePath -> IO (String, Statistics)
+runSourceTest test@(SourceTest spec config) tmpdir = do
+  result <- runTester (runTestHelper tmpdir spec) config
+  return (show result, as_statistic result)
+  where
+    as_statistic TestSucceeded = passedStatistic test
+    as_statistic (TestFailed _) = failedStatistic test
+
+runTestHelper :: FilePath -> TestSpec -> Tester TestResult
+runTestHelper temporary_path test_case = (return . TestFailed) `handleTester`
   case testExpectedResult test_case
   of ShouldNotCompile ->
        let compile_then_fail = do
@@ -248,14 +254,16 @@ runTest test_case = (return . TestFailed) `handleTester`
 
   where
     compile_and_link = do
-      mapM_ (compilePyonFile test_case) $ testPyonSources test_case
-      mapM_ (compileLLPyonFile test_case) $ testLLPyonSources test_case
-      mapM_ (compileCFile test_case) $ testCSources test_case
-      linkTest test_case
+      mapM_ (compilePyonFile temporary_path test_case) $
+        testPyonSources test_case
+      mapM_ (compileLLPyonFile temporary_path test_case) $
+        testLLPyonSources test_case
+      mapM_ (compileCFile temporary_path test_case) $
+        testCSources test_case
+      linkTest temporary_path test_case
 
     run = do
-      dir <- asks temporaryPath
-      let prog = dir </> testExecutableName
+      let prog = temporary_path </> testExecutableName
           
       (rc, out, err) <-
         withLdPath $ liftIO $ dbReadProcessWithExitCode prog [] ""
@@ -289,8 +297,7 @@ compileUsingPyonCompiler fail_message compile_flags = do
 
   runCompileCommand fail_message pyon_program_path flags ""
 
-compilePyonFile test_case file_path = do
-  test_path <- asks temporaryPath
+compilePyonFile test_path test_case file_path = do
   let obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
       flags = ["-x", "pyon",    -- Compile in pyon mode
                file_path, "-o", obj_path]
@@ -298,8 +305,7 @@ compilePyonFile test_case file_path = do
 
   compileUsingPyonCompiler fail_message flags
 
-compileLLPyonFile test_case file_path = do
-  test_path <- asks temporaryPath
+compileLLPyonFile test_path test_case file_path = do
   let obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
       flags = ["-x", "pyonasm",    -- Compile in low-level pyon mode
                file_path, "-o", obj_path]
@@ -307,9 +313,8 @@ compileLLPyonFile test_case file_path = do
 
   compileUsingPyonCompiler fail_message flags
 
-compileCFile test_case file_path = do
+compileCFile test_path test_case file_path = do
   build_dir <- asks buildDir
-  test_path <- asks temporaryPath
   platform_opts <- asks platformCOpts
   let obj_path = test_path </> takeFileName file_path `replaceExtension` ".o"
       opts = platform_opts ++
@@ -321,8 +326,7 @@ compileCFile test_case file_path = do
   
   runCompileCommand fail_message "gcc" opts ""
 
-linkTest test_case = do
-  test_path <- asks temporaryPath
+linkTest test_path test_case = do
   build_dir <- asks buildDir
   platform_opts <- asks platformLinkOpts
   let c_file_paths = [test_path </> takeFileName file `replaceExtension` ".o"

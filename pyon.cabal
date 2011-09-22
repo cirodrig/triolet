@@ -52,6 +52,8 @@ Executable pyon
   Include-Dirs:
     src/program
   Main-Is:	Main.hs
+  C-Sources:
+    cutils/Pool.c
   Other-Modules:
     Paths_pyon
     Machine

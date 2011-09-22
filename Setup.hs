@@ -277,11 +277,31 @@ doTest args _ pkg_desc lbi = do
   
   -- Compile the test driver
   runMake lbi verb [testDriverProgram lbi]
-  
-  -- Run the test driver
+
+  -- Compute build parameters for the test driver to use when
+  -- compiling and linking
   let cc_flags = targetCompileFlags econfig
       ld_flags = targetLinkFlags econfig ++ targetLibs econfig
-      test_arguments = [buildDir lbi, show cc_flags, show ld_flags] ++ args
+      
+  current_dir <- getCurrentDirectory
+  let (host_cc_flags, host_ld_flags) =
+        case executables pkg_desc
+        of [exe] ->
+             (unitTestCOpts current_dir econfig exe lbi,
+              unitTestLinkOpts current_dir econfig exe lbi)
+      
+  -- Arguments:
+  --   Build directory
+  --   Target C compiler flags
+  --   Target link flags
+  --   Host C compiler flags
+  --   Host C linker flags
+  let test_arguments = [buildDir lbi,
+                        show cc_flags,
+                        show ld_flags,
+                        show host_cc_flags,
+                        show host_ld_flags] ++ args
+  -- Run the test driver
   rawSystemExit verb (testDriverProgram lbi) test_arguments
 
 hooks = simpleUserHooks

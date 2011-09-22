@@ -1,123 +1,97 @@
 -- The driver for the Pyon test suite.
 
-{-# LANGUAGE ForeignFunctionInterface #-}
-import TestCase
-
 import Control.Monad
 import Control.Monad.Trans
 import Data.List
 import Data.Monoid
-import Foreign.Ptr
-import Foreign.C.String
 import System.Environment
 import System.FilePath
 import System.Directory
 
-foreign import ccall "unistd.h mkdtemp" c_mkdtemp :: CString -> IO CString
+import Statistics
+import TestCase
+import CUnitTest
 
--- | Given a template file name, create a new directory
-mkdtemp :: FilePath -> IO FilePath
-mkdtemp path = withCString path $ \c_path -> do
-  d_path <- c_mkdtemp c_path
-  if d_path == nullPtr
-    then fail "Cannot create temporary directory" 
-    else peekCString d_path
+sourceTestPath :: FilePath -> FilePath
+sourceTestPath base_path = base_path </> "test" </> "source"
+
+unitTestPath :: FilePath -> FilePath
+unitTestPath base_path = base_path </> "test" </> "unit"
 
 getSubdirectories :: FilePath -> IO [FilePath]
 getSubdirectories path = do
   contents <- getDirectoryContents path
   return [f | f <- contents, f /= ".", f /= ".."]
 
-loadTests :: FilePath -> IO [TestCase]
-loadTests base_path = do
+loadSourceTests :: TesterConfig -> FilePath -> IO [Test]
+loadSourceTests config base_path = do
   test_directories <- getSubdirectories base_path
-  forM test_directories $ \subdir -> do
-    loadTestCase (base_path </> subdir)
+  let sorted_tests = sort test_directories
+  forM sorted_tests $ \subdir -> do
+    liftM Test $ loadTestSpec config (base_path </> subdir)
 
--- | Statistics about test results
-data Statistics =
-  Statistics
-  { passed :: {-# UNPACK #-}!Int
-  , failed :: [String]          -- ^ List of tests that failed
-  }
+-- | Find a source test by name.  If the name matches, load it.
+loadSourceTest :: TesterConfig -> FilePath -> String -> IO (Maybe Test)
+loadSourceTest config test_parent_dir test_name = do
+  let test_dir = test_parent_dir </> test_name
+  exists <- doesDirectoryExist test_dir
+  if exists
+    then liftM (Just . Test) $ loadTestSpec config test_dir
+    else return Nothing
+  
+loadUnitTests :: TesterConfig -> FilePath -> IO [Test]
+loadUnitTests config base_path = do
+  test_directories <- getSubdirectories base_path
+  let sorted_tests = sort test_directories
+  forM sorted_tests $ \subdir -> do
+    liftM Test $ loadCUnitTest config (base_path </> subdir)
 
-passedStatistic, failedStatistic :: TestCase -> Statistics
-passedStatistic _  = Statistics 1 []
-failedStatistic tc = Statistics 0 [testName tc]
+-- | Find a unit test by name.  If the name matches, load it.
+loadUnitTest :: TesterConfig -> FilePath -> String -> IO (Maybe Test)
+loadUnitTest config test_parent_dir test_name = do
+  let test_dir = test_parent_dir </> test_name
+  exists <- doesDirectoryExist test_dir
+  if exists
+    then liftM (Just . Test) $ loadCUnitTest config test_dir
+    else return Nothing
 
-testResultStatistic TestSucceeded = passedStatistic
-testResultStatistic (TestFailed _) = failedStatistic
+loadAllTests config package_dir = do
+  source_tests <- loadSourceTests config (sourceTestPath package_dir)
+  unit_tests <- loadUnitTests config (unitTestPath package_dir)
+  return $ unit_tests ++ source_tests
 
-printStatistics :: Statistics -> IO ()
-printStatistics s = do
-  when (not $ null failed_list) $ do
-    putStrLn "Failed tests:"
-    putStrLn failed_list
-  mapM_ putStrLn stat_text
+loadNamedTests config package_dir names = mapM load_test names
   where
-    stats = map mkstat [(passed s, "passed"), (length $ failed s, "failed")]
-      where mkstat (n, label) = (n, show n, label)
+    try_maybe m fallback = do
+      x <- m
+      case x of
+        Nothing -> fallback
+        Just y -> return y
 
-    column_width = maximum [length s | (_, s, _) <- stats]
-    align s = replicate (column_width - length s) ' ' ++ s
-    stat_text = map mktext stats
-      where
-        mktext (n, num, label) =
-          let plural_test = if n == 1 then "test" else "tests"
-          in align num ++ " " ++ plural_test ++ " " ++ label
-
-    failed_list = intercalate "\n" ["    " ++ s | s <- failed s]
-
-instance Monoid Statistics where
-  mempty = Statistics 0 []
-  mappend s1 s2 = Statistics (passed s1 + passed s2) (failed s1 ++ failed s2)
-  mconcat ss = Statistics (sum $ map passed ss) (concatMap failed ss)
-
-runTests :: [TestCase] -> Tester ()
-runTests test_cases = do
-  statistics <- foldM run_test mempty test_cases
-  liftIO $ printStatistics statistics
-  where
-    run_test :: Statistics -> TestCase -> Tester Statistics
-    run_test stats test_case = do
-      liftIO $ putStrLn $ "Running " ++ testName test_case
-      result <- runTest test_case
-      liftIO $ print result
-      return $! stats `mappend` testResultStatistic result test_case
-
-loadAllTests package_dir =
-  loadTests (package_dir </> "test")
-
-loadNamedTests package_dir names = mapM load_test names
-  where
-    load_test test_name = do
-      let test_dir = package_dir </> "test" </> test_name
-      exists <- doesDirectoryExist test_dir
-      if exists
-        then loadTestCase test_dir
-        else fail $ "Test case does not exist: " ++ test_name
+    load_test test_name =
+      try_maybe (loadSourceTest config (sourceTestPath package_dir) test_name) $
+      try_maybe (loadUnitTest config (unitTestPath package_dir) test_name) $
+      fail $ "Test case does not exist: " ++ test_name
 
 main = do
   -- Set up paths
-  rel_build_dir : extra_cflags : extra_lflags : other_args <- getArgs 
+  rel_build_dir : extra_cflags : extra_lflags : host_cflags : host_lflags : other_args <- getArgs 
   build_dir <- canonicalizePath rel_build_dir 
   curdir <- getCurrentDirectory
 
+  let tester_config =
+        TesterConfig { buildDir = build_dir
+                     , platformCOpts = read extra_cflags
+                     , platformLinkOpts = read extra_lflags
+                     , hostCOpts = read host_cflags
+                     , hostLinkOpts = read host_lflags}
   -- Parse arguments
   let test_loader =
         case other_args
-        of [] -> loadAllTests curdir
-           test_names -> loadNamedTests curdir test_names
+        of [] -> loadAllTests tester_config curdir
+           test_names -> loadNamedTests tester_config curdir test_names
 
   tests <- test_loader
+  runTests tests
 
-  -- Run tests
-  tmp_base_dir <- getTemporaryDirectory
-  tmpdir <- mkdtemp (tmp_base_dir </> "pyontest.XXXXXX")
-  
-  let tester_config =
-        TesterConfig { temporaryPath = tmpdir
-                     , buildDir = build_dir
-                     , platformCOpts = read extra_cflags
-                     , platformLinkOpts = read extra_lflags}
-  launchTester tester_config $ runTests tests
+

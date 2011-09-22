@@ -406,10 +406,22 @@ pyonCOpts econfig exe lbi =
   let build_info = buildInfo exe
       includes = ["-I" ++ path | path <- Distribution.PackageDescription.includeDirs build_info]
       -- TODO: Actually determine whether m32 flag is needed
-  in "-m32" : includes
+  in includes
 
 -- | Get the options for linking the \'pyon\' binary.
 pyonLinkOpts econfig exe lbi = ["-rtsopts"] ++ pyonGhcOpts econfig exe lbi
+
+-- | C compiler options when building unit tests.
+--
+--   Unit tests are built with a temporary directory as the working directory,
+--   so paths are converted to absolute paths.
+unitTestCOpts base_path econfig exe lbi =
+  let build_info = buildInfo exe
+      includes = ["-I" ++ (base_path </> path) | path <- Distribution.PackageDescription.includeDirs build_info]
+      -- TODO: Actually determine whether m32 flag is needed
+  in includes
+
+unitTestLinkOpts base_path econfig exe lbi = [] :: [String]
 
 -------------------------------------------------------------------------------
 -- Rules to generate a makefile
