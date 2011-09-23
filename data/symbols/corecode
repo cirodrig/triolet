@@ -1525,6 +1525,112 @@ ShapeDict_dim2_zipWith4 @(a b c d e : bare)
        (\ (j : int) (i : int) (ret : OutPtr e) -> IEffect e.
           except @(IEffect e));
 
+ShapeDict_dim2_inRange (dim : dim2) (ix : index dim2) -> bool
+  attribute(inline) =
+  let type Sint = Stored int in
+  case ix of pyonTuple2 @Sint @Sint (y_s : Sint) (x_s : Sint).
+  case y_s of stored @int (y : int).
+  case x_s of stored @int (x : int).
+
+  case dim of
+    mk_dim2 @(Mlo Mhi Nlo Nhi : intindex)
+    (iMlo : IInt Mlo)
+    (iMhi : IInt Mhi)
+    (iNlo : IInt Nlo)
+    (iNhi : IInt Nhi).
+
+  let in_range_Mlo : bool =
+        case iMlo of {
+          iInt @Mlo (flo : FIInt Mlo). 
+            case flo of fiInt @Mlo (lo_i : int). y >=# lo_i
+        ; iNegInfty @Mlo.
+            True
+        ; iPosInfty @Mlo.
+            except @bool
+        } in
+  let in_range_Mhi : bool =
+        case iMhi of {
+          iInt @Mhi (fhi : FIInt Mhi).
+            case fhi of fiInt @Mhi (hi_i : int). y <# hi_i
+        ; iPosInfty @Mhi.
+            True
+        ; iNegInfty @Mhi.
+            except @bool
+        } in
+  let in_range_Nlo : bool =
+        case iNlo of {
+          iInt @Nlo (flo : FIInt Nlo). 
+            case flo of fiInt @Nlo (lo_i : int). x >=# lo_i
+        ; iNegInfty @Nlo.
+            True
+        ; iPosInfty @Nlo.
+            except @bool
+        } in
+  let in_range_Nhi : bool =
+        case iNhi of {
+          iInt @Nhi (fhi : FIInt Nhi).
+            case fhi of fiInt @Nhi (hi_i : int). x <# hi_i
+        ; iPosInfty @Nhi.
+            True
+        ; iNegInfty @Nhi.
+            except @bool
+        } in
+  and (and in_range_Mlo in_range_Mhi) (and in_range_Nlo in_range_Nhi);
+
+ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
+  (is_2d : coerce @box (BoxedType (shape t)) (Boxed dim2))
+  (indexable : IndexableDict t)
+  (repr : Repr a)
+  (container : t a)
+  (sl : slice dim2)
+  -> view2 a
+  attribute(inline) =
+
+  -- Get the container's shape
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> Writer (shape t)).
+
+  case boxed @(shape t) (get_shape @a container) of
+    boxed @(shape t) (shp : shape t).
+  case coerce @(shape t) @dim2 shp of
+    mk_dim2 @(Mlo Mhi Nlo Nhi : intindex)
+    (iMlo : IInt Mlo)
+    (iMhi : IInt Mhi)
+    (iNlo : IInt Nlo)
+    (iNhi : IInt Nhi).
+
+  -- Get the slice components
+  case sl of pyonTuple2 @SliceObject @SliceObject
+       	     (slice_y : SliceObject) (slice_x : SliceObject).
+
+  -- Compute the intersection of the container and slice.
+  -- Each dimension is computed independently.
+  case intersectSliceWithRange @Mlo @Mhi iMlo iMhi slice_y of
+    internalSlice @(sliceMlo sliceMhi : intindex)
+    (slice_iMlo : IInt sliceMlo)
+    (slice_iMhi : IInt sliceMhi)
+    (slice_ystride : int)
+    (slice_yoffset : int).
+  case intersectSliceWithRange @Nlo @Nhi iNlo iNhi slice_x of
+    internalSlice @(sliceNlo sliceNhi : intindex)
+    (slice_iNlo : IInt sliceNlo)
+    (slice_iNhi : IInt sliceNhi)
+    (slice_xstride : int)
+    (slice_xoffset : int).
+
+  -- Create a view
+  mk_view2 @a @sliceMlo @sliceMhi @sliceNlo @sliceNhi
+  slice_iMlo slice_iMhi slice_iNlo slice_iNhi
+  (\ (y : int) (x : int) -> Writer a.
+     let index_y : int = y *# slice_ystride +# slice_yoffset in
+     let index_x : int = x *# slice_xstride +# slice_xoffset in
+     let type Sint = Stored int in
+     case boxed @(PyonTuple2 Sint Sint)
+     	  (pyonTuple2 @Sint @Sint (stored @int index_y) (stored @int index_x)) of
+       boxed @(PyonTuple2 Sint Sint) (ix : PyonTuple2 Sint Sint).
+     at_index @a repr container (coerce @(index dim2) @(index (shape t)) ix));
 
 -------------------------------------------------------------------------------
 -- ShapeDict-like internal functions
@@ -2690,6 +2796,200 @@ len @(t : bare -> bare) @(a : bare)
   };
 
 -------------------------------------------------------------------------------
+-- Methods specifically for 2D streams
+
+stencil2D @(t : bare -> bare) @(a b : bare)
+  (indexable : IndexableDict t)
+  (is_matrix : coerce @box (BoxedType (shape t)) (Boxed dim2))
+  (repr_a : Repr a) (repr_b : Repr b)
+  (ymin : int) (ymax : int) (xmin : int) (xmax : int)
+  (stencilfn : view2 a -> Writer b)
+  (inp : t a)
+  -> Writer (array2 b)
+  attribute(inline, inline_sequential) =
+
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> Writer (shape t)).
+
+  -- Stencil must span at least one element
+  let yend : int = ymax +# 1 in
+  let xend : int = xmax +# 1 in
+  let stencil_size_y : int = yend -# ymin in
+  let stencil_size_x : int = xend -# xmin in
+  if or (stencil_size_y <=# 0) (stencil_size_x <=# 0)
+  then except @(Writer (array2 b)) else
+
+  -- Create stencil dimensions
+  case defineIntIndex ymin of
+    someIInt @(stencil_Mlo : intindex) (stencil_ymin : FIInt stencil_Mlo).
+  case defineIntIndex xmin of
+    someIInt @(stencil_Nlo : intindex) (stencil_xmin : FIInt stencil_Nlo).
+  case defineIntIndex yend of
+    someIInt @(stencil_Mhi : intindex) (stencil_yend : FIInt stencil_Mhi).
+  case defineIntIndex xend of
+    someIInt @(stencil_Nhi : intindex) (stencil_xend : FIInt stencil_Nhi).
+
+  -- Inspect the input data
+  case boxed @(shape t) (get_shape @a inp) of boxed @(shape t) (shp : shape t).
+  case coerce @(shape t) @dim2 shp of
+    mk_dim2
+    @(Mlo Mhi Nlo Nhi : intindex)
+    (inp_ymin : IInt Mlo)
+    (inp_yend : IInt Mhi)
+    (inp_xmin : IInt Nlo)
+    (inp_xend : IInt Nhi).
+    case fromIndInt @Mlo inp_ymin of
+      fiInt @Mlo (inp_ymin_i : int).
+    case fromIndInt @Nlo inp_xmin of
+      fiInt @Nlo (inp_xmin_i : int).
+    case fromIndInt @Mhi inp_yend of
+      fiInt @Mhi (inp_yend_i : int).
+    case fromIndInt @Nhi inp_xend of
+      fiInt @Nhi (inp_xend_i : int).
+
+    -- Compute dimensions of input
+    let type M = minus_i Mhi Mlo in
+    let type N = minus_i Nhi Nlo in
+    let inp_height : FIInt M =
+    	  minus_fii @Mhi @Mlo (fromIndInt @Mhi inp_yend) (fromIndInt @Mlo inp_ymin) in
+    case inp_height of fiInt @M (inp_height_i : int).
+    let inp_width : FIInt N =
+    	  minus_fii @Nhi @Nlo (fromIndInt @Nhi inp_xend) (fromIndInt @Nlo inp_xmin) in
+    case inp_width of fiInt @N (inp_width_i : int).
+
+    -- Compute dimensions of output
+    let type Mout = minus_i M 0 in
+    let type Nout = minus_i N 0 in
+    let type out_array = arr Mout (arr Nout b) in
+
+    let row_repr : Repr (arr Nout b) =
+    	  repr_arr @Nout @b (minus_fii @N @0 inp_width zero_fii) repr_b in
+
+    letfun {
+      -- Read from the input array2 view.  Ensure that accesses do not go
+      -- outside array bounds.
+      safe_get (pty : int) (ptx : int) (yoff : int) (xoff : int)
+        -> Writer a =
+        -- Read one element from the input for a stencil at point (pty, ptx).
+        -- The coordinate to read is (pty + yoff, ptx + xoff).
+        -- The image is padded at the edges.
+        let yindex : int = pty +# yoff in
+        let xindex : int = ptx +# xoff in
+        let bounded_yindex : int =
+              max_int inp_ymin_i (min_int yindex (inp_yend_i -# 1)) in
+        let bounded_xindex : int =
+              max_int inp_xmin_i (min_int xindex (inp_xend_i -# 1)) in
+	case boxed @(index dim2)
+	     (pyonTuple2 @(Stored int) @(Stored int)
+	      (stored @int bounded_yindex) (stored @int bounded_xindex)) of
+	  boxed @(index dim2) (ix : index dim2).
+        at_index @a repr_a inp (coerce @(index dim2) @(index (shape t)) ix);
+
+      -- Read from the input array2 view.  Assume that the given
+      -- offsets do not produce out-of-bounds array accesses.
+      unsafe_get (pty : int) (ptx : int) (yoff : int) (xoff : int)
+        -> Writer a =
+        -- Read one element from the input for a stencil at point (pty, ptx).
+        -- The coordinate to read is (pty + yoff, ptx + xoff).
+        -- The image is padded at the edges.
+        let yindex : int = pty +# yoff in
+        let xindex : int = ptx +# xoff in
+	case boxed @(index dim2)
+	     (pyonTuple2 @(Stored int) @(Stored int)
+	      (stored @int yindex) (stored @int xindex)) of
+	  boxed @(index dim2) (ix : index dim2).
+        at_index @a repr_a inp (coerce @(index dim2) @(index (shape t)) ix);
+
+      -- Initialize a region of the output array.
+      -- The region is given as an origin (y, x) and
+      -- extent (delta y, delta x).
+      init_array
+        (origin_y : int) (origin_x : int) (delta_y : int) (delta_x : int)
+        (getter : int -> int -> int -> int -> Writer a)
+        (ret : OutPtr out_array)
+        -> IEffect out_array =
+        case defineIntIndex delta_y of
+          someIInt @(Minit : intindex) (rgn_height : FIInt Minit).
+        case defineIntIndex delta_x of
+          someIInt @(Ninit : intindex) (rgn_width : FIInt Ninit).
+
+        -- Loop over region
+        doall @Minit @out_array @(arr Nout b) rgn_height
+        (\ (loop_y : int) -> IEffect (arr Nout b).
+          doall @Ninit @(arr Nout b) @b rgn_width
+          (\ (loop_x : int) -> IEffect b.
+             let y : int = origin_y +# loop_y in
+             let x : int = origin_x +# loop_x in
+             let mv : view2 a =
+                   mk_view2 @a
+                   @stencil_Mlo @stencil_Mhi @stencil_Nlo @stencil_Nhi
+                   (iInt @stencil_Mlo stencil_ymin)
+                   (iInt @stencil_Mhi stencil_yend)
+                   (iInt @stencil_Nlo stencil_xmin)
+                   (iInt @stencil_Nhi stencil_xend)
+                   (getter y x) in
+             -- Pass the array2 view to the stencil function
+             stencilfn mv (subscript_out @Nout @b repr_b
+                           (subscript_out @Mout @(arr Nout b)
+                            row_repr ret y) x)))
+    } in
+
+    -- Bounds checking is needed around the edges of the array, but not in
+    -- the interior.  Compute the size of the edges and the interior.
+    let left_boundary_size : int =
+          max_int 0 (AdditiveDict_int_negate xmin) in
+    let right_boundary_size : int =
+          max_int 0 xmax in
+    let top_boundary_size : int =
+          max_int 0 (AdditiveDict_int_negate ymin) in
+    let bottom_boundary_size : int =
+          max_int 0 ymax in
+    let center_width : int =
+     	  inp_width_i -# (left_boundary_size +# right_boundary_size) in
+    let center_height : int =
+          inp_height_i -# (top_boundary_size +# bottom_boundary_size) in
+
+    -- Origin of center, left, and right regions
+    let center_origin_y : int = top_boundary_size in
+
+    -- Origin of center region
+    let center_origin_x : int = left_boundary_size in
+    let right_origin_x : int = inp_width_i -# right_boundary_size in
+    let bottom_origin_y : int = inp_height_i -# bottom_boundary_size in
+
+    -- Create return value
+    mk_array2 @b @0 @M @0 @N zero_fii inp_height zero_fii inp_width
+    (referenced @(arr (minus_i M 0) (arr (minus_i N 0) b))
+     (if or (center_width <# 1) (center_height <# 1)
+     then
+       -- Input array2 is smaller than stencil.  Use one loop for the
+       -- entire output array.
+       init_array 0 0 inp_height_i inp_width_i safe_get
+     else
+       -- Use one loop each for the left, right, top, bottom, and center of
+       -- the output.  The corners of the output array are part of the top
+       -- and bottom strips.
+       (\ (ret_array : OutPtr out_array)
+          -> IEffect out_array.
+          fromEffTok @out_array
+          (seqEffTok
+           (seqEffTok
+            (toEffTok @out_array -- Top strip
+             (init_array 0 0 top_boundary_size inp_width_i safe_get ret_array))
+            (toEffTok @out_array -- Bottom strip
+             (init_array bottom_origin_y 0 bottom_boundary_size inp_width_i safe_get ret_array)))
+           (seqEffTok
+            (seqEffTok
+             (toEffTok @out_array -- Left strip
+              (init_array center_origin_y 0 center_height left_boundary_size safe_get ret_array))
+             (toEffTok @out_array -- Right strip
+              (init_array center_origin_y right_origin_x center_height right_boundary_size safe_get ret_array)))
+            (toEffTok @out_array -- Center region
+             (init_array center_origin_y center_origin_x center_height center_width unsafe_get ret_array)))))));
+
+-------------------------------------------------------------------------------
 -- Loops
 
 for @(N : intindex) @(acc : bare)
@@ -3026,192 +3326,6 @@ transpose @(a : bare)
     copy @a repr (subscript @N @a repr (subscript @M @(arr N a) row_repr ay x) y))
   ret;-}
 
-
-stencil2D @(t : bare -> bare) @(a b : bare)
-  (indexable : IndexableDict t)
-  (is_matrix : coerce @box (BoxedType (shape t)) (Boxed dim2))
-  (repr_a : Repr a) (repr_b : Repr b)
-  (ymin : int) (ymax : int) (xmin : int) (xmax : int)
-  (stencilfn : view2 a -> Writer b)
-  (inp : t a)
-  -> Writer (array2 b) =
-
-  case indexable of
-    indexableDict @t
-    (at_point : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
-    (at_slice : (a : bare) -> Repr a -> t a -> slice (shape t) -> Writer (view (shape t) a))
-    (get_shape : (a : bare) -> t a -> Writer (shape t)).
-
-  -- Stencil must span at least one element
-  let stencil_size_y : int =
-       AdditiveDict_int_add (AdditiveDict_int_sub ymax ymin) 1 in
-  let stencil_size_x : int =
-       AdditiveDict_int_add (AdditiveDict_int_sub xmax xmin) 1 in
-  if or (OrdDict_int_le stencil_size_y 0) (OrdDict_int_le stencil_size_x 0)
-  then except @(Writer (array2 b)) else
-
-  -- Create stencil dimensions
-  case defineIntIndex ymin of
-    someIInt @(stencil_Mlo : intindex) (stencil_ymin : FIInt stencil_Mlo).
-  case defineIntIndex xmin of
-    someIInt @(stencil_Nlo : intindex) (stencil_xmin : FIInt stencil_Nlo).
-  case defineIntIndex stencil_size_y of
-    someIInt @(stencil_M : intindex) (stencil_height : FIInt stencil_M).
-  case defineIntIndex stencil_size_x of
-    someIInt @(stencil_N : intindex) (stencil_width : FIInt stencil_N).
-
-  -- Inspect the input data
-  case boxed @(shape t) (get_shape @a inp) of boxed @(shape t) (shp : shape t).
-  case coerce @(shape t) @dim2 shp of
-    mk_dim2
-    @(Mlo M Nlo N : intindex)
-    (inp_ymin : IInt Mlo)
-    (inp_height : IInt M)
-    (inp_xmin : IInt Nlo)
-    (inp_width : IInt N).
-    let f_inp_height : FIInt M = fromIndInt @M inp_height in
-    let f_inp_width : FIInt N = fromIndInt @N inp_width in
-    case fromIndInt @Mlo inp_ymin of
-      fiInt @Mlo (inp_ymin_i : int).
-    case fromIndInt @Nlo inp_xmin of
-      fiInt @Nlo (inp_xmin_i : int).
-    case f_inp_height of
-      fiInt @M (inp_height_i : int).
-    case f_inp_width of
-      fiInt @N (inp_width_i : int).
-
-    let inp_ymax_i : int =
-          AdditiveDict_int_sub (AdditiveDict_int_add inp_ymin_i inp_height_i) 1 in
-    let inp_xmax_i : int =
-          AdditiveDict_int_sub (AdditiveDict_int_add inp_xmin_i inp_width_i) 1 in
-
-    let row_repr : Repr (arr N b) = repr_arr @N @b (fromIndInt @N inp_width) repr_b in
-
-    letfun {
-      -- Read from the input array2 view.  Ensure that accesses do not go
-      -- outside array bounds.
-      safe_get (pty : int) (ptx : int) (yoff : int) (xoff : int)
-        -> Writer a =
-        -- Read one element from the input for a stencil at point (pty, ptx).
-        -- The coordinate to read is (pty + yoff, ptx + xoff).
-        -- The image is padded at the edges.
-        let yindex : int = AdditiveDict_int_add pty yoff in
-        let xindex : int = AdditiveDict_int_add ptx xoff in
-        let bounded_yindex : int =
-              max_int inp_ymin_i (min_int yindex inp_ymax_i) in
-        let bounded_xindex : int =
-              max_int inp_xmin_i (min_int xindex inp_xmax_i) in
-	case boxed @(index dim2)
-	     (pyonTuple2 @(Stored int) @(Stored int)
-	      (stored @int bounded_yindex) (stored @int bounded_xindex)) of
-	  boxed @(index dim2) (ix : index dim2).
-        at_point @a repr_a inp (coerce @(index dim2) @(index (shape t)) ix);
-
-      -- Read from the input array2 view.  Assume that the given
-      -- offsets do not produce out-of-bounds array accesses.
-      unsafe_get (pty : int) (ptx : int) (yoff : int) (xoff : int)
-        -> Writer a =
-        -- Read one element from the input for a stencil at point (pty, ptx).
-        -- The coordinate to read is (pty + yoff, ptx + xoff).
-        -- The image is padded at the edges.
-        let yindex : int = AdditiveDict_int_add pty yoff in
-        let xindex : int = AdditiveDict_int_add ptx xoff in
-	case boxed @(index dim2)
-	     (pyonTuple2 @(Stored int) @(Stored int)
-	      (stored @int yindex) (stored @int xindex)) of
-	  boxed @(index dim2) (ix : index dim2).
-        at_point @a repr_a inp (coerce @(index dim2) @(index (shape t)) ix);
-
-      -- Initialize a region of the output array.
-      -- The region is given as an origin (y, x) and
-      -- extent (delta y, delta x).
-      initialize_array
-        (origin_y : int) (origin_x : int) (delta_y : int) (delta_x : int)
-        (getter : int -> int -> int -> int -> Writer a)
-        (ret : OutPtr (arr M (arr N b)))
-        -> IEffect (arr M (arr N b)) =
-        case defineIntIndex delta_y of
-          someIInt @(Minit : intindex) (rgn_height : FIInt Minit).
-        case defineIntIndex delta_x of
-          someIInt @(Ninit : intindex) (rgn_width : FIInt Ninit).
-
-        -- Loop over region
-        doall @Minit @(arr M (arr N b)) @(arr N b) rgn_height
-        (\ (loop_y : int) -> IEffect (arr N b).
-          doall @Ninit @(arr N b) @b rgn_width
-          (\ (loop_x : int) -> IEffect b.
-             let y : int = AdditiveDict_int_add origin_y loop_y in
-             let x : int = AdditiveDict_int_add origin_x loop_x in
-             case boxed @(view2 a)
-                  (mk_view2 @a
-                   @stencil_Mlo @stencil_M @stencil_Nlo @stencil_N
-                   stencil_ymin stencil_height stencil_xmin stencil_width
-                   (getter y x))
-             of boxed @(view2 a) (mv : view2 a).
-             -- Pass the array2 view to the stencil function
-             stencilfn mv (subscript_out @N @b repr_b
-                           (subscript_out @M @(arr N b)
-                            row_repr ret y) x)))
-    } in
-
-    -- Bounds checking is needed around the edges of the array, but not in
-    -- the interior.  Compute the size of the edges and the interior.
-    let left_boundary_size : int =
-          max_int 0 (AdditiveDict_int_negate xmin) in
-    let right_boundary_size : int =
-          max_int 0 xmax in
-    let top_boundary_size : int =
-          max_int 0 (AdditiveDict_int_negate ymin) in
-    let bottom_boundary_size : int =
-          max_int 0 ymax in
-    let center_width : int =
-          AdditiveDict_int_sub inp_width_i
-          (AdditiveDict_int_add left_boundary_size right_boundary_size) in
-    let center_height : int =
-          AdditiveDict_int_sub inp_height_i
-          (AdditiveDict_int_add top_boundary_size bottom_boundary_size) in
-
-    -- Origin of center, left, and right regions
-    let center_origin_y : int = top_boundary_size in
-
-    -- Origin of center region
-    let center_origin_x : int = left_boundary_size in
-
-    let right_origin_x : int =
-          AdditiveDict_int_sub inp_width_i right_boundary_size in
-
-    let bottom_origin_y : int =
-          AdditiveDict_int_sub inp_height_i bottom_boundary_size in
-
-    -- Create return value
-    mk_array2 @b @M @N f_inp_height f_inp_width
-    (referenced @(arr M (arr N b))
-     (if or (OrdDict_int_lt center_width 1) (OrdDict_int_lt center_height 1)
-     then
-       -- Input array2 is smaller than stencil.  Use one loop for the
-       -- entire output array.
-       initialize_array 0 0 inp_height_i inp_width_i safe_get
-     else
-       -- Use one loop each for the left, right, top, bottom, and center of
-       -- the output.  The corners of the output array are part of the top
-       -- and bottom strips.
-       (\ (ret_array : OutPtr (arr M (arr N b)))
-          -> IEffect (arr M (arr N b)).
-          fromEffTok @(arr M (arr N b))
-          (seqEffTok
-           (seqEffTok
-            (toEffTok @(arr M (arr N b)) -- Top strip
-             (initialize_array 0 0 top_boundary_size inp_width_i safe_get ret_array))
-            (toEffTok @(arr M (arr N b)) -- Bottom strip
-             (initialize_array bottom_origin_y 0 bottom_boundary_size inp_width_i safe_get ret_array)))
-           (seqEffTok
-            (seqEffTok
-             (toEffTok @(arr M (arr N b)) -- Left strip
-              (initialize_array center_origin_y 0 center_height left_boundary_size safe_get ret_array))
-             (toEffTok @(arr M (arr N b)) -- Right strip
-              (initialize_array center_origin_y right_origin_x center_height right_boundary_size safe_get ret_array)))
-            (toEffTok @(arr M (arr N b)) -- Center region
-             (initialize_array center_origin_y center_origin_x center_height center_width unsafe_get ret_array)))))));
 
 -------------------------------------------------------------------------------
 -- List container class functions
