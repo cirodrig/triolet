@@ -1,11 +1,36 @@
 
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
-module Type.Rename where
+module Type.Rename
+       (-- * Renaming
+        Renaming,
+        empty,
+        null,
+        singleton,
+        fromList,
+        union,
+        extend,
+        exclude,
+        lookup,
+        renameBinder,
+        renameBinders,
+        binderFreeVariables,
+        bindersFreeVariables,
+        Renameable(..),
+        
+        -- * Correctness checking
+        assertVarIsUndefined,
+        assertVarsAreUndefined,
+        CheckForShadowing,
+        checkForShadowing,
+        checkForShadowingSet,
+        checkForShadowingHere
+       )
+where
 
-import Prelude hiding(mapM)
+import Prelude hiding(lookup, null, mapM)
 import Control.Monad hiding(mapM)
 import qualified Data.IntSet as IntSet
-import Data.List
+import Data.List(tails)
 import Data.Maybe
 import Data.Monoid
 import Data.Traversable(traverse, mapM)
@@ -19,264 +44,120 @@ import Type.Environment
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
 
+-- | A renaming of a set of variables.
+--   Renaming may result in name shadowing.
 newtype Renaming = R {unR :: IntMap.IntMap Var}
 
-instance Monoid Renaming where
-  mempty = R mempty
-  mappend x y = R (mappend (unR x) (unR y))
+empty :: Renaming
+empty = R IntMap.empty
 
-isIdRenaming (R rn) = IntMap.null rn
+null :: Renaming -> Bool
+null (R rn) = IntMap.null rn
 
-renaming :: [(Var, Var)] -> Renaming
-renaming xs = R $ IntMap.fromList [(fromIdent $ varID v1, v2) | (v1, v2) <- xs]
+singleton :: Var -> Var -> Renaming
+singleton v1 v2 = R $ IntMap.singleton (fromIdent $ varID v1) v2
 
-singletonRenaming :: Var -> Var -> Renaming
-singletonRenaming v1 v2 = renaming [(v1, v2)]
+fromList :: [(Var, Var)] -> Renaming
+fromList xs = R $ IntMap.fromList [(fromIdent $ varID v1, v2) | (v1, v2) <- xs]
 
-insertRenaming :: Var -> Var -> Renaming -> Renaming
-insertRenaming v1 v2 (R rn) = R $ IntMap.insert (fromIdent $ varID v1) v2 rn
+-- | Compute the union of two renamings on disjoint sets of variables.
+--
+--   Disjointness is not verified.
+union :: Renaming -> Renaming -> Renaming
+union (R r1) (R r2) = R (IntMap.union r1 r2)
 
-renameVar :: Var -> Renaming -> Maybe Var
-renameVar v (R m) = IntMap.lookup (fromIdent $ varID v) m
+extend :: Var -> Var -> Renaming -> Renaming
+extend v1 v2 (R r) = R (IntMap.insert (fromIdent $ varID v1) v2 r)
 
-renameBinding :: Renaming -> Binder -> (Renaming -> Binder -> a) -> a
-renameBinding rn (x ::: t) k =
+exclude :: Var -> Renaming -> Renaming
+exclude v (R r) = R (IntMap.delete (fromIdent $ varID v) r)
+
+-- | Apply a renaming to a variable.  Return the renamed variable, or
+--   @Nothing@ if it's not renamed.
+lookup :: Var -> Renaming -> Maybe Var
+lookup v (R m) = IntMap.lookup (fromIdent $ varID v) m
+
+-- | Rename a variable binding.
+--   Remove the bound variable from the renaming because it is shadowed.
+renameBinder :: Renaming -> Binder -> (Renaming -> Binder -> a) -> a
+renameBinder rn (x ::: t) k =
   -- Remove the bound variable from the environment; it is shadowed  
   let rn' = R $ IntMap.delete (fromIdent $ varID x) (unR rn)
   in k rn' (x ::: rename rn t)
 
-renameBindings :: Renaming -> [Binder] -> (Renaming -> [Binder] -> a) -> a
-renameBindings rn (b:bs) k =
-  renameBinding rn b $ \rn' b' ->
-  renameBindings rn' bs $ \rn'' bs' ->
+renameBinders :: Renaming -> [Binder] -> (Renaming -> [Binder] -> a) -> a
+renameBinders rn (b:bs) k =
+  renameBinder rn b $ \rn' b' ->
+  renameBinders rn' bs $ \rn'' bs' ->
   k rn'' (b':bs')
 
-renameBindings rn [] k = k rn []
+renameBinders rn [] k = k rn []
+
+-- | Given a binder and the free variables of the term over which a variable
+--   is bound, get the free variables of the combined term.
+binderFreeVariables :: Binder -> Set.Set Var -> Set.Set Var
+binderFreeVariables (x ::: t) s =
+  Set.delete x $ freeVariables t `Set.union` s
+
+-- | Given a binder and the free variables of the term over which a variable
+--   is bound, get the free variables of the combined term.
+bindersFreeVariables :: [Binder] -> Set.Set Var -> Set.Set Var
+bindersFreeVariables bs s =
+  foldr binderFreeVariables s bs
 
 class Renameable a where
   -- | Rename an expression using the given renaming
   rename :: Renaming -> a -> a
   
-  -- | Rename variables bound in the outermost term to new, fresh names
-  --   if they satisfy the predicate.
-  freshen :: (Monad m, Supplies m VarID) => (Var -> m Bool) -> a -> m a
-  
   -- | Find the variables that are used in, but not defined in, the expression
   freeVariables :: a -> Set.Set Var
 
-freshenPure :: (Monad m, Supplies m VarID, Renameable a) =>
-               (Var -> Bool) -> a -> m a
-freshenPure f x = freshen (return . f) x
-
 instance Renameable a => Renameable (Maybe a) where
   rename rn x = fmap (rename rn) x
-  freshen _ Nothing  = return Nothing
-  freshen f (Just x) = liftM Just $ freshen f x
   freeVariables x = maybe Set.empty freeVariables x
+
+instance (Renameable a, Renameable b) => Renameable (a, b) where
+  rename rn (x, y) = (rename rn x, rename rn y) 
+  freeVariables (x, y) = freeVariables x `Set.union` freeVariables y
 
 instance Renameable a => Renameable [a] where
   rename rn xs = map (rename rn) xs
-  freshen f xs = mapM (freshen f) xs
   freeVariables xs = Set.unions $ map freeVariables xs
 
 instance Renameable Var where
-  rename rn v = fromMaybe v $ renameVar v rn
-  freshen _ v = return v
+  rename rn v = fromMaybe v $ lookup v rn
   freeVariables v = Set.singleton v
 
 instance Renameable Type where
   rename rn ty =
     case ty
-    of VarT v           -> case renameVar v rn
+    of VarT v           -> case lookup v rn
                            of Nothing -> ty
                               Just v' -> VarT v'
        IntT _           -> ty
-       AppT op arg      -> AppT (rename rn op) (rename rn arg)
-       FunT dom rng     -> FunT (rename rn dom) (rename rn rng)
+       AppT op arg      -> rename rn op `AppT` rename rn arg
+       FunT dom rng     -> rename rn dom `FunT` rename rn rng
        LamT binder body ->
-         renameBinding rn binder $ \rn' binder' ->
+         renameBinder rn binder $ \rn' binder' ->
          LamT binder' $ rename rn' body
        AllT binder rng  ->
-         renameBinding rn binder $ \rn' binder' ->
+         renameBinder rn binder $ \rn' binder' ->
          AllT binder' $ rename rn' rng
-       AnyT _           -> ty    -- Kinds are not renameable
+       AnyT k           -> AnyT $ rename rn k
        UTupleT _        -> ty
        CoT _            -> ty
-
-  freshen f ty =
-    case ty
-    of LamT (v ::: dom) body -> do
-         should_freshen <- f v
-         if should_freshen
-           then do
-             v' <- newClonedVar v
-             let rn = singletonRenaming v v'
-             return $ LamT (v' ::: dom) (rename rn body)
-           else return ty
-           
-       AllT (v ::: dom) rng -> do
-         should_freshen <- f v
-         if should_freshen
-           then do
-             v' <- newClonedVar v
-             let rn = singletonRenaming v v'
-             return $ AllT (v' ::: dom) (rename rn rng)
-           else return ty
-       -- Other terms don't bind variables
-       _ -> return ty
 
   freeVariables ty =
     case ty
     of VarT v -> Set.singleton v
        IntT _ -> Set.empty
-       AppT op arg -> Set.union (freeVariables op) (freeVariables arg)
-       FunT dom rng ->
-         let fv_dom = freeVariables dom 
-             fv_rng = freeVariables rng
-         in Set.union fv_dom fv_rng
-       LamT (v ::: dom) body ->
-         let fv_dom = freeVariables dom
-             fv_body = freeVariables body
-         in Set.union fv_dom (Set.delete v fv_body)
-       AllT (v ::: dom) rng ->
-         let fv_dom = freeVariables dom
-             fv_rng = freeVariables rng
-         in Set.union fv_dom (Set.delete v fv_rng)
+       AppT op arg -> freeVariables op `Set.union` freeVariables arg
+       FunT dom rng -> freeVariables dom `Set.union` freeVariables rng
+       LamT binder body -> binderFreeVariables binder $ freeVariables body
+       AllT binder rng -> binderFreeVariables binder $ freeVariables rng
        AnyT k -> freeVariables k
-       UTupleT _        -> Set.empty
+       UTupleT _ -> Set.empty
        CoT _ -> Set.empty
-
--- | Freshen variables bound in the types such that the same variable is 
---   bound by the outermost term in both types.  The outermost term is always
---   freshened.
-unifyBoundVariables :: (Monad m, Supplies m VarID) =>
-                       Type -> Type -> m (Type, Type)
-{-# SPECIALIZE unifyBoundVariables :: Type -> Type -> TypeEvalM (Type, Type) #-}
-unifyBoundVariables (LamT (v1 ::: dom1) body1) (LamT (v2 ::: dom2) body2) = do
-  v' <- newClonedVar v1
-  let rn1 = singletonRenaming v1 v'
-      rn2 = singletonRenaming v2 v'
-      t1 = LamT (v' ::: dom1) (rename rn1 body1)
-      t2 = LamT (v' ::: dom2) (rename rn2 body2)
-  return (t1, t2)
-      
-unifyBoundVariables (AllT (v1 ::: dom1) rng1) (AllT (v2 ::: dom2) rng2) = do
-  v' <- newClonedVar v1
-  let rn1 = singletonRenaming v1 v'
-      rn2 = singletonRenaming v2 v'
-      t1 = AllT (v' ::: dom1) (rename rn1 rng1)
-      t2 = AllT (v' ::: dom2) (rename rn2 rng2)
-  return (t1, t2)
-
--- Otherwise, they don't bind a common variable
-unifyBoundVariables t1 t2 = do
-  t1' <- freshenPure (const True) t1
-  t2' <- freshenPure (const True) t2
-  return (t1', t2')
-
--- | Like 'unifyBoundVariables', but variables from the first type are not
---   renamed.  Variables bound in the second type are renamed to match the
---   corresponding variables bound in the first type.
-leftUnifyBoundVariables :: (Monad m, Supplies m VarID) =>
-                       Type -> Type -> m (Type, Type)
-{-# SPECIALIZE leftUnifyBoundVariables :: Type -> Type -> TypeEvalM (Type, Type) #-}
-leftUnifyBoundVariables t1@(LamT (v1 ::: _) _) (LamT (v2 ::: dom2) body2) =
-  let rn2 = singletonRenaming v2 v1
-      t2 = LamT (v1 ::: dom2) (rename rn2 body2)
-  in return (t1, t2)
-      
-leftUnifyBoundVariables t1@(AllT (v1 ::: _) _) (AllT (v2 ::: dom2) rng2) =
-  let rn2 = singletonRenaming v2 v1
-      t2 = AllT (v1 ::: dom2) (rename rn2 rng2)
-  in return (t1, t2)
-
--- Otherwise, they don't bind a common variable
-leftUnifyBoundVariables t1 t2 = do
-  t2' <- freshenPure (const True) t2
-  return (t1, t2')
-
--------------------------------------------------------------------------------
-
-newtype Substitution = S {unS :: IntMap.IntMap Type}
-
-substitution :: [(Var, Type)] -> Substitution
-substitution xs = S $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- xs]
-
-substitutionFromMap :: IntMap.IntMap Type -> Substitution
-substitutionFromMap = S
-
-emptySubstitution :: Substitution
-emptySubstitution = S IntMap.empty
-
-singletonSubstitution :: Var -> Type -> Substitution
-singletonSubstitution v t = insertSubstitution v t emptySubstitution
-
-insertSubstitution :: Var -> Type -> Substitution -> Substitution
-insertSubstitution v t (S s) = S (IntMap.insert (fromIdent $ varID v) t s)
-
-substituteVar :: Var -> Substitution -> Maybe Type
-substituteVar v (S m) = IntMap.lookup (fromIdent $ varID v) m
-
-substituteBinding :: EvalMonad m =>
-                     Substitution
-                  -> Binder
-                  -> (Substitution -> Binder -> m a)
-                  -> m a
-substituteBinding rn (x ::: t) k = do
-  tenv <- getTypeEnv
-  
-  -- If the bound variable is in scope, then rename it to avoid name capture
-  case lookupType x tenv of
-    Nothing -> do t' <- substitute rn t
-                  k rn (x ::: t')
-    Just _  -> do
-      t' <- substitute rn t
-      x' <- newClonedVar x
-      let rn' = insertSubstitution x (VarT x') rn
-      k rn' (x' ::: t')
-
-substituteBindings :: EvalMonad m =>
-                      Substitution
-                   -> [Binder]
-                   -> (Substitution -> [Binder] -> m a)
-                   -> m a
-substituteBindings s (b:bs) k =
-  substituteBinding s b $ \s' b' ->
-  substituteBindings s' bs $ \s'' bs' ->
-  k s'' (b':bs')
-
-substituteBindings s [] k = k s []
-
-class Substitutable a where
-  substitute :: EvalMonad m => Substitution -> a -> m a
-
-instance Substitutable a => Substitutable (Maybe a) where
-  substitute s x = mapM (substitute s) x
-
-instance Substitutable a => Substitutable [a] where
-  substitute s xs = mapM (substitute s) xs
-
-instance Substitutable Type where
-  substitute sb ty =
-    case ty
-    of VarT v ->
-         return $ fromMaybe ty $ substituteVar v sb
-       AppT op arg ->
-         liftM2 AppT (substitute sb op) (substitute sb arg)
-       FunT dom rng ->
-         liftM2 FunT (substitute sb dom) (substitute sb rng)
-       AllT binder rng ->
-         substituteBinding sb binder $ \sb' binder' -> do
-           rng' <- substitute sb' rng
-           return $ AllT binder' rng'
-       LamT binder body ->
-         substituteBinding sb binder $ \sb' binder' -> do
-           body' <- substitute sb' body
-           return $ LamT binder' body'
-       AnyT _ -> return ty             -- Kinds are not substitutable
-       IntT _ -> return ty 
-       UTupleT _ -> return ty
-       CoT _ -> return ty
 
 -------------------------------------------------------------------------------
 

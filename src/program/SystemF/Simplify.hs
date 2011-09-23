@@ -20,6 +20,7 @@ import Control.Monad hiding(mapM)
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
+import qualified Data.IntSet as IntSet
 import Data.IORef
 import Data.List as List
 import Data.Maybe
@@ -35,7 +36,8 @@ import SystemF.Build
 import SystemF.Demand
 import SystemF.DemandAnalysis
 import SystemF.EtaReduce
-import SystemF.Floating
+import SystemF.Context
+import SystemF.Floating2
 import SystemF.MemoryIR
 import SystemF.Syntax
 import SystemF.Rename
@@ -51,13 +53,21 @@ import Common.Supply
 import qualified SystemF.DictEnv as DictEnv
 import SystemF.ReprDict
 import Type.Compare
-import Type.Rename
+import qualified Type.Rename as Rename
+import qualified Type.Substitute as Substitute
+import Type.Substitute(substitute, freshen, Substitutable(..))
 import Type.Type
 import Type.Eval
 import Type.Environment
 
 import Globals
 import GlobalVar
+
+-- | Return True if the expression is a variable or literal, False otherwise.
+isTrivialExp :: ExpM -> Bool
+isTrivialExp (ExpM (VarE {})) = True
+isTrivialExp (ExpM (LitE {})) = True
+isTrivialExp _                = False
 
 -- | Different features of the simplifier are enabled
 --   depending on the stage of compilation.
@@ -74,6 +84,10 @@ data SimplifierPhase =
 data LREnv =
   LREnv
   { lrIdSupply :: {-# UNPACK #-}!(Supply VarID)
+    
+    -- | Set of imported variable IDs, used to decide whether a variable was
+    --   defined in the current module
+  , lrImportedSet :: !IntSet.IntSet
     
     -- | Active rewrite rules
   , lrRewriteRules :: !RewriteRuleSet
@@ -308,11 +322,14 @@ assumeDef :: Def Mem -> LR a -> LR a
 assumeDef (Def v _ f) m = assume v (functionType f) m
 
 -- | Print the known values on entry to the computation.
+--
+--   Known values of imported variables are not printed.
 dumpKnownValues :: LR a -> LR a
 dumpKnownValues m = LR $ \env ->
   let kv_doc = hang (text "dumpKnownValues") 2 $
                vcat [hang (text (show n)) 8 (pprAbsValue kv)
-                    | (n, kv) <- IntMap.toList $ lrKnownValues env]
+                    | (n, kv) <- IntMap.toList $ lrKnownValues env,
+                      not $ n `IntSet.member` lrImportedSet env]
   in traceShow kv_doc $ runLR m env
 
 -- | Check whether there is fuel available.
@@ -663,44 +680,53 @@ inlckDataMovement ptr_ck data_check tenv dmd expression =
 --   reduction.
 betaReduce :: EvalMonad m =>
               ExpInfo -> FunM -> [TypM] -> [ExpM] -> m ExpM
-betaReduce inf (FunM fun) ty_args args
-  | length ty_args < length (funTyParams fun) = do
-      -- Substitute some type parameters and create a new function
-      let type_subst =
-            substitution [(tv, t)
-                         | (TyPatM (tv ::: _), TypM t) <-
-                             zip (funTyParams fun) ty_args]
-          leftover_ty_args = drop (length ty_args) $ funTyParams fun
+betaReduce inf fun ty_args args = do
+  -- This wrapper is here to make it easier to print debugging information
+  -- before beta reduction
+  betaReduce' inf fun ty_args args
+  {-
+  traceShow (hang (text "betaReduce") 2 $
+             pprFun fun $$
+             vcat (map ((text "@" <+>) . pprType . fromTypM) ty_args ++
+                   map ((text ">" <+>) . pprExp) args) $$
+             pprExp e) $ return e -}
 
-      params <- substitutePatMs type_subst (funParams fun)
-      body <- substitute type_subst $ funBody fun
-      ret <- substitute type_subst $ funReturn fun
-      
-      return $! undersaturated_app (funInfo fun) leftover_ty_args args params body ret
+betaReduce' inf (FunM fun) ty_args args
+  | n_ty_args < n_ty_params && null args = do
+      -- Substitute some type parameters and create a new function
+      let leftover_ty_args = drop (length ty_args) $ funTyParams fun
+
+          new_fun = FunM (fun {funTyParams = leftover_ty_args})
+      f' <- substitute (Subst type_subst emptyV) new_fun
+      return $ ExpM $ LamE inf f'
+
+  | n_ty_args > n_ty_params && not (null $ funParams fun) =
+        internalError "betaReduce: Type error in application"
+
+  | n_ty_args /= n_ty_params =
+      internalError "betaReduce: Type error in application"
 
   | otherwise = do
-      -- Rename bound value parameters if they conflict with names in the
-      -- environment
-      FunM freshened_fun <- freshenFunValueParams (FunM fun)
+      -- Substitute type parameters
+      let new_fun = FunM (fun {funTyParams = []})
+      FunM inst_fun <- substitute (Subst type_subst emptyV) new_fun
 
-      -- Substitute type arguments for type parameters
-      let type_subst =
-            substitution [(tv, t)
-                         | (TyPatM (tv ::: _), TypM t) <-
-                             zip (funTyParams freshened_fun) ty_args]
-
-      -- Apply substitution to parameters and body
-      params <- substitutePatMs type_subst (funParams freshened_fun)
-      let subst = type_subst
-      body <- substitute subst $ funBody freshened_fun
-      ret <- substitute subst $ funReturn freshened_fun
-          
       -- Is the function fully applied?
+      let Fun fun_inf [] params return_type body = inst_fun
       return $! case length args `compare` length params
-                of LT -> undersaturated_app (funInfo freshened_fun) [] args params body ret
+                of LT -> undersaturated_app fun_inf args params body return_type
                    EQ -> saturated_app args params body
                    GT -> oversaturated_app args params body
   where
+    n_ty_args = length ty_args
+    n_ty_params = length (funTyParams fun)
+
+    -- Substitution of types for type parameters
+    type_subst =
+      Substitute.fromList [(tv, t)
+                          | (TyPatM (tv ::: _), TypM t) <-
+                              zip (funTyParams fun) ty_args]
+
     oversaturated_app args params body =
       let applied_args = take (length params) args
           excess_args = drop (length params) args
@@ -714,11 +740,11 @@ betaReduce inf (FunM fun) ty_args args
     -- To process an undersaturated application,
     -- assign the parameters that have been applied and 
     -- create a new function that takes the remaining arguments.
-    undersaturated_app inf ty_args args params body return =
+    undersaturated_app inf args params body return =
       let applied_params = take (length args) params
           excess_params = drop (length args) params
           new_fun = FunM $ Fun { funInfo = inf
-                               , funTyParams = ty_args
+                               , funTyParams = []
                                , funParams = excess_params
                                , funBody = body
                                , funReturn = return}
@@ -820,58 +846,7 @@ createDataConApp' inf con fields = do
 -- scopes of temporary variables.  Let-expressions are floated out from the
 -- RHS of other let expressions and from inside function calls.
 
--- | After restructuring, an expression is either eliminated or divested of
---   a context.  The expression is eliminated if it will raise an exception.
---   Otherwise, bindings in the expression are floated outward.
-data Restructured a = Restructured Context a | Excepting
-
-newtype Restructure a = Restructure {restructure :: LR (Restructured a)}
-
--- | Add some context to the result of a restructuring computation.
---   The context will go outside any context generated by @m@.
-addContext ctx1 m = Restructure $ do
-  r <- restructure m
-  return $! case r
-            of Restructured ctx2 y -> Restructured (ctx2 ++ ctx1) y
-               Excepting           -> Excepting
-
--- | Restructuring can be interpreted as a monad.
---   Floated contexts behave like a 'MonadWriter' instance.
-instance Monad Restructure where
-  return x = Restructure (return (Restructured [] x))
-  m >>= k = Restructure $ restructure m >>= continue
-    where
-      continue (Restructured ctx1 x) = restructure $ addContext ctx1 (k x)
-      continue Excepting = return Excepting
-
--- | Restructuring an 'ExceptE' statement is like a zero, in the sense that
---   it wipes out all other results.
-restructureZero :: Restructure a
-restructureZero = Restructure (return Excepting)
-
-liftR :: LR a -> Restructure a
-liftR m = Restructure $ do
-  x <- m
-  return (Restructured [] x)
-
-liftRT :: (forall a. LR a -> LR a) -> Restructure a -> Restructure a
-liftRT t m = Restructure $ t $ restructure m
-
--- | Add the context produced by @m@ to the environment in the continuation
-floatAndAssume :: Restructure a -> (a -> Restructure b) -> Restructure b
-floatAndAssume m k = Restructure $ restructure m >>= continue
-  where
-    continue Excepting = return Excepting
-    continue (Restructured ctx x) = do
-      -- When calling 'addContext', put previously floated context from 'm'
-      -- outside the floated context introduced by this function call.
-      assumeContext ctx $ restructure $ addContext ctx (k x)
-
--- | Float a piece of context.
---
---   The floated context goes inside of any previously floated context. 
-floatItem :: ContextExp -> Restructure ()
-floatItem item = Restructure $ return $ Restructured [contextItem item] ()
+type Restructure a = TypeEvalM (Contexted a)
 
 -- | Flatten an expression until it reaches a fixed point or until the
 --   expression satisfies the given test.
@@ -888,35 +863,71 @@ floatItem item = Restructure $ return $ Restructured [contextItem item] ()
 -- > let x = C in D   [let z = B, let y = A]
 
 recFlattenExp :: ExpM -> Restructure ExpM
-recFlattenExp e = Restructure $ restructure (flattenExp e) >>= continue
-  where
-    continue (Restructured ctx1 e') | not (null ctx1) = do
-      assumeContext ctx1 $ restructure $ addContext ctx1 (recFlattenExp e')
-
-    continue ret = return ret
+recFlattenExp e = do
+  ctx_e <- flattenExp e 
+  if isUnitContext ctx_e
+    then return ctx_e
+    else joinTraverseContext recFlattenExp ctx_e
 
 -- | Flatten an expression.  Local let-bindings and case-bindings are 
 --   floated outward.
 flattenExp :: ExpM -> Restructure ExpM
-flattenExp (ExpM expression) =
-  case expression
-  of LetE inf pat rhs body -> flattenLetExp inf pat rhs body
+flattenExp expression =
+  case fromExpM expression
+  of ConE inf con args -> flattenConExp inf con args
+     LetE inf pat rhs body -> flattenLetExp inf pat rhs body
      LetfunE inf defs body -> flattenLetfunExp inf defs body
      CaseE inf scr alts -> flattenCaseExp inf scr alts
      AppE inf op ty_args args -> flattenAppExp inf op ty_args args
-     
-     -- NOTE: This elimination of exceptions is probably redundant
-     -- with the use of 'propagateException' later.  Consider merging
-     -- the two cases somehow.
-     --
-     -- They're not completely redundant with each other, because
-     -- the later cases can use 'KnownValue's to more accurately identify
-     -- excepting code.
-     ExceptE _ ty -> restructureZero
-     _ -> return (ExpM expression)
+     ExceptE _ ty -> return exceptingContext
+     _ -> return $ unitContext expression
 
 flattenExps :: [ExpM] -> Restructure [ExpM]
-flattenExps es = mapM flattenExp es
+flattenExps es = mergeList =<< mapM flattenExp es
+
+-- | A variant of 'flattenExp' that can also float bindings out of 
+--   lambda functions.  It's only safe to float the binding if the function
+--   is guaranteed to be called.
+flattenInsideLambda :: ExpM -> Restructure ExpM
+flattenInsideLambda expression =
+  case fromExpM expression
+  of LamE inf (FunM f) -> do
+       let param_vars = map tyPatMVar (funTyParams f) ++
+                        map patMVar (funParams f)
+           return_type = fromTypM $ funReturn f
+       ctx_body <-
+         assumeTyPatMs (funTyParams f) $
+         assumePatMs (funParams f) $
+         flattenExp (funBody f) >>=
+         anchorVarList param_vars (return return_type)
+         
+       return $ mapContext (\e -> ExpM $ LamE inf (FunM (f {funBody = e}))) ctx_body
+     _ -> flattenExp expression
+
+
+-- | Perform flattening in a data constructor expression.
+--   Arguments are flattened based on their kind.
+--
+--   If the kind is \"val\" or \"box\", and it's not a trivial expression,
+--   then bind the argument to a new variable.
+--
+--   If the kind is \"bare\", leave it where it is, but flatten inside the
+--   expression if it's a lambda expression.
+flattenConExp inf con args = do
+  tenv <- getTypeEnv
+  (field_types, _) <- conType (fromCInstM con)
+  let field_kinds = conFieldKinds tenv (fromCInstM con)
+  args' <- mergeList =<< mapM flatten_arg (zip3 args field_types field_kinds)
+  return $ mapContext (\xs -> ExpM $ ConE inf con xs) args'
+  where
+    flatten_arg (arg, ty, BareK) = flattenInsideLambda arg
+    flatten_arg (arg, ty, ValK) = float_field arg ty
+    flatten_arg (arg, ty, BoxK) = float_field arg ty
+    flatten_arg _ = internalError "flattenConExp: Unexpected kind"
+    
+    float_field arg ty
+      | isTrivialExp arg = return $ unitContext arg
+      | otherwise = asLetContext ty arg
 
 flattenLetExp inf pat rhs body = do
   -- Flatten the RHS.  Since the body of the RHS will be the new RHS,
@@ -924,120 +935,56 @@ flattenLetExp inf pat rhs body = do
   flat_rhs <- recFlattenExp rhs
 
   -- Float this binding
-  (floated, rn) <- liftR $ freshenContextExp $ LetCtx inf pat flat_rhs
-  floatItem floated
-  return (rename rn body)
+  joinInContext flat_rhs $ \rhs' ->
+    return $ letContext inf pat rhs' $ unitContext body
 
 flattenLetfunExp inf defs body = do
   -- Float this binding
-  (floated, rn) <- liftR $ freshenContextExp $ LetfunCtx inf defs
-  floatItem floated
-  return (rename rn body)
+  return $ letfunContext inf defs $ unitContext body
 
-flattenCaseExp inf scr alts = db_flatten_case $ do
+flattenCaseExp inf scr alts = do
   -- Perform floating in the scrutinee
-  floated_scr <-
-    -- Flatten the scrutinee
-    recFlattenExp scr `floatAndAssume` \flattened_scr -> do
-      tenv <- liftR getTypeEnv
-      
-      -- If the scrutinee is 
-      --
-      -- * a trivial expression, then floating it outward won't make
-      --   it any simpler.
-      --
-      -- * a data constructor application, then the case statement will
-      --   cancel it out.  Leave it in place in order to make sure that
-      --   happens.
-      --
-      -- Otherwise, assign the flattened scrutinee to a new variable and then
-      -- float the newly created binding.
-      if isTrivialExp flattened_scr || isDataConAppM tenv flattened_scr
-        then return flattened_scr
-        else float_scrutinee flattened_scr
+  ctx_scr <- recFlattenExp scr
+  joinInContext ctx_scr $ \flattened_scr -> do
+    -- If the scrutinee is 
+    --
+    -- a trivial expression, then floating it outward won't make
+    --   it any simpler.
+    --
+    -- a data constructor application, then the case statement will
+    --   cancel it out.  Leave it in place in order to make sure that
+    --   happens.
+    --
+    -- Otherwise, assign the flattened scrutinee to a new variable and then
+    -- float the newly created binding.
+    let should_float =
+          case fromExpM flattened_scr
+          of VarE {} -> False
+             LitE {} -> False
+             ConE {} -> False
+             _ -> True
+    ctx_floated_scr <-
+      if should_float
+      then do scrutinee_type <- inferExpType flattened_scr
+              asLetContext scrutinee_type flattened_scr
+      else return $ unitContext flattened_scr
 
-  let simplified_case = ExpM $ CaseE inf floated_scr alts
+    joinInContext ctx_floated_scr $ \floated_scr -> do
+      let simplified_case = ExpM $ CaseE inf floated_scr alts
 
-  -- Is this case binding suitable for floating?
-  case asCaseCtx simplified_case of
-    Nothing ->
-      return simplified_case
+      -- Is this case binding suitable for floating?
+      case asCaseContext simplified_case of
+        Nothing ->
+          return $ unitContext simplified_case
 
-    Just (case_ctx, case_body) -> do
-      -- Float the case binding.  Rename and return the body.
-      (rn_case_ctx, rn) <- liftR $ freshenContextExp case_ctx
-      floatItem rn_case_ctx
-      return $ rename rn case_body
-  where
-    -- Run the computation, then print debugging otuput
-    db_flatten_case m = m
-    {-db_flatten_case m = Restructure $ do
-      x <- restructure m
-      case x of
-        Restructured [] _ -> return x
-        Excepting -> return x
-        Restructured ctx new_exp ->
-          -- Use a fake type when showing the result
-          traceShow (hang (text "Restructured case") 2
-                     (pprExp (ExpM $ CaseE inf scr alts) $$ text "----" $$
-                      pprExp (applyContextWithType (IntT 1) ctx new_exp))) $
-          return x-}
-
-    -- Assign the scrutinee value to a new variable, and float the assignment.
-    -- Return the new scrutinee (which is the newly created variable).
-    float_scrutinee flattened_scr = do
-      -- Create a new variable that will bind the scrutinee
-      scr_var <- liftR $ newAnonymousVar ObjectLevel
-      scr_type <- liftR $ inferExpType flattened_scr
-
-      -- Construct demand information for the new scrutinee variable.
-      -- The scrutinee variable is used exactly once, in place of the
-      -- original scrutinee expression.  Demand information can be
-      -- reconstructed from the bindings in the case statement.
-      let demand = Dmd OnceSafe (altListSpecificity alts)
-          binder = setPatMDmd demand $ patM (scr_var ::: scr_type)
-      floatItem (LetCtx inf binder flattened_scr)
-      return (ExpM $ VarE inf scr_var)
+        Just ctx -> do
+          -- Float the case expression and contine processing the body
+          joinInContext ctx $ \body -> flattenExp body
 
 flattenAppExp inf op ty_args args = do
-  tenv <- liftR getTypeEnv
-  oper' <- flattenExp op
-  args' <-
-    case oper'
-    of ExpM (VarE _ op_var)
-         | Just (data_type, dcon) <- lookupDataConWithType op_var tenv -> do
-             -- Flattening looks through initializer functions in
-             -- fully applied data constructors, since initializers are
-             -- guaranteed to be executed.
-             let field_kinds = dataConFieldKinds tenv dcon
-                 num_args = length args
-                 num_fields = length field_kinds
-                 is_fully_applied =
-                   case dataTypeKind data_type
-                   of BareK -> num_args == 1 + num_fields
-                      _     -> num_args == num_fields
-                 extra_args = drop num_fields args
-
-                 -- Flatten under lambda in initializer fields
-                 flatten_field BareK e = flattenUnderLambda e
-                 flatten_field _ e     = flattenExp e
-
-             if is_fully_applied
-               then do fields <- zipWithM flatten_field field_kinds args
-                       return (fields ++ extra_args)
-               else flattenExps args
-       _ -> flattenExps args
-
-  return $ appE inf oper' ty_args args'
-
-flattenUnderLambda expression =
-  case fromExpM expression
-  of LamE inf (FunM f) ->
-       liftRT (assumeTyPatMs (funTyParams f) . assumePatterns (funParams f)) $
-       trace "FIXME: Anchor floats in flattenUnderLambda" $ do
-         body' <- flattenExp (funBody f)
-         return $ ExpM $ LamE inf $ FunM (f {funBody = body'})
-     _ -> flattenExp expression
+  ctx_op <- flattenExp op
+  ctx_args <- flattenExps args
+  mergeWith (\op' args' -> ExpM $ AppE inf op' ty_args args') ctx_op ctx_args
 
 -- | Restructure an expression.  Find subexpressions that have local bindings
 --   and float those bindings outward.  Bindings are only floated out from 
@@ -1052,23 +999,15 @@ flattenUnderLambda expression =
 --   is exactly one non-excepting case alternative.  Recursion is actually
 --   performed by floating away the let-binding or case binding.
 restructureExp :: ExpM -> LR ExpM
-restructureExp ex = restructure (flattenExp ex) >>= rebuild
-  where
-    rebuild (Restructured [] _) =
-      return ex -- Expression is unchanged
-
-    rebuild x = do
+restructureExp ex = do
+  result <- liftTypeEvalM $ flattenExp ex
+  if isUnitContext result
+    then return ex              -- Expression is unchanged
+    else do
       consumeFuel
-      -- Use the original expression's type as the return type.  It's
-      -- the same as the new expression's type.
-      e_type <- inferExpType ex
-      return $! case x 
-                of Restructured ctx ex' ->
-                     -- Put context onto the new expression
-                     applyContextWithType e_type ctx ex'
-                   Excepting ->
-                     -- Replace with an exception
-                     ExpM $ ExceptE defaultExpInfo e_type
+      -- The return type is the same as it was before restructuring
+      return_type <- inferExpType ex
+      contextExpression result return_type -- Rebuild the expression
 
 -------------------------------------------------------------------------------
 -- Useless copying
@@ -1230,11 +1169,13 @@ rwExp :: ExpM -> LR (ExpM, MaybeValue)
 rwExp expression = debug "rwExp" expression $ do
     -- Flatten nested let and case statements.  Consume fuel only if flattening
     -- occurs.
-    -- DEBUG: rename variables
     ex1 <- ifFuel expression $ restructureExp expression
 
     -- If this expression is uselessly copying a data structure, eliminate it
     ex2 <- ifFuel ex1 $ eliminateUselessCopying ex1
+
+    -- Rename variables to avoid name conflicts
+    ex3 <- freshen ex2
 
     -- Simplify subexpressions.
     --
@@ -1242,11 +1183,11 @@ rwExp expression = debug "rwExp" expression $ do
     -- steps in order to propagate 'InlAV's.  If we fail to propagate
     -- them, the output code will still contain references to variables that
     -- were deleted.
-    case fromExpM ex2 of
-      VarE inf v -> rwVar ex2 inf v
-      LitE inf l -> rwExpReturn (ex2, Just $ LitAV inf l)
+    case fromExpM ex3 of
+      VarE inf v -> rwVar ex3 inf v
+      LitE inf l -> rwExpReturn (ex3, Just $ LitAV inf l)
       ConE inf con args -> rwCon inf con args
-      AppE inf op ty_args args -> rwApp ex2 inf op ty_args args
+      AppE inf op ty_args args -> rwApp ex3 inf op ty_args args
       LamE inf fun -> do
         (fun', fun_val) <- rwFun fun
         rwExpReturn (ExpM $ LamE inf fun',
@@ -1254,11 +1195,18 @@ rwExp expression = debug "rwExp" expression $ do
       LetE inf bind val body -> rwLet inf bind val body
       LetfunE inf defs body -> rwLetrec inf defs body
       CaseE inf scrut alts -> rwCase inf scrut alts
-      ExceptE _ _ -> propagateException -- rwExpReturn (ex2, Nothing)
+      ExceptE _ _ -> propagateException -- rwExpReturn (ex3, Nothing)
       CoerceE inf from_t to_t body -> rwCoerce inf from_t to_t body
   where
     debug _ _ = id
-    -- debug l e m = traceShow (text l <+> (pprExp e)) m
+
+    --debug l e m = traceShow (text l <+> pprExp e) m
+
+    -- Print abstract values
+    {-debug l e m = do
+      ret@(_, av) <- m
+      traceShow (text l <+> (pprExp e $$ text "----" $$ pprMaybeValue av)) $ return ret
+    -}
     {-debug l e m = do
       ret@(e', _) <- m
       traceShow (text l <+> (pprExp e $$ text "----" $$ pprExp e')) $ return ret
@@ -1395,13 +1343,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
               Just new_expr -> do
                 consumeFuel     -- A term has been rewritten
                 rwExp new_expr
-              Nothing -> {-
-                -- Try to construct a value for this application
-                case lookupDataConWithType op_var tenv
-                of Just (type_con, data_con) ->
-                     data_con_app type_con data_con op'
-                   Nothing -> -}
-                     unknown_app
+              Nothing -> unknown_app
 
           _ -> unknown_app
   where
@@ -1430,58 +1372,6 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
 
       let new_exp = appE inf op' ty_args args'
       return (new_exp, new_value)
-
-    {-
-    -- The term is a data constructor application.  Simplify subexpressions
-    -- and rebuild the expression.  Also construct a known value for the term.
-    --
-    -- If the term will raise an exception, replace it by an exception term.
-    data_con_app type_con data_con op' = do
-      tenv <- getTypeEnv
-
-      -- Try to eta-reduce writer arguments, because this increases the
-      -- likelihood that we can value-propagate them
-      (field_types, constructed_type) <-
-        instantiateDataConTypeWithExistentials data_con (map fromTypM ty_args)
-          
-      -- Eta-reduce writer arguments, leave other arguments alone
-      let extended_field_kinds =
-            map Just (dataConFieldKinds tenv data_con) ++ repeat Nothing
-          eta_reduced_args = zipWith eta_reduce_arg args extended_field_kinds
-            where
-              -- Only eta-reduce known writer arguments
-              eta_reduce_arg arg (Just BareK) = eta_reduce arg
-              eta_reduce_arg arg _ = arg
-
-              eta_reduce (ExpM (LamE inf f)) =
-                etaReduceSingleLambdaFunction True inf f
-              eta_reduce e = e
-
-          -- Determine the type of the result of the type application.
-          -- This value is only used for a fully applied
-          -- (including the return pointer argument) data constructor.
-          result_type =
-            if dataTypeKind type_con == BareK
-            then if length args == 1 + length (dataConPatternArgs data_con)
-                 then initEffectType constructed_type
-                 else internalError "rwAppWithOperator"
-            else constructed_type
-
-      -- Simplify arguments
-      (args', arg_values) <- rwExps eta_reduced_args
-      
-      -- Construct a value from this expression
-      let new_exp = appE inf op' ty_args args'
-          new_computation =
-            dataConValue inf tenv type_con data_con ty_args arg_values
-      case new_computation of
-        Just (AbsReturn v) -> return (new_exp, Just v)
-        Nothing -> return (new_exp, Nothing)
-
-        -- If it will raise an exception, replace with an exception expression
-        Just AbsException -> do
-          consumeFuel
-          return (ExpM $ ExceptE inf result_type, Nothing) -}
 
     -- Inline the function call and continue to simplify it.
     -- The arguments will be processed after inlining.
@@ -1867,21 +1757,25 @@ eliminateCaseWithExp
       internalError "rwCase: Wrong number of fields"
   | otherwise = do
       -- Substitute known types for the existential type variables
-      params <- substitutePatMs ex_type_subst (altParams alt)
-      let subst = ex_type_subst
-      body <- substitute subst (altBody alt)
+      let subst = Subst ex_type_subst emptyV
+      body <- substitutePatMs subst (altParams alt) $ \subst' params' -> do
+        
+        -- Bind the values to variables
+        makeCaseInitializerBindings
+          (zip3 field_kinds params' initializers)
+          subst' $ \subst'' binders -> do
 
-      binders <-
-        sequence [makeCaseInitializerBinding k p i
-                 | (k, p, i) <- zip3 field_kinds params initializers]
+            -- Substitute in the body
+            body' <- substitute subst' (altBody alt)
+            return $ applyCaseElimBindings binders body'
 
       -- Continue simplifying the new expression
-      rwExp $ applyCaseElimBindings binders body
+      rwExp body
   where
     ex_types = deConExTypes $ fromDeCInstM $ altCon alt
     ex_type_subst =
-      substitution [(v, ex_type)
-                   | (v ::: _, TypM ex_type) <- zip ex_types ex_args]
+      Substitute.fromList [(v, ty)
+                          | (v ::: _, TypM ty) <- zip ex_types ex_args]
 
 -- | Given a data value and a list of case
 --   alternatives, eliminate the case statement.
@@ -1907,31 +1801,43 @@ eliminateCaseWithSimplifiedExp
       internalError "rwCase: Wrong number of fields"
   | otherwise = do
       -- Substitute known types for the existential type variables
-      params <- substitutePatMs ex_type_subst (altParams alt)
-      let subst = ex_type_subst
-      body <- substitute subst (altBody alt)
+      let subst = Subst ex_type_subst emptyV
+      substitutePatMs subst (altParams alt) $ \subst' params' -> do
 
-      binders <-
-        sequence [if is_inspector
-                  then makeCaseInspectorBinding p i
-                  else makeCaseInitializerBinding k p i
-                 | (k, p, (i, _)) <- zip3 field_kinds params initializers]
+        -- Bind the values to variables
+        let (initializer_exps, initializer_values) = unzip initializers 
+        let make_bindings =
+              if is_inspector
+              then makeCaseInspectorBindings (zip params' initializer_exps)
+              else makeCaseInitializerBindings
+                   (zip3 field_kinds params' initializer_exps)
 
-      let values = [(patMVar p, mv)
-                   | (p, (_, mv)) <- zip params initializers]
+        make_bindings subst' $ \subst'' binders -> do
+          -- Assign abstract values to the new bound variables
+          let values = [(subst_var (patMVar p), v)
+                       | (p, v) <- zip params' initializer_values]
+                where
+                  subst_var v =
+                    case lookupV v (valueSubst subst'')
+                    of Nothing -> v
+                       Just (RenamedVar v') -> v'
+                       Just (SubstitutedVar _) ->
+                         internalError "eliminateCaseWithSimplifiedExp"
 
-      -- Add known values to the environment.  Simplify the body expression.
-      (body', _) <-
-        assumePatterns params $ with_values values $ rwExp body
-      
-      -- Bind local variables 
-      return (applyCaseElimBindings binders body', Nothing)
+          -- Add known values to the environment.  Simplify the body
+          -- expression.
+          renamed_body <- substitute subst'' $ altBody alt
+          (body', _) <-
+            assumePatterns params' $ with_values values $ rwExp renamed_body
+
+          -- Bind local variables 
+          return (applyCaseElimBindings binders body', Nothing)
   where
     with_values vs e = foldr (uncurry withMaybeValue) e vs
     ex_types = deConExTypes $ fromDeCInstM $ altCon alt
     ex_type_subst =
-      substitution [(v, ex_type)
-                   | (v ::: _, TypM ex_type) <- zip ex_types ex_args]
+      Substitute.fromList [(v, ex_type)
+                          | (v ::: _, TypM ex_type) <- zip ex_types ex_args]
 
 newtype CaseElimBinding = CaseElimBinding (ExpM -> ExpM)
 
@@ -1944,28 +1850,62 @@ applyCaseElimBindings bs e = foldr apply_binding e bs
 --   bind the field value to a variable.  If the expression was an initializer
 --   expression, then a new object must be created and inspected with a case
 --   statement.  Otherwise, the value is just assigned to a variable.
-makeCaseInitializerBinding :: BaseKind -> PatM -> ExpM -> LR CaseElimBinding
-makeCaseInitializerBinding BareK param initializer = do
-  tmpvar <- newAnonymousVar ObjectLevel
-  return $ write_box tmpvar
+--
+--   We also rename the variable to avoid name conflicts.
+makeCaseInitializerBinding :: BaseKind -> PatM -> ExpM -> Subst
+                           -> (Subst -> CaseElimBinding -> LR a)
+                           -> LR a
+makeCaseInitializerBinding kind param initializer subst k =
+  case kind of
+    BareK -> do
+      tmpvar <- newAnonymousVar ObjectLevel
+      k subst (write_box tmpvar)
+    _ ->
+      k subst let_binding
   where
-    -- Write into a box, then read the box's contents
-    write_box tmpvar = CaseElimBinding $ \body ->
-      letViaBoxed (patMBinder param) initializer body
+    param' = setPatMDmd unknownDmd param
 
-makeCaseInitializerBinding _ param initializer = return let_binding
-  where
+    -- Write into a box, then read the box's contents
+    write_box tmpvar = CaseElimBinding $ \body -> do
+      letViaBoxed (patMBinder param') initializer body
+
+    -- Bind to a let-expression
     let_binding = CaseElimBinding $ \body ->
-      ExpM $ LetE defaultExpInfo (setPatMDmd unknownDmd param) initializer body
+      ExpM $ LetE defaultExpInfo param' initializer body
+
+makeCaseInitializerBindings :: [(BaseKind, PatM, ExpM)] -> Subst
+                               -> (Subst -> [CaseElimBinding] -> LR a)
+                               -> LR a
+makeCaseInitializerBindings ((kind, param, initializer):fs) subst k =
+  makeCaseInitializerBinding kind param initializer subst $ \subst' elim ->
+  makeCaseInitializerBindings fs subst' $ \subst'' elims ->
+  k subst'' (elim : elims)
+
+makeCaseInitializerBindings [] subst k = k subst []
 
 -- | Given an expression that represents a field of a data constructor,
 --   bind the field value to a variable.  This is similar to
 --   'makeCaseInitializerBinding', except the binding is always a let-binding.
-makeCaseInspectorBinding :: PatM -> ExpM -> LR CaseElimBinding
-makeCaseInspectorBinding param initializer = return let_binding
+makeCaseInspectorBinding :: PatM -> ExpM -> Subst
+                         -> (Subst -> CaseElimBinding -> LR a)
+                         -> LR a
+makeCaseInspectorBinding param initializer subst k = do 
+  k subst let_binding
   where
+    param' = setPatMDmd unknownDmd param
     let_binding = CaseElimBinding $ \body ->
-      ExpM $ LetE defaultExpInfo (setPatMDmd unknownDmd param) initializer body
+      ExpM $ LetE defaultExpInfo param' initializer body
+
+makeCaseInspectorBindings :: [(PatM, ExpM)] -> Subst
+                          -> (Subst -> [CaseElimBinding] -> LR a)
+                          -> LR a
+makeCaseInspectorBindings ((param, initializer):fs) subst k =
+  makeCaseInspectorBinding param initializer subst $ \subst' elim ->
+  makeCaseInspectorBindings fs subst' $ \subst'' elims ->
+  k subst'' (elim : elims)
+  
+makeCaseInspectorBindings [] subst k =
+  k subst []
 
 rwAlt :: Bool                   -- ^ Whether to propagate exceptions
       -> Maybe Var              -- ^ Scrutinee, if it's just a variable
@@ -2151,11 +2091,7 @@ rwCoerce inf from_t to_t body = do
 rwFun :: FunM -> LR (FunM, Maybe AbsFunValue)
 
 -- Freshen bound variables to avoid name shadowing, then rename 
-rwFun f = rwFun' =<< freshen in_type_env f
-  where
-    -- If a variable is in scope, it's in the type environment
-    in_type_env v =
-      withTypeEnv $ \tenv -> return $ isJust $ lookupType v tenv
+rwFun f = rwFun' =<< freshen f
 
 rwFun' (FunM f) =
   assumeTyPatMs (funTyParams f) $
@@ -2278,6 +2214,9 @@ rewriteLocalExpr phase ruleset mod =
               IntMap.insert (fromIdent $ varID v) (InlAV e) m
 
     let env = LREnv { lrIdSupply = var_supply
+                    , lrImportedSet = IntSet.fromList
+                                      [fromIdent $ varID $ definiendum def 
+                                      | def <- modImports mod]
                     , lrRewriteRules = ruleset
                     , lrKnownValues = known_values
                     , lrReturnParameter = Nothing

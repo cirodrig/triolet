@@ -37,7 +37,7 @@ import Common.PrecDoc
 import Builtins.Builtins
 import SystemF.Build
 import SystemF.Demand
-import SystemF.Floating
+import SystemF.Floating2
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
@@ -47,7 +47,7 @@ import SystemF.TypecheckMem
 import Type.Compare
 import Type.Environment
 import Type.Eval
-import Type.Rename
+import qualified Type.Rename as Rename
 import Type.Type
 import Globals
 import GlobalVar

@@ -241,7 +241,10 @@ typeFunctionArity :: TypeFunction -> Int
 typeFunctionArity = _tyfunArity
 
 applyTypeFunction :: EvalMonad m => TypeFunction -> [Type] -> m Type
-applyTypeFunction = _tyfunReduction
+{-# INLINE applyTypeFunction #-}
+applyTypeFunction f ts = do
+  x <- _tyfunReduction f ts
+  return $! x                   -- Ensure that result is evaluated
 
 -- | A type environment maps variables to types
 newtype TypeEnvBase type_function =

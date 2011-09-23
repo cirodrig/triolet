@@ -158,6 +158,9 @@ indexMemTF = typeFunction 1 compute_eliminator
            | op `isPyonBuiltin` The_dim2 -> return int2_type
         _ -> return $ varApp (pyonBuiltin The_index) [shape_arg']
 
+    compute_eliminator ts =
+      internalError "Error in type application when reducing a type function"
+
     none_type = varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_NoneType)]
     int_type = varApp (pyonBuiltin The_Stored) [VarT (pyonBuiltin The_int)]
     int2_type = varApp (pyonBuiltin The_PyonTuple2)

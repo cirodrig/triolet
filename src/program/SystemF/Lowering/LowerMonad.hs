@@ -24,7 +24,8 @@ import qualified SystemF.DictEnv as DictEnv
 import SystemF.Syntax
 import Type.Environment
 import Type.Type
-import Type.Rename
+import Type.Substitute(TypeSubst)
+import qualified Type.Substitute as Substitute
 
 newtype Lower a = Lower (ReaderT LowerEnv IO a)
                 deriving(Functor, Monad, MonadIO)
@@ -77,7 +78,7 @@ mkGlobalIntEnv = do
      binary_function arg1 arg2 (LL.llBuiltin LL.the_prim_minus_fii))
   return $ DictEnv.DictEnv [minimum_int, minus_int]
   where
-    binary_function :: Var -> Var -> LL.Var -> Substitution -> GenLower LL.Val
+    binary_function :: Var -> Var -> LL.Var -> TypeSubst -> GenLower LL.Val
     binary_function arg1 arg2 op_var subst = do
       val1 <- lookupIndexedInt (get_arg arg1)
       val2 <- lookupIndexedInt (get_arg arg2)
@@ -85,7 +86,7 @@ mkGlobalIntEnv = do
         LL.primCallA (LL.VarV op_var) [val1, val2]
       where
         get_arg a =
-          case substituteVar a subst
+          case Substitute.lookup a subst
           of Just t -> t
              Nothing -> internalError "mkGlobalIntEnv"
 
@@ -130,7 +131,7 @@ mkGlobalReprEnv = do
     -- This is the representation dictionary for boxed objects
     repr_Box_value = LL.VarV $ LL.llBuiltin LL.the_bivar_repr_Box
     
-    mk_tuple_dict :: [Var] -> Substitution -> GenLower LL.Val
+    mk_tuple_dict :: [Var] -> TypeSubst -> GenLower LL.Val
     mk_tuple_dict args = \subst -> do
       -- Get repr dictionaries for each type argument
       withMany (with_arg_dict subst) args $ \arg_dicts -> do
@@ -143,7 +144,7 @@ mkGlobalReprEnv = do
       
       where
         with_arg_dict subst arg k =
-          let arg' = case substituteVar arg subst
+          let arg' = case Substitute.lookup arg subst
                      of Just t -> t
                         Nothing -> internalError "initializeLowerEnv"
           in lookupReprDict arg' k
@@ -213,6 +214,10 @@ assumeReprDict ty val (Lower m) = Lower $ local update m
 -- | Find a finite integer indexed by the given index, which should be a type
 --   of kind @intindex@.  Fail if not found.
 lookupIndexedInt :: Type -> GenLower LL.Val
+lookupIndexedInt (IntT n) =
+  -- Create a literal value
+  return $ LL.RecV (LL.finIndexedIntRecord) [nativeIntV n]
+
 lookupIndexedInt ty = do
   match <- lookup_dict
   case match of

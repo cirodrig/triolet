@@ -32,13 +32,12 @@ import Debug.Trace
 import Common.Error
 import Common.Identifier
 import Builtins.Builtins
-import SystemF.Floating
 import SystemF.Demand
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.PrintMemoryIR
 import Type.Environment
-import Type.Rename
+import qualified Type.Rename as Rename
 import Type.Type
 import GlobalVar
 import Globals
@@ -159,7 +158,7 @@ type DmdAnl a = a -> Df a
 -- | Get variables mentioned in a type.
 --   The type is not changed by demand analysis.
 dfType :: Type -> Df ()
-dfType ty = mentionList $ Set.toList $ freeVariables ty
+dfType ty = mentionList $ Set.toList $ Rename.freeVariables ty
 
 withManyBinders :: (forall b. a -> Df b -> Df (a, b))
                 -> [a] -> Df c -> Df ([a], c)
@@ -230,9 +229,22 @@ dmdExp spc expressionM@(ExpM expression) =
                               | (v,d) <- IntMap.toList dmd])  $ return x
     -}
 
-dmdConE inf con args = do     
+dmdConE inf con args = do
   args' <- mapM (dmdExp Used) args
+
+  -- Value and boxed arguments should not get inlined in constructor fields.
+  -- For arguments that are just a variable, mark the variable as being
+  -- used many times.  This prevents pre-inlining.
+  tenv <- ask
+  let field_kinds = conFieldKinds tenv (fromCInstM con)
+  zipWithM_ mark_uses field_kinds args
+
   return $ ExpM $ ConE inf con args'
+  where
+    mark_uses kind (ExpM (VarE _ v))
+      | kind == ValK || kind == BoxK = mentionMany v
+
+    mark_uses _ _ = return ()
 
 -- | Dead code elimination for function application.
 --

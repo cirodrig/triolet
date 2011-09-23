@@ -15,7 +15,8 @@ and case statements branch to alternatives ('Alt').
 {-# LANGUAGE DeriveDataTypeable, FlexibleInstances #-}
 module SystemF.Syntax
     (-- * Demand information
-     Dmd(..), Multiplicity(..), Specificity(..),
+     Dmd(..), unknownDmd,
+     Multiplicity(..), Specificity(..),
      HeapMap(..),
      joinHeapMap, outerJoinHeapMap,
      
@@ -102,6 +103,11 @@ import Export
 data Dmd = Dmd { multiplicity :: !Multiplicity
                , specificity :: !Specificity
                }
+
+-- | The default demand value, 
+--   assigned to variables before demand analysis has run.
+unknownDmd :: Dmd
+unknownDmd = Dmd ManyUnsafe Used
 
 -- | How many times a variable is used.
 data Multiplicity =

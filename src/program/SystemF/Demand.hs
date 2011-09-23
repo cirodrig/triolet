@@ -26,7 +26,6 @@ import Common.Identifier
 import SystemF.Syntax
 import Type.Environment
 import Type.Type
-import Type.Rename
 import Type.Eval
 
 -------------------------------------------------------------------------------
@@ -54,24 +53,6 @@ instance Dataflow a => Dataflow (IntMap.IntMap a) where
   bottom = IntMap.empty
   joinPar m1 m2 = IntMap.unionWith joinPar m1 m2
   joinSeq m1 m2 = IntMap.unionWith joinSeq m1 m2
-
--- | A 'Dmd' can be renamed by renaming its specificity.
---   The 'multiplicity' field does not mention variable names.
-instance Renameable Dmd where
-  rename rn dmd = dmd {specificity = rename rn $ specificity dmd}
-  freshen f dmd = do spc <- freshen f $ specificity dmd
-                     return $ dmd {specificity = spc}
-  freeVariables dmd = freeVariables $ specificity dmd
-
-instance Substitutable Dmd where
-  substitute s dmd = do
-    spc <- substitute s $ specificity dmd
-    return $ Dmd (multiplicity dmd) spc
-
--- | The default demand value, 
---   assigned to variables before demand analysis has run.
-unknownDmd :: Dmd
-unknownDmd = Dmd ManyUnsafe Used
 
 showDmd (Dmd m s) =
   "[" ++ showMultiplicity m ++ ":" ++ showSpecificity s ++ "]"
@@ -106,78 +87,6 @@ instance Dataflow Multiplicity where
   joinSeq Dead x = x
   joinSeq x Dead = x
   joinSeq _ _    = ManyUnsafe
-
-instance Renameable Specificity where
-  rename rn spc =
-    case spc
-    of Decond (VarDeCon con ty_args ex_types) spcs ->
-         let ty_args' = rename rn ty_args
-         in renameBindings rn ex_types $ \rn' ex_types' ->
-            let mono_con = VarDeCon con ty_args' ex_types'
-            in Decond mono_con (rename rn' spcs)
-       
-       Decond (TupleDeCon types) spcs ->
-         let types' = rename rn types
-         in Decond (TupleDeCon types') (rename rn spcs)
-
-       Written spc -> Written (rename rn spc)
-
-       Read (HeapMap xs) ->
-         Read (HeapMap [((), rename rn val) | ((), val) <- xs])
-       
-       -- Other constructors don't mention variables
-       _ -> spc
-
-  freshen f spc =
-    case spc
-    of Decond (VarDeCon con ty_args ex_types) spcs -> do
-         -- Freshen the existential variables 
-         new_evars <- mapM (newClonedVar . binderVar) ex_types
-         let rn = renaming [(old_v, new_v)
-                           | (old_v ::: _, new_v) <- zip ex_types new_evars]
-             ex_types' = [new_v ::: k | (_ ::: k, new_v) <- zip ex_types new_evars]
-         return $ Decond (VarDeCon con ty_args ex_types') (rename rn spcs)
-
-       -- Other constructors don't bind new variables
-       Decond (TupleDeCon _) _ -> return spc
-       _ -> return spc
-
-  freeVariables spc =
-    case spc
-    of Used -> Set.empty
-       Inspected -> Set.empty
-       Decond (VarDeCon v tys ex_var_bindings) spcs ->
-         let ex_vars = [v | v ::: _ <- ex_var_bindings]
-             ex_kinds = [k | _ ::: k <- ex_var_bindings]
-             field_fvs = foldr Set.delete (freeVariables spcs) ex_vars
-         in freeVariables tys `Set.union`
-            freeVariables ex_kinds `Set.union`
-            field_fvs
-       Decond (TupleDeCon tys) spcs ->
-         freeVariables tys `Set.union` freeVariables spcs
-       Unused -> Set.empty
-
-instance Substitutable Specificity where
-  substitute s spc =
-    case spc
-    of Decond (VarDeCon v tys ex_var_bindings) spcs -> do
-         tys' <- mapM (substitute s) tys
-         substituteBindings s ex_var_bindings $ \s' ex_var_bindings' -> do 
-           spcs' <- mapM (substitute s') spcs
-           return $ Decond (VarDeCon v tys' ex_var_bindings') spcs'
-       Decond (TupleDeCon tys) spcs -> do
-         tys' <- mapM (substitute s) tys
-         spcs' <- mapM (substitute s) spcs
-         return $ Decond (TupleDeCon tys') spcs'
-       
-       Written spc' -> liftM Written $ substitute s spc'
-
-       Read _ -> internalError "substitute: Not implemented"
-       
-       -- Other terms don't mention variables
-       Used -> return spc
-       Inspected -> return spc
-       Unused -> return spc
 
 instance Dataflow Specificity where
   bottom = Unused

@@ -45,7 +45,7 @@ import Builtins.Builtins
 import Type.Eval
 import Type.Environment
 import Type.Type
-import Type.Rename
+import qualified Type.Rename as Rename
 import Type.Compare
 
 newtype instance Typ (Typed SF) = TypTSF (TypeAnn Type)

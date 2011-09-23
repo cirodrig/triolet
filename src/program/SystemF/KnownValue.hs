@@ -27,7 +27,7 @@ import SystemF.Rename
 import Type.Compare
 import Type.Environment
 import Type.Eval
-import Type.Rename
+import qualified Type.Rename as Rename
 import Type.Type
 
 -- Set intersecton
@@ -44,8 +44,9 @@ s1 `intersects` s2 = not $ Set.null $ Set.intersection s1 s2
 --
 --   'BigAV' values contain terms that may be inlined at the discretion
 --   of the simplifier, and terms that won't be inlined by the simplifier.
---   The terms that won't be inlined could still be evaluated yielding terms 
---   that the simplifier can inline.
+--
+--   The terms that won't be inlined can still be interpreted.  Interpretation
+--   may produce simpler terms that are worth inlining later on.
 data AbsValue =
     -- | A literal value
     LitAV ExpInfo !Lit
@@ -285,7 +286,7 @@ forgetVariables :: Set.Set Var -> AbsValue -> MaybeValue
 forgetVariables varset kv = forget kv
   where
     data_type_mentions_vars con = 
-      not $ Set.null $ Set.intersection varset (freeVariables con)
+      varset `intersects` Rename.freeVariables con
 
     forget kv =
       case kv
@@ -313,7 +314,7 @@ forgetVariables varset kv = forget kv
                    Just $ BigAV stored_name' complex_value
 
     forget_big_value cv@(ExpAV mval e)
-      | varset `intersects` freeVariables e = Nothing
+      | varset `intersects` Rename.freeVariables e = Nothing
       | otherwise = Just $ ExpAV (mval >>= forget_abs_fun) e
 
     forget_big_value (AbsFunAV afv) = fmap AbsFunAV (forget_abs_fun afv) 

@@ -24,7 +24,9 @@ import Common.SourcePos
 import Common.Supply
 import Type.Compare
 import Type.Environment
-import Type.Rename
+import qualified Type.Rename as Rename
+import Type.Substitute(TypeSubst, Substitutable(..), substitute)
+import qualified Type.Substitute as Substitute
 import Type.Type
 
 -- | Evaluate a type as much as possible.
@@ -104,7 +106,7 @@ typeCheckType ty =
        -- Get type of application
        applied <- typeOfApp op_k arg_k
        case applied of
-         Nothing -> trace (show (pprType ty) ++ "\n" ++ show (pprType op_k) ++ "\n" ++ show (pprType arg_k)) $ internalError "typeCheckType: Error in type application"
+         Nothing -> internalError "typeCheckType: Error in type application"
          Just result_t -> return result_t
 
      FunT dom rng -> do
@@ -153,7 +155,7 @@ typeOfTypeApp op_type arg_kind arg = do
     AllT (x ::: dom) rng -> do
       type_ok <- compareTypes dom arg_kind
       if type_ok
-        then fmap Just $ substitute (singletonSubstitution x arg) rng
+        then fmap Just $ Substitute.substituteVar x arg rng
         else return Nothing
     _ -> return Nothing
 
@@ -223,7 +225,7 @@ instantiateDataConType con_ty arg_vals ex_vars
       internalError "instantiateDataConType: Wrong number of existential variables"
   | otherwise = do
       let -- Assign parameters
-          subst1 = instantiate_arguments emptySubstitution $
+          subst1 = instantiate_arguments $
                    zip (dataConPatternParams con_ty) arg_vals
 
           -- Rename existential types, if new variables are given
@@ -240,19 +242,15 @@ instantiateDataConType con_ty arg_vals ex_vars
   where
     -- Instantiate the type by substituing arguments for the constructor's
     -- type parameters
-    instantiate_arguments :: Substitution -> [(Binder, Type)]
-                          -> Substitution
-    instantiate_arguments subst ((param_var ::: _, arg_val) : args) =
-      let subst' = insertSubstitution param_var arg_val subst
-      in instantiate_arguments subst' args
-  
-    instantiate_arguments subst' [] = subst'
+    instantiate_arguments :: [(Binder, Type)] -> TypeSubst
+    instantiate_arguments assocs = 
+      Substitute.fromList [(v, ty) | (v ::: _, ty) <- assocs]
 
     -- Instantiate existential types.  Rename each existential variable.
-    instantiate_exvars :: Substitution -> [(Binder, Var)]
-                       -> (Substitution, [Binder])
+    instantiate_exvars :: TypeSubst -> [(Binder, Var)]
+                       -> (TypeSubst, [Binder])
     instantiate_exvars subst ((old_ex_var ::: extype, ex_var) : params) =
-      let subst' = insertSubstitution old_ex_var (VarT ex_var) subst
+      let subst' = Substitute.extend old_ex_var (VarT ex_var) subst
           !(subst'', params') = instantiate_exvars subst' params
       in (subst'', ex_var ::: extype : params')
     
@@ -290,8 +288,7 @@ instantiateDataConTypeWithExistentials con_ty arg_vals
       let -- Assign parameters and existential types
           type_params =
             dataConPatternParams con_ty ++ dataConPatternExTypes con_ty
-          subst = instantiate_arguments emptySubstitution $
-                  zip type_params arg_vals
+          subst = instantiate_arguments $ zip type_params arg_vals
 
       -- Apply the substitution to field and range types
       fields <- mapM (substitute subst) $ dataConPatternArgs con_ty
@@ -300,11 +297,7 @@ instantiateDataConTypeWithExistentials con_ty arg_vals
   where
     -- Instantiate the type by substituing arguments for the constructor's
     -- type parameters
-    instantiate_arguments :: Substitution -> [(Binder, Type)]
-                          -> Substitution
-    instantiate_arguments subst ((param_var ::: _, arg_val) : args) =
-      let subst' = insertSubstitution param_var arg_val subst
-      in instantiate_arguments subst' args
-  
-    instantiate_arguments subst' [] = subst'
+    instantiate_arguments :: [(Binder, Type)] -> TypeSubst
+    instantiate_arguments assocs = 
+      Substitute.fromList [(v, ty) | (v ::: _, ty) <- assocs]
 

@@ -21,7 +21,10 @@ import Common.MonadLogic
 import Common.SourcePos
 import Common.Supply
 import Type.Environment
-import Type.Rename
+import qualified Type.Rename as Rename
+import Type.Rename(Renaming, Renameable(..))
+import Type.Substitute(TypeSubst, Substitutable(..), substitute)
+import qualified Type.Substitute as Substitute
 import Type.Type
 
 -- | Determine whether the type mentions a variable.
@@ -89,7 +92,7 @@ reduceToWhnf ty =
     -- The operator is a lambda function; evaluate it
     reduce_lambda_fun v dom body (arg : other_args) = do
       -- Substitute 'arg' in place of 'v'
-      body' <- substitute (singletonSubstitution v arg) body
+      body' <- substitute (Substitute.singleton v arg) body
             
       -- Continue to reduce
       reduceToWhnf $ typeApp body' other_args
@@ -118,7 +121,8 @@ compareTypes' t1 t2 = do
 --   Arguments are assumed to be in weak head-normal form and are assumed to
 --   inhabit the same kind.
 cmpType :: Type -> Type -> TypeEvalM Bool
-cmpType expected given = debug $ cmp =<< unifyBoundVariables expected given
+cmpType expected given =
+  debug $ cmp =<< Substitute.unifyBoundVariables expected given
   where
     -- For debugging, print the types being compared
     debug x = x -- traceShow message x
@@ -161,14 +165,14 @@ unifyTypeWithPattern :: EvalMonad m =>
                         [Var]   -- ^ Free variables in expected type
                      -> Type    -- ^ Expected type
                      -> Type    -- ^ Given type
-                     -> m (Maybe Substitution)
+                     -> m (Maybe TypeSubst)
 unifyTypeWithPattern free_vars expected given =
   liftTypeEvalM calculate_substitution
   where
     calculate_substitution = do
       result <- unify init_substitution expected given
       return $ case result
-               of Just sub -> Just $ substitutionFromMap $ IntMap.mapMaybe id sub
+               of Just sub -> Just $ Substitute.fromMap $ IntMap.mapMaybe id sub
                   Nothing -> Nothing
 
     init_substitution = IntMap.fromList [(fromIdent $ varID v, Nothing)
@@ -191,7 +195,7 @@ unify subst expected given = do
   given1 <- reduceToWhnf given
 
   -- Rename 'expected' so that bound variables match
-  (given2, expected2) <- leftUnifyBoundVariables given1 expected1
+  (given2, expected2) <- Substitute.leftUnifyBoundVariables given1 expected1
   match_unify expected2 given2
   where
     no_unifier   = return Nothing
@@ -249,13 +253,13 @@ unify subst expected given = do
     match_unify (LamT (a ::: k1) e_range) given = do
       -- Eta-expand given; rename expected
       b <- newAnonymousVar TypeLevel
-      let e_range' = rename (singletonRenaming a b) e_range
+      let e_range' = rename (Rename.singleton a b) e_range
       unify_lambdas b k1 e_range' (given `AppT` VarT b)
       
     match_unify expected (LamT (a ::: k1) g_range) = do
       -- Eta-expand expected; rename given
       b <- newAnonymousVar TypeLevel
-      let g_range' = rename (singletonRenaming a b) g_range
+      let g_range' = rename (Rename.singleton a b) g_range
       unify_lambdas b k1 (expected `AppT` VarT b) g_range'
       
     match_unify (AllT {}) _ = not_implemented

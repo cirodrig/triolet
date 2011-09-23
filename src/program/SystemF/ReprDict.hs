@@ -19,7 +19,8 @@ import SystemF.Syntax
 import SystemF.MemoryIR
 import Type.Environment
 import Type.Eval
-import Type.Rename
+import Type.Substitute(TypeSubst)
+import qualified Type.Substitute as Substitute
 import Type.Type
 
 -- | A @MkDict@ constructs a value in a singleton type, such as a
@@ -280,7 +281,7 @@ createDictEnv = do
                              }
 
 getParamType v subst =
-  case substituteVar v subst
+  case Substitute.lookup v subst
   of Just v -> v
      Nothing -> internalError "getParamType"
 
@@ -292,7 +293,7 @@ valueDict value_var dict_var =
     pattern_type = varApp (pyonBuiltin The_Stored) [VarT value_var]
     expr = MkDict $ return $ ExpM $ VarE defaultExpInfo dict_var
 
-createDict_Tuple2 :: Var -> Var -> Substitution -> MkDict
+createDict_Tuple2 :: Var -> Var -> TypeSubst -> MkDict
 createDict_Tuple2 param_var1 param_var2 subst = MkDict $
   withReprDict param1 $ \dict1 ->
   withReprDict param2 $ \dict2 ->
@@ -306,7 +307,7 @@ createDict_Tuple2 param_var1 param_var2 subst = MkDict $
     dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple2)
 
-createDict_Tuple3 :: Var -> Var -> Var -> Substitution -> MkDict
+createDict_Tuple3 :: Var -> Var -> Var -> TypeSubst -> MkDict
 createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $
   withReprDict param1 $ \dict1 ->
   withReprDict param2 $ \dict2 ->
@@ -323,7 +324,7 @@ createDict_Tuple3 pv1 pv2 pv3 subst = MkDict $
     dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple3)
 
-createDict_Tuple4 :: Var -> Var -> Var -> Var -> Substitution -> MkDict
+createDict_Tuple4 :: Var -> Var -> Var -> Var -> TypeSubst -> MkDict
 createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
   withReprDict param1 $ \dict1 ->
   withReprDict param2 $ \dict2 ->
@@ -342,7 +343,7 @@ createDict_Tuple4 pv1 pv2 pv3 pv4 subst = MkDict $
     dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     dict_oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_PyonTuple4)
 
-createDict_list :: Var -> Substitution -> MkDict
+createDict_list :: Var -> TypeSubst -> MkDict
 createDict_list param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
@@ -350,7 +351,7 @@ createDict_list param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_list)
 
-createDict_referenced :: Var -> Substitution -> MkDict
+createDict_referenced :: Var -> TypeSubst -> MkDict
 createDict_referenced param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
@@ -358,7 +359,7 @@ createDict_referenced param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Referenced)
 
-createDict_Maybe :: Var -> Substitution -> MkDict
+createDict_Maybe :: Var -> TypeSubst -> MkDict
 createDict_Maybe param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
@@ -366,7 +367,7 @@ createDict_Maybe param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Maybe)
 
-createDict_complex :: Var -> Substitution -> MkDict
+createDict_complex :: Var -> TypeSubst -> MkDict
 createDict_complex param_var subst = MkDict $
   withReprDict param $ \elt_dict ->
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] [elt_dict]
@@ -374,7 +375,7 @@ createDict_complex param_var subst = MkDict $
     param = getParamType param_var subst
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_Complex)
 
-createDict_array :: Var -> Var -> Substitution -> MkDict
+createDict_array :: Var -> Var -> TypeSubst -> MkDict
 createDict_array param_var1 param_var2 subst = MkDict $
   withReprDict param2 $ \dict2 -> do
     index <- lookupIndexedInt' param1
@@ -388,7 +389,7 @@ createDict_array param_var1 param_var2 subst = MkDict $
     dict_type = varApp (pyonBuiltin The_Repr) [data_type]
     oper = ExpM $ VarE defaultExpInfo (pyonBuiltin The_repr_arr)
 
-createDict_storedBox :: Var -> Substitution -> MkDict
+createDict_storedBox :: Var -> TypeSubst -> MkDict
 createDict_storedBox param_var subst = MkDict $ do
   return $ ExpM $ AppE defaultExpInfo oper [TypM param] []
   where

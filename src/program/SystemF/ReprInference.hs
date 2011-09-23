@@ -27,7 +27,8 @@ import Builtins.Builtins
 import Type.Compare
 import Type.Environment
 import Type.Eval
-import Type.Rename
+import qualified Type.Substitute as Substitute
+import Type.Substitute(substitute)
 import Type.Type
 import SystemF.EtaReduce
 import SystemF.SpecToMem
@@ -966,7 +967,7 @@ applyToTypeArg operator (arg_t, g_kind) =
        coerced_type <- coerceType g_kind e_kind arg_t
 
        -- Compute the result of type application
-       rng' <- substitute (singletonSubstitution a coerced_type) rng
+       rng' <- substitute (Substitute.singleton a coerced_type) rng
        return $! resultOfTypeApp rng' coerced_type operator
      _ -> do
        -- Can we coerce the operator to the proper representation?

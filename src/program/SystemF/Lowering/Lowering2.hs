@@ -194,6 +194,8 @@ lowerExp (ExpTM (TypeAnn ty expression)) =
      LetfunE _ defs body -> lowerLetrec ty defs body
      CaseE _ scr alts -> lowerCase ty scr alts
      ExceptE _ _ -> lowerExcept ty
+     -- Coercions are lowered to a no-op
+     CoerceE _ _ _ e -> lowerExp e
 
 lowerVar _ v = lift $
   case LL.lowerIntrinsicOp v

@@ -52,7 +52,8 @@ import Builtins.Builtins
 import Type.Eval
 import Type.Environment
 import Type.Type
-import Type.Rename
+import qualified Type.Rename as Rename
+import qualified Type.Substitute as Substitute
 import Type.Compare
 
 newtype instance Typ (Typed Mem) = TypTM (TypeAnn Type)
@@ -542,7 +543,10 @@ inferExpType expression =
     -- but their definitions are skipped.
     infer_exp expression =
       case fromExpM expression
-      of LamE _ f -> return $ functionType f
+      of ConE _ (CInstM con) _ ->
+           inferConAppType con
+         LamE _ f ->
+           return $ functionType f
          LetE _ pat e body ->
            assumeAndAnnotatePat pat $ \_ -> infer_exp body
          LetfunE _ defs body ->
@@ -560,6 +564,29 @@ inferExpType expression =
       assumeBinders (deConExTypes con) $ assumePatMs params $ infer_exp body
 
     debug = traceShow (text "inferExpType" <+> pprExp expression)
+
+-- | Infer the type of a fully applied data constructor.
+--
+--   For bare object constructors, it's the type of a writer function.
+inferConAppType (VarCon op ty_args _) = do
+  -- Get the data type's type
+  tenv <- getTypeEnv
+  case lookupDataConWithType op tenv of
+    Just (data_type, con_type) -> let
+      -- Apply the data type constructor to the type arguments 
+      app_type = varApp (dataConTyCon con_type) ty_args
+
+      -- Create a writer function type, if it's a bare type
+      in return $!
+         case dataTypeKind data_type
+         of BareK -> varApp (pyonBuiltin The_OutPtr) [app_type] `FunT`
+                     varApp (pyonBuiltin The_IEffect) [app_type]
+            _ -> app_type
+
+inferConAppType (TupleCon ty_args) = do
+  tenv <- getTypeEnv
+  let kinds = map (toBaseKind . typeKind tenv) ty_args
+  return $ typeApp (UTupleT kinds) ty_args
 
 -- | Infer the type of an application, given the operator type and argument
 --   types.  If the application is not well-typed, an exception is raised.

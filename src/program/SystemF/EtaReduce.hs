@@ -23,7 +23,7 @@ import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Rename
-import Type.Rename
+import qualified Type.Rename as Rename
 import Type.Type
 import Globals
 
@@ -94,7 +94,7 @@ etaReduceFunction recurse allow_exceptions f out_param params =
      of Just body ->
           -- If any references to the parameter variable remain, then
           -- we cannot eliminate the parameter.
-          if patMVar out_param `Set.member` freeVariables body
+          if patMVar out_param `Set.member` Rename.freeVariables body
           then Nothing
           else Just $ f { funParams = params
                         , funBody = body

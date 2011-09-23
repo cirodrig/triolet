@@ -16,27 +16,28 @@ import Common.Supply
 import Common.Identifier
 import Type.Compare
 import Type.Environment
-import Type.Rename
+import Type.Substitute(TypeSubst)
+import qualified Type.Substitute as Substitute
 import Type.Type
 
 -- | A first-order pattern that can be matched against types
-data TypePattern a = TypePattern [Var] Type (Substitution -> a)
+data TypePattern a = TypePattern [Var] Type (TypeSubst -> a)
 
 monoPattern :: Type -> a -> TypePattern a
 monoPattern t v = TypePattern [] t (\_ -> v)
 
-pattern :: [Var] -> Type -> (Substitution -> a) -> TypePattern a
+pattern :: [Var] -> Type -> (TypeSubst -> a) -> TypePattern a
 pattern = TypePattern
 
 pattern1 :: (Monad m, Supplies m VarID) =>
-            (Var -> (Type, Substitution -> a))
+            (Var -> (Type, TypeSubst -> a))
          -> m (TypePattern a)
 pattern1 f = do
   v1 <- newAnonymousVar TypeLevel
   case f v1 of (k, v) -> return $ pattern [v1] k v
 
 pattern2 :: (Monad m, Supplies m VarID) =>
-            (Var -> Var -> (Type, Substitution -> a))
+            (Var -> Var -> (Type, TypeSubst -> a))
          -> m (TypePattern a)
 pattern2 f = do
   v1 <- newAnonymousVar TypeLevel

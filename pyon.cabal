@@ -96,6 +96,7 @@ Executable pyon
     Untyped.Unification
     SystemF.ArgumentFlattening
     SystemF.Build
+    SystemF.Context
     SystemF.Demand
     SystemF.DemandAnalysis
     SystemF.DeadCode
@@ -103,7 +104,7 @@ Executable pyon
     SystemF.DictEnv
     SystemF.ElimPatternMatching
     SystemF.EtaReduce
-    SystemF.Floating
+    SystemF.Floating2
     SystemF.GlobalDemand
     SystemF.KnownValue
     SystemF.LoopRewrite
@@ -179,5 +180,6 @@ Executable pyon
     Type.Eval
     Type.Level
     Type.Rename
+    Type.Substitute
     Type.Type
     Type.Var

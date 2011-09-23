@@ -10,6 +10,8 @@ module SystemF.MemoryIR
         Mentions(..),
         Typ(..),
         TyPat(..),
+        tyPatMVar,
+        tyPatMKind,
         Pat(PatM),
         patM,
         patMVar,
@@ -120,6 +122,12 @@ appE inf op type_args args = ExpM (AppE inf op type_args args)
 
 conE :: ExpInfo -> ConInst -> [ExpM] -> ExpM
 conE inf op args = ExpM (ConE inf (CInstM op) args)
+
+tyPatMVar :: TyPatM -> Var
+tyPatMVar (TyPatM (v ::: _)) = v
+
+tyPatMKind :: TyPatM -> Type
+tyPatMKind (TyPatM (_ ::: t)) = t
 
 {- Obsolete; 'BaseAlt' is isomorphic to this tuple type now
 -- | Construct a case alternative given a 'MonoCon' and the other required 
