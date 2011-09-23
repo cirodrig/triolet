@@ -52,7 +52,8 @@ instance HasLevel Var where
 type VarID = Ident Var
   
 varID :: Var -> Ident Var
-varID = _varID
+{-# INLINE varID #-}
+varID v = _varID v
 
 varName :: Var -> Maybe Label
 varName = _varName
