@@ -81,9 +81,13 @@ data SimplifierPhase =
     -- | Finally, functions are inlined without regard to rewrite rules. 
   | FinalSimplifierPhase
 
-data LREnv =
-  LREnv
-  { lrIdSupply :: {-# UNPACK #-}!(Supply VarID)
+-- | Parts of LREnv that don't change during a simplifier run.  By
+--   keeping these in a separate data structure, we reduce the work
+--   performed when updating the environment.
+data LRConstants =
+  LRConstants
+  { -- | Variable ID supply
+    lrIdSupply :: {-# UNPACK #-}!(Supply VarID)
     
     -- | Set of imported variable IDs, used to decide whether a variable was
     --   defined in the current module
@@ -92,6 +96,15 @@ data LREnv =
     -- | Active rewrite rules
   , lrRewriteRules :: !RewriteRuleSet
 
+    -- | The current phase.  The phase is constant during a pass of the
+    --   simplifier.
+  , lrPhase :: !SimplifierPhase
+  }
+
+data LREnv =
+  LREnv
+  { lrConstants :: !LRConstants
+    
     -- | Information about the values stored in variables
   , lrKnownValues :: IntMap.IntMap AbsValue
     
@@ -110,10 +123,6 @@ data LREnv =
     --   If value is negative, then fuel is unlimited.  If value is zero, then
     --   further simplification is not performed.
   , lrFuel :: {-#UNPACK#-}!(IORef Int)
-
-    -- | The current phase.  The phase is constant during a pass of the
-    --   simplifier.
-  , lrPhase :: !SimplifierPhase
   }
 
 -- | Simplification either transforms some code, or detects that the code
@@ -135,7 +144,7 @@ instance MonadIO LR where
   liftIO m = LR (\_ -> liftM Just m)
 
 instance Supplies LR VarID where
-  fresh = LR (\env -> liftM Just $ supplyValue (lrIdSupply env))
+  fresh = LR (\env -> liftM Just $ supplyValue (lrIdSupply $ lrConstants env))
   supplyToST = internalError "supplyToST: Not implemented for LR"
 
 instance TypeEnvMonad LR where
@@ -147,10 +156,10 @@ instance TypeEnvMonad LR where
 
 instance EvalMonad LR where
   liftTypeEvalM m = LR $ \env -> do
-    liftM Just $ runTypeEvalM m (lrIdSupply env) (lrTypeEnv env)
+    liftM Just $ runTypeEvalM m (lrIdSupply $ lrConstants env) (lrTypeEnv env)
 
 instance ReprDictMonad LR where
-  withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply env) env
+  withVarIDs f = LR $ \env -> runLR (f $ lrIdSupply $ lrConstants env) env
   withTypeEnv f = LR $ \env -> runLR (f $ lrTypeEnv env) env
   withDictEnv f = LR $ \env -> runLR (f $ lrDictEnv env) env
   localDictEnv f m = LR $ \env ->
@@ -159,13 +168,13 @@ instance ReprDictMonad LR where
 
 liftFreshVarM :: FreshVarM a -> LR a
 liftFreshVarM m = LR $ \env -> do
-  liftM Just $ runFreshVarM (lrIdSupply env) m
+  liftM Just $ runFreshVarM (lrIdSupply $ lrConstants env) m
 
 getRewriteRules :: LR RewriteRuleSet
-getRewriteRules = LR $ \env -> return (Just $ lrRewriteRules env)
+getRewriteRules = LR $ \env -> return (Just $ lrRewriteRules $ lrConstants env)
 
 getPhase :: LR SimplifierPhase
-getPhase = LR $ \env -> return (Just $ lrPhase env)
+getPhase = LR $ \env -> return (Just $ lrPhase $ lrConstants env)
 
 getCurrentReturnParameter :: LR (Maybe PatM)
 getCurrentReturnParameter = LR $ \env -> return (Just $ lrReturnParameter env)
@@ -329,7 +338,7 @@ dumpKnownValues m = LR $ \env ->
   let kv_doc = hang (text "dumpKnownValues") 2 $
                vcat [hang (text (show n)) 8 (pprAbsValue kv)
                     | (n, kv) <- IntMap.toList $ lrKnownValues env,
-                      not $ n `IntSet.member` lrImportedSet env]
+                      not $ n `IntSet.member` lrImportedSet (lrConstants env)]
   in traceShow kv_doc $ runLR m env
 
 -- | Check whether there is fuel available.
@@ -383,8 +392,9 @@ makeExpValue (ExpM expression) =
      _ -> return Nothing
 
 rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
-  x <- rewriteApp (lrRewriteRules env) (intIndexEnv $ lrDictEnv env)
-       (lrIdSupply env) (lrTypeEnv env)
+  x <- rewriteApp (lrRewriteRules $ lrConstants env)
+       (intIndexEnv $ lrDictEnv env)
+       (lrIdSupply $ lrConstants env) (lrTypeEnv env)
        inf operator ty_args args
   return $ Just x
 
@@ -2213,17 +2223,20 @@ rewriteLocalExpr phase ruleset mod =
             insert_rewrite_rule (v, e) m =
               IntMap.insert (fromIdent $ varID v) (InlAV e) m
 
-    let env = LREnv { lrIdSupply = var_supply
-                    , lrImportedSet = IntSet.fromList
-                                      [fromIdent $ varID $ definiendum def 
-                                      | def <- modImports mod]
-                    , lrRewriteRules = ruleset
-                    , lrKnownValues = known_values
-                    , lrReturnParameter = Nothing
-                    , lrTypeEnv = tenv
-                    , lrDictEnv = denv
-                    , lrFuel = fuel
-                    , lrPhase = phase
+    let env_constants =
+          LRConstants { lrIdSupply = var_supply
+                      , lrImportedSet = IntSet.fromList
+                                        [fromIdent $ varID $ definiendum def 
+                                        | def <- modImports mod]
+                      , lrRewriteRules = ruleset
+                      , lrPhase = phase}
+        env =
+          LREnv { lrConstants = env_constants
+                , lrKnownValues = known_values
+                , lrReturnParameter = Nothing
+                , lrTypeEnv = tenv
+                , lrDictEnv = denv
+                , lrFuel = fuel
                     }
     Just result <- runLR (rwModule mod) env
     return result
