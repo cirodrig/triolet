@@ -35,10 +35,8 @@ s1 `intersects` s2 = not $ Set.null $ Set.intersection s1 s2
 
 -- | A value that is known (or partially known) at compile time.
 --
---   'LitAV', 'VarAV', and 'InlAV' terms are unconditionally inlined,
---   replacing future uses of the value.  An 'InlAV' never appears as a
---   component of another value; it's always associated directly with 
---   a program variable.
+--   'LitAV' and 'VarAV' terms are unconditionally inlined,
+--   replacing future uses of the value.
 --
 --   'HeapAV' values represent the contents of memory.
 --
@@ -55,11 +53,6 @@ data AbsValue =
     --   If the variable's value is known, a 'BigAV' is used to hold the
     --   real value.
   | VarAV ExpInfo !Var
-
-    -- | A variable's inlined value.  The expression should be inlined
-    --   wherever the variable is used.  This abstract value may not appear
-    --   inside another abstract value.
-  | InlAV ExpM
 
     -- | A complex value.  If a variable is given, the variable holds this 
     --   value.
@@ -216,7 +209,6 @@ asTrivialValue kv =
   case kv
   of LitAV inf l -> Just $ ExpM $ LitE inf l 
      VarAV inf v -> Just $ ExpM $ VarE inf v
-     InlAV _ -> Nothing
      BigAV (Just v) _ -> Just $ ExpM $ VarE defaultExpInfo v
      BigAV Nothing _ -> Nothing
 
@@ -229,23 +221,6 @@ setTrivialValue var kv =
   of BigAV Nothing val -> BigAV (Just var) val
      _ -> kv
 
--- | Get the inlined expression for this value, if there is one.
-asInlinedValue :: AbsValue -> Maybe ExpM
-asInlinedValue kv =
-  case kv
-  of InlAV exp -> Just exp
-     _ -> Nothing
-
-assertNotInlinedValue :: AbsValue -> a -> a
-assertNotInlinedValue (InlAV {}) _ =
-  internalError "Unexpected inlined value"
-assertNotInlinedValue _ x = x
-
-assertNotInlinedValue' :: MaybeValue -> a -> a
-assertNotInlinedValue' (Just (InlAV {})) _ =
-  internalError "Unexpected inlined value"
-assertNotInlinedValue' _ x = x
-
 -- | Get the value that a writer stores into its destination.
 --
 --   Function-valued terms are valid writers, but we don't know what
@@ -257,7 +232,6 @@ resultOfWriterValue av =
      BigAV _ (ExpAV (Just afv) _) -> abs_fun_value afv
      BigAV _ (AbsFunAV afv)       -> abs_fun_value afv
      VarAV {}                     -> Nothing
-     InlAV {}                     -> Nothing
      BigAV _ (ExpAV Nothing _)    -> Nothing
      _ ->
        -- Other values are not valid
@@ -293,10 +267,6 @@ forgetVariables varset kv = forget kv
       of VarAV _ v
            | v `Set.member` varset -> Nothing
            | otherwise -> Just kv
-         InlAV e ->
-           -- Al variables referenced by this value are guaranteed to be
-           -- in scope.
-           Just kv
          LitAV _ _ -> Just kv
          BigAV stored_name cv ->
            -- First eliminate variables from 'stored_name' and 'cv'
@@ -363,7 +333,6 @@ pprAbsValue kv =
   case kv
   of VarAV _ v -> pprVar v
      LitAV _ l -> pprLit l
-     InlAV exp -> parens $ pprExp exp
      BigAV Nothing cv -> pprBigAbsValue cv
      BigAV (Just v) cv ->
        parens $ pprVar v <+> text "=" <+> pprBigAbsValue cv
@@ -647,7 +616,6 @@ applyAbsValue av args =
      -- TODO: Create an 'app' term that can be evaluated when a value is
      -- substituted in place of the variable
      VarAV {} -> cannot_evaluate
-     InlAV {} -> cannot_evaluate
      BigAV _ (ExpAV _ _) -> cannot_evaluate
      BigAV _ (AbsFunAV afun) -> applyAbsFun afun args
      BigAV _ (WriterAV written_value) -> apply_writer written_value

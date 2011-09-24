@@ -60,6 +60,24 @@ instance Substitutable (Exp SM) where
   isEmptySubstitution _ s = isEmptySubst s
   substituteWorker = addDeferredSubstitution
 
+instance Substitutable (Fun SM) where
+  type Substitution (Fun SM) = Subst
+  emptySubstitution _ = emptySubst
+  isEmptySubstitution _ s = isEmptySubst s
+
+  substituteWorker s (FunSM fun) = 
+    -- Push the substitution down to the body of the function.  Defer further
+    -- processing.
+    substituteTyPatMs s (map fromTyPatSM $ funTyParams fun) $ \s' ty_params ->
+    substitutePatMs s' (map fromPatSM $ funParams fun) $ \s'' params -> do
+      ret <- substitute (typeSubst s'') $ fromTypSM $ funReturn fun
+      body <- substitute s'' $ funBody fun
+      return $ FunSM $ Fun { funInfo = funInfo fun
+                           , funTyParams = castTyPats ty_params
+                           , funParams = castPats params
+                           , funReturn = TypSM ret
+                           , funBody = body}
+
 -- | Apply a substitution to an 'ExpM'.  The actual substitution is
 --   performed later.
 deferSubstitution :: Subst -> ExpM -> ExpSM

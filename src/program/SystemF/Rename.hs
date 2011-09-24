@@ -11,6 +11,8 @@ module SystemF.Rename
         emptyV,
         lookupV,
         extendV,
+        singletonV,
+        fromListV,
         renamePatM,
         renamePatMs,
         renameTyPatM,

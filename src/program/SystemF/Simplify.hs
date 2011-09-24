@@ -476,21 +476,14 @@ funIsSmallerThan f n = compareCodeSize (funSize f) n
 --   with the inlined value; to ensure this, reference values are never
 --   pre-inlined.  Pre-inlining is performed only if it does not duplicate
 --   code or work.
---
---   If the expression should be inlined, return a 'AbsValue' holding
---   the equivalent value.  Non-writer expressions become an
---   'InlAV'.  Writer expressions become a 'DataAV' containing
---   'InlAV's.
-worthPreInlining :: TypeEnv -> Dmd -> ExpM -> Maybe AbsValue
+worthPreInlining :: TypeEnv -> Dmd -> ExpM -> Bool
 worthPreInlining tenv dmd expr =
   let should_inline =
         case multiplicity dmd
         of OnceSafe -> inlckTrue
            OnceUnsafe -> inlckTrivial `inlckOr` inlckFunction
            _ -> inlckTrivial
-  in if should_inline tenv dmd expr
-     then Just (InlAV expr)
-     else Nothing
+  in should_inline tenv dmd expr
 
 {- Value inlining (below) is disabled; it currently
 -- interacts poorly with other optimizations.
@@ -760,8 +753,8 @@ betaReduce' inf (FunM fun) ty_args args
       rwExp $ deferEmptySubstitution app_expr
   
     saturated_app args params body =
-      -- Bind parameters to arguments
-      bind_parameters params args (rwExp body)
+      -- Bind parameters to arguments and rewrite the expression
+      caseInspectorBindings (zip params args) (substAndRwExp body)
     
     -- To process an undersaturated application,
     -- assign the parameters that have been applied and 
@@ -774,17 +767,9 @@ betaReduce' inf (FunM fun) ty_args args
                                 , funParams = excess_params
                                 , funBody = body
                                 , funReturn = return}
-          simplify_new_fun = rwLam inf new_fun
-      in bind_parameters applied_params args simplify_new_fun
-
-    bind_parameters :: [PatSM] -> [ExpSM] -> LR (ExpM, MaybeValue)
-                    -> LR (ExpM, MaybeValue)
-    bind_parameters params args compute_body =
-      foldr bind_parameter compute_body $ zip params args
-    
-    bind_parameter (param, arg) compute_body
-      | isDeadPattern (fromPatSM param) = compute_body
-      | otherwise = rwLet inf param arg compute_body
+          simplify_new_fun subst =
+            rwLam inf =<< substitute subst new_fun
+      in caseInspectorBindings (zip applied_params args) simplify_new_fun
 
 -------------------------------------------------------------------------------
 -- Converting known values to expressions
@@ -814,8 +799,6 @@ createValue kind known_value =
           copy_e <- copy_expression e
           let copy_v = copy_value known_value
           return $ Just (copy_e, Just copy_v)
-
-      | Just e <- asInlinedValue known_value = liftM Just $ rwExp $ deferEmptySubstitution e
 
       | otherwise = return Nothing
 
@@ -1215,39 +1198,54 @@ eliminateUselessCopying (ExpM expression) =
 -------------------------------------------------------------------------------
 -- Traversing code
 
+-- | Apply a substitution, then rewrite an expression.
+substAndRwExp :: ExpSM -> Subst -> LR (ExpM, MaybeValue)
+substAndRwExp e s = rwExp =<< substitute s e
+
 -- | Rewrite an expression.
 --
 --   Return the expression's value if it can be determined.
 rwExp :: ExpSM -> LR (ExpM, MaybeValue)
-rwExp expression = debug "rwExp" expression $ do
-    -- Flatten nested let and case statements.  Consume fuel only if flattening
-    -- occurs.
-    ex1 <- ifFuel expression $ restructureExp expression
-
-    -- If this expression is uselessly copying a data structure, eliminate it
-    ex2 <- return ex1 -- ifFuel ex1 $ eliminateUselessCopying ex1
-
-    -- Rename variables to avoid name conflicts
-    ex3 <- freshenHead ex2
-
-    -- Simplify subexpressions.
-    --
-    -- Even if we're out of fuel, we _still_ must perform some simplification
-    -- steps in order to propagate 'InlAV's.  If we fail to propagate
-    -- them, the output code will still contain references to variables that
-    -- were deleted.
-    case ex3 of
-      VarE inf v -> rwVar inf v
-      LitE inf l -> rwExpReturn (ExpM (LitE inf l), Just $ LitAV inf l)
-      ConE inf con args -> rwCon inf con args
-      AppE inf op ty_args args -> rwApp ex3 inf op ty_args args
-      LamE inf fun -> rwLam inf fun
-      LetE inf bind val body -> rwLet inf bind val (rwExp body)
-      LetfunE inf defs body -> rwLetrec inf defs body
-      CaseE inf scrut alts -> rwCase inf scrut alts
-      ExceptE _ _ -> propagateException -- rwExpReturn (ex3, Nothing)
-      CoerceE inf from_t to_t body -> rwCoerce inf from_t to_t body
+rwExp expression =
+  debug "rwExp" expression $
+  ifElseFuel (substitute expression) (rewrite expression)
   where
+    -- Don't rewrite the expression.
+    -- Just apply the current substitution, and return.
+    substitute expression = do
+      exp' <- applySubstitution expression
+      return (exp', Nothing)
+
+    -- Rewrite the expression.
+    -- First perform local restructuring, then simplify.
+    rewrite expression = do
+      ex1 <- restructureExp expression
+      ex2 <- return ex1 -- ifFuel ex1 $ eliminateUselessCopying ex1
+      ifElseFuel (substitute ex2) (simplify ex2)
+
+    -- Simplify the expression.
+    simplify expression = do
+      -- Rename variables to avoid name conflicts
+      ex3 <- freshenHead expression
+
+      -- Simplify subexpressions.
+      --
+      -- Even if we're out of fuel, we _still_ must perform some simplification
+      -- steps in order to propagate 'InlAV's.  If we fail to propagate
+      -- them, the output code will still contain references to variables that
+      -- were deleted.
+      case ex3 of
+        VarE inf v -> rwVar inf v
+        LitE inf l -> rwExpReturn (ExpM (LitE inf l), Just $ LitAV inf l)
+        ConE inf con args -> rwCon inf con args
+        AppE inf op ty_args args -> rwApp ex3 inf op ty_args args
+        LamE inf fun -> rwLam inf fun
+        LetE inf bind val body -> rwLet inf bind val (substAndRwExp body)
+        LetfunE inf defs body -> rwLetrec inf defs body
+        CaseE inf scrut alts -> rwCase inf scrut alts
+        ExceptE _ _ -> propagateException -- rwExpReturn (ex3, Nothing)
+        CoerceE inf from_t to_t body -> rwCoerce inf from_t to_t body
+
     debug _ _ = id
 
     --debug l e m = traceShow (text l <+> pprExp e) m
@@ -1275,13 +1273,6 @@ rwVar inf v = lookupKnownValue v >>= rewrite
     original_expression = ExpM $ VarE inf v
 
     rewrite (Just val)
-        -- Replace with an inlined or trivial value
-      | Just inl_value <- asInlinedValue val = do
-          -- This variable is inlined unconditionally.  This step does not
-          -- consume fuel; fuel was consumed when the variable was selected for
-          -- unconditional inlining.
-          rwExp $ deferEmptySubstitution inl_value
-
       | Just cheap_value <- asTrivialValue val =
           -- Use fuel to replace this variable
           useFuel (original_expression, Nothing) $
@@ -1530,29 +1521,34 @@ copyStoredValue inf val_type repr arg m_dst = do
 rwLet :: ExpInfo
       -> PatSM                  -- ^ Let-bound variable
       -> ExpSM                  -- ^ Right-hand side of let expression
-      -> LR (ExpM, MaybeValue)  -- ^ Computation that rewrites the body
+      -> (Subst -> LR (ExpM, MaybeValue))
+         -- ^ Computation that rewrites the body after applying a substitution.
+         --   The substitution holds inlining decisions that were made while
+         --   processing the binder part of the let expression.
       -> LR (ExpM, MaybeValue)
-rwLet inf (PatSM bind@(PatM (bind_var ::: bind_rtype) _)) val simplify_body =
+rwLet inf (PatSM bind@(PatM (bind_var ::: _) _)) val simplify_body =
   ifElseFuel rw_recursive_let try_pre_inline
   where
     -- Check if we should inline the RHS _before_ rewriting it
     try_pre_inline = do
       tenv <- getTypeEnv
       subst_val <- applySubstitution val
-      case worthPreInlining tenv (patMDmd bind) subst_val of
-        Just val -> do
+      if worthPreInlining tenv (patMDmd bind) subst_val
+        then do
           -- The variable is used exactly once or is trivial; inline it
           consumeFuel
+          val' <- applySubstitution val
+          let subst = Subst Substitute.empty (singletonV bind_var (SubstitutedVar val'))
           (body', body_val) <-
-            assumePattern bind $ withKnownValue bind_var val simplify_body
+            assumePattern bind $ simplify_body subst
           
           -- The local variable goes out of scope, so it must not be mentioned 
           -- by the known value
           let ret_val = forgetVariable bind_var =<< body_val
           rwExpReturn (body', ret_val)
-        Nothing -> rw_recursive_let
+        else rw_recursive_let
 
-    rw_recursive_let = rwLetNormal inf bind val simplify_body
+    rw_recursive_let = rwLetNormal inf bind val (simplify_body emptySubst)
 
 -- | Rewrite a let expression that isn't pre-inlined.
 rwLetNormal inf bind val simplify_body = do
@@ -1609,7 +1605,7 @@ rwCase1 _ tenv inf scrut alts
   | [alt@(AltSM (Alt {altCon = DeCInstSM (VarDeCon op _ _)}))] <- alts,
     op `isPyonBuiltin` The_boxed = do
       let AltSM (Alt _ [binder] body) = alt
-      rwLetViaBoxed inf scrut binder (rwExp body)
+      rwLetViaBoxed inf scrut binder (substAndRwExp body)
 
 -- If this is a case of data constructor, we can unpack the case expression
 -- before processing the scrutinee.
@@ -1650,7 +1646,12 @@ rwCase1 _ tenv inf scrut alts = do
   where
     can't_deconstruct scrut' scrut_val = rwCase2 inf alts scrut' scrut_val
 
-rwLetViaBoxed :: ExpInfo -> ExpSM -> PatSM -> LR (ExpM, MaybeValue)
+rwLetViaBoxed :: ExpInfo -> ExpSM -> PatSM 
+              -> (Subst -> LR (ExpM, MaybeValue))
+                 -- ^ Computation that rewrites the body after
+                 --   applying a substitution.  The substitution holds
+                 --   inlining decisions that were made while
+                 --   processing the binder part of the let expression.
               -> LR (ExpM, MaybeValue)
 rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
   -- Rewrite the scrutinee
@@ -1696,7 +1697,7 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
       -- Simplify body
       (body', _) <- assumePattern pat $
                     withMaybeValue (patMVar pat) field_val $
-                    compute_body
+                    compute_body emptySubst
 
       -- Construct a new case alternative
       let decon = VarDeCon (pyonBuiltin The_boxed) [patMType pat] []
@@ -1874,7 +1875,7 @@ eliminateCaseWithExp tenv field_kinds ex_args initializers alt =
     -- Bind the values to variables
     caseInitializerBindings (zip3 field_kinds params initializers) $ do
       -- Continue simplifying the new expression
-      rwExp body
+      substAndRwExp body
 
 -- | Given a data value and a list of case
 --   alternatives, eliminate the case statement.
@@ -1926,7 +1927,8 @@ eliminateCaseWithSimplifiedExp
 --   * Value and boxed fields are assigned using a let-expression.
 --
 --   * Bare fields are assigned by creating and unpacking a boxed object.
-caseInitializerBinding :: BaseKind -> PatM -> ExpSM -> LR (ExpM, MaybeValue)
+caseInitializerBinding :: BaseKind -> PatM -> ExpSM
+                       -> (Subst -> LR (ExpM, MaybeValue))
                        -> LR (ExpM, MaybeValue)
 caseInitializerBinding kind param initializer compute_body =
   case kind of
@@ -1945,13 +1947,16 @@ caseInitializerBinding kind param initializer compute_body =
     constructor = VarCon (pyonBuiltin The_boxed) [patMType param] []
     param' = PatSM $ setPatMDmd unknownDmd param
 
-caseInitializerBindings :: [(BaseKind, PatM, ExpSM)] -> LR (ExpM, MaybeValue)
+caseInitializerBindings :: [(BaseKind, PatM, ExpSM)]
+                        -> (Subst -> LR (ExpM, MaybeValue))
                         -> LR (ExpM, MaybeValue)
 caseInitializerBindings ((kind, param, initializer):fs) compute_body =
-  caseInitializerBinding kind param initializer $
-  caseInitializerBindings fs compute_body
+  caseInitializerBinding kind param initializer $ \subst ->
+  caseInitializerBindings fs (apply subst)
+  where
+    apply subst subst' = compute_body =<< (subst' `composeSubst` subst)
 
-caseInitializerBindings [] compute_body = compute_body
+caseInitializerBindings [] compute_body = compute_body emptySubst
 
 -- | Bind the value constructed by a parameter of a data constructor term
 --   to a variable.  The generated code is equivalent to
@@ -1961,6 +1966,22 @@ postCaseInitializerBinding (kind, param, initializer) body =
   case kind of
     BareK -> letViaBoxed (patMBinder param) initializer body
     _ -> letE (setPatMDmd unknownDmd param) initializer body
+
+caseInspectorBinding :: PatSM -> ExpSM -> (Subst -> LR (ExpM, MaybeValue))
+                     -> LR (ExpM, MaybeValue)
+caseInspectorBinding param initializer compute_body
+  | isDeadPattern (fromPatSM param) = compute_body emptySubst
+  | otherwise = rwLet defaultExpInfo param initializer compute_body
+  
+caseInspectorBindings :: [(PatSM, ExpSM)] -> (Subst -> LR (ExpM, MaybeValue))
+                      -> LR (ExpM, MaybeValue)
+caseInspectorBindings ((param, initializer):fs) compute_body =
+  caseInspectorBinding param initializer $ \subst ->
+  caseInspectorBindings fs (apply subst)
+  where
+    apply subst subst' = compute_body =<< (subst' `composeSubst` subst)
+
+caseInspectorBindings [] compute_body = compute_body emptySubst
 
 -- | Given an expression that represents a field of a data constructor,
 --   bind the field value to a variable.  This is similar to
@@ -2215,9 +2236,9 @@ rwFun' (FunSM f) =
 rwDef :: Def SM -> LR (Def Mem)
 rwDef def = mapMDefiniens (liftM fst . rwFun) def
 
-rwExport :: Export Mem -> LR (Export Mem)
-rwExport (Export pos spec f) = do
-  subst_f <- freshenFun emptySubst f
+rwExport :: Subst -> Export Mem -> LR (Export Mem)
+rwExport initial_subst (Export pos spec f) = do
+  subst_f <- freshenFun initial_subst f
   (f', _) <- rwFun subst_f
   return (Export pos spec f')
 
@@ -2242,8 +2263,8 @@ withDefs defgroup@(Rec defs) k = assumeDefs defgroup $ do
   where
     with_wrappers wrs m = foldr (withDefValue True) m wrs
 
-rwModule :: Module Mem -> LR (Module Mem)
-rwModule (Module mod_name imports defss exports) =
+rwModule :: Subst -> Module Mem -> LR (Module Mem)
+rwModule initial_subst (Module mod_name imports defss exports) =
   -- Add imported functions to the environment.
   -- Note that all imported functions are added--recursive functions should
   -- not be in the import list, or they will be expanded repeatedly
@@ -2253,12 +2274,12 @@ rwModule (Module mod_name imports defss exports) =
     -- Add defintion groups to the environment as we go along.
     rw_top_level defss' (defs:defss) = do
       -- Insert an empty substition into each function body
-      subst_defs <- mapM (mapMDefiniens (freshenFun emptySubst)) defs
+      subst_defs <- mapM (mapMDefiniens (freshenFun initial_subst)) defs
       withDefs subst_defs $ \defs' -> rw_top_level (defss' . (defs' :)) defss
     
     -- Then rewrite the exported functions
     rw_top_level defss' [] = do
-      exports' <- mapM rwExport exports
+      exports' <- mapM (rwExport initial_subst) exports
       return $ Module mod_name imports (defss' []) exports'
 
 -- | The main entry point for the simplifier
@@ -2275,16 +2296,12 @@ rewriteLocalExpr phase ruleset mod =
     -- Take known data constructors from the type environment
     let global_known_values = initializeKnownValues tenv
     
-    -- For each variable rewrite rule, create a known value that will be 
-    -- inlined in place of the variable.
+    -- Initialize the global substitution with the variable rewrite rules.
     known_value_list <-
       runFreshVarM var_supply $ getVariableReplacements ruleset
-    let known_values =
-          foldr insert_rewrite_rule global_known_values known_value_list
-                       
-          where
-            insert_rewrite_rule (v, e) m =
-              IntMap.insert (fromIdent $ varID v) (InlAV e) m
+    let known_value_subst =
+          fromListV [(v, SubstitutedVar e) | (v, e) <- known_value_list]
+        initial_subst = Subst Substitute.empty known_value_subst
 
     let env_constants =
           LRConstants { lrIdSupply = var_supply
@@ -2295,13 +2312,13 @@ rewriteLocalExpr phase ruleset mod =
                       , lrPhase = phase}
         env =
           LREnv { lrConstants = env_constants
-                , lrKnownValues = known_values
+                , lrKnownValues = IntMap.empty
                 , lrReturnParameter = Nothing
                 , lrTypeEnv = tenv
                 , lrDictEnv = denv
                 , lrFuel = fuel
                     }
-    Just result <- runLR (rwModule mod) env
+    Just result <- runLR (rwModule initial_subst mod) env
     return result
 
 rewriteAtPhase :: SimplifierPhase -> Module Mem -> IO (Module Mem)
