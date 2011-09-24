@@ -10,9 +10,10 @@ and some local expression reordering.
 
 {-# LANGUAGE TypeSynonymInstances, FlexibleContexts, Rank2Types,
     ViewPatterns #-}
-module SystemF.Simplify (SimplifierPhase(..),
-                         rewriteLocalExpr,
-                         rewriteAtPhase)
+module SystemF.Simplifier.Simplify
+       (SimplifierPhase(..),
+        rewriteLocalExpr,
+        rewriteAtPhase)
 where
 
 import Prelude hiding(mapM)
@@ -42,10 +43,10 @@ import SystemF.MemoryIR
 import SystemF.Syntax
 import SystemF.Rename
 import SystemF.IncrementalSubstitution
-import SystemF.Rewrite
 import SystemF.TypecheckMem
 import SystemF.PrintMemoryIR
-import SystemF.KnownValue
+import SystemF.Simplifier.Rewrite
+import SystemF.Simplifier.KnownValue
 
 import Common.Error
 import Common.Identifier

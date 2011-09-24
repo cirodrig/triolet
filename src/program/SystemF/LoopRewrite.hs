@@ -15,7 +15,7 @@ import SystemF.IncrementalSubstitution
 import SystemF.ReprDict
 import SystemF.MemoryIR
 import SystemF.Syntax
-import SystemF.Rewrite
+import SystemF.Simplifier.Rewrite
 import Type.Environment
 import Type.Type
 import Globals

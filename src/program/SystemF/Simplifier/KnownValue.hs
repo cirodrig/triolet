@@ -9,7 +9,7 @@ represented by a 'DataAV' term.  If it's
 an initializer for the contents of memory, it's a 'WriterAV' term.
 -}
 
-module SystemF.KnownValue where
+module SystemF.Simplifier.KnownValue where
 
 import qualified Data.IntMap as IntMap
 import Data.Maybe

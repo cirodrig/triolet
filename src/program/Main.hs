@@ -36,8 +36,8 @@ import qualified SystemF.PrintMemoryIR
 import qualified SystemF.Rename as SystemF
 import qualified SystemF.ReprInference as SystemF
 import qualified SystemF.Floating2 as SystemF
-import qualified SystemF.Simplify as SystemF
-import qualified SystemF.Rewrite as SystemF
+import qualified SystemF.Simplifier.Rewrite as SystemF
+import qualified SystemF.Simplifier.Simplify as SystemF
 import qualified SystemF.LoopRewrite as SystemF
 import qualified SystemF.Lowering.Lowering2 as SystemF
 import qualified LowLevel.Syntax as LowLevel

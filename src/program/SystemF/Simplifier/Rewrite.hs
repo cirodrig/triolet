@@ -1,6 +1,6 @@
 
 {-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
-module SystemF.Rewrite
+module SystemF.Simplifier.Rewrite
        (insertGlobalSystemFFunctions,
         RewriteRuleSet,
         getVariableReplacements,

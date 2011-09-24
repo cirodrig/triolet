@@ -107,7 +107,6 @@ Executable pyon
     SystemF.Floating2
     SystemF.GlobalDemand
     SystemF.IncrementalSubstitution
-    SystemF.KnownValue
     SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2
     SystemF.Lowering.Marshaling
@@ -120,8 +119,9 @@ Executable pyon
     SystemF.ReprInference
     SystemF.Rename
     SystemF.ReprDict
-    SystemF.Rewrite
-    SystemF.Simplify
+    SystemF.Simplifier.KnownValue
+    SystemF.Simplifier.Rewrite
+    SystemF.Simplifier.Simplify
     SystemF.SpecToMem
     SystemF.Syntax
     SystemF.Typecheck
