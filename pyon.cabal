@@ -106,6 +106,7 @@ Executable pyon
     SystemF.EtaReduce
     SystemF.Floating2
     SystemF.GlobalDemand
+    SystemF.IncrementalSubstitution
     SystemF.KnownValue
     SystemF.LoopRewrite
     SystemF.Lowering.Datatypes2

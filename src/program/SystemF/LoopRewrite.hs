@@ -11,6 +11,7 @@ import Data.Traversable
 
 import Builtins.Builtins
 import Common.Identifier
+import SystemF.IncrementalSubstitution
 import SystemF.ReprDict
 import SystemF.MemoryIR
 import SystemF.Syntax
@@ -77,7 +78,7 @@ otherLoopOperator v =
 useRewriteRules :: ExpInfo -> Var -> [TypM] -> [ExpM] -> LRW (Maybe ExpM)
 useRewriteRules inf op_var ty_args args = ReaderT $ \env ->
   rewriteApp parallelizingRewrites (intIndexEnv (dictEnv env)) (varSupply env) (typeEnv env)
-  inf op_var ty_args args
+  inf op_var ty_args (map deferEmptySubstitution args)
 
 -------------------------------------------------------------------------------
 -- Traversal

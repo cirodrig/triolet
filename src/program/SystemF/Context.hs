@@ -189,7 +189,7 @@ substituteCtxItem s ctx k =
        substituteAltBinders s normal_alt $ \s' normal_alt' -> 
          k s' (CaseCtx inf scr' normal_alt' exc_alts')
      LetfunCtx inf defs ->
-       substituteDefGroup s defs $ \s' defs' ->
+       substituteDefGroup substitute s defs $ \s' defs' ->
        k s' (LetfunCtx inf defs')
 
 assumeCtxItem :: TypeEnvMonad m => CtxItem -> m a -> m a

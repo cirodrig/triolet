@@ -42,6 +42,16 @@ fromList xs = S $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- xs]
 union :: TypeSubst -> TypeSubst -> TypeSubst
 union (S r1) (S r2) = S (IntMap.union r1 r2)
 
+-- | @s2 `compose` s1@ is a substitution equivalent to applying @s1@, then
+--   applying @s2@.
+compose :: EvalMonad m => TypeSubst -> TypeSubst -> m TypeSubst
+s2 `compose` s1 = liftTypeEvalM $ do
+  -- Apply s2 to the range of s1
+  s1' <- traverse (substitute s2) (unS s1)
+  
+  -- Take the union of s1 and s2, with s1 overriding s2
+  return $ S $ IntMap.union s1' (unS s2)
+
 fromMap :: IntMap.IntMap Type -> TypeSubst
 fromMap = S
 

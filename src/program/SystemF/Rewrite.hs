@@ -26,6 +26,7 @@ import Common.Supply
 import Common.MonadLogic
 import Builtins.Builtins
 import SystemF.Build
+import SystemF.IncrementalSubstitution
 import SystemF.ReprDict
 import SystemF.Syntax
 import SystemF.MemoryIR
@@ -431,21 +432,24 @@ rewriteApp :: RewriteRuleSet
            -> IntIndexEnv
            -> IdentSupply Var
            -> TypeEnv
-           -> ExpInfo -> Var -> [TypM] -> [ExpM]
+           -> ExpInfo -> Var -> [TypM] -> [ExpSM]
            -> IO (Maybe ExpM)
 rewriteApp ruleset int_env id_supply tenv inf op_var ty_args args =
   case Map.lookup op_var $ rewriteRules ruleset
-  of Just rw -> let do_rewrite = rw inf ty_args args
-                in trace_rewrite (runRW do_rewrite id_supply int_env tenv)
+  of Just rw -> let do_rewrite = do
+                      subst_args <- mapM applySubstitution args
+                      trace_rewrite subst_args $ rw inf ty_args subst_args
+                in runRW do_rewrite id_supply int_env tenv
      Nothing -> return Nothing
   where
-    trace_rewrite m = do 
+    trace_rewrite subst_args m = do
       x <- m
       case x of
         Nothing -> return x
-        Just e' -> traceShow (text "rewrite" <+> old_exp $$ text "    -->" <+> pprExp e') $ return x
+        Just e' -> do
+          let old_exp = pprExp $ appE defaultExpInfo (ExpM (VarE defaultExpInfo op_var)) ty_args subst_args
+          traceShow (text "rewrite" <+> old_exp $$ text "    -->" <+> pprExp e') $ return x
     
-    old_exp = pprExp (ExpM $ AppE defaultExpInfo (ExpM (VarE defaultExpInfo op_var)) ty_args args)
 
 -- | Turn a call of 'convertToBare' into a constructor application or
 --   case statement, if the type is known.  Also, cancel applications of

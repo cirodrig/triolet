@@ -4,6 +4,8 @@ module SystemF.Rename
        (Subst(..),
         ValAss(..),
         emptySubst,
+        isEmptySubst,
+        composeSubst,
         setTypeSubst, modifyTypeSubst,
         setValueSubst, modifyValueSubst,
         emptyV,
@@ -88,6 +90,24 @@ fromListV xs = S $ IntMap.fromList [(fromIdent $ varID v, t) | (v, t) <- xs]
 unionV :: ValSubst -> ValSubst -> ValSubst
 unionV (S r1) (S r2) = S (IntMap.union r1 r2)
 
+-- | @s2 `composeV` s1@ is a substitution equivalent to applying @s1@, then
+--   applying @s2@.
+composeV :: EvalMonad m => Subst -> ValSubst -> m ValSubst
+s2 `composeV` s1 = liftTypeEvalM $ do
+  -- Apply s2 to the range of s1
+  s1' <- traverse substitute_in_assignment (unS s1)
+
+  -- Combine s1 and s2, preferring elements of s1
+  return $ S $ IntMap.union s1' (unS $ valueSubst s2)
+  where
+    substitute_in_assignment ass@(RenamedVar v) =
+      return $! case lookupV v (valueSubst s2)
+                of Nothing   -> ass
+                   Just ass' -> ass'
+                   
+    substitute_in_assignment (SubstitutedVar e) =
+      liftM SubstitutedVar $ substitute s2 e
+
 extendV :: Var -> ValAss -> ValSubst -> ValSubst
 extendV v t (S s) = S (IntMap.insert (fromIdent $ varID v) t s)
 
@@ -103,6 +123,14 @@ data Subst = Subst {typeSubst :: !TypeSubst, valueSubst :: !ValSubst}
 emptySubst = Subst Substitute.empty emptyV
 
 isEmptySubst (Subst t v) = Substitute.null t && nullV v
+
+composeSubst :: EvalMonad m => Subst -> Subst -> m Subst
+s2 `composeSubst` Subst ts1 vs1 = do
+  -- Compute the effect of applying vs1 followed by s2 on values
+  vs1' <- s2 `composeV` vs1
+  -- Compute the effect of applying ts1 followed by typeSubst s2 on types
+  type_subst <- typeSubst s2 `Substitute.compose` ts1
+  return $ Subst type_subst vs1'
 
 setTypeSubst :: TypeSubst -> Subst -> Subst
 setTypeSubst x s = s {typeSubst = x}
@@ -256,32 +284,45 @@ substitutePatMs :: EvalMonad m =>
                    Subst -> [PatM] -> (Subst -> [PatM] -> m a) -> m a
 substitutePatMs = renameMany substitutePatM
 
-substituteDefGroup :: forall m a. EvalMonad m =>
-                      Subst -> DefGroup (Def Mem)
-                   -> (Subst -> DefGroup (Def Mem) -> m a)
+substituteDefGroup :: forall m a s. EvalMonad m =>
+                      (Subst -> Fun Mem -> m (Fun s))
+                      -- ^ How to perform substitution on a function
+                   -> Subst     -- ^ Substitution to apply
+                   -> DefGroup (Def Mem) -- ^ Definition group
+                   -> (Subst -> DefGroup (Def s) -> m a)
+                      -- ^ Code over which the definitions are in scope
                    -> m a
-substituteDefGroup s g k =
+substituteDefGroup subst_fun s g k =
   case g
   of NonRec def -> do
+       -- Get function type
+       fun_type <- substitute (typeSubst s) $ functionType (definiens def)
+
        -- No new variables in scope over function body
-       f' <- substitute s $ definiens def
+       def1 <- mapMDefiniens (subst_fun s) def
        
        -- Rename the bound variable if appropriate
        (s', v') <- rename_if_bound s (definiendum def)
-       let def' = def {definiendum = v', definiens = f'}
-       assume v' (functionType f') $ k s' (NonRec def')
+       let def' = def1 {definiendum = v'}
+       
+       -- Add function to environment
+       assume v' fun_type $ k s' (NonRec def')
 
      Rec defs -> do
+       -- Get the functions' types.  Function types cannot refer to
+       -- local variables.
+       function_types <-
+         mapM (substitute (typeSubst s) . functionType . definiens) defs
+
        -- Rename variables that shadow existing names
        let definienda = map definiendum defs
        (s', renamed_definienda) <- mapAccumM rename_if_bound s definienda
 
        -- Rename functions
-       let function_types = map (functionType . definiens) defs
        assumeBinders (zipWith (:::) renamed_definienda function_types) $ do
-         fs' <- substitute s' $ map definiens defs
-         let new_defs = [def {definiendum = v, definiens = f}
-                        | (def, v, f) <- zip3 defs renamed_definienda fs']
+         defs' <- mapM (mapMDefiniens (subst_fun s')) defs
+         let new_defs = [def {definiendum = v}
+                        | (def, v) <- zip defs' renamed_definienda]
          k s' (Rec new_defs)
   where
     rename_if_bound :: Subst -> Var -> m (Subst, Var)
@@ -531,7 +572,7 @@ instance Substitutable (Exp Mem) where
            body' <- substitute s' body
            return $ ExpM $ LetE inf p' val' body'
        LetfunE inf defs body ->
-         substituteDefGroup s defs $ \s' defs' -> do
+         substituteDefGroup substitute s defs $ \s' defs' -> do
            body' <- substitute s' body
            return $ ExpM $ LetfunE inf defs' body'
        CaseE inf scr alts -> do
