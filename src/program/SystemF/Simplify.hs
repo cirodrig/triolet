@@ -1270,14 +1270,16 @@ rwExps es = mapAndUnzipM rwExp es
 rwExpReturn (exp, val) = return (exp, val)
     
 -- | Rewrite a variable expression and compute its value.
+--
+--   It is assumed that fuel is available when this expression is called.
 rwVar inf v = lookupKnownValue v >>= rewrite
   where
     original_expression = ExpM $ VarE inf v
 
     rewrite (Just val)
-      | Just cheap_value <- asTrivialValue val =
+      | Just cheap_value <- asTrivialValue val = do
           -- Use fuel to replace this variable
-          useFuel (original_expression, Nothing) $
+          consumeFuel
           rwExpReturn (cheap_value, Just val)
 
         -- Otherwise, don't inline, but propagate the value
@@ -1311,12 +1313,11 @@ rwCon inf (CInstSM con) args = do
            TupleCon ty_args ->
              fmap AbsReturn $ tupleConValue inf (map TypM ty_args) arg_values
   
-  have_fuel <- checkFuel
   case new_computation of
     Just (AbsReturn v) -> return (new_exp, Just v)
   
     -- If it will raise an exception, replace with an exception expression
-    Just AbsException | have_fuel -> do
+    Just AbsException -> do
       consumeFuel
       return (ExpM $ ExceptE inf constructed_type, Nothing)
 
@@ -1537,17 +1538,13 @@ rwLet inf (PatSM bind@(PatM (bind_var ::: _) _)) val simplify_body =
       subst_val <- applySubstitution val
       if worthPreInlining tenv (patMDmd bind) subst_val
         then do
-          -- The variable is used exactly once or is trivial; inline it
+          -- The variable is used exactly once or is trivial; inline it.
+          -- Since substitution will eliminate the variable before the
+          -- simplifier observes it, the variable isn't added to the environment.
           consumeFuel
           val' <- applySubstitution val
           let subst = Subst Substitute.empty (singletonV bind_var (SubstitutedVar val'))
-          (body', body_val) <-
-            assumePattern bind $ simplify_body subst
-          
-          -- The local variable goes out of scope, so it must not be mentioned 
-          -- by the known value
-          let ret_val = forgetVariable bind_var =<< body_val
-          rwExpReturn (body', ret_val)
+          simplify_body subst
         else rw_recursive_let
 
     rw_recursive_let = rwLetNormal inf bind val (simplify_body emptySubst)
@@ -1587,8 +1584,7 @@ rwLetrec inf defs body = withDefs defs $ \defs' -> do
 rwCase :: ExpInfo -> ExpSM -> [AltSM] -> LR (ExpM, MaybeValue)
 rwCase inf scrut alts = do
   tenv <- getTypeEnv
-  have_fuel <- checkFuel
-  rwCase1 have_fuel tenv inf scrut alts
+  rwCase1 tenv inf scrut alts
   where
     -- For debugging, print the case expression that will be rewritten
     debug_print_case :: LR (ExpM, MaybeValue) -> LR (ExpM, MaybeValue)
@@ -1598,12 +1594,17 @@ rwCase inf scrut alts = do
       let expr = ExpM $ CaseE inf scrut' alts'
       traceShow (text "rwCase" <+> pprExp expr) m
 
+-- | First stages of rewriting a case expression.  Try to simplify the case
+--   expression before simplifying subexpressions.
+--
+--   It is assumed that fuel is available.
+
 -- Special-case handling of the 'boxed' constructor.  This constructor cannot
 -- be eliminated.  Instead, its value is propagated, and we hope that the case
 -- statement becomes dead code.
 --
 -- The case statement isn't eliminated, so this step doesn't consume fuel.
-rwCase1 _ tenv inf scrut alts
+rwCase1 tenv inf scrut alts
   | [alt@(AltSM (Alt {altCon = DeCInstSM (VarDeCon op _ _)}))] <- alts,
     op `isPyonBuiltin` The_boxed = do
       let AltSM (Alt _ [binder] body) = alt
@@ -1616,8 +1617,8 @@ rwCase1 _ tenv inf scrut alts
 -- a constructor application.
 --
 -- Unpacking consumes fuel
-rwCase1 have_fuel tenv inf scrut alts
-  | have_fuel, ExpM (ConE {}) <- discardSubstitution scrut = do
+rwCase1 tenv inf scrut alts
+  | ExpM (ConE {}) <- discardSubstitution scrut = do
       consumeFuel
 
       -- Rename the scrutinee and get constructor fields
@@ -1630,7 +1631,7 @@ rwCase1 have_fuel tenv inf scrut alts
       eliminateCaseWithExp tenv field_kinds ex_types scrut_args alt
   
 -- Simplify the scrutinee, then try to simplify the case statement.
-rwCase1 _ tenv inf scrut alts = do
+rwCase1 tenv inf scrut alts = do
   -- Simplify scrutinee
   (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp scrut
 
@@ -1669,7 +1670,8 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
       
       -- Simplify the alternative.
       -- FIXME: We really should restructure this, since 'rwCaseOfCase' will 
-      -- simplify it again, leading to excessive optimization time.
+      -- re-process the alternative.  The case alternative should only be
+      -- processed once.
       alt <- case_alternative scrut_val
       subst_alt <- freshenAlt emptySubst alt
       rwCaseOfCase inf (Just scrut_type) inner_scrutinee inner_alts [subst_alt]
