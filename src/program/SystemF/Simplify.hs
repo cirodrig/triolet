@@ -107,6 +107,13 @@ data LRConstants =
     -- | The current phase.  The phase is constant during a pass of the
     --   simplifier.
   , lrPhase :: !SimplifierPhase
+    
+    -- | Number of simplification steps to perform.  For debugging, we may
+    --   stop simplification after a given number of steps.
+    --
+    --   If value is negative, then fuel is unlimited.  If value is zero, then
+    --   further simplification is not performed.
+  , lrFuel :: {-#UNPACK#-}!(IORef Int)
   }
 
 data LREnv =
@@ -124,13 +131,6 @@ data LREnv =
     
     -- | The return parameter of the current function, if there is one
   , lrReturnParameter :: !(Maybe PatM)
-    
-    -- | Number of simplification steps to perform.  For debugging, we may
-    --   stop simplification after a given number of steps.
-    --
-    --   If value is negative, then fuel is unlimited.  If value is zero, then
-    --   further simplification is not performed.
-  , lrFuel :: {-#UNPACK#-}!(IORef Int)
   }
 
 -- | Simplification either transforms some code, or detects that the code
@@ -352,7 +352,9 @@ dumpKnownValues m = LR $ \env ->
 -- | Check whether there is fuel available.
 --   If True is returned, then it's okay to perform a task that consumes fuel.
 checkFuel :: LR Bool
-checkFuel = LR $ \env -> fmap (Just . (0 /=)) $ readIORef $ lrFuel env
+checkFuel = LR $ \env -> do
+  fuel <- readIORef (lrFuel $ lrConstants env)
+  return $! Just $! fuel /= 0
 
 -- | Perform an action only if there is fuel remaining
 ifFuel :: a -> LR a -> LR a
@@ -372,8 +374,8 @@ ifElseFuel default_action action = checkFuel >>= choose
 --   or if fuel is not in use (negative).
 consumeFuel :: LR ()
 consumeFuel = LR $ \env -> do
-  fuel <- readIORef $ lrFuel env
-  when (fuel > 0) $ writeIORef (lrFuel env) $! fuel - 1
+  fuel <- readIORef $ lrFuel $ lrConstants env
+  when (fuel > 0) $ writeIORef (lrFuel $ lrConstants env) $! fuel - 1
   return (Just ())
 
 -- | Use fuel to perform an action.  If there's no fuel remaining,
@@ -2309,15 +2311,15 @@ rewriteLocalExpr phase ruleset mod =
                                         [fromIdent $ varID $ definiendum def 
                                         | def <- modImports mod]
                       , lrRewriteRules = ruleset
-                      , lrPhase = phase}
+                      , lrPhase = phase
+                      , lrFuel = fuel}
         env =
           LREnv { lrConstants = env_constants
                 , lrKnownValues = IntMap.empty
                 , lrReturnParameter = Nothing
                 , lrTypeEnv = tenv
                 , lrDictEnv = denv
-                , lrFuel = fuel
-                    }
+                }
     Just result <- runLR (rwModule initial_subst mod) env
     return result
 
