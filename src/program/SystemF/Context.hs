@@ -539,9 +539,6 @@ instance Renameable a => Renameable (Contexted a) where
 instance (Substitutable a, Substitution a ~ Subst) =>
          Substitutable (Contexted a) where
   type Substitution (Contexted a) = Subst
-  emptySubstitution x = emptySubstitution (undefined `asTypeOf` _ctxBody x)
-  isEmptySubstitution x = isEmptySubstitution (undefined `asTypeOf` _ctxBody x)
-  
   substituteWorker s (ApplyContext { _ctxContext = context
                                    , _ctxBody = body}) =
     substituteCtx s context $ \s' context' -> do

@@ -62,7 +62,10 @@ import Type.Rename(Renaming, Renameable(..),
                    assertVarsAreUndefined,
                    CheckForShadowing)
 import qualified Type.Rename as Rename
-import Type.Substitute(TypeSubst, Substitutable(..), substitute)
+import Type.Substitute(TypeSubst,
+                       SubstitutionMap(..),
+                       Substitutable(..),
+                       substitute)
 import qualified Type.Substitute as Substitute
 
 -- | A value assignment of a variable.
@@ -145,6 +148,10 @@ setValueSubst x s = s {valueSubst = x}
 
 modifyValueSubst :: (ValSubst -> ValSubst) -> Subst -> Subst
 modifyValueSubst f s = s {valueSubst = f $ valueSubst s}
+
+instance SubstitutionMap Subst where
+  emptySubstitution = emptySubst
+  isEmptySubstitution = isEmptySubst
 
 -------------------------------------------------------------------------------
 
@@ -363,8 +370,6 @@ instance Renameable Dmd where
 
 instance Substitutable Dmd where
   type Substitution Dmd = TypeSubst
-  emptySubstitution _ = Substitute.empty
-  isEmptySubstitution _ = Substitute.null
   substituteWorker s dmd = do
     spc <- substituteWorker s $ specificity dmd
     return $ Dmd (multiplicity dmd) spc
@@ -395,8 +400,6 @@ instance Renameable Specificity where
 
 instance Substitutable Specificity where
   type Substitution Specificity = TypeSubst
-  emptySubstitution _ = Substitute.empty
-  isEmptySubstitution _ = Substitute.null
   substituteWorker s spc =
     case spc
     of Decond decon spcs -> 
@@ -519,22 +522,14 @@ instance Renameable (Fun Mem) where
 
 instance Substitutable (Typ Mem) where
   type Substitution (Typ Mem) = TypeSubst
-  emptySubstitution _ = Substitute.empty
-  isEmptySubstitution _ = Substitute.null
   substituteWorker s (TypM t) = TypM `liftM` substituteWorker s t
 
 instance Substitutable (CInst Mem) where
   type Substitution (CInst Mem) = TypeSubst
-  emptySubstitution _ = Substitute.empty
-  isEmptySubstitution _ = Substitute.null
-
   substituteWorker s (CInstM x) = CInstM `liftM` substituteWorker s x
 
 instance Substitutable ConInst where
   type Substitution ConInst = TypeSubst
-  emptySubstitution _ = Substitute.empty
-  isEmptySubstitution _ = Substitute.null
-
   substituteWorker s (VarCon op ty_args ex_types) =
     VarCon op `liftM`
     mapM (substitute s) ty_args `ap`
@@ -545,9 +540,6 @@ instance Substitutable ConInst where
 
 instance Substitutable (Exp Mem) where
   type Substitution (Exp Mem) = Subst
-  emptySubstitution _ = emptySubst
-  isEmptySubstitution _ = isEmptySubst
-
   substituteWorker s (ExpM expression) =
     case expression
     of VarE inf v ->
@@ -592,9 +584,6 @@ instance Substitutable (Exp Mem) where
 
 instance Substitutable (Alt Mem) where
   type Substitution (Alt Mem) = Subst
-  emptySubstitution _ = emptySubst
-  isEmptySubstitution _ = isEmptySubst
-
   substituteWorker s (AltM (Alt (DeCInstM con) params body)) =
     substituteDeConInst (typeSubst s) con $ \ts' con' ->
     substitutePatMs (setTypeSubst ts' s) params $ \s' params' -> do
@@ -603,9 +592,6 @@ instance Substitutable (Alt Mem) where
 
 instance Substitutable (Fun Mem) where
   type Substitution (Fun Mem) = Subst
-  emptySubstitution _ = emptySubst
-  isEmptySubstitution _ = isEmptySubst
-
   substituteWorker s (FunM fun) =
     substituteTyPatMs s (funTyParams fun) $ \s' ty_params ->
     substitutePatMs s' (funParams fun) $ \s'' params -> do

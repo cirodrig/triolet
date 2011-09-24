@@ -21,6 +21,14 @@ import Type.Rename(Renaming, Renameable(..))
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
 
+class SubstitutionMap a where
+  -- | Produce an empty substitution
+  emptySubstitution :: a
+  
+  -- | Decide whether the substitution is empty.
+  -- The first argument should be ignored.
+  isEmptySubstitution :: a -> Bool
+
 -- | A substitution of types for type variables
 data TypeSubst = S {unS :: IntMap.IntMap Type}
 
@@ -63,6 +71,10 @@ exclude v (S s) = S (IntMap.delete (fromIdent $ varID v) s)
 
 lookup :: Var -> TypeSubst -> Maybe Type
 lookup v (S m) = IntMap.lookup (fromIdent $ varID v) m
+
+instance SubstitutionMap TypeSubst where
+  emptySubstitution = empty
+  isEmptySubstitution = null
 
 -- | Push a substitution through a binder.  The substitution is applied to the
 --   binder, and the binder is renamed if there is a name conflict with the
@@ -110,16 +122,9 @@ substituteBinders s [] k = k s []
 
 substituteVar v x a = substitute (singleton v x) a
 
-class Substitutable a where
+class SubstitutionMap (Substitution a) => Substitutable a where
   -- | A substitution of variables in a value
   type Substitution a
-
-  -- | Produce an empty substitution.  The argument should be ignored.
-  emptySubstitution :: a -> Substitution a
-  
-  -- | Decide whether the substitution is empty.
-  -- The first argument should be ignored.
-  isEmptySubstitution :: a -> Substitution a -> Bool
 
   -- | Apply the substitution to the argument, and rename any variable 
   --   bindings in the outermost term that shadow an in-scope variable.
@@ -129,43 +134,32 @@ class Substitutable a where
 --   if they would shadow the in-scope variables.
 freshen :: forall m a. (EvalMonad m, Substitutable a) => a -> m a
 {-# SPECIALIZE freshen :: Substitutable a => a -> TypeEvalM a #-}
-freshen = substituteWorker (emptySubstitution (undefined :: a))
+freshen = substituteWorker emptySubstitution
 
 -- | Apply the substitution to the argument.
 substitute :: forall m a. (EvalMonad m, Substitutable a) =>
               Substitution a -> a -> m a
 {-# SPECIALIZE substitute :: Substitutable a => Substitution a -> a -> TypeEvalM a #-}
 substitute s x 
-  | isEmptySubstitution (undefined :: a) s = return x
+  | isEmptySubstitution s = return x
   | otherwise = substituteWorker s x 
 
 instance Substitutable a => Substitutable (Maybe a) where
   type Substitution (Maybe a) = Substitution a
-  emptySubstitution x = emptySubstitution (undefined `asTypeOf` fromJust x)
-  isEmptySubstitution x s =
-    isEmptySubstitution (undefined `asTypeOf` fromJust x) s
   substituteWorker s x = mapM (substituteWorker s) x
 
 instance (Substitutable a, Substitutable b, Substitution a ~ Substitution b) =>
          Substitutable (a, b) where
   type Substitution (a, b) = Substitution a
-  emptySubstitution x = emptySubstitution (undefined `asTypeOf` fst x)
-  isEmptySubstitution x s = isEmptySubstitution (undefined `asTypeOf` fst x) s
   substituteWorker s (x, y) =
     liftM2 (,) (substituteWorker s x) (substituteWorker s y)
 
 instance Substitutable a => Substitutable [a] where
   type Substitution [a] = Substitution a
-  emptySubstitution x = emptySubstitution (head x)
-  isEmptySubstitution x s =
-    isEmptySubstitution (undefined `asTypeOf` head x) s
   substituteWorker s xs = mapM (substituteWorker s) xs
 
 instance Substitutable Type where
   type Substitution Type = TypeSubst
-  emptySubstitution _ = empty
-  isEmptySubstitution _ = null
-
   substituteWorker sb ty =
     case ty
     of VarT v ->

@@ -56,15 +56,10 @@ data instance Exp SM = ExpSM !Subst ExpM
 
 instance Substitutable (Exp SM) where
   type Substitution (Exp SM) = Subst
-  emptySubstitution _ = emptySubst
-  isEmptySubstitution _ s = isEmptySubst s
   substituteWorker = addDeferredSubstitution
 
 instance Substitutable (Fun SM) where
   type Substitution (Fun SM) = Subst
-  emptySubstitution _ = emptySubst
-  isEmptySubstitution _ s = isEmptySubst s
-
   substituteWorker s (FunSM fun) = 
     -- Push the substitution down to the body of the function.  Defer further
     -- processing.
