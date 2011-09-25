@@ -56,6 +56,7 @@ where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans
+import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
 import Text.PrettyPrint.HughesPJ
 
@@ -87,9 +88,20 @@ assumeBinder (v ::: t) m = assume v t m
 assumeBinders :: TypeEnvMonad m => [Binder] -> m a -> m a
 assumeBinders bs m = foldr assumeBinder m bs
 
+instance TypeEnvMonad m => TypeEnvMonad (MaybeT m) where
+  getTypeEnv = lift getTypeEnv
+  askTypeEnv f = lift (askTypeEnv f)
+  assume v t (MaybeT m) = MaybeT (assume v t m)
+
 -- | A monad supporting type-level computation
 class (MonadIO m, Supplies m (Ident Var), TypeEnvMonad m) => EvalMonad m where
   liftTypeEvalM :: TypeEvalM a -> m a
+
+instance Supplies m (Ident Var) => Supplies (MaybeT m) (Ident Var) where
+  fresh = lift fresh
+
+instance EvalMonad m => EvalMonad (MaybeT m) where
+  liftTypeEvalM = lift . liftTypeEvalM
 
 -- | A simple monad supporting type-level computation
 newtype TypeEvalM a =

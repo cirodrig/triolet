@@ -75,13 +75,6 @@ class EvalMonad m => ReprDictMonad m where
 
   localDictEnv :: (SingletonValueEnv -> SingletonValueEnv) -> m a -> m a
 
-instance Supplies m VarID => Supplies (MaybeT m) VarID where
-  fresh = lift fresh
-
-instance TypeEnvMonad m => TypeEnvMonad (MaybeT m) where
-  getTypeEnv = lift getTypeEnv
-  assume v t (MaybeT m) = MaybeT $ assume v t m
-
 instance ReprDictMonad m => ReprDictMonad (MaybeT m) where
   getVarIDs = lift getVarIDs
   withVarIDs f = MaybeT $ withVarIDs (runMaybeT . f)
@@ -89,9 +82,6 @@ instance ReprDictMonad m => ReprDictMonad (MaybeT m) where
   getDictEnv = lift getDictEnv 
   withDictEnv f = MaybeT $ withDictEnv (runMaybeT . f)
   localDictEnv f (MaybeT m) = MaybeT (localDictEnv f m)
-
-instance EvalMonad m => EvalMonad (MaybeT m) where
-  liftTypeEvalM m = lift $ liftTypeEvalM m
 
 -- | Lookup the representation dictionary of a bare type
 lookupReprDict :: ReprDictMonad m => Type -> m (Maybe MkDict)
