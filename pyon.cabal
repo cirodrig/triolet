@@ -119,6 +119,7 @@ Executable pyon
     SystemF.ReprInference
     SystemF.Rename
     SystemF.ReprDict
+    SystemF.Simplifier.AbsValue
     SystemF.Simplifier.KnownValue
     SystemF.Simplifier.Rewrite
     SystemF.Simplifier.Simplify
