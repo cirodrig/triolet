@@ -1015,93 +1015,115 @@ restructureExp ex = do
 --   location.
 --
 -- > case boxed @t E of boxed @t x. copy t r x
-eliminateUselessCopying :: ExpM -> LR ExpM
-eliminateUselessCopying (ExpM expression) =
-  case expression
-  of LetE inf bind rhs body@(ExpM (VarE _ body_var))
-       | patMVar bind == body_var ->
-           -- Useless let expression
-           consumeFuel >> return rhs
+eliminateUselessCopying :: ExpSM -> LR ExpSM
+eliminateUselessCopying expression = do
+  fresh_expression <- freshenHead expression
+  case fresh_expression of
+    LetE inf bind rhs body -> do
+      subst_body <- freshenHead body
+      case subst_body of
+        VarE _ body_var | patMVar (fromPatSM bind) == body_var ->
+          -- Useless let expression
+          consumeFuel >> return rhs
+        _ -> can't_eliminate
 
-     CaseE inf scrutinee alts -> do
-       tenv <- getTypeEnv
+    CaseE inf scrutinee alts -> do
+      tenv <- getTypeEnv
 
-       -- First, try to detect the case where a value is deconstructed and
-       -- reconstructed.
-       -- Skip this step for bare types, since we can't avoid copying.
-       uses <-
-         if BareK == alt_kind tenv (head alts)
-         then return Nothing
-         else liftM sequence $ mapM (useless_alt tenv) alts
+      -- First, try to detect the case where a value is deconstructed and
+      -- reconstructed.
+      -- Skip this step for bare types, since we can't avoid copying.
+      uses <-
+        if BareK == alt_kind tenv (head alts)
+        then return Nothing
+        else liftM sequence $ mapM (useless_alt tenv) alts
 
-       -- Useless if all alternatives are useless.
-       -- In well-typed code, all return parameters must be the same.
-       case uses of
-         Just (Nothing : _) ->
-           consumeFuel >> return scrutinee
+      -- Useless if all alternatives are useless.
+      -- In well-typed code, all return parameters must be the same.
+      case uses of
+        Just (Nothing : _) ->
+          consumeFuel >> return scrutinee
 
-         {- TODO: Generate simplified code in this case.
-         -- We must get rid of the old return
-         -- argument by eta-reducing the scrutinee, then apply it to the new
-         -- return argument.
+        {- TODO: Generate simplified code in this case.
+        -- We must get rid of the old return
+        -- argument by eta-reducing the scrutinee, then apply it to the new
+        -- return argument.
 
-         Just (Just p : _) -> undefined
+        Just (Just p : _) -> undefined
 
-         -}
+        -}
 
-         _ ->
-           -- Next, try to detect the case where a value is constructed and
-           -- then copied
-           case eliminate_unbox_and_copy tenv scrutinee alts
-           of Nothing ->
-                return (ExpM expression) -- Not useless
-              Just new_exp ->
-                consumeFuel >> return new_exp
+        _ -> do
+          -- Next, try to detect the case where a value is constructed and
+          -- then copied
+          elim_case <- eliminate_unbox_and_copy tenv scrutinee alts
+          case elim_case of 
+            Nothing -> can't_eliminate
+            Just new_exp -> consumeFuel >> return new_exp
 
-     _ -> return (ExpM expression)
+    _ -> can't_eliminate
   where
+    can't_eliminate = return expression
+
     -- Get the kind of the data type being matched
-    alt_kind tenv (AltM (Alt {altCon = DeCInstM (VarDeCon var _ _)})) =
+    alt_kind tenv (AltSM (Alt {altCon = DeCInstSM (VarDeCon var _ _)})) =
       case lookupDataConWithType var tenv
       of Just (type_con, _) -> dataTypeKind type_con
     
-    alt_kind _ (AltM (Alt {altCon = DeCInstM (TupleDeCon {})})) = ValK
+    alt_kind _ (AltSM (Alt {altCon = DeCInstSM (TupleDeCon {})})) = ValK
 
     -- Try to detect and simplify the pattern
     -- @case boxed E of boxed x. copy x@
-    eliminate_unbox_and_copy tenv scrutinee alts =
-      case unpackDataConAppM tenv scrutinee
-      of Just (dcon, [ty_arg], [], [initializer])
-           | dataConCon dcon `isPyonBuiltin` The_boxed ->
+    eliminate_unbox_and_copy tenv scrutinee alts = do
+      scrutinee' <- freshenHead scrutinee
+      case scrutinee' of
+        ConE _ (CInstSM (VarCon op [ty_arg] [])) [initializer]
+          | op `isPyonBuiltin` The_boxed ->
              case alts
-             of [AltM (Alt _ [field] body)] ->
-                  -- Body should be @copy _ _ x@ or @copy _ _ x e@
+             of [AltSM (Alt _ [field] body)] -> do
+                  let pattern_var = patMVar $ fromPatSM field
+                  -- Check whether body is @copy _ _ x@
                   -- where @x@ is the bound variable
-                  case unpackVarAppM body
-                  of Just (op, ty_args, (_ : ExpM (VarE _ src) : body_args))
-                       | op `isPyonBuiltin` The_copy && src == patMVar field ->
-                         -- Match found
-                         Just $ appE defaultExpInfo initializer [] body_args
-                     _ -> Nothing
-         _ -> Nothing
+                  body' <- freshenHead body
+                  is_copy <- checkForCopyExpr' pattern_var body'
+                  if is_copy then return (Just initializer) else do
+
+                    -- Else, check whetehr body is @copy _ _ x e@
+                    case body' of
+                      AppE _ op [_] [_, copy_src, copy_dst] -> do
+                        is_copy <-
+                          checkForVariableExpr (pyonBuiltin The_copy) op >&&>
+                          checkForVariableExpr pattern_var copy_src
+
+                        if is_copy
+                          then do
+                            copy_dst' <- applySubstitution copy_dst
+                            initializer' <- applySubstitution initializer
+                            return $ Just $ deferEmptySubstitution $
+                              appE defaultExpInfo initializer' [] [copy_dst']
+                          else return Nothing
+                      _ -> return Nothing
+                _ -> return Nothing
+        _ -> return Nothing
 
     -- Decide whether the alternative is useless.
     -- Return @Nothing@ if not useless.
     -- Return @Just Nothing@ if useless and there's no return parameter.
     -- Return @Just (Just p)@ if useless and the return parameter is @p@.
-    useless_alt tenv (AltM (Alt decon alt_fields body)) =
-      case body
-      of ExpM (ConE inf con fields) ->
-           compare_pattern_to_expression decon alt_fields con fields
+    useless_alt tenv (AltSM (Alt decon alt_fields body)) = do
+      body' <- freshenHead body
+      case body' of
+        ConE inf con fields ->
+          compare_pattern_to_expression decon alt_fields con fields
          
-         -- TODO: Also detect case where body is applied to a return parameter
+        -- TODO: Also detect case where body is applied to a return parameter
 
-         _ -> return Nothing
+        _ -> return Nothing
 
     -- Compare fields of a pattern to fields of a data constructor expression
     -- to determine whether they match.  The constructor part has already been
     -- observed to match.
-    compare_pattern_to_expression (DeCInstM decon) alt_fields (CInstM con) exp_fields =
+    compare_pattern_to_expression (DeCInstSM decon) alt_fields (CInstSM con) exp_fields =
       case (decon, con)
       of (VarDeCon alt_op alt_ty_args alt_ex_types,
           VarCon exp_op exp_ty_args exp_ex_types) -> do
@@ -1114,7 +1136,7 @@ eliminateUselessCopying (ExpM expression) =
              andM (zipWith compareTypes [t | _ ::: t <- alt_ex_types] exp_ex_types) >&&>
 
              -- Compare fields
-             return (and $ zipWith match_field alt_fields exp_fields)
+             andM (zipWith match_field alt_fields exp_fields)
 
            return $! if types_match then Just Nothing else Nothing
 
@@ -1124,7 +1146,7 @@ eliminateUselessCopying (ExpM expression) =
              -- Compare type parameters
              andM (zipWith compareTypes alt_types exp_types) >&&>
              -- Compare fields
-             return (and $ zipWith match_field alt_fields exp_fields)
+             andM (zipWith match_field alt_fields exp_fields)
 
            return $! if types_match then Just Nothing else Nothing
 
@@ -1132,17 +1154,45 @@ eliminateUselessCopying (ExpM expression) =
            -- Different constructors
            return Nothing
       where
-        -- This field should either be @v@ (for a value) or
-        -- @copy _ v@ (for an initializer).  Only one possibility is
-        -- well-typed, so go ahead and check for both.
-        match_field pattern expr =
-          case expr
-          of ExpM (VarE _ v) ->
-               v == patMVar pattern
-             _ -> case unpackVarAppM expr
-                  of Just (op, [_], [_, ExpM (VarE _ v)]) ->
-                       op `isPyonBuiltin` The_copy && v == patMVar pattern
-                     _ -> False
+        -- This field should be @v@ (for a value),
+        -- @copy _ v@ (for an initializer), or
+        -- @\r. copy _ v r@ (for an initializer).
+        -- Check for all possibilities.
+        match_field pattern expr = do
+          let pattern_var = patMVar (fromPatSM pattern)
+          subst_expr <- freshenHead expr
+          checkForVariableExpr' pattern_var subst_expr >&&>
+            checkForCopyExpr' pattern_var subst_expr
+
+-- | Test whether the expression is a variable expression referencing
+--   the given variable.
+checkForVariableExpr :: Var -> ExpSM -> LR Bool
+checkForVariableExpr v e = checkForVariableExpr' v =<< freshenHead e
+
+checkForVariableExpr' v (VarE _ v') = return $ v == v'
+checkForVariableExpr' _ _ = return False
+
+-- | Test whether the expression is an initializer function consisting of 
+--   a call to 'copy'.  Check for both the partially applied and eta-expanded
+--   forms.
+checkForCopyExpr :: Var -> ExpSM -> LR Bool
+checkForCopyExpr v e = checkForCopyExpr' v =<< freshenHead e
+
+checkForCopyExpr' v e =
+  case e
+  of AppE _ op [_] [_, copy_src] ->
+       checkForVariableExpr (pyonBuiltin The_copy) op >&&>
+       checkForVariableExpr v copy_src
+     LamE _ (FunSM (Fun _ [] [rparam] _ body)) -> do
+       let rparam_var = patMVar (fromPatSM rparam)
+       subst_body <- freshenHead body
+       case subst_body of
+         AppE _ op [_] [_, copy_src, copy_dst] ->
+           checkForVariableExpr (pyonBuiltin The_copy) op >&&>
+           checkForVariableExpr v copy_src >&&>
+           checkForVariableExpr rparam_var copy_dst
+         _ -> return False
+     _ -> return False
 
 -------------------------------------------------------------------------------
 -- Traversing code
@@ -1169,7 +1219,7 @@ rwExp expression =
     -- First perform local restructuring, then simplify.
     rewrite expression = do
       ex1 <- restructureExp expression
-      ex2 <- return ex1 -- ifFuel ex1 $ eliminateUselessCopying ex1
+      ex2 <- ifFuel ex1 $ eliminateUselessCopying ex1
       ifElseFuel (substitute ex2) (simplify ex2)
 
     -- Simplify the expression.
