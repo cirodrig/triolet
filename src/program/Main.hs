@@ -56,6 +56,8 @@ import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
 
+debugMode = False
+
 main = do
   -- Parse arguments
   (global_values, job) <- parseCommandLineArguments
@@ -139,10 +141,12 @@ highLevelOptimizations :: Bool
                        -> IO (SystemF.Module SystemF.Mem)
 highLevelOptimizations global_demand_analysis simplifier_phase mod = do
   mod <- SystemF.rewriteAtPhase simplifier_phase mod
-  putStrLn "After rewrite"
-  print $ SystemF.PrintMemoryIR.pprModule mod
-  evaluate $ SystemF.checkForShadowingModule mod -- DEBUG
-  SystemF.TypecheckMem.typeCheckModule mod
+  when debugMode $ void $ do
+    putStrLn "After rewrite"
+    print $ SystemF.PrintMemoryIR.pprModule mod
+    evaluate $ SystemF.checkForShadowingModule mod -- DEBUG
+    SystemF.TypecheckMem.typeCheckModule mod
+
   mod <- if global_demand_analysis
          then SystemF.demandAnalysis mod
          else SystemF.localDemandAnalysis mod
@@ -180,14 +184,18 @@ compilePyonToPyonAsm compile_flags path text = do
   putStrLn ""
   putStrLn "Memory IR"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
-  _ <- SystemF.TypecheckMem.typeCheckModule repr_mod -- DEBUG
+  when debugMode $ void $ do
+    SystemF.TypecheckMem.typeCheckModule repr_mod -- DEBUG
   
   -- General-purpose, high-level optimizations
   repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
+
   repr_mod <- SystemF.longRangeFloating repr_mod
-  putStrLn "After floating"
-  print $ SystemF.PrintMemoryIR.pprModule repr_mod
-  evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
+  when debugMode $ void $ do
+    putStrLn "After floating"
+    print $ SystemF.PrintMemoryIR.pprModule repr_mod
+    evaluate $ SystemF.checkForShadowingModule repr_mod -- DEBUG
+
   repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
   repr_mod <- iterateM (highLevelOptimizations False SystemF.GeneralSimplifierPhase) 4 repr_mod
   
