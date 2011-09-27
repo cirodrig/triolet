@@ -499,6 +499,15 @@ rwConvertToBare inf [TypM bare_type] [repr, arg]
            varAppE (pyonBuiltin The_copy) [TypM whnf_type]
            [return repr, varE unboxed_ref])]
 
+rwConvertToBare inf [ty] [repr, arg, ret] = do
+  -- Convert the partial application
+  m_result <- rwConvertToBare inf [ty] [repr, arg]
+
+  -- If successful, apply the converted expression to the return value
+  return $! case m_result
+            of Nothing -> Nothing
+               Just e  -> Just $ appE inf e [] [ret]
+
 rwConvertToBare _ _ _ = return Nothing
 
 rwConvertToBoxed :: RewriteRule
