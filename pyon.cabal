@@ -54,6 +54,7 @@ Executable pyon
   Main-Is:	Main.hs
   C-Sources:
     cutils/Pool.c
+    CxxInterface/Signature.c
   Other-Modules:
     Paths_pyon
     Machine
@@ -75,6 +76,7 @@ Executable pyon
     Common.SourcePos
     Common.Supply
     Common.THRecord
+    CxxInterface.SignatureHS
     Parser.Driver
     Parser.Parser
     Parser.ParserSyntax
