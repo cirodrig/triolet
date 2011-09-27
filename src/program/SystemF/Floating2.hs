@@ -94,6 +94,9 @@ floatExp expression =
      ConE inf con args -> do
        ctx_args <- floatExps args
        let new_exp = mapContext (\es -> ExpM $ ConE inf con es) ctx_args
+       
+       -- If constructing a known-safe singleton type, float the constructor
+       -- outward as far as possible
        if isSingletonConInst $ fromCInstM con
          then do
            ty <- inferExpType expression

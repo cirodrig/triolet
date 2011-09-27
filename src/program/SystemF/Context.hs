@@ -76,7 +76,7 @@ isSingletonType ty =
 -- | Whether the argument is a case statement that has multiple non-excepting
 --   branches.
 isUnfloatableCase :: ExpM -> Bool
-isUnfloatableCase e@(ExpM (CaseE {})) = isNothing $ asCaseContext e
+isUnfloatableCase e@(ExpM (CaseE {})) = isNothing $ asCaseContext True e
 isUnfloatableCase _ = False
 
 -- | Return True if the expression ends with an exception-raising statement 
@@ -330,18 +330,26 @@ addContextItem item (ApplyContext { _ctxFree = fv
 addContextItem _ ExceptingContext = ExceptingContext
 
 -- | Add a @let@ term to the outside of the given context
-letContext :: ExpInfo -> PatM -> ExpM -> Contexted a -> Contexted a
-letContext inf pat rhs body =
-  addContextItem (LetCtx inf (clearDemand pat) rhs) body
+letContext :: Bool              -- ^ Whether to preserve demand annotations
+           -> ExpInfo           -- ^ Source information
+           -> PatM              -- ^ Let binder
+           -> ExpM              -- ^ Right-hand side
+           -> Contexted a 
+           -> Contexted a
+letContext keep_demands inf pat rhs body =
+  let pat' = if keep_demands then pat else clearDemand pat
+  in addContextItem (LetCtx inf pat' rhs) body
 
 -- | Add a @case@ term to the outside of the given context
-caseContext :: ExpInfo -> ExpM -> DeCInstM -> [PatM] -> [AltM]
+caseContext :: Bool             -- ^ Whether to preserve demand annotations
+            -> ExpInfo -> ExpM -> DeCInstM -> [PatM] -> [AltM]
             -> Contexted a -> Contexted a
-caseContext inf scr (DeCInstM decon) params ex_alts body =
-  let ex_binders =
-        [AltBinders decon (map clearDemand pats)
+caseContext keep_demands inf scr (DeCInstM decon) params ex_alts body =
+  let fix_demands = if keep_demands then id else clearDemand
+      ex_binders =
+        [AltBinders decon (map fix_demands pats)
         | AltM (Alt (DeCInstM decon) pats _) <- ex_alts]
-      normal_binder = AltBinders decon (map clearDemand params)
+      normal_binder = AltBinders decon (map fix_demands params)
   in addContextItem (CaseCtx inf scr normal_binder ex_binders) body
 
 -- | Add a @letfun@ term to the outside of the given context
@@ -356,6 +364,10 @@ exceptingContext = ExceptingContext
 -- | Create a new let-binding that binds the result of the given expression to 
 --   a new variable.
 --
+--   The variable binding is annotated with the least precise use
+--   information.  One reason we do this is to prevent optimizations from 
+--   immediately propagating the variable back to its original position.
+--
 --   The expression enters the context.  A new variable is created and bound
 --   to the original expression's value The original occurrence of
 --   the expression is replaced by a new variable.
@@ -363,29 +375,32 @@ asLetContext :: EvalMonad m => Type -> ExpM -> m (Contexted ExpM)
 asLetContext ty expression = do
   let inf = case expression of ExpM e -> expInfo e
   bound_var <- newAnonymousVar ObjectLevel
+  let pat = patM (bound_var ::: ty)
   return $
-    letContext inf (patM (bound_var ::: ty)) expression $
+    letContext True inf pat expression $
     unitContext (ExpM $ VarE inf bound_var)
   
 -- | Decompose the expression into a case context and a body expression, if
 --   the expression can be decomposed this way.  There must be exactly one
 --   case alternative that does not always raise an exception.
-asCaseContext :: ExpM -> Maybe (Contexted ExpM)
-asCaseContext (ExpM (CaseE inf scr alts)) =
+asCaseContext :: Bool -> ExpM -> Maybe (Contexted ExpM)
+asCaseContext keep_demands (ExpM (CaseE inf scr alts)) =
   let (exc_alts, normal_alts) = partition isExceptingAlt alts
       exc_binders = map from_exc_alt exc_alts
   in case normal_alts
      of [AltM (Alt (DeCInstM decon) params body)] -> 
-          let ctx = [CaseCtx inf scr (AltBinders decon params) exc_binders]
+          let ctx = [CaseCtx inf scr (AltBinders decon (map fix_demands params)) exc_binders]
           in Just $ ApplyContext { _ctxFree = ctxFreeVariables ctx
                                  , _ctxContext = ctx
                                  , _ctxBody = body}
         _ -> Nothing
   where
-    from_exc_alt (AltM (Alt (DeCInstM decon) params _)) =
-      AltBinders decon params
+    fix_demands = if keep_demands then id else clearDemand
 
-asCaseContext _ = Nothing
+    from_exc_alt (AltM (Alt (DeCInstM decon) params _)) =
+      AltBinders decon (map fix_demands params)
+
+asCaseContext _ _ = Nothing
 
 -- | Combine two contexts.
 --   The inner context becomes nested inside the outer one.

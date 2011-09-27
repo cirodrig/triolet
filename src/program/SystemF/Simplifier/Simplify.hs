@@ -874,8 +874,16 @@ flattenConExp inf (CInstSM con) args = do
     flatten_arg _ = internalError "flattenConExp: Unexpected kind"
     
     float_field arg ty = do
-      flat_arg <- applySubstitution arg
-      if isTrivialExp flat_arg
+      -- Float bindings in this field
+      arg' <- flattenExp arg
+      
+      -- Bind this field's value to a variable so that copy propagation can
+      -- occur.  Give the variable 'ManyUnsafe' uses to prevent it from being
+      -- inlined back into this position.  Think of the 'ManyUnsafe' label
+      -- as reflecting how the variable may be used 
+      -- in other locations after copy propagation.
+      joinInContext arg' $ \flat_arg ->
+        if isTrivialExp flat_arg
         then return $ unitContext flat_arg
         else asLetContext ty flat_arg
 
@@ -893,7 +901,7 @@ flattenLetExp inf (PatSM pat) rhs body = do
          let group = NonRec (mkDef (patMVar pat) f)
          in return $ letfunContext inf group $ unitContext subst_body
        _ ->
-         return $ letContext inf pat rhs' $ unitContext subst_body
+         return $ letContext True inf pat rhs' $ unitContext subst_body
 
 flattenLetfunExp :: ExpInfo -> DefGroup (Def SM) -> ExpSM -> Restructure ExpM
 flattenLetfunExp inf defs body = do
@@ -948,7 +956,7 @@ flattenCaseExp inf scr alts = do
       let simplified_case = ExpM $ CaseE inf floated_scr subst_alts
 
       -- Is this case binding suitable for floating?
-      case asCaseContext simplified_case of
+      case asCaseContext True simplified_case of
         Nothing ->
           return $ unitContext simplified_case
 
