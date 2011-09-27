@@ -1254,50 +1254,68 @@ rwCon inf (CInstSM con) args = do
 rwApp :: BaseExp SM -> ExpInfo -> ExpSM -> [TypSM] -> [ExpSM]
       -> LR (ExpM, AbsCode)
 rwApp original_expression inf op ty_args args = do
-  -- First try to uncurry this application
+  (op', ty_args', args') <- preUncurryApp inf op ty_args args
+  rwAppOperator inf op' ty_args' args'
+
+-- Try to uncurry this application.  The operator and arguments have not been
+-- rewritten.
+preUncurryApp inf op ty_args args = do
   op' <- freshenHead op
   case op' of
     AppE _ inner_op inner_ty_args inner_args
       | null ty_args ->
-          use_fuel $ continue inner_op inner_ty_args (inner_args ++ args)
+          continue inner_op inner_ty_args (inner_args ++ args)
       | null inner_args ->
-          use_fuel $ continue inner_op (inner_ty_args ++ ty_args) args
-    _ -> simplify_op
+          continue inner_op (inner_ty_args ++ ty_args) args
+    _ -> return (op, ty_args, args)
   where
-    use_fuel m = useFuel' simplify_op m
-
     continue op ty_args args =
-      rwApp (AppE inf op ty_args args) inf op ty_args args
+      preUncurryApp inf op ty_args args
 
-    simplify_op = clearCurrentReturnParameter $ do
-      (op', op_val) <- rwExp op
-      let modified_expression =
-            AppE inf (deferEmptySubstitution op') ty_args args
-      rwAppWithOperator modified_expression inf op' op_val (map fromTypSM ty_args) args
+rwAppOperator inf op ty_args args = clearCurrentReturnParameter $ do
+  (op', op_val) <- rwExp op
+  let modified_expression = AppE inf (deferEmptySubstitution op') ty_args args
+  rwAppWithOperator inf op' op_val (map fromTypSM ty_args) args
 
 -- | Rewrite an application, depending on what the operator is.
 --   The operator has been simplified, but the arguments have not.
 --
 --   This function is usually called from 'rwApp'.  It calls itself 
 --   recursively to flatten out curried applications.
-rwAppWithOperator :: BaseExp SM -> ExpInfo -> ExpM -> AbsCode
+rwAppWithOperator :: ExpInfo -> ExpM -> AbsCode
                   -> [Type] -> [ExpSM] -> LR (ExpM, AbsCode)
-rwAppWithOperator original_expression inf op' op_val ty_args args =
+rwAppWithOperator inf op op_val ty_args args = do
   -- First, try to uncurry this application.
   -- This happens if the operator was rewritten to an application;
   -- otherwise we would have uncurried it in 'rwApp'.
-  case op'
+  (op', op_val', ty_args', args') <- postUncurryApp inf op op_val ty_args args
+  rwAppWithOperator' inf op' op_val' ty_args' args'
+
+postUncurryApp inf op op_val ty_args args =
+  case op
   of ExpM (AppE _ inner_op inner_ty_args inner_args)
-       | null ty_args -> use_fuel $ do
+       | null ty_args -> do
            inner_op_value <- makeExpValue inner_op
-           continue inner_op inner_op_value (map fromTypM inner_ty_args) (map deferEmptySubstitution inner_args ++ args)
-       | null inner_args -> use_fuel $ do
+           continue inner_op inner_op_value
+             (map fromTypM inner_ty_args)
+             (map deferEmptySubstitution inner_args ++ args)
+       | null inner_args -> do
            inner_op_value <- makeExpValue inner_op
-           continue inner_op inner_op_value (map fromTypM inner_ty_args ++ ty_args) args
+           continue inner_op inner_op_value
+             (map fromTypM inner_ty_args ++ ty_args) args
+     _ -> return (op, op_val, ty_args, args)
+  where
+    continue op op_value ty_args args =
+      postUncurryApp inf op op_value ty_args args
+
+rwAppWithOperator' inf op op_val ty_args args =
+  -- Apply simplification techniques specific to this operator.
+  -- Fuel must be available to simplify.
+  ifElseFuel unknown_app $
+  case op
+  of ExpM (LamE _ f) ->
+       consumeFuel >> inline_function_call f
      _ ->
-       -- Apply simplification techniques specific to this operator.
-       -- Fuel must be available to simplify.
-       ifElseFuel unknown_app $
        case codeExp op_val
        of Just (ExpM (LamE _ f)) ->
             consumeFuel >> inline_function_call f
@@ -1306,7 +1324,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
           Just (ExpM (VarE _ op_var))
             | op_var `isPyonBuiltin` The_copy ->
                 case ty_args
-                of [ty] -> rwCopyApp inf op' ty args
+                of [ty] -> rwCopyApp inf op ty args
 
             | otherwise -> do
                 -- Try to apply a rewrite rule
@@ -1324,16 +1342,13 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
     -- Operator is already processed.
     use_fuel m = useFuel' unknown_app m
 
-    continue op op_value ty_args args =
-      rwAppWithOperator original_expression inf op op_value ty_args args
-
     unknown_app = do
       (args', arg_values) <- rwExps args
 
       -- Compute the application's value, and detect if it raises an exception
       new_value <- interpretComputation' $ applyCode op_val ty_args arg_values
 
-      let new_exp = appE inf op' (map TypM ty_args) args'
+      let new_exp = appE inf op (map TypM ty_args) args'
       return (new_exp, new_value)
 
     -- Inline the function call and continue to simplify it.
