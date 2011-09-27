@@ -46,7 +46,7 @@ import SystemF.IncrementalSubstitution
 import SystemF.TypecheckMem
 import SystemF.PrintMemoryIR
 import SystemF.Simplifier.Rewrite
-import SystemF.Simplifier.KnownValue
+import SystemF.Simplifier.AbsValue
 
 import Common.Error
 import Common.Identifier
@@ -122,7 +122,7 @@ data LREnv =
   { lrConstants :: !LRConstants
     
     -- | Information about the values stored in variables
-  , lrKnownValues :: IntMap.IntMap AbsValue
+  , lrKnownValues :: AbsEnv
     
     -- | Types of variables
   , lrTypeEnv :: TypeEnv
@@ -208,27 +208,30 @@ catchException m = LR $ \env -> do
   result <- runLR m env
   return (Just result)
 
-lookupKnownValue :: Var -> LR MaybeValue
+-- | Lift abstract exception values into the 'LR' monad
+interpretComputation :: AbsComputation -> LR AbsCode
+interpretComputation TopAC           = return topCode
+interpretComputation (ReturnAC code) = return code
+interpretComputation ExceptAC        = propagateException
+
+interpretComputation' :: TypeEvalM AbsComputation -> LR AbsCode
+interpretComputation' m = liftTypeEvalM m >>= interpretComputation
+
+lookupKnownValue :: Var -> LR AbsCode
 lookupKnownValue v = LR $ \env ->
-  let val = IntMap.lookup (fromIdent $ varID v) $ lrKnownValues env
-  in return (Just val)
+  return $! Just $! lookupAbstractValue v (lrKnownValues env)
 
 -- | Add a variable's known value to the environment 
-withKnownValue :: Var -> AbsValue -> LR a -> LR a
+withKnownValue :: Var -> AbsCode -> LR a -> LR a
 withKnownValue v val m = LR $ \env ->
-  let insert_assignment mapping =
-        IntMap.insert (fromIdent $ varID v) val mapping
-      env' = env {lrKnownValues = insert_assignment $ lrKnownValues env}
+  let env' = env {lrKnownValues = insertAbstractValue v val $
+                                  lrKnownValues env}
   in runLR m env'
   where
     -- Debugging: Show the known value for this variable
+    -- TODO: implement pretty-printing
     trace_assignment =
-      traceShow (text "Simpl" <+> pprVar v <+> text "=" <+> pprAbsValue val)
-
--- | Add a variable's value to the environment, if known
-withMaybeValue :: Var -> MaybeValue -> LR a -> LR a
-withMaybeValue _ Nothing m = m
-withMaybeValue v (Just val) m = withKnownValue v val m
+      traceShow (text "Simpl" <+> pprVar v <+> text "=" <+> pprAbsCode val)
 
 -- | Add a function definition's value to the environment.
 --
@@ -238,7 +241,9 @@ withDefValue :: Bool -> Def Mem -> LR a -> LR a
 withDefValue is_rec def@(Def v _ f) m = do
   phase <- getPhase
   let fun_info = funInfo $ fromFunM f
-      fun_val = setTrivialValue v $ funAV fun_info Nothing f
+      fun_val = labelCodeVar v $
+                labelCode (ExpM $ LamE defaultExpInfo f) $
+                topCode
       can_inline = if is_rec
                    then isRecInliningCandidate phase def 
                    else isInliningCandidate phase def
@@ -319,7 +324,7 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
 
     -- An arbitrary function size threshold.  Functions smaller than this
     -- will be inlined aggressively.
-    fun_size_threshold = 5
+    fun_size_threshold = 25
 
 -- | Add a pattern-bound variable to the environment.  
 --   This adds the variable's type to the environment and
@@ -345,8 +350,8 @@ assumeDef (Def v _ f) m = assume v (functionTypeSM f) m
 dumpKnownValues :: LR a -> LR a
 dumpKnownValues m = LR $ \env ->
   let kv_doc = hang (text "dumpKnownValues") 2 $
-               vcat [hang (text (show n)) 8 (pprAbsValue kv)
-                    | (n, kv) <- IntMap.toList $ lrKnownValues env,
+               vcat [hang (text (show n)) 8 (pprAbsCode kv)
+                    | (n, kv) <- absEnvMembers $ lrKnownValues env,
                       not $ n `IntSet.member` lrImportedSet (lrConstants env)]
   in traceShow kv_doc $ runLR m env
 
@@ -393,14 +398,16 @@ useFuel' out_of_fuel action = ifElseFuel out_of_fuel (consumeFuel >> action)
 --
 --   This is called if we've already simplified an expression and thrown
 --   away its value, and now we want to get it back.
-makeExpValue :: ExpM -> LR MaybeValue
+makeExpValue :: ExpM -> LR AbsCode
 makeExpValue (ExpM expression) =
   case expression
   of VarE inf v -> do
        mvalue <- lookupKnownValue v
-       return $ mvalue `mplus` Just (VarAV inf v)
-     LitE inf l -> return $ Just $ LitAV inf l
-     _ -> return Nothing
+       case codeValue mvalue of
+         TopAV -> return $ valueCode $ VarAV v
+         _ -> return mvalue
+     LitE inf l -> return $ valueCode $ LitAV l
+     _ -> return topCode
 
 rewriteAppInSimplifier inf operator ty_args args = LR $ \env -> do
   x <- rewriteApp (lrRewriteRules $ lrConstants env)
@@ -695,7 +702,7 @@ inlckDataMovement ptr_ck data_check tenv dmd expression =
 --   followed by the function body.  The expression is not actually created;
 --   instead, the appropriate rewrite methods are called to simplify the
 --   expression that would have been created.
-betaReduce :: ExpInfo -> FunM -> [TypM] -> [ExpSM] -> LR (ExpM, MaybeValue)
+betaReduce :: ExpInfo -> FunM -> [TypM] -> [ExpSM] -> LR (ExpM, AbsCode)
 betaReduce inf fun ty_args args = do
   -- This wrapper is here to make it easier to print debugging information
   -- before beta reduction
@@ -773,86 +780,6 @@ betaReduce' inf (FunM fun) ty_args args
           simplify_new_fun subst =
             rwLam inf =<< substitute subst new_fun
       in caseInspectorBindings (zip applied_params args) simplify_new_fun
-
--------------------------------------------------------------------------------
--- Converting known values to expressions
-
--- | Attempt to construct a value from an expression.
---   Prefer to create initializer values rather than data values.
-createValue :: BaseKind -> AbsValue -> LR (Maybe (ExpM, MaybeValue))
-createValue kind known_value =
-  -- There are two cases to deal with.  The simple case is that we can just
-  -- "use the value" as if inlining it.  The complex case is when the value   
-  -- is a bare value; then we want to construct a new value.
-  case fromDataAV known_value
-  of Just (DataValue inf ty fs)
-       | kind == BareK -> do
-           -- Attempt to create a new data constructor application
-           data_app <- createDataConApp inf ty fs
-           case data_app of
-             Nothing -> try_trivial_values
-             Just ret -> return (Just ret)
-     _ -> try_trivial_values
-  where
-    -- Try to get a value out of the known value.  This code is
-    -- similar to the code for simplifying a VarE term.
-    try_trivial_values
-      | Just e <- asTrivialValue known_value = do
-          -- Copy the value
-          copy_e <- copy_expression e
-          let copy_v = copy_value known_value
-          return $ Just (copy_e, Just copy_v)
-
-      | otherwise = return Nothing
-
-    copy_value val =
-      case kind
-      of BareK -> writerAV $ AbsReturn val
-         _ -> val
-
-    copy_expression e =
-      case kind
-      of BareK -> mkCopyExp e
-         _     -> return e
-
-mkCopyExp e = do
-  e_type <- inferExpType e
-  e_dict <- getReprDict e_type
-  return $ appE defaultExpInfo copy_op [TypM e_type] [e_dict, e]
-  where
-    copy_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_copy)
-
--- | Attempt to construct a data initializer expression.
---   The parameters are fields of a 'DataAV' representing a bare object.
---
---   This function handles data constructors whose result kind is \"bare\".
---   Other known values are handled by 'createValue'.
-createDataConApp :: ExpInfo -> ConInst -> [MaybeValue]
-                 -> LR (Maybe (ExpM, MaybeValue))
-createDataConApp inf val_type m_fields 
-  | Just fields <- sequence m_fields = createDataConApp' inf val_type fields
-  | otherwise = return Nothing
-      
-createDataConApp' :: ExpInfo -> ConInst -> [AbsValue]
-                  -> LR (Maybe (ExpM, MaybeValue))
-createDataConApp' inf con fields = do
-  tenv <- getTypeEnv
-  -- Get the kind inhabited by each field.  The kind is used to decide
-  -- whether to copy the field or not.
-  let field_kinds = conFieldKinds tenv con
-
-  field_results <- zipWithM createValue field_kinds fields
-
-  case sequence field_results of
-    Just (unzip -> (field_exps, field_values)) ->
-      -- Apply the data constructor
-      let data_exp = conE inf con field_exps
-          
-          -- This is an initializer expression, so it has a writer value
-          value = writerAV $ AbsReturn $ dataAV $ DataValue inf con field_values
-      in return $ Just (data_exp, Just value)
-    Nothing -> return Nothing
-      
 
 -------------------------------------------------------------------------------
 -- Local restructuring
@@ -960,7 +887,13 @@ flattenLetExp inf (PatSM pat) rhs body = do
   -- Float this binding
   subst_body <- assumePatM pat $ applySubstitution body
   joinInContext flat_rhs $ \rhs' ->
-    return $ letContext inf pat rhs' $ unitContext subst_body
+    -- If the RHS is a lambda expression, then convert to a letfun expression
+    case rhs'
+    of ExpM (LamE _ f) ->
+         let group = NonRec (mkDef (patMVar pat) f)
+         in return $ letfunContext inf group $ unitContext subst_body
+       _ ->
+         return $ letContext inf pat rhs' $ unitContext subst_body
 
 flattenLetfunExp :: ExpInfo -> DefGroup (Def SM) -> ExpSM -> Restructure ExpM
 flattenLetfunExp inf defs body = do
@@ -991,6 +924,10 @@ flattenCaseExp inf scr alts = do
     --   cancel it out.  Leave it in place in order to make sure that
     --   happens.
     --
+    -- a multi-branch case expression, then the case-of-case transformation
+    -- is applicable.  Leave in in place so that the case-of-case
+    -- transformation will be performed.
+    --
     -- Otherwise, assign the flattened scrutinee to a new variable and then
     -- float the newly created binding.
     let should_float =
@@ -998,6 +935,7 @@ flattenCaseExp inf scr alts = do
           of VarE {} -> False
              LitE {} -> False
              ConE {} -> False
+             _ | isUnfloatableCase flattened_scr -> False
              _ -> True
     ctx_floated_scr <-
       if should_float
@@ -1202,13 +1140,13 @@ eliminateUselessCopying (ExpM expression) =
 -- Traversing code
 
 -- | Apply a substitution, then rewrite an expression.
-substAndRwExp :: ExpSM -> Subst -> LR (ExpM, MaybeValue)
+substAndRwExp :: ExpSM -> Subst -> LR (ExpM, AbsCode)
 substAndRwExp e s = rwExp =<< substitute s e
 
 -- | Rewrite an expression.
 --
 --   Return the expression's value if it can be determined.
-rwExp :: ExpSM -> LR (ExpM, MaybeValue)
+rwExp :: ExpSM -> LR (ExpM, AbsCode)
 rwExp expression =
   debug "rwExp" expression $
   ifElseFuel (substitute expression) (rewrite expression)
@@ -1217,7 +1155,7 @@ rwExp expression =
     -- Just apply the current substitution, and return.
     substitute expression = do
       exp' <- applySubstitution expression
-      return (exp', Nothing)
+      return (exp', topCode)
 
     -- Rewrite the expression.
     -- First perform local restructuring, then simplify.
@@ -1239,7 +1177,7 @@ rwExp expression =
       -- were deleted.
       case ex3 of
         VarE inf v -> rwVar inf v
-        LitE inf l -> rwExpReturn (ExpM (LitE inf l), Just $ LitAV inf l)
+        LitE inf l -> rwExpReturn (ExpM (LitE inf l), valueCode $ LitAV l)
         ConE inf con args -> rwCon inf con args
         AppE inf op ty_args args -> rwApp ex3 inf op ty_args args
         LamE inf fun -> rwLam inf fun
@@ -1251,12 +1189,14 @@ rwExp expression =
 
     debug _ _ = id
 
-    --debug l e m = traceShow (text l <+> pprExp e) m
+    {-debug l e m = do
+      e' <- applySubstitution e
+      traceShow (text l <+> pprExp e') m-}
 
     -- Print abstract values
     {-debug l e m = do
       ret@(_, av) <- m
-      traceShow (text l <+> (pprExp e $$ text "----" $$ pprMaybeValue av)) $ return ret
+      traceShow (text l <+> (pprExp e $$ text "----" $$ pprAbsCode av)) $ return ret
     -}
     {-debug l e m = do
       ret@(e', _) <- m
@@ -1265,7 +1205,7 @@ rwExp expression =
 
 -- | Rewrite a list of expressions that are in the same scope,
 --   such as arguments of a function call.
-rwExps :: [ExpSM] -> LR ([ExpM], [MaybeValue])
+rwExps :: [ExpSM] -> LR ([ExpM], [AbsCode])
 rwExps es = mapAndUnzipM rwExp es
 
 rwExpReturn (exp, val) = return (exp, val)
@@ -1277,55 +1217,34 @@ rwVar inf v = lookupKnownValue v >>= rewrite
   where
     original_expression = ExpM $ VarE inf v
 
-    rewrite (Just val)
-      | Just cheap_value <- asTrivialValue val = do
+    rewrite val
+      | Just cheap_value <- codeTrivialExp val = do
           -- Use fuel to replace this variable
           consumeFuel
-          rwExpReturn (cheap_value, Just val)
+          rwExpReturn (cheap_value, val)
 
-        -- Otherwise, don't inline, but propagate the value
-      | otherwise = rwExpReturn (original_expression, Just val)
-    rewrite Nothing =
-      -- Give the variable a value, so that copy propagation may occur
-      rwExpReturn (original_expression, Just $ VarAV inf v)
+        -- Otherwise, don't inline, but propagate the value.
+        -- Label the value if it's not already labeled.
+      | otherwise =
+          rwExpReturn (original_expression, labelCodeVar v val)
 
-rwLam :: ExpInfo -> FunSM -> LR (ExpM, MaybeValue)
+rwLam :: ExpInfo -> FunSM -> LR (ExpM, AbsCode)
 rwLam inf fun = do
   (fun', fun_val) <- rwFun fun
-  rwExpReturn (ExpM $ LamE inf fun', Just $ funAV inf fun_val fun')
+  rwExpReturn (ExpM $ LamE inf fun', fun_val)
 
-rwCon :: ExpInfo -> CInstSM -> [ExpSM] -> LR (ExpM, MaybeValue)
+rwCon :: ExpInfo -> CInstSM -> [ExpSM] -> LR (ExpM, AbsCode)
 rwCon inf (CInstSM con) args = do
-  tenv <- getTypeEnv
-
-  -- Determine type of constructed value
-  (field_types, constructed_type) <- conType con
-
   -- Simplify fields
   (args', arg_values) <- clearCurrentReturnParameter $ mapAndUnzipM rwExp args
 
-  -- Construct a value
-  let new_exp = conE inf con args'
-      new_computation =
-        case con
-        of VarCon v ty_args ex_types ->
-             let Just (type_con, data_con) = lookupDataConWithType v tenv
-             in dataConValue inf tenv type_con data_con (map TypM $ ty_args ++ ex_types) arg_values
-           TupleCon ty_args ->
-             fmap AbsReturn $ tupleConValue inf (map TypM ty_args) arg_values
-  
-  case new_computation of
-    Just (AbsReturn v) -> return (new_exp, Just v)
-  
-    -- If it will raise an exception, replace with an exception expression
-    Just AbsException -> do
-      consumeFuel
-      return (ExpM $ ExceptE inf constructed_type, Nothing)
-
-    _ -> return (new_exp, Nothing)
+  -- Interpret the constructor's value
+  new_val <- interpretComputation' $ interpretCon con arg_values
+  let new_exp = ExpM $ ConE inf (CInstM con) args'
+  return (new_exp, new_val)
 
 rwApp :: BaseExp SM -> ExpInfo -> ExpSM -> [TypSM] -> [ExpSM]
-      -> LR (ExpM, MaybeValue)
+      -> LR (ExpM, AbsCode)
 rwApp original_expression inf op ty_args args = do
   -- First try to uncurry this application
   op' <- freshenHead op
@@ -1353,8 +1272,8 @@ rwApp original_expression inf op ty_args args = do
 --
 --   This function is usually called from 'rwApp'.  It calls itself 
 --   recursively to flatten out curried applications.
-rwAppWithOperator :: BaseExp SM -> ExpInfo -> ExpM -> MaybeValue
-                  -> [Type] -> [ExpSM] -> LR (ExpM, MaybeValue)
+rwAppWithOperator :: BaseExp SM -> ExpInfo -> ExpM -> AbsCode
+                  -> [Type] -> [ExpSM] -> LR (ExpM, AbsCode)
 rwAppWithOperator original_expression inf op' op_val ty_args args =
   -- First, try to uncurry this application.
   -- This happens if the operator was rewritten to an application;
@@ -1371,25 +1290,25 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
        -- Apply simplification techniques specific to this operator.
        -- Fuel must be available to simplify.
        ifElseFuel unknown_app $
-       case op_val
-       of Just (fromFunAV -> Just funm) ->
-            consumeFuel >> inline_function_call funm
+       case codeExp op_val
+       of Just (ExpM (LamE _ f)) ->
+            consumeFuel >> inline_function_call f
 
           -- Use special rewrite semantics for built-in functions
-          Just (VarAV _ op_var)
+          Just (ExpM (VarE _ op_var))
             | op_var `isPyonBuiltin` The_copy ->
                 case ty_args
                 of [ty] -> rwCopyApp inf op' ty args
 
-          Just (VarAV _ op_var) -> do
-            -- Try to apply a rewrite rule
-            tenv <- getTypeEnv
-            rewritten <- rewriteAppInSimplifier inf op_var (map TypM ty_args) args
-            case rewritten of
-              Just new_expr -> do
-                consumeFuel     -- A term has been rewritten
-                rwExp $ deferEmptySubstitution new_expr
-              Nothing -> unknown_app
+            | otherwise -> do
+                -- Try to apply a rewrite rule
+                tenv <- getTypeEnv
+                rewritten <- rewriteAppInSimplifier inf op_var (map TypM ty_args) args
+                case rewritten of
+                  Just new_expr -> do
+                    consumeFuel     -- A term has been rewritten
+                    rwExp $ deferEmptySubstitution new_expr
+                  Nothing -> unknown_app
 
           _ -> unknown_app
   where
@@ -1404,17 +1323,7 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
       (args', arg_values) <- rwExps args
 
       -- Compute the application's value, and detect if it raises an exception
-      new_value <-
-        ifFuel Nothing $
-        let fun_result = do
-              just_op_val <- op_val 
-              applyAbsValue just_op_val arg_values
-        in case fun_result
-           of Just AbsException -> propagateException
-
-              -- There's a bug in abstract values, so this code is disabled
-              Just (AbsReturn v) -> return Nothing -- return (Just v)
-              Nothing -> return Nothing
+      new_value <- interpretComputation' $ applyCode op_val ty_args arg_values
 
       let new_exp = appE inf op' (map TypM ty_args) args'
       return (new_exp, new_value)
@@ -1428,18 +1337,49 @@ rwAppWithOperator original_expression inf op' op_val ty_args args =
 rwCopyApp inf copy_op ty args = debug $ do
   whnf_type <- reduceToWhnf ty
   case fromVarApp whnf_type of
-    Just (op, [val_type])
-      | op `isPyonBuiltin` The_Stored ->
-          case args
-          of [repr, src] ->
-               use_fuel $       -- A 'copy' call has been replaced
-               copyStoredValue inf val_type repr src Nothing
-             [repr, src, dst] ->
-               use_fuel $       -- A 'copy' call has been replaced
-               copyStoredValue inf val_type repr src (Just dst)
-             _ ->
-               internalError "rwCopyApp: Unexpected number of arguments"
-    _ -> unknown_source
+    Just (op, [val_type]) | op `isPyonBuiltin` The_Stored ->
+      copyStoredValue inf val_type repr src m_dst
+    _ -> do
+      (repr', repr_value) <- rwExp repr
+      (src', src_value) <- rwExp src
+      maybe_dst_result <- mapM rwExp m_dst
+  
+      -- Compute the value of the function call.  First, compute the value 
+      -- of 'copy' applied to the source value.
+      src_type <- inferExpType src'
+      let src_initializer_type = writerType src_type
+      src_initializer <- liftTypeEvalM $ initializerValue src_value src_type
+
+      -- If a destination was given, apply the value.
+      new_value <- 
+        case maybe_dst_result
+        of Nothing -> return src_initializer
+           Just (_, dst_value) ->
+             interpretComputation' $ applyCode src_initializer [] [dst_value]
+
+      let rebuild_copy_expr =
+            -- Rebuild the copy expression with simplified arguments
+            let rebuilt_args =
+                  repr' : src' : fmap fst (maybeToList maybe_dst_result)
+                new_exp = appE inf copy_op [TypM ty] rebuilt_args
+            in return (new_exp, new_value)
+
+      let create_initializer = do
+             -- Create an initializer expression from the source, if possible
+            src_initializer_expr <-
+              liftTypeEvalM $ concretize src_initializer_type src_initializer
+
+            case src_initializer_expr of
+              Nothing -> rebuild_copy_expr
+              Just e -> do
+                consumeFuel
+                case maybe_dst_result of
+                  Nothing ->
+                    return (e, new_value)
+                  Just (dst', dst_value) ->
+                    return (appE defaultExpInfo e [] [dst'], new_value)
+
+      ifElseFuel create_initializer rebuild_copy_expr
   where
     debug m = m
     {-
@@ -1449,49 +1389,11 @@ rwCopyApp inf copy_op ty args = debug $ do
              pprExp (appE inf copy_op [ty] args) $$ text "----" $$ pprExp e) $ return x
     -}
 
-    -- If out of fuel, then don't simplify this expression.  Process arguments.
-    use_fuel m = useFuel' unknown_source m
-    
-    -- Failed to eliminate the case statement before inspecting subexpressions
-    unknown_source = do
-      (args', arg_values) <- rwExps args
-  
-      -- Try to eliminate the statement based on values of subexpressions
-      have_fuel <- checkFuel
-      case arg_values of
-        (_ : src_value@(Just (fromDataAV -> Just (DataValue inf ty fs))) : _)
-          | have_fuel -> do
-              -- The source is a (partly) known value.  Try to replace the
-              -- copy expression by the known value.
-              m_new_exp <- createDataConApp inf ty fs
-              case m_new_exp of
-                Nothing -> rebuild_copy args' arg_values
-                Just (new_exp, new_val) -> do
-                  consumeFuel
-                  
-                  -- If an output parameter was given, then apply to the
-                  -- output parameter
-                  let retval =
-                        case args'
-                        of [_, _]       -> (new_exp, new_val)
-                           [_, _, outp] -> (appE defaultExpInfo new_exp [] [outp], Nothing)
-                  return retval
-
-        _ -> rebuild_copy args' arg_values
-
-    -- Could not simplify; rebuild expression
-    rebuild_copy args' arg_values =
-      let new_exp = appE inf copy_op [TypM ty] args'
-          new_value = copied_value arg_values
-      in return (new_exp, new_value)
-
-    -- Do we know what was stored here?
-    copied_value [_, _, _] = Nothing
-    copied_value [_, Just src_val] =
-      Just $ bigAV $ WriterAV (AbsReturn src_val)
-    copied_value [_, _] = Nothing
-    copied_value _ =
-      internalError "rwCopyApp: Wrong number of arguments in call"
+    (repr, src, m_dst) =
+      case args
+      of [repr, src] -> (repr, src, Nothing)
+         [repr, src, dst] -> (repr, src, Just dst)
+         _ -> internalError "rwCopyApp: Unexpected number of arguments"
 
 -- | Rewrite a copy of a Stored value to a deconstruct and construct operation.
 --
@@ -1525,11 +1427,11 @@ copyStoredValue inf val_type repr arg m_dst = do
 rwLet :: ExpInfo
       -> PatSM                  -- ^ Let-bound variable
       -> ExpSM                  -- ^ Right-hand side of let expression
-      -> (Subst -> LR (ExpM, MaybeValue))
+      -> (Subst -> LR (ExpM, AbsCode))
          -- ^ Computation that rewrites the body after applying a substitution.
          --   The substitution holds inlining decisions that were made while
          --   processing the binder part of the let expression.
-      -> LR (ExpM, MaybeValue)
+      -> LR (ExpM, AbsCode)
 rwLet inf (PatSM bind@(PatM (bind_var ::: _) _)) val simplify_body =
   ifElseFuel rw_recursive_let try_pre_inline
   where
@@ -1543,8 +1445,7 @@ rwLet inf (PatSM bind@(PatM (bind_var ::: _) _)) val simplify_body =
           -- Since substitution will eliminate the variable before the
           -- simplifier observes it, the variable isn't added to the environment.
           consumeFuel
-          val' <- applySubstitution val
-          let subst = Subst Substitute.empty (singletonV bind_var (SubstitutedVar val'))
+          let subst = Subst Substitute.empty (singletonV bind_var (SubstitutedVar subst_val))
           simplify_body subst
         else rw_recursive_let
 
@@ -1558,37 +1459,39 @@ rwLetNormal inf bind val simplify_body = do
   -- Inline the RHS expression, if desirable.  If
   -- inlining is not indicated, then propagate its known
   -- value.
-  let local_val_value = fmap (setTrivialValue bind_var) $ val_value
+  
+  -- If nothing is known about the RHS, there's no point in adding the
+  -- abstract value to the environment.  The only thing we know about the
+  -- value is that the bound variable represents it.  That case is handled
+  -- by the call to 'labelCodeVar' in 'rwVar'.
+  let local_val_value = if isTopCode val_value
+                        then topCode
+                        else labelCodeVar bind_var val_value
 
   -- Add local variable to the environment and rewrite the body
-  (body', body_val) <-
-    assumePattern bind $ withMaybeValue bind_var local_val_value simplify_body
+  (body', _) <-
+    assumePattern bind $ withKnownValue bind_var local_val_value simplify_body
 
-  -- The local variable goes out of scope, so it must not be mentioned 
-  -- by the known value
-  let ret_val = forgetVariable bind_var =<< body_val
-  
   -- Number of uses may change after simplifying
   let bind' = setPatMDmd unknownDmd bind
-  rwExpReturn (ExpM $ LetE inf bind' val' body', ret_val)
+  rwExpReturn (ExpM $ LetE inf bind' val' body', topCode)
 
 -- | Rewrite a letrec expression, by rewriting the functions and the
 --   expression body.  The letrec expression itself is not
 --   transformed or eliminated.
 rwLetrec inf defs body = withDefs defs $ \defs' -> do
-  (body', body_value) <- rwExp body
+  (body', _) <- rwExp body
       
   let local_vars = Set.fromList $ map definiendum $ defGroupMembers defs'
-      ret_value = forgetVariables local_vars =<< body_value
-  rwExpReturn (ExpM $ LetfunE inf defs' body', ret_value)
+  rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
 
-rwCase :: ExpInfo -> ExpSM -> [AltSM] -> LR (ExpM, MaybeValue)
+rwCase :: ExpInfo -> ExpSM -> [AltSM] -> LR (ExpM, AbsCode)
 rwCase inf scrut alts = do
   tenv <- getTypeEnv
   rwCase1 tenv inf scrut alts
   where
     -- For debugging, print the case expression that will be rewritten
-    debug_print_case :: LR (ExpM, MaybeValue) -> LR (ExpM, MaybeValue)
+    debug_print_case :: LR (ExpM, AbsCode) -> LR (ExpM, AbsCode)
     debug_print_case m = do
       scrut' <- applySubstitution scrut
       alts' <- mapM applySubstitutionAlt alts
@@ -1651,12 +1554,12 @@ rwCase1 tenv inf scrut alts = do
     can't_deconstruct scrut' scrut_val = rwCase2 inf alts scrut' scrut_val
 
 rwLetViaBoxed :: ExpInfo -> ExpSM -> PatSM 
-              -> (Subst -> LR (ExpM, MaybeValue))
+              -> (Subst -> LR (ExpM, AbsCode))
                  -- ^ Computation that rewrites the body after
                  --   applying a substitution.  The substitution holds
                  --   inlining decisions that were made while
                  --   processing the binder part of the let expression.
-              -> LR (ExpM, MaybeValue)
+              -> LR (ExpM, AbsCode)
 rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
   -- Rewrite the scrutinee
   (scrut', scrut_val) <- clearCurrentReturnParameter $ rwExp scrut
@@ -1691,17 +1594,17 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
     -- Construct and simplify a case alternative
     --
     -- > case ... of boxed @t (x : t) -> body
-    case_alternative :: MaybeValue -> LR AltM
+    case_alternative :: AbsCode -> LR AltM
     case_alternative scrut_val = do
       -- Propagate abstract value
       let field_val =
-            case scrut_val
-            of Just (fromDataAV -> Just (DataValue _ _ [val])) -> val
-               _ -> Nothing
+            case codeValue scrut_val
+            of DataAV (AbsData _ [val]) -> val
+               _ -> topCode
 
       -- Simplify body
       (body', _) <- assumePattern pat $
-                    withMaybeValue (patMVar pat) field_val $
+                    withKnownValue (patMVar pat) field_val $
                     compute_body emptySubst
 
       -- Construct a new case alternative
@@ -1715,30 +1618,30 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
       alt' <- case_alternative scrut_val
 
       -- Rebuild a new case expression
-      return (ExpM $ CaseE inf scrut' [alt'], Nothing)
+      return (ExpM $ CaseE inf scrut' [alt'], topCode)
 
 -- | A data constructor expression 
 data DataExpAndValue =
     -- | A data or tuple constructor application with arguments
-    ConAppAndValue !ConInst ![(ExpM, MaybeValue)]
+    ConAppAndValue !ConInst ![(ExpM, AbsCode)]
 
 -- | Given an expression and its abstract value, deconstruct the
 --   expression as if it were a data constructor application.
 --
 --   Return the components of the expression and the abstract values of
 --   its fields.
-makeDataExpWithAbsValue :: TypeEnv -> ExpM -> MaybeValue
+makeDataExpWithAbsValue :: TypeEnv -> ExpM -> AbsCode
                         -> Maybe DataExpAndValue
 makeDataExpWithAbsValue tenv expression expression_value =
   case expression
   of ExpM (ConE inf con args) ->
-       case expression_value
-       of Just (fromDataAV -> Just (DataValue _ dcon field_values)) ->
+       case codeValue expression_value
+       of DataAV (AbsData dcon field_values) ->
             -- 'con' and 'dcon' should be equal
             Just $ ConAppAndValue dcon (zip args field_values)
           _ ->
             -- Unknown values
-            Just $ ConAppAndValue (fromCInstM con) [(arg, Nothing) | arg <- args]
+            Just $ ConAppAndValue (fromCInstM con) [(arg, topCode) | arg <- args]
      _ ->
        Nothing
 
@@ -1758,13 +1661,13 @@ eliminateCaseWithAppAndValue
 --   application.
 --   If the scrutinee has a known value, it may still be possible to eliminate
 --   the case statement.
-rwCase2 :: ExpInfo -> [AltSM] -> ExpM -> MaybeValue -> LR (ExpM, MaybeValue)
+rwCase2 :: ExpInfo -> [AltSM] -> ExpM -> AbsCode -> LR (ExpM, AbsCode)
 rwCase2 inf alts scrut' scrut_val = do
   tenv <- getTypeEnv
   have_fuel <- checkFuel
-  case scrut_val of
-    Just (fromDataAV -> Just (DataValue _ dcon field_values)) ->
-      case mapM (>>= asTrivialValue) field_values of
+  case codeValue scrut_val of
+    DataAV (AbsData dcon field_values) ->
+      case sequence $ map codeTrivialExp field_values of
         Just field_exps | have_fuel -> do
           -- All fields can be represented as expressions. 
           -- The case statement can be eliminated.
@@ -1787,7 +1690,7 @@ rwCase2 inf alts scrut' scrut_val = do
           let alt = findAlternative alts dcon
 
           alt' <- rwAlt True scrut_var known_values alt
-          rwExpReturn (ExpM $ CaseE inf scrut' [alt'], Nothing)
+          rwExpReturn (ExpM $ CaseE inf scrut' [alt'], topCode)
     _ ->
       -- If scrutinee is a multi-branch case statement and the outer case
       -- statement's scrutinee is not a product type, then use the
@@ -1806,7 +1709,7 @@ rwCase2 inf alts scrut' scrut_val = do
            -- Cannot transform; simplify the case alternatives
            let sole_alternative = length alts == 1
            alts' <- mapM (rwAlt sole_alternative scrut_var Nothing) alts
-           rwExpReturn (ExpM $ CaseE inf scrut' alts', Nothing)
+           rwExpReturn (ExpM $ CaseE inf scrut' alts', topCode)
   where
     is_product_case tenv =
       case alts
@@ -1871,7 +1774,7 @@ eliminateCaseWithExp :: TypeEnv
                      -> [Type]
                      -> [ExpSM]
                      -> AltSM
-                     -> LR (ExpM, MaybeValue)
+                     -> LR (ExpM, AbsCode)
 eliminateCaseWithExp tenv field_kinds ex_args initializers alt =
   eliminateCaseExTypes ex_args alt $ \params body ->
   if length params /= length initializers
@@ -1895,9 +1798,9 @@ eliminateCaseWithSimplifiedExp :: Bool -- ^ Whether fields are given as field va
                                -> TypeEnv
                                -> [BaseKind] -- ^ Field kinds
                                -> [Type]     -- ^ Existential type parameters
-                               -> [(ExpM, MaybeValue)] -- ^ Initializers or field values, together with their abstract value
+                               -> [(ExpM, AbsCode)] -- ^ Initializers or field values, together with their abstract value
                                -> AltSM                -- ^ Case alternative to eliminate
-                               -> LR (ExpM, MaybeValue) -- ^ Simplified case alternative and its abstract value
+                               -> LR (ExpM, AbsCode) -- ^ Simplified case alternative and its abstract value
 eliminateCaseWithSimplifiedExp
   is_inspector tenv field_kinds ex_args initializers alt =
   eliminateCaseExTypes ex_args alt $ \params body ->
@@ -1921,9 +1824,9 @@ eliminateCaseWithSimplifiedExp
                zip params initializer_exps
           else foldr postCaseInitializerBinding body' $
                zip3 field_kinds params initializer_exps
-    return (new_body, Nothing)
+    return (new_body, topCode)
   where
-    with_values vs e = foldr (uncurry withMaybeValue) e vs
+    with_values vs e = foldr (uncurry withKnownValue) e vs
 
 -- | Given an expression that was a parameter of a data constructor term,
 --   bind the expression's value to a variable.  The correct way to bind the
@@ -1933,8 +1836,8 @@ eliminateCaseWithSimplifiedExp
 --
 --   * Bare fields are assigned by creating and unpacking a boxed object.
 caseInitializerBinding :: BaseKind -> PatM -> ExpSM
-                       -> (Subst -> LR (ExpM, MaybeValue))
-                       -> LR (ExpM, MaybeValue)
+                       -> (Subst -> LR (ExpM, AbsCode))
+                       -> LR (ExpM, AbsCode)
 caseInitializerBinding kind param initializer compute_body =
   case kind of
     BareK -> do
@@ -1953,8 +1856,8 @@ caseInitializerBinding kind param initializer compute_body =
     param' = PatSM $ setPatMDmd unknownDmd param
 
 caseInitializerBindings :: [(BaseKind, PatM, ExpSM)]
-                        -> (Subst -> LR (ExpM, MaybeValue))
-                        -> LR (ExpM, MaybeValue)
+                        -> (Subst -> LR (ExpM, AbsCode))
+                        -> LR (ExpM, AbsCode)
 caseInitializerBindings ((kind, param, initializer):fs) compute_body =
   caseInitializerBinding kind param initializer $ \subst ->
   caseInitializerBindings fs (apply subst)
@@ -1972,14 +1875,14 @@ postCaseInitializerBinding (kind, param, initializer) body =
     BareK -> letViaBoxed (patMBinder param) initializer body
     _ -> letE (setPatMDmd unknownDmd param) initializer body
 
-caseInspectorBinding :: PatSM -> ExpSM -> (Subst -> LR (ExpM, MaybeValue))
-                     -> LR (ExpM, MaybeValue)
+caseInspectorBinding :: PatSM -> ExpSM -> (Subst -> LR (ExpM, AbsCode))
+                     -> LR (ExpM, AbsCode)
 caseInspectorBinding param initializer compute_body
   | isDeadPattern (fromPatSM param) = compute_body emptySubst
   | otherwise = rwLet defaultExpInfo param initializer compute_body
   
-caseInspectorBindings :: [(PatSM, ExpSM)] -> (Subst -> LR (ExpM, MaybeValue))
-                      -> LR (ExpM, MaybeValue)
+caseInspectorBindings :: [(PatSM, ExpSM)] -> (Subst -> LR (ExpM, AbsCode))
+                      -> LR (ExpM, AbsCode)
 caseInspectorBindings ((param, initializer):fs) compute_body =
   caseInspectorBinding param initializer $ \subst ->
   caseInspectorBindings fs (apply subst)
@@ -1998,7 +1901,7 @@ postCaseInspectorBinding (param, initializer) body =
 
 rwAlt :: Bool                   -- ^ Whether to propagate exceptions
       -> Maybe Var              -- ^ Scrutinee, if it's just a variable
-      -> Maybe ([TypM], [MaybeValue]) -- ^ Deconstruted scrutinee value
+      -> Maybe ([TypM], [AbsCode]) -- ^ Deconstruted scrutinee value
       -> AltSM                        -- ^ Alternative to rewrite
       -> LR AltM
 rwAlt propagate_exceptions scr m_values (AltSM alt) = do
@@ -2008,19 +1911,10 @@ rwAlt propagate_exceptions scr m_values (AltSM alt) = do
       -- may increase or decrease after simplifying
       params = map (setPatMDmd unknownDmd . fromPatSM) $ altParams alt
   let arg_values = zipWith mk_arg values params
-  let data_value =
-        case decon
-        of VarDeCon v ty_args ex_types ->
-             let Just (data_type, dcon_type) = lookupDataConWithType v tenv
-                 ex_vars = [v | v ::: _ <- ex_types]
-             in patternValue defaultExpInfo tenv data_type dcon_type
-                (map TypM ty_args) ex_vars arg_values
-           TupleDeCon ty_args ->
-             tuplePatternValue defaultExpInfo (map TypM ty_args) arg_values
-
+  data_value <- liftTypeEvalM $ scrutineeDataValue decon params
   let assume_scrutinee m =
         case scr
-        of Just scrutinee_var -> withMaybeValue scrutinee_var data_value m
+        of Just scrutinee_var -> withKnownValue scrutinee_var data_value m
            Nothing -> m
 
   -- If scrutinee is a variable, add its known value to the environment
@@ -2041,7 +1935,7 @@ rwAlt propagate_exceptions scr m_values (AltSM alt) = do
             Just x -> return x
             Nothing -> do
               body_type <- inferExpType =<< applySubstitution body
-              return (ExpM $ ExceptE defaultExpInfo body_type, Nothing)
+              return (ExpM $ ExceptE defaultExpInfo body_type, topCode)
 
     -- Get the known values of the fields
     values = 
@@ -2053,10 +1947,10 @@ rwAlt propagate_exceptions scr m_values (AltSM alt) = do
                -- variable names appearing in the values with
                -- existential variable names appearing in the
                -- pattern.
-               repeat Nothing
+               repeat topCode
            | otherwise ->
                given_values
-         _ -> repeat Nothing
+         _ -> repeat topCode
 
     -- Add existential types, paramters, and known values to the environment
     assume_params ex_types params_and_values m = do
@@ -2069,14 +1963,11 @@ rwAlt propagate_exceptions scr m_values (AltSM alt) = do
     
     -- Add a parameter and its value to the environment
     assume_param (maybe_value, param) m =
-      assumePattern param $ withMaybeValue (patMVar param) maybe_value m
+      assumePattern param $ withKnownValue (patMVar param) maybe_value m
     
     -- Create a AbsValue argument for a data field.  Use the previous known
     -- value if available, or the variable that the field is bound to otherwise
-    mk_arg maybe_val pat =
-      case maybe_val
-      of Just val -> Just (setTrivialValue (patMVar pat) val)
-         Nothing  -> Just (VarAV defaultExpInfo $ patMVar pat)
+    mk_arg arg_val pat = labelCodeVar (patMVar pat) arg_val
 
 -- | Apply the case-of-case transformation to a multi-branch case statement.
 --   The scrutinee and inner branches have been simplified; the outer branches
@@ -2090,7 +1981,7 @@ rwCaseOfCase :: ExpInfo
              -> ExpM            -- ^ Inner case statement's scrutinee
              -> [AltM]          -- ^ Inner case statement's branches
              -> [AltSM]         -- ^ Outer case statement's branches
-             -> LR (ExpM, MaybeValue)
+             -> LR (ExpM, AbsCode)
 rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
   m_return_param <- getCurrentReturnParameter
   outer_defs <- mapM (makeBranchContinuation inf (fmap PatSM m_return_param)) outer_branches
@@ -2103,7 +1994,7 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
       new_expr = foldr bind_outer_def new_case outer_defs
         where
           bind_outer_def def e = ExpM $ LetfunE inf (NonRec def) e
-  return (new_expr, Nothing)
+  return (new_expr, topCode)
   where
     invert_branch m_return_param outer_ks (AltM branch) =
       let boxed_body =
@@ -2177,9 +2068,9 @@ rwCoerce inf (TypSM from_t) (TypSM to_t) body = do
     then rwExp body             -- Coercion is not necessary
     else do
       (body', _) <- rwExp body
-      return (ExpM $ CoerceE inf (TypM from_t) (TypM to_t) body', Nothing)
+      return (ExpM $ CoerceE inf (TypM from_t) (TypM to_t) body', topCode)
 
-rwFun :: FunSM -> LR (FunM, Maybe AbsFunValue)
+rwFun :: FunSM -> LR (FunM, AbsCode)
 
 -- Freshen bound variables to avoid name shadowing, then rename 
 rwFun f = rwFun' f
@@ -2191,16 +2082,15 @@ rwFun' (FunSM f) =
     
     -- If the function body raises an exception,
     -- replace it with an exception statement
-    let (body', body_value) =
+    let (body', body_computation) =
           case body_result
-          of Just (new_exp, m_value) ->
-               (new_exp, fmap AbsReturn m_value)
+          of Just (new_exp, value) ->
+               (new_exp, case codeValue value of {TopAV -> TopAC; _ -> ReturnAC value})
              Nothing ->
-               (ExpM $ ExceptE defaultExpInfo return_type,
-                Just AbsException)
-    let aval = abstract_value body_value
+               (ExpM $ ExceptE defaultExpInfo return_type, ExceptAC)
+    let aval = funValue ty_params params body_computation
         new_fun = FunM $ Fun (funInfo f) ty_params params' (TypM return_type) body'
-    trace_aval aval $ return (new_fun, aval)
+    return (new_fun, aval)
   where
     ty_params = map fromTyPatSM $ funTyParams f
     params = map fromPatSM $ funParams f
@@ -2229,14 +2119,6 @@ rwFun' (FunSM f) =
           case multiplicity $ patMDmd p
           of Dead -> p
              _ -> setPatMDmd unknownDmd p
-
-    abstract_value Nothing = Nothing 
-    abstract_value (Just val)
-      | not (null $ funTyParams f) = Nothing -- Cannot abstract polymorphic functions
-      | otherwise = Just $ abstractFunction (funInfo f) (map fromPatSM $ funParams f) val
-
-    trace_aval Nothing x = x
-    trace_aval (Just v) x = traceShow (text "DEBUG: Abstracted function:" $$ pprAbsFun v) x
 
 rwDef :: Def SM -> LR (Def Mem)
 rwDef def = mapMDefiniens (liftM fst . rwFun) def
@@ -2298,9 +2180,6 @@ rewriteLocalExpr phase ruleset mod =
     tenv <- readInitGlobalVarIO the_memTypes
     denv <- runFreshVarM var_supply createDictEnv
 
-    -- Take known data constructors from the type environment
-    let global_known_values = initializeKnownValues tenv
-    
     -- Initialize the global substitution with the variable rewrite rules.
     known_value_list <-
       runFreshVarM var_supply $ getVariableReplacements ruleset
@@ -2318,7 +2197,7 @@ rewriteLocalExpr phase ruleset mod =
                       , lrFuel = fuel}
         env =
           LREnv { lrConstants = env_constants
-                , lrKnownValues = IntMap.empty
+                , lrKnownValues = emptyAbsEnv
                 , lrReturnParameter = Nothing
                 , lrTypeEnv = tenv
                 , lrDictEnv = denv

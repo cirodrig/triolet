@@ -70,8 +70,9 @@ data DmdFun =
   , paramDemands :: ![DmdVar]
     -- | Number of parameters other than output parameters
   , inputArity :: {-#UNPACK#-}!Int
-    -- | True if the function takes an output parameter
-  , hasOutputParam :: !Bool
+    -- | If the function takes an output parameter, this is the parameter
+    -- variable
+  , outputParam :: !(Maybe Var)
     -- | In the case of recursive definition groups, the evaluator may be
     --   assigned lazily
   , evaluator :: Run ()
@@ -268,17 +269,17 @@ makeDmdFun m_name (FunM fun) evaluator =
 
     -- Determine the function's arity
     tenv <- getTypeEnv
-    let (input_arity, has_output_param) =
+    let (input_arity, output_param) =
           let (input_params, output_params) =
                 partitionParameters tenv (funParams fun)
-              has_output_param =
+              output_param =
                 case output_params
-                of [] -> False
-                   [_] -> True
+                of [] -> Nothing
+                   [p] -> Just $ patMVar p
                    _ -> internalError "setupFun: Can't handle multiple output parameters"
-          in (length input_params, has_output_param)
+          in (length input_params, output_param)
     
-    return $ DmdFun m_name ret_var param_vars input_arity has_output_param evaluator
+    return $ DmdFun m_name ret_var param_vars input_arity output_param evaluator
   where
     -- Separate the function parameters into input and output parameters.
     -- Output parameters must follow input parameters.
@@ -345,17 +346,18 @@ setupExp (ExpM expression) =
            function <- getDmdFun op_var
            case function of
              Just fun ->
-               let out = hasOutputParam fun
+               let out = outputParam fun
                    input_saturated = length args == inputArity fun
-                   fully_saturated = out && length args == inputArity fun + 1
+                   fully_saturated = isJust out && length args == inputArity fun + 1
                in case () of
-                 _ | out && input_saturated ->
+                 _ | isJust out && input_saturated ->
                      -- This is a function application returning an initializer
-                     setupDirectCall (evalInitializerCall fun) fun op_var args
-                   | out && fully_saturated ->
+                     let Just out_var = out
+                     in setupDirectCall (evalInitializerCall fun out_var) fun op_var args
+                   | isJust out && fully_saturated ->
                      -- This is a function application returning by side effect
                      setupDirectCall (evalEffectCall fun) fun op_var args
-                   | not out && input_saturated ->
+                   | isNothing out && input_saturated ->
                      -- This is a function application returning a value
                      setupDirectCall (evalValueCall fun) fun op_var args
                    | otherwise ->
@@ -421,13 +423,13 @@ evalIndirectCall :: DmdFun -> Run ()
 evalIndirectCall f = void $ updateDmdFun f Used
 
 -- | Evaluate a call of a function that returns an initializer.
-evalInitializerCall :: DmdFun -> [Evaluator] -> Evaluator
-evalInitializerCall dmd_fun eval_args dmd = do
+evalInitializerCall :: DmdFun -> Var -> [Evaluator] -> Evaluator
+evalInitializerCall dmd_fun out_var eval_args dmd = do
   -- If the call's return demand is an initializer demand,
   -- translate it into a side effect demand.
   let return_dmd =
         case dmd
-        of Written d -> Read (HeapMap [((), d)])
+        of Written d -> Read (HeapMap [(out_var, d)])
            Unused -> Unused
            _ -> Used
   arg_dmds <- updateDmdFun dmd_fun return_dmd

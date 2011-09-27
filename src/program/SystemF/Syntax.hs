@@ -146,7 +146,7 @@ data Specificity =
 
 -- | A map assigning properties to locations in the heap.  The key stands for
 --   the output pointer.
-newtype HeapMap a = HeapMap [((), a)]
+newtype HeapMap a = HeapMap [(Var, a)]
 
 -- | Relational join on a HeapMap
 joinHeapMap :: (a -> b -> c) -> HeapMap a -> HeapMap b -> HeapMap c

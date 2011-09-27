@@ -385,7 +385,9 @@ instance Renameable Specificity where
        Written spc -> Written (rename rn spc)
 
        Read (HeapMap xs) ->
-         Read (HeapMap [((), rename rn val) | ((), val) <- xs])
+         let rename_assoc (addr, val) =
+               (fromMaybe addr $ Rename.lookup addr rn, rename rn val)
+         in Read (HeapMap $ map rename_assoc xs)
        
        -- Other constructors don't mention variables
        _ -> spc

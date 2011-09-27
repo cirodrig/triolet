@@ -13,23 +13,36 @@ module SystemF.Simplifier.AbsValue
        (-- * Abstract values
         AbsCode,
         topCode,
+        isTopCode,
         valueCode,
         labelCode,
+        labelCodeVar,
+        relabelCodeVar,
         codeExp,
         codeTrivialExp,
         codeValue,
         AbsValue(..),
+        AbsData(..),
         funValue,
+        initializerValue,
         scrutineeDataValue,
         AbsComputation(..),
         
         -- * Interpretation
         applyCode,
-        constructorDataValue,
+        interpretCon,
+        interpretInitializer,
+
+        -- * Concretization
+        concretize,
+
+        -- * Printing
+        pprAbsCode,
 
         -- * Environments of abstract values
         AbsEnv,
         emptyAbsEnv,
+        absEnvMembers,
         insertAbstractValue,
         lookupAbstractValue
         )
@@ -40,18 +53,24 @@ import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Trans.Maybe
 import qualified Data.IntMap as IntMap
+import Data.Maybe
+import Debug.Trace
+import Text.PrettyPrint.HughesPJ
 
 import Common.Error
 import Common.Identifier
 import Common.MonadLogic
 import Common.Supply
+import Builtins.Builtins
 import SystemF.Syntax
 import SystemF.MemoryIR
+import SystemF.PrintMemoryIR
 import qualified SystemF.Rename as SFRename
 import SystemF.TypecheckMem
 import Type.Environment
 import Type.Eval
 import Type.Type
+import qualified Type.Rename as Rename
 import Type.Substitute(TypeSubst,
                        SubstitutionMap(..), Substitutable(..),
                        substitute, freshen)
@@ -64,54 +83,87 @@ renameMany f rn (x:xs) k =
 
 renameMany _ rn [] k = k rn []
 
--- | An abstract value labeled with a piece of code.
+-- | An abstract value labeled with a piece of code and/or a variable.
 --
---   The label retrieved with 'codeExp' is an expression that is exactly
---   equal to the abstract value.  At the discretion of the simplifier,
---   this expression may be inlined in place of the abstract value.
+--   The label retrieved with 'codeExp' or 'codeTrivialExp' is an
+--   expression that is exactly equal to the abstract value.  At the
+--   discretion of the simplifier, this expression may be inlined in
+--   place of the abstract value.
 --
---   If the value is a 'LitAV' or 'VarAV', the label is not explicitly
---   stored.
---   Calling 'codeExp' will return an expression in those cases.
+--   Of these functions, 'codeTrivialExp' only returns a variable or 
+--   literal, while 'codeExp' may return a larger expession.  Function values
+--   are an example of where both are useful: the larger expression is needed
+--   for beta-reduction (i.e., inlining) while the variable is useful for
+--   copy propagation when the function value is copied but not called.
+--
+--   If the value is a 'LitAV' or 'VarAV', the label does not have to be
+--   explicitly stored.  Note that the abstract value (not the label) is
+--   given priority when creating an expression.
 data AbsCode =
   AbsCode { _codeLabel :: !(Maybe ExpM)
+          , _codeVarLabel :: !(Maybe Var)
           , _codeValue :: !AbsValue
           }
 
 -- | The least precise 'AbsCode' value.
 topCode :: AbsCode
-topCode = AbsCode Nothing TopAV
+topCode = AbsCode Nothing Nothing TopAV
 
--- | Create an 'AbsCode' from an 'AbsValue'.  The created code is not labeled
---   with an expression.
+isTopCode (AbsCode Nothing Nothing TopAV) = True
+isTopCode _ = False
+
+-- | Create an 'AbsCode' from an 'AbsValue'.  The created code is not labeled.
 valueCode :: AbsValue -> AbsCode
-valueCode v = AbsCode Nothing v
+valueCode v = AbsCode Nothing Nothing v
 
 -- | Attach a label to an 'AbsCode', to be retrieved with 'codeExp'.
 labelCode :: ExpM -> AbsCode -> AbsCode
 labelCode lab code = code {_codeLabel = Just lab}
 
+-- | Attach a variable label to an 'AbsCode', to be retrieved with
+--   'codeTrivialExp', unless the code already has a trivial expression.
+labelCodeVar :: Var -> AbsCode -> AbsCode
+labelCodeVar v code
+  | isJust $ codeTrivialExp code = code
+  | TopAV <- _codeValue code = AbsCode (_codeLabel code) Nothing (VarAV v)
+  | otherwise = code {_codeVarLabel = Just v}
+
+-- | Attach a variable label to an 'AbsCode', to be retrieved with
+--   'codeTrivialExp'.
+relabelCodeVar :: Var -> AbsCode -> AbsCode
+relabelCodeVar v code = code {_codeVarLabel = Just v}
+
 -- | Convert an 'AbsCode' to an expression if possible.
 codeExp :: AbsCode -> Maybe ExpM
-codeExp code =
-  case _codeValue code
-  of LitAV l -> Just $ ExpM (LitE defaultExpInfo l)
-     VarAV v -> Just $ ExpM (VarE defaultExpInfo v)
-     _ -> case _codeLabel code
-          of Just lab -> Just lab
-             Nothing  -> Nothing
+codeExp code
+  -- First, try to get the expression that was assigned
+  | Just lab <- _codeLabel code = Just lab
+
+  -- Next, try to get a trivial value
+  | LitAV l <- _codeValue code = Just $ ExpM (LitE defaultExpInfo l)
+  | VarAV v <- _codeValue code = Just $ ExpM (VarE defaultExpInfo v)
+
+  -- Finally, get the variable that was assigned
+  | Just v <- _codeVarLabel code = Just $ ExpM (VarE defaultExpInfo v)
+  | otherwise = Nothing
 
 -- | Convert an 'AbsCode' to an expression if it can be represented by a
 --   trivial expression.
 codeTrivialExp :: AbsCode -> Maybe ExpM
 codeTrivialExp code =
-  case codeExp code
-  of Nothing -> Nothing
-     Just exp -> 
-       case exp
-       of ExpM (LitE {}) -> Just exp
-          ExpM (VarE {}) -> Just exp
-          _ -> Nothing
+  case _codeVarLabel code
+  of Just v -> Just $ ExpM (VarE defaultExpInfo v)
+     Nothing ->
+       case _codeValue code
+       of LitAV l -> Just $ ExpM (LitE defaultExpInfo l)
+          VarAV v -> Just $ ExpM (VarE defaultExpInfo v)
+          _ -> case _codeLabel code
+               of Nothing -> Nothing
+                  Just exp -> 
+                    case exp
+                    of ExpM (LitE {}) -> Just exp
+                       ExpM (VarE {}) -> Just exp
+                       _ -> Nothing
 
 codeValue :: AbsCode -> AbsValue
 codeValue = _codeValue
@@ -171,6 +223,52 @@ data AbsData =
 -- | A heap fragment.  The domain of the heap fragment indicates exactly
 --   the contents of the heap fragment.
 newtype AbsHeap = AbsHeap {fromAbsHeap :: HeapMap AbsCode}
+
+-------------------------------------------------------------------------------
+-- Printing
+
+pprAbsCode :: AbsCode -> Doc
+pprAbsCode (AbsCode Nothing Nothing val) = pprAbsValue val
+pprAbsCode (AbsCode lab var val) =
+  let lab_doc =
+        case (lab, var)
+        of (Just lab, Nothing) -> pprExp lab
+           (Nothing, Just v)   -> pprVar v
+           (Just lab, Just v)  -> pprVar v <+> text "=" <+> pprExp lab
+      val_doc = pprAbsValue val
+  in braces lab_doc $$ text "~=" <+> val_doc
+
+pprAbsValue TopAV = text "TOP"
+pprAbsValue (VarAV v) = pprVar v
+pprAbsValue (LitAV l) = pprLit l
+pprAbsValue (FunAV f) = pprAbsFun f
+pprAbsValue (DataAV d) = pprAbsData d
+pprAbsValue (HeapAV hp) = pprAbsHeap hp
+
+pprAbsComputation TopAC = text "TOP"
+pprAbsComputation (ReturnAC c) = text "RET" <+> pprAbsCode c
+pprAbsComputation ExceptAC = text "EXCEPT"
+
+pprAbsFun (AbsFun ty_params params body) =
+  let ty_params_doc = [text "@" <> parens (pprVar v <+> colon <+> pprType t)
+                      | v ::: t <- ty_params]
+      params_doc = [parens (pprVar (patMVar p) <+> colon <+> pprType (patMType p))
+                   | p <- params]
+  in hang (text "lambda" <+> sep (ty_params_doc ++ params_doc) <> text ".") 4 $
+     pprAbsComputation body
+
+pprAbsData (AbsData (VarCon op ty_args ex_types) fs) =
+  let op_doc = text "<" <> pprVar op <> text ">"
+      ty_args_doc = [text "@" <> pprType t | t <- ty_args]
+      ex_types_doc = [text "&" <> pprType t | t <- ex_types]
+      args_doc = map pprAbsCode fs
+  in parens $ hang op_doc 6 (sep $ ty_args_doc ++ ex_types_doc ++ args_doc)
+
+pprAbsData (AbsData (TupleCon _) fs) =
+  parens $ sep $ punctuate comma $ map pprAbsCode fs
+
+pprAbsHeap (AbsHeap (HeapMap xs)) =
+  braces $ vcat $ punctuate semi [pprVar a <+> text "|->" <+> pprAbsCode v | (a, v) <- xs]
 
 -------------------------------------------------------------------------------
 -- Substitution
@@ -378,17 +476,36 @@ substituteAbsValue s value =
      LitAV _ -> return value
      FunAV f -> FunAV `liftM` substitute s f
      DataAV d -> DataAV `liftM` substitute s d
-     HeapAV h -> HeapAV `liftM` substitute s h
+     HeapAV h -> do
+       -- Substitute the heap map; the result may be unrepresentable 
+       h' <- substituteAbsHeap s h
+       return $! case h'
+                 of Nothing -> TopAV
+                    Just hm -> HeapAV hm
 
 instance Substitutable AbsCode where
   type Substitution AbsCode = AbsSubst
   
   substituteWorker s code = do
-    label <- case _codeLabel code
-             of Nothing -> return Nothing
-                Just e -> liftTypeEvalM $ runMaybeT $ substituteExp s e
+    -- Substitute the variable label first
+    let (var_label, expanded_var_label) =
+          case _codeVarLabel code
+          of Nothing -> (Nothing, Nothing)
+             Just v ->
+               case lookupValue v s
+               of Nothing       -> (Just v, Nothing)
+                  Just Nothing  -> (Nothing, Nothing)
+                  Just (Just e) -> (Nothing, Just e)
+    -- Substitute the code label
+    label <-
+      case expanded_var_label
+      of Just lab -> return $ Just lab
+         Nothing ->
+           case _codeLabel code
+           of Nothing -> return Nothing
+              Just e -> liftTypeEvalM $ runMaybeT $ substituteExp s e
     value <- substitute s (_codeValue code)
-    return $ AbsCode label value
+    return $ AbsCode label var_label value
 
 instance Substitutable AbsValue where
   type Substitution AbsValue = AbsSubst
@@ -421,32 +538,48 @@ instance Substitutable AbsData where
     fields' <- substitute s fields
     return $ AbsData con' fields'
 
-instance Substitutable AbsHeap where
-  type Substitution AbsHeap = AbsSubst
- 
-  substituteWorker s (AbsHeap (HeapMap xs)) = do
-    xs' <- mapM substitute_entry xs
-    return $ AbsHeap $ HeapMap xs'
+substituteAbsHeap :: EvalMonad m => AbsSubst -> AbsHeap -> m (Maybe AbsHeap)
+substituteAbsHeap s (AbsHeap (HeapMap xs)) = do
+    m_xs' <- mapM substitute_entry xs
+    case sequence m_xs' of
+      Nothing -> return Nothing
+      Just xs' -> return $ Just $ AbsHeap $ HeapMap xs'
     where
-      substitute_entry ((), code) = do
-        code' <- substitute s code
-        return ((), code')
+      substitute_entry (addr, code) =
+        case lookupAbsValue addr s
+        of Nothing -> subst_code addr
+           Just (VarAV new_addr) -> subst_code new_addr
+           Just _ -> return Nothing
+        where
+          subst_code new_addr = do
+            code' <- substitute s code
+            return $ Just (new_addr, code')
 
 -------------------------------------------------------------------------------
 -- Abstract environments
 
--- | An environment mapping program variables to abstract values
+-- | An environment mapping program variables to abstract values.
+--
+--   All variables not explicitly stored in the map are mapped to 'topCode'.
 newtype AbsEnv = AbsEnv (IntMap.IntMap AbsCode)
 
 emptyAbsEnv :: AbsEnv
 emptyAbsEnv = AbsEnv IntMap.empty
 
-insertAbstractValue :: Var -> AbsCode -> AbsEnv -> AbsEnv
-insertAbstractValue v c (AbsEnv m) =
-  AbsEnv (IntMap.insert (fromIdent $ varID v) c m)
+absEnvMembers :: AbsEnv -> [(Int, AbsCode)]
+absEnvMembers (AbsEnv m) = IntMap.toList m
 
-lookupAbstractValue :: Var -> AbsEnv -> Maybe AbsCode
-lookupAbstractValue v (AbsEnv m) = IntMap.lookup (fromIdent $ varID v) m
+-- | Insert a variable's value in an environment
+insertAbstractValue :: Var -> AbsCode -> AbsEnv -> AbsEnv
+insertAbstractValue v c (AbsEnv m)
+  | isTopCode c = AbsEnv m
+  | otherwise   = AbsEnv (IntMap.insert (fromIdent $ varID v) c m)
+
+-- | Look up the variable's value in an environment.
+--   If its value is not stored there, it's assumed to be \'top\'.
+lookupAbstractValue :: Var -> AbsEnv -> AbsCode
+lookupAbstractValue v (AbsEnv m) =
+  fromMaybe topCode $ IntMap.lookup (fromIdent $ varID v) m
 
 -------------------------------------------------------------------------------
 -- Abstract interpretation
@@ -485,8 +618,7 @@ applyAbsFun (AbsFun ty_params params body) ty_args args
   | n_ty_args == n_ty_params && n_args >= n_params = do
       -- Application.  The function is applied and evaluated.
       let subst = AbsSubst type_subst value_subst arg_subst
-      comp <- substitutePatMs subst params $ \subst' params' -> do
-        substitute subst' body
+      comp <- substitute subst body
 
       -- If there are no remaining arguments, application has finished
       if null excess_args
@@ -529,9 +661,40 @@ applyAbsFun (AbsFun ty_params params body) ty_args args
     type_error = internalError "applyAbsFun: Type error detected"
 
 -- | Construct an abstract value for a function
-funValue :: [TyPatM] -> [PatM] -> AbsComputation -> AbsValue
+funValue :: [TyPatM] -> [PatM] -> AbsComputation -> AbsCode
 funValue typarams params body =
-  FunAV (AbsFun [b | TyPatM b <- typarams] params body)
+  -- If value of body is 'Top' or 'Return Top', then approximate the
+  -- function as 'Top'.
+  -- By approximating, we are forgetting that the function will
+  -- /definitely not/ raise an exception when partially applied.
+  -- When the value is 'Return Top', we are also forgetting that
+  -- the function will definitely not raise an exception when fully
+  -- applied.  That's okay because we have no way of utilizing that
+  -- information.
+  case body
+  of TopAC -> topCode
+     ReturnAC val | TopAV <- codeValue val -> topCode
+     _ -> valueCode $ FunAV (AbsFun [b | TyPatM b <- typarams] params body)
+
+-- | Given a data value and its type, construct the value of the
+-- corresponding initializer function.
+--
+-- The value is a one-parameter function returning a heap fragment.
+initializerValue :: AbsCode -> Type -> TypeEvalM AbsCode
+initializerValue data_value ty =
+  initializerValueHelper (ReturnAC data_value) ty
+
+-- | A helper function that handles exception-raising computations.
+--   The computation that's passed as a parameter doesn't correspond to
+--   a realizable program value.
+initializerValueHelper :: AbsComputation -> Type -> TypeEvalM AbsCode
+initializerValueHelper data_comp ty = do
+  param <- newAnonymousVar ObjectLevel
+  let param_type = varApp (pyonBuiltin The_OutPtr) [ty]
+      pattern = patM (param ::: param_type)
+  computation <- interpretComputation data_comp $ \data_value ->
+    return $ ReturnAC $ valueCode $ HeapAV $ AbsHeap (HeapMap [(param, data_value)])
+  return $ funValue [] [pattern] computation
 
 -- | Compute the value produced by a data constructor application.
 --
@@ -539,48 +702,54 @@ funValue typarams params body =
 --   the field values, the functions are each applied to a nonce
 --   parameter representing the address of the constructor field.
 --   For other fields, the argument value is exactly the field value.
-constructorDataValue :: ConInst -> [AbsCode] -> TypeEvalM AbsComputation
-constructorDataValue con fields =
+interpretCon :: ConInst -> [AbsCode] -> TypeEvalM AbsComputation
+interpretCon con fields =
   case con
   of VarCon op _ _ -> do
        -- Look up field kinds
        tenv <- getTypeEnv
-       let Just dcon_type = lookupDataCon op tenv
+       let Just (data_type, dcon_type) = lookupDataConWithType op tenv
        let field_kinds = dataConFieldKinds tenv dcon_type
        when (length field_kinds /= length fields) type_error
        
        -- Compute values
        field_computations <-
          zipWithM compute_initializer_value field_kinds fields
-       sequenceComputations field_computations $ \field_values ->
-         return $ ReturnAC $ AbsCode Nothing (datacon_value field_values)
+       
+       -- Compute the data value.  If it's a bare object, the result doesn't
+       -- represent a real value; we have to convert it to an initializer.
+       data_comp <- sequenceComputations field_computations $ \field_values ->
+         return $ ReturnAC $ valueCode (datacon_value field_values)
+
+       -- If it's a bare object, create an initializer function value
+       case dataTypeKind data_type of
+         BareK -> do
+           (_, con_type) <- conType con
+           code <- initializerValueHelper data_comp con_type
+           return $ ReturnAC code
+         _ -> return data_comp
          
      -- A tuple contains no bare fields, so it's simpler to create
      TupleCon ty_args
        | length fields /= length ty_args ->
            type_error
        | otherwise ->
-           return $ ReturnAC $ AbsCode tuple_label (datacon_value fields)
+           return $ ReturnAC $ valueCode (datacon_value fields)
   where
     type_error :: TypeEvalM a
     type_error = internalError "constructorDataValue: Type error detected"
     
     datacon_value field_values = DataAV (AbsData con field_values)
 
-    compute_initializer_value BareK f = initializerValue f
+    compute_initializer_value BareK f = interpretInitializer f
     compute_initializer_value BoxK f  = return (ReturnAC f)
     compute_initializer_value ValK f  = return (ReturnAC f)
     compute_initializer_value _    _  =
       internalError "constructorDataValue: Unexpected field kind"
 
-    -- Construct a tuple expression
-    tuple_label = do
-      field_labels <- mapM codeExp fields
-      return $ conE defaultExpInfo con field_labels
-
 -- | Compute the value produced by an initializer function
-initializerValue :: AbsCode -> TypeEvalM AbsComputation
-initializerValue code = do
+interpretInitializer :: AbsCode -> TypeEvalM AbsComputation
+interpretInitializer code = do
   -- Create a new variable to stand for the location where the result will
   -- be written
   out_var <- newAnonymousVar ObjectLevel
@@ -590,9 +759,10 @@ initializerValue code = do
   interpretComputation result $ \retval ->
     case codeValue retval
     of HeapAV (AbsHeap (HeapMap m)) ->
-         case lookup () m
+         case lookup out_var m
          of Just value -> return $ ReturnAC value
-       _ -> internalError "initializerValue: Type error detected"
+       TopAV -> return $ ReturnAC topCode
+       _ -> internalError "interpretInitializer: Type error detected"
 
 -- | Compute the value of a case scrutinee, given that it matched a pattern
 --   in a case alternative.
@@ -607,3 +777,131 @@ scrutineeDataValue decon params = do
   where
     pattern_field pat = valueCode $ VarAV (patMVar pat)
 
+-------------------------------------------------------------------------------
+-- Concretization
+
+-- | Create an expression whose result has the given abstract value, where
+--   the abstract value has the given type.
+concretize :: Type -> AbsCode -> TypeEvalM (Maybe ExpM)
+concretize ty e = runMaybeT (concretize' ty e)
+
+concretize' ty e
+  | Just exp <- codeTrivialExp e = return exp
+  | otherwise =
+      case codeValue e
+      of DataAV dv -> concretizeData dv
+         FunAV f   -> concretizeFun ty f
+         HeapAV hp -> concretizeHeap hp
+         _         -> mzero
+
+-- | Try to create a concrete expression whose value is the value of this 
+--   data constructor application.  For each bare field, create a constructor
+--   application or \'copy\' function call.  For each other field, use the
+--   field's value.
+concretizeData :: AbsData -> MaybeT TypeEvalM ExpM
+concretizeData data_value@(AbsData con fs) = do
+  -- Ensure that the data value is not a bare data value.
+  -- It's an error to attempt to concretize a bare value.
+  tenv <- getTypeEnv
+  when (bad_data_kind tenv con) $
+    internalError "concretize: Cannot concretize values of kind 'bare'"
+
+  concretizeDataConApp data_value
+  where
+    bad_data_kind tenv (VarCon op _ _) =
+      let Just (data_type, dcon_type) = lookupDataConWithType op tenv
+      in dataTypeKind data_type == BareK
+    
+    bad_data_kind tenv (TupleCon _) = False
+
+-- | Concretize a data constructor application.
+--   The result is either a data value or an initializer function.
+concretizeDataConApp (AbsData con fs) = do
+  -- Determine field kinds and types
+  tenv <- getTypeEnv
+  (field_types, _) <- conType con
+  let field_kinds = conFieldKinds tenv con
+
+  -- Concretize each field and create a constructor application
+  field_exps <- sequence $ zipWith3 concretize_field field_kinds field_types fs
+  return $ conE defaultExpInfo con field_exps
+  where
+    concretize_field BareK ty f = do
+      -- Create and concretize an initializer value
+      let init_type = varApp (pyonBuiltin The_OutPtr) [ty] `FunT`
+                      varApp (pyonBuiltin The_IEffect) [ty]
+      concretize' init_type =<< lift (initializerValue f ty)
+
+    concretize_field BoxK ty f = concretize' ty f
+    concretize_field ValK ty f = concretize' ty f
+
+concretizeFun :: Type -> AbsFun -> MaybeT TypeEvalM ExpM
+concretizeFun fun_type (AbsFun ty_params params body) =
+  case body
+  of TopAC -> mzero             -- Unknown behavior
+     ReturnAC code ->
+       -- Construct a function expression
+       assumeBinders ty_params $ assumePatMs params $ do
+         body_exp <- concretize' return_type code
+         return $ make_function body_exp
+     ExceptAC ->
+       -- Construct a function that raises an exception
+       let exception = ExpM $ ExceptE defaultExpInfo return_type
+       in return $ make_function exception
+  where
+    return_type = unpackFunctionType fun_type ty_params params
+    make_function e =
+      ExpM $ LamE defaultExpInfo $
+      FunM $ Fun defaultExpInfo (map TyPatM ty_params) params (TypM return_type) e
+
+unpackFunctionType fun_type ty_params params =
+  do_typarams Rename.empty fun_type ty_params params
+  where
+    -- Extract type arguments.  Rename the function type so that type
+    -- variables match the given type parameters.
+    do_typarams rn fun_type ((b ::: _):ty_params) params =
+      case fun_type
+      of AllT (a ::: _) range ->
+           do_typarams (Rename.extend a b rn) range ty_params params
+         _ -> type_error
+
+    do_typarams rn fun_type [] params =
+      do_params rn fun_type params
+
+    -- Drop parameter types; we don't need them
+    do_params rn fun_type (param : params) =
+      case fun_type
+      of FunT _ range -> do_params rn range params
+         _ -> type_error
+
+    -- Get the return type
+    do_params rn fun_type [] = Rename.rename rn fun_type
+
+    type_error = internalError "concretizeFun: Type error detected"
+
+-- | Concretize a heap map.  For each entry in the map, write to the heap.
+concretizeHeap :: AbsHeap -> MaybeT TypeEvalM ExpM
+concretizeHeap (AbsHeap (HeapMap [(addr, val)])) =
+  concretizeHeapItem addr val
+
+concretizeHeap _ =
+  -- Support for multiple heap contents have not been implemented
+  internalError "concretizeHeap: Not implemented for this value"
+
+concretizeHeapItem :: Var -> AbsCode -> MaybeT TypeEvalM ExpM
+concretizeHeapItem addr val
+  | Just exp <- codeTrivialExp val =
+      -- Not implemented.  The right thing to do is copy the value to the 
+      -- destination.  We need the type in order to call 'copy'.
+      internalError "concretizeHeapItem: Not implemented"
+
+  | DataAV data_value <- codeValue val = do
+      -- Consruct this value at the address
+      initializer <- concretizeDataConApp data_value
+      let out_ptr = ExpM $ VarE defaultExpInfo addr
+      return $ ExpM $ AppE defaultExpInfo initializer [] [out_ptr]
+
+  | TopAV <- codeValue val = mzero
+
+  -- Only data and variables should appear here
+  | otherwise = internalError "concretizeHeapItem: Unexpected abstract value"
