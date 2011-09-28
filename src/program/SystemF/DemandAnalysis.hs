@@ -45,9 +45,14 @@ import Globals
 -------------------------------------------------------------------------------
 -- Demand analysis functions
 
--- | Demand analysis takes the global type environment as a parameter.
---   The global type environment is used to look up type and data constructors
---   only.  The analysis generates information how variables are used.
+-- | Demand analysis takes a reduced type environment as a parameter.
+--   The type environment is only used to look up type and data constructors,
+--   and compute kinds.  Value variables are never looked up in the environment.
+--
+--   For this reason, demand analysis only updates the type environment with 
+--   type variables, not value variables.
+--   
+--   The analysis generates demand information on variables.
 newtype Df a = Df {runDf :: TypeEnv -> (a, Dmds)}
 
 evalDf :: Df a -> TypeEnv -> a
@@ -70,6 +75,10 @@ instance MonadWriter Dmds Df where
   tell w = Df (\_ -> ((), w))
   listen m = Df (\tenv -> let (x, w) = runDf m tenv in ((x, w), w))
   pass m = Df (\tenv -> let ((x, f), w) = runDf m tenv in (x, f w))
+
+instance TypeEnvMonad Df where
+  getTypeEnv = ask
+  assume v t = local (insertType v t)
 
 -- | Run multiple dataflow analyses on mutually exclusive execution paths.
 --   This kind of execution occurs in case alternatives.
@@ -170,18 +179,18 @@ withManyBinders one xs m = go xs
     
     go [] = fmap ((,) []) m
 
-withBinder :: Binder -> Df a -> Df (Binder, a)
-withBinder pat@(v ::: ty) m = do
+withTyBinder :: Binder -> Df a -> Df (Binder, a)
+withTyBinder pat@(v ::: ty) m = do
   dfType ty
-  x <- maskDemand v m
+  x <- maskDemand v $ assume v ty m
   return (pat, x)
 
-withBinders = withManyBinders withBinder
+withTyBinders = withManyBinders withTyBinder
 
 withTyPat :: TyPatM -> Df a -> Df (TyPatM, a)
 withTyPat pat@(TyPatM (v ::: ty)) m = do
   dfType ty
-  x <- maskDemand v m
+  x <- maskDemand v $ assume v ty m
   return (pat, x)
 
 withTyPats = withManyBinders withTyPat
@@ -333,7 +342,7 @@ dmdAlt :: Specificity -> AltM -> Df (AltM, Specificity)
 dmdAlt result_spc (AltM (Alt (DeCInstM (VarDeCon con ty_args ex_types)) params body)) = do
   mapM_ dfType ty_args
   (typats', (pats', body')) <-
-    withBinders ex_types $ withParams params $ dmdExp result_spc body
+    withTyBinders ex_types $ withParams params $ dmdExp result_spc body
 
   let new_alt = AltM $ Alt (DeCInstM (VarDeCon con ty_args typats')) pats' body'
   return (new_alt, altSpecificity new_alt)
@@ -481,7 +490,7 @@ localDemandAnalysis (Module modname imports defss exports) = do
 
 -- | Perform demand analysis and dead code elimination.
 demandAnalysis :: Module Mem -> IO (Module Mem)
-demandAnalysis (Module modname imports defss exports) = do
+demandAnalysis mod@(Module modname imports defss exports) = do
   tenv <- readInitGlobalVarIO the_memTypes
   let (defss', exports') = evalDf (dmdTopLevelGroup defss exports) tenv
   return $ Module modname imports defss' exports'
