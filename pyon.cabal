@@ -44,6 +44,7 @@ Executable pyon
     language-python-pyon == 0.2.2,
     language-c,
     parsec == 3.*,
+    unix,
     utf8-string
   Extensions:
     ScopedTypeVariables, MultiParamTypeClasses, PatternGuards, GADTs,
@@ -167,6 +168,7 @@ Executable pyon
     LowLevel.GenerateC
     LowLevel.GenerateCCode
     LowLevel.GenerateCHeader
+    LowLevel.GenerateCXXHeader
     LowLevel.GenerateCUtils
     LowLevel.Intrinsics
     LowLevel.LambdaConvert

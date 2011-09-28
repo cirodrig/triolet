@@ -27,6 +27,7 @@ module Job
         writeFileAsString,
         writeFileAsByteString,
         writeFilePath,
+        writeFileWithHandle,
         
         -- * Compilation flags
         CompileFlag(..),
@@ -55,6 +56,7 @@ import Foreign.C
 import Foreign.Ptr
 import System.Directory
 import System.FilePath
+import System.IO
 import System.Random
 
 import Common.Error
@@ -262,6 +264,17 @@ writeFileAsByteString fl str = writeFileHelper ByteString.writeFile fl str
 writeFilePath :: WriteFile -> IO FilePath
 writeFilePath file = writeFileHelper (\path () -> return path) file ()
 
+-- | Write the file's contents to a handle.  The handle will be closed once
+--   writing is complete.
+writeFileWithHandle :: WriteFile -> (Handle -> IO ()) -> IO ()
+writeFileWithHandle NullWriteFile _ = return ()
+writeFileWithHandle fl writer = writeFileHelper open_and_write fl writer
+  where
+    open_and_write path writer = do
+      hdl <- openFile path WriteMode
+      writer hdl
+      hClose hdl
+
 -------------------------------------------------------------------------------
 -- User-configurable flags
 
@@ -304,6 +317,7 @@ data Task a where
     , compileAsmOutput :: WriteFile -- ^ Output C file
     , compileAsmInterface :: WriteFile -- ^ Output Pyon interface file
     , compileAsmHeader :: WriteFile -- ^ Header for exported C functions
+    , compileAsmCxxHeader :: WriteFile -- ^ Header for exported C++ functions
     } :: Task ()
   -- Load an interface file
   LoadIface

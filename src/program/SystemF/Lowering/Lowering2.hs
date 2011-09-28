@@ -374,18 +374,40 @@ lowerExport :: ModuleName
 lowerExport module_name (Export pos (ExportSpec lang exported_name) fun) = do
   fun' <- lowerFun fun
   tenv <- getTypeEnv
-  fun_def <- case lang of CCall -> define_c_fun tenv fun'
-  return (fun_def, (LL.definiendum fun_def, export_sig tenv))
+  
+  -- Create exported function
+  let c_export_sig = getCExportSig tenv fun_type
+  fun_def <- case lang
+             of CCall     -> define_c_fun tenv c_export_sig fun'
+                CPlusPlus -> define_cxx_fun tenv c_export_sig fun'
+  let export_sig =
+        case lang
+        of CCall -> CExportSig c_export_sig
+           CPlusPlus ->
+             case c_export_sig
+             of CSignature domain range ->
+                  CXXExportSig $ CXXSignature exported_name domain range
+  return (fun_def, (LL.definiendum fun_def, export_sig))
   where
     fun_type = case fun of FunTM (TypeAnn fun_type _) -> fun_type
-    export_sig tenv = getCExportSig tenv fun_type
 
-    define_c_fun tenv fun = do
+    define_c_fun tenv c_export_sig fun = do
       -- Generate marshalling code
-      wrapped_fun <- createCMarshalingFunction (export_sig tenv) fun
+      wrapped_fun <- createCMarshalingFunction c_export_sig fun
 
       -- Create function name.  Function is exported with the given name.
       let label = externPyonLabel module_name exported_name (Just exported_name)
+      v <- LL.newExternalVar label (LL.PrimType LL.PointerType)
+      return $ LL.Def v wrapped_fun
+
+    define_cxx_fun tenv c_export_sig fun = do
+      -- Generate marshalling code
+      wrapped_fun <- createCMarshalingFunction c_export_sig fun
+
+      -- Create a function name.  This isn't the name the user sees.
+      -- The function with this name will be put into object code.  It will
+      -- be called from some automatically generated C++ source code.
+      let label = pyonLabel module_name exported_name
       v <- LL.newExternalVar label (LL.PrimType LL.PointerType)
       return $ LL.Def v wrapped_fun
 

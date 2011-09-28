@@ -56,8 +56,8 @@ exportReturnDeclSpecs export_type =
      FunctionET _ _ -> ([], nameDeclSpecs "PyonClosure")
 
 -- | Get the declaration components to use to declare an exported function
-exportSigDeclSpecs :: ExportSig -> Maybe DeclSpecs
-exportSigDeclSpecs (CExportSig dom rng) =
+exportSigDeclSpecs :: CSignature -> DeclSpecs
+exportSigDeclSpecs (CSignature dom rng) =
   let dom_specs = map exportParamDeclSpecs dom
       (rng_param_specs, rng_ret_specs) = exportReturnDeclSpecs rng
 
@@ -68,31 +68,31 @@ exportSigDeclSpecs (CExportSig dom rng) =
         CFunDeclr (Right (map anonymousDecl param_specs, False)) [] internalNode
 
   in case rng_ret_specs
-     of (rng_decl, rng_deriv) -> Just (rng_decl, fun_deriv : rng_deriv)
-
--- Functions exported to Pyon don't get a C signature
-exportSigDeclSpecs PyonExportSig = Nothing
+     of (rng_decl, rng_deriv) -> (rng_decl, fun_deriv : rng_deriv)
 
 -- | Create a C external function declaration for the given variable, with the
 -- given function signature.
-generateExportDecl :: (Var, ExportSig) -> Maybe CDecl
+generateExportDecl :: (Var, CSignature) -> CDecl
 generateExportDecl (v, sig) =
   case exportSigDeclSpecs sig
-  of Just (specs, derivs) ->
+  of (specs, derivs) ->
        let ident = varIdent v
            export_specs = CStorageSpec (CExtern internalNode) : specs
            declr = CDeclr (Just ident) derivs Nothing [] internalNode
-       in Just $
-          CDecl export_specs [(Just declr, Nothing, Nothing)] internalNode
-     Nothing -> Nothing
+       in CDecl export_specs [(Just declr, Nothing, Nothing)] internalNode
 
-generateCHeader :: Module -> String
+-- | Create the text of a C header file if there are any exported C functions
+generateCHeader :: Module -> Maybe String
 generateCHeader mod =
-  let export_decls = mapMaybe generateExportDecl $ moduleExports mod
+  let export_decls = [generateExportDecl (v, sig)
+                     | (v, CExportSig sig) <- moduleExports mod]
       decls = map CDeclExt export_decls
       transl_module = CTranslUnit decls internalNode 
       header_body_text = show $ pretty transl_module
-  in cModuleHeader ++ header_body_text
+      header_text = cModuleHeader ++ header_body_text
+  in if null export_decls
+     then Nothing
+     else Just header_text
      
 cModuleHeader =
   "#include <inttypes.h>\n\

@@ -48,6 +48,9 @@ sendExportDataTypes xs = do
 foreign import ccall "PyonSignature_create" pyonSignature_create ::
   Ptr PyonTypes -> Ptr ExportDataType -> IO (Ptr PyonSignature)
 
+foreign import ccall "PyonSignature_destroy" pyonSignature_destroy ::
+  Ptr PyonSignature -> IO ()
+
 sendExportSig :: [ExportDataType] -> ExportDataType -> IO (Ptr PyonSignature)
 sendExportSig param_types return_type = do
   params_ptr <- sendExportDataTypes param_types

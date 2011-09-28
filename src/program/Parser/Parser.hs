@@ -686,6 +686,7 @@ exportStatement stmt@(Py.Export {Py.export_lang = lang,
   language <-
     case identName lang
     of "ccall" -> return CCall
+       "cplusplus" -> return CPlusPlus
        _ -> error $ "Unsupported language '" ++ identName lang ++ "'"
   var <- use item
   ty' <- expression ty
@@ -702,10 +703,14 @@ exportStatement stmt@(Py.Export {Py.export_lang = lang,
   where
     check_valid_identifier _ "" = fail "Exported name is empty string"
 
+    check_valid_identifier CCall name = check_c_identifier "C" name
+    check_valid_identifier CPlusPlus name = check_c_identifier "C++" name
+
     -- Valid C identifier: alpha (alnum*)
-    check_valid_identifier CCall name@(c:cs)
+    check_c_identifier language_name name@(c:cs)
       | is_c_alpha c && all is_c_alnum cs = return name
-      | otherwise = fail "Exported name is not a valid C identifier"
+      | otherwise = fail ("Exported name is not a valid " ++ language_name ++
+                          " identifier")
     
     is_c_alpha c = isAlpha c || c == '_'
     is_c_alnum c = isAlphaNum c || c == '_'

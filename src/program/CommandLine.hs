@@ -310,12 +310,13 @@ compileObjectJob config (file_path, language) moutput_path = do
       iface_files <- find_interface_files
       let infile = readFileFromPath file_path
           hfile = writeFileFromPath header_path
+          hxxfile = writeFileFromPath hxx_path
           ifile = writeFileFromPath iface_path
           outfile = writeFileFromPath output_path
       compileWithCFile config output_path $
         return $ \cfile -> pyonCompilation
                            (commandLineFlags config) infile iface_files
-                           cfile ifile hfile outfile
+                           cfile ifile hfile hxxfile outfile
 
     PyonAsmLanguage ->
       let infile = readFileFromPath file_path
@@ -330,6 +331,9 @@ compileObjectJob config (file_path, language) moutput_path = do
     -- Exported C function declarations go here
     header_path = dropExtension output_path ++ "_interface.h"
     
+    -- Exported C++ function declarations go here
+    hxx_path = dropExtension output_path ++ "_cxx.h"
+
     -- Exported Pyon interface goes here
     iface_path = replaceExtension output_path ".pi"
 
@@ -366,13 +370,14 @@ pyonCompilation :: CompileFlags -- ^ Command-line flags
                 -> [ReadFile]   -- ^ Input interface files
                 -> TempFile     -- ^ Temporary C file
                 -> WriteFile    -- ^ Output interface file
-                -> WriteFile    -- ^ Output header file
+                -> WriteFile    -- ^ Output C header file
+                -> WriteFile    -- ^ Output C++ header file
                 -> WriteFile    -- ^ Output object file
                 -> Job ()
-pyonCompilation compile_flags infile iface_files cfile ifile hfile outfile = do
+pyonCompilation compile_flags infile iface_files cfile ifile hfile hxxfile outfile = do
   asm <- taskJob $ CompilePyonToPyonAsm compile_flags infile
   ifaces <- mapM (taskJob . LoadIface) iface_files
-  taskJob $ CompilePyonAsmToGenC asm ifaces (writeTempFile cfile) ifile hfile
+  taskJob $ CompilePyonAsmToGenC asm ifaces (writeTempFile cfile) ifile hfile hxxfile
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 
 pyonAsmCompilation :: [(String, Maybe String)] -- ^ Preprocessor macros
@@ -388,6 +393,6 @@ pyonAsmCompilation macros search_paths infile cfile ifile outfile = do
     taskJob $ ParsePyonAsm (readTempFile ppfile)
     
   -- Don't link to any interfaces
-  taskJob $ CompilePyonAsmToGenC asm [] (writeTempFile cfile) ifile writeNothing
+  taskJob $ CompilePyonAsmToGenC asm [] (writeTempFile cfile) ifile writeNothing writeNothing
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile
 

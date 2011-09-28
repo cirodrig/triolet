@@ -50,6 +50,7 @@ import qualified LowLevel.LambdaConvert as LowLevel
 import qualified LowLevel.ReferenceCounting as LowLevel
 import qualified LowLevel.GenerateC as LowLevel
 import qualified LowLevel.GenerateCHeader as LowLevel
+import qualified LowLevel.GenerateCXXHeader as LowLevel
 import qualified LowLevel.Inlining as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel
 import qualified LLParser.Parser as LLParser
@@ -101,8 +102,9 @@ runTask (CompilePyonAsmToGenC { compileAsmInput = ll_mod
                               , compileAsmIfaces = ifaces
                               , compileAsmOutput = c_file
                               , compileAsmInterface = i_file
-                              , compileAsmHeader = h_file}) = do
-  compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file
+                              , compileAsmHeader = h_file
+                              , compileAsmCxxHeader = hxx_file}) = do
+  compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file
 
 runTask (LoadIface {loadIfaceInput = iface_file}) = do
   loadIface iface_file
@@ -322,7 +324,7 @@ loadIface iface_file = do
 
 -- | Compile an input low-level module to C code.  Generate an interface file.
 -- Generate a header file if there are exported routines.
-compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
+compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file hxx_file = do
   print $ LowLevel.pprModule ll_mod
   -- Low-level transformations
   ll_mod <- LowLevel.flattenRecordTypes ll_mod
@@ -382,12 +384,15 @@ compilePyonAsmToGenC ll_mod ifaces c_file i_file h_file = do
 
   -- Generate and compile a C file
   c_mod <- LowLevel.generateCFile ll_mod
-      
   writeFileAsString c_file c_mod
   
-  when (LowLevel.moduleHasExports ll_mod) $
-    let h_mod = LowLevel.generateCHeader ll_mod
-    in writeFileAsString h_file h_mod
+  -- Generate foreign language interfaces
+  case LowLevel.generateCHeader ll_mod of
+    Just h_mod -> writeFileAsString h_file h_mod
+    Nothing -> return ()
+
+  when (LowLevel.hasCXXExports ll_mod) $ do
+    writeFileWithHandle hxx_file (LowLevel.writeCxxHeader ll_mod)
 
 -- | Compile a C file to produce an object file.
 compileCFile c_fname o_fname = do

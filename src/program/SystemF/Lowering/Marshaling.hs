@@ -262,8 +262,8 @@ passReturnWithType pt = do
 
 -- | Wrap the lowered function 'f' in marshaling code for C.  Produce a
 -- primitive function.
-createCMarshalingFunction :: ExportSig -> LL.Fun -> Lower LL.Fun
-createCMarshalingFunction sig@(CExportSig dom rng) f = do
+createCMarshalingFunction :: CSignature -> LL.Fun -> Lower LL.Fun
+createCMarshalingFunction (CSignature dom rng) f = do
   -- Generate marshaling code
   marshal_params <- mapM marshalCParameter dom
   marshal_return <- marshalCReturn rng
@@ -286,9 +286,6 @@ createCMarshalingFunction sig@(CExportSig dom rng) f = do
 
   return $ LL.primFun param_inputs return_types fun_body
 
-createCMarshallingFunction _ _ =
-  internalError "createCMarshallingFunction: Not exported to C"
-
 -------------------------------------------------------------------------------
 -- Exported types
 
@@ -298,10 +295,10 @@ createCMarshallingFunction _ _ =
 --   All elements of the type are assumed to be in their natural 
 --   representation.  Code that looks at 'ExportSig's assumes this and
 --   may break otherwise.
-getCExportSig :: TypeEnv -> Type -> ExportSig
+getCExportSig :: TypeEnv -> Type -> CSignature
 getCExportSig tenv ty =
   case getFunctionExportType tenv ty
-  of (param_types, return_type) -> CExportSig param_types return_type
+  of (param_types, return_type) -> CSignature param_types return_type
 
 getFunctionExportType tenv ty =
   case fromFunType ty
