@@ -472,13 +472,18 @@ data DefAnn =
     --   function should be aggressively inlined.
   , defAnnInlineRequest :: !Bool
     
+    -- | True for definitions that were created by the case-of-case
+    --   transformation.  A lower inlining threshold is used for such
+    --   definitions.
+  , defAnnJoinPoint :: !Bool
+    
     -- | The uses of this definition,
     -- as determined by demand analysis
   , defAnnUses :: !Multiplicity
   }
 
 defaultDefAnn :: DefAnn
-defaultDefAnn = DefAnn InlNormal False ManyUnsafe
+defaultDefAnn = DefAnn InlNormal False False ManyUnsafe
 
 -- | An annotation controlling when a function may be inlined.
 --

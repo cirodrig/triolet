@@ -324,7 +324,10 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
 
     -- An arbitrary function size threshold.  Functions smaller than this
     -- will be inlined aggressively.
-    fun_size_threshold = 25
+    fun_size_threshold =
+      -- Use a low threshold for compiler-inserted join points, because
+      -- they generally don't provide useful opportunities for optimization
+      if defAnnJoinPoint ann then 8 else 100
 
 -- | Add a pattern-bound variable to the environment.  
 --   This adds the variable's type to the environment and
@@ -2107,7 +2110,11 @@ makeBranchContinuation inf m_return_param (AltSM alt) = do
 
   -- Simplify the function
   (fun', _) <- rwFun fun
-  return $ mkDef fun_name fun'
+
+  -- Create a function definition
+  let def1 = mkDef fun_name fun'
+      def2 = modifyDefAnnotation (\a -> a {defAnnJoinPoint = True}) def1
+  return def2
 
 -- | Perform case analysis on the expression's result.  Use the @(AltM, Var)@
 --   pairs to dispatch each case.

@@ -160,10 +160,14 @@ pprDef (Def v ann f) = hang (pprVar v <+> ann_doc <+> text "=") 2 (pprFun f)
             if defAnnInlineRequest ann
             then text "inline"
             else empty
+          join_doc =
+            if defAnnJoinPoint ann
+            then text "join_point"
+            else empty
           uses_doc = text $ showMultiplicity (defAnnUses ann)
       in brackets $ sep $
          punctuate (text ",") $
-         filter (not . isEmpty) [inl_doc, phase_doc, uses_doc]
+         filter (not . isEmpty) [inl_doc, join_doc, phase_doc, uses_doc]
 
 pprDefGroup :: DefGroup (Def Mem) -> Doc
 pprDefGroup dg =
