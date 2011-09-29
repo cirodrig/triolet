@@ -545,6 +545,8 @@ inferExpType expression =
       case fromExpM expression
       of ConE _ (CInstM con) _ ->
            inferConAppType con
+         AppE _ op ty_args args ->
+           inferAppTypeQuickly op ty_args args
          LamE _ f ->
            return $ functionType f
          LetE _ pat e body ->
@@ -564,6 +566,34 @@ inferExpType expression =
       assumeBinders (deConExTypes con) $ assumePatMs params $ infer_exp body
 
     debug = traceShow (text "inferExpType" <+> pprExp expression)
+
+-- | Infer the type of an application, with minimal error checking
+inferAppTypeQuickly op ty_args args = do
+  op_type <- inferExpType op
+  tenv <- getTypeEnv
+  inst_op_type <- apply_types tenv op_type ty_args
+  apply_arguments inst_op_type args
+  where
+    apply_types tenv op_type (TypM arg:args) = do
+      let kind = typeKind tenv arg
+      m_app_type <- typeOfTypeApp op_type kind arg
+      case m_app_type of
+        Nothing -> err
+        Just t  -> apply_types tenv t args
+    
+    apply_types _ t [] = return t
+  
+    -- Compute the result of applying a type to some arguments.
+    -- For each argument, eliminate the function type constructor.
+    apply_arguments t [] = return t
+    apply_arguments t (_:args') = do
+      whnf_t <- reduceToWhnf t 
+      case whnf_t of
+        FunT _ rng -> apply_arguments rng args'
+        _ -> err
+    
+    err :: a
+    err = internalError "inferExpType: Type error in application"
 
 -- | Infer the type of a fully applied data constructor.
 --
