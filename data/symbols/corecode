@@ -2798,19 +2798,63 @@ len @(t : bare -> bare) @(a : bare)
     boxed @dim1 (sh : dim1).
 
   case sh of mk_dim1 @(Nlo Nhi : intindex) (ilo : IInt Nlo) (ihi : IInt Nhi).
-  case ilo of {
-    iInt @Nlo (flo : FIInt Nlo).
-      case ihi of {
-        iInt @Nhi (fhi : FIInt Nhi).
-	  case flo of fiInt @Nlo (lo : int).
-	  case fhi of fiInt @Nhi (hi : int).
-	  hi -# lo
-      ; iPosInfty @Nhi. except @int
-      ; iNegInfty @Nhi. except @int
-      }
-    ; iPosInfty @Nlo. except @int
-    ; iNegInfty @Nlo. except @int
-  };
+  case fromIndInt @Nlo ilo of fiInt @Nlo (lo : int).
+  case fromIndInt @Nhi ihi of fiInt @Nhi (hi : int).
+  hi -# lo;
+
+
+width @(t : bare -> bare) @(a : bare)
+  (is_2d : coerce @box (BoxedType (shape t)) (Boxed dim2))
+  (indexable : IndexableDict t)
+  (container : t a)
+  -> int attribute(inline) =
+
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> Writer (shape t)).
+
+  case boxed @dim2
+       (coerce @(Writer (shape t)) @(Writer dim2) (get_shape @a container)) of
+    boxed @dim2 (shp : dim2).
+  case shp of
+    mk_dim2
+    @(Mlo Mhi Nlo Nhi : intindex)
+    (inp_ymin : IInt Mlo)
+    (inp_yend : IInt Mhi)
+    (inp_xmin : IInt Nlo)
+    (inp_xend : IInt Nhi).
+
+  case fromIndInt @Nlo inp_xmin of fiInt @Nlo (lo : int).
+  case fromIndInt @Nhi inp_xend of fiInt @Nhi (hi : int).
+  hi -# lo;
+
+
+height @(t : bare -> bare) @(a : bare)
+  (is_2d : coerce @box (BoxedType (shape t)) (Boxed dim2))
+  (indexable : IndexableDict t)
+  (container : t a)
+  -> int attribute(inline) =
+
+  case indexable of
+    indexableDict @t
+    (at_index : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
+    (get_shape : (a : bare) -> t a -> Writer (shape t)).
+
+  case boxed @dim2
+       (coerce @(Writer (shape t)) @(Writer dim2) (get_shape @a container)) of
+    boxed @dim2 (shp : dim2).
+  case shp of
+    mk_dim2
+    @(Mlo Mhi Nlo Nhi : intindex)
+    (inp_ymin : IInt Mlo)
+    (inp_yend : IInt Mhi)
+    (inp_xmin : IInt Nlo)
+    (inp_xend : IInt Nhi).
+
+  case fromIndInt @Mlo inp_ymin of fiInt @Mlo (lo : int).
+  case fromIndInt @Mhi inp_yend of fiInt @Mhi (hi : int).
+  hi -# lo;
 
 -------------------------------------------------------------------------------
 -- Methods specifically for 2D streams
@@ -3920,55 +3964,6 @@ safeSlice @(t : bare -> bare) @(a : bare)
       except @(IEffect (view (shape t) a))
   };
 
-
-width @(t : bare -> bare) @(a : bare)
-  (is_2d : coerce @box (BoxedType (shape t)) (Boxed dim2))
-  (indexable : IndexableDict t)
-  (container : t a)
-  -> int =
-
-  case indexable of
-    indexableDict @t
-    (at_point : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
-    (at_slice : (a : bare) -> Repr a -> t a -> slice (shape t) -> Writer (view (shape t) a))
-    (get_shape : (a : bare) -> t a -> Writer (shape t)).
-
-  case boxed @(shape t) (get_shape @a container) of
-    boxed @(shape t) (shp : shape t).
-  case coerce @(shape t) @dim2 shp of
-    mk_dim2
-    @(Mlo M Nlo N : intindex)
-    (inp_ymin : IInt Mlo)
-    (inp_height : IInt M)
-    (inp_xmin : IInt Nlo)
-    (inp_width : IInt N).
-
-  case fromIndInt @N inp_width of fiInt @N (w : int). w;
-
-
-height @(t : bare -> bare) @(a : bare)
-  (is_2d : coerce @box (BoxedType (shape t)) (Boxed dim2))
-  (indexable : IndexableDict t)
-  (container : t a)
-  -> int =
-
-  case indexable of
-    indexableDict @t
-    (at_point : (a : bare) -> Repr a -> t a -> index (shape t) -> Writer a)
-    (at_slice : (a : bare) -> Repr a -> t a -> slice (shape t) -> Writer (view (shape t) a))
-    (get_shape : (a : bare) -> t a -> Writer (shape t)).
-
-  case boxed @(shape t) (get_shape @a container) of
-    boxed @(shape t) (shp : shape t).
-  case coerce @(shape t) @dim2 shp of
-    mk_dim2
-    @(Mlo M Nlo N : intindex)
-    (inp_ymin : IInt Mlo)
-    (inp_height : IInt M)
-    (inp_xmin : IInt Nlo)
-    (inp_width : IInt N).
-
-  case fromIndInt @M inp_height of fiInt @M (h : int). h;
 
 {-
 safeIndex2 @(t : bare -> bare) @(a : bare)
