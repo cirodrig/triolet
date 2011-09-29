@@ -2582,6 +2582,23 @@ Sequence_fold @(a acc : bare)
 -------------------------------------------------------------------------------
 -- Methods specifically for 1D streams
 
+range (n : int) -> Stream dim1 (Stored int)
+  attribute(inline) =
+  let vw : view1 (Stored int) =
+        if n <# 0
+        then mk_view1 @(Stored int) @0 @0
+	     (iInt @0 (fiInt @0 0))
+	     (iInt @0 (fiInt @0 0))
+	     (\ (i : int) (ret : OutPtr (Stored int)) -> IEffect (Stored int).
+	       except @(IEffect (Stored int)))
+	else case defineIntIndex n of someIInt @(N : intindex) (fin : FIInt N).
+	     mk_view1 @(Stored int) @0 @N
+	     (iInt @0 (fiInt @0 0))
+	     (iInt @N fin)
+	     (\ (i : int) (ret : OutPtr (Stored int)) -> IEffect (Stored int).
+	        stored @int i ret) in
+  viewStream @(Stored int) vw;
+
 
 Stream1_empty @(a : bare) -> Stream1 a
   attribute(inline, inline_final) =
