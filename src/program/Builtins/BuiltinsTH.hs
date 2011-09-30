@@ -128,6 +128,7 @@ pyonBuiltinVariableNames =
   , "mk_array2"
   , "mk_view0"
   , "mk_view1"
+  , "empty_view1"
   , "mk_view2"
   , "mk_darr1"
   , "mk_darr2"

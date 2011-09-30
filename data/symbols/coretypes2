@@ -382,6 +382,8 @@ data view1 : bare -> box
   mk_view1
   (a : bare) (lo hi : intindex)
   (IInt lo, IInt hi, int -> Writer a);
+
+  empty_view1 (a : bare) () ();
 };
 
 -- A 2D array view.  The index space is bounded in the Y dimension by
@@ -413,6 +415,7 @@ data darr2 : intindex -> intindex -> bare -> box
 view1ToDarr1 : (a : bare) -> (b : bare)
 	    -> view1 a
 	    -> ((N : intindex) -> FIInt N -> darr1 N a -> Writer b)
+	    -> Writer b
 	    -> Writer b;
 
 darr1ToView1 : (N : intindex) -> (a : bare)
@@ -423,6 +426,7 @@ darr1ToView1 : (N : intindex) -> (a : bare)
 view2ToDarr2 : (a : bare) -> (b : bare)
 	    -> view2 a
 	    -> ((M N : intindex) -> FIInt M -> FIInt N -> darr2 M N a -> Writer b)
+	    -> Writer b
 	    -> Writer b;
 
 darr2ToView2 : (M N : intindex) -> (a : bare)

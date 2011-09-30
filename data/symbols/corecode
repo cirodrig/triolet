@@ -460,23 +460,29 @@ safeSlice @(t : bare -> bare) @(a : bare)
 view1ToDarr1 @(a b : bare)
   (vw : view1 a)
   (elim : (N : intindex) -> FIInt N -> darr1 N a -> Writer b)
-  -> Writer b attribute(inline) =
-  case vw of
+  (elim_empty : Writer b)
+  (ret : OutPtr b)
+  -> IEffect b attribute(inline) =
+  case vw of {
     mk_view1 @a @(lo hi : intindex)
              (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-  let flo : FIInt lo = fromIndInt @lo ilo in
-  let fhi : FIInt hi = fromIndInt @hi ihi in
+      let flo : FIInt lo = fromIndInt @lo ilo in
+      let fhi : FIInt hi = fromIndInt @hi ihi in
 
-  let type N = minus_i hi lo in
-  let delta : FIInt N = minus_fii @hi @lo fhi flo in
-  case flo of fiInt @lo (lo_i : int).
+      let type N = minus_i hi lo in
+      let delta : FIInt N = minus_fii @hi @lo fhi flo in
+      case flo of fiInt @lo (lo_i : int).
 
-  -- The darr is zero-indexed; subtract the offset
-  letfun
-    f2 (i : int) -> Writer a = f (AdditiveDict_int_sub i lo_i)
-  in
+      -- The darr is zero-indexed; subtract the offset
+      letfun
+        f2 (i : int) -> Writer a = f (AdditiveDict_int_sub i lo_i)
+      in
 
-  elim @N delta (mk_darr1 @N @a f2);
+      elim @N delta (mk_darr1 @N @a f2) ret;
+
+    empty_view1 @a.
+      elim_empty ret
+  };
 
 
 darr1ToView1 @(N : intindex) @(a : bare)
@@ -494,7 +500,8 @@ viewToSequence @(a : bare) (repr : Repr a) (vw : view1 a)
      (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a)
        -> Writer (StoredBox (Sequence a)).
        case darr of mk_darr1 @N @a (f : int -> Writer a).
-       storedBox @(Sequence a) (generate @N @a (iInt @N size) repr f)))
+       storedBox @(Sequence a) (generate @N @a (iInt @N size) repr f))
+     (storedBox @(Sequence a) (Sequence_empty @a)))
   of boxed @(StoredBox (Sequence a)) (sb : StoredBox (Sequence a)).
   case sb of storedBox @(Sequence a) (sq : Sequence a).
   sq;
@@ -608,7 +615,10 @@ TraversableDict_list_build @(a : bare)
       view1ToDarr1 @a @(list a) vw
       (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a)
         -> Writer (list a).
-	 make_list @a @N size (referenced @(arr N a) (arr1D_build @N @a repr size darr))) ret
+	 make_list @a @N size (referenced @(arr N a) (arr1D_build @N @a repr size darr)))
+      (\ (ret : OutPtr (list a)) -> IEffect (list a).
+        make_list @a @0 zero_fii (referenced @(arr 0 a) (\ (ret : OutPtr (arr 0 a)) -> IEffect (arr 0 a). fromEffTok @(arr 0 a) emptyEffTok)) ret)
+      ret
   };
 
 -- List traversal.
@@ -687,25 +697,34 @@ TraversableDict_array1_build
   -> IEffect (array1 a) attribute(inline) =
   case s of {
     viewStream @a (v : view1 a).
-      case v of
+      case v of {
         mk_view1 @a @(lo hi : intindex)
 	(ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-      let flo : FIInt lo = fromIndInt @lo ilo in
-      let fhi : FIInt hi = fromIndInt @hi ihi in
+          let flo : FIInt lo = fromIndInt @lo ilo in
+          let fhi : FIInt hi = fromIndInt @hi ihi in
 
-      let type N = minus_i hi lo in
-      let delta : FIInt N = minus_fii @hi @lo fhi flo in
-      case flo of fiInt @lo (lo_i : int).
+          let type N = minus_i hi lo in
+          let delta : FIInt N = minus_fii @hi @lo fhi flo in
+          case flo of fiInt @lo (lo_i : int).
 
-      -- The array is zero-indexed; subtract the offset
-      letfun
-        f2 (i : int) -> Writer a = f (AdditiveDict_int_sub i lo_i)
-      in
+          -- The array is zero-indexed; subtract the offset
+          letfun
+            f2 (i : int) -> Writer a = f (AdditiveDict_int_sub i lo_i)
+          in
 
-      mk_array1 @a @lo @hi flo fhi
-      (referenced @(arr N a)
-       (arr1D_build @N @a repr delta (mk_darr1 @N @a f2)))
-      ret
+          mk_array1 @a @lo @hi flo fhi
+          (referenced @(arr N a)
+           (arr1D_build @N @a repr delta (mk_darr1 @N @a f2)))
+          ret;
+
+        empty_view1 @a.
+          let type N0 = minus_i 0 0 in
+          mk_array1 @a @0 @0 zero_fii zero_fii
+          (referenced @(arr N0 a)
+           (\ (ret : OutPtr (arr N0 a)) -> IEffect (arr N0 a).
+              fromEffTok @(arr N0 a) emptyEffTok))
+          ret
+      }
 
   ; sequenceStream @a (sq : Sequence a).
       -- Convert to an array1
@@ -820,11 +839,15 @@ IndexableDict_view1_at_point
   (index : Stored int)
   (ret : OutPtr a)
   -> IEffect a attribute(inline) =
-  case vw of
+  case vw of {
     mk_view1 @a @(lo hi : intindex)
     (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-  case index of stored @int (index_i : int).
-  f index_i ret;
+      case index of stored @int (index_i : int).
+      f index_i ret;
+
+    empty_view1 @a.
+      except @(IEffect a)
+  };
 
 
 IndexableDict_view1_get_shape
@@ -832,10 +855,14 @@ IndexableDict_view1_get_shape
   (vw : view1 a)
   (ret : OutPtr dim1)
   -> IEffect dim1 attribute(inline) =
-  case vw of
+  case vw of {
     mk_view1 @a @(lo hi : intindex)
     (ilo : IInt lo) (ihi : IInt hi) (f : int -> Writer a).
-  mk_dim1 @lo @hi ilo ihi ret;
+      mk_dim1 @lo @hi ilo ihi ret;
+
+    empty_view1 @a.
+      mk_dim1 @0 @0 zero_ii zero_ii ret
+  };
 
 
 IndexableDict_view2_at_point
@@ -1638,27 +1665,35 @@ ShapeDict_dim2_slice @(t : bare -> bare) @(a : bare)
 view1_flatten @(a : bare) (vw : view1 a) -> Stream dim1 a
   attribute(inline) =
   -- Shift the indices so that the first index is 0
-  case vw of
+  case vw of {
     mk_view1 @a @(lo hi : intindex)
              (Nlo : IInt lo) (Nhi : IInt hi) (f : int -> Writer a).
-  let fNlo : FIInt lo = fromIndInt @lo Nlo in
-  case fNlo of fiInt @lo (lo_i : int).
-  let size : IInt (minus_i hi lo) = minus_ii @hi @lo Nhi Nlo in
+      let fNlo : FIInt lo = fromIndInt @lo Nlo in
+      case fNlo of fiInt @lo (lo_i : int).
+      let size : IInt (minus_i hi lo) = minus_ii @hi @lo Nhi Nlo in
 
-  viewStream @a
-  (mk_view1 @a @0 @(minus_i hi lo) zero_ii size
-   (\ (i : int) -> Writer a. f (i -# lo_i)));
+      viewStream @a
+      (mk_view1 @a @0 @(minus_i hi lo) zero_ii size
+       (\ (i : int) -> Writer a. f (i -# lo_i)));
+
+    empty_view1 @a.
+      viewStream @a vw
+  };
 
 
 view1_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
           (transformer : a -> Writer b) (vw : view1 a) -> view1 b
   attribute(inline) =
-  case vw of
+  case vw of {
     mk_view1 @a @(lo hi : intindex)
-             (Nlo : IInt lo) (Nhi : IInt hi) (f : int -> Writer a).
-  mk_view1 @b @lo @hi Nlo Nhi
-  (\ (i : int) -> Writer b.
-    case boxed @a (f i) of boxed @a (x : a). transformer x);
+                 (Nlo : IInt lo) (Nhi : IInt hi) (f : int -> Writer a).
+      mk_view1 @b @lo @hi Nlo Nhi
+      (\ (i : int) -> Writer b.
+        case boxed @a (f i) of boxed @a (x : a). transformer x);
+
+    empty_view1 @a.
+      empty_view1 @b
+  };
 
 
 view1_zipWith @(a b c : bare)
@@ -1666,25 +1701,31 @@ view1_zipWith @(a b c : bare)
   (transformer : a -> b -> Writer c) (vwA : view1 a) (vwB : view1 b)
   -> view1 c
   attribute(inline, inline_final) =
-  case vwA of
+  case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
-  case vwB of
-    mk_view1 @b @(loB hiB : intindex)
-             (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
-  let type loC = max_i loA loB in
-  let type hiC = min_i hiA hiB in
-  let iloC : IInt loC = max_ii @loA @loB iloA iloB in
-  let ihiC : IInt hiC = min_ii @hiA @hiB ihiA ihiB in
-  if range_nonempty_ii @loC @hiC iloC ihiC
-  then mk_view1 @c @loC @hiC iloC ihiC
-       (\ (i : int) -> Writer c.
-         case boxed @a (fA i) of boxed @a (x : a).
-         case boxed @b (fB i) of boxed @b (y : b).
-         transformer x y)
-  else mk_view1 @c @0 @0 zero_ii zero_ii
-       (\ (i : int) (ret : OutPtr c) -> IEffect c.
-         except @(IEffect c));
+      case vwB of {
+        mk_view1 @b @(loB hiB : intindex)
+                 (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
+          let type loC = max_i loA loB in
+          let type hiC = min_i hiA hiB in
+          let iloC : IInt loC = max_ii @loA @loB iloA iloB in
+          let ihiC : IInt hiC = min_ii @hiA @hiB ihiA ihiB in
+          if range_nonempty_ii @loC @hiC iloC ihiC
+          then mk_view1 @c @loC @hiC iloC ihiC
+               (\ (i : int) -> Writer c.
+                 case boxed @a (fA i) of boxed @a (x : a).
+                 case boxed @b (fB i) of boxed @b (y : b).
+                 transformer x y)
+          else empty_view1 @c;
+
+        empty_view1 @b.
+	  empty_view1 @c
+      };
+
+    empty_view1 @a.
+      empty_view1 @c
+  };
 
 
 view1_zipWith3 @(a b c d : bare)
@@ -1693,32 +1734,41 @@ view1_zipWith3 @(a b c d : bare)
   (vwA : view1 a) (vwB : view1 b) (vwC : view1 c)
   -> view1 d
   attribute(inline, inline_final) =
-  case vwA of
+  case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
-  case vwB of
-    mk_view1 @b @(loB hiB : intindex)
-             (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
-  case vwC of
-    mk_view1 @c @(loC hiC : intindex)
-             (iloC : IInt loC) (ihiC : IInt hiC) (fC : int -> Writer c).
-  let type loD = max_i (max_i loA loB) loC in
-  let type hiD = min_i (min_i hiA hiB) hiC in
-  let iloD : IInt loD = max_ii @(max_i loA loB) @loC
-                        (max_ii @loA @loB iloA iloB) iloC in
-  let ihiD : IInt hiD = min_ii @(min_i hiA hiB) @hiC
-                        (min_ii @hiA @hiB ihiA ihiB) ihiC in
-  if range_nonempty_ii @loD @hiD iloD ihiD
-  then mk_view1 @d @loD @hiD iloD ihiD
-       (\ (i : int) -> Writer d.
-         case boxed @a (fA i) of boxed @a (x : a).
-         case boxed @b (fB i) of boxed @b (y : b).
-         case boxed @c (fC i) of boxed @c (z : c).
-         transformer x y z)
-  else mk_view1 @d @0 @0 zero_ii zero_ii
-       (\ (i : int) (ret : OutPtr d) -> IEffect d.
-         except @(IEffect d));
+      case vwB of {
+        mk_view1 @b @(loB hiB : intindex)
+                 (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
+          case vwC of {
+            mk_view1 @c @(loC hiC : intindex)
+                     (iloC : IInt loC) (ihiC : IInt hiC) (fC : int -> Writer c).
+              let type loD = max_i (max_i loA loB) loC in
+              let type hiD = min_i (min_i hiA hiB) hiC in
+              let iloD : IInt loD = max_ii @(max_i loA loB) @loC
+                                    (max_ii @loA @loB iloA iloB) iloC in
+              let ihiD : IInt hiD = min_ii @(min_i hiA hiB) @hiC
+                                    (min_ii @hiA @hiB ihiA ihiB) ihiC in
+              if range_nonempty_ii @loD @hiD iloD ihiD
+              then mk_view1 @d @loD @hiD iloD ihiD
+                   (\ (i : int) -> Writer d.
+                     case boxed @a (fA i) of boxed @a (x : a).
+                     case boxed @b (fB i) of boxed @b (y : b).
+                     case boxed @c (fC i) of boxed @c (z : c).
+                     transformer x y z)
+              else empty_view1 @d;
 
+            empty_view1 @c.
+	      empty_view1 @d
+	  };
+
+        empty_view1 @b.
+          empty_view1 @d
+      };
+
+    empty_view1 @a.
+      empty_view1 @d
+  };
 
 view1_zipWith4 @(a b c d e : bare)
   (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c) (repr_d : Repr d) (repr_e : Repr e)
@@ -1726,38 +1776,51 @@ view1_zipWith4 @(a b c d e : bare)
   (vwA : view1 a) (vwB : view1 b) (vwC : view1 c) (vwD : view1 d)
   -> view1 e
   attribute(inline, inline_final) =
-  case vwA of
+  case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
-  case vwB of
-    mk_view1 @b @(loB hiB : intindex)
-             (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
-  case vwC of
-    mk_view1 @c @(loC hiC : intindex)
-             (iloC : IInt loC) (ihiC : IInt hiC) (fC : int -> Writer c).
-  case vwD of
-    mk_view1 @d @(loD hiD : intindex)
-             (iloD : IInt loD) (ihiD : IInt hiD) (fD : int -> Writer d).
-  let type loE = max_i (max_i (max_i loA loB) loC) loD in
-  let type hiE = min_i (min_i (min_i hiA hiB) hiC) hiD in
-  let iloE : IInt loE = max_ii @(max_i (max_i loA loB) loC) @loD
-                        (max_ii @(max_i loA loB) @loC
-                         (max_ii @loA @loB iloA iloB) iloC) iloD in
-  let ihiE : IInt hiE = min_ii @(min_i (min_i hiA hiB) hiC) @hiD
-                        (min_ii @(min_i hiA hiB) @hiC
-                         (min_ii @hiA @hiB ihiA ihiB) ihiC) ihiD in
-  if range_nonempty_ii @loE @hiE iloE ihiE
-  then mk_view1 @e @loE @hiE iloE ihiE
-       (\ (i : int) -> Writer e.
-         case boxed @a (fA i) of boxed @a (x : a).
-         case boxed @b (fB i) of boxed @b (y : b).
-         case boxed @c (fC i) of boxed @c (z : c).
-         case boxed @d (fD i) of boxed @d (w : d).
-         transformer x y z w)
-  else mk_view1 @e @0 @0 zero_ii zero_ii
-       (\ (i : int) (ret : OutPtr e) -> IEffect e.
-         except @(IEffect e));
+      case vwB of {
+        mk_view1 @b @(loB hiB : intindex)
+                 (iloB : IInt loB) (ihiB : IInt hiB) (fB : int -> Writer b).
+          case vwC of {
+            mk_view1 @c @(loC hiC : intindex)
+                     (iloC : IInt loC) (ihiC : IInt hiC) (fC : int -> Writer c).
+              case vwD of {
+                mk_view1 @d @(loD hiD : intindex)
+                         (iloD : IInt loD) (ihiD : IInt hiD) (fD : int -> Writer d).
+                  let type loE = max_i (max_i (max_i loA loB) loC) loD in
+                  let type hiE = min_i (min_i (min_i hiA hiB) hiC) hiD in
+                  let iloE : IInt loE = max_ii @(max_i (max_i loA loB) loC) @loD
+                                        (max_ii @(max_i loA loB) @loC
+                                         (max_ii @loA @loB iloA iloB) iloC) iloD in
+                  let ihiE : IInt hiE = min_ii @(min_i (min_i hiA hiB) hiC) @hiD
+                                        (min_ii @(min_i hiA hiB) @hiC
+                                         (min_ii @hiA @hiB ihiA ihiB) ihiC) ihiD in
+                  if range_nonempty_ii @loE @hiE iloE ihiE
+                  then mk_view1 @e @loE @hiE iloE ihiE
+                       (\ (i : int) -> Writer e.
+                         case boxed @a (fA i) of boxed @a (x : a).
+                         case boxed @b (fB i) of boxed @b (y : b).
+                         case boxed @c (fC i) of boxed @c (z : c).
+                         case boxed @d (fD i) of boxed @d (w : d).
+                         transformer x y z w)
+                  else empty_view1 @e;
 
+		empty_view1 @d.
+                  empty_view1 @e
+              };
+
+	    empty_view1 @c.
+              empty_view1 @e
+          };
+
+	empty_view1 @b.
+          empty_view1 @e
+      };
+
+    empty_view1 @a.
+      empty_view1 @e
+  };
 
 Sequence_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
           (transformer : a -> Writer b) (sq : Sequence a) -> Sequence b =
@@ -2409,18 +2472,30 @@ outerproduct @(a b c : bare)
     } in
 
   -- Create a view2 combining the inputs
-  case viewA of
+  case viewA of {
     mk_view1 @a @(Mlo Mhi : intindex)
     	     (imlo : IInt Mlo) (imhi : IInt Mhi) (fA : int -> Writer a).
-  case viewB of
-    mk_view1 @b @(Nlo Nhi : intindex)
-    	     (inlo : IInt Nlo) (inhi : IInt Nhi) (fB : int -> Writer b).
+      case viewB of {
+        mk_view1 @b @(Nlo Nhi : intindex)
+        	     (inlo : IInt Nlo) (inhi : IInt Nhi) (fB : int -> Writer b).
 
-  mk_view2 @c @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi
-  (\ (y : int) (x : int) (ret : OutPtr c) -> IEffect c.
-     case boxed @a (fA y) of boxed @a (value_a : a).
-     case boxed @b (fB x) of boxed @b (value_b : b).
-     transformer value_a value_b ret);
+          mk_view2 @c @Mlo @Mhi @Nlo @Nhi imlo imhi inlo inhi
+          (\ (y : int) (x : int) (ret : OutPtr c) -> IEffect c.
+             case boxed @a (fA y) of boxed @a (value_a : a).
+             case boxed @b (fB x) of boxed @b (value_b : b).
+             transformer value_a value_b ret);
+
+        empty_view1 @b.
+          mk_view2 @c @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
+          (\ (y : int) (x : int) (ret : OutPtr c) -> IEffect c.
+            except @(IEffect c))
+      };
+
+    empty_view1 @a.
+      mk_view2 @c @0 @0 @0 @0 zero_ii zero_ii zero_ii zero_ii
+      (\ (y : int) (x : int) (ret : OutPtr c) -> IEffect c.
+        except @(IEffect c))
+  };
 
 -------------------------------------------------------------------------------
 -- Fold-like internal methods
@@ -2447,6 +2522,9 @@ fun_reduce1_Stream @(a : bare) (repr : Repr a)
       (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a) (ret : OutPtr a)
           -> IEffect a.
 	 darr1_reduce1 @N @a repr size f darr ret)
+      (\ (ret : OutPtr a) -> IEffect a.
+        -- Error to call 'reduce1' on an empty stream
+        except @(IEffect a))
       ret
 
   ; sequenceStream @a (sq : Sequence a).
@@ -2540,6 +2618,7 @@ view1_fold @(a acc : bare)
   (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a) (ret : OutPtr acc)
     -> IEffect acc.
     darr1_fold @N @a @acc repr_a repr_acc size f init darr ret)
+  (\ (ret : OutPtr acc) -> IEffect acc. copy @acc repr_acc init ret)
   ret;
 
 
@@ -2586,11 +2665,7 @@ range (n : int) -> Stream dim1 (Stored int)
   attribute(inline) =
   let vw : view1 (Stored int) =
         if n <# 0
-        then mk_view1 @(Stored int) @0 @0
-	     (iInt @0 (fiInt @0 0))
-	     (iInt @0 (fiInt @0 0))
-	     (\ (i : int) (ret : OutPtr (Stored int)) -> IEffect (Stored int).
-	       except @(IEffect (Stored int)))
+        then empty_view1 @(Stored int)
 	else case defineIntIndex n of someIInt @(N : intindex) (fin : FIInt N).
 	     mk_view1 @(Stored int) @0 @N
 	     (iInt @0 (fiInt @0 0))
@@ -2604,8 +2679,7 @@ Stream1_empty @(a : bare) -> Stream1 a
   attribute(inline, inline_final) =
   let zero : IInt 0 = iInt @0 (fiInt @0 0) in
   viewStream @a
-  (mk_view1 @a @0 @0 zero zero
-   (\ (i : int) (ret : OutPtr a) -> IEffect a. except @(IEffect a)));
+  (empty_view1 @a);
 
 
 Stream1_return @(a : bare) (repr : Repr a) (w : Writer a) -> Stream1 a
