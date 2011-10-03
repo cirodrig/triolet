@@ -87,8 +87,14 @@ parallel dfs = Df $ \tenv ->
   case unzip [runDf df tenv | df <- dfs]
   of (xs, dmds) -> (xs, joinPars dmds)
 
-underLambda :: Df a -> Df a
-underLambda m = censor lambdaAbstracted m
+underLambda :: Bool -> Df a -> Df a
+underLambda is_initializer m = censor change_multiplicities m
+  where
+    -- In initializer lambda functions, don't change multiplicity.
+    -- In all other functions, weaken multiplicity information because
+    -- we don't know how often the function is called.
+    change_multiplicities =
+      if is_initializer then id else lambdaAbstracted
 
 -- | Demand analysis only deals with variables that can be removed from the 
 --   program.  Global type variables (type functions and constructors) and
@@ -207,15 +213,21 @@ withParams = withManyBinders withParam
 
 -- | Do demand analysis on an expression, given how the expression's result
 --   is used.
-dmdExp :: Specificity -> DmdAnl ExpM
-dmdExp spc expressionM@(ExpM expression) =
+dmdExp = dmdExpWorker False
+
+-- | Do demand analysis on an initializer function appearing in a data
+--   constructor application, given how the expression's result is used.
+dmdInitializer = dmdExpWorker True
+
+dmdExpWorker :: Bool -> Specificity -> DmdAnl ExpM
+dmdExpWorker is_initializer spc expressionM@(ExpM expression) =
   case expression
   of VarE _ v -> mentionSpecificity v spc >> return expressionM
      LitE _ _ -> return expressionM
      ConE inf con args -> dmdConE inf con args
      AppE inf op ts args -> dmdAppE inf op ts args
      LamE inf f -> do
-       f' <- dmdFun f
+       f' <- dmdFun is_initializer f
        return $ ExpM $ LamE inf f'
      LetE inf pat rhs body -> dmdLetE spc inf pat rhs body
      LetfunE inf dg body -> do
@@ -239,21 +251,31 @@ dmdExp spc expressionM@(ExpM expression) =
     -}
 
 dmdConE inf con args = do
-  args' <- mapM (dmdExp Used) args
-
-  -- Value and boxed arguments should not get inlined in constructor fields.
-  -- For arguments that are just a variable, mark the variable as being
-  -- used many times.  This prevents pre-inlining.
   tenv <- ask
   let field_kinds = conFieldKinds tenv (fromCInstM con)
-  zipWithM_ mark_uses field_kinds args
+  args' <- zipWithM compute_uses field_kinds args
 
   return $ ExpM $ ConE inf con args'
   where
-    mark_uses kind (ExpM (VarE _ v))
-      | kind == ValK || kind == BoxK = mentionMany v
+    compute_uses kind arg
+      | kind == ValK || kind == BoxK = do
+          -- Value and boxed arguments should not get inlined in
+          -- constructor fields.  For arguments that are just a variable,
+          -- mark the variable as being used many times.  This prevents
+          -- pre-inlining.
+          case arg of
+            ExpM (VarE _ v) -> mentionMany v
+            _ -> return ()
 
-    mark_uses _ _ = return ()
+          dmdExp Used arg       -- Analyze the argument
+
+       | kind == BareK = do
+          -- Initializer functions are guaranteed to be executed, so
+          -- we can generate more precise demand information for them
+          dmdInitializer Used arg
+
+       | otherwise =
+           internalError "dmdConE"
 
 -- | Dead code elimination for function application.
 --
@@ -354,11 +376,11 @@ dmdAlt result_spc (AltM (Alt decon@(DeCInstM (TupleDeCon _)) params body)) = do
   let new_alt = AltM (Alt decon pats' body')
   return (new_alt, altSpecificity new_alt)  
 
-dmdFun :: DmdAnl FunM
-dmdFun (FunM f) = do
+dmdFun :: Bool -> DmdAnl FunM
+dmdFun is_initializer (FunM f) = do
   -- Eliminate dead code and convert patterns to wildcard patterns.
   (tps', (ps', b')) <-
-    underLambda $
+    underLambda is_initializer $
     withTyPats (funTyParams f) $
     withParams (funParams f) $ do
       dfType $ fromTypM $ funReturn f
@@ -366,7 +388,7 @@ dmdFun (FunM f) = do
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 
 dmdDef :: DmdAnl (Def Mem)
-dmdDef def = mapMDefiniens dmdFun def
+dmdDef def = mapMDefiniens (dmdFun False) def
 
 dmdGroup :: DefGroup (Def Mem) -> Df b -> Df ([DefGroup (Def Mem)], b)
 dmdGroup defgroup do_body =
@@ -468,7 +490,7 @@ partitionDefGroup members external_refs =
 -- | Eliminate dead code and get demands for an export declaration
 dmdExport :: DmdAnl (Export Mem)
 dmdExport export = do
-  fun <- dmdFun $ exportFunction export
+  fun <- dmdFun False $ exportFunction export
   return $ export {exportFunction = fun}
 
 dmdTopLevelGroup (dg:dgs) exports = do
