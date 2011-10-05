@@ -3,5 +3,6 @@ TestConfig {
   pyonSources	 = ["mul.pyon"],
   llpyonSources  = [],
   cSources	 = ["main.c"],
+  cxxSources	 = [],
   expectedResult = ShouldPrint "(44)(12.8125)"
 }

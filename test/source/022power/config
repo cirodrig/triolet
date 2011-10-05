@@ -3,5 +3,6 @@ TestConfig {
   pyonSources	 = ["mypower.pyon"],
   llpyonSources  = [],
   cSources	 = ["main.c"],
+  cxxSources	 = [],
   expectedResult = ShouldPrint "1096"
 }

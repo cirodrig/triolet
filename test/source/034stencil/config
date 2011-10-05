@@ -3,5 +3,6 @@ TestConfig {
   pyonSources	 = ["stencil.pyon"],
   llpyonSources  = [],
   cSources	 = ["main.c"],
+  cxxSources	 = [],
   expectedResult = ShouldPrint "OK"
 }

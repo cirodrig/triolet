@@ -3,5 +3,6 @@ TestConfig {
   pyonSources	 = ["test.pyon"],
   llpyonSources  = [],
   cSources	 = [],
+  cxxSources	 = [],
   expectedResult = ShouldCompile
 }

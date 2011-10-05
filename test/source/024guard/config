@@ -3,5 +3,6 @@ TestConfig {
   pyonSources	 = ["sumpos.pyon"],
   llpyonSources  = [],
   cSources	 = ["main.c"],
+  cxxSources	 = [],
   expectedResult = ShouldPrint "47"
 }

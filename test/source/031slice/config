@@ -3,5 +3,6 @@ TestConfig {
   pyonSources	 = ["slice.pyon"],
   llpyonSources  = [],
   cSources	 = ["main.c"],
+  cxxSources	 = [],
   expectedResult = ShouldPrint "-33"
 }

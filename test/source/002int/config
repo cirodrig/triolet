@@ -3,5 +3,6 @@ TestConfig {
   pyonSources	 = ["i.py"],
   llpyonSources  = [],
   cSources	 = ["main.c"],
+  cxxSources	 = [],
   expectedResult = ShouldPrint "ok"
 }
