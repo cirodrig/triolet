@@ -16,6 +16,11 @@ import CxxInterface.SignatureHS
 import LowLevel.Syntax
 import Export
 
+data FILE
+
+foreign import ccall fdopen :: CInt -> CString -> IO (Ptr FILE)
+foreign import ccall fclose :: Ptr FILE -> IO ()
+
 -- | Get the module's exported C++ functions
 cxxExports :: Module -> [(Var, CXXSignature)]
 cxxExports m = [(v, s) | (v, CXXExportSig s) <- moduleExports m]
@@ -27,34 +32,34 @@ hasCXXExports m = not $ null $ cxxExports m
 --   by this operation.
 writeCxxHeader :: Module -> Handle -> IO ()
 writeCxxHeader mod hdl = do
-  -- Convert handle to a file descriptor
+  -- Convert handle to a "FILE *"
   fd <- handleToFd hdl
-  mapM_ (writeCxxWrapper fd) $ cxxExports mod
-  closeFd fd
+  let Fd fd_int = fd
+  file_ptr <- withCString "w" $ \str -> fdopen fd_int str
+  mapM_ (writeCxxWrapper file_ptr) $ cxxExports mod
+  fclose file_ptr
 
 -- | The C function that generates wrapper code for one function.
 --
 --   Arguments are:
 --
---   * File descriptor to write to
+--   * File to write to
 --   * Pyon function name
 --   * Wrapper function name
 --   * The function type
-printCxxFunction _ _ _ _ = return ()
---foreign import ccall printCxxFunction ::
---  CInt -> CString -> CString -> Ptr PyonSignature -> IO ()
+foreign import ccall printCxxFunction ::
+  Ptr FILE -> CString -> CString -> Ptr PyonSignature -> IO ()
 
 -- | Write one wrapper function to a C++ header file
-writeCxxWrapper :: Fd -> (Var, CXXSignature) -> IO ()
-writeCxxWrapper fd (pyon_var, CXXSignature wrapper_name domain range) = do
+writeCxxWrapper :: Ptr FILE -> (Var, CXXSignature) -> IO ()
+writeCxxWrapper file (pyon_var, CXXSignature wrapper_name domain range) = do
   -- Get the name of the function that the wrapper will call
   let pyon_function_name = mangledVarName False pyon_var
   
   -- Marshal data and call the wraper generator
-  let Fd int_fd = fd
   withCString pyon_function_name $ \c_pyon_function_name ->
     withCString wrapper_name $ \c_wrapper_name -> do
       c_signature <- sendExportSig domain range
-      printCxxFunction int_fd c_pyon_function_name c_wrapper_name c_signature
+      printCxxFunction file c_pyon_function_name c_wrapper_name c_signature
       pyonSignature_destroy c_signature
       
