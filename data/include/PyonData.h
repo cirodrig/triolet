@@ -146,54 +146,64 @@ namespace Pyon {
   /****************************************************************************/
   /* Incomplete objects */
 
-  /* Abstract base class of incomplete objects.
+  /* A reference to an incomplete object consisting of a single chunk
+   * of memory.  This is used as the base class for most Incomplete objects.
    *
-   * Derived classes should not define additional fields.
-   *
-   * Incomplete objects have three states.
+   * This object has three states.
    *
    * 1. No object is referenced.  'owner' and 'object' are NULL.
    *
-   * 2. A bare object stored in a box is referenced.  'owner' points to the box.
+   * 2. A bare object is referenced, and it's stored in a box owned by this
+   *    incomplete object reference.  'owner' points
+   *    to the box.  'object' points to the object.  This state is
+   *    entered by 'allocate' and left by 'freeze'.
+   *
+   * 3. A bare object stored somewhere else is referenced.  'owner' is NULL.
    *    'object' points to the object.  New incomplete objects are created in
    *    this state by some incomplete object methods.  This state can also
    *    be entered by assignment.
    *
-   * 3. A bare object stored somewhere else is referenced.  'owner' is NULL.
-   *    'object' points to the object.  This state is entered by 'allocate' and
-   *    left by 'freeze'.
-   *
-   * Incomplete references of type 3 are derived from an incomplete reference
-   * of type 2, and they are only valid as long as their parent reference is
-   * valid.  For reasons of efficiency, no attempt is made to detect whether the
-   * parent reference is valid.
+   * Incomplete references of type 3 are derived from an incomplete
+   * reference of type 2, and they are only valid as long as their
+   * parent reference is valid.  For reasons of efficiency, no attempt
+   * is made to detect whether the parent reference is valid.
    */
   template<typename bare_type>
-  class IncompleteBase {
+  class IncompleteSingleRef {
   private:
     PyonBoxPtr owner;
     PyonBarePtr object;
 
   public:
-    IncompleteBase(void) : owner(NULL), object(NULL) {}
-    IncompleteBase(const IncompleteBase& other) {
+    // Exactly one of the following three predicates is true at any time.
+    bool isEmpty(void) const {return object == NULL;}
+    bool isOwner(void) const {return owner != NULL;}
+    bool isBorrowed(void) const {return object != NULL && owner == NULL;}
+
+  public:
+    // Construct an empty incomplete reference
+    IncompleteSingleRef(void) : owner(NULL), object(NULL) {}
+
+    // Construct a borrowed incomplete reference
+    IncompleteSingleRef(PyonBarePtr _s) : owner(NULL), object(_s) {}
+
+    IncompleteSingleRef(const IncompleteSingleRef& other) {
       // Cannot copy incomplete references that own an object
-      if (other.owner) {
+      if (other.isOwner()) {
 	pyonError ("Cannot copy a reference to an allocated object");
       }
       owner = NULL;
       object = other.object;
     }
-    IncompleteBase(PyonBarePtr _s) : owner(NULL), object(_s) {}
 
-    void operator=(const IncompleteBase& other) {
+    void operator=(const IncompleteSingleRef& other) {
       // Cannot copy incomplete references that own an object
-      if (other.owner) {
+      if (other.isOwner()) {
 	pyonError ("Cannot copy a reference to an allocated object");
       }
 
       // If the reference owns an object, release it first
-      if (owner) {
+      if (isOwner()) {
 	freeze(); // Freeze and discard the result
       }
 
@@ -202,7 +212,7 @@ namespace Pyon {
     }
 
     void allocate(void) {
-      if (object) {
+      if (!isEmpty()) {
  	pyonError("Incomplete object is already referencing an object");
       }
       // Create object and initialize header
@@ -212,17 +222,9 @@ namespace Pyon {
       object = Boxed<bare_type>(owner).getContents();
     }
 
-#ifdef BEGIN_SIGNATURE
-    void initialize(...);
-    void create(...) { allocate(); initialize(...); }
-#endif
-
     bare_type freeze(void) {
-      if (!object) {
+      if (!isOwner()) {
  	pyonError("No incomplete object reference");
-      }
-      if (!owner) {
- 	pyonError("Cannot freeze this object");
       }
       PyonBoxPtr ret = owner;
       object = NULL;
@@ -231,8 +233,45 @@ namespace Pyon {
     }
   };
 
-  /* Astract template.  Only specializations should be used. */
+  /* Abstract template of incomplete objects.  Only specializations
+   * should be used.
+   *
+   * Incomplete objects have three states.
+   *
+   * 1. No object is referenced.
+   *
+   * 2. A bare object is referenced, and it's stored in a box owned by
+   *    this incomplete object reference.  'owner' points to the box.
+   *    'object' points to the object.  This state is entered by
+   *    'allocate' and left by 'freeze'.
+   *
+   * 3. A bare object stored somewhere else is referenced.  'owner' is NULL.
+   *    'object' points to the object.  New incomplete objects are created in
+   *    this state by some incomplete object methods.  This state can also
+   *    be entered by assignment.
+   *
+   * Incomplete references of type 3 are derived from an incomplete reference
+   * of type 2, and they are only valid as long as their parent reference is
+   * valid.  For reasons of efficiency, no attempt is made to detect whether the
+   * parent reference is valid.
+   */
   template<typename bare_type>
-  class Incomplete : public IncompleteBase<bare_type> {};
+  class Incomplete {
+#if BEGIN_SIGNATURE
+  public:
+    // Exactly one of the following three predicates is true at any time.
+    bool isEmpty(void) const;
+    bool isOwner(void) const;
+    bool isBorrowed(void) const;
+
+    Incomplete(void);
+    Incomplete(const Incomplete &other);
+
+    void allocate(void);
+    void initialize(...);
+    void create(...) { allocate(); initialize(...); }
+    bare_type freeze(void);
+#endif
+  };
 
 } // end namespace
