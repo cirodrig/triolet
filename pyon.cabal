@@ -59,6 +59,9 @@ Executable pyon
   C-Sources:
     cutils/Pool.c
     CxxInterface/Signature.c
+    CxxInterface/CxxWrapperGeneratorTypes.c
+    CxxInterface/CxxWrapperGeneratorPrint.c
+    CxxInterface/CxxWrapperGenerator.c
   Other-Modules:
     Paths_pyon
     Machine

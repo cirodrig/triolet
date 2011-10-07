@@ -49,4 +49,12 @@ struct PoolDescriptor {
   void (*finalize)(void *object); /* Object finalizer */
 };
 
+#define DEFINE_POOL_DESCRIPTOR(type_name)      \
+PoolDescriptor type_name ## _alloc = {         \
+	offsetof(type_name, pool),              \
+	sizeof(type_name),                      \
+	(void (*)(void *))&finalize_ ## type_name \
+}
+
+
 #endif
