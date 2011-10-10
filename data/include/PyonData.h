@@ -1,89 +1,14 @@
 /* C++ data marshaling interface for Pyon
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-// This macro is used to demarcate signature specifications
-#define BEGIN_SIGNATURE 0
-
-#define NOT_IMPLEMENTED pyonError("Not implemented")
+#include <pyon/Base.h>
+#include <pyon/Layout.h>
 
 namespace Pyon {
-
-  struct PyonBareObj {};	// Some bare object implemented in Pyon
-  struct PyonBoxObj {};	       // Some boxed object implemented in Pyon
-  typedef PyonBareObj *PyonBarePtr;
-  typedef PyonBoxObj *PyonBoxPtr;
-
-  static inline void
-  pyonError(const char *s) {
-    fputs(s, stderr);
-    exit(-1);
-  }
-
-  /****************************************************************************/
-  /* Pyon Kinds */
-
-  // One of these tags is associated to each C++ type corresponding to
-  // a Pyon data constructor.  The tag specifies the Pyon type's kind.
-  struct BareKindTag {};
-  struct BoxKindTag {};
-  struct ValKindTag {};
-
-  // All wrapper classes are subclasses of one of these.
-  // These classes each use an associated type to specify their kind.
-  class ValType;		// Base class of value types
-  class BareType;		// Base class of bare types
-  class BoxType;		// Base class of boxed types
-
-  // Kind conversions
-  template<typename kind, typename pyon_type> struct AsBareTypeWithTag;
-  template<typename pyon_type> struct AsBareType;
-
-  /* Abstract base class for value types.
-   *
-   * Stored<typeof(this)> <: BareType */
-  class ValType {
-  public:
-    typedef ValKindTag kind;
-  };
-
-  /* An abstract base class for bare types.  Bare types encapsulate a
-   * reference to a bare Pyon object.
-   *
-   * Derived classes should not define additional fields. Dervied classes
-   * should define the methods specified in the signature. */
-  class BareType {
-  public:
-    typedef BareKindTag kind;
-
-  private:
-    PyonBarePtr const bare_data; // The pyon object
-
-  public:
-    BareType(PyonBarePtr _bare_data) : bare_data(_bare_data) {}
-    PyonBarePtr getBareData(void) const {return bare_data;}
-
-#if BEGIN_SIGNATURE
-    static int getSize(void);
-    static int getAlignment(void);
-    static void copy(T *, Incomplete<T> *);
-    static bool isPOD(void);
-#endif
-  };
-
-  /* An abstract base class for boxed types.  Boxed types encapsulate a
-   * reference to a boxed Pyon object.
-   *
-   * Derived classes should not define additional fields. */
-  class BoxType {
-  public:
-    typedef BoxKindTag kind;
-
-  private:
-    PyonBoxPtr const box_data;
-  };
 
   /****************************************************************************/
   /* Wrappers for specific type constructors  */
@@ -109,6 +34,9 @@ namespace Pyon {
 
   /****************************************************************************/
   /* Kind conversions */
+
+  template<typename kind, typename pyon_type> struct AsBareTypeWithTag;
+  template<typename pyon_type> struct AsBareType;
 
   /* Compute the bare type corresponding to a Pyon type.  The type
    * is computed by dispatching on the type's kind.
@@ -215,11 +143,13 @@ namespace Pyon {
       if (!isEmpty()) {
  	pyonError("Incomplete object is already referencing an object");
       }
-      // Create object and initialize header
-      owner = pyon_allocate_object(bare_type::getSize());
 
-      // Get pointer to field
-      object = Boxed<bare_type>(owner).getContents();
+      // Create boxed object and initialize header
+      owner = pyon_alloc_boxed(bare_type::getSize(),
+			       bare_type::getAlignment());
+
+      // Get pointer to the bare object
+      object = ((char *)owner) + addPadding<bare_type>(sizeof(void *));
     }
 
     bare_type freeze(void) {

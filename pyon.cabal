@@ -16,6 +16,9 @@ Data-Files:
   include/pyon.h
   include/pyon_list.h
   include/pyon_matrix.h
+  include/PyonData.h
+  include/pyon/Layout.h
+  include/pyon/Base.h
   interfaces/memory_py.pi
   interfaces/effects.pi
   interfaces/prim.pi

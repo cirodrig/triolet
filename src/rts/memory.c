@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <gc.h>
 #include "pyon.h"
+#include "struct.h"
+#include "machine.h"
 
 /* When defined, print a message on every allocation and deallocation. */
 #define CHATTY_ALLOC
@@ -37,4 +39,19 @@ pyon_dealloc(PyonPtr p)
   fprintf(stderr, "Deallocating %p\n", p);
 #endif
   GC_FREE(p);
+}
+
+/* Allocate a box containing some heap data.  A pointer to the box is
+   returned. */
+PyonPtr
+pyon_alloc_boxed(uint32_t size, uint32_t alignment)
+{
+  // The box's size consists of a word, followed by padding, followed
+  // by the object
+  uint32_t box_size = size + align(WORD_SIZE, alignment);
+  PyonPtr ptr = pyon_alloc(box_size);
+
+  // TODO: initialize the header
+
+  return ptr;
 }

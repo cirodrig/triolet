@@ -71,4 +71,7 @@ rtsPyAsmFiles = ["apply_new.pyasm",
 -- | Data files that are not programmatically generated
 prebuiltDataFiles = ["include/pyon.h", "include/pyon_list.h",
                      "include/pyon_matrix.h",
+                     "include/PyonData.h",
+                     "include/pyon/Base.h",
+                     "include/pyon/Layout.h",
                      "symbols/corecode", "symbols/coretypes2"]
