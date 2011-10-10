@@ -1677,7 +1677,7 @@ view1_flatten @(a : bare) (vw : view1 a) -> Stream dim1 a
        (\ (i : int) -> Writer a. f (i -# lo_i)));
 
     empty_view1 @a.
-      viewStream @a vw
+      viewStream @a (empty_view1 @a)
   };
 
 
