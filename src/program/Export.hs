@@ -30,10 +30,13 @@ data ExportSpec =
 
 -- | A data type that can be exported to foreign functions.
 data ExportDataType =
+    -- | An N-tuple.
+    TupleET [ExportDataType]
+
     -- | A Pyon list.
     --   The list contents can have any monomorphic type.  It's an error
     --   for the type to mention type variables other than constructors.
-    ListET Type
+  | ListET Type
 
     -- | A Pyon matrix.
     --   The matrix contents can have any monomorphic type.  It's an error
@@ -59,7 +62,10 @@ data ExportDataType =
 instance Show ExportDataType where
   showsPrec prec edt = 
     case edt
-    of ListET ty ->
+    of TupleET tys ->
+         showParen (prec >= 10) $
+         foldr (.) id $ intersperse (showChar ',') $ map shows tys
+       ListET ty ->
          showParen (prec >= 10) $ 
          showString "ListET (" . shows (pprType ty) . showChar ')'
        CSizeArrayET et ->

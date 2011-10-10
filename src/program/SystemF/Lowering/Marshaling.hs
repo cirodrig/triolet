@@ -3,7 +3,9 @@ is exported to C.
 -}
 
 module SystemF.Lowering.Marshaling(createCMarshalingFunction,
-                                   getCExportSig)
+                                   createCxxMarshalingFunction,
+                                   getCExportSig,
+                                   getCxxExportSig)
 where
 
 import Control.Monad
@@ -44,6 +46,13 @@ computeReprDict ty =
            element_dict <- computeReprDict element_type
            emitAtom1 owned_type $
              LL.closureCallA mat_repr_ctor [element_dict]
+       | op `isPyonBuiltin` The_PyonTuple2 -> do
+           let [t1, t2] = args
+               tuple_repr_ctor = LL.VarV (LL.llBuiltin LL.the_fun_repr_PyonTuple2)
+           dict1 <- computeReprDict t1
+           dict2 <- computeReprDict t2
+           emitAtom1 owned_type $
+             LL.closureCallA tuple_repr_ctor [dict1, dict2]
        | op `isPyonBuiltin` The_int ->
            return $ LL.VarV $ LL.llBuiltin LL.the_bivar_repr_int
        | op `isPyonBuiltin` The_float ->
@@ -102,6 +111,18 @@ demarshalCParameter ty =
      PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
      PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
      FunctionET args ret -> marshalParameterFunctionToC args ret
+
+-- | Marshal a function parameter that was passed from C++.  The converted
+--   parameter will be passed to a pyon function.
+marshalCxxParameter :: ExportDataType -> Lower ParameterMarshaler
+marshalCxxParameter ty =
+  case ty
+  of PyonIntET -> passParameterWithType (LL.PrimType LL.pyonIntType)
+     PyonFloatET -> passParameterWithType (LL.PrimType LL.pyonFloatType)
+     PyonBoolET -> passParameterWithType (LL.PrimType LL.pyonBoolType)
+     ListET _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     MatrixET _ -> passParameterWithType (LL.PrimType LL.PointerType)
+     TupleET _ -> passParameterWithType (LL.PrimType LL.PointerType)
 
 -- | Pass a parameter as a single variable.
 passParameterWithType :: LL.ValueType -> Lower ParameterMarshaler
@@ -211,6 +232,22 @@ marshalCReturn ty =
                                , rmOutput = [LL.VarV v] 
                                , rmReturns = [v]}
 
+-- | Marshal a return value to C++ code.
+--
+-- Returns a list of parameters to the exported function,
+-- a code generator that wraps the real function call,
+-- a list of argument values to pass to the Pyon function, 
+-- and a list of return variables to return from the wrapper function.
+marshalCxxReturn :: ExportDataType -> Lower ReturnMarshaler
+marshalCxxReturn ty =
+  case ty
+  of PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
+     PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
+     PyonBoolET -> passReturnWithType (LL.PrimType LL.pyonBoolType)
+     ListET _ -> passReturnParameter
+     MatrixET _ -> passReturnParameter
+     TupleET _ -> passReturnParameter
+
 demarshalCReturn :: ExportDataType -> Lower ReturnMarshaler
 demarshalCReturn ty =
   case ty
@@ -260,6 +297,14 @@ passReturnWithType pt = do
                            , rmOutput = []
                            , rmReturns = [v]}
 
+-- | Return by initializing an object that's passed as a parameter 
+passReturnParameter = do
+  v <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
+  return $ ReturnMarshaler { rmInputs = [v]
+                           , rmCode = \g -> g >>= emitAtom0
+                           , rmOutput = [LL.VarV v]
+                           , rmReturns = []}
+
 -- | Wrap the lowered function 'f' in marshaling code for C.  Produce a
 -- primitive function.
 createCMarshalingFunction :: CSignature -> LL.Fun -> Lower LL.Fun
@@ -267,7 +312,18 @@ createCMarshalingFunction (CSignature dom rng) f = do
   -- Generate marshaling code
   marshal_params <- mapM marshalCParameter dom
   marshal_return <- marshalCReturn rng
+  createMarshalingFunction marshal_params marshal_return f
 
+-- | Wrap the lowered function 'f' in marshaling code for C++.  Produce a
+-- primitive function.
+createCxxMarshalingFunction :: CXXSignature -> LL.Fun -> Lower LL.Fun
+createCxxMarshalingFunction (CXXSignature _ dom rng) f = do
+  -- Generate marshaling code
+  marshal_params <- mapM marshalCxxParameter dom
+  marshal_return <- marshalCxxReturn rng
+  createMarshalingFunction marshal_params marshal_return f
+
+createMarshalingFunction marshal_params marshal_return f = do
   -- Create the function
   let return_types = map LL.varType $ rmReturns marshal_return
       (param_inputs, param_code, param_arguments) =
@@ -297,47 +353,85 @@ createCMarshalingFunction (CSignature dom rng) f = do
 --   may break otherwise.
 getCExportSig :: TypeEnv -> Type -> CSignature
 getCExportSig tenv ty =
-  case getFunctionExportType tenv ty
-  of (param_types, return_type) -> CSignature param_types return_type
+  case getExportedFunctionSignature (getCExportType tenv) tenv ty
+  of (param_types, return_type) ->
+       CSignature param_types return_type
 
-getFunctionExportType tenv ty =
+-- | Given a memory function type signature, determine the type of the
+--   function that's exported to C++.
+--
+--   All elements of the type are assumed to be in their natural 
+--   representation.  Code that looks at 'ExportSig's assumes this and
+--   may break otherwise.
+getCxxExportSig :: String -> TypeEnv -> Type -> CXXSignature
+getCxxExportSig exported_name tenv ty =
+  case getExportedFunctionSignature (getCxxExportType tenv) tenv ty
+  of (param_types, return_type) ->
+       CXXSignature exported_name param_types return_type
+
+-- | Determine the exported parameter and return types of some
+--   function type, using the given type conversion function to
+--   convert each parameter and return type.
+getExportedFunctionSignature :: (Type -> ExportDataType)
+                             -> TypeEnv
+                             -> Type
+                             -> ([ExportDataType], ExportDataType)
+getExportedFunctionSignature convert_type tenv ty =
+  case getFunctionInputsAndOutputs tenv ty
+  of (param_types, return_type) ->
+       (map convert_type param_types, convert_type return_type)
+
+-- | Determine the input and output types of a function. 
+--
+--   In most cases, the input types are the parameter types and
+--   the output is the return type.  The primary exception is output
+--   parameters.  These are converted to a bare return type.
+--   The original function must not have a bare return type.
+getFunctionInputsAndOutputs tenv ty =
   case fromFunType ty
   of (params, return) ->
-       let param_types = mapMaybe get_param_export_type params
-           return_type = get_return_export_type params return
+       let param_types = mapMaybe get_param_input_type params
+           return_type = get_output_type params return
        in (param_types, return_type)
   where
     kind t = toBaseKind $ typeKind tenv t
 
-    get_param_export_type ty = 
-      case kind ty
-      of ValK  -> Just $ getCExportType tenv ty
-         BoxK  -> Just $ getCExportType tenv ty
-         BareK -> Just $ getCExportType tenv ty
-         OutK  -> Nothing
-         _ -> internalError "getCExportSig: Unexpected type"
+    -- Decide whether the parameter type describes an input
+    input_param t =
+      case kind t
+      of ValK  -> True
+         BoxK  -> True
+         BareK -> True
+         OutK  -> False
+         _     -> internalError "getCExportSig: Unexpected type"
 
-    -- If the function returns a value, then return that value
-    -- If it returns by writing a pointer, then return the output object
-    get_return_export_type params rtype =
-      let return_type =
-            case kind rtype
-            of ValK -> Just $ getCExportType tenv rtype
-               BoxK -> Just $ getCExportType tenv rtype
-               SideEffectK -> Nothing
-               _ -> internalError "getCExportSig: Unexpected type"
-          param_type =
-            if null params
-            then Nothing
-            else case fromVarApp $ last params
-                 of Just (con, [arg])
-                      | con `isPyonBuiltin` The_OutPtr ->
-                          Just $ getCExportType tenv arg
-                    _ -> Nothing
-      in case (param_type, return_type)
-         of (Just t, Nothing) -> t
-            (Nothing, Just t) -> t
-            _ -> internalError "getCExportSig: Unexpected type"
+    -- Decide whether the return type describes an output
+    output_return t =
+      case kind t
+      of ValK -> True
+         BoxK -> True
+         SideEffectK -> False
+         _  -> internalError "getCExportSig: Unexpected type"
+
+    get_param_input_type ty =
+      if input_param ty then Just ty else Nothing
+
+    get_output_type params rtype =
+      -- If the function returns a value, then return that value
+      -- If it returns by writing a pointer, then return the output object
+      case (param_type, return_type)
+      of (Just t, Nothing) -> t
+         (Nothing, Just t) -> t
+         _ -> internalError "getCExportSig: Unexpected type"
+      where
+        return_type = if output_return rtype then Just rtype else Nothing
+        param_type =
+          if null params
+          then Nothing
+          else case fromVarApp $ last params
+               of Just (con, [arg])
+                    | con `isPyonBuiltin` The_OutPtr -> Just arg
+                  _ -> Nothing
 
 getCExportType :: TypeEnv -> Type -> ExportDataType
 getCExportType tenv ty =
@@ -360,10 +454,33 @@ getCExportType tenv ty =
            case args
            of [arg] -> MatrixET arg -- FIXME: verify that 'arg' is monomorphic
      _ | FunT {} <- ty ->
-       case getFunctionExportType tenv ty
+       case getExportedFunctionSignature (getCExportType tenv) tenv ty
        of (param_types, return_type) -> FunctionET param_types return_type
      _ -> unsupported
   where
     unsupported = internalError "Unsupported exported type"
+                                        
+getCxxExportType :: TypeEnv -> Type -> ExportDataType
+getCxxExportType tenv ty =
+  case fromVarApp ty
+  of Just (con, args)
+       | con `isPyonBuiltin` The_int -> PyonIntET
+       | con `isPyonBuiltin` The_float -> PyonFloatET
+       | con `isPyonBuiltin` The_bool -> PyonBoolET
+       | con `isPyonBuiltin` The_PyonTuple2 ->
+           if length args /= 2
+           then type_error
+           else TupleET $ map (getCxxExportType tenv) args
+       | con `isPyonBuiltin` The_list ->
+           case args
+           of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
+       | con `isPyonBuiltin` The_array2 ->
+           case args
+           of [arg] -> MatrixET arg -- FIXME: verify that 'arg' is monomorphic
+     _ -> unsupported
+  where
+    unsupported = internalError "Unsupported exported type"
+
+    type_error = internalError "getCxxExportType: Type error detected"
                                         
   
