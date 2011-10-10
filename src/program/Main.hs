@@ -22,6 +22,7 @@ import Untyped.InitializeBuiltins
 import qualified Untyped.Print as Untyped
 import qualified Untyped.TypeInference as Untyped
 import qualified SystemF.ArgumentFlattening as SystemF
+import qualified SystemF.ConSpecialization as SystemF
 import qualified SystemF.PartialEval as SystemF
 import qualified SystemF.DeadCodeSF
 import qualified SystemF.DemandAnalysis as SystemF
@@ -152,6 +153,13 @@ highLevelOptimizations global_demand_analysis simplifier_phase mod = do
   mod <- if global_demand_analysis
          then SystemF.demandAnalysis mod
          else SystemF.localDemandAnalysis mod
+
+  -- Temporary: specialize on constructors and re-run demand analysis
+  mod <- SystemF.specializeOnConstructors mod
+  mod <- if global_demand_analysis
+         then SystemF.demandAnalysis mod
+         else SystemF.localDemandAnalysis mod
+  
   return mod
 
 -- | Compile a pyon file from source code to low-level code.

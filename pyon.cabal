@@ -103,6 +103,7 @@ Executable pyon
     SystemF.ArgumentFlattening
     SystemF.Build
     SystemF.Context
+    SystemF.ConSpecialization
     SystemF.Demand
     SystemF.DemandAnalysis
     SystemF.DeadCode
