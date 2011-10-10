@@ -135,16 +135,6 @@ discardTypeAnnotationsFun (FunTM (TypeAnn _ f)) =
              , funReturn = TypM $ fromTypTM $ funReturn f
              , funBody = dtae $ funBody f}
 
-
--- | Get the type of a function using its parameter and return types.
-functionType :: FunM -> Type 
-functionType (FunM (Fun { funTyParams = ty_params
-                        , funParams = params
-                        , funReturn = TypM ret
-                        })) =
-  forallType [b | TyPatM b <- ty_params] $
-  funType (map patMType params) ret
-
 -------------------------------------------------------------------------------
 
 assumeAndAnnotatePat :: PatM -> (PatTM -> TCM b) -> TCM b
@@ -155,10 +145,6 @@ assumeAndAnnotateTyPat :: TyPat Mem -> (TyPat TM -> TCM b) -> TCM b
 assumeAndAnnotateTyPat (TyPatM (v ::: t)) k = do
   t' <- typeInferType (TypM t)
   assume v t $ k (TyPatTM v t')
-
--- Assume a function definition.  Do not check the function definition's body.
-assumeDef :: Def Mem -> TCM a -> TCM a
-assumeDef (Def v _ fun) = assume v (functionType fun)
 
 assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
 

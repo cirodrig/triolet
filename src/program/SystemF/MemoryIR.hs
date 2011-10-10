@@ -32,6 +32,9 @@ module SystemF.MemoryIR
         unpackVarAppM, unpackDataConAppM, isDataConAppM,
         assumePatM, assumePatMs,
         assumeTyPatM, assumeTyPatMs,
+        assumeDef,
+        assumeDefGroup,
+        functionType,
         partitionParameters
        )
 where
@@ -195,6 +198,34 @@ assumeTyPatM (TyPatM b) m = assumeBinder b m
 
 assumeTyPatMs :: TypeEnvMonad m => [TyPatM] -> m a -> m a
 assumeTyPatMs pats m = foldr assumeTyPatM m pats
+
+assumeDef :: forall m a. TypeEnvMonad m => Def Mem -> m a -> m a
+{-# INLINE assumeDef #-}
+assumeDef def m = assume (definiendum def) (functionType $ definiens def) m
+
+assumeDefGroup :: forall m a b. TypeEnvMonad m =>
+                  DefGroup (Def Mem) -> m a -> m b -> m (a, b)
+{-# INLINE assumeDefGroup #-}
+assumeDefGroup g group_m body_m =
+  case g
+  of NonRec def -> do x <- group_m 
+                      y <- assumeDef def body_m
+                      return (x, y)
+     Rec defs -> assume_defs defs $ do x <- group_m
+                                       y <- body_m
+                                       return (x, y)
+  where
+    assume_defs :: forall a. [Def Mem] -> m a -> m a
+    assume_defs defs m = foldr assumeDef m defs
+
+-- | Get the type of a function using its parameter and return types.
+functionType :: FunM -> Type 
+functionType (FunM (Fun { funTyParams = ty_params
+                        , funParams = params
+                        , funReturn = TypM ret
+                        })) =
+  forallType [b | TyPatM b <- ty_params] $
+  funType (map patMType params) ret
 
 -- | Partition a list of parameters into input and output parameters.
 --   Output parameters must follow input parameters.

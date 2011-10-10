@@ -141,9 +141,6 @@ assumePats pats m = foldr assumePat m pats
 assumeDef :: TypeEnvMonad m => Def Mem -> m a -> m a
 assumeDef d m = assume (definiendum d) (functionType $ definiens d) m
 
-assumeDefGroup :: TypeEnvMonad m => DefGroup (Def Mem) -> m a -> m a
-assumeDefGroup dg m = foldr assumeDef m $ defGroupMembers dg
-
 -- | Apply the transformation to each expression in tail position.
 --   Look through let, letfun, and case statements.
 mapOverTailExps :: (ReprDictMonad m, TypeEnvMonad m) =>
@@ -154,7 +151,7 @@ mapOverTailExps f expression =
        body' <- assumePat binder $ mapOverTailExps f body
        return $ ExpM $ LetE inf binder rhs body'
      LetfunE inf defs body -> do
-       body' <- assumeDefGroup defs $ mapOverTailExps f body
+       ((), body') <- assumeDefGroup defs (return ()) $ mapOverTailExps f body
        return $ ExpM $ LetfunE inf defs body'
      CaseE inf scr alts -> do
        alts' <- mapM map_alt alts

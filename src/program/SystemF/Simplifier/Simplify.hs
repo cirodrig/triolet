@@ -342,10 +342,10 @@ assumePatterns pats m = foldr assumePattern m pats
 
 -- | Add the function definition types to the environment
 assumeDefs :: DefGroup (Def SM) -> LR a -> LR a
-assumeDefs defs m = foldr assumeDef m (defGroupMembers defs)
+assumeDefs defs m = foldr assumeDefSM m (defGroupMembers defs)
 
-assumeDef :: Def SM -> LR a -> LR a
-assumeDef (Def v _ f) m = assume v (functionTypeSM f) m
+assumeDefSM :: Def SM -> LR a -> LR a
+assumeDefSM (Def v _ f) m = assume v (functionTypeSM f) m
 
 -- | Print the known values on entry to the computation.
 --
@@ -2214,7 +2214,7 @@ rwExport initial_subst (Export pos spec f) = do
 withDefs :: DefGroup (Def SM) -> (DefGroup (Def Mem) -> LR a) -> LR a
 withDefs (NonRec def) k = do
   def' <- rwDef def
-  assumeDef def $ withDefValue False def' $ k (NonRec def')
+  assumeDefSM def $ withDefValue False def' $ k (NonRec def')
 
 withDefs defgroup@(Rec defs) k = assumeDefs defgroup $ do
   -- Don't inline recursive functions in general.  However, we _do_ want to
