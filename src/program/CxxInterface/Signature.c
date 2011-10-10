@@ -36,6 +36,17 @@ PyonType_NoneType(void)
 }
 
 const PyonType *
+PyonType_Tuple(int size)
+{
+  PyonType *p = malloc(sizeof(PyonType));
+  const PyonType **members = malloc(size * sizeof (const PyonType *));
+  *p = (PyonType){.tag = PyonNoneTypeTag};
+  p->tuple.count = size;
+  p->tuple.elems = members;
+  return p;
+}
+
+const PyonType *
 PyonType_duplicate(const PyonType *p)
 {
   switch(p->tag) {
@@ -59,6 +70,13 @@ PyonType_destroy(const PyonType *p)
   case PyonNoneTypeTag:
     free((void *)p);
     return;
+  case PyonTupleTypeTag:
+    {
+      int i;
+      for (i = 0; i < p->tuple.count; i++)
+	PyonType_destroy(p->tuple.elems[i]);
+      free((void *)p);
+    }
   default:
     fprintf(stderr, "PyonType_destroy: Invalid argument\n");
     exit(-1);

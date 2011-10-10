@@ -326,6 +326,7 @@ createCxxMarshalingFunction (CXXSignature _ dom rng) f = do
 createMarshalingFunction marshal_params marshal_return f = do
   -- Create the function
   let return_types = map LL.varType $ rmReturns marshal_return
+      return_inputs = rmInputs marshal_return
       (param_inputs, param_code, param_arguments) =
         combineParameterMarshalers marshal_params
 
@@ -340,7 +341,7 @@ createMarshalingFunction marshal_params marshal_return f = do
     -- Return the return value
     return $ LL.ReturnE $ LL.ValA (map LL.VarV $ rmReturns marshal_return)
 
-  return $ LL.primFun param_inputs return_types fun_body
+  return $ LL.primFun (param_inputs ++ return_inputs) return_types fun_body
 
 -------------------------------------------------------------------------------
 -- Exported types
@@ -458,12 +459,16 @@ getCExportType tenv ty =
        of (param_types, return_type) -> FunctionET param_types return_type
      _ -> unsupported
   where
-    unsupported = internalError "Unsupported exported type"
+    unsupported = internalError "getCExportType: Unsupported exported type"
                                         
 getCxxExportType :: TypeEnv -> Type -> ExportDataType
 getCxxExportType tenv ty =
   case fromVarApp ty
   of Just (con, args)
+       | con `isPyonBuiltin` The_Stored ->
+           -- Look through 'Stored' constructors.  Exported types are always 
+           -- in their natural reprsentation, so we can ignore them.
+           case args of [arg] -> getCxxExportType tenv arg
        | con `isPyonBuiltin` The_int -> PyonIntET
        | con `isPyonBuiltin` The_float -> PyonFloatET
        | con `isPyonBuiltin` The_bool -> PyonBoolET
@@ -479,7 +484,7 @@ getCxxExportType tenv ty =
            of [arg] -> MatrixET arg -- FIXME: verify that 'arg' is monomorphic
      _ -> unsupported
   where
-    unsupported = internalError "Unsupported exported type"
+    unsupported = internalError "getCxxExportType: Unsupported exported type"
 
     type_error = internalError "getCxxExportType: Type error detected"
                                         

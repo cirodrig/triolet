@@ -369,8 +369,9 @@ flattenExportedFun export_sig fun =
   of CExportSig (CSignature domain range) -> 
        flattenExportedCFun domain range fun
 
-     CXXExportSig (CXXSignature _ domain range) -> 
-       flattenExportedCFun domain range fun
+     CXXExportSig (CXXSignature _ domain range) ->
+       -- Don't flatten parameters of C++ functions
+       flattenFun fun
 
      PyonExportSig ->
        -- Flatten the same way as an ordinary function
@@ -414,6 +415,7 @@ flattenExportedParam etype original_param = do
   let no_change' = no_change xparams
   case etype of
     ListET _ -> no_change'
+    TupleET _ -> no_change'
     MatrixET _ -> no_change'
     PyonIntET -> no_change'
     PyonFloatET -> no_change'

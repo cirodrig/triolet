@@ -10,12 +10,19 @@ typedef enum PyonTypeTag {
   PyonIntTag = 0,               /* Pyon type "int" */
   PyonFloatTag,                 /* Pyon type "float" */
   PyonBoolTag,                  /* Pyon type "bool" */
-  PyonNoneTypeTag               /* Pyon type "NoneType" */
+  PyonNoneTypeTag,              /* Pyon type "NoneType" */
+  PyonTupleTypeTag		/* Some Pyon tuple type */
 } PyonTypeTag;
 
 /* A Pyon type */
 struct PyonType {
   PyonTypeTag tag;
+  union {
+    struct {
+      int count;		/* Number of tuple elements */
+      const PyonType **elems;	/* Pointer to an array of owned 'PyonType' */
+    } tuple;
+  };
 };
 
 /* Functions to create 'PyonType' instances */
@@ -23,6 +30,7 @@ const PyonType *PyonType_Int(void);
 const PyonType *PyonType_Float(void);
 const PyonType *PyonType_Bool(void);
 const PyonType *PyonType_NoneType(void);
+const PyonType *PyonType_Tuple(int size);
 const PyonType *PyonType_duplicate(const PyonType *);
 
 /* Destroy a PyonType instance */
