@@ -407,8 +407,9 @@ changeFunBodyM f (Fun cc s u inl fs p r b) =
 
 type Alt = (Lit, Stm)
 
--- | A piece of static data
-data StaticData = StaticData !StaticRecord ![Val]
+-- | A piece of static data.
+--   The value must be a record or literal.
+newtype StaticData = StaticData Val
 
 data Def a = Def {definiendum :: !ParamVar, definiens :: a}
 

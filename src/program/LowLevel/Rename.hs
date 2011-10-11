@@ -209,9 +209,7 @@ rnFun rn f = do
 
 -- | Rename the contents of a data definition.
 rnStaticData :: Rn -> StaticData -> FreshVarM StaticData
-rnStaticData rn (StaticData record values) = do
-  values' <- rnVals rn values
-  return $ StaticData record values'
+rnStaticData rn (StaticData val) = liftM StaticData $ rnVal rn val
 
 -- | Rename variables in an import specification.
 --

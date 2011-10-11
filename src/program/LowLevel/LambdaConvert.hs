@@ -91,7 +91,7 @@ cvtFun f = mkFun (funConvention f) (funInlineRequest f) (funFrameSize f) (funPar
 cvtFunDef = cvtDef cvtFun
 
 cvtData :: StaticData -> L StaticData
-cvtData (StaticData rec vals) = StaticData rec <$> traverse cvtVal vals
+cvtData (StaticData val) = StaticData <$> cvtVal val
 
 cvtDef :: (Applicative m) => (a -> m a) -> Def a -> m (Def a)
 cvtDef f (Def v x) = Def v <$> f x

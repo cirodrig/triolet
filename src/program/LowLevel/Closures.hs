@@ -350,9 +350,9 @@ scanDataValue value =
 -- Currently we don't allow lambda functions inside static data structures,
 -- so this is just a validity check.
 convertDataDef :: DataDef -> DataDef
-convertDataDef (Def v (StaticData record vals)) =
-  let vals' = map scanDataValue vals
-  in Def v (StaticData record vals')
+convertDataDef (Def v (StaticData val)) =
+  let val' = scanDataValue val
+  in Def v (StaticData val')
 
 convertDataDefs = map convertDataDef
 

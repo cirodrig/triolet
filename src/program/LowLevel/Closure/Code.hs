@@ -250,10 +250,9 @@ mkGlobalClosure :: EntryPoints -> CC ()
 mkGlobalClosure ep =
   let closure_values =
         [RecV objectHeaderRecord $ objectHeaderData $ VarV $ infoTableEntry ep]
-      static_value = StaticData
-                     (flattenStaticRecord globalClosureRecord)
-                     (flattenGlobalValues closure_values)
-  in writeData $ Def (globalClosure ep) static_value
+      data_value = RecV (flattenStaticRecord globalClosureRecord)
+                        (flattenGlobalValues closure_values)
+  in writeData $ Def (globalClosure ep) (StaticData data_value)
 
 -- | Create argument type tags for an info table entry.
 --   The type tags are a sequence of bytes describing the function's
@@ -271,7 +270,7 @@ mkArgumentTypeTags arg_types = (record_type, arg_type_val)
 -- | Create an info table.  The info table contains data needed by the run-time
 --   implementation of function currying.
 mkInfoTable :: CCInfo -> CC ()
-mkInfoTable cc = writeData $ Def info_table static_value
+mkInfoTable cc = writeData $ Def info_table (StaticData static_value)
   where
     entry_points = ccEntryPoints cc
     info_table = infoTableEntry entry_points
@@ -294,8 +293,8 @@ mkInfoTable cc = writeData $ Def info_table static_value
       where
         info_header = RecV infoTableHeaderRecord [uint8V $ fromEnum FunTag]
 
-    static_value = StaticData (flattenStaticRecord fun_info_type)
-                   (flattenGlobalValue fun_info)
+    static_value = RecV (flattenStaticRecord fun_info_type)
+                        (flattenGlobalValue fun_info)
 
 -- | Create an exact entry point for a closure-call function.
 --

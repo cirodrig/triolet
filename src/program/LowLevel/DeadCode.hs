@@ -272,8 +272,8 @@ dceFun fun = do
 -- | Perform dead code elimination on a data definition.  The data definition
 --   is scanned to find out what variables it references.
 dceDataDef :: DCE DataDef
-dceDataDef (Def v (StaticData rec vals)) =
-  (Def v . StaticData rec) <$> dceVals vals
+dceDataDef (Def v (StaticData val)) =
+  (Def v . StaticData) <$> dceVal val
 
 dceTopLevelDef :: DCE GlobalDef
 dceTopLevelDef (GlobalFunDef (Def v f)) = GlobalFunDef . Def v <$> dceFun f

@@ -225,8 +225,8 @@ instance Binary Fun where
                  , funBody = body}
 
 instance Binary StaticData where
-  put (StaticData r v) = put r >> put v
-  get = StaticData <$> get <*> get
+  put (StaticData v) = put v
+  get = StaticData <$> get
 
 instance (Binary a) => Binary (Def a) where
   put (Def v x) = put v >> put x

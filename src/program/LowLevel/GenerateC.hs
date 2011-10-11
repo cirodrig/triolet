@@ -841,11 +841,12 @@ genFun exported_vars (Def v fun)
 
 -- | Create a global static data definition and initialization code.
 genData :: GlobalVars -> Set.Set Var -> DataDef -> (CExtDecl, CStat)
-genData gvars exported_vars (Def v (StaticData record_type values)) =
+genData gvars exported_vars (Def v (StaticData val)) =
   (CDeclExt $
-   declareBytes not_exported v (recordSize record_type) (recordAlignment record_type),
-   initializeBytes gvars v record_type values)
+   declareBytes not_exported v (sizeOf val_type) (alignOf val_type),
+   initializeBytes gvars v val)
   where
+    val_type = valType val
     not_exported = not $ v `Set.member` exported_vars
 
 -- | Declare an external variable.  Its actual type is unimportant, since it
@@ -876,7 +877,15 @@ genImportVar v =
          CPtrDeclr [] internalNode]
   in declareVariable (varIdent v) (return_type_specs, pointer_decl) Nothing
 
-initializeBytes gvars v record_type values =
+initializeBytes gvars v (LitV lit) =
+  let base = cVar (varIdent v)
+      -- Generate the assignment *(TYPE *)base = val
+      cast_ptr = cPtrCast (litType lit) base
+      lhs = CUnary CIndOp cast_ptr internalNode
+      rhs = genLit lit
+  in cExprStat $ cAssign lhs rhs
+
+initializeBytes gvars v (RecV record_type values) =
   let base = cVar (varIdent v)
       stmts =
         map mk_stmt $
@@ -894,7 +903,7 @@ initializeField gvars base fld val =
                           _ -> internalError "initializeField"
       lhs = CUnary CIndOp field_cast_ptr internalNode
       rhs = genValWorker gvars val
-  in CAssign CAssignOp lhs rhs internalNode
+  in cAssign lhs rhs
 
 -- | Create the module initialization function, which initializes the
 -- module's global data.

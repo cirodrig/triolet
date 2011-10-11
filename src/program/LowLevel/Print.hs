@@ -92,15 +92,11 @@ pprFunctionType ftype =
   (map pprValueType $ ftParamTypes ftype)
   (map pprValueType $ ftReturnTypes ftype)
 
-pprStaticData (StaticData rec values) =
-  parens (pprStaticRecord rec) <+> (fillBracketList $ map pprVal values)
+pprStaticData (StaticData val) = pprVal val
 
 pprDataDef :: DataDef -> Doc
-pprDataDef (Def v (StaticData rec values)) =
-  let initializer = fillBracketList 
-                    [ mutability m <+> pprVal v
-                    | (m, v) <- zip (map fieldMutable $ recordFields rec) values]
-  in hang (text "data" <+> pprVar v <+> text "=") 4 initializer
+pprDataDef (Def v (StaticData val)) =
+  hang (text "data" <+> pprVar v <+> text "=") 4 (pprVal val)
   where
     mutability Constant = text "const"
     mutability Mutable  = empty

@@ -469,9 +469,15 @@ flattenTopLevel exports defs = do
     flatten (GlobalDataDef d) = fmap GlobalDataDef $ flattenDataDef d
 
 flattenStaticData :: StaticData -> RF StaticData
-flattenStaticData (StaticData recd vals) = do
-  vals' <- flattenValList vals
-  return $ StaticData (flattenStaticRecord recd) vals'
+flattenStaticData (StaticData val) =
+  case val
+  of RecV recd vals -> do
+       -- Create a flattened record
+       vals' <- flattenValList vals
+       return $ StaticData $ RecV (flattenStaticRecord recd) vals'
+     LitV _ ->
+       -- Literals are already flattened
+       return $ StaticData val
 
 -- | Change a data definition to a flat structure type
 flattenDataDef :: DataDef -> RF DataDef

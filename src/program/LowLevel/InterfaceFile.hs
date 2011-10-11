@@ -243,8 +243,8 @@ type FindRefs = Set.Set Var -> Set.Set Var
 findReferencedGlobals :: PreImport -> FindRefs
 findReferencedGlobals (Def _ (PreImportFun _ Nothing)) = mempty
 findReferencedGlobals (Def _ (PreImportFun _ (Just f))) = findRefsFun f
-findReferencedGlobals (Def _ (PreImportData (StaticData _ vals))) =
-  findRefsVals vals
+findReferencedGlobals (Def _ (PreImportData (StaticData val))) =
+  findRefsVal val
 
 findRefsVal value =
   case value
@@ -404,7 +404,7 @@ renameInterface extern_variables iface = do
               return $ ImportPrimFun renamed_var t mfun'
             ImportData _ Nothing ->
               return $ ImportData renamed_var Nothing
-            ImportData _ (Just (StaticData rec values)) -> do
-              values' <- mapM (renameVal RenameEverything renaming) values
-              return $ ImportData renamed_var (Just (StaticData rec values'))
+            ImportData _ (Just (StaticData val)) -> do
+              val' <- renameVal RenameEverything renaming val
+              return $ ImportData renamed_var (Just (StaticData val'))
       

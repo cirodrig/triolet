@@ -76,6 +76,7 @@ toPointerData :: Val -> Val
 toPointerData value =
   case value
   of VarV v -> VarV (toPointerVar v)
+     RecV rt vs -> RecV (toPointerRecordType rt) (map toPointerData vs)
      LitV _ -> value
      _ -> internalError "toPointerData"
 
@@ -125,8 +126,8 @@ toPointerFunctionType ftype =
 toPointerDef (Def v f) =
   Def (toPointerVar v) (toPointerFun f)
 
-toPointerDataDef (Def v (StaticData record x)) =
-  let dat = StaticData (toPointerRecordType record) (map toPointerData x)
+toPointerDataDef (Def v (StaticData x)) =
+  let dat = StaticData (toPointerData x)
   in Def (toPointerVar v) dat
 
 toPointerImport :: Import -> Import
@@ -150,8 +151,8 @@ toPointerImport (ImportPrimFun v ft mvalue) =
 toPointerImport (ImportData v msdata) =
   let msdata' = 
         case msdata
-        of Just (StaticData r vs) ->
-             Just (StaticData (toPointerRecordType r) (map toPointerData vs))
+        of Just (StaticData v) ->
+             Just (StaticData (toPointerData v))
            Nothing -> Nothing
   in ImportData (toPointerVar v) msdata'
 

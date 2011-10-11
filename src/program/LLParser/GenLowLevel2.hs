@@ -808,15 +808,9 @@ genFunctionDef tenv fdef = do
 
 genDataDef :: DataDef Typed -> FreshVarM LL.DataDef
 genDataDef ddef = do
-  -- Get the data type
-  let record_type = case exprType (dataValue ddef)
-                    of [NamedT (RecordT rec)] -> convertToStaticRecord rec
-                       _ -> internalError "genDataDef"
-
   -- Convert the initializer
-  value <- genDataExpr (dataValue ddef)
-  
-  return $ LL.Def (dataName ddef) (LL.StaticData record_type [value])
+  value <- genDataExpr (dataValue ddef)  
+  return $ LL.Def (dataName ddef) (LL.StaticData value)
 
 genDef :: Def Typed -> FreshVarM  LL.GlobalDef
 genDef (DataDefEnt d) = fmap LL.GlobalDataDef $ genDataDef d
