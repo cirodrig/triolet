@@ -405,8 +405,6 @@ pyonBuiltinVariableNames =
   , "darr2ToView2"
   , "Sequence_list_build"
   , "Sequence_array1_build"
-  , "Sequence_reduce"
-  , "Sequence_reduce1"
     
     -- Sequence functions
   , "Stream1_empty"
@@ -425,7 +423,11 @@ pyonBuiltinVariableNames =
   , "darr1_reduce"
   , "darr1_reduce1"
   , "darr1_fold"
+  , "view1_reduce"
+  , "view1_reduce1"
   , "view1_fold"
+  , "Sequence_reduce"
+  , "Sequence_reduce1"
   , "Sequence_fold"
   , "fun_from_MatrixView_Stream"
   , "fun_asArray2_Stream"

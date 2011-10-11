@@ -1677,6 +1677,8 @@ view1_flatten @(a : bare) (vw : view1 a) -> Stream dim1 a
        (\ (i : int) -> Writer a. f (i -# lo_i)));
 
     empty_view1 @a.
+      -- Don't reuse the view value here because the extra use interferes with
+      -- optimization
       viewStream @a (empty_view1 @a)
   };
 
@@ -2561,6 +2563,7 @@ darr1_reduce @(N : intindex) @(a : bare)
   -> IEffect a
   attribute(inline, inline_final) =
   darr1_fold @N @a @a repr repr size f init src ret;
+
 
 darr1_reduce1 @(N : intindex) @(a : bare)
   (repr : Repr a)
