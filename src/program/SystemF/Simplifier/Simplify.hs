@@ -1643,9 +1643,9 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
   -- If scrutinee is 'boxed' applied to a case statement,
   -- apply case-of-case transformation to move the 'boxed' constructor
   -- inwards
-  have_fuel <- checkFuel
-  case decon_scrutinee_case scrut' of
-    Just (scrut_type, inner_scrutinee, inner_alts) | have_fuel -> do
+  m_deconstructed_scrutinee <- ifFuel Nothing $ decon_scrutinee_case scrut'
+  case m_deconstructed_scrutinee of
+    Just (scrut_type, inner_scrutinee, inner_alts) -> do
       consumeFuel
       
       -- Simplify the alternative.
@@ -1660,12 +1660,48 @@ rwLetViaBoxed inf scrut (PatSM pat) compute_body = do
   where
     -- Attempt to deconstruct an expression of the form
     -- @boxed (t) (case e of ...)@ where the case statement has multiple
-    -- branches
-    decon_scrutinee_case (ExpM (AppE _ (ExpM (VarE _ op)) [ty_arg] [arg]))
-      | op `isPyonBuiltin` The_boxed && isUnfloatableCase arg =
-          case arg of ExpM (CaseE _ scr alts) -> Just (ty_arg, scr, alts)
+    -- branches.
+    decon_scrutinee_case expr@(ExpM (ConE _ (CInstM con) [arg]))
+      | is_boxed_con,
+        Just (scr, alts) <- from_deconstructable_case arg =
+          return $ Just (ty_arg, scr, alts)
 
-    decon_scrutinee_case _ = Nothing
+        -- Also detect the variant @boxed (t) (lambda r. case e of ...)@
+      | is_boxed_con,
+        ExpM (LamE lam_inf (FunM (Fun f_inf [] [f_arg] f_rtype f_body))) <- arg,
+        Just (scr, alts) <- from_deconstructable_case f_body = do
+          -- Rename the function argument to avoid name shadowing
+          fun_var <- newClonedVar (patMVar f_arg)
+          let f_arg' = patM (fun_var ::: patMType f_arg)
+              renaming = Rename.singleton (patMVar f_arg) fun_var
+              
+              -- Turn the body of a case alternative into a function
+              mk_fun alt =
+                case Rename.rename renaming alt
+                of AltM alt ->
+                     let new_fun =
+                           FunM (Fun f_inf [] [f_arg'] f_rtype (altBody alt))
+                         new_exp = ExpM $ LamE lam_inf new_fun
+                     in AltM (alt {altBody = new_exp})
+          return $ Just (ty_arg, scr, map mk_fun alts)
+      where
+        -- True if the data constructor is 'boxed'
+        is_boxed_con =
+          case con
+          of VarCon op _ _ -> op `isPyonBuiltin` The_boxed
+             _ -> False
+
+        -- The data constructor's type argument
+        ty_arg =
+          case con of VarCon _ [t] _ -> TypM t
+
+        from_deconstructable_case expression =
+          case expression
+          of ExpM (CaseE _ scr alts) | isUnfloatableCase expression ->
+               Just (scr, alts)
+             _ -> Nothing
+
+    decon_scrutinee_case _ = return Nothing
 
     -- Construct and simplify a case alternative
     --
@@ -2076,11 +2112,10 @@ rwCaseOfCase inf result_is_boxed scrutinee inner_branches outer_branches = do
       let boxed_body =
             case result_is_boxed
             of Nothing -> altBody branch
-               Just t -> ExpM $ AppE inf boxed_op [t] [altBody branch]
+               Just (TypM t) -> let con = VarCon (pyonBuiltin The_boxed) [t] []
+                                in ExpM $ ConE inf (CInstM con) [altBody branch]
           body' = caseAnalyze inf m_return_param outer_ks boxed_body
       in return $ AltM (branch {altBody = body'})
-
-    boxed_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_boxed)
 
 -- | Create a function that is equivalent to a case alternative.
 --   The pattern-bound variables become function parameters.
