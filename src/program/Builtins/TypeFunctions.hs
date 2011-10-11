@@ -55,7 +55,11 @@ array_shape sh =
 builtinTypeFunctions :: Map.Map Var BuiltinTypeFunction
 builtinTypeFunctions =
   Map.fromList
-  [ (pyonBuiltin The_shape, BuiltinTypeFunction shapePureTF shapeMemTF)
+  [ (pyonBuiltin The_minus_i, BuiltinTypeFunction minusTF minusTF)
+  , (pyonBuiltin The_plus_i, BuiltinTypeFunction plusTF plusTF)
+  , (pyonBuiltin The_min_i, BuiltinTypeFunction minTF minTF)
+  , (pyonBuiltin The_max_i, BuiltinTypeFunction maxTF maxTF)
+  , (pyonBuiltin The_shape, BuiltinTypeFunction shapePureTF shapeMemTF)
   , (pyonBuiltin The_index, BuiltinTypeFunction indexPureTF indexMemTF)
   , (pyonBuiltin The_slice, BuiltinTypeFunction slicePureTF sliceMemTF)
   , (pyonBuiltin The_view, BuiltinTypeFunction viewPureTF viewMemTF)
@@ -63,6 +67,86 @@ builtinTypeFunctions =
   , (pyonBuiltin The_BoxedType, BuiltinTypeFunction boxedPureTF boxedMemTF)
   , (pyonBuiltin The_BareType, BuiltinTypeFunction barePureTF bareMemTF)
   ]
+
+-- | The integers extended with @+infinity@ and @-infinity@
+data ExtInt = Fin Integer | NegInf | PosInf
+
+toExtInt ty = do
+  ty' <- reduceToWhnf ty
+  return $! case ty'
+            of IntT n                  -> Just (Fin n)
+               VarT v | v == posInftyV -> Just PosInf
+                      | v == negInftyV -> Just NegInf
+               _                       -> Nothing
+
+toExtInt' ty default_value k = do
+  x <- toExtInt ty
+  case x of
+    Nothing -> return default_value
+    Just y  -> k y
+
+fromExtInt (Fin n) = IntT n
+fromExtInt NegInf = VarT negInftyV
+fromExtInt PosInf = VarT posInftyV
+
+binaryIntTF :: Var
+            -> (ExtInt -> ExtInt -> Maybe ExtInt)
+            -> TypeFunction
+{-# INLINE binaryIntTF #-}
+binaryIntTF operator f = typeFunction 2 $ \args ->
+  let can't_reduce = varApp operator args
+  in case args
+     of [arg1, arg2] ->
+          toExtInt' arg1 can't_reduce $ \aff1 ->
+          toExtInt' arg2 can't_reduce $ \aff2 ->
+          return $! case f aff1 aff2
+                    of Just aff -> fromExtInt aff
+                       Nothing -> can't_reduce
+        _ -> return can't_reduce
+
+-- | Subtract type-level integers.
+--   This function works the same in System F and Mem.
+minusTF = binaryIntTF (pyonBuiltin The_minus_i) function
+  where
+    function (Fin x) (Fin y) = Just (Fin (x - y))
+    function (Fin _) NegInf  = Just PosInf
+    function (Fin _) PosInf  = Just NegInf
+    function NegInf  NegInf  = Nothing
+    function NegInf  _       = Just NegInf
+    function PosInf  PosInf  = Nothing
+    function PosInf  _       = Just PosInf
+
+-- | Add type-level integers.
+--   This function works the same in System F and Mem.
+plusTF = binaryIntTF (pyonBuiltin The_plus_i) function
+  where
+    function (Fin x) (Fin y) = Just (Fin (x + y))
+    function (Fin _) NegInf  = Just NegInf
+    function (Fin _) PosInf  = Just PosInf
+    function NegInf  PosInf  = Nothing
+    function NegInf  _       = Just NegInf
+    function PosInf  NegInf  = Nothing
+    function PosInf  _       = Just PosInf
+
+-- | Take the minimum of type-level integers.
+--   This function works the same in System F and Mem.
+minTF = binaryIntTF (pyonBuiltin The_min_i) function
+  where
+    function (Fin x) (Fin y) = Just (Fin (min x y))
+    function _       NegInf  = Just NegInf
+    function x       PosInf  = Just x
+    function NegInf  _       = Just NegInf
+    function PosInf  x       = Just x
+
+-- | Take the maximum of type-level integers.
+--   This function works the same in System F and Mem.
+maxTF = binaryIntTF (pyonBuiltin The_max_i) function
+  where
+    function (Fin x) (Fin y) = Just (Fin (max x y))
+    function _       PosInf  = Just PosInf
+    function x       NegInf  = Just x
+    function PosInf  _       = Just PosInf
+    function NegInf  x       = Just x
 
 -- | Compute the shape of a data type in the pure type system
 shapePureTF = shapeLike $ \op args ->
