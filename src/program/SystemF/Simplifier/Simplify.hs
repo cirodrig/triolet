@@ -281,24 +281,7 @@ isInliningCandidate :: SimplifierPhase -> Def Mem -> Bool
 isInliningCandidate phase def = phase_ok && code_growth_ok
   where
     ann = defAnnotation def
-      
-    -- Check whether inlining is allowed in the current phase
-    phase_ok =
-      case phase
-      of GeneralSimplifierPhase ->
-           case defAnnInlinePhase ann
-           of InlNormal     -> True 
-              InlWrapper    -> True
-              InlSequential -> False
-              InlFinal      -> False
-         SequentialSimplifierPhase ->
-           case defAnnInlinePhase ann
-           of InlNormal     -> True 
-              InlWrapper    -> True
-              InlSequential -> True
-              InlFinal      -> False
-         FinalSimplifierPhase ->
-           True
+    phase_ok = phasePermitsInlining phase def
 
     -- Decide whether code growth is reasonable
     code_growth_ok =
@@ -306,11 +289,7 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
       where
         is_wrapper = defAnnInlinePhase ann == InlWrapper
         is_marked_inline = defAnnInlineRequest ann
-        is_used_once =
-          case defAnnUses ann
-          of OnceSafe -> True
-             OnceUnsafe -> True
-             _ -> False
+        is_used_once = usesSuggestInlining def
 
         is_small =
           -- The inlined function will consist of the function body,
@@ -328,6 +307,34 @@ isInliningCandidate phase def = phase_ok && code_growth_ok
       -- Use a low threshold for compiler-inserted join points, because
       -- they generally don't provide useful opportunities for optimization
       if defAnnJoinPoint ann then 8 else 100
+
+-- | Decide whether the function is good for inlining, based on 
+--   its use annotation.  Functions that are used exactly once should be
+--   inlined because inlining won't produce growth.
+usesSuggestInlining :: Def a -> Bool
+usesSuggestInlining def = singleMultiplicity $ defAnnUses $ defAnnotation def
+
+-- | Decide whether inlining is permitted for the function in the current 
+--   simplifier phase, based on its phase annotation.
+phasePermitsInlining :: SimplifierPhase -> Def a -> Bool
+phasePermitsInlining phase def =
+  let def_phase = defAnnInlinePhase $ defAnnotation def
+  in def_phase `seq`
+     case phase
+     of GeneralSimplifierPhase ->
+          case def_phase
+          of InlNormal     -> True 
+             InlWrapper    -> True
+             InlSequential -> False
+             InlFinal      -> False
+        SequentialSimplifierPhase ->
+          case def_phase
+          of InlNormal     -> True 
+             InlWrapper    -> True
+             InlSequential -> True
+             InlFinal      -> False
+        FinalSimplifierPhase ->
+          True
 
 -- | Add a pattern-bound variable to the environment.  
 --   This adds the variable's type to the environment and
@@ -1553,13 +1560,37 @@ rwLetNormal inf bind val simplify_body = do
   rwExpReturn (ExpM $ LetE inf bind' val' body', topCode)
 
 -- | Rewrite a letrec expression, by rewriting the functions and the
---   expression body.  The letrec expression itself is not
---   transformed or eliminated.
-rwLetrec inf defs body = withDefs defs $ \defs' -> do
-  (body', _) <- rwExp body
-      
-  let local_vars = Set.fromList $ map definiendum $ defGroupMembers defs'
-  rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
+--   expression body.  
+rwLetrec :: ExpInfo -> DefGroup (Def SM) -> ExpSM -> LR (ExpM, AbsCode)
+rwLetrec inf defs body = do
+  phase <- getPhase
+  have_fuel <- checkFuel
+
+  -- If the function is nonrecursive and used exactly once, the function is
+  -- unconditionally pre-inlined
+  case defs of
+    NonRec def | have_fuel &&
+                 usesSuggestInlining def &&
+                 phasePermitsInlining phase def -> do
+      consumeFuel
+
+      -- Substitute a lambda expression for this variable
+      function <- applySubstitutionFun (definiens def)
+      let lambda_fun = ExpM $ LamE inf function
+          value_subst =
+            singletonV (definiendum def) (SubstitutedVar lambda_fun)
+          subst = Subst Substitute.empty value_subst
+
+      -- Rewrite the body
+      rwExp =<< substitute subst body
+
+  -- Otherwise, the letrec expression itself is not eliminated.
+  -- Local functions are simplified,
+  -- then may be considered for inlining at each callsite.
+    _ -> withDefs defs $ \defs' -> do
+      (body', _) <- rwExp body
+      let local_vars = Set.fromList $ map definiendum $ defGroupMembers defs'
+      rwExpReturn (ExpM $ LetfunE inf defs' body', topCode)
 
 rwCase :: ExpInfo -> ExpSM -> [AltSM] -> LR (ExpM, AbsCode)
 rwCase inf scrut alts = do

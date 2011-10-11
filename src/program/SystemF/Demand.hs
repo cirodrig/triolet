@@ -69,11 +69,20 @@ showMultiplicity ManySafe = "*"
 showMultiplicity OnceUnsafe = "1+"
 showMultiplicity ManyUnsafe = "*+"
 
+-- | Determine whether the 'Multiplicity' indicates that the value is
+--   used at most once when it is executed.
 safeMultiplicity :: Multiplicity -> Bool
 safeMultiplicity Dead = True
 safeMultiplicity OnceSafe = True
 safeMultiplicity ManySafe = True
 safeMultiplicity _ = False
+
+-- | Determine whether the 'Multiplicity' indicates that the value is
+--   mentioned in exactly one place.
+singleMultiplicity :: Multiplicity -> Bool
+singleMultiplicity OnceSafe = True
+singleMultiplicity OnceUnsafe = True
+singleMultiplicity _ = False
 
 instance Dataflow Multiplicity where
   bottom = Dead
