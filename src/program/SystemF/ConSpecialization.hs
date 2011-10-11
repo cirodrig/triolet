@@ -757,6 +757,10 @@ withWantedSpecializations defs m = Specialize $ ReaderT $ \env -> do
   return (return_value, wanted)
   where
     assume_defs defs m = foldr assumeDef m defs
+
+specializeExport export = do
+  f <- specializeFun (exportFunction export)
+  return $ export {exportFunction = f}
   
 specializeTopLevel :: [DefGroup (Def Mem)] -> [Export Mem]
                    -> Specialize ([DefGroup (Def Mem)], [Export Mem])
@@ -774,7 +778,9 @@ specializeTopLevel (defs:defss) exports = do
         (specializeCallsTopLevel spcl_map defss' exports')
       return (defs'' : defss'', exports'')
 
-specializeTopLevel [] exports = return ([], exports)
+specializeTopLevel [] exports = do
+  exports' <- mapM specializeExport exports
+  return ([], exports')
 
 specializeModule (Module module_name imports defs exports) =
   assume_imports $ do
