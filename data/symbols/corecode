@@ -1700,7 +1700,7 @@ view1_zipWith @(a b c : bare)
   (repr_a : Repr a) (repr_b : Repr b) (repr_c : Repr c)
   (transformer : a -> b -> Writer c) (vwA : view1 a) (vwB : view1 b)
   -> view1 c
-  attribute(inline, inline_final) =
+  attribute(inline) =
   case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
@@ -1733,7 +1733,7 @@ view1_zipWith3 @(a b c d : bare)
   (transformer : a -> b -> c -> Writer d)
   (vwA : view1 a) (vwB : view1 b) (vwC : view1 c)
   -> view1 d
-  attribute(inline, inline_final) =
+  attribute(inline) =
   case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
@@ -1775,7 +1775,7 @@ view1_zipWith4 @(a b c d e : bare)
   (transformer : a -> b -> c -> d -> Writer e)
   (vwA : view1 a) (vwB : view1 b) (vwC : view1 c) (vwD : view1 d)
   -> view1 e
-  attribute(inline, inline_final) =
+  attribute(inline) =
   case vwA of {
     mk_view1 @a @(loA hiA : intindex)
              (iloA : IInt loA) (ihiA : IInt hiA) (fA : int -> Writer a).
@@ -1823,7 +1823,8 @@ view1_zipWith4 @(a b c d e : bare)
   };
 
 Sequence_map @(a b : bare) (repr_a : Repr a) (repr_b : Repr b)
-          (transformer : a -> Writer b) (sq : Sequence a) -> Sequence b =
+          (transformer : a -> Writer b) (sq : Sequence a) -> Sequence b
+  attribute(inline, inline_final) =
   case sq of
     sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
 
@@ -1848,7 +1849,8 @@ Sequence_zipWith
   (transformer : a -> b -> Writer c)
   (sqA : Sequence a)
   (sqB : Sequence b)
-  -> Sequence c =
+  -> Sequence c
+  attribute(inline, inline_final) =
   case sqA
   of sequence @a @(st_a : box)
      (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
@@ -1903,7 +1905,8 @@ Sequence_zipWith3
   (sqA : Sequence a)
   (sqB : Sequence b)
   (sqC : Sequence c)
-  -> Sequence d =
+  -> Sequence d
+  attribute(inline, inline_final) =
   case sqA
   of sequence @a @(st_a : box)
      (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
@@ -1972,7 +1975,8 @@ Sequence_zipWith4
   (sqB : Sequence b)
   (sqC : Sequence c)
   (sqD : Sequence d)
-  -> Sequence e =
+  -> Sequence e
+  attribute(inline, inline_final) =
   case sqA
   of sequence @a @(st_a : box)
      (state_a : st_a) (next_a : st_a -> StreamNext st_a a).
@@ -2506,8 +2510,13 @@ fun_reduce_Stream @(a : bare) (repr : Repr a)
   (s : Stream dim1 a)
   (ret : OutPtr a)
   -> IEffect a
-  attribute(inline, inline_final) =
-  fun_fold_Stream @a @a repr repr f init s ret;
+  attribute(inline) =
+  case s of {
+    viewStream @a (vw : view1 a).
+      view1_reduce @a repr f init vw ret
+  ; sequenceStream @a (sq : Sequence a).
+      Sequence_reduce @a repr f init sq ret
+  };
 
 
 fun_reduce1_Stream @(a : bare) (repr : Repr a)
@@ -2515,33 +2524,13 @@ fun_reduce1_Stream @(a : bare) (repr : Repr a)
   (s : Stream dim1 a)
   (ret : OutPtr a)
   -> IEffect a
-  attribute(inline, inline_final) =
+  attribute(inline) =
   case s of {
     viewStream @a (vw : view1 a).
-      view1ToDarr1 @a @a vw
-      (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a) (ret : OutPtr a)
-          -> IEffect a.
-	 darr1_reduce1 @N @a repr size f darr ret)
-      (\ (ret : OutPtr a) -> IEffect a.
-        -- Error to call 'reduce1' on an empty stream
-        except @(IEffect a))
-      ret
+      view1_reduce1 @a repr f vw ret
 
   ; sequenceStream @a (sq : Sequence a).
-      -- Use the stream's first element as the initial value
-      case sq of
-        sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
-
-      case next state of {
-        streamValue @st @a (next_state : st) (init : BoxedType a).
-          case boxed @a (convertToBare @a repr init) of boxed @a (u_init : a).
-          let new_sequence : Sequence a =
-                sequence @a @st next_state next in
-          Sequence_fold @a @a repr repr f u_init new_sequence ret;
-
-        streamEmpty @st @a.
-          except @(IEffect a)
-      }
+      Sequence_reduce1 @a repr f sq ret
   };
 
 
@@ -2553,7 +2542,7 @@ fun_fold_Stream @(a acc : bare)
   (src : Stream dim1 a)
   (ret : OutPtr acc)
   -> IEffect acc
-  attribute(inline, inline_final) =
+  attribute(inline) =
   case src of {
     viewStream @a (vw : view1 a).
       view1_fold @a @acc repr_a repr_acc f init vw ret
@@ -2561,6 +2550,17 @@ fun_fold_Stream @(a acc : bare)
       Sequence_fold @a @acc repr_a repr_acc f init sq ret
   };
 
+
+darr1_reduce @(N : intindex) @(a : bare)
+  (repr : Repr a)
+  (size : FIInt N)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (src : darr1 N a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  darr1_fold @N @a @a repr repr size f init src ret;
 
 darr1_reduce1 @(N : intindex) @(a : bare)
   (repr : Repr a)
@@ -2605,6 +2605,37 @@ darr1_fold @(N : intindex) @(a acc : bare)
   ret;
 
 
+view1_reduce1 @(a : bare) (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (vw : view1 a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  view1ToDarr1 @a @a vw
+  (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a) (ret : OutPtr a)
+      -> IEffect a.
+     darr1_reduce1 @N @a repr size f darr ret)
+  (\ (ret : OutPtr a) -> IEffect a.
+    -- Error to call 'reduce1' on an empty stream
+    except @(IEffect a))
+  ret;
+
+
+view1_reduce @(a : bare) (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (vw : view1 a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+  view1ToDarr1 @a @a vw
+  (\ @(N : intindex) (size : FIInt N) (darr : darr1 N a) (ret : OutPtr a)
+    -> IEffect a.
+    darr1_reduce @N @a repr size f init darr ret)
+  (\ (ret : OutPtr a) -> IEffect a. copy @a repr init ret)
+  ret;
+
+
 view1_fold @(a acc : bare)
   (repr_a : Repr a)
   (repr_acc : Repr acc)
@@ -2620,6 +2651,39 @@ view1_fold @(a acc : bare)
     darr1_fold @N @a @acc repr_a repr_acc size f init darr ret)
   (\ (ret : OutPtr acc) -> IEffect acc. copy @acc repr_acc init ret)
   ret;
+
+
+Sequence_reduce @(a : bare)
+  (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (sq : Sequence a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  Sequence_fold @a @a repr repr f init sq ret;
+
+Sequence_reduce1 @(a : bare)
+  (repr : Repr a)
+  (f : a -> a -> Writer a)
+  (sq : Sequence a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  -- Use the stream's first element as the initial value
+  case sq of
+    sequence @a @(st : box) (state : st) (next : st -> StreamNext st a).
+
+  case next state of {
+    streamValue @st @a (next_state : st) (init : BoxedType a).
+      case boxed @a (convertToBare @a repr init) of boxed @a (u_init : a).
+      let new_sequence : Sequence a =
+            sequence @a @st next_state next in
+      Sequence_fold @a @a repr repr f u_init new_sequence ret;
+
+    streamEmpty @st @a.
+      except @(IEffect a)
+  };
 
 
 Sequence_fold @(a acc : bare)
@@ -2676,14 +2740,14 @@ range (n : int) -> Stream dim1 (Stored int)
 
 
 Stream1_empty @(a : bare) -> Stream1 a
-  attribute(inline, inline_final) =
+  attribute(inline) =
   let zero : IInt 0 = iInt @0 (fiInt @0 0) in
   viewStream @a
   (empty_view1 @a);
 
 
 Stream1_return @(a : bare) (repr : Repr a) (w : Writer a) -> Stream1 a
-  attribute(inline, inline_final) =
+  attribute(inline) =
   let zero : IInt 0 = iInt @0 (fiInt @0 0) in
   let one : IInt 1 = iInt @1 (fiInt @1 1) in
   viewStream @a
@@ -2693,7 +2757,7 @@ Stream1_return @(a : bare) (repr : Repr a) (w : Writer a) -> Stream1 a
 
 Stream1_guard @(a : bare) (repr : Repr a) (condition : bool) (s : Stream1 a)
   -> Stream1 a
-  attribute(inline, inline_final) =
+  attribute(inline) =
   let sq : Sequence a =
         case s of {
 	  viewStream @a (vw : view1 a). viewToSequence @a repr vw
@@ -2708,7 +2772,7 @@ Stream1_bind @(a b : bare)
   (s : Stream1 a)
   (t : a -> Stream1 b)
   -> Stream1 b
-  attribute(inline, inline_final) =
+  attribute(inline) =
   let sq : Sequence a =
         case s of {
 	  viewStream @a (vw : view1 a). viewToSequence @a repr_a vw
