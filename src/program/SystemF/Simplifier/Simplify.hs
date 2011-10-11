@@ -832,29 +832,29 @@ flattenExp' orig_expression expression =
 flattenExps :: [ExpSM] -> Restructure [ExpM]
 flattenExps es = mergeList =<< mapM flattenExp es
 
--- | A variant of 'flattenExp' that can also float bindings out of 
---   lambda functions.  It's only safe to float the binding if the function
---   is guaranteed to be called.
+-- | A variant of 'flattenExp' that can also float bindings out of
+--   initializer functions.  It's only safe to float the binding if
+--   the function is guaranteed to be called.
 flattenInsideLambda :: ExpSM -> Restructure ExpM
 flattenInsideLambda expression = do
   fresh_expression <- freshenHead expression
   case fresh_expression of
-    LamE inf (FunSM (Fun f_inf s_ty_params s_params ret body)) -> do
-      let ty_params = map fromTyPatSM s_ty_params
-          params = map fromPatSM s_params
-          param_vars = map tyPatMVar ty_params ++ map patMVar params
+    -- Only monomorphic functions are matched by this pattern.
+    -- Since the motivation for this transformation is initializer
+    -- functions, which are monomorphic, the restriction isn't a problem.
+    LamE inf (FunSM (Fun f_inf [] s_params ret body)) -> do
+      let params = map fromPatSM s_params
+          param_vars = map patMVar params
           return_type = fromTypSM ret
 
       -- Flatten the function body
       ctx_body <-
-        assumeTyPatMs ty_params $
         assumePatMs params $
         flattenExp body >>=
         anchorVarList param_vars (return return_type)
-      let rebuild_fun e = ExpM $ LamE inf (FunM (Fun f_inf ty_params params (TypM return_type) e))
+      let rebuild_fun e = ExpM $ LamE inf (FunM (Fun f_inf [] params (TypM return_type) e))
       return $ mapContext rebuild_fun ctx_body
     _ -> flattenExp' expression fresh_expression
-
 
 -- | Perform flattening in a data constructor expression.
 --   Arguments are flattened based on their kind.
