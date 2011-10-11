@@ -234,7 +234,7 @@ data TypeFunction =
     -- | How to evaluate a type function.  The length of the argument list
     --   is exactly the size given by _tyfunArity.  The arguments are not
     --   reduced.  The returned type should be in weak head-normal form.
-  , _tyfunReduction :: !(EvalMonad m => [Type] -> m Type)
+  , _tyfunReduction :: !([Type] -> TypeEvalM Type)
   }
 
 -- | A built-in type function has two implementations, depending on whether
@@ -246,7 +246,7 @@ data BuiltinTypeFunction =
   }
 
 -- | Create a type function
-typeFunction :: Int -> (forall m. EvalMonad m => [Type] -> m Type) -> TypeFunction
+typeFunction :: Int -> ([Type] -> TypeEvalM Type) -> TypeFunction
 typeFunction = TypeFunction
 
 typeFunctionArity :: TypeFunction -> Int
@@ -255,7 +255,7 @@ typeFunctionArity = _tyfunArity
 applyTypeFunction :: EvalMonad m => TypeFunction -> [Type] -> m Type
 {-# INLINE applyTypeFunction #-}
 applyTypeFunction f ts = do
-  x <- _tyfunReduction f ts
+  x <- liftTypeEvalM $ _tyfunReduction f ts
   return $! x                   -- Ensure that result is evaluated
 
 -- | A type environment maps variables to types
