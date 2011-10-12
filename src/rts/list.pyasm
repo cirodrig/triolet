@@ -401,7 +401,85 @@ procedure pyon_matrix_free_POD (pointer mat) -> () {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// Exported to C
+// Exported to C for the C++ interface
+
+data pointer pyon_List_size = sizeof PyonList;
+data pointer pyon_List_alignment = alignof PyonList;
+
+// Allocate a boxed list with the given length.
+// The boolean parameter is true if the list contains POD data.
+procedure pyon_List_initialize
+  (int length, uint elt_size, uint elt_align, pointer ret) -> () {
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef array_type = array(value length, elt_type);
+  ret @! PyonList.nelems = FinIndInt {length};
+  ret @! PyonList.contents = pointer primcall pyon_alloc(sizeof array_type);
+  ();
+};
+
+procedure pyon_List_get_contents (pointer lst) -> pointer {
+  lst @! PyonList.contents;
+};
+
+procedure pyon_Array0_size (uint size, uint align) -> uint {
+  sizeof PyonArray0(bytes(value size, value align));
+};
+
+procedure pyon_Array0_alignment (uint size, uint align) -> uint {
+  alignof PyonArray0(bytes(value size, value align));
+};
+
+procedure pyon_Array0_get_contents
+  (pointer arr, uint size, uint align) -> pointer {
+  arr @ PyonArray0(bytes(value size, value align)).content;
+};
+
+data pointer pyon_Array1_size = sizeof PyonArray1;
+data pointer pyon_Array1_alignment = alignof PyonArray1;
+
+procedure pyon_Array1_initialize
+  (int min, int end, uint elt_size, uint elt_align, pointer ret) -> () {
+  length = end - min;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef array_type = array(value length, elt_type);
+
+  ret @! PyonArray1.bound_min = FinIndInt {min};
+  ret @! PyonArray1.bound_end = FinIndInt {end};
+  ret @! PyonArray1.contents = pointer primcall pyon_alloc(sizeof array_type);
+  ();
+};
+
+procedure pyon_Array1_get_contents (pointer arr) -> pointer {
+  arr @! PyonArray1.contents;
+};
+
+
+data pointer pyon_Array2_size = sizeof PyonArray2;
+data pointer pyon_Array2_alignment = alignof PyonArray2;
+
+procedure pyon_Array2_initialize
+  (int y_min, int y_end, int x_min, int x_end,
+   uint elt_size, uint elt_align, pointer ret) -> () {
+  y_size = y_end - y_min;
+  x_size = x_end - x_min;
+  typedef elt_type = bytes(value elt_size, value elt_align);
+  typedef array_type = array(value y_size, array(value x_size, elt_type));
+
+  ret @! PyonArray2.bound_ymin = FinIndInt {y_min};
+  ret @! PyonArray2.bound_yend = FinIndInt {y_end};
+  ret @! PyonArray2.bound_xmin = FinIndInt {x_min};
+  ret @! PyonArray2.bound_xend = FinIndInt {x_end};
+  ret @! PyonArray2.contents = pointer primcall pyon_alloc(sizeof array_type);
+  ();
+};
+
+procedure pyon_Array2_get_contents (pointer arr) -> pointer {
+  arr @! PyonArray2.contents;
+};
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Exported to C for the C interface
 
 // Create a list from an array of CInt.
 // The list holds a copy of the given array.

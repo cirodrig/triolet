@@ -7,6 +7,42 @@ extern function pyon.internal.list.list_build
   (owned, owned, pointer) -> ();
 
 // Exported to C
+extern data pointer pyon.internal.list.pyon_List_size "pyon_List_size";
+extern data pointer pyon.internal.list.pyon_List_alignment "pyon_List_alignment";
+
+extern procedure pyon.internal.list.pyon_List_initialize "pyon_List_initialize"
+  (int, uint, uint, pointer) -> ();
+
+extern procedure pyon.internal.list.pyon_List_get_contents "pyon_List_get_contents"
+  (pointer) -> pointer;
+
+extern procedure pyon.internal.list.pyon_Array0_size "pyon_Array0_size"
+  (uint, uint) -> uint;
+extern procedure pyon.internal.list.pyon_Array0_alignment "pyon_Array0_alignment"
+  (uint, uint) -> uint;
+
+extern procedure pyon.internal.list.pyon_Array0_get_contents "pyon_Array0_get_contents"
+  (pointer, uint, uint) -> pointer;
+
+extern data pointer pyon.internal.list.pyon_Array1_size "pyon_Array1_size";
+extern data pointer pyon.internal.list.pyon_Array1_alignment "pyon_Array1_alignment";
+
+extern procedure pyon.internal.list.pyon_Array1_initialize "pyon_Array1_initialize"
+  (int, int, uint, uint, pointer) -> ();
+
+extern procedure pyon.internal.list.pyon_Array1_get_contents "pyon_Array1_get_contents"
+  (pointer) -> pointer;
+
+extern data pointer pyon.internal.list.pyon_Array2_size "pyon_Array2_size";
+extern data pointer pyon.internal.list.pyon_Array2_alignment "pyon_Array2_alignment";
+
+extern procedure pyon.internal.list.pyon_Array2_initialize "pyon_Array2_initialize"
+  (int, int, int, int, uint, uint, pointer) -> ();
+
+extern procedure pyon.internal.list.pyon_Array2_get_contents "pyon_Array2_get_contents"
+  (pointer) -> pointer;
+
+
 extern procedure pyon.internal.list.pyon_List_PyonInt_FromArray "pyon_List_PyonInt_FromArray"
   (int, pointer) -> pointer;
 

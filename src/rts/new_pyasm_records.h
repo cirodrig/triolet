@@ -171,6 +171,26 @@ record PyonList {
   pointer contents;		// Pointer to list contents
 };
 
+/* 0D arrays
+ *
+ * A 0-dimensional array contains just a single value.
+ */
+record PyonArray0(a) {
+  a content;                    // The single value contained in the array
+};
+
+/* 1D arrays
+ *
+ * An array has a lower and upper bound in each dimension.
+ * The lower bound is inclusive and the upper bound is not.
+ * The upper bound is greater than or equal to the lower bound.
+ */
+record PyonArray1 {
+  FinIndInt bound_min;
+  FinIndInt bound_end;
+  pointer contents;		// Pointer to matrix contents
+};
+
 /* 2D arrays
  *
  * An array has a lower and upper bound in each dimension.
