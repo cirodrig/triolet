@@ -1173,8 +1173,16 @@ darr1_fold : (N : intindex) -> (a acc : bare)
 
 view1_reduce : (a : bare)
             -> Repr a
-            -> (a -> a -> Writer a) -> a -> view1 a
+            -> (a -> a -> Writer a)
+            -> a
+            -> view1 a
             -> Writer a;
+
+view1_reduce1 : (a : bare)
+             -> Repr a
+             -> (a -> a -> Writer a)
+             -> view1 a
+             -> Writer a;
 
 view1_fold : (a acc : bare)
           -> Repr a -> Repr acc
