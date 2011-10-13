@@ -2553,6 +2553,46 @@ fun_fold_Stream @(a acc : bare)
   };
 
 
+primitive_dim1_reduce @(N : intindex) @(a : bare)
+  (repr : Repr a) (count : FIInt N)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (g : int -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  for @N @a repr (iInt @N count) init
+  (\ (i : int) (acc : a) (ret : OutPtr a) -> IEffect a.
+    case boxed @a (g i) of boxed @a (x : a).
+    f acc x ret)
+  ret;
+
+
+primitive_dim1_reduce1 @(N : intindex) @(a : bare)
+  (repr : Repr a) (size : FIInt N)
+  (f : a -> a -> Writer a)
+  (g : int -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_final) =
+  
+  case size of fiInt @N (count : int).
+  if count <=# 0
+  then except @(IEffect a)
+  else -- Get the initial value from index 0
+       case boxed @a (g 0) of boxed @a (init : a).
+
+       -- Iterate over the remaining elements
+       let size_minus_1 : FIInt (minus_i N 1) =
+       	     minus_fii @N @1 size one_fii in
+
+       for @(minus_i N 1) @a repr (iInt @(minus_i N 1) size_minus_1) init
+       (\ (i : int) (x : a) (next_x : OutPtr a) -> IEffect a.
+          case boxed @a (g (i +# 1)) of boxed @a (y : a).
+          f x y next_x)
+       ret;
+
+
 darr1_reduce @(N : intindex) @(a : bare)
   (repr : Repr a)
   (size : FIInt N)
@@ -2562,7 +2602,8 @@ darr1_reduce @(N : intindex) @(a : bare)
   (ret : OutPtr a)
   -> IEffect a
   attribute(inline, inline_final) =
-  darr1_fold @N @a @a repr repr size f init src ret;
+  case src of mk_darr1 @N @a (g : int -> Writer a).
+  primitive_dim1_reduce @N @a repr size f init g ret;
 
 
 darr1_reduce1 @(N : intindex) @(a : bare)
@@ -2573,20 +2614,8 @@ darr1_reduce1 @(N : intindex) @(a : bare)
   (ret : OutPtr a)
   -> IEffect a
   attribute(inline, inline_final) =
-  case size of fiInt @N (count : int).
-  if count <=# 0
-  then except @(IEffect a)
-  else case src of mk_darr1 @N @a (g : int -> Writer a).
-
-       -- Get the initial value from index 0
-       case boxed @a (g 0) of boxed @a (init : a).
-
-       -- Iterate over the remaining elements
-       darr1_fold @(minus_i N 1) @a @a
-       repr repr (minus_fii @N @1 size one_fii)
-       f init (mk_darr1 @(minus_i N 1) @a
-               (\ (i : int) -> Writer a. g (i +# 1)))
-       ret;
+  case src of mk_darr1 @N @a (g : int -> Writer a).
+  primitive_dim1_reduce1 @N @a repr size f g ret;
 
 
 darr1_fold @(N : intindex) @(a acc : bare)

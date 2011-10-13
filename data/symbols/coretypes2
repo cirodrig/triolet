@@ -1156,6 +1156,18 @@ unsafeMakeCoercion : (a b : box) -> coerce @box a b;
 -------------------------------------------------------------------------------
 -- Fold-like functions
 
+primitive_dim1_reduce :
+    (N : intindex) -> (a : bare)
+ -> Repr a -> FIInt N
+ -> (a -> a -> Writer a) -> a -> (int -> Writer a)
+ -> Writer a;
+
+primitive_dim1_reduce1 :
+    (N : intindex) -> (a : bare)
+ -> Repr a -> FIInt N
+ -> (a -> a -> Writer a) -> (int -> Writer a)
+ -> Writer a;
+
 darr1_reduce : (N : intindex) -> (a : bare)
             -> Repr a -> FIInt N
             -> (a -> a -> Writer a) -> a -> darr1 N a

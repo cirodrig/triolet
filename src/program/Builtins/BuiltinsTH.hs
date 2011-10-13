@@ -420,6 +420,8 @@ pyonBuiltinVariableNames =
   , "fun_fold_Stream"
   , "fun_reduce_Stream"
   , "fun_reduce1_Stream"
+  , "primitive_dim1_reduce"
+  , "primitive_dim1_reduce1"
   , "darr1_reduce"
   , "darr1_reduce1"
   , "darr1_fold"
