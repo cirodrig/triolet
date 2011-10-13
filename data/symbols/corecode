@@ -3253,6 +3253,31 @@ for @(N : intindex) @(acc : bare)
   };
 
 
+parallel_dim1_reduce @(N : intindex) @(a : bare)
+  (repr : Repr a) (count : FIInt N)
+  (f : a -> a -> Writer a)
+  (init : a)
+  (g : int -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline) =
+
+  letfun
+    -- Sequentially reduce on the interval [lb, lb + range_count)
+    do_range @(M : intindex)
+      (lb : int) (range_count : FIInt M) (range_ret : OutPtr a)
+      -> IEffect a =
+      for @M @a repr (iInt @M range_count) init
+      (\ (range_i : int) (acc : a) (acc_ret : OutPtr a) -> IEffect a.
+
+        -- Actual index is lb + range_i
+        let i : int = lb +# range_i in
+
+        case boxed @a (g i) of boxed @a (x : a).
+        f acc x acc_ret)
+      range_ret
+  in
+  blocked_reduce @N @a repr count f init do_range ret;
 
 
 

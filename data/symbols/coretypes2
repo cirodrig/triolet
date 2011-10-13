@@ -1686,28 +1686,38 @@ for : (n : intindex)
    -> (int -> acc -> Writer acc)
    -> Writer acc;
 
--- Blocked parallel reduction
+parallel_dim1_reduce :
+    (N : intindex) -> (a : bare)
+ -> Repr a -> FIInt N
+ -> (a -> a -> Writer a) -> a -> (int -> Writer a)
+ -> Writer a;
+
+parallel_dim1_reduce1 :
+    (N : intindex) -> (a : bare)
+ -> Repr a -> FIInt N
+ -> (a -> a -> Writer a) -> (int -> Writer a)
+ -> Writer a;
+
+-- Blocked parallel reduction, implemented in low-level.
 blocked_reduce :
-    (acc : bare)
- -> (n : intindex)
+    (N : intindex)
+ -> (acc : bare)
  -> Repr acc
- -> FIInt n		-- Size of range
- -> int	       			-- First member of range
+ -> FIInt N		-- Size of range
  -> (acc -> acc -> Writer acc) -- Reducer
  -> acc			-- Initial value
- -> ((n : intindex) -> FIInt n -> int -> Writer acc)
+ -> ((M : intindex) -> int -> FIInt M -> Writer acc)
     -- ^ Generate value given range
  -> Writer acc;
 
 -- Blocked parallel reduction with no neutral element
 blocked_reduce1 :
-    (acc : bare)
- -> (n : intindex)
+    (N : intindex)
+ -> (acc : bare)
  -> Repr acc
- -> FIInt n		-- Size of range
- -> int			-- First member of range
+ -> FIInt N		-- Size of range
  -> (acc -> acc -> Writer acc) -- Reducer
- -> ((n : intindex) -> FIInt n -> int -> Writer acc)
+ -> ((M : intindex) -> FIInt M -> int -> Writer acc)
     -- ^ Generate value given range
  -> Writer acc;
 

@@ -76,10 +76,10 @@ extern function pyon.internal.prim.for
   (owned, IndInt, pointer, owned, pointer) -> ();
 
 extern function pyon.internal.prim.blocked_reduce
-  (owned, FinIndInt, int, owned, pointer, owned, pointer) -> ();
+  (owned, FinIndInt, owned, pointer, owned, pointer) -> ();
 
 extern function pyon.internal.prim.blocked_reduce1
-  (owned, FinIndInt, int, owned, owned, pointer) -> ();
+  (owned, FinIndInt, owned, owned, pointer) -> ();
 
 // C implementation of blocked_reduce
 import procedure pyon_C_blocked_reduce

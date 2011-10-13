@@ -317,7 +317,7 @@ function inline for
 // A parallel reduction.  The iteration space is partitioned at run time
 // and 'generator' is called on a single member of the iteration space.
 function blocked_reduce
-  (owned acc_repr, FinIndInt size, int first,
+  (owned acc_repr, FinIndInt size,
    owned reducer, pointer init, owned generator, pointer ret) -> ()
 {
   FinIndInt {count} = size;
@@ -352,7 +352,7 @@ function blocked_reduce
   // Main computation is written in C++
   final_value = pointer primcall pyon_C_blocked_reduce
     (acc_repr @! PassConv.copy, accumulate_range, oop_reducer,
-     init, count, first);
+     init, count, int 0);
 
   // Copy into the output
   () call (acc_repr @! PassConv.copy) (final_value, ret);
@@ -368,7 +368,7 @@ function blocked_reduce
 //
 // TODO: Keep track of objects so we can deallocate them properly
 function blocked_reduce1
-  (owned acc_repr, FinIndInt size, int first,
+  (owned acc_repr, FinIndInt size,
    owned reducer, owned generator, pointer ret) -> ()
 {
   // We use the address of this data as the neutral element of the reduction.
@@ -428,7 +428,7 @@ function blocked_reduce1
   // Main computation is written in C++
   final_val = pointer primcall pyon_C_blocked_reduce
     (acc_repr @! PassConv.copy, accumulate_range, join_values,
-     uninitialized_value, count, first);
+     uninitialized_value, count, int 0);
 
   () call (acc_repr @! PassConv.copy) (final_val, ret);
 };
