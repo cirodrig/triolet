@@ -36,7 +36,6 @@ import Builtins.Builtins
 import SystemF.Build
 import SystemF.Demand
 import SystemF.DemandAnalysis
-import SystemF.EtaReduce
 import SystemF.Context
 import SystemF.Floating2
 import SystemF.MemoryIR

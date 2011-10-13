@@ -6,10 +6,7 @@ When we see a function of the form @\x. f x@, where @x@ is an application of
 eliminate the function entirely.
 -}
 
-module SystemF.EtaReduce(etaReduceModule,
-                         etaReduceSingleFunction,
-                         etaReduceSingleLambdaFunction,
-                         etaExpandModule)
+module SystemF.EtaReduce(etaExpandModule)
 where
 
 import Prelude hiding(mapM)

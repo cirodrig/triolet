@@ -30,8 +30,8 @@ import Type.Eval
 import qualified Type.Substitute as Substitute
 import Type.Substitute(substitute)
 import Type.Type
-import SystemF.EtaReduce
 import SystemF.SpecToMem
+import SystemF.EtaReduce
 import SystemF.ReprDict
 import SystemF.Syntax
 import SystemF.Print
