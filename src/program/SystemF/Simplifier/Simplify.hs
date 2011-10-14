@@ -999,9 +999,19 @@ restructureExp ex = do
     else do
       consumeFuel
       -- The return type is the same as it was before restructuring
-      return_type <- inferExpType =<< applySubstitution ex
-      new_ex <- contextExpression result return_type -- Rebuild the expression
+      old_ex <- applySubstitution ex
+      return_type <- inferExpType old_ex
+
+      -- Rebuild the expression
+      new_ex <- contextExpression result return_type
+      when False $ debug old_ex new_ex
       return $ deferEmptySubstitution new_ex
+
+  where
+    debug old_ex new_ex =
+      let message = hang (text "restructureExp") 4 $
+                    pprExp old_ex $$ text "----" $$ pprExp new_ex
+      in liftIO $ hPrint stderr message
 
 -------------------------------------------------------------------------------
 -- Useless copying
@@ -1297,8 +1307,53 @@ rwVar inf v = lookupKnownValue v >>= rewrite
 
 rwLam :: ExpInfo -> FunSM -> LR (ExpM, AbsCode)
 rwLam inf fun = do
-  (fun', fun_val) <- rwFun fun
-  rwExpReturn (ExpM $ LamE inf fun', fun_val)
+  -- First try to eta-reduce
+  restructured <- restructureLamExp inf fun
+  case restructured of
+    Nothing -> do
+      (fun', fun_val) <- rwFun fun
+      rwExpReturn (ExpM $ LamE inf fun', fun_val)
+
+    Just e -> rwExp $ deferEmptySubstitution e
+
+-- | Try to restructure a lambda expression.
+--
+-- If function is of the form (\x. E x) where E doesn't mention x,
+-- then replace it with E.
+--
+-- This is especially important when 'E' is a constructor application,
+-- because some other optimizations are enabled for terms containing 
+-- constructor applications but not terms containing lambdas.
+restructureLamExp inf fun@(FunSM (Fun fun_inf ty_params params ret body))
+  | null ty_params, [param] <- params = do
+      let param_var = patMVar $ fromPatSM param
+      body' <- freshenHead body
+      case body' of
+        AppE body_inf body_op body_ty_args body_args
+          | not $ null body_args -> do
+              -- Body is a function application
+              let last_arg = last body_args
+                  first_args = init body_args
+
+              -- Check whether last argument is the parameter variable
+              last_arg' <- freshenHead last_arg
+              case last_arg' of
+                VarE _ v | v == param_var -> do
+
+                  -- Make sure parameter isn't mentioned in other expressions
+                  body_op' <- applySubstitution body_op
+                  first_args' <- mapM applySubstitution first_args
+                  if any ((param_var `Set.member`) . Rename.freeVariables)
+                     (body_op' : first_args')
+                    then return Nothing
+                    else let reduced_body =
+                               appE body_inf body_op' (map (TypM . fromTypSM) body_ty_args) first_args'
+                         in return $ Just reduced_body
+
+                _ -> return Nothing
+        _ -> return Nothing
+  | otherwise = return Nothing
+
 
 rwCon :: ExpInfo -> CInstSM -> [ExpSM] -> LR (ExpM, AbsCode)
 rwCon inf (CInstSM con) args = do
