@@ -610,23 +610,24 @@ mergeWith :: (Renameable a, Substitutable b, EvalMonad m,
              (a -> b -> c) -> Contexted a -> Contexted b -> m (Contexted c)
 mergeWith f (ApplyContext {_ctxFree = fv1, _ctxContext = c1, _ctxBody = x})
             (ApplyContext {_ctxFree = fv2, _ctxContext = c2, _ctxBody = y})
-  | Set.null $ ctxBoundVariables c1 `Set.intersection` fv2 =
-      -- No name conflicts.  Concatenate the contexts without renaming.
-      return $ ApplyContext { _ctxFree = Set.union fv1 fv2
-                            , _ctxContext = c1 ++ c2
-                            , _ctxBody = f x y}
-
-  | otherwise = do
+  | let bv = ctxBoundVariables c1
+    in bv `intersects` fv2 || bv `intersects` ctxBoundVariables c2 = do
       -- Rename 'c2' and 'y' to eliminate name conflicts
       let rename_y = substituteCtx emptySubst c2 $ \subst c2' -> do
             y' <- substitute subst y
             return (c2', y')
       (c2', y') <- assumeCtx c1 rename_y
-      
+
       -- Concatenate the contexts
       return $ ApplyContext { _ctxFree = fv1 `Set.union` ctxFreeVariables c2'
                             , _ctxContext = c1 ++ c2'
                             , _ctxBody = f x y'}
+
+  | otherwise =
+      -- No name conflicts.  Concatenate the contexts without renaming.
+      return $ ApplyContext { _ctxFree = Set.union fv1 fv2
+                            , _ctxContext = c1 ++ c2
+                            , _ctxBody = f x y}
 
 -- If either context raises an exception, the merged context raises an
 -- exception
@@ -636,12 +637,9 @@ mergeWith _ _ ExceptingContext = return ExceptingContext
 mergeList :: (Renameable a, Substitutable a, EvalMonad m,
               Substitution a ~ Subst) => 
              [Contexted a] -> m (Contexted [a])
-mergeList (x:xs) = do
-  xs' <- mergeList xs
-  x_xs' <- merge x xs'
-  inContext x_xs' $ \(x_body, xs_body) -> return (x_body : xs_body)
-
-mergeList [] = return $ unitContext []
+mergeList [x]    = return $ mapContext (\x -> [x]) x
+mergeList (x:xs) = mergeWith (:) x =<< mergeList xs
+mergeList []     = return $ unitContext []
 
 -- | Find a value indexed by a type.  Analogous to 'lookup'.
 findByType :: Type -> [(Type, a)] -> TypeEvalM (Maybe a)
