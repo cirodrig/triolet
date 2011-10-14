@@ -328,6 +328,9 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
   where
     table = [ (pyonBuiltin The_convertToBare, rwConvertToBare)
             , (pyonBuiltin The_convertToBoxed, rwConvertToBoxed)
+            , (pyonBuiltin The_darr1_reduce, rwDarr1Reduce)
+            , (pyonBuiltin The_darr1_reduce1, rwDarr1Reduce1)
+            , (pyonBuiltin The_arr1D_build, rwArr1DBuild)
             -- , (pyonBuiltin The_range, rwRange)
             -- , (pyonBuiltin The_TraversableDict_list_traverse, rwTraverseList)
             --, (pyonBuiltin The_TraversableDict_list_build, rwBuildList)
@@ -405,10 +408,10 @@ generalRewrites = RewriteRuleSet (Map.fromList table) (Map.fromList exprs)
 parallelizingRewrites :: RewriteRuleSet
 parallelizingRewrites = RewriteRuleSet (Map.fromList table) Map.empty
   where
-    table = [ --(pyonBuiltin The_fun_reduce_Stream, rwParallelReduceStream)
-            --, (pyonBuiltin The_fun_reduce1_Stream, rwParallelReduce1Stream)
-            --, (pyonBuiltin The_histogramArray, rwParallelHistogramArray)
+    table = [ --(pyonBuiltin The_primitive_dim1_reduce, rwParallelDim1Reduce)
+            --, (pyonBuiltin The_primitive_dim1_reduce1, rwParallelDim1Reduce1)
             --, (pyonBuiltin The_doall, rwParallelDoall)
+            --, (pyonBuiltin The_histogramArray, rwParallelHistogramArray)
             ]
 
 -- | Rewrite rules that transform potentially parallel algorithms into
@@ -551,6 +554,60 @@ rwConvertToBoxed inf [TypM bare_type] [repr, arg]
       conE inf (VarCon (pyonBuiltin The_boxed) [whnf_type] []) [arg]
 
 rwConvertToBoxed _ _ _ = return Nothing
+
+-- | Convert a reduction on a @mk_darr1@ to a primitive reduction.
+--   The result is basically the same as if the function were inlined.
+--   It's done as a rewrite rule because we want to \"inline\" only if
+--   the argument is a data constructor.
+rwDarr1Reduce :: RewriteRule
+rwDarr1Reduce inf [size_index, ty]
+  (repr : count : reducer : init : darr : other_args) =
+  case fromExpM darr
+  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+       | con `isPyonBuiltin` The_mk_darr1 ->
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_reduce
+             exp = appE inf op [size_index, ty]
+                   (repr : count : reducer : init : producer : other_args)
+         in return $ Just exp
+     _ -> return Nothing
+
+rwDarr1Reduce _ _ _ = return Nothing
+
+-- | Convert a reduction on a @mk_darr1@ to a primitive reduction.
+--   The result is basically the same as if the function were inlined.
+--   It's done as a rewrite rule because we want to \"inline\" only if
+--   the argument is a data constructor.
+rwDarr1Reduce1 :: RewriteRule
+rwDarr1Reduce1 inf [size_index, ty]
+  (repr : count : reducer : darr : other_args) =
+  case fromExpM darr
+  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+       | con `isPyonBuiltin` The_mk_darr1 ->
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_reduce1
+             exp = appE inf op [size_index, ty]
+                   (repr : count : reducer : producer : other_args)
+         in return $ Just exp
+     _ -> return Nothing
+
+rwDarr1Reduce1 _ _ _ = return Nothing
+
+-- | Convert a 1D array creation on a @mk_darr1@ to a loop.
+--   The result is basically the same as if the function were inlined.
+--   It's done as a rewrite rule because we want to \"inline\" only if
+--   the argument is a data constructor.
+rwArr1DBuild :: RewriteRule
+rwArr1DBuild inf [size_index, ty]
+  (repr : count : darr : other_args) =
+  case fromExpM darr
+  of ConE _ (CInstM (VarCon con _ _)) [producer] 
+       | con `isPyonBuiltin` The_mk_darr1 ->
+         let op = ExpM $ VarE inf $ pyonBuiltin The_primitive_dim1_generate
+             exp = appE inf op [size_index, ty]
+                   (repr : count : producer : other_args)
+         in return $ Just exp
+     _ -> return Nothing
+
+rwArr1DBuild _ _ _ = return Nothing
 
 {-
 -- | Convert 'range' into an explicitly indexed variant
@@ -1142,7 +1199,7 @@ rwIntComparison op inf [] [arg1, arg2]
   where
     true_value = ExpM (VarE inf (pyonBuiltin The_True))
     false_value = ExpM (VarE inf (pyonBuiltin The_False))
-  
+
 {-
 {-
 -- | Turn a list-building histogram into an array-building histogram

@@ -207,6 +207,15 @@ record PyonArray2 {
   pointer contents;		// Pointer to matrix contents
 };
 
+/* This data structure is used by 'blocked_reduce' to store data that's
+ * used in C
+ */
+record BlockedReduceData {
+  owned initial_value;
+  owned generator;		// Function that generates and reduces values
+  owned reducer;		// Function that reduces two values
+};
+
 /* A stream of values.  Stream elements are computed on demand.
  *
  * next : state -> StreamNext

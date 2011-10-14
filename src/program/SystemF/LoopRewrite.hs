@@ -60,7 +60,6 @@ incOtherLoopCount m = local (modifyLoopNesting inc_count) m
 parLoopOperator, otherLoopOperator :: Var -> Bool
 parLoopOperator v =
   v `elem` [pyonBuiltin The_blocked_reduce,
-            pyonBuiltin The_blocked_reduce1,
             pyonBuiltin The_blocked_doall]
 
 otherLoopOperator v =
@@ -79,6 +78,50 @@ useRewriteRules :: ExpInfo -> Var -> [TypM] -> [ExpM] -> LRW (Maybe ExpM)
 useRewriteRules inf op_var ty_args args = ReaderT $ \env ->
   rewriteApp parallelizingRewrites (intIndexEnv (dictEnv env)) (varSupply env) (typeEnv env)
   inf op_var ty_args (map deferEmptySubstitution args)
+
+-- | Replace a function application with a parallel function application
+--   if possible.
+--
+--   The function must have a known parallel form, and it must be
+--   applied to all input arguments (output arguments are not required).
+replaceWithParallelApp :: ExpInfo -> Var -> [TypM] -> [ExpM]
+                       -> LRW (Maybe ExpM)
+replaceWithParallelApp inf op_var ty_args args = ReaderT $ \env ->
+  return $! do
+    -- Look up the parallel equivalent of this operator
+    parallel_op <- lookup op_var parallel_function_table
+
+    -- Ensure that the operator is fully applied
+    t <- lookupType parallel_op (typeEnv env)
+    guard (fully_applied t)
+
+    return $ new_expr parallel_op
+  where
+    new_expr parallel_op =
+      let op = ExpM $ VarE inf parallel_op
+      in appE inf op ty_args args
+
+    -- Verify that the function is fully applied, except possibly for
+    -- some missing output pointer parameters
+    fully_applied ty =
+      let (ty_binders, domain, _) = fromForallFunType ty
+      in length ty_args == length ty_binders &&
+         all is_out_ptr (drop (length args) domain)
+      where
+        -- True if 't' is an 'OutPtr' type
+        is_out_ptr t =
+          case fromVarApp t
+          of Just (op, _) -> op `isPyonBuiltin` The_OutPtr
+             _ -> False
+
+    parallel_function_table =
+      [ (pyonBuiltin The_primitive_dim1_reduce,
+         pyonBuiltin The_parallel_dim1_reduce)
+      , (pyonBuiltin The_primitive_dim1_reduce1,
+         pyonBuiltin The_parallel_dim1_reduce1)
+      , (pyonBuiltin The_doall,
+         pyonBuiltin The_parallel_doall)
+      ]
 
 -------------------------------------------------------------------------------
 -- Traversal
@@ -116,7 +159,7 @@ rwAppOper subexpr_context inf op_inf op_var ty_args args = do
   loop_nesting <- asks loopNesting
   case parLoops loop_nesting of
     0 -> do
-      rewritten <- useRewriteRules inf op_var ty_args args
+      rewritten <- replaceWithParallelApp inf op_var ty_args args
       rebuild_from_rewrite rewritten
     _ -> recurse
   where

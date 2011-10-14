@@ -540,8 +540,8 @@ arr1D_build @(N : intindex) @(a : bare)
 
   case s of mk_darr1 @N @a (f : int -> Writer a).
 
-  doall @N @(arr N a) @a size
-  (\ (i : int) -> IEffect a. f i (subscript_out @N @a repr ret i));
+  primitive_dim1_generate @N @a repr size f ret;
+
 
 arr2D_traverse @(M N : intindex) @(a : bare)
   (repr : Repr a) (height : FIInt M) (width : FIInt N) (ay : arr M (arr N a))
@@ -2593,6 +2593,16 @@ primitive_dim1_reduce1 @(N : intindex) @(a : bare)
        ret;
 
 
+primitive_dim1_generate @(N : intindex) @(a : bare)
+  (repr : Repr a) (size : FIInt N)
+  (f : int -> Writer a)
+  (ret : OutPtr (arr N a))
+  -> IEffect (arr N a)
+  attribute(inline, inline_sequential) =
+  parallel_doall @N @(arr N a) @a size
+  (\ (i : int) -> IEffect a. f i (subscript_out @N @a repr ret i));
+
+
 darr1_reduce @(N : intindex) @(a : bare)
   (repr : Repr a)
   (size : FIInt N)
@@ -3253,6 +3263,50 @@ for @(N : intindex) @(acc : bare)
   };
 
 
+for_box @(N : intindex) @(acc : box)
+  (count : IInt N)
+  (init : acc)
+  (f : int -> acc -> acc)
+  -> acc
+  attribute(inline, inline_final) =
+
+  -- Unpack the indexed int
+  case count of {
+    iInt @N (fin : FIInt N).
+      case fin of fiInt @N (bound : int).
+
+      -- Main loop
+      letfun
+        loop (i : int) (x : acc) -> acc =
+          if EqDict_int_eq i bound
+          then x
+          else loop (AdditiveDict_int_add i 1) (f i x)
+      in loop 0 init;
+
+    -- An infinite loop will fail
+    iPosInfty @N. except @acc;
+
+    -- Negative trip counts are not valid
+    iNegInfty @N. except @acc
+  };
+
+
+parallel_doall @(N : intindex) @(a b : bare)
+  (count : FIInt N)
+  (f : int -> IEffect b)
+  -> IEffect a
+  attribute(inline, inline_sequential) =
+
+  letfun
+    do_range @(M : intindex)
+      (lb : int) (range_count : FIInt M)
+      -> IEffect b =
+    doall @M @b @b range_count
+    (\ (range_i : int) -> IEffect b. f (range_i +# lb))
+  in
+  blocked_doall @N @a @b count do_range;
+
+
 parallel_dim1_reduce @(N : intindex) @(a : bare)
   (repr : Repr a) (count : FIInt N)
   (f : a -> a -> Writer a)
@@ -3260,26 +3314,77 @@ parallel_dim1_reduce @(N : intindex) @(a : bare)
   (g : int -> Writer a)
   (ret : OutPtr a)
   -> IEffect a
-  attribute(inline) =
+  attribute(inline, inline_sequential) =
 
-  letfun
+  letfun {
     -- Sequentially reduce on the interval [lb, lb + range_count)
     do_range @(M : intindex)
-      (lb : int) (range_count : FIInt M) (range_ret : OutPtr a)
-      -> IEffect a =
-      for @M @a repr (iInt @M range_count) init
-      (\ (range_i : int) (acc : a) (acc_ret : OutPtr a) -> IEffect a.
+      (lb : int) (range_count : FIInt M) (acc : BoxedType a) -> BoxedType a =
+      case boxed @a (convertToBare @a repr acc) of boxed @a (uacc : a).
+      convertToBoxed @a repr
+      (for @M @a repr (iInt @M range_count) uacc
+       (\ (range_i : int) (acc : a) (acc_ret : OutPtr a) -> IEffect a.
 
-        -- Actual index is lb + range_i
-        let i : int = lb +# range_i in
+         -- Actual index is lb + range_i
+         let i : int = lb +# range_i in
 
-        case boxed @a (g i) of boxed @a (x : a).
-        f acc x acc_ret)
-      range_ret
-  in
-  blocked_reduce @N @a repr count f init do_range ret;
+         case boxed @a (g i) of boxed @a (x : a).
+         f acc x acc_ret))
 
+  ; boxed_f (x : BoxedType a) (y : BoxedType a) -> BoxedType a =
+      case boxed @a (convertToBare @a repr x) of boxed @a (ux : a).
+      case boxed @a (convertToBare @a repr y) of boxed @a (uy : a).
+      convertToBoxed @a repr (f ux uy)
+  } in
+  let boxed_init : BoxedType a = convertToBoxed @a repr (copy @a repr init) in
 
+  convertToBare @a repr
+  (blocked_reduce @N @(BoxedType a) count boxed_f boxed_init do_range) ret;
+
+parallel_dim1_reduce1 @(N : intindex) @(a : bare)
+  (repr : Repr a) (count : FIInt N)
+  (f : a -> a -> Writer a)
+  (g : int -> Writer a)
+  (ret : OutPtr a)
+  -> IEffect a
+  attribute(inline, inline_sequential) =
+
+  let reprmaybe : Repr (Maybe a) = repr_Maybe @a repr in
+
+  -- Parallel reduce1 is defined in terms of parallel reduce.
+  -- An 'uninitialized' value is encoded as 'Nothing'.
+  letfun {
+    fmaybe (mx : Maybe a) (my : Maybe a) (ret : OutPtr (Maybe a))
+      -> IEffect (Maybe a) =
+      case mx of {
+        just @a (x : a).
+          case my of {
+            just @a (y : a). just @a (f x y) ret
+          ; nothing @a.      just @a (copy @a repr x) ret
+          }
+      ; nothing @a.
+          case my of {
+            just @a (y : a). just @a (copy @a repr y) ret
+          ; nothing @a.      nothing @a ret
+          }
+      }
+
+  ; gmaybe (i : int) (ret : OutPtr (Maybe a)) -> IEffect (Maybe a) =
+      just @a (g i) ret
+  } in
+
+  case boxed @(Maybe a) (nothing @a) of boxed @(Maybe a) (init : Maybe a).
+
+  -- Call the regular reduction function here
+  case boxed @(Maybe a) (parallel_dim1_reduce @N @(Maybe a)
+                         reprmaybe count fmaybe init gmaybe) of
+    boxed @(Maybe a) (retmaybe : Maybe a).
+  case retmaybe of {
+    just @a (retval : a). copy @a repr retval ret
+
+    -- If 'nothing' is returned, then the range was empty.  This is an error.
+  ; nothing @a. except @(IEffect a) 
+  }
 
 
 

@@ -20,25 +20,17 @@ extern "C" {
 /* Parallelized reduction */
 
 /* Functions written in low-level pyon */
-extern "C" void
-blocked_reduce_copy(void *fn, void *src, void *dst);
 extern "C" void *
-blocked_reduce_accumulate_range(void *fn,
-				void *initial_value,
-				PyonInt count,
-				PyonInt first);
+blocked_reduce_accumulate_range(void *data, void *acc, PyonInt start, PyonInt end);
 extern "C" void *
-blocked_reduce_reducer(void *fn, void *x, void *y);
+blocked_reduce_reduce(void *data, void *x, void *y);
 
 
 /* Function exported to pyon */
 extern "C" void *
-pyon_C_blocked_reduce(void *copy_fn,
-		      void *accumulate_range_fn,
-		      void *reducer_fn,
+pyon_C_blocked_reduce(void *data,
 		      void *initial_value,
-		      PyonInt count,
-		      PyonInt first);
+		      PyonInt count);
 
 
 
@@ -46,18 +38,10 @@ pyon_C_blocked_reduce(void *copy_fn,
 
 // No parallel implementation available; use sequential reduction
 void *
-pyon_C_blocked_reduce(void *copy_fn,
-		      void *accumulate_range_fn,
-		      void *reducer_fn,
-		      void *initial_value,
-		      PyonInt count,
-		      PyonInt first)
+pyon_C_blocked_reduce(void *data, void *initial_value, PyonInt count)
 {
   // Perform the reduction
-  return blocked_reduce_accumulate_range(accumulate_range_fn,
-					 initial_value,
-					 count,
-					 first);
+  return blocked_reduce_accumulate_range(data, initial_value, 0, count);
 }
 
 #else  // USE_TBB
@@ -81,24 +65,18 @@ struct BlockedReducePlan {
 // Implements the parallel_reduce Body concept.
 struct BlockedReducer {
   BlockedReducePlan *const plan;
-  bool has_value;		// If true, then 'value' holds valid data
   void *value;
 
   BlockedReducer(BlockedReducePlan *_plan) :
-    plan(_plan), has_value(false), value(NULL) {};
+    plan(_plan), value(_plan->initial_value) {};
 
   BlockedReducer(BlockedReducer &other, tbb::split) :
-    plan(other.plan), has_value(false), value(NULL) {};
-
-  void *get_value() const {
-    // If we have a partially computed value, then return that;
-    // Otherwise, use the initial value as the partially computed value
-    return has_value ? value : plan->initial_value;
-  };
+    plan(other.plan), value(other.plan->initial_value) {};
 
   void operator()(const tbb::blocked_range<int> &range) {
-    int first = range.begin();
-    int count = range.end() - first;
+    
+    int start = range.begin();
+    int end = range.end();
     void *old_value = get_value();
 
     value = blocked_reduce_accumulate_range(plan->accumulate_range_fn,
@@ -119,17 +97,12 @@ struct BlockedReducer {
 };
 
 void *
-pyon_C_blocked_reduce(void *copy_fn,
-		      void *accumulate_range_fn,
-		      void *reducer_fn,
+pyon_C_blocked_reduce(void *data,
 		      void *initial_value,
-		      PyonInt count,
-		      PyonInt first)
+		      PyonInt count)
 {
-  BlockedReducePlan plan = {copy_fn,
-			    accumulate_range_fn,
-			    reducer_fn,
-			    initial_value};
+#error "The TBB code is out of date and needs to be rewritten"
+  BlockedReducePlan plan = {data, initial_value};
 
   // Use TBB's parallel_reduce template
   tbb::blocked_range<int> range(first, first + count);
@@ -147,23 +120,19 @@ pyon_C_blocked_reduce(void *copy_fn,
 
 /* Functions written in low-level pyon */
 extern "C" void
-blocked_doall_worker(void *worker_fn, PyonInt count, PyonInt first);
+blocked_doall_worker(void *worker_fn, PyonInt start, PyonInt end);
 
 /* Function exported to pyon */
 extern "C" void
-pyon_C_blocked_doall(void *worker_fn,
-		     PyonInt count,
-		     PyonInt first);
+pyon_C_blocked_doall(void *worker_fn, PyonInt count);
 
 #ifndef USE_TBB
 
 // Sequential implementation: do everything in one thread
 extern "C" void
-pyon_C_blocked_doall(void *worker_fn,
-		     PyonInt count,
-		     PyonInt first)
+pyon_C_blocked_doall(void *worker_fn, PyonInt count)
 {
-  blocked_doall_worker(worker_fn, count, first);
+  blocked_doall_worker(worker_fn, 0, count);
 }
 
 #else  // USE_TBB
@@ -187,6 +156,7 @@ pyon_C_blocked_doall(void *worker_fn,
 		     PyonInt count,
 		     PyonInt first)
 {
+#error "The TBB code is out of date and needs to be rewritten"
   tbb::parallel_for(tbb::blocked_range<int>(first, first + count),
 		    BlockedDoer(worker_fn));
 }

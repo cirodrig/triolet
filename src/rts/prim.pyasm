@@ -317,144 +317,40 @@ function inline for
 // A parallel reduction.  The iteration space is partitioned at run time
 // and 'generator' is called on a single member of the iteration space.
 function blocked_reduce
-  (owned acc_repr, FinIndInt size,
-   owned reducer, pointer init, owned generator, pointer ret) -> ()
+  (FinIndInt size, owned reducer, owned init, owned generator) -> owned
 {
+  data BlockedReduceData reduce_data;
+  reduce_data @! BlockedReduceData.initial_value = init;
+  reduce_data @! BlockedReduceData.generator = generator;
+  reduce_data @! BlockedReduceData.reducer = reducer;
   FinIndInt {count} = size;
-  acc_size = acc_repr @! PassConv.size;
-  acc_is_pointerless = acc_repr @! PassConv.is_pointerless;
-
-  letrec {
-    // Given the current accumulator value and the range to process,
-    // compute and accumulate the reduction value over this range.
-    function accumulate_range
-      (pointer old_value, int lcount, int lfirst) -> pointer {
-      // Reduce over this range
-      local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
-      lsize = FinIndInt {lcount};
-      () = () call generator (lsize, lfirst, local_value);
-
-      // Accumulate with old value
-      ret = pointer primcall allocate (acc_is_pointerless, acc_size);
-      () = () call reducer (old_value, local_value, ret);
-      () = () call (acc_repr @! PassConv.finalize) (local_value);
-      ret;
-    };
-
-    // Out-of-place reducer
-    function oop_reducer (pointer x, pointer y) -> pointer {
-      ret = pointer primcall allocate (acc_is_pointerless, acc_size);
-      () = () call reducer (x, y, ret);
-      ret;
-    }
-  };
 
   // Main computation is written in C++
-  final_value = pointer primcall pyon_C_blocked_reduce
-    (acc_repr @! PassConv.copy, accumulate_range, oop_reducer,
-     init, count, int 0);
-
-  // Copy into the output
-  () call (acc_repr @! PassConv.copy) (final_value, ret);
-};
-
-// A parallel reduction with no neutral element.
-// The iteration space is partitioned at run time
-// and 'generator' is called on a single member of the iteration space.
-//
-// We inject a distinguished pointer into the space of valid values for this
-// data type.  That pointer serves as the neutral element, so that we can use
-// the same parallel function as a regular reduction.
-//
-// TODO: Keep track of objects so we can deallocate them properly
-function blocked_reduce1
-  (owned acc_repr, FinIndInt size,
-   owned reducer, owned generator, pointer ret) -> ()
-{
-  // We use the address of this data as the neutral element of the reduction.
-  // The data is never accessed.
-  data int64 uninitialized_value;
- 
-  FinIndInt {count} = size;
-  acc_size = acc_repr @! PassConv.size;
-  acc_is_pointerless = acc_repr @! PassConv.is_pointerless;
-
-  letrec {
-    // Given the current accumulator value and the range to process,
-    // compute and accumulate the reduction value over this range.
-    function accumulate_range
-        (pointer old_value, int lcount, int lfirst) -> pointer {
-      lsize = FinIndInt {lcount};
-
-      if (old_value == uninitialized_value) {
-        // Reduce over this range and return the output directly
-        local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
-        () = () call generator (lsize, lfirst, local_value);
-        local_value;
-      } else {
-        local_value = pointer primcall allocate (acc_is_pointerless, acc_size);
-        () = () call generator (lsize, lfirst, local_value);
-
-        // Accumulate into output
-        ret_value = pointer primcall allocate (acc_is_pointerless, acc_size);
-        () = () call reducer (old_value, local_value, ret_value);
-
-        () = () call (acc_repr @! PassConv.finalize) (local_value);
-        ret_value;
-      };
-    };
-
-    // Combine two extended values.  At least one must not be the neutral
-    // element.
-    function join_values (pointer x, pointer y) -> pointer {
-      if (x == uninitialized_value) {
-        if (y == uninitialized_value) {
-          uninitialized_value;
-        } else {
-          y;
-        };
-      } else {
-        if (y == uninitialized_value) {
-          x;
-        } else {
-          ret_value = pointer primcall allocate (acc_is_pointerless, acc_size);
-          () = () call reducer (x, y, ret_value);
-          ret_value;
-        };
-      };
-    }
-  };
-
-  // Main computation is written in C++
-  final_val = pointer primcall pyon_C_blocked_reduce
-    (acc_repr @! PassConv.copy, accumulate_range, join_values,
-     uninitialized_value, count, int 0);
-
-  () call (acc_repr @! PassConv.copy) (final_val, ret);
-};
-
-// Called from the C side of 'blocked_reduce'
-procedure blocked_reduce_copy (owned f, pointer src, pointer dst) -> () {
-  () call f (src, dst);
+  pointer primcall pyon_C_blocked_reduce(reduce_data, init, count);
 };
 
 procedure blocked_reduce_accumulate_range
-  (owned f, pointer init, int count, int first) -> pointer {
-  pointer call f (init, count, first);
+  (pointer dat, owned acc, int start, int end) -> owned {
+
+  // Given the current accumulator value and the range to process,
+  // compute and accumulate the reduction value over this range.
+  // The range is [start, end).
+  lsize = FinIndInt {end - start};
+  owned call (dat @! BlockedReduceData.generator) (start, lsize, acc);
 };
 
-procedure blocked_reduce_reducer
-  (owned f, pointer x, pointer y) -> pointer {
-  pointer call f (x, y);
+procedure blocked_reduce_reduce
+  (pointer dat, owned x, owned y) -> owned {
+  owned call (dat @! BlockedReduceData.reducer) (x, y);
 };
 
 function inline blocked_doall
-  (FinIndInt size, int first, owned worker) -> () {
+  (FinIndInt size, owned worker) -> () {
   FinIndInt {count} = size;
 
-  () primcall pyon_C_blocked_doall (worker, count, first);
+  () primcall pyon_C_blocked_doall (worker, count);
 };
 
-procedure blocked_doall_worker (owned f, int count, int first) -> () {
-  () call f (FinIndInt {count}, first);
+procedure blocked_doall_worker (owned f, int start, int end) -> () {
+  () call f (start, FinIndInt {end - start});
 };

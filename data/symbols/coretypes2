@@ -1168,6 +1168,10 @@ primitive_dim1_reduce1 :
  -> (a -> a -> Writer a) -> (int -> Writer a)
  -> Writer a;
 
+primitive_dim1_generate :
+    (N : intindex) -> (a : bare) -> Repr a -> FIInt N
+ -> (int -> Writer a) -> Writer (arr N a);
+
 darr1_reduce : (N : intindex) -> (a : bare)
             -> Repr a -> FIInt N
             -> (a -> a -> Writer a) -> a -> darr1 N a
@@ -1686,6 +1690,16 @@ for : (n : intindex)
    -> (int -> acc -> Writer acc)
    -> Writer acc;
 
+-- Sequential loop with boxed accumulator
+for_box : (n : intindex) -> (acc : box)
+       -> IInt n -> acc -> (int -> acc -> acc) -> acc;
+
+parallel_doall : (n : intindex)
+     -> (a b : bare)
+     -> FIInt n
+     -> (int -> IEffect b)
+     -> IEffect a;
+
 parallel_dim1_reduce :
     (N : intindex) -> (a : bare)
  -> Repr a -> FIInt N
@@ -1701,31 +1715,18 @@ parallel_dim1_reduce1 :
 -- Blocked parallel reduction, implemented in low-level.
 blocked_reduce :
     (N : intindex)
- -> (acc : bare)
- -> Repr acc
+ -> (acc : box)
  -> FIInt N		-- Size of range
- -> (acc -> acc -> Writer acc) -- Reducer
+ -> (acc -> acc -> acc) -- Reducer
  -> acc			-- Initial value
- -> ((M : intindex) -> int -> FIInt M -> Writer acc)
-    -- ^ Generate value given range
- -> Writer acc;
-
--- Blocked parallel reduction with no neutral element
-blocked_reduce1 :
-    (N : intindex)
- -> (acc : bare)
- -> Repr acc
- -> FIInt N		-- Size of range
- -> (acc -> acc -> Writer acc) -- Reducer
- -> ((M : intindex) -> FIInt M -> int -> Writer acc)
-    -- ^ Generate value given range
- -> Writer acc;
+ -> ((M : intindex) -> int -> FIInt M -> acc -> acc)
+    -- ^ Generate and combine a value on a part of the domain
+ -> acc;
 
 -- Blocked parallel loop
 blocked_doall :
-    (n : intindex)
+    (N : intindex)
  -> (a b : bare)
- -> FIInt n
- -> int
- -> ((n : intindex) -> FIInt n -> int -> IEffect b)
+ -> FIInt N
+ -> ((M : intindex) -> int -> FIInt M -> IEffect b)
  -> IEffect a;
