@@ -6,12 +6,14 @@ module SystemF.PrintMemoryIR
         pprTypM,
         pprTyPat,
         pprPat,
+        pprPatternMatch,
         pprExp,
         pprExpPrec,
         pprAlt,
         pprFun,
         pprFunPrec,
         pprDef,
+        pprDefGroup,
         pprExport,
         pprModule
        )

@@ -14,8 +14,10 @@ module SystemF.Context
         asLetContext, asCaseContext,
         
         -- * Eliminating contexts
-        discardContext, contextExpression,
-        
+        discardContext,
+        contextExpression,
+        pprContext,
+
         -- * Inspecting contexts
         isUnitContext, isExceptingContext,
         contextFreeVariables,
@@ -40,12 +42,13 @@ import Control.Monad
 import Data.List
 import Data.Maybe
 import qualified Data.Set as Set
-
+import Text.PrettyPrint.HughesPJ
 
 import SystemF.Syntax
 import SystemF.MemoryIR
 import SystemF.Rename
 import SystemF.TypecheckMem(functionType)
+import SystemF.PrintMemoryIR
 import Type.Compare
 import Type.Environment
 import Type.Eval
@@ -429,6 +432,27 @@ contextExpression ctx ty = do
                  ctxExpression c ty e
                ExceptingContext ->
                  ExpM $ ExceptE defaultExpInfo ty
+
+pprContext :: (a -> Doc) -> Contexted a -> Doc
+pprContext show_body (ApplyContext {_ctxContext = c, _ctxBody = b}) =
+  let context = map show_context c
+  in vcat context $$ show_body b
+  where
+    show_context (LetCtx _ pat e) =
+      text "let" <+> pprPat pat <+> text "=" <+> pprExp e
+
+    show_context (CaseCtx _ scr (AltBinders decon pats) other_alts) =
+      text "let" <+> hang decon_doc 4 (vcat $ map exception other_alts)
+      where
+        decon_doc =
+          hang (pprPatternMatch (AltM (Alt (DeCInstM decon) pats undefined)) <+> text "=") 4
+          (pprExp scr)
+        exception (AltBinders decon pats) =
+          text "except if" <+>
+          pprPatternMatch (AltM (Alt (DeCInstM decon) pats undefined))
+
+    show_context (LetfunCtx _ defs) =
+      text "letrec" <+> pprDefGroup defs
   
 -- | Split a context into a part that is dependent on a set of variables and
 --   a part that is independent.  In the result, the outer part is independent
