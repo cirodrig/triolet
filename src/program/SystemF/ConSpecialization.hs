@@ -677,6 +677,8 @@ specializeDefGroup group m =
   where
     specialize_group grp defs return_value specializations
       | IntMap.null specializations =
+          debug (text "Unspecialized functions" <+>
+                 sep (map (pprVar . definiendum) $ defGroupMembers grp)) $
           return (return_value, Nothing, grp)
       | otherwise = do
           (new_defs, created) <- specialize_functions specializations defs
@@ -705,6 +707,7 @@ specializeDefGroup group m =
           debug debug_message $
             return (specialized_functions, Just (name, specializations))
       | otherwise =
+          debug (text "Unspecialized function" <+> pprVar (definiendum def)) $
           return ([def], Nothing)
 
     specialize_functions :: IntMap.IntMap WantedSpecializations
