@@ -242,6 +242,7 @@ function inline repr_Maybe (owned repr_arg) -> owned {
   ret @! PassConv.is_pointerless = repr_arg @! PassConv.is_pointerless;
   copy = owned call copy_Maybe (repr_arg @! PassConv.copy,
                                 sizeof arg, alignof arg);
+  ret @! PassConv.copy = copy;
   ret @! PassConv.convert_to_boxed =
     owned call make_Boxed (sizeof Maybe(arg), alignof Maybe(arg));
   ret @! PassConv.convert_to_bare =
@@ -255,12 +256,12 @@ function inline repr_Maybe (owned repr_arg) -> owned {
 function copy_Maybe (owned copy_arg, uint arg_size, uint arg_align,
                      pointer src, pointer dst) -> () {
   typedef arg = bytes(value arg_size, value arg_align);
-  if (src @! Maybe(arg).isjust == uint8 0) {
+  if (src @! Maybe(arg).isjust == uint8 1) {
     // Nothing
-    dst @! Maybe(arg).isjust = uint8 0;
+    dst @! Maybe(arg).isjust = uint8 1;
     ();
   } else {
-    dst @! Maybe(arg).isjust = uint8 1;
+    dst @! Maybe(arg).isjust = uint8 0;
     () call copy_arg (src @ Maybe(arg).member, dst @ Maybe(arg).member);
   };
 };
