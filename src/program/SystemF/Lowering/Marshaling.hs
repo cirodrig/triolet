@@ -27,6 +27,13 @@ import Type.Eval
 import Type.Type
 import Export
 
+pyonType :: ExportDataType -> Type
+pyonType (ListET ty) = varApp (pyonBuiltin The_list) [pyonType ty]
+pyonType (MatrixET ty) = varApp (pyonBuiltin The_array2) [pyonType ty]
+pyonType PyonIntET = VarT (pyonBuiltin The_int)
+pyonType PyonFloatET = VarT (pyonBuiltin The_float)
+pyonType PyonBoolET = VarT (pyonBuiltin The_bool)
+
 -- | Construct a representation dictionary for a marshalable type.
 --   For types with an unknown head, 'lookupReprDict' is called.  Known types
 --   are handled by case.
@@ -252,10 +259,10 @@ demarshalCReturn :: ExportDataType -> Lower ReturnMarshaler
 demarshalCReturn ty =
   case ty
   of ListET element_type ->
-       let list_type = varApp (pyonBuiltin The_list) [element_type]
+       let list_type = varApp (pyonBuiltin The_list) [pyonType element_type]
        in demarshal_reference list_type
      MatrixET element_type ->
-       let mat_type = varApp (pyonBuiltin The_array2) [element_type]
+       let mat_type = varApp (pyonBuiltin The_array2) [pyonType element_type]
        in demarshal_reference mat_type
      PyonIntET -> passReturnWithType (LL.PrimType LL.pyonIntType)
      PyonFloatET -> passReturnWithType (LL.PrimType LL.pyonFloatType)
@@ -450,10 +457,10 @@ getCExportType tenv ty =
                    _ -> unsupported
        | con `isPyonBuiltin` The_list ->
            case args
-           of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
+           of [arg] -> ListET (getCExportType tenv arg)
        | con `isPyonBuiltin` The_array2 ->
            case args
-           of [arg] -> MatrixET arg -- FIXME: verify that 'arg' is monomorphic
+           of [arg] -> MatrixET (getCExportType tenv arg)
      _ | FunT {} <- ty ->
        case getExportedFunctionSignature (getCExportType tenv) tenv ty
        of (param_types, return_type) -> FunctionET param_types return_type
@@ -478,10 +485,10 @@ getCxxExportType tenv ty =
            else TupleET $ map (getCxxExportType tenv) args
        | con `isPyonBuiltin` The_list ->
            case args
-           of [arg] -> ListET arg -- FIXME: verify that 'arg' is monomorphic
+           of [arg] -> ListET (getCxxExportType tenv arg)
        | con `isPyonBuiltin` The_array2 ->
            case args
-           of [arg] -> MatrixET arg -- FIXME: verify that 'arg' is monomorphic
+           of [arg] -> MatrixET (getCxxExportType tenv arg)
      _ -> unsupported
   where
     unsupported = internalError "getCxxExportType: Unsupported exported type"

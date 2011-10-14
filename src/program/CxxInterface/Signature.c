@@ -46,6 +46,16 @@ PyonType_Tuple(int size)
   return p;
 }
 
+/* Create a list type.  Steals ownership of 'elem'. */
+const PyonType *
+PyonType_List(const PyonType *elem)
+{
+  PyonType *p = malloc(sizeof(PyonType));
+  *p = (PyonType){.tag = PyonListTypeTag};
+  p->list.elem = elem;
+  return p;
+}
+
 const PyonType *
 PyonType_duplicate(const PyonType *p)
 {
@@ -54,6 +64,16 @@ PyonType_duplicate(const PyonType *p)
   case PyonFloatTag: return PyonType_Float();
   case PyonBoolTag: return PyonType_Bool();
   case PyonNoneTypeTag: return PyonType_NoneType();
+  case PyonTupleTypeTag:
+    {
+      int i;
+      int count = p->tuple.count;
+      const PyonType **elems = p->tuple.elems;
+      const PyonType *t = PyonType_Tuple(count);
+      for (i = 0; i < count; i++) t->tuple.elems[i] = elems[i];
+      return t;
+    }
+  case PyonListTypeTag: return PyonType_List(PyonType_duplicate(p->list.elem));
   default:
     fprintf(stderr, "PyonType_duplicate: Invalid argument\n");
     exit(-1);
@@ -76,7 +96,12 @@ PyonType_destroy(const PyonType *p)
       for (i = 0; i < p->tuple.count; i++)
 	PyonType_destroy(p->tuple.elems[i]);
       free((void *)p);
+      return;
     }
+  case PyonListTypeTag:
+    PyonType_destroy(p->list.elem);
+    free((void *)p);
+    return;
   default:
     fprintf(stderr, "PyonType_destroy: Invalid argument\n");
     exit(-1);

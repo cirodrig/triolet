@@ -36,12 +36,12 @@ data ExportDataType =
     -- | A Pyon list.
     --   The list contents can have any monomorphic type.  It's an error
     --   for the type to mention type variables other than constructors.
-  | ListET Type
+  | ListET ExportDataType
 
     -- | A Pyon matrix.
     --   The matrix contents can have any monomorphic type.  It's an error
     --   for the type to mention type variables other than constructors.
-  | MatrixET Type
+  | MatrixET ExportDataType
 
     -- | A C array.  The array is passed as a pointer.  The array
     -- size is passed as an additional parameter.
@@ -67,7 +67,7 @@ instance Show ExportDataType where
          foldr (.) id $ intersperse (showChar ',') $ map shows tys
        ListET ty ->
          showParen (prec >= 10) $ 
-         showString "ListET (" . shows (pprType ty) . showChar ')'
+         showString "ListET (" . shows ty . showChar ')'
        CSizeArrayET et ->
          showString "CSizeArrayET " . showsPrec 10 et
        FunctionET params ret ->

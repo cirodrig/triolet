@@ -11,7 +11,8 @@ typedef enum PyonTypeTag {
   PyonFloatTag,                 /* Pyon type "float" */
   PyonBoolTag,                  /* Pyon type "bool" */
   PyonNoneTypeTag,              /* Pyon type "NoneType" */
-  PyonTupleTypeTag		/* Some Pyon tuple type */
+  PyonTupleTypeTag,             /* Some Pyon tuple type */
+  PyonListTypeTag               /* Pyon type "list a" */
 } PyonTypeTag;
 
 /* A Pyon type */
@@ -22,6 +23,9 @@ struct PyonType {
       int count;		/* Number of tuple elements */
       const PyonType **elems;	/* Pointer to an array of owned 'PyonType' */
     } tuple;
+    struct {
+      const PyonType *elem;     /* Type of a list element */
+    } list;
   };
 };
 
@@ -31,6 +35,7 @@ const PyonType *PyonType_Float(void);
 const PyonType *PyonType_Bool(void);
 const PyonType *PyonType_NoneType(void);
 const PyonType *PyonType_Tuple(int size);
+const PyonType *PyonType_List(const PyonType *);
 const PyonType *PyonType_duplicate(const PyonType *);
 
 /* Destroy a PyonType instance */

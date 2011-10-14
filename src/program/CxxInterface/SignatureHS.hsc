@@ -24,6 +24,7 @@ foreign import ccall "PyonType_Float" pyonType_Float :: IO (Ptr ExportDataType)
 foreign import ccall "PyonType_Bool" pyonType_Bool :: IO (Ptr ExportDataType)
 foreign import ccall "PyonType_NoneType" pyonType_NoneType :: IO (Ptr ExportDataType)
 foreign import ccall "PyonType_Tuple" pyonType_Tuple :: CInt -> IO (Ptr ExportDataType)
+foreign import ccall "PyonType_List" pyonType_List :: Ptr ExportDataType -> IO (Ptr ExportDataType)
 
 sendExportDataType :: ExportDataType -> IO (Ptr ExportDataType)
 sendExportDataType PyonIntET = pyonType_Int
@@ -38,7 +39,8 @@ sendExportDataType (TupleET ts) = do
   forM_ (zip ts [0..]) $ \(t, index) ->
     pokeElemOff array_ptr index =<< sendExportDataType t
   return ptr
-  
+
+sendExportDataType (ListET t) = sendExportDataType t >>= pyonType_List
 sendExportDataType _ =
   internalError "sendExportDataType: Not implemented for this constructor"
 
