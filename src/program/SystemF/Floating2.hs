@@ -132,8 +132,8 @@ floatExp expression =
        ctx_body <- enterScopeOfVars local_var_types (inferExpType body) $
                    floatExp body
        let make_new_exp fs' body' =
-             let defs = [def {definiens = f'} | (def, f') <- zip defs fs']
-             in ExpM $ LetfunE inf (Rec defs) body'
+             let defs' = [def {definiens = f'} | (def, f') <- zip defs fs']
+             in ExpM $ LetfunE inf (Rec defs') body'
        mergeWith make_new_exp ctx_fs ctx_body
      CaseE inf scr alts -> do
        ctx_scr <- floatExp scr
