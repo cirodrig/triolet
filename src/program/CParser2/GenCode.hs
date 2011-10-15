@@ -79,8 +79,20 @@ defAttributes attrs ann =
     insert_attribute _ _ =
       internalError "Unexpected function attribute"
 
-applyDefAttributes :: [Attribute] -> (SystemF.Def SystemF.Mem -> SystemF.Def SystemF.Mem)
-applyDefAttributes attrs = SystemF.modifyDefAnnotation (defAttributes attrs)
+-- | Update the annotations on a 'SystemF.Def'.  Attributes are converted
+--   to properties of the annotation.
+--   If functions are is labeled as exported.
+applyDefAttributes :: Bool
+                   -> [Attribute]
+                   -> SystemF.Def SystemF.Mem
+                   -> SystemF.Def SystemF.Mem
+applyDefAttributes is_global attrs def = SystemF.modifyDefAnnotation f def 
+  where
+    -- Global functions are exported.  Local functions are not.
+    is_exported = is_global
+
+    f annotation =
+      defAttributes attrs $ annotation {SystemF.defAnnExported = is_exported}
 
 -- | Determine the type of an expression.
 expType :: RLExp -> TransM Type.Type
@@ -268,7 +280,7 @@ translateExp (L pos expression) =
        withLetTypeSynonym dom typ $ translateExp body
      LetfunE defs body -> assumeDefGroup defs $ do
        functions <- sequence [translateFun pos (dFun d) | L pos d <- defs]
-       let systemf_defs = [applyDefAttributes (dAttributes d) $
+       let systemf_defs = [applyDefAttributes False (dAttributes d) $
                            SystemF.mkDef (toVar $ dName d) f
                           | (L _ d, f) <- zip defs functions]
        let defgroup = SystemF.Rec systemf_defs
@@ -369,7 +381,8 @@ translateAlt (Alt (TuplePattern fields) body) = do
 
 translateDecl (L pos (Decl name (FunEnt (L fun_pos f) attrs))) =
   let ResolvedVar v _ = name
-  in liftM (applyDefAttributes attrs . SystemF.mkDef v) $ translateFun fun_pos f
+  in liftM (applyDefAttributes True attrs . SystemF.mkDef v) $
+     translateFun fun_pos f
 
 translateDecl _ =
   internalError "translateDecl"

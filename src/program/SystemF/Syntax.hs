@@ -477,13 +477,18 @@ data DefAnn =
     --   definitions.
   , defAnnJoinPoint :: !Bool
     
+    -- | Whether the function is visible to pyon code outside the
+    --   current module.  This flag doesn't indicate whether the function
+    --   is exported to other languages.
+  , defAnnExported :: !Bool
+    
     -- | The uses of this definition,
     -- as determined by demand analysis
   , defAnnUses :: !Multiplicity
   }
 
 defaultDefAnn :: DefAnn
-defaultDefAnn = DefAnn InlNormal False False ManyUnsafe
+defaultDefAnn = DefAnn InlNormal False False False ManyUnsafe
 
 -- | An annotation controlling when a function may be inlined.
 --

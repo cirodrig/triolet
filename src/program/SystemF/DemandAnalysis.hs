@@ -388,7 +388,12 @@ dmdFun is_initializer (FunM f) = do
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 
 dmdDef :: DmdAnl (Def Mem)
-dmdDef def = mapMDefiniens (dmdFun False) def
+dmdDef def = do
+  -- If the function is exported to Pyon, mark it as used in an unknown way
+  when (defAnnExported $ defAnnotation def) $
+    mentionHelper (definiendum def) unknownDmd
+    
+  mapMDefiniens (dmdFun False) def
 
 dmdGroup :: DefGroup (Def Mem) -> Df b -> Df ([DefGroup (Def Mem)], b)
 dmdGroup defgroup do_body =

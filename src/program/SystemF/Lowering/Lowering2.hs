@@ -65,18 +65,18 @@ assumeSingletonValue ty bound_var m =
            assumeIndexedInt arg (LL.VarV bound_var) m
      _ -> m
 
-assumeVarG :: Var -> Type -> (LL.Var -> GenLower a) -> GenLower a
-assumeVarG v ty k = liftT1 (assumeVar v ty) k
+assumeVarG :: Bool -> Var -> Type -> (LL.Var -> GenLower a) -> GenLower a
+assumeVarG is_exported v ty k = liftT1 (assumeVar is_exported v ty) k
 
 -- | Create a lowered variable corresponding to the given variable, and
 --   add it to the environment so it can be looked up.
 --   If it's a Repr dictionary, add that to the environment also.
-assumeVar :: Var -> Type -> (LL.Var -> Lower a) -> Lower a
-assumeVar v rt k = do
+assumeVar :: Bool -> Var -> Type -> (LL.Var -> Lower a) -> Lower a
+assumeVar is_exported v rt k = do
   tenv <- getTypeEnv
   rtype <- lowerType tenv rt 
   case rtype of
-    Just t -> assumeVariableWithType v t $ \ll_var ->
+    Just t -> assumeVariableWithType is_exported v t $ \ll_var ->
       assumeSingletonValue rt ll_var (k ll_var)
     Nothing -> internalError "assumeVar: Unexpected representation"
 
@@ -172,7 +172,7 @@ bindPattern :: PatM -> RetVal -> GenLower a -> GenLower a
 bindPattern _ NoVal _ = internalError "bindPattern: Nothing to bind"
 
 bindPattern (PatM (v ::: ty) _) (RetVal value) m = do
-  assumeVarG v ty $ \ll_var -> do
+  assumeVarG False v ty $ \ll_var -> do
     bindAtom1 ll_var (LL.ValA [value])
     m
 
@@ -336,7 +336,7 @@ lowerFun (FunTM (TypeAnn _ fun)) =
     returns <- lowerType tenv $ fromTypTM $ funReturn fun
     genClosureFun params (maybeToList returns) $ lower_body (funBody fun)
   where
-    lower_param (TypedMemVarP (v ::: ty)) k = assumeVar v ty k
+    lower_param (TypedMemVarP (v ::: ty)) k = assumeVar False v ty k
     
     lower_body body = do
       ret_val <- lowerExp body
@@ -360,8 +360,9 @@ lowerDefGroup defgroup k =
   where
     assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (Def v _ f@(FunTM (TypeAnn return_type _))) k =
-      assumeVar v return_type k
+    assume_variable (Def v annotation f@(FunTM (TypeAnn return_type _))) k =
+      let is_exported = defAnnExported annotation
+      in assumeVar is_exported v return_type k
 
 lowerDefGroupG :: DefGroup (Def (Typed Mem))
                -> (LL.Group LL.FunDef -> GenLower a)
