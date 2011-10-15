@@ -381,22 +381,40 @@ flattenedParameterValue (DummyArg _) =
 flattenedParameterValues :: FlatArgs -> ([TypM], [ExpM])
 flattenedParameterValues xs = mconcat $ map flattenedParameterValue xs
 
+-- | Information about a list of decomposed return parameters.
+-- @Nothing@ means that return parameters are not decomposed.
+-- @Just xs@ describes a return parameter that has been decomposed into a list
+-- of @length xs@ parameters.
+newtype ReturnParameters a = ReturnParameters (Maybe [a])
+
+instance Monoid (ReturnParameters a) where
+  -- 'mempty' corresponds to an empty list of decomposed parameters.
+  mempty = ReturnParameters (Just [])
+  ReturnParameters x `mappend` ReturnParameters y =
+    ReturnParameters (x `mappend` y)
+
+flattenReturnDecomp :: (PatM -> a) -> Decomp -> Maybe [a]
+flattenReturnDecomp f decomp =
+  let append_parameter p = ReturnParameters (Just [f p])
+      not_decomposed = ReturnParameters Nothing
+  in case flattenMonoDecomp append_parameter not_decomposed decomp
+     of ReturnParameters x -> x
+
 -- | Get the flattened return type.  Only valid if
 --   @flattenedReturnsBySideEffect flat_ret == False@.
 flattenedReturnType :: TypeEnv -> FlatRet -> TypM
 flattenedReturnType tenv flat_ret =
   let flat_type = frType flat_ret
       flat_decomp = frDecomp flat_ret
-      flattened_types =
-        flattenMonoDecomp (\p -> [patMType p]) [flat_type] flat_decomp
-  in case flattened_types
-     of [t] -> TypM t
-        ts  -> TypM $ unboxedTupleType tenv flattened_types
+  in case flattenReturnDecomp patMType flat_decomp
+     of Just [t] -> TypM t
+        Just ts  -> TypM $ unboxedTupleType tenv ts
+        Nothing  -> TypM flat_type
 
 -- | Get the parameter list to use to bind the flattened return values
 flattenedReturnParameters :: FlatRet -> Maybe [PatM]
 flattenedReturnParameters flat_ret =
-  flattenMonoDecomp (\p -> Just [p]) Nothing $ frDecomp flat_ret
+  flattenReturnDecomp id $ frDecomp flat_ret
 
 -- | Get the flattened return value expression for a return value that has
 --   been decomposed.  The expression is either a tuple or a single variable,
@@ -404,12 +422,12 @@ flattenedReturnParameters flat_ret =
 --   It's an error to call this function if the return value does not specify
 --   to decompose.
 flattenedReturnValue :: FlatRet -> ExpM
-flattenedReturnValue flat_ret = 
-  case flattenMonoDecomp (\p -> Just [var_exp p]) Nothing $ frDecomp flat_ret
+flattenedReturnValue flat_ret =
+  case flattenReturnDecomp var_exp $ frDecomp flat_ret
   of Just [e] -> fst e
      Just es  -> let (values, types) = unzip es
                  in ExpM $ ConE defaultExpInfo (CInstM (TupleCon types)) values
-     Nothing -> internalError "flattenedReturnValue"
+     Nothing  -> internalError "flattenedReturnValue"
   where
     var_exp pat = (ExpM $ VarE defaultExpInfo (patMVar pat), patMType pat)
 
@@ -741,10 +759,11 @@ packReturn flat_ret orig_exp =
           DeadDecomp e -> -- FIXME: This eliminates the source value. 
                           -- What if the source raised an exception?
                           return e
-          DeconDecomp {} ->
+          DeconDecomp _ _ ->
             -- This can occur when returning something isomorphic to the
-            -- unit value.  In this case, we should return a unit value.
-            internalError "packReturn: No return value"
+            -- unit value.  In this case, we should return a zero-tuple.
+            return $ ExpM $ ConE defaultExpInfo (CInstM (TupleCon [])) []
+
      Just patterns -> do
        -- Return value was deconstructed (DeconDecomp).
        -- Rebuild the data structure.
