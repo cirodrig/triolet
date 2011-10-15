@@ -48,7 +48,7 @@ module SystemF.Syntax
      BaseFun(..),
      
      -- ** Function definitions
-     Def(..), mkDef, mkWrapperDef,
+     Def(..), mkDef, mkWrapperDef, mkWorkerDef,
      mapDefiniens,
      mapMDefiniens,
      modifyDefAnnotation,
@@ -444,8 +444,34 @@ data Def s =
 mkDef :: Var -> Fun s -> Def s
 mkDef v f = Def v defaultDefAnn f
 
-mkWrapperDef :: Var -> Fun s -> Def s
-mkWrapperDef v f = Def v (defaultDefAnn {defAnnInlinePhase = InlWrapper}) f
+-- | Create a wrapper function as part of a worker-wrapper transformation.
+--
+--   The wrapper function inherits some properties of the original 
+--   function.  The wrapper function, not the worker,
+--   is the one that code outside the module sees.
+mkWrapperDef :: DefAnn -> Var -> Fun s -> Def s
+mkWrapperDef original_ann v f = let
+  annotation =
+    defaultDefAnn { defAnnInlinePhase = InlWrapper
+
+                  -- The wrapper function is exported iff
+                  -- the original function is exported
+                  , defAnnExported = defAnnExported original_ann}
+  in Def v annotation f
+
+-- | Create a worker function as part of a worker-wrapper transformation.
+--
+--   The worker function inherits the inlining-related properties of the 
+--   original function.
+mkWorkerDef :: DefAnn -> Var -> Fun s -> Def s
+mkWorkerDef original_ann v f = let
+  annotation =
+    defaultDefAnn { -- Inherit inlining-related properties
+                    defAnnInlinePhase = defAnnInlinePhase original_ann
+                  , defAnnInlineRequest = defAnnInlineRequest original_ann
+                  , defAnnJoinPoint = defAnnJoinPoint original_ann
+                  }
+  in Def v annotation f
 
 mapDefiniens :: (Fun s -> Fun s') -> Def s -> Def s'
 {-# INLINE mapDefiniens #-}

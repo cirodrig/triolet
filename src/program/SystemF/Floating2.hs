@@ -1,5 +1,5 @@
 
-{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-} 
+{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
 module SystemF.Floating2
        (longRangeFloating)
 where

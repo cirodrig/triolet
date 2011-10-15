@@ -1265,10 +1265,11 @@ planFunction (FunM f) = assumeTyPatMs (funTyParams f) $ do
 -- | Create a wrapper function.  The wrapper function unpacks function
 --   parameters, calls the worker, an repacks the worker's results.
 mkWrapperFunction :: FunctionPlan
+                  -> DefAnn
                   -> Var        -- ^ Wrapper function name
                   -> Var        -- ^ Worker function name
                   -> AF (Def Mem)
-mkWrapperFunction plan wrapper_name worker_name = do
+mkWrapperFunction plan annotation wrapper_name worker_name = do
   wrapper_body <- make_wrapper_body
   let (wrapper_ty_params, wrapper_params, wrapper_ret) = 
         originalFunctionInterface plan
@@ -1277,7 +1278,7 @@ mkWrapperFunction plan wrapper_name worker_name = do
                            , funParams = wrapper_params
                            , funReturn = wrapper_ret
                            , funBody = wrapper_body}
-  return $ mkWrapperDef wrapper_name wrapper
+  return $ mkWrapperDef annotation wrapper_name wrapper
   where
     make_wrapper_body = assumeTyPatMs (originalTyParams plan) $ do
       -- Call the worker function and re-pack its arguments
@@ -1326,10 +1327,11 @@ mkWrapperFunction plan wrapper_name worker_name = do
 --   the arguments, runs the original function body, and unpacks its
 --   return value.
 mkWorkerFunction :: FunctionPlan
+                 -> DefAnn
                  -> Var         -- ^ Worker function name
                  -> ExpM        -- ^ Original function body
                  -> AF (Def Mem)
-mkWorkerFunction plan worker_name original_body = do
+mkWorkerFunction plan annotation worker_name original_body = do
   worker_body <- create_worker_body
   tenv <- getTypeEnv
   let (worker_ty_params, worker_params, worker_ret) = 
@@ -1339,7 +1341,7 @@ mkWorkerFunction plan worker_name original_body = do
                           , funParams = worker_params
                           , funReturn = worker_ret
                           , funBody = worker_body}
-  return $ mkDef worker_name worker
+  return $ mkWorkerDef annotation worker_name worker
   where
     create_worker_body = assumeTyPatMs (originalTyParams plan) $ do
       -- If the function returned by reference, then lambda-abstract over 
@@ -1399,6 +1401,7 @@ mkWorkerFunction plan worker_name original_body = do
 flattenFunctionArguments :: Def Mem -> AF (Maybe (Def Mem), Def Mem)
 flattenFunctionArguments def = do
   let fun_name = definiendum def
+      fun_annotation = defAnnotation def
       FunM fun = definiens def
   plan <- planFunction (definiens def)
   
@@ -1415,8 +1418,8 @@ flattenFunctionArguments def = do
          in return (Nothing, mkDef fun_name (FunM fun'))
     else do
       worker_name <- newClonedVar fun_name
-      worker <- mkWorkerFunction plan worker_name body
-      wrapper <- mkWrapperFunction plan fun_name worker_name
+      worker <- mkWorkerFunction plan fun_annotation worker_name body
+      wrapper <- mkWrapperFunction plan fun_annotation fun_name worker_name
       return (Just worker, wrapper)
 
 -- | Perform flattening in the body of a function, but don't change the

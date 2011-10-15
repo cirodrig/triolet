@@ -60,6 +60,8 @@ import System.IO
 import System.Random
 
 import Common.Error
+import qualified SystemF.Syntax as SystemF
+import qualified SystemF.MemoryIR as SystemF
 import qualified LowLevel.Syntax as LowLevel
 import qualified LowLevel.InterfaceFile as LowLevel
 
@@ -301,15 +303,26 @@ data Task a where
     , cppInput :: ReadFile
     , cppOutput :: WriteFile
     } :: Task ()
+
   -- Parse a PyonAsm file
   ParsePyonAsm
     { parseAsmInput :: ReadFile
     } :: Task LowLevel.Module
-  -- Compile a Pyon file
-  CompilePyonToPyonAsm
+
+  -- Parse a Pyon file and compile it to a high-level, unoptimized module
+  ParsePyon
+    { parseFlags :: CompileFlags
+    , parsePyonInput :: ReadFile
+    } :: Task (SystemF.Module SystemF.Mem)
+
+  GetBuiltins :: Task (SystemF.Module SystemF.Mem)
+
+  -- Compile a high-level, unoptimized module to a low-level module
+  CompilePyonMemToPyonAsm
     { compileFlags :: CompileFlags
-    , compilePyonInput :: ReadFile
+    , compileMemInput :: SystemF.Module SystemF.Mem
     } :: Task LowLevel.Module
+
   -- Compile a PyonAsm file
   CompilePyonAsmToGenC
     { compileAsmInput :: LowLevel.Module

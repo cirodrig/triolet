@@ -342,7 +342,12 @@ lowerFun (FunTM (TypeAnn _ fun)) =
       ret_val <- lowerExp body
       return (LL.ReturnE $ LL.ValA $ retValToList ret_val)
 
--- | Lower a definition group.
+lowerDefGroupG :: DefGroup (Def (Typed Mem))
+               -> (LL.Group LL.FunDef -> GenLower a)
+               -> GenLower a
+lowerDefGroupG defs = liftT1 (lowerDefGroup defs)
+
+-- | Lower a local definition group.
 lowerDefGroup :: DefGroup (Def (Typed Mem))
               -> (LL.Group LL.FunDef -> Lower a)
               -> Lower a
@@ -360,14 +365,44 @@ lowerDefGroup defgroup k =
   where
     assume_variables defs k = withMany assume_variable defs k
 
-    assume_variable (Def v annotation f@(FunTM (TypeAnn return_type _))) k =
-      let is_exported = defAnnExported annotation
-      in assumeVar is_exported v return_type k
+    assume_variable (Def v annotation f@(FunTM (TypeAnn return_type _))) k
+      -- Local functions cannot be exported
+      | defAnnExported annotation =
+          internalError "lowerDefGroup: Cannot export a local function"
+      | otherwise =
+          assumeVar False v return_type k
 
-lowerDefGroupG :: DefGroup (Def (Typed Mem))
-               -> (LL.Group LL.FunDef -> GenLower a)
-               -> GenLower a
-lowerDefGroupG defs = liftT1 (lowerDefGroup defs)
+-- | Lower a global definition group.
+--   The definitions and a list of exported functions are returned.
+lowerGlobalDefGroup :: DefGroup (Def (Typed Mem))
+                    -> (LL.Group LL.FunDef -> [(LL.Var, ExportSig)] -> Lower a)
+                    -> Lower a
+lowerGlobalDefGroup defgroup k = 
+  case defgroup
+  of NonRec def -> do
+       -- Lower the function before adding the variable to the environment
+       f' <- lowerFun $ definiens def
+       assume_variable def $ \(v', m_export) ->
+         k (LL.NonRec (LL.Def v' f')) (maybeToList m_export)
+     Rec defs ->
+       -- Add all variables to the environment, then lower
+       assume_variables defs $ \lowered -> do
+         let (vs', m_exports) = unzip lowered
+             exports = catMaybes m_exports
+         fs' <- mapM (lowerFun . definiens) defs
+         k (LL.Rec $ zipWith LL.Def vs' fs') exports
+  where
+    assume_variables defs k = withMany assume_variable defs k
+
+    assume_variable (Def v annotation f@(FunTM (TypeAnn return_type _))) k =
+      -- Decide whether the function is exported
+      let is_exported = defAnnExported annotation
+          
+          -- If exported, add it to the export list
+          k' v
+            | is_exported = k (v, Nothing)
+            | otherwise = k (v, Just (v, PyonExportSig))
+      in assumeVar is_exported v return_type k'
 
 lowerExport :: ModuleName
             -> Export (Typed Mem)
@@ -418,9 +453,9 @@ lowerModuleCode :: ModuleName
 lowerModuleCode module_name defss exports = lower_definitions defss
   where
     lower_definitions (defs:defss) =
-      lowerDefGroup defs $ \defs' -> do
+      lowerGlobalDefGroup defs $ \defs' exported_defs -> do
         (defss', export_sigs) <- lower_definitions defss
-        return (defs' : defss', export_sigs)
+        return (defs' : defss', exported_defs ++ export_sigs)
 
     lower_definitions [] = do
       ll_exports <- mapM (lowerExport module_name) exports

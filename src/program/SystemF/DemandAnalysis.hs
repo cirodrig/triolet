@@ -144,6 +144,10 @@ mentionSpecificity v spc = mentionHelper v $ Dmd OnceSafe spc
 mentionMultiCase :: Var -> Df ()
 mentionMultiCase v = mentionHelper v $ Dmd OnceSafe Inspected
 
+-- | A global variable is visible to other Pyon modules.
+mentionExtern :: Var -> Df ()
+mentionExtern v = mentionHelper v unknownDmd
+
 -- | Get the demand on variable @v@ produced by the given code; also, remove
 --   @v@ from the demanded set
 getDemand :: Var -> Df a -> Df (a, Dmd)
@@ -388,21 +392,26 @@ dmdFun is_initializer (FunM f) = do
   return $ FunM $ f {funTyParams = tps', funParams = ps', funBody = b'}
 
 dmdDef :: DmdAnl (Def Mem)
-dmdDef def = do
-  -- If the function is exported to Pyon, mark it as used in an unknown way
-  when (defAnnExported $ defAnnotation def) $
-    mentionHelper (definiendum def) unknownDmd
-    
-  mapMDefiniens (dmdFun False) def
+dmdDef def = mapMDefiniens (dmdFun False) def
 
+-- | Act like each exported function definition is used in an unknown way.
+--   Doing so prevents the function from being inlined/deleted.
+useExportedDefs :: [Def Mem] -> Df ()
+useExportedDefs defs = mapM_ demand_if_exported defs
+  where
+    demand_if_exported def =
+      when (defAnnExported $ defAnnotation def) $
+      mentionExtern (definiendum def)
+  
 dmdGroup :: DefGroup (Def Mem) -> Df b -> Df ([DefGroup (Def Mem)], b)
 dmdGroup defgroup do_body =
   case defgroup
   of NonRec def -> do
        -- Eliminate dead code.  Decide whether the definition is dead.
-       (body, dmd) <- getDemand (definiendum def) do_body
+       (body, dmd) <- getDemand (definiendum def) do_body_and_exports
        case multiplicity dmd of
-         Dead -> return ([], body)
+         Dead ->
+           return ([], body)
          _ -> do
            def' <- dmdDef def
            let def'' = set_def_uses dmd def'
@@ -412,10 +421,15 @@ dmdGroup defgroup do_body =
        let local_vars = map definiendum defs
        in maskDemands local_vars $ rec_dmd defs
   where
+    -- Process demands in the body.  Also account for exported variables.
+    do_body_and_exports = do
+      useExportedDefs $ defGroupMembers defgroup
+      do_body
+
     rec_dmd defs = Df $ \tenv ->
       let -- Scan each definition and the body code
           defs_and_uses = [runDf (dmdDef def) tenv | def <- defs]
-          (body, body_uses) = runDf do_body tenv
+          (body, body_uses) = runDf do_body_and_exports tenv
 
           -- Partition into strongly connected components
           members = [((new_def, uses),

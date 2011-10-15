@@ -28,6 +28,8 @@ import Job
 data Action =
     GetUsage                    -- ^ Show a usage string
   | GetHelp                     -- ^ Get help documentation
+  | GenerateBuiltinLibrary      -- ^ Generate object code of the
+                                --   built-in library
   | CompileObject               -- ^ Compile to object code
   | ConflictingAction           -- ^ Conflicting options given
     deriving(Eq)
@@ -37,6 +39,7 @@ data Action =
 actionPriority :: Action -> Int
 actionPriority GetUsage = 0
 actionPriority GetHelp = 10
+actionPriority GenerateBuiltinLibrary = 1
 actionPriority CompileObject = 1
 actionPriority ConflictingAction = 11
 
@@ -53,6 +56,8 @@ newtype Opt = Opt (InterpretOptsState -> InterpretOptsState)
 instance Monoid Opt where
   mempty = Opt id
   Opt f `mappend` Opt g = Opt (g . f)
+
+generateBuiltinLibraryCommandName = "generate-builtin-library"
 
 optionDescrs =
   [ Option "h" ["help"] (NoArg (Opt $ setAction GetHelp))
@@ -72,6 +77,9 @@ optionDescrs =
     "enable/disable a compiler flag"
   , Option "" ["fuel"] (ReqArg (\fuel -> Opt $ setFuel fuel) "FUEL")
     "limit the number of optimizations applied"
+  , Option "" [generateBuiltinLibraryCommandName]
+    (NoArg (Opt $ setAction GenerateBuiltinLibrary))
+    "generate object code of the built-in library"
   ]
 
 -- | Parse command-line arguments.  Return some global variable values and 
@@ -113,12 +121,20 @@ interpretOptions opts =
               header <- usageHeader
               putStrLn header
               putStrLn "For usage information, invoke with --help"
-              return (defaultCommandLineGlobals, pass)
+              do_nothing
             GetHelp -> do
               -- Print usage info and exist
               header <- usageHeader
               putStrLn $ usageInfo header optionDescrs
-              return (defaultCommandLineGlobals, pass)
+              do_nothing
+            GenerateBuiltinLibrary 
+              | not $ null (inputFiles commands') -> do
+                  hPutStrLn stderr ("Input files cannot be specified with --" ++ generateBuiltinLibraryCommandName)
+                  do_nothing
+              | otherwise -> do
+                  let output = outputFile commands'
+                  job <- compileBuiltinLibraryJob commands' output
+                  return (mkCommandLineGlobals commands', job)
             CompileObject -> do
               let inputs = reverse $ inputFiles commands'
                   output = outputFile commands'
@@ -128,16 +144,29 @@ interpretOptions opts =
             ConflictingAction -> do
               hPutStrLn stderr "Conflicting commands given on command line"
               hPutStrLn stderr "For usage information, invoke with --help"
-              return (defaultCommandLineGlobals, pass)
+              do_nothing
+  where
+    do_nothing = return (defaultCommandLineGlobals, pass)
 
 -- | After reading all options, update some parts of the interpreted state
 --   based on the presence/absence of options
 postProcessCommands commands = do
   input_languages <- mapM chooseLanguage $ inputFiles commands
-  let commands' =
-        commands {currentNeedCoreIR =
-                     currentNeedCoreIR commands ||
-                     any (PyonLanguage ==) input_languages}
+  let action =
+        -- If no action was specified and there's at least one input file,
+        -- default to 'CompileObject'
+        case currentAction commands
+        of GetUsage | not $ null (inputFiles commands) -> CompileObject
+           x -> x
+      need_core_ir =
+        -- If generating the builtin library or compiling a Pyon file, the
+        -- core builtin module must be loaded
+        currentNeedCoreIR commands ||
+        currentAction commands == GenerateBuiltinLibrary ||
+        any (PyonLanguage ==) input_languages
+
+  let commands' = commands { currentNeedCoreIR = need_core_ir
+                           , currentAction = action}
   return commands'
 
 -- | Global variable values that were given on the command line.
@@ -189,7 +218,7 @@ data InterpretOptsState =
   , currentNeedCoreIR :: !Bool
   }
 
-initialState = InterpretOptsState { currentAction = CompileObject
+initialState = InterpretOptsState { currentAction = GetUsage
                                   , currentLanguage = NoneLanguage
                                   , outputFile = Nothing
                                   , keepCFiles = False
@@ -282,6 +311,19 @@ chooseLanguage (file_path, NoneLanguage) = from_suffix file_path
 
 chooseLanguage (_, lang) = return lang
 
+compileBuiltinLibraryJob config Nothing = do
+  hPutStrLn stderr "Must specify output file"
+  return pass
+
+compileBuiltinLibraryJob config (Just output_path) = do
+  iface_files <- findInterfaceFiles
+  let ifile = writeFileFromPath $ ifacePath output_path
+      outfile = writeFileFromPath output_path
+  compileWithCFile config output_path $
+    return $ \cfile -> builtinLibraryCompilation
+                           (commandLineFlags config) iface_files
+                           cfile ifile outfile
+
 -- | Compile one or many object files
 compileObjectsJob config [] output = do
   hPutStrLn stderr "No input files"
@@ -307,11 +349,11 @@ compileObjectJob config (file_path, language) moutput_path = do
   -- Read and compile the file.  Decide where to put the temporary C file.
   case input_language of
     PyonLanguage -> do
-      iface_files <- find_interface_files
+      iface_files <- findInterfaceFiles
       let infile = readFileFromPath file_path
-          hfile = writeFileFromPath header_path
-          hxxfile = writeFileFromPath hxx_path
-          ifile = writeFileFromPath iface_path
+          hfile = writeFileFromPath $ headerPath output_path
+          hxxfile = writeFileFromPath $ hxxPath output_path
+          ifile = writeFileFromPath $ ifacePath output_path
           outfile = writeFileFromPath output_path
       compileWithCFile config output_path $
         return $ \cfile -> pyonCompilation
@@ -320,7 +362,7 @@ compileObjectJob config (file_path, language) moutput_path = do
 
     PyonAsmLanguage ->
       let infile = readFileFromPath file_path
-          ifile = writeFileFromPath iface_path
+          ifile = writeFileFromPath $ ifacePath output_path
           outfile = writeFileFromPath output_path
       in compileWithCFile config output_path $
          return $ \cfile -> pyonAsmCompilation
@@ -328,30 +370,30 @@ compileObjectJob config (file_path, language) moutput_path = do
                             (reverse $ includeSearchPaths config)
                             infile cfile ifile outfile
   where
-    -- Exported C function declarations go here
-    header_path = dropExtension output_path ++ "_interface.h"
-    
-    -- Exported C++ function declarations go here
-    hxx_path = dropExtension output_path ++ "_cxx.h"
-
-    -- Exported Pyon interface goes here
-    iface_path = replaceExtension output_path ".pi"
-
     output_path =
       case moutput_path
       of Just p -> p
          Nothing -> replaceExtension file_path ".o"
          
-    -- Get all interface files
-    find_interface_files = forM interface_files $ \fname -> do
-      path <- getDataFileName ("interfaces" </> fname)
-      return $ readFileFromPath path
-      where
-        -- These are the RTS interface files that were generated when
-        -- the compiler was built
-        interface_files =
-          ["memory_py.pi", "prim.pi", "structures.pi", "list.pi", "stream.pi",
-           "effects.pi"]
+-- Exported C function declarations go here
+headerPath output_path = dropExtension output_path ++ "_interface.h"
+    
+-- Exported C++ function declarations go here
+hxxPath output_path = dropExtension output_path ++ "_cxx.h"
+
+-- Exported Pyon interface goes here
+ifacePath output_path = replaceExtension output_path ".pi"
+
+-- Get all interface files
+findInterfaceFiles = forM interface_files $ \fname -> do
+  path <- getDataFileName ("interfaces" </> fname)
+  return $ readFileFromPath path
+  where
+    -- These are the RTS interface files that were generated when
+    -- the compiler was built
+    interface_files =
+      ["memory_py.pi", "prim.pi", "structures.pi", "list.pi", "stream.pi",
+       "effects.pi"]
    
 -- | Compile and generate an intermediate C file.
 -- If C files are kept, put the C file in the same location as the output, with
@@ -365,6 +407,19 @@ compileWithCFile config output_path mk_do_work
       do_work <- mk_do_work
       return $ withAnonymousFile ".c" $ do_work
 
+builtinLibraryCompilation :: CompileFlags -- ^ Command-line flags
+                          -> [ReadFile]   -- ^ Input interface files
+                          -> TempFile     -- ^ Temporary C file
+                          -> WriteFile    -- ^ Output interface file
+                          -> WriteFile    -- ^ Output object file
+                          -> Job ()
+builtinLibraryCompilation compile_flags iface_files cfile ifile outfile = do
+  high_level <- taskJob GetBuiltins
+  asm <- taskJob $ CompilePyonMemToPyonAsm compile_flags high_level
+  ifaces <- mapM (taskJob . LoadIface) iface_files
+  taskJob $ CompilePyonAsmToGenC asm ifaces (writeTempFile cfile) ifile writeNothing writeNothing
+  taskJob $ CompileGenCToObject (readTempFile cfile) outfile
+
 pyonCompilation :: CompileFlags -- ^ Command-line flags
                 -> ReadFile     -- ^ Input pyon file
                 -> [ReadFile]   -- ^ Input interface files
@@ -375,7 +430,8 @@ pyonCompilation :: CompileFlags -- ^ Command-line flags
                 -> WriteFile    -- ^ Output object file
                 -> Job ()
 pyonCompilation compile_flags infile iface_files cfile ifile hfile hxxfile outfile = do
-  asm <- taskJob $ CompilePyonToPyonAsm compile_flags infile
+  high_level <- taskJob $ ParsePyon compile_flags infile
+  asm <- taskJob $ CompilePyonMemToPyonAsm compile_flags high_level
   ifaces <- mapM (taskJob . LoadIface) iface_files
   taskJob $ CompilePyonAsmToGenC asm ifaces (writeTempFile cfile) ifile hfile hxxfile
   taskJob $ CompileGenCToObject (readTempFile cfile) outfile

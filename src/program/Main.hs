@@ -57,6 +57,8 @@ import qualified LowLevel.InterfaceFile as LowLevel
 import qualified LLParser.Parser as LLParser
 import qualified LLParser.TypeInference as LLParser
 import qualified LLParser.GenLowLevel2 as LLParser
+import qualified Globals
+import GlobalVar
 
 debugMode = False
 
@@ -93,11 +95,20 @@ runTask (ParsePyonAsm {parseAsmInput = file}) = do
   input_path <- readFilePath file
   parsePyonAsm input_path input_text
 
-runTask (CompilePyonToPyonAsm { compilePyonInput = file
-                              , compileFlags = cflags}) = do
+runTask (ParsePyon { parsePyonInput = file
+                   , parseFlags = cflags}) = do
   input_text <- readFileAsString file
   input_path <- readFilePath file
-  compilePyonToPyonAsm cflags input_path input_text
+  compilePyonToPyonMem cflags input_path input_text
+
+runTask GetBuiltins = do
+  -- Read the core module.
+  -- The module was loaded during initialization.
+  readInitGlobalVarIO Globals.the_coreModule
+
+runTask (CompilePyonMemToPyonAsm { compileMemInput = mod
+                                 , compileFlags = cflags}) = do
+  compilePyonMemToPyonAsm cflags mod
 
 runTask (CompilePyonAsmToGenC { compileAsmInput = ll_mod
                               , compileAsmIfaces = ifaces
@@ -162,10 +173,10 @@ highLevelOptimizations global_demand_analysis simplifier_phase mod = do
   
   return mod
 
--- | Compile a pyon file from source code to low-level code.
-compilePyonToPyonAsm :: CompileFlags -> FilePath -> String
-                     -> IO LowLevel.Module
-compilePyonToPyonAsm compile_flags path text = do
+-- | Compile a pyon file from source code to high-level, unoptimized code.
+compilePyonToPyonMem :: CompileFlags -> FilePath -> String
+                     -> IO (SystemF.Module SystemF.Mem)
+compilePyonToPyonMem compile_flags path text = do
   -- Parse and generate untyped code
   untyped_mod <- parseFile path text
   putStrLn "Untyped"
@@ -190,13 +201,19 @@ compilePyonToPyonAsm compile_flags path text = do
   
   -- Add predefined functions to the module
   repr_mod <- SystemF.insertGlobalSystemFFunctions repr_mod
-
+  
   putStrLn ""
   putStrLn "Memory IR"
   print $ SystemF.PrintMemoryIR.pprModule repr_mod
   when debugMode $ void $ do
     SystemF.TypecheckMem.typeCheckModule repr_mod -- DEBUG
   
+  return repr_mod
+
+compilePyonMemToPyonAsm :: CompileFlags -> SystemF.Module SystemF.Mem
+                        -> IO LowLevel.Module
+compilePyonMemToPyonAsm compile_flags repr_mod = do
+
   -- General-purpose, high-level optimizations
   repr_mod <- highLevelOptimizations True SystemF.GeneralSimplifierPhase repr_mod
 
