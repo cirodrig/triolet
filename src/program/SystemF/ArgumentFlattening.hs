@@ -1009,7 +1009,7 @@ deadValue t = do
                return $ ExpM $ LitE defaultExpInfo $ FloatL 0 t
          (VarT con, [p])
            | con `isPyonBuiltin` The_Pf ->
-               return $ ExpM $ AppE defaultExpInfo dead_proof_op [TypM p] [] 
+               return $ ExpM $ ConE defaultExpInfo (dead_proof_op p) []
            | con `isPyonBuiltin` The_FIInt -> do
                -- Use 'finIndInt' as the data constructor
                -- Get types of data constructor parameters
@@ -1020,8 +1020,18 @@ deadValue t = do
 
                -- Create arguments to data constructor
                args <- mapM deadValue dom
-               let expr = ExpM $ AppE defaultExpInfo dead_finindint_op
-                          [TypM p] args
+               let expr = ExpM $ ConE defaultExpInfo (dead_finindint_op p) args
+               return expr
+           | con `isPyonBuiltin` The_IInt -> do
+               -- Use 'iInt' as the data constructor
+               let Just datacon_type =
+                     lookupType (pyonBuiltin The_iInt) tenv
+               Just monotype <- liftTypeEvalM $ typeOfTypeApp datacon_type intindexT p
+               let (dom, _) = fromFunType monotype
+
+               -- Create arguments to data constructor
+               args <- mapM deadValue dom
+               let expr = ExpM $ ConE defaultExpInfo (dead_indint_op p) args
                return expr
          (CoT BoxK, [t1, t2]) ->
            return $ ExpM $ AppE defaultExpInfo make_coercion_op [TypM t1, TypM t2] []
@@ -1036,8 +1046,9 @@ deadValue t = do
     dead_bare = ExpM $ AppE defaultExpInfo dead_bare_op [TypM t] []
     dead_box_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadBox)
     dead_bare_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadRef)
-    dead_proof_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_deadProof)
-    dead_finindint_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_fiInt)
+    dead_proof_op p = CInstM (VarCon (pyonBuiltin The_deadProof) [p] [])
+    dead_finindint_op i = CInstM (VarCon (pyonBuiltin The_fiInt) [i] [])
+    dead_indint_op i = CInstM (VarCon (pyonBuiltin The_iInt) [i] [])
     make_coercion_op = ExpM $ VarE defaultExpInfo (pyonBuiltin The_unsafeMakeCoercion)
 
 planReturn :: (ReprDictMonad m, EvalMonad m) =>
