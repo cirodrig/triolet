@@ -62,6 +62,9 @@ instance Monad m => MonadWriter MkStm (Gen m) where
   pass (Gen m) = Gen (\rt -> do ((x, f), w) <- m rt
                                 return (x, f w))
 
+instance (Supplies m (Ident Var)) => Supplies (Gen m) (Ident Var) where
+  fresh = lift fresh
+
 execBuild :: Monad m => [ValueType] -> Gen m Stm -> m Stm
 execBuild return_type m = do
   (stm, MkStm mk_stm) <- runGen m return_type
@@ -209,6 +212,47 @@ bindAtom vars atom = emit $ LetE vars atom
 
 emitLetrec :: Monad m => Group FunDef -> Gen m ()
 emitLetrec defs = emit $ LetrecE defs
+
+emitLambda :: (Monad m, Supplies m (Ident Var)) => Fun -> Gen m Var
+emitLambda f = do
+  let f_type = case funConvention f
+               of PrimCall -> PrimType PointerType
+                  ClosureCall -> PrimType OwnedType
+  v <- newAnonymousVar f_type
+  emit $ LetrecE (NonRec (Def v f))
+  return v
+
+-- | Create a piece of code that requires parameters.  If fewer arguments 
+--   are passed than expected, a local function is generated.  Otherwise the
+--   code is emitted directly.  
+genLambdaOrCall :: (Monad m, Supplies m (Ident Var)) =>
+                   [ValueType] -> [ValueType] -> ([Val] -> Gen m [Val])
+                -> [Val] -> Gen m [Val]
+genLambdaOrCall param_types return_types mk_code args
+  | n_args == n_params =
+      mk_code args
+
+  | n_args < n_params = do
+      -- Create a function that takes the extra parameters
+      let extra_param_types = drop (length args) param_types
+      extra_params <- mapM newAnonymousVar extra_param_types
+      
+      fun_body <- lift $ execBuild return_types $ do
+        ret_values <- mk_code (args ++ map VarV extra_params)
+        return $ ReturnE $ ValA ret_values
+      f <- emitLambda $ closureFun extra_params return_types fun_body
+      return [VarV f]
+        
+  | n_args > n_params = internalError "genLambdaOrCall: Too many arguments"
+  where
+    n_args = length args
+    n_params = length param_types
+
+genLambda :: (Monad m, Supplies m (Ident Var)) =>
+             [ValueType] -> [ValueType] -> ([Val] -> Gen m [Val]) -> Gen m Val
+genLambda parameter_types return_types mk_body = do
+  [x] <- genLambdaOrCall parameter_types return_types mk_body []
+  return x
 
 -- | Generate a 'ThrowE' term.
 --   Any subsequently generated code on the same control flow path

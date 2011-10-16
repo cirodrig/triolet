@@ -21,7 +21,7 @@ import LowLevel.Records
 import qualified Type.Var
 
 lowerIntrinsicOp :: (Monad m, Supplies m (Ident Var)) =>
-                    Type.Var.Var -> Maybe (m Val)
+                    Type.Var.Var -> Maybe ([Val] -> Gen m [Val])
 lowerIntrinsicOp v 
     -- Check size assumptions
   | pyonFloatSize /= S32 =
@@ -104,93 +104,82 @@ lowerIntrinsicOp v
 
 -- | Create a unary float operation.  Return it as a lambda function, so we
 -- can use it as a value.
-unary_float op = do
-  let float_type = PrimType (FloatType S32)
-  param_var <- newAnonymousVar float_type
-  let atom = PrimA op [VarV param_var]
-  return $ LamV $ closureFun [param_var] [float_type] $ ReturnE atom
+unary_float op =
+  genLambdaOrCall [float_type] [float_type] $ \params -> do
+    emitAtom [float_type] $ PrimA op params
+  where
+    float_type = PrimType (FloatType S32)
 
-binary_float op = do
-  let float_type = PrimType (FloatType S32)
-  param_var1 <- newAnonymousVar float_type
-  param_var2 <- newAnonymousVar float_type
-  let atom = PrimA op [VarV param_var1, VarV param_var2]
-  return $ LamV $ closureFun [param_var1, param_var2] [float_type] $ ReturnE atom
+binary_float op =
+  genLambdaOrCall [float_type, float_type] [float_type] $ \params -> do
+    emitAtom [float_type] $ PrimA op params
+  where
+    float_type = PrimType (FloatType S32)
 
-binary_int op = do
-  let int_type = PrimType (IntType Signed S32)
-  param_var1 <- newAnonymousVar int_type
-  param_var2 <- newAnonymousVar int_type
-  let atom = PrimA op [VarV param_var1, VarV param_var2]
-  return $ LamV $ closureFun [param_var1, param_var2] [int_type] $ ReturnE atom
+binary_int op =
+  genLambdaOrCall [int_type, int_type] [int_type] $ \params -> do
+    emitAtom [int_type] $ PrimA op params  
+  where
+    int_type = PrimType (IntType Signed S32)
 
-binary_bool op = do
-  let bool_type = PrimType BoolType
-  param_var1 <- newAnonymousVar bool_type
-  param_var2 <- newAnonymousVar bool_type
-  let atom = PrimA op [VarV param_var1, VarV param_var2]
-  return $ LamV $ closureFun [param_var1, param_var2] [bool_type] $ ReturnE atom
+
+binary_bool op =
+  genLambdaOrCall [bool_type, bool_type] [bool_type] $ \params -> do
+    emitAtom [bool_type] $ PrimA op params
+  where
+    bool_type = PrimType BoolType
 
 -- | Round a FP number
-float_to_int round_mode = do
-  let int_type = PrimType (IntType Signed S32)
-  let float_type = PrimType (FloatType S32)
-  param_var <- newAnonymousVar float_type
-  let atom = PrimA (PrimRoundF round_mode S32 Signed S32) [VarV param_var]
-  return $ LamV $ closureFun [param_var] [int_type] $ ReturnE atom
+float_to_int round_mode =
+  genLambdaOrCall [float_type] [int_type] $ \params -> do
+    emitAtom [int_type] $ PrimA (PrimRoundF round_mode S32 Signed S32) params
+  where
+    int_type = PrimType (IntType Signed S32)
+    float_type = PrimType (FloatType S32)
   
+id_float, id_int, empty_eff_tok, from_eff_tok, dead_reference, dead_box, proof_object ::
+  (Monad m, Supplies m (Ident Var)) => [Val] -> Gen m [Val]
+
 -- | This is the identity function on floats.
-id_float :: (Monad m, Supplies m (Ident Var)) => m Val
-id_float = do
-  let float_type = PrimType (FloatType S32)
-  param_var <- newAnonymousVar float_type
-  let atom = ValA [VarV param_var]
-  return $ LamV $ closureFun [param_var] [float_type] $ ReturnE atom
+id_float =
+  genLambdaOrCall [float_type] [float_type] return
+  where
+    float_type = PrimType (FloatType S32)
 
 -- | This is the identity function on ints.
-id_int :: (Monad m, Supplies m (Ident Var)) => m Val
-id_int = do
-  let int_type = PrimType (IntType Signed S32)
-  param_var <- newAnonymousVar int_type
-  let atom = ValA [VarV param_var]
-  return $ LamV $ closureFun [param_var] [int_type] $ ReturnE atom
+id_int =
+  genLambdaOrCall [int_type] [int_type] return
+  where
+    int_type = PrimType (IntType Signed S32)
 
 indexedIntType = RecordType indexedIntRecord
 
-indexed_int_constant :: (Monad m, Supplies m (Ident Var)) => Integer -> m Val
-indexed_int_constant n =
-  return $ RecV indexedIntRecord [uint8V 0,
-                                  RecV indexedIntDataRecord [RecV finIndexedIntRecord [nativeIntV n]]]
+indexed_int_constant n [] =
+  return [RecV indexedIntRecord [uint8V 0,
+                                 RecV indexedIntDataRecord [RecV finIndexedIntRecord [nativeIntV n]]]]
 
-fin_indexed_int_constant :: (Monad m, Supplies m (Ident Var)) =>
-                            Integer -> m Val
-fin_indexed_int_constant n =
-  return $ RecV finIndexedIntRecord [nativeIntV n]
+fin_indexed_int_constant n [] =
+  return [RecV finIndexedIntRecord [nativeIntV n]]
 
 -- | Create an effect token.
-empty_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
-empty_eff_tok = return (LitV UnitL)
+empty_eff_tok [] = return [LitV UnitL]
 
 -- | Convert an effect token to a side effect.  The effect token is simply
 --   discarded.
-from_eff_tok :: (Monad m, Supplies m (Ident Var)) => m Val
-from_eff_tok = do
-  param_var <- newAnonymousVar (PrimType UnitType)
-  return $ LamV $ closureFun [param_var] [] $ ReturnE (ValA [])
+from_eff_tok =
+  genLambdaOrCall [PrimType UnitType] [] $ \_ -> do
+    emitAtom [] $ ValA []
 
 -- | Initialize an object that's dead.  Since it's dead, we don't have to  
 --   initialize it.
-dead_reference :: (Monad m, Supplies m (Ident Var)) => m Val
-dead_reference = do
-  param_var <- newAnonymousVar (PrimType PointerType)
-  return $ LamV $ closureFun [param_var] [] $ ReturnE (ValA [])
+dead_reference =
+  genLambdaOrCall [PrimType PointerType] [] $ \_ -> do
+    emitAtom [] $ ValA []
 
 -- | Create a dead boxed object.
-dead_box :: (Monad m, Supplies m (Ident Var)) => m Val
 dead_box = do
-  param_var <- newAnonymousVar (PrimType PointerType)
-  return $ LamV $ closureFun [param_var] [] $ ReturnE (ValA [])
+  genLambdaOrCall [PrimType PointerType] [] $ \_ -> do
+    emitAtom [] $ ValA []
 
 -- | Create a proof object or coercion value.
-proof_object :: (Monad m, Supplies m (Ident Var)) => m Val
-proof_object = return (LitV UnitL)
+proof_object [] = return [LitV UnitL]

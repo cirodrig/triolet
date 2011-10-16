@@ -69,19 +69,6 @@ computeMaximum :: [LL.Val] -> GenLower LL.Val
 computeMaximum [] = internalError "computeMaximum: empty list"
 computeMaximum (v:vs) = foldM nativeMaxUZ v vs
 
--- | Construct a writer function.  The function takes a pointer parameter and
---   initializes the data it points to.
-writerFunction :: (LL.Val -> GenLower LL.Stm) -> Lower LL.Val
-writerFunction mk_body = do
-  return_param <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
-  fun_body <- execBuild [] (mk_body (LL.VarV return_param))
-  let fun = LL.closureFun [return_param] [] fun_body
-  return $ LL.LamV fun
-
-returnWriterFunction :: (LL.Val -> GenLower LL.Stm) -> Lower LL.Stm
-returnWriterFunction f =
-  fmap (\v -> LL.ReturnE $ LL.ValA [v]) $ writerFunction f
-
 fieldTypeToRecord :: LL.DynamicFieldType -> LL.DynamicRecord
 fieldTypeToRecord (LL.RecordField r) = r
 fieldTypeToRecord ftype = singletonDynamicRecord LL.Mutable ftype
@@ -801,7 +788,7 @@ lowerFunctionType env ty = runLowering env $ do
 --   values (for boxed or value objects).
 algebraicIntro :: AlgLayout -> Var -> [LL.Val] -> GenLower LL.Val
 algebraicIntro (AlgMemLayout ml) con fields =
-  lift $ algMemIntro ml (VarTag con) fields
+  algMemIntro ml (VarTag con) fields
 algebraicIntro (AlgValLayout (AVLayout vl)) con fields =
   algValIntro vl (VarTag con) fields
 
@@ -816,17 +803,15 @@ algMemIntro' (MemProd { memLayout = layout
   -- Create an initializer function. 
   -- The function takes a return pointer, and writes its results into the
   -- referenced memory.
-  ret_param <- LL.newAnonymousVar (LL.PrimType LL.PointerType)
+  ret_param <- lift $ LL.newAnonymousVar (LL.PrimType LL.PointerType)
 
-  fun_body <- execBuild [] $ do
+  genLambda [LL.PrimType LL.PointerType] [] $ \[ret_param] -> do
     -- Create record type
     (record_type, _) <- memType layout
 
     -- Write fields
-    writer record_type (algInitializers fields fs) (LL.VarV ret_param)
-    return $ LL.ReturnE (LL.ValA [])
-  let fun = LL.closureFun [ret_param] [] fun_body
-  return $ LL.LamV fun
+    writer record_type (algInitializers fields fs) ret_param
+    return []
 
 algValIntro vl con =
   case findMember ((con ==) . valConstructor) vl

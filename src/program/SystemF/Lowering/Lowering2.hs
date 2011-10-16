@@ -189,7 +189,7 @@ lowerExp (ExpTM (TypeAnn ty expression)) =
      LitE _ l -> lowerLit ty l
      ConE _ con args -> lowerCon con args
      AppE _ op ty_args args -> lowerApp ty op ty_args args
-     LamE _ f -> lift $ lowerLam ty f
+     LamE _ f -> lowerLam ty f
      LetE _ binder rhs body -> lowerLet ty binder rhs body
      LetfunE _ defs body -> lowerLetrec ty defs body
      CaseE _ scr alts -> lowerCase ty scr alts
@@ -197,11 +197,12 @@ lowerExp (ExpTM (TypeAnn ty expression)) =
      -- Coercions are lowered to a no-op
      CoerceE _ _ _ e -> lowerExp e
 
-lowerVar _ v = lift $
+lowerVar _ v =
   case LL.lowerIntrinsicOp v
-  of Just lower_var -> fmap RetVal lower_var
-     Nothing -> do ll_v <- lookupVar v
-                   return $ RetVal (LL.VarV ll_v)
+  of Just lower_var -> do xs <- lower_var []
+                          return $ listToRetVal xs
+     Nothing -> lift $ do ll_v <- lookupVar v
+                          return $ RetVal (LL.VarV ll_v)
 
 lowerLit _ lit =
   case lit
@@ -250,6 +251,12 @@ lowerApp rt (ExpTM (TypeAnn _ (VarE _ op_var))) ty_args args
     in do NoVal <- lowerExp arg
           return $ RetVal (LL.LitV LL.UnitL)
 
+lowerApp rt (ExpTM (TypeAnn _ (VarE _ op_var))) ty_args args
+  | Just mk_code <- LL.lowerIntrinsicOp op_var = do
+      -- Lower the intrinsic operation
+      xs <- mk_code =<< mapM lowerExpToVal args
+      return $ listToRetVal xs
+
 lowerApp rt op ty_args args = do
   -- Lower the operator expression
   op' <- lowerExp op
@@ -264,8 +271,8 @@ lowerApp rt op ty_args args = do
     return $ listToRetVal retvals
 
 lowerLam _ f = do
-  f' <- lowerFun f
-  return $ RetVal (LL.LamV f')
+  f' <- emitLambda =<< lift (lowerFun f)
+  return $ RetVal (LL.VarV f')
 
 lowerLet _ binder rhs body =
   case binder

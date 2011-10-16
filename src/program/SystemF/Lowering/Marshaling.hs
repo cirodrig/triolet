@@ -351,7 +351,8 @@ createMarshalingFunction marshal_params marshal_return f = do
     -- Call the function and marshal the return value
     let call_arguments = param_arguments ++ rmOutput marshal_return
     rmCode marshal_return $ do
-      return $ LL.closureCallA (LL.LamV f) call_arguments
+      f_var <- emitLambda f
+      return $ LL.closureCallA (LL.VarV f_var) call_arguments
     
     -- Return the return value
     return $ LL.ReturnE $ LL.ValA (map LL.VarV $ rmReturns marshal_return)
