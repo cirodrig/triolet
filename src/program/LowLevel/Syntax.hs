@@ -290,13 +290,11 @@ data Val =
     VarV Var
   | RecV !StaticRecord [Val]
   | LitV !Lit
-  | LamV Fun
 
 valType :: Val -> ValueType
 valType (VarV v) = varType v
 valType (RecV r _) = RecordType r
 valType (LitV l) = PrimType $ litType l
-valType (LamV f) = PrimType OwnedType
 
 -- | An atomic operation.  Some non-atomic operations are included here.
 -- This is modeled after ANF, but isn't truly ANF since expressions can be 

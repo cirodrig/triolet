@@ -175,7 +175,6 @@ scanValue value =
   of VarV v -> tellRCont v Top  -- Variable has unknown return continuation
      LitV _ -> mempty
      RecV _ vs -> scanValues vs
-     LamV _ -> internalError "scanValue: Unexpected lambda"
 
 scanValues vs = mconcat $ map scanValue vs
 

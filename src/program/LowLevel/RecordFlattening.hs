@@ -67,7 +67,6 @@ expand m v = expand_var v
       of VarV v' | v /= v' -> expand_var v'
 
          -- A variable never expands to a record type or lambda function
-         LamV {} -> internalError "expand: Unexpected lambda function"
          RecV {} -> internalError "expand: Unexpected record type"
          
          -- Other values require no further expansion
@@ -158,8 +157,6 @@ flattenVal value =
   of VarV v -> expandVar v
      RecV _ vals -> liftM concat $ mapM flattenVal vals
      LitV _ -> return [value]
-     LamV f -> do f' <- flattenFun f
-                  return [LamV f']
 
 -- | Flatten a value.  The result must be a single value.
 flattenSingleVal :: Val -> RF Val
@@ -255,28 +252,6 @@ pointerOffsetCode ptr off
       ptr' <- newAnonymousVar (PrimType PointerType)
       return (LetE [ptr'] $ PrimA PrimAddP [ptr, off], VarV ptr')
 
--- | Convert a flattened value list to one that doesn't contain any lambda 
---   functions, by assigning lambda functions to temporary variables.  The
---   returned list contains variables in place of lambda functions.
-bindLambdas :: [Val] -> RF (Stm -> Stm, [Val])
-bindLambdas values = do
-  (bindings, new_values) <- mapAndUnzipM bind_lambda values
-  return (foldr (.) id bindings, new_values)
-  where
-    bind_lambda value =
-      case value
-      of VarV _ -> no_change
-         RecV _ _ ->
-           -- We were given a value that wasn't flattened
-           internalError "bindLambdas"
-         LitV _ -> no_change
-         LamV f -> do
-           -- Assign the lambda function to a variable
-           fun_var <- newAnonymousVar (PrimType OwnedType)
-           return (LetE [fun_var] $ ValA [value], VarV fun_var)
-      where
-        no_change = return (id, value)
-
 flattenStm :: Stm -> RF Stm
 flattenStm statement =
   case statement
@@ -284,8 +259,7 @@ flattenStm statement =
        -- Copy-propagate the values by assigning them directly to 'v'
        -- in the expansion mapping
        vals' <- flattenValList vals
-       (lambda_bindings, vals'') <- bindLambdas vals'
-       assign v vals'' $ fmap lambda_bindings $ flattenStm next_statement
+       assign v vals' $ flattenStm next_statement
      LetE vs (UnpackA record val) next_statement -> do
        -- Copy-propagate the values by assigning them directly to each of 'vs'
        -- in the expansion mapping
@@ -538,4 +512,3 @@ flattenGlobalValue value =
   of VarV v -> [value]
      RecV _ vals -> flattenGlobalValues vals
      LitV _ -> [value]
-     LamV f -> internalError "flattenGlobalValue: Unexpected lambda function"

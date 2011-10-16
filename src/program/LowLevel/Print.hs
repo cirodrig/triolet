@@ -264,7 +264,6 @@ pprVal value =
   of VarV v -> pprVar v
      RecV _ vs -> fillBracketList $ map pprVal vs
      LitV l -> pprLit l
-     LamV f -> parens $ pprFun f
 
 pprAtom atom =
   case atom

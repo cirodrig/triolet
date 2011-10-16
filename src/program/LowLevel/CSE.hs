@@ -104,9 +104,6 @@ cseVal value =
        let new_value = fromCSEVal $ cseFindVar v env
        return (new_value, interpretVal env value)
      LitV l -> return (value, Just $ litExpr l)
-     LamV f -> do
-       f' <- runCSEF $ cseFun f
-       return (LamV f', Nothing)
      RecV rec vs -> do
        vs' <- mapM cseVal' vs
        return (RecV rec vs', Nothing)
@@ -279,11 +276,7 @@ simplifyPrimCall op_val arg_vals =
 cseStm :: Stm -> CSE Stm
 cseStm statement =
   case statement
-  of LetE [f_var] (ValA [LamV f]) stm ->
-       -- Convert a lambda into a letrec
-       let new_statement = LetrecE (NonRec (Def f_var f)) stm
-       in check_def f_var f $ cseStm new_statement
-     LetE lhs rhs stm -> do
+  of LetE lhs rhs stm -> do
        (rhs', exprs) <- cseAtom rhs
        case exprs of
          Nothing -> return ()

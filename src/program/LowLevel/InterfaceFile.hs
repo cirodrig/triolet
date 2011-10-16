@@ -251,7 +251,6 @@ findRefsVal value =
   of VarV v -> \dom -> if v `Set.member` dom then Set.singleton v else mempty
      RecV _ vs -> findRefsVals vs
      LitV _ -> mempty
-     LamV f -> findRefsFun f
 
 findRefsVals vs = mconcat $ map findRefsVal vs
 

@@ -154,7 +154,6 @@ rnVal rn value =
   of VarV v      -> return $ VarV (rnVar (rnRenaming rn) v)
      RecV rec vs -> RecV rec `liftM` rnVals rn vs
      LitV l      -> return $ LitV l
-     LamV f      -> LamV `liftM` rnFun rn f
 
 rnVals rn vs = mapM (rnVal rn) vs
 

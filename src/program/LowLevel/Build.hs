@@ -143,7 +143,6 @@ valFreeVars val =
   of VarV v    -> Set.singleton v
      RecV _ vs -> valsFreeVars vs
      LitV _    -> Set.empty
-     LamV f    -> funFreeVars f
 
 valsFreeVars :: [Val] -> Set Var
 valsFreeVars vs = Set.unions (map valFreeVars vs)

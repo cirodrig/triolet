@@ -158,13 +158,11 @@ instance Binary Val where
   put (VarV v)     = putWord8 0 >> put v
   put (RecV sr vs) = putWord8 1 >> put sr >> put vs
   put (LitV l)     = putWord8 2 >> put l
-  put (LamV f)     = putWord8 3 >> put f
   get = getWord8 >>= pick
     where
       pick 0 = VarV <$> get
       pick 1 = RecV <$> get <*> get
       pick 2 = LitV <$> get
-      pick 3 = LamV <$> get
 
 instance Binary CallConvention where
   put = putEnum

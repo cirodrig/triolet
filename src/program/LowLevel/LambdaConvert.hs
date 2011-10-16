@@ -51,11 +51,6 @@ cvtVal value =
   of VarV _ -> return value
      RecV sr vals -> RecV sr <$> cvtVals vals
      LitV _ -> return value
-     LamV f -> do
-       f' <- lift $ cvtFun f
-       lam_var <- lift $ newAnonymousVar (PrimType OwnedType)
-       tell [Def lam_var f']
-       return (VarV lam_var)
 
 cvtVals = traverse cvtVal
 

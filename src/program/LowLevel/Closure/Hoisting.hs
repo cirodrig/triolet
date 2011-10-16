@@ -306,7 +306,6 @@ scanValue value =
   of VarV v    -> capture v
      LitV _    -> mempty
      RecV _ xs -> scanValues xs
-     LamV _    -> internalError "scanValue"
 
 scanValues vals = mconcat (map scanValue vals)
 

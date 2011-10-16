@@ -135,7 +135,6 @@ dceVal value = nudge 1 $
   of VarV v -> use v *> pure value
      RecV rec vals -> RecV rec <$> dceVals vals
      LitV l -> pure value
-     LamV f -> LamV <$> nudge (funDefinitionSize f) (dceFun f)
 
 dceVals :: DCE [Val]
 dceVals vs = traverse dceVal vs

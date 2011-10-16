@@ -341,8 +341,7 @@ closureConvertTopLevel var_ids globals imports defs = do
 scanDataValue :: Val -> Val
 scanDataValue value = 
   case value
-  of LamV {} -> internalError "scanDataValue"
-     RecV r vs -> RecV r $ map scanDataValue vs
+  of RecV r vs -> RecV r $ map scanDataValue vs
      _       -> value
 
 -- | Perform closure conversion on a data definition.

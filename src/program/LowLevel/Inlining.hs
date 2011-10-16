@@ -130,7 +130,6 @@ tailCallScanVal value =
   of VarV v -> use v
      RecV _ vs -> tailCallScanVals vs
      LitV _ -> mempty
-     LamV f -> setCallingContext Nothing $ tailCallScanFun f
      
 tailCallScanVals :: [Val] -> TailCallScan
 tailCallScanVals vs = mconcat $ map tailCallScanVal vs
@@ -457,7 +456,8 @@ inlineTailLambda cc fun args =
        -- Bind the known arguments to variables and define the function.
        if cc == ClosureCall
        then do specialized_fun <- lift $ specializeLambda fun args
-               return $ ReturnE $ ValA [LamV specialized_fun]
+               f <- lift $ emitLambda specialized_fun
+               return $ ReturnE $ ValA [VarV f]
        else internalError "inlineTailLambda: Malformed function call"
      EQ -> do
       InlSpec _ _ _ _ params stm _ <- lift $ lift $ makeLambdaFunInlinable fun
@@ -534,7 +534,6 @@ inlVal value =
   of VarV {} -> return value
      RecV rec vs -> RecV rec <$> inlValues vs
      LitV {} -> return value
-     LamV f -> LamV <$> inlFun f
 
 inlValues :: [Val] -> InlF [Val]
 inlValues = mapM inlVal
@@ -559,8 +558,6 @@ inlStatement rt statement =
        case atom' of
          CallA cc (VarV op_var) args ->
            tryInlineCall cc op_var args lhs $ inlStatement rt body
-         CallA cc (LamV op_fun) args ->
-           inlineLambda cc op_fun args lhs $ inlStatement rt body
          _ -> do lift $ bindAtom lhs atom'
                  inlStatement rt body
      LetrecE defs body ->
@@ -573,7 +570,6 @@ inlStatement rt statement =
        atom' <- embedInlF $ inlAtom atom
        case atom' of 
          CallA cc (VarV op_var) args -> tryInlineTailCall cc op_var args
-         CallA cc (LamV op_fun) args -> inlineTailLambda cc op_fun args
          _ -> return (ReturnE atom')
      ThrowE val -> do
        val' <- embedInlF $ inlVal val
