@@ -1,3 +1,14 @@
+{-| Dead code elimination.
+
+This module performs single-pass dead code elimination.
+Variables that are not used, and are produced by a non-side-effecting 
+atom, are eliminated.
+
+Let-expressions of the form @let x = A in x@ are simplified to remove
+the temporary variables.  This transformation is especially important
+when the atom @A@ is a function call, because it turns a non-tail call
+into a tail call.
+-}
 
 {-# LANGUAGE Rank2Types #-}
 module LowLevel.DeadCode(eliminateDeadCode)
@@ -227,13 +238,32 @@ dceStm statement =
     dceAlt (x, stm) = (,) x <$> dceStm stm
 
 dceLet params rhs body = do
+  -- Analyze the body.  Remove local variables from the use set.
   (uses, body') <- takeUses $ dceStm body
   putUses $ deleteUses params uses
-  has_effect <- atomHasSideEffect rhs 
+  
+  -- Eliminate the let expression if its result is dead and it is not used
+  has_effect <- atomHasSideEffect rhs
   if has_effect || any (`isUsedIn` uses) params
     then do rhs' <- dceAtom rhs
-            return (LetE params rhs' body')
+            return $ rebuildLet params rhs' body'
     else return body'
+
+-- | Construct a let expression.
+--
+--   If the expression has the form @let x = A in x@, then eliminate the 
+--   variable binding and construct a return expression instead.
+rebuildLet params rhs body
+  | ReturnE (ValA vals) <- body, match_params params vals =
+      ReturnE rhs
+  | otherwise = LetE params rhs body
+  where
+    match_params (p:params) (VarV v:vals) =
+      p == v && match_params params vals
+    
+    match_params [] [] = True
+    
+    match_params _ _ = False
 
 dceLetrec defs body = make_letrec <$> dceLocalDefGroup defs (dceStm body)
   where
