@@ -50,12 +50,7 @@ pyon_C_blocked_reduce(void *data, void *initial_value, PyonInt count)
 
 // Data that are constant over an invocation of 'blocked_reduce'.
 struct BlockedReducePlan {
-  // These are all pyon functions
-  void *copy_fn;
-  void *accumulate_range_fn;
-  void *reducer_fn;
-
-  // The initial value of the reduction; a read-only reference
+  void *data;
   void *initial_value;
 };
 
@@ -74,25 +69,13 @@ struct BlockedReducer {
     plan(other.plan), value(other.plan->initial_value) {};
 
   void operator()(const tbb::blocked_range<int> &range) {
-    
     int start = range.begin();
     int end = range.end();
-    void *old_value = get_value();
-
-    value = blocked_reduce_accumulate_range(plan->accumulate_range_fn,
-					    old_value, count, first);
-    has_value = true;
-
-    // TODO: finalize and deallocate old value if it's not initial_value
+    value = blocked_reduce_accumulate_range(plan->data, value, start, end);
   };
 
   void join (BlockedReducer &other) {
-    void *old_value1 = get_value();
-    void *old_value2 = other.get_value();
-    value = blocked_reduce_reducer(plan->reducer_fn, old_value1, old_value2);
-    has_value = true;
-    
-    // TODO: finalize and deallocate old value if it's not initial_value
+    value = blocked_reduce_reduce(plan->data, value, other.value);
   };
 };
 
@@ -101,16 +84,15 @@ pyon_C_blocked_reduce(void *data,
 		      void *initial_value,
 		      PyonInt count)
 {
-#error "The TBB code is out of date and needs to be rewritten"
   BlockedReducePlan plan = {data, initial_value};
 
   // Use TBB's parallel_reduce template
-  tbb::blocked_range<int> range(first, first + count);
+  tbb::blocked_range<int> range(0, count);
   BlockedReducer body(&plan);
   tbb::parallel_reduce(range, body);
 
   // Return the result, which may be the initial value
-  return body.get_value();
+  return body.value;
 }
 
 #endif	// USE_TBB
@@ -140,25 +122,22 @@ pyon_C_blocked_doall(void *worker_fn, PyonInt count)
 // Parallel loop partitioned using TBB
 
 struct BlockedDoer {
-  void *worker_fn;
+  void *data;
 
-  BlockedDoer(void *_worker) : worker_fn(_worker) {}
+  BlockedDoer(void *_data) : data(_data) {}
 
   void operator()(tbb::blocked_range<int> &range) const {
     int first = range.begin();
-    int count = range.end() - first;
-    blocked_doall_worker(worker_fn, count, first);
+    int end = range.end();
+    blocked_doall_worker(data, first, end);
   }
 };
 
 extern "C" void
-pyon_C_blocked_doall(void *worker_fn,
-		     PyonInt count,
-		     PyonInt first)
+pyon_C_blocked_doall(void *data, PyonInt count)
 {
-#error "The TBB code is out of date and needs to be rewritten"
-  tbb::parallel_for(tbb::blocked_range<int>(first, first + count),
-		    BlockedDoer(worker_fn));
+  tbb::parallel_for(tbb::blocked_range<int>(0, count),
+		    BlockedDoer(data));
 }
 
 #endif	// USE_TBB
