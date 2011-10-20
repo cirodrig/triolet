@@ -79,7 +79,7 @@ type CoContMap = Map.Map Var Var
 mkContMap :: LocalCPS.RConts -> LFunDef -> (Set.Set Var, ContMap, CoContMap)
 mkContMap rconts def = let
   -- Construct a map from continuation to caller
-  conts_set = Set.fromList [k | LocalCPS.RCont k _ <- IntMap.elems rconts]
+  conts_set = LocalCPS.continuationsSet rconts
   caller_map = findOutermostCallerDef rconts conts_set def
 
   -- Reverse the map, producing a map from caller to continuation

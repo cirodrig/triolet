@@ -543,29 +543,32 @@ readHoistingResults groups = foldM insert_if_hoisted Set.empty groups
 type GroupMembership = [(GroupID, [Var])]
 
 -- | Find the functions in each group
-stmGroupTable :: LocalCPS.RConts -> LStm -> GroupMembership
-stmGroupTable rconts stm =
+stmGroupTable :: Set.Set Var -> LStm -> GroupMembership
+stmGroupTable continuations stm =
   case stm
   of LetLCPS _ _ label body
-       | LocalCPS.RCont label undefined `elem` IntMap.elems rconts ->
+       | label `Set.member` continuations ->
            -- This is a continuation function
-           (ContID label, [label]) : stmGroupTable rconts body
+           (ContID label, [label]) : continue body
        | otherwise ->
            -- This is an ordinary let expression
-           stmGroupTable rconts body
+           continue body
      LetrecLCPS defs gid body ->
        (GroupID gid, map definiendum $ groupMembers defs) :
-       concatMap (stmGroupTable rconts . funBody . definiens) (groupMembers defs) ++
-       stmGroupTable rconts body
+       concatMap (continue . funBody . definiens) (groupMembers defs) ++
+       continue body
      SwitchLCPS _ alts ->
-       concat [stmGroupTable rconts s | (_, s) <- alts]
+       concat [continue s | (_, s) <- alts]
      ReturnLCPS _ -> []
      ThrowLCPS _ -> []
+  where
+    continue s = stmGroupTable continuations s
 
 createGroupTable :: LocalCPS.RConts -> LFunDef
                  -> (GroupID -> [Var], Var -> Maybe (Ident GroupLabel))
 createGroupTable rconts fun_def =
-  let group_membership = stmGroupTable rconts $ funBody $ definiens fun_def
+  let continuations = LocalCPS.continuationsSet rconts
+      group_membership = stmGroupTable continuations $ funBody $ definiens fun_def
       group_table = Map.fromList group_membership
       fun_table = Map.fromList [(f, gid)
                                | (GroupID gid, fs) <- group_membership, f <- fs]

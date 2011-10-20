@@ -15,6 +15,7 @@ in Proc. Higher-Order and Symbolic Computation 15, p. 161-180, 2002.
 
 module LowLevel.Closure.LocalCPS
        (RConts, RCont(..),
+        continuationsSet,
         lookupCont, needsContinuationCall,
         Lattice(..),
         identifyLocalContinuations)
@@ -92,6 +93,10 @@ instance Lattice a => Lattice (IntMap.IntMap a) where
 
 -- | A mapping from variable to return continuation.
 type RConts = IntMap.IntMap RCont
+
+-- | Get the set of all continuations mentioned in the mapping
+continuationsSet :: RConts -> Set.Set Var
+continuationsSet rconts = Set.fromList [k | RCont k _ <- IntMap.elems rconts]
 
 singletonRConts :: Var -> RCont -> RConts
 singletonRConts v rc = IntMap.singleton (fromIdent $ varID v) rc
