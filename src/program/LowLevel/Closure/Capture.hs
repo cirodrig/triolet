@@ -38,6 +38,7 @@ import Common.MonadLogic
 import Common.Error
 import Common.Identifier
 import Common.Supply
+import Common.Worklist
 import LowLevel.CodeTypes
 import LowLevel.FreshVar
 import LowLevel.Print
@@ -438,50 +439,6 @@ scanTopLevelDef rconts globals conts (Def v f) = do
     internalError "scanTopLevelDef: Invalid free variable constraints"
 
   return ufuncs
-
--------------------------------------------------------------------------------
--- Shared constraint solving code
---
--- This code is used for solving both capture constraints and
--- hoisting constraints.
-
-type Worklist a = IORef (Set.Set a)
-
-newWorklist :: Ord a => [a] -> IO (Worklist a)
-newWorklist contents = newIORef (Set.fromList contents)
-
-putWorklist :: Ord a => Worklist a -> a -> IO ()
-putWorklist wl x = modifyIORef wl $ Set.insert x
-
-readWorklist :: Ord a => Worklist a -> IO (Maybe a)
-readWorklist wl = do
-  s <- readIORef wl
-  case Set.minView s of
-    Just (x, s') -> do
-      writeIORef wl s'
-      return (Just x)
-    Nothing -> return Nothing
-
-isEmptyWorklist :: Ord a => Worklist a -> IO Bool
-isEmptyWorklist wl = do
-  s <- readIORef wl
-  return $ Set.null s
-
-forWorklist :: Ord a => Worklist a -> (a -> IO ()) -> IO ()
-forWorklist wl f = readWorklist wl >>= continue
-  where
-    continue Nothing  = return ()
-    continue (Just x) = f x >> forWorklist wl f
-
--- | Modify the contents of an @IORef@, and test whether the value has
---   actually changed.
-modifyCheckIORef :: Eq a => (a -> a) -> IORef a -> IO Bool
-modifyCheckIORef f ref = do
-  x <- readIORef ref
-  let y = f x
-  let change = x /= y
-  when change $ writeIORef ref y
-  return change
 
 -------------------------------------------------------------------------------
 -- Free constraint solving

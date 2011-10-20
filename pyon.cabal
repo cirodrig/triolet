@@ -83,6 +83,7 @@ Executable pyon
     Common.SourcePos
     Common.Supply
     Common.THRecord
+    Common.Worklist
     CxxInterface.SignatureHS
     Parser.Driver
     Parser.Parser
