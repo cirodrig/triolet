@@ -53,9 +53,21 @@ codeSize :: Int -> CodeSize
 codeSize n | n < 0     = internalError "codeSize: Invalid size"
            | otherwise = CodeSize n
 
+-- | Add two code sizes.  If either argument is an unknown size,
+--   the result is an unknown size.
+addCodeSize :: CodeSize -> CodeSize -> CodeSize
+infixl 4 `addCodeSize`
+addCodeSize (CodeSize s1) (CodeSize s2) =
+  CodeSize $ if s1 < 0 || s2 < 0 then -1 else s1 + s2
+
 fromCodeSize :: CodeSize -> Maybe Int
 fromCodeSize (CodeSize n) | n < 0     = Nothing
                           | otherwise = Just n
+
+-- | Code size forms a monoid under addition
+instance Monoid CodeSize where
+  mempty = codeSize 0
+  mappend = addCodeSize
 
 -- | A comparison operation
 data CmpOp = CmpEQ | CmpNE | CmpLT | CmpLE | CmpGT | CmpGE

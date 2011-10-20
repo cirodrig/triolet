@@ -4,9 +4,11 @@ module LowLevel.Inlining2 where
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.RWS
 import Control.Monad.Trans
 import qualified Data.IntMap as IntMap
 import Data.Maybe
+import Data.Monoid
 
 import Common.Error
 import Common.MonadLogic
@@ -28,7 +30,7 @@ primInlineCutoff = 5
 
 emptyRenaming = IntMap.empty
 
--- | The set of functions that can be inlined
+-- | The set of functions that can be inlined.
 type InlinedFunctions = IntMap.IntMap Fun
 
 -- | The continuation of a function call.
@@ -39,8 +41,11 @@ data ContinuationCode =
 
 data NumReturns = Zero | One | Many
 
-addOne Zero = One
-addOne _    = Many
+instance Monoid NumReturns where
+  mempty = Zero
+  mappend Zero x = x
+  mappend x Zero = x
+  mappend _ _ = Many
 
 data InlEnv =
   InlEnv { varSupply :: !(IdentSupply Var)
@@ -52,48 +57,67 @@ data InlEnv =
          -- , continuation :: !(Maybe ([Var], Stm))
          }
 
-newtype Inl a = Inl {unInl :: InlEnv -> NumReturns -> IO (a, NumReturns)}
+-- | While inlining code in a function body,
+--   compute the amount of code growth and count the number of endpoints the
+--   function has
+data InlState = InlState !NumReturns !CodeSize
 
-instance Functor Inl where
-  fmap = liftM
+instance Monoid InlState where
+  mempty = InlState mempty mempty
+  InlState r1 c1 `mappend` InlState r2 c2 =
+    InlState (mappend r1 r2) (mappend c1 c2)
 
-instance Monad Inl where
-  return x = Inl $ \_ r -> return (x, r)
-  m >>= k = Inl $ \env r -> do
-    (x, r') <- unInl m env r
-    unInl (k x) env r'
+newtype Inl s a = Inl {unInl :: RWST InlEnv () s IO a}
+                  deriving(Monad, Functor, Applicative, MonadIO)
 
-instance Applicative Inl where
-  pure = return
-  (<*>) = ap
+instance MonadReader InlEnv (Inl s) where
+  ask = Inl ask
+  local f (Inl m) = Inl (local f m)
 
-instance MonadIO Inl where
-  liftIO m = Inl $ \_ r -> do
-    x <- m
-    return (x, r)
+-- | Inlining within a function body keeps track of the function's code growth
+--   and number of endpoints
+type InlStm a = Inl InlState a
 
-runInl m e = unInl m e Zero
+-- | Inlining elsewhere just accumulates code growth info
+type InlFun a = Inl () a
 
-instance Supplies Inl (Ident Var) where
-  fresh = Inl $ \env r -> do
-    x <- supplyValue (varSupply env)
-    return (x, r)
+runInl :: InlFun a -> InlEnv -> IO a
+runInl m e = do
+  (x, _, _) <- runRWST (unInl m) e ()
+  return x
 
-local :: (InlEnv -> InlEnv) -> Inl a -> Inl a
-local f (Inl m) = Inl $ \env r -> m (f env) r
+instance Supplies (Inl s) (Ident Var) where
+  fresh = Inl $ do 
+    env <- ask
+    liftIO $ supplyValue (varSupply env)
 
-asks :: (InlEnv -> a) -> Inl a
-asks f = Inl $ \env r -> return (f env, r)
+tellReturn :: InlStm ()
+tellReturn = Inl $ RWST $ \_ s ->
+  let s' = s `mappend` InlState One mempty
+  in s' `seq` return ((), s', mempty)
 
-tellReturn :: Inl ()
-tellReturn = Inl $ \_ r -> return ((), addOne r)
+tellCodeGrowth :: CodeSize -> InlStm ()
+tellCodeGrowth size = Inl $ RWST $ \_ s ->
+  let s' = s `mappend` InlState mempty size
+  in s' `seq` return ((), s', mempty)
 
-getNumReturns :: Inl a -> Inl (NumReturns, a)
-getNumReturns (Inl f) = Inl $ \env r -> do
-  (x, local_r) <- f env Zero
-  return ((local_r, x), r)
+-- | Do inlining in a function body
+doFunctionBody :: InlStm a -> InlFun (NumReturns, CodeSize, a)
+doFunctionBody (Inl m) = Inl $ RWST $ \env s -> do
+  -- To get statistics for the function body, start processing with
+  -- 'mempty' as the state.
+  (x, InlState num_returns code_size, _) <- runRWST m env mempty
 
-renameParameter :: Var -> (Var -> Inl a) -> Inl a
+  -- Write out the code size so it will be accumulated by the caller.
+  return ((num_returns, code_size, x), s, ())
+
+-- | Do inlining on functions that appear inside a function body
+doFunction :: InlFun a -> InlStm a
+doFunction (Inl m) = Inl $ RWST $ \env s -> do
+  (x, _, _) <- runRWST m env ()
+  return (x, s, ())
+
+renameParameter :: Var -> (Var -> Inl s a) -> Inl s a
 renameParameter v f = do
   v' <- newClonedVar v
   local (insert v v') (f v')
@@ -101,26 +125,27 @@ renameParameter v f = do
     insert v v' env =
       env {renaming = IntMap.insert (fromIdent $ varID v) v' $ renaming env}
 
+renameParameters :: [Var] -> ([Var] -> Inl s a) -> Inl s a
 renameParameters = withMany renameParameter
 
-setReturns :: [ValueType] -> Inl a -> Inl a
+setReturns :: [ValueType] -> Inl s a -> Inl s a
 setReturns rtypes m = local set_returns m
   where set_returns env = env {currentReturns = Just rtypes}
 
-getReturns :: Inl [ValueType]
+getReturns :: Inl s [ValueType]
 getReturns = asks (from_just . currentReturns)
   where
     from_just (Just x) = x
     from_just Nothing  = internalError "getReturns: No return types"
 
-clearReturns :: Inl a -> Inl a
+clearReturns :: Inl s a -> Inl s a
 clearReturns m = local clear_returns m
   where clear_returns env = env {currentReturns = Nothing}
 
-renameVar :: Var -> Inl Var
-renameVar v = Inl $ \env r ->
+renameVar :: Var -> Inl s Var
+renameVar v = Inl $ RWST $ \env s ->
   let v' = fromMaybe v $ IntMap.lookup (fromIdent $ varID v) (renaming env)
-  in v' `seq` return (v', r)
+  in v' `seq` return (v', s, mempty)
 
 renameVal (VarV v) = VarV <$> renameVar v
 renameVal (RecV r vs) = RecV r <$> mapM renameVal vs
@@ -128,7 +153,7 @@ renameVal (LitV l) = return $ LitV l
 
 renameStaticData (StaticData v) = StaticData <$> renameVal v
 
-renameAtom :: Atom -> Inl Atom
+renameAtom :: Atom -> InlStm Atom
 renameAtom (ValA vs) =
   ValA <$> mapM renameVal vs
 renameAtom (CallA cc op args) =
@@ -140,16 +165,17 @@ renameAtom (PackA r args) =
 renameAtom (UnpackA r v) =
   UnpackA r <$> renameVal v
 
+renameExport :: (Var, ExportSig) -> InlFun (Var, ExportSig)
 renameExport (v, sig) = do
   v' <- renameVar v
   return (v', sig)
 
-lookupInlinedFunction :: Var -> Inl (Maybe Fun)
+lookupInlinedFunction :: Var -> Inl s (Maybe Fun)
 lookupInlinedFunction v =
   asks (IntMap.lookup (fromIdent $ varID v) . functions)
 
 -- | Consider the function for inlining.  If it's small enough, then inline it.
-considerForInlining :: Var -> Fun -> Inl a -> Inl a
+considerForInlining :: Var -> Fun -> Inl s a -> Inl s a
 considerForInlining v f m
   | willInline f = local (insert v f) m
   | otherwise = m
@@ -187,7 +213,7 @@ funIsInlinable f = False &&
 inlineCall :: Fun              -- ^ Function to inline
            -> [Val]            -- ^ Function arguments
            -> ContinuationCode -- ^ Continuation of function call
-           -> Inl Stm
+           -> InlStm Stm
 inlineCall f args cont
   | n_args == n_params =
       inlineSaturatedCall f args cont
@@ -284,19 +310,25 @@ insertContinuation return_vars cont_code e = go e
 
 -------------------------------------------------------------------------------
 
--- | Perform inlining on a function body
-inlineFun :: Fun -> Inl Fun
+-- | Perform inlining on a function body.
+--   Returns the new function and the amount of code growth that occurred due
+--   to inlining.
+inlineFun :: Fun -> InlFun (Fun, CodeSize)
 inlineFun f =
   setReturns (funReturnTypes f) $
   renameParameters (funParams f) $ \params -> do
-    body <- inline $ funBody f
-    return $ f {funParams = params, funBody = body}
+    (n_returns, code_growth, body) <- doFunctionBody $ inline $ funBody f
+    let f' = f { funSize = addCodeSize code_growth $ funSize f
+               , funParams = params
+               , funBody = body}
+
+    return (f', code_growth)
 
 -- | Consider an atom for inlining.
 --   If it shall be inlined, replace it with an inlined function.
 --
 --   The arguments should be renamed before they are passed to this function.
-inlineAtom :: Atom -> ContinuationCode -> Inl Stm
+inlineAtom :: Atom -> ContinuationCode -> InlStm Stm
 inlineAtom atom cont =
   case atom
   of CallA cc (VarV op) args -> do
@@ -325,7 +357,7 @@ inlineAtom atom cont =
 --
 -- 5. Inline function calls at 'let' statements.  The tail of the statement
 --    becomes a local function.
-inline :: Stm -> Inl Stm
+inline :: Stm -> InlStm Stm
 inline statement =
   case statement
   of LetE params rhs body   -> inlineLet params rhs body
@@ -341,13 +373,6 @@ inlineLet params rhs body = do
     rtypes <- getReturns
     inlineAtom rhs' $ HasContinuation params' rtypes body'
       
-inlineLetrec (NonRec (Def v f)) body = do
-  -- Perform inlining inside the function
-  f' <- inlineFun f
-  renameParameter v $ \v' -> do
-    body' <- considerForInlining v' f' $ inline body
-    return $ LetrecE (NonRec (Def v' f')) body'
-
 inlineLetrec defs body = do
   (defs', body') <- inlineGroup defs (inline body)
   return $ LetrecE defs' body'
@@ -371,7 +396,10 @@ inlineThrow value = do
 
 inlineGroup (NonRec (Def v f)) do_body = do
   -- Perform inlining inside the function
-  f' <- inlineFun f
+  (f', code_growth) <- doFunction $ inlineFun f
+  tellCodeGrowth code_growth
+
+  -- Rename the bound variable
   renameParameter v $ \v' -> do
     body' <- considerForInlining v' f' do_body
     return (NonRec (Def v' f'), body')
@@ -380,7 +408,9 @@ inlineGroup (Rec defs) do_body = do
   -- Rename bound variables
   renameParameters (map definiendum defs) $ \vs' -> do
     -- Perform renaming inside each function
-    fs' <- mapM (inlineFun . definiens) defs
+    (fs', code_growths) <-
+      doFunction $ mapAndUnzipM (inlineFun . definiens) defs
+    tellCodeGrowth $ mconcat code_growths
 
     -- Recursive functions may not be inlined
     body' <- do_body
@@ -391,7 +421,7 @@ inlineGroup (Rec defs) do_body = do
 -- This deviation in behavior is kind of a hack that should be fixed.
 inlineGlobalGroup (NonRec (GlobalFunDef (Def v f))) do_body = do
   -- Perform inlining inside the function
-  f' <- inlineFun f
+  (f', _) <- inlineFun f
   body' <- considerForInlining v f' do_body
   return (NonRec (GlobalFunDef (Def v f')), body')
 
@@ -410,13 +440,16 @@ inlineGlobalGroup (Rec defs) do_body = do
   let new_defs = zipWith mk_global_def vs fs'
   return (Rec new_defs, body')
   where
-    inline_global (GlobalFunDef (Def _ f)) = Left `liftM` inlineFun f
+    inline_global (GlobalFunDef (Def _ f)) = do
+      (f', _) <- inlineFun f
+      return $ Left f'
+
     inline_global (GlobalDataDef (Def _ d)) = Right `liftM` renameStaticData d
     mk_global_def v (Left f) = GlobalFunDef (Def v f)
     mk_global_def v (Right d) = GlobalDataDef (Def v d)
 
 inlineGlobals :: [Group GlobalDef] -> [(Var, ExportSig)]
-              -> Inl ([Group GlobalDef], [(Var, ExportSig)])
+              -> InlFun ([Group GlobalDef], [(Var, ExportSig)])
 inlineGlobals defss exports = do_defs defss
   where
     do_defs (defs : defss) = do
@@ -451,7 +484,7 @@ inlineModule mod =
     let env = InlEnv var_ids import_map emptyRenaming Nothing
     -- putStrLn "Before inlineModule"
     -- print $ pprModule mod
-    ((globals, exports), _) <-
+    (globals, exports) <-
       runInl (inlineGlobals (moduleGlobals mod) (moduleExports mod)) env
     let new_mod = mod {moduleGlobals = globals, moduleExports = exports}
     --putStrLn "After inlineModule"
